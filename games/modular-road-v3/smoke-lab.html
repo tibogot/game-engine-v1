@@ -66,7 +66,11 @@
        *
        * The smoke SYSTEM is imported from the game file, not reimplemented —
        * modularRoadDriftSmoke.js is the exact code road.html runs, so nothing
-       * tuned here can drift from what ships. What the lab replaces is the CAR:
+       * tuned here can drift from what ships. The 2026-09-05 AAA pass was
+       * developed here behind a lab-only subclass and then folded into that
+       * file; the "AAA pass" folder now binds straight to the shipping
+       * settings, and "Old look" restores the pre-pass numbers for an A/B.
+       * What the lab replaces is the CAR:
        * a virtual rig drives the emitter contact points, so the smoke can be
        * judged without physics, a track, or a lap between tweaks.
        *
@@ -97,7 +101,6 @@
         ModularRoadDriftSmoke,
         DEFAULT_DRIFT_SMOKE_SETTINGS,
       } from "./modularRoadDriftSmoke.js";
-      import { UpgradedDriftSmoke } from "./smokeLabUpgrades.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => {
@@ -139,109 +142,30 @@
       const cam = { mode: "orbit", distance: 7.5, height: 1.55, lookAhead: 9 };
 
       /**
-       * THE AAA EXPERIMENTS — the candidate upgrades, each toggleable so the
-       * stock look is always one click away. `upgraded` swaps the whole smoke
-       * instance for the lab subclass (the shaders differ, so it is a rebuild,
-       * not a uniform); churn and the hemisphere colours ride on its uniforms;
-       * curl is CPU-side and works on either instance.
+       * THE PRE-AAA LOOK, for A/B. These were the game's defaults before the
+       * 2026-09-05 pass (see the header of modularRoadDriftSmoke.js); the new
+       * dials are all set to their "off" value, so the button is an honest
+       * before/after on the same shader. `hemi` drives whether the sun
+       * presets feed the hemisphere ambient (the old look had a flat one).
        */
-      const exp = {
-        upgraded: true,
-        // Internal boil (shader). 0 = stock sliding window, exactly.
-        churn: 0.6,
-        churnRate: 0.7,
-        // Curl-noise turbulence (CPU). Spatially coherent, divergence-free
-        // vortices — the field is a function of POSITION, so neighbouring
-        // puffs swirl together and the plume rolls as a body, where the stock
-        // per-particle sin/cos wobble can only shiver each puff on its own.
-        curl: true,
-        curlStrength: 3.0,   // m/s² at field peak
-        curlScale: 0.35,     // cycles/m — features ~3 m across
-        curlSpeed: 0.8,      // field animation rate
-        curlHazeMul: 0.35,   // the bank gets a gentler dose
-        // How much of the stock wobble to keep alongside curl. Multiplies
-        // settings.turbulence at apply time rather than editing it, so the
-        // slider in Puffs keeps meaning what the game means by it.
-        wobbleKeep: 0.4,
+      const OLD_LOOK = {
+        emitRate: 150, opacity: 0.22,
+        sizeMin: 0.42, sizeMax: 0.85, sizeGrowth: 3.4,
+        lifeMin: 0.8, lifeMax: 1.9, fadeIn: 0.15,
+        rise: 0.75, buoyancy: 0.55, turbulence: 1.5, spread: 0.55, drag: 0.12,
+        colorHot: "#4a4a52", colorCool: "#b4b8c2", tintJitter: 0.12,
+        curl: { enabled: false }, launchOut: 0, launchUpMul: 1, lift: 0,
+        ambient: 0.5, sunStrength: 0.9, absorb: 1.0, scatter: 1.2, hgG: 0.6,
+        noiseScale: 1.0, churn: 0, detail: 0, opticalK: 0,
+        erodeStart: 0.06, erodeEnd: 1.25, erodeSoft: 0.3, worldNoiseMix: 0.55,
+        haze: {
+          emitRate: 8, lifeMin: 8, lifeMax: 16, sizeMin: 2, sizeMax: 3.4,
+          sizeGrowth: 3.2, opacity: 0.075, rise: 0.35, buoyancy: 0.25,
+          turbulence: 0.35, worldScaleMul: 0.4,
+          colorHot: "#6e6f78", colorCool: "#c2c6d0",
+        },
       };
-
-      /* ──────────────────────────────────────────────────────────────────── *
-       * CURL-NOISE FIELD                                                     *
-       *                                                                      *
-       * v = ∇×A with A three sums of sines — analytic, so exactly            *
-       * divergence-free (no clumping) and O(1) per sample. Two octaves.      *
-       * ~600 particles × 6 sin/cos pairs is dust on the frame budget.        *
-       * ──────────────────────────────────────────────────────────────────── */
-      const CURL_WAVES = (() => {
-        // Fixed seeds, so the field is identical run to run — tuning against
-        // a flow that re-rolls every reload is tuning against noise.
-        const rng = (() => { let s = 1234567; return () => {
-          s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff;
-        }; })();
-        const waves = [];
-        for (let octave = 0; octave < 2; octave++) {
-          const freq = octave === 0 ? 1 : 2.3;
-          const amp = octave === 0 ? 1 : 0.45;
-          for (let i = 0; i < 3; i++) {
-            const d = new THREE.Vector3(rng() - 0.5, (rng() - 0.5) * 0.6, rng() - 0.5)
-              .normalize().multiplyScalar(freq);
-            waves.push({ c: d, phase: rng() * Math.PI * 2, omega: 0.6 + rng() * 0.9, amp });
-          }
-        }
-        return waves;
-      })();
-      const _curl = new THREE.Vector3();
-
-      /** curl(A) at world point p, into out. Normalised to roughly unit peak. */
-      function curlAt(p, t, scale, out) {
-        // ∂ai/∂xj = c_ij · cos(ci·p·s + φ + ωt); assemble the curl from the
-        // three cosines directly.
-        const w = CURL_WAVES;
-        let g0x, g0y, g0z, g1x, g1y, g1z, g2x, g2y, g2z;
-        out.set(0, 0, 0);
-        for (let o = 0; o < w.length; o += 3) {
-          const a0 = w[o], a1 = w[o + 1], a2 = w[o + 2];
-          const k0 = a0.amp * Math.cos((a0.c.x * p.x + a0.c.y * p.y + a0.c.z * p.z) * scale + a0.phase + a0.omega * t);
-          const k1 = a1.amp * Math.cos((a1.c.x * p.x + a1.c.y * p.y + a1.c.z * p.z) * scale + a1.phase + a1.omega * t);
-          const k2 = a2.amp * Math.cos((a2.c.x * p.x + a2.c.y * p.y + a2.c.z * p.z) * scale + a2.phase + a2.omega * t);
-          g0x = a0.c.x * k0; g0y = a0.c.y * k0; g0z = a0.c.z * k0;
-          g1x = a1.c.x * k1; g1y = a1.c.y * k1; g1z = a1.c.z * k1;
-          g2x = a2.c.x * k2; g2y = a2.c.y * k2; g2z = a2.c.z * k2;
-          out.x += g2y - g1z;
-          out.y += g0z - g2x;
-          out.z += g1x - g0y;
-        }
-        // Wave vectors are unit·freq and amps sum ≈ 1.45, so this keeps the
-        // slider meaning "about this many m/s² at the swirl cores".
-        out.multiplyScalar(1 / 2.2);
-        return out;
-      }
-
-      let _curlTime = 0;
-
-      /**
-       * Accelerate every live particle along the field. BEFORE update(), so
-       * the class's own damp/integration applies to the result exactly as it
-       * does to its built-in turbulence — this is a preview of the same code
-       * running inside _stepPool once it ports.
-       */
-      function applyCurl(sdt) {
-        _curlTime += sdt * exp.curlSpeed;
-        const k = exp.curlStrength * sdt;
-        for (const p of smoke.particles) {
-          if (p.life <= 0) continue;
-          curlAt(p.position, _curlTime, exp.curlScale, _curl);
-          p.velocity.addScaledVector(_curl, k);
-        }
-        const kh = k * exp.curlHazeMul;
-        if (kh > 0) {
-          for (const p of smoke.hazeParticles) {
-            if (p.life <= 0) continue;
-            curlAt(p.position, _curlTime, exp.curlScale, _curl);
-            p.velocity.addScaledVector(_curl, kh);
-          }
-        }
-      }
+      const look = { hemi: true };
 
       /**
        * Sun setups. Each drives the scene light, the backdrop and the smoke's
@@ -254,8 +178,8 @@
           dir: [0.35, 0.85, 0.25], color: 0xfff4e0, intensity: 2.5,
           sky: 0x8fb0d4, horizon: 0xb8c8da, ground: 0x30343b,
           hemi: 0.9, exposure: 1.0,
-          // Hemisphere ambient for the UPGRADED smoke: cool skylight from
-          // above, asphalt bounce from below.
+          // Hemisphere ambient for the smoke: cool skylight from above,
+          // asphalt bounce from below.
           ambSky: 0xcfe0f5, ambGround: 0x3a3d42,
         },
         sunset: {
@@ -265,10 +189,8 @@
           dir: [-0.85, 0.10, -0.45], color: 0xffa050, intensity: 2.2,
           sky: 0x2a3352, horizon: 0xff9a4a, ground: 0x1c1a20,
           hemi: 0.35, exposure: 1.05,
-          // A sunset SKY is warm near the horizon where the smoke lives —
-          // this is the environment-tint response the stock flat ambient
-          // cannot give.
-          ambSky: 0xe08a5a, ambGround: 0x241c20,
+          // A sunset SKY is warm near the horizon where the smoke lives.
+          ambSky: 0xd8916a, ambGround: 0x2a2024,
         },
         overcast: {
           label: "Overcast",
@@ -389,17 +311,12 @@
         addEventListener("resize", onResize);
         addEventListener("keydown", onKey);
 
-        window.__smokeLab = { renderer, scene, camera, smoke, settings, rig, cam, perf, exp, buildSmoke };
+        window.__smokeLab = { renderer, scene, camera, smoke, settings, rig, cam, perf, look, buildSmoke };
 
         renderer.setAnimationLoop(frame);
       }
 
-      /**
-       * (Re)build the smoke instance. The stock/upgraded switch swaps whole
-       * shaders, so it is a rebuild — a few ms once, on a click, and the two
-       * looks are otherwise pixel-comparable because they share the settings
-       * object, the pool logic and the scene.
-       */
+      /** (Re)build the smoke instance — the same constructor call the game makes. */
       function buildSmoke() {
         if (smoke) {
           scene.remove(smoke.mesh);
@@ -412,9 +329,7 @@
             smoke.bankMesh.material.dispose();
           }
         }
-        smoke = exp.upgraded
-          ? new UpgradedDriftSmoke(scene, settings)
-          : new ModularRoadDriftSmoke(scene, settings);
+        smoke = new ModularRoadDriftSmoke(scene, settings);
         if (window.__smokeLab) window.__smokeLab.smoke = smoke;
         // The new instance boots with default sun/ambient uniforms.
         if (sunLight) applySun();
@@ -521,10 +436,10 @@
         // The smoke's OWN light rig — see the same calls in roadGame.js.
         smoke.setSunDirection(dir);
         smoke.setSunColor(new THREE.Color(s.color), s.intensity);
-        // Upgraded shading only: sky/ground ambient follows the time of day.
-        smoke.setAmbientColors?.(
-          new THREE.Color(s.ambSky ?? 0xffffff),
-          new THREE.Color(s.ambGround ?? 0xffffff),
+        // Sky/ground ambient follows the time of day (white = the old flat look).
+        smoke.setAmbientColors(
+          new THREE.Color(look.hemi ? (s.ambSky ?? 0xffffff) : 0xffffff),
+          new THREE.Color(look.hemi ? (s.ambGround ?? 0xffffff) : 0xffffff),
         );
 
         $("s-sun").textContent = s.label;
@@ -584,26 +499,11 @@
         smoke._shutter = (settings.wetSpray?.streak ?? 1) * (1 / 25) * rig.wetness;
         const pts = rig.wetness > 0 ? _allPts : _rearPts;
 
-        // ── The lab experiments, applied around the stock step ──────────────
-        // Curl first, so the class's own damping integrates it exactly the
-        // way it would integrate the ported version.
-        if (exp.curl) applyCurl(sdt);
-        // Churn dials ride on uniforms of the upgraded shader only.
-        smoke.setChurn?.(exp.churn, exp.churnRate);
-        // With curl on, most of the stock per-particle wobble is noise ON
-        // TOP of noise — scale it down for the step, restore after, so the
-        // Puffs slider keeps its game meaning.
-        const t0 = settings.turbulence;
-        const h0 = settings.haze.turbulence;
-        if (exp.curl) {
-          settings.turbulence = t0 * exp.wobbleKeep;
-          settings.haze.turbulence = h0 * exp.wobbleKeep;
-        }
+        // What updateFromVehicle would set: the launch flings along this.
+        smoke.setCarRight(_right);
         // Burnout throws off spinning wheels while parked: pass wheel-speed
         // velocity, not chassis velocity, so puffs still launch backwards.
         smoke.update(sdt, pts, rig.emit, rig.intensity, car.vel.x, car.vel.z, camera);
-        settings.turbulence = t0;
-        settings.haze.turbulence = h0;
       }
 
       /* -------------------------------------------------------------- camera */
@@ -641,10 +541,7 @@
       /* ------------------------------------------------------------------ io */
 
       function exportSettings() {
-        // Experiments ride along under their own key so a tuned look and its
-        // upgrade dials travel as one file; import strips the key back out.
-        const payload = { ...settings, _labExperiments: { ...exp } };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        const blob = new Blob([JSON.stringify(settings, null, 2)], {
           type: "application/json",
         });
         const url = URL.createObjectURL(blob);
@@ -666,16 +563,10 @@
           if (!file) return;
           try {
             const data = JSON.parse(await file.text());
-            const labExp = data._labExperiments;
-            delete data._labExperiments;
+            delete data._labExperiments; // older lab exports carried this
             // Merge, not replace: the live object is captured by the smoke
             // instance and by every GUI controller.
             deepMerge(settings, data);
-            if (labExp) {
-              const wasUpgraded = exp.upgraded;
-              deepMerge(exp, labExp);
-              if (exp.upgraded !== wasUpgraded) buildSmoke();
-            }
             refreshGui();
           } catch (err) {
             showErr(err);
@@ -702,16 +593,34 @@
       function buildGui() {
         gui = new GUI({ title: "Drift smoke", width: 320 });
 
-        const fx = gui.addFolder("AAA experiments (lab-only)");
-        fx.add(exp, "upgraded").name("upgraded shading").onChange(buildSmoke).listen();
-        fx.add(exp, "churn", 0, 1, 0.01).name("churn (boil)");
-        fx.add(exp, "churnRate", 0, 2, 0.02).name("churn rate (Hz)");
-        fx.add(exp, "curl").name("curl turbulence");
-        fx.add(exp, "curlStrength", 0, 10, 0.1).name("curl strength");
-        fx.add(exp, "curlScale", 0.05, 1.5, 0.01).name("curl scale (1/m)");
-        fx.add(exp, "curlSpeed", 0, 3, 0.05).name("curl anim speed");
-        fx.add(exp, "curlHazeMul", 0, 1, 0.02).name("curl on bank ×");
-        fx.add(exp, "wobbleKeep", 0, 1, 0.02).name("keep stock wobble");
+        const fx = gui.addFolder("AAA pass");
+        fx.add(settings, "churn", 0, 1, 0.01).name("churn (boil)");
+        fx.add(settings, "churnRate", 0, 2, 0.02).name("churn rate (Hz)");
+        fx.add(settings, "detail", 0, 1, 0.01).name("edge detail carve");
+        fx.add(settings, "detailScale", 1, 8, 0.1).name("detail scale");
+        fx.add(settings, "opticalK", 0, 6, 0.05).name("optical depth");
+        fx.add(settings.curl, "enabled").name("curl turbulence");
+        fx.add(settings.curl, "strength", 0, 10, 0.1).name("curl strength");
+        fx.add(settings.curl, "scale", 0.05, 1.5, 0.01).name("curl scale (1/m)");
+        fx.add(settings.curl, "speed", 0, 3, 0.05).name("curl anim speed");
+        fx.add(settings.curl, "bankMul", 0, 1, 0.02).name("curl on bank x");
+        fx.add(settings, "launchOut", 0, 5, 0.05).name("launch outboard");
+        fx.add(settings, "launchUpMul", 0, 1.5, 0.02).name("launch up x");
+        fx.add(settings, "lift", 0, 4, 0.05).name("delayed lift");
+        fx.add(settings, "liftDelay", 0, 1.5, 0.02).name("lift delay (s)");
+        fx.add(look, "hemi").name("hemisphere ambient").onChange(applySun);
+        fx.add({ o: () => {
+          deepMerge(settings, structuredClone(OLD_LOOK));
+          look.hemi = false;
+          applySun();
+          refreshGui();
+        } }, "o").name("Old look (pre-AAA) for A/B");
+        fx.add({ n: () => {
+          deepMerge(settings, structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS));
+          look.hemi = true;
+          applySun();
+          refreshGui();
+        } }, "n").name("AAA look (game defaults)");
 
         const fe = gui.addFolder("Emitter rig");
         fe.add(rig, "mode", MODES).name("mode (M)").listen().onChange(updateHudMode);
@@ -855,7 +764,7 @@
       /* --------------------------------------------------------------- frame */
 
       function updateHudMode() {
-        $("s-mode").textContent = `${rig.mode} · ${exp.upgraded ? "upgraded" : "stock"}`;
+        $("s-mode").textContent = rig.mode;
       }
 
       function frame() {

@@ -2,9 +2,10 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
 import {
   attribute, cameraFar, cameraNear, cameraPosition, Discard, dot, exp, float,
-  Fn, length, max, min, mix, normalize, oneMinus, perspectiveDepthToViewZ,
-  positionView, positionWorld, pow, saturate, screenUV, smoothstep, sqrt,
-  texture, uniform, uv, vec2, vec3, vec4, viewportDepthTexture,
+  floor, fract, Fn, length, max, min, mix, normalize, oneMinus,
+  perspectiveDepthToViewZ, positionView, positionWorld, pow, saturate, screenUV,
+  sin, smoothstep, sqrt, texture, uniform, uv, vec2, vec3, vec4,
+  viewportDepthTexture,
 } from "three/tsl";
 
 /**
@@ -36,6 +37,38 @@ import {
  * Alongside those: many more, much thinner particles. Volumetric appearance comes
  * from accumulated overlap of near-transparent layers; the old settings had few,
  * thick layers, which is exactly the confetti look.
+ *
+ * ── THE AAA PASS (2026-09-05, from smoke-lab.html) ───────────────────────────
+ * The shading foundations above were strong; what still read as "fog, not
+ * tyre smoke" was the DENSITY MODEL, the SHAPE and the MOTION. Each fix below
+ * has a settings dial, and each collapses to the previous behaviour at 0:
+ *
+ *   DETAIL EROSION (`detail`)  — the cloud renderer's trick: the coarse billow
+ *     is the SHAPE and a much finer field CARVES it, weighted by (1 − shape) so
+ *     it only bites at the thin edges. Crisp cauliflower rims, solid cores, and
+ *     the erosion ramp (`erodeSoft`) can then be tight without flicker.
+ *   OPTICAL DEPTH (`opticalK`) — alpha = 1 − e^(−ρk): a thick core is opaque,
+ *     a thin edge is a veil. Before, alpha was only the erosion mask, so nothing
+ *     was ever solid and the plume was a wall of the same grey.
+ *   WHITE + SELF-SHADOW      — rubber smoke IS white. The grey you see in it is
+ *     Beer-Lambert absorption inside the volume, so the tints went near-white
+ *     and `absorb` went up. Dark tints + low absorb was the "dirty fog" look.
+ *   HEMISPHERE AMBIENT       — sky colour from above, road colour from below,
+ *     dotted against the real sphere normal, in place of a flat scalar. This is
+ *     what makes the plume sit IN a sunset instead of pasted onto it.
+ *   CHURN (`churn`)          — the noise window used to SLIDE; now it crossfades
+ *     between re-seeded windows on a per-particle clock, so puffs boil in place.
+ *   CURL TURBULENCE (`curl`) — an analytic, divergence-free curl field of
+ *     position, so neighbouring puffs swirl TOGETHER and the plume rolls as a
+ *     body. The old per-particle sin/cos could only shiver each puff alone.
+ *   THE LAUNCH (`launchOut`, `launchUpMul`, `lift`, `liftDelay`) — smoke leaves
+ *     the contact patch as a LOW SHEET, flung outboard and back along the wake,
+ *     and only lifts once the wake has let go of it. Constant buoyancy from
+ *     birth was why the old plume popped straight up into a mound.
+ *   THE BANK, TAMED          — smaller, fainter, carved by the same detail
+ *     noise at a finer world scale, so it lingers BEHIND the car with structure
+ *     instead of fogging the chase camera as one soft ball.
+ * Measured: ~0.3–0.9 ms GPU at 60 fps, same as before the pass.
  */
 
 /**
@@ -224,25 +257,30 @@ export const DEFAULT_WET_SPRAY_SETTINGS = {
 
 export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
   enabled: true,
-  emitRate: 150,
+  emitRate: 220,
   trigger: 0.04,
   /** How the puffs look once the road is wet — see DEFAULT_WET_SPRAY_SETTINGS.
    *  Blended in by `setWetness`, so a dry track is untouched. */
   wetSpray: { ...DEFAULT_WET_SPRAY_SETTINGS },
   /**
-   * Per-puff peak alpha. LOW on purpose. Density is meant to come from many
-   * overlapping thin layers, not from a few opaque ones — at 0.5 (the old value)
-   * you can pick out every individual quad.
+   * Per-puff peak alpha. This is the CPU part of the density model; the
+   * shader's optical depth (`opticalK`) is the other half, and the two are
+   * tuned together — 0.55 on the old mask-only alpha would be a grey wall,
+   * and 0.22 under optical depth is a whisper. Cores overlap into solid
+   * white; single thin puffs at the edge stay veils.
    */
-  opacity: 0.22,
-  sizeMin: 0.42,
-  sizeMax: 0.85,
-  sizeGrowth: 3.4,
-  lifeMin: 0.8,
-  lifeMax: 1.9,
-  rise: 0.75,
-  spread: 0.55,
-  drag: 0.12,
+  opacity: 0.55,
+  sizeMin: 0.30,
+  sizeMax: 0.62,
+  sizeGrowth: 3.6,
+  lifeMin: 0.9,
+  lifeMax: 2.2,
+  /** Low. The vertical launch is what `lift` used to be; see THE LAUNCH. */
+  rise: 0.22,
+  /** Wide: the two wheel trails must MERGE within a car length or they read
+   *  as two parallel ropes from above. */
+  spread: 0.9,
+  drag: 0.22,
   /** Legacy flat tint. Only used if colorHot/colorCool are cleared. */
   color: "",
 
@@ -253,28 +291,61 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    * smoke looks like confetti — the puffs never change, so the eye reads them
    * as a repeating sprite instead of a dispersing volume.
    */
-  colorHot: "#4a4a52",   // fresh at the contact patch
-  colorCool: "#b4b8c2",  // thinned out and drifting
+  // WHITE. The grey inside real tyre smoke is self-shadow (`absorb`), not
+  // pigment; a dark tint plus weak absorption is the "dirty fog" look.
+  colorHot: "#b9babe",   // fresh at the contact patch
+  colorCool: "#f2f3f5",  // thinned out and drifting
   /**
    * Per-particle brightness spread, ±fraction. Even with the hot→cool ramp,
    * two puffs of the same age are otherwise the exact same colour, which the
    * eye picks up as a repeat.
    */
-  tintJitter: 0.12,
+  tintJitter: 0.08,
   /**
    * Fraction of life spent fading IN. Without it every particle appears at full
    * opacity, which pops visibly at the emitter — the single most obvious tell.
    */
-  fadeIn: 0.15,
+  fadeIn: 0.08,
   /**
-   * Swirl. Real smoke is turbulent; straight-line particles with drag look
-   * ballistic. Applied as an ACCELERATION (not a position offset) so it
-   * accumulates into curling paths instead of a uniform wobble.
+   * Per-particle swirl. Real smoke is turbulent; straight-line particles with
+   * drag look ballistic. Applied as an ACCELERATION (not a position offset)
+   * so it accumulates into curling paths. Now the MINOR term: `curl` below is
+   * the coherent motion, and this is only the fine shiver on top of it.
    */
-  turbulence: 1.5,
-  /** Upward acceleration over life — hot rubber smoke keeps climbing rather
-   *  than coasting to a stop under drag. */
-  buoyancy: 0.55,
+  turbulence: 0.5,
+  /** Constant buoyancy from birth. 0: the climb is `lift`, which waits. */
+  buoyancy: 0.0,
+  /**
+   * ── CURL TURBULENCE ──────────────────────────────────────────────────────
+   * v = ∇×A, with A a sum of sines — analytic, so exactly divergence-free (no
+   * clumping) and O(1) per sample. The field is a function of POSITION, which
+   * is the whole point: neighbouring puffs get neighbouring velocities, so the
+   * plume rolls in vortices as one body. Two octaves, fixed seeds.
+   */
+  curl: {
+    enabled: true,
+    /** m/s² at the swirl cores. */
+    strength: 3.0,
+    /** cycles/m — 0.35 puts vortices ~3 m across, about a car. */
+    scale: 0.35,
+    /** How fast the field itself animates. */
+    speed: 0.8,
+    /** The lingering bank gets a gentler dose. */
+    bankMul: 0.35,
+  },
+  /**
+   * ── THE LAUNCH ───────────────────────────────────────────────────────────
+   * Outboard fling off the tread, m/s, along the car's right axis and away
+   * from its centreline. From a chase camera this is most of the sheet you
+   * see spreading past the rear arches.
+   */
+  launchOut: 1.6,
+  /** Scale on the initial vertical launch. Low = the sheet hugs the road. */
+  launchUpMul: 0.5,
+  /** Delayed buoyancy, m/s², applied only once a puff is older than
+   *  `liftDelay`. Hot smoke rises — but not until the wake has let go. */
+  lift: 1.8,
+  liftDelay: 0.35,
   // ── LIGHTING ──────────────────────────────────────────────────────────────
   /**
    * Master lighting amount, 0..1. 0 leaves the flat unlit tint (what this
@@ -287,25 +358,31 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    * side.
    */
   sunTint: 1.0,
-  /** Floor brightness. Smoke away from the sun is lit by the sky, not black. */
-  ambient: 0.5,
+  /**
+   * Floor brightness. Smoke away from the sun is lit by the sky, not black.
+   * Scales a HEMISPHERE now — sky colour above, road colour below, from
+   * `setAmbientColors` — so it is also what carries time-of-day into the
+   * shadowed side of the plume. Low: contrast lives in the gap between this
+   * and the sun term.
+   */
+  ambient: 0.42,
   /** Direct sun term. Wrapped (N·L*0.5+0.5), because participating media stays
    *  lit well past the terminator — clamped Lambert makes smoke look solid. */
-  sunStrength: 0.9,
+  sunStrength: 1.15,
   /**
    * Beer-Lambert self-shadowing. Light reaching the visible surface falls off as
    * exp(-density * absorb), so the thick middle of a puff goes dark and the thin
    * edges stay bright. This is what stops a plume reading as uniform white paste.
    */
-  absorb: 1.0,
+  absorb: 2.2,
   /**
    * Henyey-Greenstein forward scattering. Puffs between the camera and the sun
    * light up around the rim — the silver-lining effect. Arguably the single
    * strongest "this is a volume" cue there is, and it costs one pow().
    */
-  scatter: 1.2,
+  scatter: 1.6,
   /** HG anisotropy, 0..0.95. Higher = tighter, brighter forward lobe. */
-  hgG: 0.6,
+  hgG: 0.65,
 
   // ── SHAPE ─────────────────────────────────────────────────────────────────
   /**
@@ -313,19 +390,44 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    * the lobes are a quarter of the puff across — cauliflower, not static.
    * Higher gets wispier and busier, lower gets blobbier.
    */
-  noiseScale: 1.0,
-  /** Tiles/second the noise frame slides over a puff's life. This is the
-   *  internal churn: 0 freezes each puff's pattern the moment it is born. */
+  noiseScale: 1.1,
+  /** Tiles/second the noise frame slides over a puff's life. */
   noiseDrift: 0.12,
+  /**
+   * ── CHURN ────────────────────────────────────────────────────────────────
+   * The boil. A per-particle clock picks an integer "frame"; each frame
+   * hashes to its own window into the tiling noise, and adjacent frames
+   * crossfade — so features dissolve INTO different features in place, where
+   * `noiseDrift` alone only pans a picture behind a mask. 0 = pure slide.
+   */
+  churn: 0.6,
+  /** Frames per second of that clock. */
+  churnRate: 0.7,
+  /**
+   * ── DETAIL EROSION ───────────────────────────────────────────────────────
+   * How hard the fine noise carves the coarse shape, 0..1. Weighted by
+   * (1 − shape), so it bites only where the puff is already thin: crisp
+   * cauliflower rims, untouched cores. 0 = the old soft contour.
+   */
+  detail: 0.55,
+  /** Fine-noise tiles per quad, relative to the coarse field. */
+  detailScale: 3.0,
+  /**
+   * ── OPTICAL DEPTH ────────────────────────────────────────────────────────
+   * alpha = 1 − e^(−ρ·k). Thick cores go opaque, thin edges stay veils.
+   * 0 = alpha from the erosion mask only (the old model).
+   */
+  opticalK: 1.8,
   /** Erosion threshold at birth. Above ~0.3 puffs are born already ragged. */
-  erodeStart: 0.06,
+  erodeStart: 0.05,
   /**
    * Erosion threshold at death. Must exceed peak density (~1.27) for a puff to
    * vanish completely on its own; the alpha tail covers it if not.
    */
-  erodeEnd: 1.25,
-  /** Width of the erosion ramp. Small = crisp torn edges, large = soft haze. */
-  erodeSoft: 0.3,
+  erodeEnd: 1.2,
+  /** Width of the erosion ramp. TIGHT, because `detail` is carving the edges
+   *  and a wide ramp only blurs them back into contours. */
+  erodeSoft: 0.12,
   /**
    * How much of the erosion field is sampled in WORLD space rather than in each
    * quad's own UV, 0..1.
@@ -337,7 +439,7 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    * Blended rather than pure, because pure world-space also kills the tumbling —
    * the quad-space half is what still churns per particle.
    */
-  worldNoiseMix: 0.55,
+  worldNoiseMix: 0.45,
   /** Tiles per metre for the world-space field. ~0.6 puts features around 1.5 m,
    *  i.e. bigger than one puff, which is the point. */
   worldNoiseScale: 0.6,
@@ -371,18 +473,19 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    */
   haze: {
     enabled: true,
-    /** Per rear wheel. Few, because each one ends ENORMOUS — see sizeGrowth. */
-    emitRate: 8,
-    lifeMin: 8,
-    lifeMax: 16,
-    sizeMin: 2,
-    sizeMax: 3.4,
+    /** Per rear wheel. Few, because each one ends large — see sizeGrowth. */
+    emitRate: 5,
+    lifeMin: 5,
+    lifeMax: 9,
+    sizeMin: 1.0,
+    sizeMax: 1.8,
     /**
-     * ×3.2 on top of a 3.4 m start — a bank particle dies about 14 m across.
-     * Big terminal size is the whole point: a drift cloud is metres of smoke,
-     * not a denser spray of car-sized puffs.
+     * ×2.4 on a 1.8 m start — a bank particle dies about 6 m across. This
+     * used to be 14 m, and from the chase camera (7.5 m back) that put the
+     * camera INSIDE the bank for the whole drift: a uniform grey wash over
+     * the frame. A bank the camera sees from outside can have structure.
      */
-    sizeGrowth: 3.2,
+    sizeGrowth: 2.4,
     /**
      * Growth exponent. The puffs use 0.5 (√age) because turbulent diffusion
      * widens fast then slows — right for something that exists for a second.
@@ -391,7 +494,7 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
      * and then just sits there.
      */
     growthPower: 0.85,
-    opacity: 0.075,
+    opacity: 0.035,
     /**
      * Fraction of life held at full opacity before fading at all.
      *
@@ -412,32 +515,32 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
     erodePower: 2.6,
     /** Rises and billows. An earlier pass pinned this flat to the tarmac, which
      *  read as ground fog — real drift smoke lifts into a column behind the car. */
-    rise: 0.35,
-    buoyancy: 0.25,
+    rise: 0.25,
+    buoyancy: 0.15,
     /** Low damping so it keeps spreading OUTWARD. The cloud has to grow in
      *  extent, not only in per-particle size, or it stays a narrow ribbon
      *  smeared along wherever the car happened to drive. */
     damp: 0.7,
     spread: 2.2,
     drag: 0.05,
-    turbulence: 0.35,
+    turbulence: 0.14,
     spinRate: 0.35,
     fadeIn: 0.25,
     /** Below 1 = features LARGER than the quad, so a haze particle is a piece of
      *  a big soft shape rather than a scaled-up copy of a puff. */
     noiseScale: 0.55,
     noiseDrift: 0.05,
-    /** Its own world-noise frequency, so the bank fuses along metre-scale
-     *  filaments while the puffs keep fusing along their own finer ones. */
-    worldScaleMul: 0.4,
+    /** Its own world-noise frequency. Finer than the old 0.4 so the bank has
+     *  STRUCTURE at the scale the chase camera sees it, not one soft ball. */
+    worldScaleMul: 0.75,
     /** Leans harder on the VOLUMETRIC sample than the puffs do (×1.6 on the
      *  global mix). The bank is the class you get time to drive past, so it is
      *  the one whose interior has to move with parallax rather than sit on a
      *  plane; a puff is gone before the eye could tell either way. */
     worldMixMul: 1.6,
     tintJitter: 0.1,
-    colorHot: "#6e6f78",
-    colorCool: "#c2c6d0",
+    colorHot: "#c4c5ca",
+    colorCool: "#e6e8ec",
   },
 };
 
@@ -624,6 +727,54 @@ const _contactSide = [1, -1, 1, -1];
 /** Car right, in world space — the axis `sideThrow` flings along. */
 const _sprayRight = new THREE.Vector3(1, 0, 0);
 
+// ─── Curl-noise field ─────────────────────────────────────────────────────────
+
+/**
+ * Wave table for the curl field: two octaves × three potential components,
+ * each a sine with its own wave vector, phase and animation rate. FIXED seeds
+ * (a tiny LCG) so the flow is identical run to run — tuning against a field
+ * that re-rolls on every reload is tuning against noise.
+ */
+const CURL_WAVES = (() => {
+  let s = 1234567;
+  const rng = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  const waves = [];
+  for (let octave = 0; octave < 2; octave++) {
+    const freq = octave === 0 ? 1 : 2.3;
+    const amp = octave === 0 ? 1 : 0.45;
+    for (let i = 0; i < 3; i++) {
+      const c = new THREE.Vector3(rng() - 0.5, (rng() - 0.5) * 0.6, rng() - 0.5)
+        .normalize().multiplyScalar(freq);
+      waves.push({ c, phase: rng() * Math.PI * 2, omega: 0.6 + rng() * 0.9, amp });
+    }
+  }
+  return waves;
+})();
+const _curlV = new THREE.Vector3();
+
+/**
+ * v = ∇×A at world point `p`, into `out`, normalised to roughly unit peak.
+ * ∂ai/∂xj = c_ij·cos(ci·p·s + φ + ωt), so the curl assembles from three
+ * cosines per octave — no finite differences, no extra noise samples.
+ */
+function curlAt(p, t, scale, out) {
+  const w = CURL_WAVES;
+  out.set(0, 0, 0);
+  for (let o = 0; o < w.length; o += 3) {
+    const a0 = w[o], a1 = w[o + 1], a2 = w[o + 2];
+    const k0 = a0.amp * Math.cos((a0.c.x * p.x + a0.c.y * p.y + a0.c.z * p.z) * scale + a0.phase + a0.omega * t);
+    const k1 = a1.amp * Math.cos((a1.c.x * p.x + a1.c.y * p.y + a1.c.z * p.z) * scale + a1.phase + a1.omega * t);
+    const k2 = a2.amp * Math.cos((a2.c.x * p.x + a2.c.y * p.y + a2.c.z * p.z) * scale + a2.phase + a2.omega * t);
+    out.x += a2.c.y * k2 - a1.c.z * k1;
+    out.y += a0.c.z * k0 - a2.c.x * k2;
+    out.z += a1.c.x * k1 - a0.c.y * k0;
+  }
+  // Wave vectors are unit·freq and the amps sum ≈ 1.45, so this keeps the
+  // `strength` dial meaning "about this many m/s² at the swirl cores".
+  out.multiplyScalar(1 / 2.2);
+  return out;
+}
+
 // ─── Procedural puff shape ────────────────────────────────────────────────────
 
 const NOISE_SIZE = 256;
@@ -805,7 +956,21 @@ export class ModularRoadDriftSmoke {
      *  clock, so changing the drift speed never jumps the pattern. */
     this.uWorldDrift = uniform(new THREE.Vector2(0, 0));
     /** The bank's own world-noise frequency, so it fuses at metre scale. */
-    this.uBankScale = uniform(settings.haze?.worldScaleMul ?? 0.4);
+    this.uBankScale = uniform(settings.haze?.worldScaleMul ?? 0.75);
+    // ── The AAA pass ──────────────────────────────────────────────────────
+    /** Churn clock, seconds. Advanced by the (possibly slow-motion) dt. */
+    this.uTime = uniform(0);
+    this.uChurn = uniform(settings.churn ?? 0.6);
+    this.uChurnRate = uniform(settings.churnRate ?? 0.7);
+    /** Hemisphere ambient. White/white = the old flat scalar exactly; the
+     *  game feeds the sky's zenith and haze colours via setAmbientColors. */
+    this.uSkyCol = uniform(new THREE.Color(1, 1, 1));
+    this.uGroundCol = uniform(new THREE.Color(1, 1, 1));
+    this.uDetail = uniform(settings.detail ?? 0.55);
+    this.uDetailScale = uniform(settings.detailScale ?? 3);
+    this.uOpticalK = uniform(settings.opticalK ?? 1.8);
+    /** Curl field clock. Separate from uTime so `curl.speed` scales it. */
+    this._curlTime = 0;
 
     /** True while the spray (streak) shading path is the mesh's material. */
     this._streakOn = false;
@@ -1116,9 +1281,10 @@ export class ModularRoadDriftSmoke {
   }
 
   /**
-   * Bank shading. Same lighting model as the puffs, and now the same ANALYTIC
-   * ray-sphere geometry — the mesh alone could not survive the camera being
-   * inside it.
+   * Bank shading. Same lighting model as the puffs (hemisphere ambient, detail
+   * erosion, optical depth — no churn: a metres-wide mass re-seeding its
+   * texture would shimmer), and the same ANALYTIC ray-sphere geometry — the
+   * mesh alone could not survive the camera being inside it.
    *
    * ── WHY THIS IS BackSide ───────────────────────────────────────────
    * It was FrontSide, on the sound reasoning that a closed sphere would
@@ -1143,7 +1309,6 @@ export class ModularRoadDriftSmoke {
   _buildBankNode() {
     const tint = attribute("iTint", "vec4");
     const thresh = attribute("iThresh", "float");
-    /** The VOLUME this shell stands for: xyz = centre in world space, w = radius. */
     const sphere = attribute("iSphere", "vec4");
     const noiseMap = this.noiseMap;
     const softDepth = this.uSoftDepth;
@@ -1153,10 +1318,12 @@ export class ModularRoadDriftSmoke {
       uSunColor, uWorldScale, uWorldDrift, uBankScale,
     } = this;
 
+    const { uSkyCol, uGroundCol, uDetail, uOpticalK } = this;
+
     return Fn(() => {
       const camToFrag = positionWorld.sub(cameraPosition);
       const dist = length(camToFrag).toVar();
-      const rd = camToFrag.div(dist).toVar();   // unit ray, camera → fragment
+      const rd = camToFrag.div(dist).toVar();
       const centre = sphere.xyz;
       const radius = sphere.w;
 
@@ -1164,64 +1331,49 @@ export class ModularRoadDriftSmoke {
       const b = dot(oc, rd);
       const cTerm = dot(oc, oc).sub(radius.mul(radius));
       const h = b.mul(b).sub(cTerm);
-      // Only reachable through numerical slop at the silhouette — we are shading
-      // the sphere's own surface, so the ray hits by construction.
       Discard(h.lessThan(0));
       const sq = sqrt(max(h, float(0)));
-      const t0 = b.negate().sub(sq);   // entry — NEGATIVE when the camera is inside
-      const t1 = b.negate().add(sq);   // exit
+      const t0 = b.negate().sub(sq);
+      const t1 = b.negate().add(sq);
 
-      // How far the scene is ALONG THIS RAY. positionView.z is measured down the
-      // view axis, so it needs the 1/cos rescale before it can be compared
-      // against ray parameters.
       const sceneViewZ = perspectiveDepthToViewZ(
         _sceneDepthTex.sample(screenUV).r, cameraNear, cameraFar,
       ).negate();
       const fragViewZ = positionView.z.negate();
       const sceneT = sceneViewZ.mul(dist).div(max(fragViewZ, float(1e-4)));
 
-      // The VISIBLE chord: clipped at the near side by the camera and at the far
-      // side by solid geometry. `tEnter` collapses to 0 whenever the camera is
-      // inside, which is also what makes that case safe on its own — the chord
-      // shrinks toward zero in the direction of the surface you are standing
-      // next to, so the fragments the near plane could still cut are the ones
-      // that were already going to be transparent.
       const tEnter = max(t0, float(0)).toVar();
       const tExit = min(t1, sceneT).toVar();
       const chord = max(tExit.sub(tEnter), float(0));
       const thick = saturate(chord.div(radius.mul(2)));
 
-      // Lighting normal at the point the ray ENTERS the smoke, i.e. the lit
-      // side. Real world-space normal, so it dots straight against the sun.
       const N = normalize(cameraPosition.add(rd.mul(tEnter)).sub(centre)).toVar();
 
-      // Triplanar, in WORLD space — 3D, so it parallaxes as you move, and shared
-      // between neighbours, so they erode along the same filaments and fuse into
-      // one mass instead of reading as a bag of balls.
-      //
-      // Sampled at the chord MIDPOINT rather than on the shell. That point is a
-      // function of the view ray, which is the parallax cue; and it stays
-      // well-defined from inside, where the entry point collapses onto the
-      // camera and would paint the whole sphere one flat colour.
       const mid = cameraPosition.add(rd.mul(tEnter.add(tExit).mul(0.5))).toVar();
       const aN = N.abs();
       const bl = aN.div(aN.x.add(aN.y).add(aN.z).add(0.0001));
       const wp = mid.mul(uWorldScale.mul(uBankScale));
       const off = uWorldDrift;
-      const sX = texture(noiseMap, wp.yz.add(off)).r;
-      const sY = texture(noiseMap, wp.xz.add(off)).r;
-      const sZ = texture(noiseMap, wp.xy.add(off)).r;
-      const detail = sX.mul(bl.x).add(sY.mul(bl.y)).add(sZ.mul(bl.z));
+      const sX = texture(noiseMap, wp.yz.add(off));
+      const sY = texture(noiseMap, wp.xz.add(off));
+      const sZ = texture(noiseMap, wp.xy.add(off));
+      const coarse = sX.r.mul(bl.x).add(sY.r.mul(bl.y)).add(sZ.r.mul(bl.z));
+      // ── Detail erosion (bank): the same carve, from the fine channel of the
+      // same three taps, so it costs nothing. Slightly softer than the puffs:
+      // a bank is old, diffuse smoke.
+      const fine = sX.g.mul(bl.x).add(sY.g.mul(bl.y)).add(sZ.g.mul(bl.z));
+      const detail = saturate(coarse.sub(uDetail.mul(0.85).mul(fine).mul(oneMinus(coarse))));
 
       const density = thick.mul(float(0.32).add(detail.mul(0.95))).toVar();
 
-      const alpha = smoothstep(thresh, thresh.add(erodeSoft), density)
-        .mul(tint.w)
-        .toVar();
+      const mask = smoothstep(thresh, thresh.add(erodeSoft), density);
+      const optical = mix(
+        float(1),
+        oneMinus(exp(density.mul(uOpticalK).negate())),
+        saturate(uOpticalK.mul(100)),
+      );
+      const alpha = mask.mul(optical).mul(tint.w).toVar();
 
-      // The chord clip above already handles the intersection properly; this
-      // only feathers the last few centimetres, where depth-buffer quantisation
-      // can still show a seam.
       alpha.mulAssign(saturate(sceneT.sub(t0).div(max(softDepth, float(1e-3)))));
       Discard(alpha.lessThan(0.003));
 
@@ -1237,10 +1389,12 @@ export class ModularRoadDriftSmoke {
       );
       const phase = float(1).sub(gg).div(denom).div(12.566);
 
+      // ── Hemisphere ambient (same as the puffs) ───────────────────────────
+      const hemiCol = mix(uGroundCol, uSkyCol, N.y.mul(0.5).add(0.5));
       const lit = uSunColor
         .mul(uSunStrength.mul(wrapped).add(uScatter.mul(phase)))
         .mul(transmit)
-        .add(uAmbient);
+        .add(hemiCol.mul(uAmbient));
       return vec4(tint.xyz.mul(mix(vec3(1), lit, uLightAmount)), alpha);
     })();
   }
@@ -1322,11 +1476,8 @@ export class ModularRoadDriftSmoke {
   _buildShadedNode() {
     const st = uv();
     const tint = attribute("aTint", "vec4");
-    /** xy = noise frame offset, z = noise tiles per quad, w = erosion threshold. */
     const nParams = attribute("aNoise", "vec4");
-    /** The VOLUME this quad stands in for: xyz = centre in world space, w = radius. */
     const sphere = attribute("aSphere", "vec4");
-    /** Per-class: x = world-noise mix, y = world-noise frequency multiplier. */
     const cls = attribute("aClass", "vec2");
     const softDepth = this.uSoftDepth;
     const erodeSoft = this.uErodeSoft;
@@ -1336,18 +1487,14 @@ export class ModularRoadDriftSmoke {
       uSunColor, uWorldMix, uWorldScale, uWorldDrift,
     } = this;
 
+    const {
+      uTime, uChurn, uChurnRate, uSkyCol, uGroundCol, uDetail, uDetailScale, uOpticalK,
+    } = this;
+
     return Fn(() => {
-      // ── The quad is scaffolding; the particle is a SPHERE ───────────────────
-      //
-      // Everything below intersects the view ray with that sphere instead of
-      // shading the card. This is what stops big, long-lived puffs reading as
-      // paper: a card has no parallax (its detail is painted on a plane that
-      // keeps turning to face you), it meets the ground along a straight cut,
-      // and its "thickness" is a 2D mask. A sphere has real extent in depth, so
-      // driving past one shifts what you see through it.
       const camToFrag = positionWorld.sub(cameraPosition);
       const dist = length(camToFrag).toVar();
-      const rd = camToFrag.div(dist).toVar();       // unit ray, camera → fragment
+      const rd = camToFrag.div(dist).toVar();
       const centre = sphere.xyz;
       const radius = sphere.w;
 
@@ -1355,104 +1502,118 @@ export class ModularRoadDriftSmoke {
       const b = dot(oc, rd);
       const cTerm = dot(oc, oc).sub(radius.mul(radius));
       const h = b.mul(b).sub(cTerm);
-      // Corners of the quad miss the sphere entirely. Killing them here is also
-      // the cheapest overdraw win available — it is ~21% of every quad.
       Discard(h.lessThan(0));
       const sq = sqrt(max(h, float(0)));
-      const t0 = b.negate().sub(sq).toVar();   // entry
-      const t1 = b.negate().add(sq).toVar();   // exit
+      const t0 = b.negate().sub(sq).toVar();
+      const t1 = b.negate().add(sq).toVar();
 
-      // How far the scene is ALONG THIS RAY. positionView.z is measured down the
-      // view axis, so it has to be rescaled by dist/viewZ (= 1/cos) to compare
-      // against ray parameters.
       const sceneViewZ = perspectiveDepthToViewZ(
         _sceneDepthTex.sample(screenUV).r, cameraNear, cameraFar,
       ).negate();
       const fragViewZ = positionView.z.negate();
       const sceneT = sceneViewZ.mul(dist).div(max(fragViewZ, float(1e-4)));
 
-      // Thickness of the VISIBLE chord: clipped at the near side by the camera
-      // (so you can fly through a puff) and at the far side by whatever solid
-      // geometry is behind it. Clipping here rather than fading the whole quad
-      // is why a bank resting on the road looks half-buried like a ball instead
-      // of sliced off like a sheet.
       const tEnter = max(t0, float(0)).toVar();
       const tExit = min(t1, sceneT);
       const chord = max(tExit.sub(tEnter), float(0));
       const thick = saturate(chord.div(radius.mul(2)));
 
-      // Coarse lobes carry the shape; a little fine detail keeps the torn edge
-      // from looking like a smooth contour line of the coarse field.
-      const nQuad = texture(noiseMap, st.mul(nParams.z).add(nParams.xy));
-      const detailQuad = mix(nQuad.r, nQuad.g, 0.35);
+      // ── CHURN ─────────────────────────────────────────────────────────────
+      // One tap at st*scale + drift offset was a sliding window. Now: a
+      // per-particle clock picks an integer "frame", each frame hashes to its
+      // own window into the same tiling texture, and adjacent frames
+      // crossfade. Features therefore dissolve INTO different features in
+      // place, which is the boil. The hash offsets are scaled by uChurn, so
+      // 0 collapses both taps onto the stock coordinate — the A/B baseline
+      // renders exactly the stock image.
+      //
+      // The clock is seeded from the particle's own random noise offset
+      // (nParams.xy is per-particle random), so the pool never boils in sync.
+      const seed = fract(nParams.x.mul(0.6180339).add(nParams.y.mul(0.7548776)));
+      const clock = uTime.mul(uChurnRate).add(seed.mul(64.0));
+      const frame = floor(clock);
+      const blend = fract(clock);
+      // Cheap per-frame hash → a window offset in tiles.
+      const hashOf = (f) => vec2(
+        fract(sin(f.mul(12.9898)).mul(43758.5453)),
+        fract(sin(f.mul(78.2330)).mul(24634.6345)),
+      );
+      const uvBase = st.mul(nParams.z).add(nParams.xy);
+      const offA = hashOf(frame).mul(uChurn);
+      const offB = hashOf(frame.add(1)).mul(uChurn);
+      const nQuadA = texture(noiseMap, uvBase.add(offA));
+      const nQuadB = texture(noiseMap, uvBase.add(offB));
+      // Smoothstep on the blend, so a frame change never shows as a linear
+      // pop at the cycle boundary.
+      const w = blend.mul(blend).mul(float(3).sub(blend.mul(2)));
+      // Coarse billow only, now: the fine channel is used as an EROSION
+      // term below rather than blended into the shape.
+      const coarseQuad = mix(nQuadA.r, nQuadB.r, w);
+      // ── end churn ─────────────────────────────────────────────────────────
 
-      // THE PARALLAX. Sample the field at a point INSIDE the volume — the
-      // sphere's chord midpoint — rather than on the quad's surface. That point
-      // is a function of the view ray, so moving the camera slides it through
-      // the noise and the puff's interior shifts against its silhouette, which
-      // is the cue the eye reads as depth. Sampled on the quad it would just be
-      // a picture that turns to face you.
       const mid = cameraPosition.add(rd.mul(b.negate()));
       const wuv = vec2(
         mid.x.add(mid.y.mul(0.37)),
         mid.z.add(mid.y.mul(0.61)),
       ).mul(uWorldScale.mul(cls.y)).add(uWorldDrift);
       const nWorld = texture(noiseMap, wuv);
-      const detailWorld = mix(nWorld.r, nWorld.g, 0.35);
 
-      // Per-class mix: the big slow bank leans harder on the volumetric sample,
-      // because it is the one you actually get time to walk around.
-      const detail = mix(detailQuad, detailWorld, saturate(uWorldMix.mul(cls.x)));
-      const density = thick.mul(float(0.32).add(detail.mul(0.95))).toVar();
+      // ── DETAIL EROSION + OPTICAL-DEPTH ALPHA ──────────────────────────────
+      // Density used to be thick * (0.32 + 0.95 * mix(coarse, fine, 0.35)): one
+      // blurry field, so every silhouette was a soft contour line of it.
+      //
+      // The cloud renderer's trick instead: the coarse field is the SHAPE,
+      // and a much finer field CARVES it, weighted by (1 - shape) so it only
+      // bites where the shape is already thin — the edges. Cores stay solid,
+      // rims tear into fine cauliflower, and the erosion ramp can then be
+      // tight without the whole puff flickering.
+      const base = mix(coarseQuad, nWorld.r, saturate(uWorldMix.mul(cls.x)));
+      const fineUv = uvBase.mul(uDetailScale).add(offA.mul(1.7));
+      const fine = texture(noiseMap, fineUv).g;
+      const carved = saturate(base.sub(uDetail.mul(fine).mul(oneMinus(base))));
+      const density = thick.mul(float(0.32).add(carved.mul(0.95))).toVar();
 
-      // ── Alpha: erosion, then a gentle extra feather ─────────────────────────
-      // The threshold rises over life (CPU side), so the puff erodes away from
-      // its thin edges inward instead of dimming uniformly.
       const thresh = nParams.w;
-      const alpha = smoothstep(thresh, thresh.add(erodeSoft), density)
-        .mul(tint.w)
-        .toVar();
+      const mask = smoothstep(thresh, thresh.add(erodeSoft), density);
+      // Optical depth: a thick core is OPAQUE, a thin edge is a veil. With
+      // uOpticalK at 0 this collapses to the stock erosion-mask alpha.
+      const optical = mix(
+        float(1),
+        oneMinus(exp(density.mul(uOpticalK).negate())),
+        saturate(uOpticalK.mul(100)),
+      );
+      const alpha = mask.mul(optical).mul(tint.w).toVar();
+      // ── end density model ─────────────────────────────────────────────────
 
-      // The chord clip above already handles intersection properly; this only
-      // feathers the last few centimetres, where depth-buffer quantisation can
-      // still show a seam.
       alpha.mulAssign(saturate(sceneT.sub(t0).div(max(softDepth, float(1e-3)))));
 
       Discard(alpha.lessThan(0.003));
 
-      // ── Colour: true sphere normal + wrapped diffuse + HG forward lobe ──────
-      // The normal at the point where the ray enters the sphere. Being a real
-      // world-space normal, it can be dotted straight against the world sun —
-      // no quad basis, no per-particle projection.
       const nrm = normalize(cameraPosition.add(rd.mul(tEnter)).sub(centre));
       const ndl = dot(nrm, uSunWorld);
-
-      // Wrapped diffuse. Smoke is translucent, so it stays lit around the
-      // terminator; a clamped N·L gives it a hard, solid-looking edge.
       const wrapped = saturate(ndl.mul(0.5).add(0.5));
-
-      // Beer-Lambert: how much light survives to the visible surface. Thin
-      // edges ≈ 1, thick cores → 0, which is what darkens the middle of a plume.
       const transmit = exp(density.mul(uAbsorb).negate());
 
-      // Henyey-Greenstein, now per pixel. cosθ is between the light's direction
-      // of travel and the direction out toward the camera; with rd pointing
-      // camera → fragment that is exactly dot(sun, rd), peaking when you look
-      // through the smoke toward the sun.
       const c = dot(uSunWorld, rd);
       const gg = uHgG.mul(uHgG);
       const denom = pow(
         max(float(1e-4), float(1).add(gg).sub(uHgG.mul(2).mul(c))),
         float(1.5),
       );
-      // The 1/4π keeps the forward lobe near 1 instead of ~10, so `scatter`
-      // reads as a sensible 0..2 dial rather than needing three decimal places.
       const phase = float(1).sub(gg).div(denom).div(12.566);
 
+      // ── HEMISPHERE AMBIENT ────────────────────────────────────────────────
+      // `.add(uAmbient)` was a flat scalar, the same on the sky side and the
+      // tarmac side of every puff. Now the scalar scales a sky/ground colour
+      // picked by the REAL sphere normal's upness, so the plume is cool-lit
+      // on top and dark underneath even with the sun term at zero. White
+      // defaults reproduce stock exactly.
+      const hemiCol = mix(uGroundCol, uSkyCol, nrm.y.mul(0.5).add(0.5));
       const lit = uSunColor
         .mul(uSunStrength.mul(wrapped).add(uScatter.mul(phase)))
         .mul(transmit)
-        .add(uAmbient);
+        .add(hemiCol.mul(uAmbient));
+      // ── end hemisphere ambient ────────────────────────────────────────────
       const rgb = tint.xyz.mul(mix(vec3(1), lit, uLightAmount));
 
       return vec4(rgb, alpha);
@@ -1644,10 +1805,18 @@ export class ModularRoadDriftSmoke {
     this.uScatter.value = s.scatter ?? 1.2;
     // Clamped below 1: HG's denominator collapses to 0 at g=1, c=1.
     this.uHgG.value = THREE.MathUtils.clamp(s.hgG ?? 0.6, 0, 0.95);
-    this.uBankScale.value = s.haze?.worldScaleMul ?? 0.4;
+    this.uBankScale.value = s.haze?.worldScaleMul ?? 0.75;
 
-    this.uWorldMix.value = THREE.MathUtils.clamp(s.worldNoiseMix ?? 0.55, 0, 1);
+    this.uWorldMix.value = THREE.MathUtils.clamp(s.worldNoiseMix ?? 0.45, 0, 1);
     this.uWorldScale.value = s.worldNoiseScale ?? 0.6;
+    // The AAA pass dials. Clocks run on dt so slow motion slows the boil too.
+    this.uTime.value += dt;
+    this._curlTime += dt * (s.curl?.speed ?? 0.8);
+    this.uChurn.value = s.churn ?? 0.6;
+    this.uChurnRate.value = s.churnRate ?? 0.7;
+    this.uDetail.value = s.detail ?? 0.55;
+    this.uDetailScale.value = s.detailScale ?? 3;
+    this.uOpticalK.value = s.opticalK ?? 1.8;
     // Accumulated rather than derived from a clock: moving the drift slider then
     // never teleports the pattern, it just changes how fast it goes from here.
     this._worldDriftPhase += dt * (s.worldNoiseDrift ?? 0.35);
@@ -1779,6 +1948,18 @@ export class ModularRoadDriftSmoke {
     const opacity = cfg.opacity ?? OPACITY;
     this._worldScaleMul = cfg.worldScaleMul ?? 1;
     this._worldMixMul = cfg.worldMixMul ?? 1;
+    // ── Curl + delayed lift. Both are DRY-smoke behaviours: water spray is
+    // thrown, not convected, so they fade out with wetness (the spray's own
+    // gravity and side-throw take over through _puffSettings).
+    const root = this.settings;
+    const dry = 1 - (this._wetness ?? 0);
+    const curlCfg = root.curl;
+    const curlK = (curlCfg && curlCfg.enabled !== false)
+      ? (curlCfg.strength ?? 0) * dt * dry * (isBank ? (curlCfg.bankMul ?? 0.35) : 1)
+      : 0;
+    const curlScale = curlCfg?.scale ?? 0.35;
+    const liftK = isBank ? 0 : (root.lift ?? 0) * dt * dry;
+    const liftDelay = root.liftDelay ?? 0.35;
     // Hex parsing hoisted out of the per-particle loop: this used to re-parse
     // both colour strings for every one of ~600 particles, every frame.
     const hasRamp = !!(cfg.colorHot && cfg.colorCool);
@@ -1809,6 +1990,15 @@ export class ModularRoadDriftSmoke {
         p.velocity.y += Math.sin(t * 0.73) * turb * 0.35 * dt;
       }
       p.velocity.y += buoyancy * dt;
+      // Coherent swirl: a field of POSITION, so neighbours roll together.
+      if (curlK > 0) {
+        curlAt(p.position, this._curlTime, curlScale, _curlV);
+        p.velocity.addScaledVector(_curlV, curlK);
+      }
+      // Delayed buoyancy: the wake drags a fresh puff along the road; only
+      // once it is free does the heat take it up. Constant buoyancy from
+      // birth is what made the plume pop straight up into a mound.
+      if (liftK > 0 && p.maxLife - p.life > liftDelay) p.velocity.y += liftK;
 
       p.velocity.multiplyScalar(Math.max(0, 1 - dt * damp));
       p.position.addScaledVector(p.velocity, dt);
@@ -2010,6 +2200,20 @@ export class ModularRoadDriftSmoke {
         + lateral * _sprayRight.z,
     );
 
+    // ── THE LAUNCH (dry smoke only; spray has `sideThrow` and gravity) ──
+    // Flung outboard off the tread as a low sheet. Linear random so the
+    // sheet has a spread rather than a bright rope; `side` is ±1 per contact.
+    if (emitter === this.puffEmitter) {
+      const dry = 1 - (this._wetness ?? 0);
+      const out = (this.settings.launchOut ?? 0) * dry;
+      if (out > 0) {
+        const fling = out * (side || 1) * (0.25 + Math.random() * 0.75);
+        p.velocity.x += _sprayRight.x * fling;
+        p.velocity.z += _sprayRight.z * fling;
+      }
+      p.velocity.y *= THREE.MathUtils.lerp(1, this.settings.launchUpMul ?? 1, dry);
+    }
+
     const lifeMin = Math.max(0.05, s.lifeMin ?? LIFE_MIN);
     const lifeMax = Math.max(lifeMin, s.lifeMax ?? LIFE_MAX);
     p.maxLife = THREE.MathUtils.lerp(lifeMin, lifeMax, Math.random());
@@ -2045,6 +2249,25 @@ export class ModularRoadDriftSmoke {
   /** Sun direction, pointing TOWARD the sun. Drives the per-pixel shading. */
   setSunDirection(v) {
     if (v && v.lengthSq() > 1e-8) _smokeSun.copy(v).normalize();
+  }
+
+  /**
+   * Hemisphere ambient: the colour the plume's top is lit by (sky) and its
+   * underside (road/haze). Linear-space colours. Unset = white/white, which is
+   * exactly the old flat ambient. The game hands in the sky's zenith and haze.
+   */
+  setAmbientColors(sky, ground) {
+    if (sky) this.uSkyCol.value.copy(sky);
+    if (ground) this.uGroundCol.value.copy(ground);
+  }
+
+  /**
+   * The car's right axis, world space — what `launchOut` flings along. Set by
+   * updateFromVehicle every frame; only a direct `update()` caller (the lab)
+   * needs to call this itself.
+   */
+  setCarRight(v) {
+    if (v && v.lengthSq() > 1e-8) _sprayRight.copy(v).normalize();
   }
 
   /**

@@ -1998,6 +1998,30 @@ export const PROP_CATALOG = [
     },
   },
   {
+    id: "pole_green",
+    label: "Green pole",
+    /**
+     * Same capsule treatment as `pole` — a round column the hull sampler would
+     * miss — just a stubbier, fatter silhouette in solid green so it reads as
+     * a different obstacle from the striped mast beside it.
+     */
+    collision: "solid",
+    make: () => {
+      const g = new THREE.Group();
+      g.name = "GreenPole";
+      const R = 0.92;  // ~2.5× the striped pole, so it fills a lane
+      const H = 3.4;   // about half as tall
+      const shaft = new THREE.Mesh(
+        new THREE.CylinderGeometry(R, R, H, 14),
+        mat(0x2db84a, { roughness: 0.48, metalness: 0.22 }),
+      );
+      shaft.position.y = H / 2;
+      shaft.userData.capsule = { radius: R, height: H };
+      g.add(shaft);
+      return g;
+    },
+  },
+  {
     id: "container",
     label: "Container",
     /**

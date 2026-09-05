@@ -4476,6 +4476,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // freeze the smoke's lighting at whatever the sun was doing at the time.
     driftSmoke.setSunDirection(_sunDir);
     driftSmoke.setSunColor(sunLight.color, sunLight.intensity);
+    // The plume's shadowed side is lit by the SKY, so it takes the same
+    // zenith/haze pair the world's hemisphere light does (linear, written by
+    // syncWorldLightToSky). Both default to white until the sky has run once,
+    // which is exactly the old flat ambient.
+    driftSmoke.setAmbientColors(_hemiSkyCol, _hemiGndCol);
     if (!autoHeadlights) return;
     if (!headlightsOn && sinElev < 0.10) setHeadlights(true);
     else if (headlightsOn && sinElev > 0.16) setHeadlights(false);

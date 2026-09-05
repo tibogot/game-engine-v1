@@ -4683,7 +4683,6 @@ export const PALETTE_CATEGORIES = [
   { id: "game", label: "Game" },
   { id: "straight", label: "Straight" },
   { id: "turns", label: "Turns" },
-  { id: "junctions", label: "Junctions" },
   { id: "ramps", label: "Ramps" },
   { id: "slopes", label: "Slopes" },
   { id: "banked", label: "Banked" },
@@ -4693,6 +4692,9 @@ export const PALETTE_CATEGORIES = [
   // loops and quarter-pipes are one family and you pick between them by reading
   // them together.
   { id: "loop", label: "Loop" },
+  // Junctions after Loop: used less than the everyday road families above, so
+  // they sit past the ride-inside group rather than splitting Turns from Ramps.
+  { id: "junctions", label: "Junctions" },
   { id: "obstacles", label: "Obstacles" },
   { id: "parkour", label: "Parkour" },
   { id: "scenery", label: "Scenery" },

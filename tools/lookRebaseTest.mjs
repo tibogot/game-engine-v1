@@ -108,6 +108,8 @@ const ADDED = [
   // THREE.Color once, like every other colour in that file.
   0xf4501a,
   0x6e1b09,
+  // Green pole obstacle (modularRoadProps.js): solid green shaft, new art.
+  0x2db84a,
 ];
 
 /** The file as it was before the colour fix. */
