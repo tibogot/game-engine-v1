@@ -1,7 +1,9 @@
 /**
  * V2 tree stack wired for V3 — paint, trunk/foliage/impostor LOD, height sync.
  */
+import * as THREE from "three";
 import { TreeStore } from "../../v2/core/foliage/treeStore.js";
+import { bakeObjectThumbnails } from "../../v2/tools/objectThumbnails.js";
 import { TreeLodRenderer } from "../../v2/render/foliage/treeLodRenderer.js";
 import { FoliageLodRenderer } from "../../v2/render/foliage/foliageLodRenderer.js";
 import { ImpostorFieldRenderer as ImpostorRenderer } from "../render/trees/impostorFieldRenderer.js";
@@ -35,6 +37,10 @@ export function createTreeEnvironment({
   config,
   getWorldHeight,
   toolState,
+  // Wraps a bake so the editor loop does not render mid-bake on the shared
+  // renderer (main.js's withRendererSideWork). Optional: headless callers
+  // run bakes bare.
+  runRendererSideWork = null,
 }) {
   const terrainStore = { getWorldHeight };
   const treeStore = new TreeStore(config);
@@ -63,6 +69,78 @@ export function createTreeEnvironment({
     terrainStore,
     config,
   });
+
+  // ── Palette thumbnails ──────────────────────────────────────────────────
+  // One small render per slot (trunk + leaf cards at the slot's base scale)
+  // through the same offscreen baker the props palette uses. Cached as data
+  // URLs; the panel re-reads them on _rebuildTreeUi. Bakes are chained so two
+  // preset loads in a row never contend for the renderer.
+  const _thumbs = new Map();
+  let _thumbChain = Promise.resolve();
+
+  function isSlotLoaded(slotIdx) {
+    return !!(foliageLodRenderer.slotPresets?.[slotIdx] || treeLodRenderer.slotRender?.[slotIdx]?.lod0);
+  }
+
+  function getSlotThumbnail(slotIdx) {
+    return _thumbs.get(slotIdx) ?? null;
+  }
+
+  async function _bakeSlotThumbnail(slotIdx) {
+    const preset = foliageLodRenderer.slotPresets?.[slotIdx] || null;
+    const trunkSubmeshes = treeLodRenderer.slotRender?.[slotIdx]?.lod0 || null;
+    if (!preset && !trunkSubmeshes) {
+      _thumbs.delete(slotIdx);
+      return;
+    }
+    const trunkScale = toolState.treeSlots[slotIdx]?.baseScale ?? 1;
+    // Built inside make() so the baker owns the frame; disposed here after,
+    // because the baker only pops children — it never disposes (the trunk and
+    // leaf MATERIALS are the live scene's and must survive).
+    let leafGeoms = [];
+    const make = () => {
+      const group = new THREE.Group();
+      if (trunkSubmeshes) {
+        const sMat = new THREE.Matrix4().makeScale(trunkScale, trunkScale, trunkScale);
+        for (const sm of trunkSubmeshes) {
+          const m = new THREE.Mesh(sm.geometry, sm.material);
+          m.matrixAutoUpdate = false;
+          m.matrix.copy(sMat);
+          if (sm.localMatrix) m.matrix.multiply(sm.localMatrix);
+          group.add(m);
+        }
+      }
+      if (preset) {
+        const leafMeshes = foliageLodRenderer._buildChunkSlotLod(
+          [{ x: 0, y: 0, z: 0, rotY: 0, scale: trunkScale, slotIdx }],
+          slotIdx,
+          0,
+        );
+        for (const lm of leafMeshes ?? []) {
+          group.add(lm);
+          leafGeoms.push(lm.geometry);
+        }
+      }
+      return group;
+    };
+    const run = () => bakeObjectThumbnails({ renderer, size: 160, items: [{ key: "slot", make }] });
+    try {
+      const out = await (runRendererSideWork ? runRendererSideWork(run) : run());
+      const url = out.get("slot");
+      if (url) _thumbs.set(slotIdx, url);
+    } finally {
+      for (const g of leafGeoms) g.dispose();
+      leafGeoms = [];
+    }
+  }
+
+  /** Queue a thumbnail bake for a slot; the panel refreshes when it lands. */
+  function queueThumbnail(slotIdx) {
+    _thumbChain = _thumbChain
+      .then(() => _bakeSlotThumbnail(slotIdx))
+      .catch((e) => console.warn(`[V3] Tree thumbnail bake slot ${slotIdx} failed:`, e))
+      .then(() => document.getElementById("tree-panel")?._rebuildTreeUi?.());
+  }
 
   const _impostorBakeQueue = [];
   let _impostorBakeRunning = false;
@@ -309,6 +387,7 @@ export function createTreeEnvironment({
     if (lod === 0) {
       toolState.treeSlots[slotIdx].name = name;
       queueImpostorBake(slotIdx);
+      queueThumbnail(slotIdx);
     }
     const matchedUrl = await probeModelsForFile(file.name);
     if (matchedUrl) {
@@ -336,6 +415,7 @@ export function createTreeEnvironment({
       foliageLodRenderer.setSlotPreset(slotIdx, foliagePreset);
       syncLeafField();
       queueImpostorBake(slotIdx);
+      queueThumbnail(slotIdx);
       toolState.treeSlots[slotIdx].presetFile = file.name;
       toolState.treeSlots[slotIdx].name = json.presetName || file.name.replace(/\.json$/, "");
       if (json.trunkScale != null) toolState.treeSlots[slotIdx].baseScale = json.trunkScale;
@@ -376,6 +456,8 @@ export function createTreeEnvironment({
     treeLodRenderer.disposeSlot(slotIdx);
     foliageLodRenderer.clearSlot(slotIdx);
     syncLeafField();
+    _thumbs.delete(slotIdx);
+    document.getElementById("tree-panel")?._rebuildTreeUi?.();
     console.log(`[V3] Tree slot ${slotIdx} models removed`);
   }
 
@@ -407,6 +489,9 @@ export function createTreeEnvironment({
     foliageParamChanged,
     setCastShadow,
     queueImpostorBake,
+    isSlotLoaded,
+    getSlotThumbnail,
+    queueThumbnail,
     dispose,
   };
 }

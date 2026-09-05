@@ -741,6 +741,16 @@ html, body {
 }
 .layer-card.active .layer-card-label { color: var(--accent); }
 
+/* Asset palette (assetPalette.js): an unfilled slot reads as a "+" tile */
+.layer-card-empty .layer-card-thumb {
+  background: transparent;
+  border: 1px dashed var(--border-light);
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.layer-card-empty .layer-card-label { opacity: 0.6; }
+
 /* Toggle switch (used in paint panel: edge-only, random rot, follow stroke) */
 .toggle-label {
   display: flex;

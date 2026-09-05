@@ -1,3 +1,26 @@
+/**
+ * Tree panel — palette first, brush second, and only the SELECTED tree's
+ * settings after that.
+ *
+ * The previous layout put eight collapsible slot sections (each with Colors,
+ * Lighting, SSS & Rim and Wind sub-folds) in the same scroll as the brush you
+ * were trying to paint with, and rebuilt all of them on every change. That is
+ * Unreal's per-foliage-type settings and its paint brush jammed into one
+ * column. Now:
+ *
+ *   Trees      — eraser + 8 slot cards (thumbnail, name; "+" while empty).
+ *                Click selects; drop a .json preset or .glb onto a card to load it.
+ *   Brush      — everything that shapes ONE stroke: radius, strength, shape,
+ *                density, spacing, scale range, rotation, slope skip.
+ *   <Name>     — the selected slot's own settings, collapsed, rebuilt only
+ *                when the selection changes. Hidden for the eraser.
+ *   More       — mass place, LOD distances, collision debug, clear all.
+ *
+ * The palette component is shared (assetPalette.js) so the foliage panel can
+ * get the same treatment without a second implementation.
+ */
+import { createAssetPalette } from "./assetPalette.js";
+
 const _arrowSvg =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
 const _checkSvg =
@@ -5,6 +28,7 @@ const _checkSvg =
 
 const GLB_EXTS = new Set(["glb", "gltf"]);
 const JSON_EXTS = new Set(["json"]);
+const DROP_EXTS = new Set([...GLB_EXTS, ...JSON_EXTS]);
 
 function _extOf(name) {
   return String(name || "").split(".").pop().toLowerCase();
@@ -228,17 +252,12 @@ function _button(parent, opts) {
   return btn;
 }
 
-function _addBrushExtras(parent, ts) {
-  _slider(parent, ts.brush, "falloff", {
-    label: "Shape",
-    min: 0.5,
-    max: 4,
-    step: 0.05,
-  });
-  _dropdown(parent, ts.brush, "previewShape", {
-    label: "Preview shape",
-    options: { Dome: "dome", Circle: "circle" },
-  });
+function _hint(parent, html) {
+  const p = document.createElement("p");
+  p.className = "mode-hint";
+  p.innerHTML = html;
+  parent.appendChild(p);
+  return p;
 }
 
 function _installBvhDebugUi(parent, app) {
@@ -258,342 +277,233 @@ function _installBvhDebugUi(parent, app) {
   dbgBody.appendChild(hint);
 }
 
-/** Build the v2 tree panel into #tree-panel. */
-
+/** Build the tree panel into #tree-panel. */
 export function buildTreePanel(app) {
-const panel = document.getElementById("tree-panel");
-if (!panel) return null;
-panel.innerHTML = "";
-      const ts = app.toolState;
-      const cfg = app.config;
+  const panel = document.getElementById("tree-panel");
+  if (!panel) return null;
+  panel.innerHTML = "";
+  const ts = app.toolState;
+  const cfg = app.config;
+  const tp = ts.treePaint;
 
-      // --- Brush ---
-      const brushBody = _section(panel, "Brush");
-      _slider(brushBody, ts.brush, "radius", {
-        label: "Radius",
-        min: cfg.sculpt.brushMin,
-        max: cfg.sculpt.brushMax,
-        step: 0.5,
-      });
-      _slider(brushBody, ts.brush, "strength", {
-        label: "Strength",
-        min: cfg.sculpt.strengthMin,
-        max: cfg.sculpt.strengthMax,
-        step: 0.01,
-      });
-      _addBrushExtras(brushBody, ts);
+  const isLoaded = (i) => !!app.isTreeSlotLoaded?.(i);
 
-      _installBvhDebugUi(panel, app);
+  // ── Palette ────────────────────────────────────────────────────────────────
+  const palBody = _section(panel, "Trees");
+  const palette = createAssetPalette({
+    container: palBody,
+    cards: () => [
+      { key: -1, kind: "eraser", label: "Erase", title: "Erase trees under the brush (or hold Alt while painting)" },
+      ...ts.treeSlots.map((slot, i) => {
+        const loaded = isLoaded(i);
+        return {
+          key: i,
+          kind: loaded ? "asset" : "empty",
+          label: loaded ? slot.name : "Add",
+          thumb: loaded ? app.getTreeThumbnail?.(i) : null,
+          title: loaded
+            ? `${slot.name} — click to paint, drop a preset/.glb to replace`
+            : `Empty slot ${i + 1} — drop a .json tree preset or .glb here, or select it and use its import buttons`,
+        };
+      }),
+    ],
+    activeKey: () => tp.activeSlot,
+    onSelect: (key) => {
+      tp.activeSlot = key;
+      palette.refresh();
+      // Selecting an EMPTY slot opens its settings, which hold the import
+      // buttons — so "+" leads somewhere without popping a file dialog on you.
+      rebuildSettings(key >= 0 && !isLoaded(key));
+    },
+    onDropFile: async (key, file) => {
+      const ext = _extOf(file.name);
+      if (JSON_EXTS.has(ext)) await app.loadTreePreset(key, file);
+      else if (GLB_EXTS.has(ext)) await app.importTreeGlb(key, 0, file);
+      tp.activeSlot = key;
+      palette.refresh();
+      rebuildSettings();
+    },
+    acceptExts: DROP_EXTS,
+    dropHint: "Drop preset / .glb",
+  });
+  _hint(palBody, "<kbd>Alt</kbd>+paint = erase &nbsp;·&nbsp; Drop a .json preset or .glb onto a card");
 
-      // --- Active slot ---
-      const slotBody = _section(panel, "Tree Slot");
-      function rebuildSlotPicker() {
-        slotBody.innerHTML = "";
-        const slotOpts = {};
-        for (let i = 0; i < ts.treeSlots.length; i++)
-          slotOpts[ts.treeSlots[i].name] = i;
-        _dropdown(slotBody, ts.treePaint, "activeSlot", {
-          label: "Active slot",
-          options: slotOpts,
-        });
-        _slider(slotBody, ts.treePaint, "density", {
-          label: "Density",
-          min: 0.05,
-          max: 3,
-          step: 0.05,
-        });
-        _slider(slotBody, ts.treePaint, "minSpacing", {
-          label: "Min spacing",
-          min: 1,
-          max: 100,
-          step: 0.5,
-        });
-        _slider(slotBody, ts.treePaint, "scaleMin", {
-          label: "Scale min",
-          min: 0.1,
-          max: 3,
-          step: 0.05,
-        });
-        _slider(slotBody, ts.treePaint, "scaleMax", {
-          label: "Scale max",
-          min: 0.1,
-          max: 3,
-          step: 0.05,
-        });
-        _toggle(slotBody, ts.treePaint, "randomRotation", {
-          label: "Random rot.",
-        });
-      }
-      rebuildSlotPicker();
+  // ── Brush ──────────────────────────────────────────────────────────────────
+  // Everything that shapes ONE stroke, whichever tree is selected.
+  const brushBody = _section(panel, "Brush");
+  _slider(brushBody, ts.brush, "radius", {
+    label: "Radius",
+    min: cfg.sculpt.brushMin,
+    max: cfg.sculpt.brushMax,
+    step: 0.5,
+  });
+  _slider(brushBody, ts.brush, "strength", {
+    label: "Strength",
+    min: cfg.sculpt.strengthMin,
+    max: cfg.sculpt.strengthMax,
+    step: 0.01,
+  });
+  _slider(brushBody, ts.brush, "falloff", { label: "Shape", min: 0.5, max: 4, step: 0.05 });
+  _slider(brushBody, tp, "density", { label: "Density", min: 0.05, max: 3, step: 0.05 });
+  _slider(brushBody, tp, "minSpacing", { label: "Min spacing", min: 1, max: 100, step: 0.5 });
+  _slider(brushBody, tp, "scaleMin", { label: "Scale min", min: 0.1, max: 3, step: 0.05 });
+  _slider(brushBody, tp, "scaleMax", { label: "Scale max", min: 0.1, max: 3, step: 0.05 });
+  _toggle(brushBody, tp, "randomRotation", { label: "Random rot." });
+  _toggle(brushBody, tp, "slopeEnabled", {
+    label: "Skip cliffs",
+    hint: "Never place on ground steeper than the threshold (brush and mass place)",
+  });
+  _slider(brushBody, tp, "slopeMax", { label: "Slope threshold", min: 0.0, max: 1.0, step: 0.01 });
+  _dropdown(brushBody, ts.brush, "previewShape", {
+    label: "Preview shape",
+    options: { Dome: "dome", Circle: "circle" },
+  });
 
-      // --- Mass Place Trees ---
-      const massBody = _section(panel, "Mass Place Trees");
-      _slider(massBody, ts.treePaint, "massPlaceCount", {
-        label: "Number of trees",
-        min: 1,
-        max: 50000,
-        step: 1,
-      });
-      _toggle(massBody, ts.treePaint, "massPlaceKeepExisting", {
-        label: "Keep existing trees",
-      });
-      _toggle(massBody, ts.treePaint, "slopeEnabled", {
-        label: "Skip cliffs",
-      });
-      _slider(massBody, ts.treePaint, "slopeMax", {
-        label: "Slope threshold",
-        min: 0.0,
-        max: 1.0,
-        step: 0.01,
-      });
-      _button(massBody, {
-        title: "Place",
-        onClick: () => app.massPlaceTrees(),
-      });
+  // ── Selected tree's settings ───────────────────────────────────────────────
+  // Rebuilt only when the selection changes, and never shown for the eraser.
+  const settingsHost = document.createElement("div");
+  panel.appendChild(settingsHost);
 
-      // --- Per-slot management ---
-      for (let i = 0; i < ts.treeSlots.length; i++) {
-        const slot = ts.treeSlots[i];
-        const slBody = _section(panel, slot.name, false);
-        _text(slBody, slot, "name", {
-          label: "Name",
-          onChange: () => {
-            const hdr = slBody.previousElementSibling;
-            if (hdr) hdr.innerHTML = _arrowSvg + " " + slot.name;
-          },
-        });
-        _slider(slBody, slot, "baseScale", {
-          label: "Base scale",
-          min: 0.01,
-          max: 5,
-          step: 0.01,
-        });
-        _slider(slBody, slot, "colliderRadius", {
-          label: "Collider radius",
-          min: 0,
-          max: 4,
-          step: 0.05,
-          onChange: () => app.treeColliderChanged(),
-        });
-        _slider(slBody, slot, "colliderHeight", {
-          label: "Collider height",
-          min: 0,
-          max: 30,
-          step: 0.5,
-          onChange: () => app.treeColliderChanged(),
-        });
-        _toggle(slBody, slot, "enabled", { label: "Enabled" });
-        const lod0Btn = _button(slBody, {
-          title: "Import LOD0 (detail)",
-          onClick: () => app.importTreeGlb(i, 0),
-        });
-        installDropZone(lod0Btn, {
-          hint: "Drop .glb as LOD0",
-          pickFile: tryGetGlbFileFromAnyDrop,
-          onFile: async (file) => {
-            await app.importTreeGlb(i, 0, file);
-          },
-        });
-        const lod1Btn = _button(slBody, {
-          title: "Import LOD1 (simplified)",
-          onClick: () => app.importTreeGlb(i, 1),
-        });
-        installDropZone(lod1Btn, {
-          hint: "Drop .glb as LOD1",
-          pickFile: tryGetGlbFileFromAnyDrop,
-          onFile: async (file) => {
-            await app.importTreeGlb(i, 1, file);
-          },
-        });
-        const presetBtn = _button(slBody, {
-          title: "Load tree preset",
-          onClick: () => app.loadTreePreset(i),
-        });
-        installDropZone(presetBtn, {
-          hint: "Drop .json preset",
-          pickFile: tryGetJsonFileFromAnyDrop,
-          onFile: async (file) => {
-            await app.loadTreePreset(i, file);
-          },
-        });
+  function rebuildSettings(expand = false) {
+    settingsHost.innerHTML = "";
+    const i = tp.activeSlot;
+    if (i < 0 || !ts.treeSlots[i]) return;
+    const slot = ts.treeSlots[i];
+    const loaded = isLoaded(i);
+    const title = loaded ? `${slot.name} — settings` : `Slot ${i + 1} — load a tree`;
+    const slBody = _section(settingsHost, title, expand || !loaded);
+    const hdr = slBody.previousElementSibling;
 
-        // Foliage material
-        const fi = slot.foliage;
-        const fChange = () => app.foliageParamChanged(i);
-        const colBody = _section(slBody, "Colors", false);
-        _color(colBody, fi, "bottomColor", {
-          label: "Base color",
-          onChange: fChange,
-        });
-        _color(colBody, fi, "topColor", {
-          label: "Top color",
-          onChange: fChange,
-        });
-        _slider(colBody, fi, "colorVar", {
-          label: "Leaf variation",
-          min: 0,
-          max: 0.5,
-          step: 0.01,
-          onChange: fChange,
-        });
-        _slider(colBody, fi, "treeColorVar", {
-          label: "Tree variation",
-          min: 0,
-          max: 0.5,
-          step: 0.01,
-          onChange: fChange,
-        });
-        _slider(colBody, fi, "alphaCutoff", {
-          label: "Alpha cutoff",
-          min: 0.1,
-          max: 0.9,
-          step: 0.01,
-          onChange: fChange,
-        });
+    // Import first while empty: it is the only thing an empty slot can do.
+    const importBody = loaded ? _section(slBody, "Model", false) : slBody;
+    const presetBtn = _button(importBody, {
+      title: "Load tree preset (.json)",
+      onClick: () => app.loadTreePreset(i),
+    });
+    installDropZone(presetBtn, {
+      hint: "Drop .json preset",
+      pickFile: tryGetJsonFileFromAnyDrop,
+      onFile: async (file) => { await app.loadTreePreset(i, file); },
+    });
+    const lod0Btn = _button(importBody, {
+      title: "Import LOD0 (detail .glb)",
+      onClick: () => app.importTreeGlb(i, 0),
+    });
+    installDropZone(lod0Btn, {
+      hint: "Drop .glb as LOD0",
+      pickFile: tryGetGlbFileFromAnyDrop,
+      onFile: async (file) => { await app.importTreeGlb(i, 0, file); },
+    });
+    const lod1Btn = _button(importBody, {
+      title: "Import LOD1 (simplified .glb)",
+      onClick: () => app.importTreeGlb(i, 1),
+    });
+    installDropZone(lod1Btn, {
+      hint: "Drop .glb as LOD1",
+      pickFile: tryGetGlbFileFromAnyDrop,
+      onFile: async (file) => { await app.importTreeGlb(i, 1, file); },
+    });
+    if (!loaded) return;
 
-        const litBody = _section(slBody, "Lighting", false);
-        _slider(litBody, fi, "normalBias", {
-          label: "Sphere normals",
-          min: 0,
-          max: 1,
-          step: 0.01,
-          onChange: fChange,
-        });
-        _slider(litBody, fi, "leafWarp", {
-          label: "Leaf warp",
-          min: 0,
-          max: 1,
-          step: 0.01,
-          onChange: fChange,
-        });
-        _slider(litBody, fi, "aoStr", {
-          label: "AO strength",
-          min: 0,
-          max: 1,
-          step: 0.01,
-          onChange: fChange,
-        });
+    _text(slBody, slot, "name", {
+      label: "Name",
+      onChange: () => {
+        if (hdr) hdr.innerHTML = _arrowSvg + " " + `${slot.name} — settings`;
+        palette.refresh();
+      },
+    });
+    _toggle(slBody, slot, "enabled", { label: "Enabled" });
+    _slider(slBody, slot, "baseScale", { label: "Base scale", min: 0.01, max: 5, step: 0.01 });
+    _slider(slBody, slot, "colliderRadius", {
+      label: "Collider radius",
+      min: 0, max: 4, step: 0.05,
+      onChange: () => app.treeColliderChanged(),
+    });
+    _slider(slBody, slot, "colliderHeight", {
+      label: "Collider height",
+      min: 0, max: 30, step: 0.5,
+      onChange: () => app.treeColliderChanged(),
+    });
 
-        const sssBody = _section(slBody, "SSS & Rim", false);
-        _slider(sssBody, fi, "sssStr", {
-          label: "SSS strength",
-          min: 0,
-          max: 2,
-          step: 0.01,
-          onChange: fChange,
-        });
-        _slider(sssBody, fi, "sssPow", {
-          label: "SSS power",
-          min: 0.5,
-          max: 8,
-          step: 0.1,
-          onChange: fChange,
-        });
-        _color(sssBody, fi, "sssColor", {
-          label: "SSS color",
-          onChange: fChange,
-        });
-        _slider(sssBody, fi, "rimStr", {
-          label: "Rim strength",
-          min: 0,
-          max: 2,
-          step: 0.01,
-          onChange: fChange,
-        });
-        _slider(sssBody, fi, "rimPow", {
-          label: "Rim power",
-          min: 0.5,
-          max: 8,
-          step: 0.1,
-          onChange: fChange,
-        });
-        _color(sssBody, fi, "rimColor", {
-          label: "Rim color",
-          onChange: fChange,
-        });
+    // Foliage material
+    const fi = slot.foliage;
+    const fChange = () => app.foliageParamChanged(i);
+    const colBody = _section(slBody, "Colors", false);
+    _color(colBody, fi, "bottomColor", { label: "Base color", onChange: fChange });
+    _color(colBody, fi, "topColor", { label: "Top color", onChange: fChange });
+    _slider(colBody, fi, "colorVar", { label: "Leaf variation", min: 0, max: 0.5, step: 0.01, onChange: fChange });
+    _slider(colBody, fi, "treeColorVar", { label: "Tree variation", min: 0, max: 0.5, step: 0.01, onChange: fChange });
+    _slider(colBody, fi, "alphaCutoff", { label: "Alpha cutoff", min: 0.1, max: 0.9, step: 0.01, onChange: fChange });
 
-        const windBody = _section(slBody, "Wind", false);
-        _slider(windBody, fi, "windSpeed", {
-          label: "Speed",
-          min: 0,
-          max: 5,
-          step: 0.05,
-          onChange: fChange,
-        });
-        _slider(windBody, fi, "windStr", {
-          label: "Strength",
-          min: 0,
-          max: 0.5,
-          step: 0.005,
-          onChange: fChange,
-        });
-        _slider(windBody, fi, "windMicro", {
-          label: "Micro sway",
-          min: 0,
-          max: 0.3,
-          step: 0.005,
-          onChange: fChange,
-        });
+    const litBody = _section(slBody, "Lighting", false);
+    _slider(litBody, fi, "normalBias", { label: "Sphere normals", min: 0, max: 1, step: 0.01, onChange: fChange });
+    _slider(litBody, fi, "leafWarp", { label: "Leaf warp", min: 0, max: 1, step: 0.01, onChange: fChange });
+    _slider(litBody, fi, "aoStr", { label: "AO strength", min: 0, max: 1, step: 0.01, onChange: fChange });
 
-        _button(slBody, {
-          title: "Remove models",
-          onClick: () => app.removeTreeSlot(i),
-        });
-      }
+    const sssBody = _section(slBody, "SSS & Rim", false);
+    _slider(sssBody, fi, "sssStr", { label: "SSS strength", min: 0, max: 2, step: 0.01, onChange: fChange });
+    _slider(sssBody, fi, "sssPow", { label: "SSS power", min: 0.5, max: 8, step: 0.1, onChange: fChange });
+    _color(sssBody, fi, "sssColor", { label: "SSS color", onChange: fChange });
+    _slider(sssBody, fi, "rimStr", { label: "Rim strength", min: 0, max: 2, step: 0.01, onChange: fChange });
+    _slider(sssBody, fi, "rimPow", { label: "Rim power", min: 0.5, max: 8, step: 0.1, onChange: fChange });
+    _color(sssBody, fi, "rimColor", { label: "Rim color", onChange: fChange });
 
-      // --- LOD ---
-      const lodBody = _section(panel, "LOD Distances", false);
-      _slider(lodBody, ts.treeLod, "lod0Distance", {
-        label: "LOD0 > LOD1",
-        min: 20,
-        max: 500,
-        step: 5,
-      });
-      _slider(lodBody, ts.treeLod, "lod1Distance", {
-        label: "LOD1 > hide",
-        min: 50,
-        max: 1000,
-        step: 10,
-      });
-      _slider(lodBody, ts.treeLod, "fadeOutDistance", {
-        label: "Fade-out",
-        min: 100,
-        max: 2000,
-        step: 10,
-      });
-      _toggle(lodBody, ts.treeLod, "castShadow", {
-        label: "Cast shadow",
-        onChange: () => app.treeCastShadowChanged(),
-      });
+    const windBody = _section(slBody, "Wind", false);
+    _slider(windBody, fi, "windSpeed", { label: "Speed", min: 0, max: 5, step: 0.05, onChange: fChange });
+    _slider(windBody, fi, "windStr", { label: "Strength", min: 0, max: 0.5, step: 0.005, onChange: fChange });
+    _slider(windBody, fi, "windMicro", { label: "Micro sway", min: 0, max: 0.3, step: 0.005, onChange: fChange });
 
-      // --- Tree leaf LOD (3D cards on painted trees — not billboard foliage paint) ---
-      const fLodBody = _section(panel, "Tree leaf LOD", false);
-      _slider(fLodBody, ts.foliageLod, "lod0Distance", {
-        label: "LOD0 → LOD1",
-        min: 20,
-        max: 300,
-        step: 5,
-      });
-      _slider(fLodBody, ts.foliageLod, "lod1Distance", {
-        label: "LOD1 → LOD2",
-        min: 50,
-        max: 600,
-        step: 10,
-      });
-      _slider(fLodBody, ts.foliageLod, "fadeOutDistance", {
-        label: "Hide distance",
-        min: 100,
-        max: 2000,
-        step: 10,
-      });
+    _separator(slBody);
+    _button(slBody, {
+      title: "Remove models from this slot",
+      onClick: () => app.removeTreeSlot(i),
+    });
+  }
+  rebuildSettings();
 
-      _separator(panel);
-      _button(panel, {
-        title: "Clear all trees",
-        onClick: () => app.clearAllTrees(),
-      });
+  // ── More ───────────────────────────────────────────────────────────────────
+  const moreBody = _section(panel, "More", false);
 
-      panel._rebuildTreeUi = rebuildSlotPicker;
+  const massBody = _section(moreBody, "Mass Place Trees", false);
+  _hint(massBody, "Scatters the SELECTED tree over the whole world, honouring spacing and the slope skip.");
+  _slider(massBody, tp, "massPlaceCount", { label: "Number of trees", min: 1, max: 50000, step: 1 });
+  _toggle(massBody, tp, "massPlaceKeepExisting", { label: "Keep existing trees" });
+  _button(massBody, {
+    title: "Place",
+    onClick: () => {
+      if (tp.activeSlot < 0) return; // eraser selected: nothing to place
+      app.massPlaceTrees();
+    },
+  });
 
-      return panel;
+  const lodBody = _section(moreBody, "LOD Distances", false);
+  _slider(lodBody, ts.treeLod, "lod0Distance", { label: "LOD0 > LOD1", min: 20, max: 500, step: 5 });
+  _slider(lodBody, ts.treeLod, "lod1Distance", { label: "LOD1 > hide", min: 50, max: 1000, step: 10 });
+  _slider(lodBody, ts.treeLod, "fadeOutDistance", { label: "Fade-out", min: 100, max: 2000, step: 10 });
+  _toggle(lodBody, ts.treeLod, "castShadow", {
+    label: "Cast shadow",
+    onChange: () => app.treeCastShadowChanged(),
+  });
+
+  // Tree leaf LOD (3D cards on painted trees — not billboard foliage paint)
+  const fLodBody = _section(moreBody, "Tree leaf LOD", false);
+  _slider(fLodBody, ts.foliageLod, "lod0Distance", { label: "LOD0 → LOD1", min: 20, max: 300, step: 5 });
+  _slider(fLodBody, ts.foliageLod, "lod1Distance", { label: "LOD1 → LOD2", min: 50, max: 600, step: 10 });
+  _slider(fLodBody, ts.foliageLod, "fadeOutDistance", { label: "Hide distance", min: 100, max: 2000, step: 10 });
+
+  _installBvhDebugUi(moreBody, app);
+
+  _separator(moreBody);
+  _button(moreBody, {
+    title: "Clear all trees",
+    onClick: () => app.clearAllTrees(),
+  });
+
+  // Called after preset/GLB loads, thumbnail bakes and project loads.
+  panel._rebuildTreeUi = () => {
+    palette.refresh();
+    rebuildSettings();
+  };
+
+  return panel;
 }
