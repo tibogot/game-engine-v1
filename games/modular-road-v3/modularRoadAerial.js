@@ -151,7 +151,30 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
       const up = saturate(dirW.y);
       const base = mix(uHorizon, uZenith, pow(up, float(0.55)));
       const mu = saturate(dot(dirW, uSunDir));
-      const glow = pow(mu, uSunGlowPow).mul(uSunGlow);
+
+      /*
+       * THE LOBE HAS TO DIE WITH THE SUN, and until this gate existed it did not.
+       *
+       * `mu` is a dot against the sun's direction and nothing more, so it does
+       * not care whether the sun is actually up. At 22:30 the sun sits ~19°
+       * BELOW the horizon, and looking down at the terrain along its azimuth
+       * still gives a strongly positive dot — so the lobe fired at full power
+       * and painted a large pale wash across the ground. `uSunTint` made it
+       * worse: it is a CHROMATICITY, normalised so its brightest channel is 1,
+       * so it carries hue and never dimness and is exactly as bright at midnight
+       * as at noon.
+       *
+       * The result was a sun-glare pool on the night terrain, sitting opposite
+       * the moon — because a full moon is opposite the sun — and leaving the
+       * GROUND brighter than the SKY, which is backwards.
+       *
+       * The window is civil twilight, the same one modularRoadSky's key light
+       * already blends moonlight over: full at the horizon, gone by 6° under it.
+       * Cutting it AT the horizon instead would throw away the best thing this
+       * lobe does — the low sun that turns distant ground to gold.
+       */
+      const dusk = saturate(uSunDir.y.mul(1 / 0.1045).add(1));
+      const glow = pow(mu, uSunGlowPow).mul(uSunGlow).mul(dusk);
       const inscatter = base.add(uSunTint.mul(glow));
 
       // Premultiplied: dst = src.rgb + dst*(1 - src.a) == dst*T + inscatter*(1 - T).
