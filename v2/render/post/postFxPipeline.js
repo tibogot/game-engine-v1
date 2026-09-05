@@ -23,6 +23,7 @@ import {
   resolveDisplayMode,
 } from "n8ao-webgpu";
 import { createPolishUniforms, polish } from "./polishNode.js";
+import { createPurkinjeUniforms, purkinje } from "./purkinjeNode.js";
 
 /**
  * Blend mode for the `emissive` MRT attachment: "blend this target exactly the
@@ -175,6 +176,15 @@ export class PostFxPipeline {
      * Uniforms are built lazily on first enable so this object pays nothing
      * if the user never turns it on.
      */
+    /*
+     * PURKINJE (night vision). Off by default and OMITTED FROM THE GRAPH when off, the
+     * same contract polish uses — a caller that never asks for it pays nothing at all.
+     * Once enabled it rides the existing display chain (one composed node, not a new
+     * pass), so the running cost is a dot, a smoothstep and a mix per pixel.
+     */
+    this._purkinjeEnabled = false;
+    this._purkinjeUniforms = null;
+    this._purkinjeParams = { enabled: false, amount: 0, loLum: 0.0015, hiLum: 0.05 };
     this._polishEnabled = false;
     this._polishUniforms = null;
     this._polishParams = {
@@ -298,6 +308,44 @@ export class PostFxPipeline {
    * linear RT BEFORE the cloud composite, so clouds occlude glow correctly
    * and never bloom themselves (threshold mode blooms scene+clouds together).
    */
+  /**
+   * Night-vision response. `{ enabled, amount, loLum, hiLum }`; `amount` is meant to be
+   * driven per frame from how dark the scene is, the rest are set once.
+   */
+  setPurkinje({ enabled, amount, loLum, hiLum } = {}) {
+    const p = this._purkinjeParams;
+    if (amount != null) p.amount = amount;
+    if (loLum != null) p.loLum = loLum;
+    if (hiLum != null) p.hiLum = hiLum;
+    if (this._purkinjeUniforms) this._applyPurkinjeUniforms();
+    if (enabled != null) {
+      this._purkinjeEnabled = enabled;
+      p.enabled = enabled;
+      if (enabled && !this._purkinjeUniforms) {
+        this._purkinjeUniforms = createPurkinjeUniforms();
+      }
+      this._applyPurkinjeUniforms();
+      /*
+       * REBUILD ON EVERY EXPLICIT enabled, not just on a CHANGE of it. `_refreshOutputNode`
+       * returns early while `_renderPipeline` is still null, and a game that enables this
+       * during its own setup can easily be earlier than that — the flag then reads as
+       * already-true forever after and the node never reaches the graph, with no error to
+       * show for it. Rebuilding unconditionally costs one shader compile at setup and makes
+       * the call order stop mattering. `amount` remains the per-frame control.
+       */
+      this._refreshOutputNode();
+    }
+  }
+
+  _applyPurkinjeUniforms() {
+    const u = this._purkinjeUniforms;
+    if (!u) return;
+    const p = this._purkinjeParams;
+    u.amount.value = p.amount;
+    u.loLum.value = p.loLum;
+    u.hiLum.value = p.hiLum;
+  }
+
   setBloomSelective(enabled) {
     if (this._bloomSelective === enabled) return;
     this._bloomSelective = enabled;
@@ -755,7 +803,15 @@ export class PostFxPipeline {
   }
 
   _buildDisplayChain(inputNode) {
-    let node = renderOutput(inputNode);
+    /*
+     * BEFORE renderOutput, deliberately. The Purkinje shift is a response to ABSOLUTE
+     * luminance, and renderOutput is where tone mapping compresses exactly that away —
+     * run it after and the shift can no longer tell a moonlit road from a lit wall.
+     */
+    const graded = this._purkinjeEnabled && this._purkinjeUniforms
+      ? purkinje(inputNode, this._purkinjeUniforms)
+      : inputNode;
+    let node = renderOutput(graded);
     let sharpenNode = null;
 
     if (this._fxaaEnabled) node = fxaa(node);
