@@ -5403,8 +5403,8 @@ export const CATEGORY_PRESETS = {
       // air, comes back 97 m over its own run-up. Lands roof-first unless you
       // finish the rotation with the pitch keys — that is the trick.
       base: "loopback",
-      params: { loopbackRadius: 14, loopbackAngle: 70, loopbackStraight: 5,
-        loopbackTopRadius: 11, loopbackExit: 135 },
+      params: { loopbackRadius: 21, loopbackAngle: 70, loopbackStraight: 7.5,
+        loopbackTopRadius: 16.5, loopbackExit: 135 },
     },
     {
       id: "flip_ramp_s",

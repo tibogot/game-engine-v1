@@ -108,7 +108,7 @@ function run({ speed = 30, over = {}, assists = null } = {}) {
     c.body.vel.set(0, 0, -speed);
 
     let air = false, spin = 0, minUp = 1, t = 0, peak = 0, back = -1e9;
-    let exitVz = 0, firstRate = 0, worstBack = 0, invertedAt = null, hungVertical = 0, lateRate = 0;
+    let exitVz = 0, exitSpeed = 0, firstRate = 0, worstBack = 0, invertedAt = null, hungVertical = 0, lateRate = 0;
     for (let i = 0; i < Math.round(16 / FIXED_DT); i++) {
       c.tick({ steerTarget: 0, throttle: 1, handbrake: false, yaw: 0, pitch: 0, airSteer: 0 });
       const p = c.body.pos;
@@ -117,7 +117,7 @@ function run({ speed = 30, over = {}, assists = null } = {}) {
       const rate = -c.body.angVel.dot(_r); // + = turning over backwards
       if (p.z < 2) peak = Math.max(peak, p.y);
       if (!air && c.groundedCount === 0 && p.z < 2 && p.y > lip.y - 3) {
-        air = true; exitVz = c.body.vel.z; firstRate = rate;
+        air = true; exitVz = c.body.vel.z; exitSpeed = c.body.vel.length(); firstRate = rate;
       } else if (air) {
         spin += rate * FIXED_DT;
         minUp = Math.min(minUp, _u.y);
@@ -139,7 +139,7 @@ function run({ speed = 30, over = {}, assists = null } = {}) {
       }
     }
     return {
-      top: lip.y, exitVz, firstRate, worstBack, spin: spin * R2D, minUp,
+      top: lip.y, exitVz, exitSpeed, firstRate, worstBack, spin: spin * R2D, minUp,
       t, peak, back, invertedAt, hungVertical, lateRate,
     };
   } finally {
@@ -155,13 +155,51 @@ const row = (label, r) => console.log(
   `  vertical ${r.hungVertical.toFixed(2)}s  back z ${r.back.toFixed(0)}`);
 
 if (SWEEP) {
-  console.log("=== SWEEP ===");
-  // The exit angle is the pacing knob: it decides how much of the car's speed
-  // goes UP rather than BACK, and therefore the hang time — without touching
-  // the run-up. See the note on loopbackExit in the kit.
-  for (const exit of [118, 128, 135, 142]) {
+  // HOW LONG AND HOW GENTLE CAN THE RAMP BE?
+  //
+  // Two independent things: how far it TURNS you (fixed — it has to pass
+  // vertical or the car does not come back) and how much ramp it spends doing
+  // that turn (free — bigger radii, same turn). Bigger radii read as a longer,
+  // straighter ramp; what they cost is HEIGHT, and height is capped by the
+  // entry speed, since the car has to arrive at the top with something left.
+  //
+  // "Crookedness" here is degrees of turn per metre of ramp, which is the thing
+  // the eye actually reads as bent.
+  console.log("=== SHAPE SCALE — longer/gentler vs what it costs ===");
+  const SHIPPED = {
+    loopbackRadius: PIECE_PARAM_DEFAULTS.loopbackRadius,
+    loopbackStraight: PIECE_PARAM_DEFAULTS.loopbackStraight,
+    loopbackTopRadius: PIECE_PARAM_DEFAULTS.loopbackTopRadius,
+  };
+  const shapeOf = (over) => {
+    const pts = ramp(over);
+    const seg = (i) => Math.atan2(pts[i + 1].y - pts[i].y, -(pts[i + 1].z - pts[i].z)) * R2D;
+    let len = 0, worst = 0;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = Math.hypot(pts[i + 1].y - pts[i].y, pts[i + 1].z - pts[i].z);
+      len += d;
+      if (d > 1e-6) worst = Math.max(worst, Math.abs(seg(i) - seg(i - 1)) / d);
+    }
+    return { height: pts[pts.length - 1].y, run: -pts[pts.length - 1].z, len, worst };
+  };
+  for (const scale of [1, 1.25, 1.5, 1.75, 2]) {
+    const over = {
+      loopbackRadius: SHIPPED.loopbackRadius * scale,
+      loopbackStraight: SHIPPED.loopbackStraight * scale,
+      loopbackTopRadius: SHIPPED.loopbackTopRadius * scale,
+    };
+    const g = shapeOf(over);
+    console.log(`\n  ${scale === 1 ? "SHIPPED" : `${scale}x`}  `
+      + `R${over.loopbackRadius.toFixed(0)}/top R${over.loopbackTopRadius.toFixed(0)}  `
+      + `${g.height.toFixed(0)} m tall, ${g.run.toFixed(0)} m long (${g.len.toFixed(0)} m of ramp), `
+      + `worst ${g.worst.toFixed(1)} deg/m`);
     for (const v of [26, 32, 38]) {
-      row(`exit ${exit}° @${v}`, run({ speed: v, over: { loopbackExit: exit } }));
+      const r = run({ speed: v, over });
+      console.log(`     in @${v}  over the top at ${r.exitSpeed.toFixed(0)} m/s  `
+        + `vz ${r.exitVz > 0 ? "+" : ""}${r.exitVz.toFixed(1)} ${r.exitVz > 1 ? "BACK" : "----"}  `
+        + `air ${r.t.toFixed(1)}s  minUp ${r.minUp.toFixed(2)}  `
+        + `inverted @${r.invertedAt === null ? "NEVER" : r.invertedAt.toFixed(2) + "s"}  `
+        + `peak ${r.peak.toFixed(0)}m`);
     }
   }
   process.exit(0);

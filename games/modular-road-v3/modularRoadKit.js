@@ -178,15 +178,15 @@ export const pieceParams = {
    * before the rear and dump their load), so geometry alone cannot turn it
    * over, and trying to make it produced tumbles instead of a trick.
    */
-  loopbackRadius: 14, // gentle transition off the flat (m)
+  loopbackRadius: 21, // gentle transition off the flat (m)
   loopbackAngle: 70, // the straight face's angle (deg)
-  loopbackStraight: 5, // length of that straight face (m)
+  loopbackStraight: 7.5, // length of that straight face (m)
   // 11, not 6: the curve at the end has to be the SMOOTHEST part of the ramp,
   // not the sharpest. At R6 the top pulls ~8 g and reads as a kink — the car
   // hits it rather than flowing through it. R11 is the same shape, taken
   // gently, and it also sets the rotation the car leaves with (v/R), which is
   // what the flight then continues.
-  loopbackTopRadius: 11, // curl over the top (m) — the curve at the end
+  loopbackTopRadius: 16.5, // curl over the top (m) — the curve at the end
   // THE PACING KNOB. It decides how much of the car's speed leaves as UP rather
   // than BACK, so it sets the hang time WITHOUT touching the run-up — which is
   // the lever you want, because height goes as v-squared and slowing the car to

@@ -102,7 +102,9 @@ function build(landZ, deckRise = DECK_RISE) {
   // in the gap in front of it. It also must not reach back over the ramp: an
   // elevated deck opened too early is a CEILING the car climbs into.
   const rampTopZ = pos(b.currentConnector).z;
-  const deckStart = Math.max(land - 45, rampTopZ + 14);
+  // Clearance scales with the ramp: a taller one throws the car further back
+  // before it comes down, and its own footprint is longer.
+  const deckStart = Math.max(land - 45, rampTopZ + 25);
   b.beginNewChain(
     new THREE.Vector3(0, START_HEIGHT + deckRise, deckStart), Math.PI, { exact: true });
   b.setActivePreset({
@@ -210,7 +212,13 @@ console.log("\nBUILDING LOOP-BACK SHOWCASE\n");
 // where the car is when it comes back over.
 const probe = build(null, DECK_RISE);
 const topRise = pos(probe.b.pieces.find((p) => p.id === "loopback").connectorOut).y - START_HEIGHT;
-const deckRise = Math.round(topRise + 8);
+// BELOW the lip, not above it. Above, the car meets the deck's leading edge
+// while it is still climbing away from the ramp — measured on a 38 m ramp with
+// the deck at 46 m: 0.9 s of air and a landing 11 m from the lip, which is the
+// deck getting in the way of the trick rather than catching it. Sitting under
+// the lip means the car is unambiguously descending when it arrives, and has
+// flown its arc first. Still very high above the ROAD, which is the point.
+const deckRise = Math.max(18, Math.round(topRise - 8));
 let landZ = null, built = null;
 for (let pass = 1; pass <= 8; pass++) {
   built = build(landZ, deckRise);
