@@ -154,10 +154,24 @@ function makeRingTex(size, inner = 0.78) {
   const ctx = c.getContext("2d");
   const half = size * 0.5;
   const g = ctx.createRadialGradient(half, half, 0, half, half, half);
+  /*
+   * THE RING HAS TO REACH ZERO BEFORE THE TEXTURE EDGE.
+   *
+   * The chromatic samples in makeGhostMat read this texture at up to 1/(1-ca) of the
+   * radius, which is OUTSIDE [0,1]. The sampler clamps, so whatever alpha sits on the
+   * last texel is smeared outward forever — and if the ring is still bright there, that
+   * smear draws as a hard-edged disc: the halo looked CUT OFF with a rim rather than
+   * fading out. Ending the ramp at 0.94 leaves the outer band genuinely transparent, so
+   * a clamped fetch returns nothing and there is no edge to see.
+   *
+   * The band is also wider and softer than it was. A narrow bright ring is what made the
+   * chromatic split read as a rainbow rather than as a fringe (see makeGhostMat's ca).
+   */
   g.addColorStop(0, "rgba(255,255,255,0)");
-  g.addColorStop(inner, "rgba(255,255,255,0)");
-  g.addColorStop(inner + (1 - inner) * 0.55, "rgba(255,255,255,1)");
-  g.addColorStop(inner + (1 - inner) * 0.85, "rgba(255,255,255,0.55)");
+  g.addColorStop(Math.max(0, inner - (1 - inner) * 0.35), "rgba(255,255,255,0)");
+  g.addColorStop(inner + (1 - inner) * 0.45, "rgba(255,255,255,1)");
+  g.addColorStop(inner + (1 - inner) * 0.72, "rgba(255,255,255,0.42)");
+  g.addColorStop(0.94, "rgba(255,255,255,0)");
   g.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
@@ -329,17 +343,61 @@ function swapFlareTexture(mesh, newTex, colorHex) {
   oldMat.dispose();
 }
 
+/*
+ * ── THE GHOST CHAIN ───────────────────────────────────────────────────────────────
+ *
+ * Three things separate a photographed ghost chain from a drawn one, and the first
+ * version of this table had none of them.
+ *
+ * 1. BRIGHTNESS IS NOT UNIFORM. Every ghost here used to be drawn at exactly
+ *    `ghostOpacity`, so the chain read as a row of equal beads — the single loudest tell
+ *    that a flare was authored. A real chain is dominated by one or two bright elements
+ *    with everything else faint enough that you only notice it when you look. `w` is that
+ *    weight, and most of these are deliberately low.
+ *
+ * 2. GHOSTS ARE THE COLOUR OF THE SOURCE, not of a palette. A ghost is the sun imaged
+ *    through the wrong pair of surfaces, so it starts as the sun's own colour and is then
+ *    SHIFTED by the coating it bounced off. The old table authored seven saturated hues
+ *    (orange, gold, sky blue, violet, cyan) with no relationship to the light, which is
+ *    why the chain read as confetti. `tint` is now only the coating, mixed onto the live
+ *    source colour at `tintMix` — so the whole chain warms at sunset with the sun instead
+ *    of staying a fixed rainbow.
+ *
+ * 3. FURTHER OUT MEANS BIGGER AND SOFTER. Ghosts far along the axis are further from
+ *    focus, so they spread and dim. The sizes below rise with `t` rather than wandering.
+ *
+ * 4. THE CHAIN IS NOT A RULED LINE. Every element sat exactly on the sun->centre axis, so
+ *    the ghosts read as beads threaded on a wire. In a real lens each bounce is between a
+ *    different PAIR of surfaces, with its own centring and its own tilt, so the chain
+ *    wanders a little either side of the axis. `n` is that nudge, perpendicular to the
+ *    axis, alternating sign so the chain weaves instead of drifting.
+ * 5. GHOSTS ARE NOT CIRCLES OFF-AXIS. The aperture is a circle seen straight on, but the
+ *    barrel in front of it cuts the oblique bundle — mechanical vignetting, the "cat's eye"
+ *    — so an element far from the frame centre is an ellipse with its long axis pointing
+ *    back at the centre. `ar` is a base aspect and `ghostCatsEye` grows it with how far
+ *    off-centre the element actually lands, which is the part that changes as you turn.
+ *
+ * `t` is the position along the sun->centre axis; 1 mirrors the source through the centre.
+ * The shape mix matters too — an all-disc chain is a row of blobs whatever else is right.
+ */
 const GHOST_DEFS = [
-  // `t` is the position along the sun->centre axis (1 = mirrored through the centre).
-  // A mix of shapes is the point: an all-disc chain reads as a row of blobs.
-  { t: 0.18, size: 0.10, color: "#ff8a66", kind: "iris" },
-  { t: 0.34, size: 0.06, color: "#ffd980", kind: "disc" },
-  { t: 0.5,  size: 0.16, color: "#9ed4ff", kind: "ring" },
-  { t: 0.72, size: 0.08, color: "#b298ff", kind: "iris" },
-  { t: 0.9,  size: 0.22, color: "#a8d4ff", kind: "ring" },
-  { t: 1.1,  size: 0.22, color: "#66d0ff", kind: "disc" },
-  { t: 1.45, size: 0.05, color: "#fff2a8", kind: "iris" },
+  { t: 0.10, size: 0.045, tint: "#ffd9b8", tintMix: 0.30, kind: "iris", w: 0.30, n: 0.012, ar: 1.00 },
+  { t: 0.22, size: 0.030, tint: "#ffe6c8", tintMix: 0.25, kind: "disc", w: 0.16, n: -0.018, ar: 1.00 },
+  { t: 0.36, size: 0.075, tint: "#cfe6ff", tintMix: 0.45, kind: "ring", w: 0.22, n: 0.026, ar: 1.06 },
+  { t: 0.48, size: 0.040, tint: "#ffd2b0", tintMix: 0.30, kind: "iris", w: 0.14, n: -0.009, ar: 1.00 },
+  // The two that carry the chain. Real flares have a couple of dominant elements and
+  // the eye reads the rest as their company.
+  { t: 0.62, size: 0.115, tint: "#bcd8ff", tintMix: 0.50, kind: "ring", w: 1.00, n: 0.015, ar: 1.10 },
+  { t: 0.78, size: 0.060, tint: "#ffe0bc", tintMix: 0.28, kind: "disc", w: 0.34, n: -0.030, ar: 1.00 },
+  { t: 0.95, size: 0.150, tint: "#c8ddff", tintMix: 0.48, kind: "disc", w: 0.70, n: 0.021, ar: 1.14 },
+  { t: 1.12, size: 0.085, tint: "#ffdcc0", tintMix: 0.26, kind: "iris", w: 0.20, n: -0.014, ar: 1.00 },
+  { t: 1.30, size: 0.190, tint: "#bcd0ff", tintMix: 0.52, kind: "ring", w: 0.26, n: 0.034, ar: 1.18 },
+  { t: 1.52, size: 0.070, tint: "#ffe8cc", tintMix: 0.22, kind: "iris", w: 0.12, n: -0.020, ar: 1.00 },
 ];
+
+/** Scratch for the per-ghost source/coating mix — reused, allocates nothing. */
+const _ghostCol = new THREE.Color();
+const _srcCol = new THREE.Color();
 
 /**
  * @param {object} opts
@@ -367,7 +425,7 @@ export function createLensFlareSystem({
   };
   const streakTex = makeStreakTex(512, 48);
   const starTex = makeStarburstTex(512, 8);
-  const haloTex = makeRingTex(256, 0.82);
+  const haloTex = makeRingTex(512, 0.72);
   const dirtTex = makeDirtTex(512);
 
   const group = new THREE.Group();
@@ -388,7 +446,7 @@ export function createLensFlareSystem({
   group.add(streak);
 
   const ghosts = GHOST_DEFS.map((def) => {
-    const mat = makeGhostMat(ghostTexByKind[def.kind] ?? ghostTexByKind.disc, def.color);
+    const mat = makeGhostMat(ghostTexByKind[def.kind] ?? ghostTexByKind.disc, def.tint);
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
     mesh.renderOrder = 9998;
     mesh.frustumCulled = false;
@@ -406,7 +464,15 @@ export function createLensFlareSystem({
 
   // The big chromatic halo, also centred on the source — the wide ring a bright point
   // throws through a coated lens. Chromatic like the ghosts, only more so.
-  const haloMat = makeGhostMat(haloTex, "#ffffff", 0.09);
+  /*
+   * ca 0.09 SPLIT THE HALO INTO A RAINBOW. The three chromatic samples sit at radial
+   * scales 1/(1+ca), 1 and 1/(1-ca) — at 0.09 that is a spread of ~0.18 of the radius,
+   * which was the entire width of the old ring band. Red and blue therefore landed on
+   * completely separate circles instead of fringing one, and the halo read as a drawn
+   * rainbow. A real coated lens fringes its halo; it does not disperse it into a prism.
+   * 0.028 against the wider band is a spread of about a third of the ring's width.
+   */
+  const haloMat = makeGhostMat(haloTex, "#ffffff", 0.028);
   const halo = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), haloMat);
   halo.renderOrder = 9998;
   halo.frustumCulled = false;
@@ -442,6 +508,23 @@ export function createLensFlareSystem({
     );
   }
 
+  /**
+   * How big the SOURCE is, relative to the size this flare was authored against.
+   *
+   * A lens flare is not one thing: some of it is an image of the SOURCE and some of it is
+   * an image of the LENS. They scale differently, and treating them alike is what makes a
+   * flare feel stuck to the screen rather than attached to the sun.
+   *
+   *   • Halation and the starburst core are the source, smeared. A bigger sun makes them
+   *     bigger, near enough linearly.
+   *   • Ghosts are images of the APERTURE STOP, not of the sun — their size is a property
+   *     of the lens, and they stay put however large the source grows. So is the halo.
+   *   • The streak is anamorphic: it thickens with the source but its LENGTH is the lens.
+   *
+   * 1 is the authoring reference, so a caller that never touches this gets exactly the
+   * flare it had before.
+   */
+  let sourceScale = 1;
   /** 0 = sun fully blocked, 1 = clear line of sight. See setOcclusion. */
   let occlusion = 1;
   const sunLocal = new THREE.Vector3();
@@ -506,18 +589,19 @@ export function createLensFlareSystem({
     const sunWY = ndcY * worldPerNdcY;
 
     halation.position.set(sunWX, sunWY, Z);
-    const halScale = p.halationSize * halfH * 1.4;
+    const halScale = p.halationSize * halfH * 1.4 * sourceScale;
     halation.scale.set(halScale, halScale, 1);
     halation.material.userData.uInt.value = master * screenVis * 1.4;
     halation.material.userData.uCol.value.set(p.halationColor).convertSRGBToLinear();
 
     streak.position.set(sunWX, sunWY, Z);
-    streak.scale.set(p.streakLength * halfW * 4.0, halfH * 0.12, 1);
+    // Length is the lens; thickness follows the source.
+    streak.scale.set(p.streakLength * halfW * 4.0, halfH * 0.12 * sourceScale, 1);
     streak.material.userData.uInt.value = master * screenVis * p.streakOpacity;
     streak.material.userData.uCol.value.set(p.streakColor).convertSRGBToLinear();
 
     starburst.position.set(sunWX, sunWY, Z);
-    const starS = (p.starburstSize ?? 0.9) * halfH * 2.0;
+    const starS = (p.starburstSize ?? 0.9) * halfH * 2.0 * sourceScale;
     starburst.scale.set(starS, starS, 1);
     starburst.material.userData.uInt.value = master * screenVis * (p.starburst ?? 0.55);
     starburst.material.userData.uCol.value.set(p.halationColor).convertSRGBToLinear();
@@ -531,12 +615,35 @@ export function createLensFlareSystem({
       const g = ghosts[i];
       const def = g.userData.def;
       const t = def.t * p.ghostSpacing;
-      const gx = sunWX * (1 - t * 2);
-      const gy = sunWY * (1 - t * 2);
+      /*
+       * The chain runs sun -> centre -> mirrored, with a small perpendicular nudge per
+       * element (see `n` in the table) so it weaves rather than being threaded on a wire.
+       */
+      const axLen = Math.hypot(sunWX, sunWY) || 1e-4;
+      const ax = sunWX / axLen;
+      const ay = sunWY / axLen;
+      const gx = sunWX * (1 - t * 2) + -ay * (def.n ?? 0) * halfH;
+      const gy = sunWY * (1 - t * 2) + ax * (def.n ?? 0) * halfH;
       g.position.set(gx, gy, Z);
+      /*
+       * CAT'S EYE. The lens barrel clips the oblique bundle, so an element far from the
+       * frame centre is an ellipse pointing back at it. Stretch along the chain axis by
+       * how far off-centre this element ended up, then rotate the quad onto that axis.
+       */
+      const gr = Math.hypot(gx, gy) / halfH;
+      const stretch = 1 + (p.ghostCatsEye ?? 0.5) * Math.min(gr, 1.6);
       const s = def.size * halfH * 2.0;
-      g.scale.set(s, s, 1);
-      g.material.userData.uInt.value = master * offFrameVis * p.ghostOpacity;
+      g.scale.set(s * (def.ar ?? 1) * stretch, s, 1);
+      g.rotation.z = Math.atan2(ay, ax);
+      /*
+       * The source's own colour, shifted by this element's coating. Read live from the
+       * params rather than baked at construction, so the chain follows the sun into
+       * sunset instead of staying the colour it was authored at noon.
+       */
+      _srcCol.set(p.halationColor);
+      _ghostCol.set(def.tint).lerp(_srcCol, 1 - def.tintMix);
+      g.material.userData.uCol.value.copy(_ghostCol).convertSRGBToLinear();
+      g.material.userData.uInt.value = master * offFrameVis * p.ghostOpacity * def.w;
     }
 
     dirt.position.set(0, 0, Z);
@@ -588,6 +695,11 @@ export function createLensFlareSystem({
    * clouds, terrain, the track — because only they can answer cheaply. Defaults to 1, so
    * a caller that never sets it gets exactly the previous behaviour.
    */
+  /** Source diameter relative to the authoring reference. See `sourceScale`. */
+  function setSourceScale(v) {
+    sourceScale = Math.max(0.05, Number.isFinite(v) ? v : 1);
+  }
+
   function setOcclusion(v) {
     occlusion = Math.max(0, Math.min(1, v));
   }
@@ -595,5 +707,5 @@ export function createLensFlareSystem({
   /** Every quad, for the zero-intensity cull in update(). */
   const allQuads = [halation, streak, starburst, halo, dirt, ...ghosts];
 
-  return { group, update, dispose, setOcclusion };
+  return { group, update, dispose, setOcclusion, setSourceScale };
 }
