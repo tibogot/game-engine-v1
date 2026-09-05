@@ -5,7 +5,7 @@
 // camera does, and the last unexplained roughness in the trick.
 //
 // Two things are already known and both were surprises:
-//   * it is NOT the segment joins. Easing the profile's curvature (loopbackEase)
+//   * it is NOT the segment joins. Easing the profile's curvature (flipRampEase)
 //     did not improve it -- 15800/16070/28378 became 26797/20092/22244.
 //   * it is NOT the launch. It happens at nose ~89 deg, VERTICAL, with all four
 //     wheels still on the road.
@@ -71,7 +71,7 @@ function build(over = null) {
   b.beginNewChain(new THREE.Vector3(0, START, 0), 0, { exact: true });
   b.setActivePiece("start"); b.place();
   b.setActivePreset(tile("straight_long")); b.place(); b.place();
-  const ramp = tile("flip_ramp");
+  const ramp = tile("flip_ramp_std");
   b.setActivePreset(over ? { ...ramp, params: { ...ramp.params, ...over } } : ramp);
   b.place();
   return b;
@@ -235,7 +235,7 @@ for (const mul of [1, 0.25, 0.0625]) {
     row.push(s.reduce((a, x) => (x.trueAcc > a.trueAcc ? x : a), s[0]).trueAcc);
   }
   const b = build();
-  const ramp = b.pieces.find((p) => p.id === "loopback");
+  const ramp = b.pieces.find((p) => p.id === "flip_ramp");
   const verts = ramp?.mesh?.geometry?.attributes?.position?.count ?? 0;
   console.log(`  ${(BASE * mul).toFixed(5)}  ${String(verts).padStart(8)}    `
     + row.map((x) => `${x.toFixed(0).padStart(8)}`).join("  ")
@@ -248,12 +248,12 @@ console.log("");
 // It was added to cure the jerk and judged a failure on the asin metric, which
 // is now known to have been measuring a singularity rather than the car. Worth
 // asking the question again with a number that means something.
-console.log("  loopbackEase   TRUE worst chassis jerk at 26 / 32 / 38 m/s");
+console.log("  flipRampEase   TRUE worst chassis jerk at 26 / 32 / 38 m/s");
 console.log("  " + "-".repeat(60));
 for (const e of [0, 1]) {
   const row = [];
   for (const v of [26, 32, 38]) {
-    const s = climb(v, { loopbackEase: e });
+    const s = climb(v, { flipRampEase: e });
     row.push(s.reduce((a, x) => (x.trueAcc > a.trueAcc ? x : a), s[0]).trueAcc);
   }
   console.log(`  ${e === 0 ? "0 (plain)   " : "1 (eased)   "}   `

@@ -12,7 +12,7 @@
 // driving it, because the reversal and the flip are both things no ballistic
 // helper in the kit knows about.
 //
-//   node tools/buildLoopbackTrack.mjs
+//   node tools/buildFlipRampTrack.mjs
 import * as THREE from "three";
 import { writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -25,7 +25,7 @@ const { ModularRoadBuilder, CATEGORY_PRESETS } = await import(
 const { exportTrack } = await import(pathToFileURL(join(GAME, "modularRoadTrackIO.js")).href);
 const KIT = await import(pathToFileURL(join(GAME, "modularRoadKit.js")).href);
 
-const TMP = join(ROOT, `.lbtrack.${process.pid}.mjs`);
+const TMP = join(ROOT, `.frtrack.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
@@ -89,7 +89,7 @@ function build(landZ, deckRise = DECK_RISE) {
   // 87 m in the sky; two arrive around 32 and it goes up, over, and comes down
   // onto the deck a few seconds later, which is the reference.
   put("straight_long", 2);
-  put("flip_ramp");
+  put("flip_ramp_std");
 
   // ── THE RETURN DECK ──────────────────────────────────────────────────────
   // A fresh chain, elevated, pointing back down the track. Travel here is +Z,
@@ -211,7 +211,7 @@ console.log("\nBUILDING LOOP-BACK SHOWCASE\n");
 // ramp lip plus a few metres is both stable and the right answer, since that is
 // where the car is when it comes back over.
 const probe = build(null, DECK_RISE);
-const topRise = pos(probe.b.pieces.find((p) => p.id === "loopback").connectorOut).y - START_HEIGHT;
+const topRise = pos(probe.b.pieces.find((p) => p.id === "flip_ramp").connectorOut).y - START_HEIGHT;
 // BELOW the lip, not above it. Above, the car meets the deck's leading edge
 // while it is still climbing away from the ramp — measured on a 38 m ramp with
 // the deck at 46 m: 0.9 s of air and a landing 11 m from the lip, which is the
@@ -280,7 +280,7 @@ check("it comes off travelling BACK the way it came", runA.reversed,
 check("it turns fully upside down", runA.minUp < -0.9, `lowest up ${runA.minUp.toFixed(2)}`);
 // The run-up runs from z 0 (start) down to the ramp, so coming BACK means
 // returning to a z between the two — i.e. above the road it drove out along.
-const rampZ = pos(b.pieces.find((p) => p.id === "loopback").connectorIn).z;
+const rampZ = pos(b.pieces.find((p) => p.id === "flip_ramp").connectorIn).z;
 check("it comes down over the road it arrived on",
   runA.landZ !== null && runA.landZ > rampZ + 8 && runA.landZ < 5,
   runA.landZ === null
@@ -331,5 +331,5 @@ if (fail) {
   console.log(`\n${fail} FAILURE(S) — not written\n`);
   process.exit(1);
 }
-writeFileSync(join(GAME, "loopback-showcase.json"), JSON.stringify(out, null, 1));
-console.log(`\nwrote games/modular-road-v3/loopback-showcase.json — ${out.pieces.length} pieces\n`);
+writeFileSync(join(GAME, "flip-ramp-showcase.json"), JSON.stringify(out, null, 1));
+console.log(`\nwrote games/modular-road-v3/flip-ramp-showcase.json — ${out.pieces.length} pieces\n`);

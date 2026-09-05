@@ -4644,7 +4644,7 @@ const PIECE_TO_CATEGORY = {
   curve: "turns",
   scurve: "turns",
   jump: "ramps",
-  loopback: "ramps",
+  flip_ramp: "ramps",
   dive: "ramps",
   gap: "ramps",
   landing: "ramps",
@@ -5395,24 +5395,24 @@ export const CATEGORY_PRESETS = {
     // it arrived on. Place the landing as its own chain, elevated and facing
     // back — tools/buildLoopbackTrack.mjs does exactly that.
     {
-      // Not plain "loopback": a tile id that equals a piece id shadows the
+      // Not plain "flip_ramp": a tile id that equals a piece id shadows the
       // piece in lookups, and verticalTubeTest forbids it.
-      id: "flip_ramp",
+      id: "flip_ramp_std",
       label: "Flip ramp",
       // 34 m tall. Leaves the top 36 m up going BACKWARD, turns ~250° in the
       // air, comes back 97 m over its own run-up. Lands roof-first unless you
       // finish the rotation with the pitch keys — that is the trick.
-      base: "loopback",
-      params: { loopbackRadius: 21, loopbackAngle: 70, loopbackStraight: 7.5,
-        loopbackTopRadius: 16.5, loopbackExit: 135 },
+      base: "flip_ramp",
+      params: { flipRampRadius: 21, flipRampAngle: 70, flipRampFace: 7.5,
+        flipRampTopRadius: 16.5, flipRampExit: 135 },
     },
     {
       id: "flip_ramp_s",
       label: "Flip ramp S",
       // The same thing at 23 m: same reversal, same ~250°, comes back 88 m.
-      base: "loopback",
-      params: { loopbackRadius: 11, loopbackAngle: 70, loopbackStraight: 3,
-        loopbackTopRadius: 9, loopbackExit: 132 },
+      base: "flip_ramp",
+      params: { flipRampRadius: 11, flipRampAngle: 70, flipRampFace: 3,
+        flipRampTopRadius: 9, flipRampExit: 132 },
     },
     {
       id: "dive_10",

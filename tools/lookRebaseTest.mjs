@@ -202,7 +202,10 @@ console.log("\nmigration behaviour");
 {
   const { data, steps } = migrateTrack({ version: 2, roadLook: { asphaltDark: 0x5c626a } }, {});
   check(`advances to v${TRACK_VERSION}`, data.version === TRACK_VERSION, `got v${data.version}`);
-  check("records the step", steps.length === 1 && steps[0] === "v2→v3", steps.join(","));
+  // Its own step, not the whole chain. Pinning the exact list makes every later
+  // migration look like a colour regression — v3→v4 (the flip ramp rename) broke
+  // this line without touching a single colour.
+  check("records the v2→v3 step", steps.includes("v2→v3"), steps.join(","));
 
   check("black is a fixed point", rebase(0x000000) === 0x000000, hex(rebase(0x000000)));
   check("white is a fixed point", rebase(0xffffff) === 0xffffff, hex(rebase(0xffffff)));
@@ -218,10 +221,13 @@ console.log("\nmigration behaviour");
 
   check("no roadLook -> none invented", migrateTrack({ version: 2 }, {}).data.roadLook === undefined);
 
+  // A track already at v3 must not be rebased AGAIN — the colours are the point,
+  // not whether later migrations run over it (they will, and should).
   const at3 = { version: 3, roadLook: { asphaltDark: 0x1b1f25 } };
-  const { data: same, steps: none } = migrateTrack(at3, {});
-  check("v3 is a no-op", same.roadLook.asphaltDark === 0x1b1f25 && none.length === 0);
-  check("re-running v3 is stable", migrateTrack(same, {}).data.roadLook.asphaltDark === 0x1b1f25);
+  const { data: same, steps: after3 } = migrateTrack(at3, {});
+  check("v3 colours are left alone by anything after them",
+    same.roadLook.asphaltDark === 0x1b1f25 && !after3.includes("v2→v3"), after3.join(","));
+  check("re-running is stable", migrateTrack(same, {}).data.roadLook.asphaltDark === 0x1b1f25);
 
   // The source of truth for "what a default track should end up at".
   const src = fs.readFileSync(path.join(ROOT, GAME, "modularRoadMaterial.js"), "utf8");

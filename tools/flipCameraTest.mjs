@@ -84,7 +84,7 @@ function build() {
   b.beginNewChain(new THREE.Vector3(0, START_HEIGHT, 0), 0, { exact: true });
   b.setActivePiece("start"); b.place();
   put("straight_long", 2);
-  put("flip_ramp");
+  put("flip_ramp_std");
   return b;
 }
 
@@ -321,11 +321,11 @@ check("it always goes round the SAME side, at every entry speed",
 // silently goes away and the sweep goes back to being an instant.
 const KIT = await import(pathToFileURL(join(GAME, "modularRoadKit.js")).href);
 check("the pivot's midpoint is still hinged on the ramp's straight face",
-  CAM.pivotSideDeg === KIT.PIECE_PARAM_DEFAULTS.loopbackAngle,
-  `camera ${CAM.pivotSideDeg}° vs ramp face ${KIT.PIECE_PARAM_DEFAULTS.loopbackAngle}°`);
+  CAM.pivotSideDeg === KIT.PIECE_PARAM_DEFAULTS.flipRampAngle,
+  `camera ${CAM.pivotSideDeg}° vs ramp face ${KIT.PIECE_PARAM_DEFAULTS.flipRampAngle}°`);
 check("and it still finishes before the lip, with room to settle",
-  CAM.pivotToDeg < KIT.PIECE_PARAM_DEFAULTS.loopbackExit - 15,
-  `ends at ${CAM.pivotToDeg}°, lip at ${KIT.PIECE_PARAM_DEFAULTS.loopbackExit}°`);
+  CAM.pivotToDeg < KIT.PIECE_PARAM_DEFAULTS.flipRampExit - 15,
+  `ends at ${CAM.pivotToDeg}°, lip at ${KIT.PIECE_PARAM_DEFAULTS.flipRampExit}°`);
 
 console.log(fail ? `\n${fail} FAILURE(S)\n` : "\nall checks green\n");
 process.exit(fail ? 1 : 0);

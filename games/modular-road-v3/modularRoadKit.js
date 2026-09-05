@@ -161,10 +161,10 @@ export const pieceParams = {
    * FLIP RAMP — a steep face that curls over the top, so the car comes back.
    *
    * THREE SEGMENTS, and the middle one is what stops it looking like a loop:
-   *   1. a gentle transition off the flat, radius `loopbackRadius`
-   *   2. a STRAIGHT face at `loopbackAngle` for `loopbackStraight` metres
-   *   3. a TIGHT curl over the top, radius `loopbackTopRadius`, to
-   *      `loopbackExit` — past vertical, which is what reverses the car.
+   *   1. a gentle transition off the flat, radius `flipRampRadius`
+   *   2. a STRAIGHT face at `flipRampAngle` for `flipRampFace` metres
+   *   3. a TIGHT curl over the top, radius `flipRampTopRadius`, to
+   *      `flipRampExit` — past vertical, which is what reverses the car.
    *
    * Past 90 degrees the car is being carried back the way it came, so it leaves
    * the lip travelling BACKWARD and lands on a deck above the road it arrived
@@ -178,15 +178,15 @@ export const pieceParams = {
    * before the rear and dump their load), so geometry alone cannot turn it
    * over, and trying to make it produced tumbles instead of a trick.
    */
-  loopbackRadius: 21, // gentle transition off the flat (m)
-  loopbackAngle: 70, // the straight face's angle (deg)
-  loopbackStraight: 7.5, // length of that straight face (m)
+  flipRampRadius: 21, // gentle transition off the flat (m)
+  flipRampAngle: 70, // the straight face's angle (deg)
+  flipRampFace: 7.5, // length of that straight face (m)
   // 11, not 6: the curve at the end has to be the SMOOTHEST part of the ramp,
   // not the sharpest. At R6 the top pulls ~8 g and reads as a kink — the car
   // hits it rather than flowing through it. R11 is the same shape, taken
   // gently, and it also sets the rotation the car leaves with (v/R), which is
   // what the flight then continues.
-  loopbackTopRadius: 16.5, // curl over the top (m) — the curve at the end
+  flipRampTopRadius: 16.5, // curl over the top (m) — the curve at the end
   // THE PACING KNOB. It decides how much of the car's speed leaves as UP rather
   // than BACK, so it sets the hang time WITHOUT touching the run-up — which is
   // the lever you want, because height goes as v-squared and slowing the car to
@@ -198,11 +198,11 @@ export const pieceParams = {
   //                ragged (73 deg at one speed, 129 at the next)
   // Past ~150 the car stops leaving the ramp cleanly at all, and past ~170 it
   // never leaves. 135 is the most it can be pushed while the flip stays even.
-  loopbackExit: 135,
+  flipRampExit: 135,
   // How much of an EASEMENT the ramp gets at the joins between its three
   // segments. 0 is the plain three-segment shape; 1 blends the turn in and out
-  // of every corner. See loopbackPoints — this is the curvature, not the angle.
-  loopbackEase: 1, // angle it finishes at (deg); past 90 sends the car back
+  // of every corner. See flipRampPoints — this is the curvature, not the angle.
+  flipRampEase: 1, // angle it finishes at (deg); past 90 sends the car back
   jumpLength: 18, // arc length of the ramp (m)
   jumpAngle: 12, // takeoff angle at the exit (deg)
   // Dive / down ramp (mirror of the jump — flat entry, exit pitched down).
@@ -3729,7 +3729,7 @@ function jumpPoints(pp) {
 
 /**
  * Loop-back ramp: a CONSTANT-radius curl taken past vertical, so the car comes
- * off the top going the other way. See PIECE_DEFAULTS.loopbackRadius.
+ * off the top going the other way. See PIECE_DEFAULTS.flipRampRadius.
  *
  * Constant radius matters twice over. It is what lets the car hold the surface —
  * a changing radius means a changing load, and the moment the demand spikes the
@@ -3737,14 +3737,14 @@ function jumpPoints(pp) {
  * constant-radius arc `arcLen / totalAngle` IS the true radius rather than an
  * average that flatters a tight section.
  */
-function loopbackPoints(pp) {
-  const R1 = Math.max(5, pp.loopbackRadius ?? 14);
-  const face = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.loopbackAngle ?? 72, 30, 85));
-  const straight = Math.max(0, pp.loopbackStraight ?? 6);
-  const R2 = Math.max(3, pp.loopbackTopRadius ?? 6);
+function flipRampPoints(pp) {
+  const R1 = Math.max(5, pp.flipRampRadius ?? 14);
+  const face = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(pp.flipRampAngle ?? 72, 30, 85));
+  const straight = Math.max(0, pp.flipRampFace ?? 6);
+  const R2 = Math.max(3, pp.flipRampTopRadius ?? 6);
   const exit = THREE.MathUtils.degToRad(
-    THREE.MathUtils.clamp(pp.loopbackExit ?? 120, 0, 165));
-  const ease = THREE.MathUtils.clamp(pp.loopbackEase ?? 1, 0, 1);
+    THREE.MathUtils.clamp(pp.flipRampExit ?? 120, 0, 165));
+  const ease = THREE.MathUtils.clamp(pp.flipRampEase ?? 1, 0, 1);
   const top = Math.max(0, exit - face);
   const l1 = R1 * face;   // transition
   const l2 = straight;    // straight face
@@ -4992,7 +4992,7 @@ export const PIECE_CATALOG = [
     points: jumpPoints,
   },
   {
-    id: "loopback",
+    id: "flip_ramp",
     label: "Flip ramp",
     hint: "Steep face that curls over — sends the car back, upside down",
     // Hot orange: you commit to this one at 150 km/h and it does something no
@@ -5000,7 +5000,7 @@ export const PIECE_CATALOG = [
     swatch: "#ff5a1f",
     // Wears its own deck material (see flipRampMat) rather than asphalt.
     flipRamp: true,
-    points: loopbackPoints,
+    points: flipRampPoints,
   },
   {
     id: "dive",
@@ -5764,10 +5764,23 @@ export const FOLLOW_ROAD = new Set([
   "grade_in", "grade", "grade_out",
   // Climbing / banked road: a banked climb's crest is convex in the same way.
   "banked", "banked_climb", "bankswap", "banktilt", "bankin", "bankout",
-  // The loop-back is the most concave thing in the kit — at R11 and 45 m/s it
-  // asks for around 19 g — and without road hold the car skips off it partway
-  // up instead of being carried round, which is the entire piece.
-  "loopback",
+  // THE FLIP RAMP IS IN HERE FOR A DIFFERENT REASON FROM EVERYTHING ABOVE, and
+  // the difference is worth stating because the obvious reading is wrong.
+  //
+  // It is not here for the force. MEASURED (tools/holdJerkProbe.mjs), the hold
+  // applies EXACTLY ZERO newtons across the whole climb — all 172 ticks of it,
+  // at every entry speed. Its feed-forward is gated on `_holdOmega > 0` and the
+  // car is on the CONCAVE side of the curl the entire way up, so omega is
+  // negative and the assist correctly declines: on a curve that bends toward
+  // the car, the road is already pushing it round and needs no help doing so.
+  //
+  // What membership actually buys is the TAG. `hitRoadHold` becomes
+  // `_holdContact` in the vehicle, and that is the flag the authored half-turn
+  // arms itself on at the launch — so being in this set is what makes the ramp
+  // flip the car at all, rather than what carries it up the face.
+  // `tools/flipRampTest.mjs` pins that down from the other side: the same ramp
+  // without the tag flips nothing.
+  "flip_ramp",
 ]);
 
 /** Is this a piece the car should stick to rather than fly off? See FOLLOW_ROAD. */

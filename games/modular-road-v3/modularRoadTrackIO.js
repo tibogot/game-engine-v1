@@ -51,7 +51,7 @@ export const TRACK_FORMAT = "modular-road-track";
  * v3 changes what a `roadLook` COLOUR NUMBER MEANS — see migrateV2toV3.
  * Layout, tuning numbers and the sparse rule are untouched from v2.
  */
-export const TRACK_VERSION = 3;
+export const TRACK_VERSION = 4;
 
 /** Versions this build can read. Anything older is migrated up on load. */
 export const TRACK_MIN_VERSION = 1;
@@ -281,8 +281,52 @@ function migrateV2toV3(data) {
   return out;
 }
 
+/**
+ * v4 RENAMES THE FLIP RAMP. The piece was called `loopback` and its six tuning
+ * keys `loopback*`, from back when it was thought of as a loop that came back on
+ * itself; everything user-facing has said "Flip ramp" for a while, and the two
+ * drifting apart is how someone ends up grepping for the wrong word.
+ *
+ * A piece id is the one thing in a track file that CANNOT be inherited from a
+ * default — layout is absolute — so an old save names a piece that no longer
+ * exists and loads as a hole in the track. Hence a real migration rather than an
+ * alias: the rename happens once, on load, and nothing downstream has to know
+ * both names.
+ *
+ * The tuning keys are sparse (absent = inherit today's default), so a file that
+ * never tuned the ramp simply has nothing here to rename.
+ */
+const V3_FLIP_KEYS = {
+  loopbackRadius: "flipRampRadius",
+  loopbackAngle: "flipRampAngle",
+  loopbackStraight: "flipRampFace",
+  loopbackTopRadius: "flipRampTopRadius",
+  loopbackExit: "flipRampExit",
+  loopbackEase: "flipRampEase",
+};
+
+function migrateV3toV4(data) {
+  const out = { ...data, version: 4 };
+  if (Array.isArray(data.pieces)) {
+    out.pieces = data.pieces.map((p) => (p?.id === "loopback" ? { ...p, id: "flip_ramp" } : p));
+  }
+  const pp = data.pieceParams;
+  if (pp && typeof pp === "object") {
+    const next = { ...pp };
+    for (const [was, now] of Object.entries(V3_FLIP_KEYS)) {
+      if (!(was in next)) continue;
+      // A file that somehow carries both keeps the NEW one — it is the only
+      // name anything still reads.
+      if (!(now in next)) next[now] = next[was];
+      delete next[was];
+    }
+    out.pieceParams = next;
+  }
+  return out;
+}
+
 /** version → the function that turns it into the next version up. */
-const MIGRATIONS = { 1: migrateV1toV2, 2: migrateV2toV3 };
+const MIGRATIONS = { 1: migrateV1toV2, 2: migrateV2toV3, 3: migrateV3toV4 };
 
 /**
  * Bring a track file up to TRACK_VERSION, one step at a time.

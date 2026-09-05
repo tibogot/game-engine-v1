@@ -103,11 +103,11 @@ export const CHASE_CAM = {
    *  that reads as the SIDE view sitting between them.
    *
    *  `pivotSideDeg` must match the flip ramp's straight-face angle
-   *  (`loopbackAngle`, 70°). That is the whole trick: along the straight face
+   *  (`flipRampAngle`, 70°). That is the whole trick: along the straight face
    *  the nose angle does not change AT ALL, so a pivot driven by the nose
    *  stops dead there on its own. Hinging the halfway point of the sweep on
    *  that angle parks the hold exactly on the side view, and the length of the
-   *  face (`loopbackStraight`) becomes how long the camera holds it.
+   *  face (`flipRampFace`) becomes how long the camera holds it.
    *
    *  The window used to be 20°→65° — which ends BELOW the face angle, so the
    *  sweep finished before it ever reached the flat spot, and spent its whole
@@ -592,7 +592,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
       // the face angle means the dwell costs nothing to compute and cannot drift
       // out of sync: along the straight face the nose angle is CONSTANT, so
       // `noseDeg` stops, so the pivot stops, for exactly as long as the car is
-      // on the face. Lengthen `loopbackStraight` and the camera holds the side
+      // on the face. Lengthen `flipRampFace` and the camera holds the side
       // view for longer, at any entry speed, with no timer anywhere.
       //
       // Each half is smoothstepped rather than linear, so the sweep eases INTO

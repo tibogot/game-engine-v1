@@ -193,7 +193,7 @@ import { WORLD_SIZE } from "../../v3/terrain/heightmapTexture.js";
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
 // imported assets — the source folder itself is not published.
 import auditTrackUrl from "./audittest.json?url";
-import loopbackTrackUrl from "./loopback-showcase.json?url";
+import flipRampTrackUrl from "./flip-ramp-showcase.json?url";
 import bowlTrackUrl from "./bowl-showcase.json?url";
 
 /** Cap on physics ticks per frame — a long stall must not queue a huge backlog. */
@@ -6015,7 +6015,7 @@ ${e.message}`);
   // Out along the bottom, up and over the loop-back, and home along a deck ABOVE
   // the road you arrived on. See tools/buildLoopbackTrack.mjs, which generates
   // the track AND drives it before writing it.
-  loadPresetTrack("road-preset-loopback", loopbackTrackUrl, "Load loop-back showcase");
+  loadPresetTrack("road-preset-flip-ramp", flipRampTrackUrl, "Load flip ramp showcase");
   loadPresetTrack("road-preset-bowl", bowlTrackUrl, "Load park bowl showcase");
 
   const gamepad = createGamepadInput();

@@ -18,14 +18,14 @@
 //      of with W/X. A rate that ran for the whole flight turns one flip into
 //      three, which is what an earlier version did.
 //
-// Run: node tools/loopbackTest.mjs   (--sweep to re-characterise)
+// Run: node tools/flipRampTest.mjs   (--sweep to re-characterise)
 import * as THREE from "three";
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const TMP = join(ROOT, `.loopback.${process.pid}.mjs`);
+const TMP = join(ROOT, `.flipramp.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
@@ -55,7 +55,7 @@ const ok = (cond, msg, extra = "") => {
   console.log(`   ${cond ? "PASS" : "FAIL"}  ${msg}${extra ? `  — ${extra}` : ""}`);
 };
 
-const ramp = (over = {}) => PIECE_BY_ID.get("loopback")
+const ramp = (over = {}) => PIECE_BY_ID.get("flip_ramp")
   .points({ ...PIECE_PARAM_DEFAULTS, ...over })
   .map((p) => ({ y: p.y, z: p.z }));
 
@@ -167,9 +167,9 @@ if (SWEEP) {
   // the eye actually reads as bent.
   console.log("=== SHAPE SCALE — longer/gentler vs what it costs ===");
   const SHIPPED = {
-    loopbackRadius: PIECE_PARAM_DEFAULTS.loopbackRadius,
-    loopbackStraight: PIECE_PARAM_DEFAULTS.loopbackStraight,
-    loopbackTopRadius: PIECE_PARAM_DEFAULTS.loopbackTopRadius,
+    flipRampRadius: PIECE_PARAM_DEFAULTS.flipRampRadius,
+    flipRampFace: PIECE_PARAM_DEFAULTS.flipRampFace,
+    flipRampTopRadius: PIECE_PARAM_DEFAULTS.flipRampTopRadius,
   };
   const shapeOf = (over) => {
     const pts = ramp(over);
@@ -184,13 +184,13 @@ if (SWEEP) {
   };
   for (const scale of [1, 1.25, 1.5, 1.75, 2]) {
     const over = {
-      loopbackRadius: SHIPPED.loopbackRadius * scale,
-      loopbackStraight: SHIPPED.loopbackStraight * scale,
-      loopbackTopRadius: SHIPPED.loopbackTopRadius * scale,
+      flipRampRadius: SHIPPED.flipRampRadius * scale,
+      flipRampFace: SHIPPED.flipRampFace * scale,
+      flipRampTopRadius: SHIPPED.flipRampTopRadius * scale,
     };
     const g = shapeOf(over);
     console.log(`\n  ${scale === 1 ? "SHIPPED" : `${scale}x`}  `
-      + `R${over.loopbackRadius.toFixed(0)}/top R${over.loopbackTopRadius.toFixed(0)}  `
+      + `R${over.flipRampRadius.toFixed(0)}/top R${over.flipRampTopRadius.toFixed(0)}  `
       + `${g.height.toFixed(0)} m tall, ${g.run.toFixed(0)} m long (${g.len.toFixed(0)} m of ramp), `
       + `worst ${g.worst.toFixed(1)} deg/m`);
     for (const v of [26, 32, 38]) {
@@ -233,7 +233,7 @@ console.log("=== 1. A RAMP WITH THE CURVE AT THE END, TAKEN PAST VERTICAL ===");
   ok(end > mid, "…and the curve is at the END, not spread through it",
     `${end.toFixed(2)}°/step at the top vs ${mid.toFixed(2)} in the middle`);
 
-  ok(FOLLOW_ROAD.has("loopback"),
+  ok(FOLLOW_ROAD.has("flip_ramp"),
     "it is FOLLOW_ROAD — road hold plants the car on the face, and it gates the flip");
 }
 
