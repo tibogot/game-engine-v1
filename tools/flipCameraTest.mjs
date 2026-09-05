@@ -154,7 +154,8 @@ function fly(speedIn) {
   let az = null, swept = 0, sideSign = 0;
   let peakRate = 0, dwell = 0, run = 0, airMotion = 0, airT = 0;
   let prevRate = 0, peakAccel = 0, peakAccelAt = null, sweepT = 0, wallFrames = 0;
-  let prevNose = null, prevNoseRate = null, peakNoseAccel = 0, peakNoseAt = 0;
+  let peakNoseAccel = 0, peakNoseAt = 0, prevW = null;
+  const _w = new THREE.Vector3();
   let climbing = false, launched = false, t = 0;
 
   for (let i = 0; i < Math.round(14 / FIXED_DT); i++) {
@@ -193,20 +194,24 @@ function fly(speedIn) {
           const acc = Math.abs(rate - prevRate) / FIXED_DT;
           if (acc > peakAccel) { peakAccel = acc; peakAccelAt = { t, swept }; }
         }
-        // THE CAR'S OWN pitching, measured the same way, so a rough moment can
-        // be attributed. The camera aims at the car and its boom is built on the
-        // car's frame, so anything the chassis does abruptly arrives in the shot
-        // no matter how smooth the pivot itself is.
-        const noseNow = Math.asin(Math.max(-1, Math.min(1, noseY))) * R2D;
-        if (prevNose !== null) {
-          const nr = (noseNow - prevNose) / FIXED_DT;
-          if (prevNoseRate !== null) {
-            const na = Math.abs(nr - prevNoseRate) / FIXED_DT;
-            if (na > peakNoseAccel) { peakNoseAccel = na; peakNoseAt = swept; }
-          }
-          prevNoseRate = nr;
+        // THE CAR'S OWN motion, from the rigid body's ANGULAR VELOCITY. The
+        // camera aims at the car and builds its boom on the car's frame, so
+        // anything the chassis does abruptly arrives in the shot no matter how
+        // smooth the pivot itself is — which makes the chassis the right thing
+        // to judge the camera against.
+        //
+        // NOT differentiated from asin(forward.y), which is the obvious way and
+        // is wrong here. d(asin)/dy is unbounded as y approaches 1, and this ramp
+        // takes the nose straight THROUGH vertical: measured, that read 26797°/s²
+        // at the moment the body itself was doing 648, a 41x overstatement, and
+        // the spike sat at nose 89° every single time. It was chased through the
+        // segment joins, the road hold and the tessellation before the metric
+        // itself turned out to be the thing with the discontinuity.
+        if (prevW !== null) {
+          const na = _w.copy(car.body.angVel).sub(prevW).length() / FIXED_DT * R2D;
+          if (na > peakNoseAccel) { peakNoseAccel = na; peakNoseAt = swept; }
         }
-        prevNose = noseNow;
+        (prevW ??= new THREE.Vector3()).copy(car.body.angVel);
         prevRate = rate;
         // A dwell is a stretch of the CLIMB where the shot is simply held.
         // Only counted once the sweep is under way, so the flat approach to the
@@ -254,7 +259,7 @@ for (const { v, r } of runs) {
     + `(avg ${(r.swept / r.sweepT).toFixed(0)}°/s, peak ${r.peakRate.toFixed(0)})   `
     + `holds the side ${r.dwell.toFixed(2)}s   `
     + `jerk ${r.peakAccel.toFixed(0)}°/s² @swept ${r.peakAccelAt?.swept.toFixed(0)}°`
-    + ` [car ${r.peakNoseAccel.toFixed(0)}°/s² @${r.peakNoseAt.toFixed(0)}°]   drifts ${r.airMotion.toFixed(1)}° in the air`);
+    + ` [chassis ${r.peakNoseAccel.toFixed(0)}°/s²]   drifts ${r.airMotion.toFixed(1)}° in the air`);
 }
 console.log("");
 
@@ -277,15 +282,18 @@ check("and it never reaches the rig's own backstop",
 // AGAINST THE CAR, not against a fixed number. `chaseFramingTest` holds the
 // rest of the kit to 1200°/s² of view acceleration, and that is the right bar
 // there because on those pieces the chassis is not being thrown around. Here it
-// is: MEASURED, the car's own nose pitches at 15800-28378°/s² coming off the
-// straight face onto the curl, an order of magnitude rougher than anything the
-// camera does. A rig that aims AT the car and builds its boom on the car's
-// frame cannot be smoother than the car without lagging it, so the thing worth
-// asserting is that the camera SMOOTHS that rather than amplifying it.
+// is: the body's own angular acceleration runs 4800-6400°/s² through the curl,
+// two to three times anything the camera shows. A rig that aims AT the car and
+// builds its boom on the car's frame cannot be smoother than the car without
+// lagging it, so the thing worth asserting is that the camera SMOOTHS that
+// rather than amplifying it.
+//
+// An earlier version claimed 15800-28378°/s² and a 7-13x ratio. That was a
+// broken metric, not a rough car — see the note at the measurement above.
 const worstAccel = Math.max(...runs.map((x) => x.r.peakAccel));
 const ratios = runs.map((x) => x.r.peakNoseAccel / Math.max(1, x.r.peakAccel));
 check("the camera smooths the ramp rather than passing it on",
-  Math.min(...ratios) > 5,
+  Math.min(...ratios) > 1.8,
   `camera ${worstAccel.toFixed(0)}°/s² against the chassis' own `
   + `${Math.max(...runs.map((x) => x.r.peakNoseAccel)).toFixed(0)}°/s² `
   + `— ${Math.min(...ratios).toFixed(0)}x smoother at worst`);
