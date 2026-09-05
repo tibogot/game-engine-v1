@@ -23,6 +23,8 @@ import {
 import {
   createTileMaterial,
   setGridTextureUrl,
+  getTileGridTexture,
+  tileColorAtWorldXZ,
 } from "../../v2/core/legacy/tileMaterial.js";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 
@@ -90,6 +92,13 @@ export const TERRAIN_FEATURES = {
   snow: true,
   /** Underwater lakebed tint + caustics. */
   lakebed: true,
+  /**
+   * The grey Unreal/Unity-style grid under the layers. Off = a flat colour at
+   * the grid's mean shade, for a game whose world is painted or procedural and
+   * never shows bare ground. Greybox PROPS keep their own tile material either
+   * way — this only decides what the TERRAIN computes per pixel.
+   */
+  tileGrid: true,
 };
 
 // ── Full grid (level 0) ───────────────────────────────────────────────────────
@@ -377,7 +386,24 @@ function createLODMaterial({
   //
   // color/roughness/emissive/normal come back as one struct so the material
   // slots share a single computation instead of quadruplicating the taps.
-  const tileColorNode = mat.colorNode; // capture the tile look before overwrite
+  // Base look under the layers.
+  //
+  // The tile material's own colorNode is TRI-PLANAR: three projections, six
+  // grid taps and three hashes, weighted by the world normal. On the clipmap
+  // that normal is the constant up vector every vertex was built with (the
+  // displaced position never touches it — lighting takes its normal from the
+  // bake instead), so the XY and YZ weights are exactly zero on every terrain
+  // pixel and their four taps are multiplied away. tileColorAtWorldXZ is the
+  // XZ projection alone: the same picture, two taps and one hash.
+  //
+  // MEASURED (vsync off, back-to-back variant swap): the tri-planar base was
+  // 27-33% of the terrain's GPU time in both the editor and the road game.
+  //
+  // With the grid off the base is the tile colour at 0.45, the shade the
+  // hash-varied cells average to, so a flat base reads as the same brightness.
+  const tileColorNode = F.tileGrid
+    ? tileColorAtWorldXZ(getTileGridTexture(), mat._tileUniforms, wxz)
+    : vec3(mat._tileUniforms.tileColor).mul(float(0.45));
   const SurfaceOut = struct(
     { col: "vec3", rough: "float", emis: "vec3", nrm: "vec3" },
     "TerrainSurface",
