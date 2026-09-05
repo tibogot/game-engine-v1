@@ -123,9 +123,21 @@ export const CHASSIS_GLB = {
    * needs a node material. Both arrive together in `makePaintMaterial`.
    */
   paint: true,
-  /** Strength of the clear lacquer. 1 is a show car; slightly under keeps it
-   *  from looking like it is wrapped in cling film. */
-  clearcoat: 0.85,
+  /** Strength of the clear lacquer. 1 is a show car. 0.85 on this shell was
+   *  cling film: a dielectric coat on an already-glossy dielectric base, so
+   *  every grazing panel dumped the sky as a blue wrapper. Half of that keeps
+   *  the depth and drops the cellophane rim. */
+  clearcoat: 0.48,
+  /** Coat roughness. A lacquer is still smoother than the flake, but 0.06 was
+   *  a chrome edge. Slightly softer so the sky sheen is a highlight, not a rim. */
+  clearcoatRoughness: 0.14,
+  /** Basecoat metalness. The file ships 0 (plastic). A modest flake tints the
+   *  body spec with the livery instead of staying white under the coat. */
+  paintMetalness: 0.32,
+  /** Basecoat roughness. The file's 0.059 is a second mirror under the coat;
+   *  raising it is what actually separates flake (broad, tinted) from lacquer
+   *  (tighter, white). */
+  paintRoughness: 0.24,
   /**
    * ORANGE PEEL — the fine ripple every sprayed panel has.
    *
@@ -139,7 +151,7 @@ export const CHASSIS_GLB = {
    * would swim across the bodywork as the camera moves, which reads as crawling
    * rather than as a surface.
    */
-  orangePeel: 0.55,
+  orangePeel: 0.38,
   /** Ripples per metre. Real orange peel is roughly 1–3 mm across; this is
    *  deliberately coarser, because at 1 mm it aliases into noise at any
    *  distance the chase camera actually sits at. */
@@ -413,13 +425,11 @@ function makePaintMaterial(src) {
     name: src.name || "carPaint",
     map: src.map ?? null,
     color: src.color ? src.color.clone() : new THREE.Color(0xffffff),
-    roughness: src.roughness ?? 0.5,
-    metalness: src.metalness ?? 0,
+    roughness: CHASSIS_GLB.paintRoughness,
+    metalness: CHASSIS_GLB.paintMetalness,
     clearcoat: CHASSIS_GLB.clearcoat,
-    // Tight, because a lacquer is smoother than the paint beneath it. This is
-    // what makes the coat's highlight read as a separate, sharper lobe sitting
-    // on top of the basecoat's broader one.
-    clearcoatRoughness: 0.06,
+    // Smoother than the flake, not a second mirror — see CHASSIS_GLB.clearcoatRoughness.
+    clearcoatRoughness: CHASSIS_GLB.clearcoatRoughness,
     side: src.side ?? THREE.FrontSide,
   });
 
