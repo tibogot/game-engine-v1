@@ -53,6 +53,7 @@ import {
   BODYLEAN,
   WHEEL_LAYOUT,
   HEADLIGHTS,
+  TAILLIGHTS,
   CHASSIS_GLB_LIGHTS,
   CHASSIS,
   CHASSIS_HULL,
@@ -421,6 +422,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   app.postFx?.setEnabled(true);
   app.postFx?.setBloomSelective(true);
+  /*
+   * NIGHT VISION. Enabled once at boot because toggling it rebuilds the display chain;
+   * the per-frame control is its `amount`, driven from the sky's night factor below. At
+   * amount 0 (all day) the node is an exact identity.
+   */
+  app.postFx?.setPurkinje({ enabled: true, amount: 0 });
   app.postFx?.setBloom({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
 
   /* ── RAIN ON THE LENS ──────────────────────────────────────────────────────
@@ -1170,6 +1177,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const _skyKeyCol = new THREE.Color();
   const _hemiSkyCol = new THREE.Color();
   const _hemiGndCol = new THREE.Color();
+  /**
+   * How dark it is for the smoke's lamp glow, 0 (day) → 1 (night). From the
+   * SKY's own solar elevation, not the scene light's: at night the engine
+   * points the key light at the MOON, so its elevation reads as daytime and
+   * the tail-light glow would switch itself off exactly when it matters.
+   * updateAutoHeadlights writes a fallback until the sky has run once.
+   */
+  let _smokeNightK = 1;
+  let _smokeNightFromSky = false;
   let _skyLightKey = "";
 
   function syncWorldLightToSky(look) {
@@ -1183,7 +1199,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       _lightRef.captured = true;
     }
     const el = look.sunElevation ?? 0;
-    const key = `${el.toFixed(2)}|${SKY_LIGHT.warmth}|${Math.round(camera.position.y / 50)}`;
+    const key = `${el.toFixed(2)}|${SKY_LIGHT.warmth}|${Math.round(camera.position.y / 50)}`
+      + `|${(look.moonLight ?? 0).toFixed(3)}`;
     if (key === _skyLightKey) return;
     _skyLightKey = key;
 
@@ -1220,6 +1237,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
     // Ambient from the sky itself: zenith overhead, haze underfoot.
     const cols = gameSky.getColors(camera.position.y);
+    // 1 below the horizon, 0 once the sun is ~14° up. See syncSmokeLamps.
+    _smokeNightK = THREE.MathUtils.clamp(1 - look.sunDir.y / 0.25, 0, 1);
+    _smokeNightFromSky = true;
     _hemiSkyCol.copy(cols.zenith);
     _hemiGndCol.copy(cols.haze);
 
@@ -1248,6 +1268,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       hemiGroundColor: "#" + _hemiGndCol.getHexString(THREE.SRGBColorSpace),
       hemiIntensity: (look.hemiIntensity / hemiDayRef) * _lightRef.hemi,
       exposure: look.exposure * _lightRef.exposure,
+      /*
+       * THE MOON AS A REAL KEY LIGHT. In the engine's procedural sky mode a below-horizon
+       * sun makes it swap the directional light to its own moon branch, which reads
+       * `moonIntensity` and IGNORES the `dirIntensity` computed above — so our moon phase
+       * never reached the world and every night was lit the same. Handing it our own
+       * figure (illuminated fraction x how high the moon is) is what makes a full moon
+       * overhead light the track and a new moon leave it dark.
+       */
+      moonIntensity: (look.moonLight ?? 0) * 0.55,
       /*
        * The env map's CONTENT follows the sky once our dome is the one being baked,
        * but its strength was a constant 0.45 at every hour — so reflections stayed at
@@ -1328,6 +1357,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function updateLensFlare(dt) {
     const lp = ensureFlareLook();
     if (!lp?.enabled) return;
+    /*
+     * TIE THE FLARE TO THE SUN'S ACTUAL ANGULAR SIZE. The sky owns how big the disc is
+     * (sunSizeDeg); the flare was authored against the 3.4 deg default and sized purely in
+     * screen fractions, so dialling the sun up left its halation and starburst behind and
+     * the two stopped looking like the same object. Only the parts that are an IMAGE OF
+     * THE SOURCE follow this — the ghosts and the halo are images of the lens and keep
+     * their own size (see setSourceScale).
+     */
+    const skyP = gameSky?.params;
+    if (skyP?.sunSizeDeg) app.lensFlare?.setSourceScale?.(skyP.sunSizeDeg / 3.4);
     _flareSun.copy(_cloudSun);
     let target = 1;
     if (cloudsWanted && cloudTier === "painted" && gamePainted?.sunThrough) {
@@ -1348,6 +1387,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const k = target < _flareOcc ? 9 : 3.5; // dims fast, recovers slowly
     _flareOcc += (target - _flareOcc) * Math.min(1, dt * k);
     app.lensFlare.setOcclusion(_flareOcc);
+    // The sky bleeds the SAME occlusion into its sun glare, so when a cloud crosses the
+    // sun the disc, the aureole, the lens flare and the bloom all fade as one thing.
+    gameSky?.setSunOcclusion?.(_flareOcc);
   }
 
   function updateGameSky(dt) {
@@ -1362,6 +1404,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // nothing per frame.
     gameAtmo.update(look.sunDir, Math.max(0, camera.position.y), look.moonDir);
     syncWorldLightToSky(look);
+    // Rods take over as the sun goes; the shift's own per-pixel weight decides WHERE.
+    app.postFx?.setPurkinje({ amount: look.nightF });
   }
   app.addPreRenderHook?.(updateGameSky);
 
@@ -4459,6 +4503,55 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * game harder than pressing H did: the stall arrived unasked, mid-drive, on the
    * same frame as the sun move that caused it.
    */
+  /**
+   * The car's lamps, handed to the smoke so the plume glows off them — red
+   * from the brake lights behind a drifting car, warm ahead of the headlights.
+   *
+   * Tail positions come from TAILLIGHTS' offsets on the chassis anchor (the
+   * same numbers the procedural quads use; the GLB's lamps sit within a few cm
+   * of them). Brake state is the vehicle's own rule from _updateTaillights, so
+   * the smoke flares exactly when the lamps do. Headlights use the car's
+   * forward, tipped down a touch like the dipped beams.
+   */
+  const _lampPos = new THREE.Vector3();
+  const _lampDir = new THREE.Vector3();
+  const _lampFwd = new THREE.Vector3();
+  const _tailCol = new THREE.Color(TAILLIGHTS.color);
+  const _headCol = new THREE.Color(HEADLIGHTS.color);
+  const SMOKE_TAIL_BRAKE = 3.0;
+  const SMOKE_TAIL_RUNNING = 0.6;
+  const SMOKE_HEAD = 5.0;
+  const SMOKE_HEAD_CONE = 10;
+  /**
+   * The lamps fade out with daylight (`_smokeNightK`, from the sky): against
+   * a 2.5-intensity sun a tail light adds nothing visible, and at 0 the smoke
+   * skips the lamp work entirely, so a daytime drift pays for none of it.
+   */
+  function syncSmokeLamps() {
+    const body = vehicle.body;
+    if (!body) return;
+    _lampFwd.set(0, 0, 1).applyQuaternion(body.quat);
+    const vFwd = body.vel.dot(_lampFwd);
+    const braking = !!vehicle.input?.handbrake
+      || ((vehicle.input?.throttle ?? 0) < 0 && vFwd > 0.5);
+    const tailI = (TAILLIGHTS.enabled
+      ? (braking ? SMOKE_TAIL_BRAKE : (headlightsOn ? SMOKE_TAIL_RUNNING : 0))
+      : 0) * _smokeNightK;
+    const headI = (headlightsOn ? SMOKE_HEAD : 0) * _smokeNightK;
+    for (let i = 0; i < 2; i++) {
+      const sx = i === 0 ? -1 : 1;
+      _lampPos.set(sx * TAILLIGHTS.side, TAILLIGHTS.up, -TAILLIGHTS.back)
+        .applyQuaternion(body.quat).add(body.pos);
+      driftSmoke.setLamp(i, _lampPos, _tailCol, tailI);
+    }
+    _lampDir.set(0, -0.08, 1).applyQuaternion(body.quat);
+    for (let i = 0; i < 2; i++) {
+      const sx = i === 0 ? -1 : 1;
+      _lampPos.set(sx * 0.66, 0.22, 2.05).applyQuaternion(body.quat).add(body.pos);
+      driftSmoke.setLamp(2 + i, _lampPos, _headCol, headI, _lampDir, SMOKE_HEAD_CONE);
+    }
+  }
+
   function updateAutoHeadlights() {
     if (!sunLight) return;
     _sunDir.copy(sunLight.position);
@@ -4481,6 +4574,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // syncWorldLightToSky). Both default to white until the sky has run once,
     // which is exactly the old flat ambient.
     driftSmoke.setAmbientColors(_hemiSkyCol, _hemiGndCol);
+    // Fallback only — the sky sync owns this once it has run (see its note).
+    if (!_smokeNightFromSky) _smokeNightK = THREE.MathUtils.clamp(1 - sinElev / 0.25, 0, 1);
     if (!autoHeadlights) return;
     if (!headlightsOn && sinElev < 0.10) setHeadlights(true);
     else if (headlightsOn && sinElev > 0.16) setHeadlights(false);
@@ -7671,6 +7766,7 @@ ${e.message}`);
      * nothing here feeds the deterministic sim.
      */
     if (mode === "drive") {
+      syncSmokeLamps();
       driftSmoke.updateFromVehicle(vehicle, camera, dt, keys);
       sparks.updateFromVehicle(vehicle, camera, dt);
     }
@@ -7967,6 +8063,8 @@ ${e.message}`);
       applyRoadLook();
     },
   };
+  handle.driftSmoke = driftSmoke; // console debugging: lamps, settings, pools
+  handle.smokeNightK = () => _smokeNightK;
   window.__roadGame = handle; // console debugging (window.__road is just the engine app)
   return handle;
 }

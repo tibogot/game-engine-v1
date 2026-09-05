@@ -1146,6 +1146,8 @@ export async function createWorldEnvironment({
      */
     lensFlareParams: () => toolState.lensFlare,
     setLensFlareOcclusion: (v) => lensFlare.setOcclusion(v),
+    setLensFlareSourceScale: (v) => lensFlare.setSourceScale?.(v),
+    setPurkinje: (o) => postFxPipeline?.setPurkinje?.(o),
     setCustomEnvSky,
     invalidateProcEnv,
     syncCsm,

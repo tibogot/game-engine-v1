@@ -2153,7 +2153,112 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
         </div>
+          <div class="prop-row">
+            <span class="prop-label">Star count</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-starcount" min="0.95" max="0.999" step="0.001" />
+              <span class="prop-num" id="dv-sk-starcount-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Star grid</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-stargrid" min="60" max="320" step="10" />
+              <span class="prop-num" id="dv-sk-stargrid-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Star size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-starsize" min="0.4" max="3" step="0.05" />
+              <span class="prop-num" id="dv-sk-starsize-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Moon phase</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-moonphase" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-sk-moonphase-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Moon brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-moonbright" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-sk-moonbright-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-sunsize" min="0.4" max="20" step="0.1" />
+              <span class="prop-num" id="dv-sk-sunsize-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun disc gain</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-sundisc" min="0.2" max="4" step="0.05" />
+              <span class="prop-num" id="dv-sk-sundisc-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun disc brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-sunbright" min="0" max="40" step="0.5" />
+              <span class="prop-num" id="dv-sk-sunbright-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun glow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-sunglow" min="0" max="2" step="0.02" />
+              <span class="prop-num" id="dv-sk-sunglow-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Horizon glow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-hzglow" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-sk-hzglow-v"></span>
+            </div>
+          </div>
       </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun aureole</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-aureole" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-sk-aureole-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aureole tightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-aureoleg" min="0.5" max="0.97" step="0.01" />
+              <span class="prop-num" id="dv-sk-aureoleg-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aureole haze</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-aureolehaze" min="1" max="8" step="0.1" />
+              <span class="prop-num" id="dv-sk-aureolehaze-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun bloom</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-sunbloom" min="0" max="1.5" step="0.01" />
+              <span class="prop-num" id="dv-sk-sunbloom-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Moon bloom</span>
+            <div class="prop-value">
+              <input type="range" id="dv-sk-moonbloom" min="0" max="2" step="0.02" />
+              <span class="prop-num" id="dv-sk-moonbloom-v"></span>
+            </div>
+          </div>
 
       <div class="inspector-section">
         <div class="section-header">Clouds — Shape</div>
@@ -2418,7 +2523,7 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="prop-row">
             <span class="prop-label">Sun strength</span>
             <div class="prop-value">
-              <input type="range" id="dv-pc-sun" min="0.5" max="4" step="0.05" />
+              <input type="range" id="dv-pc-sun" min="0" max="40" step="0.5" />
               <span class="prop-num" id="dv-pc-sun-v"></span>
             </div>
           </div>
@@ -2462,6 +2567,27 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-pc-edgehard" min="0.5" max="4" step="0.1" />
               <span class="prop-num" id="dv-pc-edgehard-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Powder</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-powder" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-pc-powder-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ground bounce</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-ground" min="0" max="0.5" step="0.01" />
+              <span class="prop-num" id="dv-pc-ground-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Erosion scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pc-eroscale" min="80" max="1200" step="10" />
+              <span class="prop-num" id="dv-pc-eroscale-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -5113,6 +5239,30 @@ export function createRoadDevPanel({ app, game, params }) {
     slider("dv-sk-stars", SK, "starBrightness", (v) => v.toFixed(2));
     slider("dv-sk-moon", SK, "moonSizeDeg", (v) => v.toFixed(2) + " deg");
     slider("dv-sk-earth", SK, "moonEarthshine", (v) => v.toFixed(3));
+    // Star count reads out as an APPROXIMATE number of stars over the whole sphere: the
+    // shell holds 4*pi*grid^2 cells and (1 - bar) of them hold one.
+    slider("dv-sk-starcount", SK, "starBar",
+      (v) => Math.round(4 * Math.PI * SK.starDensity * SK.starDensity * (1 - v)).toLocaleString() + " stars");
+    slider("dv-sk-stargrid", SK, "starDensity", (v) => (57.2958 / v).toFixed(2) + " deg/cell");
+    slider("dv-sk-starsize", SK, "starSize", (v) => v.toFixed(2) + "x");
+    slider("dv-sk-moonphase", SK, "moonAge",
+      (v) => (Math.abs(v - 0.5) < 0.03 ? "full" : (v < 0.03 || v > 0.97) ? "new" : v.toFixed(2)));
+    slider("dv-sk-moonbright", SK, "moonDiscBright", (v) => v.toFixed(2));
+    slider("dv-sk-sunsize", SK, "sunSizeDeg",
+      (v) => v.toFixed(2) + " deg" + (Math.abs(v - 0.53) < 0.03 ? " (real)" : ""));
+    // NOT a size: this is the last factor on the disc's INTENSITY. It was labelled "Sun
+    // disc size", which is why turning it up only made the sun brighter.
+    slider("dv-sk-sundisc", SK, "sunDiscScale", (v) => v.toFixed(2) + "x");
+    slider("dv-sk-sunbright", SK, "sunDiscBright", (v) => v.toFixed(1));
+    slider("dv-sk-sunglow", SK, "sunGlowStrength", (v) => v.toFixed(2));
+    slider("dv-sk-hzglow", SK, "horizonGlow", (v) => v.toFixed(2));
+    slider("dv-sk-aureole", SK, "aureole", (v) => (v < 0.005 ? "0.00 (off)" : v.toFixed(2)));
+    slider("dv-sk-aureoleg", SK, "aureoleG", (v) => v.toFixed(2));
+    slider("dv-sk-aureolehaze", SK, "aureoleHaze", (v) => v.toFixed(1) + "x at horizon");
+    // The game runs SELECTIVE bloom, so these decide whether the sun and moon bloom AT
+    // ALL — the bloom pass only ever sees the emissive MRT buffer.
+    slider("dv-sk-sunbloom", SK, "sunBloom", (v) => (v < 0.005 ? "0.00 (no bloom)" : v.toFixed(2)));
+    slider("dv-sk-moonbloom", SK, "moonBloom", (v) => (v < 0.005 ? "0.00 (no bloom)" : v.toFixed(2)));
   })();
 
   /* Lens flare — the params live in the ENGINE's world state (worldEnvironment owns
@@ -5205,6 +5355,9 @@ export function createRoadDevPanel({ app, game, params }) {
   pslider("dv-pc-selfsh", "selfShadow", (v) => (v < 0.005 ? "0.00 (off)" : v.toFixed(2)));
   pslider("dv-pc-selfreach", "selfReach", (v) => v.toFixed(0) + " m");
   pslider("dv-pc-edgehard", "edgeHard", (v) => (Math.abs(v - 1) < 0.01 ? "1.0 (raw)" : v.toFixed(1)));
+  pslider("dv-pc-powder", "powder", (v) => (v < 0.005 ? "0.00 (off)" : v.toFixed(2)));
+  pslider("dv-pc-ground", "groundBounce", (v) => v.toFixed(2));
+  pslider("dv-pc-eroscale", "erosionScale", (v) => v.toFixed(0) + " m");
   pslider("dv-pc-absorb", "absorb", (v) => v.toFixed(1));
   pslider("dv-pc-silver", "silver", (v) => v.toFixed(2));
   pslider("dv-pc-aerial", "aerial", (v) => v.toFixed(2));

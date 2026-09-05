@@ -817,6 +817,9 @@ export async function startV3App(opts = {}) {
     config: editorConfig,
     getWorldHeight: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
     toolState: treeToolState,
+    // Lazy: withRendererSideWork is declared further down (hoisted) and only
+    // runs after a preset loads, long after the loop's state exists.
+    runRendererSideWork: (fn) => withRendererSideWork(fn),
   });
   treeBvh = new TreeBvh(treeEnv.treeStore, (slotIdx) => {
     const s = treeToolState.treeSlots[slotIdx];
@@ -4885,6 +4888,8 @@ export async function startV3App(opts = {}) {
       bvhDebug?.rebuild();
     },
     removeTreeSlot: (slotIdx) => treeEnv.removeTreeSlot(slotIdx),
+    isTreeSlotLoaded: (slotIdx) => treeEnv.isSlotLoaded(slotIdx),
+    getTreeThumbnail: (slotIdx) => treeEnv.getSlotThumbnail(slotIdx),
     massPlaceTrees: () => treeEnv.treeSystem.massPlace(treeToolState.treePaint.massPlaceCount),
     clearAllTrees: () => treeEnv.treeSystem.clearAll(),
     setBvhDebugEnabled,
@@ -6616,6 +6621,11 @@ export async function startV3App(opts = {}) {
         worldEnv?.applyPostFxState();
       },
       /** Only emissive-MRT materials bloom when true (the v3 default). */
+      /**
+       * Night-vision response (Purkinje shift). `{ enabled }` rebuilds the display chain,
+       * so set it once; drive `{ amount }` per frame.
+       */
+      setPurkinje(o) { worldEnv?.setPurkinje?.(o); },
       setBloomSelective(on) {
         worldEnv?.postFxPipeline?.setBloomSelective(!!on);
       },
@@ -6649,6 +6659,8 @@ export async function startV3App(opts = {}) {
       params() { return worldEnv?.lensFlareParams?.() ?? null; },
       /** 0 = sun fully blocked, 1 = clear line of sight. Drive this per frame. */
       setOcclusion(v) { worldEnv?.setLensFlareOcclusion?.(v); },
+      /** Source diameter relative to the flare's authoring reference (1 = default). */
+      setSourceScale(v) { worldEnv?.setLensFlareSourceScale?.(v); },
     },
     // ── Shadow override ───────────────────────────────────────────────────────
     // CSM lives in worldToolState.csm and is NOT stored in .v3proj, so a game
