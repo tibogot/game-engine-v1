@@ -79,6 +79,11 @@ import {
   oneMinus,
   pow,
   cos,
+  sin,
+  floor,
+  fract,
+  length,
+  dot,
   fwidth,
   normalWorld,
   positionWorld,
@@ -260,6 +265,48 @@ export const WET_DEFAULTS = {
    * is perfect glass; 0 = puddles are as textured as the film around them.
    */
   rippleDamp: 0.9,
+
+  // ── IMPACT RINGS ──────────────────────────────────────────────────────────
+  //
+  // The rings a raindrop leaves when it lands in standing water. This is the
+  // ONE thing that says the rain is falling NOW rather than having fallen an
+  // hour ago, and without it the wet road and the rain are two effects that
+  // never acknowledge each other.
+  //
+  // It is also the exact inverse of the break-up above, and that is the point.
+  // `rippleDamp` fades the aggregate texture OUT as the water deepens, because
+  // a puddle deep enough to submerge the chips is glass. Rings do the opposite:
+  // a one-millimetre film has nothing to ring, so they fade IN with depth. The
+  // two together mean a puddle is a mirror when it is merely wet and a live
+  // surface while it is being rained on, which is the whole read.
+  //
+  // BUILD-TIME, not a uniform at zero. Nine cells of trig per fragment is not
+  // something a dry track should evaluate and discard — see `impacts` on
+  // createWetShading. `impactAmount` is the artistic fade WITHIN a build.
+  //
+  // MEASURED, in game, on the loop-back showcase parked where puddles fill the
+  // frame, four interleaved rounds of the road material rebuilt each way with
+  // the world rain isolated off: **+0.131 ms at 1920x889**, and +1.310 ms at
+  // pixelRatio 3. Ten times the cost for nine times the pixels, which is what
+  // pure fill on the largest surface on screen looks like. Roughly 2.5% of a
+  // 5.2 ms frame, and about 40% on top of what the rest of the wet road costs.
+  // `setRoadImpacts(false)` in roadGame is the machine-level off switch.
+  /** Master, 0..1. The game drives this from the rain switch. */
+  impactAmount: 1,
+  /**
+   * Slope of a ring at its steepest. Deliberately the same order as
+   * `rippleAmp` so the two normal contributions are comparable numbers.
+   *
+   * Judged in game on a full-width puddle: 0.09 is barely there, 0.30 reads as
+   * a downpour on a pond and starts to fight the reflection it is supposed to
+   * be breaking up. 0.16 is a shower.
+   */
+  impactAmp: 0.16,
+  /** Ring cells per metre. 0.75 ≈ one impact site every 1.3 m, which is dense
+   *  enough that a puddle always has two or three rings alive in it. */
+  impactScale: 0.75,
+  /** How often each cell fires, in rings per second. */
+  impactSpeed: 1.1,
 
   // ── MIRRORED-GEOMETRY RAIL REFLECTION ─────────────────────────────────────
   //
@@ -453,6 +500,7 @@ export const WET_NUMBERS = [
   "wetDrainStart", "wetCamber", "wetBank", "wetCurveRef", "wetDrainStrength",
   "wetSlopeMin", "wetSlopeMax", "wetWheelClear",
   "rippleAmp", "rippleScale", "rippleSpeed", "rippleStretch", "rippleDamp",
+  "impactAmount", "impactAmp", "impactScale", "impactSpeed",
   "reflectStrength", "reflectFresnel", "reflectDistort", "reflectBlur", "reflectStretch", "reflectFade",
   "reflectPlaneTol", "reflectErrTol",
   "railReflect", "railDepthTol", "railDepthSoft",
@@ -557,6 +605,25 @@ export function createWetField(u, wheelPath) {
  * steepness stay independent knobs instead of fighting each other.
  */
 export function wetRippleNormal(u) {
+  return packSlope(wetBreakupSlope(u));
+}
+
+/**
+ * Pack a tangent-space SLOPE (dh/dx, dh/dy) as a normal for `normalMap`.
+ *
+ * Split out because there are now two height fields — the break-up and the
+ * impact rings — and they must be summed as SLOPES and packed ONCE. Packing
+ * each and blending the results would normalise twice and give a surface that
+ * is neither field, and it would leave the clearcoat and the two reflection
+ * paths reading different wobbles, which is the bug tools/roadWetReflectionTest
+ * exists to prevent.
+ */
+function packSlope(slope) {
+  return vec3(slope.x.negate(), slope.y.negate(), 1.0).normalize().mul(0.5).add(0.5);
+}
+
+/** The paver/aggregate break-up, as a raw slope. See wetRippleNormal. */
+function wetBreakupSlope(u) {
   return Fn(() => {
     const a = uv().x.div(u.rippleStretch).mul(u.rippleScale);
     const b = uv().y.mul(u.rippleScale);
@@ -592,8 +659,106 @@ export function wetRippleNormal(u) {
     const texel = max(fwidth(a), fwidth(b));
     const fade = saturate(oneMinus(texel.mul(2.91 * 2.0)));
     const g = u.rippleAmp.mul(fade);
-    const n = vec3(dha.mul(g).negate(), dhb.mul(g).negate(), 1.0).normalize();
-    return n.mul(0.5).add(0.5);
+    return vec2(dha.mul(g), dhb.mul(g));
+  })();
+}
+
+/* ── IMPACT RINGS ─────────────────────────────────────────────────────────── */
+
+/** Radians of wavelet per cell unit. ~4.9 cycles across a cell. */
+const RING_K = 31.0;
+/** How far a ring's front travels, in cell units, over one cycle. Kept under
+ *  the 3×3 neighbourhood's reach so no ring is ever clipped by the cell it
+ *  strayed out of — which would read as rings dying against invisible walls. */
+const RING_REACH = 1.5;
+
+/** hash: cell id -> [0,1). */
+const ringHash1 = /*@__PURE__*/ Fn(([p]) =>
+  fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453)));
+
+/** hash: cell id -> a jitter inside the cell. */
+const ringHash2 = /*@__PURE__*/ Fn(([p]) => fract(
+  sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))).mul(43758.5453)));
+
+/**
+ * Concentric rings spreading from raindrop impacts, as a raw slope.
+ *
+ * ── WHY A CELL GRID AND NOT PARTICLES ───────────────────────────────────────
+ *
+ * There is no list of impacts and nothing to update. The plane is cut into
+ * cells; each cell hashes its own impact point and its own phase, so it fires
+ * on its own clock forever, for free. 3×3 because a ring outgrows the cell that
+ * spawned it and a fragment has to be able to see its neighbours' rings.
+ *
+ * Unrolled in JS rather than looped in TSL — nine compile-time offsets, the
+ * same shape the three break-up waves above already use, and it sidesteps the
+ * nested-Loop aliasing trap this repo has already been bitten by.
+ *
+ * ── WHY THE SLOPE IS ANALYTIC ───────────────────────────────────────────────
+ *
+ * The reference implementation central-differences the windowed sine at ±0.001
+ * to get its derivative — two sines and four smoothsteps per cell. But the
+ * height is W(m)·sin(k·m), so dh/dm = W·k·cos(k·m) + W'·sin(k·m), and with
+ * k = 31 the first term is an order of magnitude larger than the second.
+ * Keeping only it costs ONE cosine and two smoothsteps, and the dropped term is
+ * bounded by W' — which is only non-zero where W is heading for zero anyway.
+ *
+ * The k factor is then dropped as well, so `impactAmp` is a slope in the same
+ * units as `rippleAmp` instead of a number 31× smaller.
+ *
+ * ── WORLD SPACE, NOT UV ─────────────────────────────────────────────────────
+ *
+ * A ring is an event at a PLACE. On `uv()` the pattern would restart at every
+ * piece seam and change size whenever a piece was rescaled — the same failure
+ * the road-surface lab already catalogued for procedural noise on this deck.
+ */
+export function wetImpactSlope(u) {
+  return Fn(() => {
+    const p = positionWorld.xz.mul(u.impactScale).toVar();
+    const cell = floor(p).toVar();
+    const t = time.mul(u.impactSpeed);
+
+    let gx = float(0);
+    let gy = float(0);
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oz = -1; oz <= 1; oz++) {
+        const id = cell.add(vec2(ox, oz));
+        // Impact point: the cell's corner plus its own fixed jitter, so sites
+        // are irregular but never move.
+        const centre = id.add(ringHash2(id));
+        // Each cell on its own clock, offset by a per-cell constant so they do
+        // not all fire on the same beat.
+        const phase = fract(t.add(ringHash1(id))).toVar();
+        const d = centre.sub(p);
+        const r = length(d).toVar();
+        // Signed distance to the expanding front: negative inside it.
+        const m = r.sub(phase.mul(RING_REACH)).toVar();
+        // A band of wavelets just INSIDE the front and nothing outside it.
+        // Written as `1 - smoothstep(hi, lo)` rather than smoothstep with its
+        // arguments reversed: WGSL leaves that undefined when low >= high.
+        const w = m.smoothstep(-0.55, -0.28)
+          .mul(m.smoothstep(-0.28, 0.0).oneMinus());
+        // Amplitude dies over the cycle, so a ring fades rather than vanishing.
+        const amp = phase.oneMinus().mul(phase.oneMinus());
+        const dh = cos(m.mul(RING_K)).mul(w).mul(amp);
+        // Radially outward from the impact. Guarded: r is exactly 0 at the
+        // impact point itself, and normalize() there is a NaN that propagates
+        // into the clearcoat normal and blackens the fragment.
+        const inv = r.max(1e-4).reciprocal();
+        gx = gx.add(d.x.mul(inv).mul(dh));
+        gy = gy.add(d.y.mul(inv).mul(dh));
+      }
+    }
+
+    // SAME ANTI-ALIASING RULE AS THE BREAK-UP, and it matters more here: the
+    // wavelets run at ~4.9 cycles per cell unit, comfortably the highest
+    // frequency on this surface. Past a pixel per half-cycle the rings stop
+    // being rings and start being moiré that crawls with the camera — worst at
+    // exactly the grazing angles a chase camera spends its life at.
+    const texel = max(fwidth(p.x), fwidth(p.y));
+    const fade = saturate(oneMinus(texel.mul((RING_K / Math.PI))));
+    const g = u.impactAmp.mul(fade);
+    return vec2(gx.mul(g), gy.mul(g));
   })();
 }
 
@@ -611,7 +776,7 @@ export function wetRippleNormal(u) {
  *   coatRough: Node, coatNormalPacked: Node,
  * }}
  */
-export function createWetShading(u, wheelPath) {
+export function createWetShading(u, wheelPath, { impacts = false } = {}) {
   const field = createWetField(u, wheelPath);
   const film = field.x;
   const pond = field.y;
@@ -628,6 +793,32 @@ export function createWetShading(u, wheelPath) {
    * waterline without needing a second threshold or another noise sample.
    */
   const waterline = pow(saturate(pond.mul(oneMinus(pond)).mul(4.0)), u.waterlineSharp);
+
+  /**
+   * ONE SLOPE FIELD, packed ONCE, for the clearcoat and both mirrors.
+   *
+   * The two contributions are weighted here rather than outside, because they
+   * want OPPOSITE things from the water and a single `coatNormalGain` cannot
+   * express both:
+   *
+   *   • the break-up is the asphalt showing through, so standing water DROWNS
+   *     it (`rippleDamp`) — that contrast is what makes a puddle read as a
+   *     puddle rather than as more textured road;
+   *   • the rings are the water's own surface, so they need standing water to
+   *     exist on at all. A film a millimetre deep has nothing to ring.
+   *
+   * `coatNormalGain` is therefore now just the wetness gate, and the relative
+   * weighting lives in here where both terms can see `pond`.
+   *
+   * The damping consequently happens BEFORE the pack rather than after it,
+   * which is very slightly different arithmetic (the pack normalises). At these
+   * slopes — 0.05 to 0.15, so z stays above 0.99 — the difference is far below
+   * anything visible, and having one field beats having two that agree by hand.
+   */
+  const slope = impacts
+    ? wetBreakupSlope(u).mul(oneMinus(pond.mul(u.rippleDamp)))
+      .add(wetImpactSlope(u).mul(pond).mul(u.impactAmount))
+    : wetBreakupSlope(u).mul(oneMinus(pond.mul(u.rippleDamp)));
 
   return {
     field,
@@ -650,15 +841,16 @@ export function createWetShading(u, wheelPath) {
     /** Blend the deck's own roughness toward this by `film`. */
     substrateRough: u.wetRough,
     coatRough: mix(u.wetCoatRough, u.puddleCoatRough, pond),
-    coatNormalPacked: wetRippleNormal(u),
+    coatNormalPacked: packSlope(slope),
     /**
-     * How hard to push that normal. Wet enough to have a coat at all, MINUS
-     * however much of the break-up the standing water has drowned. This is the
-     * term that makes a puddle a mirror and the film around it textured, which
-     * is the read the reference photos actually have — not a uniformly rippled
-     * sheet from kerb to kerb.
+     * How hard to push that normal: simply how wet the fragment is.
+     *
+     * The pond damping that used to live here has moved into `slope` above —
+     * it applies to the break-up ONLY, and the rings need the opposite sign of
+     * the same quantity. Anything that is true of the whole water surface
+     * belongs here; anything that distinguishes the two fields belongs there.
      */
-    coatNormalGain: coat.mul(oneMinus(pond.mul(u.rippleDamp))),
+    coatNormalGain: coat,
   };
 }
 

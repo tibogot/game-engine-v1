@@ -161,8 +161,25 @@ export const WORLD_RAIN_DEFAULTS = {
   depth: 140,
 
   /* ── FALL ───────────────────────────────────────────────────────────────── */
-  /** Spawn height above the focus, metres. */
-  spawnHeight: 26,
+  /**
+   * Spawn height above the focus, metres.
+   *
+   * THIS MUST EXCEED `cameraHeight`, and the module clamps it so. The collision
+   * map can hold any surface up to `cameraHeight` above the centre, so a drop
+   * born below that ceiling is already "under the floor" on its very first
+   * frame: it collides instantly, respawns at the same altitude, and collides
+   * again — a whole population burning itself in a one-frame loop while the
+   * splashes pile up on a roof nobody can see.
+   *
+   * Found the moment this met a real track rather than the lab: the loop-back
+   * showcase carries its upper deck 30 m above the run-up, so the car drove
+   * under a ceiling at y=101 with drops spawning at y=96.6, and the rain
+   * simply stopped existing anywhere near the player. In the lab the tallest
+   * thing was a 13 m arch and the spawn was 26 m up, so nothing ever hit it.
+   *
+   * Rain comes from the sky. Spawn it above everything that can shelter you.
+   */
+  spawnHeight: 46,
   /** Terminal velocity, m/s. Real rain is 5-9; this is faster because a game
    *  frame is 16 ms and slow rain reads as snow. */
   fallSpeed: 16,
@@ -410,6 +427,23 @@ export function createWorldRain({ scene, renderer, params: overrides = {} } = {}
   const params = { ...WORLD_RAIN_DEFAULTS, ...overrides };
   const maxCount = Math.max(1, Math.round(params.maxCount));
   let count = Math.min(maxCount, Math.max(1, Math.round(params.count)));
+
+  /**
+   * The spawn/ceiling invariant, enforced rather than documented — see
+   * `spawnHeight`. Anything the bake can see is at most `cameraHeight` above
+   * the window centre, so a drop that starts below that is born already
+   * collided. The margin keeps the very first frame off the boundary.
+   */
+  const SPAWN_CLEARANCE = 6;
+  const minSpawn = params.cameraHeight + SPAWN_CLEARANCE;
+  if (params.spawnHeight < minSpawn) {
+    console.warn(
+      `[worldRain] spawnHeight ${params.spawnHeight} is below the collision `
+      + `camera's reach (${params.cameraHeight}); raising it to ${minSpawn}. `
+      + `Drops spawned under a sheltering surface collide on their first frame.`,
+    );
+    params.spawnHeight = minSpawn;
+  }
 
   const collision = createCollisionMap(renderer, params);
 
@@ -783,6 +817,21 @@ export function createWorldRain({ scene, renderer, params: overrides = {} } = {}
      *  contains rather than infer it from where the splashes ended up. */
     collisionTarget: collision.renderTarget,
     collisionCamera: collision.camera,
+    /**
+     * The particle state, for readback with `renderer.getArrayBufferAsync`.
+     *
+     * Exposed for the same reason as `collisionTarget`: when rain does not
+     * appear, the question is always "where are the drops actually?", and
+     * inferring that from the screen is guesswork. `splashTime.x >= 1000` is a
+     * dead splash; anything less is a live one at the matching `splash` entry.
+     */
+    buffers: {
+      position: positionBuffer.value,
+      velocity: velocityBuffer.value,
+      splash: splashBuffer.value,
+      splashTime: splashTimeBuffer.value,
+    },
+
     /** World XZ -> texel, for a readback. Mirrors uvFor() exactly. */
     texelFor(x, z) {
       const c = collision.bakedCentre.value;
@@ -808,7 +857,12 @@ export function createWorldRain({ scene, renderer, params: overrides = {} } = {}
 
     setArea: (a) => { params.area = a; collision.setArea(a); },
     setDepth: (d) => { params.depth = d; collision.setDepth(d); },
-    setSpawnHeight: (v) => { params.spawnHeight = v; uSpawnHeight.value = v; },
+    // Clamped for the same reason as the constructor: a spawn below the
+    // collision camera's reach is a drop that is born already collided.
+    setSpawnHeight: (v) => {
+      const n = Math.max(minSpawn, v);
+      params.spawnHeight = n; uSpawnHeight.value = n;
+    },
     setFallSpeed: (v) => { params.fallSpeed = v; uFallSpeed.value = v; },
     setFallJitter: (v) => { params.fallJitter = v; uFallJitter.value = v; },
     setRecycle: (v) => { params.recycleDrop = v; uRecycle.value = v; },
