@@ -99,6 +99,83 @@ export const CHASE_CAM = {
    *  the pivot lie in the same vertical plane, so left to itself the azimuth
    *  picks a side on rounding and the shot is not repeatable. */
   flipPivotSide: -1,
+  /** The pivot's window, in degrees of NOSE ANGLE up the ramp, and the angle
+   *  that reads as the SIDE view sitting between them.
+   *
+   *  `pivotSideDeg` must match the flip ramp's straight-face angle
+   *  (`loopbackAngle`, 70°). That is the whole trick: along the straight face
+   *  the nose angle does not change AT ALL, so a pivot driven by the nose
+   *  stops dead there on its own. Hinging the halfway point of the sweep on
+   *  that angle parks the hold exactly on the side view, and the length of the
+   *  face (`loopbackStraight`) becomes how long the camera holds it.
+   *
+   *  The window used to be 20°→65° — which ends BELOW the face angle, so the
+   *  sweep finished before it ever reached the flat spot, and spent its whole
+   *  180° inside the entry transition alone: ~0.6 s, about 300°/s, against
+   *  ~90°/s for a loop and a `boomMaxRate` backstop of 300. It ran at the
+   *  ceiling. Reaching past the face spreads the same rotation over roughly
+   *  twice the climb with a dead hold in the middle. */
+  pivotFromDeg: 20,
+  pivotSideDeg: 70,
+  pivotToDeg: 84,
+  /** Ceiling on how fast the pivot may ADVANCE, in units of t per second.
+   *  1/0.75 s, so the full 180° can never take less than 0.75 s.
+   *
+   *  It exists because the nose is a good clock for only half the climb.
+   *  MEASURED, entering at 26 m/s: the nose takes 0.40 s to go 36°->70°, then
+   *  sits at 70° for 0.24 s (the straight face — the dwell), and then whips
+   *  70°->84° in 0.10 s as the curl takes hold. Mapping the pivot straight onto
+   *  that would spend its first half at a decent 190°/s and its second at
+   *  900°/s. The cap turns that whip into a steady advance that still lands
+   *  well before the wheels leave.
+   *
+   *  Set deliberately just ABOVE what the first half asks for (peak ~1.36/s)
+   *  rather than below it. A tighter cap does smooth the sweep, but it does it
+   *  by running the pivot late into the straight face, and then the face is
+   *  spent catching up instead of holding — the dwell is the first thing a low
+   *  cap eats, and the dwell is the point. */
+  pivotRate: 1.4,
+  /** How much of the pivot is spent DECELERATING onto its final framing, in
+   *  units of t. A rate cap that simply stops when it arrives is a velocity
+   *  step: MEASURED 2376°/s² of view acceleration at 92% through the sweep,
+   *  right before the launch, which is the worst place to put one.
+   *
+   *  Measured against the END of the sweep, not against the current target.
+   *  Against the target it also decelerates onto the DWELL, and then creeps
+   *  through the straight face at a fraction of the rate instead of resting on
+   *  it — which cost the entire hold (0.20 s -> 0.00 s). Arriving at the hold
+   *  needs no help, because `want` is a smoothstep and eases itself in; only
+   *  the finish is cap-governed, so only the finish stops dead.
+   *
+   *  A critically damped follow on the whole pivot was tried instead of this
+   *  and is worse HERE, which is worth recording because it is the obvious
+   *  move: it decelerates onto the hold too, so the dwell fell to 0.03 s at
+   *  speed, and it bought almost nothing (1827 vs 1836°/s²) because the
+   *  roughness at that moment is not the camera's — see below. */
+  pivotArrive: 0.15,
+  /** `headingLerp` while the flip pivot is running.
+   *
+   *  4.0 is a 0.25 s time constant, which on a ~1 s sweep is not smoothing, it
+   *  is a delay: MEASURED, the boom reached only t=0.39 while the pivot was
+   *  asking for 0.63, and the freeze at launch then caught the shot 87% built
+   *  instead of finished. The pivot is authored smooth and rate-capped, so
+   *  there is nothing here for a slow follow to protect against.
+   *
+   *  It has to be this tight for the DWELL to exist at all, which is the part
+   *  that is easy to get wrong. A follow lags a moving target by roughly
+   *  rate x its time constant, so the boom arrives at the straight face already
+   *  behind, and then spends the face catching up rather than holding still. At
+   *  a combined ~0.2 s of lag that ate the hold entirely (0.06 s of 0.24 s
+   *  survived). The dwell is only ever as long as the face MINUS the lag. */
+  flipHeadingLerp: 25.0,
+  /** `boomSmoothTime` while the flip pivot is running.
+   *
+   *  Tighter, because the pivot is AUTHORED smooth — eased in and out of the
+   *  hold — so it does not need the spring to smooth it, and at 0.28 the spring
+   *  lags a 200°/s sweep by ~60°: the camera would trail the composition badly
+   *  enough to smear the very dwell this is for. The 0.28 case that comment
+   *  defends is a rate-limited boom fed a large error, which this is not. */
+  flipSmoothTime: 0.06,
   minSpeed: 3.0,      // below this the boom falls back to the car's facing
   headingLerp: 4.0,   // how fast the boom swings onto the travel direction
   /** How fast the boom's up tracks the road while GROUNDED. This is what keeps
@@ -204,6 +281,70 @@ export const CHASE_CAM = {
   fovAtSpeed: 12,     // extra degrees at fovSpeedRef and above
   fovSpeedRef: 50,    // m/s for the full kick — keep matching TIRE.topSpeed
   fovLerp: 3.0,       // slow: a twitchy FOV reads as nausea
+
+  // ── IMPACT ─────────────────────────────────────────────────────────────────
+  // The car lands a 45 m inverted flip and, without this, the camera does not
+  // acknowledge it at all. Both effects are PRESENTATION ONLY: they move the
+  // view, never the boom, the anchor or anything the physics can see.
+  /** Closing speed (m/s) at touchdown below which nothing happens, and the speed
+   *  at which the shake is at full strength. The floor matters more than the
+   *  ceiling: every kerb, seam and tessellation facet is a small impact, and a
+   *  camera that twitches at all of them reads as a fault, not as feedback. */
+  shakeFrom: 6,
+  shakeFull: 26,
+  /** Peak displacement of the CAMERA, in metres.
+   *
+   *  The camera moves; the shot does not. This is the whole design, and the
+   *  first version got it backwards by rotating the VIEW instead — which broke
+   *  both of the invariants the rig is built on, in exactly the way
+   *  `chaseFramingTest` exists to catch: the car came off its fixed screen
+   *  position (off-axis range 1.54°, against a 0.5° bound) and the horizon
+   *  tilted 0.22° where every other piece in the kit reads 0.0000°.
+   *
+   *  Displacing the camera instead is free of both. The shake is applied BEFORE
+   *  the view is composed, so `_d` — camera to car — is recomputed from where
+   *  the camera actually ended up: the car stays pinned to the same pixel, the
+   *  horizon is still taken exactly level off the new position, and what the
+   *  player sees moving is the world. Which is what an impact looks like. */
+  shakeMetres: 0.13,
+  /** Angular frequencies of the shake, rad/s. Low — a heavy knock, not a
+   *  rattle — and the angular acceleration this produces at the boom's distance
+   *  goes as amplitude x frequency SQUARED, so this is the term that decides
+   *  whether the shake stays inside the kit's smoothness bound. */
+  shakeHz: [15, 25, 19, 29],
+  /** Time constant of the shake's decay, seconds. Short — the impact is over,
+   *  and a shake that outlives it stops reading as an impact. */
+  shakeDecay: 0.16,
+  /** …and its ATTACK, seconds. Not a stylistic choice — the shake's amplitude
+   *  multiplies a sine that is at an arbitrary point in its cycle when a new
+   *  impact lands, so stepping the amplitude steps the camera's POSITION, and a
+   *  position step is an unbounded acceleration.
+   *
+   *  A landing is not one impact: the wheels touch, the car bounces, and each
+   *  bounce past `airGroundLockout` tops the envelope up again. MEASURED, that
+   *  turned a 15-29 rad/s shake into something the view read as 83 rad/s —
+   *  6336°/s² of view acceleration on top of the jump ramp, against a 1200
+   *  bound for the whole kit. It was never the frequencies; it was the steps
+   *  between them. */
+  shakeAttack: 0.045,
+  /** Degrees of FOV thrown on at a launch, and how fast it bleeds off.
+   *  It punches instantly and recovers slowly, which is the shape that reads as
+   *  the world lurching away from you rather than as the FOV being animated. */
+  launchFovKick: 7,
+  launchFovDecay: 0.55,
+  /** Upward speed (m/s) at the moment the wheels leave, below which it is a
+   *  crest or a kerb hop rather than a launch. */
+  launchMinRise: 4.5,
+  /** …and how long the car must have been ON the ground first, in seconds.
+   *
+   *  A BOUNCE IS NOT A LAUNCH. Without this, coming down off a 40 m ramp fires
+   *  the punch again on every hop out of the landing: MEASURED, the FOV was
+   *  still +3.4° of its +6.9° punch three decay constants later, which should
+   *  have left 0.3°. It was not a decay bug — it was the same launch firing over
+   *  and over. The vehicle draws exactly this distinction for air control
+   *  (TIRE.airGroundLockout, "a bounce is not a trick"); this is the same idea
+   *  the other way round. */
+  launchMinGrounded: 0.3,
 };
 
 /**
@@ -226,6 +367,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   const _wallSide = new THREE.Vector3(1, 0, 0);
   let _wallLatched = false;
   let _wallT = 0;
+
   const _boomU = new THREE.Vector3(0, 1, 0);  // boom up — the road's normal
   const _anchor = new THREE.Vector3();
   const _prevPos = new THREE.Vector3();
@@ -246,6 +388,8 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   const _right = new THREE.Vector3(1, 0, 0);  // persistent, eased toward level
   const _rightTgt = new THREE.Vector3();
 
+  const _shkA = new THREE.Vector3();   // the two axes the shake swings across
+  const _shkB = new THREE.Vector3();
   const _upD = new THREE.Vector3();
   const _view = new THREE.Vector3();
   const _camUp = new THREE.Vector3();
@@ -253,6 +397,12 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   let _air = 0;
   let _init = false;
   let _snap = false;
+  /** Impact FX. `_shake` is 0-1 of energy, `_shakeT` its own clock so the
+   *  waveform does not restart (and click) when a second impact lands on top of
+   *  a decaying one. `_fovSmooth` is the speed FOV, kept separate so a kick can
+   *  be added to it without being dragged through `fovLerp`. */
+  let _shake = 0, _shakeTgt = 0, _shakeT = 0, _fovKick = 0, _fovSmooth = null;
+  let _wasGrounded = true, _groundFor = 0;
 
   const D2R = Math.PI / 180;
 
@@ -296,10 +446,16 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     return (cur - change) + (change + temp) * exp;
   }
 
-  function applyFov(target, dt, snap) {
+  function applyFov(target, dt, snap, kick = 0) {
     if (!camera.isPerspectiveCamera) return;
-    const k = snap ? 1 : 1 - Math.exp(-CAM.fovLerp * dt);
-    const next = camera.fov + (target - camera.fov) * k;
+    // The SPEED fov is smoothed; the kick is not. Lerping `camera.fov` itself
+    // toward `target + kick` would drag the punch through `fovLerp`, which is
+    // deliberately slow (3.0) because a twitchy speed-FOV reads as nausea — and
+    // a punch smeared over a third of a second is not a punch. So the smoothed
+    // base is carried separately and the kick is simply added on top of it.
+    if (_fovSmooth === null || snap) _fovSmooth = target;
+    else _fovSmooth += (target - _fovSmooth) * (1 - Math.exp(-CAM.fovLerp * dt));
+    const next = _fovSmooth + kick;
     if (Math.abs(next - camera.fov) < 1e-3) return;
     camera.fov = next;
     camera.updateProjectionMatrix();
@@ -310,6 +466,12 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     _init = false;
     _air = 0;
     _snap = true;
+    _shake = 0;
+    _shakeTgt = 0;
+    _fovKick = 0;
+    _wasGrounded = true;
+    _groundFor = 0;
+    if (vehicle) vehicle.landImpact = 0;
   }
 
   function update(dt) {
@@ -335,10 +497,34 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     const grounded = vehicle.groundedCount > 0;
     _air = grounded ? 0 : _air + dt;
 
+    // ── IMPACT FX ────────────────────────────────────────────────────────────
+    // Read and CLEAR the vehicle's one-shot landing report. Taking the max
+    // rather than overwriting means a second impact inside a decaying first one
+    // tops the shake up instead of cutting it short.
+    const hit = vehicle.landImpact ?? 0;
+    if (hit > 0) {
+      vehicle.landImpact = 0;
+      _shakeTgt = Math.max(_shakeTgt,
+        THREE.MathUtils.smoothstep(hit, CAM.shakeFrom, CAM.shakeFull));
+    }
+    // The launch: the edge where the wheels leave with real upward speed, having
+    // actually been on the ground first. See CAM.launchMinGrounded.
+    if (_wasGrounded && !grounded && v.y > CAM.launchMinRise
+      && _groundFor > CAM.launchMinGrounded) _fovKick = 1;
+    _groundFor = grounded ? _groundFor + dt : 0;
+    _wasGrounded = grounded;
+    if (snap) { _shake = 0; _shakeTgt = 0; _fovKick = 0; }
+    // The envelope decays; the AMPLITUDE follows it through an attack, so no
+    // impact — first or fifth — can step the camera. See CAM.shakeAttack.
+    _shakeTgt *= Math.exp(-dt / CAM.shakeDecay);
+    _shake += (_shakeTgt - _shake) * (1 - Math.exp(-dt / CAM.shakeAttack));
+    _fovKick *= Math.exp(-dt / CAM.launchFovDecay);
+    _shakeT += dt;
+
     // Total speed, not horizontal, so a near-vertical drop reads as fast too.
     applyFov(
       CAM.fovBase + CAM.fovAtSpeed * Math.min(1, speed / Math.max(1, CAM.fovSpeedRef)),
-      dt, snap,
+      dt, snap, CAM.launchFovKick * _fovKick,
     );
 
     _carFwd.set(0, 0, 1).applyQuaternion(rquat);
@@ -368,7 +554,12 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     // nose test picks out the loop-back and nothing else; `_flipHold` is the
     // vehicle's own "carrying a curl's rotation" flag, 1 for exactly this
     // flight. Ordinary jumps, loops and bowls frame as they always have.
-    const onWall = grounded && !!vehicle._holdContact && _carFwd.y > 0.5;
+    // 0.35 is a nose of 20.5°, not the 30° it used to be. The pivot cannot start
+    // before this gate opens, and at 30° it had only ~0.4 s of climb left to
+    // sweep its first 90° in — which is most of why the shot felt hurried. The
+    // kit's ordinary grades top out at 14°, so there is still clear air between
+    // this and any road the car merely drives up.
+    const onWall = grounded && !!vehicle._holdContact && _carFwd.y > 0.35;
     const flipAir = !grounded && (vehicle._flipHold ?? 0) > 0;
     if (onWall) {
       if (!_wallLatched) {
@@ -379,22 +570,59 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
         else _wallFwd.copy(_boomF).setY(0).normalize();
         _wallLatched = true;
       }
-      // ONE PIVOT, DRIVEN BY THE NOSE, FINISHED BY THE TOP.
+      // ONE PIVOT, DRIVEN BY THE NOSE, HELD AT THE SIDE, FINISHED BY THE TOP.
       //
-      // Both ends of it are fixed by what the shot has to show:
-      //   t=0, nose 30°  — the boom is the CAR'S OWN frame, so on a wall that
-      //                    is out from the face looking down at the ROOF.
-      //   t=1, nose 110° — level, on the far side, behind the RETURN direction,
-      //                    so an inverted car reads as horizontal and upside
-      //                    down (its underside toward the camera).
-      // Between them the camera sweeps the side view. That is 180° of relative
-      // rotation, which is why locking the boom to the car's frame could never
-      // produce it: that keeps the same face of the car pointed at you forever.
-      // And it is spent on the CLIMB, so by the time the wheels leave the shot
-      // is composed and the flight holds it — the camera must not still be
-      // hunting on the way down to the deck.
+      // Three points fix it, all in degrees of nose angle, all of them things
+      // the shot has to show:
+      //   t=0,   nose 20°  — the boom is the CAR'S OWN frame, so on a wall that
+      //                      is out from the face looking down at the ROOF.
+      //   t=0.5, nose 70°  — square onto the SIDE of the car. This is the
+      //                      ramp's straight-face angle, and that is the point:
+      //                      see below.
+      //   t=1,   nose 110° — level, on the far side, behind the RETURN
+      //                      direction, so an inverted car reads as horizontal
+      //                      and upside down (its underside toward the camera).
+      // That is 180° of relative rotation, which is why locking the boom to the
+      // car's frame could never produce it: that keeps the same face of the car
+      // pointed at you forever. And it is spent on the CLIMB, so by the time the
+      // wheels leave, the shot is composed and the flight holds it — the camera
+      // must not still be hunting on the way down to the deck.
+      //
+      // THE HOLD IS THE RAMP'S, NOT THE CAMERA'S. Hinging the halfway point on
+      // the face angle means the dwell costs nothing to compute and cannot drift
+      // out of sync: along the straight face the nose angle is CONSTANT, so
+      // `noseDeg` stops, so the pivot stops, for exactly as long as the car is
+      // on the face. Lengthen `loopbackStraight` and the camera holds the side
+      // view for longer, at any entry speed, with no timer anywhere.
+      //
+      // Each half is smoothstepped rather than linear, so the sweep eases INTO
+      // the hold and back OUT of it instead of stopping and starting square.
+      //
+      // AND THE PIVOT ONLY EVER GOES FORWARD. The nose does not rise all the way
+      // to the lip and stay there — MEASURED, it peaks around 85° and then falls
+      // back through 75°, 65°, 56° as the car comes off the curl and the chassis
+      // pitches down under it. Read as a plain function of the nose, the shot
+      // would UNWIND over those last few tenths and then freeze half-built. So
+      // the nose proposes and a ratchet disposes: once the camera has swept
+      // somewhere, it stays there until the wheels are back on the ground.
+      // `pivotToDeg` is set to that measured peak rather than to the ramp's lip
+      // angle, since a target the car never reaches is a pivot that never ends.
       const noseDeg = Math.atan2(_carFwd.y, _carFwd.dot(_wallFwd)) / D2R;
-      _wallT = THREE.MathUtils.clamp((noseDeg - 20) / 45, 0, 1);
+      const want = noseDeg < CAM.pivotSideDeg
+        ? 0.5 * THREE.MathUtils.smoothstep(noseDeg, CAM.pivotFromDeg, CAM.pivotSideDeg)
+        : 0.5 + 0.5 * THREE.MathUtils.smoothstep(noseDeg, CAM.pivotSideDeg, CAM.pivotToDeg);
+      // …and it comes to REST rather than stopping, see CAM.pivotArrive. The
+      // floor keeps it from crawling the last hundredth forever.
+      // Measured against the END of the sweep, not against the current target.
+      // Against the target it also decelerates onto the DWELL — and then creeps
+      // through the straight face at a tenth of the rate instead of resting on
+      // it, which cost the whole hold (0.20 s -> 0.00 s). Arriving at 0.5 needs
+      // no help: `want` is a smoothstep, so it eases itself in. Only the finish
+      // is cap-governed, and only the finish stops dead.
+      // …and it comes to REST rather than stopping — see CAM.pivotArrive. The
+      // floor keeps it from crawling the last hundredth forever.
+      const arrive = Math.max(0.12, THREE.MathUtils.smoothstep(1 - _wallT, 0, CAM.pivotArrive));
+      _wallT = Math.max(_wallT, Math.min(want, _wallT + CAM.pivotRate * arrive * dt));
       // Swept round a chosen SIDE rather than blended straight through: both
       // ends of the pivot lie in the vertical plane through the entry
       // direction, so a plain blend has no side to prefer and the azimuth picks
@@ -430,7 +658,23 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
       _init = true;
     }
 
-    easeDir(_boomF, _dirTgt, snap ? 1 : 1 - Math.exp(-CAM.headingLerp * dt));
+    // See CAM.flipHeadingLerp: through the pivot the target is already smooth
+    // and rate-limited, so the follow is tightened to let it through intact.
+    //
+    // EASED IN, though, over the first fifth of the sweep. The pivot's frame is
+    // the HORIZONTAL direction the car entered on, while the boom arrives
+    // pointing up the slope the car is climbing, so the target steps by the
+    // slope angle on the single frame the pivot engages. At the normal follow
+    // rate that step was invisible; snapped at the tight one it was the whole
+    // camera's worst moment — MEASURED 11271°/s² of view acceleration, all of it
+    // on that first frame, against 1200 for the entire rest of the kit. Nothing
+    // is lost by taking it slowly: at t≈0 the pivot has barely left the shot the
+    // camera was already holding.
+    const headRate = onWall
+      ? THREE.MathUtils.lerp(CAM.headingLerp, CAM.flipHeadingLerp,
+        THREE.MathUtils.smoothstep(_wallT, 0, 0.2))
+      : CAM.headingLerp;
+    easeDir(_boomF, _dirTgt, snap ? 1 : 1 - Math.exp(-headRate * dt));
     const upRate = flipFlat && !grounded ? 0
       : grounded ? CAM.upLerp : (_air < CAM.airHold ? 0 : CAM.airUpLerp);
     if (upRate > 0) easeDir(_boomU, _upTgt, snap ? 1 : 1 - Math.exp(-upRate * dt));
@@ -547,13 +791,40 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
       let dAz = _azTgt - _az;
       while (dAz > Math.PI) dAz -= 2 * Math.PI;
       while (dAz < -Math.PI) dAz += 2 * Math.PI;
-      _az = smoothDamp(_az, _az + dAz, _vel, 0, CAM.boomSmoothTime, dt, cap);
-      _el = smoothDamp(_el, elTgt, _vel, 1, CAM.boomSmoothTime, dt, cap);
+      // See CAM.flipSmoothTime. Changing a smoothDamp's time constant is safe
+      // mid-flight: position and velocity are carried in `_vel`/`_az` and stay
+      // continuous, only the stiffness steps.
+      const smoothT = flipFlat ? CAM.flipSmoothTime : CAM.boomSmoothTime;
+      _az = smoothDamp(_az, _az + dAz, _vel, 0, smoothT, dt, cap);
+      _el = smoothDamp(_el, elTgt, _vel, 1, smoothT, dt, cap);
     }
 
     const ce = Math.cos(_el);
     _boomDir.set(Math.sin(_az) * ce, Math.sin(_el), Math.cos(_az) * ce);
     camera.position.copy(_anchor).addScaledVector(_boomDir, Math.hypot(CAM.dist, CAM.height));
+
+    // ── THE SHAKE ────────────────────────────────────────────────────────────
+    // Here, and not below: everything downstream derives from `camera.position`,
+    // so displacing it now means the aim, the horizon and the framing are all
+    // recomputed from the shaken vantage point rather than being disturbed after
+    // the fact. The car does not move on screen at all — see CAM.shakeMetres.
+    //
+    // Swung across the two axes perpendicular to the boom, with two
+    // incommensurate frequencies each and different phases, so it reads as a
+    // knock rather than as a sine wave and never degenerates into a diagonal.
+    if (_shake > 1e-4) {
+      const a = CAM.shakeMetres * _shake;
+      const [f1, f2, f3, f4] = CAM.shakeHz;
+      _shkA.set(0, 1, 0).cross(_boomDir);
+      if (_shkA.lengthSq() < 1e-6) _shkA.set(1, 0, 0).cross(_boomDir);
+      _shkA.normalize();
+      _shkB.crossVectors(_boomDir, _shkA).normalize();
+      camera.position
+        .addScaledVector(_shkA,
+          a * (Math.sin(_shakeT * f1) * 0.6 + Math.sin(_shakeT * f2 + 1.3) * 0.4))
+        .addScaledVector(_shkB,
+          a * (Math.sin(_shakeT * f3 + 1.7) * 0.6 + Math.sin(_shakeT * f4 + 0.4) * 0.4));
+    }
 
     // ── 4. VIEW — aim AT the car, then tilt the axis up by φ. Independent of
     // the boom, which is what pins the car and frees the boom. ────────────────
@@ -611,6 +882,9 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     /** Where the car sits relative to the view axis, in degrees (negative =
      *  below centre). Exact — the rig places it there by construction. */
     get framingDeg() { return -CAM.carBelowCentre; },
+    /** Impact FX, 0-1 each: the shake's live amplitude and the launch punch. */
+    get shake() { return _shake; },
+    get fovKick() { return _fovKick; },
   };
 
   return { update, reset, params: CAM, state };

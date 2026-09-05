@@ -4147,6 +4147,26 @@ export class Vehicle {
     this._steerFwd = new THREE.Vector3();
     /** Seconds since the last wheel contact — gates air control (airGroundLockout). */
     this._airTime = 0;
+    /**
+     * Closing speed (m/s) into the surface of the last real touchdown — how HARD
+     * the car just landed, for presentation to consume. One-shot: whoever reads
+     * it clears it, and nothing in the physics ever reads it, so it cannot feed
+     * back into the sim no matter what the camera does with it.
+     *
+     * Reported rather than judged. What counts as a landing worth reacting to is
+     * a presentation decision, so the vehicle publishes the number and the
+     * camera owns the thresholds. The one judgement made here is `airGroundLockout`
+     * — below that the wheels never really left, and reporting every kerb and
+     * tessellation facet as an impact would make the signal useless.
+     */
+    this.landImpact = 0;
+    /** Velocity at the top of the current substep, before this substep's tyre
+     *  and landing-assist work lands on it. The impact has to be read from here:
+     *  `_applyLandingAssist` runs first and deliberately absorbs part of the
+     *  closing speed, so by the time the stabilizer sees `body.vel` the number
+     *  that describes the landing is already gone. */
+    this._velAtStep = new THREE.Vector3();
+    this._landN = new THREE.Vector3();
     /** 1 while a rotation carried off a curl is live, else 0. See rampCarry*. */
     this._flipHold = 0;
     /** Seconds since the wheels last left the ground while the carry is still
@@ -4972,6 +4992,7 @@ export class Vehicle {
     const fScale = 2 * (1 - bias);
     const rScale = 2 * bias;
     for (let s = 0; s < this.SUBSTEPS; s++) {
+      this._velAtStep.copy(body.vel);
       this._gravityF.set(0, -GRAVITY * body.mass, 0);
       body.addForce(this._gravityF);
       this._applyAero();
@@ -5428,6 +5449,16 @@ export class Vehicle {
     this._stabUp.set(0, 1, 0).applyQuaternion(body.quat);
 
     if (grounded > 0) {
+      // BEFORE `_airTime` is cleared — this is the only substep on which the
+      // transition is visible at all.
+      if (this._airTime > TIRE.airGroundLockout) {
+        this._landN.copy(this._stabN);
+        if (this._landN.lengthSq() > 1e-6) {
+          this._landN.normalize();
+          const closing = -this._velAtStep.dot(this._landN);
+          if (closing > this.landImpact) this.landImpact = closing;
+        }
+      }
       this._airTime = 0;
       this._holdContact = holdContact;
       // What the surface is doing to the chassis, every substep a wheel is down,
