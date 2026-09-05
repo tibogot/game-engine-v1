@@ -82,13 +82,25 @@ export const CHASE_CAM = {
   // ── FRAMING. `carBelowCentre` is now the ONLY thing that moves the car on
   // screen. dist/height change where you watch FROM, not where the car sits. ──
   /** Degrees the car sits below the centre of the screen. 0 = dead centre.
-   *  Exact, at every attitude — see the derivation above. */
-  carBelowCentre: 14.0,
+   *  Exact, at every attitude — see the derivation above.
+   *
+   *  6°, from measuring the reference rather than from taste: in an Apex Rush
+   *  frame the car's centre sits about 9% of the frame height below the middle,
+   *  which on this vertical FOV is roughly 6°. At the old 14° it sat about 23%
+   *  down — low enough that the car reads as sitting in the bottom of the shot
+   *  rather than in it. */
+  carBelowCentre: 6.0,
 
   // ── THE BOOM: where the camera sits. Free to follow the road, because it can
   // no longer disturb the framing. ─────────────────────────────────────────────
   dist: 7.5,          // trail distance behind the car, along −boomF
-  height: 3.2,        // offset along the ROAD's normal, +boomU
+  height: 2.6,        // offset along the ROAD's normal, +boomU
+  // Lower than it was (3.2), and this — not the FOV — is what makes the road
+  // read WIDE. Dropping the camera flattens the view, so the deck fills more of
+  // the frame and the horizon rides higher, which is what the reference does
+  // (its horizon sits ~38% down the frame). Widening the FOV would spread the
+  // road too, but it would shrink the car in the same move, and in the
+  // reference the car is not small — about 23% of the frame's width.
   /** Multiplier on `height` while riding the loop-back wall and through its
    *  flight. On a vertical wall the boom's up is OUT from the face, so more
    *  of it puts the camera looking at the car's roof rather than up its
