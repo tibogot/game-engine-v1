@@ -346,6 +346,51 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    *  `liftDelay`. Hot smoke rises — but not until the wake has let go. */
   lift: 1.8,
   liftDelay: 0.35,
+  /**
+   * ── THE CAR'S OWN LIGHTS ─────────────────────────────────────────────────
+   * Up to four lamps (two tail, two head) light the plume from inside the
+   * scene: the iconic night drift shot is smoke glowing RED off the brake
+   * lights. Positions, colours and intensities come from the game every
+   * frame via setLamp(); this block only shapes the response.
+   */
+  lamps: {
+    enabled: true,
+    /** Master multiplier on all four. */
+    strength: 1.0,
+    /** Falloff radius, m: intensity / (1 + (d/radius)²). Small, because a
+     *  tail lamp is a point source a metre from the smoke, not a floodlight. */
+    radius: 0.45,
+    /** Hard range, m, beyond which a lamp contributes nothing. */
+    range: 9,
+  },
+  /**
+   * ── WHEEL-ARCH EMISSION ──────────────────────────────────────────────────
+   * Smoke does not appear at a point under the tyre; it is dragged AROUND
+   * the tyre by the tread and pours out of the arch behind it. So puffs are
+   * born on an arc from the contact patch up the back of the tyre, thrown
+   * along the rim's own surface motion, and given a short-lived swirl about
+   * the axle — the vortex the spinning wheel sheds. This is the "smoke
+   * wrapping the wheel" look, and it is all emission: no shader cost.
+   */
+  arch: {
+    enabled: true,
+    /** Tyre radius, m. The car's is 0.36. */
+    wheelRadius: 0.36,
+    /** Degrees of tyre the emission arc covers, from the contact patch
+     *  (0°) up the back of the tyre (90° = hub height). Biased toward the
+     *  contact end. */
+    sweep: 110,
+    /** Fraction of road speed a puff leaves with along the rim tangent —
+     *  backwards at the contact, upwards at the back of the tyre. */
+    throw: 0.25,
+    /** Swirl about the axle, m/s², decaying to zero over vortexTime. */
+    vortex: 6,
+    vortexTime: 0.35,
+    /** ± m across the tread the birth point is spread. */
+    treadSpread: 0.14,
+    /** Fraction of the radius the birth point sits OUTSIDE the rubber. */
+    out: 0.06,
+  },
   // ── LIGHTING ──────────────────────────────────────────────────────────────
   /**
    * Master lighting amount, 0..1. 0 leaves the flat unlit tint (what this
@@ -564,6 +609,10 @@ const TINT_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 4;
 const NOISE_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 4;
 const SPHERE_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 4;
 const CLASS_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 2;
+/** Per-vertex lamp irradiance, rgb. See `_lampAt`. */
+const LAMP_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 3;
+/** Scratch for the per-particle lamp sum. */
+const _lampRgb = [0, 0, 0];
 /**
  * The quad has to circumscribe the SPHERE'S SCREEN PROJECTION, not the sphere.
  * A sphere of radius R at distance d subtends asin(R/d); a quad of half-width R
@@ -587,6 +636,8 @@ const CLASS_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 2;
  * and the proximity fade below are for.
  */
 const K_MAX = 0.9;
+/** Tail ×2 + head ×2. Unrolled in the shader, so this is a compile-time size. */
+const LAMP_COUNT = 4;
 /**
  * Camera-proximity fade for the puffs, in two terms, whichever is smaller.
  *
@@ -934,6 +985,12 @@ export class ModularRoadDriftSmoke {
     const classAttr = new THREE.BufferAttribute(classes, 2);
     classAttr.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("aClass", classAttr);
+    // Lamp irradiance, rgb, written per particle (see `_lampAt`). Buffer #7
+    // of WebGPU's 8 — the last one this geometry can spare.
+    const lampLight = new Float32Array(TOTAL_POOL * LAMP_FLOATS_PER_PARTICLE);
+    const lampAttr = new THREE.BufferAttribute(lampLight, 3);
+    lampAttr.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute("aLamp", lampAttr);
     geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
     geometry.setDrawRange(0, 0);
 
@@ -971,6 +1028,27 @@ export class ModularRoadDriftSmoke {
     this.uOpticalK = uniform(settings.opticalK ?? 1.8);
     /** Curl field clock. Separate from uTime so `curl.speed` scales it. */
     this._curlTime = 0;
+    /**
+     * The car's lamps — CPU state, not uniforms. Their light is summed PER
+     * PARTICLE in `_stepPool` (`_lampAt`) and reaches the shader as a vertex
+     * attribute, because the per-pixel version measured ~1.5–2 ms at native
+     * resolution with the plume filling a night frame: four lamps evaluated
+     * under every layer of overdraw. A puff is at most a couple of metres
+     * across and smoke scatters near-isotropically, so the gradient a
+     * per-pixel evaluation buys within one puff is not visible; the layering
+     * of many differently-lit puffs is the whole effect, and that survives.
+     * Four evaluations per particle per frame is ~3k operations — nothing.
+     */
+    this.lamps = [];
+    for (let i = 0; i < LAMP_COUNT; i++) {
+      this.lamps.push({
+        pos: new THREE.Vector3(), col: new THREE.Color(1, 1, 1), intensity: 0,
+        dir: new THREE.Vector3(0, 0, 1), cone: 0,
+      });
+    }
+    this._lampStrength = 0;
+    this._lampRadius2 = (settings.lamps?.radius ?? 0.45) ** 2;
+    this._lampRange = settings.lamps?.range ?? 9;
 
     /** True while the spray (streak) shading path is the mesh's material. */
     this._streakOn = false;
@@ -1039,6 +1117,7 @@ export class ModularRoadDriftSmoke {
     this.noise = noise;
     this.spheres = spheres;
     this.classes = classes;
+    this.lampLight = lampLight;
     this.geometry = geometry;
     this.material = material;
     const makePool = (n) => Array.from({ length: n }, () => ({
@@ -1057,6 +1136,10 @@ export class ModularRoadDriftSmoke {
       noiseDv: 0,
       noiseScale: 1,
       tintMul: 1,
+      // The shed vortex: axle centre + axis frozen at birth, seconds it lasts.
+      vortexCx: 0, vortexCy: 0, vortexCz: 0,
+      vortexAx: 1, vortexAy: 0, vortexAz: 0,
+      vortexT: 0,
     }));
     this.particles = makePool(POOL_SIZE);
     this.hazeParticles = makePool(HAZE_POOL_SIZE);
@@ -1244,6 +1327,10 @@ export class ModularRoadDriftSmoke {
     const sphereAttr = new THREE.InstancedBufferAttribute(spheres, 4);
     sphereAttr.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute("iSphere", sphereAttr);
+    const lamp = new Float32Array(HAZE_POOL_SIZE * 3);
+    const lampAttr = new THREE.InstancedBufferAttribute(lamp, 3);
+    lampAttr.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("iLamp", lampAttr);
 
     const mat = new MeshBasicNodeMaterial({
       transparent: true,
@@ -1278,6 +1365,7 @@ export class ModularRoadDriftSmoke {
     this.bankTints = tints;
     this.bankThresholds = thresholds;
     this.bankSpheres = spheres;
+    this.bankLamp = lamp;
   }
 
   /**
@@ -1310,6 +1398,8 @@ export class ModularRoadDriftSmoke {
     const tint = attribute("iTint", "vec4");
     const thresh = attribute("iThresh", "float");
     const sphere = attribute("iSphere", "vec4");
+    /** Lamp irradiance summed on the CPU for this instance — see `_lampAt`. */
+    const lampIn = attribute("iLamp", "vec3");
     const noiseMap = this.noiseMap;
     const softDepth = this.uSoftDepth;
     const erodeSoft = this.uErodeSoft;
@@ -1391,10 +1481,15 @@ export class ModularRoadDriftSmoke {
 
       // ── Hemisphere ambient (same as the puffs) ───────────────────────────
       const hemiCol = mix(uGroundCol, uSkyCol, N.y.mul(0.5).add(0.5));
+      // The car's lamps, summed per instance on the CPU. Damped by density
+      // like the sun, but only partly — a thick core still glows from a lamp
+      // beside it, it just glows less.
+      const lamps = lampIn.mul(mix(float(0.15), float(1), transmit));
       const lit = uSunColor
         .mul(uSunStrength.mul(wrapped).add(uScatter.mul(phase)))
         .mul(transmit)
-        .add(hemiCol.mul(uAmbient));
+        .add(hemiCol.mul(uAmbient))
+        .add(lamps);
       return vec4(tint.xyz.mul(mix(vec3(1), lit, uLightAmount)), alpha);
     })();
   }
@@ -1479,6 +1574,8 @@ export class ModularRoadDriftSmoke {
     const nParams = attribute("aNoise", "vec4");
     const sphere = attribute("aSphere", "vec4");
     const cls = attribute("aClass", "vec2");
+    /** Lamp irradiance summed on the CPU for this particle — see `_lampAt`. */
+    const lampIn = attribute("aLamp", "vec3");
     const softDepth = this.uSoftDepth;
     const erodeSoft = this.uErodeSoft;
     const noiseMap = this.noiseMap;
@@ -1609,10 +1706,18 @@ export class ModularRoadDriftSmoke {
       // on top and dark underneath even with the sun term at zero. White
       // defaults reproduce stock exactly.
       const hemiCol = mix(uGroundCol, uSkyCol, nrm.y.mul(0.5).add(0.5));
+      // ── THE CAR'S LAMPS ───────────────────────────────────────────────────
+      // Tail and head lights, summed per particle on the CPU (see `_lampAt`).
+      // Damped by density like the sun, but only partly: a thick core still
+      // glows from a brake light beside it, it just glows less. The damping
+      // is also the only thing giving the glow INTERNAL structure at night,
+      // when nothing else lights the smoke — hence the deep 0.15 floor.
+      const lamps = lampIn.mul(mix(float(0.15), float(1), transmit));
       const lit = uSunColor
         .mul(uSunStrength.mul(wrapped).add(uScatter.mul(phase)))
         .mul(transmit)
-        .add(hemiCol.mul(uAmbient));
+        .add(hemiCol.mul(uAmbient))
+        .add(lamps);
       // ── end hemisphere ambient ────────────────────────────────────────────
       const rgb = tint.xyz.mul(mix(vec3(1), lit, uLightAmount));
 
@@ -1817,6 +1922,14 @@ export class ModularRoadDriftSmoke {
     this.uDetail.value = s.detail ?? 0.55;
     this.uDetailScale.value = s.detailScale ?? 3;
     this.uOpticalK.value = s.opticalK ?? 1.8;
+    // Any lamp actually lit? If not the strength goes to exactly 0, which is
+    // what the shader's If branches on — so a daytime drift pays nothing.
+    let anyLamp = false;
+    for (const L of this.lamps) if (L.intensity > 0) { anyLamp = true; break; }
+    const lampsOn = anyLamp && s.lamps?.enabled !== false;
+    this._lampStrength = lampsOn ? (s.lamps?.strength ?? 1) : 0;
+    this._lampRadius2 = Math.max(0.01, s.lamps?.radius ?? 0.45) ** 2;
+    this._lampRange = Math.max(0.1, s.lamps?.range ?? 9);
     // Accumulated rather than derived from a clock: moving the drift slider then
     // never teleports the pattern, it just changes how fast it goes from here.
     this._worldDriftPhase += dt * (s.worldNoiseDrift ?? 0.35);
@@ -1876,6 +1989,7 @@ export class ModularRoadDriftSmoke {
         this.bankMesh.geometry.attributes.iTint.needsUpdate = true;
         this.bankMesh.geometry.attributes.iThresh.needsUpdate = true;
         this.bankMesh.geometry.attributes.iSphere.needsUpdate = true;
+        this.bankMesh.geometry.attributes.iLamp.needsUpdate = true;
       }
     }
 
@@ -1899,6 +2013,9 @@ export class ModularRoadDriftSmoke {
       const classAttr = this.geometry.attributes.aClass;
       classAttr.addUpdateRange(0, alive * CLASS_FLOATS_PER_PARTICLE);
       classAttr.needsUpdate = true;
+      const lampAttr = this.geometry.attributes.aLamp;
+      lampAttr.addUpdateRange(0, alive * LAMP_FLOATS_PER_PARTICLE);
+      lampAttr.needsUpdate = true;
     }
   }
 
@@ -1960,6 +2077,7 @@ export class ModularRoadDriftSmoke {
     const curlScale = curlCfg?.scale ?? 0.35;
     const liftK = isBank ? 0 : (root.lift ?? 0) * dt * dry;
     const liftDelay = root.liftDelay ?? 0.35;
+    const vortexK = isBank ? 0 : (root.arch?.vortex ?? 0) * dt * dry;
     // Hex parsing hoisted out of the per-particle loop: this used to re-parse
     // both colour strings for every one of ~600 particles, every frame.
     const hasRamp = !!(cfg.colorHot && cfg.colorCool);
@@ -1999,6 +2117,29 @@ export class ModularRoadDriftSmoke {
       // once it is free does the heat take it up. Constant buoyancy from
       // birth is what made the plume pop straight up into a mound.
       if (liftK > 0 && p.maxLife - p.life > liftDelay) p.velocity.y += liftK;
+      // The wheel's shed vortex: swirl about the axle it was born on, in the
+      // wheel's own sense of rotation, fading out over vortexTime. The centre
+      // is frozen at birth — the car drives on, the vortex stays in the air
+      // behind it, which is what a shed vortex does.
+      if (vortexK > 0 && p.vortexT > 0) {
+        const vAge = p.maxLife - p.life;
+        if (vAge < p.vortexT) {
+          const rx = p.position.x - p.vortexCx;
+          const ry = p.position.y - p.vortexCy;
+          const rz = p.position.z - p.vortexCz;
+          // tangent = axis × r
+          const tx = p.vortexAy * rz - p.vortexAz * ry;
+          const ty = p.vortexAz * rx - p.vortexAx * rz;
+          const tz = p.vortexAx * ry - p.vortexAy * rx;
+          const tl = Math.hypot(tx, ty, tz);
+          if (tl > 1e-4) {
+            const k = vortexK * (1 - vAge / p.vortexT) / tl;
+            p.velocity.x += tx * k;
+            p.velocity.y += ty * k;
+            p.velocity.z += tz * k;
+          }
+        }
+      }
 
       p.velocity.multiplyScalar(Math.max(0, 1 - dt * damp));
       p.position.addScaledVector(p.velocity, dt);
@@ -2129,14 +2270,18 @@ export class ModularRoadDriftSmoke {
       const elapsed = p.maxLife - p.life;
       const thresh = erodeStart + (erodeEnd - erodeStart) * Math.pow(age, erodePower);
 
+      // The car's lamps, summed here per particle — see `_lampAt`.
+      this._lampAt(p.position, _lampRgb);
+
       if (isBank) {
-        this._writeBankInstance(alive++, p.position, size, alpha, thresh);
+        this._writeBankInstance(alive++, p.position, size, alpha, thresh, _lampRgb);
       } else {
         this._writeParticle(
           alive++, p.position, size, p.rotation, alpha, thresh,
           p.noiseU + p.noiseDu * elapsed * noiseDrift,
           p.noiseV + p.noiseDv * elapsed * noiseDrift,
           p.noiseScale,
+          _lampRgb,
         );
       }
     }
@@ -2150,7 +2295,7 @@ export class ModularRoadDriftSmoke {
    * Composing through Object3D/Matrix4 would allocate and do a full TRS compose
    * per particle per frame for a matrix that is only ever scale + translate.
    */
-  _writeBankInstance(index, center, size, alpha, thresh) {
+  _writeBankInstance(index, center, size, alpha, thresh, lamp) {
     const r = size * 0.5;
     const m = this.bankMesh.instanceMatrix.array;
     const o = index * 16;
@@ -2171,6 +2316,10 @@ export class ModularRoadDriftSmoke {
     this.bankTints[t + 2] = _smokeTint.b;
     this.bankTints[t + 3] = alpha;
     this.bankThresholds[index] = thresh;
+    const l = index * 3;
+    this.bankLamp[l] = lamp[0];
+    this.bankLamp[l + 1] = lamp[1];
+    this.bankLamp[l + 2] = lamp[2];
   }
 
   emitAt(emitter, s, point, intensity, velocityX, velocityZ, side = 0) {
@@ -2212,6 +2361,40 @@ export class ModularRoadDriftSmoke {
         p.velocity.z += _sprayRight.z * fling;
       }
       p.velocity.y *= THREE.MathUtils.lerp(1, this.settings.launchUpMul ?? 1, dry);
+
+      // ── THE WHEEL ARCH ──────────────────────────────────────────────────
+      // Born on an arc around the tyre instead of a point under it, and
+      // thrown along the rim's surface motion: backwards at the contact
+      // patch, UPWARDS at the back of the tyre — which is how smoke climbs
+      // out of the arch. The arc is walked in the car's HEADING frame, not
+      // its velocity, because the tyre rolls the way it points even mid-drift.
+      const A = this.settings.arch;
+      p.vortexT = 0;
+      if (A && A.enabled !== false && dry > 0) {
+        const R = A.wheelRadius ?? 0.36;
+        const theta = THREE.MathUtils.degToRad(A.sweep ?? 110) * Math.pow(Math.random(), 0.7);
+        const sn = Math.sin(theta);
+        const cs = Math.cos(theta);
+        const rr = R * (1 + (A.out ?? 0.06));
+        const tread = (Math.random() - 0.5) * 2 * (A.treadSpread ?? 0.14);
+        const fx = _chassisFwd.x, fz = _chassisFwd.z;
+        // Position on the arc, blended in by dryness so spray keeps its own.
+        const ax = point.x - fx * rr * sn + _sprayRight.x * tread;
+        const ay = point.y + R - rr * cs + 0.02;
+        const az = point.z - fz * rr * sn + _sprayRight.z * tread;
+        p.position.x += (ax - p.position.x) * dry;
+        p.position.y += (ay - p.position.y) * dry;
+        p.position.z += (az - p.position.z) * dry;
+        // Rim tangent for a forward-rolling wheel: -fwd·cosθ + up·sinθ.
+        const vt = (A.throw ?? 0.25) * speed * dry * (0.6 + Math.random() * 0.6);
+        p.velocity.x += -fx * cs * vt;
+        p.velocity.y += sn * vt;
+        p.velocity.z += -fz * cs * vt;
+        // Shed vortex about the axle through the wheel centre.
+        p.vortexCx = point.x; p.vortexCy = point.y + R; p.vortexCz = point.z;
+        p.vortexAx = _sprayRight.x; p.vortexAy = _sprayRight.y; p.vortexAz = _sprayRight.z;
+        p.vortexT = (A.vortexTime ?? 0.35) * dry;
+      }
     }
 
     const lifeMin = Math.max(0.05, s.lifeMin ?? LIFE_MIN);
@@ -2271,6 +2454,68 @@ export class ModularRoadDriftSmoke {
   }
 
   /**
+   * The car's frame for a direct `update()` caller (the lab): forward and
+   * right axes, world space. updateFromVehicle derives both itself.
+   */
+  setCarFrame(fwd, right) {
+    if (fwd && fwd.lengthSq() > 1e-8) _chassisFwd.copy(fwd).setY(0).normalize();
+    this.setCarRight(right);
+  }
+
+  /**
+   * One of the car's lamps, world space. `intensity` 0 switches it off;
+   * `dir` + `coneExp` make it a beam (headlight), omitted = omni (tail).
+   * Colour is linear. Called every frame by the game from the chassis pose.
+   * @param {number} i 0..3 — 0/1 tail, 2/3 head by convention
+   */
+  setLamp(i, pos, color, intensity, dir = null, coneExp = 0) {
+    if (i < 0 || i >= LAMP_COUNT) return;
+    const L = this.lamps[i];
+    L.pos.copy(pos);
+    L.intensity = Math.max(0, intensity || 0);
+    if (color) L.col.copy(color);
+    if (dir && dir.lengthSq() > 1e-8) {
+      L.dir.copy(dir).normalize();
+      L.cone = Math.max(0, coneExp);
+    } else {
+      L.cone = 0;
+    }
+  }
+
+  /**
+   * Lamp irradiance at world point P, rgb into `out`. Soft inverse square
+   * 1/(1+(d/r)²) with a linear range fade; headlights (cone > 0) get a
+   * pow() beam, tails are omni. Smoke scatters near-isotropically so there
+   * is no N·L here at all. Returns zeros in O(1) when nothing is lit.
+   */
+  _lampAt(P, out) {
+    out[0] = 0; out[1] = 0; out[2] = 0;
+    const k = this._lampStrength;
+    if (k <= 0) return out;
+    const r2 = this._lampRadius2;
+    const range = this._lampRange;
+    for (let i = 0; i < LAMP_COUNT; i++) {
+      const L = this.lamps[i];
+      if (L.intensity <= 0) continue;
+      const dx = L.pos.x - P.x, dy = L.pos.y - P.y, dz = L.pos.z - P.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const d = Math.sqrt(d2);
+      if (d >= range) continue;
+      let f = L.intensity / (1 + d2 / r2) * (1 - d / range);
+      if (L.cone > 0 && d > 1e-4) {
+        // cos between the beam and the direction lamp → point.
+        const c = Math.max(-(dx * L.dir.x + dy * L.dir.y + dz * L.dir.z) / d, 0.001);
+        f *= Math.pow(c, L.cone);
+      }
+      out[0] += L.col.r * f;
+      out[1] += L.col.g * f;
+      out[2] += L.col.b * f;
+    }
+    out[0] *= k; out[1] *= k; out[2] *= k;
+    return out;
+  }
+
+  /**
    * Sun colour and intensity, so smoke picks up the time of day — warm and dim
    * at dusk rather than always lit by a white noon sun.
    *
@@ -2289,7 +2534,7 @@ export class ModularRoadDriftSmoke {
   }
 
   /** `_smokeTint` is set by the caller (age ramp) before this runs. */
-  _writeParticle(index, center, size, rotation, alpha, thresh, nu, nv, nScale) {
+  _writeParticle(index, center, size, rotation, alpha, thresh, nu, nv, nScale, lamp) {
     // The sphere is the particle; the quad only has to cover its projection —
     // EXACTLY, which is R / √(1 − (R/d)²). See K_MAX for the derivation and for
     // why the old flat 1.2× was both wasteful far away and short up close. The
@@ -2341,6 +2586,7 @@ export class ModularRoadDriftSmoke {
     const noiseOffset = index * NOISE_FLOATS_PER_PARTICLE;
     const sphereOffset = index * SPHERE_FLOATS_PER_PARTICLE;
     const classOffset = index * CLASS_FLOATS_PER_PARTICLE;
+    const lampOffset = index * LAMP_FLOATS_PER_PARTICLE;
     const worldMul = this._worldScaleMul;
     const worldMix = this._worldMixMul;
 
@@ -2382,6 +2628,11 @@ export class ModularRoadDriftSmoke {
       this.noise[no + 1] = nv;
       this.noise[no + 2] = nScale;
       this.noise[no + 3] = thresh;
+
+      const lo = lampOffset + i * 3;
+      this.lampLight[lo] = lamp[0];
+      this.lampLight[lo + 1] = lamp[1];
+      this.lampLight[lo + 2] = lamp[2];
     }
   }
 }

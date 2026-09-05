@@ -52,7 +52,7 @@
       </div>
       <div class="keys">
         <b>M</b> emitter mode (donut / burnout / fly-by)<br />
-        <b>1–3</b> noon / backlit sunset / overcast<br />
+        <b>1–4</b> noon / backlit sunset / overcast / night<br />
         <b>C</b> orbit / chase · <b>E</b> emit on/off<br />
         <b>T</b> slow motion · <b>W</b> wet spray A/B<br />
         <b>R</b> reset view · orbit: drag / wheel
@@ -136,6 +136,12 @@
         /** 0 = dry smoke, 1 = full wet spray. Mirrors setWetness. */
         wetness: 0,
         timeScale: 1.0,
+        /** Lamp drive for the proxy car — the game derives these from the
+         *  chassis and the brake state; here they are dials. */
+        lampsOn: true,
+        braking: true,
+        tailIntensity: 3.0,
+        headIntensity: 5.0,
       };
 
       const CAMS = ["orbit", "chase"];
@@ -155,6 +161,7 @@
         rise: 0.75, buoyancy: 0.55, turbulence: 1.5, spread: 0.55, drag: 0.12,
         colorHot: "#4a4a52", colorCool: "#b4b8c2", tintJitter: 0.12,
         curl: { enabled: false }, launchOut: 0, launchUpMul: 1, lift: 0,
+        arch: { enabled: false }, lamps: { enabled: false },
         ambient: 0.5, sunStrength: 0.9, absorb: 1.0, scatter: 1.2, hgG: 0.6,
         noiseScale: 1.0, churn: 0, detail: 0, opticalK: 0,
         erodeStart: 0.06, erodeEnd: 1.25, erodeSoft: 0.3, worldNoiseMix: 0.55,
@@ -200,7 +207,15 @@
           ambSky: 0xb8c2ce, ambGround: 0x33373d,
         },
       };
-      const SUN_ORDER = ["noon", "sunset", "overcast"];
+      SUNS.night = {
+        label: "Night",
+        // A moon, faint and blue; the car's own lamps do the lighting.
+        dir: [0.3, 0.7, -0.4], color: 0x7d8fc4, intensity: 0.25,
+        sky: 0x0a0f1e, horizon: 0x141a2c, ground: 0x05060a,
+        hemi: 0.15, exposure: 1.0,
+        ambSky: 0x1a2238, ambGround: 0x07080c,
+      };
+      const SUN_ORDER = ["noon", "sunset", "overcast", "night"];
       let sunName = "noon";
 
       /* ===================================================================== *
@@ -232,6 +247,9 @@
       const _right = new THREE.Vector3();
       const _fwd = new THREE.Vector3();
       const _tmp = new THREE.Vector3();
+      const _lampPos = new THREE.Vector3();
+      const _tailCol = new THREE.Color(0xff2020);
+      const _headCol = new THREE.Color(0xfff0d0);
       /** Rear pair dry; all four in the wet, same as updateFromVehicle. */
       const _rearPts = [_rear0, _rear1];
       const _allPts = [_front0, _front1, _rear0, _rear1];
@@ -407,6 +425,29 @@
           w.castShadow = true;
           carRig.add(w);
         }
+        // Lamps: emissive stand-ins at the game's TAILLIGHTS offsets and a
+        // headlamp pair. The smoke is lit from THESE positions each frame.
+        carRig.userData.lamps = [];
+        const tailMat = new THREE.MeshStandardMaterial({
+          color: 0x1a0304, emissive: new THREE.Color(0xff2418), emissiveIntensity: 3, roughness: 0.3,
+        });
+        const headMat = new THREE.MeshStandardMaterial({
+          color: 0x111111, emissive: new THREE.Color(0xfff0d0), emissiveIntensity: 6, roughness: 0.2,
+        });
+        for (const sx of [-0.62, 0.62]) {
+          const t = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.16, 0.06), tailMat);
+          t.position.set(sx, 0.74, -2.16);
+          carRig.add(t);
+          carRig.userData.lamps.push({ mesh: t, kind: "tail" });
+        }
+        for (const sx of [-0.66, 0.66]) {
+          const h = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 8), headMat);
+          h.position.set(sx, 0.66, 2.14);
+          carRig.add(h);
+          carRig.userData.lamps.push({ mesh: h, kind: "head" });
+        }
+        carRig.userData.tailMat = tailMat;
+        carRig.userData.headMat = headMat;
         scene.add(carRig);
       }
 
@@ -499,8 +540,20 @@
         smoke._shutter = (settings.wetSpray?.streak ?? 1) * (1 / 25) * rig.wetness;
         const pts = rig.wetness > 0 ? _allPts : _rearPts;
 
-        // What updateFromVehicle would set: the launch flings along this.
-        smoke.setCarRight(_right);
+        // What updateFromVehicle would set: heading + right for the launch
+        // and the wheel-arch arc.
+        smoke.setCarFrame(_fwd, _right);
+        // The car's lamps, world space. Tail = omni red, head = warm beam.
+        carRig.updateMatrixWorld(true);
+        const tailI = rig.lampsOn ? (rig.braking ? rig.tailIntensity : rig.tailIntensity * 0.2) : 0;
+        const headI = rig.lampsOn ? rig.headIntensity : 0;
+        carRig.userData.tailMat.emissiveIntensity = tailI;
+        carRig.userData.headMat.emissiveIntensity = headI * 1.2;
+        carRig.userData.lamps.forEach((L, i) => {
+          L.mesh.getWorldPosition(_lampPos);
+          if (L.kind === "tail") smoke.setLamp(i, _lampPos, _tailCol, tailI);
+          else smoke.setLamp(i, _lampPos, _headCol, headI, _fwd, 10);
+        });
         // Burnout throws off spinning wheels while parked: pass wheel-speed
         // velocity, not chassis velocity, so puffs still launch backwards.
         smoke.update(sdt, pts, rig.emit, rig.intensity, car.vel.x, car.vel.z, camera);
@@ -621,6 +674,26 @@
           applySun();
           refreshGui();
         } }, "n").name("AAA look (game defaults)");
+
+        const fl2 = gui.addFolder("Car lights in smoke");
+        fl2.add(settings.lamps, "enabled").name("lamps light smoke");
+        fl2.add(settings.lamps, "strength", 0, 4, 0.05).name("strength");
+        fl2.add(settings.lamps, "radius", 0.1, 2, 0.01).name("falloff radius (m)");
+        fl2.add(settings.lamps, "range", 1, 20, 0.5).name("range (m)");
+        fl2.add(rig, "lampsOn").name("car lamps on");
+        fl2.add(rig, "braking").name("braking (bright tails)");
+        fl2.add(rig, "tailIntensity", 0, 10, 0.1).name("tail intensity");
+        fl2.add(rig, "headIntensity", 0, 15, 0.1).name("head intensity");
+
+        const fa = gui.addFolder("Wheel arch emission");
+        fa.add(settings.arch, "enabled").name("arch emission");
+        fa.add(settings.arch, "sweep", 0, 180, 1).name("arc sweep (°)");
+        fa.add(settings.arch, "throw", 0, 1, 0.01).name("rim throw x speed");
+        fa.add(settings.arch, "vortex", 0, 20, 0.1).name("vortex (m/s²)");
+        fa.add(settings.arch, "vortexTime", 0, 1.5, 0.02).name("vortex time (s)");
+        fa.add(settings.arch, "treadSpread", 0, 0.5, 0.01).name("tread spread (m)");
+        fa.add(settings.arch, "out", 0, 0.4, 0.01).name("outside rubber x");
+        fa.add(settings.arch, "wheelRadius", 0.2, 0.6, 0.01).name("wheel radius (m)");
 
         const fe = gui.addFolder("Emitter rig");
         fe.add(rig, "mode", MODES).name("mode (M)").listen().onChange(updateHudMode);
