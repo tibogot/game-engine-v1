@@ -198,7 +198,11 @@ export const pieceParams = {
   //                ragged (73 deg at one speed, 129 at the next)
   // Past ~150 the car stops leaving the ramp cleanly at all, and past ~170 it
   // never leaves. 135 is the most it can be pushed while the flip stays even.
-  loopbackExit: 135, // angle it finishes at (deg); past 90 sends the car back
+  loopbackExit: 135,
+  // How much of an EASEMENT the ramp gets at the joins between its three
+  // segments. 0 is the plain three-segment shape; 1 blends the turn in and out
+  // of every corner. See loopbackPoints — this is the curvature, not the angle.
+  loopbackEase: 1, // angle it finishes at (deg); past 90 sends the car back
   jumpLength: 18, // arc length of the ramp (m)
   jumpAngle: 12, // takeoff angle at the exit (deg)
   // Dive / down ramp (mirror of the jump — flat entry, exit pitched down).
@@ -3740,6 +3744,7 @@ function loopbackPoints(pp) {
   const R2 = Math.max(3, pp.loopbackTopRadius ?? 6);
   const exit = THREE.MathUtils.degToRad(
     THREE.MathUtils.clamp(pp.loopbackExit ?? 120, 0, 165));
+  const ease = THREE.MathUtils.clamp(pp.loopbackEase ?? 1, 0, 1);
   const top = Math.max(0, exit - face);
   const l1 = R1 * face;   // transition
   const l2 = straight;    // straight face
@@ -3748,18 +3753,44 @@ function loopbackPoints(pp) {
   // Stepped on the TIGHT end: the top curl is where the facets would show and
   // where the car takes off, and `stepsFor` reasons about arcLen/angle, which
   // for this profile is an average that flatters it.
-  const n = stepsFor(L, exit * Math.max(1, l1 / Math.max(1e-6, l3)), 16, pp);
+  // …and the easement concentrates the same turn into less of the ramp, so the
+  // tightest facet is 1.5x what a uniform arc would give. Stepped for that, or
+  // the curl grows visible flats exactly where the car takes off.
+  const n = stepsFor(
+    L, exit * (1 + 0.5 * ease) * Math.max(1, l1 / Math.max(1e-6, l3)), 16, pp);
   const ds = L / n;
   const cur = new V3(0, 0, 0);
   const pts = [cur.clone()];
+  // THE EASEMENT. `ph` is the tangent angle, so d(ph)/ds is the CURVATURE, and
+  // a linear ramp of angle is therefore a segment of CONSTANT curvature. Three
+  // such segments butted together means curvature that steps -- 1/R1, then 0
+  // along the straight face, then 1/R2 -- and a step in curvature is a step in
+  // the angular velocity the car is forced to have. It cannot ease into it; the
+  // road simply demands a different rate from one contact to the next.
+  //
+  // MEASURED, that is not a subtlety: the chassis pitches at 15800-28378 deg/s2
+  // coming off the straight face onto the curl, an order of magnitude rougher
+  // than anything the camera does, and no amount of camera smoothing touched it
+  // because it was never the camera's. Real roads put an easement -- a clothoid
+  // -- between a straight and an arc for exactly this reason.
+  //
+  // Smoothstepping the angle within each curved segment ramps the curvature up
+  // from zero and back down to zero at every join, so the whole profile is
+  // curvature-continuous: into the ramp from the flat road, onto the face, off
+  // the face, and off the lip. The TOTAL turn is untouched -- `ph` still
+  // reaches exactly `face` and exactly `exit` -- so the launch angle, and with
+  // it everything the trick depends on, is the same shape as before. What it
+  // costs is a 1.5x tighter curvature mid-segment, since the same turn is now
+  // spent unevenly.
+  const blend = (t) => THREE.MathUtils.lerp(t, t * t * (3 - 2 * t), ease);
   for (let i = 1; i <= n; i++) {
     // Mid-step angle, so a coarse step does not consistently overshoot the
     // height. The three-way pick IS the shape: ramp up through the transition,
     // hold the face angle along the straight, then curl over the top.
     const sMid = (i - 0.5) * ds;
-    const ph = sMid < l1 ? face * (sMid / l1)
+    const ph = sMid < l1 ? face * blend(sMid / l1)
       : sMid < l1 + l2 ? face
-      : face + top * ((sMid - l1 - l2) / Math.max(1e-6, l3));
+      : face + top * blend((sMid - l1 - l2) / Math.max(1e-6, l3));
     cur.y += Math.sin(ph) * ds;
     cur.z += -Math.cos(ph) * ds;
     pts.push(cur.clone());
