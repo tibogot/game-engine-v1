@@ -294,8 +294,15 @@ const pickDrop = (a, b) => {
  *
  * Plain JS rather than a TSL `Fn` — it is called once, so there is nothing to
  * deduplicate, and the argument list had grown to nine positional nodes.
+ *
+ * EXPORTED, because the car wears the same weather. chassisModel builds its
+ * beaded-paint coat from this exact field rather than a second one: two drop
+ * models would drift apart the first time either was tuned, and this file has
+ * already paid for that class of bug once (see the note on `coatWobble` in
+ * modularRoadMaterial — two expressions for one surface). It takes a plain 2D
+ * coordinate, so the caller decides whether that is the screen or a body panel.
  */
-function beadField(uvn, u, stretch, t) {
+export function beadField(uvn, u, stretch, t) {
   const { beadDensity: density, beadSize: size, beadWobble: wobble } = u;
   const g = uvn.mul(density);
   const id = floor(g);
@@ -411,9 +418,13 @@ function trailBeads(rdx, rdy, colId, headRadius, u, present) {
   // dead-straight vertical line of evenly spaced beads, which no runner leaves.
   // The bound keeps bead plus wander inside the column, for the single-cell
   // reason that governs every offset in this file.
+  // NEGATED back into SCREEN space. `rdy` arrives measured along "behind the
+  // head", which points up the screen for a falling runner, but `d` feeds
+  // capNormal and that normal has to be a real screen-space direction or the
+  // trail beads refract upside down relative to the head they trail from.
   const d = vec2(
     rdx.sub(jx.mul(headRadius).mul(1.6)),
-    fract(slot).sub(jy).div(tD),
+    fract(slot).sub(jy).div(tD).negate(),
   );
   const rn = length(d).div(max(r, float(1e-9)));
   // Above the head only: below it the runner has not been yet.
@@ -493,11 +504,22 @@ export function rainLensColor(sampleScene, u, uvNode, aspectNode, opts = {}) {
     const rInset = max(oneMinus(u.runnerSize.mul(1.30).mul(2.0)), float(0.02));
     const rJx = hash11(colId.add(7.13)).sub(0.5).mul(rInset);
 
-    // The head travels from above the top edge to below the bottom, so nothing
-    // pops into existence inside the frame.
+    /*
+     * The head travels from above the top edge to below the bottom, so nothing
+     * pops into existence inside the frame.
+     *
+     * WHICH WAY IS DOWN. `screenUV` follows the WebGPU convention — it is
+     * `screenCoordinate / screenSize` and the fragment origin is TOP-left — so
+     * y = 0 is the TOP of the screen and y grows downward. Every comment in this
+     * block was written the other way round, and the arithmetic followed the
+     * comments: `headY` started at 1 + trail and decreased, which under y-down
+     * is a runner climbing the screen and leaving through the top. The beads
+     * were never affected (their creep adds to y, which is genuinely downward),
+     * so only the long streaks looked wrong, which is exactly how it survived.
+     */
     const span = float(1).add(u.runnerTrail).add(0.2);
     const phase = fract(t.mul(u.runnerSpeed).mul(rSpeedVar).add(hash11(colId.add(51.3))));
-    const headY = float(1).add(u.runnerTrail).sub(phase.mul(span));
+    const headY = phase.mul(span).sub(u.runnerTrail).sub(0.1);
 
     // Offsets in screen units. Note the jitter is applied HERE, so the head and
     // its trail below share one centreline — they were computed from different
@@ -521,8 +543,12 @@ export function rainLensColor(sampleScene, u, uvNode, aspectNode, opts = {}) {
     const withHead = pickDrop(bead, head);
 
     // ── COMPOSITE THE DROP LAYERS ────────────────────────────────────────
+    // `rdy` is a SCREEN offset (y down); the trail wants "behind the head",
+    // which for a falling runner is UP the screen — hence the negate. `rd`
+    // above keeps the unflipped offset, because that one is the head's own
+    // geometry and its normal has to point outward in screen space.
     const drop = wantTrail
-      ? pickDrop(withHead, trailBeads(rdx, rdy, colId, rRadius, u, rPresent))
+      ? pickDrop(withHead, trailBeads(rdx, rdy.negate(), colId, rRadius, u, rPresent))
       : withHead;
     const cover = saturate(drop.cover.mul(u.amount));
     const nxy = drop.nxy;
