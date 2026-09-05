@@ -309,9 +309,18 @@ export const PAINTED_CLOUD_DEFAULTS = {
   rayTightness: 18,
 
   // ── Ground shadows ───────────────────────────────────────────────────────────────
-  /** Max darkening of the world under a cloud. 0 turns the whole pass off — and with it
-   *  the custom-cloud render path, so the frame goes back to its plain route. */
-  shadowStrength: 0.5,
+  /** Max darkening of the world under a cloud. OFF by default: the stamped shadow
+   *  reads as patchy on a road surface rather than as weather, and the deck looks
+   *  better without it.
+   *
+   *  0 also drops this half of the fullscreen pass — though not the pass itself,
+   *  which god rays keep alive on their own (see `shadowsOn() || raysOn()`), so
+   *  turning shadows off does not quietly take the rays with them.
+   *
+   *  Note the weather presets each set this: switching weather turns ground
+   *  shadows back on at that preset's strength. They are sparse overrides, so
+   *  dropping the key from WEATHER_PRESETS is what would make this stick. */
+  shadowStrength: 0,
   /** Edge softness of the shadow threshold, in shaped-density units. */
   shadowSoftness: 0.35,
   /** Metres beyond which shadows fade out, so far terrain does not sparkle. */
