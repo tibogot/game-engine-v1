@@ -22,6 +22,7 @@ import * as THREE from "three";
 const _tmpN = new THREE.Vector3();
 const _cliffN = new THREE.Vector3();
 const _treeN = new THREE.Vector3();
+const _cityN = new THREE.Vector3();
 const _terrN = new THREE.Vector3();
 const _deckN = new THREE.Vector3();
 const _moverN = new THREE.Vector3();
@@ -60,6 +61,10 @@ export function createVehicleGround({
   const state = {
     cliffBvh, roadBvh, roadSolidsBvh, treeBvh,
     moverBvh: null, moverSolidsBvh: null,
+    // City buildings. NOT a RoadBvh: it is a lot-grid broad phase over
+    // per-archetype trees (games/modular-road-v3/modularRoadCityCollider.js),
+    // but it answers the same two methods, so it slots in like any other.
+    cityCollider: null,
   };
 
   // ── GROUND (wheel probes + deck contact) ────────────────────────────────
@@ -174,7 +179,8 @@ export function createVehicleGround({
         state.roadSolidsBvh?.baked ||
         state.moverSolidsBvh?.baked ||
         state.cliffBvh?.baked ||
-        state.treeBvh?.baked
+        state.treeBvh?.baked ||
+        state.cityCollider?.baked
       );
     },
 
@@ -229,6 +235,17 @@ export function createVehicleGround({
         }
       }
 
+      // City buildings. A tower is a closed shell with a real face normal, so
+      // unlike the cliffs and the trees this needs no approximation — the
+      // collider orients the normal out of the surface itself.
+      if (state.cityCollider?.baked) {
+        const r = state.cityCollider.closestPointWithNormal(px, py, pz, maxDist, _cityN);
+        if (r && (!best || r.distance < best.distance)) {
+          best = r;
+          outNormal.copy(_cityN);
+        }
+      }
+
       return best;
     },
 
@@ -245,6 +262,11 @@ export function createVehicleGround({
       }
       if (state.moverSolidsBvh?.baked && state.moverSolidsBvh.raycastFirst) {
         const h = state.moverSolidsBvh.raycastFirst(origin, dir, far);
+        if (h && (!best || h.distance < best.distance)) best = h;
+      }
+      // A tower IS a hollow shell, so it belongs in this query.
+      if (state.cityCollider?.baked) {
+        const h = state.cityCollider.raycastFirst(origin, dir, far);
         if (h && (!best || h.distance < best.distance)) best = h;
       }
       return best;
@@ -270,6 +292,10 @@ export function createVehicleGround({
     },
     setCliffBvh(bvh) {
       state.cliffBvh = bvh || null;
+    },
+    /** City buildings — see the note on `state.cityCollider`. */
+    setCityCollider(c) {
+      state.cityCollider = c || null;
     },
     setTreeBvh(bvh) {
       state.treeBvh = bvh || null;

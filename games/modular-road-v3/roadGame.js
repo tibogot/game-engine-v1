@@ -97,13 +97,17 @@ import {
   syncTubeUniforms,
   ROAD_LOOK_FORMAT,
 } from "./modularRoadMaterial.js";
-import { screenUV, uniform, vec2, vec4 } from "three/tsl";
+import { screenUV, texture, uniform, vec2, vec4 } from "three/tsl";
 import {
   createRainLensUniforms, rainLensColor, RAIN_LENS_NUMBERS, RAIN_LENS_DEFAULTS,
 } from "./modularRoadRainLens.js";
 import {
   createWorldRain, markRainCollider, WORLD_RAIN_DEFAULTS,
 } from "./modularRoadWorldRain.js";
+import { createDock, DOCK_DEFAULTS, preloadAsphalt } from "./modularRoadDock.js";
+import {
+  createWorldOceanV2, OCEAN2_DEFAULTS,
+} from "../../v3/render/water/worldOceanV2.js";
 import { createLightning } from "./modularRoadLightning.js";
 import { createBolt, makeBoltPath } from "./modularRoadBolt.js";
 import {
@@ -346,9 +350,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   let terrainOn = true;
 
-  /** Terrain height for PHYSICS — NaN in sky mode means "no ground here". */
+  /**
+   * Terrain height for PHYSICS — NaN means "no ground here".
+   *
+   * In SKY MODE there is no terrain, but there may be a CITY, and its street
+   * plane is flat: a heightfield of one value. The vehicle already has a
+   * heightfield path, so returning the street height where the street exists
+   * makes the city's roads drivable without a line of new collision code —
+   * and NaN everywhere else keeps the sky-mode contract exactly as it was.
+   */
   function terrainH(x, z) {
-    return terrainOn ? app.getWorldHeight(x, z) : NaN;
+    if (terrainOn) return app.getWorldHeight(x, z);
+    if (city && cityWanted) {
+      const s = city.streetHeightAt(x, z);
+      if (isFinite(s)) return s;
+    }
+    return NaN;
   }
 
   /** Terrain height for AUTHORING — sky mode measures from y=0, never NaN. */
@@ -946,6 +963,11 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let cloudsWanted = clouds.enabled;
   function syncClouds() {
     clouds.setEnabled(cloudsWanted && cloudTier === "volumetric");
+    // NO devPanel?.refresh() here, however much it looks like it belongs beside
+    // syncCity's. This runs during boot, before `let devPanel` is reached, and
+    // optional chaining does not save you from a temporal dead zone — it throws
+    // ReferenceError and takes the whole game down. The panel is told from
+    // applyTrackEnv instead, which is the path that actually desyncs it.
   }
 
   /**
@@ -1906,6 +1928,21 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     scene.add(city.group);
     // Born into whatever weather is already on the track.
     city.setWet?.(roadLook.wetAmount ?? 0);
+    syncCityCollision();
+  }
+
+  /**
+   * Buildings become solid, or stop being.
+   *
+   * The collider is built on first ask (per-archetype BVHs, ~2 ms) and then
+   * survives every layout change — a corridor restamp only refills its cell
+   * map. It goes into the SOLIDS path beside the guardrails and the cliffs,
+   * which is what makes hitting a tower a crash: the vehicle arms its crash
+   * yield off any solid above CRASH.wallSpeed and never asks what it was.
+   */
+  function syncCityCollision() {
+    const on = !!(city && cityWanted && cityCollide);
+    ground.setCityCollider?.(on ? city.getCollider() : null);
   }
 
   function syncCity() {
@@ -1915,6 +1952,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     } else {
       city?.setEnabled(false);
     }
+    syncCityCollision();
     devPanel?.refresh?.();
   }
 
@@ -1926,6 +1964,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     city.params.bounds = terrainOn ? WORLD_SIZE / 2 : Infinity;
     city.params.ground = !terrainOn;
     city.setHeightSource(cityHeightSource());
+    syncCityCollision();
   }
 
   /** Track edited: re-stamp the corridor. Debounced — see the block comment. */
@@ -1935,6 +1974,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     _corridorTimer = setTimeout(() => {
       rebuildCorridor();
       city.setAvoid(cityAvoid);
+      syncCityCollision();
     }, 200);
   }
 
@@ -1985,6 +2025,252 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     city.update(dt, camera);
   }
   app.addPreRenderHook?.(updateCity);
+
+  /*
+   * ═══════════════════════════════════════════════════════════════════════════
+   * DRIFT DOCK + OCEAN
+   *
+   * A platform standing out of open water, and the sea around it. Both off by
+   * default — a track opts in through its `environment` block, the same way it
+   * opts into the city and the cloud deck.
+   *
+   * WHY THIS DOES NOT USE V3 TERRAIN. A flat plateau sculpted in the editor
+   * costs ~2.5 ms of GPU for a surface with no splat blending, no tri-planar
+   * sampling and no height bake to justify it — the terrain is fragment-bound
+   * and fills the screen. The dock covers a fraction of the frame with one PBR
+   * material. See modularRoadDock.js for the whole argument.
+   *
+   * WHAT THE OCEAN ACTUALLY NEEDS is a height field, not a rendered terrain: an
+   * array to bake its shoreline distance field from, and a texture of the same
+   * for the vertex stage. The dock emits both from the same signed-distance
+   * function it builds its mesh from, so the waterline the sea draws lands on
+   * the edge the car drives off — they cannot drift apart.
+   *
+   * The terrain toggle is untouched by any of this. A dock level runs with the
+   * terrain OFF, which is the whole point.
+   */
+  let dock = null;
+  let ocean = null;
+  let dockWanted = false;
+  let oceanWanted = false;
+  const dockParams = { ...DOCK_DEFAULTS };
+  /** Ocean look a track may pin. Everything else stays at OCEAN2_DEFAULTS. */
+  const oceanParams = {
+    surfHz: OCEAN2_DEFAULTS.surfHz,
+    surfLength: OCEAN2_DEFAULTS.surfLength,
+    surfReach: OCEAN2_DEFAULTS.surfReach,
+    windSpeed: OCEAN2_DEFAULTS.windSpeed,
+    windAngleDeg: OCEAN2_DEFAULTS.windAngleDeg,
+    fftSwellAmp: OCEAN2_DEFAULTS.fftSwellAmp,
+    ssrEnabled: OCEAN2_DEFAULTS.ssrEnabled,
+    foamCutoff: OCEAN2_DEFAULTS.foamCutoff,
+    edgeIntensity: OCEAN2_DEFAULTS.edgeIntensity,
+    /** Used when there is NO dock. With one, the dock's deck height and freeboard
+     *  decide where the water sits and this is ignored. */
+    seaLevel: -5,
+  };
+  let _shoreBakeTimer = 0;
+
+  let _waterNormal = null;
+  function waterNormalMap() {
+    if (!_waterNormal) {
+      _waterNormal = new THREE.TextureLoader().load("/textures/waterNormal.webp");
+      _waterNormal.wrapS = _waterNormal.wrapT = THREE.RepeatWrapping;
+      _waterNormal.colorSpace = THREE.NoColorSpace;
+      _waterNormal.anisotropy = 8;
+    }
+    return _waterNormal;
+  }
+
+  /** Which height field the ocean is currently built against: "open" | "dock". */
+  let oceanSourceKind = null;
+
+  function buildDock() {
+    preloadAsphalt();
+    dock = createDock({ scene, params: dockParams });
+  }
+
+  /*
+   * ── THE OCEAN DOES NOT NEED THE DOCK ──────────────────────────────────────
+   *
+   * It needs to know where LAND is, which is not the same thing. The first cut
+   * had `buildOcean` call `buildDock`, which meant you could not have a sea
+   * without a slab in it — wrong on its own terms, and wrong for the job the sea
+   * is most useful for right now, which is judging sky, light and water on their
+   * own with nothing else in the frame.
+   *
+   * So the height field comes from a SOURCE, and "no land anywhere" is a
+   * perfectly good one. `computeShorelineField` already handles it without a
+   * special case: a field with no zero crossing seeds nothing, so every texel
+   * ends up at the clamp — "very far from shore", which is exactly true.
+   */
+  let _openTex = null;
+  let _openHeights = null;
+  const OPEN_RES = 64;          // nothing to resolve; a constant needs no detail
+  const OPEN_WORLD = 4096;      // far enough that the field's edge is over the horizon
+  const OPEN_DEPTH = 60;
+
+  function openWaterSource() {
+    const seaLevel = oceanParams.seaLevel;
+    const heightBase = seaLevel - OPEN_DEPTH - 40;
+    const maxHeight = 200;
+    const bed = (seaLevel - OPEN_DEPTH - heightBase) / maxHeight;
+    if (!_openTex) {
+      _openTex = new THREE.DataTexture(
+        new Uint16Array(OPEN_RES * OPEN_RES), OPEN_RES, OPEN_RES,
+        THREE.RedFormat, THREE.HalfFloatType,
+      );
+      _openTex.name = "OpenWaterBed";
+      _openTex.minFilter = _openTex.magFilter = THREE.LinearFilter;
+      _openTex.wrapS = _openTex.wrapT = THREE.ClampToEdgeWrapping;
+      _openTex.colorSpace = THREE.NoColorSpace;
+      _openTex.generateMipmaps = false;
+      _openTex.flipY = false;
+      _openHeights = new Float32Array(OPEN_RES * OPEN_RES);
+    }
+    _openHeights.fill(bed);
+    _openTex.image.data.fill(THREE.DataUtils.toHalfFloat(bed));
+    _openTex.needsUpdate = true;
+    return {
+      kind: "open",
+      texture: _openTex, heights: _openHeights, size: OPEN_RES,
+      worldSize: OPEN_WORLD, maxHeight, heightBase, seaLevel,
+    };
+  }
+
+  function dockSource() {
+    return {
+      kind: "dock",
+      texture: dock.heightTexture, heights: dock.heights, size: dock.fieldSize,
+      worldSize: dockParams.worldSize, maxHeight: dock.maxHeight,
+      heightBase: dock.heightBase, seaLevel: dock.seaLevel,
+    };
+  }
+
+  /** The dock is land when it exists and is switched on; otherwise open sea. */
+  function oceanSource() {
+    return (dockWanted && dock) ? dockSource() : openWaterSource();
+  }
+
+  function buildOcean(src) {
+    ocean = createWorldOceanV2({
+      renderer,
+      scene,
+      heightTexNode: texture(src.texture),
+      terrainSize: src.worldSize,
+      maxHeight: src.maxHeight,
+      heightBase: src.heightBase,
+      heightmapSize: src.size,
+      normalMap: waterNormalMap(),
+    });
+    oceanSourceKind = src.kind;
+    ocean.setSeaLevel(src.seaLevel);
+    ocean.syncParams(oceanParams);
+    ocean.rebakeShore(src.heights, src.seaLevel);
+  }
+
+  /**
+   * Re-point the ocean at whatever the land situation now is.
+   *
+   * Changing the SHAPE of a source is cheap — the dock reuses its height texture,
+   * so only the shoreline field has to be re-baked. Changing the KIND of source
+   * is not: `terrainSize`, `maxHeight` and the field resolution are baked into
+   * the material when it is built, so that path disposes and rebuilds. It is a
+   * toggle, not a per-frame cost.
+   */
+  function refreshOceanSource() {
+    if (!ocean) return;
+    const src = oceanSource();
+    if (src.kind !== oceanSourceKind) {
+      ocean.dispose();
+      ocean = null;
+      buildOcean(src);
+      ocean.setEnabled(oceanWanted);
+      return;
+    }
+    ocean.setSeaLevel(src.seaLevel);
+    ocean.rebakeShore(src.heights, src.seaLevel);
+  }
+
+  /** ~40 ms at 512² — a level-load cost, and debounced behind panel edits. */
+  function rebakeShore() {
+    if (!ocean) return;
+    const src = oceanSource();
+    ocean.setSeaLevel(src.seaLevel);
+    ocean.rebakeShore(src.heights, src.seaLevel);
+  }
+
+  function syncDockOcean() {
+    if (dockWanted && !dock) buildDock();
+    dock?.setEnabled(dockWanted);
+    if (oceanWanted && !ocean) buildOcean(oceanSource());
+    else if (ocean) refreshOceanSource();
+    ocean?.setEnabled(oceanWanted);
+    devPanel?.refresh?.();
+  }
+
+  /** Dock shape changed: the mesh, the height field and the shore field all
+   *  follow, and the collision tree has a new deck in it. */
+  function applyDockParams() {
+    if (!dock) return;
+    dock.rebuild(dockParams);
+    dock.setEnabled(dockWanted);
+    if (ocean) {
+      // The dock reuses its height texture across rebuilds, so the ocean's node
+      // stays valid and only the shoreline field is stale.
+      clearTimeout(_shoreBakeTimer);
+      _shoreBakeTimer = setTimeout(rebakeShore, 150);
+    }
+    bakeCollision();
+  }
+
+  function applyOceanParams() {
+    if (!ocean) return;
+    // `seaLevel` is in this bag for the standalone case, but the dock owns it
+    // whenever there is one — passing it through would fight the dock.
+    const { seaLevel, ...rest } = oceanParams;
+    ocean.syncParams(rest);
+    if (!(dockWanted && dock)) {
+      ocean.setSeaLevel(seaLevel);
+      clearTimeout(_shoreBakeTimer);
+      _shoreBakeTimer = setTimeout(rebakeShore, 150);
+    }
+  }
+
+  /** Deck colour / normal strength only — no rebuild. See dock.setLook(). */
+  function applyDockLook() {
+    dock?.setLook(dockParams);
+  }
+
+  const _oceanZenith = new THREE.Color();
+  const _oceanHorizon = new THREE.Color();
+  const _oceanSun = new THREE.Vector3(0.4, 0.6, 0.3);
+
+  function updateDockOcean(dt) {
+    if (!ocean || !oceanWanted) return;
+    // Mirror the sky that is ACTUALLY in frame. The engine's worldEnvironment
+    // drives its ocean from the procedural sky's colours, but this game boots on
+    // its own physical sky — left alone, the sea would reflect a sky that is not
+    // on screen.
+    const look = gameSkyOn ? gameSky?.getLook() : null;
+    if (look) {
+      _oceanZenith.copy(look.zenithInside);
+      _oceanHorizon.copy(look.horizonInside);
+      ocean.setSky({ zenith: _oceanZenith, horizon: _oceanHorizon });
+      _oceanSun.copy(look.sunDir.y > 0 ? look.sunDir : look.moonDir);
+      ocean.setSunDir(_oceanSun);
+    } else {
+      const Li = app.light?.state;
+      if (Li) {
+        const az = THREE.MathUtils.degToRad(Li.sunAzimuth ?? 45);
+        const el = THREE.MathUtils.degToRad(Li.sunElevation ?? 40);
+        _oceanSun.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
+        ocean.setSunDir(_oceanSun);
+      }
+    }
+    ocean.update(dt, performance.now() * 0.001, camera);
+  }
+  app.addPreRenderHook?.(updateDockOcean);
 
   /*
    * BOOT ON THE GAME'S OWN SKY. It was built as an F8 A/B against the engine's
@@ -4223,6 +4509,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const propCol = props.collisionMeshes();
     decks.push(...propCol.deck);
     solids.push(...propCol.solids);
+
+    // The dock is a DECK and nothing else: its top face is drivable, and its
+    // skirt is deliberately absent from collision so a car that leaves the edge
+    // falls into the sea instead of sliding down a wall.
+    if (dock) {
+      const dockCol = dock.collisionMeshes();
+      decks.push(...dockCol.deck);
+    }
     // Round primitives bypass the BVH entirely — the chassis hull is SAMPLED
     // against triangles, and anything thinner than the sample spacing (a gate
     // post, say) falls between the samples. See PropManager.collisionCapsules().
@@ -6302,8 +6596,27 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     cityCenterX: "centerX",
     cityCenterZ: "centerZ",
   };
+  /** Dock + ocean keys — flat, same shallow-diff reason as clouds and city. */
+  const DOCK_ENV_MAP = {
+    dockWorldSize: "worldSize", dockTopY: "topY", dockFreeboard: "freeboard",
+    dockDepth: "depth", dockEdgeWidth: "edgeWidth", dockTileMetres: "tileMetres",
+  };
+  const OCEAN_ENV_MAP = {
+    oceanSurfHz: "surfHz", oceanSurfLength: "surfLength", oceanSurfReach: "surfReach",
+    oceanWindSpeed: "windSpeed", oceanWindAngle: "windAngleDeg",
+    oceanSwellAmp: "fftSwellAmp", oceanSsr: "ssrEnabled",
+    oceanFoamCutoff: "foamCutoff", oceanEdgeFoam: "edgeIntensity",
+    oceanSeaLevel: "seaLevel",
+  };
   function readTrackEnv(into = {}) {
     into.skyMode = !terrainOn;
+    into.dockOn = dockWanted;
+    into.oceanOn = oceanWanted;
+    for (const [k, p] of Object.entries(DOCK_ENV_MAP)) into[k] = dockParams[p];
+    for (const [k, p] of Object.entries(OCEAN_ENV_MAP)) into[k] = oceanParams[p];
+    // The pad layout is a LIST, so it rides whole rather than as flat keys —
+    // there is no sensible shallow diff of "the shape of the level".
+    into.dockPads = dockParams.pads;
     // The WISH, not the deck. Reading `clouds.enabled` here wrote this
     // machine's cloud tier into the track file. See `cloudsWanted`.
     into.cloudsOn = cloudsWanted;
@@ -6333,6 +6646,28 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const hadCity = !!city;
     syncCity();
     if (hadCity) applyCityParams();
+
+    // Dock shape BEFORE the sync, so a dock built here is built right the first
+    // time; one that already existed gets a single rebuild for the new params.
+    for (const [k, p] of Object.entries(DOCK_ENV_MAP)) {
+      if (trackEnv[k] !== undefined) dockParams[p] = trackEnv[k];
+    }
+    if (Array.isArray(trackEnv.dockPads)) dockParams.pads = trackEnv.dockPads;
+    for (const [k, p] of Object.entries(OCEAN_ENV_MAP)) {
+      if (trackEnv[k] !== undefined) oceanParams[p] = trackEnv[k];
+    }
+    dockWanted = !!trackEnv.dockOn;
+    oceanWanted = !!trackEnv.oceanOn;
+    const hadDock = !!dock;
+    syncDockOcean();
+    if (hadDock) applyDockParams();
+    applyOceanParams();
+
+    // One refresh at the end, once every switch this function throws has landed.
+    // A track load is the only place terrain, clouds, city, dock and ocean all
+    // move at once, and it is the path that used to leave the panel showing the
+    // PREVIOUS track's answers.
+    devPanel?.refresh?.();
   }
   /**
    * The pristine baselines a save is diffed against and a load resolves onto.
@@ -7632,15 +7967,32 @@ ${e.message}`);
     },
     game: {
       /** Volumetric clouds. Off releases every buffer and runs no pass. */
-      setClouds: (on) => { cloudsWanted = !!on; syncClouds(); },
+      // The refresh lives HERE, not in syncClouds: this handle is only ever
+      // called after boot, whereas syncClouds also runs during it — where
+      // touching devPanel is a temporal-dead-zone ReferenceError.
+      setClouds: (on) => { cloudsWanted = !!on; syncClouds(); devPanel?.refresh?.(); },
       /** The track's wish, not the deck: the cloud TIER decides whether that
        *  wish is currently affordable, and the two controls stay independent. */
       getClouds: () => cloudsWanted,
       /** The skyline. Track data — see the CITY block. */
       setCity: (on) => { cityWanted = !!on; syncCity(); },
       getCity: () => cityWanted,
+      /** Buildings solid, or drive-through. */
+      setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
+      getCityCollide: () => cityCollide,
       reseedCity,
       getCityStats: () => city?.stats ?? null,
+      /** Drift dock + open ocean. Track data, same as the city — see the block. */
+      setDock: (on) => { dockWanted = !!on; syncDockOcean(); bakeCollision(); },
+      getDock: () => dockWanted,
+      setOcean: (on) => { oceanWanted = !!on; syncDockOcean(); },
+      getOcean: () => oceanWanted,
+      dockParams,
+      oceanParams,
+      applyDockParams,
+      applyDockLook,
+      applyOceanParams,
+      getOceanStats: () => (ocean ? { ...ocean.stats, seaLevel: dock?.seaLevel } : null),
       /** Lens flare params, with the GAME's look applied — see ensureFlareLook. The
        *  params object itself lives in the engine's world state; the panel binds to it
        *  by reference like every other live params bag here. */
@@ -8431,13 +8783,29 @@ ${e.message}`);
     world: boot,
     /** Volumetric clouds on/off. OFF is free: every render target is released, no pass
      *  runs, and the noise bake never starts until the first enable. */
-    setClouds: (on) => { cloudsWanted = !!on; syncClouds(); },
+    setClouds: (on) => { cloudsWanted = !!on; syncClouds(); devPanel?.refresh?.(); },
     getClouds: () => cloudsWanted,
     /** The skyline — track data, lazily built. `city()` is the live handle
      *  (params, facade proxy, stats) for console tuning; `cityParams` is the
      *  set a track may pin; `applyCityParams` relayouts after editing them. */
     setCity: (on) => { cityWanted = !!on; syncCity(); },
     getCity: () => cityWanted,
+    setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
+    getCityCollide: () => cityCollide,
+    /** Drift dock + open ocean. Both off unless a track's `environment` asks. */
+    setDock: (on) => { dockWanted = !!on; syncDockOcean(); bakeCollision(); },
+    getDock: () => dockWanted,
+    setOcean: (on) => { oceanWanted = !!on; syncDockOcean(); },
+    getOcean: () => oceanWanted,
+    dockParams,
+    oceanParams,
+    applyDockParams,
+    applyDockLook,
+    applyOceanParams,
+    oceanStats: () => (ocean ? { ...ocean.stats, seaLevel: dock?.seaLevel } : null),
+    /** Dev/debug reach-in: the live ocean and dock objects. */
+    _ocean: () => ocean,
+    _dock: () => dock,
     reseedCity,
     city: () => city,
     cityParams,

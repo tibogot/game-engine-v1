@@ -87,6 +87,12 @@ export function createRoadDevPanel({ app, game, params }) {
               <button class="prop-toggle" id="dv-city" type="button" aria-label="City skyline">${CHECK_SVG}</button>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Buildings solid</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-city-collide" type="button" aria-label="City collision">${CHECK_SVG}</button>
+            </div>
+          </div>
           <button class="action-btn" id="dv-city-reseed" type="button">Reseed city</button>
           <div class="dv-hint">
             A procedural skyline to build the track through. Saved <b>with the
@@ -100,6 +106,201 @@ export function createRoadDevPanel({ app, game, params }) {
           <div class="dv-hint">
             Author worlds in <b>v3/editor.html</b>, Save Project, then drop the file
             here as <code>world.v3proj</code> to make it the default.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Ocean</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Ocean</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-ocean" type="button" aria-label="Open ocean">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Works on its own &mdash; there is no land in the world unless something
+            puts it there, and open sea is a perfectly good answer. Switch it on
+            with the terrain off and nothing else in the frame when you want to
+            judge the water, the sky and the light against each other.
+            <br /><br />
+            If the <b>drift dock</b> is on, the dock becomes the land and it owns
+            the sea level below.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sea level</span>
+            <div class="prop-value">
+              <input type="range" id="dv-oc-sea" min="-60" max="40" step="0.5" />
+              <span class="prop-num" id="dv-oc-sea-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sets / second</span>
+            <div class="prop-value">
+              <input type="range" id="dv-oc-hz" min="0.02" max="0.6" step="0.005" />
+              <span class="prop-num" id="dv-oc-hz-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Crest spacing</span>
+            <div class="prop-value">
+              <input type="range" id="dv-oc-len" min="12" max="160" step="1" />
+              <span class="prop-num" id="dv-oc-len-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Surf zone</span>
+            <div class="prop-value">
+              <input type="range" id="dv-oc-reach" min="4" max="80" step="1" />
+              <span class="prop-num" id="dv-oc-reach-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Sets &times; spacing is the speed the crest travels shoreward, in m/s.
+            The surf zone only shows where there is a shore to break on.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wind speed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-oc-wind" min="2" max="30" step="0.5" />
+              <span class="prop-num" id="dv-oc-wind-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wind angle</span>
+            <div class="prop-value">
+              <input type="range" id="dv-oc-wdir" min="0" max="360" step="1" />
+              <span class="prop-num" id="dv-oc-wdir-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Swell</span>
+            <div class="prop-value">
+              <input type="range" id="dv-oc-swell" min="0" max="3" step="0.02" />
+              <span class="prop-num" id="dv-oc-swell-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Foam density</span>
+            <div class="prop-value">
+              <input type="range" id="dv-oc-foam" min="0" max="0.8" step="0.01" />
+              <span class="prop-num" id="dv-oc-foam-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Edge foam</span>
+            <div class="prop-value">
+              <input type="range" id="dv-oc-edge" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-oc-edge-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Reflections (SSR)</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-oc-ssr" type="button" aria-label="Screen-space reflections">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            SSR measured ~<b>5.5&nbsp;ms</b> on its own &mdash; the single most
+            expensive thing in the water shader, and off by default for that
+            reason. It earns its keep only where there is something on screen worth
+            reflecting; on open sea the analytic sky already supplies it.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Drift dock</div>
+        <div class="section-body">
+          <button class="action-btn primary" id="dv-dock-preset" type="button">Set up drift level</button>
+          <div class="dv-hint">
+            One click: terrain <b>off</b>, dock and ocean <b>on</b>, and the sea
+            re-tuned from beach to quay (a 46&nbsp;m surf zone is a shoreline; a
+            concrete wall wants ~14).
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Dock</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-dock" type="button" aria-label="Drift dock">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            An asphalt apron standing in open water &mdash; the drift category.
+            Deliberately <b>not</b> v3 terrain: a flat plateau costs ~2.5&nbsp;ms
+            because the tile material is fragment-bound and fills the screen, for a
+            surface that uses none of it. The dock is one draw.
+            <br /><br />
+            It hands the ocean its height field, so the waterline the sea draws
+            lands exactly on the edge you drive off. Both save <b>with the
+            track</b>. Deck only in collision &mdash; leave the edge and you go in.
+          </div>
+
+          <div class="prop-row">
+            <span class="prop-label">Length</span>
+            <div class="prop-value">
+              <input type="range" id="dv-dock-x" min="120" max="600" step="10" />
+              <span class="prop-num" id="dv-dock-x-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Width</span>
+            <div class="prop-value">
+              <input type="range" id="dv-dock-z" min="100" max="500" step="10" />
+              <span class="prop-num" id="dv-dock-z-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Corner radius</span>
+            <div class="prop-value">
+              <input type="range" id="dv-dock-r" min="0" max="140" step="2" />
+              <span class="prop-num" id="dv-dock-r-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Freeboard</span>
+            <div class="prop-value">
+              <input type="range" id="dv-dock-fb" min="1" max="25" step="0.5" />
+              <span class="prop-num" id="dv-dock-fb-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Water depth</span>
+            <div class="prop-value">
+              <input type="range" id="dv-dock-dep" min="10" max="80" step="1" />
+              <span class="prop-num" id="dv-dock-dep-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Edge hardness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-dock-edge" min="0.5" max="12" step="0.25" />
+              <span class="prop-num" id="dv-dock-edge-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Edge hardness</b> is how many metres the height field takes to fall
+            from deck to seabed. Small is a wall: the shore field reads that as a
+            near-vertical bed, which switches run-up off and turns the breaker into
+            a tight bright line instead of a wide beach band.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Asphalt tile</span>
+            <div class="prop-value">
+              <input type="range" id="dv-dock-tile" min="2" max="20" step="0.5" />
+              <span class="prop-num" id="dv-dock-tile-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Deck brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-dock-bri" min="0.5" max="4" step="0.05" />
+              <span class="prop-num" id="dv-dock-bri-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            The asphalt diffuse averages ~0.14 linear &mdash; real road asphalt, and
+            correct, but it renders as a black hole without a lift.
           </div>
         </div>
       </div>
@@ -3945,6 +4146,140 @@ export function createRoadDevPanel({ app, game, params }) {
         </div>
       </div>
 
+      <!-- How the smoke MOVES. Curl is the coherent, plume-wide swirl; churn
+           is each puff boiling in place; the launch group is how it leaves the
+           tyre (low and outboard, lifting only once the wake lets go). -->
+      <div class="inspector-section">
+        <div class="section-header">FX — Smoke motion</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Curl turbulence</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-smk-curl" type="button" aria-label="Curl turbulence">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Curl strength</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-curls" min="0" max="10" step="0.1" />
+              <span class="prop-num" id="dv-smk-curls-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Curl scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-curlsc" min="0.05" max="1.5" step="0.01" />
+              <span class="prop-num" id="dv-smk-curlsc-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Churn (boil)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-churn" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-churn-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Churn rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-churnr" min="0" max="2" step="0.02" />
+              <span class="prop-num" id="dv-smk-churnr-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Launch outboard</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lout" min="0" max="5" step="0.05" />
+              <span class="prop-num" id="dv-smk-lout-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Launch up ×</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lup" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-smk-lup-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Delayed lift</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lift" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-smk-lift-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lift delay</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-liftd" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-smk-liftd-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Emission around the tyre, and the car's own lamps lighting the
+           plume. The lamp glow fades out with daylight on its own, so the
+           strength dial only shows itself at dusk and at night. -->
+      <div class="inspector-section">
+        <div class="section-header">FX — Smoke wheel &amp; lights</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Wheel arch emission</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-smk-arch" type="button" aria-label="Wheel arch emission">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Arc sweep</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-arcsw" min="0" max="180" step="1" />
+              <span class="prop-num" id="dv-smk-arcsw-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rim throw</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-arcthr" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-arcthr-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wheel vortex</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-arcvor" min="0" max="20" step="0.1" />
+              <span class="prop-num" id="dv-smk-arcvor-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Vortex time</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-arcvt" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-smk-arcvt-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lamps light smoke</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-smk-lamp" type="button" aria-label="Lamps light smoke">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lamp strength</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lamps" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-smk-lamps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lamp radius</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lampr" min="0.1" max="2" step="0.01" />
+              <span class="prop-num" id="dv-smk-lampr-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="inspector-section">
         <div class="section-header">FX — Sparks</div>
         <div class="section-body">
@@ -4120,6 +4455,78 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-smk-fscale-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Lumpy silhouette</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-sil" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-sil-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Silhouette bite</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-bite" min="0" max="0.8" step="0.01" />
+              <span class="prop-num" id="dv-smk-bite-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Volumetric detail</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-vol" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-vol-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Puff size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-size" min="0.15" max="1.6" step="0.01" />
+              <span class="prop-num" id="dv-smk-size-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Edge carve</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-det" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-det-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Carve scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-dets" min="1" max="8" step="0.1" />
+              <span class="prop-num" id="dv-smk-dets-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Optical depth</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-opt" min="0" max="6" step="0.05" />
+              <span class="prop-num" id="dv-smk-opt-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Erode start</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-erst" min="0" max="0.6" step="0.01" />
+              <span class="prop-num" id="dv-smk-erst-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Shape A/B</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-smk-shape-ab" type="button">Stock shape</button>
+            </div>
+          </div>
+          <p class="prop-hint">
+            <b>Lumpy silhouette</b> erodes against the RADIUS instead of the
+            ray-sphere chord. The chord is vertical at the rim, so it pinned
+            every contour within about 1% of the edge and a fresh puff could
+            only ever be a perfect circle. <b>Volumetric detail</b> samples the
+            puff's noise inside its own volume rather than on the card facing
+            you, so the interior parallaxes instead of riding along like a
+            decal. Both are 0 for the old behaviour, and <b>Shape A/B</b>
+            flips the pair.
+          </p>
         </div>
       </div>
 
@@ -4680,8 +5087,8 @@ export function createRoadDevPanel({ app, game, params }) {
       keys: ["Grid snap", "Gap / jump", "Edit piece", "Prop livery", "Flip ramp",
              "Build (sky)", "Track"] },
     { id: "world", label: "World", icon: "🌍",
-      keys: ["World", "World light", "Sky", "Clouds", "Aerial perspective",
-             "Lens flare", "Weather", "Fog", "Post FX"] },
+      keys: ["World", "World light", "Ocean", "Drift dock", "Sky", "Clouds",
+             "Aerial perspective", "Lens flare", "Weather", "Fog", "Post FX"] },
   ];
 
   const tabBar = $(".dv-tabs");
@@ -4948,14 +5355,22 @@ export function createRoadDevPanel({ app, game, params }) {
     // either throw or sit there pretending to do something.
     if (!obj) { el.closest(".prop-row")?.setAttribute("hidden", ""); return; }
     el.closest(".prop-row")?.removeAttribute("hidden");
-    el.value = obj[key];
-    if (out) out.textContent = fmt(obj[key]);
+    const sync = () => {
+      el.value = obj[key];
+      if (out) out.textContent = fmt(obj[key]);
+    };
+    sync();
     el.addEventListener("input", () => {
       const v = +el.value;
       obj[key] = v;
       if (out) out.textContent = fmt(v);
       onSet?.(v);
     });
+    // Returned so a preset or a track load can pull the control back into
+    // agreement with a value that moved behind the panel's back. Existing
+    // callers ignore it; the two early returns above still hand back undefined,
+    // so anything that keeps the handle must optional-chain it.
+    return { sync };
   }
 
   /* ── ROAD-LOOK CONTROLS BIND BY NAME, NOT BY OBJECT ────────────────────────
@@ -5522,10 +5937,92 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-lines-center", game.getCenterLinesOn?.() ?? false, (on) => game.setCenterLinesOn?.(on));
   toggle("dv-lines-edge", game.getEdgeLinesOn?.() ?? true, (on) => game.setEdgeLinesOn?.(on));
   toggle("dv-lines-bloom", game.getLinesBloom?.() ?? false, (on) => game.setLinesBloom?.(on));
-  toggle("dv-terrain", game.getTerrain?.() ?? true, (on) => game.setTerrain?.(on));
+  const terrainToggle =
+    toggle("dv-terrain", game.getTerrain?.() ?? true, (on) => game.setTerrain?.(on));
   const cityToggle = toggle("dv-city", game.getCity?.() ?? false, (on) => game.setCity?.(on));
+  const cityCollideToggle = toggle(
+    "dv-city-collide", game.getCityCollide?.() ?? true, (on) => game.setCityCollide?.(on),
+  );
   $("#dv-city-reseed")?.addEventListener("click", () => game.reseedCity?.());
-  toggle("dv-clouds", game.getClouds?.() ?? false, (on) => game.setClouds?.(on));
+
+  /* ── DRIFT DOCK + OCEAN ────────────────────────────────────────────────────
+   *
+   * Two update paths, and the split matters: a SHAPE change rebuilds the height
+   * field, re-bakes the shoreline distance field and rebuilds the mesh (~100 ms),
+   * while a LOOK change is a uniform write. Dragging a slider fires per frame, so
+   * the shape path is debounced and the look path is not.
+   *
+   * The pad is addressed through a live proxy rather than captured. `pads` is a
+   * LIST and a track load replaces it wholesale — a control holding pads[0]
+   * would then be writing into an array nobody renders, which is the same trap
+   * the road-look controls hit when the deck material was replaced under them.
+   */
+  const dockP = game.dockParams;
+  const oceanP = game.oceanParams;
+
+  let _dockShapeTimer = 0;
+  const dockShape = () => {
+    clearTimeout(_dockShapeTimer);
+    _dockShapeTimer = setTimeout(() => game.applyDockParams?.(), 180);
+  };
+  const dockLook = () => game.applyDockLook?.();
+  const oceanSync = () => game.applyOceanParams?.();
+
+  const pad0 = {};
+  for (const k of ["sizeX", "sizeZ", "radius"]) {
+    Object.defineProperty(pad0, k, {
+      get: () => dockP?.pads?.[0]?.[k] ?? 0,
+      set: (v) => { if (dockP?.pads?.[0]) dockP.pads[0][k] = v; },
+    });
+  }
+
+  const dockToggle = toggle("dv-dock", game.getDock?.() ?? false, (on) => game.setDock?.(on));
+  const oceanToggle = toggle("dv-ocean", game.getOcean?.() ?? false, (on) => game.setOcean?.(on));
+  const ssrToggle = toggle("dv-oc-ssr", !!oceanP?.ssrEnabled, (on) => {
+    if (oceanP) oceanP.ssrEnabled = on;
+    oceanSync();
+  });
+
+  if (dockP) {
+    slider("dv-dock-x", pad0, "sizeX", (v) => `${v | 0} m`, dockShape);
+    slider("dv-dock-z", pad0, "sizeZ", (v) => `${v | 0} m`, dockShape);
+    slider("dv-dock-r", pad0, "radius", (v) => `${v | 0} m`, dockShape);
+    slider("dv-dock-fb", dockP, "freeboard", (v) => `${v.toFixed(1)} m`, dockShape);
+    slider("dv-dock-dep", dockP, "depth", (v) => `${v | 0} m`, dockShape);
+    slider("dv-dock-edge", dockP, "edgeWidth", (v) => `${v.toFixed(2)} m`, dockShape);
+    slider("dv-dock-tile", dockP, "tileMetres", (v) => `${v.toFixed(1)} m`, dockShape);
+    slider("dv-dock-bri", dockP, "deckBrightness", (v) => v.toFixed(2), dockLook);
+  }
+  let reachSlider = null;
+  let edgeFoamSlider = null;
+  if (oceanP) {
+    slider("dv-oc-sea", oceanP, "seaLevel", (v) => `${v.toFixed(1)} m`, oceanSync);
+    slider("dv-oc-hz", oceanP, "surfHz", (v) => v.toFixed(3), oceanSync);
+    slider("dv-oc-len", oceanP, "surfLength", (v) => `${v | 0} m`, oceanSync);
+    reachSlider = slider("dv-oc-reach", oceanP, "surfReach", (v) => `${v | 0} m`, oceanSync);
+    slider("dv-oc-wind", oceanP, "windSpeed", (v) => v.toFixed(1), oceanSync);
+    slider("dv-oc-wdir", oceanP, "windAngleDeg", (v) => `${v | 0}\u00b0`, oceanSync);
+    slider("dv-oc-swell", oceanP, "fftSwellAmp", (v) => v.toFixed(2), oceanSync);
+    slider("dv-oc-foam", oceanP, "foamCutoff", (v) => v.toFixed(2), oceanSync);
+    edgeFoamSlider = slider("dv-oc-edge", oceanP, "edgeIntensity", (v) => v.toFixed(2), oceanSync);
+  }
+
+  /** One click to a usable drift level, including the beach-to-quay retune. */
+  $("#dv-dock-preset")?.addEventListener("click", () => {
+    game.setTerrain?.(false);
+    game.setDock?.(true);
+    game.setOcean?.(true);
+    if (oceanP) {
+      oceanP.surfReach = 14;
+      oceanP.edgeIntensity = 0.75;
+      oceanSync();
+      reachSlider?.sync();
+      edgeFoamSlider?.sync();
+    }
+    refresh();
+  });
+  const cloudsToggle =
+    toggle("dv-clouds", game.getClouds?.() ?? false, (on) => game.setClouds?.(on));
 
   // ── Clouds ──────────────────────────────────────────────────────────────────
   // Bound straight to the live params object: the cloud system's update() copies
@@ -6352,6 +6849,65 @@ export function createRoadDevPanel({ app, game, params }) {
     slider("dv-smk-soft", smk, "softDepth", (v) => v.toFixed(2) + "m");
     slider("dv-smk-fuse", smk, "worldNoiseMix");
     slider("dv-smk-fscale", smk, "worldNoiseScale");
+
+    // ── SHAPE ────────────────────────────────────────────────────────────────
+    slider("dv-smk-sil", smk, "silhouette");
+    slider("dv-smk-bite", smk, "silhouetteBite");
+    slider("dv-smk-vol", smk, "localNoise");
+    // One size dial, with the minimum trailing the maximum — same idea as the
+    // life and bank-size sliders above. The ratio is the shipped one.
+    slider("dv-smk-size", smk, "sizeMax", (v) => v.toFixed(2) + "m",
+      (v) => { smk.sizeMin = v * 0.49; });
+    slider("dv-smk-det", smk, "detail");
+    slider("dv-smk-dets", smk, "detailScale", (v) => v.toFixed(1));
+    slider("dv-smk-opt", smk, "opticalK");
+    slider("dv-smk-erst", smk, "erodeStart");
+    // A/B the whole shape pass in one click. The "on" values are read back
+    // from the settings the first time it is used, so a tuned look survives
+    // the round trip instead of snapping to whatever was hardcoded here.
+    const shapeAB = { on: true, sil: smk.silhouette ?? 1, vol: smk.localNoise ?? 1 };
+    const shapeBtn = $("#dv-smk-shape-ab");
+    shapeBtn?.addEventListener("click", () => {
+      if (shapeAB.on) {
+        shapeAB.sil = smk.silhouette;
+        shapeAB.vol = smk.localNoise;
+        smk.silhouette = 0;
+        smk.localNoise = 0;
+      } else {
+        smk.silhouette = shapeAB.sil;
+        smk.localNoise = shapeAB.vol;
+      }
+      shapeAB.on = !shapeAB.on;
+      shapeBtn.textContent = shapeAB.on ? "Stock shape" : "New shape";
+      refreshSmokeShape();
+    });
+
+    // ── MOTION ───────────────────────────────────────────────────────────────
+    if (smk.curl) {
+      toggle("dv-smk-curl", smk.curl.enabled !== false, (on) => { smk.curl.enabled = on; });
+      slider("dv-smk-curls", smk.curl, "strength", (v) => v.toFixed(1));
+      slider("dv-smk-curlsc", smk.curl, "scale");
+    }
+    slider("dv-smk-churn", smk, "churn");
+    slider("dv-smk-churnr", smk, "churnRate");
+    slider("dv-smk-lout", smk, "launchOut");
+    slider("dv-smk-lup", smk, "launchUpMul");
+    slider("dv-smk-lift", smk, "lift");
+    slider("dv-smk-liftd", smk, "liftDelay", (v) => v.toFixed(2) + "s");
+
+    // ── WHEEL ARCH + LAMPS ───────────────────────────────────────────────────
+    if (smk.arch) {
+      toggle("dv-smk-arch", smk.arch.enabled !== false, (on) => { smk.arch.enabled = on; });
+      slider("dv-smk-arcsw", smk.arch, "sweep", (v) => v.toFixed(0) + "\u00b0");
+      slider("dv-smk-arcthr", smk.arch, "throw");
+      slider("dv-smk-arcvor", smk.arch, "vortex", (v) => v.toFixed(1));
+      slider("dv-smk-arcvt", smk.arch, "vortexTime", (v) => v.toFixed(2) + "s");
+    }
+    if (smk.lamps) {
+      toggle("dv-smk-lamp", smk.lamps.enabled !== false, (on) => { smk.lamps.enabled = on; });
+      slider("dv-smk-lamps", smk.lamps, "strength");
+      slider("dv-smk-lampr", smk.lamps, "radius", (v) => v.toFixed(2) + "m");
+    }
     if (smk.haze) {
       const hz = smk.haze;
       toggle("dv-smk-haze", hz.enabled !== false, (on) => { hz.enabled = on; });
@@ -6389,6 +6945,23 @@ export function createRoadDevPanel({ app, game, params }) {
       slider("dv-spr-rise", spr, "rise");
       slider("dv-spr-drag", spr, "drag");
       slider("dv-spr-entry", spr, "entrySpeed", (v) => v.toFixed(1) + " m/s");
+    }
+  }
+
+  /**
+   * Re-sync the two sliders the Shape A/B button writes behind their backs.
+   * Written straight to the DOM rather than through `slider()`, which binds a
+   * fresh input listener every call and would stack one per A/B click.
+   */
+  function refreshSmokeShape() {
+    const smk = game.getDriftSmokeSettings?.();
+    if (!smk) return;
+    for (const [id, key] of [["dv-smk-sil", "silhouette"], ["dv-smk-vol", "localNoise"]]) {
+      const el = $(`#${id}`);
+      const out = $(`#${id}-v`);
+      if (!el) continue;
+      el.value = smk[key];
+      if (out) out.textContent = (+smk[key]).toFixed(2);
     }
   }
 
@@ -6599,8 +7172,25 @@ export function createRoadDevPanel({ app, game, params }) {
     gapToggle.set(game.getGapPreview());
     // F8 flips the sky from outside the panel.
     gameSkyToggle.set(game.getGameSky?.() ?? false);
+    /*
+     * A toggle the GAME can move has to be re-read here, or the panel shows the
+     * last thing that was CLICKED rather than what is true. `setTerrain` and
+     * `syncClouds` both already call refresh() — the gap was only that these two
+     * handles were being discarded at bind time, so there was nothing to set.
+     *
+     * Both are changed by `applyTrackEnv` on every track load, which is the path
+     * that made it visible: load a sky-mode track and the Terrain box stayed
+     * ticked over a world with no terrain in it.
+     */
+    terrainToggle.set(game.getTerrain?.() ?? true);
+    cloudsToggle.set(game.getClouds?.() ?? false);
     // A track load switches the city on or off behind the panel's back.
     cityToggle.set(game.getCity?.() ?? false);
+    cityCollideToggle.set(game.getCityCollide?.() ?? true);
+    // Same for the dock and its sea.
+    dockToggle.set(game.getDock?.() ?? false);
+    oceanToggle.set(game.getOcean?.() ?? false);
+    ssrToggle.set(!!game.oceanParams?.ssrEnabled);
     syncTierBtns();
     autoToggle.set(game.getAutoHeadlights?.() ?? true);
     // The wheel and chassis GLBs finish loading after the panel is built and

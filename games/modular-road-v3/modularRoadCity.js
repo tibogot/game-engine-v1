@@ -80,6 +80,7 @@ import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from 
 import { createCitySigns } from "./modularRoadCitySigns.js";
 import { createCityStreets } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
+import { createCityCollider } from "./modularRoadCityCollider.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
 export const CITY_DEFAULTS = {
@@ -234,6 +235,9 @@ export function createModularRoadCity({
 
   let ground = null;
   let furniture = null;
+  /** Buildings you cannot drive through. Built lazily — a city that is never
+   *  collided against never pays for the trees. */
+  let collider = null;
   /** Last wetness the game pushed — survives a ground rebuild. */
   let wetAmount = 0;
   let buildings = [];
@@ -622,6 +626,9 @@ export function createModularRoadCity({
     clearBackend();
     buildings = layout();
     stats.buildings = buildings.length;
+    // The collider's BVHs belong to the ARCHETYPES, so a rebuild only refills
+    // its cell map — see modularRoadCityCollider.js for why that matters.
+    if (collider) collider.setBuildings(buildings);
     if (P.backend === "instanced") buildInstanced();
     else buildBatched();
     buildExtras();
@@ -699,6 +706,37 @@ export function createModularRoadCity({
      * uses or the relief will be lit from one side and shadowed from another.
      */
     setSun(dir) { facade.setSun(dir); },
+
+    /**
+     * The building collider, built on first ask. Hand it to the game's ground
+     * adapter (`setCityCollider`) and towers become solid. The crash comes
+     * free: the vehicle arms `_crashYield` off ANY solid above
+     * CRASH.wallSpeed and has no idea what kind of solid it was.
+     */
+    getCollider() {
+      if (!collider) {
+        collider = createCityCollider({ kit, buildings, lotSize: P.lotSize });
+        stats.collider = collider.stats;
+      }
+      return collider;
+    },
+    /**
+     * The street surface for PHYSICS, or NaN where there is none.
+     *
+     * The city's ground plane is flat, so it IS a heightfield, and the vehicle
+     * already has a heightfield path (the terrain probe in
+     * v3/play/modularRoadGround.js). Sky mode feeds that NaN, meaning "no
+     * ground here"; this feeds it the street where the street exists, which
+     * makes the road drivable without one line of new collision code. With
+     * terrain ON there is no city ground plane — the terrain is the ground —
+     * so this returns NaN and stays out of the way.
+     */
+    streetHeightAt(x, z) {
+      if (!ground || !P.ground) return NaN;
+      const halfPlane = P.extent * 1.3;   // the plane is extent * 2.6 across
+      if (Math.abs(x - P.centerX) > halfPlane || Math.abs(z - P.centerZ) > halfPlane) return NaN;
+      return P.groundY;
+    },
     /**
      * Same weather the track gets, 0 dry … 1 soaked. The street material runs
      * the Smart Road's own wet model (modularRoadWet.js, same knob names), so
@@ -744,6 +782,8 @@ export function createModularRoadCity({
       disposeCityKit(kit);
       if (ground) ground.dispose();
       facade.material.dispose();
+      collider?.dispose();
+      collider = null;
       facade.lotHeights.texture.dispose();
     },
   };
