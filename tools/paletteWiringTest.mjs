@@ -26,6 +26,14 @@ const check = (n, c, d = "") => {
   if (!c) fail++;
 };
 
+/**
+ * Matches one key in the manual or the legend. ATTRIBUTE-TOLERANT: a `<kbd>`
+ * that names a physical key now carries `data-keys="KeyO"` so keyLabels.js can
+ * print the letter the player's own keyboard has (AZERTY moves half of them).
+ * A regex looking for a bare `<kbd>O</kbd>` stopped seeing any of them.
+ */
+const kbd = (label, flags = "") => new RegExp(`<kbd[^>]*>${label}</kbd>`, flags);
+
 /** Every id road.html defines. */
 const declared = new Set([...html.matchAll(/id="([\w-]+)"/g)].map((m) => m[1]));
 
@@ -116,7 +124,7 @@ console.log("\n=== THE KEY LEGEND MATCHES THE REAL SHORTCUTS ===");
   const legend = (html.split('id="key-legend"')[1] ?? "").split("</div>")[0];
   const pairs = [["O", "keyo"], ["J", "keyj"], ["K", "keyk"], ["N", "keyn"], ["R", "keyr"], ["W", "keyw"]];
   for (const [label, code] of pairs) {
-    const inLegend = new RegExp(`<kbd>${label}</kbd>`).test(legend);
+    const inLegend = kbd(label).test(legend);
     const inCode = new RegExp(`case "${code}":`).test(game);
     check(`legend "${label}" is a real binding`, inLegend && inCode,
       `legend:${inLegend} handler(case "${code}"):${inCode}`);
@@ -139,9 +147,26 @@ console.log("\n=== EVERY SHORTCUT IS DOCUMENTED ===");
   const pieceKeys = PIECE_CATALOG.filter((p) => p.key).map((p) => ({ id: p.id, key: p.key }));
   check(`the catalog declares piece hotkeys (${pieceKeys.length})`, pieceKeys.length > 10);
   const undocumented = pieceKeys.filter(
-    (k) => !new RegExp(`<kbd>${k.key.toUpperCase()}</kbd>`, "i").test(manual));
+    (k) => !kbd(k.key.toUpperCase(), "i").test(manual));
   check("every piece hotkey appears in the manual", undocumented.length === 0,
     `missing: ${undocumented.map((k) => `${k.key} (${k.id})`).join(", ")}`);
+
+  // …AND IS LISTED AS A BARE <kbd>, with no data-keys.
+  //
+  // The two kinds of shortcut in this game are documented differently and it is
+  // not cosmetic. Editor and driving keys are matched on `e.code` — physical
+  // position — so the manual annotates them and keyLabels.js rewrites the label
+  // to what THIS keyboard prints. Piece hotkeys are matched on `e.key`, the
+  // printed label itself (see the PIECE_CATALOG lookup in modularRoadBuilder),
+  // so their labels are already correct everywhere and relabelling them makes
+  // them WRONG: annotating the Brow's "M" turned it into "," on AZERTY, naming
+  // a key that does not select the piece.
+  const pieceBlock = (manual.split("<b>Pieces.</b>")[1] ?? "").split("</div>")[0];
+  const relabelled = pieceKeys.filter((k) =>
+    new RegExp(`<kbd data-keys="[^"]*">${k.key.toUpperCase()}</kbd>`, "i").test(pieceBlock));
+  check("piece hotkeys are NOT layout-relabelled (they match e.key, not e.code)",
+    relabelled.length === 0,
+    `annotated: ${relabelled.map((k) => `${k.key} (${k.id})`).join(", ")}`);
   const dupes = pieceKeys.filter((k, i) => pieceKeys.findIndex((o) => o.key === k.key) !== i);
   check("...and no two pieces share one", dupes.length === 0,
     `duplicated: ${dupes.map((k) => k.key).join(", ")}`);
@@ -166,7 +191,7 @@ console.log("\n=== EVERY SHORTCUT IS DOCUMENTED ===");
   // 3. EVERY EDITOR BINDING in the build-mode handler is documented too.
   const cases = [...game.matchAll(/case "key([a-z])":/g)].map((m) => m[1]);
   const editorUndoc = [...new Set(cases)].filter(
-    (c) => !new RegExp(`<kbd>${c.toUpperCase()}</kbd>`, "i").test(manual));
+    (c) => !kbd(c.toUpperCase(), "i").test(manual));
   check(`every editor letter binding is in the manual (${new Set(cases).size} distinct)`,
     editorUndoc.length === 0, `missing: ${editorUndoc.join(", ")}`);
 

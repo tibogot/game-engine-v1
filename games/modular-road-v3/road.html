@@ -465,18 +465,18 @@
                which is a lookup, not a paragraph. -->
           <div id="build-hints">
             <div id="key-legend">
-              <span><kbd>LMB</kbd> place</span><span><kbd>O</kbd> other end</span>
-              <span><kbd>J</kbd> join gap</span><span><kbd>K</kbd> branch</span>
-              <span><kbd>N</kbd> new chain</span><span><kbd>[</kbd><kbd>]</kbd> chain</span>
-              <span><kbd>R</kbd> flip L/R</span><span><kbd>B</kbd> drive</span>
-              <span><kbd>W</kbd> move gizmo</span><span><kbd>Shift+E</kbd> rotate</span>
-              <span><kbd>Q</kbd><kbd>E</kbd> yaw</span><span><kbd>RMB</kbd> select piece</span>
+              <span><kbd>LMB</kbd> place</span><span><kbd data-keys="KeyO">O</kbd> other end</span>
+              <span><kbd data-keys="KeyJ">J</kbd> join gap</span><span><kbd data-keys="KeyK">K</kbd> branch</span>
+              <span><kbd data-keys="KeyN">N</kbd> new chain</span><span><kbd data-keys="BracketLeft">[</kbd><kbd data-keys="BracketRight">]</kbd> chain</span>
+              <span><kbd data-keys="KeyR">R</kbd> flip L/R</span><span><kbd data-keys="KeyB">B</kbd> drive</span>
+              <span><kbd data-keys="KeyW">W</kbd> move gizmo</span><span><kbd>Shift</kbd>+<kbd data-keys="KeyE">E</kbd> rotate</span>
+              <span><kbd data-keys="KeyQ">Q</kbd><kbd data-keys="KeyE">E</kbd> yaw</span><span><kbd>RMB</kbd> select piece</span>
               <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> yaw step</span><span><kbd>&uarr;</kbd><kbd>&darr;</kbd> pitch step</span>
-              <span><kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll</span><span><kbd>X</kbd> world/local axes</span>
+              <span><kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll</span><span><kbd data-keys="KeyX">X</kbd> world/local axes</span>
               <span><kbd>RMB</kbd> select — nearest wins</span>
               <span><kbd>Shift</kbd>+<kbd>RMB</kbd> select section</span><span><kbd>Ctrl+Z</kbd> undo</span>
-              <span><kbd>Del</kbd> delete sel.</span><span><kbd>L</kbd> level sel.</span>
-              <span><kbd>U</kbd> edges sel.</span><span><kbd>.</kbd> orbit sel.</span>
+              <span><kbd>Del</kbd> delete sel.</span><span><kbd data-keys="KeyL">L</kbd> level sel.</span>
+              <span><kbd data-keys="KeyU">U</kbd> edges sel.</span><span><kbd>.</kbd> orbit sel.</span>
               <span><kbd>Esc</kbd> cancel</span>
               <span><kbd>?</kbd> all shortcuts</span>
               <!-- FILLED FROM PIECE_CATALOG at build time (buildRoadPaletteUI), not
@@ -542,11 +542,11 @@
                 trajectory and starts a new chain exactly where the car lands,
                 heading down-arc — no grid rounding, because that position is
                 physics, not authoring. Put a <b>Landing ramp</b>
-                (<kbd>L</kbd>) or a <b>Platform</b> there to catch it.
+                (<kbd data-keys="KeyL">L</kbd>) or a <b>Platform</b> there to catch it.
               </p>
               <p>
                 <b>You fly straight over a hole and land back on the same line</b>
-                — that is the <b>Gap</b> piece (<kbd>G</kbd>, Ramps tab). It
+                — that is the <b>Gap</b> piece (<kbd data-keys="KeyG">G</kbd>, Ramps tab). It
                 builds no road at all: it just advances the chain by its length
                 and drops it, leaving air in between. Sizes are on the tiles
                 (Gap 20 / 40 / 60 m, and two with drops), but the honest way is
@@ -590,10 +590,10 @@
                 <span><kbd>T</kbd> Tunnel</span>
               </div>
               <p>
-                Two notes. With a piece selected, <kbd>L</kbd> <i>levels</i> the
+                Two notes. With a piece selected, <kbd data-keys="KeyL">L</kbd> <i>levels</i> the
                 selection instead of picking the landing ramp — piece editing gets
-                the keyboard first. And <kbd>B</kbd> is the build/drive toggle, so
-                it is not available as a piece key (the Brow was on <kbd>B</kbd>
+                the keyboard first. And <kbd data-keys="KeyB">B</kbd> is the build/drive toggle, so
+                it is not available as a piece key (the Brow was on <kbd data-keys="KeyB">B</kbd>
                 and could never fire; it is on <kbd>M</kbd> now).
               </p>
               <p><b>Building.</b></p>
@@ -602,16 +602,16 @@
                 <span><kbd>RMB</kbd> select a piece</span>
                 <span><kbd>Shift</kbd>+<kbd>RMB</kbd> select the section between</span>
                 <span><kbd>Ctrl</kbd>+<kbd>RMB</kbd> add / remove one piece</span>
-                <span><kbd>O</kbd> other end of the chain</span>
-                <span><kbd>J</kbd> join the gap to the nearest end</span>
-                <span><kbd>K</kbd> next junction arrow</span>
-                <span><kbd>N</kbd> new chain near selection / tip</span>
-                <span><kbd>[</kbd> / <kbd>]</kbd> previous / next chain</span>
-                <span><kbd>R</kbd> flip left / right</span>
-                <span><kbd>W</kbd> gizmo: move</span>
-                <span><kbd>Shift</kbd>+<kbd>E</kbd> gizmo: rotate</span>
-                <span><kbd>X</kbd> gizmo axes: world / local</span>
-                <span><kbd>Q</kbd> / <kbd>E</kbd> yaw by one step</span>
+                <span><kbd data-keys="KeyO">O</kbd> other end of the chain</span>
+                <span><kbd data-keys="KeyJ">J</kbd> join the gap to the nearest end</span>
+                <span><kbd data-keys="KeyK">K</kbd> next junction arrow</span>
+                <span><kbd data-keys="KeyN">N</kbd> new chain near selection / tip</span>
+                <span><kbd data-keys="BracketLeft">[</kbd> / <kbd data-keys="BracketRight">]</kbd> previous / next chain</span>
+                <span><kbd data-keys="KeyR">R</kbd> flip left / right</span>
+                <span><kbd data-keys="KeyW">W</kbd> gizmo: move</span>
+                <span><kbd>Shift</kbd>+<kbd data-keys="KeyE">E</kbd> gizmo: rotate</span>
+                <span><kbd data-keys="KeyX">X</kbd> gizmo axes: world / local</span>
+                <span><kbd data-keys="KeyQ">Q</kbd> / <kbd data-keys="KeyE">E</kbd> yaw by one step</span>
               </div>
               <p>
                 <b>With something selected.</b> All of these act on the whole
@@ -620,14 +620,14 @@
               <div class="help-keys">
                 <span><kbd>Del</kbd> / <kbd>Backspace</kbd> delete</span>
                 <span><kbd>Enter</kbd> replace with the palette piece</span>
-                <span><kbd>I</kbd> insert the palette piece before it</span>
-                <span><kbd>L</kbd> level (zero the tilt)</span>
-                <span><kbd>U</kbd> guardrails &amp; kerbs on / off</span>
+                <span><kbd data-keys="KeyI">I</kbd> insert the palette piece before it</span>
+                <span><kbd data-keys="KeyL">L</kbd> level (zero the tilt)</span>
+                <span><kbd data-keys="KeyU">U</kbd> guardrails &amp; kerbs on / off</span>
                 <span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> yaw by one step</span>
                 <span><kbd>&uarr;</kbd> <kbd>&darr;</kbd> pitch by one step</span>
                 <span><kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll / bank the section</span>
-                <span><kbd>W</kbd> gizmo: move the chain</span>
-                <span><kbd>E</kbd> gizmo: tilt this piece</span>
+                <span><kbd data-keys="KeyW">W</kbd> gizmo: move the chain</span>
+                <span><kbd data-keys="KeyE">E</kbd> gizmo: tilt this piece</span>
                 <span><kbd>.</kbd> orbit around the selection</span>
                 <span><kbd>Esc</kbd> deselect</span>
               </div>
@@ -647,16 +647,16 @@
                 road. Right-<i>dragging</i> pans the camera and selects nothing.
               </p>
               <div class="help-keys">
-                <span><kbd>W</kbd> move</span>
-                <span><kbd>E</kbd> rotate</span>
-                <span><kbd>R</kbd> scale</span>
-                <span><kbd>X</kbd> world / local axes</span>
+                <span><kbd data-keys="KeyW">W</kbd> move</span>
+                <span><kbd data-keys="KeyE">E</kbd> rotate</span>
+                <span><kbd data-keys="KeyR">R</kbd> scale</span>
+                <span><kbd data-keys="KeyX">X</kbd> world / local axes</span>
                 <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> yaw by one step</span>
                 <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> pitch by one step</span>
                 <span><kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll</span>
-                <span><kbd>C</kbd> next livery</span>
-                <span><kbd>V</kbd> decal on / off</span>
-                <span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate</span>
+                <span><kbd data-keys="KeyC">C</kbd> next livery</span>
+                <span><kbd data-keys="KeyV">V</kbd> decal on / off</span>
+                <span><kbd>Ctrl</kbd>+<kbd data-keys="KeyD">D</kbd> duplicate</span>
                 <span><kbd>Del</kbd> delete</span>
                 <span><kbd>.</kbd> orbit around the selection</span>
                 <span><kbd>Esc</kbd> deselect</span>
@@ -664,7 +664,7 @@
               <p>
                 The arrow steps are the <i>same</i> Angle step the road uses, so a
                 pad and a banked piece turn by the same amount from one setting.
-                <kbd>X</kbd> is world/local everywhere — it used to be <kbd>Q</kbd>
+                <kbd data-keys="KeyX">X</kbd> is world/local everywhere — it used to be <kbd data-keys="KeyQ">Q</kbd>
                 on obstacles, which is the road's yaw nudge, so one key meant two
                 things depending on what happened to be selected.
               </p>
@@ -674,17 +674,35 @@
                 <span><kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</span>
                 <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redo</span>
                 <span><kbd>Shift</kbd>+<kbd>Backspace</kbd> redo</span>
-                <span><kbd>B</kbd> build / test drive</span>
+                <span><kbd data-keys="KeyB">B</kbd> build / test drive</span>
                 <span><kbd>?</kbd> this manual, <kbd>Esc</kbd> closes it</span>
               </div>
+              <p><b>While driving</b> (<kbd data-keys="KeyB">B</kbd>).</p>
+              <div class="help-keys">
+                <span><kbd data-keys="KeyW,KeyA,KeyS,KeyD">WASD</kbd> or the arrows drive</span>
+                <span><kbd>Space</kbd> handbrake</span>
+                <span><kbd data-keys="KeyR">R</kbd> respawn</span>
+                <span><kbd data-keys="KeyH">H</kbd> headlights</span>
+                <span><kbd>F8</kbd> game sky / engine sky</span>
+              </div>
               <p>
-                <b>While driving</b> (<kbd>B</kbd>): <kbd>WASD</kbd> or the arrows
-                to drive, <kbd>Space</kbd> handbrake,
-                <kbd>Shift</kbd>/<kbd>Ctrl</kbd> air pitch, <kbd>R</kbd> respawn,
-                <kbd>H</kbd> headlights, <kbd>C</kbd> debug orbit camera (then
-                <kbd>V</kbd> frame, <kbd>1</kbd>&ndash;<kbd>4</kbd> angles,
-                <kbd>0</kbd> recentre, <kbd>+</kbd>/<kbd>&minus;</kbd> zoom).
+                <b>In the air</b> the three axes are on separate keys, so a jump
+                can be flipped, rolled and spun independently rather than through
+                one stick.
               </p>
+              <div class="help-keys">
+                <span><kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch (flip)</span>
+                <span><kbd data-keys="KeyZ">Z</kbd>/<kbd data-keys="KeyX">X</kbd> roll</span>
+                <span><kbd data-keys="KeyQ">Q</kbd>/<kbd data-keys="KeyE">E</kbd> spin</span>
+              </div>
+              <p><b>The debug orbit camera</b> (<kbd data-keys="KeyC">C</kbd>) — watch a
+                contact from outside the car.</p>
+              <div class="help-keys">
+                <span><kbd data-keys="KeyV">V</kbd> frame</span>
+                <span><kbd>1</kbd>&ndash;<kbd>4</kbd> angles</span>
+                <span><kbd>0</kbd> recentre</span>
+                <span><kbd>+</kbd>/<kbd>&minus;</kbd> zoom</span>
+              </div>
               <h3 class="help-h">How it works</h3>
               <b>Props &amp; movers:</b> pick one above and a ghost follows your
               mouse — <kbd>LMB</kbd> to place (keeps going, so you can lay a run of
@@ -712,14 +730,14 @@
               <br><br>
               <b>The gizmo is for empty space.</b> Use it when you want a piece
               somewhere there is no track yet — drag to move it anywhere
-              (<kbd>Y</kbd> axis = height), and it still magnets onto an open end
+              (<kbd data-keys="KeyY">Y</kbd> axis = height), and it still magnets onto an open end
               if you drop it close enough.
-              <kbd>W</kbd> move <kbd>Shift+E</kbd> rotate &bull;
-              <kbd>Q</kbd>/<kbd>E</kbd> yaw nudge &bull;
-              <kbd>N</kbd> new chain &bull; <kbd>[</kbd>/<kbd>]</kbd> select chain
+              <kbd data-keys="KeyW">W</kbd> move <kbd>Shift</kbd>+<kbd data-keys="KeyE">E</kbd> rotate &bull;
+              <kbd data-keys="KeyQ">Q</kbd>/<kbd data-keys="KeyE">E</kbd> yaw nudge &bull;
+              <kbd data-keys="KeyN">N</kbd> new chain &bull; <kbd data-keys="BracketLeft">[</kbd>/<kbd data-keys="BracketRight">]</kbd> select chain
               (gizmo then drags the whole chain).
               <br>
-              <b>After a jump, press <kbd>X</kbd> for LOCAL axes.</b> World axes
+              <b>After a jump, press <kbd data-keys="KeyX">X</kbd> for LOCAL axes.</b> World axes
               line up with the build grid, which is the right frame for dropping
               a chain somewhere tidy — but a takeoff points wherever your last
               corner left it, so nudging a landing pad along the flight line
@@ -738,7 +756,7 @@
               <br>
               Everything then acts on the whole run, as ONE undo step:
               <kbd>Del</kbd> delete, <kbd>Enter</kbd> replace with the palette
-              piece, <kbd>L</kbd> level, <kbd>U</kbd> guardrails on/off, and the
+              piece, <kbd data-keys="KeyL">L</kbd> level, <kbd data-keys="KeyU">U</kbd> guardrails on/off, and the
               arrows <b>bank the section</b>.
               <br>
               Banking a section is not the same as tilting each piece in it. A
@@ -756,27 +774,27 @@
               <kbd>&larr;</kbd><kbd>&rarr;</kbd> yaw,
               <kbd>&uarr;</kbd><kbd>&darr;</kbd> pitch (<kbd>&uarr;</kbd> is nose
               up), <kbd>Shift</kbd>+<kbd>&larr;&rarr;</kbd> roll. The status line
-              shows the angle you are now at. <kbd>Q</kbd>/<kbd>E</kbd> use the
+              shows the angle you are now at. <kbd data-keys="KeyQ">Q</kbd>/<kbd data-keys="KeyE">E</kbd> use the
               same step.
               <br>
               The axes are the <i>piece's</i>, not the world's — roll is about the
               direction of travel, so banking a corner never changes where it
               points. Which thing turns depends on what you have: a piece you
               right-clicked tilts (and <b>banks everything after it in the
-              chain</b> — that is the banked-landing-strip tool; <kbd>L</kbd>
-              levels it again), a chain you picked with <kbd>[</kbd>/<kbd>]</kbd>
+              chain</b> — that is the banked-landing-strip tool; <kbd data-keys="KeyL">L</kbd>
+              levels it again), a chain you picked with <kbd data-keys="BracketLeft">[</kbd>/<kbd data-keys="BracketRight">]</kbd>
               turns rigidly, and the next-piece ghost takes yaw only, because
               every socket in the kit is level by convention.
               <br><br>
               <b>Either end:</b> a chain grows from its <b>tail</b> or its
-              <b>head</b> — press <kbd>O</kbd> (or drag the ghost onto the far end)
+              <b>head</b> — press <kbd data-keys="KeyO">O</kbd> (or drag the ghost onto the far end)
               to switch, and the status line always says which one you are on.
               Building backwards <i>prepends</i>: the piece goes in front and the
               chain's start moves back to meet it, so <b>nothing already placed
               moves</b> — you can extend a finished run backwards to a new start
               line without breaking a single seam you had aligned. A start that is
               already joined to a junction branch or to another chain is not an
-              open end, so <kbd>O</kbd> will decline there and say so.
+              open end, so <kbd data-keys="KeyO">O</kbd> will decline there and say so.
               <br><br>
               <b>Junctions — one arm continues by itself.</b> A fork, T, crossroads
               or roundabout is an ordinary chain piece: the chain drives in one end
@@ -784,19 +802,19 @@
               keep going on the main arm — just place the next piece.
               <br>
               The EXTRA exits are the floating yellow arrows. Point at one (or press
-              <kbd>K</kbd>) and place, and the side road starts as its own chain;
+              <kbd data-keys="KeyK">K</kbd>) and place, and the side road starts as its own chain;
               the arrow disappears once something is built on it. A crossroads and a
-              roundabout have two arrows — <kbd>K</kbd> steps through them one press
+              roundabout have two arrows — <kbd data-keys="KeyK">K</kbd> steps through them one press
               at a time, and pointing at one goes straight to it.
-              <kbd>R</kbd> flips which side a Split / T uses and which arm of a Y
+              <kbd data-keys="KeyR">R</kbd> flips which side a Split / T uses and which arm of a Y
               fork the chain follows. A roundabout's island is a hole — cut across
               the middle and you drop through it.
               <br><br>
               <b>Splitting and rejoining:</b> build the alternate route off a
-              Split's arrow, run it where you like, then press <kbd>J</kbd> (Join)
+              Split's arrow, run it where you like, then press <kbd data-keys="KeyJ">J</kbd> (Join)
               to close the gap back into a <b>Merge</b>. A chain is a rigid run of
               pieces, so nothing you place by hand will ever land on both ends at
-              once — <kbd>J</kbd> generates a <i>link</i> shaped to whatever is
+              once — <kbd data-keys="KeyJ">J</kbd> generates a <i>link</i> shaped to whatever is
               left over, meeting the far end exactly in position <i>and</i>
               heading. It tells you the gap it closed and the tightest radius, and
               refuses outright if the only curve that would fit is a hairpin —

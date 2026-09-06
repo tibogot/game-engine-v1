@@ -42,10 +42,58 @@ console.log(`  ${headers.length} sections`);
     `${headers.length} headers, ${new Set(headers).size} distinct`);
 }
 
-console.log("\n=== NESTED GROUPS ===");
+console.log("\n=== MARKUP NESTING ===");
+// A STRAY </div> CLOSES A SECTION EARLY AND NOTHING COMPLAINS. The browser's
+// parser repairs it, the controls still render in roughly the right place, and
+// they still get wired — so it survives. What it costs is the fold: rows that
+// escaped the .section-body stay on screen when you collapse the section, and
+// rows that escaped the .inspector-section stay on screen on EVERY TAB. Two of
+// them had been sitting in "Sky — Night" long enough that nine sliders were
+// outside their own section.
+//
+// Every one of these elements has exactly one correct depth, so walking the
+// template and comparing is the whole test.
 {
-  const prefixes = /GROUP_PREFIXES\s*=\s*\[([^\]]*)\]/.exec(SRC)?.[1] ?? "";
-  const groups = [...prefixes.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const lines = SRC.split("\n");
+  const from = lines.findIndex((l) => l.includes("root.innerHTML = `"));
+  const to = lines.findIndex((l, i) => i > from && l.trim() === "`;");
+  check("the panel template was found", from >= 0 && to > from);
+
+  let depth = 0;
+  let negative = false;
+  const misplaced = [];
+  // Depth 1 is a child of .tab-content: a section. Its header and body are 2,
+  // and the rows and notes inside the body are 3.
+  const WANT = { "inspector-section": 1, "section-body": 2, "prop-row": 3, "dv-hint": 3 };
+  for (let i = from; i <= to; i++) {
+    for (const m of lines[i].matchAll(/<div\b[^>]*>|<\/div>/g)) {
+      if (m[0] === "</div>") { depth--; if (depth < 0) negative = true; continue; }
+      for (const [cls, want] of Object.entries(WANT)) {
+        // The advert prism block is a real wrapper around its rows, so a
+        // prop-row is allowed to be one deeper than the section body.
+        if (!m[0].includes(`class="${cls}"`)) continue;
+        if (depth !== want && !(cls === "prop-row" && depth === want + 1)) {
+          misplaced.push(`${cls} at line ${i + 1} depth ${depth} (want ${want})`);
+        }
+      }
+      depth++;
+    }
+  }
+  check("the template's divs balance", depth === 0 && !negative, `ends at ${depth}`);
+  check("every section, body, row and note sits at its own nesting depth",
+    misplaced.length === 0, misplaced.slice(0, 6).join("; ") || "all nested correctly");
+}
+
+console.log("\n=== NESTED GROUPS ===");
+/** Group names and the top-level fold keys, shared with the tab checks below. */
+let groups = [];
+let topLevelKeys = [];
+{
+  // Comments stripped FIRST: the note above this list names two of the groups
+  // in quotes, and without this they parse as extra (duplicate) prefixes.
+  const prefixes = (/GROUP_PREFIXES\s*=\s*\[([^\]]*)\]/.exec(SRC)?.[1] ?? "")
+    .replace(/\/\/[^\n]*/g, "");
+  groups = [...prefixes.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   check("GROUP_PREFIXES parsed from the source", groups.length > 0, groups.join(", "));
 
   for (const g of groups) {
@@ -63,9 +111,47 @@ console.log("\n=== NESTED GROUPS ===");
       idx.every((i) => headers[i].slice(sep.length).trim().length > 0));
   }
 
-  const topLevel = headers.filter((h) => !groups.some((g) => h.startsWith(`${g} — `))).length + groups.length;
-  console.log(`  top level: ${topLevel} entries (from ${headers.length} flat)`);
-  check("nesting actually shortens the top level", topLevel < headers.length);
+  // The keys the panel actually shows at the top of a tab: a section that was
+  // not swallowed by a group keeps its own name, and each group contributes one
+  // entry where its first member sat.
+  const seen = new Set();
+  for (const h of headers) {
+    const g = groups.find((p) => h.startsWith(`${p} — `));
+    if (!g) { topLevelKeys.push(h); continue; }
+    if (!seen.has(g)) { seen.add(g); topLevelKeys.push(g); }
+  }
+  console.log(`  top level: ${topLevelKeys.length} entries (from ${headers.length} flat)`);
+  check("nesting actually shortens the top level", topLevelKeys.length < headers.length);
+}
+
+console.log("\n=== TABS COVER EVERY SECTION, EXACTLY ONCE ===");
+// The whole risk of a tabbed panel: a section that no tab claims is INVISIBLE.
+// The panel itself falls back to showing an unclaimed section on the first tab
+// and warning, so nothing is ever lost at runtime — this is what makes the
+// mistake visible at commit time instead.
+{
+  const block = /const TABS\s*=\s*\[([\s\S]*?)\n  \];/.exec(SRC)?.[1] ?? "";
+  const tabs = [...block.matchAll(/\{\s*id:\s*"([\w-]+)"[\s\S]*?keys:\s*\[([\s\S]*?)\]\s*\}/g)]
+    .map((m) => ({ id: m[1], keys: [...m[2].matchAll(/"([^"]+)"/g)].map((k) => k[1]) }));
+  check("TABS parsed from the source", tabs.length > 0,
+    tabs.map((t) => `${t.id}(${t.keys.length})`).join(" "));
+  check("tab ids are unique", new Set(tabs.map((t) => t.id)).size === tabs.length);
+
+  const claimed = tabs.flatMap((t) => t.keys);
+  const unknown = claimed.filter((k) => !topLevelKeys.includes(k));
+  check("every tab key is a real top-level section or group", unknown.length === 0,
+    unknown.join(", ") || "all resolve");
+
+  const orphans = topLevelKeys.filter((k) => !claimed.includes(k));
+  check("every top-level section is claimed by a tab", orphans.length === 0,
+    orphans.join(", ") || "all placed");
+
+  const twice = [...new Set(claimed.filter((v, i) => claimed.indexOf(v) !== i))];
+  check("no section is claimed by two tabs (the second move wins, silently)",
+    twice.length === 0, twice.join(", ") || "no overlap");
+
+  const worst = Math.max(...tabs.map((t) => t.keys.length));
+  check("no tab is longer than the corridor it replaced", worst <= 12, `longest ${worst}`);
 }
 
 console.log("\n=== DEFAULT_OPEN NAMES STILL EXIST ===");
@@ -73,9 +159,11 @@ console.log("\n=== DEFAULT_OPEN NAMES STILL EXIST ===");
   const body = /DEFAULT_OPEN\s*=\s*new Set\(\[([^\]]*)\]\)/.exec(SRC)?.[1] ?? "";
   const names = [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   check("DEFAULT_OPEN parsed", names.length > 0, names.join(", "));
+  // A GROUP name is a fold key too — the wrapper header is built in JS, so it
+  // never appears in the markup this test reads.
   for (const n of names) {
-    check(`DEFAULT_OPEN "${n}" matches a real header (a rename would silently break it)`,
-      headers.includes(n));
+    check(`DEFAULT_OPEN "${n}" matches a real header or group (a rename would silently break it)`,
+      headers.includes(n) || groups.includes(n));
   }
 }
 

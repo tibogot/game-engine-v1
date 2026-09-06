@@ -45,6 +45,10 @@ export function createRoadDevPanel({ app, game, params }) {
       <button class="tab-btn dv-collapse-all" type="button" title="Collapse all sections">⊟</button>
       <button class="tab-btn dv-collapse" type="button" title="Collapse">–</button>
     </div>
+    <!-- FOUR ROOMS, not one corridor. Filled by TABS below — the buttons and the
+         panes are both built from that one list, so a tab cannot exist without
+         somewhere to put its sections. -->
+    <div class="dv-tabs"></div>
     <!-- FIND, rather than READ. With 253 controls across 29 sections, the way
          to answer "where is the fog slider" is to type "fog" — not to scan
          paragraphs. The notes stay (they are worth having) but they are no
@@ -354,20 +358,16 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <button class="action-btn" id="dv-respawn" type="button">Respawn car (R)</button>
-          <!-- Temporary home for the old bottom shortcut bar — a proper menu later. -->
-          <div id="hint" data-mode="build">
-            <span class="hint-build">
-              <b>B</b> test drive · <b>MMB</b> orbit · <b>RMB</b> pan ·
-              <b>.</b> orbit selection · <b>LMB</b> gizmo / place ·
-              <b>Enter</b> place · <b>Backspace</b> undo
-            </span>
-            <span class="hint-drive">
-              <b data-keys="KeyB">B</b> build · <b data-keys="KeyW,KeyA,KeyS,KeyD">WASD</b>/<b>Arrows</b> drive ·
-              <b>Space</b> handbrake · <b data-keys="KeyR">R</b> respawn · <b data-keys="KeyH">H</b> headlights ·
-              <b data-keys="KeyC">C</b> debug cam
-              <br>in air: <b>Shift</b>/<b>Ctrl</b> flip · <b data-keys="KeyZ">Z</b>/<b data-keys="KeyX">X</b> roll · <b data-keys="KeyQ">Q</b>/<b data-keys="KeyE">E</b> spin
-            </span>
-          </div>
+          <!-- ONE SOURCE OF TRUTH FOR THE KEYS.
+               A twelve-key summary used to live here, squeezed into two lines of
+               a 360px column, while the game's real manual (? / the palette's ?
+               button) carried the full list — so there were two lists to keep in
+               step and the short one had already drifted: it was missing F8 and
+               the whole debug-camera set, and the manual was missing the air
+               roll and spin. The panel now points at the manual instead of
+               competing with it, and the manual learned this one's trick of
+               naming the key the player's own keyboard prints (keyLabels.js). -->
+          <button class="action-btn" id="dv-manual" type="button">Keyboard &amp; manual (?)</button>
         </div>
       </div>
 
@@ -436,7 +436,7 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">Camera</div>
+        <div class="section-header">Camera — Follow</div>
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Free look</span>
@@ -505,7 +505,7 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">Camera frame</div>
+        <div class="section-header">Camera — Frame</div>
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Heading ease</span>
@@ -1290,7 +1290,7 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">Track</div>
+        <div class="section-header">Track — Stats</div>
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Pieces</span>
@@ -1300,30 +1300,12 @@ export function createRoadDevPanel({ app, game, params }) {
             <span class="prop-label">Collision tris</span>
             <div class="prop-value"><span class="prop-num" id="dv-tris">0</span></div>
           </div>
-          <div class="prop-row">
-            <span class="prop-label">Road lines</span>
-            <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-lines" type="button" aria-label="Road lines">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">· Centre dashes</span>
-            <div class="prop-value">
-              <button class="prop-toggle" id="dv-lines-center" type="button" aria-label="Centre dashes">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">· Edge lines</span>
-            <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-lines-edge" type="button" aria-label="Edge lines">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">· Lines bloom</span>
-            <div class="prop-value">
-              <button class="prop-toggle" id="dv-lines-bloom" type="button" aria-label="Lines bloom">${CHECK_SVG}</button>
-            </div>
-          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Track — Asphalt</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Asphalt dark</span>
             <div class="prop-value">
@@ -1426,6 +1408,68 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Grit (close-up)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-grit" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-road-grit-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            Asphalt is fully procedural — no textures, so no sampler slots and it
+            tiles down a track of any length. <b>Asphalt dark / light</b> are the
+            real levers for how light the deck reads; brightness only multiplies
+            them. A mid-grey deck (~#6a7078 → #8a9098) keeps black tyres readable.
+            <br><br>
+            <b>Aggregate</b> is the chip size in cycles/metre (it self-fades before
+            it aliases at distance). <b>Wheel polish</b> smooths the two tyre
+            tracks; <b>Wheel darken</b> is the rubber deposit in those same paths
+            — pull it down if the lanes look too black.
+            <br><br>
+            <b>Bump</b> is a micro-normal from the same noise (no extra samples).
+            Zero compiles it out. Small values — this is race asphalt, not gravel.
+            <br><br>
+            <b>Chip relief</b> is the octave you can actually SEE from the chase
+            camera. Measured: a pixel covers 7.9&nbsp;mm across the road under the
+            car and 27&nbsp;mm at 20&nbsp;m ahead, so the resolvable band runs
+            about 3–10&nbsp;cm. The old grit (1.8&nbsp;cm) is below it
+            <i>everywhere</i> — the eye has to get within 6.3&nbsp;m and the boom
+            is 8.2&nbsp;m, which is why it only ever showed in the labs — and the
+            aggregate (20&nbsp;cm) is above it. This fills the gap.
+            <b>Chip size</b> is cycles/metre across (16 ≈ 6&nbsp;cm, lower =
+            bigger stones) and <b>Chip fade</b> is how fast it dies with distance
+            (higher = sooner; raise it if the mid-distance crawls).
+            <br><br>
+            <b>Bump filter</b> spreads the three height taps to one pixel's width
+            instead of a fixed 4&nbsp;mm, so the normal measures the average slope
+            rather than point-sampling something finer than the pixel. It also
+            gets the anisotropy for free — at 20&nbsp;m the taps are 8.7× wider
+            along the road than across, so along-road relief decays on its own
+            while transverse screed lines survive. Set it to 0 for the old
+            fixed-spacing look. Note the 4&nbsp;mm floor only governs within
+            ~4&nbsp;m, so the labs look unchanged and the game deck does not.
+            <br><br>
+            <b>Grit (close-up)</b> is the 1.8&nbsp;cm octave, and it ships
+            <b>off</b> — not as a quality cut. It is faded to exactly zero on
+            every pixel this camera can see (the eye must get within
+            6.3&nbsp;m; the boom is 8.2&nbsp;m), so it was three noise
+            evaluations per fragment returning a certain zero. The labs keep it,
+            because their cameras are inside that range. Turn it on here if you
+            add a bonnet or photo camera. Crossing 0 rebuilds the material.
+            <br><br>
+            Together with retiring the macro swell — 0.060° of normal tilt for a
+            three-octave fractal per tap — the bump normal went from
+            <b>18 noise evaluations per fragment to 6</b>.
+            <code>node tools/roadBumpVisibilityTest.mjs</code> prints the whole
+            table and the per-octave cost — run it before changing any of these
+            scales.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Track — Tar snakes</div>
+        <div class="section-body">
+          <div class="prop-row">
             <span class="prop-label">Tar snakes</span>
             <div class="prop-value">
               <input type="range" id="dv-road-tarsnake" min="0" max="1" step="0.02" />
@@ -1464,6 +1508,12 @@ export function createRoadDevPanel({ app, game, params }) {
             <span class="prop-label">Sealant colour</span>
             <div class="prop-value"><input type="color" id="dv-road-tarsnakecol" /></div>
           </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Track — Rubber</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Old rubber</span>
             <div class="prop-value">
@@ -1520,6 +1570,30 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-road-driftgloss-v"></span>
             </div>
           </div>
+          <div class="dv-hint">
+            <b>Old rubber</b> is track history — marks laid down <i>before</i> you
+            drove, not your own skids (those are a separate mesh). It is driven by
+            <code>aCurve</code>, the signed curvature baked into each piece, so it
+            concentrates in corners by itself and sits toward the corner's
+            <i>outside</i> where cars run wide. <b>You will not see any of it on a
+            straight</b> — the field is multiplied by curvature, so it is exactly
+            zero there. Build a curve to judge it.
+            <br><br>
+            <b>Corner sensitivity</b> is the curvature at which the marks reach
+            full strength, shown as the equivalent radius. <b>Rubber toward
+            outside</b> is signed: negative moves the band to the inside line.
+            <b>Rubber streaks</b> is how many parallel lines across the deck
+            (~a tyre apart at 20) and <b>wander</b> stops them looking machined.
+            <b>Rubber gloss</b> matters more than the darkness — rubber is
+            glossier than asphalt, and at a grazing angle that sheen is what
+            identifies it.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Track — Anisotropy</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Anisotropy</span>
             <div class="prop-value">
@@ -1548,11 +1622,59 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-road-anisowet-v"></span>
             </div>
           </div>
+          <div class="dv-hint">
+            <b>Anisotropy</b> makes the deck rougher in one direction than the
+            other, which is what a road physically is — tyres polish the
+            aggregate along the direction of travel, the paver drags the mix the
+            same way. Until now only the <i>albedo</i> knew that; this is the
+            same claim reaching the specular lobe, where gloss is actually read.
+            The tangent frame is free: three derives it from UV derivatives, and
+            this deck's UV is already (metres along, metres across).
+            <br><br>
+            <b>Aniso angle</b> is a knob and not a constant because the two
+            defensible answers disagree. Tyre polish says the surface is
+            <i>smoother</i> along the road, putting the stretch across it (90°);
+            the look people mean by "wet road at night" is a smear running away
+            from you (0°). Much of that smear is really grazing-angle projection,
+            which you already get for free — so this decides what the material
+            adds on top. Sweep it and pick.
+            <br><br>
+            <b>Aniso in wheel paths</b> is the honest part: the two strips where
+            tyres run are the polished ones. <b>Aniso killed by water</b> relaxes
+            it toward isotropic as the film builds, since water fills the grooves.
+            Note this affects the base lobe, <i>not</i> the clearcoat — three's
+            coat is isotropic — so its reach is the dry and damp deck, not a
+            puddle mirror. Zero compiles the whole anisotropic BRDF out; crossing
+            0 rebuilds the material.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Track — Road lines</div>
+        <div class="section-body">
           <div class="prop-row">
-            <span class="prop-label">Grit (close-up)</span>
+            <span class="prop-label">Road lines</span>
             <div class="prop-value">
-              <input type="range" id="dv-road-grit" min="0" max="2" step="0.05" />
-              <span class="prop-num" id="dv-road-grit-v"></span>
+              <button class="prop-toggle checked" id="dv-lines" type="button" aria-label="Road lines">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· Centre dashes</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-lines-center" type="button" aria-label="Centre dashes">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· Edge lines</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-lines-edge" type="button" aria-label="Edge lines">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· Lines bloom</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-lines-bloom" type="button" aria-label="Lines bloom">${CHECK_SVG}</button>
             </div>
           </div>
           <div class="prop-row">
@@ -1604,12 +1726,32 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-road-joints-v"></span>
             </div>
           </div>
-          <div class="prop-row">
-            <span class="prop-label">Cheap deck (A/B)</span>
-            <div class="prop-value">
-              <button class="prop-toggle" id="dv-road-cheap" type="button" aria-label="Cheap deck — no procedural surface"></button>
-            </div>
+          <div class="dv-hint">
+            <b>The paint is its own material</b> (needs <b>Road lines</b> on).
+            Marking is a thermoplastic band laid <i>on</i> the asphalt, so it
+            gets its own everything: <b>Line fill</b> is how far it smooths the
+            aggregate underneath (this is the half that stops a line reading as
+            chalk), <b>Line relief</b> lifts it a couple of millimetres proud so
+            the lip catches a low sun, and <b>Line roughness</b> is its dry
+            gloss. Both relief knobs at 0 compiles the paint out of the bump.
+            <br><br>
+            <b>Line wetness</b> is low on purpose — paint is non-porous, so it
+            barely darkens in the rain while the asphalt drops to about half.
+            That contrast is why markings pop in the wet; push it to 1 and you
+            delete the effect. <b>Line gloss (wet)</b> is the other side of the
+            same coin: water sits <i>on</i> paint instead of soaking in, so a
+            wet line is the most mirror-like thing on the road.
+            <b>Streak sharpness</b> is off by default (the original meandering
+            grain). Turn it up only if you want hard paver lines.
+            <b>Paver joints</b> are grooves every N metres (0 = off). Leave them
+            off unless you want saw-cuts across the deck — they read as seams.
           </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Track — Rails</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">FrontSide</span>
             <div class="prop-value">
@@ -1631,114 +1773,6 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="dv-hint">
-            Asphalt is fully procedural — no textures, so no sampler slots and it
-            tiles down a track of any length. <b>Asphalt dark / light</b> are the
-            real levers for how light the deck reads; brightness only multiplies
-            them. A mid-grey deck (~#6a7078 → #8a9098) keeps black tyres readable.
-            <br><br>
-            <b>Aggregate</b> is the chip size in cycles/metre (it self-fades before
-            it aliases at distance). <b>Wheel polish</b> smooths the two tyre
-            tracks; <b>Wheel darken</b> is the rubber deposit in those same paths
-            — pull it down if the lanes look too black.
-            <br><br>
-            <b>Bump</b> is a micro-normal from the same noise (no extra samples).
-            Zero compiles it out. Small values — this is race asphalt, not gravel.
-            <br><br>
-            <b>Chip relief</b> is the octave you can actually SEE from the chase
-            camera. Measured: a pixel covers 7.9&nbsp;mm across the road under the
-            car and 27&nbsp;mm at 20&nbsp;m ahead, so the resolvable band runs
-            about 3–10&nbsp;cm. The old grit (1.8&nbsp;cm) is below it
-            <i>everywhere</i> — the eye has to get within 6.3&nbsp;m and the boom
-            is 8.2&nbsp;m, which is why it only ever showed in the labs — and the
-            aggregate (20&nbsp;cm) is above it. This fills the gap.
-            <b>Chip size</b> is cycles/metre across (16 ≈ 6&nbsp;cm, lower =
-            bigger stones) and <b>Chip fade</b> is how fast it dies with distance
-            (higher = sooner; raise it if the mid-distance crawls).
-            <br><br>
-            <b>Bump filter</b> spreads the three height taps to one pixel's width
-            instead of a fixed 4&nbsp;mm, so the normal measures the average slope
-            rather than point-sampling something finer than the pixel. It also
-            gets the anisotropy for free — at 20&nbsp;m the taps are 8.7× wider
-            along the road than across, so along-road relief decays on its own
-            while transverse screed lines survive. Set it to 0 for the old
-            fixed-spacing look. Note the 4&nbsp;mm floor only governs within
-            ~4&nbsp;m, so the labs look unchanged and the game deck does not.
-            <br><br>
-            <b>Old rubber</b> is track history — marks laid down <i>before</i> you
-            drove, not your own skids (those are a separate mesh). It is driven by
-            <code>aCurve</code>, the signed curvature baked into each piece, so it
-            concentrates in corners by itself and sits toward the corner's
-            <i>outside</i> where cars run wide. <b>You will not see any of it on a
-            straight</b> — the field is multiplied by curvature, so it is exactly
-            zero there. Build a curve to judge it.
-            <br><br>
-            <b>Corner sensitivity</b> is the curvature at which the marks reach
-            full strength, shown as the equivalent radius. <b>Rubber toward
-            outside</b> is signed: negative moves the band to the inside line.
-            <b>Rubber streaks</b> is how many parallel lines across the deck
-            (~a tyre apart at 20) and <b>wander</b> stops them looking machined.
-            <b>Rubber gloss</b> matters more than the darkness — rubber is
-            glossier than asphalt, and at a grazing angle that sheen is what
-            identifies it.
-            <br><br>
-            <b>Anisotropy</b> makes the deck rougher in one direction than the
-            other, which is what a road physically is — tyres polish the
-            aggregate along the direction of travel, the paver drags the mix the
-            same way. Until now only the <i>albedo</i> knew that; this is the
-            same claim reaching the specular lobe, where gloss is actually read.
-            The tangent frame is free: three derives it from UV derivatives, and
-            this deck's UV is already (metres along, metres across).
-            <br><br>
-            <b>Aniso angle</b> is a knob and not a constant because the two
-            defensible answers disagree. Tyre polish says the surface is
-            <i>smoother</i> along the road, putting the stretch across it (90°);
-            the look people mean by "wet road at night" is a smear running away
-            from you (0°). Much of that smear is really grazing-angle projection,
-            which you already get for free — so this decides what the material
-            adds on top. Sweep it and pick.
-            <br><br>
-            <b>Aniso in wheel paths</b> is the honest part: the two strips where
-            tyres run are the polished ones. <b>Aniso killed by water</b> relaxes
-            it toward isotropic as the film builds, since water fills the grooves.
-            Note this affects the base lobe, <i>not</i> the clearcoat — three's
-            coat is isotropic — so its reach is the dry and damp deck, not a
-            puddle mirror. Zero compiles the whole anisotropic BRDF out; crossing
-            0 rebuilds the material.
-            <br><br>
-            <b>Grit (close-up)</b> is the 1.8&nbsp;cm octave, and it ships
-            <b>off</b> — not as a quality cut. It is faded to exactly zero on
-            every pixel this camera can see (the eye must get within
-            6.3&nbsp;m; the boom is 8.2&nbsp;m), so it was three noise
-            evaluations per fragment returning a certain zero. The labs keep it,
-            because their cameras are inside that range. Turn it on here if you
-            add a bonnet or photo camera. Crossing 0 rebuilds the material.
-            <br><br>
-            Together with retiring the macro swell — 0.060° of normal tilt for a
-            three-octave fractal per tap — the bump normal went from
-            <b>18 noise evaluations per fragment to 6</b>.
-            <code>node tools/roadBumpVisibilityTest.mjs</code> prints the whole
-            table and the per-octave cost — run it before changing any of these
-            scales.
-            <br><br>
-            <b>The paint is its own material</b> (needs <b>Road lines</b> on).
-            Marking is a thermoplastic band laid <i>on</i> the asphalt, so it
-            gets its own everything: <b>Line fill</b> is how far it smooths the
-            aggregate underneath (this is the half that stops a line reading as
-            chalk), <b>Line relief</b> lifts it a couple of millimetres proud so
-            the lip catches a low sun, and <b>Line roughness</b> is its dry
-            gloss. Both relief knobs at 0 compiles the paint out of the bump.
-            <br><br>
-            <b>Line wetness</b> is low on purpose — paint is non-porous, so it
-            barely darkens in the rain while the asphalt drops to about half.
-            That contrast is why markings pop in the wet; push it to 1 and you
-            delete the effect. <b>Line gloss (wet)</b> is the other side of the
-            same coin: water sits <i>on</i> paint instead of soaking in, so a
-            wet line is the most mirror-like thing on the road.
-            <b>Streak sharpness</b> is off by default (the original meandering
-            grain). Turn it up only if you want hard paver lines.
-            <b>Paver joints</b> are grooves every N metres (0 = off). Leave them
-            off unless you want saw-cuts across the deck — they read as seams.
-            <br><br>
             <b>FrontSide</b> culls back faces. The slab already has an underside,
             so this is cheaper fill and cleaner shadows. Uncheck (DoubleSide) if
             looking into an open piece end shows a hole, or to A/B the old look.
@@ -1746,6 +1780,18 @@ export function createRoadDevPanel({ app, game, params }) {
             <b>Rail metalness</b> near 1 means the rail has no diffuse at all and
             only shows reflections of the sky — which is why it looked black. Pull
             it down to let sunlight hit it.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Track — Debug</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Cheap deck (A/B)</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-road-cheap" type="button" aria-label="Cheap deck — no procedural surface"></button>
+            </div>
           </div>
           <div class="prop-row">
             <span class="prop-label">Show colliders</span>
@@ -1859,7 +1905,7 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">Lights</div>
+        <div class="section-header">Lights — Headlamps</div>
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Headlights</span>
@@ -1930,7 +1976,7 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>  <!-- /Lights. THIS CLOSE WAS MISSING: without it Weather, Bloom, Audio and FX were children of Lights, so collapsing Lights hid all four. -->
 
       <div class="inspector-section">
-        <div class="section-header">Lights — visible beams</div>
+        <div class="section-header">Lights — Visible beams</div>
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Beams (in the air)</span>
@@ -2081,7 +2127,7 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">Sky</div>
+        <div class="section-header">Sky — Model</div>
         <div class="section-body">
           <div class="dv-hint">
             The game's own sky, kept side by side with the engine's so you can
@@ -2152,7 +2198,6 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-sk-earth-v"></span>
             </div>
           </div>
-        </div>
           <div class="prop-row">
             <span class="prop-label">Star count</span>
             <div class="prop-value">
@@ -2223,7 +2268,6 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-sk-hzglow-v"></span>
             </div>
           </div>
-      </div>
           <div class="prop-row">
             <span class="prop-label">Sun aureole</span>
             <div class="prop-value">
@@ -2259,6 +2303,8 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-sk-moonbloom-v"></span>
             </div>
           </div>
+        </div>
+      </div>
 
       <div class="inspector-section">
         <div class="section-header">Clouds — Shape</div>
@@ -3040,7 +3086,7 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">Sky weather</div>
+        <div class="section-header">Weather — Preset</div>
         <div class="section-body">
           <div class="dv-hint">
             One preset moves clouds, haze and shadows <b>together</b>. A storm is not
@@ -3061,11 +3107,18 @@ export function createRoadDevPanel({ app, game, params }) {
               <button class="action-btn dv-wx" data-wx="storm" type="button">Storm</button>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Weather drives road</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-drive" type="button"
+                aria-label="Let a weather preset move the road and the rain">${CHECK_SVG}</button>
+            </div>
+          </div>
         </div>
       </div>
 
       <div class="inspector-section">
-        <div class="section-header">Weather</div>
+        <div class="section-header">Weather — Wet road</div>
         <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Wetness</span>
@@ -3102,6 +3155,19 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-wet-wheel-v"></span>
             </div>
           </div>
+          <div class="dv-hint">
+            Wet is a water <b>film</b> (darker, sheen) plus <b>puddles</b> (near-mirror
+            in the gutters). The bump on the road is what stops the sheen looking
+            like varnish — chips catch the sun through a thin film, then drown
+            inside standing water. Turn bump up in Road look if a soaked deck
+            still reads plastic.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Weather — Reflections</div>
+        <div class="section-body">
           <div class="prop-row">
             <span class="prop-label">Car reflection</span>
             <div class="prop-value">
@@ -3121,6 +3187,54 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-reflect-str-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Reflection blur</span>
+            <div class="prop-value">
+              <input type="range" id="dv-reflect-blur" min="0" max="8" step="0.1" />
+              <span class="prop-num" id="dv-reflect-blur-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Reflection smear</span>
+            <div class="prop-value">
+              <input type="range" id="dv-reflect-smear" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-reflect-smear-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Max error (m)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-reflect-flat" min="0.05" max="4" step="0.05" />
+              <span class="prop-num" id="dv-reflect-flat-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rail reflection</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rail-reflect" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-rail-reflect-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Mirror slab (m)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-reflect-slab" min="0.5" max="12" step="0.25" />
+              <span class="prop-num" id="dv-reflect-slab-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Off-plane range (m)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-reflect-plane" min="0.05" max="4" step="0.05" />
+              <span class="prop-num" id="dv-reflect-plane-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Weather — Rain</div>
+        <div class="section-body">
           <div class="dv-hint">
             <b>Rain</b> is droplets on the lens, drawn after the scene and before
             bloom — so a drop that magnifies a neon tube glows from where the
@@ -3176,20 +3290,43 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-rain-lean-v"></span>
             </div>
           </div>
-
-          <div class="dv-hint">
-            <b>Weather extras.</b> Every switch below is a real skip, not a
-            multiply by zero: the two that live in a shader sit behind a WGSL
-            branch, and the rest disarm a clock or hide a mesh. Off costs a
-            compare. These are MACHINE settings — they never ride a track save —
-            and they exist as much for bisecting a frame as for quality.
+          <div class="prop-row">
+            <span class="prop-label">Rain on the terrain</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-terrainrain" type="button"
+                aria-label="Drops land on the ground, not only on the track">${CHECK_SVG}</button>
+            </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Weather drives road</span>
+            <span class="prop-label">Rain on the car</span>
             <div class="prop-value">
-              <button class="prop-toggle" id="dv-fx-drive" type="button"
-                aria-label="Let a weather preset move the road and the rain">${CHECK_SVG}</button>
+              <button class="prop-toggle" id="dv-fx-carrain" type="button"
+                aria-label="Water beads on the bodywork">${CHECK_SVG}</button>
             </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Impact rings</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-impacts" type="button"
+                aria-label="Raindrop rings on standing water">${CHECK_SVG}</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Weather — Lightning</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            A strike is two clocks and a mesh: the <b>cloud flash</b> lights the
+            deck from inside, the <b>bolt</b> is the visible channel, and either
+            can run without the other. Every switch here is a real skip, not a
+            multiply by zero — the one that lives in a shader sits behind a WGSL
+            branch, the rest disarm a clock or hide a mesh, and off costs a
+            compare. Like the rest of the weather switches these are MACHINE
+            settings: they never ride a track save, and they exist as much for
+            bisecting a frame as for quality.
           </div>
           <div class="prop-row">
             <span class="prop-label">Lightning</span>
@@ -3213,82 +3350,12 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Rain on the terrain</span>
-            <div class="prop-value">
-              <button class="prop-toggle" id="dv-fx-terrainrain" type="button"
-                aria-label="Drops land on the ground, not only on the track">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Rain on the car</span>
-            <div class="prop-value">
-              <button class="prop-toggle" id="dv-fx-carrain" type="button"
-                aria-label="Water beads on the bodywork">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Impact rings</span>
-            <div class="prop-value">
-              <button class="prop-toggle" id="dv-fx-impacts" type="button"
-                aria-label="Raindrop rings on standing water">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="prop-row">
             <span class="prop-label">Strike now</span>
             <div class="prop-value">
               <button class="action-btn" id="dv-fx-strike" type="button">Fire</button>
             </div>
           </div>
 
-          <div class="prop-row">
-            <span class="prop-label">Reflection blur</span>
-            <div class="prop-value">
-              <input type="range" id="dv-reflect-blur" min="0" max="8" step="0.1" />
-              <span class="prop-num" id="dv-reflect-blur-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Reflection smear</span>
-            <div class="prop-value">
-              <input type="range" id="dv-reflect-smear" min="0" max="1" step="0.01" />
-              <span class="prop-num" id="dv-reflect-smear-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Max error (m)</span>
-            <div class="prop-value">
-              <input type="range" id="dv-reflect-flat" min="0.05" max="4" step="0.05" />
-              <span class="prop-num" id="dv-reflect-flat-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Rail reflection</span>
-            <div class="prop-value">
-              <input type="range" id="dv-rail-reflect" min="0" max="2" step="0.05" />
-              <span class="prop-num" id="dv-rail-reflect-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Mirror slab (m)</span>
-            <div class="prop-value">
-              <input type="range" id="dv-reflect-slab" min="0.5" max="12" step="0.25" />
-              <span class="prop-num" id="dv-reflect-slab-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Off-plane range (m)</span>
-            <div class="prop-value">
-              <input type="range" id="dv-reflect-plane" min="0.05" max="4" step="0.05" />
-              <span class="prop-num" id="dv-reflect-plane-v"></span>
-            </div>
-          </div>
-          <div class="dv-hint">
-            Wet is a water <b>film</b> (darker, sheen) plus <b>puddles</b> (near-mirror
-            in the gutters). The bump on the road is what stops the sheen looking
-            like varnish — chips catch the sun through a thin film, then drown
-            inside standing water. Turn bump up in Road look if a soaked deck
-            still reads plastic.
-          </div>
         </div>
       </div>
 
@@ -4157,34 +4224,6 @@ export function createRoadDevPanel({ app, game, params }) {
   `;
   document.body.appendChild(root);
 
-  /**
-   * Relabel the key hints for the keyboard the player ACTUALLY has.
-   *
-   * Driving is bound by `e.code` — physical position — which is right, and is
-   * why WASD lands on the same three-finger cluster everywhere. But `e.code` is
-   * NAMED for US QWERTY, so on any other layout the printed letter differs and
-   * a hardcoded hint is simply wrong. AZERTY is the case that bites here:
-   * `KeyZ` is the key printed **W**, and the key printed **Z** is `KeyW` — the
-   * THROTTLE. So "Z/X roll" told an AZERTY player to press the gas to roll left.
-   * QWERTZ has the same problem one key over (Z is printed Y).
-   *
-   * `navigator.keyboard.getLayoutMap()` maps code → printed label, so the hint
-   * can just tell the truth. Chromium-only; everywhere else the markup's own
-   * QWERTY text stands, which is exactly today's behaviour.
-   */
-  (async () => {
-    try {
-      const map = await navigator.keyboard?.getLayoutMap?.();
-      if (!map) return;
-      for (const el of root.querySelectorAll("[data-keys]")) {
-        const labels = el.dataset.keys.split(",").map((c) => map.get(c)?.toUpperCase());
-        // All or nothing — a half-translated "WASD" would be worse than none.
-        if (labels.some((l) => !l)) continue;
-        el.textContent = labels.join("");
-      }
-    } catch { /* layout API unavailable or blocked — keep the QWERTY labels */ }
-  })();
-
   const style = document.createElement("style");
   style.textContent = `
     #road-dev {
@@ -4249,18 +4288,6 @@ export function createRoadDevPanel({ app, game, params }) {
       font-weight: 600;
     }
     #road-dev .action-btn.active:hover { filter: brightness(1.08); }
-    /* Shortcut strip — parked in Mode until a real menu exists. */
-    #road-dev #hint {
-      margin-top: 8px; padding: 8px 10px;
-      font-size: 11px; line-height: 1.5; color: var(--text-dim);
-      background: rgba(0, 0, 0, 0.22);
-      border: 1px solid var(--border); border-radius: var(--radius, 4px);
-    }
-    #road-dev #hint b { color: var(--text); font-weight: 600; }
-    #road-dev #hint .hint-build,
-    #road-dev #hint .hint-drive { display: none; }
-    #road-dev #hint[data-mode="build"] .hint-build { display: block; }
-    #road-dev #hint[data-mode="drive"] .hint-drive { display: block; }
     #road-dev .dv-world-name {
       max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
@@ -4276,6 +4303,44 @@ export function createRoadDevPanel({ app, game, params }) {
       letter-spacing: 0;
     }
     #road-dev .dv-group-body > .inspector-section:last-child { border-bottom: none; }
+
+    /* ── TABS ─────────────────────────────────────────────────────────────── */
+    /* The same shape as the v3 editor's Info / Tools / World bar, for the same
+       reason: four short lists you can read beat one list of 24 you scroll. */
+    #road-dev .dv-tabs {
+      display: flex; flex: 0 0 auto;
+      border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+      background: rgba(0, 0, 0, 0.12);
+    }
+    #road-dev.collapsed .dv-tabs { display: none; }
+    #road-dev .dv-tab {
+      flex: 1 1 0; min-width: 0;
+      padding: 7px 4px 6px;
+      font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+      color: var(--text-dim, #8b95a6); background: none;
+      border: none; border-bottom: 2px solid transparent;
+      cursor: pointer; white-space: nowrap;
+    }
+    #road-dev .dv-tab:hover { color: var(--text, #eef2f7); }
+    #road-dev .dv-tab.active {
+      color: var(--text, #eef2f7);
+      border-bottom-color: var(--tm-yellow, #ffd42a);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    #road-dev .dv-tab .dv-tab-icon { margin-right: 3px; opacity: 0.8; }
+    /* While a search is running each tab says how much of it is in there, so a
+       result in another room is visible without opening the room. */
+    #road-dev .dv-tab[data-hits]::after {
+      content: attr(data-hits);
+      margin-left: 4px; padding: 0 4px;
+      font-size: 9px; font-variant-numeric: tabular-nums;
+      color: #08101c; background: var(--tm-yellow, #ffd42a);
+      border-radius: 7px;
+    }
+    #road-dev .dv-tab.empty { opacity: 0.35; }
+    #road-dev .dv-tab.empty[data-hits]::after { display: none; }
+    #road-dev .dv-pane { display: none; }
+    #road-dev .dv-pane.on { display: block; }
 
     /* ── SEARCH ───────────────────────────────────────────────────────────── */
     #road-dev .dv-search {
@@ -4371,7 +4436,16 @@ export function createRoadDevPanel({ app, game, params }) {
   // Display text loses the prefix once nested (it is above them now) but the
   // FOLD KEY keeps the full original — otherwise a bare "Power" would be one
   // rename away from colliding with some other section's key in localStorage.
-  const GROUP_PREFIXES = ["Car", "Audio", "FX", "Clouds", "Post FX", "Fog"];
+  const GROUP_PREFIXES = [
+    "Car", "Audio", "FX", "Clouds", "Post FX", "Fog",
+    // Added when the panel grew tabs. The first four were already families in
+    // everything but name: "Track" was one 500-line section covering nine
+    // subjects, "Weather" was 230 lines with its reflection controls split in
+    // half by the rain block, and Camera/Camera frame, Lights/Lights — visible
+    // beams and Sky/Sky — Night were each two top-level entries for one idea.
+    // Splitting and renaming them is all it takes — this loop does the rest.
+    "Track", "Weather", "Camera", "Lights", "Sky", "Flip ramp",
+  ];
   for (const prefix of GROUP_PREFIXES) {
     const sep = `${prefix} — `;
     const secs = [...root.querySelectorAll(".inspector-section")].filter((s) => {
@@ -4400,9 +4474,11 @@ export function createRoadDevPanel({ app, game, params }) {
   }
 
   const FOLD_KEY = "modular-road-v3.devPanel.folds";
-  /** Open on a fresh profile. Everything else — the ten "Car — …" tuning blocks
-   *  especially — starts folded so the panel opens as an index, not a wall. */
-  const DEFAULT_OPEN = new Set(["World", "Mode", "Track"]);
+  /** Open on a fresh profile: ONE per tab, so every room you switch into has
+   *  something in it rather than four closed drawers. Everything else — the ten
+   *  "Car — …" tuning blocks especially — starts folded so a tab opens as an
+   *  index, not a wall. */
+  const DEFAULT_OPEN = new Set(["Mode", "Car", "Grid snap", "World"]);
   const ARROW_SVG =
     '<svg class="section-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
     + ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
@@ -4464,7 +4540,19 @@ export function createRoadDevPanel({ app, game, params }) {
     // contains and the two light sections get different glyphs.
     "visible beams": "🔦",
     "Gap / jump": "🛫", Spawn: "📍", Race: "🏁", "Edit piece": "✏️",
-    "Camera frame": "🖼️",
+    Follow: "🎥", Frame: "🖼️", Headlamps: "💡",
+    // The nine subjects the one "Track" section turned out to be.
+    Stats: "📊", Asphalt: "🪨", "Tar snakes": "🐍", Rubber: "⬛",
+    Anisotropy: "✴️", "Road lines": "🛤️",
+    // The five the "Weather" section turned out to be. `Preset` is safe as a
+    // key: no other header contains the word.
+    Preset: "🎛️", "Wet road": "💧", Reflections: "🪞", Rain: "☔",
+    Lightning: "🌩️", Model: "🌐", Night: "🌙",
+    // Lower-case on purpose — the tail lookup is case-sensitive, and these
+    // headers are written "Flip ramp — the turn". Without them "shape" falls
+    // through to the case-insensitive substring pass and wears the Clouds
+    // glyph.
+    "Flip ramp": "🎢", shape: "🛝", "the turn": "🔄", "the shot": "🎬",
     // The Car block is eight consecutive sections. Left as one repeated 🚗 the
     // glyph column carries no information exactly where the list is longest, so
     // each handling group gets its own mark.
@@ -4488,6 +4576,9 @@ export function createRoadDevPanel({ app, game, params }) {
     "Ambient occlusion": "⚫", Distance: "🌁", Height: "🏞️",
     // Explicit, or "Build (sky)" matches the Sky entry and wears its glyph.
     "Build (sky)": "🏗️",
+    // The last two blanks. A gap in the glyph column was invisible in a list of
+    // 24; in a tab of nine it is the only line your eye skips over.
+    "Aerial perspective": "🌄", "Lens flare": "🔅",
   };
   for (const hdr of root.querySelectorAll(".section-header")) {
     const key = hdr.dataset.foldKey || hdr.textContent.trim();
@@ -4512,6 +4603,145 @@ export function createRoadDevPanel({ app, game, params }) {
     }
     if (icon) hdr.dataset.icon = icon;
   }
+
+  // ── TABS ────────────────────────────────────────────────────────────────────
+  //
+  // Even folded, 24 top-level entries in one column is a corridor you walk
+  // rather than a tool you reach into. The v3 editor solved the same problem
+  // with Info / Tools / World, so this borrows the shape: four rooms, each one
+  // short enough to read without scrolling, and you are only ever in one.
+  //
+  // The split is by WHAT YOU ARE DOING, not by which module owns the code:
+  //   Game   the session — mode, spawn, race, camera
+  //   Car    the vehicle and everything it emits (its lights, its noise, its FX)
+  //   Build  the track: placing pieces, and how the road itself looks
+  //   World  everything outside the car — light, sky, cloud, weather, post
+  // Headlights live under CAR, not WORLD, because they are the car's lamps —
+  // that is where you look for them when the beams are wrong.
+  //
+  // Done here, at the end, rather than by splitting the template into four:
+  // the markup stays one flat readable list, and grouping/folds/icons have all
+  // already run, so a section arrives at its tab fully built.
+  const TABS = [
+    { id: "game", label: "Game", icon: "🕹️",
+      keys: ["Mode", "Spawn", "Race", "Camera"] },
+    { id: "car", label: "Car", icon: "🚗",
+      keys: ["Car", "Lights", "Audio", "FX"] },
+    { id: "build", label: "Build", icon: "🛣️",
+      keys: ["Grid snap", "Gap / jump", "Edit piece", "Prop livery", "Flip ramp",
+             "Build (sky)", "Track"] },
+    { id: "world", label: "World", icon: "🌍",
+      keys: ["World", "World light", "Sky", "Clouds", "Aerial perspective",
+             "Lens flare", "Weather", "Fog", "Post FX"] },
+  ];
+
+  const tabBar = $(".dv-tabs");
+  const tabContent = $(".tab-content");
+  const panes = new Map();
+  const tabBtns = new Map();
+  for (const t of TABS) {
+    const pane = document.createElement("div");
+    pane.className = "dv-pane";
+    pane.dataset.tab = t.id;
+    panes.set(t.id, pane);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dv-tab";
+    btn.dataset.tab = t.id;
+    btn.innerHTML = `<span class="dv-tab-icon">${t.icon}</span>${t.label}`;
+    tabBar.appendChild(btn);
+    tabBtns.set(t.id, btn);
+  }
+
+  {
+    // Top-level sections only: a nested one already travels inside its group.
+    const tops = [...tabContent.children].filter((el) =>
+      el.classList.contains("inspector-section"));
+    const keyOf = (sec) => {
+      const h = sec.querySelector(":scope > .section-header");
+      return h ? (h.dataset.foldKey || h.textContent.trim()) : "";
+    };
+    const byKey = new Map(tops.map((s) => [keyOf(s), s]));
+    const placed = new Set();
+    // TABS order is the ORDER ON SCREEN — the list above reads top to bottom.
+    for (const t of TABS) {
+      for (const k of t.keys) {
+        const sec = byKey.get(k);
+        if (!sec) { console.warn(`[devPanel] tab "${t.id}" lists an unknown section: ${k}`); continue; }
+        panes.get(t.id).appendChild(sec);
+        placed.add(sec);
+      }
+    }
+    // A SECTION NOBODY CLAIMED MUST STILL APPEAR. Adding one to the template and
+    // forgetting to list it here is the obvious mistake, and a tabbed panel is
+    // exactly the kind of UI where the result would be an invisible control
+    // nobody notices for a month. It lands on the first tab, loudly.
+    const orphans = tops.filter((s) => !placed.has(s));
+    for (const s of orphans) panes.get(TABS[0].id).appendChild(s);
+    if (orphans.length) {
+      console.warn("[devPanel] sections not assigned to a tab (shown under "
+        + `${TABS[0].label}):`, orphans.map(keyOf));
+    }
+    tabContent.append(...panes.values());
+  }
+
+  const TAB_KEY = "modular-road-v3.devPanel.tab";
+  let activeTab = TABS[0].id;
+  try {
+    const saved = localStorage.getItem(TAB_KEY);
+    if (saved && panes.has(saved)) activeTab = saved;
+  } catch { /* private mode */ }
+
+  const setTab = (id) => {
+    if (!panes.has(id)) return;
+    activeTab = id;
+    for (const [tid, pane] of panes) pane.classList.toggle("on", tid === id);
+    for (const [tid, btn] of tabBtns) btn.classList.toggle("active", tid === id);
+    // Scrolling is per panel, not per pane, so switching rooms while halfway
+    // down one would drop you halfway down the next for no reason.
+    tabContent.scrollTop = 0;
+    try { localStorage.setItem(TAB_KEY, id); } catch { /* private mode */ }
+  };
+  for (const [tid, btn] of tabBtns) btn.addEventListener("click", () => setTab(tid));
+  setTab(activeTab);
+
+  /**
+   * Search has to cross the tabs or the tabs make things HARDER: typing "fog"
+   * while parked in Car must not come back empty when Fog is one room over.
+   * So each tab is labelled with its own hit count, and if the room you are
+   * standing in has none, you are moved to the first that does.
+   *
+   * @param {string} q the lower-cased query, or "" when the search is cleared
+   */
+  const syncTabHits = (q) => {
+    const counts = new Map();
+    const controls = new Map();
+    for (const [tid, pane] of panes) {
+      // The same overlapping selector the total in the search box counts, so
+      // the four badges add up to the number beside the magnifier.
+      counts.set(tid, q ? pane.querySelectorAll(
+        ".prop-row:not([data-filtered]), .action-btn:not([data-filtered]),"
+        + " .dv-hint:not([data-filtered])").length : 0);
+      controls.set(tid, q ? pane.querySelectorAll(
+        ".prop-row:not([data-filtered]), .action-btn:not([data-filtered])").length : 0);
+    }
+    for (const [tid, btn] of tabBtns) {
+      if (!q) { delete btn.dataset.hits; btn.classList.remove("empty"); continue; }
+      btn.dataset.hits = String(counts.get(tid));
+      btn.classList.toggle("empty", counts.get(tid) === 0);
+    }
+    if (!q) return;
+    // MOVE ONLY OUT OF A DEAD END, never away from results you are reading:
+    // jumping to whichever tab has the most hits would bounce you between rooms
+    // on every keystroke. A tab whose only match is a NOTE still counts as a
+    // dead end though — searching "fog" from Car found one passing mention in
+    // the beam note and sat there while World held all sixteen fog controls.
+    if (controls.get(activeTab) > 0) return;
+    const firstHit = TABS.find((t) => controls.get(t.id) > 0)
+      || TABS.find((t) => counts.get(t.id) > 0);
+    if (firstHit) setTab(firstHit.id);
+  };
 
   // ── HINTS ───────────────────────────────────────────────────────────────────
   const HINTS_KEY = "modular-road-v3.devPanel.hints";
@@ -4558,6 +4788,7 @@ export function createRoadDevPanel({ app, game, params }) {
       // Back to the user's own fold state, not to everything-open.
       for (const s of sections) s.setOpen(folds[s.key] ?? DEFAULT_OPEN.has(s.key));
       if (filterCount) filterCount.textContent = "";
+      syncTabHits("");
       return;
     }
 
@@ -4621,6 +4852,8 @@ export function createRoadDevPanel({ app, game, params }) {
       }
     }
     if (filterCount) filterCount.textContent = hits ? String(hits) : "none";
+    // Last, so the per-tab counts read the flags every pass above just set.
+    syncTabHits(q);
   };
   filterInput?.addEventListener("input", () => applyFilter(filterInput.value));
   filterInput?.addEventListener("keydown", (e) => {
@@ -4855,6 +5088,9 @@ export function createRoadDevPanel({ app, game, params }) {
   };
   modeBtn.addEventListener("click", () => { game.toggleMode(); renderMode(); });
   $("#dv-respawn").addEventListener("click", () => game.respawn());
+  // The game owns the manual (it owns the `?` key and the palette's button too),
+  // so this opens THAT rather than keeping a second copy of the key list here.
+  $("#dv-manual").addEventListener("click", () => game.openManual?.());
 
   // ── Build (sky) ─────────────────────────────────────────────────────────────
   const bhEl = $("#dv-bh");

@@ -188,6 +188,7 @@ import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
+import { relabelKeys } from "./keyLabels.js";
 import { createModularRoadSky, skyColorsAt, moonDirFromTime, SKY_DEFAULTS } from "./modularRoadSky.js";
 import { createPaintedClouds, PAINTED_CLOUD_DEFAULTS } from "./modularRoadPaintedClouds.js";
 import { createAerialPerspective } from "./modularRoadAerial.js";
@@ -6160,6 +6161,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   syncGizmoSpaceBtn();
 
   // Two ways in — the header's "?" and the link under the key legend.
+  // THE MANUAL LISTS PHYSICAL KEYS, so name them the way this keyboard prints
+  // them. Run over the whole document, not one panel: the manual, the palette's
+  // key strip and the dev panel all carry `data-keys` hints, and there is no
+  // reason for three calls. Fire-and-forget — nothing waits on a hint, and on a
+  // browser without the layout API it is a no-op that leaves the QWERTY text.
+  relabelKeys(document);
   onClick("road-help", () => setHelp(!isHelpOpen()));
   onClick("road-help-link", () => setHelp(true));
   onClick("build-help-close", () => setHelp(false));
@@ -7558,7 +7565,6 @@ ${e.message}`);
     spawnMarker.visible = !driving; // a build-time guide; hidden while racing
     if (hud) hud.classList.toggle("on", driving);
     if (paletteEl) paletteEl.style.display = driving ? "none" : "";
-    document.getElementById("hint")?.setAttribute("data-mode", mode);
     applyControlMode();
     devPanel?.renderMode(); // B key and the panel button share this path
   }
@@ -7704,6 +7710,8 @@ ${e.message}`);
       getMode: () => mode,
       toggleMode,
       respawn,
+      /** The `?` manual. The panel links to it rather than restating the keys. */
+      openManual: () => setHelp(true),
       bakeCollision: bakeCollisionNow,
       rebakeThumbnails,
       setCollisionDebug,
