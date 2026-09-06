@@ -270,8 +270,10 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    * white; single thin puffs at the edge stay veils.
    */
   opacity: 0.55,
-  sizeMin: 0.30,
-  sizeMax: 0.62,
+  // Slightly larger than they look: `silhouetteBite` eats inward from the
+  // rim, so the drawn puff is smaller than its nominal radius.
+  sizeMin: 0.36,
+  sizeMax: 0.74,
   sizeGrowth: 3.6,
   lifeMin: 0.9,
   lifeMax: 2.2,
@@ -448,6 +450,45 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
   churn: 0.6,
   /** Frames per second of that clock. */
   churnRate: 0.7,
+  /**
+   * ── THE SILHOUETTE ───────────────────────────────────────────────────────
+   * How much of the erosion cuts a RADIAL field instead of the ray-sphere
+   * chord, 0..1. 0 is the old behaviour exactly.
+   *
+   * The chord has a vertical tangent at the rim, so every contour of a
+   * chord-based field is pinned within ~1% of the sphere's edge: measured at
+   * the birth threshold the boundary could only move between 98.8% and 99.9%
+   * of the radius. That is why a fresh puff was a geometrically perfect
+   * circle with a hard edge — the "cartoon ball" — and why raggedness only
+   * showed up later, once age had driven the threshold high enough to cut
+   * deep into the disc.
+   *
+   * A radial field falls linearly to zero at the rim, so noise of amplitude A
+   * moves the boundary by A·R. Lumps at any age, and `erodeSoft` becomes a
+   * real spatial softness (about a twelfth of the radius instead of a
+   * hundredth), which is what takes the hard edge off.
+   */
+  silhouette: 1.0,
+  /**
+   * How deep the noise bites inward from the rim, as a fraction of the
+   * radius. This is the amplitude of the lumpiness. It eats into the puff, so
+   * the sizes above are set a little larger than they were to compensate.
+   */
+  silhouetteBite: 0.30,
+  /**
+   * ── VOLUMETRIC DETAIL ────────────────────────────────────────────────────
+   * How much of the puff's own noise is sampled in the particle's VOLUME
+   * rather than on its camera-facing card, 0..1. 0 is the old behaviour.
+   *
+   * The quad's uv is a plane that turns to face the viewer, so the coarse
+   * shape was better than half painted-on decal and the fine carve was
+   * entirely one — and it span with the sprite. Orbit a puff and that pattern
+   * did not move against the volume, which is the flatness you can see at
+   * some angles. Sampling at the view ray's closest-approach point relative
+   * to the particle gives a slice through a field glued to the particle
+   * instead: the camera moving slides the slice, so the interior parallaxes.
+   */
+  localNoise: 1.0,
   /**
    * ── DETAIL EROSION ───────────────────────────────────────────────────────
    * How hard the fine noise carves the coarse shape, 0..1. Weighted by
@@ -1026,6 +1067,9 @@ export class ModularRoadDriftSmoke {
     this.uDetail = uniform(settings.detail ?? 0.55);
     this.uDetailScale = uniform(settings.detailScale ?? 3);
     this.uOpticalK = uniform(settings.opticalK ?? 1.8);
+    this.uSilhouette = uniform(settings.silhouette ?? 1);
+    this.uBite = uniform(settings.silhouetteBite ?? 0.3);
+    this.uLocalNoise = uniform(settings.localNoise ?? 1);
     /** Curl field clock. Separate from uTime so `curl.speed` scales it. */
     this._curlTime = 0;
     /**
@@ -1408,7 +1452,7 @@ export class ModularRoadDriftSmoke {
       uSunColor, uWorldScale, uWorldDrift, uBankScale,
     } = this;
 
-    const { uSkyCol, uGroundCol, uDetail, uOpticalK } = this;
+    const { uSkyCol, uGroundCol, uDetail, uOpticalK, uSilhouette, uBite } = this;
 
     return Fn(() => {
       const camToFrag = positionWorld.sub(cameraPosition);
@@ -1437,6 +1481,27 @@ export class ModularRoadDriftSmoke {
       const chord = max(tExit.sub(tEnter), float(0));
       const thick = saturate(chord.div(radius.mul(2)));
 
+      // ── WHERE THE SMOKE ENDS: RADIAL, NOT CHORD ───────────────────────────
+      // `thick` is the chord through the sphere, and the chord has a VERTICAL
+      // tangent at the silhouette — so every contour of a chord-based field is
+      // pinned within about 1% of the rim however loud the noise is. That is
+      // the "perfect circle" and the hard cartoon edge; see `silhouette`.
+      //
+      // `radial` is 1 at the centre and falls LINEARLY to 0 at the rim, so
+      // noise displaces the boundary in proportion to its amplitude. The chord
+      // is still exactly right for how much light is absorbed, so it keeps
+      // driving `density` below: radius decides where the smoke ENDS, chord
+      // decides how OPAQUE it is there.
+      //
+      // `clipFrac` is the fraction of the chord that survives the scene-depth
+      // clip. It is what still buries a puff in the tarmac, and unlike `thick`
+      // it has no rim behaviour of its own to flatten the silhouette back out.
+      const uNorm = sq.div(radius);
+      const rNorm = sqrt(saturate(oneMinus(uNorm.mul(uNorm))));
+      const fullChord = max(t1.sub(tEnter), float(1e-5));
+      const clipFrac = saturate(chord.div(fullChord));
+      const radial = oneMinus(rNorm).mul(clipFrac);
+
       const N = normalize(cameraPosition.add(rd.mul(tEnter)).sub(centre)).toVar();
 
       const mid = cameraPosition.add(rd.mul(tEnter.add(tExit).mul(0.5))).toVar();
@@ -1456,7 +1521,11 @@ export class ModularRoadDriftSmoke {
 
       const density = thick.mul(float(0.32).add(detail.mul(0.95))).toVar();
 
-      const mask = smoothstep(thresh, thresh.add(erodeSoft), density);
+      // Same split as the puffs: the erosion cuts a radial field so the bank
+      // has a lumpy edge, while `density` keeps the chord for opacity.
+      const bitten = radial.sub(uBite.mul(oneMinus(detail)));
+      const shapeField = mix(density, bitten, uSilhouette);
+      const mask = smoothstep(thresh, thresh.add(erodeSoft), shapeField);
       const optical = mix(
         float(1),
         oneMinus(exp(density.mul(uOpticalK).negate())),
@@ -1586,6 +1655,7 @@ export class ModularRoadDriftSmoke {
 
     const {
       uTime, uChurn, uChurnRate, uSkyCol, uGroundCol, uDetail, uDetailScale, uOpticalK,
+      uSilhouette, uBite, uLocalNoise,
     } = this;
 
     return Fn(() => {
@@ -1615,6 +1685,32 @@ export class ModularRoadDriftSmoke {
       const chord = max(tExit.sub(tEnter), float(0));
       const thick = saturate(chord.div(radius.mul(2)));
 
+      // ── WHERE THE SMOKE ENDS: RADIAL, NOT CHORD ───────────────────────────
+      // `thick` is the chord through the sphere, and the chord has a VERTICAL
+      // tangent at the silhouette — so every contour of a chord-based field is
+      // pinned within about 1% of the rim however loud the noise is. That is
+      // the "perfect circle" and the hard cartoon edge; see `silhouette`.
+      //
+      // `radial` is 1 at the centre and falls LINEARLY to 0 at the rim, so
+      // noise displaces the boundary in proportion to its amplitude. The chord
+      // is still exactly right for how much light is absorbed, so it keeps
+      // driving `density` below: radius decides where the smoke ENDS, chord
+      // decides how OPAQUE it is there.
+      //
+      // `clipFrac` is the fraction of the chord that survives the scene-depth
+      // clip. It is what still buries a puff in the tarmac, and unlike `thick`
+      // it has no rim behaviour of its own to flatten the silhouette back out.
+      const uNorm = sq.div(radius);
+      const rNorm = sqrt(saturate(oneMinus(uNorm.mul(uNorm))));
+      const fullChord = max(t1.sub(tEnter), float(1e-5));
+      const clipFrac = saturate(chord.div(fullChord));
+      const radial = oneMinus(rNorm).mul(clipFrac);
+
+      // The view ray's closest-approach point to the particle centre. Every
+      // noise coordinate below hangs off it, which is what makes the detail
+      // parallax instead of riding on the card.
+      const mid = cameraPosition.add(rd.mul(b.negate()));
+
       // ── CHURN ─────────────────────────────────────────────────────────────
       // One tap at st*scale + drift offset was a sliding window. Now: a
       // per-particle clock picks an integer "frame", each frame hashes to its
@@ -1635,7 +1731,18 @@ export class ModularRoadDriftSmoke {
         fract(sin(f.mul(12.9898)).mul(43758.5453)),
         fract(sin(f.mul(78.2330)).mul(24634.6345)),
       );
-      const uvBase = st.mul(nParams.z).add(nParams.xy);
+      // ── THE DETAIL IS A VOLUME, NOT A DECAL ─────────────────────────────
+      // `st` is the QUAD's uv, so this sample used to land on a plane that
+      // turns to face the camera — see `localNoise`. The volumetric
+      // coordinate is `mid` taken RELATIVE TO THE PARTICLE and scaled by its
+      // radius, flattened to 2D with the same y-shear the world field uses.
+      // `nParams.xy` still offsets it, so every puff keeps its own window.
+      const lp = mid.sub(centre).div(radius);
+      const localUv = vec2(
+        lp.x.add(lp.y.mul(0.37)),
+        lp.z.add(lp.y.mul(0.61)),
+      ).mul(nParams.z).add(nParams.xy);
+      const uvBase = mix(st.mul(nParams.z).add(nParams.xy), localUv, uLocalNoise);
       const offA = hashOf(frame).mul(uChurn);
       const offB = hashOf(frame.add(1)).mul(uChurn);
       const nQuadA = texture(noiseMap, uvBase.add(offA));
@@ -1648,7 +1755,6 @@ export class ModularRoadDriftSmoke {
       const coarseQuad = mix(nQuadA.r, nQuadB.r, w);
       // ── end churn ─────────────────────────────────────────────────────────
 
-      const mid = cameraPosition.add(rd.mul(b.negate()));
       const wuv = vec2(
         mid.x.add(mid.y.mul(0.37)),
         mid.z.add(mid.y.mul(0.61)),
@@ -1671,7 +1777,11 @@ export class ModularRoadDriftSmoke {
       const density = thick.mul(float(0.32).add(carved.mul(0.95))).toVar();
 
       const thresh = nParams.w;
-      const mask = smoothstep(thresh, thresh.add(erodeSoft), density);
+      // The erosion cuts the RADIAL field, with the noise biting inward from
+      // the rim; `density` keeps its chord basis for opacity and self-shadow.
+      const bitten = radial.sub(uBite.mul(oneMinus(carved)));
+      const shapeField = mix(density, bitten, uSilhouette);
+      const mask = smoothstep(thresh, thresh.add(erodeSoft), shapeField);
       // Optical depth: a thick core is OPAQUE, a thin edge is a veil. With
       // uOpticalK at 0 this collapses to the stock erosion-mask alpha.
       const optical = mix(
@@ -1922,6 +2032,9 @@ export class ModularRoadDriftSmoke {
     this.uDetail.value = s.detail ?? 0.55;
     this.uDetailScale.value = s.detailScale ?? 3;
     this.uOpticalK.value = s.opticalK ?? 1.8;
+    this.uSilhouette.value = THREE.MathUtils.clamp(s.silhouette ?? 1, 0, 1);
+    this.uBite.value = Math.max(0, s.silhouetteBite ?? 0.3);
+    this.uLocalNoise.value = THREE.MathUtils.clamp(s.localNoise ?? 1, 0, 1);
     // Any lamp actually lit? If not the strength goes to exactly 0, which is
     // what the shader's If branches on — so a daytime drift pays nothing.
     let anyLamp = false;

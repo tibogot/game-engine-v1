@@ -162,6 +162,7 @@
         colorHot: "#4a4a52", colorCool: "#b4b8c2", tintJitter: 0.12,
         curl: { enabled: false }, launchOut: 0, launchUpMul: 1, lift: 0,
         arch: { enabled: false }, lamps: { enabled: false },
+        silhouette: 0, silhouetteBite: 0, localNoise: 0,
         ambient: 0.5, sunStrength: 0.9, absorb: 1.0, scatter: 1.2, hgG: 0.6,
         noiseScale: 1.0, churn: 0, detail: 0, opticalK: 0,
         erodeStart: 0.06, erodeEnd: 1.25, erodeSoft: 0.3, worldNoiseMix: 0.55,
@@ -647,6 +648,11 @@
         gui = new GUI({ title: "Drift smoke", width: 320 });
 
         const fx = gui.addFolder("AAA pass");
+        // The 2026-09-07 shape pass. Both are honest A/Bs: 0 restores exactly
+        // what the smoke did before, so flick them to compare.
+        fx.add(settings, "silhouette", 0, 1, 0.01).name("lumpy silhouette");
+        fx.add(settings, "silhouetteBite", 0, 0.8, 0.01).name("silhouette bite");
+        fx.add(settings, "localNoise", 0, 1, 0.01).name("volumetric detail");
         fx.add(settings, "churn", 0, 1, 0.01).name("churn (boil)");
         fx.add(settings, "churnRate", 0, 2, 0.02).name("churn rate (Hz)");
         fx.add(settings, "detail", 0, 1, 0.01).name("edge detail carve");
