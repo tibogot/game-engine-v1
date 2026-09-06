@@ -91,7 +91,7 @@
 import * as THREE from "three";
 import {
   Fn, If, float, vec2, vec3, vec4, uniform, select, mix, smoothstep, max, min, abs,
-  floor, ceil, round, fract, mod, dot, sin, pow, clamp, ivec2, uint, color, hash,
+  floor, ceil, round, fract, mod, dot, sin, pow, clamp, ivec2, uint, color, hash, uniformArray,
   positionWorld, positionView, normalWorldGeometry, normalView,
   cameraPosition, cameraNormalMatrix, uv, dFdx, dFdy, fwidth, step, textureLoad,
   normalize, reflect, sign, length,
@@ -379,6 +379,8 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     if (typeof v === "number") u[k] = uniform(isFacadeColorKey(k) ? new THREE.Color(v) : v);
   }
   const uTime = uniform(0);
+  /** The stone palette as an indexable uniform array — see the pick below. */
+  const uPalette = uniformArray(PALETTE.map((hex) => new THREE.Color(hex)));
   /** Direction TO the sun, world space — what the relief shadows are cast from. */
   const uSunDir = uniform(new THREE.Vector3(0.4, 0.8, 0.3));
 
@@ -435,12 +437,17 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
 
     // WHICH BUILDING.
     const lot = floor(positionWorld.xz.div(u.lotSize)).toVar();
+    // SIX per-lot dice from ONE hash. These are constants over a whole
+    // building and were six full PCG rounds per PIXEL. `fract(h * k)` with
+    // co-prime-ish multipliers decorrelates well enough for what they drive —
+    // a bay width, a pier depth, a palette index — and costs a multiply and a
+    // fract each instead of a hash.
     const h1 = hash21(lot).toVar();
-    const h2 = hash21(lot.add(vec2(17.3, 41.7))).toVar();
-    const h3 = hash21(lot.add(vec2(-9.1, 23.9))).toVar();
-    const h4 = hash21(lot.add(vec2(5.7, -13.3))).toVar();
-    const h5 = hash21(lot.add(vec2(31.1, 7.9))).toVar();
-    const h6 = hash21(lot.add(vec2(-22.5, -3.7))).toVar();
+    const h2 = fract(h1.mul(197.31)).toVar();
+    const h3 = fract(h1.mul(419.77)).toVar();
+    const h4 = fract(h1.mul(733.19)).toVar();
+    const h5 = fract(h1.mul(1279.53)).toVar();
+    const h6 = fract(h1.mul(2411.87)).toVar();
     const cell = clamp(lot.sub(uLotOrigin), vec2(0.0), uLotCount.sub(1.0));
     const info = textureLoad(lotTexture, ivec2(cell)).toVar();
     const baseY = info.r;
@@ -750,9 +757,15 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     // warm/cool per-brick shift, a low-frequency tone drift, and soot streaks
     // pooling low. Coursing keys off building-local metres so it lines up with
     // the floors and stays put as the camera moves.
+    // ONE INDEXED READ, not seventeen chained mixes.
+    //
+    // Picking a palette entry with `mix(prev, next, step(i, pick))` walks the
+    // WHOLE list on every pixel — seventeen mixes and seventeen steps to end up
+    // with one of seventeen constants. A uniform array is a single indexed
+    // fetch, and it also makes the palette editable at runtime instead of
+    // being baked into the graph.
     const pickIdx = floor(F.h2.mul(PALETTE.length - 0.001));
-    let base = color(PALETTE[0]);
-    for (let i = 1; i < PALETTE.length; i++) base = mix(base, color(PALETTE[i]), step(i - 0.5, pickIdx));
+    let base = uPalette.element(uint(pickIdx));
     base = base.mul(F.h6.mul(0.12).add(0.94)).mul(u.wallTint)
       .mul(select(F.isIndustrial, vec3(0.86, 0.87, 0.88), vec3(1.0)));
     const stoneBase = select(F.isCurtain.or(F.isRibbon), u.mullionColor, base).toVar();

@@ -616,7 +616,8 @@ export async function startCityLab() {
       ["deckBrightness", 0.3, 2.5, 0.05], ["grainScale", 0.2, 2, 0.05],
       ["aggWeight", 0, 1, 0.02], ["aggScale", 1, 12, 0.25], ["macroScale", 0.01, 0.2, 0.005],
       ["wheelDarken", 0, 0.4, 0.01], ["deckRough", 0.5, 1, 0.01],
-      ["tarSnakeAmount", 0, 1, 0.02], ["tarSnakeScale", 4, 30, 0.5], ["tarSnakeWidth", 0.004, 0.05, 0.001],
+      ["patchAmount", 0, 1, 0.02], ["patchScale", 3, 30, 0.5],
+      ["patchChance", 0, 0.8, 0.02], ["patchDarken", 0, 0.8, 0.02], ["patchSeam", 0, 1, 0.02],
       ["walkWidth", 2, 14, 0.25], ["kerbHeight", 0, 0.3, 0.01],
       ["markings", 0, 1, 0.05], ["detailFar", 60, 600, 10],
     ]],
@@ -652,7 +653,14 @@ export async function startCityLab() {
   const readouts = [];
   let rebuildTimer = 0;
 
+  /**
+   * A slider naming a param that no longer exists used to take the WHOLE LAB
+   * down — `fmt(undefined)` threw during setup, so renaming one uniform meant
+   * a blank page and a stack trace instead of one dead row. It reads as the
+   * city being broken when it is the panel that is out of date.
+   */
   function fmt(v) {
+    if (!Number.isFinite(v)) return "—";
     if (Math.abs(v) >= 100) return v.toFixed(0);
     if (Math.abs(v) >= 1) return v.toFixed(2).replace(/\.?0+$/, "");
     return v.toPrecision(2);

@@ -52,7 +52,6 @@ import {
   Fn, If, float, vec2, vec3, vec4, uniform, mix, smoothstep, max, min, abs, floor, fract,
   mod, step, saturate, oneMinus, pow, cos, uint, hash, positionWorld, positionView,
   normalView, normalWorld, cameraPosition, fwidth, length, normalMap,
-  mx_noise_float, mx_fractal_noise_float,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
@@ -78,15 +77,30 @@ export const STREET_DEFAULTS = {
   /** Wheel-path darkening (deposit) and polish in every lane. */
   wheelDarken: 0.10,
   wheelRough: 0.12,
-  /** Sealed cracks: contours of the macro field. */
-  tarSnakeAmount: 0.7,
-  tarSnakeColor: 0x020201,
-  tarSnakeScale: 14.0,
-  tarSnakeWidth: 0.014,
-  tarSnakeGloss: 0.30,
-  tarSnakeFade: 1.6,
-  tarSnakeBreak: 0.65,
-  tarSnakeBreakScale: 0.13,
+  /**
+   * RESURFACING PATCHES, not tar snakes.
+   *
+   * The first version drew sealed cracks as CONTOURS of the macro noise field.
+   * A contour of smooth noise is a smooth wandering curve, and crack sealant is
+   * nothing like that: it is jagged, it follows joints and stress lines, and it
+   * does not meander across a lane in a lazy arc. It read as fake because it
+   * was, and it cost a three-octave fractal in the NORMAL pass as well, purely
+   * to bump a hairline.
+   *
+   * What a city street has at this scale is PATCHES — rectangles of newer,
+   * darker asphalt where the road was dug up and made good, with a seam of
+   * sealant round the edge. That is a grid, not a contour: cheap, and right.
+   */
+  patchAmount: 0.55,
+  /** Metres per patch cell. */
+  patchScale: 9.0,
+  /** Fraction of cells that carry a patch at all. */
+  patchChance: 0.22,
+  /** How much darker a patch is, and its seam. */
+  patchDarken: 0.30,
+  patchSeam: 0.45,
+  /** Seam half-width, in metres. */
+  patchSeamWidth: 0.07,
 
   // ── PAVEMENT ──────────────────────────────────────────────────────────────
   /** Concrete is a COOL grey; warm tan reads as sand at this scale. */
@@ -179,7 +193,6 @@ export const STREET_DEFAULTS = {
   detailNear: 25,
   detailFar: 240,
   gritRelief: 0.003,
-  crackRelief: 0.010,
 };
 
 /** Every default that is a colour, for the uniform builder and the tests. */
@@ -211,6 +224,39 @@ const gridLine = (coord, period, half, aaPeriod) => {
   const hw = half.div(period);
   return smoothstep(hw.add(aaPeriod), hw.sub(aaPeriod), d);
 };
+
+/**
+ * THE ONLY NOISE IN THIS FILE, and deliberately not MaterialX's.
+ *
+ * The first version used `mx_noise_float` / `mx_fractal_noise_float`. Those are
+ * 3D PERLIN — eight corner gradients, a trilerp and a hash chain each — and
+ * counted in the generated WGSL this street was evaluating fifteen Perlin
+ * lookups per pixel. The ground plane is FLAT, so the third dimension was pure
+ * waste on every one of them, and the two sub-builds (normal, clearcoat
+ * normal) were rebuilding whole fields the colour pass had already computed.
+ *
+ * This is 2D value noise on the same integer PCG hash the facade uses: four
+ * hashes and three lerps. For asphalt tone, oil stains and puddles — fields
+ * with no directional structure to preserve — it is indistinguishable from
+ * Perlin, and several times cheaper.
+ */
+const ihash2 = (i) => hash(
+  uint(i.x.add(1 << 16)).mul(uint(73856093)).bitXor(uint(i.y.add(1 << 16)).mul(uint(19349663))),
+);
+const vnoise = /*#__PURE__*/ Fn(([p]) => {
+  const i = floor(p), f = fract(p);
+  const w = f.mul(f).mul(float(3.0).sub(f.mul(2.0)));
+  const a = ihash2(i), b = ihash2(i.add(vec2(1.0, 0.0)));
+  const c = ihash2(i.add(vec2(0.0, 1.0))), d = ihash2(i.add(vec2(1.0, 1.0)));
+  return mix(mix(a, b, w.x), mix(c, d, w.x), w.y).sub(0.5);
+});
+/** Two octaves, for the broader stains and the ponding. */
+const vfbm = (p) => vnoise(p).add(vnoise(p.mul(2.17)).mul(0.5));
+/** Three, where the macro tone wants a slower roll under the fine detail. */
+const vfbm3 = (p) => vfbm(p).add(vnoise(p.mul(4.7)).mul(0.25));
+/** Anti-aliased "x inside [lo, hi]" — the patch rectangles below. */
+const band = (x, lo, hi, aa) =>
+  smoothstep(lo.sub(aa), lo.add(aa), x).mul(smoothstep(hi.add(aa), hi.sub(aa), x));
 
 /** Tangent-space slope → normal, packed 0..1 for `normalMap`. */
 const packSlope = (slope) => vec3(slope.x.negate(), slope.y.negate(), 1.0).normalize().mul(0.5).add(0.5);
@@ -280,6 +326,23 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
    * (film, pond). Crown drainage stands in for the track's camber/bank pair: a
    * city street sheds to both kerbs, so the pool term is |lateral|.
    */
+  /**
+   * The FILM channel alone — everything the wet model knows that does NOT need
+   * the ponding fractal. Split out because the clearcoat's normal is a
+   * sub-build: it cannot read the colour pass's variables, so it was rebuilding
+   * the entire wet field, a second two-octave fractal per pixel, to recover two
+   * scalars.
+   */
+  function wetFilmOnly(L) {
+    const flat = smoothstep(0.45, 0.86, normalWorld.y);
+    const clear = oneMinus(L.wheelPath.mul(u.wetWheelClear));
+    const dose = mix(
+      mix(float(0.0), u.kerbWet, smoothstep(u.walkWidth, u.walkWidth.mul(0.75), L.intoBlock)),
+      float(1.0), L.onRoad,
+    );
+    return saturate(u.wetAmount.mul(flat).mul(clear).mul(dose));
+  }
+
   function wetField(L) {
     const flat = smoothstep(0.45, 0.86, normalWorld.y);
     const pool = smoothstep(u.wetDrainStart, 1.0, abs(L.lateral).mul(u.wetCamber));
@@ -290,11 +353,10 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     const film = saturate(base);
     // Ponding: world-space, elongated along the street's axis so puddles run
     // with the road the way water actually pools. 2 octaves, as the track.
-    const pw = positionWorld.mul(u.puddleScale);
-    const along = mix(pw.x, pw.z, L.inStreetX);
-    const acrossP = mix(pw.z, pw.x, L.inStreetX);
-    const blob = mx_fractal_noise_float(vec3(acrossP, pw.y, along.div(u.puddleStreak)), 2, 2.0, 0.5, 1.0)
-      .mul(0.5).add(0.5);
+    const pw = positionWorld.xz.mul(u.puddleScale);
+    const along = mix(pw.x, pw.y, L.inStreetX);
+    const acrossP = mix(pw.y, pw.x, L.inStreetX);
+    const blob = vfbm(vec2(acrossP, along.div(u.puddleStreak))).add(0.5);
     const thr = u.puddleThreshold.sub(pool.mul(u.wetDrainStrength));
     const pond = smoothstep(thr, thr.add(u.puddleSoft), blob).mul(u.puddleAmount).mul(base);
     return { film, pond: saturate(pond) };
@@ -386,37 +448,42 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     const detail = smoothstep(u.detailFar, u.detailNear, dist).toVar();
 
     // ── ASPHALT TONE: the track's macro + aggregate ─────────────────────────
-    const macro = mx_fractal_noise_float(positionWorld.mul(u.macroScale), 3, 2.0, 0.5, 1.0)
-      .mul(0.5).add(0.5).toVar();
+    // 2D, on the XZ plane: the ground is flat, so a 3D field spends a whole
+    // dimension producing a constant.
+    const macro = vfbm3(positionWorld.xz.mul(u.macroScale)).add(0.5).toVar();
     const aggFade = saturate(oneMinus(texelAgg.mul(2.0))).toVar();
     const agg = float(0.5).toVar();
-    const snake = float(0.0).toVar();
-    const crack = float(0.0).toVar();
+    const patch = float(0.0).toVar();
+    const seam = float(0.0).toVar();
     const worn = float(1.0).toVar();
     If(detail.greaterThan(0.001), () => {
-      agg.assign(mx_noise_float(vec3(positionWorld.x.mul(u.aggScale), positionWorld.z.mul(u.aggScale), 0.0))
-        .mul(0.5).mul(aggFade).add(0.5));
-      // TAR SNAKES — contours of the macro field, feathered to a pixel, gone
-      // once they pack tighter than the sampling rate, and SEGMENTED along
-      // their run by a triangle wave the macro field phase-shifts.
-      const c = macro.mul(u.tarSnakeScale);
-      const aa = max(pxX, pxZ).mul(u.macroScale).mul(u.tarSnakeScale).mul(3.0).add(1e-4);
-      const d = abs(fract(c).sub(0.5));
-      const line = smoothstep(u.tarSnakeWidth.add(aa), u.tarSnakeWidth, d);
-      const fade = saturate(oneMinus(aa.mul(u.tarSnakeFade)));
-      const alongW = mix(positionWorld.x, positionWorld.z, L.inStreetX);
-      const wave = abs(fract(alongW.mul(u.tarSnakeBreakScale).add(macro.mul(4.0))).sub(0.5)).mul(2.0);
-      const seg = mix(float(1), smoothstep(0.28, 0.72, wave), u.tarSnakeBreak);
-      snake.assign(saturate(line.mul(fade).mul(seg).mul(u.tarSnakeAmount)).mul(L.onRoad));
-      crack.assign(snake.mul(detail));
+      agg.assign(vnoise(positionWorld.xz.mul(u.aggScale)).mul(aggFade).add(0.5));
+      // RESURFACING PATCHES — a jittered cell grid of rectangles, each with a
+      // seam of sealant round it. See the note on `patchAmount`.
+      const pc = positionWorld.xz.div(u.patchScale);
+      const pcell = floor(pc), fpc = fract(pc);
+      const on = step(ihash2(pcell), u.patchChance);
+      // A per-cell inset, so no two patches are the same size or aligned.
+      const ix = ihash2(pcell.add(vec2(31.0, 17.0))).mul(0.18).add(0.08);
+      const iz = ihash2(pcell.add(vec2(-13.0, 41.0))).mul(0.18).add(0.08);
+      const aaP = max(pxX, pxZ).div(u.patchScale).add(1e-4);
+      const inside = band(fpc.x, ix, float(1.0).sub(ix), aaP)
+        .mul(band(fpc.y, iz, float(1.0).sub(iz), aaP));
+      const sw = u.patchSeamWidth.div(u.patchScale);
+      const outer = band(fpc.x, ix.sub(sw), float(1.0).sub(ix).add(sw), aaP)
+        .mul(band(fpc.y, iz.sub(sw), float(1.0).sub(iz).add(sw), aaP));
+      patch.assign(inside.mul(on).mul(u.patchAmount).mul(L.onRoad).mul(detail));
+      seam.assign(outer.sub(inside).max(0.0).mul(on).mul(u.patchAmount).mul(L.onRoad).mul(detail));
       worn.assign(smoothstep(float(-0.25), float(0.2),
-        mx_noise_float(positionWorld.mul(0.7))).mul(0.55).add(0.35));
+        vnoise(positionWorld.xz.mul(0.7))).mul(0.55).add(0.35));
     });
     const tone = macro.mul(oneMinus(u.aggWeight)).add(agg.mul(u.aggWeight));
     const shaped = saturate(tone.sub(0.5).mul(u.grainScale).add(0.5));
     let deck = mix(u.asphaltDark, u.asphaltLight, shaped);
     deck = deck.mul(oneMinus(L.wheelPath.mul(u.wheelDarken)));
-    deck = mix(deck, u.tarSnakeColor, snake);     // sealant REPLACES the asphalt
+    // A patch is FRESHER asphalt — darker and less bleached — and its seam is
+    // sealant, darker still. Both replace the surface rather than shade it.
+    deck = deck.mul(oneMinus(patch.mul(u.patchDarken))).mul(oneMinus(seam.mul(u.patchSeam)));
     deck = deck.mul(u.deckBrightness);
 
     // ── PAVEMENT ────────────────────────────────────────────────────────────
@@ -482,8 +549,10 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
       .add(surface.mul(u.glowColor).mul(u.glowAmount).mul(u.nightAmount));
 
     // ── What the other slots read ───────────────────────────────────────────
+    // Fresh asphalt and its sealant seam are both glossier than the weathered
+    // surface around them.
     const dryRough = mix(float(0.92), u.deckRough.sub(L.wheelPath.mul(u.wheelRough)).sub(paint.mul(0.2)), L.onRoad)
-      .sub(snake.mul(u.tarSnakeGloss));
+      .sub(patch.mul(0.10)).sub(seam.mul(0.22));
     R.rough = mix(dryRough, u.wetRough, film);
     R.coat = saturate(coat.mul(mix(float(1), u.lineCoat, paint)));
     R.coatRough = mix(mix(u.wetCoatRough, u.puddleCoatRough, pond), u.wetCoatRough.mul(u.lineCoatRough), paint);
@@ -506,15 +575,20 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
   // Sub-builds: they cannot read the colour pass's vars, so each recomputes
   // the cheap field it needs.
   material.clearcoatNormalNode = Fn(() => {
+    // Another sub-build, and it was rebuilding the ENTIRE wet field — a second
+    // two-octave fractal per pixel — to recover two scalars. The full field
+    // exists so the ALBEDO can tell a film from standing water; the ripple only
+    // needs "how wet, roughly" for its gain and "is this deep" for its damping,
+    // and the film channel answers both without the ponding fractal.
     const L = layout();
-    const W = wetField(L);
-    const coat = saturate(max(W.film.mul(u.wetCoatStrength), W.pond));
+    const film = wetFilmOnly(L).toVar();
+    const coat = saturate(film.mul(u.wetCoatStrength));
     const along = mix(positionWorld.x, positionWorld.z, L.inStreetX);
-    const texel = max(fwidth(along), fwidth(mix(positionWorld.z, positionWorld.x, L.inStreetX)));
+    const texel = max(fwidth(along), fwidth(mix(positionWorld.z, positionWorld.x, L.inStreetX))).toVar();
     const fade = saturate(oneMinus(texel.mul(u.rippleScale).mul(2.91 * 2.0)));
     // Standing water drowns the asphalt break-up — that contrast is what makes
     // a puddle read as a puddle rather than as more textured road.
-    const slope = rippleSlope(L, fade).mul(oneMinus(W.pond.mul(u.rippleDamp)));
+    const slope = rippleSlope(L, fade).mul(oneMinus(film.mul(u.rippleDamp).mul(0.6)));
     return normalMap(packSlope(slope), vec2(coat, coat));
   })();
   material.normalNode = Fn(() => {
@@ -526,16 +600,17 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     // in non-uniform control flow. The test caught exactly that.
     const pxX = fwidth(positionWorld.x).toVar(), pxZ = fwidth(positionWorld.z).toVar();
     const aggFade = saturate(oneMinus(max(pxX, pxZ).mul(u.aggScale).mul(2.0))).toVar();
+    // THIS IS A SUB-BUILD: it cannot read the colour pass's variables, so
+    // everything it wants it must recompute — which is exactly why it should
+    // want as little as possible. It used to rebuild the whole three-octave
+    // macro fractal purely to find the tar snakes for the bump, and throw all
+    // of it away except a hairline. With the snakes gone the only relief left
+    // is the aggregate and the kerb step: ONE cheap value-noise tap.
     const g = float(0.0).toVar();
-    const c = float(0.0).toVar();
     If(detail.greaterThan(0.001), () => {
-      g.assign(mx_noise_float(vec3(positionWorld.x.mul(u.aggScale), positionWorld.z.mul(u.aggScale), 0.0)).mul(aggFade));
-      const macro = mx_fractal_noise_float(positionWorld.mul(u.macroScale), 3, 2.0, 0.5, 1.0).mul(0.5).add(0.5);
-      const cc = macro.mul(u.tarSnakeScale);
-      const aa = max(pxX, pxZ).mul(u.macroScale).mul(u.tarSnakeScale).mul(3.0).add(1e-4);
-      c.assign(smoothstep(u.tarSnakeWidth.add(aa), u.tarSnakeWidth, abs(fract(cc).sub(0.5))).mul(u.tarSnakeAmount));
+      g.assign(vnoise(positionWorld.xz.mul(u.aggScale)).mul(aggFade));
     });
-    const height = g.mul(u.gritRelief).sub(c.mul(u.crackRelief)).mul(detail).mul(L.onRoad).add(kerbHeightAt(L));
+    const height = g.mul(u.gritRelief).mul(detail).mul(L.onRoad).add(kerbHeightAt(L));
     return bumpNormal(height);
   })();
 
