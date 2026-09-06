@@ -4146,140 +4146,6 @@ export function createRoadDevPanel({ app, game, params }) {
         </div>
       </div>
 
-      <!-- How the smoke MOVES. Curl is the coherent, plume-wide swirl; churn
-           is each puff boiling in place; the launch group is how it leaves the
-           tyre (low and outboard, lifting only once the wake lets go). -->
-      <div class="inspector-section">
-        <div class="section-header">FX — Smoke motion</div>
-        <div class="section-body">
-          <div class="prop-row">
-            <span class="prop-label">Curl turbulence</span>
-            <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-smk-curl" type="button" aria-label="Curl turbulence">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Curl strength</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-curls" min="0" max="10" step="0.1" />
-              <span class="prop-num" id="dv-smk-curls-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Curl scale</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-curlsc" min="0.05" max="1.5" step="0.01" />
-              <span class="prop-num" id="dv-smk-curlsc-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Churn (boil)</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-churn" min="0" max="1" step="0.01" />
-              <span class="prop-num" id="dv-smk-churn-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Churn rate</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-churnr" min="0" max="2" step="0.02" />
-              <span class="prop-num" id="dv-smk-churnr-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Launch outboard</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-lout" min="0" max="5" step="0.05" />
-              <span class="prop-num" id="dv-smk-lout-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Launch up ×</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-lup" min="0" max="1.5" step="0.02" />
-              <span class="prop-num" id="dv-smk-lup-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Delayed lift</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-lift" min="0" max="4" step="0.05" />
-              <span class="prop-num" id="dv-smk-lift-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Lift delay</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-liftd" min="0" max="1.5" step="0.02" />
-              <span class="prop-num" id="dv-smk-liftd-v"></span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Emission around the tyre, and the car's own lamps lighting the
-           plume. The lamp glow fades out with daylight on its own, so the
-           strength dial only shows itself at dusk and at night. -->
-      <div class="inspector-section">
-        <div class="section-header">FX — Smoke wheel &amp; lights</div>
-        <div class="section-body">
-          <div class="prop-row">
-            <span class="prop-label">Wheel arch emission</span>
-            <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-smk-arch" type="button" aria-label="Wheel arch emission">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Arc sweep</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-arcsw" min="0" max="180" step="1" />
-              <span class="prop-num" id="dv-smk-arcsw-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Rim throw</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-arcthr" min="0" max="1" step="0.01" />
-              <span class="prop-num" id="dv-smk-arcthr-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Wheel vortex</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-arcvor" min="0" max="20" step="0.1" />
-              <span class="prop-num" id="dv-smk-arcvor-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Vortex time</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-arcvt" min="0" max="1.5" step="0.02" />
-              <span class="prop-num" id="dv-smk-arcvt-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Lamps light smoke</span>
-            <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-smk-lamp" type="button" aria-label="Lamps light smoke">${CHECK_SVG}</button>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Lamp strength</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-lamps" min="0" max="4" step="0.05" />
-              <span class="prop-num" id="dv-smk-lamps-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
-            <span class="prop-label">Lamp radius</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-lampr" min="0.1" max="2" step="0.01" />
-              <span class="prop-num" id="dv-smk-lampr-v"></span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div class="inspector-section">
         <div class="section-header">FX — Sparks</div>
         <div class="section-body">
@@ -4527,6 +4393,140 @@ export function createRoadDevPanel({ app, game, params }) {
             decal. Both are 0 for the old behaviour, and <b>Shape A/B</b>
             flips the pair.
           </p>
+        </div>
+      </div>
+
+      <!-- How the smoke MOVES. Curl is the coherent, plume-wide swirl; churn
+           is each puff boiling in place; the launch group is how it leaves the
+           tyre (low and outboard, lifting only once the wake lets go). -->
+      <div class="inspector-section">
+        <div class="section-header">FX — Smoke motion</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Curl turbulence</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-smk-curl" type="button" aria-label="Curl turbulence">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Curl strength</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-curls" min="0" max="10" step="0.1" />
+              <span class="prop-num" id="dv-smk-curls-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Curl scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-curlsc" min="0.05" max="1.5" step="0.01" />
+              <span class="prop-num" id="dv-smk-curlsc-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Churn (boil)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-churn" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-churn-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Churn rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-churnr" min="0" max="2" step="0.02" />
+              <span class="prop-num" id="dv-smk-churnr-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Launch outboard</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lout" min="0" max="5" step="0.05" />
+              <span class="prop-num" id="dv-smk-lout-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Launch up ×</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lup" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-smk-lup-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Delayed lift</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lift" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-smk-lift-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lift delay</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-liftd" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-smk-liftd-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Emission around the tyre, and the car's own lamps lighting the
+           plume. The lamp glow fades out with daylight on its own, so the
+           strength dial only shows itself at dusk and at night. -->
+      <div class="inspector-section">
+        <div class="section-header">FX — Smoke wheel &amp; lights</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Wheel arch emission</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-smk-arch" type="button" aria-label="Wheel arch emission">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Arc sweep</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-arcsw" min="0" max="180" step="1" />
+              <span class="prop-num" id="dv-smk-arcsw-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rim throw</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-arcthr" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-arcthr-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wheel vortex</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-arcvor" min="0" max="20" step="0.1" />
+              <span class="prop-num" id="dv-smk-arcvor-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Vortex time</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-arcvt" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-smk-arcvt-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lamps light smoke</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-smk-lamp" type="button" aria-label="Lamps light smoke">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lamp strength</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lamps" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-smk-lamps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lamp radius</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-lampr" min="0.1" max="2" step="0.01" />
+              <span class="prop-num" id="dv-smk-lampr-v"></span>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -485,6 +485,10 @@ export const OCEAN2_DEFAULTS = {
  * @param {THREE.Texture}     [deps.normalMap]   — tiling water normal map
  * @param {number}            deps.terrainSize   — world metres per side
  * @param {number}            [deps.maxHeight=500]
+ * @param {number}            [deps.heightBase=0] — world Y that a stored 0.0 means.
+ *   v3 terrain stores heights upward from 0 and leaves this alone; a game placing
+ *   a dock at y=0 with sea beneath it sets a negative base so the stored range
+ *   still lands in the 0..1 the texture wants.
  * @param {object|null}       [deps.fft]         — createOceanFFTGPUSimulation()
  */
 export function createOceanSurface({
@@ -493,6 +497,7 @@ export function createOceanSurface({
   normalMap = null,
   terrainSize,
   maxHeight = 500,
+  heightBase = 0,
   fft = null,
 }) {
   const D = OCEAN2_DEFAULTS;
@@ -613,6 +618,7 @@ export function createOceanSurface({
 
   const uTerrainSize = uniform(terrainSize);
   const uMaxHeight = float(maxHeight);
+  const uHeightBase = float(heightBase);
 
   const fftCascades = fft ? fft.cascades : [];
   const ampForCascade = (i) =>
@@ -645,7 +651,7 @@ export function createOceanSurface({
 
   /** Terrain height in world metres. */
   function terrainYAt(xz) {
-    return texture(heightTexNode, fieldUV(xz)).r.mul(uMaxHeight);
+    return texture(heightTexNode, fieldUV(xz)).r.mul(uMaxHeight).add(uHeightBase);
   }
 
   /**

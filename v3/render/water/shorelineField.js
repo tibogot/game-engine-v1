@@ -181,17 +181,21 @@ function edt2d(grid, w, h) {
  * @param {number}       o.size       heightmap texels per side
  * @param {number}       o.terrainSize world metres per side
  * @param {number}       o.maxHeight  metres represented by a stored 1.0
+ * @param {number}       [o.heightBase=0] world Y that a stored 0.0 means. The v3
+ *   terrain stores heights from 0 up, so it leaves this at 0; a game that wants
+ *   water BELOW its origin (a dock at y=0 with 40 m of sea under it) sets a
+ *   negative base and keeps the stored range in 0..1 where the texture wants it.
  * @param {number}       o.seaLevel   still-water height in world metres
  * @returns {{ dist: Float32Array, dirX: Float32Array, dirZ: Float32Array,
  *             slope: Float32Array, size: number, metresPerTexel: number }}
  */
-export function computeShorelineField({ heights, size, terrainSize, maxHeight, seaLevel }) {
+export function computeShorelineField({ heights, size, terrainSize, maxHeight, seaLevel, heightBase = 0 }) {
   const n = size * size;
   const metresPerTexel = terrainSize / size;
 
   // ── Water column, in metres. Positive = submerged. ─────────────────────────
   const water = new Float32Array(n);
-  for (let i = 0; i < n; i++) water[i] = seaLevel - heights[i] * maxHeight;
+  for (let i = 0; i < n; i++) water[i] = seaLevel - (heights[i] * maxHeight + heightBase);
 
   // ── Seabed slope, |∇(water column)|, metres per metre ─────────────────────
   // Computed first because it is two things at once: an output channel (it tells
@@ -349,7 +353,7 @@ export function computeShorelineField({ heights, size, terrainSize, maxHeight, s
  * @param {number} o.terrainSize world metres per side
  * @param {number} o.maxHeight   metres represented by a stored 1.0
  */
-export function createShorelineField({ size, terrainSize, maxHeight }) {
+export function createShorelineField({ size, terrainSize, maxHeight, heightBase = 0 }) {
   const data = new Uint16Array(size * size * 4);
   const texture = new THREE.DataTexture(
     data, size, size, THREE.RGBAFormat, THREE.HalfFloatType,
@@ -381,7 +385,7 @@ export function createShorelineField({ size, terrainSize, maxHeight }) {
    */
   function update(heights, seaLevel) {
     const t0 = performance.now();
-    const f = computeShorelineField({ heights, size, terrainSize, maxHeight, seaLevel });
+    const f = computeShorelineField({ heights, size, terrainSize, maxHeight, seaLevel, heightBase });
     for (let i = 0, o = 0; i < f.dist.length; i++, o += 4) {
       data[o]     = half(f.dist[i]);
       data[o + 1] = half(f.dirX[i]);

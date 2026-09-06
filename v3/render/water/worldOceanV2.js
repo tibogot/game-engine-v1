@@ -182,6 +182,7 @@ export function createWorldOceanV2({
   heightTexNode,
   terrainSize,
   maxHeight = 500,
+  heightBase = 0,
   heightmapSize = 1024,
   normalMap = null,
   lod = {},
@@ -198,6 +199,7 @@ export function createWorldOceanV2({
     size: heightmapSize,
     terrainSize,
     maxHeight,
+    heightBase,
   });
 
   const surface = createOceanSurface({
@@ -206,6 +208,7 @@ export function createWorldOceanV2({
     normalMap,
     terrainSize,
     maxHeight,
+    heightBase,
     fft,
   });
 

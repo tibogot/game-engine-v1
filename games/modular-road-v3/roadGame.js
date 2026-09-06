@@ -1870,6 +1870,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   let city = null;
   let cityWanted = false;
+  /** Are the buildings solid? Defaults ON: the collider is only ever built
+   *  once the city itself is on (see syncCityCollision), so this costs nothing
+   *  on a track without one. The dev-panel toggle reads the same default. */
+  let cityCollide = true;
   let citySeed = 20260902;
   /** The layout knobs a track may pin. Everything else is CITY_DEFAULTS. */
   const cityParams = {
