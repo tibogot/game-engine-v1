@@ -190,12 +190,15 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // instancing; positionLocal does not — InstanceNode overwrites it), so
     // they need no attribute of their own and the parked cars, whose material
     // has no such term, simply leave them dark.
+    // NOTE the Z. The extrude's bevel pushes the body out to ±2.33, so lamps
+    // at ±2.28 sat INSIDE it — invisible, and indistinguishable from the body
+    // by the Z test the material uses. They have to stand proud of the bevel.
     const lamps = [];
     for (const [x, z, w, h] of [
-      [-0.62, -2.28, 0.44, 0.20], [0.62, -2.28, 0.44, 0.20],     // headlights
-      [-0.66, 2.28, 0.40, 0.16], [0.66, 2.28, 0.40, 0.16],       // tail lights
+      [-0.60, -2.42, 0.50, 0.22], [0.60, -2.42, 0.50, 0.22],     // headlights
+      [-0.64, 2.42, 0.46, 0.20], [0.64, 2.42, 0.46, 0.20],       // tail lights
     ]) {
-      const g = box(w, h, 0.10, x, z < 0 ? 0.62 : 0.70, z).toNonIndexed();
+      const g = box(w, h, 0.14, x, z < 0 ? 0.58 : 0.62, z).toNonIndexed();
       const c = new Float32Array(g.getAttribute("position").count * 3).fill(1.0);
       g.setAttribute("color", new THREE.BufferAttribute(c, 3));
       lamps.push(g);
@@ -412,15 +415,16 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   {
     // Head and tail lamps, found by the geometry's own Z. `positionGeometry`
     // is the raw attribute and survives instancing.
+    // Beyond ±2.35 there is nothing but the lamp boxes — the bevelled body
+    // stops at ±2.33 — so the Z test alone separates them, and the reversed
+    // smoothstep edges make it a hard cut rather than a gradient up the nose.
     const gz = positionGeometry.z;
-    const gy = positionGeometry.y;
-    const isLamp = smoothstep(0.55, 0.62, gy).mul(oneMinus(smoothstep(0.86, 0.94, gy)));
-    const isHead = smoothstep(-2.34, -2.20, gz).mul(oneMinus(smoothstep(-2.20, -2.06, gz))).mul(isLamp);
-    const isTail = smoothstep(2.20, 2.26, gz).mul(isLamp);
+    const isHead = smoothstep(-2.34, -2.38, gz);
+    const isTail = smoothstep(2.34, 2.38, gz);
     // Headlights burn day and night (a car with its lights off at dusk reads
     // as parked); tail lights only really register after dark.
-    const lampGlow = uHead.mul(isHead).mul(mix(float(0.25), float(1.0), uNight)).mul(F.headlightBoost)
-      .add(uTail.mul(isTail).mul(uNight).mul(F.taillightBoost));
+    const lampGlow = uHead.mul(isHead).mul(mix(float(0.3), float(1.0), uNight)).mul(F.headlightBoost)
+      .add(uTail.mul(isTail).mul(mix(float(0.15), float(1.0), uNight)).mul(F.taillightBoost));
     trafficMat.emissiveNode = litAdd({ vcolor: true, icolor: true }).add(lampGlow);
     applyBloomMRT(trafficMat, vec4(lampGlow, 1.0));
   }
