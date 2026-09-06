@@ -342,8 +342,21 @@ export const CHASE_CAM = {
   /** Degrees of FOV thrown on at a launch, and how fast it bleeds off.
    *  It punches instantly and recovers slowly, which is the shape that reads as
    *  the world lurching away from you rather than as the FOV being animated. */
-  launchFovKick: 7,
+  launchFovKick: 5.5,
   launchFovDecay: 0.55,
+  /** …and its ATTACK, seconds.
+   *
+   *  NOT a nicety. Setting the kick outright put the whole 7° on in ONE FRAME —
+   *  MEASURED on a plain ramp: 6.89° of FOV between two frames while the view
+   *  direction moved 0.01°, so nothing was wrong with the boom and the lurch was
+   *  entirely the lens. That is about 410°/s of FOV against roughly 4°/s for the
+   *  speed FOV: a hundred times faster than anything else the camera does, which
+   *  is not a punch, it is a jump-cut.
+   *
+   *  The original reasoning — that `fovLerp` at 3.0 would smear a punch into
+   *  nothing — was right about `fovLerp` and wrong to conclude that instant was
+   *  the answer. Three or four frames is still unmistakably a hit. */
+  launchFovAttack: 0.07,
   /** Upward speed (m/s) at the moment the wheels leave, below which it is a
    *  crest or a kerb hop rather than a launch. */
   launchMinRise: 4.5,
@@ -413,7 +426,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
    *  waveform does not restart (and click) when a second impact lands on top of
    *  a decaying one. `_fovSmooth` is the speed FOV, kept separate so a kick can
    *  be added to it without being dragged through `fovLerp`. */
-  let _shake = 0, _shakeTgt = 0, _shakeT = 0, _fovKick = 0, _fovSmooth = null;
+  let _shake = 0, _shakeTgt = 0, _shakeT = 0, _fovKick = 0, _fovKickTgt = 0, _fovSmooth = null;
   let _wasGrounded = true, _groundFor = 0;
 
   const D2R = Math.PI / 180;
@@ -481,6 +494,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     _shake = 0;
     _shakeTgt = 0;
     _fovKick = 0;
+    _fovKickTgt = 0;
     _wasGrounded = true;
     _groundFor = 0;
     if (vehicle) vehicle.landImpact = 0;
@@ -522,15 +536,19 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     // The launch: the edge where the wheels leave with real upward speed, having
     // actually been on the ground first. See CAM.launchMinGrounded.
     if (_wasGrounded && !grounded && v.y > CAM.launchMinRise
-      && _groundFor > CAM.launchMinGrounded) _fovKick = 1;
+      && _groundFor > CAM.launchMinGrounded) _fovKickTgt = 1;
     _groundFor = grounded ? _groundFor + dt : 0;
     _wasGrounded = grounded;
-    if (snap) { _shake = 0; _shakeTgt = 0; _fovKick = 0; }
+    if (snap) { _shake = 0; _shakeTgt = 0; _fovKick = 0; _fovKickTgt = 0; }
     // The envelope decays; the AMPLITUDE follows it through an attack, so no
     // impact — first or fifth — can step the camera. See CAM.shakeAttack.
     _shakeTgt *= Math.exp(-dt / CAM.shakeDecay);
     _shake += (_shakeTgt - _shake) * (1 - Math.exp(-dt / CAM.shakeAttack));
-    _fovKick *= Math.exp(-dt / CAM.launchFovDecay);
+    // The envelope decays and the lens FOLLOWS it, exactly as the shake does —
+    // so the punch rises over a few frames instead of stepping. See
+    // CAM.launchFovAttack.
+    _fovKickTgt *= Math.exp(-dt / CAM.launchFovDecay);
+    _fovKick += (_fovKickTgt - _fovKick) * (1 - Math.exp(-dt / CAM.launchFovAttack));
     _shakeT += dt;
 
     // Total speed, not horizontal, so a near-vertical drop reads as fast too.

@@ -262,19 +262,37 @@ console.log(`  off a ramp     launched ${jump.launched}   `
 check("the car actually leaves the ground on the ramp run",
   jump.launched, "otherwise the FOV check below proves nothing");
 
-const punch = jump.peakFov - jumpOff.peakFov;
-check("the launch punches the FOV",
-  punch > 2, `+${punch.toFixed(1)}° over the same run with launchFovKick: 0`);
-
-// DECAY MEASURED FROM THE PUNCH, not from the end of the run. The car comes off
-// a 40 m ramp and is still in the air — or bouncing, and re-triggering — when a
-// fixed-length run stops, so "is it back to normal at the end" tests how long
-// the run was rather than how fast the punch bleeds off.
+// THE PUNCH IS A DIFFERENCE PER FRAME, not a difference of maxima. Comparing the
+// two runs' highest FOV asks "which run got widest at any moment", and the speed
+// FOV dominates that — with the punch given an attack the two maxima landed
+// within 0.9° of each other while the punch itself was plainly 4°.
 let peakAt = 0, peakDiff = 0;
 const diffAt = (i) => jump.frames[i].fov - jumpOff.frames[i].fov;
 for (let i = 0; i < Math.min(jump.frames.length, jumpOff.frames.length); i++) {
   if (diffAt(i) > peakDiff) { peakDiff = diffAt(i); peakAt = i; }
 }
+check("the launch punches the FOV",
+  peakDiff > 2, `+${peakDiff.toFixed(1)}° at its peak over the same run with launchFovKick: 0`);
+
+// NO SINGLE FRAME MAY STEP THE LENS. This is the check that was missing, and it
+// is missing twice over: the shake shipped stepping its amplitude, and then the
+// punch shipped stepping the FOV — 6.89° between two frames on an ordinary ramp,
+// about 410°/s against roughly 4°/s for the speed FOV. Both read to the player as
+// the same fault ("a weird brutal movement at the beginning of the jump") and
+// neither was visible to any check here, because every one of them measured how
+// BIG the effect was and none measured how FAST it arrived.
+let worstStep = 0;
+for (let i = 1; i < jump.frames.length; i++) {
+  worstStep = Math.max(worstStep, Math.abs(jump.frames[i].fov - jump.frames[i - 1].fov));
+}
+check("and it swells rather than cutting — no single frame steps the lens",
+  worstStep < 1.5,
+  `worst ${worstStep.toFixed(2)}° in one frame (was 6.89° when the kick was set outright)`);
+
+// DECAY MEASURED FROM THE PUNCH, not from the end of the run. The car comes off
+// a 40 m ramp and is still in the air — or bouncing, and re-triggering — when a
+// fixed-length run stops, so "is it back to normal at the end" tests how long
+// the run was rather than how fast the punch bleeds off.
 const want = peakAt + Math.round(3 * CAM.launchFovDecay / FIXED_DT);
 const after = Math.min(jump.frames.length - 1, want);
 const left = diffAt(after);
