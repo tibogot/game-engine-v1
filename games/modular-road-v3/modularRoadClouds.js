@@ -543,6 +543,23 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
   const uWind = uniform(new THREE.Vector3());
   const uFade = uniform(0);
 
+  /*
+   * LIGHTNING, as three uniforms and no geometry.
+   *
+   * The painted tier has had this for a while and the volumetric one had nothing, so
+   * switching quality tiers switched off the weather — a storm whose sky never lit up.
+   * Same contract as painted's (`setLightningFlash(amount, worldX, worldZ, radius)`),
+   * because roadGame drives whichever deck happens to be live and must not care which.
+   *
+   * WORLD METRES HERE, tile-space there. Painted marches a thin slab through one 2D map
+   * and thinks in tiles; this march already has the world position of every sample, so
+   * the falloff is a plain distance and `uFlashFalloff` is 1/r² in metres.
+   */
+  const uFlash = uniform(0);
+  const uFlashCol = uniform(new THREE.Color(0.82, 0.88, 1.0));
+  const uFlashXZ = uniform(new THREE.Vector2());
+  const uFlashFalloff = uniform(1 / (2000 * 2000));
+
   const uAerialEnabled = uniform(P.aerialEnabled ? 1 : 0);
   const uAerialColor = uniform(new THREE.Color(0xa8c0d4));
   /** Haze colour on the SUN side of the sky. The atmosphere between us and a far cloud is
@@ -1078,6 +1095,28 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
       scattered.assign(mix(scattered, hazeCol.mul(alpha), fog));
     });
 
+    /*
+     * THE STRIKE LIGHTS THE DECK FROM INSIDE — and, as in the painted tier, AFTER the
+     * haze rather than before it: a flash lights the air between you and the cloud as
+     * well as the cloud itself, so attenuating it by the same aerial that dims the cloud
+     * attenuates it twice. Distance still dims it, radially around the strike, which is
+     * the honest reason a far storm is faint.
+     *
+     * Multiplied by `alpha` because this march is PREMULTIPLIED (`scattered` is already
+     * transmittance-weighted and the material says so). Adding straight colour here
+     * would light the empty sky between the clouds.
+     *
+     * Behind a real `If`: `uFlash` is zero for all but a fraction of a second every half
+     * minute, and this is a per-pixel exp on the most expensive shader in the game.
+     */
+    If(uFlash.greaterThan(0.0001), () => {
+      const meanD = distAcc.div(wAcc.max(1e-4));
+      const at = ro.add(rayDir.mul(meanD));
+      const d = at.xz.sub(uFlashXZ);
+      const fw = exp(dot(d, d).mul(uFlashFalloff).negate());
+      scattered.addAssign(uFlashCol.mul(uFlash.mul(fw)).mul(alpha));
+    });
+
     return vec4(scattered, alpha);
   });
 
@@ -1369,6 +1408,29 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
       const hazeCol = mix(uAerialColor, uAerialColorSun, sunward);
       scattered.assign(mix(scattered, hazeCol.mul(alpha), fog));
     });
+
+    /*
+     * THE STRIKE LIGHTS THE DECK FROM INSIDE — and, as in the painted tier, AFTER the
+     * haze rather than before it: a flash lights the air between you and the cloud as
+     * well as the cloud itself, so attenuating it by the same aerial that dims the cloud
+     * attenuates it twice. Distance still dims it, radially around the strike, which is
+     * the honest reason a far storm is faint.
+     *
+     * Multiplied by `alpha` because this march is PREMULTIPLIED (`scattered` is already
+     * transmittance-weighted and the material says so). Adding straight colour here
+     * would light the empty sky between the clouds.
+     *
+     * Behind a real `If`: `uFlash` is zero for all but a fraction of a second every half
+     * minute, and this is a per-pixel exp on the most expensive shader in the game.
+     */
+    If(uFlash.greaterThan(0.0001), () => {
+      const meanD = distAcc.div(wAcc.max(1e-4));
+      const at = ro.add(rayDir.mul(meanD));
+      const d = at.xz.sub(uFlashXZ);
+      const fw = exp(dot(d, d).mul(uFlashFalloff).negate());
+      scattered.addAssign(uFlashCol.mul(uFlash.mul(fw)).mul(alpha));
+    });
+
     return vec4(scattered, alpha);
   });
 
@@ -2254,6 +2316,22 @@ export function createModularRoadClouds({ renderer, scene, camera, seed = 137, p
     isInCloud(x, y, z, threshold = 0.02) {
       return this.densityAt(x, y, z) > threshold;
     },
+    /**
+     * Light the deck from inside for one strike. Same signature as the painted tier's,
+     * so the caller can hold either deck. Uniform pokes only — safe every frame.
+     *
+     * @param {number} amount   0..1 flash, straight off the lightning clock
+     * @param {number} [worldX] where it struck
+     * @param {number} [worldZ]
+     * @param {number} [radius] metres to 1/e of the glow
+     */
+    setLightningFlash(amount, worldX = 0, worldZ = 0, radius = 2000) {
+      uFlash.value = Math.max(0, amount);
+      uFlashXZ.value.set(worldX, worldZ);
+      const r = Math.max(1, radius);
+      uFlashFalloff.value = 1 / (r * r);
+    },
+    setLightningColor(c) { uFlashCol.value.copy(c); },
     ready: readyPromise,
     get isReady() { return _ready; },
     get bakeMs() { return _bakeMs; },

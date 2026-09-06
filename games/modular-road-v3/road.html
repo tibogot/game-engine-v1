@@ -912,6 +912,23 @@
         if (!appEl) throw new Error("Could not find #app in v3/editor.html");
         document.body.insertBefore(document.importNode(appEl, true), boot);
 
+        // 1b) ?tsltrace — put a FILE AND LINE on TSL's build-time warnings.
+        //
+        // three's node warnings ("Return statement used in an inline 'Fn()'",
+        // and every other one it emits while compiling a material) arrive with
+        // "Stack trace not available" unless this is on BEFORE the node is
+        // constructed, and by the time any game code runs, most of the world's
+        // materials already exist. Hence here, ahead of the import: with the
+        // flag the warning names the shader that raised it, which is the whole
+        // difference between a number in the console and a thing to go and fix.
+        //
+        // Off by default because it makes every node capture a stack.
+        if (new URLSearchParams(location.search).has("tsltrace")) {
+          const THREE = await import("three/webgpu");
+          THREE.Node.captureStackTrace = true;
+          console.info("[tsltrace] TSL node stack traces ON");
+        }
+
         // 2) Boot the game. Relative specifier: ES imports resolve against this
         //    module's URL (not <base>), and Vite code-splits it at build time.
         const { startRoadGame } = await import("./roadGame.js");

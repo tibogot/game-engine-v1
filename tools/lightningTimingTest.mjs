@@ -141,16 +141,38 @@ console.log("\n=== THE STORM RATE FOLLOWS `amount` ===");
   check("a distant storm still strikes at all", low > 0, `${low}`);
 }
 
-console.log("\n=== TURNING IT OFF CLEARS WHAT WAS IN FLIGHT ===");
+console.log("\n=== DISARMING CLEARS WHAT WAS IN FLIGHT; A CALM SKY DOES NOT ===");
 {
+  // The switch and the weather are two different things, and only one of them
+  // is allowed to swallow a strike that has already happened.
   const l = createLightning({ amount: 1 }, seeded(9));
   l.strike(3800);           // ~11 s of thunder still travelling
   check("thunder is queued", l.pendingThunder === 1);
+
+  // The storm passing sets `amount` to 0. Sound does not stop travelling
+  // because the rain did, so the clap still has to arrive — and the same rule
+  // is what lets a strike fired BY HAND on a clear afternoon be seen at all.
   l.setAmount(0);
   l.update(1 / 60);
-  check("no thunder left hanging after the storm ends", l.pendingThunder === 0,
-    "otherwise a clap arrives over a clear sky");
-  check("flash is zero", l.flash === 0);
+  check("a strike already in flight survives the storm ending",
+    l.pendingThunder === 1 && l.flash > 0,
+    `${l.pendingThunder} queued, flash ${l.flash.toFixed(3)}`);
+
+  // ...and no NEW ones are rolled once it is calm.
+  const before = l.lastStrike.at;
+  for (let t = 0; t < 300; t += 1 / 60) l.update(1 / 60);
+  check("a calm sky rolls no new strikes", l.lastStrike.at === before,
+    "amount 0 must silence the auto clock");
+
+  // The SWITCH, on the other hand, means off: nothing decaying, nothing queued.
+  const m = createLightning({ amount: 1 }, seeded(9));
+  m.strike(3800);
+  m.setArmed(false);
+  m.update(1 / 60);
+  check("disarming leaves no thunder hanging", m.pendingThunder === 0,
+    "otherwise a clap arrives after the effect was switched off");
+  check("disarming zeroes the flash", m.flash === 0);
+  check("a disarmed clock stands still", m.nextIn === Infinity);
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nall good");

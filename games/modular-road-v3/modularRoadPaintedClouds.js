@@ -1391,8 +1391,15 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
         If(uDebug.greaterThan(0.5), () => {
           const fx = screenCoordinate.x.div(screenSize.x);
           const dbg = vec3(fract(hitT.div(2500.0))).toVar();
-          If(fx.greaterThan(0.3333), () => dbg.assign(vec3(alpha)));
-          If(fx.greaterThan(0.6667), () => dbg.assign(vec3(sunShadow)));
+          // BRACES, not an implicit return. `() => dbg.assign(x)` hands the
+          // assignment back as the branch's VALUE, and TSL treats a value at
+          // the end of an `If` inside an inline `Fn` as a return it cannot
+          // honour: it warns, then comments the line out. Harmless for an
+          // assign — the assignment is emitted as flow code before the value is
+          // returned — but it is the whole of this file's share of that warning,
+          // and a branch that ends in a real expression WOULD be silently lost.
+          If(fx.greaterThan(0.3333), () => { dbg.assign(vec3(alpha)); });
+          If(fx.greaterThan(0.6667), () => { dbg.assign(vec3(sunShadow)); });
           deckCol.assign(dbg);
           deckA.assign(hMask);
         });

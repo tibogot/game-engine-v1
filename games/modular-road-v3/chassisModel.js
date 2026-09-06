@@ -461,9 +461,29 @@ export const CAR_RAIN = {
   /** How hard the beads push the coat normal. Still small — a bead is a
    *  millimetre proud of a panel, not a dent in it. */
   normalStrength: 0.8,
+  /**
+   * ...and harder on the glass, which is the surface people actually watch the
+   * rain on. Two reasons it is not the same number. A bead on lacquer is seen
+   * THROUGH the clearcoat, which softens it; on glass there is nothing over it.
+   * And the glass is nearly a mirror (roughness 0), so its whole appearance is
+   * a reflection and tilting the normal is the only thing that can disturb it —
+   * on the paint the flake and the basecoat carry the look regardless.
+   */
+  glassNormalStrength: 1.3,
   /** Coat roughness under a bead. Standing water is a mirror; the lacquer is
    *  already smooth, so this only has to beat `clearcoatRoughness`. */
   wetCoatRough: 0.03,
+  /**
+   * ...and the opposite sign on the glass, which starts at roughness 0.
+   *
+   * A perfect mirror reflecting a FLAT OVERCAST SKY shows nothing when you tilt
+   * it — every direction returns the same grey, so on the one day it always
+   * rains the bead normals had almost nothing to reveal. Water on glass does not
+   * only bend the reflection, it scatters at the bead's rim, and a little
+   * roughness under the drop is what makes it read as wet rather than as clean
+   * glass with a slightly bent horizon.
+   */
+  glassWetRough: 0.14,
   /** Metres at which the beads are full strength, and where they are gone.
    *  Past the far one a drop is well under a pixel and all it can do is alias. */
   fadeNear: 20,
@@ -489,7 +509,15 @@ export function createCarRainUniforms() {
   });
 }
 
-function carRainCoat(u) {
+/**
+ * THE GATED BEAD FIELD, shared by the paint and the glass.
+ *
+ * Returns the packed tangent-space normal and the strength to apply it with, so
+ * a caller decides which of its normals the water perturbs. Split out when the
+ * glass wanted the same drops: two copies of this would have been two weathers
+ * on one car the first time either was tuned.
+ */
+function carBeadField(u) {
   // The body's own UV, so the beads are welded to the panel and do not swim
   // when the car moves — the same requirement the orange peel note describes,
   // met here by construction rather than by a space conversion.
@@ -558,12 +586,39 @@ function carRainCoat(u) {
   // greater than one and packing it unmasked tilts the whole panel.
   const packed = vec3(nxy.mul(cover), float(1)).normalize().mul(0.5).add(0.5);
 
+  return { gain, packed };
+}
+
+/**
+ * The beaded-coat nodes for the PAINT: water on lacquer is a layer on top of a
+ * layer, which is what a clearcoat is.
+ */
+function carRainCoat(u) {
+  const { gain, packed } = carBeadField(u);
+  const k = gain.mul(CAR_RAIN.normalStrength);
   return {
-    normal: normalMap(packed, vec2(
-      gain.mul(CAR_RAIN.normalStrength), gain.mul(CAR_RAIN.normalStrength),
-    )),
+    normal: normalMap(packed, vec2(k, k)),
     /** Blend the authored coat roughness toward standing water where a bead is. */
     roughness: mix(float(CHASSIS_GLB.clearcoatRoughness), float(CAR_RAIN.wetCoatRough), gain),
+  };
+}
+
+/**
+ * The same drops on the GLASS, and here they perturb the surface normal itself
+ * rather than a coat's.
+ *
+ * Not a clearcoat, for once: a clearcoat is a second specular lobe evaluated on
+ * every pixel it is compiled into, and it would buy nothing here. The window has
+ * no basecoat to protect and no flake to see through — it is a near-perfect
+ * mirror of the environment, so bending its normal IS the whole effect, at the
+ * cost of one normal map and no extra BRDF.
+ */
+function carRainGlass(u, baseRough) {
+  const { gain, packed } = carBeadField(u);
+  const k = gain.mul(CAR_RAIN.glassNormalStrength);
+  return {
+    normal: normalMap(packed, vec2(k, k)),
+    roughness: mix(float(baseRough), float(CAR_RAIN.glassWetRough), gain),
   };
 }
 
@@ -601,6 +656,45 @@ function makePaintMaterial(src, opts = {}) {
     const coat = carRainCoat(opts.rainUniforms);
     mat.clearcoatNormalNode = coat.normal;
     mat.clearcoatRoughnessNode = coat.roughness;
+  }
+  return mat;
+}
+
+/**
+ * THE WINDOWS, REBUILT AS A NODE MATERIAL so they can carry the rain.
+ *
+ * Only built when there IS rain — the same discipline the paint follows. A dry
+ * track keeps the file's own material and this function is never called, so it
+ * cannot change how the glass looks on a car that has no weather.
+ *
+ * The properties are copied out by hand rather than through `copy()`: the source
+ * is a plain MeshPhysicalMaterial and the target a node material, and their
+ * `copy` chains do not meet — a target-side copy would take the base Material
+ * fields and silently drop the colour, the roughness and the transmission. The
+ * file's glass is a short list (black, roughness 0, ior 1.5, double-sided) and
+ * naming it is safer than inheriting it.
+ */
+function makeGlassMaterial(src, opts = {}) {
+  const cheap = CHASSIS_GLB.cheapGlass;
+  const mat = new THREE.MeshPhysicalNodeMaterial({
+    name: src.name || "carGlass",
+    map: src.map ?? null,
+    color: src.color ? src.color.clone() : new THREE.Color(0x000000),
+    roughness: src.roughness ?? 0,
+    metalness: src.metalness ?? 0,
+    ior: src.ior ?? 1.5,
+    // cheapGlass is opacity blending INSTEAD of transmission — see the flag.
+    transmission: cheap ? 0 : (src.transmission ?? 0),
+    transparent: true,
+    opacity: cheap ? CHASSIS_GLB.glassOpacity : (src.opacity ?? 1),
+    side: src.side ?? THREE.DoubleSide,
+    envMapIntensity: src.envMapIntensity ?? 1,
+    depthWrite: src.depthWrite,
+  });
+  if (opts.rainUniforms) {
+    const wet = carRainGlass(opts.rainUniforms, mat.roughness);
+    mat.normalNode = wet.normal;
+    mat.roughnessNode = wet.roughness;
   }
   return mat;
 }
@@ -691,6 +785,8 @@ export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL, opts = {
 
   const interior = [];
   const glass = [];
+  /** Built lazily on the first window, then shared — see the glass branch. */
+  let glassMaterial = null;
   const brakeLights = [];
   const headlampLenses = [];
 
@@ -752,7 +848,15 @@ export async function loadChassisModel(renderer, url = CHASSIS_GLB_URL, opts = {
     }
 
     if (RE_GLASS.test(tag)) {
-      if (CHASSIS_GLB.cheapGlass) {
+      if (opts.rainUniforms) {
+        // ONE material for every window, built once. They merge into a single
+        // mesh below anyway, and a per-mesh clone would compile the bead field
+        // once per window on the way there.
+        glassMaterial ??= makeGlassMaterial(o.material, {
+          rainUniforms: opts.rainUniforms,
+        });
+        o.material = glassMaterial;
+      } else if (CHASSIS_GLB.cheapGlass) {
         o.material = o.material.clone();
         o.material.transmission = 0;
         o.material.transparent = true;

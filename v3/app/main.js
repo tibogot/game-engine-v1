@@ -6744,6 +6744,10 @@ export async function startV3App(opts = {}) {
     // sculptBrush swaps its .value to the active ping-pong RT, so anything that
     // captured the NODE keeps reading live heights while the terrain is edited.
     heightTexNode,
+    // ...and the decode that goes with it: world height = texel.r * maxHeight,
+    // at uv = worldXZ / worldSize + 0.5. A shader handed the node without these
+    // has to guess the scale, which is how two views of one terrain drift apart.
+    maxHeight: MAX_HEIGHT,
     // Surface normal at a world X/Z — slope for nav walkability, unit tilt.
     // (Returns a shared vector; read its components immediately, don't retain.)
     getWorldNormal: (wx, wz) => sampleTerrainNormal(wx, wz),

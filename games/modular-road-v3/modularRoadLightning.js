@@ -107,6 +107,16 @@ export function createLightning(overrides = {}, rng = Math.random) {
   let clock = 0;
   let nextAt = 0;
   let flash = 0;
+  /**
+   * ARMED IS NOT THE SAME AS AMOUNT, and the difference is what makes a manual
+   * strike possible. `amount` says how hard it is storming, so it scales how
+   * often strikes fire on their own — at 0 the sky simply never picks one. But
+   * a strike asked for BY NAME is a command, not weather, and on a clear
+   * afternoon it is the only way anyone will ever see this code run. `armed` is
+   * the real off switch: disarmed, nothing decays, nothing is scheduled, and
+   * anything already in flight is dropped rather than left to arrive later.
+   */
+  let armed = true;
   /** The most recent strike, for anything that wants to point at it. */
   let last = null;
 
@@ -160,10 +170,9 @@ export function createLightning(overrides = {}, rng = Math.random) {
    * @returns {number} the flash, 0..1
    */
   function update(dt) {
-    const a = clamp01(params.amount);
-    if (a <= 0) {
+    if (!armed) {
       // Off means OFF: no clock, no pending strokes, no thunder left hanging to
-      // arrive after the storm has gone.
+      // arrive after the effect has been switched off.
       if (strokes.length || thunder.length) { strokes = []; thunder = []; }
       flash = 0;
       nextAt = 0;
@@ -171,10 +180,19 @@ export function createLightning(overrides = {}, rng = Math.random) {
     }
 
     clock += dt;
-    if (nextAt === 0) nextAt = clock + rollGap();
-    if (clock >= nextAt) {
-      strike();
-      nextAt = clock + rollGap();
+    // The AUTO clock is what `amount` gates. A strike already in flight keeps
+    // decaying at amount 0 and its thunder still arrives, which is both the
+    // physics — sound does not stop travelling because the rain did — and what
+    // lets the dev panel fire one in clear weather.
+    const a = clamp01(params.amount);
+    if (a > 0) {
+      if (nextAt === 0) nextAt = clock + rollGap();
+      if (clock >= nextAt) {
+        strike();
+        nextAt = clock + rollGap();
+      }
+    } else {
+      nextAt = 0;
     }
 
     // Strokes SUM rather than max: two return strokes 40 ms apart genuinely do
@@ -220,7 +238,12 @@ export function createLightning(overrides = {}, rng = Math.random) {
     get lastStrike() { return last; },
     get pendingThunder() { return thunder.length; },
     setAmount(v) { params.amount = clamp01(v); },
+    /** The master switch — see `armed`. Disarming drops everything in flight. */
+    setArmed(v) { armed = !!v; },
+    get armed() { return armed; },
     /** Seconds until the next strike, for a HUD readout. Infinity when off. */
-    get nextIn() { return params.amount > 0 ? Math.max(0, nextAt - clock) : Infinity; },
+    get nextIn() {
+      return armed && params.amount > 0 ? Math.max(0, nextAt - clock) : Infinity;
+    },
   };
 }

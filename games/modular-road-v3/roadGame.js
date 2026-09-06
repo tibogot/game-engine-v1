@@ -524,12 +524,32 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * Never in a track save; a machine setting, like the cloud tier.
    */
   let roadImpactsAllowed = true;
+  /** Rebuilds the road material, so it is a click and not a per-frame knob. */
+  function setRoadImpacts(on) {
+    roadImpactsAllowed = !!on;
+    syncRoadMaterialFeatures();
+  }
   const _rainFocus = new THREE.Vector3();
   const _rainFwd = new THREE.Vector3();
 
   function ensureWorldRain() {
     if (worldRain) return worldRain;
-    worldRain = createWorldRain({ scene, renderer });
+    /*
+     * THE GROUND ARRIVES AS A HEIGHT FIELD, not as a collider. v3's terrain is
+     * displaced in the vertex stage and the rain's collision bake overrides the
+     * whole material, vertex stage included — so on the collider layer the
+     * terrain would bake as the flat plate it is in memory. See `terrainYAt`.
+     *
+     * Null in sky mode, where there is no ground to rain on.
+     */
+    worldRain = createWorldRain({
+      scene,
+      renderer,
+      terrain: terrainOn && app.heightTexNode
+        ? { heightTexNode: app.heightTexNode, worldSize: app.worldSize, maxHeight: app.maxHeight }
+        : null,
+    });
+    worldRain.setTerrainCollision(weatherFx.terrainRain);
     // Tag whatever already exists. Everything built LATER is tagged by
     // syncRainColliders being called from the same places that re-apply the
     // mirror membership — see the note there.
@@ -1034,14 +1054,40 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    *   weatherDrive whether a weather preset is allowed to move the road and the
    *                rain at all. Off leaves every surface exactly where it is,
    *                which is what you want while tuning one of them by hand.
+   *   terrainRain  whether rain lands on the GROUND as well as on the track.
+   *                The terrain reaches the rain as a height field rather than
+   *                through the collision bake (see ensureWorldRain), and the
+   *                tap sits behind an `If` — off is one compare per drop.
    */
   const weatherFx = {
     lightning: true,
     cloudFlash: true,
     bolt: true,
     carRain: true,
+    terrainRain: true,
     weatherDrive: true,
   };
+  /**
+   * Set one flag. Two of them leave state behind in something else's uniforms,
+   * so those are told to clear: a strike frozen at the moment of switching off
+   * would otherwise stay lit on the deck / hang in the sky for good.
+   */
+  function setWeatherFx(key, on) {
+    if (!(key in weatherFx)) return false;
+    weatherFx[key] = !!on;
+    if (key === "cloudFlash" && !on) {
+      gamePainted?.setLightningFlash?.(0);
+      clouds?.setLightningFlash?.(0);
+    }
+    if (key === "bolt" && !on) bolt?.hide();
+    if (key === "carRain" && !on && carRainUniforms.amount) {
+      carRainUniforms.amount.value = 0;
+    }
+    // This one is state the rain system holds, not a per-frame drive, so it has
+    // to be pushed. Nothing to push if the rain has never been built.
+    if (key === "terrainRain") worldRain?.setTerrainCollision(on);
+    return true;
+  }
   /** How much of a full storm's rain reads as an electrical storm. Below 1 so
    *  heavy rain is not automatically a thunderstorm — most of them are not. */
   const LIGHTNING_IN_STORM = 0.85;
@@ -1095,7 +1141,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // Lightning is driven by the weather's SETTLED state as much as its
     // transition, so unlike the rest of this function it is set before the
     // early-out — a storm that has finished arriving must keep striking.
-    lightning.setAmount(weatherFx.lightning ? weather.rain * LIGHTNING_IN_STORM : 0);
+    // ARMED is the switch, AMOUNT is the weather: the fx flag disarms the clock
+    // outright (nothing decaying, nothing scheduled), while the storm only sets
+    // how often it fires on its own. Keeping them apart is what lets the panel's
+    // Fire button work on a clear afternoon, when amount is legitimately 0.
+    lightning.setArmed(weatherFx.lightning);
+    lightning.setAmount(weather.rain * LIGHTNING_IN_STORM);
     if (!weatherFx.weatherDrive) return;
     if (!weather.transitioning && !_weatherSettleApply) return;
     _weatherSettleApply = false;
@@ -1691,22 +1742,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      * the part that reads as lightning rather than as the world being switched on.
      *
      * Positioned at the last strike's own bearing and distance from the car, so the
-     * glow is a patch of sky rather than the whole deck blinking. Only the painted
-     * tier has it; the volumetric deck is a different shape model and would need its
-     * own term.
+     * glow is a patch of sky rather than the whole deck blinking.
+     *
+     * WHICHEVER DECK IS LIVE. Both tiers publish the same call, so this does not
+     * know which one it is holding — it used to reach for the painted one by name,
+     * and turning the cloud quality up switched the lightning off with it.
      */
-    if (gamePainted?.setLightningFlash) {
+    const deck = gamePainted ?? (cloudTier === "volumetric" ? clouds : null);
+    if (deck?.setLightningFlash) {
       const st = lightning.lastStrike;
       const f = weatherFx.cloudFlash ? lightning.flash : 0;
       if (f > 0 && st) {
-        gamePainted.setLightningFlash(
+        deck.setLightningFlash(
           f * LIGHTNING_CLOUD_GAIN,
           camera.position.x + st.offsetX,
           camera.position.z + st.offsetZ,
           Math.max(600, st.distance * 0.7),
         );
       } else if (_cloudFlashOn) {
-        gamePainted.setLightningFlash(0);
+        deck.setLightningFlash(0);
       }
       _cloudFlashOn = f > 0;
     }
@@ -7815,6 +7869,17 @@ ${e.message}`);
       rainParamKeys: RAIN_LENS_NUMBERS,
       setRainLean: (v) => { rainLeanFromSpeed = Math.max(0, Math.min(3, +v || 0)); },
       getRainLean: () => rainLeanFromSpeed,
+      // ── Weather extras ───────────────────────────────────────────────────
+      // The same switchboard the handle exposes, not a copy of it: the panel
+      // READS `weatherFx()` every time it draws, because the weather itself can
+      // turn a feature off and a panel holding its own last write would drift.
+      weatherFx: () => ({ ...weatherFx }),
+      setWeatherFx,
+      setRoadImpacts,
+      getRoadImpacts: () => roadImpactsAllowed,
+      /** Waiting forty seconds for a strike while looking the right way is not
+       *  a way to judge one. */
+      strikeNow: (distance) => lightning.strike(distance),
       setBump: (v) => setSurfaceParam("bumpAmount", Math.max(0, v || 0)),
       getBump: () => surfaceLook.bumpAmount,
       setStreakSharp: (v) => setSurfaceParam("streakSharp", Math.max(0, Math.min(1, v ?? 0))),
@@ -8367,7 +8432,7 @@ ${e.message}`);
     getRain: () => rainEnabled,
     /** Raindrop impact rings on the wet deck — a machine setting. Rebuilds the
      *  road material, so it is a click, not a per-frame knob. */
-    setRoadImpacts: (on) => { roadImpactsAllowed = !!on; syncRoadMaterialFeatures(); },
+    setRoadImpacts,
     getRoadImpacts: () => roadImpactsAllowed,
     /** The world-rain system once it exists, for console tuning: every knob in
      *  WORLD_RAIN_DEFAULTS has a setter on it. Null until rain is first on. */
@@ -8397,18 +8462,7 @@ ${e.message}`);
      * zero — see the declaration for which mechanism each one uses.
      */
     weatherFx: () => ({ ...weatherFx }),
-    setWeatherFx: (key, on) => {
-      if (!(key in weatherFx)) return false;
-      weatherFx[key] = !!on;
-      // The two that leave state behind have to be told, or a strike frozen at
-      // the moment of switching off would stay on the deck / in the sky.
-      if (key === "cloudFlash" && !on) gamePainted?.setLightningFlash?.(0);
-      if (key === "bolt" && !on) bolt?.hide();
-      if (key === "carRain" && !on && carRainUniforms.amount) {
-        carRainUniforms.amount.value = 0;
-      }
-      return true;
-    },
+    setWeatherFx,
     /** The bolt mesh, once a strike has earned one. `show(makeBoltPath(a, b))`
      *  draws an arbitrary channel, which is the only way to inspect one without
      *  waiting for a strike to happen to land in frame. */

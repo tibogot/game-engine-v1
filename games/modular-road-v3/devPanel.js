@@ -3177,6 +3177,69 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
 
+          <div class="dv-hint">
+            <b>Weather extras.</b> Every switch below is a real skip, not a
+            multiply by zero: the two that live in a shader sit behind a WGSL
+            branch, and the rest disarm a clock or hide a mesh. Off costs a
+            compare. These are MACHINE settings — they never ride a track save —
+            and they exist as much for bisecting a frame as for quality.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Weather drives road</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-drive" type="button"
+                aria-label="Let a weather preset move the road and the rain">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Lightning</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-lightning" type="button"
+                aria-label="Lightning strikes">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· cloud flash</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-cloudflash" type="button"
+                aria-label="Strikes light the cloud deck from inside">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· bolt</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-bolt" type="button"
+                aria-label="The visible lightning channel">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rain on the terrain</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-terrainrain" type="button"
+                aria-label="Drops land on the ground, not only on the track">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rain on the car</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-carrain" type="button"
+                aria-label="Water beads on the bodywork">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Impact rings</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-fx-impacts" type="button"
+                aria-label="Raindrop rings on standing water">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Strike now</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-fx-strike" type="button">Fire</button>
+            </div>
+          </div>
+
           <div class="prop-row">
             <span class="prop-label">Reflection blur</span>
             <div class="prop-value">
@@ -5657,6 +5720,35 @@ export function createRoadDevPanel({ app, game, params }) {
   // live with the effect — `setRainParam` is a uniform write, so every one of
   // these is live with no rebuild.
   toggle("dv-rain", game.getRain?.() ?? false, (on) => game.setRain?.(on));
+
+  /* ── Weather extras ──────────────────────────────────────────────────────
+   *
+   * Bound straight to the game's switchboard. Each of these is a real skip on
+   * the off path — see `weatherFx` in roadGame for which mechanism each one
+   * uses — so they are as useful for bisecting a frame's cost as for turning
+   * something off you do not like.
+   *
+   * Read through `game.weatherFx()` rather than remembering a local copy: the
+   * weather can turn a feature off on its own (no rain, no lightning), and a
+   * panel that trusted its own last write would drift out of step with it.
+   */
+  {
+    const fx = game.weatherFx?.() ?? {};
+    const fxToggle = (id, key) => {
+      toggle(id, fx[key] ?? false, (on) => game.setWeatherFx?.(key, on));
+    };
+    fxToggle("dv-fx-drive", "weatherDrive");
+    fxToggle("dv-fx-lightning", "lightning");
+    fxToggle("dv-fx-cloudflash", "cloudFlash");
+    fxToggle("dv-fx-bolt", "bolt");
+    fxToggle("dv-fx-carrain", "carRain");
+    fxToggle("dv-fx-terrainrain", "terrainRain");
+    toggle("dv-fx-impacts", game.getRoadImpacts?.() ?? false,
+      (on) => game.setRoadImpacts?.(on));
+    // Waiting up to forty seconds for a strike to land while you are looking at
+    // the right part of the sky is not a way to judge anything.
+    $("#dv-fx-strike")?.addEventListener("click", () => game.strikeNow?.());
+  }
   const rainSlider = (id, key, fmt) => {
     const el = $(`#${id}`);
     const out = $(`#${id}-v`);

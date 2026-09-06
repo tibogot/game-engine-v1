@@ -420,8 +420,12 @@ function createCollisionMap(renderer, params) {
  * @param {THREE.Scene}     opts.scene
  * @param {THREE.Renderer}  opts.renderer
  * @param {Object}         [opts.params]  overrides on WORLD_RAIN_DEFAULTS
+ * @param {Object}         [opts.terrain] the ground, as a HEIGHT FIELD rather than
+ *   as geometry: `{ heightTexNode, worldSize, maxHeight }`. See the note on
+ *   `terrainYAt` for why the terrain cannot go through the bake like everything
+ *   else. Omit it and nothing changes — rain lands on the collider layer only.
  */
-export function createWorldRain({ scene, renderer, params: overrides = {} } = {}) {
+export function createWorldRain({ scene, renderer, params: overrides = {}, terrain = null } = {}) {
   if (!scene || !renderer) throw new Error("createWorldRain needs { scene, renderer }");
 
   const params = { ...WORLD_RAIN_DEFAULTS, ...overrides };
@@ -466,6 +470,54 @@ export function createWorldRain({ scene, renderer, params: overrides = {} } = {}
   const uEdgeFadeStart = uniform(params.edgeFadeStart);
   const uFarFadeStart = uniform(params.farFadeStart);
   const uFarFadeEnd = uniform(params.farFadeEnd);
+  /** Terrain collision on/off. A uniform because it is a switch, and inside a
+   *  WGSL `If` because a uniform alone would still pay for the sample. */
+  const uTerrainOn = uniform(terrain ? 1 : 0);
+
+  /**
+   * THE GROUND CANNOT GO THROUGH THE BAKE, so it comes in as a height field.
+   *
+   * v3's terrain is a GPU clipmap: a flat ring mesh displaced in the VERTEX
+   * stage from the heightmap. The collision bake works by pointing a camera
+   * down with `scene.overrideMaterial` set, and an override material replaces
+   * the vertex stage along with the fragment one — so the terrain renders into
+   * the map as the flat plate it is in memory, at y = 0, everywhere. Adding it
+   * to the collider layer would not have made rain land on hills; it would have
+   * made rain land on a floor at sea level and pass straight through the peaks.
+   *
+   * Sampling the same heightmap the terrain is displaced by is exact by
+   * construction — same texture, same decode, no second source of truth to
+   * drift. It is also cheaper than the geometry would have been: one tap.
+   */
+  const terrainYAt = terrain
+    ? (xz) => texture(terrain.heightTexNode, xz.div(terrain.worldSize).add(0.5))
+      .r.mul(terrain.maxHeight)
+    : null;
+
+  /**
+   * The floor under a world XZ: `vec2(height, valid)`.
+   *
+   * Returns a vec2 rather than the pair it wants to, because an `Fn` that
+   * returns an object collapses to a swizzle — a trap this project has already
+   * paid for twice. Both the drop test and the splash's is-my-floor-still-there
+   * re-check go through here, so they cannot disagree about what the ground is.
+   */
+  const floorAt = (xz) => {
+    const hit = texture(collision.renderTarget.texture, uvFor(xz));
+    const y = hit.y.add(uSurfaceOffset).toVar();
+    const ok = hit.w.greaterThan(0.5).toVar();
+    if (terrainYAt) {
+      If(uTerrainOn.greaterThan(0.5), () => {
+        const ty = terrainYAt(xz).add(uSurfaceOffset);
+        // Whichever is HIGHER wins, and terrain alone counts as ground. From
+        // above, the topmost surface is the one a drop meets — that is the deck
+        // where a bridge crosses a valley, and the hill where it does not.
+        If(ok.not(), () => { y.assign(ty); ok.assign(true); })
+          .Else(() => { y.assign(y.max(ty)); });
+      });
+    }
+    return { y, ok };
+  };
 
   /**
    * The soft boundary, shared by drops and splashes so they cannot disagree
@@ -556,9 +608,9 @@ export function createWorldRain({ scene, renderer, params: overrides = {} } = {}
     pos.x = uLive.x.add(rel.x);
     pos.z = uLive.z.add(rel.y);
 
-    const hit = texture(collision.renderTarget.texture, uvFor(pos.xz)).toVar();
-    const solid = hit.w.greaterThan(0.5);
-    const floorY = hit.y.add(uSurfaceOffset);
+    const ground = floorAt(pos.xz);
+    const solid = ground.ok;
+    const floorY = ground.y;
 
     If(solid.and(pos.y.lessThan(floorY)), () => {
       // Land: hand the splash this exact point, start its clock.
@@ -589,8 +641,8 @@ export function createWorldRain({ scene, renderer, params: overrides = {} } = {}
     // and a called lift. Re-read the map under the splash and kill it if the
     // floor is no longer where it was standing, rather than leave a ring
     // hanging in the air where a platform used to be.
-    const under = texture(collision.renderTarget.texture, uvFor(sp.xz)).toVar();
-    If(under.w.lessThan(0.5).or(sp.y.sub(under.y).abs().greaterThan(0.5)), () => {
+    const under = floorAt(sp.xz);
+    If(under.ok.not().or(sp.y.sub(under.y).abs().greaterThan(0.5)), () => {
       st.x = float(SPLASH_DEAD);
     });
   });
@@ -850,6 +902,16 @@ export function createWorldRain({ scene, renderer, params: overrides = {} } = {}
     setSplashesEnabled,
     setLean,
     getCount: () => count,
+
+    /**
+     * Rain on the TERRAIN as well as on the collider layer. Null-terrain builds
+     * (sky mode) ignore this — there is nothing to sample. Off is a real skip:
+     * the tap sits inside a WGSL `If` on this uniform, so a switched-off terrain
+     * costs one compare per drop rather than a texture fetch.
+     */
+    setTerrainCollision: (on) => { uTerrainOn.value = terrain && on ? 1 : 0; },
+    get terrainCollision() { return uTerrainOn.value > 0.5; },
+    get hasTerrain() { return !!terrain; },
 
     /** Isolation switches — the lab measures each third of the cost with these. */
     setBakeEnabled: (on) => { bakeEnabled = !!on; },
