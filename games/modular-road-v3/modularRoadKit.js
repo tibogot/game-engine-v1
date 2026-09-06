@@ -1052,6 +1052,10 @@ const _kx = new V3();
  */
 const ALONG_OFFSET_SPAN = 1000;
 
+/** No start/finish line on this piece. Far outside any real uv.x — a rounded
+ *  start's nose runs NEGATIVE (down to -hw), so 0 or -1 are both real places. */
+export const NO_CHECKER = -1e4;
+
 /**
  * PER-PIECE NOISE PHASE. Without it every piece of a given length is painted
  * with a byte-identical patch of asphalt.
@@ -1081,7 +1085,39 @@ const ALONG_OFFSET_SPAN = 1000;
  * Quantised to a centimetre so that a piece re-placed at a numerically
  * near-identical spot keeps the same phase rather than shimmering to a new one.
  */
-function stampAlongOffset(geo, world) {
+/**
+ * …AND THE START/FINISH LINE, in the SAME attribute, because eight is the whole
+ * budget. WebGPU guarantees only 8 vertex buffers per pipeline and the deck was
+ * already using every one (position, normal, uv, aZone, aLateral, aPlain,
+ * aCurve, and this). A ninth is not a slow path, it is a dead pipeline: the
+ * road silently stops drawing and the console says
+ * "Vertex buffer count (9) exceeds the maximum number of vertex buffers (8)".
+ *
+ * These two are the only PER-PIECE CONSTANTS on the deck, so they share a vec2
+ * and cost nothing extra. Anything genuinely per-vertex could not.
+ *
+ * `.y` is uv.x of the piece's start/finish line, or NO_CHECKER. The checker
+ * used to be its own little mesh — 16 flat quads on an unlit MeshBasicMaterial,
+ * lifted 4 cm clear of the deck to dodge z-fighting. That lift is exactly what
+ * you saw: a plate hovering over the road rather than paint on it, and being
+ * unlit it took no sun, no shadow and no wet, so it stayed pure white while the
+ * asphalt around it darkened. It was also ONE flat rectangle built from a
+ * single frame, so it could not follow a deck that curved, and it spanned the
+ * full outer width — its outer 0.75 m buried inside kerbs that stand 22 cm
+ * proud. It is paint now, drawn by the deck material like the centre and edge
+ * lines: no geometry, no lift, no z-fight to dodge, lit and wetted with the
+ * surface it is painted on, and it stops at the kerb because the material only
+ * paints zone 1.
+ *
+ * STAMPED LAST, on the finished geometry. Every deck needs this attribute
+ * whether or not it has a line — pieces are merged together, and a missing or
+ * differently-sized attribute is the mismatch that silently drops a whole mesh.
+ * Doing it here rather than in each of the seven builders that make deck
+ * vertices means the count always matches and a new builder cannot forget.
+ *
+ * @param {number} [lineDist] uv.x of the start/finish line, or NO_CHECKER
+ */
+function stampPieceConstants(geo, world, lineDist = NO_CHECKER) {
   if (!geo?.getAttribute) return geo;
   const pos = geo.getAttribute("position");
   if (!pos) return geo;
@@ -1089,10 +1125,12 @@ function stampAlongOffset(geo, world) {
   const q = (v) => Math.round(v * 100);
   const h = Math.sin(q(e[12]) * 12.9898 + q(e[13]) * 78.233 + q(e[14]) * 37.719) * 43758.5453;
   const offset = (h - Math.floor(h)) * ALONG_OFFSET_SPAN;
-  geo.setAttribute(
-    "aAlongOffset",
-    new THREE.Float32BufferAttribute(new Float32Array(pos.count).fill(offset), 1),
-  );
+  const data = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    data[i * 2] = offset;
+    data[i * 2 + 1] = lineDist;
+  }
+  geo.setAttribute("aPiece", new THREE.Float32BufferAttribute(data, 2));
   return geo;
 }
 
@@ -1122,6 +1160,7 @@ function stampPieceAttributes(geo, { plain = 1, curvature = 0 } = {}) {
   geo.setAttribute("aCurve", new THREE.Float32BufferAttribute(curve, 1));
   return geo;
 }
+
 
 /**
  * @param {object} [opts]
@@ -6064,7 +6103,6 @@ for (const id of [
 /* Game-piece decor (checkered lines, arches, arrows)                       */
 /* ----------------------------------------------------------------------- */
 
-const _DECO_BLACK = new THREE.Color(0x000000);
 const _DECO_WHITE = new THREE.Color(0xffffff);
 const _DECO_YELLOW = new THREE.Color(0xffcc00);
 
@@ -6124,23 +6162,6 @@ export function gameGantryLineDist(gameType, pp, hw) {
   return straightGameLineDist(pp, false);
 }
 
-/** Deck markings for start_new / finish_new — checker at the line only. */
-function buildStartNewMarkingsGeometry(frames, profileData, pp, lineDist) {
-  const hw = profileData.hw;
-  const dist = lineDist ?? startNewLineDist(pp, hw);
-  const gateFr = _frameAtArcLength(frames, dist);
-  const part = _checkerPart(gateFr, hw, 3.2, 8, 2);
-  return _partToGeo(part);
-}
-
-function _deckPt(fr, rx, rz, lift = 0.04) {
-  return fr.pos
-    .clone()
-    .addScaledVector(fr.right, rx)
-    .addScaledVector(fr.tangent, rz)
-    .addScaledVector(fr.up, lift);
-}
-
 function _geoPart() {
   return { positions: [], normals: [], colors: [], indices: [] };
 }
@@ -6181,35 +6202,6 @@ function _partToGeo(part) {
   g.setAttribute("color", new THREE.Float32BufferAttribute(part.colors, 3));
   g.setIndex(part.indices);
   return g;
-}
-
-function _checkerPart(fr, hw, depth, cols, rows) {
-  const part = _geoPart();
-  const n = fr.up.clone().normalize();
-  const cellW = (hw * 2) / cols;
-  const cellD = depth / rows;
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const c = (row + col) % 2 === 0 ? _DECO_BLACK : _DECO_WHITE;
-      const x0 = -hw + col * cellW;
-      const x1 = x0 + cellW;
-      const z0 = -row * cellD;
-      const z1 = z0 - cellD;
-      _pushQuad(
-        part,
-        _deckPt(fr, x0, z0),
-        _deckPt(fr, x1, z0),
-        _deckPt(fr, x1, z1),
-        _deckPt(fr, x0, z1),
-        n,
-        c,
-        c,
-        c,
-        c,
-      );
-    }
-  }
-  return part;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -6525,6 +6517,15 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   let decorGeometry = null;
   let decorGateGeometry = null;
   let decorGlowGeometry = null;
+  // THE CHECKER IS PAINT ON THE DECK NOW — see stampPieceConstants. Worked out
+  // here and not inside `!skipExtras`, because the attribute has to exist on
+  // every deck geometry regardless of whether its extras were built: a ghost or
+  // a collision-only build still gets merged with the rest.
+  const hasGameLine = def.game === "start" || def.game === "start_new"
+    || def.game === "finish" || def.game === "finish_new";
+  const gameLineDist = hasGameLine
+    ? gameGantryLineDist(def.game, pp, profileData.hw)
+    : NO_CHECKER;
   if (!skipExtras) {
     if (def.shell === "vault") {
       const vault = buildVaultTunnel(frames, profileData, pp);
@@ -6534,11 +6535,11 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     } else if (def.shell) {
       shellGeometry = buildShellGeometry(def.shell, frames, profileData, pp);
     }
-    if (def.game === "start" || def.game === "start_new" || def.game === "finish" || def.game === "finish_new") {
-      const lineDist = gameGantryLineDist(def.game, pp, profileData.hw);
-      const gateFr = _frameAtArcLength(frames, lineDist);
-      decorGeometry = buildStartNewMarkingsGeometry(frames, profileData, pp, lineDist);
-      const gate = buildStartNewGateGeometries(gateFr, profileData.hw * 2);
+    if (hasGameLine) {
+      // The gantry still stands at the line; only the deck marking moved into
+      // the material, so this piece no longer has a decor MESH at all.
+      const gate = buildStartNewGateGeometries(
+        _frameAtArcLength(frames, gameLineDist), profileData.hw * 2);
       decorGateGeometry = gate.body;
       decorGlowGeometry = gate.glow;
     } else if (def.game === "checkpoint_new") {
@@ -6567,12 +6568,14 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
   }
 
   const world = currentConnector.clone().multiply(entryLocal.clone().invert());
-  // Every piece gets its own noise phase — see stampAlongOffset. Stamped HERE,
+  // Every piece gets its own noise phase — see stampPieceConstants. Stamped HERE,
   // after `world` exists and after any end caps have been appended, so it
   // reaches every builder (sweeps, custom plates, capped tubes) with one call
   // and can never disagree with the vertex count.
-  stampAlongOffset(geometry, world);
-  if (deckCollision && deckCollision !== geometry) stampAlongOffset(deckCollision, world);
+  stampPieceConstants(geometry, world, gameLineDist);
+  if (deckCollision && deckCollision !== geometry) {
+    stampPieceConstants(deckCollision, world, gameLineDist);
+  }
   const connectorOut = world.clone().multiply(exitLocal);
 
   // EXTRA WAYS OUT (junctions). Same connector convention as `connectorOut`, so

@@ -383,8 +383,8 @@ console.log("\n=== THE ATTRIBUTES THE BUMP READS ===");
 
   // ...and the repeat it used to cause is now broken by a per-piece phase that
   // rides alongside uv.x rather than inside it. This is the check that flipped.
-  const offA = built.geometry.getAttribute("aAlongOffset");
-  const offB = second.geometry.getAttribute("aAlongOffset");
+  const offA = built.geometry.getAttribute("aPiece");
+  const offB = second.geometry.getAttribute("aPiece");
   check("both pieces carry a noise phase", !!offA && !!offB);
   check("neighbouring pieces get DIFFERENT phases",
     offA && offB && Math.abs(offA.getX(0) - offB.getX(0)) > 1e-3,
@@ -398,7 +398,7 @@ console.log("\n=== THE ATTRIBUTES THE BUMP READS ===");
   const again = buildPiece("straight", initialConnector(), pieceParams, roadParams,
     { ...guardrailParams, enabled: false }, true);
   check("the phase is stable for a given placement",
-    Math.abs(again.geometry.getAttribute("aAlongOffset").getX(0) - offA.getX(0)) < 1e-9);
+    Math.abs(again.geometry.getAttribute("aPiece").getX(0) - offA.getX(0)) < 1e-9);
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nall good");

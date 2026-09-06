@@ -390,6 +390,21 @@ export function createRoadMaterial(opts = {}) {
     // dashes in the Track menu for a two-way road.
     centerOn: uniform(opts.centerOn ?? 0),
     edgeOn: uniform(opts.edgeOn ?? 1),
+    // START / FINISH CHECKER. Painted by this material rather than laid on the
+    // deck as its own mesh — see stampCheckerLine in the kit for why. Its
+    // position rides the geometry (`aChecker`, uv.x metres of the line itself);
+    // these are only its shape and colour, so they are the same for every piece
+    // and one road-look setting covers a whole track.
+    //
+    // Anchored at the LINE and drawn BACKWARDS from it, so the band always ends
+    // under the gantry however deep it is.
+    checkerDepth: uniform(opts.checkerDepth ?? 3.2), // metres back from the line
+    checkerRows: uniform(opts.checkerRows ?? 2), // cells along
+    // Cells ACROSS the full width, so a piece with kerbs shows the middle of the
+    // pattern and the outermost cell runs into the kerb the way real paint does.
+    checkerCols: uniform(opts.checkerCols ?? 8),
+    checkerDark: uniform(lin(opts.checkerDark ?? 0x0a0a0a)),
+    checkerLight: uniform(lin(opts.checkerLight ?? 0xe8e8e8)),
     // Optional neon paint: write the same line mask into emissive + bloom MRT.
     // Off by default (day look); night tracks flip `linesBloom` without a rebuild.
     linesBloom: uniform(opts.linesBloom ?? 0),
@@ -586,14 +601,14 @@ export function createRoadMaterial(opts = {}) {
   const surface = opts.buildSurface ? opts.buildSurface(u) : Fn(() => {
     // Stretched along the path, so every field below comes out as streaks that
     // run WITH the road rather than blobs sitting on it.
-    // `aAlongOffset` is a per-piece constant that decorrelates the noise from
+    // `aPiece.x` is a per-piece constant that decorrelates the noise from
     // its neighbours — without it every piece of the same length is painted
-    // with the identical patch of asphalt. See stampAlongOffset in the kit.
+    // with the identical patch of asphalt. See stampPieceConstants in the kit.
     // It rides HERE and not on uv.x itself, so the paint-line dashes, the kerb
     // bands and the tube rings keep their existing phase relative to each
     // piece's start. Being constant per piece it also drops out of fwidth, so
     // the aggregate's distance fade is unaffected.
-    const along = uv().x.add(attribute("aAlongOffset", "float"))
+    const along = uv().x.add(attribute("aPiece", "vec2").x)
       .div(u.streak); // metres along the path, anisotropic
     const across = uv().y; // metres across the developed profile
     const lateral = attribute("aLateral", "float");
@@ -603,7 +618,7 @@ export function createRoadMaterial(opts = {}) {
     // ── MACRO, IN WORLD SPACE — the seam fix ────────────────────────────────
     //
     // THE SEAM. `uv.x` restarts at 0 on EVERY piece (buildSweepGeometry), and
-    // `aAlongOffset` then adds a random per-piece phase on top. So any field
+    // `aPiece.x` then adds a random per-piece phase on top. So any field
     // driven by arc length is discontinuous at every joint on the track. For the
     // high-frequency octaves that is invisible — a phase jump in a 6 cm chip has
     // no coherent structure to break — but this one has a 16.7 m period, so the
@@ -756,7 +771,7 @@ export function createRoadMaterial(opts = {}) {
     // way, and the macro field shifts its PHASE so neighbouring snakes break at
     // different stations instead of all being cut across the same line. Same
     // trick, and the same reasoning, as the drift band's `driftWander`.
-    const alongOff = uv().x.add(attribute("aAlongOffset", "float"));
+    const alongOff = uv().x.add(attribute("aPiece", "vec2").x);
     const phase = alongOff.mul(u.tarSnakeBreakScale).add(surface.x.mul(4.0));
     const wave = abs(fract(phase).sub(0.5)).mul(2.0);
     const seg = mix(float(1), smoothstep(0.28, 0.72, wave), u.tarSnakeBreak);
@@ -867,6 +882,49 @@ export function createRoadMaterial(opts = {}) {
     attribute("aPlain", "float"), // 1 on platforms → no lines
   ))();
 
+  /**
+   * The start / finish checker — `.x` is band coverage, `.y` selects light over
+   * dark within it. A vec2 rather than two Fns so the shared work happens once,
+   * and rather than an object because an Fn that returns one collapses to a
+   * swizzle and hands back silently-undefined slots.
+   *
+   * `aPiece.y` is uv.x of the LINE, stamped per piece by the kit; the band runs
+   * BACKWARDS from it so it always ends under the gantry whatever the depth.
+   * It shares an attribute with the noise phase because the deck's pipeline is
+   * at WebGPU's 8-vertex-buffer limit — see stampPieceConstants.
+   */
+  const checker = Fn(() => {
+    const line = attribute("aPiece", "vec2").y;
+    const along = uv().x;
+    const lateral = attribute("aLateral", "float");
+    const back = line.sub(along); // metres back from the line, 0 at the line
+
+    // Band ends feathered to a pixel, like the paint lines above: a hard edge
+    // in a shader crawls at exactly the distance you spend a lap looking at.
+    const aa = max(fwidth(along), 1e-4);
+    const band = smoothstep(aa.negate(), aa, back)
+      .mul(smoothstep(aa.negate(), aa, u.checkerDepth.sub(back)))
+      // NO_CHECKER is -1e4, far below any real uv.x (a rounded start's nose
+      // runs back to -hw). One compare drops the whole band on every ordinary
+      // piece, which is all but four in the kit.
+      .mul(step(-1000.0, line));
+
+    // sin·sin rather than floor+mod: its SIGN is the checker, and it crosses
+    // zero smoothly at every cell boundary, so one smoothstep against its own
+    // fwidth anti-aliases the whole pattern. When the cells fall under a pixel
+    // it settles to a flat half — the correct average — instead of the moiré a
+    // floor-based mask crawls into.
+    const cx = lateral.add(1).mul(0.5).mul(u.checkerCols);
+    const cz = back.div(u.checkerDepth).mul(u.checkerRows);
+    const d = sin(cx.mul(Math.PI)).mul(sin(cz.mul(Math.PI)));
+    const w = max(fwidth(d), 1e-4);
+    return vec2(band, smoothstep(w.negate(), w, d));
+  })();
+  const checkerAmt = checker.x;
+
+  /** Paint of any kind, for the roughness and coat terms that treat it alike. */
+  const paintAmt = max(lineAmt, checkerAmt);
+
   mat.colorNode = Fn(() => {
     const zone = attribute("aZone", "float");
     const along = uv().x;
@@ -911,7 +969,21 @@ export function createRoadMaterial(opts = {}) {
         .mul(mix(float(1), u.wetDarken, lw))
         .mul(mix(vec3(1, 1, 1), u.wetTint, lw));
     }
-    const deckCol = mix(deckBase, lineCol, lineAmt);
+    let deckCol = mix(deckBase, lineCol, lineAmt);
+
+    // THE CHECKER, over the paint and wetted on the same terms — it IS paint,
+    // a thermoplastic band like the rest of the markings. Neither colour is
+    // pure: a black square with zero albedo and a white one at 1.0 are the two
+    // values asphalt never has, and they are what made the old unlit plate read
+    // as a decal printed on top of the world rather than laid on the road.
+    let checkerCol = mix(u.checkerDark, u.checkerLight, checker.y);
+    if (wet) {
+      const cw = wet.film.mul(u.lineWet);
+      checkerCol = checkerCol
+        .mul(mix(float(1), u.wetDarken, cw))
+        .mul(mix(vec3(1, 1, 1), u.wetTint, cw));
+    }
+    deckCol = mix(deckCol, checkerCol, checkerAmt);
 
     // Kerbs: solid red by default; hazard stripes only when railStriped is on
     // (reserved for the turn pieces later).
@@ -984,7 +1056,7 @@ export function createRoadMaterial(opts = {}) {
     // further. Mixed AFTER the substrate mix so both sides of the blend are
     // already weather-aware.
     const paintRough = wet ? mix(u.lineRough, wet.substrateRough, wet.film) : u.lineRough;
-    deck = mix(deck, paintRough, lineAmt);
+    deck = mix(deck, paintRough, paintAmt);
     deck = clamp(deck, 0.05, 1.0);
 
     let r = float(0.9); // sides / underside
@@ -1023,14 +1095,14 @@ export function createRoadMaterial(opts = {}) {
       const isKerb = step(1.5, zone).mul(oneMinus(step(2.5, zone)));
       // Paint is the wettest-LOOKING thing out there — see lineCoat. Saturated,
       // because a clearcoat above 1 is not a stronger mirror, it is invalid.
-      const paintGain = mix(float(1), u.lineCoat, lineAmt);
+      const paintGain = mix(float(1), u.lineCoat, paintAmt);
       return saturate(wet.coat.mul(isDeck.add(isKerb.mul(u.kerbWet))).mul(paintGain));
     })();
     // ...and the film on it is smoother than the same film over open aggregate,
     // which is the half that actually makes it look like a mirror rather than
     // just a brighter patch.
     mat.clearcoatRoughnessNode = mix(
-      wet.coatRough, wet.coatRough.mul(u.lineCoatRough), lineAmt,
+      wet.coatRough, wet.coatRough.mul(u.lineCoatRough), paintAmt,
     );
     mat.clearcoatNormalNode = wetClearcoatNormal(wet);
   }
@@ -2041,6 +2113,7 @@ export const ROAD_LOOK_VERSION = 1;
 export const ROAD_LOOK_COLORS = [
   "asphaltDark", "asphaltLight", "lineColor", "railA", "railB",
   "sideColor", "tubeInner", "tubeOuter", "neonColor", "panelColor", "tarSnakeColor",
+  "checkerDark", "checkerLight",
   ...WET_COLORS,
 ];
 
@@ -2058,6 +2131,7 @@ export const ROAD_LOOK_NUMBERS = [
   "driftLines", "driftWander", "driftWanderScale",
   "tarSnakeAmount", "tarSnakeScale", "tarSnakeWidth", "tarSnakeGloss", "tarSnakeFade", "tarSnakeBreak", "tarSnakeBreakScale",
   "panelRough",
+  "checkerDepth", "checkerRows", "checkerCols",
   ...WET_NUMBERS,
 ];
 

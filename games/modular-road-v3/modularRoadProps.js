@@ -31,7 +31,7 @@ import { makePalm } from "./modularRoadPalm.js";
 import { makeBarrel } from "./modularRoadBarrel.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
 import { FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
-import { roadParams } from "./modularRoadKit.js";
+import { roadParams, NO_CHECKER } from "./modularRoadKit.js";
 
 /** The one decal there is so far. Lives beside the game rather than in
  *  public/models because it is track dressing, not a shared engine asset. */
@@ -438,7 +438,13 @@ function asphaltLotGeometry() {
   // corner, so drainage is the world-space puddle field, not camber gutters.
   geo.setAttribute("aPlain", new THREE.Float32BufferAttribute(new Float32Array(vcount).fill(1), 1));
   geo.setAttribute("aCurve", new THREE.Float32BufferAttribute(new Float32Array(vcount), 1));
-  geo.setAttribute("aAlongOffset", new THREE.Float32BufferAttribute(new Float32Array(vcount), 1));
+  // Per-piece constants, packed like the kit's decks: .x noise phase (0 — a lot
+  // has no neighbours to decorrelate from), .y the start/finish line (none).
+  // A vec2 and not two attributes because the road material's pipeline is at
+  // the WebGPU limit of 8 vertex buffers — see stampPieceConstants.
+  const lotPiece = new Float32Array(vcount * 2);
+  for (let i = 0; i < vcount; i++) lotPiece[i * 2 + 1] = NO_CHECKER;
+  geo.setAttribute("aPiece", new THREE.Float32BufferAttribute(lotPiece, 2));
   geo.computeBoundingSphere();
   attachDeckProxy(geo, deckPos);
   return attachSolidProxy(geo, solidPos);

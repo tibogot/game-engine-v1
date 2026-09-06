@@ -524,7 +524,7 @@ export function createWetField(u, wheelPath) {
   return Fn(() => {
     const lateral = attribute("aLateral", "float");
     // NOTE there is no `along`/`across` here any more. The ponding field used to
-    // ride per-piece arc length plus `aAlongOffset` — a random phase per piece —
+    // ride per-piece arc length plus `aPiece.x` — a random phase per piece —
     // which decorrelated neighbouring pieces but guaranteed a hard edge through
     // every puddle at every joint. It is world-space now; see the blob below.
 

@@ -102,15 +102,33 @@ const INTENTIONAL = new Map([
  * So additions are ALLOWED but never SILENT: declare the value here, one entry
  * per occurrence, and the pairing goes back to being exact. Nobody can slip a
  * double-converted colour in by adding it rather than editing one.
+ *
+ * KEYED BY FILE, and that is not tidiness. One shared list is consumed per
+ * file, so a colour declared for file A is still "outstanding" while file B is
+ * checked — and B's own additions make its count mismatch, which is the
+ * condition that reports the leftovers. The result is a failure naming three
+ * colours that are present and correct, in a file that never had them. Keying
+ * by file makes each check see only its own declarations.
  */
-const ADDED = [
-  // Flip-ramp deck: hot orange face, dark red flanks. Both go through
-  // THREE.Color once, like every other colour in that file.
-  0xf4501a,
-  0x6e1b09,
-  // Green pole obstacle (modularRoadProps.js): solid green shaft, new art.
-  0x2db84a,
-];
+const ADDED = new Map([
+  ["modularRoadProps.js", [
+    // Flip-ramp deck: hot orange face, dark red flanks. Both go through
+    // THREE.Color once, like every other colour in that file.
+    0xf4501a,
+    0x6e1b09,
+    // Green pole obstacle: solid green shaft, new art.
+    0x2db84a,
+  ]],
+  ["modularRoadMaterial.js", [
+    // Start/finish checker, now painted by the deck material rather than laid
+    // on it as an unlit plate. Deliberately NOT the plate's 0x000000 /
+    // 0xffffff: those are the two albedos asphalt never has, and they are half
+    // of why the old mesh read as a decal printed over the world. Both go
+    // through `lin()` once, like every colour in that block.
+    0x0a0a0a,
+    0xe8e8e8,
+  ]],
+]);
 
 /** The file as it was before the colour fix. */
 function atHead(rel) {
@@ -145,7 +163,7 @@ for (const rel of FILES) {
 
   // Take the declared additions out before pairing — one occurrence each, so a
   // value that is BOTH declared and genuinely present twice still pairs.
-  const extra = [...ADDED];
+  const extra = [...(ADDED.get(path.basename(rel)) ?? [])];
   const pairable = after.filter((v) => {
     const at = extra.indexOf(v);
     if (at === -1) return true;

@@ -74,7 +74,7 @@ console.log("\n=== CAPS FACE OUT ===");
 console.log("\n=== ROAD ATTRIBUTES ===");
 {
   const g = mesh.geometry;
-  for (const name of ["aZone", "aLateral", "aPlain", "aCurve", "aAlongOffset", "uv"]) {
+  for (const name of ["aZone", "aLateral", "aPlain", "aCurve", "aPiece", "uv"]) {
     check(`has ${name}`, !!g.getAttribute(name));
   }
   const plain = g.getAttribute("aPlain");

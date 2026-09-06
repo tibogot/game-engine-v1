@@ -499,7 +499,7 @@ const BUMP_SAMPLE_EPS = 0.004;
  *   Null when there is no paint relief to add, so the mask is not even built.
  */
 function bumpHeightAt(uvn, ru, v, fades, line, on) {
-  const alongOff = uvn.x.add(attribute("aAlongOffset", "float"));
+  const alongOff = uvn.x.add(attribute("aPiece", "vec2").x);
   const along = alongOff.div(ru.streak);
   const across = uvn.y;
   const agg = mx_noise_float(
@@ -598,9 +598,9 @@ function bumpHeightAt(uvn, ru, v, fades, line, on) {
 function buildSurfaceV2(u, v, { chips }) {
   return Fn(() => {
     // Per-piece noise phase, so neighbouring pieces are not painted with the
-    // same patch of asphalt. See stampAlongOffset in modularRoadKit. Constant
+    // same patch of asphalt. See stampPieceConstants in modularRoadKit. Constant
     // per piece, so it cannot affect the fwidth-based fades below.
-    const alongRaw = uv().x.add(attribute("aAlongOffset", "float"));
+    const alongRaw = uv().x.add(attribute("aPiece", "vec2").x);
     const across = uv().y; // metres across the developed profile
     const lateral = attribute("aLateral", "float");
 
@@ -886,7 +886,7 @@ export function createRoadSurfaceV2(opts = {}) {
     }
 
     const uvn = uv();
-    const alongRaw = uvn.x.add(attribute("aAlongOffset", "float"));
+    const alongRaw = uvn.x.add(attribute("aPiece", "vec2").x);
 
     // THE TWO SAMPLING RATES, in UV metres per pixel, kept SEPARATE.
     //
