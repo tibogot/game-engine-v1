@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Ocean A/B</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #0b0e11; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; right: 10px; z-index: 10; width: 306px;
+             max-height: calc(100vh - 20px); overflow-y: auto;
+             background: rgba(12,16,20,0.92); border: 1px solid #2a343c;
+             border-radius: 8px; padding: 12px 14px; }
+      #hud h1 { margin: 0 0 4px; font-size: 13px; letter-spacing: .04em;
+             text-transform: uppercase; color: #8fb8d8; }
+      #hud h2 { margin: 12px 0 6px; font-size: 11px; letter-spacing: .06em;
+             text-transform: uppercase; color: #6f8494;
+             border-top: 1px solid #232c34; padding-top: 9px; cursor: pointer;
+             user-select: none; }
+      #hud h2::before { content: "▾ "; color: #4a5c6a; }
+      #hud h2.closed::before { content: "▸ "; }
+      #hud h2.closed + div { display: none; }
+      .row { display: flex; justify-content: space-between; gap: 12px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .sl { margin: 5px 0; }
+      .sl label { display: flex; justify-content: space-between; font-size: 11px; color: #a8b6c0; }
+      .sl label b { color: #e8f0f5; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .sl input { width: 100%; margin: 1px 0 0; accent-color: #4a9ae0; }
+      .btns { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0 2px; }
+      .btns button { flex: 1 1 66px; padding: 5px 3px; font-size: 11px; cursor: pointer;
+             background: #1a222a; color: #cfd8de; border: 1px solid #2f3b45; border-radius: 5px; }
+      .btns button.on { background: #2b6cb0; border-color: #4a9ae0; color: #fff; }
+      .btns button.big { flex: 1 1 100%; padding: 7px; font-size: 12px; }
+      .swatches { display: flex; gap: 8px; margin: 7px 0 2px; flex-wrap: wrap; }
+      .swatches label { flex: 1 1 44%; display: flex; align-items: center;
+             justify-content: space-between; font-size: 11px; color: #a8b6c0; }
+      .swatches input { width: 42px; height: 20px; padding: 0; cursor: pointer;
+             background: none; border: 1px solid #2f3b45; border-radius: 4px; }
+      .note { margin-top: 9px; padding-top: 8px; border-top: 1px solid #2a343c;
+             color: #8b99a4; font-size: 11px; }
+      #err { color: #ff8c8c; white-space: pre-wrap; }
+      #tip { position: fixed; bottom: 10px; left: 10px; z-index: 10; color: #6f8494;
+             font-size: 11px; background: rgba(12,16,20,0.8); padding: 6px 10px;
+             border-radius: 6px; border: 1px solid #232c34; }
+      #which { position: fixed; top: 10px; left: 10px; z-index: 11;
+             font: 600 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .08em;
+             padding: 7px 11px; border-radius: 5px; border: 1px solid #2f3b45;
+             background: rgba(12,16,20,0.85); }
+      #which.newer { color: #7ee0b8; border-color: #2f6a55; }
+      #which.older { color: #e0b87e; border-color: #6a5a2f; }
+    </style>
+  </head>
+  <body>
+    <div id="which" class="newer">NEW OCEAN</div>
+    <div id="hud">
+      <h1>Ocean A/B</h1>
+      <div class="row"><span>Shore field bake</span><b id="s-bake">—</b></div>
+      <div class="row"><span>Draws / tris</span><b id="s-draw">—</b></div>
+      <div class="row"><span>Clipmap</span><b id="s-clip">—</b></div>
+
+      <h2>Compare</h2>
+      <div>
+        <div class="btns">
+          <button data-which="new" class="on">New</button>
+          <button data-which="old">Old (v3)</button>
+          <button id="blink">Blink 1 Hz</button>
+        </div>
+        <div class="btns">
+          <button data-preset="bay" class="on">Calm bay</button>
+          <button data-preset="swell">Big swell</button>
+          <button data-preset="storm">Storm</button>
+        </div>
+        <div class="note" style="margin:6px 0 0;padding:0;border:0">
+          Tab flips the two. The GPU panel top-left is per-frame and trustworthy;
+          push <em>Render scale</em> past 1 until the frame unlocks from vsync
+          before believing any comparison.
+        </div>
+      </div>
+
+      <h2>Scene</h2>
+      <div>
+        <div class="btns">
+          <button data-toggle="orbit" class="on">Auto orbit</button>
+          <button data-toggle="wire">Ocean wire</button>
+          <button data-toggle="field">Shore field</button>
+        </div>
+        <div id="ui-scene"></div>
+      </div>
+
+      <h2>Surf — the travelling part</h2>
+      <div id="ui-surf"></div>
+
+      <h2>Surf — the waterline</h2>
+      <div id="ui-runup"></div>
+
+      <h2>Foam</h2>
+      <div id="ui-foam"></div>
+      <div class="swatches">
+        <label><span>Foam</span><input type="color" id="c-foam" /></label>
+      </div>
+
+      <h2>Body colour</h2>
+      <div id="ui-body"></div>
+      <div class="swatches">
+        <label><span>Inscatter</span><input type="color" id="c-inscatter" /></label>
+        <label><span>Turbidity</span><input type="color" id="c-turbidity" /></label>
+      </div>
+
+      <h2>Waves</h2>
+      <div id="ui-waves"></div>
+
+      <h2>Light &amp; reflection</h2>
+      <div id="ui-refl"></div>
+
+      <h2>Cost tiers (new only)</h2>
+      <div id="ui-tiers"></div>
+
+      <div class="note" id="s-note">Booting…</div>
+      <div class="note" id="err"></div>
+    </div>
+    <div id="tip">drag to orbit · scroll to zoom · Tab = flip old/new · F = shore field</div>
+
+    <script type="module">
+      /**
+       * OCEAN A/B LAB
+       *
+       * Runs v3/render/water/oceanSurface.js (new) and v3/render/water/
+       * oceanShader.js (the shipped one) over the SAME island, the same sun, the
+       * same sea level and the same wind, and flips between them on one key.
+       * Nothing here is imported by anything else and nothing here writes to any
+       * existing module — the shipped ocean is exercised through its own public
+       * factory exactly as v3/editor.html uses it.
+       *
+       * WHY A HAND-BUILT ISLAND RATHER THAN LOADING A .v3proj.
+       * The thing being judged is what happens in the last thirty metres before
+       * the sand, and that needs a coastline whose steepness VARIES — a wide
+       * shallow shelf on one side, a cliff on the other — so the seabed-slope
+       * channel of the shore field has something to say. Authoring that in the
+       * editor and shipping a project file would make the lab depend on an asset;
+       * generating it here keeps the page self-contained and lets the shape be a
+       * tuned constant rather than a lucky sculpt.
+       */
+      import * as THREE from "three";
+      import {
+        texture, positionWorld, cameraPosition, normalize, mix, vec3, pow,
+        saturate, float, dot, fract, abs, step, uv,
+      } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+      import { createWorldOceanV2, OCEAN2_DEFAULTS } from "./render/water/worldOceanV2.js";
+      import { createWorldOcean } from "./render/water/worldOcean.js";
+      import { createGpuStatsPanel } from "./render/gpuStatsPanel.js";
+
+      // ── World constants ──────────────────────────────────────────────────────
+      // Heights are stored 0..1 and multiplied by MAX_HEIGHT, matching the engine's
+      // heightmap contract, so both oceans see exactly the terrain they expect.
+      // The island's elevations run -100 m (deep) to +150 m (hilltop), which maps
+      // sea level onto 100 m of that 250 m range.
+      const WORLD = 1200;         // metres per side
+      const HMAP = 1024;          // heightmap texels per side
+      const MAX_HEIGHT = 250;     // metres represented by a stored 1.0
+      const MIN_ELEV = -100;
+      const SEA_Y = -MIN_ELEV;    // world Y of elevation 0
+      const LAND_SEG = 600;       // land mesh quads per side (~2 m)
+      const ISLAND_R = 360;       // nominal coast radius, metres
+
+      const $ = (id) => document.getElementById(id);
+      const setNote = (t) => { $("s-note").textContent = t; };
+      const fail = (e) => {
+        $("err").textContent = String(e?.stack || e);
+        console.error(e);
+      };
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // ISLAND
+      // ═══════════════════════════════════════════════════════════════════════
+
+      function hash2(x, y) {
+        const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+        return s - Math.floor(s);
+      }
+      function vnoise(x, y) {
+        const ix = Math.floor(x); const iy = Math.floor(y);
+        const fx = x - ix; const fy = y - iy;
+        const ux = fx * fx * (3 - 2 * fx);
+        const uy = fy * fy * (3 - 2 * fy);
+        const a = hash2(ix, iy);
+        const b = hash2(ix + 1, iy);
+        const c = hash2(ix, iy + 1);
+        const d = hash2(ix + 1, iy + 1);
+        return (a * (1 - ux) + b * ux) * (1 - uy) + (c * (1 - ux) + d * ux) * uy;
+      }
+      function fbm(x, y, oct = 5) {
+        let v = 0; let a = 0.5; let t = 0;
+        for (let i = 0; i < oct; i++) {
+          v += a * vnoise(x, y);
+          t += a;
+          x *= 2.03; y *= 2.03; a *= 0.5;
+        }
+        return v / t;
+      }
+
+      /**
+       * Elevation in metres. The one thing this function exists to do is give the
+       * coast a DIFFERENT steepness at different bearings: `shoreRun` is how many
+       * metres inland it takes to climb clear of the water, and it swings from
+       * ~200 m (a wide shallow beach — spilling breakers, broad foam) to ~24 m
+       * (a cliff — a thin plunging line). The seabed outside mirrors it, so the
+       * shallow side also has a long gentle shelf for the swell to shoal on.
+       */
+      function elevAt(x, z) {
+        const r = Math.hypot(x, z);
+        const th = Math.atan2(z, x);
+        // Wobble the coastline so it is not a circle.
+        const warp = (fbm(x * 0.0026 + 11.3, z * 0.0026 - 4.7, 4) - 0.5) * 210
+          + (fbm(x * 0.0075 - 2.1, z * 0.0075 + 8.9, 3) - 0.5) * 62;
+        const rr = r + warp;
+
+        // 0 = gentlest bearing, 1 = steepest.
+        const steep = 0.5 + 0.5 * Math.sin(th * 1.0 + 0.9);
+        const shoreRun = 200 + (24 - 200) * steep;
+        const shelfRun = 330 + (70 - 330) * steep;
+
+        const inland = ISLAND_R - rr;
+
+        if (inland > 0) {
+          const t = Math.min(inland / shoreRun, 1);
+          // Beach profile: concave, so the very edge is nearly flat sand.
+          const base = Math.pow(t, 1.45) * 92;
+          const hills = fbm(x * 0.0042 + 31.7, z * 0.0042 + 5.1, 5);
+          const ridge = Math.pow(t, 2.2) * (hills - 0.35) * 120;
+          const dunes = (fbm(x * 0.021, z * 0.021, 3) - 0.5) * 3.2 * Math.min(t * 5, 1);
+          return Math.max(-4, base + ridge + dunes);
+        }
+
+        const t = Math.min(-inland / shelfRun, 1);
+        const bed = -Math.pow(t, 0.85) * 88;
+        const ripple = (fbm(x * 0.014, z * 0.014, 3) - 0.5) * 2.4 * (1 - t);
+        return bed + ripple;
+      }
+
+      /** Normalised heightmap, the engine's 0..1 × MAX_HEIGHT convention. */
+      function buildHeightmap() {
+        const h = new Float32Array(HMAP * HMAP);
+        const span = WORLD / HMAP;
+        for (let j = 0; j < HMAP; j++) {
+          const z = (j + 0.5) * span - WORLD * 0.5;
+          for (let i = 0; i < HMAP; i++) {
+            const x = (i + 0.5) * span - WORLD * 0.5;
+            const e = elevAt(x, z);
+            h[j * HMAP + i] = Math.min(1, Math.max(0, (e - MIN_ELEV) / MAX_HEIGHT));
+          }
+        }
+        return h;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // BOOT
+      // ═══════════════════════════════════════════════════════════════════════
+
+      async function main() {
+        setNote("Building island…");
+        const heights = buildHeightmap();
+
+        // ── Renderer ────────────────────────────────────────────────────────
+        const adapter = navigator.gpu
+          ? await navigator.gpu.requestAdapter({ featureLevel: "compatibility" })
+          : null;
+        const device = adapter
+          ? await adapter.requestDevice({ requiredFeatures: [...adapter.features] })
+          : null;
+        const hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+
+        // `trackTimestamp` MUST be a constructor parameter. Setting
+        // `renderer.trackTimestamp = true` afterwards flips the renderer's own
+        // flag but the backend decides whether to allocate its query pools from
+        // `parameters.trackTimestamp` at init — so the property-after-the-fact
+        // version leaves `backend.timestampQueryPool.render` null forever and
+        // every GPU reading silently reports zero. (This is why the GPU panel in
+        // v3/app/main.js looks bit-rotted: that renderer does not pass it either.)
+        const renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          trackTimestamp: hasTimestamps,
+          ...(device ? { device } : {}),
+        });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        renderer.trackTimestamp = hasTimestamps;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.5, 20000);
+
+        // ── Find a real beach to look at ────────────────────────────────────
+        // `ISLAND_R` is only a nominal radius: the coast is warped by up to
+        // ±210 m of noise, so on any given bearing the waterline could be
+        // anywhere from 150 m to 570 m out. Guessing a camera position from the
+        // nominal radius parks it inland about half the time. So find the
+        // waterline properly — bisect elevAt along each of 48 bearings — and
+        // pick the one with the GENTLEST seabed, because a wide shallow shelf is
+        // where run-up, spilling breakers and wet sand are all visible at once.
+        function shoreRadius(bearing) {
+          const cx = Math.cos(bearing);
+          const cz = Math.sin(bearing);
+          let lo = 60;
+          let hi = 60;
+          for (let r = 60; r <= 590; r += 6) {
+            if (elevAt(cx * r, cz * r) <= 0) { hi = r; break; }
+            lo = r;
+            hi = r;
+          }
+          if (hi <= lo) return null;                 // never left the land
+          for (let i = 0; i < 24; i++) {
+            const mid = (lo + hi) * 0.5;
+            if (elevAt(cx * mid, cz * mid) > 0) lo = mid; else hi = mid;
+          }
+          return (lo + hi) * 0.5;
+        }
+
+        let bestBearing = -2.47;
+        let bestR = ISLAND_R;
+        let bestSlope = Infinity;
+        for (let i = 0; i < 48; i++) {
+          const b = (i / 48) * Math.PI * 2;
+          const r = shoreRadius(b);
+          if (r === null) continue;
+          const cx = Math.cos(b);
+          const cz = Math.sin(b);
+          const s = Math.abs(elevAt(cx * (r + 10), cz * (r + 10))
+            - elevAt(cx * (r - 10), cz * (r - 10))) / 20;
+          if (s < bestSlope) { bestSlope = s; bestBearing = b; bestR = r; }
+        }
+        const offX = Math.cos(bestBearing);
+        const offZ = Math.sin(bestBearing);
+        const shoreX = offX * bestR;
+        const shoreZ = offZ * bestR;
+        console.log(`[water-lab] beach at r=${bestR.toFixed(0)} m, `
+          + `bearing ${(bestBearing * 180 / Math.PI).toFixed(0)}°, slope ${bestSlope.toFixed(3)}`);
+
+        camera.position.set(shoreX + offX * 60, SEA_Y + 11, shoreZ + offZ * 60);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(shoreX, SEA_Y + 1, shoreZ);
+        controls.enableDamping = true;
+        controls.maxPolarAngle = Math.PI * 0.495;
+        controls.update();
+
+        // ── Light (a fixed set — never toggle a light's visibility, it
+        //    re-hashes every material's pipeline key and rebuilds the world) ──
+        const sunDir = new THREE.Vector3(0.42, 0.36, -0.83).normalize();
+        // Intensities are low because the water is UNLIT — it is a
+        // MeshBasicNodeMaterial that shades itself — so the only thing these
+        // numbers do is set the sand, and sand that blows out to white destroys
+        // the wet/dry edge this lab exists to look at.
+        const sun = new THREE.DirectionalLight(0xfff1d8, 1.25);
+        sun.position.copy(sunDir).multiplyScalar(900);
+        scene.add(sun);
+        scene.add(new THREE.HemisphereLight(0xbcd6ee, 0x50606a, 0.35));
+
+        // ── Height texture, shared by both oceans ───────────────────────────
+        const filterable = renderer.backend?.device?.features?.has("float32-filterable");
+        let heightTex;
+        if (filterable) {
+          heightTex = new THREE.DataTexture(
+            heights, HMAP, HMAP, THREE.RedFormat, THREE.FloatType,
+          );
+        } else {
+          // Half float quantises to ~12 cm at MAX_HEIGHT 250, which is visible as
+          // contour banding on a flat beach — but only the OLD ocean reads the
+          // heightmap per fragment, so this costs the candidate nothing.
+          const u16 = new Uint16Array(HMAP * HMAP);
+          for (let i = 0; i < heights.length; i++) u16[i] = THREE.DataUtils.toHalfFloat(heights[i]);
+          heightTex = new THREE.DataTexture(
+            u16, HMAP, HMAP, THREE.RedFormat, THREE.HalfFloatType,
+          );
+        }
+        heightTex.minFilter = THREE.LinearFilter;
+        heightTex.magFilter = THREE.LinearFilter;
+        heightTex.wrapS = heightTex.wrapT = THREE.ClampToEdgeWrapping;
+        heightTex.colorSpace = THREE.NoColorSpace;
+        heightTex.generateMipmaps = false;
+        heightTex.flipY = false;
+        heightTex.needsUpdate = true;
+        const heightTexNode = texture(heightTex);
+
+        // ── Land ─────────────────────────────────────────────────────────────
+        setNote("Building land mesh…");
+        const landGeo = new THREE.PlaneGeometry(WORLD, WORLD, LAND_SEG, LAND_SEG);
+        landGeo.rotateX(-Math.PI / 2);
+        {
+          const pos = landGeo.attributes.position;
+          const col = new Float32Array(pos.count * 3);
+          const c = new THREE.Color();
+          const SAND = new THREE.Color(0xd8c9a4);
+          const GRASS = new THREE.Color(0x6f8a4e);
+          const SEABED = new THREE.Color(0x8d8464);
+          for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i);
+            const z = pos.getZ(i);
+            const e = elevAt(x, z);
+            pos.setY(i, e + SEA_Y);
+            // Sand at and just above the waterline, then grass, then a duller
+            // seabed below — a plain palette on purpose, because a busy one would
+            // hide exactly the wet/dry edge this lab exists to judge.
+            const t = THREE.MathUtils.clamp((e + 2) / 26, 0, 1);
+            c.copy(SAND).lerp(GRASS, THREE.MathUtils.smoothstep(t, 0.18, 0.72));
+            if (e < 0) c.lerp(SEABED, THREE.MathUtils.clamp(-e / 30, 0, 0.65));
+            col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+          }
+          landGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+          landGeo.computeVertexNormals();
+        }
+        const land = new THREE.Mesh(
+          landGeo,
+          new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.94, metalness: 0 }),
+        );
+        land.name = "Island";
+        scene.add(land);
+
+        // ── Sky dome ─────────────────────────────────────────────────────────
+        // Deliberately simple, and deliberately the SAME for both oceans: the
+        // comparison is about the water, and a sky either of them could claim
+        // credit for would muddy it.
+        const skyMat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, fog: false });
+        {
+          const dir = normalize(positionWorld.sub(cameraPosition));
+          const sunV = vec3(sunDir.x, sunDir.y, sunDir.z);
+          const cosSun = saturate(dot(dir, sunV));
+          const grad = mix(vec3(0.72, 0.82, 0.92), vec3(0.10, 0.28, 0.62),
+            pow(saturate(dir.y), float(0.55)));
+          skyMat.colorNode = grad
+            .add(vec3(1.0, 0.94, 0.82).mul(pow(cosSun, float(120)).mul(3.0)))   // disc
+            .add(vec3(1.0, 0.93, 0.78).mul(pow(cosSun, float(8)).mul(0.16)));   // aureole
+        }
+        const sky = new THREE.Mesh(new THREE.SphereGeometry(9000, 32, 20), skyMat);
+        sky.frustumCulled = false;
+        scene.add(sky);
+
+        const normalMap = new THREE.TextureLoader().load("/textures/waterNormal.webp");
+        normalMap.wrapS = normalMap.wrapT = THREE.RepeatWrapping;
+        normalMap.colorSpace = THREE.NoColorSpace;
+
+        // ── The two oceans ───────────────────────────────────────────────────
+        setNote("Building oceans…");
+        const oceanNew = createWorldOceanV2({
+          renderer, scene, heightTexNode,
+          terrainSize: WORLD, maxHeight: MAX_HEIGHT, heightmapSize: HMAP,
+          normalMap,
+        });
+        const oceanOld = createWorldOcean({
+          renderer, scene, heightTexNode,
+          terrainSize: WORLD, maxHeight: MAX_HEIGHT,
+        });
+
+        setNote("Baking shore field…");
+        const bakeMs = oceanNew.rebakeShore(heights, SEA_Y);
+        $("s-bake").textContent = `${bakeMs.toFixed(0)} ms @ ${HMAP}²`;
+
+        oceanNew.setSunDir(sunDir);
+        oceanOld.setSunDir(sunDir);
+        const skyZenith = new THREE.Color(0.10, 0.28, 0.62);
+        const skyHorizon = new THREE.Color(0.72, 0.82, 0.92);
+        oceanNew.setSkyColors(skyZenith, skyHorizon);
+        oceanOld.setSkyColors(skyZenith, skyHorizon);
+
+        // ── Shore-field debug plane (F) ──────────────────────────────────────
+        // Distance banded every 5 m with the offshore direction as hue: the
+        // fastest way to see that the field is oriented correctly, because a
+        // flipped or mis-scaled field still produces plausible-looking foam.
+        let fieldPlane = null;
+        {
+          const s = texture(oceanNew.shoreField.texture, uv());
+          const band = fract(abs(s.x).div(float(5)));
+          const water = step(float(0), s.x);
+          const m = new THREE.MeshBasicNodeMaterial({ fog: false });
+          m.colorNode = mix(vec3(0.55, 0.32, 0.18), vec3(0.1, 0.5, 0.75), water)
+            .mul(float(0.55).add(band.mul(0.45)))
+            .add(vec3(s.y.mul(0.5).add(0.5), 0, s.z.mul(0.5).add(0.5)).mul(0.22));
+          fieldPlane = new THREE.Mesh(new THREE.PlaneGeometry(WORLD, WORLD), m);
+          fieldPlane.rotateX(-Math.PI / 2);
+          fieldPlane.position.y = SEA_Y + 140;
+          fieldPlane.visible = false;
+          scene.add(fieldPlane);
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // PARAMS + UI
+        // ═════════════════════════════════════════════════════════════════════
+        const P = {
+          ...OCEAN2_DEFAULTS,
+          seaLevel: SEA_Y,
+          renderScale: 1.0,
+          orbit: true,
+          wire: false,
+          field: false,
+          windSpeed: 14,
+          fftChoppiness: 1.3,
+        };
+        const BASE = { ...P };
+
+        const UI = {
+          "ui-scene": [
+            ["seaLevel", "Sea level (m)", SEA_Y - 24, SEA_Y + 24, 0.25],
+            ["renderScale", "Render scale", 0.5, 2.5, 0.05],
+          ],
+          "ui-surf": [
+            ["surfHz", "Sets / second", 0.02, 0.6, 0.005],
+            ["surfLength", "Crest spacing (m)", 12, 160, 1],
+            ["surfReach", "Surf zone (m)", 6, 140, 1],
+            ["surfAlongShore", "Along-shore stagger", 0, 0.02, 0.0002],
+            ["crestSharpness", "Crest sharpness", 1, 24, 0.5],
+            ["crestIntensity", "Crest intensity", 0, 1.5, 0.02],
+            ["foamDecay", "Foam decay", 0.2, 6, 0.05],
+            ["foamWakeIntensity", "Wake intensity", 0, 1.5, 0.02],
+            ["slopeGain", "Seabed slope gain", 0, 12, 0.1],
+          ],
+          "ui-runup": [
+            ["runupReach", "Run-up reach (m)", 0, 26, 0.25],
+            ["runupRush", "Rush fraction", 0.05, 0.6, 0.01],
+            ["runupShape", "Run-up shape", 0.2, 3, 0.05],
+            ["runupMaxSlope", "Max slope for run-up", 0.05, 1.2, 0.01],
+            ["filmThickness", "Sheet thickness (m)", 0.005, 0.3, 0.005],
+            ["wetFade", "Wet sand trail (m)", 0, 10, 0.1],
+            ["wetDarken", "Wet darkening", 0, 1, 0.02],
+            ["wetGloss", "Wet gloss", 0, 2, 0.02],
+          ],
+          "ui-foam": [
+            ["foamSunLit", "Foam sun lighting", 0, 1, 0.02],
+            ["edgeWidth", "Edge lace width (m)", 0.1, 12, 0.1],
+            ["edgeIntensity", "Edge intensity", 0, 1.5, 0.02],
+            ["foamNoiseScale", "Voronoi cells / m", 0.05, 1.6, 0.01],
+            ["foamGain", "Field gain", 0.8, 4, 0.05],
+            ["foamContrast", "Filament contrast", 0.4, 3, 0.05],
+            ["foamFineScale", "2nd Voronoi ×", 1.5, 8, 0.1],
+            ["foamFineAmt", "2nd Voronoi amount", 0, 1, 0.02],
+            ["foamErode", "Erosion curve", 0.4, 4, 0.05],
+            ["foamJitter", "Cell jitter", 0, 1, 0.02],
+            ["foamWarpScale", "Warp frequency", 0.05, 2, 0.01],
+            ["foamWarpStrength", "Warp strength", 0, 2.5, 0.02],
+            ["foamCutoff", "Density at full cover", 0, 0.8, 0.01],
+            ["foamTransition", "Edge softness", 0.01, 0.5, 0.01],
+            ["foamDrift", "Backwash drift (m/s)", -4, 6, 0.1],
+            ["foamDetailNear", "Detail fade start (m)", 10, 300, 5],
+            ["foamDetailFar", "Detail fade end (m)", 40, 600, 5],
+            ["foamFarDensity", "Far-field density", 0, 1, 0.02],
+          ],
+          "ui-body": [
+            ["absorptionScale", "Absorption scale", 1, 40, 0.5],
+            ["depthDistance", "Absorption depth (m)", 4, 120, 1],
+            ["inscatterStrength", "Inscatter", 0, 3, 0.05],
+            ["turbidityStrength", "Nearshore turbidity", 0, 2, 0.02],
+            ["turbidityReach", "Turbidity reach (m)", 2, 120, 1],
+            ["refractionStrength", "Refraction", 0, 0.3, 0.005],
+          ],
+          "ui-waves": [
+            ["fftSwellAmp", "Swell amp", 0, 3, 0.02],
+            ["fftRippleAmp", "Ripple amp", 0, 2, 0.02],
+            ["fftChoppiness", "Choppiness", 0, 3, 0.02],
+            ["windSpeed", "Wind speed", 2, 30, 0.5],
+            ["windAngleDeg", "Wind angle (°)", 0, 360, 1],
+            ["whitecapThreshold", "Whitecap threshold", 0.1, 0.95, 0.01],
+            ["whitecapIntensity", "Whitecap intensity", 0, 1.5, 0.02],
+            ["whitecapScale", "Whitecap cells / m", 0.02, 0.8, 0.01],
+            ["shoalDistance", "Shoaling distance (m)", 2, 120, 1],
+            ["shoalPeak", "Shoaling peak", 1, 2.5, 0.02],
+            ["normalStrength", "Detail normal", 0, 1, 0.01],
+            ["normalTiling", "Detail tiling", 0.005, 0.15, 0.002],
+          ],
+          "ui-refl": [
+            ["skyReflectIntensity", "Sky reflect", 0, 2.5, 0.02],
+            ["fresnelScale", "Fresnel", 0, 2, 0.02],
+            ["skyHorizonSpread", "Horizon band (°)", 1, 45, 0.5],
+            ["skySunGlow", "Sun aureole", 0, 1.5, 0.02],
+            ["glintIntensity", "Glint", 0, 4, 0.05],
+            ["glintPower", "Glint tightness", 20, 800, 5],
+            ["glintSpread", "Glint spread", 0, 1, 0.02],
+            ["sssIntensity", "Crest SSS", 0, 2, 0.02],
+            ["ssrStrength", "SSR strength", 0, 1, 0.02],
+          ],
+          "ui-tiers": [
+            ["fftEnd", "FFT cutoff (m)", 100, 4000, 25],
+            ["detailEnd", "Detail normal cutoff (m)", 20, 800, 10],
+            ["ssrEnd", "SSR cutoff (m)", 0, 800, 10],
+            ["refractEnd", "Refraction cutoff (m)", 20, 1200, 10],
+            ["dispFadeStart", "Displacement fade start", 20, 1200, 10],
+            ["dispFadeEnd", "Displacement fade end", 100, 3000, 25],
+          ],
+        };
+
+        const PRESETS = {
+          bay: {},
+          swell: {
+            surfHz: 0.09, surfLength: 96, surfReach: 72, crestSharpness: 9,
+            foamDecay: 1.3, runupReach: 12, fftSwellAmp: 1.9, windSpeed: 19,
+            shoalPeak: 1.6, shoalDistance: 40,
+          },
+          storm: {
+            surfHz: 0.2, surfLength: 46, surfReach: 90, crestSharpness: 4.5,
+            foamDecay: 0.85, foamWakeIntensity: 1.2, runupReach: 17,
+            fftSwellAmp: 2.5, fftRippleAmp: 1.0, fftChoppiness: 1.8,
+            windSpeed: 26, turbidityStrength: 1.1, whitecapThreshold: 0.42,
+            edgeIntensity: 1.2,
+          },
+        };
+
+        const sliders = {};
+        function buildUI() {
+          for (const [host, rows] of Object.entries(UI)) {
+            const el = $(host);
+            if (!el) continue;
+            for (const [key, label, min, max, stepv] of rows) {
+              const wrap = document.createElement("div");
+              wrap.className = "sl";
+              wrap.innerHTML =
+                `<label><span>${label}</span><b></b></label>`
+                + `<input type="range" min="${min}" max="${max}" step="${stepv}">`;
+              const input = wrap.querySelector("input");
+              const out = wrap.querySelector("b");
+              const show = () => {
+                out.textContent = Number(P[key]).toFixed(
+                  stepv >= 1 ? 0 : String(stepv).split(".")[1].length,
+                );
+              };
+              input.value = P[key];
+              show();
+              input.addEventListener("input", () => {
+                P[key] = parseFloat(input.value);
+                show();
+                apply(key);
+              });
+              sliders[key] = { input, show };
+              el.appendChild(wrap);
+            }
+          }
+          // Collapsible sections.
+          for (const h of document.querySelectorAll("#hud h2")) {
+            h.addEventListener("click", () => h.classList.toggle("closed"));
+          }
+        }
+
+        function bindColor(id, key) {
+          const el = $(id);
+          el.value = `#${new THREE.Color(P[key]).getHexString()}`;
+          el.addEventListener("input", () => { P[key] = el.value; apply(key); });
+        }
+
+        // ── Applying params ──────────────────────────────────────────────────
+        // Sea level moves the waterline, which invalidates the shore field —
+        // debounced, because the bake is ~100 ms and a slider fires far faster
+        // than that.
+        let bakeTimer = 0;
+        function scheduleBake() {
+          clearTimeout(bakeTimer);
+          bakeTimer = setTimeout(() => {
+            const ms = oceanNew.rebakeShore(heights, P.seaLevel);
+            $("s-bake").textContent = `${ms.toFixed(0)} ms @ ${HMAP}²`;
+          }, 140);
+        }
+
+        function apply(changed) {
+          oceanNew.syncParams(P);
+          // Feed the old ocean the params it shares, so the comparison is of the
+          // shaders and not of two different seas.
+          oceanOld.syncParams({
+            enabled: which === "old",
+            seaLevel: P.seaLevel,
+            windSpeed: P.windSpeed,
+            windAngleDeg: P.windAngleDeg,
+            fftChoppiness: P.fftChoppiness,
+            fftSwellAmp: P.fftSwellAmp,
+            fftRippleAmp: P.fftRippleAmp,
+            levels: 7, gridM: 64, baseCell: 1.0, horizonScale: 6.0,
+          });
+          if (changed === "seaLevel") scheduleBake();
+          if (changed === "renderScale") {
+            renderer.setPixelRatio(Math.min(devicePixelRatio, 2) * P.renderScale);
+            renderer.setSize(innerWidth, innerHeight);
+          }
+          oceanNew.surface.material.wireframe = P.wire;
+          if (fieldPlane) fieldPlane.visible = P.field;
+        }
+
+        // ── New / old switching ──────────────────────────────────────────────
+        let which = "new";
+        function setWhich(w) {
+          which = w;
+          oceanNew.setEnabled(w === "new");
+          oceanOld.setEnabled(w === "old");
+          const tag = $("which");
+          tag.textContent = w === "new" ? "NEW OCEAN" : "OLD OCEAN (v3 shipped)";
+          tag.className = w === "new" ? "newer" : "older";
+          for (const b of document.querySelectorAll("[data-which]")) {
+            b.classList.toggle("on", b.dataset.which === w);
+          }
+          apply();
+        }
+
+        let blinkTimer = 0;
+        function toggleBlink() {
+          const btn = $("blink");
+          if (blinkTimer) {
+            clearInterval(blinkTimer);
+            blinkTimer = 0;
+            btn.classList.remove("on");
+            return;
+          }
+          btn.classList.add("on");
+          blinkTimer = setInterval(() => setWhich(which === "new" ? "old" : "new"), 1000);
+        }
+
+        // Auto orbit is on at boot, so the controls start out of the way.
+        controls.enabled = !P.orbit;
+
+        buildUI();
+        bindColor("c-foam", "foamColor");
+        bindColor("c-inscatter", "inscatterTint");
+        bindColor("c-turbidity", "turbidityTint");
+
+        for (const b of document.querySelectorAll("[data-which]")) {
+          b.addEventListener("click", () => setWhich(b.dataset.which));
+        }
+        $("blink").addEventListener("click", toggleBlink);
+
+        for (const b of document.querySelectorAll("[data-toggle]")) {
+          b.addEventListener("click", () => {
+            const k = b.dataset.toggle;
+            P[k] = !P[k];
+            b.classList.toggle("on", P[k]);
+            if (k === "orbit") {
+              controls.enabled = !P.orbit;
+              // Hand the current pose back to the controls, or the first drag
+              // after switching off would snap to wherever they last were.
+              if (!P.orbit) controls.update();
+            }
+            apply(k);
+          });
+        }
+
+        for (const b of document.querySelectorAll("[data-preset]")) {
+          b.addEventListener("click", () => {
+            Object.assign(P, BASE, PRESETS[b.dataset.preset]);
+            for (const [k, s] of Object.entries(sliders)) {
+              s.input.value = P[k];
+              s.show();
+            }
+            for (const o of document.querySelectorAll("[data-preset]")) {
+              o.classList.toggle("on", o === b);
+            }
+            apply();
+            scheduleBake();
+          });
+        }
+
+        addEventListener("keydown", (e) => {
+          // Match on e.key (the printed label), not e.code — this keyboard is
+          // AZERTY and e.code lies about which key you actually pressed.
+          if (e.key === "Tab") {
+            e.preventDefault();
+            setWhich(which === "new" ? "old" : "new");
+          } else if (e.key === "f" || e.key === "F") {
+            P.field = !P.field;
+            document.querySelector('[data-toggle="field"]').classList.toggle("on", P.field);
+            apply("field");
+          }
+        });
+
+        addEventListener("resize", () => {
+          camera.aspect = innerWidth / innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(innerWidth, innerHeight);
+        });
+
+        setWhich("new");
+
+        if (hasTimestamps) createGpuStatsPanel(renderer, { top: "44px", left: "10px" });
+        renderer.info.autoReset = false;
+
+        $("s-clip").textContent =
+          `${oceanNew.stats.rings} rings, ${(oceanNew.stats.triangles / 1000) | 0}k tri, `
+          + `${(oceanNew.stats.reach / 1000).toFixed(1)} km`;
+
+        setNote("Tab flips old/new. F shows the shore field.");
+
+        // Console handle. Comparing two shaders means putting them at exactly the
+        // same camera, and "exactly" is not something you get by dragging twice.
+        //   __waterLab.look(distance, bearingOffsetRad, height)
+        window.__waterLab = {
+          camera, controls, scene, renderer, P, apply, setWhich,
+          oceanNew, oceanOld, shore: { x: shoreX, z: shoreZ, r: bestR, bearing: bestBearing },
+          look(dist = 60, sway = 0, height = 10) {
+            const ca = Math.cos(bestBearing + sway);
+            const sa = Math.sin(bestBearing + sway);
+            controls.target.set(shoreX, SEA_Y + 0.8, shoreZ);
+            camera.position.set(shoreX + ca * dist, SEA_Y + height, shoreZ + sa * dist);
+            camera.lookAt(controls.target);
+            controls.update();
+          },
+        };
+
+        // ── Frame ────────────────────────────────────────────────────────────
+        const clock = new THREE.Clock();
+        let t = 0;
+        let statTick = 0;
+
+        renderer.setAnimationLoop(() => {
+          const dt = Math.min(clock.getDelta(), 0.1);
+          t += dt;
+
+          // OrbitControls.update() drives the camera from its OWN spherical
+          // state, so it would immediately undo anything set here. While the auto
+          // orbit runs the controls are switched off entirely and re-synced on
+          // the way out (see the `orbit` toggle).
+          if (P.orbit) {
+            // A slow arc that stays OFFSHORE, looking in at the waterline. A full
+            // circle would swing the camera inland, where there is nothing this
+            // lab is about.
+            const sway = Math.sin(t * 0.08) * 0.55;          // ±32°
+            const ca = Math.cos(bestBearing + sway);
+            const sa = Math.sin(bestBearing + sway);
+            const dist = 46 + Math.sin(t * 0.05) * 18;
+            controls.target.set(shoreX, SEA_Y + 0.8, shoreZ);
+            camera.position.set(
+              shoreX + ca * dist,
+              SEA_Y + 8 + Math.sin(t * 0.037) * 4,
+              shoreZ + sa * dist,
+            );
+            camera.lookAt(controls.target);
+          } else {
+            controls.update();
+          }
+
+          oceanNew.update(dt, t, camera);
+          oceanOld.update(dt, t, camera);
+
+          renderer.info.reset();
+          renderer.render(scene, camera);
+
+          if ((statTick = (statTick + 1) % 20) === 0) {
+            const i = renderer.info.render;
+            $("s-draw").textContent = `${i.drawCalls} / ${Math.round(i.triangles / 1000)}k`;
+          }
+        });
+      }
+
+      main().catch(fail);
+    </script>
+  </body>
+</html>
