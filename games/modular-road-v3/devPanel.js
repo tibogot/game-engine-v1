@@ -1727,6 +1727,55 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="dv-hint">
+            <b>The start / finish checker</b> is paint too, which is why it lives
+            here rather than with the gantry. It used to be its own little mesh
+            floating 4&nbsp;cm over the deck on an unlit material — so it took no
+            sun, no shadow and no wet, and read as a sticker on the world. Now
+            the deck material draws it, so it is flush, it is lit, it soaks when
+            the road does, and it stops at the kerb.
+            <br><br>
+            It only appears on the four <b>Game</b> pieces that have a line, and
+            it is anchored AT that line and drawn backwards from it — so
+            <b>Checker depth</b> grows the band away from the gantry and never
+            slides out from under it. <b>Across</b> counts cells over the full
+            width including the kerbs, so the outermost one runs into the kerb
+            the way real paint does; keep it even or the centre of the road lands
+            mid-cell.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Checker depth</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-checkerdepth" min="0" max="12" step="0.1" />
+              <span class="prop-num" id="dv-road-checkerdepth-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· Across</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-checkercols" min="2" max="24" step="1" />
+              <span class="prop-num" id="dv-road-checkercols-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· Rows</span>
+            <div class="prop-value">
+              <input type="range" id="dv-road-checkerrows" min="1" max="8" step="1" />
+              <span class="prop-num" id="dv-road-checkerrows-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· Dark</span>
+            <div class="prop-value">
+              <input type="color" id="dv-road-checkerdark" />
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">· Light</span>
+            <div class="prop-value">
+              <input type="color" id="dv-road-checkerlight" />
+            </div>
+          </div>
+          <div class="dv-hint">
             <b>The paint is its own material</b> (needs <b>Road lines</b> on).
             Marking is a thermoplastic band laid <i>on</i> the asphalt, so it
             gets its own everything: <b>Line fill</b> is how far it smooths the
@@ -5714,6 +5763,14 @@ export function createRoadDevPanel({ app, game, params }) {
   roadSlider("dv-road-linerough", "lineRough", (v) => v.toFixed(2));
   roadSlider("dv-road-linewet", "lineWet", (v) => v.toFixed(2));
   roadSlider("dv-road-linecoat", "lineCoat", (v) => `${v.toFixed(2)}×`);
+  // The start / finish checker. Ordinary look uniforms like the rest of the
+  // paint — the only per-piece part of it is WHERE the line is, and that rides
+  // the geometry (aPiece.y), so these are safe to share across a whole track.
+  roadSlider("dv-road-checkerdepth", "checkerDepth", (v) => (v === 0 ? "off" : `${v.toFixed(1)} m`));
+  roadSlider("dv-road-checkercols", "checkerCols", (v) => `${v} wide`);
+  roadSlider("dv-road-checkerrows", "checkerRows", (v) => `${v} deep`);
+  roadColor("dv-road-checkerdark", "checkerDark");
+  roadColor("dv-road-checkerlight", "checkerLight");
   // Tar snakes. Plain uniforms — no build gate, because the whole field is a
   // fract/abs/smoothstep on `surface.x`, which the deck has already computed.
   // See the note on tarSnakeAmount: there is no noise here to compile out.
