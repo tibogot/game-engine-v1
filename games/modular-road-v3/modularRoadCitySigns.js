@@ -1,10 +1,29 @@
 // ============================================================================
-// CITY SIGNS — Tokyo-style signage, in five instanced draws for the whole city.
+// CITY SIGNS — building-scale HERO ADVERTS, plus the older Tokyo layers behind
+// switches that default to OFF.
 //
-// What makes a street read as Tokyo is DENSITY and LAYERING, not one big sign:
-// stacked vertical banners climbing the tower edges, a lit band wrapping every
-// podium, dot-matrix text marquees, neon tube outlines, and — the piece that
-// sells it — MEGA BILLBOARDS covering a large part of a building's face.
+// ── WHAT CHANGED AND WHY ─────────────────────────────────────────────────────
+//
+// The first pass scattered five kinds of procedural signage — painted glyph
+// logos, fake LCD text, neon frames — over most of the city. At building scale
+// that art read as exactly what it was, and it was the single most artificial
+// thing on screen. So the default is now ONE kind:
+//
+//   HERO BOARDS  few, huge (most of a tall tower's street-facing wall), a real
+//                dark frame around a printed panel, LIT by the scene by day (a
+//                vinyl wrap is a surface, not a light) and backlit at night.
+//                Every one shows a tile from a 4x4 IMAGE ATLAS whose tiles are
+//                NEUTRAL PLACEHOLDERS ("AD 07") until real images are loaded
+//                into them: `setHeroImage(slot, img)` / `loadHeroImage(slot,
+//                url)` repaint one tile in place, and every board on that slot
+//                changes with no new draw, no new texture, no shader rebuild.
+//
+// Boards go on faces that FACE A STREET. A lot on a block edge has one or two
+// street faces — known from its cell index alone — and an interior lot has
+// none and gets no board: an advert nobody can see from the road is noise.
+//
+// The banners / podium bands / LED marquees / neon strips are all still here,
+// still one draw each, behind fractions that are 0 by default.
 //
 // ── FIVE MATERIALS, FIVE DRAWS, WHATEVER THE COUNT ───────────────────────────
 //
@@ -46,19 +65,43 @@
 import * as THREE from "three";
 import {
   Fn, float, vec2, vec3, vec4, uniform, attribute, texture, uv, fract, floor,
-  mix, smoothstep, abs, max, sin, cos, clamp,
+  mix, smoothstep, abs, max, min, sin, cos, clamp,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { makeLedMatrixMaterial, applyLedMatrixParams } from "../../v2/objects/shared/ledMatrix.js";
 
 export const SIGN_DEFAULTS = {
-  /** Fraction of buildings that get each kind. */
-  bannerFraction: 0.55,
-  bandFraction: 0.40,
-  screenFraction: 0.12,
-  megaFraction: 0.16,
-  textFraction: 0.18,
-  neonFraction: 0.30,
+  /** ── HERO ADVERTS — the default, and the only kind on by default. ────────
+   *  Fraction of QUALIFYING towers (tall, with a wide street face). */
+  heroFraction: 0.45,
+  /** How much of the face the panel spans, and its height as a ratio of that
+   *  width — capped against the building so it never meets the roofline. */
+  heroFaceFrac: 0.86,
+  heroAspect: 0.70,
+  heroMinHeight: 42,
+  heroMinFace: 16,
+  /** The band (fraction of building height) the panel's centre lands in. */
+  heroLow: 0.28,
+  heroHigh: 0.60,
+  /** Frame width in METRES — the same border on a 12 m and a 30 m board. */
+  heroFrame: 0.55,
+  /** Some heroes are SCREENS (LED walls: emissive day and night, scrolling);
+   *  the rest are printed wraps, lit like the wall they hang on. */
+  heroScreenFraction: 0.3,
+  /** Print level by day; backlight at night. Screens use screenBoost. */
+  heroDay: 1.0,
+  heroNight: 2.4,
+  /** The block layout the street-face test reads (the city's own numbers). */
+  blockLots: 4,
+  streetLots: 1,
+
+  /** Fraction of buildings that get each of the OLD kinds. All off. */
+  bannerFraction: 0,
+  bandFraction: 0,
+  screenFraction: 0,
+  megaFraction: 0,
+  textFraction: 0,
+  neonFraction: 0,
 
   /** Vertical banner size (m) and how many stack up one edge. */
   bannerW: 2.2,
@@ -104,6 +147,9 @@ export const SIGN_DEFAULTS = {
 
 const BANNER_COLS = 4, BANNER_ROWS = 2, BANNER_PX = 1024;   // 8 portrait tiles
 const SCREEN_COLS = 2, SCREEN_ROWS = 2, SCREEN_PX = 1024;   // 4 square tiles
+/** Hero atlas: 16 square 512 px slots for REAL images. One texture, one draw. */
+export const HERO_COLS = 4, HERO_ROWS = 4, HERO_PX = 2048;
+export const HERO_SLOTS = HERO_COLS * HERO_ROWS;
 // The marquee window is boardW/boardH divided by the canvas aspect, so a
 // 1024x128 (8:1) canvas on a 12x2.4 m (5:1) board showed only 62% of the
 // string — five legible characters out of twenty. Matching the canvas closer
@@ -245,6 +291,120 @@ function makeAtlas(seed, cols, rows, px, portrait) {
   };
 }
 
+/**
+ * The hero atlas: same canvas machinery as the posters, but every tile starts
+ * as a NEUTRAL PLACEHOLDER — a charcoal panel, a hairline inner border and a
+ * small slot number. No logos, no glyphs, nothing pretending to be a brand.
+ * It exists to be replaced by real images.
+ */
+function makeHeroAtlas(cols, rows, px) {
+  const n = cols * rows;
+  const wrap = (slot) => ((slot | 0) % n + n) % n;
+  if (typeof document === "undefined") {
+    const filled = new Array(n).fill(false);
+    return {
+      texture: dummyTexture(40, 42, 46), cols, rows,
+      setImage: (slot) => { filled[wrap(slot)] = true; return true; },
+      repaint: (slot) => { filled[wrap(slot)] = false; },
+      isPlaceholder: (slot) => !filled[wrap(slot)],
+    };
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = px;
+  const ctx = canvas.getContext("2d");
+  const tw = px / cols, th = px / rows;
+  const placeholder = new Array(n).fill(true);
+  let tex = null;
+  // flipY: UV row 0 is the canvas's BOTTOM row — see makeAtlas's tileRect.
+  const tileRect = (i) => [(i % cols) * tw, (rows - 1 - Math.floor(i / cols)) * th];
+  function paintTile(i) {
+    const [x0, y0] = tileRect(i);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, y0, tw, th); ctx.clip();
+    const g = ctx.createLinearGradient(x0, y0, x0, y0 + th);
+    g.addColorStop(0, "#2c2f34"); g.addColorStop(1, "#1d1f23");
+    ctx.fillStyle = g; ctx.fillRect(x0, y0, tw, th);
+    ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = 3;
+    ctx.strokeRect(x0 + tw * 0.06, y0 + th * 0.06, tw * 0.88, th * 0.88);
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.font = "600 " + Math.floor(th * 0.11) + "px Arial, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("AD " + String(i + 1).padStart(2, "0"), x0 + tw / 2, y0 + th / 2);
+    ctx.restore();
+    placeholder[i] = true;
+  }
+  for (let i = 0; i < n; i++) paintTile(i);
+  tex = finishTexture(canvas);
+  return {
+    texture: tex, cols, rows,
+    setImage(slot, src) {
+      const i = wrap(slot);
+      const [x0, y0] = tileRect(i);
+      const sw = src.width ?? src.videoWidth, sh = src.height ?? src.videoHeight;
+      if (!sw || !sh) return false;
+      const scale = Math.max(tw / sw, th / sh);   // cover-fit
+      const dw = sw * scale, dh = sh * scale;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(x0, y0, tw, th); ctx.clip();
+      ctx.fillStyle = "#000"; ctx.fillRect(x0, y0, tw, th);
+      ctx.drawImage(src, x0 + (tw - dw) / 2, y0 + (th - dh) / 2, dw, dh);
+      ctx.restore();
+      placeholder[i] = false;
+      tex.needsUpdate = true;
+      return true;
+    },
+    repaint(slot) { paintTile(wrap(slot)); tex.needsUpdate = true; },
+    isPlaceholder(slot) { return placeholder[wrap(slot)]; },
+  };
+}
+
+/**
+ * Hero board material. LIT — a standard material, because a printed wrap is a
+ * SURFACE the sun and the tower's own shadow fall on; the old unlit poster
+ * floated in front of the wall at one flat brightness whatever the light did.
+ * The dark frame is drawn in the shader from the quad's UV (no second draw),
+ * and `aSign.w` picks SCREEN (emissive, scrolling) over PRINT (backlit at
+ * night). Plain nodes shared by three slots: an Fn returning an object would
+ * collapse to a swizzle.
+ */
+function makeHeroMaterial(atlas, u) {
+  const mat = new THREE.MeshStandardNodeMaterial();
+  mat.name = "CityHero";
+  mat.metalness = 0.0;
+  const aSign = attribute("aSign", "vec4");   // x = tile, y = frame frac in u, z = frame frac in v, w = 0 print / 1 screen
+  const tex = texture(atlas.texture);
+  const tile = aSign.x;
+  const tx = fract(tile.div(atlas.cols));
+  const ty = floor(tile.div(atlas.cols)).div(atlas.rows);
+  const base = uv();
+  const isScreen = aSign.w;
+  // The image sits INSIDE the frame: remap the inner rectangle to the tile.
+  const inner = vec2(
+    base.x.sub(aSign.y).div(float(1.0).sub(aSign.y.mul(2.0))),
+    base.y.sub(aSign.z).div(float(1.0).sub(aSign.z.mul(2.0))),
+  );
+  // NO SCROLL. A vertically wrapping tile shows its own seam — a doubled strip
+  // across the top of every screen — and a real advert does not crawl. A
+  // screen differs from a print by LIGHT, not motion.
+  const auv = vec2(tx.add(clamp(inner.x, 0.0, 1.0).div(atlas.cols)), ty.add(clamp(inner.y, 0.0, 1.0).div(atlas.rows)));
+  const img = tex.sample(auv).rgb;
+  const edgeU = min(base.x, float(1.0).sub(base.x)), edgeV = min(base.y, float(1.0).sub(base.y));
+  const inFrame = max(
+    smoothstep(aSign.y, aSign.y.mul(0.75), edgeU),
+    smoothstep(aSign.z, aSign.z.mul(0.75), edgeV),
+  );
+  const frameCol = vec3(0.07, 0.075, 0.08);
+  // A screen's diffuse is nearly black — it is its own light.
+  const albedo = mix(img.mul(mix(u.heroDay, float(0.12), isScreen)), frameCol, inFrame);
+  const glow = img.mul(float(1.0).sub(inFrame))
+    .mul(mix(u.nightAmount.mul(u.heroNight), u.screenBoost, isScreen));
+  mat.colorNode = albedo;
+  mat.emissiveNode = glow;
+  mat.roughnessNode = mix(mix(float(0.62), float(0.3), isScreen), float(0.35), inFrame);
+  applyBloomMRT(mat, vec4(glow, 1.0));
+  return mat;
+}
+
 /** A fixed-size canvas the LED text material owns forever. */
 function makeTextCanvas(str) {
   if (typeof document === "undefined") {
@@ -362,6 +522,8 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
 
   const u = {
     nightAmount: uniform(P.nightAmount),
+    heroDay: uniform(P.heroDay),
+    heroNight: uniform(P.heroNight),
     dayLevel: uniform(P.dayLevel),
     nightBoost: uniform(P.nightBoost),
     screenBoost: uniform(P.screenBoost),
@@ -371,11 +533,30 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
 
   const bannerAtlas = makeAtlas(seed, BANNER_COLS, BANNER_ROWS, BANNER_PX, true);
   const screenAtlas = makeAtlas(seed ^ 0x5bf03635, SCREEN_COLS, SCREEN_ROWS, SCREEN_PX, false);
+  const heroAtlas = makeHeroAtlas(HERO_COLS, HERO_ROWS, HERO_PX);
   const textCanvas = makeTextCanvas(P.texts[0]);
+
+  /**
+   * Which of a lot's four faces look onto a STREET. The layout tiles the
+   * world in periods of blockLots + streetLots cells; a built cell at index 0
+   * of its block faces the street on its −x/−z side, one at blockLots−1 on
+   * its +x/+z side. Interior cells face only their neighbours.
+   */
+  const period = P.blockLots + P.streetLots;
+  function streetFaces(cx, cz) {
+    const ix = ((cx % period) + period) % period;
+    const iz = ((cz % period) + period) % period;
+    const out = [];
+    if (ix === 0) out.push([-1, 0]);
+    if (ix === P.blockLots - 1) out.push([1, 0]);
+    if (iz === 0) out.push([0, -1]);
+    if (iz === P.blockLots - 1) out.push([0, 1]);
+    return out;
+  }
 
   // ── Placement ──────────────────────────────────────────────────────────────
   const FACES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const banners = [], screens = [], bands = [], texts = [], neon = [];
+  const banners = [], screens = [], bands = [], texts = [], neon = [], heroes = [];
   let megaCount = 0;
   const _q = new THREE.Quaternion();
   const _p = new THREE.Vector3();
@@ -428,10 +609,32 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     const face2 = FACES[(Math.floor(r0 * 4) + 1 + Math.floor(lotRand(b.cx, b.cz, 19) * 3)) % 4];
     const faceW2 = face2[0] !== 0 ? a.depth : a.width;
 
-    // ── MEGA BILLBOARD ───────────────────────────────────────────────────────
-    // The Tokyo piece: most of a wall. Checked first, because it claims the
-    // wall it is on and the banners must not land on the same one.
-    let megaFace = null;
+    // ── HERO ADVERT ──────────────────────────────────────────────────────────
+    // The default signage. Street-facing only, few, huge, framed, lit.
+    const sf = streetFaces(b.cx, b.cz);
+    let heroFace = null;
+    if (sf.length && height > P.heroMinHeight && lotRand(b.cx, b.cz, 50) < P.heroFraction) {
+      const hf = sf[Math.floor(lotRand(b.cx, b.cz, 51) * sf.length)];
+      const fw = hf[0] !== 0 ? a.depth : a.width;
+      if (fw > P.heroMinFace) {
+        const w = fw * P.heroFaceFrac;
+        const h = Math.min(w * P.heroAspect, height * 0.45);
+        let y = b.y + height * (P.heroLow + lotRand(b.cx, b.cz, 52) * (P.heroHigh - P.heroLow));
+        y = Math.max(b.y + 8 + h / 2, Math.min(b.y + height - 3 - h / 2, y));
+        faceMatrix(b, a, hf, y, w, h, 0, _m);
+        heroes.push({
+          m: _m.clone(),
+          tile: Math.floor(lotRand(b.cx, b.cz, 53) * HERO_SLOTS),
+          frU: P.heroFrame / w, frV: P.heroFrame / h,
+          screen: lotRand(b.cx, b.cz, 54) < P.heroScreenFraction ? 1 : 0,
+          cx: b.cx, cz: b.cz, face: hf, w, h, y,
+        });
+        heroFace = hf;
+      }
+    }
+
+    // ── MEGA BILLBOARD (legacy, off by default) ──────────────────────────────
+    let megaFace = heroFace;
     if (height > P.megaMinHeight && faceW2 > P.megaMinFace
         && lotRand(b.cx, b.cz, 21) < P.megaFraction) {
       const w = faceW2 * P.megaFaceFrac;
@@ -527,13 +730,17 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   const bannerMat = makePosterMaterial(bannerAtlas, u, "CityBanner", u.nightBoost);
   const screenMat = makePosterMaterial(screenAtlas, u, "CityScreen", u.screenBoost);
   const neonMat = makeNeonMaterial(u);
+  const heroMat = makeHeroMaterial(heroAtlas, u);
 
   const packSign = (d, o, e) => { d[o] = e.tile; d[o + 1] = e.jit; d[o + 2] = e.scroll ?? 0; };
   const packNeon = (d, o, e) => { d[o] = e.hue; d[o + 1] = e.intensity; };
+  const packHero = (d, o, e) => { d[o] = e.tile; d[o + 1] = e.frU; d[o + 2] = e.frV; d[o + 3] = e.screen; };
 
   const bannerMesh = instanced(banners, bannerMat, "CityBanners", "aSign", 3, packSign);
   const screenMesh = instanced(screens, screenMat, "CityScreens", "aSign", 3, packSign);
   const neonMesh = instanced(neon, neonMat, "CityNeon", "aNeon", 2, packNeon);
+  const heroMesh = instanced(heroes, heroMat, "CityHeroes", "aSign", 4, packHero);
+  if (heroMesh) { heroMesh.receiveShadow = true; heroMesh.castShadow = false; }
 
   // LED podium bands — chevron mode, the v2 matrix shader.
   const BAND_W = 20, BAND_H = 1.3;
@@ -578,6 +785,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     group,
     params: P,
     stats: {
+      heroes: heroes.length,
       banners: banners.length, bands: bands.length, texts: texts.length,
       neon: neon.length, mega: megaCount,
       /** Mega boards and ordinary screens share one mesh; this is the total. */
@@ -585,6 +793,43 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     },
     setNight(n) { u.nightAmount.value = n; },
     setTime(t) { u.time.value = t; },
+
+    /** ── HERO ADVERTS ──────────────────────────────────────────────────────
+     *  `HERO_SLOTS` image slots; every board points at one. Put a real image
+     *  in a slot and every board on it changes — no new draw, no new texture,
+     *  no shader rebuild. */
+    heroSlots: HERO_SLOTS,
+    /** Where every board is, for a picker UI: {cx, cz, face, w, h, y, tile, screen}. */
+    heroes: heroes.map((h, i) => ({ index: i, cx: h.cx, cz: h.cz, face: h.face, w: h.w, h: h.h, y: h.y, tile: h.tile, screen: h.screen })),
+    /** Paint an image (HTMLImageElement / ImageBitmap / canvas / video) into a slot. */
+    setHeroImage(slot, src) { return heroAtlas.setImage(slot, src); },
+    /** Load a URL or data URL into a slot. */
+    async loadHeroImage(slot, url) {
+      if (typeof Image === "undefined") return false;
+      const img = await new Promise((res, rej) => {
+        const im = new Image();
+        im.crossOrigin = "anonymous";
+        im.onload = () => res(im);
+        im.onerror = rej;
+        im.src = url;
+      });
+      return heroAtlas.setImage(slot, img);
+    },
+    /** Back to the neutral placeholder on one slot. */
+    resetHeroImage(slot) { heroAtlas.repaint(slot); },
+    /** Is a slot still showing its placeholder? */
+    heroSlotIsPlaceholder(slot) { return heroAtlas.isPlaceholder(slot); },
+    /** Point one board at a different slot, or flip it between print/screen. */
+    setHero(index, { slot, screen } = {}) {
+      const h = heroes[index];
+      if (!h || !heroMesh) return false;
+      if (slot != null) h.tile = ((slot | 0) % HERO_SLOTS + HERO_SLOTS) % HERO_SLOTS;
+      if (screen != null) h.screen = screen ? 1 : 0;
+      const attr = heroMesh.geometry.getAttribute("aSign");
+      attr.setXYZW(index, h.tile, h.frU, h.frV, h.screen);
+      attr.needsUpdate = true;
+      return true;
+    },
 
     /**
      * Put an image on every billboard using `slot` (0..3). Accepts anything
@@ -612,13 +857,14 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     setText(str) { textCanvas.set(str); },
 
     dispose() {
-      for (const m of [bannerMesh, screenMesh, neonMesh, bandMesh, textMesh]) {
+      for (const m of [bannerMesh, screenMesh, neonMesh, bandMesh, textMesh, heroMesh]) {
         if (!m) continue;
         group.remove(m);
         if (m.geometry !== quad) m.geometry.dispose();
         m.dispose();
       }
-      bannerMat.dispose(); screenMat.dispose(); neonMat.dispose();
+      bannerMat.dispose(); screenMat.dispose(); neonMat.dispose(); heroMat.dispose();
+      heroAtlas.texture.dispose();
       bandMat.dispose(); textMat.dispose();
       quad.dispose();
       bannerAtlas.texture.dispose();

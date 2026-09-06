@@ -27,9 +27,16 @@
 //
 // ── SHADOWS ──────────────────────────────────────────────────────────────────
 //
-// Only the L0 tier ever casts, and only on the instanced backend (castShadow
-// is per mesh; BatchedMesh cannot gate per tier). Off unless asked. The engine
-// fits its shadow camera to the VIEW, so the city does not inflate a cascade.
+// ON by default now: tower-on-tower and tower-on-street shadows are the
+// biggest depth cue a city has, and they are most of why three's example reads
+// as solid rather than as painted boxes. Only the L0 tier ever casts, and only
+// on the instanced backend (castShadow is per mesh; BatchedMesh cannot gate per
+// tier). The engine fits its shadow camera to the VIEW, so the city does not
+// inflate a cascade.
+//
+// Those are the shadows one building throws on another. The shadows a building
+// throws ON ITSELF — a pier onto its own spandrel, a window head onto its own
+// glass — are analytic, in the facade shader, and cost no map at all.
 //
 // ── LAYOUT: THE GLOBAL LOT GRID ──────────────────────────────────────────────
 //
@@ -69,8 +76,10 @@ import {
   floor, dot, sin, vec2, step,
 } from "three/tsl";
 import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.js";
-import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT } from "./modularRoadCityFacade.js";
+import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
 import { createCitySigns } from "./modularRoadCitySigns.js";
+import { createCityStreets } from "./modularRoadCityStreets.js";
+import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
 export const CITY_DEFAULTS = {
@@ -93,15 +102,28 @@ export const CITY_DEFAULTS = {
   /** Districts, as fractions of `extent` from the centre: glass inside
    *  `districtCore`, masonry out to `districtMid`, industrial beyond. Noise
    *  breaks the rings so the boundary is not a circle. */
-  districtCore: 0.40,
-  districtMid: 0.76,
+  districtCore: 0.50,
+  districtMid: 0.88,
   districtNoise: 0.22,
   /** Landmark archetypes go on the lots nearest the centre, within this radius. */
   landmarkRadius: 200,
 
-  /** Per-instance Y-scale range. X and Z are NEVER scaled. */
-  scaleYMin: 0.75,
-  scaleYMax: 1.45,
+  /** BUILDING TYPE MIX. The wall rhythm, not the palette — see BUILDING_TYPE.
+   *  Downtown is mostly curtain wall; midtown is mostly punched masonry with
+   *  some 60s ribbon slabs; anything short or industrial is always punched,
+   *  because a curtain wall on a four-storey shed reads as a mistake. */
+  typeMinHeight: 22,
+  curtainInCore: 0.70,
+  ribbonInCore: 0.16,
+  curtainInMid: 0.38,
+  ribbonInMid: 0.24,
+
+  /** Per-instance Y-scale range. X and Z are NEVER scaled.
+   *  Kept narrow on purpose: stretching a 30 m footprint to 400 m gives a
+   *  13:1 pencil, and a skyline of pencils is what the first pass looked
+   *  like. Real supertalls top out near 10:1. */
+  scaleYMin: 0.8,
+  scaleYMax: 1.22,
 
   /** Keep-out corridor half-width around whatever `avoid` describes, metres. */
   avoidRadius: 40,
@@ -121,15 +143,27 @@ export const CITY_DEFAULTS = {
   lodInterval: 0.2,
   lodMoveDist: 12,
 
-  castShadows: false,
+  /** SHADOWS ON. Tower-on-tower and tower-on-street is the single biggest
+   *  depth cue the city has, it is what makes three's example read as solid,
+   *  and measured here it costs ~0.04 ms because only the L0 tier casts. */
+  castShadows: true,
 
-  /** Streets + block ground plane — flat ground only. */
+  /** Streets + sidewalk ground plane — flat ground only (with terrain on, the
+   *  terrain IS the ground and this is skipped). One draw; see
+   *  modularRoadCityStreets.js for why it is a material and not Smart Road. */
   ground: true,
   groundY: 0,
-  streetColor: 0x1b1d21,
-  blockColor: 0x2c2e33,
+  streetParams: {},
+  /** Parked cars, pavement trees, traffic lights, crossing guardrails — five
+   *  instanced draws on the same grid. Flat ground only, like the streets. */
+  furniture: true,
+  furnitureParams: {},
 
-  /** Signage and beacons. Both are ONE draw each per kind. */
+  /** Signage: HERO ADVERTS only by default — few, building-scale, street-
+   *  facing, framed, lit, and each a slot for a REAL image
+   *  (`city.signs.loadHeroImage(slot, url)`). The old procedural layers
+   *  (banners, LED bands, marquees, neon) are still in the module behind
+   *  fractions that default to 0 — see modularRoadCitySigns.js. */
   signs: true,
   signParams: {},
   beacons: true,
@@ -140,37 +174,6 @@ export const CITY_DEFAULTS = {
   perObjectFrustumCulled: true,
   sortObjects: false,
 };
-
-/** Ground plane on the SAME global lot grid the layout uses. Unlit. */
-function createGround(P, originCellX, originCellZ) {
-  const pitch = (P.blockLots + P.streetLots) * P.lotSize;
-  const uPitch = uniform(pitch);
-  const uBuilt = uniform(P.blockLots * P.lotSize);
-  const uOrigin = uniform(new THREE.Vector2(originCellX * P.lotSize, originCellZ * P.lotSize));
-  const uStreet = uniform(new THREE.Color(P.streetColor));
-  const uBlock = uniform(new THREE.Color(P.blockColor));
-
-  const mat = new THREE.MeshBasicNodeMaterial();
-  mat.name = "CityGround";
-  mat.colorNode = Fn(() => {
-    const local = positionWorld.xz.sub(uOrigin);
-    const inBlock = fract(local.div(uPitch)).mul(uPitch);
-    const half = uBuilt.mul(0.5);
-    const dx = abs(inBlock.x.sub(half));
-    const dz = abs(inBlock.y.sub(half));
-    const aa = max(fwidth(positionWorld.x), fwidth(positionWorld.z)).mul(0.5).add(0.01);
-    const onBlock = smoothstep(half.add(aa), half.sub(aa), max(dx, dz));
-    return vec4(mix(uStreet, uBlock, onBlock), 1.0);
-  })();
-
-  const g = new THREE.PlaneGeometry(P.extent * 2.6, P.extent * 2.6);
-  g.rotateX(-Math.PI / 2);
-  const mesh = new THREE.Mesh(g, mat);
-  mesh.position.set(P.centerX, P.groundY, P.centerZ);
-  mesh.name = "CityGround";
-  mesh.receiveShadow = true;
-  return { mesh };
-}
 
 /**
  * Aviation beacons: one small emissive octahedron per mast tip, blinking on
@@ -230,6 +233,9 @@ export function createModularRoadCity({
   let kit = buildCityKit({ seed, params: kitParams });
 
   let ground = null;
+  let furniture = null;
+  /** Last wetness the game pushed — survives a ground rebuild. */
+  let wetAmount = 0;
   let buildings = [];
   let batched = null, batchGeomIds = null, batchInstIds = null;
   let instanced = null;
@@ -291,6 +297,7 @@ export function createModularRoadCity({
 
     let culledCorridor = 0, culledSlope = 0, culledBounds = 0;
     const districts = [0, 0, 0];
+    const types = [0, 0, 0];
     const foot = L * 0.42;
 
     for (let cx = originCellX - cellsHalf; cx <= originCellX + cellsHalf; cx++) {
@@ -315,6 +322,7 @@ export function createModularRoadCity({
         const rHeight = rnd();
         const rScale = rnd();
         const rDistrict = rnd();
+        const rType = rnd();
 
         if (rDensity > P.density) continue;
         if (avoid && avoid(x, z) < P.avoidRadius) { culledCorridor++; continue; }
@@ -349,7 +357,28 @@ export function createModularRoadCity({
         const scaleY = P.scaleYMin + rScale * (P.scaleYMax - P.scaleYMin);
         const top = baseY + kit.archetypes[arch].massHeight * scaleY;
 
-        out.push({ x, y: baseY, z, top, arch, scaleY, cx, cz, r, district, tier: -1 });
+        // ── BUILDING TYPE ────────────────────────────────────────────────────
+        // The wall RHYTHM, which is what you read at distance — separate from
+        // the district, which is only palette and height. Weighted by district
+        // and by height: a curtain wall is a tall-building technology, a low
+        // industrial shed is always punched, and a mid-rise slab is where the
+        // ribbon band belongs.
+        const h = top - baseY;
+        let btype = BUILDING_TYPE.punched;
+        if (district === DISTRICT.industrial || h < P.typeMinHeight) {
+          btype = BUILDING_TYPE.punched;
+        } else if (district === DISTRICT.glass) {
+          btype = rType < P.curtainInCore ? BUILDING_TYPE.curtain
+            : rType < P.curtainInCore + P.ribbonInCore ? BUILDING_TYPE.ribbon
+              : BUILDING_TYPE.punched;
+        } else {
+          btype = rType < P.curtainInMid ? BUILDING_TYPE.curtain
+            : rType < P.curtainInMid + P.ribbonInMid ? BUILDING_TYPE.ribbon
+              : BUILDING_TYPE.punched;
+        }
+        types[btype]++;
+
+        out.push({ x, y: baseY, z, top, arch, scaleY, cx, cz, r, district, btype, tier: -1 });
       }
     }
 
@@ -376,6 +405,7 @@ export function createModularRoadCity({
         facade.lotHeights.data[i] = b.y;
         facade.lotHeights.data[i + 1] = b.top;
         facade.lotHeights.data[i + 2] = b.district;
+        facade.lotHeights.data[i + 3] = b.btype;
       }
     }
     facade.lotHeights.texture.needsUpdate = true;
@@ -383,6 +413,7 @@ export function createModularRoadCity({
     stats.culledSlope = culledSlope;
     stats.culledBounds = culledBounds;
     stats.districts = districts;
+    stats.types = types;
     return out;
   }
 
@@ -432,7 +463,13 @@ export function createModularRoadCity({
     instanced = kit.archetypes.map((a, ai) =>
       a.lods.map((g, tier) => {
         if (perArch[ai] === 0) return null;
-        const im = new THREE.InstancedMesh(g, facade.material, perArch[ai]);
+        // L2 gets the CHEAP facade variant. The distance work was already
+        // being skipped by a per-pixel branch, but a 3300-line shader carries
+        // its register pressure whether the branch is taken or not, and that
+        // costs occupancy on every pixel of every far tower. Splitting it is
+        // free here because the tiers are already separate meshes.
+        const mat = tier === 2 ? facade.farMaterial : facade.material;
+        const im = new THREE.InstancedMesh(g, mat, perArch[ai]);
         im.name = `CityInst_a${ai}_l${tier}`;
         im.count = 0;
         im.frustumCulled = false;
@@ -476,7 +513,8 @@ export function createModularRoadCity({
     if (P.signs) {
       signs = createCitySigns({
         buildings, archetypes: kit.archetypes, seed,
-        lobbyHeight: facade.params.lobbyHeight, params: P.signParams, lotRand,
+        lobbyHeight: facade.params.floorHeight * 3, lotRand,
+        params: { blockLots: P.blockLots, streetLots: P.streetLots, ...P.signParams },
       });
       group.add(signs.group);
       stats.signs = signs.stats;
@@ -547,13 +585,29 @@ export function createModularRoadCity({
   function syncGround() {
     if (ground) {
       group.remove(ground.mesh);
-      ground.mesh.geometry.dispose();
-      ground.mesh.material.dispose();
+      group.remove(ground.lampMesh);
+      ground.dispose();
       ground = null;
     }
+    if (furniture) {
+      group.remove(furniture.group);
+      furniture.dispose();
+      furniture = null;
+      stats.furniture = null;
+    }
     if (P.ground) {
-      ground = createGround(P, originCellX, originCellZ);
+      ground = createCityStreets({ P, originCellX, originCellZ, params: P.streetParams });
+      // The street material is rebuilt with the ground, so the weather it was
+      // last told about has to be re-applied or every rebuild dries the city.
+      ground.setWet(wetAmount);
       group.add(ground.mesh);
+      group.add(ground.lampMesh);
+      stats.lamps = ground.lampCount;
+      if (P.furniture) {
+        furniture = createCityFurniture({ P, originCellX, originCellZ, params: P.furnitureParams });
+        group.add(furniture.group);
+        stats.furniture = furniture.stats;
+      }
     }
   }
 
@@ -585,6 +639,8 @@ export function createModularRoadCity({
     const night = facade.params.nightAmount;
     uNight.value = night;
     if (signs) { signs.setNight(night); signs.setTime(_clock); }
+    ground?.setNight(night);
+    furniture?.setNight(night);
 
     _lodT += dt;
     const moved = camera.position.distanceTo(_lastLodPos);
@@ -592,6 +648,7 @@ export function createModularRoadCity({
     _lodT = 0;
     _lastLodPos.copy(camera.position);
     applyLod(camera.position);
+    furniture?.applyLod(camera.position);
   }
 
   rebuild();
@@ -601,6 +658,10 @@ export function createModularRoadCity({
     params: P,
     facade: facade.params,
     facadeMaterial: facade.material,
+    /** The L2 tier's cheaper variant, sharing the near one's uniforms. */
+    facadeFarMaterial: facade.farMaterial,
+    /** Live street-material params, or null when there is no ground plane. */
+    get streets() { return ground ? ground.params : null; },
     stats,
     get kit() { return kit; },
     get enabled() { return enabled; },
@@ -620,6 +681,23 @@ export function createModularRoadCity({
 
     setSeed(s) { seed = s >>> 0; rebuild(); },
     get seed() { return seed; },
+
+    /** The gradient the glass mirrors — hand it the sky's own look each frame. */
+    setSkyColors(zenith, horizon, ground) { facade.setSkyColors(zenith, horizon, ground); },
+    /**
+     * Direction TO the sun, world space. The facade casts its OWN shadows from
+     * this — piers onto spandrels, window heads onto glass, string courses
+     * onto the wall below — so it has to be the same sun the scene's light
+     * uses or the relief will be lit from one side and shadowed from another.
+     */
+    setSun(dir) { facade.setSun(dir); },
+    /**
+     * Same weather the track gets, 0 dry … 1 soaked. The street material runs
+     * the Smart Road's own wet model (modularRoadWet.js, same knob names), so
+     * a wet city and a wet track read as the same rain.
+     */
+    setWet(v) { wetAmount = Math.max(0, Math.min(1, v || 0)); ground?.setWet(wetAmount); },
+    get wet() { return wetAmount; },
 
     setHeightSource(fn) { heightAt = fn ?? null; rebuild(); },
     setAvoid(fn) { avoid = fn ?? null; rebuild(); },
@@ -656,7 +734,7 @@ export function createModularRoadCity({
     dispose() {
       clearBackend();
       disposeCityKit(kit);
-      if (ground) { ground.mesh.geometry.dispose(); ground.mesh.material.dispose(); }
+      if (ground) ground.dispose();
       facade.material.dispose();
       facade.lotHeights.texture.dispose();
     },

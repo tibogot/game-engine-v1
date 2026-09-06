@@ -71,14 +71,14 @@ export const KIT_DEFAULTS = {
   /** Footprint range, metres. Kept BELOW the lot size so buildings are inset —
    *  the facade's per-building hash is the lot cell, and a tower that spilled
    *  into its neighbour's lot would change tint halfway up. */
-  minFootprint: 16,
-  maxFootprint: 28,
+  minFootprint: 24,
+  maxFootprint: 31,
   /** Height range, metres. The instance Y-scale spreads it further at runtime.
    *  `tall = rnd()²` keeps most of the set mid-rise, so a high ceiling buys a
    *  few real towers downtown rather than a wall — and a sky track at 40 m
    *  wants something to fly BETWEEN. */
-  minHeight: 24,
-  maxHeight: 300,
+  minHeight: 26,
+  maxHeight: 190,
   /** Chance a tower steps in as it rises, and how hard. */
   setbackChance: 0.62,
   maxSetbacks: 3,
@@ -119,11 +119,16 @@ function box(w, h, d, y, x = 0, z = 0) {
  * @param {object} K kit params
  */
 function buildArchetype(rnd, K, forceH = null) {
+  // NEARLY FILL THE LOT. The example sizes every footprint at `lot - 1 -
+  // rnd()*4` — 83-97% of its lot — so neighbours sit close and the streets
+  // read as canyons. Ours were 16-28 m in a 34 m lot (47-82%), which spaced
+  // every tower out into its own island of empty ground and is a large part
+  // of why the city looked like scattered blocks rather than a city.
   const w0 = K.minFootprint + rnd() * (K.maxFootprint - K.minFootprint);
   // Slabs (a wide, shallow footprint) read very differently from square towers
   // and are what stop a skyline looking like a bundle of pencils.
   const slab = rnd() < 0.3;
-  const d0 = slab ? w0 * (0.45 + rnd() * 0.25) : w0 * (0.85 + rnd() * 0.3);
+  const d0 = slab ? w0 * (0.5 + rnd() * 0.22) : w0 * (0.88 + rnd() * 0.12);
 
   // Height distribution skewed low — a real skyline is mostly mid-rise with a
   // few towers. A flat distribution gives you a wall, not a skyline.

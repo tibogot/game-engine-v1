@@ -24,7 +24,7 @@ import { register } from "node:module";
 register("./threeWebgpuHook.mjs", import.meta.url);
 const THREE = await import("three/webgpu");
 const { buildCityKit } = await import("../games/modular-road-v3/modularRoadCityKit.js");
-const { createCityFacadeMaterial, LOT_TEX_SIZE, FACADE_DEFAULTS: FACADE_DEFAULTS_ALL } = await import("../games/modular-road-v3/modularRoadCityFacade.js");
+const { createCityFacadeMaterial, LOT_TEX_SIZE, FACADE_DEFAULTS: FACADE_DEFAULTS_ALL, isFacadeColorKey } = await import("../games/modular-road-v3/modularRoadCityFacade.js");
 const { createModularRoadCity, CITY_DEFAULTS } = await import("../games/modular-road-v3/modularRoadCity.js");
 
 let fail = 0;
@@ -90,11 +90,17 @@ check("lit windows opt into selective bloom", !!facade.material.mrtNode && !!fac
 check("lotSize override reached the uniform", facade.uniforms.lotSize.value === 34);
 facade.params.floorHeight = 4.25;
 check("params proxy writes the uniform", facade.uniforms.floorHeight.value === 4.25);
-facade.params.glassColor = 0x112233;
-check("colour params go through THREE.Color", facade.uniforms.glassColor.value.getHex() === 0x112233);
+facade.params.glassTint = 0x112233;
+check("colour params go through THREE.Color", facade.uniforms.glassTint.value.getHex() === 0x112233);
 // Every param whose default is a hex colour must be a Color uniform. A float
 // uniform of 0x8a8378 is nine million, and it painted every wall white once.
-const colourKeys = Object.keys(FACADE_DEFAULTS_ALL).filter((k) => /Color[A-F]?$|^lit(Warm|Cool)$/.test(k));
+// The predicate is IMPORTED, not copied: a local regex that drifts from the
+// facade's own is exactly how nine-million-white walls got shipped once.
+const colourKeys = Object.keys(FACADE_DEFAULTS_ALL).filter(isFacadeColorKey);
+// ...and every hex-looking default must be caught by it. A colour that is
+// NOT named as one is the failure mode, so assert on the values too.
+const hexish = Object.entries(FACADE_DEFAULTS_ALL).filter(([, v]) => typeof v === "number" && Number.isInteger(v) && v > 0x1000).map(([k]) => k);
+check("every hex-valued default is recognised as a colour", hexish.every(isFacadeColorKey), hexish.filter((k) => !isFacadeColorKey(k)).join(",") || `${hexish.length} ok`);
 check(
   "every colour-named param is a THREE.Color uniform, none a float",
   colourKeys.length >= 10 && colourKeys.every((k) => facade.uniforms[k]?.value?.isColor === true),
@@ -140,8 +146,9 @@ for (const backend of ["batched", "instanced"]) {
     city.group.traverse((o) => { if (o.isInstancedMesh && /_l0$/.test(o.name)) tier0++; });
     city.setShadows(true);
     let castersOn = 0;
-    city.group.traverse((o) => { if (o.isInstancedMesh && o.castShadow) castersOn++; });
-    check("instanced: shadows gate to the near tier only", castersOn === tier0 && tier0 > 0, `${castersOn} of ${city.stats.meshes} meshes cast`);
+    // TOWER meshes only: the furniture (cars, canopies) casts on its own terms.
+    city.group.traverse((o) => { if (o.isInstancedMesh && /^CityInst_/.test(o.name) && o.castShadow) castersOn++; });
+    check("instanced: shadows gate to the near tier only", castersOn === tier0 && tier0 > 0, `${castersOn} of ${city.stats.meshes} tower meshes cast`);
     city.setShadows(false);
     flatCity = city;
   }
@@ -219,9 +226,24 @@ console.log("\n── TERRAIN ──");
   const b = city.buildings[0];
   const lot = city.facadeMaterial ? null : null; // (facade internals are not exposed; go via the group's material)
   const mat = city.facadeMaterial;
-  check("facade material is shared by every tower mesh", (() => {
-    let ok = true; city.group.traverse((o) => { if (o.isInstancedMesh && /^CityInst_/.test(o.name) && o.material !== mat) ok = false; }); return ok;
-  })());
+  const farMat = city.facadeFarMaterial;
+  // TWO shared materials, not one: L2 gets a much cheaper variant built from
+  // the SAME uniform objects (a 3300-line shader carries its register pressure
+  // on every far pixel even when its distance branch is skipped). Every tower
+  // mesh must still use one of exactly these two, or a rebuild has leaked a
+  // per-mesh material and the city is back to N pipelines.
+  let nearMeshes = 0, farMeshes = 0, strays = 0, misTier = 0;
+  city.group.traverse((o) => {
+    if (!o.isInstancedMesh || !/^CityInst_/.test(o.name)) return;
+    const tier = Number(/_l(\d)$/.exec(o.name)[1]);
+    if (o.material === mat) { nearMeshes++; if (tier === 2) misTier++; }
+    else if (o.material === farMat) { farMeshes++; if (tier !== 2) misTier++; }
+    else strays++;
+  });
+  check("every tower mesh shares one of the two facade materials", strays === 0 && nearMeshes > 0 && farMeshes > 0,
+    `${nearMeshes} near, ${farMeshes} far, ${strays} stray`);
+  check("the cheap facade is used by L2 and only L2", misTier === 0, `${misTier} on the wrong tier`);
+  check("both facade materials share the same uniforms", mat !== farMat && city.facade.floorHeight === city.facade.floorHeight);
   city.dispose();
 
   // A cliff: 1 m per metre in x. Almost every lot spans > slopeLimit.
@@ -282,18 +304,63 @@ console.log("\n── LOOK PASS ──");
   check("ordinary lots never pick a landmark archetype", c.buildings.filter((b) => !b.landmark).every((b) => b.arch < normals.length));
   check("all three districts exist and the core is glass", c.stats.districts.every((n) => n > 0) && c.buildings.filter((b) => b.r < 120).every((b) => b.district === 0), c.stats.districts.join("/"));
   check("beacons: one per masted building", c.stats.beacons === c.buildings.filter((b) => kit.archetypes[b.arch].mastTop != null).length && c.stats.beacons > 0, `${c.stats.beacons}`);
+  // Signage is OFF by default now (see CITY_DEFAULTS.signs) — the procedural
+  // board art is due to be replaced by real imported images. It still has to
+  // WORK when asked for, so the sign checks build their own city with it on.
+  // SIGNAGE IS HERO ADVERTS ONLY by default: few, huge, street-facing, each a
+  // slot for a real image. The procedural layers exist but default to 0.
   const sg = c.stats.signs;
-  check("every sign kind is placed", sg.banners > 0 && sg.bands > 0 && sg.screens > 0 && sg.texts > 0 && sg.neon > 0 && sg.mega > 0, JSON.stringify(sg));
-  // Mega boards ride the SCREEN mesh, so adding them must not add a draw.
-  check("mega billboards share the screen mesh", sg.mega > 0 && sg.screens >= sg.mega);
-  // Every neon frame is 4 tubes, so neon must exceed 4x the mega count.
-  check("each mega board is framed in neon", sg.neon >= sg.mega * 4, `${sg.neon} tubes for ${sg.mega} boards`);
+  check("signage defaults to hero adverts and nothing else",
+    CITY_DEFAULTS.signs === true && sg.heroes > 0 && sg.banners === 0 && sg.bands === 0 && sg.texts === 0 && sg.neon === 0 && sg.mega === 0,
+    JSON.stringify(sg));
+  check("heroes are FEW — a handful per hundred towers, not a scatter", sg.heroes > 8 && sg.heroes < c.stats.buildings * 0.08, `${sg.heroes} of ${c.stats.buildings}`);
+  // A board nobody can see from the road is noise: every hero must sit on a
+  // face that looks onto a street, which the lot's cell index alone decides.
+  const per = CITY_DEFAULTS.blockLots + CITY_DEFAULTS.streetLots;
+  const facesStreet = (h) => {
+    const ix = ((h.cx % per) + per) % per, iz = ((h.cz % per) + per) % per;
+    const [nx, nz] = h.face;
+    return (nx === -1 && ix === 0) || (nx === 1 && ix === CITY_DEFAULTS.blockLots - 1)
+      || (nz === -1 && iz === 0) || (nz === 1 && iz === CITY_DEFAULTS.blockLots - 1);
+  };
+  check("every hero advert faces a street", c.signs.heroes.every(facesStreet), `${c.signs.heroes.filter((h) => !facesStreet(h)).length} face a neighbour`);
+  check("every hero is building-scale", c.signs.heroes.every((h) => h.w >= 12 && h.h >= 8), "min " + Math.min(...c.signs.heroes.map((h) => h.w)).toFixed(1) + " m wide");
   let extra = 0; const names = [];
-  c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Banners|Screens|Bands|Texts|Neon|Beacons)$/.test(o.name)) { extra++; names.push(o.name); } });
-  check("signs + beacons are exactly six instanced meshes (six draws)", extra === 6, names.sort().join(","));
+  c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Banners|Screens|Bands|Texts|Neon|Beacons|Heroes)$/.test(o.name)) { extra++; names.push(o.name); } });
+  check("heroes + beacons are exactly two instanced meshes (two draws)", extra === 2, names.sort().join(","));
+  // Street lamps: the grid walked once on the CPU, one instanced draw, and
+  // every post inside the city's extent.
+  const lamps = c.group.getObjectByName("CityLamps");
+  check("street lamps are one instanced mesh", !!lamps && lamps.isInstancedMesh && c.stats.lamps > 500, `${c.stats.lamps} posts`);
+  {
+    const m = new THREE.Matrix4(), v = new THREE.Vector3(); let out = 0;
+    for (let i = 0; i < c.stats.lamps; i++) { lamps.getMatrixAt(i, m); v.setFromMatrixPosition(m); if (Math.abs(v.x) > CITY_DEFAULTS.extent || Math.abs(v.z) > CITY_DEFAULTS.extent) out++; }
+    check("every lamp post stands inside the city extent", out === 0, `${out} outside`);
+  }
+  // Street furniture: cars, trees, traffic lights, guardrails — five draws.
+  const fs = c.stats.furniture;
+  check("furniture is placed on the grid", !!fs && fs.cars > 500 && fs.trees > 300 && fs.lights > 100 && fs.rails > 200, JSON.stringify(fs));
+  let fmeshes = 0;
+  c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Cars|Trunks|Canopies|TrafficLights|Rails)$/.test(o.name)) fmeshes++; });
+  check("furniture is exactly five instanced meshes", fmeshes === 5, `${fmeshes}`);
+  {
+    const cm = c.group.getObjectByName("CityCars");
+    check("cars carry per-instance colour", !!cm && !!cm.instanceColor && cm.instanceColor.count === fs.cars);
+  }
+  // The image API: a slot swap must be a repaint, never a new texture.
+  const texBefore = c.group.getObjectByName("CityHeroes").material.name;
+  check("hero image slots are addressable and start as placeholders", c.signs.heroSlots === 16 && c.signs.heroSlotIsPlaceholder(3) === true);
+  c.signs.setHeroImage(3, { width: 4, height: 4 });
+  check("loading an image into a slot flips it off placeholder without a rebuild", c.signs.heroSlotIsPlaceholder(3) === false && c.group.getObjectByName("CityHeroes").material.name === texBefore);
+  check("a board can be re-pointed at another slot in place", c.signs.setHero(0, { slot: 3 }) === true && c.signs.heroes[0].index === 0);
   const before = JSON.stringify(c.stats.signs);
   c.rebuild();
   check("signs are deterministic across a rebuild", JSON.stringify(c.stats.signs) === before);
+  // The old Tokyo layers still work when asked for — one draw each.
+  const tokyo = createModularRoadCity({ seed: 20260902, avoid, params: { signParams: { bannerFraction: 0.5, bandFraction: 0.4, textFraction: 0.2, neonFraction: 0.3, screenFraction: 0.12 } } });
+  const ts = tokyo.stats.signs;
+  check("the legacy layers still place when their fractions are raised", ts.banners > 0 && ts.bands > 0 && ts.texts > 0 && ts.neon > 0 && ts.screens > 0, JSON.stringify(ts));
+  tokyo.dispose();
 }
 
 flatCity.dispose();

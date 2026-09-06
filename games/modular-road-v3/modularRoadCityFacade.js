@@ -1,81 +1,100 @@
 // ============================================================================
-// CITY FACADE — one material for every building in the city, with no
-// per-instance attributes at all.
+// CITY FACADE — one material for every building, no per-instance attributes,
+// and RELIEF WITHOUT GEOMETRY.
 //
-// ── WHY NO ATTRIBUTES ────────────────────────────────────────────────────────
+// ── WHAT WAS WRONG BEFORE, MEASURED AGAINST three's OWN CITY ─────────────────
 //
-// The obvious design is an instanced attribute per tower carrying its tint, its
-// window seed and its floor height. It is also the design that locks the city
-// to ONE batching backend, because the three ways to carry per-instance data
-// are all backend-specific and all have a catch:
+// three's example (examples/jsm/generators/city/SkyscraperGenerator.js) builds
+// every window as GEOMETRY: a frame with a hole, four reveal walls, the glass
+// 12–22 cm back; every pier a stepped box projecting 30–60 cm; a spandrel band
+// at each floor line; string courses; a two-step cornice; a base arcade
+// extruded 1.1 m — and every tower casts shadows on a 4096 map. The depth you
+// see in it is real: a pier throws a real shadow onto recessed glass.
 //
-//   • InstancedMesh + InstancedBufferAttribute — fine, but does not survive a
-//     move to BatchedMesh.
-//   • BatchedMesh.setColorAt() — NodeMaterial multiplies `vBatchColor` straight
-//     into colorNode (NodeMaterial.js, "if object.isBatchedMesh && _colorsTexture"),
-//     exactly like `instanceColor`. Smuggling non-colour data through it
-//     corrupts the diffuse. Same trap modularRoadPropInstancer documents for
-//     liveried parts.
-//   • BatchedMesh + your own DataTexture — needs the batch's `_indirectTexture`
-//     to map instanceIndex -> logical instance (on WebGPU `getDrawIndex()`
-//     returns null, so BatchNode falls back to instanceIndex). Private API.
+// The first version of this file PAINTED all of that — a darker ring round a
+// window, a lighter stripe for a pier — view-independent, unlit, unshadowed.
+// It read as bathroom tiles, because a painted grid is what that is. And its
+// values were inverted: dark walls, bright windows. A daytime masonry city is
+// the opposite — BRIGHT STONE, DARK HOLES.
 //
-// So all the variation is derived from POSITION instead, and the material stops
-// caring which backend drew it:
+// ── WHAT THIS DOES INSTEAD ───────────────────────────────────────────────────
 //
-//   • WHICH BUILDING  — the lot cell, `floor(worldXZ / lotSize)`. Constant over
-//     a building because a building is inset inside its lot.
-//   • HEIGHT UP THE FACADE — `worldY - lotBaseY`, in metres. Floor spacing is
-//     therefore CONSTANT no matter how far an instance is stretched in Y.
-//   • ACROSS THE FACADE — `positionGeometry.xz`, the untouched vertex attribute.
-//     NOT positionLocal: InstanceNode and BatchNode both `positionLocal.assign()`
-//     the instance-transformed position (InstanceNode.js:188, BatchNode.js:134),
-//     so by fragment time positionLocal is world space.
+// The geometry stays a box. The facade is an ANALYTIC HEIGHT FIELD the
+// fragment shader casts a ray into — closed form, not a marched parallax map,
+// because the field is made of rectangles:
 //
-// ── THE LOT TEXTURE: PER-BUILDING DATA WITHOUT PER-INSTANCE DATA ─────────────
+//     d = 0            pier / mullion fronts, string courses, cornice
+//     d = pierDepth    the slot floor: spandrel and the flat window frame
+//     d = +reveal      the glass, behind the four reveal walls
 //
-// One texel per lot cell, indexed by the `floor(worldXZ / lotSize)` the shader
-// already computes, read with `textureLoad` (a load, not a sample — no sampler
-// binding, so it never touches the 16-samplers-per-stage ceiling):
+// From the pixel, the view ray is cast INTO the wall and tested against the
+// slot's two pier flanks, the string course above or below, then the four
+// reveal walls of the opening, then the pane. Each hit yields a position, a
+// material AND A NORMAL (a flank is ±u, a sill is +y), so the scene's own sun
+// and sky light the flanks and reveals for real.
 //
-//     R  base Y of the building on this lot (metres)
-//     G  top  Y of the building on this lot (metres)
-//     B  district: 0 downtown glass · 1 midtown masonry · 2 low industrial
-//     A  spare
+// The SUN is cast the same way: a step of depth D shadows the surface behind
+// it for D·|s_u|/s_d metres on its lee side. So a pier shadows the spandrel
+// beside it, a window head shadows the glass below it, a string course
+// shadows the wall under it — and those shadows ride `receivedShadowNode`, so
+// they cut DIRECT light only and leave the sky fill alone, which is what a
+// shadow physically is.
 //
-// Allocated ONCE at a fixed size and rewritten in place (a TextureNode whose
-// `.value` changes size is the swap three's node cache mishandles). Cells
-// outside `lotOrigin/lotCount` clamp to the edge texel.
+// ── THE ONE STRUCTURAL RULE THIS FILE OBEYS ──────────────────────────────────
 //
-// ── INTERIOR MAPPING, WITHOUT THE ATTRIBUTES ─────────────────────────────────
+// `material.normalNode` is always built in a SUB-BUILD (NodeMaterial.js:480),
+// and NodeBuilder namespaces every var PER SUB-BUILD (`getSubBuildProperty(
+// 'variable', … )`). A `.toVar()` written by the colour solve therefore comes
+// back in normalNode as a FRESH variable holding only its initialiser — the
+// assignments are statements that were already emitted into the colour flow.
+// Silently, with no error. So:
 //
-// The three.js city generator's best trick is a ray-marched fake room behind
-// every pane — walls, floor, ceiling, a light, furniture — with no geometry.
-// It needs two baked attributes per glass vertex (`roomCenter`, `roomSize`)
-// because its windows are geometry. Ours are a procedural cell grid, so the
-// room box IS the cell: `[colIdx, colIdx+1] × [floorIdx, floorIdx+1] × depth`.
-// The intersection is analytic (three divides, one min), the room's contents
-// are hashes, and the whole thing rides the same `sharp` dissolve as the
-// window mask — full rooms in the near ring, flat glass beyond. Zero
-// attributes, both backends, one branch-free block.
+//   • colour / roughness / emissive / ao share vars freely (one flow), and
+//   • normalNode owns its own solve.
 //
-// ── ALIASING IS THE WHOLE JOB ────────────────────────────────────────────────
+// To keep that from meaning "trace everything twice", the pipeline is split:
+// `buildFrame` and `traceFacade` are PURE BUILDERS (plain functions, no `If`,
+// select-chains only) that both slots call, and everything expensive — the
+// interior room march, the brick hashing, the sky — happens only in the colour
+// pass. The duplicated part is ~40 ALU of ray arithmetic.
 //
-// Every repeating pattern here (windows, bricks, piers, the room interiors)
-// measures its own cells-per-pixel with `fwidth` and DISSOLVES to its mean as
-// it goes subpixel — the LED-panel technique from v2/objects/shared/ledMatrix.js.
-// A far tower converges to a flat tinted slab, which is what a far tower is.
+// ── WHY NO PER-INSTANCE ATTRIBUTES ───────────────────────────────────────────
 //
-// ── NODE MATERIAL, NOT PLAIN ─────────────────────────────────────────────────
+// They would lock the city to one batching backend (see modularRoadCity.js).
+// Everything is derived from position instead:
 //
-// Static world geometry with a plain material never re-uploads scene fog
-// uniforms on WebGPU (modularRoadScenery.js). A colorNode keeps the haze live.
+//   WHICH BUILDING  the lot cell, floor(worldXZ / lotSize)
+//   WHICH FACE      normalWorldGeometry — the PRE-bump normal. Reading
+//                   normalWorld inside colorNode pulls normal computation
+//                   into it and costs the glass its reflection.
+//   WHERE ON A FACE the box's own UV. BoxGeometry gives every face 0..1 across
+//                   and up; the face's size IN METRES falls out of the screen
+//                   derivatives, d(world)/d(uv). That is what lets the bay grid
+//                   put a pier at BOTH ends of every face, on every setback
+//                   tier, without the shader ever knowing the footprint.
+//
+// ── THE LOT TEXTURE ──────────────────────────────────────────────────────────
+//
+// One float4 per lot cell, read with `textureLoad` (no sampler binding):
+//   R base Y · G top Y · B district (0 glass/1 masonry/2 industrial)
+//   A building type (0 punched / 1 curtain wall / 2 ribbon)
+//
+// ── ALIASING ─────────────────────────────────────────────────────────────────
+//
+// Every repeating pattern measures its own cells-per-pixel and dissolves to
+// its mean: the relief switches off below `lodRelief`, the window grid melts
+// between `lodSharp` and `lodFlat`, and the mortar uses the pristine-grid
+// trick (the drawn joint never goes sub-pixel; its opacity fades to keep
+// energy constant). A far tower converges to a flat tinted slab, which is
+// what a far tower is.
 // ============================================================================
 import * as THREE from "three";
 import {
   Fn, If, float, vec2, vec3, vec4, uniform, select, mix, smoothstep, max, min, abs,
-  floor, fract, dot, sin, clamp, ivec2, positionGeometry, positionWorld,
-  normalGeometry, cameraPosition, fwidth, step, textureLoad, normalize, sign,
+  floor, ceil, round, fract, mod, dot, sin, pow, clamp, ivec2, uint, color, hash,
+  positionWorld, positionView, normalWorldGeometry, normalView,
+  cameraPosition, cameraNormalMatrix, uv, dFdx, dFdy, fwidth, step, textureLoad,
+  normalize, reflect, sign, length,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
@@ -86,114 +105,237 @@ export const LOT_TEX_SIZE = 160;
 export const DISTRICT = { glass: 0, masonry: 1, industrial: 2 };
 
 /**
- * Facade defaults, in metres and 0..1 fractions. Everything here is a uniform,
- * so the lab can drag any of it without a shader recompile.
+ * Building types, written into the lot texture's A channel. A DISTRICT is a
+ * neighbourhood (palette, height); a TYPE is how the wall is built — the bay
+ * rhythm and the depth of its relief, which is what you read at 300 m.
+ */
+export const BUILDING_TYPE = { punched: 0, curtain: 1, ribbon: 2 };
+
+/**
+ * three's NYC masonry palette, verbatim: limestone-dominant (the common tone
+ * repeats, so an equal-probability pick still feels real), buff, granite, a
+ * little terracotta. One flat pick per lot. This — not the six muddy greys it
+ * replaces — is most of why the city stopped looking brown.
+ */
+export const PALETTE = [
+  0xa8553c, 0x9c4a34,                                 // terracotta / red brick (accent)
+  0x8a6a52, 0x7d6450,                                 // brownstone
+  0xc4a370, 0xb89a6f, 0xc2b183,                       // buff / tan
+  0xc6c0b2, 0xc6c0b2, 0xbdb7a8, 0xd1ccbe, 0xb4afa1,   // limestone — the common default
+  0x9a988f, 0x8b8983, 0xa5a39a,                       // granite / concrete
+  0xdbd6cb,                                           // pale glazed (accent)
+  0x7c868d,                                           // steel / glass (cool accent)
+];
+
+/**
+ * A param whose NAME says it is a colour must become a THREE.Color uniform. As
+ * a float, 0xc6c0b2 is thirteen million, and that once painted every wall in
+ * the city blinding white. Exported so tools/cityKitTest.mjs asserts against
+ * this exact predicate instead of a copy that can drift.
+ */
+export const isFacadeColorKey = (k) =>
+  /Color$|^lit(Warm|Cool)$|^sky(Zenith|Horizon|Ground)$|^(wallTint|glassTint|dirtyGlassA|dirtyGlassB)$/.test(k);
+
+/**
+ * Facade defaults, metres and 0..1 fractions. Every number is a uniform, so
+ * the lab drags any of it without a recompile.
  */
 export const FACADE_DEFAULTS = {
-  /** Storey height. Real towers are 3.3–4.2 m; this is what sets the SCALE read. */
-  floorHeight: 3.7,
-  /** Horizontal window pitch. */
-  colWidth: 2.6,
-  /** Window size as a fraction of its cell. Lower = fatter mullions/spandrel. */
-  winW: 0.62,
-  winH: 0.54,
-  /** Ground-floor lobby band — taller, glassier, no horizontal mullions. */
-  lobbyHeight: 7.5,
+  /** Storey height and its per-lot spread. Snapped per tier, so every tier is
+   *  a whole number of floors and the cornice lands on a floor line. */
+  floorHeight: 3.9,
+  floorSpread: 0.6,
+  /** Punched-wall bay pitch and spread — 1.9–4.0 m, like the example. Bays are
+   *  then stretched to fill each face exactly, pier to pier. */
+  bayWidth: 2.9,
+  baySpread: 1.0,
+  /** Pier width, its spread, and how far it PROJECTS. The projection is the
+   *  whole point: the slot behind it is real depth the ray can enter. */
+  pierWidth: 0.62,
+  pierSpread: 0.24,
+  pierDepth: 0.40,
+  /** Window set-back behind the frame — the reveal the sun casts into. */
+  reveal: 0.18,
+  /** Glazed fraction of the floor height; the rest is the spandrel band. */
+  windowRatio: 0.62,
+  /** Flat dressed-stone frame band around the opening, at the slot floor. */
+  frameBorder: 0.10,
+  /** String courses: chance a tower has them and the band height. Pitch is
+   *  3–8 floors, per lot. The tier-top cornice is the same band, 1.6× taller. */
+  courseChance: 0.85,
+  courseHeight: 0.7,
+  /** The base: a deep colonnade on the ground tier of punched towers. */
+  baseRecess: 0.9,
+  baseWindow: 0.72,
 
-  /** Lot pitch. MUST match the layout's lotSize or the per-building hash smears. */
+  /** Lot pitch. MUST match the layout's lotSize. */
   lotSize: 34,
   /** World Y the city stands on when no lot texture has been written. */
   groundY: 0,
 
-  /** Wall palette — six entries, hard-picked per building by the lot hash. */
-  wallColorA: 0x8a8378,
-  wallColorB: 0x6d6a66,
-  wallColorC: 0xa89a82,
-  wallColorD: 0x4e5359,
-  wallColorE: 0x7a5a4c,
-  wallColorF: 0x2e3238,
-  /** Glass base tint (before the per-window brightness jitter). */
-  glassColor: 0x2b3a4a,
-  /** Roof / ledge tops — gravel and plant, never glass. */
-  roofColor: 0x35353a,
+  /** Global grade over the palette (a warm/cool dial for the lab). */
+  wallTint: 0xffffff,
+  /** Curtain-wall mullions and spandrel panels — anodised metal, not stone. */
+  mullionColor: 0x6b7076,
+  roofColor: 0x3a3a3e,
+  sootColor: 0x4a4236,
+  /** Soot streaks pooling low on the walls, and the height they fade over. */
+  soot: 0.35,
+  sootHeight: 210,
+  /** Street-level darkening — the canyon a real city sits in. */
+  canyonHeight: 26,
+  canyonAO: 0.16,
 
-  wallRough: 0.82,
-  glassRough: 0.12,
-  /** Metalness of a pane WITHOUT an interior (far) and WITH one (near). A
-   *  metal has no diffuse, so a room behind the glass needs the pane to stop
-   *  being metal or the room goes black. */
-  glassMetal: 0.55,
-  interiorMetal: 0.12,
+  /** Brick module (metres), joint width, and the bump height of a brick face. */
+  brickL: 0.6,
+  brickH: 0.3,
+  mortar: 0.025,
+  brickRelief: 0.008,
 
-  /** Grime / AO darkening at the base of every wall, and how far up it fades. */
-  baseGrime: 0.30,
-  baseGrimeHeight: 30,
-  /** Darkening of the wall in a thin ring around each window — a recess. */
-  recessAO: 0.28,
-  /** Vertical pier relief on the column grid: width (cell fraction), strength. */
-  pierWidth: 0.10,
-  pierRelief: 0.14,
-  /** Spandrel (floor-slab) band darkening at each floor line. */
-  spandrel: 0.18,
+  wallRough: 0.85,
+  /** Glass: smooth enough for a sky, soft enough not to alias over the room. */
+  glassRough: 0.18,
+  /** The soda-lime tint the room is seen through, the dirty-glass tones the
+   *  grime pulls toward, and how dirty. The 0.64 baseline is the example's:
+   *  panes must read as old glass, not open holes. Curtain walls are newer. */
+  glassTint: 0xb6c6bf,
+  dirtyGlassA: 0x13161a,
+  dirtyGlassB: 0x232b31,
+  glassGrime: 0.64,
+  curtainGrime: 0.18,
+  ribbonGrime: 0.34,
+  /** The city's own share of the scene environment (see cityLab's AMBIENT). */
+  envIntensity: 1.0,
 
-  /** Masonry district: brick pitch (m), mortar width (fraction), tint spread. */
-  brickW: 0.62,
-  brickH: 0.28,
-  mortar: 0.10,
-  brickTint: 0.16,
+  /** Analytic sky reflection: master scale, head-on reflectance per type
+   *  (bare glass is 0.04 and invisible on a skyline; coated curtain wall is a
+   *  mirror), reflected-sky gain, and the gradient — overwritten every frame
+   *  from the sky module's own look, so it tracks time of day for free. */
+  glassReflect: 1.0,
+  glassReflectMin: 0.16,
+  curtainReflectMin: 0.55,
+  skyReflectGain: 0.9,
+  skyZenith: 0x3f6fb0,
+  skyHorizon: 0xc8d6e2,
+  skyGround: 0x2a2c30,
 
-  /** Interior mapping: 0 = flat glass, 1 = full rooms. Room depth in metres. */
+  /** ── CURTAIN WALL (type 1) — big panes in a thin dark grid, nearly flush. */
+  curtainBay: 3.6,
+  curtainMullion: 0.16,
+  curtainDepth: 0.07,
+  curtainReveal: 0.04,
+  curtainWinRatio: 0.84,
+  /** ── RIBBON (type 2) — strip windows between deep concrete bands. */
+  ribbonBay: 3.0,
+  ribbonMullion: 0.10,
+  ribbonDepth: 0.05,
+  ribbonReveal: 0.22,
+  ribbonWinRatio: 0.56,
+
+  /** Interior mapping: 0 = flat glass, 1 = full rooms. Depth in metres. Rooms
+   *  span 2–3 bays, picked per floor, so neighbours share an interior. */
   interior: 1.0,
-  roomDepth: 4.2,
-  /** Fraction of rooms with curtains drawn (an opaque pane, no room). */
+  roomDepth: 4.5,
+  /** Fraction of rooms with the curtains drawn. */
   curtains: 0.28,
 
-  /** 0 = day, 1 = night. Drives the lit windows only; not a light. */
+  /** 0 = day, 1 = night. Drives the lit rooms; it is not a light. */
   nightAmount: 0,
-  /** Fraction of windows lit at full night. Also the far-distance average. */
-  litFraction: 0.30,
+  /** Fraction of rooms lit at night; each tower biases it. */
+  litFraction: 0.28,
   litWarm: 0xffd9a0,
   litCool: 0xcfe4ff,
-  emissiveBoost: 2.6,
-  /** Fraction of storeys that are wholly dark (vacant floors). Cheap realism. */
+  /** Emissive gain of a lit room — the example's 4. */
+  emissiveBoost: 4.0,
+  /** How much of that glow shows by DAY (a lit office at noon is faint). */
+  dayGlow: 0.02,
+  /** Fraction of storeys wholly dark (vacant floors). */
   darkFloors: 0.22,
-  /** Window churn. `churnFraction` of windows are on a timer at all; the rest
-   *  never change. A real city changes a few rooms an hour, not all of them
-   *  every minute — see the note at the lit-window block. */
+  /** Window churn: only `churnFraction` of rooms are on a timer AT ALL. People
+   *  do not flick their lights every minute; the first version reseeded every
+   *  window on one clock and the city twinkled like a screensaver. */
   churnPeriod: 420,
   churnFraction: 0.10,
-
   /** Crown lights: a lit band under the roofline of some towers at night. */
   crownFraction: 0.45,
   crownHeight: 1.6,
   crownBoost: 5.0,
 
-  /** Screen-space dissolve band, in window-cells per pixel. 1 -> 0 between them. */
+  /** Relief master (0 = flat paint) and the analytic sun shadow. */
+  relief: 1.0,
+  reliefShadow: 1.0,
+  /** Screen-space LOD in CELLS PER PIXEL: relief and rooms run below
+   *  `lodRelief` (a bay ≥ ~12 px); the window grid dissolves between
+   *  `lodSharp` and `lodFlat`. */
+  lodRelief: 0.09,
   lodSharp: 0.50,
   lodFlat: 0.12,
-
-  /** Per-window glass brightness spread — the anti-"sheet of one colour" knob. */
-  glassJitter: 0.35,
-  /** Sky gradient inside each pane, bottom -> top. */
-  paneGradient: 0.45,
 };
 
-/** 0..1 hash of a vec2. Positions here are bounded (lot cells, ~±100), so the
- *  classic sin-fract hash keeps full precision — no large-argument sin blowup. */
-const hash21 = /*#__PURE__*/ Fn(([p]) => {
-  return fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453));
+/**
+ * INTEGER HASHES, NOT `fract(sin(...))`.
+ *
+ * The classic sin-fract hash costs a transcendental per call, and this file
+ * calls one for the lot identity, the room assignment, every lit-window state
+ * and the churn clock. Counted in the generated WGSL: SIXTY-NINE `sin`s in one
+ * fragment shader. three's own `hash()` is PCG — pure integer ops — so the
+ * whole set moves to it for free, and gets BETTER: fract(sin()) loses its
+ * precision at large arguments, which is exactly the bug that once made the
+ * starfield invisible.
+ *
+ * The inputs are quantised to 1/256 before hashing. Everything hashed here is
+ * a lot cell, a floor index or a small derived key, so that is far finer than
+ * anything two distinct inputs are separated by. The offset keeps the value
+ * non-negative (a negative float `toUint()` is undefined) and the result stays
+ * under 2²⁴, so the float→uint conversion is exact.
+ */
+const qi = (v) => floor(v.mul(256.0)).add(1 << 22);
+const ih2 = (a, b) => hash(
+  uint(a).mul(uint(73856093)).bitXor(uint(b).mul(uint(19349663))),
+);
+const ih3 = (a, b, c) => hash(
+  uint(a).mul(uint(73856093)).bitXor(uint(b).mul(uint(19349663))).bitXor(uint(c).mul(uint(83492791))),
+);
+/** 0..1 hash of a vec2 (lot cells, floor indices). */
+const hash21 = /*#__PURE__*/ Fn(([p]) => ih2(qi(p.x), qi(p.y)));
+/** 0..1 hash of a vec3 — lot cell + floor + room. */
+const hash31 = /*#__PURE__*/ Fn(([p]) => ih3(qi(p.x), qi(p.y), qi(p.z)));
+/** Integer-keyed hash of an ALREADY-INTEGER 2D cell (brick rows, noise corners). */
+const ihash2 = (i) => ih2(i.x.add(1 << 16), i.y.add(1 << 16));
+/** Cheap value noise, −0.5..0.5, integer-hashed so it is stable across drivers. */
+const vnoise2 = /*#__PURE__*/ Fn(([p]) => {
+  const i = floor(p), f = fract(p);
+  const w = f.mul(f).mul(float(3.0).sub(f.mul(2.0)));
+  const a = ihash2(i), b = ihash2(i.add(vec2(1.0, 0.0)));
+  const c = ihash2(i.add(vec2(0.0, 1.0))), d = ihash2(i.add(vec2(1.0, 1.0)));
+  return mix(mix(a, b, w.x), mix(c, d, w.x), w.y).sub(0.5);
 });
 
-/** 0..1 hash of a vec3 — lot cell + floor + column. */
-const hash31 = /*#__PURE__*/ Fn(([p]) => {
-  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))).mul(43758.5453));
-});
+/**
+ * Surface-gradient bump (Mikkelsen), verbatim from the example. The built-in
+ * bumpMap offsets the UV to read its height, so it returns a ZERO gradient for
+ * a height keyed off position; this feeds the hardware screen derivatives of
+ * the height into the view normal instead.
+ */
+function bumpNormal(height) {
+  const dpdx = positionView.dFdx();
+  const dpdy = positionView.dFdy();
+  const r1 = dpdy.cross(normalView);
+  const r2 = normalView.cross(dpdx);
+  const det = dpdx.dot(r1);
+  const grad = det.sign().mul(height.dFdx().mul(r1).add(height.dFdy().mul(r2)));
+  return det.abs().mul(normalView).sub(grad).normalize();
+}
+
+/** Anti-aliased "x is inside [lo, hi]", with a half-width `aa` edge. */
+const band = (x, lo, hi, aa) =>
+  smoothstep(lo.sub(aa), lo.add(aa), x).mul(smoothstep(hi.add(aa), hi.sub(aa), x));
 
 /**
  * Build the city facade material.
  *
- * @param {object}  [opts]
- * @param {object}  [opts.params] overrides on FACADE_DEFAULTS
+ * @param {object} [opts]
+ * @param {object} [opts.params] overrides on FACADE_DEFAULTS
  */
 export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
   const P = { ...FACADE_DEFAULTS, ...overrides };
@@ -214,7 +356,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
   function clearLots(baseY) {
     for (let i = 0; i < LOT_TEX_SIZE * LOT_TEX_SIZE; i++) {
       lotData[i * 4] = baseY;
-      lotData[i * 4 + 1] = baseY;   // top == base: "no building here"
+      lotData[i * 4 + 1] = baseY;   // top == base: "no building on this lot"
       lotData[i * 4 + 2] = 0;
       lotData[i * 4 + 3] = 0;
     }
@@ -223,344 +365,852 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
   clearLots(P.groundY);
 
   // ── Uniforms ───────────────────────────────────────────────────────────────
-  // Every numeric param becomes a uniform. Colours are the ones NAMED as
-  // colours — `wallColorA..F`, `glassColor`, `roofColor`, `litWarm/litCool`.
-  // The suffix letter matters: `/Color$/` alone silently made the six palette
-  // entries FLOAT uniforms of ~9,000,000 and painted every wall blinding white.
-  const isColorKey = (k) => /Color[A-F]?$|^lit(Warm|Cool)$/.test(k);
   const u = {};
   for (const [k, v] of Object.entries(P)) {
-    if (typeof v === "number") u[k] = uniform(isColorKey(k) ? new THREE.Color(v) : v);
+    if (typeof v === "number") u[k] = uniform(isFacadeColorKey(k) ? new THREE.Color(v) : v);
   }
   const uTime = uniform(0);
+  /** Direction TO the sun, world space — what the relief shadows are cast from. */
+  const uSunDir = uniform(new THREE.Vector3(0.4, 0.8, 0.3));
 
-  // ── The shared surface solve ───────────────────────────────────────────────
-  // ONE solve, four readers (color / roughness / metalness / emissive). A plain
-  // function, NOT an `Fn`: an Fn returning an object collapses it to a single
-  // node and every property read becomes a swizzle — `s.color` comes back
-  // undefined and the slots go unwired. Corollary: no assign operators in here
-  // (they need a TSL stack); `toVar()` is fine.
-  function solveSurface() {
-    // WHICH FACE, in GEOMETRY space so it stays consistent with positionGeometry.
-    const n = normalGeometry;
-    const isRoof = abs(n.y).greaterThan(0.5);
-    const facingX = abs(n.x).greaterThan(abs(n.z));
-    const across = select(facingX, positionGeometry.z, positionGeometry.x).toVar();
-    // World axis the facade runs along, and the inward direction, for the rays.
-    const acrossAxis = select(facingX, vec3(0.0, 0.0, 1.0), vec3(1.0, 0.0, 0.0));
-    const inward = vec3(n.x, 0.0, n.z).negate();
+  // ══════════════════════════════════════════════════════════════════════════
+  // PURE BUILDERS — plain functions, no `If`, select-chains only, so BOTH the
+  // colour pass and the normal pass can call them (see the header note about
+  // sub-build var namespacing).
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * EVERY DERIVATIVE THIS FILE TAKES, in one place, so both passes can grab
+   * them at function top level. Derivatives are illegal inside non-uniform
+   * control flow, and `buildFrame` — which consumes these — has to be callable
+   * from INSIDE the relief branch in the normal pass.
+   * tools/cityShaderTest.mjs fails the build if one escapes into a branch.
+   */
+  function buildDerivatives() {
+    const pdx = dFdx(positionWorld).toVar(), pdy = dFdy(positionWorld).toVar();
+    const t = uv().toVar();
+    const udx = dFdx(t.x).toVar(), udy = dFdy(t.x).toVar();
+    const vdx = dFdx(t.y).toVar(), vdy = dFdy(t.y).toVar();
+    /** The example's hand-rolled LOD: the on-screen size of a surface pixel. */
+    const texel = abs(pdx).add(abs(pdy)).length().toVar();
+    return { pdx, pdy, t, udx, udy, vdx, vdy, texel };
+  }
+
+  /** The face's frame, the lot's identity, and its per-lot architectural style. */
+  function buildFrame(D) {
+    const nW = normalize(normalWorldGeometry).toVar();
+    const isRoof = abs(nW.y).greaterThan(0.5).toVar();
+    // Horizontal axis along the face: cross(up, n).
+    const uAxis = normalize(vec3(nW.z, 0.0, nW.x.negate()).add(vec3(1e-5, 0.0, 0.0))).toVar();
+
+    // FACE SIZE IN METRES, from the screen derivatives of world position and of
+    // the box UV. On a planar face both are linear in screen space, so the
+    // ratio d(across)/d(uv.x) is exactly the face width. This is what gives
+    // every face — on every setback tier, at any instance Y-scale — a pier at
+    // both ends without the shader knowing anything about the footprint.
+    const { pdx, pdy, t, udx, udy, vdx, vdy } = D;
+    const ufw = abs(udx).add(abs(udy)).max(1e-7).toVar();
+    const vfw = abs(vdx).add(abs(vdy)).max(1e-7).toVar();
+    const adx = dot(pdx, uAxis).toVar(), ady = dot(pdy, uAxis).toVar();
+    const W = abs(adx).add(abs(ady)).div(ufw).clamp(0.5, 400.0).toVar();
+    const Hf = abs(pdx.y).add(abs(pdy.y)).div(vfw).clamp(0.5, 700.0).toVar();
+    // Which way the box UV runs relative to +uAxis / +y, so u0 and v0 always
+    // increase along +uAxis and upward and the ray components agree with them.
+    const sU = adx.mul(udx).add(ady.mul(udy));
+    const sV = pdx.y.mul(vdx).add(pdy.y.mul(vdy));
+    const u0 = select(sU.greaterThan(0.0), t.x, float(1.0).sub(t.x)).mul(W).toVar();
+    const v0 = select(sV.greaterThan(0.0), t.y, float(1.0).sub(t.y)).mul(Hf).toVar();
+    // Metres per pixel along and up the face — the AA and LOD currency.
+    const mpxU = ufw.mul(W).toVar();
+    const mpxV = vfw.mul(Hf).toVar();
 
     // WHICH BUILDING.
     const lot = floor(positionWorld.xz.div(u.lotSize)).toVar();
-    const bh = hash21(lot).toVar();
-    const bh2 = hash21(lot.add(vec2(17.3, 41.7))).toVar();
-    const bh3 = hash21(lot.add(vec2(-9.1, 23.9))).toVar();
-
-    // WHERE IT STANDS, HOW TALL, WHICH DISTRICT — the lot texture.
+    const h1 = hash21(lot).toVar();
+    const h2 = hash21(lot.add(vec2(17.3, 41.7))).toVar();
+    const h3 = hash21(lot.add(vec2(-9.1, 23.9))).toVar();
+    const h4 = hash21(lot.add(vec2(5.7, -13.3))).toVar();
+    const h5 = hash21(lot.add(vec2(31.1, 7.9))).toVar();
+    const h6 = hash21(lot.add(vec2(-22.5, -3.7))).toVar();
     const cell = clamp(lot.sub(uLotOrigin), vec2(0.0), uLotCount.sub(1.0));
-    const lotInfo = textureLoad(lotTexture, ivec2(cell)).toVar();
-    const baseY = lotInfo.r;
-    const bldgH = max(lotInfo.g.sub(lotInfo.r), float(1.0));
-    const district = lotInfo.b;
-    const isMasonry = district.greaterThan(0.5).and(district.lessThan(1.5));
-    const isIndustrial = district.greaterThan(1.5);
-    const isGlassTower = district.lessThan(0.5);
+    const info = textureLoad(lotTexture, ivec2(cell)).toVar();
+    const baseY = info.r;
+    const bldgH = max(info.g.sub(info.r), float(1.0)).toVar();
+    const district = info.b, btype = info.a;
+    const isIndustrial = district.greaterThan(1.5).toVar();
+    const isCurtain = btype.greaterThan(0.5).and(btype.lessThan(1.5)).toVar();
+    const isRibbon = btype.greaterThan(1.5).toVar();
+    const isPunched = btype.lessThan(0.5).toVar();
+    /** Distinguishes the four faces, so opposite walls do not mirror. */
+    const faceKey = nW.x.mul(2.3).add(nW.z.mul(5.1)).toVar();
 
     const up = positionWorld.y.sub(baseY).toVar();
     const belowTop = bldgH.sub(up).toVar();
+    const isGroundTier = up.sub(v0).lessThan(1.0).toVar();
 
-    // District-shaped window sizes: a curtain wall downtown, punched windows in
-    // masonry, few and small on an industrial shed.
-    // Downtown is a CURTAIN WALL: nearly all glass, thin dark mullions. That is
-    // the contrast that makes the districts read — pale punched-window masonry
-    // next to dark glass slabs — rather than one grey grid everywhere.
-    const winW = select(isGlassTower, u.winW.mul(1.5).min(0.93),
-      select(isMasonry, u.winW.mul(0.82), u.winW.mul(0.6))).toVar();
-    const winH = select(isGlassTower, u.winH.mul(1.6).min(0.9),
-      select(isMasonry, u.winH.mul(0.9), u.winH.mul(0.55))).toVar();
+    // ── PER-LOT STYLE ────────────────────────────────────────────────────────
+    const spread = (c, s, h) => c.add(h.sub(0.5).mul(2.0).mul(s));
+    const bay0 = select(isCurtain, u.curtainBay, select(isRibbon, u.ribbonBay,
+      spread(u.bayWidth, u.baySpread, h4))).toVar();
+    const pierW = select(isCurtain, u.curtainMullion, select(isRibbon, u.ribbonMullion,
+      spread(u.pierWidth, u.pierSpread, h5))).max(0.02).toVar();
+    const pierD = select(isCurtain, u.curtainDepth, select(isRibbon, u.ribbonDepth,
+      u.pierDepth.mul(float(0.7).add(h3.mul(0.6))))).max(0.005).toVar();
+    const reveal = select(isCurtain, u.curtainReveal, select(isRibbon, u.ribbonReveal,
+      u.reveal.mul(float(0.7).add(h2.mul(0.6))))).max(0.005).toVar();
+    const winRatio = select(isCurtain, u.curtainWinRatio, select(isRibbon, u.ribbonWinRatio,
+      select(isIndustrial, u.windowRatio.mul(0.72), u.windowRatio))).toVar();
+    const border = select(isPunched, u.frameBorder, float(0.015)).toVar();
+    const floorH0 = spread(u.floorHeight, u.floorSpread, h1).max(2.6).toVar();
+    const courseEvery = select(isPunched.and(h3.lessThan(u.courseChance)),
+      floor(h2.mul(5.99)).add(3.0), float(0.0)).toVar();
+    const courseH = u.courseHeight.mul(float(0.7).add(h6.mul(0.6))).toVar();
+    const grime = select(isCurtain, u.curtainGrime, select(isRibbon, u.ribbonGrime, u.glassGrime)).toVar();
+    const reflectMin = select(isCurtain, u.curtainReflectMin, u.glassReflectMin).toVar();
 
-    // ── Cell coordinates ─────────────────────────────────────────────────────
-    const phaseU = bh.mul(7.0);
-    const phaseV = bh2.mul(3.0);
-    const fu = across.div(u.colWidth).add(phaseU).toVar();
-    const fv = up.sub(u.lobbyHeight).div(u.floorHeight).add(phaseV).toVar();
-    const colIdx = floor(fu).toVar();
-    const floorIdx = floor(fv).toVar();
-    const cellU = fract(fu).toVar();
-    const cellV = fract(fv).toVar();
+    // ── FACE LAYOUT ──────────────────────────────────────────────────────────
+    // Bays stretched to fill the face exactly, pier centres at pierW/2 + i·bay,
+    // so BOTH ends of every face are solid and a recess never reaches a corner.
+    // Floors snapped so the tier is a whole number of them.
+    const flat = W.lessThan(pierW.mul(2.0).add(bay0.mul(0.6))).or(Hf.lessThan(2.5)).or(isRoof).toVar();
+    const count = max(floor(W.sub(pierW).div(bay0)), 1.0).toVar();
+    const bay = W.sub(pierW).div(count).toVar();
+    const nF = max(round(Hf.div(floorH0)), 1.0).toVar();
+    const fh = Hf.div(nF).toVar();
+    const winH = fh.mul(winRatio).toVar();
+    const slotL = pierW.mul(0.5).toVar(), slotR = bay.sub(pierW.mul(0.5)).toVar();
+    const oL = slotL.add(border).toVar(), oR = max(slotR.sub(border), slotL.add(border).add(0.05)).toVar();
+    const oB = fh.sub(winH).mul(0.5).toVar(), oT = fh.add(winH).mul(0.5).toVar();
+    const pitch = select(courseEvery.greaterThan(0.5), courseEvery.mul(fh), float(1e5)).toVar();
 
-    // ── Screen-space LOD ─────────────────────────────────────────────────────
-    const uPerPx = fwidth(across).div(u.colWidth);
-    const vPerPx = fwidth(up).div(u.floorHeight);
-    const cellsPerPx = max(uPerPx, vPerPx);
-    const sharp = smoothstep(u.lodSharp, u.lodFlat, cellsPerPx).toVar(); // 1 near, 0 far
+    // The BASE: on a punched tower's ground tier, two or three floors of deep
+    // colonnade — a tall opening, recessed hard, dark inside. It is what stops
+    // every tower looking like it was extruded straight out of the pavement,
+    // and it is the piece of the example's arcade that actually reads at speed.
+    const nBase = select(h4.greaterThan(0.5), float(3.0), float(2.0)).toVar();
+    const hasBase = isPunched.and(isGroundTier).and(nF.greaterThan(nBase.add(1.5))).and(flat.not()).toVar();
+    const baseH = select(hasBase, nBase.mul(fh), float(0.0)).toVar();
 
-    // ── Window mask ──────────────────────────────────────────────────────────
-    const halfW = winW.mul(0.5);
-    const halfH = winH.mul(0.5);
-    const aaU = max(uPerPx.mul(0.5), float(0.0015));
-    const aaV = max(vPerPx.mul(0.5), float(0.0015));
-    const du = abs(cellU.sub(0.5));
-    const dv = abs(cellV.sub(0.5));
-    const towerRaw = smoothstep(halfW.add(aaU), halfW.sub(aaU), du)
-      .mul(smoothstep(halfH.add(aaV), halfH.sub(aaV), dv));
-    const lobbyRaw = smoothstep(halfW.add(aaU), halfW.sub(aaU), du)
-      .mul(smoothstep(float(0.0), float(0.06), up.div(u.lobbyHeight)))
-      .mul(smoothstep(float(1.0), float(0.88), up.div(u.lobbyHeight)));
-    const isLobby = up.lessThan(u.lobbyHeight);
-    const winRaw = select(isLobby, lobbyRaw, towerRaw).toVar();
-    const coverage = winW.mul(winH);
-    const win = mix(coverage, winRaw, sharp).toVar();
+    /** View ray, pixel-outward. Needed by the far paint's sky reflection as
+     *  well as the trace, so it lives here rather than in `traceFacade`. */
+    const V = normalize(positionWorld.sub(cameraPosition)).toVar();
 
-    // Recess ring, pier relief, spandrel band — all dissolve with `sharp`.
-    const ringRaw = smoothstep(halfW.add(0.14), halfW.add(0.02), du)
-      .mul(smoothstep(halfH.add(0.14), halfH.add(0.02), dv))
-      .sub(winRaw).max(0.0);
-    const recess = ringRaw.mul(sharp).mul(u.recessAO);
-    // Pier: a vertical rib on the cell boundary, lit on one side, shaded on
-    // the other — relief without a normal.
-    const pierMask = smoothstep(u.pierWidth, u.pierWidth.mul(0.4), du.sub(0.5).abs()).mul(sharp);
-    const pierShade = float(1.0).add(pierMask.mul(u.pierRelief).mul(sign(cellU.sub(0.5))));
-    const spandrelMask = smoothstep(float(0.09), float(0.02), min(cellV, float(1.0).sub(cellV))).mul(sharp);
-    const spandrelShade = float(1.0).sub(spandrelMask.mul(u.spandrel));
+    /**
+     * WORLD-space along-face coordinate, for the brickwork only — the same
+     * `x·n.z − z·n.x` projection the example uses. Two reasons it is not `u0`:
+     * it costs two multiplies instead of the whole face-size solve, so the
+     * NORMAL pass can compute the brick bump without redoing the layout; and
+     * being continuous across the whole city, coursing does not restart at
+     * every face corner the way face-local metres would.
+     */
+    const acrossW = positionWorld.x.mul(nW.z).sub(positionWorld.z.mul(nW.x)).toVar();
 
-    // ── Masonry (midtown only) ───────────────────────────────────────────────
-    // Running bond keyed to building-local metres, mortar AA'd by its own
-    // fwidth, dissolving to the mean tint when bricks go subpixel.
-    //
-    // BEHIND A REAL BRANCH. A `select` on district still evaluates the bricks
-    // on every pixel of every glass tower; measured, no uniform toggle moved
-    // the frame at all until the work sat inside a WGSL `If`. The inputs it
-    // reads (`up`, `across`) are `toVar()`ed above — shared nodes must be
-    // materialised before the first branch or the branch reads garbage (the
-    // v3 terrain gate finding).
-    const brickShade = Fn(() => {
-      const out = float(1.0).toVar();
-      const bAAu = max(fwidth(across).div(u.brickW), float(0.002)).toVar();
-      const bAAv = max(fwidth(up).div(u.brickH), float(0.002)).toVar();
-      const brickSharp = smoothstep(float(0.6), float(0.15), max(bAAu, bAAv)).toVar();
-      If(isMasonry.and(brickSharp.greaterThan(0.001)), () => {
-        const brow = floor(up.div(u.brickH));
-        const bcol = across.div(u.brickW).add(fract(brow.mul(0.5))); // half-brick offset per row
-        const bu = fract(bcol);
-        const bv = fract(up.div(u.brickH));
-        const m2 = u.mortar.mul(0.5);
-        const mortarMask = float(1.0).sub(
-          smoothstep(m2.sub(bAAu), m2.add(bAAu), min(bu, float(1.0).sub(bu)))
-            .mul(smoothstep(m2.sub(bAAv), m2.add(bAAv), min(bv, float(1.0).sub(bv)))),
-        );
-        const brickJit = hash21(vec2(floor(bcol), brow)).sub(0.5).mul(u.brickTint);
-        out.assign(mix(float(1.0),
-          float(1.0).add(brickJit).mul(float(1.0).sub(mortarMask.mul(0.35))), brickSharp));
-      });
-      return out;
-    })();
-
-    // ── Lit windows ──────────────────────────────────────────────────────────
-    // Per-building bias so some towers are dark and some work late; per-floor
-    // vacancy; and a window state that is MOSTLY FIXED.
-    //
-    // People do not flick their lights on and off every minute. The first
-    // version reseeded EVERY window on a shared clock, so the whole city
-    // twinkled like a screensaver — the single most artificial thing about it.
-    // Now a window's state comes from a hash that never changes, and only
-    // `churnFraction` of them (a tenth) are on a timer at all, at
-    // `churnPeriod` seconds — long enough that you notice a room has changed
-    // rather than watching it change.
-    const bldgLit = u.litFraction.mul(bh3.mul(1.1).add(0.45));
-    const floorLit = step(u.darkFloors, hash31(vec3(lot, floorIdx.mul(0.37))));
-    const winKey = colIdx.add(floorIdx.mul(31.7)).toVar();   // read inside the room branch
-    // The permanent state of this window.
-    const steadyHash = hash31(vec3(lot.mul(3.1), winKey.mul(1.7)));
-    // Is this one of the few that ever changes?
-    const isChurner = step(hash31(vec3(lot.mul(5.7), winKey.mul(0.93))), u.churnFraction);
-    const churnPhase = hash31(vec3(lot.mul(2.3), winKey.mul(0.61)));
-    const epoch = floor(uTime.div(u.churnPeriod.max(1.0)).add(churnPhase));
-    const churnHash = hash31(vec3(lot.mul(3.1), winKey.add(epoch.mul(7.13))));
-    const winHash = mix(steadyHash, churnHash, isChurner);
-    const litHard = step(winHash, bldgLit).mul(floorLit);
-    const lit = mix(bldgLit, litHard, sharp).toVar();
-    const litColor = mix(u.litWarm, u.litCool, step(0.62, bh2)).toVar();
-
-    // ── Crown lights ─────────────────────────────────────────────────────────
-    const hasCrown = step(bh3, u.crownFraction).mul(float(1.0).sub(select(isIndustrial, float(1.0), float(0.0))));
-    const crownBand = smoothstep(u.crownHeight, u.crownHeight.mul(0.25), belowTop)
-      .mul(step(float(0.0), belowTop));
-    const crownHue = fract(bh.mul(5.3));
-    const crownColor = vec3(
-      smoothstep(0.5, 0.2, abs(crownHue.sub(0.15))).mul(0.6).add(0.4),
-      smoothstep(0.45, 0.15, abs(crownHue.sub(0.5))).mul(0.7).add(0.3),
-      smoothstep(0.5, 0.2, abs(crownHue.sub(0.82))).mul(0.8).add(0.35),
-    );
-    const crown = hasCrown.mul(crownBand).mul(u.nightAmount).mul(u.crownBoost);
-
-    // ── Interior mapping ─────────────────────────────────────────────────────
-    // Room = this cell, `roomDepth` deep. Facade-space ray from the camera:
-    //   ru along the facade, rv up, rd inward (into the building).
-    //
-    // Only tower panes get rooms; the lobby is a glazed hall, left as glass.
-    // And only NEAR panes: `interiorAmt` is zero once the window grid has
-    // dissolved, and the whole solve sits behind a WGSL `If` on it — a uniform
-    // `interior = 0` therefore actually removes the cost, and far pixels never
-    // pay for rooms they cannot resolve.
-    //
-    // THE BRANCH CONTAINS THE RAY MARCH AND NOTHING ELSE — no `lit`, no
-    // `litColor`, no `nightAmount`. A `.toVar()` emits its declaration at its
-    // FIRST USE during codegen, so a top-level var whose first use is inside
-    // this `If` gets declared in the branch's scope; the emissive slot then
-    // reads a name that does not exist there and every lit window in the city
-    // goes black — which is exactly what happened, and only with
-    // `interior = 0`, because with rooms on the diffuse path hid it. The
-    // masonry note says "materialise before the first branch"; keeping ALL
-    // lighting outside the branch is the version of that rule you cannot get
-    // wrong. The per-window hashes come out too: they are two sin-fract hashes
-    // and the curtain decision needs no ray at all.
-    const interiorAmt = u.interior.mul(sharp).mul(select(isLobby, float(0.0), float(1.0))).toVar();
-    const roomHash = hash31(vec3(lot.mul(1.3), winKey.mul(0.37))).toVar();
-    const roomHash2 = hash31(vec3(lot.mul(0.7), winKey.mul(1.91))).toVar();
-    const hasCurtain = step(float(1.0).sub(u.curtains), roomHash2).toVar();
-    const interiorRoom = Fn(() => {
-      // xyz = room ALBEDO (unlit), w = the ceiling fixture mask. Both are pure
-      // geometry and hashes; the lighting is applied by the caller.
-      const out = vec4(0.0).toVar();
-      If(interiorAmt.greaterThan(0.001), () => {
-        const V = normalize(positionWorld.sub(cameraPosition));
-        const ru = dot(V, acrossAxis);
-        const rv = V.y;
-        const rd = max(dot(V, inward), float(0.03));
-        const W = u.colWidth, H = u.floorHeight, D = u.roomDepth;
-        const pu = cellU.mul(W), pv = cellV.mul(H);
-        // Distances to the three walls the ray can hit; a wall behind the ray
-        // (negative t) is pushed out of the min.
-        const tBack = D.div(rd);
-        const ruS = ru.add(sign(ru).mul(1e-4)).add(select(ru.equal(0.0), float(1e-4), float(0.0)));
-        const rvS = rv.add(sign(rv).mul(1e-4)).add(select(rv.equal(0.0), float(1e-4), float(0.0)));
-        const tSide = select(ru.greaterThan(0.0), W.sub(pu), pu.negate()).div(ruS);
-        const tVert = select(rv.greaterThan(0.0), H.sub(pv), pv.negate()).div(rvS);
-        const tSideP = select(tSide.greaterThan(0.0), tSide, float(1e6));
-        const tVertP = select(tVert.greaterThan(0.0), tVert, float(1e6));
-        const tHit = min(tBack, min(tSideP, tVertP));
-        const hu = pu.add(ru.mul(tHit)), hv = pv.add(rv.mul(tHit)), hd = rd.mul(tHit);
-        const hitBack = tHit.equal(tBack);
-        const hitFloor = tHit.equal(tVertP).and(rv.lessThan(0.0));
-        const hitCeil = tHit.equal(tVertP).and(rv.greaterThan(0.0));
-
-        // Room palette: a warm off-white wall, tinted per room; darker floor;
-        // ceiling with a bright fixture near the middle when lit.
-        const wallTint = vec3(0.86, 0.80, 0.72).mul(float(0.75).add(roomHash.mul(0.4)));
-        const floorCol = vec3(0.32, 0.26, 0.22).mul(float(0.7).add(roomHash2.mul(0.5)));
-        const ceilCol = vec3(0.9, 0.9, 0.88);
-        const fixture = smoothstep(float(0.35), float(0.12), abs(hu.sub(W.mul(0.5))).max(abs(hd.sub(D.mul(0.5)))));
-        // Furniture: a dark block against the back wall, a picture above it.
-        const furniture = hitBack.and(hv.lessThan(H.mul(0.34))).and(abs(hu.sub(W.mul(0.5))).lessThan(W.mul(0.3)));
-        const picture = hitBack.and(hv.greaterThan(H.mul(0.48))).and(hv.lessThan(H.mul(0.74)))
-          .and(abs(hu.sub(W.mul(0.5))).lessThan(W.mul(0.16)));
-        const pictureCol = vec3(fract(roomHash.mul(3.7)), fract(roomHash.mul(5.1)), fract(roomHash.mul(7.3))).mul(0.6).add(0.15);
-        // Depth cue: the deeper the hit, the darker.
-        const depthShade = mix(float(1.0), float(0.42), smoothstep(float(0.0), D, hd));
-        const roomBase = select(hitFloor, floorCol,
-          select(hitCeil, ceilCol.mul(float(0.7).add(fixture.mul(0.6))),
-            select(furniture, vec3(0.14, 0.12, 0.13),
-              select(picture, pictureCol, wallTint)))).mul(depthShade);
-        out.assign(vec4(roomBase, fixture));
-      });
-      return out;
-    })();
-    // ── Room lighting, OUTSIDE the branch ────────────────────────────────────
-    // Faint by day: through real glass in sunlight you see the sky, not the
-    // sofa. The room only reads once its own lights are on.
-    const roomAlbedo = interiorRoom.xyz;
-    const roomFixture = interiorRoom.w;
-    const litNight = u.nightAmount.mul(lit).toVar();
-    const dayRoom = roomAlbedo.mul(0.11).mul(float(1.0).sub(u.nightAmount.mul(0.85)));
-    const nightRoom = roomAlbedo.mul(litColor).mul(litNight)
-      .mul(float(0.9).add(roomFixture.mul(1.6))).toVar();
-    const curtainCol = vec3(0.62, 0.56, 0.5).mul(float(0.7).add(roomHash.mul(0.5)));
-    const interiorCol = mix(
-      dayRoom.add(nightRoom),
-      curtainCol.mul(float(0.35).add(litNight.mul(0.9))),
-      hasCurtain,
-    );
-    // What the pane contributes to BLOOM: the lit room, or a soft curtain glow.
-    const interiorGlow = mix(nightRoom, litColor.mul(litNight).mul(0.35), hasCurtain);
-
-    // ── Glass shading ────────────────────────────────────────────────────────
-    const paneJit = hash31(vec3(lot.mul(1.7), colIdx.mul(7.3).add(floorIdx)))
-      .sub(0.5).mul(u.glassJitter);
-    const paneGrad = cellV.sub(0.5).mul(u.paneGradient);
-    const glassShade = mix(float(1.0), float(1.0).add(paneJit).add(paneGrad), sharp);
-    const flatGlass = u.glassColor.mul(max(glassShade, float(0.05)));
-    const glass = mix(flatGlass, interiorCol, interiorAmt);
-
-    // ── Wall colour ──────────────────────────────────────────────────────────
-    const pick = floor(bh2.mul(5.999)).toVar();
-    const wallBase = select(pick.lessThan(0.5), u.wallColorA,
-      select(pick.lessThan(1.5), u.wallColorB,
-        select(pick.lessThan(2.5), u.wallColorC,
-          select(pick.lessThan(3.5), u.wallColorD,
-            select(pick.lessThan(4.5), u.wallColorE, u.wallColorF)))));
-    // Districts push the palette: masonry warmer, industrial greyer, and the
-    // glass towers' mullions dark — a curtain wall's frame is anodised metal,
-    // not stone.
-    const wallDistrict = select(isMasonry, wallBase.mul(vec3(1.12, 0.96, 0.86)),
-      select(isIndustrial, wallBase.mul(vec3(0.82, 0.84, 0.86)), wallBase.mul(0.42)));
-    const grime = float(1.0).sub(u.baseGrime.mul(smoothstep(u.baseGrimeHeight, float(0.0), up)));
-    const wall = wallDistrict
-      .mul(float(0.82).add(bh.mul(0.36)))
-      .mul(grime)
-      .mul(float(1.0).sub(recess))
-      .mul(pierShade)
-      .mul(spandrelShade)
-      .mul(select(isMasonry, brickShade, float(1.0)))
-      .toVar();
-
-    const baseColor = select(isRoof, u.roofColor, mix(wall, glass, win));
-
-    // A pane with a LIT room in it is a window, not a mirror — but by day a
-    // curtain wall IS a mirror, and dropping its metalness for the sake of a
-    // dim unlit room turned every glass tower into a stack of grey boxes. So
-    // the reflection stays by day and gives way to the rooms as night comes.
-    const paneMetal = mix(u.glassMetal, u.interiorMetal, interiorAmt.mul(u.nightAmount));
-    // Emissive: window glow (flat, far) OR the lit room itself (near) — the
-    // room already carries `lit` and `nightAmount`, so blend the two by the
-    // same amount to avoid double-counting.
-    const flatGlow = litColor.mul(litNight).mul(u.emissiveBoost);
-    // A lit room is already its own light in the DIFFUSE term; the emissive
-    // here is only the bloom contribution, scaled by the room's own brightness
-    // level and tinted by the pane. At 0.55× it saturated every near window to
-    // a flat tan square and the room detail vanished under it.
-    const roomGlow = interiorGlow.mul(u.emissiveBoost.mul(0.22));
-    const windowGlow = mix(flatGlow, roomGlow, interiorAmt).mul(win);
-    const emissive = select(isRoof, vec3(0.0), windowGlow.add(crownColor.mul(crown)));
+    const aaU = mpxU.mul(0.7).add(0.002).toVar(), aaV = mpxV.mul(0.7).add(0.002).toVar();
+    const cellsPerPx = max(mpxU.div(bay), mpxV.div(fh)).toVar();
+    const sharp = smoothstep(u.lodSharp, u.lodFlat, cellsPerPx).toVar();
+    const reliefAmt = smoothstep(u.lodRelief, u.lodRelief.mul(0.4), cellsPerPx)
+      .mul(u.relief).mul(select(flat, float(0.0), float(1.0))).toVar();
 
     return {
-      color: baseColor,
-      roughness: select(isRoof, float(0.95), mix(u.wallRough, u.glassRough, win)),
-      metalness: select(isRoof, float(0.0), mix(float(0.0), paneMetal, win)),
-      emissive,
+      nW, uAxis, isRoof, W, Hf, u0, v0, mpxU, mpxV, aaU, aaV, V, acrossW,
+      lot, h1, h2, h3, h4, h5, h6, faceKey, up, belowTop, bldgH,
+      isIndustrial, isCurtain, isRibbon, isPunched, flat,
+      bay, count, nF, fh, winH, slotL, slotR, oL, oR, oB, oT,
+      pierW, pierD, reveal, border, pitch, courseH, courseEvery,
+      hasBase, baseH, nBase, grime, reflectMin, sharp, reliefAmt, cellsPerPx,
     };
   }
 
-  // ── Material ───────────────────────────────────────────────────────────────
-  const material = new THREE.MeshStandardNodeMaterial();
-  material.name = "CityFacade";
-  const s = solveSurface();
-  material.colorNode = s.color;
-  material.roughnessNode = s.roughness;
-  material.metalnessNode = s.metalness;
-  material.emissiveNode = s.emissive;
+  /**
+   * Classify the point (ua, va) ON the face plane — the flat, far-field read.
+   * `bi`/`fi` are the bay and floor indices, which the room and the lit-window
+   * hashes key off.
+   */
+  function classify(F, ua, va) {
+    const uL = ua.sub(F.slotL);
+    const bi = floor(uL.div(F.bay));
+    const bu = uL.sub(bi.mul(F.bay)).add(F.slotL);       // 0..bay, pier centred on 0
+    const fi = floor(va.div(F.fh));
+    const fv = va.sub(fi.mul(F.fh));
+    const inSlot = band(bu, F.slotL, F.slotR, F.aaU);
+    // The base storey's opening is taller and starts lower.
+    const inBase = F.hasBase.and(va.lessThan(F.baseH));
+    const bB = F.fh.mul(0.22), bT = F.baseH.sub(F.fh.mul(0.28));
+    const openTall = band(bu, F.oL, F.oR, F.aaU).mul(band(va, bB, bT, F.aaV));
+    const openNorm = band(bu, F.oL, F.oR, F.aaU).mul(band(fv, F.oB, F.oT, F.aaV));
+    const opening = select(inBase, openTall, openNorm);
+    const frame = band(bu, F.oL.sub(F.border), F.oR.add(F.border), F.aaU)
+      .mul(band(fv, F.oB.sub(F.border), F.oT.add(F.border), F.aaV))
+      .sub(openNorm).max(0.0).mul(select(inBase, float(0.0), float(1.0)));
+    // String courses: at every `courseEvery` floor line, at the base's head,
+    // and the cornice at the tier top (the same band, 1.6× taller).
+    const fl = round(va.div(F.fh));
+    const isTop = fl.greaterThan(F.nF.sub(0.5));
+    const onPitch = F.courseEvery.greaterThan(0.5)
+      .and(mod(fl, max(F.courseEvery, 1.0)).lessThan(0.5)).and(fl.greaterThan(0.5));
+    const onBase = F.hasBase.and(abs(fl.sub(F.nBase)).lessThan(0.5));
+    const chH = select(isTop, F.courseH.mul(1.6), F.courseH);
+    const course = select(isTop.or(onPitch).or(onBase), float(1.0), float(0.0))
+      .mul(band(va.sub(fl.mul(F.fh)), chH.mul(-0.5), chH.mul(0.5), F.aaV));
+    return { bi, bu, fi, fv, inBase, pier: float(1.0).sub(inSlot), opening, frame, course };
+  }
+
+  /**
+   * THE RAY CAST. Select-chains only, no `If` — so it can be called from both
+   * the colour pass and the normal pass without either one owning vars the
+   * other needs (see the header).
+   *
+   * IT MUST BE CALLED INSIDE AN `If (reliefAmt > 0)`, in both passes.
+   * Measured, unconditionally: the deck view went 1.5 ms → 6.9 ms, and only
+   * 0.8 ms of that was the relief SHADING — the rest was this running on every
+   * pixel of every distant tower that can never resolve a pier. Select-chains
+   * are branch-free by construction, which is exactly why they have to be put
+   * behind a branch by hand.
+   *
+   * It reads only `F` and uniforms — no derivatives — so it is safe inside a
+   * branch. (`bumpNormal` is not, and stays outside.)
+   */
+  function traceFacade(F) {
+    const V = F.V;
+    const rd = max(dot(V, F.nW).negate(), 0.04).toVar();
+    const ru = dot(V, F.uAxis).toVar(), rv = V.y.toVar();
+    const ruS = select(abs(ru).lessThan(1e-4), float(1e-4), ru).toVar();
+    const rvS = select(abs(rv).lessThan(1e-4), float(1e-4), rv).toVar();
+
+    const c0 = classify(F, F.u0, F.v0);
+    const onFront = c0.pier.greaterThan(0.5).or(c0.course.greaterThan(0.5)).toVar();
+
+    // Depth of this slot: the base colonnade is recessed much harder.
+    const slotD = select(c0.inBase, F.pierD.add(u.baseRecess), F.pierD).toVar();
+
+    // ── Level 1: the slot's own walls — the two pier flanks and the string
+    // course above (its underside) or below (its top face).
+    const bayL = c0.bi.mul(F.bay).add(F.slotL);
+    const buA = F.u0.sub(bayL);                          // 0 at the left flank
+    const slotW = F.slotR.sub(F.slotL);
+    const t1 = slotD.div(rd).toVar();
+    const bu1 = buA.add(ru.mul(t1)), va1 = F.v0.add(rv.mul(t1));
+    const tL = buA.negate().div(ruS), tR = slotW.sub(buA).div(ruS);
+    const hitL = ru.lessThan(0.0).and(bu1.lessThan(0.0));
+    const hitR = ru.greaterThan(0.0).and(bu1.greaterThan(slotW));
+    const kUp = ceil(F.v0.div(F.pitch)).max(1.0);
+    const vcUp = kUp.mul(F.pitch);
+    const topLine = vcUp.greaterThan(F.Hf.sub(F.fh.mul(0.5)));
+    const cUpBottom = select(topLine, F.Hf.sub(F.courseH.mul(0.8)), vcUp.sub(F.courseH.mul(0.5)));
+    const tcU = cUpBottom.sub(F.v0).div(rvS);
+    const hitCU = rv.greaterThan(0.0).and(tcU.greaterThan(0.0)).and(tcU.lessThan(t1));
+    // The course below is the last regular one OR the base's head band,
+    // whichever is higher.
+    const kDn = floor(F.v0.div(F.pitch));
+    const cDn1 = kDn.mul(F.pitch);
+    const has1 = kDn.greaterThan(0.5);
+    const has2 = F.hasBase.and(F.v0.greaterThan(F.baseH));
+    const cDn = select(has2.and(has1.not().or(F.baseH.greaterThan(cDn1))), F.baseH, cDn1);
+    const tcD = cDn.add(F.courseH.mul(0.5)).sub(F.v0).div(rvS);
+    const hitCD = rv.lessThan(0.0).and(has1.or(has2)).and(tcD.greaterThan(0.0)).and(tcD.lessThan(t1));
+    const hitFlank = hitL.or(hitR).toVar();
+    const hitCourse = hitCU.or(hitCD).toVar();
+    const tFlank = select(hitL, tL, tR);
+    const tCourse = select(hitCU, tcU, tcD);
+    const isFlank = hitFlank.and(hitCourse.not().or(tFlank.lessThan(tCourse))).toVar();
+    const isCourse = hitCourse.and(isFlank.not()).toVar();
+    const tSide = select(isFlank, tFlank, tCourse).toVar();
+
+    // ── Level 2: the slot floor — spandrel, flat frame, or the opening.
+    const buS = bu1.add(F.slotL);
+    const fi1 = floor(va1.div(F.fh));
+    const fv1 = va1.sub(fi1.mul(F.fh));
+    const inBase1 = F.hasBase.and(va1.lessThan(F.baseH));
+    const bB = F.fh.mul(0.22), bT = F.baseH.sub(F.fh.mul(0.28));
+    const inOpenN = buS.greaterThan(F.oL).and(buS.lessThan(F.oR))
+      .and(fv1.greaterThan(F.oB)).and(fv1.lessThan(F.oT));
+    const inOpenB = buS.greaterThan(F.oL).and(buS.lessThan(F.oR))
+      .and(va1.greaterThan(bB)).and(va1.lessThan(bT));
+    const inOpen = select(inBase1, inOpenB, inOpenN)
+      .and(onFront.not()).and(hitFlank.or(hitCourse).not()).and(F.flat.not()).toVar();
+    const inFrame = buS.greaterThan(F.oL.sub(F.border)).and(buS.lessThan(F.oR.add(F.border)))
+      .and(fv1.greaterThan(F.oB.sub(F.border))).and(fv1.lessThan(F.oT.add(F.border)))
+      .and(inBase1.not()).toVar();
+    // The opening's own bounds, so the reveal walls know where they are.
+    const wB = select(inBase1, bB, fi1.mul(F.fh).add(F.oB)).toVar();
+    const wT = select(inBase1, bT, fi1.mul(F.fh).add(F.oT)).toVar();
+
+    // ── Level 3: the reveal — jamb, sill, head — then the pane behind it.
+    const rev = select(inBase1, u.baseRecess.mul(0.35), F.reveal).toVar();
+    const t2 = rev.div(rd).toVar();
+    const bu2 = buS.add(ru.mul(t2)).toVar();
+    const va2 = va1.add(rv.mul(t2)).toVar();
+    const jL = ru.lessThan(0.0).and(bu2.lessThan(F.oL));
+    const jR = ru.greaterThan(0.0).and(bu2.greaterThan(F.oR));
+    const sill = rv.lessThan(0.0).and(va2.lessThan(wB));
+    const head = rv.greaterThan(0.0).and(va2.greaterThan(wT));
+    const tJ = select(jL, F.oL.sub(buS), F.oR.sub(buS)).div(ruS);
+    const tV = select(sill, wB.sub(va1), wT.sub(va1)).div(rvS);
+    const hitJ = jL.or(jR), hitV = sill.or(head);
+    const isJamb = inOpen.and(hitJ).and(hitV.not().or(tJ.lessThan(tV))).toVar();
+    const isVert = inOpen.and(hitV).and(isJamb.not()).toVar();
+    const isReveal = isJamb.or(isVert).toVar();
+    const isGlass = inOpen.and(isReveal.not()).toVar();
+    const revealT = select(isJamb, tJ, tV).toVar();
+
+    // ── Where the ray actually stopped, and facing which way.
+    const tHit = select(onFront, float(0.0),
+      select(isFlank.or(isCourse), tSide,
+        select(isReveal, t1.add(revealT), select(isGlass, t1.add(t2), t1)))).toVar();
+    const depth = rd.mul(tHit).toVar();
+    const uHit = F.u0.add(ru.mul(tHit)).toVar();
+    const vHit = F.v0.add(rv.mul(tHit)).toVar();
+
+    const flankN = F.uAxis.mul(select(hitL, float(1.0), float(-1.0)));
+    const courseN = vec3(0.0, select(hitCU, float(-1.0), float(1.0)), 0.0);
+    const jambN = F.uAxis.mul(select(jL, float(1.0), float(-1.0)));
+    const vertN = vec3(0.0, select(sill, float(1.0), float(-1.0)), 0.0);
+    const N = select(isFlank, flankN, select(isCourse, courseN,
+      select(isJamb, jambN, select(isVert, vertN, F.nW)))).toVar();
+    /** 1 when the hit surface is parallel to the box face (brick bump applies). */
+    const front = select(isFlank.or(isCourse).or(isReveal), float(0.0), float(1.0)).toVar();
+
+    return {
+      V, ru, rv, rd, c0, onFront, slotD, t1, t2, rev,
+      isFlank, isCourse, isReveal, isJamb, isVert, isGlass, inOpen, inFrame, inBase1,
+      hitL, hitCU, jL, sill, bi: c0.bi, fi1, fv1, buS, bu2, va1, va2, wB, wT,
+      N, front, depth, uHit, vHit, tHit,
+    };
+  }
+
+  /**
+   * The analytic sun shadow. Light travels along −sun; `ld` is its component
+   * INTO the wall. A step of depth `dep` shadows what is behind it for
+   * dep·|s|/ld metres on its lee side. This is a real cast shadow, not a
+   * painted crease: it swings across the facade as the sun moves and vanishes
+   * when the sun comes round to face the wall head-on.
+   */
+  function buildSun(F) {
+    const s = normalize(uSunDir).toVar();
+    const ld = dot(s, F.nW).toVar();
+    const su = dot(s, F.uAxis).negate().toVar();
+    const sv = s.y.negate().toVar();
+    const ldc = max(ld, 0.05).toVar();
+    const on = smoothstep(float(0.02), float(0.14), ld).mul(u.reliefShadow).toVar();
+    /** Shadow cast onto a surface `dep` behind the face, at (bu, va). */
+    const at = (dep, bu, va) => {
+      const w = dep.mul(abs(su)).div(ldc);
+      const l = select(su.greaterThan(0.0), smoothstep(w.add(F.aaU), w.sub(F.aaU), bu.sub(F.slotL)), float(0.0));
+      const r = select(su.lessThan(0.0), smoothstep(w.add(F.aaU), w.sub(F.aaU), F.slotR.sub(bu)), float(0.0));
+      const kUp = ceil(va.div(F.pitch)).max(1.0);
+      const vc = kUp.mul(F.pitch);
+      const top = vc.greaterThan(F.Hf.sub(F.fh.mul(0.5)));
+      const cB = select(top, F.Hf.sub(F.courseH.mul(0.8)), vc.sub(F.courseH.mul(0.5)));
+      const hv = dep.mul(abs(sv)).div(ldc);
+      const b = select(sv.lessThan(0.0), smoothstep(hv.add(F.aaV), hv.sub(F.aaV), cB.sub(va)), float(0.0));
+      return max(l, max(r, b));
+    };
+    return { s, ld, su, sv, ldc, on, at };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TWO MATERIALS OFF ONE SOLVE.
+  //
+  // Every LOD tier used to share the full uber-shader, and the distance work
+  // was skipped by a per-pixel branch INSIDE it. That is the wrong place for
+  // it: a 3300-line shader has high register pressure whether or not the
+  // branch is taken, which costs occupancy — the GPU's only way to hide memory
+  // latency — on every pixel of every far tower. And the city already sorts
+  // its buildings into per-tier InstancedMeshes, so the split is free.
+  //
+  //   material     — L0/L1, the full thing: ray-cast relief, rooms, bump.
+  //   farMaterial  — L2, flat paint only. No trace, no rooms, no normalNode,
+  //                  no per-brick hashing. At >850 m none of it resolves.
+  //
+  // Both are built from the SAME uniform objects, so every slider still drives
+  // both and the two can never drift apart.
+  // ══════════════════════════════════════════════════════════════════════════
+  const makeSurface = (R, far) => Fn(() => {
+    const D = buildDerivatives();
+    const F = buildFrame(D);
+
+    const oCol = vec3(0.5).toVar();
+    const oRough = u.wallRough.toVar();
+    const oEmis = vec3(0.0).toVar();
+    const oShadow = float(1.0).toVar();
+    const oAO = float(1.0).toVar();
+    R.rough = oRough; R.emissive = oEmis; R.shadow = oShadow; R.ao = oAO;
+
+    // ── STONE ────────────────────────────────────────────────────────────────
+    // One palette pick per lot ±6%, the example's per-brick mottle and its
+    // warm/cool per-brick shift, a low-frequency tone drift, and soot streaks
+    // pooling low. Coursing keys off building-local metres so it lines up with
+    // the floors and stays put as the camera moves.
+    const pickIdx = floor(F.h2.mul(PALETTE.length - 0.001));
+    let base = color(PALETTE[0]);
+    for (let i = 1; i < PALETTE.length; i++) base = mix(base, color(PALETTE[i]), step(i - 0.5, pickIdx));
+    base = base.mul(F.h6.mul(0.12).add(0.94)).mul(u.wallTint)
+      .mul(select(F.isIndustrial, vec3(0.86, 0.87, 0.88), vec3(1.0)));
+    const stoneBase = select(F.isCurtain.or(F.isRibbon), u.mullionColor, base).toVar();
+    const jointAmt = select(F.isPunched, float(1.0), float(0.0)).toVar();
+    const tone = vnoise2(vec2(F.acrossW.mul(0.03), F.up.mul(0.03))).mul(0.18).toVar();
+    const streak = vnoise2(vec2(F.acrossW.mul(1.5), F.up.mul(0.04))).mul(2.0);
+    const dirt = smoothstep(float(-0.1), float(0.45), streak)
+      .mul(smoothstep(u.sootHeight, float(0.0), F.up)).mul(u.soot).toVar();
+
+    // Are individual BRICKS resolvable at all? A brick is 0.6 × 0.3 m, so past
+    // about half a brick per pixel the per-brick tint and the warm/cool shift
+    // average out to nothing — but their six integer hashes were still being
+    // evaluated on every pixel of every distant tower. This gates them.
+    const brickOn = far
+      ? jointAmt.lessThan(-1.0).toVar()          // never: a brick is far sub-pixel out here
+      : jointAmt.greaterThan(0.5)
+        .and(max(F.mpxU.div(u.brickL), F.mpxV.div(u.brickH)).lessThan(0.45)).toVar();
+
+    /** Brick + weathering at a point, in the coursing frame (across, up). */
+    const stoneAt = (ua, upH, lighten) => {
+      const rowC = upH.div(u.brickH), row = floor(rowC);
+      const colC = ua.div(u.brickL).add(mod(row, 2.0).mul(0.5)), col = floor(colC);
+      const dU = float(0.5).sub(abs(fract(colC).sub(0.5)));
+      const dV = float(0.5).sub(abs(fract(rowC).sub(0.5)));
+      const ddU = F.mpxU.div(u.brickL).clamp(1e-6, 0.5), ddV = F.mpxV.div(u.brickH).clamp(1e-6, 0.5);
+      const mU = u.mortar.div(u.brickL.mul(2.0)), mV = u.mortar.div(u.brickH.mul(2.0));
+      const drawU = max(ddU, mU), drawV = max(ddV, mV);
+      // The pristine-grid trick: the drawn joint never falls below the pixel
+      // footprint, and its opacity fades to keep energy constant — so mortar
+      // stays crisp up close and DISSOLVES far away instead of shimmering.
+      const lU = smoothstep(drawU.add(ddU), drawU.sub(ddU), dU).mul(min(mU.div(drawU), 1.0));
+      const lV = smoothstep(drawV.add(ddV), drawV.sub(ddV), dV).mul(min(mV.div(drawV), 1.0));
+      const joint = max(lU, lV).mul(jointAmt);
+      // Per-brick variation, near only. Defaults are the MEANS these hashes
+      // converge to, so the far tower is exactly the average of the near one.
+      const perBrickVar = float(0.0).toVar();
+      const wc = float(0.0).toVar();
+      If(brickOn, () => {
+        const bk = ihash2(vec2(col.add(F.h1.mul(300.0)), row.add(F.h2.mul(300.0))));
+        const bk2 = ihash2(vec2(row.add(F.h3.mul(300.0)), col));
+        const mottle = vnoise2(vec2(ua.mul(0.7), upH.mul(0.7))).mul(0.06);
+        perBrickVar.assign(mottle.add(bk.sub(0.5).mul(0.14)));
+        wc.assign(bk2.sub(0.5).mul(0.14));
+      });
+      const perBrick = float(1.0).add(tone).add(perBrickVar);
+      const tint = mix(stoneBase, vec3(1.0), lighten).mul(perBrick)
+        .mul(vec3(float(1.0).add(wc), 1.0, float(1.0).sub(wc)));
+      return {
+        col: mix(mix(tint, tint.mul(0.6), joint), u.sootColor, dirt),
+        rough: u.wallRough.add(joint.mul(0.12)),
+      };
+    };
+    const frameCol = stoneBase.mul(0.55).mul(float(1.0).add(tone)).toVar();   // dressed stone
+    const canyon = mix(float(1.0).sub(u.canyonAO), float(1.0),
+      smoothstep(float(0.0), u.canyonHeight, F.up)).toVar();
+
+    // ── ROOMS AND LIT WINDOWS ────────────────────────────────────────────────
+    // Rooms span 2–3 bays, chosen per floor, so neighbouring panes share one
+    // interior. A room's state is a hash that NEVER changes; only
+    // `churnFraction` of them are on a slow timer at all.
+    const roomOf = (bi, fi) => {
+      const rb = select(hash31(vec3(F.lot, fi.mul(0.37).add(F.faceKey))).greaterThan(0.5), float(3.0), float(2.0));
+      const ph = floor(hash31(vec3(F.lot.mul(1.9), fi.mul(0.71).add(F.faceKey))).mul(rb));
+      const ri = floor(bi.add(ph).div(rb));
+      const first = ri.mul(rb).sub(ph);
+      const last = min(first.add(rb), F.count);
+      return { ri, first, span: max(last.sub(max(first, 0.0)), 1.0) };
+    };
+    const litOf = (ri, fi) => {
+      const key = ri.mul(1.7).add(fi.mul(31.7)).add(F.faceKey);
+      const bldgLit = u.litFraction.mul(F.h3.mul(1.1).add(0.45));
+      const floorLit = step(u.darkFloors, hash31(vec3(F.lot, fi.mul(0.37).add(F.faceKey.mul(0.3)))));
+      const steady = hash31(vec3(F.lot.mul(3.1), key));
+      const churner = step(hash31(vec3(F.lot.mul(5.7), key.mul(0.93))), u.churnFraction);
+      const phase = hash31(vec3(F.lot.mul(2.3), key.mul(0.61)));
+      const epoch = floor(uTime.div(u.churnPeriod.max(1.0)).add(phase));
+      const churn = hash31(vec3(F.lot.mul(3.1), key.add(epoch.mul(7.13))));
+      const wh = mix(steady, churn, churner);
+      const rh = hash31(vec3(F.lot.mul(1.3), key.mul(0.37)));
+      const rh2 = hash31(vec3(F.lot.mul(0.7), key.mul(1.91)));
+      return {
+        lit: step(wh, bldgLit).mul(floorLit), mean: bldgLit, rh, rh2,
+        litCol: mix(u.litWarm, u.litCool, step(0.88, hash31(vec3(F.lot.mul(0.9), key.mul(2.3))))),
+        curtain: step(float(1.0).sub(u.curtains), rh2),
+      };
+    };
+
+    // ── GLASS ────────────────────────────────────────────────────────────────
+    // The example's model: the room seen through a soda-lime tint, muted
+    // toward dirty glass by a grime that never drops below ~0.64 — the panes
+    // must read as OLD GLASS, not open holes — with dust streaks down the
+    // facade and dirt pooled along each sill. Sky rides on top, analytically:
+    // reflect the view about the normal and read the same vertical gradient
+    // the sky module is painting the dome with. Cheaper than an env tap, and
+    // it stays sharp at distances where a 128 px PMREM cube is mush.
+    const dirty = mix(u.dirtyGlassA, u.dirtyGlassB,
+      vnoise2(vec2(F.u0.mul(0.3), F.up.mul(0.3))).add(0.5)).toVar();
+    const skyAt = (N) => {
+      const Rw = reflect(F.V, N);
+      const col = mix(
+        mix(u.skyGround, u.skyHorizon, smoothstep(float(-0.6), float(-0.05), Rw.y)),
+        mix(u.skyHorizon, u.skyZenith, smoothstep(float(-0.15), float(0.45), Rw.y)),
+        step(float(-0.02), Rw.y),
+      );
+      // NOT bare-glass Schlick. F0 = 0.04 is 3% head-on — correct for a window
+      // and INVISIBLE on a skyline, because from any normal viewpoint you see
+      // facades close to head-on. Measured: at true Schlick the towers looked
+      // identical with the term switched off. Architectural glass is COATED,
+      // so the curve runs from `reflectMin` head-on to 1 at grazing.
+      const cosT = max(dot(N, F.V.negate()), float(0.0));
+      const fres = mix(F.reflectMin, float(1.0), pow(float(1.0).sub(cosT), 4.0));
+      return {
+        col: col.mul(u.skyReflectGain),
+        amt: clamp(fres.mul(u.glassReflect).mul(float(1.0).sub(u.nightAmount.mul(0.6))), 0.0, 1.0),
+      };
+    };
+    const glassOf = (roomCol, roomLit, litCol, paneV, N) => {
+      const dust = smoothstep(float(-0.15), float(0.5),
+        vnoise2(vec2(F.u0.mul(1.3).add(F.h4.mul(70.0)), F.up.mul(0.06))).mul(2.0)).mul(0.45);
+      const pooled = smoothstep(float(0.32), float(0.0), paneV).mul(0.4);
+      const g = F.grime.add(dust).add(pooled).clamp(0.0, 0.95);
+      const sky = skyAt(N);
+      return {
+        col: mix(mix(roomCol.mul(u.glassTint), dirty, g), sky.col, sky.amt),
+        glow: roomCol.mul(litCol).mul(roomLit).mul(u.emissiveBoost)
+          .mul(float(1.0).sub(g.mul(0.6))).mul(mix(u.dayGlow, float(1.0), u.nightAmount)),
+      };
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // FAR PAINT — the flat read: bright stone with dark holes, converging to
+    // the mean as the window grid dissolves.
+    //
+    // GATED AGAINST THE RELIEF, and that pairing is the single biggest saving
+    // in this shader. The two are blended by `reliefAmt`, so at close range
+    // the flat half was computed in full and then thrown away by
+    // `mix(..., 1.0)`. Measured on one facade filling the screen — the true
+    // worst case, no overdraw — the flat half was most of the base cost. Now
+    // only the thin ring where 0 < reliefAmt < 1 pays for both.
+    // ══════════════════════════════════════════════════════════════════════
+    const notFlat = select(F.flat, float(0.0), float(1.0)).toVar();
+    const farPaint = () => {
+    const c0 = classify(F, F.u0, F.v0);
+    const winRaw = c0.opening.mul(float(1.0).sub(c0.pier)).mul(float(1.0).sub(c0.course)).mul(notFlat);
+    const coverage = F.oR.sub(F.oL).mul(F.oT.sub(F.oB)).div(F.bay.mul(F.fh)).clamp(0.0, 1.0).mul(notFlat);
+    const win0 = mix(coverage, winRaw, F.sharp).toVar();
+    const st0 = stoneAt(F.acrossW, F.up, c0.pier.mul(0.12).add(c0.course.mul(0.14)));
+
+    // ── PER-WINDOW STATE, near only ─────────────────────────────────────────
+    // `roomOf` + `litOf` are nine sin-hashes, and they exist to answer "is
+    // THIS room lit". Once the window grid has dissolved there is no this
+    // room — every pane on the tower converges to the same average — so the
+    // whole block sits behind the same `sharp` term that dissolved the grid.
+    // The defaults below ARE that average, which is why the LOD ring shows no
+    // seam. Measured: nine hashes per pixel of every distant tower.
+    const litOn = u.litFraction.mul(F.h3.mul(1.1).add(0.45)).toVar();  // the mean
+    const roomJit = float(0.5).toVar();
+    const litColV = mix(u.litWarm, u.litCool, float(0.12)).toVar();
+    const paneV = float(0.5).toVar();
+    If(F.sharp.greaterThan(0.002), () => {
+      const rm0 = roomOf(c0.bi, c0.fi);
+      const lt0 = litOf(rm0.ri, c0.fi);
+      litOn.assign(mix(lt0.mean, lt0.lit, F.sharp));
+      roomJit.assign(lt0.rh);
+      litColV.assign(lt0.litCol);
+      paneV.assign(c0.fv.sub(F.oB).div(max(F.winH, 0.1)).clamp(0.0, 1.0));
+    });
+    // A far pane shows the room's MEAN — a mid grey, lit or not — behind grime.
+    const g0 = glassOf(vec3(0.42, 0.40, 0.37).mul(float(0.6).add(roomJit.mul(0.5))),
+      litOn, litColV, paneV, F.nW);
+    const baseDark = select(c0.inBase, float(0.35), float(1.0));
+    const wallFar = mix(st0.col, frameCol, c0.frame.mul(F.sharp));
+
+    oCol.assign(mix(wallFar, g0.col.mul(baseDark), win0));
+    oRough.assign(mix(st0.rough, u.glassRough, win0));
+    oEmis.assign(g0.glow.mul(win0).mul(select(c0.inBase, float(0.0), float(1.0))));
+    oAO.assign(mix(float(1.0), float(0.84), win0)
+      .mul(mix(float(1.0), float(0.93), float(1.0).sub(c0.pier).mul(F.sharp))).mul(canyon));
+    };
+    // On the far material the flat paint IS the shader. On the near one it is
+    // the other half of a blend, so it is skipped where the relief covers it.
+    if (far) farPaint(); else If(F.reliefAmt.lessThan(0.999), farPaint);
+
+    // ══════════════════════════════════════════════════════════════════════
+    // NEAR — dress what the ray actually hit. The trace already ran (it is
+    // shared with normalNode); this branch only pays for the SHADING.
+    // ══════════════════════════════════════════════════════════════════════
+    if (!far) If(F.reliefAmt.greaterThan(0.001), () => {
+      // THE RAY CAST LIVES HERE, not at the top. See traceFacade's note: run
+      // unconditionally it cost 5 ms of a 7 ms frame, almost all of it on
+      // distant towers that can never resolve a pier.
+      const T = traceFacade(F);
+      const S = buildSun(F);
+
+      const nCol = vec3(0.0).toVar();
+      const nRough = u.wallRough.toVar();
+      const nGlow = vec3(0.0).toVar();
+      const nShade = float(0.0).toVar();    // 1 = fully in the relief's own shadow
+      const nAO = float(1.0).toVar();
+
+      // Stone everywhere the ray did not reach glass. A flank's coursing runs
+      // along its DEPTH, a course's top and underside run along the face.
+      const stU = select(T.isFlank, T.depth, F.acrossW.add(T.uHit).sub(F.u0));
+      const stV = select(T.isFlank, F.up.add(T.vHit.sub(F.v0)), F.up.add(T.depth.mul(2.0)));
+      const st = stoneAt(stU, select(T.onFront, F.up, stV), select(T.onFront, T.c0.pier.mul(0.12), float(0.1)));
+      nCol.assign(select(T.inFrame.and(T.onFront.not()), frameCol, st.col));
+      nRough.assign(st.rough);
+      nAO.assign(mix(float(1.0), float(0.78), T.depth.div(max(T.slotD.add(T.rev), 0.05)).clamp(0.0, 1.0)));
+      nShade.assign(select(T.onFront, float(0.0),
+        select(T.isFlank, float(0.0),
+          select(T.isCourse, select(T.hitCU, smoothstep(float(0.0), float(0.2), S.sv.negate()), float(0.0)),
+            S.at(T.depth, T.buS, T.va1)))));
+
+      // Reveals: dressed stone, darkening with how deep into the opening the
+      // ray went — which is what makes a window read as a HOLE.
+      const revShade = mix(float(1.0), float(0.68), T.depth.sub(T.slotD).div(max(T.rev, 0.02)).clamp(0.0, 1.0));
+      nCol.assign(select(T.isReveal, frameCol.mul(revShade), nCol));
+      nRough.assign(select(T.isReveal, u.wallRough.mul(0.9), nRough));
+      nAO.assign(select(T.isReveal, float(0.66), nAO));
+
+      // ── The pane, and the room behind it.
+      If(T.isGlass, () => {
+        const rm = roomOf(T.bi, T.fi1);
+        const lt = litOf(rm.ri, T.fi1);
+        const roomW = max(rm.span.mul(F.bay).sub(F.pierW), 0.5);
+        const roomH = max(T.wT.sub(T.wB).add(1.0), 0.8);
+        const pu = T.bi.sub(rm.first).mul(F.bay).add(T.bu2).sub(F.slotL);
+        const pv = T.va2.sub(T.wB).add(roomH.sub(T.wT.sub(T.wB)).mul(0.5));
+        const D = u.roomDepth;
+        // Analytic box hit: the nearest far-plane crossing. A near-zero ray
+        // component gives ±inf, which min() harmlessly drops.
+        const tBack = D.div(T.rd);
+        const tS = select(T.ru.greaterThan(0.0), roomW.sub(pu), pu.negate())
+          .div(select(abs(T.ru).lessThan(1e-4), float(1e-4), T.ru));
+        const tV2 = select(T.rv.greaterThan(0.0), roomH.sub(pv), pv.negate())
+          .div(select(abs(T.rv).lessThan(1e-4), float(1e-4), T.rv));
+        const tSP = select(tS.greaterThan(0.0), tS, float(1e6));
+        const tVP = select(tV2.greaterThan(0.0), tV2, float(1e6));
+        const tHit = min(tBack, min(tSP, tVP));
+        const q = vec3(
+          pu.add(T.ru.mul(tHit)).div(roomW),
+          pv.add(T.rv.mul(tHit)).div(roomH),
+          T.rd.mul(tHit).div(D),
+        );
+        const onBack = tHit.equal(tBack);
+        const onFloor = tHit.equal(tVP).and(T.rv.lessThan(0.0));
+        const onCeil = tHit.equal(tVP).and(T.rv.greaterThan(0.0));
+
+        // The room: muted plaster picked per room with a darker skirting;
+        // floorboards with a seam and a centred rug; a lighter ceiling with a
+        // round fixture that BURNS when the room is lit; a door and a framed
+        // picture on the back wall, and a low sofa in front of it.
+        const wallA = mix(color(0x9a8b73), color(0x6f7a82), lt.rh);
+        const wallC = mix(wallA, color(0xb9ad97), lt.rh2.mul(0.6));
+        const wallCol = mix(wallC, wallC.mul(0.5), smoothstep(float(0.05), float(0.04), q.y));
+        const rect = (ax, ay, cx, cy, hw, hh) =>
+          smoothstep(hw + 0.006, hw - 0.006, abs(ax.sub(cx))).mul(smoothstep(hh + 0.006, hh - 0.006, abs(ay.sub(cy))));
+        const boards = mix(color(0x4a3320), color(0x6a4c30), lt.rh)
+          .mul(float(1.0).sub(step(0.94, fract(q.x.mul(6.0))).mul(0.3)));
+        const floorCol = mix(boards, mix(color(0x7a3b32), color(0x3a5760), lt.rh2),
+          rect(q.x, q.z, 0.5, 0.62, 0.3, 0.26).mul(0.9));
+        const lamp = smoothstep(float(0.16), float(0.13), length(vec2(q.x.sub(0.5), q.z.sub(0.5))));
+        // The fixture's punch is a NIGHT thing. Left at 4.5 by day it burned a
+        // tan disc into every lit office at three in the afternoon — the room
+        // is daylit then, and a ceiling lamp against daylight is nearly
+        // invisible.
+        const lampGain = mix(float(1.0), mix(float(1.4), float(4.5), u.nightAmount), lt.lit);
+        const ceilCol = mix(mix(wallC, vec3(1.0), 0.5), lt.litCol.mul(lampGain), lamp);
+        const doorX = mix(float(0.22), float(0.78), lt.rh);
+        const picX = select(doorX.lessThan(0.5), mix(float(0.68), float(0.82), lt.rh2), mix(float(0.18), float(0.32), lt.rh2));
+        let backCol = mix(wallCol, mix(color(0x5a4631), color(0x39383c), step(0.5, lt.rh2)),
+          rect(q.x, q.y, doorX, 0.33, 0.085, 0.35));
+        backCol = mix(backCol, color(0x141210), rect(q.x, q.y, picX, 0.56, 0.075, 0.085));
+        backCol = mix(backCol, mix(color(0x2c3a4a), color(0x7a5a3a), fract(lt.rh.mul(7.3))),
+          rect(q.x, q.y, picX, 0.56, 0.055, 0.065));
+        const sofa = onBack.and(q.y.lessThan(0.3)).and(abs(q.x.sub(0.5)).lessThan(0.32));
+        const sofaCol = mix(color(0x5a4a3a), color(0x42566a), lt.rh)
+          .mul(mix(float(0.85), float(1.12), smoothstep(float(0.24), float(0.30), q.y)));
+        const shell = select(onBack, select(sofa, sofaCol, backCol),
+          select(onCeil, ceilCol, select(onFloor, floorCol, wallCol)));
+        // Corner AO, so the box reads with soft shading rather than flat walls.
+        const aoE = (a) => smoothstep(float(0.0), float(0.15), a).mul(smoothstep(float(0.0), float(0.15), float(1.0).sub(a)));
+        const edge = select(onBack, aoE(q.x).mul(aoE(q.y)),
+          select(onFloor.or(onCeil), aoE(q.x).mul(aoE(q.z)), aoE(q.y).mul(aoE(q.z))));
+        const raw = shell.mul(mix(float(0.72), float(1.0), edge)).mul(mix(float(1.0), float(0.42), q.z.clamp(0.0, 1.0)));
+        // Curtains drawn part-way in from each side, so some windows read open
+        // and others half-covered. A drape transmits only a little of the glow.
+        const dw = pow(smoothstep(float(0.3), float(1.0), lt.rh), 2.0).mul(0.5);
+        const dw2 = pow(smoothstep(float(0.3), float(1.0), lt.rh2), 2.0).mul(0.5);
+        const qu = pu.div(roomW);
+        const draped = qu.lessThan(dw).or(qu.greaterThan(float(1.0).sub(dw2))).or(lt.curtain.greaterThan(0.5));
+        const fabric = mix(color(0xcabfa6), color(0x706a64), lt.rh2)
+          .mul(mix(float(0.78), float(1.12), fract(pu.mul(2.5))));
+        const roomCol = select(draped, fabric, raw)
+          .mul(mix(vec3(1.0), lt.litCol, lt.lit.mul(0.85))).mul(mix(float(1.0), float(1.3), lt.lit));
+        const roomLit = lt.lit.mul(select(draped, float(0.2), float(1.0)));
+        const seen = mix(vec3(0.16), roomCol, u.interior);
+
+        const g = glassOf(seen, roomLit.mul(u.interior), lt.litCol,
+          T.va2.sub(T.wB).div(max(T.wT.sub(T.wB), 0.1)), F.nW);
+        nCol.assign(select(T.inBase1, g.col.mul(0.3), g.col));
+        nRough.assign(u.glassRough);
+        nGlow.assign(select(T.inBase1, vec3(0.0), g.glow));
+        nAO.assign(0.8);
+        // The pier and the window head both shadow the pane.
+        const wJ = T.rev.mul(abs(S.su)).div(S.ldc);
+        const shJ = select(S.su.greaterThan(0.0), smoothstep(wJ.add(F.aaU), wJ.sub(F.aaU), T.bu2.sub(F.oL)),
+          smoothstep(wJ.add(F.aaU), wJ.sub(F.aaU), F.oR.sub(T.bu2)));
+        const hH = T.rev.mul(abs(S.sv)).div(S.ldc);
+        const shH = select(S.sv.lessThan(0.0), smoothstep(hH.add(F.aaV), hH.sub(F.aaV), T.wT.sub(T.va2)), float(0.0));
+        nShade.assign(max(S.at(T.depth, T.bu2, T.va2), max(shJ, shH)));
+      });
+
+      // Blend the relief over the flat paint, so the two meet without a seam.
+      oCol.assign(mix(oCol, nCol, F.reliefAmt));
+      oRough.assign(mix(oRough, nRough, F.reliefAmt));
+      oEmis.assign(mix(oEmis, nGlow, F.reliefAmt));
+      oAO.assign(mix(oAO, nAO.mul(canyon), F.reliefAmt));
+      oShadow.assign(float(1.0).sub(nShade.mul(S.on).mul(F.reliefAmt)));
+    });
+
+    // ── Roofs, and the crown lights ──────────────────────────────────────────
+    const roofCol = u.roofColor.mul(float(1.0).add(vnoise2(positionWorld.xz.mul(0.5)).mul(0.3)));
+    oCol.assign(select(F.isRoof, roofCol, oCol));
+    oRough.assign(select(F.isRoof, float(0.95), oRough));
+    oShadow.assign(select(F.isRoof, float(1.0), oShadow));
+    oAO.assign(select(F.isRoof, float(1.0), oAO));
+
+    const hasCrown = step(F.h3, u.crownFraction).mul(select(F.isIndustrial, float(0.0), float(1.0)));
+    const crownBand = smoothstep(u.crownHeight, u.crownHeight.mul(0.25), F.belowTop).mul(step(float(0.0), F.belowTop));
+    const hue = fract(F.h1.mul(5.3));
+    const crownColor = vec3(
+      smoothstep(0.5, 0.2, abs(hue.sub(0.15))).mul(0.6).add(0.4),
+      smoothstep(0.45, 0.15, abs(hue.sub(0.5))).mul(0.7).add(0.3),
+      smoothstep(0.5, 0.2, abs(hue.sub(0.82))).mul(0.8).add(0.35),
+    );
+    oEmis.assign(select(F.isRoof, vec3(0.0),
+      oEmis.add(crownColor.mul(hasCrown.mul(crownBand).mul(u.nightAmount).mul(u.crownBoost)))));
+
+    return oCol;
+  });
+
+  /**
+   * normalNode's own solve. It re-runs the pure builders (≈40 ALU) and NOTHING
+   * else — no stone colour, no room, no sky. See the header for why it cannot
+   * simply read the colour pass's vars.
+   */
+  const normalSolve = Fn(() => {
+    // A MINIMAL frame, not `buildFrame()`. This pass runs on every city pixel,
+    // and the full frame solve is a lot texture read, six sin-hashes and the
+    // whole per-lot layout — none of which the far path needs. All it needs
+    // out here is the brick bump and a LOD gate, so it computes the two
+    // world-space quantities the brickwork keys off (`acrossW`, `up`) and
+    // nothing else. Measured: this pass was a large share of a 3.2 ms city.
+    const D = buildDerivatives();
+    const texel = D.texel;
+    const nW = normalize(normalWorldGeometry).toVar();
+    const isRoof = abs(nW.y).greaterThan(0.5);
+    const lot = floor(positionWorld.xz.div(u.lotSize));
+    const cell = clamp(lot.sub(uLotOrigin), vec2(0.0), uLotCount.sub(1.0));
+    const info = textureLoad(lotTexture, ivec2(cell));
+    const up = positionWorld.y.sub(info.r).toVar();
+    const isPunched = info.a.lessThan(0.5);
+    const acrossW = positionWorld.x.mul(nW.z).sub(positionWorld.z.mul(nW.x)).toVar();
+
+    // Brick relief for the bump — only on surfaces PARALLEL to the box face,
+    // because bumpNormal differentiates a world-space height field in screen
+    // space, which is only meaningful on the face plane.
+    const rowC = up.div(u.brickH);
+    const colC = acrossW.div(u.brickL).add(mod(floor(rowC), 2.0).mul(0.5));
+    const dU = float(0.5).sub(abs(fract(colC).sub(0.5)));
+    const dV = float(0.5).sub(abs(fract(rowC).sub(0.5)));
+    // The example's hand-rolled LOD: the on-screen size of a surface pixel.
+    // Cheaper than the face-size solve and enough for both the bevel and the
+    // relief gate.
+    const bevel = max(texel.mul(1.5), 0.02);
+    const face = smoothstep(float(0.0), bevel, dU.mul(u.brickL)).mul(smoothstep(float(0.0), bevel, dV.mul(u.brickH)));
+    const isStone = select(isPunched, float(1.0), float(0.0)).mul(select(isRoof, float(0.0), float(1.0)));
+    // A CONSERVATIVE gate: `bayWidth` here stands in for the lot's real bay,
+    // which only the full frame knows. Erring wide costs a few pixels of trace
+    // and guarantees the normals never switch to flat before the colour does —
+    // the reverse would show as a visible seam at the LOD ring.
+    const gateAmt = smoothstep(u.lodRelief, u.lodRelief.mul(0.4), texel.div(u.bayWidth.mul(1.6)))
+      .mul(u.relief).mul(select(isRoof, float(0.0), float(1.0))).toVar();
+    const height = face.mul(u.brickRelief).mul(isStone).mul(gateAmt);
+
+    // THE DERIVATIVES STAY OUT HERE, UNCONDITIONALLY. TSL's `select` does not
+    // lower to WGSL's `select()` at this size — it emits a real `if / else` —
+    // and a DERIVATIVE INSIDE NON-UNIFORM CONTROL FLOW is undefined behaviour
+    // in WGSL: a hard error on some drivers, silently wrong normals on others,
+    // and the wrong pixels would be exactly the pier and reveal edges this
+    // facade exists for. `bumpNormal` is nothing but dpdx/dpdy of the height
+    // field, so it is materialised here and only finished vectors get
+    // selected between. tools/cityShaderTest.mjs fails the build if one drifts
+    // back inside a branch.
+    const bumped = bumpNormal(height).toVar();
+    const flatN = normalize(cameraNormalMatrix.mul(nW)).toVar();
+    const out = normalize(mix(flatN, bumped, gateAmt)).toVar();
+
+    // The layout solve AND the ray cast both sit behind the gate — neither
+    // takes a derivative, so both are safe in a branch, and running them on
+    // every distant pixel was most of a 5 ms regression. Off-face hits
+    // (flanks, reveals, course soffits) take the hit normal; face-parallel
+    // hits keep the bumped one.
+    If(gateAmt.greaterThan(0.001), () => {
+      const F = buildFrame(D);
+      const T = traceFacade(F);
+      const hitN = normalize(cameraNormalMatrix.mul(T.N));
+      out.assign(normalize(select(T.front.lessThan(0.5), hitN, out)));
+    });
+    return out;
+  });
+
+  // ── Materials ──────────────────────────────────────────────────────────────
+  /**
+   * @param {boolean} far  L2 variant: flat paint only, no trace, no rooms,
+   *                       no normalNode, no per-brick hashing.
+   */
+  function buildMaterial(far) {
+    const R = {};
+    const m = new THREE.MeshStandardNodeMaterial();
+    m.name = far ? "CityFacadeFar" : "CityFacade";
+    // The city's OWN share of the scene environment, as a plain property so
+    // changing it never recompiles — it lets the city sit at a sun-dominant
+    // ratio without dragging the terrain and the road down with it.
+    m.envMapIntensity = P.envIntensity;
+
+    // colorNode is set up FIRST (NodeMaterial.setup: setupDiffuseColor, then
+    // setupVariants, then lighting), so `R.*` is populated by the time these
+    // lazy wrappers are built — and they share its flow, so they read the very
+    // same variables rather than re-declaring them.
+    m.colorNode = makeSurface(R, far)();
+    m.roughnessNode = Fn(() => R.rough)();
+    m.metalnessNode = float(0.0);       // all dielectric: stone, glass, metal trim
+    m.emissiveNode = Fn(() => R.emissive)();
+    m.aoNode = Fn(() => R.ao)();
+    if (!far) {
+      // A tower past the L1 ring is a few pixels of flat wall; a bumped normal
+      // and a per-hit one are the same thing there, and normalNode is the
+      // expensive slot because three always builds it in its own sub-build.
+      m.normalNode = normalSolve();
+      // The analytic relief shadows cut DIRECT light only — which is what a
+      // shadow is. Folding them into the albedo would darken the sky fill too.
+      m.receivedShadowNode = Fn(([shadow]) => shadow.mul(R.shadow));
+    }
+    return { m, R };
+  }
+
+  const { m: material, R } = buildMaterial(false);
+  const { m: farMaterial, R: farR } = buildMaterial(true);
 
   // vec4, not the vec3 emissive: the MRT attachment is a vec4 struct member
-  // and WGSL will not widen an assignment — `cannot assign 'vec3<f32>' to
-  // 'vec4<f32>'`, an invalid ShaderModule, and a city that silently never
-  // draws. Only the GAME hits it; the lab has no MRT target and the node
-  // collapses to `output`.
-  applyBloomMRT(material, vec4(s.emissive, 1.0));
+  // and WGSL will not widen an assignment — "cannot assign 'vec3<f32>' to
+  // 'vec4<f32>'", an invalid ShaderModule, and a city that silently never
+  // draws. Only the GAME hits it; the lab has no MRT target.
+  applyBloomMRT(material, Fn(() => vec4(R.emissive, 1.0))());
+  applyBloomMRT(farMaterial, Fn(() => vec4(farR.emissive, 1.0))());
 
   // ── Live params proxy ──────────────────────────────────────────────────────
   const params = new Proxy(P, {
     set(target, key, value) {
       target[key] = value;
+      if (key === "envIntensity") {
+        material.envMapIntensity = value;
+        farMaterial.envMapIntensity = value;
+        return true;
+      }
       const un = u[key];
       if (un) {
         if (un.value && un.value.isColor) un.value.set(value);
@@ -585,8 +1235,23 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
   };
 
   return {
-    material, uniforms: u, params, lotHeights,
+    material,
+    /** The L2 variant: same uniforms and lot texture, a much cheaper shader. */
+    farMaterial,
+    uniforms: u, params, lotHeights,
     /** Advance the window-churn clock. Seconds. */
     setTime(t) { uTime.value = t; },
+    /** Direction TO the sun, world space — the relief shadows follow it. */
+    setSun(dir) { if (dir) uSunDir.value.copy(dir); },
+    /**
+     * The gradient the glass mirrors. Hand it the sky module's own colours and
+     * the reflection tracks time of day exactly — sunset glass goes orange
+     * because the sky did, with no second set of numbers to keep in step.
+     */
+    setSkyColors(zenith, horizon, ground) {
+      if (zenith) u.skyZenith.value.copy(zenith);
+      if (horizon) u.skyHorizon.value.copy(horizon);
+      if (ground) u.skyGround.value.copy(ground);
+    },
   };
 }

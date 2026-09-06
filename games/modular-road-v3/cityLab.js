@@ -9,8 +9,10 @@
 // is right for MEASUREMENT and wrong for JUDGEMENT. Under one directional light
 // and no environment map the city rendered as black silhouettes, and the
 // conclusion "it does not look as good as the three.js example" was really a
-// verdict on the lab's lighting: the facade's glass is metalness 0.55, and
-// metal with nothing to reflect is black.
+// verdict on the lab's lighting: the facade's glass was metalness 0.55 at the
+// time, and metal with nothing to reflect is black. (The glass is a dielectric
+// now, and it mirrors an ANALYTIC sky rather than the env map — but the point
+// stands: judge a look under the lighting the game will actually show.)
 //
 // So the lab now imports `modularRoadSky.js` + `modularRoadSkyAtmosphere.js`
 // with the same parameters roadGame.js boots on, bakes a PMREM of that sky for
@@ -62,8 +64,22 @@ import {
 import { createModularRoadCity, CITY_DEFAULTS } from "./modularRoadCity.js";
 import { FACADE_DEFAULTS } from "./modularRoadCityFacade.js";
 import { KIT_DEFAULTS } from "./modularRoadCityKit.js";
+import { STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import { createModularRoadSky, TIME_PRESETS, skyBandName } from "./modularRoadSky.js";
 import { createSkyAtmosphere } from "./modularRoadSkyAtmosphere.js";
+
+/**
+ * SUN-TO-AMBIENT BALANCE, the lab's biggest look dial.
+ *
+ * Measured against three's city example: it runs exposure 0.45, env 0.2 and a
+ * sun up to 6 — roughly 30:1 sun to ambient, and that contrast is most of why
+ * its towers read as solid objects. This lab was at 2.4:1, which is why every
+ * face came out the same value and the city looked like grey noise.
+ *
+ * Kept as scales on what the sky reports rather than fixed numbers, so time of
+ * day still drives everything and only the RATIO is retuned.
+ */
+const AMBIENT = { hemiScale: 0.45, exposureScale: 0.85 };
 
 /** Default build altitude in the game's sky-stunt mode (roadGame.js). */
 const DECK_ALT = 40;
@@ -117,11 +133,11 @@ export async function startCityLab() {
   //
   // The city was first judged under a cheap analytic gradient with one
   // directional light and NO environment, and it read as black silhouettes.
-  // That was never the city's fault: the facade's glass is metalness 0.55 /
-  // roughness 0.12, and metal with nothing to reflect is black. It is exactly
-  // the finding the guardrail rebuild landed on — the biggest of its four
-  // causes was NO ENV. Judging a look under lighting the game will never show
-  // is how a lab produces confident, wrong answers.
+  // That was never the city's fault: the facade's glass was metalness 0.55 /
+  // roughness 0.12 then, and metal with nothing to reflect is black. It is
+  // exactly the finding the guardrail rebuild landed on — the biggest of its
+  // four causes was NO ENV. Judging a look under lighting the game will never
+  // show is how a lab produces confident, wrong answers.
   //
   // So this runs the same pair the game boots on (roadGame.js `buildGameSky`),
   // with the two parameter traps that file documents:
@@ -219,11 +235,24 @@ export async function startCityLab() {
     sun.intensity = look.dirIntensity;
     hemi.color.copy(look.horizonInside);
     hemi.groundColor.copy(look.nadirInside);
-    hemi.intensity = look.hemiIntensity;
-    renderer.toneMappingExposure = look.exposure;
+    // Scaled, not taken raw. `look.hemiIntensity` is tuned for a scene lit
+    // mostly by hemisphere fill; a city wants the SUN to define its faces, and
+    // ambient this strong washes the shading off every wall. Together with the
+    // env drop this takes the ratio from ~2.4:1 toward ~10:1.
+    hemi.intensity = look.hemiIntensity * AMBIENT.hemiScale;
+    renderer.toneMappingExposure = look.exposure * AMBIENT.exposureScale;
     // The city's lit windows follow the same night factor the sky uses, so the
-    // windows come on exactly when the sky says it is night.
-    if (city) city.facade.nightAmount = look.nightF;
+    // windows come on exactly when the sky says it is night — and its glass
+    // mirrors the same gradient the dome is painted with, so a sunset turns
+    // the towers orange without a second set of numbers to keep in step.
+    if (city) {
+      city.facade.nightAmount = look.nightF;
+      city.setSkyColors(look.zenithInside, look.horizonInside, look.nadirInside);
+      // The facade casts its OWN shadows (piers onto spandrels, heads onto
+      // glass). They must come from the same direction as the key light, or
+      // a wall is lit from the left and self-shadowed from the right.
+      city.setSun(_keyDir);
+    }
     // Keep the cheap dome showing the same sun, so F8 swaps the BACKDROP only.
     uSunDir.value.copy(look.sunDir);
     uZenith.value.copy(look.zenithInside);
@@ -303,7 +332,15 @@ export async function startCityLab() {
     try {
       envRT = pmrem.fromCubemap(cubeRT.texture, envRT);
       scene.environment = envRT.texture;
-      scene.environmentIntensity = 1.15;
+      // 1.15 was an arbitrary choice and it was the single biggest reason the
+      // city looked flat: against a ~2.7 sun it made the scene AMBIENT-DOMINANT
+      // at about 2.4:1, so no face was much brighter than any other and no
+      // building had form. three's city example runs roughly 30:1 (exposure
+      // 0.45, env 0.2, sun up to 6) and that contrast is most of why its towers
+      // read as solid. The facade also has its own `envIntensity` on top of
+      // this, so the city can sit sun-dominant without dragging the deck and
+      // the terrain down with it.
+      scene.environmentIntensity = 0.35;
     } catch (err) {
       console.warn("[CityLab] PMREM bake failed; IBL disabled.", err);
     }
@@ -524,25 +561,64 @@ export async function startCityLab() {
   //   kit     — re-bakes the archetype geometry too (debounced, the dearest)
   const SPECS = {
     "g-facade": ["live", FACADE_DEFAULTS, [
-      ["floorHeight", 2.6, 6, 0.05], ["colWidth", 1.4, 6, 0.05],
-      ["winW", 0.2, 0.95, 0.01], ["winH", 0.2, 0.95, 0.01],
-      ["lobbyHeight", 0, 18, 0.5],
+      // MASSING RHYTHM — what you read at 300 m.
+      ["floorHeight", 2.8, 6, 0.05], ["floorSpread", 0, 1.5, 0.05],
+      ["bayWidth", 1.4, 6, 0.05], ["baySpread", 0, 2, 0.05],
+      // REAL RELIEF. `pierDepth` and `reveal` are the two that decide whether
+      // this is architecture or a painted grid: they are the depths the ray
+      // enters and the sun casts into.
+      ["relief", 0, 1, 0.02], ["reliefShadow", 0, 1.5, 0.02],
+      ["pierWidth", 0.1, 1.6, 0.02], ["pierSpread", 0, 0.6, 0.02],
+      ["pierDepth", 0, 1.2, 0.01], ["reveal", 0, 0.8, 0.01],
+      ["windowRatio", 0.2, 0.95, 0.01], ["frameBorder", 0, 0.4, 0.01],
+      ["courseChance", 0, 1, 0.05], ["courseHeight", 0.2, 2, 0.05],
+      ["baseRecess", 0, 3, 0.05],
+      // GLASS. `glassGrime` is the example's key number: never below ~0.64 on
+      // old stock, or the panes read as open holes.
+      ["glassGrime", 0, 0.95, 0.01], ["curtainGrime", 0, 0.95, 0.01], ["ribbonGrime", 0, 0.95, 0.01],
+      ["glassReflect", 0, 2, 0.02], ["glassReflectMin", 0, 1, 0.01],
+      ["curtainReflectMin", 0, 1, 0.01], ["skyReflectGain", 0.2, 1.6, 0.02],
+      ["glassRough", 0.02, 0.6, 0.01], ["wallRough", 0.3, 1, 0.02],
       ["interior", 0, 1, 0.02], ["roomDepth", 1.5, 9, 0.1], ["curtains", 0, 1, 0.02],
-      ["interiorMetal", 0, 0.6, 0.02],
-      ["glassRough", 0.02, 0.6, 0.01], ["glassMetal", 0, 1, 0.02],
-      ["wallRough", 0.3, 1, 0.02],
-      ["pierWidth", 0, 0.3, 0.01], ["pierRelief", 0, 0.5, 0.01], ["spandrel", 0, 0.6, 0.01],
-      ["recessAO", 0, 0.6, 0.01], ["baseGrime", 0, 0.8, 0.02],
-      ["brickW", 0.2, 1.5, 0.02], ["brickH", 0.1, 0.6, 0.01], ["mortar", 0, 0.3, 0.01], ["brickTint", 0, 0.5, 0.01],
-      ["glassJitter", 0, 1, 0.02], ["paneGradient", 0, 1.5, 0.02],
+      // LIGHT BALANCE and the canyon.
+      ["envIntensity", 0, 1.5, 0.02],
+      ["soot", 0, 1.2, 0.02], ["sootHeight", 20, 400, 10],
+      ["canyonAO", 0, 0.8, 0.02], ["canyonHeight", 0, 80, 2],
+      // MASONRY.
+      ["brickL", 0.2, 1.2, 0.02], ["brickH", 0.1, 0.6, 0.01],
+      ["mortar", 0, 0.12, 0.005], ["brickRelief", 0, 0.03, 0.001],
+      // CURTAIN WALL / RIBBON.
+      ["curtainBay", 2, 9, 0.1], ["curtainMullion", 0.04, 0.6, 0.01],
+      ["curtainDepth", 0, 0.4, 0.01], ["curtainReveal", 0, 0.3, 0.005],
+      ["curtainWinRatio", 0.5, 0.98, 0.01],
+      ["ribbonBay", 1.5, 8, 0.1], ["ribbonMullion", 0.04, 0.5, 0.01],
+      ["ribbonDepth", 0, 0.4, 0.01], ["ribbonReveal", 0, 0.6, 0.01],
+      ["ribbonWinRatio", 0.2, 0.95, 0.01],
     ]],
     "g-night": ["live", FACADE_DEFAULTS, [
       ["litFraction", 0, 1, 0.01], ["darkFloors", 0, 0.8, 0.01],
-      ["emissiveBoost", 0, 8, 0.1], ["churnPeriod", 0, 240, 5],
+      ["emissiveBoost", 0, 8, 0.1], ["dayGlow", 0, 1, 0.02],
+      ["churnPeriod", 0, 900, 10], ["churnFraction", 0, 1, 0.02],
       ["crownFraction", 0, 1, 0.02], ["crownBoost", 0, 12, 0.2],
     ]],
     "g-aa": ["live", FACADE_DEFAULTS, [
+      ["lodRelief", 0.01, 0.4, 0.005],
       ["lodSharp", 0.1, 2, 0.02], ["lodFlat", 0.01, 0.5, 0.01],
+    ]],
+    // The ground plane's material — the Smart Road's own asphalt and wet
+    // model, re-keyed to the block grid. `wetAmount` here is what the game's
+    // weather drives; the rest are the track's knobs under the track's names.
+    "g-streets": ["streets", STREET_DEFAULTS, [
+      ["wetAmount", 0, 1, 0.01], ["puddleAmount", 0, 1, 0.02],
+      ["wetDarken", 0.2, 1, 0.01], ["wetCoatStrength", 0, 1, 0.02],
+      ["puddleThreshold", 0.3, 0.9, 0.01], ["puddleScale", 0.05, 0.6, 0.01],
+      ["rippleAmp", 0, 0.2, 0.005], ["rippleScale", 0.3, 4, 0.05],
+      ["deckBrightness", 0.3, 2.5, 0.05], ["grainScale", 0.2, 2, 0.05],
+      ["aggWeight", 0, 1, 0.02], ["aggScale", 1, 12, 0.25], ["macroScale", 0.01, 0.2, 0.005],
+      ["wheelDarken", 0, 0.4, 0.01], ["deckRough", 0.5, 1, 0.01],
+      ["tarSnakeAmount", 0, 1, 0.02], ["tarSnakeScale", 4, 30, 0.5], ["tarSnakeWidth", 0.004, 0.05, 0.001],
+      ["walkWidth", 2, 14, 0.25], ["kerbHeight", 0, 0.3, 0.01],
+      ["markings", 0, 1, 0.05], ["detailFar", 60, 600, 10],
     ]],
     "g-lod": ["live", CITY_DEFAULTS, [
       ["lod0Dist", 40, 800, 10], ["lod1Dist", 200, 3000, 25],
@@ -559,6 +635,9 @@ export async function startCityLab() {
       ["slopeLimit", 0.5, 30, 0.5], ["sinkBias", 0, 4, 0.1],
       ["districtCore", 0.05, 0.9, 0.01], ["districtMid", 0.2, 1, 0.01], ["districtNoise", 0, 0.6, 0.01],
       ["landmarkRadius", 0, 600, 10],
+      ["typeMinHeight", 0, 80, 2],
+      ["curtainInCore", 0, 1, 0.02], ["ribbonInCore", 0, 1, 0.02],
+      ["curtainInMid", 0, 1, 0.02], ["ribbonInMid", 0, 1, 0.02],
     ]],
     "g-kit": ["kit", KIT_DEFAULTS, [
       ["archetypes", 2, 40, 1],
@@ -610,6 +689,7 @@ export async function startCityLab() {
       const get = () => {
         if (kind === "kit") return kitOverrides[key] ?? defaults[key];
         if (kind === "layout") return city.params[key];
+        if (kind === "streets") return city.streets ? city.streets[key] : defaults[key];
         // Facade params live behind the material's proxy; LOD params on the city.
         return key in city.facade ? city.facade[key] : city.params[key];
       };
@@ -623,6 +703,7 @@ export async function startCityLab() {
           if (key === "lotSize") city.facade.lotSize = v;
           return;
         }
+        if (kind === "streets") { if (city.streets) city.streets[key] = v; return; }
         if (key in city.facade) city.facade[key] = v; else city.params[key] = v;
       };
 
@@ -631,7 +712,7 @@ export async function startCityLab() {
       input.addEventListener("input", () => {
         set(parseFloat(input.value));
         val.textContent = fmt(parseFloat(input.value));
-        if (kind !== "live") scheduleRebuild(kind);
+        if (kind !== "live" && kind !== "streets") scheduleRebuild(kind);
       });
       readouts.push(() => { input.value = get(); val.textContent = fmt(get()); });
       host.appendChild(row);

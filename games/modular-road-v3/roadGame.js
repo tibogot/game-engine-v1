@@ -1904,6 +1904,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       heightAt: cityHeightSource(),
     });
     scene.add(city.group);
+    // Born into whatever weather is already on the track.
+    city.setWet?.(roadLook.wetAmount ?? 0);
   }
 
   function syncCity() {
@@ -1957,9 +1959,29 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     return 1 - THREE.MathUtils.smoothstep(el, -8, 6);
   }
 
+  const _citySun = new THREE.Vector3(0.4, 0.8, 0.3);
+
   function updateCity(dt) {
     if (!city || !cityWanted) return;
     city.facade.nightAmount = cityNight();
+    // The facade mirrors the sky analytically and casts its own relief
+    // shadows, so it needs the same gradient the dome is painted with and the
+    // same direction the key light comes from. Both come free from the sky's
+    // look; without them the glass would reflect a fixed noon blue at sunset
+    // and every pier would shadow the wrong way.
+    const look = gameSkyOn ? gameSky?.getLook() : null;
+    if (look) {
+      city.setSkyColors(look.zenithInside, look.horizonInside, look.nadirInside);
+      _citySun.copy(look.sunDir.y > 0 ? look.sunDir : look.moonDir);
+    } else {
+      const Li = app.light?.state;
+      if (Li) {
+        const az = THREE.MathUtils.degToRad(Li.sunAzimuth ?? 45);
+        const el = THREE.MathUtils.degToRad(Li.sunElevation ?? 40);
+        _citySun.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az));
+      }
+    }
+    city.setSun(_citySun);
     city.update(dt, camera);
   }
   app.addPreRenderHook?.(updateCity);
@@ -3862,6 +3884,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // Optional: the cheap deck's uniform bag is a subset and has no weather.
     const wetU = roadMaterial._roadUniforms?.wetAmount;
     if (wetU) wetU.value = wet;
+    // The city's streets run the same wet model as the deck; one weather.
+    city?.setWet?.(wet);
     // A tyre SQUEEGEES standing water, so a wet skid is a light clearing rather
     // than a dark rubber ribbon — see MARK_LOOK in modularRoadTireMarks. The
     // marks are their own mesh and material, so they have to be told.
