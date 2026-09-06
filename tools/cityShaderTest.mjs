@@ -24,6 +24,7 @@ const THREE = await import("three/webgpu");
 const TSL = await import("three/tsl");
 const { createCityFacadeMaterial } = await import("../games/modular-road-v3/modularRoadCityFacade.js");
 const { createCityStreets } = await import("../games/modular-road-v3/modularRoadCityStreets.js");
+const { createCityFurniture } = await import("../games/modular-road-v3/modularRoadCityFurniture.js");
 const { CITY_DEFAULTS } = await import("../games/modular-road-v3/modularRoadCity.js");
 
 let fail = 0;
@@ -65,6 +66,9 @@ const stubRenderer = {
   // Queried for float32-filterable / depth-texture support when a shadow map
   // is in play. This build target has the lot.
   hasFeature: () => true,
+  // Renderer.js:3491 — ShadowNode asks whether the backend can do hardware
+  // depth comparison before it picks a sampler. WebGPU can.
+  hasCompatibility: () => true,
   _currentRenderContext: null,
 };
 
@@ -76,9 +80,11 @@ const stubRenderer = {
 const backendForBuilder = new THREE.WebGPUBackend({});
 stubRenderer.backend.createNodeBuilder = (o, r) => backendForBuilder.createNodeBuilder(o, r);
 
-function buildWGSL(material, { withLight = true } = {}) {
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
-  const mesh = new THREE.Mesh(geometry, material);
+function buildWGSL(material, { withLight = true, instanced = null } = {}) {
+  // An instanced material reads per-instance data through InstanceNode, which
+  // only exists when the OBJECT being built is the InstancedMesh itself.
+  const geometry = instanced ? instanced.geometry : new THREE.BoxGeometry(1, 1, 1);
+  const mesh = instanced || new THREE.Mesh(geometry, material);
   mesh.updateMatrixWorld();
 
   const scene = new THREE.Scene();
@@ -277,6 +283,44 @@ console.log("\n── STREET SHADER ──");
     }
     check("no street derivative is taken inside a branch", bad.length === 0, bad.slice(0, 2).join(" | "));
   }
+}
+
+// ── Street furniture: five materials, each carrying a lamp/skyglow emissive ──
+// These read `varyingProperty('vInstanceColor')`, which only EXISTS when the
+// mesh has an instanceColor — reading it otherwise is the kind of thing that
+// compiles here and renders black in the browser.
+console.log("\n── FURNITURE SHADERS ──");
+{
+  const streets = createCityStreets({ P: CITY_DEFAULTS, originCellX: 0, originCellZ: 0 });
+  const furn = createCityFurniture({
+    P: CITY_DEFAULTS, originCellX: 0, originCellZ: 0,
+    lamp: { pool: streets.lampPoolFree, color: streets.lampColor },
+  });
+  const mats = [];
+  furn.group.traverse((o) => { if (o.isInstancedMesh) mats.push([o.name, o.material, o]); });
+  check("every furniture kind has a material", mats.length === 6, mats.map(([n]) => n).join(","));
+
+  let bad = null;
+  for (const [name, mat, mesh] of mats) {
+    try {
+      const b = buildWGSL(mat, { instanced: mesh });
+      const f = b.fragmentShader || "";
+      if (/\bundefined\b/.test(f)) { bad = `${name}: 'undefined' in the source`; break; }
+      if (!/\bif\s*\(|Light|shadow/i.test(f)) { bad = `${name}: no lighting`; break; }
+    } catch (e) { bad = `${name}: ${e.message}`; break; }
+  }
+  check("every furniture material generates WGSL", bad === null, bad || `${mats.length} materials`);
+
+  // A material that reads vInstanceColor MUST be on a mesh that writes it.
+  let mismatched = [];
+  for (const [name, , mesh] of mats) {
+    const needs = /Cars|Canopies|TrafficLights|Traffic$/.test(name);
+    if (needs && !mesh.instanceColor) mismatched.push(name);
+  }
+  check("every material reading the instance tint is on a mesh that writes one", mismatched.length === 0, mismatched.join(","));
+
+  furn.dispose();
+  streets.dispose();
 }
 
 console.log(fail === 0 ? "\nALL PASS" : `\n${fail} FAILURE(S)`);

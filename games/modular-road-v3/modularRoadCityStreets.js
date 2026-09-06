@@ -168,6 +168,10 @@ export const STREET_DEFAULTS = {
   lampRange: 17,
   /** How much MORE a wet surface lights up under a lamp (the film's mirror). */
   lampWetGain: 1.8,
+  /** NIGHT SKYGLOW — see the same pair in the facade. Between the lamps a
+   *  street is lit by the city, not by nothing. */
+  glowColor: 0x2a2f3a,
+  glowAmount: 1.0,
   /** 0 by day, 1 at night — the city hands this over with the facade's. */
   nightAmount: 0,
 
@@ -231,6 +235,7 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
   const uBlockW = uniform(blockW);
   const uStreetW = uniform(streetW);
   const uOrigin = uniform(new THREE.Vector2(originCellX * P.lotSize, originCellZ * P.lotSize));
+  const uGroundY = uniform(P.groundY);
 
   const u = {};
   for (const [k, v] of Object.entries(S)) {
@@ -304,11 +309,17 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
    * at `lampRange`. Two lamps, ~30 ALU, no light objects. Returns 0..∞
    * irradiance (before colour).
    */
-  function lampPool(L) {
+  function lampPool(L, opts = {}) {
     const alongZ = L.inStreetX;                         // 1: street runs along Z
     const along = mix(positionWorld.x, positionWorld.z, alongZ);
     const acrossM = L.across;                           // 0..streetW across the carriageway
-    const h = u.lampHeight;
+    // How far BELOW the head this surface is. The road is at y=0 so it is the
+    // full lamp height; a car roof or a tree crown is nearer the lamp and has
+    // to be lit harder, or the street glows and everything standing on it
+    // stays black — which is exactly what the first night looked like.
+    const h = opts.free
+      ? u.lampHeight.sub(positionWorld.y.sub(uGroundY)).max(0.6)
+      : u.lampHeight;
     const pool = (station, sideAcross) => {
       const da = along.sub(station);
       const dx = acrossM.sub(sideAcross);
@@ -322,7 +333,21 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     const stB = floor(st.add(0.5).sub(u.lampStagger)).add(u.lampStagger).mul(u.lampPitch);   // side B: staggered
     const sideA = u.lampInset.negate();                 // just past the near kerb
     const sideB = uStreetW.add(u.lampInset);
-    return pool(stA, sideA).add(pool(stB, sideB)).mul(L.onRoad.max(smoothstep(u.walkWidth, u.walkWidth.mul(0.75), L.intoBlock)));
+    const both = pool(stA, sideA).add(pool(stB, sideB));
+    // On the ground the pool only exists on the carriageway and the pavement.
+    // For free-standing objects there is no such mask — a tree crown is above
+    // the pavement whatever the shader thinks of the pixel under it.
+    return opts.free ? both : both.mul(L.onRoad.max(smoothstep(u.walkWidth, u.walkWidth.mul(0.75), L.intoBlock)));
+  }
+
+  /**
+   * The lamp field as seen by anything STANDING on the street — cars, trees,
+   * railings. Same stations, same falloff, same uniforms as the road's pools,
+   * so a car is lit by the lamp whose pool it is parked in and the two can
+   * never disagree. Handed to modularRoadCityFurniture through the city.
+   */
+  function lampPoolFree() {
+    return lampPool(layout(), { free: true }).mul(u.lampIntensity).mul(u.nightAmount);
   }
 
   /**
@@ -453,7 +478,8 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     // eyes and cameras compress it. Compress the pool's albedo the same way:
     // asphalt lands near 0.2, paint near 0.6, a 3:1 that looks like a street.
     const poolAlbedo = mix(surface, vec3(0.5), 0.35);
-    R.lampEmissive = poolAlbedo.mul(lamp).mul(float(1.0).add(film.mul(u.lampWetGain))).mul(u.lampColor);
+    R.lampEmissive = poolAlbedo.mul(lamp).mul(float(1.0).add(film.mul(u.lampWetGain))).mul(u.lampColor)
+      .add(surface.mul(u.glowColor).mul(u.glowAmount).mul(u.nightAmount));
 
     // ── What the other slots read ───────────────────────────────────────────
     const dryRough = mix(float(0.92), u.deckRough.sub(L.wheelPath.mul(u.wheelRough)).sub(paint.mul(0.2)), L.onRoad)
@@ -550,7 +576,7 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
   lampMat.colorNode = vec3(0.16, 0.17, 0.18);
   // Only the underside of the head glows — the emitter — and only at night.
   const headGlow = Fn(() => {
-    const y = positionWorld.y.sub(uniform(P.groundY));
+    const y = positionWorld.y.sub(uGroundY);
     const isHead = smoothstep(S.lampHeight - 0.3, S.lampHeight - 0.05, y);
     return u.lampColor.mul(isHead).mul(u.nightAmount).mul(u.lampIntensity.mul(2.2));
   })();
@@ -628,6 +654,13 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     mesh, material, params, uniforms: u,
     /** The lamp posts: one InstancedMesh, one draw. Add next to `mesh`. */
     lampMesh,
+    /** The lamp field for free-standing objects (see lampPoolFree). A node
+     *  builder — call it inside the consumer's own material. */
+    lampPoolFree,
+    /** The lamp colour uniform, so a consumer tints by the same light. */
+    lampColor: u.lampColor,
+    /** Night, shared so a consumer fades with the same clock. */
+    nightUniform: u.nightAmount,
     lampCount: lampMatrices.length,
     /** Same weather the track gets: 0 dry … 1 soaked. */
     setWet(amount) { u.wetAmount.value = Math.max(0, Math.min(1, amount || 0)); },

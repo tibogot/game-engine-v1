@@ -341,8 +341,24 @@ console.log("\n── LOOK PASS ──");
   const fs = c.stats.furniture;
   check("furniture is placed on the grid", !!fs && fs.cars > 500 && fs.trees > 300 && fs.lights > 100 && fs.rails > 200, JSON.stringify(fs));
   let fmeshes = 0;
-  c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Cars|Trunks|Canopies|TrafficLights|Rails)$/.test(o.name)) fmeshes++; });
-  check("furniture is exactly five instanced meshes", fmeshes === 5, `${fmeshes}`);
+  c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Cars|Trunks|Canopies|TrafficLights|Rails|Traffic)$/.test(o.name)) fmeshes++; });
+  check("furniture is exactly six instanced meshes", fmeshes === 6, `${fmeshes}`);
+  // MOVING TRAFFIC: one more draw, driven on the CPU and culled by distance.
+  check("traffic is laid out on lanes", fs.lanes > 40 && fs.traffic > 200, `${fs.traffic} cars on ${fs.lanes} lanes`);
+  {
+    const tm = c.group.getObjectByName("CityTraffic");
+    check("traffic is one instanced mesh", !!tm && tm.isInstancedMesh && tm.instanceMatrix.count === fs.traffic);
+    const cam = new THREE.Vector3(0, 40, 0);
+    c.update(0.016, { position: cam });
+    const first = tm.count;
+    check("an update fills only the cars within range", first > 0 && first < fs.traffic, `${first} of ${fs.traffic}`);
+    // ...and they MOVE: the same car must be somewhere else a second later.
+    const m0 = new THREE.Matrix4(), m1 = new THREE.Matrix4(), v0 = new THREE.Vector3(), v1 = new THREE.Vector3();
+    tm.getMatrixAt(0, m0); v0.setFromMatrixPosition(m0);
+    c.update(1.0, { position: cam });
+    tm.getMatrixAt(0, m1); v1.setFromMatrixPosition(m1);
+    check("traffic actually moves between frames", v0.distanceTo(v1) > 0.5, `${v0.distanceTo(v1).toFixed(1)} m`);
+  }
   {
     const cm = c.group.getObjectByName("CityCars");
     check("cars carry per-instance colour", !!cm && !!cm.instanceColor && cm.instanceColor.count === fs.cars);

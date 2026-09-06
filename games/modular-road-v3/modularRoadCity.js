@@ -604,7 +604,12 @@ export function createModularRoadCity({
       group.add(ground.lampMesh);
       stats.lamps = ground.lampCount;
       if (P.furniture) {
-        furniture = createCityFurniture({ P, originCellX, originCellZ, params: P.furnitureParams });
+        furniture = createCityFurniture({
+          P, originCellX, originCellZ, params: P.furnitureParams,
+          // The street's OWN lamp field, so a car is lit by the lamp whose
+          // pool it is parked in and the two can never drift apart.
+          lamp: { pool: ground.lampPoolFree, color: ground.lampColor },
+        });
         group.add(furniture.group);
         stats.furniture = furniture.stats;
       }
@@ -641,6 +646,9 @@ export function createModularRoadCity({
     if (signs) { signs.setNight(night); signs.setTime(_clock); }
     ground?.setNight(night);
     furniture?.setNight(night);
+    // Traffic moves EVERY frame — it is the one thing here that is not static,
+    // and it is throttled by distance rather than by the LOD timer.
+    furniture?.updateTraffic(_clock, camera.position);
 
     _lodT += dt;
     const moved = camera.position.distanceTo(_lastLodPos);

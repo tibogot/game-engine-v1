@@ -256,6 +256,15 @@ export const FACADE_DEFAULTS = {
    *  window on one clock and the city twinkled like a screensaver. */
   churnPeriod: 420,
   churnFraction: 0.10,
+  /** NIGHT SKYGLOW. A city is never black between its own lights: the light
+   *  it throws up bounces off haze and off every other lit surface, and that
+   *  is what stops an unlit wall going to pure black the moment the sun does.
+   *  A flat ambient add on the albedo, scaled by night — an ambient light in
+   *  everything but name, and confined to the city so it cannot wash out the
+   *  terrain or the deck. */
+  glowColor: 0x2a2f3a,
+  glowAmount: 1.0,
+
   /** Crown lights: a lit band under the roofline of some towers at night. */
   crownFraction: 0.45,
   crownHeight: 1.6,
@@ -1082,6 +1091,11 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     );
     oEmis.assign(select(F.isRoof, vec3(0.0),
       oEmis.add(crownColor.mul(hasCrown.mul(crownBand).mul(u.nightAmount).mul(u.crownBoost)))));
+
+    // SKYGLOW — the city lighting itself. Multiplied by the surface's own
+    // albedo, so it is an ambient light rather than a fog added on top: a
+    // pale stone wall picks it up and dark glass barely does.
+    oEmis.assign(oEmis.add(oCol.mul(u.glowColor).mul(u.glowAmount).mul(u.nightAmount)));
 
     return oCol;
   });

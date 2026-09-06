@@ -21,7 +21,10 @@
 // vertex work, and the vertex stage is nowhere near the bottleneck here.
 // ============================================================================
 import * as THREE from "three";
-import { Fn, float, vec3, uniform, positionWorld, smoothstep, mix } from "three/tsl";
+import {
+  Fn, float, vec3, vec4, uniform, positionWorld, positionGeometry, smoothstep, mix, oneMinus,
+  vertexColor, materialColor, varyingProperty,
+} from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
@@ -44,6 +47,35 @@ export const FURNITURE_DEFAULTS = {
   /** Keep clear of the crossings at block ends, metres. */
   crossClear: 6.5,
   nightAmount: 0,
+  /** ── MOVING TRAFFIC ───────────────────────────────────────────────────
+   *  Cars driving the lanes, wrapping across the city. ONE extra draw, and
+   *  the update is a matrix compose per visible car on the CPU — a few
+   *  hundred of those is nothing, and it avoids putting per-instance motion
+   *  in the vertex stage where it is far harder to get right.
+   *
+   *  Nothing else in the city moves; this is what makes it read as running
+   *  rather than as a diorama, and at night the headlight and tail-light
+   *  streams down an avenue are the whole picture. */
+  traffic: true,
+  /** Cars per lane across the full width of the city. */
+  trafficPerLane: 10,
+  /** Metres per second. Real city traffic, not a motorway. */
+  trafficSpeedMin: 7.5,
+  trafficSpeedMax: 13.5,
+  /** How far from the camera a moving car is still updated and drawn. */
+  trafficRange: 380,
+  /** Head and tail lamp strength at night (they bloom). */
+  headlightBoost: 6.0,
+  taillightBoost: 2.6,
+  headlightColor: 0xfff0d0,
+  taillightColor: 0xff2a12,
+
+  /** NIGHT SKYGLOW. A real city is never black between its lamps — its own
+   *  light bounces off haze and off every other lit surface. Without it every
+   *  car and tree is a silhouette the instant the sun goes. A flat ambient
+   *  add, warm, scaled by night: cheap, and it only touches the city. */
+  glowColor: 0x2a2f3a,
+  glowAmount: 1.0,
 };
 
 /** Deterministic per-station hash. */
@@ -80,7 +112,7 @@ function pickCarColor(r) {
  * @param {number} o.originCellZ
  * @param {object} [o.params]
  */
-export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {} }) {
+export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
   group.name = "CityFurniture";
@@ -94,6 +126,32 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const inside = (x, z) => Math.abs(x - P.centerX) <= half && Math.abs(z - P.centerZ) <= half;
 
   const uNight = uniform(F.nightAmount);
+  const uGlow = uniform(new THREE.Color(F.glowColor));
+  const uGlowAmt = uniform(F.glowAmount);
+  const uHead = uniform(new THREE.Color(F.headlightColor));
+  const uTail = uniform(new THREE.Color(F.taillightColor));
+  const gyBase = gy;
+
+  /**
+   * What a lamp adds to a surface standing in the street, plus the skyglow.
+   * Emissive rather than a light because there are no lights: the value is
+   * the lamp's irradiance times this surface's own albedo, so a white car
+   * lights up under a lamp and a black one barely does — which is what
+   * happens. The albedo is `materialColor × vertexColor × instanceColor`,
+   * exactly what the diffuse slot resolves to, so the two can never disagree.
+   */
+  function litAdd({ vcolor = false, icolor = false } = {}) {
+    let albedo = materialColor;
+    if (vcolor) albedo = albedo.mul(vertexColor());
+    // InstanceNode writes the per-instance tint into this varying and
+    // NodeMaterial multiplies it into the diffuse (NodeMaterial.js:857). Read
+    // the SAME varying rather than a second copy, or a red car would light up
+    // white. Only where the mesh actually has an instanceColor — the varying
+    // is never assigned otherwise.
+    if (icolor) albedo = albedo.mul(varyingProperty("vec3", "vInstanceColor"));
+    const pool = lamp ? lamp.pool().mul(lamp.color) : vec3(0.0);
+    return albedo.mul(pool.add(uGlow.mul(uGlowAmt).mul(uNight)));
+  }
 
   // ── Geometry ───────────────────────────────────────────────────────────────
   // THE CAR IS A SIDE PROFILE, not two boxes. A box read as a box even from
@@ -127,6 +185,21 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       bc[i * 3] = k; bc[i * 3 + 1] = glass ? 0.18 : 1.0; bc[i * 3 + 2] = glass ? 0.22 : 1.0;
     }
     body.setAttribute("color", new THREE.BufferAttribute(bc, 3));
+    // HEAD AND TAIL LAMPS, as real boxes on the nose and tail. The traffic
+    // material finds them by their LOCAL Z (positionGeometry survives
+    // instancing; positionLocal does not — InstanceNode overwrites it), so
+    // they need no attribute of their own and the parked cars, whose material
+    // has no such term, simply leave them dark.
+    const lamps = [];
+    for (const [x, z, w, h] of [
+      [-0.62, -2.28, 0.44, 0.20], [0.62, -2.28, 0.44, 0.20],     // headlights
+      [-0.66, 2.28, 0.40, 0.16], [0.66, 2.28, 0.40, 0.16],       // tail lights
+    ]) {
+      const g = box(w, h, 0.10, x, z < 0 ? 0.62 : 0.70, z).toNonIndexed();
+      const c = new Float32Array(g.getAttribute("position").count * 3).fill(1.0);
+      g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+      lamps.push(g);
+    }
     const wheels = [];
     for (const [x, z] of [[-0.86, -1.45], [0.86, -1.45], [-0.86, 1.45], [0.86, 1.45]]) {
       // ExtrudeGeometry is NON-indexed and CylinderGeometry is indexed, and
@@ -141,8 +214,10 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     }
     // All non-indexed, all position/normal/uv/color — merge needs identical
     // layouts AND identical indexing.
-    const g = mergeGeometries([body, ...wheels], false);
-    body.dispose(); wheels.forEach((w) => w.dispose());
+    const g = mergeGeometries([body, ...wheels, ...lamps], false);
+    body.dispose();
+    wheels.forEach((w) => w.dispose());
+    lamps.forEach((l) => l.dispose());
     return g;
   })();
   const trunkGeo = box(0.24, F.treeHeight * 0.55, 0.24);
@@ -183,12 +258,16 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   // per-instance tint costs nothing.
   const carMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0.45, vertexColors: true });
   carMat.name = "CityCars";
+  carMat.emissiveNode = litAdd({ vcolor: true, icolor: true });
   const trunkMat = new THREE.MeshStandardNodeMaterial({ color: 0x3b2c20, roughness: 0.95 });
   trunkMat.name = "CityTrunks";
+  trunkMat.emissiveNode = litAdd();
   const canopyMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.95 });
   canopyMat.name = "CityCanopies";
+  canopyMat.emissiveNode = litAdd({ icolor: true });
   const railMat = new THREE.MeshStandardNodeMaterial({ color: 0x3a3d42, roughness: 0.45, metalness: 0.7 });
   railMat.name = "CityRails";
+  railMat.emissiveNode = litAdd();
   // Traffic light: dark pole and head; the lens glows in the instance's colour,
   // brighter at night, and into the bloom MRT.
   const lightMat = new THREE.MeshStandardNodeMaterial({ color: 0x1a1c1f, roughness: 0.5, metalness: 0.5 });
@@ -293,11 +372,112 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     group.add(im);
     return im;
   }
+  // ── MOVING TRAFFIC ─────────────────────────────────────────────────────────
+  // A lane is a straight line across the whole city on one street axis; cars
+  // wrap along it, so they pass through the junctions instead of stopping at
+  // block ends. Lane centres sit at 1/8, 3/8, 5/8, 7/8 of the carriageway —
+  // between the paint the street shader draws at 1/4, 1/2 and 3/4.
+  const lanes = [];
+  if (F.traffic) {
+    const span = half * 2;
+    for (let k = Math.floor((-half - ox) / pitch) - 1; k <= Math.ceil((half - ox) / pitch) + 1; k++) {
+      for (const axis of ["z", "x"]) {
+        const base = (axis === "z" ? ox : oz) + k * pitch + blockW;
+        for (const [frac, dir] of [[0.125, 1], [0.375, 1], [0.625, -1], [0.875, -1]]) {
+          const across = base + streetW * frac;
+          const lim = axis === "z" ? P.centerX : P.centerZ;
+          if (Math.abs(across - lim) > half) continue;
+          lanes.push({ axis, across, dir, span });
+        }
+      }
+    }
+  }
+  const traffic = [];
+  for (let li = 0; li < lanes.length; li++) {
+    for (let i = 0; i < F.trafficPerLane; i++) {
+      const r0 = h2(li, i, 61), r1 = h2(li, i, 62), r2 = h2(li, i, 63);
+      traffic.push({
+        lane: lanes[li],
+        phase: (i + r0) / F.trafficPerLane,
+        speed: F.trafficSpeedMin + r1 * (F.trafficSpeedMax - F.trafficSpeedMin),
+        color: pickCarColor(r2),
+        m: new THREE.Matrix4(),
+        x: 0, z: 0,
+      });
+    }
+  }
+
+  const trafficMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0.45, vertexColors: true });
+  trafficMat.name = "CityTraffic";
+  {
+    // Head and tail lamps, found by the geometry's own Z. `positionGeometry`
+    // is the raw attribute and survives instancing.
+    const gz = positionGeometry.z;
+    const gy = positionGeometry.y;
+    const isLamp = smoothstep(0.55, 0.62, gy).mul(oneMinus(smoothstep(0.86, 0.94, gy)));
+    const isHead = smoothstep(-2.34, -2.20, gz).mul(oneMinus(smoothstep(-2.20, -2.06, gz))).mul(isLamp);
+    const isTail = smoothstep(2.20, 2.26, gz).mul(isLamp);
+    // Headlights burn day and night (a car with its lights off at dusk reads
+    // as parked); tail lights only really register after dark.
+    const lampGlow = uHead.mul(isHead).mul(mix(float(0.25), float(1.0), uNight)).mul(F.headlightBoost)
+      .add(uTail.mul(isTail).mul(uNight).mul(F.taillightBoost));
+    trafficMat.emissiveNode = litAdd({ vcolor: true, icolor: true }).add(lampGlow);
+    applyBloomMRT(trafficMat, vec4(lampGlow, 1.0));
+  }
+
   const carMesh = instanced(cars, carGeo, carMat, "CityCars");
   const trunkMesh = instanced(trees, trunkGeo, trunkMat, "CityTrunks", { shadows: false });
   const canopyMesh = instanced(trees, canopyGeo, canopyMat, "CityCanopies");
   const lightMesh = instanced(lights, lightGeo, lightMat, "CityTrafficLights", { shadows: false });
   const railMesh = instanced(rails, railGeo, railMat, "CityRails", { shadows: false });
+  const trafficMesh = traffic.length
+    ? (() => {
+      const im = new THREE.InstancedMesh(carGeo, trafficMat, traffic.length);
+      im.name = "CityTraffic";
+      im.frustumCulled = false;
+      im.castShadow = true;
+      im.receiveShadow = true;
+      im.count = 0;                       // filled by the first update
+      traffic.forEach((c, i) => im.setColorAt(i, _c.set(c.color)));
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      group.add(im);
+      return im;
+    })()
+    : null;
+
+  /**
+   * Advance the traffic. `t` is seconds; `cam` is the camera position, so only
+   * the cars near enough to see are composed and uploaded — the rest cost a
+   * multiply and a compare.
+   */
+  const _tq = new THREE.Quaternion(), _tp = new THREE.Vector3(), _ts = new THREE.Vector3(1, 1, 1);
+  function updateTraffic(t, cam) {
+    if (!trafficMesh) return;
+    const r2 = F.trafficRange * F.trafficRange;
+    let n = 0;
+    for (let i = 0; i < traffic.length; i++) {
+      const c = traffic[i];
+      const L = c.lane;
+      // Wrap 0..1 along the lane, then map to world.
+      let u = (c.phase + (t * c.speed) / L.span) % 1;
+      if (u < 0) u += 1;
+      const along = -half + u * L.span;
+      const x = L.axis === "z" ? L.across : along * L.dir;
+      const z = L.axis === "z" ? along * L.dir : L.across;
+      const dx = x - cam.x, dz = z - cam.z;
+      if (dx * dx + dz * dz > r2) continue;
+      // Nose points along the direction of travel; the model's nose is at -z.
+      const yaw = L.axis === "z" ? (L.dir > 0 ? 0 : Math.PI) : (L.dir > 0 ? -Math.PI / 2 : Math.PI / 2);
+      _tp.set(x, gyBase, z);
+      _tq.setFromAxisAngle(UP, yaw);
+      trafficMesh.setMatrixAt(n, _tm.compose(_tp, _tq, _ts));
+      if (trafficMesh.instanceColor) trafficMesh.setColorAt(n, _c.set(c.color));
+      n++;
+    }
+    trafficMesh.count = n;
+    trafficMesh.instanceMatrix.needsUpdate = true;
+    if (trafficMesh.instanceColor) trafficMesh.instanceColor.needsUpdate = true;
+  }
 
   // ── DISTANCE CULL ──────────────────────────────────────────────────────────
   // Every kind is one mesh with `frustumCulled = false`, so without this the
@@ -314,6 +494,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     { mesh: railMesh, list: rails, range: 260 },
   ];
   const _pos = new THREE.Vector3();
+  const _tm = new THREE.Matrix4();
   for (const e of [...cars, ...trees, ...lights, ...rails]) { _pos.setFromMatrixPosition(e.m); e.x = _pos.x; e.z = _pos.z; }
   function applyLod(cam) {
     for (const k of kinds) {
@@ -340,14 +521,24 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   return {
     group,
     params: F,
-    stats: { cars: cars.length, trees: trees.length, lights: lights.length, rails: rails.length },
+    stats: {
+      cars: cars.length, trees: trees.length, lights: lights.length, rails: rails.length,
+      traffic: traffic.length, lanes: lanes.length,
+    },
     setNight(n) { uNight.value = Math.max(0, Math.min(1, n || 0)); },
+    /** The night skyglow — colour and strength. */
+    setGlow(hex, amount) {
+      if (hex != null) uGlow.value.set(hex);
+      if (amount != null) uGlowAmt.value = amount;
+    },
     /** Cut each kind at its range from the camera. Call on the LOD timer. */
     applyLod,
+    /** Drive the moving traffic. `t` seconds, `cam` a Vector3. Every frame. */
+    updateTraffic,
     dispose() {
-      for (const m of [carMesh, trunkMesh, canopyMesh, lightMesh, railMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
+      for (const m of [carMesh, trunkMesh, canopyMesh, lightMesh, railMesh, trafficMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
       for (const g of [carGeo, trunkGeo, canopyGeo, lightGeo, railGeo]) g.dispose();
-      for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat]) m.dispose();
+      for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat]) m.dispose();
     },
   };
 }
