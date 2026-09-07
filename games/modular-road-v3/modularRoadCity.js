@@ -707,6 +707,8 @@ export function createModularRoadCity({
 
   // ── Update ─────────────────────────────────────────────────────────────────
   let _lodT = 1e9;
+  /** Which of the two heavy LOD consumers gets this tick — see `update`. */
+  let _lodTurn = 1;
   const _lastLodPos = new THREE.Vector3(1e9, 1e9, 1e9);
 
   function update(dt, camera) {
@@ -731,9 +733,29 @@ export function createModularRoadCity({
     if (_lodT < P.lodInterval && moved < P.lodMoveDist) return;
     _lodT = 0;
     _lastLodPos.copy(camera.position);
+
+    // ── THE EXPENSIVE PAIR TAKE TURNS ─────────────────────────────────────
+    //
+    // These three together walk ~35k items and re-upload every instance
+    // matrix they decide to keep. Run in the same frame — which is what they
+    // used to do — that is one long frame every time the car moves 12 m, and
+    // it showed up as a p95 frame time of 20.4 ms against a 16.7 ms budget
+    // while the median sat exactly on vsync.
+    //
+    // Nothing here needs to be current. The tiers have 30 m of hysteresis and
+    // the furniture and roofs cull at 420-620 m, so being one or two ticks
+    // stale — a few tens of metres at racing speed — cannot be seen. Spreading
+    // them makes the worst tick a third of the size for no visible cost.
+    // The tier pass runs EVERY tick: it decides which buildings draw at all,
+    // it is only 2150 distance tests, and it re-packs instance matrices solely
+    // when a tier actually changed. Staggering it made towers pop.
     applyLod(camera.position);
-    furniture?.applyLod(camera.position);
-    roofs?.applyLod(camera.position);
+    // These two are the expensive pair — ~33k items between them, and both
+    // re-upload every matrix they keep whether or not anything moved. They take
+    // turns.
+    _lodTurn = (_lodTurn + 1) % 2;
+    if (_lodTurn === 0) furniture?.applyLod(camera.position);
+    else roofs?.applyLod(camera.position);
   }
 
   rebuild();

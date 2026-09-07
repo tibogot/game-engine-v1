@@ -114,12 +114,15 @@ city.group.traverse((o) => { if (o.isInstancedMesh && /^CityRoof/.test(o.name)) 
 // once and the second measurement would just be the first one again.
 const roofParams = city.roofs;
 const eye = { position: new THREE.Vector3(0, 400, 0) };
+// THREE ticks per measurement, not one: the LOD consumers take turns (see the
+// round-robin in city.update), so a single tick is not guaranteed to be the
+// roofs' turn. Pumping three guarantees exactly one roof pass.
+const pump = () => { for (let i = 0; i < 3; i++) { eye.position.y += 1; city.update(5, eye); } };
 roofParams.range = 200;
-city.update(5, eye);
+pump();
 const near = meshes.reduce((a, m) => a + m.count, 0);
 roofParams.range = 1e6;
-eye.position.set(0, 401, 0);          // and move it, for the same reason
-city.update(5, eye);
+pump();
 const all = meshes.reduce((a, m) => a + m.count, 0);
 check("the distance cull actually cuts", near < all, `${near} drawn at 200 m vs ${all} at ∞`);
 

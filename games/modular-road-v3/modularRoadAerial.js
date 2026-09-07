@@ -62,6 +62,26 @@ export const AERIAL_DEFAULTS = {
    * thick at altitude as it is in the valley, which reads as soup.
    */
   scaleHeight: 2200,
+  /**
+   * ── THE GROUND LAYER ──────────────────────────────────────────────────────
+   *
+   * A SECOND, much shallower haze under the clean air — the aerosol layer a
+   * real city sits in. Two components, because one cannot do this job: at a
+   * scale height of 2200 m a 400 m tower still sees 95% of the density its own
+   * doorstep does, so the whole city hazes by the same amount and reads as one
+   * even wash at distance. Nothing separates near from far but perspective.
+   *
+   * At 160 m the layer is thick in the streets, half gone by the second
+   * setback and effectively absent above the towers — which is the picture
+   * everyone recognises from the air: roofs and masts standing clear out of
+   * murk, with the streets below them lost in it. It is also what gives a
+   * skyline DEPTH, because each rank of buildings sinks a little further into
+   * it than the one in front.
+   *
+   * Set `groundHaze` to 0 for the old single-component air.
+   */
+  groundHaze: 0.00055,
+  groundHazeHeight: 160,
   /** Strength of the forward-scatter lobe: haze looking INTO the sun goes bright and warm. */
   sunGlow: 1.35,
   /** Tightness of that lobe. Higher = a smaller, hotter halo around the sun. */
@@ -84,6 +104,8 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
   const uDensity = uniform(P.density);
   const uMaxAmount = uniform(P.maxAmount);
   const uInvScaleH = uniform(1 / P.scaleHeight);
+  const uGroundHaze = uniform(P.groundHaze);
+  const uInvGroundH = uniform(1 / P.groundHazeHeight);
   const uSunGlow = uniform(P.sunGlow);
   const uSunGlowPow = uniform(P.sunGlowPow);
   const uMaxDist = uniform(P.maxDist);
@@ -140,8 +162,15 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
       // metres of relief.
       const midY = uCamPos.y.add(dirW.y.mul(dist).mul(0.5)).max(0.0);
       const rho = exp(midY.mul(uInvScaleH).negate());
+      // The shallow layer, same midpoint stand-in. It is a cruder approximation
+      // here than for the clean air — a 160 m scale height varies a lot over a
+      // ray that climbs 300 m — but this is a look, not a radiometric budget,
+      // and the error is a smooth one that reads as the layer being slightly
+      // soft-edged, which it is.
+      const rhoG = exp(midY.mul(uInvGroundH).negate());
 
-      const amount = exp(dist.mul(uDensity).mul(rho).negate()).oneMinus().mul(uMaxAmount);
+      const sigma = uDensity.mul(rho).add(uGroundHaze.mul(rhoG));
+      const amount = exp(dist.mul(sigma).negate()).oneMinus().mul(uMaxAmount);
 
       // ── THE COLOUR OF THE DISTANCE ────────────────────────────────────────────
       // The sky in THIS direction, not one fog colour: pale at the horizon, deeper
@@ -226,6 +255,8 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
     uDensity.value = P.density;
     uMaxAmount.value = P.maxAmount;
     uInvScaleH.value = 1 / Math.max(1, P.scaleHeight);
+    uGroundHaze.value = P.groundHaze;
+    uInvGroundH.value = 1 / Math.max(1, P.groundHazeHeight);
     uSunGlow.value = P.sunGlow;
     uSunGlowPow.value = P.sunGlowPow;
     uMaxDist.value = P.maxDist;
