@@ -1339,6 +1339,102 @@ export function buildWorldPanel(app) {
           onChange: woc,
           hint: "Map-covering sea with waves; islands = terrain above sea level. Independent of placed water bodies.",
         });
+        _dropdown(oceanBody, wo, "mode", {
+          label: "Shader",
+          options: { Classic: "classic", "V2 (shore field)": "v2" },
+          onChange: woc,
+          hint: "Classic is the original, unchanged. V2 measures distance to the "
+            + "WATERLINE rather than water depth, so a foam band is the same width "
+            + "in metres on a beach and against a cliff, the surf travels shoreward "
+            + "instead of the whole map pulsing together, and shallow water is "
+            + "transparent. Built the first time you select it; only one of the two "
+            + "is ever alive.",
+        });
+
+        // The V2 knobs, in their own drawer so the classic set is unchanged.
+        // A curated subset — the shader has ~70 params and most are look-tuning
+        // that belongs in a lab, not in the middle of a terrain editor.
+        {
+          const v2 = wo.v2;
+          const v2Body = _section(oceanBody, "V2 shore", false);
+          _slider(v2Body, v2, "surfHz", {
+            label: "Sets / second", min: 0.02, max: 0.6, step: 0.005, onChange: woc,
+            hint: "Wave sets arriving per second. Times crest spacing = the speed "
+              + "the breaker travels shoreward, in m/s.",
+          });
+          _slider(v2Body, v2, "surfLength", {
+            label: "Crest spacing", min: 12, max: 160, step: 1, onChange: woc,
+            hint: "Metres between successive crests.",
+          });
+          _slider(v2Body, v2, "surfReach", {
+            label: "Surf zone", min: 4, max: 120, step: 1, onChange: woc,
+            hint: "Metres offshore the surf reaches. A beach wants 40-60; a "
+              + "vertical quay wall wants ~14.",
+          });
+          _slider(v2Body, v2, "runupReach", {
+            label: "Run-up", min: 0, max: 26, step: 0.25, onChange: woc,
+            hint: "Metres the water's edge climbs the beach at the top of the "
+              + "surge. Switches itself off where the seabed is too steep — water "
+              + "climbs sand, not rock.",
+          });
+          _separator(v2Body);
+          _slider(v2Body, v2, "foamCutoff", {
+            label: "Foam density", min: 0, max: 0.8, step: 0.01, onChange: woc,
+            hint: "Threshold at full coverage. Low is a solid white sheet with "
+              + "round holes; ~0.6 leaves a connected web, which is what reads as "
+              + "foam.",
+          });
+          _slider(v2Body, v2, "edgeIntensity", {
+            label: "Edge foam", min: 0, max: 1.5, step: 0.02, onChange: woc,
+            hint: "The permanent lace at the water's edge, which moves with it.",
+          });
+          _slider(v2Body, v2, "foamNoiseScale", {
+            label: "Foam cells / m", min: 0.05, max: 1.6, step: 0.01, onChange: woc,
+            hint: "Voronoi cell density. Too fine and it reads as hatching.",
+          });
+          _slider(v2Body, v2, "foamMacroScale", {
+            label: "Sheet cells / m", min: 0.005, max: 0.12, step: 0.002, onChange: woc,
+            hint: "The LARGE Voronoi that decides where foam clumps at all — "
+              + "0.03 is about 33 m cells. Everything else in the foam lives "
+              + "under 2 m, so without this the band averages out to one even "
+              + "ribbon of noise at any real viewing distance.",
+          });
+          _slider(v2Body, v2, "foamMacroAmt", {
+            label: "Sheet contrast", min: 0, max: 1, step: 0.02, onChange: woc,
+            hint: "How hard the sheets bite. 0 is the old uniform band; past ~0.7 "
+              + "whole stretches of coast go bare.",
+          });
+          _slider(v2Body, v2, "foamTransition", {
+            label: "Edge softness", min: 0.02, max: 0.45, step: 0.01, onChange: woc,
+            hint: "Width of the threshold's shoulder. Near zero gives flat shapes "
+              + "with drawn edges; ~0.18 lets thin foam actually be thin, which "
+              + "is what makes the edge read as fractal rather than cut.",
+          });
+          _slider(v2Body, v2, "foamLodPixels", {
+            label: "Foam LOD (px/cell)", min: 1, max: 8, step: 0.1, onChange: woc,
+            hint: "Pixels per Voronoi cell at which an octave is dropped. Below ~2 "
+              + "you are sampling under Nyquist and it crawls with static; high "
+              + "values go soft early. This is measured from the real pixel "
+              + "footprint, so it holds at any resolution or field of view.",
+          });
+          _separator(v2Body);
+          _slider(v2Body, v2, "depthDistance", {
+            label: "Absorption depth", min: 4, max: 120, step: 1, onChange: woc,
+            hint: "Metres of water over which colour saturates. Ocean holds its "
+              + "colour far longer than a lake.",
+          });
+          _slider(v2Body, v2, "turbidityStrength", {
+            label: "Nearshore turbidity", min: 0, max: 2, step: 0.02, onChange: woc,
+            hint: "Churned-up water near the coast scatters more, and greener.",
+          });
+          _toggle(v2Body, v2, "ssrEnabled", {
+            label: "Reflections (SSR)", onChange: woc,
+            hint: "Screen-space reflections. Measured at ~5.5 ms on open sea — the "
+              + "most expensive thing in the shader by a wide margin, and off by "
+              + "default for that reason. Worth it only where there is something "
+              + "on screen worth reflecting.",
+          });
+        }
         _slider(oceanBody, wo, "seaLevel", {
           label: "Sea level",
           min: -100,

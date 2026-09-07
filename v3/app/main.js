@@ -2457,6 +2457,17 @@ export async function startV3App(opts = {}) {
       const region = isFull ? null : rectToWorldRegion(rect);
       treeEnv.syncTreeHeights(region);
       foliageEnv.syncFoliageHeights(region);
+      /*
+       * The v2 ocean's shoreline distance field is derived from the terrain, so
+       * a sculpt invalidates it — a coast that moved leaves the foam behind.
+       * This is the right place because the readback is ALREADY debounced to a
+       * settled edit (see markHeightmapDirty / scheduleHeightmapReadback); the
+       * bake is ~100 ms at 1024² and must never ride a drag.
+       *
+       * Costs nothing unless the v2 ocean exists — setOceanHeights only bakes
+       * when it has been built and is the active mode.
+       */
+      worldEnv?.setOceanHeights(cpuHeightmap);
     } finally {
       readbackInFlight = false;
       if (readbackPending) syncHeightmapToCPU();
@@ -5256,6 +5267,17 @@ export async function startV3App(opts = {}) {
       rivers2,
       riversV2,
       paintLayers: textureLib.exportData(),
+      /*
+       * The world's LOOK, which this format has never carried. Only the ocean so
+       * far — light, sky, fog and post are the same gap and the same one-key
+       * change, and belong here when someone needs them.
+       *
+       * Written WHOLE rather than sparsely, matching susuki/groundTsl/meadowTsl
+       * below. The load merges per key and ignores what it no longer knows, so a
+       * param added later keeps its default on an older file instead of arriving
+       * `undefined` — the contract lakeSystem.importData already uses.
+       */
+      environment: { worldOcean: structuredClone(worldToolState.worldOcean) },
       spawn:     spawnSystem.exportData(),
       grassDensity:  grassTerrainData.getDensitySnapshot(),
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
@@ -5335,6 +5357,29 @@ export async function startV3App(opts = {}) {
     if (d.grassDensity?.length === grassTerrainData.densityTex.image.data.length) {
       grassTerrainData.restoreDensitySnapshot(d.grassDensity);
       if (d.grassDensity.some((v) => v > 0)) void ensureGrassBuilt();
+    }
+    /*
+     * The world's look. Merged PER KEY, and only for keys this build still has —
+     * so a project written before a param existed keeps today's default for it
+     * rather than setting it `undefined`, and a param since retired is ignored
+     * rather than resurrected. Same contract as lakeSystem.importData.
+     */
+    if (d.environment?.worldOcean) {
+      const src = d.environment.worldOcean;
+      const dst = worldToolState.worldOcean;
+      for (const k of Object.keys(dst)) {
+        if (k === "v2") continue;
+        if (src[k] !== undefined) dst[k] = src[k];
+      }
+      if (src.v2 && dst.v2) {
+        for (const k of Object.keys(dst.v2)) {
+          if (src.v2[k] !== undefined) dst.v2[k] = src.v2[k];
+        }
+      }
+      worldEnv?.worldOceanChanged();
+      // The panel binds to the state object directly, so rebuilding it is how
+      // its controls pick up values a load moved underneath them.
+      buildWorldPanelUi();
     }
     if (d.susuki) Object.assign(susukiState, d.susuki);
     if (d.susukiDensity?.length === grassTerrainData.susukiDensityTex.image.data.length) {

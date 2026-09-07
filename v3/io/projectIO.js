@@ -23,6 +23,9 @@
  *                                            UNCONFORMED base when it owns it)
  *   rivers2   river2System.exportData()     (River+ carve — heightmap blob is the
  *                                            UNCARVED base; load re-carves)
+ *   environment { worldOcean }  the world's LOOK, as opposed to its shape. Only
+ *             the ocean so far; light, sky, fog and post are the same gap and the
+ *             same one-key-each change, and belong here when they are needed.
  *   paintLayers  7 ground-paint slots: name, per-map { name, url } references,
  *             tiling / normal / AO / roughness strengths and auto-paint rules.
  *             REFERENCES, not pixels — the images live in /textures. A map
@@ -50,6 +53,7 @@ export function encodeProjectFile({
   snow, snowRes,        // Uint8Array, texels per side
   trees, foliage, props, roads, splines, lakes, rivers, rivers2, riversV2,
   paintLayers,          // textureLibrary.exportData() — slot metadata, no pixels
+  environment,          // { worldOcean } — the world LOOK; see the manifest note
   spawn,                // { x, z, yaw } player start, or null
   grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
   susukiDensity,        // Uint8Array (RGBA 512²) painted susuki coverage
@@ -89,6 +93,7 @@ export function encodeProjectFile({
     rivers2:  rivers2 ?? null,
     riversV2: riversV2 ?? null,
     paintLayers: paintLayers ?? null,
+    environment: environment ?? null,
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
     groundTsl: groundTsl ?? null,
@@ -153,6 +158,7 @@ export function decodeProjectFile(buffer) {
     rivers2:   manifest.rivers2,
     riversV2:  manifest.riversV2 ?? null,
     paintLayers: manifest.paintLayers ?? null,
+    environment: manifest.environment ?? null,
     spawn:     manifest.spawn ?? null,
     grassDensity:  blob("grassDensity"),
     susukiDensity: blob("susukiDensity"),

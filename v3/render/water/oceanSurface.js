@@ -143,7 +143,7 @@ import { MeshBasicNodeMaterial } from "three";
 import {
   Fn, If, Break, Discard, uniform, float, vec2, vec3, vec4,
   mix, smoothstep, step, dot, exp, pow, max, min, abs, saturate, clamp,
-  floor, fract, sin, cos, sqrt, length, round, Loop, attribute,
+  floor, fract, sin, cos, sqrt, length, round, log2, fwidth, Loop, attribute,
   normalize, reflect, texture, positionLocal, positionWorld, positionView,
   modelWorldMatrix, cameraPosition, cameraNear, cameraFar,
   cameraViewMatrix, cameraProjectionMatrix, screenUV,
@@ -152,6 +152,21 @@ import {
 
 const TWO_PI = 6.283185307179586;
 const DEG2RAD = Math.PI / 180;
+
+/*
+ * Foam octaves. THE number that decides whether foam reads as foam.
+ *
+ * Fractal edges are the whole look: at 2 octaves the field is smooth blobs with
+ * rounded boundaries however it is thresholded, and no amount of tuning gets
+ * past that — the shapes simply have no detail to tear. Each octave added puts
+ * structure one scale finer, and by 5 the boundary never resolves into a line,
+ * which is what makes it read like a cloud rather than a decal. Rendered
+ * side by side at 2/3/4/5 against a reference implementation before choosing.
+ *
+ * 5 x 9 = 45 hashes. It is the most expensive thing in the foam block and it is
+ * the reason the block is worth having.
+ */
+const FOAM_OCTAVES = 5;
 
 /** SSR march. TSL unrolls Loop counts, so these are compile-time. */
 const SSR_STEPS = 20;
@@ -185,18 +200,19 @@ const _vnoise2 = /*#__PURE__*/ Fn(([p]) => {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 });
 
-/** 2-octave value FBM — only ever used to domain-warp the foam, where a third
- *  octave changes nothing you can see. */
+/** 3-octave value FBM — only ever used to domain-warp the foam. The reference
+ *  implementation uses 5; the top two are below a pixel at any distance the
+ *  surf zone is actually seen from, and cost 8 hashes each. */
 const _warpFbm = /*#__PURE__*/ Fn(([p_immutable]) => {
   const p = p_immutable.toVar();
   const v = float(0).toVar();
   const a = float(1).toVar();
   const t = float(0).toVar();
-  Loop(2, () => {
+  Loop(3, () => {
     v.addAssign(a.mul(_vnoise2(p)));
     t.addAssign(a);
     p.assign(p.mul(2.3));
-    a.assign(a.mul(0.45));
+    a.assign(a.mul(0.4));
   });
   return v.div(max(t, float(1e-4)));
 });
@@ -220,28 +236,44 @@ const _worleyF1 = /*#__PURE__*/ Fn(([p, jitter]) => {
 });
 
 /**
- * 4-octave Voronoi (Worley F1) FBM — the foam pattern.
+ * Domain-warped Worley (F1) FBM with per-octave screen-space LOD — the foam
+ * pattern.
  *
  * NOT inverted: F1 is small at cell centres and large at the boundaries, so the
- * high values form the NETWORK BETWEEN cells. That web is what makes foam read
- * as foam — a connected, ragged mesh of filaments with holes in it — where the
- * inverted form gives disconnected blobs, and where stretching it anisotropically
- * (tried, discarded) gives parallel brush strokes.
+ * high values form the network BETWEEN cells, and at enough octaves that network
+ * is a ragged fractal web — which is what foam looks like.
  *
- * 4 octaves rather than the old ocean's 5: the lake recorded that the 5th is
- * invisible at a shoreline, but 3 loses the fine lace once a domain warp is
- * pulling the coarse octaves around. 36 hashes vs 45.
+ * An inverted variant was tried and shipped briefly, on the theory that the
+ * un-inverted form only ever yields thin ridge lines. It does, at two or three
+ * octaves; the fix for that is octaves, not inversion. See FOAM_OCTAVES.
+ *
+ * `lod` is the (fractional) octave index at which one cell has shrunk to about
+ * a pixel. Octaves past it fade out AND leave the normaliser with them, so the
+ * field converges on the average of the octaves that are still resolvable
+ * rather than on a constant — no brightness step as an octave goes.
+ *
+ * Fading a sub-pixel octave rather than thresholding it is the entire point. A
+ * Voronoi cell smaller than a pixel cannot be resolved, and running an erosion
+ * threshold across one is how procedural foam becomes crawling static — which
+ * is exactly what the shoreline looked like from above before this existed.
  */
-const _worleyFbm = /*#__PURE__*/ Fn(([p_immutable, jitter]) => {
+const _worleyFbmLod = /*#__PURE__*/ Fn(([p_immutable, jitter, lod]) => {
   const p = p_immutable.toVar();
   const v = float(0).toVar();
   const a = float(0.5).toVar();
   const t = float(0).toVar();
-  Loop(3, () => {
-    v.addAssign(a.mul(_worleyF1(p, jitter)));
-    t.addAssign(a);
+  const oct = float(0).toVar();
+  Loop(FOAM_OCTAVES, () => {
+    // 1 while the octave is resolvable, ramping to 0 across the octave that
+    // crosses Nyquist. Weighting the normaliser by the same number is what
+    // keeps the mean steady as octaves leave, so foam does not brighten or
+    // darken as it recedes.
+    const w = a.mul(saturate(lod.sub(oct)));
+    v.addAssign(w.mul(_worleyF1(p, jitter)));
+    t.addAssign(w);
     p.assign(p.mul(2.0));
     a.assign(a.mul(0.5));
+    oct.addAssign(float(1));
   });
   return v.div(max(t, float(1e-4)));
 });
@@ -419,30 +451,50 @@ export const OCEAN2_DEFAULTS = {
   edgeWidth: 1.6,
   edgeIntensity: 0.9,
   /** Voronoi cells per metre in the coarse field. */
-  foamNoiseScale: 0.55,
+  foamNoiseScale: 0.145,
+  /*
+   * ── THE MACRO FIELD ────────────────────────────────────────────────────────
+   * Cells per metre of a third, much larger Voronoi that modulates COVERAGE
+   * rather than texture: 0.03 ≈ 33 m cells.
+   *
+   * This is the thing the foam was missing. Everything else here lives between
+   * 0.45 m and 1.8 m, so from any distance the whole band averaged out to one
+   * uniform ribbon of noise — foam-coloured static rather than foam. Real surf
+   * is scale-invariant across two orders of magnitude: 30-50 m sheets where a
+   * set has just broken, 5-10 m patches as it drains, then metre-scale lace.
+   * Without a macro term you can add octaves forever and never get the first
+   * of those, because no octave is anywhere near that size.
+   *
+   * It drives coverage, not brightness, so it feeds the erosion threshold: a
+   * cell with low macro value does not get faint foam, it gets torn-open foam
+   * with holes in it, and eventually none.
+   */
+  foamMacroScale: 0.03,
+  /** How hard the macro field bites. 0 = the old uniform band, 1 = coverage is
+   *  entirely at the macro field's mercy (too much — sets vanish between cells). */
+  foamMacroAmt: 0.45,
+  /** How far the macro sheets are dragged along the shore per second. Sets do
+   *  not sit still; a stationary macro field reads as a stain on the water. */
+  foamMacroDrift: 0.9,
   /** 1 = fully random cell points, 0 = a regular grid (and it looks like one). */
   foamJitter: 1.0,
   /** Domain warp: frequency, then how hard it pushes. The warp is what stops the
    *  Voronoi reading as a grid, so `foamWarpStrength` near 1 is not optional. */
-  foamWarpScale: 0.5,
-  foamWarpStrength: 1.0,
-  /** Second Voronoi field, as a multiple of the first, and how much of it rides
-   *  on the coarse one. This is what puts holes and clumping in the filaments. */
-  foamFineScale: 3.4,
-  foamFineAmt: 0.70,
+  foamWarpScale: 3.0,
+  foamWarpStrength: 0.6,
   /** Stretches the summed Voronoi field to fill 0..1. Without it the field sits
    *  around 0.35 and every threshold knob below is unusable — see the note at
    *  the point of use. */
-  foamGain: 2.1,
+  foamGain: 1.6,
   /** Shapes the web: >1 thins the filaments, <1 fattens them. */
-  foamContrast: 1.35,
+  foamContrast: 1.5,
   /**
    * Erosion curve. Coverage sets a THRESHOLD on the noise field rather than
    * scaling the foam's opacity, so ageing foam breaks into filaments and flecks
    * instead of politely fading out. Higher = it holds together longer and then
    * shatters late.
    */
-  foamErode: 2.0,
+  foamErode: 1.6,
   /**
    * The threshold at FULL coverage, in the gain-normalised field's own units.
    * Low is a solid white sheet with round holes punched in it (which is what it
@@ -450,15 +502,31 @@ export const OCEAN2_DEFAULTS = {
    * with roughly half the area open, which is the target. Above ~0.75 even a
    * breaking crest is only flecks.
    */
-  foamCutoff: 0.60,
-  /** Softness of that threshold. Small keeps foam edges crisp — foam does not
-   *  have soft edges, it has torn ones. */
-  foamTransition: 0.13,
-  /** Between these the foam stops being a thresholded field and becomes its own
-   *  area average — cells are sub-pixel past here, and thresholding something
-   *  you cannot resolve is how procedural foam turns into crawling sparkle. */
-  foamDetailNear: 70,
-  foamDetailFar: 190,
+  foamCutoff: 0.35,
+  /** Width of the threshold's shoulder, and it is load-bearing: a near-binary
+   *  cut turns any field into flat shapes with drawn edges. This is what lets
+   *  thin foam be thin rather than absent. */
+  foamTransition: 0.18,
+  /*
+   * Between these the foam stops being a thresholded field and becomes its own
+   * area average.
+   *
+   * These are now a BACKSTOP, not the mechanism. Sub-pixel detail is killed per
+   * octave by the screen-space LOD in `_worleyFbmLod`, which measures the real
+   * footprint of a pixel in metres instead of guessing from camera distance —
+   * a fixed metre range cannot be right, because whether a cell is sub-pixel
+   * depends on resolution and field of view as much as on how far away it is.
+   * The old 70/190 m pair was tuned at one window size on one machine, and from
+   * a high camera it left the band still hard-thresholding cells about a pixel
+   * across, which is exactly where the static came from. Pushed out so the LOD
+   * does the work and these only catch the far horizon.
+   */
+  foamDetailNear: 260,
+  foamDetailFar: 620,
+  /** Pixels per Voronoi cell at which an octave is considered spent. Below ~2
+   *  you are sampling under Nyquist and it sparkles; far above it, foam goes
+   *  soft before it needs to. */
+  foamLodPixels: 2.5,
   /** Area fraction the eroded field covers at full coverage, which is what the
    *  far field converges on. Read it off a close-up: it is how white the densest
    *  foam looks when you squint. */
@@ -594,11 +662,13 @@ export function createOceanSurface({
   u.edgeWidth = uniform(D.edgeWidth);
   u.edgeIntensity = uniform(D.edgeIntensity);
   u.foamNoiseScale = uniform(D.foamNoiseScale);
+  u.foamMacroScale = uniform(D.foamMacroScale);
+  u.foamMacroAmt = uniform(D.foamMacroAmt);
+  u.foamMacroDrift = uniform(D.foamMacroDrift);
+  u.foamLodPixels = uniform(D.foamLodPixels);
   u.foamJitter = uniform(D.foamJitter);
   u.foamWarpScale = uniform(D.foamWarpScale);
   u.foamWarpStrength = uniform(D.foamWarpStrength);
-  u.foamFineScale = uniform(D.foamFineScale);
-  u.foamFineAmt = uniform(D.foamFineAmt);
   u.foamGain = uniform(D.foamGain);
   u.foamContrast = uniform(D.foamContrast);
   u.foamErode = uniform(D.foamErode);
@@ -1075,6 +1145,26 @@ export function createOceanSurface({
     const nearEdge = float(1).sub(smoothstep(u.edgeWidth, u.edgeWidth.mul(3), abs(sdEff)));
     const foamWanted = max(surfBand.mul(u.surfEnabled), nearEdge).mul(u.foamEnabled).toVar();
 
+    /*
+     * How many metres of ground one pixel covers here, measured rather than
+     * guessed. This is the number the foam LOD needs, and it has to be taken
+     * OUT HERE: WGSL only allows derivatives under uniform control flow, and
+     * the foam block below is branched on a per-fragment value. Same rule that
+     * keeps mipmapped textureSample out of these branches — and it fails the
+     * same silent way, so it is worth the hoist even though the value is only
+     * used inside.
+     *
+     * `foamLod` is then the octave index at which a Voronoi cell has shrunk to
+     * `foamLodPixels` pixels: octave k has cells 1/(scale·2^k) metres across,
+     * so the octave that reaches the limit is log2 of the ratio between the
+     * base cell size and the pixel footprint.
+     */
+    const mPerPx = max(fwidth(wXZ.x), fwidth(wXZ.y)).toVar();
+    const baseCellM = float(1).div(max(u.foamNoiseScale, float(1e-4)));
+    const foamLod = log2(
+      max(baseCellM.div(max(mPerPx.mul(u.foamLodPixels), float(1e-5))), float(1)),
+    ).toVar();
+
     If(foamWanted.greaterThan(0.002), () => {
       // Steep bed → plunging breaker: a tight, bright line that dies fast.
       // Shallow bed → spilling: wide, soft, long-lived. One number from the
@@ -1090,40 +1180,76 @@ export function createOceanSurface({
       // ragged, organic web — that warp is doing as much for the look as the
       // Voronoi is. `foamDrift` scrolls it offshore, in the shore field's own
       // direction, so the backwash pulls correctly in every bay.
-      const drift = offDir.mul(u.time.mul(u.foamDrift));
+      /*
+       * Advected along the WIND, which is one constant vector for the whole
+       * ocean, not along `offDir`.
+       *
+       * Drifting along the offshore direction sounds better and is the second
+       * version of the same bug as the rotating frame above. `offDir` varies
+       * per fragment, so `offDir · t` is a displacement whose DIRECTION varies
+       * across the surface and whose magnitude grows without bound — after a
+       * minute neighbouring fragments are sampling points tens of metres apart
+       * in different directions, which shears the noise into layered contour
+       * striations that get worse the longer you watch. A constant vector is a
+       * pure translation and cannot distort anything.
+       *
+       * The shoreward motion that actually reads is not the texture sliding
+       * anyway: it is `surfPhase` moving COVERAGE, which is smooth in `sd` and
+       * already correct in every bay.
+       */
+      const windDir = vec2(cos(u.windAngle), sin(u.windAngle)).toVar();
+      const drift = windDir.mul(u.time.mul(u.foamDrift));
+
+      /*
+       * Sampled in PLAIN WORLD SPACE. Rotating the coordinate into the shore
+       * field's own frame to squash the cells across the beach was tried and is
+       * wrong: `offDir` turns from fragment to fragment, so the noise frame
+       * turns with it, and a noise field whose frame rotates is no longer a
+       * smooth function of position. It whorls. The top-down view filled with
+       * concentric contour rings centred wherever the offshore direction swung
+       * — wood grain, not water.
+       *
+       * Anisotropy has to come from something that varies smoothly. Translation
+       * does (`foamDrift` below, and the macro field's along-shore drift); a
+       * per-fragment rotation does not, and no amount of tuning fixes a
+       * coordinate that is discontinuous in the first place.
+       */
       const base = wXZ.add(drift).mul(u.foamNoiseScale).toVar();
 
       const warpP = base.mul(u.foamWarpScale);
       const warp = vec2(_warpFbm(warpP).sub(0.5), _warpFbm(warpP.add(vec2(4, 4))).sub(0.5));
       const wp = base.add(warp.mul(u.foamWarpStrength)).toVar();
 
-      // Two Voronoi FBMs at different scales, SUMMED — not multiplied.
-      //
-      // Multiplying them was wrong and wrong in an instructive way. A Worley F1
-      // FBM does not live in 0..1: normalised by its own amplitude it centres
-      // around ~0.35 with most of its mass in 0.15..0.55. Multiply two of those
-      // and the product centres near 0.12 with a range of a tenth — so the
-      // erosion threshold, which is a number in 0..1, goes from "passes
-      // everything" to "kills everything" over about 0.05 of slider travel, and
-      // there is no setting in between. Summing preserves the distribution;
-      // `foamGain` then stretches it to fill 0..1 so the threshold means what it
-      // says and the sliders are usable.
-      // Coarse is the 3-octave FBM; FINE IS A SINGLE OCTAVE. Two full FBMs was
-      // 72 hashes and measured as the only place the new ocean is dearer than the
-      // old one (2.36 vs 2.10 ms with the screen full of surf zone). The fine
-      // field's whole job is to put holes and clumping into the coarse web, and
-      // its own upper octaves are far below a pixel by the time they would
-      // matter — so one octave does the job for 9 hashes instead of 27.
-      const coarse = _worleyFbm(wp, u.foamJitter).toVar();
-      const fine = _worleyF1(wp.mul(u.foamFineScale).add(vec2(17.3, 5.1)), u.foamJitter).toVar();
-      const mixed = mix(coarse, coarse.mul(0.55).add(fine.mul(0.45)), u.foamFineAmt);
-      const combined = pow(saturate(mixed.mul(u.foamGain)), u.foamContrast).toVar();
+      /*
+       * ── THE PATTERN ───────────────────────────────────────────────────────
+       * Domain-warped Worley FBM, contrast, then a SOFT threshold. Ported from
+       * a reference implementation of this exact effect rather than rederived,
+       * after several rounds of rederiving it badly.
+       *
+       * Three things matter and all three had been wrong:
+       *
+       *  - OCTAVES. Five. Foam's edge is fractal, and an edge is only fractal if
+       *    there is structure at every scale down to the pixel. At two octaves
+       *    the field is smooth blobs and no threshold recovers detail that was
+       *    never generated.
+       *
+       *  - THE WARP IS HIGH FREQUENCY AND WEAK (scale 3.0, strength 0.6). It
+       *    jitters individual cells. The old low-frequency strong warp (0.5,
+       *    1.0) displaced whole regions coherently, which bends the cell
+       *    boundaries into long parallel curves — the fingerprint pattern.
+       *
+       *  - THE THRESHOLD HAS A REAL SHOULDER (~0.18 wide). A near-binary cut
+       *    turns any field, however good, into flat shapes with drawn edges.
+       *    The shoulder is what lets thin foam be thin instead of absent.
+       *
+       * Not inverted. The earlier note claiming the inverted form was needed for
+       * connected sheets was solving a problem that only existed because there
+       * were too few octaves.
+       */
+      const nRaw = _worleyFbmLod(wp, u.foamJitter, foamLod).toVar();
+      const shaped = pow(saturate(nRaw.mul(u.foamGain)), u.foamContrast).toVar();
 
-      // Past a few tens of metres a cell is under a pixel, and thresholding a
-      // sub-pixel field is exactly how you manufacture sparkle. Fade the detail
-      // toward flat so distant foam becomes smooth coverage instead of speckle.
       const detFade = float(1).sub(smoothstep(u.foamDetailNear, u.foamDetailFar, camDist)).toVar();
-      const detail = combined.toVar();
 
       const ph = surfPhase(wXZ, sd).toVar();
       const age = fract(ph).toVar();
@@ -1149,24 +1275,72 @@ export function createOceanSurface({
       // That is what foam actually does, and it is the difference between foam
       // and a white shape getting more transparent. Same mechanism as the drift
       // smoke's rising erosion threshold.
-      const cover = saturate(max(crest, max(wake, edge))).toVar();
-      const thr = mix(float(0.985), u.foamCutoff, pow(cover, u.foamErode)).toVar();
-      const eroded = smoothstep(thr, thr.add(max(u.foamTransition, float(0.01))), detail);
+      /*
+       * ── THE MACRO FIELD ──────────────────────────────────────────────────
+       * A single Voronoi octave at ~33 m, drifting along the shore, folded into
+       * COVERAGE before the threshold is taken. It is deliberately not part of
+       * the pattern above: mixing it into the texture would only have made the
+       * static coarser. Driving coverage instead means a low-macro patch does
+       * not get dimmer foam, it gets foam torn open with holes in it and then
+       * none at all — which is how a spent sheet actually leaves the water.
+       *
+       * This is the scale the whole band was missing. Everything else here
+       * lives under 2 m, so at any real viewing distance it averaged to one
+       * even ribbon; a 33 m term is what gives sheets, gaps, and the sense that
+       * a set broke HERE and not twenty metres along.
+       *
+       * Inverted (1 - F1) so cell interiors are the dense sheets and the cell
+       * boundaries are the tears between them, which is the way round that puts
+       * the gaps in a connected network rather than isolating the foam.
+       */
+      // Warped like everything else. Unwarped, a single Voronoi octave this
+      // large reads as exactly what it is — round holes with clean circular
+      // edges punched out of the band — and the eye finds a circle instantly.
+      // Along the wind for the same reason as the sheet field: a per-fragment
+      // drift direction is not a translation, it is a shear that grows with time.
+      const macroBase = wXZ.add(windDir.mul(u.time.mul(u.foamMacroDrift))).mul(u.foamMacroScale);
+      const macroWarp = vec2(
+        _warpFbm(macroBase.mul(1.9)).sub(0.5),
+        _warpFbm(macroBase.mul(1.9).add(vec2(11, 7))).sub(0.5),
+      );
+      const macroP = macroBase.add(macroWarp.mul(0.75)).toVar();
+      const macroRaw = float(1).sub(_worleyF1(macroP, u.foamJitter)).toVar();
+      // Recentred on its own mean so `foamMacroAmt` fades toward "no modulation"
+      // rather than toward "everything is dimmer".
+      const macro = saturate(macroRaw.sub(0.35).mul(1.7).add(0.5)).toVar();
+      const macroMod = mix(float(1), macro, u.foamMacroAmt).toVar();
 
-      // ── Distance: stop thresholding, start averaging ──────────────────────
+      const cover = saturate(max(crest, max(wake, edge)).mul(macroMod)).toVar();
+
+      /*
+       * ── EROSION, not fading ───────────────────────────────────────────────
+       * Coverage does not scale the foam's brightness — it drives the
+       * THRESHOLD. Full coverage passes most of the field (a sheet at the
+       * breaking crest); as the wake ages and coverage drops, the threshold
+       * climbs and only the densest cores survive, so the sheet breaks into
+       * filaments and then into flecks before it goes. That is what foam does,
+       * and it is the difference between foam and a white shape fading out.
+       *
+       * `foamTransition` is the shoulder width, and it earns its keep now: the
+       * smoothstep is the only thing making thin foam translucent instead of
+       * simply absent.
+       */
+      const thr = mix(float(0.985), u.foamCutoff, pow(cover, u.foamErode)).toVar();
+      const eroded = smoothstep(thr, thr.add(max(u.foamTransition, float(0.01))), shaped).toVar();
+
+      // ── Distance: stop resolving detail, start averaging ──────────────────
       // Past a few tens of metres a Voronoi cell is smaller than a pixel, and
-      // thresholding a field you cannot resolve is precisely how procedural foam
-      // turns into crawling sparkle. Fading the FIELD toward a constant does not
-      // work either — whichever constant you pick sits on one side of the
-      // threshold, so distant foam either vanishes or goes solid. What is
-      // actually wanted is the area average of the eroded field, and `cover` is
-      // already that number, so far foam converges on it directly.
+      // resolving a field you cannot sample is how procedural foam turns into
+      // crawling sparkle. The per-octave LOD above handles most of this; these
+      // two only catch the far horizon, where what is actually wanted is the
+      // area average of the eroded field — and `cover` is already that number.
       foam.assign(saturate(mix(cover.mul(u.foamFarDensity), eroded, detFade)));
 
       // Foam is not one flat white. Thin lace lets a little water through and
       // sits in its own shadow; the dense cores are the only part that is paper
-      // white. Without this the mask reads as a decal laid on the surface.
-      foamShade.assign(mix(float(0.74), float(1.0), saturate(detail.mul(cover.add(0.35)))));
+      // white. Driven by DENSITY now, so the shading follows the same soft
+      // gradient the coverage does instead of being keyed to the raw pattern.
+      foamShade.assign(mix(float(0.7), float(1.0), saturate(eroded.mul(1.15).add(0.1))));
     });
 
     // ── Whitecaps out at sea, from the FFT's own crest pinching ──────────────
@@ -1279,8 +1453,9 @@ export function createOceanSurface({
     "runupReach", "runupRush", "runupShape", "runupMaxSlope", "filmThickness",
     "runupNearEnd", "runupFarEnd", "wetFade", "wetDarken", "wetGloss",
     "foamSunLit", "edgeWidth", "edgeIntensity", "foamNoiseScale", "foamJitter", "foamWarpScale",
-    "foamWarpStrength", "foamFineScale", "foamFineAmt", "foamGain", "foamContrast", "foamErode",
+    "foamWarpStrength", "foamGain", "foamContrast", "foamErode",
     "foamCutoff", "foamTransition", "foamDrift", "foamDetailNear", "foamDetailFar", "foamFarDensity",
+    "foamMacroScale", "foamMacroAmt", "foamMacroDrift", "foamLodPixels",
     "horizonFadeStart", "horizonFadeEnd", "underwaterMurk", "opacity",
   ];
   const BOOL_KEYS = [

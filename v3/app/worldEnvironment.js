@@ -28,6 +28,8 @@ import { PostFxPipeline } from "../../v2/render/post/postFxPipeline.js";
 import { createDayNightSky } from "../render/sky/dayNightSky.js";
 import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
 import { createWorldOcean } from "../render/water/worldOcean.js";
+import { createWorldOceanV2 } from "../render/water/worldOceanV2.js";
+import { HEIGHTMAP_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { InteriorVolumeRegistry } from "../../v2/render/lighting/interiorVolumeRegistry.js";
 import { createInteriorLightingNodes } from "../../v2/render/lighting/interiorLightingTsl.js";
 
@@ -943,6 +945,136 @@ export async function createWorldEnvironment({
   worldOcean.syncParams(toolState.worldOcean);
   worldOcean.setSunDir(_effectiveLightDir);
 
+  /*
+   * ── THE SECOND OCEAN ──────────────────────────────────────────────────────
+   *
+   * `worldOcean.mode === "v2"` draws oceanSurface.js instead. The old one above
+   * is untouched and stays the default; nothing here runs unless the switch is
+   * thrown.
+   *
+   * LAZY, and only one of them ever visible. Each ocean owns a GPU FFT
+   * simulation and a clipmap, so building both up front would double that for a
+   * session that never asks. A game (rts-v3, modular-road) picks its mode at
+   * boot and pays for exactly one.
+   *
+   * The v2 ocean also wants a CPU heightmap to bake its shoreline distance field
+   * from, which lives in main.js — hence `setOceanHeights` below rather than a
+   * constructor argument. Until it is called the field is flat, which reads as
+   * open water with no land: correct, just not yet the terrain.
+   */
+  let oceanV2 = null;
+  let _oceanHeights = null;
+  let _oceanNormalMap = null;
+  /** Sea level the shore field was last baked at; null = nothing baked yet. */
+  let _shoreBakedLevel = null;
+  let _shoreBakeTimer  = 0;
+  /** Shore-field resolution: match the heightmap it is derived from. */
+  const oceanV2FieldRes = HEIGHTMAP_SIZE;
+
+  function waterNormalMapForOcean() {
+    if (!_oceanNormalMap) {
+      _oceanNormalMap = new THREE.TextureLoader().load("/textures/waterNormal.webp");
+      _oceanNormalMap.wrapS = _oceanNormalMap.wrapT = THREE.RepeatWrapping;
+      _oceanNormalMap.colorSpace = THREE.NoColorSpace;
+      _oceanNormalMap.anisotropy = 8;
+    }
+    return _oceanNormalMap;
+  }
+
+  /** Shared with the classic ocean: same quantity, same units, same meaning. */
+  const OCEAN_SHARED_KEYS = [
+    "seaLevel", "windSpeed", "windAngleDeg",
+    "fftSwellAmp", "fftRippleAmp", "fftChoppiness", "fftUpdateHz",
+    "levels", "gridM", "baseCell", "horizonScale",
+  ];
+  function oceanV2Params() {
+    const o = toolState.worldOcean;
+    const out = { ...(o.v2 ?? {}) };
+    for (const k of OCEAN_SHARED_KEYS) if (o[k] !== undefined) out[k] = o[k];
+    return out;
+  }
+
+  function ensureOceanV2() {
+    if (oceanV2) return oceanV2;
+    oceanV2 = createWorldOceanV2({
+      renderer,
+      scene,
+      heightTexNode,
+      terrainSize,
+      /*
+       * The LIVE terrain scale, not the 500 default. Heightmaps are stored
+       * normalised, so this is the number that turns a stored value into
+       * metres — and the shore field compares those metres against the sea
+       * level to find the waterline. Hard-code it and a project configured to
+       * any other max height bakes its coastline in the wrong place: at 1000,
+       * every hill reads half as tall, the computed waterline climbs inland,
+       * and at the real shore the field reports open water. `foamWanted` never
+       * clears its gate, so the entire foam block is skipped and no amount of
+       * tuning brings the surf back.
+       */
+      maxHeight: MAX_HEIGHT,
+      heightmapSize: oceanV2FieldRes,
+      normalMap: waterNormalMapForOcean(),
+    });
+    oceanV2.syncParams(oceanV2Params());
+    oceanV2.setSunDir(_effectiveLightDir);
+    _shoreBakedLevel = null; // nothing baked into a brand-new field
+    rebakeShoreIfStale({ immediate: true });
+    return oceanV2;
+  }
+
+  /*
+   * The shore field is a function of BOTH the terrain and the sea level: it
+   * stores signed distance to the WATERLINE, and moving the water moves the
+   * line. So a rebake is owed whenever either one changes — not only on a
+   * sculpt. Miss the sea-level half and the foam band stays welded to the
+   * waterline it was baked at, which on a big move means no foam at all: the
+   * field says "deep water everywhere" because that is where the sea used to be.
+   *
+   * ~100 ms at 1024², and the sea-level slider fires on every pointer move, so
+   * the bake is coalesced to the trailing edge of a drag. The old field stays
+   * on screen for that moment — the foam lags the water by a beat — which is
+   * the cheaper of the two bad options against a 100 ms hitch per pixel of
+   * slider travel.
+   */
+  function rebakeShoreNow() {
+    _shoreBakeTimer = 0;
+    if (!oceanV2 || !_oceanHeights || toolState.worldOcean.mode !== "v2") return;
+    const level = toolState.worldOcean.seaLevel;
+    oceanV2.rebakeShore(_oceanHeights, level);
+    _shoreBakedLevel = level;
+  }
+
+  /** Bake only when the field is actually stale. `immediate` skips the debounce. */
+  function rebakeShoreIfStale({ immediate = false } = {}) {
+    if (!oceanV2 || !_oceanHeights || toolState.worldOcean.mode !== "v2") return;
+    if (_shoreBakedLevel === toolState.worldOcean.seaLevel) return;
+    clearTimeout(_shoreBakeTimer);
+    if (immediate) rebakeShoreNow();
+    else _shoreBakeTimer = setTimeout(rebakeShoreNow, 150);
+  }
+
+  /** Only one ocean visible, and the inactive one fully off (its FFT idles). */
+  function applyOceanMode() {
+    const o = toolState.worldOcean;
+    const wantV2 = o.mode === "v2";
+    if (wantV2) ensureOceanV2();
+    worldOcean.setEnabled(!wantV2 && !!o.enabled);
+    oceanV2?.setEnabled(wantV2 && !!o.enabled);
+  }
+
+  /**
+   * Hand the v2 ocean the CPU heightmap so it can bake its shoreline field.
+   * ~100 ms at 1024², so main.js calls this on a settled sculpt, never per frame.
+   */
+  function setOceanHeights(heights) {
+    _oceanHeights = heights;
+    // New terrain at the SAME sea level is still stale, so drop the stamp
+    // rather than letting the level comparison decide there is nothing to do.
+    _shoreBakedLevel = null;
+    rebakeShoreIfStale({ immediate: true });
+  }
+
   // Depth-buffer water surfaces (LakeSystem, River+) are owned by main.js but driven
   // from here: the effective light direction and the day/night sky colours are only
   // fresh inside updateFrame(). Each surface may implement setSunDir, setSkyColors
@@ -1014,6 +1146,9 @@ export async function createWorldEnvironment({
 
   function worldOceanChanged() {
     worldOcean.syncParams(toolState.worldOcean);
+    oceanV2?.syncParams(oceanV2Params());
+    applyOceanMode();
+    rebakeShoreIfStale(); // sea level moved ⇒ the waterline moved
   }
 
   function updateFrame(dtSec, { streamQueueDepth = 0 } = {}) {
@@ -1031,6 +1166,7 @@ export async function createWorldEnvironment({
       _lastLightSnap = lightSnap;
       updateSunSky();
       worldOcean.setSunDir(_effectiveLightDir);
+      oceanV2?.setSunDir(_effectiveLightDir);
     }
 
     lensFlare.update();
@@ -1085,6 +1221,10 @@ export async function createWorldEnvironment({
     _oceanHorizon.set(ps.horizonDay).lerp(_tmpOceanC.set(ps.horizonNight), 1 - dayT);
     worldOcean.setSkyColors(_oceanZenith, _oceanHorizon);
     worldOcean.update(dtSec, _appTimeSec, camera);
+    if (oceanV2) {
+      oceanV2.setSkyColors(_oceanZenith, _oceanHorizon);
+      oceanV2.update(dtSec, _appTimeSec, camera);
+    }
 
     for (const s of waterSurfaces) {
       s.setSkyColors?.(_oceanZenith, _oceanHorizon);
@@ -1169,6 +1309,8 @@ export async function createWorldEnvironment({
     hemi,
     csm,
     worldOcean,
+    getOceanV2: () => oceanV2,
+    setOceanHeights,
     lensFlare,
     postFxPipeline,
     sunDir,

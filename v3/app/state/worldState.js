@@ -1,4 +1,5 @@
 import { createToolState } from "../../../v2/app/state/toolState.js";
+import { OCEAN2_DEFAULTS } from "../../render/water/oceanSurface.js";
 
 /** World-tab toolState slice — same defaults as v2 createToolState(). */
 export function createWorldToolState() {
@@ -44,7 +45,26 @@ export function createWorldToolState() {
     csm: ts.csm,
     fog: ts.fog,
     interior: ts.interior,
-    worldOcean: ts.worldOcean,
+    /*
+     * TWO OCEANS, ONE SLICE.
+     *
+     * `mode` picks which shader draws: "classic" is oceanShader.js exactly as it
+     * has always been, "v2" is oceanSurface.js (shoreline distance field,
+     * travelling surf, transparent shallows). Default is classic, so nothing
+     * about an existing project changes until the switch is thrown.
+     *
+     * The v2 params live in their own `v2` bag rather than beside the classic
+     * ones because several names collide with DIFFERENT meanings — `foamCutoff`
+     * is a 0..1 threshold in classic and a gain-normalised one in v2, and mixing
+     * them would have each shader quietly corrupting the other's tuning. The
+     * genuinely shared quantities (sea level, wind, swell, the clipmap LOD) stay
+     * at the top level and are forwarded to whichever ocean is active.
+     */
+    worldOcean: {
+      ...ts.worldOcean,
+      mode: "classic",
+      v2: structuredClone(OCEAN2_DEFAULTS),
+    },
     audio: ts.audio,
   };
 }
