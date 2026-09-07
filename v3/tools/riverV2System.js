@@ -780,6 +780,20 @@ export class RiverV2System {
   // Ribbon meshes
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /**
+   * Build one river's water surface.
+   *
+   * Tessellated, not a two-vertex strip. The surface is DISPLACED in the vertex
+   * stage — swell advecting downstream, standing waves where the flow is fast —
+   * and a strip with one quad per station has nothing to displace: the waves
+   * would exist only in the shader's imagination. So the solved stations are
+   * resampled at `meshStep` metres along and `meshAcross` columns wide, which
+   * is decoupled from the solver's own station spacing (that one also drives
+   * the conform, and making it fine enough for waves would cost far more).
+   *
+   * The mesh still overhangs the banks: the waterline is found per pixel by the
+   * depth test, so the edge must sit outside it or the shore is a hard cut.
+   */
   _buildRibbon(river) {
     const s = river.solved;
     if (river.mesh) {
@@ -789,56 +803,87 @@ export class RiverV2System {
     }
     if (!s || s.count < 2) return;
 
-    const n = s.count;
-    const drop = this.params.surfaceDrop ?? 0.05;
-    const pos = new Float32Array(n * 2 * 3);
-    const uvs = new Float32Array(n * 2 * 2);
-    const flow = new Float32Array(n * 2 * 4);
-    const turb = new Float32Array(n * 2);
+    const p = this.params;
+    const drop = p.surfaceDrop ?? 0.05;
+    const step = Math.max(0.25, p.meshStep ?? 0.8);
+    const cols = Math.max(2, Math.round(p.meshAcross ?? 12));
+    const rows = Math.max(2, Math.min(4096, Math.round(s.total / step) + 1));
 
-    for (let i = 0; i < n; i++) {
-      const halfW = s.width[i] * 0.5;
-      // Overhang the banks: the waterline is found per pixel by the depth test,
-      // so the mesh edge must sit outside it or the shore would be a hard cut.
-      const span = halfW + Math.min(s.bank[i] * 0.5, RIBBON_OVERHANG);
-      const px = -s.tanZ[i];
-      const pz = s.tanX[i];
-      const y = s.level[i] - drop;
+    const vCount = rows * (cols + 1);
+    const pos = new Float32Array(vCount * 3);
+    const uvs = new Float32Array(vCount * 2);
+    const flow = new Float32Array(vCount * 4);
+    // (turbulence, depth) — depth sets the standing-wave spacing, see the note
+    // on waveHeight in riverV2Material.js.
+    const wave = new Float32Array(vCount * 2);
 
-      const l = i * 6;
-      pos[l + 0] = s.x[i] - px * span; pos[l + 1] = y; pos[l + 2] = s.z[i] - pz * span;
-      pos[l + 3] = s.x[i] + px * span; pos[l + 4] = y; pos[l + 5] = s.z[i] + pz * span;
+    // Walk the solved stations once, interpolating between them per row.
+    let si = 0;
+    for (let r = 0; r < rows; r++) {
+      const arc = (r / (rows - 1)) * s.total;
+      while (si < s.count - 2 && s.arc[si + 1] < arc) si++;
+      const a0 = s.arc[si];
+      const a1 = s.arc[si + 1];
+      const t = a1 > a0 ? Math.min(1, Math.max(0, (arc - a0) / (a1 - a0))) : 0;
+      const lerp = (arr) => arr[si] + (arr[si + 1] - arr[si]) * t;
 
-      const q = i * 4;
-      uvs[q + 0] = s.arc[i]; uvs[q + 1] = -span;
-      uvs[q + 2] = s.arc[i]; uvs[q + 3] = span;
+      const cx = lerp(s.x);
+      const cz = lerp(s.z);
+      let tx = lerp(s.tanX);
+      let tz = lerp(s.tanZ);
+      const tl = Math.hypot(tx, tz) || 1;
+      tx /= tl; tz /= tl;
+      const px = -tz;
+      const pz = tx;
 
-      const f = i * 8;
-      for (let k = 0; k < 2; k++) {
-        flow[f + k * 4 + 0] = s.tanX[i];
-        flow[f + k * 4 + 1] = s.tanZ[i];
-        flow[f + k * 4 + 2] = s.speed[i];
-        flow[f + k * 4 + 3] = halfW;
+      const halfW = lerp(s.width) * 0.5;
+      const span = halfW + Math.min(lerp(s.bank) * 0.5, RIBBON_OVERHANG);
+      const y = lerp(s.level) - drop;
+      const spd = lerp(s.speed);
+      const tb = lerp(s.turb);
+      const dp = lerp(s.depth);
+
+      for (let c = 0; c <= cols; c++) {
+        const across = (c / cols - 0.5) * 2 * span;
+        const v = r * (cols + 1) + c;
+        pos[v * 3 + 0] = cx + px * across;
+        pos[v * 3 + 1] = y;
+        pos[v * 3 + 2] = cz + pz * across;
+        uvs[v * 2 + 0] = arc;
+        uvs[v * 2 + 1] = across;
+        flow[v * 4 + 0] = tx;
+        flow[v * 4 + 1] = tz;
+        flow[v * 4 + 2] = spd;
+        flow[v * 4 + 3] = halfW;
+        wave[v * 2 + 0] = tb;
+        wave[v * 2 + 1] = dp;
       }
-      turb[i * 2] = s.turb[i];
-      turb[i * 2 + 1] = s.turb[i];
     }
 
-    const idx = new Uint32Array((n - 1) * 6);
-    for (let i = 0; i < n - 1; i++) {
-      const a = i * 2;
-      const o = i * 6;
-      idx[o + 0] = a; idx[o + 1] = a + 1; idx[o + 2] = a + 2;
-      idx[o + 3] = a + 1; idx[o + 4] = a + 3; idx[o + 5] = a + 2;
+    const idx = new Uint32Array((rows - 1) * cols * 6);
+    let o = 0;
+    for (let r = 0; r < rows - 1; r++) {
+      for (let c = 0; c < cols; c++) {
+        const a = r * (cols + 1) + c;
+        const b = a + 1;
+        const d = a + (cols + 1);
+        const e = d + 1;
+        idx[o++] = a; idx[o++] = b; idx[o++] = d;
+        idx[o++] = b; idx[o++] = e; idx[o++] = d;
+      }
     }
 
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     g.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
     g.setAttribute("aFlow", new THREE.BufferAttribute(flow, 4));
-    g.setAttribute("aTurb", new THREE.BufferAttribute(turb, 1));
+    g.setAttribute("aWave", new THREE.BufferAttribute(wave, 2));
     g.setIndex(new THREE.BufferAttribute(idx, 1));
     g.computeBoundingSphere();
+    // The vertex stage lifts the surface by at most the wave amplitude, which
+    // the bounding sphere knows nothing about; a little slack stops a crest
+    // popping the whole river out on a grazing frustum edge.
+    if (g.boundingSphere) g.boundingSphere.radius += 2;
 
     const mesh = new THREE.Mesh(g, this._water.material);
     mesh.name = `RiverV2:${river.id}`;
@@ -1600,6 +1645,7 @@ export class RiverV2System {
         maxBankSlope: p.maxBankSlope, bankFlareMax: p.bankFlareMax,
         manningN: p.manningN, flowScale: p.flowScale, minSlope: p.minSlope,
         minSpeed: p.minSpeed, maxSpeed: p.maxSpeed, surfaceDrop: p.surfaceDrop,
+        meshStep: p.meshStep, meshAcross: p.meshAcross,
         froudeStart: p.froudeStart, froudeFull: p.froudeFull,
         newWidth: p.newWidth, newDepth: p.newDepth, newBank: p.newBank,
         sand: { ...p.sand },

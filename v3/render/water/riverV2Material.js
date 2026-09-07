@@ -38,7 +38,7 @@ import { MeshBasicNodeMaterial } from "three";
 import {
   Fn, If, Break, uniform, float, vec2, vec3, vec4,
   mix, smoothstep, step, dot, cross, exp, pow, max, min, abs, saturate,
-  floor, fract, sin, sign, dFdy, Loop, uv, attribute,
+  floor, fract, sin, cos, sign, dFdy, Loop, uv, attribute, positionLocal, clamp,
   normalize, reflect, texture, positionWorld, positionView, cameraPosition,
   cameraNear, cameraFar, cameraViewMatrix, cameraProjectionMatrix,
   screenUV, Discard, perspectiveDepthToViewZ,
@@ -98,6 +98,28 @@ const blendRNM = /*#__PURE__*/ Fn(([n1, n2]) =>
   ).normalize(),
 );
 
+/**
+ * Surface height above the solved level, in metres, at a point on the ribbon.
+ *
+ * Two terms, and the split is physical rather than decorative:
+ *
+ *  - SWELL advects downstream. It is driven by ONE authored speed rather than
+ *    the per-station velocity, on purpose: a phase of `(arc - t*speed(arc))`
+ *    shears a little more every second wherever speed varies along the river,
+ *    and after a minute the wave is sawn apart. The texture layers dodge that
+ *    with a two-phase reset, but a reset in GEOMETRY is a visible pop. A single
+ *    advection speed cannot shear at all.
+ *
+ *  - STANDING WAVES do not advect — that is what makes them standing. They are
+ *    a function of arc length alone, so they are pinned in the world the way a
+ *    real standing wave is pinned over the feature that causes it. Wavelength
+ *    comes from the flow itself (λ = 2π·v²/g) and amplitude from the solved
+ *    turbulence, so they appear exactly where the water is already breaking and
+ *    nowhere else.
+ *
+ * Both taper to zero before the waterline. If the surface lifted at the edge it
+ * would climb its own bank and the per-pixel shoreline would come apart.
+ */
 export const RIVER_MATERIAL_DEFAULTS = {
   absorption: [0.42, 0.14, 0.1],
   absorptionScale: 14,
@@ -151,6 +173,20 @@ export const RIVER_MATERIAL_DEFAULTS = {
 
   streakStrength: 0.12,
   streakScale: 0.35,
+
+  // ── Surface displacement ───────────────────────────────────────────────
+  waveEnabled: true,
+  /** Metres of swell, peak. Small: a river is not the sea. */
+  swellAmplitude: 0.055,
+  /** Metres between swell crests. */
+  swellLength: 5.5,
+  /** Metres/second the swell travels. One speed for the whole river — see the
+   *  note on waveHeight for why it is not the per-station velocity. */
+  swellSpeed: 1.6,
+  /** Metres of standing wave at full turbulence. This is the rapids relief. */
+  standingAmplitude: 0.22,
+  /** Standing-wave spacing, as a multiple of the local water depth. */
+  standingLength: 6,
 };
 
 /**
@@ -163,7 +199,9 @@ export const RIVER_MATERIAL_DEFAULTS = {
  *             signed, 0 on the centreline). Metres on both axes, so the normal
  *             map keeps a square aspect whatever the river's width.
  *   aFlow  — vec4(tangentX, tangentZ, speed m/s, halfWidth m) per vertex.
- *   aTurb  — float 0..1, the solved turbulence of this station.
+ *   aWave  — vec2(turbulence 0..1, water depth m) for this station. Depth is
+ *             here because it sets the standing-wave spacing, not because the
+ *             shading needs it — thickness comes from the depth buffer.
  */
 export function createRiverMaterial({ normalMap, params = {} }) {
   const p = { ...RIVER_MATERIAL_DEFAULTS, ...params };
@@ -224,6 +262,13 @@ export function createRiverMaterial({ normalMap, params = {} }) {
 
     streakStrength: uniform(p.streakStrength),
     streakScale: uniform(p.streakScale),
+
+    waveEnabled: uniform(p.waveEnabled ? 1 : 0),
+    swellAmplitude: uniform(p.swellAmplitude),
+    swellLength: uniform(p.swellLength),
+    swellSpeed: uniform(p.swellSpeed),
+    standingAmplitude: uniform(p.standingAmplitude),
+    standingLength: uniform(p.standingLength),
   };
 
   const material = new MeshBasicNodeMaterial();
@@ -234,6 +279,36 @@ export function createRiverMaterial({ normalMap, params = {} }) {
   // A ribbon's winding flips with the sign of the centreline's curvature, so it
   // can present either face.
   material.side = THREE.DoubleSide;
+
+  /** See the note above RIVER_MATERIAL_DEFAULTS. Defined here rather than at
+   *  module scope so it closes over `u` — an Fn argument must be a node. */
+  const waveHeight = Fn(([arc = float(0), across = float(0), speed = float(0),
+    halfW = float(1), turbA = float(0), depthA = float(1)]) => {
+    const taper = float(1).sub(
+      smoothstep(halfW.mul(0.55), halfW.max(0.05), abs(across)),
+    );
+
+    const kS = float(6.2831853).div(u.swellLength.max(0.5));
+    const drift = u.time.mul(u.swellSpeed);
+    const swell = sin(arc.sub(drift).mul(kS).add(across.mul(0.35)))
+      .add(sin(arc.sub(drift.mul(0.63)).mul(kS.mul(1.63)).sub(across.mul(0.21))).mul(0.55))
+      .mul(u.swellAmplitude);
+
+    // Spacing scales with DEPTH, not with v²/g.
+    //
+    // The deep-water formula λ = 2π·v²/g is the wrong regime here: at 8.5 m/s
+    // it asks for a 46 m wavelength, which reads as a long ocean swell rather
+    // than rapids. A river running that fast is SHALLOW and supercritical, and
+    // there the standing-wave train spaces itself at a few multiples of the
+    // depth — which is also the more useful control, since a deep river then
+    // gets long waves and a shallow chute gets a choppy train.
+    const lam = clamp(depthA.mul(u.standingLength), float(1.2), float(30));
+    const kStand = float(6.2831853).div(lam);
+    const breakUp = _vnoise(vec2(arc.mul(0.35), across.mul(0.6))).mul(0.6).add(0.7);
+    const stand = sin(arc.mul(kStand)).mul(turbA).mul(u.standingAmplitude).mul(breakUp);
+
+    return swell.add(stand).mul(taper).mul(u.waveEnabled);
+  });
 
   /** Scene distance from camera, in metres, at a screen UV. */
   const sceneDistAt = Fn(([suv = vec2(0)]) =>
@@ -257,13 +332,30 @@ export function createRiverMaterial({ normalMap, params = {} }) {
     return vec3(ndcUv.x, ndcUv.y, pv.z.negate());
   });
 
+  // ── Displacement ────────────────────────────────────────────────────────
+  // The ribbon is tessellated (riverV2System._buildRibbon), so this is real
+  // relief rather than a normal-map illusion: it holds up at eye level and in
+  // silhouette, which is exactly where a flat ribbon stops convincing.
+  material.positionNode = Fn(() => {
+    const flow = attribute("aFlow", "vec4");
+    // Same speed expression the fragment stage uses, or the relief and the
+    // shading of it would be computed from different wavelengths.
+    const h = waveHeight(
+      uv().x, uv().y, flow.z.add(u.flowBias).max(0.01), flow.w.max(0.25),
+      attribute("aWave", "vec2").x, attribute("aWave", "vec2").y.max(0.05),
+    );
+    return positionLocal.add(vec3(0, h, 0));
+  })();
+
   material.colorNode = Fn(() => {
     // ── 0. Per-station flow, straight off the mesh ──────────────────────────
     const flow = attribute("aFlow", "vec4").toVar();
     const flowDir = normalize(vec3(flow.x, 0, flow.y)).toVar();
     const speed = flow.z.add(u.flowBias).max(0.01).toVar();
     const halfW = flow.w.max(0.25).toVar();
-    const turbA = attribute("aTurb", "float").toVar();
+    const waveA = attribute("aWave", "vec2").toVar();
+    const turbA = waveA.x.toVar();
+    const depthA = waveA.y.max(0.05).toVar();
 
     const arc = uv().x;          // metres downstream
     const across = uv().y;       // metres from the centreline, signed
@@ -306,7 +398,19 @@ export function createRiverMaterial({ normalMap, params = {} }) {
 
     const nR = vec3(ripple.xy.mul(u.normalStrength), ripple.z).normalize();
     const nS = vec3(swell.xy.mul(u.normalStrength2), swell.z).normalize();
-    const tsn = blendRNM(nS, nR).toVar();
+    const tsnTex = blendRNM(nS, nR).toVar();
+
+    // The displaced surface has to be LIT as displaced, or the waves show in
+    // silhouette and vanish everywhere else. Two extra evaluations of the same
+    // height function give its gradient here, per pixel, rather than
+    // interpolating a vertex normal across a coarse quad.
+    const EPS = float(0.35);
+    const hW = waveHeight(arc, across, speed, halfW, turbA, depthA).toVar();
+    const hA = waveHeight(arc.add(EPS), across, speed, halfW, turbA, depthA);
+    const hB = waveHeight(arc, across.add(EPS), speed, halfW, turbA, depthA);
+    // Tangent frame is (along flow, across, up) — the same basis tsn lives in.
+    const waveN = vec3(hW.sub(hA).div(EPS), hW.sub(hB).div(EPS), float(1)).normalize();
+    const tsn = blendRNM(waveN, tsnTex).toVar();
 
     // ── 2. Tangent frame from the flow, not from the world ─────────────────
     // T runs downstream, so wave crests sit ACROSS the current the way they do
@@ -596,6 +700,13 @@ export function createRiverMaterial({ normalMap, params = {} }) {
 
     if (sp.streakStrength != null) u.streakStrength.value = sp.streakStrength;
     if (sp.streakScale != null) u.streakScale.value = sp.streakScale;
+
+    if (sp.waveEnabled != null) u.waveEnabled.value = sp.waveEnabled ? 1 : 0;
+    if (sp.swellAmplitude != null) u.swellAmplitude.value = sp.swellAmplitude;
+    if (sp.swellLength != null) u.swellLength.value = sp.swellLength;
+    if (sp.swellSpeed != null) u.swellSpeed.value = sp.swellSpeed;
+    if (sp.standingAmplitude != null) u.standingAmplitude.value = sp.standingAmplitude;
+    if (sp.standingLength != null) u.standingLength.value = sp.standingLength;
   }
 
   function update(dt, elapsed) { u.time.value = elapsed; }

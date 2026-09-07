@@ -124,6 +124,15 @@ export function createRiverV2ToolState() {
        */
       surfaceDrop: 0.05,
 
+      // ── Surface mesh density ───────────────────────────────────────────────
+      // Separate from stationSpacing on purpose: that one also drives the
+      // conform, and making it fine enough for waves would cost far more than
+      // resampling the ribbon does. These only rebuild geometry.
+      /** Metres between rows of the water surface, along the flow. */
+      meshStep: 0.8,
+      /** Columns across the ribbon. Waves need width to be seen bending. */
+      meshAcross: 12,
+
       /**
        * Sand along the banks — see riverSandTsl.js. Terrain shading, not water
        * shading: it applies under AND around the channel whether or not that
@@ -242,6 +251,20 @@ export function createRiverWaterState(overrides = {}) {
     foamCutoff: 0.4,
     foamTransition: 0.16,
 
+    // ── Surface displacement ───────────────────────────────────────────────
+    // Real vertical relief, not a normal-map illusion — see waveHeight in
+    // riverV2Material.js for why the swell advects at one speed while the
+    // standing waves do not advect at all.
+    waveEnabled: true,
+    /** Metres of swell, peak. Small: a river is not the sea. */
+    swellAmplitude: 0.055,
+    swellLength: 5.5,
+    swellSpeed: 1.6,
+    /** Metres of standing wave at full turbulence — the rapids relief. */
+    standingAmplitude: 0.22,
+    /** Standing-wave spacing, as a multiple of the local water depth. */
+    standingLength: 6,
+
     // ── Flow streaks ───────────────────────────────────────────────────────
     /** Faint lengthwise banding, the thing that reads as "moving water" even
      *  when the surface is otherwise calm. */
@@ -304,5 +327,12 @@ export function riverWaterParams(s) {
 
     streakStrength: s.streakStrength,
     streakScale: s.streakScale,
+
+    waveEnabled: s.waveEnabled,
+    swellAmplitude: s.swellAmplitude,
+    swellLength: s.swellLength,
+    swellSpeed: s.swellSpeed,
+    standingAmplitude: s.standingAmplitude,
+    standingLength: s.standingLength,
   };
 }

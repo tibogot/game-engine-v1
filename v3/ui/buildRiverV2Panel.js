@@ -375,6 +375,21 @@ export function buildRiverV2Panel(app) {
       hint: "Seconds before each phase resets. Longer is smoother but stretches more; shorter is crisper but the cross-fade starts to pulse." });
     _slider(sf, w, "flowBias", { label: "Speed bias (m/s)", min: -2, max: 6, step: 0.05, onChange: onMat,
       hint: "Added to the solved velocity everywhere, for art direction." });
+    _hint(sf, "Displacement is real geometry, so it reads at eye level and in silhouette. Swell drifts downstream at one speed for the whole river (a per-station speed shears the wave apart over time); standing waves do not drift at all — that is what makes them standing — and appear only where the solved flow is already breaking.");
+    _toggle(sf, w, "waveEnabled", { label: "Surface waves", onChange: onMat });
+    _slider(sf, w, "swellAmplitude", { label: "Swell height (m)", min: 0, max: 0.6, step: 0.005, onChange: onMat });
+    _slider(sf, w, "swellLength", { label: "Swell length (m)", min: 0.5, max: 40, step: 0.1, onChange: onMat });
+    _slider(sf, w, "swellSpeed", { label: "Swell drift (m/s)", min: 0, max: 8, step: 0.05, onChange: onMat });
+    _slider(sf, w, "standingAmplitude", { label: "Standing waves (m)", min: 0, max: 1.5, step: 0.01, onChange: onMat,
+      hint: "Height at full turbulence. Appears only where the solved flow is already breaking." });
+    _slider(sf, w, "standingLength", { label: "Standing spacing (x depth)", min: 1, max: 25, step: 0.25, onChange: onMat,
+      hint: "Crest spacing as a multiple of the local depth. A fast river is shallow, and its wave train spaces itself off the depth — the deep-water v-squared formula asks for tens of metres here and reads as ocean swell." });
+    _slider(sf, p, "meshStep", { label: "Mesh step (m)", min: 0.25, max: 5, step: 0.05,
+      onChange: () => { sys.rebuildMeshes(); },
+      hint: "Metres between rows of the water surface. Waves cannot be finer than this." });
+    _slider(sf, p, "meshAcross", { label: "Mesh columns", min: 2, max: 48, step: 1,
+      onChange: () => { sys.rebuildMeshes(); },
+      hint: "Columns across the ribbon." });
     _slider(sf, w, "streakStrength", { label: "Flow streaks", min: 0, max: 0.6, step: 0.01, onChange: onMat,
       hint: "Faint lengthwise banding — what reads as moving water even on a calm reach." });
     _slider(sf, w, "streakScale", { label: "Streak scale", min: 0.05, max: 2, step: 0.01, onChange: onMat });
