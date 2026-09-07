@@ -6700,6 +6700,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const DOCK_ENV_MAP = {
     dockWorldSize: "worldSize", dockTopY: "topY", dockFreeboard: "freeboard",
     dockDepth: "depth", dockEdgeWidth: "edgeWidth", dockTileMetres: "tileMetres",
+    dockBrightness: "deckBrightness",
+  };
+  /**
+   * The apron's own shape, FLAT — one key per number rather than the `pads`
+   * array itself.
+   *
+   * Riding the array whole looks tidier and cannot work. `sparse()` diffs
+   * shallowly and opens with `a === b`, and the frozen `TRACK_ENV_DEFAULTS`
+   * snapshot captured `dockParams.pads` BY REFERENCE — so the "default" and the
+   * live value were the same array object, the diff was always empty, and the
+   * dock's shape saved as nothing at all. Editing a pad in the panel mutates it
+   * in place, which mutates the snapshot too (`Object.freeze` is shallow), so
+   * even a deep compare would have found them equal.
+   *
+   * The format's own comment says it: keys are FLAT because sparse() diffs
+   * shallowly. This is that rule, applied to the one place I broke it.
+   */
+  const PAD_ENV_MAP = {
+    dockPadSizeX: "sizeX", dockPadSizeZ: "sizeZ", dockPadRadius: "radius",
+    dockPadX: "x", dockPadZ: "z", dockPadRot: "rotDeg",
   };
   const OCEAN_ENV_MAP = {
     oceanSurfHz: "surfHz", oceanSurfLength: "surfLength", oceanSurfReach: "surfReach",
@@ -6714,9 +6734,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     into.oceanOn = oceanWanted;
     for (const [k, p] of Object.entries(DOCK_ENV_MAP)) into[k] = dockParams[p];
     for (const [k, p] of Object.entries(OCEAN_ENV_MAP)) into[k] = oceanParams[p];
-    // The pad layout is a LIST, so it rides whole rather than as flat keys —
-    // there is no sensible shallow diff of "the shape of the level".
-    into.dockPads = dockParams.pads;
+    const pad0 = dockParams.pads?.[0];
+    for (const [k, p] of Object.entries(PAD_ENV_MAP)) into[k] = pad0?.[p] ?? 0;
     // The WISH, not the deck. Reading `clouds.enabled` here wrote this
     // machine's cloud tier into the track file. See `cloudsWanted`.
     into.cloudsOn = cloudsWanted;
@@ -6752,7 +6771,15 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     for (const [k, p] of Object.entries(DOCK_ENV_MAP)) {
       if (trackEnv[k] !== undefined) dockParams[p] = trackEnv[k];
     }
-    if (Array.isArray(trackEnv.dockPads)) dockParams.pads = trackEnv.dockPads;
+    // Rebuild pad 0 from the flat keys. A fresh object rather than a mutation,
+    // so nothing that captured the old one keeps writing into the live shape.
+    if (dockParams.pads?.[0]) {
+      const pad0 = { ...dockParams.pads[0] };
+      for (const [k, p] of Object.entries(PAD_ENV_MAP)) {
+        if (trackEnv[k] !== undefined) pad0[p] = trackEnv[k];
+      }
+      dockParams.pads = [pad0, ...dockParams.pads.slice(1)];
+    }
     for (const [k, p] of Object.entries(OCEAN_ENV_MAP)) {
       if (trackEnv[k] !== undefined) oceanParams[p] = trackEnv[k];
     }
