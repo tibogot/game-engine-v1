@@ -361,7 +361,29 @@ export async function createWorldEnvironment({
   const F = toolState.fog;
   const uHFogEnabled = uniform(F.height.enabled ? 1 : 0);
   const uHFogValleyMode = uniform(F.height.mode === "valley" ? 1 : 0);
-  const uHFogColor = uniform(new THREE.Color(F.height.color).convertSRGBToLinear());
+  /*
+   * FOG COLOURS CONVERT ONCE — here and at every `.set(hex)` below.
+   *
+   * `THREE.Color`'s constructor and `.set()` ALREADY run sRGB->linear: both default to
+   * SRGBColorSpace and call `ColorManagement.toWorkingColorSpace`, and nothing in v3
+   * disables colour management. Each of these used to chain `.convertSRGBToLinear()`
+   * on top, applying the curve a SECOND time.
+   *
+   * Not subtle: height fog #a8c4e0 landed at 0.127 linear red instead of 0.392 (3.1x
+   * too dark), and the sun tint #ffd6a0 lost 3.5x of its blue. About 70 of 255 display
+   * code values — and a HUE shift rather than a brightness one, because the transfer
+   * function is non-linear and crushes the weak channels hardest. Fog read too blue,
+   * the sun tint too orange.
+   *
+   * It hid because both fog types default to `enabled: false`, so it only showed once
+   * fog was switched on. Same bug was fixed in games/modular-road-v3 and games/rts-v3.
+   *
+   * THE HEXES ARE NOT REBASED. On the road deck the literals were rebased so the tuned
+   * look held byte-for-byte; fog is atmosphere, not art direction, and these values are
+   * what the colour pickers have been promising all along. Fog gets LIGHTER here, and
+   * that is the correction.
+   */
+  const uHFogColor = uniform(new THREE.Color(F.height.color));
   const uHFogDensity = uniform(F.height.density);
   const uHFogFalloff = uniform(F.height.falloff ?? 0.05);
   const uHFogHeight = uniform(F.height.height);
@@ -373,8 +395,8 @@ export async function createWorldEnvironment({
   const uValleyNoiseScaleB = uniform(F.height.noiseScaleB ?? 0.01);
   const uValleyTime = uniform(0);
   const uDFogEnabled = uniform(F.distance.enabled ? 1 : 0);
-  const uDFogColor = uniform(new THREE.Color(F.distance.color).convertSRGBToLinear());
-  const uDFogSunTint = uniform(new THREE.Color(F.distance.sunTint).convertSRGBToLinear());
+  const uDFogColor = uniform(new THREE.Color(F.distance.color));
+  const uDFogSunTint = uniform(new THREE.Color(F.distance.sunTint));
   const uDFogSunDir = uniform(new THREE.Vector3(0, 1, 0));
   const uDFogTintPow = uniform(F.distance.tintPow ?? 2.0);
   const uDFogSunStrength = uniform(0);
@@ -453,7 +475,7 @@ export async function createWorldEnvironment({
   function syncFog() {
     uHFogEnabled.value = F.height.enabled ? 1 : 0;
     uHFogValleyMode.value = F.height.mode === "valley" ? 1 : 0;
-    uHFogColor.value.set(F.height.color).convertSRGBToLinear();
+    uHFogColor.value.set(F.height.color);
     uHFogDensity.value = F.height.density;
     uHFogFalloff.value = F.height.falloff ?? 0.05;
     uHFogHeight.value = F.height.height;
@@ -464,7 +486,7 @@ export async function createWorldEnvironment({
     uValleyNoiseScaleA.value = F.height.noiseScaleA ?? 0.005;
     uValleyNoiseScaleB.value = F.height.noiseScaleB ?? 0.01;
     uDFogEnabled.value = F.distance.enabled ? 1 : 0;
-    uDFogColor.value.set(F.distance.color).convertSRGBToLinear();
+    uDFogColor.value.set(F.distance.color);
     uDFogDensity.value = F.distance.density;
   }
 
@@ -472,18 +494,30 @@ export async function createWorldEnvironment({
     const D = toolState.fog.distance;
     const sunUp = sunDir.y;
     uDFogSunDir.value.copy(sunDir);
-    uDFogSunTint.value.set(D.sunTint).convertSRGBToLinear();
+    uDFogSunTint.value.set(D.sunTint);
     uDFogTintPow.value = D.tintPow ?? 2.0;
     uDFogSunStrength.value = THREE.MathUtils.clamp((sunUp + 0.1) / 0.15, 0, 1);
     if (D.matchSky && toolState.skyMode === "procedural") {
       const ps = toolState.proceduralSky;
       const dayF = THREE.MathUtils.clamp((sunUp + 0.15) / 0.4, 0, 1);
+      /*
+       * THE WORST OF THE EIGHT — a THIRD pass of the curve, not a second.
+       *
+       * `.set()` has already linearised both horizon colours, and the lerp below is a
+       * blend of two LINEAR colours, which is the correct space to blend them in. The
+       * `.convertSRGBToLinear()` that used to close this line therefore converted an
+       * already-doubly-converted colour again.
+       *
+       * `matchSky` exists so distant geometry dissolves into the horizon behind it.
+       * The sky reads `horizonDay` correctly (dayNightSky.js), the fog read it three
+       * times over, so the two could never meet however the dials were set.
+       */
       _fogAwayColor.set(ps.horizonDay);
       _fogAwayNight.set(ps.horizonNight);
       _fogAwayColor.lerp(_fogAwayNight, 1 - dayF);
-      uDFogColor.value.copy(_fogAwayColor).convertSRGBToLinear();
+      uDFogColor.value.copy(_fogAwayColor);
     } else {
-      uDFogColor.value.set(D.color).convertSRGBToLinear();
+      uDFogColor.value.set(D.color);
     }
   }
 
