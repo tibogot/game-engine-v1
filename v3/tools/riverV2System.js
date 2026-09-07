@@ -1,0 +1,1509 @@
+/**
+ * v3/tools/riverV2System.js — River v2.
+ *
+ * THE SPLINE IS THE MASTER AND THE TERRAIN CONFORMS TO IT.
+ *
+ * That is the whole design, and everything else is a consequence:
+ *
+ *  - The water level between nodes is the author's interpolated curve, never a
+ *    trace of the ground, so a river can be lifted into the air and its channel
+ *    and banks come with it.
+ *  - The conform CUTS AND FILLS. It writes a complete cross-section — bed, then
+ *    a lip standing `freeboard` above the water, then a shoulder easing back to
+ *    natural ground — and that section meets untouched terrain exactly at its
+ *    outer edge, by construction. Raising an embankment is not a special case;
+ *    it is the same formula with the ground below the lip instead of above it.
+ *  - The bank FLARES where it must. A wall is widened until its slope is under
+ *    `maxBankSlope`, so a river lifted 20 m above a floodplain grows a broad
+ *    levee rather than a vertical fence.
+ *  - Width, depth and bank are PER NODE and interpolate along the spline, so a
+ *    river narrows into a gorge and opens into a pool without being split in two.
+ *  - The bed returns to exactly the water level at ±width/2, so the drawn
+ *    waterline lands on the channel rim with no gap to tune.
+ *
+ * Non-destructive, like the road conform: the unconformed terrain is kept and
+ * every re-conform restores from it before rewriting, so dragging a node moves
+ * the channel instead of stacking a new one on top of the last.
+ *
+ * The base is held on the CPU (`_cpuBase`) and pushed to the GPU as a texture
+ * only when it actually changes — mode entry, an external sculpt, a project
+ * load. The alternative, reading the base back off a render target, costs a
+ * 16 MB transfer every time and buys nothing: the same numbers are already in
+ * the CPU heightmap mirror when the snapshot is taken.
+ */
+
+import * as THREE from "three";
+import { QuadMesh, MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  Fn, If, Break, Loop, uniform, float, vec2, vec4,
+  mix, smoothstep, step, dot, clamp, max, min, sqrt, pow, abs, texture, uv, attribute,
+} from "three/tsl";
+import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
+import { createRiverMaterial } from "../render/water/riverV2Material.js";
+import { riverWaterParams, RIVER_NODE_DEFAULTS } from "../app/state/riverV2State.js";
+import { solveRiver, closestStation, MIN_NODES } from "./riverV2Channel.js";
+
+/** Path-texture width. Matches the solver's station ceiling, so no river is split. */
+const MAX_PATH_POINTS = 2048;
+/** Spline segments rasterized per conform pass — the inner loop's unrolled length. */
+const CHUNK_SEGS = 24;
+/** Undo ring depth. Entries are small JSON snapshots of the node arrays. */
+const MAX_UNDO = 64;
+/** Metres between flow-direction arrows. */
+const ARROW_SPACING = 14;
+/** Metres the ribbon overhangs each bank so the depth test finds the waterline. */
+const RIBBON_OVERHANG = 2.5;
+
+const COL_ACTIVE = 0x7fe9ff;
+const COL_IDLE = 0x2c7f96;
+const COL_PINNED = 0xffc04a;
+const COL_SELECTED = 0xffffff;
+const COL_WIDTH = 0x8cff9a;
+const COL_LEVEL = 0xffd166;
+
+let _nextRiverId = 1;
+
+/** Bilinear sample of a normalized heightmap, in metres. */
+function sampleNormalized(map, wx, wz) {
+  const size = HEIGHTMAP_SIZE;
+  const res = size - 1;
+  const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
+  const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+  const fx = u * res;
+  const fz = v * res;
+  const ix0 = Math.floor(fx);
+  const iz0 = Math.floor(fz);
+  const ix1 = Math.min(ix0 + 1, res);
+  const iz1 = Math.min(iz0 + 1, res);
+  const tx = fx - ix0;
+  const tz = fz - iz0;
+  const h0 = map[iz0 * size + ix0] * (1 - tx) + map[iz0 * size + ix1] * tx;
+  const h1 = map[iz1 * size + ix0] * (1 - tx) + map[iz1 * size + ix1] * tx;
+  return (h0 * (1 - tz) + h1 * tz) * MAX_HEIGHT;
+}
+
+/**
+ * Emit the "nearest point on this chunk's centreline" graph.
+ *
+ * Plain JS returning an object of TSL nodes, NOT a TSL `Fn`: an Fn that returns
+ * an object collapses into a swizzle and silently drops every field but the
+ * first. Two shaders need these five values, so the graph is built twice from
+ * one source instead of being wrapped.
+ */
+function nearestChannel(uvC, pathTex, uSegStart, uSegEnd) {
+  const bestD2 = float(1e9).toVar();
+  const level = float(0).toVar();
+  const halfW = float(0.001).toVar();
+  const depth = float(0).toVar();
+  const bank = float(0.001).toVar();
+
+  const W = float(MAX_PATH_POINTS);
+  Loop(CHUNK_SEGS, ({ i }) => {
+    const idx = float(i).add(uSegStart);
+    If(idx.greaterThanEqual(uSegEnd), () => { Break(); });
+
+    // Row 0: (u, v, level, halfWidth). Row 1: (depth, bank, -, -).
+    const a0 = texture(pathTex, vec2(idx.add(0.5).div(W), 0.25));
+    const b0 = texture(pathTex, vec2(idx.add(1.5).div(W), 0.25));
+    const a1 = texture(pathTex, vec2(idx.add(0.5).div(W), 0.75));
+    const b1 = texture(pathTex, vec2(idx.add(1.5).div(W), 0.75));
+
+    const ab = b0.xy.sub(a0.xy);
+    const len2 = max(dot(ab, ab), float(1e-12));
+    const t = clamp(dot(uvC.sub(a0.xy), ab).div(len2), float(0), float(1));
+    const p = a0.xy.add(ab.mul(t));
+    const d = uvC.sub(p);
+    const d2 = dot(d, d);
+
+    If(d2.lessThan(bestD2), () => {
+      bestD2.assign(d2);
+      level.assign(mix(a0.z, b0.z, t));
+      halfW.assign(mix(a0.w, b0.w, t));
+      depth.assign(mix(a1.x, b1.x, t));
+      bank.assign(mix(a1.y, b1.y, t));
+    });
+  });
+
+  return { dist: sqrt(bestD2), level, halfW, depth, bank };
+}
+
+export class RiverV2System {
+  /**
+   * @param {object} deps
+   * @param {THREE.Scene}   deps.scene
+   * @param {object}        deps.toolState        object carrying a `.riverV2` slice
+   * @param {THREE.WebGPURenderer} deps.renderer
+   * @param {function}      deps.getRT            () => the live heightmap RenderTarget
+   * @param {Float32Array}  deps.cpuHeightmap     normalized CPU mirror of that RT
+   * @param {THREE.Texture} deps.waterNormalMap
+   * @param {function}      [deps.getCamera]      for constant-size handles
+   * @param {function}      [deps.onConformCommitted] terrain changed; push to dependents
+   * @param {function}      [deps.onWaterMeshesChanged] ribbons rebuilt; rebake water map
+   */
+  constructor({
+    scene, toolState, renderer, getRT, cpuHeightmap, waterNormalMap,
+    getCamera = null, onConformCommitted = null, onWaterMeshesChanged = null,
+  }) {
+    this.scene = scene;
+    this.toolState = toolState;
+    this.renderer = renderer;
+    this.getRT = getRT;
+    this.cpuHeightmap = cpuHeightmap;
+    this.getCamera = getCamera;
+    this.onConformCommitted = onConformCommitted;
+    this.onWaterMeshesChanged = onWaterMeshesChanged;
+
+    /** @type {{id:number, nodes:Array, solved:object|null, mesh:THREE.Mesh|null}[]} */
+    this.rivers = [];
+    this.selected = null;   // { riverIdx, nodeIdx }
+    this.dragging = false;
+    this.editActive = false;
+
+    this._drag = null;
+    this._time = 0;
+    this._undo = [];
+    this._redo = [];
+
+    // ── Scene graph ─────────────────────────────────────────────────────────
+    this.group = new THREE.Group();
+    this.group.name = "RiverV2";
+    scene.add(this.group);
+
+    this.handleGroup = new THREE.Group();
+    this.handleGroup.name = "RiverV2Handles";
+    this.handleGroup.visible = false;
+    scene.add(this.handleGroup);
+
+    this.arrowGroup = new THREE.Group();
+    this.arrowGroup.name = "RiverV2Arrows";
+    this.arrowGroup.visible = false;
+    scene.add(this.arrowGroup);
+
+    this._water = createRiverMaterial({ normalMap: waterNormalMap });
+
+    // ── Terrain base, held on the CPU ───────────────────────────────────────
+    this._cpuBase = null;                       // normalized, unconformed
+    this._coverage = null;                      // Uint8Array, 1 where a river wrote
+    this._baseTexData = null;
+    this._baseTex = null;
+    this._rebaseTimer = 0;
+
+    this._initPasses();
+    this._buildHandlePrototypes();
+    this.syncMaterial();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GPU passes
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _initPasses() {
+    const size = HEIGHTMAP_SIZE;
+
+    // Read source for the conform pass. It holds a copy of the height RT, so it
+    // uses the SAME precision rule sculptBrush picked for that RT — anything
+    // else either loses height precision or claims some the source never had.
+    const type = this.renderer?.backend?.device?.features?.has("float32-filterable")
+      ? THREE.FloatType : THREE.HalfFloatType;
+    this._rtScratch = new THREE.RenderTarget(size, size, {
+      format: THREE.RGBAFormat, type,
+      minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+      generateMipmaps: false, depthBuffer: false, colorSpace: THREE.NoColorSpace,
+    });
+    this._rtScratch.texture.flipY = false;
+
+    // Path texture: two rows per river.
+    //   row 0 — (u, v, level, halfWidth)     positions in UV, level normalized
+    //   row 1 — (depth, bank, 0, 0)          depth normalized, bank in UV
+    this._pathData = new Float32Array(MAX_PATH_POINTS * 2 * 4);
+    this._pathTex = new THREE.DataTexture(
+      this._pathData, MAX_PATH_POINTS, 2, THREE.RGBAFormat, THREE.FloatType,
+    );
+    this._pathTex.minFilter = THREE.NearestFilter;
+    this._pathTex.magFilter = THREE.NearestFilter;
+    this._pathTex.needsUpdate = true;
+
+    // ── Copy pass ──────────────────────────────────────────────────────────
+    // Preserves G and B: River+ (the older carve tool) tags carved texels in G,
+    // and blitting zeroes over it would silently break its rebase.
+    this._copySrc = texture(this._pathTex);
+    const copyMat = new MeshBasicNodeMaterial();
+    copyMat.fragmentNode = Fn(() => {
+      const s = texture(this._copySrc, uv());
+      return vec4(s.r, s.g, s.b, float(1));
+    })();
+    this._copyQuad = new QuadMesh(copyMat);
+
+    // ── Conform pass ───────────────────────────────────────────────────────
+    this._uSegStart = uniform(0);
+    this._uSegEnd = uniform(0);
+    this._uBedCurve = uniform(0.55);
+    this._uFreeboardN = uniform(0.001);   // normalized height
+    this._uLipFrac = uniform(0.28);
+    /** Converts a normalized height difference into the UV run it needs at
+     *  `maxBankSlope`. = MAX_HEIGHT / (slope * WORLD_SIZE). */
+    this._uSlopeToUv = uniform(1);
+    this._uFlareMax = uniform(4);
+
+    const scratchTex = this._rtScratch.texture;
+    const pathTex = this._pathTex;
+
+    const conformMat = new MeshBasicNodeMaterial();
+    conformMat.fragmentNode = Fn(() => {
+      const uvC = uv();
+      const src = texture(scratchTex, uvC);
+      const natural = src.r.toVar();
+
+      const ch = nearestChannel(uvC, pathTex, this._uSegStart, this._uSegEnd);
+
+      // ── Channel: bed falls from the rim to `depth` at the centreline ──────
+      // Both shapes return to 0 at u = 1, i.e. the bed meets the water level
+      // exactly at ±width/2. That is what makes the waterline land on the mesh
+      // edge with nothing to tune.
+      const uCh = clamp(ch.dist.div(max(ch.halfW, float(1e-6))), float(0), float(1));
+      const flat = float(1).sub(pow(uCh, float(8)));   // flat-bottomed canal
+      const para = float(1).sub(uCh.mul(uCh));         // parabolic natural channel
+      const bedShape = mix(flat, para, this._uBedCurve);
+      const tChannel = ch.level.sub(ch.depth.mul(bedShape));
+
+      // ── Bank: waterline → lip → natural ground ───────────────────────────
+      // The lip stands `freeboard` above the water and is what actually holds
+      // the river in when the surrounding ground is lower than the surface.
+      const rim = ch.level.add(this._uFreeboardN);
+      // Widen the shoulder until its slope is acceptable, so a tall embankment
+      // or a deep gorge wall ramps instead of standing vertical.
+      const need = abs(natural.sub(rim)).mul(this._uSlopeToUv);
+      const flare = clamp(need, ch.bank, ch.bank.mul(this._uFlareMax));
+      const uB = clamp(ch.dist.sub(ch.halfW).div(max(flare, float(1e-6))), float(0), float(1));
+      const aRise = smoothstep(float(0), this._uLipFrac, uB);
+      const bEase = smoothstep(this._uLipFrac, float(1), uB);
+      const tBank = mix(mix(ch.level, rim, aRise), natural, bEase);
+
+      const inChannel = step(ch.dist, ch.halfW);
+      const target = mix(tBank, tChannel, inChannel);
+
+      return vec4(target, src.g, src.b, float(1));
+    })();
+    this._conformQuad = new QuadMesh(conformMat);
+  }
+
+  /** Scissored quad render into an RT (same contract as sculptBrush). */
+  _render(quad, dstRT, rect) {
+    const renderer = this.renderer;
+    const prevAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    if (rect) {
+      dstRT.scissor.set(rect.x, rect.y, rect.w, rect.h);
+      renderer.setScissorTest(true);
+    }
+    renderer.setRenderTarget(dstRT);
+    quad.render(renderer);
+    renderer.setRenderTarget(null);
+    if (rect) renderer.setScissorTest(false);
+    renderer.autoClear = prevAutoClear;
+  }
+
+  _blit(srcTexture, dstRT, rect = null) {
+    this._copySrc.value = srcTexture;
+    this._render(this._copyQuad, dstRT, rect);
+  }
+
+  _clampRect(x0, y0, x1, y1) {
+    const S = HEIGHTMAP_SIZE;
+    x0 = Math.max(0, Math.min(S, Math.floor(x0)));
+    y0 = Math.max(0, Math.min(S, Math.floor(y0)));
+    x1 = Math.max(0, Math.min(S, Math.ceil(x1)));
+    y1 = Math.max(0, Math.min(S, Math.ceil(y1)));
+    if (x1 - x0 < 1 || y1 - y0 < 1) return null;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Terrain base
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  get hasBase() { return this._cpuBase !== null; }
+
+  /** Snapshot the CURRENT terrain as the unconformed base. The caller must have
+   *  refreshed the CPU mirror first (main.js awaits ensureCpuHeightmapFromGpu). */
+  _ensureBase() {
+    if (this._cpuBase) return;
+    this._cpuBase = Float32Array.from(this.cpuHeightmap);
+    this._uploadBase();
+  }
+
+  /**
+   * Push `_cpuBase` to the GPU.
+   *
+   * The base gets its OWN texture node and quad rather than reusing the general
+   * copy pass. That pass's node is bound to the height RT, which is linearly
+   * filtered; this texture is float and nearest-filtered, and swapping one node
+   * between the two sampler types every restore is asking the backend to
+   * rebuild the pipeline on a hot path — or, without float32-filterable, to
+   * build an invalid one.
+   *
+   * RGBA rather than Red, even though only R is read: it is the format every
+   * other height surface in this engine uses, and the 12 MB saved is not worth
+   * being the one place that does something different.
+   */
+  _uploadBase() {
+    const n = HEIGHTMAP_SIZE * HEIGHTMAP_SIZE;
+    if (!this._baseTexData) {
+      this._baseTexData = new Float32Array(n * 4);
+      this._baseTex = new THREE.DataTexture(
+        this._baseTexData, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE,
+        THREE.RGBAFormat, THREE.FloatType,
+      );
+      this._baseTex.minFilter = THREE.NearestFilter;
+      this._baseTex.magFilter = THREE.NearestFilter;
+      this._baseTex.flipY = false;
+
+      const src = texture(this._baseTex);
+      const mat = new MeshBasicNodeMaterial();
+      // Preserves the height RT's G and B, which River+ uses for its own carve
+      // flag — a restore must not quietly wipe the other tool's bookkeeping.
+      mat.fragmentNode = Fn(() => {
+        const b = texture(src, uv());
+        const cur = texture(this._rtScratch.texture, uv());
+        return vec4(b.r, cur.g, cur.b, float(1));
+      })();
+      this._baseQuad = new QuadMesh(mat);
+    }
+    const d = this._baseTexData;
+    const b = this._cpuBase;
+    for (let i = 0; i < n; i++) d[i * 4] = b[i];
+    this._baseTex.needsUpdate = true;
+  }
+
+  /** Restore the whole terrain to its unconformed state. */
+  _restoreBase() {
+    if (!this._baseQuad) return;
+    const rtMain = this.getRT();
+    // The G/B passthrough reads scratch, so scratch has to hold the CURRENT
+    // heightmap before the restore overwrites main's R.
+    this._blit(rtMain.texture, this._rtScratch);
+    this._render(this._baseQuad, rtMain, null);
+  }
+
+  _dropBase() {
+    this._cpuBase = null;
+    this._coverage = null;
+  }
+
+  /** Terrain was edited by something else (sculpt, procedural gen, load). */
+  notifyTerrainEdited() {
+    if (!this._cpuBase) return;
+    clearTimeout(this._rebaseTimer);
+    this._rebaseTimer = setTimeout(() => this._rebaseNow(), 60);
+  }
+
+  /**
+   * Fold external edits into the base — but only OUTSIDE the river footprint.
+   * Inside it, the base must keep the pre-river ground or the channel would
+   * re-conform against its own output and dig itself deeper every stroke.
+   */
+  _rebaseNow() {
+    if (!this._cpuBase) return;
+    const cov = this._coverage;
+    const n = this._cpuBase.length;
+    for (let i = 0; i < n; i++) {
+      if (!cov || cov[i] === 0) this._cpuBase[i] = this.cpuHeightmap[i];
+    }
+    this._uploadBase();
+    this.applyConform({ commit: true });
+  }
+
+  /** Unconformed ground height in metres. The solver's view of the world. */
+  sampleBase(wx, wz) {
+    const map = this._cpuBase || this.cpuHeightmap;
+    return sampleNormalized(map, wx, wz);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Solve
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  get params() { return this.toolState.riverV2; }
+
+  _solvable() { return this.rivers.some((r) => r.nodes.length >= MIN_NODES); }
+
+  _solveAll() {
+    const p = this.params;
+    const ground = (x, z) => this.sampleBase(x, z);
+    for (const r of this.rivers) {
+      r.solved = solveRiver({ nodes: r.nodes, sampleGround: ground, params: p });
+    }
+  }
+
+  /** Widest the conform can reach from the centreline at a station, in metres. */
+  _reachAt(solved, i) {
+    return solved.width[i] * 0.5 + solved.bank[i] * (this.params.bankFlareMax ?? 4);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Conform
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _uploadPath(solved) {
+    const n = Math.min(solved.count, MAX_PATH_POINTS);
+    const d = this._pathData;
+    const half = WORLD_SIZE * 0.5;
+    const row1 = MAX_PATH_POINTS * 4;
+    for (let i = 0; i < n; i++) {
+      d[i * 4 + 0] = (solved.x[i] + half) / WORLD_SIZE;
+      d[i * 4 + 1] = (solved.z[i] + half) / WORLD_SIZE;
+      d[i * 4 + 2] = solved.level[i] / MAX_HEIGHT;
+      d[i * 4 + 3] = (solved.width[i] * 0.5) / WORLD_SIZE;
+      d[row1 + i * 4 + 0] = solved.depth[i] / MAX_HEIGHT;
+      d[row1 + i * 4 + 1] = solved.bank[i] / WORLD_SIZE;
+      d[row1 + i * 4 + 2] = 0;
+      d[row1 + i * 4 + 3] = 0;
+    }
+    this._pathTex.needsUpdate = true;
+    return n;
+  }
+
+  _syncConformUniforms() {
+    const p = this.params;
+    this._uBedCurve.value = p.bedCurve ?? 0.55;
+    this._uFreeboardN.value = (p.freeboard ?? 0.6) / MAX_HEIGHT;
+    this._uLipFrac.value = Math.min(0.9, Math.max(0.02, p.lipFraction ?? 0.28));
+    const slope = Math.max(0.02, p.maxBankSlope ?? 0.9);
+    this._uSlopeToUv.value = MAX_HEIGHT / (slope * WORLD_SIZE);
+    this._uFlareMax.value = Math.max(1, p.bankFlareMax ?? 4);
+  }
+
+  _conformRiver(river) {
+    const s = river.solved;
+    if (!s) return;
+    const n = this._uploadPath(s);
+    if (n < 2) return;
+
+    const S = HEIGHTMAP_SIZE;
+    const half = WORLD_SIZE * 0.5;
+    const rtMain = this.getRT();
+
+    for (let a = 0; a < n - 1; a += CHUNK_SEGS) {
+      const b = Math.min(a + CHUNK_SEGS, n - 1);
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, reach = 0;
+      for (let i = a; i <= b; i++) {
+        if (s.x[i] < minX) minX = s.x[i];
+        if (s.x[i] > maxX) maxX = s.x[i];
+        if (s.z[i] < minZ) minZ = s.z[i];
+        if (s.z[i] > maxZ) maxZ = s.z[i];
+        reach = Math.max(reach, this._reachAt(s, i));
+      }
+      const rect = this._clampRect(
+        ((minX - reach + half) / WORLD_SIZE) * S - 2,
+        ((minZ - reach + half) / WORLD_SIZE) * S - 2,
+        ((maxX + reach + half) / WORLD_SIZE) * S + 2,
+        ((maxZ + reach + half) / WORLD_SIZE) * S + 2,
+      );
+      if (!rect) continue;
+
+      this._uSegStart.value = a;
+      this._uSegEnd.value = b;
+      this._blit(rtMain.texture, this._rtScratch, rect);
+      this._render(this._conformQuad, rtMain, rect);
+    }
+  }
+
+  /**
+   * Conservative CPU footprint, for the rebase merge. Discs at each station of
+   * the maximum possible reach: stations are closer together than the smallest
+   * reach, so the discs overlap and cover the whole corridor. Over-covering by
+   * a texel or two only means slightly more ground is protected from external
+   * sculpting than strictly necessary.
+   */
+  _rebuildCoverage() {
+    const S = HEIGHTMAP_SIZE;
+    if (!this._coverage) this._coverage = new Uint8Array(S * S);
+    else this._coverage.fill(0);
+    const cov = this._coverage;
+    const half = WORLD_SIZE * 0.5;
+    const perTexel = WORLD_SIZE / (S - 1);
+
+    for (const r of this.rivers) {
+      const s = r.solved;
+      if (!s) continue;
+      for (let i = 0; i < s.count; i++) {
+        const reach = this._reachAt(s, i);
+        const rt = reach / perTexel;
+        const cx = ((s.x[i] + half) / WORLD_SIZE) * (S - 1);
+        const cz = ((s.z[i] + half) / WORLD_SIZE) * (S - 1);
+        const x0 = Math.max(0, Math.floor(cx - rt));
+        const x1 = Math.min(S - 1, Math.ceil(cx + rt));
+        const z0 = Math.max(0, Math.floor(cz - rt));
+        const z1 = Math.min(S - 1, Math.ceil(cz + rt));
+        const r2 = rt * rt;
+        for (let iz = z0; iz <= z1; iz++) {
+          const dz = iz - cz;
+          const row = iz * S;
+          for (let ix = x0; ix <= x1; ix++) {
+            const dx = ix - cx;
+            if (dx * dx + dz * dz <= r2) cov[row + ix] = 1;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Full re-conform: restore the base, then rewrite every river's cross-section.
+   *
+   * @param {object}  [opts]
+   * @param {boolean} [opts.rebuild=true] also rebuild ribbons, handles, arrows
+   * @param {boolean} [opts.commit=true]  refresh the CPU mirror and dependent
+   *   systems (grass, trees, collision). Call with commit on mouse-up, not per
+   *   frame of a drag.
+   */
+  applyConform({ rebuild = true, commit = true } = {}) {
+    if (!this._solvable()) {
+      if (this._cpuBase) {
+        this._restoreBase();
+        this._dropBase();
+        if (commit) this.onConformCommitted?.();
+      }
+      if (rebuild) this._rebuildVisual();
+      return;
+    }
+
+    this._ensureBase();
+    this._solveAll();
+    this._syncConformUniforms();
+
+    this._restoreBase();
+    for (const r of this.rivers) this._conformRiver(r);
+
+    if (rebuild) this._rebuildVisual();
+    if (commit) {
+      // Only the rebase reads the footprint, and a rebase cannot happen while a
+      // handle is being dragged — so this stays out of the per-mousemove path.
+      this._rebuildCoverage();
+      this.onConformCommitted?.();
+    }
+  }
+
+  /** Panel hook — a conform-affecting parameter changed. */
+  refreshConform() { this.applyConform({ commit: true }); }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Ribbon meshes
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _buildRibbon(river) {
+    const s = river.solved;
+    if (river.mesh) {
+      this.group.remove(river.mesh);
+      river.mesh.geometry.dispose();
+      river.mesh = null;
+    }
+    if (!s || s.count < 2) return;
+
+    const n = s.count;
+    const drop = this.params.surfaceDrop ?? 0.05;
+    const pos = new Float32Array(n * 2 * 3);
+    const uvs = new Float32Array(n * 2 * 2);
+    const flow = new Float32Array(n * 2 * 4);
+    const turb = new Float32Array(n * 2);
+
+    for (let i = 0; i < n; i++) {
+      const halfW = s.width[i] * 0.5;
+      // Overhang the banks: the waterline is found per pixel by the depth test,
+      // so the mesh edge must sit outside it or the shore would be a hard cut.
+      const span = halfW + Math.min(s.bank[i] * 0.5, RIBBON_OVERHANG);
+      const px = -s.tanZ[i];
+      const pz = s.tanX[i];
+      const y = s.level[i] - drop;
+
+      const l = i * 6;
+      pos[l + 0] = s.x[i] - px * span; pos[l + 1] = y; pos[l + 2] = s.z[i] - pz * span;
+      pos[l + 3] = s.x[i] + px * span; pos[l + 4] = y; pos[l + 5] = s.z[i] + pz * span;
+
+      const q = i * 4;
+      uvs[q + 0] = s.arc[i]; uvs[q + 1] = -span;
+      uvs[q + 2] = s.arc[i]; uvs[q + 3] = span;
+
+      const f = i * 8;
+      for (let k = 0; k < 2; k++) {
+        flow[f + k * 4 + 0] = s.tanX[i];
+        flow[f + k * 4 + 1] = s.tanZ[i];
+        flow[f + k * 4 + 2] = s.speed[i];
+        flow[f + k * 4 + 3] = halfW;
+      }
+      turb[i * 2] = s.turb[i];
+      turb[i * 2 + 1] = s.turb[i];
+    }
+
+    const idx = new Uint32Array((n - 1) * 6);
+    for (let i = 0; i < n - 1; i++) {
+      const a = i * 2;
+      const o = i * 6;
+      idx[o + 0] = a; idx[o + 1] = a + 1; idx[o + 2] = a + 2;
+      idx[o + 3] = a + 1; idx[o + 4] = a + 3; idx[o + 5] = a + 2;
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    g.setAttribute("aFlow", new THREE.BufferAttribute(flow, 4));
+    g.setAttribute("aTurb", new THREE.BufferAttribute(turb, 1));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.computeBoundingSphere();
+
+    const mesh = new THREE.Mesh(g, this._water.material);
+    mesh.name = `RiverV2:${river.id}`;
+    mesh.frustumCulled = true;
+    mesh.renderOrder = 10;
+    river.mesh = mesh;
+    this.group.add(mesh);
+  }
+
+  rebuildMeshes() {
+    for (const r of this.rivers) this._buildRibbon(r);
+    this.onWaterMeshesChanged?.();
+  }
+
+  /** All live water meshes — for the water-surface map bake (lakebed, caustics). */
+  get meshes() { return this.rivers.map((r) => r.mesh).filter(Boolean); }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Handles and flow arrows
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _buildHandlePrototypes() {
+    this._geoNode = new THREE.SphereGeometry(1, 12, 8);
+    this._geoWidth = new THREE.OctahedronGeometry(1, 0);
+    this._geoLevel = new THREE.ConeGeometry(0.7, 2, 8);
+
+    this._matCache = new Map();
+
+    // Arrow: a cone rotated to point along +Z, so a basis matrix built from the
+    // flow tangent orients it directly.
+    const cone = new THREE.ConeGeometry(0.45, 1.5, 7);
+    cone.rotateX(Math.PI / 2);
+    cone.translate(0, 0, 0.2);
+    const shaft = new THREE.BoxGeometry(0.16, 0.16, 1.1);
+    shaft.translate(0, 0, -0.85);
+    this._geoArrow = mergeSimple([cone, shaft]);
+
+    const arrowMat = new MeshBasicNodeMaterial();
+    arrowMat.colorNode = attribute("aColor", "vec3");
+    arrowMat.fog = false;
+    this._arrowMat = arrowMat;
+    this._arrows = null;
+  }
+
+  _handleMat(color) {
+    let m = this._matCache.get(color);
+    if (!m) {
+      m = new THREE.MeshBasicMaterial({ color, depthTest: true, fog: false });
+      this._matCache.set(color, m);
+    }
+    return m;
+  }
+
+  _handleScale() {
+    const cam = this.getCamera?.();
+    if (!cam) return 1;
+    // Roughly constant on screen: handles stay grabbable when zoomed out and do
+    // not swallow the river when zoomed in.
+    const d = cam.position.length();
+    return Math.min(6, Math.max(0.45, d / 90));
+  }
+
+  _clearGroup(group) {
+    for (let i = group.children.length - 1; i >= 0; i--) {
+      const c = group.children[i];
+      group.remove(c);
+      if (c.isInstancedMesh) c.dispose?.();
+    }
+  }
+
+  _rebuildVisual() {
+    this.rebuildMeshes();
+    this._rebuildHandles();
+    this._rebuildArrows();
+  }
+
+  _rebuildHandles() {
+    this._clearGroup(this.handleGroup);
+    const p = this.params;
+    if (!p.showHandles) return;
+    const sc = this._handleScale();
+
+    for (let ri = 0; ri < this.rivers.length; ri++) {
+      const river = this.rivers[ri];
+      const active = ri === this._activeIdx();
+      for (let ni = 0; ni < river.nodes.length; ni++) {
+        const nd = river.nodes[ni];
+        const isSel = this.selected && this.selected.riverIdx === ri && this.selected.nodeIdx === ni;
+        const color = isSel ? COL_SELECTED
+          : Number.isFinite(nd.y) ? COL_PINNED
+            : active ? COL_ACTIVE : COL_IDLE;
+        const m = new THREE.Mesh(this._geoNode, this._handleMat(color));
+        m.position.set(nd.x, this._nodeDisplayY(river, ni), nd.z);
+        m.scale.setScalar(sc * (active ? 1 : 0.75));
+        m.userData = { kind: "node", riverIdx: ri, nodeIdx: ni };
+        m.renderOrder = 950;
+        this.handleGroup.add(m);
+      }
+    }
+
+    // The selected node also gets a width pair and a level handle. Showing these
+    // on every node at once turns a river into a hedge of gizmos.
+    const sel = this._selectedNode();
+    if (sel) {
+      const { river, node, riverIdx, nodeIdx } = sel;
+      const y = this._nodeDisplayY(river, nodeIdx);
+      const t = this._nodeTangent(river, nodeIdx);
+      const px = -t.z, pz = t.x;
+      const halfW = (node.width ?? this.params.newWidth) * 0.5;
+
+      for (const side of [-1, 1]) {
+        const m = new THREE.Mesh(this._geoWidth, this._handleMat(COL_WIDTH));
+        m.position.set(node.x + px * halfW * side, y, node.z + pz * halfW * side);
+        m.scale.setScalar(sc * 0.8);
+        m.userData = { kind: "width", riverIdx, nodeIdx, side };
+        m.renderOrder = 951;
+        this.handleGroup.add(m);
+      }
+
+      const lv = new THREE.Mesh(this._geoLevel, this._handleMat(COL_LEVEL));
+      lv.position.set(node.x, y + sc * 3.2, node.z);
+      lv.scale.setScalar(sc);
+      lv.userData = { kind: "level", riverIdx, nodeIdx };
+      lv.renderOrder = 951;
+      this.handleGroup.add(lv);
+    }
+  }
+
+  /**
+   * Flow-direction arrows.
+   *
+   * Not decoration: node order defines which way the river runs, and a profile
+   * that climbs against it is a real authoring mistake with no other symptom
+   * until the water visibly sits wrong. Those stretches are drawn RED, so the
+   * debug view doubles as the validity check.
+   */
+  _rebuildArrows() {
+    this._clearGroup(this.arrowGroup);
+    this._arrows = null;
+    if (!this.params.showArrows) return;
+
+    const items = [];
+    for (const river of this.rivers) {
+      const s = river.solved;
+      if (!s) continue;
+      let next = 0;
+      for (let i = 0; i < s.count; i++) {
+        if (s.arc[i] < next) continue;
+        next = s.arc[i] + ARROW_SPACING;
+        items.push({
+          x: s.x[i], y: s.level[i] + 0.35, z: s.z[i],
+          tx: s.tanX[i], tz: s.tanZ[i],
+          speed: s.speed[i], uphill: s.uphill[i],
+          scale: Math.min(3, Math.max(0.6, s.width[i] * 0.14)),
+        });
+      }
+    }
+    if (!items.length) return;
+
+    const mesh = new THREE.InstancedMesh(this._geoArrow, this._arrowMat, items.length);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 940;
+
+    const colors = new Float32Array(items.length * 3);
+    const m4 = new THREE.Matrix4();
+    const fwd = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3();
+    const up2 = new THREE.Vector3();
+    const scl = new THREE.Matrix4();
+
+    const maxSpeed = this.params.maxSpeed ?? 9;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      fwd.set(it.tx, 0, it.tz).normalize();
+      right.crossVectors(up, fwd).normalize();
+      up2.crossVectors(fwd, right).normalize();
+      m4.makeBasis(right, up2, fwd);
+      scl.makeScale(it.scale, it.scale, it.scale);
+      m4.multiply(scl);
+      m4.setPosition(it.x, it.y, it.z);
+      mesh.setMatrixAt(i, m4);
+
+      // Slow water is deep blue, fast water washes out to white; a reach that
+      // climbs against the flow is red whatever its speed.
+      const t = Math.min(1, it.speed / Math.max(0.5, maxSpeed * 0.6));
+      if (it.uphill) {
+        colors[i * 3 + 0] = 1; colors[i * 3 + 1] = 0.12; colors[i * 3 + 2] = 0.12;
+      } else {
+        colors[i * 3 + 0] = 0.25 + 0.75 * t;
+        colors[i * 3 + 1] = 0.6 + 0.4 * t;
+        colors[i * 3 + 2] = 1;
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.geometry.setAttribute(
+      "aColor", new THREE.InstancedBufferAttribute(colors, 3),
+    );
+
+    this._arrows = mesh;
+    this.arrowGroup.add(mesh);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Selection helpers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _activeIdx() {
+    if (!this.rivers.length) return -1;
+    const i = this.params.activeRiverIndex | 0;
+    return Math.max(0, Math.min(this.rivers.length - 1, i));
+  }
+
+  get activeRiver() {
+    const i = this._activeIdx();
+    return i < 0 ? null : this.rivers[i];
+  }
+
+  _selectedNode() {
+    if (!this.selected) return null;
+    const river = this.rivers[this.selected.riverIdx];
+    if (!river) return null;
+    const node = river.nodes[this.selected.nodeIdx];
+    if (!node) return null;
+    return { river, node, riverIdx: this.selected.riverIdx, nodeIdx: this.selected.nodeIdx };
+  }
+
+  /** Where a node's handle is drawn: its solved water level, or the ground. */
+  _nodeDisplayY(river, nodeIdx) {
+    const nd = river.nodes[nodeIdx];
+    if (Number.isFinite(nd.y)) return nd.y;
+    const s = river.solved;
+    if (s && s.nodeLevel && s.nodeLevel[nodeIdx] != null) return s.nodeLevel[nodeIdx];
+    return this.sampleBase(nd.x, nd.z);
+  }
+
+  _nodeTangent(river, nodeIdx) {
+    const nodes = river.nodes;
+    const a = Math.max(0, nodeIdx - 1);
+    const b = Math.min(nodes.length - 1, nodeIdx + 1);
+    let dx = nodes[b].x - nodes[a].x;
+    let dz = nodes[b].z - nodes[a].z;
+    const len = Math.hypot(dx, dz) || 1;
+    return { x: dx / len, z: dz / len };
+  }
+
+  /** Mirror the selected node's channel into the panel-facing state fields. */
+  syncSelectionToState() {
+    const sel = this._selectedNode();
+    const p = this.params;
+    if (!sel) {
+      p.selWidth = p.newWidth;
+      p.selDepth = p.newDepth;
+      p.selBank = p.newBank;
+      p.selLevel = 0;
+      return;
+    }
+    p.selWidth = sel.node.width ?? p.newWidth;
+    p.selDepth = sel.node.depth ?? p.newDepth;
+    p.selBank = sel.node.bank ?? p.newBank;
+    p.selLevel = this._nodeDisplayY(sel.river, sel.nodeIdx);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Picking and dragging
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  pick(raycaster) {
+    if (!this.params.showHandles) return null;
+    const hits = raycaster.intersectObjects(this.handleGroup.children, false);
+    for (const h of hits) {
+      if (h.object.userData?.kind) return { ...h.object.userData };
+    }
+    return null;
+  }
+
+  select(pick) {
+    if (!pick) return;
+    this.selected = { riverIdx: pick.riverIdx, nodeIdx: pick.nodeIdx };
+    this.params.activeRiverIndex = pick.riverIdx;
+    this.syncSelectionToState();
+    this._rebuildHandles();
+  }
+
+  beginDrag(pick) {
+    if (!pick) return false;
+    this.select(pick);
+    this._pushUndo();
+    this._drag = { ...pick };
+    this.dragging = true;
+    return true;
+  }
+
+  /**
+   * @param {object} ctx
+   * @param {THREE.Raycaster} ctx.raycaster
+   * @param {{x:number,z:number}|null} ctx.terrainHit
+   * @param {THREE.Camera} ctx.camera
+   */
+  dragTo({ raycaster, terrainHit, camera }) {
+    const d = this._drag;
+    if (!d) return;
+    const river = this.rivers[d.riverIdx];
+    const node = river?.nodes[d.nodeIdx];
+    if (!node) return;
+
+    if (d.kind === "node") {
+      if (!terrainHit) return;
+      node.x = terrainHit.x;
+      node.z = terrainHit.z;
+    } else if (d.kind === "width") {
+      const y = this._nodeDisplayY(river, d.nodeIdx);
+      const hit = this._rayOnHorizontalPlane(raycaster, y);
+      if (!hit) return;
+      const t = this._nodeTangent(river, d.nodeIdx);
+      const px = -t.z, pz = t.x;
+      // Project onto the across-stream axis, so dragging along the river does
+      // not change the width.
+      const dist = Math.abs((hit.x - node.x) * px + (hit.z - node.z) * pz);
+      node.width = Math.min(200, Math.max(1, dist * 2));
+    } else if (d.kind === "level") {
+      const y = this._dragLevelY(raycaster, node, camera);
+      if (y == null) return;
+      // Dragging the level handle is what PINS a node: from here on the solver
+      // holds this height instead of dropping the node onto the valley floor.
+      node.y = y;
+    }
+
+    this.applyConform({ commit: false });
+    this.syncSelectionToState();
+  }
+
+  /** What the current drag is moving, so the caller only pays for a terrain
+   *  raycast when a node is actually being dragged across the ground. */
+  get dragKind() { return this._drag?.kind ?? null; }
+
+  endDrag() {
+    if (!this._drag) return false;
+    this._drag = null;
+    this.dragging = false;
+    this.applyConform({ commit: true });
+    return true;
+  }
+
+  cancelDrag() {
+    this._drag = null;
+    this.dragging = false;
+  }
+
+  _rayOnHorizontalPlane(raycaster, y) {
+    const r = raycaster.ray;
+    if (Math.abs(r.direction.y) < 1e-6) return null;
+    const t = (y - r.origin.y) / r.direction.y;
+    if (t < 0) return null;
+    return {
+      x: r.origin.x + r.direction.x * t,
+      z: r.origin.z + r.direction.z * t,
+    };
+  }
+
+  /** Vertical drag: intersect the ray with a vertical plane through the node
+   *  that faces the camera, and take the height of the hit. */
+  _dragLevelY(raycaster, node, camera) {
+    if (!camera) return null;
+    const nx = camera.position.x - node.x;
+    const nz = camera.position.z - node.z;
+    const len = Math.hypot(nx, nz) || 1;
+    const n = new THREE.Vector3(nx / len, 0, nz / len);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+      n, new THREE.Vector3(node.x, 0, node.z),
+    );
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(plane, hit)) return null;
+    return Math.max(-MAX_HEIGHT, Math.min(MAX_HEIGHT * 1.5, hit.y));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Editing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _newNode(x, z) {
+    const p = this.params;
+    return {
+      x, z,
+      y: null,                 // AUTO — the solver drops it onto the valley floor
+      width: p.newWidth ?? RIVER_NODE_DEFAULTS.width,
+      depth: p.newDepth ?? RIVER_NODE_DEFAULTS.depth,
+      bank: p.newBank ?? RIVER_NODE_DEFAULTS.bank,
+    };
+  }
+
+  startNewRiver() {
+    this._pushUndo();
+    this.rivers.push({ id: _nextRiverId++, nodes: [], solved: null, mesh: null });
+    this.params.activeRiverIndex = this.rivers.length - 1;
+    this.selected = null;
+    this._rebuildVisual();
+  }
+
+  /**
+   * Click on the terrain.
+   *
+   * Appends to the end of the active river, or PREPENDS when the first node is
+   * selected — so a river can be traced upstream from its mouth without
+   * restarting it, which is how anyone actually draws one.
+   */
+  addNode({ x, z }) {
+    this._pushUndo();
+    if (!this.rivers.length) {
+      this.rivers.push({ id: _nextRiverId++, nodes: [], solved: null, mesh: null });
+      this.params.activeRiverIndex = 0;
+    }
+    const ri = this._activeIdx();
+    const river = this.rivers[ri];
+    const node = this._newNode(x, z);
+
+    const prepend = this.selected
+      && this.selected.riverIdx === ri
+      && this.selected.nodeIdx === 0
+      && river.nodes.length > 1;
+
+    if (prepend) {
+      river.nodes.unshift(node);
+      this.selected = { riverIdx: ri, nodeIdx: 0 };
+    } else {
+      river.nodes.push(node);
+      this.selected = { riverIdx: ri, nodeIdx: river.nodes.length - 1 };
+    }
+
+    this._snapMouthToNeighbour(ri);
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+  }
+
+  /** Alt-click near the centreline: insert a node into the span it landed on. */
+  insertNodeNear({ x, z }) {
+    const ri = this._activeIdx();
+    const river = this.rivers[ri];
+    if (!river || river.nodes.length < 2) return false;
+
+    // Insert against the CONTROL polyline, not the curve: the curve interpolates
+    // the control points, so the span index is the same either way and this
+    // needs no curve evaluation.
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < river.nodes.length - 1; i++) {
+      const a = river.nodes[i];
+      const b = river.nodes[i + 1];
+      const abx = b.x - a.x, abz = b.z - a.z;
+      const len2 = abx * abx + abz * abz || 1e-9;
+      const t = Math.max(0, Math.min(1, ((x - a.x) * abx + (z - a.z) * abz) / len2));
+      const dx = x - (a.x + abx * t);
+      const dz = z - (a.z + abz * t);
+      const d = Math.hypot(dx, dz);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    // Reject clicks that are nowhere near the river.
+    const solved = river.solved;
+    const tol = solved ? Math.max(8, solved.width[0]) : 12;
+    if (best < 0 || bestD > tol * 2) return false;
+
+    this._pushUndo();
+    const a = river.nodes[best];
+    const b = river.nodes[best + 1];
+    const node = this._newNode(x, z);
+    // An inserted node inherits the channel it was inserted into, so adding
+    // detail never changes the shape of the river.
+    node.width = (a.width + b.width) * 0.5;
+    node.depth = (a.depth + b.depth) * 0.5;
+    node.bank = (a.bank + b.bank) * 0.5;
+    river.nodes.splice(best + 1, 0, node);
+    this.selected = { riverIdx: ri, nodeIdx: best + 1 };
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+    return true;
+  }
+
+  deleteSelected() {
+    const sel = this._selectedNode();
+    if (!sel) return false;
+    this._pushUndo();
+    sel.river.nodes.splice(sel.nodeIdx, 1);
+    if (!sel.river.nodes.length) {
+      this.rivers.splice(sel.riverIdx, 1);
+      this.params.activeRiverIndex = Math.max(0, this.rivers.length - 1);
+      this.selected = null;
+    } else {
+      this.selected = {
+        riverIdx: sel.riverIdx,
+        nodeIdx: Math.min(sel.nodeIdx, sel.river.nodes.length - 1),
+      };
+    }
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+    return true;
+  }
+
+  deleteActiveRiver() {
+    const i = this._activeIdx();
+    if (i < 0) return false;
+    this._pushUndo();
+    const r = this.rivers[i];
+    if (r.mesh) { this.group.remove(r.mesh); r.mesh.geometry.dispose(); }
+    this.rivers.splice(i, 1);
+    this.params.activeRiverIndex = Math.max(0, this.rivers.length - 1);
+    this.selected = null;
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+    return true;
+  }
+
+  clearAll() {
+    this._pushUndo();
+    for (const r of this.rivers) {
+      if (r.mesh) { this.group.remove(r.mesh); r.mesh.geometry.dispose(); }
+    }
+    this.rivers.length = 0;
+    this.selected = null;
+    this.params.activeRiverIndex = 0;
+    this.applyConform({ commit: true });
+  }
+
+  /** Un-pin the selected node: back to following the valley floor. */
+  releaseSelectedLevel() {
+    const sel = this._selectedNode();
+    if (!sel) return false;
+    this._pushUndo();
+    sel.node.y = null;
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+    return true;
+  }
+
+  /** Pin every node of the active river at its currently solved level. */
+  pinActiveRiver() {
+    const river = this.activeRiver;
+    if (!river?.solved) return false;
+    this._pushUndo();
+    for (let i = 0; i < river.nodes.length; i++) {
+      river.nodes[i].y = river.solved.nodeLevel[i];
+    }
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+    return true;
+  }
+
+  /** Un-pin every node of the active river. */
+  releaseActiveRiver() {
+    const river = this.activeRiver;
+    if (!river) return false;
+    this._pushUndo();
+    for (const nd of river.nodes) nd.y = null;
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+    return true;
+  }
+
+  /** Lift or lower every PINNED node of the active river together. */
+  nudgeActiveRiver(dy) {
+    const river = this.activeRiver;
+    if (!river?.solved) return false;
+    this._pushUndo();
+    for (let i = 0; i < river.nodes.length; i++) {
+      const base = Number.isFinite(river.nodes[i].y)
+        ? river.nodes[i].y : river.solved.nodeLevel[i];
+      river.nodes[i].y = base + dy;
+    }
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+    return true;
+  }
+
+  /** Reverse the flow: node order IS the direction, so this reverses the array. */
+  reverseActiveRiver() {
+    const river = this.activeRiver;
+    if (!river || river.nodes.length < 2) return false;
+    this._pushUndo();
+    river.nodes.reverse();
+    if (this.selected?.riverIdx === this._activeIdx()) {
+      this.selected.nodeIdx = river.nodes.length - 1 - this.selected.nodeIdx;
+    }
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+    return true;
+  }
+
+  /** Apply the selected node's channel to every node of its river. */
+  applySelectedChannelToRiver() {
+    const sel = this._selectedNode();
+    if (!sel) return false;
+    this._pushUndo();
+    for (const nd of sel.river.nodes) {
+      nd.width = sel.node.width;
+      nd.depth = sel.node.depth;
+      nd.bank = sel.node.bank;
+    }
+    this.applyConform({ commit: true });
+    return true;
+  }
+
+  /** Panel edited one of the selected node's channel values. */
+  setSelectedChannel({ width, depth, bank } = {}) {
+    const sel = this._selectedNode();
+    if (!sel) return false;
+    if (width != null) sel.node.width = width;
+    if (depth != null) sel.node.depth = depth;
+    if (bank != null) sel.node.bank = bank;
+    this.applyConform({ commit: true });
+    return true;
+  }
+
+  /** Panel edited the selected node's level — which pins it. */
+  setSelectedLevel(y) {
+    const sel = this._selectedNode();
+    if (!sel) return false;
+    sel.node.y = y;
+    this.applyConform({ commit: true });
+    return true;
+  }
+
+  /**
+   * A confluence, kept deliberately small: when a river's endpoint lands on
+   * another river, pin it to that river's water level there. Nothing else is
+   * shared — no junction geometry, no linked solve — because the interpolating
+   * profile already makes the two surfaces meet once their levels agree.
+   */
+  _snapMouthToNeighbour(riverIdx) {
+    const river = this.rivers[riverIdx];
+    if (!river || river.nodes.length < 1) return;
+    const ends = [0, river.nodes.length - 1];
+    for (const ei of ends) {
+      const nd = river.nodes[ei];
+      if (Number.isFinite(nd.y)) continue;
+      for (let oi = 0; oi < this.rivers.length; oi++) {
+        if (oi === riverIdx) continue;
+        const other = this.rivers[oi];
+        if (!other.solved) continue;
+        const snapR = Math.max(4, (nd.width ?? 10) * 0.75);
+        const c = closestStation(other.solved, nd.x, nd.z, snapR);
+        if (c) { nd.y = c.level; break; }
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Undo / redo
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _snapshot() {
+    return JSON.stringify(this.rivers.map((r) => ({
+      id: r.id,
+      nodes: r.nodes.map((n) => ({
+        x: n.x, z: n.z, y: Number.isFinite(n.y) ? n.y : null,
+        width: n.width, depth: n.depth, bank: n.bank,
+      })),
+    })));
+  }
+
+  _restore(json) {
+    const data = JSON.parse(json);
+    for (const r of this.rivers) {
+      if (r.mesh) { this.group.remove(r.mesh); r.mesh.geometry.dispose(); }
+    }
+    this.rivers = data.map((r) => ({
+      id: r.id, nodes: r.nodes, solved: null, mesh: null,
+    }));
+    _nextRiverId = Math.max(_nextRiverId, ...this.rivers.map((r) => r.id + 1), 1);
+    this.selected = null;
+    this.params.activeRiverIndex = Math.max(0, Math.min(
+      this.params.activeRiverIndex | 0, this.rivers.length - 1,
+    ));
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+  }
+
+  _pushUndo() {
+    this._undo.push(this._snapshot());
+    if (this._undo.length > MAX_UNDO) this._undo.shift();
+    this._redo.length = 0;
+  }
+
+  undo() {
+    if (!this._undo.length) return false;
+    this._redo.push(this._snapshot());
+    this._restore(this._undo.pop());
+    return true;
+  }
+
+  redo() {
+    if (!this._redo.length) return false;
+    this._undo.push(this._snapshot());
+    this._restore(this._redo.pop());
+    return true;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Material / frame
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  syncMaterial() {
+    this._water.syncParams(riverWaterParams(this.params.water));
+  }
+
+  /** Drives its own clock from main's loop, so it does NOT implement the
+   *  worldEnvironment `updateWater` hook — that would advance time twice. */
+  update(dt) {
+    this._time += dt;
+    this._water.update(dt, this._time);
+    if (this.editActive && this.handleGroup.visible) {
+      const sc = this._handleScale();
+      for (const h of this.handleGroup.children) {
+        const k = h.userData?.kind;
+        if (k === "node") h.scale.setScalar(sc * 0.9);
+        else if (k === "width") h.scale.setScalar(sc * 0.8);
+        else if (k === "level") h.scale.setScalar(sc);
+      }
+    }
+  }
+
+  /** worldEnvironment water-surface contract (sun/sky only — see update()). */
+  setSunDir(v) { this._water.setSunDir(v); }
+  setSkyColors(z, h) { this._water.setSkyColors(z, h); }
+
+  setEditActive(on) {
+    this.editActive = !!on;
+    this.handleGroup.visible = on && !!this.params.showHandles;
+    this.arrowGroup.visible = on && !!this.params.showArrows;
+    if (!on) this.cancelDrag();
+  }
+
+  refreshVisibility() {
+    this.handleGroup.visible = this.editActive && !!this.params.showHandles;
+    this.arrowGroup.visible = this.editActive && !!this.params.showArrows;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Persistence
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  exportData() {
+    if (!this.rivers.length) return null;
+    const p = this.params;
+    return {
+      params: {
+        stationSpacing: p.stationSpacing, forceDownhill: p.forceDownhill,
+        minGradient: p.minGradient, levelSmoothing: p.levelSmoothing,
+        bedCurve: p.bedCurve, freeboard: p.freeboard, lipFraction: p.lipFraction,
+        maxBankSlope: p.maxBankSlope, bankFlareMax: p.bankFlareMax,
+        manningN: p.manningN, flowScale: p.flowScale, minSlope: p.minSlope,
+        minSpeed: p.minSpeed, maxSpeed: p.maxSpeed, surfaceDrop: p.surfaceDrop,
+        newWidth: p.newWidth, newDepth: p.newDepth, newBank: p.newBank,
+        water: { ...p.water },
+      },
+      rivers: this.rivers.map((r) => ({
+        id: r.id,
+        nodes: r.nodes.map((n) => ({
+          x: n.x, z: n.z, y: Number.isFinite(n.y) ? n.y : null,
+          width: n.width, depth: n.depth, bank: n.bank,
+        })),
+      })),
+    };
+  }
+
+  /** The terrain as it was before any river touched it. Saved with the project
+   *  so a reload re-conforms rather than conforming an already-conformed world. */
+  exportBaseHeightmap() {
+    return this._cpuBase ? Float32Array.from(this._cpuBase) : null;
+  }
+
+  importData(data) {
+    for (const r of this.rivers) {
+      if (r.mesh) { this.group.remove(r.mesh); r.mesh.geometry.dispose(); }
+    }
+    this.rivers = [];
+    this.selected = null;
+    this._undo.length = 0;
+    this._redo.length = 0;
+
+    const list = Array.isArray(data) ? data : data?.rivers;
+    if (data?.params) {
+      const p = this.params;
+      for (const [k, v] of Object.entries(data.params)) {
+        if (k === "water") {
+          if (v && typeof v === "object") Object.assign(p.water, v);
+        } else if (v != null) {
+          p[k] = v;
+        }
+      }
+    }
+    if (Array.isArray(list)) {
+      for (const r of list) {
+        if (!Array.isArray(r?.nodes) || r.nodes.length === 0) continue;
+        this.rivers.push({
+          id: r.id ?? _nextRiverId++,
+          nodes: r.nodes.map((n) => ({
+            x: n.x, z: n.z,
+            y: Number.isFinite(n.y) ? n.y : null,
+            width: n.width ?? this.params.newWidth,
+            depth: n.depth ?? this.params.newDepth,
+            bank: n.bank ?? this.params.newBank,
+          })),
+          solved: null, mesh: null,
+        });
+      }
+    }
+    _nextRiverId = Math.max(_nextRiverId, ...this.rivers.map((r) => r.id + 1), 1);
+    this.params.activeRiverIndex = Math.max(0, this.rivers.length - 1);
+    this.syncMaterial();
+    this.applyConform({ commit: true });
+    this.syncSelectionToState();
+  }
+
+  /** Called before a project's heightmap is swapped in, so the loaded terrain is
+   *  never folded into the previous scene's base. */
+  resetForLoad() {
+    clearTimeout(this._rebaseTimer);
+    this._dropBase();
+  }
+}
+
+/** Minimal geometry merge — the two arrow parts share a material and have the
+ *  same attribute set, so a full mergeGeometries dependency is not needed. */
+function mergeSimple(geos) {
+  let vCount = 0;
+  let iCount = 0;
+  for (const g of geos) {
+    vCount += g.attributes.position.count;
+    iCount += g.index ? g.index.count : g.attributes.position.count;
+  }
+  const pos = new Float32Array(vCount * 3);
+  const nor = new Float32Array(vCount * 3);
+  const idx = new Uint32Array(iCount);
+  let vo = 0, io = 0;
+  for (const g of geos) {
+    const p = g.attributes.position.array;
+    const nAttr = g.attributes.normal;
+    pos.set(p, vo * 3);
+    if (nAttr) nor.set(nAttr.array, vo * 3);
+    const gi = g.index ? g.index.array : null;
+    const c = g.attributes.position.count;
+    if (gi) {
+      for (let i = 0; i < gi.length; i++) idx[io + i] = gi[i] + vo;
+      io += gi.length;
+    } else {
+      for (let i = 0; i < c; i++) idx[io + i] = i + vo;
+      io += c;
+    }
+    vo += c;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  return out;
+}

@@ -19,6 +19,8 @@
  *   splines   splineSystem.exportData()
  *   lakes     lakeSystem.exportData()
  *   rivers    riverSystem.exportData()      (basic ribbon rivers)
+ *   riversV2  riverV2System.exportData()    (River v2 — the heightmap blob is the
+ *                                            UNCONFORMED base when it owns it)
  *   rivers2   river2System.exportData()     (River+ carve — heightmap blob is the
  *                                            UNCARVED base; load re-carves)
  *   spawn     { x, z, yaw }                 player start; null when unplaced
@@ -42,7 +44,7 @@ export function encodeProjectFile({
   heightmap,            // Float32Array
   splat, splatRes,      // Uint8Array (both slices combined), texels per side
   snow, snowRes,        // Uint8Array, texels per side
-  trees, foliage, props, roads, splines, lakes, rivers, rivers2,
+  trees, foliage, props, roads, splines, lakes, rivers, rivers2, riversV2,
   spawn,                // { x, z, yaw } player start, or null
   grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
   susukiDensity,        // Uint8Array (RGBA 512²) painted susuki coverage
@@ -80,6 +82,7 @@ export function encodeProjectFile({
     lakes:    lakes ?? null,
     rivers:   rivers ?? null,
     rivers2:  rivers2 ?? null,
+    riversV2: riversV2 ?? null,
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
     groundTsl: groundTsl ?? null,
@@ -142,6 +145,7 @@ export function decodeProjectFile(buffer) {
     lakes:     manifest.lakes,
     rivers:    manifest.rivers,
     rivers2:   manifest.rivers2,
+    riversV2:  manifest.riversV2 ?? null,
     spawn:     manifest.spawn ?? null,
     grassDensity:  blob("grassDensity"),
     susukiDensity: blob("susukiDensity"),

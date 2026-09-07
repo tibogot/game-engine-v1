@@ -78,6 +78,8 @@ const _ssrMaster = /*#__PURE__*/ uniform(1);
 /** @param {boolean} on — false removes the SSR march from every water surface. */
 export function setWaterSsrEnabled(on) { _ssrMaster.value = on ? 1 : 0; }
 export function isWaterSsrEnabled() { return _ssrMaster.value > 0; }
+/** The uniform node itself, for other water shaders that must AND against it. */
+export const waterSsrMasterNode = _ssrMaster;
 
 /**
  * The scene colour and depth grabs, shared by EVERY water surface.
@@ -91,6 +93,15 @@ export function isWaterSsrEnabled() { return _ssrMaster.value > 0; }
  */
 const _sceneColorTex = /*#__PURE__*/ viewportSharedTexture();
 const _sceneDepthTex = /*#__PURE__*/ viewportDepthTexture();
+
+/**
+ * Exported so OTHER water shaders (riverV2Material.js) sample these same two
+ * nodes. Building their own would defeat the whole point of hoisting them: each
+ * extra ViewportTextureNode is another full-resolution framebuffer copy per
+ * frame. Two copies, engine-wide, however many water surfaces exist.
+ */
+export const sceneColorGrab = _sceneColorTex;
+export const sceneDepthGrab = _sceneDepthTex;
 
 // ─── Noise helpers (lifted from v2/core/legacy/lake-shader.js) ────────────────
 
