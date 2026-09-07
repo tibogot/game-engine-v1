@@ -5255,6 +5255,7 @@ export async function startV3App(opts = {}) {
       rivers:    riverSystem.exportData(),
       rivers2,
       riversV2,
+      paintLayers: textureLib.exportData(),
       spawn:     spawnSystem.exportData(),
       grassDensity:  grassTerrainData.getDensitySnapshot(),
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
@@ -5349,6 +5350,15 @@ export async function startV3App(opts = {}) {
         void ensureSusukiBuilt();
       }
       susukiUi?.refresh();
+    }
+
+    // Ground-paint slots: which material each layer uses, its tiling and its
+    // auto-paint rules. Awaits the boot-time default preload internally, so a
+    // project opened during startup is not overwritten by it.
+    if (d.paintLayers) {
+      await textureLib.importData(d.paintLayers);
+      for (let i = 0; i < 7; i++) refreshLayerThumb(i);
+      syncTexlibEditor();
     }
 
     if (d.groundTsl) {

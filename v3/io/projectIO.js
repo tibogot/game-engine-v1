@@ -23,6 +23,10 @@
  *                                            UNCONFORMED base when it owns it)
  *   rivers2   river2System.exportData()     (River+ carve — heightmap blob is the
  *                                            UNCARVED base; load re-carves)
+ *   paintLayers  7 ground-paint slots: name, per-map { name, url } references,
+ *             tiling / normal / AO / roughness strengths and auto-paint rules.
+ *             REFERENCES, not pixels — the images live in /textures. A map
+ *             loaded from a dropped local file keeps only its name.
  *   spawn     { x, z, yaw }                 player start; null when unplaced
  *
  * Binary blobs stay raw (heightmap Float32, splat/snow Uint8) — no base64 bloat.
@@ -45,6 +49,7 @@ export function encodeProjectFile({
   splat, splatRes,      // Uint8Array (both slices combined), texels per side
   snow, snowRes,        // Uint8Array, texels per side
   trees, foliage, props, roads, splines, lakes, rivers, rivers2, riversV2,
+  paintLayers,          // textureLibrary.exportData() — slot metadata, no pixels
   spawn,                // { x, z, yaw } player start, or null
   grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
   susukiDensity,        // Uint8Array (RGBA 512²) painted susuki coverage
@@ -83,6 +88,7 @@ export function encodeProjectFile({
     rivers:   rivers ?? null,
     rivers2:  rivers2 ?? null,
     riversV2: riversV2 ?? null,
+    paintLayers: paintLayers ?? null,
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
     groundTsl: groundTsl ?? null,
@@ -146,6 +152,7 @@ export function decodeProjectFile(buffer) {
     rivers:    manifest.rivers,
     rivers2:   manifest.rivers2,
     riversV2:  manifest.riversV2 ?? null,
+    paintLayers: manifest.paintLayers ?? null,
     spawn:     manifest.spawn ?? null,
     grassDensity:  blob("grassDensity"),
     susukiDensity: blob("susukiDensity"),

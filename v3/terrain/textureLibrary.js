@@ -14,7 +14,22 @@ import * as THREE from "three";
 import { uniform } from "three/tsl";
 
 export const NUM_LAYERS = 7;
-export const SLOT_RES   = 512; // per-slot texture resolution (fixed for the DataArrayTexture)
+/**
+ * Per-slot texture resolution, fixed for the DataArrayTexture.
+ *
+ * Every source image is resized to this, so it is the ceiling on how sharp the
+ * ground can ever look. It costs VRAM and boot time, NOT frame time — the
+ * shader takes the same number of taps whatever the size. Both arrays together,
+ * mipmaps included: 512 is about 20 MB, 1024 about 78 MB, 2048 about 314 MB.
+ *
+ * 1024 because several of the shipped defaults (Rock028, Rock058, the cliff and
+ * cobble sets) are 2K source files that were being thrown away at 512.
+ *
+ * Nothing outside this file reads it, and the project format stores texture
+ * REFERENCES rather than pixels, so changing it cannot invalidate a saved
+ * project.
+ */
+export const SLOT_RES   = 1024;
 
 // Default swatch colours — distinct enough to identify layers quickly
 const DEFAULT_ALBEDO = [
@@ -241,7 +256,12 @@ export class TextureLibrary {
     this.slots[slotIndex].aoUrl  = url;
   }
 
-  async preloadDefaults() {
+  preloadDefaults() {
+    this._defaultsPromise = this._preloadDefaults();
+    return this._defaultsPromise;
+  }
+
+  async _preloadDefaults() {
     const B = "/textures/pbr_materials";
     const sets = [
       { name: "Grass",       d: "Grass005",                       col: "Grass005_1K-JPG_Color.jpg",                          nor: "Grass005_1K-JPG_NormalGL.jpg",           rough: "Grass005_1K-JPG_Roughness.jpg",                         ao: "Grass005_1K-JPG_AmbientOcclusion.jpg" },
@@ -326,6 +346,109 @@ export class TextureLibrary {
     const mid = (SLOT_RES * SLOT_RES * 0.5 + SLOT_RES * 0.5) | 0;
     const off = (i * SLOT_RES * SLOT_RES + mid) * 4;
     return [this._albedoData[off], this._albedoData[off+1], this._albedoData[off+2]];
+  }
+
+  // ── Project persistence ───────────────────────────────────────────────────
+  //
+  // Layer setup used to live nowhere: not in the .v3proj, not in localStorage.
+  // Every load ran preloadDefaults() over the top, so a renamed layer, a
+  // different material, a tiling scale or an auto-paint rule was gone on reload
+  // while the PAINTED WEIGHTS survived in the project blob — the ground came
+  // back looking wrong with the painting intact, which is a horrible thing to
+  // debug.
+  //
+  // Pixels are deliberately NOT stored. A project already carries a heightmap
+  // and splat blob; adding seven 1024² albedo + ORM pairs would add tens of
+  // megabytes for data that is sitting in /textures. References are stored the
+  // way tree slots store preset filenames.
+
+  /** Slot metadata for encodeProjectFile({ paintLayers }). */
+  exportData() {
+    const ref = (name, url) => {
+      if (!name && !url) return null;
+      // An object URL from a dropped file dies with the page; keep the filename
+      // so the load can at least say what is missing.
+      const keep = url && !/^(blob:|data:)/.test(url) ? url : null;
+      return { name: name ?? null, url: keep };
+    };
+    return this.slots.map((s, i) => {
+      const u = this.slotUniforms[i];
+      return {
+        name:      s.name,
+        albedo:    ref(s.albedoName, s.albedoUrl),
+        normal:    ref(s.normalName, s.normalUrl),
+        rough:     ref(s.roughName,  s.roughUrl),
+        ao:        ref(s.aoName,     s.aoUrl),
+        uvScale:   u.uUVScale.value,
+        normalStr: u.uNormalStr.value,
+        aoStr:     u.uAOStr.value,
+        roughStr:  u.uRoughStr.value,
+        auto: {
+          enabled:   s.autoEnabled,
+          heightMin: s.autoHeightMin,
+          heightMax: s.autoHeightMax,
+          slopeMin:  s.autoSlopeMin,
+          slopeMax:  s.autoSlopeMax,
+          blend:     s.autoBlend,
+          strength:  s.autoStrength,
+        },
+      };
+    });
+  }
+
+  /**
+   * Restore slot metadata and re-fetch the referenced maps.
+   *
+   * AWAITS preloadDefaults FIRST. Those are async URL loads fired at boot; if a
+   * project is opened while they are still in flight they land afterwards and
+   * overwrite everything restored here, which looks exactly like the bug this
+   * whole method exists to fix.
+   */
+  async importData(data) {
+    if (!Array.isArray(data)) return;
+    try { await this._defaultsPromise; } catch (_) { /* defaults are best-effort */ }
+
+    const missing = [];
+    const jobs = [];
+    const n = Math.min(NUM_LAYERS, data.length);
+    for (let i = 0; i < n; i++) {
+      const d = data[i];
+      if (!d) continue;
+      const s = this.slots[i];
+      const u = this.slotUniforms[i];
+      if (typeof d.name === "string") s.name = d.name;
+      if (Number.isFinite(d.uvScale))   u.uUVScale.value   = d.uvScale;
+      if (Number.isFinite(d.normalStr)) u.uNormalStr.value = d.normalStr;
+      if (Number.isFinite(d.aoStr))     u.uAOStr.value     = d.aoStr;
+      if (Number.isFinite(d.roughStr))  u.uRoughStr.value  = d.roughStr;
+      const a = d.auto;
+      if (a) {
+        s.autoEnabled = !!a.enabled;
+        if (Number.isFinite(a.heightMin)) s.autoHeightMin = a.heightMin;
+        if (Number.isFinite(a.heightMax)) s.autoHeightMax = a.heightMax;
+        if (Number.isFinite(a.slopeMin))  s.autoSlopeMin  = a.slopeMin;
+        if (Number.isFinite(a.slopeMax))  s.autoSlopeMax  = a.slopeMax;
+        if (Number.isFinite(a.blend))     s.autoBlend     = a.blend;
+        if (Number.isFinite(a.strength))  s.autoStrength  = a.strength;
+      }
+      const fetchMap = (r, load) => {
+        if (!r) return;
+        if (r.url) jobs.push(load(i, r.url).catch(() => missing.push(r.name ?? r.url)));
+        else if (r.name) missing.push(r.name);
+      };
+      fetchMap(d.albedo, (k, url) => this.loadAlbedoFromUrl(k, url));
+      fetchMap(d.normal, (k, url) => this.loadNormalFromUrl(k, url));
+      fetchMap(d.rough,  (k, url) => this.loadRoughnessFromUrl(k, url));
+      fetchMap(d.ao,     (k, url) => this.loadAOFromUrl(k, url));
+    }
+    await Promise.all(jobs);
+    if (missing.length) {
+      console.warn(
+        `[V3] Paint layers: ${missing.length} texture(s) not restored — they were ` +
+        `loaded from a local file rather than a project path, so only the name survives: ` +
+        missing.join(", "),
+      );
+    }
   }
 
   // Returns the array that createSplatOverlay() expects as `layerSlots`
