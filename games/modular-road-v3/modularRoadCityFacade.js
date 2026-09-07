@@ -145,6 +145,11 @@ export const BUILDING_TYPE = { punched: 0, curtain: 1, ribbon: 2 };
  * little terracotta. One flat pick per lot. This — not the six muddy greys it
  * replaces — is most of why the city stopped looking brown.
  */
+/** The gases a real street is actually lit by — see `neonAmount`. */
+export const NEON_PALETTE = [
+  0xff2ea6, 0x25e0ff, 0xffd9a0, 0xff8a1f, 0x39ff8b, 0xff2d3a,
+];
+
 export const PALETTE = [
   0xa8553c, 0x9c4a34,                                 // terracotta / red brick (accent)
   0x8a6a52, 0x7d6450,                                 // brownstone
@@ -243,6 +248,92 @@ export const FACADE_DEFAULTS = {
   glassReflectMin: 0.16,
   curtainReflectMin: 0.55,
   skyReflectGain: 0.9,
+
+  /**
+   * THE SUN IN THE GLASS.
+   *
+   * The glass already mirrors the sky, and a sky is a smooth gradient — which
+   * mirrors to a smooth gradient, so the skyline read flat. What a real
+   * curtain-wall city does is FLASH: one tower face lights up as you move past
+   * it, then goes out and the next one takes over. That is the sun's own disc
+   * in a mirror, and it is the single strongest "this is a real city" cue at
+   * distance.
+   *
+   * It is a mirror lobe on the REFLECTED view ray, not a light: `pow(R·sun, k)`
+   * with a large k. Cheap — a dot and a pow on pixels that are already doing a
+   * reflect — and it lands in the EMISSIVE slot, so it goes through the bloom
+   * MRT and blooms like a real specular highlight rather than just going white.
+   *
+   * Note it does not alias the way a tight lobe usually does: the normal is
+   * constant across a flat face, so the term varies slowly in screen space and
+   * whole faces light at once. That IS the effect — glass towers flash by the
+   * face, not by the pixel.
+   */
+  /**
+   * ── STREET-LEVEL NEON ─────────────────────────────────────────────────
+   *
+   * The Blade Runner read is not the giant billboards — it is shopfront neon
+   * on the first two or three floors and a wet ground under it. The billboards
+   * are the postcard; the neon is the city.
+   *
+   * It is PAINT, not geometry: a fascia band and the odd blade sign per bay,
+   * keyed off the same per-lot hash everything else here uses. Zero draw calls,
+   * and it lands in the emissive slot so it goes through the bloom MRT and
+   * actually glows rather than just being a bright colour.
+   *
+   * Gated on height, because that is the whole point: a branch that skips the
+   * work on every pixel above the third floor, which is nearly all of them on
+   * a skyline.
+   */
+  neonAmount: 1.0,
+  /**
+   * Fraction of BUILDINGS with a lit frontage at all, then of BAYS within one.
+   *
+   * Two gates, not one, and the building gate is the important one. With only
+   * the bay gate every building in the city had some neon on it, and from
+   * altitude that read as a glowing grid tracing every block — a lit outline
+   * of the street plan rather than a street. Real neon clusters: a parade of
+   * lit frontages, then a stretch of dark offices.
+   */
+  neonBuildings: 0.26,
+  neonFraction: 0.5,
+  /** Metres above the building base for the fascia band, and its depth. */
+  neonHeight: 4.0,
+  neonThick: 0.40,
+  /** A projecting blade sign above the fascia, on some bays. */
+  neonBladeH: 2.6,
+  neonBladeFraction: 0.42,
+  /** Emissive gain. Bloom does the rest — and did rather too much of it. */
+  neonBoost: 1.5,
+  /** Neon by day is a tube with the lights on in daylight — visible, not gone. */
+  neonDay: 0.16,
+
+  sunGlint: 1.2,
+  /**
+   * Lobe tightness, and MEASURED rather than guessed — three guesses in a row
+   * were wrong, all of them invisible.
+   *
+   * Sampling the visible glass faces from a street canyon, the distribution of
+   * R.sun is: best face 0.996, p99 0.907, median 0.025. At 900 even the best
+   * face in the city got 0.996^900 = 1.7%% of the glint, and A/B frames differed
+   * by fewer pixels than two identical frames did — the term was strictly below
+   * the animation noise.
+   *
+   * The deeper reason it has to be this wide: every building here is an
+   * axis-aligned box, so the WHOLE CITY has four face orientations. A
+   * physically tight lobe is then all-or-nothing — a face is within a couple of
+   * degrees of alignment or it contributes exactly nothing, and usually none on
+   * screen are. Real glass towers get away with a tight lobe because they have
+   * varied plan angles, curved corners and panel bowing to scatter it.
+   *
+   * 20 is a ~11 degree lobe: broad enough that sun-facing glass takes a warm
+   * sheen and individual panes catch it, which is what golden hour in a city
+   * actually looks like. The principled upgrade, if this ever wants to SPARKLE
+   * rather than glow, is a per-pane normal jitter off the window hash the
+   * facade already computes — that scatters the lobe the way real oil-canning
+   * does, and would let the exponent go back up.
+   */
+  sunGlintSharp: 20,
   skyZenith: 0x3f6fb0,
   skyHorizon: 0xc8d6e2,
   skyGround: 0x2a2c30,
@@ -411,6 +502,16 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
   const uPalette = uniformArray(PALETTE.map((hex) => new THREE.Color(hex)));
   /** Direction TO the sun, world space — what the relief shadows are cast from. */
   const uSunDir = uniform(new THREE.Vector3(0.4, 0.8, 0.3));
+  /** The sun's own colour, for the glint. Warm white until the sky says else. */
+  const uSunCol = uniform(new THREE.Color(1.0, 0.96, 0.88));
+  /**
+   * Shopfront neon, as an indexable uniform array.
+   *
+   * Saturated and few: real signage runs to a handful of gas colours, and a
+   * continuous hue wheel reads as a rainbow rather than as a street. Magenta,
+   * cyan, warm white, amber, green, and a deep red.
+   */
+  const uNeon = uniformArray(NEON_PALETTE.map((hex) => new THREE.Color(hex)));
 
   // ══════════════════════════════════════════════════════════════════════════
   // PURE BUILDERS — plain functions, no `If`, select-chains only, so BOTH the
@@ -905,9 +1006,21 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
       // so the curve runs from `reflectMin` head-on to 1 at grazing.
       const cosT = max(dot(N, F.V.negate()), float(0.0));
       const fres = mix(F.reflectMin, float(1.0), pow(float(1.0).sub(cosT), 4.0));
+
+      // THE SUN'S DISC, in the same mirror. `Rw` is already the reflected view
+      // ray, so this is one dot and one pow on top of work the pane is doing
+      // anyway. Gated on the sun being ABOVE the horizon — below it there is
+      // no disc to reflect, and without the gate every pane flashed at
+      // midnight from a sun direction that was still pointing somewhere.
+      const sd = normalize(uSunDir);
+      const up = smoothstep(float(-0.02), float(0.10), sd.y);
+      const glint = pow(max(dot(Rw, sd), float(0.0)), u.sunGlintSharp)
+        .mul(u.sunGlint).mul(fres).mul(up).mul(float(1.0).sub(u.nightAmount));
+
       return {
         col: col.mul(u.skyReflectGain),
         amt: clamp(fres.mul(u.glassReflect).mul(float(1.0).sub(u.nightAmount.mul(0.6))), 0.0, 1.0),
+        glint: uSunCol.mul(glint),
       };
     };
     const glassOf = (roomCol, roomLit, litCol, paneV, N) => {
@@ -916,10 +1029,15 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
       const pooled = smoothstep(float(0.32), float(0.0), paneV).mul(0.4);
       const g = F.grime.add(dust).add(pooled).clamp(0.0, 0.95);
       const sky = skyAt(N);
+      // The glint rides the EMISSIVE, not the albedo: a specular highlight is
+      // light leaving the surface, and putting it in the albedo would have the
+      // sun's own reflection darkened by the room behind the glass. Dirty
+      // glass flashes less, same `g` the room is muted by.
       return {
         col: mix(mix(roomCol.mul(u.glassTint), dirty, g), sky.col, sky.amt),
         glow: roomCol.mul(litCol).mul(roomLit).mul(u.emissiveBoost)
-          .mul(float(1.0).sub(g.mul(0.6))).mul(mix(u.dayGlow, float(1.0), u.nightAmount)),
+          .mul(float(1.0).sub(g.mul(0.6))).mul(mix(u.dayGlow, float(1.0), u.nightAmount))
+          .add(sky.glint.mul(float(1.0).sub(g.mul(0.7)))),
       };
     };
 
@@ -1133,6 +1251,43 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     oEmis.assign(select(F.isRoof, vec3(0.0),
       oEmis.add(crownColor.mul(hasCrown.mul(crownBand).mul(u.nightAmount).mul(u.crownBoost)))));
 
+    // ── SHOPFRONT NEON ──────────────────────────────────────────────────
+    //
+    // BEHIND A HEIGHT GATE, and that is not a micro-optimisation: on any
+    // skyline view almost every pixel is above the third floor, so this is a
+    // branch that genuinely skips its own body for most of the frame — the
+    // same shape as the relief gate above it, and the reason that one is worth
+    // 5 ms.
+    const neonTop = u.neonHeight.add(u.neonThick).add(u.neonBladeH).toVar();
+    If(F.up.lessThan(neonTop.add(0.5)).and(F.isRoof.not()).and(F.flat.not()), () => {
+      // One hash per BAY, so a frontage is a shop rather than a whole tower
+      // lighting up at once. `faceKey` keeps the four sides different.
+      // Does this BUILDING have a lit frontage at all? Industrial never does:
+      // a warehouse on the fringe with a neon shopfront is the sort of detail
+      // that quietly tells you the city was generated rather than built.
+      const lotLit = step(F.h5, u.neonBuildings).mul(float(1.0).sub(float(F.isIndustrial)));
+      const bi = floor(F.u0.div(F.bay)).toVar();
+      const h = hash31(vec3(F.lot, bi.mul(1.7).add(F.faceKey.mul(11.3)))).toVar();
+      const on = step(h, u.neonFraction).mul(lotLit);
+      const ci = floor(fract(h.mul(37.13)).mul(NEON_PALETTE.length - 0.001));
+      const col = uNeon.element(uint(ci));
+
+      const lo = u.neonHeight, hi = u.neonHeight.add(u.neonThick);
+      // The fascia: a lit band over the shopfront, the length of the bay.
+      const fascia = band(F.up, lo, hi, F.aaV);
+      // A blade sign standing above it, at one edge of the bay — paint, but at
+      // speed a bright vertical bar off a frontage reads as a projecting sign.
+      const bu = F.u0.sub(bi.mul(F.bay));
+      const blade = band(bu, F.bay.mul(0.08), F.bay.mul(0.08).add(0.5), F.aaU)
+        .mul(band(F.up, hi, hi.add(u.neonBladeH), F.aaV))
+        .mul(step(fract(h.mul(91.7)), u.neonBladeFraction));
+
+      const lit = fascia.add(blade.mul(1.15)).mul(on)
+        .mul(u.neonAmount).mul(u.neonBoost)
+        .mul(mix(u.neonDay, float(1.0), u.nightAmount));
+      oEmis.assign(oEmis.add(col.mul(lit)));
+    });
+
     // SKYGLOW — the city lighting itself. Multiplied by the surface's own
     // albedo, so it is an ambient light rather than a fog added on top: a
     // pale stone wall picks it up and dark glass barely does.
@@ -1297,7 +1452,17 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     /** Advance the window-churn clock. Seconds. */
     setTime(t) { uTime.value = t; },
     /** Direction TO the sun, world space — the relief shadows follow it. */
-    setSun(dir) { if (dir) uSunDir.value.copy(dir); },
+    /**
+     * Direction TO the sun, and optionally its colour.
+     *
+     * The colour matters for the glint specifically: a sunset flash off a
+     * tower should be orange because the sun is, and reading it from the sky
+     * module means there is one set of numbers rather than two that drift.
+     */
+    setSun(dir, color) {
+      if (dir) uSunDir.value.copy(dir);
+      if (color) uSunCol.value.copy(color);
+    },
     /**
      * The gradient the glass mirrors. Hand it the sky module's own colours and
      * the reflection tracks time of day exactly — sunset glass goes orange

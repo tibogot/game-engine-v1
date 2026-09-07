@@ -82,6 +82,7 @@ import { createCityStreets } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
 import { createCityObstacles } from "./modularRoadCityObstacles.js";
+import { createCityRoofs } from "./modularRoadCityRoofs.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
 export const CITY_DEFAULTS = {
@@ -153,6 +154,12 @@ export const CITY_DEFAULTS = {
   /** Streets + sidewalk ground plane — flat ground only (with terrain on, the
    *  terrain IS the ground and this is skipped). One draw; see
    *  modularRoadCityStreets.js for why it is a material and not Smart Road. */
+  /** Rooftop plant, tanks, stacks and dishes. Four instanced draws, hard
+   *  distance-culled — and unlike the street, roofs are what a SKY TRACK
+   *  actually looks at. See modularRoadCityRoofs.js. */
+  roofs: true,
+  roofParams: {},
+
   ground: true,
   groundY: 0,
   streetParams: {},
@@ -246,6 +253,9 @@ export function createModularRoadCity({
 
   let ground = null;
   let furniture = null;
+  /** Rooftop clutter. Unlike the streets it does NOT need flat ground — it
+   *  rides the buildings, which exist with terrain on or off. */
+  let roofs = null;
   /** Street furniture you can hit. Null with no ground plane, same as the rest. */
   let obstacles = null;
   /** Buildings you cannot drive through. Built lazily — a city that is never
@@ -504,6 +514,28 @@ export function createModularRoadCity({
     stats.meshes = instanced.flat().filter(Boolean).length;
   }
 
+  /**
+   * Rooftop clutter, rebuilt with the layout.
+   *
+   * NOT part of syncGround: the streets need flat ground (with terrain on the
+   * terrain IS the ground), but roofs ride the buildings and exist either way.
+   * That distinction is the whole reason this is a separate function.
+   */
+  function syncRoofs() {
+    if (roofs) {
+      group.remove(roofs.group);
+      roofs.dispose();
+      roofs = null;
+      stats.roofs = null;
+    }
+    if (!P.roofs) return;
+    roofs = createCityRoofs({
+      P, buildings, archetypes: kit.archetypes, params: P.roofParams,
+    });
+    group.add(roofs.group);
+    stats.roofs = roofs.stats;
+  }
+
   function clearBackend() {
     if (batched) {
       group.remove(batched);
@@ -668,6 +700,7 @@ export function createModularRoadCity({
     else buildBatched();
     buildExtras();
     syncGround();
+    syncRoofs();
     _lodT = 1e9;
     stats.lastBuildMs = performance.now() - t0;
   }
@@ -685,6 +718,7 @@ export function createModularRoadCity({
     facade.setTime(_clock);
     const night = facade.params.nightAmount;
     uNight.value = night;
+    roofs?.setNight(night);
     if (signs) { signs.setNight(night); signs.setTime(_clock); }
     ground?.setNight(night);
     furniture?.setNight(night);
@@ -699,6 +733,7 @@ export function createModularRoadCity({
     _lastLodPos.copy(camera.position);
     applyLod(camera.position);
     furniture?.applyLod(camera.position);
+    roofs?.applyLod(camera.position);
   }
 
   rebuild();
@@ -723,6 +758,9 @@ export function createModularRoadCity({
     },
     /** Live per-kind toggles: lamps / lights / trees / cars / rails / radius. */
     get obstacles() { return obstacles ? obstacles.params : null; },
+    /** Live rooftop-clutter params, or null when roofs are off. */
+    get roofs() { return roofs ? roofs.params : null; },
+    setRoofs(on) { P.roofs = !!on; syncRoofs(); },
 
     /**
      * A clear stretch of ROAD near (x, z) — where to put the car.
@@ -915,6 +953,7 @@ export function createModularRoadCity({
     dispose() {
       clearBackend();
       disposeCityKit(kit);
+      if (roofs) roofs.dispose();
       if (ground) ground.dispose();
       facade.material.dispose();
       collider?.dispose();

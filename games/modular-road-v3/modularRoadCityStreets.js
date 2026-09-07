@@ -52,9 +52,10 @@ import {
   Fn, If, float, vec2, vec3, vec4, uniform, mix, smoothstep, max, min, abs, floor, fract,
   mod, step, saturate, oneMinus, pow, cos, uint, hash, positionWorld, positionView,
   normalView, normalWorld, cameraPosition, fwidth, length, normalMap,
-  texture, dot, sqrt,
+  texture, dot, sqrt, uniformArray,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
+import { NEON_PALETTE } from "./modularRoadCityFacade.js";
 
 /**
  * Defaults. The wet block mirrors WET_DEFAULTS in modularRoadWet.js by NAME and
@@ -189,6 +190,24 @@ export const STREET_DEFAULTS = {
   glowAmount: 1.0,
   /** 0 by day, 1 at night — the city hands this over with the facade's. */
   nightAmount: 0,
+
+  // ── NEON SPILL ────────────────────────────────────────────────────────────
+  //
+  // The other half of the shopfront neon (the lit frontages themselves are in
+  // modularRoadCityFacade.js). A sign is only half the effect — what makes a
+  // street read as Blade Runner is the COLOURED LIGHT ON THE GROUND under it,
+  // and this street is now a mirror, so the wash gets paid for twice: once
+  // directly, and once in the reflection lying on top of it.
+  //
+  // Emissive, like the lamp pools and for the same reason: there are no lights
+  // here. It is the frontage's irradiance times the road's own albedo, so it
+  // shows on paint and on wet asphalt and barely on dry.
+  neonSpill: 0.42,
+  /** Metres from the kerb the wash reaches into the carriageway. */
+  neonSpillWidth: 10.0,
+  /** How much brighter the wash is on a wet road — the same trade `lampWetGain`
+   *  makes: standing water mirrors the frontage back at you. */
+  neonWetGain: 2.2,
 
   // ── PLANAR REFLECTION (modularRoadWet.js WET_DEFAULTS, same names) ────────
   //
@@ -350,6 +369,9 @@ export function createCityStreets({
    * assignable, which is what lets `setReflection` follow the ping-pong.
    */
   const reflectTex = reflectionTexture ? texture(reflectionTexture) : null;
+
+  /** The same gases the facades are lit by, so a frontage and its pool agree. */
+  const uNeonPal = uniformArray(NEON_PALETTE.map((hex) => new THREE.Color(hex)));
 
   // ── Pure builders. No `If`, no derivatives — safe to call from every slot,
   // including normalNode's sub-build, which cannot read another slot's vars.
@@ -621,6 +643,32 @@ export function createCityStreets({
     const poolAlbedo = mix(surface, vec3(0.5), 0.35);
     R.lampEmissive = poolAlbedo.mul(lamp).mul(float(1.0).add(film.mul(u.lampWetGain))).mul(u.lampColor)
       .add(surface.mul(u.glowColor).mul(u.glowAmount).mul(u.nightAmount));
+
+    // ── THE NEON WASH ───────────────────────────────────────────────────────
+    // Strongest at the kerb and dying into the carriageway, coloured per BLOCK
+    // so one frontage is magenta and the next is cyan rather than the whole
+    // city sharing a tint. `intoBlock` is 0 at the block edge and negative out
+    // in the road, so the falloff is measured on how far into the road we are.
+    const blockCell = floor(positionWorld.xz.sub(uOrigin).div(uPitch)).toVar();
+    const nh = ihash2(blockCell).toVar();
+    const nIdx = floor(fract(nh.mul(53.7)).mul(NEON_PALETTE.length - 0.001));
+    const neonCol = uNeonPal.element(uint(nIdx));
+    // BOTH SIDES of the kerb. Written as max(-intoBlock, 0) this was zero
+    // everywhere INSIDE the block, so the wash sat at full strength across the
+    // whole block interior — a filled rectangle of colour per block, which from
+    // altitude read as a glowing outline of every block in the city rather than
+    // as light on a road. The light comes FROM the frontage: it peaks at the
+    // building line and dies in both directions.
+    const fromKerb = abs(L.intoBlock);
+    const wash = oneMinus(smoothstep(float(0.0), u.neonSpillWidth, fromKerb))
+      // Not at the junctions: there is no frontage on the corner of a crossing,
+      // and without this the wash pooled in the middle of every intersection.
+      .mul(oneMinus(L.junction))
+      .mul(step(float(0.35), nh));           // only blocks that HAVE a frontage lit
+    R.lampEmissive = R.lampEmissive.add(
+      poolAlbedo.mul(neonCol).mul(wash).mul(u.neonSpill).mul(u.nightAmount)
+        .mul(float(1.0).add(film.mul(u.neonWetGain))),
+    );
 
     // ── THE CAR, MIRRORED IN THE WET STREET ─────────────────────────────────
     // EMISSIVE, like the road's: the image of a car must not Lambert-shade

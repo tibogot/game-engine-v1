@@ -98,6 +98,25 @@ export const KIT_DEFAULTS = {
    *  has a shape you recognise. The layout places them only near downtown. */
   landmarks: 3,
   landmarkHeight: 1.6,   // × maxHeight, upper end
+
+  // ── ROOFS ─────────────────────────────────────────────────────────────────
+  //
+  // THIS IS A SKY-TRACK GAME. The surface of the city you look at most is not
+  // the facades — you see those edge-on at 200 km/h — it is the ROOFS, and
+  // every one of them was a bare tinted plate.
+  //
+  // The cheap half of fixing that lives here: a parapet wall round every
+  // exposed deck, baked into the archetype. It costs no draw call at all (it
+  // merges into geometry that is already instanced) and it is what turns a
+  // flat plate into a roof you are looking INTO rather than at.
+  //
+  // The per-building clutter — plant, tanks, stacks, dishes — cannot live here,
+  // because every instance of an archetype would then carry an identical roof.
+  // See modularRoadCityRoofs.js.
+  parapet: true,
+  /** Metres. Deliberately just over a hand-rail: taller reads as a wall. */
+  parapetHeight: 1.0,
+  parapetThick: 0.3,
 };
 
 /**
@@ -173,6 +192,41 @@ function buildArchetype(rnd, K, forceH = null) {
     mid.push(g.clone());
   }
 
+  /**
+   * A parapet wall round a deck of `w` x `d` at height `y`.
+   *
+   * Four boxes. The facade shader needs no special case for them: it measures
+   * a face's height from the screen derivatives and treats anything under
+   * 2.5 m as flat, so a 1 m parapet gets the stone paint and no window relief,
+   * which is exactly right. Its top face reads |n.y| > 0.5 and takes the roof
+   * colour, same as the deck it stands on.
+   */
+  const parapetRing = (w, d, y) => {
+    if (!K.parapet) return [];
+    const h = K.parapetHeight, t = K.parapetThick;
+    if (w <= t * 3 || d <= t * 3) return [];      // too small to read as a wall
+    return [
+      box(w, h, t, y, 0, (d - t) / 2),
+      box(w, h, t, y, 0, -(d - t) / 2),
+      box(t, h, d - t * 2, y, (w - t) / 2, 0),
+      box(t, h, d - t * 2, y, -(w - t) / 2, 0),
+    ];
+  };
+
+  // EVERY exposed deck, not just the top one. A setback tower is a stack of
+  // roofs, and from above each ledge reads as one — leaving them bare is what
+  // made a wedding-cake tower look like a solid extrusion from the air.
+  for (let i = 0; i < tiers.length; i++) {
+    const t = tiers[i];
+    // The deck exposed at this tier's TOP: the tier above sits in the middle
+    // of it, so the ring goes round this tier's own footprint.
+    const ringY = t.y + t.h;
+    for (const g of parapetRing(t.w, t.d, ringY)) {
+      full.push(g);
+      mid.push(g.clone());
+    }
+  }
+
   // ── Setback / podium ledges (L0 only) ──────────────────────────────────────
   // A thin slab overhanging each step. Without them a setback is a bare notch
   // and the tower reads as a stack of boxes, which is exactly what it is.
@@ -207,10 +261,13 @@ function buildArchetype(rnd, K, forceH = null) {
   let spireTop = topY;
   /** Height of the mast tip, or null — where an aviation beacon goes. */
   let mastTop = null;
+  /** The mechanical penthouse's footprint, so roof clutter can keep out of it. */
+  let crownFootW = 0, crownFootD = 0;
 
   if (rnd() < K.crownChance) {
     const cw = top.w * (0.4 + rnd() * 0.28);
     const cd = top.d * (0.4 + rnd() * 0.28);
+    crownFootW = cw; crownFootD = cd;
     const ch = 2.5 + rnd() * 5.5;
     full.push(box(cw, ch, cd, topY));
     mid.push(box(cw, ch, cd, topY));
@@ -263,6 +320,22 @@ function buildArchetype(rnd, K, forceH = null) {
      *  lot texture carries as the building top (crown lights sit under it). */
     massHeight: massTop,
     footprint: Math.max(w0, d0),
+    /**
+     * THE TOP DECK, in archetype-local space — where the roof clutter goes.
+     *
+     * `y` is local, so a placed building's roof is at `b.y + roof.y * b.scaleY`
+     * (X and Z are never scaled; see CITY_DEFAULTS). `crownW`/`crownD` are the
+     * mechanical penthouse's footprint, 0 when there is none — clutter has to
+     * keep out of it or it grows through the box.
+     */
+    roof: {
+      y: topY,
+      w: top.w,
+      d: top.d,
+      crownW: crownFootW,
+      crownD: crownFootD,
+      inset: K.parapetThick + 0.6,
+    },
     /** Footprint per axis — the signs need the face they hang on. */
     width: w0,
     depth: d0,
