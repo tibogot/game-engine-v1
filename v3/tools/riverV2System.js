@@ -43,6 +43,7 @@ import { createRiverMaterial } from "../render/water/riverV2Material.js";
 import { riverWaterParams, RIVER_NODE_DEFAULTS } from "../app/state/riverV2State.js";
 import {
   solveRiver, closestStation, planConformChunks, conformStride, LOOP_SEGS, MIN_NODES,
+  buildFlowIndex, sampleFlow, sampleFlowAt,
 } from "./riverV2Channel.js";
 
 /** Path-texture width. Matches the solver's station ceiling, so no river is split. */
@@ -187,6 +188,7 @@ export class RiverV2System {
 
     this._drag = null;
     this._time = 0;
+    this._flowIndex = null;
     this._undo = [];
     this._redo = [];
 
@@ -471,6 +473,10 @@ export class RiverV2System {
     this._coverage = null;
   }
 
+  /** Drop the flow lookup when the last river goes, so a query cannot answer
+   *  from a river that no longer exists. */
+  _dropFlowIndex() { this._flowIndex = null; }
+
   /** Terrain was edited by something else (sculpt, procedural gen, load). */
   notifyTerrainEdited() {
     if (!this._cpuBase) return;
@@ -514,6 +520,53 @@ export class RiverV2System {
     for (const r of this.rivers) {
       r.solved = solveRiver({ nodes: r.nodes, sampleGround: ground, params: p });
     }
+    this._flowIndex = buildFlowIndex(this.rivers.map((r) => r.solved), {
+      worldSize: WORLD_SIZE,
+      bedCurve: p.bedCurve,
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Flow query — for physics, gameplay and audio
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * What is the water doing at this world position?
+   *
+   * The solver already knows the surface level, the velocity and the channel
+   * cross-section at every station, so this is a lookup rather than a second
+   * model — and it reuses the conform's own bed formula, so the depth reported
+   * is the depth the terrain actually has.
+   *
+   * @returns {null|object} `{ surfaceY, bedY, depth, speed, dirX, dirZ,
+   *   distance, inChannel, width, halfWidth, arc, turbulence, riverIndex }`,
+   *   or null when no river is close enough to have an opinion.
+   */
+  sampleFlow(x, z) { return sampleFlow(this._flowIndex, x, z); }
+
+  /** As sampleFlow, plus `submerged` / `submergedDepth` for a 3D point. */
+  sampleFlowAt(x, y, z) { return sampleFlowAt(this._flowIndex, x, y, z); }
+
+  /**
+   * Force per unit mass that the current would apply to something floating at
+   * this point — the one derived quantity almost every caller wants, so it is
+   * not re-derived in five places.
+   *
+   * @param {number} drag how strongly the body couples to the water, 0..1
+   * @returns {null|{x:number, z:number, speed:number, submergedDepth:number}}
+   */
+  flowForceAt(x, y, z, drag = 1) {
+    const f = sampleFlowAt(this._flowIndex, x, y, z);
+    if (!f || !f.submerged) return null;
+    // Coupling ramps over the first metre of immersion: something barely
+    // touching the surface should not be shoved as hard as something in it.
+    const bite = Math.min(1, f.submergedDepth / 1) * drag;
+    return {
+      x: f.dirX * f.speed * bite,
+      z: f.dirZ * f.speed * bite,
+      speed: f.speed,
+      submergedDepth: f.submergedDepth,
+    };
   }
 
   /** Widest the conform can reach from the centreline at a station, in metres. */
@@ -691,6 +744,7 @@ export class RiverV2System {
       }
       // Clear the field too, or the bank sand would outlive the last river.
       this._render(this._clearNearQuad, this._rtNear, null);
+      this._dropFlowIndex();
       this.onRiverFieldChanged?.(false);
       if (rebuild) this._rebuildVisual();
       return;

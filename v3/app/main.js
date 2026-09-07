@@ -6666,9 +6666,18 @@ export async function startV3App(opts = {}) {
       get lakeSystem() { return lakeSystem; },
       lakebedShading,
       waterSurfaceMap,
+      waterSurfaceMap,
       get river2System() { return river2System; },
       get riverV2System() { return riverV2System; },
       riverSandShading,
+      /**
+       * River flow at a world position, for physics, gameplay and audio:
+       * `{ surfaceY, bedY, depth, speed, dirX, dirZ, inChannel, ... }` or null.
+       * `flowForceAt` adds the immersion ramp most callers would write anyway.
+       */
+      sampleRiverFlow: (x, z) => riverV2System?.sampleFlow(x, z) ?? null,
+      sampleRiverFlowAt: (x, y, z) => riverV2System?.sampleFlowAt(x, y, z) ?? null,
+      riverFlowForceAt: (x, y, z, drag) => riverV2System?.flowForceAt(x, y, z, drag) ?? null,
       get grassState() { return grassState; },
       get grassRings() { return grassRings; },
       get grassTintRT() { return grassTintRT; },

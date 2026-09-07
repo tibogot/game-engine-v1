@@ -439,3 +439,181 @@ export function conformStride(count, budget) {
   if (count <= budget) return 1;
   return Math.max(1, Math.ceil((count - 1) / Math.max(1, budget - 1)));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Flow query — what the water is doing at a world position
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The renderer is not the only thing that needs to know where the water is and
+// which way it is going: buoyancy, a swimming player, a boat, drifting debris
+// and audio all want the same answer on the CPU, every frame, for arbitrary
+// points. The solver already has it — surface level, velocity and the channel
+// cross-section at every station — so this is a lookup, not a second model. It
+// deliberately reuses the SAME bed formula the conform writes, so the depth a
+// query reports is the depth the terrain actually has.
+//
+// Queries are cheap because the stations go into a uniform grid whose cell is
+// at least the widest reach in the scene: any station that could be nearest to
+// a point is then in that point's own cell or one of its eight neighbours, so a
+// query tests a handful of segments rather than thousands.
+
+/** Extra metres beyond the water's edge that a query still reports on. */
+const FLOW_MARGIN = 2;
+
+/**
+ * Build the lookup structure. Cheap enough to rebuild whenever a river changes.
+ *
+ * @param {Array<object|null>} solvedList one entry per river, from solveRiver
+ * @param {object} opts
+ * @param {number} opts.worldSize
+ * @param {number} [opts.bedCurve] the tool's cross-section shape, so the depth
+ *   a query reports matches the terrain the conform wrote
+ */
+export function buildFlowIndex(solvedList, { worldSize, bedCurve = 0.55 } = {}) {
+  const rivers = (solvedList || []).filter((s) => s && s.count >= 2);
+  if (!rivers.length) return null;
+
+  let maxReach = 1;
+  for (const s of rivers) {
+    for (let i = 0; i < s.count; i++) {
+      const r = s.width[i] * 0.5 + FLOW_MARGIN;
+      if (r > maxReach) maxReach = r;
+    }
+  }
+  // One cell is at least the widest reach, which is what makes a 3x3 scan
+  // sufficient rather than merely likely.
+  const cell = Math.max(maxReach, 4);
+  const half = worldSize * 0.5;
+  const dim = Math.max(1, Math.ceil(worldSize / cell));
+  const cells = new Map();
+
+  for (let ri = 0; ri < rivers.length; ri++) {
+    const s = rivers[ri];
+    for (let i = 0; i < s.count - 1; i++) {
+      // Register the SEGMENT in every cell either endpoint falls in, so a long
+      // segment spanning a cell boundary is found from both sides.
+      const put = (x, z) => {
+        const cx = Math.max(0, Math.min(dim - 1, Math.floor((x + half) / cell)));
+        const cz = Math.max(0, Math.min(dim - 1, Math.floor((z + half) / cell)));
+        const key = cz * dim + cx;
+        let list = cells.get(key);
+        if (!list) { list = []; cells.set(key, list); }
+        // Segments are short relative to a cell, so duplicates are rare and a
+        // linear check is cheaper than a Set per cell.
+        const tag = ri * 100000 + i;
+        if (list[list.length - 1] !== tag) list.push(tag);
+      };
+      put(s.x[i], s.z[i]);
+      put(s.x[i + 1], s.z[i + 1]);
+    }
+  }
+
+  return { rivers, cells, cell, dim, half, bedCurve, maxReach };
+}
+
+/** Bed height below the surface at `dist` from the centreline. Mirrors the
+ *  conform's cross-section exactly — see riverV2System's resolve pass. */
+function bedDrop(dist, halfW, depth, bedCurve) {
+  const u = Math.min(1, Math.max(0, dist / Math.max(halfW, 1e-6)));
+  const flat = 1 - Math.pow(u, 8);
+  const para = 1 - u * u;
+  return depth * (flat * (1 - bedCurve) + para * bedCurve);
+}
+
+/**
+ * What is the water doing at (x, z)?
+ *
+ * @returns {null|{
+ *   riverIndex:number, distance:number, inChannel:boolean,
+ *   surfaceY:number, bedY:number, depth:number,
+ *   speed:number, dirX:number, dirZ:number,
+ *   width:number, halfWidth:number, arc:number, turbulence:number
+ * }} null when no river is near enough to have an opinion.
+ */
+export function sampleFlow(index, x, z) {
+  if (!index) return null;
+  const { rivers, cells, cell, dim, half, bedCurve } = index;
+
+  const cx = Math.floor((x + half) / cell);
+  const cz = Math.floor((z + half) / cell);
+
+  let bestD2 = Infinity;
+  let bestRi = -1, bestSi = -1, bestT = 0;
+
+  for (let oz = -1; oz <= 1; oz++) {
+    const gz = cz + oz;
+    if (gz < 0 || gz >= dim) continue;
+    for (let ox = -1; ox <= 1; ox++) {
+      const gx = cx + ox;
+      if (gx < 0 || gx >= dim) continue;
+      const list = cells.get(gz * dim + gx);
+      if (!list) continue;
+      for (let k = 0; k < list.length; k++) {
+        const tag = list[k];
+        const ri = (tag / 100000) | 0;
+        const i = tag - ri * 100000;
+        const s = rivers[ri];
+        const ax = s.x[i], az = s.z[i];
+        const abx = s.x[i + 1] - ax, abz = s.z[i + 1] - az;
+        const len2 = abx * abx + abz * abz || 1e-9;
+        let t = ((x - ax) * abx + (z - az) * abz) / len2;
+        t = t < 0 ? 0 : (t > 1 ? 1 : t);
+        const dx = x - (ax + abx * t);
+        const dz = z - (az + abz * t);
+        const d2 = dx * dx + dz * dz;
+        if (d2 < bestD2) { bestD2 = d2; bestRi = ri; bestSi = i; bestT = t; }
+      }
+    }
+  }
+  if (bestRi < 0) return null;
+
+  const s = rivers[bestRi];
+  const i = bestSi, j = bestSi + 1, t = bestT;
+  const lerp = (arr) => arr[i] + (arr[j] - arr[i]) * t;
+
+  const distance = Math.sqrt(bestD2);
+  const width = lerp(s.width);
+  const halfWidth = width * 0.5;
+  // Beyond the channel plus a small margin there is nothing useful to say.
+  if (distance > halfWidth + FLOW_MARGIN) return null;
+
+  const surfaceY = lerp(s.level);
+  const depthMax = lerp(s.depth);
+  const drop = bedDrop(distance, halfWidth, depthMax, bedCurve);
+  const bedY = surfaceY - drop;
+
+  let dirX = s.tanX[i] + (s.tanX[j] - s.tanX[i]) * t;
+  let dirZ = s.tanZ[i] + (s.tanZ[j] - s.tanZ[i]) * t;
+  const dl = Math.hypot(dirX, dirZ) || 1;
+  dirX /= dl; dirZ /= dl;
+
+  return {
+    riverIndex: bestRi,
+    distance,
+    inChannel: distance <= halfWidth,
+    surfaceY,
+    bedY,
+    depth: Math.max(0, surfaceY - bedY),
+    speed: lerp(s.speed),
+    dirX, dirZ,
+    width, halfWidth,
+    arc: lerp(s.arc),
+    turbulence: lerp(s.turb),
+  };
+}
+
+/**
+ * Flow at a 3D point, with the one extra fact a physics step actually wants:
+ * whether the point is under the surface, and how far.
+ *
+ * @returns {null|object} the sampleFlow result plus `submerged` and
+ *   `submergedDepth` (metres of water above the point, 0 when it is not).
+ */
+export function sampleFlowAt(index, x, y, z) {
+  const f = sampleFlow(index, x, z);
+  if (!f) return null;
+  const above = f.surfaceY - y;
+  f.submerged = f.inChannel && above > 0;
+  f.submergedDepth = f.submerged ? above : 0;
+  return f;
+}

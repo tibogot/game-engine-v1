@@ -9,6 +9,7 @@
  */
 import {
   solveRiver, monotoneCubic, closestStation, planConformChunks, conformStride, LOOP_SEGS,
+  buildFlowIndex, sampleFlow, sampleFlowAt,
 } from "../v3/tools/riverV2Channel.js";
 
 let pass = 0, fail = 0;
@@ -266,6 +267,135 @@ console.log("\n11. Conform passes tile the path and compose in any order");
     ok(`stride(${count}, ${budget}) keeps the path inside its budget`, points <= budget + 1,
       `${points} points vs budget ${budget}`);
   }
+}
+
+console.log("\n12. Flow query: what the water is doing at a world position");
+{
+  // A straight river running +X, so every expected answer is hand-checkable.
+  const straight = solveRiver({
+    nodes: [node(-200, 0), node(0, 0), node(200, 0)],
+    sampleGround: (x) => 60 - x * 0.05,
+    params: PARAMS,
+  });
+  const idx = buildFlowIndex([straight], { worldSize: 1024, bedCurve: PARAMS.bedCurve });
+  ok("an index is built", !!idx);
+
+  const mid = sampleFlow(idx, 0, 0);
+  ok("the centreline is in the channel", mid && mid.inChannel);
+  ok("distance from the centreline is ~0", mid && mid.distance < 0.5, `${mid && mid.distance}`);
+  ok("it reports the deepest point there", mid && Math.abs(mid.depth - 1.8) < 0.05,
+    `depth ${mid && mid.depth.toFixed(3)}`);
+  ok("bed sits exactly depth below the surface",
+    mid && Math.abs((mid.surfaceY - mid.bedY) - mid.depth) < 1e-9);
+  ok("flow points downstream (+X)", mid && mid.dirX > 0.99 && Math.abs(mid.dirZ) < 0.05,
+    `(${mid && mid.dirX.toFixed(3)}, ${mid && mid.dirZ.toFixed(3)})`);
+  ok("direction is unit length", mid && Math.abs(Math.hypot(mid.dirX, mid.dirZ) - 1) < 1e-6);
+  ok("speed matches the solver", mid && Math.abs(mid.speed - straight.speed[Math.round(straight.count / 2)]) < 0.2);
+
+  // Across the channel: depth must fall to zero exactly at the water's edge,
+  // because that is where the conform puts the bed.
+  const halfW = mid.halfWidth;
+  ok("halfWidth is the authored half-width", Math.abs(halfW - 5) < 1e-6, `${halfW}`);
+  const atEdge = sampleFlow(idx, 0, halfW - 0.01);
+  ok("depth is ~0 at the waterline", atEdge && atEdge.depth < 0.02,
+    `${atEdge && atEdge.depth.toFixed(4)}`);
+  const inner = sampleFlow(idx, 0, halfW * 0.5);
+  ok("halfway out is shallower than the middle but still wet",
+    inner && inner.depth > 0.05 && inner.depth < mid.depth, `${inner && inner.depth.toFixed(3)}`);
+  ok("halfway out is still in the channel", inner && inner.inChannel);
+
+  const justOut = sampleFlow(idx, 0, halfW + 1);
+  ok("just past the edge is out of the channel", justOut && !justOut.inChannel);
+  ok("...but still reported, so a caller can see the bank coming", !!justOut);
+  ok("well clear of the river returns null", sampleFlow(idx, 0, 200) === null);
+  ok("the far side of the world returns null", sampleFlow(idx, 480, 480) === null);
+
+  // Surface level must agree with the solver, not be re-derived. Compare
+  // against the station actually nearest x = 0, not the middle of the array:
+  // stations are spaced along ARC, so index count/2 is a couple of metres off
+  // and on a sloping river that is a real height difference.
+  let nearest0 = 0;
+  for (let i = 1; i < straight.count; i++) {
+    if (Math.abs(straight.x[i]) < Math.abs(straight.x[nearest0])) nearest0 = i;
+  }
+  ok("surface level matches the solved profile",
+    Math.abs(mid.surfaceY - straight.level[nearest0]) < 0.05,
+    `${mid.surfaceY.toFixed(3)} vs ${straight.level[nearest0].toFixed(3)} at x=${straight.x[nearest0].toFixed(2)}`);
+
+  // Downstream really is downhill.
+  const up = sampleFlow(idx, -150, 0);
+  const down = sampleFlow(idx, 150, 0);
+  ok("the surface falls downstream", up.surfaceY > down.surfaceY,
+    `${up.surfaceY.toFixed(2)} -> ${down.surfaceY.toFixed(2)}`);
+
+  // 3D form.
+  const under = sampleFlowAt(idx, 0, mid.surfaceY - 1, 0);
+  ok("a point under the surface is submerged", under && under.submerged);
+  ok("...by the right amount", under && Math.abs(under.submergedDepth - 1) < 1e-6);
+  const over = sampleFlowAt(idx, 0, mid.surfaceY + 2, 0);
+  ok("a point above the surface is not submerged", over && !over.submerged);
+  ok("...and reports zero immersion", over && over.submergedDepth === 0);
+
+  // Per-node width is respected by the query, not just by the mesh.
+  const varied = solveRiver({
+    nodes: [node(-200, 0, { width: 40 }), node(0, 0, { width: 6 }), node(200, 0, { width: 40 })],
+    sampleGround: () => 40, params: PARAMS,
+  });
+  const vIdx = buildFlowIndex([varied], { worldSize: 1024, bedCurve: PARAMS.bedCurve });
+  const wide = sampleFlow(vIdx, -195, 0);
+  const narrow = sampleFlow(vIdx, 0, 0);
+  ok("the query sees the river narrow", narrow.halfWidth < wide.halfWidth * 0.5,
+    `${wide.halfWidth.toFixed(1)} -> ${narrow.halfWidth.toFixed(1)}`);
+  ok("a point 10 m out is wet in the wide reach", sampleFlow(vIdx, -195, 10)?.inChannel === true);
+  ok("...and dry in the narrow one", (sampleFlow(vIdx, 0, 10)?.inChannel ?? false) === false);
+
+  // Two rivers: the query must answer for the nearer one.
+  const other = solveRiver({
+    nodes: [node(-200, 300), node(200, 300)], sampleGround: () => 10, params: PARAMS,
+  });
+  const both = buildFlowIndex([straight, other], { worldSize: 1024, bedCurve: PARAMS.bedCurve });
+  ok("near river 0 answers for river 0", sampleFlow(both, 0, 0)?.riverIndex === 0);
+  ok("near river 1 answers for river 1", sampleFlow(both, 0, 300)?.riverIndex === 1);
+  ok("between them answers for neither", sampleFlow(both, 0, 150) === null);
+
+  // Degenerate input.
+  ok("no rivers -> no index", buildFlowIndex([], { worldSize: 1024 }) === null);
+  ok("nulls in the list -> no index", buildFlowIndex([null, null], { worldSize: 1024 }) === null);
+  ok("a null index answers null", sampleFlow(null, 0, 0) === null);
+  ok("a null index answers null in 3D", sampleFlowAt(null, 0, 0, 0) === null);
+
+  // The grid must not change the answer: brute force over every segment has to
+  // agree with the accelerated lookup, or the cell size is wrong.
+  const brute = (s, x, z) => {
+    let best = Infinity;
+    for (let i = 0; i < s.count - 1; i++) {
+      const ax = s.x[i], az = s.z[i];
+      const abx = s.x[i + 1] - ax, abz = s.z[i + 1] - az;
+      const len2 = abx * abx + abz * abz || 1e-9;
+      let t = ((x - ax) * abx + (z - az) * abz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      best = Math.min(best, Math.hypot(x - (ax + abx * t), z - (az + abz * t)));
+    }
+    return best;
+  };
+  const meander = solveRiver({
+    nodes: [node(-300, 0), node(-100, 80), node(100, -80), node(300, 0)],
+    sampleGround: (x) => 50 - x * 0.02, params: PARAMS,
+  });
+  const mIdx = buildFlowIndex([meander], { worldSize: 1024, bedCurve: PARAMS.bedCurve });
+  let mismatch = 0, checked = 0;
+  for (let i = 0; i < meander.count; i += 7) {
+    for (const off of [-4, -1, 0, 1, 4]) {
+      const px = -meander.tanZ[i], pz = meander.tanX[i];
+      const qx = meander.x[i] + px * off, qz = meander.z[i] + pz * off;
+      const got = sampleFlow(mIdx, qx, qz);
+      const want = brute(meander, qx, qz);
+      checked++;
+      if (!got || Math.abs(got.distance - want) > 0.01) mismatch++;
+    }
+  }
+  ok(`the grid finds the true nearest segment (${checked} probes on a meander)`,
+    mismatch === 0, `${mismatch} disagreed with brute force`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

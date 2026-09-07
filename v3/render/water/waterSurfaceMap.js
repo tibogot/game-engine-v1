@@ -78,7 +78,16 @@ export function createWaterSurfaceMap({ worldSize, maxHeight, resolution = 1024 
   // Writes the surface's world height; DoubleSide because river ribbons wind
   // either way depending on centreline curvature.
   const heightMat = new THREE.MeshBasicNodeMaterial();
-  heightMat.colorNode = vec4(positionWorld.y, 0, 0, 1);
+  // fragmentNode, NOT colorNode. This map stores a world height, which is
+  // frequently NEGATIVE — the "no water" floor writes -100. A colorNode is
+  // treated as a colour: it goes through the output pipeline, which clamps the
+  // negative away and forces alpha to 1, so the floor landed as 0.0 and the map
+  // said "there is water at sea level, everywhere". Every piece of terrain below
+  // Y=0 then read as submerged, which is why a river channel dug below grade
+  // came out sanded and lit with caustics all the way up its banks, and why
+  // LOWERING a water surface appeared to have no effect while raising one
+  // worked. fragmentNode writes the value through untouched.
+  heightMat.fragmentNode = vec4(positionWorld.y, 0, 0, 1);
   heightMat.side = THREE.DoubleSide;
   heightMat.fog = false;
 
@@ -131,5 +140,10 @@ export function createWaterSurfaceMap({ worldSize, maxHeight, resolution = 1024 
     _borrowed.length = 0;
   }
 
-  return { texture: rt.texture, setSourceProvider, markDirty, bakeIfNeeded };
+  return {
+    texture: rt.texture,
+    /** The target itself, so the map can be read back and checked. */
+    renderTarget: rt,
+    setSourceProvider, markDirty, bakeIfNeeded,
+  };
 }
