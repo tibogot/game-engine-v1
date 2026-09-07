@@ -1958,7 +1958,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // The capsules follow the same switch as the buildings — turning city
     // collision off has to take the lamp posts with it, or the towers become
     // passable while the street furniture stays solid.
-    syncCityCapsules(vehicleRef?.group?.position ?? null, true);
+    syncCityCapsules(vehicleRef?.body?.pos ?? null, true);
   }
 
   function syncCity() {
@@ -2042,7 +2042,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // The car's window of hittable street furniture. Around the CAR, not the
     // camera — a chase camera trails by ~8 m and a look-back would otherwise
     // slide the window off the thing about to be hit.
-    syncCityCapsules(vehicleRef?.group?.position ?? camera.position);
+    syncCityCapsules(vehicleRef?.body?.pos ?? camera.position);
   }
   app.addPreRenderHook?.(updateCity);
 
@@ -2496,6 +2496,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   let cityCapsules = [];
   const _capsAt = new THREE.Vector3(Infinity, Infinity, Infinity);
+  /** How many times the window has actually MOVED. A car that has driven a
+   *  kilometre with this stuck at 1 is the bug above, back again. */
+  let _capsAtCount = 0;
   /** Re-ask once the car has moved this far. The query radius is 70 m, so this
    *  leaves ~50 m of slack — several seconds even at full speed. */
   const CITY_CAPSULE_STEP = 18;
@@ -2510,6 +2513,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   /**
    * Refresh the city's window if the car has left it. Cheap enough to call
    * every frame: the common case is one distance compare.
+   *
+   * `pos` MUST be the car's real position — `vehicle.body.pos`, which is what
+   * every other consumer in this file reads. It was `vehicle.group.position`,
+   * and that Group is created once and NEVER MOVED (the car is drawn from
+   * `body.pos` / `_renderPos`), so it is permanently (0, 0, 0).
+   *
+   * That failed in the nastiest possible way: silently, and only after a few
+   * seconds of play. The first call ran (the "last refreshed at" mark starts
+   * at infinity), grabbed the ~100 capsules around the spawn, and recorded
+   * (0,0,0) as where it stood. Every call after that compared (0,0,0) to
+   * (0,0,0), read zero, and returned early — so the car drove off still
+   * carrying the lamp posts from its spawn and nothing else. Buildings kept
+   * colliding throughout, because those go through the lot-grid collider and
+   * never touch this window, which is exactly what the bug report described.
    */
   function syncCityCapsules(pos, force = false) {
     if (!city || !cityWanted || !cityCollide || !pos) {
@@ -2519,6 +2536,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
     if (!force && _capsAt.distanceToSquared(pos) < CITY_CAPSULE_STEP * CITY_CAPSULE_STEP) return;
     _capsAt.copy(pos);
+    _capsAtCount++;
     cityCapsules = city.obstacleCapsulesNear(pos.x, pos.z) ?? [];
     pushSolidCapsules();
   }
@@ -7633,7 +7651,7 @@ ${e.message}`);
     vehicle.respawn();
     // Re-ask the capsule window with the car in its new place, or it keeps the
     // set from wherever it was before the teleport.
-    syncCityCapsules(vehicle.group?.position ?? null, true);
+    syncCityCapsules(vehicle.body?.pos ?? null, true);
     chase.reset();
     // Without these the old skid ribbon and smoke puffs stay stretched across
     // the map from wherever the car was to where it just teleported.
@@ -9054,6 +9072,12 @@ ${e.message}`);
     getReflectSlab: () => authoredSlab,
     setCityInMirror: (on) => { cityInMirror = !!on; applyRailReflectionMembers(); },
     getCityInMirror: () => cityInMirror,
+    /** Diagnostics for the street-furniture collision window — see
+     *  syncCityCapsules. `refreshes` stuck at 1 after driving IS the bug. */
+    getCityCapsuleInfo: () => ({
+      held: cityCapsules.length, refreshes: _capsAtCount,
+      lastAt: [_capsAt.x, _capsAt.y, _capsAt.z],
+    }),
     /** The mirror itself — exposed for the same reason the lab exposes it: when
      *  a reflection is missing, "the target is empty", "the projection lands off
      *  the edge" and "it is there but multiplied to nothing" look identical on
