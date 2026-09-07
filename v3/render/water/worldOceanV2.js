@@ -186,6 +186,7 @@ export function createWorldOceanV2({
   heightmapSize = 1024,
   normalMap = null,
   lod = {},
+  envMap = null,
 }) {
   const lodCfg = { ...OCEAN2_LOD_DEFAULTS, ...lod };
 
@@ -210,6 +211,7 @@ export function createWorldOceanV2({
     maxHeight,
     heightBase,
     fft,
+    envMap,
   });
 
   const group = new THREE.Group();
@@ -296,6 +298,9 @@ export function createWorldOceanV2({
     setEnvMap() {},   // analytic sky — no PMREM needed
     setSunDir(v) { surface.setSunDir(v); },
     setSkyColors(zenith, horizon) { surface.setSky({ zenith, horizon }); },
+    /** Scene environment map for the reflection; null falls back to the
+     *  analytic sky. No-ops unless the texture identity changed. */
+    setEnvMap(tex) { surface.setEnvMap(tex); },
     setSky(o) { surface.setSky(o); },
 
     /**

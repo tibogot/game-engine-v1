@@ -1418,6 +1418,29 @@ export function buildWorldPanel(app) {
               + "footprint, so it holds at any resolution or field of view.",
           });
           _separator(v2Body);
+          _slider(v2Body, v2, "envReflect", {
+            label: "Env reflection", min: 0, max: 1, step: 0.02, onChange: woc,
+            hint: "How much of the reflection comes from the scene's real "
+              + "environment map rather than the analytic two-colour sky. At "
+              + "grazing angles Fresnel is ~1, so the water IS its reflection — "
+              + "this is the single biggest thing separating sea from plastic. "
+              + "Falls back to the analytic sky automatically when the scene "
+              + "has no environment.",
+          });
+          _slider(v2Body, v2, "waterRoughness", {
+            label: "Water roughness", min: 0, max: 0.25, step: 0.005, onChange: woc,
+            hint: "Base roughness of undisturbed water. Very low — water is "
+              + "nearly a mirror. Raise it for a choppy, wind-scuffed surface.",
+          });
+          _slider(v2Body, v2, "specAA", {
+            label: "Distance roughness", min: 0, max: 1.5, step: 0.02, onChange: woc,
+            hint: "Folds the wave detail a pixel cannot resolve back in as "
+              + "roughness. Past a few hundred metres one pixel covers many "
+              + "waves; averaging their normals leaves a mirror the water is "
+              + "not, so the horizon goes glassy and the sun glint aliases into "
+              + "crawling sparkle. This is most of what makes a horizon read.",
+          });
+          _separator(v2Body);
           _slider(v2Body, v2, "depthDistance", {
             label: "Absorption depth", min: 4, max: 120, step: 1, onChange: woc,
             hint: "Metres of water over which colour saturates. Ocean holds its "

@@ -71,7 +71,6 @@ export async function createWorldEnvironment({
   let _lastLightSnap = "";
   let _lastProcSkySnap = "";
   let _lastInteriorSnap = "";
-  let _oceanEnvRef = null;
 
   // Scratch colours for driving ocean sky reflection each frame.
   const _oceanZenith  = new THREE.Color();
@@ -1015,6 +1014,7 @@ export async function createWorldEnvironment({
       maxHeight: MAX_HEIGHT,
       heightmapSize: oceanV2FieldRes,
       normalMap: waterNormalMapForOcean(),
+      envMap: scene.environment ?? null,
     });
     oceanV2.syncParams(oceanV2Params());
     oceanV2.setSunDir(_effectiveLightDir);
@@ -1223,6 +1223,15 @@ export async function createWorldEnvironment({
     worldOcean.update(dtSec, _appTimeSec, camera);
     if (oceanV2) {
       oceanV2.setSkyColors(_oceanZenith, _oceanHorizon);
+      /*
+       * Follow the scene's environment map. Pushed every frame rather than
+       * hooked at each site that assigns it, because `scene.environment` is
+       * replaced from four separate paths (procedural sky bake, procedural
+       * cubemap, loaded HDR, and cleared for the flat sky) and any hook would
+       * be one `scene.environment = ...` away from going stale. setEnvMap
+       * compares identity and returns immediately when nothing moved.
+       */
+      oceanV2.setEnvMap(scene.environment ?? null);
       oceanV2.update(dtSec, _appTimeSec, camera);
     }
 

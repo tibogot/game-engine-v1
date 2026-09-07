@@ -143,11 +143,12 @@ import { MeshBasicNodeMaterial } from "three";
 import {
   Fn, If, Break, Discard, uniform, float, vec2, vec3, vec4,
   mix, smoothstep, step, dot, exp, pow, max, min, abs, saturate, clamp,
-  floor, fract, sin, cos, sqrt, length, round, log2, fwidth, Loop, attribute,
+  floor, fract, sin, cos, sqrt, length, round, log2, fwidth, dFdx, dFdy, Loop, attribute,
   normalize, reflect, texture, positionLocal, positionWorld, positionView,
   modelWorldMatrix, cameraPosition, cameraNear, cameraFar,
   cameraViewMatrix, cameraProjectionMatrix, screenUV,
   viewportDepthTexture, viewportSharedTexture, perspectiveDepthToViewZ,
+  pmremTexture,
 } from "three/tsl";
 
 const TWO_PI = 6.283185307179586;
@@ -289,6 +290,30 @@ const _blendRNM = /*#__PURE__*/ Fn(([n1, n2]) =>
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A 2x2 mid-grey equirect stand-in for the environment map.
+ *
+ * PMREMNode dereferences its texture while the material is being BUILT, so it
+ * cannot be handed null and given a real map later — and the ocean is often
+ * constructed before the sky has baked. This keeps the graph valid until a host
+ * calls `setEnvMap`; `envPresent` stays 0 meanwhile, so nothing it produces is
+ * ever actually mixed in.
+ */
+let _envPlaceholder = null;
+function envPlaceholder() {
+  if (!_envPlaceholder) {
+    _envPlaceholder = new THREE.DataTexture(
+      new Uint8Array([128, 128, 128, 255, 128, 128, 128, 255,
+                      128, 128, 128, 255, 128, 128, 128, 255]),
+      2, 2, THREE.RGBAFormat,
+    );
+    _envPlaceholder.mapping = THREE.EquirectangularReflectionMapping;
+    _envPlaceholder.colorSpace = THREE.NoColorSpace;
+    _envPlaceholder.needsUpdate = true;
+  }
+  return _envPlaceholder;
+}
+
 export const OCEAN2_DEFAULTS = {
   // ── Body colour ────────────────────────────────────────────────────────────
   // Per-channel Beer-Lambert. Red is absorbed an order of magnitude faster than
@@ -329,6 +354,46 @@ export const OCEAN2_DEFAULTS = {
   skySunGlow: 0.35,
   skySunGlowSize: 9,
   fresnelScale: 1.0,
+
+  /*
+   * ── THE ENVIRONMENT ────────────────────────────────────────────────────────
+   * How much of the reflection comes from the scene's real environment map
+   * rather than from the analytic two-colour sky above.
+   *
+   * At grazing angles Fresnel goes to ~1, so the water IS its reflection — and
+   * from a car, or from any camera near the surface, almost every ray is
+   * grazing. Reflecting a two-stop gradient is the reason a sea reads as tinted
+   * plastic no matter how good its waves and foam are; no amount of work on
+   * either fixes something that is mostly a mirror pointed at nothing.
+   *
+   * Costs one prefiltered cube tap. The analytic sky stays as the fallback for
+   * hosts with no environment (`setEnvMap(null)`), so nothing regresses.
+   */
+  envReflect: 1.0,
+  /** Multiplier on the environment tap, matching scene.environmentIntensity. */
+  envIntensity: 1.0,
+
+  /*
+   * ── ROUGHNESS, AND WHY IT IS NOT A CONSTANT ────────────────────────────────
+   * Base roughness of undisturbed water. Very low — water is nearly a mirror.
+   */
+  waterRoughness: 0.035,
+  /*
+   * Weight on the normal variance a pixel cannot resolve, folded into roughness
+   * (Kaplanyan/Tokuyoshi geometric specular antialiasing).
+   *
+   * Past a few hundred metres there are many waves inside one pixel. Averaging
+   * their normals throws the variance away, so the surface reads as a mirror it
+   * physically is not: distant water goes glassy and the sun glint aliases into
+   * crawling sparkle. Measuring the variance from the screen-space derivative of
+   * the normal and adding it to roughness puts the lost detail back where it
+   * belongs — as a wider specular lobe and a blurrier environment tap. It is a
+   * few ALU and it is most of what makes a horizon believable.
+   */
+  specAA: 0.55,
+  /** Clamp on that term. Unclamped, a near-silhouette pixel can drive roughness
+   *  to 1 and punch a dull grey hole in the horizon. */
+  specAAMax: 0.3,
 
   /**
    * OFF BY DEFAULT, and this is not timidity — it is the single most expensive
@@ -567,7 +632,17 @@ export function createOceanSurface({
   maxHeight = 500,
   heightBase = 0,
   fft = null,
+  envMap = null,
 }) {
+  /*
+   * The scene's prefiltered environment. `scene.environment` is already a PMREM
+   * result and PMREMNode passes such a texture straight through (isPMREMTexture),
+   * so no second prefilter happens. The node's `value` is settable at runtime and
+   * only resets its cached PMREM, so following a sky change costs no recompile.
+   */
+  let _envTexture = envMap ?? null;
+  let _envNode = null;
+
   const D = OCEAN2_DEFAULTS;
   const u = {};
 
@@ -590,6 +665,13 @@ export function createOceanSurface({
   u.skyHorizonColor = uniform(new THREE.Color(D.skyHorizonColor));
   u.sunColor = uniform(new THREE.Color(D.sunColor));
   u.skyReflectIntensity = uniform(D.skyReflectIntensity);
+  u.envReflect = uniform(D.envReflect);
+  u.envIntensity = uniform(D.envIntensity);
+  /** 0 until a host hands us an environment; keeps the analytic fallback exact. */
+  u.envPresent = uniform(_envTexture ? 1 : 0);
+  u.waterRoughness = uniform(D.waterRoughness);
+  u.specAA = uniform(D.specAA);
+  u.specAAMax = uniform(D.specAAMax);
   u.skyHorizonSpread = uniform(Math.sin(D.skyHorizonSpread * DEG2RAD));
   u.skySunGlow = uniform(D.skySunGlow);
   u.skySunGlowSize = uniform(D.skySunGlowSize);
@@ -987,10 +1069,48 @@ export function createOceanSurface({
       worldN.assign(normalize(worldN.add(vec3(det.x, 0, det.z))));
     }
 
+    /*
+     * ── ROUGHNESS FROM WHAT THE PIXEL CANNOT SEE ─────────────────────────────
+     * Kaplanyan/Tokuyoshi geometric specular antialiasing: the variance of the
+     * normal inside one pixel, measured from its screen-space derivative and
+     * added to the roughness.
+     *
+     * This is the whole answer to the distant sea. Out past a few hundred
+     * metres a pixel covers many waves; averaging their normals discards the
+     * spread, leaving a mirror the water is not, so the horizon goes glassy and
+     * the sun glint aliases into crawling sparkle. Feeding the discarded
+     * variance back as roughness widens the specular lobe and blurs the
+     * environment tap by exactly as much as was lost.
+     *
+     * Derivatives, so this must stay in UNIFORM control flow — same rule that
+     * keeps mipmapped textureSample out of the branches below. It sits here, in
+     * the main body, and the branches read the result.
+     */
+    const dNx = dFdx(worldN);
+    const dNy = dFdy(worldN);
+    const normalVar = dot(dNx, dNx).add(dot(dNy, dNy));
+    const kernelRough = min(normalVar.mul(u.specAA), u.specAAMax).toVar();
+    // Roughness composes in alpha (= roughness²), not in roughness.
+    const baseAlpha = u.waterRoughness.mul(u.waterRoughness);
+    const specAlpha2 = saturate(baseAlpha.add(kernelRough)).toVar();
+    const envRough = saturate(sqrt(specAlpha2)).toVar();
+
     // ── Reflection ───────────────────────────────────────────────────────────
     const reflectDir = reflect(viewDir.negate(), worldN).toVar();
     const skyColor = analyticSky(reflectDir).mul(u.skyReflectIntensity).toVar();
-    const reflected = skyColor.toVar();
+    /*
+     * The real environment, prefiltered, sampled at the roughness derived
+     * above — so a calm near surface takes a sharp mip and the far sea takes a
+     * blurred one, which is what stops the horizon from shimmering.
+     *
+     * `envPresent` is 0 until a host calls setEnvMap, so with no environment
+     * this collapses to exactly the analytic sky it replaced.
+     */
+    _envNode = pmremTexture(_envTexture ?? envPlaceholder(), reflectDir, envRough);
+    const envColor = _envNode.mul(u.envIntensity);
+    const reflected = mix(
+      skyColor, envColor, saturate(u.envReflect.mul(u.envPresent)),
+    ).toVar();
 
     If(u.ssrEnabled.greaterThan(0).and(camDist.lessThan(u.ssrEnd)), () => {
       const vsNrm = cameraViewMatrix.mul(vec4(worldN, 0)).xyz.normalize().toVar();
@@ -1111,8 +1231,12 @@ export function createOceanSurface({
     const halfV = normalize(viewDir.add(u.sunDir));
     const NdotH = max(dot(glintN, halfV), float(0.001));
     const NdotL = max(dot(glintN, u.sunDir), float(0.0));
+    // Same widening applied to the sun glint. Without it the glint keeps a
+    // pinpoint lobe out to the horizon and turns into a field of flickering
+    // white dots — the classic aliased-ocean look, and the one thing a player
+    // notices before anything else about the water.
     const ggxAlpha = clamp(sqrt(float(2).div(u.glintPower.add(2))), float(0.01), float(1));
-    const a2 = ggxAlpha.mul(ggxAlpha);
+    const a2 = saturate(ggxAlpha.mul(ggxAlpha).add(kernelRough));
     const denom = NdotH.mul(NdotH).mul(a2.sub(1)).add(1);
     const specD = a2.mul(a2).div(denom.mul(denom));
     body.addAssign(u.sunColor.mul(specD.mul(NdotL).mul(u.glintIntensity).mul(fresnelW.add(0.15))));
@@ -1454,6 +1578,7 @@ export function createOceanSurface({
     "runupNearEnd", "runupFarEnd", "wetFade", "wetDarken", "wetGloss",
     "foamSunLit", "edgeWidth", "edgeIntensity", "foamNoiseScale", "foamJitter", "foamWarpScale",
     "foamWarpStrength", "foamGain", "foamContrast", "foamErode",
+    "envReflect", "envIntensity", "waterRoughness", "specAA", "specAAMax",
     "foamCutoff", "foamTransition", "foamDrift", "foamDetailNear", "foamDetailFar", "foamFarDensity",
     "foamMacroScale", "foamMacroAmt", "foamMacroDrift", "foamLodPixels",
     "horizonFadeStart", "horizonFadeEnd", "underwaterMurk", "opacity",
@@ -1493,6 +1618,18 @@ export function createOceanSurface({
       if (sun) u.sunColor.value.copy(sun);
     },
     setUnderwater(t) { u.underwaterT.value = t; },
+    /**
+     * Point the reflection at the scene's environment map, or null to fall back
+     * to the analytic sky. Cheap enough to call every frame — it no-ops unless
+     * the texture identity actually changed.
+     */
+    setEnvMap(tex) {
+      const next = tex ?? null;
+      if (next === _envTexture) return;
+      _envTexture = next;
+      u.envPresent.value = next ? 1 : 0;
+      if (_envNode) _envNode.value = next ?? envPlaceholder();
+    },
     dispose() { material.dispose(); },
   };
 }
