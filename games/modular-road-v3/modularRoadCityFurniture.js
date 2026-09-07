@@ -28,6 +28,33 @@ import {
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
+/**
+ * WHICH WAY THE CAR MODEL FACES, along its own local Z. +1 means the bonnet
+ * is at +Z.
+ *
+ * ONE constant, because three separate places have to agree about it and for a
+ * while none of them did:
+ *
+ *   the PROFILE   an extruded side outline, flipped by `rotateY(PI/2)` — the
+ *                 bonnet ends up at +z however the shape was authored
+ *   the LAMPS     boxes bolted on the ends, white on the bonnet, red on the boot
+ *   the YAW       how a moving car is turned to face where it is going
+ *
+ * They were written from a comment that said "nose at −z" while the geometry
+ * actually put it at +z, so the headlights were modelled on the BOOT. No
+ * choice of yaw can fix that: turn the white lamps forward and the car drives
+ * trunk-first, turn the bonnet forward and it shows red lights at the front.
+ * Both were visible in the game, on different streets, from the one error.
+ *
+ * Derive from this rather than writing a literal sign anywhere.
+ */
+export const CAR_NOSE_Z = 1;
+
+/** Where the lamp boxes sit along Z. Proud of the extrude bevel at ±2.33. */
+const LAMP_Z = 2.42;
+/** The material's cut, just inside the boxes and outside the bevel. */
+const LAMP_CUT = 2.34, LAMP_CUT_FULL = 2.38;
+
 export const FURNITURE_DEFAULTS = {
   /** Parked cars: station pitch along the kerb, occupancy, and how far the
    *  parking lane sits in from the kerb. */
@@ -162,7 +189,13 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   // a black car black ones, from one draw. ~150 triangles.
   const carGeo = (() => {
     const L = 4.5, W = 1.82;
-    // (z along the car, y up) — nose at −z. Sills sit 0.32 above the road.
+    // THE PROFILE IS FLIPPED BY THE EXTRUSION. These are (shape x, y) pairs
+    // with the bonnet at negative shape-x — but `rotateY(PI/2)` below maps
+    // shape-x to −z, so in the FINISHED geometry the NOSE IS AT +Z. That is
+    // measurable: the lowest body end is at +z. The comment here used to claim
+    // the opposite, and the lamp boxes below were placed to match the comment
+    // rather than the geometry, which put the white headlights on the boot.
+    // Sills sit 0.32 above the road.
     const pts = [
       [-2.25, 0.32], [-2.25, 0.62], [-2.05, 0.72], [-0.95, 0.80],   // bumper, hood
       [-0.35, 1.32], [0.75, 1.36],                                   // windscreen, roof
@@ -180,7 +213,10 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     const bc = new Float32Array(bp.count * 3);
     for (let i = 0; i < bp.count; i++) {
       const y = bp.getY(i), z = bp.getZ(i);
-      const glass = y > 0.86 && y < 1.34 && z > -0.55 && z < 1.65;
+      // MIRRORED with everything else: this band was written for the profile
+      // before the rotation, so it tinted a stripe of bonnet and left half the
+      // real cabin painted body colour. The cabin is at z −1.65 … +0.55.
+      const glass = y > 0.86 && y < 1.34 && z > -1.65 && z < 0.55;
       const k = glass ? 0.16 : 1.0;   // glass: dark, tinted by the paint only faintly
       bc[i * 3] = k; bc[i * 3 + 1] = glass ? 0.18 : 1.0; bc[i * 3 + 2] = glass ? 0.22 : 1.0;
     }
@@ -190,13 +226,20 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // instancing; positionLocal does not — InstanceNode overwrites it), so
     // they need no attribute of their own and the parked cars, whose material
     // has no such term, simply leave them dark.
-    // NOTE the Z. The extrude's bevel pushes the body out to ±2.33, so lamps
-    // at ±2.28 sat INSIDE it — invisible, and indistinguishable from the body
-    // by the Z test the material uses. They have to stand proud of the bevel.
+    //
+    // HEADLIGHTS AT +Z, because that is where the bonnet is (see the profile
+    // note above). They were at −Z, on the boot, and no choice of yaw could
+    // fix that: point the white lamps forward and the car drove trunk-first;
+    // point the bonnet forward and it showed red lights at the front. Both
+    // were seen in the game, on different streets, from this one error.
+    //
+    // NOTE the Z magnitude. The extrude's bevel pushes the body out to ±2.33,
+    // so lamps at ±2.28 sat INSIDE it — invisible, and indistinguishable from
+    // the body by the Z test the material uses. They stand proud of the bevel.
     const lamps = [];
     for (const [x, z, w, h] of [
-      [-0.60, -2.42, 0.50, 0.22], [0.60, -2.42, 0.50, 0.22],     // headlights
-      [-0.64, 2.42, 0.46, 0.20], [0.64, 2.42, 0.46, 0.20],       // tail lights
+      [-0.60, CAR_NOSE_Z * LAMP_Z, 0.50, 0.22], [0.60, CAR_NOSE_Z * LAMP_Z, 0.50, 0.22],       // headlights, on the bonnet
+      [-0.64, -CAR_NOSE_Z * LAMP_Z, 0.46, 0.20], [0.64, -CAR_NOSE_Z * LAMP_Z, 0.46, 0.20],     // tail lights, on the boot
     ]) {
       const g = box(w, h, 0.14, x, z < 0 ? 0.58 : 0.62, z).toNonIndexed();
       const c = new Float32Array(g.getAttribute("position").count * 3).fill(1.0);
@@ -390,7 +433,18 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
           const across = base + streetW * frac;
           const lim = axis === "z" ? P.centerX : P.centerZ;
           if (Math.abs(across - lim) > half) continue;
-          lanes.push({ axis, across, dir, span });
+          // WHICH SIDE IS THE RIGHT-HAND SIDE FLIPS BETWEEN THE TWO AXES, and
+          // this table did not, so one whole axis drove on the wrong side —
+          // half the city's traffic meeting the other half head-on.
+          //
+          // `right = forward x up`. Driving +Z that is -X, so the +1 lanes
+          // belong at LOW across, which is where 0.125/0.375 put them. Driving
+          // +X it is +Z, so the +1 lanes belong at HIGH across instead — the
+          // exact mirror. One sign, applied on one axis, and both agree on
+          // right-hand traffic. trafficHeadingTest checks the side, not just
+          // the heading, because a heading that is consistent with a lane can
+          // still be consistent with the WRONG lane.
+          lanes.push({ axis, across, dir: axis === "x" ? -dir : dir, span });
         }
       }
     }
@@ -418,9 +472,11 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // Beyond ±2.35 there is nothing but the lamp boxes — the bevelled body
     // stops at ±2.33 — so the Z test alone separates them, and the reversed
     // smoothstep edges make it a hard cut rather than a gradient up the nose.
-    const gz = positionGeometry.z;
-    const isHead = smoothstep(-2.34, -2.38, gz);
-    const isTail = smoothstep(2.34, 2.38, gz);
+    // DISTANCE TOWARD THE BONNET, so neither test carries a sign of its own —
+    // both follow CAR_NOSE_Z, and the lamp boxes are placed from it too.
+    const gz = positionGeometry.z.mul(CAR_NOSE_Z);
+    const isHead = smoothstep(LAMP_CUT, LAMP_CUT_FULL, gz);
+    const isTail = smoothstep(-LAMP_CUT, -LAMP_CUT_FULL, gz);
     // Headlights burn day and night (a car with its lights off at dusk reads
     // as parked); tail lights only really register after dark.
     const lampGlow = uHead.mul(isHead).mul(mix(float(0.3), float(1.0), uNight)).mul(F.headlightBoost)
@@ -470,8 +526,23 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       const z = L.axis === "z" ? along * L.dir : L.across;
       const dx = x - cam.x, dz = z - cam.z;
       if (dx * dx + dz * dz > r2) continue;
-      // Nose points along the direction of travel; the model's nose is at -z.
-      const yaw = L.axis === "z" ? (L.dir > 0 ? 0 : Math.PI) : (L.dir > 0 ? -Math.PI / 2 : Math.PI / 2);
+      // BONNET ALONG THE DIRECTION OF TRAVEL. The model's nose is at +Z, so
+      // this is the yaw that maps (0,0,+1) onto the way the car is going.
+      //
+      // The X pair used to be (-PI/2, +PI/2) and was exactly backwards, which
+      // is why half the traffic drove trunk-first. The other half looked wrong
+      // for an unrelated reason — the headlights were modelled on the boot —
+      // and fixing only one of the two just moves which half looks wrong.
+      // trafficHeadingTest locks the heading to the position cars move to, and
+      // to which end of the model the white lamps are on.
+      // A rotation about Y by `yaw` sends the model's nose, (0, 0, CAR_NOSE_Z),
+      // to (sin yaw, 0, cos yaw) * CAR_NOSE_Z. Solve that for each of the four
+      // travel directions rather than keeping a table that can disagree with
+      // the model — which is exactly how this broke.
+      const nose = CAR_NOSE_Z;
+      const yaw = L.axis === "z"
+        ? (L.dir * nose > 0 ? 0 : Math.PI)
+        : (L.dir * nose > 0 ? Math.PI / 2 : -Math.PI / 2);
       _tp.set(x, gyBase, z);
       _tq.setFromAxisAngle(UP, yaw);
       trafficMesh.setMatrixAt(n, _tm.compose(_tp, _tq, _ts));
@@ -523,6 +594,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   }
 
   return {
+    /** Every placement, by kind — the obstacle table turns these into the
+     *  capsules the car collides with (modularRoadCityObstacles.js). */
+    lists: { cars, trees, lights, rails },
     group,
     params: F,
     stats: {

@@ -81,6 +81,7 @@ import { createCitySigns } from "./modularRoadCitySigns.js";
 import { createCityStreets } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
+import { createCityObstacles } from "./modularRoadCityObstacles.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
 export const CITY_DEFAULTS = {
@@ -155,6 +156,10 @@ export const CITY_DEFAULTS = {
   ground: true,
   groundY: 0,
   streetParams: {},
+  /** Lamp posts, traffic lights, tree trunks, parked cars and the crossing
+   *  guardrail, as capsules the car can hit. See modularRoadCityObstacles.js
+   *  for why capsules and not triangles. */
+  obstacleParams: {},
   /** Parked cars, pavement trees, traffic lights, crossing guardrails — five
    *  instanced draws on the same grid. Flat ground only, like the streets. */
   furniture: true,
@@ -213,6 +218,11 @@ function createBeacons(list, P, uTime, uNight) {
  * @param {object}   [opts.kitParams]    overrides on KIT_DEFAULTS
  * @param {(x:number,z:number)=>number} [opts.avoid]    keep-out distance query
  * @param {(x:number,z:number)=>number} [opts.heightAt] ground sampler, null = flat
+ * @param {THREE.Texture} [opts.reflectionTexture] the game's car-reflection
+ *   target. Handing it in makes the wet street mirror the car — no second
+ *   pass, because the road already renders one and, when the car is on the
+ *   street, its mirror plane IS the street. Omit it and the street is built
+ *   with no reflection code at all.
  */
 export function createModularRoadCity({
   seed = 20260902,
@@ -221,6 +231,7 @@ export function createModularRoadCity({
   kitParams = {},
   avoid = null,
   heightAt = null,
+  reflectionTexture = null,
 } = {}) {
   const P = { ...CITY_DEFAULTS, ...params };
 
@@ -235,6 +246,8 @@ export function createModularRoadCity({
 
   let ground = null;
   let furniture = null;
+  /** Street furniture you can hit. Null with no ground plane, same as the rest. */
+  let obstacles = null;
   /** Buildings you cannot drive through. Built lazily — a city that is never
    *  collided against never pays for the trees. */
   let collider = null;
@@ -295,6 +308,10 @@ export function createModularRoadCity({
     facade.lotHeights.clear(P.groundY);
     facade.lotHeights.setOrigin(minCx, minCz, countX, countZ);
     stats.lotTexCells = [countX, countZ];
+    // The window's ORIGIN as well as its size. Without it the lot texture is
+    // un-relocatable: the data alone says nothing about which cell index 0 is,
+    // so nothing outside this function can stand a second facade on this city.
+    stats.lotTexOrigin = [minCx, minCz];
 
     // Landmarks sort to the end of the kit; the ordinary pick excludes them.
     const normalCount = kit.archetypes.length - (kit.stats.landmarks ?? 0);
@@ -599,8 +616,12 @@ export function createModularRoadCity({
       furniture = null;
       stats.furniture = null;
     }
+    obstacles = null;
+    stats.obstacles = null;
     if (P.ground) {
-      ground = createCityStreets({ P, originCellX, originCellZ, params: P.streetParams });
+      ground = createCityStreets({
+        P, originCellX, originCellZ, params: P.streetParams, reflectionTexture,
+      });
       // The street material is rebuilt with the ground, so the weather it was
       // last told about has to be re-applied or every rebuild dries the city.
       ground.setWet(wetAmount);
@@ -617,6 +638,20 @@ export function createModularRoadCity({
         group.add(furniture.group);
         stats.furniture = furniture.stats;
       }
+      // Built from the placements above, so it can never describe furniture
+      // that is not there — it is rebuilt with them or not at all.
+      obstacles = createCityObstacles({
+        lampMatrices: ground.lampMatrices,
+        lists: furniture?.lists ?? null,
+        groundY: P.groundY,
+        // The same corridor the towers respect, so a track at street level is
+        // not lined with posts you cannot see coming — plus whatever the game
+        // asked to be kept clear, which is where the car appears.
+        avoid,
+        avoidRadius: P.avoidRadius,
+        params: P.obstacleParams,
+      });
+      stats.obstacles = obstacles.stats;
     }
   }
 
@@ -675,8 +710,108 @@ export function createModularRoadCity({
     facadeMaterial: facade.material,
     /** The L2 tier's cheaper variant, sharing the near one's uniforms. */
     facadeFarMaterial: facade.farMaterial,
+    /**
+     * Street furniture you can hit, as capsules, near a point.
+     *
+     * A RADIUS QUERY rather than a list: there are ~4300 lamp posts and ~3000
+     * parked cars, and a capsule 300 m away cannot be reached before the next
+     * refresh. The caller re-asks as the car moves. Empty with no ground plane
+     * — with terrain on, the terrain is the ground and none of this exists.
+     */
+    obstacleCapsulesNear(x, z, radius) {
+      return obstacles ? obstacles.capsulesNear(x, z, radius) : [];
+    },
+    /** Live per-kind toggles: lamps / lights / trees / cars / rails / radius. */
+    get obstacles() { return obstacles ? obstacles.params : null; },
+
+    /**
+     * A clear stretch of ROAD near (x, z) — where to put the car.
+     *
+     * The alternative was a hole in the collision around the spawn, and that
+     * is a bad trade: it leaves two lamp posts you can see and drive straight
+     * through, at the one place the player is looking hardest. Move the car
+     * instead. Nothing about the city changes, and nothing stops being solid.
+     *
+     * The grid makes this exact rather than a search. Streets are the band
+     * [blockW, pitch) of each period, so the centre line of the nearest one is
+     * a snap, not a scan — and the point returned is mid-carriageway, clear of
+     * the kerbs the lamps and trees stand on and of the parking lane.
+     *
+     * @returns {{x:number, z:number, yaw:number}} yaw points ALONG the street.
+     */
+    streetSpawnNear(x = 0, z = 0) {
+      const pitch = (P.blockLots + P.streetLots) * P.lotSize;
+      const blockW = P.blockLots * P.lotSize;
+      const streetW = Math.max(P.streetLots * P.lotSize, 1);
+      const ox = originCellX * P.lotSize, oz = originCellZ * P.lotSize;
+      /** Centre of the street band nearest `v` on one axis. */
+      const centre = (v, o) => {
+        const k = Math.round((v - o - blockW - streetW / 2) / pitch);
+        return o + k * pitch + blockW + streetW / 2;
+      };
+      const cx = centre(x, ox), cz = centre(z, oz);
+      // Take the axis whose street is NEARER, and run along it — the other
+      // coordinate stays where it was, so the car lands on the length of a
+      // street rather than in the middle of a junction.
+      const dx = Math.abs(cx - x), dz = Math.abs(cz - z);
+      return dx <= dz
+        // A street running along Z: fix x at its centre, keep z, face +Z.
+        ? { x: cx, z, yaw: 0 }
+        // One running along X: fix z, keep x, face +X.
+        : { x, z: cz, yaw: Math.PI / 2 };
+    },
+
+    /**
+     * The facade's lot height field — base, top, district and type per cell.
+     * It IS the city as far as the shader is concerned, so exposing it lets a
+     * harness stand a SECOND facade material on exactly this city (an A/B of
+     * two shader builds inside one page load, which is the only way to compare
+     * them without a reload's order effects) and lets a test read back what
+     * the towers actually told the shader.
+     */
+    get lotHeights() { return facade.lotHeights; },
     /** Live street-material params, or null when there is no ground plane. */
     get streets() { return ground ? ground.params : null; },
+    /**
+     * This frame's mirror, forwarded to the street. Hand it exactly what the
+     * road deck gets — the pass is shared, and the street's own fades decide
+     * whether any of it survives down here.
+     */
+    setReflection(tex, matrix, center, normal, on) {
+      ground?.setReflection?.(tex, matrix, center, normal, on);
+    },
+    get canReflect() { return !!ground?.canReflect; },
+    /**
+     * WHAT THE WET STREET SHOULD MIRROR — and it is not the car.
+     *
+     * A planar reflection of the car lands directly underneath the car, which
+     * the car itself hides. On the sky track that does not matter, because
+     * what you actually see reflected there is the guardrails. A city street
+     * has no rails, so on its own the mirror had nothing visible in it at all.
+     *
+     * What a wet street mirrors is the LAMPS — a column of light stretched
+     * down the road is the single image everyone recognises as "wet city" —
+     * then the traffic lights, the parked cars and the crossing rails.
+     *
+     * All of them are already ONE InstancedMesh each, so putting the whole set
+     * in the mirror is four or five extra draws on a pass that already runs at
+     * half resolution, not a draw per lamp post.
+     */
+    get reflectables() {
+      const out = [];
+      if (ground?.lampMesh) out.push(ground.lampMesh);
+      if (furniture?.group) {
+        for (const o of furniture.group.children) {
+          if (!o.isInstancedMesh) continue;
+          // Tree canopies are 6-9 m of alpha-tested foliage and read as a
+          // smear at this roughness; the trunks under them do not earn a draw
+          // on their own. Everything else is street-level and sells the wet.
+          if (o.name === "CityCanopies" || o.name === "CityTrunks") continue;
+          out.push(o);
+        }
+      }
+      return out;
+    },
     stats,
     get kit() { return kit; },
     get enabled() { return enabled; },

@@ -1928,11 +1928,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       },
       avoid: cityAvoid,
       heightAt: cityHeightSource(),
+      // The wet street mirrors the car off the pass the ROAD already renders.
+      // No second mirror: when the car is on the street, the plane the road
+      // reflects about IS the street, and when it is up on the sky track the
+      // street's own distance and off-plane fades take it to nothing.
+      reflectionTexture: carReflection.texture,
     });
     scene.add(city.group);
     // Born into whatever weather is already on the track.
     city.setWet?.(roadLook.wetAmount ?? 0);
     syncCityCollision();
+    // Its lamps and street furniture only reach the puddle if the membership
+    // pass runs AFTER they exist.
+    applyRailReflectionMembers();
   }
 
   /**
@@ -1947,6 +1955,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function syncCityCollision() {
     const on = !!(city && cityWanted && cityCollide);
     ground.setCityCollider?.(on ? city.getCollider() : null);
+    // The capsules follow the same switch as the buildings — turning city
+    // collision off has to take the lamp posts with it, or the towers become
+    // passable while the street furniture stays solid.
+    syncCityCapsules(vehicleRef?.group?.position ?? null, true);
   }
 
   function syncCity() {
@@ -2027,6 +2039,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
     city.setSun(_citySun);
     city.update(dt, camera);
+    // The car's window of hittable street furniture. Around the CAR, not the
+    // camera — a chase camera trails by ~8 m and a look-back would otherwise
+    // slide the window off the thing about to be hit.
+    syncCityCapsules(vehicleRef?.group?.position ?? camera.position);
   }
   app.addPreRenderHook?.(updateCity);
 
@@ -2468,6 +2484,44 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let trackBottomY = null;
   /** Exact round colliders (gate posts) — see PropManager.collisionCapsules(). */
   let solidCapsules = [];
+  /**
+   * THE CITY'S OWN CAPSULES — lamp posts, traffic lights, tree trunks, parked
+   * cars, the crossing guardrail.
+   *
+   * Held separately from the props' because they are a MOVING WINDOW: the city
+   * has ~4300 lamp posts and ~3000 parked cars, and handing all of them to a
+   * per-tick solver would be as pointless as it is expensive — a capsule 300 m
+   * away cannot be touched before the next refresh. So the set is re-asked
+   * around the car and the two lists are concatenated for the vehicle.
+   */
+  let cityCapsules = [];
+  const _capsAt = new THREE.Vector3(Infinity, Infinity, Infinity);
+  /** Re-ask once the car has moved this far. The query radius is 70 m, so this
+   *  leaves ~50 m of slack — several seconds even at full speed. */
+  const CITY_CAPSULE_STEP = 18;
+
+  /** Hand the vehicle both lists as one. */
+  function pushSolidCapsules() {
+    vehicleRef?.setSolidCapsules(
+      cityCapsules.length ? solidCapsules.concat(cityCapsules) : solidCapsules,
+    );
+  }
+
+  /**
+   * Refresh the city's window if the car has left it. Cheap enough to call
+   * every frame: the common case is one distance compare.
+   */
+  function syncCityCapsules(pos, force = false) {
+    if (!city || !cityWanted || !cityCollide || !pos) {
+      if (cityCapsules.length) { cityCapsules = []; pushSolidCapsules(); }
+      _capsAt.set(Infinity, Infinity, Infinity);
+      return;
+    }
+    if (!force && _capsAt.distanceToSquared(pos) < CITY_CAPSULE_STEP * CITY_CAPSULE_STEP) return;
+    _capsAt.copy(pos);
+    cityCapsules = city.obstacleCapsulesNear(pos.x, pos.z) ?? [];
+    pushSolidCapsules();
+  }
   /** Same `let … = null` reason as devPanel: bakeCollision hands these to the
    *  vehicle, and `const vehicle` below would be in TDZ on an early bake. */
   let vehicleRef = null;
@@ -3981,6 +4035,23 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let _propInstancerRef = null;
   /** Set once buildMergedTrack's group exists — see the note in `apply`. */
   let _mergedGroupRef = null;
+  /** City furniture in the puddle. Four draws; off restores the old behaviour. */
+  let cityInMirror = true;
+  /**
+   * The slab the mirror pass clips to, as AUTHORED. It is 3 m because a
+   * curving deck's geometry leaves its own plane and a taller slab lets a
+   * guardrail 24 m away draw its reflection downhill (see the long note in
+   * modularRoadReflection.js).
+   *
+   * A CITY STREET has no such problem: it is one flat plane 2.4 km across, so
+   * nothing on it ever leaves the plane. There a 3 m slab is pure loss — it
+   * cuts a lamp post off a metre below the glowing head that is the entire
+   * reason to reflect it. So the slab opens up whenever the mirror plane IS
+   * the street, and snaps back the instant the car is on the track again.
+   */
+  let authoredSlab = 3.0;
+  const CITY_MIRROR_SLAB = 11.0;
+
   function applyRailReflectionMembers() {
     // Nothing of the TRACK goes in the planar mirror any more. The rail's
     // reflection comes from mirrored geometry instead (rebuildMirrorRails), so
@@ -4046,6 +4117,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // onChange calls it during construction, before `mergedGroup` exists.
     // Naming the const directly there is a temporal-dead-zone throw.
     apply(_mergedGroupRef);
+
+    // THE CITY'S STREET FURNITURE. See `city.reflectables` for why the car
+    // alone was never going to be visible: its reflection lands under itself.
+    // Lamps, traffic lights, parked and moving cars, crossing rails — one
+    // InstancedMesh each, so the whole set is four extra draws on a
+    // half-resolution pass.
+    for (const o of city?.reflectables ?? []) {
+      if (cityInMirror) o.layers.enable(REFLECT_LAYER);
+      else o.layers.disable(REFLECT_LAYER);
+    }
 
     rebuildMirrorRails();
     rebuildMirrorProps();
@@ -4286,6 +4367,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // reflection, which is indistinguishable from the toggle doing nothing.
     const railOn = roadMaterial._railMirrorOn;
     if (railOn) railOn.value = 0;
+    // The city street rides the same rule, and for the same reason: it samples
+    // the same ping-ponged target, so it must go dark on every path out of
+    // this function rather than keep mirroring a car that has driven away.
+    city?.setReflection?.(null, null, null, null, false);
 
     const ru = roadMaterial._reflectUniforms;
     if (!ru) return;
@@ -4329,6 +4414,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     _mirrorPoint.multiplyScalar(1 / n);
     _mirrorNormal.normalize();
 
+    // Level, and at the street's own height, with the street actually there:
+    // that is the flat-plane case the tall slab is for.
+    const gy = city?.params?.groundY ?? 0;
+    const onCityStreet = !terrainOn && cityWanted && !!city
+      && _mirrorNormal.y > 0.995 && Math.abs(_mirrorPoint.y - gy) < 0.6;
+    carReflection.slab = onCityStreet ? CITY_MIRROR_SLAB : authoredSlab;
+
     const ok = carReflection.update(camera, _mirrorPoint, _mirrorNormal);
     ru.reflectOn.value = ok ? 1 : 0;
     if (!ok) return;
@@ -4340,6 +4432,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     ru.reflectMatrix.value.copy(carReflection.textureMatrix);
     ru.reflectCenter.value.copy(_mirrorPoint);
     ru.reflectNormal.value.copy(_mirrorNormal);
+    // Same frame, same buffer, same plane — the city street is just another
+    // wet surface lying in it.
+    city?.setReflection?.(carReflection.texture, carReflection.textureMatrix,
+      _mirrorPoint, _mirrorNormal, true);
   }
 
   // GLB body, same deal. This one changes NO physics — the collision box stays
@@ -4525,7 +4621,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // against triangles, and anything thinner than the sample spacing (a gate
     // post, say) falls between the samples. See PropManager.collisionCapsules().
     solidCapsules = props.collisionCapsules();
-    vehicleRef?.setSolidCapsules(solidCapsules);
+    pushSolidCapsules();
 
     syncMoverBvhs();
 
@@ -7052,6 +7148,21 @@ ${e.message}`);
     if (builder.pieces.length) return poseFromPiece(builder.pieces[0]);
     const sp = app.getSpawnPoint?.() ?? null;
     if (sp) return { x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw ?? 0 };
+    // ── NO TRACK, AND THE CITY STREET IS THE GROUND ──────────────────────
+    //
+    // The default spawn is the world origin, and the origin sits on the city's
+    // block grid — with the street furniture solid, the car appeared impaled
+    // on a lamp post and could not move.
+    //
+    // The first fix punched a hole in the collision around the spawn, and that
+    // was the wrong trade: two posts you can see and drive straight through, at
+    // the one place the player is looking hardest. Nothing stops being solid.
+    // The CAR moves instead, onto the middle of the nearest carriageway —
+    // clear of the kerbs the lamps and trees stand on, and of the parking lane.
+    if (city && cityWanted && !terrainOn && city.streetSpawnNear) {
+      const st = city.streetSpawnNear(0, 0);
+      return { x: st.x, y: groundBaseY(st.x, st.z), z: st.z, yaw: st.yaw };
+    }
     return { x: 0, y: groundBaseY(0, 0), z: 0, yaw: 0 };
   }
 
@@ -7493,6 +7604,9 @@ ${e.message}`);
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.yaw + Math.PI);
     vehicle.setSpawn(new THREE.Vector3(s.x, s.y + SPAWN_LIFT, s.z), q);
     vehicle.respawn();
+    // Re-ask the capsule window with the car in its new place, or it keeps the
+    // set from wherever it was before the teleport.
+    syncCityCapsules(vehicle.group?.position ?? null, true);
     chase.reset();
     // Without these the old skid ribbon and smoke puffs stay stretched across
     // the map from wherever the car was to where it just teleported.
@@ -8302,8 +8416,10 @@ ${e.message}`);
         roadMaterial._roadUniforms.reflectPlaneTol.value = v;
       },
       getReflectPlane: () => roadMaterial._roadUniforms.reflectPlaneTol.value,
-      setReflectSlab: (v) => { carReflection.slab = v; },
-      getReflectSlab: () => carReflection.slab,
+      setReflectSlab: (v) => { authoredSlab = Math.max(0.2, +v || 0.2); carReflection.slab = authoredSlab; },
+      getReflectSlab: () => authoredSlab,
+      setCityInMirror: (on) => { cityInMirror = !!on; applyRailReflectionMembers(); },
+      getCityInMirror: () => cityInMirror,
       setRailReflect: (v) => {
         roadLook.railReflect = v;
         roadMaterial._roadUniforms.railReflect.value = v;
@@ -8907,8 +9023,10 @@ ${e.message}`);
     getRailsInMirror: () => railsInMirror,
     /** Half-height of the mirror's clipping slab, metres — see
      *  modularRoadReflection.js. The knob for inverted reflections on slopes. */
-    setReflectSlab: (v) => { carReflection.slab = v; },
-    getReflectSlab: () => carReflection.slab,
+    setReflectSlab: (v) => { authoredSlab = Math.max(0.2, +v || 0.2); carReflection.slab = authoredSlab; },
+    getReflectSlab: () => authoredSlab,
+    setCityInMirror: (on) => { cityInMirror = !!on; applyRailReflectionMembers(); },
+    getCityInMirror: () => cityInMirror,
     /** The mirror itself — exposed for the same reason the lab exposes it: when
      *  a reflection is missing, "the target is empty", "the projection lands off
      *  the edge" and "it is there but multiplied to nothing" look identical on

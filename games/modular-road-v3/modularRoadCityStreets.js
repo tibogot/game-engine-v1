@@ -52,6 +52,7 @@ import {
   Fn, If, float, vec2, vec3, vec4, uniform, mix, smoothstep, max, min, abs, floor, fract,
   mod, step, saturate, oneMinus, pow, cos, uint, hash, positionWorld, positionView,
   normalView, normalWorld, cameraPosition, fwidth, length, normalMap,
+  texture, dot, sqrt,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
@@ -189,6 +190,34 @@ export const STREET_DEFAULTS = {
   /** 0 by day, 1 at night — the city hands this over with the facade's. */
   nightAmount: 0,
 
+  // ── PLANAR REFLECTION (modularRoadWet.js WET_DEFAULTS, same names) ────────
+  //
+  // The puddles were already here and already correct; what they had to
+  // reflect was a smooth gradient sky, which mirrors to nothing at all. That
+  // is why wet street read as "lighter patches" rather than as water.
+  //
+  // This costs NO NEW RENDER PASS. The game already mirrors the car about the
+  // plane of its own tyre contacts for the road deck, and when the car is on
+  // the street THAT PLANE IS THIS SURFACE — so the street samples the target
+  // the road pass already wrote, with the road's own uniforms. When the car is
+  // up on the sky track the same fades that keep a banked deck honest
+  // (`reflectFade` by distance, `reflectPlaneTol` off the plane) take the
+  // street's reflection to zero, which is correct: there is nothing down here
+  // to mirror.
+  reflectStrength: 1.2,
+  /** Near-nothing looking straight down, near-total at a chase camera's angle. */
+  reflectFresnel: 2.5,
+  /** Mip bias by coat roughness — a flat puddle mirrors sharply, damp asphalt smears. */
+  reflectBlur: 3.2,
+  /** Vertical smear of the three taps, in UV. */
+  reflectStretch: 0.02,
+  /** How far the ripple bends the reflected image. */
+  reflectDistort: 0.06,
+  /** Metres from the contact point at which it has faded out. */
+  reflectFade: 26,
+  /** Metres off the mirror plane before it is discarded. */
+  reflectPlaneTol: 0.7,
+
   // ── LOD ───────────────────────────────────────────────────────────────────
   detailNear: 25,
   detailFar: 240,
@@ -269,8 +298,14 @@ const packSlope = (slope) => vec3(slope.x.negate(), slope.y.negate(), 1.0).norma
  * @param {number} opts.originCellX  global lot cell the grid is phased from
  * @param {number} opts.originCellZ
  * @param {object} [opts.params]     overrides on STREET_DEFAULTS
+ * @param {THREE.Texture} [opts.reflectionTexture] the car-reflection target.
+ *   Its identity CHANGES every frame (the pass is double-buffered), so the
+ *   material keeps a `.sample()`-form node the caller re-points — see
+ *   `setReflection`. Null builds the street with no reflection code at all.
  */
-export function createCityStreets({ P, originCellX, originCellZ, params: overrides = {} }) {
+export function createCityStreets({
+  P, originCellX, originCellZ, params: overrides = {}, reflectionTexture = null,
+}) {
   const S = { ...STREET_DEFAULTS, ...overrides };
 
   const pitch = (P.blockLots + P.streetLots) * P.lotSize;
@@ -287,6 +322,34 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
   for (const [k, v] of Object.entries(S)) {
     if (typeof v === "number") u[k] = uniform(isStreetColorKey(k) ? new THREE.Color(v) : v);
   }
+
+  /**
+   * The mirror's own state — not authored, so not in STREET_DEFAULTS: a saved
+   * track must not be able to pin where the car happened to be standing.
+   */
+  const rf = {
+    /** biasMatrix · virtualCamera.projection · virtualCamera.viewInverse. */
+    reflectMatrix: uniform(new THREE.Matrix4()),
+    /** World-space contact point the distance fade is measured from. */
+    reflectCenter: uniform(new THREE.Vector3()),
+    /** The mirror plane's normal. */
+    reflectNormal: uniform(new THREE.Vector3(0, 1, 0)),
+    /** 0 whenever the pass did not run, so the street fades out rather than
+     *  projecting a frozen frame — the mistake that made "reflection off" look
+     *  like it did nothing on the road. */
+    reflectOn: uniform(0),
+  };
+
+  /**
+   * ONE texture node, in `.sample()` form rather than `texture(t, uv)`.
+   *
+   * The reflection target is double-buffered — the street cannot sample a
+   * texture the mirror pass is writing in the same WebGPU sync scope — so the
+   * texture this material must read CHANGES IDENTITY every frame.
+   * `texture(t, uv)` bakes `t` in at build time; this form keeps `.value`
+   * assignable, which is what lets `setReflection` follow the ping-pong.
+   */
+  const reflectTex = reflectionTexture ? texture(reflectionTexture) : null;
 
   // ── Pure builders. No `If`, no derivatives — safe to call from every slot,
   // including normalNode's sub-build, which cannot read another slot's vars.
@@ -532,6 +595,17 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     const lineCol = u.paintColor.mul(mix(float(1), u.wetDarken, lw)).mul(mix(vec3(1, 1, 1), u.wetTint, lw));
     surface = mix(surface, lineCol, paint);
 
+    // ── What the other slots read ───────────────────────────────────────────
+    // Fresh asphalt and its sealant seam are both glossier than the weathered
+    // surface around them. Computed HERE rather than at the end because the
+    // reflection below reads `coat` and `coatRough` — how wet and how smooth
+    // is exactly what decides how much of a mirror this fragment is.
+    const dryRough = mix(float(0.92), u.deckRough.sub(L.wheelPath.mul(u.wheelRough)).sub(paint.mul(0.2)), L.onRoad)
+      .sub(patch.mul(0.10)).sub(seam.mul(0.22));
+    R.rough = mix(dryRough, u.wetRough, film);
+    R.coat = saturate(coat.mul(mix(float(1), u.lineCoat, paint))).toVar();
+    R.coatRough = mix(mix(u.wetCoatRough, u.puddleCoatRough, pond), u.wetCoatRough.mul(u.lineCoatRough), paint).toVar();
+
     // ── STREET LIGHT POOLS, as emissive on the ground ───────────────────────
     // Emissive rather than a light because there are no lights: the pool is
     // the lamp's irradiance times the surface's own albedo, so a white line
@@ -548,14 +622,55 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     R.lampEmissive = poolAlbedo.mul(lamp).mul(float(1.0).add(film.mul(u.lampWetGain))).mul(u.lampColor)
       .add(surface.mul(u.glowColor).mul(u.glowAmount).mul(u.nightAmount));
 
-    // ── What the other slots read ───────────────────────────────────────────
-    // Fresh asphalt and its sealant seam are both glossier than the weathered
-    // surface around them.
-    const dryRough = mix(float(0.92), u.deckRough.sub(L.wheelPath.mul(u.wheelRough)).sub(paint.mul(0.2)), L.onRoad)
-      .sub(patch.mul(0.10)).sub(seam.mul(0.22));
-    R.rough = mix(dryRough, u.wetRough, film);
-    R.coat = saturate(coat.mul(mix(float(1), u.lineCoat, paint)));
-    R.coatRough = mix(mix(u.wetCoatRough, u.puddleCoatRough, pond), u.wetCoatRough.mul(u.lineCoatRough), paint);
+    // ── THE CAR, MIRRORED IN THE WET STREET ─────────────────────────────────
+    // EMISSIVE, like the road's: the image of a car must not Lambert-shade
+    // with the asphalt it lands on, or it would brighten and dim with the sun,
+    // which is precisely backwards for a reflection.
+    if (reflectTex) {
+      const clip = rf.reflectMatrix.mul(vec4(positionWorld, 1.0));
+      const projUv = clip.xy.div(max(clip.w, float(1e-4)));
+
+      // Break it up with the water's own surface — the SAME ripple the
+      // clearcoat normal uses, so the reflection and the highlight sitting on
+      // top of it agree. Without this it reads as a decal pasted on the road.
+      const rFade = saturate(oneMinus(max(pxX, pxZ).mul(u.rippleScale).mul(5.82)));
+      const reflUv = projUv.add(rippleSlope(L, rFade).mul(u.reflectDistort));
+
+      // Three taps smeared vertically, and blurred to match the surface.
+      // `.blur()` is a mip BIAS, so the hardware's own derivative LOD still
+      // runs underneath: a rough film gets a rough mirror for free, which is
+      // both correct and the right antialiasing for a thin bright source.
+      const dy = R.coatRough.mul(u.reflectStretch);
+      const tex = reflectTex.blur(saturate(R.coatRough.mul(u.reflectBlur)));
+      const col = tex.sample(reflUv.add(vec2(0, dy.negate())))
+        .add(tex.sample(reflUv).mul(2.0))
+        .add(tex.sample(reflUv.add(vec2(0, dy)))).mul(0.25);
+
+      // Near-nothing looking straight down, near-total at the grazing angle a
+      // chase camera lives at.
+      const fres = oneMinus(abs(normalView.z)).pow(u.reflectFresnel);
+      // Valid only near the contact point and only ON the plane. When the car
+      // is up on the sky track both of these are already zero, which is how
+      // the street knows it has nothing to mirror.
+      const toFrag = positionWorld.sub(rf.reflectCenter);
+      const d = length(toFrag);
+      const near = oneMinus(smoothstep(u.reflectFade.mul(0.45), u.reflectFade, d));
+      const offPlane = abs(dot(toFrag, rf.reflectNormal));
+      const onPlane = oneMinus(smoothstep(
+        u.reflectPlaneTol.mul(0.35), u.reflectPlaneTol, offPlane,
+      ));
+      // ...and only inside the target. Off its edge there is no data, so it has
+      // to go to zero rather than smear a stretched border pixel down the road.
+      const e = reflUv.sub(0.5).abs().mul(2.0);
+      const inside = oneMinus(smoothstep(0.86, 1.0, max(e.x, e.y)));
+      // Kerbs and pavement take it at the same reduced dose the film does.
+      const zone = mix(u.kerbWet, float(1.0), L.onRoad);
+
+      R.lampEmissive = R.lampEmissive.add(col.rgb.mul(col.a)
+        .mul(fres).mul(R.coat).mul(near).mul(onPlane).mul(inside).mul(zone)
+        .mul(u.reflectStrength).mul(rf.reflectOn));
+    }
+
     R.pond = pond;
     return surface;
   });
@@ -729,6 +844,9 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     mesh, material, params, uniforms: u,
     /** The lamp posts: one InstancedMesh, one draw. Add next to `mesh`. */
     lampMesh,
+    /** Where the posts actually are — the obstacle table builds its capsules
+     *  from these, so the thing you hit is the thing you can see. */
+    lampMatrices,
     /** The lamp field for free-standing objects (see lampPoolFree). A node
      *  builder — call it inside the consumer's own material. */
     lampPoolFree,
@@ -742,6 +860,26 @@ export function createCityStreets({ P, originCellX, originCellZ, params: overrid
     /** 0 day … 1 night — the lamp pools and heads come on with it. */
     setNight(n) { u.nightAmount.value = Math.max(0, Math.min(1, n || 0)); },
     setOrigin(cellX, cellZ) { uOrigin.value.set(cellX * P.lotSize, cellZ * P.lotSize); },
+
+    /** Whether this street was built able to reflect at all. */
+    get canReflect() { return reflectTex !== null; },
+    /**
+     * Point the street at this frame's mirror. Hand it exactly what the road
+     * deck gets — the same target, matrix, contact point and normal — because
+     * when the car is ON the street they describe the same plane.
+     *
+     * `tex` must be the buffer the pass just WROTE (the ping-pong swaps every
+     * frame); `on` false leaves the reflection off rather than showing a
+     * frozen one.
+     */
+    setReflection(tex, matrix, center, normal, on = true) {
+      if (!reflectTex) return;
+      if (tex) reflectTex.value = tex;
+      if (matrix) rf.reflectMatrix.value.copy(matrix);
+      if (center) rf.reflectCenter.value.copy(center);
+      if (normal) rf.reflectNormal.value.copy(normal);
+      rf.reflectOn.value = on && tex ? 1 : 0;
+    },
     dispose() { geometry.dispose(); material.dispose(); lampGeo.dispose(); lampMat.dispose(); lampMesh.dispose(); },
   };
 }

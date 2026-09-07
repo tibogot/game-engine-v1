@@ -87,6 +87,34 @@
 // trick (the drawn joint never goes sub-pixel; its opacity fades to keep
 // energy constant). A far tower converges to a flat tinted slab, which is
 // what a far tower is.
+// ── THE 208 `if`s ARE NOT THE PROBLEM. MEASURED, THEN ABANDONED ─────────────
+//
+// TSL's `select()` is not a conditional move: it emits a real WGSL `if / else`
+// with a temporary either side, and this file generates 208 of them. The nine
+// per-lot style picks alone — a choice between two uniforms each — compiled to
+// EIGHTEEN nested branches at the top of every fragment. That looks like an
+// obvious win, and it is not one.
+//
+// Converted `buildFrame` to branchless `mix(b, a, f32(cond))`: 208 -> 164
+// branches, 4627 -> 4107 lines of generated WGSL. Then measured three ways,
+// deck viewpoint, on an RTX 4050:
+//
+//   reload-interleaved, native res   A 2.260 ms   B 2.271 ms
+//   reload-interleaved, 2x pixels    A 4.194      B 4.163
+//   BOTH shaders in ONE page load,
+//   swapped on the tower meshes      A 2.944      B 2.956   (spread +/-0.03)
+//
+// No difference at any resolution. The third method is the trustworthy one:
+// reloading has an order effect worth ~0.3 ms (every first-of-round load
+// reported exactly 2.687 ms whichever build was in it), which is twice the
+// effect being looked for. The branches are coherent — every condition here is
+// constant over a whole building — so the hardware was already taking one arm
+// per warp, and removing them just moved work from the branch unit to the ALU.
+//
+// The conversion was reverted. If you are looking for tower time, look at what
+// EVERY pixel does regardless of tier — the derivatives, the frame solve, the
+// stone and glass paint — not at the branches around it.
+//
 // ============================================================================
 import * as THREE from "three";
 import {

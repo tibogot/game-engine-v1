@@ -285,6 +285,65 @@ console.log("\n── STREET SHADER ──");
   }
 }
 
+// ── The street's PLANAR REFLECTION variant ───────────────────────────────────
+// Only built when a reflection target is handed in, so the plain build above
+// never compiles a line of it. Three taps, a matrix projection and a ripple
+// distortion, all inside the one flow that also owns the derivatives — exactly
+// the shape of thing that compiles in Node and is rejected by Dawn.
+console.log(String.fromCharCode(10) + "── STREET REFLECTION ──");
+{
+  const target = new THREE.RenderTarget(64, 64, { type: THREE.HalfFloatType });
+  let rBuilder = null, rErr = null;
+  try {
+    const streets = createCityStreets({
+      P: CITY_DEFAULTS, originCellX: 0, originCellZ: 0,
+      reflectionTexture: target.texture,
+    });
+    check("a reflective street reports canReflect", streets.canReflect === true);
+    check("setReflection exists and tolerates a null frame",
+      (() => { try { streets.setReflection(null, null, null, null, false); return true; } catch { return false; } })());
+    rBuilder = buildWGSL(streets.material);
+  } catch (e) { rErr = e; }
+  check("the reflective street generates WGSL without throwing", rErr === null, rErr ? rErr.message : "");
+  if (rErr && process.env.CITY_SHADER_TRACE) console.log(rErr.stack);
+
+  if (rBuilder) {
+    const f = rBuilder.fragmentShader || "";
+    if (process.env.CITY_REFLECT_DUMP) {
+      const fs = await import("node:fs");
+      fs.writeFileSync(process.env.CITY_REFLECT_DUMP, f);
+    }
+    check("no 'undefined' leaked into the reflective street WGSL", !/\bundefined\b/.test(f));
+    // Three taps of the mirror, not one — the vertical smear that keeps a
+    // half-resolution reflection from reading as a hard-edged decal. They are
+    // BIASED samples specifically: `.blur()` sets a mip bias so the mirror is
+    // as rough as the water it lands in, and a plain `textureSample` here
+    // would mean that blur had been optimised away.
+    const taps = (f.match(/textureSampleBias\(/g) || []).length;
+    check("the mirror is sampled three times, mip-biased", taps === 3, `${taps} biased samples`);
+    const bad2 = [];
+    let cur = { name: "<module>", lines: [] };
+    const rfns = [];
+    for (const ln of f.split(String.fromCharCode(10))) {
+      const m = /^fn\s+([A-Za-z_]\w*)/.exec(ln);
+      if (m) { rfns.push(cur); cur = { name: m[1], lines: [] }; }
+      cur.lines.push(ln);
+    }
+    rfns.push(cur);
+    for (const fn of rfns) {
+      let ctrl = 0;
+      for (const ln of fn.lines) {
+        if (/\bdpdx\b|\bdpdy\b|\bfwidth\b/i.test(ln) && ctrl > 0) bad2.push(`${fn.name}: ${ln.trim().slice(0, 60)}`);
+        const o = (ln.match(/\{/g) || []).length, c = (ln.match(/\}/g) || []).length;
+        if (ctrl > 0 || /\b(if|else|for|while|loop|switch|case)\b/.test(ln)) ctrl += o - c;
+        if (ctrl < 0) ctrl = 0;
+      }
+    }
+    check("no reflection derivative is taken inside a branch", bad2.length === 0, bad2.slice(0, 2).join(" | "));
+  }
+  target.dispose();
+}
+
 // ── Street furniture: five materials, each carrying a lamp/skyglow emissive ──
 // These read `varyingProperty('vInstanceColor')`, which only EXISTS when the
 // mesh has an instanceColor — reading it otherwise is the kind of thing that
