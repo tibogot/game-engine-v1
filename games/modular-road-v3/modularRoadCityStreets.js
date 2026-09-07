@@ -175,6 +175,13 @@ export const STREET_DEFAULTS = {
   lampPitch: 26,
   /** Lamp head height and its inset from the kerb onto the pavement. */
   lampHeight: 9.0,
+  /**
+   * Metres from the camera a post is still DRAWN. The posts had no cull of
+   * any kind — all 4262 every frame, most of them a kilometre off and under a
+   * pixel — while the furniture beside them culled at 260-650 m. The light
+   * POOLS are a shader term and unaffected; this is the geometry only.
+   */
+  lampDrawRange: 720,
   lampInset: 0.9,
   /** Stagger the two sides by half a pitch — real streets alternate. */
   lampStagger: 0.5,
@@ -866,6 +873,30 @@ export function createCityStreets({
   lampMatrices.forEach((m, i) => lampMesh.setMatrixAt(i, m));
   lampMesh.instanceMatrix.needsUpdate = true;
   lampMesh.frustumCulled = false;
+  /** Post positions, flat, for the cull below — the matrices stay the source. */
+  const lampXZ = new Float32Array(lampMatrices.length * 2);
+  lampMatrices.forEach((m, i) => { lampXZ[i * 2] = m.elements[12]; lampXZ[i * 2 + 1] = m.elements[14]; });
+  /**
+   * Range + frustum cull for the posts, on the city's LOD tick. Same shape as
+   * the furniture's: partition near-and-in-view to the front, cut `count`.
+   * The posts cast no shadow, so the frustum applies to all of them.
+   */
+  function applyLampLod(view) {
+    const cam = view.pos;
+    const r2 = S.lampDrawRange * S.lampDrawRange;
+    const y = P.groundY + S.lampHeight * 0.5;
+    let n = 0;
+    for (let i = 0; i < lampMatrices.length; i++) {
+      const x = lampXZ[i * 2], z = lampXZ[i * 2 + 1];
+      const dx = x - cam.x, dz = z - cam.z;
+      if (dx * dx + dz * dz >= r2) continue;
+      if (!view.inView(x, y, z, S.lampHeight * 0.55)) continue;
+      lampMesh.setMatrixAt(n++, lampMatrices[i]);
+    }
+    lampMesh.count = n;
+    lampMesh.instanceMatrix.needsUpdate = true;
+    lampMesh.visible = n > 0;
+  }
   lampMesh.castShadow = false;
   lampMesh.receiveShadow = false;
 
@@ -895,6 +926,7 @@ export function createCityStreets({
     /** Where the posts actually are — the obstacle table builds its capsules
      *  from these, so the thing you hit is the thing you can see. */
     lampMatrices,
+    applyLampLod,
     /** The lamp field for free-standing objects (see lampPoolFree). A node
      *  builder — call it inside the consumer's own material. */
     lampPoolFree,

@@ -83,6 +83,7 @@ import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
 import { createCityObstacles } from "./modularRoadCityObstacles.js";
 import { createCityRoofs } from "./modularRoadCityRoofs.js";
+import { createLodView } from "./modularRoadCityLodView.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
 export const CITY_DEFAULTS = {
@@ -145,6 +146,24 @@ export const CITY_DEFAULTS = {
   lodHysteresis: 30,
   lodInterval: 0.2,
   lodMoveDist: 12,
+  /**
+   * PER-INSTANCE FRUSTUM CULL, on the same tick. Every mesh here is
+   * `frustumCulled = false` (each spans the whole city), so nothing was
+   * culled at all: at street level two thirds of everything in range was
+   * behind or beside the camera and still went through the vertex stage.
+   * See modularRoadCityLodView.js for what is exempt and why.
+   *
+   * `lodMargin` pads the test so a pan has something to pan into before the
+   * next tick; `lodTurnAngle` (degrees) makes a heading change fire the tick
+   * the way a 12 m move does, so the padding only has to cover ONE frame of
+   * turning rather than 200 ms of it.
+   */
+  lodMargin: 35,
+  lodTurnAngle: 6,
+  /** Pack each tier mesh near-first so early-Z rejects hidden facade
+   *  fragments. A runtime switch so it can be MEASURED — off restores layout
+   *  order, which is what it drew in before. */
+  lodSort: true,
 
   /** SHADOWS ON. Tower-on-tower and tower-on-street is the single biggest
    *  depth cue the city has, it is what makes three's example read as solid,
@@ -599,15 +618,26 @@ export function createModularRoadCity({
     return 2;
   }
 
-  function applyLod(camPos) {
+  /** Per-tier lists of building indices for this tick, sorted near-first. */
+  const _tierIdx = [[], [], []];
+  let _dist = new Float32Array(0);
+  const _byDist = (p, q) => _dist[p] - _dist[q];
+
+  function applyLod(view) {
     const t0 = performance.now();
-    let changed = 0;
+    const camPos = view.pos;
+    let changed = 0, culled = 0;
     const counts = [0, 0, 0];
+    if (_dist.length < buildings.length) _dist = new Float32Array(buildings.length);
+    for (const l of _tierIdx) l.length = 0;
+
     for (let i = 0; i < buildings.length; i++) {
       const b = buildings[i];
       const dx = b.x - camPos.x, dz = b.z - camPos.z;
-      const dy = (b.y + b.top) * 0.5 - camPos.y;
+      const cy = (b.y + b.top) * 0.5;
+      const dy = cy - camPos.y;
       const dist = Math.sqrt(dx * dx + dz * dz + dy * dy);
+      _dist[i] = dist;
       const t = tierFor(dist, b.tier);
       if (t !== b.tier) {
         b.tier = t;
@@ -615,13 +645,37 @@ export function createModularRoadCity({
         if (batched) batched.setGeometryIdAt(batchInstIds[i], batchGeomIds[b.arch][t]);
       }
       counts[t]++;
+      if (!instanced) continue;
+      // FRUSTUM — L1 and L2 only. L0 casts shadows into the frame from
+      // outside it, and there are 45 of them; not worth the shadow bug.
+      if (t !== 0) {
+        const a = kit.archetypes[b.arch];
+        // Bounding sphere: half the footprint diagonal by half the height,
+        // about the building's midpoint. Y is the scaled axis; X/Z never are.
+        const r = Math.hypot(a.footprint * 0.71, a.height * b.scaleY * 0.5);
+        if (!view.inView(b.x, cy, b.z, r)) { culled++; continue; }
+      }
+      _tierIdx[t].push(i);
     }
-    if (instanced && changed > 0) {
+
+    if (instanced) {
+      // FRONT TO BACK, within each tier. Instances draw in buffer order, and
+      // the facade is the most expensive shader in the game: drawn back to
+      // front it runs in full on every fragment a nearer tower then covers.
+      // Sorted near-first, early-Z rejects those fragments before the shader
+      // runs — most of what an occlusion-culling pass would buy, for the cost
+      // of sorting ~2000 indices five times a second. The repack therefore
+      // happens EVERY tick now, not only when a tier changed.
+      if (P.lodSort) for (let t = 0; t < 3; t++) _tierIdx[t].sort(_byDist);
       for (const row of instanced) for (const im of row) if (im) im.count = 0;
-      for (const b of buildings) {
-        const im = instanced[b.arch][b.tier];
-        if (!im) continue;
-        im.setMatrixAt(im.count++, matrixFor(b, _m));
+      for (let t = 0; t < 3; t++) {
+        const idx = _tierIdx[t];
+        for (let k = 0; k < idx.length; k++) {
+          const b = buildings[idx[k]];
+          const im = instanced[b.arch][t];
+          if (!im) continue;
+          im.setMatrixAt(im.count++, matrixFor(b, _m));
+        }
       }
       for (const row of instanced) for (const im of row) {
         if (!im) continue;
@@ -630,6 +684,7 @@ export function createModularRoadCity({
       }
     }
     stats.lod = counts;
+    stats.culled = culled;
     stats.lastLodMs = performance.now() - t0;
     return changed;
   }
@@ -707,9 +762,11 @@ export function createModularRoadCity({
 
   // ── Update ─────────────────────────────────────────────────────────────────
   let _lodT = 1e9;
-  /** Which of the two heavy LOD consumers gets this tick — see `update`. */
-  let _lodTurn = 1;
+  /** Which of the heavy LOD consumers gets this tick — see `update`. */
+  let _lodTurn = 2;
   const _lastLodPos = new THREE.Vector3(1e9, 1e9, 1e9);
+  const _lastLodFwd = new THREE.Vector3(0, 0, 0);
+  const _lodView = createLodView();
 
   function update(dt, camera) {
     if (!enabled) return;
@@ -730,9 +787,19 @@ export function createModularRoadCity({
 
     _lodT += dt;
     const moved = camera.position.distanceTo(_lastLodPos);
-    if (_lodT < P.lodInterval && moved < P.lodMoveDist) return;
+    // A heading change is a trigger too: with a per-instance frustum cull,
+    // a fast pan otherwise shows the edge of the frame empty until the clock
+    // or the odometer fires.
+    _lodView.margin = P.lodMargin;
+    _lodView.update(camera);
+    const turnedDeg = _lodView.hasFrustum
+      ? Math.acos(Math.min(1, Math.max(-1, _lodView.fwd.dot(_lastLodFwd)))) * 57.2958
+      : 0;
+    const byTurn = turnedDeg >= P.lodTurnAngle;
+    if (_lodT < P.lodInterval && moved < P.lodMoveDist && !byTurn) return;
     _lodT = 0;
     _lastLodPos.copy(camera.position);
+    _lastLodFwd.copy(_lodView.fwd);
 
     // ── THE EXPENSIVE PAIR TAKE TURNS ─────────────────────────────────────
     //
@@ -749,13 +816,21 @@ export function createModularRoadCity({
     // The tier pass runs EVERY tick: it decides which buildings draw at all,
     // it is only 2150 distance tests, and it re-packs instance matrices solely
     // when a tier actually changed. Staggering it made towers pop.
-    applyLod(camera.position);
-    // These two are the expensive pair — ~33k items between them, and both
-    // re-upload every matrix they keep whether or not anything moved. They take
-    // turns.
-    _lodTurn = (_lodTurn + 1) % 2;
-    if (_lodTurn === 0) furniture?.applyLod(camera.position);
-    else roofs?.applyLod(camera.position);
+    applyLod(_lodView);
+    // The heavy consumers — ~37k items between them, each re-uploading every
+    // matrix it keeps — take turns on a clock or odometer tick. A TURN tick
+    // runs all of them: they are every bit as frustum-sensitive as the towers,
+    // and a stale one shows as furniture missing from the edge of a pan.
+    if (byTurn) {
+      furniture?.applyLod(_lodView);
+      roofs?.applyLod(_lodView);
+      ground?.applyLampLod?.(_lodView);
+    } else {
+      _lodTurn = (_lodTurn + 1) % 3;
+      if (_lodTurn === 0) furniture?.applyLod(_lodView);
+      else if (_lodTurn === 1) roofs?.applyLod(_lodView);
+      else ground?.applyLampLod?.(_lodView);
+    }
   }
 
   rebuild();

@@ -240,7 +240,7 @@ export function createCityRoofs({ P, buildings, archetypes, params: overrides = 
       // A little tonal spread per item, so a roof of identical grey boxes does
       // not read as a texture atlas.
       const g = 0.62 + h2(b.cx, b.cz, 800 + i) * 0.5;
-      lists[kind].push({ m: _m.compose(_p, _q, _s).clone(), tone: g });
+      lists[kind].push({ m: _m.compose(_p, _q, _s).clone(), tone: g, x: _p.x, y: _p.y, z: _p.z });
       if (kind === "pad") break;               // a pad owns the deck
     }
   }
@@ -310,17 +310,19 @@ export function createCityRoofs({ P, buildings, archetypes, params: overrides = 
    * `frustumCulled = false` otherwise draws the whole city's roofs from
    * anywhere at all.
    */
-  const _pos = new THREE.Vector3();
-  function applyLod(cam) {
+  function applyLod(view) {
+    const cam = view.pos;
     const r2 = R.range * R.range;
     let drawn = 0;
     for (const k of kinds) {
       const list = k.list;
       let lo = 0;
       for (let i = 0; i < list.length; i++) {
-        _pos.setFromMatrixPosition(list[i].m);
-        const dx = _pos.x - cam.x, dy = _pos.y - cam.y, dz = _pos.z - cam.z;
+        const e = list[i];
+        const dx = e.x - cam.x, dy = e.y - cam.y, dz = e.z - cam.z;
         if (dx * dx + dy * dy + dz * dz > r2) continue;
+        // Nothing up here casts a shadow, so all of it takes the frustum test.
+        if (!view.inView(e.x, e.y + 2.0, e.z, 3.0)) continue;
         if (i !== lo) {
           const t = list[i]; list[i] = list[lo]; list[lo] = t;
         }

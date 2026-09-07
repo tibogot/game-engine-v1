@@ -561,27 +561,37 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   // the city's LOD timer, each list is partitioned near-first and `count` is
   // cut at the kind's range. A partial sort of ~7k items at 5 Hz is nothing;
   // the re-upload is ~0.4 MB per kind per tick.
+  // `casts`: shadow casters are culled by RANGE ONLY. The shadow pass draws
+  // the same InstancedMesh with the same count, so a car dropped for being
+  // off-screen also loses the shadow it throws INTO the frame. See
+  // modularRoadCityLodView.js. Everything else gets the frustum test too.
   const kinds = [
-    { mesh: carMesh, list: cars, range: 420 },
-    { mesh: trunkMesh, list: trees, range: 650 },
-    { mesh: canopyMesh, list: trees, range: 650 },
-    { mesh: lightMesh, list: lights, range: 380 },
-    { mesh: railMesh, list: rails, range: 260 },
+    { mesh: carMesh, list: cars, range: 420, casts: true },
+    { mesh: trunkMesh, list: trees, range: 650, casts: false },
+    { mesh: canopyMesh, list: trees, range: 650, casts: true },
+    { mesh: lightMesh, list: lights, range: 380, casts: false },
+    { mesh: railMesh, list: rails, range: 260, casts: false },
   ];
   const _pos = new THREE.Vector3();
   const _tm = new THREE.Matrix4();
   for (const e of [...cars, ...trees, ...lights, ...rails]) { _pos.setFromMatrixPosition(e.m); e.x = _pos.x; e.z = _pos.z; }
-  function applyLod(cam) {
+  function applyLod(view) {
+    const cam = view.pos;
     for (const k of kinds) {
       if (!k.mesh) continue;
       const r2 = k.range * k.range;
+      const cullFrustum = !k.casts;
       let n = 0;
-      // Partition in place: near instances to the front.
+      // Partition in place: near (and, for non-casters, in-view) instances to
+      // the front. A 4 m sphere at head height covers every kind here.
       const list = k.list;
       for (let i = 0; i < list.length; i++) {
         const e = list[i];
         const dx = e.x - cam.x, dz = e.z - cam.z;
-        if (dx * dx + dz * dz < r2) { if (i !== n) { const t = list[n]; list[n] = e; list[i] = t; } n++; }
+        if (dx * dx + dz * dz >= r2) continue;
+        if (cullFrustum && !view.inView(e.x, gyBase + 2.5, e.z, 4.0)) continue;
+        if (i !== n) { const t = list[n]; list[n] = e; list[i] = t; }
+        n++;
       }
       for (let i = 0; i < n; i++) {
         k.mesh.setMatrixAt(i, list[i].m);
