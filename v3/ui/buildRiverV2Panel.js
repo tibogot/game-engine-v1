@@ -144,6 +144,10 @@ export function buildRiverV2Panel(app) {
     panel.innerHTML = "";
     const p = app.toolState.riverV2;
     const sys = app.riverV2System;
+    // The per-node sliders read mirrored state, so pull it from the selection
+    // first — otherwise a refresh triggered by anything other than an edit
+    // (a mode change, an undo, a project load) shows the previous node's values.
+    sys.syncSelectionToState?.();
     const w = p.water;
 
     const onMat = () => app.materialChanged?.();
@@ -323,6 +327,29 @@ export function buildRiverV2Panel(app) {
     });
     _slider(fl, p, "minSpeed", { label: "Min speed (m/s)", min: 0, max: 2, step: 0.01, onChange: onConform });
     _slider(fl, p, "maxSpeed", { label: "Max speed (m/s)", min: 0.5, max: 20, step: 0.1, onChange: onConform });
+    _hint(fl, "Whitewater is keyed to the Froude number, v / sqrt(g·depth) — how close the flow is to breaking. Absolute, so a calm river reads as calm rather than as 100% of its own small turbulence.");
+    _slider(fl, p, "froudeStart", { label: "Rapids start (Fr)", min: 0, max: 3, step: 0.05, onChange: onConform,
+      hint: "Below this Froude number there is no turbulence at all. ~1 is where real water starts to break; lower it to get whitewater on a gentler river." });
+    _slider(fl, p, "froudeFull", { label: "Rapids full (Fr)", min: 0.1, max: 5, step: 0.05, onChange: onConform,
+      hint: "Froude number at which turbulence saturates." });
+
+    // ── Banks (sand) ────────────────────────────────────────────────────────
+    const sd = _section(panel, "Banks (sand)", false);
+    _hint(sd, "A sand band on the terrain under and around the channel, measured from the centreline out — so it follows the river's width and covers bed and bank in one sweep. Terrain shading, not water: no caustics, and it shows whether or not that stretch is submerged.");
+    const onSand = () => app.sandChanged?.();
+    _toggle(sd, p.sand, "enabled", { label: "Enabled", onChange: onSand });
+    _color (sd, p.sand, "color", { label: "Sand colour", onChange: onSand });
+    _slider(sd, p.sand, "strength", { label: "Strength", min: 0, max: 1, step: 0.01, onChange: onSand,
+      hint: "How much of the sand hue replaces the painted ground." });
+    _slider(sd, p.sand, "width", { label: "Width beyond channel (m)", min: 0, max: 60, step: 0.5, onChange: onSand,
+      hint: "Metres of sand past the water's own half-width, on each side." });
+    _slider(sd, p.sand, "fade", { label: "Edge fade (m)", min: 0.1, max: 30, step: 0.1, onChange: onSand });
+    _slider(sd, p.sand, "edgeNoise", { label: "Edge wander (m)", min: 0, max: 15, step: 0.1, onChange: onSand,
+      hint: "Wobble on the outer edge, so the band is not a perfect ribbon." });
+    _slider(sd, p.sand, "edgeNoiseScale", { label: "Wander scale", min: 0.005, max: 0.3, step: 0.005, onChange: onSand,
+      hint: "Noise cells per metre. Lower = longer, lazier bays." });
+    _slider(sd, p.sand, "detail", { label: "Keep ground detail", min: 0, max: 1, step: 0.01, onChange: onSand,
+      hint: "Multiplies the sand by the ground's own luminance so the painted texture reads through instead of going flat." });
 
     // ── Water colour ────────────────────────────────────────────────────────
     const wc = _section(panel, "Water colour", false);
@@ -371,7 +398,9 @@ export function buildRiverV2Panel(app) {
     _slider(ww, w, "foamScale", { label: "Noise scale", min: 0.05, max: 3, step: 0.01, onChange: onMat,
       hint: "Cells per metre, in flow space — so the foam travels with the current." });
     _slider(ww, w, "foamBreakup", { label: "Breakup", min: 0, max: 1, step: 0.01, onChange: onMat,
-      hint: "How hard the noise chews holes in the foam. 0 = flat white." });
+      hint: "How hard the noise chews holes in the foam. 0 = flat white, even where the water is genuinely churning." });
+    _slider(ww, w, "foamContrast", { label: "Breakup contrast", min: 0.5, max: 5, step: 0.05, onChange: onMat,
+      hint: "Stretches the noise so it swings the full range. Low values leave it hovering near its mean, which is what makes saturated foam read as milk." });
     _slider(ww, w, "foamSharpness", { label: "Sharpness", min: 0.2, max: 4, step: 0.01, onChange: onMat });
     _slider(ww, w, "foamCutoff", { label: "Cutoff", min: 0, max: 1, step: 0.01, onChange: onMat });
     _slider(ww, w, "foamTransition", { label: "Edge softness", min: 0.01, max: 0.5, step: 0.005, onChange: onMat });

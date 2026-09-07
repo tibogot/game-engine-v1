@@ -106,6 +106,7 @@ export function createLakebedShading({ waterMapTex, worldSize, params = {} }) {
     causticsSpeed:      uniform(p.causticsSpeed),
     causticsMaxDepth:   uniform(p.causticsMaxDepth),
     shoreBlend:         uniform(p.shoreBlend),
+    causticsMinDepth:   uniform(p.causticsMinDepth),
   };
 
   /**
@@ -150,9 +151,18 @@ export function createLakebedShading({ waterMapTex, worldSize, params = {} }) {
       const cg = _caustic(cUv.add(dOff), t, sh);
       const cb = _caustic(cUv.add(dOff.mul(2)), t, sh);
 
-      // Light stops reaching the bed with depth (the -1 start keeps a little
-      // sparkle right at the waterline — revo's constant).
-      const causticsFade = float(1).sub(smoothstep(float(-1), u.causticsMaxDepth, depth));
+      // Caustics need water ABOVE the bed to focus light through, so they ramp
+      // in from the waterline as well as out with depth.
+      //
+      // Without the ramp-in they were at 88% strength at ZERO depth — the -1
+      // start below is revo's, and on a lake's gentle beach a little sparkle at
+      // the edge is fine. A river's rim is different: the outer half-metre of a
+      // channel is only a few centimetres deep, Beer-Lambert does nothing over
+      // that distance, so the bed shows through un-tinted and the caustics land
+      // on what reads as dry sand. Ramping in kills that and leaves them where
+      // there is visibly water.
+      const causticsFade = smoothstep(float(0), max(u.causticsMinDepth, float(1e-3)), depth)
+        .mul(float(1).sub(smoothstep(float(-1), u.causticsMaxDepth, depth)));
       const caustics = vec3(cr, cg, cb)
         .mul(u.causticsColor).mul(u.causticsIntensity).mul(causticsFade);
 
@@ -189,6 +199,7 @@ export function createLakebedShading({ waterMapTex, worldSize, params = {} }) {
     if (s.causticsSpeed      != null) u.causticsSpeed.value      = s.causticsSpeed;
     if (s.causticsMaxDepth   != null) u.causticsMaxDepth.value   = s.causticsMaxDepth;
     if (s.shoreBlend         != null) u.shoreBlend.value         = s.shoreBlend;
+    if (s.causticsMinDepth   != null) u.causticsMinDepth.value   = s.causticsMinDepth;
   }
 
   return { apply, syncParams, uniforms: u };

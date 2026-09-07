@@ -309,11 +309,23 @@ export function solveRiver({ nodes, sampleGround, params, mouthLevel = null }) {
   const minSpeed = params.minSpeed ?? 0.08;
   const maxSpeed = params.maxSpeed ?? 9;
 
+  // Whitewater threshold, as a FROUDE NUMBER — an absolute measure, not a
+  // relative one. The first version normalised turbulence against the river's
+  // own worst reach, which is wrong in the most common case there is: a river
+  // of uniform gradient has one turbulence value everywhere, so dividing by the
+  // maximum gave 1.0 along its whole length and painted a glass-calm stream
+  // solid white. Fr = v / sqrt(g·d) says how close the flow is to going
+  // supercritical, which is physically when water actually breaks, and it means
+  // the same thing on a mountain torrent and a lowland stream.
+  const froudeStart = params.froudeStart ?? 0.8;
+  const froudeFull = Math.max(froudeStart + 0.01, params.froudeFull ?? 1.8);
+  const G = 9.81;
+
   const speed = new Float32Array(count);
   const slope = new Float32Array(count);
   const uphill = new Uint8Array(count);
-  let maxTurb = 1e-6;
   const turb = new Float32Array(count);
+  const froude = new Float32Array(count);
 
   for (let i = 0; i < count; i++) {
     const a = Math.max(0, i - 1);
@@ -328,22 +340,15 @@ export function solveRiver({ nodes, sampleGround, params, mouthLevel = null }) {
     const v = (1 / manningN) * Math.pow(depth[i], 2 / 3) * Math.sqrt(S) * flowScale;
     speed[i] = Math.min(maxSpeed, Math.max(minSpeed, v));
 
-    // Turbulence: steep AND fast. Froude-flavoured rather than exact — what
-    // matters is that it peaks in the same places whitewater does.
-    turb[i] = Math.max(0, fall) * speed[i];
-    if (turb[i] > maxTurb) maxTurb = turb[i];
+    froude[i] = speed[i] / Math.sqrt(G * Math.max(depth[i], 1e-3));
+    turb[i] = Math.min(1, Math.max(0, (froude[i] - froudeStart) / (froudeFull - froudeStart)));
   }
-  // Normalise turbulence against this river's own worst reach, so the shader's
-  // whitewater sliders mean the same thing on a mountain torrent and a lowland
-  // stream. Rivers with no gradient at all stay at zero.
-  const turbNorm = maxTurb > 1e-4 ? 1 / maxTurb : 0;
-  for (let i = 0; i < count; i++) turb[i] = Math.min(1, turb[i] * turbNorm);
 
   return {
     count, total,
     x: sx, z: sz, arc, tanX, tanZ,
     level, width, depth, bank,
-    speed, slope, turb, uphill,
+    speed, slope, turb, froude, uphill,
     nodeArc: xs,
     nodeLevel: Array.from(nLevel),
     nodePinned: Array.from(pinned),
@@ -374,4 +379,63 @@ export function closestStation(solved, x, z, maxDist = Infinity) {
     level: solved.level[best],
     width: solved.width[best],
   };
+}
+
+/**
+ * Segments the conform shader's inner loop can visit. Compile-time: TSL unrolls
+ * it, so it is a hard ceiling on how many stations one pass may consider.
+ */
+export const LOOP_SEGS = 96;
+/**
+ * Split a river into conform passes.
+ *
+ * Each pass is SCISSORED to its own chunk of stations but must SEE `margin`
+ * stations either side. A texel inside a chunk's rect sits up to `maxReach`
+ * metres from the centreline, so its true nearest segment can be that far along
+ * the river — i.e. in a neighbouring chunk. A pass that cannot see that segment
+ * measures the distance to a far one instead, its cross-section evaluates to
+ * "natural ground", and it fills the channel straight back in: the river comes
+ * out cut into pieces exactly one chunk long. That was a real, visible bug.
+ *
+ * The invariant that prevents it is `margin * spacing >= maxReach`.
+ *
+ * @param {number} count    solved station count
+ * @param {number} spacing  metres between stations
+ * @param {number} maxReach widest the conform reaches from the centreline, metres
+ */
+/**
+ * Split a river's path into conform passes.
+ *
+ * Each pass only ever looks at its OWN segments. That is safe because the
+ * passes do not write terrain — they carry the nearest-segment search forward,
+ * and `min` over distance is associative, so the passes compose in any order
+ * and a later resolve turns the winner into a height. See riverV2System's
+ * "nearest, then resolve" note.
+ *
+ * Two earlier designs had each pass write the terrain directly, which made a
+ * pass's answer depend on seeing every segment that could be nearest for any
+ * texel in its rect. Neither an arc-length margin nor a spatial window can
+ * guarantee that: a river folding back on itself puts two arms within a bank
+ * width of each other while they are most of the river apart along its length.
+ * Both shipped a visibly gappy river. The associative formulation removes the
+ * requirement instead of trying to satisfy it.
+ */
+export function planConformChunks(count, loopSegs = LOOP_SEGS) {
+  const chunks = [];
+  if (count < 2) return { chunks, loopSegs };
+  const step = Math.max(1, loopSegs);
+  for (let a = 0; a < count - 1; a += step) {
+    chunks.push({ a, b: Math.min(a + step, count - 1) });
+  }
+  return { chunks, loopSegs };
+}
+
+/**
+ * Decimation stride for one river's conform path, so all rivers together fit
+ * the shared path texture. Purely a memory budget — accuracy along the channel
+ * is set by the solver's station spacing, not by this.
+ */
+export function conformStride(count, budget) {
+  if (count <= budget) return 1;
+  return Math.max(1, Math.ceil((count - 1) / Math.max(1, budget - 1)));
 }

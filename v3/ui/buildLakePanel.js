@@ -213,6 +213,8 @@ export function buildLakePanel(app) {
       _slider(bed, lb, "causticsDispersion", { label: "Caustics dispersion", min: 0, max: 1, step: 0.01, onChange: onB,
         hint: "Chromatic fringing — red/blue split on the filament edges, like real refracted light." });
       _slider(bed, lb, "causticsSpeed", { label: "Caustics speed", min: 0, max: 2, step: 0.01, onChange: onB });
+      _slider(bed, lb, "causticsMinDepth", { label: "Caustics min depth (m)", min: 0, max: 3, step: 0.05, onChange: onB,
+        hint: "Caustics fade IN over this much water. Light needs depth to focus through, so at 0 they appear right at the waterline — which on a river's shallow rim reads as caustics on dry sand." });
       _slider(bed, lb, "causticsMaxDepth", { label: "Caustics max depth (m)", min: 1, max: 30, step: 0.5, onChange: onB,
         hint: "Caustics fade out by this depth — light stops reaching the bed." });
       _slider(bed, lb, "shoreBlend", { label: "Shore blend (m)", min: 0.02, max: 3, step: 0.01, onChange: onB,

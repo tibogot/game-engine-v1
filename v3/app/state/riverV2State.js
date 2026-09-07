@@ -100,6 +100,22 @@ export function createRiverV2ToolState() {
       /** Solved speeds are clamped into this band, metres/second. */
       minSpeed: 0.08,
       maxSpeed: 9,
+      /**
+       * Whitewater threshold, as a Froude number (v / sqrt(g·d)) — how close the
+       * flow is to going supercritical, which is physically when water breaks.
+       * An ABSOLUTE measure on purpose: anything relative (turbulence against
+       * the river's own worst reach) reports a uniform stream as 100% rapids.
+       * Below `froudeStart` there is no turbulence at all; at `froudeFull` it is
+       * saturated. Lower the start to get whitewater on a gentler river.
+       */
+      froudeStart: 0.8,
+      /**
+       * Saturating at 1.8 was too eager: an ordinary 8% reach reaches Fr ~2 and
+       * came out fully white, which is what a lifted node looks like on a short
+       * river. 2.5 keeps a real rapid unmistakably white while leaving water
+       * visible through it.
+       */
+      froudeFull: 2.5,
 
       // ── Surface placement ──────────────────────────────────────────────────
       /**
@@ -107,6 +123,23 @@ export function createRiverV2ToolState() {
        * hides the mesh edge inside the bank lip; 0 puts it exactly on the rim.
        */
       surfaceDrop: 0.05,
+
+      /**
+       * Sand along the banks — see riverSandTsl.js. Terrain shading, not water
+       * shading: it applies under AND around the channel whether or not that
+       * stretch is submerged, and carries no caustics.
+       */
+      sand: {
+        enabled: true,
+        color: "#c9ab7c",
+        strength: 0.9,
+        /** Metres of sand beyond the channel's own half-width, each side. */
+        width: 7,
+        fade: 4.5,
+        edgeNoise: 3,
+        edgeNoiseScale: 0.05,
+        detail: 0.5,
+      },
 
       // ── Water shading (see riverV2Material.js) ─────────────────────────────
       water: createRiverWaterState(),
@@ -194,8 +227,16 @@ export function createRiverWaterState(overrides = {}) {
     wakeDistance: 2.4,
     /** Noise cells per metre in flow space. Foam advects with the current. */
     foamScale: 0.55,
-    /** How hard the noise chews holes in the foam. 0 = flat white. */
-    foamBreakup: 0.75,
+    /**
+     * How hard the noise chews holes in the foam. 0 = flat white.
+     * Applied multiplicatively, so it still breaks up a SATURATED source — a
+     * real cascade reaches turbulence 1.0 by itself, and before this it went
+     * flat white there.
+     */
+    foamBreakup: 0.9,
+    /** Contrast stretch on the foam noise, so it swings the full 0..1 and can
+     *  cross the cutoff from both sides instead of hovering near its mean. */
+    foamContrast: 2.2,
     foamSharpness: 1.3,
     /** Below this the foam is cut away entirely. */
     foamCutoff: 0.4,
@@ -256,6 +297,7 @@ export function riverWaterParams(s) {
     wakeDistance: s.wakeDistance,
     foamScale: s.foamScale,
     foamBreakup: s.foamBreakup,
+    foamContrast: s.foamContrast,
     foamSharpness: s.foamSharpness,
     foamCutoff: s.foamCutoff,
     foamTransition: s.foamTransition,

@@ -42,6 +42,16 @@ export function createLakebedState(overrides = {}) {
     /** Morph rate of the net, in pattern time. ~0.5 reads as gentle sunlight. */
     causticsSpeed:     0.5,
     /** Caustics die out by this depth — light stops reaching the bed. */
+    /**
+     * Metres of water the caustics fade IN over, from the waterline.
+     *
+     * Light has to travel through water to focus, so there are none at zero
+     * depth. Without this they sat at 88% strength right at the shoreline (the
+     * fade-out below starts at -1, revo's constant) and landed on the shallow
+     * rim of a river channel, which is only centimetres deep and reads as dry
+     * sand. Set to 0 for the old behaviour.
+     */
+    causticsMinDepth:  0.55,
     causticsMaxDepth:  7.5,
 
     /** Metres of depth over which the whole treatment fades in at the waterline. */

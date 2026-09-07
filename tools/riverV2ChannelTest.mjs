@@ -7,7 +7,9 @@
  *   8 — the cross-section CUTS AND FILLS, and is continuous at both seams
  * Run: node tools/riverV2ChannelTest.mjs   (picked up by npm test)
  */
-import { solveRiver, monotoneCubic, closestStation } from "../v3/tools/riverV2Channel.js";
+import {
+  solveRiver, monotoneCubic, closestStation, planConformChunks, conformStride, LOOP_SEGS,
+} from "../v3/tools/riverV2Channel.js";
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra = "") {
@@ -20,6 +22,7 @@ const PARAMS = {
   stationSpacing: 2.5, forceDownhill: true, minGradient: 0.0008, levelSmoothing: 0,
   bedCurve: 0.55, freeboard: 0.6, lipFraction: 0.28, maxBankSlope: 0.9, bankFlareMax: 4,
   manningN: 0.04, flowScale: 1, minSlope: 0.0006, minSpeed: 0.08, maxSpeed: 9,
+  froudeStart: 0.8, froudeFull: 2.5,
   newWidth: 10, newDepth: 1.8, newBank: 8,
 };
 const node = (x, z, o = {}) => ({ x, z, y: null, width: 10, depth: 1.8, bank: 8, ...o });
@@ -101,7 +104,31 @@ console.log("\n6. Velocity responds to slope and depth (Manning)");
   ok("a shallower channel runs slower at the same slope", vShallow < vSteep, `${vShallow.toFixed(3)} < ${vSteep.toFixed(3)}`);
   ok("speeds stay inside the clamp band",
     Math.min(...steep.speed) >= PARAMS.minSpeed - 1e-9 && Math.max(...steep.speed) <= PARAMS.maxSpeed + 1e-9);
-  ok("turbulence is normalised to 0..1", Math.max(...steep.turb) <= 1 + 1e-6 && Math.min(...steep.turb) >= 0);
+  ok("turbulence stays in 0..1", Math.max(...steep.turb) <= 1 + 1e-6 && Math.min(...steep.turb) >= 0);
+
+  // The bug this replaced, found the first time a river was drawn in the editor:
+  // turbulence used to be normalised against the river's OWN worst reach, so a
+  // river of uniform gradient — the commonest case there is — came out at 1.0
+  // along its whole length and painted a glass-calm stream solid white. Froude
+  // is an absolute measure, so calm water now reads as calm.
+  // (`steep` here is a 5% gradient 1.8 m deep — that is genuinely Fr ~2, a real
+  // torrent, so it SHOULD white-cap. The gentle case is the flat one.)
+  ok("a uniform gentle river has NO whitewater", Math.max(...flat.turb) === 0,
+    `Fr=${flat.froude[0].toFixed(3)}, turb=${Math.max(...flat.turb)}`);
+  ok("...because its Froude number really is subcritical", flat.froude[0] < 0.8,
+    `Fr=${flat.froude[0].toFixed(3)}`);
+  ok("the genuinely steep reach does white-cap", Math.max(...steep.turb) > 0.5,
+    `Fr=${steep.froude[0].toFixed(2)}`);
+
+  const torrent = solveRiver({
+    // A 1-in-5 mountain stream, shallow over a rough bed.
+    nodes: [node(-100, 0, { depth: 0.35 }), node(100, 0, { depth: 0.35 })],
+    sampleGround: (x) => 100 - x * 0.2, params: PARAMS,
+  });
+  const tMax = Math.max(...torrent.turb);
+  ok("a steep shallow torrent DOES white-cap", tMax > 0.5,
+    `Fr=${torrent.froude[0].toFixed(2)}, turb=${tMax.toFixed(2)}`);
+  ok("its Froude number is supercritical", torrent.froude[0] > 1);
 }
 
 console.log("\n7. AUTO level takes the corridor MINIMUM, not the centreline");
@@ -195,6 +222,50 @@ console.log("\n10. Degenerate input is refused, not crashed on");
   ok("two coincident nodes -> null or finite", dup === null || Array.from(dup.level).every(Number.isFinite));
   const tiny = solveRiver({ nodes: [node(0, 0), node(0.01, 0)], sampleGround: () => 10, params: PARAMS });
   ok("a sub-metre river stays finite", tiny === null || Array.from(tiny.level).every(Number.isFinite));
+}
+
+console.log("\n11. Conform passes tile the path and compose in any order");
+{
+  // History, because it took three goes. The conform is scissored into passes.
+  // The first two designs had each pass WRITE the terrain from whichever
+  // segment it found nearest, which makes a pass's answer depend on seeing
+  // every segment that could win for any texel in its rect. An arc-length
+  // margin either side does not guarantee that, and neither does a spatial
+  // window: a river folding back on itself puts two arms within a bank width of
+  // each other while they are most of the river apart along its length. Both
+  // shipped a visibly gappy river.
+  //
+  // The fix was to stop writing terrain in the pass. Passes now only carry the
+  // nearest-segment search forward, and `min` over distance is associative, so
+  // they compose in any order and each needs only its OWN segments — a texel
+  // whose nearest segment is elsewhere is inside that chunk's rect anyway. So
+  // what is left to check is simply that the chunks tile the path and fit the
+  // shader's unrolled loop.
+  for (const count of [2, 3, 50, 96, 97, 200, 1000, 2048]) {
+    const plan = planConformChunks(count);
+    const spans = plan.chunks.map((c) => c.b - c.a);
+    const contiguous = plan.chunks.every((c, i) =>
+      (i === 0 ? c.a === 0 : c.a === plan.chunks[i - 1].b));
+    const reachesEnd = plan.chunks[plan.chunks.length - 1].b === count - 1;
+    ok(`n=${count}: every chunk fits the loop`, Math.max(...spans) <= LOOP_SEGS,
+      `widest ${Math.max(...spans)} > ${LOOP_SEGS}`);
+    ok(`n=${count}: chunks tile the path with no hole`, contiguous && reachesEnd);
+    ok(`n=${count}: every chunk covers at least one segment`, Math.min(...spans) >= 1);
+  }
+  ok("a one-point path is refused, not crashed on",
+    planConformChunks(1).chunks.length === 0);
+
+  // The path texture is shared by every river, so each river's path is capped
+  // to its share of it. This is a memory budget only — accuracy along the
+  // channel comes from the solver's station spacing, not from this.
+  ok("a short river is not decimated", conformStride(300, 1024) === 1);
+  ok("an over-long river is decimated", conformStride(4000, 1024) > 1);
+  for (const [count, budget] of [[4000, 1024], [2048, 64], [5, 2], [300, 300]]) {
+    const stride = conformStride(count, budget);
+    const points = Math.max(2, Math.ceil((count - 1) / stride) + 1);
+    ok(`stride(${count}, ${budget}) keeps the path inside its budget`, points <= budget + 1,
+      `${points} points vs budget ${budget}`);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

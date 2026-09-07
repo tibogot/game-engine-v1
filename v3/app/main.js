@@ -132,6 +132,7 @@ import { createRiverV2ToolState } from "./state/riverV2State.js";
 import { setWaterSsrEnabled } from "../render/water/lakeMaterial.js";
 import { createWaterSurfaceMap } from "../render/water/waterSurfaceMap.js";
 import { createLakebedShading } from "../render/water/lakebedTsl.js";
+import { createRiverSandShading } from "../render/water/riverSandTsl.js";
 import { SmartRoadLabSystem } from "../../v2/tools/smartRoad/smartRoadLabSystem.js";
 import { RoadConformSystem } from "../tools/roadConformSystem.js";
 import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
@@ -550,7 +551,11 @@ export async function startV3App(opts = {}) {
   // and the snow surface definition (snowSystem.shared): painted snow displaces
   // the terrain itself with real volume; the deform tile only refines the same
   // surface with trail compression near the player.
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc, terrainFeatureOverrides, terrainNormals);
+  // Sand on the river banks. Reads River v2's nearest-segment field, which does
+  // not exist yet — the sources are attached once that system is built.
+  const riverSandShading = createRiverSandShading({ worldSize: WORLD_SIZE });
+
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc, terrainFeatureOverrides, terrainNormals, riverSandShading);
   scene.add(lod.group);
   /**
    * Terrain visibility — see the `terrain` block on the returned handle.
@@ -4400,8 +4405,13 @@ export async function startV3App(opts = {}) {
       bvhDebug?.update();
     },
     onWaterMeshesChanged: () => waterSurfaceMap.markDirty(),
+    onRiverFieldChanged: (hasRivers) => riverSandShading.setActive(hasRivers),
   });
   worldEnv?.addWaterSurface(riverV2System);
+  // The distance field and path texture are stable render targets, so this is a
+  // one-time hookup; their CONTENTS change on every conform.
+  riverSandShading.setSources(riverV2System.nearTexture, riverV2System.pathTexture);
+  riverSandShading.syncParams(riverV2Slice.riverV2.sand);
 
   // Both water systems exist — the lakebed shading's water-surface map can now
   // see their meshes. Terrain edits change where water meets ground, but the
@@ -5408,6 +5418,7 @@ export async function startV3App(opts = {}) {
     riverSystem.importData(d.rivers ?? null);
     river2System.importData(d.rivers2 ?? null);
     riverV2System.importData(d.riversV2 ?? null);
+    riverSandShading.syncParams(riverV2Slice.riverV2.sand);
     riverV2Ui?.refresh();
 
     // Also always import: a project with no player start must clear the old marker.
@@ -5627,6 +5638,7 @@ export async function startV3App(opts = {}) {
     maxHeight: MAX_HEIGHT,
     waterGlobals,
     materialChanged: () => riverV2System.syncMaterial(),
+    sandChanged: () => riverSandShading.syncParams(riverV2Slice.riverV2.sand),
     conformChanged: () => riverV2System.refreshConform(),
     visibilityChanged: () => riverV2System.refreshVisibility(),
   });
@@ -6656,6 +6668,7 @@ export async function startV3App(opts = {}) {
       waterSurfaceMap,
       get river2System() { return river2System; },
       get riverV2System() { return riverV2System; },
+      riverSandShading,
       get grassState() { return grassState; },
       get grassRings() { return grassRings; },
       get grassTintRT() { return grassTintRT; },

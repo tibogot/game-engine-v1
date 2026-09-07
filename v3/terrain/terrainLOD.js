@@ -92,6 +92,8 @@ export const TERRAIN_FEATURES = {
   snow: true,
   /** Underwater lakebed tint + caustics. */
   lakebed: true,
+  /** Sand band along a River v2 channel, under and around the water. */
+  riverSand: true,
   /**
    * The grey Unreal/Unity-style grid under the layers. Off = a flat colour at
    * the grid's mean shade, for a game whose world is painted or procedural and
@@ -275,7 +277,7 @@ function buildRingGrid(N, step) {
 function createLODMaterial({
   heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
   splatOverlay, snowShared = null, lakebed = null, groundProc = null,
-  terrainNormals = null, features = {},
+  terrainNormals = null, riverSand = null, features = {},
 }) {
   const F = { ...TERRAIN_FEATURES, ...features };
   const mat = createTileMaterial({
@@ -463,6 +465,11 @@ function createLODMaterial({
     // which is editor UI and must stay visible over a submerged brush target.
     if (lakebed && F.lakebed) col.assign(lakebed.apply(col));
 
+    // River banks: sand under and around the channel. Sits ABOVE the lakebed
+    // because it is the ground's own material, not something the water does to
+    // it — and it applies whether or not that stretch is submerged.
+    if (riverSand && F.riverSand) col.assign(riverSand.apply(col));
+
     // The cursor tint is the ONLY consumer of ring/maskOverlay, so with the
     // cursor compiled out the colour passes straight through.
     if (F.cursor) {
@@ -532,7 +539,7 @@ function _mergeClipmapGeometries(geos) {
 export function createTerrainLOD(
   heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
   splatOverlay, snowShared = null, lakebed = null, groundProc = null,
-  features = {}, terrainNormals = null,
+  features = {}, terrainNormals = null, riverSand = null,
 ) {
   const group = new THREE.Group();
 
@@ -554,7 +561,7 @@ export function createTerrainLOD(
   const matArgs = {
     heightTexNode, uCenterXZ: uCenter, uCursorUV, uCursorRadius,
     uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed,
-    groundProc, terrainNormals,
+    groundProc, terrainNormals, riverSand,
   };
 
   const mesh = new THREE.Mesh(geometry, createLODMaterial({ ...matArgs, features }));

@@ -41,12 +41,12 @@ import {
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { createRiverMaterial } from "../render/water/riverV2Material.js";
 import { riverWaterParams, RIVER_NODE_DEFAULTS } from "../app/state/riverV2State.js";
-import { solveRiver, closestStation, MIN_NODES } from "./riverV2Channel.js";
+import {
+  solveRiver, closestStation, planConformChunks, conformStride, LOOP_SEGS, MIN_NODES,
+} from "./riverV2Channel.js";
 
 /** Path-texture width. Matches the solver's station ceiling, so no river is split. */
 const MAX_PATH_POINTS = 2048;
-/** Spline segments rasterized per conform pass — the inner loop's unrolled length. */
-const CHUNK_SEGS = 24;
 /** Undo ring depth. Entries are small JSON snapshots of the node arrays. */
 const MAX_UNDO = 64;
 /** Metres between flow-direction arrows. */
@@ -84,30 +84,37 @@ function sampleNormalized(map, wx, wz) {
 }
 
 /**
- * Emit the "nearest point on this chunk's centreline" graph.
+ * The conform is TWO stages: "nearest", then "resolve".
  *
- * Plain JS returning an object of TSL nodes, NOT a TSL `Fn`: an Fn that returns
- * an object collapses into a swizzle and silently drops every field but the
- * first. Two shaders need these five values, so the graph is built twice from
- * one source instead of being wrapped.
+ * Stage one runs once per chunk of spline and carries forward, per texel, the
+ * closest segment found so far as (distance2, path index, t). It writes no
+ * terrain. Because `min` over distance is associative, the chunks compose in
+ * any order and each only has to look at its own segments — a chunk's rect
+ * already covers everything within `reach` of them, and any texel whose true
+ * nearest segment lies elsewhere is inside THAT chunk's rect too.
+ *
+ * Stage two runs once, full screen, and turns the winning segment into a
+ * height by evaluating the cross-section against the untouched base terrain.
+ *
+ * The obvious design — have each chunk write the terrain directly — is what
+ * shipped twice and was visibly wrong twice: it makes a pass's answer depend on
+ * seeing every segment that could win for any texel it touches, which neither
+ * an arc-length margin nor a spatial window can guarantee on a river that folds
+ * back on itself. Splitting the search from the write removes the requirement.
  */
-function nearestChannel(uvC, pathTex, uSegStart, uSegEnd) {
-  const bestD2 = float(1e9).toVar();
-  const level = float(0).toVar();
-  const halfW = float(0.001).toVar();
-  const depth = float(0).toVar();
-  const bank = float(0.001).toVar();
+function nearestSearch(uvC, pathTex, prev, uSegStart, uSegEnd) {
+  const bestD2 = prev.r.toVar();
+  const bestIdx = prev.g.toVar();
+  const bestT = prev.b.toVar();
 
   const W = float(MAX_PATH_POINTS);
-  Loop(CHUNK_SEGS, ({ i }) => {
+  Loop(LOOP_SEGS, ({ i }) => {
     const idx = float(i).add(uSegStart);
     If(idx.greaterThanEqual(uSegEnd), () => { Break(); });
 
-    // Row 0: (u, v, level, halfWidth). Row 1: (depth, bank, -, -).
+    // Row 0 is (u, v, level, halfWidth) — only the position is needed here.
     const a0 = texture(pathTex, vec2(idx.add(0.5).div(W), 0.25));
     const b0 = texture(pathTex, vec2(idx.add(1.5).div(W), 0.25));
-    const a1 = texture(pathTex, vec2(idx.add(0.5).div(W), 0.75));
-    const b1 = texture(pathTex, vec2(idx.add(1.5).div(W), 0.75));
 
     const ab = b0.xy.sub(a0.xy);
     const len2 = max(dot(ab, ab), float(1e-12));
@@ -118,14 +125,29 @@ function nearestChannel(uvC, pathTex, uSegStart, uSegEnd) {
 
     If(d2.lessThan(bestD2), () => {
       bestD2.assign(d2);
-      level.assign(mix(a0.z, b0.z, t));
-      halfW.assign(mix(a0.w, b0.w, t));
-      depth.assign(mix(a1.x, b1.x, t));
-      bank.assign(mix(a1.y, b1.y, t));
+      bestIdx.assign(idx);
+      bestT.assign(t);
     });
   });
 
-  return { dist: sqrt(bestD2), level, halfW, depth, bank };
+  return vec4(bestD2, bestIdx, bestT, float(1));
+}
+
+/** Channel parameters of the winning segment, from the shared path texture. */
+function channelAt(pathTex, idx, t) {
+  const W = float(MAX_PATH_POINTS);
+  const uA = idx.add(0.5).div(W);
+  const uB = idx.add(1.5).div(W);
+  const a0 = texture(pathTex, vec2(uA, 0.25));
+  const b0 = texture(pathTex, vec2(uB, 0.25));
+  const a1 = texture(pathTex, vec2(uA, 0.75));   // (depth, bank, -, -)
+  const b1 = texture(pathTex, vec2(uB, 0.75));
+  return {
+    level: mix(a0.z, b0.z, t),
+    halfW: mix(a0.w, b0.w, t),
+    depth: mix(a1.x, b1.x, t),
+    bank: mix(a1.y, b1.y, t),
+  };
 }
 
 export class RiverV2System {
@@ -144,6 +166,7 @@ export class RiverV2System {
   constructor({
     scene, toolState, renderer, getRT, cpuHeightmap, waterNormalMap,
     getCamera = null, onConformCommitted = null, onWaterMeshesChanged = null,
+    onRiverFieldChanged = null,
   }) {
     this.scene = scene;
     this.toolState = toolState;
@@ -153,6 +176,8 @@ export class RiverV2System {
     this.getCamera = getCamera;
     this.onConformCommitted = onConformCommitted;
     this.onWaterMeshesChanged = onWaterMeshesChanged;
+    /** (hasRivers) => void — the nearest-segment field became (un)available. */
+    this.onRiverFieldChanged = onRiverFieldChanged;
 
     /** @type {{id:number, nodes:Array, solved:object|null, mesh:THREE.Mesh|null}[]} */
     this.rivers = [];
@@ -190,6 +215,9 @@ export class RiverV2System {
     this._rebaseTimer = 0;
 
     this._initPasses();
+    // The field starts as whatever was in VRAM; clear it before anything can
+    // read it, or a distance of 0 would read as "river everywhere".
+    this._render(this._clearNearQuad, this._rtNear, null);
     this._buildHandlePrototypes();
     this.syncMaterial();
   }
@@ -206,12 +234,29 @@ export class RiverV2System {
     // else either loses height precision or claims some the source never had.
     const type = this.renderer?.backend?.device?.features?.has("float32-filterable")
       ? THREE.FloatType : THREE.HalfFloatType;
-    this._rtScratch = new THREE.RenderTarget(size, size, {
-      format: THREE.RGBAFormat, type,
-      minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
-      generateMipmaps: false, depthBuffer: false, colorSpace: THREE.NoColorSpace,
-    });
-    this._rtScratch.texture.flipY = false;
+    const makeRT = () => {
+      const rt = new THREE.RenderTarget(size, size, {
+        format: THREE.RGBAFormat, type,
+        minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+        generateMipmaps: false, depthBuffer: false, colorSpace: THREE.NoColorSpace,
+      });
+      rt.texture.flipY = false;
+      return rt;
+    };
+    this._rtScratch = makeRT();
+
+    // The unconformed terrain, mirrored on the CPU and uploaded when it changes.
+    // Allocated up front because the resolve pass samples it, and that pass is
+    // built here. RGBA rather than Red even though only R is used: it is the
+    // format every other height surface in this engine uses.
+    this._baseTexData = new Float32Array(size * size * 4);
+    this._baseTex = new THREE.DataTexture(
+      this._baseTexData, size, size, THREE.RGBAFormat, THREE.FloatType,
+    );
+    this._baseTex.minFilter = THREE.NearestFilter;
+    this._baseTex.magFilter = THREE.NearestFilter;
+    this._baseTex.flipY = false;
+    this._baseSrc = texture(this._baseTex);
 
     // Path texture: two rows per river.
     //   row 0 — (u, v, level, halfWidth)     positions in UV, level normalized
@@ -235,7 +280,18 @@ export class RiverV2System {
     })();
     this._copyQuad = new QuadMesh(copyMat);
 
-    // ── Conform pass ───────────────────────────────────────────────────────
+    // The nearest-RT ping-pong gets its own node: swapping one texture node
+    // between differently-filtered sources asks the backend to rebuild the
+    // pipeline on a hot path.
+    this._nearCopySrc = texture(this._pathTex);
+    const nearCopyMat = new MeshBasicNodeMaterial();
+    nearCopyMat.fragmentNode = Fn(() => {
+      const c = texture(this._nearCopySrc, uv());
+      return vec4(c.r, c.g, c.b, float(1));
+    })();
+    this._nearCopyQuad = new QuadMesh(nearCopyMat);
+
+    // ── Nearest-segment search + resolve (see the note above the builders) ──
     this._uSegStart = uniform(0);
     this._uSegEnd = uniform(0);
     this._uBedCurve = uniform(0.55);
@@ -246,22 +302,42 @@ export class RiverV2System {
     this._uSlopeToUv = uniform(1);
     this._uFlareMax = uniform(4);
 
-    const scratchTex = this._rtScratch.texture;
     const pathTex = this._pathTex;
 
-    const conformMat = new MeshBasicNodeMaterial();
-    conformMat.fragmentNode = Fn(() => {
-      const uvC = uv();
-      const src = texture(scratchTex, uvC);
-      const natural = src.r.toVar();
+    // Per-texel winner so far: (distance2, path index, t). Ping-ponged through
+    // a scratch the same way the height passes used to be.
+    this._rtNear = makeRT();
+    this._rtNearScratch = makeRT();
 
-      const ch = nearestChannel(uvC, pathTex, this._uSegStart, this._uSegEnd);
+    const clearMat = new MeshBasicNodeMaterial();
+    clearMat.fragmentNode = Fn(() => vec4(float(1e9), float(0), float(0), float(1)))();
+    this._clearNearQuad = new QuadMesh(clearMat);
+
+    const nearMat = new MeshBasicNodeMaterial();
+    nearMat.fragmentNode = Fn(() => {
+      const uvC = uv();
+      const prev = texture(this._rtNearScratch.texture, uvC);
+      return nearestSearch(uvC, pathTex, prev, this._uSegStart, this._uSegEnd);
+    })();
+    this._nearQuad = new QuadMesh(nearMat);
+
+    const resolveMat = new MeshBasicNodeMaterial();
+    resolveMat.fragmentNode = Fn(() => {
+      const uvC = uv();
+      const near = texture(this._rtNear.texture, uvC);
+      // The cross-section is evaluated against the UNTOUCHED base, so a resolve
+      // is a restore and an apply in one — and is idempotent.
+      const natural = texture(this._baseSrc, uvC).r.toVar();
+      const keep = texture(this._rtScratch.texture, uvC);   // River+'s G/B flags
+
+      const dist = sqrt(near.r);
+      const ch = channelAt(pathTex, near.g, near.b);
 
       // ── Channel: bed falls from the rim to `depth` at the centreline ──────
       // Both shapes return to 0 at u = 1, i.e. the bed meets the water level
       // exactly at ±width/2. That is what makes the waterline land on the mesh
       // edge with nothing to tune.
-      const uCh = clamp(ch.dist.div(max(ch.halfW, float(1e-6))), float(0), float(1));
+      const uCh = clamp(dist.div(max(ch.halfW, float(1e-6))), float(0), float(1));
       const flat = float(1).sub(pow(uCh, float(8)));   // flat-bottomed canal
       const para = float(1).sub(uCh.mul(uCh));         // parabolic natural channel
       const bedShape = mix(flat, para, this._uBedCurve);
@@ -275,17 +351,21 @@ export class RiverV2System {
       // or a deep gorge wall ramps instead of standing vertical.
       const need = abs(natural.sub(rim)).mul(this._uSlopeToUv);
       const flare = clamp(need, ch.bank, ch.bank.mul(this._uFlareMax));
-      const uB = clamp(ch.dist.sub(ch.halfW).div(max(flare, float(1e-6))), float(0), float(1));
+      const uB = clamp(dist.sub(ch.halfW).div(max(flare, float(1e-6))), float(0), float(1));
       const aRise = smoothstep(float(0), this._uLipFrac, uB);
       const bEase = smoothstep(this._uLipFrac, float(1), uB);
       const tBank = mix(mix(ch.level, rim, aRise), natural, bEase);
 
-      const inChannel = step(ch.dist, ch.halfW);
-      const target = mix(tBank, tChannel, inChannel);
+      const inChannel = step(dist, ch.halfW);
+      const shaped = mix(tBank, tChannel, inChannel);
+      // Where no river was ever found the search left distance at 1e9, and the
+      // bank branch has already eased all the way back to natural — but pin it
+      // exactly so an empty world is bit-identical to its base.
+      const target = mix(shaped, natural, step(float(1e8), near.r));
 
-      return vec4(target, src.g, src.b, float(1));
+      return vec4(target, keep.g, keep.b, float(1));
     })();
-    this._conformQuad = new QuadMesh(conformMat);
+    this._resolveQuad = new QuadMesh(resolveMat);
   }
 
   /** Scissored quad render into an RT (same contract as sculptBrush). */
@@ -347,43 +427,43 @@ export class RiverV2System {
    * other height surface in this engine uses, and the 12 MB saved is not worth
    * being the one place that does something different.
    */
+  /**
+   * Push `_cpuBase` to the GPU. The texture itself is allocated in _initPasses
+   * because the resolve pass samples it.
+   */
   _uploadBase() {
     const n = HEIGHTMAP_SIZE * HEIGHTMAP_SIZE;
-    if (!this._baseTexData) {
-      this._baseTexData = new Float32Array(n * 4);
-      this._baseTex = new THREE.DataTexture(
-        this._baseTexData, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE,
-        THREE.RGBAFormat, THREE.FloatType,
-      );
-      this._baseTex.minFilter = THREE.NearestFilter;
-      this._baseTex.magFilter = THREE.NearestFilter;
-      this._baseTex.flipY = false;
-
-      const src = texture(this._baseTex);
-      const mat = new MeshBasicNodeMaterial();
-      // Preserves the height RT's G and B, which River+ uses for its own carve
-      // flag — a restore must not quietly wipe the other tool's bookkeeping.
-      mat.fragmentNode = Fn(() => {
-        const b = texture(src, uv());
-        const cur = texture(this._rtScratch.texture, uv());
-        return vec4(b.r, cur.g, cur.b, float(1));
-      })();
-      this._baseQuad = new QuadMesh(mat);
-    }
     const d = this._baseTexData;
     const b = this._cpuBase;
     for (let i = 0; i < n; i++) d[i * 4] = b[i];
     this._baseTex.needsUpdate = true;
   }
 
-  /** Restore the whole terrain to its unconformed state. */
-  _restoreBase() {
-    if (!this._baseQuad) return;
+  /** Blit the nearest-search RT into its own ping-pong scratch. */
+  _blitNear(rect = null) {
+    this._nearCopySrc.value = this._rtNear.texture;
+    this._render(this._nearCopyQuad, this._rtNearScratch, rect);
+  }
+
+  /**
+   * Turn the current nearest-segment field into terrain. One full-screen pass,
+   * evaluated against the untouched base — so it is a restore and an apply at
+   * once, and running it twice changes nothing.
+   */
+  _resolve() {
     const rtMain = this.getRT();
-    // The G/B passthrough reads scratch, so scratch has to hold the CURRENT
-    // heightmap before the restore overwrites main's R.
+    // The pass carries River+'s G/B flags through, and reads them from scratch,
+    // so scratch has to hold the current heightmap first.
     this._blit(rtMain.texture, this._rtScratch);
-    this._render(this._baseQuad, rtMain, null);
+    this._render(this._resolveQuad, rtMain, null);
+  }
+
+  /** Restore the whole terrain to its unconformed state: resolve with nothing
+   *  found, which the cross-section defines as "leave the base alone". */
+  _restoreBase() {
+    if (!this._cpuBase) return;
+    this._render(this._clearNearQuad, this._rtNear, null);
+    this._resolve();
   }
 
   _dropBase() {
@@ -445,23 +525,61 @@ export class RiverV2System {
   // Conform
   // ═══════════════════════════════════════════════════════════════════════════
 
-  _uploadPath(solved) {
-    const n = Math.min(solved.count, MAX_PATH_POINTS);
+  /**
+   * Upload the centreline for the conform, taking every `stride`-th station.
+   *
+   * @returns {number} path points written; the caller indexes chunks in this
+   *   PATH space, and path point k is station `k * stride`.
+   */
+  /**
+   * Pack EVERY river's centreline into the one shared path texture, back to
+   * back, and return where each landed.
+   *
+   * They share a texture because the resolve pass looks up the winning segment
+   * by a single global index — so the winner may come from any river, which is
+   * also what makes a confluence resolve correctly instead of one river's pass
+   * overwriting another's.
+   *
+   * @returns {Array<null|{offset:number,count:number,idxOf:function,solved:object}>}
+   */
+  _uploadAllPaths() {
     const d = this._pathData;
     const half = WORLD_SIZE * 0.5;
     const row1 = MAX_PATH_POINTS * 4;
-    for (let i = 0; i < n; i++) {
-      d[i * 4 + 0] = (solved.x[i] + half) / WORLD_SIZE;
-      d[i * 4 + 1] = (solved.z[i] + half) / WORLD_SIZE;
-      d[i * 4 + 2] = solved.level[i] / MAX_HEIGHT;
-      d[i * 4 + 3] = (solved.width[i] * 0.5) / WORLD_SIZE;
-      d[row1 + i * 4 + 0] = solved.depth[i] / MAX_HEIGHT;
-      d[row1 + i * 4 + 1] = solved.bank[i] / WORLD_SIZE;
-      d[row1 + i * 4 + 2] = 0;
-      d[row1 + i * 4 + 3] = 0;
+    const live = this.rivers.filter((r) => r.solved && r.solved.count >= 2).length;
+    const budget = Math.max(64, Math.floor(MAX_PATH_POINTS / Math.max(1, live)));
+
+    const layout = [];
+    let off = 0;
+    for (const river of this.rivers) {
+      const s = river.solved;
+      if (!s || s.count < 2) { layout.push(null); continue; }
+
+      const stride = conformStride(s.count, budget);
+      const last = s.count - 1;
+      const n = Math.min(Math.max(2, Math.ceil(last / stride) + 1), MAX_PATH_POINTS - off);
+      if (n < 2) { layout.push(null); continue; }
+
+      // The final point is pinned to the last station so a decimated path still
+      // ends exactly where the river does.
+      const idxOf = (k) => (k >= n - 1 ? last : Math.min(last, k * stride));
+      for (let k = 0; k < n; k++) {
+        const i = idxOf(k);
+        const j = off + k;
+        d[j * 4 + 0] = (s.x[i] + half) / WORLD_SIZE;
+        d[j * 4 + 1] = (s.z[i] + half) / WORLD_SIZE;
+        d[j * 4 + 2] = s.level[i] / MAX_HEIGHT;
+        d[j * 4 + 3] = (s.width[i] * 0.5) / WORLD_SIZE;
+        d[row1 + j * 4 + 0] = s.depth[i] / MAX_HEIGHT;
+        d[row1 + j * 4 + 1] = s.bank[i] / WORLD_SIZE;
+        d[row1 + j * 4 + 2] = 0;
+        d[row1 + j * 4 + 3] = 0;
+      }
+      layout.push({ offset: off, count: n, idxOf, solved: s });
+      off += n;
     }
     this._pathTex.needsUpdate = true;
-    return n;
+    return layout;
   }
 
   _syncConformUniforms() {
@@ -474,20 +592,26 @@ export class RiverV2System {
     this._uFlareMax.value = Math.max(1, p.bankFlareMax ?? 4);
   }
 
-  _conformRiver(river) {
-    const s = river.solved;
-    if (!s) return;
-    const n = this._uploadPath(s);
-    if (n < 2) return;
-
+  /**
+   * Run the nearest-segment search for one river, in chunks.
+   *
+   * Each pass looks ONLY at its own segments and is scissored to their
+   * footprint. That is sufficient: a texel whose nearest segment lies in some
+   * other chunk is inside that chunk's rect too, because "nearest" means within
+   * `reach` of it. `min` over distance then composes the passes in any order.
+   */
+  _searchRiver(entry) {
+    if (!entry) return;
+    const s = entry.solved;
     const S = HEIGHTMAP_SIZE;
     const half = WORLD_SIZE * 0.5;
-    const rtMain = this.getRT();
+    const plan = planConformChunks(entry.count, LOOP_SEGS);
 
-    for (let a = 0; a < n - 1; a += CHUNK_SEGS) {
-      const b = Math.min(a + CHUNK_SEGS, n - 1);
+    for (const { a, b } of plan.chunks) {
+      const i0 = entry.idxOf(a);
+      const i1 = entry.idxOf(b);
       let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, reach = 0;
-      for (let i = a; i <= b; i++) {
+      for (let i = i0; i <= i1; i++) {
         if (s.x[i] < minX) minX = s.x[i];
         if (s.x[i] > maxX) maxX = s.x[i];
         if (s.z[i] < minZ) minZ = s.z[i];
@@ -502,10 +626,10 @@ export class RiverV2System {
       );
       if (!rect) continue;
 
-      this._uSegStart.value = a;
-      this._uSegEnd.value = b;
-      this._blit(rtMain.texture, this._rtScratch, rect);
-      this._render(this._conformQuad, rtMain, rect);
+      this._uSegStart.value = entry.offset + a;
+      this._uSegEnd.value = entry.offset + b;
+      this._blitNear(rect);
+      this._render(this._nearQuad, this._rtNear, rect);
     }
   }
 
@@ -565,6 +689,9 @@ export class RiverV2System {
         this._dropBase();
         if (commit) this.onConformCommitted?.();
       }
+      // Clear the field too, or the bank sand would outlive the last river.
+      this._render(this._clearNearQuad, this._rtNear, null);
+      this.onRiverFieldChanged?.(false);
       if (rebuild) this._rebuildVisual();
       return;
     }
@@ -573,8 +700,15 @@ export class RiverV2System {
     this._solveAll();
     this._syncConformUniforms();
 
-    this._restoreBase();
-    for (const r of this.rivers) this._conformRiver(r);
+    // Search every river into the shared nearest-segment field, then resolve it
+    // to terrain once. The resolve reads the untouched base, so there is no
+    // separate restore step and re-running it is a no-op.
+    const layout = this._uploadAllPaths();
+    this._render(this._clearNearQuad, this._rtNear, null);
+    for (const entry of layout) this._searchRiver(entry);
+    this._resolve();
+
+    this.onRiverFieldChanged?.(true);
 
     if (rebuild) this._rebuildVisual();
     if (commit) {
@@ -667,6 +801,17 @@ export class RiverV2System {
 
   /** All live water meshes — for the water-surface map bake (lakebed, caustics). */
   get meshes() { return this.rivers.map((r) => r.mesh).filter(Boolean); }
+
+  /**
+   * The nearest-segment field the conform leaves behind: R = distance² to the
+   * closest river centreline in UV units, G = path index, B = t along it.
+   *
+   * It is a live distance field for the whole river network, updated on every
+   * edit, which is exactly what the sand band on the banks needs — so that
+   * costs a texture fetch rather than a bake of its own. See riverSandTsl.js.
+   */
+  get nearTexture() { return this._rtNear.texture; }
+  get pathTexture() { return this._pathTex; }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Handles and flow arrows
@@ -1401,7 +1546,9 @@ export class RiverV2System {
         maxBankSlope: p.maxBankSlope, bankFlareMax: p.bankFlareMax,
         manningN: p.manningN, flowScale: p.flowScale, minSlope: p.minSlope,
         minSpeed: p.minSpeed, maxSpeed: p.maxSpeed, surfaceDrop: p.surfaceDrop,
+        froudeStart: p.froudeStart, froudeFull: p.froudeFull,
         newWidth: p.newWidth, newDepth: p.newDepth, newBank: p.newBank,
+        sand: { ...p.sand },
         water: { ...p.water },
       },
       rivers: this.rivers.map((r) => ({
@@ -1433,8 +1580,8 @@ export class RiverV2System {
     if (data?.params) {
       const p = this.params;
       for (const [k, v] of Object.entries(data.params)) {
-        if (k === "water") {
-          if (v && typeof v === "object") Object.assign(p.water, v);
+        if (k === "water" || k === "sand") {
+          if (v && typeof v === "object") Object.assign(p[k], v);
         } else if (v != null) {
           p[k] = v;
         }

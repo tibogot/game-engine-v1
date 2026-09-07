@@ -38,7 +38,7 @@ import { MeshBasicNodeMaterial } from "three";
 import {
   Fn, If, Break, uniform, float, vec2, vec3, vec4,
   mix, smoothstep, step, dot, cross, exp, pow, max, min, abs, saturate,
-  floor, fract, sin, Loop, uv, attribute,
+  floor, fract, sin, sign, dFdy, Loop, uv, attribute,
   normalize, reflect, texture, positionWorld, positionView, cameraPosition,
   cameraNear, cameraFar, cameraViewMatrix, cameraProjectionMatrix,
   screenUV, Discard, perspectiveDepthToViewZ,
@@ -143,7 +143,8 @@ export const RIVER_MATERIAL_DEFAULTS = {
   wake: 1.1,
   wakeDistance: 2.4,
   foamScale: 0.55,
-  foamBreakup: 0.75,
+  foamBreakup: 0.9,
+  foamContrast: 2.2,
   foamSharpness: 1.3,
   foamCutoff: 0.4,
   foamTransition: 0.16,
@@ -216,6 +217,7 @@ export function createRiverMaterial({ normalMap, params = {} }) {
     wakeDistance: uniform(p.wakeDistance),
     foamScale: uniform(p.foamScale),
     foamBreakup: uniform(p.foamBreakup),
+    foamContrast: uniform(p.foamContrast),
     foamSharpness: uniform(p.foamSharpness),
     foamCutoff: uniform(p.foamCutoff),
     foamTransition: uniform(p.foamTransition),
@@ -238,12 +240,21 @@ export function createRiverMaterial({ normalMap, params = {} }) {
     perspectiveDepthToViewZ(sceneDepthGrab.sample(suv).r, cameraNear, cameraFar).negate(),
   );
 
-  /** World point -> (screen uv, distance from camera). */
-  const projectWorld = Fn(([wp = vec3(0)]) => {
+  /**
+   * World point -> (NDC uv, distance from camera).
+   *
+   * NDC uv is `ndc * 0.5 + 0.5`, which is NOT the space the framebuffer grabs
+   * are indexed in. `screenUV` is built from FRAGMENT COORDINATES (three's
+   * ScreenNode: `screenCoordinate / screenSize`), and on WebGPU those run DOWN
+   * the screen, so its Y is upside down relative to this — except in passes
+   * where `builder.isFlipY()` is true, such as rendering into a post-processing
+   * target. `toScreenUv` below settles which, per frame, by measurement.
+   */
+  const projectNdc = Fn(([wp = vec3(0)]) => {
     const pv = cameraViewMatrix.mul(vec4(wp, 1)).xyz;
     const clip = cameraProjectionMatrix.mul(vec4(pv, 1));
-    const suv = clip.xy.div(clip.w.max(1e-5)).mul(0.5).add(0.5);
-    return vec3(suv.x, suv.y, pv.z.negate());
+    const ndcUv = clip.xy.div(clip.w.max(1e-5)).mul(0.5).add(0.5);
+    return vec3(ndcUv.x, ndcUv.y, pv.z.negate());
   });
 
   material.colorNode = Fn(() => {
@@ -334,6 +345,26 @@ export function createRiverMaterial({ normalMap, params = {} }) {
     const rayDir = normalize(positionWorld.sub(cameraPosition));
     const verticalDepth = waterThickness.mul(rayDir.y.abs()).toVar();
 
+    // ── Which way is up, in the space the framebuffer grabs are indexed? ────
+    // Projecting THIS fragment's own world position must reproduce its own
+    // screen position, so `selfNdc.xy` is exactly the fragment's NDC uv and both
+    // derivatives below are exact non-zero constants across the whole frame.
+    // Their relative sign says whether NDC uv and screenUV agree — measured
+    // rather than assumed, because the answer flips when the scene renders into
+    // a post-processing target instead of the canvas.
+    //
+    // Getting this wrong is not subtle in effect but is very subtle to spot: a
+    // mirrored sample still returns a plausible depth, so the wake test simply
+    // reads the wrong row of the screen and paints foam wherever the mirrored
+    // row happens to contain nearer geometry.
+    const selfNdc = projectNdc(positionWorld).toVar();
+    const yAgree = sign(dFdy(screenUV.y)).mul(sign(dFdy(selfNdc.y))).toVar();
+    /** 0 when the two conventions agree, 1 when screenUV's Y is mirrored. */
+    const uvFlip = float(0.5).sub(yAgree.mul(0.5)).toVar();
+    /** NDC uv -> the uv that `sceneColorGrab` / `sceneDepthGrab` expect. */
+    const toScreenUv = (ndcUv) =>
+      vec2(ndcUv.x, mix(ndcUv.y, float(1).sub(ndcUv.y), uvFlip));
+
     // ── 5. Reflection: sky gradient, optionally overlaid with SSR ──────────
     const viewDir = normalize(cameraPosition.sub(positionWorld)).toVar();
     const reflectVec = reflect(viewDir.negate(), normal);
@@ -358,7 +389,7 @@ export function createRiverMaterial({ normalMap, params = {} }) {
         If(q.z.greaterThan(cameraNear.negate()), () => { Break(); });
 
         const clip = cameraProjectionMatrix.mul(vec4(q, 1));
-        const suv = clip.xy.div(clip.w).mul(0.5).add(0.5).toVar();
+        const suv = toScreenUv(clip.xy.div(clip.w).mul(0.5).add(0.5)).toVar();
         If(suv.x.lessThan(0).or(suv.x.greaterThan(1))
           .or(suv.y.lessThan(0)).or(suv.y.greaterThan(1)), () => { Break(); });
 
@@ -379,7 +410,7 @@ export function createRiverMaterial({ normalMap, params = {} }) {
           const tMid = tNear.add(tFar).mul(0.5).toVar();
           const q = vsPos.add(vsDir.mul(tMid));
           const clip = cameraProjectionMatrix.mul(vec4(q, 1));
-          const suv = clip.xy.div(clip.w).mul(0.5).add(0.5);
+          const suv = toScreenUv(clip.xy.div(clip.w).mul(0.5).add(0.5));
           const diff = q.z.negate().sub(sceneDistAt(suv)).toVar();
           If(diff.greaterThan(0), () => {
             tFar.assign(tMid);
@@ -446,11 +477,12 @@ export function createRiverMaterial({ normalMap, params = {} }) {
       If(u.wake.greaterThan(0), () => {
         for (const [frac, weight] of WAKE_TAPS) {
           const wp = positionWorld.sub(flowDir.mul(u.wakeDistance.mul(frac)));
-          const pr = projectWorld(wp).toVar();
-          const onScreen = step(0, pr.x).mul(step(pr.x, 1))
-            .mul(step(0, pr.y)).mul(step(pr.y, 1));
+          const pr = projectNdc(wp).toVar();
+          const suv = toScreenUv(pr.xy).toVar();
+          const onScreen = step(0, suv.x).mul(step(suv.x, 1))
+            .mul(step(0, suv.y)).mul(step(suv.y, 1));
           // Thickness at that upstream point. <= 0 means dry or solid.
-          const upThick = sceneDistAt(pr.xy).sub(pr.z);
+          const upThick = sceneDistAt(suv).sub(pr.z);
           const blocked = float(1).sub(smoothstep(0, u.shallowDepth.max(1e-3), upThick));
           wakeSrc.addAssign(blocked.mul(onScreen).mul(weight));
         }
@@ -469,8 +501,22 @@ export function createRiverMaterial({ normalMap, params = {} }) {
       const noise = mix(_fbm3(nUv1), _fbm3(nUv2), blend).toVar();
 
       const raw = saturate(turbSrc.add(shallowSrc).add(wakeSrc));
+
+      // Break the foam up MULTIPLICATIVELY, and stretch the noise first.
+      //
+      // A 3-octave value FBM sits around 0.5 and rarely reaches its extremes,
+      // so `mix(1, noise * k, breakup)` has a floor of `1 - breakup` — at the
+      // old 0.75 that floor was 0.25 and the mask never dropped through the
+      // cutoff. The consequence: once any source saturated (a real cascade
+      // reaches turbulence 1.0 on its own) the whole reach went FLAT WHITE
+      // rather than broken. Whitewater is patchy even in a rapid.
+      //
+      // Contrast-stretching gives the noise a full 0..1 swing, and multiplying
+      // by up to 2 lets it straddle the cutoff from both sides, so saturation
+      // reads as dense foam with holes in it instead of milk.
+      const nC = saturate(noise.sub(0.5).mul(u.foamContrast).add(0.5));
       const shaped = pow(max(raw, float(1e-4)), u.foamSharpness)
-        .mul(mix(float(1), noise.mul(1.6), u.foamBreakup));
+        .mul(mix(float(1), nC.mul(2), u.foamBreakup));
 
       const cutLo = max(u.foamCutoff.sub(u.foamTransition), float(0));
       const cutHi = min(u.foamCutoff.add(u.foamTransition), float(1.5));
@@ -543,6 +589,7 @@ export function createRiverMaterial({ normalMap, params = {} }) {
     if (sp.wakeDistance != null) u.wakeDistance.value = sp.wakeDistance;
     if (sp.foamScale != null) u.foamScale.value = sp.foamScale;
     if (sp.foamBreakup != null) u.foamBreakup.value = sp.foamBreakup;
+    if (sp.foamContrast != null) u.foamContrast.value = sp.foamContrast;
     if (sp.foamSharpness != null) u.foamSharpness.value = sp.foamSharpness;
     if (sp.foamCutoff != null) u.foamCutoff.value = sp.foamCutoff;
     if (sp.foamTransition != null) u.foamTransition.value = sp.foamTransition;
