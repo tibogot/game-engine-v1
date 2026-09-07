@@ -36,8 +36,67 @@ export function createFoliageEnvironment({
   }
   applyFoliageSlotTextures(billboardRenderer, toolState.foliageSlots).catch(() => {});
 
-  function syncFoliageHeights() {
-    foliageStore.syncAllHeights(terrainStore);
+  /**
+   * Re-drape instance heights onto the terrain.
+   *
+   * `region` is an optional { x, z, radius } in world metres — pass it after a
+   * PARTIAL terrain edit and only the chunks it covers are touched. That matters
+   * far more than the height loop suggests: a full scan also bumps EVERY chunk's
+   * generation, and the LOD renderers rebuild every mesh that invalidates.
+   * MEASURED at 25k trees, 4 s sculpt stroke: p99 42.7 ms with the full scan vs
+   * 18.3 ms with the call removed entirely, while the height loop itself is only
+   * 0.8 ms. The cost is the invalidation, not the arithmetic.
+   *
+   * Omit `region` (project load, terrain resize, whole-map generate) for a full
+   * resync.
+   */
+  function syncFoliageHeights(region = null) {
+    if (!region) {
+      foliageStore.syncAllHeights(terrainStore);
+      return;
+    }
+    foliageStore.syncHeightsForChunks(
+      foliageStore.getChunkKeysInRadius(region.x, region.z, region.radius),
+      terrainStore,
+    );
+  }
+
+  /** True once a slot has a texture — a project one or a session preview. */
+  function isSlotLoaded(slotIdx) {
+    const slot = toolState.foliageSlots[slotIdx];
+    return !!(slot && (slot.textureUrl || slot.texturePreviewName));
+  }
+
+  /**
+   * Data URL for the palette card: the slot's own texture drawn onto a dark
+   * ground so a cut-out leaf reads against it. Cached per texture object, so a
+   * panel rebuild is a map lookup rather than a redraw.
+   *
+   * Nothing to bake here (unlike trees, which render a real model) — the
+   * texture IS the picture.
+   */
+  const _thumbs = new Map();
+  function getSlotThumbnail(slotIdx) {
+    const tex = billboardRenderer.slotRender?.[slotIdx]?.textureObj;
+    const img = tex?.image;
+    if (!img) { _thumbs.delete(slotIdx); return null; }
+    const hit = _thumbs.get(slotIdx);
+    if (hit && hit.src === img) return hit.url;
+    try {
+      const S = 96;
+      const c = document.createElement("canvas");
+      c.width = c.height = S;
+      const g = c.getContext("2d");
+      g.fillStyle = "#1b1b1b";
+      g.fillRect(0, 0, S, S);
+      g.drawImage(img, 0, 0, S, S);
+      const url = c.toDataURL("image/png");
+      _thumbs.set(slotIdx, { src: img, url });
+      return url;
+    } catch (_) {
+      // Image not decoded yet, or tainted — the card falls back to initials.
+      return null;
+    }
   }
 
   function updateFrame(camera, sunDir, timeSec) {
@@ -161,6 +220,8 @@ export function createFoliageEnvironment({
   }
 
   return {
+    isSlotLoaded,
+    getSlotThumbnail,
     foliageStore,
     billboardRenderer,
     paintSystem,

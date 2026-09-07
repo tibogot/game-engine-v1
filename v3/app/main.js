@@ -121,11 +121,14 @@ import { createFoliageEnvironment } from "./foliageEnvironment.js";
 import { buildFoliagePanel } from "../ui/buildFoliagePanel.js";
 import { createRiverToolState } from "./state/riverState.js";
 import { buildRiverPanels } from "../ui/buildRiverPanel.js";
+import { buildRiverV2Panel } from "../ui/buildRiverV2Panel.js";
 import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
 import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
+import { RiverV2System } from "../tools/riverV2System.js";
 import { createLakeToolState } from "./state/lakeState.js";
 import { buildLakePanel } from "../ui/buildLakePanel.js";
 import { LakeSystem } from "../tools/lakeSystem.js";
+import { createRiverV2ToolState } from "./state/riverV2State.js";
 import { setWaterSsrEnabled } from "../render/water/lakeMaterial.js";
 import { createWaterSurfaceMap } from "../render/water/waterSurfaceMap.js";
 import { createLakebedShading } from "../render/water/lakebedTsl.js";
@@ -626,6 +629,7 @@ export async function startV3App(opts = {}) {
   const splinePanel    = document.getElementById("spline-panel");
   const riverPanel     = document.getElementById("river-panel");
   const river2Panel    = document.getElementById("river2-panel");
+  const riverV2Panel   = document.getElementById("riverv2-panel");
   const lakePanel      = document.getElementById("lake-panel");
   const roadPanel      = document.getElementById("road-panel");
   const spawnPanel     = document.getElementById("spawn-panel");
@@ -886,6 +890,15 @@ export async function startV3App(opts = {}) {
 
   // ── Grass system ───────────────────────────────────────────────────────────
   const grassTerrainData = new GrassTerrainData();
+  // Grass/susuki read the terrain surface straight off the GPU bake — see the
+  // note in grassTerrainData.js for the 17.3 ms/readback this replaced.
+  grassTerrainData.initSurfaceBake({
+    renderer,
+    heightTexNode,
+    heightmapSize: HEIGHTMAP_SIZE,
+    worldSize: WORLD_SIZE,
+    maxHeight: MAX_HEIGHT,
+  });
   const grassWindTex      = createWindTexture();
   const grassSpecNoiseTex = createSpecNoiseTexture();
 
@@ -1777,6 +1790,11 @@ export async function startV3App(opts = {}) {
   };
   let riverSystem = null;
   let river2System = null;
+  // River v2 — the spline is the master and the terrain conforms to it. Its own
+  // state slice, solver, conform and shader; it shares nothing with River+.
+  const riverV2Slice = createRiverV2ToolState();
+  let riverV2System = null;
+  let riverV2Ui = null;
   const lakeToolSlice = createLakeToolState();
   let lakeSystem = null;
   let lakeUi = null;
@@ -1857,6 +1875,10 @@ export async function startV3App(opts = {}) {
     river2Panel.style.display = (editorMode === "river2" && !playMode.active) ? "" : "none";
   }
 
+  function syncRiverV2PanelVisibility() {
+    riverV2Panel.style.display = (editorMode === "riverv2" && !playMode.active) ? "" : "none";
+  }
+
   function syncLakePanelVisibility() {
     lakePanel.style.display = (editorMode === "lake" && !playMode.active) ? "" : "none";
   }
@@ -1903,6 +1925,7 @@ export async function startV3App(opts = {}) {
       river2System.handleGroup.visible =
         editorMode === "river2" && riverToolSlice.river2.showHandles && !playMode.active;
     }
+    riverV2System?.setEditActive(editorMode === "riverv2" && !playMode.active);
   }
 
   function applySplineModeEffects() {
@@ -1922,6 +1945,7 @@ export async function startV3App(opts = {}) {
     if (editorMode === "spline" && m !== "spline") _onLeaveSplineMode();
     if (editorMode === "river" && m !== "river") _onLeaveRiverMode();
     if (editorMode === "river2" && m !== "river2") _onLeaveRiver2Mode();
+    if (editorMode === "riverv2" && m !== "riverv2") riverV2System?.cancelDrag();
     if (editorMode === "lake" && m !== "lake") lakeSystem?.cancelDrag();
     if (editorMode === "road" && m !== "road") _onLeaveRoadMode();
     if (editorMode === "props" && m !== "props") _onLeavePropsMode();
@@ -1963,9 +1987,13 @@ export async function startV3App(opts = {}) {
     } else if (m === "spawn") {
       uCursorUV.value.set(-2, -2);
       spawnUi?.refresh();
-    } else if (m === "props" || m === "spline" || m === "river" || m === "river2" || m === "road" || m === "lake") {
+    } else if (m === "props" || m === "spline" || m === "river" || m === "river2"
+      || m === "riverv2" || m === "road" || m === "lake") {
       uCursorUV.value.set(-2, -2);
       if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
+      // River v2 snapshots the unconformed terrain from the CPU mirror, so the
+      // mirror has to be fresh before the first conform of the session.
+      if (m === "riverv2") void ensureCpuHeightmapFromGpu().then(() => riverV2Ui?.refresh());
       // Lake creation reads terrain height at the click to pick a water level.
       if (m === "lake") void ensureCpuHeightmapFromGpu().then(() => lakeUi?.refresh());
       if (m === "road") {
@@ -1988,6 +2016,7 @@ export async function startV3App(opts = {}) {
     syncSplinePanelVisibility();
     syncRiverPanelVisibility();
     syncRiver2PanelVisibility();
+    syncRiverV2PanelVisibility();
     syncLakePanelVisibility();
     syncRoadPanelVisibility();
     syncSpawnPanelVisibility();
@@ -2030,11 +2059,13 @@ export async function startV3App(opts = {}) {
     splinePanel.style.display = "none";
     riverPanel.style.display = "none";
     river2Panel.style.display = "none";
+    riverV2Panel.style.display = "none";
     lakePanel.style.display = "none";
     roadPanel.style.display = "none";
     spawnPanel.style.display = "none";
     roadSystem?.setEditActive(false);
     lakeSystem?.setEditActive(false);
+    riverV2System?.setEditActive(false);
     spawnSystem.setVisible(false);
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
@@ -2330,6 +2361,48 @@ export async function startV3App(opts = {}) {
   let readbackInFlight  = false;
   let readbackPending   = false;
 
+  /**
+   * Widen a texel rect to a 32-texel grid.
+   *
+   * WebGPU pads every readback row to a 256-byte boundary. At RGBA that is 16
+   * texels for float32 and 32 for half-float, so a 32-aligned x/width is always
+   * tightly packed and the rows copy straight across with no padding to unpick.
+   * The old full-map read never hit this because 1024 is already aligned.
+   */
+  function alignReadRect(rect) {
+    const S = HEIGHTMAP_SIZE;
+    const x0 = Math.max(0, Math.floor(rect.x / 32) * 32);
+    const y0 = Math.max(0, Math.floor(rect.y / 32) * 32);
+    const x1 = Math.min(S, Math.ceil((rect.x + rect.w) / 32) * 32);
+    const y1 = Math.min(S, Math.ceil((rect.y + rect.h) / 32) * 32);
+    return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+  }
+
+  /**
+   * Texel rect → world centre + radius, for chunk-limited height resyncs.
+   * getChunkKeysInRadius takes a square box around the centre, so a radius of
+   * half the rect's diagonal is guaranteed to cover its corners.
+   */
+  function rectToWorldRegion(rect) {
+    const x0 = (rect.x / HEIGHTMAP_SIZE - 0.5) * WORLD_SIZE;
+    const x1 = ((rect.x + rect.w) / HEIGHTMAP_SIZE - 0.5) * WORLD_SIZE;
+    const z0 = (rect.y / HEIGHTMAP_SIZE - 0.5) * WORLD_SIZE;
+    const z1 = ((rect.y + rect.h) / HEIGHTMAP_SIZE - 0.5) * WORLD_SIZE;
+    return {
+      x: (x0 + x1) * 0.5,
+      z: (z0 + z1) * 0.5,
+      radius: 0.5 * Math.hypot(x1 - x0, z1 - z0),
+    };
+  }
+
+  /**
+   * Refresh the CPU heightmap mirror from the GPU.
+   *
+   * Reads only the rect the brush actually wrote. MEASURED before this: eight
+   * full-map readbacks a second while dragging, 16 MB each, 22 ms for the read
+   * plus 6 ms to convert — and that was on top of a 17 ms grass texture rebuild
+   * that is now a GPU bake (see grassTerrainData.initSurfaceBake).
+   */
   async function syncHeightmapToCPU() {
     if (readbackInFlight) {
       readbackPending = true;
@@ -2338,22 +2411,47 @@ export async function startV3App(opts = {}) {
     readbackInFlight = true;
     readbackPending  = false;
     try {
-      const rt  = sculpt.getCurrentRT();
-      const raw = await renderer.readRenderTargetPixelsAsync(
-        rt, 0, 0, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE,
+      const rt = sculpt.getCurrentRT();
+      const dirty = sculpt.getDirtyRect();
+      // Claim the rect BEFORE awaiting: anything written during the read lands
+      // in a fresh rect and is picked up by the next pass instead of being lost.
+      sculpt.clearDirtyRect();
+      let rect = alignReadRect(
+        dirty ?? { x: 0, y: 0, w: HEIGHTMAP_SIZE, h: HEIGHTMAP_SIZE },
       );
-      const isHalf = raw instanceof Uint16Array;
-      let minH = 0;
-      for (let i = 0; i < HEIGHTMAP_SIZE * HEIGHTMAP_SIZE; i++) {
-        const r = raw[i * 4];
-        const v = isHalf ? THREE.DataUtils.fromHalfFloat(r) : r;
-        cpuHeightmap[i] = v;
-        if (v < minH) minH = v;
+      let raw = await renderer.readRenderTargetPixelsAsync(rt, rect.x, rect.y, rect.w, rect.h);
+      // Defensive: if the driver padded anyway, fall back to the whole map so a
+      // misaligned config can never silently corrupt the mirror.
+      if (raw.length !== rect.w * rect.h * 4) {
+        rect = { x: 0, y: 0, w: HEIGHTMAP_SIZE, h: HEIGHTMAP_SIZE };
+        raw = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE);
       }
-      cpuHeightmapMinY = minH * MAX_HEIGHT;
-      grassTerrainData.rebuildFromHeightmap(cpuHeightmap, HEIGHTMAP_SIZE, MAX_HEIGHT, WORLD_SIZE);
-      treeEnv.syncTreeHeights();
-      foliageEnv.syncFoliageHeights();
+      const isHalf = raw instanceof Uint16Array;
+      const isFull = rect.w === HEIGHTMAP_SIZE && rect.h === HEIGHTMAP_SIZE;
+      let minH = 0;
+      for (let row = 0; row < rect.h; row++) {
+        const src = row * rect.w * 4;
+        const dst = (rect.y + row) * HEIGHTMAP_SIZE + rect.x;
+        for (let i = 0; i < rect.w; i++) {
+          const rv = raw[src + i * 4];
+          const v = isHalf ? THREE.DataUtils.fromHalfFloat(rv) : rv;
+          cpuHeightmap[dst + i] = v;
+          if (v < minH) minH = v;
+        }
+      }
+      // A partial read cannot see the whole map, so the lowest point is only
+      // ever revised DOWNWARD. Being stale-low is harmless: this feeds the
+      // cursor ray-march's floor plane, which just starts marching lower.
+      // A full read (generator, load, undo of a whole-map edit) resets it.
+      cpuHeightmapMinY = isFull
+        ? minH * MAX_HEIGHT
+        : Math.min(cpuHeightmapMinY, minH * MAX_HEIGHT);
+      // Only the chunks under the edited rect need re-draping — see the note on
+      // syncTreeHeights for why the full scan is expensive out of proportion to
+      // its arithmetic.
+      const region = isFull ? null : rectToWorldRegion(rect);
+      treeEnv.syncTreeHeights(region);
+      foliageEnv.syncFoliageHeights(region);
     } finally {
       readbackInFlight = false;
       if (readbackPending) syncHeightmapToCPU();
@@ -2368,7 +2466,6 @@ export async function startV3App(opts = {}) {
       if (cpuHeightmap[i] < minH) minH = cpuHeightmap[i];
     }
     cpuHeightmapMinY = minH * MAX_HEIGHT;
-    grassTerrainData.rebuildFromHeightmap(cpuHeightmap, HEIGHTMAP_SIZE, MAX_HEIGHT, WORLD_SIZE);
     treeEnv.syncTreeHeights();
     foliageEnv.syncFoliageHeights();
   }
@@ -2765,6 +2862,8 @@ export async function startV3App(opts = {}) {
       if (_hv !== _lastNormalBakeVersion && !_rendererSideWork) {
         _lastNormalBakeVersion = _hv;
         terrainNormals.bake();
+        // Grass surface rides the same gate — one bake per edit, on the GPU.
+        grassTerrainData.bakeSurface();
       }
 
       bakeGrassTintIfNeeded();
@@ -2820,6 +2919,7 @@ export async function startV3App(opts = {}) {
       splineFeatureStore?.refresh();
       riverSystem?.update(dt);
       river2System?.update(dt);
+      riverV2System?.update(dt);
       roadSystem?.update();
 
       tickPerf(perf, now, dt * 1000);
@@ -3050,6 +3150,13 @@ export async function startV3App(opts = {}) {
       setEditorMode(editorMode === "lake" ? "view" : "lake");
       return;
     }
+    // Matched on e.key (the printed letter) rather than e.code (the QWERTY
+    // position), so the shortcut lands on H for this AZERTY keyboard too.
+    if (e.key?.toLowerCase() === "h" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "riverv2" ? "view" : "riverv2");
+      return;
+    }
     if (e.code === "KeyP" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       if (playMode.active) exitPlay();
@@ -3097,6 +3204,13 @@ export async function startV3App(opts = {}) {
         else splineSys.deleteSelected();
         return;
       }
+    }
+    if (editorMode === "riverv2" && !playMode.active
+        && (e.code === "Delete" || e.code === "Backspace")) {
+      e.preventDefault();
+      riverV2System.deleteSelected();
+      riverV2Ui?.refresh();
+      return;
     }
     if ((editorMode === "river" || editorMode === "river2") && !playMode.active) {
       if (e.code === "Delete" || e.code === "Backspace") {
@@ -3192,6 +3306,7 @@ export async function startV3App(opts = {}) {
         else if (editorMode === "foliage") foliageEnv.paintSystem.undo();
         else if (editorMode === "river" && riverSystem?.undo()) { /* ok */ }
         else if (editorMode === "river2" && river2System?.undo()) { /* ok */ }
+        else if (editorMode === "riverv2" && riverV2System?.undo()) { riverV2Ui?.refresh(); }
         else if (editorMode === "spline" && splineSys?.undo()) { /* ok */ }
         else if (sculpt.undo()) onHistoryChange();
         return;
@@ -3209,6 +3324,7 @@ export async function startV3App(opts = {}) {
         else if (editorMode === "foliage") foliageEnv.paintSystem.redo();
         else if (editorMode === "river" && riverSystem?.redo()) { /* ok */ }
         else if (editorMode === "river2" && river2System?.redo()) { /* ok */ }
+        else if (editorMode === "riverv2" && riverV2System?.redo()) { riverV2Ui?.refresh(); }
         else if (editorMode === "spline" && splineSys?.redo()) { /* ok */ }
         else if (sculpt.redo()) onHistoryChange();
         return;
@@ -4269,12 +4385,31 @@ export async function startV3App(opts = {}) {
   });
   worldEnv?.addWaterSurface(lakeSystem);
 
+  // ── River v2 ───────────────────────────────────────────────────────────────
+  riverV2System = new RiverV2System({
+    scene,
+    toolState: { riverV2: riverV2Slice.riverV2 },
+    renderer,
+    getRT: () => sculpt.getCurrentRT(),
+    cpuHeightmap,
+    waterNormalMap,
+    getCamera: () => camera,
+    onConformCommitted: () => {
+      markHeightmapDirty();
+      requestHeightmapReadback();
+      bvhDebug?.update();
+    },
+    onWaterMeshesChanged: () => waterSurfaceMap.markDirty(),
+  });
+  worldEnv?.addWaterSurface(riverV2System);
+
   // Both water systems exist — the lakebed shading's water-surface map can now
   // see their meshes. Terrain edits change where water meets ground, but the
   // MAP only stores the water surfaces' own Y, so only water edits rebake it.
   waterSurfaceMap.setSourceProvider(() => [
     lakeSystem.group,
     ...river2System.segments.map((s) => s.mesh).filter(Boolean),
+    ...riverV2System.meshes,
   ]);
 
   // Keep the river system's uncarved-base RT in sync with every non-river
@@ -4287,10 +4422,14 @@ export async function startV3App(opts = {}) {
     const _undo = sculpt.undo;
     const _redo = sculpt.redo;
     const _replace = sculpt.replaceHeightData;
-    sculpt.endStroke = (...a) => { const r = _endStroke(...a); river2System.notifyTerrainEdited(); return r; };
-    sculpt.undo = (...a) => { const r = _undo(...a); if (r) river2System.notifyTerrainEdited(); return r; };
-    sculpt.redo = (...a) => { const r = _redo(...a); if (r) river2System.notifyTerrainEdited(); return r; };
-    sculpt.replaceHeightData = (...a) => { const r = _replace(...a); river2System.notifyTerrainEdited(); return r; };
+    const terrainEdited = () => {
+      river2System.notifyTerrainEdited();
+      riverV2System.notifyTerrainEdited();
+    };
+    sculpt.endStroke = (...a) => { const r = _endStroke(...a); terrainEdited(); return r; };
+    sculpt.undo = (...a) => { const r = _undo(...a); if (r) terrainEdited(); return r; };
+    sculpt.redo = (...a) => { const r = _redo(...a); if (r) terrainEdited(); return r; };
+    sculpt.replaceHeightData = (...a) => { const r = _replace(...a); terrainEdited(); return r; };
   }
 
   // ── Smart Road (v2 Smart Road 2 lab system + heightmap terrain conform) ─────
@@ -4902,6 +5041,8 @@ export async function startV3App(opts = {}) {
     toolState: foliageToolState,
     config: editorConfig,
     loadFoliageTexture: (slotIdx, file) => foliageEnv.loadFoliageTexture(slotIdx, file),
+    isFoliageSlotLoaded: (slotIdx) => foliageEnv.isSlotLoaded(slotIdx),
+    getFoliageThumbnail: (slotIdx) => foliageEnv.getSlotThumbnail(slotIdx),
     foliageSlotStructureChanged: (slotIdx) => foliageEnv.slotStructureChanged(slotIdx),
     foliageSlotMaterialChanged: (slotIdx) => foliageEnv.slotMaterialChanged(slotIdx),
     massPlaceFoliage: () => foliageEnv.paintSystem.massPlace(foliageToolState.foliagePaint.massPlaceCount),
@@ -5075,7 +5216,15 @@ export async function startV3App(opts = {}) {
     // river splines, and the load re-carves. Saving the carved result instead
     // would dig every gorge twice as deep on reload.
     const rivers2 = river2System.exportData();
-    const baseHeightmap = rivers2.length ? await river2System.exportBaseHeightmap() : null;
+    const riversV2 = riverV2System.exportData();
+    // Both river systems reshape the terrain and the file holds ONE heightmap,
+    // so it has to be the most original one. River+ captures its base first
+    // (River v2 snapshots whatever the world looks like when it starts, carve
+    // included), so River+'s base is the earlier terrain — and loading it lets
+    // both rebuild in the same order they were built.
+    const baseHeightmap = rivers2.length
+      ? await river2System.exportBaseHeightmap()
+      : (riversV2 ? riverV2System.exportBaseHeightmap() : null);
     const treeInstances = [];
     for (const arr of treeEnv.treeStore.chunks.values()) {
       for (const t of arr) treeInstances.push([t.x, t.z, t.y, t.rotY, t.scale, t.slotIdx]);
@@ -5095,6 +5244,7 @@ export async function startV3App(opts = {}) {
       lakes:     lakeSystem.exportData(),
       rivers:    riverSystem.exportData(),
       rivers2,
+      riversV2,
       spawn:     spawnSystem.exportData(),
       grassDensity:  grassTerrainData.getDensitySnapshot(),
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
@@ -5148,6 +5298,7 @@ export async function startV3App(opts = {}) {
     // replaceHeightData would otherwise schedule a rebase that folds the
     // freshly loaded terrain into the previous scene's base.
     river2System.resetForLoad();
+    riverV2System.resetForLoad();
     if (d.heightmap?.length === HEIGHTMAP_SIZE * HEIGHTMAP_SIZE) {
       sculpt.replaceHeightData(d.heightmap);
       markHeightmapDirty();
@@ -5256,6 +5407,8 @@ export async function startV3App(opts = {}) {
     // leftovers. River+ re-carves the saved (uncarved) base heightmap.
     riverSystem.importData(d.rivers ?? null);
     river2System.importData(d.rivers2 ?? null);
+    riverV2System.importData(d.riversV2 ?? null);
+    riverV2Ui?.refresh();
 
     // Also always import: a project with no player start must clear the old marker.
     spawnSystem.importData(d.spawn ?? null);
@@ -5467,6 +5620,16 @@ export async function startV3App(opts = {}) {
       if (dragging) { dragging = false; lakeSystem.cancelDrag(); }
     });
   }
+
+  riverV2Ui = buildRiverV2Panel({
+    toolState: { riverV2: riverV2Slice.riverV2 },
+    riverV2System,
+    maxHeight: MAX_HEIGHT,
+    waterGlobals,
+    materialChanged: () => riverV2System.syncMaterial(),
+    conformChanged: () => riverV2System.refreshConform(),
+    visibilityChanged: () => riverV2System.refreshVisibility(),
+  });
 
   buildRiverPanels({
     toolState: riverToolSlice,
@@ -5791,6 +5954,48 @@ export async function startV3App(opts = {}) {
     if (river2System.dragging) {
       river2System.finalizeMove();
       syncEditorOrbitEnabled();
+    }
+  });
+
+  // ── River v2 mode mouse events ────────────────────────────────────────────
+  // Click places a node, alt-click inserts one into the span it landed on, and
+  // the handles are the tool: node spheres move the course, green diamonds set
+  // the width at that node, the gold cone lifts the water level (which pins it).
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "riverv2") return;
+    if (!riverV2System.dragging) return;
+    refreshMouse(e);
+    raycaster.setFromCamera(mouse, camera);
+    // Only a node drag needs the terrain; width and level drags resolve against
+    // analytic planes, so the raycast is skipped for them.
+    const terrainHit = riverV2System.dragKind === "node" ? getTerrainHitWorld(e) : null;
+    riverV2System.dragTo({ raycaster, terrainHit, camera });
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "riverv2" || e.button !== 0) return;
+    e.preventDefault();
+    refreshMouse(e);
+    raycaster.setFromCamera(mouse, camera);
+    const picked = riverV2System.pick(raycaster);
+    if (picked) {
+      riverV2System.beginDrag(picked);
+      controls.enabled = false;
+      riverV2Ui?.refresh();
+    } else if (e.altKey) {
+      const hit = getTerrainHitWorld(e);
+      if (hit && riverV2System.insertNodeNear(hit)) riverV2Ui?.refresh();
+    } else {
+      const hit = getTerrainHitWorld(e);
+      if (hit) { riverV2System.addNode(hit); riverV2Ui?.refresh(); }
+    }
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", () => {
+    if (editorMode !== "riverv2") return;
+    if (riverV2System.endDrag()) {
+      syncEditorOrbitEnabled();
+      riverV2Ui?.refresh();
     }
   });
 
@@ -6450,12 +6655,14 @@ export async function startV3App(opts = {}) {
       lakebedShading,
       waterSurfaceMap,
       get river2System() { return river2System; },
+      get riverV2System() { return riverV2System; },
       get grassState() { return grassState; },
       get grassRings() { return grassRings; },
       get grassTintRT() { return grassTintRT; },
       get susukiSystem() { return susukiSystem; },
       renderer,
       terrainNormals,
+      grassTerrainData,
       grassTintScene,
       grassTintCam,
       forceGrassTintBake() {

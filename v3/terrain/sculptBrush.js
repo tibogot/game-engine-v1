@@ -507,6 +507,8 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   // Bumped on every render into rtMain; see _render(). Consumers that cache
   // anything derived from the heightmap poll this instead of guessing.
   let _mainVersion = 0;
+  // Texel rect written into rtMain since the CPU mirror last read it.
+  let _dirtyRect = null;
 
   // ── Render helpers ────────────────────────────────────────────────────────
   // rect is in logical texel coords ({x, y, w, h}, y = row index in uv space).
@@ -520,7 +522,14 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     // erosion, hydro, undo/redo restore, blitFull, the generator pass. Bumping
     // the version here (rather than at each call site) is what lets derived
     // GPU data (the baked normal map) invalidate without any caller opting in.
-    if (dstRT === rtMain) _mainVersion++;
+    if (dstRT === rtMain) {
+      _mainVersion++;
+      // Accumulate what the CPU mirror still needs to re-read. A null rect is a
+      // whole-map write (generator, blitFull, replaceHeightData), so it widens
+      // the dirty area to everything. Tracked HERE, in the same funnel as the
+      // version counter, so no caller can forget to report an edit.
+      _dirtyRect = rect ? _unionRect(_dirtyRect, rect) : { ...FULL_RECT };
+    }
     const prevAutoClear = renderer.autoClear;
     renderer.autoClear = false;
     if (rect) {
@@ -871,5 +880,13 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     getCurrentRT: () => rtMain,
     /** Monotonic counter — changes whenever the heightmap RT is written. */
     getHeightVersion: () => _mainVersion,
+    /**
+     * Texel rect written since clearDirtyRect(), or null if nothing changed.
+     * Lets the CPU mirror read back only what a brush actually touched instead
+     * of the whole 16 MB map — MEASURED at 8 full-map readbacks per second
+     * while dragging.
+     */
+    getDirtyRect: () => (_dirtyRect ? { ..._dirtyRect } : null),
+    clearDirtyRect: () => { _dirtyRect = null; },
   };
 }

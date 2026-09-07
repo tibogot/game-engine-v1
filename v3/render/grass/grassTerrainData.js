@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { QuadMesh } from "three/webgpu";
+import { Fn, clamp, float, floor, max, min, sqrt, texture, uv, vec2, vec4 } from "three/tsl";
 
 const DENSITY_RES = 512;
 const HEIGHT_RES  = 1024; // must match HEIGHTMAP_SIZE — 1:1 copy, no resampling artefacts
@@ -6,6 +8,27 @@ const NORMAL_RES  = 512;  // normals can be half-res; still 4× better than befo
 const CLIFF_RES   = 512;  // cliff-top height/normal grid — 4m/texel at 2048m world
 
 const CLIFF_INVALID = -9999; // sentinel Y where no cliff top exists at a texel
+
+/**
+ * Float render target for the baked grass surface. Full float wherever the GPU
+ * can filter it: half-float quantizes a 500 m height range into ~0.5 m steps,
+ * which would read as terraced grass on smooth ground.
+ */
+function _makeSurfaceRT(res) {
+  const rt = new THREE.RenderTarget(res, res, {
+    format: THREE.RGBAFormat,
+    type: THREE.FloatType,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
+    depthBuffer: false,
+    generateMipmaps: false,
+    colorSpace: THREE.NoColorSpace,
+  });
+  rt.texture.flipY = false;
+  return rt;
+}
 
 /**
  * Owns every CPU/GPU texture the hybrid grass rings need:
@@ -37,23 +60,23 @@ export class GrassTerrainData {
     this.densityTex.minFilter = this.densityTex.magFilter = THREE.LinearFilter;
     this.densityTex.needsUpdate = true;
 
-    // ── Height (world-space Y) — full terrain resolution ─────────────────
-    const hData = new Float32Array(HEIGHT_RES * HEIGHT_RES * 4);
-    this.grassHeightTex = new THREE.DataTexture(hData, HEIGHT_RES, HEIGHT_RES, THREE.RGBAFormat, THREE.FloatType);
-    this.grassHeightTex.wrapS = this.grassHeightTex.wrapT = THREE.ClampToEdgeWrapping;
-    this.grassHeightTex.minFilter = this.grassHeightTex.magFilter = THREE.LinearFilter;
-    this.grassHeightTex.needsUpdate = true;
-
-    // ── Normals (FD from heightmap) ───────────────────────────────────────
-    const nData = new Float32Array(NORMAL_RES * NORMAL_RES * 4);
-    for (let i = 0; i < NORMAL_RES * NORMAL_RES; i++) {
-      nData[i * 4 + 1] = 1;
-      nData[i * 4 + 3] = 1;
-    }
-    this.terrainNormalTex = new THREE.DataTexture(nData, NORMAL_RES, NORMAL_RES, THREE.RGBAFormat, THREE.FloatType);
-    this.terrainNormalTex.wrapS = this.terrainNormalTex.wrapT = THREE.ClampToEdgeWrapping;
-    this.terrainNormalTex.minFilter = this.terrainNormalTex.magFilter = THREE.LinearFilter;
-    this.terrainNormalTex.needsUpdate = true;
+    // ── Height (world-space Y) + normals — GPU, baked from the terrain ────
+    // These used to be CPU DataTextures rebuilt from the heightmap mirror after
+    // every readback: a 1M-texel copy plus a 512² finite-difference pass, then
+    // ~20 MB re-uploaded. MEASURED at 17.3 ms per readback (JIT-warmed) and it
+    // ran ~8×/second while dragging a brush — the single largest item in the
+    // sculpt stroke, and it ran even with no grass painted.
+    //
+    // The data already existed on the GPU: terrainNormalMap bakes the same
+    // surface (.xyz world normal, .w normalized height) once per edit. These are
+    // now render targets filled from it, so the CPU does none of this work.
+    // Consumers (hybrid grass, susuki) are unchanged — they sample
+    // `.grassHeightTex` for .x metres and `.terrainNormalTex` for .xyz as before.
+    this._heightRT = _makeSurfaceRT(HEIGHT_RES);
+    this._normalRT = _makeSurfaceRT(NORMAL_RES);
+    this.grassHeightTex  = this._heightRT.texture;
+    this.terrainNormalTex = this._normalRT.texture;
+    this._surfaceBake = null;
 
     // ── Cliff-top height (world-space Y, -9999 where no cliff) + normal ────
     const chData = new Float32Array(CLIFF_RES * CLIFF_RES * 4);
@@ -104,71 +127,110 @@ export class GrassTerrainData {
   get hasCliffSurface() { return this._hasCliffSurface; }
 
   /**
-   * Recompute height + normal textures from the CPU heightmap mirror.
-   * @param {Float32Array} cpuHeightmap  normalized 0-1 heights (hmSize²)
-   * @param {number}       hmSize        heightmap texel edge (e.g. 1024)
-   * @param {number}       maxHeight     metres at value 1.0
-   * @param {number}       worldSize     terrain edge in metres (e.g. 2048)
+   * Wire the GPU bake. Must be called once, after the terrain surface bake
+   * exists — it renders immediately so nothing ever samples a cleared target
+   * (a zeroed normal normalizes to NaN, which would break every blade).
+   *
+   * USE fragmentNode, NOT colorNode. A node material's colorNode supplies only
+   * RGB — the alpha is taken from material opacity, so a vec4's .w is silently
+   * DISCARDED and written as 1. fragmentNode writes the vec4 verbatim, which is
+   * why sculptBrush's passes use it too. This cost an hour: the height plane
+   * baked as a constant 500 m and every blade was culled by the frustum test on
+   * a bogus world position.
+   *
+   * Height comes from the heightmap itself rather than the terrain surface
+   * bake's packed .w, because that .w is a victim of the very same colorNode
+   * alpha rule (see terrainNormalMap.js) and currently always reads 1.
+   *
+   * PARITY: this reproduces the old CPU maths texel for texel, deliberately,
+   * including its quirks — the corner UV convention (u = ix/(nRes-1), not the
+   * texel centre uv() gives), the NEAREST heightmap tap that Math.round did, and
+   * the ±1 output-texel (±4 m) difference baseline. Reusing the terrain's own
+   * normal bake instead would have been tidier and slightly sharper, but it
+   * would also have changed grass shading on rolling ground. This is a
+   * performance change, so it is not allowed to change the picture.
+   *
+   * @param {object} o
+   * @param {THREE.WebGPURenderer} o.renderer
+   * @param {object} o.heightTexNode   shared TSL node over the live height RT
+   * @param {number} o.heightmapSize   heightmap texel edge (hmSize)
+   * @param {number} o.worldSize       terrain edge in metres
+   * @param {number} o.maxHeight       metres at normalized height 1.0
    */
-  rebuildFromHeightmap(cpuHeightmap, hmSize, maxHeight, worldSize) {
-    // ── Heights at full terrain resolution (1:1 copy when HEIGHT_RES === hmSize) ──
-    const hRes = HEIGHT_RES;
-    const hOut = this.grassHeightTex.image.data;
+  initSurfaceBake({ renderer, heightTexNode, heightmapSize, worldSize, maxHeight }) {
+    const hMat = new THREE.MeshBasicNodeMaterial();
+    hMat.toneMapped = hMat.fog = false;
+    hMat.depthTest = hMat.depthWrite = false;
+    // .x = world Y in metres, the layout the grass/susuki compute expects.
+    hMat.fragmentNode = Fn(() => vec4(
+      texture(heightTexNode, uv()).r.mul(float(maxHeight)),
+      float(0), float(0), float(1),
+    ))();
 
-    if (hRes === hmSize) {
-      // Direct copy — no coordinate mapping, no rounding, no bilinear error.
-      for (let i = 0; i < hRes * hRes; i++) {
-        const i4 = i * 4;
-        hOut[i4]     = cpuHeightmap[i] * maxHeight;
-        hOut[i4 + 1] = 0;
-        hOut[i4 + 2] = 0;
-        hOut[i4 + 3] = 1;
-      }
-    } else {
-      for (let iz = 0; iz < hRes; iz++) {
-        for (let ix = 0; ix < hRes; ix++) {
-          const u  = ix / (hRes - 1);
-          const v  = iz / (hRes - 1);
-          const sx = Math.max(0, Math.min(hmSize - 1, Math.round(u * (hmSize - 1))));
-          const sz = Math.max(0, Math.min(hmSize - 1, Math.round(v * (hmSize - 1))));
-          const i4 = (iz * hRes + ix) * 4;
-          hOut[i4]     = cpuHeightmap[sz * hmSize + sx] * maxHeight;
-          hOut[i4 + 1] = 0;
-          hOut[i4 + 2] = 0;
-          hOut[i4 + 3] = 1;
-        }
-      }
+    const nMat = new THREE.MeshBasicNodeMaterial();
+    nMat.toneMapped = nMat.fog = false;
+    nMat.depthTest = nMat.depthWrite = false;
+    {
+      const NRES = NORMAL_RES;
+      const HM   = heightmapSize;
+      const ws2  = (worldSize / NRES) * 2;
+      const du   = 1 / (NRES - 1);
+
+      // uv() is texel-centred; the CPU loop indexed with u = ix/(nRes-1).
+      const toCorner = (c) => c.mul(float(NRES)).sub(float(0.5)).div(float(NRES - 1));
+
+      // NEAREST tap on the heightmap — the GPU equivalent of the CPU's
+      // Math.round(u * (hmSize - 1)) index, snapped back to that texel's centre.
+      const getH = (u, v) => {
+        const tx = clamp(floor(clamp(u, float(0), float(1)).mul(float(HM - 1)).add(float(0.5))), float(0), float(HM - 1));
+        const tz = clamp(floor(clamp(v, float(0), float(1)).mul(float(HM - 1)).add(float(0.5))), float(0), float(HM - 1));
+        return texture(heightTexNode, vec2(
+          tx.add(float(0.5)).div(float(HM)),
+          tz.add(float(0.5)).div(float(HM)),
+        )).r.mul(float(maxHeight));
+      };
+
+      nMat.fragmentNode = Fn(() => {
+        const u = toCorner(uv().x);
+        const v = toCorner(uv().y);
+        const nx = getH(max(u.sub(float(du)), float(0)), v)
+          .sub(getH(min(u.add(float(du)), float(1)), v));
+        const nz = getH(u, max(v.sub(float(du)), float(0)))
+          .sub(getH(u, min(v.add(float(du)), float(1))));
+        const len = sqrt(nx.mul(nx).add(float(ws2 * ws2)).add(nz.mul(nz)));
+        return vec4(nx.div(len), float(ws2).div(len), nz.div(len), float(1));
+      })();
     }
-    this.grassHeightTex.needsUpdate = true;
 
-    // ── Normals at half resolution ────────────────────────────────────────
-    const nRes = NORMAL_RES;
-    const nOut = this.terrainNormalTex.image.data;
-    const ws2  = (worldSize / nRes) * 2;
-    const du   = 1 / (nRes - 1);
-
-    const getH = (u, v) => {
-      const x = Math.max(0, Math.min(hmSize - 1, Math.round(u * (hmSize - 1))));
-      const z = Math.max(0, Math.min(hmSize - 1, Math.round(v * (hmSize - 1))));
-      return cpuHeightmap[z * hmSize + x] * maxHeight;
+    this._surfaceBake = {
+      renderer,
+      hQuad: new QuadMesh(hMat),
+      nQuad: new QuadMesh(nMat),
+      hMat, nMat,
     };
+    this.bakeSurface();
+  }
 
-    for (let iz = 0; iz < nRes; iz++) {
-      for (let ix = 0; ix < nRes; ix++) {
-        const u  = ix / (nRes - 1);
-        const v  = iz / (nRes - 1);
-        const i4 = (iz * nRes + ix) * 4;
-
-        const nx  = getH(Math.max(0, u - du), v) - getH(Math.min(1, u + du), v);
-        const nz  = getH(u, Math.max(0, v - du)) - getH(u, Math.min(1, v + du));
-        const len = Math.sqrt(nx * nx + ws2 * ws2 + nz * nz);
-        nOut[i4]     = nx / len;
-        nOut[i4 + 1] = ws2 / len;
-        nOut[i4 + 2] = nz / len;
-        nOut[i4 + 3] = 1;
-      }
-    }
-    this.terrainNormalTex.needsUpdate = true;
+  /**
+   * Re-bake height + normal from the terrain surface. Cheap (two small
+   * fullscreen passes) and driven by the same height-version gate that drives
+   * terrainNormals.bake(), so sculpting, erosion, undo/redo, road grading and
+   * project loads all refresh it without knowing this exists.
+   */
+  bakeSurface() {
+    const b = this._surfaceBake;
+    if (!b) return false;
+    const { renderer } = b;
+    const prevRT = renderer.getRenderTarget();
+    const prevAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.setRenderTarget(this._heightRT);
+    b.hQuad.render(renderer);
+    renderer.setRenderTarget(this._normalRT);
+    b.nQuad.render(renderer);
+    renderer.setRenderTarget(prevRT);
+    renderer.autoClear = prevAutoClear;
+    return true;
   }
 
   /** Paint or erase grass density at world position (cx, cz). */
