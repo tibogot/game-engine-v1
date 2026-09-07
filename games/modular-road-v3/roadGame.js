@@ -179,6 +179,7 @@ import {
   loadChassisModel, CHASSIS_GLB, CHASSIS_GLB_URL, applyChassisGlbTransform,
   resetChassisGlbFit, chassisGlbMounts, bakeGhostCarGeometry,
   createCarRainUniforms, CAR_RAIN,
+  CAR_NIGHT, CAR_NIGHT_DEFAULTS, setCarNight, applyCarNightParams,
 } from "./chassisModel.js";
 import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "./modularRoadSparks.js";
 import { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } from "./modularRoadPropPhysics.js";
@@ -1429,6 +1430,48 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     /** 0 = keep today's neutral lamp, 1 = full atmospheric reddening. */
     warmth: 1.0,
   };
+  /*
+   * A FLOOR UNDER THE NIGHT AMBIENT.
+   *
+   * The hemisphere light takes its two colours from the sky's own radiance, and
+   * at night that is honestly, measurably black — #010104 overhead and #040811
+   * underfoot at 22:30. Multiply by a 0.17 intensity and a 0.52 exposure and the
+   * world's fill light is gone: everything that is not in a headlight pool or
+   * emissive renders as a silhouette, the car included.
+   *
+   * Real night is never that. Airglow, starlight, scattered moonlight and — over
+   * a city — skyglow all put a floor under it that the sky dome's own radiance
+   * does not model. This is that floor. It is deliberately a LERP TO, not a
+   * multiply: at noon nightK is 0 and every number below is untouched, so the
+   * hand-tuned day look cannot regress through here.
+   *
+   * Kept modest on purpose. Enough hemisphere light to fully model the car also
+   * lifts the ground out of night — measured at intensity 2.0 the track reads as
+   * dusk. The car's own share is the rim in chassisModel.js (CAR_NIGHT), which
+   * is per-object and costs the world nothing.
+   */
+  const NIGHT_AMBIENT = {
+    enabled: true,
+    /** Hemisphere intensity at full night, as a fraction of the noon reference. */
+    intensity: 1.0,
+    /** What the night sky hands a surface facing up … */
+    skyColor: "#7799cc",
+    /** … and what the ground bounces back up at it. */
+    groundColor: "#33404f",
+  };
+  const NIGHT_AMBIENT_DEFAULTS = { ...NIGHT_AMBIENT };
+  // Built from hex, so these are WORKING (linear) space like the sky's own
+  // colours — the lerp below mixes two values in the same space, and
+  // applyWorldLight re-encodes to sRGB on the way out. See the colour-space note
+  // in syncWorldLightToSky; this project has been bitten by that twice.
+  const _nightAmbSky = new THREE.Color(NIGHT_AMBIENT.skyColor);
+  const _nightAmbGnd = new THREE.Color(NIGHT_AMBIENT.groundColor);
+  /** Re-read the two colours after a panel edit. Intensity is read live. */
+  function applyNightAmbientParams() {
+    _nightAmbSky.set(NIGHT_AMBIENT.skyColor);
+    _nightAmbGnd.set(NIGHT_AMBIENT.groundColor);
+    _skyLightKey = ""; // force syncWorldLightToSky past its elevation cache
+  }
   /** Boot values, captured as the NOON REFERENCE so this cannot regress the
    *  look that was hand-tuned at midday — everything is scaled to land on them
    *  when the sun is high, and only the variation around that is new. */
@@ -1449,6 +1492,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   let _smokeNightK = 1;
   let _smokeNightFromSky = false;
+  /** sin(solar elevation) FROM THE SKY. Valid once _smokeNightFromSky is true. */
+  let _skySunY = 1;
   let _skyLightKey = "";
   /** The sky's answer, cached so the flash can be added to it every frame
    *  without re-running the solar-elevation-keyed computation above it. */
@@ -1509,8 +1554,21 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // 1 below the horizon, 0 once the sun is ~14° up. See syncSmokeLamps.
     _smokeNightK = THREE.MathUtils.clamp(1 - look.sunDir.y / 0.25, 0, 1);
     _smokeNightFromSky = true;
+    // The SKY's solar elevation, kept for updateAutoHeadlights — which cannot
+    // use the scene's key light, because at night that light is the moon.
+    _skySunY = look.sunDir.y;
     _hemiSkyCol.copy(cols.zenith);
     _hemiGndCol.copy(cols.haze);
+    // The night floor (see NIGHT_AMBIENT). nightK is 0 at the horizon and 1 six
+    // degrees under it, so this is inert all day and fully in at true night.
+    const ambK = NIGHT_AMBIENT.enabled ? nightK : 0;
+    if (ambK > 0) {
+      _hemiSkyCol.lerp(_nightAmbSky, ambK);
+      _hemiGndCol.lerp(_nightAmbGnd, ambK);
+    }
+    // The car's own rim rides the same curve, so the body lifts off the
+    // background at exactly the moment the world stops lighting it.
+    setCarNight(nightK);
 
     /*
      * COLOUR SPACE, and this project has been bitten here before: the engine
@@ -1548,7 +1606,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       dirIntensity: (look.dirIntensity / dayRef) * _lightRef.dir,
       hemiSkyColor: _hemiSkyCol.clone(),
       hemiGroundColor: _hemiGndCol.clone(),
-      hemiIntensity: (look.hemiIntensity / hemiDayRef) * _lightRef.hemi,
+      // Lerped, not multiplied: at ambK 0 this IS the old expression.
+      hemiIntensity: THREE.MathUtils.lerp(
+        (look.hemiIntensity / hemiDayRef) * _lightRef.hemi,
+        NIGHT_AMBIENT.intensity * _lightRef.hemi,
+        ambK,
+      ),
       exposure: look.exposure * _lightRef.exposure,
       /*
        * THE MOON AS A REAL KEY LIGHT. In the engine's procedural sky mode a below-horizon
@@ -5440,8 +5503,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // Fallback only — the sky sync owns this once it has run (see its note).
     if (!_smokeNightFromSky) _smokeNightK = THREE.MathUtils.clamp(1 - sinElev / 0.25, 0, 1);
     if (!autoHeadlights) return;
-    if (!headlightsOn && sinElev < 0.10) setHeadlights(true);
-    else if (headlightsOn && sinElev > 0.16) setHeadlights(false);
+    /*
+     * THE SUN FOR THIS TEST IS THE SKY'S, NOT THE SCENE'S.
+     *
+     * `sinElev` above comes from the scene's DirectionalLight, and below the
+     * horizon the engine repoints that light at the MOON — measured +0.318 and
+     * blue (#cdd9ff) at 22:30. So the gate read a high sun at midnight and
+     * switched the headlights OFF, or refused to turn them on: auto headlights
+     * did the exact opposite of their job for the whole night. This is the same
+     * omission `_smokeNightK` above already carries a correction for.
+     *
+     * Falls back to the key light until the sky has run once, which is only the
+     * first frame or two and is above the horizon there anyway.
+     */
+    const sunY = _smokeNightFromSky ? _skySunY : sinElev;
+    if (!headlightsOn && sunY < 0.10) setHeadlights(true);
+    else if (headlightsOn && sunY > 0.16) setHeadlights(false);
   }
 
   setHeadlights(false);
@@ -9041,6 +9118,27 @@ ${e.message}`);
     lensFlareParams: () => ensureFlareLook(),
     /** Live occlusion, 0..1 — read-only, for the panel readout. */
     lensFlareOcclusion: () => _flareOcc,
+    /* ── NIGHT ─────────────────────────────────────────────────────────────
+     * Two halves of one problem, deliberately separate knobs: NIGHT_AMBIENT is
+     * the floor under the WORLD's fill light, CAR_NIGHT is the rim carried by
+     * the car alone. Turn the first up far enough and it stops being night;
+     * turn the second up far enough and the car reads as a sticker. The default
+     * split leans on the second. Both are machine settings — never track data.
+     */
+    nightAmbient: NIGHT_AMBIENT,
+    applyNightAmbient: applyNightAmbientParams,
+    resetNightAmbient: () => {
+      Object.assign(NIGHT_AMBIENT, NIGHT_AMBIENT_DEFAULTS);
+      applyNightAmbientParams();
+    },
+    carNight: CAR_NIGHT,
+    applyCarNight: applyCarNightParams,
+    resetCarNight: () => {
+      Object.assign(CAR_NIGHT, CAR_NIGHT_DEFAULTS);
+      applyCarNightParams();
+    },
+    /** How dark the sky says it is, 0 day … 1 night — for panel readouts. */
+    getNightK: () => THREE.MathUtils.clamp(-_skySunY / 0.1045, 0, 1),
     cloudParams: clouds.params,
     /** One clock for everything that cares: engine sky (drives the sun light and the
      *  cloud colours) AND the game-owned sky dome. Setting only one of the two is how

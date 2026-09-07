@@ -39,7 +39,7 @@ import {
   materialEmissive, uniform, positionLocal, smoothstep, oneMinus, vec3, float,
   normalLocal, normalize, transformNormalToView, mx_noise_float,
   uv, vec2, time, mix, saturate, normalMap, positionWorld, cameraPosition, length,
-  If, Fn,
+  If, Fn, abs, vec4, normalView, normalWorld,
 } from "three/tsl";
 import { beadField, createRainLensUniforms } from "./modularRoadRainLens.js";
 import {
@@ -622,6 +622,95 @@ function carRainGlass(u, baseRough) {
   };
 }
 
+/* ── NIGHT ON THE CAR ────────────────────────────────────────────────────────
+ *
+ * At night the world gives the bodywork essentially nothing, and the car goes
+ * to a black cutout with only the tail lights readable. That is not a bug in
+ * any one place, it is three multipliers landing on top of each other — the sky
+ * hands the hemisphere light its own radiance (measured #010104 at 22:30, i.e.
+ * black), the env map is a PMREM of that same black sky so there is nothing to
+ * reflect, and night exposure is 0.52. A dark surface under all three is zero.
+ *
+ * The world half of the answer is a floor under the ambient (NIGHT_AMBIENT in
+ * roadGame.js). It cannot be the whole answer: enough hemisphere light to model
+ * the car also lifts the ground, and then it is not night any more. What the
+ * hemisphere CANNOT do is the other half — it is keyed on the normal, so the
+ * face turned toward the chase camera is exactly the face it leaves dark.
+ *
+ * So the car carries its own rim. This is the character light every third-person
+ * game rigs to its camera, done in the material instead of with a real light:
+ *   • per-object by construction — the world is not touched
+ *   • no new light in the scene, so no shader rebuild (three hashes the light
+ *     SET into every material's cache key) and no per-fragment cost anywhere else
+ *   • view-dependent, which is the whole point: it catches the silhouette edge
+ *     that a normal-keyed ambient never reaches.
+ *
+ * `skyBias` is what keeps it from reading as a cheap glowing outline: light
+ * comes from ABOVE at night, so upward-facing edges take the rim and the sill
+ * under the car stays dark.
+ */
+export const CAR_NIGHT = {
+  enabled: true,
+  /** Rim strength at full night. 0 is off without a rebuild. */
+  rim: 0.30,
+  /**
+   * Falloff. TUNED HIGH, and that is the whole difference between a rim and a
+   * wash: a car is all curves, so at a gentle power (2-3 was the first try)
+   * "near the edge" covers most of the visible body and the paint reads as pale
+   * grey plastic — the yellow disappeared entirely. 8 keeps it on the actual
+   * edge, where the roof line and the wing catch it and the flanks do not.
+   */
+  rimPower: 8.0,
+  /** 0 = rim the whole silhouette, 1 = only what faces the sky. */
+  skyBias: 0.7,
+  /**
+   * Flat lift over the whole body. Deliberately almost nothing: the back of a
+   * car at night IS dark, and the rear panel filling in grey is what makes a
+   * night render look washed. The knob is here to be turned up if a track wants
+   * it, not because the default needs it.
+   */
+  fill: 0.006,
+  /** Moonlight off grey rock, same chromaticity the world's night key uses. */
+  color: "#8fb4ff",
+};
+export const CAR_NIGHT_DEFAULTS = { ...CAR_NIGHT };
+
+/**
+ * ONE uniform bag for every paint material on the car, built on first use.
+ *
+ * Module-level rather than passed through `loadChassisModel` opts because it
+ * must survive a chassis reload: the game swaps the model when the weather
+ * turns wet, and a per-load bag would leave the game driving a dead uniform
+ * with nothing to show why the rim stopped following the sun.
+ */
+let _nightU = null;
+function nightUniforms() {
+  _nightU ??= {
+    amount: uniform(0), // 0 day … 1 night — driven by the game's sky
+    rim: uniform(CAR_NIGHT.rim),
+    rimPower: uniform(CAR_NIGHT.rimPower),
+    skyBias: uniform(CAR_NIGHT.skyBias),
+    fill: uniform(CAR_NIGHT.fill),
+    color: uniform(new THREE.Color(CAR_NIGHT.color)),
+  };
+  return _nightU;
+}
+
+/** How dark it is, 0 day … 1 night. Every frame is fine — it is one uniform. */
+export function setCarNight(amount) {
+  nightUniforms().amount.value = Math.max(0, Math.min(1, amount || 0));
+}
+
+/** Push edited CAR_NIGHT values onto the live material (dev panel). */
+export function applyCarNightParams() {
+  const u = nightUniforms();
+  u.rim.value = CAR_NIGHT.rim;
+  u.rimPower.value = CAR_NIGHT.rimPower;
+  u.skyBias.value = CAR_NIGHT.skyBias;
+  u.fill.value = CAR_NIGHT.fill;
+  u.color.value.set(CAR_NIGHT.color);
+}
+
 /**
  * @param {object} [opts]
  * @param {object} [opts.rainUniforms] a rain-lens uniform bag. Present = the
@@ -656,6 +745,27 @@ function makePaintMaterial(src, opts = {}) {
     const coat = carRainCoat(opts.rainUniforms);
     mat.clearcoatNormalNode = coat.normal;
     mat.clearcoatRoughnessNode = coat.roughness;
+  }
+
+  if (CAR_NIGHT.enabled) {
+    const u = nightUniforms();
+    // The repo's cheap fresnel (v3/props/collectibles.js): a view normal facing
+    // the camera has |z| = 1, an edge has 0. No normalize, no dot, no view ray.
+    const edge = oneMinus(abs(normalView.z)).pow(u.rimPower);
+    // 1 facing up, 0 facing down. `skyBias` mixes between "rim everything" and
+    // "rim only what the sky can see", which is what keeps the sill dark.
+    const up = normalWorld.y.mul(0.5).add(0.5);
+    const glow = u.color.mul(u.amount).mul(edge.mul(u.rim).mul(mix(float(1), up, u.skyBias)).add(u.fill));
+    mat.emissiveNode = glow;
+    /*
+     * LIT, BUT NEVER BLOOMED. The scene's MRT routes every material's `emissive`
+     * into the selective-bloom buffer (v2/render/post/postFxPipeline.js
+     * `_applySceneMRT`), so left alone this would halo the entire car — a rim
+     * that glows is the exact "cheap outline" tell this is trying to avoid. A
+     * material-level mrtNode overrides the scene's, and writing zero to the
+     * emissive attachment is what keeps the light without the bloom.
+     */
+    applyBloomMRT(mat, vec4(0, 0, 0, 1));
   }
   return mat;
 }
