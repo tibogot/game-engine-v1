@@ -8430,7 +8430,18 @@ ${e.message}`);
        * Whatever it is, it is triggered by something other than elapsed time
        * under the cover, so paying for a longer loader buys nothing.
        */
-      await settleFrames(cityToWarm ? 1500 : 700, cityToWarm ? 2000 : 900, cityToWarm ? 9000 : 9000);
+      /*
+       * SHORT, BECAUSE THE LONG VERSION DID NOT WORK.
+       *
+       * This settle exists to let the engine's own frames build what the poses
+       * cannot. That part is worth a second or two. What it CANNOT do is
+       * absorb the driver's shader compile — measured at 4300 ms behind a 25 s
+       * cover and 4486 ms behind a 21.5 s one, always landing ~5 s AFTER the
+       * cover whatever its length. Charging the player twenty seconds for
+       * something that happens anyway is worse than the stall, so this is back
+       * to the smallest wait that still does its actual job.
+       */
+      await settleFrames(400, 600, 3000);
 
       /*
        * ── NOW THE MIRROR, STILL UNDER THE COVER ────────────────────────────
@@ -8438,7 +8449,7 @@ ${e.message}`);
        * is the cheap 0.66 s version rather than the 8 s one.
        */
       reflectionEnabled = reflectionWas;
-      if (reflectionWas) await settleFrames(500, cityToWarm ? 1500 : 800, 7000);
+      if (reflectionWas) await settleFrames(300, 500, 2500);
       // Every pass has now drawn every mesh; give the LOD its counts back.
       if (forcedCityMeshes) { for (const [m, c] of forcedCityMeshes) m.count = c; forcedCityMeshes = null; }
 
