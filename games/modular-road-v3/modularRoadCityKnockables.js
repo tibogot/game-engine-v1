@@ -40,7 +40,25 @@
 import * as THREE from "three";
 
 export const CITY_KNOCK = {
-  enabled: true,
+  /**
+   * OFF, and the reason is a design one rather than a cost one.
+   *
+   * These bodies were built for the PEDESTRIAN GUARDRAILS, and a guardrail
+   * stands flush against the kerb with the pavement immediately behind it. It
+   * has nowhere to go. Driving into one does not send it down the street — the
+   * car scrapes along it, the barrier disappears out from under the contact,
+   * and what you feel is a collision that stopped working rather than an
+   * object you hit. PLAYED, and it is not fun, which is the only test that
+   * mattered here.
+   *
+   * The machinery is right; the target was wrong. Physics belongs on things
+   * standing IN THE ROAD, where there is room behind them and where hitting
+   * one is a decision the player made — cones, roadworks, bins, pallets. That
+   * is the next piece of work, and this pool is what will drive it, so it
+   * stays. Until then it allocates nothing and costs nothing: see the early
+   * return in createCityKnockables.
+   */
+  enabled: false,
   /**
    * How many rails can be in the air at once.
    *
@@ -108,6 +126,9 @@ const _scl = new THREE.Vector3();
  */
 export function createCityKnockables({ rails, mesh, obstacles, groundY = 0, params = {} }) {
   const K = { ...CITY_KNOCK, ...params };
+  // Disabled means ABSENT, not idle: no pool, no per-frame scan, and the city's
+  // updateKnockables returns 0 without touching anything.
+  if (!K.enabled) return null;
   /** @type {Array<{railIdx:number, e:object, pos:THREE.Vector3, vel:THREE.Vector3,
    *   quat:THREE.Quaternion, spin:THREE.Vector3, still:number, done:boolean}>} */
   const active = [];

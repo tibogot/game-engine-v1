@@ -856,9 +856,13 @@ export function createModularRoadCity({
       });
       stats.obstacles = obstacles.stats;
       /*
-       * KNOCKABLE GUARDRAILS. Built after the obstacle table because it has to
-       * be able to take a rail OUT of it — a barrier you have just sent down the
-       * street must stop being something to hit.
+       * KNOCKABLES. Built after the obstacle table because a knocked body has
+       * to be able to take itself OUT of it — something you have just sent
+       * down the street must stop being something to hit.
+       *
+       * Returns NULL by default now: the guardrails it was pointed at stand
+       * flush against the kerb and cannot be knocked anywhere, so they are
+       * static collision again. See the note on CITY_KNOCK.enabled.
        */
       knockables = furniture
         ? createCityKnockables({
