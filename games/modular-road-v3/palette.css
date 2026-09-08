@@ -921,3 +921,44 @@
   text-transform: uppercase;
   pointer-events: all;
 }
+
+/* ── CHECKPOINT RUSH ────────────────────────────────────────────────────────
+   Its own HUD, not the race clock's: the lap system rewrites #race-flash every
+   frame, so anything the rush posted there would be cleared before it painted.
+   Bottom-centre, clear of the speedo on the right and the split on the left. */
+.road-cp-hud {
+  position: absolute;
+  left: 50%;
+  bottom: 118px;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.75);
+}
+.road-cp-time {
+  font: 700 34px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  color: #35ff9a;
+  letter-spacing: 0.04em;
+}
+.road-cp-info {
+  margin-top: 4px;
+  font: 600 12px/1 ui-sans-serif, system-ui, sans-serif;
+  color: #b9c2cc;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.road-cp-say {
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  font: 700 22px/1 ui-sans-serif, system-ui, sans-serif;
+  color: #eafff5;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.road-cp-say.show { opacity: 1; }

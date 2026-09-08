@@ -1060,6 +1060,16 @@ export function createModularRoadCity({
     /** Live street-material params, or null when there is no ground plane. */
     get streets() { return ground ? ground.params : null; },
     /**
+     * The checkpoint ring, straight through to the street's uniforms.
+     *
+     * NOT via applyStreetParams: the marker values live in RUNTIME_UNIFORMS,
+     * which that path deliberately skips so the dev panel cannot clobber
+     * something driven per frame. This is the exception, so it gets its own
+     * door rather than a hole in the rule. Three uniform writes, and a no-op
+     * on the shader when the street's `markerOn` gate is 0.
+     */
+    setCheckpointMarker(x, z, amount) { ground?.setMarker?.(x, z, amount); },
+    /**
      * Push edits to `streets` into the live uniforms — a uniform write, no
      * rebuild, so it is safe to call from a slider's input event.
      *

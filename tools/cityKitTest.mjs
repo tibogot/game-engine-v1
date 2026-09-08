@@ -454,6 +454,49 @@ console.log("\n── LOOK PASS ──");
   tokyo.dispose();
 }
 
+// ── 7b. Checkpoint route ─────────────────────────────────────────────────────
+/*
+ * A checkpoint the player cannot reach is the one failure this feature has,
+ * and it is invisible from the code: the route is random, so a point inside a
+ * tower looks exactly like a point on a street until you drive at it.
+ *
+ * `streetSpawnNear` snaps to the centre of the nearest street, which makes the
+ * test exact rather than statistical: a point already ON a street centre is a
+ * FIXED POINT of that function. Feed each route point back through it and it
+ * must not move.
+ */
+{
+  console.log("\n── CHECKPOINTS ──");
+  const { createCityCheckpoints } = await import("../games/modular-road-v3/modularRoadCityCheckpoints.js");
+  const scene = new THREE.Scene();
+  const run = createCityCheckpoints({ scene, city: flatCity, hudParent: null });
+  check("the rush builds against a city", !!run);
+  if (run) {
+    const n = run.start(0, 0);
+    check("a route is built", n === run.params.count, `${n} checkpoints`);
+    let offStreet = 0, tooClose = 0, outside = 0;
+    const extent = flatCity.params.extent;
+    let prev = null;
+    for (const p of run.route) {
+      const snap = flatCity.streetSpawnNear(p.x, p.z);
+      if (Math.hypot(snap.x - p.x, snap.z - p.z) > 1e-6) offStreet++;
+      if (Math.abs(p.x) > extent || Math.abs(p.z) > extent) outside++;
+      if (prev && Math.hypot(p.x - prev.x, p.z - prev.z) < run.params.legMin * 0.4) tooClose++;
+      prev = p;
+    }
+    check("every checkpoint is on a street centre (reachable)", offStreet === 0, `${offStreet} off-street`);
+    check("no checkpoint is outside the city", outside === 0, `${outside} outside ±${extent} m`);
+    check("legs are real legs, not a pile", tooClose === 0, `${tooClose} legs under 40% of legMin`);
+    // Collecting one must advance the target and add time.
+    const before = run.state.time;
+    const t0 = run.route[0];
+    const ev = run.update(0.016, { x: t0.x, y: 0, z: t0.z });
+    check("driving into one collects it", ev?.kind === "checkpoint" && run.state.reached === 1, JSON.stringify(ev));
+    check("collecting adds time", run.state.time > before, `${before.toFixed(1)} -> ${run.state.time.toFixed(1)} s`);
+    run.dispose();
+  }
+}
+
 flatCity.dispose();
 
 // ── 8. Defaults tables: no key declared twice ────────────────────────────────

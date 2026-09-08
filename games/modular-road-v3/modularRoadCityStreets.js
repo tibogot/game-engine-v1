@@ -124,6 +124,31 @@ export const STREET_DEFAULTS = {
    * field multiplied away.
    */
   chipsOn: 1,
+  /*
+   * ── THE CHECKPOINT RING, PAINTED BY THE ROAD ITSELF ─────────────────────
+   *
+   * `markerOn` is a BUILD-TIME gate, like `chipsOn`: at 0 the term is not in
+   * the shader at all, so turning the whole checkpoint feature off costs
+   * exactly nothing rather than costing a multiply by zero. At 1 it is about
+   * ten ALU on a material that already runs.
+   *
+   * A ring drawn HERE rather than as geometry is the cheapest marker there
+   * is — no mesh, no draw call, no transform — and it is the only one that is
+   * safely OPAQUE. The obvious marker is a translucent cylinder, and r184
+   * blends only the `output` MRT attachment: a transparent column standing in
+   * a city street would erase the emissive buffer behind it and punch a hole
+   * in the bloom of every lit window it covered.
+   */
+  markerOn: 1,
+  /** Ring radius and band thickness, metres. */
+  markerRadius: 7.0,
+  markerBand: 1.1,
+  /** Live: where it is, and how strongly it shows. Both driven per frame by
+   *  the checkpoint run; `markerAmt` at 0 is no ring anywhere. */
+  markerX: 0,
+  markerZ: 0,
+  markerAmt: 0,
+  markerColor: 0x35ff9a,
   /**
    * Cycles per metre ACROSS. 24 ⇒ ~4 cm stones.
    *
@@ -508,7 +533,7 @@ export const isStreetColorKey = (k) => /Color$|^asphalt(Dark|Light)$|^wetTint$/.
 
 /** Uniforms the GAME owns frame to frame — never written from `params`.
  *  See applyParams for what goes wrong if they are. */
-const RUNTIME_UNIFORMS = new Set(["wetAmount", "nightAmount"]);
+const RUNTIME_UNIFORMS = new Set(["wetAmount", "nightAmount", "markerX", "markerZ", "markerAmt"]);
 
 /**
  * Surface-gradient bump (Mikkelsen) — the same one the facade uses. bumpMap
@@ -1185,6 +1210,23 @@ export function createCityStreets({
     R.lampEmissive = poolAlbedo.mul(lamp).mul(float(1.0).add(film.mul(u.lampWetGain))).mul(u.lampColor)
       .add(surface.mul(u.glowColor).mul(u.glowAmount).mul(u.nightAmount));
 
+    /*
+     * THE CHECKPOINT RING. One distance, two smoothsteps, added to the
+     * emissive so it blooms and needs no transparency. Anti-aliased by the
+     * band's own derivative rather than by a fixed width, or it strobes at
+     * a grazing angle — the same reason every other line on this street is.
+     */
+    if (S.markerOn) {
+      const d = length(positionWorld.xz.sub(vec2(u.markerX, u.markerZ)));
+      const ring = smoothstep(u.markerBand, float(0.0), abs(d.sub(u.markerRadius)));
+      // A soft fill inside it, so the target reads as a PLACE and not as a
+      // hoop you might be looking at edge-on.
+      const fill = smoothstep(u.markerRadius, u.markerRadius.mul(0.45), d).mul(0.22);
+      R.lampEmissive = R.lampEmissive.add(
+        u.markerColor.mul(ring.add(fill)).mul(u.markerAmt).mul(L.onRoad),
+      );
+    }
+
     // ── THE NEON WASH ───────────────────────────────────────────────────────
     // Strongest at the kerb and dying into the carriageway, coloured per BLOCK
     // so one frontage is magenta and the next is cyan rather than the whole
@@ -1593,6 +1635,23 @@ export function createCityStreets({
     setWet(amount) { u.wetAmount.value = Math.max(0, Math.min(1, amount || 0)); },
     /** 0 day … 1 night — the lamp pools and heads come on with it. */
     setNight(n) { u.nightAmount.value = Math.max(0, Math.min(1, n || 0)); },
+    /**
+     * The checkpoint ring: where it is and how strongly it shows.
+     *
+     * Its own setter rather than a trip through `applyParams`, and for a
+     * reason: the marker uniforms are in RUNTIME_UNIFORMS, which applyParams
+     * deliberately SKIPS so the dev panel cannot clobber a value something
+     * else drives per frame. That is the right rule and this is the exception
+     * to it, so it gets a door of its own instead of a hole in the rule.
+     *
+     * Costs three uniform writes and is a no-op on the shader when `markerOn`
+     * is 0 — the term is not compiled in at all.
+     */
+    setMarker(x, z, amount) {
+      u.markerX.value = x;
+      u.markerZ.value = z;
+      u.markerAmt.value = Math.max(0, Math.min(1, amount || 0));
+    },
     setOrigin(cellX, cellZ) { uOrigin.value.set(cellX * P.lotSize, cellZ * P.lotSize); },
 
     /** Whether this street was built able to reflect at all. */

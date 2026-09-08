@@ -200,6 +200,7 @@ import { createAerialPerspective } from "./modularRoadAerial.js";
 import { createWeather, WEATHER_NAMES } from "./modularRoadWeather.js";
 import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
 import { createModularRoadCity, CITY_DEFAULTS } from "./modularRoadCity.js";
+import { createCityCheckpoints } from "./modularRoadCityCheckpoints.js";
 import { WORLD_SIZE } from "../../v3/terrain/heightmapTexture.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
@@ -2138,6 +2139,17 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      * vehicle's list for most of a block. Driving through the barrier you have
      * just launched is the one bug this whole path exists to avoid.
      */
+    /*
+     * THE CHECKPOINT RUSH. Built lazily against whatever city is live, and
+     * only while driving. Its whole per-frame cost is one squared-distance
+     * compare — see the note at the top of modularRoadCityCheckpoints.js —
+     * and with the feature off nothing here is constructed at all.
+     */
+    if (checkpoints && checkpoints.city !== city) { checkpoints.run?.dispose(); checkpoints = null; }
+    if (checkpoints?.run?.running) {
+      const ev = checkpoints.run.update(dt, vehicleRef?.body?.pos ?? null, city.facade?.params?.nightAmount ?? 0);
+      if (ev) onCheckpointEvent(ev);
+    }
     const knockedNow = city.updateKnockables?.(dt, vehicleRef?.body ?? null) ?? 0;
     // The car's window of hittable street furniture. Around the CAR, not the
     // camera — a chase camera trails by ~8 m and a look-back would otherwise
@@ -2145,6 +2157,43 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     syncCityCapsules(vehicleRef?.body?.pos ?? camera.position, knockedNow > 0);
   }
   app.addPreRenderHook?.(updateCity);
+
+  /*
+   * ── CHECKPOINT RUSH ────────────────────────────────────────────────────────
+   *
+   * Deliberately a single binding and two call sites. Removing the feature is
+   * deleting this block, the `checkpoints` line in updateCity and the G key —
+   * nothing else in the game knows it exists, and the ring it draws is behind
+   * the street's own `markerOn` build-time gate.
+   */
+  let checkpoints = null;
+  function ensureCheckpoints() {
+    const c = city;
+    if (!c) return null;
+    if (checkpoints?.city === c) return checkpoints.run;
+    checkpoints?.run?.dispose();
+    const run = createCityCheckpoints({
+      scene, city: c,
+      hudParent: document.getElementById("race-hud") ?? document.body,
+    });
+    checkpoints = run ? { city: c, run } : null;
+    return run;
+  }
+  function onCheckpointEvent(ev) {
+    const run = checkpoints?.run;
+    if (ev.kind === "checkpoint") { audioSystem.playCue("cp"); run?.say(`+${Math.round(run.params.bonusTime)}s`, 1.2); }
+    else if (ev.kind === "finish") { audioSystem.playCue("cpAhead"); run?.say(`RUN COMPLETE — ${ev.reached} checkpoints`, 5); }
+    else if (ev.kind === "timeout") run?.say(`TIME UP — ${ev.reached} checkpoints`, 5);
+  }
+  /** Start or stop the rush. Bound to G in drive mode. */
+  function toggleCheckpointRush() {
+    const run = ensureCheckpoints();
+    if (!run) return;                       // no city, no streets to run on
+    if (run.running) { run.stop(); run.say("Run cancelled", 2); return; }
+    const p = vehicleRef?.body?.pos ?? camera.position;
+    const n = run.start(p.x, p.z);
+    run.say(`CHECKPOINT RUSH — ${n} to reach`, 3.5);
+  }
 
   /*
    * ═══════════════════════════════════════════════════════════════════════════
@@ -6382,6 +6431,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // DEBUG ORBIT CAM. Recentre used to be X — that is air-roll now, so
       // recentre moved to 0 with the other view presets. Remaining debug keys
       // still miss the drive keymap (WASD / arrows / QE / ZX / space / shift / ctrl).
+      else if (code === "keyg") { toggleCheckpointRush(); return; }
       else if (code === "keyc") setDebugCam(!debugCamOn);
       else if (code === "keyh") {
         // Manual headlight toggle — same as the Lights panel: takes over from auto.
@@ -8301,6 +8351,10 @@ ${e.message}`);
        *  that does not exist until the city is built, so without it they sit
        *  at zero showing values the street does not have. */
       setCity: (on) => { cityWanted = !!on; syncCity(); devPanel?.refresh?.(); },
+    /** The checkpoint rush, or null until one has been started. Exposed for a
+     *  harness and for the panel — the game itself never reads it back. */
+    get checkpointRun() { return checkpoints?.run ?? null; },
+    startCheckpointRush: () => toggleCheckpointRush(),
       getCity: () => cityWanted,
       /** Buildings solid, or drive-through. */
       setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
@@ -9146,6 +9200,11 @@ ${e.message}`);
      *  (params, facade proxy, stats) for console tuning; `cityParams` is the
      *  set a track may pin; `applyCityParams` relayouts after editing them. */
     setCity: (on) => { cityWanted = !!on; syncCity(); devPanel?.refresh?.(); },
+    /** The checkpoint rush, or null until one has been started. On BOTH this
+     *  handle and the dev panel's `game` object — a control that reads only
+     *  one of the two sits dead at zero, which has happened here before. */
+    get checkpointRun() { return checkpoints?.run ?? null; },
+    startCheckpointRush: () => toggleCheckpointRush(),
     getCity: () => cityWanted,
     setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
     getCityCollide: () => cityCollide,
