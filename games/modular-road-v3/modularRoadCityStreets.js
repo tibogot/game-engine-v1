@@ -51,7 +51,7 @@ import * as THREE from "three";
 import {
   Fn, If, float, vec2, vec3, vec4, uniform, mix, smoothstep, max, min, abs, floor, fract,
   mod, step, saturate, oneMinus, pow, cos, uint, hash, positionWorld, positionView,
-  normalView, normalWorld, cameraPosition, fwidth, length, normalMap,
+  normalView, normalWorld, cameraPosition, fwidth, length, normalMap, positionGeometry,
   texture, dot, sqrt, uniformArray,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
@@ -201,12 +201,33 @@ export const STREET_DEFAULTS = {
 
   // ── PAINT ─────────────────────────────────────────────────────────────────
   paintColor: 0xd0ccc0,
+  /**
+   * The CENTRE line's own colour — yellow, because it divides opposing traffic
+   * and almost every road authority marks that differently from the white lane
+   * dividers either side of it.
+   *
+   * Warm and slightly dirty rather than a saturated primary: road yellow is a
+   * thermoplastic that greys off within a season, and a pure #ffff00 down the
+   * middle of a street reads as a decal. Set it to `paintColor` and every
+   * marking goes back to one colour.
+   */
+  centreColor: 0xe0b53a,
   centreWidth: 0.12,
   laneWidth: 0.10,
   dashPeriod: 7.0,
   crossPitch: 1.2,
   crossWidth: 0.38,
   crossInset: 5.0,
+  /** Gap between the crossing and where the lane markings resume, metres.
+   *  Real junctions leave the approach clear; markings running into the zebra
+   *  is the tell that they were drawn by a grid rather than by a road crew. */
+  laneClear: 1.6,
+  /** Stop lines on / off, and their shape. `stopOffset` is how far outside the
+   *  crossing band the bar sits; `stopWidth` is the bar itself, and 0.35 m is
+   *  what a real one measures. */
+  stopLines: 1,
+  stopOffset: 0.9,
+  stopWidth: 0.35,
   markings: 1.0,
   /** Paint under water: it darkens FAR less than open aggregate (`lineWet`)
    *  but it is the wettest-LOOKING thing on the road (`lineCoat`), and the
@@ -328,6 +349,15 @@ export const STREET_DEFAULTS = {
   lampPitch: 26,
   /** Lamp head height and its inset from the kerb onto the pavement. */
   lampHeight: 9.0,
+  /** The arm that reaches over the carriageway, and the lantern on its end.
+   *  Shapes taken from v2/objects/roadLamp.js so the city lamp and the scenery
+   *  prop are recognisably the same fitting. */
+  lampArm: 1.9,
+  lampPostTop: 0.09,
+  lampPostBase: 0.15,
+  lampHeadW: 0.80,
+  lampHeadH: 0.18,
+  lampHeadD: 0.38,
   /**
    * Metres from the camera a post is still DRAWN. The posts had no cull of
    * any kind — all 4262 every frame, most of them a kilometre off and under a
@@ -1003,11 +1033,65 @@ export function createCityStreets({
     const centreV = lineAA(L.su.sub(half), centreW, aaC);
     const dividerV = max(lineAA(L.su.sub(uStreetW.mul(0.25)), laneW, aaC),
       lineAA(L.su.sub(uStreetW.mul(0.75)), laneW, aaC)).mul(dashZ);
-    const laneV = max(centreV, dividerV).mul(L.inStreetX).mul(oneMinus(L.inStreetZ));
+    const onV = L.inStreetX.mul(oneMinus(L.inStreetZ));
+    const onH = L.inStreetZ.mul(oneMinus(L.inStreetX));
+    /*
+     * HOW FAR IT IS TO THE NEXT JUNCTION, along whichever street this is.
+     *
+     * The block runs 0..blockW along a street's own axis with a junction at
+     * each end, so the distance to the nearer one is min(f, blockW - f) on that
+     * axis. Everything a junction needs to know about — where lane markings
+     * have to stop, where the stop line goes — keys off this one value.
+     */
+    const endAlong = min(mix(L.fx, L.fz, L.inStreetX),
+      uBlockW.sub(mix(L.fx, L.fz, L.inStreetX))).toVar();
+    /*
+     * LANE MARKINGS STOP SHORT OF THE CROSSING.
+     *
+     * They used to run the full length of the block and straight through the
+     * zebra, which is wrong everywhere in the world: a centre line ends at the
+     * stop line and the crossing is a clear field of bars. It was invisible
+     * while every marking was the same off-white and became obvious the moment
+     * the centre line went yellow — a yellow stripe crossing the walking bars.
+     */
+    const laneGate = smoothstep(u.crossInset.add(u.laneClear),
+      u.crossInset.add(u.laneClear).add(0.35), endAlong);
+    const laneV = max(centreV, dividerV).mul(onV).mul(laneGate);
     const centreH = lineAA(L.sv.sub(half), centreW, aaC);
     const dividerH = max(lineAA(L.sv.sub(uStreetW.mul(0.25)), laneW, aaC),
       lineAA(L.sv.sub(uStreetW.mul(0.75)), laneW, aaC)).mul(dashX);
-    const laneH = max(centreH, dividerH).mul(L.inStreetZ).mul(oneMinus(L.inStreetX));
+    const laneH = max(centreH, dividerH).mul(onH).mul(laneGate);
+    /*
+     * THE CENTRE LINE, KEPT SEPARATE so it can be YELLOW.
+     *
+     * It is the one marking that means something different from the rest: a
+     * centre line divides OPPOSING traffic, which is why most of the world
+     * paints it in a different colour from the lane dividers beside it. Setting
+     * `centreColor` equal to `paintColor` restores the single-colour look, so
+     * this costs one mix and no decision.
+     *
+     * The mask is taken BEFORE wear and the other common multipliers: they
+     * apply equally to every marking, so they cancel out of a ratio that only
+     * decides WHICH COLOUR a covered pixel is. Where nothing is painted the
+     * colour is not read at all.
+     */
+    const centreMask = max(centreV.mul(onV), centreH.mul(onH)).mul(laneGate);
+    /*
+     * THE STOP LINE — a solid bar across the approach, just outside the zebra.
+     *
+     * HALF THE CARRIAGEWAY, not the full width, and which half depends on which
+     * end of the block it is: only the traffic APPROACHING a junction stops at
+     * it, and the two directions stop at opposite ends. A bar spanning the whole
+     * road would say both directions stop on the same line, which is the one
+     * thing a stop line never means. The staggered pair is also the shape a
+     * driver recognises without being told which way is which.
+     */
+    const atLowEnd = step(mix(L.fx, L.fz, L.inStreetX), uBlockW.mul(0.5));
+    const rightHalf = step(float(0.0), L.lateral);
+    const stopSide = mix(rightHalf, oneMinus(rightHalf), atLowEnd);
+    const aaEnd = fwidth(endAlong).mul(0.75).add(0.002);
+    const stopBar = lineAA(endAlong.sub(u.crossInset.add(u.stopOffset)), u.stopWidth.mul(0.5), aaEnd)
+      .mul(L.onRoad).mul(stopSide).mul(u.stopLines);
     const aaCross = pxU.div(u.crossPitch).add(0.001);
     const nearEndZ = max(step(L.fz, u.crossInset), step(uBlockW.sub(u.crossInset), L.fz));
     const nearEndX = max(step(L.fx, u.crossInset), step(uBlockW.sub(u.crossInset), L.fx));
@@ -1016,10 +1100,13 @@ export function createCityStreets({
     // The garnish: a light interior mottle so the surviving paint is not a flat
     // swatch. `wearInterior` is what keeps it from becoming the old model again.
     const worn = saturate(oneMinus(wearTops.mul(scrub).mul(u.wearInterior)));
-    const paint = max(max(laneV, laneH), max(crossV, crossH))
+    const paint = max(max(max(laneV, laneH), max(crossV, crossH)), stopBar)
       .mul(worn).mul(detail).mul(u.markings).mul(oneMinus(L.junction)).toVar();
     const lw = film.mul(u.lineWet);
-    const lineCol = u.paintColor.mul(mix(float(1), u.wetDarken, lw)).mul(mix(vec3(1, 1, 1), u.wetTint, lw));
+    // Yellow down the middle, white for everything else. Wet darkens and tints
+    // both the same way — the water does not care what colour the paint is.
+    const paintBase = mix(u.paintColor, u.centreColor, centreMask);
+    const lineCol = paintBase.mul(mix(float(1), u.wetDarken, lw)).mul(mix(vec3(1, 1, 1), u.wetTint, lw));
     surface = mix(surface, lineCol, paint);
 
     // ── What the other slots read ───────────────────────────────────────────
@@ -1253,13 +1340,35 @@ export function createCityStreets({
   // box) and a head (a flatter box) merged into one 24-triangle geometry, one
   // InstancedMesh, one draw; the head is emissive into the bloom MRT so the
   // sources read as sources at night.
+  /*
+   * THE LAMP, shaped like v2/objects/roadLamp.js — a tapered post, an arm that
+   * reaches out over the carriageway, and a sodium box on the end of it.
+   *
+   * What this replaces was two boxes with the "head" sitting 32 cm off the post,
+   * which from the road read as a post with a lump on it rather than as a street
+   * light: the whole silhouette of a street lamp is the ARM, and it was not
+   * there. Built here rather than imported from the scenery prop because that
+   * one returns a Mesh with its own two materials, and two materials is two
+   * draws for 4262 lamps; this stays one geometry, one material, one draw.
+   *
+   * 24 -> 56 triangles, so ~240k for the whole city. The lamps were never the
+   * cost and this does not make them one.
+   *
+   * The placement already yaws each lamp so local +X points at the road, which
+   * is what makes an arm possible at all — see lampMatrices below.
+   */
   const lampGeo = (() => {
-    const pole = new THREE.BoxGeometry(0.22, S.lampHeight, 0.22);
-    pole.translate(0, S.lampHeight / 2, 0);
-    const head = new THREE.BoxGeometry(0.9, 0.22, 0.42);
-    head.translate(0.32, S.lampHeight, 0);
+    const H = S.lampHeight, armLen = S.lampArm;
+    const pole = new THREE.CylinderGeometry(S.lampPostTop, S.lampPostBase, H, 8);
+    pole.translate(0, H / 2, 0);
+    const arm = new THREE.BoxGeometry(armLen, 0.12, 0.12);
+    arm.translate(armLen / 2, H, 0);
+    const head = new THREE.BoxGeometry(S.lampHeadW, S.lampHeadH, S.lampHeadD);
+    // Slung UNDER the arm, which is both correct and what lets the shader find
+    // it: the emitter is the only thing out at the arm's end and below it.
+    head.translate(armLen, H - 0.14, 0);
     const g = new THREE.BufferGeometry();
-    const merged = [pole, head];
+    const merged = [pole, arm, head];
     let pos = [], nrm = [], uvs = [], idx = [], base = 0;
     for (const m of merged) {
       const p = m.getAttribute("position"), n = m.getAttribute("normal"), t = m.getAttribute("uv");
@@ -1282,11 +1391,20 @@ export function createCityStreets({
   lampMat.metalness = 0.6;
   lampMat.roughness = 0.5;
   lampMat.colorNode = vec3(0.16, 0.17, 0.18);
-  // Only the underside of the head glows — the emitter — and only at night.
+  /*
+   * Only the HEAD glows, and it is found in GEOMETRY space rather than by world
+   * height. Height alone used to be enough when the lamp was a post with a box
+   * on top; with an arm there are now three things up there and two of them are
+   * structure. `positionGeometry` is the raw attribute and survives instancing
+   * (the same trick the parked cars use to find their own headlights), so the
+   * test is "out at the end of the arm, and below it" — which is exactly and
+   * only the lantern.
+   */
   const headGlow = Fn(() => {
-    const y = positionWorld.y.sub(uGroundY);
-    const isHead = smoothstep(S.lampHeight - 0.3, S.lampHeight - 0.05, y);
-    return u.lampColor.mul(isHead).mul(u.nightAmount).mul(u.lampIntensity.mul(2.2));
+    const gx = positionGeometry.x, gy = positionGeometry.y;
+    const outboard = step(S.lampArm * 0.55, gx);
+    const underArm = smoothstep(S.lampHeight - 0.05, S.lampHeight - 0.12, gy);
+    return u.lampColor.mul(outboard.mul(underArm)).mul(u.nightAmount).mul(u.lampIntensity.mul(2.2));
   })();
   lampMat.emissiveNode = headGlow;
   applyBloomMRT(lampMat, vec4(headGlow, 1.0));

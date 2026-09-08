@@ -239,6 +239,14 @@ export function createRoadDevPanel({ app, game, params }) {
         <div class="section-header">City street — markings &amp; wear</div>
         <div class="section-body">
           <div class="prop-row">
+            <span class="prop-label">Line colour</span>
+            <div class="prop-value"><input type="color" id="dv-st-paint" /></div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Centre colour</span>
+            <div class="prop-value"><input type="color" id="dv-st-centre" /></div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Markings</span>
             <div class="prop-value">
               <input type="range" id="dv-st-markings" min="0" max="1" step="0.02" />
@@ -6225,6 +6233,8 @@ export function createRoadDevPanel({ app, game, params }) {
   stSlider("dv-st-chiprelief", "chipRelief", asMm);
   stSlider("dv-st-gritrelief", "gritRelief", asMm);
 
+  stColor("dv-st-paint", "paintColor");
+  stColor("dv-st-centre", "centreColor");
   stSlider("dv-st-markings", "markings", (v) => v.toFixed(2));
   stSlider("dv-st-wear", "wearAmount", (v) => v.toFixed(2));
   stSlider("dv-st-bite", "wearBite", (v) => `${(v * 100).toFixed(0)}%`);

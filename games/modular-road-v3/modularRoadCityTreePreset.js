@@ -52,6 +52,31 @@ export const CITY_TREE_PRESET = {
   /** ± this fraction of random size variation per tree, so a street is not a
    *  row of clones. The city's own placement scale is folded in on top. */
   scaleVar: 0.18,
+  /**
+   * The canopy's world radius at store-scale 1, metres.
+   *
+   * MEASURED off the baked impostor —
+   * `app.treeEnv.impostorRenderer.slots[slot].bakeRadius` — which is the truest
+   * figure available because the bake sees the actual leaf cards. Re-read it
+   * there if the preset changes.
+   *
+   * A NUMBER rather than a lookup on purpose: the impostor is baked
+   * asynchronously after loadTreePreset, and the trees are planted immediately
+   * after, so reading it live is a race that would silently plant unfitted
+   * trees on the first build and fitted ones on the next. (The preset's own
+   * `bounds.aoRadius` is 3.03 and IS synchronous, but it only spans the leaf
+   * CENTRES — it under-reports the visible canopy by a quarter.)
+   */
+  canopyRadius: 3.82,
+  /**
+   * How far a canopy may reach past a wall before it counts as clipping.
+   *
+   * Not zero: real street trees brush the buildings they stand under, and
+   * demanding a clean gap would shrink every tree on a narrow pavement to
+   * nothing. This is the amount of overlap that reads as a tree beside a
+   * building rather than a tree inside one.
+   */
+  brush: 0.6,
 };
 
 /** One in-flight load per (slot, file) — the city rebuilds far more often than
@@ -114,18 +139,38 @@ export async function installCityPresetTrees(treeEnv, trees, opts = {}) {
   const groundY = P.groundY ?? 0;
 
   let n = 0;
+  let fitted = 0;
   for (const e of trees) {
     // A hash of the position, not Math.random: the city rebuilds on every seed
     // change and a tree that resizes itself each time reads as flicker.
     const h = Math.abs(Math.sin(e.x * 12.9898 + e.z * 78.233) * 43758.5453) % 1;
     const vary = 1 + (h - 0.5) * 2 * P.scaleVar;
     const rotY = h * Math.PI * 2;
-    store.addTree(e.x, e.z, groundY, rotY, baseScale * P.scale * vary * (e.scale ?? 1), slot);
+    const natural = baseScale * P.scale * vary * (e.scale ?? 1);
+    /*
+     * SIZED TO ITS OWN SPOT. A city block leaves a tree between 1.5 and 5 m of
+     * pavement depending on how wide the building behind it is, and a single
+     * global size cannot satisfy both ends of that — MEASURED, even a 3 m
+     * canopy planted hard against the kerb still clipped a building 29% of the
+     * time. Capping per tree fixes every one of them and costs a divide: trees
+     * with room stay full size, trees under an overhanging block are pruned
+     * back, which is what happens to real ones.
+     *
+     * `clearance` is undefined when the furniture had no building index to ask
+     * (headless, or a host that passed none), and then nothing is capped.
+     */
+    const room = e.clearance;
+    const cap = room == null || !isFinite(room)
+      ? Infinity
+      : (room + P.brush) / P.canopyRadius;
+    const scale = Math.min(natural, cap);
+    if (scale < natural - 1e-6) fitted++;
+    store.addTree(e.x, e.z, groundY, rotY, scale, slot);
     n++;
   }
 
   return {
-    stats: { trees: n, slot, baseScale },
+    stats: { trees: n, slot, baseScale, fittedToClearance: fitted },
     dispose() { store.removeTreesBySlot(slot); },
   };
 }

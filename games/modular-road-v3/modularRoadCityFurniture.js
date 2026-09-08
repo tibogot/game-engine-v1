@@ -75,14 +75,33 @@ export const FURNITURE_DEFAULTS = {
   treeSource: "preset",
   /** Trees on the pavement: pitch, distance in from the kerb, canopy size. */
   treePitch: 18,
-  treeInset: 2.3,
+  /**
+   * How far ONTO the pavement a tree stands, from the kerb.
+   *
+   * WAS 2.3, which put the trunk halfway across a 5.5 m pavement and, on a
+   * wide-footprint lot, behind the building line — 259 trees had their trunk
+   * inside a building. Street trees go at the kerb in real cities anyway, so
+   * this both fixes the clash and is more correct: it buys 1.1 m of clearance
+   * for every tree in the city at no cost.
+   */
+  treeInset: 1.2,
+  /**
+   * Least room a tree needs before it is not planted at all, metres to the
+   * nearest building wall. Below this it would be shrunk to a shrub, and a
+   * shrub on a pavement reads as a mistake rather than as a small tree.
+   * MEASURED at 1.0: keeps 94.9% of the placements.
+   */
+  treeMinClearance: 1.0,
   treeOccupancy: 0.8,
   treeHeight: 4.8,
   treeCanopy: 2.6,
   /** Pedestrian guardrail either side of every crossing, metres. */
   railRun: 9,
-  /** Traffic lights: one per junction corner. */
-  lightHeight: 4.6,
+  /** Mast-arm traffic signals: post height, and how far the arm reaches out
+   *  over the carriageway. 7.0 / 4.6 puts the head near the middle of a 34 m
+   *  street's near half, which is where a driver actually looks for it. */
+  lightHeight: 7.0,
+  lightArm: 4.6,
   /** Keep clear of the crossings at block ends, metres. */
   crossClear: 6.5,
   nightAmount: 0,
@@ -151,7 +170,7 @@ function pickCarColor(r) {
  * @param {number} o.originCellZ
  * @param {object} [o.params]
  */
-export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null }) {
+export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
   group.name = "CityFurniture";
@@ -301,9 +320,19 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     a.dispose(); b.dispose();
     return g;
   })();
+  /*
+   * MAST-ARM SIGNAL: a tall post, a long arm out over the carriageway, and the
+   * signal head hanging from its end. The same silhouette as the street lamp
+   * beside it, which is what makes them read as fittings from the same city.
+   *
+   * The head hangs BELOW the arm, which is both correct and what lets the
+   * shader find it — see lensGlow. Arm along local +X; the placement yaws each
+   * mast so that points at the road.
+   */
   const lightGeo = mergeGeometries([
-    box(0.16, F.lightHeight, 0.16),                       // pole
-    box(0.34, 1.05, 0.30, 0, F.lightHeight - 0.2, 0.12),  // head
+    box(0.20, F.lightHeight, 0.20),                                            // post
+    box(F.lightArm, 0.15, 0.15, F.lightArm / 2, F.lightHeight - 0.15, 0),      // arm
+    box(0.34, 1.00, 0.30, F.lightArm, F.lightHeight - 1.20, 0),                // head
   ], false);
   const railGeo = mergeGeometries([
     box(0.06, 1.05, 0.06, -0.95, 0, 0), box(0.06, 1.05, 0.06, 0.95, 0, 0),   // posts
@@ -330,10 +359,17 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   // brighter at night, and into the bloom MRT.
   const lightMat = new THREE.MeshStandardNodeMaterial({ color: 0x1a1c1f, roughness: 0.5, metalness: 0.5 });
   lightMat.name = "CityTrafficLights";
+  /*
+   * The LENS, found in geometry space. World height cannot separate it any more:
+   * with an arm there are three things up the mast and only one of them lights.
+   * `positionGeometry` is the raw attribute and survives instancing — the same
+   * trick the parked cars use for their own headlights. "Out at the arm's end,
+   * and below the arm" is exactly and only the signal head.
+   */
   const lensGlow = Fn(() => {
-    const y = positionWorld.y.sub(uniform(gy));
-    const isHead = smoothstep(F.lightHeight - 0.55, F.lightHeight - 0.35, y);
-    return vec3(1.0).mul(isHead).mul(mix(float(1.2), float(3.5), uNight));
+    const outboard = smoothstep(F.lightArm * 0.55, F.lightArm * 0.8, positionGeometry.x);
+    const belowArm = smoothstep(F.lightHeight - 0.4, F.lightHeight - 0.7, positionGeometry.y);
+    return vec3(1.0).mul(outboard.mul(belowArm)).mul(mix(float(1.2), float(3.5), uNight));
   })();
   // instanceColor multiplies colorNode, not emissiveNode — so the lens colour
   // is carried by making the emissive read the tinted colour slot.
@@ -386,9 +422,19 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
             const st = Math.round(s / F.treePitch);
             if (h2(seedA, st, 11) > F.treeOccupancy) continue;
             const [x, z] = at(treeAcross, s);
+            /*
+             * HOW MUCH ROOM THIS ONE HAS. Carried on the placement rather than
+             * resolved here, because the two tree paths have very different
+             * canopies — 2.6 m for the procedural icospheres, 5.9 m for the
+             * preset — so "does it fit" is the renderer's question to answer.
+             * What IS decided here is whether to plant at all, so the obstacle
+             * capsules can never describe a tree nobody drew.
+             */
+            const clearance = buildingClearance ? buildingClearance(x, z) : Infinity;
+            if (clearance < F.treeMinClearance) continue;
             const scale = 0.85 + h2(seedA, st, 12) * 0.35;
             const green = new THREE.Color().setHSL(0.26 + (h2(seedA, st, 13) - 0.5) * 0.07, 0.34, 0.16 + h2(seedA, st, 14) * 0.09);
-            place(trees, x, z, h2(seedA, st, 15) * 6.283, { color: green.getHex(), scale });
+            place(trees, x, z, h2(seedA, st, 15) * 6.283, { color: green.getHex(), scale, clearance });
           }
           // Guardrail either side of each crossing, on the kerb line.
           for (const end of [a0, a1]) {
@@ -398,13 +444,29 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
               place(rails, x, z, yawAlong, {});
             }
           }
-          // A traffic light on the corner at each end of the run, facing the road.
+          /*
+           * A MAST-ARM SIGNAL on the corner — a tall post with the head slung
+           * out over the carriageway, not a short pole with a box on it.
+           *
+           * THE YAW NOW ENCODES WHICH SIDE, not which end, and that is the whole
+           * change. The arm has to reach over the ROAD; on the far kerb that is
+           * the opposite world direction, so a yaw that only knew which end of
+           * the block it was at would point half of them backwards into the
+           * building line. `dir` is "into the block", so the arm wants the
+           * opposite — which is exactly what flipping by side does.
+           *
+           * ONE per side rather than one per side per end. Four mast arms at
+           * every junction corner is what a short pole could get away with and a
+           * 7 m mast cannot; pairing each side with one end gives the two-arm
+           * diagonal a real junction has.
+           */
           for (const end of [a0, a1]) {
+            if ((end === a0) !== (side === 0)) continue;
             const s = end === a0 ? a0 - 1.0 : a1 + 1.0;
             const [x, z] = at(kerb + dir * 0.9, s);
             const phase = h2(Math.round(x), Math.round(z), 21);
             const lens = phase < 0.45 ? 0xff2a1a : phase < 0.55 ? 0xffb020 : 0x35ff6a;
-            place(lights, x, z, yawAlong + (end === a0 ? Math.PI : 0), { color: lens });
+            place(lights, x, z, yawAlong + (side === 0 ? 0 : Math.PI), { color: lens });
           }
         }
       }

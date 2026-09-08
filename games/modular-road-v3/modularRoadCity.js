@@ -745,7 +745,66 @@ export function createModularRoadCity({
       group.add(ground.lampMesh);
       stats.lamps = ground.lampCount;
       if (P.furniture) {
+        /*
+         * HOW MUCH ROOM IS THERE HERE? — for the pavement trees.
+         *
+         * MEASURED, before this existed: 63% of tree canopies intersected a
+         * building and 259 trees had their trunk INSIDE one. The placement was
+         * never checked against the buildings at all; it only survived the
+         * procedural tree because that canopy was 2.6 m and the gap is usually
+         * a bit more than that. A real tree preset is 6 m and the gap does not
+         * move, so the moment the trees got good the fault became obvious.
+         *
+         * Footprints are 24-31 m in a 34 m lot, so a building sits only
+         * 1.5-5.0 m back from the kerb while trees sit 1.2 m out from it —
+         * there genuinely is not room for a full-size tree everywhere, which is
+         * why the answer is to SIZE each tree to its own spot rather than to
+         * shrink them all (measured: no global size fixes it — even a 3 m
+         * canopy at the kerb still overlaps 29% of the time).
+         *
+         * A uniform grid over the lot pitch: one bucket per lot, each holding
+         * the buildings whose footprint can reach it. Built once per city
+         * build, queried ~4.6k times. Buildings are axis-aligned boxes centred
+         * on their lot, so the query is an exact box distance, not an estimate.
+         */
+        const CLEAR_CELL = P.lotSize;
+        const clearGrid = new Map();
+        const ckey = (i, j) => `${i},${j}`;
+        for (const b of buildings) {
+          const a = kit.archetypes[b.arch];
+          if (!a) continue;
+          const rec = { x: b.x, z: b.z, hw: a.width * 0.5, hd: a.depth * 0.5 };
+          const ci = Math.floor(b.x / CLEAR_CELL), cj = Math.floor(b.z / CLEAR_CELL);
+          // Spill into the 8 neighbours so a query never has to look further
+          // than its own bucket — a footprint is smaller than a lot, so one
+          // ring is enough and the test can stay a single lookup.
+          for (let di = -1; di <= 1; di++) {
+            for (let dj = -1; dj <= 1; dj++) {
+              const k = ckey(ci + di, cj + dj);
+              let arr = clearGrid.get(k);
+              if (!arr) clearGrid.set(k, (arr = []));
+              arr.push(rec);
+            }
+          }
+        }
+        /** Metres from (x, z) to the nearest building wall. Infinity if none
+         *  is near; NEGATIVE when the point is inside a footprint. */
+        const buildingClearance = (x, z) => {
+          const arr = clearGrid.get(ckey(Math.floor(x / CLEAR_CELL), Math.floor(z / CLEAR_CELL)));
+          if (!arr) return Infinity;
+          let best = Infinity;
+          for (const b of arr) {
+            const dx = Math.abs(x - b.x) - b.hw;
+            const dz = Math.abs(z - b.z) - b.hd;
+            const d = (dx < 0 && dz < 0)
+              ? Math.max(dx, dz)                                   // inside: negative
+              : Math.hypot(Math.max(dx, 0), Math.max(dz, 0));      // outside: true distance
+            if (d < best) best = d;
+          }
+          return best;
+        };
         furniture = createCityFurniture({
+          buildingClearance,
           P, originCellX, originCellZ, params: P.furnitureParams,
           // The street's OWN lamp field, so a car is lit by the lamp whose
           // pool it is parked in and the two can never drift apart.
