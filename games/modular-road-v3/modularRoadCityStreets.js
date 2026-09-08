@@ -228,6 +228,15 @@ export const STREET_DEFAULTS = {
   stopLines: 1,
   stopOffset: 0.9,
   stopWidth: 0.35,
+  /** Lane arrows on the approach. `arrowAt` is where the TIP sits, in metres
+   *  from the junction — far enough past the stop line to be read from a car,
+   *  not so far it lands mid-block. Head and stem are metres. */
+  arrows: 1,
+  arrowAt: 9.5,
+  arrowHead: 1.6,
+  arrowHeadW: 1.15,
+  arrowStem: 2.6,
+  arrowStemW: 0.32,
   markings: 1.0,
   /** Paint under water: it darkens FAR less than open aggregate (`lineWet`)
    *  but it is the wettest-LOOKING thing on the road (`lineCoat`), and the
@@ -1092,6 +1101,35 @@ export function createCityStreets({
     const aaEnd = fwidth(endAlong).mul(0.75).add(0.002);
     const stopBar = lineAA(endAlong.sub(u.crossInset.add(u.stopOffset)), u.stopWidth.mul(0.5), aaEnd)
       .mul(L.onRoad).mul(stopSide).mul(u.stopLines);
+    /*
+     * LANE ARROWS — analytic, no texture.
+     *
+     * An arrow is a triangle on a rectangle, and both are exact in closed form:
+     * the head's half-width is just a linear ramp along its own length, so the
+     * whole glyph is two band tests and a compare. That is worth doing HERE
+     * rather than sampling an atlas, because it costs no sampler, no texture
+     * memory and no mip chain, and it is resolution-independent — the tip stays
+     * sharp at any distance instead of going soft at the first mip.
+     *
+     * It does NOT generalise. A turn or U-turn glyph is a curve, and curves
+     * analytically are far more ALU than they are worth on a shader that
+     * already covers most of the screen — that is where a small marking atlas
+     * earns its place, and where I would put one.
+     *
+     * Rides the same approach half as the stop line: an arrow tells you what
+     * YOUR lane does, so it belongs only on the side approaching this junction.
+     */
+    const laneCell = uStreetW.mul(0.25);
+    const laneMid = floor(L.across.div(laneCell)).add(0.5).mul(laneCell);
+    const offLane = abs(L.across.sub(laneMid));
+    // 0 at the tip, growing back down the arrow away from the junction.
+    const at = endAlong.sub(u.arrowAt);
+    const headHalf = u.arrowHeadW.mul(0.5).mul(saturate(at.div(u.arrowHead)));
+    const arrowHead = band(at, float(0.0), u.arrowHead, aaEnd)
+      .mul(smoothstep(headHalf.add(pxU), headHalf.sub(pxU), offLane));
+    const arrowStem = band(at, u.arrowHead, u.arrowHead.add(u.arrowStem), aaEnd)
+      .mul(smoothstep(u.arrowStemW.mul(0.5).add(pxU), u.arrowStemW.mul(0.5).sub(pxU), offLane));
+    const arrow = max(arrowHead, arrowStem).mul(L.onRoad).mul(stopSide).mul(u.arrows);
     const aaCross = pxU.div(u.crossPitch).add(0.001);
     const nearEndZ = max(step(L.fz, u.crossInset), step(uBlockW.sub(u.crossInset), L.fz));
     const nearEndX = max(step(L.fx, u.crossInset), step(uBlockW.sub(u.crossInset), L.fx));
@@ -1100,7 +1138,7 @@ export function createCityStreets({
     // The garnish: a light interior mottle so the surviving paint is not a flat
     // swatch. `wearInterior` is what keeps it from becoming the old model again.
     const worn = saturate(oneMinus(wearTops.mul(scrub).mul(u.wearInterior)));
-    const paint = max(max(max(laneV, laneH), max(crossV, crossH)), stopBar)
+    const paint = max(max(max(laneV, laneH), max(crossV, crossH)), max(stopBar, arrow))
       .mul(worn).mul(detail).mul(u.markings).mul(oneMinus(L.junction)).toVar();
     const lw = film.mul(u.lineWet);
     // Yellow down the middle, white for everything else. Wet darkens and tints

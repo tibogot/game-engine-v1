@@ -126,10 +126,32 @@ export function createCityObstacles({
   for (const e of lists?.lights ?? []) push(e.m, KIND.LIGHT);
   for (const e of lists?.trees ?? []) push(e.m, KIND.TREE);
   for (const e of lists?.cars ?? []) push(e.m, KIND.CAR);
-  for (const e of lists?.rails ?? []) push(e.m, KIND.RAIL);
+  /*
+   * RAILS KEEP A BACK-REFERENCE, because they are the ones you can knock down.
+   *
+   * The list index and the table row are NOT the same number: `push` silently
+   * drops anything inside the track corridor, so every dropped rail shifts
+   * every later one. A knockable that de-collided the wrong barrier — or, once
+   * the corridor moved, a different one each rebuild — is exactly the kind of
+   * fault that looks like flaky physics, so the mapping is recorded rather than
+   * assumed.
+   */
+  const railRow = new Int32Array(lists?.rails?.length ?? 0).fill(-1);
+  {
+    let i = 0;
+    for (const e of lists?.rails ?? []) {
+      const row = rows.length / 4;
+      push(e.m, KIND.RAIL);
+      if (rows.length / 4 > row) railRow[i] = row;
+      i++;
+    }
+  }
 
   const table = new Float32Array(rows);
   const count = table.length / 4;
+  /** Set once a rail has been knocked over: it stops being something to hit.
+   *  Without this the car bounces off the barrier it just sent down the road. */
+  const knocked = new Uint8Array(count);
 
   /** Per kind: is it on, and what shape does it make. Rebuilt when a flag moves. */
   const enabled = () => [O.lamps, O.lights, O.trees, O.cars, O.rails];
@@ -165,6 +187,7 @@ export function createCityObstacles({
       const ox = table[o], oz = table[o + 1];
       const dx = ox - x, dz = oz - z;
       if (dx * dx + dz * dz > r2) continue;
+      if (knocked[i]) continue;              // already on the floor — see `knocked`
       const kind = table[o + 2];
       if (!on[kind]) continue;
       const yaw = table[o + 3];
@@ -208,5 +231,20 @@ export function createCityObstacles({
     set(t, k, v) { if (k in t) t[k] = v; return true; },
   });
 
-  return { capsulesNear, params: params_, stats, KIND };
+  return {
+    capsulesNear, params: params_, stats, KIND,
+    /**
+     * Take one rail out of collision, by its index in the FURNITURE's rail
+     * list. Returns false when that rail was never in the table at all (it sat
+     * in the track corridor), which the caller can treat as "already gone".
+     */
+    knockRail(railIndex) {
+      const row = railRow[railIndex] ?? -1;
+      if (row < 0 || knocked[row]) return false;
+      knocked[row] = 1;
+      return true;
+    },
+    /** How many are down — for the panel, and for a test to assert against. */
+    get knockedCount() { let n = 0; for (let i = 0; i < count; i++) n += knocked[i]; return n; },
+  };
 }

@@ -698,13 +698,20 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       for (let i = 0; i < list.length; i++) {
         const e = list[i];
         const dx = e.x - cam.x, dz = e.z - cam.z;
-        if (dx * dx + dz * dz >= r2) continue;
-        if (cullFrustum && !view.inView(e.x, gyBase + 2.5, e.z, 4.0)) continue;
+        // OUT OF RANGE OR OUT OF VIEW: say so, rather than leaving a stale
+        // index behind. A knocked rail writes itself into `idx` every frame,
+        // and an index this tick did not fill belongs to a different entry —
+        // writing to it would teleport somebody else's barrier.
+        if (dx * dx + dz * dz >= r2) { e.idx = -1; continue; }
+        if (cullFrustum && !view.inView(e.x, gyBase + 2.5, e.z, 4.0)) { e.idx = -1; continue; }
         if (i !== n) { const t = list[n]; list[n] = e; list[i] = t; }
         n++;
       }
       for (let i = 0; i < n; i++) {
-        k.mesh.setMatrixAt(i, list[i].m);
+        // `liveM` is a pose something else owns this frame — a knocked rail
+        // being thrown. The authored matrix stays untouched underneath it.
+        k.mesh.setMatrixAt(i, list[i].liveM ?? list[i].m);
+        list[i].idx = i;
         if (list[i].color != null && k.mesh.instanceColor) k.mesh.setColorAt(i, _c.set(list[i].color));
       }
       k.mesh.count = n;
@@ -717,6 +724,10 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     /** Every placement, by kind — the obstacle table turns these into the
      *  capsules the car collides with (modularRoadCityObstacles.js). */
     lists: { cars, trees, lights, rails },
+    /** The rail mesh, so the knockables can redraw one that is in the air —
+     *  `applyLod` only rewrites five times a second, which a thrown barrier
+     *  cannot wait for. */
+    railMesh,
     group,
     params: F,
     stats: {

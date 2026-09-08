@@ -2112,10 +2112,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
     city.setSun(_citySun);
     city.update(dt, camera);
+    /*
+     * KNOCKABLE GUARDRAILS, every frame — a barrier in the air cannot wait for
+     * the LOD tick. It returns how many it just took down, and that number has
+     * to FORCE a capsule refresh: the window normally only rebuilds every 18 m,
+     * and a rail knocked at the car's bumper would otherwise stay solid in the
+     * vehicle's list for most of a block. Driving through the barrier you have
+     * just launched is the one bug this whole path exists to avoid.
+     */
+    const knockedNow = city.updateKnockables?.(dt, vehicleRef?.body ?? null) ?? 0;
     // The car's window of hittable street furniture. Around the CAR, not the
     // camera — a chase camera trails by ~8 m and a look-back would otherwise
     // slide the window off the thing about to be hit.
-    syncCityCapsules(vehicleRef?.body?.pos ?? camera.position);
+    syncCityCapsules(vehicleRef?.body?.pos ?? camera.position, knockedNow > 0);
   }
   app.addPreRenderHook?.(updateCity);
 

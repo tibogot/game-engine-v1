@@ -65,7 +65,7 @@
 import * as THREE from "three";
 import {
   Fn, float, vec2, vec3, vec4, uniform, attribute, texture, uv, fract, floor,
-  mix, smoothstep, abs, max, min, sin, cos, clamp,
+  mix, smoothstep, abs, max, min, sin, cos, clamp, oneMinus, step, saturate, fwidth,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { makeLedMatrixMaterial, applyLedMatrixParams } from "../../v2/objects/shared/ledMatrix.js";
@@ -83,6 +83,31 @@ export const SIGN_DEFAULTS = {
   /** The band (fraction of building height) the panel's centre lands in. */
   heroLow: 0.28,
   heroHigh: 0.60,
+  /**
+   * ── WHERE AN LED WALL GOES, and it is NOT where a printed wrap goes ───────
+   *
+   * A wrap is an advert ON a building, so it sits on the wall like a poster:
+   * the middle third, well inside the facade. A Blade Runner screen is a piece
+   * of the SKYLINE — you see it before you see the street it is on, over the
+   * roofs of everything in front. Placed in the print band it was hidden by
+   * the next tower along from anywhere except directly underneath it, which is
+   * the one place a board that size does not need help being noticed.
+   *
+   * So screens crown the tower: centre in the top quarter, top edge just under
+   * the parapet, and only on buildings tall enough that the crown is actually
+   * above the skyline. A tower that fails `crownMinHeight` still gets a
+   * board — it gets a printed one, which is what that building wanted anyway.
+   */
+  crownLow: 0.74,
+  crownHigh: 0.90,
+  /** Metres of parapet left above a crowning screen. Small: the board should
+   *  look mounted on the roof line, not floating below it. */
+  crownTopMargin: 1.4,
+  /** Below this a tower is not a skyline piece and takes a printed wrap.
+   *  NOT `screenMinHeight` — that name is already taken further down by the
+   *  legacy wide-screen layer, and a second key of the same name in this
+   *  object would have been silently swallowed by the first. */
+  crownMinHeight: 66,
   /** Frame width in METRES — the same border on a 12 m and a 30 m board. */
   heroFrame: 0.55,
   /** Some heroes are SCREENS (LED walls: emissive day and night, scrolling);
@@ -141,8 +166,50 @@ export const SIGN_DEFAULTS = {
   /** Printed level by day, light level at night. */
   dayLevel: 0.55,
   nightBoost: 3.2,
-  screenBoost: 4.0,
+  /**
+   * Screen emissive level.
+   *
+   * WAS 4.0, and that was tuned when a screen was a smooth glowing panel. The
+   * LCD grid multiplies each subpixel by 3 to hold the panel's average
+   * brightness, which is right on average and wrong at the peaks: every lit
+   * subpixel is now a local spike, and at 4.0 those spikes clipped and bloomed
+   * into a wall of white bars with the advert invisible behind them. The
+   * structure IS the brightness now, so the level comes down to meet it.
+   */
+  screenBoost: 1.7,
   nightAmount: 0,
+
+  /* ── LED WALL ──────────────────────────────────────────────────────────────
+   * The pixel structure that separates a screen from a glowing poster. Screens
+   * only; a printed wrap never runs any of it. See makeHeroMaterial.
+   */
+  /** LCD cells ACROSS the panel. Rows follow from the board's own aspect, so
+   *  cells stay square. 96 on a 25 m board is a ~26 cm pixel, which is the
+   *  pitch a real building-scale LED wall actually runs. */
+  lcdCols: 132,
+  /** Dark lattice between emitters, as a fraction of a subpixel. Real walls
+   *  read as roughly a third black up close; below ~0.15 the grid disappears
+   *  and it is just colour fringing. */
+  lcdGap: 0.28,
+  /**
+   * How fast the structure dies as cells shrink on screen.
+   *
+   * MUCH more aggressive than the Nyquist limit alone would need, and that is
+   * the point: a real LED wall shows no subpixel structure at all from across a
+   * street, and at 1.6 the grid was still half-strength on a board 50 m away,
+   * where it read as vertical noise with the advert lost behind it. At 6 the
+   * structure belongs to the last few metres — which is exactly where you want
+   * it, and where nothing else in the frame is competing for the pixels.
+   */
+  lcdFade: 2.0,
+  /** How far toward true single-channel subpixels the stripe goes. 1 is what a
+   *  display physically does and is too absolute over a photograph; see the
+   *  note at the call site. */
+  lcdStrength: 0.72,
+  /** How much bigger a SCREEN board is than a printed one. A Blade Runner wall
+   *  is not the size of a poster; these are the ones that should dominate a
+   *  street, so they take more of the face and are allowed to run taller. */
+  heroScreenScale: 1.45,
 };
 
 const BANNER_COLS = 4, BANNER_ROWS = 2, BANNER_PX = 1024;   // 8 portrait tiles
@@ -423,6 +490,32 @@ function makeHeroAtlas(cols, rows, px) {
 }
 
 /**
+ * An INSTANCED ATTRIBUTE IS STILL A VARYING, and a varying is interpolated.
+ *
+ * Every atlas material picks its tile with `fract(tile / cols)` for the column
+ * and `floor(tile / cols)` for the row. That is correct arithmetic on an
+ * integer and catastrophic on one that has been through the rasteriser:
+ * `aSign` is read in the fragment stage, so three routes it through a varying,
+ * and perspective-correct interpolation of the constant 4.0 across a quad
+ * lands on 3.9999998. Then `fract(3.9999998 / 4)` is 0.99999995, not 0 — the
+ * column jumps to the far side of the atlas AND the row drops by one, and
+ * because the u then runs 1.0 → 1.25 the sampler clamps it, so the board shows
+ * ONE COLUMN OF TEXELS from the wrong tile stretched across its whole face.
+ *
+ * MEASURED in road.html: tile 4 rendered as a flat wall of colour with no
+ * image at all, while tiles 0 and 6 on the same mesh were perfect. It hits
+ * exactly the tiles that are multiples of `cols` — 4, 8 and 12, which is 37 of
+ * the city's 145 boards.
+ *
+ * Rounding to the nearest integer before the divide removes the whole class,
+ * for one add and one floor. It is not a clamp or an epsilon: the value IS an
+ * integer, and this is where it is made one again.
+ */
+function tileIndex(v) {
+  return floor(v.add(0.5));
+}
+
+/**
  * Hero board material. LIT — a standard material, because a printed wrap is a
  * SURFACE the sun and the tower's own shadow fall on; the old unlit poster
  * floated in front of the wall at one flat brightness whatever the light did.
@@ -437,7 +530,7 @@ function makeHeroMaterial(atlas, u) {
   mat.metalness = 0.0;
   const aSign = attribute("aSign", "vec4");   // x = tile, y = frame frac in u, z = frame frac in v, w = 0 print / 1 screen
   const tex = texture(atlas.texture);
-  const tile = aSign.x;
+  const tile = tileIndex(aSign.x);
   const tx = fract(tile.div(atlas.cols));
   const ty = floor(tile.div(atlas.cols)).div(atlas.rows);
   const base = uv();
@@ -451,7 +544,63 @@ function makeHeroMaterial(atlas, u) {
   // across the top of every screen — and a real advert does not crawl. A
   // screen differs from a print by LIGHT, not motion.
   const auv = vec2(tx.add(clamp(inner.x, 0.0, 1.0).div(atlas.cols)), ty.add(clamp(inner.y, 0.0, 1.0).div(atlas.rows)));
-  const img = tex.sample(auv).rgb;
+  const flat = tex.sample(auv).rgb;
+  /*
+   * ── THE LCD, and it is what makes a screen read as a SCREEN ────────────────
+   *
+   * A printed wrap and an LED wall differ by more than brightness. Up close a
+   * real display is a grid of emitters with black between them and a visible
+   * RGB stripe inside each one, and that structure is most of why a Blade
+   * Runner billboard looks like a billboard rather than a poster that happens
+   * to glow. It costs about twenty ALU and it is gated to screens.
+   *
+   * SUBPIXELS. Each LCD pixel is split in three across; each third shows ONE
+   * channel and is multiplied by 3 so the panel keeps its brightness. That
+   * triples the local contrast, which is exactly the colour fringing you see on
+   * a real emissive wall photographed close.
+   *
+   * THE FADE IS NOT OPTIONAL. A pixel grid is the textbook moire generator: the
+   * instant one LCD cell is finer than one screen pixel it aliases into
+   * crawling rainbow noise, and a board 300 m down an avenue is exactly that.
+   * `fwidth` of the LCD-space coordinate says how many cells a pixel spans, and
+   * the structure is faded out before it reaches one — past that the board is
+   * simply the image, which is the correct answer at that distance anyway.
+   *
+   * Everything here multiplies `flat`, so a board with no image still shows its
+   * placeholder through the grid rather than going black.
+   */
+  /*
+   * SQUARE CELLS on a board that is not square. `lcdCols` counts cells ACROSS,
+   * so the row count has to be scaled by the panel's height/width or the pixels
+   * come out as letterbox slots. The frame fractions carry that ratio for free:
+   * frU is frame/width and frV is frame/height, so frU/frV IS height/width, per
+   * board, with no extra attribute.
+   */
+  const lcdAspect = aSign.y.div(aSign.z.max(1e-4));
+  const lcdUv = vec2(inner.x.mul(u.lcdCols), inner.y.mul(u.lcdCols.mul(lcdAspect)));
+  const cell = fract(lcdUv);
+  // Three stripes across the cell; `sx` runs 0..3 through them.
+  const sx = cell.x.mul(3.0);
+  const rMask = oneMinus(step(1.0, sx));
+  const gMask = step(1.0, sx).mul(oneMinus(step(2.0, sx)));
+  const bMask = step(2.0, sx);
+  // NOT a hard channel mask. Isolating each subpixel to one channel is what a
+  // display physically does, and on a photograph at 50 m it reads as vertical
+  // noise with the advert lost behind it. `lcdStrength` mixes toward that from
+  // flat white, so the stripe is a strong tint rather than a filter — the
+  // fringing survives, the picture survives with it.
+  const stripe = mix(vec3(1.0, 1.0, 1.0), vec3(rMask, gMask, bMask).mul(3.0), u.lcdStrength);
+  // The dark lattice: a gap down each subpixel and a wider one between rows,
+  // which is what stops it reading as three coloured bars instead of a pixel.
+  const subGap = smoothstep(float(0.0), u.lcdGap, fract(sx))
+    .mul(smoothstep(float(1.0), float(1.0).sub(u.lcdGap), fract(sx)));
+  const rowGap = smoothstep(float(0.0), u.lcdGap.mul(1.6), cell.y)
+    .mul(smoothstep(float(1.0), float(1.0).sub(u.lcdGap.mul(1.6)), cell.y));
+  const lcd = flat.mul(stripe).mul(subGap.mul(rowGap));
+  // How many LCD cells one screen pixel covers. Past ~1 the grid is noise.
+  const lcdTexel = max(fwidth(lcdUv.x), fwidth(lcdUv.y));
+  const lcdFade = saturate(oneMinus(lcdTexel.mul(u.lcdFade))).mul(isScreen);
+  const img = mix(flat, lcd, lcdFade);
   const edgeU = min(base.x, float(1.0).sub(base.x)), edgeV = min(base.y, float(1.0).sub(base.y));
   const inFrame = max(
     smoothstep(aSign.y, aSign.y.mul(0.75), edgeU),
@@ -519,7 +668,7 @@ function makePosterMaterial(atlas, u, name, boost) {
   const aSign = attribute("aSign", "vec3");   // x = tile, y = jitter, z = scroll
   const tex = texture(atlas.texture);
   const col = Fn(() => {
-    const tile = aSign.x;
+    const tile = tileIndex(aSign.x);
     const tx = fract(tile.div(atlas.cols));
     const ty = floor(tile.div(atlas.cols)).div(atlas.rows);
     const base = uv();
@@ -592,6 +741,10 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     nightBoost: uniform(P.nightBoost),
     screenBoost: uniform(P.screenBoost),
     neonBoost: uniform(P.neonBoost),
+    lcdCols: uniform(P.lcdCols),
+    lcdGap: uniform(P.lcdGap),
+    lcdFade: uniform(P.lcdFade),
+    lcdStrength: uniform(P.lcdStrength),
     time: uniform(0),
   };
 
@@ -681,16 +834,34 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
       const hf = sf[Math.floor(lotRand(b.cx, b.cz, 51) * sf.length)];
       const fw = hf[0] !== 0 ? a.depth : a.width;
       if (fw > P.heroMinFace) {
-        const w = fw * P.heroFaceFrac;
-        const h = Math.min(w * P.heroAspect, height * 0.45);
-        let y = b.y + height * (P.heroLow + lotRand(b.cx, b.cz, 52) * (P.heroHigh - P.heroLow));
-        y = Math.max(b.y + 8 + h / 2, Math.min(b.y + height - 3 - h / 2, y));
+        /*
+         * SCREENS ARE BIGGER THAN PRINTS, and the roll happens FIRST so the
+         * size can know. A printed wrap is an advert on a wall; an LED wall is
+         * the thing you see the street by. Sizing both the same made the
+         * screens read as posters that happened to glow — the scale is half of
+         * why a Blade Runner board lands.
+         *
+         * Clamped to 0.98 of the face and to 62% of the building: a board wider
+         * than its own wall, or one that reaches the roofline, both read as a
+         * bug rather than as ambition.
+         */
+        const isScreen = lotRand(b.cx, b.cz, 54) < P.heroScreenFraction
+          && height > P.crownMinHeight ? 1 : 0;
+        const grow = isScreen ? P.heroScreenScale : 1;
+        const w = fw * Math.min(P.heroFaceFrac * grow, 0.98);
+        const h = Math.min(w * P.heroAspect, height * (isScreen ? 0.62 : 0.45));
+        // Screens crown the tower, prints sit mid-wall — see crownLow.
+        const lo = isScreen ? P.crownLow : P.heroLow;
+        const hi = isScreen ? P.crownHigh : P.heroHigh;
+        const top = isScreen ? P.crownTopMargin : 3;
+        let y = b.y + height * (lo + lotRand(b.cx, b.cz, 52) * (hi - lo));
+        y = Math.max(b.y + 8 + h / 2, Math.min(b.y + height - top - h / 2, y));
         faceMatrix(b, a, hf, y, w, h, 0, _m);
         heroes.push({
           m: _m.clone(),
           tile: Math.floor(lotRand(b.cx, b.cz, 53) * HERO_SLOTS),
           frU: P.heroFrame / w, frV: P.heroFrame / h,
-          screen: lotRand(b.cx, b.cz, 54) < P.heroScreenFraction ? 1 : 0,
+          screen: isScreen,
           cx: b.cx, cz: b.cz, face: hf, w, h, y,
         });
         heroFace = hf;
@@ -857,6 +1028,21 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     },
     setNight(n) { u.nightAmount.value = n; },
     setTime(t) { u.time.value = t; },
+
+    /**
+     * Live-push any sign uniform. Every LED knob (`screenBoost`, `lcdCols`,
+     * `lcdGap`, `lcdFade`, `lcdStrength`) is a plain uniform, so tuning the
+     * look never needs a city rebuild — which matters because a rebuild is
+     * seconds and judging a screen is a dozen small nudges. `nightAmount` is
+     * excluded: it is driven per frame by setNight and a written value would
+     * be overwritten on the next tick anyway.
+     */
+    applyParams(patch = {}) {
+      for (const k of Object.keys(patch)) {
+        if (k === "nightAmount" || k === "time") continue;
+        if (u[k]) { u[k].value = patch[k]; P[k] = patch[k]; }
+      }
+    },
 
     /** ── HERO ADVERTS ──────────────────────────────────────────────────────
      *  `HERO_SLOTS` image slots; every board points at one. Put a real image

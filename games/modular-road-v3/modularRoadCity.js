@@ -82,6 +82,7 @@ import { createCityStreets, STREET_DEFAULTS } from "./modularRoadCityStreets.js"
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
 import { createCityObstacles } from "./modularRoadCityObstacles.js";
+import { createCityKnockables } from "./modularRoadCityKnockables.js";
 import { createCityRoofs } from "./modularRoadCityRoofs.js";
 import { createLodView } from "./modularRoadCityLodView.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
@@ -286,6 +287,8 @@ export function createModularRoadCity({
   let roofs = null;
   /** Street furniture you can hit. Null with no ground plane, same as the rest. */
   let obstacles = null;
+  /** Guardrails currently being thrown, and the pool that throws them. */
+  let knockables = null;
   /** Buildings you cannot drive through. Built lazily — a city that is never
    *  collided against never pays for the trees. */
   let collider = null;
@@ -734,6 +737,8 @@ export function createModularRoadCity({
     }
     obstacles = null;
     stats.obstacles = null;
+    knockables = null;
+    stats.knockables = null;
     if (P.ground) {
       ground = createCityStreets({
         P, originCellX, originCellZ, params: P.streetParams, reflectionTexture,
@@ -828,6 +833,21 @@ export function createModularRoadCity({
         params: P.obstacleParams,
       });
       stats.obstacles = obstacles.stats;
+      /*
+       * KNOCKABLE GUARDRAILS. Built after the obstacle table because it has to
+       * be able to take a rail OUT of it — a barrier you have just sent down the
+       * street must stop being something to hit.
+       */
+      knockables = furniture
+        ? createCityKnockables({
+          rails: furniture.lists.rails,
+          mesh: furniture.railMesh,
+          obstacles,
+          groundY: P.groundY,
+          params: P.knockParams,
+        })
+        : null;
+      stats.knockables = knockables?.stats ?? null;
     }
   }
 
@@ -942,6 +962,20 @@ export function createModularRoadCity({
     obstacleCapsulesNear(x, z, radius) {
       return obstacles ? obstacles.capsulesNear(x, z, radius) : [];
     },
+    /**
+     * Drive the knockable guardrails. EVERY FRAME — a body in the air cannot
+     * wait for the LOD tick. `car` is the vehicle body; this only reads it.
+     * @returns {number} how many rails were knocked THIS frame, so the caller
+     *   can refresh its capsule window (they have just stopped being solid).
+     */
+    updateKnockables(dt, car) {
+      if (!knockables) return 0;
+      const before = knockables.stats.knocked;
+      knockables.update(dt, car);
+      return knockables.stats.knocked - before;
+    },
+    /** Live knockable params, or null when there is no furniture. */
+    get knockables() { return knockables ? knockables.params : null; },
     /** Live per-kind toggles: lamps / lights / trees / cars / rails / radius. */
     get obstacles() { return obstacles ? obstacles.params : null; },
     /** Live rooftop-clutter params, or null when roofs are off. */

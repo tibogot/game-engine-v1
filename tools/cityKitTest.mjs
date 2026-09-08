@@ -388,5 +388,63 @@ console.log("\n── LOOK PASS ──");
 }
 
 flatCity.dispose();
+
+// ── 8. Defaults tables: no key declared twice ────────────────────────────────
+/*
+ * A DUPLICATE KEY IN A DEFAULTS OBJECT IS SILENT AND THE LATER ONE WINS.
+ *
+ * These tables are long, heavily commented and grouped by feature, which is
+ * exactly the shape that hides a repeat: the two declarations end up hundreds
+ * of lines apart and nothing — not the linter, not the runtime — says a word.
+ * It has cost two debugging sessions already. `chipScale`/`chipStretch` were
+ * declared twice in STREET_DEFAULTS and the tuned values silently lost to the
+ * older pair; a new `screenMinHeight` for the crowning LED walls collided with
+ * the legacy wide-screen one and would have taken its value instead.
+ *
+ * Reading the SOURCE is the point — by the time the object exists the
+ * duplicate is gone, so there is nothing left to assert against.
+ */
+{
+  console.log("\n── DEFAULTS TABLES ──");
+  const { readFileSync } = await import("node:fs");
+  const tables = [
+    ["SIGN_DEFAULTS", "modularRoadCitySigns.js"],
+    ["STREET_DEFAULTS", "modularRoadCityStreets.js"],
+    ["FURNITURE_DEFAULTS", "modularRoadCityFurniture.js"],
+    ["FACADE_DEFAULTS", "modularRoadCityFacade.js"],
+    ["CITY_DEFAULTS", "modularRoadCity.js"],
+  ];
+  for (const [name, file] of tables) {
+    let src;
+    try {
+      src = readFileSync(new URL(`../games/modular-road-v3/${file}`, import.meta.url), "utf8");
+    } catch { continue; }
+    const start = src.indexOf(`${name} = {`);
+    if (start < 0) { check(`${name} is findable in ${file}`, false); continue; }
+    // Walk braces from the opening one so nested objects/arrays stay inside the
+    // slice; only depth-1 keys are declarations of this table.
+    let i = src.indexOf("{", start), depth = 0, end = i;
+    for (; i < src.length; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") { depth--; if (depth === 0) { end = i; break; } }
+    }
+    const body = src.slice(src.indexOf("{", start) + 1, end);
+    // Strip comments and nested braces/brackets, then read `key:` at top level.
+    const flat = body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    const seen = new Map();
+    const dupes = [];
+    let d = 0;
+    for (const m of flat.matchAll(/[{}[\]]|(^|[,{])\s*([A-Za-z_$][\w$]*)\s*:/gm)) {
+      const t = m[0];
+      if (m[2] === undefined) { d += (t === "{" || t === "[") ? 1 : -1; continue; }
+      if (d !== 0) continue;
+      const k = m[2];
+      if (seen.has(k)) dupes.push(k); else seen.set(k, true);
+    }
+    check(`${name} declares every key once`, dupes.length === 0,
+      `${seen.size} keys${dupes.length ? " · DUPLICATED: " + dupes.join(", ") : ""}`);
+  }
+}
+
 console.log(fail === 0 ? "\nALL PASS" : `\n${fail} FAILURE(S)`);
 process.exit(fail === 0 ? 0 : 1);
