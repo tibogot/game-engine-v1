@@ -343,7 +343,43 @@ console.log("\n── LOOK PASS ──");
   {
     const m = new THREE.Matrix4(), v = new THREE.Vector3(); let out = 0;
     for (let i = 0; i < c.stats.lamps; i++) { lamps.getMatrixAt(i, m); v.setFromMatrixPosition(m); if (Math.abs(v.x) > CITY_DEFAULTS.extent || Math.abs(v.z) > CITY_DEFAULTS.extent) out++; }
-    check("every lamp post stands inside the city extent", out === 0, `${out} outside`);
+    /*
+   * EVERY LANTERN OVER ITS CARRIAGEWAY.
+   *
+   * The lamp is a post with an ARM, so the yaw decides which way the lantern
+   * reaches — and on east-west streets the two sides' yaws were swapped, so
+   * half the lamps in the city lit the building behind them instead of the
+   * road. Nothing threw, nothing looked wrong in a stat, and it was caught
+   * from a night screenshot.
+   *
+   * `streetSpawnNear` snaps to the centre of the nearest street, so the test
+   * is exact: transform the lantern (local +X at the arm's end) to world and
+   * it must come out CLOSER to a street centre than the post does. An arm
+   * pointing into the block moves it further away.
+   */
+  {
+    const S = c.streets;
+    const arm = S.lampArm, h = S.lampHeight;
+    let wrongWay = 0, total = 0;
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < Math.min(lamps.count, 400); i++) {
+      lamps.getMatrixAt(i, m);
+      const e = m.elements;
+      const px = e[12], pz = e[14];
+      const hx = e[0] * arm + e[4] * h + px;
+      const hz = e[2] * arm + e[6] * h + pz;
+      const sPost = c.streetSpawnNear(px, pz);
+      const sHead = c.streetSpawnNear(hx, hz);
+      const dPost = Math.hypot(sPost.x - px, sPost.z - pz);
+      const dHead = Math.hypot(sHead.x - hx, sHead.z - hz);
+      total++;
+      if (dHead >= dPost) wrongWay++;
+    }
+    check("every street lamp reaches OVER the road, not into the building",
+      wrongWay === 0, `${wrongWay} of ${total} lanterns point the wrong way`);
+  }
+
+  check("every lamp post stands inside the city extent", out === 0, `${out} outside`);
   }
   // Street furniture: cars, trees, traffic lights, guardrails — five draws.
   const fs = c.stats.furniture;

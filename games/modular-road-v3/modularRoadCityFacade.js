@@ -306,7 +306,15 @@ export const FACADE_DEFAULTS = {
   /** Emissive gain. Bloom does the rest — and did rather too much of it. */
   neonBoost: 1.5,
   /** Neon by day is a tube with the lights on in daylight — visible, not gone. */
-  neonDay: 0.16,
+  /*
+   * ZERO BY DAY, and that is the other half of why it looked wrong.
+   *
+   * A neon tube in daylight is a dark glass tube, not a bright colour — but
+   * this has no unlit representation, so any daytime value paints a flat
+   * coloured band with no glow behind it. At 0.16 that was a pink stripe on a
+   * sunlit wall. Off by day, and it is a light again rather than paint.
+   */
+  neonDay: 0.0,
 
   sunGlint: 1.2,
   /**
@@ -1265,7 +1273,22 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
       // Does this BUILDING have a lit frontage at all? Industrial never does:
       // a warehouse on the fringe with a neon shopfront is the sort of detail
       // that quietly tells you the city was generated rather than built.
-      const lotLit = step(F.h5, u.neonBuildings).mul(float(1.0).sub(float(F.isIndustrial)));
+      /*
+       * MASONRY ONLY, AND NEVER ON GLASS.
+       *
+       * Neon belongs on a punched masonry frontage — a shop with a wall around
+       * its window. Painted onto a curtain-wall tower it reads as exactly what
+       * it is: a coloured shape stuck on a mirror, and at 26% of buildings the
+       * downtown core was covered in them. SEEN IN THE GAME: two enormous pink
+       * and cyan L's across a glass facade in broad daylight, which is what
+       * sent me looking.
+       *
+       * Industrial never had it. Curtain wall and ribbon slabs now do not
+       * either, which leaves it where a real parade of shopfronts would be.
+       */
+      const lotLit = step(F.h5, u.neonBuildings)
+        .mul(float(F.isPunched))
+        .mul(float(1.0).sub(float(F.isIndustrial)));
       const bi = floor(F.u0.div(F.bay)).toVar();
       const h = hash31(vec3(F.lot, bi.mul(1.7).add(F.faceKey.mul(11.3)))).toVar();
       const on = step(h, u.neonFraction).mul(lotLit);

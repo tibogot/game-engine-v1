@@ -56,8 +56,17 @@ export const ROAD_SIGN_DEFAULTS = {
   plateSize: 0.72,
   /** How far onto the pavement, from the kerb. */
   inset: 0.75,
-  /** Chance a block side carries a mid-block sign, and the tiles it may use. */
-  signChance: 0.55,
+  /**
+   * Chance a block side carries a mid-block sign.
+   *
+   * WAS 0.55 for ONE sign per block side. A block edge is ~136 m, so that was
+   * a sign every ~250 m of frontage — placed, counted in the stats, and never
+   * actually seen from the car. Real streets carry signage every junction and
+   * often twice between. 0.9, and a second one at the far end of the run.
+   */
+  signChance: 0.9,
+  /** Chance of a SECOND sign on the same block side, at the other end. */
+  signChanceSecond: 0.55,
   /** Where the folder overrides live. */
   dir: "/city-signs/",
   extensions: ["png", "webp", "jpg"],

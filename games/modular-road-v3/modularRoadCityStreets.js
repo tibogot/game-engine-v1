@@ -1521,7 +1521,20 @@ export function createCityStreets({
           for (let x = Math.ceil((x0 - stagger) / S.lampPitch) * S.lampPitch + stagger; x < x1; x += S.lampPitch) {
             if (Math.abs(x - P.centerX) > half || Math.abs(z - P.centerZ) > half) continue;
             _pv.set(x, P.groundY, z);
-            _m.compose(_pv, yaw(side === 0 ? Math.PI / 2 : -Math.PI / 2), _sv);
+            /*
+             * THE ARM HAS TO REACH OVER THE ROAD, and these two were swapped.
+             *
+             * A rotation about +Y by t sends the arm's local +X to
+             * (cos t, 0, -sin t). At +PI/2 that is -Z — and side 0 stands on
+             * the -Z kerb with the carriageway at +Z, so every lamp on an
+             * east-west street pointed its lantern INTO the building behind
+             * it. Half the lamps in the city, and spotted from a night
+             * screenshot rather than by anything here.
+             *
+             * The Z-running branch above is right for the same reason it looks
+             * wrong: yaw 0 leaves the arm on +X, which IS its street.
+             */
+            _m.compose(_pv, yaw(side === 0 ? -Math.PI / 2 : Math.PI / 2), _sv);
             lampMatrices.push(_m.clone());
           }
         }

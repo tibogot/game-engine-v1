@@ -102,11 +102,23 @@ export const FURNITURE_DEFAULTS = {
   treeCanopy: 2.6,
   /** Pedestrian guardrail either side of every crossing, metres. */
   railRun: 9,
-  /** Mast-arm traffic signals: post height, and how far the arm reaches out
-   *  over the carriageway. 7.0 / 4.6 puts the head near the middle of a 34 m
-   *  street's near half, which is where a driver actually looks for it. */
-  lightHeight: 7.0,
-  lightArm: 4.6,
+  /**
+   * Mast-arm traffic signals: post height, and how far the arm reaches out
+   * over the carriageway.
+   *
+   * WAS 7.0 / 4.6, and the arm was far too short. MEASURED in the game: the
+   * street is 34 m wide with lanes centred 4.3, 12.8, 21.3 and 29.8 m from the
+   * kerb, the mast stands 0.9 m back on the pavement, and a 4.6 m arm put the
+   * head 3.7 m out — over the gutter, short of even the first lane. It read as
+   * a lamp post with a box on it, which is exactly what it looked like.
+   *
+   * 9.5 m puts the head 8.6 m out, between the first and second lanes and
+   * squarely over the near half of the carriageway, which is where a driver
+   * looks for it. The post goes up with it: a longer arm needs the height or
+   * the head hangs into the lane it is signalling.
+   */
+  lightHeight: 7.6,
+  lightArm: 9.5,
   /**
    * THE SIGNAL CYCLE, in seconds, and the two boundaries inside it as
    * fractions: green from 0, amber from `signalGreenEnd`, red from
@@ -395,10 +407,12 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     const STEEL = 0x33373c, SHELL = 0x141618;
     // Post and arm: tapered cylinders, 8 and 6 sided. A box post is the one
     // thing that gives a mast away at any distance.
-    const pole = new THREE.CylinderGeometry(0.13, 0.19, H, 8, 1);
+    const pole = new THREE.CylinderGeometry(0.15, 0.22, H, 8, 1);
     pole.translate(0, H / 2, 0);
     tint(pole, STEEL);
-    const arm = new THREE.CylinderGeometry(0.075, 0.115, A, 6, 1);
+    // Thicker with the longer span — a 9.5 m reach on a 7 cm tube reads as
+    // wire rather than as steel.
+    const arm = new THREE.CylinderGeometry(0.09, 0.15, A, 6, 1);
     arm.rotateZ(-Math.PI / 2);          // Y-up cylinder laid along +X
     arm.translate(A / 2, H - 0.18, 0);
     tint(arm, STEEL);
@@ -649,10 +663,14 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
            * The yaw faces ACROSS the pavement into the road, flipped by side,
            * so a driver sees the face and not the grey back.
            */
-          if (h2(seedA, side, 91) < F.signChance) {
-            const s = a0 + F.crossClear + h2(seedA, side, 92) * Math.max(1, (a1 - a0) - F.crossClear * 2);
+          for (let k = 0; k < 2; k++) {
+            const chance = k === 0 ? F.signChance : F.signChanceSecond;
+            if (h2(seedA, side * 2 + k, 91) >= chance) continue;
+            // Two halves of the run, so a pair never lands on top of itself.
+            const span = Math.max(1, (a1 - a0) - F.crossClear * 2) * 0.5;
+            const s = a0 + F.crossClear + k * span + h2(seedA, side * 2 + k, 92) * span;
             const [x, z] = at(kerb + dir * F.inset, s);
-            const tile = MIDBLOCK_SIGNS[Math.floor(h2(seedA, side, 93) * MIDBLOCK_SIGNS.length) % MIDBLOCK_SIGNS.length];
+            const tile = MIDBLOCK_SIGNS[Math.floor(h2(seedA, side * 2 + k, 93) * MIDBLOCK_SIGNS.length) % MIDBLOCK_SIGNS.length];
             place(roadSigns, x, z, yawAlong + (dir > 0 ? Math.PI : 0), { tile });
           }
         }
