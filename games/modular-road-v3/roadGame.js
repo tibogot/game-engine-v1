@@ -8202,6 +8202,8 @@ ${e.message}`);
      * The city has far more to warm than a track does. Run for either.
      */
     const cityToWarm = !!(city && cityWanted);
+    /** Counts forced up for the warm-up; restored once every pass has run. */
+    let forcedCityMeshes = null;
     if (!pieces.length && !cityToWarm) return;
     warmingUp = true;
     /*
@@ -8369,7 +8371,23 @@ ${e.message}`);
           renderer.render(scene, warmCam);
           await new Promise((res) => requestAnimationFrame(() => res()));
         }
-        for (const [m, c] of forced) m.count = c;
+        /*
+         * HELD FORCED THROUGH BOTH SETTLES, and restored at the very end.
+         *
+         * The counts used to be put back here, which meant the settle frames —
+         * and, more importantly, the MIRROR pass that runs after them — drew
+         * only whatever the LOD happened to have in range. Every facade variant
+         * the mirror had not yet seen was left for the player.
+         *
+         * The city facade is 231 kB of WGSL, and a driver compiling one of
+         * those is a single GPU task of seconds: MEASURED in a Chrome trace,
+         * two of them at 3210 ms and 1705 ms, on the GPU process's main thread,
+         * with no JavaScript long task and no change in three's program count
+         * (three counts a program when it EMITS the source, long before the
+         * driver has finished with it — which is why every in-page counter said
+         * nothing was happening).
+         */
+        forcedCityMeshes = forced;
       }
       /*
        * ── THEN LET THE REAL LOOP RUN, UNDER THE COVER ──────────────────────
@@ -8421,6 +8439,8 @@ ${e.message}`);
        */
       reflectionEnabled = reflectionWas;
       if (reflectionWas) await settleFrames(500, cityToWarm ? 1500 : 800, 7000);
+      // Every pass has now drawn every mesh; give the LOD its counts back.
+      if (forcedCityMeshes) { for (const [m, c] of forcedCityMeshes) m.count = c; forcedCityMeshes = null; }
 
       /*
        * ── WAIT FOR THE GPU, NOT FOR THE CPU ────────────────────────────────
@@ -8447,10 +8467,22 @@ ${e.message}`);
       // stutters once on first reveal — never let it take the race down.
       console.warn("[road] pipeline warm-up skipped:", e);
     } finally {
-      reflectionEnabled = reflectionWas;   // never leave the mirror off on a throw
-      if (carGroup) carGroup.visible = carWasVisible;
+      /*
+       * NOTHING IN HERE MAY THROW. A ReferenceError in this block skipped
+       * `cover.remove()` and left the game behind a permanent full-screen
+       * overlay — the warm-up's own failure mode became worse than anything it
+       * was protecting against. The cover comes off first, and the tidying is
+       * wrapped.
+       */
       cover.remove();
       warmingUp = false;
+      try {
+        if (forcedCityMeshes) { for (const [m, c] of forcedCityMeshes) m.count = c; }
+        reflectionEnabled = reflectionWas;   // never leave the mirror off on a throw
+        if (carGroup) carGroup.visible = carWasVisible;
+      } catch (e) {
+        console.warn("[road] warm-up cleanup failed:", e);
+      }
     }
   }
 
