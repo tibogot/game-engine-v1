@@ -105,16 +105,18 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
   const beamMat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
   beamMat.name = "CityCheckpointBeam";
   /*
-   * SEEN THROUGH THE CITY, and this is the whole difference between a marker
-   * and a decoration. With depth testing on, a column standing three blocks
-   * away is behind a tower and you never learn it exists. Off, it reads as the
-   * hologram every open-world game uses for a waypoint, and it costs one flag.
+   * DEPTH-TESTED, so it goes BEHIND the buildings like a real object.
    *
-   * `depthWrite` off with it, or a column that writes depth over the whole
-   * skyline would punch a hole in everything drawn after it.
+   * It was briefly drawn through them — the hologram trick most open-world
+   * games use — and it looked wrong here, because this city is otherwise
+   * solid and lit and a column ignoring all of it reads as a bug rather than
+   * as a marker. The height is what solves visibility instead: at 400 m the
+   * beam clears a 310 m skyline, so from anywhere in the city you see the top
+   * of it standing above the rooftops, and the arrow handles the last block
+   * where the base is hidden by the building in front of you.
    */
-  beamMat.depthTest = false;
-  beamMat.depthWrite = false;
+  beamMat.depthTest = true;
+  beamMat.depthWrite = true;
   const beamGlow = Fn(() => {
     const t = positionGeometry.y.div(P.beamHeight);
     // Bright at the road, gone well before the top: a hard-ended 400 m column
@@ -127,7 +129,6 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
   const beam = new THREE.Mesh(beamGeo, beamMat);
   beam.name = "CityCheckpointBeam";
   beam.frustumCulled = false;      // one object; a cull test costs more than it saves
-  beam.renderOrder = 999;          // after the world, since it ignores depth
   beam.visible = false;
   beam.castShadow = false;
   beam.receiveShadow = false;
@@ -164,9 +165,14 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
      * calls — and it is written only when the angle has moved more than a
      * degree, so it is a handful of DOM writes a second rather than 60.
      */
+    /*
+     * A SHAPE WITH A TAIL, not a triangle. `▲` has three equal corners and
+     * reads as pointing three ways at once — you cannot tell a rotated one
+     * from an unrotated one. The clip-path in palette.css draws a real arrow:
+     * one point, one stem, no ambiguity at any angle.
+     */
     hudArrow = document.createElement("div");
     hudArrow.className = "road-cp-arrow";
-    hudArrow.textContent = "▲";
     hud.insertBefore(hudArrow, hudTime);
   }
   /** A short message of this system's own. Cleared by the update tick. */

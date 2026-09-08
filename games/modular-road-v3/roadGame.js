@@ -8122,11 +8122,82 @@ ${e.message}`);
    * @param {object} [o]
    * @param {string} [o.label] what the cover says
    */
+  /**
+   * Run the engine's OWN frames until it is genuinely quiet.
+   *
+   * `minFrames` before the streak is even considered, and that minimum is the
+   * whole point: an earlier version asked only for a streak of fast frames and
+   * exited BEFORE the expensive work had started, which is worse than not
+   * waiting at all because it looks like it worked. The stalls being absorbed
+   * here are seconds long, so a run of quick frames early on means nothing.
+   *
+   * Capped by TIME, not by frame count: the stalls being absorbed are seconds
+   * long, so a frame budget either expires during one of them or waits far
+   * past the end of the work. The cap is a hard ceiling — a machine that
+   * cannot settle must still get to play.
+   *
+   * @param {number} minMs   run at least this long before believing the streak
+   * @param {number} streak  consecutive frames under 20 ms to call it done
+   * @param {number} maxMs   hard ceiling
+   */
+  async function settleFrames(minMs, streak, maxMs) {
+    const t0 = performance.now();
+    let fast = 0, prev = t0;
+    for (;;) {
+      await new Promise((res) => requestAnimationFrame(() => res()));
+      const now = performance.now();
+      const frame = now - prev;
+      prev = now;
+      fast = frame < 20 ? fast + 1 : 0;
+      const elapsed = now - t0;
+      if (elapsed >= maxMs) break;               // never hold the game hostage
+      if (elapsed >= minMs && fast >= streak) break;
+    }
+    return Math.round(performance.now() - t0);
+  }
+
   async function warmUpTrackPipelines({ label = "Preparing track…" } = {}) {
     if (warmingUp) return;
     const pieces = builder.pieces ?? [];
-    if (!pieces.length) return;
+    /*
+     * A TRACK IS NOT THE ONLY THING WORTH WARMING.
+     *
+     * This used to be `if (!pieces.length) return`, which skipped the ENTIRE
+     * warm-up whenever there was no track — and that is exactly the case the
+     * city is played in: spawn on a city street, no pieces placed, and every
+     * pipeline in the city gets built under the player instead. It is why the
+     * pure-city session stuttered for a minute and a track-above-the-city one
+     * stuttered differently: with a track the warm-up ran, without one it
+     * never happened at all.
+     *
+     * The city has far more to warm than a track does. Run for either.
+     */
+    const cityToWarm = !!(city && cityWanted);
+    if (!pieces.length && !cityToWarm) return;
     warmingUp = true;
+    /*
+     * ── THE MIRROR GOES LAST, AND THAT IS THE WHOLE FIX ─────────────────────
+     *
+     * The car's reflection renders THE WHOLE SCENE AGAIN into a mirror target
+     * — a second pass with its own pipeline for every material it draws. With
+     * it enabled from the start it is the FIRST thing to draw the city, so it
+     * builds the entire city's worth of pipelines on the player's first frame.
+     *
+     * MEASURED, one variable, long tasks after the cover lifts:
+     *   mirror on from the start          10389 ms   (one 8232 ms task)
+     *   mirror off, enabled 6 s later         0 ms   + 659 ms when switched on
+     *
+     * Nothing else moved that number — not warming every city mesh, not the
+     * GPU queue drain, not the cover's opacity, not rAF versus setTimeout
+     * yields. The order is what matters: let the ORDINARY pass build the
+     * pipelines first and the mirror reuses almost all of them, which is why
+     * switching it on afterwards costs 0.66 s instead of 8.
+     *
+     * It also explains the symptom that made no sense — editing a track piece
+     * makes it stutter again, because the new piece needs a mirror pipeline.
+     */
+    const reflectionWas = reflectionEnabled;
+    reflectionEnabled = false;
     /*
      * THE CAR IS WARMED TOO, AND IT IS HALF THE STALL.
      *
@@ -8188,7 +8259,7 @@ ${e.message}`);
         // backgrounded or occluded tab rAF drops to ~1 Hz, and the same warm-up
         // measured 13.7 s instead of 2.5 s. Pipelines are built by render()
         // itself, so there is nothing here that needs to wait for a frame.
-        await new Promise((res) => setTimeout(res, 0));
+        await new Promise((res) => requestAnimationFrame(() => res()));
       }
       // One overhead pass for anything the ground-level poses cannot see —
       // undersides, scenery, and props parked off the racing line.
@@ -8200,13 +8271,108 @@ ${e.message}`);
         warmCam.lookAt(c.x, c.y, c.z);
         warmCam.updateMatrixWorld(true);
         renderer.render(scene, warmCam);
-        await new Promise((res) => setTimeout(res, 0));
+        await new Promise((res) => requestAnimationFrame(() => res()));
+      }
+      /*
+       * ── EVERY MESH THE CITY CAN PRODUCE, DRAWN ONCE ───────────────────────
+       *
+       * This is the one that actually mattered, and no camera pose can do it.
+       *
+       * The city is ~80 InstancedMeshes — 21 archetypes x 3 LOD tiers, plus
+       * furniture, roofs, signs and clutter — and the LOD writes `count = 0`
+       * on every one that is out of range. A mesh with count 0 SUBMITS NO
+       * DRAW, so its pipeline is never built, however many angles you render
+       * it from. It gets built the first time a building of that archetype
+       * comes into range, which is while the player is driving.
+       *
+       * MEASURED, from a real drive the user recorded: over four consecutive
+       * frames the draw count went 87 -> 145 as new meshes came into view,
+       * 34 pipelines were created, and those four frames cost 11.0 seconds.
+       * Across the first minute, 78 vertex and 39 fragment programs compiled
+       * during play, for 12.7 s of stall plus 5.6 s of trailing GPU work —
+       * and after that the session was smooth for as long as it ran.
+       *
+       * So: force every one of them to submit a single instance and render.
+       * The count is restored immediately; nothing is moved, nothing is
+       * reseeded, and one instance of a 12-triangle L2 box costs nothing to
+       * actually draw. `shadowMap.needsUpdate` because most of those programs
+       * are SHADOW variants (31 vertex against 1 fragment in the worst frame),
+       * and the shadow pass will not revisit a cascade it thinks is current.
+       */
+      if (city && cityWanted && city.group) {
+        const forced = [];
+        city.group.traverse((o) => {
+          if (o.isInstancedMesh && o.count < 1) { forced.push([o, o.count]); o.count = 1; }
+        });
+        const carAt = vehicleRef?.body?.pos ?? camera.position;
+        const gy = city.params?.groundY ?? 0;
+        warmCam.position.set(carAt.x, gy + 2.2, carAt.z);
+        warmCam.lookAt(carAt.x + 30, gy + 1.5, carAt.z);
+        warmCam.updateMatrixWorld(true);
+        // Two frames: the first builds the main-pass pipelines, the second
+        // catches anything the shadow pass only wants once it has depth.
+        for (let i = 0; i < 2; i++) {
+          renderer.shadowMap.needsUpdate = true;
+          renderer.render(scene, warmCam);
+          await new Promise((res) => requestAnimationFrame(() => res()));
+        }
+        for (const [m, c] of forced) m.count = c;
+      }
+      /*
+       * ── THEN LET THE REAL LOOP RUN, UNDER THE COVER ──────────────────────
+       *
+       * Every pose above is a guess at what the player is about to see. This
+       * is not a guess: it is the engine's own frame, with the real camera,
+       * the real post pass and — the expensive one — the real MIRROR pass,
+       * simply allowed to happen while the cover is still up.
+       *
+       * It could not work before, and the reason is worth keeping: the poses
+       * used to yield with `setTimeout(0)`, which starves requestAnimationFrame
+       * — so the engine's loop never ran at all under the cover and every real
+       * frame's work landed on the player. With the yields on rAF the loop
+       * runs here, and the streak below only breaks on a frame slow enough to
+       * be one of the stalls we are trying to absorb.
+       *
+       * A MINIMUM of frames as well as a streak: an earlier version asked only
+       * for "8 fast frames" and exited on the first eight, because the CPU was
+       * idle while the GPU still had the whole warm-up in flight.
+       */
+      await settleFrames(700, 32, 9000);
+
+      /*
+       * ── NOW THE MIRROR, STILL UNDER THE COVER ────────────────────────────
+       * Everything it needs has just been built by the ordinary pass, so this
+       * is the cheap 0.66 s version rather than the 8 s one.
+       */
+      reflectionEnabled = reflectionWas;
+      if (reflectionWas) await settleFrames(500, 26, 7000);
+
+      /*
+       * ── WAIT FOR THE GPU, NOT FOR THE CPU ────────────────────────────────
+       *
+       * The last piece, and the one that beat six earlier attempts.
+       *
+       * Every `renderer.render` above only QUEUES work. Building a pipeline is
+       * the driver's job on its own schedule, so when the cover came down the
+       * CPU was idle and the GPU still had the whole warm-up in flight — and
+       * the first real frame blocked on it. MEASURED: a frame with ZERO draw
+       * calls and ZERO new programs that took 6967 ms. That is not rendering,
+       * it is the queue draining under the player instead of under the cover.
+       *
+       * It also explains why holding the cover "until frames are fast" did
+       * nothing: the frames WERE fast, because the CPU had nothing left to do.
+       * `onSubmittedWorkDone` is the only thing here that asks the GPU.
+       */
+      const device = renderer.backend?.device;
+      if (device?.queue?.onSubmittedWorkDone) {
+        await device.queue.onSubmittedWorkDone();
       }
     } catch (e) {
       // A warm-up is an optimisation. If it fails the game still runs, it just
       // stutters once on first reveal — never let it take the race down.
       console.warn("[road] pipeline warm-up skipped:", e);
     } finally {
+      reflectionEnabled = reflectionWas;   // never leave the mirror off on a throw
       if (carGroup) carGroup.visible = carWasVisible;
       cover.remove();
       warmingUp = false;

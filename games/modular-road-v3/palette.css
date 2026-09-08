@@ -966,11 +966,15 @@
 /* The direction arrow. A CSS rotation on one glyph — no GPU, no draw call, and
    it points the way even when the target is behind a tower. */
 .road-cp-arrow {
-  font-size: 30px;
-  line-height: 1;
-  color: #35ff9a;
-  margin-bottom: 6px;
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 6px;
+  background: #35ff9a;
+  /* A POINT AND A STEM. An equilateral triangle has three identical corners,
+     so a rotated one is indistinguishable from an unrotated one — it appears
+     to point three ways at once. This shape only ever points one way. */
+  clip-path: polygon(50% 0%, 100% 46%, 72% 46%, 72% 100%, 28% 100%, 28% 46%, 0% 46%);
   transform-origin: 50% 50%;
   will-change: transform;
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.8));
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.85));
 }
