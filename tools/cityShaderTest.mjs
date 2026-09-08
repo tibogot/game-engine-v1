@@ -378,12 +378,29 @@ console.log("\n── FURNITURE SHADERS ──");
   check("every furniture material generates WGSL", bad === null, bad || `${mats.length} materials`);
 
   // A material that reads vInstanceColor MUST be on a mesh that writes it.
+  // The signals are NOT on this list any more: they carry their lens tints in
+  // vertex colours and their cycle position in `aPhase`, because instanceColor
+  // is multiplied into colorNode whether you want it or not — which is how the
+  // old lens colour ended up tinting the body instead of lighting the lens.
   let mismatched = [];
   for (const [name, , mesh] of mats) {
-    const needs = /Cars|Canopies|TrafficLights|Traffic$/.test(name);
+    const needs = /Cars|Canopies|Traffic$/.test(name);
     if (needs && !mesh.instanceColor) mismatched.push(name);
   }
   check("every material reading the instance tint is on a mesh that writes one", mismatched.length === 0, mismatched.join(","));
+
+  // The signals' own contract: one float per mast saying where in the cycle it
+  // sits. Without it every light in the city shows the same colour at once.
+  {
+    const sig = mats.find(([n]) => /TrafficLights/.test(n));
+    const attr = sig?.[2]?.geometry?.getAttribute?.("aPhase");
+    check("traffic signals carry a per-instance cycle phase", !!attr && attr.count === sig[2].count,
+      attr ? `${attr.count} phases for ${sig[2].count} masts` : "aPhase missing");
+    // Opposed approaches: a junction's two axes must never be green together.
+    const vals = attr ? [...new Set(Array.from(attr.array).map((v) => +(v % 1).toFixed(3)))] : [];
+    const opposed = vals.some((v) => vals.some((w) => Math.abs(((w - v) % 1 + 1) % 1 - 0.5) < 1e-3));
+    check("cross streets are half a cycle apart", opposed, `${vals.length} distinct phases`);
+  }
 
   furn.dispose();
   streets.dispose();

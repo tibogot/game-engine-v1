@@ -23,7 +23,7 @@
 import * as THREE from "three";
 import {
   Fn, float, vec3, vec4, uniform, positionWorld, positionGeometry, smoothstep, mix, oneMinus,
-  vertexColor, materialColor, varyingProperty,
+  vertexColor, materialColor, varyingProperty, attribute, fract, step,
 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
@@ -102,6 +102,31 @@ export const FURNITURE_DEFAULTS = {
    *  street's near half, which is where a driver actually looks for it. */
   lightHeight: 7.0,
   lightArm: 4.6,
+  /**
+   * THE SIGNAL CYCLE, in seconds, and the two boundaries inside it as
+   * fractions: green from 0, amber from `signalGreenEnd`, red from
+   * `signalAmberEnd` to the end.
+   *
+   * Cross streets run half a cycle apart, so red must last MORE than half or
+   * both directions would be green at once — 0.50 is the shortest red that
+   * cannot overlap, and the amber is taken out of the green's share rather
+   * than added on top. 24 s is a real urban cycle and slow enough that you
+   * notice one change while driving past rather than a flicker.
+   */
+  signalCycle: 24,
+  signalGreenEnd: 0.44,
+  signalAmberEnd: 0.50,
+  /**
+   * Lens brightness, day and night.
+   *
+   * A signal lens is SMALL — 27 cm across — and it feeds the bloom buffer, so
+   * the level that reads as "lit" is far lower than it looks in isolation:
+   * at 5.0 the disc clipped to white and bloomed into a green floodlight with
+   * no lens visible inside it. These are tuned so the colour survives the
+   * bloom instead of being eaten by it.
+   */
+  signalDay: 0.8,
+  signalNight: 1.8,
   /** Keep clear of the crossings at block ends, metres. */
   crossClear: 6.5,
   nightAmount: 0,
@@ -184,6 +209,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const inside = (x, z) => Math.abs(x - P.centerX) <= half && Math.abs(z - P.centerZ) <= half;
 
   const uNight = uniform(F.nightAmount);
+  /** Drives the signal cycle. Fed the city clock every frame by updateTraffic. */
+  const uSignalTime = uniform(0);
   const uGlow = uniform(new THREE.Color(F.glowColor));
   const uGlowAmt = uniform(F.glowAmount);
   const uHead = uniform(new THREE.Color(F.headlightColor));
@@ -321,19 +348,81 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     return g;
   })();
   /*
-   * MAST-ARM SIGNAL: a tall post, a long arm out over the carriageway, and the
-   * signal head hanging from its end. The same silhouette as the street lamp
-   * beside it, which is what makes them read as fittings from the same city.
+   * ── THE OVERHEAD SIGNAL ───────────────────────────────────────────────────
    *
-   * The head hangs BELOW the arm, which is both correct and what lets the
-   * shader find it — see lensGlow. Arm along local +X; the placement yaws each
-   * mast so that points at the road.
+   * WAS three boxes — a post, an arm and a blank slab on the end — and it did
+   * not read as a traffic light at all, because nothing about it said signal.
+   * It was the street lamp's silhouette at a different size, which is why the
+   * two were mistaken for each other.
+   *
+   * What makes a signal legible is the HEAD, not the mast: a black backboard,
+   * a housing, and three lenses stacked vertically with hoods over them. All
+   * of that is here, and it costs ~150 triangles ONCE — the geometry is shared
+   * by every signal in the city through one InstancedMesh, and the LOD writer
+   * only ever draws the couple of dozen near the camera.
+   *
+   * VERTEX COLOURS carry the lens tints, so an unlit red lens still reads as a
+   * dark red disc rather than as more black plastic. That also frees
+   * `instanceColor`, which the old version was using to carry a lens colour it
+   * then never managed to get into the emissive (see lensGlow).
+   *
+   * Arm along local +X, head hanging under its far end; the placement yaws
+   * each mast so the arm reaches over the carriageway.
    */
-  const lightGeo = mergeGeometries([
-    box(0.20, F.lightHeight, 0.20),                                            // post
-    box(F.lightArm, 0.15, 0.15, F.lightArm / 2, F.lightHeight - 0.15, 0),      // arm
-    box(0.34, 1.00, 0.30, F.lightArm, F.lightHeight - 1.20, 0),                // head
-  ], false);
+  const lightGeo = (() => {
+    const H = F.lightHeight, A = F.lightArm;
+    const parts = [];
+    const tint = (g, hex) => {
+      const n = g.getAttribute("position").count;
+      const c = new THREE.Color(hex);
+      const arr = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+      g.setAttribute("color", new THREE.Float32BufferAttribute(arr, 3));
+      parts.push(g);
+      return g;
+    };
+    const STEEL = 0x33373c, SHELL = 0x141618;
+    // Post and arm: tapered cylinders, 8 and 6 sided. A box post is the one
+    // thing that gives a mast away at any distance.
+    const pole = new THREE.CylinderGeometry(0.13, 0.19, H, 8, 1);
+    pole.translate(0, H / 2, 0);
+    tint(pole, STEEL);
+    const arm = new THREE.CylinderGeometry(0.075, 0.115, A, 6, 1);
+    arm.rotateZ(-Math.PI / 2);          // Y-up cylinder laid along +X
+    arm.translate(A / 2, H - 0.18, 0);
+    tint(arm, STEEL);
+    // Backboard: the wide dark plate the lenses are read against. It is most
+    // of why a signal is visible against a bright sky.
+    tint(box(0.80, 1.44, 0.04, A, H - 1.56, -0.20), SHELL);
+    // Housing, hung under the arm end.
+    tint(box(0.38, 1.16, 0.34, A, H - 1.42, 0), SHELL);
+    /*
+     * THREE LENSES, and their Y positions are the shader's only handle on
+     * which is which — see lensGlow. Discs, not boxes: a round lens is the
+     * single most recognisable thing on the whole assembly.
+     */
+    const LENS = [[H - 0.52, 0xff2a1a], [H - 0.85, 0xffb020], [H - 1.18, 0x35ff6a]];
+    for (const [y, hex] of LENS) {
+      /*
+       * PROUD OF THE HOUSING BY A CLEAR MARGIN, and that margin is load
+       * bearing: the shader separates lens from bodywork by depth alone
+       * (`front` in lensGlow), so a disc flush with the 0.17 front face lights
+       * the face with it and the "lens" comes out a SQUARE. Housing front is
+       * 0.17, the disc sits at 0.20-0.27, and the hood stops at 0.185.
+       */
+      const d = new THREE.CylinderGeometry(0.135, 0.135, 0.07, 10, 1);
+      d.rotateX(Math.PI / 2);           // face +Z
+      d.translate(A, y, 0.235);
+      tint(d, hex);
+      // Hood over each lens, so low sun does not wash the head out.
+      tint(box(0.34, 0.035, 0.17, A, y + 0.145, 0.10), SHELL);
+    }
+    const g = mergeGeometries(parts, false);
+    for (const q of parts) q.dispose();
+    return g;
+  })();
+  /** Lens centres in geometry Y, top to bottom — the shader bands off these. */
+  const LENS_Y = [F.lightHeight - 0.52, F.lightHeight - 0.85, F.lightHeight - 1.18];
   const railGeo = mergeGeometries([
     box(0.06, 1.05, 0.06, -0.95, 0, 0), box(0.06, 1.05, 0.06, 0.95, 0, 0),   // posts
     box(2.0, 0.05, 0.05, 0, 1.0, 0), box(2.0, 0.05, 0.05, 0, 0.55, 0),        // rails
@@ -357,24 +446,55 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   railMat.emissiveNode = litAdd();
   // Traffic light: dark pole and head; the lens glows in the instance's colour,
   // brighter at night, and into the bloom MRT.
-  const lightMat = new THREE.MeshStandardNodeMaterial({ color: 0x1a1c1f, roughness: 0.5, metalness: 0.5 });
+  const lightMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.5, vertexColors: true });
   lightMat.name = "CityTrafficLights";
   /*
-   * The LENS, found in geometry space. World height cannot separate it any more:
-   * with an arm there are three things up the mast and only one of them lights.
-   * `positionGeometry` is the raw attribute and survives instancing — the same
-   * trick the parked cars use for their own headlights. "Out at the arm's end,
-   * and below the arm" is exactly and only the signal head.
+   * ── ONE LENS LIGHTS, AND THE CITY CYCLES ──────────────────────────────────
+   *
+   * The old version lit the WHOLE HEAD, in white, at a constant level. Three
+   * things wrong with that, and the third was a real bug: a signal shows one
+   * lens at a time, its colour is the whole message, and the per-instance
+   * colour the placement was setting never reached the glow at all —
+   * `instanceColor` multiplies `colorNode`, not `emissiveNode`, so it tinted a
+   * near-black body where nobody could see it while the emissive returned a
+   * hardcoded white. MEASURED: the buffer really did hold red, red, green.
+   *
+   * So the state is computed here instead of being baked at placement, which
+   * costs nothing and buys the thing a static colour can never have — the
+   * signals actually CHANGE. `aPhase` says where in the cycle this mast sits
+   * and the clock does the rest: no CPU per frame, no instance rewrites, no
+   * extra draw. Cross streets are half a cycle apart, so when one is green the
+   * other is red, which is the only part of this a player would notice was
+   * wrong.
+   *
+   * WHICH lens is found in GEOMETRY space, off the three lens centres, because
+   * `positionGeometry` is the raw attribute and survives instancing (the same
+   * trick the parked cars use for their headlights). `front` keeps the glow on
+   * the lens faces rather than lighting the backboard through the housing.
+   *
+   * `aPhase` is a FRACTION, never an integer index — see the varying-precision
+   * trap in the signs atlas. Interpolating 0.5 to 0.4999999 costs nothing.
    */
+  const aPhase = attribute("aPhase", "float");
   const lensGlow = Fn(() => {
-    const outboard = smoothstep(F.lightArm * 0.55, F.lightArm * 0.8, positionGeometry.x);
-    const belowArm = smoothstep(F.lightHeight - 0.4, F.lightHeight - 0.7, positionGeometry.y);
-    return vec3(1.0).mul(outboard.mul(belowArm)).mul(mix(float(1.2), float(3.5), uNight));
+    const t = fract(uSignalTime.div(F.signalCycle).add(aPhase));
+    const g = float(F.signalGreenEnd), a = float(F.signalAmberEnd);
+    const isGreen = step(t, g);
+    const isAmber = step(g, t).mul(step(t, a));
+    const isRed = step(a, t);
+    const y = positionGeometry.y;
+    // A window around each lens centre. Half the 0.33 spacing, so the bands
+    // touch and never overlap.
+    const band = (c) => step(float(c - 0.16), y).mul(step(y, float(c + 0.16)));
+    const lit = vec3(1.0, 0.16, 0.10).mul(band(LENS_Y[0]).mul(isRed))
+      .add(vec3(1.0, 0.69, 0.13).mul(band(LENS_Y[1]).mul(isAmber)))
+      .add(vec3(0.21, 1.0, 0.42).mul(band(LENS_Y[2]).mul(isGreen)));
+    const front = step(float(0.19), positionGeometry.z);
+    const atHead = step(float(F.lightArm * 0.6), positionGeometry.x);
+    return lit.mul(front.mul(atHead)).mul(mix(float(F.signalDay), float(F.signalNight), uNight));
   })();
-  // instanceColor multiplies colorNode, not emissiveNode — so the lens colour
-  // is carried by making the emissive read the tinted colour slot.
   lightMat.emissiveNode = lensGlow;
-  applyBloomMRT(lightMat, lensGlow.mul(uNight));
+  applyBloomMRT(lightMat, vec4(lensGlow, 1.0));
 
   // ── Placement ──────────────────────────────────────────────────────────────
   const cars = [], trees = [], lights = [], rails = [];
@@ -464,9 +584,22 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
             if ((end === a0) !== (side === 0)) continue;
             const s = end === a0 ? a0 - 1.0 : a1 + 1.0;
             const [x, z] = at(kerb + dir * 0.9, s);
-            const phase = h2(Math.round(x), Math.round(z), 21);
-            const lens = phase < 0.45 ? 0xff2a1a : phase < 0.55 ? 0xffb020 : 0x35ff6a;
-            place(lights, x, z, yawAlong + (side === 0 ? 0 : Math.PI), { color: lens });
+            /*
+             * PHASE COMES FROM THE AXIS, not from a hash of the position.
+             *
+             * The old line rolled a random lens colour per mast, so the four
+             * signals around one junction could all be green — which is the
+             * one thing about a traffic light a player checks without meaning
+             * to. Streets running in z are half a cycle from streets running
+             * in x, so a junction's two approaches are always opposed.
+             *
+             * The small per-block offset stops the whole city changing on the
+             * same beat (a green wave down an avenue); both axes of one
+             * junction share it, so it never breaks the opposition above.
+             */
+            const wave = (((kx + kz) % 5) * 0.037);
+            const phase = (axis === "z" ? 0 : 0.5) + wave;
+            place(lights, x, z, yawAlong + (side === 0 ? 0 : Math.PI), { phase });
           }
         }
       }
@@ -597,6 +730,17 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       .catch((e) => console.warn("[CityFurniture] preset trees failed, none planted:", e));
   }
   const lightMesh = instanced(lights, lightGeo, lightMat, "CityTrafficLights", { shadows: false });
+  /*
+   * The cycle position, one float per mast. A real instanced attribute rather
+   * than `instanceColor`, because instanceColor is multiplied into colorNode
+   * by NodeMaterial whether you want it or not — which is exactly how the old
+   * lens colour ended up tinting the body instead of lighting the lens.
+   */
+  if (lightMesh) {
+    const phases = new Float32Array(lights.length);
+    for (let i = 0; i < lights.length; i++) phases[i] = lights[i].phase ?? 0;
+    lightGeo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
+  }
   const railMesh = instanced(rails, railGeo, railMat, "CityRails", { shadows: false });
   const trafficMesh = traffic.length
     ? (() => {
@@ -620,6 +764,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
    */
   const _tq = new THREE.Quaternion(), _tp = new THREE.Vector3(), _ts = new THREE.Vector3(1, 1, 1);
   function updateTraffic(t, cam) {
+    // The signals ride the same clock; it is already here every frame.
+    uSignalTime.value = t;
     if (!trafficMesh) return;
     const r2 = F.trafficRange * F.trafficRange;
     let n = 0;
