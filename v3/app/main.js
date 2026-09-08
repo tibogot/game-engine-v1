@@ -3533,6 +3533,11 @@ export async function startV3App(opts = {}) {
   const tlblAO     = document.getElementById("tlbl-aostr");
   const tslRStr    = document.getElementById("tsl-rstr");
   const tlblRStr   = document.getElementById("tlbl-rstr");
+  const tslTriplanar = document.getElementById("tsl-triplanar");
+
+  tslTriplanar.addEventListener("change", () => {
+    textureLib.setTriplanar(texlibActiveSlot, tslTriplanar.checked);
+  });
 
   tslUVScale.addEventListener("input", () => {
     textureLib.setUVScale(texlibActiveSlot, Number(tslUVScale.value));
@@ -3615,6 +3620,7 @@ export async function startV3App(opts = {}) {
     tlblAO.textContent = u.uAOStr.value.toFixed(1);
     tslRStr.value = Math.round(u.uRoughStr.value * 10);
     tlblRStr.textContent = u.uRoughStr.value.toFixed(1);
+    tslTriplanar.checked = u.uTriplanar.value > 0.5;
     texlibNameEl.value = s.name;
     // Sync map cell thumbnails for the active slot
     for (const [mapType, urlProp] of [

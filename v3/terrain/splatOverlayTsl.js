@@ -29,8 +29,8 @@
  */
 import * as THREE from "three";
 import {
-  Fn, If, float, int, struct, vec2, vec3,
-  texture, mix, max, clamp, sqrt, uniform, step, normalize,
+  Fn, If, float, int, struct, vec2, vec3, vec4,
+  texture, mix, max, clamp, pow, sqrt, uniform, step, normalize,
   positionWorld, smoothstep, abs, length, mx_noise_float,
 } from "three/tsl";
 import { WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
@@ -64,6 +64,8 @@ export const SPLAT_FEATURES = {
   solo: true,
   /** Per-layer tangent-space normal mapping from ORM.ba. */
   normalMap: true,
+  /** Per-layer world-triplanar projection (uTriplanar). */
+  triplanar: true,
 };
 
 /**
@@ -115,12 +117,47 @@ export function createSplatOverlay(
   const albedoArrNode = texture(albedoArrayTex);
   const ormArrNode    = texture(ormArrayTex);
 
-  const layerAlbedos = [];
-  const layerOrms    = [];
-  for (let i = 0; i < NUM_LAYERS; i++) {
-    const uv = positionWorld.xz.mul(invWS).mul(layerSlots[i].uUVScale);
-    layerAlbedos.push(albedoArrNode.sample(uv).depth(int(i)));
-    layerOrms.push(ormArrNode.sample(uv).depth(int(i)));
+  /**
+   * TRIPLANAR, PER LAYER, OFF BY DEFAULT.
+   *
+   * Every layer is projected straight down (world XZ), which is right for
+   * ground and wrong for a wall: on a steep slope the texture stretches
+   * vertically. The fix is to project on all three world axes and blend by the
+   * surface normal, which is what the prop and cliff materials already do.
+   *
+   * It is NOT free and it is NOT global. Triplanar means three taps where there
+   * was one, for BOTH the albedo and the packed ORM: six instead of two for
+   * that layer, everywhere that layer appears, flat ground included (there the
+   * two side projections are still sampled, they just weigh about zero). With
+   * seven layers, turning it on for all of them would take the layer block from
+   * 14 taps to 42. So it is a per-layer uniform that a real WGSL branch skips,
+   * and it defaults OFF: enable it on the rock layer, not on grass.
+   *
+   * The branch is legal because it tests a UNIFORM, which is uniform control
+   * flow, so the implicit-derivative sampling inside it is well defined. A
+   * per-pixel slope test would NOT be, which is exactly why this is an author
+   * switch rather than something automatic.
+   *
+   * Normal maps stay on the XZ tangent frame even with triplanar on. That frame
+   * is an approximation on steep ground either way, and reorienting it per
+   * projection is a bigger change than this is worth: albedo, roughness and AO
+   * are what read as "stretched".
+   */
+  function sampleLayer(i, arrNode, triWeights) {
+    const p   = positionWorld.mul(invWS).mul(layerSlots[i].uUVScale);
+    const out = vec4(arrNode.sample(p.xz).depth(int(i))).toVar();
+    if (F.triplanar && triWeights && layerSlots[i].uTriplanar) {
+      If(layerSlots[i].uTriplanar.greaterThan(0.0), () => {
+        const side  = arrNode.sample(p.zy).depth(int(i)); // X-facing wall
+        const front = arrNode.sample(p.xy).depth(int(i)); // Z-facing wall
+        out.assign(
+          out.mul(triWeights.y)
+            .add(side.mul(triWeights.x))
+            .add(front.mul(triWeights.z)),
+        );
+      });
+    }
+    return out;
   }
 
   // ── Weight extraction (pre-auto-paint) ────────────────────────────────────────
@@ -240,6 +277,28 @@ export function createSplatOverlay(
       If(gateSum.greaterThan(0.0), () => {
         const baseC = vec3(colV).toVar(); // pristine base for w0 + heightBlend
         const w = nwExpr.map((n) => float(n).toVar());
+
+        // Triplanar blend weights from the world normal, materialized BEFORE
+        // any branch that reads them: a node whose first generation lands in a
+        // skipped branch reads as garbage everywhere else. Null when the caller
+        // passes no normal, because the grass tint bake is a flat top-down
+        // plane where a side projection would be meaningless.
+        let triW = null;
+        if (F.triplanar && geomNormal !== null) {
+          const nAbs = abs(normalize(vec3(geomNormal))).toVar();
+          // The power sharpens the transition, so the seam between projections
+          // is a narrow band rather than a wide mush across the whole slope.
+          const nSharp = vec3(
+            pow(nAbs.x, float(4)), pow(nAbs.y, float(4)), pow(nAbs.z, float(4)),
+          ).toVar();
+          triW = nSharp.div(max(nSharp.x.add(nSharp.y).add(nSharp.z), float(1e-5))).toVar();
+        }
+        const layerAlbedos = [];
+        const layerOrms    = [];
+        for (let i = 0; i < NUM_LAYERS; i++) {
+          layerAlbedos.push(sampleLayer(i, albedoArrNode, triW));
+          layerOrms.push(sampleLayer(i, ormArrNode, triW));
+        }
 
         // Auto-material redistributes w0 to the rule layers (uAutoEnabled), or
         // replaces ALL weights with the rules (uAutoFull preview). Both off is

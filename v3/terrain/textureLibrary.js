@@ -103,6 +103,11 @@ export class TextureLibrary {
       uNormalStr: uniform(1.0),
       uAOStr:     uniform(0.8),
       uRoughStr:  uniform(1.0),
+      // 1 = project this layer on all three world axes instead of straight
+      // down. OFF by default: it triples the taps for that layer everywhere it
+      // is used, so it is meant for a rock layer on steep ground, not for
+      // everything. See the long note in splatOverlayTsl.js.
+      uTriplanar: uniform(0.0),
     }));
   }
 
@@ -336,6 +341,7 @@ export class TextureLibrary {
 
   setSlotName(i, name) { this.slots[i].name = name; }
 
+  setTriplanar(i, on) { this.slotUniforms[i].uTriplanar.value = on ? 1 : 0; }
   setUVScale(i, v)    { this.slotUniforms[i].uUVScale.value   = v; }
   setNormalStr(i, v)  { this.slotUniforms[i].uNormalStr.value = v; }
   setAOStr(i, v)      { this.slotUniforms[i].uAOStr.value     = v; }
@@ -383,6 +389,7 @@ export class TextureLibrary {
         normalStr: u.uNormalStr.value,
         aoStr:     u.uAOStr.value,
         roughStr:  u.uRoughStr.value,
+        triplanar: u.uTriplanar.value > 0.5,
         auto: {
           enabled:   s.autoEnabled,
           heightMin: s.autoHeightMin,
@@ -421,6 +428,7 @@ export class TextureLibrary {
       if (Number.isFinite(d.normalStr)) u.uNormalStr.value = d.normalStr;
       if (Number.isFinite(d.aoStr))     u.uAOStr.value     = d.aoStr;
       if (Number.isFinite(d.roughStr))  u.uRoughStr.value  = d.roughStr;
+      if (d.triplanar != null) u.uTriplanar.value = d.triplanar ? 1 : 0;
       const a = d.auto;
       if (a) {
         s.autoEnabled = !!a.enabled;
