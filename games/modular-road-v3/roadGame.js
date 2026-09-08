@@ -1996,6 +1996,16 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // reflects about IS the street, and when it is up on the sky track the
       // street's own distance and off-plane fades take it to nothing.
       reflectionTexture: carReflection.texture,
+      /*
+       * THE ENGINE'S TREE STACK, so the city's pavement trees get trunk LOD,
+       * continuous leaf LOD, GPU culling and octahedral impostors for free.
+       *
+       * startV3App builds this unconditionally and ticks it every frame whether
+       * or not anything has planted a tree, so handing it over costs nothing
+       * and replaces a hand-rolled bake that had none of the above and cost
+       * 6 ms. The city publishes placements into its store; it does not own it.
+       */
+      treeEnv: app.treeEnv ?? null,
     });
     scene.add(city.group);
     // Born into whatever weather is already on the track.

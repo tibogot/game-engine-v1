@@ -27,7 +27,7 @@ import {
 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
-import { loadCityTreePreset, buildPresetCityTrees } from "./modularRoadCityTreePreset.js";
+import { installCityPresetTrees } from "./modularRoadCityTreePreset.js";
 
 /**
  * WHICH WAY THE CAR MODEL FACES, along its own local Z. +1 means the bonnet
@@ -151,7 +151,7 @@ function pickCarColor(r) {
  * @param {number} o.originCellZ
  * @param {object} [o.params]
  */
-export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null }) {
+export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
   group.name = "CityFurniture";
@@ -499,31 +499,40 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
 
   const carMesh = instanced(cars, carGeo, carMat, "CityCars");
   /*
-   * THE TREE, one way or the other. On the preset path the procedural meshes
-   * are never built — not built and hidden — so a city running preset trees
-   * pays nothing for the icospheres, and `kinds` below skips them because it
-   * already tolerates a null mesh (a kind with no placements returns null).
+   * THE TREE, one way or the other.
    *
-   * The preset arrives ASYNCHRONOUSLY: it is a JSON fetch, a leaf atlas and a
-   * trunk GLB. The city is built synchronously and cannot wait for that, so the
-   * meshes are attached when they land. `disposed` guards the case where the
-   * city is torn down or rebuilt first — without it a rebuild mid-load attaches
-   * a canopy to a group nobody is drawing any more and leaks it.
+   * On the preset path this module draws NO trees at all — not hidden ones,
+   * none — because the trees are not ours to draw. They go into v3's shared
+   * TreeStore and its own renderers pick them up, which is what buys the leaf
+   * LOD, the impostors and the GPU culling that a mesh built here would have to
+   * reimplement (and did, badly, at 6 ms). `kinds` below already tolerates a
+   * null mesh, so the distance cull simply skips them.
+   *
+   * `treeEnv` is the engine's; without one the preset path cannot work, so it
+   * falls back to procedural rather than silently drawing nothing.
+   *
+   * Publishing is ASYNCHRONOUS — the preset is a JSON fetch, a leaf atlas and a
+   * trunk GLB. `disposed` guards a rebuild that lands first: without it the
+   * trees of a city nobody is drawing any more would be left in the store.
    */
-  const usePreset = F.treeSource === "preset";
+  const usePreset = F.treeSource === "preset" && !!treeEnv;
   const trunkMesh = usePreset ? null : instanced(trees, trunkGeo, trunkMat, "CityTrunks", { shadows: false });
   const canopyMesh = usePreset ? null : instanced(trees, canopyGeo, canopyMat, "CityCanopies");
   let presetTrees = null;
   let disposed = false;
+  // MUTATED IN PLACE, and returned by reference below. The stats object is
+  // built once when this function returns, long before the trees land, so a
+  // value assigned later would never reach a caller holding that snapshot.
+  const presetTreeStats = { planted: 0, slot: -1 };
   if (usePreset && trees.length) {
-    loadCityTreePreset()
-      .then((bundle) => {
-        if (disposed) return;
-        presetTrees = buildPresetCityTrees(bundle, trees);
-        if (presetTrees.leafMesh) group.add(presetTrees.leafMesh);
-        if (presetTrees.trunkMesh) group.add(presetTrees.trunkMesh);
+    installCityPresetTrees(treeEnv, trees, { groundY: gyBase })
+      .then((handle) => {
+        if (disposed) { handle.dispose(); return; }
+        presetTrees = handle;
+        presetTreeStats.planted = handle.stats.trees;
+        presetTreeStats.slot = handle.stats.slot;
       })
-      .catch((e) => console.warn("[CityFurniture] preset trees failed, none drawn:", e));
+      .catch((e) => console.warn("[CityFurniture] preset trees failed, none planted:", e));
   }
   const lightMesh = instanced(lights, lightGeo, lightMat, "CityTrafficLights", { shadows: false });
   const railMesh = instanced(rails, railGeo, railMat, "CityRails", { shadows: false });
@@ -613,9 +622,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const _tm = new THREE.Matrix4();
   for (const e of [...cars, ...trees, ...lights, ...rails]) { _pos.setFromMatrixPosition(e.m); e.x = _pos.x; e.z = _pos.z; }
   function applyLod(view) {
-    // Preset trunks carry their own cull — see the note there for why they
-    // cannot ride the loop below.
-    presetTrees?.applyLod(view);
+    // No preset-tree case here on purpose: those are culled and LOD'd by v3's
+    // own tree renderers, which run off the engine's camera every frame.
     const cam = view.pos;
     for (const k of kinds) {
       if (!k.mesh) continue;
@@ -652,6 +660,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     stats: {
       cars: cars.length, trees: trees.length, lights: lights.length, rails: rails.length,
       traffic: traffic.length, lanes: lanes.length,
+      /** Live — filled in when the preset trees land. `planted: 0` with
+       *  treeSource "preset" means they are still loading, or failed. */
+      presetTrees: presetTreeStats,
     },
     setNight(n) { uNight.value = Math.max(0, Math.min(1, n || 0)); },
     /** The night skyglow — colour and strength. */
@@ -665,11 +676,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     updateTraffic,
     dispose() {
       disposed = true;                    // stops an in-flight preset load attaching
-      if (presetTrees) {
-        for (const m of [presetTrees.leafMesh, presetTrees.trunkMesh]) if (m) group.remove(m);
-        presetTrees.dispose();
-        presetTrees = null;
-      }
+      // Nothing to remove from the group — preset trees live in the engine's
+      // TreeStore, not here. This unplants them.
+      if (presetTrees) { presetTrees.dispose(); presetTrees = null; }
       for (const m of [carMesh, trunkMesh, canopyMesh, lightMesh, railMesh, trafficMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
       for (const g of [carGeo, trunkGeo, canopyGeo, lightGeo, railGeo]) g.dispose();
       for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat]) m.dispose();

@@ -258,6 +258,15 @@ export function createModularRoadCity({
   avoid = null,
   heightAt = null,
   reflectionTexture = null,
+  /**
+   * The engine's tree environment (app.treeEnv from startV3App).
+   *
+   * Handed in rather than imported because the city is a GAME system and the
+   * tree stack is the ENGINE's — the city publishes placements into it, it does
+   * not own it. Without one, furniture falls back to its procedural tree, so a
+   * headless build or a host with no tree stack still works.
+   */
+  treeEnv = null,
 } = {}) {
   const P = { ...CITY_DEFAULTS, ...params };
 
@@ -741,6 +750,7 @@ export function createModularRoadCity({
           // The street's OWN lamp field, so a car is lit by the lamp whose
           // pool it is parked in and the two can never drift apart.
           lamp: { pool: ground.lampPoolFree, color: ground.lampColor },
+          treeEnv,
         });
         group.add(furniture.group);
         stats.furniture = furniture.stats;

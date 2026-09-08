@@ -164,6 +164,39 @@ export class TreeStore {
     return n;
   }
 
+  /**
+   * Drop every tree belonging to one slot, wherever it is.
+   *
+   * `removeTreesInRadius` cannot do this job for a caller that plants OUTSIDE
+   * the terrain world: it derives a chunk window from `config.world` and clamps
+   * it to `[0, maxC]`, so anything past the world edge is silently skipped.
+   * Adding a tree has no such limit — `worldToChunkIndex` just floors, and a
+   * negative or over-range index is a perfectly good Map key — so a system that
+   * covers more ground than the terrain does (the modular-road city spans
+   * ±1200 m against a ±800 m world) can plant trees it could never remove.
+   *
+   * This walks the chunks it actually has instead of a computed window, which
+   * is the only way to be exhaustive, and is cheap because it runs on edits and
+   * teardown rather than per frame.
+   *
+   * @returns {number} how many trees were removed
+   */
+  removeTreesBySlot(slotIdx) {
+    let removed = 0;
+    for (const [key, trees] of this.chunks) {
+      const kept = [];
+      for (const t of trees) {
+        if (t.slotIdx === slotIdx) removed++;
+        else kept.push(t);
+      }
+      if (kept.length === trees.length) continue;   // untouched — do not bump
+      if (kept.length) this.chunks.set(key, kept);
+      else this.chunks.delete(key);
+      this._bumpGen(key);
+    }
+    return removed;
+  }
+
   clear() {
     for (const key of this.chunks.keys()) this._bumpGen(key);
     this.chunks.clear();
