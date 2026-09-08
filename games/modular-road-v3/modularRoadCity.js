@@ -860,15 +860,15 @@ export function createModularRoadCity({
        * to be able to take itself OUT of it — something you have just sent
        * down the street must stop being something to hit.
        *
-       * Returns NULL by default now: the guardrails it was pointed at stand
-       * flush against the kerb and cannot be knocked anywhere, so they are
-       * static collision again. See the note on CITY_KNOCK.enabled.
+       * Pointed at the STREET CLUTTER, not at the guardrails: a rail stands
+       * flush against the kerb and cannot be knocked anywhere, which is why
+       * they went back to being static walls. Cones, bins, pallets and water
+       * barriers stand in the road with room behind them, and none of them is
+       * in the obstacle table at all — see modularRoadCityClutter.js.
        */
       knockables = furniture
         ? createCityKnockables({
-          rails: furniture.lists.rails,
-          mesh: furniture.railMesh,
-          obstacles,
+          groups: furniture.knockableGroups,
           groundY: P.groundY,
           params: P.knockParams,
         })
@@ -1000,6 +1000,9 @@ export function createModularRoadCity({
       knockables.update(dt, car);
       return knockables.stats.knocked - before;
     },
+    /** The furniture handle — its placement lists are what the obstacle table
+     *  and the knockable pool both read. */
+    get furniture() { return furniture; },
     /** Live knockable params, or null when there is no furniture. */
     get knockables() { return knockables ? knockables.params : null; },
     /** Live per-kind toggles: lamps / lights / trees / cars / rails / radius. */

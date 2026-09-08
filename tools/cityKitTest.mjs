@@ -351,6 +351,46 @@ console.log("\n── LOOK PASS ──");
   let fmeshes = 0;
   c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Cars|Trunks|Canopies|TrafficLights|Rails|Traffic)$/.test(o.name)) fmeshes++; });
   check("furniture is exactly six instanced meshes", fmeshes === 6, `${fmeshes}`);
+
+  // ── STREET CLUTTER ────────────────────────────────────────────────────────
+  {
+    const names = [];
+    c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Cones|Barriers|Bins|Pallets)$/.test(o.name)) names.push(o.name); });
+    check("clutter is four instanced meshes", names.length === 4, names.sort().join(","));
+    // One material across all four: they differ by geometry, and four
+    // materials would be four shader builds for a difference nobody sees.
+    const mats = new Set();
+    c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Cones|Barriers|Bins|Pallets)$/.test(o.name)) mats.add(o.material.uuid); });
+    check("clutter shares one material", mats.size === 1, `${mats.size} material(s)`);
+    const cl = fs.clutter;
+    check("roadworks and bays actually place", !!cl && cl.cones > 200 && cl.barriers > 10 && cl.bins > 10 && cl.pallets > 10, JSON.stringify(cl));
+    // A cone belongs to a SITE. Every barrier heads a run of cones, so cones
+    // must outnumber barriers by roughly the taper+run count, never be loose.
+    check("cones come in runs, not scattered", cl.cones / Math.max(1, cl.barriers) > 8,
+      `${(cl.cones / Math.max(1, cl.barriers)).toFixed(1)} cones per barrier`);
+    // NOTHING here is in the obstacle table: a cone that stops a car is wrong,
+    // and a knockable with no capsule needs no de-collision. See the module.
+    const ob = c.stats.obstacles;
+    const solidKinds = Object.keys(ob).filter((k) => /cone|barrier|bin|pallet|clutter/i.test(k));
+    check("clutter is never solid", solidKinds.length === 0,
+      solidKinds.length ? `in the table: ${solidKinds.join(",")}` : `${ob.total} capsules, none of them clutter`);
+    check("the knockable pool is pointed at the clutter", !!c.stats.knockables,
+      c.stats.knockables ? "live" : "pool absent");
+    /*
+     * EVERY placement must carry a cached x/z. Both the LOD partition and the
+     * knockable scan test them, and an entry without them reads `undefined`,
+     * so `NaN >= range²` is FALSE — the kind is silently never culled AND
+     * never knockable, with no error anywhere. That is exactly what happened
+     * when the clutter was first added.
+     */
+    const lists = c.furniture?.lists ?? {};
+    const missing = Object.entries(lists)
+      .filter(([, l]) => Array.isArray(l) && l.length)
+      .filter(([, l]) => !Number.isFinite(l[0].x) || !Number.isFinite(l[0].z))
+      .map(([n]) => n);
+    check("every furniture kind caches x/z (or it is never culled and never hit)",
+      missing.length === 0, missing.length ? `no x/z on: ${missing.join(",")}` : `${Object.keys(lists).length} kinds`);
+  }
   // MOVING TRAFFIC: one more draw, driven on the CPU and culled by distance.
   check("traffic is laid out on lanes", fs.lanes > 40 && fs.traffic > 200, `${fs.traffic} cars on ${fs.lanes} lanes`);
   {

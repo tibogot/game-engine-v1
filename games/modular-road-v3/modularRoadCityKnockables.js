@@ -51,14 +51,12 @@ export const CITY_KNOCK = {
    * object you hit. PLAYED, and it is not fun, which is the only test that
    * mattered here.
    *
-   * The machinery is right; the target was wrong. Physics belongs on things
-   * standing IN THE ROAD, where there is room behind them and where hitting
-   * one is a decision the player made — cones, roadworks, bins, pallets. That
-   * is the next piece of work, and this pool is what will drive it, so it
-   * stays. Until then it allocates nothing and costs nothing: see the early
-   * return in createCityKnockables.
+   * The machinery was right; the target was wrong. It now drives the STREET
+   * CLUTTER instead — cones, bins, pallets and water barriers, which stand in
+   * the road with room behind them and which hitting is a decision you made.
+   * See modularRoadCityClutter.js.
    */
-  enabled: false,
+  enabled: true,
   /**
    * How many rails can be in the air at once.
    *
@@ -117,45 +115,66 @@ const _quat = new THREE.Quaternion();
 const _scl = new THREE.Vector3();
 
 /**
+ * SEVERAL KINDS, ONE POOL.
+ *
+ * A cone and a water-filled barrier are the same simulation with different
+ * numbers, so they share the bodies and the per-frame scan; what they do not
+ * share is MASS, which is the only thing that makes one of them fly and the
+ * other shove. Each group carries its own overrides and the body remembers
+ * which group threw it.
+ *
+ * One pool rather than one per kind because the pool cap IS the cost model: 32
+ * bodies is the ceiling on all the work this system can ever do in a frame,
+ * and four pools of 32 would quietly make that 128.
+ *
  * @param {object} o
- * @param {Array}  o.rails       the furniture's rail placements ({ m, x, z })
- * @param {THREE.InstancedMesh} o.mesh   the rail mesh, so a flying one can be redrawn
- * @param {object} o.obstacles   the city's obstacle table (for knockRail)
+ * @param {Array<{list:Array, mesh:THREE.InstancedMesh, params?:object, solid?:object}>} o.groups
+ *        each kind's placements ({ m, x, z }), its mesh, and its overrides.
+ *        `solid` is an optional obstacle table with `knockRail(i)` — a kind
+ *        without one is never in the collision table and needs no de-collision.
  * @param {number} o.groundY
- * @param {object} [o.params]
+ * @param {object} [o.params]  defaults shared by every group
  */
-export function createCityKnockables({ rails, mesh, obstacles, groundY = 0, params = {} }) {
+export function createCityKnockables({ groups = [], groundY = 0, params = {} }) {
   const K = { ...CITY_KNOCK, ...params };
   // Disabled means ABSENT, not idle: no pool, no per-frame scan, and the city's
   // updateKnockables returns 0 without touching anything.
   if (!K.enabled) return null;
-  /** @type {Array<{railIdx:number, e:object, pos:THREE.Vector3, vel:THREE.Vector3,
+  const G = groups.filter((g) => g && g.mesh && g.list?.length)
+    .map((g) => ({ ...g, K: { ...K, ...(g.params ?? {}) } }));
+  if (!G.length) return null;
+  /** @type {Array<{g:object, idx:number, e:object, pos:THREE.Vector3, vel:THREE.Vector3,
    *   quat:THREE.Quaternion, spin:THREE.Vector3, still:number, done:boolean}>} */
   const active = [];
   const stats = { knocked: 0, active: 0 };
 
-  function knock(railIdx, carVel, speed) {
+  function knock(g, idx, carVel, speed) {
     if (active.length >= K.pool) return false;
-    // Collision first: if the table has already dropped this one (it sat in the
-    // track corridor and was never solid), there is nothing to knock.
-    if (!obstacles?.knockRail?.(railIdx)) return false;
-    const e = rails[railIdx];
+    // Collision first, for a kind that HAS collision: if the table has already
+    // dropped this one (it sat in the track corridor and was never solid),
+    // there is nothing to knock. A kind with no table is always knockable.
+    if (g.solid && !g.solid.knockRail?.(idx)) return false;
+    const e = g.list[idx];
+    // NOT `K` — the outer K is read on this function's first line, and a
+    // same-named const here puts that read inside its own dead zone.
+    const gk = g.K;
     e.m.decompose(_pos, _quat, _scl);
 
-    const throwSpeed = speed * K.hitImpulse;
+    const throwSpeed = speed * gk.hitImpulse;
     const dir = _v.copy(carVel).setY(0);
     if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1); else dir.normalize();
 
     active.push({
-      railIdx,
+      g,
+      idx,
       e,
       pos: _pos.clone(),
-      vel: dir.multiplyScalar(throwSpeed).setY(throwSpeed * K.hitLoft),
+      vel: dir.multiplyScalar(throwSpeed).setY(throwSpeed * gk.hitLoft),
       quat: _quat.clone(),
       // Tumble about a horizontal axis across the throw — a panel hit side-on
       // goes end over end, which a random axis does not give you.
       spin: new THREE.Vector3(-dir.z, 0, dir.x)
-        .multiplyScalar(Math.min(throwSpeed * K.spinPerSpeed, K.spinMax)),
+        .multiplyScalar(Math.min(throwSpeed * gk.spinPerSpeed, gk.spinMax)),
       still: 0,
       done: false,
     });
@@ -169,7 +188,7 @@ export function createCityKnockables({ rails, mesh, obstacles, groundY = 0, para
    * never writes to it.
    */
   function update(dt, car) {
-    if (!K.enabled || !mesh || !car) return;
+    if (!car) return;
     const step = Math.min(dt, 1 / 30);   // a long frame must not launch anything
 
     /*
@@ -194,36 +213,45 @@ export function createCityKnockables({ rails, mesh, obstacles, groundY = 0, para
      */
     const speed = car.vel ? car.vel.length() : 0;
     if (speed >= K.minSpeed && active.length < K.pool) {
-      const r2 = K.range * K.range;
       const cx = car.pos.x, cz = car.pos.z;
       const ux = car.vel.x / speed, uz = car.vel.z / speed;
-      const reach = Math.min(speed * K.lookahead, K.lookaheadMax);
-      for (let i = 0; i < rails.length; i++) {
-        const e = rails[i];
-        if (e.knocked) continue;
-        const dx = e.x - cx, dz = e.z - cz;
-        if (dx * dx + dz * dz > r2) continue;
-        const ahead = dx * ux + dz * uz;
-        if (ahead < -K.hitRadius || ahead > reach + K.hitRadius) continue;
-        const side = Math.abs(dx * uz - dz * ux);
-        if (side <= K.hitRadius) { if (!knock(i, car.vel, speed)) break; }
+      scan: for (const g of G) {
+        const GK = g.K;
+        if (speed < GK.minSpeed) continue;
+        const r2 = GK.range * GK.range;
+        // A kind with no collision needs no lookahead: nothing is going to
+        // stop the car before the body is launched, so the honest test is
+        // "did the car reach it", not "is it about to".
+        const reach = g.solid ? Math.min(speed * GK.lookahead, GK.lookaheadMax) : 0;
+        const list = g.list;
+        for (let i = 0; i < list.length; i++) {
+          const e = list[i];
+          if (e.knocked) continue;
+          const dx = e.x - cx, dz = e.z - cz;
+          if (dx * dx + dz * dz > r2) continue;
+          const ahead = dx * ux + dz * uz;
+          if (ahead < -GK.hitRadius || ahead > reach + GK.hitRadius) continue;
+          const side = Math.abs(dx * uz - dz * ux);
+          if (side <= GK.hitRadius) { if (!knock(g, i, car.vel, speed)) break scan; }
+        }
       }
     }
 
     // ── INTEGRATE WHAT IS MOVING ─────────────────────────────────────────────
-    let wrote = false;
+    const wrote = new Set();
     for (let i = active.length - 1; i >= 0; i--) {
       const b = active[i];
       if (b.done) continue;
-      b.vel.y -= K.gravity * step;
+      const bk = b.g.K;
+      b.vel.y -= bk.gravity * step;
       b.pos.addScaledVector(b.vel, step);
 
       if (b.pos.y <= groundY) {
         b.pos.y = groundY;
-        if (b.vel.y < 0) b.vel.y = -b.vel.y * K.restitution;
-        const damp = Math.max(0, 1 - K.friction * step);
+        if (b.vel.y < 0) b.vel.y = -b.vel.y * bk.restitution;
+        const damp = Math.max(0, 1 - bk.friction * step);
         b.vel.x *= damp; b.vel.z *= damp;
-        b.spin.multiplyScalar(Math.max(0, 1 - K.angularDamping * step));
+        b.spin.multiplyScalar(Math.max(0, 1 - bk.angularDamping * step));
       }
 
       const spinLen = b.spin.length();
@@ -234,9 +262,9 @@ export function createCityKnockables({ rails, mesh, obstacles, groundY = 0, para
       }
 
       // Sleep: a settled panel must stop integrating AND stop jittering.
-      if (b.vel.lengthSq() < K.sleepSpeed * K.sleepSpeed && spinLen < K.sleepSpin) {
+      if (b.vel.lengthSq() < bk.sleepSpeed * bk.sleepSpeed && spinLen < bk.sleepSpin) {
         b.still += step;
-        if (b.still > K.sleepAfter) { b.done = true; b.vel.set(0, 0, 0); b.spin.set(0, 0, 0); }
+        if (b.still > bk.sleepAfter) { b.done = true; b.vel.set(0, 0, 0); b.spin.set(0, 0, 0); }
       } else {
         b.still = 0;
       }
@@ -250,10 +278,11 @@ export function createCityKnockables({ rails, mesh, obstacles, groundY = 0, para
        * frame. `idx` is where the last LOD tick put this entry, and -1 when it
        * culled it — writing to a stale index would move somebody else's rail.
        */
-      const idx = b.e.idx ?? -1;
-      if (idx >= 0 && idx < mesh.count) { mesh.setMatrixAt(idx, b.e.liveM); wrote = true; }
+      const slot = b.e.idx ?? -1;
+      const mesh = b.g.mesh;
+      if (slot >= 0 && slot < mesh.count) { mesh.setMatrixAt(slot, b.e.liveM); wrote.add(mesh); }
     }
-    if (wrote) mesh.instanceMatrix.needsUpdate = true;
+    for (const m of wrote) m.instanceMatrix.needsUpdate = true;
 
     // Retire finished bodies — the rail keeps `liveM`, so it stays where it
     // fell for as long as the city lives.

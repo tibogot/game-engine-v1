@@ -28,6 +28,7 @@ import {
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { installCityPresetTrees } from "./modularRoadCityTreePreset.js";
+import { buildClutterKit, placeStreetClutter, CLUTTER_DEFAULTS } from "./modularRoadCityClutter.js";
 
 /**
  * WHICH WAY THE CAR MODEL FACES, along its own local Z. +1 means the bonnet
@@ -129,6 +130,8 @@ export const FURNITURE_DEFAULTS = {
   signalNight: 1.8,
   /** Keep clear of the crossings at block ends, metres. */
   crossClear: 6.5,
+  /** Roadworks and loading-bay clutter — see modularRoadCityClutter.js. */
+  ...CLUTTER_DEFAULTS,
   nightAmount: 0,
   /** ── MOVING TRAFFIC ───────────────────────────────────────────────────
    *  Cars driving the lanes, wrapping across the city. ONE extra draw, and
@@ -423,6 +426,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   })();
   /** Lens centres in geometry Y, top to bottom — the shader bands off these. */
   const LENS_Y = [F.lightHeight - 0.52, F.lightHeight - 0.85, F.lightHeight - 1.18];
+  const { coneGeo, barrierGeo, binGeo, palletGeo } = buildClutterKit();
   const railGeo = mergeGeometries([
     box(0.06, 1.05, 0.06, -0.95, 0, 0), box(0.06, 1.05, 0.06, 0.95, 0, 0),   // posts
     box(2.0, 0.05, 0.05, 0, 1.0, 0), box(2.0, 0.05, 0.05, 0, 0.55, 0),        // rails
@@ -441,6 +445,15 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const canopyMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.95 });
   canopyMat.name = "CityCanopies";
   canopyMat.emissiveNode = litAdd({ icolor: true });
+  /*
+   * ONE MATERIAL FOR ALL FOUR KINDS. Cones, barriers, bins and pallets are all
+   * rough dielectrics carrying their own vertex colours, so they differ by
+   * geometry alone — four materials would be four shader builds and four
+   * pipeline compiles for a difference nobody can see.
+   */
+  const clutterMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.78, metalness: 0.0, vertexColors: true });
+  clutterMat.name = "CityClutter";
+  clutterMat.emissiveNode = litAdd({ vcolor: true });
   const railMat = new THREE.MeshStandardNodeMaterial({ color: 0x3a3d42, roughness: 0.45, metalness: 0.7 });
   railMat.name = "CityRails";
   railMat.emissiveNode = litAdd();
@@ -498,6 +511,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
 
   // ── Placement ──────────────────────────────────────────────────────────────
   const cars = [], trees = [], lights = [], rails = [];
+  const cones = [], barriers = [], bins = [], pallets = [];
+  const clutterInto = { cones, barriers, bins, pallets };
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
   const UP = new THREE.Vector3(0, 1, 0);
   const place = (list, x, z, yaw, extra) => {
@@ -601,6 +616,16 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
             const phase = (axis === "z" ? 0 : 0.5) + wave;
             place(lights, x, z, yawAlong + (side === 0 ? 0 : Math.PI), { phase });
           }
+          /*
+           * ROADWORKS AND LOADING BAYS. Placed from HERE rather than from the
+           * clutter module because this loop is the one place that turns block
+           * indices into kerb lines — a second copy of that maths is how the
+           * two would drift apart.
+           */
+          placeStreetClutter({
+            into: clutterInto, place, at, kerb, dir, a0, a1, yawAlong,
+            rand: h2, seed: seedA + (side === 0 ? 0 : 977), C: F,
+          });
         }
       }
     }
@@ -742,6 +767,10 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     lightGeo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
   }
   const railMesh = instanced(rails, railGeo, railMat, "CityRails", { shadows: false });
+  const coneMesh = instanced(cones, coneGeo, clutterMat, "CityCones", { shadows: false });
+  const barrierMesh = instanced(barriers, barrierGeo, clutterMat, "CityBarriers", { shadows: true });
+  const binMesh = instanced(bins, binGeo, clutterMat, "CityBins", { shadows: true });
+  const palletMesh = instanced(pallets, palletGeo, clutterMat, "CityPallets", { shadows: false });
   const trafficMesh = traffic.length
     ? (() => {
       const im = new THREE.InstancedMesh(carGeo, trafficMat, traffic.length);
@@ -819,16 +848,54 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   // the same InstancedMesh with the same count, so a car dropped for being
   // off-screen also loses the shadow it throws INTO the frame. See
   // modularRoadCityLodView.js. Everything else gets the frustum test too.
+  /*
+   * The knockable kinds: a list, its mesh, and the mass that decides whether
+   * it flies or shoves. A cone is light enough to be launched by a glancing
+   * blow; a water-filled barrier shifts and rotates and never leaves the
+   * ground, which is the only thing that makes the two feel different. None is
+   * `solid` — see the note at the top of modularRoadCityClutter.js.
+   */
+  const knockGroups = [
+    { list: cones, mesh: coneMesh, params: { hitImpulse: 1.05, hitLoft: 0.42, spinPerSpeed: 2.6, spinMax: 22, restitution: 0.34, friction: 2.4, hitRadius: 1.5 } },
+    { list: bins, mesh: binMesh, params: { hitImpulse: 0.62, hitLoft: 0.22, spinPerSpeed: 1.4, spinMax: 12, restitution: 0.2, friction: 3.4, hitRadius: 1.6 } },
+    { list: pallets, mesh: palletMesh, params: { hitImpulse: 0.68, hitLoft: 0.20, spinPerSpeed: 1.6, spinMax: 13, restitution: 0.18, friction: 3.6, hitRadius: 1.7 } },
+    { list: barriers, mesh: barrierMesh, params: { hitImpulse: 0.34, hitLoft: 0.07, spinPerSpeed: 0.7, spinMax: 5, restitution: 0.12, friction: 5.5, hitRadius: 2.0, minSpeed: 5.0 } },
+  ];
   const kinds = [
     { mesh: carMesh, list: cars, range: 420, casts: true },
     { mesh: trunkMesh, list: trees, range: 650, casts: false },
     { mesh: canopyMesh, list: trees, range: 650, casts: true },
     { mesh: lightMesh, list: lights, range: 380, casts: false },
     { mesh: railMesh, list: rails, range: 260, casts: false },
+    // Small, low and close to the road, so they go early. A cone at 200 m is
+    // three pixels and there are more of them than of anything except rails.
+    { mesh: coneMesh, list: cones, range: 190, casts: false },
+    { mesh: barrierMesh, list: barriers, range: 240, casts: true },
+    { mesh: binMesh, list: bins, range: 190, casts: true },
+    { mesh: palletMesh, list: pallets, range: 170, casts: false },
   ];
   const _pos = new THREE.Vector3();
   const _tm = new THREE.Matrix4();
-  for (const e of [...cars, ...trees, ...lights, ...rails]) { _pos.setFromMatrixPosition(e.m); e.x = _pos.x; e.z = _pos.z; }
+  /*
+   * THE X/Z CACHE, AND WHY IT IS DERIVED RATHER THAN LISTED.
+   *
+   * Both the LOD partition below and the knockable pool test `e.x`/`e.z`, and
+   * an entry that never got them reads `undefined` — so `dx * dx + dz * dz`
+   * is NaN, `NaN >= r2` is FALSE, and the kind is silently never culled AND
+   * never knockable. MEASURED when the clutter was first added against a
+   * hand-written list: all 1456 cones drew from anywhere in a 2.4 km city and
+   * not one of them could be hit, with no error anywhere.
+   *
+   * So the lists come from `kinds` and the knockable groups themselves. A new
+   * kind cannot be forgotten here, because forgetting it would mean not
+   * declaring it at all.
+   */
+  const cached = new Set();
+  for (const list of [...kinds.map((k) => k.list), ...knockGroups.map((g) => g.list)]) {
+    if (!list || cached.has(list)) continue;
+    cached.add(list);
+    for (const e of list) { _pos.setFromMatrixPosition(e.m); e.x = _pos.x; e.z = _pos.z; }
+  }
   function applyLod(view) {
     // No preset-tree case here on purpose: those are culled and LOD'd by v3's
     // own tree renderers, which run off the engine's camera every frame.
@@ -869,16 +936,21 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   return {
     /** Every placement, by kind — the obstacle table turns these into the
      *  capsules the car collides with (modularRoadCityObstacles.js). */
-    lists: { cars, trees, lights, rails },
+    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets },
     /** The rail mesh, so the knockables can redraw one that is in the air —
      *  `applyLod` only rewrites five times a second, which a thrown barrier
      *  cannot wait for. */
     railMesh,
+    /** The knockable kinds, ready for the pool: each is a list, its mesh, and
+     *  the mass that decides whether it flies or shoves. None is `solid` — see
+     *  the note at the top of modularRoadCityClutter.js. */
+    knockableGroups: knockGroups,
     group,
     params: F,
     stats: {
       cars: cars.length, trees: trees.length, lights: lights.length, rails: rails.length,
       traffic: traffic.length, lanes: lanes.length,
+      clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length },
       /** Live — filled in when the preset trees land. `planted: 0` with
        *  treeSource "preset" means they are still loading, or failed. */
       presetTrees: presetTreeStats,
@@ -898,9 +970,11 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       // Nothing to remove from the group — preset trees live in the engine's
       // TreeStore, not here. This unplants them.
       if (presetTrees) { presetTrees.dispose(); presetTrees = null; }
-      for (const m of [carMesh, trunkMesh, canopyMesh, lightMesh, railMesh, trafficMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
-      for (const g of [carGeo, trunkGeo, canopyGeo, lightGeo, railGeo]) g.dispose();
-      for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat]) m.dispose();
+      for (const m of [carMesh, trunkMesh, canopyMesh, lightMesh, railMesh, trafficMesh,
+        coneMesh, barrierMesh, binMesh, palletMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
+      for (const g of [carGeo, trunkGeo, canopyGeo, lightGeo, railGeo,
+        coneGeo, barrierGeo, binGeo, palletGeo]) g.dispose();
+      for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat, clutterMat]) m.dispose();
     },
   };
 }

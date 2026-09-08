@@ -364,7 +364,9 @@ console.log("\n── FURNITURE SHADERS ──");
   });
   const mats = [];
   furn.group.traverse((o) => { if (o.isInstancedMesh) mats.push([o.name, o.material, o]); });
-  check("every furniture kind has a material", mats.length === 6, mats.map(([n]) => n).join(","));
+  // Six original kinds plus the four street-clutter ones, which share ONE
+  // material between them — see the clutter section of cityKitTest.
+  check("every furniture kind has a material", mats.length === 10, mats.map(([n]) => n).join(","));
 
   let bad = null;
   for (const [name, mat, mesh] of mats) {
