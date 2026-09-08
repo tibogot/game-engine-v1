@@ -78,7 +78,7 @@ import {
 import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.js";
 import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
 import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
-import { createCityStreets } from "./modularRoadCityStreets.js";
+import { createCityStreets, STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
 import { createCityObstacles } from "./modularRoadCityObstacles.js";
@@ -937,6 +937,31 @@ export function createModularRoadCity({
     get lotHeights() { return facade.lotHeights; },
     /** Live street-material params, or null when there is no ground plane. */
     get streets() { return ground ? ground.params : null; },
+    /**
+     * Push edits to `streets` into the live uniforms — a uniform write, no
+     * rebuild, so it is safe to call from a slider's input event.
+     *
+     * Returns true when a BUILD-TIME gate moved and the street has to be
+     * rebuilt for the change to mean anything; the caller decides when to pay
+     * that (~7 s), because doing it silently mid-drag would be worse than the
+     * slider appearing to do nothing for a moment.
+     */
+    applyStreetParams(patch) {
+      if (!ground) return false;
+      const needsRebuild = ground.applyParams(patch);
+      if (needsRebuild) P.streetParams = { ...P.streetParams, ...ground.params };
+      return needsRebuild;
+    },
+    /**
+     * Back to the authored look. Clears `P.streetParams` too, or the next
+     * rebuild would resurrect the overrides this just undid.
+     * @returns {boolean} true if a rebuild is needed (a build-time gate moved)
+     */
+    resetStreetParams() {
+      if (!ground) return false;
+      P.streetParams = {};
+      return ground.applyParams(STREET_DEFAULTS);
+    },
     /**
      * This frame's mirror, forwarded to the street. Hand it exactly what the
      * road deck gets — the pass is shared, and the street's own fades decide

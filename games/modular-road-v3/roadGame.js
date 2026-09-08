@@ -8224,14 +8224,31 @@ ${e.message}`);
       /** The track's wish, not the deck: the cloud TIER decides whether that
        *  wish is currently affordable, and the two controls stay independent. */
       getClouds: () => cloudsWanted,
-      /** The skyline. Track data — see the CITY block. */
-      setCity: (on) => { cityWanted = !!on; syncCity(); },
+      /** The skyline. Track data — see the CITY block.
+       *  The refresh is not cosmetic: the street-look controls bind to a bag
+       *  that does not exist until the city is built, so without it they sit
+       *  at zero showing values the street does not have. */
+      setCity: (on) => { cityWanted = !!on; syncCity(); devPanel?.refresh?.(); },
       getCity: () => cityWanted,
       /** Buildings solid, or drive-through. */
       setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
       getCityCollide: () => cityCollide,
       reseedCity,
       getCityStats: () => city?.stats ?? null,
+      /* ── STREET SURFACE ────────────────────────────────────────────────
+       * The asphalt's own look. `streetParams()` is the LIVE bag — a GETTER,
+       * because the street is rebuilt on any relayout and a captured bag would
+       * be one nobody is drawing. `applyStreet` is a uniform write and returns
+       * true only when a build-time gate moved. Machine settings; a track saves
+       * none of it. */
+      streetParams: () => city?.streets ?? null,
+      applyStreet: (patch) => city?.applyStreetParams?.(patch) ?? false,
+      rebuildStreet: () => { if (city) applyCityParams(); },
+      resetStreet: () => {
+        if (!city?.streets) return false;
+        if (city.resetStreetParams()) applyCityParams();
+        return true;
+      },
       /** Drift dock + open ocean. Track data, same as the city — see the block. */
       setDock: (on) => { dockWanted = !!on; syncDockOcean(); bakeCollision(); },
       getDock: () => dockWanted,
@@ -9040,10 +9057,28 @@ ${e.message}`);
     /** The skyline — track data, lazily built. `city()` is the live handle
      *  (params, facade proxy, stats) for console tuning; `cityParams` is the
      *  set a track may pin; `applyCityParams` relayouts after editing them. */
-    setCity: (on) => { cityWanted = !!on; syncCity(); },
+    setCity: (on) => { cityWanted = !!on; syncCity(); devPanel?.refresh?.(); },
     getCity: () => cityWanted,
     setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
     getCityCollide: () => cityCollide,
+    /* ── STREET SURFACE ────────────────────────────────────────────────────
+     * The asphalt's own look — chips, wear, streak, relief, kerbs, paint.
+     * `streetParams()` is the LIVE params bag (bind sliders to it by
+     * reference); `applyStreet()` pushes it into the uniforms with no rebuild.
+     *
+     * Machine settings, not track data: nothing here is saved with a track.
+     */
+    streetParams: () => city?.streets ?? null,
+    /** @returns {boolean} true if a build-time gate moved — call rebuildStreet. */
+    applyStreet: (patch) => city?.applyStreetParams?.(patch) ?? false,
+    /** The ~7 s path, for the handful of gates a uniform cannot express. */
+    rebuildStreet: () => { if (city) applyCityParams(); },
+    /** Back to the authored look. @returns {boolean} false if there is no street. */
+    resetStreet: () => {
+      if (!city?.streets) return false;
+      if (city.resetStreetParams()) applyCityParams();
+      return true;
+    },
     /** Drift dock + open ocean. Both off unless a track's `environment` asks. */
     setDock: (on) => { dockWanted = !!on; syncDockOcean(); bakeCollision(); },
     getDock: () => dockWanted,

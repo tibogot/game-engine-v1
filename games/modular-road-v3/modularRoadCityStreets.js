@@ -467,6 +467,10 @@ export const STREET_DEFAULTS = {
 /** Every default that is a colour, for the uniform builder and the tests. */
 export const isStreetColorKey = (k) => /Color$|^asphalt(Dark|Light)$|^wetTint$/.test(k);
 
+/** Uniforms the GAME owns frame to frame — never written from `params`.
+ *  See applyParams for what goes wrong if they are. */
+const RUNTIME_UNIFORMS = new Set(["wetAmount", "nightAmount"]);
+
 /**
  * Surface-gradient bump (Mikkelsen) — the same one the facade uses. bumpMap
  * offsets a UV to read its height, so it returns a zero gradient for a height
@@ -1394,6 +1398,41 @@ export function createCityStreets({
     /** Night, shared so a consumer fades with the same clock. */
     nightUniform: u.nightAmount,
     lampCount: lampMatrices.length,
+    /**
+     * Push edited `params` into the live uniforms. NO REBUILD.
+     *
+     * Every numeric default became a uniform at build (see the loop that
+     * creates `u`), so almost the whole look is tunable at a uniform write —
+     * which is what makes a panel worth having here. A rebuild of this street
+     * is ~7 s; a slider that cost that would never be dragged twice.
+     *
+     * TWO EXCLUSIONS, and both would be bugs rather than surprises:
+     *
+     *   wetAmount / nightAmount are RUNTIME state, not authored look. The game
+     *   drives them from the weather and the clock through setWet/setNight,
+     *   which write the uniform and deliberately leave `params` alone. Pushing
+     *   params over them would snap a soaked city dry on the next slider drag.
+     *
+     *   `chipsOn` is a BUILD-TIME gate — a JS branch that decides whether the
+     *   cellular field is in the compiled shader at all. Writing its uniform
+     *   changes nothing; it needs the material rebuilt, and the caller is told
+     *   so by the return value rather than left wondering.
+     *
+     * @param {object} [patch] merged into `params` first, if given
+     * @returns {boolean} true when something changed that NEEDS a rebuild
+     */
+    applyParams(patch) {
+      const before = S.chipsOn;
+      if (patch) Object.assign(S, patch);
+      for (const [k, v] of Object.entries(S)) {
+        if (typeof v !== "number" || RUNTIME_UNIFORMS.has(k)) continue;
+        const un = u[k];
+        if (!un) continue;
+        if (isStreetColorKey(k)) un.value.set(v);
+        else un.value = v;
+      }
+      return S.chipsOn !== before;
+    },
     /** Same weather the track gets: 0 dry … 1 soaked. */
     setWet(amount) { u.wetAmount.value = Math.max(0, Math.min(1, amount || 0)); },
     /** 0 day … 1 night — the lamp pools and heads come on with it. */

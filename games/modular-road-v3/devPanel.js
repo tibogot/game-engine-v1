@@ -111,6 +111,201 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">City street — surface</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Asphalt dark</span>
+            <div class="prop-value"><input type="color" id="dv-st-dark" /></div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Asphalt light</span>
+            <div class="prop-value"><input type="color" id="dv-st-light" /></div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-bright" min="0.2" max="3" step="0.02" />
+              <span class="prop-num" id="dv-st-bright-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Grain contrast</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-grain" min="0" max="2.5" step="0.05" />
+              <span class="prop-num" id="dv-st-grain-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Streak</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-streak" min="1" max="30" step="0.5" />
+              <span class="prop-num" id="dv-st-streak-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Roughness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-rough" min="0.3" max="1" step="0.01" />
+              <span class="prop-num" id="dv-st-rough-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Gloss variation</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-roughvary" min="0" max="0.4" step="0.005" />
+              <span class="prop-num" id="dv-st-roughvary-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Streak</b> is the one that decides whether this reads as road or as
+            gravel — it is how many times longer wear is along the street than
+            across it. At 1 the fields are isotropic and look like shingle.
+            Everything here is a uniform write: no rebuild, drag freely.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">City street — chips</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Cellular chips</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-st-chips" type="button" aria-label="Cellular chip field">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Chip size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-chipscale" min="6" max="60" step="1" />
+              <span class="prop-num" id="dv-st-chipscale-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Chip jitter</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-chipjit" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-st-chipjit-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Chip edge</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-chipsharp" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-st-chipsharp-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Chip variation</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-chipvary" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-st-chipvary-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Binder depth</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-binder" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-st-binder-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Chip relief</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-chiprelief" min="0" max="0.05" step="0.001" />
+              <span class="prop-num" id="dv-st-chiprelief-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aggregate relief</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-gritrelief" min="0" max="0.03" step="0.001" />
+              <span class="prop-num" id="dv-st-gritrelief-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            The chips are the <b>daylight</b> texture and they are albedo, not
+            relief. The relief sliders only show under <b>grazing light</b> —
+            headlights at night, a low sun. Under a high sun on a flat road
+            N&middot;L is at its maximum, where tilting the normal changes
+            nothing, so they will look dead at noon whatever you set.
+            <br /><b>Cellular chips</b> is a build-time gate: toggling it
+            rebuilds the street (~7&nbsp;s).
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">City street — markings &amp; wear</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Markings</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-markings" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-st-markings-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wear amount</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-wear" min="0" max="4" step="0.05" />
+              <span class="prop-num" id="dv-st-wear-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Edge bite</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-bite" min="0" max="0.8" step="0.01" />
+              <span class="prop-num" id="dv-st-bite-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Finger size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-finger" min="4" max="60" step="1" />
+              <span class="prop-num" id="dv-st-finger-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wear off-path</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-wearbase" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-st-wearbase-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Wear level</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-wearlevel" min="0.2" max="0.8" step="0.01" />
+              <span class="prop-num" id="dv-st-wearlevel-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Crossing wear</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-crosswear" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-st-crosswear-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Interior mottle</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-wearint" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-st-wearint-v"></span>
+            </div>
+          </div>
+          <button class="action-btn" id="dv-st-reset" type="button">Reset street look</button>
+          <div class="dv-hint">
+            Wear eats a line inward from its <b>edge</b> — <b>Edge bite</b> is how
+            deep, as a fraction of that line's own width, and <b>Finger size</b> is
+            how fine the chipping is. <b>Interior mottle</b> is the old
+            erode-the-whole-area model, kept low on purpose: turn it up and the
+            markings go patchy and grey all over instead of eaten at the rim.
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Ocean</div>
         <div class="section-body">
           <div class="prop-row">
@@ -4901,6 +5096,10 @@ export function createRoadDevPanel({ app, game, params }) {
     // beams and Sky/Sky — Night were each two top-level entries for one idea.
     // Splitting and renaming them is all it takes — this loop does the rest.
     "Track", "Weather", "Camera", "Lights", "Sky", "Flip ramp",
+    // The street's own look — three sections' worth of asphalt, chips and
+    // markings, folded under one entry so the World tab stays inside the
+    // twelve the corridor rule allows.
+    "City street",
   ];
   for (const prefix of GROUP_PREFIXES) {
     const sep = `${prefix} — `;
@@ -5087,7 +5286,8 @@ export function createRoadDevPanel({ app, game, params }) {
       keys: ["Grid snap", "Gap / jump", "Edit piece", "Prop livery", "Flip ramp",
              "Build (sky)", "Track"] },
     { id: "world", label: "World", icon: "🌍",
-      keys: ["World", "World light", "Ocean", "Drift dock", "Sky", "Clouds",
+      keys: ["World", "World light", "City street",
+             "Ocean", "Drift dock", "Sky", "Clouds",
              "Aerial perspective", "Lens flare", "Weather", "Fog", "Post FX"] },
   ];
 
@@ -5944,6 +6144,111 @@ export function createRoadDevPanel({ app, game, params }) {
     "dv-city-collide", game.getCityCollide?.() ?? true, (on) => game.setCityCollide?.(on),
   );
   $("#dv-city-reseed")?.addEventListener("click", () => game.reseedCity?.());
+
+  /* ── CITY STREET SURFACE ───────────────────────────────────────────────────
+   *
+   * ADDRESSED THROUGH A LIVE PROXY, not a captured params bag — the same trap
+   * the road-look controls hit when the deck material was replaced under them,
+   * and the dock controls hit when a track load replaced `pads`. The street is
+   * REBUILT whenever the city relayouts (seed, density, a build-time gate), so
+   * a slider holding the old `params` object would be writing into a material
+   * nobody is drawing. `game.streetParams()` is re-read on every access.
+   *
+   * Writes are uniform writes: `applyStreet` never rebuilds. It returns true
+   * only when a BUILD-TIME gate moved, and only then do we pay the ~7 s.
+   */
+  /** Every street control's re-read, so a rebuild or a reset pulls the panel
+   *  back into agreement with params that moved behind its back. */
+  const streetSyncs = [];
+  const streetProxyCache = new Map();
+  const streetProxy = (key) => {
+    if (!streetProxyCache.has(key)) {
+      const o = {};
+      Object.defineProperty(o, key, {
+        get: () => game.streetParams?.()?.[key] ?? 0,
+        set: (v) => { const p = game.streetParams?.(); if (p) p[key] = v; },
+      });
+      streetProxyCache.set(key, o);
+    }
+    return streetProxyCache.get(key);
+  };
+  const streetSync = () => game.applyStreet?.();
+  /** A slider bound to one street param, live. */
+  const stSlider = (id, key, fmt) => {
+    const h = slider(id, streetProxy(key), key, fmt, streetSync);
+    if (h?.sync) streetSyncs.push(h.sync);
+    return h;
+  };
+  /**
+   * Street colours are HEX NUMBERS in the params bag (0x2b2f34), which is
+   * neither of the two colour helpers above: `roadColor` owns a linear
+   * THREE.Color uniform, `colorField` owns an "#rrggbb" string. The conversion
+   * to linear happens inside applyParams via Color.set(number), so the panel
+   * must hand over a NUMBER and never a pre-converted colour — doing it here
+   * as well is exactly the double-decode this project has been bitten by.
+   */
+  const stColor = (id, key) => {
+    const el = $(`#${id}`);
+    if (!el) return;
+    const sync = () => {
+      const p = game.streetParams?.();
+      if (!p || p[key] == null) return;
+      el.value = `#${(p[key] >>> 0).toString(16).padStart(6, "0")}`;
+    };
+    el.addEventListener("input", () => {
+      const p = game.streetParams?.();
+      if (!p) return;
+      p[key] = parseInt(el.value.slice(1), 16);
+      streetSync();
+    });
+    streetSyncs.push(sync);
+    sync();
+  };
+
+  stColor("dv-st-dark", "asphaltDark");
+  stColor("dv-st-light", "asphaltLight");
+  stSlider("dv-st-bright", "deckBrightness", (v) => v.toFixed(2));
+  stSlider("dv-st-grain", "grainScale", (v) => v.toFixed(2));
+  stSlider("dv-st-streak", "streak", (v) => `${v.toFixed(1)}:1`);
+  stSlider("dv-st-rough", "deckRough", (v) => v.toFixed(2));
+  stSlider("dv-st-roughvary", "roughVary", (v) => v.toFixed(3));
+
+  // Chip size and finger size are FREQUENCIES (cycles per metre across the
+  // street); showing centimetres is what makes them mean something.
+  const asCm = (v) => `${(100 / Math.max(v, 0.001)).toFixed(1)} cm`;
+  const asMm = (v) => `${(v * 1000).toFixed(1)} mm`;
+  stSlider("dv-st-chipscale", "chipScale", asCm);
+  stSlider("dv-st-chipjit", "chipJitter", (v) => v.toFixed(2));
+  stSlider("dv-st-chipsharp", "chipSharp", (v) => v.toFixed(2));
+  stSlider("dv-st-chipvary", "chipVary", (v) => v.toFixed(2));
+  stSlider("dv-st-binder", "binderDepth", (v) => v.toFixed(2));
+  stSlider("dv-st-chiprelief", "chipRelief", asMm);
+  stSlider("dv-st-gritrelief", "gritRelief", asMm);
+
+  stSlider("dv-st-markings", "markings", (v) => v.toFixed(2));
+  stSlider("dv-st-wear", "wearAmount", (v) => v.toFixed(2));
+  stSlider("dv-st-bite", "wearBite", (v) => `${(v * 100).toFixed(0)}%`);
+  stSlider("dv-st-finger", "wearFingerScale", asCm);
+  stSlider("dv-st-wearbase", "wearBase", (v) => v.toFixed(2));
+  stSlider("dv-st-wearlevel", "wearLevel", (v) => v.toFixed(2));
+  stSlider("dv-st-crosswear", "crossWear", (v) => `${v.toFixed(2)}x`);
+  stSlider("dv-st-wearint", "wearInterior", (v) => v.toFixed(2));
+
+  // The one control here that is NOT a uniform write. `applyStreet` reports the
+  // gate moved and we pay the rebuild; without that the toggle would flip and
+  // nothing on screen would change, which reads as a broken switch.
+  const chipsToggle = toggle("dv-st-chips", (game.streetParams?.()?.chipsOn ?? 1) > 0, (on) => {
+    const p = game.streetParams?.();
+    if (!p) return;
+    p.chipsOn = on ? 1 : 0;
+    if (game.applyStreet?.()) game.rebuildStreet?.();
+  });
+
+  $("#dv-st-reset")?.addEventListener("click", () => {
+    if (!game.resetStreet?.()) return;
+    for (const s of streetSyncs) s();
+    refresh();
+  });
 
   /* ── DRIFT DOCK + OCEAN ────────────────────────────────────────────────────
    *
@@ -7156,6 +7461,12 @@ export function createRoadDevPanel({ app, game, params }) {
     // slider, a track load, the cheap-deck A/B), and the replacement carries
     // different values — and, on the cheap deck, fewer uniforms.
     refreshRoadLook();
+    // The STREET is the same problem one step further out: the city is built
+    // lazily, so at panel-construction time there is no street at all and every
+    // control here read a null bag and settled on zero. It is rebuilt on a seed
+    // or layout change too, which replaces the bag again.
+    for (const s of streetSyncs) s();
+    chipsToggle?.set((game.streetParams?.()?.chipsOn ?? 1) > 0);
     renderMode();
     renderLiveries();
     renderSpawnSrc();
