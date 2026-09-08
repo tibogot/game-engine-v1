@@ -143,7 +143,29 @@ export const CITY_DEFAULTS = {
 
   /** LOD ring radii, metres, with hysteresis and a recompute throttle. */
   lod0Dist: 220,
-  lod1Dist: 850,
+  /**
+   * WAS 850, and 850 was paying for detail nobody could see.
+   *
+   * MEASURED in road.html (interleaved A/B, five 2 s rounds each, medians, at
+   * pixel ratio 2.0 so the frame is GPU-bound rather than vsync-locked):
+   *
+   *   450   20.0 ms      850   21.5 ms      1400   22.0 ms
+   *
+   * — so the ring was costing 1.5 ms of a 21.5 ms frame in the WORST case, an
+   * elevated view with the whole city in shot. And it buys nothing: at 450 the
+   * L1 population drops 342 → 88 in a wide street view and 821 → 290 at street
+   * level, and both frames are indistinguishable from the 850 ones. At 850 m a
+   * tower is a few hundred pixels tall; L2's massing box already carries its
+   * silhouette and the cheap facade already carries its window grid, and the
+   * bay relief L1 adds on top of that is far under a pixel.
+   *
+   * The two shader knobs tested alongside it — `lodRelief` and `interior` —
+   * came back as EXACT NULLS: 67 frames / 2 s at 0.04, 0.09, 0.18, and 67
+   * again with relief and interior switched off entirely. The facade's
+   * screen-space work is not what the frame is spending its time on, so those
+   * two stay where they are and stay at full quality.
+   */
+  lod1Dist: 450,
   lodHysteresis: 30,
   lodInterval: 0.2,
   lodMoveDist: 12,
