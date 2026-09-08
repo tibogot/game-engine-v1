@@ -8299,6 +8299,30 @@ ${e.message}`);
        * are SHADOW variants (31 vertex against 1 fragment in the worst frame),
        * and the shadow pass will not revisit a cascade it thinks is current.
        */
+      /*
+       * ── WAIT FOR THE TREES TO LAND ───────────────────────────────────────
+       *
+       * `installCityPresetTrees` is FIRE AND FORGET: it fetches the preset over
+       * the network and then plants ~4300 trees into the engine's TreeStore,
+       * which builds chunks and impostors. That lands whenever the fetch
+       * resolves — after the cover has already come down — and the planting is
+       * a multi-second hitch.
+       *
+       * MEASURED, from the user's own drive: a 3917 ms frame in BUILD MODE,
+       * sitting still, five seconds after the city's cover lifted. Not the
+       * mirror, not a shader — nothing had compiled in that frame at all.
+       *
+       * Only ever waited for in preset mode, and capped: a failed fetch must
+       * not hold the game behind a cover forever.
+       */
+      if (city && cityWanted && city.furniture?.params?.treeSource === "preset") {
+        const until = performance.now() + 12000;
+        while (performance.now() < until) {
+          if ((city.stats?.furniture?.presetTrees?.planted ?? 0) > 0) break;
+          await new Promise((res) => setTimeout(res, 100));
+        }
+      }
+
       if (city && cityWanted && city.group) {
         const forced = [];
         city.group.traverse((o) => {
@@ -8337,7 +8361,22 @@ ${e.message}`);
        * for "8 fast frames" and exited on the first eight, because the CPU was
        * idle while the GPU still had the whole warm-up in flight.
        */
-      await settleFrames(700, 32, 9000);
+      /*
+       * LONGER WHEN THE CITY IS ON, and the minimum is the load-bearing part.
+       *
+       * Planting the preset trees is not the end of it: the TreeStore then
+       * builds its chunks and impostors over the following seconds, and that
+       * lands as one multi-second hitch. MEASURED: waiting for `planted > 0`
+       * alone moved the stall rather than removing it — 4583 ms, still in
+       * build mode, ~4.5 s after the cover lifted — and a five-second minimum
+       * settle did not catch it either (4486 ms behind a 21.5 s cover). The
+       * TreeStore builds its chunks on its own schedule, driven by where the
+       * camera IS, so no amount of standing still under a cover contains it.
+       * Left at a moderate wait rather than an expensive one that does not
+       * work: this catches the city's own pipelines, and the tree streaming is
+       * a separate problem in a separate system.
+       */
+      await settleFrames(cityToWarm ? 1500 : 700, 40, cityToWarm ? 11000 : 9000);
 
       /*
        * ── NOW THE MIRROR, STILL UNDER THE COVER ────────────────────────────
