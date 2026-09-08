@@ -58,9 +58,16 @@ export const CHECKPOINT_DEFAULTS = {
   startTime: 30,
   bonusTime: 11,
 
-  /** The beam: how tall, how wide, and how far away it stays drawn. */
-  beamHeight: 46,
-  beamRadius: 1.15,
+  /**
+   * The beam: how tall, how wide, and how far away it stays drawn.
+   *
+   * 400 m, and that is not decoration. WAS 46 m, and in a city whose towers
+   * reach 310 m a 46 m column is behind the first building you pass — PLAYED,
+   * and the marker was simply not findable: the HUD said "351 m" and there was
+   * nothing on screen to walk toward. A waypoint has to clear the skyline.
+   */
+  beamHeight: 400,
+  beamRadius: 1.6,
   /** Beyond this the beam is hidden — it has already done its job, and a
    *  1 px column across the skyline is aliasing, not guidance. */
   beamRange: 900,
@@ -93,13 +100,26 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
    * and it is emissive rather than transparent for the reason at the top of
    * this file.
    */
-  const beamGeo = new THREE.CylinderGeometry(P.beamRadius, P.beamRadius * 1.35, P.beamHeight, 10, 1, true);
+  const beamGeo = new THREE.CylinderGeometry(P.beamRadius, P.beamRadius * 1.6, P.beamHeight, 10, 1, true);
   beamGeo.translate(0, P.beamHeight / 2, 0);
   const beamMat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
   beamMat.name = "CityCheckpointBeam";
+  /*
+   * SEEN THROUGH THE CITY, and this is the whole difference between a marker
+   * and a decoration. With depth testing on, a column standing three blocks
+   * away is behind a tower and you never learn it exists. Off, it reads as the
+   * hologram every open-world game uses for a waypoint, and it costs one flag.
+   *
+   * `depthWrite` off with it, or a column that writes depth over the whole
+   * skyline would punch a hole in everything drawn after it.
+   */
+  beamMat.depthTest = false;
+  beamMat.depthWrite = false;
   const beamGlow = Fn(() => {
     const t = positionGeometry.y.div(P.beamHeight);
-    const fade = smoothstep(float(1.0), float(0.12), t);
+    // Bright at the road, gone well before the top: a hard-ended 400 m column
+    // reads as a wall, a fading one reads as light.
+    const fade = smoothstep(float(0.55), float(0.0), t);
     return vec3(col.r, col.g, col.b).mul(fade).mul(mix(float(P.beamDay), float(P.beamNight), uNight));
   })();
   beamMat.colorNode = beamGlow;
@@ -107,14 +127,15 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
   const beam = new THREE.Mesh(beamGeo, beamMat);
   beam.name = "CityCheckpointBeam";
   beam.frustumCulled = false;      // one object; a cull test costs more than it saves
+  beam.renderOrder = 999;          // after the world, since it ignores depth
   beam.visible = false;
   beam.castShadow = false;
   beam.receiveShadow = false;
   scene.add(beam);
 
   // ── HUD: two lines, written only when the text actually changes ───────────
-  let hud = null, hudTime = null, hudInfo = null, hudSay = null;
-  let lastTimeText = "", lastInfoText = "", sayTimer = 0;
+  let hud = null, hudTime = null, hudInfo = null, hudSay = null, hudArrow = null;
+  let lastTimeText = "", lastInfoText = "", sayTimer = 0, lastArrowDeg = 999;
   if (hudParent && typeof document !== "undefined") {
     hud = document.createElement("div");
     hud.className = "road-cp-hud";
@@ -134,6 +155,19 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
     hudSay = document.createElement("div");
     hudSay.className = "road-cp-say";
     hudParent.appendChild(hudSay);
+    /*
+     * ── THE DIRECTION ARROW ───────────────────────────────────────────────
+     *
+     * A beam tells you WHERE once you can see it; an arrow tells you WHICH WAY
+     * at the junction you are sitting at, which is the question a city
+     * actually asks. It is a CSS rotation on one element — zero GPU, zero draw
+     * calls — and it is written only when the angle has moved more than a
+     * degree, so it is a handful of DOM writes a second rather than 60.
+     */
+    hudArrow = document.createElement("div");
+    hudArrow.className = "road-cp-arrow";
+    hudArrow.textContent = "▲";
+    hud.insertBefore(hudArrow, hudTime);
   }
   /** A short message of this system's own. Cleared by the update tick. */
   function say(text, seconds = 2.6) {
@@ -223,7 +257,7 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
    * The entire per-frame cost of the feature is below: one subtract, one dot,
    * two compares, and a DOM write that only happens when the text changes.
    */
-  function update(dt, carPos, night = 0) {
+  function update(dt, carPos, night = 0, camera = null) {
     if (sayTimer > 0) {
       sayTimer -= dt;
       if (sayTimer <= 0 && hudSay) hudSay.className = "road-cp-say";
@@ -268,6 +302,24 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
       const info = `${state.reached}/${route.length}  ·  ${Math.round(state.dist)} m`;
       if (info !== lastInfoText) { hudInfo.textContent = info; lastInfoText = info; }
     }
+    /*
+     * WHICH WAY, relative to where you are LOOKING — not to where the car is
+     * pointing. The chase camera is what the player reads the world through,
+     * so an arrow measured against the car's heading swings the wrong way
+     * whenever the two disagree, which is exactly during the corner where you
+     * need it.
+     */
+    if (hudArrow && t && camera) {
+      _v.set(0, 0, -1).applyQuaternion(camera.quaternion);
+      const view = Math.atan2(_v.x, -_v.z);
+      const want = Math.atan2(t.x - carPos.x, -(t.z - carPos.z));
+      let deg = ((want - view) * 180) / Math.PI;
+      deg = ((deg % 360) + 540) % 360 - 180;          // -180..180
+      if (Math.abs(deg - lastArrowDeg) > 1) {
+        hudArrow.style.transform = `rotate(${deg.toFixed(0)}deg)`;
+        lastArrowDeg = deg;
+      }
+    }
     return event;
   }
 
@@ -288,6 +340,7 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
       beamMat.dispose();
       hud?.remove();
       hudSay?.remove();
+      hudArrow?.remove();
     },
   };
 }

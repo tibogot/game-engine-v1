@@ -2147,7 +2147,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      */
     if (checkpoints && checkpoints.city !== city) { checkpoints.run?.dispose(); checkpoints = null; }
     if (checkpoints?.run?.running) {
-      const ev = checkpoints.run.update(dt, vehicleRef?.body?.pos ?? null, city.facade?.params?.nightAmount ?? 0);
+      const ev = checkpoints.run.update(dt, vehicleRef?.body?.pos ?? null, city.facade?.params?.nightAmount ?? 0, camera);
       if (ev) onCheckpointEvent(ev);
     }
     const knockedNow = city.updateKnockables?.(dt, vehicleRef?.body ?? null) ?? 0;

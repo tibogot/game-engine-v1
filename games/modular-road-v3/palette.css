@@ -962,3 +962,15 @@
   transition: opacity 180ms ease;
 }
 .road-cp-say.show { opacity: 1; }
+
+/* The direction arrow. A CSS rotation on one glyph — no GPU, no draw call, and
+   it points the way even when the target is behind a tower. */
+.road-cp-arrow {
+  font-size: 30px;
+  line-height: 1;
+  color: #35ff9a;
+  margin-bottom: 6px;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.8));
+}
