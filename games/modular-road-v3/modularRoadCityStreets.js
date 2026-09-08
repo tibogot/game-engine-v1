@@ -64,18 +64,96 @@ import { NEON_PALETTE } from "./modularRoadCityFacade.js";
  */
 export const STREET_DEFAULTS = {
   // ── ASPHALT (modularRoadMaterial.js ROAD_LOOK) ────────────────────────────
-  asphaltDark: 0x1b1f25,
-  asphaltLight: 0x414852,
+  /*
+   * LIGHTER AND FINER THAN THE TRACK, on purpose — this is the first place the
+   * city deliberately DIVERGES in value from modularRoadMaterial's ROAD_LOOK
+   * rather than accidentally drifting from it.
+   *
+   * The track deck is a racing surface: dark, tight, wet-looking. A city street
+   * is old, sun-bleached, salted and patched, and reads several stops lighter
+   * and much busier — which is what a reference photo of a real crossing shows.
+   * The shading MODEL stays identical; only these numbers move.
+   */
+  asphaltDark: 0x2b2f34,
+  asphaltLight: 0x6a7076,
   deckBrightness: 1.0,
   /** Symmetric contrast about the tone's midpoint. */
   grainScale: 1.0,
-  /** World-space macro tone: resurfacing patches, bleaching, old repairs. */
+  /**
+   * ANISOTROPY, and the reason this street used to read as grey plastic.
+   *
+   * The track deck has carried `streak: 14` since the material was written, and
+   * modularRoadMaterial.js says why in as many words: it is "the single thing
+   * that separates road from gravel", because asphalt is laid in strips by a
+   * paver and then worn, polished and rain-streaked ALONG the direction of
+   * travel. Sampling along and across at the same frequency "is isotropic by
+   * construction and reads as marble or shingle no matter how it is tuned".
+   *
+   * This file lifted the track's tone model term for term — the tone values are
+   * still identical, checked live — but it sampled `positionWorld.xz` flat, so
+   * every field it inherited came out as round blobs. It got the recipe and
+   * missed the one term that makes the recipe look like a road.
+   *
+   * The street knows its own direction already (`layout().inStreetX`, which the
+   * wet ripple has always used to stretch itself), so this costs one mix pair.
+   * At a junction the along-Z street wins, exactly as `across` already does.
+   * 1 restores the old isotropic fields.
+   */
+  streak: 14,
+  /** World-space macro tone: resurfacing patches, bleaching, old repairs.
+   *  Cycles per metre ACROSS the street; along it, `streak`× longer. */
   macroScale: 0.06,
   /** Chip aggregate, cycles per metre (5 ⇒ ~20 cm chips), and its weight
    *  against the macro layer. */
-  aggScale: 5.0,
-  aggWeight: 0.4,
+  /** 7.5 ⇒ ~13 cm chips: finer and denser than the track's 20 cm, which is
+   *  what makes a city street read as busy grit rather than as smooth tarmac. */
+  aggScale: 7.5,
+  /** More of the tone comes from the chips than on the track (0.4). With the
+   *  aggregate finally reaching the albedo at all (see `texelAgg`), this is the
+   *  difference between "a road with stones in it" and a grey field. */
+  aggWeight: 0.55,
+
+  /* ── CELLULAR CHIPS ───────────────────────────────────────────────────────
+   * Ported from modularRoadSurfaceV2's opt-in chip mode, which is `chipsOn: 0`
+   * on the track only because it is a candidate in the A/B lab there. In the
+   * city it is the default, because it is the one term that gives the asphalt
+   * daylight texture — see the note at the call site.
+   *
+   * A BUILD-TIME gate, like the track's: at 0 the worley is not in the compiled
+   * shader at all and the old value-noise aggregate is, rather than a cellular
+   * field multiplied away.
+   */
+  chipsOn: 1,
+  /**
+   * Cycles per metre ACROSS. 24 ⇒ ~4 cm stones.
+   *
+   * Finer than modularRoadSurfaceV2's 14, and the difference is the camera, not
+   * the asphalt: the track's number was chosen against a chase boom 8.2 m up,
+   * while a city street is read from a car window a metre and a half off the
+   * ground. At 14 the stones came out as cobbles from there. Real dense-graded
+   * asphalt is 8-14 mm; 24 is as fine as this holds against the pixel footprint
+   * before the band limit below starts eating it.
+   */
+  chipScale: 24,
+  /** How far each stone's centre wanders inside its cell. 1 = fully irregular,
+   *  0 = a lattice, which reads instantly as procedural. */
+  chipJitter: 0.9,
+  /** Stone edge hardness. Higher = a crisper rim between stone and binder. */
+  chipSharp: 0.30,
+  /** How far individual stones vary in tone from each other. This is what
+   *  stops the field looking like one stone stamped repeatedly. */
+  chipVary: 0.30,
+  /** How much darker the binder between the stones is than the stones. */
+  binderDepth: 0.38,
+  /** Mild stretch along the street — a paver does elongate the mix a little,
+   *  but nothing like the 14:1 the macro tone uses. */
+  chipStretch: 2.0,
+  /** Band-limit rate for the chip field, on the across-street footprint. */
+  chipFadeRate: 1.0,
   deckRough: 0.93,
+  /** How much the tone fields modulate roughness. The track's own note: this is
+   *  what makes a deck read as a surface rather than as a flat colour. */
+  roughVary: 0.10,
   /** Wheel-path darkening (deposit) and polish in every lane. */
   wheelDarken: 0.10,
   wheelRough: 0.12,
@@ -136,6 +214,81 @@ export const STREET_DEFAULTS = {
   lineWet: 0.35,
   lineCoat: 1.4,
   lineCoatRough: 0.5,
+
+  /* ── WEAR ─────────────────────────────────────────────────────────────────
+   * How the markings come off. See the long note at the paint site for what
+   * this replaced and why one noise tap could never look right.
+   */
+  /**
+   * Peak wear, on an old stretch, right in a wheel path. 0 = pristine paint.
+   *
+   * Over 1 on purpose — it multiplies the 0..1 age field before a saturate, so
+   * values above 1 CLIP the older stretches to fully worn while leaving the
+   * freshly painted ones untouched. That contrast between runs is most of the
+   * effect; an early tuning used 0.85, which put every stretch at partial wear
+   * and read as a uniform dirty tint rather than as paint in different states.
+   */
+  wearAmount: 2.0,
+  /** How deep the tyres eat into a line's EDGE, as a FRACTION of that line's
+   *  own half-width, at full wear. 0.38 ⇒ up to a third of the bar gone at the
+   *  worst bite, which is about what the reference photo shows. */
+  wearBite: 0.38,
+  /** Finger frequency across the line, cycles/m. 22 ⇒ ~4.5 cm bites — fine
+   *  chipping rather than a slow wobble along the edge. */
+  wearFingerScale: 22,
+  /**
+   * ISOTROPIC — 1, not the asphalt tone's 14:1 and not the 1.8 this started at.
+   *
+   * A crossing bar runs ALONG the street, so any stretch in that direction
+   * smears the finger field down the bar's own edge and the chipping becomes a
+   * slow wobble — which is exactly how the first attempt read next to the
+   * reference photo. Paint chips have no grain; the tyre does not care which
+   * way the bar points. Leave it at 1.
+   */
+  wearFingerStretch: 1.0,
+  /** Second octave, as a multiple of `wearFingerScale`. The spikes that ride
+   *  on the coarse bites and stop the edge looking like a sine wave. */
+  wearFingerOctave: 2.7,
+  /**
+   * The INTERIOR mottle, as a fraction of the edge model's strength.
+   *
+   * Kept low deliberately. Eroding a bar across its whole area is what the two
+   * previous versions of this did and it is what made them look like a stain:
+   * a worn crossing bar is solid white in the middle and eaten at the rim. This
+   * is only here so the surviving paint is not a flat swatch.
+   */
+  wearInterior: 0.04,
+  /** Fraction of that wear away from the wheel paths. Not zero — weather and
+   *  grit take paint everywhere, just far more slowly than tyres do. */
+  wearBase: 0.50,
+  /** Aggregate height above which the paint has been abraded off. Higher
+   *  leaves more paint (only the very proudest chips are bare). */
+  wearLevel: 0.45,
+  /** Edge softness of that threshold. SMALL on purpose: paint chips, it does
+   *  not fade, and a wide edge is what made the old model read as a stain. */
+  wearEdge: 0.07,
+  /** Cycles per metre ACROSS for the repaint-age field; `streak` stretches it
+   *  along, so 0.15 is ~7 m across and ~90 m runs down the street. */
+  wearAgeScale: 0.15,
+  /** How much of the wear mask comes from the FINER octave rather than the
+   *  20 cm aggregate. The coarse field alone put only a handful of blobs on a
+   *  38 cm crossing bar, which read as the bar being damaged rather than as
+   *  paint being worn; the fine octave is what makes it look abraded. */
+  wearFine: 0.65,
+  /** Fine octave frequency, as a multiple of `aggScale`. 3.5 ⇒ ~6 cm. */
+  wearFineScale: 3.5,
+  /**
+   * Crossing bite RELATIVE TO THE LANE LINES.
+   *
+   * Below 1, but not by much, and for a different reason than it was before.
+   * The old area-wise model had to be turned right down on crossings because
+   * eroding a wide slab across its area looked chewed; with the bite applied to
+   * the EDGE that objection is gone — a zebra with fingered edges reads exactly
+   * like the real thing. What remains is a genuine preference: lane lines are
+   * thin, sit permanently under the tyre track, and are the marking you notice
+   * from the car, so they keep the deeper bite.
+   */
+  crossWear: 0.85,
 
   // ── WET (modularRoadWet.js WET_DEFAULTS, same names) ──────────────────────
   wetAmount: 0,
@@ -247,7 +400,68 @@ export const STREET_DEFAULTS = {
   // ── LOD ───────────────────────────────────────────────────────────────────
   detailNear: 25,
   detailFar: 240,
-  gritRelief: 0.003,
+  /**
+   * Aggregate relief, in metres. WAS 0.003 and that was invisible — see
+   * `chipRelief` for the measurement and for why the light, not the surface,
+   * is what decides whether any of this shows.
+   */
+  gritRelief: 0.008,
+
+  /* ── THE MID OCTAVE, and why the street had no relief you could see ────────
+   *
+   * The street's only relief was the 20 cm aggregate at `gritRelief`, and
+   * modularRoadSurfaceV2.js already measured — with tools/roadBumpVisibilityTest
+   * .mjs — that this is the WRONG BAND. Its finding, on the track deck and worth
+   * repeating here because the geometry is the same: at FOV 60 over 1080 px the
+   * chase camera's nearest deck fragment is 8.2 m away and its footprint there
+   * is ~8 mm across, so the finest relief the player can resolve is roughly 3 cm
+   * near and ~10 cm at middle distance. A 20 cm chip sits ABOVE that band and
+   * reads as tonal variation rather than as texture; the 1.8 cm grit sits below
+   * it and is correctly faded to zero everywhere on screen.
+   *
+   * There was simply no relief authored where the camera can see it. This
+   * octave fills the gap, same as `bumpChip` does on the track.
+   *
+   * Cheaper here than on the track: `bumpNormal` is a surface-gradient bump, so
+   * the height's screen derivative IS a per-pixel average — the tap-spreading
+   * machinery V2 needed (`bumpFilter`) is inherent, and only the fade is ported.
+   */
+  /**
+   * Amplitude in METRES — same units as `gritRelief` and `kerbHeight`.
+   *
+   * 14 mm, which is FAR more than the ~2 mm a real chip stands proud. That is
+   * deliberate and it is worth knowing why, because the honest number looked
+   * like nothing:
+   *
+   * WHETHER RELIEF SHOWS IS DECIDED BY THE LIGHT, NOT BY THE SURFACE. Diffuse
+   * shading is N·L, and on a horizontal road under a high sun N·L sits at its
+   * maximum — where its derivative with respect to normal tilt is ZERO. Tilting
+   * a few degrees there changes the lit result by nothing at all, so no
+   * physically-sized relief can read at noon, at any amplitude. Under the car's
+   * headlights the same road is lit at ~79° off the normal, which is where that
+   * derivative is at its LARGEST, and relief reads strongly.
+   *
+   * MEASURED by rebuilding the city at night with the headlights on: 2.2 mm was
+   * indistinguishable from relief switched off entirely, 50 mm read as gravel,
+   * and 14 mm is grain. So this is a value tuned for the one lighting condition
+   * that can show it, and it costs nothing in the one that cannot.
+   */
+  chipRelief: 0.014,
+  /**
+   * Fade rate for the RELIEF specifically, on the across-street footprint.
+   *
+   * 2.0 is exactly Nyquist; below it on purpose, because `bumpNormal` takes a
+   * screen derivative and so averages over a pixel instead of point-sampling —
+   * the octave can run past Nyquist and degrade gently rather than cutting out.
+   * 1.5 keeps the relief readable to roughly 40 m at this FOV.
+   *
+   * Note there is no `chipScale`/`chipStretch` here: the relief uses the SAME
+   * ones the albedo chips do, because they are the same stones. Two sets
+   * existed briefly and, being identically named, the second silently won —
+   * which is why the chip field was running at 16 cycles/m and 3:1 rather than
+   * the 14 and 2:1 it was authored for.
+   */
+  reliefFade: 1.5,
 };
 
 /** Every default that is a colour, for the uniform builder and the tests. */
@@ -304,6 +518,47 @@ const vnoise = /*#__PURE__*/ Fn(([p]) => {
   const a = ihash2(i), b = ihash2(i.add(vec2(1.0, 0.0)));
   const c = ihash2(i.add(vec2(0.0, 1.0))), d = ihash2(i.add(vec2(1.0, 1.0)));
   return mix(mix(a, b, w.x), mix(c, d, w.x), w.y).sub(0.5);
+});
+
+/**
+ * 2D CELLULAR (Worley) on the same hash — THE CHIP FIELD.
+ *
+ * Value noise is a cloud: it has no scale you can read, which is exactly why
+ * the aggregate above could sit at 5-7 cycles/m (a 20 cm "stone") for so long
+ * without anyone being able to point at what was wrong. A cellular field states
+ * its scale outright — you can see the individual stones and the binder between
+ * them — and that is what makes asphalt read as a surface with stones IN it, in
+ * plain daylight, where relief cannot help (see `chipRelief`).
+ *
+ * 2D, and on this file's own integer hash, for the reason in the note above:
+ * `mx_worley_noise_float` is 3D, and the ground plane is flat, so a third of
+ * every distance test would be computing a constant. Nine cells, two hashes
+ * each for the feature point plus one for its tone.
+ *
+ * @returns vec2(distance to the nearest feature point, that cell's own 0..1 tone)
+ */
+const cellular = /*#__PURE__*/ Fn(([p, jitter]) => {
+  const ip = floor(p).toVar();
+  const fp = p.sub(ip).toVar();
+  const best = float(8.0).toVar();
+  const tone = float(0.5).toVar();
+  for (let oy = -1; oy <= 1; oy++) {
+    for (let ox = -1; ox <= 1; ox++) {
+      const off = vec2(ox, oy);
+      const cell = ip.add(off);
+      // Two hashes for the feature point, jittered off the cell centre.
+      const jx = ihash2(cell);
+      const jy = ihash2(cell.add(vec2(37.0, 17.0)));
+      const pt = off.add(vec2(jx, jy).sub(0.5).mul(jitter).add(0.5));
+      const dv = pt.sub(fp);
+      const d2 = dv.dot(dv);
+      // Carry the winning cell's tone alongside the distance — one stone being
+      // paler than its neighbour is most of what reads as aggregate.
+      tone.assign(mix(tone, ihash2(cell.add(vec2(-11.0, 53.0))), step(d2, best)));
+      best.assign(min(best, d2));
+    }
+  }
+  return vec2(sqrt(best), tone);
 });
 /** Two octaves, for the broader stains and the ponding. */
 const vfbm = (p) => vnoise(p).add(vnoise(p.mul(2.17)).mul(0.5));
@@ -510,6 +765,26 @@ export function createCityStreets({
    * street, faded before they can beat against the pixel grid. `fadeIn` is the
    * fwidth term, taken by the caller at top level.
    */
+  /**
+   * World XZ, stretched along whichever way this street runs — the asphalt
+   * fields' sampling coordinate. See `streak`.
+   *
+   * Same axis convention as rippleSlope below (`inStreetX` = 1 means a street
+   * running along Z, so ALONG is z), so the tone and the water can never
+   * disagree about which way the street points.
+   *
+   * The fwidth-based fades that guard these fields are left as they are: they
+   * are taken from `max(pxX, pxZ)`, and the ACROSS axis — the one that keeps
+   * the full frequency — is unchanged, so the existing term still bounds the
+   * finer of the two directions. Dividing the along axis only ever makes the
+   * field coarser, so the guard stays conservative rather than becoming wrong.
+   */
+  function streakedXZ(L, stretch = u.streak) {
+    const along = mix(positionWorld.x, positionWorld.z, L.inStreetX);
+    const acrossW = mix(positionWorld.z, positionWorld.x, L.inStreetX);
+    return vec2(along.div(stretch), acrossW);
+  }
+
   function rippleSlope(L, fadeIn) {
     const along = mix(positionWorld.x, positionWorld.z, L.inStreetX);
     const acrossW = mix(positionWorld.z, positionWorld.x, L.inStreetX);
@@ -535,21 +810,68 @@ export function createCityStreets({
     // ── Every derivative, at top level ──────────────────────────────────────
     const pxU = fwidth(L.across).toVar();                 // metres per pixel across the street
     const pxX = fwidth(positionWorld.x).toVar(), pxZ = fwidth(positionWorld.z).toVar();
-    const texelAgg = max(pxX, pxZ).mul(u.aggScale).toVar();
+    /*
+     * BAND-LIMITED ON THE ACROSS-STREET FOOTPRINT — see the same fix in the
+     * normal pass. `max(pxX, pxZ)` picks the along-VIEW axis on a surface seen
+     * at a grazing angle, and that is already past 0.1 m a few metres out, so
+     * `aggFade` collapsed and `agg` sat at a constant 0.5 over most of the
+     * visible street. The aggregate this file believes it is drawing was
+     * therefore absent from the albedo, from `roughVary`, and from the paint
+     * wear that keys off it.
+     *
+     * Correct as well as necessary, and MORE correct since `streak`: the field
+     * is now 14x lower frequency along the street than across it, so the across
+     * axis is unambiguously the one that has to be band-limited. At 5 cycles/m
+     * that fades in around 100 m, where a pixel spans half a chip.
+     */
+    const texelAgg = mix(pxZ, pxX, L.inStreetX).mul(u.aggScale).toVar();
+    // The chip field's own band limit — it runs at `chipScale`, not `aggScale`.
+    const chipAggFade = saturate(oneMinus(
+      mix(pxZ, pxX, L.inStreetX).mul(u.chipScale).mul(2.0).mul(u.chipFadeRate),
+    )).toVar();
     const dist = length(positionWorld.sub(cameraPosition)).toVar();
     const detail = smoothstep(u.detailFar, u.detailNear, dist).toVar();
 
     // ── ASPHALT TONE: the track's macro + aggregate ─────────────────────────
     // 2D, on the XZ plane: the ground is flat, so a 3D field spends a whole
     // dimension producing a constant.
-    const macro = vfbm3(positionWorld.xz.mul(u.macroScale)).add(0.5).toVar();
+    const sxz = streakedXZ(L).toVar();                    // street-aligned, see `streak`
+    const macro = vfbm3(sxz.mul(u.macroScale)).add(0.5).toVar();
     const aggFade = saturate(oneMinus(texelAgg.mul(2.0))).toVar();
     const agg = float(0.5).toVar();
     const patch = float(0.0).toVar();
     const seam = float(0.0).toVar();
-    const worn = float(1.0).toVar();
+    // PAINT WEAR — see the WEAR block in STREET_DEFAULTS. Both default to
+    // "intact paint" so that beyond the detail range the markings stay solid,
+    // which is what the single blob-noise they replace also did.
+    const wearTops = float(0.0).toVar();
+    const wearAge = float(0.5).toVar();
     If(detail.greaterThan(0.001), () => {
-      agg.assign(vnoise(positionWorld.xz.mul(u.aggScale)).mul(aggFade).add(0.5));
+      if (S.chipsOn) {
+        /*
+         * CELLULAR CHIPS — the daylight texture.
+         *
+         * This is the term that makes the street read like a photograph of a
+         * road at noon, and it is albedo, not relief: individual stones, each a
+         * slightly different tone, with darker binder between them. The smooth
+         * value-noise aggregate it replaces could not do it at any amplitude,
+         * because a cloud has no stones in it.
+         *
+         * `chipScale` 14 ⇒ ~7 cm. Real dense-graded asphalt is 8-14 mm, but a
+         * procedural cannot hold that against the pixel footprint at any useful
+         * distance — 14 is the same compromise modularRoadSurfaceV2 arrived at.
+         */
+        const cxz = streakedXZ(L, u.chipStretch);
+        const cell = cellular(cxz.mul(u.chipScale), u.chipJitter).toVar();
+        const edge = mix(float(0.85), float(0.28), u.chipSharp);
+        const stone = oneMinus(smoothstep(edge.mul(0.35), edge, cell.x)).mul(chipAggFade).toVar();
+        const vary = cell.y.sub(0.5).mul(u.chipVary);
+        agg.assign(saturate(
+          float(0.5).add(stone.sub(0.5).mul(u.binderDepth)).add(vary.mul(stone)),
+        ));
+      } else {
+        agg.assign(vnoise(sxz.mul(u.aggScale)).mul(aggFade).add(0.5));
+      }
       // RESURFACING PATCHES — a jittered cell grid of rectangles, each with a
       // seam of sealant round it. See the note on `patchAmount`.
       const pc = positionWorld.xz.div(u.patchScale);
@@ -566,8 +888,21 @@ export function createCityStreets({
         .mul(band(fpc.y, iz.sub(sw), float(1.0).sub(iz).add(sw), aaP));
       patch.assign(inside.mul(on).mul(u.patchAmount).mul(L.onRoad).mul(detail));
       seam.assign(outer.sub(inside).max(0.0).mul(on).mul(u.patchAmount).mul(L.onRoad).mul(detail));
-      worn.assign(smoothstep(float(-0.25), float(0.2),
-        vnoise(positionWorld.xz.mul(0.7))).mul(0.55).add(0.35));
+      // Which chips are PROUD. Paint is sprayed onto the aggregate, so the
+      // tyres take it off the tops first and it survives in the hollows — the
+      // reason worn road paint is speckled at chip scale rather than faded.
+      // TWO OCTAVES, not one. The 20 cm aggregate alone gave a mask whose
+      // features were the size of the chips, which on a 38 cm crossing bar is
+      // only a handful of blobs per bar — coarse enough to read as damage to
+      // the BAR rather than as worn paint. The finer octave (`wearFineScale`x,
+      // so ~6 cm) puts grain inside each of those, which is what makes it look
+      // abraded instead of chewed.
+      const fine = vnoise(sxz.mul(u.aggScale.mul(u.wearFineScale))).add(0.5);
+      const maskField = mix(agg, fine, u.wearFine);
+      wearTops.assign(smoothstep(u.wearLevel.sub(u.wearEdge), u.wearLevel.add(u.wearEdge), maskField));
+      // How long since this stretch was repainted. Streaked, so it reads as
+      // runs of newer and older paint down the street, not as blobs.
+      wearAge.assign(vnoise(sxz.mul(u.wearAgeScale)).add(0.5));
     });
     const tone = macro.mul(oneMinus(u.aggWeight)).add(agg.mul(u.aggWeight));
     const shaped = saturate(tone.sub(0.5).mul(u.grainScale).add(0.5));
@@ -600,26 +935,85 @@ export function createCityStreets({
     // Water darkens what it lies on: road, kerb, walk — before the paint.
     let surface = mix(walkCol, deck, L.onRoad).mul(albedoScale).mul(tint);
 
+    /*
+     * ── PAINT WEAR: THE EDGE IS THE MODEL ────────────────────────────────────
+     *
+     * Look at a worn crossing and the bars are still SOLID WHITE in the middle.
+     * What has gone is the perimeter: tyres bite in from the edge and leave a
+     * ragged, fingered boundary a few centimetres deep, while the interior sits
+     * there almost untouched. That shape is the whole read, and it is why the
+     * previous two attempts here both looked wrong — they multiplied a mask
+     * into the paint's ALPHA, which erodes a bar uniformly across its area and
+     * gives a bar that has gone patchy and grey all over. No amount of tuning a
+     * area-wise mask produces an eaten edge, because it is the wrong operator.
+     *
+     * So the erosion is applied to the line's WIDTH instead. `lineAA` and
+     * `gridLine` both threshold a distance against a half-width, so subtracting
+     * a per-fragment noise from that width moves the boundary inward by that
+     * many metres — and because the noise varies along the edge, the boundary
+     * comes out fingered exactly like the reference. It only ever eats INWARD:
+     * paint does not grow, so the field is clamped at zero.
+     *
+     * The old interior speckle stays, but demoted to a garnish — a hint of
+     * mottling inside the bar, an order of magnitude below what it was.
+     *
+     * Fields reused, no new concepts: `wheelPath` (where the tyres run),
+     * `wearAge` (how long since this stretch was repainted), and one high
+     * frequency tap for the fingers.
+     */
+    const scrub = mix(u.wearBase, float(1.0), L.wheelPath)
+      .mul(saturate(wearAge.mul(u.wearAmount))).toVar();
+    // Fingers, not smears: a MILD stretch, unlike the 14:1 the asphalt tone
+    // uses. At 14 cycles/m across, the bites are ~7 cm — the scale a tyre
+    // actually chips paint at, and the scale the reference shows.
+    /*
+     * TWO OCTAVES, and ISOTROPIC — see `wearFingerStretch` for why the stretch
+     * had to go. One smooth octave gives a slow wobble down the edge; real
+     * chipping has fine spikes riding on that, and the second octave at
+     * `wearFingerOctave`x is what supplies them.
+     */
+    const _fxz = streakedXZ(L, u.wearFingerStretch);
+    const finger = saturate(
+      vnoise(_fxz.mul(u.wearFingerScale))
+        .add(vnoise(_fxz.mul(u.wearFingerScale.mul(u.wearFingerOctave))).mul(0.5))
+        .add(0.5),
+    );
+    // A FRACTION of each line's own width, not a fixed number of metres. The
+    // first version bit a flat 4.5 cm, which is a quarter of a 12 cm lane line
+    // but only 5% of a 38 cm crossing bar — so the lines frayed and the zebra
+    // came out pristine. As a fraction, one number means the same visible
+    // damage on both.
+    const biteLane = finger.mul(scrub).mul(u.wearBite).toVar();
+    const biteCross = biteLane.mul(u.crossWear).toVar();
+
     // ── PAINT, wetted on its own terms ──────────────────────────────────────
     const aaC = pxU.mul(0.75).add(0.002);
     const half = uStreetW.mul(0.5);
     const dashZ = step(fract(positionWorld.z.div(u.dashPeriod)), float(0.5));
     const dashX = step(fract(positionWorld.x.div(u.dashPeriod)), float(0.5));
-    const centreV = lineAA(L.su.sub(half), u.centreWidth, aaC);
-    const dividerV = max(lineAA(L.su.sub(uStreetW.mul(0.25)), u.laneWidth, aaC),
-      lineAA(L.su.sub(uStreetW.mul(0.75)), u.laneWidth, aaC)).mul(dashZ);
+    // Every width below is the authored width MINUS the bite, floored at zero
+    // so a fully eaten stretch closes up rather than inverting.
+    const centreW = u.centreWidth.mul(oneMinus(biteLane)).max(0.0).toVar();
+    const laneW = u.laneWidth.mul(oneMinus(biteLane)).max(0.0).toVar();
+    const crossW = u.crossWidth.mul(oneMinus(biteCross)).max(0.0).toVar();
+    const centreV = lineAA(L.su.sub(half), centreW, aaC);
+    const dividerV = max(lineAA(L.su.sub(uStreetW.mul(0.25)), laneW, aaC),
+      lineAA(L.su.sub(uStreetW.mul(0.75)), laneW, aaC)).mul(dashZ);
     const laneV = max(centreV, dividerV).mul(L.inStreetX).mul(oneMinus(L.inStreetZ));
-    const centreH = lineAA(L.sv.sub(half), u.centreWidth, aaC);
-    const dividerH = max(lineAA(L.sv.sub(uStreetW.mul(0.25)), u.laneWidth, aaC),
-      lineAA(L.sv.sub(uStreetW.mul(0.75)), u.laneWidth, aaC)).mul(dashX);
+    const centreH = lineAA(L.sv.sub(half), centreW, aaC);
+    const dividerH = max(lineAA(L.sv.sub(uStreetW.mul(0.25)), laneW, aaC),
+      lineAA(L.sv.sub(uStreetW.mul(0.75)), laneW, aaC)).mul(dashX);
     const laneH = max(centreH, dividerH).mul(L.inStreetZ).mul(oneMinus(L.inStreetX));
     const aaCross = pxU.div(u.crossPitch).add(0.001);
     const nearEndZ = max(step(L.fz, u.crossInset), step(uBlockW.sub(u.crossInset), L.fz));
     const nearEndX = max(step(L.fx, u.crossInset), step(uBlockW.sub(u.crossInset), L.fx));
-    const crossV = gridLine(L.su, u.crossPitch, u.crossWidth, aaCross).mul(L.inStreetX).mul(oneMinus(L.inStreetZ)).mul(nearEndZ);
-    const crossH = gridLine(L.sv, u.crossPitch, u.crossWidth, aaCross).mul(L.inStreetZ).mul(oneMinus(L.inStreetX)).mul(nearEndX);
-    const paint = max(max(laneV, laneH), max(crossV, crossH)).mul(detail).mul(worn).mul(u.markings)
-      .mul(oneMinus(L.junction)).toVar();
+    const crossV = gridLine(L.su, u.crossPitch, crossW, aaCross).mul(L.inStreetX).mul(oneMinus(L.inStreetZ)).mul(nearEndZ);
+    const crossH = gridLine(L.sv, u.crossPitch, crossW, aaCross).mul(L.inStreetZ).mul(oneMinus(L.inStreetX)).mul(nearEndX);
+    // The garnish: a light interior mottle so the surviving paint is not a flat
+    // swatch. `wearInterior` is what keeps it from becoming the old model again.
+    const worn = saturate(oneMinus(wearTops.mul(scrub).mul(u.wearInterior)));
+    const paint = max(max(laneV, laneH), max(crossV, crossH))
+      .mul(worn).mul(detail).mul(u.markings).mul(oneMinus(L.junction)).toVar();
     const lw = film.mul(u.lineWet);
     const lineCol = u.paintColor.mul(mix(float(1), u.wetDarken, lw)).mul(mix(vec3(1, 1, 1), u.wetTint, lw));
     surface = mix(surface, lineCol, paint);
@@ -629,7 +1023,18 @@ export function createCityStreets({
     // surface around them. Computed HERE rather than at the end because the
     // reflection below reads `coat` and `coatRough` — how wet and how smooth
     // is exactly what decides how much of a mirror this fragment is.
-    const dryRough = mix(float(0.92), u.deckRough.sub(L.wheelPath.mul(u.wheelRough)).sub(paint.mul(0.2)), L.onRoad)
+    /*
+     * GLOSS FOLLOWS THE VISIBLE AGGREGATE — modularRoadMaterial.js's roughVary,
+     * which its own comment calls "what makes the deck read as a surface rather
+     * than a flat colour". The street inherited the tone fields that drive it
+     * but never fed them to the roughness slot, so every chip and every patch of
+     * old surfacing had exactly the same specular response and the asphalt read
+     * as one moulded sheet. Same weighting as the track: the macro drift at full
+     * strength, the aggregate at half.
+     */
+    const roughN = macro.sub(0.5).mul(u.roughVary)
+      .add(agg.sub(0.5).mul(u.roughVary).mul(0.5));
+    const dryRough = mix(float(0.92), u.deckRough.add(roughN).sub(L.wheelPath.mul(u.wheelRough)).sub(paint.mul(0.2)), L.onRoad)
       .sub(patch.mul(0.10)).sub(seam.mul(0.22));
     R.rough = mix(dryRough, u.wetRough, film);
     R.coat = saturate(coat.mul(mix(float(1), u.lineCoat, paint))).toVar();
@@ -769,18 +1174,72 @@ export function createCityStreets({
     // emitted at its FIRST USE, which is inside the branch below — a derivative
     // in non-uniform control flow. The test caught exactly that.
     const pxX = fwidth(positionWorld.x).toVar(), pxZ = fwidth(positionWorld.z).toVar();
-    const aggFade = saturate(oneMinus(max(pxX, pxZ).mul(u.aggScale).mul(2.0))).toVar();
+    /*
+     * ALSO ON THE ACROSS-STREET FOOTPRINT — see chipFade below for the full
+     * reasoning and the measurement. This one is a FIX, not a port: the
+     * aggregate relief was gated by `max(pxX, pxZ)`, which at a grazing view
+     * angle is the along-view axis and is already past 0.1 m a few metres out,
+     * so `aggFade` sat at zero and the 20 cm relief this file believed it was
+     * drawing never reached the shading anywhere the player looks. Raising
+     * `gritRelief` 27-fold to 8 cm changed nothing on screen, which is what
+     * proved it was a gate rather than a weighting.
+     */
+    const aggFade = saturate(oneMinus(mix(pxZ, pxX, L.inStreetX).mul(u.aggScale).mul(2.0))).toVar();
     // THIS IS A SUB-BUILD: it cannot read the colour pass's variables, so
     // everything it wants it must recompute — which is exactly why it should
     // want as little as possible. It used to rebuild the whole three-octave
     // macro fractal purely to find the tar snakes for the bump, and throw all
-    // of it away except a hairline. With the snakes gone the only relief left
-    // is the aggregate and the kerb step: ONE cheap value-noise tap.
+    // of it away except a hairline. With the snakes gone the relief is the
+    // aggregate, the mid-band chip and the kerb step: TWO cheap noise taps.
+    /*
+     * FADED ON THE ACROSS-STREET FOOTPRINT, not on `max(pxX, pxZ)`.
+     *
+     * MEASURED: the first version used the max, copying the aggregate's fade,
+     * and the octave was invisible — not subtle, absent. Raising the amplitude
+     * eleven-fold to 25 mm changed nothing, which is what said it was a gate and
+     * not a weighting. The ground is seen at a GRAZING angle, so the world
+     * footprint along the view direction is enormous a few metres out (a pixel
+     * spans centimetres across the street and tens of centimetres down it), and
+     * the max picks that axis — so the fade sat at zero over almost the whole
+     * visible street.
+     *
+     * The across-street axis is the well-sampled one, and it is the one carrying
+     * the variation anyway (see `chipStretch`). This is the same conclusion
+     * modularRoadSurfaceV2 reaches from the other direction: it spreads its two
+     * taps independently so the along-road slope decays on its own, and lets the
+     * fade run past Nyquist. `bumpNormal` gets that averaging for free — its
+     * derivative IS the per-pixel difference — so the along axis needs no gate.
+     */
+    const acrossPx = mix(pxZ, pxX, L.inStreetX).toVar();
+    const chipFade = saturate(oneMinus(acrossPx.mul(u.chipScale).mul(u.reliefFade))).toVar();
     const g = float(0.0).toVar();
+    const chip = float(0.0).toVar();
+    // Streaked like the colour pass's aggregate, or the relief would run across
+    // the tone it is supposed to be the relief OF. See `streak`.
+    const sxz = streakedXZ(L).toVar();
+    // The relief takes the same milder stretch the albedo chips do — see
+    // `chipStretch`. They are the same stones.
+    const cxz = streakedXZ(L, u.chipStretch).toVar();
     If(detail.greaterThan(0.001), () => {
-      g.assign(vnoise(positionWorld.xz.mul(u.aggScale)).mul(aggFade));
+      g.assign(vnoise(sxz.mul(u.aggScale)).mul(aggFade));
+      if (S.chipsOn) {
+        /*
+         * THE STONES ARE THE BUMPS. Sampling a smooth value noise at roughly
+         * the chip frequency put relief NEAR the stones but not ON them — the
+         * shading said "bumpy" while the albedo said "stones", and the two
+         * disagreed about where every individual stone was. Same cellular field
+         * as the colour pass, so a stone that looks paler is also the one
+         * standing proud.
+         */
+        const cell = cellular(cxz.mul(u.chipScale), u.chipJitter);
+        const edge = mix(float(0.85), float(0.28), u.chipSharp);
+        chip.assign(oneMinus(smoothstep(edge.mul(0.35), edge, cell.x)).sub(0.5).mul(chipFade));
+      } else {
+        chip.assign(vnoise(cxz.mul(u.chipScale)).mul(chipFade));
+      }
     });
-    const height = g.mul(u.gritRelief).mul(detail).mul(L.onRoad).add(kerbHeightAt(L));
+    const height = g.mul(u.gritRelief).add(chip.mul(u.chipRelief))
+      .mul(detail).mul(L.onRoad).add(kerbHeightAt(L));
     return bumpNormal(height);
   })();
 

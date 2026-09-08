@@ -120,7 +120,15 @@ const cam = new THREE.PerspectiveCamera(62, 1.6, 0.5, 8192);
 let flatCity = null;
 
 for (const backend of ["batched", "instanced"]) {
-  const city = createModularRoadCity({ seed: 20260902, avoid, params: { backend } });
+  // PROCEDURAL TREES EXPLICITLY: the furniture draw-count checks below are
+  // about the procedural kit's batching, and the preset tree path builds no
+  // procedural trunk/canopy (and loads its atlas + GLB over the network, which
+  // does not happen headlessly). Pinning it keeps these counts a statement
+  // about the geometry, not about which tree the city happens to default to.
+  const city = createModularRoadCity({
+    seed: 20260902, avoid,
+    params: { backend, furnitureParams: { treeSource: "procedural" } },
+  });
   const n = city.stats.buildings;
   check(`${backend}: buildings placed`, n > 200, `${n} buildings, ${city.stats.culledCorridor} cleared for the corridor`);
 

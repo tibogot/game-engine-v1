@@ -150,6 +150,51 @@ const SCREEN_COLS = 2, SCREEN_ROWS = 2, SCREEN_PX = 1024;   // 4 square tiles
 /** Hero atlas: 16 square 512 px slots for REAL images. One texture, one draw. */
 export const HERO_COLS = 4, HERO_ROWS = 4, HERO_PX = 2048;
 export const HERO_SLOTS = HERO_COLS * HERO_ROWS;
+
+/**
+ * Where real adverts live: `public/city-ads/ad-01.webp` … `ad-16.webp`, served
+ * from the Vite public dir as `/city-ads/…`.
+ *
+ * NUMBERED BY THE LABEL, NOT THE SLOT. A placeholder paints itself "AD 07",
+ * which is slot 6 — the label is `i + 1`. Naming the files after the label is
+ * what makes "replace the one that says AD 07" mean `ad-07.webp` instead of
+ * sending you to `ad-06`, so the loader does the -1 rather than you.
+ *
+ * WebP first because the image is decoded into the atlas canvas either way —
+ * the source format has no effect at all on GPU cost, only on download size —
+ * but png/jpg are tried too so an image dropped in as either still works.
+ */
+export const HERO_AD_DIR = "/city-ads/";
+export const HERO_AD_EXTENSIONS = ["webp", "png", "jpg"];
+
+/**
+ * Fill the hero slots from that folder. MISSING FILES ARE NOT AN ERROR: any
+ * slot with no image keeps its "AD nn" placeholder, so you can drop in three
+ * adverts today and the other thirteen carry on saying what they are.
+ *
+ * @param {object} signs the object returned by createCitySigns
+ * @returns {Promise<{loaded:number, missing:string[]}>}
+ */
+export async function loadHeroAdFolder(signs, opts = {}) {
+  const dir = opts.dir ?? HERO_AD_DIR;
+  const exts = opts.extensions ?? HERO_AD_EXTENSIONS;
+  if (!signs?.loadHeroImage || typeof Image === "undefined") return { loaded: 0, missing: [] };
+  const missing = [];
+  let loaded = 0;
+  await Promise.all(Array.from({ length: HERO_SLOTS }, async (_, slot) => {
+    const label = String(slot + 1).padStart(2, "0");
+    for (const ext of exts) {
+      try {
+        // Each miss rejects (Image.onerror), which is the ONLY way to probe for
+        // a file without a manifest — so the throw is expected control flow
+        // here, not a failure, and must not escape to the caller.
+        if (await signs.loadHeroImage(slot, `${dir}ad-${label}.${ext}`)) { loaded++; return; }
+      } catch (_) { /* not this extension — try the next */ }
+    }
+    missing.push(label);
+  }));
+  return { loaded, missing };
+}
 // The marquee window is boardW/boardH divided by the canvas aspect, so a
 // 1024x128 (8:1) canvas on a 12x2.4 m (5:1) board showed only 62% of the
 // string — five legible characters out of twenty. Matching the canvas closer
@@ -337,17 +382,36 @@ function makeHeroAtlas(cols, rows, px) {
   tex = finishTexture(canvas);
   return {
     texture: tex, cols, rows,
+    /*
+     * STRETCH-FIT, and it is stretch-fit because the TILE IS SQUARE AND THE
+     * BOARD IS NOT.
+     *
+     * The atlas is one 2048² canvas in a 4x4 grid, so a tile is 512x512. The
+     * printed panel inside a hero board's frame is 1.461:1 (`heroAspect` 0.70,
+     * less a constant-metre frame), and makeHeroMaterial maps the panel's uv
+     * 0..1 straight onto the tile — so whatever is in the tile is stretched
+     * 1.46x horizontally on the wall. MEASURED with a circle-and-square test
+     * card: the circle comes out a visibly wide ellipse.
+     *
+     * Cover-fit made that worse rather than better. A 1.46:1 advert was first
+     * CROPPED to square, losing a third of its width, and then stretched back
+     * out — damage twice over, and no source aspect could avoid both.
+     *
+     * Filling the tile means a 1.46:1 source is squashed to 1:1 here and
+     * stretched back to 1.46:1 on the board, arriving exactly as authored.
+     * So: AUTHOR ADVERTS AT ~1.46:1 (1024x700 is a good size) and they land
+     * undistorted. A square source will look wide, which is now the honest
+     * behaviour rather than a hidden crop.
+     */
     setImage(slot, src) {
       const i = wrap(slot);
       const [x0, y0] = tileRect(i);
       const sw = src.width ?? src.videoWidth, sh = src.height ?? src.videoHeight;
       if (!sw || !sh) return false;
-      const scale = Math.max(tw / sw, th / sh);   // cover-fit
-      const dw = sw * scale, dh = sh * scale;
       ctx.save();
       ctx.beginPath(); ctx.rect(x0, y0, tw, th); ctx.clip();
       ctx.fillStyle = "#000"; ctx.fillRect(x0, y0, tw, th);
-      ctx.drawImage(src, x0 + (tw - dw) / 2, y0 + (th - dh) / 2, dw, dh);
+      ctx.drawImage(src, x0, y0, tw, th);
       ctx.restore();
       placeholder[i] = false;
       tex.needsUpdate = true;

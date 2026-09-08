@@ -77,7 +77,7 @@ import {
 } from "three/tsl";
 import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.js";
 import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
-import { createCitySigns } from "./modularRoadCitySigns.js";
+import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
 import { createCityStreets } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
@@ -590,6 +590,26 @@ export function createModularRoadCity({
       });
       group.add(signs.group);
       stats.signs = signs.stats;
+      /*
+       * REAL ADVERTS, if any have been dropped into public/city-ads/.
+       *
+       * Fire-and-forget: the atlas already carries readable placeholders, so a
+       * board is never blank while this is in flight, and a slot with no file
+       * simply keeps the one it has. Repainting a tile changes no draw call, no
+       * texture identity and no shader — which is the whole reason the atlas is
+       * built this way — so it is safe to land whenever it lands.
+       *
+       * `signs` is captured rather than read from the outer binding: a rebuild
+       * can replace it while these are loading, and painting into the atlas of
+       * a disposed sign set would be a silent leak.
+       */
+      const signsAtBuild = signs;
+      loadHeroAdFolder(signsAtBuild)
+        .then(({ loaded, missing }) => {
+          if (loaded) console.log(`[CitySigns] ${loaded} hero advert${loaded === 1 ? "" : "s"} loaded`
+            + (missing.length ? `; still placeholders: ${missing.join(", ")}` : ""));
+        })
+        .catch((e) => console.warn("[CitySigns] hero advert folder:", e));
     } else {
       stats.signs = { banners: 0, screens: 0, bands: 0 };
     }

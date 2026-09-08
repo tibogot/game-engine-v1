@@ -354,6 +354,13 @@ console.log("\n── FURNITURE SHADERS ──");
   const furn = createCityFurniture({
     P: CITY_DEFAULTS, originCellX: 0, originCellZ: 0,
     lamp: { pool: streets.lampPoolFree, color: streets.lampColor },
+    // PROCEDURAL TREES EXPLICITLY. These checks are about the procedural
+    // furniture's instance-tint contract, and the preset tree path builds no
+    // procedural trunk/canopy at all — so leaving this to the default would
+    // make the assertion below track a look setting rather than the shaders it
+    // is meant to guard. The preset path fetches a JSON, an atlas and a GLB and
+    // is not exercised headlessly.
+    params: { treeSource: "procedural" },
   });
   const mats = [];
   furn.group.traverse((o) => { if (o.isInstancedMesh) mats.push([o.name, o.material, o]); });
