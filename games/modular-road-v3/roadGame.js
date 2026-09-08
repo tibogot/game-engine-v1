@@ -2094,6 +2094,28 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     else city.rebuild();
   }
 
+  /**
+   * Swap which tree the city plants, and rebuild.
+   *
+   * A REAL SWITCH rather than an edit, because this is the one knob worth
+   * A/B-ing by hand: the preset trees go into the engine's shared TreeStore,
+   * which streams chunks and bakes impostors around the camera — and that is
+   * the current suspect for the stutter that survives the pipeline warm-up.
+   * The procedural trees are plain instanced geometry with no streaming at
+   * all, so flipping between them isolates the streaming as the variable
+   * while keeping the same number of things on screen.
+   *
+   * @param {"preset"|"procedural"} mode
+   */
+  function setCityTrees(mode) {
+    const want = mode === "procedural" ? "procedural" : "preset";
+    cityParams.furnitureParams = { ...(cityParams.furnitureParams ?? {}), treeSource: want };
+    if (!city) return want;
+    city.params.furnitureParams = { ...(city.params.furnitureParams ?? {}), treeSource: want };
+    city.rebuild();
+    return want;
+  }
+
   function reseedCity() {
     citySeed = (Math.random() * 0xffffffff) >>> 0;
     applyCityParams();
@@ -8125,33 +8147,40 @@ ${e.message}`);
   /**
    * Run the engine's OWN frames until it is genuinely quiet.
    *
-   * `minFrames` before the streak is even considered, and that minimum is the
-   * whole point: an earlier version asked only for a streak of fast frames and
-   * exited BEFORE the expensive work had started, which is worse than not
-   * waiting at all because it looks like it worked. The stalls being absorbed
-   * here are seconds long, so a run of quick frames early on means nothing.
+   * A QUIET TAIL, not a streak of fast frames, and the difference is the whole
+   * point. The remaining stall is in the GPU PROCESS — a four-second wall-clock
+   * gap with no JavaScript long task and no new shader programs — so it is
+   * invisible to anything this code can ask about directly. What it is not
+   * invisible to is the frame clock: it shows up as one enormous frame,
+   * whenever the driver decides to do it.
+   *
+   * So the rule is "keep going until nothing slow has happened for `quietMs`".
+   * A streak of fast frames exits the moment the queue looks calm, which an
+   * earlier version did — before the work had even started, which is worse
+   * than not waiting because it looks like it worked. A quiet tail cannot: a
+   * stall at six seconds resets the clock and the cover stays up past it.
    *
    * Capped by TIME, not by frame count: the stalls being absorbed are seconds
    * long, so a frame budget either expires during one of them or waits far
    * past the end of the work. The cap is a hard ceiling — a machine that
    * cannot settle must still get to play.
    *
-   * @param {number} minMs   run at least this long before believing the streak
-   * @param {number} streak  consecutive frames under 20 ms to call it done
+   * @param {number} minMs   run at least this long, whatever happens
+   * @param {number} quietMs  required run with no frame at or over 20 ms
    * @param {number} maxMs   hard ceiling
    */
-  async function settleFrames(minMs, streak, maxMs) {
+  async function settleFrames(minMs, quietMs, maxMs) {
     const t0 = performance.now();
-    let fast = 0, prev = t0;
+    let prev = t0, lastSlow = t0;
     for (;;) {
       await new Promise((res) => requestAnimationFrame(() => res()));
       const now = performance.now();
       const frame = now - prev;
       prev = now;
-      fast = frame < 20 ? fast + 1 : 0;
+      if (frame >= 20) lastSlow = now;
       const elapsed = now - t0;
       if (elapsed >= maxMs) break;               // never hold the game hostage
-      if (elapsed >= minMs && fast >= streak) break;
+      if (elapsed >= minMs && now - lastSlow >= quietMs) break;
     }
     return Math.round(performance.now() - t0);
   }
@@ -8376,7 +8405,14 @@ ${e.message}`);
        * work: this catches the city's own pipelines, and the tree streaming is
        * a separate problem in a separate system.
        */
-      await settleFrames(cityToWarm ? 1500 : 700, 40, cityToWarm ? 11000 : 9000);
+      /*
+       * MODEST ON PURPOSE. A longer hold was tried and measured: the remaining
+       * stall lands ~5 s AFTER the cover comes down no matter how long it
+       * stayed up (4300 ms behind a 25 s cover, 4486 ms behind a 21.5 s one).
+       * Whatever it is, it is triggered by something other than elapsed time
+       * under the cover, so paying for a longer loader buys nothing.
+       */
+      await settleFrames(cityToWarm ? 1500 : 700, cityToWarm ? 2000 : 900, cityToWarm ? 9000 : 9000);
 
       /*
        * ── NOW THE MIRROR, STILL UNDER THE COVER ────────────────────────────
@@ -8384,7 +8420,7 @@ ${e.message}`);
        * is the cheap 0.66 s version rather than the 8 s one.
        */
       reflectionEnabled = reflectionWas;
-      if (reflectionWas) await settleFrames(500, 26, 7000);
+      if (reflectionWas) await settleFrames(500, cityToWarm ? 1500 : 800, 7000);
 
       /*
        * ── WAIT FOR THE GPU, NOT FOR THE CPU ────────────────────────────────
@@ -8556,6 +8592,9 @@ ${e.message}`);
        *  that does not exist until the city is built, so without it they sit
        *  at zero showing values the street does not have. */
       setCity: (on) => { cityWanted = !!on; syncCity(); devPanel?.refresh?.(); },
+    /** "preset" | "procedural" — see setCityTrees. Rebuilds the city. */
+    setCityTrees: (mode) => setCityTrees(mode),
+    getCityTrees: () => (city?.furniture?.params?.treeSource ?? cityParams.furnitureParams?.treeSource ?? "preset"),
     /** The checkpoint rush, or null until one has been started. Exposed for a
      *  harness and for the panel — the game itself never reads it back. */
     get checkpointRun() { return checkpoints?.run ?? null; },
@@ -9405,6 +9444,9 @@ ${e.message}`);
      *  (params, facade proxy, stats) for console tuning; `cityParams` is the
      *  set a track may pin; `applyCityParams` relayouts after editing them. */
     setCity: (on) => { cityWanted = !!on; syncCity(); devPanel?.refresh?.(); },
+    /** "preset" | "procedural" — see setCityTrees. Rebuilds the city. */
+    setCityTrees: (mode) => setCityTrees(mode),
+    getCityTrees: () => (city?.furniture?.params?.treeSource ?? cityParams.furnitureParams?.treeSource ?? "preset"),
     /** The checkpoint rush, or null until one has been started. On BOTH this
      *  handle and the dev panel's `game` object — a control that reads only
      *  one of the two sits dead at zero, which has happened here before. */
