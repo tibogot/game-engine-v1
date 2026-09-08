@@ -164,7 +164,7 @@ export function buildClutterKit() {
  * indices into kerb lines, and duplicating it here is how the two would drift.
  *
  * @param {object} o
- * @param {{cones:Array,barriers:Array,bins:Array,pallets:Array}} o.into  lists to push into
+ * @param {{cones:Array,barriers:Array,bins:Array,pallets:Array,signs:Array}} o.into  lists to push into
  * @param {(list:Array,x:number,z:number,yaw:number,extra?:object)=>void} o.place
  * @param {(across:number,along:number)=>[number,number]} o.at  block-space → world
  * @param {number} o.kerb    the kerb line in the across axis
@@ -191,6 +191,16 @@ export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlon
      * runs parallel for `worksRun` and is stopped by the barrier.
      */
     const s0 = a0 + C.endClear + rand(seed, 2, 72) * (runLen - C.worksTaper - C.worksRun);
+    /*
+     * THE WARNING SIGN COMES FIRST, which is the whole point of a warning
+     * sign: it stands on the pavement a few metres BEFORE the taper begins,
+     * facing the traffic that is about to meet it. A works sign anywhere else
+     * is decoration; here it is the reason the closure is readable at speed.
+     */
+    if (into.signs) {
+      const [sx, sz] = at(kerb + dir * 0.8, s0 - 7);
+      place(into.signs, sx, sz, yawAlong + (dir > 0 ? Math.PI : 0), { tile: C.worksSignTile });
+    }
     const taperN = Math.max(2, Math.round(C.worksTaper / C.conePitch));
     for (let i = 0; i <= taperN; i++) {
       const t = i / taperN;

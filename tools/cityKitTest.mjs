@@ -390,6 +390,33 @@ console.log("\n── LOOK PASS ──");
       .map(([n]) => n);
     check("every furniture kind caches x/z (or it is never culled and never hit)",
       missing.length === 0, missing.length ? `no x/z on: ${missing.join(",")}` : `${Object.keys(lists).length} kinds`);
+
+    /*
+     * PER-INSTANCE ATTRIBUTES MUST SURVIVE THE LOD PARTITION.
+     *
+     * applyLod swaps entries inside the list, so slot `i` belongs to a
+     * different object every tick. An attribute uploaded once at build time
+     * stays in the ORIGINAL order and every slot draws somebody else's value —
+     * a pedestrian sign's artwork on a roadworks post, a junction's signals no
+     * longer opposed. Silent, and only after the camera moves.
+     */
+    const camNear = new THREE.PerspectiveCamera(62, 1.6, 0.5, 8192);
+    camNear.position.set(0, 6, 0);
+    camNear.lookAt(200, 4, 0);
+    c.update(10, camNear);
+    for (const [meshName, attrName, key] of [["CityRoadSigns", "aTile", "tile"], ["CityTrafficLights", "aPhase", "phase"]]) {
+      let mesh = null;
+      c.group.traverse((o) => { if (o.isInstancedMesh && o.name === meshName) mesh = o; });
+      if (!mesh) { check(`${meshName} exists`, false); continue; }
+      const attr = mesh.geometry.getAttribute(attrName);
+      const list = meshName === "CityRoadSigns" ? lists.roadSigns : lists.lights;
+      let wrong = 0;
+      for (let i = 0; i < mesh.count; i++) {
+        if (Math.abs(attr.getX(i) - (list[i][key] ?? 0)) > 1e-5) wrong++;
+      }
+      check(`${meshName}: ${attrName} follows its entry through the LOD partition`,
+        mesh.count > 0 && wrong === 0, `${wrong} of ${mesh.count} slots mismatched`);
+    }
   }
   // MOVING TRAFFIC: one more draw, driven on the CPU and culled by distance.
   check("traffic is laid out on lanes", fs.lanes > 40 && fs.traffic > 200, `${fs.traffic} cars on ${fs.lanes} lanes`);

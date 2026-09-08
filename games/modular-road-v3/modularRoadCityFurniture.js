@@ -29,6 +29,10 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { installCityPresetTrees } from "./modularRoadCityTreePreset.js";
 import { buildClutterKit, placeStreetClutter, CLUTTER_DEFAULTS } from "./modularRoadCityClutter.js";
+import {
+  ROAD_SIGN_DEFAULTS, SIGN, MIDBLOCK_SIGNS, makeRoadSignAtlas,
+  buildRoadSignGeometry, makeRoadSignMaterial, loadRoadSignFolder,
+} from "./modularRoadCityRoadSigns.js";
 
 /**
  * WHICH WAY THE CAR MODEL FACES, along its own local Z. +1 means the bonnet
@@ -132,6 +136,10 @@ export const FURNITURE_DEFAULTS = {
   crossClear: 6.5,
   /** Roadworks and loading-bay clutter — see modularRoadCityClutter.js. */
   ...CLUTTER_DEFAULTS,
+  /** Road signs — see modularRoadCityRoadSigns.js. */
+  ...ROAD_SIGN_DEFAULTS,
+  /** The warning triangle that fronts every roadworks closure. */
+  worksSignTile: SIGN.WORKS,
   nightAmount: 0,
   /** ── MOVING TRAFFIC ───────────────────────────────────────────────────
    *  Cars driving the lanes, wrapping across the city. ONE extra draw, and
@@ -427,6 +435,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   /** Lens centres in geometry Y, top to bottom — the shader bands off these. */
   const LENS_Y = [F.lightHeight - 0.52, F.lightHeight - 0.85, F.lightHeight - 1.18];
   const { coneGeo, barrierGeo, binGeo, palletGeo } = buildClutterKit();
+  const signAtlas = makeRoadSignAtlas(F);
+  const signGeo = buildRoadSignGeometry(F);
   const railGeo = mergeGeometries([
     box(0.06, 1.05, 0.06, -0.95, 0, 0), box(0.06, 1.05, 0.06, 0.95, 0, 0),   // posts
     box(2.0, 0.05, 0.05, 0, 1.0, 0), box(2.0, 0.05, 0.05, 0, 0.55, 0),        // rails
@@ -454,6 +464,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const clutterMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.78, metalness: 0.0, vertexColors: true });
   clutterMat.name = "CityClutter";
   clutterMat.emissiveNode = litAdd({ vcolor: true });
+  const signMat = makeRoadSignMaterial(signAtlas, uNight);
   const railMat = new THREE.MeshStandardNodeMaterial({ color: 0x3a3d42, roughness: 0.45, metalness: 0.7 });
   railMat.name = "CityRails";
   railMat.emissiveNode = litAdd();
@@ -511,8 +522,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
 
   // ── Placement ──────────────────────────────────────────────────────────────
   const cars = [], trees = [], lights = [], rails = [];
-  const cones = [], barriers = [], bins = [], pallets = [];
-  const clutterInto = { cones, barriers, bins, pallets };
+  const cones = [], barriers = [], bins = [], pallets = [], roadSigns = [];
+  const clutterInto = { cones, barriers, bins, pallets, signs: roadSigns };
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
   const UP = new THREE.Vector3(0, 1, 0);
   const place = (list, x, z, yaw, extra) => {
@@ -626,6 +637,24 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
             into: clutterInto, place, at, kerb, dir, a0, a1, yawAlong,
             rand: h2, seed: seedA + (side === 0 ? 0 : 977), C: F,
           });
+          /*
+           * ONE MID-BLOCK SIGN, facing the traffic it is for.
+           *
+           * Mid-block, and never STOP or GIVE WAY — those mean a junction, and
+           * this city signals its junctions. A speed limit halfway down a
+           * block is right; a stop sign there is the kind of wrong that reads
+           * as carelessness rather than as decoration, so the roll cannot draw
+           * one (see MIDBLOCK_SIGNS).
+           *
+           * The yaw faces ACROSS the pavement into the road, flipped by side,
+           * so a driver sees the face and not the grey back.
+           */
+          if (h2(seedA, side, 91) < F.signChance) {
+            const s = a0 + F.crossClear + h2(seedA, side, 92) * Math.max(1, (a1 - a0) - F.crossClear * 2);
+            const [x, z] = at(kerb + dir * F.inset, s);
+            const tile = MIDBLOCK_SIGNS[Math.floor(h2(seedA, side, 93) * MIDBLOCK_SIGNS.length) % MIDBLOCK_SIGNS.length];
+            place(roadSigns, x, z, yawAlong + (dir > 0 ? Math.PI : 0), { tile });
+          }
         }
       }
     }
@@ -767,6 +796,18 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     lightGeo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
   }
   const railMesh = instanced(rails, railGeo, railMat, "CityRails", { shadows: false });
+  const signMesh = instanced(roadSigns, signGeo, signMat, "CityRoadSigns", { shadows: false });
+  /*
+   * WHICH SIGN each post shows. A real instanced attribute, and rounded in the
+   * shader before it is decoded — see the note in makeRoadSignMaterial.
+   */
+  if (signMesh) {
+    const tiles = new Float32Array(roadSigns.length);
+    for (let i = 0; i < roadSigns.length; i++) tiles[i] = roadSigns[i].tile ?? 0;
+    signGeo.setAttribute("aTile", new THREE.InstancedBufferAttribute(tiles, 1));
+    // Any tile the project supplies replaces the drawn one, in place.
+    loadRoadSignFolder(signAtlas).catch(() => {});
+  }
   const coneMesh = instanced(cones, coneGeo, clutterMat, "CityCones", { shadows: false });
   const barrierMesh = instanced(barriers, barrierGeo, clutterMat, "CityBarriers", { shadows: true });
   const binMesh = instanced(bins, binGeo, clutterMat, "CityBins", { shadows: true });
@@ -865,7 +906,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     { mesh: carMesh, list: cars, range: 420, casts: true },
     { mesh: trunkMesh, list: trees, range: 650, casts: false },
     { mesh: canopyMesh, list: trees, range: 650, casts: true },
-    { mesh: lightMesh, list: lights, range: 380, casts: false },
+    // `attr`: a per-instance value that must follow its entry through the
+    // partition below. See the note in applyLod — this is not optional.
+    { mesh: lightMesh, list: lights, range: 380, casts: false, attr: "aPhase", key: "phase" },
     { mesh: railMesh, list: rails, range: 260, casts: false },
     // Small, low and close to the road, so they go early. A cone at 200 m is
     // three pixels and there are more of them than of anything except rails.
@@ -873,6 +916,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     { mesh: barrierMesh, list: barriers, range: 240, casts: true },
     { mesh: binMesh, list: bins, range: 190, casts: true },
     { mesh: palletMesh, list: pallets, range: 170, casts: false },
+    // Signs read from further than clutter does — that is their job.
+    { mesh: signMesh, list: roadSigns, range: 260, casts: false, attr: "aTile", key: "tile" },
   ];
   const _pos = new THREE.Vector3();
   const _tm = new THREE.Matrix4();
@@ -920,23 +965,42 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         if (i !== n) { const t = list[n]; list[n] = e; list[i] = t; }
         n++;
       }
+      /*
+       * ── PER-INSTANCE DATA MOVES WITH ITS ENTRY ──────────────────────────
+       *
+       * The partition above SWAPS entries inside `list`, so instance slot `i`
+       * belongs to a different object every tick. The matrix is rewritten here
+       * for exactly that reason — and anything else carried per instance has
+       * to be rewritten with it, or it stays in the ORIGINAL order and every
+       * slot gets somebody else's value.
+       *
+       * MEASURED: uploaded once at build time, `aTile` put a pedestrian sign's
+       * artwork on a roadworks post the moment the first LOD tick ran, and
+       * `aPhase` scrambled which signals were opposed at a junction — both
+       * silently, both only after the camera moved. `instanceColor` was
+       * already being rewritten here for the same reason; these are the same
+       * problem with a different buffer.
+       */
+      const attr = k.attr ? k.mesh.geometry.getAttribute(k.attr) : null;
       for (let i = 0; i < n; i++) {
-        // `liveM` is a pose something else owns this frame — a knocked rail
+        // `liveM` is a pose something else owns this frame — a knocked cone
         // being thrown. The authored matrix stays untouched underneath it.
         k.mesh.setMatrixAt(i, list[i].liveM ?? list[i].m);
         list[i].idx = i;
         if (list[i].color != null && k.mesh.instanceColor) k.mesh.setColorAt(i, _c.set(list[i].color));
+        if (attr) attr.setX(i, list[i][k.key] ?? 0);
       }
       k.mesh.count = n;
       k.mesh.instanceMatrix.needsUpdate = true;
       if (k.mesh.instanceColor) k.mesh.instanceColor.needsUpdate = true;
+      if (attr) attr.needsUpdate = true;
     }
   }
 
   return {
     /** Every placement, by kind — the obstacle table turns these into the
      *  capsules the car collides with (modularRoadCityObstacles.js). */
-    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets },
+    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns },
     /** The rail mesh, so the knockables can redraw one that is in the air —
      *  `applyLod` only rewrites five times a second, which a thrown barrier
      *  cannot wait for. */
@@ -951,6 +1015,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       cars: cars.length, trees: trees.length, lights: lights.length, rails: rails.length,
       traffic: traffic.length, lanes: lanes.length,
       clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length },
+      roadSigns: roadSigns.length,
       /** Live — filled in when the preset trees land. `planted: 0` with
        *  treeSource "preset" means they are still loading, or failed. */
       presetTrees: presetTreeStats,
@@ -971,10 +1036,11 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       // TreeStore, not here. This unplants them.
       if (presetTrees) { presetTrees.dispose(); presetTrees = null; }
       for (const m of [carMesh, trunkMesh, canopyMesh, lightMesh, railMesh, trafficMesh,
-        coneMesh, barrierMesh, binMesh, palletMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
+        coneMesh, barrierMesh, binMesh, palletMesh, signMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
       for (const g of [carGeo, trunkGeo, canopyGeo, lightGeo, railGeo,
-        coneGeo, barrierGeo, binGeo, palletGeo]) g.dispose();
-      for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat, clutterMat]) m.dispose();
+        coneGeo, barrierGeo, binGeo, palletGeo, signGeo]) g.dispose();
+      for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat, clutterMat, signMat]) m.dispose();
+      signAtlas.texture.dispose();
     },
   };
 }
