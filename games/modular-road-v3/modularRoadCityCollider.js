@@ -245,12 +245,50 @@ export function createCityCollider({ kit, buildings, lotSize }) {
     return best;
   }
 
+  /**
+   * IS anything hit within `far` — a boolean, allocating NOTHING.
+   *
+   * Same walk as `raycastFirst`, without the part that costs: no triangle
+   * info, no normal, and no `{ distance, point, normal }` for the caller to
+   * throw away. The chassis' cavity test only ever asks whether it is walled
+   * in, and it asks a few hundred times a frame — see RoadBvh.raycastAny for
+   * the measurement that made this necessary.
+   */
+  function raycastAny(origin, dir, far) {
+    if (!enabled || !byCell.size) return false;
+    _rayDir.copy(dir).normalize();
+    const step = lotSize * 0.5;
+    let lastKey = NaN;
+    for (let t = 0; t <= far + step; t += step) {
+      const tt = Math.min(t, far);
+      const cx = Math.floor((origin.x + _rayDir.x * tt) / lotSize);
+      const cz = Math.floor((origin.z + _rayDir.z * tt) / lotSize);
+      const k = key(cx, cz);
+      if (k === lastKey) continue;
+      lastKey = k;
+      const b = byCell.get(k);
+      if (b === undefined) continue;
+      const A = arch[b.arch];
+      const s = b.scaleY || 1;
+      _ray.origin.set(origin.x - b.x, (origin.y - b.y) / s, origin.z - b.z);
+      _ray.direction.set(_rayDir.x, _rayDir.y / s, _rayDir.z);
+      const scale = _ray.direction.length();
+      _ray.direction.divideScalar(scale);
+      // The archetype BVH walk is the library's, so this one still allocates
+      // its hit — but once per CELL the ray crosses, not once per sample.
+      const h = A.bvh.raycastFirst(_ray, THREE.DoubleSide);
+      if (h && h.distance / scale <= far) return true;
+    }
+    return false;
+  }
+
   return {
     /** The ground adapter tests this before querying, like every other source. */
     get baked() { return enabled && byCell.size > 0; },
     stats,
     closestPointWithNormal,
     raycastFirst,
+    raycastAny,
     /** Turn collision off without tearing the trees down (the dev panel). */
     setEnabled(on) { enabled = !!on; },
     /**

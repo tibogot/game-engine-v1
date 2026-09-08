@@ -271,6 +271,25 @@ export function createVehicleGround({
       }
       return best;
     },
+
+    /**
+     * The same question as `raycastFirst`, asked as a BOOLEAN so nothing has
+     * to be built to answer it — and it stops at the first source that says
+     * yes rather than finding the nearest of them.
+     *
+     * This is the chassis' cavity test, which is one of the hottest calls in
+     * the game: ~800 a frame, every one of them discarding the hit object it
+     * paid for. Sources without the fast path fall back to the old one, so a
+     * collider that has not implemented it still answers correctly.
+     */
+    raycastAny(origin, dir, far) {
+      const ask = (src) => {
+        if (!src?.baked) return false;
+        if (src.raycastAny) return src.raycastAny(origin, dir, far);
+        return !!src.raycastFirst?.(origin, dir, far);
+      };
+      return ask(state.roadSolidsBvh) || ask(state.moverSolidsBvh) || ask(state.cityCollider);
+    },
   };
 
   return {

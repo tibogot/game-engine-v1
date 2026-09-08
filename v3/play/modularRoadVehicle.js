@@ -20,6 +20,19 @@ export const GRAVITY = 9.81;
  *  so car behavior, lap times, and ghosts are framerate-independent. */
 export const FIXED_DT = 1 / 120;
 
+/** Clamp, at module scope — see _closestHullToSegment for why it is not local. */
+function _clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+/**
+ * "Is anything hit within `far`", preferring a collider's allocation-free
+ * path. The fallback is there so a collider that predates `raycastAny` — the
+ * test harnesses each stub one — still answers correctly.
+ */
+function _rayAny(bvh, origin, dir, far) {
+  if (bvh.raycastAny) return bvh.raycastAny(origin, dir, far);
+  return !!bvh.raycastFirst(origin, dir, far);
+}
+
 /**
  * THE CORE BOX — mass distribution, deck contact, wall probes.
  *
@@ -6422,6 +6435,9 @@ export class Vehicle {
    * @returns {number} distance from the hull surface point to the segment
    */
   _closestHullToSegment(aW, bW, outQ, outN) {
+    // `cl` used to be declared here as an arrow — one closure allocated per
+    // capsule per substep, which with ~76 city capsules is thousands a second
+    // of pure garbage for a clamp. Hoisted to module scope (`_clamp`).
     const H = CHASSIS_HULL;
     this._worldToGeom(aW, this._capA);
     this._worldToGeom(bW, this._capB);
@@ -6430,19 +6446,18 @@ export class Vehicle {
     const hw = H.width / 2, hh = H.height / 2, hl = H.length / 2;
     const loY = H.offsetY - hh, hiY = H.offsetY + hh;
     const loZ = H.offsetZ - hl, hiZ = H.offsetZ + hl;
-    const cl = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
     let t = 0.5;
     for (let i = 0; i < 6; i++) {
       this._capP.copy(this._capA).addScaledVector(dir, t);
-      outQ.set(cl(this._capP.x, -hw, hw), cl(this._capP.y, loY, hiY), cl(this._capP.z, loZ, hiZ));
+      outQ.set(_clamp(this._capP.x, -hw, hw), _clamp(this._capP.y, loY, hiY), _clamp(this._capP.z, loZ, hiZ));
       if (dd < 1e-9) break;
-      const next = cl(this._capT.subVectors(outQ, this._capA).dot(dir) / dd, 0, 1);
+      const next = _clamp(this._capT.subVectors(outQ, this._capA).dot(dir) / dd, 0, 1);
       if (Math.abs(next - t) < 1e-5) { t = next; break; }
       t = next;
     }
     this._capP.copy(this._capA).addScaledVector(dir, t);
-    outQ.set(cl(this._capP.x, -hw, hw), cl(this._capP.y, loY, hiY), cl(this._capP.z, loZ, hiZ));
+    outQ.set(_clamp(this._capP.x, -hw, hw), _clamp(this._capP.y, loY, hiY), _clamp(this._capP.z, loZ, hiZ));
 
     const dist = outQ.distanceTo(this._capP);
     if (dist > 1e-6) {
@@ -6525,20 +6540,30 @@ export class Vehicle {
         pen = skin - res.distance;
       } else {
         let recovered = false;
-        if (bvh.raycastFirst) {
+        /*
+         * BOOLEAN, NOT A HIT. This test asks "is the sample walled in", and
+         * the answer is the only part of a hit it ever reads — but going
+         * through `raycastFirst` built a result object, cloned the hit point
+         * and cloned the normal for every one of the ~800 asks a frame.
+         * MEASURED in road.html: the solid path allocated ~1.9 MB/frame, which
+         * on this heap is a 60-130 ms major GC every few seconds. `raycastAny`
+         * answers the same question and allocates nothing; the fallback keeps
+         * a collider that has not implemented it working unchanged.
+         */
+        if (bvh.raycastAny || bvh.raycastFirst) {
           // Close but not overlapping. A ray along the away normal that hits
           // another face means the sample is walled in (rail U, hollow wall).
           // End-cap punch: away runs down the middle of a long solid and misses,
           // so a horizontal perpendicular is tried too (arch pillar).
           this._cavityFrom.copy(this._sphC).addScaledVector(this._sphN, 0.002);
-          let blocked = bvh.raycastFirst(this._cavityFrom, this._sphN, reach);
+          let blocked = _rayAny(bvh, this._cavityFrom, this._sphN, reach);
           if (!blocked) {
             const px = -nz, pz = nx;
             const plen = Math.hypot(px, pz);
             if (plen > 0.1) {
               this._cavitySide.set(px / plen, 0, pz / plen);
-              blocked = bvh.raycastFirst(this._cavityFrom, this._cavitySide, reach)
-                || bvh.raycastFirst(this._cavityFrom, this._cavitySide.negate(), reach);
+              blocked = _rayAny(bvh, this._cavityFrom, this._cavitySide, reach)
+                || _rayAny(bvh, this._cavityFrom, this._cavitySide.negate(), reach);
             }
           }
           if (blocked) {

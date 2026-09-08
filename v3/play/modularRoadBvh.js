@@ -23,6 +23,11 @@ const _triC = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _hitTriInfo = {};
 const _hitNormal = new THREE.Vector3();
+// raycastAny's scratch — see the method for why it does not go through
+// raycastFirst.
+const _anyBox = new THREE.Box3();
+const _anyHit = new THREE.Vector3();
+const _anyEnd = new THREE.Vector3();
 /** Float → its exact 32-bit pattern, for hashing poses without rounding. */
 const _f32 = new Float32Array(1);
 const _u32 = new Uint32Array(_f32.buffer);
@@ -299,6 +304,50 @@ export class RoadBvh {
       normal: _hitNormal.clone(),
       roadHold: this.holdAtFace(hit.faceIndex),
     };
+  }
+
+  /**
+   * IS anything hit within `far` — a boolean, and NOTHING is allocated.
+   *
+   * The chassis asks this ~800 times a frame (the cavity test in
+   * `_resolveSolidBvh`: "is this hull sample walled in, or just near a wall").
+   * It uses the answer as a boolean and throws the rest away, but it used to
+   * go through `raycastFirst`, which builds a result object, CLONES the hit
+   * point, CLONES the normal, and computes that normal from the triangle
+   * first. MEASURED in road.html: the solid-collision path was allocating
+   * ~1.9 MB PER FRAME, and on a 600 MB heap that bought a 60-130 ms major GC
+   * every few seconds — which is exactly what a "spike" is.
+   *
+   * So this walks the tree itself. `shapecast` hands back a REUSED triangle,
+   * `Ray.intersectTriangle` takes a target to write into, and the bounds test
+   * is the SEGMENT's box rather than the infinite ray's — a cavity ray is a
+   * few centimetres long, so bounding it is both cheaper and the only way to
+   * stop the traversal from walking the whole tree along the ray.
+   */
+  raycastAny(origin, dir, far = Infinity) {
+    if (!this.baked) return false;
+    const len = Math.hypot(dir.x, dir.y, dir.z);
+    if (len < 1e-9 || !(far > 0)) return false;
+    const nx = dir.x / len, ny = dir.y / len, nz = dir.z / len;
+    const reach = far === Infinity ? 1e6 : far;
+    _anyEnd.set(origin.x + nx * reach, origin.y + ny * reach, origin.z + nz * reach);
+    _anyBox.makeEmpty();
+    _anyBox.expandByPoint(_anyEnd);
+    _anyBox.expandByPoint(_ray.origin.set(origin.x, origin.y, origin.z));
+    _ray.direction.set(nx, ny, nz);
+    const far2 = reach * reach;
+    let hit = false;
+    this._bvh.shapecast({
+      intersectsBounds: (box) => _anyBox.intersectsBox(box),
+      intersectsTriangle: (tri) => {
+        // Double-sided: a hollow shell is walled-in from either face.
+        if (!_ray.intersectTriangle(tri.a, tri.b, tri.c, false, _anyHit)) return false;
+        if (_anyHit.distanceToSquared(_ray.origin) > far2) return false;
+        hit = true;
+        return true;     // stop the traversal
+      },
+    });
+    return hit;
   }
 
   /** Nearest surface point within `maxDist`, or null. */
