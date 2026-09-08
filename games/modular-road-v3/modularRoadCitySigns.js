@@ -110,9 +110,36 @@ export const SIGN_DEFAULTS = {
   crownMinHeight: 66,
   /** Frame width in METRES — the same border on a 12 m and a 30 m board. */
   heroFrame: 0.55,
-  /** Some heroes are SCREENS (LED walls: emissive day and night, scrolling);
-   *  the rest are printed wraps, lit like the wall they hang on. */
-  heroScreenFraction: 0.3,
+  /**
+   * Fraction of ordinary heroes that are LED screens. ZERO, and deliberately.
+   *
+   * Sixteen glowing walls scattered over the skyline is wallpaper: none of
+   * them is a place, and each one makes the next less remarkable. There is
+   * exactly ONE LED wall in the city, it is a landmark, and it is placed by
+   * the block below rather than rolled per building. Everything else is a
+   * printed wrap, which is what an advert on a building actually is.
+   */
+  heroScreenFraction: 0,
+
+  /* ── THE ONE LED WALL: how big, and where ────────────────────────────────
+   * It spans a RUN OF ADJACENT BUILDINGS along a block edge, so it is wider
+   * than any single facade could ever be. */
+  /** How many neighbouring lots it spans. 3 lots is ~95 m of wall. */
+  ledSpanLots: 3,
+  /** Fraction of the run it actually covers — under 1 so it reads as mounted
+   *  on the block rather than as the block's own surface. */
+  ledSpanFrac: 0.94,
+  /** Board height as a fraction of its width, and a hard cap against the
+   *  SHORTEST building in the run so it can never overhang one. */
+  ledSpanAspect: 0.30,
+  ledSpanHeightCap: 0.42,
+  /** Every building under the board must be at least this tall. */
+  ledSpanMinHeight: 52,
+  /** Metres of wall left above the board. */
+  ledSpanTopMargin: 6,
+  /** Which atlas slot the wall shows. Pinned rather than rolled: there is one
+   *  of these and you should be able to choose what is on it. */
+  ledSpanTile: 0,
   /** Print level by day; backlight at night. Screens use screenBoost. */
   heroDay: 1.0,
   heroNight: 2.4,
@@ -167,48 +194,72 @@ export const SIGN_DEFAULTS = {
   dayLevel: 0.55,
   nightBoost: 3.2,
   /**
-   * Screen emissive level.
+   * Emissive level of THE LED wall.
    *
-   * WAS 4.0, and that was tuned when a screen was a smooth glowing panel. The
-   * LCD grid multiplies each subpixel by 3 to hold the panel's average
-   * brightness, which is right on average and wrong at the peaks: every lit
-   * subpixel is now a local spike, and at 4.0 those spikes clipped and bloomed
-   * into a wall of white bars with the advert invisible behind them. The
-   * structure IS the brightness now, so the level comes down to meet it.
+   * Tuned against the dot mask, not against a smooth panel: most of the board
+   * is the dark gap between emitters, so the lit dots have to sit well above
+   * what a flat glowing quad would need to reach the same apparent brightness.
    */
-  screenBoost: 1.7,
+  screenBoost: 2.6,
   nightAmount: 0,
 
-  /* ── LED WALL ──────────────────────────────────────────────────────────────
-   * The pixel structure that separates a screen from a glowing poster. Screens
-   * only; a printed wrap never runs any of it. See makeHeroMaterial.
-   */
-  /** LCD cells ACROSS the panel. Rows follow from the board's own aspect, so
-   *  cells stay square. 96 on a 25 m board is a ~26 cm pixel, which is the
-   *  pitch a real building-scale LED wall actually runs. */
-  lcdCols: 132,
-  /** Dark lattice between emitters, as a fraction of a subpixel. Real walls
-   *  read as roughly a third black up close; below ~0.15 the grid disappears
-   *  and it is just colour fringing. */
-  lcdGap: 0.28,
-  /**
-   * How fast the structure dies as cells shrink on screen.
+  /* ── THE LED WALL ─────────────────────────────────────────────────────────
    *
-   * MUCH more aggressive than the Nyquist limit alone would need, and that is
-   * the point: a real LED wall shows no subpixel structure at all from across a
-   * street, and at 1.6 the grid was still half-strength on a board 50 m away,
-   * where it read as vertical noise with the advert lost behind it. At 6 the
-   * structure belongs to the last few metres — which is exactly where you want
-   * it, and where nothing else in the frame is competing for the pixels.
+   * ONE board in the city runs this, and it is a landmark rather than a class
+   * of signage — see the placement block at the end of createCitySigns. Every
+   * other hero is a printed wrap, which is why `heroScreenFraction` is 0.
+   *
+   * THE MODEL IS v2/objects/shared/ledMatrix.js, ported rather than imported.
+   * That file is the canonical LED shader and it gets this right in a way the
+   * first attempt here did not: the previous version drew a subpixel grid OVER
+   * a smooth photograph, which is a photo with a screen door in front of it.
+   * An LED wall is not that — the image is SAMPLED PER EMITTER, so each LED
+   * shows one flat colour and the picture is genuinely made of them. That is
+   * `ledUv` below, and it is the whole difference.
+   *
+   * It is ported and not imported because ledMatrix owns a material per board
+   * with its own uv and one content texture, while every hero here is an
+   * instance in ONE mesh reading ONE atlas by a per-instance tile. Importing
+   * it would cost a draw call and give up the atlas; porting the model costs
+   * about fifteen ALU on a quad.
    */
-  lcdFade: 2.0,
-  /** How far toward true single-channel subpixels the stripe goes. 1 is what a
-   *  display physically does and is too absolute over a photograph; see the
-   *  note at the call site. */
-  lcdStrength: 0.72,
-  /** How much bigger a SCREEN board is than a printed one. A Blade Runner wall
-   *  is not the size of a poster; these are the ones that should dominate a
-   *  street, so they take more of the face and are allowed to run taller. */
+  /**
+   * Distance between LED centres, in METRES. The grid follows from the board's
+   * own size, so a bigger wall gets MORE emitters rather than bigger ones —
+   * which is the property a fixed column count does not have, and the reason
+   * the mega board would otherwise have looked like a low-res texture.
+   *
+   * Deliberately far coarser than a real wall (10–50 mm). At a true pitch a
+   * 96 m board carries ~2000 emitters across, and from anywhere you actually
+   * drive that is comfortably sub-pixel — the structure would be correct,
+   * invisible, and pointless. This is the pitch of a stadium screen, which is
+   * the thing that reads as "made of LEDs" from across a city.
+   *
+   * TUNED IN THE GAME against the two failure modes either side of it, on the
+   * 96 m wall (so ~230 emitters across, 68 down):
+   *   0.34  emitters too fine to read at 95 m — a photo again
+   *   0.55  unmistakably LEDs, and the advert is mush
+   *   0.42  emitters countable at 40 m, obvious at 95 m, and the truck,
+   *         the script and the strapline all still read
+   */
+  ledPitch: 0.42,
+  /** Emitter radius as a fraction of its cell. Below ~0.3 the board goes dark
+   *  between dots; above ~0.45 they touch and it is a smooth panel again. */
+  ledDotRadius: 0.36,
+  /** Edge softness on the dot, in cell units. Pure AA — keep it small. */
+  ledDotSoft: 0.07,
+  /**
+   * The LOD window, in LED CELLS PER SCREEN PIXEL.
+   *
+   * A dot grid is the textbook moire generator, so both the dot mask and the
+   * per-emitter sampling cross-fade to their smooth equivalents as the cells
+   * shrink: full structure below `ledLodFar`, gone above `ledLodNear`. The
+   * mask fades to `ledCoverage` — the dots' own average — rather than to 1, so
+   * the board holds its brightness across the transition instead of flaring.
+   */
+  ledLodNear: 0.95,
+  ledLodFar: 0.10,
+  /** How much bigger a SCREEN board is than a printed one. */
   heroScreenScale: 1.45,
 };
 
@@ -515,6 +566,11 @@ function tileIndex(v) {
   return floor(v.add(0.5));
 }
 
+/** Fraction of a unit cell a round emitter of radius `r` covers. */
+function dotCoverage(r) {
+  return Math.min(1, Math.PI * r * r);
+}
+
 /**
  * Hero board material. LIT — a standard material, because a printed wrap is a
  * SURFACE the sun and the tower's own shadow fall on; the old unlit poster
@@ -540,67 +596,80 @@ function makeHeroMaterial(atlas, u) {
     base.x.sub(aSign.y).div(float(1.0).sub(aSign.y.mul(2.0))),
     base.y.sub(aSign.z).div(float(1.0).sub(aSign.z.mul(2.0))),
   );
+  /*
+   * ── THE IMAGE IS SAMPLED PER EMITTER ─────────────────────────────────────
+   *
+   * This is the line that makes it an LED wall rather than a photograph with a
+   * grid over it. `cellUv` is the CENTRE of the LED the fragment falls in, so
+   * every fragment inside one emitter reads the SAME texel and the whole cell
+   * lights one flat colour — which is what an LED wall physically does, and
+   * what the eye reads as "made of LEDs". Sampling the photo continuously and
+   * multiplying a mask over it, which is what this did before, gives a smooth
+   * picture behind a screen door and reads as neither.
+   *
+   * The grid comes from a real dot PITCH, so the board's own size decides the
+   * emitter count: a 90 m wall gets 260 LEDs across and a 12 m one gets 35,
+   * and both have the same physical pixel. `panelW`/`panelH` recover that size
+   * from the frame fractions the instance already carries — frU is frame/w, so
+   * w is frame/frU and the lit panel inside it is w − 2·frame. No new
+   * attribute, no second uniform per board.
+   *
+   * SQUARE CELLS FALL OUT FOR FREE, because both axes are divided by the same
+   * metre pitch rather than by a column count the aspect then has to correct.
+   */
+  const panelW = u.heroFrameM.div(aSign.y.max(1e-4)).sub(u.heroFrameM.mul(2.0));
+  const panelH = u.heroFrameM.div(aSign.z.max(1e-4)).sub(u.heroFrameM.mul(2.0));
+  const ledCols = panelW.div(u.ledPitch).max(2.0);
+  const ledRows = panelH.div(u.ledPitch).max(2.0);
+  const grid = vec2(inner.x.mul(ledCols), inner.y.mul(ledRows));
+  const cellCentre = floor(grid).add(0.5);
+  const local = grid.sub(cellCentre);          // −0.5 … 0.5 within the emitter
+  /*
+   * SCREEN-SPACE LOD, and it is not optional. A dot grid is the textbook moire
+   * generator: the instant a cell is finer than a pixel it turns into crawling
+   * noise. `fwidth` of the LED-space coordinate says how many cells a pixel
+   * spans, and BOTH the mask and the per-emitter snapping cross-fade to their
+   * smooth equivalents across that window — so the far board is simply the
+   * image at the correct average brightness, which is also what it looks like
+   * in life from that distance.
+   *
+   * Derivatives at TOP LEVEL, never inside a branch (cityShaderTest enforces
+   * it), and `isScreen` folded in here so a printed wrap runs none of it.
+   */
+  const cellsPerPx = max(fwidth(inner.x).mul(ledCols), fwidth(inner.y).mul(ledRows));
+  const sharp = smoothstep(u.ledLodNear, u.ledLodFar, cellsPerPx).mul(isScreen);
+  const ledUv = mix(inner, cellCentre.div(vec2(ledCols, ledRows)), sharp);
+
   // NO SCROLL. A vertically wrapping tile shows its own seam — a doubled strip
   // across the top of every screen — and a real advert does not crawl. A
   // screen differs from a print by LIGHT, not motion.
-  const auv = vec2(tx.add(clamp(inner.x, 0.0, 1.0).div(atlas.cols)), ty.add(clamp(inner.y, 0.0, 1.0).div(atlas.rows)));
+  const auv = vec2(
+    tx.add(clamp(ledUv.x, 0.0, 1.0).div(atlas.cols)),
+    ty.add(clamp(ledUv.y, 0.0, 1.0).div(atlas.rows)),
+  );
   const flat = tex.sample(auv).rgb;
+
   /*
-   * ── THE LCD, and it is what makes a screen read as a SCREEN ────────────────
-   *
-   * A printed wrap and an LED wall differ by more than brightness. Up close a
-   * real display is a grid of emitters with black between them and a visible
-   * RGB stripe inside each one, and that structure is most of why a Blade
-   * Runner billboard looks like a billboard rather than a poster that happens
-   * to glow. It costs about twenty ALU and it is gated to screens.
-   *
-   * SUBPIXELS. Each LCD pixel is split in three across; each third shows ONE
-   * channel and is multiplied by 3 so the panel keeps its brightness. That
-   * triples the local contrast, which is exactly the colour fringing you see on
-   * a real emissive wall photographed close.
-   *
-   * THE FADE IS NOT OPTIONAL. A pixel grid is the textbook moire generator: the
-   * instant one LCD cell is finer than one screen pixel it aliases into
-   * crawling rainbow noise, and a board 300 m down an avenue is exactly that.
-   * `fwidth` of the LCD-space coordinate says how many cells a pixel spans, and
-   * the structure is faded out before it reaches one — past that the board is
-   * simply the image, which is the correct answer at that distance anyway.
-   *
-   * Everything here multiplies `flat`, so a board with no image still shows its
-   * placeholder through the grid rather than going black.
+   * THE EMITTER, and the reason the mask fades to `ledCoverage` rather than to
+   * 1.0: most of an LED wall is the dark gap between dots, so its average is
+   * well under full. Dissolving toward 1 makes the board FLARE as it recedes;
+   * dissolving toward the dots' own coverage holds one brightness all the way
+   * out. Round, because a round emitter behind a diffuser is what a stadium
+   * screen actually is, and a square one just reads as a low-res texture.
    */
+  const dotDist = local.length();
+  const rawDot = smoothstep(u.ledDotRadius, u.ledDotRadius.sub(u.ledDotSoft), dotDist);
+  const dotMask = mix(float(1.0), mix(u.ledCoverage, rawDot, sharp), isScreen);
+  const img = flat.mul(dotMask);
   /*
-   * SQUARE CELLS on a board that is not square. `lcdCols` counts cells ACROSS,
-   * so the row count has to be scaled by the panel's height/width or the pixels
-   * come out as letterbox slots. The frame fractions carry that ratio for free:
-   * frU is frame/width and frV is frame/height, so frU/frV IS height/width, per
-   * board, with no extra attribute.
+   * BLOOM SEES A FULLER BOARD THAN THE EYE DOES — the same split ledMatrix.js
+   * makes, for the same reason. The visible mask fades to ~40% coverage at
+   * distance, which is the correct average brightness but drops a far board
+   * under the bloom threshold, so its glow would die exactly where a real LED
+   * wall's glow is the whole point. Up close the two masks are identical.
    */
-  const lcdAspect = aSign.y.div(aSign.z.max(1e-4));
-  const lcdUv = vec2(inner.x.mul(u.lcdCols), inner.y.mul(u.lcdCols.mul(lcdAspect)));
-  const cell = fract(lcdUv);
-  // Three stripes across the cell; `sx` runs 0..3 through them.
-  const sx = cell.x.mul(3.0);
-  const rMask = oneMinus(step(1.0, sx));
-  const gMask = step(1.0, sx).mul(oneMinus(step(2.0, sx)));
-  const bMask = step(2.0, sx);
-  // NOT a hard channel mask. Isolating each subpixel to one channel is what a
-  // display physically does, and on a photograph at 50 m it reads as vertical
-  // noise with the advert lost behind it. `lcdStrength` mixes toward that from
-  // flat white, so the stripe is a strong tint rather than a filter — the
-  // fringing survives, the picture survives with it.
-  const stripe = mix(vec3(1.0, 1.0, 1.0), vec3(rMask, gMask, bMask).mul(3.0), u.lcdStrength);
-  // The dark lattice: a gap down each subpixel and a wider one between rows,
-  // which is what stops it reading as three coloured bars instead of a pixel.
-  const subGap = smoothstep(float(0.0), u.lcdGap, fract(sx))
-    .mul(smoothstep(float(1.0), float(1.0).sub(u.lcdGap), fract(sx)));
-  const rowGap = smoothstep(float(0.0), u.lcdGap.mul(1.6), cell.y)
-    .mul(smoothstep(float(1.0), float(1.0).sub(u.lcdGap.mul(1.6)), cell.y));
-  const lcd = flat.mul(stripe).mul(subGap.mul(rowGap));
-  // How many LCD cells one screen pixel covers. Past ~1 the grid is noise.
-  const lcdTexel = max(fwidth(lcdUv.x), fwidth(lcdUv.y));
-  const lcdFade = saturate(oneMinus(lcdTexel.mul(u.lcdFade))).mul(isScreen);
-  const img = mix(flat, lcd, lcdFade);
+  const bloomMask = mix(float(1.0), mix(float(1.0), rawDot, sharp), isScreen);
+  const bloomImg = flat.mul(bloomMask);
   const edgeU = min(base.x, float(1.0).sub(base.x)), edgeV = min(base.y, float(1.0).sub(base.y));
   const inFrame = max(
     smoothstep(aSign.y, aSign.y.mul(0.75), edgeU),
@@ -609,12 +678,13 @@ function makeHeroMaterial(atlas, u) {
   const frameCol = vec3(0.07, 0.075, 0.08);
   // A screen's diffuse is nearly black — it is its own light.
   const albedo = mix(img.mul(mix(u.heroDay, float(0.12), isScreen)), frameCol, inFrame);
-  const glow = img.mul(float(1.0).sub(inFrame))
-    .mul(mix(u.nightAmount.mul(u.heroNight), u.screenBoost, isScreen));
+  const level = mix(u.nightAmount.mul(u.heroNight), u.screenBoost, isScreen);
+  const notFrame = float(1.0).sub(inFrame);
+  const glow = img.mul(notFrame).mul(level);
   mat.colorNode = albedo;
   mat.emissiveNode = glow;
   mat.roughnessNode = mix(mix(float(0.62), float(0.3), isScreen), float(0.35), inFrame);
-  applyBloomMRT(mat, vec4(glow, 1.0));
+  applyBloomMRT(mat, vec4(bloomImg.mul(notFrame).mul(level), 1.0));
   return mat;
 }
 
@@ -741,10 +811,19 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     nightBoost: uniform(P.nightBoost),
     screenBoost: uniform(P.screenBoost),
     neonBoost: uniform(P.neonBoost),
-    lcdCols: uniform(P.lcdCols),
-    lcdGap: uniform(P.lcdGap),
-    lcdFade: uniform(P.lcdFade),
-    lcdStrength: uniform(P.lcdStrength),
+    // The board's physical size is recovered in the shader from the frame
+    // fractions, so the frame's metre width has to be a uniform too.
+    heroFrameM: uniform(P.heroFrame),
+    ledPitch: uniform(P.ledPitch),
+    ledDotRadius: uniform(P.ledDotRadius),
+    ledDotSoft: uniform(P.ledDotSoft),
+    ledLodNear: uniform(P.ledLodNear),
+    ledLodFar: uniform(P.ledLodFar),
+    /* The dots' own average coverage — what the mask dissolves TO at distance
+     * so the board holds its brightness. Derived, never authored: a round dot
+     * of radius r in a unit cell covers pi*r^2, and authoring it separately
+     * just means it can disagree with the radius it is supposed to describe. */
+    ledCoverage: uniform(dotCoverage(P.ledDotRadius)),
     time: uniform(0),
   };
 
@@ -774,6 +853,8 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   // ── Placement ──────────────────────────────────────────────────────────────
   const FACES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   const banners = [], screens = [], bands = [], texts = [], neon = [], heroes = [];
+  /** The single LED wall, once placed — null if no run in the city qualified. */
+  let ledWall = null;
   let megaCount = 0;
   const _q = new THREE.Quaternion();
   const _p = new THREE.Vector3();
@@ -942,6 +1023,112 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     }
   }
 
+
+  /* ══ THE LED WALL ══════════════════════════════════════════════════════════
+   *
+   * One board, and it does not belong to a building.
+   *
+   * Every other sign in this file is rolled per lot: a building qualifies, a
+   * hash says yes, a board goes on its wall. That is right for signage and
+   * wrong for a landmark — a landmark has to be findable, has to be the only
+   * one, and has to be BIGGER THAN ANY FACADE, which per-lot placement can
+   * never give you because the widest lot is 34 m.
+   *
+   * So this is a second pass over the finished layout. It looks for a RUN of
+   * adjacent buildings along one block edge — same edge, all built, all tall
+   * enough — and hangs a single quad across the whole run. Three lots is about
+   * 95 m of wall, which is the width of two or three towers, and the board
+   * fronts all of them at once.
+   *
+   * ── WHY A RUN AND NOT A BILLBOARD ON A POST ──────────────────────────────
+   *
+   * A free-standing structure would need its own geometry, its own draw call
+   * and its own collision, and it would have to be sited somewhere the track
+   * never goes. Hanging the board on a wall that already exists costs ONE MORE
+   * INSTANCE in the hero mesh — no new mesh, no new material, no new draw —
+   * and the buildings behind it are already solid, so the collision is done.
+   *
+   * ── WHY IT CANNOT OVERHANG ───────────────────────────────────────────────
+   *
+   * The run's buildings are different heights, and a board sized off the
+   * tallest would float in front of the shortest with sky behind it. So the
+   * height is capped against the MINIMUM top in the run and hung below it:
+   * whatever the skyline does, every part of the board has wall behind it.
+   *
+   * Likewise the stand-off is taken from the DEEPEST building on the run, so
+   * the board clears the one that sticks out furthest instead of being
+   * swallowed by it.
+   */
+  {
+    const lots = new Map();
+    for (const b of buildings) lots.set(b.cx + "," + b.cz, b);
+
+    // Runs advance along the edge: a z-facing edge runs in x, and vice versa.
+    let best = null;
+    for (const b of buildings) {
+      for (const face of streetFaces(b.cx, b.cz)) {
+        const stepX = face[0] !== 0 ? 0 : 1;
+        const stepZ = face[0] !== 0 ? 1 : 0;
+        const run = [];
+        let minTop = Infinity, maxHalf = 0, ok = true;
+        for (let k = 0; k < P.ledSpanLots; k++) {
+          const n = lots.get((b.cx + stepX * k) + "," + (b.cz + stepZ * k));
+          const a = n && archetypes[n.arch];
+          // Same edge for every lot in the run, or the board turns a corner.
+          if (!a || !streetFaces(n.cx, n.cz).some(f => f[0] === face[0] && f[1] === face[1])) { ok = false; break; }
+          if (n.top - n.y < P.ledSpanMinHeight) { ok = false; break; }
+          run.push(n);
+          minTop = Math.min(minTop, n.top);
+          maxHalf = Math.max(maxHalf, (face[0] !== 0 ? a.width : a.depth) * 0.5);
+        }
+        if (!ok || run.length < P.ledSpanLots) continue;
+        /*
+         * Pick DOWNTOWN. The tallest run would put the board where the towers
+         * already compete with it; the run nearest the origin is where the
+         * track and the player are, and a landmark you never drive past is not
+         * one. Ties break on height so it still lands on a real wall.
+         */
+        const mid = run[(run.length / 2) | 0];
+        const score = Math.hypot(mid.x, mid.z) - (minTop - mid.y) * 0.5;
+        if (!best || score < best.score) best = { run, face, minTop, maxHalf, score };
+      }
+    }
+
+    if (best) {
+      const { run, face, minTop, maxHalf } = best;
+      const [nx, nz] = face;
+      const first = run[0], last = run[run.length - 1];
+      // Centre of the run, pushed out to the shared face plane.
+      const cxw = (first.x + last.x) * 0.5 + nx * (maxHalf + P.standoff);
+      const czw = (first.z + last.z) * 0.5 + nz * (maxHalf + P.standoff);
+      /*
+       * The run's own spacing IS the lot pitch, so the wall length needs no
+       * lotSize passed in: centre-to-centre over (n-1) gaps gives the pitch,
+       * and n pitches is the block frontage the run occupies.
+       */
+      const centres = Math.abs(last.x - first.x) + Math.abs(last.z - first.z);
+      const pitch = centres / Math.max(1, run.length - 1);
+      const runLen = pitch * run.length;
+      const w = runLen * P.ledSpanFrac;
+      const lowest = minTop - Math.max(...run.map(r => r.y));
+      const h = Math.min(w * P.ledSpanAspect, lowest * P.ledSpanHeightCap);
+      const y = minTop - P.ledSpanTopMargin - h / 2;
+
+      _p.set(cxw, y, czw);
+      _q.setFromAxisAngle(_up, Math.atan2(nx, nz));
+      _s.set(w, h, 1);
+      _m.compose(_p, _q, _s);
+      heroes.push({
+        m: _m.clone(),
+        tile: ((P.ledSpanTile | 0) % HERO_SLOTS + HERO_SLOTS) % HERO_SLOTS,
+        frU: P.heroFrame / w, frV: P.heroFrame / h,
+        screen: 1,
+        cx: run[0].cx, cz: run[0].cz, face, w, h, y,
+      });
+      ledWall = { w, h, y, lots: run.length, x: cxw, z: czw, face };
+    }
+  }
+
   // ── Meshes ─────────────────────────────────────────────────────────────────
   const quad = new THREE.PlaneGeometry(1, 1);
 
@@ -1025,6 +1212,8 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
       neon: neon.length, mega: megaCount,
       /** Mega boards and ordinary screens share one mesh; this is the total. */
       screens: screens.length,
+      /** The one LED wall: its size and where it landed, or null. */
+      ledWall,
     },
     setNight(n) { u.nightAmount.value = n; },
     setTime(t) { u.time.value = t; },
@@ -1042,6 +1231,9 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
         if (k === "nightAmount" || k === "time") continue;
         if (u[k]) { u[k].value = patch[k]; P[k] = patch[k]; }
       }
+      // Derived, so moving the radius alone must not leave the dissolve
+      // target describing the old dot.
+      if ("ledDotRadius" in patch) u.ledCoverage.value = dotCoverage(P.ledDotRadius);
     },
 
     /** ── HERO ADVERTS ──────────────────────────────────────────────────────
