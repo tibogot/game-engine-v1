@@ -2036,8 +2036,26 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   function syncCity() {
     if (cityWanted) {
-      if (!city) buildCity();
+      const built = !city;
+      if (built) buildCity();
       city.setEnabled(true);
+      /*
+       * A NEW CITY IS A HUNDRED NEW SHADERS, so warm them here rather than
+       * letting the player find them.
+       *
+       * The city is lazy and is switched on from the dev panel long after the
+       * boot warm-up has run, so its facades, streets, signs and furniture are
+       * unbuilt pipelines the first time anything draws them — which, on the
+       * usual route through this game, is the first frame of the race.
+       * MEASURED: entering play mode with a city compiled ~66 programs and
+       * cost ~10 s in three frames; with no city, 29 programs and ~2.8 s. The
+       * difference is exactly this.
+       *
+       * Only on the build, not on every re-enable: a city that already exists
+       * has already been through here, and re-warming a warm pipeline is a
+       * cover over nothing.
+       */
+      if (built) warmUpTrackPipelines({ label: "Preparing city…" });
     } else {
       city?.setEnabled(false);
     }
@@ -8050,21 +8068,49 @@ ${e.message}`);
    * this deliberately does not try to detect "already warm".
    */
   let warmingUp = false;
-  async function warmUpTrackPipelines() {
+  /**
+   * @param {object} [o]
+   * @param {string} [o.label] what the cover says
+   */
+  async function warmUpTrackPipelines({ label = "Preparing track…" } = {}) {
     if (warmingUp) return;
     const pieces = builder.pieces ?? [];
     if (!pieces.length) return;
     warmingUp = true;
+    /*
+     * THE CAR IS WARMED TOO, AND IT IS HALF THE STALL.
+     *
+     * This used to run with the vehicle still hidden — toggleMode revealed it
+     * on the line AFTER the call — so every material the car owns (paint,
+     * glass, wheels, discs, lamps, and the shadow variant of each) compiled on
+     * the first frame the player could see, which is the first frame they were
+     * driving. MEASURED in road.html: entering play mode cost 2.2 s + 6.9 s +
+     * 0.9 s in three consecutive frames, with `renderer.info.memory.programs`
+     * going 198 -> 264. Making the car visible for these poses moves 48 of
+     * those compiles in here, behind the cover.
+     *
+     * Restored in the `finally`, so a warm-up that throws cannot leave a car
+     * parked in the middle of the editor.
+     */
+    let carGroup = null;
+    let carWasVisible = false;
     // A CLONE, so the live chase camera is never touched — the engine's own
     // frame loop keeps rendering the real view underneath the cover.
     const warmCam = camera.clone();
     const cover = document.createElement("div");
     cover.className = "road-warmup-cover";
-    cover.textContent = "Preparing track…";
+    cover.textContent = label;
     document.body.appendChild(cover);
     const _p = new THREE.Vector3();
     const _f = new THREE.Vector3();
     try {
+      // `vehicleRef`, NOT `vehicle`: the latter is a const declared further
+      // down this function, and syncCity can reach here while it is still in
+      // its temporal dead zone — where `vehicle?.group` throws rather than
+      // yielding undefined. Same late-bind reason devPanel and bakeCollision
+      // hold refs instead of the binding.
+      carGroup = vehicleRef?.group ?? null;
+      if (carGroup) { carWasVisible = carGroup.visible; carGroup.visible = true; }
       // Yield once so the cover actually paints before the canvas starts
       // flashing through the track behind it.
       await new Promise((res) => requestAnimationFrame(() => res()));
@@ -8111,12 +8157,13 @@ ${e.message}`);
       // stutters once on first reveal — never let it take the race down.
       console.warn("[road] pipeline warm-up skipped:", e);
     } finally {
+      if (carGroup) carGroup.visible = carWasVisible;
       cover.remove();
       warmingUp = false;
     }
   }
 
-  function toggleMode() {
+  async function toggleMode() {
     mode = mode === "build" ? "drive" : "build";
     const driving = mode === "drive";
     if (driving) clearBrush(); // no cursor brush while racing
@@ -8150,12 +8197,28 @@ ${e.message}`);
       // the merged-track build because it is the same kind of cost, paid at the
       // same transition, and neither is paid per edit any more.
       syncPreMirrored();
-      warmUpTrackPipelines();
       props.deselect();
       movers.deselect();
+      // BEFORE the warm-up, not after: the warm-up renders what is VISIBLE, so
+      // a car revealed on the next line is a car whose shaders compile on the
+      // first frame of the race instead. See warmUpTrackPipelines.
       vehicle.enabled = true;
       if (vehicle.group) vehicle.group.visible = true;
-      respawn();
+      respawn();     // put the car where it belongs before it is drawn
+      /*
+       * AWAITED, and that is the whole point of it.
+       *
+       * Unawaited, this lost a race it could not win: it yields to a frame
+       * before its first pose renders, so the first REAL frame of the race got
+       * there first and compiled the pipelines itself — which is the stall the
+       * warm-up exists to prevent. MEASURED: 80 programs still compiled during
+       * the first drive, with a 4.6 s frame among them.
+       *
+       * Drive mode is also the only place some of these can be built at all —
+       * the merged track and the pre-mirrored content are drive-only, so no
+       * amount of warming in the editor reaches them.
+       */
+      await warmUpTrackPipelines({ label: "Preparing race…" });
       beginRace(); // gates from the current track + load its record
     } else {
       setMergedTrack(false); // back to editable pieces
@@ -9034,6 +9097,22 @@ ${e.message}`);
   applyCarReflectionMembers();
   applyRailReflectionMembers();
   app.addPreRenderHook?.(updateCarReflection);
+
+  /*
+   * WARM THE PIPELINES BEFORE THE EDITOR IS HANDED OVER.
+   *
+   * Every shader this game draws is compiled by the first `render()` that
+   * needs it, synchronously, inside that frame — so the cost lands wherever
+   * the material first becomes visible. Left alone that is the first frame of
+   * the first race: MEASURED at 2.2 s + 6.9 s + 0.9 s in three consecutive
+   * frames, which is a car at 35 m/s teleporting through a block.
+   *
+   * Paying it here instead puts it behind the loading state the player is
+   * already waiting on. Not awaited: the cover is modal, the editor behind it
+   * is fully built, and blocking `startRoadGame` would hold up every caller
+   * for a cost that is theirs to absorb, not the boot's.
+   */
+  warmUpTrackPipelines({ label: "Preparing shaders…" });
 
   onStatus("ready");
 
