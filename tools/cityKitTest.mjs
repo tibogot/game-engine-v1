@@ -550,6 +550,18 @@ console.log("\n── LOOK PASS ──");
       artSign = n && sum < 0 ? -1 : 1;
       check("the sign plate has exactly one artwork face", n === 4, `${n} unpinned vertices`);
     }
+    /*
+     * COVERAGE FIRST, AND THIS IS NOT A FORMALITY. The check below can only
+     * judge a sign that says which lane it is for, so a `continue` on missing
+     * `travel` silently exempts anything that forgets to tag itself — which is
+     * exactly what happened: the roadworks sign is placed from the clutter
+     * module, carried no travel, and sat there facing the wrong way through a
+     * green run of this very test. An untagged sign is a failure, not a skip.
+     */
+    const untagged = roadSigns.filter((e) => e.travel == null).length;
+    check("every road sign says which lane it is for",
+      roadSigns.length > 0 && untagged === 0, `${untagged} of ${roadSigns.length} untagged`);
+
     let signWrong = 0, signTotal = 0;
     for (const e of roadSigns.slice(0, 400)) {
       if (e.travel == null) continue;
@@ -562,6 +574,41 @@ console.log("\n── LOOK PASS ──");
     }
     check("every road sign faces the traffic it is for",
       signTotal > 0 && signWrong === 0, `${signWrong} of ${signTotal} face away`);
+
+    /*
+     * AND THE WORKS SIGN STANDS BEFORE ITS OWN CLOSURE. Facing the right way
+     * is not enough: a warning that stands past the cones it warns about is
+     * worse than no warning. Measured against the real cones, because "before"
+     * only means anything relative to the lane's direction of travel.
+     */
+    const { SIGN: SIGN_ENUM } = await import("../games/modular-road-v3/modularRoadCityRoadSigns.js");
+    const cones = flatCity.furniture.lists.cones || [];
+    let lateSign = 0, worksTotal = 0;
+    for (const e of roadSigns) {
+      if (e.tile !== SIGN_ENUM.WORKS_TEMP || e.travel == null) continue;
+      const alongOf = (p) => (e.axis === "z" ? p.z : p.x);
+      const acrossOf = (p) => (e.axis === "z" ? p.x : p.z);
+      const sAlong = alongOf(e), sAcross = acrossOf(e);
+      /*
+       * THE NEAREST CONE, SIGNED. Averaging over a window looked equivalent
+       * and was not: a one-sided window quietly DROPPED every misplaced sign
+       * instead of failing it, and the test went green on the bug it was
+       * written for. The nearest cone is 7 m away whichever end the sign is
+       * standing at, so its sign is the answer and nothing can fall out.
+       */
+      let best = Infinity, bestD = 0;
+      for (const k of cones) {
+        if (Math.abs(acrossOf(k) - sAcross) > 12) continue;
+        const d = (alongOf(k) - sAlong) * e.travel;     // + is downstream
+        if (Math.abs(d) > 90 || Math.abs(d) >= best) continue;
+        best = Math.abs(d); bestD = d;
+      }
+      if (!isFinite(best)) continue;                    // no closure near this sign
+      worksTotal++;
+      if (bestD <= 0) lateSign++;
+    }
+    check("the roadworks sign stands before the cones it warns about",
+      worksTotal > 0 && lateSign === 0, `${lateSign} of ${worksTotal} stand past their taper`);
 
     /*
      * NOTHING BURIED IN A BUILDING. A cone, sign or bin inside a footprint is

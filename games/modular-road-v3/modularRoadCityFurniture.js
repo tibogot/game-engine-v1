@@ -194,7 +194,9 @@ export const FURNITURE_DEFAULTS = {
   /** Road signs — see modularRoadCityRoadSigns.js. */
   ...ROAD_SIGN_DEFAULTS,
   /** The warning triangle that fronts every roadworks closure. */
-  worksSignTile: SIGN.WORKS,
+  // Temporary works get the yellow ground, so a closure is legible as a
+  // closure before the picture on the plate resolves at all.
+  worksSignTile: SIGN.WORKS_TEMP,
   nightAmount: 0,
   /** ── MOVING TRAFFIC ───────────────────────────────────────────────────
    *  Cars driving the lanes, wrapping across the city. ONE extra draw, and
@@ -778,7 +780,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
            * two would drift apart.
            */
           placeStreetClutter({
-            into: clutterInto, place, at, kerb, dir, a0, a1, yawAlong,
+            into: clutterInto, place, at, kerb, dir, a0, a1, yawAlong, axis, travel,
             rand: h2, seed: seedA + (side === 0 ? 0 : 977), C: F,
           });
           /*

@@ -178,7 +178,7 @@ export function buildClutterKit() {
  * @param {number} o.seed
  * @param {object} o.C       CLUTTER_DEFAULTS merged with overrides
  */
-export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlong, rand, seed, C }) {
+export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlong, axis, travel, rand, seed, C }) {
   const runLen = a1 - a0 - C.endClear * 2;
   if (runLen < C.worksTaper + C.worksRun + 6) return;
   const roll = rand(seed, 1, 71);
@@ -198,10 +198,19 @@ export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlon
      * sign: it stands on the pavement a few metres BEFORE the taper begins,
      * facing the traffic that is about to meet it. A works sign anywhere else
      * is decoration; here it is the reason the closure is readable at speed.
+     *
+     * "BEFORE" AND "FACING" BOTH COME FROM `travel`. This used to read the
+     * kerb's inward direction instead, which is only the same thing on half
+     * the streets — on the other half the sign stood at the FAR end of its
+     * own closure, showing its back, warning nobody about cones they had
+     * already driven through.
      */
     if (into.signs) {
-      const [sx, sz] = at(kerb + dir * 0.8, s0 - 7);
-      place(into.signs, sx, sz, yawAlong + (dir > 0 ? Math.PI : 0), { tile: C.worksSignTile });
+      const closureEnd = s0 + C.worksTaper + C.worksRun;
+      const ss = travel > 0 ? s0 - 7 : closureEnd + 7;
+      const [sx, sz] = at(kerb + dir * 0.8, ss);
+      place(into.signs, sx, sz, yawAlong + (travel > 0 ? Math.PI : 0),
+        { tile: C.worksSignTile, axis, travel });
     }
     const taperN = Math.max(2, Math.round(C.worksTaper / C.conePitch));
     for (let i = 0; i <= taperN; i++) {

@@ -90,15 +90,36 @@ export const SIGN = {
   PEDESTRIAN: 6,
   ONE_WAY: 7,
   WORKS: 8,
+  PRIORITY: 9,
+  SIGNALS_AHEAD: 10,
+  PARKING: 11,
+  LIMIT_END: 12,
+  BUS_STOP: 13,
+  WORKS_TEMP: 14,
 };
 /** The ones a mid-block placement may roll. Never STOP or GIVE WAY: those mean
  *  a junction, and putting one mid-block is the kind of wrong that reads as
  *  carelessness rather than as decoration. */
 export const MIDBLOCK_SIGNS = [
   SIGN.LIMIT_30, SIGN.LIMIT_50, SIGN.NO_PARKING, SIGN.PEDESTRIAN, SIGN.ONE_WAY,
+  SIGN.PRIORITY, SIGN.SIGNALS_AHEAD, SIGN.PARKING, SIGN.LIMIT_END, SIGN.BUS_STOP,
 ];
 
 const RED = "#c8102e", BLUE = "#0a4ea3", WHITE = "#f4f4f0", DARK = "#1a1c1f";
+/*
+ * THE TWO YELLOWS, AND WHY THERE ARE TWO.
+ *
+ * `YELLOW` is the priority-road diamond and nothing else. It is the only
+ * permanent yellow in the set, so on a strip it reads as "main road" at a
+ * distance where a red-ring disc is still a grey smudge — that is the whole
+ * reason to spend a slot on it.
+ *
+ * `TEMP` is the ground of temporary works signage. Keeping it a different,
+ * warmer yellow is what stops the two saying the same thing: one means the
+ * road you are on, the other means today only.
+ */
+const YELLOW = "#f5c518", TEMP = "#f0a828";
+const GREY = "#b3b8bf", GREY_DARK = "#6d727a", GREEN = "#1f9d55", AMBER = "#f0a500";
 /** The reserved back-of-sign patch, bottom-left of every tile. */
 const BACK_GREY = "#7e838a";
 
@@ -124,6 +145,26 @@ function label(ctx, cx, cy, text, size, colour) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, cx, cy);
+}
+
+/** The warning triangle both works signs stand on, point UP. */
+function warnTriangle(ctx, c, s, R, ground) {
+  poly(ctx, c, c - s * 0.03, R * 1.06, 3, -Math.PI / 2);
+  ctx.fillStyle = ground; ctx.fill();
+  ctx.lineWidth = s * 0.075; ctx.strokeStyle = RED; ctx.lineJoin = "round"; ctx.stroke();
+}
+
+/** The digger figure: a solid mass, because a literal little man is illegible
+ *  at this size and reads as noise. Shared so the two works signs cannot drift
+ *  apart into two different diggers. */
+function digger(ctx, c, s) {
+  ctx.fillStyle = DARK;
+  ctx.beginPath(); ctx.arc(c - s * 0.02, c + s * 0.02, s * 0.045, 0, Math.PI * 2); ctx.fill();
+  ctx.fillRect(c - s * 0.06, c + s * 0.07, s * 0.09, s * 0.12);
+  ctx.save();
+  ctx.translate(c + s * 0.05, c + s * 0.10); ctx.rotate(-0.6);
+  ctx.fillRect(0, 0, s * 0.115, s * 0.028);
+  ctx.restore();
 }
 
 /**
@@ -189,19 +230,79 @@ function drawSign(ctx, slot, s) {
       ctx.closePath(); ctx.fill();
       break;
     }
-    case SIGN.WORKS: {
-      // Warning triangle, point UP, with the digger figure as a solid mass —
-      // a literal little man is illegible at this size and reads as noise.
-      poly(ctx, c, c - s * 0.03, R * 1.06, 3, -Math.PI / 2);
+    case SIGN.WORKS:
+      warnTriangle(ctx, c, s, R, WHITE);
+      digger(ctx, c, s);
+      break;
+    case SIGN.WORKS_TEMP:
+      // The same warning on the yellow ground temporary signage uses. Same
+      // picture, different promise: this one means today, and it is the one
+      // the lane closure puts on the pavement in front of its own taper.
+      warnTriangle(ctx, c, s, R, TEMP);
+      digger(ctx, c, s);
+      break;
+    case SIGN.PRIORITY:
+      // A diamond, not a square turned by chance: the four points ARE the
+      // sign, and it is the only shape in the set that has them.
+      poly(ctx, c, c, R * 1.1, 4, 0);
       ctx.fillStyle = WHITE; ctx.fill();
-      ctx.lineWidth = s * 0.075; ctx.strokeStyle = RED; ctx.lineJoin = "round"; ctx.stroke();
+      poly(ctx, c, c, R * 0.78, 4, 0);
+      ctx.fillStyle = YELLOW; ctx.fill();
+      break;
+    case SIGN.SIGNALS_AHEAD: {
+      warnTriangle(ctx, c, s, R, WHITE);
+      // The lantern, lenses in their real order top-down. Getting that order
+      // wrong is the one thing a driver notices without meaning to.
+      const lw = s * 0.10, lh = s * 0.22, y0 = c - s * 0.09;
       ctx.fillStyle = DARK;
-      ctx.beginPath(); ctx.arc(c - s * 0.02, c + s * 0.02, s * 0.045, 0, Math.PI * 2); ctx.fill();
-      ctx.fillRect(c - s * 0.06, c + s * 0.07, s * 0.09, s * 0.12);
+      ctx.fillRect(c - lw / 2, y0, lw, lh);
+      const lens = [RED, AMBER, GREEN];
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = lens[i];
+        ctx.beginPath();
+        ctx.arc(c, y0 + lh * (0.19 + i * 0.31), lw * 0.27, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case SIGN.PARKING:
+      ctx.fillStyle = BLUE;
+      ctx.fillRect(c - R, c - R, R * 2, R * 2);
+      label(ctx, c, c + s * 0.02, "P", s * 0.54, WHITE);
+      break;
+    case SIGN.LIMIT_END:
+      // End of restriction: the number is still there, greyed and struck
+      // through. Clipped to the disc, or the bars run off the plate.
+      disc(ctx, c, c, R, WHITE, "#c9ccd1", s * 0.05);
+      label(ctx, c, c + s * 0.015, "50", s * 0.44, GREY);
       ctx.save();
-      ctx.translate(c + s * 0.05, c + s * 0.10); ctx.rotate(-0.6);
-      ctx.fillRect(0, 0, s * 0.115, s * 0.028);
+      ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.clip();
+      ctx.strokeStyle = GREY_DARK; ctx.lineWidth = s * 0.026; ctx.lineCap = "butt";
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(c - R + i * s * 0.07, c + R);
+        ctx.lineTo(c + R + i * s * 0.07, c - R);
+        ctx.stroke();
+      }
       ctx.restore();
+      break;
+    case SIGN.BUS_STOP: {
+      // A silhouette, not a drawing. A rendered bus at 20 px is mud; a mass
+      // with a window band and two wheels still reads as a bus.
+      ctx.fillStyle = BLUE;
+      ctx.fillRect(c - R, c - R, R * 2, R * 2);
+      ctx.fillStyle = WHITE;
+      ctx.fillRect(c - R * 0.56, c - R * 0.60, R * 1.12, R * 0.92);
+      // THREE panes, not one band. A single strip reads as a windscreen and
+      // the whole thing becomes a lorry; a row of windows is what says bus.
+      ctx.fillStyle = BLUE;
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(c - R * 0.49 + i * R * 0.34, c - R * 0.48, R * 0.30, R * 0.30);
+      }
+      ctx.fillStyle = WHITE;
+      for (const dx of [-R * 0.30, R * 0.30]) {
+        ctx.beginPath(); ctx.arc(c + dx, c + R * 0.38, R * 0.13, 0, Math.PI * 2); ctx.fill();
+      }
       break;
     }
     default:
