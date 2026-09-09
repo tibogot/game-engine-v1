@@ -254,6 +254,20 @@ export const CITY_DEFAULTS = {
 
   /** 'batched' | 'instanced'. Instanced by default — see the header. */
   backend: "instanced",
+  /**
+   * Compile the facade once PER BUILDING TYPE instead of once for all three.
+   *
+   * OFF, and the measurement is why. Pinning the type does shrink each shader
+   * — punched 4435, curtain and ribbon 3311 lines against 4833 combined — but
+   * the city draws all three types at once, so the driver compiles all three
+   * pipelines rather than one. Per-pipeline size is what buys occupancy at
+   * RUN time; total emitted code is what the ~29 s first-frame compile pays.
+   * This trade moves 200 kB of compile to 466 kB to save register pressure,
+   * and until that shows up as GPU ms it is the wrong side of the trade.
+   *
+   * Kept wired, off, so it is one flag to A/B rather than a rewrite to redo.
+   */
+  facadeTypeSplit: false,
   perObjectFrustumCulled: true,
   sortObjects: false,
 };
@@ -328,6 +342,7 @@ export function createModularRoadCity({
   group.name = "City";
 
   const facade = createCityFacadeMaterial({
+    typeSplit: P.facadeTypeSplit === true,
     params: { lotSize: P.lotSize, groundY: P.groundY, ...facadeParams },
   });
 
@@ -655,20 +670,37 @@ export function createModularRoadCity({
     stats.meshes = 1;
   }
 
+  /**
+   * ONE ROW PER (ARCHETYPE, BUILDING TYPE).
+   *
+   * With the type split off this is exactly the old layout — `types` is 1 and
+   * the row index IS the archetype. With it on, an instance can only sit in a
+   * mesh whose material was compiled for its own wall system, so the archetype
+   * alone is no longer enough to place it.
+   */
+  const rowTypes = () => (facade.typeSplit ? 3 : 1);
+  const rowOf = (b) => (facade.typeSplit ? b.arch * 3 + b.btype : b.arch);
+
   function buildInstanced() {
-    const perArch = new Array(kit.archetypes.length).fill(0);
-    for (const b of buildings) perArch[b.arch]++;
-    instanced = kit.archetypes.map((a, ai) =>
-      a.lods.map((g, tier) => {
-        if (perArch[ai] === 0) return null;
+    const types = rowTypes();
+    const rows = kit.archetypes.length * types;
+    const perRow = new Array(rows).fill(0);
+    for (const b of buildings) perRow[rowOf(b)]++;
+    instanced = new Array(rows);
+    for (let r = 0; r < rows; r++) {
+      const ai = Math.floor(r / types);
+      const btype = types === 1 ? 0 : r % types;
+      const a = kit.archetypes[ai];
+      instanced[r] = a.lods.map((g, tier) => {
+        if (perRow[r] === 0) return null;
         // L2 gets the CHEAP facade variant. The distance work was already
         // being skipped by a per-pixel branch, but a 3300-line shader carries
         // its register pressure whether the branch is taken or not, and that
         // costs occupancy on every pixel of every far tower. Splitting it is
         // free here because the tiers are already separate meshes.
-        const mat = tier === 2 ? facade.farMaterial : facade.material;
-        const im = new THREE.InstancedMesh(g, mat, perArch[ai]);
-        im.name = `CityInst_a${ai}_l${tier}`;
+        const mat = facade.materialFor(btype, tier === 2);
+        const im = new THREE.InstancedMesh(g, mat, perRow[r]);
+        im.name = `CityInst_a${ai}${facade.typeSplit ? `_t${btype}` : ""}_l${tier}`;
         im.count = 0;
         im.frustumCulled = false;
         im.receiveShadow = true;
@@ -676,8 +708,8 @@ export function createModularRoadCity({
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         group.add(im);
         return im;
-      }),
-    );
+      });
+    }
     stats.meshes = instanced.flat().filter(Boolean).length;
   }
 
@@ -876,7 +908,7 @@ export function createModularRoadCity({
         const idx = _tierIdx[t];
         for (let k = 0; k < idx.length; k++) {
           const b = buildings[idx[k]];
-          const im = instanced[b.arch][t];
+          const im = instanced[rowOf(b)][t];
           if (!im) continue;
           im.setMatrixAt(im.count++, matrixFor(b, _m));
         }
@@ -1486,7 +1518,7 @@ export function createModularRoadCity({
       disposeCityKit(kit);
       if (roofs) roofs.dispose();
       if (ground) ground.dispose();
-      facade.material.dispose();
+      for (const m of facade.allMaterials) m.dispose();
       collider?.dispose();
       collider = null;
       facade.lotHeights.texture.dispose();

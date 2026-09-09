@@ -140,5 +140,49 @@ check("a camera without a projection still works, range-only",
   city.stats.culled === 0 && tierCount(1) + tierCount(2) === city.stats.lod[1] + city.stats.lod[2],
   `culled ${city.stats.culled}, submitted ${tierCount(1) + tierCount(2)}`);
 
+// ── THE PER-BUILDING-TYPE SPLIT ─────────────────────────────────────────────
+//
+// With `facadeTypeSplit` on there is one mesh row per (archetype, TYPE), and an
+// instance may only sit in a row whose material was compiled for its own wall
+// system. Put a curtain-wall tower in the punched mesh and it still draws, at
+// full speed, with no warning — it is just wearing the wrong facade. So this
+// checks the two things that would be silent: that every building is still
+// placed, and that it is placed in a mesh built for ITS type.
+{
+  const c2 = createModularRoadCity({ params: { extent: 700, facadeTypeSplit: true } });
+  const rows = [];
+  c2.group.traverse((o) => { if (o.isInstancedMesh && /^CityInst_/.test(o.name)) rows.push(o); });
+  const fake2 = { position: new THREE.Vector3(17, 3, 0) };
+  for (let i = 0; i < 4; i++) { fake2.position.y += 0.01; c2.update(5, fake2); }
+
+  check("the split names a type into every tower mesh",
+    rows.length > 0 && rows.every((m) => /_t\d_l\d$/.test(m.name)),
+    `${rows.length} meshes`);
+
+  // Nothing lost and nothing double-counted: submitted must equal assigned.
+  const submitted = rows.reduce((a, m) => a + m.count, 0);
+  const assigned = c2.stats.lod[0] + c2.stats.lod[1] + c2.stats.lod[2];
+  check("every building still lands in a mesh once", submitted === assigned,
+    `${submitted} submitted vs ${assigned} assigned`);
+
+  // The material a row draws with has to be the one compiled for its type —
+  // the name carries the type, and so does the material's.
+  const TYPE_NAMES = ["Punched", "Curtain", "Ribbon"];
+  const wrong = rows.filter((m) => {
+    const t = Number(m.name.match(/_t(\d)_l/)[1]);
+    return !(m.material.name || "").endsWith(TYPE_NAMES[t]);
+  });
+  check("each row draws with the material compiled for its own type",
+    wrong.length === 0,
+    wrong.length ? `${wrong[0].name} uses ${wrong[0].material.name}` : `${rows.length} rows`);
+
+  // All three wall systems must actually be present, or the split is being
+  // measured on a city that only ever had one of them.
+  const seen = new Set(rows.filter((m) => m.count > 0)
+    .map((m) => Number(m.name.match(/_t(\d)_l/)[1])));
+  check("all three building types are drawn", seen.size === 3, `types ${[...seen].sort()}`);
+  c2.dispose();
+}
+
 console.log(`\n${fail === 0 ? "ALL PASS" : `${fail} FAILURE(S)`}  (${pass} passed)`);
 process.exit(fail === 0 ? 0 : 1);

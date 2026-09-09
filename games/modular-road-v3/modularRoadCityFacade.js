@@ -138,6 +138,8 @@ export const DISTRICT = { glass: 0, masonry: 1, industrial: 2 };
  * rhythm and the depth of its relief, which is what you read at 300 m.
  */
 export const BUILDING_TYPE = { punched: 0, curtain: 1, ribbon: 2 };
+/** Suffix for the per-type material names, so a GPU capture is readable. */
+const TYPE_NAME = ["Punched", "Curtain", "Ribbon"];
 
 /**
  * three's NYC masonry palette, verbatim: limestone-dominant (the common tone
@@ -515,8 +517,42 @@ const band = (x, lo, hi, aa) =>
  * @param {object} [opts]
  * @param {object} [opts.params] overrides on FACADE_DEFAULTS
  */
-export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
+export function createCityFacadeMaterial({ params: overrides = {}, typeSplit = true } = {}) {
   const P = { ...FACADE_DEFAULTS, ...overrides };
+
+  // ── BUILDING TYPE AS A COMPILE-TIME CONSTANT ───────────────────────────────
+  //
+  // `btype` is a texture read, so punched / curtain / ribbon are RUNTIME values
+  // and all three wall systems compile into ONE shader. Every pixel of every
+  // building then carries the register pressure of two wall systems it is not,
+  // and the driver compiles all three however few of them a given tower uses.
+  //
+  // But the type is known on the CPU — it is `b.btype`, a plain JS field, and
+  // the lot texture is written FROM it — so the city can hand each InstancedMesh
+  // a material built with `PIN` set. The helpers below then fold on a JS boolean
+  // instead of emitting a `select`, and because the node system only generates
+  // code for nodes REACHABLE FROM AN OUTPUT, a folded select does not merely
+  // hide its dead branch behind a constant: nothing references that subtree any
+  // more, so it is never emitted at all.
+  //
+  // `typeSplit: false` builds only the old combined material — the A/B, and
+  // what the BatchedMesh backend has to use, since it has one material for
+  // every building in the city.
+  //
+  /** `select` that folds when the condition has already been decided in JS. */
+  const selT = (c, a, b) => (typeof c === "boolean" ? (c ? a : b) : select(c, a, b));
+  /** AND over a mix of JS booleans and nodes. Returns a boolean or a node. */
+  const andT = (a, b) => (a === false || b === false ? false
+    : a === true ? b : b === true ? a : a.and(b));
+  /** OR over a mix of JS booleans and nodes. */
+  const orT = (a, b) => (a === true || b === true ? true
+    : a === false ? b : b === false ? a : a.or(b));
+  /** 1.0 / 0.0 from a flag that may already be decided. */
+  const numT = (c) => (typeof c === "boolean" ? float(c ? 1 : 0) : float(c));
+  /** NOT over a mix of JS booleans and nodes. */
+  const notT = (a) => (typeof a === "boolean" ? !a : a.not());
+  /** `.toVar()` that survives a flag having folded away to a JS boolean. */
+  const varT = (c) => (typeof c === "boolean" ? c : c.toVar());
 
   // ── Lot texture ────────────────────────────────────────────────────────────
   const lotData = new Float32Array(LOT_TEX_SIZE * LOT_TEX_SIZE * 4);
@@ -587,7 +623,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
   }
 
   /** The face's frame, the lot's identity, and its per-lot architectural style. */
-  function buildFrame(D) {
+  function buildFrame(D, PIN) {
     const nW = normalize(normalWorldGeometry).toVar();
     const isRoof = abs(nW.y).greaterThan(0.5).toVar();
     // Horizontal axis along the face: cross(up, n).
@@ -633,9 +669,13 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     const bldgH = max(info.g.sub(info.r), float(1.0)).toVar();
     const district = info.b, btype = info.a;
     const isIndustrial = district.greaterThan(1.5).toVar();
-    const isCurtain = btype.greaterThan(0.5).and(btype.lessThan(1.5)).toVar();
-    const isRibbon = btype.greaterThan(1.5).toVar();
-    const isPunched = btype.lessThan(0.5).toVar();
+    const isCurtain = PIN === null
+      ? btype.greaterThan(0.5).and(btype.lessThan(1.5)).toVar()
+      : PIN === BUILDING_TYPE.curtain;
+    const isRibbon = PIN === null
+      ? btype.greaterThan(1.5).toVar() : PIN === BUILDING_TYPE.ribbon;
+    const isPunched = PIN === null
+      ? btype.lessThan(0.5).toVar() : PIN === BUILDING_TYPE.punched;
     /** Distinguishes the four faces, so opposite walls do not mirror. */
     const faceKey = nW.x.mul(2.3).add(nW.z.mul(5.1)).toVar();
 
@@ -645,23 +685,23 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
 
     // ── PER-LOT STYLE ────────────────────────────────────────────────────────
     const spread = (c, s, h) => c.add(h.sub(0.5).mul(2.0).mul(s));
-    const bay0 = select(isCurtain, u.curtainBay, select(isRibbon, u.ribbonBay,
+    const bay0 = selT(isCurtain, u.curtainBay, selT(isRibbon, u.ribbonBay,
       spread(u.bayWidth, u.baySpread, h4))).toVar();
-    const pierW = select(isCurtain, u.curtainMullion, select(isRibbon, u.ribbonMullion,
+    const pierW = selT(isCurtain, u.curtainMullion, selT(isRibbon, u.ribbonMullion,
       spread(u.pierWidth, u.pierSpread, h5))).max(0.02).toVar();
-    const pierD = select(isCurtain, u.curtainDepth, select(isRibbon, u.ribbonDepth,
+    const pierD = selT(isCurtain, u.curtainDepth, selT(isRibbon, u.ribbonDepth,
       u.pierDepth.mul(float(0.7).add(h3.mul(0.6))))).max(0.005).toVar();
-    const reveal = select(isCurtain, u.curtainReveal, select(isRibbon, u.ribbonReveal,
+    const reveal = selT(isCurtain, u.curtainReveal, selT(isRibbon, u.ribbonReveal,
       u.reveal.mul(float(0.7).add(h2.mul(0.6))))).max(0.005).toVar();
-    const winRatio = select(isCurtain, u.curtainWinRatio, select(isRibbon, u.ribbonWinRatio,
+    const winRatio = selT(isCurtain, u.curtainWinRatio, selT(isRibbon, u.ribbonWinRatio,
       select(isIndustrial, u.windowRatio.mul(0.72), u.windowRatio))).toVar();
-    const border = select(isPunched, u.frameBorder, float(0.015)).toVar();
+    const border = selT(isPunched, u.frameBorder, float(0.015)).toVar();
     const floorH0 = spread(u.floorHeight, u.floorSpread, h1).max(2.6).toVar();
-    const courseEvery = select(isPunched.and(h3.lessThan(u.courseChance)),
+    const courseEvery = selT(andT(isPunched, h3.lessThan(u.courseChance)),
       floor(h2.mul(5.99)).add(3.0), float(0.0)).toVar();
     const courseH = u.courseHeight.mul(float(0.7).add(h6.mul(0.6))).toVar();
-    const grime = select(isCurtain, u.curtainGrime, select(isRibbon, u.ribbonGrime, u.glassGrime)).toVar();
-    const reflectMin = select(isCurtain, u.curtainReflectMin, u.glassReflectMin).toVar();
+    const grime = selT(isCurtain, u.curtainGrime, selT(isRibbon, u.ribbonGrime, u.glassGrime)).toVar();
+    const reflectMin = selT(isCurtain, u.curtainReflectMin, u.glassReflectMin).toVar();
 
     // ── FACE LAYOUT ──────────────────────────────────────────────────────────
     // Bays stretched to fill the face exactly, pier centres at pierW/2 + i·bay,
@@ -683,8 +723,9 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     // every tower looking like it was extruded straight out of the pavement,
     // and it is the piece of the example's arcade that actually reads at speed.
     const nBase = select(h4.greaterThan(0.5), float(3.0), float(2.0)).toVar();
-    const hasBase = isPunched.and(isGroundTier).and(nF.greaterThan(nBase.add(1.5))).and(flat.not()).toVar();
-    const baseH = select(hasBase, nBase.mul(fh), float(0.0)).toVar();
+    const hasBase = varT(andT(isPunched,
+      isGroundTier.and(nF.greaterThan(nBase.add(1.5))).and(flat.not())));
+    const baseH = selT(hasBase, nBase.mul(fh), float(0.0)).toVar();
 
     /** View ray, pixel-outward. Needed by the far paint's sky reflection as
      *  well as the trace, so it lives here rather than in `traceFacade`. */
@@ -729,23 +770,23 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     const fv = va.sub(fi.mul(F.fh));
     const inSlot = band(bu, F.slotL, F.slotR, F.aaU);
     // The base storey's opening is taller and starts lower.
-    const inBase = F.hasBase.and(va.lessThan(F.baseH));
+    const inBase = andT(F.hasBase, va.lessThan(F.baseH));
     const bB = F.fh.mul(0.22), bT = F.baseH.sub(F.fh.mul(0.28));
     const openTall = band(bu, F.oL, F.oR, F.aaU).mul(band(va, bB, bT, F.aaV));
     const openNorm = band(bu, F.oL, F.oR, F.aaU).mul(band(fv, F.oB, F.oT, F.aaV));
-    const opening = select(inBase, openTall, openNorm);
+    const opening = selT(inBase, openTall, openNorm);
     const frame = band(bu, F.oL.sub(F.border), F.oR.add(F.border), F.aaU)
       .mul(band(fv, F.oB.sub(F.border), F.oT.add(F.border), F.aaV))
-      .sub(openNorm).max(0.0).mul(select(inBase, float(0.0), float(1.0)));
+      .sub(openNorm).max(0.0).mul(selT(inBase, float(0.0), float(1.0)));
     // String courses: at every `courseEvery` floor line, at the base's head,
     // and the cornice at the tier top (the same band, 1.6× taller).
     const fl = round(va.div(F.fh));
     const isTop = fl.greaterThan(F.nF.sub(0.5));
     const onPitch = F.courseEvery.greaterThan(0.5)
       .and(mod(fl, max(F.courseEvery, 1.0)).lessThan(0.5)).and(fl.greaterThan(0.5));
-    const onBase = F.hasBase.and(abs(fl.sub(F.nBase)).lessThan(0.5));
+    const onBase = andT(F.hasBase, abs(fl.sub(F.nBase)).lessThan(0.5));
     const chH = select(isTop, F.courseH.mul(1.6), F.courseH);
-    const course = select(isTop.or(onPitch).or(onBase), float(1.0), float(0.0))
+    const course = selT(orT(isTop.or(onPitch), onBase), float(1.0), float(0.0))
       .mul(band(va.sub(fl.mul(F.fh)), chH.mul(-0.5), chH.mul(0.5), F.aaV));
     return { bi, bu, fi, fv, inBase, pier: float(1.0).sub(inSlot), opening, frame, course };
   }
@@ -776,7 +817,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     const onFront = c0.pier.greaterThan(0.5).or(c0.course.greaterThan(0.5)).toVar();
 
     // Depth of this slot: the base colonnade is recessed much harder.
-    const slotD = select(c0.inBase, F.pierD.add(u.baseRecess), F.pierD).toVar();
+    const slotD = selT(c0.inBase, F.pierD.add(u.baseRecess), F.pierD).toVar();
 
     // ── Level 1: the slot's own walls — the two pier flanks and the string
     // course above (its underside) or below (its top face).
@@ -799,10 +840,10 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     const kDn = floor(F.v0.div(F.pitch));
     const cDn1 = kDn.mul(F.pitch);
     const has1 = kDn.greaterThan(0.5);
-    const has2 = F.hasBase.and(F.v0.greaterThan(F.baseH));
-    const cDn = select(has2.and(has1.not().or(F.baseH.greaterThan(cDn1))), F.baseH, cDn1);
+    const has2 = andT(F.hasBase, F.v0.greaterThan(F.baseH));
+    const cDn = selT(andT(has2, has1.not().or(F.baseH.greaterThan(cDn1))), F.baseH, cDn1);
     const tcD = cDn.add(F.courseH.mul(0.5)).sub(F.v0).div(rvS);
-    const hitCD = rv.lessThan(0.0).and(has1.or(has2)).and(tcD.greaterThan(0.0)).and(tcD.lessThan(t1));
+    const hitCD = rv.lessThan(0.0).and(orT(has1, has2)).and(tcD.greaterThan(0.0)).and(tcD.lessThan(t1));
     const hitFlank = hitL.or(hitR).toVar();
     const hitCourse = hitCU.or(hitCD).toVar();
     const tFlank = select(hitL, tL, tR);
@@ -815,23 +856,24 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     const buS = bu1.add(F.slotL);
     const fi1 = floor(va1.div(F.fh));
     const fv1 = va1.sub(fi1.mul(F.fh));
-    const inBase1 = F.hasBase.and(va1.lessThan(F.baseH));
+    const inBase1 = andT(F.hasBase, va1.lessThan(F.baseH));
     const bB = F.fh.mul(0.22), bT = F.baseH.sub(F.fh.mul(0.28));
     const inOpenN = buS.greaterThan(F.oL).and(buS.lessThan(F.oR))
       .and(fv1.greaterThan(F.oB)).and(fv1.lessThan(F.oT));
     const inOpenB = buS.greaterThan(F.oL).and(buS.lessThan(F.oR))
       .and(va1.greaterThan(bB)).and(va1.lessThan(bT));
-    const inOpen = select(inBase1, inOpenB, inOpenN)
+    const inOpen = selT(inBase1, inOpenB, inOpenN)
       .and(onFront.not()).and(hitFlank.or(hitCourse).not()).and(F.flat.not()).toVar();
-    const inFrame = buS.greaterThan(F.oL.sub(F.border)).and(buS.lessThan(F.oR.add(F.border)))
-      .and(fv1.greaterThan(F.oB.sub(F.border))).and(fv1.lessThan(F.oT.add(F.border)))
-      .and(inBase1.not()).toVar();
+    const inFrame = varT(andT(
+      buS.greaterThan(F.oL.sub(F.border)).and(buS.lessThan(F.oR.add(F.border)))
+        .and(fv1.greaterThan(F.oB.sub(F.border))).and(fv1.lessThan(F.oT.add(F.border))),
+      notT(inBase1)));
     // The opening's own bounds, so the reveal walls know where they are.
-    const wB = select(inBase1, bB, fi1.mul(F.fh).add(F.oB)).toVar();
-    const wT = select(inBase1, bT, fi1.mul(F.fh).add(F.oT)).toVar();
+    const wB = selT(inBase1, bB, fi1.mul(F.fh).add(F.oB)).toVar();
+    const wT = selT(inBase1, bT, fi1.mul(F.fh).add(F.oT)).toVar();
 
     // ── Level 3: the reveal — jamb, sill, head — then the pane behind it.
-    const rev = select(inBase1, u.baseRecess.mul(0.35), F.reveal).toVar();
+    const rev = selT(inBase1, u.baseRecess.mul(0.35), F.reveal).toVar();
     const t2 = rev.div(rd).toVar();
     const bu2 = buS.add(ru.mul(t2)).toVar();
     const va2 = va1.add(rv.mul(t2)).toVar();
@@ -920,9 +962,9 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
   // Both are built from the SAME uniform objects, so every slider still drives
   // both and the two can never drift apart.
   // ══════════════════════════════════════════════════════════════════════════
-  const makeSurface = (R, far) => Fn(() => {
+  const makeSurface = (R, far, PIN) => Fn(() => {
     const D = buildDerivatives();
-    const F = buildFrame(D);
+    const F = buildFrame(D, PIN);
 
     const oCol = vec3(0.5).toVar();
     const oRough = u.wallRough.toVar();
@@ -947,8 +989,8 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     let base = uPalette.element(uint(pickIdx));
     base = base.mul(F.h6.mul(0.12).add(0.94)).mul(u.wallTint)
       .mul(select(F.isIndustrial, vec3(0.86, 0.87, 0.88), vec3(1.0)));
-    const stoneBase = select(F.isCurtain.or(F.isRibbon), u.mullionColor, base).toVar();
-    const jointAmt = select(F.isPunched, float(1.0), float(0.0)).toVar();
+    const stoneBase = selT(orT(F.isCurtain, F.isRibbon), u.mullionColor, base).toVar();
+    const jointAmt = selT(F.isPunched, float(1.0), float(0.0)).toVar();
     const tone = vnoise2(vec2(F.acrossW.mul(0.03), F.up.mul(0.03))).mul(0.18).toVar();
     const streak = vnoise2(vec2(F.acrossW.mul(1.5), F.up.mul(0.04))).mul(2.0);
     const dirt = smoothstep(float(-0.1), float(0.45), streak)
@@ -1132,12 +1174,12 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     // A far pane shows the room's MEAN — a mid grey, lit or not — behind grime.
     const g0 = glassOf(vec3(0.42, 0.40, 0.37).mul(float(0.6).add(roomJit.mul(0.5))),
       litOn, litColV, paneV, F.nW);
-    const baseDark = select(c0.inBase, float(0.35), float(1.0));
+    const baseDark = selT(c0.inBase, float(0.35), float(1.0));
     const wallFar = mix(st0.col, frameCol, c0.frame.mul(F.sharp));
 
     oCol.assign(mix(wallFar, g0.col.mul(baseDark), win0));
     oRough.assign(mix(st0.rough, u.glassRough, win0));
-    oEmis.assign(g0.glow.mul(win0).mul(select(c0.inBase, float(0.0), float(1.0))));
+    oEmis.assign(g0.glow.mul(win0).mul(selT(c0.inBase, float(0.0), float(1.0))));
     oAO.assign(mix(float(1.0), float(0.84), win0)
       .mul(mix(float(1.0), float(0.93), float(1.0).sub(c0.pier).mul(F.sharp))).mul(canyon));
     };
@@ -1262,9 +1304,9 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
 
         const g = glassOf(seen, roomLit.mul(u.interior), lt.litCol,
           T.va2.sub(T.wB).div(max(T.wT.sub(T.wB), 0.1)), F.nW);
-        nCol.assign(select(T.inBase1, g.col.mul(0.3), g.col));
+        nCol.assign(selT(T.inBase1, g.col.mul(0.3), g.col));
         nRough.assign(u.glassRough);
-        nGlow.assign(select(T.inBase1, vec3(0.0), g.glow));
+        nGlow.assign(selT(T.inBase1, vec3(0.0), g.glow));
         nAO.assign(0.8);
         // The pier and the window head both shadow the pane.
         const wJ = T.rev.mul(abs(S.su)).div(S.ldc);
@@ -1358,11 +1400,11 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
        */
       const shopRoll = hash31(vec3(F.lot, float(7.77))).toVar();
       const notInd = float(1.0).sub(float(F.isIndustrial));
-      const notBase = select(F.hasBase, float(0.0), float(1.0));
-      const lobbyOn = u.shopfronts.mul(float(F.isCurtain)).mul(notInd).mul(notBase).toVar();
+      const notBase = selT(F.hasBase, float(0.0), float(1.0));
+      const lobbyOn = u.shopfronts.mul(numT(F.isCurtain)).mul(notInd).mul(notBase).toVar();
       const paradeOn = u.shopfronts
         .mul(notInd).mul(notBase)
-        .mul(float(1.0).sub(float(F.isCurtain)))
+        .mul(float(1.0).sub(numT(F.isCurtain)))
         .mul(step(F.bldgH, u.shopMaxHeight))
         .mul(step(shopRoll, u.shopBuildings))
         .toVar();
@@ -1498,7 +1540,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
        * either, which leaves it where a real parade of shopfronts would be.
        */
       const lotLit = step(F.h5, u.neonBuildings)
-        .mul(float(F.isPunched))
+        .mul(numT(F.isPunched))
         .mul(float(1.0).sub(float(F.isIndustrial)));
       const bi = floor(F.u0.div(F.bay)).toVar();
       const h = hash31(vec3(F.lot, bi.mul(1.7).add(F.faceKey.mul(11.3)))).toVar();
@@ -1535,7 +1577,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
    * else — no stone colour, no room, no sky. See the header for why it cannot
    * simply read the colour pass's vars.
    */
-  const normalSolve = Fn(() => {
+  const makeNormalSolve = (PIN) => Fn(() => {
     // A MINIMAL frame, not `buildFrame()`. This pass runs on every city pixel,
     // and the full frame solve is a lot texture read, six sin-hashes and the
     // whole per-lot layout — none of which the far path needs. All it needs
@@ -1550,7 +1592,8 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     const cell = clamp(lot.sub(uLotOrigin), vec2(0.0), uLotCount.sub(1.0));
     const info = textureLoad(lotTexture, ivec2(cell));
     const up = positionWorld.y.sub(info.r).toVar();
-    const isPunched = info.a.lessThan(0.5);
+    const isPunched = PIN === null
+      ? info.a.lessThan(0.5) : PIN === BUILDING_TYPE.punched;
     const acrossW = positionWorld.x.mul(nW.z).sub(positionWorld.z.mul(nW.x)).toVar();
 
     // Brick relief for the bump — only on surfaces PARALLEL to the box face,
@@ -1565,7 +1608,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     // relief gate.
     const bevel = max(texel.mul(1.5), 0.02);
     const face = smoothstep(float(0.0), bevel, dU.mul(u.brickL)).mul(smoothstep(float(0.0), bevel, dV.mul(u.brickH)));
-    const isStone = select(isPunched, float(1.0), float(0.0)).mul(select(isRoof, float(0.0), float(1.0)));
+    const isStone = selT(isPunched, float(1.0), float(0.0)).mul(select(isRoof, float(0.0), float(1.0)));
     // A CONSERVATIVE gate: `bayWidth` here stands in for the lot's real bay,
     // which only the full frame knows. Erring wide costs a few pixels of trace
     // and guarantees the normals never switch to flat before the colour does —
@@ -1593,7 +1636,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     // (flanks, reveals, course soffits) take the hit normal; face-parallel
     // hits keep the bumped one.
     If(gateAmt.greaterThan(0.001), () => {
-      const F = buildFrame(D);
+      const F = buildFrame(D, PIN);
       const T = traceFacade(F);
       const hitN = normalize(cameraNormalMatrix.mul(T.N));
       out.assign(normalize(select(T.front.lessThan(0.5), hitN, out)));
@@ -1605,11 +1648,14 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
   /**
    * @param {boolean} far  L2 variant: flat paint only, no trace, no rooms,
    *                       no normalNode, no per-brick hashing.
+   * @param {number|null} PIN  building type compiled in, or null for the
+   *                       combined material that decides it per pixel.
    */
-  function buildMaterial(far) {
+  function buildMaterial(far, PIN) {
     const R = {};
     const m = new THREE.MeshStandardNodeMaterial();
-    m.name = far ? "CityFacadeFar" : "CityFacade";
+    m.name = (far ? "CityFacadeFar" : "CityFacade")
+      + (PIN === null ? "" : TYPE_NAME[PIN]);
     // The city's OWN share of the scene environment, as a plain property so
     // changing it never recompiles — it lets the city sit at a sun-dominant
     // ratio without dragging the terrain and the road down with it.
@@ -1619,7 +1665,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     // setupVariants, then lighting), so `R.*` is populated by the time these
     // lazy wrappers are built — and they share its flow, so they read the very
     // same variables rather than re-declaring them.
-    m.colorNode = makeSurface(R, far)();
+    m.colorNode = makeSurface(R, far, PIN)();
     m.roughnessNode = Fn(() => R.rough)();
     m.metalnessNode = float(0.0);       // all dielectric: stone, glass, metal trim
     m.emissiveNode = Fn(() => R.emissive)();
@@ -1628,7 +1674,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
       // A tower past the L1 ring is a few pixels of flat wall; a bumped normal
       // and a per-hit one are the same thing there, and normalNode is the
       // expensive slot because three always builds it in its own sub-build.
-      m.normalNode = normalSolve();
+      m.normalNode = makeNormalSolve(PIN)();
       // The analytic relief shadows cut DIRECT light only — which is what a
       // shadow is. Folding them into the albedo would darken the sky fill too.
       m.receivedShadowNode = Fn(([shadow]) => shadow.mul(R.shadow));
@@ -1636,23 +1682,50 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     return { m, R };
   }
 
-  const { m: material, R } = buildMaterial(false);
-  const { m: farMaterial, R: farR } = buildMaterial(true);
+  /**
+   * One near/far pair, wired for bloom.
+   *
+   * vec4, not the vec3 emissive: the MRT attachment is a vec4 struct member
+   * and WGSL will not widen an assignment — "cannot assign 'vec3<f32>' to
+   * 'vec4<f32>'", an invalid ShaderModule, and a city that silently never
+   * draws. Only the GAME hits it; the lab has no MRT target.
+   */
+  function buildPair(PIN) {
+    const { m: near, R: nearR } = buildMaterial(false, PIN);
+    const { m: fars, R: farR } = buildMaterial(true, PIN);
+    applyBloomMRT(near, Fn(() => vec4(nearR.emissive, 1.0))());
+    applyBloomMRT(fars, Fn(() => vec4(farR.emissive, 1.0))());
+    return { material: near, farMaterial: fars };
+  }
 
-  // vec4, not the vec3 emissive: the MRT attachment is a vec4 struct member
-  // and WGSL will not widen an assignment — "cannot assign 'vec3<f32>' to
-  // 'vec4<f32>'", an invalid ShaderModule, and a city that silently never
-  // draws. Only the GAME hits it; the lab has no MRT target.
-  applyBloomMRT(material, Fn(() => vec4(R.emissive, 1.0))());
-  applyBloomMRT(farMaterial, Fn(() => vec4(farR.emissive, 1.0))());
+  /*
+   * THE COMBINED PAIR IS ALWAYS BUILT, AND THAT IS FREE.
+   *
+   * Building a material is a JS node graph; the driver only compiles one when
+   * something DRAWS with it. So keeping the combined pair around for the
+   * BatchedMesh backend — which has a single material for the whole city and
+   * therefore cannot use a pinned one — costs nothing at all while the
+   * instanced backend is running, and nothing but the JS while it is not.
+   */
+  const { material, farMaterial } = buildPair(null);
+  /** Pinned pairs, indexed by BUILDING_TYPE. Empty when the split is off. */
+  const variants = [];
+  if (typeSplit) {
+    for (const t of [BUILDING_TYPE.punched, BUILDING_TYPE.curtain, BUILDING_TYPE.ribbon]) {
+      variants[t] = buildPair(t);
+    }
+  }
+  /** Every material this facade owns, for the settings that are not uniforms. */
+  const allMaterials = [material, farMaterial]
+    .concat(variants.flatMap((v) => [v.material, v.farMaterial]));
 
   // ── Live params proxy ──────────────────────────────────────────────────────
   const params = new Proxy(P, {
     set(target, key, value) {
       target[key] = value;
       if (key === "envIntensity") {
-        material.envMapIntensity = value;
-        farMaterial.envMapIntensity = value;
+        // A plain property, not a uniform — so it has to be set on each one.
+        for (const m of allMaterials) m.envMapIntensity = value;
         return true;
       }
       const un = u[key];
@@ -1682,6 +1755,21 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     material,
     /** The L2 variant: same uniforms and lot texture, a much cheaper shader. */
     farMaterial,
+    /** Every material, for anything that is a property rather than a uniform. */
+    allMaterials,
+    /** True when there is a pinned pair per building type to pick from. */
+    typeSplit: variants.length > 0,
+    /**
+     * The material for a building of this TYPE at this TIER.
+     *
+     * Falls back to the combined pair when the split is off, so a caller that
+     * does not care — or a BatchedMesh, which cannot care — needs no branch.
+     */
+    materialFor(btype, far) {
+      const v = variants[btype];
+      if (!v) return far ? farMaterial : material;
+      return far ? v.farMaterial : v.material;
+    },
     uniforms: u, params, lotHeights,
     /** Advance the window-churn clock. Seconds. */
     setTime(t) { uTime.value = t; },
