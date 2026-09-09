@@ -75,6 +75,12 @@ export function createRoadDevPanel({ app, game, params }) {
               <button class="prop-toggle" id="dv-terrain" type="button" aria-label="Terrain (off = sky mode)">${CHECK_SVG}</button>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Flat ground</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-flatground" type="button" aria-label="Flat debug ground: a floor to land on, without a terrain">${CHECK_SVG}</button>
+            </div>
+          </div>
           <div class="dv-hint">
             Off is <b>sky mode</b>: no ground drawn, none to land on — the car falls
             past where it was and respawns. For races that live in the air, and for
@@ -6147,6 +6153,9 @@ export function createRoadDevPanel({ app, game, params }) {
   toggle("dv-lines-bloom", game.getLinesBloom?.() ?? false, (on) => game.setLinesBloom?.(on));
   const terrainToggle =
     toggle("dv-terrain", game.getTerrain?.() ?? true, (on) => game.setTerrain?.(on));
+    // A floor to land on without loading a terrain — see
+    // modularRoadFlatGround.js for why the two are separate.
+    toggle("dv-flatground", game.getFlatGround?.() ?? false, (on) => game.setFlatGround?.(on));
   const cityToggle = toggle("dv-city", game.getCity?.() ?? false, (on) => game.setCity?.(on));
   const cityCollideToggle = toggle(
     "dv-city-collide", game.getCityCollide?.() ?? true, (on) => game.setCityCollide?.(on),

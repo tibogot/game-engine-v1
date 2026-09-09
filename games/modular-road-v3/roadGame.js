@@ -39,6 +39,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import "../../v3/styles/editor.css";
 import "./palette.css";
 import { startV3App } from "../../v3/app/main.js";
+import { createFlatGround } from "./modularRoadFlatGround.js";
 import { createModularRoadClouds } from "./modularRoadClouds.js";
 import {
   Vehicle,
@@ -374,12 +375,42 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * makes the city's roads drivable without a line of new collision code —
    * and NaN everywhere else keeps the sky-mode contract exactly as it was.
    */
+  /*
+   * ── THE FLAT DEBUG GROUND ─────────────────────────────────────────────────
+   *
+   * A floor to land on while tuning ramps, without loading a clipmap terrain
+   * to get a plane at y = 0. Lazy: built the first time it is switched on, so
+   * a session that never asks for it pays nothing.
+   */
+  let flatGround = null;
+  let flatGroundOn = false;
+  function setFlatGround(on) {
+    const next = !!on;
+    if (next === flatGroundOn) return;
+    flatGroundOn = next;
+    if (next && !flatGround) {
+      flatGround = createFlatGround();
+      scene.add(flatGround.mesh);
+    }
+    if (flatGround) flatGround.mesh.visible = next;
+    // The kill floor is a different rule with a floor under the track.
+    trackBottomY = null;
+    devPanel?.refresh?.();
+  }
+
   function terrainH(x, z) {
     if (terrainOn) return app.getWorldHeight(x, z);
     if (city && cityWanted) {
       const s = city.streetHeightAt(x, z);
       if (isFinite(s)) return s;
     }
+    /*
+     * AFTER the city, not before: where both exist the city's streets ARE the
+     * ground, and its own plane sits at the same height. This is what carries
+     * on past the city's edge and what stands in for it when there is no city
+     * at all — which is the case it was built for.
+     */
+    if (flatGroundOn && flatGround?.covers(x, z)) return flatGround.heightAt(x, z);
     return NaN;
   }
 
@@ -8921,6 +8952,8 @@ ${e.message}`);
       /** Sky mode: terrain hidden, not solid, heights measured from y=0. */
       setTerrain,
       getTerrain: () => terrainOn,
+      setFlatGround,
+      getFlatGround: () => flatGroundOn,
       setSpawnToCar,
       clearSpawn,
       hasSpawn: () => gameSpawn != null,
@@ -9826,6 +9859,8 @@ ${e.message}`);
      *  sky mode is just a track; this is a runtime mode, not track data. */
     setTerrain,
     getTerrain: () => terrainOn,
+    setFlatGround,
+    getFlatGround: () => flatGroundOn,
     /** Cloud density at a world point (0 until the bake lands) — for HUD/audio rules. */
     cloudDensityAt: (x, y, z) => clouds.densityAt(x, y, z),
     lensFlareParams: () => ensureFlareLook(),
