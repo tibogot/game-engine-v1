@@ -1190,6 +1190,60 @@ console.log("\n── LOOK PASS ──");
   }
 
   /*
+   * ── CAR PARKS ────────────────────────────────────────────────────────────
+   *
+   * The one thing that can really go wrong here is cars that do not line up
+   * with the paint, and it is invisible to any count: the placer and the
+   * shader would each be internally consistent and disagree with each other.
+   * So the test re-derives the bay grid from `bayLayout` — the single
+   * description both of them read — and checks every car sits on a bay centre.
+   * If the two ever stop sharing that, this fails.
+   */
+  console.log("\n── CAR PARKS ──");
+  {
+    const { bayLayout, CARPARK_DEFAULTS } =
+      await import("../games/modular-road-v3/modularRoadCityCarPark.js");
+    const nP = flatCity.stats.carParks;
+    check("some squares became car parks", nP > 0,
+      `${nP} parks, ${flatCity.stats.parkedInParks} cars`);
+    let pgMesh = null;
+    flatCity.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CityCarPark") pgMesh = o; });
+    check("all the bay paint is one draw",
+      !!pgMesh && pgMesh.instanceMatrix.count === nP, `${nP} parks in ${pgMesh ? 1 : 0} mesh`);
+
+    const blockW = CITY_DEFAULTS.blockLots * CITY_DEFAULTS.lotSize;
+    const L = bayLayout(CARPARK_DEFAULTS, blockW);
+    let offBay = 0, total = 0, outside = 0;
+    for (const pk of (flatCity.stats.carParkList || [])) {
+      for (const b of pk.bays) {
+        total++;
+        const lx = b.x - pk.x - L.x0;
+        const lz = b.z - pk.z - L.z0;
+        if (lx < -0.01 || lx > L.spanX + 0.01 || lz < -0.01 || lz > L.spanZ + 0.01) { outside++; continue; }
+        // On a bay centre across, and on a rank centre along.
+        const acr = Math.abs((lx / L.bayWidth) % 1 - 0.5);
+        const row = lz % L.rowPitch;
+        const onRank = Math.min(Math.abs(row - L.bayDepth * 0.5),
+          Math.abs(row - L.bayDepth * 1.5));
+        if (acr > 0.02 || onRank > 0.02) offBay++;
+      }
+    }
+    check("every parked car stands on a painted bay",
+      total > 0 && offBay === 0 && outside === 0,
+      `${offBay} of ${total} off a bay, ${outside} outside the markings`);
+    /*
+     * AND NOT EVERY BAY IS TAKEN. A car park with every space filled is the
+     * one arrangement a real one is never in, and it is the state a
+     * placement loop falls into by default.
+     */
+    const capacity = L.rows * 2 * L.cols * nP;
+    check("the car parks are busy but not full",
+      total < capacity * 0.85 && total > capacity * 0.3,
+      `${total} cars in ${capacity} bays`);
+  }
+
+
+  /*
    * ── SKYBRIDGES ───────────────────────────────────────────────────────────
    *
    * Every way a bridge can be wrong is geometric and none of them shows in a

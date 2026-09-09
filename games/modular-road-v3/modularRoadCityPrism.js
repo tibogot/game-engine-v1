@@ -60,6 +60,25 @@ export const CITY_PRISM_DEFAULTS = {
  * `archetypes` their shapes; both are exactly what createCitySigns is given,
  * so this needs no new data plumbed through the city.
  */
+/**
+ * WHICH SQUARE THE BOARD TAKES — the one nearest downtown, where the track
+ * and the player are.
+ *
+ * Exported because the car parks have to exclude it, and the only safe way to
+ * agree on "the plaza the prism took" is for both to ask the same function. A
+ * second copy of "nearest to the origin" would agree right up until either
+ * rule was tuned, and the symptom would be a hundred cars parked around a
+ * billboard.
+ */
+export function pickPrismPlaza(plazas) {
+  let best = null, bd = Infinity;
+  for (const pz of plazas) {
+    const d = Math.hypot(pz.x, pz.z);
+    if (d < bd) { bd = d; best = pz; }
+  }
+  return best;
+}
+
 export function placeCityPrism({ buildings, archetypes, plazas = [], params = {} } = {}) {
   const P = { ...CITY_PRISM_DEFAULTS, ...params };
   if (!P.prism || !buildings?.length) return null;
@@ -76,13 +95,7 @@ export function placeCityPrism({ buildings, archetypes, plazas = [], params = {}
    * feature, and a seed that produced none must still get its landmark.
    */
   if (P.prismSite === "plaza" && plazas.length) {
-    // The one nearest downtown, which is where the track and the player are.
-    let best = null;
-    for (const pz of plazas) {
-      const d = Math.hypot(pz.x, pz.z);
-      if (!best || d < best.d) best = { pz, d };
-    }
-    const { pz } = best;
+    const pz = pickPrismPlaza(plazas);
     const group = buildAdPrismMesh({
       params: { ...AD_PRISM, legs: true, scale: P.prismPlazaScale },
     });

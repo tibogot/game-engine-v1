@@ -78,7 +78,8 @@ import {
 import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.js";
 import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
 import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
-import { placeCityPrism, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
+import { placeCityPrism, pickPrismPlaza, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
+import { planCarParks, buildCarParkGround, CARPARK_DEFAULTS } from "./modularRoadCityCarPark.js";
 import { placeCityBridges, BRIDGE_DEFAULTS } from "./modularRoadCityBridges.js";
 import { createCityStreets, STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
@@ -239,6 +240,10 @@ export const CITY_DEFAULTS = {
    *  handful of them in a city. See modularRoadCityBridges.js. */
   bridges: true,
   bridgeParams: {},
+  /** Some of the squares become surface car parks — painted bays and cars
+   *  standing in them. One draw for the paint, none for the cars. */
+  carParks: true,
+  carParkParams: {},
   beacons: true,
   beaconColor: 0xff2a1a,
 
@@ -342,6 +347,8 @@ export function createModularRoadCity({
   let signs = null;
   let prism = null;
   let bridges = null;
+  let carParkGround = null;
+  let carParks = [];
   let beacons = null;
   let enabled = true;
   let originCellX = 0, originCellZ = 0;
@@ -352,7 +359,7 @@ export function createModularRoadCity({
   const stats = {
     buildings: 0, lod: [0, 0, 0], meshes: 0, kit: kit.stats,
     lastLodMs: 0, lastBuildMs: 0,
-    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, plazas: 0, plazaList: [], bridges: 0, bridgeSpans: [],
+    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, plazas: 0, plazaList: [], bridges: 0, bridgeSpans: [], carParks: 0, parkedInParks: 0, carParkList: [],
     lotTexCells: [0, 0], landmarks: 0, beacons: 0,
     signs: { banners: 0, screens: 0, bands: 0 },
     districts: [0, 0, 0],
@@ -704,6 +711,8 @@ export function createModularRoadCity({
     if (signs) { group.remove(signs.group); signs.dispose(); signs = null; }
     if (prism) { group.remove(prism.group); prism.dispose(); prism = null; }
     if (bridges) { group.remove(bridges.group); bridges.dispose(); bridges = null; }
+    if (carParkGround) { group.remove(carParkGround.mesh); carParkGround.dispose(); carParkGround = null; }
+    carParks = [];
     if (beacons) {
       group.remove(beacons);
       beacons.geometry.dispose();
@@ -963,8 +972,38 @@ export function createModularRoadCity({
         // Exposed so a harness (and the dev console) can ask the same question
         // the placement asks: is this point inside a building?
         clearanceAt = buildingClearance;
+        /*
+         * CAR PARKS, PLANNED BEFORE THE FURNITURE. An empty paved block breaks
+         * the grid, which was the point of plazas — but a bare one reads as
+         * MISSING rather than as open, and the eye tells the difference. The
+         * cars go in as extra instances of the four bodies the street already
+         * draws, so a few hundred more parked cars is a few hundred matrices
+         * and not one more draw. The paint is one instanced quad per park.
+         *
+         * The square the prism took is excluded through the prism's OWN
+         * picker: a second copy of "nearest to downtown" would agree until
+         * either rule was tuned, and the symptom would be a hundred cars
+         * parked around a billboard.
+         */
+        const parkP = { ...CARPARK_DEFAULTS, ...P.carParkParams, carParks: P.carParks };
+        carParks = planCarParks({
+          plazas: stats.plazaList,
+          blockW: P.blockLots * P.lotSize,
+          rand: blockRand,
+          skip: P.prism && (P.prismParams?.prismSite ?? CITY_PRISM_DEFAULTS.prismSite) === "plaza"
+            ? pickPrismPlaza(stats.plazaList) : null,
+          params: parkP,
+        });
+        carParkGround = buildCarParkGround(carParks, parkP, P.blockLots * P.lotSize);
+        if (carParkGround) group.add(carParkGround.mesh);
+        stats.carParks = carParks.length;
+        stats.parkedInParks = carParks.reduce((a, pk) => a + pk.bays.length, 0);
+        // The bays themselves, so a harness can check the cars against the
+        // paint rather than against a count that cannot tell them apart.
+        stats.carParkList = carParks;
         furniture = createCityFurniture({
           buildingClearance,
+          parkBays: carParks,
           P, originCellX, originCellZ, params: P.furnitureParams,
           // The street's OWN lamp field, so a car is lit by the lamp whose
           // pool it is parked in and the two can never drift apart.

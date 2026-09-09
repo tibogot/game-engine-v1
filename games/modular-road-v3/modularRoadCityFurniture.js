@@ -481,7 +481,7 @@ function pickCarBody(r) {
   return CAR_SHARE.length - 1;
 }
 
-export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null }) {
+export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [] }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
   group.name = "CityFurniture";
@@ -1092,6 +1092,23 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
    * independently. Copying here instead would have given the renderer and the
    * collider two versions of where the traffic is parked.
    */
+  /*
+   * THE CAR PARKS' CARS, into the SAME lists the street's parked cars use.
+   *
+   * That is the whole reason this is here rather than in the car-park module:
+   * these are extra instances of the four bodies already being drawn, so a few
+   * hundred more cars cost a few hundred matrices and not one more draw. A
+   * separate mesh would have been tidier to write and four draws worse to run.
+   */
+  for (const pk of parkBays) {
+    for (let i = 0; i < pk.bays.length; i++) {
+      const b = pk.bays[i];
+      place(cars, b.x, b.z, b.yaw, {
+        color: pickCarColor(h2(Math.round(pk.x), i, 71)),
+        body: pickCarBody(h2(Math.round(pk.z), i, 72)),
+      });
+    }
+  }
   const carsByBody = CAR_BODIES.map(() => []);
   for (const e of cars) carsByBody[e.body ?? 0].push(e);
   const carMeshes = carsByBody.map((list, i) =>
