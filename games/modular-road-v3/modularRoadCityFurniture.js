@@ -119,6 +119,10 @@ export const FURNITURE_DEFAULTS = {
    */
   lightHeight: 7.6,
   lightArm: 9.5,
+  /** Metres back from the junction, along the mast's own approach. Just
+   *  behind the crossing (crossClear is 6.5), which is where a stop line is
+   *  and which is what keeps two masts on one corner from crossing booms. */
+  lightSetback: 7.0,
   /**
    * THE SIGNAL CYCLE, in seconds, and the two boundaries inside it as
    * fractions: green from 0, amber from `signalGreenEnd`, red from
@@ -642,14 +646,42 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
            * building line. `dir` is "into the block", so the arm wants the
            * opposite — which is exactly what flipping by side does.
            *
-           * ONE per side rather than one per side per end. Four mast arms at
-           * every junction corner is what a short pole could get away with and a
-           * 7 m mast cannot; pairing each side with one end gives the two-arm
-           * diagonal a real junction has.
+           * ONE PER APPROACH, ON THAT APPROACH'S RIGHT-HAND KERB, AT THE
+           * JUNCTION IT ARRIVES AT. We drive on the right, so that is the only
+           * place a signal belongs — and getting it right is also what stops
+           * the masts crossing.
+           *
+           * The pairing was INVERTED. `side === 0` is the low-across kerb, and
+           * the lanes beside it travel in +along (see the lane table: low frac
+           * gets dir +1). Traffic going +along ARRIVES at the HIGH end, a1 —
+           * but this put that mast at a0, the junction it had just left. So
+           * every mast stood at the wrong corner, behind its own driver, on
+           * top of the cross street's mast: two booms over one corner in an X,
+           * heads out over the pedestrian crossing instead of over the lanes.
+           *
+           * Right-hand rule, once: facing +z your right is -x, which is the
+           * low-across kerb. So side 0 serves +along traffic and belongs at
+           * a1; side 1 serves -along traffic and belongs at a0.
            */
           for (const end of [a0, a1]) {
-            if ((end === a0) !== (side === 0)) continue;
-            const s = end === a0 ? a0 - 1.0 : a1 + 1.0;
+            if ((end === a0) === (side === 0)) continue;
+            /*
+             * SET BACK ONTO ITS OWN APPROACH, which is what uncrosses them.
+             *
+             * These used to sit 1 m INTO the junction mouth. Both masts that
+             * share a corner then stood 2.7 m apart — MEASURED at the origin:
+             * (0.9, -1) and (-1, 0.9) — with 9.5 m booms at the same height
+             * meeting at right angles. That is the X the user photographed.
+             *
+             * The corner is not the mistake: it genuinely serves two
+             * approaches, and a real junction does put a mast on it. The
+             * mistake was standing them in the crossing. Backed off by
+             * `lightSetback` each mast sits behind its own stop line, just
+             * short of the zebra, and the two booms reach into the junction
+             * from opposite sides without ever meeting — mast A's boom stops
+             * at x <= 0.9 while mast B's never comes below z = 0.9.
+             */
+            const s = end === a0 ? a0 + F.lightSetback : a1 - F.lightSetback;
             const [x, z] = at(kerb + dir * 0.9, s);
             /*
              * PHASE COMES FROM THE AXIS, not from a hash of the position.

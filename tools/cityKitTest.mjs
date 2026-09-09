@@ -398,6 +398,43 @@ console.log("\n── LOOK PASS ──");
       `${sigWrong} of ${sigTotal} heads point the wrong way`);
 
     /*
+     * THE TEST ABOVE WAS TOO WEAK, AND IT PASSED ON A SCREENSHOT THAT WAS
+     * OBVIOUSLY WRONG. At a junction corner BOTH streets are within an arm's
+     * length, so "the head is nearer a street centre than the post" is
+     * satisfied by a mast reaching over the CROSS street. It only ever proved
+     * the arm points at *a* road, never at its own — which is how two booms
+     * ended up crossing over one corner with their heads out over the zebra.
+     *
+     * Two things it could not see, both checked here:
+     *   1. the head must be over the SAME street the post stands on, so the
+     *      axis of the nearest centre line has to match;
+     *   2. no two masts may share a corner, because that is what an X looks
+     *      like from the car.
+     */
+    let crossStreet = 0;
+    for (const e of lights.slice(0, 300)) {
+      const el = e.m.elements;
+      const px = el[12], pz = el[14];
+      const hx = el[0] * FP.lightArm + el[4] * (FP.lightHeight - 0.8) + px;
+      const hz = el[2] * FP.lightArm + el[6] * (FP.lightHeight - 0.8) + pz;
+      // streetSpawnNear's yaw names the axis of the street it snapped to.
+      if (Math.abs(flatCity.streetSpawnNear(px, pz).yaw - flatCity.streetSpawnNear(hx, hz).yaw) > 1e-6) crossStreet++;
+    }
+    check("every signal reaches over ITS OWN street, not the cross street",
+      crossStreet === 0, `${crossStreet} of 300 reach across the wrong road`);
+
+    let tooClose = 0;
+    const pts = lights.slice(0, 600).map((e) => [e.m.elements[12], e.m.elements[14]]);
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        const d = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]);
+        if (d < 6) { tooClose++; break; }
+      }
+    }
+    check("no two signal masts share a corner (no crossed booms)", tooClose === 0,
+      `${tooClose} masts within 6 m of another`);
+
+    /*
      * NOTHING BURIED IN A BUILDING. A cone, sign or bin inside a footprint is
      * invisible, still costs an instance and a capsule, and is exactly the
      * kind of waste that never shows up in a stat — the count says 1456 cones
