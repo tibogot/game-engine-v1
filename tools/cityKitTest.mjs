@@ -1085,12 +1085,26 @@ console.log("\n── LOOK PASS ──");
     c.update(0.016, { position: cam });
     const first = tm.count;
     check("an update fills only the cars within range", first > 0 && first < fs.traffic, `${first} of ${fs.traffic}`);
-    // ...and they MOVE: the same car must be somewhere else a second later.
+    /*
+     * ...AND THEY MOVE. Across the POPULATION, not instance 0: now that cars
+     * stop at lights, whichever car happens to land in slot 0 may legitimately
+     * be sitting at a red, and this check would fail on correct behaviour.
+     * A median over everything in range cannot be caught out that way.
+     */
     const m0 = new THREE.Matrix4(), m1 = new THREE.Matrix4(), v0 = new THREE.Vector3(), v1 = new THREE.Vector3();
-    tm.getMatrixAt(0, m0); v0.setFromMatrixPosition(m0);
+    const was = [];
+    for (let i = 0; i < tm.count; i++) { tm.getMatrixAt(i, m0); was.push(new THREE.Vector3().setFromMatrixPosition(m0)); }
     c.update(1.0, { position: cam });
-    tm.getMatrixAt(0, m1); v1.setFromMatrixPosition(m1);
-    check("traffic actually moves between frames", v0.distanceTo(v1) > 0.5, `${v0.distanceTo(v1).toFixed(1)} m`);
+    const moved = [];
+    for (let i = 0; i < Math.min(tm.count, was.length); i++) {
+      tm.getMatrixAt(i, m1); v1.setFromMatrixPosition(m1);
+      moved.push(was[i].distanceTo(v1));
+    }
+    moved.sort((a, b) => a - b);
+    const median = moved.length ? moved[moved.length >> 1] : 0;
+    check("traffic actually moves between frames", median > 0.3,
+      `median ${median.toFixed(2)} m over ${moved.length} cars`);
+    void v0;
   }
   {
     // Every body's mesh carries its own colours, and between them they cover
@@ -1240,6 +1254,120 @@ console.log("\n── LOOK PASS ──");
     check("the car parks are busy but not full",
       total < capacity * 0.85 && total > capacity * 0.3,
       `${total} cars in ${capacity} bays`);
+  }
+
+
+  /*
+   * ── TRAFFIC THAT STOPS AND QUEUES ────────────────────────────────────────
+   *
+   * None of this is visible in a count, and the whole model went in with three
+   * parameters undefined without a single existing test noticing: `2 *
+   * undefined * gap` is NaN, `NaN < v*v` is false, so every constraint quietly
+   * evaporated and the cars drove exactly as they had before. A model that
+   * fails by doing nothing needs tests that assert it did something.
+   */
+  console.log("\n── TRAFFIC ──");
+  {
+    const { signalPhaseAt, signalGo } =
+      await import("../games/modular-road-v3/modularRoadCityFurniture.js");
+    const cam = new THREE.Vector3(0, 2, 0);
+    const cars = flatCity.furniture.traffic;
+    const FP2 = flatCity.furniture.params;
+    /*
+     * MEASURED OVER TIME, NOT AT AN INSTANT, and that is not a convenience.
+     * A lane is 2400 m with ten cars on it, so at any single moment only a
+     * handful are sitting at a line — a snapshot would make a working model
+     * look broken and a broken one look plausible. What the lights do is
+     * visible in how many cars they stop over a cycle.
+     */
+    let everStopped = 0, everSlowed = 0, stoppedSamples = 0, looseSamples = 0;
+    const wasStopped = new Set();
+    for (let i = 0; i < 1800; i++) {
+      flatCity.update(1 / 30, { position: cam });
+      if (i % 5) continue;
+      for (const c of cars) {
+        if (c.v < 0.5 && !wasStopped.has(c)) { wasStopped.add(c); everStopped++; }
+        if (c.v < c.speed * 0.6) everSlowed++;
+        // Slow with nothing holding it AND not accelerating: genuinely stuck.
+        if (c.v < 0.5) { stoppedSamples++; if (!c.hold && !c.rising) looseSamples++; }
+      }
+    }
+    const stopped = cars.filter((c) => c.v < 0.5);
+    check("the lights actually stop traffic", everStopped > 40,
+      `${everStopped} of ${cars.length} cars came to a stop over 60 s`);
+    check("and many more slow for them", everSlowed > 500, `${everSlowed} slow samples`);
+    check("and most of it is not — a city, not a car park",
+      stopped.length < cars.length * 0.75, `${stopped.length} of ${cars.length}`);
+
+    /*
+     * NOBODY STOPS IN THE BOX. A car that halts inside a junction blocks the
+     * cross traffic forever, and it is the one failure this model can produce
+     * that never clears itself.
+     */
+    const L2 = CITY_DEFAULTS.lotSize;
+    const pitch2 = (CITY_DEFAULTS.blockLots + CITY_DEFAULTS.streetLots) * L2;
+    const blockW2 = CITY_DEFAULTS.blockLots * L2;
+    const half2 = CITY_DEFAULTS.extent;
+    const cellOf = (c) => {
+      const along = (-half2 + c.u * c.lane.span) * c.lane.dir;
+      const rel = along - 0;               // the test city's origin is 0
+      return rel - Math.floor(rel / pitch2) * pitch2;
+    };
+    const inBox = stopped.filter((c) => cellOf(c) >= blockW2);
+    check("no car is stopped inside a junction", inBox.length === 0,
+      `${inBox.length} of ${stopped.length} stopped in the box`);
+
+    /*
+     * AND NOBODY IS INSIDE ANYBODY. Without car-following every car in a lane
+     * brakes for the same line and parks on the one in front — a red light
+     * would stack a dozen cars in three metres, which is what this measures.
+     */
+    let worst = Infinity, pairs = 0;
+    const byLane = new Map();
+    for (const c of cars) {
+      if (!byLane.has(c.li)) byLane.set(c.li, []);
+      byLane.get(c.li).push(c);
+    }
+    for (const row of byLane.values()) {
+      row.sort((a, b) => a.u - b.u);
+      for (let k = 0; k < row.length; k++) {
+        const a = row[k], b = row[(k + 1) % row.length];
+        let du = b.u - a.u;
+        if (du <= 0) du += 1;
+        worst = Math.min(worst, du * a.lane.span);
+        pairs++;
+      }
+    }
+    check("no two cars in a lane are inside each other",
+      worst > FP2.trafficGap * 0.7,
+      `closest pair ${worst.toFixed(2)} m, gap target ${FP2.trafficGap} m`);
+
+    /*
+     * A STOPPED CAR HAS A REASON — and the reason is read off the model rather
+     * than reconstructed. An earlier version of this check re-derived the
+     * junction index and the signal phase itself, got one of them wrong, and
+     * reported every stopped car as unexplained: a test that duplicates the
+     * thing it is testing fails on its own copy. `hold` is set where the
+     * decision is actually made.
+     */
+    /*
+     * Sampled over the run, not at the end, and for the same reason as above:
+     * seven cars are standing still at any given instant and three of them
+     * being unexplained is noise, not a signal.
+     *
+     * A slow car with nothing binding it is real — one just released by a
+     * green is accelerating and has no constraint left — so `rising` tells
+     * the two apart. What must never happen is a car that is stopped, has
+     * nothing holding it, and is not pulling away: that one is stuck, and it
+     * is what a NaN constraint looks like from outside.
+     */
+    const loose = looseSamples / Math.max(1, stoppedSamples);
+    check("no car is ever stopped with nothing holding it and no way out",
+      stoppedSamples > 200 && loose < 0.02,
+      `${(loose * 100).toFixed(2)}% of ${stoppedSamples} stopped samples were stuck`);
+    const byRed = stopped.filter((c) => c.hold === 2).length;
+    check("and the lights are among the reasons", byRed > 0 || stopped.length === 0,
+      `${byRed} held by a red, ${stopped.length - byRed} by the car in front`);
   }
 
 

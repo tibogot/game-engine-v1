@@ -29,6 +29,10 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { installCityPresetTrees } from "./modularRoadCityTreePreset.js";
 import { buildClutterKit, placeStreetClutter, CLUTTER_DEFAULTS } from "./modularRoadCityClutter.js";
+// The stop line is the STREET's number, not a second copy of it: a car that
+// pulls up a metre past its own painted line is the one error in this whole
+// model anybody would notice.
+import { STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import {
   ROAD_SIGN_DEFAULTS, SIGN, MIDBLOCK_SIGNS, makeRoadSignAtlas,
   buildRoadSignGeometry, makeRoadSignMaterial, loadRoadSignFolder,
@@ -225,6 +229,13 @@ export const FURNITURE_DEFAULTS = {
   /** Metres per second. Real city traffic, not a motorway. */
   trafficSpeedMin: 7.5,
   trafficSpeedMax: 13.5,
+  /** THE DRIVING MODEL. `trafficGap` is bumper to bumper at a standstill —
+   *  a car is 4.5 m, so this is the car plus a couple of metres of headway.
+   *  Braking is harder than pulling away because it is in a real car, and
+   *  because a queue that accelerates as hard as it stops concertinas. */
+  trafficGap: 7.2,
+  trafficAccel: 2.6,
+  trafficDecel: 4.5,
   /** How far from the camera a moving car is still updated and drawn. */
   trafficRange: 380,
   /** Head and tail lamp strength at night (they bloom). */
@@ -479,6 +490,40 @@ const CAR_SHARE = (() => {
 function pickCarBody(r) {
   for (let i = 0; i < CAR_SHARE.length; i++) if (r < CAR_SHARE[i]) return i;
   return CAR_SHARE.length - 1;
+}
+
+/**
+ * ── THE SIGNAL CYCLE, WRITTEN ONCE ───────────────────────────────────────────
+ *
+ * The lens colour lives in a SHADER: a clock uniform plus a per-instance phase,
+ * so the CPU has never known what colour any signal is showing. Cars that stop
+ * at lights need exactly that, and the obvious way to get it — a second copy of
+ * the cycle arithmetic in the traffic loop — is how the two would drift until
+ * cars stopped on green.
+ *
+ * So the PHASE is computed here and nowhere else. The mast is given it at
+ * placement and hands it to the shader as `aPhase`; the car asks for the same
+ * junction's phase by the same function. There is one expression, and both
+ * sides read it.
+ *
+ * What is still duplicated is the band test — `t < greenEnd` — because a shader
+ * cannot call this. It is one comparison against the same uniform, and
+ * `signalGo` is the JS half; keep them in step.
+ */
+export function signalPhaseAt(axis, kx, kz) {
+  // Streets running in z are half a cycle from streets running in x, so the two
+  // approaches to any junction are always opposed. The small per-block offset
+  // stops the whole city changing on the same beat.
+  const wave = ((((kx + kz) % 5) + 5) % 5) * 0.037;
+  return (axis === "z" ? 0 : 0.5) + wave;
+}
+
+/** True while that signal is GREEN. Amber counts as stop — a car that can still
+ *  pull up should, and one that cannot is already past the line. */
+export function signalGo(time, phase, F) {
+  let t = (time / F.signalCycle + phase) % 1;
+  if (t < 0) t += 1;
+  return t < F.signalGreenEnd;
 }
 
 export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [] }) {
@@ -907,8 +952,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
              * same beat (a green wave down an avenue); both axes of one
              * junction share it, so it never breaks the opposition above.
              */
-            const wave = (((kx + kz) % 5) * 0.037);
-            const phase = (axis === "z" ? 0 : 0.5) + wave;
+            const phase = signalPhaseAt(axis, kx, kz);
             /*
              * THE ARM'S OWN YAW, DERIVED — not `yawAlong` with a flip.
              *
@@ -1053,10 +1097,22 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   for (let li = 0; li < lanes.length; li++) {
     for (let i = 0; i < F.trafficPerLane; i++) {
       const r0 = h2(li, i, 61), r1 = h2(li, i, 62), r2 = h2(li, i, 63);
+      const u0 = (i + r0) / F.trafficPerLane;
       traffic.push({
         lane: lanes[li],
-        phase: (i + r0) / F.trafficPerLane,
+        li,
+        phase: u0,
+        /*
+         * `u` IS STATE NOW, not a function of the clock.
+         *
+         * It used to be `(phase + t * speed / span) % 1` — a closed form, and a
+         * car that can be stopped by a red light has no closed form. `v` is the
+         * current speed and starts at cruise, so the first frame after a build
+         * is traffic already moving rather than a grid pulling away together.
+         */
+        u: u0,
         speed: F.trafficSpeedMin + r1 * (F.trafficSpeedMax - F.trafficSpeedMin),
+        v: F.trafficSpeedMin + r1 * (F.trafficSpeedMax - F.trafficSpeedMin),
         color: pickCarColor(r2),
         body: pickCarBody(h2(li, i, 64)),
         m: new THREE.Matrix4(),
@@ -1064,6 +1120,18 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       });
     }
   }
+  /*
+   * CARS IN ORDER, PER LANE — and this is what makes stopping possible at all.
+   *
+   * Without a leader to follow, every car in a lane brakes for the same stop
+   * line and parks on top of the one in front: a red light would stack twelve
+   * cars in the same three metres. They are created evenly spaced and only ever
+   * move forward, and no car may pass its leader, so this order is fixed for
+   * the life of the city and never needs re-sorting.
+   */
+  const laneCars = lanes.map(() => []);
+  for (const c of traffic) laneCars[c.li].push(c);
+  for (const row of laneCars) row.sort((a, b) => a.u - b.u);
 
   const trafficMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0.45, vertexColors: true });
   trafficMat.name = "CityTraffic";
@@ -1236,6 +1304,124 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const _tq = new THREE.Quaternion(), _tp = new THREE.Vector3(), _ts = new THREE.Vector3(1, 1, 1);
   /** Reused so the per-frame update allocates nothing. */
   const _trafficN = new Int32Array(CAR_BODIES.length);
+  /** Where the stop line is, in metres back from the junction mouth. Taken from
+   *  the STREET's own numbers so the cars pull up on the paint rather than near
+   *  it — a car stopped a metre past its own stop line is the one error in this
+   *  whole model anybody would notice. */
+  const _streetP = { ...STREET_DEFAULTS, ...(P?.streetParams || {}) };
+  const STOP_AT = _streetP.crossInset + _streetP.stopOffset;
+  let _lastT = null;
+
+  /**
+   * ── ONE STEP OF THE TRAFFIC ────────────────────────────────────────────────
+   *
+   * Every car picks the LOWEST speed three constraints allow: its own cruise,
+   * what the car in front leaves room for, and what the signal ahead permits.
+   * Then it ramps toward that rather than snapping, because a city where the
+   * traffic changes speed instantly reads as a puppet show.
+   *
+   * `sqrt(2 a d)` is the whole braking model: the fastest you can be going and
+   * still stop in `d` metres at `a`. It has the property that matters here —
+   * far from the line it returns a speed above cruise, so braking simply does
+   * not begin until it needs to, with no threshold to tune.
+   */
+  function stepTraffic(t, dt) {
+    if (dt <= 0) return;
+    for (let li = 0; li < laneCars.length; li++) {
+      const row = laneCars[li];
+      const n = row.length;
+      if (!n) continue;
+      const L = lanes[li];
+      const span = L.span;
+      const originAlong = L.axis === "z" ? oz : ox;
+      const originAcross = L.axis === "z" ? ox : oz;
+      // The lane's own block index across the street; the junction's index
+      // ALONG it changes as the car travels, so that one is per car.
+      const acrossIdx = Math.floor((L.across - originAcross) / pitch);
+      for (let i = 0; i < n; i++) {
+        const c = row[i];
+        let vMax = c.speed;
+        /*
+         * WHY it slowed, recorded as it happens. One field, set where the
+         * decision is made — so a test can ask the model what it did instead
+         * of re-deriving the junction arithmetic and checking its own copy.
+         * That copy is the thing this file has got wrong more than once.
+         */
+        c.hold = 0;
+
+        // ── The car in front. `row` is ordered and nobody overtakes, so the
+        // leader is simply the next one round.
+        const lead = row[(i + 1) % n];
+        let gapU = lead.u - c.u;
+        if (gapU <= 0) gapU += 1;
+        const gap = gapU * span - F.trafficGap;
+        const gv = 2 * F.trafficDecel * (gap > 0 ? gap : 0);
+        if (gv < vMax * vMax) { vMax = Math.sqrt(gv); c.hold = 1; }   // the car in front
+        // AND NEVER FURTHER THAN THE GAP ITSELF IN ONE STEP. The curve above
+        // is smooth but discrete: it can hand back a speed that carries the
+        // car past the thing it was braking for, in one frame.
+        const gcap = gap / dt;
+        if (gcap < vMax) { vMax = gcap > 0 ? gcap : 0; c.hold = 1; }
+
+        // ── The signal ahead. `sLocal` is where this car sits in the repeating
+        // block+junction cell; the junction band is [blockW, pitch).
+        const worldAlong = (-half + c.u * span) * L.dir;
+        const rel = worldAlong - originAlong;
+        const cell = Math.floor(rel / pitch);
+        const sLocal = rel - cell * pitch;
+        // Inside the junction there is nothing left to obey — a car that stops
+        // in the box is worse than one that runs an amber.
+        if (sLocal < blockW) {
+          const dist = L.dir > 0 ? (blockW - STOP_AT) - sLocal : sLocal - STOP_AT;
+          if (dist > 0) {
+            // Which junction it is: ahead in the direction of travel, so the
+            // one BELOW this cell when travelling backwards along the axis.
+            const jAlong = L.dir > 0 ? cell : cell - 1;
+            const kx = L.axis === "z" ? acrossIdx : jAlong;
+            const kz = L.axis === "z" ? jAlong : acrossIdx;
+            if (!signalGo(t, signalPhaseAt(L.axis, kx, kz), F)) {
+              const sv = 2 * F.trafficDecel * dist;
+              if (sv < vMax * vMax) { vMax = Math.sqrt(sv); c.hold = 2; }  // a red light
+              /*
+               * AND IT MAY NOT CROSS THE LINE. This is the difference between
+               * a model that stops at lights and one that only appears to.
+               *
+               * Braking in discrete steps lands the car a centimetre or two
+               * PAST `dist = 0` — and one centimetre past, the test above
+               * stops applying, the car finds nothing holding it and pulls
+               * away through the red. MEASURED: 57% of the time a car was
+               * stopped, nothing was holding it, which is that. Capping the
+               * step at the distance remaining makes overshoot impossible, so
+               * `dist` stays positive and the red keeps binding until it is
+               * not red any more.
+               */
+              const cap = dist / dt;
+              if (cap < vMax) { vMax = cap; c.hold = 2; }
+            }
+          }
+        }
+
+        // ── Ramp. Braking is allowed to be harder than pulling away, which is
+        // both true of cars and what keeps a queue from concertina-ing.
+        const v0 = c.v;
+        const dv = vMax - c.v;
+        const lim = dv > 0 ? F.trafficAccel * dt : F.trafficDecel * 1.6 * dt;
+        c.v += dv > lim ? lim : (dv < -lim ? -lim : dv);
+        if (c.v < 0) c.v = 0;
+        /*
+         * Pulling away, or standing still? A car that is slow with nothing
+         * holding it is one that has just been let go by a green — a real
+         * state, and the only one that can look like "stopped for no reason".
+         * Recording it is what lets a test tell the two apart instead of
+         * having to tolerate a percentage.
+         */
+        c.rising = c.v > v0 ? 1 : 0;
+        c.u += (c.v * dt) / span;
+        if (c.u >= 1) c.u -= 1;
+      }
+    }
+  }
+
   function updateTraffic(t, cam) {
     // The signals ride the same clock; it is already here every frame.
     uSignalTime.value = t;
@@ -1243,14 +1429,21 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     const r2 = F.trafficRange * F.trafficRange;
     // One write cursor per body. The cars in range are packed to the front of
     // their own mesh, so a body with nothing near the camera draws nothing.
+    /*
+     * CLAMPED, and the clamp is load-bearing. A tab left in the background
+     * hands back a dt of many seconds, and an unclamped step would teleport
+     * every car through the junction it was waiting at — signals, queue and
+     * all — in one frame.
+     */
+    const dt = _lastT == null ? 0 : Math.min(0.1, Math.max(0, t - _lastT));
+    _lastT = t;
+    stepTraffic(t, dt);
+
     const n = _trafficN.fill(0);
     for (let i = 0; i < traffic.length; i++) {
       const c = traffic[i];
       const L = c.lane;
-      // Wrap 0..1 along the lane, then map to world.
-      let u = (c.phase + (t * c.speed) / L.span) % 1;
-      if (u < 0) u += 1;
-      const along = -half + u * L.span;
+      const along = -half + c.u * L.span;
       const x = L.axis === "z" ? L.across : along * L.dir;
       const z = L.axis === "z" ? along * L.dir : L.across;
       const dx = x - cam.x, dz = z - cam.z;
@@ -1439,6 +1632,14 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
      *  the mass that decides whether it flies or shoves. None is `solid` — see
      *  the note at the top of modularRoadCityClutter.js. */
     knockableGroups: knockGroups,
+    /** The clock the signals and the traffic both run on. Exposed because
+     *  "was that car stopped at a red?" cannot be answered without the time
+     *  the SIM used — asking at any other time gets a different colour. */
+    get trafficTime() { return _lastT ?? 0; },
+    /** The moving cars themselves — `{ lane, u, v, speed }`, live. Exposed for
+     *  the same reason `lanes` is: whether a car stopped at a red light is a
+     *  question about state, and nothing on screen can be asked it. */
+    traffic,
     /** THE LANE TABLE THE CARS ACTUALLY DRIVE. Exposed because it is the only
      *  first-hand statement in the city of which way traffic goes on which
      *  half of which street — everything else re-derives it, and re-deriving
