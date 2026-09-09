@@ -33,6 +33,10 @@ import {
   ROAD_SIGN_DEFAULTS, SIGN, MIDBLOCK_SIGNS, makeRoadSignAtlas,
   buildRoadSignGeometry, makeRoadSignMaterial, loadRoadSignFolder,
 } from "./modularRoadCityRoadSigns.js";
+import {
+  GANTRY_DEFAULTS, GANTRY_PANELS, makeGantryAtlas, buildGantryGeometry,
+  makeGantryMaterial, loadGantryFolder,
+} from "./modularRoadCityGantry.js";
 
 /**
  * ── THE DRIVING-SIDE RULE. ONE PLACE, BECAUSE EVERYTHING NEEDS IT ───────────
@@ -194,6 +198,9 @@ export const FURNITURE_DEFAULTS = {
   /** Road signs — see modularRoadCityRoadSigns.js. */
   ...ROAD_SIGN_DEFAULTS,
   /** The warning triangle that fronts every roadworks closure. */
+  /** Overhead direction gantries — see modularRoadCityGantry.js. */
+  ...GANTRY_DEFAULTS,
+  gantryRows: GANTRY_DEFAULTS.rows,
   // Temporary works get the yellow ground, so a closure is legible as a
   // closure before the picture on the plate resolves at all.
   worksSignTile: SIGN.WORKS_TEMP,
@@ -508,6 +515,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const { coneGeo, barrierGeo, binGeo, palletGeo } = buildClutterKit();
   const signAtlas = makeRoadSignAtlas(F);
   const signGeo = buildRoadSignGeometry(F);
+  const gantryAtlas = makeGantryAtlas({ ...F, rows: F.gantryRows });
+  const gantryGeo = buildGantryGeometry(F);
   const railGeo = mergeGeometries([
     box(0.06, 1.05, 0.06, -0.95, 0, 0), box(0.06, 1.05, 0.06, 0.95, 0, 0),   // posts
     box(2.0, 0.05, 0.05, 0, 1.0, 0), box(2.0, 0.05, 0.05, 0, 0.55, 0),        // rails
@@ -536,6 +545,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   clutterMat.name = "CityClutter";
   clutterMat.emissiveNode = litAdd({ vcolor: true });
   const signMat = makeRoadSignMaterial(signAtlas, uNight);
+  const gantryMat = makeGantryMaterial(gantryAtlas, uNight);
   const railMat = new THREE.MeshStandardNodeMaterial({ color: 0x3a3d42, roughness: 0.45, metalness: 0.7 });
   railMat.name = "CityRails";
   railMat.emissiveNode = litAdd();
@@ -594,7 +604,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
 
   // ── Placement ──────────────────────────────────────────────────────────────
   const cars = [], trees = [], lights = [], rails = [];
-  const cones = [], barriers = [], bins = [], pallets = [], roadSigns = [];
+  const cones = [], barriers = [], bins = [], pallets = [], roadSigns = [], gantries = [];
   const clutterInto = { cones, barriers, bins, pallets, signs: roadSigns };
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
   const UP = new THREE.Vector3(0, 1, 0);
@@ -772,6 +782,24 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
               ? (side === 0 ? 0 : Math.PI)
               : (side === 0 ? -Math.PI / 2 : Math.PI / 2);
             place(lights, x, z, armYaw, { phase, axis, side, travel, a0, a1 });
+            /*
+             * AN OVERHEAD DIRECTION GANTRY ON THE SAME APPROACH, sometimes.
+             *
+             * Shares the signal's mast corner and the signal's `armYaw` — the
+             * boom is local +X on both, so there is ONE convention for "reach
+             * out over the carriageway" rather than two that can drift. What
+             * differs is only how far back it stands: `setback` is well beyond
+             * `lightSetback`, because a driver needs to read where the road
+             * goes BEFORE they read whether they may go there.
+             */
+            if (h2(seedA, side, 121) < F.chance) {
+              const gs = travel > 0 ? a1 - F.setback : a0 + F.setback;
+              if (gs > a0 + F.crossClear && gs < a1 - F.crossClear) {
+                const [gx, gz] = at(kerb + dir * 0.9, gs);
+                const gTile = Math.floor(h2(seedA, side, 122) * GANTRY_PANELS.length) % GANTRY_PANELS.length;
+                place(gantries, gx, gz, armYaw, { tile: gTile, axis, side, travel });
+              }
+            }
           }
           /*
            * ROADWORKS AND LOADING BAYS. Placed from HERE rather than from the
@@ -965,6 +993,13 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // Any tile the project supplies replaces the drawn one, in place.
     loadRoadSignFolder(signAtlas).catch(() => {});
   }
+  const gantryMesh = instanced(gantries, gantryGeo, gantryMat, "CityGantry", { shadows: false });
+  if (gantryMesh) {
+    const gt = new Float32Array(gantries.length);
+    for (let i = 0; i < gantries.length; i++) gt[i] = gantries[i].tile ?? 0;
+    gantryGeo.setAttribute("aTile", new THREE.InstancedBufferAttribute(gt, 1));
+    loadGantryFolder(gantryAtlas).catch(() => {});
+  }
   const coneMesh = instanced(cones, coneGeo, clutterMat, "CityCones", { shadows: false });
   const barrierMesh = instanced(barriers, barrierGeo, clutterMat, "CityBarriers", { shadows: true });
   const binMesh = instanced(bins, binGeo, clutterMat, "CityBins", { shadows: true });
@@ -1077,6 +1112,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // Signs read from FURTHER than clutter: their whole job is to be legible
     // before you arrive, and 260 m cut them off inside a single block run.
     { mesh: signMesh, list: roadSigns, range: 340, casts: false, attr: "aTile", key: "tile" },
+    // Read from much further than a kerb sign: that is the whole point of
+    // hanging it over the road.
+    { mesh: gantryMesh, list: gantries, range: 700, casts: false, attr: "aTile", key: "tile" },
   ];
   const _pos = new THREE.Vector3();
   const _tm = new THREE.Matrix4();
@@ -1159,7 +1197,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   return {
     /** Every placement, by kind — the obstacle table turns these into the
      *  capsules the car collides with (modularRoadCityObstacles.js). */
-    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns },
+    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns, gantries },
     /** The rail mesh, so the knockables can redraw one that is in the air —
      *  `applyLod` only rewrites five times a second, which a thrown barrier
      *  cannot wait for. */
@@ -1168,6 +1206,13 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
      *  the mass that decides whether it flies or shoves. None is `solid` — see
      *  the note at the top of modularRoadCityClutter.js. */
     knockableGroups: knockGroups,
+    /** THE LANE TABLE THE CARS ACTUALLY DRIVE. Exposed because it is the only
+     *  first-hand statement in the city of which way traffic goes on which
+     *  half of which street — everything else re-derives it, and re-deriving
+     *  it is what has gone wrong every time. Anything that needs to agree with
+     *  the traffic should be checked against this, not against a second copy
+     *  of the reasoning. `{ axis, across, dir, span }`, across absolute. */
+    lanes,
     group,
     params: F,
     stats: {
@@ -1175,6 +1220,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       traffic: traffic.length, lanes: lanes.length,
       clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length },
       roadSigns: roadSigns.length,
+      gantries: gantries.length,
       /** Live — filled in when the preset trees land. `planted: 0` with
        *  treeSource "preset" means they are still loading, or failed. */
       presetTrees: presetTreeStats,
@@ -1195,9 +1241,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       // TreeStore, not here. This unplants them.
       if (presetTrees) { presetTrees.dispose(); presetTrees = null; }
       for (const m of [carMesh, trunkMesh, canopyMesh, lightMesh, railMesh, trafficMesh,
-        coneMesh, barrierMesh, binMesh, palletMesh, signMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
+        coneMesh, barrierMesh, binMesh, palletMesh, signMesh, gantryMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
       for (const g of [carGeo, trunkGeo, canopyGeo, lightGeo, railGeo,
-        coneGeo, barrierGeo, binGeo, palletGeo, signGeo]) g.dispose();
+        coneGeo, barrierGeo, binGeo, palletGeo, signGeo, gantryGeo]) g.dispose();
       for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat, clutterMat, signMat]) m.dispose();
       signAtlas.texture.dispose();
     },

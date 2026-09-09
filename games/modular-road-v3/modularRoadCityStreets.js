@@ -262,6 +262,33 @@ export const STREET_DEFAULTS = {
   arrowHeadW: 1.15,
   arrowStem: 2.6,
   arrowStemW: 0.32,
+  /** Turn arrows. `turnArrows` at 0 leaves every lane the straight glyph and
+   *  the shader bit-identical to the one before they existed — the head's
+   *  frame simply never rotates. `turnChance` is per lane per junction end. */
+  turnArrows: 1,
+  turnChance: 0.55,
+  arrowArm: 1.30,
+  /** How often a turning lane also says "or straight on". */
+  comboChance: 0.45,
+  /** ── KERBSIDE BAYS ──
+   *  `extraMarkings` is the branch: 0 and the whole group costs nothing, and
+   *  the road is bit-identical to the one before they existed. */
+  extraMarkings: 1,
+  /** Parking bays: a line `bayDepth` out from the kerb, ticked every
+   *  `bayPitch`. Sized so the parked cars sit inside them. */
+  parkingBays: 1,
+  bayDepth: 2.5,
+  bayPitch: 5.6,
+  bayLineW: 0.11,
+  /** The yellow hatched keep-clear bay — one per block side, rolled. Sits in
+   *  the parking strip, so `hatchDepth` should match `bayDepth`. */
+  hatchBays: 1,
+  hatchChance: 0.42,
+  hatchLen: 13.0,
+  hatchNear: 0.35,
+  hatchDepth: 2.5,
+  hatchPitch: 1.5,
+  hatchLineW: 0.13,
   markings: 1.0,
   /** Paint under water: it darkens FAR less than open aggregate (`lineWet`)
    *  but it is the wettest-LOOKING thing on the road (`lineCoat`), and the
@@ -709,6 +736,9 @@ export function createCityStreets({
   /** Where we are on the block grid. */
   function layout() {
     const local = positionWorld.xz.sub(uOrigin);
+    // Which block of the grid, as integers — the only stable per-junction key
+    // the shader has, and what the lane-arrow roll is drawn against.
+    const block = floor(local.div(uPitch)).toVar();
     const fx = mod(local.x, uPitch).toVar();
     const fz = mod(local.y, uPitch).toVar();
     const inStreetX = step(uBlockW, fx).toVar();   // a street running along Z
@@ -730,7 +760,7 @@ export function createCityStreets({
     const laneU = fract(abs(lateral).mul(2.0));               // 0..1 across each lane
     const wheelPath = smoothstep(0.12, 0.28, abs(laneU.sub(0.5)))
       .mul(oneMinus(smoothstep(0.36, 0.48, abs(laneU.sub(0.5))))).mul(onRoad).toVar();
-    return { fx, fz, inStreetX, inStreetZ, su, sv, onRoad, junction, intoBlock, across, lateral, wheelPath };
+    return { block, fx, fz, inStreetX, inStreetZ, su, sv, onRoad, junction, intoBlock, across, lateral, wheelPath };
   }
 
   /** The kerb: rises over `kerbWidth` at the block edge, stays up on the walk. */
@@ -1144,37 +1174,104 @@ export function createCityStreets({
     const approachX = mix(rightHalf, oneMinus(rightHalf), atLowEnd);   // x-running
     const stopSide = mix(approachX, oneMinus(approachX), L.inStreetX); // z-running flips
     const aaEnd = fwidth(endAlong).mul(0.75).add(0.002);
+    // The raw along-the-street coordinate and its footprint. Taken HERE, at
+    // top level: the kerbside bays below sit inside a uniform branch, and a
+    // derivative inside a branch is undefined.
+    const alongF = mix(L.fx, L.fz, L.inStreetX).toVar();
+    // `.toVar()` is load-bearing: this is used ONLY inside the branch below,
+    // and without it TSL emits the fwidth lazily at first use — which is
+    // inside the branch, where a derivative is undefined.
+    const aaAlong = fwidth(alongF).mul(0.75).add(0.002).toVar();
     const stopBar = lineAA(endAlong.sub(u.crossInset.add(u.stopOffset)), u.stopWidth.mul(0.5), aaEnd)
       .mul(L.onRoad).mul(stopSide).mul(u.stopLines);
     /*
-     * LANE ARROWS — analytic, no texture.
+     * LANE ARROWS — analytic, no texture, and THREE glyphs for barely more
+     * than the one.
      *
      * An arrow is a triangle on a rectangle, and both are exact in closed form:
-     * the head's half-width is just a linear ramp along its own length, so the
-     * whole glyph is two band tests and a compare. That is worth doing HERE
-     * rather than sampling an atlas, because it costs no sampler, no texture
-     * memory and no mip chain, and it is resolution-independent — the tip stays
-     * sharp at any distance instead of going soft at the first mip.
+     * the head's half-width is just a linear ramp along its own length. That is
+     * worth doing HERE rather than sampling an atlas, because it costs no
+     * sampler, no texture memory and no mip chain, and it is
+     * resolution-independent — the tip stays sharp at any distance instead of
+     * going soft at the first mip.
      *
-     * It does NOT generalise. A turn or U-turn glyph is a curve, and curves
-     * analytically are far more ALU than they are worth on a shader that
-     * already covers most of the screen — that is where a small marking atlas
-     * earns its place, and where I would put one.
+     * THE TURN GLYPH IS NOT A CURVE. An earlier note here said turn arrows
+     * needed an atlas because "a turn glyph is a curve". It is not: a turn
+     * arrow is the SAME triangle seen from ninety degrees, sitting at the end
+     * of a bar. So the head is drawn once, in its own frame, and the frame is
+     * what turns — a pair of mixes, not a second glyph. Straight, left and
+     * right all come out of the code that already drew straight, and the atlas
+     * that comment asked for is not needed after all.
      *
      * Rides the same approach half as the stop line: an arrow tells you what
      * YOUR lane does, so it belongs only on the side approaching this junction.
      */
     const laneCell = uStreetW.mul(0.25);
-    const laneMid = floor(L.across.div(laneCell)).add(0.5).mul(laneCell);
-    const offLane = abs(L.across.sub(laneMid));
+    const laneIdx = floor(L.across.div(laneCell)).toVar();
+    const laneMid = laneIdx.add(0.5).mul(laneCell);
+    const off = L.across.sub(laneMid).toVar();          // signed, along +across
+    const offLane = abs(off);
+    /*
+     * WHICH WAY IS THE DRIVER'S RIGHT, IN ACROSS-SPACE — and note what is NOT
+     * here. Everything else in this block flips with `inStreetX`, because the
+     * lane table negates for x-streets. This does not: the kerb on a driver's
+     * right is the OUTER kerb of their own half whichever way the street runs,
+     * so the answer is just which half of the road this is. Adding the axis
+     * flip out of habit would put every turn arrow in the city backwards on
+     * one axis, which is the exact bug this file has already had twice.
+     */
+    const rightAcross = rightHalf.mul(2.0).sub(1.0);
+    /*
+     * WHICH GLYPH THIS LANE GETS. The lane against the kerb may turn right and
+     * the lane against the centre line may turn left, and neither is ever
+     * allowed to say the other: a right-turn arrow in the inside lane is a
+     * wrong instruction, not a decoration. Rolled per junction END so one
+     * avenue is not the same sequence twice over.
+     */
+    const kerbLane = step(float(1.0), abs(laneIdx.sub(1.5)));
+    const cell = vec2(L.block.x.mul(4.0).add(atLowEnd.mul(2.0)).add(L.inStreetX), L.block.y);
+    const turn = kerbLane.mul(step(ihash2(cell), u.turnChance))
+      .sub(oneMinus(kerbLane).mul(step(ihash2(cell.add(vec2(97.0, 31.0))), u.turnChance)))
+      .mul(u.turnArrows).toVar();
+    const turning = abs(turn).toVar();                  // 1 while this lane turns
+    // Signed across-offset in the direction of the TURN, so the head is always
+    // out at positive `offT` and left and right are one expression.
+    const offT = off.mul(rightAcross).mul(turn).toVar();
     // 0 at the tip, growing back down the arrow away from the junction.
     const at = endAlong.sub(u.arrowAt);
-    const headHalf = u.arrowHeadW.mul(0.5).mul(saturate(at.div(u.arrowHead)));
-    const arrowHead = band(at, float(0.0), u.arrowHead, aaEnd)
-      .mul(smoothstep(headHalf.add(pxU), headHalf.sub(pxU), offLane));
+    const elbowMid = u.arrowHead.add(u.arrowStemW.mul(0.5));
+    /*
+     * THE HEAD'S OWN FRAME. `hx` runs back from the tip, `hy` across it — and
+     * so do their antialiasing widths, which have to swap with the frame or
+     * the turn head is filtered along the wrong axis and goes to mush at
+     * grazing angles.
+     */
+    const hx = mix(at, u.arrowArm.add(u.arrowHead).sub(offT), turning).toVar();
+    const hy = mix(off, at.sub(elbowMid), turning).toVar();
+    const aaHx = mix(aaEnd, pxU, turning);
+    const aaHy = mix(pxU, aaEnd, turning);
+    const headHalf = u.arrowHeadW.mul(0.5).mul(saturate(hx.div(u.arrowHead)));
+    const arrowHead = band(hx, float(0.0), u.arrowHead, aaHx)
+      .mul(smoothstep(headHalf.add(aaHy), headHalf.sub(aaHy), abs(hy)));
+    // The shaft runs back down the lane either way — a turn arrow still
+    // arrives up its own lane before it bends.
     const arrowStem = band(at, u.arrowHead, u.arrowHead.add(u.arrowStem), aaEnd)
       .mul(smoothstep(u.arrowStemW.mul(0.5).add(pxU), u.arrowStemW.mul(0.5).sub(pxU), offLane));
-    const arrow = max(arrowHead, arrowStem).mul(L.onRoad).mul(stopSide).mul(u.arrows);
+    // And the elbow exists only when there is a turn to make.
+    const arrowElbow = lineAA(at.sub(elbowMid), u.arrowStemW.mul(0.5), aaEnd)
+      .mul(band(offT, float(0.0), u.arrowArm, pxU)).mul(turning);
+    /*
+     * THE COMBINED GLYPH — "this lane goes straight OR turns". A turning lane
+     * rolls again for it, and it costs one more head: the forward head the
+     * turn case gave up when its frame rotated away. The shaft already reaches
+     * the elbow, so the two heads meet without any extra joinery.
+     */
+    const comboHalf = u.arrowHeadW.mul(0.5).mul(saturate(at.div(u.arrowHead)));
+    const arrowCombo = band(at, float(0.0), u.arrowHead, aaEnd)
+      .mul(smoothstep(comboHalf.add(pxU), comboHalf.sub(pxU), offLane))
+      .mul(turning).mul(step(ihash2(cell.add(vec2(41.0, 59.0))), u.comboChance));
+    const arrow = max(max(arrowHead, arrowStem), max(arrowElbow, arrowCombo))
+      .mul(L.onRoad).mul(stopSide).mul(u.arrows);
     const aaCross = pxU.div(u.crossPitch).add(0.001);
     const nearEndZ = max(step(L.fz, u.crossInset), step(uBlockW.sub(u.crossInset), L.fz));
     const nearEndX = max(step(L.fx, u.crossInset), step(uBlockW.sub(u.crossInset), L.fx));
@@ -1183,12 +1280,78 @@ export function createCityStreets({
     // The garnish: a light interior mottle so the surviving paint is not a flat
     // swatch. `wearInterior` is what keeps it from becoming the old model again.
     const worn = saturate(oneMinus(wearTops.mul(scrub).mul(u.wearInterior)));
-    const paint = max(max(max(laneV, laneH), max(crossV, crossH)), max(stopBar, arrow))
-      .mul(worn).mul(detail).mul(u.markings).mul(oneMinus(L.junction)).toVar();
+    /*
+     * ── KERBSIDE BAYS ──────────────────────────────────────────────────────
+     *
+     * Two markings, both hugging the kerb, both behind ONE uniform branch so
+     * the whole group can be switched off for nothing (a uniform condition is
+     * real uniform control flow; the fwidths they need are taken above, never
+     * inside the branch).
+     *
+     * PARKING BAYS run the length of every block: a line parallel to the kerb
+     * and a tick every `bayPitch`. This is where the parked cars already are,
+     * so it is the one marking that explains something already on the screen
+     * instead of decorating empty asphalt.
+     *
+     * THE HATCHED BAY is the yellow keep-clear rectangle — one per block side,
+     * rolled, sitting in the parking strip where a bus or a delivery needs the
+     * kerb kept free. It is the same criss-cross a box junction uses, at the
+     * size it is actually useful.
+     */
+    const kerbDist = min(L.across, uStreetW.sub(L.across)).toVar();
+    const extra = float(0.0).toVar();
+    const extraYellow = float(0.0).toVar();
+    /*
+     * THE STRIP TEST IS IN THE BRANCH ON PURPOSE, and it is the optimisation
+     * that makes this group nearly free. Both markings live within `bayDepth`
+     * of a kerb — 2.5 m of a 34 m street — so about six road fragments in
+     * seven can skip the lot. The condition is per-fragment rather than
+     * uniform, which normally buys nothing on a GPU, but here whole quads sit
+     * entirely inside or entirely outside the strip: divergence happens only
+     * along one line per kerb.
+     *
+     * Every derivative this block needs (`pxU`, `aaAlong`) is taken at top
+     * level and pinned with `.toVar()`. A derivative evaluated inside a branch
+     * is undefined, and cityShaderTest fails the build if one gets in here.
+     */
+    If(u.extraMarkings.greaterThan(0.5).and(kerbDist.lessThan(u.bayDepth.add(0.6))), () => {
+      const inStrip = step(kerbDist, u.bayDepth);
+      const bayEdge = lineAA(kerbDist.sub(u.bayDepth), u.bayLineW.mul(0.5), pxU);
+      const bayTick = gridLine(alongF, u.bayPitch, u.bayLineW.mul(0.5), aaAlong.div(u.bayPitch))
+        .mul(inStrip);
+      const bays = max(bayEdge.mul(inStrip), bayTick).mul(u.parkingBays);
+
+      // One hatched bay per block side, its position rolled with its presence.
+      const bSide = step(uStreetW.mul(0.5), L.across);
+      const bCell = vec2(L.block.x.mul(8.0).add(bSide.mul(4.0)).add(L.inStreetX.mul(2.0)), L.block.y);
+      const room = max(uBlockW.sub(u.crossInset.mul(2.0)).sub(u.hatchLen).sub(12.0), float(1.0));
+      const bStart = u.crossInset.add(6.0).add(ihash2(bCell.add(vec2(13.0, 7.0))).mul(room));
+      // Distance INTO the rectangle from its nearest edge: 0 on the border,
+      // positive inside. One expression gives both the outline and the clip.
+      const hEdge = min(
+        min(alongF.sub(bStart), bStart.add(u.hatchLen).sub(alongF)),
+        min(kerbDist.sub(u.hatchNear), u.hatchDepth.sub(kerbDist)),
+      );
+      const hatch = max(
+        lineAA(hEdge, u.hatchLineW.mul(0.5), aaAlong),
+        gridLine(alongF.add(kerbDist), u.hatchPitch, u.hatchLineW.mul(0.5), aaAlong.div(u.hatchPitch))
+          .mul(step(float(0.0), hEdge)),
+      ).mul(step(ihash2(bCell), u.hatchChance)).mul(u.hatchBays);
+
+      extra.assign(max(bays, hatch).mul(L.onRoad).mul(oneMinus(L.junction)));
+      extraYellow.assign(hatch);            // the parking bays stay white
+    });
+    const paint = max(
+      max(max(max(laneV, laneH), max(crossV, crossH)), max(stopBar, arrow))
+        .mul(oneMinus(L.junction)),
+      extra,
+    ).mul(worn).mul(detail).mul(u.markings).toVar();
     const lw = film.mul(u.lineWet);
     // Yellow down the middle, white for everything else. Wet darkens and tints
     // both the same way — the water does not care what colour the paint is.
-    const paintBase = mix(u.paintColor, u.centreColor, centreMask);
+    // The hatched bay is yellow for the same reason the centre line is, so it
+    // rides the same mask rather than carrying a second yellow that can drift.
+    const paintBase = mix(u.paintColor, u.centreColor, max(centreMask, extraYellow));
     const lineCol = paintBase.mul(mix(float(1), u.wetDarken, lw)).mul(mix(vec3(1, 1, 1), u.wetTint, lw));
     surface = mix(surface, lineCol, paint);
 

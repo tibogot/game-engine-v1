@@ -455,6 +455,131 @@ console.log("\n── LOOK PASS ──");
     check("laneTravelDir agrees with the lane table the cars use", ruleBad === 0,
       `${ruleBad} of 4 combinations disagree`);
 
+    /*
+     * ── WHICH WAY IS A DRIVER'S RIGHT, IN THE STREET SHADER'S ACROSS-SPACE ──
+     *
+     * The turn arrows need this and nothing else in the shader did, so it is
+     * new surface and it is the exact shape of the rule this file has already
+     * got wrong twice. The shader answers it with `2 * rightHalf - 1` and NO
+     * axis flip, which looks wrong beside every other line in that block.
+     *
+     * So it is DERIVED here rather than restated: right = forward x up, taken
+     * in the frame the shader uses (across is world x on a z-street, world z
+     * on an x-street). If someone "fixes" the shader by adding the inStreetX
+     * flip the rest of the block has, this fails on both axes at once.
+     */
+    let rightBad = 0;
+    const rightDetail = [];
+    for (const axis of ["z", "x"]) {
+      for (const side of [0, 1]) {
+        const travel = laneTravelDir(axis, side);
+        // forward x up, up = +Y. f=(fx,0,fz) -> right = (-fz, 0, fx).
+        const f = axis === "z" ? [0, travel] : [travel, 0];   // [x, z]
+        const right = [-f[1], f[0]];
+        // The shader's across axis: world x on a z-street, world z on an x-street.
+        const truth = Math.sign(axis === "z" ? right[0] : right[1]);
+        // What the shader computes: rightHalf is 1 on the high-across half,
+        // and side 1 IS the high-across half.
+        const shader = side * 2 - 1;
+        if (shader !== truth) rightBad++;
+        rightDetail.push(`${axis}${side}:${shader}v${truth}`);
+      }
+    }
+    check("the shader's across-space 'driver's right' matches forward x up",
+      rightBad === 0, `${rightBad} of 4 wrong (${rightDetail.join(" ")})`);
+
+    /*
+     * AND THE KERB LANE IS THE ONE ON THAT RIGHT. The turn rule hangs off it —
+     * the kerb lane may turn right, the inside lane may turn left — so getting
+     * the two swapped paints a right-turn arrow in the inside lane, which is a
+     * wrong instruction rather than a wrong-looking one.
+     */
+    let laneBad = 0;
+    for (const side of [0, 1]) {
+      const rightAcross = side * 2 - 1;
+      // Lane cells across the street, 0..3; the shader's `kerbLane` is the
+      // outer pair, and laneMid grows with the cell index.
+      const [kerb, inner] = side === 0 ? [0, 1] : [3, 2];
+      const isOuter = (i) => (Math.abs(i - 1.5) >= 1 ? 1 : 0);
+      if (!isOuter(kerb) || isOuter(inner)) laneBad++;
+      // The kerb lane must sit to the driver's RIGHT of the inside one.
+      if ((kerb - inner) * rightAcross <= 0) laneBad++;
+    }
+    check("the kerb lane is the one on the driver's right", laneBad === 0,
+      `${laneBad} of 4 checks wrong`);
+
+    /*
+     * ── AND NOW AGAINST THE CARS, WHICH ARE THE ONE THING KNOWN TO BE RIGHT ──
+     *
+     * The two checks above are derivations, and a derivation can be
+     * self-consistently wrong. This one is not: it takes the REAL lanes the
+     * traffic drives on, out of the cars themselves, and asks whether the
+     * street shader's arrow rule agrees with them. Two subsystems that were
+     * written apart have to give the same answer, or one of them is wrong.
+     *
+     * No origin arithmetic either — the four lanes of a street are recovered
+     * by sorting, so there is nothing here to get out of step with the city's
+     * own layout maths.
+     */
+    const laneSet = flatCity.furniture.lanes || [];
+    const streetW2 = CITY_DEFAULTS.streetLots * CITY_DEFAULTS.lotSize;
+    /*
+     * Cluster by SORTING, not by dividing. The lanes of one street span
+     * 0.75 * streetW and the next street is a whole pitch away, so a gap
+     * bigger than streetW can only be the gap between streets — and unlike a
+     * modulo key this cannot be knocked out of alignment by where the city's
+     * origin happens to sit.
+     */
+    const groups = new Map();
+    for (const axis of ["z", "x"]) {
+      const sorted = laneSet.filter((l) => l.axis === axis).sort((a, b) => a.across - b.across);
+      let gi = 0, prev = null;
+      for (const ln of sorted) {
+        if (prev !== null && ln.across - prev > streetW2) gi++;
+        prev = ln.across;
+        const key = `${axis}:${gi}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(ln);
+      }
+    }
+    let sideBad = 0, headBad = 0, kerbBad = 0, laneChecked = 0;
+    const sideDetail = new Set();
+    for (const g2 of groups.values()) {
+      if (g2.length !== 4) continue;                    // clipped at the city edge
+      g2.sort((a, b) => a.across - b.across);
+      for (let idx = 0; idx < 4; idx++) {
+        const ln = g2[idx];
+        laneChecked++;
+        // The shader: rightHalf is 1 on the upper half of the carriageway.
+        const shaderRight = idx >= 2 ? 1 : -1;
+        // The cars: right = forward x up, in the shader's across axis.
+        const truthRight = ln.axis === "z" ? -ln.dir : ln.dir;
+        if (shaderRight !== truthRight) { sideBad++; sideDetail.add(`${ln.axis}/lane${idx}`); }
+        // The shader calls lanes 0 and 3 the kerb lanes.
+        const shaderKerb = idx === 0 || idx === 3;
+        // Truth: the kerb lane is the one of its pair lying toward the
+        // driver's right, i.e. its partner is displaced against that right.
+        const partner = g2[idx < 2 ? 1 - idx : 5 - idx];
+        if (shaderKerb !== ((ln.across - partner.across) * truthRight > 0)) kerbBad++;
+        /*
+         * THE ANSWER TO "IS THE BEND GOING THE RIGHT WAY", in world terms.
+         * The kerb lane's glyph turns right, the inside lane's turns left, and
+         * the shader displaces the head by rightAcross * turn.
+         */
+        const turn = shaderKerb ? 1 : -1;
+        const headDir = shaderRight * turn;             // across-space, shader
+        const wantDir = truthRight * turn;              // across-space, cars
+        if (headDir !== wantDir) headBad++;
+      }
+    }
+    check("the shader's road half agrees with the lanes the cars drive",
+      laneChecked > 0 && sideBad === 0,
+      `${sideBad} of ${laneChecked} lanes disagree${sideDetail.size ? ` (${[...sideDetail].join(" ")})` : ""}`);
+    check("the kerb lane of each pair is the one toward the cars' right",
+      laneChecked > 0 && kerbBad === 0, `${kerbBad} of ${laneChecked} wrong`);
+    check("a turn arrow bends toward the side the cars say it should",
+      laneChecked > 0 && headBad === 0, `${headBad} of ${laneChecked} bend the wrong way`);
+
     // And every mast must sit at the end its own traffic ARRIVES at.
     let wrongEnd = 0, endTotal = 0;
     for (const e of lights.slice(0, 300)) {
@@ -609,6 +734,66 @@ console.log("\n── LOOK PASS ──");
     }
     check("the roadworks sign stands before the cones it warns about",
       worksTotal > 0 && lateSign === 0, `${lateSign} of ${worksTotal} stand past their taper`);
+
+    /*
+     * ── THE OVERHEAD GANTRIES ──────────────────────────────────────────────
+     *
+     * Third time this rule is checked in this file and it is not duplication:
+     * the lantern, the kerb sign and the board are placed by three different
+     * lines, and each of the first two was wrong at some point while the other
+     * passed. The board's artwork face is read out of the geometry, as before,
+     * so this fails if the panel is ever rebuilt facing the other way.
+     */
+    const gantries = flatCity.furniture.lists.gantries || [];
+    const gMeshes = [];
+    c.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CityGantry") gMeshes.push(o); });
+    const gMesh = gMeshes[0] || null;
+    /*
+     * ONE MESH, holding every board. `count` is not the thing to assert — the
+     * LOD has already trimmed it by the time this runs — so this checks the
+     * allocated capacity and, more to the point, that there is exactly one
+     * mesh: the mast, the boom and the panel share a material through a
+     * reserved patch in the atlas, and if that ever stops being true this
+     * becomes two draws per board rather than one for the city.
+     */
+    check("every gantry in the city is one draw call",
+      gMeshes.length === 1 && gMesh.instanceMatrix.count === gantries.length,
+      `${gantries.length} boards, ${gMeshes.length} mesh(es), capacity ${gMesh ? gMesh.instanceMatrix.count : 0}`);
+    let gArt = 0;
+    if (gMesh) {
+      const pos = gMesh.geometry.getAttribute("position");
+      const uvA = gMesh.geometry.getAttribute("uv");
+      const tally = new Map();
+      for (let i = 0; i < uvA.count; i++) {
+        const k = `${uvA.getX(i).toFixed(5)},${uvA.getY(i).toFixed(5)}`;
+        tally.set(k, (tally.get(k) || 0) + 1);
+      }
+      let pin = null, most = 0;
+      for (const [k, n2] of tally) if (n2 > most) { most = n2; pin = k; }
+      let sum = 0, n = 0;
+      for (let i = 0; i < pos.count; i++) {
+        if (`${uvA.getX(i).toFixed(5)},${uvA.getY(i).toFixed(5)}` === pin) continue;
+        sum += pos.getZ(i); n++;
+      }
+      gArt = n && sum < 0 ? -1 : 1;
+      check("the gantry panel has exactly one artwork face", n === 4, `${n} unpinned vertices`);
+    }
+    let gWrong = 0, gClash = 0;
+    for (const e of gantries) {
+      const el = e.m.elements;
+      const nx = el[8] * gArt, nz = el[10] * gArt;
+      const tx = e.axis === "z" ? 0 : e.travel;
+      const tz = e.axis === "z" ? e.travel : 0;
+      if (nx * tx + nz * tz > -0.5) gWrong++;
+      // And it must stand clear of the lantern on its own approach, or the
+      // board is read through the signal it is meant to precede.
+      const near = lights.find((l) => Math.hypot(l.x - e.x, l.z - e.z) < FP.lightArm);
+      if (near) gClash++;
+    }
+    check("every gantry board faces the traffic it directs",
+      gantries.length > 0 && gWrong === 0, `${gWrong} of ${gantries.length} face away`);
+    check("no gantry stands on top of a traffic signal",
+      gClash === 0, `${gClash} of ${gantries.length} within an arm's length of a mast`);
 
     /*
      * NOTHING BURIED IN A BUILDING. A cone, sign or bin inside a footprint is
