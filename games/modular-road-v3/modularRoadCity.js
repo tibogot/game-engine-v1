@@ -78,6 +78,7 @@ import {
 import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.js";
 import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
 import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
+import { placeCityPrism, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
 import { createCityStreets, STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
@@ -221,6 +222,11 @@ export const CITY_DEFAULTS = {
    *  fractions that default to 0 — see modularRoadCitySigns.js. */
   signs: true,
   signParams: {},
+  /** ONE trivision board on a downtown roof — a landmark, not a class of
+   *  signage. Four draws and no per-frame CPU; off and the prop is never
+   *  built. See modularRoadCityPrism.js. */
+  prism: true,
+  prismParams: {},
   beacons: true,
   beaconColor: 0xff2a1a,
 
@@ -322,6 +328,7 @@ export function createModularRoadCity({
   let batched = null, batchGeomIds = null, batchInstIds = null;
   let instanced = null;
   let signs = null;
+  let prism = null;
   let beacons = null;
   let enabled = true;
   let originCellX = 0, originCellZ = 0;
@@ -607,6 +614,7 @@ export function createModularRoadCity({
       instanced = null;
     }
     if (signs) { group.remove(signs.group); signs.dispose(); signs = null; }
+    if (prism) { group.remove(prism.group); prism.dispose(); prism = null; }
     if (beacons) {
       group.remove(beacons);
       beacons.geometry.dispose();
@@ -649,6 +657,17 @@ export function createModularRoadCity({
     } else {
       stats.signs = { banners: 0, screens: 0, bands: 0 };
     }
+    /*
+     * THE ROOFTOP PRISM. One landmark, four draws, no per-frame CPU — the
+     * slats turn in a vertex shader off a shared clock. Built after the signs
+     * so it can be scored against a skyline the signs have already read.
+     */
+    prism = placeCityPrism({
+      buildings, archetypes: kit.archetypes,
+      params: { ...CITY_PRISM_DEFAULTS, ...P.prismParams, prism: P.prism },
+    });
+    if (prism) { group.add(prism.group); stats.prism = prism.at; }
+    else stats.prism = null;
     if (P.beacons) {
       const tips = [];
       for (const b of buildings) {

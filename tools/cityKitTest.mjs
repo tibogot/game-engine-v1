@@ -960,6 +960,59 @@ console.log("\n── LOOK PASS ──");
  * must not move.
  */
 {
+  /*
+   * ── THE ROOFTOP PRISM ────────────────────────────────────────────────────
+   *
+   * One board, and every way it can be wrong is geometric: floating over the
+   * roof, sunk into it, on a building too short to be a landmark, or turned
+   * away from the side of the city anyone drives on. So it is measured, not
+   * inspected — the bounding box against the tower's own top.
+   */
+  console.log("\n── ROOFTOP PRISM ──");
+  {
+    const pStats = flatCity.stats.prism;
+    check("a tower was found to carry the prism", !!pStats,
+      pStats ? `${pStats.height.toFixed(0)} m tower at ${pStats.x.toFixed(0)}, ${pStats.z.toFixed(0)}` : "none");
+    let pGroup = null;
+    flatCity.group.traverse((o) => { if (o.name === "CityAdPrism") pGroup = o; });
+    check("the prism is in the city group", !!pGroup);
+    if (pStats && pGroup) {
+      const PRISM_MIN = (await import("../games/modular-road-v3/modularRoadCityPrism.js")).CITY_PRISM_DEFAULTS.prismMinHeight;
+      check("it stands on a tower tall enough to be a landmark",
+        pStats.height > PRISM_MIN, `${pStats.height.toFixed(0)} m vs ${PRISM_MIN} m minimum`);
+
+      pGroup.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(pGroup);
+      /*
+       * SITS ON THE ROOF. Below the top and it is buried in the slab; more
+       * than a few metres above and it floats. The lift is derived from the
+       * prop's own `panelBottom` times its scale, so this catches the case
+       * where that derivation and the prop drift apart.
+       */
+      const clearance = bb.min.y - pStats.y;
+      check("the board sits on the roof, not in it or above it",
+        clearance >= -0.2 && clearance <= 3.5, `bottom is ${clearance.toFixed(2)} m above the roof`);
+      check("the board is big enough to read across the city",
+        bb.max.x - bb.min.x > 30, `${(bb.max.x - bb.min.x).toFixed(1)} m wide`);
+
+      // Facing: the live face is local +Z, so the rotated +Z must point at the
+      // origin, which is the side the track and the player are on.
+      const f = new THREE.Vector3(0, 0, 1).applyQuaternion(pGroup.quaternion);
+      const toOrigin = new THREE.Vector3(-pStats.x, 0, -pStats.z).normalize();
+      const dotF = f.x * toOrigin.x + f.z * toOrigin.z;
+      check("the board faces the side of the city people drive on",
+        dotF > 0.9, `dot ${dotF.toFixed(3)}`);
+
+      // And it is one object, not a class of them — this is the whole reason
+      // it is allowed to be uninstanced.
+      let meshes = 0, prisms = 0;
+      pGroup.traverse((o) => { if (o.isMesh) meshes++; });
+      flatCity.group.traverse((o) => { if (o.name === "CityAdPrism") prisms++; });
+      check("there is exactly one prism, costing a handful of draws",
+        prisms === 1 && meshes <= 6, `${prisms} prism, ${meshes} meshes`);
+    }
+  }
+
   console.log("\n── CHECKPOINTS ──");
   const { createCityCheckpoints } = await import("../games/modular-road-v3/modularRoadCityCheckpoints.js");
   const scene = new THREE.Scene();

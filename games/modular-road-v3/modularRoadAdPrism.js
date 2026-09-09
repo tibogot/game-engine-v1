@@ -333,12 +333,21 @@ export function buildAdPrismMesh({ params = {} } = {}) {
   const steel = [];
   const dark = [];
 
-  for (const sx of [-1, 1]) {
-    steel.push(boxAt(post, postH, post, sx * postX, postH * 0.5, -0.38));
-    steel.push(boxAt(0.72, 0.1, 0.72, sx * postX, 0.05, -0.38));
-    steel.push(boxAt(post + 0.08, 0.08, post + 0.08, sx * postX, postH + 0.04, -0.38));
+  /*
+   * THE LEGS ARE OPTIONAL. A roadside board stands on them; one bolted to a
+   * roof parapet has nothing to stand on and the posts would hang in the air
+   * below the building's own edge. The back stays and the spine stays — those
+   * are what the slats hang off — so `legs: false` removes only the ground
+   * structure, not the board.
+   */
+  if (p.legs !== false) {
+    for (const sx of [-1, 1]) {
+      steel.push(boxAt(post, postH, post, sx * postX, postH * 0.5, -0.38));
+      steel.push(boxAt(0.72, 0.1, 0.72, sx * postX, 0.05, -0.38));
+      steel.push(boxAt(post + 0.08, 0.08, post + 0.08, sx * postX, postH + 0.04, -0.38));
+    }
+    steel.push(boxAt(postX * 2 + post, 0.18, 0.14, 0, y0 + 0.35, -0.72));
   }
-  steel.push(boxAt(postX * 2 + post, 0.18, 0.14, 0, y0 + 0.35, -0.72));
   steel.push(boxAt(postX * 2 + post, 0.14, 0.12, 0, cy, -0.7));
 
   // Back far enough that the rear vertex clears it at rest and mid-flip.
