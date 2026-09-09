@@ -44,7 +44,7 @@
 import * as THREE from "three";
 
 /** Which kind each entry is. Kept as a number so the table stays a Float32Array. */
-const KIND = { LAMP: 0, LIGHT: 1, TREE: 2, CAR: 3, RAIL: 4 };
+const KIND = { LAMP: 0, LIGHT: 1, TREE: 2, CAR: 3, RAIL: 4, PIER: 5 };
 
 export const OBSTACLE_DEFAULTS = {
   /** Per kind, because a snagging fallen car is a real failure mode and the
@@ -75,6 +75,17 @@ export const OBSTACLE_DEFAULTS = {
   railRadius: 0.17,
   railHalfLength: 0.95,
   railY: 0.76,
+  /**
+   * VIADUCT PIERS. Two orders of magnitude more massive than anything else in
+   * here, and the only obstacle in the city that would stop a car dead — which
+   * is exactly why it cannot be the one thing you drive through. The radius and
+   * the height are handed in from the structure that was actually built rather
+   * than guessed here, because a default that drifts from the geometry is an
+   * invisible column or an invisible hole.
+   */
+  piers: true,
+  pierRadius: 1.5,
+  pierHeight: 10.5,
 };
 
 /**
@@ -91,9 +102,13 @@ export const OBSTACLE_DEFAULTS = {
  */
 export function createCityObstacles({
   lampMatrices = null, lists = null, groundY = 0,
-  avoid = null, avoidRadius = 40, params = {},
+  avoid = null, avoidRadius = 40, params = {}, piers = null,
 } = {}) {
   const O = { ...OBSTACLE_DEFAULTS, ...params };
+  if (piers) {
+    if (piers.radius != null) O.pierRadius = piers.radius;
+    if (piers.height != null) O.pierHeight = piers.height;
+  }
 
   // NOTE: there is deliberately no "keep clear" hole-punching here.
   //
@@ -122,7 +137,14 @@ export function createCityObstacles({
     rows.push(_p.x, _p.z, kind, yaw);
   };
 
+  /** The same drop rules as `push`, for things placed by position not matrix. */
+  const pushAt = (x, z, kind) => {
+    if (avoid && avoid(x, z) < avoidRadius) { dropped++; return; }
+    rows.push(x, z, kind, 0);
+  };
+
   for (const m of lampMatrices ?? []) push(m, KIND.LAMP);
+  if (O.piers) for (const q of piers?.list ?? []) pushAt(q.x, q.z, KIND.PIER);
   for (const e of lists?.lights ?? []) push(e.m, KIND.LIGHT);
   for (const e of lists?.trees ?? []) push(e.m, KIND.TREE);
   for (const e of lists?.cars ?? []) push(e.m, KIND.CAR);
@@ -211,8 +233,12 @@ export function createCityObstacles({
       }
 
       // Upright: the pole only.
-      const rad = kind === KIND.LAMP ? O.lampRadius : kind === KIND.LIGHT ? O.lightRadius : O.treeRadius;
-      const h = kind === KIND.LAMP ? O.lampHeight : kind === KIND.LIGHT ? O.lightHeight : O.treeHeight;
+      const rad = kind === KIND.LAMP ? O.lampRadius
+        : kind === KIND.LIGHT ? O.lightRadius
+          : kind === KIND.PIER ? O.pierRadius : O.treeRadius;
+      const h = kind === KIND.LAMP ? O.lampHeight
+        : kind === KIND.LIGHT ? O.lightHeight
+          : kind === KIND.PIER ? O.pierHeight : O.treeHeight;
       // Capsule ends are the SPHERE CENTRES, so they sit a radius inside each
       // flat end of the post the geometry actually draws.
       const lo = groundY + rad;

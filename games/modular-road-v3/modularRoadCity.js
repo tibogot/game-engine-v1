@@ -77,6 +77,7 @@ import {
 } from "three/tsl";
 import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.js";
 import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
+import { createCityViaduct, viaductLayout } from "./modularRoadCityViaduct.js";
 import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
 import { placeCityPrism, pickPrismPlaza, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
 import { planCarParks, buildCarParkGround, CARPARK_DEFAULTS } from "./modularRoadCityCarPark.js";
@@ -241,6 +242,14 @@ export const CITY_DEFAULTS = {
    *  handful of them in a city. See modularRoadCityBridges.js. */
   bridges: true,
   bridgeParams: {},
+  /**
+   * THE ELEVATED MOTORWAY. Everything else in the city is on the ground plane,
+   * and a city with nothing ever overhead reads flat however good the walls
+   * are. Two draws, and its traffic is free — see the lane note in
+   * modularRoadCityFurniture.js.
+   */
+  viaduct: true,
+  viaductParams: {},
   /** Some of the squares become surface car parks — painted bays and cars
    *  standing in them. One draw for the paint, none for the cars. */
   carParks: true,
@@ -370,6 +379,9 @@ export function createModularRoadCity({
   let signs = null;
   let prism = null;
   let bridges = null;
+  let viaduct = null;
+  /** The pure layout, shared by the geometry and the traffic. */
+  let viaductAt = null;
   let carParkGround = null;
   let carParks = [];
   let parkGround = null;
@@ -384,7 +396,7 @@ export function createModularRoadCity({
   const stats = {
     buildings: 0, lod: [0, 0, 0], meshes: 0, kit: kit.stats,
     lastLodMs: 0, lastBuildMs: 0,
-    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, plazas: 0, plazaList: [], bridges: 0, bridgeSpans: [], carParks: 0, parkedInParks: 0, carParkList: [], parks: 0, parkList: [],
+    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, plazas: 0, plazaList: [], bridges: 0, bridgeSpans: [], viaduct: null, carParks: 0, parkedInParks: 0, carParkList: [], parks: 0, parkList: [],
     lotTexCells: [0, 0], landmarks: 0, beacons: 0,
     signs: { banners: 0, screens: 0, bands: 0 },
     districts: [0, 0, 0],
@@ -753,6 +765,8 @@ export function createModularRoadCity({
     if (signs) { group.remove(signs.group); signs.dispose(); signs = null; }
     if (prism) { group.remove(prism.group); prism.dispose(); prism = null; }
     if (bridges) { group.remove(bridges.group); bridges.dispose(); bridges = null; }
+    if (viaduct) { group.remove(viaduct.group); viaduct.dispose(); viaduct = null; }
+    viaductAt = null;
     if (carParkGround) { group.remove(carParkGround.mesh); carParkGround.dispose(); carParkGround = null; }
     carParks = [];
     if (parkGround) { group.remove(parkGround.mesh); parkGround.dispose(); parkGround = null; }
@@ -829,6 +843,39 @@ export function createModularRoadCity({
       stats.bridges = bridges.count;
       stats.bridgeSpans = bridges.spans;
     } else { stats.bridges = 0; stats.bridgeSpans = []; }
+    /*
+     * THE VIADUCT. Built here rather than with the ground because it belongs to
+     * the SKYLINE, not to the street surface: with terrain on there is no city
+     * ground plane, and an elevated motorway is still exactly as valid.
+     *
+     * The layout is computed first and kept, because the traffic needs the same
+     * answer and two systems only agree about a structure if they ask one
+     * function rather than each deriving it.
+     */
+    viaductAt = P.viaduct
+      ? viaductLayout({ P, originCellX, originCellZ, params: P.viaductParams })
+      : null;
+    /*
+     * NO PIER IN THE RACING LINE.
+     *
+     * A viaduct crosses the whole city, so it crosses the track corridor too,
+     * and a 2.6 m concrete column standing in it is not an obstacle — it is a
+     * wall the player meets at speed with no way round. The deck is one
+     * continuous mesh, so dropping the piers there costs nothing and looks
+     * right: a real viaduct spans what it cannot stand in.
+     *
+     * The corridor is only known here, which is why this is not in the pure
+     * layout. Note it does NOT move the deck: a track that climbs above 13 m
+     * on this street will still meet it. `viaductOffset` moves the whole thing
+     * to another street, and `viaduct: false` turns it off.
+     */
+    if (viaductAt && avoid) {
+      viaductAt.piers = viaductAt.piers.filter(
+        (q) => avoid(q.x, q.z, viaductAt.deckBottom) >= P.avoidRadius);
+    }
+    viaduct = createCityViaduct({ layout: viaductAt, uNight, castShadows: P.castShadows });
+    if (viaduct) { group.add(viaduct.group); stats.viaduct = viaduct.stats; }
+    else stats.viaduct = null;
     if (P.beacons) {
       const tips = [];
       for (const b of buildings) {
@@ -1069,6 +1116,9 @@ export function createModularRoadCity({
           parkBays: carParks,
           parkTrees: parks,
           P, originCellX, originCellZ, params: P.furnitureParams,
+          // The motorway's lanes come from the same layout the deck was built
+          // from, so the cars cannot end up beside the road they drive on.
+          viaduct: viaductAt,
           // The street's OWN lamp field, so a car is lit by the lamp whose
           // pool it is parked in and the two can never drift apart.
           lamp: { pool: ground.lampPoolFree, color: ground.lampColor },
@@ -1082,6 +1132,13 @@ export function createModularRoadCity({
       obstacles = createCityObstacles({
         lampMatrices: ground.lampMatrices,
         lists: furniture?.lists ?? null,
+        // Derived from the viaduct that was actually built, so the capsule can
+        // never describe a pier of a different size than the one you can see.
+        piers: viaductAt ? {
+          list: viaductAt.piers,
+          height: viaductAt.deckBottom - P.groundY,
+          radius: Math.max(viaductAt.params.pierWidth, viaductAt.params.pierDepth) * 0.5 + 0.2,
+        } : null,
         groundY: P.groundY,
         // The same corridor the towers respect, so a track at street level is
         // not lined with posts you cannot see coming — plus whatever the game

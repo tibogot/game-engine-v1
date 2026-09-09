@@ -595,7 +595,7 @@ export function signalGo(time, phase, F) {
   return t < F.signalGreenEnd;
 }
 
-export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [], parkTrees = [] }) {
+export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [], parkTrees = [], viaduct = null }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
   group.name = "CityFurniture";
@@ -1185,11 +1185,49 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       }
     }
   }
+  /*
+   * ── THE VIADUCT'S LANES ────────────────────────────────────────────────────
+   *
+   * AND THAT IS THE WHOLE FEATURE. A lane is already a straight line that wraps
+   * across the city; an elevated lane is the same line with a `y` on it, so the
+   * queueing, the four-body fleet, the colour compaction and the distance cull
+   * all apply to the motorway without one line of new simulation.
+   *
+   * Two things do NOT apply, and both are absences rather than special cases:
+   * a motorway has no signals, and it has no junctions to turn at. Elevated
+   * lanes are also deliberately kept OUT of `laneIndex`, which is what makes
+   * them unreachable as a turn target — a street car cannot turn up onto the
+   * viaduct because there is no slip road, and the lane it would have to name
+   * is not in the map to be named.
+   *
+   * `across` here is a deck lane centre, not a street fraction, so `fi` is only
+   * carried for the driving-side rule — which is the same rule, because the
+   * deck runs along a street axis like everything else.
+   */
+  if (viaduct && F.traffic && viaduct.params.viaductTraffic !== false) {
+    for (let fi = 0; fi < viaduct.laneAcross.length; fi++) {
+      lanes.push({
+        axis: viaduct.axis,
+        across: viaduct.laneAcross[fi],
+        dir: laneDirForIndex(viaduct.axis, fi),
+        span: half * 2,
+        fi,
+        k: null,
+        y: viaduct.deckTop,
+        elevated: true,
+        cars: viaduct.params.viaductCars,
+        speedScale: viaduct.params.viaductSpeed,
+      });
+    }
+  }
+
   const traffic = [];
   for (let li = 0; li < lanes.length; li++) {
-    for (let i = 0; i < F.trafficPerLane; i++) {
+    const perLane = lanes[li].cars ?? F.trafficPerLane;
+    const vScale = lanes[li].speedScale ?? 1;
+    for (let i = 0; i < perLane; i++) {
       const r0 = h2(li, i, 61), r1 = h2(li, i, 62), r2 = h2(li, i, 63);
-      const u0 = (i + r0) / F.trafficPerLane;
+      const u0 = (i + r0) / perLane;
       traffic.push({
         lane: lanes[li],
         li,
@@ -1210,8 +1248,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
          * is traffic already moving rather than a grid pulling away together.
          */
         u: u0,
-        speed: F.trafficSpeedMin + r1 * (F.trafficSpeedMax - F.trafficSpeedMin),
-        v: F.trafficSpeedMin + r1 * (F.trafficSpeedMax - F.trafficSpeedMin),
+        speed: (F.trafficSpeedMin + r1 * (F.trafficSpeedMax - F.trafficSpeedMin)) * vScale,
+        v: (F.trafficSpeedMin + r1 * (F.trafficSpeedMax - F.trafficSpeedMin)) * vScale,
         color: pickCarColor(r2),
         body: pickCarBody(h2(li, i, 64)),
         m: new THREE.Matrix4(),
@@ -1636,7 +1674,10 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         const sLocal = rel - cell * pitch;
         // Inside the junction there is nothing left to obey — a car that stops
         // in the box is worse than one that runs an amber.
-        if (sLocal < blockW) {
+        // A motorway has no signals and no junctions. Both are absences, not
+        // special cases: skip the block and the elevated lane simply never
+        // finds anything to stop for or turn into.
+        if (!L.elevated && sLocal < blockW) {
           // Which junction it is: ahead in the direction of travel, so the one
           // BELOW this cell when travelling backwards along the axis.
           const jAlong = L.dir > 0 ? cell : cell - 1;
@@ -1810,7 +1851,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       const im = trafficMeshes[bi];
       if (!im) continue;
       const slot = n[bi];
-      _tp.set(x, gyBase, z);
+      _tp.set(x, L.y ?? gyBase, z);
       _tq.setFromAxisAngle(UP, yaw);
       im.setMatrixAt(slot, _tm.compose(_tp, _tq, _ts));
       /*
