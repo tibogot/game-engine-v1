@@ -1133,56 +1133,96 @@ console.log("\n── LOOK PASS ──");
  */
 {
   /*
-   * ── THE ROOFTOP PRISM ────────────────────────────────────────────────────
+   * ── THE PRISM ────────────────────────────────────────────────────────────
    *
-   * One board, and every way it can be wrong is geometric: floating over the
-   * roof, sunk into it, on a building too short to be a landmark, or turned
-   * away from the side of the city anyone drives on. So it is measured, not
-   * inspected — the bounding box against the tower's own top.
+   * Whichever site it took, the failure modes are the same shape and none of
+   * them shows in a count: sunk into its own ground, floating over it, too
+   * small to be a landmark, or turned away from the side of the city anyone
+   * drives on. Only the ground it stands on differs, so only that branches.
    */
-  console.log("\n── ROOFTOP PRISM ──");
+  console.log("\n── THE PRISM ──");
   {
     const pStats = flatCity.stats.prism;
-    check("a tower was found to carry the prism", !!pStats,
-      pStats ? `${pStats.height.toFixed(0)} m tower at ${pStats.x.toFixed(0)}, ${pStats.z.toFixed(0)}` : "none");
+    check("the board got a site", !!pStats, pStats ? `${pStats.site}` : "none");
     let pGroup = null;
     flatCity.group.traverse((o) => { if (o.name === "CityAdPrism") pGroup = o; });
     check("the prism is in the city group", !!pGroup);
     if (pStats && pGroup) {
-      const PRISM_MIN = (await import("../games/modular-road-v3/modularRoadCityPrism.js")).CITY_PRISM_DEFAULTS.prismMinHeight;
-      check("it stands on a tower tall enough to be a landmark",
-        pStats.height > PRISM_MIN, `${pStats.height.toFixed(0)} m vs ${PRISM_MIN} m minimum`);
-
       pGroup.updateMatrixWorld(true);
       const bb = new THREE.Box3().setFromObject(pGroup);
-      /*
-       * SITS ON THE ROOF. Below the top and it is buried in the slab; more
-       * than a few metres above and it floats. The lift is derived from the
-       * prop's own `panelBottom` times its scale, so this catches the case
-       * where that derivation and the prop drift apart.
-       */
       const clearance = bb.min.y - pStats.y;
-      check("the board sits on the roof, not in it or above it",
-        clearance >= -0.2 && clearance <= 3.5, `bottom is ${clearance.toFixed(2)} m above the roof`);
-      check("the board is big enough to read across the city",
-        bb.max.x - bb.min.x > 30, `${(bb.max.x - bb.min.x).toFixed(1)} m wide`);
+      check("the board sits on its ground, not in it or above it",
+        clearance >= -0.2 && clearance <= 3.5, `bottom is ${clearance.toFixed(2)} m above it`);
+      const width = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z);
 
-      // Facing: the live face is local +Z, so the rotated +Z must point at the
-      // origin, which is the side the track and the player are on.
+      if (pStats.site === "plaza") {
+        const inSquare = (flatCity.stats.plazaList || []).some(
+          (pz) => Math.hypot(pz.x - pStats.x, pz.z - pStats.z) < 1e-6);
+        check("the board stands in a real plaza", inSquare,
+          `${pStats.x.toFixed(0)}, ${pStats.z.toFixed(0)} against ${(flatCity.stats.plazaList || []).length} squares`);
+        // It must FIT in the square, or it is a board through a building.
+        const blockW = CITY_DEFAULTS.blockLots * CITY_DEFAULTS.lotSize;
+        check("the board fits inside the square it stands in",
+          width < blockW * 0.8, `${width.toFixed(1)} m across a ${blockW} m block`);
+        check("the board is big enough to be a landmark in its square",
+          width > 12, `${width.toFixed(1)} m wide`);
+      } else {
+        const PRISM_MIN = (await import("../games/modular-road-v3/modularRoadCityPrism.js")).CITY_PRISM_DEFAULTS.prismMinHeight;
+        check("it stands on a tower tall enough to be a landmark",
+          pStats.height > PRISM_MIN, `${pStats.height.toFixed(0)} m vs ${PRISM_MIN} m minimum`);
+        check("the board is big enough to read across the city", width > 30,
+          `${width.toFixed(1)} m wide`);
+      }
+
+      // The live face is local +Z, so the rotated +Z must point at the origin.
       const f = new THREE.Vector3(0, 0, 1).applyQuaternion(pGroup.quaternion);
       const toOrigin = new THREE.Vector3(-pStats.x, 0, -pStats.z).normalize();
       const dotF = f.x * toOrigin.x + f.z * toOrigin.z;
       check("the board faces the side of the city people drive on",
         dotF > 0.9, `dot ${dotF.toFixed(3)}`);
 
-      // And it is one object, not a class of them — this is the whole reason
-      // it is allowed to be uninstanced.
       let meshes = 0, prisms = 0;
       pGroup.traverse((o) => { if (o.isMesh) meshes++; });
       flatCity.group.traverse((o) => { if (o.name === "CityAdPrism") prisms++; });
-      check("there is exactly one prism, costing a handful of draws",
+      check("there is exactly ONE prism, costing a handful of draws",
         prisms === 1 && meshes <= 6, `${prisms} prism, ${meshes} meshes`);
     }
+  }
+
+  /*
+   * ── SKYBRIDGES ───────────────────────────────────────────────────────────
+   *
+   * Every way a bridge can be wrong is geometric and none of them shows in a
+   * count: floating in the gap without reaching either tower, crossing above
+   * the shorter roof so one end enters nothing, or sitting low enough to be a
+   * footbridge. So each is measured against the two buildings it claims to
+   * join, found by the lot cells it recorded — not against the arithmetic
+   * that placed it, which would only prove the numbers had been copied.
+   */
+  console.log("\n── SKYBRIDGES ──");
+  {
+    const nB = flatCity.stats.bridges;
+    check("some pairs of towers got a bridge", nB > 0, `${nB} bridges`);
+    let bMesh = null;
+    flatCity.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CityBridges") bMesh = o; });
+    check("every bridge in the city is one draw",
+      !!bMesh && bMesh.instanceMatrix.count === nB, `${nB} in ${bMesh ? 1 : 0} mesh`);
+
+    const cells = new Map();
+    for (const b of flatCity.buildings) cells.set(`${b.cx},${b.cz}`, b);
+    let short = 0, tooLow = 0, aboveRoof = 0, orphan = 0;
+    for (const sp of (flatCity.stats.bridgeSpans || [])) {
+      const a = cells.get(sp.a), b = cells.get(sp.b);
+      if (!a || !b) { orphan++; continue; }
+      if (sp.y > Math.min(a.top, b.top)) aboveRoof++;
+      if (sp.y - Math.max(a.y, b.y) < 12) tooLow++;
+      const centres = Math.hypot(a.x - b.x, a.z - b.z);
+      if (sp.span < centres * 0.35) short++;
+    }
+    check("no bridge crosses above the shorter tower's roof", aboveRoof === 0, `${aboveRoof} of ${nB}`);
+    check("no bridge is really a footbridge", tooLow === 0, `${tooLow} of ${nB} under 12 m`);
+    check("every bridge reaches across its own gap", short === 0 && orphan === 0,
+      `${short} too short, ${orphan} joined to nothing`);
   }
 
   console.log("\n── CHECKPOINTS ──");

@@ -79,6 +79,7 @@ import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.j
 import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
 import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
 import { placeCityPrism, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
+import { placeCityBridges, BRIDGE_DEFAULTS } from "./modularRoadCityBridges.js";
 import { createCityStreets, STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
@@ -234,6 +235,10 @@ export const CITY_DEFAULTS = {
    *  built. See modularRoadCityPrism.js. */
   prism: true,
   prismParams: {},
+  /** Glazed links thrown across a street between two towers. One draw; a
+   *  handful of them in a city. See modularRoadCityBridges.js. */
+  bridges: true,
+  bridgeParams: {},
   beacons: true,
   beaconColor: 0xff2a1a,
 
@@ -336,6 +341,7 @@ export function createModularRoadCity({
   let instanced = null;
   let signs = null;
   let prism = null;
+  let bridges = null;
   let beacons = null;
   let enabled = true;
   let originCellX = 0, originCellZ = 0;
@@ -346,7 +352,7 @@ export function createModularRoadCity({
   const stats = {
     buildings: 0, lod: [0, 0, 0], meshes: 0, kit: kit.stats,
     lastLodMs: 0, lastBuildMs: 0,
-    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, plazas: 0,
+    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, plazas: 0, plazaList: [], bridges: 0, bridgeSpans: [],
     lotTexCells: [0, 0], landmarks: 0, beacons: 0,
     signs: { banners: 0, screens: 0, bands: 0 },
     districts: [0, 0, 0],
@@ -407,6 +413,7 @@ export function createModularRoadCity({
     const normalCount = kit.archetypes.length - (kit.stats.landmarks ?? 0);
 
     let culledCorridor = 0, culledSlope = 0, culledBounds = 0, culledPlaza = 0;
+    const plazaList = [], plazaSeen = new Set();
     const districts = [0, 0, 0];
     const types = [0, 0, 0];
     const foot = L * 0.42;
@@ -466,6 +473,14 @@ export function createModularRoadCity({
           if (Math.hypot(bcx, bcz) < extent * P.plazaMaxR
             && blockRand(bx, bz, 31) < P.plazaChance) {
             culledPlaza++;
+            // Recorded once per block, with its world centre: an empty square
+            // is open ground, and open ground is the one thing anything else
+            // in this city can be asked to stand in.
+            const pk = bx + "," + bz;
+            if (!plazaSeen.has(pk)) {
+              plazaSeen.add(pk);
+              plazaList.push({ bx, bz, x: bcx + P.centerX, z: bcz + P.centerZ, y: P.groundY });
+            }
             continue;
           }
         }
@@ -576,7 +591,8 @@ export function createModularRoadCity({
     stats.culledBounds = culledBounds;
     stats.culledPlaza = culledPlaza;
     // Lots, not squares: blockLots^2 lots make one plaza.
-    stats.plazas = Math.round(culledPlaza / (P.blockLots * P.blockLots));
+    stats.plazas = plazaList.length;
+    stats.plazaList = plazaList;
     stats.districts = districts;
     stats.types = types;
     return out;
@@ -687,6 +703,7 @@ export function createModularRoadCity({
     }
     if (signs) { group.remove(signs.group); signs.dispose(); signs = null; }
     if (prism) { group.remove(prism.group); prism.dispose(); prism = null; }
+    if (bridges) { group.remove(bridges.group); bridges.dispose(); bridges = null; }
     if (beacons) {
       group.remove(beacons);
       beacons.geometry.dispose();
@@ -735,11 +752,30 @@ export function createModularRoadCity({
      * so it can be scored against a skyline the signs have already read.
      */
     prism = placeCityPrism({
-      buildings, archetypes: kit.archetypes,
+      buildings, archetypes: kit.archetypes, plazas: stats.plazaList,
       params: { ...CITY_PRISM_DEFAULTS, ...P.prismParams, prism: P.prism },
     });
     if (prism) { group.add(prism.group); stats.prism = prism.at; }
     else stats.prism = null;
+    /*
+     * SKYBRIDGES. A grid reads as a grid because the space between the blocks
+     * is always empty; one link across a street says the two sides were built
+     * to relate to each other. One draw, and the best value on the list from
+     * the track — you fly over the canyons, and a bridge is the only thing
+     * that ever crosses one.
+     */
+    bridges = placeCityBridges({
+      buildings, archetypes: kit.archetypes, rand: lotRand,
+      params: {
+        ...BRIDGE_DEFAULTS, streetLots: P.streetLots, uNight,
+        ...P.bridgeParams, bridges: P.bridges,
+      },
+    });
+    if (bridges) {
+      group.add(bridges.group);
+      stats.bridges = bridges.count;
+      stats.bridgeSpans = bridges.spans;
+    } else { stats.bridges = 0; stats.bridgeSpans = []; }
     if (P.beacons) {
       const tips = [];
       for (const b of buildings) {

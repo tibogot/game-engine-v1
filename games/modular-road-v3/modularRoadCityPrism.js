@@ -30,6 +30,14 @@ import { buildAdPrismMesh, AD_PRISM } from "./modularRoadAdPrism.js";
 export const CITY_PRISM_DEFAULTS = {
   /** Off and it costs nothing at all — the prop is never built. */
   prism: true,
+  /** WHERE IT STANDS. "plaza" puts it in one of the empty blocks, on its own
+   *  legs, where you drive past it; "roof" puts it on a downtown tower, where
+   *  it is a skyline landmark instead. Plaza falls back to roof if the seed
+   *  produced no square big enough. */
+  prismSite: "plaza",
+  /** A board in a square is read from across the block, not from across the
+   *  city, so it does not need to be as big. */
+  prismPlazaScale: 3.2,
   /** The prop's own scale. `AD_PRISM.scale` is 2 for a roadside board; a
    *  rooftop landmark has to read from the far side of the city. */
   prismScale: 6.5,
@@ -52,9 +60,60 @@ export const CITY_PRISM_DEFAULTS = {
  * `archetypes` their shapes; both are exactly what createCitySigns is given,
  * so this needs no new data plumbed through the city.
  */
-export function placeCityPrism({ buildings, archetypes, params = {} } = {}) {
+export function placeCityPrism({ buildings, archetypes, plazas = [], params = {} } = {}) {
   const P = { ...CITY_PRISM_DEFAULTS, ...params };
   if (!P.prism || !buildings?.length) return null;
+
+  /*
+   * A SQUARE FIRST, IF THERE IS ONE.
+   *
+   * The plazas are the only open ground in this city, and an empty paved
+   * block reads as missing content until something stands in it. A trivision
+   * board is exactly what does stand in one — and unlike the roof, it is then
+   * at the scale you actually meet it, from a car, on its own legs.
+   *
+   * It falls back to a roof rather than refusing: `plazas` is a rolled
+   * feature, and a seed that produced none must still get its landmark.
+   */
+  if (P.prismSite === "plaza" && plazas.length) {
+    // The one nearest downtown, which is where the track and the player are.
+    let best = null;
+    for (const pz of plazas) {
+      const d = Math.hypot(pz.x, pz.z);
+      if (!best || d < best.d) best = { pz, d };
+    }
+    const { pz } = best;
+    const group = buildAdPrismMesh({
+      params: { ...AD_PRISM, legs: true, scale: P.prismPlazaScale },
+    });
+    group.name = "CityAdPrism";
+    // Sat on the ground by its own measured underside, for the same reason
+    // the roof version is: the prop's lowest geometry is not its bottom rail.
+    const box = new THREE.Box3().setFromObject(group);
+    group.position.set(pz.x, pz.y - box.min.y, pz.z);
+    // Facing the middle of the city, so the side you approach from is the
+    // side with the pictures on it.
+    const len = Math.hypot(pz.x, pz.z) || 1;
+    group.rotation.y = Math.atan2(-pz.x / len, -pz.z / len);
+    group.traverse((o) => {
+      if (!o.isMesh) return;
+      o.userData.noCollide = true;
+      o.userData.noMerge = true;
+    });
+    return {
+      group,
+      at: { x: pz.x, y: pz.y, z: pz.z, height: 0, scale: P.prismPlazaScale, site: "plaza" },
+      dispose() {
+        group.traverse((o) => {
+          if (!o.isMesh) return;
+          o.geometry?.dispose?.();
+          const m = o.material;
+          if (Array.isArray(m)) m.forEach((mm) => mm?.dispose?.());
+          else m?.dispose?.();
+        });
+      },
+    };
+  }
 
   let best = null;
   for (const b of buildings) {
@@ -113,7 +172,7 @@ export function placeCityPrism({ buildings, archetypes, params = {} } = {}) {
 
   return {
     group,
-    at: { x: b.x, y: top, z: b.z, height: best.height, scale: P.prismScale },
+    at: { x: b.x, y: top, z: b.z, height: best.height, scale: P.prismScale, site: "roof" },
     dispose() {
       group.traverse((o) => {
         if (!o.isMesh) return;
