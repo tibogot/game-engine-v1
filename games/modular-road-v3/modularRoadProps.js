@@ -186,7 +186,20 @@ function hazardPlatformGeometry() {
   return attachDeckProxy(geo, deckPos);
 }
 
-const DIAMOND_PLATE_URL = "/textures/pbr_materials/DiamondPlate-1K/DiamondPlate001_1K-PNG";
+/*
+ * THIS GAME'S OWN TEXTURES, already compressed.
+ *
+ * `/textures/pbr_materials/` is the v3 EDITOR's library — big lossless source
+ * art, and correct for a tool you author in. Shipping it to a browser is a
+ * different job: the plate's four maps were 7.48 MB, of which 5.25 MB was a
+ * normal map stored at 16 bits per channel that the browser decodes to 8
+ * before three ever sees it. Every one of those bits crossed the network and
+ * was then discarded.
+ *
+ * `/textures/modular-road/` holds only what this game ships, packed by
+ * tools/packTextures.py. The editor's originals are untouched.
+ */
+const DIAMOND_PLATE_URL = "/textures/modular-road/diamond_plate";
 let _diamondPlateMaps = null;
 let _diamondPlatePreload = null;
 
@@ -207,7 +220,7 @@ export function preloadDiamondPlate() {
     let done;
     pending.push(new Promise((resolve) => { done = resolve; }));
     const tex = loader.load(
-      `${DIAMOND_PLATE_URL}_${suffix}.png`,
+      `${DIAMOND_PLATE_URL}/${suffix}.webp`,
       () => done(),
       undefined,
       () => {
@@ -220,11 +233,19 @@ export function preloadDiamondPlate() {
     tex.anisotropy = 8;
     return tex;
   };
+  /*
+   * ROUGHNESS AND METALNESS ARE THE SAME TEXTURE — packed ORM, the glTF
+   * convention: AO in R, roughness in G, metalness in B. three reads `.g` for
+   * a roughnessMap and `.b` for a metalnessMap, so handing it one texture for
+   * both is exactly right, and it is one sampler instead of two. This project
+   * already sits near WebGPU's 16-sampler ceiling in the terrain stage.
+   */
+  const orm = load("orm", false);
   _diamondPlateMaps = {
-    color: load("Color", true),
-    normal: load("NormalGL", false),
-    roughness: load("Roughness", false),
-    metalness: load("Metalness", false),
+    color: load("albedo", true),
+    normal: load("normal", false),
+    roughness: orm,
+    metalness: orm,
   };
   _diamondPlatePreload = Promise.all(pending).then(() => _diamondPlateMaps);
   return _diamondPlatePreload;

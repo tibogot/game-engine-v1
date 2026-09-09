@@ -98,6 +98,25 @@ const DEFAULT_MATERIALS = [
 ];
 
 function createDefaultPbrMaterial({ id, name, uvScale = 1.0, paths }) {
+  /*
+   * ── FETCHED WHEN SOMETHING ASKS, NOT WHEN THE LIBRARY IS BUILT ────────────
+   *
+   * This list is a PALETTE — options the editor offers, that a prop opts into
+   * by `materialId`. Building the library used to fetch all of them, so every
+   * game on this engine downloaded the whole palette whether or not a single
+   * prop referenced one.
+   *
+   * MEASURED on the racing game: Cobblestone, Concrete 030 and Ground Tiles 01
+   * came to 17.36 MB per boot, and neither of its worlds nor any of its track
+   * saves mentions any of the three. It was downloading a dropdown it never
+   * opens.
+   *
+   * Getters rather than an explicit `load()` because the consumer is
+   * `createMaterialForLibrary`, which runs only when a prop actually resolves
+   * to this material — so "asked for" and "needed" are already the same
+   * moment, and the editor's picker still gets them the instant it shows one.
+   */
+  let _alb = null, _nor = null, _rgh = null, _ao = null;
   return {
     type: "pbr",
     id,
@@ -107,10 +126,10 @@ function createDefaultPbrMaterial({ id, name, uvScale = 1.0, paths }) {
     aoStrength: 1.0,
     roughStrength: 1.0,
     paths: { ...paths },
-    albedoTex: makeTex(paths.albedo, true),
-    normalTex: makeTex(paths.normal, false),
-    roughnessTex: makeTex(paths.rough, false),
-    aoTex: makeTex(paths.ao, false),
+    get albedoTex() { return (_alb ??= makeTex(paths.albedo, true)); },
+    get normalTex() { return (_nor ??= makeTex(paths.normal, false)); },
+    get roughnessTex() { return (_rgh ??= makeTex(paths.rough, false)); },
+    get aoTex() { return (_ao ??= makeTex(paths.ao, false)); },
     uUVScale: uniform(uvScale),
     uNormalStr: uniform(1.0),
     uAOStr: uniform(1.0),
