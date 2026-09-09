@@ -777,6 +777,25 @@ console.log("\n── LOOK PASS ──");
       }
       gArt = n && sum < 0 ? -1 : 1;
       check("the gantry panel has exactly one artwork face", n === 4, `${n} unpinned vertices`);
+      /*
+       * AND THE PIN LANDS INSIDE THE PATCH IT AIMS AT. This one was already
+       * wrong and showed nothing: the pinned UV sat within a pixel of the
+       * patch's edge, so the mast was painted steel at full resolution and
+       * would have started smearing the board's artwork as soon as the mip
+       * chain began averaging across the boundary — visible at distance,
+       * invisible near, and invisible in the source. Cross-checks the geometry
+       * against the atlas rather than trusting either.
+       */
+      const { rect } = await import("../games/modular-road-v3/modularRoadCityGantry.js")
+        .then((m) => ({ rect: m.gantryPatchUV(FP).rect }));
+      const [pu, pv] = pin.split(",").map(Number);
+      const inside = pu > rect[0] && pu < rect[2] && pv > rect[1] && pv < rect[3];
+      // A quarter of the patch clear on every side, or a mip will reach out of it.
+      const margin = Math.min(pu - rect[0], rect[2] - pu, pv - rect[1], rect[3] - pv);
+      const quarter = Math.min(rect[2] - rect[0], rect[3] - rect[1]) * 0.25;
+      check("the gantry's pinned UV sits well inside the reserved patch",
+        inside && margin >= quarter,
+        `pin (${pu.toFixed(4)}, ${pv.toFixed(4)}) in [${rect.map((r) => r.toFixed(4)).join(", ")}], margin ${margin.toFixed(4)} vs ${quarter.toFixed(4)}`);
     }
     let gWrong = 0, gClash = 0;
     for (const e of gantries) {

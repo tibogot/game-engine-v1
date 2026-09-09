@@ -27,8 +27,10 @@ import { attribute, texture, uv, vec3, float, floor, fract, step, positionGeomet
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 export const GANTRY_DEFAULTS = {
-  /** Atlas: four panels stacked, each the full width. 4:1 is close to what a
-   *  real destination board is, and it is what the geometry below expects. */
+  /** Atlas: four panels stacked, each the full width. The TILE'S ASPECT IS
+   *  DERIVED from the panel below, never set here — a tile and a board that
+   *  disagree stretch the lettering, and that is the kind of wrong that is
+   *  obvious on screen and invisible in the source. */
   rows: 4,
   px: 1024,
 
@@ -38,9 +40,11 @@ export const GANTRY_DEFAULTS = {
   mastRadius: 0.15,
   boomReach: 9.0,
   boomThick: 0.22,
-  /** The panel, hanging under the boom. */
+  /** The panel, hanging under the boom. Tall enough to carry two destinations
+   *  at a size you can read at speed; the bottom edge still clears 6 m, which
+   *  is well over anything that drives under it. */
   panelWidth: 7.2,
-  panelHeight: 1.8,
+  panelHeight: 2.7,
   panelDrop: 0.18,
   /** How far out along the boom the panel's centre sits. */
   panelOut: 5.2,
@@ -66,6 +70,28 @@ export const GANTRY_PANELS = [
 const BLUE = "#0b3f8f", WHITE = "#f2f4f7";
 /** The reserved patch every non-panel face is pinned to. */
 const STEEL_GREY = "#8d9299";
+/** Its size and margin, in atlas pixels. */
+const PATCH_PX = 28, PATCH_PAD = 3;
+
+/**
+ * THE TILE'S SHAPE COMES FROM THE BOARD'S, and the patch's UV comes from the
+ * tile's. Both derived, in one place, because the failure when they disagree
+ * is not a crash: a tile at the wrong aspect only makes the lettering subtly
+ * too narrow, and a pin that lands a pixel outside its patch only shows up as
+ * a smear of the board's artwork creeping up the mast at distance, once the
+ * mip chain starts averaging. Legible, plausible, and wrong.
+ */
+export function gantryTileHeight(P) {
+  return Math.round(P.px * P.panelHeight / P.panelWidth);
+}
+/** The patch as [u0, v0, u1, v1] in TILE-local UV, and the pin at its centre. */
+export function gantryPatchUV(P) {
+  const th = gantryTileHeight(P);
+  return {
+    rect: [PATCH_PAD / P.px, PATCH_PAD / th, (PATCH_PAD + PATCH_PX) / P.px, (PATCH_PAD + PATCH_PX) / th],
+    pin: [(PATCH_PAD + PATCH_PX / 2) / P.px, (PATCH_PAD + PATCH_PX / 2) / th],
+  };
+}
 
 /** An arrow, drawn as a mass rather than a glyph so it survives being small. */
 function arrow(ctx, cx, cy, s, dir) {
@@ -122,7 +148,14 @@ function drawPanel(ctx, slot, w, h) {
 
 export function makeGantryAtlas(P) {
   const n = P.rows;
-  const th = P.px / n;
+  /*
+   * THE TILE'S SHAPE COMES FROM THE BOARD'S. A fixed square canvas cut into
+   * four made the tile 4:1 while the panel it maps onto is nearer 8:3, and the
+   * only symptom is lettering that is subtly too narrow — legible, plausible,
+   * and wrong. Deriving it means the two cannot disagree, whatever the panel
+   * is resized to later.
+   */
+  const th = gantryTileHeight(P);
   if (typeof document === "undefined") {
     const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
     t.needsUpdate = true;
@@ -130,7 +163,7 @@ export function makeGantryAtlas(P) {
   }
   const canvas = document.createElement("canvas");
   canvas.width = P.px;
-  canvas.height = P.px;
+  canvas.height = th * n;
   const ctx = canvas.getContext("2d");
   // UV row 0 is the canvas BOTTOM row, matching the sign and hero atlases.
   const top = (i) => (n - 1 - i) * th;
@@ -143,8 +176,9 @@ export function makeGantryAtlas(P) {
     drawPanel(ctx, i, P.px, th);
     // THE RESERVED STEEL PATCH. The mast and boom are pinned here, so the
     // structure is painted steel rather than a smear of the board's artwork.
+    // Measured from the tile's BOTTOM, which is where UV v = 0 sits.
     ctx.fillStyle = STEEL_GREY;
-    ctx.fillRect(2, th - 14, 12, 12);
+    ctx.fillRect(PATCH_PAD, th - PATCH_PAD - PATCH_PX, PATCH_PX, PATCH_PX);
     ctx.restore();
   }
   for (let i = 0; i < n; i++) paintTile(i);
@@ -162,7 +196,7 @@ export function makeGantryAtlas(P) {
       ctx.clearRect(0, y0, P.px, th);
       ctx.drawImage(img, 0, y0, P.px, th);
       ctx.fillStyle = STEEL_GREY;
-      ctx.fillRect(2, y0 + th - 14, 12, 12);
+      ctx.fillRect(PATCH_PAD, y0 + th - PATCH_PAD - PATCH_PX, PATCH_PX, PATCH_PX);
       ctx.restore();
       tex.needsUpdate = true;
       return true;
@@ -191,7 +225,7 @@ export function buildGantryGeometry(P) {
   const panel = new THREE.BoxGeometry(P.panelWidth, P.panelHeight, 0.09);
   panel.translate(P.panelOut, H - P.boomThick - P.panelDrop - P.panelHeight / 2, 0);
 
-  const BX = 0.006, BY = 0.006;          // inside the reserved steel patch
+  const [BX, BY] = gantryPatchUV(P).pin;   // the middle of the reserved patch
   const pinAll = (g) => {
     const a = g.getAttribute("uv");
     for (let i = 0; i < a.count; i++) a.setXY(i, BX, BY);
