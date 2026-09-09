@@ -25,7 +25,10 @@
 // by.
 
 import * as THREE from "three";
-import { buildAdPrismMesh, AD_PRISM } from "./modularRoadAdPrism.js";
+import {
+  buildAdPrismMesh, AD_PRISM, findAdPrismSlats, uniquifyAdPrismMaterial,
+  setAdPrismImages, PRISM_PX,
+} from "./modularRoadAdPrism.js";
 
 export const CITY_PRISM_DEFAULTS = {
   /** Off and it costs nothing at all — the prop is never built. */
@@ -49,6 +52,21 @@ export const CITY_PRISM_DEFAULTS = {
   prismNearWeight: 0.30,
   /** Lifted clear of the roof so the bottom rail does not z-fight the slab. */
   prismLift: 0.8,
+
+  /** THE THREE POSTERS come out of public/city-ads/, the same folder and the
+   *  same `ad-NN` convention the hero billboards use — so an image dropped in
+   *  for the boards is available to the prism, with no second place to put
+   *  files and no manifest to keep in step.
+   *
+   *  WHICH three is CHOSEN BY SHAPE, not written down here. The board is
+   *  16:9 and that folder is mostly portrait phone shots: measured, only two
+   *  of twelve are near 16:9 and the worst is 0.70, which on this board is a
+   *  face squashed to half its width. A fixed list of slot numbers would have
+   *  been right for exactly today's folder and quietly wrong the moment
+   *  another image was added. */
+  prismAdDir: "/city-ads/",
+  prismAdScan: 16,
+  prismAdExtensions: ["webp", "png", "jpg"],
 };
 
 /**
@@ -79,6 +97,57 @@ export function pickPrismPlaza(plazas) {
   return best;
 }
 
+/**
+ * Give this board its own textures and hang three posters on it.
+ *
+ * `uniquifyAdPrismMaterial` FIRST, and it is not optional: the prop's material
+ * is a template shared with every prism the track builder places, so loading
+ * into it without cloning would retexture the player's boards from the city's.
+ *
+ * The load is fire-and-forget and never throws. The prop already paints a
+ * readable placeholder on each face, so a face is never blank while this is in
+ * flight and a missing file simply keeps the placeholder — which is the same
+ * contract the hero billboards have, and the reason neither needs a manifest.
+ */
+function dressPrism(group, P) {
+  const slats = findAdPrismSlats(group);
+  if (slats) uniquifyAdPrismMaterial(slats);
+  if (typeof Image === "undefined" || !(P.prismAdScan > 0)) return;
+  /*
+   * Probe a slot across the extensions and report its SHAPE as well as its
+   * URL. Each miss is expected control flow, not a failure — it is the only
+   * way to find a file without a manifest, which is the whole point of that
+   * folder.
+   */
+  const probe = (slot) => new Promise((res) => {
+    let i = 0;
+    const tryNext = () => {
+      if (i >= P.prismAdExtensions.length) return res(null);
+      const url = `${P.prismAdDir}ad-${String(slot).padStart(2, "0")}.${P.prismAdExtensions[i++]}`;
+      const img = new Image();
+      img.onload = () => res({ url, aspect: img.width / Math.max(1, img.height) });
+      img.onerror = tryNext;
+      img.src = url;
+    };
+    tryNext();
+  });
+  const want = PRISM_PX[0] / PRISM_PX[1];
+  Promise.all(Array.from({ length: P.prismAdScan }, (_, i) => probe(i + 1)))
+    .then((found) => {
+      /*
+       * THE THREE THAT FIT, by log-ratio so a picture half as wide as the
+       * board and one twice as wide are equally wrong — which they are. A
+       * plain difference would rate the too-wide one as the better fit.
+       */
+      const ok = found.filter(Boolean)
+        .sort((a, b) => Math.abs(Math.log(a.aspect / want)) - Math.abs(Math.log(b.aspect / want)));
+      if (!ok.length) return;
+      const urls = [0, 1, 2].map((i) => ok[i % ok.length].url);
+      setAdPrismImages(group, urls);
+    })
+    .catch(() => {});
+}
+
 export function placeCityPrism({ buildings, archetypes, plazas = [], params = {} } = {}) {
   const P = { ...CITY_PRISM_DEFAULTS, ...params };
   if (!P.prism || !buildings?.length) return null;
@@ -100,6 +169,7 @@ export function placeCityPrism({ buildings, archetypes, plazas = [], params = {}
       params: { ...AD_PRISM, legs: true, scale: P.prismPlazaScale },
     });
     group.name = "CityAdPrism";
+    dressPrism(group, P);
     // Sat on the ground by its own measured underside, for the same reason
     // the roof version is: the prop's lowest geometry is not its bottom rail.
     const box = new THREE.Box3().setFromObject(group);
@@ -151,6 +221,7 @@ export function placeCityPrism({ buildings, archetypes, plazas = [], params = {}
     params: { ...AD_PRISM, legs: false, scale: P.prismScale },
   });
   group.name = "CityAdPrism";
+  dressPrism(group, P);
 
   /*
    * THE LIFT IS MEASURED OFF THE PROP, not computed from its parameters.
