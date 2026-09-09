@@ -35,6 +35,10 @@ import { roadParams, NO_CHECKER } from "./modularRoadKit.js";
 
 /** The one decal there is so far. Lives beside the game rather than in
  *  public/models because it is track dressing, not a shared engine asset. */
+// Served from `public/` for the same reason the world is: a runtime path 404s
+// in a build, where only `public/` is copied, and this one failed silently as
+// "decal failed to load" — easy to read straight past. Not a `?url` import,
+// because this module is imported by the headless tests straight into Node.
 export const DECAL_URL = "/games/modular-road-v3/rondcarre.png";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { materialEmissive, materialColor, positionLocal, normalLocal, float, mix, fract, fwidth, smoothstep, vec3, texture, uv, attribute, step, oneMinus, normalMap, vec2 } from "three/tsl";

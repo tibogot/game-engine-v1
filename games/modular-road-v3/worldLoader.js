@@ -10,8 +10,20 @@ import { decodeProjectFile, isProjectFile } from "../../v3/io/projectIO.js";
 import { saveTerrainConfig, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../../v3/terrain/heightmapTexture.js";
 import { stashPendingHeightmap } from "../../v3/io/pendingLoad.js";
 
-/** Flat empty terrain — a stunt track supplies its own scenery, so the world
- *  under it only has to exist and not get in the way. */
+/*
+ * Flat empty terrain — a stunt track supplies its own scenery, so the world
+ * under it only has to exist and not get in the way.
+ *
+ * SERVED FROM `public/`, AND THAT IS THE BUG THIS FIXES. A runtime URL string
+ * resolves in dev, where vite serves the whole project tree, and 404s in a
+ * BUILD, where only `public/` is copied — so the deployed game had been
+ * failing to load its own world with "is not a V3 project file" and quietly
+ * carrying on without it.
+ *
+ * `public/` rather than a `?url` import because this module is also imported
+ * by the headless tests, straight into Node, where vite's query suffixes mean
+ * nothing and a `.v3proj` import is an unknown file extension.
+ */
 export const DEFAULT_WORLD_URL = "/games/modular-road-v3/stunt.v3proj";
 
 const PENDING_KEY = "modular-road-v3.pendingWorld";
