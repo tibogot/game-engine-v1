@@ -2166,8 +2166,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
          * it; completing a frame does.
          */
         showCover("Building city…");
+        coverProgress(0.04, "laying out the blocks");
         await coverPainted();
         buildCity();
+        coverProgress(0.16, "city built");
       }
       city.setEnabled(true);
       /*
@@ -8286,17 +8288,41 @@ ${e.message}`);
    * So the cover is owned here and whoever needs it first raises it. A second
    * caller re-labels the one already up rather than stacking another.
    */
-  let _cover = null;
+  let _cover = null, _coverBar = null, _coverText = null, _coverDetail = null;
   function showCover(label) {
     if (!_cover) {
       _cover = document.createElement("div");
       _cover.className = "road-warmup-cover";
+      _coverText = document.createElement("div");
+      const bar = document.createElement("div");
+      bar.className = "road-warmup-bar";
+      _coverBar = document.createElement("i");
+      bar.appendChild(_coverBar);
+      _coverDetail = document.createElement("div");
+      _coverDetail.className = "road-warmup-detail";
+      _cover.append(_coverText, bar, _coverDetail);
       document.body.appendChild(_cover);
     }
-    _cover.textContent = label;
+    _coverText.textContent = label;
     return _cover;
   }
-  function hideCover() { _cover?.remove(); _cover = null; }
+  /**
+   * How far along, and what is happening.
+   *
+   * A thirty-second wait with no bar is indistinguishable from a hang — and
+   * MEASURED, switching the city on is 32 s to playable of which 29 s is a
+   * frozen tab, so the browser cannot even animate a spinner. A bar that only
+   * moves BETWEEN the frozen blocks is honest about that: it steps, because
+   * the work steps.
+   */
+  function coverProgress(frac, detail) {
+    if (_coverBar) _coverBar.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+    if (_coverDetail && detail != null) _coverDetail.textContent = detail;
+  }
+  function hideCover() {
+    _cover?.remove();
+    _cover = null; _coverBar = null; _coverText = null; _coverDetail = null;
+  }
   /**
    * Wait until the cover has actually been PAINTED.
    *
@@ -8485,7 +8511,11 @@ ${e.message}`);
       // pathological 500-piece track cannot stall for a minute.
       const MAX_POSES = 60;
       const stride = Math.max(1, Math.ceil(pieces.length / MAX_POSES));
+      const poseCount = Math.max(1, Math.ceil(pieces.length / stride));
+      let posesDone = 0;
       for (let i = 0; i < pieces.length; i += stride) {
+        coverProgress(0.16 + 0.14 * (posesDone / poseCount),
+          `track shaders  ${++posesDone}/${poseCount}`);
         const m = pieces[i].connectorIn;
         _p.setFromMatrixPosition(m);
         // -Z is travel, matching socketMatrix; stand back and look along it so
@@ -8659,8 +8689,10 @@ ${e.message}`);
        * Everything it needs has just been built by the ordinary pass, so this
        * is the cheap 0.66 s version rather than the 8 s one.
        */
+      coverProgress(0.88, "reflections");
       reflectionEnabled = reflectionWas;
       if (reflectionWas) await settleFrames(300, 500, 2500);
+      coverProgress(1.0, "ready");
 
       /*
        * ── DRIVE THE ROAD, UNDER THE COVER ──────────────────────────────────
@@ -8691,7 +8723,16 @@ ${e.message}`);
           if (!_warmPose) _warmPose = { pos: new THREE.Vector3(), at: new THREE.Vector3() };
           app.addPreRenderHook?.(warmDriveHook);
           try {
+            const driveTotal = WARM_DRIVE_STEPS * 2 + 1;
             for (let i = -WARM_DRIVE_STEPS; i <= WARM_DRIVE_STEPS; i++) {
+              /*
+               * MOST OF THE WAIT IS HERE, so most of the bar is too. The drive
+               * is where new ground first reaches the renderer, which is where
+               * the pipelines are actually compiled — 0.30 to 0.85 of the bar
+               * for what MEASURED as roughly four fifths of the frozen time.
+               */
+              coverProgress(0.30 + 0.55 * ((i + WARM_DRIVE_STEPS) / driveTotal),
+                `city shaders  ${i + WARM_DRIVE_STEPS + 1}/${driveTotal}`);
               const d = i * WARM_DRIVE_STEP_M;
               _warmPose.pos.set(st.x + ax * d, gy + 2.4, st.z + az * d);
               _warmPose.at.set(st.x + ax * (d + 60), gy + 1.6, st.z + az * (d + 60));

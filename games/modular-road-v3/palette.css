@@ -920,6 +920,34 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
   pointer-events: all;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── THE PROGRESS BAR ────────────────────────────────────────────────────────
+   A wait with no bar is indistinguishable from a hang, and this one is thirty
+   seconds long. The width is set from JS; the transition is short so a phase
+   that completes in one jump still reads as movement rather than a teleport. */
+.road-warmup-bar {
+  width: min(320px, 42vw);
+  height: 3px;
+  background: #1b2027;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.road-warmup-bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #d8dde5;
+  transition: width 140ms linear;
+}
+.road-warmup-detail {
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  color: #565e6a;
+  text-transform: none;
+  min-height: 13px;
 }
 
 /* ── CHECKPOINT RUSH ────────────────────────────────────────────────────────
