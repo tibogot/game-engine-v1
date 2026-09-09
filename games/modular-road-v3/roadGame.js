@@ -41,6 +41,7 @@ import "./palette.css";
 import { startV3App } from "../../v3/app/main.js";
 import { createFlatGround } from "./modularRoadFlatGround.js";
 import { createModularRoadClouds } from "./modularRoadClouds.js";
+import { createBirdFlock } from "./modularRoadBirds.js";
 import {
   Vehicle,
   FIXED_DT,
@@ -2318,6 +2319,39 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     syncCityCapsules(vehicleRef?.body?.pos ?? camera.position, knockedNow > 0);
   }
   app.addPreRenderHook?.(updateCity);
+
+  /* ── BIRDS ─────────────────────────────────────────────────────────────────
+   *
+   * One draw, no compute, and closed form in the vertex stage — see the header
+   * of modularRoadBirds.js for why this is not three.js's boids example, which
+   * runs 8192 birds each reading all 8192 others.
+   *
+   * Two things have to be fed every frame and both are easy to forget, because
+   * getting them wrong looks like nothing at all rather than like an error:
+   * the CLOCK, without which the flocks hang motionless in the sky; and the
+   * VIEWPORT, which sets the pixel floor that stops a distant bird from
+   * shrinking under a pixel and crawling. A resize with a stale viewport does
+   * not throw, it just starts the shimmer again.
+   */
+  let birds = createBirdFlock({
+    center: { x: 0, z: 0 },
+    groundY: 0,
+    params: {},
+  });
+  if (birds) scene.add(birds.mesh);
+  let _birdT = 0;
+  const _birdSize = new THREE.Vector2();
+  function updateBirds(dt) {
+    if (!birds) return;
+    _birdT += dt;
+    birds.setTime(_birdT);
+    renderer.getSize(_birdSize);
+    birds.setViewport(_birdSize.y, camera.fov ?? 60);
+    // They go to roost. The same night term the city reads, so the sky and the
+    // buildings under it never disagree about what time it is.
+    birds.setNight(cityNight());
+  }
+  app.addPreRenderHook?.(updateBirds);
 
   /*
    * ── CHECKPOINT RUSH ────────────────────────────────────────────────────────
