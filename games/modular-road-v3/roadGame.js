@@ -2123,10 +2123,21 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     syncCityCapsules(vehicleRef?.body?.pos ?? null, true);
   }
 
-  function syncCity() {
+  async function syncCity() {
     if (cityWanted) {
       const built = !city;
-      if (built) buildCity();
+      if (built) {
+        /*
+         * COVER FIRST, PAINTED, AND ONLY THEN BUILD. `buildCity()` is over two
+         * seconds of synchronous work — the layout, every instanced mesh, the
+         * collider's cell map, the signage — and a browser cannot paint while
+         * JavaScript is running. Putting an element in the DOM does not show
+         * it; completing a frame does.
+         */
+        showCover("Building city…");
+        await coverPainted();
+        buildCity();
+      }
       city.setEnabled(true);
       /*
        * A NEW CITY IS A HUNDRED NEW SHADERS, so warm them here rather than
@@ -8231,7 +8242,53 @@ ${e.message}`);
    * the same poses in a few ms because the pipelines are already cached, so
    * this deliberately does not try to detect "already warm".
    */
+  /**
+   * ── THE COVER, AND WHY IT IS SHARED ────────────────────────────────────────
+   *
+   * The warm-up used to make its own, which meant the cover could not exist
+   * before the warm-up started — and `buildCity()` runs BEFORE it. MEASURED:
+   * switching the city on froze the tab for 2231 ms with nothing on screen,
+   * and only then did the overlay appear. That is the "it freezes, THEN it
+   * shows the loader" the player sees, and no amount of yielding inside the
+   * warm-up can fix it, because the freeze happens before the warm-up exists.
+   *
+   * So the cover is owned here and whoever needs it first raises it. A second
+   * caller re-labels the one already up rather than stacking another.
+   */
+  let _cover = null;
+  function showCover(label) {
+    if (!_cover) {
+      _cover = document.createElement("div");
+      _cover.className = "road-warmup-cover";
+      document.body.appendChild(_cover);
+    }
+    _cover.textContent = label;
+    return _cover;
+  }
+  function hideCover() { _cover?.remove(); _cover = null; }
+  /**
+   * Wait until the cover has actually been PAINTED.
+   *
+   * Two frames, not one. `requestAnimationFrame` fires BEFORE that frame's
+   * style, layout and paint, so a single await resumes at the start of frame N
+   * — and if the caller then blocks, frame N never reaches the screen. The
+   * second rAF can only run once frame N has been through paint.
+   */
+  const coverPainted = () => new Promise((res) =>
+    requestAnimationFrame(() => requestAnimationFrame(res)));
+
   let warmingUp = false;
+  /**
+   * A warm-up asked for while one is already running.
+   *
+   * This used to be `if (warmingUp) return` and nothing else, which DROPS the
+   * request — and the request most likely to be dropped is the city's, because
+   * the boot warm-up is still running at exactly the moment a player reaches
+   * the dev panel and switches the city on. The city then compiles its whole
+   * pipeline set under the player, which is the failure the warm-up exists to
+   * prevent, arriving through the warm-up itself.
+   */
+  let warmQueued = null;
   /**
    * @param {object} [o]
    * @param {string} [o.label] what the cover says
@@ -8284,7 +8341,7 @@ ${e.message}`);
   const WARM_DRIVE_STEP_M = 45;
 
   async function warmUpTrackPipelines({ label = "Preparing track…" } = {}) {
-    if (warmingUp) return;
+    if (warmingUp) { warmQueued = { label }; return; }
     const pieces = builder.pieces ?? [];
     /*
      * A TRACK IS NOT THE ONLY THING WORTH WARMING.
@@ -8363,10 +8420,8 @@ ${e.message}`);
     // A CLONE, so the live chase camera is never touched — the engine's own
     // frame loop keeps rendering the real view underneath the cover.
     const warmCam = camera.clone();
-    const cover = document.createElement("div");
-    cover.className = "road-warmup-cover";
-    cover.textContent = label;
-    document.body.appendChild(cover);
+    // Re-labels the cover syncCity may already have raised, or raises one.
+    showCover(label);
     const _p = new THREE.Vector3();
     const _f = new THREE.Vector3();
     try {
@@ -8377,9 +8432,20 @@ ${e.message}`);
       // hold refs instead of the binding.
       carGroup = vehicleRef?.group ?? null;
       if (carGroup) { carWasVisible = carGroup.visible; carGroup.visible = true; }
-      // Yield once so the cover actually paints before the canvas starts
-      // flashing through the track behind it.
-      await new Promise((res) => requestAnimationFrame(() => res()));
+      /*
+       * TWO FRAMES, NOT ONE, AND THE COMMENT HERE USED TO BE WRONG.
+       *
+       * It said "yield once so the cover actually paints". One does not:
+       * `requestAnimationFrame` fires BEFORE that frame's style, layout and
+       * paint, so a single await resumes at the START of frame N — and the
+       * first `renderer.render` below then blocks for seconds, so frame N is
+       * never painted and the cover is never seen. MEASURED: the player got
+       * 2635 ms and 2281 ms of frozen tab with no overlay at all.
+       *
+       * The second rAF can only run once frame N has been through paint, so
+       * by the time this resumes the cover is genuinely on screen.
+       */
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
       // EVERY piece gets a pose, not a strided sample. Striding to 14 was tried
       // and measured: 6 pipelines still compiled mid-route, because a material
       // that appears on only one piece is invisible from every pose that skips
@@ -8643,8 +8709,15 @@ ${e.message}`);
        * was protecting against. The cover comes off first, and the tidying is
        * wrapped.
        */
-      cover.remove();
+      hideCover();
       warmingUp = false;
+      // Anything asked for while this one was running runs NOW, rather than
+      // being forgotten. Scheduled rather than awaited: this is a `finally`.
+      if (warmQueued) {
+        const next = warmQueued;
+        warmQueued = null;
+        setTimeout(() => { warmUpTrackPipelines(next).catch(() => {}); }, 0);
+      }
       try {
         if (forcedCityMeshes) { for (const [m, c] of forcedCityMeshes) m.count = c; }
         reflectionEnabled = reflectionWas;   // never leave the mirror off on a throw
