@@ -574,16 +574,33 @@ export async function startV3App(opts = {}) {
   // Terrain starts flat (createHeightmapTexture initializes all-zeros).
   // User can generate terrain manually via the Procedural panel.
 
-  // ── Human character + quadruped pawns ─────────────────────────────────────
+  /*
+   * ── HUMAN CHARACTER + QUADRUPED PAWNS, NOT LOADED YET ─────────────────────
+   *
+   * These are built here because play mode wants them by reference, but NOTHING
+   * IS FETCHED until play mode is actually entered. Every game on this engine
+   * constructs them, and most have no play mode: MEASURED on the racing game,
+   * a boot pulled UA1+UA2 (5.07 MB), the husky (1.47 MB), the fox (0.82 MB), a
+   * katana and a hat — 8.2 MB of characters it can never show, on every load,
+   * over the network on a deployment.
+   *
+   * Safe to defer because all three loads were ALWAYS asynchronous. Everything
+   * downstream already had to cope with a pawn whose model had not arrived
+   * yet; this only widens a window the code was written to tolerate.
+   */
   const character = createHumanCharacter(scene, renderer);
   const husky = new HuskyOnFoot({
     scene,
     loader: getSharedGltfLoader(),
     modelUrl: "/models/Husky_compressed.glb",
   });
-  husky.load();
   const fox = new FoxOnFoot({ scene, loader: getSharedGltfLoader() });
-  fox.load();
+  /** Pull the play-mode cast in. Idempotent — each one guards itself. */
+  function loadPlayCast() {
+    character.load?.();
+    husky.load();
+    fox.load();
+  }
 
   // Player BVH — merged CliffBvh bake (prop box proxies / live props) plus the
   // instanced SolidCollider (cliffs, real triangles, no rebake on edits),
@@ -702,6 +719,9 @@ export async function startV3App(opts = {}) {
     character,
     husky,
     fox,
+    // Called by playMode.enter(), which is the ONE gate every route
+    // into play mode passes through.
+    loadPlayCast,
     getCollider: () => onFootCollider,
     getCliffBvh: () => worldCollider,
     getTreeBvh: () => treeBvh,
@@ -3386,11 +3406,32 @@ export async function startV3App(opts = {}) {
     }
   }
 
-  // Preload default PBR texture sets from /textures/pbr_materials/
-  textureLib.preloadDefaults().then(() => {
-    for (let i = 0; i < 7; i++) refreshLayerThumb(i);
-    syncTexlibEditor();
-  }).catch(err => console.warn("Default texture preload failed:", err));
+  /*
+   * ── THE DEFAULT PAINT LIBRARY, AND WHY A GAME MUST NOT PRELOAD IT ─────────
+   *
+   * Seven PBR sets, four maps each, `Promise.all`, on every boot. MEASURED on
+   * the racing game: 104 MB across 44 files — 88% of everything that game
+   * downloads — and it does not have a paint panel to show them in. On a
+   * deployment that is most of a minute before anything appears.
+   *
+   * It is also largely redundant for a game: a .v3proj carries its OWN
+   * paintLayers, which is what the terrain actually renders with. These are
+   * the EDITOR's starting palette, and the editor is where they belong.
+   *
+   * `loadPaintDefaults` stays available so a game that later switches terrain
+   * on can pull them in THEN, where the cost belongs to the thing that needs
+   * it and a loading screen is expected.
+   */
+  let _paintDefaults = null;
+  function loadPaintDefaults() {
+    if (_paintDefaults) return _paintDefaults;
+    _paintDefaults = textureLib.preloadDefaults().then(() => {
+      for (let i = 0; i < 7; i++) refreshLayerThumb(i);
+      syncTexlibEditor();
+    }).catch(err => console.warn("Default texture preload failed:", err));
+    return _paintDefaults;
+  }
+  if (opts.preloadPaintTextures !== false) loadPaintDefaults();
 
   // Brush sliders
   pslRadius.addEventListener("input", () => {
@@ -6767,6 +6808,10 @@ export async function startV3App(opts = {}) {
   // caller; a game (games/rts-v3/…) imports this same boot, gets this handle,
   // loads its own .v3proj through loadProjectFromUrl, and builds gameplay on top.
   return {
+    /** Pull in the editor's default PBR palette. A game that boots with
+     *  `preloadPaintTextures: false` calls this when terrain first turns on,
+     *  so the 104 MB belongs to the mode that wants it. */
+    loadPaintDefaults,
     scene,
     camera,
     controls,

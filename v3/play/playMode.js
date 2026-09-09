@@ -46,6 +46,7 @@ export function createPlayMode({
   getSpawnPoint = () => null,
   onEnterMenu, onStartWalking, onExit,
   onModeChange,
+  loadPlayCast,
   onRequestImmersive,
 }) {
   let active  = false;
@@ -732,6 +733,13 @@ export function createPlayMode({
 
   function enter(opts = {}) {
     if (active) return;
+    /*
+     * THE CAST IS FETCHED HERE, and this is the one gate every route into play
+     * mode passes through — which is why it is here rather than at any of the
+     * three places that call `onStartWalking`. Idempotent, so entering play
+     * mode a second time costs nothing.
+     */
+    loadPlayCast?.();
     active = true;
     walking = false;
     moveMode = "char";

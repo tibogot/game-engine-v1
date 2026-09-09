@@ -287,6 +287,19 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // WebGPU's 16-sampler ceiling. Project-dependent features (snow, lakebed,
     // groundProc, autoPaint...) stay ON: the .v3proj decides those.
     terrainFeatures: { cursor: false },
+    /*
+     * AND NO DEFAULT PAINT PALETTE. Same reasoning as `cursor`, but this one
+     * is not dead code, it is 104 MB: seven PBR sets at four maps each, on
+     * every boot, for a paint panel this game does not have. MEASURED as 88%
+     * of everything the racing game downloads — most of a minute on a
+     * deployment before anything appears.
+     *
+     * A .v3proj carries its own paintLayers, which is what terrain actually
+     * renders with; these are the editor's starting palette. Pulled in below
+     * the moment terrain is switched on, so the cost belongs to the mode that
+     * wants it.
+     */
+    preloadPaintTextures: false,
     splatFeatures:   { solo: false },
     /**
      * TWO SHADOW CASCADES, NOT THREE.
@@ -5893,6 +5906,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     const next = !!on;
     if (next === terrainOn) return;
     terrainOn = next;
+    // The palette this game did not preload. Idempotent, and only ever paid
+    // by a session that actually turns terrain on.
+    if (terrainOn) app.loadPaintDefaults?.();
     app.terrain?.setVisible(terrainOn);
     // The kill-floor RULE changed (world-absolute vs track-relative), so the
     // cached value is stale even though the track itself never moved.

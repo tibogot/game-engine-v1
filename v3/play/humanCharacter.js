@@ -60,7 +60,26 @@ export function createHumanCharacter(scene, renderer) {
     return found;
   }
 
-  // ── Load main character model ───────────────────────────────────────────────
+  /*
+   * ── LOADED ON DEMAND, NOT ON CONSTRUCTION ─────────────────────────────────
+   *
+   * This used to fetch as soon as the character was created, and every game
+   * built on the v3 app creates one whether or not it has a play mode. The
+   * racing game was downloading 5 MB of soldier, a katana and a hat on every
+   * boot for a character it can never show.
+   *
+   * Deferring it is safe because the fetch was ALWAYS asynchronous: everything
+   * here already has to work before the model arrives — that is what `loaded`
+   * is for — and this only widens a window the code was written to tolerate.
+   */
+  let loadStarted = false;
+  function load() {
+    if (loadStarted) return;
+    loadStarted = true;
+    loadModel();
+  }
+
+  function loadModel() {
   loader.load(MODEL_PATH, (gltf) => {
     const model = gltf.scene;
     model.traverse(o => {
@@ -267,6 +286,7 @@ export function createHumanCharacter(scene, renderer) {
   }, undefined, err => {
     console.warn("[HumanChar] Failed to load character model:", err);
   });
+  }
 
   // ── Animation helper ────────────────────────────────────────────────────────
   function setAction(next, fade = FADE_TIME) {
@@ -361,6 +381,9 @@ export function createHumanCharacter(scene, renderer) {
 
   // ── Public API ──────────────────────────────────────────────────────────────
   return {
+    /** Start fetching the model. Called when play mode is first entered, so a
+     *  game with no play mode never pays for a character it cannot show. */
+    load,
     get loaded() { return loaded; },
     get rolling() { return rolling; },
     get slidePhase() { return slidePhase; },
