@@ -265,6 +265,54 @@ console.log("\n── CORRIDOR STABILITY ──");
   for (const cty of [overhead, atGrade, base]) cty.dispose?.();
   void CORRIDOR_X;
 
+  /*
+   * ── PLAZAS ARE WHOLE BLOCKS ─────────────────────────────────────────────
+   *
+   * The point of a plaza is that it is the entire block. A roll at the same
+   * rate applied per LOT would give scattered holes inside blocks, which
+   * reads as a bug rather than as a square — and the two are indistinguish-
+   * able from a building count alone, so counting is not enough. This checks
+   * the shape: every block the layout emptied must be empty in ALL of its
+   * lots, and blocks that were not emptied must still be built.
+   */
+  {
+    const P0 = CITY_DEFAULTS;
+    const pitch = P0.blockLots + P0.streetLots;
+    const withPlazas = createModularRoadCity({ seed: 20260902, avoid: () => Infinity });
+    const noPlazas = createModularRoadCity({
+      seed: 20260902, avoid: () => Infinity, params: { plazas: false },
+    });
+    check("plazas actually appear", withPlazas.stats.plazas > 0,
+      `${withPlazas.stats.plazas} squares, ${withPlazas.stats.culledPlaza} lots`);
+    check("a plaza costs LESS than the block it replaces",
+      withPlazas.stats.buildings < noPlazas.stats.buildings,
+      `${noPlazas.stats.buildings} without, ${withPlazas.stats.buildings} with`);
+
+    // Which blocks lost lots, and did they lose ALL of them?
+    const blockOf = (b) => `${Math.floor(b.cx / pitch)},${Math.floor(b.cz / pitch)}`;
+    const before = new Map();
+    for (const b of noPlazas.buildings) {
+      const k = blockOf(b);
+      before.set(k, (before.get(k) || 0) + 1);
+    }
+    const after = new Map();
+    for (const b of withPlazas.buildings) {
+      const k = blockOf(b);
+      after.set(k, (after.get(k) || 0) + 1);
+    }
+    let partial = 0, emptied = 0;
+    for (const [k, n] of before) {
+      const now = after.get(k) || 0;
+      if (now === n) continue;
+      if (now === 0) emptied++;
+      else partial++;                      // a hole in a block, not a square
+    }
+    check("every plaza empties its whole block, never part of one",
+      partial === 0 && emptied > 0, `${emptied} blocks emptied, ${partial} left half-built`);
+    withPlazas.dispose?.();
+    noPlazas.dispose?.();
+  }
+
   // Density is per lot too: lowering it must be a strict subset.
   const sparse = createModularRoadCity({ seed: 20260902, avoid, params: { density: 0.5 } });
   let notSubset = 0;

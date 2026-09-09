@@ -307,6 +307,16 @@ export const FACADE_DEFAULTS = {
    *  metres wide whatever the windows above are doing, and shops that line
    *  up with the windows above them are the tell of a generated frontage. */
   shopfronts: 1,
+  /** How many eligible buildings get a parade at all. NOT most of them: a
+   *  shopfront on every frontage in the city is wallpaper, not a street. */
+  shopBuildings: 0.42,
+  /** Above this a frontage belongs to whatever occupies the tower, not to
+   *  the street — so shops stay a low-building thing. */
+  shopMaxHeight: 52,
+  /** A curtain-wall tower gets a LOBBY instead: glazed nearly to the soffit,
+   *  no stallriser, no fascia, no awning, and a much wider mullion. */
+  lobbySill: 0.20,
+  lobbyMull: 2.4,
   shopHeight: 4.3,
   shopUnit: 6.2,
   shopPier: 0.55,
@@ -1314,10 +1324,40 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
        * glazing onto the face of that recess would be two different ideas
        * about the same four metres fighting each other.
        */
-      const shopOn = u.shopfronts
-        .mul(float(1.0).sub(float(F.isIndustrial)))
-        .mul(select(F.hasBase, float(0.0), float(1.0)))
+      /*
+       * WHO GETS ONE, and the honest answer is "not most of them". The first
+       * cut put a parade of shops on every building that was not industrial
+       * and had no colonnade, which is nearly all of them — and a shopfront
+       * on every frontage in the city is wallpaper, not a street. It also put
+       * shops on the base of three-hundred-metre glass towers, which is the
+       * one place they certainly do not go.
+       *
+       * Three rules, and each removes a different wrong thing:
+       *   • A TOWER GETS A LOBBY. Curtain wall is a tall-building technology;
+       *     its ground floor is a tall glazed entrance hall, not six shops.
+       *     Same masks, no stallriser, no fascia, no awning, a wider mullion.
+       *   • SHOPS ARE A LOW-BUILDING THING. Above `shopMaxHeight` a frontage
+       *     belongs to whatever occupies the tower, not to the street.
+       *   • AND THEN ONLY SOME OF THEM. `shopBuildings` is what turns a
+       *     continuous parade into a street where some frontages are shops
+       *     and the rest are plain wall — which is what a real one looks like.
+       *
+       * The roll is its OWN hash rather than one of h1..h6: `h6` already
+       * drives the wall tint, and reusing it would have made every shop
+       * frontage the same brightness as its own wall for no reason anyone
+       * could ever have explained.
+       */
+      const shopRoll = hash31(vec3(F.lot, float(7.77))).toVar();
+      const notInd = float(1.0).sub(float(F.isIndustrial));
+      const notBase = select(F.hasBase, float(0.0), float(1.0));
+      const lobbyOn = u.shopfronts.mul(float(F.isCurtain)).mul(notInd).mul(notBase).toVar();
+      const paradeOn = u.shopfronts
+        .mul(notInd).mul(notBase)
+        .mul(float(1.0).sub(float(F.isCurtain)))
+        .mul(step(F.bldgH, u.shopMaxHeight))
+        .mul(step(shopRoll, u.shopBuildings))
         .toVar();
+      const shopOn = max(paradeOn, lobbyOn).toVar();
       const shopH = u.shopHeight;
       const si = floor(F.u0.div(u.shopUnit)).toVar();
       // Metres across THIS shop, so every width below is in metres and the
@@ -1333,18 +1373,22 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
         smoothstep(0.55, 0.18, abs(shue.sub(0.74))).mul(0.70).add(0.14),
       ), 0.72).toVar();
 
-      const fasciaLo = shopH.sub(u.shopFascia);
+      // A lobby is glazed nearly to the soffit and has no sign band; a shop
+      // stops under its fascia. `lobbyOn` is 0 or 1, so these are a switch.
+      const fasciaLo = mix(shopH.sub(u.shopFascia), shopH.sub(0.12), lobbyOn).toVar();
+      const glassLo = mix(u.shopStall, u.lobbySill, lobbyOn).toVar();
+      const mullPitch = mix(u.shopMull, u.lobbyMull, lobbyOn).toVar();
       const awnLo = fasciaLo.sub(u.shopAwningH);
       // The pier between shops keeps the building's own stone; everything
       // between two piers is frontage.
       const glazedX = band(sx, u.shopPier, u.shopUnit.sub(u.shopPier.mul(0.35)), F.aaU).toVar();
-      const stallY = band(F.up, float(0.0), u.shopStall, F.aaV);
-      const glassY = band(F.up, u.shopStall, fasciaLo, F.aaV);
+      const stallY = band(F.up, float(0.0), glassLo, F.aaV);
+      const glassY = band(F.up, glassLo, fasciaLo, F.aaV);
       const fasciaY = band(F.up, fasciaLo, shopH, F.aaV);
       // Mullions: the fine vertical rhythm that says "shop window" rather
       // than "hole in a wall".
-      const mv = fract(sx.sub(u.shopPier).div(u.shopMull));
-      const mull = band(mv, float(0.0), u.shopMullW.div(u.shopMull), F.aaU.div(u.shopMull));
+      const mv = fract(sx.sub(u.shopPier).div(mullPitch));
+      const mull = band(mv, float(0.0), u.shopMullW.div(mullPitch), F.aaU.div(mullPitch));
 
       const glazed = glazedX.mul(glassY).toVar();
       const glass = glazed.mul(float(1.0).sub(mull)).toVar();
@@ -1355,15 +1399,18 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
       // geometry — at the distance a frontage is actually read, a striped
       // band under the sign IS an awning.
       const awnY = band(F.up, awnLo, fasciaLo, F.aaV);
-      const awnM = glazedX.mul(awnY).mul(step(fract(sh.mul(53.1)), u.shopAwning)).toVar();
+      const awnM = glazedX.mul(awnY).mul(step(fract(sh.mul(53.1)), u.shopAwning)).mul(paradeOn).toVar();
       const stripe = step(float(0.5), fract(sx.div(u.shopStripe)));
       const awnCol = mix(shopCol.mul(0.85), vec3(0.88, 0.88, 0.85), stripe);
 
       oCol.assign(mix(oCol, vec3(0.040, 0.045, 0.052), glass.mul(shopOn)));
       oCol.assign(mix(oCol, vec3(0.075, 0.078, 0.082), mullM.mul(shopOn)));
-      oCol.assign(mix(oCol, shopCol.mul(0.42), stallM.mul(shopOn)));
-      oCol.assign(mix(oCol, shopCol, fasciaM.mul(shopOn)));
-      oCol.assign(mix(oCol, awnCol, awnM.mul(shopOn)));
+      // The painted parts are the PARADE's alone. A lobby is glass, metal and
+      // stone; giving it a coloured fascia was most of what made the towers
+      // look wrong.
+      oCol.assign(mix(oCol, shopCol.mul(0.42), stallM.mul(paradeOn)));
+      oCol.assign(mix(oCol, shopCol, fasciaM.mul(paradeOn)));
+      oCol.assign(mix(oCol, awnCol, awnM.mul(paradeOn)));
       oRough.assign(mix(oRough, float(0.14), glass.mul(shopOn)));
       /*
        * AND THE LIGHT INSIDE. A shop window at night is not a dark pane with
@@ -1375,7 +1422,9 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
        * The awning hangs in front of the glass, so it takes the light back
        * out again.
        */
-      const litShop = step(sh, u.shopLitFraction);
+      // A lobby is always lit — that is rather the point of a lobby — while a
+      // parade has some shops shut.
+      const litShop = max(step(sh, u.shopLitFraction).mul(paradeOn), lobbyOn);
       oEmis.assign(oEmis.add(vec3(1.0, 0.86, 0.66).mul(
         glass.mul(float(1.0).sub(awnM)).mul(litShop).mul(shopOn)
           .mul(u.nightAmount).mul(u.shopGlow))));

@@ -134,6 +134,13 @@ export const CITY_DEFAULTS = {
   /** Keep-out corridor half-width around whatever `avoid` describes, metres. */
   avoidRadius: 40,
 
+  /** PLAZAS. Whole blocks left unbuilt, rolled per block — a square rather
+   *  than a gap. `plazaMaxR` keeps them off the fringe, where an empty block
+   *  is a field rather than a place. Cheaper than the block they replace. */
+  plazas: true,
+  plazaChance: 0.05,
+  plazaMaxR: 0.62,
+
   /** World half-size the city may occupy (the terrain's edge). */
   bounds: Infinity,
   boundsMargin: 80,
@@ -339,7 +346,7 @@ export function createModularRoadCity({
   const stats = {
     buildings: 0, lod: [0, 0, 0], meshes: 0, kit: kit.stats,
     lastLodMs: 0, lastBuildMs: 0,
-    culledCorridor: 0, culledSlope: 0, culledBounds: 0,
+    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, plazas: 0,
     lotTexCells: [0, 0], landmarks: 0, beacons: 0,
     signs: { banners: 0, screens: 0, bands: 0 },
     districts: [0, 0, 0],
@@ -353,6 +360,17 @@ export function createModularRoadCity({
   /** A single deterministic draw for (lot, purpose k) — the signs use it. */
   function lotRand(cx, cz, k) {
     const h = (seed ^ Math.imul(cx | 0, 0x27d4eb2d) ^ Math.imul(cz | 0, 0x165667b1) ^ Math.imul(k | 0, 0x85ebca6b)) >>> 0;
+    return mulberry32(h)();
+  }
+  /**
+   * A single draw for (BLOCK, purpose k). Blocks, not lots, because a plaza is
+   * a whole city block and rolling it per lot would give holes in a block
+   * rather than a square. Keyed the same way as `lotRand`, so it inherits the
+   * property everything here depends on: the answer for one block cannot be
+   * changed by anything that happens in another.
+   */
+  function blockRand(bx, bz, k) {
+    const h = (seed ^ Math.imul(bx | 0, 0x2545f491) ^ Math.imul(bz | 0, 0x9e3779b1) ^ Math.imul(k | 0, 0xc2b2ae35)) >>> 0;
     return mulberry32(h)();
   }
   const pmod = (a, n) => ((a % n) + n) % n;
@@ -388,7 +406,7 @@ export function createModularRoadCity({
     // Landmarks sort to the end of the kit; the ordinary pick excludes them.
     const normalCount = kit.archetypes.length - (kit.stats.landmarks ?? 0);
 
-    let culledCorridor = 0, culledSlope = 0, culledBounds = 0;
+    let culledCorridor = 0, culledSlope = 0, culledBounds = 0, culledPlaza = 0;
     const districts = [0, 0, 0];
     const types = [0, 0, 0];
     const foot = L * 0.42;
@@ -418,6 +436,39 @@ export function createModularRoadCity({
         const rType = rnd();
 
         if (rDensity > P.density) continue;
+        /*
+         * ── A PLAZA: ONE WHOLE BLOCK LEFT UNBUILT ────────────────────────
+         *
+         * Every block in this city is the same size, which is most of why a
+         * grid reads as generated rather than as a place. One square breaks
+         * that for almost nothing — and it costs LESS than the block it
+         * replaces, because the buildings simply are not built.
+         *
+         * It needs no paving of its own: the street shader already draws the
+         * walk surface across a whole block and only stops for a building, so
+         * an empty block comes out as a paved square for free.
+         *
+         * ROLLED PER BLOCK, NOT PER LOT. A per-lot roll at the same rate
+         * gives scattered holes in a block, which reads as a bug; the point
+         * of a plaza is that it is the whole block.
+         *
+         * And not out on the fringe, where an empty block is just a field —
+         * measured from the BLOCK'S centre, not this lot's. Testing the lot's
+         * own radius let a plaza that straddles the limit empty the lots
+         * inside it and keep the ones outside, which is precisely the ragged
+         * half-block this whole decision exists to avoid.
+         */
+        if (P.plazas) {
+          const bx = Math.floor((cx - originCellX) / pitch);
+          const bz = Math.floor((cz - originCellZ) / pitch);
+          const bcx = (originCellX + bx * pitch + (P.blockLots - 1) * 0.5 + 0.5) * L - P.centerX;
+          const bcz = (originCellZ + bz * pitch + (P.blockLots - 1) * 0.5 + 0.5) * L - P.centerZ;
+          if (Math.hypot(bcx, bcz) < extent * P.plazaMaxR
+            && blockRand(bx, bz, 31) < P.plazaChance) {
+            culledPlaza++;
+            continue;
+          }
+        }
 
         let baseY = P.groundY;
         if (heightAt) {
@@ -523,6 +574,9 @@ export function createModularRoadCity({
     stats.culledCorridor = culledCorridor;
     stats.culledSlope = culledSlope;
     stats.culledBounds = culledBounds;
+    stats.culledPlaza = culledPlaza;
+    // Lots, not squares: blockLots^2 lots make one plaza.
+    stats.plazas = Math.round(culledPlaza / (P.blockLots * P.blockLots));
     stats.districts = districts;
     stats.types = types;
     return out;
