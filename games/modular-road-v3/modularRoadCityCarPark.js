@@ -83,17 +83,19 @@ export function bayLayout(P, blockW) {
 /**
  * Which squares become car parks, and where every car in them stands.
  *
- * `skip` is the plaza something else has already taken — the prism stands in
- * one, and parking a hundred cars around it would be two ideas about the same
- * square.
+ * `skip` is every plaza something else has already taken — the prism stands in
+ * one and the parks take others, and parking a hundred cars around either
+ * would be two ideas about the same square. A LIST rather than one square,
+ * because the number of things competing for a plaza only ever goes up.
  */
-export function planCarParks({ plazas = [], blockW, rand, skip = null, params = {} } = {}) {
+export function planCarParks({ plazas = [], blockW, rand, skip = [], params = {} } = {}) {
   const P = { ...CARPARK_DEFAULTS, ...params };
   if (!P.carParks || !plazas.length) return [];
+  const taken = new Set((Array.isArray(skip) ? skip : [skip]).filter(Boolean).map((t) => `${t.bx},${t.bz}`));
   const L = bayLayout(P, blockW);
   const parks = [];
   for (const pz of plazas) {
-    if (skip && pz.bx === skip.bx && pz.bz === skip.bz) continue;
+    if (taken.has(`${pz.bx},${pz.bz}`)) continue;
     if (rand(pz.bx, pz.bz, 57) >= P.carParkChance) continue;
     const bays = [];
     for (let r = 0; r < L.rows; r++) {

@@ -28,11 +28,14 @@ import {
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { installCityPresetTrees } from "./modularRoadCityTreePreset.js";
-import { buildClutterKit, placeStreetClutter, CLUTTER_DEFAULTS } from "./modularRoadCityClutter.js";
+import {
+  buildClutterKit, placeStreetClutter, CLUTTER_DEFAULTS, paint as clutterPaint,
+} from "./modularRoadCityClutter.js";
 // The stop line is the STREET's number, not a second copy of it: a car that
 // pulls up a metre past its own painted line is the one error in this whole
 // model anybody would notice.
 import { STREET_DEFAULTS } from "./modularRoadCityStreets.js";
+import { buildBenchGeometry } from "./modularRoadCityPark.js";
 import {
   ROAD_SIGN_DEFAULTS, SIGN, MIDBLOCK_SIGNS, makeRoadSignAtlas,
   buildRoadSignGeometry, makeRoadSignMaterial, loadRoadSignFolder,
@@ -526,7 +529,7 @@ export function signalGo(time, phase, F) {
   return t < F.signalGreenEnd;
 }
 
-export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [] }) {
+export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [], parkTrees = [] }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
   group.name = "CityFurniture";
@@ -700,6 +703,10 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const carGeos = CAR_BODIES.map(buildCarBody);
   const carGeo = carGeos[0];            // the saloon still stands for "a car"
   const { coneGeo, barrierGeo, binGeo, palletGeo, jerseyGeo, plateGeo } = buildClutterKit();
+  // The bench lives with the park but is BUILT here, on the clutter's own
+  // helpers, so it lands on the shared clutter material like everything else
+  // standing on a pavement.
+  const benchGeo = buildBenchGeometry(clutterPaint, box);
   const signAtlas = makeRoadSignAtlas(F);
   const signGeo = buildRoadSignGeometry(F);
   const gantryAtlas = makeGantryAtlas({ ...F, rows: F.gantryRows });
@@ -794,7 +801,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   // ── Placement ──────────────────────────────────────────────────────────────
   const cars = [], trees = [], lights = [], rails = [];
   const cones = [], barriers = [], bins = [], pallets = [], roadSigns = [], gantries = [],
-    vents = [], blocks = [], plates = [];
+    vents = [], blocks = [], plates = [], benches = [];
   const clutterInto = { cones, barriers, bins, pallets, signs: roadSigns, blocks, plates };
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
   const UP = new THREE.Vector3(0, 1, 0);
@@ -1180,6 +1187,22 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       });
     }
   }
+  /*
+   * THE PARKS' TREES AND BENCHES.
+   *
+   * The trees go into the SAME list the street trees use, which is the whole
+   * reason this is here rather than in the park module: they become extra
+   * instances of the two tree meshes the city already draws, so two hundred
+   * more trees is two hundred more matrices and not one more draw.
+   */
+  for (const pk of parkTrees) {
+    for (const t of pk.trees) {
+      const green = new THREE.Color().setHSL(0.27 + (h2(Math.round(t.x), Math.round(t.z), 41) - 0.5) * 0.06,
+        0.38, 0.17 + h2(Math.round(t.z), Math.round(t.x), 42) * 0.08);
+      place(trees, t.x, t.z, t.yaw, { color: green.getHex(), scale: t.scale, clearance: Infinity });
+    }
+    for (const b of pk.benches) place(benches, b.x, b.z, b.yaw, {});
+  }
   const carsByBody = CAR_BODIES.map(() => []);
   for (const e of cars) carsByBody[e.body ?? 0].push(e);
   const carMeshes = carsByBody.map((list, i) =>
@@ -1271,6 +1294,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const blockMesh = instanced(blocks, jerseyGeo, clutterMat, "CityBlocks", { shadows: true });
   // A plate lies ON the road; it casts nothing and receives everything.
   const plateMesh = instanced(plates, plateGeo, clutterMat, "CityPlates", { shadows: false });
+  const benchMesh = instanced(benches, benchGeo, clutterMat, "CityBenches", { shadows: true });
   /*
    * THE MOVING FLEET, one mesh per body.
    *
@@ -1551,6 +1575,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // point of using it — and a plate is flat, so it goes early.
     { mesh: blockMesh, list: blocks, range: 300, casts: true },
     { mesh: plateMesh, list: plates, range: 160, casts: false },
+    { mesh: benchMesh, list: benches, range: 190, casts: true },
     // Signs read from further than clutter does — that is their job.
     // Signs read from FURTHER than clutter: their whole job is to be legible
     // before you arrive, and 260 m cut them off inside a single block run.
@@ -1643,7 +1668,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   return {
     /** Every placement, by kind — the obstacle table turns these into the
      *  capsules the car collides with (modularRoadCityObstacles.js). */
-    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns, gantries, vents, blocks, plates },
+    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns, gantries, vents, blocks, plates, benches },
     /** The rail mesh, so the knockables can redraw one that is in the air —
      *  `applyLod` only rewrites five times a second, which a thrown barrier
      *  cannot wait for. */
@@ -1673,7 +1698,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       cars: cars.length, carBodies: CAR_BODIES.map((b, i) => `${b.name}:${carsByBody[i].length}`).join(" "),
       trees: trees.length, lights: lights.length, rails: rails.length,
       traffic: traffic.length, lanes: lanes.length,
-      clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length, blocks: blocks.length, plates: plates.length },
+      clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length, blocks: blocks.length, plates: plates.length, benches: benches.length },
       roadSigns: roadSigns.length,
       gantries: gantries.length,
       vents: vents.length,
@@ -1697,9 +1722,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       // TreeStore, not here. This unplants them.
       if (presetTrees) { presetTrees.dispose(); presetTrees = null; }
       for (const m of [...carMeshes, ...trafficMeshes, trunkMesh, canopyMesh, lightMesh, railMesh,
-        coneMesh, barrierMesh, binMesh, palletMesh, blockMesh, plateMesh, signMesh, gantryMesh, ventMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
+        coneMesh, barrierMesh, binMesh, palletMesh, blockMesh, plateMesh, benchMesh, signMesh, gantryMesh, ventMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
       for (const g of [...carGeos, trunkGeo, canopyGeo, lightGeo, railGeo,
-        coneGeo, barrierGeo, binGeo, palletGeo, jerseyGeo, plateGeo, signGeo, gantryGeo, steamGeo]) g.dispose();
+        coneGeo, barrierGeo, binGeo, palletGeo, jerseyGeo, plateGeo, benchGeo, signGeo, gantryGeo, steamGeo]) g.dispose();
       for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat, clutterMat, signMat]) m.dispose();
       signAtlas.texture.dispose();
     },

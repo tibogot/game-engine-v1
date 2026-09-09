@@ -98,7 +98,7 @@ function box(w, h, d, x = 0, y = 0, z = 0) {
  * @param {number|((y:number,x:number,z:number)=>number)} paint hex, or a
  *        function of the vertex position returning one.
  */
-function paint(g, paintSpec) {
+export function paint(g, paintSpec) {
   const p = g.getAttribute("position");
   const arr = new Float32Array(p.count * 3);
   const c = new THREE.Color();

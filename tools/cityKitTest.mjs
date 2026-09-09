@@ -1290,6 +1290,60 @@ console.log("\n── LOOK PASS ──");
   }
 
   /*
+   * ── PARKS ────────────────────────────────────────────────────────────────
+   *
+   * The one thing that can really go wrong is a tree standing in the middle of
+   * a gravel path — it looks like an accident because it is one — and it
+   * happens the moment the shader and the planter each decide where the paths
+   * are. So the test asks `pathMask`, the same single description both of them
+   * read, rather than working the paths out again.
+   */
+  console.log("\n── PARKS ──");
+  {
+    const { pathMask, PARK_DEFAULTS } =
+      await import("../games/modular-road-v3/modularRoadCityPark.js");
+    const green = flatCity.stats.parkList || [];
+    check("some squares became parks", green.length > 0,
+      `${green.length} parks, ${green.reduce((a, p2) => a + p2.trees.length, 0)} trees`);
+    let pgMesh = null;
+    flatCity.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CityPark") pgMesh = o; });
+    check("all the grass is one draw",
+      !!pgMesh && pgMesh.instanceMatrix.count === green.length,
+      `${green.length} parks in ${pgMesh ? 1 : 0} mesh`);
+
+    const blockW = CITY_DEFAULTS.blockLots * CITY_DEFAULTS.lotSize;
+    let onPath = 0, treeTotal = 0, outside = 0;
+    for (const pk of green) {
+      for (const t of pk.trees) {
+        treeTotal++;
+        const px = t.x - pk.x, pz = t.z - pk.z;
+        if (Math.abs(px) > blockW * 0.5 || Math.abs(pz) > blockW * 0.5) { outside++; continue; }
+        if (pathMask(px, pz, PARK_DEFAULTS, blockW)) onPath++;
+      }
+    }
+    check("no tree stands in the middle of a path",
+      treeTotal > 0 && onPath === 0 && outside === 0,
+      `${onPath} of ${treeTotal} on gravel, ${outside} outside the block`);
+
+    /*
+     * AND NO SQUARE IS TWO THINGS AT ONCE. A park and a car park on the same
+     * block would be two ideas about the same ground, and the only symptom
+     * would be trees growing out of parked cars.
+     */
+    const parkKeys = new Set(green.map((p2) => `${p2.bx},${p2.bz}`));
+    const clash = (flatCity.stats.carParkList || []).filter((c2) => parkKeys.has(`${c2.bx},${c2.bz}`));
+    check("no square is both a park and a car park", clash.length === 0,
+      `${clash.length} squares claimed twice`);
+    // And the prism has its own square too.
+    const pStats2 = flatCity.stats.prism;
+    if (pStats2?.site === "plaza") {
+      const onPrism = green.filter((p2) => Math.hypot(p2.x - pStats2.x, p2.z - pStats2.z) < 1);
+      check("the prism's square is not also a park", onPrism.length === 0, `${onPrism.length}`);
+    }
+  }
+
+
+  /*
    * ── CAR PARKS ────────────────────────────────────────────────────────────
    *
    * The one thing that can really go wrong here is cars that do not line up
