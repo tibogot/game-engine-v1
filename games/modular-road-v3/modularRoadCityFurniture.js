@@ -699,7 +699,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
    */
   const carGeos = CAR_BODIES.map(buildCarBody);
   const carGeo = carGeos[0];            // the saloon still stands for "a car"
-  const { coneGeo, barrierGeo, binGeo, palletGeo } = buildClutterKit();
+  const { coneGeo, barrierGeo, binGeo, palletGeo, jerseyGeo, plateGeo } = buildClutterKit();
   const signAtlas = makeRoadSignAtlas(F);
   const signGeo = buildRoadSignGeometry(F);
   const gantryAtlas = makeGantryAtlas({ ...F, rows: F.gantryRows });
@@ -793,8 +793,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
 
   // ── Placement ──────────────────────────────────────────────────────────────
   const cars = [], trees = [], lights = [], rails = [];
-  const cones = [], barriers = [], bins = [], pallets = [], roadSigns = [], gantries = [], vents = [];
-  const clutterInto = { cones, barriers, bins, pallets, signs: roadSigns };
+  const cones = [], barriers = [], bins = [], pallets = [], roadSigns = [], gantries = [],
+    vents = [], blocks = [], plates = [];
+  const clutterInto = { cones, barriers, bins, pallets, signs: roadSigns, blocks, plates };
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
   const UP = new THREE.Vector3(0, 1, 0);
   const place = (list, x, z, yaw, extra) => {
@@ -1267,6 +1268,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const barrierMesh = instanced(barriers, barrierGeo, clutterMat, "CityBarriers", { shadows: true });
   const binMesh = instanced(bins, binGeo, clutterMat, "CityBins", { shadows: true });
   const palletMesh = instanced(pallets, palletGeo, clutterMat, "CityPallets", { shadows: false });
+  const blockMesh = instanced(blocks, jerseyGeo, clutterMat, "CityBlocks", { shadows: true });
+  // A plate lies ON the road; it casts nothing and receives everything.
+  const plateMesh = instanced(plates, plateGeo, clutterMat, "CityPlates", { shadows: false });
   /*
    * THE MOVING FLEET, one mesh per body.
    *
@@ -1514,6 +1518,18 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     { list: bins, mesh: binMesh, params: { hitImpulse: 0.62, hitLoft: 0.22, spinPerSpeed: 1.4, spinMax: 12, restitution: 0.2, friction: 3.4, hitRadius: 1.6 } },
     { list: pallets, mesh: palletMesh, params: { hitImpulse: 0.68, hitLoft: 0.20, spinPerSpeed: 1.6, spinMax: 13, restitution: 0.18, friction: 3.6, hitRadius: 1.7 } },
     { list: barriers, mesh: barrierMesh, params: { hitImpulse: 0.34, hitLoft: 0.07, spinPerSpeed: 0.7, spinMax: 5, restitution: 0.12, friction: 5.5, hitRadius: 2.0, minSpeed: 5.0 } },
+    /*
+     * CONCRETE. Barely moves, never leaves the ground, and needs a real hit
+     * before it moves at all — which is the entire difference between this and
+     * the plastic barrier above, and the reason both exist. A jersey that
+     * skitters like a cone teaches the player the wrong thing about a shape
+     * they will meet again at speed.
+     *
+     * The trench plate is NOT here on purpose: it lies over a hole in the road
+     * and is driven across. One that flew when clipped would be the most
+     * obviously wrong object in the city.
+     */
+    { list: blocks, mesh: blockMesh, params: { hitImpulse: 0.11, hitLoft: 0.0, spinPerSpeed: 0.22, spinMax: 2, restitution: 0.05, friction: 9.0, hitRadius: 2.4, minSpeed: 9.0 } },
   ];
   const kinds = [
     // One entry per body: each has its own mesh and its own sub-list, and the
@@ -1531,6 +1547,10 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     { mesh: barrierMesh, list: barriers, range: 240, casts: true },
     { mesh: binMesh, list: bins, range: 190, casts: true },
     { mesh: palletMesh, list: pallets, range: 170, casts: false },
+    // Concrete reads from further than a cone does — that is rather the
+    // point of using it — and a plate is flat, so it goes early.
+    { mesh: blockMesh, list: blocks, range: 300, casts: true },
+    { mesh: plateMesh, list: plates, range: 160, casts: false },
     // Signs read from further than clutter does — that is their job.
     // Signs read from FURTHER than clutter: their whole job is to be legible
     // before you arrive, and 260 m cut them off inside a single block run.
@@ -1623,7 +1643,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   return {
     /** Every placement, by kind — the obstacle table turns these into the
      *  capsules the car collides with (modularRoadCityObstacles.js). */
-    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns, gantries, vents },
+    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns, gantries, vents, blocks, plates },
     /** The rail mesh, so the knockables can redraw one that is in the air —
      *  `applyLod` only rewrites five times a second, which a thrown barrier
      *  cannot wait for. */
@@ -1653,7 +1673,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       cars: cars.length, carBodies: CAR_BODIES.map((b, i) => `${b.name}:${carsByBody[i].length}`).join(" "),
       trees: trees.length, lights: lights.length, rails: rails.length,
       traffic: traffic.length, lanes: lanes.length,
-      clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length },
+      clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length, blocks: blocks.length, plates: plates.length },
       roadSigns: roadSigns.length,
       gantries: gantries.length,
       vents: vents.length,
@@ -1677,9 +1697,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       // TreeStore, not here. This unplants them.
       if (presetTrees) { presetTrees.dispose(); presetTrees = null; }
       for (const m of [...carMeshes, ...trafficMeshes, trunkMesh, canopyMesh, lightMesh, railMesh,
-        coneMesh, barrierMesh, binMesh, palletMesh, signMesh, gantryMesh, ventMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
+        coneMesh, barrierMesh, binMesh, palletMesh, blockMesh, plateMesh, signMesh, gantryMesh, ventMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
       for (const g of [...carGeos, trunkGeo, canopyGeo, lightGeo, railGeo,
-        coneGeo, barrierGeo, binGeo, palletGeo, signGeo, gantryGeo, steamGeo]) g.dispose();
+        coneGeo, barrierGeo, binGeo, palletGeo, jerseyGeo, plateGeo, signGeo, gantryGeo, steamGeo]) g.dispose();
       for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat, clutterMat, signMat]) m.dispose();
       signAtlas.texture.dispose();
     },

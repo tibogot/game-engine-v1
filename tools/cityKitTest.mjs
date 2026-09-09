@@ -1002,8 +1002,17 @@ console.log("\n── LOOK PASS ──");
   // ── STREET CLUTTER ────────────────────────────────────────────────────────
   {
     const names = [];
-    c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Cones|Barriers|Bins|Pallets)$/.test(o.name)) names.push(o.name); });
-    check("clutter is four instanced meshes", names.length === 4, names.sort().join(","));
+    c.group.traverse((o) => {
+      if (o.isInstancedMesh && /^City(Cones|Barriers|Bins|Pallets|Blocks|Plates)$/.test(o.name)) names.push(o.name);
+    });
+    /*
+     * A KIND PER SHAPE, ALL ON ONE MATERIAL. The literal four became six the
+     * moment concrete arrived; what this is really guarding is that each new
+     * shape costs a draw and NOT a material, so the count is a bound rather
+     * than a number to keep bumping.
+     */
+    check("every clutter shape is its own instanced mesh", names.length >= 4 && names.length <= 8,
+      names.sort().join(","));
     // One material across all four: they differ by geometry, and four
     // materials would be four shader builds for a difference nobody sees.
     const mats = new Set();
@@ -1019,6 +1028,47 @@ console.log("\n── LOOK PASS ──");
     // and a knockable with no capsule needs no de-collision. See the module.
     const ob = c.stats.obstacles;
     const solidKinds = Object.keys(ob).filter((k) => /cone|barrier|bin|pallet|clutter/i.test(k));
+    /*
+     * ── ROAD BLOCKS ──────────────────────────────────────────────────────
+     *
+     * A line of jersey barriers exists to leave NO GAP — a gap between two of
+     * them is a gap you could drive into, which is the one thing the line is
+     * for. Placed end to end at `jerseyLen`, so the test measures the spacing
+     * of consecutive barriers in a run rather than trusting the loop.
+     */
+    const blocks = flatCity.furniture.lists.blocks || [];
+    check("concrete closures were built", blocks.length > 50, `${blocks.length} jersey barriers`);
+    {
+      const CD = (await import("../games/modular-road-v3/modularRoadCityClutter.js")).CLUTTER_DEFAULTS;
+      // Nearest neighbour for each barrier; within a run that is the next one
+      // along, and it must be about one barrier length away — never more.
+      let gapped = 0, runs = 0;
+      for (const b of blocks) {
+        let near = Infinity;
+        for (const o of blocks) {
+          if (o === b) continue;
+          const d = Math.hypot(o.x - b.x, o.z - b.z);
+          if (d < near) near = d;
+        }
+        if (!isFinite(near)) continue;
+        runs++;
+        if (near > CD.jerseyLen * 1.35) gapped++;
+      }
+      check("no gap you could drive through in a line of concrete",
+        runs > 0 && gapped === 0,
+        `${gapped} of ${runs} more than a barrier's length from their neighbour`);
+    }
+    /*
+     * AND THE TRENCH PLATE IS NOT KNOCKABLE. It lies over a hole in the road
+     * and is driven across; one that flew when clipped would be the most
+     * obviously wrong object in the city.
+     */
+    const knockNames = flatCity.furniture.knockableGroups.map((g) => g.mesh?.name);
+    check("the trench plate is not something you can knock over",
+      !knockNames.includes("CityPlates"), knockNames.join(", "));
+    check("but concrete is — it shoves rather than flies",
+      knockNames.includes("CityBlocks"), knockNames.join(", "));
+
     check("clutter is never solid", solidKinds.length === 0,
       solidKinds.length ? `in the table: ${solidKinds.join(",")}` : `${ob.total} capsules, none of them clutter`);
     check("the knockable pool is pointed at the clutter", !!c.stats.knockables,

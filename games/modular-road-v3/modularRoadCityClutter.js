@@ -60,6 +60,12 @@ export const CLUTTER_DEFAULTS = {
    *  at 2.4 m the run read as a dotted line from a moving car rather than as a
    *  barrier you must not cross. */
   conePitch: 1.8,
+  /** How many closures are held with concrete rather than cones — a lane shut
+   *  for a month instead of an afternoon. */
+  hardChance: 0.42,
+  /** A jersey barrier is 2.4 m; they are laid end to end, because a gap
+   *  between two of them is a gap you could drive into. */
+  jerseyLen: 2.42,
   /** How far into the road the closure reaches, metres from the kerb. A little
    *  over one lane, so the closed lane is genuinely shut. */
   worksWidth: 3.4,
@@ -152,10 +158,38 @@ export function buildClutterKit() {
   const palletGeo = mergeGeometries(palletParts, false);
   for (const g of palletParts) g.dispose();
 
-  for (const [n, g] of Object.entries({ coneGeo, barrierGeo, binGeo, palletGeo })) {
+  // ── JERSEY BARRIER ────────────────────────────────────────────────────────
+  //
+  // The heavy one, and the reason it is worth a separate kind from the plastic
+  // barrier above: concrete does not move. A water-filled barrier shifts when
+  // you hit it and a jersey shoves YOU, and the whole point of having both is
+  // that a driver learns which is which by their shape from a distance.
+  //
+  // The profile IS the shape — a wide foot, a sharp batter, a narrow top. Three
+  // stacked boxes read as that at any speed you will ever see one, and a real
+  // swept profile would cost vertices for a silhouette nobody gets close to.
+  const jerseyGeo = mergeGeometries([
+    paint(box(2.40, 0.16, 0.62, 0, 0.08), 0x9a988f),      // foot
+    paint(box(2.40, 0.26, 0.44, 0, 0.29), 0xa9a79d),      // batter
+    paint(box(2.40, 0.42, 0.26, 0, 0.63), 0xb4b2a8),      // upstand
+    // The reflective band every real one carries, low on the batter.
+    paint(box(2.42, 0.07, 0.455, 0, 0.30), 0xf0e9d0),
+  ], false);
+
+  // ── STEEL TRENCH PLATE ────────────────────────────────────────────────────
+  //
+  // Flat, and deliberately NOT knockable: a plate lies over a hole in the road
+  // and is driven across. One that flew when clipped would be the single most
+  // obviously wrong object in the city, so it never joins the knockable groups.
+  const plateGeo = mergeGeometries([
+    paint(box(2.60, 0.05, 2.00, 0, 0.025), 0x53565c),     // the plate
+    paint(box(2.66, 0.02, 2.06, 0, 0.006), 0xc8a12a),     // the yellow lip under it
+  ], false);
+
+  for (const [n, g] of Object.entries({ coneGeo, barrierGeo, binGeo, palletGeo, jerseyGeo, plateGeo })) {
     if (!g) throw new Error(`[CityClutter] merge returned null for ${n}`);
   }
-  return { coneGeo, barrierGeo, binGeo, palletGeo };
+  return { coneGeo, barrierGeo, binGeo, palletGeo, jerseyGeo, plateGeo };
 }
 
 /**
@@ -212,6 +246,17 @@ export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlon
       place(into.signs, sx, sz, yawAlong + (travel > 0 ? Math.PI : 0),
         { tile: C.worksSignTile, axis, travel });
     }
+    /*
+     * CONES OR CONCRETE, and the choice is what makes two closures look like
+     * different jobs rather than the same one twice. A cone taper is a lane
+     * shut for the afternoon; a jersey line is a lane shut for a month, and
+     * the run beside it gets a trench plate because something is dug up.
+     *
+     * The TAPER is always cones either way — you do not build a concrete
+     * taper, you feather the traffic in with cones and then hold it with the
+     * barriers.
+     */
+    const hard = rand(seed, 5, 83) < C.hardChance;
     const taperN = Math.max(2, Math.round(C.worksTaper / C.conePitch));
     for (let i = 0; i <= taperN; i++) {
       const t = i / taperN;
@@ -219,9 +264,23 @@ export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlon
       place(into.cones, x, z, rand(seed, i, 73) * 6.283, {});
     }
     const head = s0 + C.worksTaper;
-    for (let s = head + C.conePitch; s < head + C.worksRun; s += C.conePitch) {
-      const [x, z] = at(kerb - dir * C.worksWidth, s);
-      place(into.cones, x, z, rand(seed, Math.round(s), 74) * 6.283, {});
+    if (hard) {
+      // End to end down the shut lane, and end to end matters: a gap between
+      // two jersey barriers is a gap you could drive into, which is the one
+      // thing a line of them exists to prevent.
+      for (let s = head + C.jerseyLen * 0.5; s < head + C.worksRun; s += C.jerseyLen) {
+        const [x, z] = at(kerb - dir * C.worksWidth, s);
+        place(into.blocks, x, z, yawAlong, {});
+      }
+      if (into.plates) {
+        const [px, pz] = at(kerb - dir * (C.worksWidth - 1.6), head + C.worksRun * 0.45);
+        place(into.plates, px, pz, yawAlong, {});
+      }
+    } else {
+      for (let s = head + C.conePitch; s < head + C.worksRun; s += C.conePitch) {
+        const [x, z] = at(kerb - dir * C.worksWidth, s);
+        place(into.cones, x, z, rand(seed, Math.round(s), 74) * 6.283, {});
+      }
     }
     // The barrier closes the head of the run, ACROSS the shut lane.
     {
