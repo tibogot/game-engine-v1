@@ -123,7 +123,7 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   const city = createModularRoadCity({ params: { extent: 700 } });
   const meshes = [];
   city.group.traverse((o) => { if (o.isMesh && /Viaduct/.test(o.name)) meshes.push(o); });
-  check("the viaduct is three draws — deck, rail, piers", meshes.length === 3,
+  check("the viaduct is four draws — deck, rail, shafts, caps", meshes.length === 4,
     meshes.map((m) => m.name).join(", "));
   check("the city reports a viaduct", !!city.stats.viaduct, JSON.stringify(city.stats.viaduct));
 
@@ -153,7 +153,7 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   check("and the street traffic is still on the street", down > 10, `${down} at ground level`);
   check("nothing is drawn between the two", up + down === heights.length,
     `${heights.length - up - down} cars at neither height`);
-  check("the deck carries piers worth reporting", cityViaduct.piers > 5 && cityViaduct.draws === 3,
+  check("the deck carries piers worth reporting", cityViaduct.piers > 5 && cityViaduct.draws === 4,
     JSON.stringify(cityViaduct));
 
   /*
@@ -179,6 +179,91 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   for (const m of [...col.deck, ...col.solids]) {
     check(`${m.name} is bakeable`, !!m.geometry && !!m.matrixWorld);
   }
+  city.dispose();
+}
+
+// ── THE SLIP ROADS ──────────────────────────────────────────────────────────
+//
+// A ramp has to satisfy four things at once, and three of them are invisible
+// until you drive it: it must fit in the street, it must clear the deck it
+// left, it must not be steeper than a car can take, and it must arrive at
+// street level rather than a metre above or below it.
+{
+  const V = L.params;
+  check("there are ramps", (L.ramps ?? []).length >= 2, `${(L.ramps ?? []).length}`);
+
+  // FIT AND CLEARANCE, as the two inequalities rather than as the numbers that
+  // currently satisfy them. Widen the deck or the ramp and this is what fails.
+  check("a ramp clears the deck it diverges from",
+    V.rampOffset - V.rampWidth / 2 >= V.deckWidth / 2 - 1e-9,
+    `inner edge ${(V.rampOffset - V.rampWidth / 2).toFixed(2)} vs deck edge ${(V.deckWidth / 2).toFixed(2)}`);
+  check("and still fits inside the street",
+    V.rampOffset + V.rampWidth / 2 <= streetW / 2 + 1e-9,
+    `outer edge ${(V.rampOffset + V.rampWidth / 2).toFixed(2)} vs kerb ${(streetW / 2).toFixed(2)}`);
+
+  for (let r = 0; r < L.ramps.length; r++) {
+    const path = L.ramps[r].path;
+    // ARRIVES AT THE STREET. A ramp ending in the air is a jump; one ending
+    // below the street is a hole. Both draw perfectly.
+    const end = path[path.length - 1];
+    check(`ramp ${r} arrives at street level`, Math.abs(end.y - P.groundY) < 0.25,
+      `ends at ${end.y.toFixed(2)} m`);
+    check(`ramp ${r} starts on the deck`, Math.abs(path[0].y - L.deckY) < 0.1,
+      `starts at ${path[0].y.toFixed(2)} vs deck ${L.deckY.toFixed(2)}`);
+
+    // DRIVABLE. Measured as the real grade between stations, not as the
+    // average — the eased profile is deliberately steeper in the middle, and
+    // the average would hide exactly the part that matters.
+    let steepest = 0;
+    for (let i = 1; i < path.length; i++) {
+      const run = Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z);
+      if (run < 1e-6) continue;
+      steepest = Math.max(steepest, Math.abs(path[i].y - path[i - 1].y) / run);
+    }
+    check(`ramp ${r} is never steeper than 12%`, steepest < 0.12,
+      `steepest ${(steepest * 100).toFixed(1)}%`);
+
+    /*
+     * IT MUST NOT DESCEND WHILE IT IS STILL OVER THE DECK.
+     *
+     * This is the one that was actually wrong. The first version eased the
+     * lateral move and the descent over the same window, so around forty
+     * metres in the ramp surface was inside the main slab — a road that draws
+     * correctly and is a wall when you reach it. Diverge first, then descend.
+     */
+    const deckEdge = V.deckWidth / 2;
+    let worst = null;
+    for (const q of path) {
+      const lat = Math.abs((L.axis === "x" ? q.z : q.x) - L.across);
+      if (lat >= deckEdge) continue;                 // clear of the deck
+      const below = L.deckY - q.y;
+      if (below > 0.05 && (worst === null || below > worst)) worst = below;
+    }
+    check(`ramp ${r} is clear of the deck before it drops`, worst === null,
+      worst === null ? "never under it" : `${worst.toFixed(2)} m below the deck while still over it`);
+  }
+}
+
+// ── THE PIERS ARE SOLID ─────────────────────────────────────────────────────
+//
+// They were not, and nothing said so. `enabled()` in the obstacle table was a
+// POSITIONAL array indexed by KIND — five entries for six kinds — so every
+// pier was written into the table, counted in the stats, and then skipped by
+// the one line that decides what is solid. The structure drew, you could park
+// under it, and you could drive straight through the columns.
+{
+  const city = createModularRoadCity({ params: { extent: 700 } });
+  const full = viaductLayout({ P: { ...P, extent: 700 }, originCellX: 0, originCellZ: 0 });
+  const pier = full.piers.find((q) => Math.abs(q.top - full.deckBottom) < 1e-6);
+  const caps = city.obstacleCapsulesNear(pier.x, pier.z, 10);
+  const fat = caps.filter((c) => c.radius > 1.0);
+  check("a viaduct pier is a solid capsule", fat.length >= 1,
+    `${fat.length} fat of ${caps.length} capsules at (${pier.x}, ${pier.z})`);
+  check("and it reaches from the ground to the deck",
+    fat.length > 0 && fat[0].a.y < 2 && fat[0].b.y > full.deckBottom - 2.5,
+    fat.length ? `${fat[0].a.y.toFixed(1)} to ${fat[0].b.y.toFixed(1)} m` : "none");
+  check("the obstacle table counts them", city.stats.obstacles.piers > 5,
+    `${city.stats.obstacles.piers} piers`);
   city.dispose();
 }
 

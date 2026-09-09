@@ -110,6 +110,59 @@ export const VIADUCT_DEFAULTS = {
    */
   railPostSpacing: 7,
 
+  /**
+   * ── SLIP ROADS ─────────────────────────────────────────────────────────────
+   *
+   * Without them the motorway is scenery you can only reach by falling onto it.
+   *
+   * One per direction, each diverging to ITS OWN RIGHT — which puts them on
+   * opposite sides of the deck, exactly as a real pair would be, and means
+   * neither ever crosses the opposing carriageway.
+   *
+   * `rampLength` is the whole descent. 170 m for an 11.6 m drop is a 6.8%
+   * average, and because the profile is eased at both ends (a real road has a
+   * vertical curve at the crest and at the sag, and a car that meets a grade
+   * change as a corner gets thrown) the steepest point is about 10%.
+   */
+  ramps: true,
+  /** Where each ramp's TOP sits along the run, as a fraction of it. */
+  rampAt: [0.3, 0.7],
+  rampLength: 220,
+  /**
+   * THE RAMP'S OWN WIDTH AND OFFSET, and the two are locked together by the
+   * street, not chosen freely:
+   *
+   *   the ramp must clear the deck   offset - width/2 >= deckWidth/2
+   *   and stay inside the street     offset + width/2 <= streetWidth/2
+   *
+   * With a 34 m street and a 19 m deck that leaves exactly one usable pair —
+   * 7 m wide at 13 m out puts the ramp's inner edge flush with the deck's and
+   * its outer edge half a metre inside the kerb. A 9 m ramp does not fit at
+   * all, and the version that tried put its outer wheels over the pavement.
+   * viaductTest checks both inequalities rather than the numbers.
+   */
+  rampWidth: 7,
+  rampOffset: 13,
+  /**
+   * ── DIVERGE FIRST, THEN DESCEND ────────────────────────────────────────────
+   *
+   * These two windows do not overlap, and that is the whole geometry of the
+   * thing. A ramp that starts dropping while it is still over the deck drops
+   * INTO it — measured on the first attempt, the ramp surface ended up inside
+   * the main slab about forty metres along, which draws as a perfectly ordinary
+   * road right up until you drive it.
+   *
+   * So the lateral move finishes at `rampSplit` and the descent does not begin
+   * until `rampFall`. Until then the ramp runs flat, two centimetres above the
+   * deck it is leaving — the gore area of a real slip road, and the 2 cm is
+   * what stops the two coplanar surfaces fighting over it.
+   */
+  rampSplit: 0.22,
+  rampFall: 0.20,
+  /** Stations per ramp. Ramps bend in two axes at once, so they get their own
+   *  density rather than inheriting the straight's. */
+  rampSteps: 26,
+
   /** Traffic. A motorway is busier and faster than the streets under it. */
   viaductTraffic: true,
   viaductCars: 26,
@@ -184,30 +237,97 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
   }
 
   /*
-   * PIERS SKIP THE JUNCTIONS.
+   * ── THE SLIP ROADS ─────────────────────────────────────────────────────────
    *
-   * A pier on the centre line of a crossroads would sit exactly where cars
-   * turn, and the viaduct would be planting columns in the middle of every
-   * intersection it crosses. Real viaducts span their junctions instead, so
-   * this drops any pier landing in a junction band and lets the deck carry the
-   * longer span.
+   * Also just points. A ramp diverges sideways while it descends, which is two
+   * curves at once and would be fiddly as geometry — as a path it is two eased
+   * interpolations sampled together, and `computeFrames` turns the result into
+   * a properly banked, properly twisted road with no further help.
+   *
+   * `ease` is smoothstep, and it is doing real work in BOTH axes. Vertically it
+   * is the crest and sag curve every road has, because a car meeting an abrupt
+   * grade change meets it as a corner and gets thrown. Laterally it is the
+   * diverge, which has to start and end parallel or the ramp leaves the deck at
+   * an angle and rejoins the street at one.
+   */
+  const ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+  const ramps = [];
+  if (V.ramps) {
+    // It leaves from the deck's own outer edge, flush, so the gore is a lane
+    // widening rather than a road appearing beside another one.
+    const startOff = (V.deckWidth - V.rampWidth) / 2;
+    const topY = deckY + 0.02;
+    for (let r = 0; r < V.rampAt.length; r++) {
+      // Alternate direction, so there is one slip road for each carriageway.
+      const dir = r % 2 === 0 ? 1 : -1;
+      // RIGHT of the direction of travel: right of +x is +z, right of +z is -x.
+      const side = axis === "x" ? dir : -dir;
+      const a0 = alongMin + (alongMax - alongMin) * V.rampAt[r];
+      const rPath = [];
+      for (let i = 0; i <= V.rampSteps; i++) {
+        const t = i / V.rampSteps;
+        const a = a0 + dir * V.rampLength * t;
+        // A 2 cm lip at the bottom rather than exactly groundY: coplanar with
+        // the street plane is a z-fight across the whole ramp mouth, and 2 cm
+        // is far below anything the suspension notices.
+        const fall = ease((t - V.rampFall) / (1 - V.rampFall));
+        const y = topY - (topY - (P.groundY + 0.02)) * fall;
+        const off = across + side * (startOff
+          + (V.rampOffset - startOff) * ease(t / V.rampSplit));
+        rPath.push(axis === "x" ? new THREE.Vector3(a, y, off)
+          : new THREE.Vector3(off, y, a));
+      }
+      ramps.push({ path: rPath, dir, side });
+    }
+  }
+
+  /*
+   * ── PIERS ──────────────────────────────────────────────────────────────────
+   *
+   * Each carries its own top height, because the ramps descend and a column
+   * under one is shorter than a column under the deck. The shaft is instanced
+   * at unit height and scaled, so any height costs the same nothing.
+   *
+   * TWO PLACES A PIER MAY NOT STAND. A junction, because that is exactly where
+   * cars turn and a real viaduct spans what it cannot stand in. And anywhere
+   * the road above it is too low to be worth holding up — the bottom of a ramp
+   * is a road ON the ground, and a stub column under it is a bollard in the
+   * street.
    */
   const oAlong = axis === "x" ? ox : oz;
+  const inJunction = (along) => {
+    let f = (along - oAlong) % pitch;
+    if (f < 0) f += pitch;
+    return f >= blockW;
+  };
   const piers = [];
   const first = Math.ceil((alongMin - oAlong) / V.spanLength);
   const last = Math.floor((alongMax - oAlong) / V.spanLength);
   for (let i = first; i <= last; i++) {
     const a = oAlong + i * V.spanLength;
-    let f = (a - oAlong) % pitch;
-    if (f < 0) f += pitch;
-    if (f >= blockW) continue;                       // in a junction: span it
-    piers.push(axis === "x" ? { x: a, z: across } : { x: across, z: a });
+    if (inJunction(a)) continue;
+    piers.push(axis === "x" ? { x: a, z: across, top: deckBottom }
+      : { x: across, z: a, top: deckBottom });
+  }
+  const minPier = V.capHeight + 1.5;
+  for (const rm of ramps) {
+    let acc = 0;
+    for (let i = 1; i < rm.path.length; i++) {
+      const p0 = rm.path[i - 1], p1 = rm.path[i];
+      acc += p0.distanceTo(p1);
+      if (acc < V.spanLength) continue;
+      acc = 0;
+      const top = p1.y - V.deckThickness;
+      if (top - P.groundY < minPier) continue;
+      if (inJunction(axis === "x" ? p1.x : p1.z)) continue;
+      piers.push({ x: p1.x, z: p1.z, top });
+    }
   }
 
   return {
     axis, across, alongMin, alongMax,
     deckY, deckBottom, railTop,
-    path, laneAcross, piers, params: V,
+    path, ramps, laneAcross, piers, params: V,
   };
 }
 
@@ -257,8 +377,25 @@ export function createCityViaduct({
   // kerbs, same deck lines, same shader.
   const rp = { ...roadParams, width: V.deckWidth, thickness: V.deckThickness };
   const profile = buildProfile(rp, true);
-  const frames = computeFrames(layout.path);
-  const deckGeo = buildSweepGeometry(frames, profile);
+  const rampRp = { ...roadParams, width: V.rampWidth, thickness: V.deckThickness };
+  const rampProfile = buildProfile(rampRp, true);
+
+  /*
+   * ── ONE MESH FOR THE WHOLE INTERCHANGE ─────────────────────────────────────
+   *
+   * The main deck and every slip road are swept separately — they are different
+   * paths and different section widths — and then merged. They share a material,
+   * so merging costs nothing and saves a draw per ramp; and because the merged
+   * mesh IS the collision surface, it also means one BVH covering the deck and
+   * its ramps rather than three that have to agree at the joins.
+   */
+  const runs = [{ frames: computeFrames(layout.path), rp, profile }];
+  for (const rm of layout.ramps ?? []) {
+    runs.push({ frames: computeFrames(rm.path), rp: rampRp, profile: rampProfile });
+  }
+  const deckParts = runs.map((r) => buildSweepGeometry(r.frames, r.profile));
+  const deckGeo = deckParts.length === 1 ? deckParts[0] : mergeGeometries(deckParts, false);
+  if (deckParts.length > 1) for (const g of deckParts) g.dispose();
 
   let deckMat = roadMaterial;
   if (!deckMat) {
@@ -289,8 +426,22 @@ export function createCityViaduct({
   let rail = null;
   let railCollider = null;
   const railP = { ...railParams, postSpacing: V.railPostSpacing };
-  const railGeo = buildRailGeometry(frames, rp, railP);
-  const railColGeo = buildRailCollision(frames, rp, railP);
+  const railParts = [], railColParts = [];
+  for (const r of runs) {
+    const g = buildRailGeometry(r.frames, r.rp, railP);
+    if (g) railParts.push(g);
+    const c = buildRailCollision(r.frames, r.rp, railP);
+    if (c) railColParts.push(c);
+  }
+  const merge1 = (parts) => {
+    if (!parts.length) return null;
+    if (parts.length === 1) return parts[0];
+    const m = mergeGeometries(parts, false);
+    for (const g of parts) g.dispose();
+    return m;
+  };
+  const railGeo = merge1(railParts);
+  const railColGeo = merge1(railColParts);
   if (railGeo) {
     let rm = railMaterial;
     if (!rm) {
@@ -316,44 +467,68 @@ export function createCityViaduct({
     railCollider.updateMatrixWorld();
   }
 
-  // ── The piers: one instanced unit ──────────────────────────────────────────
+  /*
+   * ── THE PIERS ──────────────────────────────────────────────────────────────
+   *
+   * TWO instanced meshes, and the split is the whole reason ramps work. Every
+   * pier under the main deck is the same height; every pier under a ramp is a
+   * different one, because the ramp is descending. So the SHAFT is built at
+   * unit height and scaled per instance — the taper survives it untouched,
+   * being entirely in X and Z — while the CAP, which must not stretch, is its
+   * own mesh translated to whatever height its shaft reached.
+   *
+   * The alternative was one geometry per distinct height, which is a draw call
+   * per pier on a structure that has sixty of them.
+   */
   const { material: pierMat, uTop } = pierMaterial(V);
   owned.push(pierMat);
   uTop.value = layout.deckBottom;
-  let piers = null;
+  let shafts = null, caps = null;
+  const mk = (w, h, d, y, shade) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    g.translate(0, y, 0);
+    const n = g.attributes.position.count;
+    const c = new Float32Array(n * 3).fill(shade);
+    g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+    return g;
+  };
   if (layout.piers.length) {
-    const colH = layout.deckBottom - V.capHeight;
-    const pieces = [];
     // A tapered shaft as two stacked boxes rather than a lathe: the taper reads
     // at forty metres and beyond, and two boxes is 24 triangles against a
-    // cylinder's hundreds.
-    const lower = colH * 0.55;
-    const mk = (w, h, d, y, shade) => {
-      const g = new THREE.BoxGeometry(w, h, d);
-      g.translate(0, y, 0);
-      const n = g.attributes.position.count;
-      const c = new Float32Array(n * 3).fill(shade);
-      g.setAttribute("color", new THREE.BufferAttribute(c, 3));
-      return g;
-    };
-    pieces.push(mk(V.pierWidth, lower, V.pierDepth, lower * 0.5, 1.0));
+    // cylinder's hundreds. Built 1 m tall; the instance matrix does the rest.
+    const lowerF = 0.55;
+    const shaftParts = [mk(V.pierWidth, lowerF, V.pierDepth, lowerF * 0.5, 1.0)];
     const tw = V.pierWidth * V.pierTaper, td = V.pierDepth * V.pierTaper;
-    pieces.push(mk(tw, colH - lower, td, lower + (colH - lower) * 0.5, 1.0));
-    const [cw, cd] = layout.axis === "x" ? [V.capDepth, V.capWidth] : [V.capWidth, V.capDepth];
-    pieces.push(mk(cw, V.capHeight, cd, colH + V.capHeight * 0.5, 0.86));
-    const pierGeo = mergeGeometries(pieces, false);
-    for (const g of pieces) g.dispose();
+    shaftParts.push(mk(tw, 1 - lowerF, td, lowerF + (1 - lowerF) * 0.5, 1.0));
+    const shaftGeo = mergeGeometries(shaftParts, false);
+    for (const g of shaftParts) g.dispose();
 
-    piers = new THREE.InstancedMesh(pierGeo, pierMat, layout.piers.length);
-    piers.name = "CityViaductPiers";
-    piers.castShadow = castShadows;
-    piers.receiveShadow = true;
-    piers.frustumCulled = false;
+    const [cw, cd] = layout.axis === "x" ? [V.capDepth, V.capWidth] : [V.capWidth, V.capDepth];
+    const capGeo = mk(cw, V.capHeight, cd, V.capHeight * 0.5, 0.86);
+
+    shafts = new THREE.InstancedMesh(shaftGeo, pierMat, layout.piers.length);
+    shafts.name = "CityViaductPiers";
+    caps = new THREE.InstancedMesh(capGeo, pierMat, layout.piers.length);
+    caps.name = "CityViaductPierCaps";
     const m = new THREE.Matrix4();
-    layout.piers.forEach((p, i) => { m.makeTranslation(p.x, 0, p.z); piers.setMatrixAt(i, m); });
-    piers.instanceMatrix.needsUpdate = true;
-    group.add(piers);
+    layout.piers.forEach((p, i) => {
+      const colH = Math.max(0.5, p.top - V.capHeight);
+      m.makeScale(1, colH, 1);
+      m.setPosition(p.x, 0, p.z);
+      shafts.setMatrixAt(i, m);
+      m.identity();
+      m.setPosition(p.x, colH, p.z);
+      caps.setMatrixAt(i, m);
+    });
+    for (const im of [shafts, caps]) {
+      im.castShadow = castShadows;
+      im.receiveShadow = true;
+      im.frustumCulled = false;
+      im.instanceMatrix.needsUpdate = true;
+      group.add(im);
+    }
   }
+  const piers = shafts;
 
   return {
     group,
@@ -371,7 +546,8 @@ export function createCityViaduct({
     },
     stats: {
       piers: layout.piers.length,
-      draws: 1 + (rail ? 1 : 0) + (piers ? 1 : 0),
+      ramps: (layout.ramps ?? []).length,
+      draws: 1 + (rail ? 1 : 0) + (piers ? 2 : 0),
       lengthM: Math.round(layout.alongMax - layout.alongMin),
       deckTris: deckGeo.index ? deckGeo.index.count / 3 : 0,
       railTris: railGeo ? (railGeo.index ? railGeo.index.count / 3 : 0) : 0,
@@ -382,7 +558,8 @@ export function createCityViaduct({
       deckGeo.dispose();
       if (railGeo) railGeo.dispose();
       if (railColGeo) railColGeo.dispose();
-      if (piers) { piers.geometry.dispose(); piers.dispose(); }
+      if (shafts) { shafts.geometry.dispose(); shafts.dispose(); }
+      if (caps) { caps.geometry.dispose(); caps.dispose(); }
       for (const m of owned) m.dispose();
     },
   };

@@ -176,7 +176,30 @@ export function createCityObstacles({
   const knocked = new Uint8Array(count);
 
   /** Per kind: is it on, and what shape does it make. Rebuilt when a flag moves. */
-  const enabled = () => [O.lamps, O.lights, O.trees, O.cars, O.rails];
+  /*
+   * ── WHICH KINDS ARE SOLID, KEYED BY KIND ───────────────────────────────────
+   *
+   * This was `[O.lamps, O.lights, O.trees, O.cars, O.rails]` — a POSITIONAL
+   * array indexed by `KIND`. Adding `KIND.PIER = 5` to a five-element array
+   * made `on[5]` undefined, so every viaduct pier was written into the table,
+   * counted in the stats, and then skipped by the one line that decides what
+   * is solid. The result was a structure you could see, could park under, and
+   * could drive straight through — with nothing anywhere reporting a problem.
+   *
+   * Keyed by KIND, an id with no flag is now a hole you cannot open by
+   * accident, and `everyKindHasAnEnableFlag` in tools/viaductTest.mjs fails if
+   * one ever appears again.
+   */
+  const enabled = () => {
+    const on = [];
+    on[KIND.LAMP] = O.lamps;
+    on[KIND.LIGHT] = O.lights;
+    on[KIND.TREE] = O.trees;
+    on[KIND.CAR] = O.cars;
+    on[KIND.RAIL] = O.rails;
+    on[KIND.PIER] = O.piers;
+    return on;
+  };
 
   const stats = {
     total: count,
@@ -187,6 +210,7 @@ export function createCityObstacles({
     trees: (lists?.trees ?? []).length,
     cars: (lists?.cars ?? []).length,
     rails: (lists?.rails ?? []).length,
+    piers: (piers?.list ?? []).length,
     lastNear: 0,
   };
 
@@ -259,6 +283,9 @@ export function createCityObstacles({
 
   return {
     capsulesNear, params: params_, stats, KIND,
+    /** Which kinds are currently solid, indexed by KIND. A hole here is a kind
+     *  that draws and does not collide — see the note on `enabled`. */
+    enabledByKind: enabled,
     /**
      * Take one rail out of collision, by its index in the FURNITURE's rail
      * list. Returns false when that rail was never in the table at all (it sat
