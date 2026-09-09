@@ -344,6 +344,15 @@ export function createModularRoadCity({
    * headless build or a host with no tree stack still works.
    */
   treeEnv = null,
+  /**
+   * The GAME'S road and guardrail materials, for the viaduct.
+   *
+   * Handed in rather than made here for two reasons, and the second is the one
+   * that matters: the viaduct then reads as the same road as the track, and it
+   * costs NO shader compile, because both materials are already built and
+   * compiled by the time the city exists.
+   */
+  viaductMaterials = null,
 } = {}) {
   const P = { ...CITY_DEFAULTS, ...params };
 
@@ -873,7 +882,14 @@ export function createModularRoadCity({
       viaductAt.piers = viaductAt.piers.filter(
         (q) => avoid(q.x, q.z, viaductAt.deckBottom) >= P.avoidRadius);
     }
-    viaduct = createCityViaduct({ layout: viaductAt, uNight, castShadows: P.castShadows });
+    viaduct = createCityViaduct({
+      layout: viaductAt, castShadows: P.castShadows,
+      // The GAME'S road and rail materials. Sharing them is what makes the
+      // viaduct read as the same road as the track — and what stops a 2.4 km
+      // motorway costing a shader compile, since both are already built.
+      roadMaterial: viaductMaterials?.road ?? null,
+      railMaterial: viaductMaterials?.rail ?? null,
+    });
     if (viaduct) { group.add(viaduct.group); stats.viaduct = viaduct.stats; }
     else stats.viaduct = null;
     if (P.beacons) {
@@ -1524,6 +1540,20 @@ export function createModularRoadCity({
      * terrain ON there is no city ground plane — the terrain is the ground —
      * so this returns NaN and stays out of the way.
      */
+    /**
+     * ── THE VIADUCT'S DRIVE SURFACE ────────────────────────────────────────────
+     *
+     * `{deck, solids}`, the same shape the dock hands over, for the game's
+     * collision bake to collect. Empty when there is no viaduct.
+     *
+     * This is NOT `streetHeightAt`, and it cannot be: that is a single flat
+     * `groundY` for the whole city and structurally cannot express a road
+     * eleven metres in the air. An elevated road is real geometry, resolved
+     * against the same BVH the track uses.
+     */
+    viaductCollision() {
+      return viaduct ? viaduct.collisionMeshes() : { deck: [], solids: [] };
+    },
     streetHeightAt(x, z) {
       if (!ground || !P.ground) return NaN;
       const halfPlane = P.extent * 1.3;   // the plane is extent * 2.6 across

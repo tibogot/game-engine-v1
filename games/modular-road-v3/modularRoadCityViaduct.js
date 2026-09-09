@@ -1,6 +1,7 @@
 // ── THE ELEVATED URBAN MOTORWAY ──────────────────────────────────────────────
 //
-// A concrete viaduct running the whole width of the city, above one street.
+// A road on stilts running the whole width of the city. You drive under it, you
+// drive ON it, and there is traffic on it either way.
 //
 // ── WHY THIS ONE, OUT OF EVERYTHING LEFT ─────────────────────────────────────
 //
@@ -8,38 +9,55 @@
 // signs, markings, traffic, clutter — all of it is street level, and a city
 // where nothing is ever overhead reads flat however much detail goes into the
 // walls. A viaduct is the only structure that puts something between the player
-// and the sky at street level, and the only one you both drive UNDER and see
-// traffic moving along ABOVE you.
+// and the sky at street level.
 //
-// ── WHAT IT COSTS: TWO DRAWS ─────────────────────────────────────────────────
+// ── IT IS A ROAD, BUILT BY THE ROAD KIT ──────────────────────────────────────
 //
-// The DECK is one merged mesh for the entire run — slab, both parapets, the
-// whole 2.4 km. It is about sixty triangles, so there is nothing to gain by
-// splitting it for culling and something to lose: a chain of instanced spans
-// would be one draw too, but with a visible seam wherever two segments met and
-// a per-instance matrix to upload. One mesh has no seams because there are no
-// joins.
+// The first version was a box. This one is a SWEPT ROAD: a centreline path
+// through `computeFrames`, then `buildSweepGeometry` with the game's own road
+// profile, exactly as a track piece is built. That is not tidiness, it buys
+// four things at once and none of them are optional for a road you drive on:
 //
-// The PIERS are one InstancedMesh — column and hammerhead cap merged into a
-// single unit — so the count does not matter. Around fifty-five of them.
+//   · IT IS DRIVABLE. `buildPiece` uses the swept geometry as its own deck
+//     collider (modularRoadKit.js), so the mesh IS the collision surface. The
+//     precedent is the dock — a non-track static mesh the car drives on, added
+//     to the deck list in one line — and, in v3, stuntCarMode baking Smart
+//     Road's elevated decks into the very same Vehicle.
+//   · IT LOOKS LIKE THE GAME'S ROADS, because it is one. Kerbs, deck lines,
+//     the asphalt shader, the wet model — all of it, by sharing the material.
+//   · IT SHARES THE TRACK'S PIPELINE. The road material is already compiled by
+//     the time the city builds, so a 2.4 km motorway adds no shader compile at
+//     all — which matters more here than anywhere, see the note in
+//     modularRoadCityFacade.js about what the first frame costs.
+//   · THE PATH CAN BEND. The frames come from arbitrary points carrying their
+//     own `y`, so curves, grades and ramps are DATA rather than new code. The
+//     straight run below is the simplest possible path, not the only one.
 //
-// The traffic on it costs NOTHING extra at all: see the note on lanes below.
+// ── WHAT IT COSTS ────────────────────────────────────────────────────────────
+//
+// Three draws: deck, guardrail, piers. The piers are one InstancedMesh — column
+// and hammerhead merged into a single unit — so their count is free. The
+// traffic on it costs nothing extra at all: see the lane note in
+// modularRoadCityFurniture.js.
 //
 // ── THE ONE HEIGHT CONSTRAINT, AND IT IS LOAD-BEARING ────────────────────────
 //
 // Skybridges cross between towers of at least `bridgeMinHeight` (45 m) at a
 // fraction of the shorter one starting at `bridgeLow` (0.35). So the lowest
-// skybridge in any city this can generate is at 15.75 m, and as long as the
-// TOP OF THE PARAPET stays below that, a skybridge can never intersect the
-// viaduct — with no coupling between the two modules, no exclusion test, and
-// no ordering constraint on which is built first. viaductTest checks the
-// arithmetic still holds, because the alternative is a bridge through a road
-// that nobody notices until they drive under it.
+// skybridge in any city this can generate is at 15.75 m, and as long as the TOP
+// OF THE GUARDRAIL stays below that, a skybridge can never intersect the
+// viaduct — with no coupling between the two modules, no exclusion test, and no
+// ordering constraint on which is built first. viaductTest checks the
+// arithmetic still holds, because the alternative is a glazed link through a
+// road that nobody notices until they drive under it.
 
 import * as THREE from "three";
-import { Fn, float, vec3, vec4, uniform, mix, smoothstep, abs, positionWorld, vertexColor } from "three/tsl";
+import { Fn, float, vec3, uniform, mix, smoothstep, positionWorld, vertexColor } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
+import {
+  computeFrames, buildSweepGeometry, buildProfile, roadParams,
+} from "./modularRoadKit.js";
+import { buildRailGeometry, buildRailCollision, railParams } from "./modularRoadRail.js";
 
 export const VIADUCT_DEFAULTS = {
   /** Off and nothing is built. */
@@ -50,19 +68,26 @@ export const VIADUCT_DEFAULTS = {
    *  whatever is in the middle. Signed. */
   viaductOffset: 2,
 
-  /** The deck, metres. Four lanes, shoulders, and a central reserve. */
+  /** The deck. Four lanes, shoulders, and room for the guardrails. */
   deckWidth: 19,
-  deckThickness: 1.5,
-  parapetHeight: 1.1,
-  parapetThickness: 0.42,
+  deckThickness: 1.2,
   /**
-   * Underside of the deck above the street.
+   * Underside of the slab above the street.
    *
-   * Tall enough to drive under without it feeling like a hazard, and low
-   * enough that the parapet top stays under the lowest possible skybridge —
-   * see the header. 10.5 + 1.5 + 1.1 = 13.1 against 15.75.
+   * Tall enough to drive under without it feeling like a hazard, and low enough
+   * that the guardrail top stays under the lowest possible skybridge — see the
+   * header.
    */
-  clearance: 10.5,
+  clearance: 10.4,
+  /**
+   * Distance between centreline stations on a straight, metres.
+   *
+   * A straight needs almost none — two points would sweep correctly — but this
+   * is also the deck's triangle budget and the resolution its collision BVH is
+   * built from, so it is a real knob rather than a formality. Curves get their
+   * own density from the points that describe them.
+   */
+  straightStep: 24,
 
   /** Pier spacing along the run. */
   spanLength: 34,
@@ -74,57 +99,36 @@ export const VIADUCT_DEFAULTS = {
   capDepth: 3.2,
   /** Piers taper: the fraction of the full section left at the top. */
   pierTaper: 0.78,
+  /**
+   * GUARDRAIL POST SPACING, metres. Wider than the track's 3.6.
+   *
+   * MEASURED over the full 2.4 km run: the beam itself is 15.3k triangles and
+   * the posts are everything else — 87.5k at 3.6 m, 52.5k at 7. Instancing them
+   * was the obvious move and it is the wrong one: the same posts still rasterise,
+   * so it saves memory and no frame time at all. Spacing them saves both, and a
+   * motorway barrier genuinely has fewer posts than a race circuit's.
+   */
+  railPostSpacing: 7,
 
   /** Traffic. A motorway is busier and faster than the streets under it. */
   viaductTraffic: true,
   viaductCars: 26,
   viaductSpeed: 1.55,
 
-  colorDeck: 0x9d9c95,
-  colorParapet: 0xb0aea6,
   colorPier: 0x8c8b84,
-  /** The parapet's edge line, lit at night. A dark viaduct over a lit street
-   *  reads as a mistake rather than as a structure. */
-  edgeGlow: 1.5,
+  colorPierDirt: 0x4c4a44,
 };
-
-/** Vertex-colour keys for the three parts, so one material serves all of them. */
-const PART = { deck: 0, parapet: 1, pier: 2 };
-const PART_COLOR = [
-  new THREE.Color(1, 0, 0), new THREE.Color(0, 1, 0), new THREE.Color(0, 0, 1),
-];
-
-function tag(geo, part) {
-  const n = geo.attributes.position.count;
-  const c = new Float32Array(n * 3);
-  const col = PART_COLOR[part];
-  for (let i = 0; i < n; i++) { c[i * 3] = col.r; c[i * 3 + 1] = col.g; c[i * 3 + 2] = col.b; }
-  geo.setAttribute("color", new THREE.BufferAttribute(c, 3));
-  return geo;
-}
-
-function box(w, h, d, x, y, z, part) {
-  const g = new THREE.BoxGeometry(w, h, d);
-  g.translate(x, y, z);
-  return tag(g, part);
-}
 
 /**
  * ── WHERE THE VIADUCT IS ─────────────────────────────────────────────────────
  *
- * PURE, and separate from the geometry on purpose: the traffic system needs the
- * same answer, and the only way two systems agree about a structure is if they
- * ask one function rather than each deriving it. It is the same discipline the
- * lane table is under (see `laneTravelDir` in modularRoadCityFurniture.js), for
- * the same reason.
+ * PURE, and separate from the geometry on purpose: the traffic system and the
+ * collision bake both need the same answer, and the only way three systems
+ * agree about a structure is if they ask one function rather than each deriving
+ * it. Same discipline as the lane table (see `laneTravelDir` in
+ * modularRoadCityFurniture.js), for the same reason.
  *
  * Returns null when the chosen street falls outside the city.
- *
- * @returns {null | {
- *   axis: "x"|"z", across: number, alongMin: number, alongMax: number,
- *   deckBottom: number, deckTop: number, railTop: number,
- *   laneAcross: number[], piers: {x: number, z: number}[],
- * }}
  */
 export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {} }) {
   const V = { ...VIADUCT_DEFAULTS, ...params };
@@ -146,14 +150,38 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
   const across = oAcross + k * pitch + blockW + streetW / 2;
   if (Math.abs(across - cAcross) > half) return null;
 
+  /*
+   * `deckY` IS THE DRIVING SURFACE, and every other height is measured from it.
+   *
+   * The road profile puts the deck at y = 0 and hangs the slab BELOW it, so the
+   * centreline path is at the surface the car sits on — not at the underside,
+   * and not at the middle of the slab. Getting this backwards would put the car
+   * a slab's thickness inside its own road.
+   */
   const deckBottom = P.groundY + V.clearance;
-  const deckTop = deckBottom + V.deckThickness;
-  const railTop = deckTop + V.parapetHeight;
+  const deckY = deckBottom + V.deckThickness;
+  const railTop = deckY + roadParams.railHeight + railParams.gap + railParams.height;
 
-  // Lane centres across the deck: two each side of a central reserve.
+  // Lane centres across the deck: two each side of the central reserve.
   const laneAcross = [-0.34, -0.13, 0.13, 0.34].map((f) => across + f * V.deckWidth);
 
   const alongMin = cAlong - half, alongMax = cAlong + half;
+
+  /*
+   * THE CENTRELINE, as points.
+   *
+   * A straight line today. It is a POLYLINE rather than two endpoints because
+   * everything the viaduct is going to grow — curves, grades, a run out past
+   * the edge of town, ramps peeling off it — is a different set of points
+   * through the same sweep, and none of it needs this file to change shape.
+   */
+  const path = [];
+  const steps = Math.max(1, Math.round((alongMax - alongMin) / V.straightStep));
+  for (let i = 0; i <= steps; i++) {
+    const a = alongMin + ((alongMax - alongMin) * i) / steps;
+    path.push(axis === "x" ? new THREE.Vector3(a, deckY, across)
+      : new THREE.Vector3(across, deckY, a));
+  }
 
   /*
    * PIERS SKIP THE JUNCTIONS.
@@ -161,8 +189,8 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
    * A pier on the centre line of a crossroads would sit exactly where cars
    * turn, and the viaduct would be planting columns in the middle of every
    * intersection it crosses. Real viaducts span their junctions instead, so
-   * this drops any pier landing in a junction band and lets the deck — which
-   * is one continuous mesh and does not care — carry the longer span.
+   * this drops any pier landing in a junction band and lets the deck carry the
+   * longer span.
    */
   const oAlong = axis === "x" ? ox : oz;
   const piers = [];
@@ -176,148 +204,186 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
     piers.push(axis === "x" ? { x: a, z: across } : { x: across, z: a });
   }
 
-  return { axis, across, alongMin, alongMax, deckBottom, deckTop, railTop, laneAcross, piers, params: V };
+  return {
+    axis, across, alongMin, alongMax,
+    deckY, deckBottom, railTop,
+    path, laneAcross, piers, params: V,
+  };
+}
+
+/** Concrete for the piers. The deck is the game's own road material. */
+function pierMaterial(V) {
+  const m = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.0 });
+  m.name = "CityViaductPier";
+  const base = uniform(new THREE.Color(V.colorPier));
+  const dirt = uniform(new THREE.Color(V.colorPierDirt));
+  const uTop = uniform(0);
+  m.colorNode = Fn(() => {
+    /*
+     * Concrete streaks DOWNWARD, and on a structure this size that is most of
+     * what sells it as concrete rather than as grey plastic. Rain runs off the
+     * deck edge onto the pier tops, so the dirt is keyed to distance BELOW the
+     * deck rather than to height above the ground.
+     */
+    const below = uTop.sub(positionWorld.y).toVar();
+    const streak = smoothstep(float(0.0), float(2.6), below)
+      .mul(smoothstep(float(9.0), float(3.0), below)).mul(0.28);
+    // `vertexColor()` is a vec4; the alpha is not a part id and never was.
+    return mix(base.mul(vertexColor().rgb.r.mul(0.25).add(0.75)), dirt, streak);
+  })();
+  return { material: m, uTop };
 }
 
 /**
- * Build the viaduct. Two draws.
+ * Build the viaduct. Three draws.
  *
  * @param {object} opts
  * @param {ReturnType<typeof viaductLayout>} opts.layout
- * @param {object} [opts.uNight]  the city's night uniform, for the edge line
+ * @param {THREE.Material} [opts.roadMaterial]  the game's road surface. Passing
+ *   it is what makes the viaduct look like the track AND costs no new pipeline.
+ * @param {THREE.Material} [opts.railMaterial]  the game's guardrail material.
  */
-export function createCityViaduct({ layout, uNight = null, castShadows = true }) {
+export function createCityViaduct({
+  layout, roadMaterial = null, railMaterial = null, castShadows = true,
+}) {
   if (!layout) return null;
   const V = layout.params;
   const group = new THREE.Group();
   group.name = "CityViaduct";
+  const owned = [];
 
-  const alongLen = layout.alongMax - layout.alongMin;
-  const alongMid = (layout.alongMin + layout.alongMax) * 0.5;
-  const xz = (along, across) => (layout.axis === "x" ? [along, across] : [across, along]);
+  // ── The deck: the road kit's own sweep ─────────────────────────────────────
+  // A wider, thicker section than the track's, and otherwise identical — same
+  // kerbs, same deck lines, same shader.
+  const rp = { ...roadParams, width: V.deckWidth, thickness: V.deckThickness };
+  const profile = buildProfile(rp, true);
+  const frames = computeFrames(layout.path);
+  const deckGeo = buildSweepGeometry(frames, profile);
 
-  // ── Material: one, for all three parts ──────────────────────────────────────
-  const uNightU = uNight || uniform(0);
-  const mat = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.86, metalness: 0.0 });
-  mat.name = "CityViaduct";
-  const cDeck = uniform(new THREE.Color(V.colorDeck));
-  const cRail = uniform(new THREE.Color(V.colorParapet));
-  const cPier = uniform(new THREE.Color(V.colorPier));
-  const uGlow = uniform(V.edgeGlow);
-  const uRailTop = uniform(layout.railTop);
-
-  /** `vertexColor()` is a vec4 — the alpha is not a part id and never was. */
-  const partOf = () => vertexColor().rgb;
-
-  mat.colorNode = Fn(() => {
-    const p = partOf();
-    const base = cDeck.mul(p.r).add(cRail.mul(p.g)).add(cPier.mul(p.b)).toVar();
-    /*
-     * Concrete streaks DOWNWARD, and on a structure this size that is most of
-     * what sells it as concrete rather than as grey plastic. Rain runs off the
-     * deck edge and stains the fascia and the pier tops, so the dirt is keyed
-     * to distance BELOW the deck rather than to height above the ground.
-     */
-    const below = uRailTop.sub(positionWorld.y).toVar();
-    const streak = smoothstep(float(0.0), float(3.2), below)
-      .mul(smoothstep(float(11.0), float(4.0), below)).mul(0.22);
-    return mix(base, vec3(0.30, 0.29, 0.27), streak);
-  })();
-
-  mat.roughnessNode = float(0.86);
-  /*
-   * THE EDGE LINE. A strip of emissive along the very top of the parapet, on
-   * at night only. It is not a lamp — there is no light cast and no draw — it
-   * is the structure drawing its own silhouette, which is what actually reads
-   * from the road below at night. Costs one smoothstep.
-   */
-  const edge = Fn(() => {
-    const p = partOf();
-    const nearTop = smoothstep(float(0.18), float(0.02), abs(uRailTop.sub(positionWorld.y)));
-    return vec3(1.0, 0.72, 0.42).mul(nearTop).mul(p.g).mul(uNightU).mul(uGlow);
-  });
-  mat.emissiveNode = edge();
-  // vec4, not vec3: the MRT attachment is a vec4 struct member and WGSL will
-  // not widen an assignment. A vec3 here is an invalid ShaderModule and a
-  // viaduct that silently never draws.
-  applyBloomMRT(mat, Fn(() => vec4(edge(), 1.0))());
-
-  // ── The deck: ONE mesh, the whole run ──────────────────────────────────────
-  const parts = [];
-  const dY = layout.deckBottom + V.deckThickness * 0.5;
-  {
-    const [w, d] = layout.axis === "x" ? [alongLen, V.deckWidth] : [V.deckWidth, alongLen];
-    const [x, z] = xz(alongMid, layout.across);
-    parts.push(box(w, V.deckThickness, d, x, dY, z, PART.deck));
+  let deckMat = roadMaterial;
+  if (!deckMat) {
+    deckMat = new THREE.MeshStandardNodeMaterial({ color: 0x3b3b3e, roughness: 0.92 });
+    deckMat.name = "CityViaductDeckFallback";
+    owned.push(deckMat);
   }
-  // Parapets, one each side, plus a central reserve barrier.
-  const rY = layout.deckTop + V.parapetHeight * 0.5;
-  for (const off of [-0.5, 0.5]) {
-    const across = layout.across + off * (V.deckWidth - V.parapetThickness);
-    const [w, d] = layout.axis === "x" ? [alongLen, V.parapetThickness] : [V.parapetThickness, alongLen];
-    const [x, z] = xz(alongMid, across);
-    parts.push(box(w, V.parapetHeight, d, x, rY, z, PART.parapet));
-  }
-  {
-    // The central reserve is lower — it is a barrier, not a wall, and a full
-    // parapet up the middle would hide the oncoming traffic that is half the
-    // point of putting cars up here.
-    const h = V.parapetHeight * 0.62;
-    const [w, d] = layout.axis === "x" ? [alongLen, V.parapetThickness * 1.3] : [V.parapetThickness * 1.3, alongLen];
-    const [x, z] = xz(alongMid, layout.across);
-    parts.push(box(w, h, d, x, layout.deckTop + h * 0.5, z, PART.parapet));
-  }
-  const deckGeo = mergeGeometries(parts, false);
-  for (const g of parts) g.dispose();
-  const deck = new THREE.Mesh(deckGeo, mat);
+  const deck = new THREE.Mesh(deckGeo, deckMat);
   deck.name = "CityViaductDeck";
   deck.castShadow = castShadows;
   deck.receiveShadow = true;
   // One mesh spanning the city: there is no camera position from which culling
-  // it is correct, and at ~60 triangles there is nothing to gain by trying.
+  // it is correct.
   deck.frustumCulled = false;
   group.add(deck);
 
+  /*
+   * ── THE GUARDRAIL, ON THE SAME FRAMES ──────────────────────────────────────
+   *
+   * The game's own rail, not the kit's older W-beam sweep — so the viaduct's
+   * barrier is the one that was actually tuned to look right, and so it comes
+   * with the thing that matters more here than on the track: a COLLISION PROXY
+   * that is two vertical walls on decimated frames rather than every post and
+   * corrugation. Measured on this run, the visible beam is 9816 triangles; the
+   * proxy is a fraction of that, and it is the one the chassis is sampled
+   * against on a road eleven metres in the air.
+   */
+  let rail = null;
+  let railCollider = null;
+  const railP = { ...railParams, postSpacing: V.railPostSpacing };
+  const railGeo = buildRailGeometry(frames, rp, railP);
+  const railColGeo = buildRailCollision(frames, rp, railP);
+  if (railGeo) {
+    let rm = railMaterial;
+    if (!rm) {
+      rm = new THREE.MeshStandardNodeMaterial({ color: 0x9aa0a6, roughness: 0.45, metalness: 0.7 });
+      rm.name = "CityViaductRailFallback";
+      owned.push(rm);
+    }
+    rail = new THREE.Mesh(railGeo, rm);
+    rail.name = "CityViaductRail";
+    rail.castShadow = castShadows;
+    rail.receiveShadow = true;
+    rail.frustumCulled = false;
+    group.add(rail);
+  }
+  if (railColGeo) {
+    // NOT added to the group: it is never drawn, only collided with. A real
+    // Mesh rather than a duck-typed stand-in so `bakeFromMeshes` finds exactly
+    // what it expects, and left at the identity because the geometry is already
+    // in world space.
+    railCollider = new THREE.Mesh(railColGeo, deckMat);
+    railCollider.name = "CityViaductRailCollision";
+    railCollider.visible = false;
+    railCollider.updateMatrixWorld();
+  }
+
   // ── The piers: one instanced unit ──────────────────────────────────────────
-  let pierMesh = null;
+  const { material: pierMat, uTop } = pierMaterial(V);
+  owned.push(pierMat);
+  uTop.value = layout.deckBottom;
+  let piers = null;
   if (layout.piers.length) {
     const colH = layout.deckBottom - V.capHeight;
     const pieces = [];
-    // A tapered shaft, as two stacked boxes rather than a lathe: the taper is
-    // read at 40 m and beyond, and two boxes is 24 triangles against a
+    // A tapered shaft as two stacked boxes rather than a lathe: the taper reads
+    // at forty metres and beyond, and two boxes is 24 triangles against a
     // cylinder's hundreds.
     const lower = colH * 0.55;
-    pieces.push(box(V.pierWidth, lower, V.pierDepth, 0, lower * 0.5, 0, PART.pier));
+    const mk = (w, h, d, y, shade) => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      g.translate(0, y, 0);
+      const n = g.attributes.position.count;
+      const c = new Float32Array(n * 3).fill(shade);
+      g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+      return g;
+    };
+    pieces.push(mk(V.pierWidth, lower, V.pierDepth, lower * 0.5, 1.0));
     const tw = V.pierWidth * V.pierTaper, td = V.pierDepth * V.pierTaper;
-    pieces.push(box(tw, colH - lower, td, 0, lower + (colH - lower) * 0.5, 0, PART.pier));
-    // The hammerhead, across the deck.
+    pieces.push(mk(tw, colH - lower, td, lower + (colH - lower) * 0.5, 1.0));
     const [cw, cd] = layout.axis === "x" ? [V.capDepth, V.capWidth] : [V.capWidth, V.capDepth];
-    pieces.push(box(cw, V.capHeight, cd, 0, colH + V.capHeight * 0.5, 0, PART.pier));
+    pieces.push(mk(cw, V.capHeight, cd, colH + V.capHeight * 0.5, 0.86));
     const pierGeo = mergeGeometries(pieces, false);
     for (const g of pieces) g.dispose();
 
-    pierMesh = new THREE.InstancedMesh(pierGeo, mat, layout.piers.length);
-    pierMesh.name = "CityViaductPiers";
-    pierMesh.castShadow = castShadows;
-    pierMesh.receiveShadow = true;
-    pierMesh.frustumCulled = false;
+    piers = new THREE.InstancedMesh(pierGeo, pierMat, layout.piers.length);
+    piers.name = "CityViaductPiers";
+    piers.castShadow = castShadows;
+    piers.receiveShadow = true;
+    piers.frustumCulled = false;
     const m = new THREE.Matrix4();
-    layout.piers.forEach((p, i) => {
-      m.makeTranslation(p.x, 0, p.z);
-      pierMesh.setMatrixAt(i, m);
-    });
-    pierMesh.instanceMatrix.needsUpdate = true;
-    group.add(pierMesh);
+    layout.piers.forEach((p, i) => { m.makeTranslation(p.x, 0, p.z); piers.setMatrixAt(i, m); });
+    piers.instanceMatrix.needsUpdate = true;
+    group.add(piers);
   }
 
   return {
     group,
     layout,
-    stats: { piers: layout.piers.length, draws: pierMesh ? 2 : 1, lengthM: Math.round(alongLen) },
+    /**
+     * ── WHAT THE CAR IS RESOLVED AGAINST ──────────────────────────────────────
+     *
+     * The same shape the dock hands over, and consumed the same way: the deck
+     * meshes go into the drive-surface BVH, the guardrail into solids. `RoadBvh`
+     * reads only `.geometry` and `.matrixWorld`, so these are the real meshes
+     * with no proxy and no copy — the surface you see IS the surface you are on.
+     */
+    collisionMeshes() {
+      return { deck: [deck], solids: railCollider ? [railCollider] : [] };
+    },
+    stats: {
+      piers: layout.piers.length,
+      draws: 1 + (rail ? 1 : 0) + (piers ? 1 : 0),
+      lengthM: Math.round(layout.alongMax - layout.alongMin),
+      deckTris: deckGeo.index ? deckGeo.index.count / 3 : 0,
+      railTris: railGeo ? (railGeo.index ? railGeo.index.count / 3 : 0) : 0,
+      railColTris: railColGeo ? (railColGeo.index ? railColGeo.index.count / 3
+        : railColGeo.attributes.position.count / 3) : 0,
+    },
     dispose() {
       deckGeo.dispose();
-      if (pierMesh) { pierMesh.geometry.dispose(); pierMesh.dispose(); }
-      mat.dispose();
+      if (railGeo) railGeo.dispose();
+      if (railColGeo) railColGeo.dispose();
+      if (piers) { piers.geometry.dispose(); piers.dispose(); }
+      for (const m of owned) m.dispose();
     },
   };
 }

@@ -14,7 +14,9 @@ import { register } from "node:module";
 
 register("./threeWebgpuHook.mjs", import.meta.url);
 const THREE = await import("three/webgpu");
-const { viaductLayout } = await import("../games/modular-road-v3/modularRoadCityViaduct.js");
+const { viaductLayout, createCityViaduct } =
+  await import("../games/modular-road-v3/modularRoadCityViaduct.js");
+const { roadParams } = await import("../games/modular-road-v3/modularRoadKit.js");
 const { BRIDGE_DEFAULTS } = await import("../games/modular-road-v3/modularRoadCityBridges.js");
 const { CITY_DEFAULTS, createModularRoadCity } = await import("../games/modular-road-v3/modularRoadCity.js");
 const { LANE_FRACS, laneDirForIndex, FURNITURE_DEFAULTS } =
@@ -105,9 +107,11 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
 // ── THE DECK LANES ARE ON THE DECK ──────────────────────────────────────────
 {
   const V = L.params;
-  const edge = V.deckWidth / 2 - V.parapetThickness;
+  // Inside the KERB now, not a parapet: the deck is a road-kit sweep, so its
+  // drivable width is the section width less a kerb at each side.
+  const edge = V.deckWidth / 2 - roadParams.railWidth;
   const off = L.laneAcross.map((a) => Math.abs(a - L.across));
-  check("every deck lane is inside the parapets", Math.max(...off) < edge,
+  check("every deck lane is inside the kerbs", Math.max(...off) < edge,
     `outermost ${Math.max(...off).toFixed(2)} m vs ${edge.toFixed(2)} m`);
   check("the deck lanes keep right, same rule as the street",
     laneDirForIndex(L.axis, 0) === -laneDirForIndex(L.axis, 3),
@@ -119,7 +123,8 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   const city = createModularRoadCity({ params: { extent: 700 } });
   const meshes = [];
   city.group.traverse((o) => { if (o.isMesh && /Viaduct/.test(o.name)) meshes.push(o); });
-  check("the viaduct is two draws", meshes.length === 2, meshes.map((m) => m.name).join(", "));
+  check("the viaduct is three draws — deck, rail, piers", meshes.length === 3,
+    meshes.map((m) => m.name).join(", "));
   check("the city reports a viaduct", !!city.stats.viaduct, JSON.stringify(city.stats.viaduct));
 
   // A camera under the deck, so everything nearby is in range.
@@ -141,16 +146,61 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
     for (let i = 0; i < o.count; i++) heights.push(e[i * 16 + 13]);
   });
   const cityViaduct = city.stats.viaduct;
-  const deckY = viaductLayout({ P, originCellX: 0, originCellZ: 0 }).deckTop;
+  const deckY = viaductLayout({ P, originCellX: 0, originCellZ: 0 }).deckY;
   const up = heights.filter((y) => y > deckY - 1).length;
   const down = heights.filter((y) => y < 3).length;
   check("some traffic is drawn ON the deck", up > 10, `${up} of ${heights.length} cars above ${deckY.toFixed(1)} m`);
   check("and the street traffic is still on the street", down > 10, `${down} at ground level`);
   check("nothing is drawn between the two", up + down === heights.length,
     `${heights.length - up - down} cars at neither height`);
-  check("the deck carries piers worth reporting", cityViaduct.piers > 5 && cityViaduct.draws === 2,
+  check("the deck carries piers worth reporting", cityViaduct.piers > 5 && cityViaduct.draws === 3,
     JSON.stringify(cityViaduct));
+
+  /*
+   * ── IT IS ACTUALLY IN THE DRIVE-SURFACE BVH ───────────────────────────────
+   *
+   * The city has to HAND OVER its deck, in the shape the game's collision bake
+   * collects — `{deck, solids}`, the same contract the dock uses. Without this
+   * the viaduct is a road you fall straight through, which looks completely
+   * correct right up until you land on it.
+   */
+  const col = city.viaductCollision();
+  check("the city hands over a drive surface", col.deck.length === 1,
+    `${col.deck.length} deck meshes`);
+  check("and a solid guardrail to stay on it", col.solids.length === 1,
+    `${col.solids.length} solid meshes`);
+  check("the deck it hands over is the deck you can see",
+    col.deck[0] === meshes.find((m) => m.name === "CityViaductDeck"),
+    "same object, no proxy");
+  check("the guardrail collider is NOT drawn",
+    col.solids[0].visible === false && !col.solids[0].parent,
+    "invisible and out of the scene graph");
+  // Every collision mesh must carry the two things RoadBvh reads off it.
+  for (const m of [...col.deck, ...col.solids]) {
+    check(`${m.name} is bakeable`, !!m.geometry && !!m.matrixWorld);
+  }
   city.dispose();
+}
+
+// ── THE TRIANGLE BUDGET ─────────────────────────────────────────────────────
+//
+// A 2.4 km road is not free, and unlike everything else in the city it goes
+// into a BVH the chassis is sampled against every frame. Reported, and held to
+// a ceiling that is a tripwire rather than a target: the numbers matter most
+// when somebody later makes the section denser without noticing what it feeds.
+{
+  const full = viaductLayout({ P, originCellX: 0, originCellZ: 0 });
+  const built = createCityViaduct({ layout: full });
+  const st = built.stats;
+  console.log(`       ${st.lengthM} m · deck ${st.deckTris} tris · rail ${st.railTris} drawn, `
+    + `${st.railColTris} collided · ${st.piers} piers`);
+  check("the deck's collision geometry stays under 20k triangles", st.deckTris < 20000,
+    `${st.deckTris}`);
+  // The whole point of the proxy: the barrier the chassis is sampled against
+  // must be far cheaper than the barrier that is drawn.
+  check("the guardrail collision proxy is cheaper than the visible rail",
+    st.railColTris < st.railTris * 0.5, `${st.railColTris} vs ${st.railTris}`);
+  built.dispose();
 }
 
 console.log(`\n${fail === 0 ? "ALL PASS" : `${fail} FAILURE(S)`}  (${pass} passed)`);

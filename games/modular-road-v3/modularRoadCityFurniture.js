@@ -1213,7 +1213,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         span: half * 2,
         fi,
         k: null,
-        y: viaduct.deckTop,
+        y: viaduct.deckY,
         elevated: true,
         cars: viaduct.params.viaductCars,
         speedScale: viaduct.params.viaductSpeed,

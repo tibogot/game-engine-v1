@@ -650,6 +650,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let _cityRainSurfaces = null;
   function onCityRebuilt(surfaces) {
     _cityRainSurfaces = surfaces;
+    // THE VIADUCT IS IN THE DRIVE-SURFACE BVH, so a city rebuild changes what
+    // the car can stand on. Deferred, like every other rebake — `bakeCollision`
+    // only marks it stale and the next query builds it.
+    bakeCollision();
     // Cheap and correct when rain is off: this returns immediately, and the
     // layer bits are set the moment the weather turns.
     syncRainColliders();
@@ -2126,6 +2130,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
        * 6 ms. The city publishes placements into its store; it does not own it.
        */
       treeEnv: app.treeEnv ?? null,
+      // The viaduct is a ROAD, swept by the road kit, so it wants the road's
+      // own materials — same look as the track, and no new pipeline to compile.
+      viaductMaterials: { road: roadMaterial, rail: railMaterial },
     });
     scene.add(city.group);
     // Born into whatever weather is already on the track.
@@ -4937,6 +4944,23 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     if (dock) {
       const dockCol = dock.collisionMeshes();
       decks.push(...dockCol.deck);
+    }
+    /*
+     * THE CITY'S ELEVATED MOTORWAY, on exactly the dock's terms.
+     *
+     * Its deck is a road-kit sweep, so the mesh IS the drive surface — the same
+     * arrangement every track piece has. The guardrail goes into SOLIDS, which
+     * is what stops the car leaving a road eleven metres in the air rather than
+     * merely drawing a fence beside it.
+     *
+     * Nothing else in the city is here, and nothing else should be: the streets
+     * are an analytic plane (`streetHeightAt`) and the buildings have their own
+     * lot-grid collider. This is the one piece of the city with real geometry
+     * under the wheels.
+     */
+    if (city && cityWanted) {
+      const vc = city.viaductCollision?.();
+      if (vc) { decks.push(...vc.deck); solids.push(...vc.solids); }
     }
     // Round primitives bypass the BVH entirely — the chassis hull is SAMPLED
     // against triangles, and anything thinner than the sample spacing (a gate
