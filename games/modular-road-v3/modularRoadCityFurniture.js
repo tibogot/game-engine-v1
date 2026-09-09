@@ -37,6 +37,9 @@ import {
   GANTRY_DEFAULTS, GANTRY_PANELS, makeGantryAtlas, buildGantryGeometry,
   makeGantryMaterial, loadGantryFolder,
 } from "./modularRoadCityGantry.js";
+import {
+  STEAM_DEFAULTS, buildSteamGeometry, makeSteamMaterial,
+} from "./modularRoadCitySteam.js";
 
 /**
  * ── THE DRIVING-SIDE RULE. ONE PLACE, BECAUSE EVERYTHING NEEDS IT ───────────
@@ -198,6 +201,8 @@ export const FURNITURE_DEFAULTS = {
   /** Road signs — see modularRoadCityRoadSigns.js. */
   ...ROAD_SIGN_DEFAULTS,
   /** The warning triangle that fronts every roadworks closure. */
+  /** Street steam — see modularRoadCitySteam.js. */
+  ...STEAM_DEFAULTS,
   /** Overhead direction gantries — see modularRoadCityGantry.js. */
   ...GANTRY_DEFAULTS,
   gantryRows: GANTRY_DEFAULTS.rows,
@@ -652,6 +657,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const signGeo = buildRoadSignGeometry(F);
   const gantryAtlas = makeGantryAtlas({ ...F, rows: F.gantryRows });
   const gantryGeo = buildGantryGeometry(F);
+  const steamGeo = buildSteamGeometry(F);
   const railGeo = mergeGeometries([
     box(0.06, 1.05, 0.06, -0.95, 0, 0), box(0.06, 1.05, 0.06, 0.95, 0, 0),   // posts
     box(2.0, 0.05, 0.05, 0, 1.0, 0), box(2.0, 0.05, 0.05, 0, 0.55, 0),        // rails
@@ -681,6 +687,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   clutterMat.emissiveNode = litAdd({ vcolor: true });
   const signMat = makeRoadSignMaterial(signAtlas, uNight);
   const gantryMat = makeGantryMaterial(gantryAtlas, uNight);
+  const steam = makeSteamMaterial(uSignalTime, uNight, F);
   const railMat = new THREE.MeshStandardNodeMaterial({ color: 0x3a3d42, roughness: 0.45, metalness: 0.7 });
   railMat.name = "CityRails";
   railMat.emissiveNode = litAdd();
@@ -739,7 +746,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
 
   // ── Placement ──────────────────────────────────────────────────────────────
   const cars = [], trees = [], lights = [], rails = [];
-  const cones = [], barriers = [], bins = [], pallets = [], roadSigns = [], gantries = [];
+  const cones = [], barriers = [], bins = [], pallets = [], roadSigns = [], gantries = [], vents = [];
   const clutterInto = { cones, barriers, bins, pallets, signs: roadSigns };
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
   const UP = new THREE.Vector3(0, 1, 0);
@@ -947,6 +954,16 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
             rand: h2, seed: seedA + (side === 0 ? 0 : 977), C: F,
           });
           /*
+           * A STEAM VENT IN THE CARRIAGEWAY. In the road rather than on the
+           * pavement, because that is where a manhole is — and because a
+           * plume you drive THROUGH is worth more than one you drive past.
+           */
+          if (h2(seedA, side, 131) < F.steamChance) {
+            const vs = a0 + F.crossClear + h2(seedA, side, 132) * Math.max(1, (a1 - a0) - F.crossClear * 2);
+            const [vx, vz] = at(kerb - dir * F.steamInset, vs);
+            place(vents, vx, vz, h2(seedA, side, 133) * 6.283, { phase: h2(seedA, side, 134) });
+          }
+          /*
            * ONE MID-BLOCK SIGN, facing the traffic it is for.
            *
            * Mid-block, and never STOP or GIVE WAY — those mean a junction, and
@@ -1141,6 +1158,17 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // Any tile the project supplies replaces the drawn one, in place.
     loadRoadSignFolder(signAtlas).catch(() => {});
   }
+  const ventMesh = F.steam
+    ? instanced(vents, steamGeo, steam.material, "CitySteam", { shadows: false })
+    : null;
+  if (ventMesh) {
+    const ph = new Float32Array(vents.length);
+    for (let i = 0; i < vents.length; i++) ph[i] = vents[i].phase ?? 0;
+    steamGeo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(ph, 1));
+    // Transparent, so it must draw after the solid city or it blends against
+    // whatever happened to be in the buffer first.
+    ventMesh.renderOrder = 3;
+  }
   const gantryMesh = instanced(gantries, gantryGeo, gantryMat, "CityGantry", { shadows: false });
   if (gantryMesh) {
     const gt = new Float32Array(gantries.length);
@@ -1298,6 +1326,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // Read from much further than a kerb sign: that is the whole point of
     // hanging it over the road.
     { mesh: gantryMesh, list: gantries, range: 700, casts: false, attr: "aTile", key: "tile" },
+    // Short: a plume is soft and slow, and at distance it is a grey smudge
+    // over the one part of the frame that is already busiest.
+    { mesh: ventMesh, list: vents, range: 210, casts: false, attr: "aPhase", key: "phase" },
   ];
   const _pos = new THREE.Vector3();
   const _tm = new THREE.Matrix4();
@@ -1380,7 +1411,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   return {
     /** Every placement, by kind — the obstacle table turns these into the
      *  capsules the car collides with (modularRoadCityObstacles.js). */
-    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns, gantries },
+    lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns, gantries, vents },
     /** The rail mesh, so the knockables can redraw one that is in the air —
      *  `applyLod` only rewrites five times a second, which a thrown barrier
      *  cannot wait for. */
@@ -1405,6 +1436,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length },
       roadSigns: roadSigns.length,
       gantries: gantries.length,
+      vents: vents.length,
       /** Live — filled in when the preset trees land. `planted: 0` with
        *  treeSource "preset" means they are still loading, or failed. */
       presetTrees: presetTreeStats,
@@ -1425,9 +1457,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       // TreeStore, not here. This unplants them.
       if (presetTrees) { presetTrees.dispose(); presetTrees = null; }
       for (const m of [...carMeshes, ...trafficMeshes, trunkMesh, canopyMesh, lightMesh, railMesh,
-        coneMesh, barrierMesh, binMesh, palletMesh, signMesh, gantryMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
+        coneMesh, barrierMesh, binMesh, palletMesh, signMesh, gantryMesh, ventMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
       for (const g of [...carGeos, trunkGeo, canopyGeo, lightGeo, railGeo,
-        coneGeo, barrierGeo, binGeo, palletGeo, signGeo, gantryGeo]) g.dispose();
+        coneGeo, barrierGeo, binGeo, palletGeo, signGeo, gantryGeo, steamGeo]) g.dispose();
       for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat, clutterMat, signMat]) m.dispose();
       signAtlas.texture.dispose();
     },

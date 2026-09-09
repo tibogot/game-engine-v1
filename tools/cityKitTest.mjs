@@ -926,6 +926,34 @@ console.log("\n── LOOK PASS ──");
       gClash === 0, `${gClash} of ${gantries.length} within an arm's length of a mast`);
 
     /*
+     * ── STEAM VENTS ────────────────────────────────────────────────────────
+     *
+     * A manhole is in the ROAD. On the pavement it is a mystery, and a plume
+     * you drive through is worth more than one you drive past.
+     *
+     * Checked against the lanes the traffic actually drives rather than
+     * against the expression that placed them — re-deriving `kerb - dir *
+     * inset` here would only prove the arithmetic was copied correctly, which
+     * is the one thing that was never in doubt.
+     */
+    const vents = flatCity.furniture.lists.vents || [];
+    let ventMeshes = 0;
+    c.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CitySteam") ventMeshes++; });
+    check("all the city's steam is one draw", ventMeshes === 1 && vents.length > 0,
+      `${vents.length} vents in ${ventMeshes} mesh(es)`);
+    let offRoad = 0;
+    for (const e of vents) {
+      let near = Infinity;
+      for (const ln of laneSet) {
+        const d = Math.abs((ln.axis === "z" ? e.x : e.z) - ln.across);
+        if (d < near) near = d;
+      }
+      if (near > streetW2 * 0.5) offRoad++;
+    }
+    check("every vent is in the carriageway, not on the pavement",
+      vents.length > 0 && offRoad === 0, `${offRoad} of ${vents.length} off the road`);
+
+    /*
      * NOTHING BURIED IN A BUILDING. A cone, sign or bin inside a footprint is
      * invisible, still costs an instance and a capsule, and is exactly the
      * kind of waste that never shows up in a stat — the count says 1456 cones
