@@ -8185,6 +8185,12 @@ ${e.message}`);
     return Math.round(performance.now() - t0);
   }
 
+  /** How far the warm-up drives, each way, and in what steps. 16 x 45 m is
+   *  720 m of street in each direction — past where the user's own trace put
+   *  the last hitch (z = -1113 from a start at z = -4). */
+  const WARM_DRIVE_STEPS = 16;
+  const WARM_DRIVE_STEP_M = 45;
+
   async function warmUpTrackPipelines({ label = "Preparing track…" } = {}) {
     if (warmingUp) return;
     const pieces = builder.pieces ?? [];
@@ -8204,6 +8210,22 @@ ${e.message}`);
     const cityToWarm = !!(city && cityWanted);
     /** Counts forced up for the warm-up; restored once every pass has run. */
     let forcedCityMeshes = null;
+    /*
+     * The moving warm-up holds the REAL camera, because the mirror pass and
+     * the city's own LOD both read that camera and nothing else. A cloned one
+     * would move the view and leave both of them looking at the start line.
+     * The hook runs immediately before the engine's render, so whatever the
+     * orbit controls or the chase camera did earlier in the frame is
+     * overwritten for exactly one frame.
+     */
+    let _warmPose = null;
+    const warmDriveHook = () => {
+      if (!_warmPose) return;
+      camera.position.copy(_warmPose.pos);
+      camera.lookAt(_warmPose.at);
+      camera.updateMatrixWorld(true);
+      if (city && cityWanted) city.update(0, camera);
+    };
     if (!pieces.length && !cityToWarm) return;
     warmingUp = true;
     /*
@@ -8450,6 +8472,50 @@ ${e.message}`);
        */
       reflectionEnabled = reflectionWas;
       if (reflectionWas) await settleFrames(300, 500, 2500);
+
+      /*
+       * ── DRIVE THE ROAD, UNDER THE COVER ──────────────────────────────────
+       *
+       * THE THING EVERY OTHER ATTEMPT MISSED. Every pose above is STATIC — a
+       * handful of viewpoints, held still. But the stall the player actually
+       * feels is not at the start line, it is a hundred metres down the road
+       * and then again three hundred metres later: 1300 ms at z=-405 at 48
+       * m/s, then ten more of 117-167 ms strung out to z=-1113, measured from
+       * the user's own drive. Standing still cannot produce those, because
+       * what triggers them is GROUND THE RENDERER HAS NOT SEEN — new
+       * archetypes crossing an LOD ring, new facade branches, new street
+       * content entering the mirror.
+       *
+       * So the warm-up drives. The camera is walked down the street the car is
+       * sitting on, a few hundred metres, one REAL engine frame per step so
+       * the post pass, the shadow cascade and the mirror all run on each of
+       * them. It is the cheapest pose in the list — the scene is already
+       * resident — and it is the only one that reproduces what the player is
+       * about to do.
+       */
+      if (cityToWarm && vehicleRef?.body?.pos) {
+        const st = city.streetSpawnNear?.(vehicleRef.body.pos.x, vehicleRef.body.pos.z);
+        if (st) {
+          // Along the street, both ways, so the run is not one-directional.
+          const ax = Math.sin(st.yaw), az = Math.cos(st.yaw);
+          const gy = city.params?.groundY ?? 0;
+          if (!_warmPose) _warmPose = { pos: new THREE.Vector3(), at: new THREE.Vector3() };
+          app.addPreRenderHook?.(warmDriveHook);
+          try {
+            for (let i = -WARM_DRIVE_STEPS; i <= WARM_DRIVE_STEPS; i++) {
+              const d = i * WARM_DRIVE_STEP_M;
+              _warmPose.pos.set(st.x + ax * d, gy + 2.4, st.z + az * d);
+              _warmPose.at.set(st.x + ax * (d + 60), gy + 1.6, st.z + az * (d + 60));
+              await new Promise((res) => requestAnimationFrame(() => res()));
+            }
+          } finally {
+            app.removePreRenderHook?.(warmDriveHook);
+            _warmPose = null;
+          }
+          // Whatever that turned up, let it finish before the cover lifts.
+          await settleFrames(300, 700, 4000);
+        }
+      }
       // Every pass has now drawn every mesh; give the LOD its counts back.
       if (forcedCityMeshes) { for (const [m, c] of forcedCityMeshes) m.count = c; forcedCityMeshes = null; }
 
