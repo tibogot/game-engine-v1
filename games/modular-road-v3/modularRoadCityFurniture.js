@@ -461,7 +461,19 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     tint(arm, STEEL);
     // Backboard: the wide dark plate the lenses are read against. It is most
     // of why a signal is visible against a bright sky.
-    tint(box(0.80, 1.44, 0.04, A, H - 1.56, -0.20), SHELL);
+    /*
+     * THE HEAD LOOKS BACK DOWN ITS OWN APPROACH — so the lenses are on local
+     * -Z and the backboard behind them on +Z.
+     *
+     * It was the other way round, and the arm being right made it worse rather
+     * than better: the mast stands on the right kerb UPSTREAM of the junction,
+     * so the traffic it controls comes from BEHIND it, and a face on +Z showed
+     * the lenses to the cars that had already gone through. All four
+     * axis/side combinations were wrong by exactly 180 degrees, which is why
+     * it read as "the block with the lights is facing the opposite direction"
+     * whichever street you looked at.
+     */
+    tint(box(0.80, 1.44, 0.04, A, H - 1.56, 0.20), SHELL);
     // Housing, hung under the arm end.
     tint(box(0.38, 1.16, 0.34, A, H - 1.42, 0), SHELL);
     /*
@@ -479,11 +491,11 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
        * 0.17, the disc sits at 0.20-0.27, and the hood stops at 0.185.
        */
       const d = new THREE.CylinderGeometry(0.135, 0.135, 0.07, 10, 1);
-      d.rotateX(Math.PI / 2);           // face +Z
-      d.translate(A, y, 0.235);
+      d.rotateX(-Math.PI / 2);          // face -Z, back down the approach
+      d.translate(A, y, -0.235);
       tint(d, hex);
       // Hood over each lens, so low sun does not wash the head out.
-      tint(box(0.34, 0.035, 0.17, A, y + 0.145, 0.10), SHELL);
+      tint(box(0.34, 0.035, 0.17, A, y + 0.145, -0.10), SHELL);
     }
     const g = mergeGeometries(parts, false);
     for (const q of parts) q.dispose();
@@ -570,7 +582,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     const lit = vec3(1.0, 0.16, 0.10).mul(band(LENS_Y[0]).mul(isRed))
       .add(vec3(1.0, 0.69, 0.13).mul(band(LENS_Y[1]).mul(isAmber)))
       .add(vec3(0.21, 1.0, 0.42).mul(band(LENS_Y[2]).mul(isGreen)));
-    const front = step(float(0.19), positionGeometry.z);
+    // The lens face is the -Z one — see the head geometry.
+    const front = step(positionGeometry.z, float(-0.19));
     const atHead = step(float(F.lightArm * 0.6), positionGeometry.x);
     return lit.mul(front.mul(atHead)).mul(mix(float(F.signalDay), float(F.signalNight), uNight));
   })();

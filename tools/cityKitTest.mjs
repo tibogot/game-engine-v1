@@ -469,6 +469,48 @@ console.log("\n── LOOK PASS ──");
       endTotal > 0 && wrongEnd === 0, `${wrongEnd} of ${endTotal} at the far end`);
 
     /*
+     * AND IT MUST LOOK BACK AT THAT TRAFFIC. The arm being right does not make
+     * the head right: the mast stands UPSTREAM on the right kerb, so a head
+     * facing the same way the cars travel shows its lenses to the ones that
+     * have already gone through. All four axis/side combinations were wrong by
+     * exactly 180 degrees while every other test passed.
+     *
+     * WHICH WAY THE LENSES ACTUALLY FACE IS READ OUT OF THE GEOMETRY, not
+     * assumed. An earlier version of this test hardcoded "the lens is on -Z",
+     * which is the answer rather than the question — it would have passed just
+     * as happily on the build where they were on +Z, because nothing about the
+     * INSTANCE changes when the head is modelled backwards. Find the lens
+     * vertices (proud of the housing, out at the arm's end) and take the sign
+     * of their z.
+     */
+    let lensSign = 0;
+    {
+      let lightMesh = null;
+      c.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CityTrafficLights") lightMesh = o; });
+      const pos = lightMesh.geometry.getAttribute("position");
+      let sum = 0, n = 0;
+      for (let i = 0; i < pos.count; i++) {
+        const z = pos.getZ(i);
+        if (pos.getX(i) > FP.lightArm * 0.8 && Math.abs(z) > 0.19) { sum += z; n++; }
+      }
+      lensSign = n && sum < 0 ? -1 : 1;
+      check("the signal head has a lens face proud of its housing", n > 0, `${n} lens vertices`);
+    }
+    let facingWrong = 0, facingTotal = 0;
+    for (const e of lights.slice(0, 300)) {
+      if (e.travel == null) continue;
+      const el = e.m.elements;
+      // Local +Z is the third basis column; the lenses look along lensSign.
+      const nx = el[8] * lensSign, nz = el[10] * lensSign;
+      const tx = e.axis === "z" ? 0 : e.travel;
+      const tz = e.axis === "z" ? e.travel : 0;
+      facingTotal++;
+      if (nx * tx + nz * tz > -0.5) facingWrong++;      // must point back at it
+    }
+    check("every signal head faces the traffic it controls",
+      facingTotal > 0 && facingWrong === 0, `${facingWrong} of ${facingTotal} face away`);
+
+    /*
      * NOTHING BURIED IN A BUILDING. A cone, sign or bin inside a footprint is
      * invisible, still costs an instance and a capsule, and is exactly the
      * kind of waste that never shows up in a stat — the count says 1456 cones
