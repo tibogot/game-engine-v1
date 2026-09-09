@@ -307,6 +307,15 @@ export const FACADE_DEFAULTS = {
    *  metres wide whatever the windows above are doing, and shops that line
    *  up with the windows above them are the tell of a generated frontage. */
   shopfronts: 1,
+  /** A doorway for every frontage that is NOT a parade or a lobby — which is
+   *  most of them, and all of them were blank wall from pavement to roof.
+   *  One per FACE: the shader does not know which face is the front, and a
+   *  door on each is what a real corner block has anyway. */
+  doorways: 1,
+  doorW: 1.7,
+  doorH: 2.6,
+  doorFrame: 0.16,
+  doorGlow: 0.75,
   /** How many eligible buildings get a parade at all. NOT most of them: a
    *  shopfront on every frontage in the city is wallpaper, not a street. */
   shopBuildings: 0.42,
@@ -1428,6 +1437,47 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
       oEmis.assign(oEmis.add(vec3(1.0, 0.86, 0.66).mul(
         glass.mul(float(1.0).sub(awnM)).mul(litShop).mul(shopOn)
           .mul(u.nightAmount).mul(u.shopGlow))));
+
+      /*
+       * ── AND A DOOR FOR EVERYONE ELSE ───────────────────────────────────
+       *
+       * Only 42% of eligible buildings get a parade, which is the point — but
+       * it left the other 58% as blank wall from the pavement to the roof.
+       * Real buildings without shops still have a way IN, and at eye level a
+       * doorway is the difference between a building and an extrusion.
+       *
+       * ONE PER FACE, at a hashed position, rather than one per building: the
+       * shader has no idea which face is the front — it does not even know
+       * the other three exist — so a door on each is both the only thing
+       * available and, as it happens, what a real corner block looks like.
+       *
+       * It costs almost nothing on top of what is already here. This sits
+       * inside the same street-level branch as the shopfront, so the pixels
+       * that pay for it are the ones already paying, and the two are mutually
+       * exclusive by construction: a frontage is a parade, a lobby, or a door.
+       */
+      const plainOn = u.doorways.mul(notBase)
+        .mul(float(1.0).sub(max(paradeOn, lobbyOn))).toVar();
+      const dh = hash31(vec3(F.lot, F.faceKey.mul(3.7).add(19.1))).toVar();
+      const dU = F.u0.sub(F.W.mul(mix(float(0.24), float(0.76), dh))).toVar();
+      const dHalf = u.doorW.mul(0.5);
+      const doorM = band(dU, dHalf.negate(), dHalf, F.aaU)
+        .mul(band(F.up, float(0.0), u.doorH, F.aaV)).toVar();
+      // The surround, and a canopy over it — a door with a lintel reads as an
+      // entrance; a dark rectangle on a wall reads as a hole.
+      const surM = band(dU, dHalf.add(u.doorFrame).negate(), dHalf.add(u.doorFrame), F.aaU)
+        .mul(band(F.up, float(0.0), u.doorH.add(u.doorFrame), F.aaV))
+        .sub(doorM).max(0.0).toVar();
+      const canM = band(dU, dHalf.add(0.34).negate(), dHalf.add(0.34), F.aaU)
+        .mul(band(F.up, u.doorH.add(u.doorFrame), u.doorH.add(u.doorFrame).add(0.17), F.aaV))
+        .toVar();
+      oCol.assign(mix(oCol, vec3(0.30, 0.31, 0.33), surM.mul(plainOn)));
+      oCol.assign(mix(oCol, vec3(0.055, 0.058, 0.065), doorM.mul(plainOn)));
+      oCol.assign(mix(oCol, vec3(0.10, 0.10, 0.11), canM.mul(plainOn)));
+      // A lamp over the door. Small, warm, and always on — an entrance light
+      // is the one light in a city that never goes off.
+      oEmis.assign(oEmis.add(vec3(1.0, 0.88, 0.70).mul(
+        canM.mul(plainOn).mul(u.nightAmount).mul(u.doorGlow))));
 
       // One hash per BAY, so a frontage is a shop rather than a whole tower
       // lighting up at once. `faceKey` keeps the four sides different.
