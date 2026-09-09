@@ -1942,10 +1942,36 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   /** The layout knobs a track may pin. Everything else is CITY_DEFAULTS. */
   const cityParams = {
     extent: 1200, density: 0.86, downtownPower: 2.2, heightNoise: 0.55,
-    scaleYMax: 1.45, avoidRadius: 40, centerX: 0, centerZ: 0,
+    scaleYMax: 1.45, centerX: 0, centerZ: 0,
+    /*
+     * WAS 40, AND 40 IS WIDER THAN A LOT.
+     *
+     * A lot is 34 m, so a 40 m pad around every piece box cleared one to two
+     * EXTRA lots in every direction — which is why placing a piece deleted a
+     * block rather than the tower it actually passed through. At 8 m the
+     * corridor is the track plus a driveable margin, and the road threads
+     * between towers instead of bulldozing to make room.
+     */
+    avoidRadius: 8,
+    /*
+     * Headroom between a roof and the track's underside. Below this a lot is
+     * cleared; above it the track simply flies over. Not zero: a deck that
+     * misses a parapet by nothing looks like a mistake even when it is not,
+     * and the piece box is the mesh alone — it does not know about the rail
+     * posts standing on top of it.
+     */
+    avoidClear: 6,
   };
   const CITY_LOT = CITY_DEFAULTS.lotSize;
-  const _corridorCells = new Set();
+  /**
+   * Cell key → the LOWEST underside any track piece reaches over that cell.
+   *
+   * A Set here only ever said "a piece passes over this lot", which is why a
+   * track three hundred metres up cleared the block beneath it as hard as one
+   * at street level. Keeping the height turns the same stamp into an answer
+   * about whether the track and a building can actually meet.
+   */
+  const _corridorCells = new Map();
   const _pieceBox = new THREE.Box3();
   let _corridorTimer = 0;
 
@@ -1953,7 +1979,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     return terrainOn ? (x, z) => app.getWorldHeight(x, z) : null;
   }
 
-  /** Stamp every piece's footprint, grown by the corridor radius, into lot cells. */
+  /** Stamp every piece's footprint, grown by the corridor radius, into lot
+   *  cells — keeping, per cell, the lowest underside that reaches it. */
   function rebuildCorridor() {
     _corridorCells.clear();
     const pad = cityParams.avoidRadius;
@@ -1964,20 +1991,41 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // Piece meshes carry their WORLD transform in `matrix` — matrixAutoUpdate
       // is off and the builder root sits at the origin (see _makeMesh).
       _pieceBox.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrix);
+      const lowY = _pieceBox.min.y;
       const cx0 = Math.floor((_pieceBox.min.x - pad) / CITY_LOT);
       const cx1 = Math.floor((_pieceBox.max.x + pad) / CITY_LOT);
       const cz0 = Math.floor((_pieceBox.min.z - pad) / CITY_LOT);
       const cz1 = Math.floor((_pieceBox.max.z + pad) / CITY_LOT);
       for (let cx = cx0; cx <= cx1; cx++) {
-        for (let cz = cz0; cz <= cz1; cz++) _corridorCells.add(cx * 100003 + cz);
+        for (let cz = cz0; cz <= cz1; cz++) {
+          const key = cx * 100003 + cz;
+          // The LOWEST piece wins: one low piece over a cell is enough to
+          // need the lot clear, however high everything else above it flies.
+          const prev = _corridorCells.get(key);
+          if (prev === undefined || lowY < prev) _corridorCells.set(key, lowY);
+        }
       }
     }
   }
-  /** The layout's keep-out query. -1 inside a stamped cell so it clears even
-   *  at avoidRadius 0; ∞ elsewhere. The radius itself was applied at stamp. */
-  function cityAvoid(x, z) {
+  /**
+   * The layout's keep-out query. -1 clears the lot, ∞ keeps it; the radius
+   * itself was applied at stamp, which is why -1 clears even at radius 0.
+   *
+   * `top` is the height the building would REACH, and it is what makes this
+   * height-aware: a lot is only cleared if some piece's underside comes down
+   * within `avoidClear` of that roof. Elevated track now flies over the city
+   * instead of deleting it — which is the whole point of building around a
+   * skyline rather than through the hole where one used to be.
+   *
+   * Called without `top` it still clears, so any caller that has not been
+   * taught about heights fails safe rather than driving through a tower.
+   */
+  function cityAvoid(x, z, top) {
     const key = Math.floor(x / CITY_LOT) * 100003 + Math.floor(z / CITY_LOT);
-    return _corridorCells.has(key) ? -1 : Infinity;
+    const lowY = _corridorCells.get(key);
+    if (lowY === undefined) return Infinity;
+    if (top != null && lowY > top + cityParams.avoidClear) return Infinity;
+    return -1;
   }
 
   function buildCity() {
@@ -6897,6 +6945,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     cityHeightNoise: "heightNoise",
     cityScaleYMax: "scaleYMax",
     cityAvoidRadius: "avoidRadius",
+    cityAvoidClear: "avoidClear",
     cityCenterX: "centerX",
     cityCenterZ: "centerZ",
   };

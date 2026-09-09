@@ -418,7 +418,6 @@ export function createModularRoadCity({
         const rType = rnd();
 
         if (rDensity > P.density) continue;
-        if (avoid && avoid(x, z) < P.avoidRadius) { culledCorridor++; continue; }
 
         let baseY = P.groundY;
         if (heightAt) {
@@ -449,6 +448,25 @@ export function createModularRoadCity({
         const arch = Math.floor(t * normalCount);
         const scaleY = P.scaleYMin + rScale * (P.scaleYMax - P.scaleYMin);
         const top = baseY + kit.archetypes[arch].massHeight * scaleY;
+
+        /*
+         * THE TRACK'S KEEP-OUT, ASKED AFTER THE HEIGHT IS KNOWN.
+         *
+         * This test used to sit up with the density roll, where all it could
+         * say was "a piece passes over this lot" — so a track three hundred
+         * metres in the air stamped out the block underneath it exactly as
+         * hard as one at street level, for a collision that could never
+         * happen. Handing `top` to the query lets the corridor answer the
+         * question it was always really being asked: is the track low enough
+         * HERE to meet a building THIS tall.
+         *
+         * Moving it below the dice is free by construction: `lotRng(cx, cz)`
+         * is a fresh generator per lot, so where a lot bails out cannot
+         * disturb any other lot. That is the same property that lets a piece
+         * clear the towers under it without reshuffling the city, and
+         * cityKitTest guards it.
+         */
+        if (avoid && avoid(x, z, top) < P.avoidRadius) { culledCorridor++; continue; }
 
         // ── BUILDING TYPE ────────────────────────────────────────────────────
         // The wall RHYTHM, which is what you read at distance — separate from

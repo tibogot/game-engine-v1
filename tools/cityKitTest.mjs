@@ -202,6 +202,69 @@ console.log("\n── CORRIDOR STABILITY ──");
     moved === 0 && extra === 0 && wide.stats.buildings < flatCity.stats.buildings,
     `${flatCity.stats.buildings} → ${wide.stats.buildings}; ${moved} changed, ${extra} appeared`,
   );
+  /*
+   * ── THE CORRIDOR ASKS HOW TALL THE BUILDING IS ──────────────────────────
+   *
+   * The keep-out used to be answered from (x, z) alone, so a track three
+   * hundred metres in the air stamped out the block underneath it exactly as
+   * hard as one at street level — buildings deleted for a collision that
+   * could never happen, which is what "the city adapts to my track" actually
+   * was. The query now gets the height the building would reach.
+   *
+   * Both directions are checked, because only one of them is the fix. A
+   * corridor that cleared nothing at all would pass a "high track keeps the
+   * city" test and drive straight through a tower.
+   */
+  const CORRIDOR_X = 1e9;                      // the band avoid() describes
+  const bandAvoid = (deckY) => (x, z, top) => {
+    const d = Math.abs(x);
+    if (d > 120) return Infinity;              // outside the strip: keep
+    if (top != null && deckY > top + 6) return Infinity;   // track flies over
+    return -1;
+  };
+  const overhead = createModularRoadCity({ seed: 20260902, avoid: bandAvoid(400), params: {} });
+  const atGrade = createModularRoadCity({ seed: 20260902, avoid: bandAvoid(2), params: {} });
+  const base = createModularRoadCity({ seed: 20260902, avoid: () => Infinity, params: {} });
+  check("a track flown over the city clears nothing",
+    overhead.stats.buildings === base.stats.buildings,
+    `${base.stats.buildings} with no track, ${overhead.stats.buildings} under a 400 m deck`);
+  check("a track at street level still clears its own corridor",
+    atGrade.stats.buildings < base.stats.buildings,
+    `${base.stats.buildings} → ${atGrade.stats.buildings} under a 2 m deck`);
+  /*
+   * AND WHAT IT CLEARS IS STILL A STRICT SUBSET — the property that makes
+   * "build around the city" possible at all. Moving the query below the dice
+   * cannot disturb another lot, because `lotRng(cx, cz)` is a fresh generator
+   * per lot; this is what proves that rather than asserting it.
+   */
+  const baseKeys = new Map(base.buildings.map((b) => [key(b), b]));
+  let gMoved = 0, gExtra = 0, gLandmark = 0;
+  for (const b of atGrade.buildings) {
+    const o = baseKeys.get(key(b));
+    if (!o) { gExtra++; continue; }
+    /*
+     * LANDMARKS ARE THE ONE REAL EXCEPTION, and it is deliberate rather than
+     * a leak. The post-pass always promotes the N lots nearest downtown to
+     * the landmark archetypes, so removing one promotes the next-nearest —
+     * a global decision, on purpose, and the only thing in the layout that is
+     * not a pure function of (seed, cell).
+     *
+     * The check above this one passes only because its corridor happens to
+     * wipe the entire landmark disc, so no promotion can be observed. Saying
+     * so here is the difference between a test that holds and one that holds
+     * by luck.
+     */
+    if (o.landmark || b.landmark) { gLandmark++; continue; }
+    if (o.arch !== b.arch || Math.abs(o.scaleY - b.scaleY) > 1e-12 || o.y !== b.y) gMoved++;
+  }
+  check("a low track removes buildings and moves no ordinary one",
+    gMoved === 0 && gExtra === 0, `${gMoved} changed, ${gExtra} appeared`);
+  check("the only buildings the corridor re-decides are the landmarks",
+    gLandmark <= (base.stats.landmarks || 0) + (atGrade.stats.landmarks || 0),
+    `${gLandmark} touched, ${base.stats.landmarks} landmarks`);
+  for (const cty of [overhead, atGrade, base]) cty.dispose?.();
+  void CORRIDOR_X;
+
   // Density is per lot too: lowering it must be a strict subset.
   const sparse = createModularRoadCity({ seed: 20260902, avoid, params: { density: 0.5 } });
   let notSubset = 0;
