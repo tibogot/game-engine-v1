@@ -839,12 +839,26 @@ console.log("\n── LOOK PASS ──");
 
   check("every lamp post stands inside the city extent", out === 0, `${out} outside`);
   }
-  // Street furniture: cars, trees, traffic lights, guardrails — five draws.
+  // Street furniture: cars, trees, traffic lights, guardrails.
   const fs = c.stats.furniture;
   check("furniture is placed on the grid", !!fs && fs.cars > 500 && fs.trees > 300 && fs.lights > 100 && fs.rails > 200, JSON.stringify(fs));
-  let fmeshes = 0;
-  c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Cars|Trunks|Canopies|TrafficLights|Rails|Traffic)$/.test(o.name)) fmeshes++; });
-  check("furniture is exactly six instanced meshes", fmeshes === 6, `${fmeshes}`);
+  /*
+   * WHAT THIS GUARDS IS THE DRAW COUNT, not a particular number of meshes.
+   *
+   * It used to say "exactly six", which was the same statement while there
+   * was one car body; now there are four bodies parked and four driving, and
+   * pinning the literal would have meant either deleting the check or letting
+   * it drift into a number nobody could justify. The invariant that actually
+   * matters has not changed: the entire population of the city — thousands of
+   * parked cars, thousands of trees, hundreds of masts, a moving fleet — is a
+   * BOUNDED handful of draws, and it stays bounded when a body is added.
+   */
+  const fnames = [];
+  c.group.traverse((o) => {
+    if (o.isInstancedMesh && /^City(Cars|Trunks|Canopies|TrafficLights|Rails|Traffic)(_|$)/.test(o.name)) fnames.push(o.name);
+  });
+  check("the whole street population is a handful of draws",
+    fnames.length >= 6 && fnames.length <= 14, `${fnames.length}: ${fnames.join(", ")}`);
 
   // ── STREET CLUTTER ────────────────────────────────────────────────────────
   {
@@ -915,8 +929,19 @@ console.log("\n── LOOK PASS ──");
   // MOVING TRAFFIC: one more draw, driven on the CPU and culled by distance.
   check("traffic is laid out on lanes", fs.lanes > 40 && fs.traffic > 200, `${fs.traffic} cars on ${fs.lanes} lanes`);
   {
-    const tm = c.group.getObjectByName("CityTraffic");
-    check("traffic is one instanced mesh", !!tm && tm.isInstancedMesh && tm.instanceMatrix.count === fs.traffic);
+    /*
+     * ONE MESH PER BODY, and between them they hold every car exactly once.
+     * Capacity is the thing to check, not `count`: `count` is rewritten every
+     * frame to whatever is in range, but a mesh sized smaller than its share
+     * of the fleet would silently stop drawing the cars past the end — which
+     * looks like a culling bug and is an allocation bug.
+     */
+    const tms = [];
+    c.group.traverse((o) => { if (o.isInstancedMesh && /^CityTraffic(_|$)/.test(o.name)) tms.push(o); });
+    const cap = tms.reduce((a, m) => a + m.instanceMatrix.count, 0);
+    const tm = tms[0];
+    check("every moving car has a slot in a body's mesh",
+      tms.length > 0 && cap === fs.traffic, `${tms.length} meshes, ${cap} slots for ${fs.traffic} cars`);
     const cam = new THREE.Vector3(0, 40, 0);
     c.update(0.016, { position: cam });
     const first = tm.count;
@@ -929,8 +954,16 @@ console.log("\n── LOOK PASS ──");
     check("traffic actually moves between frames", v0.distanceTo(v1) > 0.5, `${v0.distanceTo(v1).toFixed(1)} m`);
   }
   {
-    const cm = c.group.getObjectByName("CityCars");
-    check("cars carry per-instance colour", !!cm && !!cm.instanceColor && cm.instanceColor.count === fs.cars);
+    // Every body's mesh carries its own colours, and between them they cover
+    // the whole parked population — a body that lost its instanceColor would
+    // draw a street of identical white cars and nothing else would complain.
+    const cms = [];
+    c.group.traverse((o) => { if (o.isInstancedMesh && /^CityCars(_|$)/.test(o.name)) cms.push(o); });
+    const tinted = cms.filter((m) => m.instanceColor);
+    const colours = tinted.reduce((a, m) => a + m.instanceColor.count, 0);
+    check("every parked car carries a per-instance colour",
+      cms.length > 0 && tinted.length === cms.length && colours === fs.cars,
+      `${tinted.length}/${cms.length} meshes tinted, ${colours} colours for ${fs.cars} cars`);
   }
   // The image API: a slot swap must be a repaint, never a new texture.
   const texBefore = c.group.getObjectByName("CityHeroes").material.name;

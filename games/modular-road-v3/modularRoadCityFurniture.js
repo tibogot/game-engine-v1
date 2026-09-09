@@ -270,6 +270,212 @@ function pickCarColor(r) {
  * @param {number} o.originCellZ
  * @param {object} [o.params]
  */
+/*
+ * ── THE TRAFFIC FLEET ──────────────────────────────────────────────────────
+ *
+ * Four bodies, not one. A street where every car is the same silhouette
+ * reads as generated no matter how good that silhouette is, and the fix is
+ * shape variety rather than more detail on a single shape — you recognise a
+ * van by its outline at a hundred metres and by nothing else.
+ *
+ * ONE DRAW CALL EACH, so the whole fleet is four. That is the honest cost
+ * and it is the reason this is four geometries rather than one geometry
+ * deformed per instance: a vertex-stage reshape would have kept it at one
+ * draw, but `InstanceNode` overwrites `positionLocal`, so it would have
+ * meant fighting the instancing path for a saving of three draws out of a
+ * hundred and twenty. Not a trade worth making.
+ *
+ * The profiles are (along, up) pairs with the BONNET AT NEGATIVE along —
+ * `rotateY(PI/2)` maps that axis to −z, so in the finished geometry the nose
+ * is at +Z. That is measurable and it is what CAR_NOSE_Z states. The comment
+ * here once claimed the opposite and the lamp boxes were placed to match the
+ * comment rather than the geometry, which put the white headlights on the
+ * boot; both halves of the traffic then looked wrong for two different
+ * reasons and fixing one only moved which half.
+ */
+export const CAR_BODIES = [
+  {
+    name: "saloon",
+    width: 1.82, wheel: 0.33, axle: 1.45, tread: 0.86,
+    // bumper, bonnet, windscreen, roof, rear glass, boot, tail
+    pts: [
+      [-2.25, 0.32], [-2.25, 0.62], [-2.05, 0.72], [-0.95, 0.80],
+      [-0.35, 1.32], [0.75, 1.36],
+      [1.45, 1.10], [2.05, 0.95], [2.25, 0.70], [2.25, 0.32],
+    ],
+    glass: [0.86, 1.34, -1.65, 0.55],
+    lamps: [2.42, -2.42],
+    share: 0.44,
+  },
+  {
+    // Shorter, and the tail falls straight off the roof instead of stepping
+    // down to a boot — which is the whole difference between the two shapes.
+    name: "hatchback",
+    width: 1.76, wheel: 0.31, axle: 1.26, tread: 0.83,
+    pts: [
+      [-1.98, 0.30], [-1.98, 0.60], [-1.80, 0.70], [-0.85, 0.78],
+      [-0.30, 1.28], [0.72, 1.34],
+      [1.42, 1.16], [1.78, 0.78], [1.90, 0.60], [1.90, 0.30],
+    ],
+    glass: [0.84, 1.32, -1.50, 0.70],
+    lamps: [2.14, -2.06],
+    share: 0.30,
+  },
+  {
+    // A tall box on a short nose. Nothing else on the street has this
+    // outline, so it does most of the work of making the traffic look mixed.
+    name: "van",
+    width: 1.96, wheel: 0.36, axle: 1.72, tread: 0.90,
+    pts: [
+      [-2.62, 0.36], [-2.62, 0.70], [-2.50, 0.88], [-2.05, 1.05],
+      // The cab roof sits BELOW the box behind it, which is what a van
+      // actually looks like — and it is also what keeps the nose readable as
+      // the lower end. Level with the box it was a 5 cm difference, and 5 cm
+      // is not a shape, it is a rounding error waiting to flip a test.
+      [-1.85, 1.82], [2.30, 2.02],
+      [2.48, 1.80], [2.55, 1.10], [2.55, 0.70], [2.55, 0.36],
+    ],
+    // Only the cab glazes; the box behind it is panel all the way back.
+    glass: [1.10, 1.92, -2.10, -1.30],
+    lamps: [2.78, -2.72],
+    share: 0.16,
+  },
+  {
+    // A saloon with a roof sign. Taxis are the one vehicle a city has a lot
+    // of and that you can name on sight, so it is worth one archetype.
+    name: "taxi",
+    width: 1.84, wheel: 0.33, axle: 1.48, tread: 0.87,
+    pts: [
+      [-2.30, 0.32], [-2.30, 0.62], [-2.10, 0.72], [-1.00, 0.80],
+      [-0.38, 1.34], [0.80, 1.38],
+      [1.50, 1.12], [2.10, 0.96], [2.30, 0.70], [2.30, 0.32],
+    ],
+    glass: [0.86, 1.36, -1.70, 0.60],
+    lamps: [2.47, -2.47],
+    roofSign: true,
+    share: 0.10,
+  },
+];
+
+/**
+ * One body, built from its profile. Everything that used to be a literal in
+ * here is now read off the spec, so a new archetype is a table entry rather
+ * than a copy of this function.
+ */
+function buildCarBody(B) {
+  const W = B.width;
+  const shape = new THREE.Shape();
+  shape.moveTo(B.pts[0][0], B.pts[0][1]);
+  for (let i = 1; i < B.pts.length; i++) shape.lineTo(B.pts[i][0], B.pts[i][1]);
+  shape.closePath();
+  const body = new THREE.ExtrudeGeometry(shape, {
+    depth: W, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.08, bevelSegments: 1, steps: 1,
+  });
+  body.rotateY(Math.PI / 2);          // extrusion axis (z) → across the car (x)
+  body.translate(-W / 2, 0, 0);
+  // Glass band: vertices between the belt line and the roof, on the cabin.
+  // The window is given in FINISHED coordinates (y lo, y hi, z lo, z hi) —
+  // the profile is mirrored by the rotation above, and writing the band in
+  // profile space is what once tinted a stripe of bonnet and left half the
+  // real cabin painted body colour.
+  const [gLo, gHi, zLo, zHi] = B.glass;
+  const bp = body.getAttribute("position");
+  const bc = new Float32Array(bp.count * 3);
+  for (let i = 0; i < bp.count; i++) {
+    const y = bp.getY(i), z = bp.getZ(i);
+    const glass = y > gLo && y < gHi && z > zLo && z < zHi;
+    bc[i * 3] = glass ? 0.16 : 1.0;
+    bc[i * 3 + 1] = glass ? 0.18 : 1.0;
+    bc[i * 3 + 2] = glass ? 0.22 : 1.0;
+  }
+  body.setAttribute("color", new THREE.BufferAttribute(bc, 3));
+
+  /*
+   * HEAD AND TAIL LAMPS, as real boxes on the nose and tail. The traffic
+   * material finds them by their LOCAL Z (positionGeometry survives
+   * instancing; positionLocal does not — InstanceNode overwrites it), so
+   * they need no attribute of their own and the parked cars, whose material
+   * has no such term, simply leave them dark.
+   *
+   * THE Z MAGNITUDE MATTERS. The extrude's bevel pushes the body out past
+   * the profile, so lamps flush with the profile sat INSIDE it — invisible,
+   * and indistinguishable from the body by the Z test the material uses.
+   * `lamps` carries the proud positions per body for that reason.
+   */
+  const [noseZ, tailZ] = B.lamps;
+  const half = B.width * 0.5;
+  const extras = [];
+  for (const [x, z, w, h, yy] of [
+    [-half * 0.66, CAR_NOSE_Z * noseZ, 0.50, 0.22, 0.62],
+    [half * 0.66, CAR_NOSE_Z * noseZ, 0.50, 0.22, 0.62],
+    [-half * 0.70, CAR_NOSE_Z * tailZ, 0.46, 0.20, 0.58],
+    [half * 0.70, CAR_NOSE_Z * tailZ, 0.46, 0.20, 0.58],
+  ]) {
+    const g = box(w, h, 0.14, x, yy, z).toNonIndexed();
+    const c = new Float32Array(g.getAttribute("position").count * 3).fill(1.0);
+    g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+    extras.push(g);
+  }
+  // Wing mirrors. Two small dark boxes, and the cheapest detail on the car
+  // that says "this is a vehicle" at the distance you actually see it.
+  const mirrorZ = Math.max(zLo, Math.min(zHi, zHi - 0.15));
+  for (const sx of [-1, 1]) {
+    const g = box(0.16, 0.10, 0.09, sx * (half + 0.09), gHi - 0.14, mirrorZ).toNonIndexed();
+    const c = new Float32Array(g.getAttribute("position").count * 3).fill(0.08);
+    g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+    extras.push(g);
+  }
+  if (B.roofSign) {
+    const g = box(0.62, 0.17, 0.24, 0, B.pts[5][1] + 0.09, -0.35).toNonIndexed();
+    const c = new Float32Array(g.getAttribute("position").count * 3).fill(0.92);
+    g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+    extras.push(g);
+  }
+
+  /*
+   * ExtrudeGeometry is NON-indexed and CylinderGeometry is indexed, and
+   * mergeGeometries returns null (silently) for a mixed set — the trap
+   * proj_merge_geometries_gotchas records. Everything goes non-indexed.
+   *
+   * Twelve sides rather than eight: a wheel is round in silhouette against
+   * the road more often than any other part of the car is against anything,
+   * and the four extra triangles per wheel cost nothing on an instanced
+   * mesh that draws one geometry however many cars there are.
+   */
+  const wheels = [];
+  for (const [x, z] of [
+    [-B.tread, -B.axle], [B.tread, -B.axle], [-B.tread, B.axle], [B.tread, B.axle],
+  ]) {
+    const w = new THREE.CylinderGeometry(B.wheel, B.wheel, 0.24, 12, 1, false).toNonIndexed();
+    w.rotateZ(Math.PI / 2);
+    w.translate(x, B.wheel, z);
+    const wc = new Float32Array(w.getAttribute("position").count * 3).fill(0.05);
+    w.setAttribute("color", new THREE.BufferAttribute(wc, 3));
+    wheels.push(w);
+  }
+  // All non-indexed, all position/normal/uv/color — merge needs identical
+  // layouts AND identical indexing.
+  const g = mergeGeometries([body, ...wheels, ...extras], false);
+  body.dispose();
+  wheels.forEach((w) => w.dispose());
+  extras.forEach((l) => l.dispose());
+  return g;
+}
+
+/** Cumulative shares, so one hash roll picks a body. */
+const CAR_SHARE = (() => {
+  const out = [];
+  let acc = 0;
+  for (const b of CAR_BODIES) { acc += b.share; out.push(acc); }
+  // Normalised, so the table cannot silently stop covering 0..1.
+  return out.map((v) => v / acc);
+})();
+/** Which body a roll in 0..1 picks. */
+function pickCarBody(r) {
+  for (let i = 0; i < CAR_SHARE.length; i++) if (r < CAR_SHARE[i]) return i;
+  return CAR_SHARE.length - 1;
+}
+
 export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
@@ -320,85 +526,6 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   // wheel cylinders. VERTEX COLOURS split it into paint / glass / rubber, and
   // `instanceColor` multiplies all three, so a white car gets grey wheels and
   // a black car black ones, from one draw. ~150 triangles.
-  const carGeo = (() => {
-    const L = 4.5, W = 1.82;
-    // THE PROFILE IS FLIPPED BY THE EXTRUSION. These are (shape x, y) pairs
-    // with the bonnet at negative shape-x — but `rotateY(PI/2)` below maps
-    // shape-x to −z, so in the FINISHED geometry the NOSE IS AT +Z. That is
-    // measurable: the lowest body end is at +z. The comment here used to claim
-    // the opposite, and the lamp boxes below were placed to match the comment
-    // rather than the geometry, which put the white headlights on the boot.
-    // Sills sit 0.32 above the road.
-    const pts = [
-      [-2.25, 0.32], [-2.25, 0.62], [-2.05, 0.72], [-0.95, 0.80],   // bumper, hood
-      [-0.35, 1.32], [0.75, 1.36],                                   // windscreen, roof
-      [1.45, 1.10], [2.05, 0.95], [2.25, 0.70], [2.25, 0.32],        // rear glass, trunk, tail
-    ];
-    const shape = new THREE.Shape();
-    shape.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i][0], pts[i][1]);
-    shape.closePath();
-    const body = new THREE.ExtrudeGeometry(shape, { depth: W, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.08, bevelSegments: 1, steps: 1 });
-    body.rotateY(Math.PI / 2);          // extrusion axis (z) → across the car (x)
-    body.translate(-W / 2, 0, 0);
-    // Glass band: vertices between the belt line and the roof, on the cabin.
-    const bp = body.getAttribute("position");
-    const bc = new Float32Array(bp.count * 3);
-    for (let i = 0; i < bp.count; i++) {
-      const y = bp.getY(i), z = bp.getZ(i);
-      // MIRRORED with everything else: this band was written for the profile
-      // before the rotation, so it tinted a stripe of bonnet and left half the
-      // real cabin painted body colour. The cabin is at z −1.65 … +0.55.
-      const glass = y > 0.86 && y < 1.34 && z > -1.65 && z < 0.55;
-      const k = glass ? 0.16 : 1.0;   // glass: dark, tinted by the paint only faintly
-      bc[i * 3] = k; bc[i * 3 + 1] = glass ? 0.18 : 1.0; bc[i * 3 + 2] = glass ? 0.22 : 1.0;
-    }
-    body.setAttribute("color", new THREE.BufferAttribute(bc, 3));
-    // HEAD AND TAIL LAMPS, as real boxes on the nose and tail. The traffic
-    // material finds them by their LOCAL Z (positionGeometry survives
-    // instancing; positionLocal does not — InstanceNode overwrites it), so
-    // they need no attribute of their own and the parked cars, whose material
-    // has no such term, simply leave them dark.
-    //
-    // HEADLIGHTS AT +Z, because that is where the bonnet is (see the profile
-    // note above). They were at −Z, on the boot, and no choice of yaw could
-    // fix that: point the white lamps forward and the car drove trunk-first;
-    // point the bonnet forward and it showed red lights at the front. Both
-    // were seen in the game, on different streets, from this one error.
-    //
-    // NOTE the Z magnitude. The extrude's bevel pushes the body out to ±2.33,
-    // so lamps at ±2.28 sat INSIDE it — invisible, and indistinguishable from
-    // the body by the Z test the material uses. They stand proud of the bevel.
-    const lamps = [];
-    for (const [x, z, w, h] of [
-      [-0.60, CAR_NOSE_Z * LAMP_Z, 0.50, 0.22], [0.60, CAR_NOSE_Z * LAMP_Z, 0.50, 0.22],       // headlights, on the bonnet
-      [-0.64, -CAR_NOSE_Z * LAMP_Z, 0.46, 0.20], [0.64, -CAR_NOSE_Z * LAMP_Z, 0.46, 0.20],     // tail lights, on the boot
-    ]) {
-      const g = box(w, h, 0.14, x, z < 0 ? 0.58 : 0.62, z).toNonIndexed();
-      const c = new Float32Array(g.getAttribute("position").count * 3).fill(1.0);
-      g.setAttribute("color", new THREE.BufferAttribute(c, 3));
-      lamps.push(g);
-    }
-    const wheels = [];
-    for (const [x, z] of [[-0.86, -1.45], [0.86, -1.45], [-0.86, 1.45], [0.86, 1.45]]) {
-      // ExtrudeGeometry is NON-indexed and CylinderGeometry is indexed, and
-      // mergeGeometries returns null (silently) for a mixed set — the trap
-      // proj_merge_geometries_gotchas records. Everything goes non-indexed.
-      const w = new THREE.CylinderGeometry(0.33, 0.33, 0.24, 8, 1, false).toNonIndexed();
-      w.rotateZ(Math.PI / 2);
-      w.translate(x, 0.33, z);
-      const wc = new Float32Array(w.getAttribute("position").count * 3).fill(0.05);
-      w.setAttribute("color", new THREE.BufferAttribute(wc, 3));
-      wheels.push(w);
-    }
-    // All non-indexed, all position/normal/uv/color — merge needs identical
-    // layouts AND identical indexing.
-    const g = mergeGeometries([body, ...wheels, ...lamps], false);
-    body.dispose();
-    wheels.forEach((w) => w.dispose());
-    lamps.forEach((l) => l.dispose());
-    return g;
-  })();
   const trunkGeo = box(0.24, F.treeHeight * 0.55, 0.24);
   // A crown, not a lollipop: two icospheres, subdivided, with every vertex
   // pushed in or out by a hash so the silhouette is ragged, and the second
@@ -512,6 +639,14 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   })();
   /** Lens centres in geometry Y, top to bottom — the shader bands off these. */
   const LENS_Y = [F.lightHeight - 0.52, F.lightHeight - 0.85, F.lightHeight - 1.18];
+  /*
+   * BUILT PER CITY, not once at import. The table and the builder above are
+   * static and shared, but the geometries are not: `dispose()` frees them on
+   * teardown, and a module-level set would be freed out from under the next
+   * city the moment one was rebuilt.
+   */
+  const carGeos = CAR_BODIES.map(buildCarBody);
+  const carGeo = carGeos[0];            // the saloon still stands for "a car"
   const { coneGeo, barrierGeo, binGeo, palletGeo } = buildClutterKit();
   const signAtlas = makeRoadSignAtlas(F);
   const signGeo = buildRoadSignGeometry(F);
@@ -521,7 +656,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     box(0.06, 1.05, 0.06, -0.95, 0, 0), box(0.06, 1.05, 0.06, 0.95, 0, 0),   // posts
     box(2.0, 0.05, 0.05, 0, 1.0, 0), box(2.0, 0.05, 0.05, 0, 0.55, 0),        // rails
   ], false);
-  for (const g of [carGeo, trunkGeo, canopyGeo, lightGeo, railGeo]) if (!g) throw new Error("[CityFurniture] merge returned null");
+  for (const g of [...carGeos, trunkGeo, canopyGeo, lightGeo, railGeo]) if (!g) throw new Error("[CityFurniture] merge returned null");
 
   // ── Materials ──────────────────────────────────────────────────────────────
   // Plain colours: NodeMaterial multiplies `instanceColor` into the slot, so
@@ -666,7 +801,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
               : (side === 0 ? -Math.PI / 2 : Math.PI / 2);
             const reversedIn = h2(seedA, st, 3) < F.carReverseChance ? Math.PI : 0;
             place(cars, x, z, parkYaw + reversedIn + (h2(seedA, st, 4) - 0.5) * 0.06,
-              { color: pickCarColor(h2(seedA, st, 5)) });
+              { color: pickCarColor(h2(seedA, st, 5)), body: pickCarBody(h2(seedA, st, 6)) });
           }
           // Trees on the pavement, staggered off the lamp stations.
           for (let s = a0 + F.crossClear + 4; s < a1 - F.crossClear; s += F.treePitch) {
@@ -904,6 +1039,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         phase: (i + r0) / F.trafficPerLane,
         speed: F.trafficSpeedMin + r1 * (F.trafficSpeedMax - F.trafficSpeedMin),
         color: pickCarColor(r2),
+        body: pickCarBody(h2(li, i, 64)),
         m: new THREE.Matrix4(),
         x: 0, z: 0,
       });
@@ -931,7 +1067,19 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     applyBloomMRT(trafficMat, vec4(lampGlow, 1.0));
   }
 
-  const carMesh = instanced(cars, carGeo, carMat, "CityCars");
+  /*
+   * ONE MESH PER BODY, and the sub-lists hold the SAME entry objects as
+   * `cars` — not copies. Everything downstream that walks the parked cars
+   * (the buried-in-a-building scan, the obstacle capsules, the stats) still
+   * sees one list of every car, while the LOD partitions each body's list
+   * independently. Copying here instead would have given the renderer and the
+   * collider two versions of where the traffic is parked.
+   */
+  const carsByBody = CAR_BODIES.map(() => []);
+  for (const e of cars) carsByBody[e.body ?? 0].push(e);
+  const carMeshes = carsByBody.map((list, i) =>
+    instanced(list, carGeos[i], carMat, `CityCars_${CAR_BODIES[i].name}`));
+  const carMesh = carMeshes.find(Boolean) || null;
   /*
    * THE TREE, one way or the other.
    *
@@ -1004,20 +1152,34 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const barrierMesh = instanced(barriers, barrierGeo, clutterMat, "CityBarriers", { shadows: true });
   const binMesh = instanced(bins, binGeo, clutterMat, "CityBins", { shadows: true });
   const palletMesh = instanced(pallets, palletGeo, clutterMat, "CityPallets", { shadows: false });
-  const trafficMesh = traffic.length
-    ? (() => {
-      const im = new THREE.InstancedMesh(carGeo, trafficMat, traffic.length);
-      im.name = "CityTraffic";
-      im.frustumCulled = false;
-      im.castShadow = true;
-      im.receiveShadow = true;
-      im.count = 0;                       // filled by the first update
-      traffic.forEach((c, i) => im.setColorAt(i, _c.set(c.color)));
-      if (im.instanceColor) im.instanceColor.needsUpdate = true;
-      group.add(im);
-      return im;
-    })()
-    : null;
+  /*
+   * THE MOVING FLEET, one mesh per body.
+   *
+   * Each is sized for EVERY car of its body rather than for the ones expected
+   * in range: `count` is rewritten each frame by updateTraffic, and a mesh
+   * that runs out of capacity would silently stop drawing the cars past the
+   * end. Capacity is address space, not work — an InstancedMesh costs what it
+   * draws, not what it could.
+   *
+   * Colours are written once, in the SAME order updateTraffic fills matrices,
+   * which is why each car carries `slot`: the compaction loop packs the cars
+   * in range to the front, so instance i is not car i and a colour written by
+   * list index would repaint the fleet every frame.
+   */
+  const trafficByBody = CAR_BODIES.map(() => []);
+  for (const c of traffic) trafficByBody[c.body ?? 0].push(c);
+  const trafficMeshes = trafficByBody.map((list, i) => {
+    if (!list.length) return null;
+    const im = new THREE.InstancedMesh(carGeos[i], trafficMat, list.length);
+    im.name = `CityTraffic_${CAR_BODIES[i].name}`;
+    im.frustumCulled = false;
+    im.castShadow = true;
+    im.receiveShadow = true;
+    im.count = 0;                       // filled by the first update
+    group.add(im);
+    return im;
+  });
+  const trafficMesh = trafficMeshes.find(Boolean) || null;
 
   /**
    * Advance the traffic. `t` is seconds; `cam` is the camera position, so only
@@ -1025,12 +1187,16 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
    * multiply and a compare.
    */
   const _tq = new THREE.Quaternion(), _tp = new THREE.Vector3(), _ts = new THREE.Vector3(1, 1, 1);
+  /** Reused so the per-frame update allocates nothing. */
+  const _trafficN = new Int32Array(CAR_BODIES.length);
   function updateTraffic(t, cam) {
     // The signals ride the same clock; it is already here every frame.
     uSignalTime.value = t;
     if (!trafficMesh) return;
     const r2 = F.trafficRange * F.trafficRange;
-    let n = 0;
+    // One write cursor per body. The cars in range are packed to the front of
+    // their own mesh, so a body with nothing near the camera draws nothing.
+    const n = _trafficN.fill(0);
     for (let i = 0; i < traffic.length; i++) {
       const c = traffic[i];
       const L = c.lane;
@@ -1059,15 +1225,30 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       const yaw = L.axis === "z"
         ? (L.dir * nose > 0 ? 0 : Math.PI)
         : (L.dir * nose > 0 ? Math.PI / 2 : -Math.PI / 2);
+      const bi = c.body ?? 0;
+      const im = trafficMeshes[bi];
+      if (!im) continue;
+      const slot = n[bi];
       _tp.set(x, gyBase, z);
       _tq.setFromAxisAngle(UP, yaw);
-      trafficMesh.setMatrixAt(n, _tm.compose(_tp, _tq, _ts));
-      if (trafficMesh.instanceColor) trafficMesh.setColorAt(n, _c.set(c.color));
-      n++;
+      im.setMatrixAt(slot, _tm.compose(_tp, _tq, _ts));
+      /*
+       * THE COLOUR IS WRITTEN HERE, WITH THE MATRIX, and it has to be. The
+       * loop compacts — instance `slot` is whichever car happened to be in
+       * range, not car `i` — so a colour uploaded once at build time by list
+       * index would land on a different car every frame and the fleet would
+       * shimmer through its own palette as you drove.
+       */
+      im.setColorAt(slot, _c.set(c.color));
+      n[bi]++;
     }
-    trafficMesh.count = n;
-    trafficMesh.instanceMatrix.needsUpdate = true;
-    if (trafficMesh.instanceColor) trafficMesh.instanceColor.needsUpdate = true;
+    for (let bi = 0; bi < trafficMeshes.length; bi++) {
+      const im = trafficMeshes[bi];
+      if (!im) continue;
+      im.count = n[bi];
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    }
   }
 
   // ── DISTANCE CULL ──────────────────────────────────────────────────────────
@@ -1095,7 +1276,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     { list: barriers, mesh: barrierMesh, params: { hitImpulse: 0.34, hitLoft: 0.07, spinPerSpeed: 0.7, spinMax: 5, restitution: 0.12, friction: 5.5, hitRadius: 2.0, minSpeed: 5.0 } },
   ];
   const kinds = [
-    { mesh: carMesh, list: cars, range: 420, casts: true },
+    // One entry per body: each has its own mesh and its own sub-list, and the
+    // partition has to happen on the list the mesh actually draws.
+    ...carMeshes.map((mesh, i) => ({ mesh, list: carsByBody[i], range: 420, casts: true })),
     { mesh: trunkMesh, list: trees, range: 650, casts: false },
     { mesh: canopyMesh, list: trees, range: 650, casts: true },
     // `attr`: a per-instance value that must follow its entry through the
@@ -1216,7 +1399,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     group,
     params: F,
     stats: {
-      cars: cars.length, trees: trees.length, lights: lights.length, rails: rails.length,
+      cars: cars.length, carBodies: CAR_BODIES.map((b, i) => `${b.name}:${carsByBody[i].length}`).join(" "),
+      trees: trees.length, lights: lights.length, rails: rails.length,
       traffic: traffic.length, lanes: lanes.length,
       clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length },
       roadSigns: roadSigns.length,
@@ -1240,9 +1424,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       // Nothing to remove from the group — preset trees live in the engine's
       // TreeStore, not here. This unplants them.
       if (presetTrees) { presetTrees.dispose(); presetTrees = null; }
-      for (const m of [carMesh, trunkMesh, canopyMesh, lightMesh, railMesh, trafficMesh,
+      for (const m of [...carMeshes, ...trafficMeshes, trunkMesh, canopyMesh, lightMesh, railMesh,
         coneMesh, barrierMesh, binMesh, palletMesh, signMesh, gantryMesh]) { if (!m) continue; group.remove(m); m.dispose(); }
-      for (const g of [carGeo, trunkGeo, canopyGeo, lightGeo, railGeo,
+      for (const g of [...carGeos, trunkGeo, canopyGeo, lightGeo, railGeo,
         coneGeo, barrierGeo, binGeo, palletGeo, signGeo, gantryGeo]) g.dispose();
       for (const m of [carMat, trunkMat, canopyMat, lightMat, railMat, trafficMat, clutterMat, signMat]) m.dispose();
       signAtlas.texture.dispose();

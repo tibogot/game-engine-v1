@@ -20,7 +20,7 @@ import { register } from "node:module";
 
 register("./threeWebgpuHook.mjs", import.meta.url);
 const THREE = await import("three/webgpu");
-const { createCityFurniture, CAR_NOSE_Z } = await import("../games/modular-road-v3/modularRoadCityFurniture.js");
+const { createCityFurniture, CAR_NOSE_Z, CAR_BODIES } = await import("../games/modular-road-v3/modularRoadCityFurniture.js");
 const { createCityStreets } = await import("../games/modular-road-v3/modularRoadCityStreets.js");
 const { CITY_DEFAULTS } = await import("../games/modular-road-v3/modularRoadCity.js");
 
@@ -43,9 +43,18 @@ const furn = createCityFurniture({
   params: { trafficRange: 1e6 },
 });
 
-let traffic = null;
-furn.group.traverse((o) => { if (o.name === "CityTraffic") traffic = o; });
-check("the traffic mesh exists", traffic !== null);
+/*
+ * THE FLEET IS FOUR BODIES NOW, one instanced mesh each. Poses are gathered
+ * across all of them in a fixed mesh order, so an instance "slot" still means
+ * the same car between the two time samples — which is the whole property
+ * this file's comparison rests on.
+ */
+const trafficMeshes = [];
+furn.group.traverse((o) => {
+  if (o.isInstancedMesh && /^CityTraffic(_|$)/.test(o.name)) trafficMeshes.push(o);
+});
+trafficMeshes.sort((a, b) => (a.name < b.name ? -1 : 1));
+check("the traffic meshes exist", trafficMeshes.length > 0, trafficMeshes.map((m) => m.name).join(", "));
 
 /** Every instance's pose at time `t`, keyed by its instance slot. */
 function poseAt(t) {
@@ -55,10 +64,12 @@ function poseAt(t) {
   const out = [];
   const m = new THREE.Matrix4();
   const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
-  for (let i = 0; i < traffic.count; i++) {
-    traffic.getMatrixAt(i, m);
-    m.decompose(p, q, s);
-    out.push({ pos: p.clone(), quat: q.clone() });
+  for (const mesh of trafficMeshes) {
+    for (let i = 0; i < mesh.count; i++) {
+      mesh.getMatrixAt(i, m);
+      m.decompose(p, q, s);
+      out.push({ pos: p.clone(), quat: q.clone() });
+    }
   }
   return out;
 }
@@ -73,23 +84,41 @@ check("every car is in range, so instance slots mean the same car in both sample
 // Not asserted from a comment — MEASURED off the built geometry, then checked
 // against the constant the lamps and the yaw are both derived from. The bug
 // this file exists for was exactly a disagreement between those two.
-let carMesh = null;
-furn.group.traverse((o) => { if (o.name === "CityCars") carMesh = o; });
-check("the parked-car mesh exists", carMesh !== null);
-{
+/*
+ * EVERY BODY IS CHECKED, not just the saloon. A fleet is exactly the kind of
+ * thing where a new archetype gets its lamp table copied from the last one and
+ * the sign left as it was — and half the traffic then drives boot-first for a
+ * reason no screenshot of the other half would show. The thresholds come from
+ * each body's OWN numbers, out of the exported table, rather than from
+ * constants that only ever described the saloon.
+ */
+const carMeshes = [];
+furn.group.traverse((o) => {
+  if (o.isInstancedMesh && /^CityCars_/.test(o.name)) carMeshes.push(o);
+});
+check("the parked-car meshes exist", carMeshes.length === CAR_BODIES.length,
+  `${carMeshes.length} of ${CAR_BODIES.length}`);
+for (const B of CAR_BODIES) {
+  const carMesh = carMeshes.find((m) => m.name === `CityCars_${B.name}`);
+  if (!carMesh) { check(`${B.name}: mesh present`, false); continue; }
+  // Beyond the body, where only the lamp boxes live — from this body's own
+  // lamp table, pulled in a little so the box itself is inside the window.
+  const LAMP_EDGE = Math.min(Math.abs(B.lamps[0]), Math.abs(B.lamps[1])) - 0.10;
+  // Far enough fore and aft to be clear of the cabin, scaled to this body.
+  const HALF = Math.min(Math.abs(B.pts[0][0]), Math.abs(B.pts[9][0])) * 0.55;
   const pos = carMesh.geometry.getAttribute("position");
   // Tallest point of the BODY in each half, ignoring the lamp boxes beyond the
   // bevel. The bonnet half is the low one; the cabin sits over the boot half.
   let hiPos = 0, hiNeg = 0;
   for (let i = 0; i < pos.count; i++) {
     const z = pos.getZ(i), y = pos.getY(i);
-    if (Math.abs(z) > 2.36) continue;          // lamp boxes, not body
-    if (z > 1.2) hiPos = Math.max(hiPos, y);
-    else if (z < -1.2) hiNeg = Math.max(hiNeg, y);
+    if (Math.abs(z) > LAMP_EDGE) continue;     // lamp boxes, not body
+    if (z > HALF) hiPos = Math.max(hiPos, y);
+    else if (z < -HALF) hiNeg = Math.max(hiNeg, y);
   }
   // The end with the LOWER roofline is the bonnet.
   const measuredNose = hiPos < hiNeg ? 1 : -1;
-  check("the model's nose is where CAR_NOSE_Z says it is",
+  check(`${B.name}: the model's nose is where CAR_NOSE_Z says it is`,
     measuredNose === CAR_NOSE_Z,
     `geometry says ${measuredNose > 0 ? "+Z" : "-Z"} (heights ${hiNeg.toFixed(2)} / ${hiPos.toFixed(2)}), constant says ${CAR_NOSE_Z > 0 ? "+Z" : "-Z"}`);
 
@@ -100,7 +129,7 @@ check("the parked-car mesh exists", carMesh !== null);
   const boxes = new Map();                 // (z sign, x sign) → x extent
   for (let i = 0; i < pos.count; i++) {
     const z = pos.getZ(i), x = pos.getX(i);
-    if (Math.abs(z) <= 2.36) continue;
+    if (Math.abs(z) <= LAMP_EDGE) continue;
     const k = `${z > 0 ? "+" : "-"}${x > 0 ? "+" : "-"}`;
     const e = boxes.get(k) ?? { minX: 9, maxX: -9 };
     e.minX = Math.min(e.minX, x);
@@ -114,7 +143,7 @@ check("the parked-car mesh exists", carMesh !== null);
   };
   const wPos = widthAt("+"), wNeg = widthAt("-");
   const headZ = wPos > wNeg ? 1 : -1;
-  check("the headlights are on the bonnet, not the boot", headZ === CAR_NOSE_Z,
+  check(`${B.name}: the headlights are on the bonnet, not the boot`, headZ === CAR_NOSE_Z,
     `single-box width ${wNeg.toFixed(2)} at -Z vs ${wPos.toFixed(2)} at +Z; nose is at ${CAR_NOSE_Z > 0 ? "+Z" : "-Z"}`);
 }
 

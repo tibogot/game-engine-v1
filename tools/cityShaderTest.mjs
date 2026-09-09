@@ -367,7 +367,17 @@ console.log("\n── FURNITURE SHADERS ──");
   // Six original kinds, the four street-clutter ones (which share ONE material
   // between them — see the clutter section of cityKitTest), the road signs, and
   // the overhead direction gantries.
-  check("every furniture kind has a material", mats.length === 12, mats.map(([n]) => n).join(","));
+  /*
+   * The count used to be pinned here, which said the same thing while every
+   * kind was one mesh. It no longer is — the traffic fleet is four bodies
+   * parked and four driving — and a literal would have had to be bumped every
+   * time a body was added, which is a number nobody can justify from the
+   * code. What this is actually for is that no kind reaches the renderer
+   * without a node material, so that is what it now says.
+   */
+  check("every furniture kind has a material",
+    mats.length >= 12 && mats.every(([, m]) => m && m.isNodeMaterial),
+    `${mats.length}: ${mats.map(([n]) => n).join(",")}`);
 
   let bad = null;
   for (const [name, mat, mesh] of mats) {
