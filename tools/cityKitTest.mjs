@@ -511,6 +511,59 @@ console.log("\n── LOOK PASS ──");
       facingTotal > 0 && facingWrong === 0, `${facingWrong} of ${facingTotal} face away`);
 
     /*
+     * AND SO MUST A ROAD SIGN. Same rule, same trap: this one flipped on
+     * `dir` (the kerb's inward direction) instead of on `travel`, so it was
+     * right on x-streets and backwards on every z-street — a driver on half
+     * the city's roads saw only grey backs.
+     *
+     * WHICH FACE CARRIES THE ARTWORK IS READ OUT OF THE GEOMETRY. Every face
+     * of the plate except the front has its UVs pinned into the reserved grey
+     * patch, so the art face is the one whose UVs still span 0..1; take the
+     * sign of its z. Assuming "+Z" here would be writing down the answer, and
+     * would keep passing if the plate were ever rebuilt the other way round.
+     */
+    const roadSigns = flatCity.furniture.lists.roadSigns;
+    let artSign = 0;
+    {
+      let signMesh = null;
+      c.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CityRoadSigns") signMesh = o; });
+      const pos = signMesh.geometry.getAttribute("position");
+      const uv = signMesh.geometry.getAttribute("uv");
+      /*
+       * The pin is whichever UV the geometry repeats most — every face but
+       * one is collapsed onto it. Finding it that way rather than testing
+       * "near the origin" matters: the art face's own (0,0) corner sits in
+       * the grey patch too, and a proximity test silently ate it.
+       */
+      const tally = new Map();
+      for (let i = 0; i < uv.count; i++) {
+        const k = `${uv.getX(i).toFixed(5)},${uv.getY(i).toFixed(5)}`;
+        tally.set(k, (tally.get(k) || 0) + 1);
+      }
+      let pin = null, most = 0;
+      for (const [k, n2] of tally) if (n2 > most) { most = n2; pin = k; }
+      let sum = 0, n = 0;
+      for (let i = 0; i < pos.count; i++) {
+        if (`${uv.getX(i).toFixed(5)},${uv.getY(i).toFixed(5)}` === pin) continue;
+        sum += pos.getZ(i); n++;
+      }
+      artSign = n && sum < 0 ? -1 : 1;
+      check("the sign plate has exactly one artwork face", n === 4, `${n} unpinned vertices`);
+    }
+    let signWrong = 0, signTotal = 0;
+    for (const e of roadSigns.slice(0, 400)) {
+      if (e.travel == null) continue;
+      const el = e.m.elements;
+      const nx = el[8] * artSign, nz = el[10] * artSign;
+      const tx = e.axis === "z" ? 0 : e.travel;
+      const tz = e.axis === "z" ? e.travel : 0;
+      signTotal++;
+      if (nx * tx + nz * tz > -0.5) signWrong++;        // must look back down the lane
+    }
+    check("every road sign faces the traffic it is for",
+      signTotal > 0 && signWrong === 0, `${signWrong} of ${signTotal} face away`);
+
+    /*
      * NOTHING BURIED IN A BUILDING. A cone, sign or bin inside a footprint is
      * invisible, still costs an instance and a capsule, and is exactly the
      * kind of waste that never shows up in a stat — the count says 1456 cones

@@ -790,8 +790,15 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
            * as carelessness rather than as decoration, so the roll cannot draw
            * one (see MIDBLOCK_SIGNS).
            *
-           * The yaw faces ACROSS the pavement into the road, flipped by side,
-           * so a driver sees the face and not the grey back.
+           * THE YAW COMES FROM `travel`, NOT FROM `dir`.
+           *
+           * The plate's artwork is on its local +Z, so the sign has to face
+           * AGAINST the lane it addresses. This flipped on `dir` instead,
+           * which is the same mistake the masts and the ground arrows both
+           * made: `dir` is the kerb's inward direction, and the lane table
+           * negates it on x-streets. That made x-streets right by accident
+           * and turned every sign on every z-street to face the traffic's
+           * back — the "sometimes right, sometimes not" the user saw.
            */
           for (let k = 0; k < 2; k++) {
             const chance = k === 0 ? F.signChance : F.signChanceSecond;
@@ -801,7 +808,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
             const s = a0 + F.crossClear + k * span + h2(seedA, side * 2 + k, 92) * span;
             const [x, z] = at(kerb + dir * F.inset, s);
             const tile = MIDBLOCK_SIGNS[Math.floor(h2(seedA, side * 2 + k, 93) * MIDBLOCK_SIGNS.length) % MIDBLOCK_SIGNS.length];
-            place(roadSigns, x, z, yawAlong + (dir > 0 ? Math.PI : 0), { tile });
+            place(roadSigns, x, z, yawAlong + (travel > 0 ? Math.PI : 0), { tile, axis, travel });
           }
         }
       }
