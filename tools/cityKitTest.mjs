@@ -435,6 +435,40 @@ console.log("\n── LOOK PASS ──");
       `${tooClose} masts within 6 m of another`);
 
     /*
+     * THE DRIVING-SIDE RULE ITSELF, against the lane table it is derived from.
+     * Everything that re-derived this got it wrong on one axis — signals, stop
+     * lines and lane arrows were all correct on x-running streets and
+     * backwards on z-running ones, while the CARS, the only thing reading the
+     * table directly, were always right. So the test reads the table too.
+     */
+    const { laneTravelDir } = await import("../games/modular-road-v3/modularRoadCityFurniture.js");
+    const LANE_TABLE = [[0.125, 1], [0.375, 1], [0.625, -1], [0.875, -1]];
+    let ruleBad = 0;
+    for (const axis of ["z", "x"]) {
+      for (const side of [0, 1]) {
+        // The lane nearest this kerb: low-across side takes the lowest frac.
+        const [, baseDir] = side === 0 ? LANE_TABLE[0] : LANE_TABLE[3];
+        const actual = axis === "x" ? -baseDir : baseDir;
+        if (laneTravelDir(axis, side) !== actual) ruleBad++;
+      }
+    }
+    check("laneTravelDir agrees with the lane table the cars use", ruleBad === 0,
+      `${ruleBad} of 4 combinations disagree`);
+
+    // And every mast must sit at the end its own traffic ARRIVES at.
+    let wrongEnd = 0, endTotal = 0;
+    for (const e of lights.slice(0, 300)) {
+      if (e.travel == null) continue;
+      endTotal++;
+      const along = e.axis === "z" ? e.z : e.x;
+      const want = e.travel > 0 ? e.a1 : e.a0;          // the junction ahead
+      const other = e.travel > 0 ? e.a0 : e.a1;
+      if (Math.abs(along - want) > Math.abs(along - other)) wrongEnd++;
+    }
+    check("every signal stands at the junction its traffic arrives at",
+      endTotal > 0 && wrongEnd === 0, `${wrongEnd} of ${endTotal} at the far end`);
+
+    /*
      * NOTHING BURIED IN A BUILDING. A cone, sign or bin inside a footprint is
      * invisible, still costs an instance and a capsule, and is exactly the
      * kind of waste that never shows up in a stat — the count says 1456 cones

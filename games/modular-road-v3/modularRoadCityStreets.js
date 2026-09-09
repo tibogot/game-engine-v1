@@ -1122,7 +1122,27 @@ export function createCityStreets({
      */
     const atLowEnd = step(mix(L.fx, L.fz, L.inStreetX), uBlockW.mul(0.5));
     const rightHalf = step(float(0.0), L.lateral);
-    const stopSide = mix(rightHalf, oneMinus(rightHalf), atLowEnd);
+    /*
+     * ── WHICH HALF IS APPROACHING THIS END — AND IT FLIPS WITH THE AXIS ─────
+     *
+     * This used to be one formula for both axes, and so it was right on
+     * x-running streets and backwards on z-running ones: half the city's stop
+     * lines and lane arrows were painted on the wrong side of the road, which
+     * reads exactly as the user described — "sometimes they are right,
+     * sometimes not".
+     *
+     * The lane table (modularRoadCityFurniture, `laneTravelDir`) negates `dir`
+     * for x-streets, so the LOW-across half travels +along on a z-street and
+     * -along on an x-street. The half approaching a given end therefore swaps
+     * between the two axes, and `inStreetX` is the only thing in the shader
+     * that knows which we are on.
+     *
+     * KEEP THIS IN STEP WITH `laneTravelDir`. It is the same rule written in
+     * TSL because a shader cannot import a function; it is not a second
+     * opinion about which side of the road we drive on.
+     */
+    const approachX = mix(rightHalf, oneMinus(rightHalf), atLowEnd);   // x-running
+    const stopSide = mix(approachX, oneMinus(approachX), L.inStreetX); // z-running flips
     const aaEnd = fwidth(endAlong).mul(0.75).add(0.002);
     const stopBar = lineAA(endAlong.sub(u.crossInset.add(u.stopOffset)), u.stopWidth.mul(0.5), aaEnd)
       .mul(L.onRoad).mul(stopSide).mul(u.stopLines);

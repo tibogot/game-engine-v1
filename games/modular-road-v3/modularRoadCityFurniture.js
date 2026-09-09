@@ -35,6 +35,41 @@ import {
 } from "./modularRoadCityRoadSigns.js";
 
 /**
+ * ── THE DRIVING-SIDE RULE. ONE PLACE, BECAUSE EVERYTHING NEEDS IT ───────────
+ *
+ * We drive on the RIGHT. Anything that belongs beside the traffic it serves —
+ * a signal, an approach sign, a stop line, a lane arrow — has to know which
+ * way the lanes on a given kerb travel, and every object that worked this out
+ * for itself got it wrong on one of the two axes.
+ *
+ * The one piece of truth is the lane table in the traffic block below:
+ *
+ *     [[0.125, 1], [0.375, 1], [0.625, -1], [0.875, -1]]   then, for x: -dir
+ *
+ * Read off it: on a Z-running street the LOW-across half travels +along; on an
+ * X-running street the SAME half travels -along, because the table negates
+ * `dir` for x. That single flip is why signals, stop lines and arrows were all
+ * right on one axis and backwards on the other, while the cars — the only
+ * thing reading the table directly — were always correct.
+ *
+ * Two consequences, and both follow from this function alone:
+ *   · the RIGHT-HAND KERB for +along traffic is the side this returns +1 for;
+ *   · that traffic ARRIVES at the block's high end, so its stop line, its
+ *     arrow and its signal all belong there.
+ *
+ * The street SHADER cannot import this — it is TSL — so it derives the same
+ * thing from `inStreetX`; see the note on `approachSide` in
+ * modularRoadCityStreets.js, and keep the two in step.
+ *
+ * @param {"x"|"z"} axis  which way the street runs
+ * @param {0|1} side      0 = the low-across kerb, 1 = the high-across kerb
+ * @returns {1|-1} the direction the lanes beside that kerb travel, along the street
+ */
+export function laneTravelDir(axis, side) {
+  return axis === "z" ? (side === 0 ? 1 : -1) : (side === 0 ? -1 : 1);
+}
+
+/**
  * WHICH WAY THE CAR MODEL FACES, along its own local Z. +1 means the bonnet
  * is at +Z.
  *
@@ -663,8 +698,15 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
            * low-across kerb. So side 0 serves +along traffic and belongs at
            * a1; side 1 serves -along traffic and belongs at a0.
            */
+          /*
+           * WHICH END THIS KERB'S TRAFFIC ARRIVES AT — from the shared rule,
+           * not from `side`. Deriving it from the side alone was right on
+           * z-streets and backwards on x-streets, because the lane table
+           * negates `dir` for x. See laneTravelDir.
+           */
+          const travel = laneTravelDir(axis, side);
           for (const end of [a0, a1]) {
-            if ((end === a0) === (side === 0)) continue;
+            if ((travel > 0) !== (end === a1)) continue;
             /*
              * SET BACK ONTO ITS OWN APPROACH, which is what uncrosses them.
              *
@@ -681,7 +723,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
              * from opposite sides without ever meeting — mast A's boom stops
              * at x <= 0.9 while mast B's never comes below z = 0.9.
              */
-            const s = end === a0 ? a0 + F.lightSetback : a1 - F.lightSetback;
+            const s = travel > 0 ? a1 - F.lightSetback : a0 + F.lightSetback;
             const [x, z] = at(kerb + dir * 0.9, s);
             /*
              * PHASE COMES FROM THE AXIS, not from a hash of the position.
@@ -714,7 +756,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
             const armYaw = axis === "z"
               ? (side === 0 ? 0 : Math.PI)
               : (side === 0 ? -Math.PI / 2 : Math.PI / 2);
-            place(lights, x, z, armYaw, { phase });
+            place(lights, x, z, armYaw, { phase, axis, side, travel, a0, a1 });
           }
           /*
            * ROADWORKS AND LOADING BAYS. Placed from HERE rather than from the
