@@ -64,9 +64,11 @@ export const ROAD_SIGN_DEFAULTS = {
    * actually seen from the car. Real streets carry signage every junction and
    * often twice between. 0.9, and a second one at the far end of the run.
    */
-  signChance: 0.9,
-  /** Chance of a SECOND sign on the same block side, at the other end. */
-  signChanceSecond: 0.55,
+  signChance: 1.0,
+  /** Chance of a SECOND sign on the same block side, at the other end. Signage
+   *  is one of the things a real street has a LOT of, and it was still reading
+   *  as sparse from the car at 0.55. */
+  signChanceSecond: 0.9,
   /** Where the folder overrides live. */
   dir: "/city-signs/",
   extensions: ["png", "webp", "jpg"],

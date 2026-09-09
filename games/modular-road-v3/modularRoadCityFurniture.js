@@ -146,6 +146,10 @@ export const FURNITURE_DEFAULTS = {
   signalNight: 1.8,
   /** Keep clear of the crossings at block ends, metres. */
   crossClear: 6.5,
+  /** Fraction of parked cars reversed into their space. A few is real; half
+   *  is what it used to be, and half of those were facing oncoming traffic
+   *  with their headlights on. */
+  carReverseChance: 0.09,
   /** Roadworks and loading-bay clutter — see modularRoadCityClutter.js. */
   ...CLUTTER_DEFAULTS,
   /** Road signs — see modularRoadCityRoadSigns.js. */
@@ -574,8 +578,31 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
             if (h2(seedA, st, 1) > F.carOccupancy) continue;
             const jitter = (h2(seedA, st, 2) - 0.5) * 0.9;
             const [x, z] = at(carAcross, s + jitter);
-            const flip = h2(seedA, st, 3) < 0.5 ? 0 : Math.PI;
-            place(cars, x, z, yawAlong + flip + (h2(seedA, st, 4) - 0.5) * 0.06, { color: pickCarColor(h2(seedA, st, 5)) });
+            /*
+             * PARKED CARS FACE THE WAY THEIR LANE TRAVELS.
+             *
+             * This was `yawAlong + (coin flip ? 0 : PI)`, so HALF the parked
+             * cars faced backwards — and since their headlights burn day and
+             * night, every other one on your side of the road was a vehicle
+             * coming straight at you. Reported as "the cars are driving the
+             * wrong lines", and it is not the moving traffic (whose lane
+             * directions are right); it is the parked ones.
+             *
+             * The kerb you are parked against decides it, exactly as it
+             * decides which way the signal arm reaches: a rotation about +Y by
+             * t sends the nose (+Z) to (sin t, cos t) in XZ, and a z-running
+             * street's low-x kerb carries the +z lanes.
+             *
+             * A few are still reversed in, because a car park nose-out is a
+             * real thing and a street where every single car is perfectly
+             * aligned reads as generated.
+             */
+            const parkYaw = axis === "z"
+              ? (side === 0 ? 0 : Math.PI)
+              : (side === 0 ? -Math.PI / 2 : Math.PI / 2);
+            const reversedIn = h2(seedA, st, 3) < F.carReverseChance ? Math.PI : 0;
+            place(cars, x, z, parkYaw + reversedIn + (h2(seedA, st, 4) - 0.5) * 0.06,
+              { color: pickCarColor(h2(seedA, st, 5)) });
           }
           // Trees on the pavement, staggered off the lamp stations.
           for (let s = a0 + F.crossClear + 4; s < a1 - F.crossClear; s += F.treePitch) {
@@ -639,7 +666,23 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
              */
             const wave = (((kx + kz) % 5) * 0.037);
             const phase = (axis === "z" ? 0 : 0.5) + wave;
-            place(lights, x, z, yawAlong + (side === 0 ? 0 : Math.PI), { phase });
+            /*
+             * THE ARM'S OWN YAW, DERIVED — not `yawAlong` with a flip.
+             *
+             * `yawAlong` orients things that run ALONG the street (a parked
+             * car's nose, a guardrail). The signal's arm is its local +X and
+             * has to reach ACROSS, into the carriageway, and those two are not
+             * the same rotation on both axes. A rotation about +Y by t sends
+             * +X to (cos t, -sin t) in XZ, so an x-running street needs -PI/2
+             * where a z-running one needs 0 — reusing `yawAlong` sent 156 of
+             * 300 signals into the building behind them. Same bug, same file,
+             * same day as the street lamps: derive it from the direction the
+             * road actually is.
+             */
+            const armYaw = axis === "z"
+              ? (side === 0 ? 0 : Math.PI)
+              : (side === 0 ? -Math.PI / 2 : Math.PI / 2);
+            place(lights, x, z, armYaw, { phase });
           }
           /*
            * ROADWORKS AND LOADING BAYS. Placed from HERE rather than from the
@@ -930,12 +973,14 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     { mesh: railMesh, list: rails, range: 260, casts: false },
     // Small, low and close to the road, so they go early. A cone at 200 m is
     // three pixels and there are more of them than of anything except rails.
-    { mesh: coneMesh, list: cones, range: 190, casts: false },
+    { mesh: coneMesh, list: cones, range: 230, casts: false },
     { mesh: barrierMesh, list: barriers, range: 240, casts: true },
     { mesh: binMesh, list: bins, range: 190, casts: true },
     { mesh: palletMesh, list: pallets, range: 170, casts: false },
     // Signs read from further than clutter does — that is their job.
-    { mesh: signMesh, list: roadSigns, range: 260, casts: false, attr: "aTile", key: "tile" },
+    // Signs read from FURTHER than clutter: their whole job is to be legible
+    // before you arrive, and 260 m cut them off inside a single block run.
+    { mesh: signMesh, list: roadSigns, range: 340, casts: false, attr: "aTile", key: "tile" },
   ];
   const _pos = new THREE.Vector3();
   const _tm = new THREE.Matrix4();

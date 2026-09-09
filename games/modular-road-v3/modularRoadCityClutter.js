@@ -52,17 +52,19 @@ export const CLUTTER_DEFAULTS = {
   /** Chance a block side carries a roadworks site. Sparse on purpose: one
    *  closure every few blocks is a living city, one per block is a council
    *  that has lost control. */
-  worksChance: 0.16,
+  worksChance: 0.30,
   /** Metres of diagonal taper, then metres of closed lane behind it. */
   worksTaper: 11,
   worksRun: 17,
-  /** Cone spacing along the taper and the run. */
-  conePitch: 2.4,
+  /** Cone spacing along the taper and the run. Tighter than a real closure —
+   *  at 2.4 m the run read as a dotted line from a moving car rather than as a
+   *  barrier you must not cross. */
+  conePitch: 1.8,
   /** How far into the road the closure reaches, metres from the kerb. A little
    *  over one lane, so the closed lane is genuinely shut. */
   worksWidth: 3.4,
   /** Chance a block side carries a loading bay instead. */
-  bayChance: 0.20,
+  bayChance: 0.34,
   /** How far into the road bay clutter sits. Small — it is at the kerb, it is
    *  just proud enough to be worth avoiding. */
   bayInset: 1.0,

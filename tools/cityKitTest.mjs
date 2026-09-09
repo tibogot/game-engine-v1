@@ -377,6 +377,47 @@ console.log("\n── LOOK PASS ──");
     }
     check("every street lamp reaches OVER the road, not into the building",
       wrongWay === 0, `${wrongWay} of ${total} lanterns point the wrong way`);
+
+    // THE SIGNALS HAVE THE SAME SHAPE AND HAD THE SAME BUG: a mast arm that
+    // must reach across the carriageway, yawed off the wrong axis convention.
+    // 156 of 300 heads were over the building behind them.
+    const FP = flatCity.furniture.params;
+    const lights = flatCity.furniture.lists.lights;
+    let sigWrong = 0, sigTotal = 0;
+    for (const e of lights.slice(0, 300)) {
+      const el = e.m.elements;
+      const px = el[12], pz = el[14];
+      const hx = el[0] * FP.lightArm + el[4] * (FP.lightHeight - 0.8) + px;
+      const hz = el[2] * FP.lightArm + el[6] * (FP.lightHeight - 0.8) + pz;
+      const sp = flatCity.streetSpawnNear(px, pz);
+      const sh = flatCity.streetSpawnNear(hx, hz);
+      sigTotal++;
+      if (Math.hypot(sh.x - hx, sh.z - hz) >= Math.hypot(sp.x - px, sp.z - pz)) sigWrong++;
+    }
+    check("every traffic signal reaches OVER the carriageway", sigWrong === 0,
+      `${sigWrong} of ${sigTotal} heads point the wrong way`);
+
+    /*
+     * NOTHING BURIED IN A BUILDING. A cone, sign or bin inside a footprint is
+     * invisible, still costs an instance and a capsule, and is exactly the
+     * kind of waste that never shows up in a stat — the count says 1456 cones
+     * either way.
+     */
+    const buried = {};
+    for (const [kind, list] of Object.entries(flatCity.furniture.lists)) {
+      if (!Array.isArray(list) || !list.length) continue;
+      let bad = 0, n = 0;
+      for (const e of list.slice(0, 400)) {
+        const room = flatCity.buildingClearance(e.x, e.z);
+        if (room == null) continue;
+        n++;
+        if (room < 0) bad++;
+      }
+      if (n) buried[kind] = `${bad}/${n}`;
+    }
+    const anyBuried = Object.entries(buried).filter(([, v]) => !v.startsWith("0/"));
+    check("no street furniture is buried inside a building", anyBuried.length === 0,
+      anyBuried.length ? anyBuried.map(([k, v]) => `${k} ${v}`).join(", ") : JSON.stringify(buried));
   }
 
   check("every lamp post stands inside the city extent", out === 0, `${out} outside`);

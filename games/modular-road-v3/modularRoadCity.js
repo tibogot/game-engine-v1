@@ -311,6 +311,8 @@ export function createModularRoadCity({
   let obstacles = null;
   /** Guardrails currently being thrown, and the pool that throws them. */
   let knockables = null;
+  /** Set when the city builds — see buildingClearance on the handle. */
+  let clearanceAt = null;
   /** Buildings you cannot drive through. Built lazily — a city that is never
    *  collided against never pays for the trees. */
   let collider = null;
@@ -760,6 +762,7 @@ export function createModularRoadCity({
     obstacles = null;
     stats.obstacles = null;
     knockables = null;
+    clearanceAt = null;
     stats.knockables = null;
     if (P.ground) {
       ground = createCityStreets({
@@ -830,6 +833,9 @@ export function createModularRoadCity({
           }
           return best;
         };
+        // Exposed so a harness (and the dev console) can ask the same question
+        // the placement asks: is this point inside a building?
+        clearanceAt = buildingClearance;
         furniture = createCityFurniture({
           buildingClearance,
           P, originCellX, originCellZ, params: P.furnitureParams,
@@ -1003,6 +1009,9 @@ export function createModularRoadCity({
     /** The furniture handle — its placement lists are what the obstacle table
      *  and the knockable pool both read. */
     get furniture() { return furniture; },
+    /** Metres to the nearest building wall; NEGATIVE inside a footprint.
+     *  Null until the city has been built. */
+    buildingClearance(x, z) { return clearanceAt ? clearanceAt(x, z) : null; },
     /** Live knockable params, or null when there is no furniture. */
     get knockables() { return knockables ? knockables.params : null; },
     /** Live per-kind toggles: lamps / lights / trees / cars / rails / radius. */
