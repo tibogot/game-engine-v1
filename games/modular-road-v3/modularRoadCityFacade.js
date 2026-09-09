@@ -298,6 +298,29 @@ export const FACADE_DEFAULTS = {
   neonBuildings: 0.26,
   neonFraction: 0.5,
   /** Metres above the building base for the fascia band, and its depth. */
+  /** ── STREET LEVEL ──
+   *  The bottom of a building is not the same thing as the rest of it, and
+   *  it is the only part most players ever see up close. `shopfronts` at 0
+   *  restores the old facade exactly — the branch simply paints nothing.
+   *
+   *  `shopUnit` is deliberately NOT the structural bay: a shop is about six
+   *  metres wide whatever the windows above are doing, and shops that line
+   *  up with the windows above them are the tell of a generated frontage. */
+  shopfronts: 1,
+  shopHeight: 4.3,
+  shopUnit: 6.2,
+  shopPier: 0.55,
+  shopStall: 0.55,
+  shopFascia: 0.78,
+  shopMull: 1.15,
+  shopMullW: 0.09,
+  /** Awnings on some of them, striped, hung under the fascia. */
+  shopAwning: 0.36,
+  shopAwningH: 0.55,
+  shopStripe: 0.34,
+  /** How many shops are open, and how hard the inside glows at night. */
+  shopLitFraction: 0.74,
+  shopGlow: 1.35,
   neonHeight: 4.0,
   neonThick: 0.40,
   /** A projecting blade sign above the fascia, on some bays. */
@@ -1259,7 +1282,7 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     oEmis.assign(select(F.isRoof, vec3(0.0),
       oEmis.add(crownColor.mul(hasCrown.mul(crownBand).mul(u.nightAmount).mul(u.crownBoost)))));
 
-    // ── SHOPFRONT NEON ──────────────────────────────────────────────────
+    // ── STREET LEVEL: THE SHOPFRONT, AND THE NEON OVER IT ──────────────────────────────────────────────────
     //
     // BEHIND A HEIGHT GATE, and that is not a micro-optimisation: on any
     // skyline view almost every pixel is above the third floor, so this is a
@@ -1267,7 +1290,96 @@ export function createCityFacadeMaterial({ params: overrides = {} } = {}) {
     // same shape as the relief gate above it, and the reason that one is worth
     // 5 ms.
     const neonTop = u.neonHeight.add(u.neonThick).add(u.neonBladeH).toVar();
-    If(F.up.lessThan(neonTop.add(0.5)).and(F.isRoof.not()).and(F.flat.not()), () => {
+    // ONE GATE FOR BOTH. Two branches at nearly the same height would
+    // have been two tests bought for one saving.
+    const streetTop = max(neonTop, u.shopHeight).add(0.5).toVar();
+    If(F.up.lessThan(streetTop).and(F.isRoof.not()).and(F.flat.not()), () => {
+      /*
+       * ── THE SHOPFRONT ──────────────────────────────────────────────────
+       *
+       * The storey you drive past was the same stone as the thirtieth. Real
+       * streets read as streets because the bottom four metres is glass,
+       * stallrisers, awnings and signage on A UNIT OF ITS OWN — a shop is
+       * about six metres wide whatever the structural bay above it is doing,
+       * and that mismatch between the ground rhythm and the one above it is a
+       * large part of what makes a frontage look built rather than extruded.
+       *
+       * SO THE SHOP UNIT IS NOT THE BAY. Reusing `F.bay` would have been a
+       * line cheaper and would have lined every shop up with the windows
+       * above it, which is the one thing that gives a generated frontage
+       * away.
+       *
+       * A TOWER GETS A COLONNADE OR A PARADE, NEVER BOTH. `hasBase` already
+       * gives punched towers a deep recessed ground tier, and painting shop
+       * glazing onto the face of that recess would be two different ideas
+       * about the same four metres fighting each other.
+       */
+      const shopOn = u.shopfronts
+        .mul(float(1.0).sub(float(F.isIndustrial)))
+        .mul(select(F.hasBase, float(0.0), float(1.0)))
+        .toVar();
+      const shopH = u.shopHeight;
+      const si = floor(F.u0.div(u.shopUnit)).toVar();
+      // Metres across THIS shop, so every width below is in metres and the
+      // face's own `aaU` is already the right filter width.
+      const sx = F.u0.sub(si.mul(u.shopUnit)).toVar();
+      const sh = hash31(vec3(F.lot, si.mul(3.1).add(F.faceKey.mul(5.9)))).toVar();
+      // A painted frontage colour per shop: saturated, but pulled well off
+      // full chroma — a parade of pure hues reads as a toy.
+      const shue = fract(sh.mul(17.3));
+      const shopCol = mix(vec3(0.30, 0.32, 0.35), vec3(
+        smoothstep(0.55, 0.18, abs(shue.sub(0.06))).mul(0.75).add(0.12),
+        smoothstep(0.50, 0.16, abs(shue.sub(0.42))).mul(0.62).add(0.10),
+        smoothstep(0.55, 0.18, abs(shue.sub(0.74))).mul(0.70).add(0.14),
+      ), 0.72).toVar();
+
+      const fasciaLo = shopH.sub(u.shopFascia);
+      const awnLo = fasciaLo.sub(u.shopAwningH);
+      // The pier between shops keeps the building's own stone; everything
+      // between two piers is frontage.
+      const glazedX = band(sx, u.shopPier, u.shopUnit.sub(u.shopPier.mul(0.35)), F.aaU).toVar();
+      const stallY = band(F.up, float(0.0), u.shopStall, F.aaV);
+      const glassY = band(F.up, u.shopStall, fasciaLo, F.aaV);
+      const fasciaY = band(F.up, fasciaLo, shopH, F.aaV);
+      // Mullions: the fine vertical rhythm that says "shop window" rather
+      // than "hole in a wall".
+      const mv = fract(sx.sub(u.shopPier).div(u.shopMull));
+      const mull = band(mv, float(0.0), u.shopMullW.div(u.shopMull), F.aaU.div(u.shopMull));
+
+      const glazed = glazedX.mul(glassY).toVar();
+      const glass = glazed.mul(float(1.0).sub(mull)).toVar();
+      const mullM = glazed.mul(mull).toVar();
+      const stallM = glazedX.mul(stallY).toVar();
+      const fasciaM = fasciaY.toVar();
+      // An awning over some of them, hung under the fascia. Paint, not
+      // geometry — at the distance a frontage is actually read, a striped
+      // band under the sign IS an awning.
+      const awnY = band(F.up, awnLo, fasciaLo, F.aaV);
+      const awnM = glazedX.mul(awnY).mul(step(fract(sh.mul(53.1)), u.shopAwning)).toVar();
+      const stripe = step(float(0.5), fract(sx.div(u.shopStripe)));
+      const awnCol = mix(shopCol.mul(0.85), vec3(0.88, 0.88, 0.85), stripe);
+
+      oCol.assign(mix(oCol, vec3(0.040, 0.045, 0.052), glass.mul(shopOn)));
+      oCol.assign(mix(oCol, vec3(0.075, 0.078, 0.082), mullM.mul(shopOn)));
+      oCol.assign(mix(oCol, shopCol.mul(0.42), stallM.mul(shopOn)));
+      oCol.assign(mix(oCol, shopCol, fasciaM.mul(shopOn)));
+      oCol.assign(mix(oCol, awnCol, awnM.mul(shopOn)));
+      oRough.assign(mix(oRough, float(0.14), glass.mul(shopOn)));
+      /*
+       * AND THE LIGHT INSIDE. A shop window at night is not a dark pane with
+       * a sign over it — the interior is lit and it spills onto the pavement,
+       * which is most of why a night street looks inhabited. Warm, because
+       * shop lighting is; and against the cold sparse room lights above it,
+       * that contrast IS the street level.
+       *
+       * The awning hangs in front of the glass, so it takes the light back
+       * out again.
+       */
+      const litShop = step(sh, u.shopLitFraction);
+      oEmis.assign(oEmis.add(vec3(1.0, 0.86, 0.66).mul(
+        glass.mul(float(1.0).sub(awnM)).mul(litShop).mul(shopOn)
+          .mul(u.nightAmount).mul(u.shopGlow))));
+
       // One hash per BAY, so a frontage is a shop rather than a whole tower
       // lighting up at once. `faceKey` keeps the four sides different.
       // Does this BUILDING have a lit frontage at all? Industrial never does:
