@@ -257,7 +257,14 @@ export function createCityRoofs({ P, buildings, archetypes, params: overrides = 
     // The city's night skyglow, multiplied by the surface's own albedo so a
     // pale casing picks it up and a dark duct barely does — an ambient light,
     // not a fog laid over the top. Same model the street and facade use.
-    const albedo = vertexColor().mul(vTint);
+    /*
+     * `.rgb`, AND IT IS NOT COSMETIC. `vertexColor()` is a vec4 — the colour
+     * attribute may carry alpha — so this was a vec4 all the way down and
+     * `vec4(glow, 1.0)` below asked for five components. Three warned about it
+     * on every city load and carried on, which is the worst of both: a real
+     * type error that never failed loudly enough to fix itself.
+     */
+    const albedo = vertexColor().rgb.mul(vTint);
     const glow = albedo.mul(uGlow).mul(uGlowAmt).mul(uNight);
     mat.emissiveNode = glow;
     applyBloomMRT(mat, vec4(glow, 1.0));

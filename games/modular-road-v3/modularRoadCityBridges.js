@@ -98,7 +98,9 @@ export function makeBridgeMaterial(uNight, P) {
    * green channel is already carried per vertex for free.
    */
   const isGlass = step(float(0.5), vertexColor().g);
-  mat.colorNode = mix(vertexColor(), vec3(0.055, 0.062, 0.075), isGlass);
+  // `.rgb`: vertexColor() is a vec4, and mixing it with a vec3 is the same
+  // type mismatch that had the roofs asking for a five-component vec4.
+  mat.colorNode = mix(vertexColor().rgb, vec3(0.055, 0.062, 0.075), isGlass);
   // Lit inside. Warm, because a walkway is; a dark tube strung between two lit
   // towers reads as something broken rather than something built.
   mat.emissiveNode = vec3(1.0, 0.90, 0.74).mul(isGlass).mul(uNight).mul(uGlow);

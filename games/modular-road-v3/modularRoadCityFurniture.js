@@ -513,7 +513,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
    */
   function litAdd({ vcolor = false, icolor = false } = {}) {
     let albedo = materialColor;
-    if (vcolor) albedo = albedo.mul(vertexColor());
+    // `.rgb` so the albedo stays the vec3 this comment says it is:
+    // vertexColor() is a vec4 and would have widened the whole chain.
+    if (vcolor) albedo = albedo.mul(vertexColor().rgb);
     // InstanceNode writes the per-instance tint into this varying and
     // NodeMaterial multiplies it into the diffuse (NodeMaterial.js:857). Read
     // the SAME varying rather than a second copy, or a red car would light up
