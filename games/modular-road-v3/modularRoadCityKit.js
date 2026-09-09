@@ -79,10 +79,25 @@ export const KIT_DEFAULTS = {
    *  wants something to fly BETWEEN. */
   minHeight: 26,
   maxHeight: 190,
-  /** Chance a tower steps in as it rises, and how hard. */
-  setbackChance: 0.62,
-  maxSetbacks: 3,
+  /** Chance a tower steps in as it rises, and how hard.
+   *
+   *  HEIGHT DECIDES, not a flat roll. MEASURED on the old kit: 13 of 21
+   *  archetypes stepped in, which sounds healthy — until you look at WHICH.
+   *  The 272 m and 301 m landmarks were pure boxes, and they are the three
+   *  buildings whose whole job is to give the skyline a shape you recognise,
+   *  seen from a track that flies over the rooftops. A flat 62% roll spends
+   *  its setbacks on the mid-rise, where nobody reads a silhouette.
+   *
+   *  So a low block may well be a box — most real ones are — and anything
+   *  approaching `maxHeight` almost always steps, more than once. Costs no
+   *  extra tier and no extra draw: a stepped tower is the same stack of boxes
+   *  with different widths. */
+  setbackChance: 0.42,
+  setbackChanceTall: 0.97,
+  maxSetbacks: 2,
+  maxSetbacksTall: 4,
   setbackDepth: 0.16,
+  setbackDepthTall: 0.24,
   /** Chance of a PODIUM: a wide low base with a narrower tower on it. The
    *  commonest tall-building form there is, and the one that reads best from
    *  a road at its foot — the podium is what you drive past. */
@@ -155,7 +170,16 @@ function buildArchetype(rnd, K, forceH = null) {
   const H = forceH ?? (K.minHeight + tall * (K.maxHeight - K.minHeight));
 
   const podium = H > 60 && rnd() < K.podiumChance;
-  const nSet = rnd() < K.setbackChance ? 1 + Math.floor(rnd() * K.maxSetbacks) : 0;
+  /*
+   * HOW TALL IS THIS, AS A FRACTION OF THE KIT'S CEILING. The landmarks are
+   * forced well ABOVE that ceiling, so this saturates at 1 for them — which is
+   * the point: they are the buildings the skyline is read by.
+   */
+  const tallT = Math.max(0, Math.min(1, (H - K.minHeight) / Math.max(1, K.maxHeight - K.minHeight)));
+  const chance = K.setbackChance + (K.setbackChanceTall - K.setbackChance) * tallT;
+  const maxSet = K.maxSetbacks + (K.maxSetbacksTall - K.maxSetbacks) * tallT;
+  const depth = K.setbackDepth + (K.setbackDepthTall - K.setbackDepth) * tallT;
+  const nSet = rnd() < chance ? 1 + Math.floor(rnd() * maxSet) : 0;
 
   // ── Tier stack ─────────────────────────────────────────────────────────────
   // Each tier is a box from `y` up to the next setback, narrower than the last.
@@ -179,8 +203,8 @@ function buildArchetype(rnd, K, forceH = null) {
     const h = remaining * frac;
     tiers.push({ y, h, w, d });
     y += h;
-    w *= 1 - K.setbackDepth * (0.6 + rnd() * 0.8);
-    d *= 1 - K.setbackDepth * (0.6 + rnd() * 0.8);
+    w *= 1 - depth * (0.6 + rnd() * 0.8);
+    d *= 1 - depth * (0.6 + rnd() * 0.8);
   }
 
   const full = [];

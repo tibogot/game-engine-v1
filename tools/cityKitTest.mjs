@@ -67,6 +67,42 @@ check("L2's box is the massing envelope", worstMass < 1e-3, `worst ${worstMass.t
 check("every tier stands on y = 0", worstBase < 1e-3, `worst ${worstBase.toExponential(1)} m`);
 check("footprints fit inside a lot", footprintOk, `widest ${worstFoot.toFixed(1)} m vs lot ${CITY_DEFAULTS.lotSize} m`);
 check("triangle count falls with each tier", monotonic);
+/*
+ * ── THE TALL ONES HAVE A SILHOUETTE ─────────────────────────────────────────
+ *
+ * A flat setback roll spends its setbacks on the mid-rise, where nobody reads
+ * one. MEASURED on the kit before this was height-weighted: 13 of 21
+ * archetypes stepped in, which sounds healthy — but the 272 m and 301 m
+ * landmarks were pure boxes, and those are the three buildings whose entire
+ * job is to be recognisable from a track that flies over the rooftops.
+ *
+ * Measured off the MESH, and off the tower rather than its mast: reading the
+ * topmost vertices reports 98% narrowing on anything with an aerial, which is
+ * a 1 m box on the roof and not a setback at all.
+ */
+{
+  const BANDS = 20, tipBand = Math.floor(BANDS * 0.85);
+  const stepOf = (geo) => {
+    const pos = geo.getAttribute("position");
+    let top = 0;
+    for (let i = 0; i < pos.count; i++) top = Math.max(top, pos.getY(i));
+    const w = new Array(BANDS).fill(0);
+    for (let i = 0; i < pos.count; i++) {
+      const b = Math.min(BANDS - 1, Math.floor((pos.getY(i) / Math.max(1e-6, top)) * BANDS));
+      w[b] = Math.max(w[b], Math.max(Math.abs(pos.getX(i)), Math.abs(pos.getZ(i))) * 2);
+    }
+    for (let i = 1; i < BANDS; i++) if (w[i] === 0) w[i] = w[i - 1];
+    for (let i = BANDS - 2; i >= 0; i--) if (w[i] === 0) w[i] = w[i + 1];
+    const base = Math.max(w[0], w[1]);
+    return base > 0 ? 1 - w[tipBand] / base : 0;
+  };
+  const tall = kit.archetypes.filter((a) => a.massHeight > 150);
+  const boxy = tall.filter((a) => stepOf(a.lods[0]) < 0.12);
+  check("every tower over 150 m steps in — the skyline is read by these",
+    tall.length > 0 && boxy.length === 0,
+    `${boxy.length} of ${tall.length} are plain boxes`
+    + ` (steps ${tall.map((a) => (stepOf(a.lods[0]) * 100).toFixed(0) + "%").join(", ")})`);
+}
 check("archetypes are height-sorted (the downtown falloff depends on it)", orderOk);
 const kitB = buildCityKit({ seed: 20260902 });
 check("same seed, same kit", kitB.archetypes.every((a, i) => Math.abs(a.height - kit.archetypes[i].height) < 1e-9));
