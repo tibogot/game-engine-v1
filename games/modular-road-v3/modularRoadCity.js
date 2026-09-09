@@ -303,6 +303,9 @@ export function createModularRoadCity({
   kitParams = {},
   avoid = null,
   heightAt = null,
+  /** Called with the rain-collider surfaces after EVERY build, including
+   *  the first. See `rainSurfaces` for why it is told rather than asked. */
+  onRebuilt = null,
   reflectionTexture = null,
   /**
    * The engine's tree environment (app.treeEnv from startV3App).
@@ -1050,6 +1053,32 @@ export function createModularRoadCity({
   }
 
   // ── Build / rebuild ────────────────────────────────────────────────────────
+  /**
+   * THE SURFACES RAIN LANDS ON — the street, the buildings and the roofs.
+   *
+   * Deliberately not everything. The rain collider is a top-down render of a
+   * layer, EVERY frame, so each tagged mesh is a draw in that pass: the ground
+   * you drive on and the roofs you fly over are worth it, and a splash on a
+   * bin at 60 km/h is not. Nothing else in the city is tagged, and an untagged
+   * object costs the bake exactly nothing — the bake camera does
+   * `disableAll()` first, so it is opt-in by construction.
+   */
+  function rainSurfaces() {
+    const out = [];
+    if (ground?.mesh) out.push(ground.mesh);
+    if (batched) out.push(batched);
+    if (instanced) {
+      for (const row of instanced) {
+        if (!row) continue;
+        // L0 only. The far tiers are the same towers with coarser tops, and a
+        // second copy of a roof in the height buffer is a draw for nothing.
+        if (row[0]) out.push(row[0]);
+      }
+    }
+    if (roofs?.group) out.push(roofs.group);
+    return out;
+  }
+
   function rebuild() {
     const t0 = performance.now();
     clearBackend();
@@ -1065,6 +1094,19 @@ export function createModularRoadCity({
     syncRoofs();
     _lodT = 1e9;
     stats.lastBuildMs = performance.now() - t0;
+    /*
+     * TOLD, NOT ASKED. Every mutator on this city funnels through `rebuild()`
+     * — reseed, a param change, and the track corridor on every build settle —
+     * and each of them REPLACES these meshes. A caller that tagged them once
+     * after construction would be tagging objects that no longer exist the
+     * first time the player nudged a track piece, and the symptom is rain
+     * falling through a road that worked a minute ago.
+     *
+     * The surfaces are handed over rather than fetched, because on the first
+     * call this object has not been returned yet and the caller has nothing to
+     * ask.
+     */
+    onRebuilt?.(rainSurfaces());
   }
 
   // ── Update ─────────────────────────────────────────────────────────────────
@@ -1144,6 +1186,7 @@ export function createModularRoadCity({
 
   return {
     group,
+    rainSurfaces,
     params: P,
     facade: facade.params,
     facadeMaterial: facade.material,

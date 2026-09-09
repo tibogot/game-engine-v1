@@ -1244,6 +1244,54 @@ console.log("\n── LOOK PASS ──");
 
 
   /*
+   * ── RAIN SURFACES ────────────────────────────────────────────────────────
+   *
+   * The rain collider layer is opt-in, and for a long time nothing in the city
+   * opted in: `floorAt` returned "no surface" for every column, so no drop in
+   * the city ever landed or splashed. The track deck worked, which is exactly
+   * why nobody noticed.
+   *
+   * Two things have to hold and neither shows on screen until it rains: the
+   * right meshes are offered, and they are offered again after EVERY rebuild —
+   * a rebuild replaces them, so a one-time tag would be tagging objects that
+   * no longer exist the moment a track piece moved.
+   */
+  console.log("\n── RAIN SURFACES ──");
+  {
+    const surfaces = flatCity.rainSurfaces();
+    const names = surfaces.map((o) => o.name || o.type);
+    check("the street is something rain can land on",
+      surfaces.some((o) => o.name === "CityStreets"), names.join(", ").slice(0, 90));
+    check("the buildings are too", surfaces.some((o) => o.isInstancedMesh && /Facade|City/.test(o.material?.name || "")) || surfaces.length > 2,
+      `${surfaces.length} surfaces`);
+    /*
+     * AND THE FURNITURE IS NOT. Every tagged mesh is a draw in a top-down pass
+     * that runs every frame while it rains; the road and the roofs earn that,
+     * and a splash on a wheelie bin at 60 km/h does not.
+     */
+    const furniture = surfaces.filter((o) => /CityCars|CityTrees|CityCones|CityRoadSigns|CityGantry|CitySteam|CityTraffic/.test(o.name || ""));
+    check("street furniture is NOT tagged, so the bake stays cheap",
+      furniture.length === 0, furniture.map((o) => o.name).join(", ") || "none");
+
+    // Told again on every rebuild, with the NEW meshes.
+    let calls = 0, last = null;
+    const watched = createModularRoadCity({
+      seed: 20260902, avoid: () => Infinity,
+      onRebuilt: (s2) => { calls++; last = s2; },
+    });
+    check("the city reports its surfaces on the first build", calls === 1 && last?.length > 0,
+      `${calls} call(s), ${last?.length ?? 0} surfaces`);
+    const before = last;
+    watched.rebuild();
+    check("and again on a rebuild", calls === 2, `${calls} calls`);
+    check("with the NEW meshes, not the ones it just threw away",
+      last !== before && last.every((o) => !before.includes(o)),
+      `${last.filter((o) => before.includes(o)).length} stale`);
+    watched.dispose?.();
+  }
+
+
+  /*
    * ── SKYBRIDGES ───────────────────────────────────────────────────────────
    *
    * Every way a bridge can be wrong is geometric and none of them shows in a

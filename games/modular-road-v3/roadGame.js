@@ -595,10 +595,36 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * and the failure reads as "rain falls through the deck", which sends you
    * looking at the collision buffer instead of at a forgotten re-tag.
    */
-  function syncRainColliders() {
-    if (!worldRain || !_mergedGroupRef) return;
-    markRainCollider(_mergedGroupRef);
+  /**
+   * The city's rain surfaces, as of its LAST build.
+   *
+   * Held rather than fetched because the ordering runs both ways: the city can
+   * be rebuilt while rain is off (tag nothing, remember them) and rain can be
+   * switched on long after (tag what we remembered). Either way the tagging
+   * happens exactly once per rebuild, and never at all if it never rains.
+   */
+  let _cityRainSurfaces = null;
+  function onCityRebuilt(surfaces) {
+    _cityRainSurfaces = surfaces;
+    // Cheap and correct when rain is off: this returns immediately, and the
+    // layer bits are set the moment the weather turns.
+    syncRainColliders();
   }
+
+  function syncRainColliders() {
+    if (!worldRain) return;
+    if (_mergedGroupRef) markRainCollider(_mergedGroupRef);
+    /*
+     * AND THE CITY. Rain fell straight through it: the collider layer is
+     * opt-in and nothing in the city had ever opted in, so `floorAt` returned
+     * "no surface" for every column and no drop in the city ever landed or
+     * splashed. The track deck worked, which is exactly why it went unnoticed.
+     *
+     * Only the street, the buildings and the roofs — see `rainSurfaces`.
+     */
+    if (_cityRainSurfaces) for (const o of _cityRainSurfaces) markRainCollider(o);
+  }
+
 
   function setRainEnabled(on) {
     const next = !!on;
@@ -2032,6 +2058,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     if (city) return;
     rebuildCorridor();
     city = createModularRoadCity({
+      onRebuilt: onCityRebuilt,
       seed: citySeed,
       params: {
         ...cityParams,
