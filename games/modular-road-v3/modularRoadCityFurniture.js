@@ -84,6 +84,51 @@ export function laneTravelDir(axis, side) {
 }
 
 /**
+ * THE SAME TABLE, AS DATA — the four lane centres across a street, low to high.
+ *
+ * `laneTravelDir` answers the driving-side question for a KERB. Turning needs
+ * it for a LANE: a right turn goes from the kerb-most lane of one street into
+ * the kerb-most lane of the next, and "kerb-most" is an index into this. Both
+ * read the one table, so they cannot drift apart — which is the failure this
+ * whole area of the file keeps having.
+ */
+export const LANE_FRACS = [0.125, 0.375, 0.625, 0.875];
+
+/**
+ * Which way lane `fi` travels along its street.
+ *
+ * The low half of the road travels +along on a Z street and -along on an X one
+ * — that single flip is the entire driving-side rule, and it is expressed once,
+ * here, by deferring to `laneTravelDir`.
+ */
+export function laneDirForIndex(axis, fi) {
+  return laneTravelDir(axis, fi < 2 ? 0 : 1);
+}
+
+/**
+ * The two lanes on `axis` that travel `dir`, KERB-MOST FIRST.
+ *
+ * Which pair it is falls out of the table; which of the pair is kerb-most is
+ * simply the one further from the street's centre line.
+ */
+export function lanePairFor(axis, dir) {
+  return laneDirForIndex(axis, 0) === dir ? [0, 1] : [3, 2];
+}
+
+/**
+ * Where you end up after turning: `hand` is +1 for a right turn, -1 for a left.
+ *
+ * Derived, not tabulated. `right = forward x up`, and forward is (0,0,dir) on a
+ * Z street and (dir,0,0) on an X one, so right of +Z is -X and right of +X is
+ * +Z. A table of four cases is exactly how the heading bug happened twice.
+ *
+ * @returns {{axis: "x"|"z", dir: 1|-1}}
+ */
+export function turnTo(axis, dir, hand) {
+  return axis === "z" ? { axis: "x", dir: -dir * hand } : { axis: "z", dir: dir * hand };
+}
+
+/**
  * WHICH WAY THE CAR MODEL FACES, along its own local Z. +1 means the bonnet
  * is at +Z.
  *
@@ -239,6 +284,27 @@ export const FURNITURE_DEFAULTS = {
   trafficGap: 7.2,
   trafficAccel: 2.6,
   trafficDecel: 4.5,
+  /**
+   * TURNING AT JUNCTIONS.
+   *
+   * Without it the lanes are infinite straight lines and the whole city reads
+   * as parallel conveyor belts: nothing ever leaves the street it started on.
+   *
+   * `trafficTurnChance` is per car per junction, and only ONE hand is open to
+   * any given lane — the kerb-most lane may turn right, the median-most may
+   * turn left. A right turn out of the inner lane would cut straight across
+   * the outer one, which is the thing that reads as wrong even to someone not
+   * looking for it.
+   *
+   * `trafficTurnRadius` is the corner-cutting radius the car is drawn on, and
+   * `trafficTurnLook` is how far before the corner the decision is taken — far
+   * enough that there is room to check the other street for a gap BEFORE the
+   * car has committed to swinging out.
+   */
+  trafficTurns: true,
+  trafficTurnChance: 0.3,
+  trafficTurnRadius: 5.5,
+  trafficTurnLook: 26,
   /** How far from the camera a moving car is still updated and drawn. */
   trafficRange: 380,
   /** Head and tail lamp strength at night (they bloom). */
@@ -1076,13 +1142,30 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   // block ends. Lane centres sit at 1/8, 3/8, 5/8, 7/8 of the carriageway —
   // between the paint the street shader draws at 1/4, 1/2 and 3/4.
   const lanes = [];
+  /**
+   * (axis, street cell, lane index) -> index into `lanes`.
+   *
+   * A turning car has to name the lane it is turning INTO, and it can only do
+   * that by integers: the two `across` values would be computed by two
+   * different expressions and float equality between them is not a thing to
+   * rely on. `k` and `fi` are exact.
+   */
+  const laneIndex = new Map();
+  /**
+   * A NUMBER, not a string. `maybeTurn` runs for every car in a block on every
+   * frame — around a thousand calls at 60 Hz — and a template literal there is
+   * a thousand short-lived strings a second for the collector to deal with.
+   * `k` is a street index, comfortably inside +/-4096 for any city this can
+   * build; the +4096 only exists so a negative one does not collide.
+   */
+  const laneKey = (axis, k, fi) => (((k + 4096) * 4 + fi) * 2 + (axis === "z" ? 0 : 1));
   if (F.traffic) {
     const span = half * 2;
     for (let k = Math.floor((-half - ox) / pitch) - 1; k <= Math.ceil((half - ox) / pitch) + 1; k++) {
       for (const axis of ["z", "x"]) {
         const base = (axis === "z" ? ox : oz) + k * pitch + blockW;
-        for (const [frac, dir] of [[0.125, 1], [0.375, 1], [0.625, -1], [0.875, -1]]) {
-          const across = base + streetW * frac;
+        for (let fi = 0; fi < LANE_FRACS.length; fi++) {
+          const across = base + streetW * LANE_FRACS[fi];
           const lim = axis === "z" ? P.centerX : P.centerZ;
           if (Math.abs(across - lim) > half) continue;
           // WHICH SIDE IS THE RIGHT-HAND SIDE FLIPS BETWEEN THE TWO AXES, and
@@ -1096,7 +1179,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
           // right-hand traffic. trafficHeadingTest checks the side, not just
           // the heading, because a heading that is consistent with a lane can
           // still be consistent with the WRONG lane.
-          lanes.push({ axis, across, dir: axis === "x" ? -dir : dir, span });
+          laneIndex.set(laneKey(axis, k, fi), lanes.length);
+          lanes.push({ axis, across, dir: laneDirForIndex(axis, fi), span, fi, k });
         }
       }
     }
@@ -1109,6 +1193,13 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       traffic.push({
         lane: lanes[li],
         li,
+        /** Stable identity. `li` changes when the car turns; this never does,
+         *  so the turn dice stay deterministic for the life of the city. */
+        id: traffic.length,
+        /** The turn in progress, or null. See `maybeTurn`. */
+        turn: null,
+        /** The junction this car has already made its mind up about. */
+        turnAt: -1,
         phase: u0,
         /*
          * `u` IS STATE NOW, not a function of the clock.
@@ -1133,13 +1224,71 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
    *
    * Without a leader to follow, every car in a lane brakes for the same stop
    * line and parks on top of the one in front: a red light would stack twelve
-   * cars in the same three metres. They are created evenly spaced and only ever
-   * move forward, and no car may pass its leader, so this order is fixed for
-   * the life of the city and never needs re-sorting.
+   * cars in the same three metres. Nobody overtakes, so the leader is simply
+   * the next one round the ring.
+   *
+   * IT IS A RING, NOT A SORTED LIST, and the difference started to matter when
+   * cars began turning. `u` wraps from 1 back to 0, so the array stops being
+   * ascending the moment the first car laps — what is preserved is the CYCLIC
+   * order, which is all `row[(i + 1) % n]` needs. A turning car leaves one ring
+   * and joins another, and `insertIntoRing` puts it in the arc it actually
+   * occupies rather than where a sort would have put it.
    */
   const laneCars = lanes.map(() => []);
   for (const c of traffic) laneCars[c.li].push(c);
   for (const row of laneCars) row.sort((a, b) => a.u - b.u);
+
+  /** Forward distance from `a` to `b` around the ring, in u. */
+  const fwdU = (a, b) => { const d = (b - a) % 1; return d < 0 ? d + 1 : d; };
+
+  /**
+   * Put a car into a lane's ring, in the arc it belongs to.
+   *
+   * NOT `sort by u`. See the note above: the array is cyclically ordered and
+   * generally not ascending, so sorting it would reverse the queue of whichever
+   * cars had lapped and hand half the lane a leader that is behind it.
+   */
+  function insertIntoRing(row, car) {
+    const n = row.length;
+    if (n === 0) { row.push(car); return; }
+    /*
+     * THE CAR IT FALLS IN BEHIND is the one with the SMALLEST forward distance
+     * to it. Nothing else — no arc walk, no epsilon.
+     *
+     * The first version compared each arc against the offset into it, which is
+     * the same answer in exact arithmetic and a different one in floating
+     * point. Two cars a hundredth of a millimetre apart — which is precisely
+     * what a junction produces when two streams merge — made one arc measure
+     * 0.999986 instead of 0.000014, and the arriving car was filed a whole lap
+     * away from where it actually was. Its follower then read a clear 2392 m
+     * of road and drove straight through it. This formulation cannot express
+     * that mistake: whichever of the two is behind, its forward distance is
+     * the small one.
+     */
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = fwdU(row[i].u, car.u);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    row.splice(best + 1, 0, car);
+  }
+
+  /**
+   * Is there room at `u` on this lane for one more car?
+   *
+   * Asked BEFORE the arc starts, not at the corner: a car that has already
+   * begun to swing out and then finds nowhere to go has no good option left.
+   * The margin is wider than the following gap because the car arrives across
+   * the traffic rather than into the back of it.
+   */
+  function roomAt(row, u, span) {
+    const need = (F.trafficGap * 1.6) / span;
+    for (let i = 0; i < row.length; i++) {
+      const d = fwdU(u, row[i].u);
+      if (d < need || 1 - d < need) return false;
+    }
+    return true;
+  }
 
   const trafficMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0.45, vertexColors: true });
   trafficMat.name = "CityTraffic";
@@ -1339,6 +1488,94 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const _streetP = { ...STREET_DEFAULTS, ...(P?.streetParams || {}) };
   const STOP_AT = _streetP.crossInset + _streetP.stopOffset;
   let _lastT = null;
+  /**
+   * Turns are APPLIED AFTER every lane has stepped, never during.
+   *
+   * A transfer splices two of the very arrays `stepTraffic` is iterating, and
+   * it can move a car into a lane that has not stepped yet — which would step
+   * it twice in one frame, at two different speeds, with a leader it had not
+   * had when it braked. Collecting them costs an array and removes the whole
+   * class of problem.
+   */
+  const _pendingTurns = [];
+
+  /**
+   * ── DECIDE A TURN, once per car per junction ───────────────────────────────
+   *
+   * Called while the car is still in the block, `trafficTurnLook` metres out.
+   * Everything here is derived from the lane table (`lanePairFor`, `turnTo`)
+   * rather than tabulated again — this file has twice shipped a hand-written
+   * table that disagreed with the one the cars actually drive on.
+   *
+   * THE CORNER is where the two lane centre-lines cross. That is this lane's
+   * `across` on one axis and the target lane's `across` on the other, and it
+   * needs no junction geometry at all: the target lane's across IS a coordinate
+   * on the axis this car is travelling along.
+   */
+  function maybeTurn(c, L, jAlong, acrossIdx, worldAlong, sLocal) {
+    // TOO FAR TO CARE, in two subtractions and before anything is looked up.
+    // The corner is at least the junction's near edge away, so a car further
+    // out than the look-ahead cannot be deciding anything yet — which is the
+    // case almost every car is in almost every frame.
+    if ((L.dir > 0 ? blockW - sLocal : sLocal) > F.trafficTurnLook) return;
+    const jKey = jAlong * 8192 + acrossIdx;
+    if (c.turnAt === jKey) return;
+    // ONE HAND PER LANE. The kerb-most lane turns right, the median-most turns
+    // left. Anything else cuts across a lane of its own street on the way out.
+    const pair = lanePairFor(L.axis, L.dir);
+    const hand = L.fi === pair[0] ? 1 : -1;
+    const to = turnTo(L.axis, L.dir, hand);
+    const tPair = lanePairFor(to.axis, to.dir);
+    // Into the matching lane of the new street: kerb-most from a right turn,
+    // median-most from a left. Both are the shortest path across the box, and
+    // both are where a real driver ends up.
+    const tLi = laneIndex.get(laneKey(to.axis, jAlong, hand === 1 ? tPair[0] : tPair[1]));
+    if (tLi === undefined) return;          // the city ends here — carry on straight
+    const target = lanes[tLi];
+    const toCorner = (target.across - worldAlong) * L.dir;
+    if (toCorner > F.trafficTurnLook || toCorner < F.trafficTurnRadius) return;
+    c.turnAt = jKey;
+    if (h2(c.id, jKey, 77) >= F.trafficTurnChance) return;
+    const uEnter0 = (L.across * to.dir + half) / target.span;
+    const uEnter = uEnter0 - Math.floor(uEnter0);
+    if (!roomAt(laneCars[tLi], uEnter, target.span)) return;
+    c.turn = {
+      li: tLi,
+      r: F.trafficTurnRadius,
+      crossed: false,
+      /** The corner, in world XZ. */
+      cx: L.axis === "z" ? L.across : target.across,
+      cz: L.axis === "z" ? target.across : L.across,
+      /** Unit heading in, and out. */
+      fx: L.axis === "z" ? 0 : L.dir, fz: L.axis === "z" ? L.dir : 0,
+      tx: to.axis === "z" ? 0 : to.dir, tz: to.axis === "z" ? to.dir : 0,
+      /** The corner's coordinate on the axis the car is on RIGHT NOW; rewritten
+       *  to the new axis at the transfer, so one expression measures progress
+       *  through the turn on both halves of it. */
+      cornerAlong: target.across,
+      /** ...which on the far side is this lane's across. */
+      enterAlong: L.across,
+      /** Where on the target lane it will arrive — re-checked every frame. */
+      uEnter,
+    };
+  }
+
+  /** Move a car onto the street it turned into, at the corner. */
+  function applyTurn(c) {
+    const T = c.turn;
+    if (!T || T.crossed) return;
+    const old = laneCars[c.li];
+    const at = old.indexOf(c);
+    if (at >= 0) old.splice(at, 1);
+    const L2 = lanes[T.li];
+    c.lane = L2;
+    c.li = T.li;
+    const u = (T.enterAlong * L2.dir + half) / L2.span;
+    c.u = u - Math.floor(u);
+    insertIntoRing(laneCars[T.li], c);
+    T.cornerAlong = T.enterAlong;
+    T.crossed = true;
+  }
 
   /**
    * ── ONE STEP OF THE TRAFFIC ────────────────────────────────────────────────
@@ -1400,11 +1637,11 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         // Inside the junction there is nothing left to obey — a car that stops
         // in the box is worse than one that runs an amber.
         if (sLocal < blockW) {
+          // Which junction it is: ahead in the direction of travel, so the one
+          // BELOW this cell when travelling backwards along the axis.
+          const jAlong = L.dir > 0 ? cell : cell - 1;
           const dist = L.dir > 0 ? (blockW - STOP_AT) - sLocal : sLocal - STOP_AT;
           if (dist > 0) {
-            // Which junction it is: ahead in the direction of travel, so the
-            // one BELOW this cell when travelling backwards along the axis.
-            const jAlong = L.dir > 0 ? cell : cell - 1;
             const kx = L.axis === "z" ? acrossIdx : jAlong;
             const kz = L.axis === "z" ? jAlong : acrossIdx;
             if (!signalGo(t, signalPhaseAt(L.axis, kx, kz), F)) {
@@ -1427,6 +1664,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
               if (cap < vMax) { vMax = cap; c.hold = 2; }
             }
           }
+          // A car only reaches the junction on a green — the constraint above
+          // is what stops it otherwise — so turning needs no light of its own.
+          if (F.trafficTurns && !c.turn) maybeTurn(c, L, jAlong, acrossIdx, worldAlong, sLocal);
         }
 
         // ── Ramp. Braking is allowed to be harder than pulling away, which is
@@ -1446,8 +1686,40 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         c.rising = c.v > v0 ? 1 : 0;
         c.u += (c.v * dt) / span;
         if (c.u >= 1) c.u -= 1;
+
+        // ── Through the corner. One signed distance, measured along whichever
+        // lane the car is on, negative before the corner and positive after.
+        if (c.turn) {
+          const T = c.turn;
+          const s = ((-half + c.u * span) * L.dir - T.cornerAlong) * L.dir;
+          if (T.crossed) {
+            if (s > T.r) c.turn = null;
+          } else if (s >= 0) {
+            _pendingTurns.push(c);
+          } else if (s < -T.r) {
+            /*
+             * THE GAP ON THE OTHER STREET IS NOT A FACT, IT IS A MOVING TARGET.
+             *
+             * Checking it once, at the decision, was wrong: the approach takes
+             * a couple of seconds and the traffic being merged into covers 20
+             * m in that time — more than the margin the check asks for. So a
+             * car could pass the test and still arrive on top of somebody, and
+             * MEASURED it did, three centimetres behind another car, within
+             * the first two seconds of the simulation.
+             *
+             * So it is asked again every frame, and the turn is abandoned
+             * while there is still room to abandon it: `s < -r` means the arc
+             * has not started bending yet, so cancelling here is invisible.
+             * `turnAt` is already set, so a cancelled car will not re-roll at
+             * this junction — it simply carries straight on.
+             */
+            if (!roomAt(laneCars[T.li], T.uEnter, lanes[T.li].span)) c.turn = null;
+          }
+        }
       }
     }
+    for (let i = 0; i < _pendingTurns.length; i++) applyTurn(_pendingTurns[i]);
+    _pendingTurns.length = 0;
   }
 
   function updateTraffic(t, cam) {
@@ -1472,10 +1744,42 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       const c = traffic[i];
       const L = c.lane;
       const along = -half + c.u * L.span;
-      const x = L.axis === "z" ? L.across : along * L.dir;
-      const z = L.axis === "z" ? along * L.dir : L.across;
+      let x = L.axis === "z" ? L.across : along * L.dir;
+      let z = L.axis === "z" ? along * L.dir : L.across;
       const dx = x - cam.x, dz = z - cam.z;
       if (dx * dx + dz * dz > r2) continue;
+      /*
+       * ── THE CORNER, DRAWN AS A CURVE ───────────────────────────────────────
+       *
+       * The car is logically on one lane or the other — there is no third
+       * place for it to be, and inventing one would put it outside every
+       * queue. So the TURN is purely how it is drawn: within `r` of the
+       * corner, a quadratic Bezier from `corner - in*r` to `corner + out*r`
+       * with the corner itself as the control point.
+       *
+       * That Bezier collapses to something with no square roots in it:
+       *
+       *     P(t) = corner - in*r*(1-t)^2 + out*r*t^2
+       *     P'(t) ∝ in*(1-t) + out*t
+       *
+       * so the heading is a straight lerp between the two lane directions and
+       * costs four multiplies. Which is the whole reason to accept that an arc
+       * length parameterised by distance-to-corner is not quite uniform: at
+       * 13 m/s through a 5.5 m corner, nobody has ever seen it.
+       */
+      let hx = 0, hz = 0;
+      if (c.turn) {
+        const T = c.turn;
+        const ax = T.crossed ? T.tx : T.fx, az = T.crossed ? T.tz : T.fz;
+        const sd = (x - T.cx) * ax + (z - T.cz) * az;
+        if (sd > -T.r && sd < T.r) {
+          const t = (sd + T.r) / (2 * T.r), it = 1 - t;
+          x = T.cx - T.fx * T.r * it * it + T.tx * T.r * t * t;
+          z = T.cz - T.fz * T.r * it * it + T.tz * T.r * t * t;
+          hx = T.fx * it + T.tx * t;
+          hz = T.fz * it + T.tz * t;
+        }
+      }
       // BONNET ALONG THE DIRECTION OF TRAVEL. The model's nose is at +Z, so
       // this is the yaw that maps (0,0,+1) onto the way the car is going.
       //
@@ -1490,9 +1794,18 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       // travel directions rather than keeping a table that can disagree with
       // the model — which is exactly how this broke.
       const nose = CAR_NOSE_Z;
-      const yaw = L.axis === "z"
+      let yaw = L.axis === "z"
         ? (L.dir * nose > 0 ? 0 : Math.PI)
         : (L.dir * nose > 0 ? Math.PI / 2 : -Math.PI / 2);
+      // Mid-corner the heading is not axis-aligned, so it comes off the curve's
+      // own tangent instead. Same rule as the four cases above — point the NOSE
+      // along the direction of travel — just written continuously. The table is
+      // left in place for the straight case precisely because it is the thing
+      // that has been wrong twice and is now covered by trafficHeadingTest.
+      if (hx !== 0 || hz !== 0) {
+        const sg = nose > 0 ? 1 : -1;
+        yaw = Math.atan2(hx * sg, hz * sg);
+      }
       const bi = c.body ?? 0;
       const im = trafficMeshes[bi];
       if (!im) continue;
@@ -1692,6 +2005,16 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
      *  the traffic should be checked against this, not against a second copy
      *  of the reasoning. `{ axis, across, dir, span }`, across absolute. */
     lanes,
+    /**
+     * THE QUEUES THEMSELVES, one ring per lane, in cyclic order.
+     *
+     * Exposed because the invariant that makes red lights work — every car
+     * follows the next one round, and no arrival is ever dropped on top of
+     * somebody — lives here and nowhere else. It cannot be checked from the
+     * rendered scene: a car spliced into the wrong arc of the ring still draws
+     * in exactly the right place, it just gets a leader that is behind it.
+     */
+    laneCars,
     group,
     params: F,
     stats: {
