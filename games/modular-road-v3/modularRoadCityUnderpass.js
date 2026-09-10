@@ -217,13 +217,19 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
     if (t >= 1) return 1;
     return ease((t - U.rampHold) / (1 - U.rampHold));
   };
-  const total = a1 - a0;
-  const n = Math.max(8, Math.round(total / U.step));
-  for (let i = 0; i <= n; i++) {
-    const a = a0 + ((a1 - a0) * i) / n;
-    path.push(at(a, top - (top - roadY) * depthAt(a)));
-  }
-
+  /*
+   * STATIONS, AND TWO OF THEM ARE NOT NEGOTIABLE.
+   *
+   * A sweep can only start or stop AT a station, and the roof has to start
+   * exactly at the portal. Left to an even spacing it does not: the nearest
+   * station to `cov0` was six metres inside it, so there was a six-metre
+   * stretch of trench with no roof AND no wall — and because the street plane
+   * above is single-sided, standing in the tunnel you looked up through it at
+   * the sky.
+   *
+   * So the portals are stations by construction, and the rest fill in around
+   * them.
+   */
   /*
    * WHERE THE ROOF IS: from the end of one block to the start of another, so
    * the portals stand at the two junctions and every crossing between them is
@@ -232,6 +238,14 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
    */
   const cov0 = portalIn;
   const cov1 = portalOut;
+
+  const total = a1 - a0;
+  const n = Math.max(8, Math.round(total / U.step));
+  const stations = new Set([a0, a1, cov0, cov1]);
+  for (let i = 0; i <= n; i++) stations.add(a0 + ((a1 - a0) * i) / n);
+  for (const a of [...stations].sort((p1, p2) => p1 - p2)) {
+    path.push(at(a, top - (top - roadY) * depthAt(a)));
+  }
 
   /*
    * ── THE HOLE ───────────────────────────────────────────────────────────────
@@ -246,20 +260,44 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
    * street level, which reads as the street simply missing.
    */
   const holeHalf = U.roadWidth / 2 + U.wallGap + U.wallThick + U.lipWidth;
-  const sink = 0.35;
-  let hIn = a0, hOut = a1;
-  for (let i = 0; i <= n; i++) {
-    const a = a0 + ((a1 - a0) * i) / n;
-    if (top - path[i].y > sink) { hIn = a; break; }
+
+  /*
+   * ── THE MOUTH HAS NO STEP ──────────────────────────────────────────────────
+   *
+   * The hole used to begin only once the road was 0.35 m down, which left the
+   * street plane lying on top of the first twenty-odd metres of ramp. Driving
+   * IN that is a 35 cm drop; driving OUT it is a 35 cm wall, and at speed the
+   * car climbs it and is thrown. It is the "thin piece of road going straight
+   * while the ramp goes down" — the street, still there, over the ramp.
+   *
+   * So the hole starts at the mouth, where the road IS the street to within
+   * two centimetres. It cannot start at full width, though: the trench is
+   * wider than the road, and at the mouth there are no walls yet to fill the
+   * difference — that would be an open slot beside the road. So it starts road
+   * wide and widens once the walls have height to stand in it, which is also
+   * what a real cut looks like from above.
+   */
+  const roadHalf = U.roadWidth / 2;
+  const wallFrom = 0.30;               // the depth at which a wall is worth building
+  const depthAtA = (a) => top - (top - roadY) * depthAt(a);
+  let wIn = a0, wOut = a1;
+  for (const q of path) {
+    const a = axis === "x" ? q.x : q.z;
+    if (top - q.y > wallFrom) { wIn = a; break; }
   }
-  for (let i = n; i >= 0; i--) {
-    const a = a0 + ((a1 - a0) * i) / n;
-    if (top - path[i].y > sink) { hOut = a; break; }
+  for (let i = path.length - 1; i >= 0; i--) {
+    const q = path[i];
+    const a = axis === "x" ? q.x : q.z;
+    if (top - q.y > wallFrom) { wOut = a; break; }
   }
-  const rect = (lo, hi) => (axis === "x"
-    ? { minX: lo, maxX: hi, minZ: across - holeHalf, maxZ: across + holeHalf }
-    : { minX: across - holeHalf, maxX: across + holeHalf, minZ: lo, maxZ: hi });
-  const openRects = [rect(hIn, cov0), rect(cov1, hOut)];
+  void depthAtA;
+  const rect = (lo, hi, h) => (axis === "x"
+    ? { minX: lo, maxX: hi, minZ: across - h, maxZ: across + h }
+    : { minX: across - h, maxX: across + h, minZ: lo, maxZ: hi });
+  const openRects = [
+    rect(a0, wIn, roadHalf), rect(wIn, cov0, holeHalf),
+    rect(cov1, wOut, holeHalf), rect(wOut, a1, roadHalf),
+  ];
 
   return {
     axis, across, roadY, top, a0, a1, cov0, cov1, path, openRects, holeHalf,
@@ -533,8 +571,10 @@ export function createCityUnderpass({
      */
     for (let i = 0; i < frames.length; i++) {
       const y = frames[i].pos.y;
-      // Only where there is actually a wall to build.
-      if (layout.top - y < 0.08) continue;
+      // Only where there is actually a wall to build — and the threshold is the
+      // layout's, not a second opinion: the hole widens to the wall line at
+      // exactly this depth, so a wall that started later would leave a slot.
+      if (layout.top - y < 0.30) continue;
       if (!isOpen(i)) continue;
       const capY = layout.top + U.parapetHeight;
       rowAlong.push(alongAt(i));

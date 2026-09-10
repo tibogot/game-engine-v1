@@ -338,6 +338,50 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   city.dispose();
 }
 
+// ── THE ROOF STARTS AT THE PORTAL, TO THE MILLIMETRE ────────────────────────
+//
+// A sweep can only begin AT a station. Left to an even spacing the nearest one
+// to `cov0` was six metres inside it, so six metres of trench had no roof AND
+// no wall — and because the street plane above is single-sided, standing in the
+// tunnel you looked up through it at the sky.
+{
+  const on = (a) => L.path.some((q) => Math.abs((L.axis === "x" ? q.x : q.z) - a) < 1e-6);
+  check("there is a station exactly at the entry portal", on(L.cov0), `${L.cov0}`);
+  check("and exactly at the exit portal", on(L.cov1), `${L.cov1}`);
+  check("and at both mouths", on(L.a0) && on(L.a1), `${L.a0} / ${L.a1}`);
+}
+
+// ── THE MOUTH HAS NO STEP ───────────────────────────────────────────────────
+//
+// The hole used to begin only once the road was 0.35 m down, which left the
+// street plane lying on top of the first twenty-odd metres of ramp. Driving in
+// that is a drop; driving OUT it is a 35 cm wall the car climbs and is thrown
+// by. It is the "thin piece of road going straight while the ramp goes down".
+{
+  const open = underpassOpenAt(L);
+  const at = (along) => (L.axis === "x" ? [along, L.across] : [L.across, along]);
+  // Every metre of ramp between the mouth and the portal must be cut.
+  let covered = 0;
+  for (let a = L.a0 + 0.5; a < L.cov0; a += 2) if (!open(...at(a))) covered++;
+  check("the street never lies over the ramp", covered === 0,
+    `${covered} metres of ramp still under street plane`);
+
+  /*
+   * AND THE CUT IS NARROW AT THE MOUTH. The trench is wider than the road, and
+   * at the mouth there are no walls yet to fill the difference — cutting full
+   * width there would open a slot beside the road with nothing in it.
+   */
+  const U = L.params;
+  const beside = L.axis === "x"
+    ? [L.a0 + 4, L.across + U.roadWidth / 2 + 1] : [L.across + U.roadWidth / 2 + 1, L.a0 + 4];
+  check("but no wider than the road while the walls have no height",
+    !open(...beside), `${U.roadWidth / 2 + 1} m out at the mouth is still street`);
+  // ...and it DOES widen once they do, or the trench walls stand on tarmac.
+  const deep = L.axis === "x"
+    ? [L.cov0 - 20, L.across + U.roadWidth / 2 + 1] : [L.across + U.roadWidth / 2 + 1, L.cov0 - 20];
+  check("and it widens once they do", open(...deep), "full width down the trench");
+}
+
 // ── NOTHING STANDS ON THE HOLE ──────────────────────────────────────────────
 {
   const city = createModularRoadCity({ params: { extent: 700 } });
