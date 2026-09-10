@@ -80,6 +80,9 @@ import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from 
 import {
   createCityViaduct, viaductLayout, viaductKeepOut, viaductFootprint,
 } from "./modularRoadCityViaduct.js";
+import {
+  createCityUnderpass, underpassLayout, underpassOpenAt, underpassFootprint,
+} from "./modularRoadCityUnderpass.js";
 import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
 import { placeCityPrism, pickPrismPlaza, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
 import { planCarParks, buildCarParkGround, CARPARK_DEFAULTS } from "./modularRoadCityCarPark.js";
@@ -252,6 +255,13 @@ export const CITY_DEFAULTS = {
    */
   viaduct: true,
   viaductParams: {},
+  /**
+   * THE UNDERPASS. A road that dips under the city and comes back up — the one
+   * structure that uses the space BELOW the ground plane, which until now was
+   * simply not a place. See modularRoadCityUnderpass.js.
+   */
+  underpass: true,
+  underpassParams: {},
   /** Some of the squares become surface car parks — painted bays and cars
    *  standing in them. One draw for the paint, none for the cars. */
   carParks: true,
@@ -397,6 +407,14 @@ export function createModularRoadCity({
   let viaductClear = null;
   /** Where the DECK is overhead, so no tower is built into it. */
   let viaductUnder = null;
+  let underpass = null;
+  /** The pure layout, shared by the geometry, the collision and the hole. */
+  let underAt = null;
+  /** True over an OPEN trench — where the street plane has to stop existing,
+   *  both to the eye and to the vehicle. */
+  let underOpen = null;
+  /** The whole run, for keeping street furniture off it. */
+  let underUnder = null;
   let carParkGround = null;
   let carParks = [];
   let parkGround = null;
@@ -411,7 +429,7 @@ export function createModularRoadCity({
   const stats = {
     buildings: 0, lod: [0, 0, 0], meshes: 0, kit: kit.stats,
     lastLodMs: 0, lastBuildMs: 0,
-    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, culledViaduct: 0, plazas: 0, plazaList: [], bridges: 0, bridgeSpans: [], viaduct: null, carParks: 0, parkedInParks: 0, carParkList: [], parks: 0, parkList: [],
+    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, culledViaduct: 0, underpass: null, plazas: 0, plazaList: [], bridges: 0, bridgeSpans: [], viaduct: null, carParks: 0, parkedInParks: 0, carParkList: [], parks: 0, parkList: [],
     lotTexCells: [0, 0], landmarks: 0, beacons: 0,
     signs: { banners: 0, screens: 0, bands: 0 },
     districts: [0, 0, 0],
@@ -786,9 +804,13 @@ export function createModularRoadCity({
     if (prism) { group.remove(prism.group); prism.dispose(); prism = null; }
     if (bridges) { group.remove(bridges.group); bridges.dispose(); bridges = null; }
     if (viaduct) { group.remove(viaduct.group); viaduct.dispose(); viaduct = null; }
+    if (underpass) { group.remove(underpass.group); underpass.dispose(); underpass = null; }
     viaductAt = null;
     viaductClear = null;
     viaductUnder = null;
+    underAt = null;
+    underOpen = null;
+    underUnder = null;
     if (carParkGround) { group.remove(carParkGround.mesh); carParkGround.dispose(); carParkGround = null; }
     carParks = [];
     if (parkGround) { group.remove(parkGround.mesh); parkGround.dispose(); parkGround = null; }
@@ -892,6 +914,15 @@ export function createModularRoadCity({
       viaductAt.piers = viaductAt.piers.filter(
         (q) => avoid(q.x, q.z, viaductAt.deckBottom) >= P.avoidRadius);
     }
+    /*
+     * AND NOT IN THE UNDERPASS EITHER. The two structures cross — one over the
+     * city, one under it — and a viaduct pier landing in the trench would be a
+     * column standing in a road seven metres below the ground it was founded
+     * on. The deck spans it, which is what a viaduct does.
+     */
+    if (viaductAt && underUnder) {
+      viaductAt.piers = viaductAt.piers.filter((q) => !underUnder(q.x, q.z));
+    }
     viaduct = createCityViaduct({
       layout: viaductAt, castShadows: P.castShadows, uNight,
       // The GAME'S road and rail materials. Sharing them is what makes the
@@ -902,6 +933,15 @@ export function createModularRoadCity({
     });
     if (viaduct) { group.add(viaduct.group); stats.viaduct = viaduct.stats; }
     else stats.viaduct = null;
+
+    underpass = createCityUnderpass({
+      layout: underAt,
+      roadMaterial: viaductMaterials?.road ?? null,
+      vaultMaterial: viaductMaterials?.vaultShell ?? null,
+      glowMaterial: viaductMaterials?.tunnelGlow ?? null,
+    });
+    if (underpass) { group.add(underpass.group); stats.underpass = underpass.stats; }
+    else stats.underpass = null;
     if (P.beacons) {
       const tips = [];
       for (const b of buildings) {
@@ -1023,7 +1063,10 @@ export function createModularRoadCity({
         // `buildExtras` runs before this, so the viaduct's keep-out is already
         // known. Lamp posts are placed in the streets module, not in furniture,
         // so the gate has to exist in both or half of them come back.
-        keepOut: viaductClear,
+        keepOut: cityKeepOut,
+        // The open trenches, cut out of the ground plane rather than discarded
+        // per pixel — see `planeWithHoles`.
+        holes: underAt ? underAt.openRects : [],
       });
       // The street material is rebuilt with the ground, so the weather it was
       // last told about has to be re-applied or every rebuild dries the city.
@@ -1149,7 +1192,7 @@ export function createModularRoadCity({
           // Nothing tall under a descending ramp. Signals and lamps are SOLID,
           // so one left standing is not scenery clipping a road, it is a wall
           // across the only way onto the motorway.
-          keepOut: viaductClear,
+          keepOut: cityKeepOut,
           // The motorway's lanes come from the same layout the deck was built
           // from, so the cars cannot end up beside the road they drive on.
           viaduct: viaductAt,
@@ -1240,6 +1283,14 @@ export function createModularRoadCity({
     return out;
   }
 
+  /**
+   * Everywhere a placement must not go: under a viaduct ramp, and anywhere over
+   * the underpass. ONE predicate, because the furniture module and the streets
+   * module each take exactly one and there is no sense in them disagreeing.
+   */
+  const cityKeepOut = (x, z) => (viaductClear ? viaductClear(x, z) : false)
+    || (underUnder ? underUnder(x, z) : false);
+
   function rebuild() {
     const t0 = performance.now();
     clearBackend();
@@ -1258,6 +1309,22 @@ export function createModularRoadCity({
       : null;
     viaductClear = viaductKeepOut(viaductAt);
     viaductUnder = viaductFootprint(viaductAt, P.lotSize);
+    /*
+     * AN UNDERPASS IS A HOLE IN THE CITY'S GROUND PLANE, so it needs one to
+     * exist. With terrain ON there is none — the terrain IS the ground, and it
+     * is a heightfield this city does not cut — so the whole structure would be
+     * buried seven metres under a hillside, drawn, collidable and invisible.
+     *
+     * Same condition `streetHeightAt` already uses to decide whether the city
+     * has a floor at all.
+     */
+    underAt = P.underpass && P.ground
+      ? underpassLayout({ P, originCellX, originCellZ, params: P.underpassParams })
+      : null;
+    underOpen = underpassOpenAt(underAt);
+    // A metre of margin: a lamp post ON the lip of a trench is a lamp post
+    // hanging over a hole.
+    underUnder = underpassFootprint(underAt, 1.0);
     buildings = layout();
     stats.buildings = buildings.length;
     // The collider's BVHs belong to the ARCHETYPES, so a rebuild only refills
@@ -1583,23 +1650,39 @@ export function createModularRoadCity({
      * so this returns NaN and stays out of the way.
      */
     /**
-     * ── THE VIADUCT'S DRIVE SURFACE ────────────────────────────────────────────
+     * ── THE CITY'S OWN ROADS, FOR COLLISION ────────────────────────────────────
      *
      * `{deck, solids}`, the same shape the dock hands over, for the game's
-     * collision bake to collect. Empty when there is no viaduct.
+     * collision bake to collect. The viaduct AND the underpass — every piece of
+     * the city that is real geometry under the wheels rather than a plane.
      *
      * This is NOT `streetHeightAt`, and it cannot be: that is a single flat
      * `groundY` for the whole city and structurally cannot express a road
      * eleven metres in the air. An elevated road is real geometry, resolved
      * against the same BVH the track uses.
      */
-    viaductCollision() {
-      return viaduct ? viaduct.collisionMeshes() : { deck: [], solids: [] };
+    roadCollision() {
+      const v = viaduct ? viaduct.collisionMeshes() : { deck: [], solids: [] };
+      const u = underpass ? underpass.collisionMeshes() : { deck: [], solids: [] };
+      return { deck: [...v.deck, ...u.deck], solids: [...v.solids, ...u.solids] };
     },
     streetHeightAt(x, z) {
       if (!ground || !P.ground) return NaN;
       const halfPlane = P.extent * 1.3;   // the plane is extent * 2.6 across
       if (Math.abs(x - P.centerX) > halfPlane || Math.abs(z - P.centerZ) > halfPlane) return NaN;
+      /*
+       * THERE IS NO GROUND OVER A HOLE.
+       *
+       * NaN is not a special case bolted on here — it is what this function
+       * already returns outside the city and with terrain on, and everything
+       * downstream reads it as "no surface". So the open trench simply stops
+       * being street, and the underpass road's own BVH takes over.
+       *
+       * Without it the car drives straight across the top of the hole on the
+       * street it is supposed to be driving under, and the tunnel is scenery
+       * you can see into and never enter.
+       */
+      if (underOpen && underOpen(x, z)) return NaN;
       return P.groundY;
     },
     /**

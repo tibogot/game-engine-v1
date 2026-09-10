@@ -760,7 +760,31 @@ function corridorTest(paths, halfW) {
  * every one of the above a SECOND time — for a surface the player passes at
  * fifty metres a second. The seams are dark lines, not grooves.
  */
-function concreteDetail(V) {
+export const CONCRETE_DEFAULTS = {
+  formPanelW: 2.4,
+  formPanelH: 1.25,
+  formSeam: 0.2,
+  concreteBlotch: 0.13,
+  concreteSpeckle: 0.07,
+};
+
+export function concreteDetail(params = {}) {
+  /*
+   * ITS OWN DEFAULTS, and this is the whole reason they exist.
+   *
+   * This used to read the caller's parameter bag directly, which was fine while
+   * the viaduct was the only caller — its defaults happened to contain every
+   * key. The underpass's do not, so it built `uniform(undefined)` for all five
+   * and the browser threw `Uniform "null" not implemented` at shader-generation
+   * time. Nothing headless noticed, because the underpass's test never asked
+   * the material for WGSL.
+   *
+   * A shared helper cannot depend on what its caller happens to have. See
+   * modularRoadCityFurniture.js for the same bug in the traffic model, where
+   * three missing params became NaN and every driving constraint silently
+   * stopped applying.
+   */
+  const V = { ...CONCRETE_DEFAULTS, ...params };
   const uPanelW = uniform(V.formPanelW);
   const uPanelH = uniform(V.formPanelH);
   const uSeam = uniform(V.formSeam);

@@ -2133,7 +2133,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       treeEnv: app.treeEnv ?? null,
       // The viaduct is a ROAD, swept by the road kit, so it wants the road's
       // own materials — same look as the track, and no new pipeline to compile.
-      viaductMaterials: { road: roadMaterial, rail: railMaterial },
+      // The road and rail for the viaduct, and the track tunnel's own shell and
+      // LED battens for the underpass. All four are already built and compiled
+      // by the time the city exists, so neither structure costs a pipeline.
+      viaductMaterials: {
+        road: roadMaterial, rail: railMaterial,
+        vaultShell: vaultShellMaterial, tunnelGlow: tunnelGlowMaterial,
+      },
     });
     scene.add(city.group);
     // Born into whatever weather is already on the track.
@@ -4997,7 +5003,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       decks.push(...dockCol.deck);
     }
     /*
-     * THE CITY'S ELEVATED MOTORWAY, on exactly the dock's terms.
+     * THE CITY'S OWN ROADS, on exactly the dock's terms.
      *
      * Its deck is a road-kit sweep, so the mesh IS the drive surface — the same
      * arrangement every track piece has. The guardrail goes into SOLIDS, which
@@ -5010,7 +5016,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      * under the wheels.
      */
     if (city && cityWanted) {
-      const vc = city.viaductCollision?.();
+      const vc = city.roadCollision?.();
       if (vc) { decks.push(...vc.deck); solids.push(...vc.solids); }
     }
     // Round primitives bypass the BVH entirely — the chassis hull is SAMPLED

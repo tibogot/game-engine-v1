@@ -237,6 +237,36 @@ check("it also builds with no lights in the scene (bakes, probes)", unlitErr ===
   built.dispose();
 }
 
+// ── THE UNDERPASS'S MATERIALS ───────────────────────────────────────────────
+//
+// Its vault and road are the game's own, already compiled — but the trench wall
+// is its own material, and it shares the faked concrete with the viaduct's
+// piers. Sharing a helper across two modules is exactly how it came to build
+// `uniform(undefined)` for all five of its parameters: the viaduct's defaults
+// contained the keys and the underpass's did not. The browser threw at
+// shader-generation time and nothing headless noticed, because the underpass
+// test never asked a material for WGSL. Now it does.
+{
+  const { underpassLayout, createCityUnderpass } =
+    await import("../games/modular-road-v3/modularRoadCityUnderpass.js");
+  const L = underpassLayout({ P: CITY_DEFAULTS, originCellX: 0, originCellZ: 0 });
+  check("an underpass layout is produced", !!L);
+  const built = createCityUnderpass({ layout: L });
+  let walls = null;
+  built.group.traverse((o) => { if (o.name === "CityUnderpassWalls") walls = o; });
+  check("the trench has a wall mesh to measure", !!walls);
+  let b = null, err = null;
+  try { b = buildWGSL(walls.material); } catch (e) { err = e; }
+  check("the trench wall generates WGSL", err === null, err ? err.message : "");
+  if (b) {
+    const frag = b.fragmentShader || "";
+    console.log(`       trench wall ${(frag.length / 1024).toFixed(1)} kB fragment`);
+    check("no 'undefined' leaked into it", !/\bundefined\b/.test(frag));
+    check("and no NaN literals", !/\bNaN\b/.test(frag));
+  }
+  built.dispose();
+}
+
 // ── The street material gets the same treatment ──────────────────────────────
 // It is one draw over a plane 6 km across, so a derivative smuggled into a
 // branch, or a dead `undefined`, would be just as expensive to find in a

@@ -194,16 +194,19 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
    * the viaduct is a road you fall straight through, which looks completely
    * correct right up until you land on it.
    */
-  const col = city.viaductCollision();
-  check("the city hands over a drive surface", col.deck.length === 1,
-    `${col.deck.length} deck meshes`);
-  check("and a solid guardrail to stay on it", col.solids.length === 1,
-    `${col.solids.length} solid meshes`);
+  // Viaduct AND underpass: every piece of the city that is real geometry
+  // under the wheels rather than a plane.
+  const col = city.roadCollision();
+  check("the city hands over its roads as drive surfaces", col.deck.length >= 1,
+    `${col.deck.length} deck meshes: ${col.deck.map((m) => m.name).join(", ")}`);
+  check("and the solids that keep you on them", col.solids.length >= 1,
+    `${col.solids.length}: ${col.solids.map((m) => m.name).join(", ")}`);
   check("the deck it hands over is the deck you can see",
-    col.deck[0] === meshes.find((m) => m.name === "CityViaductDeck"),
+    col.deck.includes(meshes.find((m) => m.name === "CityViaductDeck")),
     "same object, no proxy");
+  const railCol = col.solids.find((m) => m.name === "CityViaductRailCollision");
   check("the guardrail collider is NOT drawn",
-    col.solids[0].visible === false && !col.solids[0].parent,
+    !!railCol && railCol.visible === false && !railCol.parent,
     "invisible and out of the scene graph");
   // Every collision mesh must carry the two things RoadBvh reads off it.
   for (const m of [...col.deck, ...col.solids]) {

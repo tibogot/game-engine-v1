@@ -679,8 +679,65 @@ const packSlope = (slope) => vec3(slope.x.negate(), slope.y.negate(), 1.0).norma
  *   material keeps a `.sample()`-form node the caller re-points — see
  *   `setReflection`. Null builds the street with no reflection code at all.
  */
+/**
+ * ── THE GROUND, WITH HOLES CUT IN IT ─────────────────────────────────────────
+ *
+ * The city's street is TWO TRIANGLES and everything on it is shader. An
+ * underpass needs a hole in that, and there are two ways to make one:
+ *
+ *   A DISCARD in the fragment stage, testing every pixel of the ground against
+ *   a couple of rectangles. It is about ten instructions — and it costs early-Z
+ *   on the largest surface in the game, which is the part that is not about ten
+ *   instructions.
+ *
+ *   OR CUT IT OUT OF THE GEOMETRY, which is what this does. The holes are
+ *   axis-aligned rectangles, so splitting the plane along their edges turns two
+ *   triangles into a couple of dozen and leaves the shader untouched. Nothing
+ *   is tested at run time because there is nothing there.
+ *
+ * Exact, not gridded: the cut lines ARE the hole edges, so a hole is never a
+ * pixel out and never needs a resolution chosen for it.
+ */
+function planeWithHoles(cx, cz, halfSize, holes) {
+  const xs = new Set([cx - halfSize, cx + halfSize]);
+  const zs = new Set([cz - halfSize, cz + halfSize]);
+  for (const h of holes) {
+    for (const v of [h.minX, h.maxX]) if (v > cx - halfSize && v < cx + halfSize) xs.add(v);
+    for (const v of [h.minZ, h.maxZ]) if (v > cz - halfSize && v < cz + halfSize) zs.add(v);
+  }
+  const X = [...xs].sort((a, b) => a - b);
+  const Z = [...zs].sort((a, b) => a - b);
+  const pos = [], uv = [], idx = [];
+  const inHole = (x0, x1, z0, z1) => holes.some((h) => x0 >= h.minX - 1e-6 && x1 <= h.maxX + 1e-6
+    && z0 >= h.minZ - 1e-6 && z1 <= h.maxZ + 1e-6);
+  for (let i = 0; i + 1 < X.length; i++) {
+    for (let j = 0; j + 1 < Z.length; j++) {
+      const x0 = X[i], x1 = X[i + 1], z0 = Z[j], z1 = Z[j + 1];
+      if (inHole(x0, x1, z0, z1)) continue;
+      const b = pos.length / 3;
+      // Local to the mesh, which stands at (cx, groundY, cz).
+      pos.push(x0 - cx, 0, z0 - cz, x1 - cx, 0, z0 - cz,
+        x1 - cx, 0, z1 - cz, x0 - cx, 0, z1 - cz);
+      uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+      // Wound so the face points UP, matching a PlaneGeometry rotated -PI/2.
+      idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(
+    new Float32Array(pos.length).fill(0).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  return g;
+}
+
 export function createCityStreets({
   P, originCellX, originCellZ, params: overrides = {}, reflectionTexture = null,
+  /** Axis-aligned rectangles to cut out of the ground plane — see
+   *  `planeWithHoles`. The underpass's open trenches, and nothing else. */
+  holes = [],
   /** Where the ground is spoken for by something overhead — see viaductKeepOut.
    *  Lamp posts are placed HERE rather than in the furniture module, so the
    *  gate has to exist in both or half of them come back. */
@@ -1763,8 +1820,13 @@ export function createCityStreets({
   lampMesh.castShadow = false;
   lampMesh.receiveShadow = false;
 
-  const geometry = new THREE.PlaneGeometry(P.extent * 2.6, P.extent * 2.6);
-  geometry.rotateX(-Math.PI / 2);
+  const geometry = holes.length
+    ? planeWithHoles(P.centerX, P.centerZ, P.extent * 1.3, holes)
+    : (() => {
+      const g = new THREE.PlaneGeometry(P.extent * 2.6, P.extent * 2.6);
+      g.rotateX(-Math.PI / 2);
+      return g;
+    })();
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(P.centerX, P.groundY, P.centerZ);
   mesh.name = "CityStreets";
