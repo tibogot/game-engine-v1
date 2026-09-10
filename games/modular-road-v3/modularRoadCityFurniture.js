@@ -1248,6 +1248,37 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       });
       n++;
     }
+    /*
+     * AND ONE BEFORE EACH SLIP ROAD, which is the board that actually matters.
+     * The evenly spaced ones say where the road goes; this one says the exit is
+     * coming, at a fixed distance rather than wherever the rhythm happened to
+     * land — a warning you meet by luck is not a warning.
+     *
+     * Every gantry panel carries a straight-on line and a turn-off line, so the
+     * board reads correctly for an exit with no new artwork.
+     */
+    const warn = viaduct.params.gantryWarn;
+    for (const rmp of viaduct.ramps ?? []) {
+      const a0 = rmp.dir > 0 ? rmp.mouthMin : rmp.mouthMax;
+      const a = a0 - rmp.dir * warn;
+      if (a < viaduct.alongMin || a > viaduct.alongMax) continue;
+      const yaw = viaduct.axis === "x"
+        ? (rmp.dir > 0 ? Math.PI / 2 : -Math.PI / 2)
+        : (rmp.dir > 0 ? 0 : Math.PI);
+      const off = rmp.side * viaduct.params.deckWidth * 0.25;
+      _p.set(
+        viaduct.axis === "x" ? a : viaduct.across + off,
+        viaduct.deckY,
+        viaduct.axis === "x" ? viaduct.across + off : a,
+      );
+      _q.setFromAxisAngle(UP, yaw);
+      gantries.push({
+        m: _m.compose(_p, _q, _s).clone(),
+        tile: h2(n, 7, 93) * 3.999 | 0,
+        axis: viaduct.axis, side: rmp.side > 0 ? 1 : 0, travel: rmp.dir,
+      });
+      n++;
+    }
   }
 
   if (viaduct && F.traffic && viaduct.params.viaductTraffic !== false) {

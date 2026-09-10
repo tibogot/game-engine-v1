@@ -61,6 +61,7 @@ import {
 } from "./modularRoadKit.js";
 import { buildRailGeometry, buildRailCollision, railParams } from "./modularRoadRail.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
+import { createRoadMarkings, MARK } from "./modularRoadCityMarkings.js";
 
 export const VIADUCT_DEFAULTS = {
   /** Off and nothing is built. */
@@ -253,6 +254,21 @@ export const VIADUCT_DEFAULTS = {
    */
   gantries: true,
   gantrySpacing: 420,
+  /** How far before a slip road its warning board stands. Far enough to be a
+   *  warning rather than an announcement. */
+  gantryWarn: 240,
+
+  /**
+   * ── PAINT ON THE DECK ──────────────────────────────────────────────────────
+   *
+   * A motorway exit is signed three times over in reality — a board, then paint
+   * in the lane, then the gore itself — and the paint is the one that tells you
+   * WHICH LANE. Without it the slip road is a hole in a barrier that you either
+   * happen to be lined up for or you do not.
+   */
+  markings: true,
+  markWidth: 3.4,
+  markLength: 9.0,
 
   joints: true,
   jointWidth: 0.42,
@@ -561,6 +577,41 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
   const joints = V.joints ? stationWalk(path, V.spanLength) : [];
 
   /*
+   * ── THE EXIT, PAINTED ──────────────────────────────────────────────────────
+   *
+   * In the lane that leaves, reading up to the gore: the word first, then two
+   * diverge arrows closing on the mouth. All of it on the STRAIGHT, where the
+   * deck is axis-aligned and an along coordinate still means something.
+   */
+  const marks = [];
+  if (V.markings) {
+    const laneOut = axis === "x" ? 1 : -1;   // +along is which world across?
+    for (const rmp of ramps) {
+      // The lane that leaves is the outer one on the ramp's side.
+      const lane = rmp.side > 0 ? laneAcross[3] : laneAcross[0];
+      const a0 = rmp.dir > 0 ? rmp.mouthMin + V.gorePad : rmp.mouthMax - V.gorePad;
+      // Yaw so the shape's +Z reads along the direction of travel.
+      const yaw = axis === "x"
+        ? (rmp.dir > 0 ? Math.PI / 2 : -Math.PI / 2)
+        : (rmp.dir > 0 ? 0 : Math.PI);
+      const at = (back, tile, w, h) => {
+        const a = a0 - rmp.dir * back;
+        if (a < alongMin || a > alongMax) return;
+        marks.push({
+          x: axis === "x" ? a : lane,
+          z: axis === "x" ? lane : a,
+          y: deckY,
+          yaw, tile, w, h,
+        });
+      };
+      at(150, MARK.sortie, V.markWidth * 1.25, V.markLength * 1.5);
+      at(90, MARK.arrowDiverge, V.markWidth, V.markLength);
+      at(40, MARK.arrowDiverge, V.markWidth, V.markLength);
+    }
+    void laneOut;
+  }
+
+  /*
    * ── A POLYLINE PER LANE ────────────────────────────────────────────────────
    *
    * The traffic model drives a lane, and a lane used to be "an axis, an across
@@ -592,7 +643,7 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
     axis, across, alongMin, alongMax,
     deckY, deckBottom, railTop,
     path, cum, pathLength, straightI0, straightI1,
-    ramps, laneAcross, lanePaths, piers, columns, joints, params: V,
+    ramps, laneAcross, lanePaths, piers, columns, joints, marks, params: V,
   };
 }
 
@@ -1156,6 +1207,12 @@ export function createCityViaduct({
     } else { geo.dispose(); }
   }
 
+  // ── The paint ──────────────────────────────────────────────────────────────
+  const markings = createRoadMarkings({
+    marks: layout.marks ?? [], name: "CityViaductMarkings",
+  });
+  if (markings) group.add(markings.mesh);
+
   return {
     group,
     layout,
@@ -1173,9 +1230,11 @@ export function createCityViaduct({
     stats: {
       piers: layout.piers.length,
       ramps: (layout.ramps ?? []).length,
-      draws: 1 + (rail ? 1 : 0) + (piers ? 2 : 0) + (columns ? 1 : 0) + (joints ? 1 : 0),
+      draws: 1 + (rail ? 1 : 0) + (piers ? 2 : 0) + (columns ? 1 : 0)
+        + (joints ? 1 : 0) + (markings ? 1 : 0),
       columns: columns ? columns.count : 0,
       joints: joints ? joints.count : 0,
+      marks: markings ? markings.stats.marks : 0,
       lengthM: Math.round(layout.pathLength ?? (layout.alongMax - layout.alongMin)),
       straightM: Math.round(layout.alongMax - layout.alongMin),
       deckTris: deckGeo.index ? deckGeo.index.count / 3 : 0,
@@ -1191,6 +1250,7 @@ export function createCityViaduct({
       if (caps) { caps.geometry.dispose(); caps.dispose(); }
       if (columns) { columns.geometry.dispose(); columns.dispose(); }
       if (joints) { joints.geometry.dispose(); joints.dispose(); }
+      markings?.dispose();
       for (const m of owned) m.dispose();
     },
   };
