@@ -1209,6 +1209,47 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
    * carried for the driving-side rule — which is the same rule, because the
    * deck runs along a street axis like everything else.
    */
+  /*
+   * ── DESTINATION BOARDS OVER THE MOTORWAY ───────────────────────────────────
+   *
+   * The city's OWN gantries, pushed onto the city's own list, so they land in
+   * the same InstancedMesh as every board on every street: no new geometry, no
+   * new material, no new draw call, and no second atlas to keep in step with
+   * the first. A gantry costs an instance, which is what that module was built
+   * for.
+   *
+   * They face the traffic they are for, which on a two-way deck means
+   * alternating: every other board is turned to the other carriageway.
+   */
+  if (viaduct && viaduct.params.gantries !== false && viaduct.lanePaths) {
+    const dp = viaduct.path;
+    const step = viaduct.params.gantrySpacing;
+    let acc = step * 0.5;
+    let n = 0;
+    for (let i = 1; i < dp.length; i++) {
+      acc += dp[i - 1].distanceTo(dp[i]);
+      if (acc < step) continue;
+      acc = 0;
+      const a = dp[i - 1], b = dp[i];
+      // The board hangs over ONE carriageway, from a mast on that side, so it
+      // sits on whichever half the traffic it is addressing drives on.
+      const flip = n % 2 === 0;
+      const yaw = Math.atan2(b.x - a.x, b.z - a.z) + (flip ? 0 : Math.PI);
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const L = Math.hypot(dx, dz) || 1;
+      const off = (flip ? 1 : -1) * viaduct.params.deckWidth * 0.25;
+      const gx = b.x + (-dz / L) * off, gz = b.z + (dx / L) * off;
+      _p.set(gx, viaduct.deckY, gz);
+      _q.setFromAxisAngle(UP, yaw);
+      gantries.push({
+        m: _m.compose(_p, _q, _s).clone(),
+        tile: h2(n, 3, 91) * 3.999 | 0,
+        axis: viaduct.axis, side: flip ? 1 : 0, travel: flip ? 1 : -1,
+      });
+      n++;
+    }
+  }
+
   if (viaduct && F.traffic && viaduct.params.viaductTraffic !== false) {
     for (let fi = 0; fi < viaduct.laneAcross.length; fi++) {
       const lp = viaduct.lanePaths?.[fi] ?? null;

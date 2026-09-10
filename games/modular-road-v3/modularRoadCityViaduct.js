@@ -52,12 +52,15 @@
 // road that nobody notices until they drive under it.
 
 import * as THREE from "three";
-import { Fn, float, vec3, uniform, mix, smoothstep, positionWorld, vertexColor } from "three/tsl";
+import {
+  Fn, float, vec3, vec4, uniform, mix, smoothstep, positionWorld, vertexColor,
+} from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   computeFrames, buildSweepGeometry, buildProfile, roadParams, NO_CHECKER,
 } from "./modularRoadKit.js";
 import { buildRailGeometry, buildRailCollision, railParams } from "./modularRoadRail.js";
+import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
 export const VIADUCT_DEFAULTS = {
   /** Off and nothing is built. */
@@ -203,6 +206,50 @@ export const VIADUCT_DEFAULTS = {
 
   colorPier: 0x8c8b84,
   colorPierDirt: 0x4c4a44,
+
+  /**
+   * ── LIGHTING COLUMNS ───────────────────────────────────────────────────────
+   *
+   * Down the central reserve, two heads each, one over either carriageway —
+   * which is where a real motorway puts them, and it halves the count against
+   * a column on each shoulder.
+   *
+   * They do not CAST light. The lamp field the streets run is a shader pool
+   * keyed to the street grid, and an elevated road is not on it; this is the
+   * structure drawing its own line of lights at night, which is what actually
+   * reads from below. One instanced mesh either way.
+   */
+  columns: true,
+  columnSpacing: 46,
+  columnHeight: 8.5,
+  columnReach: 4.6,
+  columnGlow: 3.2,
+  colorColumn: 0x9ea3a6,
+
+  /**
+   * ── EXPANSION JOINTS ───────────────────────────────────────────────────────
+   *
+   * A dark band across the deck at every pier. Two hundred metres of unbroken
+   * asphalt is the one thing that says "this is not really a bridge", and the
+   * joints are what break it into spans you can count as you drive.
+   *
+   * Geometry rather than a stripe in the road shader, because that shader is
+   * shared with the whole track and a viaduct's joints have no business
+   * appearing on a race circuit.
+   */
+  /**
+   * Destination boards over the deck. They ride the CITY'S gantry mesh — see
+   * the note in modularRoadCityFurniture.js — so they cost instances, not draws.
+   */
+  gantries: true,
+  gantrySpacing: 420,
+
+  joints: true,
+  jointWidth: 0.42,
+  /** How far above the deck they sit. Enough to win the depth test at range
+   *  without being a lip the suspension can feel. */
+  jointLift: 0.014,
+  colorJoint: 0x2c2b29,
 };
 
 /**
@@ -577,12 +624,29 @@ function corridorTest(paths, halfW) {
   };
 }
 
-/** Concrete for the piers. The deck is the game's own road material. */
-function pierMaterial(V) {
+/**
+ * ── ONE MATERIAL FOR EVERYTHING THAT IS NOT THE ROAD ─────────────────────────
+ *
+ * Piers, lighting columns and expansion joints all run on this. They look
+ * nothing alike, and they do not need to: the vertex colour carries three
+ * independent channels —
+ *
+ *   .r  concrete shade, 0..1
+ *   .g  lantern: emissive at night, and the only thing here that glows
+ *   .b  joint: flat dark, no streaking
+ *
+ * One material is one pipeline, and in this game a pipeline is the expensive
+ * unit — the first frame is spent compiling, not drawing. Three tidy materials
+ * would be three compiles for three things that are collectively a few hundred
+ * triangles.
+ */
+function pierMaterial(V, uNightU, uGlow) {
   const m = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.0 });
-  m.name = "CityViaductPier";
+  m.name = "CityViaductParts";
   const base = uniform(new THREE.Color(V.colorPier));
   const dirt = uniform(new THREE.Color(V.colorPierDirt));
+  const colu = uniform(new THREE.Color(V.colorColumn));
+  const joint = uniform(new THREE.Color(V.colorJoint));
   const uTop = uniform(0);
   m.colorNode = Fn(() => {
     /*
@@ -595,8 +659,21 @@ function pierMaterial(V) {
     const streak = smoothstep(float(0.0), float(2.6), below)
       .mul(smoothstep(float(9.0), float(3.0), below)).mul(0.28);
     // `vertexColor()` is a vec4; the alpha is not a part id and never was.
-    return mix(base.mul(vertexColor().rgb.r.mul(0.25).add(0.75)), dirt, streak);
+    const vc = vertexColor().rgb;
+    const concrete = mix(base.mul(vc.r.mul(0.25).add(0.75)), dirt, streak);
+    // A lantern is not concrete and a joint is not weathered — both step out of
+    // the streak, which is keyed to the deck above and means nothing to either.
+    return mix(mix(concrete, colu, vc.g), joint, vc.b);
   })();
+  /*
+   * THE LIGHTS COME ON. Emissive only on the lantern channel, only at night,
+   * and through the bloom MRT so the heads flare the way the street lamps do —
+   * a line of hard dots along an unlit structure reads as a mistake.
+   */
+  const glow = Fn(() => vertexColor().rgb.g
+    .mul(uNightU).mul(uGlow).mul(vec3(1.0, 0.86, 0.62)));
+  m.emissiveNode = glow();
+  applyBloomMRT(m, Fn(() => vec4(glow(), 1.0))());
   return { material: m, uTop };
 }
 
@@ -611,6 +688,8 @@ function pierMaterial(V) {
  */
 export function createCityViaduct({
   layout, roadMaterial = null, railMaterial = null, castShadows = true,
+  /** The world's night value, 0 day … 1 night. Drives the lantern heads. */
+  uNight = null,
 }) {
   if (!layout) return null;
   const V = layout.params;
@@ -918,17 +997,25 @@ export function createCityViaduct({
    * The alternative was one geometry per distinct height, which is a draw call
    * per pier on a structure that has sixty of them.
    */
-  const { material: pierMat, uTop } = pierMaterial(V);
+  const uNightU = uNight || uniform(0);
+  const uGlow = uniform(V.columnGlow);
+  const { material: pierMat, uTop } = pierMaterial(V, uNightU, uGlow);
   owned.push(pierMat);
   uTop.value = layout.deckBottom;
   let shafts = null, caps = null;
+  /** Paint every vertex of `g` with the three channels the parts material
+   *  reads: concrete shade, lantern, joint. See `pierMaterial`. */
+  const tint = (g, r, gg, b) => {
+    const n = g.attributes.position.count;
+    const c = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { c[i * 3] = r; c[i * 3 + 1] = gg; c[i * 3 + 2] = b; }
+    g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+    return g;
+  };
   const mk = (w, h, d, y, shade) => {
     const g = new THREE.BoxGeometry(w, h, d);
     g.translate(0, y, 0);
-    const n = g.attributes.position.count;
-    const c = new Float32Array(n * 3).fill(shade);
-    g.setAttribute("color", new THREE.BufferAttribute(c, 3));
-    return g;
+    return tint(g, shade, 0, 0);
   };
   if (layout.piers.length) {
     // A tapered shaft as two stacked boxes rather than a lathe: the taper reads
@@ -968,6 +1055,86 @@ export function createCityViaduct({
   }
   const piers = shafts;
 
+  /*
+   * ── STATIONS ALONG A RUN ───────────────────────────────────────────────────
+   *
+   * By ARC LENGTH, with the heading taken from the polyline, so anything bolted
+   * to the deck follows it round the curves without knowing they are there.
+   */
+  const walk = (pts, spacing, fn) => {
+    let acc = spacing;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      acc += a.distanceTo(b);
+      if (acc < spacing) continue;
+      acc = 0;
+      const dx = b.x - a.x, dz = b.z - a.z;
+      fn(b, Math.atan2(dx, dz));
+    }
+  };
+
+  // ── Lighting columns, down the central reserve ─────────────────────────────
+  let columns = null;
+  if (V.columns) {
+    const parts = [];
+    const post = mk(0.26, V.columnHeight, 0.26, V.columnHeight * 0.5, 0.0);
+    parts.push(tint(post, 0.55, 0, 0));
+    for (const s2 of [-1, 1]) {
+      const arm = new THREE.BoxGeometry(V.columnReach, 0.16, 0.16);
+      arm.translate((s2 * V.columnReach) / 2, V.columnHeight - 0.1, 0);
+      parts.push(tint(arm, 0.55, 0, 0));
+      const head = new THREE.BoxGeometry(0.86, 0.16, 0.34);
+      head.translate(s2 * V.columnReach, V.columnHeight - 0.2, 0);
+      parts.push(tint(head, 0, 1, 0));
+    }
+    const geo = mergeGeometries(parts, false);
+    for (const g of parts) g.dispose();
+    const at = [];
+    walk(layout.path, V.columnSpacing, (q, yaw) => at.push({ q, yaw }));
+    if (at.length) {
+      columns = new THREE.InstancedMesh(geo, pierMat, at.length);
+      columns.name = "CityViaductColumns";
+      const m = new THREE.Matrix4(), qt = new THREE.Quaternion();
+      const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
+      at.forEach((c, i) => {
+        qt.setFromAxisAngle(up, c.yaw);
+        m.compose(new THREE.Vector3(c.q.x, layout.deckY, c.q.z), qt, one);
+        columns.setMatrixAt(i, m);
+      });
+      columns.castShadow = false;      // 300 triangles of shadow at 12 m up
+      columns.receiveShadow = true;
+      columns.frustumCulled = false;
+      columns.instanceMatrix.needsUpdate = true;
+      group.add(columns);
+    } else { geo.dispose(); }
+  }
+
+  // ── Expansion joints, one per span ─────────────────────────────────────────
+  let joints = null;
+  if (V.joints) {
+    const g0 = new THREE.BoxGeometry(V.deckWidth - roadParams.railWidth * 2, 0.02, V.jointWidth);
+    g0.translate(0, 0, 0);
+    const geo = tint(g0, 0, 0, 1);
+    const at = [];
+    walk(layout.path, V.spanLength, (q, yaw) => at.push({ q, yaw }));
+    if (at.length) {
+      joints = new THREE.InstancedMesh(geo, pierMat, at.length);
+      joints.name = "CityViaductJoints";
+      const m = new THREE.Matrix4(), qt = new THREE.Quaternion();
+      const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
+      at.forEach((c, i) => {
+        qt.setFromAxisAngle(up, c.yaw);
+        m.compose(new THREE.Vector3(c.q.x, layout.deckY + V.jointLift, c.q.z), qt, one);
+        joints.setMatrixAt(i, m);
+      });
+      joints.castShadow = false;
+      joints.receiveShadow = false;
+      joints.frustumCulled = false;
+      joints.instanceMatrix.needsUpdate = true;
+      group.add(joints);
+    } else { geo.dispose(); }
+  }
+
   return {
     group,
     layout,
@@ -985,7 +1152,9 @@ export function createCityViaduct({
     stats: {
       piers: layout.piers.length,
       ramps: (layout.ramps ?? []).length,
-      draws: 1 + (rail ? 1 : 0) + (piers ? 2 : 0),
+      draws: 1 + (rail ? 1 : 0) + (piers ? 2 : 0) + (columns ? 1 : 0) + (joints ? 1 : 0),
+      columns: columns ? columns.count : 0,
+      joints: joints ? joints.count : 0,
       lengthM: Math.round(layout.pathLength ?? (layout.alongMax - layout.alongMin)),
       straightM: Math.round(layout.alongMax - layout.alongMin),
       deckTris: deckGeo.index ? deckGeo.index.count / 3 : 0,
@@ -999,6 +1168,8 @@ export function createCityViaduct({
       if (railColGeo) railColGeo.dispose();
       if (shafts) { shafts.geometry.dispose(); shafts.dispose(); }
       if (caps) { caps.geometry.dispose(); caps.dispose(); }
+      if (columns) { columns.geometry.dispose(); columns.dispose(); }
+      if (joints) { joints.geometry.dispose(); joints.dispose(); }
       for (const m of owned) m.dispose();
     },
   };

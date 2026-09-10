@@ -893,7 +893,7 @@ export function createModularRoadCity({
         (q) => avoid(q.x, q.z, viaductAt.deckBottom) >= P.avoidRadius);
     }
     viaduct = createCityViaduct({
-      layout: viaductAt, castShadows: P.castShadows,
+      layout: viaductAt, castShadows: P.castShadows, uNight,
       // The GAME'S road and rail materials. Sharing them is what makes the
       // viaduct read as the same road as the track — and what stops a 2.4 km
       // motorway costing a shader compile, since both are already built.

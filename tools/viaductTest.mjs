@@ -125,7 +125,10 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   const city = createModularRoadCity({ params: { extent: 700 } });
   const meshes = [];
   city.group.traverse((o) => { if (o.isMesh && /Viaduct/.test(o.name)) meshes.push(o); });
-  check("the viaduct is four draws — deck, rail, shafts, caps", meshes.length === 4,
+  // Deck, rail, pier shafts, pier caps, lighting columns, expansion joints.
+  // Six for a 2.7 km interchange, and the count is stated rather than bounded
+  // because the whole design of this thing is "adding parts costs instances".
+  check("the viaduct is six draws", meshes.length === 6,
     meshes.map((m) => m.name).join(", "));
   check("the city reports a viaduct", !!city.stats.viaduct, JSON.stringify(city.stats.viaduct));
 
@@ -155,8 +158,29 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   check("and the street traffic is still on the street", down > 10, `${down} at ground level`);
   check("nothing is drawn between the two", up + down === heights.length,
     `${heights.length - up - down} cars at neither height`);
-  check("the deck carries piers worth reporting", cityViaduct.piers > 5 && cityViaduct.draws === 4,
+  check("the deck carries piers worth reporting", cityViaduct.piers > 5 && cityViaduct.draws === 6,
     JSON.stringify(cityViaduct));
+  check("it is lit and jointed", cityViaduct.columns > 10 && cityViaduct.joints > 10,
+    `${cityViaduct.columns} columns, ${cityViaduct.joints} joints`);
+  /*
+   * THE BOARDS COST NO DRAW. They are pushed onto the CITY'S gantry list, so
+   * they land in the same InstancedMesh as every board on every street. If
+   * they ever stopped doing that the symptom would be a new mesh named
+   * something plausible, not a broken picture — so the count is what is
+   * checked, against a city built without a viaduct at all.
+   */
+  const gant = [];
+  city.group.traverse((o) => { if (o.isInstancedMesh && /Gantry/.test(o.name)) gant.push(o); });
+  check("the boards ride the city's own gantry mesh", gant.length === 1,
+    gant.map((m) => m.name).join(", ") || "none");
+  // The PLACEMENT LIST, not the mesh's count: `applyLod` rewrites `count` every
+  // tick to whatever is in range, so comparing drawn instances compares two
+  // camera positions rather than two cities.
+  const bare = createModularRoadCity({ params: { extent: 700, viaduct: false } });
+  check("and there are MORE of them than without the viaduct",
+    city.stats.furniture.gantries > bare.stats.furniture.gantries,
+    `${city.stats.furniture.gantries} placed vs ${bare.stats.furniture.gantries} with no viaduct`);
+  bare.dispose();
 
   /*
    * ── IT IS ACTUALLY IN THE DRIVE-SURFACE BVH ───────────────────────────────
