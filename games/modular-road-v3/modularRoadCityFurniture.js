@@ -595,7 +595,7 @@ export function signalGo(time, phase, F) {
   return t < F.signalGreenEnd;
 }
 
-export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [], parkTrees = [], viaduct = null }) {
+export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [], parkTrees = [], viaduct = null, keepOut = null }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
   group.name = "CityFurniture";
@@ -873,6 +873,11 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const UP = new THREE.Vector3(0, 1, 0);
   const place = (list, x, z, yaw, extra) => {
     if (!inside(x, z)) return;
+    // NOTHING UNDER A DESCENDING RAMP. One gate, at the one place every kind of
+    // furniture is created, because a ramp passes through the height of all of
+    // them and street furniture is solid — so anything missed here is not
+    // scenery clipping a road, it is a wall across it.
+    if (keepOut && keepOut(x, z)) return;
     _p.set(x, gy, z);
     _q.setFromAxisAngle(UP, yaw);
     list.push({ m: _m.compose(_p, _q, _s).clone(), ...extra });

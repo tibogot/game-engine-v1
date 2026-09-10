@@ -77,7 +77,7 @@ import {
 } from "three/tsl";
 import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.js";
 import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
-import { createCityViaduct, viaductLayout } from "./modularRoadCityViaduct.js";
+import { createCityViaduct, viaductLayout, viaductKeepOut } from "./modularRoadCityViaduct.js";
 import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
 import { placeCityPrism, pickPrismPlaza, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
 import { planCarParks, buildCarParkGround, CARPARK_DEFAULTS } from "./modularRoadCityCarPark.js";
@@ -391,6 +391,8 @@ export function createModularRoadCity({
   let viaduct = null;
   /** The pure layout, shared by the geometry and the traffic. */
   let viaductAt = null;
+  /** Where a ramp is overhead, so nothing tall is placed under it. */
+  let viaductClear = null;
   let carParkGround = null;
   let carParks = [];
   let parkGround = null;
@@ -776,6 +778,7 @@ export function createModularRoadCity({
     if (bridges) { group.remove(bridges.group); bridges.dispose(); bridges = null; }
     if (viaduct) { group.remove(viaduct.group); viaduct.dispose(); viaduct = null; }
     viaductAt = null;
+    viaductClear = null;
     if (carParkGround) { group.remove(carParkGround.mesh); carParkGround.dispose(); carParkGround = null; }
     carParks = [];
     if (parkGround) { group.remove(parkGround.mesh); parkGround.dispose(); parkGround = null; }
@@ -864,6 +867,7 @@ export function createModularRoadCity({
     viaductAt = P.viaduct
       ? viaductLayout({ P, originCellX, originCellZ, params: P.viaductParams })
       : null;
+    viaductClear = viaductKeepOut(viaductAt);
     /*
      * NO PIER IN THE RACING LINE.
      *
@@ -1010,6 +1014,10 @@ export function createModularRoadCity({
     if (P.ground) {
       ground = createCityStreets({
         P, originCellX, originCellZ, params: P.streetParams, reflectionTexture,
+        // `buildExtras` runs before this, so the viaduct's keep-out is already
+        // known. Lamp posts are placed in the streets module, not in furniture,
+        // so the gate has to exist in both or half of them come back.
+        keepOut: viaductClear,
       });
       // The street material is rebuilt with the ground, so the weather it was
       // last told about has to be re-applied or every rebuild dries the city.
@@ -1132,6 +1140,10 @@ export function createModularRoadCity({
           parkBays: carParks,
           parkTrees: parks,
           P, originCellX, originCellZ, params: P.furnitureParams,
+          // Nothing tall under a descending ramp. Signals and lamps are SOLID,
+          // so one left standing is not scenery clipping a road, it is a wall
+          // across the only way onto the motorway.
+          keepOut: viaductClear,
           // The motorway's lanes come from the same layout the deck was built
           // from, so the cars cannot end up beside the road they drive on.
           viaduct: viaductAt,
@@ -1150,9 +1162,11 @@ export function createModularRoadCity({
         lists: furniture?.lists ?? null,
         // Derived from the viaduct that was actually built, so the capsule can
         // never describe a pier of a different size than the one you can see.
+        // Each entry carries its own `top`, because a pier under a descending
+        // ramp is shorter than one under the deck — see the note in
+        // modularRoadCityObstacles.js on what that got wrong.
         piers: viaductAt ? {
           list: viaductAt.piers,
-          height: viaductAt.deckBottom - P.groundY,
           radius: Math.max(viaductAt.params.pierWidth, viaductAt.params.pierDepth) * 0.5 + 0.2,
         } : null,
         groundY: P.groundY,

@@ -2340,9 +2340,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   });
   if (birds) scene.add(birds.mesh);
   let _birdT = 0;
+  let birdsOn = true;
   const _birdSize = new THREE.Vector2();
   function updateBirds(dt) {
-    if (!birds) return;
+    /*
+     * OFF IS FREE, and both halves of that matter.
+     *
+     * `visible = false` takes the mesh out of the render list, so there is no
+     * draw and no vertex work — the whole flock is a single instanced mesh, so
+     * that is the entire GPU cost gone. And returning here skips the clock, the
+     * viewport read and the night sample, so there is no per-frame CPU either.
+     *
+     * The mesh is KEPT rather than disposed: rebuilding is cheap but the first
+     * draw after a rebuild would recompile the pipeline, and in this game that
+     * is the one cost worth going out of the way to avoid.
+     */
+    if (!birds || !birdsOn) return;
     _birdT += dt;
     birds.setTime(_birdT);
     renderer.getSize(_birdSize);
@@ -2352,6 +2365,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     birds.setNight(cityNight());
   }
   app.addPreRenderHook?.(updateBirds);
+  function setBirds(on) {
+    birdsOn = !!on;
+    if (birds) birds.mesh.visible = birdsOn;
+  }
 
   /*
    * ── CHECKPOINT RUSH ────────────────────────────────────────────────────────
@@ -9155,6 +9172,8 @@ ${e.message}`);
       },
       getDriftSmokeSettings: () => driftSmoke.settings,
       getSparkSettings: () => sparks.settings,
+      getBirds: () => birdsOn,
+      setBirds,
       getPropPhysics: () => PROP_PHYSICS,
       syncPropPhysics: () => propPhysics.sync(),
       awakeProps: () => propPhysics.awakeCount,

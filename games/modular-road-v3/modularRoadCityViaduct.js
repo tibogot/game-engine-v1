@@ -159,6 +159,8 @@ export const VIADUCT_DEFAULTS = {
    */
   rampSplit: 0.22,
   rampFall: 0.20,
+  /** Extra metres of open barrier either end of the gore. */
+  gorePad: 12,
   /** Stations per ramp. Ramps bend in two axes at once, so they get their own
    *  density rather than inheriting the straight's. */
   rampSteps: 26,
@@ -277,7 +279,20 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
         rPath.push(axis === "x" ? new THREE.Vector3(a, y, off)
           : new THREE.Vector3(off, y, a));
       }
-      ramps.push({ path: rPath, dir, side });
+      /*
+       * THE MOUTH — the along-axis window in which the ramp is still over the
+       * deck it is leaving. The deck's barrier has to be ABSENT here, or the
+       * slip road is a road you can see and cannot enter. A little margin
+       * either side, because a gap that ends exactly where the ramp clears is
+       * a gap you have to hit perfectly.
+       */
+      const aSplit = a0 + dir * V.rampLength * V.rampSplit;
+      const pad = V.gorePad;
+      ramps.push({
+        path: rPath, dir, side,
+        mouthMin: Math.min(a0, aSplit) - pad,
+        mouthMax: Math.max(a0, aSplit) + pad,
+      });
     }
   }
 
@@ -328,6 +343,51 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
     axis, across, alongMin, alongMax,
     deckY, deckBottom, railTop,
     path, ramps, laneAcross, piers, params: V,
+  };
+}
+
+/**
+ * ── WHERE NOTHING MAY STAND ──────────────────────────────────────────────────
+ *
+ * A predicate over the RAMPS, and only the ramps. Under the main deck there is
+ * 10.4 m of headroom and a lamp post is 9 — the street below it carries on as a
+ * street. A ramp is different: it descends from eleven metres to the pavement,
+ * so somewhere along it, it passes through the height of everything the city
+ * puts on a kerb. In the first version it did exactly that, and because street
+ * furniture is solid the signals and lamps it passed through became a wall
+ * across the slip road.
+ *
+ * Height-aware would be more precise and is not worth it: the strip is thirteen
+ * metres wide and a couple of hundred long, twice, and a lamp post under a ramp
+ * is wrong at any height it would fit under.
+ *
+ * @returns {(x:number, z:number) => boolean} true where the ground is spoken for
+ */
+export function viaductKeepOut(layout) {
+  if (!layout || !(layout.ramps ?? []).length) return null;
+  const V = layout.params;
+  const halfW = V.rampWidth / 2 + 3.0;
+  const h2 = halfW * halfW;
+  // Flattened to plain numbers: this is asked once per candidate placement, of
+  // which there are tens of thousands.
+  const segs = [];
+  for (const rmp of layout.ramps) {
+    for (let i = 1; i < rmp.path.length; i++) {
+      const a = rmp.path[i - 1], b = rmp.path[i];
+      segs.push(a.x, a.z, b.x - a.x, b.z - a.z);
+    }
+  }
+  return (x, z) => {
+    for (let i = 0; i < segs.length; i += 4) {
+      const px = x - segs[i], pz = z - segs[i + 1];
+      const dx = segs[i + 2], dz = segs[i + 3];
+      const len2 = dx * dx + dz * dz;
+      let t = len2 > 0 ? (px * dx + pz * dz) / len2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const qx = px - dx * t, qz = pz - dz * t;
+      if (qx * qx + qz * qz < h2) return true;
+    }
+    return false;
   };
 }
 
@@ -426,11 +486,72 @@ export function createCityViaduct({
   let rail = null;
   let railCollider = null;
   const railP = { ...railParams, postSpacing: V.railPostSpacing };
+
+  /*
+   * ── THE BARRIER, WITH THE GORE LEFT OPEN ───────────────────────────────────
+   *
+   * A rail down both edges of everything is what the first version did, and it
+   * walled the slip roads off completely: the ramp diverged from the deck with
+   * a barrier on the deck's edge AND one on the ramp's, so the one place a car
+   * has to cross was the one place it could not. The road was visibly there and
+   * unreachable.
+   *
+   * So the rails are built A SIDE AT A TIME over sub-ranges of the frames:
+   *   · the DECK keeps both barriers except on the side a ramp leaves from,
+   *     where it stops before the mouth and starts again after it;
+   *   · a RAMP has its outer barrier for its whole length — that is the edge of
+   *     a road eleven metres up — and its inner one only once it has diverged
+   *     far enough to be a separate road.
+   *
+   * WHICH LOCAL SIDE IS WHICH IS MEASURED, NOT ASSUMED. `computeFrames` picks
+   * its own frame, so `right` is not guaranteed to point at +across; dotting it
+   * with the across axis once tells us, and getting it wrong would open the
+   * barrier on the far edge of the deck instead — a hole with nothing beside it
+   * and nothing to see.
+   */
+  const acrossUnit = layout.axis === "x"
+    ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+  const sideSignOf = (fr) => (fr[0].right.dot(acrossUnit) >= 0 ? 1 : -1);
+
+  /** {frames, rp, sides} — one call to the rail builder each. */
+  const railRuns = [];
+  {
+    const F = runs[0].frames;
+    const span = layout.alongMax - layout.alongMin;
+    const idxOf = (a) => Math.max(0, Math.min(F.length - 1,
+      Math.round(((a - layout.alongMin) / span) * (F.length - 1))));
+    const deckSign = sideSignOf(F);
+    for (const localSide of [-1, 1]) {
+      // The world-across side this local side sits on.
+      const worldSide = localSide * deckSign;
+      const gaps = (layout.ramps ?? [])
+        .filter((r) => r.side === worldSide)
+        .map((r) => [idxOf(r.mouthMin), idxOf(r.mouthMax)])
+        .sort((a, b) => a[0] - b[0]);
+      let cur = 0;
+      for (const [g0, g1] of gaps) {
+        if (g0 - cur >= 2) railRuns.push({ frames: F.slice(cur, g0 + 1), rp, sides: [localSide] });
+        cur = Math.max(cur, g1);
+      }
+      if (F.length - 1 - cur >= 2) railRuns.push({ frames: F.slice(cur), rp, sides: [localSide] });
+    }
+  }
+  (layout.ramps ?? []).forEach((rmp, i) => {
+    const F = runs[i + 1].frames;
+    const sign = sideSignOf(F);
+    // Inner = toward the deck centre, i.e. the opposite world side to the one
+    // the ramp diverged to.
+    const inner = -rmp.side * sign;
+    const k = Math.min(F.length - 2, Math.ceil(V.rampSplit * (F.length - 1)));
+    railRuns.push({ frames: F, rp: rampRp, sides: [-inner] });
+    railRuns.push({ frames: F.slice(k), rp: rampRp, sides: [inner] });
+  });
+
   const railParts = [], railColParts = [];
-  for (const r of runs) {
-    const g = buildRailGeometry(r.frames, r.rp, railP);
+  for (const r of railRuns) {
+    const g = buildRailGeometry(r.frames, r.rp, railP, { sides: r.sides });
     if (g) railParts.push(g);
-    const c = buildRailCollision(r.frames, r.rp, railP);
+    const c = buildRailCollision(r.frames, r.rp, railP, { sides: r.sides });
     if (c) railColParts.push(c);
   }
   const merge1 = (parts) => {

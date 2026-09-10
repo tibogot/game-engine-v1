@@ -2620,6 +2620,25 @@ export function createRoadDevPanel({ app, game, params }) {
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Sky — Birds</div>
+        <div class="section-body">
+          <div class="dv-hint">
+            Flocks wheeling over the city. <b>No simulation</b> — three.js's own
+            boids example has 8192 birds each reading all 8192 others, 67 million
+            interactions a frame, for a behaviour you can only read at ten metres.
+            These are closed form in the vertex stage: one draw, 1260 triangles,
+            no compute passes. Off removes the draw AND the per-frame work.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Birds</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-birds" type="button" aria-label="Birds">${CHECK_SVG}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Sky — Night</div>
         <div class="section-body">
           <div class="dv-hint">
@@ -7149,6 +7168,7 @@ export function createRoadDevPanel({ app, game, params }) {
   const spk = game.getSparkSettings?.();
   if (spk) {
     toggle("dv-sparks", spk.enabled !== false, (on) => { spk.enabled = on; });
+    toggle("dv-birds", api.getBirds?.() !== false, (on) => { api.setBirds?.(on); });
     slider("dv-spk-rate", spk, "emitRate", (v) => v.toFixed(0));
     slider("dv-spk-int", spk, "intensity");
     slider("dv-spk-str", spk, "stretch", (v) => v.toFixed(3));

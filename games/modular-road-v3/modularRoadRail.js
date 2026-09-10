@@ -1010,15 +1010,28 @@ function railCollisionWalls(rp, r, zSign, minDepth = RAIL_COLLISION_DEPTH) {
  * behind) and the proxy block of labGuardrailTest.mjs (face alignment, no
  * floor, no plateau).
  */
-export function buildRailCollision(frames, rp, r = railParams) {
+/**
+ * WHICH SIDES TO BUILD. Both, unless told otherwise.
+ *
+ * A track piece always wants both — it is a road with an edge either side. A
+ * SLIP ROAD does not: where it diverges from the deck it left, the two carry on
+ * side by side and a barrier between them is a wall across the one place a car
+ * has to be able to cross. So the viaduct builds its rails a side at a time,
+ * over sub-ranges of the frames, and leaves the gore open.
+ *
+ * Defaulted rather than required, so every existing caller is untouched.
+ */
+export function buildRailCollision(frames, rp, r = railParams, opts = {}) {
   if (r.height <= 0 || !frames?.length) return null;
+  const sides = opts.sides ?? [-1, 1];
+  if (!sides.length) return null;
   const hw = rp.width / 2;
   const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
   const edgeAbs = hw - rw * 0.5;
 
   const positions = [];
   const indices = [];
-  for (const side of [-1, 1]) {
+  for (const side of sides) {
     const zSign = r.mirrorSides ? side : 1;
     // Thinned on THIS rail's own path (see decimateFrames) so the proxy keeps
     // following the visible beam on a rolling piece.
@@ -1091,6 +1104,9 @@ export function buildMirroredRailGeometry(frames, rp, r = railParams, opts = {})
  */
 export function buildRailGeometry(frames, rp, r = railParams, opts = {}) {
   if (r.height <= 0 || !frames?.length) return null;
+  // See the note on buildRailCollision: one side at a time, for slip roads.
+  const sides = opts.sides ?? [-1, 1];
+  if (!sides.length) return null;
   const hw = rp.width / 2;
   const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45);
   const kerbTop = rp.railHeight;
@@ -1105,7 +1121,7 @@ export function buildRailGeometry(frames, rp, r = railParams, opts = {}) {
   if (post && sink) { sink.key = post.key; sink.template = post.template; }
 
   const geos = [];
-  for (const side of [-1, 1]) {
+  for (const side of sides) {
     const zSign = r.mirrorSides ? side : 1;
     const baseLat = side * edgeAbs;
     // PER SIDE, on this rail's own path — the two rails of a rolling or curving

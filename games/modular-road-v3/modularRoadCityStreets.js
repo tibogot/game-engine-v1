@@ -681,6 +681,10 @@ const packSlope = (slope) => vec3(slope.x.negate(), slope.y.negate(), 1.0).norma
  */
 export function createCityStreets({
   P, originCellX, originCellZ, params: overrides = {}, reflectionTexture = null,
+  /** Where the ground is spoken for by something overhead — see viaductKeepOut.
+   *  Lamp posts are placed HERE rather than in the furniture module, so the
+   *  gate has to exist in both or half of them come back. */
+  keepOut = null,
 }) {
   const S = { ...STREET_DEFAULTS, ...overrides };
 
@@ -1690,6 +1694,7 @@ export function createCityStreets({
           const z0 = oz + kz * per, z1 = z0 + bw;
           for (let z = Math.ceil((z0 - stagger) / S.lampPitch) * S.lampPitch + stagger; z < z1; z += S.lampPitch) {
             if (Math.abs(x - P.centerX) > half || Math.abs(z - P.centerZ) > half) continue;
+            if (keepOut && keepOut(x, z)) continue;
             _pv.set(x, P.groundY, z);
             _m.compose(_pv, yaw(side === 0 ? 0 : Math.PI), _sv);
             lampMatrices.push(_m.clone());
@@ -1703,6 +1708,7 @@ export function createCityStreets({
           const x0 = ox + kx * per, x1 = x0 + bw;
           for (let x = Math.ceil((x0 - stagger) / S.lampPitch) * S.lampPitch + stagger; x < x1; x += S.lampPitch) {
             if (Math.abs(x - P.centerX) > half || Math.abs(z - P.centerZ) > half) continue;
+            if (keepOut && keepOut(x, z)) continue;
             _pv.set(x, P.groundY, z);
             /*
              * THE ARM HAS TO REACH OVER THE ROAD, and these two were swapped.

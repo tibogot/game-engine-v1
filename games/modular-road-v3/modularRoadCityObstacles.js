@@ -85,6 +85,8 @@ export const OBSTACLE_DEFAULTS = {
    */
   piers: true,
   pierRadius: 1.5,
+  /** Fallback only. Every pier carries its OWN height — see the note in
+   *  `capsulesNear` on what the fourth table slot means for a pier. */
   pierHeight: 10.5,
 };
 
@@ -137,14 +139,34 @@ export function createCityObstacles({
     rows.push(_p.x, _p.z, kind, yaw);
   };
 
-  /** The same drop rules as `push`, for things placed by position not matrix. */
-  const pushAt = (x, z, kind) => {
+  /**
+   * The same drop rules as `push`, for things placed by position not matrix.
+   *
+   * `w` lands in the row's fourth slot. For everything with a direction that is
+   * a YAW; for a pier — which is square in plan and has no meaningful yaw — it
+   * is the pier's own HEIGHT. See the note in `capsulesNear`.
+   */
+  const pushAt = (x, z, kind, w = 0) => {
     if (avoid && avoid(x, z) < avoidRadius) { dropped++; return; }
-    rows.push(x, z, kind, 0);
+    rows.push(x, z, kind, w);
   };
 
   for (const m of lampMatrices ?? []) push(m, KIND.LAMP);
-  if (O.piers) for (const q of piers?.list ?? []) pushAt(q.x, q.z, KIND.PIER);
+  /*
+   * EACH PIER CARRIES ITS OWN HEIGHT, and it has to.
+   *
+   * The first version passed ONE height for all of them — the main deck's
+   * underside — which is right for the piers under the deck and badly wrong for
+   * the ones under a slip road, because a ramp descends. Every short ramp pier
+   * got a 10.4 m capsule, so each stood several metres THROUGH the ramp it was
+   * holding up: an invisible column in the middle of the road, at four places
+   * on every ramp, hit at speed by anyone using it.
+   */
+  if (O.piers) {
+    for (const q of piers?.list ?? []) {
+      pushAt(q.x, q.z, KIND.PIER, Math.max(0.5, (q.top ?? 0) - groundY));
+    }
+  }
   for (const e of lists?.lights ?? []) push(e.m, KIND.LIGHT);
   for (const e of lists?.trees ?? []) push(e.m, KIND.TREE);
   for (const e of lists?.cars ?? []) push(e.m, KIND.CAR);
@@ -260,9 +282,18 @@ export function createCityObstacles({
       const rad = kind === KIND.LAMP ? O.lampRadius
         : kind === KIND.LIGHT ? O.lightRadius
           : kind === KIND.PIER ? O.pierRadius : O.treeRadius;
-      const h = kind === KIND.LAMP ? O.lampHeight
-        : kind === KIND.LIGHT ? O.lightHeight
-          : kind === KIND.PIER ? O.pierHeight : O.treeHeight;
+      /*
+       * A PIER'S HEIGHT COMES OFF ITS OWN ROW, not out of the params.
+       *
+       * The fourth slot is a yaw for everything that has a direction; a pier is
+       * square in plan and has none, so it carries its height there instead.
+       * Every other kind is one shape repeated, and a pier is not: the ones
+       * under a slip road are shorter than the ones under the deck, because the
+       * road above them is coming down.
+       */
+      const h = kind === KIND.PIER ? (yaw > 0 ? yaw : O.pierHeight)
+        : kind === KIND.LAMP ? O.lampHeight
+          : kind === KIND.LIGHT ? O.lightHeight : O.treeHeight;
       // Capsule ends are the SPHERE CENTRES, so they sit a radius inside each
       // flat end of the post the geometry actually draws.
       const lo = groundY + rad;
