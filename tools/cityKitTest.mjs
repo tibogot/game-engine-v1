@@ -465,9 +465,31 @@ console.log("\n── LOOK PASS ──");
   // SIGNAGE IS HERO ADVERTS ONLY by default: few, huge, street-facing, each a
   // slot for a real image. The procedural layers exist but default to 0.
   const sg = c.stats.signs;
-  check("signage defaults to hero adverts and nothing else",
-    CITY_DEFAULTS.signs === true && sg.heroes > 0 && sg.banners === 0 && sg.bands === 0 && sg.texts === 0 && sg.neon === 0 && sg.mega === 0,
+  /*
+   * WHAT THE CITY SHOWS BY DEFAULT, AND WHAT IT DELIBERATELY DOES NOT.
+   *
+   * This used to read "hero adverts and nothing else", which was the right call
+   * when the alternative was banners and screens scattered over every tower —
+   * that reads as clutter, not as a city.
+   *
+   * The street-level set is a different thing and is now ON: shopfront neon
+   * words, the scrolling ribbon at the kerb under them, and the LED band that
+   * WRAPS a podium's corner. All three sit where a person stands rather than
+   * halfway up a tower, which is what makes them read as a place instead of as
+   * advertising. Measured together: two extra draws and no measurable GPU cost.
+   *
+   * The tower-scale extras stay off: banners, mid-wall screens, marquee texts
+   * and the legacy mega board.
+   */
+  check("signage defaults to heroes plus the street-level set",
+    CITY_DEFAULTS.signs === true && sg.heroes > 0 && sg.words > 0 && sg.ribbons > 0 && sg.bands > 0,
     JSON.stringify(sg));
+  check("...and NOT the tower-scale clutter",
+    sg.banners === 0 && sg.texts === 0 && sg.neon === 0 && sg.mega === 0,
+    JSON.stringify(sg));
+  // A wrapping band is FOUR quads — one per face — so the count has to be a
+  // multiple of four, or a podium somewhere is wearing three sides of a belt.
+  check("every band wraps all four faces", sg.bands % 4 === 0, `${sg.bands} quads`);
   check("heroes are FEW — a handful per hundred towers, not a scatter", sg.heroes > 8 && sg.heroes < c.stats.buildings * 0.08, `${sg.heroes} of ${c.stats.buildings}`);
   // A board nobody can see from the road is noise: every hero must sit on a
   // face that looks onto a street, which the lot's cell index alone decides.
@@ -481,8 +503,21 @@ console.log("\n── LOOK PASS ──");
   check("every hero advert faces a street", c.signs.heroes.every(facesStreet), `${c.signs.heroes.filter((h) => !facesStreet(h)).length} face a neighbour`);
   check("every hero is building-scale", c.signs.heroes.every((h) => h.w >= 12 && h.h >= 8), "min " + Math.min(...c.signs.heroes.map((h) => h.w)).toFixed(1) + " m wide");
   let extra = 0; const names = [];
-  c.group.traverse((o) => { if (o.isInstancedMesh && /^City(Banners|Screens|Bands|Texts|Neon|Beacons|Heroes)$/.test(o.name)) { extra++; names.push(o.name); } });
-  check("heroes + beacons are exactly two instanced meshes (two draws)", extra === 2, names.sort().join(","));
+  c.group.traverse((o) => {
+    if (o.isInstancedMesh
+      && /^City(Banners|Screens|Bands|Texts|Neon|Beacons|Heroes|NeonWords|KerbRibbon)$/.test(o.name)) {
+      extra++; names.push(o.name);
+    }
+  });
+  /*
+   * FIVE MESHES, FIVE DRAWS: heroes, beacons, the wrapping bands, the shopfront
+   * neon and the kerb ribbons. Asserted by NAME rather than by count alone so
+   * that adding a sixth kind of sign has to be a decision someone writes down
+   * here, rather than something that drifts in one instanced mesh at a time.
+   */
+  check("signage is five instanced meshes, and these five",
+    names.sort().join(",") === "CityBands,CityBeacons,CityHeroes,CityKerbRibbon,CityNeonWords",
+    names.sort().join(","));
   // Street lamps: the grid walked once on the CPU, one instanced draw, and
   // every post inside the city's extent.
   const lamps = c.group.getObjectByName("CityLamps");

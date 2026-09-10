@@ -71,6 +71,19 @@ import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { makeLedMatrixMaterial, applyLedMatrixParams } from "../../v2/objects/shared/ledMatrix.js";
 
 export const SIGN_DEFAULTS = {
+  /* ── shopfront neon and the kerb ribbon ─────────────────────────────────── */
+  /** How many street-facing faces get a neon word. */
+  wordFraction: 0.55,
+  /** Metres. The ASPECT must match the atlas tile's or the lettering stretches. */
+  wordW: 4.6,
+  wordAspect: 4,
+  /** Height of its centre above the pavement — above a door, below a first floor. */
+  wordY: 3.5,
+  /** Of the faces that get a word, how many also get a ribbon at the kerb. */
+  ribbonFraction: 0.7,
+  ribbonH: 0.42,
+  ribbonY: 0.62,
+
   /** ── HERO ADVERTS — the default, and the only kind on by default. ────────
    *  Fraction of QUALIFYING towers (tall, with a wide street face). */
   heroFraction: 0.45,
@@ -149,7 +162,16 @@ export const SIGN_DEFAULTS = {
 
   /** Fraction of buildings that get each of the OLD kinds. All off. */
   bannerFraction: 0,
-  bandFraction: 0,
+  /**
+   * How many podiums get the LED band that WRAPS the corner.
+   *
+   * Was 0 — the band existed as a single quad on a single face, which reads as
+   * a poster stuck on rather than as part of the building, and it was not worth
+   * having. It wraps now (four faces, mitred at the corners), which is the
+   * thing that made it worth turning on. Kept well under half so a street has
+   * some and not every tower.
+   */
+  bandFraction: 0.22,
   screenFraction: 0,
   megaFraction: 0,
   textFraction: 0,
@@ -358,6 +380,97 @@ function finishTexture(canvas) {
  * Returns a handle that keeps the CANVAS so tiles can be repainted later
  * without ever replacing the texture object.
  */
+/** Shop-front neon: 4:1 tiles, so two columns of eight fill a square page. */
+export const WORD_COLS = 2, WORD_ROWS = 8, WORD_PX = 2048;
+export const WORD_SLOTS = WORD_COLS * WORD_ROWS;
+
+/**
+ * ── NEON WITH ACTUAL WORDS ───────────────────────────────────────────────────
+ *
+ * The city already had `neon`, and it is a coloured TUBE — a glowing bar that
+ * frames a billboard. What a street like the reference is actually full of is
+ * shop signs that SAY something, at head height, in a dozen different colours,
+ * and that is a different object: artwork, not a shape.
+ *
+ * One canvas page, sixteen tiles, one instanced quad per sign. The tiles are 4:1
+ * because that is the shape a shopfront sign is, and because the quad's aspect
+ * has to match the tile's or the lettering stretches — the same rule the gantry
+ * atlas states and the portal band follows.
+ *
+ * OPAQUE, deliberately. A neon sign drawn with transparency would erase the
+ * emissive attachment behind it (r184 blends only `output`), and the dark tile
+ * background reads as the sign's own backing box, which is what most of them
+ * have anyway. So the transparency problem is avoided rather than solved.
+ */
+function makeNeonWordAtlas(px = WORD_PX, cols = WORD_COLS, rows = WORD_ROWS) {
+  if (typeof document === "undefined") return { texture: dummyTexture(), cols, rows };
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = px;
+  const ctx = canvas.getContext("2d");
+  const tw = px / cols, th = px / rows;
+  const WORDS = [
+    ["RAMEN", "#ff2d55"], ["OPEN 24H", "#25e0ff"], ["BAR", "#ffb020"],
+    ["NOODLES", "#ff4fd8"], ["SUSHI", "#39ff88"], ["HOTEL", "#ff2d55"],
+    ["KARAOKE", "#a06bff"], ["COFFEE", "#ffd24a"], ["CLUB", "#25e0ff"],
+    ["TATTOO", "#ff4fd8"], ["PHARMACY", "#39ff88"], ["LIVE", "#ff6a1a"],
+    ["CASINO", "#ffd24a"], ["MOTEL", "#ff2d55"], ["EAT", "#25e0ff"],
+    ["EXCHANGE", "#a06bff"],
+  ];
+  ctx.fillStyle = "#07060a";
+  ctx.fillRect(0, 0, px, px);
+  for (let i = 0; i < cols * rows; i++) {
+    const col = i % cols;
+    // flipY, exactly as `makeAtlas` explains: shader row 0 is the canvas bottom.
+    const row = rows - 1 - Math.floor(i / cols);
+    const x0 = col * tw, y0 = row * th;
+    const [word, hue] = WORDS[i % WORDS.length];
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, y0, tw, th);
+    ctx.clip();
+    // The backing box, and a thin bright keyline round it — every one of these
+    // signs is a physical object bolted to a wall, not a decal.
+    ctx.fillStyle = "#0a0910";
+    ctx.fillRect(x0, y0, tw, th);
+    ctx.strokeStyle = "rgba(255,255,255,0.10)";
+    ctx.lineWidth = Math.max(2, th * 0.02);
+    ctx.strokeRect(x0 + th * 0.06, y0 + th * 0.06, tw - th * 0.12, th - th * 0.12);
+
+    /*
+     * NEON IS BUILT UP IN THREE PASSES, and the order is what makes it read:
+     * a wide soft halo in the tube's colour, a tighter stroke of the same, then
+     * a near-white core. One pass of coloured text looks like coloured text.
+     */
+    const cx = x0 + tw / 2, cy = y0 + th / 2;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    let size = Math.round(th * 0.52);
+    ctx.font = `bold ${size}px system-ui, sans-serif`;
+    while (ctx.measureText(word).width > tw * 0.82 && size > 12) {
+      size -= 2;
+      ctx.font = `bold ${size}px system-ui, sans-serif`;
+    }
+    ctx.shadowColor = hue;
+    ctx.lineJoin = "round";
+    ctx.shadowBlur = th * 0.30;
+    ctx.strokeStyle = hue;
+    ctx.lineWidth = size * 0.30;
+    ctx.strokeText(word, cx, cy);
+    ctx.shadowBlur = th * 0.14;
+    ctx.lineWidth = size * 0.14;
+    ctx.strokeText(word, cx, cy);
+    ctx.shadowBlur = th * 0.05;
+    ctx.fillStyle = "#fff8f2";
+    ctx.fillText(word, cx, cy);
+    ctx.restore();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return { texture: tex, cols, rows };
+}
+
 function makeAtlas(seed, cols, rows, px, portrait) {
   if (typeof document === "undefined") {
     return { texture: dummyTexture(), cols, rows, setImage: () => false, repaint: () => {} };
@@ -732,6 +845,32 @@ function makeTextCanvas(str) {
  * Poster material. Unlit; the atlas tile, brightness jitter and scroll speed
  * all arrive in ONE instanced vec3, so every poster in the city is one draw.
  */
+/** Shop neon: an atlas tile, lifted hard at night, and a bloom source. */
+function makeNeonWordMaterial(atlas, u) {
+  const mat = new THREE.MeshBasicNodeMaterial();
+  mat.name = "CityNeonWord";
+  const aWord = attribute("aWord", "vec2");    // x = tile, y = per-sign level
+  const tex = texture(atlas.texture);
+  const col = Fn(() => {
+    const tile = tileIndex(aWord.x);
+    const tx = fract(tile.div(atlas.cols));
+    const ty = floor(tile.div(atlas.cols)).div(atlas.rows);
+    const base = uv();
+    const auv = vec2(tx.add(base.x.div(atlas.cols)), ty.add(base.y.div(atlas.rows)));
+    const ink = tex.sample(auv).rgb;
+    /*
+     * A neon sign is ON in daylight too — that is why you can tell an open shop
+     * from a shut one at noon — it just is not a bloom source until dusk. So the
+     * day level is a real number rather than zero, and only the night term
+     * reaches the emissive buffer below.
+     */
+    return ink.mul(mix(u.dayLevel.mul(1.35), u.neonBoost, u.nightAmount)).mul(aWord.y);
+  })();
+  mat.colorNode = vec4(col, 1.0);
+  applyBloomMRT(mat, vec4(col.mul(u.nightAmount), 1.0));
+  return mat;
+}
+
 function makePosterMaterial(atlas, u, name, boost) {
   const mat = new THREE.MeshBasicNodeMaterial();
   mat.name = name;
@@ -830,6 +969,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   const bannerAtlas = makeAtlas(seed, BANNER_COLS, BANNER_ROWS, BANNER_PX, true);
   const screenAtlas = makeAtlas(seed ^ 0x5bf03635, SCREEN_COLS, SCREEN_ROWS, SCREEN_PX, false);
   const heroAtlas = makeHeroAtlas(HERO_COLS, HERO_ROWS, HERO_PX);
+  const wordAtlas = makeNeonWordAtlas();
   const textCanvas = makeTextCanvas(P.texts[0]);
 
   /**
@@ -853,6 +993,8 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   // ── Placement ──────────────────────────────────────────────────────────────
   const FACES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   const banners = [], screens = [], bands = [], texts = [], neon = [], heroes = [];
+  /** Shop-front neon words, and the kerb ribbons under them. */
+  const words = [], ribbons = [];
   /** The single LED wall, once placed — null if no run in the city qualified. */
   let ledWall = null;
   let megaCount = 0;
@@ -984,10 +1126,66 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
       }
     }
 
-    // ── PODIUM LED BAND ──────────────────────────────────────────────────────
+    /*
+     * ── PODIUM LED BAND, WHICH NOW GOES ROUND THE CORNER ───────────────────────
+     *
+     * It used to be one quad on one face, which is a poster. A real one runs
+     * round the whole podium and turns the corners, and that is most of why it
+     * reads as architecture rather than as a sticker: you see it continue past
+     * the edge of the building.
+     *
+     * Four quads, one per face, each sized to ITS OWN face — a tower is not
+     * square, so using one width for all four leaves two of them short. They
+     * overlap slightly at the corners: each is inset from the wall by
+     * `standoff`, so meeting them exactly at the corner leaves a notch you can
+     * see straight through.
+     *
+     * The band runs the CHEVRON pattern, and that is what makes this safe. A
+     * repeating pattern turning a corner needs no continuity of content, so
+     * there is no per-face scroll offset to carry and nothing to keep in phase.
+     * Text would need one, and would need the shared v2 LED material changed to
+     * take it.
+     */
     if (lotRand(b.cx, b.cz, 14) < P.bandFraction && height > lobbyHeight + 4) {
-      faceMatrix(b, a, face, b.y + lobbyHeight + P.bandH * 0.5 + 0.3, faceW * 0.96, P.bandH, 0, _m);
-      bands.push(_m.clone());
+      const bandY = b.y + lobbyHeight + P.bandH * 0.5 + 0.3;
+      for (const f of FACES) {
+        const fW = (f[0] !== 0 ? a.depth : a.width);
+        faceMatrix(b, a, f, bandY, fW + P.standoff * 2 + 0.06, P.bandH, 0, _m);
+        bands.push(_m.clone());
+      }
+    }
+
+    /*
+     * ── SHOPFRONT NEON, AND THE RIBBON UNDER IT ────────────────────────────────
+     *
+     * The two things the reference street is full of at eye level, and the two
+     * the city had nothing of: a sign that says RAMEN, and a strip of scrolling
+     * text along the kerb under it. Both go on faces that actually front a
+     * street — a neon sign in an interior courtyard is lighting a wall nobody
+     * stands at.
+     *
+     * They are placed together on purpose. A sign with a ribbon under it reads
+     * as one shop; scattered independently they read as decoration.
+     */
+    for (const sf of streetFaces(b.cx, b.cz)) {
+      const fW = (sf[0] !== 0 ? a.depth : a.width);
+      if (fW < P.wordW * 1.4) continue;
+      const r0 = lotRand(b.cx, b.cz, 61 + sf[0] * 3 + sf[1]);
+      if (r0 > P.wordFraction) continue;
+      // Along the face, clear of the corners.
+      const room = fW * 0.5 - P.wordW * 0.62;
+      const slide = (lotRand(b.cx, b.cz, 62 + sf[0] + sf[1] * 2) * 2 - 1) * Math.max(0, room);
+      const wy = b.y + P.wordY;
+      faceMatrix(b, a, sf, wy, P.wordW, P.wordW / P.wordAspect, slide, _m);
+      words.push({
+        m: _m.clone(),
+        tile: Math.floor(lotRand(b.cx, b.cz, 63 + sf[0] + sf[1]) * WORD_SLOTS),
+        level: 0.75 + lotRand(b.cx, b.cz, 64 + sf[0] - sf[1]) * 0.5,
+      });
+      if (lotRand(b.cx, b.cz, 65 + sf[0] * 2 + sf[1]) < P.ribbonFraction) {
+        faceMatrix(b, a, sf, b.y + P.ribbonY, fW * 0.92, P.ribbonH, 0, _m);
+        ribbons.push(_m.clone());
+      }
     }
 
     // ── LED TEXT MARQUEE ─────────────────────────────────────────────────────
@@ -1161,6 +1359,9 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   const bannerMesh = instanced(banners, bannerMat, "CityBanners", "aSign", 3, packSign);
   const screenMesh = instanced(screens, screenMat, "CityScreens", "aSign", 3, packSign);
   const neonMesh = instanced(neon, neonMat, "CityNeon", "aNeon", 2, packNeon);
+  const wordMat = makeNeonWordMaterial(wordAtlas, u);
+  const wordMesh = instanced(words, wordMat, "CityNeonWords", "aWord", 2,
+    (d, o, e) => { d[o] = e.tile; d[o + 1] = e.level; });
   const heroMesh = instanced(heroes, heroMat, "CityHeroes", "aSign", 4, packHero);
   if (heroMesh) { heroMesh.receiveShadow = true; heroMesh.castShadow = false; }
 
@@ -1185,7 +1386,33 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   }, P.textW, P.textH);
   textMat.side = THREE.FrontSide;
 
-  let bandMesh = null, textMesh = null;
+  /*
+   * THE KERB RIBBON — the strip of scrolling text along the bottom of a
+   * shopfront. Its own material rather than the marquee's because it is a
+   * different object: much wider than it is tall, so it needs far more columns
+   * and far fewer rows, and it runs faster because you read it from a moving
+   * car.
+   */
+  const ribbonMat = makeLedMatrixMaterial({
+    boardW: 18, boardH: P.ribbonH,
+    contentTexture: textCanvas.texture, sourceAspect: textCanvas.aspect,
+  });
+  applyLedMatrixParams(ribbonMat, {
+    mode: 4, shape: 1, cols: 240, rows: 6, emissive: 4.4, panSpeed: 0.5,
+    rgb: false, tintColor: "#ffb020", useRamp: true,
+    coreColor: "#fff3c4", edgeColor: "#ff7a10",
+  }, 18, P.ribbonH);
+  ribbonMat.side = THREE.FrontSide;
+
+  let bandMesh = null, textMesh = null, ribbonMesh = null;
+  if (ribbons.length) {
+    ribbonMesh = new THREE.InstancedMesh(quad, ribbonMat, ribbons.length);
+    ribbonMesh.name = "CityKerbRibbon";
+    ribbonMesh.frustumCulled = false;
+    ribbons.forEach((m, i) => ribbonMesh.setMatrixAt(i, m));
+    ribbonMesh.instanceMatrix.needsUpdate = true;
+    group.add(ribbonMesh);
+  }
   if (bands.length) {
     bandMesh = new THREE.InstancedMesh(quad, bandMat, bands.length);
     bandMesh.name = "CityBands";
@@ -1210,6 +1437,8 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
       heroes: heroes.length,
       banners: banners.length, bands: bands.length, texts: texts.length,
       neon: neon.length, mega: megaCount,
+      /** Shopfront neon words and the kerb ribbons under them. */
+      words: words.length, ribbons: ribbons.length,
       /** Mega boards and ordinary screens share one mesh; this is the total. */
       screens: screens.length,
       /** The one LED wall: its size and where it landed, or null. */
@@ -1306,8 +1535,10 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
         m.dispose();
       }
       bannerMat.dispose(); screenMat.dispose(); neonMat.dispose(); heroMat.dispose();
+      wordMat.dispose(); ribbonMat.dispose(); wordAtlas.texture?.dispose();
       heroAtlas.texture.dispose();
       bandMat.dispose(); textMat.dispose();
+      wordMesh?.geometry.dispose(); ribbonMesh?.geometry.dispose();
       quad.dispose();
       bannerAtlas.texture.dispose();
       screenAtlas.texture.dispose();
