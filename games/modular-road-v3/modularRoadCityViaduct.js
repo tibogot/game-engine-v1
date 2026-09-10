@@ -170,6 +170,32 @@ export const VIADUCT_DEFAULTS = {
    *  density rather than inheriting the straight's. */
   rampSteps: 26,
 
+  /**
+   * ── THE ROUTE ──────────────────────────────────────────────────────────────
+   *
+   * Straight over its street through the middle of town, then a curve at each
+   * end and a run out past the edge. A grid city where every line is one of two
+   * directions reads as a grid; the one structure tall enough to be seen from
+   * everywhere is the one worth bending.
+   *
+   * The straight part is where the grid arithmetic lives — piers dodging
+   * junctions, slip roads, lane offsets — so `straightSpan` is how much of the
+   * city keeps that, and the curves happen outside it. Pull it in and more of
+   * the viaduct curves; the buildings under the curve are demolished for it,
+   * which is what an urban motorway actually does to a block.
+   */
+  straightSpan: 0.66,
+  curveRadius: 260,
+  curveAngle: 38,
+  /** Which way both ends bend, in world across. Same sign at both, so the whole
+   *  thing is one shallow arc rather than an S. */
+  curveTurn: 1,
+  /** How far it runs after the curve, out past the edge of town. */
+  tailLength: 420,
+  /** Station spacing on a curve. Tighter than the straight's, because this is
+   *  where the deck's silhouette is actually read. */
+  curveStep: 12,
+
   /** Traffic. A motorway is busier and faster than the streets under it. */
   viaductTraffic: true,
   viaductCars: 26,
@@ -190,6 +216,56 @@ export const VIADUCT_DEFAULTS = {
  *
  * Returns null when the chosen street falls outside the city.
  */
+/** Unit tangent from the last two points of a run. */
+function headOf(pts) {
+  const a = pts[pts.length - 2], b = pts[pts.length - 1];
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const L = Math.hypot(dx, dz) || 1;
+  return { x: dx / L, z: dz / L };
+}
+
+/**
+ * An arc of `total` radians off `pos` heading `head`, bending toward `want`.
+ *
+ * WHICH WAY IT BENDS IS CHOSEN BY TRYING BOTH. The centre of an arc is ninety
+ * degrees off the heading, and which ninety depends on a sign convention that
+ * is easy to state and easy to get backwards — and getting it backwards does
+ * not throw, it curves the viaduct into the city instead of out of it. So both
+ * are built and the one that ends up further along `want` is kept.
+ */
+function arcRun(pos, head, radius, total, want, step, y) {
+  const build = (sign) => {
+    const perp = { x: -head.z * sign, z: head.x * sign };
+    const cx = pos.x + perp.x * radius, cz = pos.z + perp.z * radius;
+    const a0 = Math.atan2(pos.z - cz, pos.x - cx);
+    const n = Math.max(2, Math.ceil((radius * total) / step));
+    const pts = [];
+    for (let i = 1; i <= n; i++) {
+      /*
+       * PLUS, not minus. Position on the circle is c + R(cos a, sin a), so the
+       * tangent is R(-sin a, cos a) — which equals `head` at the start angle
+       * only when `a` INCREASES for sign +1 and decreases for sign -1. Walking
+       * it the other way sends the arc back the way the road came.
+       *
+       * "Try both signs" below could not catch this: BOTH candidates were wrong
+       * the same way, so it picked the less bad of two arcs that curved
+       * backwards, and the tails came out five hundred metres inside the city
+       * instead of a kilometre outside it. A chooser only helps when one of the
+       * choices is right.
+       */
+      const a = a0 + sign * total * (i / n);
+      pts.push(new THREE.Vector3(cx + Math.cos(a) * radius, y, cz + Math.sin(a) * radius));
+    }
+    return pts;
+  };
+  const A = build(1), B = build(-1);
+  const score = (pts) => {
+    const e = pts[pts.length - 1];
+    return (e.x - pos.x) * want.x + (e.z - pos.z) * want.z;
+  };
+  return score(A) >= score(B) ? A : B;
+}
+
 export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {} }) {
   const V = { ...VIADUCT_DEFAULTS, ...params };
   if (!V.viaduct) return null;
@@ -222,10 +298,17 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
   const deckY = deckBottom + V.deckThickness;
   const railTop = deckY + roadParams.railHeight + railParams.gap + railParams.height;
 
-  // Lane centres across the deck: two each side of the central reserve.
-  const laneAcross = [-0.34, -0.13, 0.13, 0.34].map((f) => across + f * V.deckWidth);
+  // Lane centres across the deck: two each side of the central reserve. Kept as
+  // absolute coordinates as well as offsets, because on the STRAIGHT they are
+  // what the grid-side checks talk about.
+  const LANE_OFF = [-0.34, -0.13, 0.13, 0.34];
+  const laneAcross = LANE_OFF.map((f) => across + f * V.deckWidth);
 
-  const alongMin = cAlong - half, alongMax = cAlong + half;
+  // The STRAIGHT run's extent. Not the whole viaduct any more — the curves and
+  // the tails live outside it — but it is still where every piece of grid
+  // arithmetic happens, so it keeps the plain name.
+  const alongMin = cAlong - half * V.straightSpan;
+  const alongMax = cAlong + half * V.straightSpan;
 
   const ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
   const ramps = [];
@@ -272,21 +355,30 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
   }
 
   /*
-   * THE CENTRELINE, as points.
+   * ── THE CENTRELINE ─────────────────────────────────────────────────────────
    *
-   * A straight line today. It is a POLYLINE rather than two endpoints because
-   * everything the viaduct is going to grow — curves, grades, a run out past
-   * the edge of town — is a different set of points through the same sweep.
+   * Tail, curve, straight, curve, tail. Built as three runs and concatenated,
+   * because the two ends are walked OUTWARD from the straight — that is the
+   * only way the straight lands exactly on its street, which everything else
+   * about the viaduct depends on.
    *
-   * NOT EVENLY SPACED, though, and that is deliberate. A sweep can only change
-   * its cross-section AT a station, and the kerb has to stop where a slip road
-   * crosses it. At the plain 24 m spacing a gore is three stations, which is
-   * not enough to both end the kerb and taper it down; so the stations bunch up
-   * around every ramp mouth and stay sparse everywhere else, which is the whole
-   * point of the path being a list rather than a step size.
+   * NOT EVENLY SPACED, and on purpose in two different places. A sweep can only
+   * change its cross-section AT a station, and the kerb has to stop where a
+   * slip road crosses it — at the plain 24 m spacing a gore is three stations,
+   * which is not enough to both end the kerb and taper it down. Curves get
+   * their own tighter spacing for a different reason: that is where the deck's
+   * silhouette is actually read.
    */
   const path = [];
+  let straightI0 = 0, straightI1 = 0;
   {
+    const alongUnit = axis === "x" ? { x: 1, z: 0 } : { x: 0, z: 1 };
+    const acrossUnit = axis === "x" ? { x: 0, z: 1 } : { x: 1, z: 0 };
+    const want = { x: acrossUnit.x * V.curveTurn, z: acrossUnit.z * V.curveTurn };
+    const at = (a) => (axis === "x" ? new THREE.Vector3(a, deckY, across)
+      : new THREE.Vector3(across, deckY, a));
+
+    // The straight, with extra stations wherever a kerb has to change.
     const stations = new Set();
     const steps = Math.max(1, Math.round((alongMax - alongMin) / V.straightStep));
     for (let i = 0; i <= steps; i++) {
@@ -298,11 +390,41 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
         if (x > alongMin && x < alongMax) stations.add(x);
       }
     }
-    for (const a of [...stations].sort((p1, p2) => p1 - p2)) {
-      path.push(axis === "x" ? new THREE.Vector3(a, deckY, across)
-        : new THREE.Vector3(across, deckY, a));
-    }
+    const mid = [...stations].sort((p1, p2) => p1 - p2).map(at);
+
+    const ang = (V.curveAngle * Math.PI) / 180;
+    /** Curve then run, walking away from one end of the straight. */
+    const wing = (from, head) => {
+      if (ang <= 0 || V.curveRadius <= 0) return [];
+      const arc = arcRun(from, head, V.curveRadius, ang, want, V.curveStep, deckY);
+      if (V.tailLength > 0) {
+        const h = headOf(arc.length > 1 ? arc : [from, arc[0]]);
+        const n = Math.max(1, Math.round(V.tailLength / V.straightStep));
+        const last = arc[arc.length - 1];
+        for (let i = 1; i <= n; i++) {
+          arc.push(new THREE.Vector3(
+            last.x + h.x * (V.tailLength * i) / n, deckY,
+            last.z + h.z * (V.tailLength * i) / n,
+          ));
+        }
+      }
+      return arc;
+    };
+    const hi = wing(mid[mid.length - 1], alongUnit);
+    const lo = wing(mid[0], { x: -alongUnit.x, z: -alongUnit.z });
+
+    for (let i = lo.length - 1; i >= 0; i--) path.push(lo[i]);
+    straightI0 = path.length;
+    for (const q of mid) path.push(q);
+    straightI1 = path.length - 1;
+    for (const q of hi) path.push(q);
   }
+
+  /** Cumulative arc length, so anything can be placed by distance travelled
+   *  rather than by a coordinate that stops being monotonic once it bends. */
+  const cum = new Float64Array(path.length);
+  for (let i = 1; i < path.length; i++) cum[i] = cum[i - 1] + path[i - 1].distanceTo(path[i]);
+  const pathLength = cum[path.length - 1] || 0;
 
   /*
    * ── PIERS ──────────────────────────────────────────────────────────────────
@@ -317,40 +439,74 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
    * is a road ON the ground, and a stub column under it is a bollard in the
    * street.
    */
-  const oAlong = axis === "x" ? ox : oz;
-  const inJunction = (along) => {
-    let f = (along - oAlong) % pitch;
-    if (f < 0) f += pitch;
-    return f >= blockW;
+  /*
+   * A junction test in WORLD terms, so it keeps working once the deck bends
+   * away from the axis it was laid out on.
+   *
+   * BOTH axes, not either. A junction is where two streets CROSS. The viaduct
+   * runs along a street, so its across coordinate sits in a street band for its
+   * whole length — an `||` here reads every metre of it as a junction and
+   * refuses to plant a single pier, which is exactly what the first version
+   * did: seventeen piers for two and a half kilometres, none under a ramp.
+   */
+  const inJunction = (x, z) => {
+    const fx = ((x - ox) % pitch + pitch) % pitch;
+    const fz = ((z - oz) % pitch + pitch) % pitch;
+    return fx >= blockW && fz >= blockW;
   };
+
   const piers = [];
-  const first = Math.ceil((alongMin - oAlong) / V.spanLength);
-  const last = Math.floor((alongMax - oAlong) / V.spanLength);
-  for (let i = first; i <= last; i++) {
-    const a = oAlong + i * V.spanLength;
-    if (inJunction(a)) continue;
-    piers.push(axis === "x" ? { x: a, z: across, top: deckBottom }
-      : { x: across, z: a, top: deckBottom });
-  }
   const minPier = V.capHeight + 1.5;
-  for (const rm of ramps) {
-    let acc = 0;
-    for (let i = 1; i < rm.path.length; i++) {
-      const p0 = rm.path[i - 1], p1 = rm.path[i];
-      acc += p0.distanceTo(p1);
+  /** Walk a run by arc length and drop a pier every `spanLength`. */
+  const pierWalk = (pts, topOf) => {
+    let acc = V.spanLength;
+    for (let i = 1; i < pts.length; i++) {
+      acc += pts[i - 1].distanceTo(pts[i]);
       if (acc < V.spanLength) continue;
       acc = 0;
-      const top = p1.y - V.deckThickness;
+      const q = pts[i];
+      const top = topOf(q);
       if (top - P.groundY < minPier) continue;
-      if (inJunction(axis === "x" ? p1.x : p1.z)) continue;
-      piers.push({ x: p1.x, z: p1.z, top });
+      if (inJunction(q.x, q.z)) continue;
+      piers.push({ x: q.x, z: q.z, top });
     }
-  }
+  };
+  pierWalk(path, () => deckBottom);
+  for (const rm of ramps) pierWalk(rm.path, (q) => q.y - V.deckThickness);
+
+  /*
+   * ── A POLYLINE PER LANE ────────────────────────────────────────────────────
+   *
+   * The traffic model drives a lane, and a lane used to be "an axis, an across
+   * and a direction" — three numbers that describe a straight line and nothing
+   * else. The moment the deck bends, cars on it fly off into the air, still
+   * perfectly spaced and perfectly obeying each other.
+   *
+   * So an elevated lane is a PATH: the deck's centreline offset sideways by the
+   * lane's own distance. The offset is taken in the local frame, so it follows
+   * the bend; on the straight it reduces to exactly the old numbers, which is
+   * why the driving-side rule can still be read off `laneDirForIndex`.
+   */
+  const lanePaths = LANE_OFF.map((f) => {
+    const off = f * V.deckWidth;
+    const pts = path.map((q, i) => {
+      const a = path[Math.max(0, i - 1)], b = path[Math.min(path.length - 1, i + 1)];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const L = Math.hypot(dx, dz) || 1;
+      // right = (-t.z, t.x): for a run along +x that is +z, which is the sense
+      // `across` is measured in, so the straight case matches to the metre.
+      return new THREE.Vector3(q.x + (-dz / L) * off, q.y, q.z + (dx / L) * off);
+    });
+    const c = new Float64Array(pts.length);
+    for (let i = 1; i < pts.length; i++) c[i] = c[i - 1] + pts[i - 1].distanceTo(pts[i]);
+    return { pts, cum: c, length: c[c.length - 1] || 0 };
+  });
 
   return {
     axis, across, alongMin, alongMax,
     deckY, deckBottom, railTop,
-    path, ramps, laneAcross, piers, params: V,
+    path, cum, pathLength, straightI0, straightI1,
+    ramps, laneAcross, lanePaths, piers, params: V,
   };
 }
 
@@ -373,18 +529,40 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
  */
 export function viaductKeepOut(layout) {
   if (!layout || !(layout.ramps ?? []).length) return null;
-  const V = layout.params;
-  const halfW = V.rampWidth / 2 + 3.0;
+  return corridorTest(layout.ramps.map((r) => r.path), layout.params.rampWidth / 2 + 3.0);
+}
+
+/**
+ * ── THE DECK'S OWN FOOTPRINT, FOR THE BUILDINGS UNDER IT ─────────────────────
+ *
+ * The straight runs over a street, where there is nothing to hit. The CURVES do
+ * not — they leave the grid and fly over blocks, and a tower is three hundred
+ * metres of solid geometry through a road eleven metres up.
+ *
+ * So the blocks under the curve come down, which is exactly what an urban
+ * motorway does to the city it is cut through, and reads as deliberate rather
+ * than as a mistake. Half a lot wider than the deck, because a lot is placed by
+ * its centre and a building whose centre just clears the deck still has most of
+ * itself underneath it.
+ */
+export function viaductFootprint(layout, lotSize = 34) {
+  if (!layout) return null;
+  return corridorTest([layout.path], layout.params.deckWidth / 2 + lotSize * 0.55);
+}
+
+/** Distance-to-polyline test, flattened to plain numbers because it is asked
+ *  once per candidate lot and once per candidate placement — tens of thousands
+ *  of times per rebuild. */
+function corridorTest(paths, halfW) {
   const h2 = halfW * halfW;
-  // Flattened to plain numbers: this is asked once per candidate placement, of
-  // which there are tens of thousands.
   const segs = [];
-  for (const rmp of layout.ramps) {
-    for (let i = 1; i < rmp.path.length; i++) {
-      const a = rmp.path[i - 1], b = rmp.path[i];
+  for (const path of paths) {
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1], b = path[i];
       segs.push(a.x, a.z, b.x - a.x, b.z - a.z);
     }
   }
+  if (!segs.length) return null;
   return (x, z) => {
     for (let i = 0; i < segs.length; i += 4) {
       const px = x - segs[i], pz = z - segs[i + 1];
@@ -532,9 +710,23 @@ export function createCityViaduct({
    *  first version did, and it put the rail gaps in the wrong place the moment
    *  the path stopped being uniform. */
   const alongOfFrame = (fr, i) => (layout.axis === "x" ? fr[i].pos.x : fr[i].pos.z);
+  /*
+   * SEARCHED, AND ONLY OVER THE STRAIGHT.
+   *
+   * Two reasons, and they arrived one after the other. The stations are not
+   * evenly spaced — they bunch up at every gore — so an index cannot be
+   * interpolated from a coordinate. And once the deck curves away at each end,
+   * the along coordinate stops being monotonic and starts REPEATING: a search
+   * over the whole path happily matches a station out on a wing, which put the
+   * rail gaps and the kerb ends hundreds of metres from the ramps they belong
+   * to. Everything that is placed by an along coordinate belongs to the
+   * straight by construction, so the search is bounded to it.
+   */
   const nearestStation = (fr, a) => {
-    let best = 0, bd = Infinity;
-    for (let i = 0; i < fr.length; i++) {
+    const lo = layout.straightI0 ?? 0;
+    const hi = Math.min(layout.straightI1 ?? fr.length - 1, fr.length - 1);
+    let best = lo, bd = Infinity;
+    for (let i = lo; i <= hi; i++) {
       const d = Math.abs(alongOfFrame(fr, i) - a);
       if (d < bd) { bd = d; best = i; }
     }
@@ -794,7 +986,8 @@ export function createCityViaduct({
       piers: layout.piers.length,
       ramps: (layout.ramps ?? []).length,
       draws: 1 + (rail ? 1 : 0) + (piers ? 2 : 0),
-      lengthM: Math.round(layout.alongMax - layout.alongMin),
+      lengthM: Math.round(layout.pathLength ?? (layout.alongMax - layout.alongMin)),
+      straightM: Math.round(layout.alongMax - layout.alongMin),
       deckTris: deckGeo.index ? deckGeo.index.count / 3 : 0,
       railTris: railGeo ? (railGeo.index ? railGeo.index.count / 3 : 0) : 0,
       railColTris: railColGeo ? (railColGeo.index ? railColGeo.index.count / 3

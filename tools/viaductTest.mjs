@@ -93,11 +93,13 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
 
 // ── NO PIER STANDS IN A JUNCTION ────────────────────────────────────────────
 {
+  // BOTH axes. A junction is where two streets CROSS; the viaduct runs ALONG a
+  // street, so its across coordinate is in a street band for its whole length
+  // and a one-axis test calls every metre of it a junction.
   const bad = L.piers.filter((q) => {
-    const along = L.axis === "x" ? q.x : q.z;
-    let f = along % pitch;
-    if (f < 0) f += pitch;
-    return f >= blockW;
+    const fx = ((q.x % pitch) + pitch) % pitch;
+    const fz = ((q.z % pitch) + pitch) % pitch;
+    return fx >= blockW && fz >= blockW;
   });
   check("piers span the junctions rather than standing in them",
     bad.length === 0, `${L.piers.length} piers, ${bad.length} in a junction`);
@@ -492,6 +494,143 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
     }
   }
   built.dispose();
+}
+
+// ── THE ROUTE BENDS, AND LEAVES TOWN ────────────────────────────────────────
+{
+  const V = L.params;
+  check("the route is longer than its straight", L.pathLength > (L.alongMax - L.alongMin) + 200,
+    `${Math.round(L.pathLength)} m of road over a ${Math.round(L.alongMax - L.alongMin)} m straight`);
+  check("the straight is still a straight", L.straightI1 > L.straightI0 + 10,
+    `stations ${L.straightI0}..${L.straightI1}`);
+  // Every station of the straight sits on the street's centre line, to the
+  // millimetre. This is the property the piers, the ramps and the kerb ends all
+  // depend on, and it is the one a bad curve would quietly break first.
+  let offStreet = 0;
+  for (let i = L.straightI0; i <= L.straightI1; i++) {
+    const q = L.path[i];
+    if (Math.abs((L.axis === "x" ? q.z : q.x) - L.across) > 1e-6) offStreet++;
+  }
+  check("no station of the straight has wandered off the street", offStreet === 0,
+    `${offStreet} of ${L.straightI1 - L.straightI0 + 1}`);
+
+  /*
+   * IT ENDS OUTSIDE THE CITY, AND ON THE SIDE IT MEANT TO.
+   *
+   * The arc's direction is chosen by building both and keeping the one that
+   * ends further along the wanted side — which cannot help when BOTH are wrong,
+   * and both were: the angle was walked against the heading, so the tails came
+   * out five hundred metres INSIDE the city instead of a kilometre outside. So
+   * this checks the ends are actually out there, and on the same side.
+   */
+  const ends = [L.path[0], L.path[L.path.length - 1]];
+  for (let i = 0; i < 2; i++) {
+    const q = ends[i];
+    const along = L.axis === "x" ? q.x : q.z;
+    check(`end ${i} runs out past the edge of town`, Math.abs(along) > P.extent,
+      `along ${Math.round(along)} vs extent ${P.extent}`);
+  }
+  const side = (q) => Math.sign((L.axis === "x" ? q.z : q.x) - L.across);
+  check("both ends bend the same way", side(ends[0]) === side(ends[1])
+    && side(ends[0]) === Math.sign(V.curveTurn),
+    `${side(ends[0])} and ${side(ends[1])}, wanted ${Math.sign(V.curveTurn)}`);
+
+  // A lane polyline must be a lane's width from the deck, all the way round.
+  // Offsetting in world coordinates instead of the local frame passes on the
+  // straight and pulls the lanes off the deck through every curve.
+  for (let fi = 0; fi < L.lanePaths.length; fi++) {
+    const lp = L.lanePaths[fi];
+    let worst = 0;
+    for (let i = 0; i < lp.pts.length; i++) {
+      const d = lp.pts[i].distanceTo(L.path[i]);
+      worst = Math.max(worst, Math.abs(d - Math.abs(L.laneAcross[fi] - L.across)));
+    }
+    check(`lane ${fi} keeps its offset around the curves`, worst < 0.05,
+      `worst drift ${worst.toFixed(3)} m`);
+  }
+}
+
+// ── NOTHING IS BUILT INTO THE DECK ──────────────────────────────────────────
+//
+// The straight runs over a street, where there is nothing to hit. The curves
+// leave the grid and fly over blocks — and a tower is three hundred metres of
+// solid geometry through a road eleven metres up. It does not clip, it does not
+// warn; it is simply a building with a motorway inside it.
+{
+  const city = createModularRoadCity({ params: { extent: 700 } });
+  const full = viaductLayout({ P: { ...P, extent: 700 }, originCellX: 0, originCellZ: 0 });
+  const halfW = full.params.deckWidth / 2;
+  const near = (x, z) => {
+    let best = Infinity;
+    for (let i = 1; i < full.path.length; i++) {
+      const a = full.path[i - 1], b = full.path[i];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const l2 = dx * dx + dz * dz;
+      let t = l2 > 0 ? ((x - a.x) * dx + (z - a.z) * dz) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      best = Math.min(best, Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t)));
+    }
+    return best;
+  };
+  let through = 0, worst = Infinity;
+  for (const b of city.buildings ?? []) {
+    if (b.top < full.deckBottom) continue;          // low enough to pass under
+    const d = near(b.x, b.z);
+    worst = Math.min(worst, d);
+    if (d < halfW) through++;
+  }
+  check("no building stands in the deck", through === 0,
+    `${through} through it; closest tall building ${worst === Infinity ? "n/a" : worst.toFixed(1) + " m"}`);
+  // And it did not level the city to achieve that.
+  check("the cull is a corridor, not a clearance", city.stats.buildings > 400,
+    `${city.stats.buildings} buildings, ${city.stats.culledViaduct} cleared for the viaduct`);
+  check("some buildings WERE cleared for it", city.stats.culledViaduct > 0,
+    `${city.stats.culledViaduct}`);
+  city.dispose();
+}
+
+// ── AND THE CARS FOLLOW IT ──────────────────────────────────────────────────
+//
+// A lane used to be an axis, an across and a direction — three numbers that
+// describe a straight line and nothing else. Bend the deck and the cars carry
+// on in a straight line, perfectly spaced, out into the air.
+{
+  const city = createModularRoadCity({ params: { extent: 700 } });
+  const cam = { position: new THREE.Vector3(0, 3, 0) };
+  for (let i = 0; i < 8; i++) { cam.position.y += 0.01; city.update(0.4, cam); }
+  const full = viaductLayout({ P: { ...P, extent: 700 }, originCellX: 0, originCellZ: 0 });
+
+  // Every drawn car at deck height must be ON the deck — within half a deck
+  // width of the centreline, measured against the real polyline.
+  const near = (x, z) => {
+    let best = Infinity;
+    for (let i = 1; i < full.path.length; i++) {
+      const a = full.path[i - 1], b = full.path[i];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const l2 = dx * dx + dz * dz;
+      let t = l2 > 0 ? ((x - a.x) * dx + (z - a.z) * dz) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      best = Math.min(best, Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t)));
+    }
+    return best;
+  };
+  let up = 0, off = 0, worst = 0;
+  city.group.traverse((o) => {
+    if (!o.isInstancedMesh || !/^CityTraffic_/.test(o.name)) return;
+    const e = o.instanceMatrix.array;
+    for (let i = 0; i < o.count; i++) {
+      const y = e[i * 16 + 13];
+      if (y < full.deckY - 1) continue;
+      up++;
+      const d = near(e[i * 16 + 12], e[i * 16 + 14]);
+      worst = Math.max(worst, d);
+      if (d > full.params.deckWidth / 2) off++;
+    }
+  });
+  check("there is deck traffic to check", up > 10, `${up} cars up there`);
+  check("every car on the deck is ON the deck", off === 0,
+    `${off} of ${up} off the road, worst ${worst.toFixed(1)} m from the centreline`);
+  city.dispose();
 }
 
 // ── THE TRIANGLE BUDGET ─────────────────────────────────────────────────────

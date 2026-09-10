@@ -77,7 +77,9 @@ import {
 } from "three/tsl";
 import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.js";
 import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
-import { createCityViaduct, viaductLayout, viaductKeepOut } from "./modularRoadCityViaduct.js";
+import {
+  createCityViaduct, viaductLayout, viaductKeepOut, viaductFootprint,
+} from "./modularRoadCityViaduct.js";
 import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
 import { placeCityPrism, pickPrismPlaza, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
 import { planCarParks, buildCarParkGround, CARPARK_DEFAULTS } from "./modularRoadCityCarPark.js";
@@ -393,6 +395,8 @@ export function createModularRoadCity({
   let viaductAt = null;
   /** Where a ramp is overhead, so nothing tall is placed under it. */
   let viaductClear = null;
+  /** Where the DECK is overhead, so no tower is built into it. */
+  let viaductUnder = null;
   let carParkGround = null;
   let carParks = [];
   let parkGround = null;
@@ -407,7 +411,7 @@ export function createModularRoadCity({
   const stats = {
     buildings: 0, lod: [0, 0, 0], meshes: 0, kit: kit.stats,
     lastLodMs: 0, lastBuildMs: 0,
-    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, plazas: 0, plazaList: [], bridges: 0, bridgeSpans: [], viaduct: null, carParks: 0, parkedInParks: 0, carParkList: [], parks: 0, parkList: [],
+    culledCorridor: 0, culledSlope: 0, culledBounds: 0, culledPlaza: 0, culledViaduct: 0, plazas: 0, plazaList: [], bridges: 0, bridgeSpans: [], viaduct: null, carParks: 0, parkedInParks: 0, carParkList: [], parks: 0, parkList: [],
     lotTexCells: [0, 0], landmarks: 0, beacons: 0,
     signs: { banners: 0, screens: 0, bands: 0 },
     districts: [0, 0, 0],
@@ -467,7 +471,8 @@ export function createModularRoadCity({
     // Landmarks sort to the end of the kit; the ordinary pick excludes them.
     const normalCount = kit.archetypes.length - (kit.stats.landmarks ?? 0);
 
-    let culledCorridor = 0, culledSlope = 0, culledBounds = 0, culledPlaza = 0;
+    let culledViaduct = 0;
+  let culledCorridor = 0, culledSlope = 0, culledBounds = 0, culledPlaza = 0;
     const plazaList = [], plazaSeen = new Set();
     const districts = [0, 0, 0];
     const types = [0, 0, 0];
@@ -588,6 +593,9 @@ export function createModularRoadCity({
          * cityKitTest guards it.
          */
         if (avoid && avoid(x, z, top) < P.avoidRadius) { culledCorridor++; continue; }
+        // And the same for the elevated motorway, for the same reason: it is a
+        // road at eleven metres and every building here is taller than that.
+        if (viaductUnder && viaductUnder(x, z)) { culledViaduct++; continue; }
 
         // ── BUILDING TYPE ────────────────────────────────────────────────────
         // The wall RHYTHM, which is what you read at distance — separate from
@@ -642,6 +650,7 @@ export function createModularRoadCity({
     }
     facade.lotHeights.texture.needsUpdate = true;
     stats.culledCorridor = culledCorridor;
+    stats.culledViaduct = culledViaduct;
     stats.culledSlope = culledSlope;
     stats.culledBounds = culledBounds;
     stats.culledPlaza = culledPlaza;
@@ -779,6 +788,7 @@ export function createModularRoadCity({
     if (viaduct) { group.remove(viaduct.group); viaduct.dispose(); viaduct = null; }
     viaductAt = null;
     viaductClear = null;
+    viaductUnder = null;
     if (carParkGround) { group.remove(carParkGround.mesh); carParkGround.dispose(); carParkGround = null; }
     carParks = [];
     if (parkGround) { group.remove(parkGround.mesh); parkGround.dispose(); parkGround = null; }
@@ -864,10 +874,6 @@ export function createModularRoadCity({
      * answer and two systems only agree about a structure if they ask one
      * function rather than each deriving it.
      */
-    viaductAt = P.viaduct
-      ? viaductLayout({ P, originCellX, originCellZ, params: P.viaductParams })
-      : null;
-    viaductClear = viaductKeepOut(viaductAt);
     /*
      * NO PIER IN THE RACING LINE.
      *
@@ -1230,6 +1236,21 @@ export function createModularRoadCity({
   function rebuild() {
     const t0 = performance.now();
     clearBackend();
+    /*
+     * THE VIADUCT IS PLANNED BEFORE THE CITY IS.
+     *
+     * It used to be worked out in `buildExtras`, which runs after the
+     * buildings — fine while it was a straight line over a street, because a
+     * street has no buildings on it. It curves now, and a curve leaves the
+     * grid: the deck flies over blocks, and a tower is three hundred metres of
+     * solid geometry through a road eleven metres up. The layout is pure and
+     * cheap, so it is worked out first and the towers under it are never built.
+     */
+    viaductAt = P.viaduct
+      ? viaductLayout({ P, originCellX, originCellZ, params: P.viaductParams })
+      : null;
+    viaductClear = viaductKeepOut(viaductAt);
+    viaductUnder = viaductFootprint(viaductAt, P.lotSize);
     buildings = layout();
     stats.buildings = buildings.length;
     // The collider's BVHs belong to the ARCHETYPES, so a rebuild only refills

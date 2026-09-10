@@ -1211,15 +1211,23 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
    */
   if (viaduct && F.traffic && viaduct.params.viaductTraffic !== false) {
     for (let fi = 0; fi < viaduct.laneAcross.length; fi++) {
+      const lp = viaduct.lanePaths?.[fi] ?? null;
       lanes.push({
         axis: viaduct.axis,
         across: viaduct.laneAcross[fi],
         dir: laneDirForIndex(viaduct.axis, fi),
-        span: half * 2,
+        // The lane's OWN length, not the city's width: the deck curves away at
+        // both ends and runs out past the edge, so it is half a kilometre
+        // longer than the grid it started on.
+        span: lp ? lp.length : half * 2,
         fi,
         k: null,
         y: viaduct.deckY,
         elevated: true,
+        /** The deck's centreline offset to this lane. See the note in
+         *  modularRoadCityViaduct.js: a lane is a PATH once the road bends. */
+        pts: lp?.pts ?? null,
+        cum: lp?.cum ?? null,
         cars: viaduct.params.viaductCars,
         speedScale: viaduct.params.viaductSpeed,
       });
@@ -1789,9 +1797,32 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     for (let i = 0; i < traffic.length; i++) {
       const c = traffic[i];
       const L = c.lane;
-      const along = -half + c.u * L.span;
-      let x = L.axis === "z" ? L.across : along * L.dir;
-      let z = L.axis === "z" ? along * L.dir : L.across;
+      let x, z, pathFwdX = 0, pathFwdZ = 0;
+      if (L.pts) {
+        /*
+         * A LANE THAT BENDS. `u` is still the same 0..1 the queueing model
+         * moves; here it is read as distance along the lane's own polyline
+         * rather than as a coordinate on an axis. A lane running the other way
+         * walks the same polyline backwards, so one set of points serves both
+         * carriageways and the two can never drift apart.
+         */
+        const s = (L.dir > 0 ? c.u : 1 - c.u) * L.span;
+        const cum = L.cum, pts = L.pts;
+        let lo = 0, hi = cum.length - 1;
+        while (lo < hi - 1) { const m = (lo + hi) >> 1; if (cum[m] <= s) lo = m; else hi = m; }
+        const seg = Math.max(1e-6, cum[hi] - cum[lo]);
+        const t = Math.min(1, Math.max(0, (s - cum[lo]) / seg));
+        const a = pts[lo], b = pts[hi];
+        x = a.x + (b.x - a.x) * t;
+        z = a.z + (b.z - a.z) * t;
+        const dx = (b.x - a.x) * L.dir, dz = (b.z - a.z) * L.dir;
+        const len = Math.hypot(dx, dz) || 1;
+        pathFwdX = dx / len; pathFwdZ = dz / len;
+      } else {
+        const along = -half + c.u * L.span;
+        x = L.axis === "z" ? L.across : along * L.dir;
+        z = L.axis === "z" ? along * L.dir : L.across;
+      }
       const dx = x - cam.x, dz = z - cam.z;
       if (dx * dx + dz * dz > r2) continue;
       /*
@@ -1813,7 +1844,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
        * length parameterised by distance-to-corner is not quite uniform: at
        * 13 m/s through a 5.5 m corner, nobody has ever seen it.
        */
-      let hx = 0, hz = 0;
+      let hx = pathFwdX, hz = pathFwdZ;
       if (c.turn) {
         const T = c.turn;
         const ax = T.crossed ? T.tx : T.fx, az = T.crossed ? T.tz : T.fz;
