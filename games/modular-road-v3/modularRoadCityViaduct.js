@@ -193,8 +193,18 @@ export const VIADUCT_DEFAULTS = {
   /** Which way both ends bend, in world across. Same sign at both, so the whole
    *  thing is one shallow arc rather than an S. */
   curveTurn: 1,
-  /** How far it runs after the curve, out past the edge of town. */
+  /**
+   * How far it runs after the curve, out past the edge of town — and DOWN.
+   *
+   * A motorway that stops in mid-air eleven metres up is the one thing about an
+   * elevated road you cannot explain away, and it is what the player sees the
+   * moment they follow it to the end. So the tail is a descent: the same eased
+   * profile the slip roads use, over a much longer run, landing on the ground
+   * outside the city where it can simply carry on as a street.
+   */
   tailLength: 420,
+  /** The fraction of the tail spent still level, before it starts down. */
+  tailHold: 0.12,
   /** Station spacing on a curve. Tighter than the straight's, because this is
    *  where the deck's silhouette is actually read. */
   curveStep: 12,
@@ -448,10 +458,14 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
         const h = headOf(arc.length > 1 ? arc : [from, arc[0]]);
         const n = Math.max(1, Math.round(V.tailLength / V.straightStep));
         const last = arc[arc.length - 1];
+        const land = P.groundY + 0.02;   // the same 2 cm the slip roads land on
         for (let i = 1; i <= n; i++) {
+          const t = i / n;
+          const fall = ease((t - V.tailHold) / (1 - V.tailHold));
           arc.push(new THREE.Vector3(
-            last.x + h.x * (V.tailLength * i) / n, deckY,
-            last.z + h.z * (V.tailLength * i) / n,
+            last.x + h.x * (V.tailLength * t),
+            deckY - (deckY - land) * fall,
+            last.z + h.z * (V.tailLength * t),
           ));
         }
       }
@@ -518,8 +532,33 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
       piers.push({ x: q.x, z: q.z, top });
     }
   };
-  pierWalk(path, () => deckBottom);
+  // The deck is no longer flat — the tails come down — so a pier under it takes
+  // its height from the road above it exactly like a pier under a ramp does.
+  pierWalk(path, (q) => q.y - V.deckThickness);
   for (const rm of ramps) pierWalk(rm.path, (q) => q.y - V.deckThickness);
+
+  /*
+   * ── EVERYTHING ELSE BOLTED TO THE DECK ─────────────────────────────────────
+   *
+   * Stationed here rather than where it is drawn, for the reason the piers are:
+   * the lighting columns are SOLID, and the list the collision reads has to be
+   * the same list the geometry was built from or there is an invisible column
+   * somewhere, or a visible one you drive through.
+   */
+  const stationWalk = (pts, spacing) => {
+    const out = [];
+    let acc = spacing;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      acc += a.distanceTo(b);
+      if (acc < spacing) continue;
+      acc = 0;
+      out.push({ x: b.x, y: b.y, z: b.z, yaw: Math.atan2(b.x - a.x, b.z - a.z) });
+    }
+    return out;
+  };
+  const columns = V.columns ? stationWalk(path, V.columnSpacing) : [];
+  const joints = V.joints ? stationWalk(path, V.spanLength) : [];
 
   /*
    * ── A POLYLINE PER LANE ────────────────────────────────────────────────────
@@ -553,7 +592,7 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
     axis, across, alongMin, alongMax,
     deckY, deckBottom, railTop,
     path, cum, pathLength, straightI0, straightI1,
-    ramps, laneAcross, lanePaths, piers, params: V,
+    ramps, laneAcross, lanePaths, piers, columns, joints, params: V,
   };
 }
 
@@ -1055,24 +1094,6 @@ export function createCityViaduct({
   }
   const piers = shafts;
 
-  /*
-   * ── STATIONS ALONG A RUN ───────────────────────────────────────────────────
-   *
-   * By ARC LENGTH, with the heading taken from the polyline, so anything bolted
-   * to the deck follows it round the curves without knowing they are there.
-   */
-  const walk = (pts, spacing, fn) => {
-    let acc = spacing;
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1], b = pts[i];
-      acc += a.distanceTo(b);
-      if (acc < spacing) continue;
-      acc = 0;
-      const dx = b.x - a.x, dz = b.z - a.z;
-      fn(b, Math.atan2(dx, dz));
-    }
-  };
-
   // ── Lighting columns, down the central reserve ─────────────────────────────
   let columns = null;
   if (V.columns) {
@@ -1089,8 +1110,7 @@ export function createCityViaduct({
     }
     const geo = mergeGeometries(parts, false);
     for (const g of parts) g.dispose();
-    const at = [];
-    walk(layout.path, V.columnSpacing, (q, yaw) => at.push({ q, yaw }));
+    const at = layout.columns;
     if (at.length) {
       columns = new THREE.InstancedMesh(geo, pierMat, at.length);
       columns.name = "CityViaductColumns";
@@ -1098,7 +1118,9 @@ export function createCityViaduct({
       const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
       at.forEach((c, i) => {
         qt.setFromAxisAngle(up, c.yaw);
-        m.compose(new THREE.Vector3(c.q.x, layout.deckY, c.q.z), qt, one);
+        // `c.y`, not `deckY`: the tails descend, and a column that ignores that
+        // stands eleven metres over a road that has already reached the ground.
+        m.compose(new THREE.Vector3(c.x, c.y, c.z), qt, one);
         columns.setMatrixAt(i, m);
       });
       columns.castShadow = false;      // 300 triangles of shadow at 12 m up
@@ -1115,8 +1137,7 @@ export function createCityViaduct({
     const g0 = new THREE.BoxGeometry(V.deckWidth - roadParams.railWidth * 2, 0.02, V.jointWidth);
     g0.translate(0, 0, 0);
     const geo = tint(g0, 0, 0, 1);
-    const at = [];
-    walk(layout.path, V.spanLength, (q, yaw) => at.push({ q, yaw }));
+    const at = layout.joints;
     if (at.length) {
       joints = new THREE.InstancedMesh(geo, pierMat, at.length);
       joints.name = "CityViaductJoints";
@@ -1124,7 +1145,7 @@ export function createCityViaduct({
       const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
       at.forEach((c, i) => {
         qt.setFromAxisAngle(up, c.yaw);
-        m.compose(new THREE.Vector3(c.q.x, layout.deckY + V.jointLift, c.q.z), qt, one);
+        m.compose(new THREE.Vector3(c.x, c.y + V.jointLift, c.z), qt, one);
         joints.setMatrixAt(i, m);
       });
       joints.castShadow = false;

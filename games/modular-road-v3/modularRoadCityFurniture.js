@@ -1838,7 +1838,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     for (let i = 0; i < traffic.length; i++) {
       const c = traffic[i];
       const L = c.lane;
-      let x, z, pathFwdX = 0, pathFwdZ = 0;
+      let x, z, pathY = null, pathFwdX = 0, pathFwdZ = 0;
       if (L.pts) {
         /*
          * A LANE THAT BENDS. `u` is still the same 0..1 the queueing model
@@ -1856,6 +1856,10 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         const a = pts[lo], b = pts[hi];
         x = a.x + (b.x - a.x) * t;
         z = a.z + (b.z - a.z) * t;
+        // FROM THE LANE, not from a constant. The deck is level over the city
+        // and comes down to the ground at both ends, so a car reading a fixed
+        // height drives the last four hundred metres through the air.
+        pathY = a.y + (b.y - a.y) * t;
         const dx = (b.x - a.x) * L.dir, dz = (b.z - a.z) * L.dir;
         const len = Math.hypot(dx, dz) || 1;
         pathFwdX = dx / len; pathFwdZ = dz / len;
@@ -1928,7 +1932,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       const im = trafficMeshes[bi];
       if (!im) continue;
       const slot = n[bi];
-      _tp.set(x, L.y ?? gyBase, z);
+      _tp.set(x, pathY ?? L.y ?? gyBase, z);
       _tq.setFromAxisAngle(UP, yaw);
       im.setMatrixAt(slot, _tm.compose(_tp, _tq, _ts));
       /*

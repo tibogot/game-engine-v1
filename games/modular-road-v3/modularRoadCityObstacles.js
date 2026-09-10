@@ -44,7 +44,7 @@
 import * as THREE from "three";
 
 /** Which kind each entry is. Kept as a number so the table stays a Float32Array. */
-const KIND = { LAMP: 0, LIGHT: 1, TREE: 2, CAR: 3, RAIL: 4, PIER: 5 };
+const KIND = { LAMP: 0, LIGHT: 1, TREE: 2, CAR: 3, RAIL: 4, PIER: 5, COLUMN: 6 };
 
 export const OBSTACLE_DEFAULTS = {
   /** Per kind, because a snagging fallen car is a real failure mode and the
@@ -83,6 +83,19 @@ export const OBSTACLE_DEFAULTS = {
    * than guessed here, because a default that drifts from the geometry is an
    * invisible column or an invisible hole.
    */
+  /**
+   * VIADUCT LIGHTING COLUMNS. Thin, and standing in the central reserve of a
+   * road eleven metres up — so the only thing that ever meets one is a car
+   * already on the deck, at speed, with nowhere to go. Exactly the reason it
+   * cannot be the one piece of the structure you pass through.
+   *
+   * Unlike a pier, the base is NOT the ground: it is the deck. That is carried
+   * on the row, because the deck comes down to street level at both ends.
+   */
+  columns: true,
+  columnRadius: 0.22,
+  columnHeight: 8.5,
+
   piers: true,
   pierRadius: 1.5,
   /** Fallback only. Every pier carries its OWN height — see the note in
@@ -104,12 +117,16 @@ export const OBSTACLE_DEFAULTS = {
  */
 export function createCityObstacles({
   lampMatrices = null, lists = null, groundY = 0,
-  avoid = null, avoidRadius = 40, params = {}, piers = null,
+  avoid = null, avoidRadius = 40, params = {}, piers = null, columns = null,
 } = {}) {
   const O = { ...OBSTACLE_DEFAULTS, ...params };
   if (piers) {
     if (piers.radius != null) O.pierRadius = piers.radius;
     if (piers.height != null) O.pierHeight = piers.height;
+  }
+  if (columns) {
+    if (columns.radius != null) O.columnRadius = columns.radius;
+    if (columns.height != null) O.columnHeight = columns.height;
   }
 
   // NOTE: there is deliberately no "keep clear" hole-punching here.
@@ -167,6 +184,11 @@ export function createCityObstacles({
       pushAt(q.x, q.z, KIND.PIER, Math.max(0.5, (q.top ?? 0) - groundY));
     }
   }
+  // A column's row carries the height of the DECK it stands on, not its own —
+  // see the note on the params. Its own height is the same for all of them.
+  if (O.columns) {
+    for (const q of columns?.list ?? []) pushAt(q.x, q.z, KIND.COLUMN, q.y ?? 0);
+  }
   for (const e of lists?.lights ?? []) push(e.m, KIND.LIGHT);
   for (const e of lists?.trees ?? []) push(e.m, KIND.TREE);
   for (const e of lists?.cars ?? []) push(e.m, KIND.CAR);
@@ -220,6 +242,7 @@ export function createCityObstacles({
     on[KIND.CAR] = O.cars;
     on[KIND.RAIL] = O.rails;
     on[KIND.PIER] = O.piers;
+    on[KIND.COLUMN] = O.columns;
     return on;
   };
 
@@ -233,6 +256,7 @@ export function createCityObstacles({
     cars: (lists?.cars ?? []).length,
     rails: (lists?.rails ?? []).length,
     piers: (piers?.list ?? []).length,
+    columns: (columns?.list ?? []).length,
     lastNear: 0,
   };
 
@@ -281,7 +305,8 @@ export function createCityObstacles({
       // Upright: the pole only.
       const rad = kind === KIND.LAMP ? O.lampRadius
         : kind === KIND.LIGHT ? O.lightRadius
-          : kind === KIND.PIER ? O.pierRadius : O.treeRadius;
+          : kind === KIND.PIER ? O.pierRadius
+            : kind === KIND.COLUMN ? O.columnRadius : O.treeRadius;
       /*
        * A PIER'S HEIGHT COMES OFF ITS OWN ROW, not out of the params.
        *
@@ -292,12 +317,15 @@ export function createCityObstacles({
        * road above them is coming down.
        */
       const h = kind === KIND.PIER ? (yaw > 0 ? yaw : O.pierHeight)
-        : kind === KIND.LAMP ? O.lampHeight
-          : kind === KIND.LIGHT ? O.lightHeight : O.treeHeight;
+        : kind === KIND.COLUMN ? O.columnHeight
+          : kind === KIND.LAMP ? O.lampHeight
+            : kind === KIND.LIGHT ? O.lightHeight : O.treeHeight;
       // Capsule ends are the SPHERE CENTRES, so they sit a radius inside each
       // flat end of the post the geometry actually draws.
-      const lo = groundY + rad;
-      const hi = groundY + Math.max(h - rad, rad + 0.01);
+      // A column stands on the DECK; everything else stands on the ground.
+      const foot = kind === KIND.COLUMN ? yaw : groundY;
+      const lo = foot + rad;
+      const hi = foot + Math.max(h - rad, rad + 0.01);
       out.push({
         a: new THREE.Vector3(ox, lo, oz),
         b: new THREE.Vector3(ox, hi, oz),

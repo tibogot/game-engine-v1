@@ -657,6 +657,75 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   city.dispose();
 }
 
+// ── IT LANDS ────────────────────────────────────────────────────────────────
+//
+// A motorway that stops in mid-air eleven metres up is the one thing about an
+// elevated road you cannot explain away, and it is what the player sees the
+// moment they follow it to the end.
+{
+  const V = L.params;
+  for (const q of [L.path[0], L.path[L.path.length - 1]]) {
+    check("the deck reaches the ground at its ends",
+      Math.abs(q.y - P.groundY) < 0.25, `ends at ${q.y.toFixed(2)} m`);
+  }
+  // And it gets there gently. The tail is long, so this should be nowhere near
+  // as steep as the slip roads — if it ever is, the tail has been shortened
+  // without anyone checking what that does to the gradient.
+  let steepest = 0;
+  for (let i = 1; i < L.path.length; i++) {
+    const run = Math.hypot(L.path[i].x - L.path[i - 1].x, L.path[i].z - L.path[i - 1].z);
+    if (run < 1e-6) continue;
+    steepest = Math.max(steepest, Math.abs(L.path[i].y - L.path[i - 1].y) / run);
+  }
+  check("and never steeper than 8% getting there", steepest < 0.08,
+    `steepest ${(steepest * 100).toFixed(1)}%`);
+
+  // The middle must stay UP. A descent that leaked into the straight would
+  // drop the motorway onto the street it is supposed to fly over.
+  let lowest = Infinity;
+  for (let i = L.straightI0; i <= L.straightI1; i++) lowest = Math.min(lowest, L.path[i].y);
+  check("the straight is still eleven metres up", Math.abs(lowest - L.deckY) < 1e-6,
+    `lowest station on the straight ${lowest.toFixed(2)} m`);
+}
+
+// ── THE LIGHTING COLUMNS ARE SOLID ──────────────────────────────────────────
+//
+// They stand in the central reserve of a road eleven metres up, so the only
+// thing that ever meets one is a car already on the deck, at speed, with
+// nowhere to go — which is exactly why it cannot be the piece of the structure
+// you pass through. Same failure the piers had, and it drew perfectly then too.
+{
+  const city = createModularRoadCity({ params: { extent: 700 } });
+  const full = viaductLayout({ P: { ...P, extent: 700 }, originCellX: 0, originCellZ: 0 });
+  check("there are columns to check", full.columns.length > 5, `${full.columns.length}`);
+  // One on the level part of the deck, where its foot is eleven metres up.
+  const high = full.columns.find((c) => Math.abs(c.y - full.deckY) < 0.01);
+  const caps = city.obstacleCapsulesNear(high.x, high.z, 4)
+    .filter((c) => c.radius < 1.0 && c.a.y > full.deckY - 1);
+  check("a column is a solid capsule", caps.length >= 1,
+    `${caps.length} thin capsules standing on the deck`);
+  check("and it stands ON the deck, not on the ground",
+    caps.length > 0 && caps[0].a.y > full.deckY,
+    caps.length ? `foot at ${caps[0].a.y.toFixed(1)} m, deck at ${full.deckY.toFixed(1)}` : "none");
+  check("the obstacle table counts them", city.stats.obstacles.columns > 5,
+    `${city.stats.obstacles.columns}`);
+
+  /*
+   * AND A COLUMN ON THE DESCENDING TAIL STANDS ON THE TAIL. Its foot height is
+   * carried per row for exactly this reason — a single "deck height" for all of
+   * them leaves the ones at the ends floating several metres over their own
+   * road, solid, and invisible from the car that hits them.
+   */
+  const low = full.columns.filter((c) => c.y < full.deckY - 2);
+  check("some columns are on the descent", low.length > 0, `${low.length}`);
+  const lowCaps = city.obstacleCapsulesNear(low[0].x, low[0].z, 4)
+    .filter((c) => c.radius < 1.0);
+  check("a column on the descent has its foot on the road there",
+    lowCaps.some((c) => Math.abs(c.a.y - low[0].y) < 1.0),
+    lowCaps.length ? `feet at ${lowCaps.map((c) => c.a.y.toFixed(1)).join(", ")} vs road ${low[0].y.toFixed(1)}` : "none");
+  city.dispose();
+}
+
 // ── THE TRIANGLE BUDGET ─────────────────────────────────────────────────────
 //
 // A 2.4 km road is not free, and unlike everything else in the city it goes

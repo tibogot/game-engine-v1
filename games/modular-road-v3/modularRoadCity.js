@@ -1175,6 +1175,13 @@ export function createModularRoadCity({
           list: viaductAt.piers,
           radius: Math.max(viaductAt.params.pierWidth, viaductAt.params.pierDepth) * 0.5 + 0.2,
         } : null,
+        // The lighting columns down the central reserve. Same list the geometry
+        // was built from, so there can be no invisible one and no ghost.
+        columns: viaductAt ? {
+          list: viaductAt.columns,
+          radius: 0.22,
+          height: viaductAt.params.columnHeight,
+        } : null,
         groundY: P.groundY,
         // The same corridor the towers respect, so a track at street level is
         // not lined with posts you cannot see coming — plus whatever the game
