@@ -595,7 +595,7 @@ export function signalGo(time, phase, F) {
   return t < F.signalGreenEnd;
 }
 
-export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [], parkTrees = [], viaduct = null, keepOut = null }) {
+export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [], parkTrees = [], viaduct = null, keepOut = null, holeAt = null }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
   group.name = "CityFurniture";
@@ -1901,6 +1901,22 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       }
       const dx = x - cam.x, dz = z - cam.z;
       if (dx * dx + dz * dz > r2) continue;
+      /*
+       * NOT OVER A HOLE IN THE STREET.
+       *
+       * A lane is an infinite straight line and knows nothing about the
+       * underpass; the two inner lanes of the street it runs under pass
+       * directly over the open trench, and the cars in them were driving along
+       * six metres of fresh air. Hiding them is a compromise — the honest
+       * answer is that this street's traffic should DIVE, which is the lane
+       * paths the viaduct already proved — but a car that is not there beats a
+       * car flying over a hole, and the trench is short enough that at the
+       * spacing these run there is rarely more than one per lane inside it.
+       *
+       * Elevated lanes are exempt: they carry their own height and are nowhere
+       * near the street plane.
+       */
+      if (holeAt && !L.elevated && holeAt(x, z)) continue;
       /*
        * ── THE CORNER, DRAWN AS A CURVE ───────────────────────────────────────
        *

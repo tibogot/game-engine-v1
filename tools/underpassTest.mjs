@@ -276,6 +276,68 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   built.dispose();
 }
 
+// ── THE VAULT IS THE WALL UNDER THE ROOF ────────────────────────────────────
+//
+// The trench walls used to be built along the WHOLE run, which was wrong three
+// ways at once. Their inner face landed a centimetre from the vault's own wall
+// (`_vaultInnerProfile` springs from hw + 0.34), so the chassis got two
+// conflicting pushes in a frame and the car was thrown into the air. Their lip
+// ran at street level over a section that still HAS a street, so two coplanar
+// surfaces fought over the same pixels — a strip of "floating road" over the
+// tunnel. And it was several hundred metres of geometry doing what the tunnel
+// around it was already doing.
+{
+  const built = createCityUnderpass({ layout: L });
+  let walls = null;
+  built.group.traverse((o) => { if (o.name === "CityUnderpassWalls") walls = o; });
+  const pos = walls.geometry.getAttribute("position");
+  let underRoof = 0;
+  for (let i = 0; i < pos.count; i++) {
+    const along = L.axis === "x" ? pos.getX(i) : pos.getZ(i);
+    if (along > L.cov0 + 2 && along < L.cov1 - 2) underRoof++;
+  }
+  check("no trench wall inside the covered section", underRoof === 0,
+    `${underRoof} wall vertices under the roof`);
+
+  // And where they DO exist, their inner face has to line up with the vault's,
+  // or the two meet at the portal with a step between them.
+  const U = L.params;
+  check("the trench wall continues the vault's line exactly",
+    Math.abs(U.roadWidth / 2 + U.wallGap - (U.roadWidth / 2 + 0.34)) < 1e-9,
+    `wallGap ${U.wallGap} vs the vault's 0.34`);
+  built.dispose();
+}
+
+// ── NO CAR DRIVES OVER THE HOLE ─────────────────────────────────────────────
+//
+// A traffic lane is an infinite straight line and knows nothing about the
+// underpass. The two inner lanes of the street it runs under pass directly over
+// the open trench, and the cars in them were driving along six metres of fresh
+// air.
+{
+  const city = createModularRoadCity({ params: { extent: 700 } });
+  const full = underpassLayout({ P: { ...P, extent: 700 }, originCellX: 0, originCellZ: 0 });
+  const open = underpassOpenAt(full);
+  const cam = { position: new THREE.Vector3(full.across, 3, (full.a0 + full.cov0) / 2) };
+  for (let i = 0; i < 8; i++) { cam.position.y += 0.01; city.update(0.4, cam); }
+  let overHole = 0, drawn = 0;
+  city.group.traverse((o) => {
+    if (!o.isInstancedMesh || !/^CityTraffic_/.test(o.name)) return;
+    const e = o.instanceMatrix.array;
+    for (let i = 0; i < o.count; i++) {
+      const x = e[i * 16 + 12], y = e[i * 16 + 13], z = e[i * 16 + 14];
+      drawn++;
+      // Elevated traffic carries its own height and is nowhere near the street.
+      if (y > 3) continue;
+      if (open(x, z)) overHole++;
+    }
+  });
+  check("there is traffic near the trench to check", drawn > 20, `${drawn} cars drawn`);
+  check("no street car is drawn over the open trench", overHole === 0,
+    `${overHole} of ${drawn} in mid-air`);
+  city.dispose();
+}
+
 // ── NOTHING STANDS ON THE HOLE ──────────────────────────────────────────────
 {
   const city = createModularRoadCity({ params: { extent: 700 } });

@@ -111,8 +111,20 @@ export const UNDERPASS_DEFAULTS = {
   /** Station spacing. Tight through the portals, where the eye is. */
   step: 10,
 
-  /** Trench walls: how far out from the road edge, and how thick. */
-  wallGap: 0.35,
+  /**
+   * ── THE TRENCH WALL'S INNER FACE ───────────────────────────────────────────
+   *
+   * 0.34, and it is not a taste value: it is exactly where the VAULT puts its
+   * own wall. `_vaultInnerProfile` springs from `hw + 0.34`, so matching it
+   * means the open trench's wall and the tunnel's wall are one continuous
+   * surface through the portal instead of two surfaces a centimetre apart.
+   *
+   * A centimetre apart is worse than it sounds. Two solids in almost the same
+   * place give the chassis two conflicting pushes in one frame, and the car is
+   * thrown into the air — which is exactly what this did before the walls were
+   * confined to the open trench.
+   */
+  wallGap: 0.34,
   wallThick: 0.5,
   /**
    * ── THE PARAPET ROUND THE HOLE ─────────────────────────────────────────────
@@ -473,7 +485,7 @@ export function createCityUnderpass({
     const inner = U.roadWidth / 2 + U.wallGap;
     const outer = inner + U.wallThick;
     const lip = outer + U.lipWidth;
-    const pos = [], col = [], idx = [];
+    const pos = [], col = [], idx = [], rowAlong = [];
     const push = (p, shade) => {
       pos.push(p.x, p.y, p.z);
       col.push(shade, 0, 0);
@@ -500,13 +512,32 @@ export function createCityUnderpass({
     const alongAt = (i) => (layout.axis === "x" ? frames[i].pos.x : frames[i].pos.z);
     const isOpen = (i) => {
       const a = alongAt(i);
-      return a < layout.cov0 - 1e-6 || a > layout.cov1 + 1e-6;
+      return a < layout.cov0 + 1e-6 || a > layout.cov1 - 1e-6;
     };
+    /*
+     * ── ONLY WHERE THE TRENCH IS OPEN ──────────────────────────────────────────
+     *
+     * Under the roof the VAULT is the wall, and building a second one there was
+     * wrong in three separate ways at once:
+     *
+     *   · its inner face landed a centimetre from the vault's, so the chassis
+     *     got two conflicting pushes in a frame and the car was thrown;
+     *   · its lip ran at street level along a section that still HAS a street,
+     *     so two coplanar surfaces fought over the same pixels — the strip of
+     *     "floating road" over the tunnel;
+     *   · and it was several hundred metres of geometry doing nothing that the
+     *     tunnel around it was not already doing.
+     *
+     * The range is inclusive at both portals so the trench wall and the vault
+     * meet rather than leaving a gap you can see daylight through.
+     */
     for (let i = 0; i < frames.length; i++) {
       const y = frames[i].pos.y;
       // Only where there is actually a wall to build.
       if (layout.top - y < 0.08) continue;
-      const capY = layout.top + (isOpen(i) ? U.parapetHeight : 0);
+      if (!isOpen(i)) continue;
+      const capY = layout.top + U.parapetHeight;
+      rowAlong.push(alongAt(i));
       for (const s of [-1, 1]) {
         push(atFrame(i, s * inner, y), 1.0);        // 0 inner foot
         push(atFrame(i, s * inner, capY), 1.0);     // 1 inner top
@@ -515,11 +546,21 @@ export function createCityUnderpass({
         push(atFrame(i, s * lip, layout.top), 0.8);   // 4 lip edge
       }
     }
-    // Stitch consecutive stations. FIVE verts per side per station, laid out
-    // side -1 then side +1, so the stride is ten.
+    /*
+     * Stitch consecutive stations. FIVE verts per side per station, laid out
+     * side -1 then side +1, so the stride is ten.
+     *
+     * `rowAlong` is what stops the two ends being sewn together. Stations are
+     * skipped — at grade, and under the roof — so consecutive ROWS are not
+     * always consecutive frames, and joining a row at the entry trench to one
+     * at the exit trench would sweep a wall the length of the tunnel through
+     * everything between them.
+     */
     const per = 10;
     const rows = pos.length / 3 / per;
     for (let r = 0; r + 1 < rows; r++) {
+      const gap = Math.abs(rowAlong[r + 1] - rowAlong[r]);
+      if (gap > U.step * 2.5) continue;
       for (let s = 0; s < 2; s++) {
         const o0 = r * per + s * 5, o1 = (r + 1) * per + s * 5;
         // The two sides face opposite ways, so their winding is mirrored — a

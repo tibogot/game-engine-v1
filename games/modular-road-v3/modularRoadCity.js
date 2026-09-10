@@ -1193,6 +1193,9 @@ export function createModularRoadCity({
           // so one left standing is not scenery clipping a road, it is a wall
           // across the only way onto the motorway.
           keepOut: cityKeepOut,
+          // Where the street has an actual hole in it, so the lanes that cross
+          // it stop putting cars in mid-air.
+          holeAt: underOpen,
           // The motorway's lanes come from the same layout the deck was built
           // from, so the cars cannot end up beside the road they drive on.
           viaduct: viaductAt,
