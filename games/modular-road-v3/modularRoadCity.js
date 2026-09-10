@@ -323,24 +323,23 @@ export const CITY_DEFAULTS = {
    * is nine hashes against a box trace and it is what a night skyline is made
    * of. This is only the furniture inside.
    *
-   * OFF. It is 916 lines, 17% of what the driver compiles for the ~29 s
-   * first-frame wait, and it is very nearly invisible. Toggling the `interior`
-   * uniform live — inside one frame setup, so nothing about a harness can
-   * drift — changes the image by a WORST PIXEL OF ZERO at 10 m, 30 m and at an
-   * angle: the near frame is filled with spandrel and mullion, not vision
-   * glass, so the room path is never even reached. Only at ~60 m, where whole
-   * panes resolve, does anything move at all, and there the mean is 0.04/255.
+   * ON. It costs 916 lines, 17% of what the driver compiles for the ~29 s
+   * first-frame wait, and it was briefly switched off for that — then put
+   * back, because the measurement that justified it was looking in the wrong
+   * place.
    *
-   * That is an upper bound on this flag, not its value: `interior = 0` also
-   * kills the lit-window glow, which the flag keeps. The room is drawn behind
-   * a pane that is at least 55% reflection (`curtainReflectMin`) and muted
-   * again by grime, and that is what a furnished box costs to see through.
+   * What was measured: toggling the `interior` uniform live against a GLASS
+   * CURTAIN tower changed a worst pixel of zero at 10 m, 30 m and at an angle,
+   * and a mean of 0.04/255 at 60 m. All true, and all beside the point. A
+   * curtain wall is >=55% reflection (`curtainReflectMin`) and muted again by
+   * grime, so it is the one wall system that hides its own interior — and a
+   * punched facade with deep reveals, which is most of the city and where the
+   * parallax actually reads, was never in the frame.
    *
-   * The condition for putting it back is the glass, not taste: raise
-   * transmission, drop `reflectMin`, or bring the camera to where whole panes
-   * fill the frame, and this becomes visible enough to be worth its compile.
+   * The lesson is not about this flag. A "cannot see it" result is only as
+   * good as the sample, and one building type is not the city.
    */
-  facadeInteriorRooms: false,
+  facadeInteriorRooms: true,
   perObjectFrustumCulled: true,
   sortObjects: false,
 };
