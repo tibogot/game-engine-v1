@@ -187,6 +187,95 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   built.dispose();
 }
 
+// ── THE TRENCH IS INSIDE ONE BLOCK ──────────────────────────────────────────
+//
+// This is the bug that made the whole thing unplayable, and it looked like a
+// respawn glitch rather than a layout mistake. The open trench was 135 m
+// starting mid-block against a 170 m pitch, so it reached straight across the
+// next junction — and driving along THAT cross street dropped the car six
+// metres into a road it could not see, past the fall threshold, back to the
+// start. The hole was correct. The geometry was correct. The place was not.
+{
+  const U = L.params;
+  check("the ramp fits inside a block", U.rampLength <= L.blockSpan,
+    `${U.rampLength} m ramp in a ${L.blockSpan} m block`);
+  for (const r of L.openRects) {
+    const lo = L.axis === "x" ? r.minX : r.minZ;
+    const hi = L.axis === "x" ? r.maxX : r.maxZ;
+    // Every metre of an open trench must be in the SAME block: a junction
+    // between its ends is a street with a hole across it.
+    const b0 = Math.floor(lo / pitch), b1 = Math.floor(hi / pitch);
+    const f0 = ((lo % pitch) + pitch) % pitch, f1 = ((hi % pitch) + pitch) % pitch;
+    check("an open trench never reaches a junction",
+      b0 === b1 && f0 < blockW + 1e-6 && f1 < blockW + 1e-6,
+      `${lo.toFixed(0)}..${hi.toFixed(0)} sits ${f0.toFixed(0)}..${f1.toFixed(0)} into a ${blockW} m block`);
+  }
+  // And the roof has to cover every junction between the portals, which is the
+  // same statement from the other side.
+  const first = Math.ceil((L.cov0 - blockW) / pitch);
+  let uncovered = 0;
+  for (let j = first; j * pitch + blockW < L.a1; j++) {
+    const jStart = j * pitch + blockW, jEnd = (j + 1) * pitch;
+    if (jEnd < L.a0 || jStart > L.a1) continue;
+    if (jStart < L.cov0 - 1e-6 || jEnd > L.cov1 + 1e-6) uncovered++;
+  }
+  check("every junction the road passes under is roofed", uncovered === 0,
+    `${uncovered} junctions over open trench`);
+}
+
+// ── YOU CANNOT FALL IN FROM THE SIDE ────────────────────────────────────────
+//
+// The trench is 18 m of missing street in a 34 m road, so there IS still street
+// either side of the hole — and nothing to stop a car that drifts across from
+// dropping into a road it cannot see. The parapet is part of the wall mesh,
+// which is already a solid, so it costs no draw and no new collision.
+{
+  const built = createCityUnderpass({ layout: L });
+  let walls = null;
+  built.group.traverse((o) => { if (o.name === "CityUnderpassWalls") walls = o; });
+  const pos = walls.geometry.getAttribute("position");
+  let above = 0, aboveCovered = 0;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) < P.groundY + 0.3) continue;
+    above++;
+    const along = L.axis === "x" ? pos.getX(i) : pos.getZ(i);
+    if (along > L.cov0 + 1e-6 && along < L.cov1 - 1e-6) aboveCovered++;
+  }
+  check("there is a parapet above street level", above > 0, `${above} vertices`);
+  // And ONLY beside the hole. A wall down the middle of an intact street is a
+  // barrier across a road with nothing wrong with it.
+  check("but none over the covered section", aboveCovered === 0,
+    `${aboveCovered} parapet vertices over the roof`);
+  built.dispose();
+}
+
+// ── NO KERBS WHERE IT IS STILL A STREET ─────────────────────────────────────
+//
+// The road is swept with the game's kerbed section, which is right in the
+// trench and wrong at the two ends, where it is at grade and simply IS the
+// street. A pair of red-and-white kerbs running across an ordinary road is the
+// give-away — and like the viaduct's gore, the shape and the PAINT stop by two
+// different mechanisms, so both are checked.
+{
+  const built = createCityUnderpass({ layout: L });
+  const road = built.collisionMeshes().deck[0];
+  const g = road.geometry;
+  const pos = g.getAttribute("position");
+  const zone = g.getAttribute("aZone");
+  check("the road carries a zone attribute", !!zone);
+  let atGrade = 0, deep = 0;
+  for (let i = 0; i < pos.count; i++) {
+    if (zone.getX(i) < 1.5) continue;                  // not kerb-painted
+    const y = pos.getY(i);
+    if (y > P.groundY - 0.6) atGrade++;
+    if (y < P.groundY - 3) deep++;
+  }
+  check("no kerb paint where the road is at street level", atGrade === 0,
+    `${atGrade} kerb-zoned vertices at grade`);
+  check("but kerbs down in the trench", deep > 0, `${deep} kerb-zoned vertices below -3 m`);
+  built.dispose();
+}
+
 // ── NOTHING STANDS ON THE HOLE ──────────────────────────────────────────────
 {
   const city = createModularRoadCity({ params: { extent: 700 } });

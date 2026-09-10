@@ -65,22 +65,46 @@ export const UNDERPASS_DEFAULTS = {
   /**
    * ── THE DEPTH, AND WHY IT IS THIS NUMBER ───────────────────────────────────
    *
-   * The vault's crown stands `tunnelHeight` above the road and its shell is
-   * about 0.4 m thick, so the road has to be at least that far down or the
-   * tunnel's back breaks through the street it is running under — and it does
-   * not look like a mistake from above, it looks like a concrete kerb nobody
-   * ordered. 5.6 m of interior is generous for a car and keeps the excavation
-   * shallow, which keeps the ramps short.
+   * Three things stack up and there is very little slack in them.
+   *
+   * The vault's crown stands `tunnelHeight` above the road with about 0.45 m of
+   * shell on it, so the road has to be at least that far down or the tunnel's
+   * back breaks through the street it runs under — which from above does not
+   * read as a bug, it reads as a concrete kerb nobody ordered.
+   *
+   * And the ramp has to reach that depth INSIDE ONE BLOCK. See `blockSpan`
+   * below: that is 136 m to lose the whole depth in, which at a tolerable
+   * gradient is about six and a half metres. Deeper is not better here; deeper
+   * is a ramp that does not fit and a hole across somebody's street.
    */
-  depth: 7.0,
+  depth: 6.5,
   tunnelHeight: 5.6,
 
-  /** The roofed part, and the open descent at each end. */
-  coveredLength: 380,
-  rampLength: 175,
-  /** Fraction of the ramp still level before it starts down — the same eased
-   *  crest the viaduct's slip roads use, for the same reason. */
-  rampHold: 0.10,
+  /**
+   * ── THE ROOF STARTS AT THE FIRST JUNCTION ──────────────────────────────────
+   *
+   * `coverBlocks` is how many block pitches the roofed part spans, and it is
+   * counted in BLOCKS rather than metres for the reason the whole structure is
+   * laid out on the grid: an underpass that ends wherever a length ran out puts
+   * its open trench across a cross street, and a cross street with a hole in it
+   * is a road the player drives along and falls into.
+   */
+  coverBlocks: 3,
+  /**
+   * The open descent. Must be no longer than a block — checked, not assumed —
+   * and set very close to it, because the block is the only budget there is and
+   * every metre left unused comes back as gradient.
+   */
+  rampLength: 134,
+  /**
+   * Fraction of the ramp still level before it starts down.
+   *
+   * Small, and it is not the crest smoothing — `ease` is a smoothstep and
+   * already leaves the top and bottom flat. This is only breathing room at the
+   * mouth, and it is expensive: it shortens the run the descent actually has,
+   * and at a fixed depth that is a steeper road. At 0.10 this came out at 8.6%.
+   */
+  rampHold: 0.04,
 
   /** Road width down there. Narrower than the street above it. */
   roadWidth: 15,
@@ -90,8 +114,17 @@ export const UNDERPASS_DEFAULTS = {
   /** Trench walls: how far out from the road edge, and how thick. */
   wallGap: 0.35,
   wallThick: 0.5,
-  /** The lip that runs along the top of the trench at street level. */
+  /**
+   * ── THE PARAPET ROUND THE HOLE ─────────────────────────────────────────────
+   *
+   * The trench is 18 m of missing street in a 34 m road, so there is still
+   * street either side of it — and nothing stopping a car that drifts across
+   * from dropping six and a half metres into a road it cannot see. A real one
+   * has a wall; so does this. It is part of the wall mesh, which is already in
+   * the solids channel, so it costs no draw and no new collision.
+   */
   lipWidth: 0.7,
+  parapetHeight: 0.95,
 
   colorWall: 0x8d8c85,
   colorWallDirt: 0x46443f,
@@ -125,9 +158,33 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
   if (Math.abs(across - cAcross) > half) return null;
 
   const roadY = P.groundY - U.depth;
-  const total = U.coveredLength + U.rampLength * 2;
-  const a0 = cAlong - total / 2;
-  const a1 = cAlong + total / 2;
+  const oAlong = axis === "x" ? ox : oz;
+
+  /*
+   * ── SNAPPED TO THE BLOCK GRID ──────────────────────────────────────────────
+   *
+   * A cell is a block then a junction: [j·pitch, j·pitch + blockW) is the
+   * block, and the rest is where two streets cross. The roof therefore has to
+   * start at the END of a block and end at the START of one, so that every
+   * junction in between is under it — and the open trench, which is the part
+   * with no roof, falls entirely inside the block before it.
+   *
+   * The first version measured the whole thing in metres from the centre and a
+   * 135 m trench starting mid-block reached straight across the next junction.
+   * The hole was correct, the geometry was correct, and driving along that
+   * cross street dropped the car seven metres into a road it could not see.
+   */
+  const jMid = Math.round((cAlong - oAlong - blockW / 2) / pitch);
+  const nCov = Math.max(1, Math.round(U.coverBlocks));
+  const j0 = jMid - Math.floor(nCov / 2);
+  const j1 = j0 + nCov;
+  const portalIn = oAlong + j0 * pitch + blockW;
+  const portalOut = oAlong + j1 * pitch;
+  const a0 = portalIn - U.rampLength;
+  const a1 = portalOut + U.rampLength;
+  // The ramp has to fit in the block it descends through, or the hole reaches
+  // the junction again and we are back where we started.
+  if (U.rampLength > blockW) return null;
   if (a0 < cAlong - half || a1 > cAlong + half) return null;
 
   /*
@@ -141,13 +198,14 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
   const at = (a, y) => (axis === "x" ? new THREE.Vector3(a, y, across)
     : new THREE.Vector3(across, y, a));
   const depthAt = (a) => {
-    // 0 at both mouths, 1 across the covered middle.
+    // 0 at both mouths, 1 by the portal and all the way between them.
     const dIn = (a - a0) / U.rampLength;
     const dOut = (a1 - a) / U.rampLength;
     const t = Math.min(dIn, dOut);
     if (t >= 1) return 1;
     return ease((t - U.rampHold) / (1 - U.rampHold));
   };
+  const total = a1 - a0;
   const n = Math.max(8, Math.round(total / U.step));
   for (let i = 0; i <= n; i++) {
     const a = a0 + ((a1 - a0) * i) / n;
@@ -155,12 +213,13 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
   }
 
   /*
-   * WHERE THE ROOF IS. The covered run, pulled in slightly at each end so the
-   * portal stands where the trench has reached full depth rather than part way
-   * down it — a vault mouth on a slope is a shape that cannot be built.
+   * WHERE THE ROOF IS: from the end of one block to the start of another, so
+   * the portals stand at the two junctions and every crossing between them is
+   * roofed. It is also exactly where the road reaches full depth, which is not
+   * a coincidence — the ramp length was chosen to fit the block.
    */
-  const cov0 = a0 + U.rampLength;
-  const cov1 = a1 - U.rampLength;
+  const cov0 = portalIn;
+  const cov1 = portalOut;
 
   /*
    * ── THE HOLE ───────────────────────────────────────────────────────────────
@@ -192,7 +251,7 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
 
   return {
     axis, across, roadY, top, a0, a1, cov0, cov1, path, openRects, holeHalf,
-    params: U,
+    blockSpan: blockW, params: U,
   };
 }
 
@@ -277,8 +336,62 @@ export function createCityUnderpass({
   const profile = buildProfile(rp, true);
   const frames = computeFrames(layout.path);
 
-  // ── The road ───────────────────────────────────────────────────────────────
-  const roadGeo = buildSweepGeometry(frames, profile);
+  /*
+   * ── NO KERBS WHERE IT IS STILL A STREET ────────────────────────────────────
+   *
+   * The road is swept with the game's kerbed section, which is right for the
+   * six metres of it that are in a trench and wrong for the first and last
+   * twenty, where it is at grade and simply IS the street. A pair of red and
+   * white kerbs running across an ordinary road is the give-away.
+   *
+   * Same two mechanisms as the viaduct's gore, and they are still not the same
+   * mechanism: the SHAPE comes from `profileAt` and can change per station, so
+   * the kerb ramps down; the PAINT comes from the reference profile's zone and
+   * cannot, so the red has to end at a segment boundary. Hence two sweeps.
+   */
+  const kerbLerp = (pd, k, repaint) => ({
+    hw: pd.hw,
+    pts: pd.pts.map((q) => (q.zone === 2
+      ? { ...q, y: q.y * k, zone: repaint ? 1 : q.zone } : q)),
+  });
+  const flat = kerbLerp(profile, 0, true);
+  /*
+   * Where the kerb starts, measured as the ROAD's depth below the street.
+   *
+   * Deeper than it looks like it needs to be, because a kerb stands
+   * `railHeight` ABOVE the road it is on — start them at 0.6 m down and their
+   * tops are still only 0.4 m below the street, which is close enough to grade
+   * to read as kerbs across an ordinary road. The first thirty metres of the
+   * ramp having none is also just correct: it is still a street there.
+   */
+  const kerbFrom = 1.2;
+  const alongOfFrame = (i) => (layout.axis === "x" ? frames[i].pos.x : frames[i].pos.z);
+  let kIn = 0, kOut = frames.length - 1;
+  for (let i = 0; i < frames.length; i++) {
+    if (layout.top - frames[i].pos.y > kerbFrom) { kIn = i; break; }
+  }
+  for (let i = frames.length - 1; i >= 0; i--) {
+    if (layout.top - frames[i].pos.y > kerbFrom) { kOut = i; break; }
+  }
+  const taper = 3;
+  const roadParts = [];
+  if (kIn >= 2) {
+    roadParts.push(buildSweepGeometry(frames.slice(0, kIn + 1), flat, {
+      profileAt: (t, i) => kerbLerp(profile,
+        Math.min(1, Math.max(0, (i - (kIn - taper)) / taper)), true),
+    }));
+  }
+  roadParts.push(buildSweepGeometry(frames.slice(kIn, kOut + 1), profile));
+  if (kOut <= frames.length - 3) {
+    const tail = frames.slice(kOut);
+    const n2 = tail.length - 1;
+    roadParts.push(buildSweepGeometry(tail, flat, {
+      profileAt: (t, i) => kerbLerp(profile, 1 - Math.min(1, i / taper), true),
+    }));
+    void n2;
+  }
+  const roadGeo = roadParts.length === 1 ? roadParts[0] : mergeGeometries(roadParts, false);
+  if (roadParts.length > 1) for (const g of roadParts) g.dispose();
   {
     // The road material reads per-PIECE constants the sweep does not write —
     // see the same note in the viaduct. Without them the whole underpass reads
@@ -372,34 +485,48 @@ export function createCityUnderpass({
       const f = frames[i];
       return V.copy(f.pos).addScaledVector(f.right, lat).setY(y);
     };
+    /*
+     * FIVE POINTS PER SIDE, bottom to outside:
+     *   0 inner foot, at the road
+     *   1 inner top of the parapet   ← the face a car meets
+     *   2 outer top of the parapet
+     *   3 outer, back down at street level
+     *   4 the lip edge, flush with the street
+     *
+     * The parapet only exists where the trench is OPEN. Over the covered
+     * section there is no hole to fall into and a wall down the middle of an
+     * intact street would be a barrier across a road with nothing wrong with it.
+     */
+    const alongAt = (i) => (layout.axis === "x" ? frames[i].pos.x : frames[i].pos.z);
+    const isOpen = (i) => {
+      const a = alongAt(i);
+      return a < layout.cov0 - 1e-6 || a > layout.cov1 + 1e-6;
+    };
     for (let i = 0; i < frames.length; i++) {
       const y = frames[i].pos.y;
       // Only where there is actually a wall to build.
       if (layout.top - y < 0.08) continue;
+      const capY = layout.top + (isOpen(i) ? U.parapetHeight : 0);
       for (const s of [-1, 1]) {
-        const a = push(atFrame(i, s * inner, y), 1.0);       // inner foot
-        const b = push(atFrame(i, s * inner, layout.top), 1.0); // inner top
-        const c = push(atFrame(i, s * outer, layout.top), 0.9); // outer top
-        const d = push(atFrame(i, s * lip, layout.top), 0.8);   // lip edge
-        void a; void b; void c; void d;
+        push(atFrame(i, s * inner, y), 1.0);        // 0 inner foot
+        push(atFrame(i, s * inner, capY), 1.0);     // 1 inner top
+        push(atFrame(i, s * outer, capY), 0.9);     // 2 outer top
+        push(atFrame(i, s * outer, layout.top), 0.9); // 3 outer at street
+        push(atFrame(i, s * lip, layout.top), 0.8);   // 4 lip edge
       }
     }
-    // Stitch consecutive stations. Four verts per side per station, laid out
-    // side -1 then side +1, so the stride is eight.
-    const per = 8;
+    // Stitch consecutive stations. FIVE verts per side per station, laid out
+    // side -1 then side +1, so the stride is ten.
+    const per = 10;
     const rows = pos.length / 3 / per;
     for (let r = 0; r + 1 < rows; r++) {
       for (let s = 0; s < 2; s++) {
-        const o0 = r * per + s * 4, o1 = (r + 1) * per + s * 4;
-        // inner face, top of wall, and the lip
-        if (s === 0) {
-          quad(o0 + 1, o0 + 0, o1 + 0, o1 + 1);
-          quad(o0 + 2, o0 + 1, o1 + 1, o1 + 2);
-          quad(o0 + 3, o0 + 2, o1 + 2, o1 + 3);
-        } else {
-          quad(o0 + 0, o0 + 1, o1 + 1, o1 + 0);
-          quad(o0 + 1, o0 + 2, o1 + 2, o1 + 1);
-          quad(o0 + 2, o0 + 3, o1 + 3, o1 + 2);
+        const o0 = r * per + s * 5, o1 = (r + 1) * per + s * 5;
+        // The two sides face opposite ways, so their winding is mirrored — a
+        // trench wall backfacing is a trench you can see straight through.
+        for (let k = 0; k < 4; k++) {
+          if (s === 0) quad(o0 + k + 1, o0 + k, o1 + k, o1 + k + 1);
+          else quad(o0 + k, o0 + k + 1, o1 + k + 1, o1 + k);
         }
       }
     }
