@@ -294,14 +294,26 @@ export const CITY_DEFAULTS = {
    * Whether the facade's normal pass re-runs the relief trace to recover the
    * true normals of piers, reveals and course soffits.
    *
-   * ON. It is 19% of the near shader and 14% of everything the driver compiles
-   * for the ~29 s first-frame wait, which is the largest single block left —
-   * but with it off a pier's return and a window reveal are lit as though they
-   * lay flat in the wall, and up close that is what makes a facade look
-   * printed on. Wired as a flag so the trade is one line to A/B rather than a
-   * rewrite to redo, the same way `facadeTypeSplit` is.
+   * OFF, and unlike `facadeTypeSplit` the measurement says take it.
+   *
+   * The pass is the largest self-contained block in the shader — 997 lines,
+   * 19% of the near facade, 14% of everything the driver compiles for the
+   * ~29 s first-frame wait — and it exists only because a normalNode is built
+   * in its own sub-build and cannot read the colour pass's variables, so
+   * `buildFrame` and `traceFacade` run a SECOND time on every city pixel.
+   *
+   * The expectation was that dropping it would make piers and reveals look
+   * printed on. It does not. Against a repeat-capture noise floor of 0.00%,
+   * the same wall at 6 m differs by at most 2/255, at 16 m by 2/255, and along
+   * a grazing angle by 5/255 — with the LOD gate fully open, so the trace was
+   * genuinely running. The relief is shallow (`pierDepth` 0.4, `reveal` 0.18)
+   * and the bump normal already carries nearly all of it; the hit normal
+   * differs only on the narrow flank and reveal strips.
+   *
+   * Turn it back on if the relief is ever made deep enough to matter — that is
+   * the condition under which this trade changes, not a change of taste.
    */
-  facadeReliefNormals: true,
+  facadeReliefNormals: false,
   perObjectFrustumCulled: true,
   sortObjects: false,
 };
