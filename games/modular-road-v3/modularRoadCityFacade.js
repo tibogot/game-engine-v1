@@ -517,7 +517,30 @@ const band = (x, lo, hi, aa) =>
  * @param {object} [opts]
  * @param {object} [opts.params] overrides on FACADE_DEFAULTS
  */
-export function createCityFacadeMaterial({ params: overrides = {}, typeSplit = true } = {}) {
+/**
+ * @param {object}  [o]
+ * @param {object}  [o.params]     overrides on FACADE_DEFAULTS
+ * @param {boolean} [o.typeSplit]  compile a pinned pair per building type
+ * @param {boolean} [o.reliefNormals=true]
+ *   Whether the normal pass re-runs the relief TRACE to recover the true
+ *   normals of piers, reveals and course soffits.
+ *
+ *   It is the single biggest self-contained block in the shader —
+ *   `tools/facadeShaderSizes.mjs` measures the normal pass at 997 lines, 21%
+ *   of the near facade — and it exists only because a normalNode is built in
+ *   its own sub-build and cannot read the colour pass's variables, so
+ *   `buildFrame` and `traceFacade` are run a SECOND time on every city pixel.
+ *
+ *   With it off, off-face surfaces keep the bumped face normal instead of
+ *   their own: a pier's return and a window reveal are lit as though they lay
+ *   in the wall plane. That is a real look change, not a free win, which is
+ *   why it is a parameter with the honest default rather than a silent
+ *   optimisation. The city's ~29 s first-frame wait is the driver compiling
+ *   this shader, so a fifth of it is worth putting a number on.
+ */
+export function createCityFacadeMaterial({
+  params: overrides = {}, typeSplit = true, reliefNormals = true,
+} = {}) {
   const P = { ...FACADE_DEFAULTS, ...overrides };
 
   // ── BUILDING TYPE AS A COMPILE-TIME CONSTANT ───────────────────────────────
@@ -1655,12 +1678,18 @@ export function createCityFacadeMaterial({ params: overrides = {}, typeSplit = t
     // every distant pixel was most of a 5 ms regression. Off-face hits
     // (flanks, reveals, course soffits) take the hit normal; face-parallel
     // hits keep the bumped one.
-    If(gateAmt.greaterThan(0.001), () => {
-      const F = buildFrame(D, PIN);
-      const T = traceFacade(F);
-      const hitN = normalize(cameraNormalMatrix.mul(T.N));
-      out.assign(normalize(select(T.front.lessThan(0.5), hitN, out)));
-    });
+    // Folded on a JS boolean, so with `reliefNormals` off the trace is not
+    // merely skipped at runtime — it is never reachable from an output, and the
+    // node system emits no code for it at all. That is the point: the driver's
+    // bill is lines compiled, not lines executed.
+    if (reliefNormals) {
+      If(gateAmt.greaterThan(0.001), () => {
+        const F = buildFrame(D, PIN);
+        const T = traceFacade(F);
+        const hitN = normalize(cameraNormalMatrix.mul(T.N));
+        out.assign(normalize(select(T.front.lessThan(0.5), hitN, out)));
+      });
+    }
     return out;
   });
 

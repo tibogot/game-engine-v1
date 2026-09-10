@@ -290,6 +290,18 @@ export const CITY_DEFAULTS = {
    * Kept wired, off, so it is one flag to A/B rather than a rewrite to redo.
    */
   facadeTypeSplit: false,
+  /**
+   * Whether the facade's normal pass re-runs the relief trace to recover the
+   * true normals of piers, reveals and course soffits.
+   *
+   * ON. It is 19% of the near shader and 14% of everything the driver compiles
+   * for the ~29 s first-frame wait, which is the largest single block left —
+   * but with it off a pier's return and a window reveal are lit as though they
+   * lay flat in the wall, and up close that is what makes a facade look
+   * printed on. Wired as a flag so the trade is one line to A/B rather than a
+   * rewrite to redo, the same way `facadeTypeSplit` is.
+   */
+  facadeReliefNormals: true,
   perObjectFrustumCulled: true,
   sortObjects: false,
 };
@@ -374,6 +386,7 @@ export function createModularRoadCity({
 
   const facade = createCityFacadeMaterial({
     typeSplit: P.facadeTypeSplit === true,
+    reliefNormals: P.facadeReliefNormals !== false,
     params: { lotSize: P.lotSize, groundY: P.groundY, ...facadeParams },
   });
 
