@@ -5815,6 +5815,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // autoHeadlights gate. Behind it, turning auto headlights off would also
     // freeze the smoke's lighting at whatever the sun was doing at the time.
     driftSmoke.setSunDirection(_sunDir);
+    // The city's tunnel mouths need it too — same already-normalised, already
+    // NaN-guarded vector, so it costs a copy.
+    city?.setSunDirection(_sunDir);
     driftSmoke.setSunColor(sunLight.color, sunLight.intensity);
     // The plume's shadowed side is lit by the SKY, so it takes the same
     // zenith/haze pair the world's hemisphere light does (linear, written by

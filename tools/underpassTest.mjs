@@ -237,16 +237,22 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   console.log(`       ${st.lengthM} m, ${st.coveredM} covered, ${st.depthM} m down · `
     + `road ${st.roadTris} · vault ${st.vaultTris} · walls ${st.wallTris} · ${st.draws} draws`);
   /*
-   * FIVE: road, vault, glow, walls, portal signs.
+   * SEVEN: road, vault, glow, walls, portal signs, and a light shaft at each
+   * mouth.
    *
-   * The number is asserted rather than merely printed because everything in
-   * this module is deliberately merged into as few meshes as it can be — the
-   * gutter, the risers, the headwalls and the mouth barriers all live in the
-   * WALL mesh precisely so they cost nothing extra. A sixth draw appearing
-   * here means something was built as its own mesh that should have been
-   * written into an existing one.
+   * The number is asserted rather than merely printed because everything here
+   * is deliberately merged into as few meshes as it can be — the gutter, the
+   * risers, the headwalls and the mouth barriers all live in the WALL mesh
+   * precisely so they cost nothing extra. An eighth draw means something was
+   * built as its own mesh that should have been written into an existing one.
+   *
+   * The two shafts are the one place that rule is knowingly broken: each needs
+   * its own portal plane in its uniforms, and a single hull covering both would
+   * span the whole 374 m tunnel and shade a fortune in fragments that can never
+   * be lit. They are frustum-culled and 34 m deep, so in practice you are
+   * inside at most one of them at a time.
    */
-  check("five draws for the whole thing", st.draws === 5, `${st.draws}`);
+  check("seven draws for the whole thing", st.draws === 7, `${st.draws}`);
   check("and it stays under 20k triangles",
     st.roadTris + st.vaultTris + st.wallTris < 20000,
     `${st.roadTris + st.vaultTris + st.wallTris}`);

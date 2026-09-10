@@ -2623,7 +2623,7 @@ export function buildVaultTunnel(frames, profileData = buildProfile(), pp = piec
   for (const g of shellParts) g.dispose();
   if (shell) shell.computeBoundingSphere();
   const collision = _sweepShellProfile(coll, inner, { reverse: false });
-  const glow = _vaultGlowGeometry(frames, inner, total);
+  const glow = _vaultGlowGeometry(frames, inner, total, pp);
   return { shell, collision, glow };
 }
 
@@ -2782,17 +2782,43 @@ function _vaultRib(fr, inner) {
  * Discrete wall neon bars. Real tunnels light a few fixtures, not a Tron ring
  * every metre — two bars every ~13 m, both walls, same stations so they pair.
  */
-function _vaultGlowGeometry(frames, inner, total) {
+/**
+ * ── SPACED LUMINAIRES OR A CONTINUOUS RUN ────────────────────────────────────
+ *
+ * The default is what a short track tunnel wants: 1.35 m battens every 13 m,
+ * which read as individual lamps flicking past at speed.
+ *
+ * A 374 m road tunnel wants the other thing. At that length the spacing turns
+ * the lighting into isolated dashes, and each dash is a 7.5 cm-tall emissive
+ * bar — far under a pixel of height at any distance — so it aliases into a
+ * ragged blob rather than reading as a lamp. Up close the geometry is a clean
+ * rectangle; the problem is entirely that there is not enough of it to resolve.
+ * A continuous strip is both what a real road tunnel has and the thing that
+ * survives being small on screen, because its length carries the read.
+ *
+ * `lightRun` picks: one bar per side spanning the whole tunnel. It is also
+ * CHEAPER — two boxes instead of the fifty-six the city's tunnel was building.
+ */
+function _vaultGlowGeometry(frames, inner, total, pp = pieceParams) {
   const left = inner[1];
   const right = inner[inner.length - 2];
   const y = left.y - 0.32;
   const xl = left.x + 0.028;
   const xr = right.x - 0.028;
   const parts = [];
-  for (let s = _VAULT_LIGHT_MARGIN; s <= total - _VAULT_LIGHT_MARGIN + 0.05; s += _VAULT_LIGHT_SPACING) {
-    const fr = _frameAtArcLength(frames, s);
-    parts.push(_neonBar(fr, xl, y));
-    parts.push(_neonBar(fr, xr, y));
+  const margin = pp.vaultLightMargin ?? _VAULT_LIGHT_MARGIN;
+  if (pp.vaultLightRun) {
+    const runLen = Math.max(0.5, total - margin * 2);
+    const fr = _frameAtArcLength(frames, total / 2);
+    parts.push(_neonBar(fr, xl, y, runLen));
+    parts.push(_neonBar(fr, xr, y, runLen));
+  } else {
+    const spacing = pp.vaultLightSpacing ?? _VAULT_LIGHT_SPACING;
+    for (let s = margin; s <= total - margin + 0.05; s += spacing) {
+      const fr = _frameAtArcLength(frames, s);
+      parts.push(_neonBar(fr, xl, y));
+      parts.push(_neonBar(fr, xr, y));
+    }
   }
   if (!parts.length) return null;
   const glow = mergeGeometries(parts, false);
@@ -2801,11 +2827,49 @@ function _vaultGlowGeometry(frames, inner, total) {
   return glow;
 }
 
-function _neonBar(fr, x, y) {
-  const geo = new THREE.BoxGeometry(0.04, 0.075, 1.35);
+/**
+ * ── A NEON IS A FLAT FACE, NOT A BOX ─────────────────────────────────────────
+ *
+ * It used to be a 4 x 7.5 cm box, and the box was the bug. Seen from inside the
+ * tunnel the strip runs away from you almost edge-on, and somewhere along its
+ * length the view crosses the plane of one of its faces — so that face turns
+ * away and the apparent thickness of the strip JUMPS. It reads as a step
+ * halfway down an otherwise straight light, which is exactly what it is: the
+ * silhouette of a box, not a modelling error and not aliasing.
+ *
+ * A strip on a wall is only ever seen from one side, so one quad facing the
+ * tunnel has no silhouette to step across, and no back faces to pay for. Half
+ * the triangles, and the light stays the same thickness the whole way.
+ *
+ * Winding is DERIVED, not assumed: `right`, `up` and `tangent` have no
+ * handedness worth betting on, and a neon wound backwards is simply not drawn.
+ */
+function _neonBar(fr, x, y, len = 1.35, h = 0.075) {
   _pos.copy(fr.pos).addScaledVector(fr.right, x).addScaledVector(fr.up, y);
-  _m.makeBasis(fr.right, fr.up, fr.tangent).setPosition(_pos);
-  geo.applyMatrix4(_m);
+  // Faces the middle of the tunnel: the strip sits on one wall, so "inboard"
+  // is whichever way the centreline is from it.
+  const inward = x < 0 ? 1 : -1;
+  const hx = len / 2, hy = h / 2;
+  const corner = (a, b) => new V3().copy(_pos)
+    .addScaledVector(fr.tangent, a * hx)
+    .addScaledVector(fr.up, b * hy);
+  const c = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+  const want = new V3().copy(fr.right).multiplyScalar(inward);
+  const n = new V3().subVectors(c[1], c[0]).cross(new V3().subVectors(c[2], c[0]));
+  const flip = n.dot(want) < 0;
+  const idx = flip ? [0, 3, 2, 0, 2, 1] : [0, 1, 2, 0, 2, 3];
+  const pos = [], nrm = [], uv = [];
+  const nn = want.clone().normalize();
+  for (const q of c) {
+    pos.push(q.x, q.y, q.z);
+    nrm.push(nn.x, nn.y, nn.z);
+  }
+  uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
   return geo;
 }
 

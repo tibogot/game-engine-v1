@@ -52,6 +52,7 @@ import {
   roadParams, pieceParams,
 } from "./modularRoadKit.js";
 import { createPortalSigns } from "./modularRoadCityPortalSign.js";
+import { createPortalShafts } from "./modularRoadCityPortalShaft.js";
 import { concreteDetail } from "./modularRoadCityViaduct.js";
 
 export const UNDERPASS_DEFAULTS = {
@@ -154,6 +155,10 @@ export const UNDERPASS_DEFAULTS = {
    * nothing. The cause was `streetHeightAt` — see `coveredRect`.
    */
   vaultCollides: true,
+
+  /** Daylight falling through the mouths — see modularRoadCityPortalShaft.js. */
+  shafts: true,
+  shaftParams: null,
 
   colorWall: 0x8d8c85,
   colorWallDirt: 0x46443f,
@@ -632,7 +637,11 @@ export function createCityUnderpass({
      * set-back bore would leave a ring of nothing behind it that you can see
      * the sky through from inside — see `portalReveal` in the kit.
      */
-    const pp = { ...pieceParams, tunnelHeight: U.tunnelHeight, portalReveal: 0 };
+    const pp = {
+      ...pieceParams,
+      tunnelHeight: U.tunnelHeight,
+      portalReveal: 0,
+    };
     const built = buildVaultTunnel(covFrames, profile, pp);
     if (built?.shell) {
       vault = new THREE.Mesh(built.shell,
@@ -1294,12 +1303,37 @@ export function createCityUnderpass({
   const signs = createPortalSigns({ layout, uNight, params: U.signParams });
   if (signs) group.add(signs.mesh);
 
+  /*
+   * ── DAYLIGHT IN THE MOUTH ──────────────────────────────────────────────────
+   *
+   * The shaft of lit air hanging inside each portal. It needs the same bore the
+   * vault was swept from — the aperture that decides which air is lit has to be
+   * the hole the light actually comes through — so it is handed the kit's own
+   * profiles rather than re-deriving them.
+   */
+  const shafts = U.shafts === false ? null : createPortalShafts({
+    layout,
+    profiles: vaultProfiles(profile, { ...pieceParams, tunnelHeight: U.tunnelHeight }),
+    params: U.shaftParams,
+  });
+  if (shafts) {
+    group.add(shafts.group);
+    // Reachable from the scene graph so the shaft can be tuned against the
+    // running game rather than by reloading the city for every guess.
+    shafts.group.userData.api = shafts;
+  }
+
   const tri = (m) => (m ? (m.geometry.index ? m.geometry.index.count / 3
     : m.geometry.attributes.position.count / 3) : 0);
 
   return {
     group,
     layout,
+    /**
+     * Where the sun is, so the shafts can point. Safe every frame — they only
+     * rebuild when it has actually moved.
+     */
+    setSun(v, strength) { shafts?.setSun(v, strength); },
     /** `{deck, solids}` — the shape the game's collision bake collects. */
     collisionMeshes() {
       const solids = [];
@@ -1308,7 +1342,8 @@ export function createCityUnderpass({
       return { deck: lid ? [road, lid] : [road], solids };
     },
     stats: {
-      draws: 1 + (vault ? 1 : 0) + (glow ? 1 : 0) + (walls ? 1 : 0) + (signs ? 1 : 0),
+      draws: 1 + (vault ? 1 : 0) + (glow ? 1 : 0) + (walls ? 1 : 0) + (signs ? 1 : 0)
+      + (shafts ? shafts.stats.draws : 0),
       lengthM: Math.round(layout.a1 - layout.a0),
       coveredM: Math.round(layout.cov1 - layout.cov0),
       depthM: +(layout.top - layout.roadY).toFixed(1),
@@ -1323,6 +1358,7 @@ export function createCityUnderpass({
       if (vaultCollider) vaultCollider.geometry.dispose();
       if (walls) walls.geometry.dispose();
       signs?.dispose();
+      shafts?.dispose();
       for (const m of owned) m.dispose();
     },
   };

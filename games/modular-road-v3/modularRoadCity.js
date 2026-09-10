@@ -426,6 +426,21 @@ export function createModularRoadCity({
   let originCellX = 0, originCellZ = 0;
   const uTime = uniform(0);
   const uNight = uniform(0);
+  /*
+   * WHERE THE SUN IS, which nothing in the city knew until the portal shafts
+   * needed it. A unit vector pointing TOWARD it, plus how much of it there is —
+   * zero below the horizon, so a shaft cannot hang in a midnight tunnel.
+   *
+   * Driven from roadGame, which already computes exactly this vector for the
+   * drift smoke and guards it against the NaN sun this scene has been seen to
+   * produce. Kept as plain values rather than uniforms because what consumes it
+   * rebuilds GEOMETRY: the shaft is the aperture swept along the sun, so the
+   * sun is a build input, not a shader input. Held here so an underpass rebuilt
+   * mid-session is pointed the right way the moment it exists, instead of
+   * waiting for the sun to move.
+   */
+  const _sunDir = new THREE.Vector3(0.35, 0.72, 0.6);
+  let _sunStrength = 1;
   let _clock = 0;
 
   const stats = {
@@ -959,7 +974,12 @@ export function createModularRoadCity({
       // The portal boards are retroreflective after dark, like every real one.
       uNight,
     });
-    if (underpass) { group.add(underpass.group); stats.underpass = underpass.stats; }
+    if (underpass) {
+      group.add(underpass.group);
+      stats.underpass = underpass.stats;
+      // Point the new shafts before the first frame, not after the sun moves.
+      underpass.setSun(_sunDir, _sunStrength);
+    }
     else stats.underpass = null;
     if (P.beacons) {
       const tips = [];
@@ -1752,6 +1772,22 @@ export function createModularRoadCity({
      */
     setWet(v) { wetAmount = Math.max(0, Math.min(1, v || 0)); ground?.setWet(wetAmount); },
     get wet() { return wetAmount; },
+
+    /**
+     * Where the sun is, as a unit vector pointing at it. Call it every frame.
+     *
+     * `strength` goes to zero as it sets: the portal shafts are daylight, and
+     * daylight that keeps shining out of a tunnel mouth at midnight is worse
+     * than no shaft at all.
+     */
+    setSunDirection(v) {
+      if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y) || !Number.isFinite(v.z)) return;
+      _sunDir.copy(v);
+      // Fades out as it sets rather than snapping off at the horizon, so the
+      // last shaft of the day thins instead of vanishing between two frames.
+      _sunStrength = Math.max(0, Math.min(1, (v.y - 0.02) / 0.16));
+      underpass?.setSun(_sunDir, _sunStrength);
+    },
 
     setHeightSource(fn) { heightAt = fn ?? null; rebuild(); },
     setAvoid(fn) { avoid = fn ?? null; rebuild(); },
