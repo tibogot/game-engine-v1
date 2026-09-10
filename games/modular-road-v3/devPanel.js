@@ -7168,7 +7168,7 @@ export function createRoadDevPanel({ app, game, params }) {
   const spk = game.getSparkSettings?.();
   if (spk) {
     toggle("dv-sparks", spk.enabled !== false, (on) => { spk.enabled = on; });
-    toggle("dv-birds", api.getBirds?.() !== false, (on) => { api.setBirds?.(on); });
+    toggle("dv-birds", game.getBirds?.() !== false, (on) => { game.setBirds?.(on); });
     slider("dv-spk-rate", spk, "emitRate", (v) => v.toFixed(0));
     slider("dv-spk-int", spk, "intensity");
     slider("dv-spk-str", spk, "stretch", (v) => v.toFixed(3));

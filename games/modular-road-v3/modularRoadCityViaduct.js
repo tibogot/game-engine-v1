@@ -55,7 +55,7 @@ import * as THREE from "three";
 import { Fn, float, vec3, uniform, mix, smoothstep, positionWorld, vertexColor } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
-  computeFrames, buildSweepGeometry, buildProfile, roadParams,
+  computeFrames, buildSweepGeometry, buildProfile, roadParams, NO_CHECKER,
 } from "./modularRoadKit.js";
 import { buildRailGeometry, buildRailCollision, railParams } from "./modularRoadRail.js";
 
@@ -449,11 +449,40 @@ export function createCityViaduct({
    * mesh IS the collision surface, it also means one BVH covering the deck and
    * its ramps rather than three that have to agree at the joins.
    */
+  /*
+   * ── aPiece, WHICH THE ROAD MATERIAL READS AND THE SWEEP DOES NOT WRITE ─────
+   *
+   * `buildSweepGeometry` emits position, uv, aLateral and aZone. The per-PIECE
+   * constants are stamped a level up, by the builder, for every track piece —
+   * so sharing the road material without them logs "Vertex attribute aPiece not
+   * found on geometry" and the shader reads zero for the whole viaduct.
+   *
+   *   .x is an along-offset that decorrelates the surface noise from every other
+   *      run. All-zero means this road's grain lines up exactly with any track
+   *      piece that also has none, which is a visible repeat where two roads
+   *      meet.
+   *   .y is where the start/finish line goes, and a motorway has none — that is
+   *      what NO_CHECKER is for.
+   */
+  const stampPiece = (geo, offset) => {
+    const n = geo.getAttribute("position").count;
+    const d = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) { d[i * 2] = offset; d[i * 2 + 1] = NO_CHECKER; }
+    geo.setAttribute("aPiece", new THREE.Float32BufferAttribute(d, 2));
+    return geo;
+  };
+
   const runs = [{ frames: computeFrames(layout.path), rp, profile }];
   for (const rm of layout.ramps ?? []) {
     runs.push({ frames: computeFrames(rm.path), rp: rampRp, profile: rampProfile });
   }
-  const deckParts = runs.map((r) => buildSweepGeometry(r.frames, r.profile));
+  // A different offset per run, derived from where the run starts, so it is
+  // stable across rebuilds and different between the deck and each ramp.
+  const deckParts = runs.map((r, i) => {
+    const p0 = r.frames[0].pos;
+    const h = Math.abs(Math.sin(p0.x * 12.9898 + p0.z * 78.233 + i * 37.719) * 43758.5453);
+    return stampPiece(buildSweepGeometry(r.frames, r.profile), (h - Math.floor(h)) * 100);
+  });
   const deckGeo = deckParts.length === 1 ? deckParts[0] : mergeGeometries(deckParts, false);
   if (deckParts.length > 1) for (const g of deckParts) g.dispose();
 
