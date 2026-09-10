@@ -44,11 +44,35 @@ export function createVehicleGround({
   const getTH = getTerrainHeight;
 
   /** Heightfield normal from central differences of the terrain sampler. */
-  function terrainNormal(x, z, out, eps = 0.6) {
-    const hL = getTH(x - eps, z);
-    const hR = getTH(x + eps, z);
-    const hD = getTH(x, z - eps);
-    const hU = getTH(x, z + eps);
+  /**
+   * ── THE HEIGHTFIELD'S NORMAL, AND WHAT HAPPENS AT ITS EDGE ─────────────────
+   *
+   * A central difference over four neighbours, which is the right answer
+   * everywhere the field has a value. The field does NOT always have one:
+   * `getTerrainHeight` returns NaN for "there is no ground here", and it means
+   * it — outside the city, with terrain off, and now over the underpass, where
+   * the street has an actual hole in it.
+   *
+   * Unguarded, a single NaN neighbour makes the whole normal NaN. That normal
+   * goes to a wheel, the wheel produces a NaN force, and one frame later the
+   * car's pose is non-finite and the game respawns it — which is what this cost
+   * before it was fixed: the underpass was unreachable, because the failure
+   * fires while the car is still on solid street. The CENTRE sample is finite
+   * out there; it is a neighbour 0.6 m away that is not. So the trigger radius
+   * was `eps`, and "I cannot even go close to it" was the literal truth.
+   *
+   * A missing neighbour is treated as level with the centre, which is the right
+   * shape for it: at the lip of a hole the ground really is flat right up to
+   * the edge, and inventing a slope there would tip the car in.
+   */
+  function terrainNormal(x, z, out, eps = 0.6, centre = null) {
+    const c = centre != null && Number.isFinite(centre) ? centre : getTH(x, z);
+    if (!Number.isFinite(c)) { out.set(0, 1, 0); return out; }
+    const at = (v) => (Number.isFinite(v) ? v : c);
+    const hL = at(getTH(x - eps, z));
+    const hR = at(getTH(x + eps, z));
+    const hD = at(getTH(x, z - eps));
+    const hU = at(getTH(x, z + eps));
     out.set(-(hR - hL) / (2 * eps), 1, -(hU - hD) / (2 * eps));
     return out.normalize();
   }
@@ -115,7 +139,9 @@ export function createVehicleGround({
           best = {
             distance: vertDist,
             point: { x: origin.x, y: terrainY, z: origin.z },
-            normal: terrainNormal(origin.x, origin.z, _terrN),
+            // `terrainY` is already known to be finite here, so hand it over
+            // rather than paying for a fifth sample of the same point.
+            normal: terrainNormal(origin.x, origin.z, _terrN, 0.6, terrainY),
             // The heightfield probe is a VERTICAL projection, not a ray along
             // `dir`. An inverted wheel origin still "hits" it, and the strut
             // then pushes into the world. Tire.apply skips this source when
