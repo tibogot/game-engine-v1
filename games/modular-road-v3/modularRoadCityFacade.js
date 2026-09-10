@@ -539,7 +539,7 @@ const band = (x, lo, hi, aa) =>
  *   this shader, so a fifth of it is worth putting a number on.
  */
 export function createCityFacadeMaterial({
-  params: overrides = {}, typeSplit = true, reliefNormals = true,
+  params: overrides = {}, typeSplit = true, reliefNormals = true, interiorRooms = true,
 } = {}) {
   const P = { ...FACADE_DEFAULTS, ...overrides };
 
@@ -1343,9 +1343,24 @@ export function createCityFacadeMaterial({
         const roomCol = select(draped, fabric, raw)
           .mul(mix(vec3(1.0), lt.litCol, lt.lit.mul(0.85))).mul(mix(float(1.0), float(1.3), lt.lit));
         const roomLit = lt.lit.mul(select(draped, float(0.2), float(1.0)));
-        const seen = mix(vec3(0.16), roomCol, u.interior);
+        /*
+         * ── THE FURNISHED INTERIOR IS OPTIONAL ────────────────────────────
+         *
+         * With `interiorRooms` off, the pane shows the same flat mean the FAR
+         * path already shows — so near and far agree and the LOD ring still
+         * has no seam — and the whole box march above becomes unreferenced.
+         * The node system only emits code reachable from an output, so it is
+         * not merely skipped: it is not generated. The JS above still runs
+         * once at material build, which costs nothing worth measuring.
+         *
+         * `lt` is deliberately still read. Which windows are LIT is a night
+         * feature and by far the cheapest part of this block — nine hashes
+         * against a five-plane box trace — so it stays either way.
+         */
+        const flatRoom = vec3(0.42, 0.40, 0.37).mul(float(0.6).add(lt.rh.mul(0.5)));
+        const seen = mix(vec3(0.16), interiorRooms ? roomCol : flatRoom, u.interior);
 
-        const g = glassOf(seen, roomLit.mul(u.interior), lt.litCol,
+        const g = glassOf(seen, (interiorRooms ? roomLit : lt.lit).mul(u.interior), lt.litCol,
           T.va2.sub(T.wB).div(max(T.wT.sub(T.wB), 0.1)), F.nW);
         nCol.assign(selT(T.inBase1, g.col.mul(0.3), g.col));
         nRough.assign(u.glassRough);

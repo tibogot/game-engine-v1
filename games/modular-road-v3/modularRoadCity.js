@@ -314,6 +314,33 @@ export const CITY_DEFAULTS = {
    * the condition under which this trade changes, not a change of taste.
    */
   facadeReliefNormals: false,
+  /**
+   * Whether a window pane shows a FURNISHED room behind it — a five-plane box
+   * trace with floorboards, a rug, a sofa, a door, a framed picture, a ceiling
+   * fixture and curtains — or the flat mean the far path already shows.
+   *
+   * Which windows are LIT is NOT this flag; that stays either way, because it
+   * is nine hashes against a box trace and it is what a night skyline is made
+   * of. This is only the furniture inside.
+   *
+   * OFF. It is 916 lines, 17% of what the driver compiles for the ~29 s
+   * first-frame wait, and it is very nearly invisible. Toggling the `interior`
+   * uniform live — inside one frame setup, so nothing about a harness can
+   * drift — changes the image by a WORST PIXEL OF ZERO at 10 m, 30 m and at an
+   * angle: the near frame is filled with spandrel and mullion, not vision
+   * glass, so the room path is never even reached. Only at ~60 m, where whole
+   * panes resolve, does anything move at all, and there the mean is 0.04/255.
+   *
+   * That is an upper bound on this flag, not its value: `interior = 0` also
+   * kills the lit-window glow, which the flag keeps. The room is drawn behind
+   * a pane that is at least 55% reflection (`curtainReflectMin`) and muted
+   * again by grime, and that is what a furnished box costs to see through.
+   *
+   * The condition for putting it back is the glass, not taste: raise
+   * transmission, drop `reflectMin`, or bring the camera to where whole panes
+   * fill the frame, and this becomes visible enough to be worth its compile.
+   */
+  facadeInteriorRooms: false,
   perObjectFrustumCulled: true,
   sortObjects: false,
 };
@@ -399,6 +426,7 @@ export function createModularRoadCity({
   const facade = createCityFacadeMaterial({
     typeSplit: P.facadeTypeSplit === true,
     reliefNormals: P.facadeReliefNormals !== false,
+    interiorRooms: P.facadeInteriorRooms !== false,
     params: { lotSize: P.lotSize, groundY: P.groundY, ...facadeParams },
   });
 
