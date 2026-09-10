@@ -253,8 +253,9 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
    * inside at most one of them at a time.
    */
   /*
-   * TEN: road, vault, glow, walls, portal signs, two light shafts, and the
-   * fit-out's three — steel, emergency niches, overhead boards.
+   * EIGHT: road, vault, glow, walls, portal signs, and the fit-out's three —
+   * steel, emergency niches, overhead boards. The two light shafts are OFF
+   * (see `shafts` in the underpass defaults); switching them on makes it ten.
    *
    * Asserted rather than printed because everything here is deliberately merged
    * into as few meshes as it can be. The gutter, risers, headwalls and mouth
@@ -263,11 +264,8 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
    * eleventh draw means something was built as its own mesh that should have
    * been merged into an existing one.
    *
-   * The two shafts are the one place that rule is knowingly broken: each needs
-   * its own portal plane, and a single hull covering both would span the whole
-   * tunnel and shade a fortune in fragments that can never be lit.
    */
-  check("ten draws for the whole thing", st.draws === 10, `${st.draws}`);
+  check("eight draws for the whole thing", st.draws === 8, `${st.draws}`);
   check("and it stays under 20k triangles",
     st.roadTris + st.vaultTris + st.wallTris < 20000,
     `${st.roadTris + st.vaultTris + st.wallTris}`);

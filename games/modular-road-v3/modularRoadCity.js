@@ -1669,7 +1669,21 @@ export function createModularRoadCity({
      * onto the wall below — so it has to be the same sun the scene's light
      * uses or the relief will be lit from one side and shadowed from another.
      */
+    /**
+     * The dominant light's direction, for the FACADES. Not the same thing as
+     * `setSunDirection` and not a duplicate of it: this one takes the moon
+     * after dark, because a building still has a lit side at night, whereas the
+     * underpass wants the sun specifically and how much of it there is.
+     */
     setSun(dir) { facade.setSun(dir); },
+
+    /**
+     * Is (x, z) inside the ROOFED part of the underpass?
+     *
+     * Asked by the game every frame to widen the shadow cascade while you are
+     * under there — see the note at its call site. Cheap: one rectangle test.
+     */
+    inTunnel(x, z) { return underRoof ? underRoof(x, z) : false; },
 
     /**
      * The building collider, built on first ask. Hand it to the game's ground

@@ -2277,6 +2277,42 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   const _citySun = new THREE.Vector3(0.4, 0.8, 0.3);
 
+  /*
+   * ── THE TUNNEL WAS ONLY DARK NEAR THE CAR ──────────────────────────────────
+   *
+   * The shadow cascade is fitted to the VIEW, and `maxFar` is 80 m — two
+   * cascades of about forty each, which is the right budget for a chase camera
+   * on open road. The city's tunnel is 374 m long. So the vault's shadow was
+   * only ever rendered for the first eighty metres in front of you: near the
+   * car the bore was properly black, further in the sun came straight through
+   * the roof, and the boundary between the two slid along the tunnel as you
+   * drove. Which is exactly what it looked like — a dark patch following the
+   * car.
+   *
+   * `maxFar` is one of the settings that CAN change at runtime (`cascades` and
+   * `fade` are the two that cannot — they recompile), and it costs a
+   * `csm.updateFrustums()`. So it is widened while the camera is under the roof
+   * and put straight back on the way out. Shadows go softer for those few
+   * hundred metres, which in a tunnel lit by its own battens is not something
+   * anyone can see; a lit tunnel is.
+   *
+   * Only on a CHANGE — `updateFrustums` every frame would be a waste, and the
+   * hysteresis is the mode flag itself rather than a distance, so there is
+   * nothing to flicker at the boundary.
+   */
+  const TUNNEL_SHADOW_FAR = 320;
+  let _tunnelShadowOn = false;
+  let _shadowFarNormal = null;
+  function syncTunnelShadowRange() {
+    const shadows = app.shadows;
+    if (!shadows?.state) return;
+    if (_shadowFarNormal == null) _shadowFarNormal = shadows.state.maxFar;
+    const inside = !!city?.inTunnel?.(camera.position.x, camera.position.z);
+    if (inside === _tunnelShadowOn) return;
+    _tunnelShadowOn = inside;
+    shadows.set({ maxFar: inside ? TUNNEL_SHADOW_FAR : _shadowFarNormal });
+  }
+
   function updateCity(dt) {
     if (!city || !cityWanted) return;
     city.facade.nightAmount = cityNight();
@@ -2299,6 +2335,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     }
     city.setSun(_citySun);
     city.update(dt, camera);
+    syncTunnelShadowRange();
     /*
      * KNOCKABLE GUARDRAILS, every frame — a barrier in the air cannot wait for
      * the LOD tick. It returns how many it just took down, and that number has

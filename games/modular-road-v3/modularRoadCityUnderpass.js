@@ -157,8 +157,18 @@ export const UNDERPASS_DEFAULTS = {
    */
   vaultCollides: true,
 
-  /** Daylight falling through the mouths — see modularRoadCityPortalShaft.js. */
-  shafts: true,
+  /**
+   * ── DAYLIGHT IN THE MOUTHS: OFF, AND WHY ───────────────────────────────────
+   *
+   * Two versions were built and neither is good enough to ship. The marching
+   * one looked right and cost 1.12 ms with visible dither; the swept-aperture
+   * one costs 0.016 ms and does not look right — too even, too clean, no sense
+   * of dust in the air. The module is kept because the measurements in it are
+   * worth having, and because the answer is probably a third thing: an
+   * art-directed cone with a noise shader, the way it is faked in Blender,
+   * which is also what a forest or a room needs and this is not.
+   */
+  shafts: false,
   shaftParams: null,
 
   /** Fans, boards, trays and niches — see modularRoadCityTunnelFit.js. */
@@ -686,6 +696,36 @@ export function createCityUnderpass({
    * A box rather than a sheet, because the chassis is SAMPLED against triangles
    * and a single-sided plane is something a fast car can find its way through.
    */
+  /*
+   * ── HOW HIGH THE ROAD'S OUTER EDGE IS, STATION BY STATION ──────────────────
+   *
+   * Not the same as the road's centreline, and that difference was a bug you
+   * could drive into. The kerbed profile puts `railHeight` at +/-hw, so the
+   * road's outer edge stands 22 cm ABOVE the deck — while the gutter beside it
+   * was laid at deck level. That is a 34 cm wide, 22 cm deep channel running
+   * the length of the trench with the road's kerb as one wall of it: you could
+   * see down into it, and a wheel that wandered out of lane dropped into it and
+   * caught.
+   *
+   * The kerb is not the same height everywhere either. It tapers in over
+   * `taper` stations at each end (see `kerbLerp`), because at the mouth the
+   * road simply IS the street and a kerb across an ordinary road is the
+   * give-away. So the gutter has to follow the SAME ramp, or it trades a
+   * channel down the middle for a step at each end.
+   *
+   * `kerbTop` is read off the profile rather than from `roadParams.railHeight`:
+   * the profile is what the sweep actually used, and a second opinion about the
+   * kerb's height is exactly the kind of thing that drifts.
+   */
+  const kerbTop = profile.pts.reduce((m, q) => (q.zone === 2 ? Math.max(m, q.y) : m), 0);
+  const kerbK = (i) => {
+    if (i <= kIn) return Math.min(1, Math.max(0, (i - (kIn - taper)) / taper));
+    if (i >= kOut) return 1 - Math.min(1, Math.max(0, (i - kOut) / taper));
+    return 1;
+  };
+  /** World height of the road's outer edge at station `i`. */
+  const edgeY = (i) => frames[i].pos.y + kerbTop * kerbK(i);
+
   const { material: wallMat, uTop } = wallMaterial(U);
   owned.push(wallMat);
   uTop.value = layout.roadY;
@@ -1071,7 +1111,7 @@ export function createCityUnderpass({
       const half = U.roadWidth / 2;
       const rRow = [], rAlong = [];
       for (let i = 0; i < frames.length; i++) {
-        const y = frames[i].pos.y;
+        const y = edgeY(i);
         const a = alongAt(i);
         // Only where the hole is still road-wide: past `wIn` the wall and its
         // lip cover the step, and doubling up there would fight them.
@@ -1126,10 +1166,13 @@ export function createCityUnderpass({
         if (layout.top - y < 0.30) continue;   // at grade the street IS the floor
         gAlong.push(alongAt(i));
         gFrame.push(i);
+        // FLUSH WITH THE ROAD'S EDGE, kerb included — see `edgeY`. Laid at the
+        // centreline's height instead it is a channel a wheel drops into.
+        const ey = edgeY(i);
         const row = [];
         for (const s of [-1, 1]) {
-          row.push(push(atFrame(i, s * (U.roadWidth / 2), y), 0.55));
-          row.push(push(atFrame(i, s * inner, y), 0.7));
+          row.push(push(atFrame(i, s * (U.roadWidth / 2), ey), 0.55));
+          row.push(push(atFrame(i, s * inner, ey), 0.7));
         }
         gRow.push(row);
       }
@@ -1149,7 +1192,7 @@ export function createCityUnderpass({
        */
       for (const [r, dir] of [[0, -1], [gRow.length - 1, 1]]) {
         if (r < 0 || !gRow[r]) continue;
-        const i = gFrame[r], f = frames[i], y = f.pos.y;
+        const i = gFrame[r], f = frames[i], y = edgeY(i);
         if (layout.top - y < 0.02) continue;
         for (const s of [-1, 1]) {
           const a0i = push(atFrame(i, s * (U.roadWidth / 2), y), 0.5);
