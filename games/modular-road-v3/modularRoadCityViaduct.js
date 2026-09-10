@@ -161,6 +161,11 @@ export const VIADUCT_DEFAULTS = {
   rampFall: 0.20,
   /** Extra metres of open barrier either end of the gore. */
   gorePad: 12,
+  /** Station spacing through a gore. Fine enough to end the kerb AND taper it
+   *  down inside the mouth — see the note on the centreline. */
+  goreStep: 6,
+  /** Stations over which a kerb rises or falls where it starts and stops. */
+  kerbTaper: 3,
   /** Stations per ramp. Ramps bend in two axes at once, so they get their own
    *  density rather than inheriting the straight's. */
   rampSteps: 26,
@@ -222,36 +227,6 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
 
   const alongMin = cAlong - half, alongMax = cAlong + half;
 
-  /*
-   * THE CENTRELINE, as points.
-   *
-   * A straight line today. It is a POLYLINE rather than two endpoints because
-   * everything the viaduct is going to grow — curves, grades, a run out past
-   * the edge of town, ramps peeling off it — is a different set of points
-   * through the same sweep, and none of it needs this file to change shape.
-   */
-  const path = [];
-  const steps = Math.max(1, Math.round((alongMax - alongMin) / V.straightStep));
-  for (let i = 0; i <= steps; i++) {
-    const a = alongMin + ((alongMax - alongMin) * i) / steps;
-    path.push(axis === "x" ? new THREE.Vector3(a, deckY, across)
-      : new THREE.Vector3(across, deckY, a));
-  }
-
-  /*
-   * ── THE SLIP ROADS ─────────────────────────────────────────────────────────
-   *
-   * Also just points. A ramp diverges sideways while it descends, which is two
-   * curves at once and would be fiddly as geometry — as a path it is two eased
-   * interpolations sampled together, and `computeFrames` turns the result into
-   * a properly banked, properly twisted road with no further help.
-   *
-   * `ease` is smoothstep, and it is doing real work in BOTH axes. Vertically it
-   * is the crest and sag curve every road has, because a car meeting an abrupt
-   * grade change meets it as a corner and gets thrown. Laterally it is the
-   * diverge, which has to start and end parallel or the ramp leaves the deck at
-   * an angle and rejoins the street at one.
-   */
   const ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
   const ramps = [];
   if (V.ramps) {
@@ -293,6 +268,39 @@ export function viaductLayout({ P, originCellX = 0, originCellZ = 0, params = {}
         mouthMin: Math.min(a0, aSplit) - pad,
         mouthMax: Math.max(a0, aSplit) + pad,
       });
+    }
+  }
+
+  /*
+   * THE CENTRELINE, as points.
+   *
+   * A straight line today. It is a POLYLINE rather than two endpoints because
+   * everything the viaduct is going to grow — curves, grades, a run out past
+   * the edge of town — is a different set of points through the same sweep.
+   *
+   * NOT EVENLY SPACED, though, and that is deliberate. A sweep can only change
+   * its cross-section AT a station, and the kerb has to stop where a slip road
+   * crosses it. At the plain 24 m spacing a gore is three stations, which is
+   * not enough to both end the kerb and taper it down; so the stations bunch up
+   * around every ramp mouth and stay sparse everywhere else, which is the whole
+   * point of the path being a list rather than a step size.
+   */
+  const path = [];
+  {
+    const stations = new Set();
+    const steps = Math.max(1, Math.round((alongMax - alongMin) / V.straightStep));
+    for (let i = 0; i <= steps; i++) {
+      stations.add(alongMin + ((alongMax - alongMin) * i) / steps);
+    }
+    for (const rmp of ramps) {
+      const a = rmp.mouthMin - V.goreStep, b = rmp.mouthMax + V.goreStep;
+      for (let x = a; x <= b + 1e-6; x += V.goreStep) {
+        if (x > alongMin && x < alongMax) stations.add(x);
+      }
+    }
+    for (const a of [...stations].sort((p1, p2) => p1 - p2)) {
+      path.push(axis === "x" ? new THREE.Vector3(a, deckY, across)
+        : new THREE.Vector3(across, deckY, a));
     }
   }
 
@@ -472,16 +480,110 @@ export function createCityViaduct({
     return geo;
   };
 
+  /*
+   * WHICH LOCAL SIDE IS WHICH IS MEASURED, NOT ASSUMED. `computeFrames` picks
+   * its own frame, so the profile's local +x is not guaranteed to point at
+   * +across; dotting `right` with the across axis once settles it. Getting this
+   * backwards would end the kerb on the far edge of the deck instead.
+   */
+  const acrossUnit = layout.axis === "x"
+    ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+  const sideSignOf = (fr) => (fr[0].right.dot(acrossUnit) >= 0 ? 1 : -1);
+
+  /**
+   * ── A KERB THAT STOPS ──────────────────────────────────────────────────────
+   *
+   * Where a slip road crosses the deck, both roads were sweeping their full
+   * section straight through each other, so the two red-and-white kerbs met in
+   * an X across the open tarmac — a 22 cm lip diagonally over the one place a
+   * car has to cross, painted as if it were a boundary.
+   *
+   * A kerb is two profile points per side, identifiable by zone 2 and the sign
+   * of their local x, so this lowers them and repaints them as deck. Two things
+   * have to happen and they are NOT the same thing:
+   *
+   *   · THE SHAPE, which comes from `profileAt` and so can change per station —
+   *     the kerb ramps down over a few stations rather than stepping 22 cm.
+   *   · THE PAINT, which comes from the REFERENCE profile's zone and cannot
+   *     change per station at all (buildSweepGeometry takes shape from the
+   *     morph and zone from the reference). So the red has to end at a segment
+   *     boundary, which is why the deck is swept in pieces rather than in one.
+   */
+  const kerbLerp = (pd, localSide, k, repaint) => ({
+    hw: pd.hw,
+    pts: pd.pts.map((q) => (q.zone === 2 && Math.sign(q.x) === localSide
+      ? { ...q, y: q.y * k, zone: repaint ? 1 : q.zone } : q)),
+  });
+
   const runs = [{ frames: computeFrames(layout.path), rp, profile }];
   for (const rm of layout.ramps ?? []) {
     runs.push({ frames: computeFrames(rm.path), rp: rampRp, profile: rampProfile });
   }
   // A different offset per run, derived from where the run starts, so it is
   // stable across rebuilds and different between the deck and each ramp.
-  const deckParts = runs.map((r, i) => {
-    const p0 = r.frames[0].pos;
+  const offsetFor = (fr, i) => {
+    const p0 = fr[0].pos;
     const h = Math.abs(Math.sin(p0.x * 12.9898 + p0.z * 78.233 + i * 37.719) * 43758.5453);
-    return stampPiece(buildSweepGeometry(r.frames, r.profile), (h - Math.floor(h)) * 100);
+    return (h - Math.floor(h)) * 100;
+  };
+  /** Along-axis coordinate of a frame, and the nearest station to a coordinate.
+   *  A SEARCH, because the stations are not evenly spaced — they bunch up at
+   *  every gore. Interpolating an index from the along coordinate is what the
+   *  first version did, and it put the rail gaps in the wrong place the moment
+   *  the path stopped being uniform. */
+  const alongOfFrame = (fr, i) => (layout.axis === "x" ? fr[i].pos.x : fr[i].pos.z);
+  const nearestStation = (fr, a) => {
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < fr.length; i++) {
+      const d = Math.abs(alongOfFrame(fr, i) - a);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  };
+
+  const deckParts = [];
+  const sweep = (fr, pd, opts, off) => stampPiece(buildSweepGeometry(fr, pd, opts), off);
+  {
+    const F = runs[0].frames;
+    const off = offsetFor(F, 0);
+    const sign = sideSignOf(F);
+    const gores = (layout.ramps ?? [])
+      .map((r) => ({
+        i0: nearestStation(F, r.mouthMin),
+        i1: nearestStation(F, r.mouthMax),
+        local: r.side * sign,
+      }))
+      .sort((a, b) => a.i0 - b.i0);
+    let cur = 0;
+    for (const g of gores) {
+      if (g.i0 > cur) deckParts.push(sweep(F.slice(cur, g.i0 + 1), profile, {}, off));
+      const seg = F.slice(g.i0, g.i1 + 1);
+      const n = seg.length - 1;
+      const tf = Math.max(1, Math.min(Math.floor(n / 3), V.kerbTaper));
+      // Full kerb at both ends of the gore so it meets the kerbed segments
+      // either side exactly, flat across the middle where the ramp crosses.
+      deckParts.push(sweep(seg, kerbLerp(profile, g.local, 0, true), {
+        profileAt: (t, i) => kerbLerp(profile, g.local,
+          Math.max(1 - Math.min(1, i / tf), 1 - Math.min(1, (n - i) / tf)), true),
+      }, off));
+      cur = g.i1;
+    }
+    if (cur < F.length - 1) deckParts.push(sweep(F.slice(cur), profile, {}, off));
+  }
+  (layout.ramps ?? []).forEach((rmp, ri) => {
+    const F = runs[ri + 1].frames;
+    const off = offsetFor(F, ri + 1);
+    const inner = -rmp.side * sideSignOf(F);
+    const k = Math.min(F.length - 2, Math.ceil(V.rampSplit * (F.length - 1)));
+    const tf = Math.max(1, Math.min(Math.floor(k / 3), V.kerbTaper));
+    // The inner kerb starts flat — at the mouth this edge is in the middle of
+    // the deck, and a kerb there is a lip across the traffic — and rises to
+    // full by the time the ramp is a road of its own.
+    deckParts.push(sweep(F.slice(0, k + 1), kerbLerp(rampProfile, inner, 0, true), {
+      profileAt: (t, i) => kerbLerp(rampProfile, inner,
+        Math.min(1, Math.max(0, (i - (k - tf)) / tf)), true),
+    }, off));
+    deckParts.push(sweep(F.slice(k), rampProfile, {}, off));
   });
   const deckGeo = deckParts.length === 1 ? deckParts[0] : mergeGeometries(deckParts, false);
   if (deckParts.length > 1) for (const g of deckParts) g.dispose();
@@ -538,17 +640,11 @@ export function createCityViaduct({
    * barrier on the far edge of the deck instead — a hole with nothing beside it
    * and nothing to see.
    */
-  const acrossUnit = layout.axis === "x"
-    ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-  const sideSignOf = (fr) => (fr[0].right.dot(acrossUnit) >= 0 ? 1 : -1);
-
   /** {frames, rp, sides} — one call to the rail builder each. */
   const railRuns = [];
   {
     const F = runs[0].frames;
-    const span = layout.alongMax - layout.alongMin;
-    const idxOf = (a) => Math.max(0, Math.min(F.length - 1,
-      Math.round(((a - layout.alongMin) / span) * (F.length - 1))));
+    const idxOf = (a) => nearestStation(F, a);
     const deckSign = sideSignOf(F);
     for (const localSide of [-1, 1]) {
       // The world-across side this local side sits on.

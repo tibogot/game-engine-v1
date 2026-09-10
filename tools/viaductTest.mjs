@@ -425,6 +425,75 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   city.dispose();
 }
 
+// ── THE KERB STOPS WHERE THE ROADS CROSS ────────────────────────────────────
+//
+// Both roads used to sweep their full section straight through each other, so
+// the two red-and-white kerbs met in an X across the open tarmac — a 22 cm lip
+// laid diagonally over the one place a car has to cross, painted as if it were
+// a boundary.
+//
+// Two separate things have to stop, and they stop by different mechanisms:
+// the SHAPE comes from the per-station morph, the PAINT from the reference
+// profile's zone. Checking only one of them would pass with a flat red stripe
+// still painted across the junction, or with an unpainted 22 cm lip still
+// there — so both are checked.
+{
+  const full = viaductLayout({ P, originCellX: 0, originCellZ: 0 });
+  const built = createCityViaduct({ layout: full });
+  const deck = built.collisionMeshes().deck[0];
+  const g = deck.geometry;
+  const pos = g.getAttribute("position");
+  const zone = g.getAttribute("aZone");
+  check("the deck carries a zone attribute to read", !!zone);
+
+  const V = full.params;
+  const deckEdge = V.deckWidth / 2;
+  for (let r = 0; r < full.ramps.length; r++) {
+    const rmp = full.ramps[r];
+    // The middle of the gore, where the two roads genuinely overlap.
+    const mid = (rmp.mouthMin + rmp.mouthMax) / 2;
+    let lip = 0, painted = 0, seen = 0;
+    for (let i = 0; i < pos.count; i++) {
+      const along = full.axis === "x" ? pos.getX(i) : pos.getZ(i);
+      if (Math.abs(along - mid) > 8) continue;
+      const across = (full.axis === "x" ? pos.getZ(i) : pos.getX(i)) - full.across;
+      if (Math.sign(across) !== rmp.side) continue;
+      if (Math.abs(across) > deckEdge + 0.5) continue;   // the deck's own width
+      const y = pos.getY(i);
+      if (y < full.deckY - 0.5) continue;                // underside, not the top
+      seen++;
+      // A kerb stands `railHeight` above the deck. Anything at that height in
+      // the middle of the gore is a lip across the junction.
+      if (y > full.deckY + roadParams.railHeight * 0.5) lip++;
+      if (zone.getX(i) > 1.5) painted++;                 // zone 2 = kerb paint
+    }
+    check(`ramp ${r}: the gore has deck surface to measure`, seen > 0, `${seen} vertices`);
+    check(`ramp ${r}: no kerb LIP across the junction`, lip === 0,
+      `${lip} of ${seen} vertices stand a kerb high`);
+    check(`ramp ${r}: no kerb PAINT across the junction`, painted === 0,
+      `${painted} of ${seen} vertices are still zoned as kerb`);
+  }
+
+  /*
+   * AND THE KERB IS STILL THERE EVERYWHERE ELSE. Flattening the whole deck
+   * would pass every check above — this is the one that says the fix was local.
+   */
+  {
+    const mid = (full.alongMin + full.alongMax) / 2;
+    const clear = full.ramps.every((r) => mid < r.mouthMin - 60 || mid > r.mouthMax + 60);
+    let lip = 0;
+    if (clear) {
+      for (let i = 0; i < pos.count; i++) {
+        const along = full.axis === "x" ? pos.getX(i) : pos.getZ(i);
+        if (Math.abs(along - mid) > 30) continue;
+        if (pos.getY(i) > full.deckY + roadParams.railHeight * 0.5) lip++;
+      }
+      check("the plain deck still has its kerbs", lip > 0, `${lip} kerb-height vertices`);
+    }
+  }
+  built.dispose();
+}
+
 // ── THE TRIANGLE BUDGET ─────────────────────────────────────────────────────
 //
 // A 2.4 km road is not free, and unlike everything else in the city it goes
