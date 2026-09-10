@@ -102,6 +102,51 @@ for (const a of kit.archetypes) {
     }
   }
 }
+/*
+ * ── NOTHING MAY SIT IN THE SAME PLANE AS ANYTHING ELSE ──────────────────────
+ *
+ * A building is a pile of boxes, and a pile of boxes creates coplanar surfaces
+ * for nothing: a tier's top face is exactly where the next tier's bottom face
+ * is, and every parapet, penthouse and water tank rests its underside on the
+ * deck below it. Coplanar faces have equal depth to the bit, so which one wins
+ * is undefined and flips as the camera moves. It was 916 opposed pairs across
+ * 21 of 21 archetypes; `dropBuriedFaces` removes the ones nobody can see and
+ * the water tank was refitted to the roof it stands on.
+ *
+ * Guarded because it comes back for free: any new roof box placed with an
+ * offset that can overhang re-creates it, and the symptom is a shimmer on a
+ * roofline that nobody will connect to the box they added.
+ */
+let coplanar = 0;
+for (const a of kit.archetypes) {
+  const g = a.lods[0];
+  const pos = g.attributes.position, nrm = g.attributes.normal, idx = g.index;
+  const planes = new Map();
+  const n = idx ? idx.count : pos.count;
+  for (let t = 0; t + 2 < n; t += 3) {
+    const v = [0, 1, 2].map((k) => (idx ? idx.getX(t + k) : t + k));
+    const ny = nrm.getY(v[0]);
+    if (Math.abs(ny) < 0.9) continue;
+    const key = pos.getY(v[0]).toFixed(4);
+    if (!planes.has(key)) planes.set(key, []);
+    planes.get(key).push({
+      up: ny > 0,
+      minX: Math.min(...v.map((i) => pos.getX(i))), maxX: Math.max(...v.map((i) => pos.getX(i))),
+      minZ: Math.min(...v.map((i) => pos.getZ(i))), maxZ: Math.max(...v.map((i) => pos.getZ(i))),
+    });
+  }
+  for (const group of planes.values()) {
+    for (const u of group.filter((f) => f.up)) {
+      for (const w of group.filter((f) => !f.up)) {
+        if (u.minX < w.maxX - 1e-4 && w.minX < u.maxX - 1e-4 &&
+            u.minZ < w.maxZ - 1e-4 && w.minZ < u.maxZ - 1e-4) coplanar++;
+      }
+    }
+  }
+}
+check("no two horizontal faces are left fighting for the same plane",
+  coplanar === 0, `${coplanar} opposed coplanar pairs`);
+
 check("every wall carries its own width as a per-face constant, not an estimate",
   trisChecked > 500 && triSpread < 1e-4 && tooWide === 0 && widthMin > 0,
   `${trisChecked} tris · spread within a face ${triSpread.toExponential(1)} m · ` +

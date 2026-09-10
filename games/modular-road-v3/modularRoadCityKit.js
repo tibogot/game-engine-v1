@@ -194,6 +194,74 @@ function addFaceSize(g, w, h, d) {
 }
 
 /**
+ * Remove horizontal faces that are buried under a coplanar one.
+ *
+ * A building is a pile of boxes, and a pile of boxes puts surfaces in the same
+ * plane for free: every tier's TOP face is exactly where the next tier's BOTTOM
+ * face is, and every parapet, penthouse and roof box rests its bottom face on
+ * the deck it stands on. Two coplanar faces have equal depth to the bit, so
+ * which one the rasteriser keeps is undefined and flips as the camera moves —
+ * z-fighting, on the roofline, on every archetype. Measured before this pass:
+ * 916 opposed coplanar triangle pairs across all 21 archetypes, 21 of 21
+ * affected. three.js's own city generator places its parts specifically "so
+ * they never sit coplanar with the walls, spandrels or piers and z-fight".
+ *
+ * The rule is conservative on purpose: a downward face is dropped only when an
+ * upward face in the SAME plane completely contains it. An upward face means
+ * solid material immediately below that plane, so anything resting on it is
+ * genuinely invisible — this can only remove triangles nobody could see. The
+ * upward faces themselves are always kept: a deck under a parapet ring is
+ * covered in a thin strip and exposed everywhere else, so it is never
+ * contained, and it is the roof you actually look at.
+ *
+ * Each axis-aligned quad is two triangles that share the quad's diagonal, so a
+ * triangle's bounding box IS its quad's bounding box, and containment can be
+ * decided per triangle without reassembling faces.
+ */
+function dropBuriedFaces(g) {
+  if (!g || !g.index) return g;
+  const pos = g.attributes.position, nrm = g.attributes.normal, idx = g.index;
+  const tri = [];
+  for (let t = 0; t + 2 < idx.count; t += 3) {
+    const v = [idx.getX(t), idx.getX(t + 1), idx.getX(t + 2)];
+    const ny = nrm.getY(v[0]);
+    tri.push({
+      t, up: ny > 0.9, down: ny < -0.9, y: pos.getY(v[0]),
+      minX: Math.min(pos.getX(v[0]), pos.getX(v[1]), pos.getX(v[2])),
+      maxX: Math.max(pos.getX(v[0]), pos.getX(v[1]), pos.getX(v[2])),
+      minZ: Math.min(pos.getZ(v[0]), pos.getZ(v[1]), pos.getZ(v[2])),
+      maxZ: Math.max(pos.getZ(v[0]), pos.getZ(v[1]), pos.getZ(v[2])),
+    });
+  }
+  // Upward faces bucketed by plane, so each downward face only compares against
+  // the handful that could possibly be under it.
+  const ups = new Map();
+  for (const f of tri) {
+    if (!f.up) continue;
+    const key = f.y.toFixed(4);
+    if (!ups.has(key)) ups.set(key, []);
+    ups.get(key).push(f);
+  }
+  const E = 1e-4;
+  const keep = [];
+  let dropped = 0;
+  for (const f of tri) {
+    let buried = false;
+    if (f.down) {
+      for (const u of ups.get(f.y.toFixed(4)) ?? []) {
+        if (u.minX <= f.minX + E && u.maxX >= f.maxX - E &&
+            u.minZ <= f.minZ + E && u.maxZ >= f.maxZ - E) { buried = true; break; }
+      }
+    }
+    if (buried) { dropped++; continue; }
+    keep.push(idx.getX(f.t), idx.getX(f.t + 1), idx.getX(f.t + 2));
+  }
+  if (dropped === 0) return g;
+  g.setIndex(keep);
+  return g;
+}
+
+/**
  * Generate one archetype at three levels of detail.
  *
  * @param {() => number} rnd seeded RNG
@@ -347,10 +415,23 @@ function buildArchetype(rnd, K, forceH = null) {
 
     if (rnd() < 0.5) {
       // Water tank, offset — asymmetry on the roofline is worth 2 triangles.
-      const tw = 2 + rnd() * 2;
+      //
+      // Its offset is a fraction of the TIER's width, but it stands on the
+      // mechanical penthouse, which is only 40-68% of that. So the tank could
+      // hang over the penthouse edge: a sliver of it floating unsupported, and
+      // its underside left coplanar with the roof it mostly sits on, which
+      // z-fights. Fit it to the roof it is actually standing on — shrink it if
+      // the penthouse is small, then keep the offset inside what is left. The
+      // asymmetry survives wherever there is room for it.
       const th = 2.5 + rnd() * 2;
-      full.push(box(tw, th, tw, massTop, top.w * 0.22, -top.d * 0.2));
-      mid.push(box(tw, th, tw, massTop, top.w * 0.22, -top.d * 0.2));
+      const tw = Math.min(2 + rnd() * 2, Math.min(cw, cd) * 0.6);
+      const fit = (v, span) => {
+        const room = Math.max(0, (span - tw) / 2);
+        return Math.max(-room, Math.min(room, v));
+      };
+      const tx = fit(top.w * 0.22, cw), tz = fit(-top.d * 0.2, cd);
+      full.push(box(tw, th, tw, massTop, tx, tz));
+      mid.push(box(tw, th, tw, massTop, tx, tz));
       spireTop = Math.max(spireTop, massTop + th);
     }
     if (rnd() < K.mastChance) {
@@ -366,8 +447,8 @@ function buildArchetype(rnd, K, forceH = null) {
   }
 
   // ── Merge ──────────────────────────────────────────────────────────────────
-  const l0 = mergeGeometries(full, false);
-  const l1 = mergeGeometries(mid, false);
+  const l0 = dropBuriedFaces(mergeGeometries(full, false));
+  const l1 = dropBuriedFaces(mergeGeometries(mid, false));
   const l2 = box(w0, massTop, d0, 0);
 
   if (!l0 || !l1) {
