@@ -53,7 +53,8 @@
 
 import * as THREE from "three";
 import {
-  Fn, float, vec3, vec4, uniform, mix, smoothstep, positionWorld, vertexColor,
+  Fn, float, vec2, vec3, vec4, uniform, mix, smoothstep, positionWorld,
+  vertexColor, normalWorldGeometry, abs, fract, sin, step, max,
 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
@@ -217,6 +218,25 @@ export const VIADUCT_DEFAULTS = {
 
   colorPier: 0x8c8b84,
   colorPierDirt: 0x4c4a44,
+  /**
+   * ── CONCRETE, FAKED ────────────────────────────────────────────────────────
+   *
+   * MEASURED at 20.7 kB of WGSL before, and this is what it costs to add — see
+   * the note on `concreteDetail`. A 1K texture set for the same job packs to
+   * about 850 kB, which is nine per cent of this game's entire boot payload for
+   * one material, and the whole city around it is procedural anyway: one
+   * textured object among two thousand shader-built ones tends to read as MORE
+   * out of place, not less.
+   *
+   * `formPanel` is the size of the shuttering the pour was cast against, and it
+   * is the single most recognisable thing about structural concrete — the grid
+   * of faint seams where the panels met. Everything else here is dirt.
+   */
+  formPanelW: 2.4,
+  formPanelH: 1.25,
+  formSeam: 0.2,
+  concreteBlotch: 0.13,
+  concreteSpeckle: 0.07,
 
   /**
    * ── LIGHTING COLUMNS ───────────────────────────────────────────────────────
@@ -715,6 +735,74 @@ function corridorTest(paths, halfW) {
 }
 
 /**
+ * ── CONCRETE, WITHOUT A TEXTURE ──────────────────────────────────────────────
+ *
+ * Three things, in this order of how much they matter:
+ *
+ *   FORM PANEL SEAMS. Structural concrete is cast against panels, and the faint
+ *   grid where they met is what makes a grey surface read as concrete rather
+ *   than as painted plastic. It is also the cheapest of the three, being
+ *   straight lines.
+ *
+ *   BLOTCHING, from two sine fields at incommensurate frequencies rather than
+ *   real value noise. Proper FBM is eight hash lookups an octave; this is two
+ *   sines and a multiply, and for the soft irregular staining on a pour that is
+ *   genuinely all it needs. Concrete is the easy case — no hard edges and no
+ *   repeating structure, which is exactly the opposite of the diamond plate,
+ *   and exactly why THAT one earned a real texture and this one does not.
+ *
+ *   AGGREGATE SPECKLE, one hash. The arguments are wrapped into a small range
+ *   first: `sin()` fed coordinates in the tens of thousands bands rather than
+ *   hashes, which is what made this game's starfield invisible.
+ *
+ * NO normalNode, and that is a deliberate omission rather than a shortcut.
+ * three builds that slot in its own sub-build, so a bumped normal would run
+ * every one of the above a SECOND time — for a surface the player passes at
+ * fifty metres a second. The seams are dark lines, not grooves.
+ */
+function concreteDetail(V) {
+  const uPanelW = uniform(V.formPanelW);
+  const uPanelH = uniform(V.formPanelH);
+  const uSeam = uniform(V.formSeam);
+  const uBlotch = uniform(V.concreteBlotch);
+  const uSpeckle = uniform(V.concreteSpeckle);
+
+  /** 1 on a seam line, 0 between. */
+  const lineAt = (v, period) => {
+    const d = abs(fract(v.div(period)).sub(0.5)).mul(period);
+    return smoothstep(float(0.055), float(0.008), d);
+  };
+
+  return Fn(() => {
+    const p = positionWorld;
+    /*
+     * THE ACROSS COORDINATE HAS TO VARY ACROSS THE FACE.
+     *
+     * A pier is a box. On the face whose normal is ±x, `p.x` is CONSTANT — so a
+     * seam line keyed to it is either absent from that face or covers the whole
+     * of it, depending on where the pier happens to stand. Picking whichever of
+     * x and z actually moves costs an abs, a step and a mix.
+     */
+    const n = normalWorldGeometry;
+    const across = mix(p.x, p.z, step(float(0.5), abs(n.x))).toVar();
+
+    const seam = max(lineAt(across, uPanelW), lineAt(p.y, uPanelH)).mul(uSeam);
+
+    const b1 = sin(p.x.mul(0.71).add(p.z.mul(0.43)).add(p.y.mul(0.27)));
+    const b2 = sin(p.x.mul(0.19).sub(p.z.mul(0.31)).add(p.y.mul(0.13)));
+    const blot = b1.mul(b2).mul(0.5).add(0.5);
+
+    const q = vec2(fract(across.mul(0.0731)), fract(p.y.mul(0.0917)));
+    const grain = fract(sin(q.x.mul(127.1).add(q.y.mul(311.7))).mul(43758.5453));
+
+    return float(1.0)
+      .sub(seam)
+      .mul(float(1.0).sub(uBlotch.mul(0.5)).add(blot.mul(uBlotch)))
+      .mul(float(1.0).sub(uSpeckle.mul(0.5)).add(grain.mul(uSpeckle)));
+  });
+}
+
+/**
  * ── ONE MATERIAL FOR EVERYTHING THAT IS NOT THE ROAD ─────────────────────────
  *
  * Piers, lighting columns and expansion joints all run on this. They look
@@ -731,6 +819,7 @@ function corridorTest(paths, halfW) {
  * triangles.
  */
 function pierMaterial(V, uNightU, uGlow) {
+  const detail = concreteDetail(V);
   const m = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.0 });
   m.name = "CityViaductParts";
   const base = uniform(new THREE.Color(V.colorPier));
@@ -750,7 +839,9 @@ function pierMaterial(V, uNightU, uGlow) {
       .mul(smoothstep(float(9.0), float(3.0), below)).mul(0.28);
     // `vertexColor()` is a vec4; the alpha is not a part id and never was.
     const vc = vertexColor().rgb;
-    const concrete = mix(base.mul(vc.r.mul(0.25).add(0.75)), dirt, streak);
+    // The cast surface itself, then the weather on top of it.
+    const cast = base.mul(vc.r.mul(0.25).add(0.75)).mul(detail());
+    const concrete = mix(cast, dirt, streak);
     // A lantern is not concrete and a joint is not weathered — both step out of
     // the streak, which is keyed to the deck above and means nothing to either.
     return mix(mix(concrete, colu, vc.g), joint, vc.b);

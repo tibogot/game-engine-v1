@@ -202,6 +202,41 @@ check("it also builds with no lights in the scene (bakes, probes)", unlitErr ===
   console.log(`       the driver compiles ${total} lines instead of ${combined} — the split's COST`);
 }
 
+// ── THE VIADUCT'S PARTS MATERIAL ────────────────────────────────────────────
+//
+// Piers, lighting columns, expansion joints and the concrete they are cast in,
+// all on ONE material — three vertex-colour channels rather than three
+// pipelines, because a pipeline is what this game's first frame is spent on.
+//
+// The concrete is FAKED: form-panel seams, two sine fields for blotching, one
+// hash for aggregate. A 1K texture set for the same job packs to about 850 kB,
+// nine per cent of the entire boot payload, for a surface passed at fifty
+// metres a second. This is the tripwire on that trade — it measured 20.7 kB
+// before the concrete and 22.0 kB after, and the day somebody reaches for real
+// FBM (eight hash lookups an octave) this is what should stop them.
+{
+  const { viaductLayout, createCityViaduct } =
+    await import("../games/modular-road-v3/modularRoadCityViaduct.js");
+  const L = viaductLayout({ P: CITY_DEFAULTS, originCellX: 0, originCellZ: 0 });
+  const built = createCityViaduct({ layout: L });
+  let piers = null;
+  built.group.traverse((o) => { if (o.name === "CityViaductPiers") piers = o; });
+  check("the viaduct has a parts mesh to measure", !!piers);
+  let b = null, err = null;
+  try { b = buildWGSL(piers.material, { instanced: piers }); } catch (e) { err = e; }
+  check("the parts material generates WGSL", err === null, err ? err.message : "");
+  if (b) {
+    const frag = b.fragmentShader || "";
+    console.log(`       parts material ${(frag.length / 1024).toFixed(1)} kB fragment`);
+    check("faked concrete stays under 30 kB", frag.length < 30 * 1024,
+      `${(frag.length / 1024).toFixed(1)} kB`);
+    check("no 'undefined' leaked into it", !/undefined/.test(frag),
+      (frag.match(/.{0,50}undefined.{0,50}/) || [""])[0]);
+    check("and no NaN literals", !/NaN/.test(frag));
+  }
+  built.dispose();
+}
+
 // ── The street material gets the same treatment ──────────────────────────────
 // It is one draw over a plane 6 km across, so a derivative smuggled into a
 // branch, or a dead `undefined`, would be just as expensive to find in a
