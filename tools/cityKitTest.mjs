@@ -47,6 +47,7 @@ let worstNear = 0, worstMass = 0, worstBase = 0, worstFoot = 0;
 for (const a of kit.archetypes) {
   for (const g of a.lods) {
     if (!g.attributes.position || !g.attributes.normal || !g.attributes.uv) attrsOk = false;
+    if (!g.attributes.aFace) attrsOk = false;
     g.computeBoundingBox();
   }
   const [l0, l1, l2] = a.lods;
@@ -60,6 +61,51 @@ if (worstFoot >= CITY_DEFAULTS.lotSize) footprintOk = false;
 for (let i = 1; i < kit.archetypes.length; i++) {
   if (kit.archetypes[i].height < kit.archetypes[i - 1].height) orderOk = false;
 }
+
+/*
+ * ── THE FACE WIDTH THE SHADER LAYS BAYS OUT WITH MUST BE THE REAL ONE ───────
+ *
+ * The facade divides `aFace.x` by the bay width and FLOORS it to get the bay
+ * count. It used to solve that width from screen derivatives instead, and a
+ * floor() cannot be handed a per-pixel estimate: when the quotient landed on
+ * an integer the count flipped between pixel quads, every bay boundary moved,
+ * and the wall dithered pier-against-glass up its full height.
+ *
+ * So it is not enough that the attribute EXISTS — it has to carry the true
+ * extent of the face the vertex sits on, or the layout is confidently wrong
+ * instead of noisily wrong. Every vertical face is checked against the actual
+ * spread of its own vertices.
+ */
+let triSpread = 0, trisChecked = 0, tooWide = 0, widthMin = Infinity;
+for (const a of kit.archetypes) {
+  for (const g of a.lods) {
+    const pos = g.attributes.position, nrm = g.attributes.normal, fa = g.attributes.aFace;
+    if (!fa) continue;
+    const idx = g.index;
+    const tri = idx ? idx.count : pos.count;
+    for (let t = 0; t + 2 < tri; t += 3) {
+      const v = [0, 1, 2].map((k) => (idx ? idx.getX(t + k) : t + k));
+      if (Math.abs(nrm.getY(v[0])) > 0.5) continue;           // roof / underside
+      const w0 = fa.getX(v[0]);
+      // A per-face value that VARIES across a triangle is interpolated, and an
+      // interpolated width is exactly the estimate this attribute replaced.
+      triSpread = Math.max(triSpread,
+        Math.abs(fa.getX(v[1]) - w0), Math.abs(fa.getX(v[2]) - w0));
+      // And it must be a real width: never wider than the face's own extent.
+      const nx = nrm.getX(v[0]);
+      const along = Math.abs(nx) > Math.abs(nrm.getZ(v[0])) ? "z" : "x";
+      const spread = Math.max(...v.map((i) => pos[`get${along.toUpperCase()}`](i)))
+        - Math.min(...v.map((i) => pos[`get${along.toUpperCase()}`](i)));
+      if (spread - w0 > 1e-3) tooWide++;
+      widthMin = Math.min(widthMin, w0);
+      trisChecked++;
+    }
+  }
+}
+check("every wall carries its own width as a per-face constant, not an estimate",
+  trisChecked > 500 && triSpread < 1e-4 && tooWide === 0 && widthMin > 0,
+  `${trisChecked} tris · spread within a face ${triSpread.toExponential(1)} m · ` +
+  `${tooWide} narrower than claimed · min width ${widthMin.toFixed(2)} m`);
 
 check("every LOD has position/normal/uv (merge did not return null)", attrsOk);
 check("L0 and L1 share a roofline exactly", worstNear < 1e-6, `worst ${worstNear.toExponential(1)} m`);

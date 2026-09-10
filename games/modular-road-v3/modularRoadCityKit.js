@@ -143,7 +143,54 @@ export const KIT_DEFAULTS = {
 function box(w, h, d, y, x = 0, z = 0) {
   const g = new THREE.BoxGeometry(w, h, d);
   g.translate(x, y + h / 2, z);
+  addFaceSize(g, w, h, d);
   return g;
+}
+
+/**
+ * Stamp each vertex with the EXACT size of the face it belongs to, in metres.
+ *
+ * The facade shader needs the face's width to lay out its bays. It used to
+ * solve that from screen derivatives — the ratio of d(world)/d(uv) across a
+ * 2x2 pixel quad. That ratio is a per-face constant in theory, but a finite
+ * difference over four pixels carries a fraction of a percent of noise, and
+ * the shader feeds it straight into
+ *     count = floor((W - pierWidth) / bayWidth)
+ * When that quotient happens to sit ON an integer — which it does, because
+ * both the footprints and the bay width are ordinary numbers that sometimes
+ * divide — the noise flips `count` between neighbouring quads. Every bay
+ * boundary on the face then moves, and adjacent pixels resolve to pier or to
+ * glass at random: a coloured, dithered band running the wall's full height,
+ * on one building and not the identical-looking one beside it.
+ *
+ * three.js's own city generator never does this. It computes the bay count on
+ * the CPU from the authored face length, and passes per-face data to the
+ * shader as an attribute, with the note "a per-face id must not interpolate,
+ * or equal() below misses on the rounding". This is that fix: an exact number,
+ * decided once, where it is actually known.
+ *
+ * No FLAT interpolation qualifier is needed. Every vertex of a face carries
+ * the same pair, and interpolating a constant gives the constant back.
+ *
+ * Instances are translation plus a Y-scale only (`matrixFor` composes with an
+ * identity quaternion and `(1, scaleY, 1)`), so the WIDTH written here is the
+ * width in world space no matter where the building is placed. The height is
+ * not — it scales — which is why the shader still measures that one itself.
+ */
+function addFaceSize(g, w, h, d) {
+  const n = g.attributes.normal;
+  const out = new Float32Array(n.count * 2);
+  for (let i = 0; i < n.count; i++) {
+    const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i)), az = Math.abs(n.getZ(i));
+    // Which face this vertex sits on, and therefore which two edges bound it.
+    let fw, fh;
+    if (ax >= ay && ax >= az) { fw = d; fh = h; }        // the ±X walls span depth
+    else if (az >= ay) { fw = w; fh = h; }               // the ±Z walls span width
+    else { fw = w; fh = d; }                             // roof / underside
+    out[i * 2] = fw;
+    out[i * 2 + 1] = fh;
+  }
+  g.setAttribute("aFace", new THREE.BufferAttribute(out, 2));
 }
 
 /**

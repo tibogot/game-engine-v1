@@ -122,7 +122,7 @@ import {
   floor, ceil, round, fract, mod, dot, sin, pow, clamp, ivec2, uint, color, hash, uniformArray,
   positionWorld, positionView, normalWorldGeometry, normalView,
   cameraPosition, cameraNormalMatrix, uv, dFdx, dFdy, fwidth, step, textureLoad,
-  normalize, reflect, sign, length,
+  normalize, reflect, sign, length, attribute,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
@@ -638,7 +638,27 @@ export function createCityFacadeMaterial({ params: overrides = {}, typeSplit = t
     const ufw = abs(udx).add(abs(udy)).max(1e-7).toVar();
     const vfw = abs(vdx).add(abs(vdy)).max(1e-7).toVar();
     const adx = dot(pdx, uAxis).toVar(), ady = dot(pdy, uAxis).toVar();
-    const W = abs(adx).add(abs(ady)).div(ufw).clamp(0.5, 400.0).toVar();
+    /*
+     * ── THE FACE WIDTH IS AN ATTRIBUTE, NOT A DERIVATIVE. ────────────────────
+     *
+     * `aFace.x` is stamped on every vertex by the kit's `box()` with the
+     * exact width of the face that vertex belongs to; see the long note there
+     * for the artifact this fixes. In short: `W` feeds
+     *     count = floor(W.sub(pierW).div(bay0))
+     * and a floor() cannot be handed an estimate that wobbles between pixel
+     * quads. When the quotient sat on an integer the count flipped, every bay
+     * boundary moved, and the wall dithered pier-against-glass up its whole
+     * height. An attribute is per-face constant by construction, so the flip
+     * is not made less likely — it is impossible.
+     *
+     * The HEIGHT stays a derivative on purpose: instances carry a per-building
+     * Y-scale, so the authored height is not the world height, and the scale
+     * is not available here on the BatchedMesh path. `nF` rounds rather than
+     * floors and `fh` changes by only 1/nF when it moves, so the same failure
+     * is both rarer and far milder there — measured: nudging `floorHeight`
+     * does not produce the artifact, nudging `bayWidth` does.
+     */
+    const W = attribute("aFace", "vec2").x.clamp(0.5, 400.0).toVar();
     const Hf = abs(pdx.y).add(abs(pdy.y)).div(vfw).clamp(0.5, 700.0).toVar();
     // Which way the box UV runs relative to +uAxis / +y, so u0 and v0 always
     // increase along +uAxis and upward and the ray components agree with them.
