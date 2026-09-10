@@ -82,6 +82,7 @@ import {
 } from "./modularRoadCityViaduct.js";
 import {
   createCityUnderpass, underpassLayout, underpassOpenAt, underpassFootprint,
+  underpassRoofAt, underpassDip,
 } from "./modularRoadCityUnderpass.js";
 import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
 import { placeCityPrism, pickPrismPlaza, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
@@ -415,6 +416,7 @@ export function createModularRoadCity({
   let underOpen = null;
   /** The whole run, for keeping street furniture off it. */
   let underUnder = null;
+  let underRoof = null;
   let carParkGround = null;
   let carParks = [];
   let parkGround = null;
@@ -811,6 +813,7 @@ export function createModularRoadCity({
     underAt = null;
     underOpen = null;
     underUnder = null;
+    underRoof = null;
     if (carParkGround) { group.remove(carParkGround.mesh); carParkGround.dispose(); carParkGround = null; }
     carParks = [];
     if (parkGround) { group.remove(parkGround.mesh); parkGround.dispose(); parkGround = null; }
@@ -939,6 +942,22 @@ export function createModularRoadCity({
       roadMaterial: viaductMaterials?.road ?? null,
       vaultMaterial: viaductMaterials?.vaultShell ?? null,
       glowMaterial: viaductMaterials?.tunnelGlow ?? null,
+      /*
+       * THE ROOF HAS TO BLOCK THE SUN, and it was never asked to.
+       *
+       * This argument was simply not passed, so it defaulted to false and the
+       * vault was a shadow RECEIVER that cast nothing. Sunlight went straight
+       * through the roof onto the tunnel floor — and with it the shadow of
+       * every car, lamp and building standing on the street above, projected
+       * down into a tunnel they are nowhere near. The tunnel was lit like an
+       * open road with other people's shadows sliding across it.
+       *
+       * The track's own tunnel shell has always cast (see the merged-track
+       * material table); this is the city catching up with it.
+       */
+      castShadows: P.castShadows,
+      // The portal boards are retroreflective after dark, like every real one.
+      uNight,
     });
     if (underpass) { group.add(underpass.group); stats.underpass = underpass.stats; }
     else stats.underpass = null;
@@ -1196,6 +1215,9 @@ export function createModularRoadCity({
           // Where the street has an actual hole in it, so the lanes that cross
           // it stop putting cars in mid-air.
           holeAt: underOpen,
+          // ...and the street whose lanes go down it, so the two inner ones
+          // follow the road rather than being hidden over the hole.
+          underpass: underpassDip(underAt),
           // The motorway's lanes come from the same layout the deck was built
           // from, so the cars cannot end up beside the road they drive on.
           viaduct: viaductAt,
@@ -1325,6 +1347,7 @@ export function createModularRoadCity({
       ? underpassLayout({ P, originCellX, originCellZ, params: P.underpassParams })
       : null;
     underOpen = underpassOpenAt(underAt);
+    underRoof = underpassRoofAt(underAt);
     // A metre of margin: a lamp post ON the lip of a trench is a lamp post
     // hanging over a hole.
     underUnder = underpassFootprint(underAt, 1.0);
@@ -1705,6 +1728,21 @@ export function createModularRoadCity({
        * you can see into and never enter.
        */
       if (underOpen && underOpen(x, z)) return NaN;
+      /*
+       * AND NONE UNDER THE ROOF EITHER, which is the half of this that took
+       * three attempts to see. Over the covered section the street is still
+       * there — you drive over it — so it was left alone, and the tunnel stayed
+       * unenterable: a height function has no notion of above or below, so
+       * inside the tunnel this answered "the surface here is street level" and
+       * the suspension spent every frame trying to climb 5.9 m to reach it.
+       * MEASURED: the car entered the portal at 12 m/s and left it going 12 m/s
+       * STRAIGHT UP, one frame after its nose crossed `cov0`. Every scene-wide
+       * triangle scan of that spot found nothing, because the thing throwing
+       * the car was not geometry at all.
+       *
+       * The street above is given back by the lid mesh — see `coveredRect`.
+       */
+      if (underRoof && underRoof(x, z)) return NaN;
       return P.groundY;
     },
     /**

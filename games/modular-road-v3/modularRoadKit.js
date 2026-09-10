@@ -2561,23 +2561,61 @@ const _VAULT_LIGHT_MARGIN = 6.5;
  * cheaper inner-only collision, glow is a handful of boxes not a strip on
  * every metre and not a shader on every shell pixel.
  */
+/**
+ * ── THE ARCH, AS NUMBERS ───────────────────────────────────────────────────
+ *
+ * The two cross-sections `buildVaultTunnel` sweeps: the bore you drive through
+ * and the outside of the shell around it, in profile coordinates (x across from
+ * the centreline, y up from the road surface).
+ *
+ * A caller that has to fill in AROUND the tunnel needs the same arch the sweep
+ * used, to the last decimal — the city's portal headwall cuts this exact
+ * outline out of a rectangle, and an outline computed twice is an outline that
+ * drifts apart. So it is computed once and handed out.
+ */
+export function vaultProfiles(profileData = buildProfile(), pp = pieceParams) {
+  const inner = _vaultInnerProfile(profileData.hw, pp.tunnelHeight ?? 7.2);
+  return { inner, outer: _offsetProfile(inner, _VAULT_THICK) };
+}
+
 export function buildVaultTunnel(frames, profileData = buildProfile(), pp = pieceParams) {
   const visual = _subsampleFrames(frames, 2.5);
   const coll = _subsampleFrames(frames, 5.2);
   const inner = _vaultInnerProfile(profileData.hw, pp.tunnelHeight ?? 7.2);
   const outer = _offsetProfile(inner, _VAULT_THICK);
   const total = _pathLength(frames);
-  const portal = Math.min(_VAULT_PORTAL, total * 0.2);
+  /*
+   * ── HOW FAR THE BORE IS SET BACK FROM THE MOUTH ────────────────────────────
+   *
+   * The reveal exists so a free-standing tunnel does not read as a paper
+   * cutout: the outer shell starts at the mouth, the inner surface is pulled
+   * back, and the slanted ring between them catches the light from any angle.
+   *
+   * It is exactly wrong when something else already forms the portal face. The
+   * city's underpass ends in a concrete headwall, and the reveal put a 72 cm
+   * RECESS behind it — a ring of nothing between the headwall and the start of
+   * the bore. The headwall is single-sided (it faces the trench), so from
+   * inside the tunnel a grazing sight line went through its back face, into
+   * the void above the vault, and out at the sky. MEASURED from a camera in
+   * the tunnel: 246 background pixels crossing the portal plane at y = -1.05,
+   * across +/-3.3 — just outside the arch, just under its crown.
+   *
+   * So the caller can turn it off, and then the bore starts AT the mouth with
+   * nothing behind the wall to see into. The bevels are skipped rather than
+   * built degenerate.
+   */
+  const portal = Math.min(Math.max(0, pp.portalReveal ?? _VAULT_PORTAL), total * 0.2);
   const innerFrames = _pulledFrames(visual, portal);
   const shellParts = [
     _sweepShellProfile(innerFrames, inner, { color: _VAULT_IN, reverse: false, uvWorld: true }),
     _sweepShellProfile(visual, outer, { color: _VAULT_OUT, reverse: true, uvWorld: true }),
-    // 3D portal reveal: outer starts at the mouth, inner is set back. A
-    // planar cap here was FrontSide-culled from 3/4 and the vault read as a
-    // paper cutout. The slanted ring is visible from every angle.
-    _vaultMouthBevel(visual[0], innerFrames[0], outer, inner, _VAULT_LIP, false),
-    _vaultMouthBevel(visual[visual.length - 1], innerFrames[innerFrames.length - 1], outer, inner, _VAULT_LIP, true),
   ];
+  if (portal > 1e-6) {
+    shellParts.push(
+      _vaultMouthBevel(visual[0], innerFrames[0], outer, inner, _VAULT_LIP, false),
+      _vaultMouthBevel(visual[visual.length - 1], innerFrames[innerFrames.length - 1], outer, inner, _VAULT_LIP, true),
+    );
+  }
   for (let s = _VAULT_RIB_SPACING; s < total - 1.6; s += _VAULT_RIB_SPACING) {
     shellParts.push(_vaultRib(_frameAtArcLength(frames, s), inner));
   }
@@ -2613,7 +2651,21 @@ function _vaultInnerProfile(hw, apex) {
   const rx = xo;
   const ry = Math.max(2.2, apex - spring);
   const skirtY = -(roadParams.thickness + 0.4);
-  const ARC = 12;
+  /*
+   * ── HOW ROUND THE ARCH IS ──────────────────────────────────────────────────
+   *
+   * 24 segments over the half-turn, and the reason is the SILHOUETTE, not the
+   * shading. The shell is one shared vertex grid and `computeVertexNormals`
+   * already smooths across the profile, so the surface was never faceted — but
+   * a 16 m span cut into 12 pieces is 15 degrees a facet, and the OUTLINE of
+   * the portal is what you actually look at from the trench. No amount of
+   * normal smoothing rounds an outline; only segments do.
+   *
+   * It is cheap here: this is a cross-section, so the cost is linear in the
+   * sweep, about 7k triangles across the city's 374 m tunnel against a scene
+   * that draws nine million.
+   */
+  const ARC = 24;
   const prof = [
     { x: -xo, y: skirtY },
     { x: -xo, y: spring },

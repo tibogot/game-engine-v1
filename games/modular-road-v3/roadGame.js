@@ -8574,7 +8574,6 @@ ${e.message}`);
      * parked in the middle of the editor.
      */
     let carGroup = null;
-    let carWasVisible = false;
     // A CLONE, so the live chase camera is never touched — the engine's own
     // frame loop keeps rendering the real view underneath the cover.
     const warmCam = camera.clone();
@@ -8589,7 +8588,7 @@ ${e.message}`);
       // yielding undefined. Same late-bind reason devPanel and bakeCollision
       // hold refs instead of the binding.
       carGroup = vehicleRef?.group ?? null;
-      if (carGroup) { carWasVisible = carGroup.visible; carGroup.visible = true; }
+      if (carGroup) carGroup.visible = true;
       /*
        * TWO FRAMES, NOT ONE, AND THE COMMENT HERE USED TO BE WRONG.
        *
@@ -8894,7 +8893,17 @@ ${e.message}`);
       try {
         if (forcedCityMeshes) { for (const [m, c] of forcedCityMeshes) m.count = c; }
         reflectionEnabled = reflectionWas;   // never leave the mirror off on a throw
-        if (carGroup) carGroup.visible = carWasVisible;
+        /*
+         * RESTORED FROM THE MODE, NOT FROM A SNAPSHOT TAKEN ON THE WAY IN.
+         *
+         * These overlap. Toggling the city starts one while the mode toggle is
+         * still inside its own, and the two `finally` blocks run in the wrong
+         * order: the second captured `true` and put it back, then the first put
+         * back the `false` it had captured in build mode — leaving the player
+         * driving an invisible car. The mode is the only thing that actually
+         * knows whether there should be a car on screen, so ask it.
+         */
+        if (carGroup) carGroup.visible = mode === "drive";
       } catch (e) {
         console.warn("[road] warm-up cleanup failed:", e);
       }

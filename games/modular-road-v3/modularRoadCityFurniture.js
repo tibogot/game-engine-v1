@@ -595,7 +595,7 @@ export function signalGo(time, phase, F) {
   return t < F.signalGreenEnd;
 }
 
-export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [], parkTrees = [], viaduct = null, keepOut = null, holeAt = null }) {
+export function createCityFurniture({ P, originCellX, originCellZ, params: overrides = {}, lamp = null, treeEnv = null, buildingClearance = null, parkBays = [], parkTrees = [], viaduct = null, keepOut = null, holeAt = null, underpass = null }) {
   const F = { ...FURNITURE_DEFAULTS, ...overrides };
   const group = new THREE.Group();
   group.name = "CityFurniture";
@@ -1189,6 +1189,34 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         }
       }
     }
+    /*
+     * ── AND TWO OF THEM GO UNDER ───────────────────────────────────────────────
+     *
+     * The tunnel is not a separate road. It IS this street, for four hundred
+     * metres, and the lanes that fall inside its carriageway should follow it
+     * down rather than being hidden over the hole.
+     *
+     * `dip` is the whole feature: a lane that already has a height gets one
+     * that varies. Everything else — the queue, the four-body fleet, the
+     * colour compaction, the distance cull — is untouched, because none of it
+     * ever looked at y.
+     *
+     * The lane stays a normal street lane in every other respect, and that is
+     * deliberate: it runs the full width of the city, wraps at the edge like
+     * all the others, and obeys the lights at every junction it meets ABOVE
+     * ground. Only while it is actually down in the trench does it stop
+     * looking for signals and turns — see `deep` in stepTraffic. Making the
+     * whole lane a motorway instead would have been less code and would have
+     * had the inner lanes of one street running every red light in the city.
+     */
+    if (underpass) {
+      for (const L of lanes) {
+        if (L.elevated || L.axis !== underpass.axis) continue;
+        if (Math.abs(L.across - underpass.across) > underpass.half) continue;
+        L.dip = underpass.yAt;
+        L.dipTop = underpass.top;
+      }
+    }
   }
   /*
    * ── THE VIADUCT'S LANES ────────────────────────────────────────────────────
@@ -1655,6 +1683,11 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     const tLi = laneIndex.get(laneKey(to.axis, jAlong, hand === 1 ? tPair[0] : tPair[1]));
     if (tLi === undefined) return;          // the city ends here — carry on straight
     const target = lanes[tLi];
+    // AND YOU CANNOT TURN INTO A HOLE. Every junction over the tunnel is
+    // roofed, so a car on the cross street sits directly above a lane that is
+    // six metres down; without this it would turn into it and fall through the
+    // roof of its own city.
+    if (target.dip && target.dipTop - target.dip(L.across) > 0.5) return;
     const toCorner = (target.across - worldAlong) * L.dir;
     if (toCorner > F.trafficTurnLook || toCorner < F.trafficTurnRadius) return;
     c.turnAt = jKey;
@@ -1762,7 +1795,17 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         // A motorway has no signals and no junctions. Both are absences, not
         // special cases: skip the block and the elevated lane simply never
         // finds anything to stop for or turn into.
-        if (!L.elevated && sLocal < blockW) {
+        /*
+         * DOWN IN THE TRENCH THERE IS NOTHING TO OBEY. The junctions this lane
+         * passes under are real, and the lights on them are real, and they are
+         * six metres above the roof — a car in the tunnel that stopped for one
+         * would be stopping for a road it cannot reach. Half a metre of depth
+         * is the threshold, which keeps the shallow ends of the ramps (where
+         * the road IS the street) behaving like street.
+         */
+        const dipY = L.dip ? L.dip(worldAlong) : null;
+        const deep = dipY !== null && L.dipTop - dipY > 0.5;
+        if (!L.elevated && !deep && sLocal < blockW) {
           // Which junction it is: ahead in the direction of travel, so the one
           // BELOW this cell when travelling backwards along the axis.
           const jAlong = L.dir > 0 ? cell : cell - 1;
@@ -1898,6 +1941,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         const along = -half + c.u * L.span;
         x = L.axis === "z" ? L.across : along * L.dir;
         z = L.axis === "z" ? along * L.dir : L.across;
+        // A straight lane that happens to go underground. Same line, same
+        // wrap, same queue — it just stops being flat for four hundred metres.
+        if (L.dip) pathY = L.dip(L.axis === "z" ? z : x);
       }
       const dx = x - cam.x, dz = z - cam.z;
       if (dx * dx + dz * dz > r2) continue;
@@ -1905,18 +1951,18 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
        * NOT OVER A HOLE IN THE STREET.
        *
        * A lane is an infinite straight line and knows nothing about the
-       * underpass; the two inner lanes of the street it runs under pass
-       * directly over the open trench, and the cars in them were driving along
-       * six metres of fresh air. Hiding them is a compromise — the honest
-       * answer is that this street's traffic should DIVE, which is the lane
-       * paths the viaduct already proved — but a car that is not there beats a
-       * car flying over a hole, and the trench is short enough that at the
-       * spacing these run there is rarely more than one per lane inside it.
+       * underpass, so the two inner lanes of the street it runs under used to
+       * pass directly over the open trench, six metres up, on a road that is
+       * not there. They were hidden, which was an honest compromise and looked
+       * like one — cars winking out at the portal and back in at the far end.
        *
-       * Elevated lanes are exempt: they carry their own height and are nowhere
-       * near the street plane.
+       * Those lanes now DIVE instead (`dip`), so this is the backstop rather
+       * than the answer: any lane that still has a constant height and finds
+       * itself over the hole is not drawn. A lane that carries its own height
+       * — elevated on the viaduct, dipped through the tunnel — is exempt,
+       * because it is not on the street plane in the first place.
        */
-      if (holeAt && !L.elevated && holeAt(x, z)) continue;
+      if (holeAt && !L.elevated && !L.dip && holeAt(x, z)) continue;
       /*
        * ── THE CORNER, DRAWN AS A CURVE ───────────────────────────────────────
        *

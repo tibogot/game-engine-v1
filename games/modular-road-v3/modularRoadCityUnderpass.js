@@ -48,9 +48,10 @@ import * as THREE from "three";
 import { Fn, uniform, vec3, mix, smoothstep, float, positionWorld, vertexColor } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
-  computeFrames, buildSweepGeometry, buildProfile, buildVaultTunnel,
+  computeFrames, buildSweepGeometry, buildProfile, buildVaultTunnel, vaultProfiles,
   roadParams, pieceParams,
 } from "./modularRoadKit.js";
+import { createPortalSigns } from "./modularRoadCityPortalSign.js";
 import { concreteDetail } from "./modularRoadCityViaduct.js";
 
 export const UNDERPASS_DEFAULTS = {
@@ -138,6 +139,22 @@ export const UNDERPASS_DEFAULTS = {
   lipWidth: 0.7,
   parapetHeight: 0.95,
 
+  /**
+   * ── THE VAULT'S SHELL IS SOLID ─────────────────────────────────────────────
+   *
+   * True, and it stays true: without it the tunnel wall is a curtain you drive
+   * through into the earth.
+   *
+   * It was switched off for an afternoon while the entry launch was being
+   * hunted, because switching it off made the launch smaller — 41 m/s of
+   * vertical became 12. That was real and it was also a red herring: the
+   * heightfield was lifting the car up INTO the vault, so removing the vault
+   * removed the second half of a collision the first half had already caused.
+   * Chasing the bigger number would have cost the tunnel its walls and fixed
+   * nothing. The cause was `streetHeightAt` — see `coveredRect`.
+   */
+  vaultCollides: true,
+
   colorWall: 0x8d8c85,
   colorWallDirt: 0x46443f,
 };
@@ -192,11 +209,42 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
   const j1 = j0 + nCov;
   const portalIn = oAlong + j0 * pitch + blockW;
   const portalOut = oAlong + j1 * pitch;
-  const a0 = portalIn - U.rampLength;
-  const a1 = portalOut + U.rampLength;
+  /*
+   * ── AND THE MOUTH DOES NOT OPEN ON A ZEBRA ─────────────────────────────────
+   *
+   * The block-grid snapping above keeps the TRENCH clear of the junctions. It
+   * says nothing about the crossings, which are painted in the first and last
+   * `crossInset` metres of every block — and a ramp of exactly `rampLength`
+   * put this mouth 2.0 m into its block and the far one 134 of 136, so both
+   * opened in the middle of a pedestrian crossing and cut the bars in half.
+   *
+   * So each mouth is nudged to the nearest edge of the safe band inside its
+   * own block. It shortens the ramp by a few metres rather than moving it a
+   * whole cell, which is the smallest change that gets the paint out of the
+   * way — the gradient absorbs it without anyone noticing.
+   */
+  const CROSS_CLEAR = (P.streetParams?.crossInset ?? 5.0) + 1.5;
+  /** Nudge `a` clear of the crossings in the block it sits in, moving `dir`. */
+  const clearOfCrossing = (a, dir) => {
+    const rel = a - oAlong;
+    const cell = Math.floor(rel / pitch);
+    const into = rel - cell * pitch;
+    if (into >= CROSS_CLEAR && into <= blockW - CROSS_CLEAR) return a;
+    // Inside a crossing (or in the junction): pull toward the block's middle,
+    // which always shortens the ramp rather than lengthening it into a junction.
+    const want = into < blockW / 2 ? CROSS_CLEAR : blockW - CROSS_CLEAR;
+    void dir;
+    return oAlong + cell * pitch + want;
+  };
+  const a0 = clearOfCrossing(portalIn - U.rampLength, 1);
+  const a1 = clearOfCrossing(portalOut + U.rampLength, -1);
+  /** What the ramp actually turned out to be, after that nudge. */
+  const rampIn = portalIn - a0;
+  const rampOut = a1 - portalOut;
   // The ramp has to fit in the block it descends through, or the hole reaches
   // the junction again and we are back where we started.
   if (U.rampLength > blockW) return null;
+  if (rampIn <= 1 || rampOut <= 1) return null;
   if (a0 < cAlong - half || a1 > cAlong + half) return null;
 
   /*
@@ -210,9 +258,12 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
   const at = (a, y) => (axis === "x" ? new THREE.Vector3(a, y, across)
     : new THREE.Vector3(across, y, a));
   const depthAt = (a) => {
-    // 0 at both mouths, 1 by the portal and all the way between them.
-    const dIn = (a - a0) / U.rampLength;
-    const dOut = (a1 - a) / U.rampLength;
+    // 0 at both mouths, 1 by the portal and all the way between them. The two
+    // ramps are measured SEPARATELY because the crossing nudge can shorten one
+    // and not the other; using a single nominal length made the shorter ramp
+    // reach full depth before its portal.
+    const dIn = (a - a0) / rampIn;
+    const dOut = (a1 - a) / rampOut;
     const t = Math.min(dIn, dOut);
     if (t >= 1) return 1;
     return ease((t - U.rampHold) / (1 - U.rampHold));
@@ -294,14 +345,55 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
   const rect = (lo, hi, h) => (axis === "x"
     ? { minX: lo, maxX: hi, minZ: across - h, maxZ: across + h }
     : { minX: across - h, maxX: across + h, minZ: lo, maxZ: hi });
+  /*
+   * ── THE MOUTH TUCKS UNDER THE ROAD ─────────────────────────────────────────
+   *
+   * The hole used to start exactly at `a0`, where the road also starts, so the
+   * street's cut edge and the road's end edge met precisely — two boundaries on
+   * the same line, and the rasteriser drops a pixel row between them. It showed
+   * as a hairline of daylight straight across the mouth.
+   *
+   * The road's first station is 2 cm PROUD of the street (the same lip the
+   * viaduct's slip roads land on), so a few centimetres of street left in place
+   * under it is hidden by the road itself. Only along the axis: insetting the
+   * SIDES would pull the street's edge inboard of the riser that covers the
+   * step, and trade this seam for a worse one.
+   */
+  const MOUTH_TUCK = 0.3;
   const openRects = [
-    rect(a0, wIn, roadHalf), rect(wIn, cov0, holeHalf),
-    rect(cov1, wOut, holeHalf), rect(wOut, a1, roadHalf),
+    rect(a0 + MOUTH_TUCK, wIn, roadHalf), rect(wIn, cov0, holeHalf),
+    rect(cov1, wOut, holeHalf), rect(wOut, a1 - MOUTH_TUCK, roadHalf),
   ];
+
+  /*
+   * ── THE COVERED RECT, WHICH IS NOT A HOLE AND NOT SOLID EITHER ─────────────
+   *
+   * Between the portals the street is intact — you drive over it — but there is
+   * no ground under it for six and a half metres, and that is a distinction the
+   * city's height function structurally cannot make. `streetHeightAt` is a
+   * height FUNCTION: it answers "the surface here is at y" with no notion of
+   * above or below, so inside the tunnel it kept insisting the surface was at
+   * street level and the wheels obediently tried to climb to it. MEASURED: the
+   * car reached the portal at 12 m/s and left it at +12 m/s VERTICAL.
+   *
+   * So this rect is where the heightfield must shut up, and the lid below is
+   * what gives the street back to the traffic driving over the top. A mesh can
+   * do what a height function cannot, because a mesh has a direction: a ray
+   * cast downward from inside the tunnel starts BELOW the lid and misses it
+   * entirely, which is exactly the answer we need and exactly the answer the
+   * analytic surface has no way to give.
+   */
+  const coveredRect = rect(cov0, cov1, holeHalf);
 
   return {
     axis, across, roadY, top, a0, a1, cov0, cov1, path, openRects, holeHalf,
-    blockSpan: blockW, params: U,
+    /*
+     * Where the hole stops being road-wide and widens to the wall line. Between
+     * the mouth and here the street is cut at the ROAD's edge, and the step
+     * down to the descending road needs a face on it — see the riser.
+     */
+    wIn, wOut,
+    coveredRect, blockSpan: blockW, params: U,
   };
 }
 
@@ -321,6 +413,51 @@ export function underpassOpenAt(layout) {
   };
 }
 
+/**
+ * Is (x, z) over the ROOFED section? The street is real up there and the height
+ * function must still not claim it — see `coveredRect`. Paired with the lid
+ * mesh, which is the surface that actually holds the traffic up.
+ */
+export function underpassRoofAt(layout) {
+  if (!layout) return null;
+  const q = layout.coveredRect;
+  return (x, z) => x >= q.minX && x <= q.maxX && z >= q.minZ && z <= q.maxZ;
+}
+
+/**
+ * ── THE ROAD'S HEIGHT, AS A FUNCTION OF HOW FAR ALONG YOU ARE ────────────────
+ *
+ * For the city's traffic, which drives this street too.
+ *
+ * The traffic model's lane is a straight line across the whole city with one
+ * constant height, and it knew nothing about any of this: the two inner lanes
+ * of the street the tunnel replaces drove straight over the open trench, six
+ * metres up, on a road that is not there. They were being HIDDEN over the hole,
+ * which was honest about being a compromise and looked like one — cars winking
+ * out at the portal and back in at the far end.
+ *
+ * A lane can already carry its own height (that is how the viaduct's traffic
+ * works), so all this has to hand over is the profile. Outside the run it
+ * answers street level, so a lane can call it along its entire length without
+ * knowing where the tunnel starts.
+ */
+export function underpassDip(layout) {
+  if (!layout) return null;
+  const { axis, across, top, a0, a1, path, params: U } = layout;
+  // The path is already sorted along the axis and is straight in XZ — only y
+  // changes — so this is a plain 1-D lookup, not a polyline walk.
+  const as = path.map((q) => (axis === "x" ? q.x : q.z));
+  const ys = path.map((q) => q.y);
+  const yAt = (a) => {
+    if (a <= a0 || a >= a1) return top;
+    let lo = 0, hi = as.length - 1;
+    while (lo < hi - 1) { const m = (lo + hi) >> 1; if (as[m] <= a) lo = m; else hi = m; }
+    const seg = as[hi] - as[lo] || 1e-6;
+    return ys[lo] + (ys[hi] - ys[lo]) * ((a - as[lo]) / seg);
+  };
+  return { axis, across, half: U.roadWidth / 2, a0, a1, top, yAt };
+}
+
 /** The whole run's footprint, for keeping buildings and furniture off it. */
 export function underpassFootprint(layout, pad = 0) {
   if (!layout) return null;
@@ -337,7 +474,22 @@ export function underpassFootprint(layout, pad = 0) {
 /** Concrete for the trench walls — the same faked pour the viaduct's piers use. */
 function wallMaterial(U) {
   const detail = concreteDetail(U);
-  const m = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.0 });
+  /*
+   * ── vertexColors STAYS OFF, AND THE CONCRETE IS GREY BECAUSE OF IT ─────────
+   *
+   * The `color` attribute here is not a colour. It is a shading SCALAR packed
+   * into the red channel — `(shade, 0, 0)` — which `colorNode` reads back as
+   * `vertexColor().rgb.r`. That is a fine way to carry one number per vertex,
+   * right up until the material also declares `vertexColors: true`: three then
+   * multiplies the whole diffuse colour by that attribute as if it were a
+   * colour, green and blue are multiplied by ZERO, and every retaining wall in
+   * the underpass renders bright red. `colorWall` is 0x8d8c85 — grey.
+   *
+   * `vertexColor()` reads the attribute directly and does not need the flag,
+   * so turning it off changes nothing except stopping the second, unwanted
+   * multiply.
+   */
+  const m = new THREE.MeshStandardNodeMaterial({ vertexColors: false, roughness: 0.9, metalness: 0.0 });
   m.name = "CityUnderpassWall";
   const base = uniform(new THREE.Color(U.colorWall));
   const dirt = uniform(new THREE.Color(U.colorWallDirt));
@@ -368,7 +520,7 @@ function wallMaterial(U) {
  */
 export function createCityUnderpass({
   layout, roadMaterial = null, vaultMaterial = null, glowMaterial = null,
-  castShadows = false,
+  castShadows = false, uNight = null,
 }) {
   if (!layout) return null;
   const U = layout.params;
@@ -475,7 +627,12 @@ export function createCityUnderpass({
     && alongOf(i) <= layout.cov1 + 1e-6);
   let vault = null, glow = null, vaultCollider = null;
   if (covFrames.length > 2) {
-    const pp = { ...pieceParams, tunnelHeight: U.tunnelHeight };
+    /*
+     * NO PORTAL REVEAL. The headwall IS the portal face here, and the reveal's
+     * set-back bore would leave a ring of nothing behind it that you can see
+     * the sky through from inside — see `portalReveal` in the kit.
+     */
+    const pp = { ...pieceParams, tunnelHeight: U.tunnelHeight, portalReveal: 0 };
     const built = buildVaultTunnel(covFrames, profile, pp);
     if (built?.shell) {
       vault = new THREE.Mesh(built.shell,
@@ -530,6 +687,25 @@ export function createCityUnderpass({
       return pos.length / 3 - 1;
     };
     const quad = (a, b, c, d) => { idx.push(a, b, c, a, c, d); };
+    /**
+     * The same quad, wound so its face points the way you asked for.
+     *
+     * Winding has been the bug three times in this file now — the trench wall
+     * backfacing, the portal headwall invisible from the trench — and every
+     * time it was someone reasoning about `right x up` and getting it wrong.
+     * The vertices already know the answer, so ask them.
+     */
+    const quadFacing = (a, b, c, d, wx, wy, wz) => {
+      const ux = pos[b * 3] - pos[a * 3];
+      const uy = pos[b * 3 + 1] - pos[a * 3 + 1];
+      const uz = pos[b * 3 + 2] - pos[a * 3 + 2];
+      const vx = pos[c * 3] - pos[a * 3];
+      const vy = pos[c * 3 + 1] - pos[a * 3 + 1];
+      const vz = pos[c * 3 + 2] - pos[a * 3 + 2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      if (nx * wx + ny * wy + nz * wz >= 0) quad(a, b, c, d);
+      else quad(a, d, c, b);
+    };
     const V = new THREE.Vector3();
     const atFrame = (i, lat, y) => {
       const f = frames[i];
@@ -569,21 +745,59 @@ export function createCityUnderpass({
      * The range is inclusive at both portals so the trench wall and the vault
      * meet rather than leaving a gap you can see daylight through.
      */
+    /*
+     * ── THE BARRIER STARTS WHERE THE RAMP DOES ─────────────────────────────────
+     *
+     * It used to start at 30 cm of depth, which is where the HOLE widens to the
+     * wall line — a sensible-looking rule that left the first thirty metres of
+     * descending ramp with nothing beside it at all. There is a drop there the
+     * moment the road starts going down, so that is where the barrier belongs.
+     *
+     * What genuinely cannot start early is the LIP: it lies flush with the
+     * street, and for that first stretch the street is still there (the hole is
+     * only as wide as the road), so a lip would be two coplanar surfaces
+     * fighting over the same pixels — the "floating road" bug again. So the lip
+     * collapses onto the wall's outer face until the hole widens to meet it,
+     * and only then opens out. Degenerate quads have no area and cost nothing.
+     */
     for (let i = 0; i < frames.length; i++) {
       const y = frames[i].pos.y;
-      // Only where there is actually a wall to build — and the threshold is the
-      // layout's, not a second opinion: the hole widens to the wall line at
-      // exactly this depth, so a wall that started later would leave a slot.
-      if (layout.top - y < 0.30) continue;
+      /*
+       * FROM THE VERY FIRST STATION. There used to be a 2 cm threshold here —
+       * "no drop yet, nothing to fall off" — and it left a sliver at the mouth
+       * where the road has begun to curve away but the barrier has not started,
+       * with nothing on the step between them. The barrier simply begins where
+       * the ramp does; where the drop is nil the section is degenerate and
+       * costs nothing, and a metre later it is a real wall.
+       */
       if (!isOpen(i)) continue;
+      const a = alongAt(i);
+      const wide = a > layout.wIn - 1e-6 && a < layout.wOut + 1e-6;
+      const lipHere = wide ? lip : outer;
       const capY = layout.top + U.parapetHeight;
-      rowAlong.push(alongAt(i));
+      /*
+       * ── THE FOOT GOES UNDER BOTH SURFACES ──────────────────────────────────
+       *
+       * It used to sit at `y`, the ROAD's height at this station — which is
+       * where the wall meets the road down in the trench, and wrong at the
+       * mouth. Out there the wall stands on the STREET, laterally clear of the
+       * road; and for the first few metres the road is up to 2 cm PROUD of the
+       * street (the mouth lip). So the wall's foot was placed 2 cm above the
+       * ground it stands on, and it floated: a hairline of daylight under the
+       * whole barrier, exactly as reported.
+       *
+       * A quarter metre below the lower of the two costs four triangles' worth
+       * of buried wall and cannot leave a gap however the ramp is regraded. The
+       * road and the gutter hide it from inside the trench.
+       */
+      const footY = Math.min(y, layout.top) - 0.25;
+      rowAlong.push(a);
       for (const s of [-1, 1]) {
-        push(atFrame(i, s * inner, y), 1.0);        // 0 inner foot
+        push(atFrame(i, s * inner, footY), 1.0);    // 0 inner foot
         push(atFrame(i, s * inner, capY), 1.0);     // 1 inner top
         push(atFrame(i, s * outer, capY), 0.9);     // 2 outer top
         push(atFrame(i, s * outer, layout.top), 0.9); // 3 outer at street
-        push(atFrame(i, s * lip, layout.top), 0.8);   // 4 lip edge
+        push(atFrame(i, s * lipHere, layout.top), 0.8); // 4 lip edge
       }
     }
     /*
@@ -598,6 +812,35 @@ export function createCityUnderpass({
      */
     const per = 10;
     const rows = pos.length / 3 / per;
+    /*
+     * ── AND ITS ENDS ARE CLOSED ────────────────────────────────────────────────
+     *
+     * The wall is a swept RIBBON — five points per side, stitched station to
+     * station — so where a run begins or ends the cross-section is an open
+     * edge, and a ribbon seen end-on is a surface with nothing behind it. You
+     * could look straight into the parapet and out the far side of the world.
+     *
+     * `runEnds` finds them properly rather than assuming there are two: rows
+     * are skipped at grade and under the roof, so the mesh holds several
+     * separate runs and each one has two ends of its own.
+     */
+    const runEnds = [];
+    for (let r = 0; r < rows; r++) {
+      const prev = r > 0 && Math.abs(rowAlong[r] - rowAlong[r - 1]) <= U.step * 2.5;
+      const next = r + 1 < rows && Math.abs(rowAlong[r + 1] - rowAlong[r]) <= U.step * 2.5;
+      if (!prev) runEnds.push([r, -1]);
+      if (!next) runEnds.push([r, 1]);
+    }
+    for (const [r, dir] of runEnds) {
+      for (let s = 0; s < 2; s++) {
+        const o = r * per + s * 5;
+        // The five points close back to the foot, so the cap is the wall's
+        // actual section: fan it from there.
+        const want = [dir * (layout.axis === "x" ? 1 : 0), 0, dir * (layout.axis === "x" ? 0 : 1)];
+        quadFacing(o + 0, o + 1, o + 2, o + 3, want[0], want[1], want[2]);
+        quadFacing(o + 0, o + 3, o + 4, o + 0, want[0], want[1], want[2]);
+      }
+    }
     for (let r = 0; r + 1 < rows; r++) {
       const gap = Math.abs(rowAlong[r + 1] - rowAlong[r]);
       if (gap > U.step * 2.5) continue;
@@ -611,13 +854,397 @@ export function createCityUnderpass({
         }
       }
     }
+    /*
+     * ── THE PORTAL HEADWALL: A ROUND BORE THROUGH A SQUARE BLOCK ─────────────
+     *
+     * The vault is a SHELL — a curved surface, not a solid. Above its crown,
+     * between the arch and the street half a metre over it, there was no
+     * geometry at all, and the street plane up there is single-sided. So from
+     * the open trench you looked OVER the top of the arch, through the earth,
+     * and out at the far side of the city; from the ramp the same void showed
+     * you the sky.
+     *
+     * Filling that void with a solid would be the wrong shape of fix — nobody
+     * can ever get inside it, so it is hundreds of metres of triangles that
+     * exist to be invisible. The void is only EXPOSED where the tunnel is cut
+     * open, which is its two ends. So each end gets a flat wall with the arch
+     * cut out of it: the cheapest way to close the hole, and exactly what a
+     * real underpass is — a round bore through a square concrete block.
+     *
+     * It is written into the trench wall's OWN arrays rather than made into a
+     * mesh of its own, which buys two things for nothing: it is the same
+     * material so it costs no extra draw, and the trench wall is already in
+     * the SOLIDS channel, so the headwall stops a car like the wall it is.
+     *
+     * The outline is the vault's own outer profile, taken from the kit instead
+     * of re-derived here — a hole computed twice is a hole that drifts away
+     * from the thing it has to fit. The rectangle around it runs wall to wall
+     * and from under the road up to street level, so it also caps the open
+     * ends the trench walls leave behind when they stop at the portal.
+     *
+     * Between the two, a fan: each arch point is pushed straight out from the
+     * centre of the bore until it lands on the rectangle, and consecutive
+     * pairs make a quad. Radial projection preserves the order around the
+     * boundary, so the ring closes without a triangulator.
+     */
+    if (covFrames.length > 2) {
+      const { inner, outer } = vaultProfiles(profile, { ...pieceParams, tunnelHeight: U.tunnelHeight });
+      /*
+       * ── THE HOLE IS THE BORE, NOT THE OUTSIDE OF THE SHELL ─────────────────
+       *
+       * `inner`, and the difference is 78 cm of open ring round the mouth.
+       *
+       * Cutting the shell's OUTER outline out of the wall leaves the whole
+       * thickness of the vault uncovered at the portal, and that ring is a way
+       * in: a sight line entering it near the crown passes through the outer
+       * shell from the inside — which is a BACK face, so it is not drawn and
+       * does not stop anything — into the void above the tunnel, and out
+       * through the single-sided street plane to the sky. MEASURED in the
+       * running game: rays crossing the portal plane at y = -0.27, above the
+       * bore's ceiling at -0.90 and below the shell's crown at -0.12, still
+       * reached the sky.
+       *
+       * So the wall closes everything except the hole you actually drive
+       * through. The vault's own mouth bevel ends up behind it and is no
+       * longer the thing holding that ring shut, which is the point — a
+       * reveal is a decoration, and this has to be a wall.
+       */
+      const hole = inner;
+      const yTop = layout.top - layout.roadY;
+      let yBot = 0, aLo = Infinity, aHi = -Infinity, aWide = 0;
+      for (const q of hole) {
+        yBot = Math.min(yBot, q.y);
+        aLo = Math.min(aLo, q.y);
+        aHi = Math.max(aHi, q.y);
+      }
+      // The block still has to CONTAIN the shell, which is wider than the bore
+      // — and the trench it plugs, which is wider than both.
+      for (const q of outer) aWide = Math.max(aWide, Math.abs(q.x));
+      aWide = Math.max(aWide, layout.holeHalf);
+      yBot -= 0.15;
+      /*
+       * THE BLOCK HAS TO BE WIDER THAN THE BORE, and the trench wall is not.
+       *
+       * The obvious width is the trench wall's outer face — but the vault's
+       * SHELL is thick, and its outside (8.62 m) reaches past that wall
+       * (8.34 m). Sized to the wall, the ring inverted around the springing:
+       * the arch was already outside the rectangle there, the projection had
+       * nowhere to push it, and the quads collapsed — leaving a 4.3 m tall
+       * slot down each side of the portal, which is precisely the gap you
+       * could see the city through. So the rectangle is sized off the arch it
+       * has to contain, never off the wall beside it.
+       */
+      const W = Math.max(profile.hw + U.wallGap + U.wallThick, aWide + 0.5);
+      void outer;
+      // The point to push out FROM. The middle of the bore's own height, on
+      // the centreline: inside the arch for any profile this can produce.
+      const cy = (aLo + aHi) / 2;
+      const toRect = (q) => {
+        const dx = q.x, dy = q.y - cy;
+        let t = Infinity;
+        if (Math.abs(dx) > 1e-9) t = Math.min(t, (dx > 0 ? W : -W) / dx);
+        if (Math.abs(dy) > 1e-9) t = Math.min(t, ((dy > 0 ? yTop : yBot) - cy) / dy);
+        if (!Number.isFinite(t) || t < 1) t = 1;   // already outside: leave it
+        return { x: dx * t, y: cy + dy * t };
+      };
+      /*
+       * ── AND THE RING HAS TO GO ROUND THE CORNERS ────────────────────────────
+       *
+       * Projecting each arch point outward and joining consecutive pairs makes
+       * a strip whose outer edge is a straight CHORD between the two landing
+       * points. Wherever those two land on different sides of the rectangle,
+       * that chord cuts the corner off, and the triangle it cuts away is a
+       * hole. MEASURED: 9 of 261 probes at the top corners still saw straight
+       * through a portal that was otherwise closed.
+       *
+       * So the corner is inserted where it belongs. Every point — arch and
+       * corner alike — has an angle about the centre of the bore, the arch's
+       * angles decrease monotonically along the profile, and a corner is put
+       * into whichever gap its own angle falls in. Each span then fans from
+       * the arch point through however many corners it swept past.
+       */
+      const angOf = (x, y) => Math.atan2(y - cy, x);
+      const th = hole.map((q) => angOf(q.x, q.y));
+      // Unwrapped, because atan2 comes back in (-PI, PI] and this outline
+      // starts below the left skirt and ends below the right one — it crosses
+      // the branch cut, and an angle that jumps by 2PI is not comparable.
+      for (let k = 1; k < th.length; k++) {
+        while (th[k] > th[k - 1]) th[k] -= Math.PI * 2;
+      }
+      const corners = [
+        { x: W, y: yTop }, { x: -W, y: yTop }, { x: -W, y: yBot }, { x: W, y: yBot },
+      ].map((q) => ({ q, a: angOf(q.x, q.y) }));
+      /** The corners swept between two arch angles, in the order they occur. */
+      const between = (hi, lo) => {
+        const got = [];
+        for (const c of corners) {
+          for (const k of [-2, -1, 0, 1, 2]) {
+            const a = c.a + k * Math.PI * 2;
+            if (a < hi - 1e-9 && a > lo + 1e-9) got.push({ a, q: c.q });
+          }
+        }
+        return got.sort((p1, p2) => p2.a - p1.a).map((e) => e.q);
+      };
+
+      const _hv = new THREE.Vector3();
+      const capAt = (fr, outward) => {
+        const put = (q) => {
+          const at = pos.length / 3;
+          _hv.copy(fr.pos).addScaledVector(fr.right, q.x).addScaledVector(fr.up, q.y);
+          pos.push(_hv.x, _hv.y, _hv.z);
+          col.push(1, 1, 1);
+          return at;
+        };
+        /*
+         * WINDING FROM THE FRAME, NOT FROM A GUESS. The two ends face opposite
+         * ways, so one of them has to be wound backwards — and a headwall
+         * wound the wrong way is invisible from precisely the side you stand
+         * on to look at it, which is the same trap the trench walls hit.
+         */
+        const tri = (a, b, c) => {
+          if (outward > 0) idx.push(a, c, b);
+          else idx.push(a, b, c);
+        };
+        let pA = put(hole[0]), qA = put(toRect(hole[0]));
+        for (let k = 0; k + 1 < hole.length; k++) {
+          const pB = put(hole[k + 1]), qB = put(toRect(hole[k + 1]));
+          let prev = qA;
+          for (const c of between(th[k], th[k + 1])) {
+            const ci = put(c);
+            tri(pA, prev, ci);
+            prev = ci;
+          }
+          tri(pA, prev, qB);
+          tri(pA, qB, pB);
+          pA = pB; qA = qB;
+        }
+      };
+      /*
+       * WHICH WAY EACH CAP FACES, and it was backwards.
+       *
+       * A back face is not drawn, so a headwall wound the wrong way is
+       * invisible from precisely the side you stand on to look at it — and
+       * the first version of this test could not tell, because it only asked
+       * whether the ray hit ANYTHING: the vault three tenths of a metre
+       * further on caught every ray and the wall was never missed. Measured
+       * from a fixed eye in the trench: nearest hit 12.314 m for a portal at
+       * 12.000 m, on `CityUnderpassVault`.
+       */
+      capAt(covFrames[0], 1);
+      capAt(covFrames[covFrames.length - 1], -1);
+    }
+
+    /*
+     * ── THE RISER AT THE MOUTH: A STEP IS NOT A SURFACE ────────────────────────
+     *
+     * From the mouth to `wIn` the street is cut at the ROAD's edge (7.50 m),
+     * because there is no wall yet to fill anything wider. Meanwhile the road
+     * is already going down. So the street's cut edge and the road below it are
+     * separated by a step — nought to thirty centimetres over about thirty
+     * metres — and NOTHING was on the vertical face of that step.
+     *
+     * A step with no face is a hole. The street plane is single-sided, so from
+     * a low camera on the ramp you looked in through the slot, under the
+     * street, and straight out at the world beyond: the two bright wedges down
+     * either side of the ramp, widening exactly as the road drops away.
+     *
+     * Found by painting the sky magenta and looking, which is worth writing
+     * down: the ground here is the terrain CLIPMAP, a displaced grid whose hole
+     * is cut in the shader, so raycasting the scene says "closed" for a surface
+     * that is not drawn. Geometry probes cannot see this class of bug at all.
+     */
+    {
+      const half = U.roadWidth / 2;
+      const rRow = [], rAlong = [];
+      for (let i = 0; i < frames.length; i++) {
+        const y = frames[i].pos.y;
+        const a = alongAt(i);
+        // Only where the hole is still road-wide: past `wIn` the wall and its
+        // lip cover the step, and doubling up there would fight them.
+        if (a > layout.wIn + 1e-6 && a < layout.wOut - 1e-6) continue;
+        // No threshold, for the same reason the wall has none: the sliver of
+        // step right at the mouth is exactly where a threshold leaves a hole.
+        rAlong.push(a);
+        const row = [];
+        for (const s2 of [-1, 1]) {
+          row.push(push(atFrame(i, s2 * half, y), 0.5));
+          row.push(push(atFrame(i, s2 * half, layout.top), 0.65));
+        }
+        rRow.push(row);
+      }
+      for (let r = 0; r + 1 < rRow.length; r++) {
+        if (Math.abs(rAlong[r + 1] - rAlong[r]) > U.step * 2.5) continue;
+        const a = rRow[r], b = rRow[r + 1];
+        const f = frames[0];
+        // Facing IN, toward the road, which is the only side anyone stands on.
+        for (const [s2, i0, i1] of [[-1, 0, 1], [1, 2, 3]]) {
+          quadFacing(a[i0], a[i1], b[i1], b[i0],
+            f.right.x * -s2, 0, f.right.z * -s2);
+        }
+      }
+    }
+
+    /*
+     * ── THE GUTTER, WHICH IS THE 34 cm NOBODY OWNED ────────────────────────────
+     *
+     * The road is swept `roadWidth` wide, so its edge is at 7.50 m. The wall's
+     * inner face is at `roadWidth / 2 + wallGap` = 7.84, because that is where
+     * the VAULT springs from and the two have to be one surface through the
+     * portal. Which left a 34 cm slot between the road and the wall, running
+     * the whole length of the trench with nothing under it — you looked down
+     * it and out at the sky, which is what "at the kerbs it's open" was.
+     *
+     * Neither side was wrong to be where it is, so the fix is not to move
+     * either: it is to floor the gap. A real cut has exactly this — a drainage
+     * channel at the foot of the retaining wall — so it costs two triangles a
+     * station a side and looks like something rather than like a patch.
+     *
+     * Built over the WHOLE run rather than only the open part, because the
+     * same 34 cm exists under the roof; there the vault's skirt hides it from
+     * most angles, which is not the same as closing it.
+     */
+    {
+      const gRow = [];
+      const gAlong = [];
+      const gFrame = [];
+      for (let i = 0; i < frames.length; i++) {
+        const y = frames[i].pos.y;
+        if (layout.top - y < 0.30) continue;   // at grade the street IS the floor
+        gAlong.push(alongAt(i));
+        gFrame.push(i);
+        const row = [];
+        for (const s of [-1, 1]) {
+          row.push(push(atFrame(i, s * (U.roadWidth / 2), y), 0.55));
+          row.push(push(atFrame(i, s * inner, y), 0.7));
+        }
+        gRow.push(row);
+      }
+      /*
+       * ── AND A FACE ON THE STEP WHERE THE GUTTER BEGINS ─────────────────────
+       *
+       * The hole in the street widens from the road's edge to the wall line at
+       * exactly this station. On the mouth side of it the street covers that
+       * 34 cm strip; on the tunnel side the gutter does, thirty centimetres
+       * lower. Between the two is a transverse step, and a step with no face is
+       * a hole — twelve pixels of it, which is what was left of "you can see
+       * the sky at the kerbs" after the long wedges were closed.
+       *
+       * MEASURED by counting magenta pixels against a magenta sky and
+       * unprojecting them: both specks crossed street level at across +/-7.83,
+       * along -135.8, which is the wall line at the station where it starts.
+       */
+      for (const [r, dir] of [[0, -1], [gRow.length - 1, 1]]) {
+        if (r < 0 || !gRow[r]) continue;
+        const i = gFrame[r], f = frames[i], y = f.pos.y;
+        if (layout.top - y < 0.02) continue;
+        for (const s of [-1, 1]) {
+          const a0i = push(atFrame(i, s * (U.roadWidth / 2), y), 0.5);
+          const a1i = push(atFrame(i, s * inner, y), 0.5);
+          const b1i = push(atFrame(i, s * inner, layout.top), 0.65);
+          const b0i = push(atFrame(i, s * (U.roadWidth / 2), layout.top), 0.65);
+          quadFacing(a0i, a1i, b1i, b0i,
+            f.tangent.x * dir, f.tangent.y * dir, f.tangent.z * dir);
+        }
+      }
+      for (let r = 0; r + 1 < gRow.length; r++) {
+        if (Math.abs(gAlong[r + 1] - gAlong[r]) > U.step * 2.5) continue;
+        const a = gRow[r], b = gRow[r + 1];
+        // Up, on both sides. The winding mirrors between them, which is the
+        // trap the trench walls fell into twice — so it is DERIVED here rather
+        // than written out, and cannot be got backwards.
+        quadFacing(a[0], a[1], b[1], b[0], 0, 1, 0);
+        quadFacing(a[2], a[3], b[3], b[2], 0, 1, 0);
+      }
+    }
+
+    /*
+     * ── AND A WALL ACROSS THE MOUTH ────────────────────────────────────────────
+     *
+     * The parapet runs down both sides of the trench and then simply stopped
+     * at the portal, so the street above the tunnel ended at a bare edge over
+     * a six-metre drop. Nothing real is built like that: the wall turns the
+     * corner and runs across the top of the arch.
+     *
+     * It is a barrier in the honest sense too — the trench wall is in the
+     * SOLIDS channel, so this stops a car on the street from driving off the
+     * end of the hole, which until now only the two side walls did.
+     */
+    /*
+      * The sign is which way the ROOF is from that portal: into the tunnel, so
+      * the wall stands on solid roof rather than hanging over the trench it is
+      * there to fence off. Entry looks forward, exit looks back.
+      */
+    for (const [fr, sgn] of [[covFrames[0], 1], [covFrames[covFrames.length - 1], -1]]) {
+      if (!fr) continue;
+      const y0 = layout.top, y1 = layout.top + U.parapetHeight;
+      const d0 = 0, d1 = U.wallThick;
+      const box = [];
+      // Eight corners: two depths into the roofed side, two heights, two ends.
+      for (const d of [d0, d1]) {
+        for (const yy of [y0, y1]) {
+          for (const lat of [-lip, lip]) {
+            const f = fr;
+            const v = new THREE.Vector3().copy(f.pos)
+              .addScaledVector(f.right, lat)
+              .addScaledVector(f.tangent, sgn * d)
+              .setY(yy);
+            box.push(push(v, 0.9));
+          }
+        }
+      }
+      // d0: 0=(y0,-) 1=(y0,+) 2=(y1,-) 3=(y1,+)   d1: 4..7 likewise
+      const faces = [
+        [0, 2, 3, 1],   // over the trench
+        [4, 6, 7, 5],   // over the street
+        [2, 6, 7, 3],   // the top
+        [0, 1, 5, 4],   // the underside
+        [1, 3, 7, 5],   // one end
+        [0, 2, 6, 4],   // the other
+      ];
+      // Each face is wound to point AWAY from the middle of the box, worked
+      // out from the vertices rather than reasoned about: `right`, `up` and
+      // `tangent` do not have a handedness I am willing to assume, and a face
+      // wound inwards is a hole you can only see from one particular angle.
+      let cx = 0, cy = 0, cz = 0;
+      for (const bi of box) { cx += pos[bi * 3]; cy += pos[bi * 3 + 1]; cz += pos[bi * 3 + 2]; }
+      cx /= box.length; cy /= box.length; cz /= box.length;
+      for (const f of faces) {
+        const i0 = box[f[0]] * 3, i1 = box[f[1]] * 3, i2 = box[f[2]] * 3, i3 = box[f[3]] * 3;
+        const mx = (pos[i0] + pos[i1] + pos[i2] + pos[i3]) / 4 - cx;
+        const my = (pos[i0 + 1] + pos[i1 + 1] + pos[i2 + 1] + pos[i3 + 1]) / 4 - cy;
+        const mz = (pos[i0 + 2] + pos[i1 + 2] + pos[i2 + 2] + pos[i3 + 2]) / 4 - cz;
+        quadFacing(box[f[0]], box[f[1]], box[f[2]], box[f[3]], mx, my, mz);
+      }
+    }
     if (idx.length) {
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
       g.setIndex(idx);
-      g.computeVertexNormals();
-      walls = new THREE.Mesh(g, wallMat);
+      /*
+       * ── FLAT NORMALS, BECAUSE THIS IS A CONCRETE BOX ───────────────────────
+       *
+       * `computeVertexNormals` on an INDEXED mesh averages every face that
+       * shares a vertex. Every corner here is a true 90-degree edge — the
+       * parapet's top, the lip, the gutter, the end caps — so averaging bent
+       * the normal round each of them and smeared the lighting across faces
+       * that are physically at right angles. On the end cap it showed as a soft
+       * cross of highlight where four averaged corners met, which is what
+       * "check the normals" was pointing at.
+       *
+       * Splitting to non-indexed first gives one normal per FACE, which is the
+       * truth for a prismatic solid: every surface in this mesh is flat. It
+       * triples the vertex count of a mesh with about a thousand triangles in
+       * it, which is nothing, and it is the only way to get a hard edge out of
+       * a shared-vertex mesh.
+       *
+       * The VAULT is deliberately not treated this way — it is a swept arch and
+       * wants its normals averaged, which is why it looks round.
+       */
+      const flat = g.toNonIndexed();
+      g.dispose();
+      flat.computeVertexNormals();
+      walls = new THREE.Mesh(flat, wallMat);
       walls.name = "CityUnderpassWalls";
       walls.receiveShadow = true;
       walls.castShadow = false;
@@ -625,6 +1252,47 @@ export function createCityUnderpass({
       group.add(walls);
     }
   }
+
+  /*
+   * ── THE LID: TWO TRIANGLES OF STREET THAT NOBODY CAN SEE ───────────────────
+   *
+   * Invisible, in the DECK channel only, lying at street level across the
+   * roofed section. It exists because the heightfield had to be switched off
+   * there (see `coveredRect`) and something still has to hold up whatever is
+   * driving over the tunnel.
+   *
+   * Invisible because the street plane is already drawn there — this is
+   * collision, not scenery. Deck-only because a solid would be a wall the
+   * chassis fights inside the tunnel; the deck channel is probed by a downward
+   * wheel ray, and a wheel ray fired from six metres under it never reaches it.
+   * That asymmetry IS the fix.
+   */
+  let lid = null;
+  {
+    const q = layout.coveredRect;
+    const y = layout.top;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute([
+      q.minX, y, q.minZ, q.maxX, y, q.minZ, q.maxX, y, q.maxZ, q.minX, y, q.maxZ,
+    ], 3));
+    g.setIndex([0, 2, 1, 0, 3, 2]);   // wound up, so the drivable face is the top
+    g.computeVertexNormals();
+    lid = new THREE.Mesh(g, new THREE.MeshBasicMaterial());
+    lid.name = "CityUnderpassLid";
+    lid.visible = false;
+    lid.frustumCulled = false;
+    group.add(lid);
+  }
+
+  /*
+   * ── THE BOARD OVER THE MOUTH ───────────────────────────────────────────────
+   *
+   * The blue direction band on the headwall. It lives in its own module because
+   * it is signage rather than structure, and because the headwall's proportions
+   * decide its shape — see the note there on why a gantry panel cannot go here.
+   */
+  const signs = createPortalSigns({ layout, uNight, params: U.signParams });
+  if (signs) group.add(signs.mesh);
 
   const tri = (m) => (m ? (m.geometry.index ? m.geometry.index.count / 3
     : m.geometry.attributes.position.count / 3) : 0);
@@ -635,12 +1303,12 @@ export function createCityUnderpass({
     /** `{deck, solids}` — the shape the game's collision bake collects. */
     collisionMeshes() {
       const solids = [];
-      if (vaultCollider) solids.push(vaultCollider);
+      if (vaultCollider && U.vaultCollides) solids.push(vaultCollider);
       if (walls) solids.push(walls);
-      return { deck: [road], solids };
+      return { deck: lid ? [road, lid] : [road], solids };
     },
     stats: {
-      draws: 1 + (vault ? 1 : 0) + (glow ? 1 : 0) + (walls ? 1 : 0),
+      draws: 1 + (vault ? 1 : 0) + (glow ? 1 : 0) + (walls ? 1 : 0) + (signs ? 1 : 0),
       lengthM: Math.round(layout.a1 - layout.a0),
       coveredM: Math.round(layout.cov1 - layout.cov0),
       depthM: +(layout.top - layout.roadY).toFixed(1),
@@ -654,6 +1322,7 @@ export function createCityUnderpass({
       if (glow) glow.geometry.dispose();
       if (vaultCollider) vaultCollider.geometry.dispose();
       if (walls) walls.geometry.dispose();
+      signs?.dispose();
       for (const m of owned) m.dispose();
     },
   };
