@@ -950,7 +950,17 @@
         // 2) Boot the game. Relative specifier: ES imports resolve against this
         //    module's URL (not <base>), and Vite code-splits it at build time.
         const { startRoadGame } = await import("./roadGame.js");
-        await startRoadGame({ onStatus: (s) => (msg.textContent = s) });
+        const game = await startRoadGame({ onStatus: (s) => (msg.textContent = s) });
+        /*
+         * THE HANDLE, ON THE WINDOW.
+         *
+         * Not for the game — nothing in it reads this. It is for the console:
+         * every bug in this project that only appears while DRIVING has had to
+         * be chased by asking the player to reproduce it, because there was no
+         * way to put the car somewhere specific and look at what happened. One
+         * property is cheaper than that, every time.
+         */
+        window.__roadGame = game;
 
         boot.classList.add("hidden");
         setTimeout(() => boot.remove(), 600);

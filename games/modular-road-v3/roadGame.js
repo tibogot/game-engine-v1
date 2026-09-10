@@ -6004,6 +6004,21 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   function fallFloorY() {
     if (terrainOn) return FALL_Y;
+    /*
+     * THE CITY GOES DOWN NOW, and the floor has to follow it.
+     *
+     * This used to be the track's lowest connector and nothing else, which was
+     * right while the track was the only thing in the world with a height. The
+     * city's underpass is a road six and a half metres BELOW the ground plane,
+     * and with a sky track forty metres up the floor landed at minus ten —
+     * putting a perfectly ordinary road underneath it. Driving down the ramp
+     * read as falling out of the world and the player was sent back to the
+     * start every time they went near it.
+     *
+     * Not cached with `trackBottomY`: the city rebuilds far more often than the
+     * track does, and one number off a layout is not worth a second staleness
+     * rule to get wrong.
+     */
     if (trackBottomY === null) {
       // Cheap and rare (once per track edit), but O(pieces) — hence the cache
       // rather than doing it in checkFall, which runs every frame.
@@ -6015,7 +6030,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       }
       trackBottomY = Number.isFinite(lo) ? lo : 0;
     }
-    return trackBottomY - SKY_FALL_MARGIN;
+    let floor = trackBottomY;
+    if (city && cityWanted) {
+      const cityLow = city.roadFloorY?.();
+      if (Number.isFinite(cityLow)) floor = Math.min(floor, cityLow);
+    }
+    return floor - SKY_FALL_MARGIN;
   }
 
   /**

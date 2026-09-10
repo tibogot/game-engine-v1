@@ -1661,6 +1661,25 @@ export function createModularRoadCity({
      * eleven metres in the air. An elevated road is real geometry, resolved
      * against the same BVH the track uses.
      */
+    /**
+     * ── THE LOWEST POINT OF ANY CITY ROAD ──────────────────────────────────────
+     *
+     * `Infinity` when the city has none, so a caller can `Math.min` it with
+     * whatever else it knows about without a special case.
+     *
+     * This exists because the kill floor used to be derived from the TRACK
+     * alone, on the reasonable assumption that nothing else in the world went
+     * downward. The underpass broke that: it is a road six and a half metres
+     * below the ground plane, and a sky track forty metres up put the floor at
+     * minus ten — so driving down the ramp was indistinguishable from falling
+     * out of the world, and the game sent the player back to the start every
+     * time they approached it.
+     */
+    roadFloorY() {
+      let lo = Infinity;
+      if (underAt) lo = Math.min(lo, underAt.roadY - 1.5);
+      return lo;
+    },
     roadCollision() {
       const v = viaduct ? viaduct.collisionMeshes() : { deck: [], solids: [] };
       const u = underpass ? underpass.collisionMeshes() : { deck: [], solids: [] };
