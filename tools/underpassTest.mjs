@@ -252,7 +252,22 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
    * be lit. They are frustum-culled and 34 m deep, so in practice you are
    * inside at most one of them at a time.
    */
-  check("seven draws for the whole thing", st.draws === 7, `${st.draws}`);
+  /*
+   * TEN: road, vault, glow, walls, portal signs, two light shafts, and the
+   * fit-out's three — steel, emergency niches, overhead boards.
+   *
+   * Asserted rather than printed because everything here is deliberately merged
+   * into as few meshes as it can be. The gutter, risers, headwalls and mouth
+   * barriers all live in the WALL mesh; the fans, trays, hangers and niche
+   * bodies are ONE merged steel mesh however many of them there are. An
+   * eleventh draw means something was built as its own mesh that should have
+   * been merged into an existing one.
+   *
+   * The two shafts are the one place that rule is knowingly broken: each needs
+   * its own portal plane, and a single hull covering both would span the whole
+   * tunnel and shade a fortune in fragments that can never be lit.
+   */
+  check("ten draws for the whole thing", st.draws === 10, `${st.draws}`);
   check("and it stays under 20k triangles",
     st.roadTris + st.vaultTris + st.wallTris < 20000,
     `${st.roadTris + st.vaultTris + st.wallTris}`);

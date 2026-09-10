@@ -53,6 +53,7 @@ import {
 } from "./modularRoadKit.js";
 import { createPortalSigns } from "./modularRoadCityPortalSign.js";
 import { createPortalShafts } from "./modularRoadCityPortalShaft.js";
+import { createTunnelFitOut } from "./modularRoadCityTunnelFit.js";
 import { concreteDetail } from "./modularRoadCityViaduct.js";
 
 export const UNDERPASS_DEFAULTS = {
@@ -159,6 +160,10 @@ export const UNDERPASS_DEFAULTS = {
   /** Daylight falling through the mouths — see modularRoadCityPortalShaft.js. */
   shafts: true,
   shaftParams: null,
+
+  /** Fans, boards, trays and niches — see modularRoadCityTunnelFit.js. */
+  fitOut: true,
+  fitParams: null,
 
   colorWall: 0x8d8c85,
   colorWallDirt: 0x46443f,
@@ -1316,6 +1321,21 @@ export function createCityUnderpass({
     profiles: vaultProfiles(profile, { ...pieceParams, tunnelHeight: U.tunnelHeight }),
     params: U.shaftParams,
   });
+  /*
+   * ── WHAT IS BOLTED TO THE INSIDE ───────────────────────────────────────────
+   *
+   * Jet fans, overhead boards, cable trays and emergency niches. Its own module
+   * because it is fit-out rather than structure, and it takes the same bore the
+   * vault was swept from so nothing has to be kept in step by hand.
+   */
+  const fit = U.fitOut === false ? null : createTunnelFitOut({
+    layout,
+    profiles: vaultProfiles(profile, { ...pieceParams, tunnelHeight: U.tunnelHeight }),
+    glowMaterial,
+    params: U.fitParams,
+  });
+  if (fit) group.add(fit.group);
+
   if (shafts) {
     group.add(shafts.group);
     // Reachable from the scene graph so the shaft can be tuned against the
@@ -1343,7 +1363,7 @@ export function createCityUnderpass({
     },
     stats: {
       draws: 1 + (vault ? 1 : 0) + (glow ? 1 : 0) + (walls ? 1 : 0) + (signs ? 1 : 0)
-      + (shafts ? shafts.stats.draws : 0),
+      + (shafts ? shafts.stats.draws : 0) + (fit ? fit.stats.draws : 0),
       lengthM: Math.round(layout.a1 - layout.a0),
       coveredM: Math.round(layout.cov1 - layout.cov0),
       depthM: +(layout.top - layout.roadY).toFixed(1),
@@ -1359,6 +1379,7 @@ export function createCityUnderpass({
       if (walls) walls.geometry.dispose();
       signs?.dispose();
       shafts?.dispose();
+      fit?.dispose();
       for (const m of owned) m.dispose();
     },
   };
