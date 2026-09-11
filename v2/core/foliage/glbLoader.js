@@ -6,15 +6,13 @@
  */
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
+import { setupDraco } from "../dracoLoader.js";
 
-const _draco = new DRACOLoader();
-_draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
-_draco.setDecoderConfig({ type: "js" });
-
-const _loader = new GLTFLoader();
-_loader.setDRACOLoader(_draco);
+// Draco comes from ../dracoLoader.js — see the note there. This file used to
+// configure its own, pointed at a different CDN and a different build from the
+// two other places that do the same thing.
+const _loader = setupDraco(new GLTFLoader());
 
 export function getSharedGltfLoader() { return _loader; }
 

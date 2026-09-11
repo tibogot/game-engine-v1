@@ -90,7 +90,24 @@ export function createFlightMode({
       loadPlane(urlIdx + 1);
     }
   }
-  loadPlane();
+  /*
+   * LOADED ON FIRST ENTRY, NOT AT CONSTRUCTION.
+   *
+   * `startV3App` builds every play mode whether or not a game uses one, so a
+   * racing game that never walks, flies or drives this car was still fetching
+   * and parsing its model on every boot. The load now waits for `resetFrom`,
+   * which is the one call every route into this mode goes through.
+   *
+   * Nothing downstream needed changing: the model has ALWAYS been async, so
+   * `loaded === false` is a state this mode already had to survive for the
+   * first moments after boot. Deferring only moves when that window happens.
+   */
+  let _requested = false;
+  function ensureLoaded() {
+    if (_requested) return;
+    _requested = true;
+    loadPlane();
+  }
 
   const state = {
     get heading() { return ctrl.heading; },
@@ -99,6 +116,7 @@ export function createFlightMode({
   };
 
   function resetFrom(x, y, z, yaw) {
+    ensureLoaded();
     ctrl.reset(x, y, z, yaw);
     _flyCamYaw = null;
     gun.clear();
@@ -218,6 +236,8 @@ export function createFlightMode({
 
   return {
     get loaded() { return planeLoaded; },
+    /** Start the model load early, for a caller that wants it warm. */
+    ensureLoaded,
     get state() { return state; },
     get speed() { return ctrl.speed(); },
     get controller() { return ctrl; },

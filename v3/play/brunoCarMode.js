@@ -152,9 +152,27 @@ export function createBrunoCarMode({
       (err) => console.warn(`[Play] Bruno load failed (${CAR_MODEL}):`, err),
     );
   }
-  load();
+  /*
+   * LOADED ON FIRST ENTRY, NOT AT CONSTRUCTION.
+   *
+   * `startV3App` builds every play mode whether or not a game uses one, so a
+   * racing game that never walks, flies or drives this car was still fetching
+   * and parsing its model on every boot. The load now waits for `resetFrom`,
+   * which is the one call every route into this mode goes through.
+   *
+   * Nothing downstream needed changing: the model has ALWAYS been async, so
+   * `loaded === false` is a state this mode already had to survive for the
+   * first moments after boot. Deferring only moves when that window happens.
+   */
+  let _requested = false;
+  function ensureLoaded() {
+    if (_requested) return;
+    _requested = true;
+    load();
+  }
 
   function resetFrom(x, y, z, yaw) {
+    ensureLoaded();
     const gy = sampleGroundY(x, z);
     heading = yaw;
     camYaw = yaw;

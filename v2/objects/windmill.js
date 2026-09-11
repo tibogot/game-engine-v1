@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+import { setupDraco } from "../core/dracoLoader.js";
 
 /**
  * Wind turbine GLB along a spline — static tower/nacelle, spinning hub + blades.
@@ -31,14 +31,14 @@ function sideSign(side) {
   return side === "left" ? 1 : -1;
 }
 
-function setupDracoLoader(loader) {
-  const draco = new DRACOLoader();
-  draco.setDecoderPath(
-    "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/",
-  );
-  loader.setDRACOLoader(draco);
-  return draco;
-}
+// Draco now comes from v2/core/dracoLoader.js — one decoder for the whole
+// project, vendored at /draco/ from the installed three, instead of this file
+// and two others each fetching a different build from a different CDN.
+//
+// The loader is SHARED, so it must not be disposed when this load finishes:
+// disposing it tore down the worker pool that every later GLB decode needs.
+// The old local instance was created and destroyed per load, which is what
+// made the dispose correct then and wrong now.
 
 /** One-time reparent: only Plane + Circle002 under a pivot at the hub. */
 function prepareWindmillTemplate(gltfScene) {
@@ -81,12 +81,10 @@ export function preloadWindmillModel(modelPath = WINDMILL_DEFAULTS.modelPath) {
   if (_loadPromise) return _loadPromise;
 
   _loadPromise = new Promise((resolve, reject) => {
-    const loader = new GLTFLoader();
-    const draco = setupDracoLoader(loader);
+    const loader = setupDraco(new GLTFLoader());
     loader.load(
       modelPath,
       (gltf) => {
-        draco.dispose();
         _template = prepareWindmillTemplate(gltf.scene);
         resolve(_template);
       },

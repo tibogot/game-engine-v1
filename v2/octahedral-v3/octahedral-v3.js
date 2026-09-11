@@ -12,7 +12,7 @@ import {
 } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+import { setupDraco } from "../core/dracoLoader.js";
 import { createUiHelpers } from "./custom-ui.js";
 import {
   BAKE_SPHERE_MARGIN,
@@ -175,10 +175,8 @@ export async function run() {
   scene.add(ground);
 
   // ── Loaders ────────────────────────────────────────────────────────────
-  const gltfLoader = new GLTFLoader();
-  const dracoLoader = new DRACOLoader();
-  dracoLoader.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.7/");
-  gltfLoader.setDRACOLoader(dracoLoader);
+  // Draco from v2/core/dracoLoader.js — one decoder, vendored at /draco/.
+  const gltfLoader = setupDraco(new GLTFLoader());
 
   function applyShadowToMeshes(root, cast, receive) {
     if (!root) return;
