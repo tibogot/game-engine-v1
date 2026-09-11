@@ -1549,6 +1549,14 @@ export function createModularRoadCity({
     rainSurfaces,
     params: P,
     facade: facade.params,
+    /**
+     * The LIVE uniform bag. Exposed because the facade's look settings are
+     * things you judge by driving — `bayFit` above all, which is a blend
+     * precisely so it can be dialled against the real city rather than argued
+     * about — and every one of them is a uniform write that needs no rebuild
+     * and no recompile.
+     */
+    facadeUniforms: facade.uniforms,
     facadeMaterial: facade.material,
     /** The L2 tier's cheaper variant, sharing the near one's uniforms. */
     facadeFarMaterial: facade.farMaterial,

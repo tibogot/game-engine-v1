@@ -9101,6 +9101,12 @@ ${e.message}`);
       getCityCollide: () => cityCollide,
       reseedCity,
       getCityStats: () => city?.stats ?? null,
+      /** The facade's live uniforms, for tuning its look from the console:
+       *  `__roadGame.cityFacadeUniforms().bayFit.value = 1` puts the window
+       *  grid back to stretched-to-fit without a reload. A GETTER, because the
+       *  city is rebuilt on relayout and a captured bag would be one that
+       *  nothing is drawing. */
+      cityFacadeUniforms: () => city?.facadeUniforms ?? null,
       /* ── STREET SURFACE ────────────────────────────────────────────────
        * The asphalt's own look. `streetParams()` is the LIVE bag — a GETTER,
        * because the street is rebuilt on any relayout and a captured bag would

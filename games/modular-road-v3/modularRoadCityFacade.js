@@ -184,6 +184,39 @@ export const FACADE_DEFAULTS = {
    *  then stretched to fill each face exactly, pier to pier. */
   bayWidth: 2.9,
   baySpread: 1.0,
+  /**
+   * ── HOW THE BAYS MEET THE END OF A FACE ────────────────────────────────────
+   *
+   * 1 = STRETCH. A whole number of bays is fitted to the face and the bay
+   * takes whatever width makes them fill it exactly. This is what shipped.
+   * 0 = FIXED PITCH. The bay is `bayWidth` whatever the face is, and the
+   * remainder becomes a wider pier at each END.
+   *
+   * Stretching makes the WINDOW a function of the BUILDING'S WIDTH, which is
+   * backwards: measured over ordinary faces at the default 2.9 m, the bay
+   * lands anywhere between 2.91 m and 3.48 m — a 19% spread. Two towers of
+   * different widths standing side by side get visibly different-sized
+   * windows, and that is most of what stops the city reading as one
+   * construction system. A real building standardises the window and absorbs
+   * the odd dimension at the corner, which is exactly what a fixed pitch with
+   * margins does.
+   *
+   * It is a BLEND rather than a switch on purpose: at 1 the arithmetic is
+   * identical to what shipped (the remainder is exactly `pierWidth`, so both
+   * margins come out at the half-pier the old layout had), so the change can
+   * be dialled and judged in the game rather than argued about, and there is
+   * no second pipeline — one material is one compile, and in this city that
+   * compile IS the load time.
+   */
+  bayFit: 0.0,
+  /**
+   * How far the two end margins may differ from each other, 0 = symmetric.
+   *
+   * Centred is the honest default — a real elevation centres its grid — but
+   * identical margins on every face in the city is its own kind of tell, so a
+   * per-lot dice pushes them off centre by up to this fraction of the slack.
+   */
+  bayPhase: 0.35,
   /** Pier width, its spread, and how far it PROJECTS. The projection is the
    *  whole point: the slot behind it is real depth the ray can enter. */
   pierWidth: 0.62,
@@ -695,7 +728,7 @@ export function createCityFacadeMaterial({
 
     // WHICH BUILDING.
     const lot = floor(positionWorld.xz.div(u.lotSize)).toVar();
-    // SIX per-lot dice from ONE hash. These are constants over a whole
+    // SEVEN per-lot dice from ONE hash. These are constants over a whole
     // building and were six full PCG rounds per PIXEL. `fract(h * k)` with
     // co-prime-ish multipliers decorrelates well enough for what they drive —
     // a bay width, a pier depth, a palette index — and costs a multiply and a
@@ -706,6 +739,11 @@ export function createCityFacadeMaterial({
     const h4 = fract(h1.mul(733.19)).toVar();
     const h5 = fract(h1.mul(1279.53)).toVar();
     const h6 = fract(h1.mul(2411.87)).toVar();
+    // The seventh drives the bay margins' phase. Its own dice rather than a
+    // borrowed one: `h3` already sets pier depth and the string courses, and a
+    // city where every deep-piered building also has its window grid pushed the
+    // same way off centre is a city with one designer's tic.
+    const h7 = fract(h1.mul(3571.13)).toVar();
     const cell = clamp(lot.sub(uLotOrigin), vec2(0.0), uLotCount.sub(1.0));
     const info = textureLoad(lotTexture, ivec2(cell)).toVar();
     const baseY = info.r;
@@ -747,12 +785,36 @@ export function createCityFacadeMaterial({
     const reflectMin = selT(isCurtain, u.curtainReflectMin, u.glassReflectMin).toVar();
 
     // ── FACE LAYOUT ──────────────────────────────────────────────────────────
-    // Bays stretched to fill the face exactly, pier centres at pierW/2 + i·bay,
-    // so BOTH ends of every face are solid and a recess never reaches a corner.
-    // Floors snapped so the tier is a whole number of them.
+    // A whole number of bays, a pier centred on every bay boundary, and the
+    // slack at the two ends. Floors snapped so the tier is a whole number.
     const flat = W.lessThan(pierW.mul(2.0).add(bay0.mul(0.6))).or(Hf.lessThan(2.5)).or(isRoof).toVar();
     const count = max(floor(W.sub(pierW).div(bay0)), 1.0).toVar();
-    const bay = W.sub(pierW).div(count).toVar();
+    /*
+     * ── STRETCHED OR FIXED — see `bayFit`. ───────────────────────────────────
+     *
+     * `bayS` is the shipped width: the bay bends until `count` of them fill the
+     * face exactly. `bay0` is the fixed pitch: the same window on every
+     * building in the city, with the slack pushed out to the corners.
+     *
+     * The COUNT is the same either way, which is what makes the blend between
+     * them meaningful: only the pitch and the margins move, nothing pops from
+     * one bay to another as it is dialled.
+     */
+    const bayS = W.sub(pierW).div(count).toVar();
+    const bay = mix(bay0, bayS, u.bayFit).toVar();
+    /*
+     * THE SLACK, AND WHERE THE GRID STARTS.
+     *
+     * `count · bay` is at most `W − pierW`, so there is never less than a full
+     * pier of slack to share between the two ends — each margin is therefore
+     * always at least the half-pier the old layout gave them, whatever the
+     * phase does. At `bayFit = 1` the slack IS exactly `pierW` and both margins
+     * come out at `pierW/2`: the shipped layout, reproduced rather than
+     * approximated.
+     */
+    const slack = max(W.sub(count.mul(bay)), pierW).toVar();
+    const ph = float(0.5).add(h7.sub(0.5).mul(u.bayPhase)).clamp(0.0, 1.0).toVar();
+    const uOrigin = pierW.mul(0.5).add(slack.sub(pierW).mul(ph)).toVar();
     const nF = max(round(Hf.div(floorH0)), 1.0).toVar();
     const fh = Hf.div(nF).toVar();
     const winH = fh.mul(winRatio).toVar();
@@ -794,7 +856,7 @@ export function createCityFacadeMaterial({
       nW, uAxis, isRoof, W, Hf, u0, v0, mpxU, mpxV, aaU, aaV, V, acrossW,
       lot, h1, h2, h3, h4, h5, h6, faceKey, up, belowTop, bldgH,
       isIndustrial, isCurtain, isRibbon, isPunched, flat,
-      bay, count, nF, fh, winH, slotL, slotR, oL, oR, oB, oT,
+      bay, count, nF, fh, winH, slotL, slotR, oL, oR, oB, oT, uOrigin,
       pierW, pierD, reveal, border, pitch, courseH, courseEvery,
       hasBase, baseH, nBase, grime, reflectMin, sharp, reliefAmt, cellsPerPx,
     };
@@ -806,21 +868,40 @@ export function createCityFacadeMaterial({
    * hashes key off.
    */
   function classify(F, ua, va) {
-    const uL = ua.sub(F.slotL);
-    const bi = floor(uL.div(F.bay));
+    /*
+     * THE GRID STARTS AT THE MARGIN, not at the half-pier. `slotL` used to be
+     * both — the face's left margin AND the half-pier carried inside `bu` —
+     * because the two happened to be equal when the bays always filled the
+     * face exactly. They are different things and only one of them moves.
+     */
+    const uL = ua.sub(F.uOrigin);
+    /*
+     * ── AND OUTSIDE THE RUN OF BAYS IS SOLID WALL ──────────────────────────
+     *
+     * Without this the margins are not margins: `bi` simply keeps counting,
+     * and the strip past the last bay lands at the START of a phantom one,
+     * which is glass. The shipped layout got away with it because its right
+     * margin was only half a pier — but it did NOT get away with it, and the
+     * comment claiming "a recess never reaches a corner" was wrong by 0.31 m
+     * on the right-hand end of every face in the city. Modelled in
+     * tools/facadeBayProbe.mjs; with a fixed pitch the same leak would be up
+     * to 1.75 m, which is a window wrapped round a building corner.
+     */
+    const inGrid = band(uL, float(0.0), F.count.mul(F.bay), F.aaU);
+    const bi = floor(uL.div(F.bay)).clamp(float(0.0), F.count.sub(1.0));
     const bu = uL.sub(bi.mul(F.bay)).add(F.slotL);       // 0..bay, pier centred on 0
     const fi = floor(va.div(F.fh));
     const fv = va.sub(fi.mul(F.fh));
-    const inSlot = band(bu, F.slotL, F.slotR, F.aaU);
+    const inSlot = band(bu, F.slotL, F.slotR, F.aaU).mul(inGrid);
     // The base storey's opening is taller and starts lower.
     const inBase = andT(F.hasBase, va.lessThan(F.baseH));
     const bB = F.fh.mul(0.22), bT = F.baseH.sub(F.fh.mul(0.28));
     const openTall = band(bu, F.oL, F.oR, F.aaU).mul(band(va, bB, bT, F.aaV));
     const openNorm = band(bu, F.oL, F.oR, F.aaU).mul(band(fv, F.oB, F.oT, F.aaV));
-    const opening = selT(inBase, openTall, openNorm);
+    const opening = selT(inBase, openTall, openNorm).mul(inGrid);
     const frame = band(bu, F.oL.sub(F.border), F.oR.add(F.border), F.aaU)
       .mul(band(fv, F.oB.sub(F.border), F.oT.add(F.border), F.aaV))
-      .sub(openNorm).max(0.0).mul(selT(inBase, float(0.0), float(1.0)));
+      .sub(openNorm).max(0.0).mul(selT(inBase, float(0.0), float(1.0))).mul(inGrid);
     // String courses: at every `courseEvery` floor line, at the base's head,
     // and the cornice at the tier top (the same band, 1.6× taller).
     const fl = round(va.div(F.fh));
@@ -864,7 +945,9 @@ export function createCityFacadeMaterial({
 
     // ── Level 1: the slot's own walls — the two pier flanks and the string
     // course above (its underside) or below (its top face).
-    const bayL = c0.bi.mul(F.bay).add(F.slotL);
+    // Where this bay starts on the face — from the grid's own origin, which is
+    // the left margin and no longer the half-pier (see `classify`).
+    const bayL = c0.bi.mul(F.bay).add(F.uOrigin);
     const buA = F.u0.sub(bayL);                          // 0 at the left flank
     const slotW = F.slotR.sub(F.slotL);
     const t1 = slotD.div(rd).toVar();
