@@ -618,6 +618,8 @@
         renderer.toneMappingExposure = PARAMS.light.exposure;
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        // Required for TSL `castShadowNode` (hedge foliage alpha-cut shadows).
+        renderer.shadowMap.transmitted = true;
         document.body.appendChild(renderer.domElement);
         document.body.appendChild(stats.dom);
 

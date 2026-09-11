@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CRT Billboard Lab — modular-road</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden; background: #07080c; color: #dce6f2;
+        font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;
+      }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10; width: 300px;
+        padding: 12px 14px;
+        background: rgba(8, 13, 22, 0.86);
+        border: 1px solid rgba(150, 180, 220, 0.18);
+        border-radius: 10px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+      }
+      #hud h1 {
+        margin: 0 0 2px; font-size: 11px; letter-spacing: 0.09em;
+        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      }
+      #hud .title { margin: 0 0 10px; font-size: 17px; font-weight: 650; color: #f2f6fb; }
+      .stats {
+        display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+        padding: 8px 0; margin-bottom: 6px;
+        border-top: 1px solid rgba(150, 180, 220, 0.14);
+        border-bottom: 1px solid rgba(150, 180, 220, 0.14);
+        font-variant-numeric: tabular-nums;
+      }
+      .stats dt { color: #7f93ad; font-size: 11px; }
+      .stats dd { margin: 0; font-weight: 600; }
+      .note { font-size: 11px; color: #8fa4bd; margin: 8px 0 0; }
+      .note b { color: #cfe0f5; }
+      kbd {
+        font: 11px ui-monospace, monospace; background: rgba(120,160,210,.18);
+        border: 1px solid rgba(150,180,220,.25); border-radius: 4px; padding: 0 4px;
+      }
+      #err {
+        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        max-width: 640px; padding: 10px 12px; display: none;
+        background: rgba(60, 12, 12, 0.94); border: 1px solid #a44;
+        border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
+        font: 11px/1.5 ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>modular-road</h1>
+      <p class="title">CRT Billboard Lab</p>
+      <dl class="stats">
+        <dt>GPU render</dt><dd id="s-gpu">–</dd>
+        <dt>fps</dt><dd id="s-fps">–</dd>
+        <dt>draws</dt><dd id="s-draw">–</dd>
+        <dt>ad</dt><dd id="s-ad">–</dd>
+      </dl>
+      <p class="note">
+        Night City megascreen: <b>horizontal scan bands</b>, soft gaps,
+        highlights stay readable. Not a retro-TV zebra filter.
+      </p>
+      <p class="note">
+        <kbd>2</kbd> street (judge here) &nbsp; <kbd>1</kbd> close &nbsp;
+        <kbd>3</kbd> skyline &nbsp; <kbd>C</kbd> CRT on/off
+      </p>
+    </div>
+    <div id="err"></div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { materialColor, pass } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import { bloom } from "three/addons/tsl/display/BloomNode.js";
+      import {
+        applyCrtParams,
+        buildCrtBillboard,
+        CRT_ADS,
+        CRT_DEFAULTS,
+        CRT_PRESETS,
+        findCrtFace,
+        setCrtTexture,
+      } from "./modularRoadCrtBillboard.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => {
+        const el = $("err");
+        el.style.display = "block";
+        el.textContent = e?.stack || String(e);
+        console.error(e);
+      };
+
+      const look = { ...CRT_DEFAULTS };
+      const sceneCtl = {
+        exposure: 1.08,
+        bloomStrength: 1.15,
+        bloomRadius: 0.62,
+        bloomThreshold: 0.28,
+        ad: CRT_ADS[0],
+      };
+
+      let renderer, scene, camera, controls, pipeline, bloomPass;
+      let board, wall, moon, hemi;
+      let gui, hasTimestamps = false;
+      const loader = new THREE.TextureLoader();
+      const texCache = new Map();
+      const perf = { frames: 0, gpuSum: 0, gpuN: 0, since: 0, gpu: 0, fps: 0 };
+
+      async function createTimingDevice() {
+        if (!navigator.gpu) return null;
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return null;
+          return await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+        } catch (e) {
+          console.warn("[crt-lab] timestamp device unavailable", e);
+          return null;
+        }
+      }
+
+      function screenY() {
+        return look.panelBottom + look.boardH * 0.5;
+      }
+
+      function applyLook() {
+        const face = findCrtFace(board);
+        if (face?.material) applyCrtParams(face.material, look);
+      }
+
+      function applyBloom() {
+        if (!bloomPass) return;
+        bloomPass.strength.value = sceneCtl.bloomStrength;
+        bloomPass.radius.value = sceneCtl.bloomRadius;
+        bloomPass.threshold.value = sceneCtl.bloomThreshold;
+      }
+
+      function applyExposure() {
+        renderer.toneMappingExposure = sceneCtl.exposure;
+      }
+
+      function setView(name) {
+        const y = screenY();
+        if (name === "close") {
+          camera.position.set(0.6, y - 0.8, 11);
+          controls.target.set(0, y, 0);
+        } else if (name === "street") {
+          camera.position.set(2.5, 1.6, 42);
+          controls.target.set(0, y * 0.88, 0);
+        } else {
+          camera.position.set(22, y + 6, 110);
+          controls.target.set(0, y + 1, 0);
+        }
+        controls.update();
+      }
+
+      function rebuildBoard() {
+        const mat = findCrtFace(board)?.material ?? null;
+        if (board) {
+          scene.remove(board);
+          board.traverse((o) => {
+            o.geometry?.dispose?.();
+            if (o.material && o.userData?.crtFace) return;
+            o.material?.dispose?.();
+          });
+        }
+        board = buildCrtBillboard({ params: look, material: mat });
+        scene.add(board);
+        applyLook();
+        window.__crtLab && (window.__crtLab.board = board);
+      }
+
+      function loadAd(url) {
+        sceneCtl.ad = url;
+        $("s-ad").textContent = url.split("/").pop();
+        const hit = texCache.get(url);
+        if (hit) {
+          setCrtTexture(findCrtFace(board).material, hit);
+          return;
+        }
+        loader.load(
+          url,
+          (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.anisotropy = 4;
+            tex.wrapS = THREE.ClampToEdgeWrapping;
+            tex.wrapT = THREE.ClampToEdgeWrapping;
+            tex.generateMipmaps = true;
+            tex.minFilter = THREE.LinearMipmapLinearFilter;
+            tex.magFilter = THREE.LinearFilter;
+            texCache.set(url, tex);
+            const face = findCrtFace(board);
+            if (face) setCrtTexture(face.material, tex);
+          },
+          undefined,
+          (err) => showErr(err),
+        );
+      }
+
+      function applyPreset(name) {
+        const src = CRT_PRESETS[name];
+        if (!src) return;
+        Object.assign(look, src);
+        applyLook();
+        gui?.controllersRecursive?.().forEach((c) => c.updateDisplay?.());
+      }
+
+      function copyLook() {
+        const payload = {
+          format: "modular-crt-billboard",
+          version: 1,
+          savedAt: new Date().toISOString(),
+          look: { ...look },
+        };
+        navigator.clipboard?.writeText(JSON.stringify(payload, null, 2));
+      }
+
+      function buildGui() {
+        gui = new GUI({ title: "CRT billboard" });
+
+        const fSrc = gui.addFolder("Source");
+        const ads = {};
+        for (const url of CRT_ADS) ads[url.split("/").pop()] = url;
+        fSrc.add(sceneCtl, "ad", ads).name("City ad").onChange(loadAd);
+        fSrc.add({ upload: () => fileInput.click() }, "upload").name("Upload image");
+        fSrc.add(look, "enabled", 0, 1, 1).name("CRT on").onChange(applyLook);
+        fSrc.add({ nightCity: () => applyPreset("nightCity") }, "nightCity");
+        fSrc.add({ street: () => applyPreset("street") }, "street").name("street (far)");
+        fSrc.add({ close: () => applyPreset("close") }, "close").name("close-up");
+        fSrc.add({ retro: () => applyPreset("retro") }, "retro").name("retro TV");
+        fSrc.add({ raw: () => applyPreset("raw") }, "raw").name("raw image");
+        fSrc.open();
+
+        const fScan = gui.addFolder("Scanlines");
+        fScan.add(look, "scanlines", 20, 160, 1).name("Count").onChange(applyLook);
+        fScan.add(look, "scan", 0, 0.75, 0.01).name("Strength").onChange(applyLook);
+        fScan.add(look, "scanFloor", 0.35, 0.9, 0.01).name("Gap floor").onChange(applyLook);
+        fScan.add(look, "bleed", 0, 0.45, 0.01).name("Phosphor bleed").onChange(applyLook);
+        fScan.add(look, "beamMin", 0.8, 4, 0.05).name("Beam min").onChange(applyLook);
+        fScan.add(look, "beamMax", 1.5, 8, 0.05).name("Beam max").onChange(applyLook);
+        fScan.add(look, "scanBrightMin", 0.1, 0.7, 0.01).name("Preserve from").onChange(applyLook);
+        fScan.add(look, "scanBrightMax", 0.5, 1, 0.01).name("Preserve to").onChange(applyLook);
+        fScan.open();
+
+        const fGrille = gui.addFolder("Phosphor mask (close-up only)");
+        fGrille.add(look, "grilleCount", 24, 320, 1).name("Count").onChange(applyLook);
+        fGrille.add(look, "grille", 0, 0.8, 0.01).name("Strength").onChange(applyLook);
+
+        const fAnalog = gui.addFolder("Analog");
+        fAnalog.add(look, "barrel", 0, 0.22, 0.001).name("Barrel").onChange(applyLook);
+        fAnalog.add(look, "chroma", 0, 0.012, 0.0001).name("Chroma").onChange(applyLook);
+        fAnalog.add(look, "vignette", 0, 0.8, 0.01).name("Vignette").onChange(applyLook);
+        fAnalog.add(look, "flicker", 0, 0.12, 0.001).name("Flicker").onChange(applyLook);
+        fAnalog.add(look, "rollSpeed", 0, 0.35, 0.005).name("Roll speed").onChange(applyLook);
+        fAnalog.add(look, "rollAmount", 0, 0.4, 0.005).name("Roll amount").onChange(applyLook);
+        fAnalog.add(look, "rollWidth", 0.008, 0.12, 0.001).name("Roll width").onChange(applyLook);
+        fAnalog.add(look, "noise", 0, 0.16, 0.001).name("Grain").onChange(applyLook);
+        fAnalog.add(look, "glass", 0, 0.3, 0.005).name("Glass").onChange(applyLook);
+
+        const fLight = gui.addFolder("Brightness");
+        fLight.add(look, "emissive", 0.5, 12, 0.05).name("Emissive").onChange(applyLook);
+        fLight.addColor(look, "phosphor").name("Phosphor").onChange(applyLook);
+        fLight.add(sceneCtl, "exposure", 0.3, 2.2, 0.01).name("Exposure").onChange(applyExposure);
+
+        const fBoard = gui.addFolder("Board (rebuilds mesh)");
+        fBoard.add(look, "boardW", 2, 16, 0.1).name("Width").onFinishChange(rebuildBoard);
+        fBoard.add(look, "boardH", 1.2, 10, 0.1).name("Height").onFinishChange(rebuildBoard);
+        fBoard.add(look, "panelBottom", 0.4, 6, 0.05).name("Bottom").onFinishChange(rebuildBoard);
+
+        const fBloom = gui.addFolder("Bloom");
+        fBloom.add(sceneCtl, "bloomStrength", 0, 2.4, 0.01).name("Strength").onChange(applyBloom);
+        fBloom.add(sceneCtl, "bloomRadius", 0, 1, 0.01).name("Radius").onChange(applyBloom);
+        fBloom.add(sceneCtl, "bloomThreshold", 0, 1.4, 0.01).name("Threshold").onChange(applyBloom);
+
+        const fView = gui.addFolder("View");
+        fView.add({ close: () => setView("close") }, "close");
+        fView.add({ street: () => setView("street") }, "street");
+        fView.add({ far: () => setView("far") }, "far").name("skyline");
+        fView.add({ copy: copyLook }, "copy").name("Copy params JSON");
+      }
+
+      const fileInput = Object.assign(document.createElement("input"), {
+        type: "file",
+        accept: "image/*",
+      });
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files?.[0];
+        fileInput.value = "";
+        if (!file) return;
+        const url = URL.createObjectURL(file);
+        loadAd(url);
+      });
+
+      function buildPost() {
+        pipeline = new THREE.RenderPipeline(renderer);
+        const scenePass = pass(scene, camera);
+        const sceneColor = scenePass.getTextureNode("output");
+        bloomPass = bloom(
+          sceneColor,
+          sceneCtl.bloomStrength,
+          sceneCtl.bloomRadius,
+          sceneCtl.bloomThreshold,
+        );
+        pipeline.outputNode = sceneColor.add(bloomPass);
+      }
+
+      async function init() {
+        const device = await createTimingDevice();
+        hasTimestamps = Boolean(device?.features?.has("timestamp-query"));
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x07080c);
+        scene.fog = new THREE.Fog(0x07080c, 55, 220);
+
+        camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 320);
+        camera.position.set(2.5, 1.6, 42);
+
+        renderer = new THREE.WebGPURenderer({
+          antialias: true,
+          trackTimestamp: true,
+          ...(device ? { device } : {}),
+        });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = sceneCtl.exposure;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        await renderer.init();
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.minDistance = 1.6;
+        controls.maxDistance = 180;
+        controls.maxPolarAngle = Math.PI * 0.495;
+        controls.target.set(0, screenY() * 0.88, 0);
+        controls.update();
+
+        hemi = new THREE.HemisphereLight(0x1a2848, 0x08060a, 0.28);
+        scene.add(hemi);
+        moon = new THREE.DirectionalLight(0xb7c8e8, 0.42);
+        moon.position.set(-8, 22, 10);
+        moon.castShadow = true;
+        moon.shadow.mapSize.set(1024, 1024);
+        moon.shadow.camera.near = 2;
+        moon.shadow.camera.far = 60;
+        moon.shadow.camera.left = -18;
+        moon.shadow.camera.right = 18;
+        moon.shadow.camera.top = 16;
+        moon.shadow.camera.bottom = -4;
+        scene.add(moon);
+
+        const groundMat = new THREE.MeshStandardNodeMaterial({
+          color: 0x101218, roughness: 0.92, metalness: 0.04,
+        });
+        groundMat.colorNode = materialColor;
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(80, 80),
+          groundMat,
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        const wallMat = new THREE.MeshStandardNodeMaterial({
+          color: 0x141820, roughness: 0.9, metalness: 0.06,
+        });
+        wallMat.colorNode = materialColor;
+        wall = new THREE.Mesh(
+          new THREE.BoxGeometry(28, 22, 1.8),
+          wallMat,
+        );
+        wall.position.set(0, 10.5, -1.6);
+        wall.castShadow = true;
+        wall.receiveShadow = true;
+        scene.add(wall);
+
+        board = buildCrtBillboard({ params: look });
+        scene.add(board);
+        loadAd(CRT_ADS[3] ?? CRT_ADS[0]);
+
+        buildPost();
+        buildGui();
+        setView("street");
+
+        addEventListener("resize", onResize);
+        addEventListener("keydown", onKey);
+        window.__crtLab = { renderer, scene, camera, look, sceneCtl, board, applyLook };
+        renderer.setAnimationLoop(frame);
+      }
+
+      function onKey(e) {
+        if (e.target?.matches?.("input, textarea")) return;
+        const k = e.key.toLowerCase();
+        if (k === "1") setView("close");
+        if (k === "2") setView("street");
+        if (k === "3") setView("far");
+        if (k === "c") {
+          look.enabled = look.enabled ? 0 : 1;
+          applyLook();
+          gui?.controllersRecursive?.().forEach((c) => c.updateDisplay?.());
+        }
+        if (k === "h") {
+          gui.domElement.style.display = gui.domElement.style.display === "none" ? "" : "none";
+          $("hud").style.display = $("hud").style.display === "none" ? "" : "none";
+        }
+      }
+
+      function onResize() {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      }
+
+      function frame() {
+        controls.update();
+        pipeline.render();
+
+        if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+
+        const now = performance.now();
+        if (!perf.since) perf.since = now;
+        perf.frames++;
+        const ts = renderer.info.render.timestamp;
+        if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
+        if (now - perf.since >= 500) {
+          perf.fps = (perf.frames * 1000) / (now - perf.since);
+          perf.gpu = perf.gpuN ? perf.gpuSum / perf.gpuN : 0;
+          $("s-fps").textContent = perf.fps.toFixed(0);
+          $("s-gpu").textContent = perf.gpuN ? `${perf.gpu.toFixed(2)} ms` : "n/a";
+          $("s-draw").textContent = String(renderer.info.render.drawCalls);
+          perf.frames = 0; perf.gpuSum = 0; perf.gpuN = 0; perf.since = now;
+        }
+      }
+
+      init().catch(showErr);
+    </script>
+  </body>
+</html>
