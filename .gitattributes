@@ -1,0 +1,27 @@
+# Binary assets must never have their line endings "fixed".
+#
+# Git auto-detects most of these, and auto-detection is exactly the kind of
+# thing that works until it does not — a decoder or a model corrupted by CRLF
+# translation fails at runtime, in the browser, with nothing pointing at the
+# commit that did it. This says so explicitly instead.
+#
+# The Draco decoder is the immediate reason: public/draco/draco_decoder.wasm is
+# the one file in the project whose corruption would break every compressed GLB
+# at once.
+
+*.wasm   binary
+*.glb    binary
+*.gltf   binary
+*.ktx2   binary
+*.basis  binary
+*.hdr    binary
+*.exr    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.webp   binary
+*.mp3    binary
+*.ogg    binary
+*.wav    binary
+*.woff   binary
+*.woff2  binary
