@@ -69,6 +69,7 @@ import {
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { makeLedMatrixMaterial, applyLedMatrixParams } from "../../v2/objects/shared/ledMatrix.js";
+import { buildAdTotemMesh, AD_TOTEM } from "./modularRoadAdBillboard.js";
 
 export const SIGN_DEFAULTS = {
   /* ── shopfront neon and the kerb ribbon ─────────────────────────────────── */
@@ -125,6 +126,10 @@ export const SIGN_DEFAULTS = {
   heroFrame: 0.55,
   /** Board thickness, metres. Under `standoff` (0.45) so the box reaches the
    *  wall without touching it — see the note where the boxes are built. */
+  /** How many street-facing building faces get a pavement citylight. */
+  totemFraction: 0.3,
+  /** Metres out from the wall — it stands on the pavement, not against it. */
+  totemStandoff: 2.6,
   heroDepth: 0.4,
   heroBoxColor: 0x2a2d33,
   /**
@@ -999,6 +1004,8 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   const banners = [], screens = [], bands = [], texts = [], neon = [], heroes = [];
   /** Shop-front neon words, and the kerb ribbons under them. */
   const words = [], ribbons = [];
+  /** Pavement citylights — the track builder's ad totem, finally in the city. */
+  const totems = [], totemPosters = [];
   /** The single LED wall, once placed — null if no run in the city qualified. */
   let ledWall = null;
   let megaCount = 0;
@@ -1192,6 +1199,55 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
       }
     }
 
+    /*
+     * ── CITYLIGHTS ON THE PAVEMENT ─────────────────────────────────────────
+     *
+     * The track builder has had an "Ad totem" since the scenery kit was
+     * written — a 1.28 x 2.22 m portrait cabinet, the thing that stands beside
+     * a bus stop — and the city never used it. Every advert in the city was
+     * three storeys up, which is why the streets read as walls with posters on
+     * them rather than as somewhere a person waits for a bus.
+     *
+     * It stands on the PAVEMENT, so it is pushed out past the building by
+     * `totemStandoff` rather than the wall `standoff` the mounted signs use,
+     * and it sits on the building's own base height.
+     *
+     * The poster costs NOTHING: it is pushed into the banner list, so it is
+     * another instance of a mesh that already exists, off the portrait atlas
+     * that is already the right shape for it. Only the cabinet is new, and
+     * that is two instanced meshes for every totem in the city.
+     */
+    for (const sf of streetFaces(b.cx, b.cz)) {
+      if (lotRand(b.cx, b.cz, 71 + sf[0] * 5 + sf[1]) > P.totemFraction) continue;
+      const fW = (sf[0] !== 0 ? a.depth : a.width);
+      // Along the face, well clear of the corners a kerb turns at.
+      const slide = (lotRand(b.cx, b.cz, 72 + sf[0] + sf[1] * 3) * 2 - 1) * (fW * 0.3);
+      const [nx, nz] = sf;
+      const half = (nx !== 0 ? a.width : a.depth) * 0.5 + P.totemStandoff;
+      _p.set(b.x + nx * half + nz * slide, b.y, b.z + nz * half - nx * slide);
+      _q.setFromAxisAngle(_up, Math.atan2(nx, nz));
+      totems.push(_m.compose(_p, _q, _s.set(1, 1, 1)).clone());
+      // The poster plane, on the cabinet's own front face.
+      const cy = AD_TOTEM.baseH + AD_TOTEM.panelH * 0.5;
+      const out = AD_TOTEM.depth * 0.52;
+      _p.set(b.x + nx * (half + out) + nz * slide, b.y + cy, b.z + nz * (half + out) - nx * slide);
+      /*
+       * ITS OWN LIST, not the banner list it first went into.
+       *
+       * Sharing the banner MATERIAL is free and right — the portrait atlas is
+       * already the shape a citylight poster is. Sharing its LIST was not:
+       * `banners` means tower-scale wall banners, which are off by default, and
+       * the stats immediately read "626 banners" for a city with none. One draw
+       * either way; this way the number still means something.
+       */
+      totemPosters.push({
+        m: _m.compose(_p, _q, _s.set(AD_TOTEM.panelW - 0.06, AD_TOTEM.panelH - 0.06, 1)).clone(),
+        tile: Math.floor(lotRand(b.cx, b.cz, 73 + sf[0] - sf[1]) * (BANNER_COLS * BANNER_ROWS)),
+        jit: lotRand(b.cx, b.cz, 74 + sf[0] + sf[1]),
+        scroll: 0,
+      });
+    }
+
     // ── LED TEXT MARQUEE ─────────────────────────────────────────────────────
     // On the lobby band's face, above it — the shopfront sign.
     if (lotRand(b.cx, b.cz, 15) < P.textFraction && height > lobbyHeight + 8 && faceW > P.textW * 1.05) {
@@ -1361,6 +1417,8 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   const packHero = (d, o, e) => { d[o] = e.tile; d[o + 1] = e.frU; d[o + 2] = e.frV; d[o + 3] = e.screen; };
 
   const bannerMesh = instanced(banners, bannerMat, "CityBanners", "aSign", 3, packSign);
+  // The citylight posters: their own mesh, the banners' material and atlas.
+  const totemPosterMesh = instanced(totemPosters, bannerMat, "CityTotemPosters", "aSign", 3, packSign);
   const screenMesh = instanced(screens, screenMat, "CityScreens", "aSign", 3, packSign);
   const neonMesh = instanced(neon, neonMat, "CityNeon", "aNeon", 2, packNeon);
   const wordMat = makeNeonWordMaterial(wordAtlas, u);
@@ -1391,6 +1449,39 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
    * heroes are pushed from two places and a second copy of this arithmetic is
    * how the two drift apart.
    */
+  /*
+   * ── THE CITYLIGHT CABINETS ─────────────────────────────────────────────────
+   *
+   * Built ONCE by the track builder's own `buildAdTotemMesh`, then instanced.
+   * Calling the shared builder rather than re-describing the box stack here is
+   * the whole point: the totem beside a bus stop in the city is the same object
+   * as the totem you can place on a track, and if someone restyles it there it
+   * restyles here too. A second description would have looked identical for
+   * about a week.
+   *
+   * Two draws — the steel and the dark cabinet back — for every citylight in
+   * the city. Its poster is not here at all: that went into the banner list, so
+   * it is another instance of a mesh that already existed.
+   */
+  const totemMeshes = [];
+  if (totems.length) {
+    const proto = buildAdTotemMesh({});
+    for (const child of proto.children) {
+      // The prototype's own poster is a single placeholder plane; the city's
+      // posters come off the shared portrait atlas instead.
+      if (child.userData?.adPoster) { child.geometry.dispose(); child.material?.dispose?.(); continue; }
+      const im = new THREE.InstancedMesh(child.geometry, child.material, totems.length);
+      im.name = `CityTotem_${child.name.replace(/^AdTotem/, "")}`;
+      im.frustumCulled = false;
+      im.castShadow = true;
+      im.receiveShadow = true;
+      totems.forEach((m, i) => im.setMatrixAt(i, m));
+      im.instanceMatrix.needsUpdate = true;
+      group.add(im);
+      totemMeshes.push(im);
+    }
+  }
+
   let heroBoxMesh = null;
   if (heroes.length && P.heroDepth > 0) {
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -1489,6 +1580,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     params: P,
     stats: {
       heroes: heroes.length,
+      totems: totems.length,
       banners: banners.length, bands: bands.length, texts: texts.length,
       neon: neon.length, mega: megaCount,
       /** Shopfront neon words and the kerb ribbons under them. */
@@ -1582,7 +1674,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     setText(str) { textCanvas.set(str); },
 
     dispose() {
-      for (const m of [bannerMesh, screenMesh, neonMesh, bandMesh, textMesh, heroMesh, heroBoxMesh]) {
+      for (const m of [bannerMesh, screenMesh, neonMesh, bandMesh, textMesh, heroMesh, heroBoxMesh, totemPosterMesh, ...totemMeshes]) {
         if (!m) continue;
         group.remove(m);
         if (m.geometry !== quad) m.geometry.dispose();

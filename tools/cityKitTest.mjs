@@ -596,18 +596,26 @@ console.log("\n── LOOK PASS ──");
   let extra = 0; const names = [];
   c.group.traverse((o) => {
     if (o.isInstancedMesh
-      && /^City(Banners|Screens|Bands|Texts|Neon|Beacons|Heroes|NeonWords|KerbRibbon)$/.test(o.name)) {
+      && /^City(Banners|Screens|Bands|Texts|Neon|Beacons|Heroes|NeonWords|KerbRibbon|HeroBoxes|TotemPosters|Totem_[A-Za-z]+)$/.test(o.name)) {
       extra++; names.push(o.name);
     }
   });
   /*
-   * FIVE MESHES, FIVE DRAWS: heroes, beacons, the wrapping bands, the shopfront
-   * neon and the kerb ribbons. Asserted by NAME rather than by count alone so
-   * that adding a sixth kind of sign has to be a decision someone writes down
-   * here, rather than something that drifts in one instanced mesh at a time.
+   * NINE MESHES, NINE DRAWS, and every one of them a decision written down
+   * here rather than something that drifted in one instanced mesh at a time.
+   *
+   * The five originals: heroes, beacons, the wrapping bands, the shopfront neon
+   * and the kerb ribbons. Then the pavement citylights added four more —
+   * `CityHeroBoxes` is the board behind each hero poster, `CityTotem_Steel` and
+   * `CityTotem_Back` are the cabinet, and `CityBanners` is the totems' posters.
+   *
+   * That last one is worth the note: the posters were pushed into the BANNER
+   * list expecting to ride a mesh that already existed, and the mesh did not —
+   * no banners were being placed at all, so the list was empty and the draw was
+   * never created. It is one draw, not zero. This test is how that was found.
    */
-  check("signage is five instanced meshes, and these five",
-    names.sort().join(",") === "CityBands,CityBeacons,CityHeroes,CityKerbRibbon,CityNeonWords",
+  check("signage is nine instanced meshes, and these nine",
+    names.sort().join(",") === "CityBands,CityBeacons,CityHeroBoxes,CityHeroes,CityKerbRibbon,CityNeonWords,CityTotemPosters,CityTotem_Back,CityTotem_Steel",
     names.sort().join(","));
   // Street lamps: the grid walked once on the CPU, one instanced draw, and
   // every post inside the city's extent.
