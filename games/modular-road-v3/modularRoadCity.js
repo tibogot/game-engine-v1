@@ -84,7 +84,7 @@ import {
   createCityUnderpass, underpassLayout, underpassOpenAt, underpassFootprint,
   underpassRoofAt, underpassDip,
 } from "./modularRoadCityUnderpass.js";
-import { createCitySigns, loadHeroAdFolder } from "./modularRoadCitySigns.js";
+import { createCitySigns, loadHeroAdFolder, loadTotemAdFolder } from "./modularRoadCitySigns.js";
 import { placeCityPrism, pickPrismPlaza, CITY_PRISM_DEFAULTS } from "./modularRoadCityPrism.js";
 import { planCarParks, buildCarParkGround, CARPARK_DEFAULTS } from "./modularRoadCityCarPark.js";
 import { planParks, buildParkGround, PARK_DEFAULTS } from "./modularRoadCityPark.js";
@@ -932,6 +932,16 @@ export function createModularRoadCity({
             + (missing.length ? `; still placeholders: ${missing.join(", ")}` : ""));
         })
         .catch((e) => console.warn("[CitySigns] hero advert folder:", e));
+      // The pavement citylights, same fire-and-forget. Portrait art from
+      // public/city-totems/ if it is there, and a centre-cropped hero advert
+      // standing in for any slot that is not — see loadTotemAdFolder.
+      loadTotemAdFolder(signsAtBuild)
+        .then(({ loaded, fromAds, missing }) => {
+          if (loaded) console.log(`[CitySigns] ${loaded} citylight poster${loaded === 1 ? "" : "s"} loaded`
+            + (fromAds ? ` (${fromAds} borrowed from /city-ads/)` : "")
+            + (missing.length ? `; still placeholders: ${missing.join(", ")}` : ""));
+        })
+        .catch((e) => console.warn("[CitySigns] citylight folder:", e));
     } else {
       stats.signs = { banners: 0, screens: 0, bands: 0 };
     }

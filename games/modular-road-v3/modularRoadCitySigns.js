@@ -130,7 +130,17 @@ export const SIGN_DEFAULTS = {
   totemFraction: 0.3,
   /** Metres out from the wall — it stands on the pavement, not against it. */
   totemStandoff: 2.6,
-  heroDepth: 0.4,
+  /** Board thickness, metres. `heroGap + heroDepth` must stay under `standoff`
+   *  (0.45) so the box never reaches the wall. */
+  heroDepth: 0.34,
+  /** Gap between the poster plane and the board's front face. NOT cosmetic: at
+   *  1 cm the two z-fought at distance and every big board in the city
+   *  flickered as you drove past, the LED ones included. */
+  heroGap: 0.06,
+  /** How far the board oversails the poster on every side. Coincident
+   *  silhouettes shimmer along their shared edge even when the depths are
+   *  safely apart — and a real board has a lip anyway. */
+  heroRim: 0.09,
   heroBoxColor: 0x2a2d33,
   /**
    * Fraction of ordinary heroes that are LED screens. ZERO, and deliberately.
@@ -344,6 +354,51 @@ export async function loadHeroAdFolder(signs, opts = {}) {
   }));
   return { loaded, missing };
 }
+/** Portrait citylight posters: `public/city-totems/totem-01.webp` … `-08`. */
+export const TOTEM_AD_DIR = "/city-totems/";
+export const TOTEM_SLOTS = BANNER_COLS * BANNER_ROWS;
+
+/**
+ * Fill the citylight slots, FALLING BACK TO THE BIG BOARDS' FOLDER.
+ *
+ * A pavement cabinet is portrait (1.28 x 2.22 m) and a hero advert is landscape
+ * (1.46:1), so they are not interchangeable art — but an empty cabinet is worse
+ * than a cropped one, and the atlas `setImage` COVER-fits, so a landscape ad
+ * arrives centre-cropped rather than squashed. That is a deliberate stopgap:
+ * drop portrait art into `/city-totems/` and it takes over, slot by slot, with
+ * no code change.
+ *
+ * @returns {Promise<{loaded:number, fromAds:number, missing:string[]}>}
+ */
+export async function loadTotemAdFolder(signs, opts = {}) {
+  const dir = opts.dir ?? TOTEM_AD_DIR;
+  const fallbackDir = opts.fallbackDir ?? HERO_AD_DIR;
+  const exts = opts.extensions ?? HERO_AD_EXTENSIONS;
+  if (!signs?.loadTotemImage || typeof Image === "undefined") {
+    return { loaded: 0, fromAds: 0, missing: [] };
+  }
+  const missing = [];
+  let loaded = 0, fromAds = 0;
+  await Promise.all(Array.from({ length: TOTEM_SLOTS }, async (_, slot) => {
+    const label = String(slot + 1).padStart(2, "0");
+    for (const ext of exts) {
+      try {
+        if (await signs.loadTotemImage(slot, `${dir}totem-${label}.${ext}`)) { loaded++; return; }
+      } catch (_) { /* not this extension */ }
+    }
+    // Nothing authored for this cabinet yet — borrow a hero advert.
+    for (const ext of exts) {
+      try {
+        if (await signs.loadTotemImage(slot, `${fallbackDir}ad-${label}.${ext}`)) {
+          loaded++; fromAds++; return;
+        }
+      } catch (_) { /* nor this one */ }
+    }
+    missing.push(label);
+  }));
+  return { loaded, fromAds, missing };
+}
+
 // The marquee window is boardW/boardH divided by the canvas aspect, so a
 // 1024x128 (8:1) canvas on a 12x2.4 m (5:1) board showed only 62% of the
 // string — five legible characters out of twenty. Matching the canvas closer
@@ -976,6 +1031,15 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   };
 
   const bannerAtlas = makeAtlas(seed, BANNER_COLS, BANNER_ROWS, BANNER_PX, true);
+  /*
+   * The citylights get their OWN portrait atlas rather than the banners'.
+   *
+   * They already have their own mesh, so a second material costs no draw — and
+   * it means a poster dropped into `public/city-totems/` lands on the pavement
+   * cabinets and nowhere else. Sharing the banner atlas would have made the two
+   * inseparable the first time either wanted different art.
+   */
+  const totemAtlas = makeAtlas(seed ^ 0x2f6a1c53, BANNER_COLS, BANNER_ROWS, BANNER_PX, true);
   const screenAtlas = makeAtlas(seed ^ 0x5bf03635, SCREEN_COLS, SCREEN_ROWS, SCREEN_PX, false);
   const heroAtlas = makeHeroAtlas(HERO_COLS, HERO_ROWS, HERO_PX);
   const wordAtlas = makeNeonWordAtlas();
@@ -1408,6 +1472,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   }
 
   const bannerMat = makePosterMaterial(bannerAtlas, u, "CityBanner", u.nightBoost);
+  const totemMat = makePosterMaterial(totemAtlas, u, "CityTotemPoster", u.nightBoost);
   const screenMat = makePosterMaterial(screenAtlas, u, "CityScreen", u.screenBoost);
   const neonMat = makeNeonMaterial(u);
   const heroMat = makeHeroMaterial(heroAtlas, u);
@@ -1418,7 +1483,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
 
   const bannerMesh = instanced(banners, bannerMat, "CityBanners", "aSign", 3, packSign);
   // The citylight posters: their own mesh, the banners' material and atlas.
-  const totemPosterMesh = instanced(totemPosters, bannerMat, "CityTotemPosters", "aSign", 3, packSign);
+  const totemPosterMesh = instanced(totemPosters, totemMat, "CityTotemPosters", "aSign", 3, packSign);
   const screenMesh = instanced(screens, screenMat, "CityScreens", "aSign", 3, packSign);
   const neonMesh = instanced(neon, neonMat, "CityNeon", "aNeon", 2, packNeon);
   const wordMat = makeNeonWordMaterial(wordAtlas, u);
@@ -1620,6 +1685,8 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     heroes: heroes.map((h, i) => ({ index: i, cx: h.cx, cz: h.cz, face: h.face, w: h.w, h: h.h, y: h.y, tile: h.tile, screen: h.screen })),
     /** Paint an image (HTMLImageElement / ImageBitmap / canvas / video) into a slot. */
     setHeroImage(slot, src) { return heroAtlas.setImage(slot, src); },
+    /** Paint one citylight poster. Same contract as `setHeroImage`. */
+    setTotemImage(slot, src) { return totemAtlas.setImage(slot, src); },
     /** Load a URL or data URL into a slot. */
     async loadHeroImage(slot, url) {
       if (typeof Image === "undefined") return false;
@@ -1631,6 +1698,17 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
         im.src = url;
       });
       return heroAtlas.setImage(slot, img);
+    },
+    /** The same, for a pavement citylight. Rejects if the file is not there. */
+    async loadTotemImage(slot, url) {
+      const img = await new Promise((res, rej) => {
+        const im = new Image();
+        im.crossOrigin = "anonymous";
+        im.onload = () => res(im);
+        im.onerror = rej;
+        im.src = url;
+      });
+      return totemAtlas.setImage(slot, img);
     },
     /** Back to the neutral placeholder on one slot. */
     resetHeroImage(slot) { heroAtlas.repaint(slot); },
@@ -1682,6 +1760,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
       }
       bannerMat.dispose(); screenMat.dispose(); neonMat.dispose(); heroMat.dispose();
       wordMat.dispose(); ribbonMat.dispose(); wordAtlas.texture?.dispose();
+      totemMat.dispose(); totemAtlas.texture?.dispose();
       heroBoxMesh?.material.dispose();
       heroAtlas.texture.dispose();
       bandMat.dispose(); textMat.dispose();
