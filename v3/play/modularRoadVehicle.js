@@ -3059,7 +3059,50 @@ class Tire {
     }
 
     this.hitDistance = distFromHub;
-    this.compression = TIRE.restLength - distFromHub;
+    /*
+     * A STRUT CANNOT BE SHORTER THAN NOTHING. `distFromHub` is floored at zero
+     * for the force only — `hitDistance` above keeps the raw measurement for
+     * everything that reads geometry rather than load.
+     *
+     * THE CONTACT IS NOT REJECTED, and that distinction is the whole reason this
+     * is safe where the previous attempt was not. The note below records a
+     * ceiling guard that DISCARDED contacts with a negative hub distance and had
+     * to be removed because it tore the car off a tube wall (r 97 against a wall
+     * at r 8) and dropped the loop from 49 m to 38 m. Bounding the SPRING while
+     * keeping the contact leaves the wheel grounded, still gripping, still
+     * holding the car on the wall — only the force it may generate is finite.
+     *
+     * WHY IT IS NEEDED. Nothing bounded compression on the negative side, and
+     * past `bottomOutThresh` the excess is SQUARED, so a contact above the hub
+     * produced forces with no physical ceiling — and the force is applied along
+     * CHASSIS-UP, which on a car lying on its side points sideways in the world.
+     * That is the inverted-landing launcher: measured with
+     * tools/attic/suspensionTravelProbe.mjs, a car landing rolled 160° reached
+     * 1.142 m of "compression" on a 0.55 m strut and 448 car-weights, and turned
+     * 22 m/s into 135 m/s.
+     *
+     * WHY restLength IS THE RIGHT BOUND, measured rather than picked. Every
+     * legitimate case stays comfortably under it, so the clamp never fires in
+     * normal play and those cases are bit-identical:
+     *
+     *     cruising a flat straight      0.077 m
+     *     hard landing, 40 m/s down     0.338 m
+     *     loop, 126-198 km/h            0.397-0.427 m
+     *     tube wall-ride, 126 km/h      0.279 m
+     *     ---- the bound ----           0.550 m
+     *     tube wall-ride, 162-198 km/h  0.833-1.088 m   (clamped)
+     *     landing rolled 110-160°       0.833-1.142 m   (clamped)
+     *
+     * The fast TUBE rides are clamped too, and that is deliberate rather than
+     * accepted: they reach the same depths as the launcher, so no test on hub
+     * distance alone can separate them. What separates them is that the tube's
+     * force is BALANCED (the car holds 45 m/s indefinitely) while the launcher's
+     * is not. The clamp still leaves far more than the ride needs — a 45 m/s
+     * wall-ride at r 8 demands about 26 car-weights of centripetal force and the
+     * bound supplies roughly 52 — which is why the tube survives it. See
+     * tools/verticalTubeTest.mjs and tubeDensityTest for the guards.
+     */
+    this.compression = TIRE.restLength - Math.max(0, distFromHub);
 
     // NOTE — a 'ceiling guard' was tried here and REMOVED. Do not re-add one
     // without reading this. (The guard above is NOT that guard: it fires only
