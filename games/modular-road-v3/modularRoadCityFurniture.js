@@ -36,6 +36,7 @@ import {
 // model anybody would notice.
 import { STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import { buildBenchGeometry } from "./modularRoadCityPark.js";
+import { createRoadMarkings, planStreetMarks } from "./modularRoadCityMarkings.js";
 import {
   ROAD_SIGN_DEFAULTS, SIGN, MIDBLOCK_SIGNS, makeRoadSignAtlas,
   buildRoadSignGeometry, makeRoadSignMaterial, loadRoadSignFolder,
@@ -156,6 +157,15 @@ const LAMP_Z = 2.42;
 const LAMP_CUT = 2.34, LAMP_CUT_FULL = 2.38;
 
 export const FURNITURE_DEFAULTS = {
+  /** Road lettering — BUS, STOP, SORTIE, TAXI, the bike symbol. One draw for
+   *  all of it, off the atlas the viaduct already uses. */
+  markings: true,
+  /** Metres between candidate slots along a lane. Most candidates stay bare:
+   *  paint everywhere reads as a test track, not a city. */
+  markingEvery: 46,
+  /** Keep clear of a junction by this much. Lettering inside one reads as a
+   *  mistake, and it is the first thing the eye checks at a stop line. */
+  markingJunctionClear: 11,
   /** Parked cars: station pitch along the kerb, occupancy, and how far the
    *  parking lane sits in from the kerb. */
   carPitch: 7.2,
@@ -2193,7 +2203,37 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     }
   }
 
+  /*
+   * ── ROAD LETTERING ─────────────────────────────────────────────────────────
+   *
+   * The marking atlas has existed since the viaduct, and the viaduct was the
+   * only thing using it — twelve slots and not a letter anywhere a player
+   * drives. It goes on the streets here because this is where the grid
+   * constants already live; deriving `pitch`/`blockW`/`ox`/`oz` a second time
+   * somewhere else is how two modules end up disagreeing about where a street
+   * is.
+   *
+   * ONE DRAW for every marking in the city, and it reuses `keepOut` and
+   * `holeAt` — the same corridor and underpass predicates every other piece of
+   * furniture respects, so paint cannot appear across the track or over the
+   * hole.
+   */
+  let markings = null;
+  if (F.markings !== false) {
+    const marks = planStreetMarks({
+      laneFracs: LANE_FRACS, laneDirForIndex,
+      pitch, blockW, streetW, ox, oz, half,
+      centerX: P.centerX, centerZ: P.centerZ, groundY: gy,
+      keepOut, holeAt,
+      every: F.markingEvery, junctionClear: F.markingJunctionClear,
+    });
+    markings = createRoadMarkings({ marks, name: "CityStreetMarkings" });
+    if (markings) group.add(markings.mesh);
+  }
+
   return {
+    /** The street lettering, so the city can report and dispose it. */
+    markings,
     /** Every placement, by kind — the obstacle table turns these into the
      *  capsules the car collides with (modularRoadCityObstacles.js). */
     lists: { cars, trees, lights, rails, cones, barriers, bins, pallets, roadSigns, gantries, vents, blocks, plates, benches },

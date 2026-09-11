@@ -310,3 +310,148 @@ export function createRoadMarkings({
     },
   };
 }
+
+/**
+ * ── WHERE THE PAINT GOES ─────────────────────────────────────────────────────
+ *
+ * This atlas has shipped since the viaduct was built, and until now the viaduct
+ * was the only thing using it: twelve authored slots, one draw for the whole
+ * city, and not a letter of it anywhere a player actually drives.
+ *
+ * The street shader already paints what is made of rectangles — lane arrows,
+ * parking bays, hatching — analytically, which is the right answer for a
+ * rectangle. This places the things that are NOT rectangles: lettering, the
+ * bike symbol, chevrons. So the two do not overlap in scope, and nothing here
+ * makes the street's fragment stage any bigger.
+ *
+ * Pure: takes the grid, returns `marks` for `createRoadMarkings`. It knows
+ * nothing about THREE, which is what lets the caller be the module that
+ * already has the grid constants rather than a new one that would have to
+ * derive them a second time and drift.
+ *
+ * DETERMINISTIC. Every choice keys off the street index, the lane and the step,
+ * so a rebuild paints the same city. A marking that moved when the track
+ * changed would be worse than no marking.
+ */
+export function planStreetMarks({
+  laneFracs, laneDirForIndex,
+  pitch, blockW, streetW, ox, oz, half, centerX, centerZ, groundY = 0,
+  /** Predicates from the caller: the track corridor, and the underpass hole. */
+  keepOut = null, holeAt = null,
+  /** Metres between candidate slots along a lane. */
+  every = 46,
+  /** Clear of a junction by this much — paint inside one reads as a mistake. */
+  junctionClear = 11,
+} = {}) {
+  const marks = [];
+  const laneW = streetW / Math.max(laneFracs.length, 1);
+  /*
+   * PROPORTION IS THE WHOLE GAME WITH ROAD TEXT.
+   *
+   * In the atlas a word reads along +u and a letter stands up along +v, so the
+   * quad's WIDTH carries the word and its LENGTH carries the letter height —
+   * which is right, because that is how paint on a road works: the letters sit
+   * side by side across the lane and each one is drawn long, so it looks
+   * upright from a driver's eye a metre off the ground.
+   *
+   * Get the ratio wrong and it is not slightly off, it is unreadable. At
+   * 2.3 m across by 5.4 m along, "TAXI" gave letters 0.57 m wide and 5.4 m
+   * long — a 1:9 stretch, which renders as a pile of bars with an X in it.
+   *
+   * A letter wants to be roughly 2.5x its own width. The word fills ~0.95 of
+   * the tile across and a text row ~0.3 of it along, so for N letters:
+   *     0.3 * len = 2.5 * (0.95 * wide / N)   ->   len ~= 8 * wide / N
+   */
+  const wide = Math.min(laneW * 0.62, 4.6);
+  const textLen = (n) => Math.min(8.0 * wide / n, laneW * 1.6);
+  /** Integer hash: stable, and cheap enough to call per candidate. */
+  const h = (a, b, c) => {
+    let n = (a * 73856093) ^ (b * 19349663) ^ (c * 83492791);
+    n = (n ^ (n >>> 13)) >>> 0;
+    return (n % 1000) / 1000;
+  };
+  const kLo = Math.floor((-half - Math.max(ox, oz)) / pitch) - 1;
+  const kHi = Math.ceil((half - Math.min(ox, oz)) / pitch) + 1;
+
+  for (const axis of ["z", "x"]) {
+    const acrossOrigin = axis === "z" ? ox : oz;
+    const alongOrigin = axis === "z" ? oz : ox;
+    const acrossLim = axis === "z" ? centerX : centerZ;
+    const alongLim = axis === "z" ? centerZ : centerX;
+    for (let k = kLo; k <= kHi; k++) {
+      const base = acrossOrigin + k * pitch + blockW;
+      for (let fi = 0; fi < laneFracs.length; fi++) {
+        const across = base + streetW * laneFracs[fi];
+        if (Math.abs(across - acrossLim) > half) continue;
+        const dir = laneDirForIndex(axis, fi);
+        // The quad's length runs along its local +Z, so yaw points that at the
+        // direction of travel — lettering has to read for the driver, not the
+        // map. +Z is yaw 0; +X is yaw +pi/2.
+        const yaw = axis === "z"
+          ? (dir > 0 ? 0 : Math.PI)
+          : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+        const kerbMost = dir === laneDirForIndex(axis, 0) ? fi === 0 : fi === laneFracs.length - 1;
+
+        for (let along = -half; along <= half; along += every) {
+          // Junction bands are where a street of the OTHER axis crosses.
+          const jRel = along - alongOrigin - blockW;
+          const inJunction = ((jRel % pitch) + pitch) % pitch < streetW + junctionClear
+            || ((jRel % pitch) + pitch) % pitch > pitch - junctionClear;
+          if (inJunction) continue;
+          if (Math.abs(along - alongLim) > half) continue;
+          const x = axis === "z" ? across : along;
+          const z = axis === "z" ? along : across;
+          if (keepOut && keepOut(x, z)) continue;
+          if (holeAt && holeAt(x, z)) continue;
+
+          const r = h(k, fi, Math.round(along));
+          // Most candidates stay bare. Paint everywhere reads as a test track.
+          if (r > 0.34) continue;
+          let tile, len, wq = wide;
+          if (kerbMost) {
+            tile = r < 0.10 ? MARK.bus : r < 0.18 ? MARK.bike : r < 0.26 ? MARK.taxi : MARK.slow;
+          } else {
+            tile = r < 0.12 ? MARK.sortie : r < 0.22 ? MARK.stop : MARK.school;
+          }
+          // Letter counts, so a long word is not crushed to fit a short one's box.
+          const LETTERS = {
+            [MARK.bus]: 3, [MARK.taxi]: 4, [MARK.stop]: 4,
+            [MARK.sortie]: 6, [MARK.slow]: 8, [MARK.school]: 5,
+          };
+          if (tile === MARK.bike) {
+            // A symbol, not a word: it stands up along +v like the arrows do,
+            // so it wants to be taller than it is wide and not much else.
+            wq = Math.min(laneW * 0.42, 2.2);
+            len = wq * 1.6;
+          } else {
+            len = textLen(LETTERS[tile] ?? 4);
+          }
+          /*
+           * TEXT TURNS A QUARTER TURN THAT ARROWS DO NOT.
+           *
+           * `PlaneGeometry` is authored in XY and rotated into XZ, which
+           * transposes the tile's axes against the arrow convention the
+           * viaduct established (shape's +Z along travel). An arrow is drawn
+           * pointing up the tile and comes out right; a WORD is drawn reading
+           * across the tile and comes out laid along the road with every
+           * letter on its side.
+           *
+           * So text gets a quarter turn the other way and its box swapped with
+           * it:
+           * the word then spreads ACROSS the lane and each letter is drawn
+           * long down the road, which is how paint is paired to a driver's
+           * eye height — letters side by side, each one stretched so it looks
+           * upright from a metre off the ground.
+           */
+          const isWord = tile !== MARK.bike;
+          if (isWord) {
+            marks.push({ x, y: groundY, z, yaw: yaw - Math.PI / 2, w: len, h: wq, tile });
+          } else {
+            marks.push({ x, y: groundY, z, yaw, w: wq, h: len, tile });
+          }
+        }
+      }
+    }
+  }
+  return marks;
+}
