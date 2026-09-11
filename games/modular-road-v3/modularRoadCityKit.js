@@ -473,6 +473,17 @@ function buildArchetype(rnd, K, forceH = null) {
     massHeight: massTop,
     footprint: Math.max(w0, d0),
     /**
+     * THE TIER STACK, in archetype-local space — `y` and `h` local (multiply by
+     * a placed building's `scaleY`), `w`/`d` in world metres already, because X
+     * and Z are never scaled.
+     *
+     * Exposed because anything mounted on a WALL has to know which wall is
+     * actually there at that height. A setback tower is narrower higher up, so
+     * a sign placed against the base footprint at fifty metres is bolted to
+     * thin air — which is exactly what the city's hero adverts were doing.
+     */
+    tiers: tiers.map((t) => ({ y: t.y, h: t.h, w: t.w, d: t.d })),
+    /**
      * THE TOP DECK, in archetype-local space — where the roof clutter goes.
      *
      * `y` is local, so a placed building's roof is at `b.y + roof.y * b.scaleY`

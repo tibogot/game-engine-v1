@@ -91,6 +91,9 @@ export const SIGN_DEFAULTS = {
   /** How much of the face the panel spans, and its height as a ratio of that
    *  width — capped against the building so it never meets the roofline. */
   heroFaceFrac: 0.86,
+  /** A hero board narrower than this is not a hero — it drops to a wider tier
+   *  rather than sit small on an upper setback. */
+  heroMinWidth: 12,
   heroAspect: 0.70,
   heroMinHeight: 42,
   heroMinFace: 16,
@@ -133,14 +136,14 @@ export const SIGN_DEFAULTS = {
   /** Board thickness, metres. `heroGap + heroDepth` must stay under `standoff`
    *  (0.45) so the box never reaches the wall. */
   heroDepth: 0.34,
-  /** Gap between the poster plane and the board's front face. NOT cosmetic: at
-   *  1 cm the two z-fought at distance and every big board in the city
-   *  flickered as you drove past, the LED ones included. */
+  /** Clearance between the poster plane and the board's open front edge. No
+   *  longer load-bearing — the front face is gone, so there is nothing to
+   *  z-fight — but it keeps the poster off the box's side walls. */
   heroGap: 0.06,
-  /** How far the board oversails the poster on every side. Coincident
-   *  silhouettes shimmer along their shared edge even when the depths are
-   *  safely apart — and a real board has a lip anyway. */
-  heroRim: 0.09,
+  /** How far the board is INSET from the poster on every side. Negative on
+   *  purpose: the board has no front face, so the poster has to cover the
+   *  opening from every angle. A positive value shows straight into it. */
+  heroRim: -0.06,
   heroBoxColor: 0x2a2d33,
   /**
    * Fraction of ordinary heroes that are LED screens. ZERO, and deliberately.
@@ -1080,6 +1083,22 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   const _up = new THREE.Vector3(0, 1, 0);
 
   /** A quad on a building face: centred at height `y`, `w` x `h` metres. */
+  /**
+   * The tier of `a` whose vertical span contains local height `ly`.
+   *
+   * Local means archetype space: divide a world height by the instance's
+   * `scaleY` first, because a placed building is stretched in Y and never in
+   * X or Z. Returns null when the archetype predates the tier export, and the
+   * last tier when `ly` is above the top — a mast or a crown is still standing
+   * on the top tier's wall.
+   */
+  function tierAt(a, ly) {
+    const ts = a?.tiers;
+    if (!ts || !ts.length) return null;
+    for (const t of ts) if (ly >= t.y && ly < t.y + t.h) return t;
+    return ly < 0 ? ts[0] : ts[ts.length - 1];
+  }
+
   function faceMatrix(b, a, face, y, w, h, slide, out) {
     const [nx, nz] = face;
     const half = (nx !== 0 ? a.width : a.depth) * 0.5 + P.standoff;
@@ -1146,15 +1165,56 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
         const isScreen = lotRand(b.cx, b.cz, 54) < P.heroScreenFraction
           && height > P.crownMinHeight ? 1 : 0;
         const grow = isScreen ? P.heroScreenScale : 1;
-        const w = fw * Math.min(P.heroFaceFrac * grow, 0.98);
-        const h = Math.min(w * P.heroAspect, height * (isScreen ? 0.62 : 0.45));
+        let w = fw * Math.min(P.heroFaceFrac * grow, 0.98);
+        let h = Math.min(w * P.heroAspect, height * (isScreen ? 0.62 : 0.45));
         // Screens crown the tower, prints sit mid-wall — see crownLow.
         const lo = isScreen ? P.crownLow : P.heroLow;
         const hi = isScreen ? P.crownHigh : P.heroHigh;
         const top = isScreen ? P.crownTopMargin : 3;
         let y = b.y + height * (lo + lotRand(b.cx, b.cz, 52) * (hi - lo));
         y = Math.max(b.y + 8 + h / 2, Math.min(b.y + height - top - h / 2, y));
-        faceMatrix(b, a, hf, y, w, h, 0, _m);
+        /*
+         * ── WHICH WALL IS ACTUALLY THERE AT THAT HEIGHT ────────────────────
+         *
+         * `a.width`/`a.depth` are the BASE footprint, and a setback tower is
+         * narrower higher up. A board sized and placed against the base at
+         * fifty metres is bolted to thin air — which is what a screenshot of
+         * the city showed: boards floating in the gap beside a tower that had
+         * already stepped in under them.
+         *
+         * So the height is chosen first, as before, and then the board is
+         * fitted to the tier that exists there: its width, its wall plane, and
+         * its vertical span. `faceMatrix` only ever reads `width`/`depth`, so
+         * handing it the tier's is the whole placement fix.
+         *
+         * A board is never allowed to overhang its tier's top or bottom
+         * either — that is the same floating failure in miniature, a poster
+         * whose upper half is off the end of the wall.
+         */
+        let wall = a;
+        let T = tierAt(a, (y - b.y) / (b.scaleY || 1));
+        if (T) {
+          /*
+           * A HERO WANTS A BIG WALL. If the tier at the chosen height is a
+           * narrow upper setback, the board is correctly placed and far too
+           * small to be a hero advert — so it moves down to the widest tier
+           * the tower has instead, which is what an advertiser would do.
+           * Without this the fix traded floating boards for postage stamps.
+           */
+          const faceOf = (t) => (hf[0] !== 0 ? t.d : t.w);
+          if (faceOf(T) * P.heroFaceFrac * grow < P.heroMinWidth) {
+            for (const t of a.tiers) if (faceOf(t) > faceOf(T)) T = t;
+          }
+          const tY0 = b.y + T.y * (b.scaleY || 1);
+          const tY1 = tY0 + T.h * (b.scaleY || 1);
+          const tW = hf[0] !== 0 ? T.d : T.w;
+          w = tW * Math.min(P.heroFaceFrac * grow, 0.98);
+          h = Math.min(w * P.heroAspect, height * (isScreen ? 0.62 : 0.45),
+            Math.max(tY1 - tY0 - 2, 1));
+          y = Math.max(tY0 + h / 2 + 1, Math.min(tY1 - h / 2 - 1, y));
+          wall = { width: T.w, depth: T.d };
+        }
+        faceMatrix(b, wall, hf, y, w, h, 0, _m);
         heroes.push({
           m: _m.clone(),
           tile: Math.floor(lotRand(b.cx, b.cz, 53) * HERO_SLOTS),
@@ -1549,7 +1609,36 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
 
   let heroBoxMesh = null;
   if (heroes.length && P.heroDepth > 0) {
+    /*
+     * THE FRONT FACE IS DELETED, AND THAT IS THE WHOLE FIX.
+     *
+     * A gap cannot solve this. Depth resolution falls off as z², and with this
+     * camera (near 0.5, far 4096) it is 0.0075 m at 250 m but 0.31 m at
+     * 1600 m — so any separation that fits inside the 0.45 m standoff is
+     * comfortable up close and hopeless far away. That is exactly what was
+     * reported: the near boards fine, the far ones flickering.
+     *
+     * So there is no plane behind the poster any more. The board's +Z face is
+     * removed, leaving an open-fronted box: four sides and a back. Nothing is
+     * coplanar with the poster, so no depth comparison between them exists to
+     * be ambiguous, at any distance.
+     *
+     * That only works because the box is SMALLER than the poster (`heroRim` is
+     * negative): the missing front is covered by the poster from every angle
+     * that can see it, so the box never reads as open. Make the rim positive
+     * again and you will see straight into it around the edges.
+     */
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+    {
+      const nrm = boxGeo.attributes.normal, idx = boxGeo.index;
+      const keep = [];
+      for (let t = 0; t + 2 < idx.count; t += 3) {
+        const v = idx.getX(t);
+        if (nrm.getZ(v) > 0.5) continue;               // the face the poster hides
+        keep.push(idx.getX(t), idx.getX(t + 1), idx.getX(t + 2));
+      }
+      boxGeo.setIndex(keep);
+    }
     const boxMat = new THREE.MeshStandardNodeMaterial({
       color: new THREE.Color(P.heroBoxColor), roughness: 0.72, metalness: 0.0,
     });
