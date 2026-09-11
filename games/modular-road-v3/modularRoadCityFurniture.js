@@ -1567,7 +1567,20 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     lightGeo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
   }
   const railMesh = instanced(rails, railGeo, railMat, "CityRails", { shadows: false });
-  const signMesh = instanced(roadSigns, signGeo, signMat, "CityRoadSigns", { shadows: false });
+  /*
+   * THE BOARDS CAST. Signs and gantries were both `shadows: false`, and a
+   * destination board hanging over four lanes with no shadow under it is the
+   * kind of wrong you feel before you can name it — reported from the game as
+   * exactly that.
+   *
+   * It is affordable because the shadow pass here is NOT triangle bound: the
+   * city's trees are 1.35 M triangles and the biggest caster on screen, and
+   * removing them saved 0.00 ms of a 0.52 ms pass (measured in road.html, 2
+   * cascades, `maxFar` 80). A few hundred boards are far below that floor. The
+   * kinds still switched off below are the ones with nothing to cast — a flat
+   * rail, a traffic light already inside its own junction's shade.
+   */
+  const signMesh = instanced(roadSigns, signGeo, signMat, "CityRoadSigns", { shadows: true });
   /*
    * WHICH SIGN each post shows. A real instanced attribute, and rounded in the
    * shader before it is decoded — see the note in makeRoadSignMaterial.
@@ -1590,7 +1603,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // whatever happened to be in the buffer first.
     ventMesh.renderOrder = 3;
   }
-  const gantryMesh = instanced(gantries, gantryGeo, gantryMat, "CityGantry", { shadows: false });
+  const gantryMesh = instanced(gantries, gantryGeo, gantryMat, "CityGantry", { shadows: true });
   if (gantryMesh) {
     const gt = new Float32Array(gantries.length);
     for (let i = 0; i < gantries.length; i++) gt[i] = gantries[i].tile ?? 0;

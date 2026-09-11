@@ -14,8 +14,12 @@ import { register } from "node:module";
 
 register("./threeWebgpuHook.mjs", import.meta.url);
 const THREE = await import("three/webgpu");
-const { viaductLayout, createCityViaduct } =
+const { viaductLayout, createCityViaduct, VIADUCT_DEFAULTS } =
   await import("../games/modular-road-v3/modularRoadCityViaduct.js");
+// The street lamp's own numbers, so "the same lamp" is checked against the
+// source rather than restated and left to drift.
+const { STREET_DEFAULTS } =
+  await import("../games/modular-road-v3/modularRoadCityStreets.js");
 const { roadParams } = await import("../games/modular-road-v3/modularRoadKit.js");
 const { BRIDGE_DEFAULTS } = await import("../games/modular-road-v3/modularRoadCityBridges.js");
 const { CITY_DEFAULTS, createModularRoadCity } = await import("../games/modular-road-v3/modularRoadCity.js");
@@ -165,6 +169,105 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
     JSON.stringify(cityViaduct));
   check("it is lit and jointed", cityViaduct.columns > 10 && cityViaduct.joints > 10,
     `${cityViaduct.columns} columns, ${cityViaduct.joints} joints`);
+
+  /*
+   * ── THE PARTS ALL SPEAK THE MATERIAL'S LANGUAGE ────────────────────────────
+   *
+   * `pierMaterial` reads FOUR vertex-colour channels (concrete shade / lamp
+   * head / joint / lamp metal). A geometry that supplies only three does not
+   * fail, it reads `.a` as something it never wrote and comes out the wrong
+   * colour — and `mergeGeometries` refuses to merge mismatched attribute sets
+   * at all, which is a silent null mesh rather than an error. Both failures are
+   * invisible from here except as "why is that grey".
+   */
+  {
+    const parts = meshes.filter((m) => /Piers|PierCaps|Columns|Joints/.test(m.name));
+    check("every part on the shared material carries four colour channels",
+      parts.length === 4 && parts.every((m) => m.geometry.attributes.color?.itemSize === 4),
+      parts.map((m) => `${m.name}:${m.geometry.attributes.color?.itemSize ?? "none"}`).join(" "));
+
+    /*
+     * AND ONLY THE LAMP IS LAMP. `.g` (head) and `.a` (post and arms) both
+     * select the lamp's metal; `.g` alone drives the emissive, because a post
+     * that glows is a lightsaber. Concrete must select neither, or the piers
+     * turn to steel the moment the material gains a metalness node.
+     */
+    const chan = (m, k) => {
+      const c = m.geometry.attributes.color;
+      let hi = 0;
+      for (let i = 0; i < c.count; i++) hi = Math.max(hi, c.getComponent(i, k));
+      return hi;
+    };
+    for (const m of parts) {
+      const lamp = Math.max(chan(m, 1), chan(m, 3));
+      const isLamp = m.name === "CityViaductColumns";
+      check(`${m.name} ${isLamp ? "is" : "is not"} lamp metal`, (lamp > 0.5) === isLamp,
+        `max(.g, .a) = ${lamp}`);
+    }
+    const col = parts.find((m) => m.name === "CityViaductColumns");
+    check("...and only its head glows", col && chan(col, 1) > 0.5 && chan(col, 3) > 0.5,
+      col ? `.g ${chan(col, 1)}  .a ${chan(col, 3)}` : "no columns");
+  }
+
+  /*
+   * ── WHAT CASTS AND WHAT IS BURIED ──────────────────────────────────────────
+   *
+   * Both reported from the game. The lamps cast nothing, which at midday makes
+   * a lamp post you can see through; and the joints read as slabs lying across
+   * the road because they stood proud on their own sides and took no shadow.
+   *
+   * The shadow pass here is NOT triangle bound — removing the city's trees,
+   * 1.35 M triangles, saved 0.00 ms of a 0.52 ms pass — so casting is affordable
+   * and the old "300 triangles at 12 m up" reasoning was measuring the wrong
+   * thing. This nails the outcome rather than the argument.
+   */
+  {
+    const col = meshes.find((m) => m.name === "CityViaductColumns");
+    const jnt = meshes.find((m) => m.name === "CityViaductJoints");
+    check("the lighting columns cast a shadow", col?.castShadow === true);
+    check("the joints take one", jnt?.receiveShadow === true);
+
+    // Buried: almost all of the plate is under the deck, and what is over it is
+    // a joint's worth rather than a kerb's.
+    const pos = jnt?.geometry.attributes.position;
+    let lo = 1e9, hi = -1e9;
+    for (let i = 0; pos && i < pos.count; i++) {
+      lo = Math.min(lo, pos.getY(i)); hi = Math.max(hi, pos.getY(i));
+    }
+    check("...and stand barely proud of the deck they are set into",
+      pos && hi > 0 && hi < 0.03 && lo < -0.02,
+      `${(hi * 1000).toFixed(0)} mm over the deck, ${(-lo * 1000).toFixed(0)} mm buried`);
+    // Narrow enough to be a line you cross, not a band you drive over.
+    let zlo = 1e9, zhi = -1e9;
+    for (let i = 0; pos && i < pos.count; i++) {
+      zlo = Math.min(zlo, pos.getZ(i)); zhi = Math.max(zhi, pos.getZ(i));
+    }
+    check("...and narrow enough to read as a joint", zhi - zlo < 0.25,
+      `${((zhi - zlo) * 1000).toFixed(0)} mm across`);
+  }
+
+  /*
+   * ── AND IT IS THE SAME LAMP AS THE STREETS ─────────────────────────────────
+   *
+   * The whole point of the rebuild: one city, one make of street light. The
+   * profile numbers are compared against the street lamp's own defaults rather
+   * than restated here, so the two cannot drift apart without this failing.
+   */
+  {
+    const V = VIADUCT_DEFAULTS, S = STREET_DEFAULTS;
+    check("the viaduct lamp has the street lamp's profile",
+      V.columnPostBase === S.lampPostBase && V.columnPostTop === S.lampPostTop
+      && V.columnArmThick === 0.12 && V.columnHeadW === S.lampHeadW
+      && V.columnHeadH === S.lampHeadH && V.columnHeadD === S.lampHeadD,
+      `post ${V.columnPostBase}/${V.columnPostTop} vs ${S.lampPostBase}/${S.lampPostTop}, `
+      + `head ${V.columnHeadW}x${V.columnHeadH}x${V.columnHeadD} vs ${S.lampHeadW}x${S.lampHeadH}x${S.lampHeadD}`);
+    // A round post, not a box: eight-sided like the street's, so the taper is
+    // the silhouette and the facets never show.
+    const col = meshes.find((m) => m.name === "CityViaductColumns");
+    const tris = col ? (col.geometry.index ? col.geometry.index.count : col.geometry.attributes.position.count) / 3 : 0;
+    check("...and a round tapered pole rather than a box", tris >= 72 && tris <= 96,
+      `${tris} triangles (a boxed post was 60)`);
+  }
   check("and the exits are painted", cityViaduct.marks > 0, `${cityViaduct.marks} markings`);
   /*
    * THE BOARDS COST NO DRAW. They are pushed onto the CITY'S gantry list, so

@@ -249,13 +249,49 @@ export const VIADUCT_DEFAULTS = {
    * keyed to the street grid, and an elevated road is not on it; this is the
    * structure drawing its own line of lights at night, which is what actually
    * reads from below. One instanced mesh either way.
+   *
+   * ── AND IT IS THE SAME LAMP AS THE STREETS BELOW ───────────────────────────
+   *
+   * It was a square concrete post with square arms and a light-grey box on the
+   * end, while every lamp on every street in the same city is a tapered round
+   * pole in dark metal with a slim head slung under its arm. Driving off the
+   * viaduct into the streets, the lighting changed make. Reported from the
+   * game, and correctly: a city's lamps are one of the things that tells you
+   * it is one city.
+   *
+   * So the PROFILE now comes from the street lamp (modularRoadCityStreets.js,
+   * `lampGeo`) — the same taper radii, the same arm thickness, the same head
+   * box, the same dark metal — and only the numbers that are about this ROAD
+   * rather than about the lamp stay the viaduct's own: how tall it stands over
+   * the deck, how far it reaches, how often it repeats, and the fact that it
+   * carries TWO heads from the central reserve instead of one from a kerb.
+   *
+   * That split is the point. Style is shared; road geometry is not.
    */
   columns: true,
   columnSpacing: 46,
   columnHeight: 8.5,
   columnReach: 4.6,
   columnGlow: 3.2,
-  colorColumn: 0x9ea3a6,
+  /** The profile, taken from the street lamp so the two are the same object.
+   *  Radii, not diameters. */
+  columnPostBase: 0.15,
+  columnPostTop: 0.09,
+  columnArmThick: 0.12,
+  columnHeadW: 0.80,
+  columnHeadH: 0.18,
+  columnHeadD: 0.38,
+  /**
+   * The lamp's metal — post, arm and head alike, exactly as the street lamp
+   * does it: one colour for the whole fitting, and only the GLOW picks the
+   * head out at night.
+   *
+   * 0x6f7376 is the street lamp's `vec3(0.16, 0.17, 0.18)` written as sRGB,
+   * which is what a hex on a `THREE.Color` means once colour management has
+   * had it. The old 0x9ea3a6 was about twice as bright in linear terms and
+   * read as painted concrete next to the streets' dark steel.
+   */
+  colorColumn: 0x6f7376,
 
   /**
    * ── EXPANSION JOINTS ───────────────────────────────────────────────────────
@@ -291,10 +327,36 @@ export const VIADUCT_DEFAULTS = {
   markLength: 9.0,
 
   joints: true,
-  jointWidth: 0.42,
-  /** How far above the deck they sit. Enough to win the depth test at range
-   *  without being a lip the suspension can feel. */
-  jointLift: 0.014,
+  /**
+   * ── AND THEY ARE A JOINT, NOT A SLAB ───────────────────────────────────────
+   *
+   * Reported from the game as "large seams... like a real mesh rectangle that
+   * goes from one side of the kerb to the other", and asked whether it was on
+   * purpose. It was — but three separate things made it read as an object
+   * lying on the road rather than as part of it:
+   *
+   *  · 0.42 m ACROSS. A 34 m span moves a few centimetres; the hardware that
+   *    covers that is a hand's width, not half a metre. At the width it was,
+   *    it is a band you drive over, not a line you cross.
+   *  · IT FLOATED. The box is 2 cm thick and was lifted 1.4 cm, so it hovered
+   *    4 mm clear of the deck with its top 2.4 cm up — visible SIDES, and a
+   *    shadow gap under it at a grazing angle. Sides are what make a thing an
+   *    object.
+   *  · AND IT TOOK NO SHADOW. `receiveShadow` was off, so it stayed uniformly
+   *    dark under everything the deck darkened under, which is the same tell
+   *    as a decal that forgot it was in the world.
+   *
+   * Now it is a plate BURIED in the deck: 10 cm tall with only `jointStand`
+   * showing, so there are no free-standing sides and nothing to see under.
+   */
+  jointWidth: 0.16,
+  /** How much of the buried plate stands above the deck. Enough to win the
+   *  depth test at range, small enough to read as a joint and not a lip — and
+   *  it is not collision, so the suspension never meets it either way. */
+  jointStand: 0.016,
+  /** How deep the plate sits in the deck. Only `jointStand` is ever seen; the
+   *  rest is there so the joint has no underside to catch the light. */
+  jointSink: 0.10,
   colorJoint: 0x2c2b29,
 };
 
@@ -830,12 +892,18 @@ export function concreteDetail(params = {}) {
  * ── ONE MATERIAL FOR EVERYTHING THAT IS NOT THE ROAD ─────────────────────────
  *
  * Piers, lighting columns and expansion joints all run on this. They look
- * nothing alike, and they do not need to: the vertex colour carries three
+ * nothing alike, and they do not need to: the vertex colour carries four
  * independent channels —
  *
  *   .r  concrete shade, 0..1
- *   .g  lantern: emissive at night, and the only thing here that glows
+ *   .g  lantern: the lamp's metal, AND the only thing here that glows
  *   .b  joint: flat dark, no streaking
+ *   .a  lamp metal that does not glow — the post and the arms
+ *
+ * `.g` and `.a` pick the SAME colour on purpose: a street lamp is one casting
+ * from foot to lantern and only the light tells you where the head is. They
+ * are two channels rather than one because the emissive keys off `.g` alone,
+ * and a glowing post is a lightsaber.
  *
  * One material is one pipeline, and in this game a pipeline is the expensive
  * unit — the first frame is spent compiling, not drawing. Three tidy materials
@@ -851,6 +919,13 @@ function pierMaterial(V, uNightU, uGlow) {
   const colu = uniform(new THREE.Color(V.colorColumn));
   const joint = uniform(new THREE.Color(V.colorJoint));
   const uTop = uniform(0);
+  /** Lamp metal: the head (which also glows) or the post and arms (which do
+   *  not). One selector so colour, metalness and roughness cannot disagree
+   *  about which vertices are the lamp. */
+  const lampSel = Fn(() => {
+    const vc = vertexColor();
+    return max(vc.g, vc.a);
+  });
   m.colorNode = Fn(() => {
     /*
      * Concrete streaks DOWNWARD, and on a structure this size that is most of
@@ -866,10 +941,19 @@ function pierMaterial(V, uNightU, uGlow) {
     // The cast surface itself, then the weather on top of it.
     const cast = base.mul(vc.r.mul(0.25).add(0.75)).mul(detail());
     const concrete = mix(cast, dirt, streak);
-    // A lantern is not concrete and a joint is not weathered — both step out of
+    // A lamp is not concrete and a joint is not weathered — both step out of
     // the streak, which is keyed to the deck above and means nothing to either.
-    return mix(mix(concrete, colu, vc.g), joint, vc.b);
+    return mix(mix(concrete, colu, lampSel()), joint, vc.b);
   })();
+  /*
+   * AND THE LAMP IS METAL, which the streets' lamps get for free from having
+   * their own material (metalness 0.6, roughness 0.5) and this one could not,
+   * being one pipeline for concrete and steel at once. Driven off the same
+   * selector, so a pier stays exactly the matte 0.88 / 0.0 it was — the
+   * expression is 0 for every vertex that is not a lamp.
+   */
+  m.metalnessNode = lampSel().mul(0.6);
+  m.roughnessNode = mix(float(0.88), float(0.5), lampSel());
   /*
    * THE LIGHTS COME ON. Emissive only on the lantern channel, only at night,
    * and through the bloom MRT so the heads flare the way the street lamps do —
@@ -1210,11 +1294,20 @@ export function createCityViaduct({
   let shafts = null, caps = null;
   /** Paint every vertex of `g` with the three channels the parts material
    *  reads: concrete shade, lantern, joint. See `pierMaterial`. */
-  const tint = (g, r, gg, b) => {
+  /*
+   * FOUR COMPONENTS, and every geometry on `pierMat` goes through here — piers
+   * and caps via `mk`, the column parts and the joints directly. That matters:
+   * `mergeGeometries` needs identical attribute sets, and a material reading
+   * `.a` while some of its meshes only supply three channels is a silent
+   * wrong-colour rather than an error. One writer, one shape.
+   */
+  const tint = (g, r, gg, b, a = 0) => {
     const n = g.attributes.position.count;
-    const c = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) { c[i * 3] = r; c[i * 3 + 1] = gg; c[i * 3 + 2] = b; }
-    g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+    const c = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      c[i * 4] = r; c[i * 4 + 1] = gg; c[i * 4 + 2] = b; c[i * 4 + 3] = a;
+    }
+    g.setAttribute("color", new THREE.BufferAttribute(c, 4));
     return g;
   };
   const mk = (w, h, d, y, shade) => {
@@ -1263,16 +1356,29 @@ export function createCityViaduct({
   // ── Lighting columns, down the central reserve ─────────────────────────────
   let columns = null;
   if (V.columns) {
+    /*
+     * THE STREET LAMP'S OWN PROFILE, with two arms instead of one — see the
+     * note on the defaults. A tapered round pole (eight sides, as the streets
+     * use: the taper is the silhouette, the facets never show), a slim arm out
+     * to each carriageway, and the head slung UNDER the arm's end, which is
+     * both what a real one does and what stops the head reading as a lump on
+     * top of a stick.
+     *
+     * 80 triangles against the old 60, for ~46 m of road. The lamps were never
+     * the cost and this does not make them one.
+     */
     const parts = [];
-    const post = mk(0.26, V.columnHeight, 0.26, V.columnHeight * 0.5, 0.0);
-    parts.push(tint(post, 0.55, 0, 0));
+    const H = V.columnHeight;
+    const post = new THREE.CylinderGeometry(V.columnPostTop, V.columnPostBase, H, 8);
+    post.translate(0, H / 2, 0);
+    parts.push(tint(post, 0, 0, 0, 1));
     for (const s2 of [-1, 1]) {
-      const arm = new THREE.BoxGeometry(V.columnReach, 0.16, 0.16);
-      arm.translate((s2 * V.columnReach) / 2, V.columnHeight - 0.1, 0);
-      parts.push(tint(arm, 0.55, 0, 0));
-      const head = new THREE.BoxGeometry(0.86, 0.16, 0.34);
-      head.translate(s2 * V.columnReach, V.columnHeight - 0.2, 0);
-      parts.push(tint(head, 0, 1, 0));
+      const arm = new THREE.BoxGeometry(V.columnReach, V.columnArmThick, V.columnArmThick);
+      arm.translate((s2 * V.columnReach) / 2, H, 0);
+      parts.push(tint(arm, 0, 0, 0, 1));
+      const head = new THREE.BoxGeometry(V.columnHeadW, V.columnHeadH, V.columnHeadD);
+      head.translate(s2 * V.columnReach, H - 0.14, 0);
+      parts.push(tint(head, 0, 1, 0, 0));
     }
     const geo = mergeGeometries(parts, false);
     for (const g of parts) g.dispose();
@@ -1289,7 +1395,15 @@ export function createCityViaduct({
         m.compose(new THREE.Vector3(c.x, c.y, c.z), qt, one);
         columns.setMatrixAt(i, m);
       });
-      columns.castShadow = false;      // 300 triangles of shadow at 12 m up
+      /*
+       * IT CASTS. The old comment here — "300 triangles of shadow at 12 m up"
+       * — is the reasoning the shadow budget was actually measured against and
+       * found wrong: the pass is NOT triangle bound. Removing the city's trees,
+       * 1.35 M triangles and the single biggest caster on screen, saved 0.00 ms
+       * of a 0.52 ms pass. A line of lamp posts is nothing next to that, and a
+       * lamp post with no shadow at midday is a lamp post you can see through.
+       */
+      columns.castShadow = castShadows;
       columns.receiveShadow = true;
       columns.frustumCulled = false;
       columns.instanceMatrix.needsUpdate = true;
@@ -1300,8 +1414,11 @@ export function createCityViaduct({
   // ── Expansion joints, one per span ─────────────────────────────────────────
   let joints = null;
   if (V.joints) {
-    const g0 = new THREE.BoxGeometry(V.deckWidth - roadParams.railWidth * 2, 0.02, V.jointWidth);
-    g0.translate(0, 0, 0);
+    // Buried: `jointSink` tall, sitting so that only `jointStand` is over the
+    // deck. Nothing here is collision, so the part below the surface costs
+    // nothing but the four side faces it stops anyone ever seeing.
+    const g0 = new THREE.BoxGeometry(V.deckWidth - roadParams.railWidth * 2, V.jointSink, V.jointWidth);
+    g0.translate(0, V.jointStand - V.jointSink / 2, 0);
     const geo = tint(g0, 0, 0, 1);
     const at = layout.joints;
     if (at.length) {
@@ -1311,11 +1428,14 @@ export function createCityViaduct({
       const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
       at.forEach((c, i) => {
         qt.setFromAxisAngle(up, c.yaw);
-        m.compose(new THREE.Vector3(c.x, c.y + V.jointLift, c.z), qt, one);
+        m.compose(new THREE.Vector3(c.x, c.y, c.z), qt, one);
         joints.setMatrixAt(i, m);
       });
+      // It casts nothing — 16 mm of plate has no shadow to give — but it has to
+      // TAKE one, or it stays lit under the pier shadow the deck is sitting in
+      // and reads as a decal that is not really in the world.
       joints.castShadow = false;
-      joints.receiveShadow = false;
+      joints.receiveShadow = true;
       joints.frustumCulled = false;
       joints.instanceMatrix.needsUpdate = true;
       group.add(joints);
