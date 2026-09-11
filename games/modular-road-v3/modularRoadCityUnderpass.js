@@ -140,10 +140,11 @@ export const UNDERPASS_DEFAULTS = {
    */
   lipWidth: 0.7,
   parapetHeight: 0.95,
-  /** A wall across the drivable deck at each portal. The deck is the full
-   *  width of the trench and its edge was guarded only by the parapet's ~1.2 m
-   *  end cap — see the note where these are built. */
-  deckEndWalls: true,
+  /** Metres over which each parapet run flares from a point at the portal
+   *  out to full thickness — a deflector, so a car meeting the barrier's start
+   *  is pushed back into its lane. A blunt start was the "invisible wall" on
+   *  the side roads; see the note on the nose. */
+  noseLength: 4.0,
 
   /**
    * ── THE VAULT'S SHELL IS SOLID ─────────────────────────────────────────────
@@ -853,6 +854,33 @@ export function createCityUnderpass({
       const a = alongAt(i);
       const wide = a > layout.wIn - 1e-6 && a < layout.wOut + 1e-6;
       const lipHere = wide ? lip : outer;
+      /*
+       * ── THE NOSE: THE PARAPET STARTS AS A DEFLECTOR, NOT A CLIFF ───────────
+       *
+       * Each parapet run begins at a portal, and it began BLUNT: a face 1.2 m
+       * wide (wall + lip) and a metre tall, square across the side road,
+       * pointing straight at oncoming traffic. A car hugging the trench side
+       * has its outer half-metre over the lip strip — drivable ground — and
+       * met that face dead-on. Reported as "an invisible wall that blocks the
+       * car, on both side roads, exactly where the road is split by the
+       * tunnel"; chased for days as a collision bug. The collider was correct:
+       * it IS a wall. It was a wall that starts with a cliff.
+       *
+       * So over `noseLength` from the portal plane the wall's outer face runs
+       * DIAGONALLY, from the inner line at the portal out to full thickness —
+       * a chamfer in plan, the way a real barrier terminal is flared. A car
+       * that meets it is pushed sideways back into its lane and carries on,
+       * instead of stopping dead. The height stays FULL the whole way: a wall
+       * that ramps up out of the street instead would have a top a wheel can
+       * ride onto, and the top of a parapet is not ground — the wheel would
+       * find the tunnel road seven metres down, the exact fall this file has
+       * already fixed once. Only the wall's lateral extent shrinks toward the
+       * portal; the lip edge (vert 4) stays put, so the lip deck simply widens
+       * to fill the wedge and there is no gap in the ground anywhere.
+       */
+      const dPortal = Math.min(Math.abs(a - layout.cov0), Math.abs(a - layout.cov1));
+      const nose = U.noseLength > 0 ? Math.min(1, dPortal / U.noseLength) : 1;
+      const wallOut = inner + (outer - inner) * nose;
       const capY = layout.top + U.parapetHeight;
       /*
        * ── THE FOOT GOES UNDER BOTH SURFACES ──────────────────────────────────
@@ -874,8 +902,8 @@ export function createCityUnderpass({
       for (const s of [-1, 1]) {
         push(atFrame(i, s * inner, footY), 1.0);    // 0 inner foot
         push(atFrame(i, s * inner, capY), 1.0);     // 1 inner top
-        push(atFrame(i, s * outer, capY), 0.9);     // 2 outer top
-        push(atFrame(i, s * outer, layout.top), 0.9); // 3 outer at street
+        push(atFrame(i, s * wallOut, capY), 0.9);     // 2 outer top
+        push(atFrame(i, s * wallOut, layout.top), 0.9); // 3 outer at street
         push(atFrame(i, s * lipHere, layout.top), 0.8); // 4 lip edge
       }
     }
@@ -1250,6 +1278,18 @@ export function createCityUnderpass({
      * It is a barrier in the honest sense too — the trench wall is in the
      * SOLIDS channel, so this stops a car on the street from driving off the
      * end of the hole, which until now only the two side walls did.
+     *
+     * BETWEEN THE PARAPETS' INNER FACES, NOT ACROSS THE LIPS. It used to span
+     * `lip` to `lip` — the full hole, lip strips included. The lip strip is
+     * drivable ground at the edge of each side road, so half a metre before
+     * the portal a car keeping to the trench side of its lane met a square
+     * metre-high face across the outer part of the lane. Reported as "an
+     * invisible mesh blocks the car, on both side roads, exactly where the
+     * road is split by the tunnel", with sparks; the contacts the resolver
+     * logged were this box's front face (normal along the road) and its end
+     * face (normal across it), at exactly `lip`. The drop it exists to fence
+     * off is between the two parapets, so that is all it spans now; the
+     * parapet's own flared nose carries on from its corner.
      */
     /*
       * The sign is which way the ROOF is from that portal: into the tunnel, so
@@ -1264,7 +1304,7 @@ export function createCityUnderpass({
       // Eight corners: two depths into the roofed side, two heights, two ends.
       for (const d of [d0, d1]) {
         for (const yy of [y0, y1]) {
-          for (const lat of [-lip, lip]) {
+          for (const lat of [-inner, inner]) {
             const f = fr;
             const v = new THREE.Vector3().copy(f.pos)
               .addScaledVector(f.right, lat)
@@ -1393,74 +1433,6 @@ export function createCityUnderpass({
   }
 
   /*
-   * ── THE END WALL ACROSS THE DECK ───────────────────────────────────────────
-   *
-   * The lid over the covered section is a DRIVABLE deck the full width of the
-   * trench — about sixteen metres here — and at the portal that deck simply
-   * stops, with the open trench beyond it. The only thing guarding that edge
-   * was the parapet's own end cap: a pentagon about 1.2 m wide, closing the
-   * ribbon. Sixteen metres of drop, one and a bit metres of guard.
-   *
-   * Reported as "an invisible wall" — which it was, from the one line where
-   * you met it. Head-on, a wall seen exactly end-on is a few pixels wide, so
-   * it read as nothing at all; anywhere else across the deck there was
-   * genuinely nothing, and you would have gone in.
-   *
-   * So each portal gets a wall across the whole opening. ABOVE THE DECK ONLY —
-   * it starts at the street and rises, because the tunnel bore is directly
-   * below and a wall that reached down would brick up the road it exists to
-   * carry. One mesh for both ends, one draw, and it joins the solids so it
-   * stops a car rather than being scenery.
-   */
-  let endWalls = null;
-  if (U.deckEndWalls !== false && layout.cov1 > layout.cov0) {
-    const t = Math.max(U.wallThickness ?? 0.5, 0.4);
-    const w = layout.holeHalf * 2;
-    const h = U.parapetHeight + 0.25;
-    const cy = layout.top + U.parapetHeight * 0.5 - 0.125;
-    const parts = [];
-    for (const a of [layout.cov0, layout.cov1]) {
-      const g2 = layout.axis === "x"
-        ? new THREE.BoxGeometry(t, h, w)
-        : new THREE.BoxGeometry(w, h, t);
-      g2.translate(
-        layout.axis === "x" ? a : layout.across,
-        cy,
-        layout.axis === "x" ? layout.across : a,
-      );
-      parts.push(g2);
-    }
-    const merged = mergeGeometries(parts, false);
-    parts.forEach((g2) => g2.dispose());
-    if (merged) {
-      /*
-       * IT SHARES THE WALL MATERIAL, SO IT HAS TO SPEAK THE WALL'S LANGUAGE.
-       *
-       * `wallMaterial` shades every face by `vertexColor().rgb.r` — the trench
-       * wall packs one shade number per vertex into the red channel of a
-       * `color` attribute (see `push`). A BoxGeometry has no such attribute,
-       * and a missing attribute reads as ZERO: the concrete was multiplied by
-       * nothing and the wall rendered black. A black one-metre wall on a dark
-       * deck edge against a dark trench is, to a driver, an invisible wall —
-       * which is exactly what was reported, and what a day of hunting colliders
-       * could not find, because the collider was right and the PAINT was gone.
-       *
-       * 0.9 is the shade the trench wall gives its own outer faces.
-       */
-      const nV = merged.attributes.position.count;
-      const shade = new Float32Array(nV * 3);
-      for (let i = 0; i < nV; i++) shade[i * 3] = 0.9;
-      merged.setAttribute("color", new THREE.BufferAttribute(shade, 3));
-      endWalls = new THREE.Mesh(merged, wallMat);
-      endWalls.name = "CityUnderpassDeckEndWalls";
-      endWalls.receiveShadow = true;
-      endWalls.castShadow = true;
-      endWalls.frustumCulled = false;
-      group.add(endWalls);
-    }
-  }
-
-  /*
    * ── THE LID: TWO TRIANGLES OF STREET THAT NOBODY CAN SEE ───────────────────
    *
    * Invisible, in the DECK channel only, lying at street level across the
@@ -1552,7 +1524,6 @@ export function createCityUnderpass({
       const solids = [];
       if (vaultCollider && U.vaultCollides) solids.push(vaultCollider);
       if (walls) solids.push(walls);
-      if (endWalls) solids.push(endWalls);
       const deck = [road];
       if (lid) deck.push(lid);
       if (lipDeck) deck.push(lipDeck);
@@ -1574,7 +1545,6 @@ export function createCityUnderpass({
       if (glow) glow.geometry.dispose();
       if (vaultCollider) vaultCollider.geometry.dispose();
       if (lipDeck) { lipDeck.geometry.dispose(); lipDeck.material.dispose(); }
-      if (endWalls) { group.remove(endWalls); endWalls.geometry.dispose(); }
       if (walls) walls.geometry.dispose();
       signs?.dispose();
       shafts?.dispose();

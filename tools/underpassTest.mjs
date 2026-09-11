@@ -245,14 +245,13 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
     const sharing = [...col.solids, ...col.deck].filter((m) => walls && m.material === walls.material);
     const bare = sharing.filter((m) => !m.geometry.attributes.color);
     check("every mesh sharing the wall material carries a color (shade) attribute",
-      sharing.length >= 2 && bare.length === 0,
+      sharing.length >= 1 && bare.length === 0,
       `${sharing.map((m) => m.name).join(", ")}${bare.length ? " — NO shade: " + bare.map((m) => m.name).join(", ") : ""}`);
-    const ew = sharing.find((m) => m.name === "CityUnderpassDeckEndWalls");
-    if (ew) {
-      const c = ew.geometry.attributes.color;
+    for (const m of sharing) {
+      const c = m.geometry.attributes.color;
       let minR = 1e9;
       for (let i = 0; i < c.count; i++) minR = Math.min(minR, c.getX(i));
-      check("...and the end walls' shade is not zero (black)", minR > 0.5, `min red ${minR}`);
+      check(`...and ${m.name}'s shade is never zero (black)`, minR > 0.1, `min red ${minR}`);
     }
   }
   const lid = col.deck.find((m) => m.name === "CityUnderpassLid");
@@ -280,14 +279,10 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   /*
    * THREE SOLIDS, and the third is the one that was missing for a long time.
    *
-   * The lid over the covered section is a drivable deck the FULL width of the
-   * trench, and at the portal it just stops. The only thing guarding that edge
-   * was the parapet's own end cap — about 1.2 m of pentagon against a ~16 m
-   * opening. It was reported from the game as "an invisible wall": head-on, a
-   * wall seen end-on is a few pixels, and everywhere else across the deck
-   * there was nothing to hit at all.
+   * The wall across each mouth (in the walls mesh) closes the deck edge at the
+   * portal; a second, separate end-wall mesh once duplicated it and is gone.
    */
-  check("and the walls, the vault and the deck end walls as solids", col.solids.length === 3,
+  check("and the walls and the vault as solids", col.solids.length === 2,
     col.solids.map((m) => m.name).join(", "));
   for (const m of [...col.deck, ...col.solids]) {
     check(`${m.name} is bakeable`, !!m.geometry && !!m.matrixWorld);
@@ -678,6 +673,61 @@ const headingAlong = (e, o, axis) => {
   }
   check("and the corner where it hands over to the wall is capped", capVerts >= 4,
     `${capVerts} cap vertices across the gutter strip`);
+
+  /*
+   * THE NOSE. Each parapet run begins at a portal, and it began BLUNT: a face
+   * 1.2 m wide and a metre tall square across the side road. A car hugging the
+   * trench side has its outer half-metre over the lip strip and met it dead-on
+   * — "an invisible wall blocks the car, on both side roads, exactly where the
+   * road is split by the tunnel". So the wall's outer face now flares from a
+   * point on the inner line at the portal out to full thickness over
+   * `noseLength`: a deflector that pushes a car back into its lane. The height
+   * stays full the whole way (a wall that ramped UP would have a top a wheel
+   * could ride onto, and a parapet top is not ground).
+   */
+  const outer = inner + L.params.wallThick;
+  const capY = L.top + L.params.parapetHeight;
+  const noseLen = L.params.noseLength;
+  let tipMax = 0, tipN = 0, fullMax = 0, fullN = 0;
+  for (let i = 0; i < pos.count; i++) {
+    if (Math.abs(pos.getY(i) - capY) > 1e-3) continue;   // parapet tops only
+    const a = alongOf(i), acr = Math.abs(acrossOf(i));
+    if (acr < inner - 1e-3) continue;
+    const d = Math.min(Math.abs(a - L.cov0), Math.abs(a - L.cov1));
+    const onRoof = a > L.cov0 + 1e-3 && a < L.cov1 - 1e-3;
+    if (onRoof) continue;
+    if (d < 1e-3) { tipN++; tipMax = Math.max(tipMax, acr); }
+    else if (d > noseLen + 1e-3 && d < L.params.step + 1) { fullN++; fullMax = Math.max(fullMax, acr); }
+  }
+  check("the parapet starts as a point on the inner line at each portal",
+    tipN >= 4 && tipMax < inner + 1e-3, `${tipN} tip verts, widest at ${tipMax.toFixed(3)} vs inner ${inner.toFixed(3)}`);
+  check("...at FULL height (no ramp a wheel could ride up)", tipN >= 4, `${tipN} verts at cap height on the portal plane`);
+  check("...and is full thickness once past the nose", fullN >= 2 && Math.abs(fullMax - outer) < 1e-3,
+    `${fullN} verts, outer top at ${fullMax.toFixed(3)} vs outer ${outer.toFixed(3)}`);
+
+  /*
+   * AND THE WALL ACROSS THE MOUTH SPANS ONLY BETWEEN THE PARAPETS' INNER
+   * FACES. It used to reach to the lip edge — across the lip strips, which are
+   * drivable ground at the edge of each side road — so a car keeping to the
+   * trench side met a metre-high face half a metre before the portal. That was
+   * the "invisible mesh blocks the car on both side roads"; the resolver logged
+   * its contacts on this box at exactly `lip`. Look at parapet-height vertices
+   * on the roofed side of each portal: none may sit beyond `inner`.
+   */
+  {
+    let beyond = 0, atMouth = 0;
+    for (let i = 0; i < pos.count; i++) {
+      if (Math.abs(pos.getY(i) - capY) > 1e-3) continue;
+      const a = alongOf(i);
+      const inRoof0 = a > L.cov0 - 1e-3 && a < L.cov0 + L.params.wallThick + 1e-3;
+      const inRoof1 = a < L.cov1 + 1e-3 && a > L.cov1 - L.params.wallThick - 1e-3;
+      if (!inRoof0 && !inRoof1) continue;
+      atMouth++;
+      if (Math.abs(acrossOf(i)) > inner + 1e-3) beyond++;
+    }
+    check("the wall across the mouth spans only between the parapets' inner faces",
+      atMouth >= 8 && beyond === 0, `${beyond} of ${atMouth} mouth-wall top verts beyond inner ${inner.toFixed(2)} (lip edge ${L.holeHalf.toFixed(2)})`);
+  }
   built.dispose();
 }
 

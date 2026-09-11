@@ -2196,6 +2196,28 @@ export const SOLID = {
    */
   sitNormalMaxY: 0.45,
   /**
+   * A SOLID UNDER THE ROAD CANNOT BE HIT BY A CHASSIS ON THE ROAD.
+   *
+   * Skip a contact whose closest point lies at or below the ground the wheels
+   * are standing on (the lowest grounded tyre's contact, plus this margin in
+   * metres). Meshes bury geometry under drivable surfaces all the time — the
+   * underpass parapet's end cap and its portal headwall both stop EXACTLY at
+   * street level, under the lip strip, where nothing on the road can touch
+   * them. But the walled-in recovery below reaches them: a low hull sample
+   * within `insideReach` of that buried face whose sideways ray meets the
+   * parapet was judged INSIDE a wall and pushed out by up to a metre — a
+   * dead stop with sparks, in both directions, at the tunnel portal on both
+   * side roads. The face was never above the ground; only its top edge was
+   * near enough for the heuristics to find.
+   *
+   * The reference is the WHEELS, not a world ground: on a slope the low tyre's
+   * contact is the lowest thing the car stands on, and a wall's contact with a
+   * hull sample is at that sample's height, well above any tyre — so real
+   * walls, kerbs, rails and slabs are never confused with buried ones. Only
+   * applied while the wheels carry the car; a tumbling car has no "ground".
+   */
+  buriedBelow: 0.04,
+  /**
    * ...BUT ONLY WHILE THE WHEELS ARE ACTUALLY CARRYING THE CAR.
    *
    * Read the rule above again: the lid is skipped so the hull cannot park on it
@@ -6524,6 +6546,14 @@ export class Vehicle {
     const wheelsCarry = this._isSupported();
     // Chassis up, for the lid test below — see SOLID.sitNormalMaxY.
     this._sitUp.set(0, 1, 0).applyQuaternion(this.body.quat);
+    // The ground the car stands on, for the buried-face test — see
+    // SOLID.buriedBelow. The lowest grounded tyre contact; -Infinity (no
+    // filter) while airborne.
+    let floorY = -Infinity;
+    if (wheelsCarry) {
+      floorY = Infinity;
+      for (const t of this.tires) if (t.grounded && t.hitPoint.y < floorY) floorY = t.hitPoint.y;
+    }
 
     for (const sp of this.SOLID_BOX_SAMPLES) {
       this._geomToWorld(sp, this._sphC);
@@ -6531,6 +6561,11 @@ export class Vehicle {
         this._sphC.x, this._sphC.y, this._sphC.z, queryR, this._sphN,
       );
       if (!res) continue;
+      // Buried under the road the wheels are on: not a wall — see
+      // SOLID.buriedBelow. Before the overlap, walled-in and sweep tests, all
+      // three of which can be fooled by a face whose top edge is flush with
+      // the ground.
+      if (res.y < floorY + SOLID.buriedBelow) continue;
       // `_sphN` is flipped toward the query (away from the closest face).
       let nx = this._sphN.x;
       let ny = this._sphN.y;
