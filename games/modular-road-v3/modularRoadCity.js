@@ -294,26 +294,34 @@ export const CITY_DEFAULTS = {
    * Whether the facade's normal pass re-runs the relief trace to recover the
    * true normals of piers, reveals and course soffits.
    *
-   * OFF, and unlike `facadeTypeSplit` the measurement says take it.
+   * ON — and it was briefly switched off, on an argument that did not survive
+   * being tested.
    *
-   * The pass is the largest self-contained block in the shader — 997 lines,
-   * 19% of the near facade, 14% of everything the driver compiles for the
-   * ~29 s first-frame wait — and it exists only because a normalNode is built
-   * in its own sub-build and cannot read the colour pass's variables, so
-   * `buildFrame` and `traceFacade` run a SECOND time on every city pixel.
+   * The pass is the largest self-contained block in the shader: 997 lines, 19%
+   * of the near facade, 14% of everything the driver compiles. It was dropped
+   * to shorten the city's first-frame wait, on the reasoning that compile time
+   * follows shader size. Then the wait was actually TIMED, by perturbing one
+   * harmless literal so the WGSL text changes and the pipeline cache misses:
    *
-   * The expectation was that dropping it would make piers and reveals look
-   * printed on. It does not. Against a repeat-capture noise floor of 0.00%,
-   * the same wall at 6 m differs by at most 2/255, at 16 m by 2/255, and along
-   * a grazing angle by 5/255 — with the LOD gate fully open, so the trace was
-   * genuinely running. The relief is shallow (`pierDepth` 0.4, `reveal` 0.18)
-   * and the bump normal already carries nearly all of it; the hit normal
-   * differs only on the narrow flank and reveal strips.
+   *     with the pass      1818, 1687 ms   (6417 lines)
+   *     without it         1737, 1704 ms   (5509 lines)
    *
-   * Turn it back on if the relief is ever made deep enough to matter — that is
-   * the condition under which this trade changes, not a change of taste.
+   * A 14% smaller shader compiles ~2% faster, and the spread WITHIN each
+   * setting is larger than the gap between them. Cutting the facade is not the
+   * lever on load time. (Cold vs warm is real and the instrument works: the
+   * same switch-on runs 1818 ms cold, then 19 ms once the pipelines cache.)
+   *
+   * Note the total, too: ~1.7 s, not the ~29 s this was chased for. The bust
+   * invalidates only the FACADE pipelines, so this is the facade's own share
+   * with every other city material still cached — the historical figure was a
+   * genuinely cold machine compiling everything at once.
+   *
+   * So the pass costs nothing worth having and is back on. It was also
+   * measured as invisible (worst pixel 2/255 at 6 m against a 0.00% noise
+   * floor), which is what made removing it look free — but "free" is not a
+   * reason to remove something when the saving is also zero.
    */
-  facadeReliefNormals: false,
+  facadeReliefNormals: true,
   /**
    * Whether a window pane shows a FURNISHED room behind it — a five-plane box
    * trace with floorboards, a rug, a sofa, a door, a framed picture, a ceiling
