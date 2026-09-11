@@ -140,6 +140,10 @@ export const UNDERPASS_DEFAULTS = {
    */
   lipWidth: 0.7,
   parapetHeight: 0.95,
+  /** A wall across the drivable deck at each portal. The deck is the full
+   *  width of the trench and its edge was guarded only by the parapet's ~1.2 m
+   *  end cap — see the note where these are built. */
+  deckEndWalls: true,
 
   /**
    * ── THE VAULT'S SHELL IS SOLID ─────────────────────────────────────────────
@@ -250,11 +254,30 @@ export function underpassLayout({ P, originCellX = 0, originCellZ = 0, params = 
     const cell = Math.floor(rel / pitch);
     const into = rel - cell * pitch;
     if (into >= CROSS_CLEAR && into <= blockW - CROSS_CLEAR) return a;
-    // Inside a crossing (or in the junction): pull toward the block's middle,
-    // which always shortens the ramp rather than lengthening it into a junction.
-    const want = into < blockW / 2 ? CROSS_CLEAR : blockW - CROSS_CLEAR;
-    void dir;
-    return oAlong + cell * pitch + want;
+    /*
+     * MOVE THE WAY THE CALLER ASKED, WHICH IS THE WAY THAT SHORTENS THE RAMP.
+     *
+     * This used to pick by which HALF of the block the mouth landed in, and
+     * discard `dir` outright — the old comment claimed that "always shortens
+     * the ramp", and it does not. Which half a mouth falls in has nothing to
+     * do with which way the portal is, so one end got pulled toward the portal
+     * (shorter ramp, correct) and the other got pushed AWAY from it, extending
+     * the trench across the neighbouring cross street. The parapet then ran
+     * out over that street's roadway — and only ever on one side of the
+     * tunnel, because the two mouths land in different halves.
+     *
+     * `dir` is +1 for the entry mouth and -1 for the exit, in both cases the
+     * direction of the portal. Moving that way can only make the ramp shorter,
+     * and if it shortens past nothing the caller's `rampIn <= 1` guard rejects
+     * the whole underpass rather than building a broken one.
+     */
+    const base = oAlong + cell * pitch;
+    if (dir > 0) {
+      return into < CROSS_CLEAR ? base + CROSS_CLEAR : base + pitch + CROSS_CLEAR;
+    }
+    return into > blockW - CROSS_CLEAR
+      ? base + blockW - CROSS_CLEAR
+      : base - pitch + blockW - CROSS_CLEAR;
   };
   const a0 = clearOfCrossing(portalIn - U.rampLength, 1);
   const a1 = clearOfCrossing(portalOut + U.rampLength, -1);
@@ -730,6 +753,8 @@ export function createCityUnderpass({
   owned.push(wallMat);
   uTop.value = layout.roadY;
   let walls = null;
+  /** The parapet's lip, as a DECK — see where it is built. */
+  let lipDeck = null;
   {
     const inner = U.roadWidth / 2 + U.wallGap;
     const outer = inner + U.wallThick;
@@ -1307,6 +1332,113 @@ export function createCityUnderpass({
       walls.castShadow = false;
       walls.frustumCulled = false;
       group.add(walls);
+
+      /*
+       * ── THE LIP IS GROUND, SO IT HAS TO BE A DECK ─────────────────────────
+       *
+       * The street is cut at the LIP's outer edge (`lip === holeHalf`), so the
+       * strip between the last solid street and the wall's outer face is the
+       * lip plate: a surface at street level that you can plainly drive a wheel
+       * onto. But the parapet mesh sits in the SOLIDS channel, which only the
+       * chassis is pushed out of; wheels find their ground with a downward ray
+       * through the DECK channel, and nothing in that channel exists over the
+       * lip. So a wheel that hung over the lip found the tunnel road seven
+       * metres below as its ground and dropped toward it, tipping the car in —
+       * "the car falls at the barrier side", which is exactly what it did.
+       *
+       * The fix is not to move anything: the lip is the right shape in the
+       * right place. It is to let wheels see it. This is the same quads from
+       * the same positions, indexed on their own and wound so the drivable
+       * face is the top, and pushed into the deck list. Invisible, because the
+       * walls mesh already draws it.
+       */
+      {
+        const lipIdx = [];
+        const nrmY = (a, b, c) => {
+          const ax = pos[a * 3], ay = pos[a * 3 + 1], az = pos[a * 3 + 2];
+          const ux = pos[b * 3] - ax, uy = pos[b * 3 + 1] - ay, uz = pos[b * 3 + 2] - az;
+          const vx = pos[c * 3] - ax, vy = pos[c * 3 + 1] - ay, vz = pos[c * 3 + 2] - az;
+          return uz * vx - ux * vz;   // y component of u x v
+        };
+        // Each TRIANGLE is wound on its own. A quad's two halves can disagree
+        // where the lip collapses onto the wall at a run's end (the quad is
+        // nearly degenerate and twists), and the test found exactly one that
+        // did — a wheel ray passes straight through a face that points down.
+        const lipTri = (a, b, c) => {
+          if (nrmY(a, b, c) >= 0) lipIdx.push(a, b, c);
+          else lipIdx.push(a, c, b);
+        };
+        const lipQuad = (a, b, c, d) => { lipTri(a, b, c); lipTri(a, c, d); };
+        for (let r = 0; r + 1 < rows; r++) {
+          const gap = Math.abs(rowAlong[r + 1] - rowAlong[r]);
+          if (gap > U.step * 2.5) continue;
+          for (let s = 0; s < 2; s++) {
+            const o0 = r * per + s * 5, o1 = (r + 1) * per + s * 5;
+            // 3 = outer face at street level, 4 = lip edge at street level.
+            lipQuad(o0 + 3, o0 + 4, o1 + 4, o1 + 3);
+          }
+        }
+        if (lipIdx.length) {
+          const lg = new THREE.BufferGeometry();
+          lg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+          lg.setIndex(lipIdx);
+          lg.computeVertexNormals();
+          lipDeck = new THREE.Mesh(lg, new THREE.MeshBasicMaterial());
+          lipDeck.name = "CityUnderpassLipDeck";
+          lipDeck.visible = false;
+          lipDeck.updateMatrixWorld();
+        }
+      }
+    }
+  }
+
+  /*
+   * ── THE END WALL ACROSS THE DECK ───────────────────────────────────────────
+   *
+   * The lid over the covered section is a DRIVABLE deck the full width of the
+   * trench — about sixteen metres here — and at the portal that deck simply
+   * stops, with the open trench beyond it. The only thing guarding that edge
+   * was the parapet's own end cap: a pentagon about 1.2 m wide, closing the
+   * ribbon. Sixteen metres of drop, one and a bit metres of guard.
+   *
+   * Reported as "an invisible wall" — which it was, from the one line where
+   * you met it. Head-on, a wall seen exactly end-on is a few pixels wide, so
+   * it read as nothing at all; anywhere else across the deck there was
+   * genuinely nothing, and you would have gone in.
+   *
+   * So each portal gets a wall across the whole opening. ABOVE THE DECK ONLY —
+   * it starts at the street and rises, because the tunnel bore is directly
+   * below and a wall that reached down would brick up the road it exists to
+   * carry. One mesh for both ends, one draw, and it joins the solids so it
+   * stops a car rather than being scenery.
+   */
+  let endWalls = null;
+  if (U.deckEndWalls !== false && layout.cov1 > layout.cov0) {
+    const t = Math.max(U.wallThickness ?? 0.5, 0.4);
+    const w = layout.holeHalf * 2;
+    const h = U.parapetHeight + 0.25;
+    const cy = layout.top + U.parapetHeight * 0.5 - 0.125;
+    const parts = [];
+    for (const a of [layout.cov0, layout.cov1]) {
+      const g2 = layout.axis === "x"
+        ? new THREE.BoxGeometry(t, h, w)
+        : new THREE.BoxGeometry(w, h, t);
+      g2.translate(
+        layout.axis === "x" ? a : layout.across,
+        cy,
+        layout.axis === "x" ? layout.across : a,
+      );
+      parts.push(g2);
+    }
+    const merged = mergeGeometries(parts, false);
+    parts.forEach((g2) => g2.dispose());
+    if (merged) {
+      endWalls = new THREE.Mesh(merged, wallMat);
+      endWalls.name = "CityUnderpassDeckEndWalls";
+      endWalls.receiveShadow = true;
+      endWalls.castShadow = true;
+      endWalls.frustumCulled = false;
+      group.add(endWalls);
     }
   }
 
@@ -1402,7 +1534,11 @@ export function createCityUnderpass({
       const solids = [];
       if (vaultCollider && U.vaultCollides) solids.push(vaultCollider);
       if (walls) solids.push(walls);
-      return { deck: lid ? [road, lid] : [road], solids };
+      if (endWalls) solids.push(endWalls);
+      const deck = [road];
+      if (lid) deck.push(lid);
+      if (lipDeck) deck.push(lipDeck);
+      return { deck, solids };
     },
     stats: {
       draws: 1 + (vault ? 1 : 0) + (glow ? 1 : 0) + (walls ? 1 : 0) + (signs ? 1 : 0)
@@ -1419,6 +1555,8 @@ export function createCityUnderpass({
       if (vault) vault.geometry.dispose();
       if (glow) glow.geometry.dispose();
       if (vaultCollider) vaultCollider.geometry.dispose();
+      if (lipDeck) { lipDeck.geometry.dispose(); lipDeck.material.dispose(); }
+      if (endWalls) { group.remove(endWalls); endWalls.geometry.dispose(); }
       if (walls) walls.geometry.dispose();
       signs?.dispose();
       shafts?.dispose();

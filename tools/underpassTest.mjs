@@ -199,6 +199,35 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
    * invisible (the street plane is already drawn there), and it must sit at
    * street level, not at the roof.
    */
+  /*
+   * THE LIP IS GROUND. The street is cut at the lip's outer edge, so the strip
+   * between the last solid street and the wall is the lip plate — and the
+   * parapet mesh is a SOLID, which only the chassis is pushed out of. Wheels
+   * find ground with a downward ray through the DECK channel, and nothing was
+   * there over the lip: a wheel that hung past the edge found the tunnel road
+   * seven metres down and the car tipped in. So the lip quads are also a deck,
+   * and every one of them must face UP or a wheel ray passes straight through.
+   */
+  {
+    const lipDeck = col.deck.find((m) => m.name === "CityUnderpassLipDeck");
+    check("the parapet lip is a deck, so a wheel over it has ground", !!lipDeck,
+      col.deck.map((m) => m.name).join(", "));
+    if (lipDeck) {
+      const g = lipDeck.geometry, pos = g.attributes.position, idx = g.index;
+      let down = 0, tris = 0, atStreet = 0;
+      const v = (i, k) => pos.getComponent(idx.getX(i), k);
+      for (let t2 = 0; t2 + 2 < idx.count; t2 += 3) {
+        const ux = v(t2 + 1, 0) - v(t2, 0), uy = v(t2 + 1, 1) - v(t2, 1), uz = v(t2 + 1, 2) - v(t2, 2);
+        const vx = v(t2 + 2, 0) - v(t2, 0), vy = v(t2 + 2, 1) - v(t2, 1), vz = v(t2 + 2, 2) - v(t2, 2);
+        const ny = uz * vx - ux * vz;
+        tris++;
+        if (ny < 0) down++;
+        if (Math.abs(v(t2, 1) - L.top) < 1e-3) atStreet++;
+      }
+      check("...every lip triangle faces up", tris > 0 && down === 0, `${down} of ${tris} face down`);
+      check("...and lies at street level", atStreet === tris, `${atStreet} of ${tris} at top=${L.top}`);
+    }
+  }
   const lid = col.deck.find((m) => m.name === "CityUnderpassLid");
   check("and the lid that replaces the street's height function", !!lid);
   if (lid) {
@@ -221,7 +250,17 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
   // launch was being hunted (removing it halved the launch, which was true and
   // a red herring — the heightfield was pressing the car into it), and without
   // it the tunnel wall is a curtain you drive through into the earth.
-  check("and the walls and the vault as solids", col.solids.length === 2,
+  /*
+   * THREE SOLIDS, and the third is the one that was missing for a long time.
+   *
+   * The lid over the covered section is a drivable deck the FULL width of the
+   * trench, and at the portal it just stops. The only thing guarding that edge
+   * was the parapet's own end cap — about 1.2 m of pentagon against a ~16 m
+   * opening. It was reported from the game as "an invisible wall": head-on, a
+   * wall seen end-on is a few pixels, and everywhere else across the deck
+   * there was nothing to hit at all.
+   */
+  check("and the walls, the vault and the deck end walls as solids", col.solids.length === 3,
     col.solids.map((m) => m.name).join(", "));
   for (const m of [...col.deck, ...col.solids]) {
     check(`${m.name} is bakeable`, !!m.geometry && !!m.matrixWorld);
