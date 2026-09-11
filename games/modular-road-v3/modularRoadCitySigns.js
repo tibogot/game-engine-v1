@@ -123,6 +123,10 @@ export const SIGN_DEFAULTS = {
   crownMinHeight: 66,
   /** Frame width in METRES — the same border on a 12 m and a 30 m board. */
   heroFrame: 0.55,
+  /** Board thickness, metres. Under `standoff` (0.45) so the box reaches the
+   *  wall without touching it — see the note where the boxes are built. */
+  heroDepth: 0.4,
+  heroBoxColor: 0x2a2d33,
   /**
    * Fraction of ordinary heroes that are LED screens. ZERO, and deliberately.
    *
@@ -1365,6 +1369,56 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
   const heroMesh = instanced(heroes, heroMat, "CityHeroes", "aSign", 4, packHero);
   if (heroMesh) { heroMesh.receiveShadow = true; heroMesh.castShadow = false; }
 
+  /*
+   * ── THE BOARD BEHIND THE POSTER ────────────────────────────────────────────
+   *
+   * A hero advert was a printed sheet floating in the air. Its frame is painted
+   * IN the shader — `frU`/`frV` are fractions of the quad — so there was no
+   * geometry anywhere: seen from an angle the board had no thickness, and it
+   * cast no shadow on the wall it was supposedly bolted to.
+   *
+   * One instanced box fixes both, and the shadow is the half that actually
+   * sells it. Depth reads from the silhouette only when you are beside the
+   * board; the shadow reads from everywhere.
+   *
+   * SIZED TO THE GAP, not guessed. The panel already floats `standoff` (0.45 m)
+   * off the wall, so a box a little shallower than that reaches the facade
+   * without touching it — full thickness, and no coplanar face to fight with
+   * the wall behind. Its front sits just behind the poster for the same reason.
+   *
+   * ONE DRAW for every board in the city. The matrices are derived from the
+   * heroes that already exist rather than built at each push site, because
+   * heroes are pushed from two places and a second copy of this arithmetic is
+   * how the two drift apart.
+   */
+  let heroBoxMesh = null;
+  if (heroes.length && P.heroDepth > 0) {
+    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+    const boxMat = new THREE.MeshStandardNodeMaterial({
+      color: new THREE.Color(P.heroBoxColor), roughness: 0.72, metalness: 0.0,
+    });
+    boxMat.name = "CityHeroBox";
+    heroBoxMesh = new THREE.InstancedMesh(boxGeo, boxMat, heroes.length);
+    heroBoxMesh.name = "CityHeroBoxes";
+    heroBoxMesh.frustumCulled = false;
+    heroBoxMesh.castShadow = true;
+    heroBoxMesh.receiveShadow = true;
+    const bp = new THREE.Vector3(), bq = new THREE.Quaternion(), bs = new THREE.Vector3();
+    const bm = new THREE.Matrix4();
+    const d = P.heroDepth;
+    heroes.forEach((e, i) => {
+      e.m.decompose(bp, bq, bs);
+      const [nx, nz] = e.face;
+      // Back the box off along the face normal so its FRONT is just behind the
+      // poster; `bs` carries the board's own width and height already.
+      bp.x -= nx * (d * 0.5 + 0.01);
+      bp.z -= nz * (d * 0.5 + 0.01);
+      heroBoxMesh.setMatrixAt(i, bm.compose(bp, bq, bs.set(bs.x, bs.y, d)));
+    });
+    heroBoxMesh.instanceMatrix.needsUpdate = true;
+    group.add(heroBoxMesh);
+  }
+
   // LED podium bands — chevron mode, the v2 matrix shader.
   const BAND_W = 20, BAND_H = 1.3;
   const bandMat = makeLedMatrixMaterial({ boardW: BAND_W, boardH: BAND_H });
@@ -1528,7 +1582,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     setText(str) { textCanvas.set(str); },
 
     dispose() {
-      for (const m of [bannerMesh, screenMesh, neonMesh, bandMesh, textMesh, heroMesh]) {
+      for (const m of [bannerMesh, screenMesh, neonMesh, bandMesh, textMesh, heroMesh, heroBoxMesh]) {
         if (!m) continue;
         group.remove(m);
         if (m.geometry !== quad) m.geometry.dispose();
@@ -1536,6 +1590,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
       }
       bannerMat.dispose(); screenMat.dispose(); neonMat.dispose(); heroMat.dispose();
       wordMat.dispose(); ribbonMat.dispose(); wordAtlas.texture?.dispose();
+      heroBoxMesh?.material.dispose();
       heroAtlas.texture.dispose();
       bandMat.dispose(); textMat.dispose();
       wordMesh?.geometry.dispose(); ribbonMesh?.geometry.dispose();
