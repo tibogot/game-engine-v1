@@ -228,6 +228,33 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
       check("...and lies at street level", atStreet === tris, `${atStreet} of ${tris} at top=${L.top}`);
     }
   }
+  /*
+   * ANYTHING PAINTED WITH THE WALL MATERIAL MUST CARRY ITS SHADE.
+   *
+   * `wallMaterial` multiplies the concrete by `vertexColor().rgb.r`. The trench
+   * wall packs a shade into the red channel of a `color` attribute; a geometry
+   * that shares the material without that attribute reads ZERO and renders
+   * black. That is how the deck end wall shipped invisible — the collider was
+   * right and the paint was gone, and a black wall on a dark deck edge is
+   * indistinguishable from no wall at all. Reported from the game as "an
+   * invisible mesh blocks the car"; a day of collider-hunting could not see it
+   * because it was not a collision bug.
+   */
+  {
+    const walls = col.solids.find((m) => m.name === "CityUnderpassWalls");
+    const sharing = [...col.solids, ...col.deck].filter((m) => walls && m.material === walls.material);
+    const bare = sharing.filter((m) => !m.geometry.attributes.color);
+    check("every mesh sharing the wall material carries a color (shade) attribute",
+      sharing.length >= 2 && bare.length === 0,
+      `${sharing.map((m) => m.name).join(", ")}${bare.length ? " — NO shade: " + bare.map((m) => m.name).join(", ") : ""}`);
+    const ew = sharing.find((m) => m.name === "CityUnderpassDeckEndWalls");
+    if (ew) {
+      const c = ew.geometry.attributes.color;
+      let minR = 1e9;
+      for (let i = 0; i < c.count; i++) minR = Math.min(minR, c.getX(i));
+      check("...and the end walls' shade is not zero (black)", minR > 0.5, `min red ${minR}`);
+    }
+  }
   const lid = col.deck.find((m) => m.name === "CityUnderpassLid");
   check("and the lid that replaces the street's height function", !!lid);
   if (lid) {

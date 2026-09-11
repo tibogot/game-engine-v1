@@ -1433,6 +1433,24 @@ export function createCityUnderpass({
     const merged = mergeGeometries(parts, false);
     parts.forEach((g2) => g2.dispose());
     if (merged) {
+      /*
+       * IT SHARES THE WALL MATERIAL, SO IT HAS TO SPEAK THE WALL'S LANGUAGE.
+       *
+       * `wallMaterial` shades every face by `vertexColor().rgb.r` — the trench
+       * wall packs one shade number per vertex into the red channel of a
+       * `color` attribute (see `push`). A BoxGeometry has no such attribute,
+       * and a missing attribute reads as ZERO: the concrete was multiplied by
+       * nothing and the wall rendered black. A black one-metre wall on a dark
+       * deck edge against a dark trench is, to a driver, an invisible wall —
+       * which is exactly what was reported, and what a day of hunting colliders
+       * could not find, because the collider was right and the PAINT was gone.
+       *
+       * 0.9 is the shade the trench wall gives its own outer faces.
+       */
+      const nV = merged.attributes.position.count;
+      const shade = new Float32Array(nV * 3);
+      for (let i = 0; i < nV; i++) shade[i * 3] = 0.9;
+      merged.setAttribute("color", new THREE.BufferAttribute(shade, 3));
       endWalls = new THREE.Mesh(merged, wallMat);
       endWalls.name = "CityUnderpassDeckEndWalls";
       endWalls.receiveShadow = true;
