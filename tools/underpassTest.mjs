@@ -24,6 +24,8 @@ const { CITY_DEFAULTS, createModularRoadCity } =
   await import("../games/modular-road-v3/modularRoadCity.js");
 const { roadParams, vaultProfiles, buildProfile, pieceParams } =
   await import("../games/modular-road-v3/modularRoadKit.js");
+const { createPortalHazard } =
+  await import("../games/modular-road-v3/modularRoadCityPortalHazard.js");
 
 let pass = 0, fail = 0;
 const check = (name, ok, extra = "") => {
@@ -314,22 +316,140 @@ check("a layout is produced", !!L, L ? `${L.axis} axis at ${L.across}` : "null")
    * inside at most one of them at a time.
    */
   /*
-   * EIGHT: road, vault, glow, walls, portal signs, and the fit-out's three —
-   * steel, emergency niches, overhead boards. The two light shafts are OFF
-   * (see `shafts` in the underpass defaults); switching them on makes it ten.
+   * NINE: road, vault, glow, walls, portal signs, the portal hazard paint, and
+   * the fit-out's three — steel, emergency niches, overhead boards. The two
+   * light shafts are OFF (see `shafts` in the underpass defaults); switching
+   * them on makes it eleven.
    *
    * Asserted rather than printed because everything here is deliberately merged
    * into as few meshes as it can be. The gutter, risers, headwalls and mouth
    * barriers all live in the WALL mesh; the fans, trays, hangers and niche
-   * bodies are ONE merged steel mesh however many of them there are. An
-   * eleventh draw means something was built as its own mesh that should have
-   * been merged into an existing one.
+   * bodies are ONE merged steel mesh however many of them there are. A tenth
+   * draw means something was built as its own mesh that should have been
+   * merged into an existing one.
    *
+   * The hazard paint is the one addition that cannot merge into the walls: it
+   * is a textured cutout material and the wall is vertex-shaded concrete, and
+   * half of it lies on the street rather than on the wall at all. It carries
+   * its chevrons AND its stripes in one mesh for exactly this reason.
    */
-  check("eight draws for the whole thing", st.draws === 8, `${st.draws}`);
+  check("nine draws for the whole thing", st.draws === 9, `${st.draws}`);
   check("and it stays under 20k triangles",
     st.roadTris + st.vaultTris + st.wallTris < 20000,
     `${st.roadTris + st.vaultTris + st.wallTris}`);
+
+  /*
+   * ── THE PAINT AT THE PORTALS ───────────────────────────────────────────────
+   *
+   * Chevrons fanning up to each mouth and hazard stripes on the wall across it.
+   * Four things can go wrong here and three of them are silent:
+   *
+   *  · it could be COLLISION. Paint you can hit is the exact bug this file
+   *    spent a week on, so the hazard mesh must not appear in either channel.
+   *  · the chevrons could sit outside the opening, or out in the open trench
+   *    where there is no lane to warn.
+   *  · they could point the WRONG WAY. The chevron lies on its side in the
+   *    tile with its apex at +u (so that a flipped canvas cannot reverse it —
+   *    see the note there), and that apex belongs on the edge nearer the
+   *    portal, the side the driver is coming from. Reversed, the run points
+   *    politely into the wall and looks entirely deliberate.
+   *  · the panel could be a BACK FACE. `at()` maps along/across to x/z with
+   *    opposite handedness on the two axes, so a winding written by hand is
+   *    right for one tunnel orientation and invisible in the other.
+   */
+  {
+    let hz = null;
+    built.group.traverse((o) => { if (o.name === "CityPortalHazard") hz = o; });
+    check("the portals are painted", !!hz);
+    check("...and the paint is not collision", !col.deck.includes(hz) && !col.solids.includes(hz),
+      `${col.deck.length} deck + ${col.solids.length} solids`);
+    if (hz) {
+      const pos = hz.geometry.attributes.position;
+      const uvA = hz.geometry.attributes.uv;
+      const idx = hz.geometry.index;
+      const inner = L.params.roadWidth / 2 + L.params.wallGap;
+      const alongOf = (i) => (L.axis === "x" ? pos.getX(i) : pos.getZ(i));
+      const acrossOf = (i) => (L.axis === "x" ? pos.getZ(i) : pos.getX(i)) - L.across;
+
+      // Quads are four consecutive vertices; flat ones are the chevrons.
+      let chevrons = 0, panels = 0, wrongWay = 0, outside = 0, tooWide = 0, backFace = 0;
+      let widest = 0, widestBack = 1e9;
+      for (let v = 0; v + 3 < pos.count; v += 4) {
+        const ys = [0, 1, 2, 3].map((k) => pos.getY(v + k));
+        const flat = Math.max(...ys) - Math.min(...ys) < 1e-3;
+        const acr = [0, 1, 2, 3].map((k) => Math.abs(acrossOf(v + k)));
+        const alo = [0, 1, 2, 3].map((k) => alongOf(v + k));
+        if (Math.max(...acr) > inner + 1e-3) tooWide++;
+        if (flat) {
+          chevrons++;
+          // Inside the covered range: over the roof, never in the open trench.
+          if (Math.min(...alo) < L.cov0 - 1e-3 || Math.max(...alo) > L.cov1 + 1e-3) outside++;
+          // The portal this one belongs to, and the apex (v = 0) must be the
+          // edge nearer it.
+          const portal = Math.abs(Math.min(...alo) - L.cov0) < Math.abs(Math.max(...alo) - L.cov1)
+            ? L.cov0 : L.cov1;
+          let apexD = 0, tailD = 0, apexN = 0, tailN = 0;
+          for (let k = 0; k < 4; k++) {
+            const d = Math.abs(alo[k] - portal);
+            // The apex is the tile's +u edge; 0.125 is the middle of its box.
+            if (uvA.getX(v + k) > 0.125) { apexD += d; apexN++; } else { tailD += d; tailN++; }
+          }
+          if (apexN && tailN && apexD / apexN > tailD / tailN) wrongWay++;
+          const w = Math.max(...acr);
+          if (w > widest) { widest = w; widestBack = Math.min(...alo.map((a) => Math.abs(a - portal))); }
+        } else {
+          panels++;
+        }
+      }
+      check("...the chevrons are over the roof, not the open trench", outside === 0,
+        `${outside} of ${chevrons} outside cov0..cov1`);
+      check("...no paint reaches past the parapets onto the lip", tooWide === 0,
+        `${tooWide} quads wider than inner ${inner.toFixed(2)}`);
+      check("...every chevron points back at the driver", wrongWay === 0,
+        `${wrongWay} of ${chevrons} reversed`);
+      check("...and the run fans, widest at the portal", chevrons > 2 && widestBack < 8,
+        `widest ${widest.toFixed(2)} m sits ${widestBack.toFixed(1)} m from its portal`);
+      check("...with an object marker on each mouth wall", panels === 2, `${panels}`);
+
+      /*
+       * EACH QUAD STAYS INSIDE ITS OWN TILE. The chevron lives in the first
+       * quarter of the strip and the stripes in the rest; a quad that strays
+       * across the boundary samples the other artwork along one edge, which at
+       * a distance is a smear nobody can name the cause of.
+       */
+      let strayed = 0;
+      for (let v = 0; v + 3 < pos.count; v += 4) {
+        const ys = [0, 1, 2, 3].map((k) => pos.getY(v + k));
+        const deck = Math.max(...ys) - Math.min(...ys) < 1e-3;
+        for (let k = 0; k < 4; k++) {
+          const u = uvA.getX(v + k);
+          if (deck ? u > 0.25 : u < 0.25) strayed++;
+        }
+      }
+      check("...and neither tile bleeds into the other", strayed === 0,
+        `${strayed} corners on the wrong side of u = 0.25`);
+
+      // Each panel's WOUND normal must point out of the roof. Walk the index
+      // buffer so this reads the triangles the GPU will actually rasterise.
+      const tri = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+      const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+      for (let t = 0; t + 2 < idx.count; t += 3) {
+        va.fromBufferAttribute(pos, idx.getX(t));
+        vb.fromBufferAttribute(pos, idx.getX(t + 1));
+        vc.fromBufferAttribute(pos, idx.getX(t + 2));
+        if (Math.abs(va.y - vb.y) < 1e-3 && Math.abs(va.y - vc.y) < 1e-3) continue; // deck
+        e1.subVectors(vb, va); e2.subVectors(vc, va);
+        tri.crossVectors(e1, e2).normalize();
+        const alongN = L.axis === "x" ? tri.x : tri.z;
+        const mid = (L.axis === "x" ? va.x : va.z);
+        // Nearer cov0 means the roof is toward +along, and vice versa.
+        const intoRoof = Math.abs(mid - L.cov0) < Math.abs(mid - L.cov1) ? 1 : -1;
+        if (alongN * intoRoof < 0.5) backFace++;
+      }
+      check("...facing the driver, not the concrete", backFace === 0,
+        `${backFace} back-facing marker triangles`);
+    }
+  }
   built.dispose();
 }
 
@@ -1097,6 +1217,72 @@ const headingAlong = (e, o, axis) => {
   check("no street furniture stands over the underpass", onIt === 0,
     `${onIt} capsules on it`);
   city.dispose();
+}
+
+
+// ── THE PORTAL PAINT IS RIGHT ON BOTH AXES ──────────────────────────────────
+//
+// `at()` maps (along, across) onto (x, z) one way for an x-axis tunnel and the
+// other way for a z one: the two are MIRROR IMAGES, so any quad wound by hand
+// is correct for one orientation and a back face in the other. The city only
+// ever builds one axis at a time, so a test that runs the real layout can only
+// ever see half of this — and the half it cannot see is invisible on screen
+// rather than wrong-looking, which is the worst way for it to fail.
+//
+// So both are built here from a synthetic layout and checked the same way: the
+// marker faces out of the roof, and the chevrons' apexes (v = 0) sit on the
+// portal side.
+{
+  const mk = (axis) => createPortalHazard({
+    layout: {
+      axis, across: axis === "x" ? -40 : 25, top: 0,
+      cov0: -30, cov1: 210, params: L.params,
+    },
+  });
+  for (const axis of ["x", "z"]) {
+    const hz = mk(axis);
+    check(`the portal paint builds on the ${axis} axis`, !!hz);
+    if (!hz) continue;
+    const pos = hz.mesh.geometry.attributes.position;
+    const uvA = hz.mesh.geometry.attributes.uv;
+    const idx = hz.mesh.geometry.index;
+    const alongOf = (v) => (axis === "x" ? pos.getX(v) : pos.getZ(v));
+    const cov0 = -30, cov1 = 210;
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), n = new THREE.Vector3();
+    let back = 0, markers = 0, reversed = 0, flats = 0;
+    for (let t = 0; t + 2 < idx.count; t += 3) {
+      a.fromBufferAttribute(pos, idx.getX(t));
+      b.fromBufferAttribute(pos, idx.getX(t + 1));
+      c.fromBufferAttribute(pos, idx.getX(t + 2));
+      e1.subVectors(b, a); e2.subVectors(c, a);
+      n.crossVectors(e1, e2).normalize();
+      const flat = Math.abs(a.y - b.y) < 1e-3 && Math.abs(a.y - c.y) < 1e-3;
+      if (flat) { flats++; if (n.y < 0.5) back++; continue; }
+      markers++;
+      const mid = axis === "x" ? a.x : a.z;
+      const intoRoof = Math.abs(mid - cov0) < Math.abs(mid - cov1) ? 1 : -1;
+      if ((axis === "x" ? n.x : n.z) * intoRoof < 0.5) back++;
+    }
+    // Chevron apexes, per quad of four vertices.
+    for (let v = 0; v + 3 < pos.count; v += 4) {
+      const ys = [0, 1, 2, 3].map((k) => pos.getY(v + k));
+      if (Math.max(...ys) - Math.min(...ys) > 1e-3) continue;
+      const alo = [0, 1, 2, 3].map((k) => alongOf(v + k));
+      const portal = Math.abs(Math.min(...alo) - cov0) < Math.abs(Math.max(...alo) - cov1)
+        ? cov0 : cov1;
+      let apex = 0, an = 0, tail = 0, tn = 0;
+      for (let k = 0; k < 4; k++) {
+        const d = Math.abs(alo[k] - portal);
+        if (uvA.getX(v + k) > 0.125) { apex += d; an++; } else { tail += d; tn++; }
+      }
+      if (an && tn && apex / an > tail / tn) reversed++;
+    }
+    check(`...every face points the right way on ${axis}`, back === 0 && markers > 0 && flats > 0,
+      `${back} back-facing of ${flats} deck + ${markers} marker triangles`);
+    check(`...and the chevrons point at the driver on ${axis}`, reversed === 0, `${reversed} reversed`);
+    hz.dispose();
+  }
 }
 
 console.log(`\n${fail === 0 ? "ALL PASS" : `${fail} FAILURE(S)`}  (${pass} passed)`);

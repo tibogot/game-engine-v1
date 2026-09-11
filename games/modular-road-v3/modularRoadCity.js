@@ -1041,7 +1041,8 @@ export function createModularRoadCity({
        * material table); this is the city catching up with it.
        */
       castShadows: P.castShadows,
-      // The portal boards are retroreflective after dark, like every real one.
+      // The portal boards and the mouth hazard markers are retroreflective
+      // after dark, like every real one.
       uNight,
     });
     if (underpass) {

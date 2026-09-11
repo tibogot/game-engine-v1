@@ -54,6 +54,7 @@ import {
 import { createPortalSigns } from "./modularRoadCityPortalSign.js";
 import { createPortalShafts } from "./modularRoadCityPortalShaft.js";
 import { createTunnelFitOut } from "./modularRoadCityTunnelFit.js";
+import { createPortalHazard } from "./modularRoadCityPortalHazard.js";
 import { concreteDetail } from "./modularRoadCityViaduct.js";
 
 export const UNDERPASS_DEFAULTS = {
@@ -179,6 +180,11 @@ export const UNDERPASS_DEFAULTS = {
   /** Fans, boards, trays and niches — see modularRoadCityTunnelFit.js. */
   fitOut: true,
   fitParams: null,
+
+  /** The gore chevrons and the hazard stripes at each mouth — see
+   *  modularRoadCityPortalHazard.js. Paint, not collision. */
+  hazard: true,
+  hazardParams: null,
 
   colorWall: 0x8d8c85,
   colorWallDirt: 0x46443f,
@@ -1501,6 +1507,23 @@ export function createCityUnderpass({
   });
   if (fit) group.add(fit.group);
 
+  /*
+   * ── AND WHAT THE ROAD SAYS ABOUT ALL THIS ──────────────────────────────────
+   *
+   * Chevrons fanning up to each portal and hazard stripes on the wall across
+   * the mouth. Its own module for the same reason the signs are: it is paint
+   * rather than structure, and it needs the portal's proportions rather than
+   * the tunnel's.
+   *
+   * It is deliberately absent from `collisionMeshes` — paint is not something
+   * you hit, and a marking in the solids channel is the exact class of bug
+   * this file spent a week on.
+   */
+  const hazard = U.hazard === false ? null : createPortalHazard({
+    layout, uNight, params: U.hazardParams,
+  });
+  if (hazard) group.add(hazard.mesh);
+
   if (shafts) {
     group.add(shafts.group);
     // Reachable from the scene graph so the shaft can be tuned against the
@@ -1531,7 +1554,8 @@ export function createCityUnderpass({
     },
     stats: {
       draws: 1 + (vault ? 1 : 0) + (glow ? 1 : 0) + (walls ? 1 : 0) + (signs ? 1 : 0)
-      + (shafts ? shafts.stats.draws : 0) + (fit ? fit.stats.draws : 0),
+      + (shafts ? shafts.stats.draws : 0) + (fit ? fit.stats.draws : 0)
+      + (hazard ? hazard.stats.draws : 0),
       lengthM: Math.round(layout.a1 - layout.a0),
       coveredM: Math.round(layout.cov1 - layout.cov0),
       depthM: +(layout.top - layout.roadY).toFixed(1),
@@ -1549,6 +1573,7 @@ export function createCityUnderpass({
       signs?.dispose();
       shafts?.dispose();
       fit?.dispose();
+      hazard?.dispose();
       for (const m of owned) m.dispose();
     },
   };
