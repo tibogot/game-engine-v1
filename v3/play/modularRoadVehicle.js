@@ -1787,51 +1787,51 @@ export const ROOF = {
    *  keep firing impact events. */
   impactSpeed: 2.5,
   /**
-   * OFF. While the roof is pinned against a road surface, stop the SUSPENSION
+   * ON. While the roof is pinned against a road surface, stop the SUSPENSION
    * pushing the car further into it (see the ceiling-guard block in Tire.apply).
    *
-   * IT WORKS, AND IT COSTS LOOPS. Turn it on and an inverted car comes to rest
-   * exactly on its roofline and stays there — measured y 0.81 against a 0.76 m
-   * roof, never sinking a millimetre, for a drop, a 15 m/s landing and a 40 m/s
-   * slam alike (tools/roofContactTest.mjs). Off, all three sink through the deck
-   * and fall to the respawn floor.
+   * WHAT IT BUYS. An inverted car comes to rest exactly on its roofline and
+   * stays there — measured y 0.81 against a 0.76 m roof, never sinking a
+   * millimetre, for a drop, a 15 m/s landing and a 40 m/s slam alike
+   * (tools/roofContactTest.mjs). With it off all three sank through the deck
+   * and fell to the respawn floor, and the wheels pushing "down" through a road
+   * they were under is also the INVERTED LANDING LAUNCHER: a car landing past
+   * 90 degrees of roll gained speed instead of losing it, up to 6.14x at 180
+   * degrees (tools/attic/invertedLaunchProbe.mjs).
    *
-   * But it also arms at the TOP OF A LOOP — measured at y 48–49.7, car inverted
-   * (chassis-up.y −0.97), against a surface whose normal points UP (n.y 1.00)
-   * within 5 cm of a roof sample. Every loop in tools/loopSpeedReadoutTest.mjs
-   * then fails to crest. Which surface that is has not been identified: it is
-   * not the slab the wheels are on (that faces down at the car), and the loop's
-   * outer face is ~1.7 m away, well outside DECK.searchRadius.
+   * WHY IT SHIPPED OFF UNTIL 2026-09-12. It armed at the top of a loop and every
+   * loop then failed to crest. The surface responsible was recorded as
+   * unidentified: "normal points UP (n.y 1.00) within 5 cm of a roof sample",
+   * with the loop's outer face believed to be ~1.7 m away and so out of reach.
    *
-   * Two narrower discriminators were tried and measured:
-   *   • roof contact alone           armed at every loop ENTRY, which runs under
-   *                                  the loop's own descending slab — 4/7 loops
-   *                                  lost. Fixed by the guardUpMin test below.
-   *   • "wheel contact is behind the
-   *      plane the roof rests on"    never fires: the probe starts 0.6 m along
-   *                                  chassis-up, which inverted is INSIDE the
-   *                                  slab, so it reports a hit at hub −0.28 with
-   *                                  a contact point ABOVE the plane.
+   * IT WAS THE LOOP'S OUTER SKIN, and the samples reaching it were not roof
+   * samples. Measured with tools/attic/loopRoofSurfaceProbe.mjs: the two
+   * DECK_CONTACT points that armed the guard were the UNDERSIDE rear corners at
+   * (±0.90, −0.30, −1.80), and each found the far side of the 0.8 m slab the
+   * car was driving on, 0.018 m and 0.034 m away, where a rear corner pushes
+   * through near the apex. 1.7 m is the distance from the body centre and from
+   * the actual roof samples, which is why looking there found nothing.
    *
-   * So the trade today is: loops (constant, core gameplay) against inverted
-   * landings (rare, and already handled — the car falls through, FALL_Y catches
-   * it, STUCK respawns it). Loops win, exactly as the note in Tire.apply
-   * concluded for the same reason.
+   * The discriminator is therefore not a tolerance or a heuristic. A ROOF guard
+   * may only be armed by a ROOF sample, and the two populations in
+   * DECK_CONTACT_POINTS are a metre apart (see the top of the deck-contact
+   * loop). With that test in place the guard no longer arms anywhere in a loop.
    *
-   * What is NOT in question: everything else in this block ships on. The roof
-   * reaches the real roofline, ceilings no longer tunnel, roof contact is
-   * reported to the game, and a lid-slide costs speed.
+   * Both earlier attempts recorded in this block stay rejected for their own
+   * reasons: rejecting all negative hub distances still tears the car off a tube
+   * wall, and roof contact alone still arms at a loop ENTRY, which runs under
+   * the loop's own descending slab (guardUpMin handles that one).
    *
-   * Inverted landings on TERRAIN are a separate path (Tire.apply skips the
+   * Inverted landings on TERRAIN remain a separate path (Tire.apply skips the
    * heightfield probe when chassis-up.y < `dot`; chassis corners hold the lid).
-   * That does not use this flag, so loops stay safe.
+   * That does not use this flag.
    *
    * The heightfield is a vertical spring, not a mesh, so a lid slam pogos
    * unless we absorb the closing speed and keep the airborne landing assist
    * off for a beat after contact. Those knobs live here because they are the
    * terrain-lid half of the same roof-down problem — not a third system.
    */
-  suspensionGuard: false,
+  suspensionGuard: true,
   /** Fraction of downward speed removed the instant roof corners first hit
    *  dirt. The corner springs are 180 kN/m and underdamped (they exist to
    *  catch a chassis that has already sunk past the wheels); without this,
@@ -2288,16 +2288,50 @@ export const SOLID = {
   /** Bounciness of a chassis hit. 0 = dead stop into the surface (arcade-correct
    *  — a car hitting a wall should not rebound like a ball). */
   restitution: 0.05,
-  /** Tangential speed kept per second while scraping (1/s decay). Scraping a
-   *  rail should cost some speed; being stuck must not drain everything, so this
-   *  ramps with speed via `frictionFullSpeed`. */
-  friction: 1.2,
-  frictionFullSpeed: 6.0,
-  /** Torque from off-centre contacts, as a fraction of the "physically correct"
-   *  amount. Full torque makes a rail clip spin the car wildly; 0 makes hits
-   *  feel dead. This is deliberately light — the wheels and stabilizer own the
-   *  car's attitude, a wall only deflects it. */
-  spin: 0.15,
+  /**
+   * COULOMB FRICTION COEFFICIENT for the chassis sliding on a solid.
+   *
+   * Replaced `friction: 1.2`, which was a 1/s exponential decay on the whole
+   * body's velocity and therefore not friction at all: it was not bounded by how
+   * hard the car was pressing, so leaning on a rail cost exactly as much as
+   * grinding into it, and it pulled on the centre of mass, so a scrape could not
+   * drag the touching end back and swing the tail round. A coefficient bounded
+   * by the normal impulse does both by construction.
+   *
+   * 0.45 is painted steel on steel with the bodywork deforming — high enough
+   * that a wall-ride scrubs speed and pulls the nose in, low enough that a
+   * glancing clip still slides off rather than gripping and pivoting the car.
+   */
+  mu: 0.45,
+  /**
+   * Below this sliding speed (m/s) friction is faded out.
+   *
+   * Mostly redundant now and kept small on purpose. The old decay needed a ramp
+   * because it drained a trapped car crawling free of the little speed it had;
+   * Coulomb friction cannot do that, since a car that is barely pressing
+   * generates barely any normal impulse to be bounded by. What is left is the
+   * last metre per second, where the tangential direction is numerical noise
+   * rather than a real slide direction.
+   */
+  frictionFullSpeed: 1.0,
+  /**
+   * ROTATIONAL SHARE of a contact impulse, 0..1.
+   *
+   * Was "torque from off-centre contacts, as a fraction of the physically
+   * correct amount" — a SECOND, independent budget added on top of a linear
+   * response that had already taken the full closing speed out of the centre of
+   * mass. Two budgets meant the total was conserved in neither direction, and
+   * the value that stopped rail clips spinning the car wildly (0.15) was also
+   * what made every impact read as a dead stop.
+   *
+   * Now it scales the rotational half of ONE impulse, and the same factor goes
+   * into the effective-mass solve, so the normal velocity is still cancelled
+   * exactly whatever it is set to. 1 is the honest rigid-body answer; 0
+   * reproduces the old centre-of-mass response exactly. The wheels and
+   * stabilizer still own the car's attitude the moment the contact ends — this
+   * only decides how a hit is shared between speed and spin while it lasts.
+   */
+  spin: 1.0,
   /** Max rad/s a single contact may impart, so nothing can wind up a tumble. */
   maxSpin: 2.5,
 };
@@ -2401,7 +2435,7 @@ export const STUCK = {
  * Crash yield — after a REAL crash, the landing assists go quiet so the car
  * can tumble. They stay on for ordinary jumps.
  *
- * Wall hits are dead on purpose (`SOLID.restitution` 0.05 / `spin` 0.15).
+ * Wall hits are dead on purpose (`SOLID.restitution` 0.05).
  * Raising those globally would bounce every scrape. While this hold is
  * active — and on a swinging/sliding mover that is already a wrecking-ball
  * — response uses the values below instead. Static barriers you clip while
@@ -2459,10 +2493,28 @@ export const CRASH = {
   /** Chassis-up.y above this, with enough wheels down, is a recovery. */
   recoverUp: 0.5,
   recoverWheels: 3,
-  /** Bounciness while yielded / wrecking-ball. SOLID.restitution stays 0.05. */
-  restitution: 0.4,
-  /** Off-centre torque fraction while yielded. SOLID.spin stays 0.15. */
-  spin: 0.55,
+  /**
+   * Bounciness while yielded / wrecking-ball. SOLID.restitution stays 0.05.
+   *
+   * WAS 0.4, AND THAT WAS THE FLIPPER BALL. Measured on a flat wall with
+   * tools/wallImpactProbe.mjs: a 55 m/s head-on came back off the wall at
+   * 22.1 m/s, which is 0.4 × the closing speed to three figures, and every
+   * impact past the crash threshold reversed the car's heading by 180°.
+   *
+   * It was raised to 0.4 because at SOLID's value the car "simply stopped" —
+   * true at the time, and the wrong fix for it. The car stopped because the
+   * whole impulse was taken out of the centre of mass with nowhere else to go;
+   * bouncing it back is not the alternative to that, it is the same error with
+   * the sign flipped. Now that a hit is shared between speed and spin, a crash
+   * throws the car about on its own and this can be what a car actually is:
+   * bodywork that absorbs the hit. 0.12 leaves just enough kick to read as an
+   * impact rather than a magnet.
+   */
+  restitution: 0.12,
+  /** Rotational share while yielded — see SOLID.spin, which this overrides.
+   *  1 = the full rigid-body answer; a crash is exactly when the car should be
+   *  allowed to take the whole rotation a real impact would give it. */
+  spin: 1.0,
   /** rad/s cap while yielded. SOLID.maxSpin stays 2.5 so scrapes cannot wind up. */
   maxSpin: 6,
   /**
@@ -2587,6 +2639,16 @@ export class RigidBody {
     this._R3t = new THREE.Matrix3();
     this._mat = new THREE.Matrix4();
     this._worldInvI = new THREE.Matrix3();
+    /** Pose `_worldInvI` was built at — see worldInvInertia(). NaN so the first
+     *  ask always misses, whatever the starting quaternion is. */
+    this._wiQx = NaN; this._wiQy = NaN; this._wiQz = NaN; this._wiQw = NaN;
+    /** Impulse scratch. Separate from `_r`/`_tau` on purpose: the contact solver
+     *  calls getVelocityAtPoint between its own impulses, and sharing them made
+     *  the second impulse of a pair read the first one's lever arm. */
+    this._eimA = new THREE.Vector3();
+    this._eimB = new THREE.Vector3();
+    this._impR = new THREE.Vector3();
+    this._impT = new THREE.Vector3();
   }
 
   _setInertia(mass, { width: w, height: h, length: l, comX = 0, comY = 0, comZ = 0 }) {
@@ -2613,6 +2675,63 @@ export class RigidBody {
     return out.addVectors(this.vel, this._rotVel);
   }
 
+  /**
+   * World-space inverse inertia, R·I⁻¹·Rᵀ, refreshed only when the pose moved.
+   *
+   * `integrate` already builds this every step, but an IMPULSE has to be
+   * resolved mid-step, against the pose the contact was found at. Recomputing
+   * unconditionally would rebuild two 3×3 products per contact per substep, so
+   * the quaternion is compared first — during one substep every contact shares
+   * a pose, and the second and later ones are free.
+   */
+  worldInvInertia() {
+    const q = this.quat;
+    if (this._wiQx !== q.x || this._wiQy !== q.y || this._wiQz !== q.z || this._wiQw !== q.w) {
+      this._mat.makeRotationFromQuaternion(q);
+      this._R3.setFromMatrix4(this._mat);
+      this._R3t.copy(this._R3).transpose();
+      this._worldInvI.copy(this._R3).multiply(this.localInvInertia).multiply(this._R3t);
+      this._wiQx = q.x; this._wiQy = q.y; this._wiQz = q.z; this._wiQw = q.w;
+    }
+    return this._worldInvI;
+  }
+
+  /**
+   * Inverse of the EFFECTIVE MASS the body presents at `worldPoint` along `dir`.
+   *
+   *     k = 1/m + n · ( (I⁻¹ (r × n)) × r )
+   *
+   * This is the whole reason a car does not hit like a ball. The impulse needed
+   * to change the velocity AT A CONTACT POINT is `Δv / k`, and the second term
+   * says how much of that leaks into rotation instead of translation. Hit a body
+   * dead through its centre of mass and the term is zero — all of the impulse
+   * goes into stopping it, which is the ball. Hit it on a corner and the term is
+   * large — most of the impulse spins it, and it keeps its speed.
+   *
+   * `angScale` scales the rotational share, and MUST be the same value passed to
+   * `applyImpulseAtPoint`, or the impulse solved here will not produce the
+   * velocity change it was solved for. See SOLID.spin.
+   */
+  effectiveInvMass(rWorld, dir, angScale = 1) {
+    if (angScale <= 0) return this.invMass;
+    this._eimA.crossVectors(rWorld, dir).applyMatrix3(this.worldInvInertia());
+    this._eimB.crossVectors(this._eimA, rWorld);
+    return this.invMass + angScale * this._eimB.dot(dir);
+  }
+
+  /**
+   * Apply an impulse (N·s) at a world point: linear on the centre of mass,
+   * angular on `r × J`. The rotational half is scaled by `angScale` — see
+   * `effectiveInvMass`, which must be given the same value.
+   */
+  applyImpulseAtPoint(impulse, worldPoint, angScale = 1) {
+    this.vel.addScaledVector(impulse, this.invMass);
+    if (angScale <= 0) return;
+    this._impR.subVectors(worldPoint, this.pos);
+    this._impT.crossVectors(this._impR, impulse).applyMatrix3(this.worldInvInertia());
+    this.angVel.addScaledVector(this._impT, angScale);
+  }
+
   integrate(dt) {
     this.vel.x += this.forceAccum.x * this.invMass * dt;
     this.vel.y += this.forceAccum.y * this.invMass * dt;
@@ -2621,12 +2740,9 @@ export class RigidBody {
     this.pos.y += this.vel.y * dt;
     this.pos.z += this.vel.z * dt;
 
-    this._mat.makeRotationFromQuaternion(this.quat);
-    this._R3.setFromMatrix4(this._mat);
-    this._R3t.copy(this._R3).transpose();
-    this._worldInvI.copy(this._R3).multiply(this.localInvInertia).multiply(this._R3t);
-
-    this._tau.copy(this.torqueAccum).applyMatrix3(this._worldInvI);
+    // Shares the cache with the impulse path rather than rebuilding: after a
+    // substep with contacts the matrix is already correct for this pose.
+    this._tau.copy(this.torqueAccum).applyMatrix3(this.worldInvInertia());
     this.angVel.x += this._tau.x * dt;
     this.angVel.y += this._tau.y * dt;
     this.angVel.z += this._tau.z * dt;
@@ -4105,6 +4221,14 @@ export class Vehicle {
     this._solidR = new THREE.Vector3();
     this._solidTorque = new THREE.Vector3();
     this._solidSpinAxis = new THREE.Vector3();
+    /** Impulse solver scratch — see _applySolidContact. */
+    /** Real surface left in front of the closest contributing sample (m), set
+     *  by whichever resolver found the contact. See the anti-pass-through
+     *  clamp in _applySolidContact. */
+    this._solidGap = 0;
+    this._solidJ = new THREE.Vector3();
+    this._solidW0 = new THREE.Vector3();
+    this._solidDW = new THREE.Vector3();
     this._steerRateFwd = new THREE.Vector3();
     this._slipUp = new THREE.Vector3();
     this._slipFwd = new THREE.Vector3();
@@ -6245,6 +6369,38 @@ export class Vehicle {
     this._deckUp.set(0, 1, 0).applyQuaternion(body.quat);
 
     for (const corner of this.DECK_CONTACT_POINTS) {
+      /*
+       * IS THIS SAMPLE ON THE ROOF? Only a roof sample may arm the ROOF guard.
+       *
+       * The list holds two populations and they are far apart: the four
+       * underside corners sit at chassis y = −hh (−0.30 today) and everything
+       * else — the four top corners and the roof in-fill grid — sits at
+       * DECK_CONTACT.roofY (+0.76). Zero separates them with a metre of margin
+       * either way, so the test needs no tolerance.
+       *
+       * THIS IS WHAT KEPT ROOF.suspensionGuard SWITCHED OFF, and the doc block
+       * on that flag is the record of hunting it: the guard fixed inverted
+       * landings but armed at the top of a loop "against a surface whose normal
+       * points UP within 5 cm of a roof sample", and that surface was never
+       * identified. It is not a roof sample and it is not 5 cm away in the sense
+       * meant. MEASURED with tools/attic/loopRoofSurfaceProbe.mjs, driving the
+       * real `loop` piece: the two samples that armed it were
+       * (−0.90, −0.30, −1.80) and (+0.90, −0.30, −1.80), both UNDERSIDE rear
+       * corners, and what they found was the loop's own OUTER SKIN at 0.018 m
+       * and 0.034 m — the far side of the 0.8 m slab the car is driving on,
+       * which a rear corner pokes through near the apex.
+       *
+       * Both arming conditions were then satisfied for an honest reason and a
+       * wrong one. The normal really does point up in world (it is the outside
+       * of the ring at the top), and it really does oppose chassis-up (the car
+       * is inverted) — so "a surface is resting on this car's roof" was inferred
+       * from a corner that is not on the roof, about a face the car is
+       * underneath rather than lying on. The earlier note guessed the outer face
+       * was "~1.7 m away, well outside DECK.searchRadius", which is true of the
+       * body centre and of the roof samples, and is why the search stopped
+       * there.
+       */
+      const isRoofSample = corner.y > 0;
       this._geomToWorld(corner, this._cWorld);
       const res = this.groundBvh.closestPointWithNormal(
         this._cWorld.x, this._cWorld.y, this._cWorld.z, DECK.searchRadius, this._deckN,
@@ -6282,7 +6438,7 @@ export class Vehicle {
             //
             // The same "resting on it, not pressed by it" test as below, so a
             // ceiling approach still arms nothing.
-            if (ROOF.enabled && this._deckN.y > ROOF.guardUpMin) {
+            if (ROOF.enabled && isRoofSample && this._deckN.y > ROOF.guardUpMin) {
               this._roofGuard = ROOF.guardHold;
               // THE SLAM SPEED IS MEASURED HERE, not at the contact below.
               // The clamp on the next line kills the closing velocity BEFORE
@@ -6329,7 +6485,10 @@ export class Vehicle {
       if (this._deckN.y <= ROOF.guardUpMin) continue;
 
       // 1) The wheels may be lying. See the ceiling-guard block in Tire.apply.
-      this._roofGuard = ROOF.guardHold;
+      //    Roof samples only, for the reason set out at the top of this loop —
+      //    an underside corner that has poked through a loop's slab satisfies
+      //    every other test here and is not a car lying on its lid.
+      if (isRoofSample) this._roofGuard = ROOF.guardHold;
 
       // 2) Sliding on the lid costs speed. Coulomb-shaped, the same as the
       //    terrain corners in _applyChassisGroundContact.
@@ -6423,11 +6582,14 @@ export class Vehicle {
     this._solidN.set(0, 0, 0);
     this._solidPoint.set(0, 0, 0);
 
+    let gap = Infinity;
     for (const cap of this.solidCapsules) {
       const d = this._closestHullToSegment(cap.a, cap.b, this._capQ, this._capN);
       const pen = cap.radius + skin - d;
       if (pen <= 0) continue;
       hits++;
+      // Real surface left in front of the hull — see the BVH path's sampleGap.
+      if (d - cap.radius < gap) gap = d - cap.radius;
       // _capN already points out of the capsule, in world space.
       this._solidN.addScaledVector(this._capN, pen);
       this._geomToWorld(this._capQ, this._sphC);
@@ -6438,6 +6600,7 @@ export class Vehicle {
     this._solidPoint.multiplyScalar(1 / hits);
     if (this._solidN.lengthSq() < 1e-10) return;
     this._solidN.normalize();
+    this._solidGap = Math.max(0, gap);
     this._applySolidContact(deepest, null, dt);
   }
 
@@ -6542,6 +6705,7 @@ export class Vehicle {
     }
 
     let deepest = 0;
+    let gap = Infinity;
     let hits = 0;
     const wheelsCarry = this._isSupported();
     // Chassis up, for the lid test below — see SOLID.sitNormalMaxY.
@@ -6571,6 +6735,12 @@ export class Vehicle {
       let ny = this._sphN.y;
       let nz = this._sphN.z;
       let pen;
+      /** How much REAL surface is left in front of this sample, as opposed to
+       *  how far into the virtual skin it is. The anti-pass-through clamp in
+       *  _applySolidContact needs the true figure: a sweep contact has pen 0 but
+       *  can still be 20 cm clear, and treating that as a full skin's worth of
+       *  room let slow descents settle straight through a guardrail beam. */
+      let sampleGap = res.distance;
       if (res.distance < skin) {
         pen = skin - res.distance;
       } else {
@@ -6641,6 +6811,7 @@ export class Vehicle {
             }
             nx = ox; ny = oy; nz = oz;
             pen = res.distance + skin;
+            sampleGap = 0; // walled in: no clear surface ahead at all
             recovered = true;
           }
         }
@@ -6683,6 +6854,7 @@ export class Vehicle {
       if (Math.abs(upDot) > sitY && wheelsCarry) continue;
 
       hits++;
+      if (sampleGap < gap) gap = sampleGap;
       this._sphN.set(nx, ny, nz);
       // Sweep hits have pen 0 (velocity clamp only). They still have to vote
       // on the aggregate normal or a lone approach would call apply with a
@@ -6705,6 +6877,7 @@ export class Vehicle {
       this._solidN.copy(this._deepestN);
     }
     this._solidN.normalize();
+    this._solidGap = Math.max(0, gap);
     this._applySolidContact(deepest, surfaceVelFn, dt);
   }
 
@@ -6766,62 +6939,190 @@ export class Vehicle {
     const spinK = violent ? CRASH.spin : SOLID.spin;
     const spinMax = violent ? CRASH.maxSpin : SOLID.maxSpin;
 
+    // ── IMPULSE AT THE CONTACT POINT ────────────────────────────────────────
+    //
+    // THE CAR USED TO HIT LIKE A BALL, and this is where it did it. The old
+    // response took the closing speed READ AT THE CONTACT POINT and removed all
+    // of it FROM THE CENTRE OF MASS — `vel += n · −vN(1+rest)`. Two separate
+    // errors stacked in that one line:
+    //
+    //  • A ball has no other place for the energy to go, so a wall returns it
+    //    all as linear velocity. A car does: a hit away from the centre of mass
+    //    spins it. The correct impulse divides the required velocity change by
+    //    the EFFECTIVE MASS at the contact, which carries the rotational term,
+    //    so the further off-centre the hit the less of it comes back as speed.
+    //    With no such term every impact was a centre-of-mass impact.
+    //  • Rotation was then added SEPARATELY below, as a tunable fraction of
+    //    "the physically correct amount". Two independent budgets, so the total
+    //    was not conserved in either direction: a corner clip paid the full
+    //    linear price AND got a spin on top, while the dial that stopped the
+    //    spin looking silly (0.15) left the deflection reading as a dead stop.
+    //
+    // One impulse now does both. MEASURED with tools/wallImpactProbe.mjs before
+    // this change: a 55 m/s head-on rebounded off a flat wall at 22.1 m/s — 80
+    // km/h straight back — and every hit above the crash threshold reversed the
+    // car's heading by 180°. That is the flipper-ball report, in one number.
+    //
+    // `spinK` survives as the ROTATIONAL SHARE of the one impulse, not as a
+    // second budget: 1 is the honest rigid-body answer, 0 reproduces the old
+    // centre-of-mass response exactly, and anything between stiffens the car
+    // against being spun without breaking the normal-velocity solve — the same
+    // factor goes into `effectiveInvMass`, so the impulse still cancels exactly
+    // the closing speed it was solved for.
+    this._solidR.subVectors(this._solidPoint, body.pos);
+    this._solidW0.copy(body.angVel);
+    let jn = 0;
     if (vN < 0) {
-      body.vel.addScaledVector(this._solidN, -vN * (1 + rest));
+      const k = body.effectiveInvMass(this._solidR, this._solidN, spinK);
+      jn = (-(1 + rest) * vN) / Math.max(k, 1e-9);
+      this._solidJ.copy(this._solidN).multiplyScalar(jn);
+      body.applyImpulseAtPoint(this._solidJ, this._solidPoint, spinK);
     }
     if (surfaceVelFn) {
+      // A moving wall must still not be penetrated after its own velocity is
+      // counted back in. Resolved on the CENTRE OF MASS deliberately: this is a
+      // correction for the surface frame, not a second collision, and giving it
+      // a lever would let a mover wind the car up every substep.
       const relN = body.vel.dot(this._solidN) - this._surfV.dot(this._solidN);
       if (relN < 0) body.vel.addScaledVector(this._solidN, -relN);
     }
 
-    // 3) TANGENTIAL — scraping costs speed, ramped in so a car crawling out of
-    //    somewhere it is trapped is not drained of the little it has.
-    // 3) TANGENTIAL — scraping costs speed, ramped in so a car crawling out of
-    //    somewhere it is trapped is not drained of the little it has.
-    //    Sweep-only contacts (deepest 0) are "would cross next tick", not a
-    //    scrape yet — friction here glued the car to a start/finish nose after
-    //    the anti-tunnel clamp, same feel as parking on a hole-wall rim.
-    if (deepest > 0 && SOLID.friction > 0 && dt > 0 && this._solidN.y < SOLID.sitNormalMaxY) {
-      const vn2 = body.vel.dot(this._solidN);
-      this._solidT.copy(body.vel).addScaledVector(this._solidN, -vn2);
+    // ── COULOMB FRICTION AT THE CONTACT ─────────────────────────────────────
+    //
+    // Was an exponential decay on the whole body's velocity, which is not
+    // friction in two ways that both showed. It was not bounded by how hard the
+    // car was pressing — leaning on a rail cost the same as grinding into it —
+    // and it acted on the centre of mass, so a scrape could not do the one thing
+    // a scrape does, which is drag the touching end back and swing the other end
+    // round. Bounded by `mu · jn` and applied AT THE POINT, both fall out.
+    //
+    // Self-limiting for free, which is what the old `frictionFullSpeed` ramp was
+    // hand-rolling: a car crawling out of somewhere it is trapped presses almost
+    // nothing into the wall, so `jn` is almost nothing, so the friction it pays
+    // is almost nothing. The ramp is kept only for the very last of that, below
+    // walking pace, where the tangential solve is mostly numerical noise.
+    //
+    // Sweep-only contacts (deepest 0) are "would cross next tick", not a scrape
+    // yet — friction there glued the car to a start/finish nose after the
+    // anti-tunnel clamp, same feel as parking on a hole-wall rim.
+    // NO LID GATE, and the removal is the fix rather than an oversight.
+    //
+    // Friction used to be skipped whenever the contact normal was mostly up in
+    // WORLD space (`_solidN.y < SOLID.sitNormalMaxY`). That made sense for the
+    // old model and only for it: the decay pulled on the whole body at a fixed
+    // rate per second regardless of how hard the car was pressing, so applying
+    // it to a surface the car was resting ON glued the car to it. Coulomb
+    // friction cannot glue anything — what it may take is `mu · jn`, and a car
+    // barely resting generates barely any normal impulse to be bounded by.
+    //
+    // Keeping the gate was an outright bug once the model changed, because the
+    // guardrail cap IS a lid: a car landing on the beam slid across the top of
+    // it with NO FRICTION AT ALL and dribbled over the far side. Measured in
+    // tools/railTunnelTest.mjs, removing the gate recovered 5 of the 7 slow
+    // descents that were crossing the barrier, and took the broadside landings
+    // back to 18/18. Friction on the cap is what makes a car that lands on a
+    // guardrail stay on the guardrail.
+    //
+    // KNOWN COST, measured rather than guessed, because a world-Y gate also
+    // silently excused every ROLLED rail. On a corkscrew the barrier rolls with
+    // the road, so its flank reads as mostly-up in world space while the car
+    // presses it for the length of the piece (up to 14.2 m/s of closing speed —
+    // see CRASH.wallSpeed). That press is now charged real friction, which
+    // scrubs speed and drags the touching side back: in tools/chaseFramingTest
+    // .mjs it is worth 0.10 of the chase boom's swing on the twist, and the car
+    // carries the full 180 degrees of corkscrew roll where it used to reach 160.
+    // A gate on the CHASSIS-frame normal was tried and does not address it —
+    // in the car's own frame a corkscrew's rail is a flank, not a lid, so the
+    // test correctly declines to skip it and the branch bought nothing.
+    if (jn > 0 && deepest > 0 && SOLID.mu > 0) {
+      body.getVelocityAtPoint(this._solidPoint, this._sphV);
+      if (surfaceVelFn) this._sphV.sub(this._surfV);
+      const vn2 = this._sphV.dot(this._solidN);
+      this._solidT.copy(this._sphV).addScaledVector(this._solidN, -vn2);
       const vT = this._solidT.length();
-      const ramp = Math.min(1, vT / Math.max(0.01, SOLID.frictionFullSpeed));
-      if (ramp > 0) {
-        this._solidT.multiplyScalar(Math.exp(-SOLID.friction * ramp * dt));
-        body.vel.copy(this._solidT).addScaledVector(this._solidN, vn2);
+      if (vT > 1e-4) {
+        this._solidT.multiplyScalar(1 / vT);
+        const kt = body.effectiveInvMass(this._solidR, this._solidT, spinK);
+        // The impulse that would arrest the slide completely, and the most
+        // friction is allowed to be. Whichever is smaller is the real one —
+        // that IS Coulomb's law, and it is why this can never add energy.
+        const jStop = vT / Math.max(kt, 1e-9);
+        const ramp = Math.min(1, vT / Math.max(0.01, SOLID.frictionFullSpeed));
+        const jt = Math.min(jStop, SOLID.mu * jn * ramp);
+        if (jt > 0) {
+          this._solidJ.copy(this._solidT).multiplyScalar(-jt);
+          body.applyImpulseAtPoint(this._solidJ, this._solidPoint, spinK);
+        }
       }
     }
 
-    // 4) SPIN — an off-centre hit should turn the car a little. Deliberately a
-    //    fraction of the physically correct impulse and hard-capped: the wheels
-    //    and stabilizer own the car's attitude, a wall only nudges it.
-    if (spinK > 0 && vN < 0) {
-      this._solidR.subVectors(this._solidPoint, body.pos);
-      this._solidTorque.crossVectors(this._solidR, this._solidN)
-        .multiplyScalar(-vN * spinK);
-      const mag = this._solidTorque.length();
-      if (mag > 1e-6) {
-        // CAP THE RESULT, NOT THE INCREMENT.
-        //
-        // This clamped the per-contact impulse to `maxSpin` and then ADDED it —
-        // but a scrape is not one contact, it is a contact every substep, and
-        // each one added up to the cap again. So the cap bounded nothing over a
-        // sustained rub and the car could be wound to any yaw rate at all.
-        // MEASURED on the user's own track (tools/jumpDebugTrack.mjs): a car
-        // that lands sliding after a barrel roll walks out to the guardrail and
-        // leaves it spinning at 2.65–3.39 rad/s, against a maxSpin of 2.5. That
-        // is the "it turns by itself, very abruptly" — a rail hit, not a
-        // landing, which is why it kept surviving every landing fix.
-        //
-        // Clamping the RESULTING rate about the spin axis is what the constant
-        // always meant: "nothing can wind up a tumble". A first touch still gets
-        // its full deflection; a long scrape simply stops adding once it is
-        // already spinning that fast.
-        this._solidSpinAxis.copy(this._solidTorque).multiplyScalar(1 / mag);
-        const cur = body.angVel.dot(this._solidSpinAxis);
-        const room = spinMax - cur;
-        const add = Math.min(mag, Math.max(0, room));
-        if (add > 0) body.angVel.addScaledVector(this._solidSpinAxis, add);
+    // ── ANTI-PASS-THROUGH ───────────────────────────────────────────────────
+    //
+    // A correct impulse is ALLOWED to leave the contact point still moving
+    // inward, and that is the point of it: the rest of the closing speed went
+    // into rotation instead of into stopping the car. What it must never do is
+    // leave enough inward speed to put the point through the surface before the
+    // next substep — and on a thin solid hit near its edge, where the lever is
+    // long and the effective mass is therefore high, it can.
+    //
+    // MEASURED in tools/railTunnelTest.mjs after the impulse rewrite: 5 of 130
+    // slow descents onto the guardrail beam (3–6 m/s of travel, 8–20 m/s of
+    // fall, landing 0.6–1.2 m off the rail's centre line) went through it. The
+    // impulse was right and the car was genuinely tipping off the beam; it
+    // simply had one substep to do it in.
+    //
+    // So the crossing guarantee is kept SEPARATE from the response, which is
+    // the standard split (speculative contact): the impulse decides how the hit
+    // feels, this decides that it happened at all. It removes only the excess
+    // over what fits in the remaining gap, adds no energy, and cannot bounce —
+    // and on a wall it is inert, because after a 0.12-restitution impulse the
+    // contact point is already travelling AWAY.
+    if (jn > 0 && dt > 0) {
+      body.getVelocityAtPoint(this._solidPoint, this._sphV);
+      if (surfaceVelFn) this._sphV.sub(this._surfV);
+      const vIn = -this._sphV.dot(this._solidN);
+      if (vIn > 0) {
+        // The real surface left in front of the closest sample, measured by
+        // the resolver rather than inferred from the skin. `skin - deepest`
+        // was the first guess and it is wrong in the direction that matters:
+        // a sweep contact has pen 0, so it read as a whole skin of room when
+        // the sample could still be 20 cm clear, and the clamp then never
+        // fired on exactly the slow descents it was added for.
+        const maxIn = this._solidGap / dt;
+        if (vIn > maxIn) {
+          // On the CENTRE OF MASS, with no lever. This is a constraint, not a
+          // collision: giving it a lever would let a sustained rest on a ledge
+          // spin the car up one clamp at a time.
+          body.vel.addScaledVector(this._solidN, vIn - maxIn);
+        }
+      }
+    }
+
+    // ── SPIN CEILING ────────────────────────────────────────────────────────
+    //
+    // CAP THE RESULT, NOT THE INCREMENT — the rule the old separate spin step
+    // arrived at, kept verbatim now that the rotation comes from the impulse
+    // instead. A scrape is not one contact, it is a contact every substep, so a
+    // per-contact cap bounds nothing over a sustained rub: measured on the
+    // user's own track (tools/jumpDebugTrack.mjs), a car that slid out to the
+    // guardrail left it spinning at 2.65–3.39 rad/s against a cap of 2.5. That
+    // was the "it turns by itself, very abruptly".
+    //
+    // Clamping the RESULTING rate about this contact's own axis is what the
+    // constant always meant: a first touch still gets its full deflection, a
+    // long scrape simply stops adding once it is already spinning that fast.
+    this._solidDW.subVectors(body.angVel, this._solidW0);
+    const dwMag = this._solidDW.length();
+    if (dwMag > 1e-6) {
+      this._solidSpinAxis.copy(this._solidDW).multiplyScalar(1 / dwMag);
+      const before = this._solidW0.dot(this._solidSpinAxis);
+      const after = before + dwMag;
+      if (after > spinMax) {
+        // Never below where it already was: a contact must not BRAKE a spin it
+        // did not cause, or driving alongside a rail would quietly cancel a
+        // barrel roll the player earned in the air.
+        const allowed = Math.max(before, spinMax);
+        body.angVel.addScaledVector(this._solidSpinAxis, allowed - after);
       }
     }
 

@@ -62,7 +62,15 @@ function buildLoopTrack({ runUp = 8, rails = true } = {}) {
     bvh.bakeFromMeshes(meshes);
     return bvh.baked ? bvh : null;
   };
-  return { deck: mk(deckGeos), solids: mk(railGeos), startZ, loop };
+  // The loop's own footprint in world space. `ride` uses it to decide what
+  // counts as being ON THE RING — see the note there.
+  const ringBox = new THREE.Box3();
+  for (const g of [loop.geometry, loop.shellGeometry]) {
+    if (!g) continue;
+    const c = g.clone(); c.applyMatrix4(loop.world); c.computeBoundingBox();
+    ringBox.union(c.boundingBox);
+  }
+  return { deck: mk(deckGeos), solids: mk(railGeos), startZ, loop, ringBox };
 }
 
 function ride(track, v0, { secs = 16, log = false, steer = 0 } = {}) {
@@ -82,7 +90,28 @@ function ride(track, v0, { secs = 16, log = false, steer = 0 } = {}) {
     const p = car.body.pos, v = car.body.vel.length();
     // What the HUD/tach/engine-audio actually print, and what the car is doing.
     const hud = readoutRef.fn(car.body);
-    if (p.y > 1) {
+    /*
+     * ON THE RING MEANS INSIDE THE LOOP PIECE, not "above y = 1".
+     *
+     * The proxy was `p.y > 1`, and it does not survive the car LEAVING the loop.
+     * This harness is a run-up plus one loop and nothing after it, so a car that
+     * crests and departs flies back over the straight it arrived on, lands, and
+     * scrapes along — all of it well above y = 1, all of it recorded as "speed
+     * on the ring", none of it on the ring.
+     *
+     * MEASURED at the 180 km/h entry, which is where it bit: the minimum was
+     * being taken at z ~ −108, roughly 100 m back down the RUN-UP, from a car
+     * that had already been round. The ring itself spans z ~ −162 to −214. The
+     * assertion floor is 60 km/h and the number it was reading was 61, so the
+     * check was one km/h from failing on a measurement of the wrong road.
+     *
+     * The loop's bounding box is unambiguous and needs no state proxy. `y > 1`
+     * stays as well, to exclude the entry and exit feet where the car is simply
+     * driving on the flat through the same footprint.
+     */
+    const onRing = p.y > 1 && track.ringBox
+      && p.z <= track.ringBox.max.z + 1 && p.z >= track.ringBox.min.z - 1;
+    if (onRing) {
       minVOnRing = Math.min(minVOnRing, v);
       // Only meaningful once the car is genuinely moving; a stationary car
       // trivially reads 0/0.

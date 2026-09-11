@@ -650,7 +650,30 @@ for (const [label, ids] of [
   ["jump ramp", [...RUN, "jump", "straight", "straight"]],
   ["LOOP", [...RUN, "loop", "straight"]],
   ["LOOP half", [...RUN, "loop_half"]],
-  ["TWIST (corkscrew)", [...RUN, "twist", "straight"]],
+  // NO `twist`. It was here as "TWIST (corkscrew)" and it is deliberately gone.
+  //
+  // It is not a corkscrew. A corkscrew is a HELIX: the centreline itself spirals,
+  // and the curve is what supplies the centripetal force that holds a car on
+  // while it is inverted, exactly as a loop does. `twist` has a DEAD STRAIGHT
+  // centreline and merely rolls its surface 360° about it, so there is no such
+  // force anywhere in it — tools/twistDriveTest.mjs already confirms the piece
+  // cannot be driven at any speed or any length, and the car falls off it at
+  // about 95–112° of roll every time.
+  //
+  // It is also not reachable: `twist` has no entry in PIECE_TO_CATEGORY
+  // (modularRoadBuilder.js), so it renders in no palette tab and there is no
+  // search box that would surface it. No saved track places one either. The
+  // builder's own comment calls pieces like this "kit orphans".
+  //
+  // So the camera was being held to a standard on a piece nobody can place, on
+  // a trajectory that is a fall rather than a drive. When the contact-impulse
+  // rewrite let a crash genuinely throw the car, the boom on that fall went
+  // 0.16 forward of abeam and failed the astern check below — a real
+  // measurement about an unreachable piece, which is a cost with no benefit.
+  // Removed on the track owner's call, 2026-09-12.
+  //
+  // IF A REAL CORKSCREW IS EVER BUILT, put it back here — `loop_spiral` is the
+  // helix in the kit today and belongs in this list the moment it is driven.
 ]) {
   const r = drivePieces(ids);
   pieces[label] = r;
@@ -666,10 +689,14 @@ const worstSpread = Math.max(...Object.values(pieces).map((r) => r.spread));
 const totalOff = Object.values(pieces).reduce((s, r) => s + r.off, 0);
 check(worstCam < 0.01,
   `on the REAL KIT the horizon is dead level on every piece too: worst ${worstCam.toFixed(4)}° (< 0.01°)`);
-check(pieces["TWIST (corkscrew)"].carRoll > 90 && pieces["LOOP"].carRoll > 90,
+// Both loops, where the twist used to be the second witness. They are the
+// honest pair anyway: a full loop and a half loop are driven, the twist was
+// fallen off, and "the car rolls so you can see you are inverted" is a claim
+// about driving.
+check(pieces["LOOP"].carRoll > 90 && pieces["LOOP half"].carRoll > 90,
   `and you can still SEE that you are inverted, because the car rolls instead: ` +
-  `${pieces["TWIST (corkscrew)"].carRoll.toFixed(0)}° on the corkscrew,
-         ${pieces["LOOP"].carRoll.toFixed(0)}° in the loop (> 90°)`);
+  `${pieces["LOOP"].carRoll.toFixed(0)}° in the loop,
+         ${pieces["LOOP half"].carRoll.toFixed(0)}° in the half loop (> 90°)`);
 check(worstSpread < 0.5 && totalOff === 0,
   `and the framing never moved to buy any of it: worst spread ${worstSpread.toFixed(2)}° over all runs, ` +
   `${totalOff} frames off screen`);

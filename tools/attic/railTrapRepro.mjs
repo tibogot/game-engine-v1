@@ -24,7 +24,7 @@ const { RoadBvh } = await import(pathToFileURL(join(ROOT, "games/modular-road-v3
   .catch(() => ({ RoadBvh: null }));
 
 console.log("=== SETUP ===");
-console.log(`  SOLID.skin ${SOLID.skin}  push ${SOLID.push}  friction ${SOLID.friction}`);
+console.log(`  SOLID.skin ${SOLID.skin}  push ${SOLID.push}  mu ${SOLID.mu}`);
 console.log(`  STUCK speed ${STUCK.speed}  beachedSpeed ${STUCK.beachedSpeed}  respawnAfter ${STUCK.respawnAfter}`);
 console.log(`  TIRE.rayLength ${TIRE.rayLength}  WHEEL.radius ${WHEEL.radius}`);
 console.log(`  CHASSIS ${CHASSIS.width} x ${CHASSIS.height} x ${CHASSIS.length}`);

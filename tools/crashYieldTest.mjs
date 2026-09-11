@@ -158,7 +158,7 @@ console.log("\n=== driving again ends the crash — but not before minHold ===")
     `crashYield ${late.crashYield.toFixed(2)}, wheels ${late.groundedCount}`);
 }
 
-console.log("\n=== yielded airborne slam bounces; a slow on-road clip stays dead ===");
+console.log("\n=== a yielded airborne slam is thrown clear; a slow on-road clip stays dead ===");
 {
   const slam = (y, vx) => {
     const c = makeCar({ solids: wall(3.0) });
@@ -172,8 +172,25 @@ console.log("\n=== yielded airborne slam bounces; a slow on-road clip stays dead
     return c;
   };
   const air = slam(4, 22);
-  check("airborne slam rebounds instead of dying", air.body.vel.x < -4,
-    `vx ${air.body.vel.x.toFixed(1)} m/s`);
+  // WAS `vel.x < -4` — "the slam must bounce back at over 4 m/s".
+  //
+  // That assertion WAS the flipper ball. It passed because CRASH.restitution
+  // was 0.4, so a 22 m/s slam returned 8.8 m/s — 32 km/h of rebound straight
+  // back off a barrier, which is what a ball does and what a car does not.
+  // The intent behind it was right and worth keeping: a crash must not leave
+  // the car DEAD against the wall. Rebound was just the wrong way to measure
+  // it, because with the whole impulse taken out of the centre of mass there
+  // was nothing else it COULD be measured as.
+  //
+  // The contract now has the shape the intent always had, in three parts: the
+  // car comes away from the wall, the hit spins it, and the coming-away is not
+  // a bounce. See SOLID.spin and CRASH.restitution.
+  check("an airborne slam comes away from the wall rather than sticking",
+    air.body.vel.x < -0.5, `vx ${air.body.vel.x.toFixed(1)} m/s`);
+  check("...and the hit throws the car instead of just reversing it",
+    air.body.angVel.length() > 1.5, `spin ${air.body.angVel.length().toFixed(2)} rad/s`);
+  check("...but it does NOT rebound like a ball",
+    air.body.vel.x > -6, `vx ${air.body.vel.x.toFixed(1)} m/s vs 22 m/s in`);
   {
     const c = makeCar({ solids: wall(6.0) });
     c.body.pos.set(0, 0.55, 0);

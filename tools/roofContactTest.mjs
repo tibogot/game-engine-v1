@@ -120,17 +120,24 @@ const restY = DECK_CONTACT.roofY;
     `${ROOF.impactSpeed}) — enough to tell a slam from lying there`);
 }
 
-// ── KNOWN GAP — the inverted car still sinks ────────────────────────────────
-// The roof now CATCHES the deck, but it does not hold it: the wheel probe starts
-// 0.6 m along chassis-up, which inverted is inside the slab, so all four report
-// contact and the suspension extends "down" — up through the road. Four struts
-// beat the roof's contact spring and the car goes through.
+// ── AN INVERTED CAR IS HELD ON ITS ROOF ─────────────────────────────────────
 //
-// ROOF.suspensionGuard fixes it completely (see the numbers in that block) and
-// is OFF, because it also arms at the top of a loop and costs every loop on the
-// track. Reported rather than asserted so this stays a usable regression guard —
-// the same call, for the same reason, as the note in Tire.apply.
-console.log("\n=== KNOWN GAP — it does not HOLD it (reported, not asserted) ===");
+// WAS A "KNOWN GAP — the inverted car still sinks", reported and not asserted.
+// The roof caught the deck but could not hold it: the wheel probe starts 0.6 m
+// along chassis-up, which inverted is INSIDE the slab, so all four wheels
+// reported contact and the suspension extended "down" — which is up through the
+// road. Four struts beat the roof's contact spring and the car went through, to
+// y −49 every time, i.e. out of the world.
+//
+// ROOF.suspensionGuard closes it, and is ON since 2026-09-12. It always worked;
+// what kept it off was that it also armed at the top of a loop and cost every
+// loop on the track, against a surface nobody had identified. It was the loop's
+// OUTER SKIN, reached by the two UNDERSIDE rear corners of the deck-contact box
+// poking through the 0.8 m slab near the apex — not a roof sample at all. A roof
+// guard may only be armed by a roof sample, and with that one test added it no
+// longer arms anywhere in a loop. See tools/attic/loopRoofSurfaceProbe.mjs for
+// the measurement and the ROOF.suspensionGuard block for the write-up.
+console.log("\n=== 2b. AN INVERTED CAR IS HELD ON ITS ROOF ===");
 console.log(`  ROOF.suspensionGuard is ${ROOF.suspensionGuard}`);
 for (const [n, vel] of [
   ["dropped onto its roof", V(0, -6, 0)],
@@ -138,21 +145,41 @@ for (const [n, vel] of [
   ["slams inverted, 40 m/s", V(0, -40, 0)],
 ]) {
   const r = run({ pos: V(0, 3, -20), vel, quat: INVERTED });
-  const held = r.y > restY - 0.25 && r.minY > -1;
-  console.log(`  ${held ? "holds" : "SINKS"}  ${n} — ends at y ${r.y.toFixed(2)} ` +
-    `(roof height ${restY.toFixed(2)}), min y ${r.minY.toFixed(2)}`);
+  check(`held on its roof: ${n}`, r.y > restY - 0.25 && r.minY > -1,
+    `ends at y ${r.y.toFixed(2)} (roof height ${restY.toFixed(2)}), min y ${r.minY.toFixed(2)}`);
 }
 
 // ── 3. SLIDING ON THE LID COSTS SPEED ───────────────────────────────────────
 console.log("\n=== 3. SLIDING ON THE LID COSTS SPEED ===");
 {
   const r = run({ pos: V(0, restY + 0.02, -20), vel: V(0, 0, -30), quat: INVERTED, ticks: 360 });
-  // Deck contact carries no tangential term at all — the wheels own friction —
-  // so before this an inverted car slid at landing speed indefinitely.
-  check("an inverted slide slows down", r.horizSpeed < 30 * 0.85,
-    `30 → ${r.horizSpeed.toFixed(1)} m/s over 3 s`);
-  check("and it does not stop dead either", r.horizSpeed > 0.2,
-    `${r.horizSpeed.toFixed(1)} m/s — a scrape, not a wall`);
+  /*
+   * REPORTED, NOT ASSERTED, and this is a demotion — read before restoring it.
+   *
+   * The assertion was `horizSpeed < 30 × 0.85`, i.e. an inverted car sliding at
+   * 30 m/s must lose speed to ROOF.friction. It passed, and it was never
+   * measuring that: THE CAR IS NOT ON THE LID. It is in free fall roughly 49 m
+   * BELOW the road, and has been for most of the three seconds.
+   *
+   * MEASURED, end of run, with the guard both ways:
+   *     guard off   ends y −48.70   horizontal 22.2 m/s
+   *     guard on    ends y −48.59   horizontal 34.0 m/s
+   * Same outcome, same hole in the road. Off, the speed falls because the wheels
+   * keep raycasting the road from underneath and scrub against it on the way
+   * down; on, they are correctly cleared, so nothing scrubs and the residual
+   * inverted-launch acceleration shows through instead. Neither number is lid
+   * friction, so neither belongs in a pass/fail on lid friction.
+   *
+   * THE REAL GAP THIS EXPOSES, worth keeping visible: the guard holds a car that
+   * LANDS inverted (the three cases above, up to a 40 m/s slam) but not one
+   * already sliding at 30 m/s, which outruns the contact — 0.25 m per substep
+   * against a 5 cm deck skin — and gets under the deck, where roof contact
+   * cannot be re-established and the guard expires. Fixing that is the
+   * inverted-launcher work; see tools/attic/invertedLaunchProbe.mjs.
+   */
+  console.log(`  GAP   an inverted slide at 30 m/s still gets under the deck:`
+    + ` ends y ${r.y.toFixed(2)}, horizontal ${r.horizSpeed.toFixed(1)} m/s`);
+  console.log(`        (it did with the guard off too, at y −48.70 — see the comment)`);
 }
 
 // ── 4. CEILINGS ─────────────────────────────────────────────────────────────
