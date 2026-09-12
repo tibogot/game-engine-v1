@@ -117,7 +117,8 @@ const check = (name, ok, extra = "") => {
 {
   const city = createModularRoadCity({ params: { extent: 700 } });
   const m = city.mounts;
-  check("the city builds its mounts", !!m && city.stats.mounts && city.stats.mounts.acUnits > 0 && city.stats.mounts.balconies > 0,
+  check("the city builds its mounts", !!m && city.stats.mounts && city.stats.mounts.acUnits > 0
+    && city.stats.mounts.balconies > 0 && city.stats.mounts.fireEscapes > 0,
     JSON.stringify(city.stats.mounts));
   if (m) {
     // Every candidate stands against a wall of a building: inside the
@@ -127,7 +128,7 @@ const check = (name, ok, extra = "") => {
     let off = 0, n = 0, low = 0;
     const pos = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(), mat = new THREE.Matrix4();
     for (const pb of m.perBuilding) {
-      for (const list of [pb.ac, pb.bal]) {
+      for (const list of [pb.ac, pb.bal, pb.esc, pb.escS]) {
         for (const e of list) {
           mat.fromArray(e); mat.decompose(pos, q, s);
           n++;
@@ -136,12 +137,14 @@ const check = (name, ok, extra = "") => {
           // covers half the footprint and half the height.
           if (Math.hypot(dx, dz) > pb.r + 1.5) off++;
           if (pos.y < pb.y - pb.r || pos.y > pb.y + pb.r + 1) off++;
-          if (pos.y < 3.0) low++;   // nothing on the ground floor
+          // Nothing on the ground floor. The fire escape's drop ladder hangs
+          // lowest, and stops at 1.9 m — above a car roof.
+          if (pos.y < 1.8) low++;
         }
       }
     }
     check("every unit and balcony stands within its own building's reach", off === 0, `${off} of ${n} astray`);
-    check("...and none on the ground floor", low === 0, `${low} below 3 m`);
+    check("...and none on the ground floor", low === 0, `${low} below 1.8 m`);
 
     /*
      * THE LOT TEXTURE ROUND-TRIPS. The shader reads the building's district,
@@ -164,8 +167,11 @@ const check = (name, ok, extra = "") => {
       }
       check("every building's texel reads back its district, type and Y-scale", n > 100 && wrong === 0, `${wrong} of ${n} wrong`);
     }
-    // The LOD fill: a view from the middle sees some, never more than capacity.
-    const view = { pos: new THREE.Vector3(0, 30, 0), inView: () => true };
+    // The LOD fill, from beside a building that has a fire escape: the
+    // mid-rises that carry them sit out past downtown, where a view from the
+    // centre is beyond their range. Never more than capacity.
+    const at = m.perBuilding.find((pb) => pb.esc.length) ?? m.perBuilding[0];
+    const view = { pos: new THREE.Vector3(at.x, at.y, at.z), inView: () => true };
     m.applyLod(view);
     const st = city.stats.mounts;
     // Both materials must compile to WGSL with the instanced mesh they ride:
@@ -180,8 +186,9 @@ const check = (name, ok, extra = "") => {
       check(`${mesh.name} generates WGSL`, frag.length > 500 && !/undefined/.test(frag), `${frag.length} chars`);
     }
     check("the LOD tick fills the meshes from what is near",
-      st.acDrawn > 0 && st.balconiesDrawn > 0 && st.acDrawn <= 9000 && st.balconiesDrawn <= 7000,
-      `${st.acDrawn} units, ${st.balconiesDrawn} balconies drawn of ${st.acUnits} / ${st.balconies}`);
+      st.acDrawn > 0 && st.balconiesDrawn > 0 && st.escapesDrawn > 0
+      && st.acDrawn <= 9000 && st.balconiesDrawn <= 7000 && st.escapesDrawn <= 8000,
+      `${st.acDrawn} units, ${st.balconiesDrawn} balconies, ${st.escapesDrawn} escape parts drawn of ${st.acUnits} / ${st.balconies} / ${st.fireEscapes}`);
   }
   city.dispose?.();
 }

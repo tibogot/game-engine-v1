@@ -1,17 +1,18 @@
 // ── THINGS BOLTED TO WINDOWS ─────────────────────────────────────────────────
 //
 // Air-conditioning units in some of the windows, balconies under some of the
-// others. Three's city generator has the first (12% of shaft windows, louvred,
-// streaked with condensate) and it is the single cheapest thing that breaks a
-// tower's grid: a small box hanging off a wall says someone lives there.
+// others, a fire escape zig-zagging up one face of some mid-rises. Three's
+// city generator has the first (12% of shaft windows, louvred, streaked with
+// condensate) and it is the single cheapest thing that breaks a tower's grid:
+// a small box hanging off a wall says someone lives there.
 //
-// Both need to know where the windows ARE, which the shader decides per pixel
+// All of them need to know where the windows ARE, which the shader decides per pixel
 // and the CPU never knew — see modularRoadCityFacadeLayout.js, which is that
 // arithmetic transcribed. Everything here reads it and nothing here guesses.
 //
 // ── COST ─────────────────────────────────────────────────────────────────────
 //
-// Two instanced meshes, two draws. Tens of thousands of candidates across the
+// Four instanced meshes, four draws. Tens of thousands of candidates across the
 // city, but a unit is 40 cm tall and unreadable past a couple of hundred
 // metres, so the LOD tick fills each mesh with what is near and in view —
 // buildings first (two thousand tests), then only the windows of the ones that
@@ -48,6 +49,23 @@ export const MOUNT_DEFAULTS = {
   railHeight: 1.0,
   balconyRange: 320,
   balconyMax: 7000,
+
+  /**
+   * ── FIRE ESCAPES ─────────────────────────────────────────────────────────
+   * One face of some masonry mid-rises: a landing at every floor across two
+   * bays, a stair run between landings alternating direction, a ladder
+   * hanging from the lowest. The single most "city" thing a brick wall can
+   * carry, and a zig-zag of shadow across it in the afternoon.
+   */
+  fireEscapes: true,
+  escapeBuildings: 0.35,
+  /** Mid-rises only: below the hero adverts (which stand off 45 cm — a landing
+   *  would run through one), above the two-storey shops. */
+  escapeMinHeight: 14,
+  escapeMaxHeight: 40,
+  escapeDepth: 1.2,
+  escapeRange: 320,
+  escapeMax: 4000,
 };
 
 /**
@@ -66,7 +84,7 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
   // ── Per-building candidate lists ───────────────────────────────────────────
   /** {x,y,z, ac: Float32Array[], bal: Float32Array[]} per building with any. */
   const perBuilding = [];
-  let acTotal = 0, balTotal = 0;
+  let acTotal = 0, balTotal = 0, escTotal = 0;
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
   const UP = new THREE.Vector3(0, 1, 0);
   /** A stable 0..1 roll from a few small integers — the same PCG the facade uses. */
@@ -87,7 +105,19 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
     const balFace0 = Math.floor(roll(b.cx, b.cz, 12, 0, 0) * 4);
     const balFace1 = (balFace0 + 1 + Math.floor(roll(b.cx, b.cz, 13, 0, 0) * 3)) % 4;
 
-    const ac = [], bal = [];
+    /*
+     * The fire escape: a building-level decision, ONE face, never a balcony
+     * face, and its two bays keep their windows clear of AC units. Decided
+     * before the window loop so the units can defer to it.
+     */
+    const escapeBuilding = M.fireEscapes && isPunched && !isIndustrial
+      && bh >= M.escapeMinHeight && bh <= M.escapeMaxHeight
+      && roll(b.cx, b.cz, 14, 0, 0) < M.escapeBuildings;
+    let escFace = Math.floor(roll(b.cx, b.cz, 15, 0, 0) * 4);
+    if (balconyBuilding) { while (escFace === balFace0 || escFace === balFace1) escFace = (escFace + 1) % 4; }
+    let escBay = -1;   // the first of its two bays, on tier 0 of `escFace`
+
+    const ac = [], bal = [], esc = [], escS = [];
     a.tiers.forEach((t, ti) => {
       const tierBottom = b.y + t.y * scaleY;
       const Hf = t.h * scaleY;
@@ -98,10 +128,64 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
         const yaw = Math.atan2(f.n[0], f.n[1]);       // local +z → the face normal
         _q.setFromAxisAngle(UP, yaw);
         const wins = windowsOf(L, { groundTier: ti === 0 });
+
+        // ── The fire escape, on tier 0 of its face, two bays wide.
+        if (escapeBuilding && ti === 0 && fi === escFace && L.count >= 2 && L.nF >= 4) {
+          escBay = Math.floor(roll(b.cx, b.cz, 16, 0, 0) * (L.count - 1));
+          const uc = (L.oL + L.oR) * 0.5 - L.slotL;
+          const cu = L.uOrigin + (escBay + 0.5) * L.bay + uc;          // between the two windows
+          const width = L.bay + (L.oR - L.oL) + 0.4;
+          const cx = f.origin[0] + f.along[0] * cu, cz = f.origin[1] + f.along[1] * cu;
+          const D = M.escapeDepth;
+          const topF = L.nF - 1;
+          // Landings at every floor from the first to the top.
+          for (let k = 1; k <= topF; k++) {
+            if (L.hasBase && k < L.nBase) continue;
+            _p.set(cx, tierBottom + k * L.fh + 0.05, cz);
+            _s.set(width, 1, 1);
+            esc.push(new Float32Array(_m.compose(_p, _q, _s).elements));
+          }
+          // A stair between each pair of landings, alternating direction, and a
+          // ladder hanging from the lowest one. Built from the LOW end so the
+          // pitch stays under 90° and the treads keep facing up; direction is
+          // a half-turn of yaw, which is why the stair has rails on both sides.
+          const run = Math.max(width - 1.4, 1.2);
+          const rise = L.fh;
+          const len = Math.hypot(run, rise), pitch = Math.atan2(rise, run);
+          const qs = new THREE.Quaternion(), qz = new THREE.Quaternion();
+          const first = L.hasBase ? Math.max(1, L.nBase) : 1;
+          for (let k = first; k < topF; k++) {
+            const dir = (k % 2 === 0) ? 1 : -1;
+            const x0 = -dir * run * 0.5, y0 = k * rise + 0.05;
+            const mx = cx + f.along[0] * (x0 + dir * run * 0.5), mz = cz + f.along[1] * (x0 + dir * run * 0.5);
+            qs.setFromAxisAngle(UP, yaw + (dir < 0 ? Math.PI : 0));
+            qz.setFromAxisAngle(new THREE.Vector3(0, 0, 1), pitch);
+            qs.multiply(qz);
+            _p.set(mx + f.n[0] * D * 0.55, tierBottom + y0 + rise * 0.5, mz + f.n[1] * D * 0.55);
+            _s.set(len, 1, 1);
+            escS.push(new Float32Array(_m.compose(_p, _q.copy(qs), _s).elements));
+          }
+          // The drop ladder: a short vertical run below the first landing, at
+          // its outer edge. It stops two metres up — a car roof is 1.3.
+          {
+            const ladder = Math.max(0.5, Math.min(2.0, first * rise - 1.9));
+            qs.setFromAxisAngle(UP, yaw);
+            qz.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
+            qs.multiply(qz);
+            _p.set(cx + f.n[0] * (D - 0.3), tierBottom + first * rise - ladder * 0.5, cz + f.n[1] * (D - 0.3));
+            _s.set(ladder, 1, 0.6);
+            escS.push(new Float32Array(_m.compose(_p, _q.copy(qs), _s).elements));
+          }
+          _q.setFromAxisAngle(UP, yaw);   // restore for the windows below
+        }
+
         for (const w of wins) {
           const wx = f.origin[0] + f.along[0] * w.u, wz = f.origin[1] + f.along[1] * w.u;
+          // A window the fire escape lands on keeps its sill clear.
+          const underEscape = escapeBuilding && ti === 0 && fi === escFace && escBay >= 0
+            && (w.bi === escBay || w.bi === escBay + 1);
           // ── The unit: on the sill, back against the glass, nose out past the wall.
-          if (M.acUnits && isPunched && roll(b.cx, b.cz, 20 + fi, ti * 97 + w.fi, w.bi) < M.acChance) {
+          if (M.acUnits && isPunched && !underEscape && roll(b.cx, b.cz, 20 + fi, ti * 97 + w.fi, w.bi) < M.acChance) {
             const inset = (facadeParams.pierDepth + facadeParams.reveal) - M.acD * 0.5;
             _p.set(wx - f.n[0] * inset, tierBottom + w.sill + M.acH * 0.5 + 0.03, wz - f.n[1] * inset);
             _s.set(1, 1, 1);
@@ -118,9 +202,9 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
         }
       });
     });
-    if (ac.length || bal.length) {
-      perBuilding.push({ x: b.x, y: b.y + bh * 0.5, z: b.z, r: Math.hypot(a.footprint, bh) * 0.5, ac, bal });
-      acTotal += ac.length; balTotal += bal.length;
+    if (ac.length || bal.length || esc.length) {
+      perBuilding.push({ x: b.x, y: b.y + bh * 0.5, z: b.z, r: Math.hypot(a.footprint, bh) * 0.5, ac, bal, esc, escS });
+      acTotal += ac.length; balTotal += bal.length; escTotal += esc.length + escS.length;
     }
   }
 
@@ -172,7 +256,52 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
   balMesh.frustumCulled = false;
   group.add(balMesh);
 
-  const stats = { acUnits: acTotal, balconies: balTotal, buildings: perBuilding.length, acDrawn: 0, balconiesDrawn: 0 };
+  // ── The fire escape ────────────────────────────────────────────────────────
+  // Landings: a grating slab with a rail on three sides, unit width, scaled to
+  // two bays. Stairs: a tread slab with a rail on BOTH sides (see the note on
+  // direction), unit length, scaled to the run. One dark-metal material with
+  // a grating on horizontal faces and tread stripes along the stair.
+  const ED = M.escapeDepth, ES = 0.06;
+  const landSlab = new THREE.BoxGeometry(1, ES, ED); landSlab.translate(0, -ES / 2, ED / 2);
+  const landF = new THREE.BoxGeometry(1, RH, RT); landF.translate(0, RH / 2, ED - RT / 2);
+  const landL = new THREE.BoxGeometry(RT, RH, ED - RT); landL.translate(-0.5 + RT / 2, RH / 2, (ED - RT) / 2);
+  const landR = new THREE.BoxGeometry(RT, RH, ED - RT); landR.translate(0.5 - RT / 2, RH / 2, (ED - RT) / 2);
+  const landGeo = mergeGeometries([tint(landSlab, 1), tint(landF, 0), tint(landL, 0), tint(landR, 0)], false);
+  for (const g of [landSlab, landF, landL, landR]) g.dispose();
+  const stairSlab = new THREE.BoxGeometry(1, 0.08, 0.9);
+  const stairA = new THREE.BoxGeometry(1, 0.9, RT); stairA.translate(0, 0.45, 0.45 - RT / 2);
+  const stairB = new THREE.BoxGeometry(1, 0.9, RT); stairB.translate(0, 0.45, -0.45 + RT / 2);
+  const stairGeo = mergeGeometries([tint(stairSlab, 1), tint(stairA, 0), tint(stairB, 0)], false);
+  for (const g of [stairSlab, stairA, stairB]) g.dispose();
+  const escMat = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.5 });
+  escMat.name = "CityFireEscapes";
+  escMat.colorNode = Fn(() => {
+    const metal = vec3(0.13, 0.13, 0.14);
+    // Grating on the walking surfaces: a fine mesh the eye reads as open steel.
+    const flat = step(0.5, normalLocal.y);
+    const mesh = step(0.5, fract(uv().x.mul(18.0))).add(step(0.5, fract(uv().y.mul(18.0)))).clamp(0.0, 1.0);
+    const surf = mix(metal, metal.mul(0.55), flat.mul(mesh).mul(vertexColor().r));
+    return surf;
+  })();
+  const escLandMesh = new THREE.InstancedMesh(landGeo, escMat, Math.max(1, Math.min(M.escapeMax, escTotal)));
+  escLandMesh.name = "CityFireEscapeLandings";
+  escLandMesh.count = 0;
+  escLandMesh.castShadow = true;
+  escLandMesh.receiveShadow = true;
+  escLandMesh.frustumCulled = false;
+  group.add(escLandMesh);
+  const escStairMesh = new THREE.InstancedMesh(stairGeo, escMat, Math.max(1, Math.min(M.escapeMax, escTotal)));
+  escStairMesh.name = "CityFireEscapeStairs";
+  escStairMesh.count = 0;
+  escStairMesh.castShadow = true;
+  escStairMesh.receiveShadow = true;
+  escStairMesh.frustumCulled = false;
+  group.add(escStairMesh);
+
+  const stats = {
+    acUnits: acTotal, balconies: balTotal, fireEscapes: escTotal, buildings: perBuilding.length,
+    acDrawn: 0, balconiesDrawn: 0, escapesDrawn: 0,
+  };
 
   /**
    * Fill both meshes with what is near and in view. Buildings are tested
@@ -182,8 +311,8 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
   const near = [];
   function applyLod(view) {
     const cam = view.pos;
-    const rAc = M.acRange, rBal = M.balconyRange;
-    const rMax = Math.max(rAc, rBal);
+    const rAc = M.acRange, rBal = M.balconyRange, rEsc = M.escapeRange;
+    const rMax = Math.max(rAc, rBal, rEsc);
     near.length = 0;
     for (const pb of perBuilding) {
       const dx = pb.x - cam.x, dy = pb.y - cam.y, dz = pb.z - cam.z;
@@ -194,9 +323,11 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
       near.push(pb);
     }
     near.sort((a, b) => a.d2 - b.d2);
-    let na = 0, nb = 0;
+    let na = 0, nb = 0, ne = 0, ns = 0;
     const acArr = acMesh.instanceMatrix.array, balArr = balMesh.instanceMatrix.array;
+    const escArr = escLandMesh.instanceMatrix.array, escSArr = escStairMesh.instanceMatrix.array;
     const capA = acMesh.instanceMatrix.count, capB = balMesh.instanceMatrix.count;
+    const capE = escLandMesh.instanceMatrix.count, capS = escStairMesh.instanceMatrix.count;
     for (const pb of near) {
       if (pb.d2 < (rAc + pb.r) * (rAc + pb.r)) {
         for (const e of pb.ac) {
@@ -212,10 +343,24 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
           balArr.set(e, nb * 16); nb++;
         }
       }
+      if (pb.d2 < (rEsc + pb.r) * (rEsc + pb.r)) {
+        for (const e of pb.esc) {
+          if (ne >= capE) break;
+          if (!view.inView(e[12], e[13], e[14], 3.0)) continue;
+          escArr.set(e, ne * 16); ne++;
+        }
+        for (const e of pb.escS) {
+          if (ns >= capS) break;
+          if (!view.inView(e[12], e[13], e[14], 3.0)) continue;
+          escSArr.set(e, ns * 16); ns++;
+        }
+      }
     }
     acMesh.count = na; acMesh.instanceMatrix.needsUpdate = true;
     balMesh.count = nb; balMesh.instanceMatrix.needsUpdate = true;
-    stats.acDrawn = na; stats.balconiesDrawn = nb;
+    escLandMesh.count = ne; escLandMesh.instanceMatrix.needsUpdate = true;
+    escStairMesh.count = ns; escStairMesh.instanceMatrix.needsUpdate = true;
+    stats.acDrawn = na; stats.balconiesDrawn = nb; stats.escapesDrawn = ne + ns;
   }
 
   return {
@@ -225,6 +370,9 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
     dispose() {
       group.remove(acMesh); acGeo.dispose(); acMat.dispose(); acMesh.dispose();
       group.remove(balMesh); balGeo.dispose(); balMat.dispose(); balMesh.dispose();
+      group.remove(escLandMesh); landGeo.dispose(); escLandMesh.dispose();
+      group.remove(escStairMesh); stairGeo.dispose(); escStairMesh.dispose();
+      escMat.dispose();
     },
   };
 }
