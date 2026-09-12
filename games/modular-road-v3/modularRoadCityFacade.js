@@ -1037,7 +1037,7 @@ export function createCityFacadeMaterial({
       V, ru, rv, rd, c0, onFront, slotD, t1, t2, rev,
       isFlank, isCourse, isReveal, isJamb, isVert, isGlass, inOpen, inFrame, inBase1,
       hitL, hitCU, jL, sill, bi: c0.bi, fi1, fv1, buS, bu2, va1, va2, wB, wT,
-      N, front, depth, uHit, vHit, tHit,
+      N, front, depth, uHit, vHit, tHit, bayL, slotW,
     };
   }
 
@@ -1117,10 +1117,20 @@ export function createCityFacadeMaterial({
       .mul(select(F.isIndustrial, vec3(0.86, 0.87, 0.88), vec3(1.0)));
     const stoneBase = selT(orT(F.isCurtain, F.isRibbon), u.mullionColor, base).toVar();
     const jointAmt = selT(F.isPunched, float(1.0), float(0.0)).toVar();
-    const tone = vnoise2(vec2(F.acrossW.mul(0.03), F.up.mul(0.03))).mul(0.18).toVar();
+    /*
+     * A METAL PANEL DOES NOT WEATHER LIKE LIMESTONE. The soot streaks and the
+     * tonal drift are masonry's: porous stone drinks the rain and streaks
+     * downward. They were applied to everything this material paints,
+     * including the anodised spandrels of a curtain wall — so every glass
+     * tower carried stone dirt on its panels, and it read as a texture that
+     * did not belong to the building. Metal keeps a trace (it does stain
+     * along a sill), stone keeps the lot.
+     */
+    const weather = selT(F.isPunched, float(1.0), float(0.28)).toVar();
+    const tone = vnoise2(vec2(F.acrossW.mul(0.03), F.up.mul(0.03))).mul(0.18).mul(weather).toVar();
     const streak = vnoise2(vec2(F.acrossW.mul(1.5), F.up.mul(0.04))).mul(2.0);
     const dirt = smoothstep(float(-0.1), float(0.45), streak)
-      .mul(smoothstep(u.sootHeight, float(0.0), F.up)).mul(u.soot).toVar();
+      .mul(smoothstep(u.sootHeight, float(0.0), F.up)).mul(u.soot).mul(weather).toVar();
 
     // Are individual BRICKS resolvable at all? A brick is 0.6 × 0.3 m, so past
     // about half a brick per pixel the per-brick tint and the warm/cool shift
@@ -1168,6 +1178,12 @@ export function createCityFacadeMaterial({
     const frameCol = stoneBase.mul(0.55).mul(float(1.0).add(tone)).toVar();   // dressed stone
     const canyon = mix(float(1.0).sub(u.canyonAO), float(1.0),
       smoothstep(float(0.0), u.canyonHeight, F.up)).toVar();
+    /*
+     * THE SUN, ONCE, FOR BOTH HALVES. It used to be built inside the relief
+     * branch only, which is the whole reason the flat paint had no shadow at
+     * all — see `shadeMean` below. It is five dot products.
+     */
+    const S = far ? null : buildSun(F);
 
     // ── ROOMS AND LIT WINDOWS ────────────────────────────────────────────────
     // Rooms span 2–3 bays, chosen per floor, so neighbouring panes share one
@@ -1277,6 +1293,28 @@ export function createCityFacadeMaterial({
     const coverage = F.oR.sub(F.oL).mul(F.oT.sub(F.oB)).div(F.bay.mul(F.fh)).clamp(0.0, 1.0).mul(notFlat);
     const win0 = mix(coverage, winRaw, F.sharp).toVar();
     const st0 = stoneAt(F.acrossW, F.up, c0.pier.mul(0.12).add(c0.course.mul(0.14)));
+    /*
+     * ── THE FLAT PAINT IS THE RELIEF'S AVERAGE, INCLUDING ITS SHADOW ──────────
+     *
+     * `reliefAmt` fades the relief out with distance and, because it measures
+     * cells per PIXEL along the face, with viewing angle too: at 100 m a wall
+     * is fully traced only within ~45° of head-on and flat by 70°, and
+     * driving past — or orbiting — sweeps every facade through that. A fade is
+     * fine if the two ends agree. They did not: the traced side carries the
+     * sun's cast shadow on the lee side of every pier, and the flat side
+     * carried none, so the fade was a brightness POP proportional to how much
+     * of each slot the sun was shadowing. Reported as a building changing
+     * texture as the camera moved.
+     *
+     * The traced shadow is analytic, so its mean is too: a pier of depth D
+     * shadows D·|s_u|/s_d of the slot beside it, so that over the slot's
+     * width is the fraction of slot floor in shadow. Applied to the non-pier
+     * pixels of the flat paint, the two ends now meet, and a far tower gets
+     * the self-shading a sunlit masonry tower actually has.
+     */
+    const shadeMean = far ? float(0.0) : F.pierD.mul(abs(S.su)).div(S.ldc)
+      .div(max(F.slotR.sub(F.slotL), 0.1)).clamp(0.0, 1.0)
+      .mul(float(1.0).sub(c0.pier)).mul(notFlat);
 
     // ── PER-WINDOW STATE, near only ─────────────────────────────────────────
     // `roomOf` + `litOf` are nine sin-hashes, and they exist to answer "is
@@ -1306,8 +1344,11 @@ export function createCityFacadeMaterial({
     oCol.assign(mix(wallFar, g0.col.mul(baseDark), win0));
     oRough.assign(mix(st0.rough, u.glassRough, win0));
     oEmis.assign(g0.glow.mul(win0).mul(selT(c0.inBase, float(0.0), float(1.0))));
+    // 0.87, between the traced slot floor (0.78 at full depth) and its lip —
+    // the mean a slot converges to, so the AO does not step at the LOD ring.
     oAO.assign(mix(float(1.0), float(0.84), win0)
-      .mul(mix(float(1.0), float(0.93), float(1.0).sub(c0.pier).mul(F.sharp))).mul(canyon));
+      .mul(mix(float(1.0), float(0.87), float(1.0).sub(c0.pier).mul(F.sharp))).mul(canyon));
+    if (!far) oShadow.assign(float(1.0).sub(shadeMean.mul(S.on)));
     };
     // On the far material the flat paint IS the shader. On the near one it is
     // the other half of a blend, so it is skipped where the relief covers it.
@@ -1322,7 +1363,6 @@ export function createCityFacadeMaterial({
       // unconditionally it cost 5 ms of a 7 ms frame, almost all of it on
       // distant towers that can never resolve a pier.
       const T = traceFacade(F);
-      const S = buildSun(F);
 
       const nCol = vec3(0.0).toVar();
       const nRough = u.wallRough.toVar();
@@ -1330,11 +1370,33 @@ export function createCityFacadeMaterial({
       const nShade = float(0.0).toVar();    // 1 = fully in the relief's own shadow
       const nAO = float(1.0).toVar();
 
-      // Stone everywhere the ray did not reach glass. A flank's coursing runs
-      // along its DEPTH, a course's top and underside run along the face.
-      const stU = select(T.isFlank, T.depth, F.acrossW.add(T.uHit).sub(F.u0));
+      /*
+       * ── THE BRICKWORK TURNS THE CORNER ─────────────────────────────────────
+       *
+       * A flank's across-coordinate used to be the ray's DEPTH into the wall:
+       * 0..0.4 m, less than one brick. So every row on a pier's side was the
+       * same single brick, hashed per row — HORIZONTAL STRIPES down the side
+       * of every pier in the city — and the running bond's half-stagger put
+       * odd rows on a different brick past 0.3 m of depth, which moved with
+       * the view. Seen from orbit as a pier whose texture changed as the
+       * camera turned; it was the coursing being re-dealt every frame.
+       *
+       * Real brickwork does not restart at a corner, it goes round it. So the
+       * flank continues the front's coursing: the world across-coordinate of
+       * the pier's edge, then onward along the flank by the depth — the same
+       * unrolled walk a bricklayer takes. Left flank walks +u into the wall,
+       * right flank walks −u, so both stay continuous with the pier they hang
+       * off. The vertical coordinate was already right.
+       */
+      const edgeU = select(T.hitL, T.bayL, T.bayL.add(T.slotW));
+      const stU = select(T.isFlank,
+        F.acrossW.add(edgeU.sub(F.u0)).add(select(T.hitL, T.depth, T.depth.negate())),
+        F.acrossW.add(T.uHit).sub(F.u0));
       const stV = select(T.isFlank, F.up.add(T.vHit.sub(F.v0)), F.up.add(T.depth.mul(2.0)));
-      const st = stoneAt(stU, select(T.onFront, F.up, stV), select(T.onFront, T.c0.pier.mul(0.12), float(0.1)));
+      // The course front takes the same lift the far paint gives it — the two
+      // used to disagree by 0.14, which was a brightness step at the LOD ring.
+      const st = stoneAt(stU, select(T.onFront, F.up, stV),
+        select(T.onFront, T.c0.pier.mul(0.12).add(T.c0.course.mul(0.14)), float(0.1)));
       nCol.assign(select(T.inFrame.and(T.onFront.not()), frameCol, st.col));
       nRough.assign(st.rough);
       nAO.assign(mix(float(1.0), float(0.78), T.depth.div(max(T.slotD.add(T.rev), 0.05)).clamp(0.0, 1.0)));
@@ -1463,7 +1525,8 @@ export function createCityFacadeMaterial({
       oRough.assign(mix(oRough, nRough, F.reliefAmt));
       oEmis.assign(mix(oEmis, nGlow, F.reliefAmt));
       oAO.assign(mix(oAO, nAO.mul(canyon), F.reliefAmt));
-      oShadow.assign(float(1.0).sub(nShade.mul(S.on).mul(F.reliefAmt)));
+      // Blended over the flat paint's MEAN shadow, not over 1 — see shadeMean.
+      oShadow.assign(mix(oShadow, float(1.0).sub(nShade.mul(S.on)), F.reliefAmt));
     });
 
     // ── Roofs, and the crown lights ──────────────────────────────────────────
