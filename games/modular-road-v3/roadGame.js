@@ -211,6 +211,7 @@ import { WORLD_SIZE } from "../../v3/terrain/heightmapTexture.js";
 import auditTrackUrl from "./audittest.json?url";
 import flipRampTrackUrl from "./flip-ramp-showcase.json?url";
 import bowlTrackUrl from "./bowl-showcase.json?url";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 /** Cap on physics ticks per frame — a long stall must not queue a huge backlog. */
 const MAX_SIM_TICKS = 8;
@@ -3931,7 +3932,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       let im = postBatches.get(key);
       if (!im || im.geometry !== g.template || (im.instanceMatrix?.count ?? 0) < n) {
         if (im) { postGroup.remove(im); im.dispose(); }
-        im = new THREE.InstancedMesh(g.template, railMaterial, n + POST_SLACK);
+        im = shareInstancePipeline(new THREE.InstancedMesh(g.template, railMaterial, n + POST_SLACK));
         // NO SHADOWS, and this is the other half of the 359k. A caster is drawn
         // once per cascade as well as once for the view, so with three cascades
         // the posts were paying 4× — and what they buy is the shadow of a 0.15 m
@@ -4090,7 +4091,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // costs nothing, and the flipped normals are the error
     // buildMirroredRailGeometry already documents and accepts.
     for (const [, grp] of postGroups) {
-      const im = new THREE.InstancedMesh(grp.template, railMaterial, grp.mats.length);
+      const im = shareInstancePipeline(new THREE.InstancedMesh(grp.template, railMaterial, grp.mats.length));
       for (let i = 0; i < grp.mats.length; i++) im.setMatrixAt(i, grp.mats[i]);
       im.instanceMatrix.needsUpdate = true;
       im.castShadow = false;
@@ -4341,7 +4342,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
     const world = new THREE.Matrix4();
     for (const part of parts) {
-      const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
+      const im = shareInstancePipeline(new THREE.InstancedMesh(part.geometry, part.material, list.length));
       for (let k = 0; k < list.length; k++) {
         list[k].root.updateMatrixWorld(true);
         world.copy(list[k].root.matrixWorld).multiply(_mirrorFlipY).multiply(part.local);
@@ -4381,7 +4382,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         // Copied rather than skipped: dropping it would silently lose geometry
         // from the reflection. Instance matrices are relative to the mesh, so
         // they carry over unchanged and only the mesh transform is mirrored.
-        mesh = new THREE.InstancedMesh(o.geometry, o.material, o.count);
+        mesh = shareInstancePipeline(new THREE.InstancedMesh(o.geometry, o.material, o.count));
         mesh.instanceMatrix.array.set(o.instanceMatrix.array);
         mesh.instanceMatrix.needsUpdate = true;
         if (o.instanceColor) {

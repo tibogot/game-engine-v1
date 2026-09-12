@@ -30,6 +30,7 @@ import {
   uniform, uv, vec3, float, abs, min, max, smoothstep, step, mix, sin, floor, fract,
 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 export const PARK_DEFAULTS = {
   /** Off and the squares stay paved. */
@@ -211,7 +212,7 @@ export function buildParkGround(parks, P, blockW) {
   mat.colorNode = mix(grass, uPath, path);
   mat.roughnessNode = mix(float(0.96), float(0.88), path);
 
-  const mesh = new THREE.InstancedMesh(geo, mat, parks.length);
+  const mesh = shareInstancePipeline(new THREE.InstancedMesh(geo, mat, parks.length));
   mesh.name = "CityPark";
   mesh.receiveShadow = true;
   mesh.castShadow = false;

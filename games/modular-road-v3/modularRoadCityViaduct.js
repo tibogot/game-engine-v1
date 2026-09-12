@@ -63,6 +63,7 @@ import {
 import { buildRailGeometry, buildRailCollision, railParams } from "./modularRoadRail.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { createRoadMarkings, MARK } from "./modularRoadCityMarkings.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 export const VIADUCT_DEFAULTS = {
   /** Off and nothing is built. */
@@ -1329,9 +1330,9 @@ export function createCityViaduct({
     const [cw, cd] = layout.axis === "x" ? [V.capDepth, V.capWidth] : [V.capWidth, V.capDepth];
     const capGeo = mk(cw, V.capHeight, cd, V.capHeight * 0.5, 0.86);
 
-    shafts = new THREE.InstancedMesh(shaftGeo, pierMat, layout.piers.length);
+    shafts = shareInstancePipeline(new THREE.InstancedMesh(shaftGeo, pierMat, layout.piers.length));
     shafts.name = "CityViaductPiers";
-    caps = new THREE.InstancedMesh(capGeo, pierMat, layout.piers.length);
+    caps = shareInstancePipeline(new THREE.InstancedMesh(capGeo, pierMat, layout.piers.length));
     caps.name = "CityViaductPierCaps";
     const m = new THREE.Matrix4();
     layout.piers.forEach((p, i) => {
@@ -1384,7 +1385,7 @@ export function createCityViaduct({
     for (const g of parts) g.dispose();
     const at = layout.columns;
     if (at.length) {
-      columns = new THREE.InstancedMesh(geo, pierMat, at.length);
+      columns = shareInstancePipeline(new THREE.InstancedMesh(geo, pierMat, at.length));
       columns.name = "CityViaductColumns";
       const m = new THREE.Matrix4(), qt = new THREE.Quaternion();
       const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
@@ -1422,7 +1423,7 @@ export function createCityViaduct({
     const geo = tint(g0, 0, 0, 1);
     const at = layout.joints;
     if (at.length) {
-      joints = new THREE.InstancedMesh(geo, pierMat, at.length);
+      joints = shareInstancePipeline(new THREE.InstancedMesh(geo, pierMat, at.length));
       joints.name = "CityViaductJoints";
       const m = new THREE.Matrix4(), qt = new THREE.Quaternion();
       const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);

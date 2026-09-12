@@ -2,6 +2,7 @@ import * as THREE from "three";
 
 const _viewInvShared = new THREE.Matrix4();
 import { WORLD_SIZE } from "../terrain/heightmapTexture.js";
+import { shareInstancePipeline } from "../render/instancePipeline.js";
 
 const _tmp       = new THREE.Matrix4();
 const _tmpDelta  = new THREE.Matrix4();
@@ -98,7 +99,7 @@ export class PropInstancer {
 
   _createLodMeshes(entries) {
     return entries.map(({ geometry, material, localMatrix }) => {
-      const im = new THREE.InstancedMesh(geometry, material, this.MAX);
+      const im = shareInstancePipeline(new THREE.InstancedMesh(geometry, material, this.MAX));
       im.count         = 0;
       im.castShadow    = this._castShadow;
       im.receiveShadow = true;
@@ -125,7 +126,7 @@ export class PropInstancer {
     type.mergedBox.getCenter(boxCenter);
 
     const hitboxGeo = new THREE.BoxGeometry(boxSize.x, boxSize.y, boxSize.z);
-    const hitboxIM  = new THREE.InstancedMesh(hitboxGeo, _hitboxMat, this.MAX);
+    const hitboxIM  = shareInstancePipeline(new THREE.InstancedMesh(hitboxGeo, _hitboxMat, this.MAX));
     hitboxIM.count         = 0;
     hitboxIM.frustumCulled = false;
     this.scene.add(hitboxIM);

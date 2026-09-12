@@ -37,6 +37,7 @@ import * as THREE from "three";
 import {
   Fn, attribute, texture, uv, vec2, floor, float, uniform, mix, positionWorld,
 } from "three/tsl";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 export const MARKING_DEFAULTS = {
   /** Atlas tile edge, pixels. Paint has no fine detail; legibility is all. */
@@ -283,7 +284,7 @@ export function createRoadMarkings({
   })();
   mat.opacityNode = tex.a;
 
-  const mesh = new THREE.InstancedMesh(geo, mat, marks.length);
+  const mesh = shareInstancePipeline(new THREE.InstancedMesh(geo, mat, marks.length));
   mesh.name = name;
   mesh.castShadow = false;
   mesh.receiveShadow = true;

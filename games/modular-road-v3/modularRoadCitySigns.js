@@ -70,6 +70,7 @@ import {
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { makeLedMatrixMaterial, applyLedMatrixParams } from "../../v2/objects/shared/ledMatrix.js";
 import { buildAdTotemMesh, AD_TOTEM } from "./modularRoadAdBillboard.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 export const SIGN_DEFAULTS = {
   /* ── shopfront neon and the kerb ribbon ─────────────────────────────────── */
@@ -1529,7 +1530,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     if (!list.length) return null;
     const geo = quad.clone();
     const data = new Float32Array(list.length * size);
-    const im = new THREE.InstancedMesh(geo, material, list.length);
+    const im = shareInstancePipeline(new THREE.InstancedMesh(geo, material, list.length));
     im.name = name;
     im.frustumCulled = false;
     list.forEach((e, i) => {
@@ -1606,7 +1607,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
       // The prototype's own poster is a single placeholder plane; the city's
       // posters come off the shared portrait atlas instead.
       if (child.userData?.adPoster) { child.geometry.dispose(); child.material?.dispose?.(); continue; }
-      const im = new THREE.InstancedMesh(child.geometry, child.material, totems.length);
+      const im = shareInstancePipeline(new THREE.InstancedMesh(child.geometry, child.material, totems.length));
       im.name = `CityTotem_${child.name.replace(/^AdTotem/, "")}`;
       im.frustumCulled = false;
       im.castShadow = true;
@@ -1654,7 +1655,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
       color: new THREE.Color(P.heroBoxColor), roughness: 0.72, metalness: 0.0,
     });
     boxMat.name = "CityHeroBox";
-    heroBoxMesh = new THREE.InstancedMesh(boxGeo, boxMat, heroes.length);
+    heroBoxMesh = shareInstancePipeline(new THREE.InstancedMesh(boxGeo, boxMat, heroes.length));
     heroBoxMesh.name = "CityHeroBoxes";
     heroBoxMesh.frustumCulled = false;
     heroBoxMesh.castShadow = true;
@@ -1716,7 +1717,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
 
   let bandMesh = null, textMesh = null, ribbonMesh = null;
   if (ribbons.length) {
-    ribbonMesh = new THREE.InstancedMesh(quad, ribbonMat, ribbons.length);
+    ribbonMesh = shareInstancePipeline(new THREE.InstancedMesh(quad, ribbonMat, ribbons.length));
     ribbonMesh.name = "CityKerbRibbon";
     ribbonMesh.frustumCulled = false;
     ribbons.forEach((m, i) => ribbonMesh.setMatrixAt(i, m));
@@ -1724,7 +1725,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     group.add(ribbonMesh);
   }
   if (bands.length) {
-    bandMesh = new THREE.InstancedMesh(quad, bandMat, bands.length);
+    bandMesh = shareInstancePipeline(new THREE.InstancedMesh(quad, bandMat, bands.length));
     bandMesh.name = "CityBands";
     bandMesh.frustumCulled = false;
     bands.forEach((m, i) => bandMesh.setMatrixAt(i, m));
@@ -1732,7 +1733,7 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
     group.add(bandMesh);
   }
   if (texts.length) {
-    textMesh = new THREE.InstancedMesh(quad, textMat, texts.length);
+    textMesh = shareInstancePipeline(new THREE.InstancedMesh(quad, textMat, texts.length));
     textMesh.name = "CityTexts";
     textMesh.frustumCulled = false;
     texts.forEach((m, i) => textMesh.setMatrixAt(i, m));

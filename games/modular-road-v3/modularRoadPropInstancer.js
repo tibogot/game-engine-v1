@@ -35,6 +35,7 @@ import { enableMeshShadows } from "./modularRoadParkour.js";
 import { decalMaterial, decalGeometry } from "./modularRoadDecals.js";
 import { isLedDisplayUnique } from "./modularRoadLedDisplay.js";
 import { isAdvertAuthored } from "./modularRoadAdBillboard.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 /**
  * Does this instance draw its unique face as a LIVE mesh rather than instanced?
@@ -433,7 +434,7 @@ export class PropInstancer {
     if (batch) for (const m of batch.meshes) this.group.remove(m);
     const capacity = insts.length + SLACK;
     const meshes = parts.map((p) => {
-      const im = new THREE.InstancedMesh(p.geometry, p.material, capacity);
+      const im = shareInstancePipeline(new THREE.InstancedMesh(p.geometry, p.material, capacity));
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       im.userData.tintable = p.tintable;
       im.userData.propId = typeId;
@@ -548,7 +549,7 @@ export class PropInstancer {
         this._decalGeo.set(key, decalGeometry(decal.size?.[0] ?? 1, decal.size?.[1] ?? 1));
       }
       const capacity = need + SLACK * faces.length;
-      const im = new THREE.InstancedMesh(this._decalGeo.get(key), material, capacity);
+      const im = shareInstancePipeline(new THREE.InstancedMesh(this._decalGeo.get(key), material, capacity));
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       im.castShadow = false;   // a flat sticker casting a shadow reads as a bug
       im.receiveShadow = true; // but it must darken with the wall it is on

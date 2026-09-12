@@ -25,6 +25,7 @@ import { Fn, vec3, mix, uv, step, fract, float, normalLocal, vertexColor } from 
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { BUILDING_TYPE, DISTRICT } from "./modularRoadCityFacade.js";
 import { lotDice, faceLayout, windowsOf, tierFaces, pcgHash } from "./modularRoadCityFacadeLayout.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 export const MOUNT_DEFAULTS = {
   acUnits: true,
@@ -220,7 +221,7 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
     const front = step(0.5, normalLocal.z);
     return mix(body, grille, front);
   })();
-  const acMesh = new THREE.InstancedMesh(acGeo, acMat, Math.max(1, Math.min(M.acMax, acTotal)));
+  const acMesh = shareInstancePipeline(new THREE.InstancedMesh(acGeo, acMat, Math.max(1, Math.min(M.acMax, acTotal))));
   acMesh.name = "CityAcUnits";
   acMesh.count = 0;
   acMesh.castShadow = true;
@@ -248,7 +249,7 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
   const balMat = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.0 });
   balMat.name = "CityBalconies";
   balMat.colorNode = Fn(() => mix(vec3(0.16, 0.17, 0.18), vec3(0.62, 0.60, 0.56), vertexColor().r))();
-  const balMesh = new THREE.InstancedMesh(balGeo, balMat, Math.max(1, Math.min(M.balconyMax, balTotal)));
+  const balMesh = shareInstancePipeline(new THREE.InstancedMesh(balGeo, balMat, Math.max(1, Math.min(M.balconyMax, balTotal))));
   balMesh.name = "CityBalconies";
   balMesh.count = 0;
   balMesh.castShadow = true;
@@ -283,14 +284,14 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
     const surf = mix(metal, metal.mul(0.55), flat.mul(mesh).mul(vertexColor().r));
     return surf;
   })();
-  const escLandMesh = new THREE.InstancedMesh(landGeo, escMat, Math.max(1, Math.min(M.escapeMax, escTotal)));
+  const escLandMesh = shareInstancePipeline(new THREE.InstancedMesh(landGeo, escMat, Math.max(1, Math.min(M.escapeMax, escTotal))));
   escLandMesh.name = "CityFireEscapeLandings";
   escLandMesh.count = 0;
   escLandMesh.castShadow = true;
   escLandMesh.receiveShadow = true;
   escLandMesh.frustumCulled = false;
   group.add(escLandMesh);
-  const escStairMesh = new THREE.InstancedMesh(stairGeo, escMat, Math.max(1, Math.min(M.escapeMax, escTotal)));
+  const escStairMesh = shareInstancePipeline(new THREE.InstancedMesh(stairGeo, escMat, Math.max(1, Math.min(M.escapeMax, escTotal))));
   escStairMesh.name = "CityFireEscapeStairs";
   escStairMesh.count = 0;
   escStairMesh.castShadow = true;
@@ -298,6 +299,13 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
   escStairMesh.frustumCulled = false;
   group.add(escStairMesh);
 
+  /** What each mesh was sized for — see the note in `applyLod`. */
+  const capacity = {
+    ac: Math.max(1, Math.min(M.acMax, acTotal)),
+    bal: Math.max(1, Math.min(M.balconyMax, balTotal)),
+    esc: Math.max(1, Math.min(M.escapeMax, escTotal)),
+    escS: Math.max(1, Math.min(M.escapeMax, escTotal)),
+  };
   const stats = {
     acUnits: acTotal, balconies: balTotal, fireEscapes: escTotal, buildings: perBuilding.length,
     acDrawn: 0, balconiesDrawn: 0, escapesDrawn: 0,
@@ -326,8 +334,11 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
     let na = 0, nb = 0, ne = 0, ns = 0;
     const acArr = acMesh.instanceMatrix.array, balArr = balMesh.instanceMatrix.array;
     const escArr = escLandMesh.instanceMatrix.array, escSArr = escStairMesh.instanceMatrix.array;
-    const capA = acMesh.instanceMatrix.count, capB = balMesh.instanceMatrix.count;
-    const capE = escLandMesh.instanceMatrix.count, capS = escStairMesh.instanceMatrix.count;
+    // The capacity each mesh was BUILT with. Not `instanceMatrix.count`: the
+    // matrix attribute is padded past three's uniform-buffer cliff so every
+    // mesh shares one pipeline (v3/render/instancePipeline.js), so the
+    // attribute is larger than the mesh is meant to draw.
+    const capA = capacity.ac, capB = capacity.bal, capE = capacity.esc, capS = capacity.escS;
     for (const pb of near) {
       if (pb.d2 < (rAc + pb.r) * (rAc + pb.r)) {
         for (const e of pb.ac) {

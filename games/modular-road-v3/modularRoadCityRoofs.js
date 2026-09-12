@@ -37,6 +37,7 @@ import {
 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 export const ROOF_DEFAULTS = {
   /** Items per roof, before the deck's own size trims it. */
@@ -273,7 +274,7 @@ export function createCityRoofs({ P, buildings, archetypes, params: overrides = 
   const _c = new THREE.Color();
   function instanced(list, geo, name) {
     if (!list.length) { geo.dispose(); return null; }
-    const im = new THREE.InstancedMesh(geo, mat, list.length);
+    const im = shareInstancePipeline(new THREE.InstancedMesh(geo, mat, list.length));
     im.name = name;
     im.frustumCulled = false;
     im.castShadow = false;      // measured before turning on: see the header

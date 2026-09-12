@@ -45,6 +45,7 @@ import {
   solveRiver, closestStation, planConformChunks, conformStride, LOOP_SEGS, MIN_NODES,
   buildFlowIndex, sampleFlow, sampleFlowAt,
 } from "./riverV2Channel.js";
+import { shareInstancePipeline } from "../render/instancePipeline.js";
 
 /** Path-texture width. Matches the solver's station ceiling, so no river is split. */
 const MAX_PATH_POINTS = 2048;
@@ -1054,7 +1055,7 @@ export class RiverV2System {
     }
     if (!items.length) return;
 
-    const mesh = new THREE.InstancedMesh(this._geoArrow, this._arrowMat, items.length);
+    const mesh = shareInstancePipeline(new THREE.InstancedMesh(this._geoArrow, this._arrowMat, items.length));
     mesh.frustumCulled = false;
     mesh.renderOrder = 940;
 

@@ -1038,8 +1038,8 @@ console.log("\n── LOOK PASS ──");
      * becomes two draws per board rather than one for the city.
      */
     check("every gantry in the city is one draw call",
-      gMeshes.length === 1 && gMesh.instanceMatrix.count === gantries.length,
-      `${gantries.length} boards, ${gMeshes.length} mesh(es), capacity ${gMesh ? gMesh.instanceMatrix.count : 0}`);
+      gMeshes.length === 1 && gMesh.instanceMatrix.count >= gantries.length,
+      `${gantries.length} boards, ${gMeshes.length} mesh(es), room for ${gMesh ? gMesh.instanceMatrix.count : 0}`);
     let gArt = 0;
     if (gMesh) {
       const pos = gMesh.geometry.getAttribute("position");
@@ -1300,7 +1300,7 @@ console.log("\n── LOOK PASS ──");
     const cap = tms.reduce((a, m) => a + m.instanceMatrix.count, 0);
     const tm = tms[0];
     check("every moving car has a slot in a body's mesh",
-      tms.length > 0 && cap === fs.traffic, `${tms.length} meshes, ${cap} slots for ${fs.traffic} cars`);
+      tms.length > 0 && cap >= fs.traffic, `${tms.length} meshes, ${cap} slots for ${fs.traffic} cars`);
     const cam = new THREE.Vector3(0, 40, 0);
     c.update(0.016, { position: cam });
     const first = tm.count;
@@ -1335,7 +1335,11 @@ console.log("\n── LOOK PASS ──");
     const tinted = cms.filter((m) => m.instanceColor);
     const colours = tinted.reduce((a, m) => a + m.instanceColor.count, 0);
     check("every parked car carries a per-instance colour",
-      cms.length > 0 && tinted.length === cms.length && colours === fs.cars,
+      // `>=`: three sizes `instanceColor` from `instanceMatrix.count`, and that
+      // attribute is padded past the uniform-buffer cliff so instanced meshes
+      // share one pipeline (v3/render/instancePipeline.js). What matters is
+      // that every body's mesh is tinted and there is a colour for every car.
+      cms.length > 0 && tinted.length === cms.length && colours >= fs.cars,
       `${tinted.length}/${cms.length} meshes tinted, ${colours} colours for ${fs.cars} cars`);
   }
   // The image API: a slot swap must be a repaint, never a new texture.
@@ -1442,7 +1446,7 @@ console.log("\n── LOOK PASS ──");
     let pgMesh = null;
     flatCity.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CityPark") pgMesh = o; });
     check("all the grass is one draw",
-      !!pgMesh && pgMesh.instanceMatrix.count === green.length,
+      !!pgMesh && pgMesh.count === green.length,
       `${green.length} parks in ${pgMesh ? 1 : 0} mesh`);
 
     const blockW = CITY_DEFAULTS.blockLots * CITY_DEFAULTS.lotSize;
@@ -1497,7 +1501,7 @@ console.log("\n── LOOK PASS ──");
     let pgMesh = null;
     flatCity.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CityCarPark") pgMesh = o; });
     check("all the bay paint is one draw",
-      !!pgMesh && pgMesh.instanceMatrix.count === nP, `${nP} parks in ${pgMesh ? 1 : 0} mesh`);
+      !!pgMesh && pgMesh.count === nP, `${nP} parks in ${pgMesh ? 1 : 0} mesh`);
 
     const blockW = CITY_DEFAULTS.blockLots * CITY_DEFAULTS.lotSize;
     const L = bayLayout(CARPARK_DEFAULTS, blockW);
@@ -1710,7 +1714,7 @@ console.log("\n── LOOK PASS ──");
     let bMesh = null;
     flatCity.group.traverse((o) => { if (o.isInstancedMesh && o.name === "CityBridges") bMesh = o; });
     check("every bridge in the city is one draw",
-      !!bMesh && bMesh.instanceMatrix.count === nB, `${nB} in ${bMesh ? 1 : 0} mesh`);
+      !!bMesh && bMesh.count === nB, `${nB} in ${bMesh ? 1 : 0} mesh`);
 
     const cells = new Map();
     for (const b of flatCity.buildings) cells.set(`${b.cx},${b.cz}`, b);

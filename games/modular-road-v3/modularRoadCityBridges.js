@@ -28,6 +28,7 @@
 import * as THREE from "three";
 import { mix, float, vec3, uniform, vertexColor, positionGeometry, abs, step } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 export const BRIDGE_DEFAULTS = {
   /** Off and nothing is built. */
@@ -170,7 +171,7 @@ export function placeCityBridges({ buildings, archetypes, rand, params = {} } = 
 
   const geo = buildBridgeGeometry(P);
   const { material, uGlow } = makeBridgeMaterial(params.uNight ?? uniform(0), P);
-  const mesh = new THREE.InstancedMesh(geo, material, spans.length);
+  const mesh = shareInstancePipeline(new THREE.InstancedMesh(geo, material, spans.length));
   mesh.name = "CityBridges";
   mesh.castShadow = true;
   mesh.receiveShadow = true;

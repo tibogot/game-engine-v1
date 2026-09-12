@@ -32,6 +32,7 @@ import * as THREE from "three";
 import {
   uniform, uv, vec2, vec3, float, fract, abs, smoothstep, max, min, step, mix, floor,
 } from "three/tsl";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 export const CARPARK_DEFAULTS = {
   /** Off and the squares stay empty. */
@@ -174,7 +175,7 @@ export function buildCarParkGround(parks, P, blockW) {
   mat.colorNode = mix(uSurf, uLine, paint);
   mat.roughnessNode = mix(float(0.88), float(0.7), paint);
 
-  const mesh = new THREE.InstancedMesh(geo, mat, parks.length);
+  const mesh = shareInstancePipeline(new THREE.InstancedMesh(geo, mat, parks.length));
   mesh.name = "CityCarPark";
   mesh.receiveShadow = true;
   mesh.castShadow = false;

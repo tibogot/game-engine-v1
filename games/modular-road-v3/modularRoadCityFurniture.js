@@ -48,6 +48,7 @@ import {
 import {
   STEAM_DEFAULTS, buildSteamGeometry, makeSteamMaterial,
 } from "./modularRoadCitySteam.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 /**
  * ── THE DRIVING-SIDE RULE. ONE PLACE, BECAUSE EVERYTHING NEEDS IT ───────────
@@ -1136,7 +1137,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   const _c = new THREE.Color();
   function instanced(list, geo, mat, name, { shadows = true } = {}) {
     if (!list.length) return null;
-    const im = new THREE.InstancedMesh(geo, mat, list.length);
+    const im = shareInstancePipeline(new THREE.InstancedMesh(geo, mat, list.length));
     im.name = name;
     im.frustumCulled = false;
     im.castShadow = shadows;
@@ -1636,7 +1637,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   for (const c of traffic) trafficByBody[c.body ?? 0].push(c);
   const trafficMeshes = trafficByBody.map((list, i) => {
     if (!list.length) return null;
-    const im = new THREE.InstancedMesh(carGeos[i], trafficMat, list.length);
+    const im = shareInstancePipeline(new THREE.InstancedMesh(carGeos[i], trafficMat, list.length));
     im.name = `CityTraffic_${CAR_BODIES[i].name}`;
     im.frustumCulled = false;
     im.castShadow = true;

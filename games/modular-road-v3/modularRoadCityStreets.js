@@ -56,6 +56,7 @@ import {
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { NEON_PALETTE } from "./modularRoadCityFacade.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 /**
  * Defaults. The wet block mirrors WET_DEFAULTS in modularRoadWet.js by NAME and
@@ -1787,7 +1788,7 @@ export function createCityStreets({
       }
     }
   }
-  const lampMesh = new THREE.InstancedMesh(lampGeo, lampMat, Math.max(lampMatrices.length, 1));
+  const lampMesh = shareInstancePipeline(new THREE.InstancedMesh(lampGeo, lampMat, Math.max(lampMatrices.length, 1)));
   lampMesh.name = "CityLamps";
   lampMesh.count = lampMatrices.length;
   lampMatrices.forEach((m, i) => lampMesh.setMatrixAt(i, m));

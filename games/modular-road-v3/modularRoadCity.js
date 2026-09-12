@@ -98,6 +98,7 @@ import { createCityKnockables } from "./modularRoadCityKnockables.js";
 import { createCityRoofs } from "./modularRoadCityRoofs.js";
 import { createLodView } from "./modularRoadCityLodView.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 export const CITY_DEFAULTS = {
   /** Half-extent of the built area, metres. 1200 = a 2.4 km city. */
@@ -378,7 +379,7 @@ function createBeacons(list, P, uTime, uNight) {
   })();
   mat.colorNode = vec4(col, 1.0);
   applyBloomMRT(mat, vec4(col, 1.0));
-  const im = new THREE.InstancedMesh(geo, mat, list.length);
+  const im = shareInstancePipeline(new THREE.InstancedMesh(geo, mat, list.length));
   im.name = "CityBeacons";
   im.frustumCulled = false;
   const m = new THREE.Matrix4();
@@ -842,7 +843,7 @@ export function createModularRoadCity({
         // costs occupancy on every pixel of every far tower. Splitting it is
         // free here because the tiers are already separate meshes.
         const mat = facade.materialFor(btype, tier === 2);
-        const im = new THREE.InstancedMesh(g, mat, perRow[r]);
+        const im = shareInstancePipeline(new THREE.InstancedMesh(g, mat, perRow[r]));
         im.name = `CityInst_a${ai}${facade.typeSplit ? `_t${btype}` : ""}_l${tier}`;
         im.count = 0;
         im.frustumCulled = false;

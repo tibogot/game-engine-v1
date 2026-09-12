@@ -21,6 +21,7 @@ import {
 } from "./modularRoadKit.js";
 import { solveGapArc } from "./gapArc.js";
 import { sparse, resolve } from "./modularRoadTrackIO.js";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 /**
  * THE KIT'S SHIPPED NUMBERS, snapshotted at import — before anything can write
@@ -2759,7 +2760,7 @@ export class ModularRoadBuilder {
         // SLACK, so appending one piece to a chain does not reallocate the whole
         // batch — placing pieces one after another is the single most common
         // thing anyone does in here.
-        im = new THREE.InstancedMesh(grp.geometry, grp.material, n + INSTANCE_SLACK);
+        im = shareInstancePipeline(new THREE.InstancedMesh(grp.geometry, grp.material, n + INSTANCE_SLACK));
         im.matrixAutoUpdate = false; // root/instGroup at origin → instance mats are world
         im.frustumCulled = false; // a track spans a large area; skip per-mesh culling
         // Neither flat markings nor a window should cast — see the note where

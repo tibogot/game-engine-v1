@@ -79,8 +79,11 @@ const _p = new THREE.Vector3();
 city.group.traverse((o) => {
   if (!o.isInstancedMesh || !/^CityRoof/.test(o.name)) return;
   const m = new THREE.Matrix4();
-  for (let i = 0; i < o.count || i < o.instanceMatrix.count; i++) {
-    if (i >= o.instanceMatrix.count) break;
+  // `o.count` is what the mesh DRAWS. The matrix attribute is padded past
+  // three's uniform-buffer cliff so instanced meshes share one pipeline
+  // (v3/render/instancePipeline.js), so its capacity is larger and the entries
+  // past `count` were never written.
+  for (let i = 0; i < o.count; i++) {
     o.getMatrixAt(i, m);
     _p.setFromMatrixPosition(m);
     const b = byXZ.get(`${Math.floor(_p.x / lot)},${Math.floor(_p.z / lot)}`);

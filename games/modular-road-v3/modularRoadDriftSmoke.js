@@ -7,6 +7,7 @@ import {
   sin, smoothstep, sqrt, texture, uniform, uv, vec2, vec3, vec4,
   viewportDepthTexture,
 } from "three/tsl";
+import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 /**
  * Rear-wheel drift smoke for modular-road test drive.
@@ -1396,7 +1397,7 @@ export class ModularRoadDriftSmoke {
     mat.colorNode = shaded.xyz;
     mat.opacityNode = shaded.w;
 
-    const mesh = new THREE.InstancedMesh(geo, mat, HAZE_POOL_SIZE);
+    const mesh = shareInstancePipeline(new THREE.InstancedMesh(geo, mat, HAZE_POOL_SIZE));
     mesh.frustumCulled = false;
     mesh.count = 0;
     // Behind the sharp puffs. Nothing here is depth-sorted, so draw order is the
