@@ -112,6 +112,117 @@ export function paint(g, paintSpec) {
   return g;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────────
+ * THE TWO ROAD BLOCKS, AS A TABLE THAT NEITHER SIDE OWNS
+ *
+ * The jersey barrier and the steel trench plate are the only clutter shapes that
+ * are ALSO placeable props in the track builder, and they are genuinely built
+ * twice — not out of duplication, but because the two places need different
+ * constructions of the same silhouette:
+ *
+ *   THE CITY    draws hundreds of them as ONE InstancedMesh, so the colours have
+ *               to ride in a vertex attribute (see `paint`).
+ *   A PLACED    is a small Group of flat-coloured parts, which the prop
+ *   PROP        instancer collapses into one vertex-shaded draw by itself
+ *               (collapsePlainParts). Handing it a pre-painted mesh would fight
+ *               that, and `bakePlainAttrs` drops a `color` attribute anyway.
+ *
+ * So the SHAPE is a table and the two constructions read it. This codebase has
+ * already paid the bill for the alternative once: the city street was a hand
+ * copy of the track asphalt and the two drifted apart for months.
+ *
+ * ── `y` IS THE PART'S BOTTOM, AND THAT IS THE BUG THIS FOUND ──────────────────
+ *
+ * `box()` places a part's BOTTOM at `y`, which is the convention every other
+ * shape in this file follows. These two were authored as if `y` were the part's
+ * CENTRE, and nothing caught it because they are small objects seen from a
+ * moving car under LOD. MEASURED before (tools/roadBlockTest.mjs now
+ * asserts it, for every shape in this file):
+ *
+ *     jerseyGeo   y 0.080 -> 1.050     floating 8 cm, 1.05 m tall not 0.84,
+ *                                      with a 5 cm and an 8 cm gap THROUGH it
+ *     plateGeo    y 0.006 -> 0.075     the slab hovering 2.5 cm off the road,
+ *                                      its underside in view
+ *     everything  y 0.000 -> ...
+ *     else
+ *
+ * Read as centres the original numbers are continuous and correct, so the fix is
+ * the convention, not the design: each part's bottom is now where the one below
+ * it ends.
+ * ────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * @typedef {object} BlockSpec
+ * @property {{length:number,width:number,height:number}} size  Footprint along
+ *   X and Z plus total height — what a placement needs to lay a line of them end
+ *   to end with no gap, and what PropManager.stackSnap snaps against.
+ * @property {{w:number,h:number,d:number,y:number,color:number}[]} parts
+ *   Boxes, centred on X and Z, each sitting on `y`.
+ */
+
+/**
+ * CONCRETE JERSEY BARRIER — the heavy one.
+ *
+ * Worth being a separate kind from the plastic water barrier because concrete
+ * does not move: a water-filled barrier shifts when you hit it and a jersey
+ * shoves YOU, and the whole point of having both is that a driver learns which
+ * is which by their shape from a distance.
+ *
+ * The profile IS the shape — a wide foot, a sharp batter, a narrow top. Three
+ * stacked boxes read as that at any speed you will ever see one, and a real
+ * swept profile would cost vertices for a silhouette nobody gets close to.
+ *
+ * @type {BlockSpec}
+ */
+export const JERSEY_BARRIER = {
+  size: { length: 2.40, width: 0.62, height: 0.84 },
+  parts: [
+    { w: 2.40, h: 0.16, d: 0.620, y: 0.000, color: 0x9a988f }, // foot
+    { w: 2.40, h: 0.26, d: 0.440, y: 0.160, color: 0xa9a79d }, // batter
+    { w: 2.40, h: 0.42, d: 0.260, y: 0.420, color: 0xb4b2a8 }, // upstand
+    // The reflective band every real one carries, low on the batter and a
+    // whisker proud of it so it cannot z-fight the face it is painted on.
+    { w: 2.42, h: 0.07, d: 0.455, y: 0.265, color: 0xf0e9d0 },
+  ],
+};
+
+/**
+ * STEEL TRENCH PLATE — flat, and deliberately not a knockable.
+ *
+ * It lies over a hole in the road and is driven across. One that flew when
+ * clipped would be the single most obviously wrong object in the city, so in the
+ * city it never joins the knockable groups, and as a prop it is a DECK rather
+ * than a solid.
+ *
+ * The yellow lip is listed first and is WIDER than the slab rather than under
+ * it: what you see is a painted rim around the plate's edge, which is what marks
+ * one out on a real road. Both sit on y = 0, so the only coplanar pair is the
+ * two undersides, which are against the tarmac.
+ *
+ * @type {BlockSpec}
+ */
+export const TRENCH_PLATE = {
+  size: { length: 2.60, width: 2.00, height: 0.05 },
+  parts: [
+    { w: 2.66, h: 0.02, d: 2.06, y: 0.000, color: 0xc8a12a }, // the yellow lip
+    { w: 2.60, h: 0.05, d: 2.00, y: 0.000, color: 0x53565c }, // the plate
+  ],
+};
+
+/** Every road-block table there is, by the prop id that places it. */
+export const ROAD_BLOCK_SPECS = { jersey: JERSEY_BARRIER, roadplate: TRENCH_PLATE };
+
+/**
+ * One road block as a single merged, vertex-painted geometry — the city's form.
+ * Intermediates are freed; `mergeGeometries` has copied them by then.
+ */
+export function blockGeometry(spec) {
+  const parts = spec.parts.map((p) => paint(box(p.w, p.h, p.d, 0, p.y, 0), p.color));
+  const geo = mergeGeometries(parts, false);
+  for (const g of parts) g.dispose();
+  return geo;
+}
+
 /**
  * The four shapes, built once. Every one is modelled with its base at y = 0 and
  * facing +Z, so a placement only ever has to supply a position and a yaw.
@@ -158,33 +269,12 @@ export function buildClutterKit() {
   const palletGeo = mergeGeometries(palletParts, false);
   for (const g of palletParts) g.dispose();
 
-  // ── JERSEY BARRIER ────────────────────────────────────────────────────────
-  //
-  // The heavy one, and the reason it is worth a separate kind from the plastic
-  // barrier above: concrete does not move. A water-filled barrier shifts when
-  // you hit it and a jersey shoves YOU, and the whole point of having both is
-  // that a driver learns which is which by their shape from a distance.
-  //
-  // The profile IS the shape — a wide foot, a sharp batter, a narrow top. Three
-  // stacked boxes read as that at any speed you will ever see one, and a real
-  // swept profile would cost vertices for a silhouette nobody gets close to.
-  const jerseyGeo = mergeGeometries([
-    paint(box(2.40, 0.16, 0.62, 0, 0.08), 0x9a988f),      // foot
-    paint(box(2.40, 0.26, 0.44, 0, 0.29), 0xa9a79d),      // batter
-    paint(box(2.40, 0.42, 0.26, 0, 0.63), 0xb4b2a8),      // upstand
-    // The reflective band every real one carries, low on the batter.
-    paint(box(2.42, 0.07, 0.455, 0, 0.30), 0xf0e9d0),
-  ], false);
-
-  // ── STEEL TRENCH PLATE ────────────────────────────────────────────────────
-  //
-  // Flat, and deliberately NOT knockable: a plate lies over a hole in the road
-  // and is driven across. One that flew when clipped would be the single most
-  // obviously wrong object in the city, so it never joins the knockable groups.
-  const plateGeo = mergeGeometries([
-    paint(box(2.60, 0.05, 2.00, 0, 0.025), 0x53565c),     // the plate
-    paint(box(2.66, 0.02, 2.06, 0, 0.006), 0xc8a12a),     // the yellow lip under it
-  ], false);
+  // ── THE TWO ROAD BLOCKS ───────────────────────────────────────────────────
+  // Built from the shared tables above, which the track builder's placeable
+  // Concrete barrier and Road plate read too — one silhouette, two
+  // constructions. See the note on JERSEY_BARRIER for why there are two.
+  const jerseyGeo = blockGeometry(JERSEY_BARRIER);
+  const plateGeo = blockGeometry(TRENCH_PLATE);
 
   for (const [n, g] of Object.entries({ coneGeo, barrierGeo, binGeo, palletGeo, jerseyGeo, plateGeo })) {
     if (!g) throw new Error(`[CityClutter] merge returned null for ${n}`);

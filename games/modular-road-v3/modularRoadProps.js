@@ -29,6 +29,9 @@ import { makeTireWall } from "./modularRoadTireWall.js";
 import { makeCrane } from "./modularRoadCrane.js";
 import { makePalm } from "./modularRoadPalm.js";
 import { makeBarrel } from "./modularRoadBarrel.js";
+// The two road-block silhouettes the CITY scatters, so the placeable ones and
+// the procedural ones are the same object. See the note on JERSEY_BARRIER.
+import { JERSEY_BARRIER, TRENCH_PLATE } from "./modularRoadCityClutter.js";
 import { DECAL_OFFSET } from "./modularRoadDecals.js";
 import { FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { roadParams, NO_CHECKER } from "./modularRoadKit.js";
@@ -775,6 +778,15 @@ function roadBlockGeometry(length = 2.2, height = 1.06) {
   return geo;
 }
 
+/**
+ * Footprint of the plastic water barrier, after the visual's rotateY.
+ *
+ * One constant because it was three copies of 2.2 — the geometry's default
+ * length, the collision box, and now the row snapping — and a row that snaps by
+ * a length its geometry does not have is a gap you could drive into.
+ */
+export const WATER_BARRIER_SIZE = { length: 2.2, width: 0.56, height: 1.06 };
+
 /** Solid white / solid red — instance tint, same cost as one colour. */
 export const ROAD_BLOCK_COLORS = [
   0xf4f4f6, // white
@@ -782,20 +794,103 @@ export const ROAD_BLOCK_COLORS = [
 ];
 
 function makeRoadBlock() {
+  const S = WATER_BARRIER_SIZE;
   // White base: instanceColor multiplies in, so tint × 1 = the chosen colour.
   const m = new THREE.Mesh(
-    roadBlockGeometry(),
+    roadBlockGeometry(S.length, S.height),
     mat(0xffffff, { roughness: 0.42, metalness: 0.04 }),
   );
   m.name = "RoadBlock";
   m.userData.tintable = true;
   // Vertical box, not the jersey slope/trough. The trough is a lid the hull
-  // parks on; the slope launches. Same footprint as the visual (0.56 × 1.06 ×
-  // 2.2 after the visual's rotateY).
-  const box = new THREE.BoxGeometry(2.2, 1.06, 0.56);
-  box.translate(0, 1.06 / 2, 0);
+  // parks on; the slope launches. Same footprint as the visual.
+  const box = new THREE.BoxGeometry(S.length, S.height, S.width);
+  box.translate(0, S.height / 2, 0);
   m.userData.collisionGeometry = box;
   return m;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * THE PLACEABLE ROAD BLOCKS
+ *
+ * Three of them now, and they are three because a driver reads them differently
+ * from a distance:
+ *
+ *   Road block         plastic, water-filled, white or red. Light.
+ *   Concrete barrier   a jersey. Heavy, and the one that shoves YOU.
+ *   Road plate         steel, lying over a hole. You drive across it.
+ *
+ * The last two are the city's own roadworks shapes, placeable. Their silhouette
+ * comes from the tables in modularRoadCityClutter so the one you place by hand
+ * and the hundreds the city scatters cannot drift — the failure this codebase
+ * already paid for once, when the city street was a hand copy of the track
+ * asphalt.
+ *
+ * ── WHY A GROUP OF BOXES AND NOT THE CITY'S MERGED MESH ───────────────────────
+ *
+ * The city paints its colours into a vertex attribute because it draws hundreds
+ * of barriers as one InstancedMesh. A prop must not: the instancer's
+ * `collapsePlainParts` already folds every plain opaque part of a type into ONE
+ * vertex-shaded draw, and the normalisation it does that through
+ * (`bakePlainAttrs`) keeps position/normal/uv and rebuilds the colour from
+ * `material.color` — so a pre-painted `color` attribute would be silently
+ * thrown away and the barrier would come out one flat grey.
+ *
+ * Four boxes here therefore cost ONE draw, and each part keeps its own shade.
+ * The geometry is translated rather than the mesh so every part shares the
+ * group's transform, which is what lets a collision proxy be authored in group
+ * space below.
+ * ────────────────────────────────────────────────────────────────────────────── */
+
+/** Build a road-block table into a Group of flat-coloured boxes on y = 0. */
+function roadBlockParts(spec, name, look) {
+  const g = new THREE.Group();
+  g.name = name;
+  for (const p of spec.parts) {
+    const geo = new THREE.BoxGeometry(p.w, p.h, p.d);
+    geo.translate(0, p.y + p.h / 2, 0); // `y` is the part's bottom
+    g.add(new THREE.Mesh(geo, mat(p.color, look)));
+  }
+  return g;
+}
+
+/**
+ * Concrete jersey barrier — steer around it, not over it.
+ *
+ * Collided as ONE upright box over the whole footprint, exactly as the plastic
+ * road block is and for the same two reasons: the batter is a ramp that would
+ * launch a car that clipped it, and the 26 cm top is a lid the hull would park
+ * on. Baking the visible profile instead would also put the foot's 9 cm shoulder
+ * in the solids tree as a ledge to perch on.
+ */
+function makeJerseyBarrier() {
+  const g = roadBlockParts(JERSEY_BARRIER, "JerseyBarrier", { roughness: 0.88, metalness: 0.0 });
+  const S = JERSEY_BARRIER.size;
+  const box = new THREE.BoxGeometry(S.length, S.height, S.width);
+  box.translate(0, S.height / 2, 0);
+  // One proxy on the first part — every part shares the group's transform, so
+  // the box is authored in group space and lands on the ground. The rest are
+  // paint; two copies of the same proxy would resolve the same contact twice.
+  g.children[0].userData.collisionGeometry = box;
+  for (let i = 1; i < g.children.length; i++) g.children[i].userData.noCollide = true;
+  return g;
+}
+
+/**
+ * Steel trench plate. 5 cm up, so the instancer's FLAT_PROP_HEIGHT rule drops
+ * its shadow casting for free — a slab lying on the road contributes nothing but
+ * a shadow-map draw, per cascade.
+ *
+ * Collided as nothing at all; see the catalog entry for the measurement that
+ * settled that, and why `deck` was the wrong answer for a shape this thin.
+ * `noCollide` on both parts is belt and braces: the role already keeps them out
+ * of every channel, and it is what stops a future change of role quietly baking
+ * a 2 cm step and a 5 cm one, three centimetres apart, into the drive surface.
+ */
+function makeTrenchPlate() {
+  const g = roadBlockParts(TRENCH_PLATE, "RoadPlate", { roughness: 0.58, metalness: 0.45 });
+  for (const part of g.children) part.userData.noCollide = true;
+  return g;
 }
 
 /**
@@ -2165,7 +2260,69 @@ export const PROP_CATALOG = [
      */
     collision: "solid",
     variants: ROAD_BLOCK_COLORS,
+    /** A line of barriers exists to leave NO GAP — see the note on `stack` in
+     *  the Concrete barrier below, which is where the reasoning lives. */
+    stack: WATER_BARRIER_SIZE,
     make: () => makeRoadBlock(),
+  },
+  {
+    id: "jersey",
+    label: "Concrete barrier",
+    /**
+     * The city's concrete jersey, placeable. `solid`, like the plastic block and
+     * like Wall: you steer around one. Collided as a single upright box — see
+     * makeJerseyBarrier for why the visible profile is the wrong thing to bake.
+     */
+    collision: "solid",
+    /**
+     * ROW SNAPPING, AND WHY A BARRIER OF ALL THINGS NEEDS IT.
+     *
+     * A line of concrete exists to leave no gap, because a gap between two
+     * barriers is a gap you could drive into — the city's own placement loop
+     * lays them end to end at `jerseyLen` for exactly that reason, and
+     * cityKitTest measures it (0 of 588 gapped). Placed by hand with no snap you
+     * are eyeballing 2.40 m over and over, and every line you build leaks.
+     *
+     * PropManager.stackSnap already does it: click BESIDE a barrier and the next
+     * one lands one length along, in the first one's rotation, so a line you
+     * started at an angle stays a line. Clicking ON the top still stacks, which
+     * is harmless and occasionally what you want for a taller wall.
+     */
+    stack: JERSEY_BARRIER.size,
+    make: () => makeJerseyBarrier(),
+  },
+  {
+    id: "roadplate",
+    label: "Road plate",
+    /**
+     * ── IT IS NOT A DECK, AND I TRIED ────────────────────────────────────────
+     *
+     * `deck` is the obvious role — driving across it is the whole object — and
+     * MEASURED in the game it makes the plate stand on itself. A placement snap
+     * searches DOWNWARD through the same deck tree the plate is baked into, and
+     * `hitIsOwnDeck` (roadGame.js) only discounts a hit more than
+     * DECK_SELF_SKIP = 4 cm above the prop's root. The plate's top is 5 cm up,
+     * so it clears that by one centimetre — and one centimetre is not a margin.
+     * Re-snapping a placed plate, which is what a gizmo drag does:
+     *
+     *     y = 0 → 0 → 0.05 → 0.05 …    nudge it once and it floats
+     *
+     * Every other prop in the deck channel is at least 0.80 m thick
+     * (asphaltlot), twenty times the margin, so this is the one shape the rule
+     * does not fit rather than a rule that is wrong.
+     *
+     * `none` is also what the CITY does with this same object: nothing in the
+     * roadworks clutter is solid, on purpose. And it costs nothing to drive
+     * over — the wheels stay on the road 5 cm below the plate's face, which at
+     * this thickness is the difference between a plate and a painted plate.
+     *
+     * `stack` still tiles them: one plate is 2.60 × 2.00 m, which covers a
+     * trench and not a junction, so a crossing is several meeting flush, and
+     * stackSnap's footprint path does not need the block to be in any BVH.
+     */
+    collision: "none",
+    stack: TRENCH_PLATE.size,
+    make: () => makeTrenchPlate(),
   },
   {
     id: "holewall",

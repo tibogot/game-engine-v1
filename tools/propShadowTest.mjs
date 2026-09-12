@@ -68,8 +68,11 @@ function bareInstancer() {
 }
 
 // Things you can land on, or that stand tall enough to shade something.
-const OBSTACLES = ["box", "wall", "roadblock", "ramp", "kickerramp", "jumpkicker",
+const OBSTACLES = ["box", "wall", "roadblock", "jersey", "ramp", "kickerramp", "jumpkicker",
                    "pole", "cone", "tube"];
+// `roadplate` is deliberately NOT here: it is 5 cm of steel lying on the road,
+// so FLAT_PROP_HEIGHT takes its casting away on purpose. flatPropShadowTest owns
+// that case.
 
 // GLB-backed, and there is no fetch here — their make() returns an empty group
 // until preloadContainer()/preloadTireWall() resolve, which roadGame awaits

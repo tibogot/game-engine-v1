@@ -3073,6 +3073,20 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   const _snapBox = new THREE.Box3();
 
   /**
+   * How far above its own root a hit has to be before it counts as a prop
+   * standing on ITSELF rather than on the thing it rests on.
+   *
+   * THIS IS A FLOOR ON HOW THIN A DECK PROP MAY BE, and it is the reason the
+   * road plate is `collision: "none"` rather than the `deck` its shape wants.
+   * A 5 cm plate's own top clears this by a single centimetre, and measured in
+   * the game that is not enough: re-snapping a placed one (what a gizmo drag
+   * does) walked it 0 → 0 → 0.05 and left it floating. Every other prop in the
+   * deck channel is at least 0.80 m thick, so the rule fits all of them with
+   * twenty times the room. tools/roadBlockTest.mjs asserts that stays true.
+   */
+  const DECK_SELF_SKIP = 0.04;
+
+  /**
    * True when a deck hit is this prop sitting on itself.
    *
    * A `collision: "both"` prop (board ramp, platform, slope) is baked into the
@@ -3084,7 +3098,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function hitIsOwnDeck(inst, point) {
     const root = inst?.root;
     if (!root) return false;
-    if (point.y <= root.position.y + 0.04) return false;
+    if (point.y <= root.position.y + DECK_SELF_SKIP) return false;
     root.updateWorldMatrix(true, true);
     _snapBox.setFromObject(root);
     return _snapBox.containsPoint(point);

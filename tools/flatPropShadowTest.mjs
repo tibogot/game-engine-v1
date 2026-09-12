@@ -76,7 +76,7 @@ check("FLAT_PROP_HEIGHT parses out of the source", Number.isFinite(THRESHOLD),
   String(THRESHOLD));
 
 console.log("\n=== FLAT PROPS DO NOT CAST ===");
-for (const id of ["boostpad", "launchpad", "boostdecal", "launchdecal"]) {
+for (const id of ["boostpad", "launchpad", "boostdecal", "launchdecal", "roadplate"]) {
   const m = measure(id);
   if (!m) { check(`${id} builds a template`, false); continue; }
   check(`${id} (${m.h.toFixed(3)} m) casts no shadow`, m.cast === 0,
@@ -84,7 +84,7 @@ for (const id of ["boostpad", "launchpad", "boostdecal", "launchdecal"]) {
 }
 
 console.log("\n=== UPRIGHT PROPS STILL DO ===");
-for (const id of ["cone", "pole", "box", "wall", "roadblock"]) {
+for (const id of ["cone", "pole", "box", "wall", "roadblock", "jersey"]) {
   const m = measure(id);
   if (!m) { check(`${id} builds a template`, false); continue; }
   check(`${id} (${m.h.toFixed(3)} m) still casts`, m.cast === m.n,
