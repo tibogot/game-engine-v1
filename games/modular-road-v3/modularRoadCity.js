@@ -1076,9 +1076,9 @@ export function createModularRoadCity({
      * that ever crosses one.
      */
     bridges = placeCityBridges({
-      buildings, archetypes: kit.archetypes, rand: lotRand,
+      buildings, archetypes: kit.archetypes, rand: lotRand, originCellX, originCellZ,
       params: {
-        ...BRIDGE_DEFAULTS, streetLots: P.streetLots, uNight,
+        ...BRIDGE_DEFAULTS, streetLots: P.streetLots, blockLots: P.blockLots, uNight,
         ...P.bridgeParams, bridges: P.bridges,
       },
     });

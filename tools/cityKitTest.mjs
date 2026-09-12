@@ -1731,6 +1731,42 @@ console.log("\n── LOOK PASS ──");
     check("no bridge is really a footbridge", tooLow === 0, `${tooLow} of ${nB} under 12 m`);
     check("every bridge reaches across its own gap", short === 0 && orphan === 0,
       `${short} too short, ${orphan} joined to nothing`);
+
+    /*
+     * OVER A STREET, NOT THROUGH A TOWER. The three checks above all passed
+     * while 11 of 19 bridges crossed a LOT: two cells `streetLots + 1` apart
+     * only have a street between them when the first ends its block, and the
+     * placement never asked — so most bridges ran straight through the tower
+     * between their two ends and read as stubs sticking out of it. Every cell
+     * a bridge crosses must be a street cell, and none may hold a building.
+     */
+    const pitchB = flatCity.params.blockLots + flatCity.params.streetLots;
+    const oX = Math.floor(flatCity.params.centerX / flatCity.params.lotSize);
+    const oZ = Math.floor(flatCity.params.centerZ / flatCity.params.lotSize);
+    const pm = (v, m) => ((v % m) + m) % m;
+    let overLot = 0, throughTower = 0;
+    for (const sp of (flatCity.stats.bridgeSpans || [])) {
+      const [ax, az] = sp.a.split(",").map(Number), [bx, bz] = sp.b.split(",").map(Number);
+      const alongXb = ax !== bx;
+      for (let c = Math.min(alongXb ? ax : az, alongXb ? bx : bz) + 1; c < Math.max(alongXb ? ax : az, alongXb ? bx : bz); c++) {
+        if (pm(c - (alongXb ? oX : oZ), pitchB) < flatCity.params.blockLots) overLot++;
+        if (cells.has(alongXb ? `${c},${az}` : `${ax},${c}`)) throughTower++;
+      }
+    }
+    check("every bridge crosses a street, never a lot", overLot === 0, `${overLot} lot cell(s) under bridges`);
+    check("...and none runs through a tower", throughTower === 0, `${throughTower}`);
+
+    /*
+     * AND IT IS NOT GREEN AND PURPLE. The glass used to be tagged in the vertex
+     * colour's green channel while the material declared `vertexColors`, so
+     * three multiplied the tag in as a colour. The part is an attribute now,
+     * and there must be no colour attribute for anything to multiply.
+     */
+    if (bMesh) {
+      check("the bridge material does not multiply vertex colours in", bMesh.material.vertexColors !== true);
+      check("...and the geometry carries its part as `aPart`, not as a colour",
+        !!bMesh.geometry.getAttribute("aPart") && !bMesh.geometry.getAttribute("color"));
+    }
   }
 
   console.log("\n── CHECKPOINTS ──");

@@ -237,6 +237,31 @@ check("it also builds with no lights in the scene (bakes, probes)", unlitErr ===
   built.dispose();
 }
 
+// ── THE SKYBRIDGES ──────────────────────────────────────────────────────────
+//
+// Rebuilt from a vertex-colour tag (which rendered green and purple) into
+// concrete slabs, glazing, drawn mullions and a computed sky reflection. It
+// calls the viaduct's `concreteDetail`, and the first cut multiplied by that
+// helper's Fn instead of CALLING it — the slabs came out black and nothing
+// headless complained. This at least guarantees the graph compiles clean.
+{
+  const { makeBridgeMaterial, BRIDGE_DEFAULTS } =
+    await import("../games/modular-road-v3/modularRoadCityBridges.js");
+  const { uniform } = await import("three/tsl");
+  const { material } = makeBridgeMaterial(uniform(0), { ...BRIDGE_DEFAULTS });
+  let b = null, err = null;
+  try { b = buildWGSL(material); } catch (e) { err = e; }
+  check("the skybridge material generates WGSL", err === null, err ? err.message : "");
+  if (b) {
+    const frag = b.fragmentShader || "";
+    console.log(`       skybridge ${(frag.length / 1024).toFixed(1)} kB fragment`);
+    check("skybridge stays small — it is a walkway, not a facade", frag.length < 30 * 1024,
+      `${(frag.length / 1024).toFixed(1)} kB`);
+    check("no 'undefined' leaked into it", !/undefined/.test(frag));
+    check("and it never reads a vertex colour", material.vertexColors !== true);
+  }
+}
+
 // ── THE UNDERPASS'S MATERIALS ───────────────────────────────────────────────
 //
 // Its vault and road are the game's own, already compiled — but the trench wall

@@ -17,6 +17,27 @@
 // the only geometric fact needed, and it comes straight off the lot grid, so
 // there is no search and no spatial index.
 //
+// ── THE TWO THINGS THAT WERE WRONG WITH THEM ─────────────────────────────────
+//
+// 1. MOST OF THEM WERE NOT OVER A STREET. "Two cells `streetLots + 1` apart"
+//    only has a street between them when the first cell is the LAST lot of its
+//    block; anywhere else the cell in between is another lot. MEASURED on the
+//    default city: 11 of 19 bridges crossed a lot, 10 of them straight through
+//    the tower standing on it — which is why a skybridge usually read as two
+//    small stubs poking out of either side of one building.
+//
+// 2. THEY WERE GREEN AND PURPLE. The glass was tagged by setting the vertex
+//    colour's green channel to 1, and the material also declared
+//    `vertexColors: true` — so three multiplied that tag in as a COLOUR. The
+//    frame came out (0.34, 0, 0.36), purple, and the glass green. The same trap
+//    the underpass walls fell into, where a shade packed in red rendered red.
+//
+// Now: a concrete deck and roof slab carrying the viaduct's own faked-concrete
+// detail (no new noise), a recessed glazed band with the mullions and the
+// handrail DRAWN on it, an aluminium-grey frame, and the ceiling lights showing
+// through the glass after dark. The part is a real attribute, `aPart`, and
+// there are no vertex colours at all.
+//
 // ── ONE DRAW, AND THE SCALE IS IN X ALONE ────────────────────────────────────
 //
 // One InstancedMesh. The geometry is a unit-length bridge — real dimensions in
@@ -26,9 +47,14 @@
 // longer bridge is longer, not taller.
 
 import * as THREE from "three";
-import { mix, float, vec3, uniform, vertexColor, positionGeometry, abs, step } from "three/tsl";
+import {
+  mix, float, vec3, uniform, attribute, positionGeometry, positionWorld, normalWorldGeometry,
+  abs, step, fract, smoothstep, fwidth, max, min, cameraPosition, normalWorld, normalize, dot,
+  reflect, pow, clamp,
+} from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
+import { concreteDetail } from "./modularRoadCityViaduct.js";
 
 export const BRIDGE_DEFAULTS = {
   /** Off and nothing is built. */
@@ -52,59 +78,149 @@ export const BRIDGE_DEFAULTS = {
   /** Lit inside at night — a walkway is always lit, and a dark tube between
    *  two lit towers reads as a mistake. */
   bridgeGlow: 1.6,
+  /** Metres between mullions along the glazing. */
+  mullionPitch: 1.8,
+  /** Concrete, frame and glass. */
+  colorConcrete: 0x9c9d99,
+  colorFrame: 0x8a9096,
+  colorGlass: 0x1b2530,
 };
 
-const SILL = 0.30, CAP = 0.34;
+/** Deck slab, roof slab, and how far the glass is set back from both. */
+const DECK = 0.85, ROOF = 0.62, INSET = 0.14, LIP = 0.22;
+/** `aPart` values. */
+export const BRIDGE_PART = { concrete: 0, glass: 1 };
 
 /**
  * A unit-length bridge: 1 m along X, real size in Y and Z.
  *
- * Three bands, merged and vertex-coloured, so ONE material covers frame and
- * glass. The glass band is tagged in the colour's green channel rather than by
- * position, because the instance matrix scales X and a position test would
- * then mean something different on every bridge.
+ * Three boxes: the deck slab, the glazed band set back from it, and a roof slab
+ * that oversails the glass by `LIP` so it throws a shadow line down the top of
+ * the glazing — the detail that makes a band of glass read as recessed rather
+ * than painted on. Tagged by `aPart`, never by colour.
  */
 export function buildBridgeGeometry(P) {
   const W = P.bridgeWidth, H = P.bridgeHeight;
-  const glassH = Math.max(0.4, H - SILL - CAP);
+  const glassH = Math.max(0.6, H - DECK - ROOF);
   const parts = [];
-  const push = (h, y, r, g, b) => {
-    const q = new THREE.BoxGeometry(1, h, W).toNonIndexed();
-    q.translate(0, y, 0);
+  const push = (h, y, d, part) => {
+    const q = new THREE.BoxGeometry(1, h, d).toNonIndexed();
+    q.translate(0, y + h / 2, 0);
+    q.deleteAttribute("uv");
     const n = q.getAttribute("position").count;
-    const col = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) { col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b; }
-    q.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    q.setAttribute("aPart", new THREE.Float32BufferAttribute(new Float32Array(n).fill(part), 1));
     parts.push(q);
   };
-  // Sill, glazing, roof cap. Green channel 1.0 marks the glass to the shader.
-  push(SILL, SILL * 0.5, 0.34, 0.0, 0.36);
-  push(glassH, SILL + glassH * 0.5, 0.09, 1.0, 0.13);
-  push(CAP, SILL + glassH + CAP * 0.5, 0.30, 0.0, 0.32);
+  push(DECK, 0, W, BRIDGE_PART.concrete);
+  push(glassH, DECK, W - INSET * 2, BRIDGE_PART.glass);
+  push(ROOF, DECK + glassH, W + LIP * 2, BRIDGE_PART.concrete);
   const g = mergeGeometries(parts, false);
   for (const q of parts) q.dispose();
   if (!g) throw new Error("[CityBridges] merge returned null");
   return g;
 }
 
+/**
+ * ONE small material. No `If`: two surfaces blended by `aPart`, every
+ * derivative at the top level.
+ *
+ * The concrete is the viaduct's `concreteDetail` — form-panel seams, blotch
+ * and speckle already written, already measured cheap, and it makes a bridge
+ * read as the same concrete as the motorway it shares a skyline with.
+ *
+ * THE GLASS REFLECTS A SKY IT COMPUTES ITSELF. The first version leaned on the
+ * scene environment for its reflection — and there is none: the city's towers
+ * fake their own, so these panes rendered black from every angle. A reflected
+ * direction, a two-colour sky gradient and a Schlick fresnel is a dot, a
+ * reflect and a pow; it fades out at night, when the room inside takes over.
+ */
 export function makeBridgeMaterial(uNight, P) {
-  const mat = new THREE.MeshStandardNodeMaterial({
-    roughness: 0.42, metalness: 0.25, vertexColors: true,
-  });
+  const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.8, metalness: 0.0 });
   mat.name = "CityBridges";
   const uGlow = uniform(P.bridgeGlow);
+  const cConcrete = uniform(new THREE.Color(P.colorConcrete ?? BRIDGE_DEFAULTS.colorConcrete));
+  const cFrame = uniform(new THREE.Color(P.colorFrame ?? BRIDGE_DEFAULTS.colorFrame));
+  const cGlass = uniform(new THREE.Color(P.colorGlass ?? BRIDGE_DEFAULTS.colorGlass));
+  const pitch = float(P.mullionPitch ?? BRIDGE_DEFAULTS.mullionPitch);
+
+  const isGlass = step(float(0.5), attribute("aPart", "float"));
+  const detail = concreteDetail();
+
   /*
-   * THE GLASS IS FOUND BY ITS TAG, NOT ITS HEIGHT. `positionGeometry.y` would
-   * work only until the first bridge with a different deck height, and the
-   * green channel is already carried per vertex for free.
+   * ALONG THE BRIDGE, in metres. The instance matrix scales X by the span, so
+   * geometry X is a fraction and cannot place a mullion. World position can,
+   * and the long glazed faces are exactly the ones whose normal is across the
+   * bridge — so whichever of x and z that normal is NOT along is the length.
    */
-  const isGlass = step(float(0.5), vertexColor().g);
-  // `.rgb`: vertexColor() is a vec4, and mixing it with a vec3 is the same
-  // type mismatch that had the roofs asking for a five-component vec4.
-  mat.colorNode = mix(vertexColor().rgb, vec3(0.055, 0.062, 0.075), isGlass);
-  // Lit inside. Warm, because a walkway is; a dark tube strung between two lit
-  // towers reads as something broken rather than something built.
-  mat.emissiveNode = vec3(1.0, 0.90, 0.74).mul(isGlass).mul(uNight).mul(uGlow);
+  const pw = positionWorld;
+  const along = mix(pw.x, pw.z, step(float(0.5), abs(normalWorldGeometry.x)));
+  // Height up the glass, in metres from the deck: X-only scaling leaves Y real.
+  const up = positionGeometry.y.sub(DECK);
+  const glassH = Math.max(0.6, P.bridgeHeight - DECK - ROOF);
+
+  const lineMask = (v, period, halfW) => {
+    const f = abs(fract(v.div(period)).sub(0.5)).mul(period);   // metres to the nearest line
+    const aa = max(fwidth(v), float(1e-4));
+    return float(1).sub(smoothstep(float(halfW), float(halfW).add(aa), f));
+  };
+  const mullion = lineMask(along.add(pitch.mul(0.5)), pitch, 0.045);
+  // Frame at the head and sill of the glass, and the handrail a metre up.
+  const band = (y0, h) => {
+    const aa = max(fwidth(up), float(1e-4));
+    return smoothstep(float(y0 - h).sub(aa), float(y0 - h), up).mul(
+      float(1).sub(smoothstep(float(y0 + h), float(y0 + h).add(aa), up)));
+  };
+  const frameH = max(max(band(0.05, 0.06), band(glassH - 0.05, 0.06)), band(1.05, 0.035));
+  const frame = max(mullion, frameH).mul(isGlass);
+
+  // A faint lighter reflection toward the top of each pane, so the glass is not
+  // one flat colour where the environment reflection is weak.
+  const sheen = smoothstep(float(0.2), float(glassH), up).mul(0.35);
+  const glass = cGlass.mul(float(1).add(sheen));
+  // `detail()`, CALLED: concreteDetail hands back a Fn, and multiplying by the
+  // Fn itself instead of its result is what first rendered these slabs black.
+  const concrete = cConcrete.mul(detail());
+
+  let col = mix(concrete, glass, isGlass);
+  col = mix(col, cFrame, frame);
+  mat.colorNode = col;
+  mat.roughnessNode = mix(float(0.86), mix(float(0.06), float(0.45), frame), isGlass);
+  mat.metalnessNode = frame.mul(0.6);
+
+  /*
+   * LIT INSIDE after dark: a ceiling strip seen through the top of the glass,
+   * and a softer warm fill below it. Warm, because a walkway is; a dark tube
+   * strung between two lit towers reads as something broken.
+   */
+  const ceiling = smoothstep(float(glassH - 0.55), float(glassH - 0.15), up);
+  const fill = float(0.18);
+  const pane = isGlass.mul(float(1).sub(frame));
+  // By day only the ceiling strip shows through; the warm fill of the room is a
+  // night thing — by day it greyed every pane, which is not what glass does.
+  const lit = pane.mul(ceiling.mul(mix(float(0.25), float(0.9), uNight)).add(fill.mul(uNight)));
+  const lightsOn = float(1.0);
+
+  const V = normalize(cameraPosition.sub(positionWorld));
+  const N = normalize(normalWorld);
+  const R = reflect(V.negate(), N);
+  const cosV = clamp(dot(N, V), 0.0, 1.0);
+  const fresnel = float(0.06).add(float(0.94).mul(pow(float(1).sub(cosV), 5.0)));
+  // Kept DARK and blue on purpose, matched by eye to the tower glass either side:
+  // the first pass (horizon 0.62, fresnel up to 0.97) read as frosted white.
+  const sky = mix(vec3(0.34, 0.40, 0.47), vec3(0.16, 0.25, 0.38), smoothstep(-0.05, 0.6, R.y))
+    // Below the horizon the pane reflects the street canyon, not the sky.
+    .mul(mix(float(0.6), float(1.0), smoothstep(-0.25, 0.05, R.y)));
+  /*
+   * TUNED IN THE GAME, three passes, from under a bridge at street level:
+   *   0.12 + 0.85·F   frosted white panes
+   *   0.03 + 0.32·F   a black band; the mullions vanished into it
+   *   0.14 + 0.38·F   blue-grey, reads as the same glass as the towers beside it
+   * From below a pane mostly reflects the canyon, which is why the floor is not
+   * lower: physically right and visually a hole in the sky.
+   */
+  const reflection = sky.mul(fresnel.mul(0.38).add(0.14)).mul(pane).mul(float(1).sub(uNight.mul(0.85)));
+
+  mat.emissiveNode = vec3(1.0, 0.88, 0.70).mul(lit).mul(lightsOn).mul(uGlow).add(reflection);
   return { material: mat, uGlow };
 }
 
@@ -115,13 +231,16 @@ export function makeBridgeMaterial(uNight, P) {
  * needs nothing new plumbed through the city. Returns null when the seed
  * produced no eligible pair, which is a legitimate outcome and not an error.
  */
-export function placeCityBridges({ buildings, archetypes, rand, params = {} } = {}) {
+export function placeCityBridges({ buildings, archetypes, rand, originCellX = 0, originCellZ = 0, params = {} } = {}) {
   const P = { ...BRIDGE_DEFAULTS, ...params };
   if (!P.bridges || !buildings?.length) return null;
 
   const byCell = new Map();
   for (const b of buildings) byCell.set(`${b.cx},${b.cz}`, b);
   const gap = (P.streetLots ?? 1) + 1;
+  const blockLots = P.blockLots ?? 4;
+  const pitch = blockLots + (P.streetLots ?? 1);
+  const pmod = (v, m) => ((v % m) + m) % m;
 
   const spans = [];
   const half = (b, alongX) => {
@@ -135,6 +254,13 @@ export function placeCityBridges({ buildings, archetypes, rand, params = {} } = 
     if (hA < P.bridgeMinHeight) continue;
     // Only +x and +z, so each pair is considered once rather than twice.
     for (const [dx, dz] of [[gap, 0], [0, gap]]) {
+      /*
+       * A STREET IS ONLY BETWEEN THEM IF `b` ENDS ITS BLOCK. Anywhere else the
+       * cell in between is another lot — the bug that put most of this city's
+       * bridges through the middle of a tower. See the header.
+       */
+      const idx = dx ? pmod(b.cx - originCellX, pitch) : pmod(b.cz - originCellZ, pitch);
+      if (idx !== blockLots - 1) continue;
       const o = byCell.get(`${b.cx + dx},${b.cz + dz}`);
       if (!o) continue;
       const hB = o.top - o.y;
