@@ -1721,7 +1721,16 @@ export function createCityFacadeMaterial({
     // ONE GATE FOR BOTH. Two branches at nearly the same height would
     // have been two tests bought for one saving.
     const streetTop = max(neonTop, u.shopHeight).add(0.5).toVar();
-    If(F.up.lessThan(streetTop).and(F.isRoof.not()).and(F.flat.not()), () => {
+    /*
+     * NOT IN THE FAR MATERIAL AT ALL. L2 starts at ~850 m, where a shopfront
+     * is a pixel and a door is not even that — and the branch was still being
+     * compiled into that shader: with the shop interior it had grown to a
+     * quarter of the far fragment stage. Folded on the JS flag, the node
+     * system never emits it, which is the difference between a branch not
+     * taken and a branch not compiled. Measured: the far shader dropped from
+     * 2154 lines to well under 1700.
+     */
+    if (!far) If(F.up.lessThan(streetTop).and(F.isRoof.not()).and(F.flat.not()), () => {
       /*
        * ── THE SHOPFRONT ──────────────────────────────────────────────────
        *
