@@ -3570,6 +3570,47 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * `auto`/`free` take whichever of the two the ray reaches FIRST, so aiming at
    * a bridge gets the bridge and aiming past its edge gets the valley floor.
    */
+  /**
+   * ── WHERE THE RAY MEETS THE GAME'S OWN GROUND ──────────────────────────────
+   *
+   * `app.pickWorldAtClient` maps the cursor through TERRAIN UV and ends with
+   *
+   *     return ( u >= 0 && u <= 1 && v >= 0 && v <= 1 ) ? { u, v } : null;
+   *
+   * — a hard edge at `WORLD_SIZE / 2`, 1024 m from the centre, and it does not
+   * care whether the terrain is switched ON. The city's street plane is
+   * `extent * 2.6` across, 3120 m at the default extent, so the outer third of
+   * the city had no placeable ground at all: the ghost simply vanished past a
+   * radius. Reported from the game, with the city on and the terrain off.
+   *
+   * The rule this restores is the honest one: YOU CAN BUILD WHERE THE CAR HAS
+   * GROUND. `terrainH` is that sampler already — the city street, the flat
+   * debug ground, or NaN — so this only has to find WHERE the ray crosses it.
+   * Both surfaces are horizontal, so one ray/plane intersection is exact; the
+   * height is re-read at the hit and the plane re-crossed once in case it is
+   * not (the flat ground has its own sampler). Re-reading is also what keeps a
+   * HOLE a hole: over the underpass trench `terrainH` is NaN, so this returns
+   * nothing and the ghost stays red rather than hanging over the drop.
+   *
+   * It runs ONLY when the terrain pick already came back empty, and only while
+   * a brush is live, so it costs nothing anywhere else.
+   */
+  const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const _groundHit = new THREE.Vector3();
+  function pickGameGround(ray) {
+    let y = (city && cityWanted) ? (city.params.groundY ?? 0) : 0;
+    for (let i = 0; i < 2; i++) {
+      _groundPlane.constant = -y;
+      if (!ray.intersectPlane(_groundPlane, _groundHit)) return null;
+      const h = terrainH(_groundHit.x, _groundHit.z);
+      if (!isFinite(h)) return null;
+      if (Math.abs(h - y) < 0.01) { _groundHit.y = h; return _groundHit.clone(); }
+      y = h;
+    }
+    _groundHit.y = y;
+    return _groundHit.clone();
+  }
+
   function pickPlacementSurface(clientX, clientY, mode = SURFACE_SNAP.mode) {
     const rect = renderer.domElement.getBoundingClientRect();
     _brushNdc.set(
@@ -3584,7 +3625,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       const hit = deckBvh.raycastFirst(_brushRay.ray.origin, _brushRay.ray.direction, 5000);
       if (hit?.point) deck = _brushPoint.set(hit.point.x, hit.point.y, hit.point.z).clone();
     }
-    const terr = app.pickWorldAtClient?.(clientX, clientY)?.point?.clone() ?? null;
+    // Terrain first where there is terrain; the game's own ground everywhere
+    // else — see pickGameGround for the 1024 m edge this gets past.
+    const terr = app.pickWorldAtClient?.(clientX, clientY)?.point?.clone()
+      ?? pickGameGround(_brushRay.ray);
 
     // ROAD mode still reports the TERRAIN point when it misses the deck, marked
     // invalid. The ghost has to stay under the cursor to be useful feedback — a
@@ -9188,6 +9232,12 @@ ${e.message}`);
       getCityCollide: () => cityCollide,
       reseedCity,
       getCityStats: () => city?.stats ?? null,
+      /** The ground the car stands on at a world point — terrain, city street,
+       *  the flat debug ground, or NaN where there is none (outside them all,
+       *  and over the underpass trench). Exposed for the same reason
+       *  `clearanceAt` is: a harness and the console should be able to ask the
+       *  question placement and physics ask, rather than a copy of it. */
+      groundAt: (x, z) => terrainH(x, z),
       /** The facade's live uniforms, for tuning its look from the console:
        *  `__roadGame.cityFacadeUniforms().bayFit.value = 1` puts the window
        *  grid back to stretched-to-fit without a reload. A GETTER, because the
@@ -10046,6 +10096,10 @@ ${e.message}`);
     get checkpointRun() { return checkpoints?.run ?? null; },
     startCheckpointRush: () => toggleCheckpointRush(),
     getCity: () => cityWanted,
+    /** The ground the car stands on at a world point — terrain, city street,
+     *  flat debug ground, or NaN where there is none. Same sampler placement
+     *  and physics use, exposed for the console and for harnesses. */
+    groundAt: (x, z) => terrainH(x, z),
     setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
     getCityCollide: () => cityCollide,
     /* ── STREET SURFACE ────────────────────────────────────────────────────
