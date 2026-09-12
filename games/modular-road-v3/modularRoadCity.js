@@ -746,8 +746,17 @@ export function createModularRoadCity({
         const i = (iz * LOT_TEX_SIZE + ix) * 4;
         facade.lotHeights.data[i] = b.y;
         facade.lotHeights.data[i + 1] = b.top;
-        facade.lotHeights.data[i + 2] = b.district;
-        facade.lotHeights.data[i + 3] = b.btype;
+        /*
+         * B carries BOTH the district and the type — `district + 4 * btype`,
+         * each 0..2 — because A had to be freed for the building's Y-SCALE.
+         * The facade lays its floors out from the face's height, and that
+         * height is the authored tier height times this scale; read from a
+         * screen derivative instead, it dithered the floor lines on any
+         * building whose height fell near a half-floor. See `Hf` in
+         * modularRoadCityFacade.js.
+         */
+        facade.lotHeights.data[i + 2] = b.district + 4 * b.btype;
+        facade.lotHeights.data[i + 3] = b.scaleY || 1;
       }
     }
     facade.lotHeights.texture.needsUpdate = true;
@@ -1585,6 +1594,9 @@ export function createModularRoadCity({
     facadeUniforms: facade.uniforms,
     /** The AC units and balconies, for a harness to check against the windows. */
     get mounts() { return mounts; },
+    /** The placed buildings — position, archetype, scale, district, type — for
+     *  a harness to check anything placed against them. Read only. */
+    get buildings() { return buildings; },
     facadeMaterial: facade.material,
     /** The L2 tier's cheaper variant, sharing the near one's uniforms. */
     facadeFarMaterial: facade.farMaterial,

@@ -734,15 +734,28 @@ export function createCityFacadeMaterial({
      * height. An attribute is per-face constant by construction, so the flip
      * is not made less likely — it is impossible.
      *
-     * The HEIGHT stays a derivative on purpose: instances carry a per-building
-     * Y-scale, so the authored height is not the world height, and the scale
-     * is not available here on the BatchedMesh path. `nF` rounds rather than
-     * floors and `fh` changes by only 1/nF when it moves, so the same failure
-     * is both rarer and far milder there — measured: nudging `floorHeight`
-     * does not produce the artifact, nudging `bayWidth` does.
+     * ── AND SO IS THE HEIGHT, NOW. ──────────────────────────────────────────
+     *
+     * It stayed a derivative for a while, on the argument that `nF` rounds
+     * rather than floors and so flips more rarely and more mildly. Rarer,
+     * yes: on most buildings `Hf / floorH0` sits nowhere near a half and the
+     * round is stable. But a city has two thousand buildings, and the few
+     * whose tier height fell near a half-floor dithered every floor line —
+     * a coloured noise in horizontal bands, exactly the stipple the width fix
+     * removed on the other axis. Reported from orbit, on "a few buildings".
+     *
+     * The authored tier height is on the same attribute (`aFace.y`); what was
+     * missing was the instance's Y-scale, which the shader cannot read from a
+     * BatchedMesh. It reads it from the lot texture instead — the city writes
+     * `scaleY` into the alpha channel alongside the heights — so the height
+     * is exact on every backend, and a floor count can no longer flip.
      */
     const W = attribute("aFace", "vec2").x.clamp(0.5, 400.0).toVar();
-    const Hf = abs(pdx.y).add(abs(pdy.y)).div(vfw).clamp(0.5, 700.0).toVar();
+    // WHICH BUILDING — read here, because the face height needs its scale.
+    const lot = floor(positionWorld.xz.div(u.lotSize)).toVar();
+    const cell = clamp(lot.sub(uLotOrigin), vec2(0.0), uLotCount.sub(1.0));
+    const info = textureLoad(lotTexture, ivec2(cell)).toVar();
+    const Hf = attribute("aFace", "vec2").y.mul(info.a.max(0.05)).clamp(0.5, 700.0).toVar();
     // Which way the box UV runs relative to +uAxis / +y, so u0 and v0 always
     // increase along +uAxis and upward and the ray components agree with them.
     const sU = adx.mul(udx).add(ady.mul(udy));
@@ -753,8 +766,6 @@ export function createCityFacadeMaterial({
     const mpxU = ufw.mul(W).toVar();
     const mpxV = vfw.mul(Hf).toVar();
 
-    // WHICH BUILDING.
-    const lot = floor(positionWorld.xz.div(u.lotSize)).toVar();
     // SEVEN per-lot dice from ONE hash. These are constants over a whole
     // building and were six full PCG rounds per PIXEL. `fract(h * k)` with
     // co-prime-ish multipliers decorrelates well enough for what they drive —
@@ -777,11 +788,10 @@ export function createCityFacadeMaterial({
     const h9 = fract(h1.mul(7307.17)).toVar();
     const h10 = fract(h1.mul(9173.29)).toVar();
     const h11 = fract(h1.mul(11311.7)).toVar();
-    const cell = clamp(lot.sub(uLotOrigin), vec2(0.0), uLotCount.sub(1.0));
-    const info = textureLoad(lotTexture, ivec2(cell)).toVar();
     const baseY = info.r;
     const bldgH = max(info.g.sub(info.r), float(1.0)).toVar();
-    const district = info.b, btype = info.a;
+    // B packs `district + 4 * btype`; A is the instance's Y-scale (see Hf).
+    const district = mod(info.b, 4.0), btype = floor(info.b.div(4.0));
     const isIndustrial = district.greaterThan(1.5).toVar();
     const isCurtain = PIN === null
       ? btype.greaterThan(0.5).and(btype.lessThan(1.5)).toVar()
@@ -1934,7 +1944,7 @@ export function createCityFacadeMaterial({
     const info = textureLoad(lotTexture, ivec2(cell));
     const up = positionWorld.y.sub(info.r).toVar();
     const isPunched = PIN === null
-      ? info.a.lessThan(0.5) : PIN === BUILDING_TYPE.punched;
+      ? floor(info.b.div(4.0)).lessThan(0.5) : PIN === BUILDING_TYPE.punched;
     const acrossW = positionWorld.x.mul(nW.z).sub(positionWorld.z.mul(nW.x)).toVar();
 
     // Brick relief for the bump — only on surfaces PARALLEL to the box face,
@@ -2088,7 +2098,11 @@ export function createCityFacadeMaterial({
     texture: lotTexture,
     data: lotData,
     size: LOT_TEX_SIZE,
+    /** The cell the texture's (0,0) stands for — a harness needs it to find a
+     *  building's texel. */
+    origin: [0, 0],
     setOrigin(cellX, cellZ, countX, countZ) {
+      lotHeights.origin = [cellX, cellZ];
       uLotOrigin.value.set(cellX, cellZ);
       uLotCount.value.set(
         Math.max(1, Math.min(countX, LOT_TEX_SIZE)),

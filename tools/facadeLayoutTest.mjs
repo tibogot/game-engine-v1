@@ -143,6 +143,27 @@ const check = (name, ok, extra = "") => {
     check("every unit and balcony stands within its own building's reach", off === 0, `${off} of ${n} astray`);
     check("...and none on the ground floor", low === 0, `${low} below 3 m`);
 
+    /*
+     * THE LOT TEXTURE ROUND-TRIPS. The shader reads the building's district,
+     * type and Y-SCALE from one texel; the scale is what makes the face height
+     * exact (see `Hf`). B packs `district + 4 * btype`, A is the scale — check
+     * every building's texel says what the building is.
+     */
+    {
+      const lh = city.lotHeights, [ox, oz] = lh.origin;
+      let n = 0, wrong = 0;
+      for (const b of city.buildings) {
+        const ix = b.cx - ox, iz = b.cz - oz;
+        if (ix < 0 || iz < 0 || ix >= lh.size || iz >= lh.size) continue;
+        const i = (iz * lh.size + ix) * 4;
+        const packed = lh.data[i + 2], scale = lh.data[i + 3];
+        n++;
+        if (packed % 4 !== b.district || Math.floor(packed / 4) !== b.btype) wrong++;
+        if (Math.abs(scale - (b.scaleY || 1)) > 1e-6) wrong++;
+        if (Math.abs(lh.data[i + 1] - lh.data[i] - (b.top - b.y)) > 1e-4) wrong++;
+      }
+      check("every building's texel reads back its district, type and Y-scale", n > 100 && wrong === 0, `${wrong} of ${n} wrong`);
+    }
     // The LOD fill: a view from the middle sees some, never more than capacity.
     const view = { pos: new THREE.Vector3(0, 30, 0), inView: () => true };
     m.applyLod(view);

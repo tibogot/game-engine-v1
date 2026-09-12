@@ -178,7 +178,7 @@ export function createBakedFacadeMaterial({
     const lot = floor(positionWorld.xz.div(u.lotSize)).toVar();
     const cell = clamp(lot.sub(uLotOrigin), vec2(0.0), uLotCount.sub(1.0));
     const info = textureLoad(lotTex, ivec2(cell)).toVar();
-    const baseY = info.r, btype = info.a;
+    const baseY = info.r, btype = floor(info.b.div(4.0));   // B packs district + 4 * type
     const bldgH = max(info.g.sub(info.r), float(1.0)).toVar();
     const h1 = hash21(lot).toVar();
     const h2 = fract(h1.mul(197.31)).toVar();
