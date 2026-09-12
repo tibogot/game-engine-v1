@@ -122,7 +122,7 @@ import {
   floor, ceil, round, fract, mod, dot, sin, pow, clamp, ivec2, uint, color, hash, uniformArray,
   positionWorld, positionView, normalWorldGeometry, normalView,
   cameraPosition, cameraNormalMatrix, uv, dFdx, dFdy, fwidth, step, textureLoad,
-  normalize, reflect, sign, length, attribute,
+  normalize, reflect, sign, length, attribute, sqrt,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 
@@ -151,6 +151,8 @@ const TYPE_NAME = ["Punched", "Curtain", "Ribbon"];
 export const NEON_PALETTE = [
   0xff2ea6, 0x25e0ff, 0xffd9a0, 0xff8a1f, 0x39ff8b, 0xff2d3a,
 ];
+
+export const FABRIC_PALETTE = [0xcabfa6, 0x8c7f6e, 0x706a64, 0x5f7285, 0x7f8b70, 0x9a5a48];
 
 export const PALETTE = [
   0xa8553c, 0x9c4a34,                                 // terracotta / red brick (accent)
@@ -474,6 +476,28 @@ export const FACADE_DEFAULTS = {
   crownHeight: 1.6,
   crownBoost: 5.0,
 
+  /**
+   * ── VARIATION WITHIN A BUILDING ───────────────────────────────────────────
+   *
+   * Measured against three's own city, ours varied BETWEEN buildings — palette,
+   * district, height — and not within one: every window on a tower was the
+   * same rectangle in the same grid. That is exactly why it read as "the same
+   * tower in a different colour". Everything below is a per-lot dice off the
+   * hash the facade already has, so it is a uniform and a few ALU, not a
+   * pipeline.
+   */
+  /** Glazing bars: some lots split each opening into paired or tripled panes,
+   *  some add a transom. Paint on the pane, at the pane's depth. */
+  glazingBars: 1.0,
+  barWidth: 0.07,
+  /** Chance a masonry lot gets ARCHED heads — and, with a base colonnade, an
+   *  arcade. The example's arcade is its most distinctive ground floor. */
+  archChance: 0.30,
+  /** Curtain walls come in three finishes: anodised panel, all-glass (the
+   *  spandrel is dark tinted glass), and stone-clad strip. */
+  curtainStyles: 1.0,
+  /** Blinds, part-lowered, on some of the rooms that have no curtain. */
+  blinds: 1.0,
   /** Relief master (0 = flat paint) and the analytic sun shadow. */
   relief: 1.0,
   reliefShadow: 1.0,
@@ -654,6 +678,9 @@ export function createCityFacadeMaterial({
    * cyan, warm white, amber, green, and a deep red.
    */
   const uNeon = uniformArray(NEON_PALETTE.map((hex) => new THREE.Color(hex)));
+  /** The example's curtain fabrics: cream, taupe, grey, blue, sage, terracotta.
+   *  Six, so a street of drawn curtains is not two colours repeating. */
+  const uFabric = uniformArray(FABRIC_PALETTE.map((hex) => new THREE.Color(hex)));
 
   // ══════════════════════════════════════════════════════════════════════════
   // PURE BUILDERS — plain functions, no `If`, select-chains only, so BOTH the
@@ -744,6 +771,12 @@ export function createCityFacadeMaterial({
     // city where every deep-piered building also has its window grid pushed the
     // same way off centre is a city with one designer's tic.
     const h7 = fract(h1.mul(3571.13)).toVar();
+    // Four more for the in-building variation: pane grouping, transom, arch,
+    // curtain finish. Same reasoning as h7 — each its own dice.
+    const h8 = fract(h1.mul(5153.71)).toVar();
+    const h9 = fract(h1.mul(7307.17)).toVar();
+    const h10 = fract(h1.mul(9173.29)).toVar();
+    const h11 = fract(h1.mul(11311.7)).toVar();
     const cell = clamp(lot.sub(uLotOrigin), vec2(0.0), uLotCount.sub(1.0));
     const info = textureLoad(lotTexture, ivec2(cell)).toVar();
     const baseY = info.r;
@@ -777,6 +810,21 @@ export function createCityFacadeMaterial({
     const winRatio = selT(isCurtain, u.curtainWinRatio, selT(isRibbon, u.ribbonWinRatio,
       select(isIndustrial, u.windowRatio.mul(0.72), u.windowRatio))).toVar();
     const border = selT(isPunched, u.frameBorder, float(0.015)).toVar();
+    /*
+     * ── HOW THE OPENING IS DIVIDED, PER LOT ──────────────────────────────────
+     * `groups` panes across (1, 2 or 3 — paired and tripled windows are most
+     * of what makes a masonry street look built rather than tiled), an
+     * optional transom at 68% of the height, and on some lots an ARCHED head.
+     * Curtain wall keeps its big single panes; ribbon gets pairs.
+     */
+    const groups = selT(isCurtain, float(1.0), selT(isRibbon, float(2.0),
+      select(h8.lessThan(0.45), float(1.0), select(h8.lessThan(0.8), float(2.0), float(3.0)))))
+      .mul(step(0.5, u.glazingBars)).max(1.0).toVar();
+    const transom = selT(isPunched, step(h9, float(0.35)).mul(step(0.5, u.glazingBars)), float(0.0)).toVar();
+    const arched = varT(andT(isPunched, andT(isIndustrial.not(), h10.lessThan(u.archChance))));
+    /** Curtain finish: 0 panel, 1 all-glass, 2 stone strip. */
+    const cStyle = selT(isCurtain,
+      floor(h11.mul(2.999)).mul(step(0.5, u.curtainStyles)), float(0.0)).toVar();
     const floorH0 = spread(u.floorHeight, u.floorSpread, h1).max(2.6).toVar();
     const courseEvery = selT(andT(isPunched, h3.lessThan(u.courseChance)),
       floor(h2.mul(5.99)).add(3.0), float(0.0)).toVar();
@@ -821,6 +869,19 @@ export function createCityFacadeMaterial({
     const slotL = pierW.mul(0.5).toVar(), slotR = bay.sub(pierW.mul(0.5)).toVar();
     const oL = slotL.add(border).toVar(), oR = max(slotR.sub(border), slotL.add(border).add(0.05)).toVar();
     const oB = fh.sub(winH).mul(0.5).toVar(), oT = fh.add(winH).mul(0.5).toVar();
+    /*
+     * THE ARCH. A segmental head: the top edge drops from `oT` at the centre
+     * by `rise·(1 − sqrt(1 − x²))` toward the jambs, so it is a true circular
+     * arc — semicircular when the rise equals the half-width. Applied to the
+     * opening, its frame, the trace's opening test and the head reveal, so
+     * the ray sees the same hole the paint does.
+     */
+    const archRise = selT(arched, min(oR.sub(oL).mul(0.5), winH.mul(0.42)), float(0.0)).toVar();
+    const archTop = (bu, top) => {
+      const cx = oL.add(oR).mul(0.5), hw = max(oR.sub(oL).mul(0.5), 0.05);
+      const x = bu.sub(cx).div(hw).clamp(-1.0, 1.0);
+      return top.sub(archRise.mul(float(1.0).sub(sqrt(max(float(1.0).sub(x.mul(x)), 0.0)))));
+    };
     const pitch = select(courseEvery.greaterThan(0.5), courseEvery.mul(fh), float(1e5)).toVar();
 
     // The BASE: on a punched tower's ground tier, two or three floors of deep
@@ -857,6 +918,7 @@ export function createCityFacadeMaterial({
       lot, h1, h2, h3, h4, h5, h6, faceKey, up, belowTop, bldgH,
       isIndustrial, isCurtain, isRibbon, isPunched, flat,
       bay, count, nF, fh, winH, slotL, slotR, oL, oR, oB, oT, uOrigin,
+      groups, transom, arched, archRise, archTop, cStyle,
       pierW, pierD, reveal, border, pitch, courseH, courseEvery,
       hasBase, baseH, nBase, grime, reflectMin, sharp, reliefAmt, cellsPerPx,
     };
@@ -896,11 +958,12 @@ export function createCityFacadeMaterial({
     // The base storey's opening is taller and starts lower.
     const inBase = andT(F.hasBase, va.lessThan(F.baseH));
     const bB = F.fh.mul(0.22), bT = F.baseH.sub(F.fh.mul(0.28));
-    const openTall = band(bu, F.oL, F.oR, F.aaU).mul(band(va, bB, bT, F.aaV));
-    const openNorm = band(bu, F.oL, F.oR, F.aaU).mul(band(fv, F.oB, F.oT, F.aaV));
+    // Arched lots arch the base too — that is the arcade.
+    const openTall = band(bu, F.oL, F.oR, F.aaU).mul(band(va, bB, F.archTop(bu, bT), F.aaV));
+    const openNorm = band(bu, F.oL, F.oR, F.aaU).mul(band(fv, F.oB, F.archTop(bu, F.oT), F.aaV));
     const opening = selT(inBase, openTall, openNorm).mul(inGrid);
     const frame = band(bu, F.oL.sub(F.border), F.oR.add(F.border), F.aaU)
-      .mul(band(fv, F.oB.sub(F.border), F.oT.add(F.border), F.aaV))
+      .mul(band(fv, F.oB.sub(F.border), F.archTop(bu, F.oT).add(F.border), F.aaV))
       .sub(openNorm).max(0.0).mul(selT(inBase, float(0.0), float(1.0))).mul(inGrid);
     // String courses: at every `courseEvery` floor line, at the base's head,
     // and the cornice at the tier top (the same band, 1.6× taller).
@@ -910,9 +973,15 @@ export function createCityFacadeMaterial({
       .and(mod(fl, max(F.courseEvery, 1.0)).lessThan(0.5)).and(fl.greaterThan(0.5));
     const onBase = andT(F.hasBase, abs(fl.sub(F.nBase)).lessThan(0.5));
     const chH = select(isTop, F.courseH.mul(1.6), F.courseH);
+    const cv = va.sub(fl.mul(F.fh));
     const course = selT(orT(isTop.or(onPitch), onBase), float(1.0), float(0.0))
-      .mul(band(va.sub(fl.mul(F.fh)), chH.mul(-0.5), chH.mul(0.5), F.aaV));
-    return { bi, bu, fi, fv, inBase, pier: float(1.0).sub(inSlot), opening, frame, course };
+      .mul(band(cv, chH.mul(-0.5), chH.mul(0.5), F.aaV));
+    // The cornice is two steps in the example; here the lower step's
+    // underside is a shadow line across the band's bottom third — the read of
+    // a projecting lip, painted, on the band the ray already stops at.
+    const under = course.mul(band(cv, chH.mul(-0.5), chH.mul(-0.5).add(chH.mul(0.3)), F.aaV))
+      .mul(select(isTop, float(1.0), float(0.6)));
+    return { bi, bu, fi, fv, inBase, pier: float(1.0).sub(inSlot), opening, frame, course, under };
   }
 
   /**
@@ -985,9 +1054,9 @@ export function createCityFacadeMaterial({
     const inBase1 = andT(F.hasBase, va1.lessThan(F.baseH));
     const bB = F.fh.mul(0.22), bT = F.baseH.sub(F.fh.mul(0.28));
     const inOpenN = buS.greaterThan(F.oL).and(buS.lessThan(F.oR))
-      .and(fv1.greaterThan(F.oB)).and(fv1.lessThan(F.oT));
+      .and(fv1.greaterThan(F.oB)).and(fv1.lessThan(F.archTop(buS, F.oT)));
     const inOpenB = buS.greaterThan(F.oL).and(buS.lessThan(F.oR))
-      .and(va1.greaterThan(bB)).and(va1.lessThan(bT));
+      .and(va1.greaterThan(bB)).and(va1.lessThan(F.archTop(buS, bT)));
     const inOpen = selT(inBase1, inOpenB, inOpenN)
       .and(onFront.not()).and(hitFlank.or(hitCourse).not()).and(F.flat.not()).toVar();
     const inFrame = varT(andT(
@@ -996,7 +1065,10 @@ export function createCityFacadeMaterial({
       notT(inBase1)));
     // The opening's own bounds, so the reveal walls know where they are.
     const wB = selT(inBase1, bB, fi1.mul(F.fh).add(F.oB)).toVar();
-    const wT = selT(inBase1, bT, fi1.mul(F.fh).add(F.oT)).toVar();
+    // The head follows the arch at this pixel's own across-position: a flat
+    // head at the LOCAL arch height, which is the right hole to within a
+    // reveal's width and costs nothing over the rectangle.
+    const wT = selT(inBase1, F.archTop(buS, bT), fi1.mul(F.fh).add(F.archTop(buS, F.oT))).toVar();
 
     // ── Level 3: the reveal — jamb, sill, head — then the pane behind it.
     const rev = selT(inBase1, u.baseRecess.mul(0.35), F.reveal).toVar();
@@ -1115,7 +1187,19 @@ export function createCityFacadeMaterial({
     let base = uPalette.element(uint(pickIdx));
     base = base.mul(F.h6.mul(0.12).add(0.94)).mul(u.wallTint)
       .mul(select(F.isIndustrial, vec3(0.86, 0.87, 0.88), vec3(1.0)));
-    const stoneBase = selT(orT(F.isCurtain, F.isRibbon), u.mullionColor, base).toVar();
+    /*
+     * THE CURTAIN WALL'S FINISH. Three, per lot: the anodised panel it always
+     * had; ALL-GLASS, where the spandrel is dark tinted glass so the whole
+     * face reads as one sheet (the classic mirror tower); and STONE-CLAD, a
+     * limestone strip between the window bands. The mullions stay metal.
+     */
+    const cGlassCol = vec3(0.09, 0.11, 0.13);
+    const curtainBase = select(F.cStyle.lessThan(0.5), u.mullionColor,
+      select(F.cStyle.lessThan(1.5), cGlassCol, base.mul(0.92)));
+    const stoneBase = selT(F.isCurtain, curtainBase, selT(F.isRibbon, u.mullionColor, base)).toVar();
+    const spandrelRough = selT(F.isCurtain,
+      select(F.cStyle.lessThan(1.5).and(F.cStyle.greaterThan(0.5)), u.glassRough.add(0.1), u.wallRough),
+      u.wallRough).toVar();
     const jointAmt = selT(F.isPunched, float(1.0), float(0.0)).toVar();
     /*
      * A METAL PANEL DOES NOT WEATHER LIKE LIMESTONE. The soot streaks and the
@@ -1172,7 +1256,7 @@ export function createCityFacadeMaterial({
         .mul(vec3(float(1.0).add(wc), 1.0, float(1.0).sub(wc)));
       return {
         col: mix(mix(tint, tint.mul(0.6), joint), u.sootColor, dirt),
-        rough: u.wallRough.add(joint.mul(0.12)),
+        rough: spandrelRough.add(joint.mul(0.12)),
       };
     };
     const frameCol = stoneBase.mul(0.55).mul(float(1.0).add(tone)).toVar();   // dressed stone
@@ -1209,8 +1293,9 @@ export function createCityFacadeMaterial({
       const wh = mix(steady, churn, churner);
       const rh = hash31(vec3(F.lot.mul(1.3), key.mul(0.37)));
       const rh2 = hash31(vec3(F.lot.mul(0.7), key.mul(1.91)));
+      const rh3 = hash31(vec3(F.lot.mul(0.5), key.mul(2.71)));
       return {
-        lit: step(wh, bldgLit).mul(floorLit), mean: bldgLit, rh, rh2,
+        lit: step(wh, bldgLit).mul(floorLit), mean: bldgLit, rh, rh2, rh3,
         litCol: mix(u.litWarm, u.litCool, step(0.88, hash31(vec3(F.lot.mul(0.9), key.mul(2.3))))),
         curtain: step(float(1.0).sub(u.curtains), rh2),
       };
@@ -1257,6 +1342,22 @@ export function createCityFacadeMaterial({
         glint: uSunCol.mul(glint),
       };
     };
+    /**
+     * GLAZING BARS, as paint at the pane. `pu`/`pv` are 0..1 across and up the
+     * opening. The internal divisions of `groups` panes, and the transom, each
+     * `barWidth` metres wide, anti-aliased with the face's own filter.
+     */
+    const barsAt = (pu, pv, openW, openH) => {
+      const g = F.groups;
+      const k = round(pu.mul(g));
+      const inner = step(0.5, k).mul(step(k, g.sub(0.5)));
+      const du = abs(pu.mul(g).sub(k)).div(g).mul(openW);
+      const hwB = u.barWidth.mul(0.5);
+      const vert = smoothstep(hwB.add(F.aaU), hwB.sub(F.aaU), du).mul(inner);
+      const dv = abs(pv.sub(0.68)).mul(openH);
+      const horz = smoothstep(hwB.add(F.aaV), hwB.sub(F.aaV), dv).mul(F.transom);
+      return max(vert, horz).clamp(0.0, 1.0);
+    };
     const glassOf = (roomCol, roomLit, litCol, paneV, N) => {
       const dust = smoothstep(float(-0.15), float(0.5),
         vnoise2(vec2(F.u0.mul(1.3).add(F.h4.mul(70.0)), F.up.mul(0.06))).mul(2.0)).mul(0.45);
@@ -1291,8 +1392,12 @@ export function createCityFacadeMaterial({
     const c0 = classify(F, F.u0, F.v0);
     const winRaw = c0.opening.mul(float(1.0).sub(c0.pier)).mul(float(1.0).sub(c0.course)).mul(notFlat);
     const coverage = F.oR.sub(F.oL).mul(F.oT.sub(F.oB)).div(F.bay.mul(F.fh)).clamp(0.0, 1.0).mul(notFlat);
-    const win0 = mix(coverage, winRaw, F.sharp).toVar();
-    const st0 = stoneAt(F.acrossW, F.up, c0.pier.mul(0.12).add(c0.course.mul(0.14)));
+    // Bars take their share out of the sharp window and out of the far mean.
+    const bar0 = barsAt(c0.bu.sub(F.oL).div(max(F.oR.sub(F.oL), 0.1)),
+      c0.fv.sub(F.oB).div(max(F.winH, 0.1)), F.oR.sub(F.oL), F.winH);
+    const barShare = F.groups.sub(1.0).add(F.transom).mul(u.barWidth).div(max(F.oR.sub(F.oL), 0.5));
+    const win0 = mix(coverage.mul(float(1.0).sub(barShare)), winRaw.mul(float(1.0).sub(bar0)), F.sharp).toVar();
+    const st0 = stoneAt(F.acrossW, F.up, c0.pier.mul(0.12).add(c0.course.mul(0.14)).sub(c0.under.mul(0.30)));
     /*
      * ── THE FLAT PAINT IS THE RELIEF'S AVERAGE, INCLUDING ITS SHADOW ──────────
      *
@@ -1396,7 +1501,7 @@ export function createCityFacadeMaterial({
       // The course front takes the same lift the far paint gives it — the two
       // used to disagree by 0.14, which was a brightness step at the LOD ring.
       const st = stoneAt(stU, select(T.onFront, F.up, stV),
-        select(T.onFront, T.c0.pier.mul(0.12).add(T.c0.course.mul(0.14)), float(0.1)));
+        select(T.onFront, T.c0.pier.mul(0.12).add(T.c0.course.mul(0.14)).sub(T.c0.under.mul(0.30)), float(0.1)));
       nCol.assign(select(T.inFrame.and(T.onFront.not()), frameCol, st.col));
       nRough.assign(st.rough);
       nAO.assign(mix(float(1.0), float(0.78), T.depth.div(max(T.slotD.add(T.rev), 0.05)).clamp(0.0, 1.0)));
@@ -1483,11 +1588,26 @@ export function createCityFacadeMaterial({
         const dw2 = pow(smoothstep(float(0.3), float(1.0), lt.rh2), 2.0).mul(0.5);
         const qu = pu.div(roomW);
         const draped = qu.lessThan(dw).or(qu.greaterThan(float(1.0).sub(dw2))).or(lt.curtain.greaterThan(0.5));
-        const fabric = mix(color(0xcabfa6), color(0x706a64), lt.rh2)
+        const fabric = uFabric.element(uint(floor(lt.rh2.mul(5.999))))
           .mul(mix(float(0.78), float(1.12), fract(pu.mul(2.5))));
-        const roomCol = select(draped, fabric, raw)
+        /*
+         * BLINDS, on some of the rooms with no curtain: a venetian blind
+         * lowered a hashed 25–75% from the head, pale, with a slat rhythm
+         * that fades out before a slat nears a pixel. It is the third state a
+         * window has — open, curtained, blinded — and the one that breaks up
+         * a grid of identical panes most, because it is a HORIZONTAL edge at
+         * a different height in every window.
+         */
+        const pvW = T.va2.sub(T.wB).div(max(T.wT.sub(T.wB), 0.1));
+        const blindOn = step(0.55, lt.rh3).mul(u.blinds).mul(float(1.0).sub(lt.curtain));
+        const drop = float(0.25).add(fract(lt.rh3.mul(13.7)).mul(0.5));
+        const blinded = blindOn.greaterThan(0.5).and(pvW.greaterThan(float(1.0).sub(drop))).and(draped.not());
+        const slatAmt = smoothstep(float(0.03), float(0.006), F.aaV);
+        const slat = mix(float(1.0), float(0.82).add(step(0.5, fract(T.va2.div(0.06))).mul(0.18)), slatAmt);
+        const blindCol = mix(color(0xd9d3c4), color(0xb9b2a6), fract(lt.rh3.mul(7.1))).mul(slat);
+        const roomCol = select(draped, fabric, select(blinded, blindCol, raw))
           .mul(mix(vec3(1.0), lt.litCol, lt.lit.mul(0.85))).mul(mix(float(1.0), float(1.3), lt.lit));
-        const roomLit = lt.lit.mul(select(draped, float(0.2), float(1.0)));
+        const roomLit = lt.lit.mul(select(draped, float(0.2), select(blinded, float(0.35), float(1.0))));
         /*
          * ── THE FURNISHED INTERIOR IS OPTIONAL ────────────────────────────
          *
@@ -1507,9 +1627,11 @@ export function createCityFacadeMaterial({
 
         const g = glassOf(seen, (interiorRooms ? roomLit : lt.lit).mul(u.interior), lt.litCol,
           T.va2.sub(T.wB).div(max(T.wT.sub(T.wB), 0.1)), F.nW);
-        nCol.assign(selT(T.inBase1, g.col.mul(0.3), g.col));
-        nRough.assign(u.glassRough);
-        nGlow.assign(selT(T.inBase1, vec3(0.0), g.glow));
+        const bar = barsAt(T.bu2.sub(F.oL).div(max(F.oR.sub(F.oL), 0.1)),
+          T.va2.sub(T.wB).div(max(T.wT.sub(T.wB), 0.1)), F.oR.sub(F.oL), T.wT.sub(T.wB));
+        nCol.assign(mix(selT(T.inBase1, g.col.mul(0.3), g.col), frameCol.mul(0.9), bar));
+        nRough.assign(mix(u.glassRough, u.wallRough, bar));
+        nGlow.assign(selT(T.inBase1, vec3(0.0), g.glow).mul(float(1.0).sub(bar)));
         nAO.assign(0.8);
         // The pier and the window head both shadow the pane.
         const wJ = T.rev.mul(abs(S.su)).div(S.ldc);
