@@ -40,7 +40,11 @@ console.log(
 check("one tree per archetype, not per building",
   col.stats.archetypes === kit.archetypes.length && col.stats.archetypes < 40);
 // The whole point of the design: a merged city tree would be ~54k triangles.
-check("the trees are archetype-sized, not city-sized", col.stats.tris < 4000, `${col.stats.tris} tris`);
+// The ceiling was 4000 when an archetype's L0 was ~150 triangles; the roofline
+// pass (coping, finials, stepped crowns, hipped roofs) took it to ~280, and a
+// car landing on a roof SHOULD meet those, so the collider keeps baking L0.
+// Still an order of magnitude under city-sized.
+check("the trees are archetype-sized, not city-sized", col.stats.tris < 9000, `${col.stats.tris} tris`);
 check("the build is fast enough to be invisible", col.stats.buildMs < 60, `${col.stats.buildMs.toFixed(1)} ms`);
 check("the collider is live", col.baked === true);
 
