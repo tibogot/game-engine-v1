@@ -77,6 +77,7 @@ import {
 } from "three/tsl";
 import { buildCityKit, disposeCityKit, mulberry32 } from "./modularRoadCityKit.js";
 import { createCityFacadeMaterial, LOT_TEX_SIZE, DISTRICT, BUILDING_TYPE } from "./modularRoadCityFacade.js";
+import { createCityMounts } from "./modularRoadCityMounts.js";
 import {
   createCityViaduct, viaductLayout, viaductKeepOut, viaductFootprint,
 } from "./modularRoadCityViaduct.js";
@@ -239,6 +240,11 @@ export const CITY_DEFAULTS = {
    *  fractions that default to 0 — see modularRoadCitySigns.js. */
   signs: true,
   signParams: {},
+  /** Air-conditioning units in windows and balconies under them — the things
+   *  bolted to a facade that say someone is inside. Two instanced draws,
+   *  range-culled on the LOD tick. See modularRoadCityMounts.js. */
+  mounts: true,
+  mountParams: {},
   /** ONE trivision board on a downtown roof — a landmark, not a class of
    *  signage. Four draws and no per-frame CPU; off and the prop is never
    *  built. See modularRoadCityPrism.js. */
@@ -459,6 +465,7 @@ export function createModularRoadCity({
   let batched = null, batchGeomIds = null, batchInstIds = null;
   let instanced = null;
   let signs = null;
+  let mounts = null;
   let prism = null;
   let bridges = null;
   let viaduct = null;
@@ -878,6 +885,7 @@ export function createModularRoadCity({
       instanced = null;
     }
     if (signs) { group.remove(signs.group); signs.dispose(); signs = null; }
+    if (mounts) { group.remove(mounts.group); mounts.dispose(); mounts = null; stats.mounts = null; }
     if (prism) { group.remove(prism.group); prism.dispose(); prism = null; }
     if (bridges) { group.remove(bridges.group); bridges.dispose(); bridges = null; }
     if (viaduct) { group.remove(viaduct.group); viaduct.dispose(); viaduct = null; }
@@ -904,6 +912,21 @@ export function createModularRoadCity({
 
   // ── Extras: signs and beacons ──────────────────────────────────────────────
   function buildExtras() {
+    /*
+     * WHAT IS BOLTED TO THE WINDOWS. Built from the facade's own layout
+     * arithmetic, transcribed (modularRoadCityFacadeLayout.js), so a unit sits
+     * IN its window rather than beside it. It reads the facade's LIVE params
+     * — bayFit above all — at build time; a change to those after the build
+     * needs a rebuild, the same as everything else placed against a wall.
+     */
+    if (P.mounts) {
+      mounts = createCityMounts({
+        buildings, archetypes: kit.archetypes, facadeParams: facade.params,
+        lotSize: P.lotSize, params: P.mountParams,
+      });
+      group.add(mounts.group);
+      stats.mounts = mounts.stats;
+    }
     if (P.signs) {
       signs = createCitySigns({
         buildings, archetypes: kit.archetypes, seed,
@@ -1533,11 +1556,14 @@ export function createModularRoadCity({
     if (byTurn) {
       furniture?.applyLod(_lodView);
       roofs?.applyLod(_lodView);
+      mounts?.applyLod(_lodView);
       ground?.applyLampLod?.(_lodView);
     } else {
       _lodTurn = (_lodTurn + 1) % 3;
       if (_lodTurn === 0) furniture?.applyLod(_lodView);
-      else if (_lodTurn === 1) roofs?.applyLod(_lodView);
+      // The mounts ride the roofs' turn: both are small, both are building-
+      // bound, and a fourth turn would have slowed every other list's refresh.
+      else if (_lodTurn === 1) { roofs?.applyLod(_lodView); mounts?.applyLod(_lodView); }
       else ground?.applyLampLod?.(_lodView);
     }
   }
@@ -1557,6 +1583,8 @@ export function createModularRoadCity({
      * and no recompile.
      */
     facadeUniforms: facade.uniforms,
+    /** The AC units and balconies, for a harness to check against the windows. */
+    get mounts() { return mounts; },
     facadeMaterial: facade.material,
     /** The L2 tier's cheaper variant, sharing the near one's uniforms. */
     facadeFarMaterial: facade.farMaterial,
