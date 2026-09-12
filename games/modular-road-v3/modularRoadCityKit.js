@@ -132,6 +132,27 @@ export const KIT_DEFAULTS = {
   /** Metres. Deliberately just over a hand-rail: taller reads as a wall. */
   parapetHeight: 1.0,
   parapetThick: 0.3,
+  /**
+   * ── THE ROOFLINE, MEASURED AGAINST THREE'S CITY ────────────────────────────
+   *
+   * Its towers finish: a coping on the parapet, finials at the corners, a
+   * stepped crown, a real roof on the top of it. Ours stopped at a box with a
+   * box on it, and in a game you look at from above that is the difference
+   * you see first. All of it merges into the archetype — no draw, a few dozen
+   * triangles — and goes into L1 as well, because a roofline is silhouette
+   * and the L0/L1 swap happens where a changing one is plainly visible.
+   */
+  /** A stone coping capping every parapet: slightly wider than the wall,
+   *  which is the one line that makes a parapet read as built. */
+  coping: true,
+  copingHeight: 0.12,
+  copingOverhang: 0.08,
+  /** Chance a tower's top parapet carries a stepped pinnacle at each corner. */
+  finialChance: 0.35,
+  /** The mechanical penthouse steps in once or twice as it rises. */
+  crownSteps: true,
+  /** Chance the top step wears a hipped roof instead of a flat cap. */
+  hipRoofChance: 0.30,
 };
 
 /**
@@ -191,6 +212,81 @@ function addFaceSize(g, w, h, d) {
     out[i * 2 + 1] = fh;
   }
   g.setAttribute("aFace", new THREE.BufferAttribute(out, 2));
+}
+
+/**
+ * Drop a geometry's DOWNWARD faces outright.
+ *
+ * For things that stand on something — a coping on its parapet, a finial on
+ * its coping, a roof on its penthouse. `dropBuriedFaces` only removes an
+ * underside that a single upward face completely contains, and a coping
+ * oversails the wall it caps, a finial straddles two coping runs, a hip roof
+ * has no underside anyone could ever see. Their bottoms would otherwise be
+ * opposed coplanar faces, which is a z-fight on the roofline — exactly the
+ * class of thing the kit test guards against.
+ */
+function stripDown(g) {
+  const nrm = g.attributes.normal, idx = g.index;
+  const keep = [];
+  for (let t = 0; t + 2 < idx.count; t += 3) {
+    if (nrm.getY(idx.getX(t)) < -0.9) continue;
+    keep.push(idx.getX(t), idx.getX(t + 1), idx.getX(t + 2));
+  }
+  g.setIndex(keep);
+  return g;
+}
+
+/**
+ * A hipped roof over a `w` x `d` deck at height `y`, rising `h` to a ridge
+ * along the longer axis (a pyramid when the deck is square). Two trapezoids
+ * and two triangles, wound outward from the vertices rather than by hand —
+ * the same rule every other piece of this codebase learned to follow.
+ *
+ * The facade shader reads |n.y| > 0.5 as roof and paints it the roof colour,
+ * which a 30° pitch is comfortably inside; `aFace` gets the deck size like
+ * any other horizontal face. No underside: it sits on the penthouse.
+ */
+function hipRoof(w, d, h, y) {
+  const hw = w / 2, hd = d / 2;
+  const alongX = w >= d;
+  const rl = Math.abs(w - d) / 2;
+  const r0 = alongX ? [-rl, y + h, 0] : [0, y + h, -rl];
+  const r1 = alongX ? [rl, y + h, 0] : [0, y + h, rl];
+  const c0 = [-hw, y, -hd], c1 = [hw, y, -hd], c2 = [hw, y, hd], c3 = [-hw, y, hd];
+  const polys = alongX
+    ? [[c0, c1, r1, r0], [c2, c3, r0, r1], [c3, c0, r0], [c1, c2, r1]]
+    : [[c1, c2, r1, r0], [c3, c0, r0, r1], [c0, c1, r0], [c2, c3, r1]];
+  const pos = [], nrm = [], uvs = [], face = [], idx = [];
+  const centre = [0, y + h * 0.3, 0];
+  for (const p of polys) {
+    // Face normal from the first three vertices; flip the winding if it looks
+    // into the roof instead of out of it.
+    const ax = p[1][0] - p[0][0], ay = p[1][1] - p[0][1], az = p[1][2] - p[0][2];
+    const bx = p[2][0] - p[0][0], by = p[2][1] - p[0][1], bz = p[2][2] - p[0][2];
+    let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    const mx = p.reduce((s, v) => s + v[0], 0) / p.length - centre[0];
+    const my = p.reduce((s, v) => s + v[1], 0) / p.length - centre[1];
+    const mz = p.reduce((s, v) => s + v[2], 0) / p.length - centre[2];
+    const verts = (nx * mx + ny * my + nz * mz) < 0 ? [...p].reverse() : p;
+    if (verts !== p) { nx = -nx; ny = -ny; nz = -nz; }
+    const base = pos.length / 3;
+    for (const v of verts) {
+      pos.push(v[0], v[1], v[2]);
+      nrm.push(nx, ny, nz);
+      uvs.push((v[0] + hw) / w, (v[2] + hd) / d);
+      face.push(w, d);
+    }
+    for (let i = 1; i + 1 < verts.length; i++) idx.push(base, base + i, base + i + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  g.setAttribute("aFace", new THREE.Float32BufferAttribute(face, 2));
+  g.setIndex(idx);
+  return g;
 }
 
 /**
@@ -322,6 +418,23 @@ function buildArchetype(rnd, K, forceH = null) {
     d *= 1 - depth * (0.6 + rnd() * 0.8);
   }
 
+  /*
+   * ── THE ROOFLINE ROLLS ITS OWN DICE ─────────────────────────────────────
+   *
+   * Every `rnd()` call shifts the sequence for every archetype after it. When
+   * the coping, finials, crown steps and hip roofs first drew from the main
+   * stream, the 21 archetypes came out with different heights and footprints
+   * from the ones the city had — four more of them over 42 m, which put hero
+   * adverts on 250 buildings instead of a handful and failed the signage
+   * tests for a reason that had nothing to do with signage. A roof detail
+   * must not move the building under it.
+   *
+   * So the roofline has a stream of its own, seeded from numbers this
+   * archetype has already drawn. Deterministic per seed, and invisible to
+   * everything that came before.
+   */
+  const rnd2 = mulberry32(Math.floor(w0 * 1013 + d0 * 7919 + H * 104729) >>> 0);
+
   const full = [];
   const mid = [];
 
@@ -355,12 +468,36 @@ function buildArchetype(rnd, K, forceH = null) {
   // EVERY exposed deck, not just the top one. A setback tower is a stack of
   // roofs, and from above each ledge reads as one — leaving them bare is what
   // made a wedding-cake tower look like a solid extrusion from the air.
+  /**
+   * The coping on that wall: a thin stone cap oversailing it by `overhang` on
+   * both sides. Four mitred runs, undersides stripped (they stand on the wall
+   * and oversail it, so `dropBuriedFaces` could never prove them buried).
+   * Into L1 too, or the two tiers' rooflines would differ by 12 cm and the
+   * finials standing on it would jump at the LOD swap.
+   */
+  const copingRing = (w, d, y) => {
+    if (!K.parapet || !K.coping) return [];
+    const pt = K.parapetThick, o = K.copingOverhang, h = K.copingHeight, t = pt + o * 2;
+    if (w <= pt * 3 || d <= pt * 3) return [];
+    const cy = y + K.parapetHeight;
+    return [
+      box(w + o * 2, h, t, cy, 0, (d - pt) / 2),
+      box(w + o * 2, h, t, cy, 0, -(d - pt) / 2),
+      box(t, h, d - pt * 2 - o * 2, cy, (w - pt) / 2, 0),
+      box(t, h, d - pt * 2 - o * 2, cy, -(w - pt) / 2, 0),
+    ].map(stripDown);
+  };
+
   for (let i = 0; i < tiers.length; i++) {
     const t = tiers[i];
     // The deck exposed at this tier's TOP: the tier above sits in the middle
     // of it, so the ring goes round this tier's own footprint.
     const ringY = t.y + t.h;
     for (const g of parapetRing(t.w, t.d, ringY)) {
+      full.push(g);
+      mid.push(g.clone());
+    }
+    for (const g of copingRing(t.w, t.d, ringY)) {
       full.push(g);
       mid.push(g.clone());
     }
@@ -403,17 +540,69 @@ function buildArchetype(rnd, K, forceH = null) {
   /** The mechanical penthouse's footprint, so roof clutter can keep out of it. */
   let crownFootW = 0, crownFootD = 0;
 
+  /*
+   * ── FINIALS ────────────────────────────────────────────────────────────────
+   * A stepped pinnacle at each corner of the top parapet, standing on the
+   * coping. Two boxes, the upper one narrower; undersides stripped. Pure
+   * silhouette, so L1 carries them too.
+   */
+  const capTop = K.parapet ? topY + K.parapetHeight + (K.coping ? K.copingHeight : 0) : topY;
+  if (K.parapet && rnd2() < K.finialChance && Math.min(top.w, top.d) > 8) {
+    const fw = 0.7, fh = 1.4, fw2 = 0.36, fh2 = 1.1;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const fx = sx * (top.w - fw) / 2, fz = sz * (top.d - fw) / 2;
+        for (const list of [full, mid]) {
+          list.push(stripDown(box(fw, fh, fw, capTop, fx, fz)));
+          list.push(stripDown(box(fw2, fh2, fw2, capTop + fh, fx, fz)));
+        }
+      }
+    }
+    spireTop = Math.max(spireTop, capTop + fh + fh2);
+  }
+
   if (rnd() < K.crownChance) {
-    const cw = top.w * (0.4 + rnd() * 0.28);
-    const cd = top.d * (0.4 + rnd() * 0.28);
+    /*
+     * THE CROWN STEPS IN. One box was a mechanical penthouse; two or three,
+     * each narrower, is a crown — the top of a tower drawn by someone who
+     * meant it. The keep-out the roof clutter respects is the FIRST step, the
+     * widest; the tank and the roof sit on the last.
+     */
+    let cw = top.w * (0.4 + rnd() * 0.28);
+    let cd = top.d * (0.4 + rnd() * 0.28);
     crownFootW = cw; crownFootD = cd;
-    const ch = 2.5 + rnd() * 5.5;
-    full.push(box(cw, ch, cd, topY));
-    mid.push(box(cw, ch, cd, topY));
-    massTop = topY + ch;
+    const steps = K.crownSteps ? 1 + Math.floor(rnd2() * 3) : 1;
+    let cy = topY;
+    for (let st = 0; st < steps; st++) {
+      // The first step's height is the old penthouse roll, on the main stream.
+      const ch = st === 0 ? 2.5 + rnd() * 5.5 : 1.8 + rnd2() * 2.5;
+      full.push(box(cw, ch, cd, cy));
+      mid.push(box(cw, ch, cd, cy));
+      cy += ch;
+      if (st < steps - 1) {
+        cw *= 0.62 + rnd2() * 0.2;
+        cd *= 0.62 + rnd2() * 0.2;
+      }
+    }
+    massTop = cy;
     spireTop = massTop;
 
-    if (rnd() < 0.5) {
+    /*
+     * A HIPPED ROOF on some of them, instead of a flat cap: the one shape that
+     * says "roof" from any distance, and the example's towers have real roofs
+     * where ours had lids. It takes the tank's place — nothing stands on a
+     * pitched roof — and the mast, if any, rises from its ridge.
+     */
+    const hip = rnd2() < K.hipRoofChance && Math.min(cw, cd) > 4;
+    const hipH = hip ? Math.min(cw, cd) * 0.3 : 0;
+    if (hip) {
+      full.push(hipRoof(cw, cd, hipH, massTop));
+      mid.push(hipRoof(cw, cd, hipH, massTop));
+      spireTop = Math.max(spireTop, massTop + hipH);
+    }
+
+    const tankRoll = rnd();
+    if (!hip && tankRoll < 0.5) {
       // Water tank, offset — asymmetry on the roofline is worth 2 triangles.
       //
       // Its offset is a fraction of the TIER's width, but it stands on the
@@ -438,11 +627,14 @@ function buildArchetype(rnd, K, forceH = null) {
       // A mast is nearly free and is the thing that reads at 2 km. ONE height,
       // used by both tiers — drawing it twice from `rnd()` gave L0 and L1
       // different masts and made the tower visibly grow at the LOD boundary.
+      // From the ridge when there is a roof; undersides stripped, it stands
+      // on something either way.
       const mh = 6 + rnd() * 18;
-      full.push(box(0.5, mh, 0.5, massTop));
-      mid.push(box(0.5, mh, 0.5, massTop));
-      spireTop = Math.max(spireTop, massTop + mh);
-      mastTop = massTop + mh;
+      const mastBase = massTop + hipH;
+      full.push(stripDown(box(0.5, mh, 0.5, mastBase)));
+      mid.push(stripDown(box(0.5, mh, 0.5, mastBase)));
+      spireTop = Math.max(spireTop, mastBase + mh);
+      mastTop = mastBase + mh;
     }
   }
 

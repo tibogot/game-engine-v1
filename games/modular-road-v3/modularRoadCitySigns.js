@@ -1205,6 +1205,13 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
           if (faceOf(T) * P.heroFaceFrac * grow < P.heroMinWidth) {
             for (const t of a.tiers) if (faceOf(t) > faceOf(T)) T = t;
           }
+          // And a TALL wall: a board squeezed into a short setback tier is a
+          // letterbox, not a hero. Move to the tallest tier if this one cannot
+          // hold an 8 m board with a metre of wall above and below it.
+          const spanOf = (t) => t.h * (b.scaleY || 1) - 2;
+          if (spanOf(T) < 8) {
+            for (const t of a.tiers) if (t.h > T.h) T = t;
+          }
           const tY0 = b.y + T.y * (b.scaleY || 1);
           const tY1 = tY0 + T.h * (b.scaleY || 1);
           const tW = hf[0] !== 0 ? T.d : T.w;
@@ -1214,15 +1221,19 @@ export function createCitySigns({ buildings, archetypes, seed, lobbyHeight, para
           y = Math.max(tY0 + h / 2 + 1, Math.min(tY1 - h / 2 - 1, y));
           wall = { width: T.w, depth: T.d };
         }
-        faceMatrix(b, wall, hf, y, w, h, 0, _m);
-        heroes.push({
-          m: _m.clone(),
-          tile: Math.floor(lotRand(b.cx, b.cz, 53) * HERO_SLOTS),
-          frU: P.heroFrame / w, frV: P.heroFrame / h,
-          screen: isScreen,
-          cx: b.cx, cz: b.cz, face: hf, w, h, y,
-        });
-        heroFace = hf;
+        // No wall tall enough anywhere on the tower: no hero. A building
+        // that is all short tiers is not a billboard site.
+        if (h >= 8) {
+          faceMatrix(b, wall, hf, y, w, h, 0, _m);
+          heroes.push({
+            m: _m.clone(),
+            tile: Math.floor(lotRand(b.cx, b.cz, 53) * HERO_SLOTS),
+            frU: P.heroFrame / w, frV: P.heroFrame / h,
+            screen: isScreen,
+            cx: b.cx, cz: b.cz, face: hf, w, h, y,
+          });
+          heroFace = hf;
+        }
       }
     }
 
