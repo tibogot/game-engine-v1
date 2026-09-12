@@ -171,6 +171,7 @@ import {
   createTrackFileInput,
 } from "./modularRoadTrackIO.js";
 import { createChaseCamera } from "./chaseCamera.js";
+import { createSurfaceOrbit } from "./surfaceOrbit.js";
 import { createDebugCamera } from "./debugCamera.js";
 import { createGamepadInput } from "./gamepadInput.js";
 import { createGearbox, GEARBOX } from "./gearbox.js";
@@ -6436,10 +6437,40 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function syncMouseButtons() {
     const mb = controls.mouseButtons;
     if (!mb) return;
+    const orbitting = mode === "build" || freeLook;
     mb.LEFT = null; // always free — gizmo / placement own the left button
-    mb.MIDDLE = mode === "build" ? THREE.MOUSE.ROTATE : null;
-    mb.RIGHT = mode === "build" ? THREE.MOUSE.PAN : null;
+    // Whenever the camera is orbiting — build OR free-look. Free-look used to
+    // enable rotation and then map no button to it.
+    mb.MIDDLE = orbitting ? THREE.MOUSE.ROTATE : null;
+    mb.RIGHT = orbitting ? THREE.MOUSE.PAN : null;
+    // Zoom toward the cursor, not the pivot: point at a facade detail and
+    // scroll, the way every CAD viewer does it. OrbitControls' own flag.
+    controls.zoomToCursor = true;
   }
+
+  /*
+   * ── ORBIT AROUND WHAT IS UNDER THE CURSOR ──────────────────────────────────
+   *
+   * See surfaceOrbit.js. The middle button going down raycasts what it is
+   * over — buildings, road, props, the car, the ground — and that point is
+   * the pivot for that drag; a double press frames it. The targets are the
+   * scene's solid things; the sky, the clouds, the birds, the mirror copies,
+   * the debug wireframes, the placement ghost and the GPU clipmap (whose CPU
+   * geometry is a flat grid the vertex shader displaces — the ground sampler
+   * stands in for it) are left out.
+   */
+  const surfaceOrbit = createSurfaceOrbit({
+    camera, controls, domElement: renderer.domElement,
+    active: () => mode === "build" || freeLook,
+    targets: () => [
+      city?.group, mergedGroup, postGroup, props?.group, movers?.group, portals?.group,
+      vehicle.group, flatGroundOn ? flatGround?.mesh : null,
+    ],
+    exclude: () => [
+      gameSky?.mesh, clouds?.mesh, birds?.mesh, mirrorRailGroup, mirrorPropGroup, debugGroup, brush?.root,
+    ],
+    groundHeight: (x, z) => terrainH(x, z),
+  });
 
   // ── ORBIT ORIGIN (`.` / numpad `.`) ────────────────────────────────────────
   // OrbitControls turns around `controls.target`, which is otherwise only moved
@@ -6540,7 +6571,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // Match `e.key === "."` as well as the codes: AZERTY types `.` via Shift+;
     // (`e.code` is Semicolon), and numpad `.` is NumpadDecimal on every layout.
     if ((code === "period" || code === "numpaddecimal" || e.key === ".") && !e.repeat) {
-      focusOrbitOnSelection();
+      // A selection wins; with none, frame whatever the cursor is over (or
+      // the middle of the screen if it is not over the canvas).
+      if (!focusOrbitOnSelection()) {
+        const r = renderer.domElement.getBoundingClientRect();
+        const x = lastPointer?.x ?? r.left + r.width / 2, y = lastPointer?.y ?? r.top + r.height / 2;
+        surfaceOrbit.frameAt(x, y);
+      }
       return;
     }
     // Piece editing takes precedence while a placed piece is selected (right-click).
