@@ -24,6 +24,8 @@ import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { SkyMesh } from "three/addons/objects/SkyMesh.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { createLensFlareSystem } from "../../v2/effects/lensFlare.js";
+import { createLensFlare2 } from "../../v2/effects/lensFlare2.js";
+import { applyBloomMRT } from "../render/bloomMRT.js";
 import { PostFxPipeline } from "../../v2/render/post/postFxPipeline.js";
 import { createDayNightSky } from "../render/sky/dayNightSky.js";
 import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
@@ -902,12 +904,46 @@ export async function createWorldEnvironment({
   updateSunSky();
   applySkyMode(toolState.skyMode);
 
-  const lensFlare = createLensFlareSystem({
+  /*
+   * TWO FLARES, ONE PARAMS OBJECT.
+   *
+   * `lensFlare2` is the analytic rewrite (v2/effects/lensFlare2.js): 4 draw calls instead
+   * of 16, every shape computed rather than baked into an 8-bit canvas, and the bright
+   * parts routed into the emissive MRT so the flare actually blooms alongside the sun disc
+   * it sits on. The original is kept, running off the SAME params object, so the two can be
+   * A/B'd in the running game rather than in a lab — which is the only place a look change
+   * has ever actually been judged here.
+   *
+   * Only one of them updates per frame; the other is parked invisible, so the loser costs
+   * nothing but its (tiny) construction.
+   */
+  const lensFlareLegacy = createLensFlareSystem({
     scene,
     camera,
     getSunDir: () => sunDir,
     getParams: () => toolState.lensFlare,
   });
+  const lensFlareNext = createLensFlare2({
+    scene,
+    camera,
+    getSunDir: () => sunDir,
+    getParams: () => toolState.lensFlare,
+    /* Injected rather than imported inside the effect: v2 never reaches up into v3, and a
+     * caller with no selective bloom simply passes nothing. */
+    bloomMRT: applyBloomMRT,
+  });
+  /* Parked from birth. Its quads default to intensity 1 at the origin, so an un-updated
+   * legacy group would paint a full-strength flare over frame 0. */
+  lensFlareLegacy.group.visible = false;
+  /** Which one is live. `toolState.lensFlare.legacy` flips it; default is the new one. */
+  let lensFlare = lensFlareNext;
+  function syncFlareChoice() {
+    const wantLegacy = !!toolState.lensFlare.legacy;
+    const want = wantLegacy ? lensFlareLegacy : lensFlareNext;
+    if (want === lensFlare) return;
+    lensFlare.group.visible = false;
+    lensFlare = want;
+  }
 
   const postFxPipeline = new PostFxPipeline({ renderer, scene, camera });
   // v3 uses SELECTIVE bloom: only the emissive MRT buffer blooms (lanterns,
@@ -1169,6 +1205,7 @@ export async function createWorldEnvironment({
       oceanV2?.setSunDir(_effectiveLightDir);
     }
 
+    syncFlareChoice();
     lensFlare.update();
 
     if (toolState.fog.distance.enabled) driveFogSun();
@@ -1320,7 +1357,9 @@ export async function createWorldEnvironment({
     worldOcean,
     getOceanV2: () => oceanV2,
     setOceanHeights,
-    lensFlare,
+    get lensFlare() { return lensFlare; },
+    lensFlareLegacy,
+    lensFlareNext,
     postFxPipeline,
     sunDir,
     getEffectiveLightDir: () => _effectiveLightDir,
@@ -1330,8 +1369,13 @@ export async function createWorldEnvironment({
      * is in front of the sun. See createLensFlareSystem's setOcclusion.
      */
     lensFlareParams: () => toolState.lensFlare,
-    setLensFlareOcclusion: (v) => lensFlare.setOcclusion(v),
-    setLensFlareSourceScale: (v) => lensFlare.setSourceScale?.(v),
+    /* Fed to BOTH, so flipping between them mid-drive never leaves one holding a stale
+     * occlusion or a stale sun size. */
+    setLensFlareOcclusion: (v) => { lensFlareLegacy.setOcclusion(v); lensFlareNext.setOcclusion(v); },
+    setLensFlareSourceScale: (v) => { lensFlareLegacy.setSourceScale?.(v); lensFlareNext.setSourceScale?.(v); },
+    /** The sun's LINEAR colour through the current air mass. New flare only — the old one
+     *  has no notion of a live source colour. */
+    setLensFlareSourceColor: (c) => lensFlareNext.setSourceColor?.(c),
     setPurkinje: (o) => postFxPipeline?.setPurkinje?.(o),
     setCustomEnvSky,
     invalidateProcEnv,

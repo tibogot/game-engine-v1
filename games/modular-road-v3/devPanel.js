@@ -3560,6 +3560,106 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-lf-halo-v"></span>
             </div>
           </div>
+          <div class="dv-hint">
+            Below: the <b>analytic</b> flare (lensFlare2) only. It is the default; tick
+            <b>Old flare</b> to put the original back for an A/B. Both read this same block,
+            so everything above stays comparable.
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ray fan count</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-rays" min="8" max="220" step="2" />
+              <span class="prop-num" id="dv-lf-rays-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Blade spikes</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-spikes" min="0" max="1" step="0.02" />
+              <span class="prop-num" id="dv-lf-spikes-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Big arc</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-arc" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-lf-arc-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Arc size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-arcsize" min="0.4" max="3" step="0.05" />
+              <span class="prop-num" id="dv-lf-arcsize-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spectral dashes</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-spectral" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-lf-spectral-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Veiling glare</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-veil" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-lf-veil-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Veil size (cost)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-veilsize" min="0.3" max="2.4" step="0.05" />
+              <span class="prop-num" id="dv-lf-veilsize-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Aperture blades</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-blades" min="3" max="12" step="1" />
+              <span class="prop-num" id="dv-lf-blades-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Iris angle</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-iris" min="0" max="1.05" step="0.01" />
+              <span class="prop-num" id="dv-lf-iris-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Chromatic</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-chroma" min="0" max="0.06" step="0.002" />
+              <span class="prop-num" id="dv-lf-chroma-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Scintillation</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-scint" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-lf-scint-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bloom feed</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-bloom" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-lf-bloom-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sky sun colour</span>
+            <div class="prop-value">
+              <input type="range" id="dv-lf-srccol" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-lf-srccol-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Old flare (A/B)</span>
+            <div class="prop-value"><input type="checkbox" id="dv-lf-legacy" /></div>
+          </div>
         </div>
       </div>
 
@@ -6479,6 +6579,25 @@ export function createRoadDevPanel({ app, game, params }) {
     lfs("dv-lf-dirt", "dirtOpacity", (v) => v.toFixed(2));
     lfs("dv-lf-star", "starburst", (v) => v.toFixed(2));
     lfs("dv-lf-halo", "haloOpacity", (v) => v.toFixed(2));
+    /* lensFlare2 only — harmless on the old system, which ignores these keys. */
+    lfs("dv-lf-rays", "rayCount", (v) => v.toFixed(0));
+    lfs("dv-lf-spikes", "spikes", (v) => v.toFixed(2));
+    lfs("dv-lf-arc", "arcOpacity", (v) => v.toFixed(2));
+    lfs("dv-lf-arcsize", "arcSize", (v) => v.toFixed(2));
+    lfs("dv-lf-spectral", "spectral", (v) => v.toFixed(2));
+    lfs("dv-lf-veil", "veil", (v) => v.toFixed(2));
+    lfs("dv-lf-veilsize", "veilSize", (v) => v.toFixed(2));
+    lfs("dv-lf-blades", "blades", (v) => v.toFixed(0));
+    lfs("dv-lf-iris", "irisAngle", (v) => ((v * 180) / Math.PI).toFixed(0) + "°");
+    lfs("dv-lf-chroma", "chroma", (v) => v.toFixed(3));  // >0.03 turns the edge fringe into a rainbow
+    lfs("dv-lf-scint", "scintillation", (v) => v.toFixed(2));
+    lfs("dv-lf-bloom", "bloom", (v) => v.toFixed(2));
+    lfs("dv-lf-srccol", "sourceColorMix", (v) => v.toFixed(2));
+    const lfLegacy = document.getElementById("dv-lf-legacy");
+    if (lfLegacy) {
+      lfLegacy.checked = !!LF.legacy;
+      lfLegacy.addEventListener("change", () => { LF.legacy = lfLegacy.checked; });
+    }
   })();
 
   /* Aerial perspective — a live params object owned by roadGame, present in every

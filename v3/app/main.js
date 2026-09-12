@@ -6996,6 +6996,13 @@ export async function startV3App(opts = {}) {
       setOcclusion(v) { worldEnv?.setLensFlareOcclusion?.(v); },
       /** Source diameter relative to the flare's authoring reference (1 = default). */
       setSourceScale(v) { worldEnv?.setLensFlareSourceScale?.(v); },
+      /**
+       * The source's LINEAR colour — the sun seen through the current air mass. A game with
+       * its own sky already computes this; handing it over is what makes the flare follow
+       * the atmosphere into sunset instead of staying the one colour it was authored with.
+       * Understood by lensFlare2 only; a no-op on the original system.
+       */
+      setSourceColor(c) { worldEnv?.setLensFlareSourceColor?.(c); },
     },
     // ── Shadow override ───────────────────────────────────────────────────────
     // CSM lives in worldToolState.csm and is NOT stored in .v3proj, so a game
