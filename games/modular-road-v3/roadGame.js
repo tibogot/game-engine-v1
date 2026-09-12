@@ -3150,10 +3150,27 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       // Road-only and there is no road here: refuse rather than silently
       // dropping the prop to the terrain, which would look like a bug.
       if (mode === "road") return null;
-      // Same refusal in sky mode: there is no ground to drop to, and answering
-      // 0 would rain props onto an invisible plane far below the track.
-      if (!terrainOn) return null;
-      return app.getWorldHeight(x, z);
+      /*
+       * THE GROUND IS NOT ONLY THE TERRAIN.
+       *
+       * This used to be `if (!terrainOn) return null`, which was right when
+       * terrain-off meant sky mode and there was nothing to drop onto. It
+       * stopped being right when the city arrived: with terrain off the city's
+       * STREET is ground, and so is the flat debug floor. Returning null there
+       * made `snapToSurface` fail, and a failed snap never adds the prop's
+       * `restY` — the offset `make()` authors so a barrel's base is flush.
+       * So every obstacle placed on a city street sat half buried, while the
+       * same obstacle on the viaduct was fine because the deck BVH above
+       * answers first. Reported from the game exactly that way.
+       *
+       * `terrainH` is the sampler the CAR uses — terrain, city street, flat
+       * ground, or NaN — so placement and physics now agree about where the
+       * ground is. NaN keeps the sky-mode refusal this replaces: `snapToSurface`
+       * already tests `Number.isFinite`, so nothing drops onto an invisible
+       * plane.
+       */
+      const h = terrainH(x, z);
+      return Number.isFinite(h) ? h : null;
     },
   });
   // Built BEFORE the manager: the manager takes `show` as its selection
