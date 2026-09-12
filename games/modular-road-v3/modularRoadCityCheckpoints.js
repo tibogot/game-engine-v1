@@ -194,32 +194,56 @@ export function createCityCheckpoints({ scene, city, hudParent = null, params = 
    * which is the whole reason this reuses it instead of sampling the plane.
    * The walk turns by a random angle each leg, so the route wanders the grid
    * instead of running off in one direction and leaving the city.
+   *
+   * ── A CHECKPOINT ON TOP OF THE LAST ONE ────────────────────────────────────
+   *
+   * This used to have a fallback for a walk that could not find a leg: after
+   * eight tries that all left the city it placed the point where the walk
+   * already WAS. That is a checkpoint sitting exactly on the previous one — you
+   * collect both at once and the leg simply does not exist. It happened in
+   * about 1 route in 200 (MEASURED: 14 of 3000 on cityKitTest's city), always
+   * near an edge, and it is why that suite failed now and then for no reason
+   * anyone could see.
+   *
+   * Two causes, both fixed. A rejected leg only spun the heading by a random
+   * 108–252°, which near a CORNER can keep pointing out of the city for all
+   * eight tries — so a rejection now turns the walk back toward the middle,
+   * which a leg of at most `legMax` from inside the 82% box can always reach.
+   * And the street snap can pull a far point back onto a street near where the
+   * walk started, so a leg that snaps shorter than half `legMin` is refused and
+   * rolled again rather than kept.
    */
   function buildRoute(fromX, fromZ) {
     route.length = 0;
     let x = fromX, z = fromZ;
     let heading = Math.random() * Math.PI * 2;
     const extent = city.params?.extent ?? 1200;
+    const bound = extent * 0.82;
+    const shortest = P.legMin * 0.5;
     for (let i = 0; i < P.count; i++) {
       let placed = null;
-      // A few tries, then take what we get: a leg that would leave the city is
-      // turned back rather than clamped, or the route piles up on the edge.
-      for (let attempt = 0; attempt < 8; attempt++) {
+      for (let attempt = 0; attempt < 12 && !placed; attempt++) {
         const leg = P.legMin + Math.random() * (P.legMax - P.legMin);
         const a = heading + (Math.random() - 0.5) * 2.4;
         const nx = x + Math.cos(a) * leg, nz = z + Math.sin(a) * leg;
-        if (Math.abs(nx) > extent * 0.82 || Math.abs(nz) > extent * 0.82) {
-          heading += Math.PI * (0.6 + Math.random() * 0.8);
+        if (Math.abs(nx) > bound || Math.abs(nz) > bound) {
+          // Back toward the middle, with a little spread so two edge hits in a
+          // row do not retrace the same line.
+          heading = Math.atan2(-z, -x) + (Math.random() - 0.5) * 1.2;
           continue;
         }
         const st = city.streetSpawnNear(nx, nz);
+        if (Math.hypot(st.x - x, st.z - z) < shortest) continue;
         placed = { x: st.x, z: st.z };
         heading = a;
-        break;
       }
       if (!placed) {
-        const st = city.streetSpawnNear(x, z);
+        // Still nothing: walk a full minimum leg straight at the centre. Never
+        // the point we are standing on.
+        const toC = Math.atan2(-z, -x);
+        const st = city.streetSpawnNear(x + Math.cos(toC) * P.legMin, z + Math.sin(toC) * P.legMin);
         placed = { x: st.x, z: st.z };
+        heading = toC;
       }
       route.push(placed);
       x = placed.x; z = placed.z;

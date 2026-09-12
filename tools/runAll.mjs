@@ -19,13 +19,47 @@
 // Output stays in NAME ORDER despite finishing out of order: completed results
 // are buffered and flushed in order behind a pointer, so a line still appears as
 // soon as everything before it is done, and two runs remain diffable.
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { spawn } from "node:child_process";
 import { cpus } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, "..");
+
+/**
+ * SWEEP THE PATCHED COPIES THAT A KILLED RUN LEFT BEHIND.
+ *
+ * A suite that needs a patched module writes `.<name>.<pid>.mjs` in the repo
+ * root, imports it, and deletes it on the very next line. That delete only
+ * misses when the process dies in between — a timeout, Ctrl+C, a background run
+ * stopped — and each miss leaves one file for good. 79 had piled up in the root
+ * before anyone noticed. They are gitignored, so git never complained; they
+ * were just clutter in the project folder.
+ *
+ * Judged by AGE, not by the pid in the name. Checking whether that pid is still
+ * running was the first version, and on Windows it kept 5 of the 79: pids are
+ * reused, so a long-dead test's number now belonged to some unrelated process.
+ * A live suite deletes its copy within about a second of writing it, so
+ * anything a minute old is a leftover — and a concurrent run's fresh copy is
+ * left alone.
+ */
+function sweepStaleCopies() {
+  const STALE_MS = 60_000;
+  let n = 0;
+  for (const f of readdirSync(ROOT)) {
+    if (!/^\.[\w-]+\.\d+\.mjs$/.test(f)) continue;
+    const path = join(ROOT, f);
+    try {
+      if (Date.now() - statSync(path).mtimeMs < STALE_MS) continue;
+      unlinkSync(path);
+      n++;
+    } catch { /* already gone */ }
+  }
+  if (n) console.log(`removed ${n} leftover patched cop${n === 1 ? "y" : "ies"} from killed runs\n`);
+}
+sweepStaleCopies();
 
 /**
  * THE FIVE LONG VEHICLE SIMULATIONS, and the only reason a full run is minutes

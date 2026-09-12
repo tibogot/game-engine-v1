@@ -1754,6 +1754,26 @@ console.log("\n── LOOK PASS ──");
     check("every checkpoint is on a street centre (reachable)", offStreet === 0, `${offStreet} off-street`);
     check("no checkpoint is outside the city", outside === 0, `${outside} outside ±${extent} m`);
     check("legs are real legs, not a pile", tooClose === 0, `${tooClose} legs under 40% of legMin`);
+    // ONE route was a coin toss: about 1 in 200 used to put a checkpoint on top
+    // of the previous one (the walk's "no leg found" fallback stayed where it
+    // was), so this suite failed now and then with nothing changed. Many routes,
+    // from starts all over the city including its edges, is what actually tests
+    // the walk. The route is rebuilt by start(), so the run is restarted below.
+    {
+      const ROUTES = 400;
+      let piled = 0, worst = Infinity;
+      for (let k = 0; k < ROUTES; k++) {
+        run.start((Math.random() - 0.5) * extent * 1.6, (Math.random() - 0.5) * extent * 1.6);
+        for (let i = 1; i < run.route.length; i++) {
+          const d = Math.hypot(run.route[i].x - run.route[i - 1].x, run.route[i].z - run.route[i - 1].z);
+          worst = Math.min(worst, d / run.params.legMin);
+          if (d < run.params.legMin * 0.4) { piled++; break; }
+        }
+      }
+      check(`no checkpoint lands on the last one, over ${ROUTES} routes`, piled === 0,
+        `${piled} bad routes, shortest leg ${(worst * 100).toFixed(0)}% of legMin`);
+      run.start(0, 0);
+    }
     // Collecting one must advance the target and add time.
     const before = run.state.time;
     const t0 = run.route[0];
