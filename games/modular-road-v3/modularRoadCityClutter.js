@@ -302,7 +302,26 @@ export function buildClutterKit() {
  * @param {number} o.seed
  * @param {object} o.C       CLUTTER_DEFAULTS merged with overrides
  */
-export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlong, axis, travel, rand, seed, C }) {
+export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlong, axis, travel, rand, seed, C, blocked = null }) {
+  /*
+   * A SITE IS PLACED WHOLE OR NOT AT ALL.
+   *
+   * Every object used to go straight to `place`, which silently refuses a spot
+   * inside a keep-out — so a closure that crossed one came out TRIMMED: a
+   * taper with no barrier at its head, or a jersey line with one barrier
+   * missing from the middle. The second is the exact failure a line of
+   * concrete exists to prevent, and cityKitTest caught it the day the city
+   * gates added a keep-out that roadworks could run into.
+   *
+   * So the site is laid out first and committed only if `blocked` refuses
+   * none of it. Without a `blocked` it commits everything, as before.
+   */
+  const pending = [];
+  const put = (list, x, z, yaw, extra) => { pending.push([list, x, z, yaw, extra]); };
+  const commit = () => {
+    if (blocked && pending.some(([, x, z]) => blocked(x, z))) return;
+    for (const [list, x, z, yaw, extra] of pending) place(list, x, z, yaw, extra);
+  };
   const runLen = a1 - a0 - C.endClear * 2;
   if (runLen < C.worksTaper + C.worksRun + 6) return;
   const roll = rand(seed, 1, 71);
@@ -333,7 +352,7 @@ export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlon
       const closureEnd = s0 + C.worksTaper + C.worksRun;
       const ss = travel > 0 ? s0 - 7 : closureEnd + 7;
       const [sx, sz] = at(kerb + dir * 0.8, ss);
-      place(into.signs, sx, sz, yawAlong + (travel > 0 ? Math.PI : 0),
+      put(into.signs, sx, sz, yawAlong + (travel > 0 ? Math.PI : 0),
         { tile: C.worksSignTile, axis, travel });
     }
     /*
@@ -351,7 +370,7 @@ export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlon
     for (let i = 0; i <= taperN; i++) {
       const t = i / taperN;
       const [x, z] = at(kerb - dir * (0.45 + t * (C.worksWidth - 0.45)), s0 + t * C.worksTaper);
-      place(into.cones, x, z, rand(seed, i, 73) * 6.283, {});
+      put(into.cones, x, z, rand(seed, i, 73) * 6.283, {});
     }
     const head = s0 + C.worksTaper;
     if (hard) {
@@ -360,29 +379,30 @@ export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlon
       // thing a line of them exists to prevent.
       for (let s = head + C.jerseyLen * 0.5; s < head + C.worksRun; s += C.jerseyLen) {
         const [x, z] = at(kerb - dir * C.worksWidth, s);
-        place(into.blocks, x, z, yawAlong, {});
+        put(into.blocks, x, z, yawAlong, {});
       }
       if (into.plates) {
         const [px, pz] = at(kerb - dir * (C.worksWidth - 1.6), head + C.worksRun * 0.45);
-        place(into.plates, px, pz, yawAlong, {});
+        put(into.plates, px, pz, yawAlong, {});
       }
     } else {
       for (let s = head + C.conePitch; s < head + C.worksRun; s += C.conePitch) {
         const [x, z] = at(kerb - dir * C.worksWidth, s);
-        place(into.cones, x, z, rand(seed, Math.round(s), 74) * 6.283, {});
+        put(into.cones, x, z, rand(seed, Math.round(s), 74) * 6.283, {});
       }
     }
     // The barrier closes the head of the run, ACROSS the shut lane.
     {
       const [x, z] = at(kerb - dir * (C.worksWidth * 0.55), head + C.worksRun + 0.8);
-      place(into.barriers, x, z, yawAlong + Math.PI / 2, {});
+      put(into.barriers, x, z, yawAlong + Math.PI / 2, {});
     }
     // Dressing inside the closure — it is a works site, not an empty box.
     for (let k = 0; k < 2; k++) {
       const [x, z] = at(kerb - dir * (1.0 + rand(seed, k, 75) * 1.6),
         head + 2 + rand(seed, k, 76) * (C.worksRun - 4));
-      place(k === 0 ? into.pallets : into.bins, x, z, rand(seed, k, 77) * 6.283, {});
+      put(k === 0 ? into.pallets : into.bins, x, z, rand(seed, k, 77) * 6.283, {});
     }
+    commit();
     return;
   }
 
@@ -393,7 +413,8 @@ export function placeStreetClutter({ into, place, at, kerb, dir, a0, a1, yawAlon
     for (let k = 0; k < n; k++) {
       const [x, z] = at(kerb - dir * (C.bayInset + rand(seed, k, 80) * 0.5), s0 + k * 1.5);
       const list = rand(seed, k, 81) < 0.55 ? into.bins : into.pallets;
-      place(list, x, z, yawAlong + (rand(seed, k, 82) - 0.5) * 0.6, {});
+      put(list, x, z, yawAlong + (rand(seed, k, 82) - 0.5) * 0.6, {});
     }
+    commit();
   }
 }

@@ -1088,6 +1088,9 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
           placeStreetClutter({
             into: clutterInto, place, at, kerb, dir, a0, a1, yawAlong, axis, travel,
             rand: h2, seed: seedA + (side === 0 ? 0 : 977), C: F,
+            // The same two refusals `place` makes, asked up front, so a site
+            // that meets either is left out whole instead of trimmed.
+            blocked: (x, z) => !inside(x, z) || (keepOut ? keepOut(x, z) : false),
           });
           /*
            * A STEAM VENT IN THE CARRIAGEWAY. In the road rather than on the

@@ -90,6 +90,7 @@ import { placeCityPrism, pickPrismPlaza, CITY_PRISM_DEFAULTS } from "./modularRo
 import { planCarParks, buildCarParkGround, CARPARK_DEFAULTS } from "./modularRoadCityCarPark.js";
 import { planParks, buildParkGround, PARK_DEFAULTS } from "./modularRoadCityPark.js";
 import { placeCityBridges, BRIDGE_DEFAULTS } from "./modularRoadCityBridges.js";
+import { planCityGates, createCityGates, gateFootprint, gateMeetsCorridor } from "./modularRoadCityGate.js";
 import { createCityStreets, STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
@@ -270,6 +271,16 @@ export const CITY_DEFAULTS = {
    */
   underpass: true,
   underpassParams: {},
+  /**
+   * THE GATES. Stone civic blocks thrown across a street, with a vaulted
+   * passage the carriageway runs straight through — the one structure the road
+   * goes INTO rather than beside or over. Each takes the two lots facing each
+   * other across a mid-block street, so nothing bolted to a tower has to learn
+   * about it. One draw a gate, one material for all of them, and flat ground
+   * only, like the streets. See modularRoadCityGate.js.
+   */
+  gates: true,
+  gateParams: {},
   /** Some of the squares become surface car parks — painted bays and cars
    *  standing in them. One draw for the paint, none for the cars. */
   carParks: true,
@@ -485,6 +496,10 @@ export function createModularRoadCity({
   /** The whole run, for keeping street furniture off it. */
   let underUnder = null;
   let underRoof = null;
+  /** The gate plan (placements + dims), its footprint test, and its meshes. */
+  let gatesAt = null;
+  let gateUnder = null;
+  let gates = null;
   let carParkGround = null;
   let carParks = [];
   let parkGround = null;
@@ -543,6 +558,27 @@ export function createModularRoadCity({
   }
   const pmod = (a, n) => ((a % n) + n) % n;
 
+  /**
+   * Is the BLOCK containing lot (cx, cz) a plaza? One predicate, because the
+   * lot loop and the gate planner both have to agree about it — a gate wing
+   * standing in a square is a building in the middle of somebody's park.
+   *
+   * @returns {{bx:number,bz:number,x:number,z:number}|null}
+   */
+  function plazaBlockOf(cx, cz, extent) {
+    if (!P.plazas) return null;
+    const L = P.lotSize;
+    const pitch = P.blockLots + P.streetLots;
+    const bx = Math.floor((cx - originCellX) / pitch);
+    const bz = Math.floor((cz - originCellZ) / pitch);
+    const bcx = (originCellX + bx * pitch + (P.blockLots - 1) * 0.5 + 0.5) * L - P.centerX;
+    const bcz = (originCellZ + bz * pitch + (P.blockLots - 1) * 0.5 + 0.5) * L - P.centerZ;
+    if (Math.hypot(bcx, bcz) < extent * P.plazaMaxR && blockRand(bx, bz, 31) < P.plazaChance) {
+      return { bx, bz, x: bcx + P.centerX, z: bcz + P.centerZ };
+    }
+    return null;
+  }
+
   // ── Layout ─────────────────────────────────────────────────────────────────
   function layout() {
     const out = [];
@@ -576,6 +612,26 @@ export function createModularRoadCity({
 
     let culledViaduct = 0;
   let culledCorridor = 0, culledSlope = 0, culledBounds = 0, culledPlaza = 0;
+    let culledGate = 0;
+    /*
+     * THE GATES, BEFORE A SINGLE LOT IS BUILT. Each site comes from its own
+     * coarse cell's dice and the static structures (plazas, viaduct, underpass)
+     * — never from which lots happened to be built. That is the property the
+     * whole layout rests on: taking a lot away, for the track or for density,
+     * must never move anything else. Flat ground only: with terrain on there is
+     * no street plane for the passage to open onto.
+     */
+    gatesAt = P.gates && P.ground
+      ? planCityGates({
+        P, rand: blockRand, extent, originCellX, originCellZ,
+        isPlaza: (cx, cz) => plazaBlockOf(cx, cz, extent) !== null,
+        keepOut: (x, z) => (viaductClear ? viaductClear(x, z) : false)
+          || (underUnder ? underUnder(x, z) : false),
+        under: viaductUnder,
+        params: P.gateParams,
+      })
+      : null;
+    const gateReserved = gatesAt ? gatesAt.reserved : null;
     const plazaList = [], plazaSeen = new Set();
     const districts = [0, 0, 0];
     const types = [0, 0, 0];
@@ -628,25 +684,28 @@ export function createModularRoadCity({
          * inside it and keep the ones outside, which is precisely the ragged
          * half-block this whole decision exists to avoid.
          */
-        if (P.plazas) {
-          const bx = Math.floor((cx - originCellX) / pitch);
-          const bz = Math.floor((cz - originCellZ) / pitch);
-          const bcx = (originCellX + bx * pitch + (P.blockLots - 1) * 0.5 + 0.5) * L - P.centerX;
-          const bcz = (originCellZ + bz * pitch + (P.blockLots - 1) * 0.5 + 0.5) * L - P.centerZ;
-          if (Math.hypot(bcx, bcz) < extent * P.plazaMaxR
-            && blockRand(bx, bz, 31) < P.plazaChance) {
+        {
+          const plaza = plazaBlockOf(cx, cz, extent);
+          if (plaza) {
             culledPlaza++;
             // Recorded once per block, with its world centre: an empty square
             // is open ground, and open ground is the one thing anything else
             // in this city can be asked to stand in.
-            const pk = bx + "," + bz;
+            const pk = plaza.bx + "," + plaza.bz;
             if (!plazaSeen.has(pk)) {
               plazaSeen.add(pk);
-              plazaList.push({ bx, bz, x: bcx + P.centerX, z: bcz + P.centerZ, y: P.groundY });
+              plazaList.push({ bx: plaza.bx, bz: plaza.bz, x: plaza.x, z: plaza.z, y: P.groundY });
             }
             continue;
           }
         }
+        /*
+         * A GATE WING. Reserved before the density roll, like a plaza: the
+         * site was decided from the gate's own dice before any lot was looked
+         * at, so whether THIS lot would have been built has no say in it — and
+         * nothing about this lot can move a gate anywhere else.
+         */
+        if (gateReserved && gateReserved.has(cx + "," + cz)) { culledGate++; continue; }
 
         let baseY = P.groundY;
         if (heightAt) {
@@ -739,6 +798,23 @@ export function createModularRoadCity({
       }
       stats.landmarks = Math.min(nL, cands.length);
     }
+
+    // ── Gates: the track corridor is the one veto that can change ────────────
+    /*
+     * Checked AFTER the loop and only ever REMOVES a gate. Its two lots stay
+     * reserved and empty rather than growing towers: a track edit taking a
+     * gate away must not add buildings, for the same reason it must not move
+     * them. Two open lots either side of a street read as a square, and the
+     * moment the track moves off, the gate comes back exactly where it was.
+     */
+    if (gatesAt && avoid) {
+      gatesAt.gates = gatesAt.gates.filter((g) => !gateMeetsCorridor(g, (x, z, t) => avoid(x, z, t), P.avoidRadius));
+    }
+    if (gatesAt && !gatesAt.gates.length) gatesAt = { ...gatesAt, gates: [] };
+    gateUnder = gateFootprint(gatesAt, 1.5);
+    stats.gates = gatesAt ? gatesAt.gates.length : 0;
+    stats.gateList = gatesAt ? gatesAt.gates : [];
+    stats.culledGate = culledGate;
 
     // ── Lot texture ──────────────────────────────────────────────────────────
     for (const b of out) {
@@ -900,6 +976,9 @@ export function createModularRoadCity({
     if (bridges) { group.remove(bridges.group); bridges.dispose(); bridges = null; }
     if (viaduct) { group.remove(viaduct.group); viaduct.dispose(); viaduct = null; }
     if (underpass) { group.remove(underpass.group); underpass.dispose(); underpass = null; }
+    if (gates) { group.remove(gates.group); gates.dispose(); gates = null; }
+    gatesAt = null;
+    gateUnder = null;
     viaductAt = null;
     viaductClear = null;
     viaductUnder = null;
@@ -1085,6 +1164,9 @@ export function createModularRoadCity({
       underpass.setSun(_sunDir, _sunStrength);
     }
     else stats.underpass = null;
+    gates = createCityGates({ plan: gatesAt, uNight, castShadows: P.castShadows });
+    if (gates) { group.add(gates.group); stats.gateMesh = gates.stats; }
+    else stats.gateMesh = null;
     if (P.beacons) {
       const tips = [];
       for (const b of buildings) {
@@ -1253,6 +1335,23 @@ export function createModularRoadCity({
           // ring is enough and the test can stay a single lookup.
           for (let di = -1; di <= 1; di++) {
             for (let dj = -1; dj <= 1; dj++) {
+              const k = ckey(ci + di, cj + dj);
+              let arr = clearGrid.get(k);
+              if (!arr) clearGrid.set(k, (arr = []));
+              arr.push(rec);
+            }
+          }
+        }
+        // The gates, as walls. A gate is ~97 m across — three lots — so it
+        // spills as many rings as its half-span needs, not the usual one.
+        for (const g of gatesAt?.gates ?? []) {
+          const hw = g.axis === "z" ? g.halfSpan : g.halfDepth;
+          const hd = g.axis === "z" ? g.halfDepth : g.halfSpan;
+          const rec = { x: g.x, z: g.z, hw, hd };
+          const ci = Math.floor(g.x / CLEAR_CELL), cj = Math.floor(g.z / CLEAR_CELL);
+          const ri = Math.ceil(hw / CLEAR_CELL) + 1, rj = Math.ceil(hd / CLEAR_CELL) + 1;
+          for (let di = -ri; di <= ri; di++) {
+            for (let dj = -rj; dj <= rj; dj++) {
               const k = ckey(ci + di, cj + dj);
               let arr = clearGrid.get(k);
               if (!arr) clearGrid.set(k, (arr = []));
@@ -1429,6 +1528,8 @@ export function createModularRoadCity({
       }
     }
     if (roofs?.group) out.push(roofs.group);
+    // The gates: rain must stop at a roof you can drive under.
+    if (gates) out.push(...gates.meshes);
     return out;
   }
 
@@ -1438,7 +1539,10 @@ export function createModularRoadCity({
    * module each take exactly one and there is no sense in them disagreeing.
    */
   const cityKeepOut = (x, z) => (viaductClear ? viaductClear(x, z) : false)
-    || (underUnder ? underUnder(x, z) : false);
+    || (underUnder ? underUnder(x, z) : false)
+    // Nothing stands in a gate's passage or inside its walls: a lamp post in
+    // the vault is a solid capsule in the only way through.
+    || (gateUnder ? gateUnder(x, z) : false);
 
   function rebuild() {
     const t0 = performance.now();
@@ -1863,7 +1967,8 @@ export function createModularRoadCity({
     roadCollision() {
       const v = viaduct ? viaduct.collisionMeshes() : { deck: [], solids: [] };
       const u = underpass ? underpass.collisionMeshes() : { deck: [], solids: [] };
-      return { deck: [...v.deck, ...u.deck], solids: [...v.solids, ...u.solids] };
+      const g = gates ? gates.collisionMeshes() : { deck: [], solids: [] };
+      return { deck: [...v.deck, ...u.deck], solids: [...v.solids, ...u.solids, ...g.solids] };
     },
     streetHeightAt(x, z) {
       if (!ground || !P.ground) return NaN;
