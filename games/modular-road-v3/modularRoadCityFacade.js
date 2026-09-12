@@ -1039,8 +1039,23 @@ export function createCityFacadeMaterial({
     const cDn = selT(andT(has2, has1.not().or(F.baseH.greaterThan(cDn1))), F.baseH, cDn1);
     const tcD = cDn.add(F.courseH.mul(0.5)).sub(F.v0).div(rvS);
     const hitCD = rv.lessThan(0.0).and(orT(has1, has2)).and(tcD.greaterThan(0.0)).and(tcD.lessThan(t1));
-    const hitFlank = hitL.or(hitR).toVar();
-    const hitCourse = hitCU.or(hitCD).toVar();
+    /*
+     * ── A PIXEL ON THE FRONT HITS NOTHING ──────────────────────────────────
+     *
+     * These tests asked only "would this ray, continued into the wall, cross a
+     * flank or a course band" — and for a pixel that is ON a pier front, it
+     * always would: the pier's own flank is right there. `tHit` and the colour
+     * pass both honoured `onFront` and stopped at depth 0, so the paint was
+     * right. The NORMAL was not: `N` and `front` came out as the flank's
+     * sideways normal, or the course's up/down one, and the normal pass
+     * shaded every pier front as a wall facing sideways and every string
+     * course as a wall facing the sky — sun gone, sky fill only, brick bump
+     * gone: a smooth blue-grey band on cream stone. Which flank or which face
+     * of the course it picked depended on the ray's sign, so it changed as
+     * the camera went round the building. Reported from orbit, twice.
+     */
+    const hitFlank = hitL.or(hitR).and(onFront.not()).toVar();
+    const hitCourse = hitCU.or(hitCD).and(onFront.not()).toVar();
     const tFlank = select(hitL, tL, tR);
     const tCourse = select(hitCU, tcU, tcD);
     const isFlank = hitFlank.and(hitCourse.not().or(tFlank.lessThan(tCourse))).toVar();
