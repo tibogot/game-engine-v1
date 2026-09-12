@@ -12,6 +12,7 @@
  */
 import * as THREE from "three";
 import { uniform } from "three/tsl";
+import { normalizeProcParams, albedoThumbnailUrl, PROC_RES } from "./proceduralLayer.js";
 
 export const NUM_LAYERS = 7;
 /**
@@ -30,6 +31,8 @@ export const NUM_LAYERS = 7;
  * project.
  */
 export const SLOT_RES   = 1024;
+// A procedural bake is copied straight into a slot layer, byte for byte.
+if (PROC_RES !== SLOT_RES) throw new Error("proceduralLayer PROC_RES must equal SLOT_RES");
 
 // Default swatch colours — distinct enough to identify layers quickly
 const DEFAULT_ALBEDO = [
@@ -75,6 +78,26 @@ export class TextureLibrary {
     this.albedoArrayTex = _makeArrayTex(this._albedoData, THREE.SRGBColorSpace);
     this.ormArrayTex    = _makeArrayTex(this._ormData, THREE.LinearSRGBColorSpace);
 
+    // Textures with a WHOLE-array upload still pending. A single-layer upload
+    // (procedural re-bake) must not replace one of those, or the other layer's
+    // new pixels would never reach the GPU. The renderer calls onUpdate once
+    // the upload has actually happened.
+    // Both start pending: the very first upload creates the GPU texture and
+    // must carry every layer.
+    this._fullUploadPending = new Set([this.albedoArrayTex, this.ormArrayTex]);
+    for (const tex of [this.albedoArrayTex, this.ormArrayTex]) {
+      tex.onUpdate = () => this._fullUploadPending.delete(tex);
+    }
+
+    // Procedural slots: a factory rather than an instance, so a game that never
+    // touches a procedural layer never allocates the bake targets.
+    this._procBakerFactory = null;
+    this._procBaker = null;
+    this._procQueue = Promise.resolve();
+    this._procLatest = new Map(); // slot → newest requested params (coalesces slider drags)
+    this._procRunning = new Map(); // slot → promise of its bake loop
+    this._procGen = new Array(NUM_LAYERS).fill(0); // bumped to cancel a slot's in-flight bake
+
     // ── Per-slot metadata ──────────────────────────────────────────────────────
     this.slots = Array.from({ length: NUM_LAYERS }, (_, i) => ({
       name:        `Layer ${i + 1}`,
@@ -86,6 +109,11 @@ export class TextureLibrary {
       normalUrl:   null,
       roughUrl:    null,
       aoUrl:       null,
+      // null = the slot shows its image maps. Otherwise the params of a
+      // procedural texture baked into this slot (see proceduralLayer.js); the
+      // image references above are kept so switching back can restore them.
+      procedural:    null,
+      procThumbUrl:  null,
       // Auto-paint rules (baked on demand via Generate)
       autoEnabled:   false,
       autoHeightMin: 0,
@@ -109,6 +137,25 @@ export class TextureLibrary {
       // everything. See the long note in splatOverlayTsl.js.
       uTriplanar: uniform(0.0),
     }));
+  }
+
+  // ── GPU upload ─────────────────────────────────────────────────────────────
+
+  /** Re-upload every layer of an array texture (the original behaviour). */
+  _uploadAll(tex) {
+    tex.clearLayerUpdates();
+    this._fullUploadPending.add(tex);
+    tex.needsUpdate = true;
+  }
+
+  /**
+   * Re-upload ONE layer. A procedural re-bake changes a single slot, and
+   * re-sending all seven 1024² layers on every slider move is ~28 MB per
+   * texture. Falls back to a full upload when one is already pending.
+   */
+  _uploadLayer(tex, layer) {
+    if (!this._fullUploadPending.has(tex)) tex.addLayerUpdate(layer);
+    tex.needsUpdate = true;
   }
 
   // ── Default fill helpers ───────────────────────────────────────────────────
@@ -140,17 +187,21 @@ export class TextureLibrary {
   // ── Texture loading ────────────────────────────────────────────────────────
 
   async loadAlbedo(slotIndex, file) {
+    // Dropping an image onto a procedural slot turns it back into an image slot.
+    this._dropProcedural(slotIndex);
     const bm  = await createImageBitmap(file);
     const px  = _resizeImageToSlotRes(bm);
     bm.close();
     const off = slotIndex * SLOT_RES * SLOT_RES * 4;
     this._albedoData.set(px, off);
-    this.albedoArrayTex.needsUpdate = true;
+    this._uploadAll(this.albedoArrayTex);
     this.slots[slotIndex].albedoName = file.name;
     this.slots[slotIndex].albedoUrl  = URL.createObjectURL(file);
   }
 
   async loadNormalMap(slotIndex, file) {
+    // Dropping an image onto a procedural slot turns it back into an image slot.
+    this._dropProcedural(slotIndex);
     const bm  = await createImageBitmap(file);
     const px  = _resizeImageToSlotRes(bm);
     bm.close();
@@ -160,31 +211,35 @@ export class TextureLibrary {
       this._ormData[off + i*4+2] = px[i*4];     // R → B (normal X)
       this._ormData[off + i*4+3] = px[i*4+1];   // G → A (normal Y)
     }
-    this.ormArrayTex.needsUpdate = true;
+    this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].normalName = file.name;
     this.slots[slotIndex].normalUrl  = URL.createObjectURL(file);
   }
 
   async loadRoughness(slotIndex, file) {
+    // Dropping an image onto a procedural slot turns it back into an image slot.
+    this._dropProcedural(slotIndex);
     const bm  = await createImageBitmap(file);
     const px  = _resizeImageToSlotRes(bm);
     bm.close();
     const n   = SLOT_RES * SLOT_RES;
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4] = px[i*4]; // R → roughness
-    this.ormArrayTex.needsUpdate = true;
+    this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].roughName = file.name;
     this.slots[slotIndex].roughUrl  = URL.createObjectURL(file);
   }
 
   async loadAO(slotIndex, file) {
+    // Dropping an image onto a procedural slot turns it back into an image slot.
+    this._dropProcedural(slotIndex);
     const bm  = await createImageBitmap(file);
     const px  = _resizeImageToSlotRes(bm);
     bm.close();
     const n   = SLOT_RES * SLOT_RES;
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4+1] = px[i*4]; // R → AO
-    this.ormArrayTex.needsUpdate = true;
+    this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].aoName = file.name;
     this.slots[slotIndex].aoUrl  = URL.createObjectURL(file);
   }
@@ -217,7 +272,7 @@ export class TextureLibrary {
     bm.close();
     const off = slotIndex * SLOT_RES * SLOT_RES * 4;
     this._albedoData.set(px, off);
-    this.albedoArrayTex.needsUpdate = true;
+    this._uploadAll(this.albedoArrayTex);
     this.slots[slotIndex].albedoName = url.split("/").pop();
     this.slots[slotIndex].albedoUrl  = url;
   }
@@ -232,7 +287,7 @@ export class TextureLibrary {
       this._ormData[off + i*4+2] = px[i*4];
       this._ormData[off + i*4+3] = px[i*4+1];
     }
-    this.ormArrayTex.needsUpdate = true;
+    this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].normalName = url.split("/").pop();
     this.slots[slotIndex].normalUrl  = url;
   }
@@ -244,7 +299,7 @@ export class TextureLibrary {
     const n   = SLOT_RES * SLOT_RES;
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4] = px[i*4];
-    this.ormArrayTex.needsUpdate = true;
+    this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].roughName = url.split("/").pop();
     this.slots[slotIndex].roughUrl  = url;
   }
@@ -256,7 +311,7 @@ export class TextureLibrary {
     const n   = SLOT_RES * SLOT_RES;
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4+1] = px[i*4];
-    this.ormArrayTex.needsUpdate = true;
+    this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].aoName = url.split("/").pop();
     this.slots[slotIndex].aoUrl  = url;
   }
@@ -302,7 +357,7 @@ export class TextureLibrary {
       this._albedoData[off + i*4+2] = b;
       this._albedoData[off + i*4+3] = 255;
     }
-    this.albedoArrayTex.needsUpdate = true;
+    this._uploadAll(this.albedoArrayTex);
     this.slots[slotIndex].albedoName = null;
     this.slots[slotIndex].albedoUrl  = null;
   }
@@ -314,7 +369,7 @@ export class TextureLibrary {
       this._ormData[off + i*4+2] = 128; // normalX → flat
       this._ormData[off + i*4+3] = 128; // normalY → flat
     }
-    this.ormArrayTex.needsUpdate = true;
+    this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].normalName = null;
     this.slots[slotIndex].normalUrl  = null;
   }
@@ -323,7 +378,7 @@ export class TextureLibrary {
     const n   = SLOT_RES * SLOT_RES;
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4] = 204; // 0.8
-    this.ormArrayTex.needsUpdate = true;
+    this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].roughName = null;
     this.slots[slotIndex].roughUrl  = null;
   }
@@ -332,7 +387,7 @@ export class TextureLibrary {
     const n   = SLOT_RES * SLOT_RES;
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4+1] = 255; // 1.0
-    this.ormArrayTex.needsUpdate = true;
+    this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].aoName = null;
     this.slots[slotIndex].aoUrl  = null;
   }
@@ -340,6 +395,97 @@ export class TextureLibrary {
   // ── Slot settings ──────────────────────────────────────────────────────────
 
   setSlotName(i, name) { this.slots[i].name = name; }
+
+  // ── Procedural slots ───────────────────────────────────────────────────────
+
+  /** `() => ProceduralLayerBaker` — called once, the first time a slot bakes. */
+  setProceduralBakerFactory(fn) { this._procBakerFactory = fn; }
+
+  /**
+   * Make slot i procedural with these params and bake it.
+   *
+   * COALESCES per slot: while a bake runs, only the newest request is kept, so
+   * a slider drag bakes as fast as the GPU allows and never works through a
+   * backlog of stale values. Bakes for different slots run one at a time
+   * because they share the baker's render targets.
+   *
+   * The slot is marked procedural immediately, so a save made while the bake
+   * is still running records it. Resolves when the newest params are showing.
+   */
+  requestProcedural(i, params) {
+    this.slots[i].procedural = normalizeProcParams(params);
+    this._procLatest.set(i, this.slots[i].procedural);
+    const running = this._procRunning.get(i);
+    if (running) return running;
+    const job = (async () => {
+      try {
+        while (this._procLatest.has(i)) {
+          const next = this._procLatest.get(i);
+          this._procLatest.delete(i);
+          await this._bakeProcedural(i, next);
+        }
+      } finally {
+        this._procRunning.delete(i);
+      }
+    })();
+    this._procRunning.set(i, job);
+    return job;
+  }
+
+  async _bakeProcedural(i, params) {
+    const gen = this._procGen[i];
+    const run = this._procQueue.then(() => {
+      if (!this._procBaker) {
+        if (!this._procBakerFactory) throw new Error("TextureLibrary: no procedural baker factory set");
+        this._procBaker = this._procBakerFactory();
+      }
+      return this._procBaker.bake(params);
+    });
+    this._procQueue = run.catch(() => {});
+    const { albedo, orm } = await run;
+    // Switched back to images (or re-imported) while this bake was running.
+    if (gen !== this._procGen[i]) return;
+    const off = i * SLOT_RES * SLOT_RES * 4;
+    this._albedoData.set(albedo, off);
+    this._ormData.set(orm, off);
+    this._uploadLayer(this.albedoArrayTex, i);
+    this._uploadLayer(this.ormArrayTex, i);
+    this.slots[i].procThumbUrl = albedoThumbnailUrl(albedo);
+    this.onProceduralBaked?.(i);
+  }
+
+  /** Forget any procedural state for slot i and cancel its in-flight bake. */
+  _dropProcedural(i) {
+    this._procGen[i]++;
+    this._procLatest.delete(i);
+    const s = this.slots[i];
+    const was = s.procedural !== null;
+    s.procedural = null;
+    s.procThumbUrl = null;
+    return was;
+  }
+
+  /**
+   * Switch slot i back to its image maps: re-fetch the references it kept, or
+   * fall back to the neutral swatch where there is nothing to fetch.
+   */
+  async clearProcedural(i) {
+    if (!this._dropProcedural(i)) return;
+    const s = this.slots[i];
+    const restore = (nameKey, urlKey, loadFromUrl, clear) => {
+      const name = s[nameKey], url = s[urlKey];
+      if (!url) { clear(i); return null; }
+      return loadFromUrl(i, url)
+        .then(() => { s[nameKey] = name ?? s[nameKey]; })
+        .catch(() => clear(i));
+    };
+    await Promise.all([
+      restore("albedoName", "albedoUrl", (k, u) => this.loadAlbedoFromUrl(k, u),    (k) => this.clearAlbedo(k)),
+      restore("normalName", "normalUrl", (k, u) => this.loadNormalFromUrl(k, u),    (k) => this.clearNormal(k)),
+      restore("roughName",  "roughUrl",  (k, u) => this.loadRoughnessFromUrl(k, u), (k) => this.clearRoughness(k)),
+      restore("aoName",     "aoUrl",     (k, u) => this.loadAOFromUrl(k, u),        (k) => this.clearAO(k)),
+    ]);
+  }
 
   setTriplanar(i, on) { this.slotUniforms[i].uTriplanar.value = on ? 1 : 0; }
   setUVScale(i, v)    { this.slotUniforms[i].uUVScale.value   = v; }
@@ -390,6 +536,9 @@ export class TextureLibrary {
         aoStr:     u.uAOStr.value,
         roughStr:  u.uRoughStr.value,
         triplanar: u.uTriplanar.value > 0.5,
+        // Params only, never pixels: the bake is deterministic, so loading
+        // re-generates exactly the same texture.
+        procedural: s.procedural ? { ...s.procedural } : null,
         auto: {
           enabled:   s.autoEnabled,
           heightMin: s.autoHeightMin,
@@ -439,15 +588,33 @@ export class TextureLibrary {
         if (Number.isFinite(a.blend))     s.autoBlend     = a.blend;
         if (Number.isFinite(a.strength))  s.autoStrength  = a.strength;
       }
-      const fetchMap = (r, load) => {
-        if (!r) return;
+      if (d.procedural && typeof d.procedural === "object") {
+        // Keep the image references (so switching the slot back to Image can
+        // restore them) but do not fetch them: the bake owns the pixels.
+        const keepRef = (r, nameKey, urlKey) => {
+          if (r) { s[nameKey] = r.name ?? null; s[urlKey] = r.url ?? null; }
+        };
+        keepRef(d.albedo, "albedoName", "albedoUrl");
+        keepRef(d.normal, "normalName", "normalUrl");
+        keepRef(d.rough,  "roughName",  "roughUrl");
+        keepRef(d.ao,     "aoName",     "aoUrl");
+        jobs.push(this.requestProcedural(i, d.procedural).catch((err) => {
+          console.warn(`[V3] Paint layer ${i + 1}: procedural bake failed`, err);
+        }));
+        continue;
+      }
+      // An image slot in the file: a procedural bake still running for this
+      // slot from the current session must not land on top of it.
+      const wasProcedural = this._dropProcedural(i);
+      const fetchMap = (r, load, clear) => {
+        if (!r) { if (wasProcedural) clear(i); return; }
         if (r.url) jobs.push(load(i, r.url).catch(() => missing.push(r.name ?? r.url)));
         else if (r.name) missing.push(r.name);
       };
-      fetchMap(d.albedo, (k, url) => this.loadAlbedoFromUrl(k, url));
-      fetchMap(d.normal, (k, url) => this.loadNormalFromUrl(k, url));
-      fetchMap(d.rough,  (k, url) => this.loadRoughnessFromUrl(k, url));
-      fetchMap(d.ao,     (k, url) => this.loadAOFromUrl(k, url));
+      fetchMap(d.albedo, (k, url) => this.loadAlbedoFromUrl(k, url), (k) => this.clearAlbedo(k));
+      fetchMap(d.normal, (k, url) => this.loadNormalFromUrl(k, url),    (k) => this.clearNormal(k));
+      fetchMap(d.rough,  (k, url) => this.loadRoughnessFromUrl(k, url), (k) => this.clearRoughness(k));
+      fetchMap(d.ao,     (k, url) => this.loadAOFromUrl(k, url),        (k) => this.clearAO(k));
     }
     await Promise.all(jobs);
     if (missing.length) {

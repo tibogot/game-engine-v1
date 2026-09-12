@@ -1004,6 +1004,18 @@
                       <input type="text" class="prop-input" id="texlib-name" placeholder="Layer name" />
                     </div>
                   </div>
+                  <!-- Source: image maps, or a procedural texture baked into this slot -->
+                  <div class="prop-row" title="Image: load texture files. Procedural: generate the texture from colours and a pattern. Both cost the same per frame.">
+                    <span class="prop-label">Source</span>
+                    <div class="prop-value">
+                      <div class="option-chips" id="texlib-source" style="flex:1">
+                        <button type="button" class="option-chip active" data-src="image">Image</button>
+                        <button type="button" class="option-chip" data-src="procedural">Procedural</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div id="texlib-proc-src" hidden></div>
+                  <div id="texlib-image-src">
                   <!-- Map grid: 4 drop zones -->
                   <div class="tex-map-grid" id="tex-map-grid">
                     <div class="tex-map-cell" id="tmc-albedo" data-map="albedo">
@@ -1028,6 +1040,7 @@
                     </div>
                   </div>
                   <p class="mode-hint" style="margin-top:3px">Drop image or click cell to load. Filename with "normal"/"rough"/"ao" auto-routes.</p>
+                  </div><!-- /#texlib-image-src -->
                   <!-- Per-slot parameters -->
                   <div class="prop-row" title="Project this layer on all three world axes instead of straight down, so it stops stretching on steep ground. Costs 3x the texture taps for this layer - turn it on for rock, not for grass.">
                     <span class="prop-label">Triplanar</span>

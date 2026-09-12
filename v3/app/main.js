@@ -35,6 +35,8 @@ import { SplatMap } from "../terrain/splatMap.js";
 import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
 import { createTerrainNormalMap } from "../terrain/terrainNormalMap.js";
 import { TextureLibrary } from "../terrain/textureLibrary.js";
+import { ProceduralLayerBaker, procParamsFromPreset } from "../terrain/proceduralLayer.js";
+import { createProceduralLayerPanel } from "../ui/proceduralLayerPanel.js";
 import { PaintSystem } from "../tools/paintSystem.js";
 import { BrushMask } from "../../v2/core/paint/brushMask.js";
 import {
@@ -417,6 +419,9 @@ export async function startV3App(opts = {}) {
   // ── Paint system (splatmap + texture library + overlay) ───────────────────
   const splatMap   = new SplatMap();
   const textureLib = new TextureLibrary();
+  // Procedural paint layers bake on the GPU. A factory, so the bake targets are
+  // only allocated the first time a slot actually goes procedural.
+  textureLib.setProceduralBakerFactory(() => new ProceduralLayerBaker(renderer));
   // ── Boot-time terrain shader features ─────────────────────────────────────
   // startV3App({ terrainFeatures: { cursor: false }, splatFeatures: { solo: false } }).
   //
@@ -3503,7 +3508,8 @@ export async function startV3App(opts = {}) {
     if (label) label.textContent = textureLib.slots[slotIdx].name || `L${slotIdx + 1}`;
     const thumb = document.getElementById(`lthumb-${slotIdx + 1}`);
     if (!thumb) return;
-    const url = textureLib.slots[slotIdx].albedoUrl;
+    const slot = textureLib.slots[slotIdx];
+    const url = slot.procedural ? slot.procThumbUrl : slot.albedoUrl;
     if (url) {
       thumb.style.backgroundImage = `url(${url})`;
       thumb.style.backgroundColor = '';
@@ -3655,7 +3661,11 @@ export async function startV3App(opts = {}) {
     const file = e.dataTransfer.files[0];
     if (!file) return;
     const slotIdx = layer - 1;
-    textureLib.loadFileAutoDetect(slotIdx, file).then(() => refreshLayerThumb(slotIdx));
+    textureLib.loadFileAutoDetect(slotIdx, file).then(() => {
+      refreshLayerThumb(slotIdx);
+      // A drop turns a procedural slot back into an image slot.
+      if (slotIdx === texlibActiveSlot) syncTexlibEditor();
+    });
   });
 
   // Texture library slot tabs
@@ -3758,6 +3768,71 @@ export async function startV3App(opts = {}) {
     }
   });
 
+  // ── Texture Library: procedural source ─────────────────────────────────────
+  // A slot is either Image (its four map files) or Procedural (a texture baked
+  // from colours + a pattern into the same array layers). The terrain shader
+  // cannot tell the difference, so neither can its frame cost.
+  const texlibSourceEl = document.getElementById("texlib-source");
+  const texlibImageSrc = document.getElementById("texlib-image-src");
+  const texlibProcSrc  = document.getElementById("texlib-proc-src");
+
+  /** First preset for a slot switched to Procedural: a guess from its name. */
+  function guessProcPreset(name = "") {
+    const n = name.toLowerCase();
+    if (/snow|ice/.test(n)) return "softSnow";
+    if (/sand|beach|desert/.test(n)) return "beachSand";
+    if (/moss/.test(n)) return "mossyRock";
+    if (/rock|cliff|stone|cobble/.test(n)) return "paintedRock";
+    if (/dirt|ground|soil|path|mud|earth/.test(n)) return "dirtPath";
+    if (/flower|meadow/.test(n)) return "flowerMeadow";
+    return "genshinGrass";
+  }
+
+  function requestSlotProcedural(i, params) {
+    if (i === texlibActiveSlot) procPanel.setBusy(true);
+    textureLib.requestProcedural(i, params)
+      .catch((err) => console.warn(`[V3] Procedural layer ${i + 1} bake failed:`, err))
+      .finally(() => { if (i === texlibActiveSlot) procPanel.setBusy(false); });
+  }
+
+  const procPanel = createProceduralLayerPanel(texlibProcSrc, {
+    onChange: (p) => requestSlotProcedural(texlibActiveSlot, p),
+    onPreset: (p) => {
+      // A preset's look is designed at a tiling size, so it brings its UV tile.
+      textureLib.setUVScale(texlibActiveSlot, p.uvScale);
+      requestSlotProcedural(texlibActiveSlot, p);
+      syncTexlibEditor();
+    },
+  });
+
+  textureLib.onProceduralBaked = (i) => {
+    refreshLayerThumb(i);
+    if (i === texlibActiveSlot) procPanel.setThumb(textureLib.slots[i].procThumbUrl);
+    grassTintDirty = true; // the grass tint samples the painted ground colour
+  };
+
+  texlibSourceEl.addEventListener("click", (e) => {
+    const chip = e.target.closest(".option-chip[data-src]");
+    if (!chip) return;
+    const i = texlibActiveSlot;
+    const s = textureLib.slots[i];
+    if (chip.dataset.src === "procedural") {
+      if (s.procedural) return;
+      const p = procParamsFromPreset(guessProcPreset(s.name));
+      textureLib.setUVScale(i, p.uvScale);
+      requestSlotProcedural(i, p);
+      syncTexlibEditor();
+    } else {
+      if (!s.procedural) return;
+      textureLib.clearProcedural(i).then(() => {
+        refreshLayerThumb(i);
+        if (i === texlibActiveSlot) syncTexlibEditor();
+        grassTintDirty = true;
+      });
+      syncTexlibEditor();
+    }
+  });
+
   function syncTexlibEditor() {
     const s = textureLib.slots[texlibActiveSlot];
     const u = textureLib.slotUniforms[texlibActiveSlot];
@@ -3771,6 +3846,15 @@ export async function startV3App(opts = {}) {
     tlblRStr.textContent = u.uRoughStr.value.toFixed(1);
     tslTriplanar.checked = u.uTriplanar.value > 0.5;
     texlibNameEl.value = s.name;
+    const isProc = s.procedural !== null;
+    texlibSourceEl.querySelectorAll(".option-chip").forEach((c) =>
+      c.classList.toggle("active", c.dataset.src === (isProc ? "procedural" : "image")));
+    texlibImageSrc.hidden = isProc;
+    texlibProcSrc.hidden = !isProc;
+    if (isProc) {
+      procPanel.setParams(s.procedural);
+      procPanel.setThumb(s.procThumbUrl);
+    }
     // Sync map cell thumbnails for the active slot
     for (const [mapType, urlProp] of [
       ["albedo", "albedoUrl"], ["normal", "normalUrl"], ["rough", "roughUrl"], ["ao", "aoUrl"],
@@ -6896,6 +6980,7 @@ export async function startV3App(opts = {}) {
       terrainNormals,
       grassTerrainData,
       splatMap,
+      textureLib,
       sculptFilterState,
       paintFilterState: paintState.filter,
       grassTintScene,
