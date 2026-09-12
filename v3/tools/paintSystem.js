@@ -23,10 +23,16 @@ const MAX_HISTORY          = 32;
 const MAX_STAMPS_PER_EVENT = 16;
 
 export class PaintSystem {
-  constructor({ paintState, splatMap, brushMask }) {
-    this.paintState = paintState;
-    this.splatMap   = splatMap;
-    this.brushMask  = brushMask ?? null;
+  /**
+   * @param {object} [o.heightSource] { data: Float32Array normalized heights,
+   *   size, worldSize, maxHeight } for the brush filter. `data` may be a getter:
+   *   the CPU heightmap mirror is created after this system in main.js.
+   */
+  constructor({ paintState, splatMap, brushMask, heightSource = null }) {
+    this.paintState   = paintState;
+    this.splatMap     = splatMap;
+    this.brushMask    = brushMask ?? null;
+    this.heightSource = heightSource;
 
     this.isPainting = false;
     this.lastPoint  = null;
@@ -173,8 +179,21 @@ export class PaintSystem {
       maskData,
       maskSize,
       maskRotation,
+      filter:        this._filterFor(s),
     });
     if (rect) this._strokeRect = this._unionRect(this._strokeRect, rect);
+  }
+
+  /** The brush filter for one stamp, or null when no band is on. */
+  _filterFor(s) {
+    const f  = s.filter;
+    const hs = this.heightSource;
+    if (!f || !hs || !(f.heightOn || f.slopeOn)) return null;
+    return {
+      heightOn: !!f.heightOn, heightMin: f.heightMin, heightMax: f.heightMax, heightSoft: f.heightSoft,
+      slopeOn:  !!f.slopeOn,  slopeMin:  f.slopeMin,  slopeMax:  f.slopeMax,  slopeSoft:  f.slopeSoft,
+      hm: hs.data, hmSize: hs.size, worldSize: hs.worldSize, maxHeight: hs.maxHeight,
+    };
   }
 
   _unionRect(a, b) {

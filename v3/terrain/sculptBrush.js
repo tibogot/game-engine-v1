@@ -18,6 +18,8 @@ import {
   uv,
   uniform,
   mx_noise_float,
+  atan,
+  smoothstep,
 } from "three/tsl";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 
@@ -110,6 +112,61 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   // Replaces the old radial (1 - d/radius) falloff. The soft-circle mask preset
   // reproduces identical behaviour; other presets give shaped brush footprints.
   // Out-of-bounds brush UVs return 0 via the inBounds gate (ignoring clamp mode).
+  // ── Brush filter (height band / slope band) ───────────────────────────────
+  //
+  // Multiplied into getBrushFalloff, which every brush except the ramp funnels
+  // through — so raise, smooth, flatten, noise, terrace, plateau, crater,
+  // smudge, contrast, thermal and hydro all honour it with no per-brush code.
+  // The ramp is an explicit two-point tool and does not use the falloff.
+  //
+  // WHY A DEDICATED NODE ON rtScratch, NOT srcNode. srcNode.value is swapped
+  // between passes, and during the hydro erode pass it points at rtMain, which
+  // is the very target that pass writes. Sampling it there would bind the
+  // render target as its own input and fail validation. rtScratch is only ever
+  // WRITTEN by the copy pass, which does not use the falloff, so a node that
+  // stays on rtScratch is safe in every pass that does.
+  //
+  // It reads the CURRENT height, so the filter acts as you sculpt: "raise only
+  // below 40 m" climbs until the ground reaches 40 m and then stops, which is
+  // what the equivalent Unity filter does.
+  //
+  // OFF IS EXACTLY 1.0. Each band goes through mix(1, band, uOn); with uOn = 0
+  // that is 1·1 + band·0, and band is a finite smoothstep, so the product is
+  // exactly one and every brush output is unchanged bit for bit.
+  const filterSrc  = texture(rtScratch.texture);
+  const uFltHOn    = uniform(0);
+  const uFltHMin   = uniform(0);
+  const uFltHMax   = uniform(MAX_HEIGHT);
+  const uFltHSoft  = uniform(5);
+  const uFltSOn    = uniform(0);
+  const uFltSMin   = uniform(30);
+  const uFltSMax   = uniform(90);
+  const uFltSSoft  = uniform(3);
+
+  // Fully on inside [lo, hi], fading to zero over `soft` OUTSIDE it — so
+  // "min 40" means full effect from exactly 40, not half. The CPU paint filter
+  // in splatMap.js uses the identical shape.
+  const filterBand = (v, lo, hi, soft) => {
+    const s = max(soft, float(1e-4));
+    return smoothstep(lo.sub(s), lo, v).mul(float(1).sub(smoothstep(hi, hi.add(s), v)));
+  };
+
+  const filterMask = Fn(([uvCoord]) => {
+    const hM = texture(filterSrc, uvCoord).r.mul(float(MAX_HEIGHT));
+    const hL = texture(filterSrc, vec2(uvCoord.x.sub(texel), uvCoord.y)).r;
+    const hR = texture(filterSrc, vec2(uvCoord.x.add(texel), uvCoord.y)).r;
+    const hD = texture(filterSrc, vec2(uvCoord.x, uvCoord.y.sub(texel))).r;
+    const hU = texture(filterSrc, vec2(uvCoord.x, uvCoord.y.add(texel))).r;
+    // Normalized delta over two texels -> rise over run in metres.
+    const k  = float(MAX_HEIGHT / (2 * (WORLD_SIZE / HEIGHTMAP_SIZE)));
+    const gx = hR.sub(hL).mul(k);
+    const gz = hU.sub(hD).mul(k);
+    const slopeDeg = atan(length(vec2(gx, gz)), float(1)).mul(float(180 / Math.PI));
+    const hMask = mix(float(1), filterBand(hM, uFltHMin, uFltHMax, uFltHSoft), uFltHOn);
+    const sMask = mix(float(1), filterBand(slopeDeg, uFltSMin, uFltSMax, uFltSSoft), uFltSOn);
+    return hMask.mul(sMask);
+  });
+
   const getBrushFalloff = Fn(([uvCoord]) => {
     const maskUV   = uvCoord.sub(uBrushUV).div(uRadius.mul(float(2))).add(float(0.5));
     const c        = maskUV.sub(float(0.5));
@@ -121,7 +178,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     );
     const inBoundsX = step(float(0), rotUV.x).mul(step(rotUV.x, float(1)));
     const inBoundsY = step(float(0), rotUV.y).mul(step(rotUV.y, float(1)));
-    return texture(maskNode, rotUV).r.mul(inBoundsX).mul(inBoundsY);
+    return texture(maskNode, rotUV).r.mul(inBoundsX).mul(inBoundsY).mul(filterMask(uvCoord));
   });
 
   // ── Raise / lower brush ───────────────────────────────────────────────────
@@ -702,6 +759,13 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     // valid (zero) water/flux, not stale values from a previous stamp.
     const clearRect = _expandRect(writeRect, 2) ?? writeRect;
 
+    // The rain pass reads the brush filter off rtScratch, but hydro refreshes
+    // scratch only inside its iteration loop — AFTER the rain is seeded. Copy
+    // first, one texel wider for the slope taps, or the first stamp of a stroke
+    // would filter rain against stale heights. Harmless when the filter is off.
+    srcNode.value = rtMain.texture;
+    _render(copyQuad, rtScratch, _expandRect(clearRect, 1) ?? clearRect);
+
     _render(hydroRainQuad, rts.waterA, clearRect); // seed rain
     _render(hydroZeroQuad, rts.waterB, clearRect);
     _render(hydroZeroQuad, rts.fluxA,  clearRect);
@@ -888,5 +952,21 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
      */
     getDirtyRect: () => (_dirtyRect ? { ..._dirtyRect } : null),
     clearDirtyRect: () => { _dirtyRect = null; },
+    /**
+     * Apply a brushFilterSection state. Min and max are ordered here, so a band
+     * dragged "inside out" still means the range between the two handles.
+     */
+    setFilter(f) {
+      const hA = f?.heightMin ?? 0, hB = f?.heightMax ?? MAX_HEIGHT;
+      const sA = f?.slopeMin ?? 30, sB = f?.slopeMax ?? 90;
+      uFltHOn.value   = f?.heightOn ? 1 : 0;
+      uFltHMin.value  = Math.min(hA, hB);
+      uFltHMax.value  = Math.max(hA, hB);
+      uFltHSoft.value = Math.max(0, f?.heightSoft ?? 0);
+      uFltSOn.value   = f?.slopeOn ? 1 : 0;
+      uFltSMin.value  = Math.min(sA, sB);
+      uFltSMax.value  = Math.max(sA, sB);
+      uFltSSoft.value = Math.max(0, f?.slopeSoft ?? 0);
+    },
   };
 }

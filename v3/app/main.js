@@ -116,6 +116,7 @@ import {
 import { createTreeToolState } from "./state/treeState.js";
 import { createTreeEnvironment } from "./treeEnvironment.js";
 import { buildTreePanel } from "../ui/buildTreePanel.js";
+import { buildBrushFilterSection, createBrushFilterState } from "../ui/brushFilterSection.js";
 import { createFoliageToolState } from "./state/foliageState.js";
 import { createFoliageEnvironment } from "./foliageEnvironment.js";
 import { buildFoliagePanel } from "../ui/buildFoliagePanel.js";
@@ -1346,10 +1347,58 @@ export async function startV3App(opts = {}) {
     brush: { radius: 80, strength: 0.50, falloff: 2.0, spacingFactor: 0.10 },
     noiseMask: 0.0, noiseScale: 3.0, noiseOctaves: 3, noiseEdgeOnly: false,
     maskRotation: 0, maskRandomRotation: false, maskFollowStroke: false,
+    // Height / slope band for the paint brush. Separate from sculpt's on
+    // purpose — see brushFilterSection.js.
+    filter: createBrushFilterState(MAX_HEIGHT),
   };
   const paintBrushMask = new BrushMask();
   paintBrushMask.generateBuiltin("soft");
-  const paintSys = new PaintSystem({ paintState, splatMap, brushMask: paintBrushMask });
+  const paintSys = new PaintSystem({
+    paintState,
+    splatMap,
+    brushMask: paintBrushMask,
+    // Getter, not a value: cpuHeightmap is declared further down this function,
+    // and reading it here would hit the temporal dead zone. It is only read at
+    // stamp time, long after it exists.
+    heightSource: {
+      get data() { return cpuHeightmap; },
+      size: HEIGHTMAP_SIZE,
+      worldSize: WORLD_SIZE,
+      maxHeight: MAX_HEIGHT,
+    },
+  });
+
+  // ── Brush filters (height / slope band), one per mode ─────────────────────
+  // Mounted right after each panel's Brush section; the section header shows
+  // the active band even while collapsed.
+  const sculptFilterState = createBrushFilterState(MAX_HEIGHT);
+  {
+    // Anchor BEFORE the Sculpt tools section, not after the Brush section. The
+    // Brush section's mask markup has an unclosed <div>, so the browser nests
+    // Sculpt / Procedural / Erosion / Fluvial INSIDE it, and "after Brush" would
+    // land at the very bottom of the panel. The HTML is left as it is because
+    // closing that div would rearrange the existing panel layout.
+    const sculptToolsSec = document.getElementById("btn-raise")?.closest(".inspector-section");
+    const sculptBrushSec = document.querySelector("#sculpt-panel > .inspector-section");
+    if (sculptToolsSec || sculptBrushSec) {
+      buildBrushFilterSection({
+        anchorEl: sculptToolsSec ?? sculptBrushSec,
+        where: sculptToolsSec ? "beforebegin" : "afterend",
+        state: sculptFilterState,
+        maxHeight: MAX_HEIGHT,
+        onChange: () => sculpt.setFilter(sculptFilterState),
+      });
+    }
+    sculpt.setFilter(sculptFilterState);
+    const paintBrushSec = document.querySelector("#paint-panel > .inspector-section");
+    if (paintBrushSec) {
+      buildBrushFilterSection({
+        anchorEl: paintBrushSec,
+        state: paintState.filter,
+        maxHeight: MAX_HEIGHT,
+      });
+    }
+  }
   let   texlibActiveSlot = 0;
 
   let stickyMode  = "raise";
@@ -6787,6 +6836,9 @@ export async function startV3App(opts = {}) {
       renderer,
       terrainNormals,
       grassTerrainData,
+      splatMap,
+      sculptFilterState,
+      paintFilterState: paintState.filter,
       grassTintScene,
       grassTintCam,
       forceGrassTintBake() {

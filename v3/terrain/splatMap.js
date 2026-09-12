@@ -104,6 +104,11 @@ export class SplatMap {
     const maskCos   = maskData ? Math.cos(maskRot) : 1;
     const maskSin   = maskData ? Math.sin(maskRot) : 0;
     const invDiam   = 1 / (2 * r);
+    // Brush filter (height / slope band). Null unless a band is actually on, so
+    // the loop below is the exact old code path when filters are off.
+    const flt = stroke.filter && stroke.filter.hm && (stroke.filter.heightOn || stroke.filter.slopeOn)
+      ? stroke.filter
+      : null;
 
     const activeLayer = stroke.activeLayer;
     const isEraser    = activeLayer === 0;
@@ -153,6 +158,24 @@ export class SplatMap {
             n = n*noiseMask + (1-noiseMask);
           }
           falloff *= Math.max(0, n);
+        }
+
+        if (flt) {
+          // Same band shape as the sculpt filter in sculptBrush.js: full effect
+          // inside [min, max], fading over `soft` outside it.
+          const su = (px + 0.5) / SPLAT_RES;
+          const sv = (pz + 0.5) / SPLAT_RES;
+          let m = 1;
+          if (flt.heightOn) {
+            const hM = _sampleHm(flt.hm, flt.hmSize, su, sv) * flt.maxHeight;
+            m *= _bandMask(hM, flt.heightMin, flt.heightMax, flt.heightSoft);
+          }
+          if (m > 0 && flt.slopeOn) {
+            const sD = _slopeDegs(flt.hm, flt.hmSize, su, sv, flt.worldSize, flt.maxHeight);
+            m *= _bandMask(sD, flt.slopeMin, flt.slopeMax, flt.slopeSoft);
+          }
+          falloff *= m;
+          if (falloff <= 0) continue;
         }
 
         const w     = falloff * stroke.strength;
@@ -445,6 +468,13 @@ function _slopeDegs(hm, size, u, v, worldSize, maxHeight) {
   const gx = (_sampleHm(hm, size, u+s, v) - _sampleHm(hm, size, u-s, v)) * maxHeight / (2*tw);
   const gz = (_sampleHm(hm, size, u, v+s) - _sampleHm(hm, size, u, v-s)) * maxHeight / (2*tw);
   return Math.acos(Math.min(1, 1 / Math.sqrt(1 + gx*gx + gz*gz))) * (180 / Math.PI);
+}
+
+/** Full inside [lo, hi] (either order), fading to 0 over `soft` outside it. */
+function _bandMask(v, lo, hi, soft) {
+  const a = Math.min(lo, hi), b = Math.max(lo, hi);
+  const w = Math.max(soft, 1e-4);
+  return _smoothstep(a - w, a, v) * (1 - _smoothstep(b, b + w, v));
 }
 
 function _smoothstep(e0, e1, x) {
