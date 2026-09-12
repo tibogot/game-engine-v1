@@ -1218,6 +1218,7 @@ export async function startV3App(opts = {}) {
   const lblClampMax = document.getElementById("lbl-clamp-max");
   const subRaiseLower   = document.getElementById("sub-raiselower");
   const subTerrace      = document.getElementById("sub-terrace");
+  const subFlatten      = document.getElementById("sub-flatten");
   const subNoise        = document.getElementById("sub-noise");
   const subErode        = document.getElementById("sub-erode");
   const subHydro        = document.getElementById("sub-hydro");
@@ -1373,11 +1374,10 @@ export async function startV3App(opts = {}) {
   // the active band even while collapsed.
   const sculptFilterState = createBrushFilterState(MAX_HEIGHT);
   {
-    // Anchor BEFORE the Sculpt tools section, not after the Brush section. The
-    // Brush section's mask markup has an unclosed <div>, so the browser nests
-    // Sculpt / Procedural / Erosion / Fluvial INSIDE it, and "after Brush" would
-    // land at the very bottom of the panel. The HTML is left as it is because
-    // closing that div would rearrange the existing panel layout.
+    // Anchor BEFORE the Sculpt tools section. The Brush section used to have an
+    // unclosed <div> that nested every later section inside it, which made
+    // "after Brush" land at the bottom of the panel; that markup is fixed now,
+    // but anchoring on the tools section is correct either way.
     const sculptToolsSec = document.getElementById("btn-raise")?.closest(".inspector-section");
     const sculptBrushSec = document.querySelector("#sculpt-panel > .inspector-section");
     if (sculptToolsSec || sculptBrushSec) {
@@ -1422,6 +1422,8 @@ export async function startV3App(opts = {}) {
     // Tool options always track stickyMode so modifier-key overrides don't hide the zone.
     subRaiseLower.style.display = (stickyMode === "raise" || stickyMode === "lower") ? "" : "none";
     subTerrace   .style.display = stickyMode === "terrace" ? "" : "none";
+    if (subFlatten) subFlatten.style.display = stickyMode === "flatten" ? "" : "none";
+    if (stickyMode !== "flatten" && _pickingHeight) setPickingHeight(false);
     subNoise     .style.display = stickyMode === "noise"   ? "" : "none";
     subErode     .style.display = stickyMode === "erode"   ? "" : "none";
     subHydro     .style.display = stickyMode === "hydro"   ? "" : "none";
@@ -1443,6 +1445,42 @@ export async function startV3App(opts = {}) {
     rampState = "idle";
     rampHint.textContent = "Click start point...";
     refreshModeIndicator();
+  });
+
+  // ── Set Height: fixed target + eyedropper ─────────────────────────────────
+  // Flatten used to have exactly one behaviour: capture the height under the
+  // cursor when the stroke starts. That is still the default. "Fixed height"
+  // flattens to a typed value instead, and Pick copies a value off the terrain
+  // with one click, without sculpting — Unity's Set Height / Unreal's flatten
+  // target. Applies to Alt+drag flatten too, since that shares the same stamp.
+  const flattenState = { fixed: false, heightM: 0 };
+  const ckFlattenFixed    = document.getElementById("ck-flatten-fixed");
+  const numFlattenHeight  = document.getElementById("num-flatten-height");
+  const btnFlattenPick    = document.getElementById("btn-flatten-pick");
+  // Declared with var-like hoisting in mind: setMode() (defined above) reads it,
+  // but only runs from events, long after this line.
+  var _pickingHeight = false;
+  function setPickingHeight(on) {
+    _pickingHeight = !!on;
+    btnFlattenPick?.classList.toggle("primary", _pickingHeight);
+    if (btnFlattenPick) btnFlattenPick.textContent = _pickingHeight ? "Click ground…" : "Pick";
+    renderer.domElement.style.cursor = _pickingHeight ? "crosshair" : "";
+  }
+  const setFlattenFixed = (on) => {
+    flattenState.fixed = !!on;
+    ckFlattenFixed?.classList.toggle("checked", flattenState.fixed);
+  };
+  ckFlattenFixed?.addEventListener("click", () => setFlattenFixed(!flattenState.fixed));
+  numFlattenHeight?.addEventListener("change", () => {
+    const v = parseFloat(numFlattenHeight.value);
+    if (!Number.isFinite(v)) { numFlattenHeight.value = flattenState.heightM; return; }
+    flattenState.heightM = v;
+    // Typing a target and having it silently ignored would be the surprise.
+    setFlattenFixed(true);
+  });
+  btnFlattenPick?.addEventListener("click", () => setPickingHeight(!_pickingHeight));
+  window.addEventListener("keydown", (e) => {
+    if (_pickingHeight && e.key === "Escape") setPickingHeight(false);
   });
 
   function setStickyStamp(s) {
@@ -2652,7 +2690,9 @@ export async function startV3App(opts = {}) {
   function stampAt(u, v) {
     const mode = getStrokeMode();
     if (mode === "flatten" && !_flattenLocked) {
-      sculpt.uFlattenTarget.value = sampleHeightNormalized(u, v);
+      sculpt.uFlattenTarget.value = flattenState.fixed
+        ? flattenState.heightM / MAX_HEIGHT
+        : sampleHeightNormalized(u, v);
       _flattenLocked = true;
     }
     if      (mode === "smooth")  sculpt.smooth(u, v);
@@ -3137,6 +3177,19 @@ export async function startV3App(opts = {}) {
     refreshModeIndicator();
     refreshMouse(e);
 
+    // Set Height eyedropper: copy the ground height, never sculpt on this click.
+    if (_pickingHeight) {
+      const uvHit = getUV();
+      if (uvHit) {
+        const hM = Math.round(sampleHeightNormalized(uvHit.u, uvHit.v) * MAX_HEIGHT * 100) / 100;
+        flattenState.heightM = hM;
+        if (numFlattenHeight) numFlattenHeight.value = hM;
+        setFlattenFixed(true);
+      }
+      setPickingHeight(false);
+      return;
+    }
+
     // Ramp: two-click workflow — first click sets A, second click bakes the ramp.
     if (stickyMode === "ramp") {
       const uvHit = getUV();
@@ -3442,6 +3495,12 @@ export async function startV3App(opts = {}) {
   drawPaintMaskPreview();
 
   function refreshLayerThumb(slotIdx) {
+    // The card label used to stay "L1".."L7" forever: only typing in the name
+    // field updated it, so the defaults (Grass, Rock...) and names restored from
+    // a project never reached the cards. Every path that changes a slot already
+    // funnels through here, so the label is refreshed alongside the thumbnail.
+    const label = document.getElementById(`llabel-${slotIdx + 1}`);
+    if (label) label.textContent = textureLib.slots[slotIdx].name || `L${slotIdx + 1}`;
     const thumb = document.getElementById(`lthumb-${slotIdx + 1}`);
     if (!thumb) return;
     const url = textureLib.slots[slotIdx].albedoUrl;
