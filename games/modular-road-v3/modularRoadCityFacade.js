@@ -376,7 +376,23 @@ export const FACADE_DEFAULTS = {
   shopStripe: 0.34,
   /** How many shops are open, and how hard the inside glows at night. */
   shopLitFraction: 0.74,
-  shopGlow: 1.35,
+  shopGlow: 0.55,
+  /**
+   * ── THE SHOP BEHIND THE GLASS ─────────────────────────────────────────────
+   *
+   * The shopfront was a dark pane with a warm glow behind it at night. The
+   * example's is a ROOM: a tiled floor, a troffer-lit ceiling, shelves of
+   * goods on the back wall, a counter — ray-cast behind the pane the way the
+   * office rooms are behind theirs. At driving height it is the interior you
+   * actually see, and a street of them is what makes a frontage read as
+   * open for business rather than as painted on.
+   *
+   * Same analytic box as the rooms, its own dressing; a lobby gets a lobby
+   * (stone floor, dark panelling, a desk) instead of shelves. Only pixels in
+   * the street-level branch pay for it. 0 = the old dark pane.
+   */
+  shopInterior: 1.0,
+  shopDepth: 5.5,
   neonHeight: 4.0,
   neonThick: 0.40,
   /** A projecting blade sign above the fascia, on some bays. */
@@ -1805,7 +1821,85 @@ export function createCityFacadeMaterial({
       const stripe = step(float(0.5), fract(sx.div(u.shopStripe)));
       const awnCol = mix(shopCol.mul(0.85), vec3(0.88, 0.88, 0.85), stripe);
 
-      oCol.assign(mix(oCol, vec3(0.040, 0.045, 0.052), glass.mul(shopOn)));
+      /*
+       * ── THE ROOM BEHIND THE PANE ───────────────────────────────────────────
+       *
+       * The same five-plane box the office rooms use, cast from this pixel
+       * along the view ray: `pu` across the shop unit (metres), `pv` up from
+       * the sill, `D` deep. Where the ray lands — back wall, floor, ceiling or
+       * a side wall — decides the dressing. A shop: chequered tile floor,
+       * suspended ceiling with lit troffers, shelving in bands of goods, a
+       * counter. A lobby: polished stone, dark panelling, a reception desk
+       * and a warm-lit ceiling. Everything is a hash of the shop unit, so a
+       * parade is different shops rather than one shop repeated.
+       */
+      const shopSeen = vec3(0.040, 0.045, 0.052).toVar();
+      const shopGlowV = vec3(0.0).toVar();
+      If(u.shopInterior.greaterThan(0.5).and(glass.mul(shopOn).greaterThan(0.002)), () => {
+        const ru = dot(F.V, F.uAxis).toVar(), rv = F.V.y.toVar();
+        const rd = max(dot(F.V, F.nW).negate(), 0.04).toVar();
+        const roomW = u.shopUnit.sub(u.shopPier.mul(1.35));
+        const roomH = fasciaLo.sub(glassLo).add(0.6);
+        const D = u.shopDepth;
+        const pu = sx.sub(u.shopPier).toVar();
+        const pv = F.up.sub(glassLo).toVar();
+        const tBack = D.div(rd);
+        const tS = select(ru.greaterThan(0.0), roomW.sub(pu), pu.negate())
+          .div(select(abs(ru).lessThan(1e-4), float(1e-4), ru));
+        const tV2 = select(rv.greaterThan(0.0), roomH.sub(pv), pv.negate())
+          .div(select(abs(rv).lessThan(1e-4), float(1e-4), rv));
+        const tSP = select(tS.greaterThan(0.0), tS, float(1e6));
+        const tVP = select(tV2.greaterThan(0.0), tV2, float(1e6));
+        const tHit = min(tBack, min(tSP, tVP));
+        const q = vec3(pu.add(ru.mul(tHit)).div(roomW), pv.add(rv.mul(tHit)).div(roomH), rd.mul(tHit).div(D));
+        const onBack = tHit.equal(tBack);
+        const onFloor = tHit.equal(tVP).and(rv.lessThan(0.0));
+        const onCeil = tHit.equal(tVP).and(rv.greaterThan(0.0));
+        const litIn = max(step(sh, u.shopLitFraction).mul(paradeOn), lobbyOn).toVar();
+        const isLobby = lobbyOn.greaterThan(0.5);
+        // Goods: five colour families, picked per shelf band per shop.
+        const goods = (k) => {
+          const g = fract(sh.mul(31.7).add(k.mul(0.618)));
+          return mix(mix(vec3(0.72, 0.28, 0.24), vec3(0.24, 0.42, 0.66), step(0.2, g)),
+            mix(vec3(0.82, 0.70, 0.30), mix(vec3(0.30, 0.56, 0.36), vec3(0.85, 0.83, 0.78), step(0.8, g)), step(0.6, g)),
+            step(0.4, g));
+        };
+        // Back wall: shelves every 0.45 m of height, goods in blocks across.
+        const shelfRow = floor(q.y.mul(roomH).div(0.45));
+        const onShelf = step(0.82, fract(q.y.mul(roomH).div(0.45)));
+        const goodsCol = goods(shelfRow.add(floor(q.x.mul(6.0)).mul(3.1)))
+          .mul(float(0.7).add(fract(q.x.mul(6.0)).mul(0.5)))
+          .mul(step(fract(q.x.mul(6.0)), float(0.9)));
+        const shopBack = mix(goodsCol, vec3(0.34, 0.33, 0.31), onShelf);
+        const lobbyBack = mix(vec3(0.22, 0.17, 0.13), vec3(0.28, 0.22, 0.17), step(0.5, fract(q.x.mul(5.0))));
+        // Floor: a chequer for the shop, a polished slab for the lobby.
+        const chk = mod(floor(q.x.mul(roomW).div(0.6)).add(floor(q.z.mul(D).div(0.6))), 2.0);
+        const shopFloor = mix(vec3(0.78, 0.76, 0.70), vec3(0.62, 0.60, 0.56), chk);
+        const lobbyFloor = vec3(0.70, 0.66, 0.60).mul(float(0.9).add(step(0.95, fract(q.z.mul(D).div(1.2))).mul(0.2)));
+        // Ceiling: troffers in a grid, burning when the shop is lit.
+        const trof = step(0.35, fract(q.x.mul(3.0))).mul(step(0.65, fract(q.x.mul(3.0))).oneMinus())
+          .mul(step(0.3, fract(q.z.mul(3.0))).mul(step(0.7, fract(q.z.mul(3.0))).oneMinus()));
+        const lampCol = select(isLobby, vec3(1.0, 0.86, 0.66), vec3(0.92, 0.96, 1.0));
+        const ceilBase = mix(vec3(0.62, 0.62, 0.60), lampCol.mul(mix(float(1.2), float(5.0), u.nightAmount)), trof.mul(litIn));
+        const ceilCol = mix(ceilBase, vec3(0.30, 0.28, 0.26), float(isLobby).mul(float(1.0).sub(trof)));
+        // A counter across part of the shop, a desk across the lobby.
+        const counter = onFloor.and(q.z.greaterThan(0.55)).and(q.z.lessThan(0.75))
+          .and(q.x.greaterThan(select(isLobby, float(0.25), float(0.05))))
+          .and(q.x.lessThan(select(isLobby, float(0.75), float(0.55))));
+        const side = mix(vec3(0.62, 0.60, 0.57), vec3(0.24, 0.20, 0.17), float(isLobby));
+        const shell = select(onBack, select(isLobby, lobbyBack, shopBack),
+          select(onCeil, ceilCol, select(onFloor, select(counter, vec3(0.30, 0.26, 0.22), select(isLobby, lobbyFloor, shopFloor)), side)));
+        const aoE = (a) => smoothstep(float(0.0), float(0.12), a).mul(smoothstep(float(0.0), float(0.12), float(1.0).sub(a)));
+        const edge = select(onBack, aoE(q.x).mul(aoE(q.y)), select(onFloor.or(onCeil), aoE(q.x).mul(aoE(q.z)), aoE(q.y).mul(aoE(q.z))));
+        const raw = shell.mul(mix(float(0.7), float(1.0), edge)).mul(mix(float(1.0), float(0.5), q.z.clamp(0.0, 1.0)));
+        // Lit: the whole room takes the lamp colour a little; dark: it goes to
+        // the dim grey of a shut shop seen through its window.
+        const roomCol = mix(raw.mul(0.35), raw.mul(mix(vec3(1.0), lampCol, 0.5)).mul(1.15), litIn);
+        const g = glassOf(roomCol, litIn.mul(0.6), lampCol, pv.div(max(roomH, 0.5)).clamp(0.0, 1.0), F.nW);
+        shopSeen.assign(g.col);
+        shopGlowV.assign(g.glow);
+      });
+      oCol.assign(mix(oCol, shopSeen, glass.mul(shopOn)));
       oCol.assign(mix(oCol, vec3(0.075, 0.078, 0.082), mullM.mul(shopOn)));
       // The painted parts are the PARADE's alone. A lobby is glass, metal and
       // stone; giving it a coloured fascia was most of what made the towers
@@ -1827,6 +1921,7 @@ export function createCityFacadeMaterial({
       // A lobby is always lit — that is rather the point of a lobby — while a
       // parade has some shops shut.
       const litShop = max(step(sh, u.shopLitFraction).mul(paradeOn), lobbyOn);
+      oEmis.assign(oEmis.add(shopGlowV.mul(glass.mul(float(1.0).sub(awnM)).mul(shopOn))));
       oEmis.assign(oEmis.add(vec3(1.0, 0.86, 0.66).mul(
         glass.mul(float(1.0).sub(awnM)).mul(litShop).mul(shopOn)
           .mul(u.nightAmount).mul(u.shopGlow))));
