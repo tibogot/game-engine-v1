@@ -91,6 +91,9 @@ import { planCarParks, buildCarParkGround, CARPARK_DEFAULTS } from "./modularRoa
 import { planParks, buildParkGround, PARK_DEFAULTS } from "./modularRoadCityPark.js";
 import { placeCityBridges, BRIDGE_DEFAULTS } from "./modularRoadCityBridges.js";
 import { planCityGates, createCityGates, gateFootprint, gateMeetsCorridor } from "./modularRoadCityGate.js";
+import {
+  planRoundTowers, createRoundTowers, roundTowerFootprint, roundTowerMeetsCorridor,
+} from "./modularRoadCityRoundTower.js";
 import { createCityStreets, STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
@@ -281,6 +284,14 @@ export const CITY_DEFAULTS = {
    */
   gates: true,
   gateParams: {},
+  /**
+   * ROUND TOWERS on corner lots — the one silhouette a kit of boxes cannot
+   * make. Each reserves its lot before the lot loop, like a gate, so the
+   * facade, collider, roof clutter and adverts never meet a curve. Every round
+   * tower in the city is ONE draw. See modularRoadCityRoundTower.js.
+   */
+  roundTowers: true,
+  roundTowerParams: {},
   /** Some of the squares become surface car parks — painted bays and cars
    *  standing in them. One draw for the paint, none for the cars. */
   carParks: true,
@@ -500,6 +511,10 @@ export function createModularRoadCity({
   let gatesAt = null;
   let gateUnder = null;
   let gates = null;
+  /** Round tower plan, footprint test and meshes — same lifecycle as the gates. */
+  let roundAt = null;
+  let roundUnder = null;
+  let roundTowers = null;
   let carParkGround = null;
   let carParks = [];
   let parkGround = null;
@@ -632,6 +647,24 @@ export function createModularRoadCity({
       })
       : null;
     const gateReserved = gatesAt ? gatesAt.reserved : null;
+    /*
+     * ROUND TOWERS, planned the same way and at the same moment — after the
+     * gates, which they are told about so the two never claim one lot.
+     */
+    roundAt = P.roundTowers
+      ? planRoundTowers({
+        P, rand: blockRand, extent, originCellX, originCellZ,
+        isPlaza: (cx, cz) => plazaBlockOf(cx, cz, extent) !== null,
+        keepOut: (x, z) => (viaductClear ? viaductClear(x, z) : false)
+          || (underUnder ? underUnder(x, z) : false),
+        under: viaductUnder,
+        taken: gateReserved,
+        heightAt,
+        params: P.roundTowerParams,
+      })
+      : null;
+    const roundReserved = roundAt ? roundAt.reserved : null;
+    let culledRound = 0;
     const plazaList = [], plazaSeen = new Set();
     const districts = [0, 0, 0];
     const types = [0, 0, 0];
@@ -661,6 +694,15 @@ export function createModularRoadCity({
         const rDistrict = rnd();
         const rType = rnd();
 
+        /*
+         * A LOT A GATE OR A ROUND TOWER HAS TAKEN. Checked before the density
+         * roll: the site was decided from its own dice before any lot was looked
+         * at, so whether THIS lot would have been built has no say in it — and
+         * nothing about this lot can move the structure anywhere else. (After
+         * the roll, a reserved lot that lost it went uncounted.)
+         */
+        if (gateReserved && gateReserved.has(cx + "," + cz)) { culledGate++; continue; }
+        if (roundReserved && roundReserved.has(cx + "," + cz)) { culledRound++; continue; }
         if (rDensity > P.density) continue;
         /*
          * ── A PLAZA: ONE WHOLE BLOCK LEFT UNBUILT ────────────────────────
@@ -699,13 +741,6 @@ export function createModularRoadCity({
             continue;
           }
         }
-        /*
-         * A GATE WING. Reserved before the density roll, like a plaza: the
-         * site was decided from the gate's own dice before any lot was looked
-         * at, so whether THIS lot would have been built has no say in it — and
-         * nothing about this lot can move a gate anywhere else.
-         */
-        if (gateReserved && gateReserved.has(cx + "," + cz)) { culledGate++; continue; }
 
         let baseY = P.groundY;
         if (heightAt) {
@@ -815,6 +850,13 @@ export function createModularRoadCity({
     stats.gates = gatesAt ? gatesAt.gates.length : 0;
     stats.gateList = gatesAt ? gatesAt.gates : [];
     stats.culledGate = culledGate;
+    if (roundAt && avoid) {
+      roundAt.towers = roundAt.towers.filter((t) => !roundTowerMeetsCorridor(t, (x, z, top) => avoid(x, z, top), P.avoidRadius));
+    }
+    roundUnder = roundTowerFootprint(roundAt, 0.8);
+    stats.roundTowers = roundAt ? roundAt.towers.length : 0;
+    stats.roundTowerList = roundAt ? roundAt.towers : [];
+    stats.culledRound = culledRound;
 
     // ── Lot texture ──────────────────────────────────────────────────────────
     for (const b of out) {
@@ -979,6 +1021,9 @@ export function createModularRoadCity({
     if (gates) { group.remove(gates.group); gates.dispose(); gates = null; }
     gatesAt = null;
     gateUnder = null;
+    if (roundTowers) { group.remove(roundTowers.group); roundTowers.dispose(); roundTowers = null; }
+    roundAt = null;
+    roundUnder = null;
     viaductAt = null;
     viaductClear = null;
     viaductUnder = null;
@@ -1167,6 +1212,9 @@ export function createModularRoadCity({
     gates = createCityGates({ plan: gatesAt, uNight, castShadows: P.castShadows });
     if (gates) { group.add(gates.group); stats.gateMesh = gates.stats; }
     else stats.gateMesh = null;
+    roundTowers = createRoundTowers({ plan: roundAt, uNight, castShadows: P.castShadows });
+    if (roundTowers) { group.add(roundTowers.group); stats.roundTowerMesh = roundTowers.stats; }
+    else stats.roundTowerMesh = null;
     if (P.beacons) {
       const tips = [];
       for (const b of buildings) {
@@ -1359,6 +1407,21 @@ export function createModularRoadCity({
             }
           }
         }
+        // Round towers, as their bounding box — conservative by the corners of a
+        // square around a circle, which only ever makes a tree a little smaller.
+        for (const t of roundAt?.towers ?? []) {
+          const half = t.radius + (roundAt.params.podiumGrow ?? 0);
+          const rec = { x: t.x, z: t.z, hw: half, hd: half };
+          const ci = Math.floor(t.x / CLEAR_CELL), cj = Math.floor(t.z / CLEAR_CELL);
+          for (let di = -1; di <= 1; di++) {
+            for (let dj = -1; dj <= 1; dj++) {
+              const k = ckey(ci + di, cj + dj);
+              let arr = clearGrid.get(k);
+              if (!arr) clearGrid.set(k, (arr = []));
+              arr.push(rec);
+            }
+          }
+        }
         /** Metres from (x, z) to the nearest building wall. Infinity if none
          *  is near; NEGATIVE when the point is inside a footprint. */
         const buildingClearance = (x, z) => {
@@ -1530,6 +1593,7 @@ export function createModularRoadCity({
     if (roofs?.group) out.push(roofs.group);
     // The gates: rain must stop at a roof you can drive under.
     if (gates) out.push(...gates.meshes);
+    if (roundTowers) out.push(roundTowers.mesh);
     return out;
   }
 
@@ -1542,7 +1606,8 @@ export function createModularRoadCity({
     || (underUnder ? underUnder(x, z) : false)
     // Nothing stands in a gate's passage or inside its walls: a lamp post in
     // the vault is a solid capsule in the only way through.
-    || (gateUnder ? gateUnder(x, z) : false);
+    || (gateUnder ? gateUnder(x, z) : false)
+    || (roundUnder ? roundUnder(x, z) : false);
 
   function rebuild() {
     const t0 = performance.now();
@@ -1968,7 +2033,8 @@ export function createModularRoadCity({
       const v = viaduct ? viaduct.collisionMeshes() : { deck: [], solids: [] };
       const u = underpass ? underpass.collisionMeshes() : { deck: [], solids: [] };
       const g = gates ? gates.collisionMeshes() : { deck: [], solids: [] };
-      return { deck: [...v.deck, ...u.deck], solids: [...v.solids, ...u.solids, ...g.solids] };
+      const rt = roundTowers ? roundTowers.collisionMeshes() : { deck: [], solids: [] };
+      return { deck: [...v.deck, ...u.deck], solids: [...v.solids, ...u.solids, ...g.solids, ...rt.solids] };
     },
     streetHeightAt(x, z) {
       if (!ground || !P.ground) return NaN;
