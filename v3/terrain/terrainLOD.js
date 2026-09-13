@@ -285,6 +285,10 @@ function createLODMaterial({
     gridColor:     0x444444,
     gridLineColor: 0x111111,
   });
+  // The paint blend's generated code depends on build-time switches (per-layer
+  // triplanar is compiled in only while a layer uses it); registering lets it
+  // recompile this material when one flips.
+  splatOverlay?.registerMaterial?.(mat);
 
   const texel = float(1.0 / HEIGHTMAP_SIZE);
 

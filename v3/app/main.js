@@ -475,6 +475,18 @@ export async function startV3App(opts = {}) {
   // not exist yet — the sources are attached once that system is built.
   const riverSandShading = createRiverSandShading({ worldSize: WORLD_SIZE });
 
+  /**
+   * Triplanar is compiled into the terrain shader only while at least one paint
+   * layer has it on — with every switch off its branches still cost ~4 ms at
+   * 4.76 Mpx (see splatOverlayTsl sampleLayer). Call after anything that changes
+   * a layer's triplanar switch.
+   */
+  function syncTriplanarCompile() {
+    splatOverlay.setTriplanarCompiled(
+      textureLib.slotUniforms.map((u) => u.uTriplanar.value > 0.5),
+    );
+  }
+
   const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading);
   scene.add(lod.group);
   /**
@@ -3664,6 +3676,7 @@ export async function startV3App(opts = {}) {
 
   tslTriplanar.addEventListener("change", () => {
     textureLib.setTriplanar(texlibActiveSlot, tslTriplanar.checked);
+    syncTriplanarCompile();
   });
   const tslBlockGrass = document.getElementById("tsl-block-grass");
   const tslBlockTrees = document.getElementById("tsl-block-trees");
@@ -5655,6 +5668,7 @@ export async function startV3App(opts = {}) {
     }
     if (d.paintLayers) {
       await textureLib.importData(d.paintLayers);
+      syncTriplanarCompile();
       for (let i = 0; i < 7; i++) refreshLayerThumb(i);
       syncTexlibEditor();
     }

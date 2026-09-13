@@ -143,6 +143,36 @@ export function createSplatOverlay(
   const albedoArrNode = texture(albedoArrayTex);
   const ormArrNode    = texture(ormArrayTex);
 
+  // Build-time switches that can change after creation (see sampleLayer).
+  // Materials whose generated code depends on them register here, so a change
+  // gives them a different program cache key and recompiles them.
+  // triplanarSlots[i] = layer i's triplanar projection is generated at all.
+  const compileState = { triplanar: false, triplanarSlots: new Array(NUM_LAYERS).fill(false) };
+  const _compileConsumers = new Set();
+  const _triKey = () => compileState.triplanarSlots.map((on) => (on ? 1 : 0)).join("");
+  function registerMaterial(mat) {
+    if (!mat || _compileConsumers.has(mat)) return mat;
+    _compileConsumers.add(mat);
+    const baseKey = mat.customProgramCacheKey.bind(mat);
+    mat.customProgramCacheKey = () => `${baseKey()}|splatTri:${_triKey()}`;
+    return mat;
+  }
+  /**
+   * Compile triplanar for exactly the layers that use it. `slots` is a
+   * per-layer boolean array (L1..L7). Only those layers get the extra side
+   * projections, and they get them WITHOUT a runtime branch: a layer with the
+   * code generated always uses it. Returns true if the generated code changed
+   * (the registered materials then recompile — a one-off pause).
+   */
+  function setTriplanarCompiled(slots) {
+    const next = Array.from({ length: NUM_LAYERS }, (_, i) => Boolean(slots?.[i]) && F.triplanar);
+    if (next.every((v, i) => v === compileState.triplanarSlots[i])) return false;
+    compileState.triplanarSlots = next;
+    compileState.triplanar = next.some(Boolean);
+    for (const mat of _compileConsumers) mat.needsUpdate = true;
+    return true;
+  }
+
   /**
    * TRIPLANAR, PER LAYER, OFF BY DEFAULT.
    *
@@ -168,22 +198,30 @@ export function createSplatOverlay(
    * is an approximation on steep ground either way, and reorienting it per
    * projection is a bigger change than this is worth: albedo, roughness and AO
    * are what read as "stretched".
+   *
+   * COMPILED PER LAYER, ONLY WHILE THAT LAYER USES IT. It used to be a runtime
+   * branch on the uniform above for every layer, meant to make "all switches
+   * off" free — and it was not: MEASURED 2026-09-13 at 4.76 Mpx, any painted
+   * terrain cost +5.6 ms with the seven branches compiled in and every switch
+   * off, versus +1.3 ms compiled out. The texture samples inside a branch are
+   * evidently still paid on this backend. So a layer's side projections are
+   * generated only while `compileState.triplanarSlots[i]` is set, and then
+   * unconditionally, with no branch. setTriplanarCompiled() changes the set and
+   * recompiles the registered materials (a one-off pause on toggle). This runs
+   * at shader BUILD time — TSL executes a Fn's body per build — so the flags
+   * decide what is generated, not what runs.
    */
   function sampleLayer(i, arrNode, triWeights) {
     const p   = positionWorld.mul(invWS).mul(layerSlots[i].uUVScale);
-    const out = vec4(arrNode.sample(p.xz).depth(int(i))).toVar();
-    if (F.triplanar && triWeights && layerSlots[i].uTriplanar) {
-      If(layerSlots[i].uTriplanar.greaterThan(0.0), () => {
-        const side  = arrNode.sample(p.zy).depth(int(i)); // X-facing wall
-        const front = arrNode.sample(p.xy).depth(int(i)); // Z-facing wall
-        out.assign(
-          out.mul(triWeights.y)
-            .add(side.mul(triWeights.x))
-            .add(front.mul(triWeights.z)),
-        );
-      });
+    const top = arrNode.sample(p.xz).depth(int(i));
+    if (compileState.triplanarSlots[i] && triWeights) {
+      const side  = arrNode.sample(p.zy).depth(int(i)); // X-facing wall
+      const front = arrNode.sample(p.xy).depth(int(i)); // Z-facing wall
+      return top.mul(triWeights.y)
+        .add(side.mul(triWeights.x))
+        .add(front.mul(triWeights.z)).toVar();
     }
-    return out;
+    return vec4(top).toVar();
   }
 
   // ── Weight extraction (pre-auto-paint) ────────────────────────────────────────
@@ -307,7 +345,7 @@ export function createSplatOverlay(
         // passes no normal, because the grass tint bake is a flat top-down
         // plane where a side projection would be meaningless.
         let triW = null;
-        if (F.triplanar && geomNormal !== null) {
+        if (compileState.triplanar && geomNormal !== null) {
           const nAbs = abs(normalize(vec3(geomNormal))).toVar();
           // The power sharpens the transition, so the seam between projections
           // is a narrow band rather than a wide mush across the whole slope.
@@ -473,6 +511,9 @@ export function createSplatOverlay(
     uMacroWarmth,
     uMacroScale,
     blend,
+    registerMaterial,
+    setTriplanarCompiled,
+    get triplanarCompiled() { return compileState.triplanar; },
     auto: {
       uAutoEnabled, uAutoFull, uAutoFlat, uAutoCliff, uAutoHigh,
       uAutoSlopeHiY, uAutoSlopeLoY, uAutoHighStart, uAutoHighEnd, uAutoNoise,

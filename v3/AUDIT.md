@@ -31,10 +31,10 @@ the game.
 2. ~~Retire Procedural Ground and Meadow~~ — DONE 2026-09-13. No saved project
    used either; a before/after render and the grass tint are pixel-identical.
    Paint slot 8's channel (splat slice 1 alpha) is now unused.
-2b. **Triplanar costs ~4.2 ms at 4.76 Mpx (~1 ms native) on any painted
-   terrain even with every layer's switch OFF** (measured 2026-09-13: painting
-   +5.6 ms compiled in vs +1.3 ms compiled out). Fix: compile it in only when a
-   layer actually uses it.
+2b. ~~Triplanar cost ~4.2 ms with every switch off~~ — FIXED 2026-09-13: now
+   compiled per layer only while that layer uses it. Painting cost at 4.76 Mpx:
+   all off +5.6 → +1.6–2.1 ms; Rock triplanar on +2.3–2.6 ms. Toggling a layer's
+   Triplanar recompiles the terrain shader (one-off pause).
 3. **More Genshin textures** 👁: cliff rock, forest floor, wet sand, snow.
 4. **Target strength.** The Opacity slider only scales stroke strength, so a
    stroke still drives a layer to full weight. Unity caps it (a 30% mud scatter).
@@ -103,7 +103,6 @@ Reopen only for a specific target (a weaker machine, 120 Hz, 1440p).
 
 ## Suggested order
 
-1. Triplanar only compiled when used (2b).
-2. Grass look pass, panel and horizon (16–18), with your eyes.
-3. Heightmap PNG/RAW import (10).
-4. Roads when ready.
+1. Grass look pass, panel and horizon (16–18), with your eyes.
+2. Heightmap PNG/RAW import (10).
+3. Roads when ready.
