@@ -55,6 +55,8 @@ export const PROP_CONTACT = {
   maxSpin: 60,
   /** A body this far below where it started (m) has left the world. */
   fallLimit: 200,
+  /** A sleeping prop struck by another this fast (m/s, into it) is woken. */
+  wakeSpeed: 0.5,
   /** Below this speed AND spin, held for `sleepAfter` s while grounded, a body sleeps. */
   sleepSpeed: 0.25,
   sleepSpin: 0.5,
@@ -101,6 +103,10 @@ const _local = new THREE.Vector3();
 const _closest = new THREE.Vector3();
 const _hullC = new THREE.Vector3();
 const _castFrom = new THREE.Vector3();
+const _pw = new THREE.Vector3();
+const _pn = new THREE.Vector3();
+const _pl = new THREE.Vector3();
+const _pq = new THREE.Quaternion();
 const _q = new THREE.Quaternion();
 const _qi = new THREE.Quaternion();
 const _down = new THREE.Vector3(0, -1, 0);
@@ -128,6 +134,17 @@ export function buildContactShape(profile) {
   const sh = profile.shape;
   const comY = profile.comY ?? 0;
   const ground = [], car = [];
+  /*
+   * `pair`: the points tested against ANOTHER body's exact shape. Kept off the
+   * silhouette's sharp edges on purpose: a tyre stacked squarely on another has
+   * its bottom rim exactly over the lower one's rim edge, where the distance
+   * field's normal is undefined — up on one tick, sideways the next, and a
+   * stack shuffled itself apart. Inset cap rings sit over the face, never the
+   * edge, and the tread rings stay on the tread for tyres side by side.
+   */
+  const pair = [];
+  /** Exact shape, root-relative, for the signed distance a neighbour's points are tested against. */
+  const sdf = { kind: sh.kind, comY };
   const pt = (out, x, y, z) => out.push(x, y - comY, z);
   const ring = (out, y, r, n, phase = 0) => {
     for (let i = 0; i < n; i++) {
@@ -145,6 +162,14 @@ export function buildContactShape(profile) {
     ring(ground, y0 + sh.height, sh.top, 6);
     for (const [h, r] of sh.rings) ring(car, y0 + h, r, 8, Math.PI / 8);
     ring(car, y0 + sh.height, sh.top, 6);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) pt(pair, sx * sh.base * 0.9, y0, sz * sh.base * 0.9);
+    for (const [h, r] of sh.rings) ring(pair, y0 + h, r, 8, Math.PI / 8);
+    ring(pair, y0 + sh.height, sh.top * 0.8, 4);
+    // Radius by height above the base, for the distance field: the plate, the
+    // taper rings, the top.
+    sdf.y0 = y0;
+    sdf.height = sh.height;
+    sdf.profile = [[0, sh.base], ...sh.rings, [sh.height, sh.top]];
   } else if (sh.kind === "cylinder") {
     const r = profile.size.width * 0.5, h = profile.size.height * 0.5;
     const cy = (sh.baseY ?? -h) + h; // axis centre, root-relative
@@ -155,11 +180,16 @@ export function buildContactShape(profile) {
     for (let k = 0; k < n; k++) ring(car, cy - h + (2 * h * k) / (n - 1), r, 12);
     pt(car, 0, cy + h, 0);
     pt(car, 0, cy - h, 0);
+    ring(pair, cy + h, r * 0.85, 8);
+    ring(pair, cy - h, r * 0.85, 8);
+    for (const f of [-0.8, 0, 0.8]) ring(pair, cy + f * h, r, 12, Math.PI / 12);
+    Object.assign(sdf, { r, h, cy });
   } else if (sh.kind === "box") {
     const hx = sh.width * 0.5, hz = sh.length * 0.5, y0 = sh.baseY;
     for (const sx of [-1, 1]) for (const sy of [0, 1]) for (const sz of [-1, 1]) {
       pt(ground, sx * hx, y0 + sy * sh.height, sz * hz);
     }
+    Object.assign(sdf, { hx, hy: sh.height * 0.5, hz, cy: y0 + sh.height * 0.5 });
     // A surface grid: ~0.25 m across, ~0.2 m up. Only the SURFACE — an
     // interior point is never the first thing a bumper reaches.
     const nx = Math.max(2, Math.round(sh.width / 0.25) + 1);
@@ -168,6 +198,12 @@ export function buildContactShape(profile) {
     for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) {
       if (i && j && k && i < nx - 1 && j < ny - 1 && k < nz - 1) continue;
       pt(car, -hx + (2 * hx * i) / (nx - 1), y0 + (sh.height * j) / (ny - 1), -hz + (2 * hz * k) / (nz - 1));
+    }
+    // A box's faces are flat, so its pair points are the same grid pulled in
+    // off the edges by a few centimetres.
+    for (let i = 0; i < car.length; i += 3) {
+      const yc = car[i + 1] + comY - (y0 + sh.height * 0.5);
+      pt(pair, car[i] * 0.94, y0 + sh.height * 0.5 + yc * 0.94, car[i + 2] * 0.94);
     }
   } else {
     throw new Error(`[PropContact] unknown shape kind "${sh.kind}"`);
@@ -180,6 +216,8 @@ export function buildContactShape(profile) {
   return {
     ground: new Float32Array(ground),
     car: new Float32Array(car),
+    pair: new Float32Array(pair),
+    sdf,
     rims,
     reach,
     /** World-space ground points for the current pose, refilled per query. */
@@ -211,8 +249,7 @@ export function setShapeInertia(body, p) {
 }
 
 /**
- * The solver. Stateless between bodies apart from a reused contact pool, so one
- * instance serves any number of them, one at a time.
+ * The solver. Holds nothing between ticks but a reused contact pool.
  *
  * A "sim" is any object carrying:
  *   body     RigidBody at the centre of mass
@@ -220,7 +257,15 @@ export function setShapeInertia(body, p) {
  *            bumperGive, rollingDrag, dragArea, spinDrag, shape
  *   shape    buildContactShape(profile)
  *   startY   height it started from (for the fall limit)
- * and gets `grounded`, `hasPlane`, `planeN`, `planeD`, `stillFor` written to it.
+ *   asleep   (only read by addPair: a sleeping neighbour is immovable)
+ * and gets `grounded`, `hasPlane`, `planeN`, `planeD`, `stillFor` written to it,
+ * plus `wakeMe` when something hits it hard enough while it sleeps.
+ *
+ * ONE BODY: step(). SEVERAL THAT TOUCH (a tyre stack): begin(), addBody() for
+ * each awake one, addPair() for each pair within reach, solve() once so every
+ * contact in the stack is iterated together, then finish() each. Solving the
+ * bodies of a stack one after another cannot hold it up: the lower tyre is
+ * settled before the upper one's weight has been applied to it.
  */
 export class PropContactSolver {
   constructor() {
@@ -235,23 +280,47 @@ export class PropContactSolver {
    *   the caller decides what that means for its bookkeeping.
    */
   step(s, dt, car, ground) {
-    const C = PROP_CONTACT;
-    const b = s.body;
-    b.vel.y -= C.gravity * dt;
+    this.begin();
+    this.addBody(s, dt, car, ground);
+    this.solve();
+    return this.finish(s, dt);
+  }
+
+  /** Start a tick: forget last tick's contacts. */
+  begin() {
     this.count = 0;
-    this._carContact = null;
+  }
+
+  /** Gravity, the car and the ground for one awake body. */
+  addBody(s, dt, car, ground) {
+    s.body.vel.y -= PROP_CONTACT.gravity * dt;
+    s._carC = null;
     if (car && this.carNear(s, car)) this._collectCar(s, car, dt);
     this._collectGround(s, dt, ground);
+  }
 
-    // Car contacts are first in the list, so within each pass the ground has
-    // the last word — a prop the car is crushing stays above the road.
+  /** Iterate every contact added since begin(). */
+  solve(iterations = PROP_CONTACT.iterations) {
+    // Car contacts are added before a body's ground contacts, so within each
+    // pass the ground has the last word — a prop the car is crushing stays
+    // above the road.
     const n = this.count;
-    for (let it = 0; it < C.iterations && n; it++) {
-      for (let i = 0; i < n; i++) this._solve(this.contacts[i], b);
+    for (let it = 0; it < iterations && n; it++) {
+      for (let i = 0; i < n; i++) this._solve(this.contacts[i]);
     }
-    if (this._carContact) {
-      s.carVel.copy(this._carContact.cv);   // what the virtual car has left
+  }
+
+  /**
+   * Integrate one body after solve().
+   * @returns {boolean} false if it left the world or went non-finite
+   */
+  finish(s, dt) {
+    const C = PROP_CONTACT;
+    const b = s.body;
+    if (s._carC) {
+      s.carVel.copy(s._carC.cv);   // what the virtual car has left
       s.carGap = 0;
+      s._carC = null;
     } else {
       s.carGap = (s.carGap ?? Infinity) + dt;
     }
@@ -364,31 +433,58 @@ export class PropContactSolver {
     for (let i = 0; i < count; i += 3) fn(_t.set(gp[i], gp[i + 1], gp[i + 2]));
   }
 
-  _push() {
+  /**
+   * A fresh contact on `body`. The other side is one of: the ground (`b2`
+   * null, `cv` zero), the car (`car`, `cv` the virtual car), or another prop
+   * (`b2`, pushed the opposite way).
+   */
+  _push(body) {
     let c = this.contacts[this.count];
     if (!c) {
       c = { p: new THREE.Vector3(), n: new THREE.Vector3(), cv: new THREE.Vector3(), lt: new THREE.Vector3() };
       this.contacts.push(c);
     }
     this.count++;
+    c.body = body;
+    c.b2 = null;
     c.ln = 0;
     c.lt.set(0, 0, 0);
+    c.cv.set(0, 0, 0);
     c.car = false;
     return c;
+  }
+
+  /** Velocity of the contact's first body relative to whatever it touches, at p. */
+  _relVel(c, out) {
+    c.body.getVelocityAtPoint(c.p, out);
+    if (c.b2) return out.sub(c.b2.getVelocityAtPoint(c.p, _cv));
+    return out.sub(c.cv);
+  }
+
+  /** Inverse effective mass of the contact along `dir`. */
+  _invMass(c, dir) {
+    _v.subVectors(c.p, c.body.pos);
+    let k = c.body.effectiveInvMass(_v, dir);
+    if (c.b2) {
+      _w.subVectors(c.p, c.b2.pos);
+      k += c.b2.effectiveInvMass(_w, dir);
+    } else if (c.car) {
+      k += 1 / PROP_CONTACT.carMass;
+    }
+    return k;
   }
 
   /**
    * A contact's velocity target. `sep` > 0 is a gap, < 0 penetration. A CAR
    * contact (`c.car`) is solved as a real two-body exchange against the virtual
    * car in `c.cv`: its inverse mass joins the effective mass, and _solve takes
-   * each impulse back out of `c.cv`.
+   * each impulse back out of `c.cv`. A PAIR contact is the same exchange
+   * against the other prop, which receives the opposite impulse.
    */
-  _init(c, b, sep, dt, e, mu) {
+  _init(c, sep, dt, e, mu) {
     const C = PROP_CONTACT;
-    b.getVelocityAtPoint(c.p, _vr).sub(c.cv);
-    const vn = _vr.dot(c.n);
-    _v.subVectors(c.p, b.pos);
-    c.k = b.effectiveInvMass(_v, c.n) + (c.car ? 1 / C.carMass : 0);
+    const vn = this._relVel(c, _vr).dot(c.n);
+    c.k = this._invMass(c, c.n);
     c.mu = mu;
     if (vn < -C.bounceThreshold && sep + vn * dt < 0) {
       c.target = -e * vn;
@@ -396,37 +492,150 @@ export class PropContactSolver {
       // Speculative: may close the gap this step, never more.
       c.target = sep > 0 ? -sep / dt : 0;
     }
+    // Two props already overlapping are pushed apart gently here — there is no
+    // position projection between bodies, and a stack must not pop.
+    if (c.b2 && sep < -C.slop) c.target = Math.max(c.target, Math.min(1, 0.2 * (-sep - C.slop) / dt));
   }
 
-  _solve(c, b) {
-    _v.subVectors(c.p, b.pos);
-    b.getVelocityAtPoint(c.p, _vr).sub(c.cv);
-    const vn = _vr.dot(c.n);
+  _apply(c, impulse) {
+    c.body.applyImpulseAtPoint(impulse, c.p);
+    if (c.b2) c.b2.applyImpulseAtPoint(_t.copy(impulse).negate(), c.p);
+    else if (c.car) c.cv.addScaledVector(impulse, -1 / PROP_CONTACT.carMass);
+  }
+
+  _solve(c) {
+    const vn = this._relVel(c, _vr).dot(c.n);
     let dl = (c.target - vn) / c.k;
     const ln = Math.max(0, c.ln + dl);
     dl = ln - c.ln;
     c.ln = ln;
-    if (dl !== 0) {
-      b.applyImpulseAtPoint(_dv.copy(c.n).multiplyScalar(dl), c.p);
-      if (c.car) c.cv.addScaledVector(c.n, -dl / PROP_CONTACT.carMass);
-    }
+    if (dl !== 0) this._apply(c, _dv.copy(c.n).multiplyScalar(dl));
 
     // Coulomb friction, accumulated as a vector and clamped to the cone mu·λn.
     if (!(c.mu > 0) || c.ln <= 0) return;
-    b.getVelocityAtPoint(c.p, _vr).sub(c.cv);
+    this._relVel(c, _vr);
     _vr.addScaledVector(c.n, -_vr.dot(c.n));
     const vt = _vr.length();
     if (vt < 1e-6) return;
     _n.copy(_vr).multiplyScalar(-1 / vt);
-    const kt = b.effectiveInvMass(_v, _n) + (c.car ? 1 / PROP_CONTACT.carMass : 0);
+    const kt = this._invMass(c, _n);
     _dv.copy(c.lt);
     c.lt.addScaledVector(_n, vt / kt);
     const max = c.mu * c.ln;
     const len = c.lt.length();
     if (len > max) c.lt.multiplyScalar(max / len);
     _dv.subVectors(c.lt, _dv);
-    b.applyImpulseAtPoint(_dv, c.p);
-    if (c.car) c.cv.addScaledVector(_dv, -1 / PROP_CONTACT.carMass);
+    this._apply(c, _dv);
+  }
+
+  /**
+   * Contacts between two props. Each body's `pair` points are tested against
+   * the OTHER body's exact shape (a signed distance field), both ways round, so
+   * a corner into a face and a face onto a corner are both caught.
+   *
+   * A sleeping neighbour is immovable for this tick — a flying cone lands on a
+   * sleeping stack without the whole stack waking — unless it is struck hard,
+   * in which case it is flagged `wakeMe` for the owner to wake next tick.
+   */
+  addPair(a, b, dt) {
+    if (a.asleep && b.asleep) return;
+    const reach = a.shape.reach + b.shape.reach + PROP_CONTACT.margin;
+    if (a.body.pos.distanceToSquared(b.body.pos) > reach * reach) return;
+    const e = Math.max(a.profile.restitution, b.profile.restitution);
+    const mu = Math.sqrt(a.profile.friction * b.profile.friction);
+    this._pointsInto(a, b, dt, e, mu, 1);
+    this._pointsInto(b, a, dt, e, mu, -1);
+  }
+
+  /**
+   * `from`'s pair points against `into`'s shape. A point inside `into` pushes
+   * `into` back along its outward normal and `from` forward.
+   */
+  _pointsInto(from, into, dt, e, mu, _order) {
+    const C = PROP_CONTACT;
+    const pts = from.shape.pair, fb = from.body;
+    for (let i = 0; i < pts.length; i += 3) {
+      _pw.set(pts[i], pts[i + 1], pts[i + 2]).applyQuaternion(fb.quat).add(fb.pos);
+      const sep = this._sdf(into, _pw, _pn);
+      if (sep > C.margin) continue;
+      // Put the contact on an AWAKE body, pushed away from the other one:
+      // `into`'s outward normal pushes `from` out, and its reverse pushes `into`.
+      const main = from.asleep ? into : from;
+      const other = main === from ? into : from;
+      const c = this._push(main.body);
+      c.n.copy(_pn);
+      if (main !== from) c.n.negate();
+      if (!other.asleep) c.b2 = other.body;
+      c.p.copy(_pw);
+      this._init(c, sep, dt, e, mu);
+      // Resting on another prop counts as support, for sleep and rolling drag.
+      if (c.n.y > 0.5) main.grounded = true;
+      else if (c.b2 && c.n.y < -0.5) other.grounded = true;
+      if (other.asleep && this._relVel(c, _vr).dot(c.n) < -C.wakeSpeed) other.wakeMe = true;
+    }
+  }
+
+  /**
+   * Signed distance from world point `p` to sim `s`'s shape (negative inside),
+   * with the outward surface normal written to `outN` in world space.
+   */
+  _sdf(s, p, outN) {
+    const b = s.body, d = s.shape.sdf;
+    _pq.copy(b.quat).invert();
+    _pl.copy(p).sub(b.pos).applyQuaternion(_pq);
+    const x = _pl.x, z = _pl.z;
+    const y = _pl.y + d.comY;                 // root-relative height
+    let dist;
+    if (d.kind === "box") {
+      const qx = Math.abs(x) - d.hx, qy = Math.abs(y - d.cy) - d.hy, qz = Math.abs(z) - d.hz;
+      const ox = Math.max(qx, 0), oy = Math.max(qy, 0), oz = Math.max(qz, 0);
+      const out = Math.hypot(ox, oy, oz);
+      if (out > 0) {
+        dist = out;
+        outN.set(Math.sign(x) * ox, Math.sign(y - d.cy) * oy, Math.sign(z) * oz).multiplyScalar(1 / out);
+      } else {
+        dist = Math.max(qx, qy, qz);
+        if (qy >= qx && qy >= qz) outN.set(0, Math.sign(y - d.cy) || 1, 0);
+        else if (qx >= qz) outN.set(Math.sign(x) || 1, 0, 0);
+        else outN.set(0, 0, Math.sign(z) || 1);
+      }
+    } else {
+      // Cylinder, or a cone as a cylinder whose radius follows the taper.
+      let r, cy, h;
+      if (d.kind === "cylinder") {
+        r = d.r; cy = d.cy; h = d.h;
+      } else {
+        const hb = Math.min(Math.max(y - d.y0, 0), d.height);
+        const prof = d.profile;
+        r = prof[prof.length - 1][1];
+        for (let k = 1; k < prof.length; k++) {
+          if (hb <= prof[k][0]) {
+            const [h0, r0] = prof[k - 1], [h1, r1] = prof[k];
+            r = r0 + (r1 - r0) * ((hb - h0) / Math.max(h1 - h0, 1e-6));
+            break;
+          }
+        }
+        h = d.height * 0.5;
+        cy = d.y0 + h;
+      }
+      const rad = Math.hypot(x, z);
+      const rx = rad > 1e-6 ? x / rad : 1, rz = rad > 1e-6 ? z / rad : 0;
+      const sy = Math.sign(y - cy) || 1;
+      const dR = rad - r, dA = Math.abs(y - cy) - h;
+      if (dR > 0 || dA > 0) {
+        const oR = Math.max(dR, 0), oA = Math.max(dA, 0);
+        dist = Math.hypot(oR, oA);
+        outN.set(rx * oR, sy * oA, rz * oR).multiplyScalar(1 / dist);
+      } else if (dA >= dR) {
+        dist = dA;
+        outN.set(0, sy, 0);
+      } else {
+        dist = dR;
+        outN.set(rx, 0, rz);
+      }
+    }
+    outN.applyQuaternion(b.quat);
+    return dist;
   }
 
   /**
@@ -545,13 +754,13 @@ export class PropContactSolver {
       _w.add(_v);
     }
 
-    const c = this._push();
+    const c = this._push(b);
     c.car = true;
     c.p.copy(_w);
     c.n.copy(_gn);
     c.cv.copy(s.carVel);
-    this._carContact = c;
-    this._init(c, b, -Math.min(deepest, C.slop), dt, p.carRestitution, p.carFriction);
+    s._carC = c;
+    this._init(c, -Math.min(deepest, C.slop), dt, p.carRestitution, p.carFriction);
   }
 
   /** One ray per body for the surface under it, treated as a plane at the body's scale. */
@@ -585,11 +794,10 @@ export class PropContactSolver {
         b.getVelocityAtPoint(_t, _vr);
         if (sep + Math.min(0, _vr.dot(n)) * dt > C.margin) continue;
       }
-      const c = this._push();
+      const c = this._push(b);
       c.p.copy(_t);
       c.n.copy(n);
-      c.cv.set(0, 0, 0);
-      this._init(c, b, sep, dt, p.restitution, p.friction);
+      this._init(c, sep, dt, p.restitution, p.friction);
       s.grounded = true;
     }
   }

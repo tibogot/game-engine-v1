@@ -10,11 +10,10 @@
 //
 // TWO TIERS, because they are different problems:
 //
-//  • TYRE — a free rigid body (cones and barrels: see CONTACT BODIES below). This is the well-behaved 80% of rigid-body
-//    dynamics: take an impulse, tumble, settle, sleep. What general engines are
-//    HARD at — stacking, resting contact stability, constraint graphs — is
-//    approximated with a cheap sphere-sphere pass so a tyre wall can sit on
-//    itself until the car smashes through it. It is not a general stack solver.
+//  • CONE / BARREL / TYRE — free rigid bodies on the contact-point solver in
+//    modularRoadPropContact.js, shared with the city's street clutter: points
+//    on each object's real shape against the road, the car's hull and each
+//    other, so a tyre wall stands on itself and comes down when it is hit.
 //
 //  • GATE — ONE degree of freedom. Simulated directly as hinge angle + angular
 //    velocity + spring + damping, NOT as a rigid body with a hinge constraint.
@@ -31,43 +30,20 @@
 // integrates forever AND jitters in place. A settled prop costs one comparison.
 // ============================================================================
 //
-// CONTACT BODIES (cone, barrel). The sphere proxy above could not tip, roll or
-// right itself: spin was WRITTEN into angVel on a hit and bled off by damping,
-// and the one ground sphere never rotated with the body, so a barrel on its
-// side floated 0.75 m up and a cone could freeze standing on its tip. These two
-// run on the contact-point solver in modularRoadPropContact.js — the same one
-// the city's street clutter uses, so a cone behaves alike in both places.
+// CONTACT BODIES. The old sphere proxy could not tip, roll or right itself:
+// spin was WRITTEN into angVel on a hit and bled off by damping, and the one
+// ground sphere never rotated with the body, so a barrel on its side floated
+// 0.75 m up, a cone could freeze standing on its tip, and a tyre knocked onto
+// its tread hovered at half its thickness.
 import * as THREE from "three";
 import { RigidBody, CHASSIS_HULL } from "../../v3/play/modularRoadVehicle.js";
 import {
   PROP_CONTACT, PropContactSolver, buildContactShape, setShapeInertia,
 } from "./modularRoadPropContact.js";
 
+/** Master switch (the dev panel reads it). The feel lives in each profile. */
 export const PROP_PHYSICS = {
   enabled: true,
-  gravity: 22,           // punchier than 9.81 — arcade props should settle fast
-  /** Below this speed AND spin, for `sleepAfter` seconds, a body sleeps. */
-  sleepSpeed: 0.25,
-  sleepSpin: 0.5,
-  sleepAfter: 0.6,
-  /** Ground bounce / slide. */
-  restitution: 0.28,
-  friction: 3.5,
-  angularDamping: 1.4,
-  /**
-   * How hard the car throws a prop, as a fraction of car speed. Under 1 on
-   * purpose: at 1.35 a cone left a 25 m/s car doing 33.8 m/s — outrunning the
-   * car that hit it, which reads as a glitch rather than a hit.
-   */
-  hitImpulse: 0.85,
-  /** Loft as a fraction of the throw. Enough to leave the ground, not a punt. */
-  hitLoft: 0.22,
-  /** Tumble rate per m/s of throw, and a hard cap. Uncapped this hit 48 rad/s
-   *  (7.7 rev/s) — a blur, not a cartwheel. */
-  hitSpin: 0.30,
-  maxSpin: 16,
-  /** Speed floor (m/s) before a touch counts as a hit at all. */
-  minHitSpeed: 1.5,
 };
 
 /** Solver constants live with the solver; re-exported for existing importers. */
@@ -154,8 +130,6 @@ export const PHYSICS_PROP_TYPES = {
      * No longer a collision sphere — the contact shape below is.
      */
     radius: 0.42 * CONE_SCALE,
-    /** Sphere used only for prop-vs-prop separation, about the centre of mass. */
-    pairRadius: 0.3 * CONE_SCALE,
     size: {
       width: 0.54 * CONE_SCALE,
       height: 0.9 * CONE_SCALE,
@@ -211,27 +185,35 @@ export const PHYSICS_PROP_TYPES = {
   tyre: {
     kind: "body",
     /**
-     * Heavier than a cone (rubber vs hollow PVC) but still arcade: square
-     * scaling, not cube, so a wall of them is spectacular to smash rather than
-     * a row of bollards. ~32 kg at TIRE_SCALE 2.
+     * ~32 kg: a 1.4 m barrier tyre at TIRE_SCALE 2, mass scaled by area (a
+     * tyre is a rubber shell, not a solid), so a wall is spectacular to smash
+     * rather than a row of bollards.
      */
     mass: 8 * TIRE_SCALE * TIRE_SCALE,
-    /**
-     * Ground / rest proxy: half the thickness. A sphere of the OUTER radius
-     * would sit the pancake in mid-air and, stacked, explode the pile (centres
-     * are only `2 * TIRE_TUBE_R` apart).
-     */
+    /** Height of the root above the base: the root is the tyre's centre. */
     radius: TIRE_TUBE_R,
-    /** What the car actually hits — the disc's outer radius. */
-    hitRadius: TIRE_OUTER_R,
-    /** Lying-flat cylinder, Y up. Sphere-sphere cannot represent a pancake. */
-    proxy: "cylinder",
     size: {
       width: TIRE_SIZE.width,
       height: TIRE_SIZE.height,
       length: TIRE_SIZE.length,
     },
     comY: 0,
+    /**
+     * A closed short cylinder, Y up, lying flat. On its tread it rolls on the
+     * rims' exact lowest points, exactly as the barrel does on its side; the
+     * hole is not modelled — nothing on a track fits through it.
+     */
+    shape: { kind: "cylinder" },
+    /** Rubber: it bounces, and it grips — which is what holds a wall up. */
+    restitution: 0.45,
+    friction: 0.9,
+    carRestitution: 0.35,
+    carFriction: 0.6,
+    bumperGive: 0.04,
+    /** Rolls a long way on its tread, like a real loose wheel. */
+    rollingDrag: 0.3,
+    dragArea: 0.5,
+    spinDrag: 0.01,
   },
   barrel: {
     kind: "body",
@@ -285,44 +267,36 @@ export const PHYSICS_PROP_TYPES = {
      * the way a real gate swings against its stop.
      */
     maxAngle: 1.75,
-    /** Spring back to closed (1/s²) and its damping (1/s). Together these ARE
-     *  the feel: stiff+damped = a shop door, soft+loose = a saloon door. */
+    /** Spring back to closed (1/s²) and its damping (1/s) — the door closer.
+     *  Stiff+damped = a shop door, soft+loose = a saloon door. */
     spring: 14,
     damping: 2.2,
-    /** Angular kick per m/s of car speed through the panel. Big enough that a
-     *  gate visibly flies open rather than easing aside. */
-    kick: 2.6,
     /**
-     * How hard a CLOSED gate resists (1/s of exponential speed scrub on the
-     * through-panel component only). This is the half that was missing: the
-     * panel swung but the car sailed through untouched, so it read as "the gate
-     * does nothing". Scaled by how closed the gate still is, so you shove
-     * through with a knock rather than bouncing off a wall.
+     * Mass of the panel (kg) — a 4.4 m steel field gate. With the width it IS
+     * the gate's weight in the hit: the swing a car gives it and the speed the
+     * car pays for it both come from it (see panelInertia). It replaced the
+     * tuned `resistance` scrub, which charged the car for how CLOSED the gate
+     * was rather than for anything the panel did. Measured through the middle
+     * of the doorway:
      *
-     * RECALIBRATED when the contact test started using the car's real footprint
-     * (see _carFootprint). The gate now begins swinging when the BONNET reaches
-     * it rather than when the car's middle does — 2.4 m earlier — so it is
-     * already part-open by the time the car arrives and `closedness` has faded.
-     * At the old 0.9 that dropped the cost of a 20 m/s pass from 1.3 m/s to
-     * 0.89, i.e. the geometry fix quietly made gates softer. Re-measured across
-     * the range (the old figures in this comment predate two contact fixes and
-     * no longer describe anything):
+     *     mass   4 m/s exit   10 m/s exit   20 m/s cost   45 m/s kept
+     *      50       2.50          8.59          0.76          95.9%
+     *      70       2.50          7.97          1.05          94.3%
+     *      90       2.50          7.28          1.33          92.7%   <- here
+     *     120       2.50          6.18          1.83          90.5%
      *
-     *     resistance   4 m/s exit   20 m/s cost   45 m/s kept
-     *        0.9          3.43         0.89          98%
-     *        1.4          3.20         1.38          96%     <- here
-     *        2.4          2.89         2.37          94%
-     *        4.0          2.68         3.92          90%
-     *
-     * 1.4 restores the tuned feel exactly: same cost as before, and a crawling
-     * car still clears `minPushSpeed`.
-     *
-     * The ONLY place a prop touches the car — cones stay strictly one-way. A
-     * gate that cost you nothing would not be an obstacle.
+     * 90 kg costs a 20 m/s pass what the tuned scrub did (1.38). A slower car
+     * now pays more of its speed — it holds the gate against its closer for
+     * longer, which is real — and the minPushSpeed floor still lets a crawl
+     * through.
      */
-    resistance: 1.4,
+    mass: 90,
+    /** A real hit bangs the panel open a little faster than the car (steel). */
+    restitution: 0.3,
+    /** Swing kept, reversed, when the panel hits its stop at ±maxAngle. */
+    stopRestitution: 0.3,
     /**
-     * Floor on the through-panel speed the resistance may scrub to (m/s).
+     * Floor on the car speed the gate may scrub to (m/s).
      *
      * Without it the penalty compounds with TIME IN CONTACT, so a SLOW car is
      * punished hardest — measured at resistance 1.8: 45 m/s kept 88% of its
@@ -335,23 +309,17 @@ export const PHYSICS_PROP_TYPES = {
   },
 };
 
+/** Moment of inertia of a gate panel about its hinge: a uniform plate, m·w²/3. */
+const panelInertia = (p) => p.mass * p.width * p.width / 3;
+
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
-const _local = new THREE.Vector3();
-const _closest = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _qi = new THREE.Quaternion();
-const _carVel = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
-const _down = new THREE.Vector3(0, -1, 0);
 const _up = new THREE.Vector3(0, 1, 0);
-const _pairN = new THREE.Vector3();
-const _pairV = new THREE.Vector3();
-/** Sphere a body presents to other props. For a shaped body it sits at the CoM. */
-const pairR = (s) => s.profile.pairRadius ?? s.profile.radius;
-
 export class PropPhysics {
   /**
    * @param {object} o
@@ -398,17 +366,17 @@ export class PropPhysics {
           mass: profile.mass,
           size: { ...profile.size, comY: profile.comY ?? 0 },
         });
-        const sim = { inst, profile, home, body, asleep: true, stillFor: 0 };
-        if (profile.shape) {
-          // The body lives at the CENTRE OF MASS; the root is written back
-          // offset from it (_writeRoot). Rebuilt here so a barrel measured
-          // after its GLB loaded gets its real diameter.
-          sim.shape = buildContactShape(profile);
-          sim.com = new THREE.Vector3(0, profile.comY ?? 0, 0);
-          sim.grounded = false;
-          sim.startY = home.pos.y;
-          setShapeInertia(body, profile);
-        }
+        // The body lives at the CENTRE OF MASS; the root is written back
+        // offset from it (_writeRoot). The shape is rebuilt here so a barrel
+        // measured after its GLB loaded gets its real diameter.
+        const sim = {
+          inst, profile, home, body, asleep: true, stillFor: 0,
+          shape: buildContactShape(profile),
+          com: new THREE.Vector3(0, profile.comY ?? 0, 0),
+          grounded: false,
+          startY: home.pos.y,
+        };
+        setShapeInertia(body, profile);
         this._homeBody(sim);
         this.sims.push(sim);
       } else {
@@ -475,25 +443,56 @@ export class PropPhysics {
     }
     if (!this.sims.length) return;
     const car = vehicle?.enabled ? vehicle.body : null;
+    const S = this.solver;
+    const ground = this.getGroundBvh?.();
+
+    // Gates, and waking whatever the car has reached. A settled prop costs one
+    // bounding test here and nothing else.
     for (const s of this.sims) {
-      if (s.profile.kind === "hinge") this._tickHinge(s, dt, car, vehicle);
-      else if (s.shape) this._tickContactBody(s, dt, car);
-      else this._tickBody(s, dt, car, vehicle);
+      if (s.profile.kind === "hinge") { this._tickHinge(s, dt, car, vehicle); continue; }
+      if (s.wakeMe) { s.wakeMe = false; if (s.asleep) this._wakeCluster(s); }
+      if (s.asleep && car && S.carNear(s, car)) this._wakeCluster(s);
     }
-    // Sphere contacts AFTER every body has integrated, otherwise a stacked tyre
-    // is snapped onto the road (through the one underneath) before its neighbour
-    // has had a chance to support it.
-    this._bodyContacts();
+
+    // ONE SOLVE for every awake body and every pair within reach, so a stack's
+    // contacts are iterated together. Sleeping neighbours take part as
+    // immovable surfaces.
+    const awake = this._awake ??= [];
+    awake.length = 0;
+    S.begin();
     for (const s of this.sims) {
       if (!s.body || s.asleep) continue;
-      if (s.shape) {
-        this.solver.project(s);
-        if (this.solver.sleep(s, dt)) s.asleep = true;
-      } else {
-        this._groundContact(s, dt);
-        this._sleepBody(s, dt);
+      s._ai = awake.length;
+      awake.push(s);
+      S.addBody(s, dt, car, ground);
+    }
+    if (!awake.length) return;
+    for (const a of awake) {
+      for (const o of this.sims) {
+        if (!o.body || o === a) continue;
+        if (!o.asleep && o._ai < a._ai) continue;   // each awake pair once
+        S.addPair(a, o, dt);
+      }
+    }
+    // A stack needs more passes than a lone cone to carry weight down to the road.
+    S.solve(awake.length > 1 ? PROP_CONTACT.iterations * 2 : PROP_CONTACT.iterations);
+
+    for (const s of awake) {
+      if (S.finish(s, dt)) continue;
+      // Left the world, or the numbers did: stop integrating, and never hand a
+      // non-finite pose to the renderer.
+      if (!Number.isFinite(s.body.pos.x + s.body.pos.y + s.body.pos.z + s.body.quat.w)) this._homeBody(s);
+      s.body.vel.set(0, 0, 0);
+      s.body.angVel.set(0, 0, 0);
+      s.asleep = true;
+    }
+    for (const s of awake) {
+      if (!s.asleep) {
+        S.project(s);
+        if (S.sleep(s, dt)) s.asleep = true;
       }
       this._writeRoot(s);
+      s._ai = -1;
     }
   }
 
@@ -503,64 +502,6 @@ export class PropPhysics {
     root.quaternion.copy(s.body.quat);
     root.position.copy(s.body.pos);
     if (s.com) root.position.sub(_v.copy(s.com).applyQuaternion(s.body.quat));
-  }
-
-  // ── CONTACT BODY (cone / barrel) ────────────────────────────────────────────
-  // The model lives in modularRoadPropContact.js, shared with the city's street
-  // clutter. What stays here is only this owner's bookkeeping: waking a stack,
-  // and putting a body that left the world back where it was authored.
-
-  _tickContactBody(s, dt, car) {
-    if (s.asleep) {
-      if (!car || !this.solver.carNear(s, car)) return; // a settled prop costs this
-      this._wakeCluster(s);
-    }
-    if (!this.solver.step(s, dt, car, this.getGroundBvh?.())) {
-      if (!Number.isFinite(s.body.pos.x + s.body.pos.y + s.body.pos.z + s.body.quat.w)) this._homeBody(s);
-      s.body.vel.set(0, 0, 0);
-      s.body.angVel.set(0, 0, 0);
-      s.asleep = true;
-    }
-  }
-
-  // ── FREE BODY (tyres) ───────────────────────────────────────────────────────
-
-  _tickBody(s, dt, car, vehicle) {
-    const P = PROP_PHYSICS;
-    const hit = car ? this._carImpulse(s, car, vehicle) : false;
-    if (s.asleep && !hit) return;   // a settled prop costs exactly this
-    s.asleep = false;
-
-    const b = s.body;
-    b.vel.y -= P.gravity * dt;
-    b.pos.addScaledVector(b.vel, dt);
-
-    // Spin: integrate the quaternion from angular velocity, then bleed it off.
-    const w = b.angVel;
-    if (w.lengthSq() > 1e-9) {
-      _q.set(w.x * dt * 0.5, w.y * dt * 0.5, w.z * dt * 0.5, 0).multiply(b.quat);
-      b.quat.set(b.quat.x + _q.x, b.quat.y + _q.y, b.quat.z + _q.z, b.quat.w + _q.w).normalize();
-      w.multiplyScalar(Math.max(0, 1 - P.angularDamping * dt));
-    }
-  }
-
-  _sleepBody(s, dt) {
-    const P = PROP_PHYSICS;
-    const b = s.body;
-    const w = b.angVel;
-    // SLEEP — needs BOTH linear and angular stillness held for a while. Either
-    // alone false-triggers: a cone spinning on the spot has no velocity, and one
-    // sliding flat has no spin.
-    if (b.vel.lengthSq() < P.sleepSpeed * P.sleepSpeed && w.lengthSq() < P.sleepSpin * P.sleepSpin) {
-      s.stillFor += dt;
-      if (s.stillFor >= P.sleepAfter) {
-        s.asleep = true;
-        b.vel.set(0, 0, 0);
-        w.set(0, 0, 0);
-      }
-    } else {
-      s.stillFor = 0;
-    }
   }
 
   /**
@@ -586,226 +527,10 @@ export class PropPhysics {
     }
   }
 
-  /** True if two body proxies overlap with `pad` metres of slack. */
+  /** True if two bodies' reach spheres overlap with `pad` metres of slack. */
   _bodiesNearby(a, b, pad) {
-    if (a.profile.proxy === "cylinder" && b.profile.proxy === "cylinder") {
-      const ra = a.profile.size.length * 0.5, rb = b.profile.size.length * 0.5;
-      const ha = a.profile.size.height * 0.5, hb = b.profile.size.height * 0.5;
-      const dx = b.body.pos.x - a.body.pos.x;
-      const dz = b.body.pos.z - a.body.pos.z;
-      const dy = b.body.pos.y - a.body.pos.y;
-      return Math.hypot(dx, dz) < ra + rb + pad && Math.abs(dy) < ha + hb + pad;
-    }
-    const max = pairR(a) + pairR(b) + pad;
+    const max = a.shape.reach + b.shape.reach + pad;
     return a.body.pos.distanceToSquared(b.body.pos) < max * max;
-  }
-
-  /** Separate overlapping body-proxies. Asleep bodies act as infinite mass. */
-  _bodyContacts() {
-    const bodies = this.sims;
-    const n = bodies.length;
-    for (let i = 0; i < n; i++) {
-      const a = bodies[i];
-      if (!a.body) continue;
-      for (let j = i + 1; j < n; j++) {
-        const b = bodies[j];
-        if (!b.body) continue;
-        if (a.asleep && b.asleep) continue;
-        if (a.profile.proxy === "cylinder" && b.profile.proxy === "cylinder") {
-          this._cylinderPair(a, b);
-        } else {
-          this._spherePair(a, b);
-        }
-      }
-    }
-  }
-
-  _spherePair(a, b) {
-    const sum = pairR(a) + pairR(b);
-    _pairN.copy(b.body.pos).sub(a.body.pos);
-    const d2 = _pairN.lengthSq();
-    if (d2 >= sum * sum) return;
-    if (d2 < 1e-10) _pairN.set(0, 1, 0);
-    else _pairN.multiplyScalar(1 / Math.sqrt(d2));
-    const dist = d2 < 1e-10 ? 0 : Math.sqrt(d2);
-    this._resolveAlong(a, b, _pairN.x, _pairN.y, _pairN.z, sum - dist);
-  }
-
-  /**
-   * Lying-flat tyre vs tyre. A sphere the size of the disc would shove a
-   * pancake stack apart vertically (centres are only a thickness apart).
-   * SAT on a Y-cylinder: separate on the axis of least penetration.
-   */
-  _cylinderPair(a, b) {
-    const ra = a.profile.size.length * 0.5, rb = b.profile.size.length * 0.5;
-    const ha = a.profile.size.height * 0.5, hb = b.profile.size.height * 0.5;
-    const dx = b.body.pos.x - a.body.pos.x;
-    const dz = b.body.pos.z - a.body.pos.z;
-    const dy = b.body.pos.y - a.body.pos.y;
-    const horiz = Math.hypot(dx, dz);
-    const overlapH = ra + rb - horiz;
-    const overlapY = ha + hb - Math.abs(dy);
-    if (overlapH <= 0 || overlapY <= 0) return;
-    if (overlapY <= overlapH) {
-      this._resolveAlong(a, b, 0, dy >= 0 ? 1 : -1, 0, overlapY);
-    } else if (horiz < 1e-8) {
-      this._resolveAlong(a, b, 1, 0, 0, overlapH);
-    } else {
-      this._resolveAlong(a, b, dx / horiz, 0, dz / horiz, overlapH);
-    }
-  }
-
-  _resolveAlong(a, b, nx, ny, nz, pen) {
-    const invA = a.asleep ? 0 : 1;
-    const invB = b.asleep ? 0 : 1;
-    const inv = invA + invB;
-    if (inv === 0) return;
-    const s = pen / inv;
-    _pairN.set(nx, ny, nz);
-    if (invA) a.body.pos.addScaledVector(_pairN, -s);
-    if (invB) b.body.pos.addScaledVector(_pairN, s);
-    _pairV.copy(b.body.vel).sub(a.body.vel);
-    const rel = _pairV.x * nx + _pairV.y * ny + _pairV.z * nz;
-    if (rel < 0) {
-      const j = -rel / inv;
-      if (invA) a.body.vel.addScaledVector(_pairN, -j);
-      if (invB) b.body.vel.addScaledVector(_pairN, j);
-    }
-  }
-
-  /** Rest on the deck, or on another body underneath — using the same BVH. */
-  _groundContact(s, dt) {
-    const bvh = this.getGroundBvh?.();
-    const b = s.body;
-    const r = s.profile.radius;
-    let floorY = null;
-    if (bvh?.baked) {
-      // Cast from above the body so a prop that has sunk still finds the surface.
-      const hit = bvh.raycastFirst(
-        { x: b.pos.x, y: b.pos.y + 1.2, z: b.pos.z }, _down, 4,
-      );
-      if (hit) floorY = hit.point.y;
-    }
-    // Other bodies as extra floors. Without this a stacked tyre is snapped
-    // onto the road through the one it is sitting on, in a single frame.
-    let fromBody = false;
-    for (const o of this.sims) {
-      if (!o.body || o === s) continue;
-      if (o.body.pos.y >= b.pos.y - 1e-4) continue;
-      const dx = b.pos.x - o.body.pos.x;
-      const dz = b.pos.z - o.body.pos.z;
-      const horiz2 = dx * dx + dz * dz;
-      let impliedFloor;
-      if (s.profile.proxy === "cylinder" && o.profile.proxy === "cylinder") {
-        const rx = s.profile.size.length * 0.5 + o.profile.size.length * 0.5;
-        if (horiz2 >= rx * rx) continue;
-        impliedFloor = o.body.pos.y + o.profile.size.height * 0.5;
-      } else {
-        const sum = r + pairR(o);
-        if (horiz2 >= sum * sum) continue;
-        const restCenterY = o.body.pos.y + Math.sqrt(Math.max(0, sum * sum - horiz2));
-        impliedFloor = restCenterY - r;
-      }
-      if (floorY === null || impliedFloor > floorY) {
-        floorY = impliedFloor;
-        fromBody = true;
-      }
-    }
-    if (floorY === null) return;      // off the track: let it fall away
-
-    const pen = floorY + r - b.pos.y;
-    if (pen <= 0) return;
-    b.pos.y = floorY + r;
-    if (b.vel.y < 0) {
-      // Resting on another tyre must not bounce — a wall would jitter apart.
-      b.vel.y = fromBody ? 0 : -b.vel.y * PROP_PHYSICS.restitution;
-      b.angVel.multiplyScalar(0.7);
-    }
-    // Tangential friction — this is what actually brings it to rest.
-    const friction = PROP_PHYSICS.friction * (s.profile.frictionScale ?? 1);
-    const k = Math.exp(-friction * dt);
-    b.vel.x *= k;
-    b.vel.z *= k;
-  }
-
-  /**
-   * Car → prop impulse. ONE-WAY: the car is never touched.
-   *
-   * Sphere (prop) vs oriented box (chassis). The tumble is written DIRECTLY into
-   * `angVel` from the push direction (see the TUMBLE block below) — it does not
-   * "fall out naturally" from an off-centre force, as this comment used to say.
-   * Nothing here goes through `addForceAtPoint`, and the body's inertia tensor
-   * is never consulted; see the note on `comY`.
-   */
-  _carImpulse(s, car, vehicle) {
-    const P = PROP_PHYSICS;
-    const b = s.body;
-    const r = s.profile.hitRadius ?? s.profile.radius;
-
-    // Prop centre in chassis-local space.
-    _qi.copy(car.quat).invert();
-    _local.copy(b.pos).sub(car.pos).applyQuaternion(_qi);
-    // THE HULL, not the core box: this is "what shape does the car hit things
-    // with", which is exactly the question CHASSIS_HULL answers. The core box
-    // stops 0.6 m short of the nose, so cones were being punted by an invisible
-    // bumper set back inside the bodywork.
-    const hw = CHASSIS_HULL.width * 0.5;
-    const hh = CHASSIS_HULL.height * 0.5;
-    const hl = CHASSIS_HULL.length * 0.5;
-    _closest.set(
-      Math.max(-hw, Math.min(hw, _local.x)),
-      CHASSIS_HULL.offsetY + Math.max(-hh, Math.min(hh, _local.y - CHASSIS_HULL.offsetY)),
-      CHASSIS_HULL.offsetZ + Math.max(-hl, Math.min(hl, _local.z - CHASSIS_HULL.offsetZ)),
-    );
-    const d2 = _closest.distanceToSquared(_local);
-    if (d2 > r * r) return false;
-
-    // PUSH ALONG THE CAR'S TRAVEL, NOT THE SHORTEST SEPARATION.
-    //
-    // Shortest-separation is the right normal for resolving penetration and the
-    // WRONG one for throwing something. A traffic cone is short, so its centre
-    // sits just below the chassis box: the nearest point on the box is on its
-    // FLOOR and that normal points straight DOWN. Dotted against a car driving
-    // forward it gives a closing speed of zero — measured, the impulse never
-    // fired once. A bumper does not push a cone downward, it sweeps it along.
-    _v.copy(car.vel);
-    _v.y = 0;
-    const speed = _v.length();
-    if (speed < P.minHitSpeed) return false;
-    _n.copy(_v).multiplyScalar(1 / speed);
-
-    // Where along the bumper it was struck decides how far it is thrown SIDEWAYS
-    // — clip one with the corner and it should spin off to that side, not fly
-    // straight down the road like one hit dead centre.
-    _v2.set(1, 0, 0).applyQuaternion(car.quat);
-    const lateral = Math.max(-1, Math.min(1, _local.x / hw));
-    _n.addScaledVector(_v2, lateral * 0.7).normalize();
-
-    const closing = speed;
-
-    // Per-type scale: barrels stay put-ish; cones stay spectacular. Default 1
-    // keeps every existing prop on the same throw as before this field existed.
-    const scale = s.profile.hitScale ?? 1;
-    const j = closing * P.hitImpulse * scale;
-    b.vel.addScaledVector(_n, j);
-    b.vel.y += Math.abs(j) * P.hitLoft; // a little loft — flat-sliding cones look dead
-
-    // TUMBLE. A body struck near its BASE by something moving horizontally
-    // rotates about the axis perpendicular to the push and to up — that is what
-    // makes a cone cartwheel end-over-end instead of skating away upright, and
-    // it is most of what sells the effect.
-    _v2.crossVectors(_up, _n).normalize().multiplyScalar(j * P.hitSpin);
-    b.angVel.add(_v2);
-    // A touch of asymmetry so a row of cones does not tumble in lockstep.
-    b.angVel.x += (Math.random() - 0.5) * j * 0.12;
-    b.angVel.z += (Math.random() - 0.5) * j * 0.12;
-    const spin = b.angVel.length();
-    if (spin > P.maxSpin) b.angVel.multiplyScalar(P.maxSpin / spin);
-
-    s.asleep = false;
-    s.stillFor = 0;
-    this._wakeCluster(s);
-    return true;
   }
 
   // ── HINGE (gates) ───────────────────────────────────────────────────────────
@@ -891,7 +616,7 @@ export class PropPhysics {
     _n.set(0, 0, 1).applyQuaternion(s.home.quat).applyQuaternion(_q);  // normal
 
     s.blocking = 0;
-    let held = false;
+    let contact = null;
     if (car) {
       // Work in the hinge's HOME frame: at angle 0 the panel lies along +X and
       // its normal is +Z. A POSITIVE rotation about +Y sweeps the panel toward
@@ -932,60 +657,44 @@ export class PropPhysics {
           if (Math.abs(_v2.z) < 0.2) s.pushSide = s.angle >= 0 ? 1 : -1;
         }
         const side = s.pushSide;
+        contact = { side, fp };
 
-        // THE CONSTRAINT, and the whole fix. Impulses alone cannot do this:
-        // the spring kept closing the panel INTO the car mid-pass, and at speed
-        // the car was through the doorway before an impulse had built. A door
-        // does not get nudged — it is DISPLACED, and stays displaced for exactly
-        // as long as something is in its way.
-        // Swing to whichever EDGE of the car's footprint the panel is being
-        // pushed toward — the angle at which the panel just clears the bodywork.
-        // Expressed as a delta from the current angle so nothing here has to
-        // worry about which turn of ±π the bearings landed on.
-        let want = fp.full
-          ? side * p.maxAngle // hinge is inside the car: nothing to clear to
-          : s.angle + ((side > 0 ? fp.hi : fp.lo) - fp.rel);
-        if (want > p.maxAngle) want = p.maxAngle;
-        else if (want < -p.maxAngle) want = -p.maxAngle;
-        // Push ONLY — never drag the gate closed toward the car.
-        if ((side > 0 && s.angle < want) || (side < 0 && s.angle > want)) {
-          // Panel speed needed to keep up; carried into angVel so the gate keeps
-          // swinging past the car instead of stopping dead the instant it clears.
-          const dNeed = want - s.angle;
-          s.angVel = dNeed / Math.max(dt, 1e-4) * 0.35 + s.angVel * 0.2;
-          s.angle = want;
-          held = true;
-          s.blocking = 1 - Math.min(1, Math.abs(s.angle) / p.maxAngle);
-        }
-
-        // RESIST — the car pays for shoving it. Scaled by how CLOSED the gate
-        // still is, so it fades to nothing once open: a knock, not a wall.
-        const closedness = 1 - Math.min(1, Math.abs(s.angle) / p.maxAngle);
-        const closing = car.vel.dot(_n);
-        if (vehicle && closedness > 0.02 && Math.abs(closing) > p.minPushSpeed) {
-          const brake = Math.exp(-p.resistance * closedness * dt);
-          // Only the THROUGH-panel component is scrubbed — sliding along the
-          // gate face must stay free, or it grabs the car sideways. And never
-          // below minPushSpeed, so a gate can always be nosed open.
-          const vN = car.vel.dot(_n);
-          // SCRUB SPEED, DO NOT STEER.
+        // THE HIT, as a real exchange between a panel with inertia and a car
+        // with mass. `u` is the panel's swing rate in the push direction and
+        // `rho` the lever where the bodywork meets it: the middle of the stretch
+        // of panel the car's footprint covers. The car closes on that point at
+        // `vc`; if it is faster than the panel there, the impulse that brings
+        // them together (plus a metal bang for a real hit) is shared out by
+        // the effective masses — the panel through rho²/I, the car through 1/M.
+        // A crawl nudges it open, a fast hit slams it against its stop, and the
+        // car pays exactly the momentum the panel took.
+        const I = panelInertia(p);
+        const rho = Math.min(p.width, Math.max(0.5, (fp.dist + p.width) * 0.5));
+        _v2.copy(_n).multiplyScalar(-side);                     // push direction, world
+        const vc = car.vel.dot(_v2);
+        const u = side * s.angVel;
+        const closing = vc - u * rho;
+        if (closing > 0) {
+          const e = closing > PROP_CONTACT.bounceThreshold ? p.restitution : 0;
+          const J = (1 + e) * closing / (rho * rho / I + 1 / PROP_CONTACT.carMass);
+          s.angVel += side * J * rho / I;
+          // THE CAR PAYS — the only prop that ever touches it. J/M off its
+          // speed, and never below minPushSpeed, so a gate can always be nosed
+          // open: without the floor the cost compounds with time in contact and
+          // a SLOW car is punished hardest (measured once: 45 m/s kept 88%, 6 m/s
+          // kept 14%).
           //
-          // This applied its correction ALONG THE PANEL NORMAL, and that normal
-          // swings round with the panel — so removing a through-panel component
-          // necessarily injected a sideways one, and the car came out of the gate
-          // pointing somewhere else. Measured against an identical run with the
-          // gate deleted: 4.4 m of lateral drift, purely from a prop that is
-          // supposed to cost speed and nothing else.
-          //
-          // The gate wants to take energy, not to aim the car. Taking the same
-          // amount off the speed leaves the direction untouched, which is what
-          // "a knock, not a wall" always meant.
-          const floor = Math.min(Math.abs(vN), p.minPushSpeed);
-          const target = Math.max(floor, Math.abs(vN) * brake);
-          const drop = Math.abs(vN) - target;
-          const speed = car.vel.length();
-          if (drop > 0 && speed > 1e-4) {
-            car.vel.multiplyScalar(Math.max(0, (speed - drop) / speed));
+          // SCRUB SPEED, DO NOT STEER. Taking it along the panel normal swings
+          // with the panel, so removing a through-panel component injected a
+          // sideways one — 4.4 m of lateral drift against the same run with no
+          // gate. Taking the same amount off the SPEED leaves the heading alone.
+          if (vehicle) {
+            const speed = car.vel.length();
+            const floor = Math.min(speed, p.minPushSpeed);
+            const drop = Math.min(J / PROP_CONTACT.carMass, speed - floor);
+            if (drop > 0 && speed > 1e-4) {
+              car.vel.multiplyScalar(Math.max(0, (speed - drop) / speed));
+            }
           }
         }
       } else {
@@ -993,21 +702,46 @@ export class PropPhysics {
       }
     }
 
-    // Spring back to closed, damped — but NOT while the car is holding it open,
-    // or the panel closes through the car it is supposed to be blocked by.
-    if (!held) s.angVel += -p.spring * s.angle * dt;
+    // The door closer: a spring back to closed, damped. It acts while the car
+    // holds the gate open too — pushing it back is what the car keeps paying for.
+    s.angVel += -p.spring * s.angle * dt;
     s.angVel *= Math.max(0, 1 - p.damping * dt);
     s.angle += s.angVel * dt;
-    if (s.angle > p.maxAngle) { s.angle = p.maxAngle; s.angVel *= -0.3; }
-    else if (s.angle < -p.maxAngle) { s.angle = -p.maxAngle; s.angVel *= -0.3; }
+    if (s.angle > p.maxAngle) { s.angle = p.maxAngle; s.angVel *= -p.stopRestitution; }
+    else if (s.angle < -p.maxAngle) { s.angle = -p.maxAngle; s.angVel *= -p.stopRestitution; }
+
+    // THE DISPLACEMENT FLOOR. The impulse lands at one lever, but a car sweeps
+    // the whole stretch of panel it covers, and at speed the far end of the car
+    // is through the doorway before a single contact point could keep up. So if
+    // the panel is still inside the footprint on the side it is being pushed
+    // toward, it is put at that edge — the angle at which it just clears the
+    // bodywork — and its swing is raised to keep pace with the car. It never
+    // drags the gate closed toward the car, and it charges the car nothing.
+    if (contact) {
+      const { side } = contact;
+      const fp = this._carFootprint(car, s.angle);
+      if (fp.full || (fp.rel >= fp.lo && fp.rel <= fp.hi)) {
+        let want = fp.full
+          ? side * p.maxAngle // hinge is inside the car: nothing to clear to
+          : s.angle + ((side > 0 ? fp.hi : fp.lo) - fp.rel);
+        if (want > p.maxAngle) want = p.maxAngle;
+        else if (want < -p.maxAngle) want = -p.maxAngle;
+        if ((side > 0 && s.angle < want) || (side < 0 && s.angle > want)) {
+          const keepUp = (want - s.angle) / Math.max(dt, 1e-4);
+          if (side * s.angVel < side * keepUp) s.angVel = keepUp;
+          s.angle = want;
+          s.blocking = 1 - Math.min(1, Math.abs(s.angle) / p.maxAngle);
+        }
+      }
+    }
 
     _q.setFromAxisAngle(_up, s.angle);
     s.inst.root.quaternion.copy(s.home.quat).multiply(_q);
 
     // KEEP THE PANEL OUT OF THE CAR — by moving the PANEL, never the car.
     //
-    // The spring is what puts it there. `held` stops the gate closing only while
-    // the car's footprint still overlaps the panel's own ray, and a car that has
+    // The spring is what puts it there. The displacement floor above acts only
+    // while the car's footprint still overlaps the panel's own ray, and a car that has
     // driven most of the way through is past that while its TAIL is still in the
     // doorway — so the gate swung shut through the back of the car. Measured in
     // the running page at every crossing point: ~1.0 m of panel inside the

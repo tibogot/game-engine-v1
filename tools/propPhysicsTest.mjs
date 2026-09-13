@@ -301,6 +301,82 @@ console.log("\n=== A BARREL ON ITS SIDE ROLLS ===");
     Math.abs(s.body.pos.y - r) < 0.01, `centre y ${s.body.pos.y.toFixed(3)}, radius ${r.toFixed(3)}`);
 }
 
+console.log("\n=== TYRE WALLS STAND, AND COME DOWN WHEN HIT ===");
+// Tyres left the sphere/flat-cylinder proxy for the shared solver, and a wall
+// now stands on real tyre-on-tyre contacts solved together. What that has to
+// guarantee: a stack does not shuffle itself apart when woken, a car brings the
+// upper courses down, nothing is pushed into the road, and it all sleeps again.
+{
+  const TR = PHYSICS_PROP_TYPES.tyre.radius, OR = PHYSICS_PROP_TYPES.tyre.size.width / 2;
+  const wall = (cols, rows) => {
+    const l = [];
+    for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+      l.push({ id: "tyre", x: (c - (cols - 1) / 2) * 2 * OR, y: TR + r * 2 * TR, z: 0 });
+    }
+    return l;
+  };
+  const drift = (phys) => Math.max(...phys.sims.map((s) => s.inst.root.position.distanceTo(s.home.pos)));
+
+  {
+    const { phys } = mk(wall(5, 3));
+    for (const s of phys.sims) s.asleep = false;
+    let worst = 0;
+    for (let i = 0; i < 4 / DT; i++) { phys.tick(DT, null); worst = Math.max(worst, drift(phys)); }
+    check("a 5x3 wall woken with nothing touching it stays standing",
+      worst < 0.01, `worst drift ${(worst * 100).toFixed(2)} cm`);
+    check("...and goes back to sleep", phys.awakeCount === 0, `awake ${phys.awakeCount}`);
+  }
+
+  {
+    const { phys } = mk(wall(5, 3));
+    phys.sims.forEach((s) => { s.phys = phys; });
+    const car = fakeCar({ pos: V(0.3, 0.5, -6), vel: V(0, 0, 20) });
+    let lowest = Infinity, finite = true;
+    drive(phys, car, 8, {
+      leaveAfter: 0.3,
+      each: () => {
+        for (const s of phys.sims) {
+          if (!Number.isFinite(s.body.pos.x + s.body.pos.y + s.body.pos.z)) finite = false;
+          lowest = Math.min(lowest, lowestY(s));
+        }
+      },
+    });
+    const upper = phys.sims.filter((s) => s.home.pos.y > TR + 0.01);
+    const down = upper.filter((s) => s.inst.root.position.y < TR + 0.05).length;
+    check("a car through the wall at 20 m/s brings the upper courses down",
+      down >= 3, `${down}/${upper.length} upper tyres now on the road`);
+    check("no tyre is ever pushed into the road", lowest > -0.02, `lowest point ${lowest.toFixed(3)} m`);
+    check("nothing goes non-finite", finite);
+    check("the wreckage settles and sleeps", phys.awakeCount === 0, `awake ${phys.awakeCount}`);
+  }
+
+  {
+    const q = new THREE.Quaternion().setFromAxisAngle(V(1, 0, 0), Math.PI / 2); // tread down
+    const { phys } = mk([{ id: "tyre", y: OR + 0.01, quat: q }]);
+    const s = phys.sims[0];
+    s.asleep = false;
+    s.body.vel.set(5, 0, 0);
+    run(phys, null, 0.8);
+    const ratio = Math.abs(s.body.angVel.z) * OR / Math.abs(s.body.vel.x);
+    check("a tyre on its tread ROLLS (v = w·r), it does not skid or float",
+      Math.abs(ratio - 1) < 0.05 && Math.abs(s.body.pos.y - OR) < 0.01,
+      `w·r/v ${ratio.toFixed(3)}, centre ${s.body.pos.y.toFixed(3)} m (r ${OR})`);
+  }
+
+  {
+    const { phys } = mk([...wall(1, 2), { id: "cone", x: 0.1, y: 3 }]);
+    const cone = phys.sims[2];
+    cone.phys = phys;
+    cone.asleep = false;
+    run(phys, null, 5);
+    const top = 4 * TR;
+    check("a cone dropped on a stack lands ON it, not through it",
+      Math.abs(lowestY(cone) - top) < 0.03, `cone base ${lowestY(cone).toFixed(3)} m, stack top ${top.toFixed(2)} m`);
+    check("...without knocking the stack about",
+      Math.max(...phys.sims.slice(0, 2).map((s) => s.inst.root.position.distanceTo(s.home.pos))) < 0.02);
+  }
+}
+
 console.log("\n=== LAP RESET PUTS THEM BACK ===");
 {
   const { phys } = mk([{ id: "cone", x: 3, z: 1 }, { id: "gate", x: 10 }]);
@@ -555,7 +631,8 @@ console.log("\n=== THE GATE OPENS WHEN THE BONNET ARRIVES, NOT THE MIDDLE ===");
   // of its length but nowhere near the panel — still must not touch it.
   const src = readFileSync(join(ROOT, "games/modular-road-v3/modularRoadPropPhysics.js"), "utf8");
   check("the contact test uses the hull footprint, not a radius",
-    /_carFootprint\(car, s\.angle\)/.test(src) && /CHASSIS_HULL\.length/.test(src));
+    /_carFootprint\(car, s\.angle\)/.test(src)
+      && /const H = CHASSIS_HULL;[\s\S]*?H\.length \* 0\.5/.test(src.slice(src.indexOf("_carFootprint(car, angle)"))));
 }
 
 console.log("\n=== THE GATE NEVER ENDS UP INSIDE THE CAR ===");
@@ -647,6 +724,45 @@ console.log("\n=== THE GATE NEVER ENDS UP INSIDE THE CAR ===");
   check("the panel can swing past 90 degrees", P.maxAngle > Math.PI / 2,
     `${P.maxAngle} rad = ${(P.maxAngle * 180 / Math.PI).toFixed(0)}°`);
 }
+console.log("\n=== THE GATE IS A PANEL WITH MASS ===");
+// The panel used to be displaced out of the car's way with a guessed swing
+// (35% of the speed it needed) and the car was charged a tuned scrub for how
+// CLOSED the gate was. Now a hit is an exchange between the panel's inertia and
+// the car's mass, so the swing depends on how hard it was hit and the car's
+// cost on how heavy the panel is.
+{
+  const P = PHYSICS_PROP_TYPES.gate;
+  const through = (speed, mass = P.mass) => {
+    const m0 = P.mass;
+    P.mass = mass;
+    try {
+      const root = new THREE.Object3D();
+      const phys = new PropPhysics({ props: { instances: [{ id: "gate", root }] }, getGroundBvh: () => null });
+      phys.sync();
+      const g = phys.sims[0];
+      const body = {
+        pos: V(P.width / 2, 0.5, -8), vel: V(0, 0, speed), quat: new THREE.Quaternion(),
+        getVelocityAtPoint(_p, o) { return o.copy(this.vel); },
+      };
+      let peakW = 0;
+      for (let i = 0; i < 6 / DT; i++) {
+        body.pos.addScaledVector(body.vel, DT);
+        phys.tick(DT, { enabled: true, body });
+        peakW = Math.max(peakW, Math.abs(g.angVel));
+      }
+      return { peakW, cost: speed - body.vel.z };
+    } finally { P.mass = m0; }
+  };
+  const slow = through(4), fast = through(20);
+  check("a hard hit slams the panel open much faster than a crawl nudges it",
+    fast.peakW > 2 * slow.peakW, `peak swing ${slow.peakW.toFixed(1)} rad/s at 4 m/s, ${fast.peakW.toFixed(1)} at 20`);
+  const light = through(20, P.mass * 0.5), heavy = through(20, P.mass * 2);
+  check("a heavier panel costs the car more speed — the cost is the momentum it took",
+    heavy.cost > light.cost + 0.5, `${(P.mass * 0.5).toFixed(0)} kg: ${light.cost.toFixed(2)} m/s, ${(P.mass * 2).toFixed(0)} kg: ${heavy.cost.toFixed(2)} m/s`);
+  check("the retired tuning knobs are gone, not left dangling",
+    !("kick" in P) && !("resistance" in P));
+}
+
 console.log("\n=== THE COLLIDER OVERLAY DRAWS WHAT THE SIM USES ===");
 // "Show colliders" is a debugging instrument, so a wireframe that does not sit
 // on the thing it describes costs more time than it saves. Both of its errors
