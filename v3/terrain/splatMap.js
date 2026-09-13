@@ -90,6 +90,23 @@ export class SplatMap {
     return this._hasPaint;
   }
 
+  /**
+   * Summed painted weight (0..1) of the flagged layers at a world position —
+   * nearest texel. `flags[i]` is layer i+1 (L1..L7). Used to keep trees and
+   * foliage off layers that block them, e.g. a path.
+   */
+  flaggedWeightAt(wx, wz, flags) {
+    const half = WORLD_SIZE * 0.5;
+    const px = Math.floor((wx + half) / WORLD_SIZE * SPLAT_RES);
+    const pz = Math.floor((wz + half) / WORLD_SIZE * SPLAT_RES);
+    if (px < 0 || pz < 0 || px >= SPLAT_RES || pz >= SPLAT_RES) return 0;
+    const i = (pz * SPLAT_RES + px) * 4;
+    let w = 0;
+    for (let l = 0; l < 4; l++) if (flags[l]) w += this.data0[i + l];
+    for (let l = 4; l < 7; l++) if (flags[l]) w += this.data1[i + l - 4];
+    return Math.min(1, w / 255);
+  }
+
   applySplatStroke(stroke) {
     const r         = stroke.radius;
     const invR      = 1 / r;

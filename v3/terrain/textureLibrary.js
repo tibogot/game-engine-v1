@@ -114,6 +114,11 @@ export class TextureLibrary {
       // image references above are kept so switching back can restore them.
       procedural:    null,
       procThumbUrl:  null,
+      // Vegetation blocking: where this layer is painted, grass/susuki thin
+      // out and tree/foliage painting places nothing. Off by default, so no
+      // existing project changes; the path and shore presets switch them on.
+      blocksGrass:   false,
+      blocksTrees:   false,
       // Auto-paint rules (baked on demand via Generate)
       autoEnabled:   false,
       autoHeightMin: 0,
@@ -494,6 +499,10 @@ export class TextureLibrary {
     ]);
   }
 
+  /** Per-layer flags for the grass mask and tree/foliage placement (L1..L7). */
+  blocksGrassFlags() { return this.slots.map((s) => s.blocksGrass); }
+  blocksTreesFlags() { return this.slots.map((s) => s.blocksTrees); }
+
   setTriplanar(i, on) { this.slotUniforms[i].uTriplanar.value = on ? 1 : 0; }
   setUVScale(i, v)    { this.slotUniforms[i].uUVScale.value   = v; }
   setNormalStr(i, v)  { this.slotUniforms[i].uNormalStr.value = v; }
@@ -546,6 +555,8 @@ export class TextureLibrary {
         // Params only, never pixels: the bake is deterministic, so loading
         // re-generates exactly the same texture.
         procedural: s.procedural ? { ...s.procedural } : null,
+        blocksGrass: s.blocksGrass,
+        blocksTrees: s.blocksTrees,
         auto: {
           enabled:   s.autoEnabled,
           heightMin: s.autoHeightMin,
@@ -580,6 +591,9 @@ export class TextureLibrary {
       const s = this.slots[i];
       const u = this.slotUniforms[i];
       if (typeof d.name === "string") s.name = d.name;
+      // Absent in older files = false, their behaviour before these existed.
+      s.blocksGrass = d.blocksGrass === true;
+      s.blocksTrees = d.blocksTrees === true;
       if (Number.isFinite(d.uvScale))   u.uUVScale.value   = d.uvScale;
       if (Number.isFinite(d.normalStr)) u.uNormalStr.value = d.normalStr;
       if (Number.isFinite(d.aoStr))     u.uAOStr.value     = d.aoStr;

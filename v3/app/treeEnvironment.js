@@ -36,13 +36,15 @@ export function createTreeEnvironment({
   renderer,
   config,
   getWorldHeight,
+  // Optional (wx, wz) => boolean: true where painting must not place a tree.
+  isPlacementBlocked = null,
   toolState,
   // Wraps a bake so the editor loop does not render mid-bake on the shared
   // renderer (main.js's withRendererSideWork). Optional: headless callers
   // run bakes bare.
   runRendererSideWork = null,
 }) {
-  const terrainStore = { getWorldHeight };
+  const terrainStore = { getWorldHeight, isPlacementBlocked: isPlacementBlocked ?? undefined };
   const treeStore = new TreeStore(config);
   const treeLodRenderer = new TreeLodRenderer(scene, config);
   const foliageLodRenderer = new FoliageLodRenderer(scene, config);

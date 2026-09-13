@@ -847,11 +847,20 @@ export async function startV3App(opts = {}) {
     // leaf meshes → fewer draw calls, at the cost of coarser per-cell LOD.
     foliageLod: { chunkGroup: 3 },
   };
+  // Paint layers flagged "Blocks trees" (a path, a shore) keep tree and
+  // foliage painting off them. Placement only: trees already standing there
+  // are never deleted. Lazy — textureLib/splatMap are read at call time.
+  const isVegetationBlocked = (wx, wz) => {
+    const flags = textureLib.blocksTreesFlags();
+    if (!flags.some(Boolean)) return false;
+    return splatMap.flaggedWeightAt(wx, wz, flags) > 0.45;
+  };
   const treeEnv = createTreeEnvironment({
     scene,
     renderer,
     config: editorConfig,
     getWorldHeight: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
+    isPlacementBlocked: isVegetationBlocked,
     toolState: treeToolState,
     // Lazy: withRendererSideWork is declared further down (hoisted) and only
     // runs after a preset loads, long after the loop's state exists.
@@ -866,6 +875,7 @@ export async function startV3App(opts = {}) {
     scene,
     config: editorConfig,
     getWorldHeight: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
+    isPlacementBlocked: isVegetationBlocked,
     toolState: foliageToolState,
   });
   const perf = createPerfState();
@@ -931,6 +941,10 @@ export async function startV3App(opts = {}) {
     worldSize: WORLD_SIZE,
     maxHeight: MAX_HEIGHT,
   });
+  // Grass and susuki sample painted density with "Blocks grass" layers masked
+  // out — a GPU bake that only re-runs when the density, the ground paint or
+  // a layer's flag changes. See grassTerrainData.initDensityMask.
+  grassTerrainData.initDensityMask({ renderer, splatTex: splatMap.tex });
   const grassWindTex      = createWindTexture();
   const grassSpecNoiseTex = createSpecNoiseTexture();
 
@@ -1097,7 +1111,7 @@ export async function startV3App(opts = {}) {
       renderer,
       heightTex:        grassTerrainData.grassHeightTex,
       terrainNormalTex: grassTerrainData.terrainNormalTex,
-      densityTex:       grassTerrainData.densityTex,
+      densityTex:       grassTerrainData.grassDensityMaskedTex,
       windTex:          grassWindTex,
       specNoiseTex:     grassSpecNoiseTex,
       tintTex:          grassTintRT.texture,
@@ -1187,7 +1201,7 @@ export async function startV3App(opts = {}) {
         renderer,
         heightTex:        grassTerrainData.grassHeightTex,
         terrainNormalTex: grassTerrainData.terrainNormalTex,
-        densityTex:       grassTerrainData.susukiDensityTex,
+        densityTex:       grassTerrainData.susukiDensityMaskedTex,
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
         sp:               susukiState,
@@ -1315,6 +1329,12 @@ export async function startV3App(opts = {}) {
   const plblHBlend     = document.getElementById("plbl-hblend");
   const pslHContrast   = document.getElementById("psl-hcontrast");
   const plblHContrast  = document.getElementById("plbl-hcontrast");
+  const pslMacroStr    = document.getElementById("psl-macro-str");
+  const plblMacroStr   = document.getElementById("plbl-macro-str");
+  const pslMacroWarm   = document.getElementById("psl-macro-warm");
+  const plblMacroWarm  = document.getElementById("plbl-macro-warm");
+  const pslMacroScale  = document.getElementById("psl-macro-scale");
+  const plblMacroScale = document.getElementById("plbl-macro-scale");
   const pslNoise       = document.getElementById("psl-noise");
   const plblNoise      = document.getElementById("plbl-noise");
   const pslNScale      = document.getElementById("psl-nscale");
@@ -3027,6 +3047,7 @@ export async function startV3App(opts = {}) {
         // Grass surface rides the same gate — one bake per edit, on the GPU.
         grassTerrainData.bakeSurface();
       }
+      if (!_rendererSideWork) grassTerrainData.updateDensityMask(textureLib.blocksGrassFlags());
 
       bakeGrassTintIfNeeded();
       waterSurfaceMap.bakeIfNeeded(renderer);
@@ -3610,6 +3631,30 @@ export async function startV3App(opts = {}) {
     splatOverlay.uHeightBlend.value = Number(pslHBlend.value) / 100;
     plblHBlend.textContent = splatOverlay.uHeightBlend.value.toFixed(2);
   });
+  function syncMacroUi() {
+    pslMacroStr.value = String(Math.round(splatOverlay.uMacroStrength.value * 100));
+    plblMacroStr.textContent = splatOverlay.uMacroStrength.value.toFixed(2);
+    pslMacroWarm.value = String(Math.round(splatOverlay.uMacroWarmth.value * 100));
+    plblMacroWarm.textContent = splatOverlay.uMacroWarmth.value.toFixed(2);
+    pslMacroScale.value = String(Math.round(splatOverlay.uMacroScale.value));
+    plblMacroScale.textContent = String(Math.round(splatOverlay.uMacroScale.value));
+  }
+  pslMacroStr.addEventListener("input", () => {
+    splatOverlay.uMacroStrength.value = Number(pslMacroStr.value) / 100;
+    syncMacroUi();
+    grassTintDirty = true; // the grass takes its colour from the painted ground
+  });
+  pslMacroWarm.addEventListener("input", () => {
+    splatOverlay.uMacroWarmth.value = Number(pslMacroWarm.value) / 100;
+    syncMacroUi();
+    grassTintDirty = true;
+  });
+  pslMacroScale.addEventListener("input", () => {
+    splatOverlay.uMacroScale.value = Number(pslMacroScale.value);
+    syncMacroUi();
+    grassTintDirty = true;
+  });
+
   pslHContrast.addEventListener("input", () => {
     splatOverlay.uHeightContrast.value = Number(pslHContrast.value) / 100;
     plblHContrast.textContent = splatOverlay.uHeightContrast.value.toFixed(2);
@@ -3729,6 +3774,14 @@ export async function startV3App(opts = {}) {
   tslTriplanar.addEventListener("change", () => {
     textureLib.setTriplanar(texlibActiveSlot, tslTriplanar.checked);
   });
+  const tslBlockGrass = document.getElementById("tsl-block-grass");
+  const tslBlockTrees = document.getElementById("tsl-block-trees");
+  tslBlockGrass.addEventListener("change", () => {
+    textureLib.slots[texlibActiveSlot].blocksGrass = tslBlockGrass.checked;
+  });
+  tslBlockTrees.addEventListener("change", () => {
+    textureLib.slots[texlibActiveSlot].blocksTrees = tslBlockTrees.checked;
+  });
 
   tslUVScale.addEventListener("input", () => {
     textureLib.setUVScale(texlibActiveSlot, Number(tslUVScale.value));
@@ -3827,6 +3880,13 @@ export async function startV3App(opts = {}) {
    */
   const procUvScale = (p) => Math.min(200, Math.max(1, Math.round(WORLD_SIZE / p.tileM)));
 
+  /** A path or shore is walked on: its presets keep grass and trees off it. */
+  function applyPresetBlocking(i, p) {
+    if (p.pattern !== "path") return;
+    textureLib.slots[i].blocksGrass = true;
+    textureLib.slots[i].blocksTrees = true;
+  }
+
   function requestSlotProcedural(i, params) {
     if (i === texlibActiveSlot) procPanel.setBusy(true);
     textureLib.requestProcedural(i, params)
@@ -3839,6 +3899,7 @@ export async function startV3App(opts = {}) {
     onPreset: (p) => {
       // A preset's look is designed at a tile size, so it brings its UV tile.
       textureLib.setUVScale(texlibActiveSlot, procUvScale(p));
+      applyPresetBlocking(texlibActiveSlot, p);
       requestSlotProcedural(texlibActiveSlot, p);
       syncTexlibEditor();
     },
@@ -3859,6 +3920,7 @@ export async function startV3App(opts = {}) {
       if (s.procedural) return;
       const p = procParamsFromPreset(guessProcPreset(s.name));
       textureLib.setUVScale(i, procUvScale(p));
+      applyPresetBlocking(i, p);
       requestSlotProcedural(i, p);
       syncTexlibEditor();
     } else {
@@ -3884,6 +3946,8 @@ export async function startV3App(opts = {}) {
     tslRStr.value = Math.round(u.uRoughStr.value * 10);
     tlblRStr.textContent = u.uRoughStr.value.toFixed(1);
     tslTriplanar.checked = u.uTriplanar.value > 0.5;
+    tslBlockGrass.checked = s.blocksGrass;
+    tslBlockTrees.checked = s.blocksTrees;
     texlibNameEl.value = s.name;
     const isProc = s.procedural !== null;
     texlibSourceEl.querySelectorAll(".option-chip").forEach((c) =>
@@ -5548,6 +5612,9 @@ export async function startV3App(opts = {}) {
       paintBlend: {
         heightBlend: splatOverlay.uHeightBlend.value,
         contrast:    splatOverlay.uHeightContrast.value,
+        macroStrength: splatOverlay.uMacroStrength.value,
+        macroWarmth:   splatOverlay.uMacroWarmth.value,
+        macroScale:    splatOverlay.uMacroScale.value,
       },
       /*
        * The world's LOOK, which this format has never carried. Only the ocean so
@@ -5691,6 +5758,12 @@ export async function startV3App(opts = {}) {
       plblHBlend.textContent = splatOverlay.uHeightBlend.value.toFixed(2);
       pslHContrast.value = String(Math.round(splatOverlay.uHeightContrast.value * 100));
       plblHContrast.textContent = splatOverlay.uHeightContrast.value.toFixed(2);
+      const ms = d.paintBlend.macroStrength, mw = d.paintBlend.macroWarmth, mc = d.paintBlend.macroScale;
+      splatOverlay.uMacroStrength.value = Number.isFinite(ms) ? Math.min(0.5, Math.max(0, ms)) : 0;
+      splatOverlay.uMacroWarmth.value   = Number.isFinite(mw) ? Math.min(1, Math.max(0, mw)) : 0;
+      if (Number.isFinite(mc)) splatOverlay.uMacroScale.value = Math.min(400, Math.max(10, mc));
+      syncMacroUi();
+      grassTintDirty = true;
     }
     if (d.paintLayers) {
       await textureLib.importData(d.paintLayers);
@@ -7034,6 +7107,9 @@ export async function startV3App(opts = {}) {
       grassTerrainData,
       splatMap,
       textureLib,
+      treeEnv,
+      foliageEnv,
+      splatOverlay,
       sculptFilterState,
       paintFilterState: paintState.filter,
       grassTintScene,

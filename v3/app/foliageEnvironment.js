@@ -19,9 +19,11 @@ export function createFoliageEnvironment({
   scene,
   config,
   getWorldHeight,
+  // Optional (wx, wz) => boolean: true where painting must not place foliage.
+  isPlacementBlocked = null,
   toolState,
 }) {
-  const terrainStore = { getWorldHeight };
+  const terrainStore = { getWorldHeight, isPlacementBlocked: isPlacementBlocked ?? undefined };
   const foliageStore = new FoliageStore(config);
   const billboardRenderer = new BillboardRenderer(scene, config);
   const paintSystem = new FoliagePaintSystem({

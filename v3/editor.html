@@ -899,6 +899,38 @@
               </div>
             </div>
 
+            <!-- LARGE-SCALE VARIATION -------------------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header" data-toggle>
+                <i data-lucide="chevron-down" class="section-arrow"></i>
+                Large-scale Variation
+              </div>
+              <div class="section-body hidden">
+                <p class="mode-hint" style="margin-top:2px">Soft brightness and warmth changes across the world, so a repeating texture stops reading as a tile at distance. Both at 0 = off.</p>
+                <div class="prop-row" title="How much brighter and darker the big patches get">
+                  <span class="prop-label">Brightness</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-macro-str" min="0" max="50" step="1" value="0" />
+                    <span class="prop-num" id="plbl-macro-str">0.00</span>
+                  </div>
+                </div>
+                <div class="prop-row" title="Bright patches lean warm (yellow), dark patches lean cool (blue-green)">
+                  <span class="prop-label">Warmth</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-macro-warm" min="0" max="100" step="1" value="0" />
+                    <span class="prop-num" id="plbl-macro-warm">0.00</span>
+                  </div>
+                </div>
+                <div class="prop-row" title="Size of the patches in metres">
+                  <span class="prop-label">Size (m)</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-macro-scale" min="10" max="400" step="5" value="80" />
+                    <span class="prop-num" id="plbl-macro-scale">80</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- NOISE MASK --------------------------------------------- -->
             <div class="inspector-section">
               <div class="section-header" data-toggle>
@@ -1056,6 +1088,24 @@
                     <div class="prop-value">
                       <label class="toggle-label">
                         <input type="checkbox" id="tsl-triplanar" />
+                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Where this layer is painted, grass and susuki thin out and disappear. Use it for paths and shores.">
+                    <span class="prop-label">Blocks grass</span>
+                    <div class="prop-value">
+                      <label class="toggle-label">
+                        <input type="checkbox" id="tsl-block-grass" />
+                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Tree and foliage painting (and mass place) will not put anything where this layer is painted. Trees already placed are never removed.">
+                    <span class="prop-label">Blocks trees</span>
+                    <div class="prop-value">
+                      <label class="toggle-label">
+                        <input type="checkbox" id="tsl-block-trees" />
                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                       </label>
                     </div>

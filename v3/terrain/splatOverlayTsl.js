@@ -31,7 +31,7 @@ import * as THREE from "three";
 import {
   Fn, If, float, int, struct, vec2, vec3, vec4,
   texture, mix, max, clamp, pow, sqrt, uniform, step, normalize,
-  positionWorld, smoothstep, abs, length, mx_noise_float,
+  positionWorld, smoothstep, abs, length, mx_noise_float, floor, fract, hash, uint,
 } from "three/tsl";
 import { WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 
@@ -66,7 +66,29 @@ export const SPLAT_FEATURES = {
   normalMap: true,
   /** Per-layer world-triplanar projection (uTriplanar). */
   triplanar: true,
+  /** Large-scale world colour variation (uMacroStrength / uMacroWarmth). */
+  macroVariation: true,
 };
+
+/**
+ * Cheap 2D value noise for the large-scale variation — no textures. The cell
+ * hash is integer PCG, not fract(sin()): a sin hash loses precision at large
+ * world coordinates and starts drawing visible patterns on a big map.
+ */
+const macroHash = (p) => hash(
+  p.x.add(32768).toUint().mul(uint(73856093))
+    .bitXor(p.y.add(32768).toUint().mul(uint(19349663))),
+);
+function macroValueNoise(p) {
+  const i = floor(p);
+  const f = fract(p);
+  const u = f.mul(f).mul(float(3).sub(f.mul(2)));
+  const a = macroHash(i);
+  const b = macroHash(i.add(vec2(1, 0)));
+  const c = macroHash(i.add(vec2(0, 1)));
+  const d = macroHash(i.add(vec2(1, 1)));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
 
 /**
  * @param {object[]} layerSlots  — 7 objects, each with TSL uniforms:
@@ -110,6 +132,10 @@ export function createSplatOverlay(
   const uSoloLayer      = uniform(-1.0);
   const uHeightBlend    = uniform(0.0);
   const uHeightContrast = uniform(0.5);
+  // Large-scale variation (see blend()). Both 0 = off and branch-skipped.
+  const uMacroStrength  = uniform(0.0);  // brightness swing, 0..0.5
+  const uMacroWarmth    = uniform(0.0);  // warm/cool tint amount, 0..1
+  const uMacroScale     = uniform(80.0); // metres per noise cell
 
   // ── Layer texture samples — 2 DataArrayTexture bindings for 7 layers ─────────
   // Node objects are built eagerly but only REFERENCED inside blend()'s branch,
@@ -373,6 +399,25 @@ export function createSplatOverlay(
           });
         }
 
+        // Large-scale variation: a soft world-space brightness and warmth
+        // shift over tens of metres, so a repeating layer texture stops
+        // reading as a repeating tile at distance. Pure maths (two octaves of
+        // value noise), no texture taps, and a real branch on its uniforms, so
+        // it costs nothing while both are 0 — the default, which leaves every
+        // existing project exactly as it was.
+        if (F.macroVariation) {
+          If(uMacroStrength.add(uMacroWarmth).greaterThan(0.0), () => {
+            const mp = positionWorld.xz.div(max(uMacroScale, float(1)));
+            // Second octave at a non-integer ratio so the two never line up.
+            const n = macroValueNoise(mp).mul(0.65)
+              .add(macroValueNoise(mp.mul(2.37).add(vec2(17.3, 41.9))).mul(0.35)).toVar();
+            const b = n.sub(0.5).mul(2.0); // -1..1
+            // Brighter patches lean warm, darker ones cool — the painted look.
+            const warmTint = mix(vec3(0.93, 1.0, 1.07), vec3(1.07, 1.02, 0.9), n);
+            colV.assign(colV.mul(float(1).add(b.mul(uMacroStrength))).mul(mix(vec3(1), warmTint, uMacroWarmth)));
+          });
+        }
+
         // Solo mode (greyscale single-layer visualisation) — an EDITOR affordance.
         if (F.solo) {
           If(uSoloLayer.greaterThanEqual(float(0)), () => {
@@ -433,6 +478,9 @@ export function createSplatOverlay(
     uSoloLayer,
     uHeightBlend,
     uHeightContrast,
+    uMacroStrength,
+    uMacroWarmth,
+    uMacroScale,
     blend,
     auto: {
       uAutoEnabled, uAutoFull, uAutoFlat, uAutoCliff, uAutoHigh,

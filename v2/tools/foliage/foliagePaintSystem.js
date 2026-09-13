@@ -121,6 +121,9 @@ export class FoliagePaintSystem {
 
       if (this.foliageStore.hasFoliageNearby(tx, tz, spacing)) continue;
       if (this._isTooSteep(tx, tz)) continue;
+      // Optional hook: the v3 editor keeps foliage off paint layers flagged to
+      // block it (a path). v2's terrain store has no such method.
+      if (this.terrainStore.isPlacementBlocked?.(tx, tz)) continue;
 
       const rotY = fp.randomRotation ? Math.random() * Math.PI * 2 : 0;
       const scale =
@@ -198,6 +201,9 @@ export class FoliagePaintSystem {
       if (tx < -halfW || tx > halfW || tz < -halfW || tz > halfW) continue;
       if (this.foliageStore.hasFoliageNearby(tx, tz, spacing)) continue;
       if (this._isTooSteep(tx, tz)) continue;
+      // Optional hook: the v3 editor keeps foliage off paint layers flagged to
+      // block it (a path). v2's terrain store has no such method.
+      if (this.terrainStore.isPlacementBlocked?.(tx, tz)) continue;
 
       const rotY = fp.randomRotation ? Math.random() * Math.PI * 2 : 0;
       const scale =

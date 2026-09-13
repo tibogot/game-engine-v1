@@ -30,7 +30,8 @@
  *             tiling / normal / AO / roughness strengths and auto-paint rules.
  *             REFERENCES, not pixels — the images live in /textures. A map
  *             loaded from a dropped local file keeps only its name.
- *   paintBlend { heightBlend, contrast }    how painted layers mix at their edges.
+ *   paintBlend { heightBlend, contrast, macroStrength, macroWarmth, macroScale }
+ *             how painted layers mix at their edges, plus large-scale variation.
  *             Was saved nowhere, so a game never got the edge the editor showed.
  *   spawn     { x, z, yaw }                 player start; null when unplaced
  *

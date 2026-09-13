@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { QuadMesh } from "three/webgpu";
-import { Fn, clamp, float, floor, max, min, sqrt, texture, uv, vec2, vec4 } from "three/tsl";
+import { Fn, clamp, dot, float, floor, int, max, min, smoothstep, sqrt, texture, uniform, uv, vec2, vec4 } from "three/tsl";
 
 const DENSITY_RES = 512;
 const HEIGHT_RES  = 1024; // must match HEIGHTMAP_SIZE — 1:1 copy, no resampling artefacts
@@ -18,6 +18,23 @@ function _makeSurfaceRT(res) {
   const rt = new THREE.RenderTarget(res, res, {
     format: THREE.RGBAFormat,
     type: THREE.FloatType,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
+    depthBuffer: false,
+    generateMipmaps: false,
+    colorSpace: THREE.NoColorSpace,
+  });
+  rt.texture.flipY = false;
+  return rt;
+}
+
+/** 8-bit target for a masked density copy — same format as the painted DataTexture. */
+function _makeDensityRT(res) {
+  const rt = new THREE.RenderTarget(res, res, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     wrapS: THREE.ClampToEdgeWrapping,
@@ -105,6 +122,20 @@ export class GrassTerrainData {
     this.susukiDensityTex.minFilter = this.susukiDensityTex.magFilter = THREE.LinearFilter;
     this.susukiDensityTex.needsUpdate = true;
     this._hasSusukiData = false;
+
+    // ── Density with blocking paint layers masked out — GPU ──────────────
+    // What the grass and susuki rings actually sample. Painted density times
+    // "not on a layer that blocks grass" (a path, a shore), baked only when
+    // the density paint, the ground paint or a layer's blocking flag changes.
+    // With no blocking layer it is an exact copy of the painted density, so
+    // the grass is unchanged until someone opts a layer in. Done as a bake
+    // rather than inside the grass compute because that compute is v2's shared
+    // HybridGrassSystem, which the v2 editor also runs.
+    this._grassMaskRT  = _makeDensityRT(DENSITY_RES);
+    this._susukiMaskRT = _makeDensityRT(DENSITY_RES);
+    this.grassDensityMaskedTex  = this._grassMaskRT.texture;
+    this.susukiDensityMaskedTex = this._susukiMaskRT.texture;
+    this._densityMask = null;
 
     this._hasGrassData    = false; // any terrain density painted
     this._hasCliffData    = false; // any cliff density painted
@@ -228,6 +259,81 @@ export class GrassTerrainData {
     b.hQuad.render(renderer);
     renderer.setRenderTarget(this._normalRT);
     b.nQuad.render(renderer);
+    renderer.setRenderTarget(prevRT);
+    renderer.autoClear = prevAutoClear;
+    return true;
+  }
+
+  /**
+   * Wire the masked-density bake (see the constructor note).
+   *
+   * @param {object} o
+   * @param {THREE.WebGPURenderer} o.renderer
+   * @param {THREE.DataArrayTexture} o.splatTex  SplatMap.tex — 2 slices:
+   *   slice 0 RGBA = layers 1-4, slice 1 RGB = layers 5-7 (A = meadow, ignored)
+   */
+  initDensityMask({ renderer, splatTex }) {
+    const uBlockA = uniform(new THREE.Vector4(0, 0, 0, 0));
+    const uBlockB = uniform(new THREE.Vector4(0, 0, 0, 0));
+    const make = (srcTex) => {
+      const m = new THREE.MeshBasicNodeMaterial();
+      m.toneMapped = m.fog = false;
+      m.depthTest = m.depthWrite = false;
+      m.fragmentNode = Fn(() => {
+        const c = uv();
+        const d = texture(srcTex, c).x;
+        const s0 = texture(splatTex, c).depth(int(0));
+        const s1 = texture(splatTex, c).depth(int(1));
+        const blocked = dot(s0, uBlockA).add(dot(s1, uBlockB));
+        // Soft, so the grass thins toward a path edge instead of cutting off.
+        const keep = float(1).sub(smoothstep(0.3, 0.6, blocked));
+        const v = d.mul(keep);
+        return vec4(v, v, v, 1);
+      })();
+      return new QuadMesh(m);
+    };
+    this._densityMask = {
+      renderer, splatTex, uBlockA, uBlockB,
+      grassQuad: make(this.densityTex),
+      susukiQuad: make(this.susukiDensityTex),
+      blockKey: "",
+      seen: { d: -1, s: -1, splat: -1, block: "" },
+    };
+    this.updateDensityMask(null);
+  }
+
+  /**
+   * Re-bake the masked density if anything feeding it changed. Cheap to call
+   * every frame: it compares texture versions and returns without rendering.
+   *
+   * @param {?boolean[]} blocksGrass  per paint layer (index 0 = layer 1), or
+   *   null to keep the current flags
+   * @returns {boolean} true if it re-baked
+   */
+  updateDensityMask(blocksGrass) {
+    const b = this._densityMask;
+    if (!b) return false;
+    if (blocksGrass) {
+      const key = blocksGrass.map((x) => (x ? 1 : 0)).join("");
+      if (key !== b.blockKey) {
+        b.blockKey = key;
+        const f = (i) => (blocksGrass[i] ? 1 : 0);
+        b.uBlockA.value.set(f(0), f(1), f(2), f(3));
+        b.uBlockB.value.set(f(4), f(5), f(6), 0);
+      }
+    }
+    const seen = b.seen;
+    const dV = this.densityTex.version, sV = this.susukiDensityTex.version, spV = b.splatTex.version;
+    if (seen.d === dV && seen.s === sV && seen.splat === spV && seen.block === b.blockKey) return false;
+    seen.d = dV; seen.s = sV; seen.splat = spV; seen.block = b.blockKey;
+    const { renderer } = b;
+    const prevRT = renderer.getRenderTarget();
+    const prevAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.setRenderTarget(this._grassMaskRT);
+    b.grassQuad.render(renderer);
+    renderer.setRenderTarget(this._susukiMaskRT);
+    b.susukiQuad.render(renderer);
     renderer.setRenderTarget(prevRT);
     renderer.autoClear = prevAutoClear;
     return true;
