@@ -49,9 +49,9 @@ the game.
 
 ## Sculpt
 
-10. **Heightmap import/export in 16-bit PNG and RAW.** Only the editor's own
-    format today, so Gaea / World Machine terrain cannot come in. The brush
-    stamps already contain a 16-bit PNG decoder.
+10. ~~Heightmap import/export in 16-bit PNG and RAW~~ — DONE 2026-09-13. Sculpt
+    panel → Heightmap File (and the toolbar Load accepts .png/.raw/.r16). Round
+    trip within half a 16-bit step; other sizes are resampled.
 11. **Concavity filter** (the third Unity brush filter).
 12. **Terrain holes** for caves and tunnels (rendering, collision, readback).
     Only with a real need.
@@ -101,8 +101,14 @@ the game.
 Nothing left that is felt: the game is vsync-locked with ~4× GPU headroom.
 Reopen only for a specific target (a weaker machine, 120 Hz, 1440p).
 
+Checked 2026-09-13 after the triplanar finding: the other switch-gated terrain
+features (snow, lakebed, river sand, auto-paint, height blend) compiled OUT all
+together save only 0.1–0.4 ms unpainted and 0.3–0.6 ms painted at 4.76 Mpx
+(two runs each, ~0.03–0.15 ms native). Their gates work; no change made.
+Large-scale variation was already measured free.
+
 ## Suggested order
 
 1. Grass look pass, panel and horizon (16–18), with your eyes.
-2. Heightmap PNG/RAW import (10).
+2. More Genshin textures (3), small paint gaps (4, 5, 7).
 3. Roads when ready.

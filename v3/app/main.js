@@ -13,6 +13,10 @@ import {
   downloadBuffer,
   pickHeightmapFile,
 } from "../io/heightmapIO.js";
+import {
+  isPng, decodePngHeights, encodeGray16Png, decodeRawHeights, encodeRaw16,
+  flipRows, resampleHeights, heightsToUint16,
+} from "../io/heightmapFormats.js";
 import { DEFAULT_GEN } from "../terrain/proceduralGen.js";
 import { createProceduralGenPass } from "../terrain/proceduralGenGpu.js";
 import { erodeDroplets, buildErosionKernel, smoothHeights } from "../terrain/globalErosion.js";
@@ -1758,6 +1762,106 @@ export async function startV3App(opts = {}) {
     sculpt.replaceHeightData(decoded.heights);
     onHistoryChange();
   }
+
+  // ── Heightmap file: 16-bit PNG / RAW (v3/io/heightmapFormats.js) ─────────
+  // The formats Gaea, World Machine, Unity and Unreal use. Neither carries a
+  // world size or a height range, so the TOP HEIGHT field says what white
+  // (65535) means, and a file of another resolution is resampled to this
+  // terrain's. Row 0 = the terrain's −Z edge, for import and export alike, so
+  // a round trip is exact.
+  const hmfTop    = document.getElementById("hmf-top");
+  const hmfFlip   = document.getElementById("hmf-flip");
+  const hmfEndian = document.getElementById("hmf-endian");
+  const hmfStatus = document.getElementById("hmf-status");
+  hmfTop.value = String(MAX_HEIGHT);
+  hmfTop.max = String(MAX_HEIGHT);
+  const hmfTopMetres = () => {
+    const v = parseFloat(hmfTop.value);
+    const t = Number.isFinite(v) ? Math.min(MAX_HEIGHT, Math.max(1, v)) : MAX_HEIGHT;
+    hmfTop.value = String(t);
+    return t;
+  };
+
+  /** Encode the current terrain; returns { buffer, name, message } without downloading. */
+  async function buildHeightmapExport(kind) {
+    await syncHeightmapToCPU();
+    const N = HEIGHTMAP_SIZE;
+    const top = hmfTopMetres();
+    const { samples, clippedLow, clippedHigh } = heightsToUint16(cpuHeightmap, MAX_HEIGHT, top);
+    if (hmfFlip.checked) flipRows(samples, N, N);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const buffer = kind === "png"
+      ? await encodeGray16Png(samples, N, N)
+      : encodeRaw16(samples, { littleEndian: hmfEndian.value !== "big" });
+    let message = `Exported ${N}×${N} 16-bit ${kind.toUpperCase()}, white = ${top} m.`;
+    if (clippedLow || clippedHigh) {
+      message += ` ${clippedLow} texel(s) below 0 m and ${clippedHigh} above ${top} m were clipped.`;
+    }
+    return { buffer, name: `terrain-${ts}-${N}.${kind}`, message };
+  }
+
+  async function exportHeightmapFormat(kind) {
+    const { buffer, name, message } = await buildHeightmapExport(kind);
+    downloadBuffer(buffer, name);
+    hmfStatus.textContent = message;
+  }
+
+  /** Import a 16-bit/8-bit PNG or a RAW heightmap onto the current terrain. */
+  async function importHeightmapFormat(file) {
+    const buf = await file.arrayBuffer();
+    const dec = isPng(buf)
+      ? await decodePngHeights(buf)
+      : decodeRawHeights(buf, { littleEndian: hmfEndian.value !== "big" });
+    if (dec.width !== dec.height) {
+      window.alert(`Non-square heightmaps (${dec.width}×${dec.height}) are not supported.`);
+      return;
+    }
+    let data = dec.data;
+    if (hmfFlip.checked) flipRows(data, dec.width, dec.height);
+    const N = HEIGHTMAP_SIZE;
+    let note = "";
+    if (dec.width !== N) {
+      const ok = window.confirm(
+        `This heightmap is ${dec.width}×${dec.height}; the terrain is ${N}×${N}.\n`
+        + `Resample it to fit? (Undoable.)`,
+      );
+      if (!ok) return;
+      data = resampleHeights(data, dec.width, dec.height, N, N);
+      note = `, resampled to ${N}×${N}`;
+    }
+    const top = hmfTopMetres();
+    const k = top / MAX_HEIGHT;
+    if (k !== 1) for (let i = 0; i < data.length; i++) data[i] *= k;
+    sculpt.replaceHeightData(data);
+    onHistoryChange();
+    hmfStatus.textContent = `Imported ${dec.width}×${dec.height} ${dec.bitDepth}-bit ${isPng(buf) ? "PNG" : "RAW"}${note}, white = ${top} m.`
+      + (dec.bitDepth === 8 ? " 8-bit has only 256 levels, so slopes will step; use 16-bit if you can." : "");
+  }
+
+  function pickExternalHeightmap() {
+    return new Promise((resolve) => {
+      const input = Object.assign(document.createElement("input"), { type: "file", accept: ".png,.raw,.r16" });
+      input.style.display = "none";
+      const done = (f) => { resolve(f); input.remove(); };
+      input.addEventListener("change", () => done(input.files?.[0] ?? null));
+      input.addEventListener("cancel", () => done(null));
+      document.body.appendChild(input);
+      input.click();
+    });
+  }
+
+  const runHeightmapTask = async (fn) => {
+    try { await fn(); } catch (err) {
+      console.error(err);
+      window.alert(err instanceof Error ? err.message : "Heightmap file operation failed.");
+    }
+  };
+  document.getElementById("hmf-import").addEventListener("click", () => runHeightmapTask(async () => {
+    const file = await pickExternalHeightmap();
+    if (file) await importHeightmapFormat(file);
+  }));
+  document.getElementById("hmf-export-png").addEventListener("click", () => runHeightmapTask(() => exportHeightmapFormat("png")));
+  document.getElementById("hmf-export-raw").addEventListener("click", () => runHeightmapTask(() => exportHeightmapFormat("raw")));
 
   async function loadHeightmap() {
     const file = await pickHeightmapFile();
@@ -5774,6 +5878,11 @@ export async function startV3App(opts = {}) {
     if (!file) return;
     try {
       const buf = await file.arrayBuffer();
+      // PNG / RAW heightmaps from other tools (the Heightmap File section's path).
+      if (isPng(buf) || /\.(raw|r16)$/i.test(file.name)) {
+        await importHeightmapFormat(file);
+        return;
+      }
       if (!isProjectFile(buf)) {
         // Bare heightmap path (handles its own size-mismatch reload+stash).
         await loadHeightmapBuffer(buf);
@@ -6993,6 +7102,7 @@ export async function startV3App(opts = {}) {
       treeEnv,
       foliageEnv,
       splatOverlay,
+      heightmapFiles: { buildExport: buildHeightmapExport, importFile: importHeightmapFormat },
       sculptFilterState,
       paintFilterState: paintState.filter,
       grassTintScene,

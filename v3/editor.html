@@ -751,6 +751,46 @@
             </div>
           </div>
 
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
+              Heightmap File
+            </div>
+            <div class="section-body">
+              <p class="mode-hint" style="margin-top:0">16-bit PNG and RAW (.raw / .r16), the formats Gaea, World Machine, Unity and Unreal use. Black = 0 m, white = Top height.</p>
+              <div class="prop-row" title="The height a white pixel (65535) stands for. Use the height range your terrain tool exported with.">
+                <span class="prop-label">Top height (m)</span>
+                <div class="prop-value">
+                  <input type="number" class="prop-input" id="hmf-top" min="1" step="1" />
+                </div>
+              </div>
+              <div class="prop-row" title="Reverse the rows. Try this if an imported terrain comes in mirrored front-to-back.">
+                <span class="prop-label">Flip vertically</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="hmf-flip" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
+              <div class="prop-row" title="Byte order of 16-bit RAW files. Unity and Unreal use little-endian (Windows).">
+                <span class="prop-label">RAW byte order</span>
+                <div class="prop-value">
+                  <select class="prop-dropdown" id="hmf-endian">
+                    <option value="little">Little-endian (Windows, Unity, Unreal)</option>
+                    <option value="big">Big-endian (Mac)</option>
+                  </select>
+                </div>
+              </div>
+              <button type="button" class="action-btn primary" id="hmf-import">Import PNG / RAW…</button>
+              <div style="display:flex;gap:6px">
+                <button type="button" class="action-btn" id="hmf-export-png" style="flex:1">Export PNG 16-bit</button>
+                <button type="button" class="action-btn" id="hmf-export-raw" style="flex:1">Export RAW 16-bit</button>
+              </div>
+              <p class="mode-hint" id="hmf-status">Import is undoable. A file of another size is resampled to this terrain's resolution.</p>
+            </div>
+          </div>
+
         </div><!-- /#sculpt-panel -->
 
         <!-- ═══════════════════════════════════════════════════════════ -->

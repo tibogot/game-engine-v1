@@ -179,7 +179,7 @@ export function pickProjectFile() {
   return new Promise((resolve) => {
     const input  = document.createElement("input");
     input.type   = "file";
-    input.accept = ".v3proj,.v3height,application/octet-stream";
+    input.accept = ".v3proj,.v3height,.png,.raw,.r16,application/octet-stream";
     input.style.display = "none";
     const cleanup = (file) => { resolve(file); input.remove(); };
     input.addEventListener("change", () => cleanup(input.files?.[0] ?? null));
