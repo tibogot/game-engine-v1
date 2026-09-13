@@ -2448,7 +2448,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       const ev = checkpoints.run.update(worldDt(dt), vehicleRef?.body?.pos ?? null, city.facade?.params?.nightAmount ?? 0, camera);
       if (ev) onCheckpointEvent(ev);
     }
-    const knockedNow = city.updateKnockables?.(worldDt(dt), vehicleRef?.body ?? null) ?? 0;
+    const knockedNow = city.updateKnockables?.(worldDt(dt),
+      vehicleRef?.enabled ? vehicleRef.body : null, vehicleRef?.groundBvh ?? null) ?? 0;
     // The car's window of hittable street furniture. Around the CAR, not the
     // camera — a chase camera trails by ~8 m and a look-back would otherwise
     // slide the window off the thing about to be hit.
@@ -5410,9 +5411,21 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       const p = sim.profile;
       if (p.kind === "body") {
         // Draw the PROXY the sim uses, not the mesh — that is the whole point.
-        const g = p.proxy === "cylinder"
-          ? new THREE.CylinderGeometry(p.size.length * 0.5, p.size.length * 0.5, p.size.height, 16)
-          : new THREE.SphereGeometry(p.radius, 10, 6);
+        let g;
+        if (p.shape?.kind === "cone") {
+          // Contact silhouette: square base plate to flat top. The body sits at
+          // the centre of mass, so the outline is offset down to the base.
+          g = new THREE.CylinderGeometry(p.shape.top, p.shape.base * Math.SQRT2, p.shape.height, 4, 1);
+          g.rotateY(Math.PI / 4);
+          g.translate(0, p.shape.height / 2 - p.radius - (p.comY ?? 0), 0);
+        } else if (p.shape?.kind === "cylinder") {
+          g = new THREE.CylinderGeometry(p.size.width * 0.5, p.size.width * 0.5, p.size.height, 16);
+          g.translate(0, -(p.comY ?? 0), 0);
+        } else {
+          g = p.proxy === "cylinder"
+            ? new THREE.CylinderGeometry(p.size.length * 0.5, p.size.length * 0.5, p.size.height, 16)
+            : new THREE.SphereGeometry(p.radius, 10, 6);
+        }
         dbgProps.push({ line: line(g, DBG_LINE.prop), sim });
       } else if (p.kind === "hinge") {
         const g = new THREE.BoxGeometry(p.width, p.height, 0.1);

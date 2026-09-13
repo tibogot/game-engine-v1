@@ -29,11 +29,22 @@ const { Vehicle, CHASSIS, CHASSIS_HULL, SOLID, WHEEL, WHEEL_LOCAL, FIXED_DT } =
   await import(pathToFileURL(TMP).href);
 // Same redirect as tools/propPhysicsTest.mjs: bare "three" is three/webgpu under
 // vite but not in node, and the prop module pulls the vehicle for CHASSIS_HULL.
+// The prop module also imports the shared contact solver, which imports the
+// vehicle too — both copies have to point at the same redirected vehicle.
+const vehicleRel = `from "./${TMP.split(/[\\/]/).pop()}"`;
+const CTMP = join(ROOT, `.hullc.${process.pid}.mjs`);
+writeFileSync(CTMP, readFileSync(join(ROOT, "games/modular-road-v3/modularRoadPropContact.js"), "utf8")
+  .replace('from "../../v3/play/modularRoadVehicle.js"', vehicleRel));
 const PTMP = join(ROOT, `.hullp.${process.pid}.mjs`);
 writeFileSync(PTMP, readFileSync(join(ROOT, "games/modular-road-v3/modularRoadPropPhysics.js"), "utf8")
-  .replace('from "../../v3/play/modularRoadVehicle.js"', `from "./${TMP.split(/[\\/]/).pop()}"`));
-const { GATE_POST_RADIUS, GATE_POST_HEIGHT } = await import(pathToFileURL(PTMP).href);
-unlinkSync(PTMP); unlinkSync(TMP);
+  .replace('from "../../v3/play/modularRoadVehicle.js"', vehicleRel)
+  .replace('from "./modularRoadPropContact.js"', `from "./${CTMP.split(/[\\/]/).pop()}"`));
+let GATE_POST_RADIUS, GATE_POST_HEIGHT;
+try {
+  ({ GATE_POST_RADIUS, GATE_POST_HEIGHT } = await import(pathToFileURL(PTMP).href));
+} finally {
+  unlinkSync(PTMP); unlinkSync(CTMP); unlinkSync(TMP);
+}
 
 Vehicle.prototype._buildMeshes = function () {
   this.group = new THREE.Group(); this.chassisMesh = new THREE.Object3D();

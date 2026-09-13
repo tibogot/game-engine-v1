@@ -223,6 +223,84 @@ export function blockGeometry(spec) {
   return geo;
 }
 
+/** The city cone's silhouette, shared by the mesh and its physics profile. */
+const CITY_CONE = { height: 0.62, lift: 0.045, bottom: 0.155, top: 0.035, pad: 0.34 };
+/** Taper radius of the city cone at `h` metres above the road. */
+const cityConeR = (h) => CITY_CONE.bottom
+  + (CITY_CONE.top - CITY_CONE.bottom) * (h - CITY_CONE.lift) / CITY_CONE.height;
+
+/**
+ * PHYSICS PROFILES for the knockable clutter, run by the same contact solver as
+ * the track builder's props (modularRoadPropContact.js).
+ *
+ * Every dimension below is read off the geometry in buildClutterKit, and the
+ * root is the instance matrix — base on the road, so `baseY` is 0 and `comY`
+ * is the centre of mass above it. The city keeps its OWN cone (a 108-triangle
+ * cylinder drawn hundreds at a time, not the track's lathe), so it gets its own
+ * profile sized to that mesh; the feel numbers match the track cone's.
+ *
+ * What used to make a water barrier shove and a cone fly was a table of
+ * per-kind throw fractions. It is MASS now, against the car's 1400 kg: a 2 t
+ * jersey hit at walking pace moves ~10 cm, a bin flies.
+ */
+export const CLUTTER_PHYSICS = {
+  cone: {
+    mass: 3,
+    comY: 0.1,          // the pad and the bottom of the taper carry most of it
+    shape: {
+      kind: "cone",
+      height: CITY_CONE.lift + CITY_CONE.height,
+      base: CITY_CONE.pad / 2,
+      top: CITY_CONE.top,
+      rings: [0.2, 0.35, 0.5].map((h) => [h, cityConeR(h)]),
+      baseY: 0,
+    },
+    /** Per kg, about the CoM — the track cone's, scaled to this one's size. */
+    inertia: { xx: 0.039, yy: 0.013 },
+    restitution: 0.25, friction: 0.7,
+    carRestitution: 0.2, carFriction: 0.4, bumperGive: 0.05,
+    rollingDrag: 1.2, dragArea: 0.12, spinDrag: 0.06,
+  },
+  bin: {
+    mass: 15,           // an empty wheelie bin
+    comY: 0.42,
+    shape: { kind: "box", width: 0.62, height: 1.04, length: 0.66, baseY: 0 },
+    restitution: 0.2, friction: 0.5,
+    carRestitution: 0.15, carFriction: 0.35, bumperGive: 0.03,
+    rollingDrag: 1.5, dragArea: 0.5, spinDrag: 0.02,
+  },
+  pallet: {
+    mass: 20,
+    comY: 0.1,
+    shape: { kind: "box", width: 1.16, height: 0.22, length: 1.16, baseY: 0 },
+    restitution: 0.15, friction: 0.6,
+    carRestitution: 0.1, carFriction: 0.4, bumperGive: 0.02,
+    rollingDrag: 2, dragArea: 0.6, spinDrag: 0.02,
+  },
+  barrier: {
+    mass: 350,          // a filled water barrier
+    comY: 0.35,
+    shape: { kind: "box", width: 1.6, height: 0.84, length: 0.52, baseY: 0 },
+    restitution: 0.05, friction: 0.6,
+    carRestitution: 0.05, carFriction: 0.3, bumperGive: 0.03,
+    rollingDrag: 2.5, dragArea: 1.0, spinDrag: 0.005,
+  },
+  jersey: {
+    mass: 2000,         // a 2.4 m precast concrete section
+    comY: 0.33,
+    shape: {
+      kind: "box",
+      width: JERSEY_BARRIER.size.length,
+      height: JERSEY_BARRIER.size.height,
+      length: JERSEY_BARRIER.size.width,
+      baseY: 0,
+    },
+    restitution: 0.02, friction: 0.8,
+    carRestitution: 0.02, carFriction: 0.3, bumperGive: 0.02,
+    rollingDrag: 3, dragArea: 1.2, spinDrag: 0.002,
+  },
+};
+
 /**
  * The four shapes, built once. Every one is modelled with its base at y = 0 and
  * facing +Z, so a placement only ever has to supply a position and a yaw.
@@ -232,13 +310,13 @@ export function buildClutterKit() {
   // The white band is the whole reason this reads as a cone and not as an
   // orange spike, and it is free: a cylinder with height segments, coloured by
   // vertex Y. Real cones are ~75 cm; this one is 0.70 to the tip.
-  const CONE_H = 0.62;
-  const coneBody = new THREE.CylinderGeometry(0.035, 0.155, CONE_H, 8, 6, true);
-  coneBody.translate(0, CONE_H / 2 + 0.045, 0);
+  const CONE_H = CITY_CONE.height;
+  const coneBody = new THREE.CylinderGeometry(CITY_CONE.top, CITY_CONE.bottom, CONE_H, 8, 6, true);
+  coneBody.translate(0, CONE_H / 2 + CITY_CONE.lift, 0);
   paint(coneBody, (y) => (y > 0.30 && y < 0.44 ? 0xf2f2ee : 0xff5a12));
   const coneGeo = mergeGeometries([
     coneBody,
-    paint(box(0.34, 0.045, 0.34), 0xd9490c),          // base pad
+    paint(box(CITY_CONE.pad, CITY_CONE.lift, CITY_CONE.pad), 0xd9490c),   // base pad
   ], false);
   coneBody.dispose();
 

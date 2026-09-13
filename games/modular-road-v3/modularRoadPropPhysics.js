@@ -10,7 +10,7 @@
 //
 // TWO TIERS, because they are different problems:
 //
-//  • CONE / TYRE — a free rigid body. This is the well-behaved 80% of rigid-body
+//  • TYRE — a free rigid body (cones and barrels: see CONTACT BODIES below). This is the well-behaved 80% of rigid-body
 //    dynamics: take an impulse, tumble, settle, sleep. What general engines are
 //    HARD at — stacking, resting contact stability, constraint graphs — is
 //    approximated with a cheap sphere-sphere pass so a tyre wall can sit on
@@ -30,8 +30,18 @@
 // SLEEPING is mandatory, not an optimisation: without it every settled cone
 // integrates forever AND jitters in place. A settled prop costs one comparison.
 // ============================================================================
+//
+// CONTACT BODIES (cone, barrel). The sphere proxy above could not tip, roll or
+// right itself: spin was WRITTEN into angVel on a hit and bled off by damping,
+// and the one ground sphere never rotated with the body, so a barrel on its
+// side floated 0.75 m up and a cone could freeze standing on its tip. These two
+// run on the contact-point solver in modularRoadPropContact.js — the same one
+// the city's street clutter uses, so a cone behaves alike in both places.
 import * as THREE from "three";
 import { RigidBody, CHASSIS_HULL } from "../../v3/play/modularRoadVehicle.js";
+import {
+  PROP_CONTACT, PropContactSolver, buildContactShape, setShapeInertia,
+} from "./modularRoadPropContact.js";
 
 export const PROP_PHYSICS = {
   enabled: true,
@@ -59,6 +69,9 @@ export const PROP_PHYSICS = {
   /** Speed floor (m/s) before a touch counts as a hit at all. */
   minHitSpeed: 1.5,
 };
+
+/** Solver constants live with the solver; re-exported for existing importers. */
+export { PROP_CONTACT };
 
 /**
  * Linear scale of the traffic cone, against the ~0.93 m motorway cone the
@@ -129,42 +142,71 @@ export const PHYSICS_PROP_TYPES = {
   cone: {
     kind: "body",
     /**
-     * Mass scales with the SQUARE of size, not the cube.
-     *
-     * Cubic (×27 → 59 kg) is the physically honest answer for a solid object 3×
-     * bigger, and it is the wrong one here: the whole point of a cone is that
-     * hitting it is spectacular and free, and at 59 kg against a 1400 kg car it
-     * stops flying and starts feeling like a bollard. A real cone is also mostly
-     * hollow shell plus a weighted base, so its mass grows nearer area than
-     * volume anyway — ×9 → 19.8 kg is both the better-playing and the more
-     * defensible number. Raise it if you want them to shrug the car off.
+     * A real motorway cone: ~2 kg of PVC shell on a ~2.5 kg rubber base. Mass
+     * scales with the SQUARE of CONE_SCALE (a shell grows by area, not volume).
+     * It now decides the throw — see PROP_CONTACT.carMass — so a heavier cone
+     * really does leave the bumper slower.
      */
-    mass: 2.2 * CONE_SCALE * CONE_SCALE,
-    /** Collision proxy: a sphere at the centre of mass. A cone is close enough
-     *  to a sphere for being punted by a car, and it never gets stuck on edges
-     *  the way a hull would. */
+    mass: 4.5 * CONE_SCALE * CONE_SCALE,
+    /**
+     * Height of the ROOT above the base. The mesh is dropped by this and the
+     * root lifted by it (modularRoadProps.js), so the base is ground-flush.
+     * No longer a collision sphere — the contact shape below is.
+     */
     radius: 0.42 * CONE_SCALE,
+    /** Sphere used only for prop-vs-prop separation, about the centre of mass. */
+    pairRadius: 0.3 * CONE_SCALE,
     size: {
       width: 0.54 * CONE_SCALE,
       height: 0.9 * CONE_SCALE,
       length: 0.54 * CONE_SCALE,
     },
     /**
-     * CoM offset — INERT TODAY, and the comment here used to claim otherwise
-     * ("low CoM so it rights itself and settles base-down"). Nothing rights a
-     * cone: `size` and `comY` reach `RigidBody._setInertia` and stop there,
-     * because `_tickBody` integrates position and orientation directly and
-     * never calls `integrate()`, never reads `localInvInertia`, and never
-     * accumulates torque. A knocked cone therefore keeps whatever attitude the
-     * angular damping froze it at, which can be tip-down.
-     *
-     * Kept rather than deleted because it is the correct value the moment
-     * anyone routes these bodies through `RigidBody.integrate()` — but it
-     * should not be read as describing current behaviour. To actually get
-     * self-righting, the cheap route is a gravity torque toward upright while
-     * awake, not a switch to full rigid-body dynamics.
+     * Centre of mass below the root (m): 0.15 m above the base, because the
+     * rubber base is over half the mass. LIVE now — gravity acts here, which is
+     * what stands a tilted cone back up and lays a toppled one on its side.
      */
     comY: -0.27 * CONE_SCALE,
+    /** Contact silhouette, from the lathe in modularRoadProps.js: square base
+     *  plate half-width, flat-top radius, overall height, the taper as
+     *  [height above base, radius], and the base 0.42 m below the root. */
+    shape: {
+      kind: "cone",
+      height: 0.93 * CONE_SCALE,
+      base: 0.275 * CONE_SCALE,
+      top: 0.051 * CONE_SCALE,
+      rings: [[0.21, 0.150], [0.42, 0.119], [0.66, 0.083]].map(([h, r]) => [h * CONE_SCALE, r * CONE_SCALE]),
+      baseY: -0.42 * CONE_SCALE,
+    },
+    /** Inertia per kg (m²) about the CoM — weighted base + thin shell. */
+    inertia: { xx: 0.077 * CONE_SCALE * CONE_SCALE, yy: 0.034 * CONE_SCALE * CONE_SCALE },
+    /** PVC/rubber on asphalt. */
+    restitution: 0.25,
+    friction: 0.7,
+    /** Against the bumper: a soft plastic knock, and a little grip so a corner
+     *  clip spins it off to the side. */
+    carRestitution: 0.2,
+    carFriction: 0.4,
+    /**
+     * How far behind the deepest point the bumper still touches (m) — PVC and
+     * bumper give. It decides how high up the taper the hit lands, and that
+     * lever arm over the centre of mass IS the tumble. Measured with the probe
+     * (car leaving after the hit):
+     *
+     *     give    8 m/s            25 m/s             45 m/s
+     *     0.05    knocked over     flips, 1.2 m up    2.5 m up, 28 rad/s   <- here
+     *     0.07    flips            5.0 m up           10 m up, spin capped
+     *
+     * 0.05 is windscreen-to-roof height at motorway speed, which is what real
+     * footage shows; 0.07 launches cones like mortars.
+     */
+    bumperGive: 0.05,
+    /** Spin lost per second while touching the ground (1/s). A square base
+     *  does not roll far. */
+    rollingDrag: 1.2,
+    /** Air: Cd·A (m²) of a tumbling cone, and spin drag (per rad/s, per s). */
+    dragArea: 0.2,
+    spinDrag: 0.06,
   },
   tyre: {
     kind: "body",
@@ -194,25 +236,15 @@ export const PHYSICS_PROP_TYPES = {
   barrel: {
     kind: "body",
     /**
-     * Heavier than a cone or tyre on purpose: a steel drum should scoot and
-     * tumble, not cartwheel like PVC. Mass alone does not change the throw
-     * (impulse is velocity-based — see `hitScale`); it is kept honest for the
-     * RigidBody and for anything that later routes through real inertia.
-     * ~120 kg — arcade "half-full drum", not a hollow cone (~20 kg).
+     * ~120 kg, a half-full drum. Mass is what makes it heavy now: against the
+     * 1400 kg car it takes noticeably less speed than a 4.5 kg cone, and its
+     * inertia makes it tumble slowly rather than cartwheel.
      */
     mass: 120,
     /**
-     * Fraction of the global hitImpulse / loft / spin. Well under 1 so a barrel
-     * shrugs a clip that would punt a cone across the deck.
-     */
-    hitScale: 0.28,
-    /** Extra ground drag vs the global friction — heavy drums don't skate. */
-    frictionScale: 1.8,
-    /**
-     * Sphere proxy about the centre — a drum tumbles end-over-end, so the
-     * tyre's Y-up cylinder rest would float it once it lands on its side.
-     * Numbers are seeded from BARREL_HEIGHT and refined by modularRoadBarrel
-     * once the GLB is measured.
+     * Height of the root above the base (the root is the drum's centre).
+     * Seeded from BARREL_HEIGHT; modularRoadBarrel refines size/radius once the
+     * GLB is measured, and the contact shape is rebuilt from `size` on sync().
      */
     radius: BARREL_HEIGHT * 0.5,
     hitRadius: BARREL_HEIGHT * 0.5,
@@ -222,6 +254,18 @@ export const PHYSICS_PROP_TYPES = {
       length: BARREL_HEIGHT * 0.66,
     },
     comY: 0,
+    /** A closed cylinder, Y up; dimensions come from `size`. */
+    shape: { kind: "cylinder" },
+    /** Steel on asphalt: a dull thunk, not a bounce. */
+    restitution: 0.15,
+    friction: 0.5,
+    carRestitution: 0.1,
+    carFriction: 0.3,
+    bumperGive: 0.03,
+    /** A drum on its side should roll a good way — low, but not frictionless. */
+    rollingDrag: 0.6,
+    dragArea: 0.8,
+    spinDrag: 0.002,
   },
   gate: {
     kind: "hinge",
@@ -305,6 +349,8 @@ const _down = new THREE.Vector3(0, -1, 0);
 const _up = new THREE.Vector3(0, 1, 0);
 const _pairN = new THREE.Vector3();
 const _pairV = new THREE.Vector3();
+/** Sphere a body presents to other props. For a shaped body it sits at the CoM. */
+const pairR = (s) => s.profile.pairRadius ?? s.profile.radius;
 
 export class PropPhysics {
   /**
@@ -319,6 +365,8 @@ export class PropPhysics {
     this.sims = [];
     this._enabled = true;
     this._lastPropCount = -1;
+    /** The shared contact solver — see modularRoadPropContact.js. */
+    this.solver = new PropContactSolver();
   }
 
   /**
@@ -350,9 +398,19 @@ export class PropPhysics {
           mass: profile.mass,
           size: { ...profile.size, comY: profile.comY ?? 0 },
         });
-        body.pos.copy(home.pos);
-        body.quat.copy(home.quat);
-        this.sims.push({ inst, profile, home, body, asleep: true, stillFor: 0 });
+        const sim = { inst, profile, home, body, asleep: true, stillFor: 0 };
+        if (profile.shape) {
+          // The body lives at the CENTRE OF MASS; the root is written back
+          // offset from it (_writeRoot). Rebuilt here so a barrel measured
+          // after its GLB loaded gets its real diameter.
+          sim.shape = buildContactShape(profile);
+          sim.com = new THREE.Vector3(0, profile.comY ?? 0, 0);
+          sim.grounded = false;
+          sim.startY = home.pos.y;
+          setShapeInertia(body, profile);
+        }
+        this._homeBody(sim);
+        this.sims.push(sim);
       } else {
         this.sims.push({ inst, profile, home, angle: 0, angVel: 0, pushSide: 0 });
       }
@@ -366,8 +424,7 @@ export class PropPhysics {
       s.inst.root.position.copy(s.home.pos);
       s.inst.root.quaternion.copy(s.home.quat);
       if (s.body) {
-        s.body.pos.copy(s.home.pos);
-        s.body.quat.copy(s.home.quat);
+        this._homeBody(s);
         s.body.vel.set(0, 0, 0);
         s.body.angVel.set(0, 0, 0);
         s.asleep = true;
@@ -378,6 +435,13 @@ export class PropPhysics {
         s.pushSide = 0;
       }
     }
+  }
+
+  /** Body at the authored pose — offset to the centre of mass for shaped props. */
+  _homeBody(s) {
+    s.body.quat.copy(s.home.quat);
+    s.body.pos.copy(s.home.pos);
+    if (s.com) s.body.pos.add(_v.copy(s.com).applyQuaternion(s.home.quat));
   }
 
   setEnabled(on) { this._enabled = !!on; }
@@ -413,6 +477,7 @@ export class PropPhysics {
     const car = vehicle?.enabled ? vehicle.body : null;
     for (const s of this.sims) {
       if (s.profile.kind === "hinge") this._tickHinge(s, dt, car, vehicle);
+      else if (s.shape) this._tickContactBody(s, dt, car);
       else this._tickBody(s, dt, car, vehicle);
     }
     // Sphere contacts AFTER every body has integrated, otherwise a stacked tyre
@@ -421,14 +486,44 @@ export class PropPhysics {
     this._bodyContacts();
     for (const s of this.sims) {
       if (!s.body || s.asleep) continue;
-      this._groundContact(s, dt);
-      this._sleepBody(s, dt);
-      s.inst.root.position.copy(s.body.pos);
-      s.inst.root.quaternion.copy(s.body.quat);
+      if (s.shape) {
+        this.solver.project(s);
+        if (this.solver.sleep(s, dt)) s.asleep = true;
+      } else {
+        this._groundContact(s, dt);
+        this._sleepBody(s, dt);
+      }
+      this._writeRoot(s);
     }
   }
 
-  // ── FREE BODY (cones / tyres) ───────────────────────────────────────────────
+  /** Root from body: shaped props are simulated at their centre of mass. */
+  _writeRoot(s) {
+    const root = s.inst.root;
+    root.quaternion.copy(s.body.quat);
+    root.position.copy(s.body.pos);
+    if (s.com) root.position.sub(_v.copy(s.com).applyQuaternion(s.body.quat));
+  }
+
+  // ── CONTACT BODY (cone / barrel) ────────────────────────────────────────────
+  // The model lives in modularRoadPropContact.js, shared with the city's street
+  // clutter. What stays here is only this owner's bookkeeping: waking a stack,
+  // and putting a body that left the world back where it was authored.
+
+  _tickContactBody(s, dt, car) {
+    if (s.asleep) {
+      if (!car || !this.solver.carNear(s, car)) return; // a settled prop costs this
+      this._wakeCluster(s);
+    }
+    if (!this.solver.step(s, dt, car, this.getGroundBvh?.())) {
+      if (!Number.isFinite(s.body.pos.x + s.body.pos.y + s.body.pos.z + s.body.quat.w)) this._homeBody(s);
+      s.body.vel.set(0, 0, 0);
+      s.body.angVel.set(0, 0, 0);
+      s.asleep = true;
+    }
+  }
+
+  // ── FREE BODY (tyres) ───────────────────────────────────────────────────────
 
   _tickBody(s, dt, car, vehicle) {
     const P = PROP_PHYSICS;
@@ -501,7 +596,7 @@ export class PropPhysics {
       const dy = b.body.pos.y - a.body.pos.y;
       return Math.hypot(dx, dz) < ra + rb + pad && Math.abs(dy) < ha + hb + pad;
     }
-    const max = a.profile.radius + b.profile.radius + pad;
+    const max = pairR(a) + pairR(b) + pad;
     return a.body.pos.distanceToSquared(b.body.pos) < max * max;
   }
 
@@ -526,8 +621,7 @@ export class PropPhysics {
   }
 
   _spherePair(a, b) {
-    const ra = a.profile.radius, rb = b.profile.radius;
-    const sum = ra + rb;
+    const sum = pairR(a) + pairR(b);
     _pairN.copy(b.body.pos).sub(a.body.pos);
     const d2 = _pairN.lengthSq();
     if (d2 >= sum * sum) return;
@@ -607,7 +701,7 @@ export class PropPhysics {
         if (horiz2 >= rx * rx) continue;
         impliedFloor = o.body.pos.y + o.profile.size.height * 0.5;
       } else {
-        const sum = r + o.profile.radius;
+        const sum = r + pairR(o);
         if (horiz2 >= sum * sum) continue;
         const restCenterY = o.body.pos.y + Math.sqrt(Math.max(0, sum * sum - horiz2));
         impliedFloor = restCenterY - r;

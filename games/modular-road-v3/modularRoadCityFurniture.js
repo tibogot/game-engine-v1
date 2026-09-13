@@ -29,7 +29,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { installCityPresetTrees } from "./modularRoadCityTreePreset.js";
 import {
-  buildClutterKit, placeStreetClutter, CLUTTER_DEFAULTS, paint as clutterPaint,
+  buildClutterKit, placeStreetClutter, CLUTTER_DEFAULTS, CLUTTER_PHYSICS, paint as clutterPaint,
 } from "./modularRoadCityClutter.js";
 // The stop line is the STREET's number, not a second copy of it: a car that
 // pulls up a metre past its own painted line is the one error in this whole
@@ -2086,29 +2086,26 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
   // off-screen also loses the shadow it throws INTO the frame. See
   // modularRoadCityLodView.js. Everything else gets the frustum test too.
   /*
-   * The knockable kinds: a list, its mesh, and the mass that decides whether
-   * it flies or shoves. A cone is light enough to be launched by a glancing
-   * blow; a water-filled barrier shifts and rotates and never leaves the
-   * ground, which is the only thing that makes the two feel different. None is
-   * `solid` — see the note at the top of modularRoadCityClutter.js.
+   * The knockable kinds: a list, its mesh, and its physics profile. What makes
+   * a cone fly and a water barrier shove is MASS, in the same solver the track
+   * builder's props use — see CLUTTER_PHYSICS. None is `solid` — see the note
+   * at the top of modularRoadCityClutter.js.
    */
   const knockGroups = [
-    { list: cones, mesh: coneMesh, params: { hitImpulse: 1.05, hitLoft: 0.42, spinPerSpeed: 2.6, spinMax: 22, restitution: 0.34, friction: 2.4, hitRadius: 1.5 } },
-    { list: bins, mesh: binMesh, params: { hitImpulse: 0.62, hitLoft: 0.22, spinPerSpeed: 1.4, spinMax: 12, restitution: 0.2, friction: 3.4, hitRadius: 1.6 } },
-    { list: pallets, mesh: palletMesh, params: { hitImpulse: 0.68, hitLoft: 0.20, spinPerSpeed: 1.6, spinMax: 13, restitution: 0.18, friction: 3.6, hitRadius: 1.7 } },
-    { list: barriers, mesh: barrierMesh, params: { hitImpulse: 0.34, hitLoft: 0.07, spinPerSpeed: 0.7, spinMax: 5, restitution: 0.12, friction: 5.5, hitRadius: 2.0, minSpeed: 5.0 } },
+    { list: cones, mesh: coneMesh, profile: CLUTTER_PHYSICS.cone },
+    { list: bins, mesh: binMesh, profile: CLUTTER_PHYSICS.bin },
+    { list: pallets, mesh: palletMesh, profile: CLUTTER_PHYSICS.pallet },
+    { list: barriers, mesh: barrierMesh, profile: CLUTTER_PHYSICS.barrier },
     /*
-     * CONCRETE. Barely moves, never leaves the ground, and needs a real hit
-     * before it moves at all — which is the entire difference between this and
-     * the plastic barrier above, and the reason both exist. A jersey that
-     * skitters like a cone teaches the player the wrong thing about a shape
-     * they will meet again at speed.
+     * CONCRETE. 2 t against the car's 1.4 t, on high friction: a touch moves it
+     * centimetres and only a real hit slides it — which is the entire difference
+     * between this and the plastic barrier above, and the reason both exist.
      *
      * The trench plate is NOT here on purpose: it lies over a hole in the road
      * and is driven across. One that flew when clipped would be the most
      * obviously wrong object in the city.
      */
-    { list: blocks, mesh: blockMesh, params: { hitImpulse: 0.11, hitLoft: 0.0, spinPerSpeed: 0.22, spinMax: 2, restitution: 0.05, friction: 9.0, hitRadius: 2.4, minSpeed: 9.0 } },
+    { list: blocks, mesh: blockMesh, profile: CLUTTER_PHYSICS.jersey },
   ];
   const kinds = [
     // One entry per body: each has its own mesh and its own sub-list, and the

@@ -1782,15 +1782,16 @@ export function createModularRoadCity({
       return obstacles ? obstacles.capsulesNear(x, z, radius) : [];
     },
     /**
-     * Drive the knockable guardrails. EVERY FRAME — a body in the air cannot
-     * wait for the LOD tick. `car` is the vehicle body; this only reads it.
-     * @returns {number} how many rails were knocked THIS frame, so the caller
-     *   can refresh its capsule window (they have just stopped being solid).
+     * Drive the knockable street clutter. EVERY FRAME — a body in the air
+     * cannot wait for the LOD tick. `car` is the vehicle body (only read);
+     * `ground` the collider the vehicle drives on, so clutter lands on the same
+     * surfaces the car does.
+     * @returns {number} how many objects were first touched THIS frame
      */
-    updateKnockables(dt, car) {
+    updateKnockables(dt, car, ground = null) {
       if (!knockables) return 0;
       const before = knockables.stats.knocked;
-      knockables.update(dt, car);
+      knockables.update(dt, car, ground);
       return knockables.stats.knocked - before;
     },
     /** The furniture handle — its placement lists are what the obstacle table

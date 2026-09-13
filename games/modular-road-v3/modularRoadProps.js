@@ -1953,9 +1953,9 @@ export const PROP_CATALOG = [
     label: "Oil barrel",
     collision: "none",
     /**
-     * Knockable steel drum — same PropPhysics free-body path as the cone, with
-     * a heavier hitScale so it scoots rather than flies. Visual is the GLB;
-     * collision is a sphere proxy (see PHYSICS_PROP_TYPES.barrel).
+     * Knockable steel drum — same PropPhysics contact-body path as the cone;
+     * its 120 kg is what makes it heavier to hit. Visual is the GLB; collision
+     * is a closed cylinder sized from it (see PHYSICS_PROP_TYPES.barrel).
      */
     make: () => makeBarrel(),
   },

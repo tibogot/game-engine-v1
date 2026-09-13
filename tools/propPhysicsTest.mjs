@@ -26,12 +26,21 @@ const VTMP = join(ROOT, `.pv.${process.pid}.mjs`);
 writeFileSync(VTMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
+const vehicleRel = `from "./${VTMP.split(/[\\/]/).pop()}"`;
+const CTMP = join(ROOT, `.pc.${process.pid}.mjs`);
+writeFileSync(CTMP, readFileSync(join(ROOT, "games/modular-road-v3/modularRoadPropContact.js"), "utf8")
+  .replace('from "../../v3/play/modularRoadVehicle.js"', vehicleRel));
 const PTMP = join(ROOT, `.pp.${process.pid}.mjs`);
 writeFileSync(PTMP, readFileSync(join(ROOT, "games/modular-road-v3/modularRoadPropPhysics.js"), "utf8")
-  .replace('from "../../v3/play/modularRoadVehicle.js"', `from "./${VTMP.split(/[\\/]/).pop()}"`));
-const { PropPhysics, PROP_PHYSICS, PHYSICS_PROP_TYPES } = await import(pathToFileURL(PTMP).href);
-const { CHASSIS, CHASSIS_HULL } = await import(pathToFileURL(VTMP).href);
-unlinkSync(PTMP); unlinkSync(VTMP);
+  .replace('from "../../v3/play/modularRoadVehicle.js"', vehicleRel)
+  .replace('from "./modularRoadPropContact.js"', `from "./${CTMP.split(/[\\/]/).pop()}"`));
+let PropPhysics, PHYSICS_PROP_TYPES, CHASSIS_HULL;
+try {
+  ({ PropPhysics, PHYSICS_PROP_TYPES } = await import(pathToFileURL(PTMP).href));
+  ({ CHASSIS_HULL } = await import(pathToFileURL(VTMP).href));
+} finally {
+  unlinkSync(PTMP); unlinkSync(CTMP); unlinkSync(VTMP);
+}
 
 /** Flat ground at y=0, same shape as the deck BVH the game passes in. */
 const ground = {
@@ -48,9 +57,11 @@ const ground = {
 /** Minimal stand-in for PropManager — the physics only reads `instances`. */
 function fakeProps(list) {
   return {
-    instances: list.map(({ id, x = 0, y = 0.28, z = 0 }) => {
+    instances: list.map(({ id, x = 0, y, z = 0, quat }) => {
       const root = new THREE.Object3D();
-      root.position.set(x, y, z);
+      // Default: ground-flush, the way make() authors it.
+      root.position.set(x, y ?? PHYSICS_PROP_TYPES[id]?.radius ?? 0, z);
+      if (quat) root.quaternion.copy(quat);
       return { id, root };
     }),
   };
@@ -72,6 +83,31 @@ const mk = (list) => {
 };
 const DT = 1 / 120;
 const run = (phys, car, secs) => { for (let i = 0; i < secs / DT; i++) phys.tick(DT, car); };
+/** A car that actually MOVES, and swerves away `leaveAfter` s after first contact. */
+const drive = (phys, car, secs, { leaveAfter = Infinity, each } = {}) => {
+  let hitAt = null;
+  for (let i = 0; i < secs / DT; i++) {
+    const t = i * DT;
+    car.body.pos.addScaledVector(car.body.vel, DT);
+    if (hitAt === null && phys.awakeCount) hitAt = t;
+    if (hitAt !== null && t - hitAt > leaveAfter) car.body.pos.x = 1e3;
+    phys.tick(DT, car);
+    each?.(t);
+  }
+};
+const upY = (q) => V(0, 1, 0).applyQuaternion(q).y;
+/** Lowest ground contact point of a shaped body, world y. */
+const lowestY = (s) => {
+  let m = Infinity;
+  s.phys.solver.forGroundPoints(s, (p) => { m = Math.min(m, p.y); });
+  return m;
+};
+/** Ground points within 1.5 cm of the floor — 1 means balanced on a point. */
+const supports = (s) => {
+  let n = 0;
+  s.phys.solver.forGroundPoints(s, (p) => { if (p.y < 0.015) n++; });
+  return n;
+};
 
 console.log("=== SETUP ===");
 {
@@ -85,28 +121,73 @@ console.log("=== SETUP ===");
 }
 
 console.log("\n=== A CAR HITS A CONE ===");
+// Contact-point body: the tumble is not written in, it comes from WHERE the
+// bumper lands (above the weighted base) and the inertia. So these measure the
+// outcome of a real pass, with the car driving on and then away.
 {
   const { phys } = mk([{ id: "cone", x: 0, z: 0 }]);
   const s = phys.sims[0];
-  const before = s.body.pos.clone();
-  // Car arriving at the cone at 25 m/s.
-  const car = fakeCar({ pos: V(0, 0.6, -1.2), vel: V(0, 0, 25) });
-  phys.tick(DT, car);
-  check("the cone wakes on contact", !s.asleep);
+  s.phys = phys;
+  const car = fakeCar({ pos: V(0.3, 0.5, -4), vel: V(0, 0, 25) });
+  let maxV = 0, maxH = 0, minUp = 1, maxW = 0, woke = false;
+  drive(phys, car, 1.5, {
+    leaveAfter: 0.08,
+    each: () => {
+      woke ||= !s.asleep;
+      maxV = Math.max(maxV, s.body.vel.length());
+      maxH = Math.max(maxH, s.inst.root.position.y);
+      minUp = Math.min(minUp, upY(s.body.quat));
+      maxW = Math.max(maxW, s.body.angVel.length());
+    },
+  });
+  check("the cone wakes on contact", woke);
   check("it is thrown forward, along the car's travel",
-    s.body.vel.z > 5, `vz = ${s.body.vel.z.toFixed(1)} m/s`);
-  check("but never outruns the car that hit it — that reads as a glitch",
-    s.body.vel.length() < 25, `${s.body.vel.length().toFixed(1)} m/s vs the car's 25`);
-  check("it gets some loft — a flat-sliding cone looks dead",
-    s.body.vel.y > 0, `vy = ${s.body.vel.y.toFixed(2)}`);
-  check("it TUMBLES: an off-centre hit produces spin, which is what sells it",
-    s.body.angVel.length() > 1, `|w| = ${s.body.angVel.length().toFixed(1)} rad/s`);
-  check("spin is capped to a cartwheel, not a blur",
-    s.body.angVel.length() <= PROP_PHYSICS.maxSpin + 1e-6,
-    `${s.body.angVel.length().toFixed(1)} <= ${PROP_PHYSICS.maxSpin} rad/s`);
-  run(phys, null, 0.5);
-  check("it actually moves", s.body.pos.distanceTo(before) > 1,
-    `${s.body.pos.distanceTo(before).toFixed(1)} m`);
+    s.body.pos.z > 5, `${s.body.pos.z.toFixed(1)} m down the road`);
+  // Physically a light prop CAN leave faster than the bumper (restitution);
+  // what must not happen is the car pumping it again and again.
+  const cap = 25 * (1 + PHYSICS_PROP_TYPES.cone.carRestitution) + 0.5;
+  check("it leaves at about bumper speed, not a multiple of it",
+    maxV < cap, `peak ${maxV.toFixed(1)} m/s (cap ${cap.toFixed(1)})`);
+  check("it TUMBLES, from the hit landing above its centre of mass",
+    minUp < 0, `cone axis reached up.y ${minUp.toFixed(2)}`);
+  check("it leaves the ground, but windscreen-high rather than a mortar",
+    maxH > 0.8 && maxH < 4, `root peaked at ${maxH.toFixed(2)} m`);
+  check("spin stays a cartwheel, well under the numerical cap",
+    maxW < 40, `peak ${maxW.toFixed(1)} rad/s`);
+}
+
+console.log("\n=== A CAR DRIVING ON DOES NOT PUMP THE CONE ===");
+// The old impulse fired on every tick of overlap without looking at how fast
+// the cone was ALREADY going, so a car catching it up re-launched it each time.
+{
+  const { phys } = mk([{ id: "cone", x: 0, z: 0 }]);
+  const s = phys.sims[0];
+  const car = fakeCar({ pos: V(0, 0.5, -4), vel: V(0, 0, 25) });
+  let maxV = 0;
+  drive(phys, car, 2, { each: () => { maxV = Math.max(maxV, s.body.vel.length()); } });
+  const cap = 25 * (1 + PHYSICS_PROP_TYPES.cone.carRestitution) + 0.5;
+  check("a cone the car keeps meeting never exceeds one bounce off it",
+    maxV < cap, `peak ${maxV.toFixed(1)} m/s over 2 s of pushing (cap ${cap.toFixed(1)})`);
+}
+
+console.log("\n=== MASS DECIDES THE THROW ===");
+{
+  const P = PHYSICS_PROP_TYPES.cone;
+  const throwAt = (mass) => {
+    const m0 = P.mass;
+    P.mass = mass;
+    try {
+      const { phys } = mk([{ id: "cone", x: 0, z: 0 }]);
+      const s = phys.sims[0];
+      let maxV = 0;
+      drive(phys, fakeCar({ pos: V(0, 0.5, -4), vel: V(0, 0, 25) }), 0.6,
+        { leaveAfter: 0.02, each: () => { maxV = Math.max(maxV, s.body.vel.length()); } });
+      return maxV;
+    } finally { P.mass = m0; }
+  };
+  const light = throwAt(P.mass), heavy = throwAt(900);
+  check("a heavy prop takes less of the car's speed than a light one",
+    heavy < light - 2, `${P.mass} kg -> ${light.toFixed(1)} m/s, 900 kg -> ${heavy.toFixed(1)} m/s`);
 }
 
 console.log("\n=== ONE-WAY COUPLING ===");
@@ -121,24 +202,103 @@ console.log("\n=== ONE-WAY COUPLING ===");
 }
 
 console.log("\n=== IT SETTLES AND SLEEPS ===");
-{
-  const { phys } = mk([{ id: "cone", x: 0, z: 0 }]);
+for (const id of ["cone", "barrel"]) {
+  const { phys } = mk([{ id, x: 0, z: 0 }]);
   const s = phys.sims[0];
-  const car = fakeCar({ pos: V(0, 0.6, -1.2), vel: V(0, 0, 30) });
-  phys.tick(DT, car);
-  check("awake right after the hit", phys.awakeCount === 1);
-  run(phys, null, 8);
-  check("it comes to rest and SLEEPS (or it jitters and burns CPU forever)",
+  s.phys = phys;
+  const car = fakeCar({ pos: V(0.3, 0.5, -4), vel: V(0, 0, 30) });
+  let woke = false;
+  drive(phys, car, 0.5, { leaveAfter: 0.08, each: () => { woke ||= phys.awakeCount === 1; } });
+  check(`${id}: awake after the hit`, woke);
+  run(phys, null, 25);
+  check(`${id}: it comes to rest and SLEEPS (or it jitters and burns CPU forever)`,
     phys.awakeCount === 0, `awake ${phys.awakeCount}`);
-  check("it rests ON the ground, not sunk into it or floating",
-    Math.abs(s.body.pos.y - PHYSICS_PROP_TYPES.cone.radius) < 0.05,
-    `y = ${s.body.pos.y.toFixed(3)} (radius ${PHYSICS_PROP_TYPES.cone.radius})`);
-  check("a sleeping prop costs nothing — no drift while asleep", (() => {
+  check(`${id}: it rests ON the ground, not sunk into it or floating`,
+    Math.abs(lowestY(s)) < 0.01, `lowest point y = ${lowestY(s).toFixed(4)}`);
+  // THE FLOATING-BARREL BUG. One sphere about the centre never rotated with
+  // the body, so a drum on its side hovered at half its HEIGHT above the road.
+  check(`${id}: it rests on a face or an edge, never balanced on a single point`,
+    supports(s) >= 2, `${supports(s)} support points`);
+  check(`${id}: a sleeping prop costs nothing — no drift while asleep`, (() => {
     const p = s.body.pos.clone();
     run(phys, null, 2);
     return s.body.pos.equals(p);
   })());
-  check("the visual mesh follows the body", s.inst.root.position.equals(s.body.pos));
+  const expectRoot = s.body.pos.clone().sub(s.com.clone().applyQuaternion(s.body.quat));
+  check(`${id}: the visual root follows the body (offset from its centre of mass)`,
+    s.inst.root.position.distanceTo(expectRoot) < 1e-9 && s.inst.root.quaternion.equals(s.body.quat));
+}
+
+console.log("\n=== A CONE RIGHTS ITSELF, OR FALLS OVER — NOTHING IN BETWEEN ===");
+// Gravity acts at the centre of mass, low in the weighted base, so a nudged
+// cone stands back up and one pushed past its tipping point lies down. Before,
+// nothing applied any torque and a cone kept whatever tilt it had.
+{
+  const settle = (deg) => {
+    const q = new THREE.Quaternion().setFromAxisAngle(V(1, 0, 0), deg * Math.PI / 180);
+    const { phys } = mk([{ id: "cone", y: 0.6, quat: q }]);
+    const s = phys.sims[0];
+    s.asleep = false;
+    run(phys, null, 5);
+    return { up: upY(s.body.quat), asleep: s.asleep };
+  };
+  const t30 = settle(30), t70 = settle(70);
+  check("tilted 30 degrees, it stands back up", t30.up > 0.99 && t30.asleep, `up.y ${t30.up.toFixed(3)}`);
+  check("tilted 70 degrees, it lies down on its side", t70.up < 0 && t70.asleep, `up.y ${t70.up.toFixed(3)}`);
+}
+
+console.log("\n=== A CAR DRIVING THROUGH A BARREL KNOCKS IT OVER ===");
+// Reported as "I'm just pushing them". Three causes, all in the car contact:
+//  • gravity's 0.08 m/s counted as entering through the hull ROOF, so the drum
+//    was popped 0.51 m up onto the box and carried there (the entry window);
+//  • the hull's flat front hit a 1.5 m drum dead on its centre of mass, so
+//    nothing could tip it (the measured bonnet slope, CAR_NOSE);
+//  • the drum had no contact points in the bumper band at all (denser rings).
+{
+  const rest = PHYSICS_PROP_TYPES.barrel.radius;
+  const { phys } = mk([{ id: "barrel", x: 0, z: 0 }]);
+  const s = phys.sims[0];
+  const car = fakeCar({ pos: V(0, 0.5, -5), vel: V(0, 0, 15) });
+  let minUp = 1, hoisted = 0, onBumperLate = 0;
+  drive(phys, car, 3, {
+    each: (t) => {
+      const up = upY(s.body.quat);
+      minUp = Math.min(minUp, up);
+      // Never tipped yet, upright, lifted, and touching the car = sitting on
+      // it. (A drum mid-flip passes upright in the air too — that is fine.)
+      const onCar = phys.solver.count && phys.solver.contacts[0].cv.lengthSq() > 0;
+      if (onCar && minUp > 0.9 && s.inst.root.position.y > rest + 0.3) {
+        hoisted = Math.max(hoisted, s.inst.root.position.y - rest);
+      }
+      if (t > 1.5 && phys.solver.count && phys.solver.contacts[0].cv.lengthSq() > 0) onBumperLate += DT;
+    },
+  });
+  check("a 15 m/s hit knocks the drum over instead of plowing it upright",
+    minUp < 0.3, `drum axis reached up.y ${minUp.toFixed(2)}`);
+  check("it is never hoisted upright onto the car",
+    hoisted === 0, hoisted ? `lifted ${hoisted.toFixed(2)} m while upright` : "");
+  check("the car is not still shoving it a second and a half later",
+    onBumperLate < 0.2, `${onBumperLate.toFixed(2)} s on the bumper after t=1.5 s`);
+}
+
+console.log("\n=== A BARREL ON ITS SIDE ROLLS ===");
+{
+  const P = PHYSICS_PROP_TYPES.barrel;
+  const r = P.size.width / 2;
+  const q = new THREE.Quaternion().setFromAxisAngle(V(1, 0, 0), Math.PI / 2); // axis along Z
+  const { phys } = mk([{ id: "barrel", y: r + 0.01, quat: q }]);
+  const s = phys.sims[0];
+  s.asleep = false;
+  s.body.vel.set(4, 0, 0);             // shoved sideways with no spin at all
+  run(phys, null, 0.6);
+  const ratio = Math.abs(s.body.angVel.z) * r / Math.abs(s.body.vel.x);
+  check("ground friction spins a sliding drum up until it ROLLS (v = w·r)",
+    Math.abs(ratio - 1) < 0.05, `w·r / v = ${ratio.toFixed(3)}`);
+  // Solid-cylinder slide-to-roll keeps 2/3 of the speed; drag takes a little.
+  check("...keeping about two thirds of its speed, as a solid cylinder does",
+    s.body.vel.x > 4 * 0.55 && s.body.vel.x < 4 * 0.7, `${s.body.vel.x.toFixed(2)} of 4 m/s`);
+  check("it rolls at its RADIUS above the road, not half its height",
+    Math.abs(s.body.pos.y - r) < 0.01, `centre y ${s.body.pos.y.toFixed(3)}, radius ${r.toFixed(3)}`);
 }
 
 console.log("\n=== LAP RESET PUTS THEM BACK ===");
@@ -146,13 +306,14 @@ console.log("\n=== LAP RESET PUTS THEM BACK ===");
   const { phys } = mk([{ id: "cone", x: 3, z: 1 }, { id: "gate", x: 10 }]);
   const cone = phys.sims[0], gate = phys.sims[1];
   const home = cone.home.pos.clone();
-  const car = fakeCar({ pos: V(3, 0.6, -0.2), vel: V(0, 0, 30) });
-  run(phys, car, 1.5);
-  check("the cone really was displaced first", cone.body.pos.distanceTo(home) > 0.5,
-    `${cone.body.pos.distanceTo(home).toFixed(1)} m away`);
+  const car = fakeCar({ pos: V(3, 0.5, -4), vel: V(0, 0, 30) });
+  drive(phys, car, 1.5, { leaveAfter: 0.08 });
+  check("the cone really was displaced first", cone.inst.root.position.distanceTo(home) > 0.5,
+    `${cone.inst.root.position.distanceTo(home).toFixed(1)} m away`);
   gate.angle = 1.0; gate.angVel = 2;
   phys.reset();
-  check("cone returns to its AUTHORED position", cone.body.pos.equals(home));
+  check("cone returns to its AUTHORED position",
+    cone.body.pos.distanceTo(home.clone().add(cone.com.clone().applyQuaternion(cone.home.quat))) < 1e-9);
   check("and its authored rotation", cone.body.quat.equals(cone.home.quat));
   check("with no leftover momentum", cone.body.vel.length() === 0 && cone.body.angVel.length() === 0);
   check("cone goes back to sleep", cone.asleep === true);
@@ -201,16 +362,21 @@ console.log("\n=== A PLACED CONE SITS ON THE GROUND ===");
   check("the tyre's rest height is half its thickness, so it lies flat on y=0",
     /g\.position\.y = hw/.test(tyre));
 
-  // Net effect: base at 0, body centre at +radius — exactly where the ground
-  // contact wants to hold it, so a resting cone never jumps when it wakes.
-  const { phys } = mk([{ id: "cone", x: 0, y: PHYSICS_PROP_TYPES.cone.radius, z: 0 }]);
-  const s2 = phys.sims[0];
-  const y0 = s2.body.pos.y;
-  phys.tick(DT, fakeCar({ pos: V(0, 0.6, -1.2), vel: V(0, 0, 8) }));
-  run(phys, null, 6);
-  check("a cone placed flush settles at the SAME height it was placed",
-    Math.abs(s2.body.pos.y - y0) < 0.03,
-    `placed ${y0.toFixed(2)} -> settled ${s2.body.pos.y.toFixed(2)}`);
+  // Net effect: base at 0 — exactly where the ground contact holds it, so a
+  // resting cone (or barrel) never jumps or sinks when it wakes.
+  for (const id of ["cone", "barrel"]) {
+    const { phys } = mk([{ id, x: 0, z: 0 }]);
+    const s2 = phys.sims[0];
+    s2.phys = phys;
+    const y0 = s2.inst.root.position.y;
+    check(`a ${id} placed flush has its base on the ground`, Math.abs(lowestY(s2)) < 1e-6,
+      `lowest point ${lowestY(s2).toFixed(4)}`);
+    s2.asleep = false;
+    run(phys, null, 3);
+    check(`a woken, untouched ${id} stays exactly where it was placed`,
+      Math.abs(s2.inst.root.position.y - y0) < 0.005 && upY(s2.body.quat) > 0.9999 && s2.asleep,
+      `dy ${(s2.inst.root.position.y - y0).toFixed(4)}, asleep ${s2.asleep}`);
+  }
 }
 
 console.log("\n=== THE GATE IS HELD OPEN UNTIL THE CAR IS THROUGH ===");
@@ -506,12 +672,18 @@ console.log("\n=== THE COLLIDER OVERLAY DRAWS WHAT THE SIM USES ===");
 
 console.log("\n=== CONES STAY STRICTLY ONE-WAY ===");
 {
-  const { phys } = mk([{ id: "cone", x: 0, z: 0 }]);
-  const car = fakeCar({ pos: V(0, 0.6, -1.2), vel: V(0, 0, 25) });
+  const { phys } = mk([{ id: "cone", x: 0, z: 0 }, { id: "barrel", x: 1.5, z: 3 }]);
+  const car = fakeCar({ pos: V(0, 0.5, -4), vel: V(0, 0, 25) });
   const vehicle = { enabled: true, body: car.body };
   const v0 = car.body.vel.clone();
-  for (let i = 0; i < 0.5 / DT; i++) phys.tick(DT, vehicle);
-  check("a cone never perturbs the car, even with a vehicle handle available",
+  let touched = 0;
+  for (let i = 0; i < 0.8 / DT; i++) {
+    car.body.pos.addScaledVector(car.body.vel, DT);
+    phys.tick(DT, vehicle);
+    touched = Math.max(touched, phys.awakeCount);
+  }
+  check("the pass really did hit both the cone and the barrel", touched === 2, `${touched} awake`);
+  check("neither perturbs the car, even with a vehicle handle available",
     car.body.vel.equals(v0), `${car.body.vel.toArray()}`);
 }
 
