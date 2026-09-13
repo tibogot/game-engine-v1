@@ -71,10 +71,18 @@ export function createTerrainNormalMap({ heightTexNode, renderer, resolution = H
   // ── Bake pass ─────────────────────────────────────────────────────────────
   // Identical maths to the per-pixel version it replaces, so the surface it
   // describes is the same one every other system already agrees on.
+  //
+  // fragmentNode, NOT colorNode. A node material's colorNode is RGB only: the
+  // vec4's .w was thrown away and written as 1, so until 2026-09-13 every
+  // reader of the packed height saw 1.0 = MAX_HEIGHT everywhere (measured:
+  // flat 0 m terrain and a 0–108 m generated one both baked .w = 1). That
+  // silently put the auto-paint high-altitude rule and the procedural ground
+  // height tint "above the line" on the whole map, and floated the snow deform
+  // tile 500 m up. fragmentNode writes the vec4 verbatim; .xyz is unchanged.
   const bakeMat = new THREE.MeshBasicNodeMaterial();
   bakeMat.toneMapped = bakeMat.fog = false;
   bakeMat.depthTest  = bakeMat.depthWrite = false;
-  bakeMat.colorNode = Fn(() => {
+  bakeMat.fragmentNode = Fn(() => {
     const c     = uv();
     const texel = float(1.0 / HEIGHTMAP_SIZE);
     const hL  = texture(heightTexNode, vec2(c.x.sub(texel), c.y)).r;

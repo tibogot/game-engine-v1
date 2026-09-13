@@ -25,10 +25,9 @@ the game.
 
 ## Paint and ground look (the Genshin track)
 
-1. **Fix the terrain bake's alpha bug.** The height packed into the surface bake
-   always reads 1, which silently disables auto-paint's high-altitude rule and
-   the height tint ("snow above X metres"). Small fix; it switches on rules that
-   were silently off.
+1. ~~Fix the terrain bake's alpha bug~~ — DONE 2026-09-13. It was two bugs: the
+   packed height always read 1, AND negative normal components were clamped to
+   0 (every slope facing −X or −Z lit too flat).
 2. **Retire Procedural Ground and Meadow.** Measured +3.1 ms and +2.8 ms (Meadow
    whenever anything is painted). Old projects must still load and look the
    same. Frees paint slot 8.
@@ -100,7 +99,7 @@ Reopen only for a specific target (a weaker machine, 120 Hz, 1440p).
 
 ## Suggested order
 
-1. Alpha bug fix (1), then retire Ground and Meadow (2).
+1. Retire Ground and Meadow (2).
 2. Grass look pass, panel and horizon (16–18), with your eyes.
 3. Heightmap PNG/RAW import (10).
 4. Roads when ready.
