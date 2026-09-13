@@ -60,8 +60,15 @@ the game.
     project. Cars, ball and plane still see solid ground.
     Phase 2 DONE 2026-09-13: Tunnel mode (O). Click both mouths; horseshoe
     rock tube with a walkable floor, openings cut automatically (their own
-    hole source, re-cut after sculpting), collision, undo, saved. Next: cave
-    meshes; later maybe mouth trench carving and tunnel interior lighting.
+    hole source, re-cut after sculpting), collision, undo, saved.
+    Phase 3 DONE 2026-09-14: caves on the same tool — Cave style (rough
+    organic walls, flat floor), per-node size (chambers), closed ends (dead
+    ends, one-entrance caves).
+    2026-09-14 also DONE: dig-in entrances (ramp cutting + headwall built as
+    mesh + opening, follows terrain edits), baked interior lighting (lamps,
+    daylight at mouths, zero per-pixel cost), vehicles (car, stunt car, ball,
+    plane) use openings and tunnel floors. Remaining: characters are not lit
+    by the baked tunnel light.
 13. **Mirror, clone, copy-paste.**
 14. **Non-destructive edit layers** like Unreal's. Large; roads and rivers
     already do this per tool.

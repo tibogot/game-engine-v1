@@ -114,8 +114,8 @@ export function createPlayMode({
   }
 
   /**
-   * TERRAIN HOLES — on foot only (the capsule and the quadrupeds that ride it).
-   * The cars, the ball and the plane still see solid ground for now.
+   * TERRAIN HOLES — every mode. On foot uses footTerrainHeight; the cars, the
+   * ball and the plane use sampleGroundY below, which applies the same rules.
    *
    * Over a hole the terrain height is a floor far below the world, so the
    * capsule's own rules do the right thing with no special case: nothing to
@@ -146,13 +146,69 @@ export function createPlayMode({
     return getTerrainHeight(wx, wz);
   }
 
-  function sampleGroundY(wx, wz, fromY = 99999) {
+  /**
+   * The solid surface — terrain or the highest mesh, cast from the sky. For
+   * FRESH placements only (entering play, respawn after a fall): a spot the
+   * player has never been, where "under a roof" means nothing yet.
+   */
+  function solidGroundY(wx, wz, fromY = 99999) {
     const terrainY = getTerrainHeight(wx, wz);
     const cliffBvh = getCliffBvh();
     if (!cliffBvh?.baked) return terrainY;
     const bvhY = cliffBvh.raycastHeightFrom(wx, fromY, wz);
     if (bvhY != null && bvhY > terrainY) return bvhY;
     return terrainY;
+  }
+
+  /** How far above the vehicle the ground ray starts. */
+  const GROUND_RAY_HEADROOM = 4;
+
+  /**
+   * Ground for the cars, the ball and the plane (and mode switches).
+   *
+   * Two differences from solidGroundY, both needed for tunnels:
+   *  - Openings and "underground" follow the on-foot rules: the terrain there
+   *    is HOLE_FLOOR_Y, so the tube's own floor is what holds the vehicle.
+   *  - The mesh ray starts just above the VEHICLE, not in the sky. From the sky
+   *    the first thing a ray meets over a tunnel is its roof, and the car would
+   *    be put on top of it. (The plane already cast from its own height.)
+   */
+  function sampleGroundY(wx, wz, fromY = 99999) {
+    if (!isTerrainHole) return solidGroundY(wx, wz, fromY);
+    const terrainY = footTerrainHeight(wx, wz);
+    const cliffBvh = getCliffBvh();
+    if (!cliffBvh?.baked) return terrainY;
+    const from = Math.min(fromY, capsule.position.y + GROUND_RAY_HEADROOM);
+    const bvhY = cliffBvh.raycastHeightFrom(wx, from, wz);
+    if (bvhY != null && bvhY > terrainY) return bvhY;
+    return terrainY;
+  }
+
+  /**
+   * Vehicles: remember the last spot on open ground, and put the vehicle back
+   * there if it falls out of the world (a hole with nothing under it).
+   */
+  function trackVehicleSafety() {
+    if (!isTerrainHole) return;
+    const p = capsule.position;
+    const terr = getTerrainHeight(p.x, p.z);
+    if (!_underground && !isTerrainHole(p.x, p.z) && Math.abs(p.y - terr) < 2) {
+      (_lastSafe ??= new THREE.Vector3()).copy(p);
+    }
+    if (p.y >= FELL_OUT_Y) return;
+    const spawn = getSpawnPoint();
+    const tx = _lastSafe ? _lastSafe.x : spawn ? spawn.x : (savedTarget?.x ?? 0);
+    const tz = _lastSafe ? _lastSafe.z : spawn ? spawn.z : (savedTarget?.z ?? 0);
+    _underground = false;
+    const gy = solidGroundY(tx, tz);
+    p.set(tx, gy, tz);
+    const heading = flipYaw(currentYaw());
+    let s = null;
+    if (moveMode === "car") s = brunoCar.resetFrom(tx, gy, tz, heading);
+    else if (moveMode === "stunt") s = stuntCar.resetFrom(tx, gy, tz, heading);
+    else if (moveMode === "ball") s = ballDebug.resetFrom(tx, gy + BALL_R, tz);
+    else if (moveMode === "fly") s = flight.resetFrom(tx, gy + 20, tz, heading);
+    if (s) p.set(s.x, s.y, s.z);
   }
 
   const flight = createFlightMode({
@@ -173,7 +229,10 @@ export function createPlayMode({
   const stuntCar = stunt ?? createStuntCarMode({
     scene,
     camera,
-    sampleGroundY,
+    sampleGroundY: (wx, wz, fromY) => {
+      const y = sampleGroundY(wx, wz, fromY);
+      return y <= HOLE_FLOOR_Y + 1 ? NaN : y;
+    },
     getCliffBvh,
     getTreeBvh,
     getStuntRoadMeshes,
@@ -801,7 +860,7 @@ export function createPlayMode({
     if (spawn && Number.isFinite(spawn.yaw)) camYaw = spawn.yaw;
     _underground = false;
     _lastSafe = null;
-    capsule.reset(tx, sampleGroundY(tx, tz), tz);
+    capsule.reset(tx, solidGroundY(tx, tz), tz);
 
     // camYaw sits BEHIND the player, so the facing is the flip of it — spawning
     // the character at camYaw itself would stand them nose-to-camera.
@@ -938,7 +997,7 @@ export function createPlayMode({
       const tx = _lastSafe ? _lastSafe.x : spawn ? spawn.x : (savedTarget?.x ?? 0);
       const tz = _lastSafe ? _lastSafe.z : spawn ? spawn.z : (savedTarget?.z ?? 0);
       _underground = false;
-      capsule.reset(tx, sampleGroundY(tx, tz), tz);
+      capsule.reset(tx, solidGroundY(tx, tz), tz);
     }
 
     updateOnFootWire(colliderDebugOn && isOnFoot());
@@ -984,11 +1043,18 @@ export function createPlayMode({
     if (isOnFoot()) {
       updateOnFoot(dt);
     } else if (isBrunoMode()) {
+      updateUnderground();
       brunoCar.update(dt, keys, capsule.position);
     } else if (isStuntMode()) {
+      updateUnderground();
       stuntCar.update(dt, keys, capsule.position);
     } else if (isBallMode()) {
+      updateUnderground();
       ballDebug.update(dt, keys, camYaw, capsule.position);
+    }
+    if (!isOnFoot()) {
+      if (isFlyMode()) updateUnderground();
+      trackVehicleSafety();
     }
 
     if (isBrunoMode() && brunoCar.loaded) {

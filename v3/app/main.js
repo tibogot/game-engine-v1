@@ -121,6 +121,7 @@ import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
 import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
 import { RiverV2System } from "../tools/riverV2System.js";
 import { TunnelSystem, createTunnelToolState } from "../tools/tunnelSystem.js";
+import { TUNNEL_DEFAULTS, CAVE_DEFAULTS } from "../tools/tunnelPath.js";
 import { buildTunnelPanel } from "../ui/buildTunnelPanel.js";
 import { createLakeToolState } from "./state/lakeState.js";
 import { buildLakePanel } from "../ui/buildLakePanel.js";
@@ -3076,7 +3077,7 @@ export async function startV3App(opts = {}) {
         if (_hv !== _tunnelHolesHv) { _tunnelHolesHv = _hv; _tunnelHolesDue = now + 400; }
         if (_tunnelHolesDue && now >= _tunnelHolesDue && !_rendererSideWork && !tunnelSystem.dragging) {
           _tunnelHolesDue = 0;
-          void ensureCpuHeightmapFromGpu().then(() => tunnelSystem.rebuildHoles());
+          void ensureCpuHeightmapFromGpu().then(() => tunnelSystem.onTerrainChanged());
         }
       }
       if (_hv !== _lastNormalBakeVersion && !_rendererSideWork) {
@@ -6141,7 +6142,7 @@ export async function startV3App(opts = {}) {
     });
   }
 
-  tunnelUi = buildTunnelPanel({ tunnelSystem, maxHeight: MAX_HEIGHT });
+  tunnelUi = buildTunnelPanel({ tunnelSystem, maxHeight: MAX_HEIGHT, defaults: { TUNNEL_DEFAULTS, CAVE_DEFAULTS } });
 
   riverV2Ui = buildRiverV2Panel({
     toolState: { riverV2: riverV2Slice.riverV2 },

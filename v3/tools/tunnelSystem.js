@@ -17,14 +17,21 @@
  * Handles and the centreline draw through the terrain (depthTest off), because
  * the interesting part of a tunnel is inside a mountain.
  *
- * Undo is a JSON snapshot of the node lists; every restore rebuilds meshes and
+ * STYLES: "tunnel" (clean horseshoe) or "cave" (rough, organic shell). Any
+ * tunnel can be closed at either end (a dome — a cave with one entrance), and
+ * any node can be sized up into a chamber. An open end can be DUG IN: the mouth
+ * drops below the ground and a ramp cutting leads down to it. Lighting (lamps,
+ * daylight at the mouths) is baked into the mesh.
+ *
+ * Undo is a JSON snapshot of the tunnel list; every restore rebuilds meshes and
  * holes from scratch.
  */
 import * as THREE from "three";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import { attribute, mix, uniform } from "three/tsl";
 import {
-  TUNNEL_DEFAULTS, buildTunnelGeometry, rasterizeTunnelHoles, sampleTunnel, resolveNodeHeights, FLOOR_LIFT,
+  TUNNEL_DEFAULTS, CAVE_DEFAULTS, CUT_DEFAULTS, LIGHT_DEFAULTS, MIN_NODE_SCALE, MAX_NODE_SCALE,
+  buildTunnelGeometry, computeCuttings, rasterizeTunnelHoles, sampleTunnel, resolveNodeHeights, FLOOR_LIFT,
 } from "./tunnelPath.js";
 
 const COL_IDLE = 0x8a8f99;
@@ -37,6 +44,7 @@ export function createTunnelToolState() {
   return {
     tunnel: {
       showHandles: true,
+      newStyle: "tunnel",
       newWidth: TUNNEL_DEFAULTS.width,
       newHeight: TUNNEL_DEFAULTS.height,
       newThickness: TUNNEL_DEFAULTS.thickness,
@@ -45,6 +53,22 @@ export function createTunnelToolState() {
       selWidth: TUNNEL_DEFAULTS.width,
       selHeight: TUNNEL_DEFAULTS.height,
       selThickness: TUNNEL_DEFAULTS.thickness,
+      selStyle: "tunnel",
+      selRoughness: CAVE_DEFAULTS.roughness,
+      selClosedStart: false,
+      selClosedEnd: false,
+      selScale: 1,
+      // Mirrors of the active tunnel's entrance + lighting settings.
+      selDigStart: false,
+      selDigEnd: false,
+      selCutCover: CUT_DEFAULTS.cover,
+      selCutLength: CUT_DEFAULTS.length,
+      selCutSlope: CUT_DEFAULTS.slope,
+      selLamps: true,
+      selLampSpacing: LIGHT_DEFAULTS.lampSpacing,
+      selLampIntensity: LIGHT_DEFAULTS.lampIntensity,
+      selLampColor: LIGHT_DEFAULTS.lampColor,
+      selDaylight: LIGHT_DEFAULTS.daylight,
       wallColor: "#6f675c",
       floorColor: "#4a4239",
     },
@@ -115,7 +139,11 @@ export class TunnelSystem {
   _buildMaterial() {
     const m = new MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
     const base = mix(this._uWall, this._uFloor, attribute("aFloor", "float"));
-    m.colorNode = base.mul(attribute("aShade", "float"));
+    const albedo = base.mul(attribute("aShade", "float"));
+    m.colorNode = albedo;
+    // Baked interior light (lamp pools, daylight at the mouths) lights the rock;
+    // the lamp fixtures glow on their own.
+    m.emissiveNode = albedo.mul(attribute("aEmit", "vec3")).add(attribute("aGlow", "vec3"));
     return m;
   }
 
@@ -144,9 +172,20 @@ export class TunnelSystem {
   syncSelectionToState() {
     const p = this.params;
     const t = this.activeTunnel;
-    if (t) { p.selWidth = t.width; p.selHeight = t.height; p.selThickness = t.thickness; }
+    if (t) {
+      p.selWidth = t.width; p.selHeight = t.height; p.selThickness = t.thickness;
+      p.selStyle = t.style; p.selRoughness = t.roughness;
+      p.selClosedStart = t.closedStart; p.selClosedEnd = t.closedEnd;
+      p.selDigStart = t.digStart; p.selDigEnd = t.digEnd;
+      p.selCutCover = t.cutCover; p.selCutLength = t.cutLength; p.selCutSlope = t.cutSlope;
+      p.selLamps = t.lamps; p.selLampSpacing = t.lampSpacing; p.selLampIntensity = t.lampIntensity;
+      p.selLampColor = t.lampColor; p.selDaylight = t.daylight;
+    }
     const sel = this._selectedNode();
-    if (sel) p.selFloor = resolveNodeHeights(sel.tunnel.nodes)[sel.nodeIdx];
+    if (sel) {
+      p.selFloor = resolveNodeHeights(sel.tunnel.nodes, sel.tunnel)[sel.nodeIdx];
+      p.selScale = sel.node.scale ?? 1;
+    }
   }
 
   // ── Authoring ────────────────────────────────────────────────────────────
@@ -169,7 +208,10 @@ export class TunnelSystem {
 
   _newTunnel() {
     const p = this.params;
-    const t = { nodes: [], width: p.newWidth, height: p.newHeight, thickness: p.newThickness };
+    const t = _parseTunnel({
+      nodes: [], width: p.newWidth, height: p.newHeight, thickness: p.newThickness, style: p.newStyle,
+      lamps: p.newStyle !== "cave",
+    });
     this.tunnels.push(t);
     this.activeIndex = this.tunnels.length - 1;
     return t;
@@ -179,7 +221,7 @@ export class TunnelSystem {
   addNode(hit) {
     this._pushUndo();
     const t = this.activeTunnel ?? this._newTunnel();
-    const nd = { x: hit.x, z: hit.z, y: hit.y, pinned: false };
+    const nd = { x: hit.x, z: hit.z, y: hit.y, pinned: false, scale: 1 };
     let at = t.nodes.length;
     if (this.selected && this.selected.tunnelIdx === this.activeIndex && this.selected.nodeIdx === 0 && t.nodes.length > 1) at = 0;
     t.nodes.splice(at, 0, nd);
@@ -202,8 +244,9 @@ export class TunnelSystem {
     }
     if (best < 0) return false;
     this._pushUndo();
-    const ys = resolveNodeHeights(t.nodes);
-    t.nodes.splice(best + 1, 0, { x: hit.x, z: hit.z, y: (ys[best] + ys[best + 1]) * 0.5, pinned: false });
+    const ys = resolveNodeHeights(t.nodes, t);
+    const sc = ((t.nodes[best].scale ?? 1) + (t.nodes[best + 1].scale ?? 1)) * 0.5;
+    t.nodes.splice(best + 1, 0, { x: hit.x, z: hit.z, y: (ys[best] + ys[best + 1]) * 0.5, pinned: false, scale: sc });
     this.selected = { tunnelIdx: this.activeIndex, nodeIdx: best + 1 };
     this._rebuildTunnel(this.activeIndex, { holes: true });
     this._rebuildHandles();
@@ -235,8 +278,10 @@ export class TunnelSystem {
     const { tunnel, node, nodeIdx } = sel;
     node.x = terrainHit.x;
     node.z = terrainHit.z;
-    const isEnd = nodeIdx === 0 || nodeIdx === tunnel.nodes.length - 1;
-    if (isEnd || !node.pinned) node.y = terrainHit.y;
+    // An OPEN end is a mouth: its floor follows the ground where it is dropped.
+    const openEnd = (nodeIdx === 0 && !tunnel.closedStart) || (nodeIdx === tunnel.nodes.length - 1 && !tunnel.closedEnd);
+    if (openEnd) node.pinned = false;
+    if (openEnd || !node.pinned) node.y = terrainHit.y;
     this._dragMoved = true;
     // Geometry only while dragging; holes and collision settle on release.
     this._rebuildTunnel(sel.tunnelIdx, { holes: false });
@@ -335,6 +380,65 @@ export class TunnelSystem {
     this._scheduleHoles();
   }
 
+  /** Size of the selected node (1 = the tunnel's section; 3 = a chamber three times as big). */
+  setSelectedScale(scale) {
+    const sel = this._selectedNode();
+    if (!sel || !Number.isFinite(scale)) return;
+    this._pushUndoCoalesced("scale");
+    sel.node.scale = Math.min(MAX_NODE_SCALE, Math.max(MIN_NODE_SCALE, scale));
+    this._rebuildTunnel(sel.tunnelIdx, { holes: false });
+    this._rebuildHandles();
+    this._scheduleHoles();
+  }
+
+  /** Tunnel or cave. Switching to a cave with the tunnel defaults keeps its size. */
+  setActiveStyle(style) {
+    const t = this.activeTunnel;
+    if (!t || (style !== "tunnel" && style !== "cave") || t.style === style) return;
+    this._pushUndo();
+    t.style = style;
+    this._rebuildTunnel(this.activeIndex, { holes: true });
+  }
+
+  /** Cave wall roughness, metres of outward push at most. */
+  setActiveRoughness(r) {
+    const t = this.activeTunnel;
+    if (!t || !Number.isFinite(r)) return;
+    this._pushUndoCoalesced("rough");
+    t.roughness = Math.max(0, r);
+    this._rebuildTunnel(this.activeIndex, { holes: false });
+    this._scheduleHoles();
+  }
+
+  /** Close either end into a dome (a dead end). */
+  setActiveClosed({ start, end }) {
+    const t = this.activeTunnel;
+    if (!t) return;
+    this._pushUndo();
+    if (typeof start === "boolean") t.closedStart = start;
+    if (typeof end === "boolean") t.closedEnd = end;
+    this._rebuildTunnel(this.activeIndex, { holes: true });
+  }
+
+  /**
+   * Entrance and lighting settings of the active tunnel, e.g.
+   * { digStart: true } or { lampSpacing: 10 }. Toggles are one undo step each;
+   * slider drags coalesce.
+   */
+  setActiveOptions(patch) {
+    const t = this.activeTunnel;
+    if (!t) return;
+    const keys = Object.keys(patch);
+    const toggle = keys.every((k) => typeof patch[k] === "boolean");
+    if (toggle) this._pushUndo(); else this._pushUndoCoalesced("opt:" + keys.join(","));
+    for (const k of keys) t[k] = patch[k];
+    // Digging changes where the floor is, and so the openings.
+    const affectsHoles = keys.some((k) => k.startsWith("dig") || k.startsWith("cut"));
+    this._rebuildTunnel(this.activeIndex, { holes: false });
+    if (affectsHoles) { if (toggle) this.rebuildHoles(); else this._scheduleHoles(); }
+    this._rebuildHandles();
+  }
+
   /** Raise or lower every node of the active tunnel. */
   nudgeActiveTunnel(dy) {
     const t = this.activeTunnel;
@@ -357,7 +461,8 @@ export class TunnelSystem {
     }
     const sampled = sampleTunnel(t);
     if (sampled) {
-      const mesh = new THREE.Mesh(buildTunnelGeometry(sampled, t), this.material);
+      t._cuts = computeCuttings(sampled, t, this.heightAt);
+      const mesh = new THREE.Mesh(buildTunnelGeometry(sampled, t, { cuts: t._cuts }), this.material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.name = `Tunnel ${i + 1}`;
@@ -391,12 +496,26 @@ export class TunnelSystem {
     }
     const buf = new Uint8Array(res * res);
     for (const t of this.tunnels) {
-      if (t._sampled) rasterizeTunnelHoles(t._sampled, t, this.heightAt, buf, res, this.worldSize);
+      if (t._sampled) rasterizeTunnelHoles(t._sampled, t, this.heightAt, buf, res, this.worldSize, { cuts: t._cuts ?? [] });
     }
     this._holesDueAt = 0;
     this.splatMap.setProcHoles(buf);
     this._hadHoles = true;
     this.onChanged();
+  }
+
+  /**
+   * The ground changed (sculpt, erosion, load...). Openings are re-cut; a
+   * dug-in entrance's walls follow the ground, so those tunnels rebuild too.
+   */
+  onTerrainChanged() {
+    let any = false;
+    for (let i = 0; i < this.tunnels.length; i++) {
+      const t = this.tunnels[i];
+      if ((t.digStart && !t.closedStart) || (t.digEnd && !t.closedEnd)) { this._rebuildTunnel(i, { holes: false }); any = true; }
+    }
+    this.rebuildHoles();
+    if (any) this._rebuildHandles();
   }
 
   _removeTunnelAt(i) {
@@ -442,16 +561,16 @@ export class TunnelSystem {
     if (!this.params.showHandles) return;
     for (let ti = 0; ti < this.tunnels.length; ti++) {
       const t = this.tunnels[ti];
-      const ys = resolveNodeHeights(t.nodes);
+      const ys = resolveNodeHeights(t.nodes, t);
       const active = ti === this.activeIndex;
       for (let ni = 0; ni < t.nodes.length; ni++) {
         const nd = t.nodes[ni];
         const isSel = this.selected && this.selected.tunnelIdx === ti && this.selected.nodeIdx === ni;
-        const isEnd = ni === 0 || ni === t.nodes.length - 1;
-        const col = isSel ? COL_SELECTED : (nd.pinned && !isEnd) ? COL_PINNED : active ? COL_ACTIVE : COL_IDLE;
+        const isAnchorEnd = (ni === 0 && !t.closedStart) || (ni === t.nodes.length - 1 && !t.closedEnd);
+        const col = isSel ? COL_SELECTED : (nd.pinned && !isAnchorEnd) ? COL_PINNED : active ? COL_ACTIVE : COL_IDLE;
         const m = new THREE.Mesh(this._geoNode, this._handleMat(col));
         m.position.set(nd.x, ys[ni] + FLOOR_LIFT, nd.z);
-        m.userData = { kind: "node", tunnelIdx: ti, nodeIdx: ni, active };
+        m.userData = { kind: "node", tunnelIdx: ti, nodeIdx: ni, active, size: Math.sqrt(nd.scale ?? 1) };
         m.renderOrder = 960;
         this.handleGroup.add(m);
       }
@@ -462,7 +581,7 @@ export class TunnelSystem {
   _scaleHandles() {
     for (const m of this.handleGroup.children) {
       if (!m.isMesh) continue;
-      m.scale.setScalar(this._handleScale(m.position) * (m.userData.active ? 1 : 0.75));
+      m.scale.setScalar(this._handleScale(m.position) * (m.userData.active ? 1 : 0.75) * (m.userData.size ?? 1));
     }
   }
 
@@ -502,7 +621,7 @@ export class TunnelSystem {
 
   _snapshot() {
     return JSON.stringify({
-      tunnels: this.tunnels.map((t) => ({ nodes: t.nodes, width: t.width, height: t.height, thickness: t.thickness })),
+      tunnels: this.tunnels.map(_serializeTunnel),
       activeIndex: this.activeIndex,
     });
   }
@@ -510,7 +629,7 @@ export class TunnelSystem {
   _restore(json) {
     const d = JSON.parse(json);
     this._disposeAll();
-    this.tunnels = d.tunnels.map((t) => ({ ...t, nodes: t.nodes.map((n) => ({ ...n })) }));
+    this.tunnels = d.tunnels.map(_parseTunnel);
     this.activeIndex = Math.min(d.activeIndex, this.tunnels.length - 1);
     this.selected = null;
     this.rebuildAll();
@@ -551,13 +670,10 @@ export class TunnelSystem {
   exportData() {
     if (!this.tunnels.length) return null;
     return {
-      version: 1,
+      version: 3,
       wallColor: this.params.wallColor,
       floorColor: this.params.floorColor,
-      tunnels: this.tunnels.map((t) => ({
-        width: t.width, height: t.height, thickness: t.thickness,
-        nodes: t.nodes.map((n) => ({ x: n.x, z: n.z, y: n.y, pinned: !!n.pinned })),
-      })),
+      tunnels: this.tunnels.map(_serializeTunnel),
     };
   }
 
@@ -567,21 +683,55 @@ export class TunnelSystem {
     this.undoStack.length = 0;
     this.redoStack.length = 0;
     const list = Array.isArray(data?.tunnels) ? data.tunnels : [];
-    const num = (v, d) => (Number.isFinite(v) ? v : d);
-    this.tunnels = list
-      .map((t) => ({
-        width: num(t.width, TUNNEL_DEFAULTS.width),
-        height: num(t.height, TUNNEL_DEFAULTS.height),
-        thickness: num(t.thickness, TUNNEL_DEFAULTS.thickness),
-        nodes: (t.nodes ?? [])
-          .filter((n) => Number.isFinite(n?.x) && Number.isFinite(n?.z) && Number.isFinite(n?.y))
-          .map((n) => ({ x: n.x, z: n.z, y: n.y, pinned: n.pinned === true })),
-      }))
-      .filter((t) => t.nodes.length > 0);
+    this.tunnels = list.map(_parseTunnel).filter((t) => t.nodes.length > 0);
     if (typeof data?.wallColor === "string") this.params.wallColor = data.wallColor;
     if (typeof data?.floorColor === "string") this.params.floorColor = data.floorColor;
     this.syncMaterialColors();
     this.activeIndex = this.tunnels.length - 1;
     this.rebuildAll();
   }
+}
+
+// ── Serialisation (undo snapshots and project files share it) ─────────────────
+
+function _serializeTunnel(t) {
+  return {
+    style: t.style, width: t.width, height: t.height, thickness: t.thickness,
+    roughness: t.roughness, closedStart: t.closedStart, closedEnd: t.closedEnd,
+    digStart: t.digStart, digEnd: t.digEnd, cutCover: t.cutCover, cutLength: t.cutLength, cutSlope: t.cutSlope,
+    lamps: t.lamps, lampSpacing: t.lampSpacing, lampIntensity: t.lampIntensity, lampColor: t.lampColor, daylight: t.daylight,
+    nodes: t.nodes.map((n) => ({ x: n.x, z: n.z, y: n.y, pinned: !!n.pinned, scale: n.scale ?? 1 })),
+  };
+}
+
+/** Tolerant: fills anything missing (older files have no style, sizes or ends). */
+function _parseTunnel(t) {
+  const num = (v, d) => (Number.isFinite(v) ? v : d);
+  const style = t?.style === "cave" ? "cave" : "tunnel";
+  return {
+    style,
+    width: num(t?.width, TUNNEL_DEFAULTS.width),
+    height: num(t?.height, TUNNEL_DEFAULTS.height),
+    thickness: num(t?.thickness, TUNNEL_DEFAULTS.thickness),
+    roughness: Math.max(0, num(t?.roughness, CAVE_DEFAULTS.roughness)),
+    closedStart: t?.closedStart === true,
+    closedEnd: t?.closedEnd === true,
+    digStart: t?.digStart === true,
+    digEnd: t?.digEnd === true,
+    cutCover: Math.max(0, num(t?.cutCover, CUT_DEFAULTS.cover)),
+    cutLength: Math.max(0, num(t?.cutLength, CUT_DEFAULTS.length)),
+    cutSlope: Math.max(0, num(t?.cutSlope, CUT_DEFAULTS.slope)),
+    // Older files had no lighting: tunnels get lamps, caves do not.
+    lamps: typeof t?.lamps === "boolean" ? t.lamps : style !== "cave",
+    lampSpacing: Math.max(4, num(t?.lampSpacing, LIGHT_DEFAULTS.lampSpacing)),
+    lampIntensity: Math.max(0, num(t?.lampIntensity, LIGHT_DEFAULTS.lampIntensity)),
+    lampColor: typeof t?.lampColor === "string" ? t.lampColor : LIGHT_DEFAULTS.lampColor,
+    daylight: Math.max(0, num(t?.daylight, LIGHT_DEFAULTS.daylight)),
+    nodes: (t?.nodes ?? [])
+      .filter((n) => Number.isFinite(n?.x) && Number.isFinite(n?.z) && Number.isFinite(n?.y))
+      .map((n) => ({
+        x: n.x, z: n.z, y: n.y, pinned: n.pinned === true,
+        scale: Math.min(MAX_NODE_SCALE, Math.max(MIN_NODE_SCALE, num(n.scale, 1))),
+      })),
+  };
 }
