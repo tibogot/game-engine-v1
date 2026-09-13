@@ -153,7 +153,9 @@ export function copyDriftSmokeState(from, to) {
   };
   copyPool(from.particles, to.particles);
   copyPool(from.hazeParticles, to.hazeParticles);
-  for (const e of ["puffEmitter", "hazeEmitter"]) {
+  copyPool(from.sprayParticles, to.sprayParticles);
+  to._sprayAlive = from._sprayAlive;
+  for (const e of ["puffEmitter", "hazeEmitter", "sprayEmitter"]) {
     to[e].index = from[e].index;
     to[e].accum = [...from[e].accum];
   }
@@ -283,14 +285,14 @@ export class FlipbookDriftSmoke extends ModularRoadDriftSmoke {
     if (this.bankMesh.material !== want) this.bankMesh.material = want;
   }
 
-  update(dt, points, emit, intensity, vx, vz, camera) {
+  update(dt, points, emit, intensity, vx, vz, camera, spray) {
     this.syncFlip();
     // The bank sprite is laid out in the camera's plane, like the puff cards.
     if (camera) {
       this._flipU.uCamRight.value.set(1, 0, 0).applyQuaternion(camera.quaternion);
       this._flipU.uCamUp.value.set(0, 1, 0).applyQuaternion(camera.quaternion);
     }
-    return super.update(dt, points, emit, intensity, vx, vz, camera);
+    return super.update(dt, points, emit, intensity, vx, vz, camera, spray);
   }
 
   _lampAt(P, out) {
@@ -307,6 +309,9 @@ export class FlipbookDriftSmoke extends ModularRoadDriftSmoke {
 
   _writeParticle(index, ...rest) {
     super._writeParticle(index, ...rest);
+    // Frame indices are a PUFF thing; the spray class writes its own buffers
+    // with the streak shader and must not have its aClass touched.
+    if (this._target !== this._puffTarget) return;
     const rec = this._flipByPos?.get(this._flipPos);
     if (!rec) return;
     const { p, slot } = rec;
@@ -319,7 +324,7 @@ export class FlipbookDriftSmoke extends ModularRoadDriftSmoke {
     } else {
       frame = (p.maxLife - p.life) * f.fps + this._seed(p, slot) * frames;
     }
-    const classes = this.classes;
+    const classes = this._puffTarget.classes;
     const o = index * 12; // VERTS_PER_PARTICLE (6) × CLASS floats (2)
     for (let i = 0; i < 6; i++) classes[o + i * 2] = frame;
   }

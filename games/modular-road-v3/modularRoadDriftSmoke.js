@@ -142,19 +142,23 @@ export function wireSmokeOutput(material, shaded) {
 }
 
 /**
- * WET SPRAY — the same puff system, wearing a different coat.
+ * WET SPRAY — its own particle class, running ALONGSIDE the smoke.
  *
- * ON A SOAKED ROAD A TYRE DOES NOT SMOKE, IT SPRAYS, and that is why this is a
- * look SWAP rather than a second particle class running alongside. Rubber smoke
- * needs a dry, hot, sliding tyre; standing water needs neither heat nor slip —
- * the contact patch simply throws the film it displaces. So the two are close to
- * mutually exclusive in reality, and swapping is more truthful than adding.
+ * It used to be a look SWAP on the smoke's own pool: wetness blended the puff
+ * settings toward these, and at 0.5 the mesh's material flipped to the streak
+ * shader — so on a wet road a drift drew spray and NO smoke at all, and between
+ * 0 and 0.5 it drew half-smoke, half-water particles. The reasoning was that a
+ * soaked tyre does not smoke. It smokes far LESS — water keeps the rubber cool —
+ * but a hard drift on a damp road still smokes, and a spinning tyre that has
+ * cleared its own path heats up again. So now:
  *
- * It is also what the emitter can actually express. `opacity` is read once per
- * class in `_stepPool` and the colour ramp is global, so two looks cannot share
- * one pool without per-particle opacity and tint fields. Blending the CLASS
- * settings by wetness gets the effect with no new pool, no new mesh, no extra
- * draw call, and no risk of a heavy spray starving the smoke budget.
+ *   - spray has its own pool, mesh and emitter (all four contacts, gated by
+ *     speed × wetness, streak shader) — one extra draw, only while it is alive;
+ *   - smoke keeps its own look and its slip gate, and its intensity fades toward
+ *     `wetSmoke` as the road soaks.
+ *
+ * Each class reads its own `opacity` and colour ramp, which is what the old
+ * single pool could not express.
  *
  * The differences from smoke are all physical:
  *   - WHITE, not grey. Water scatters; carbon absorbs.
@@ -243,7 +247,7 @@ export const DEFAULT_WET_SPRAY_SETTINGS = {
   //
   // An arc needs both halves: thrown up hard, then dragged down. Smoke wants
   // neither, which is why all three of these have to be blended in per-wetness
-  // rather than inherited (see `_puffSettings`).
+  // rather than inherited (see `_spraySettings`).
   /** Upward launch off the tread, m/s. Nothing like smoke's gentle 0.28 lift. */
   rise: 2.4,
   /** Gravity, m/s². NEGATIVE — smoke's `buoyancy` climbs, water falls, and the
@@ -322,9 +326,16 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
   enabled: true,
   emitRate: 220,
   trigger: 0.04,
-  /** How the puffs look once the road is wet — see DEFAULT_WET_SPRAY_SETTINGS.
-   *  Blended in by `setWetness`, so a dry track is untouched. */
+  /** The wet spray — its own particle class, see DEFAULT_WET_SPRAY_SETTINGS.
+   *  Emits only while `setWetness` is above 0, so a dry track is untouched. */
   wetSpray: { ...DEFAULT_WET_SPRAY_SETTINGS },
+  /**
+   * How much smoke is left on a FULLY soaked road, as a multiple of the dry
+   * intensity; it fades linearly with wetness. Water keeps a sliding tyre cool,
+   * so it smokes much less — but not zero. 1 = rain changes nothing, 0 = the
+   * old behaviour of spray replacing smoke outright.
+   */
+  wetSmoke: 0.35,
   /**
    * Per-puff peak alpha. This is the CPU part of the density model; the
    * shader's optical depth (`opticalK`) is the other half, and the two are
@@ -707,6 +718,13 @@ const POOL_SIZE = 1024;
  */
 const HAZE_POOL_SIZE = 320;
 const TOTAL_POOL = POOL_SIZE + HAZE_POOL_SIZE;
+/**
+ * Wet spray's own pool. Steady state is `4 contacts × emitRate/4 × meanLife`
+ * ≈ 950 × 0.3 s ≈ 290 typical, ~400 at the long end of its life range — so
+ * 1024 has headroom for a heavier setting before the ring buffer starts
+ * recycling live droplets (which reads as the plume flickering).
+ */
+const SPRAY_POOL_SIZE = 1024;
 const VERTS_PER_PARTICLE = 6;
 const FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 3;
 const TINT_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 4;
@@ -809,7 +827,7 @@ const SPEED_DRAG = 0.12;
 const _smokeTint = new THREE.Color();
 const _smokeHot = new THREE.Color();
 const _smokeCool = new THREE.Color();
-/** Scratch for the wet-spray colour cross-fade — see _puffSettings. */
+/** Scratch for the wet-spray colours — see _spraySettings. */
 const _wetTmp = new THREE.Color();
 /** Sun direction (TOWARD the sun), fed in by the game. Identity = straight up. */
 const _smokeSun = new THREE.Vector3(0, 1, 0);
@@ -881,6 +899,44 @@ const _sprayPoints = [_frontContact0, _frontContact1, _rearContact0, _rearContac
 const _contactSide = [1, -1, 1, -1];
 /** Car right, in world space — the axis `sideThrow` flings along. */
 const _sprayRight = new THREE.Vector3(1, 0, 0);
+/** Reused spray argument for `update` — no allocation per frame. */
+const _sprayCall = { points: _sprayPoints, emit: false, intensity: 0 };
+
+/**
+ * One pooled billboard class's CPU buffers + geometry: 6 verts per particle, the
+ * attribute layout every smoke / spray shader reads. The puffs and the wet spray
+ * each own one, so each is its own draw with its own material.
+ */
+function makeBillboardBuffers(count) {
+  const positions = new Float32Array(count * FLOATS_PER_PARTICLE);
+  const tints = new Float32Array(count * TINT_FLOATS_PER_PARTICLE);
+  const noise = new Float32Array(count * NOISE_FLOATS_PER_PARTICLE);
+  const spheres = new Float32Array(count * SPHERE_FLOATS_PER_PARTICLE);
+  const classes = new Float32Array(count * CLASS_FLOATS_PER_PARTICLE);
+  const lampLight = new Float32Array(count * LAMP_FLOATS_PER_PARTICLE);
+  const uvs = new Float32Array(count * UV_FLOATS_PER_PARTICLE);
+  for (let i = 0; i < count; i++) uvs.set(_smokeUvs, i * UV_FLOATS_PER_PARTICLE);
+
+  const geometry = new THREE.BufferGeometry();
+  const dyn = (name, array, size) => {
+    const a = new THREE.BufferAttribute(array, size);
+    a.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute(name, a);
+  };
+  dyn("position", positions, 3);
+  // Named `aTint`, not `color`: a node material treats a `color` attribute as
+  // the built-in vertex-colour slot, and this one is driven entirely by hand.
+  dyn("aTint", tints, 4);
+  dyn("aNoise", noise, 4);
+  dyn("aSphere", spheres, 4);
+  dyn("aClass", classes, 2);
+  // Lamp irradiance, rgb, written per particle (see `_lampAt`). Buffer #7
+  // of WebGPU's 8 — the last one this geometry can spare.
+  dyn("aLamp", lampLight, 3);
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setDrawRange(0, 0);
+  return { geometry, positions, tints, noise, spheres, classes, lampLight };
+}
 
 // ─── Curl-noise field ─────────────────────────────────────────────────────────
 
@@ -1061,42 +1117,8 @@ export class ModularRoadDriftSmoke {
   constructor(scene, settings = DEFAULT_DRIFT_SMOKE_SETTINGS) {
     this.settings = settings;
 
-    const positions = new Float32Array(TOTAL_POOL * FLOATS_PER_PARTICLE);
-    const tints = new Float32Array(TOTAL_POOL * TINT_FLOATS_PER_PARTICLE);
-    const noise = new Float32Array(TOTAL_POOL * NOISE_FLOATS_PER_PARTICLE);
-    const spheres = new Float32Array(TOTAL_POOL * SPHERE_FLOATS_PER_PARTICLE);
-    const classes = new Float32Array(TOTAL_POOL * CLASS_FLOATS_PER_PARTICLE);
-    const uvs = new Float32Array(TOTAL_POOL * UV_FLOATS_PER_PARTICLE);
-    for (let i = 0; i < TOTAL_POOL; i++) {
-      uvs.set(_smokeUvs, i * UV_FLOATS_PER_PARTICLE);
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    const posAttr = new THREE.BufferAttribute(positions, 3);
-    posAttr.setUsage(THREE.DynamicDrawUsage);
-    geometry.setAttribute("position", posAttr);
-    // Named `aTint`, not `color`: a node material treats a `color` attribute as
-    // the built-in vertex-colour slot, and this one is driven entirely by hand.
-    const tintAttr = new THREE.BufferAttribute(tints, 4);
-    tintAttr.setUsage(THREE.DynamicDrawUsage);
-    geometry.setAttribute("aTint", tintAttr);
-    const noiseAttr = new THREE.BufferAttribute(noise, 4);
-    noiseAttr.setUsage(THREE.DynamicDrawUsage);
-    geometry.setAttribute("aNoise", noiseAttr);
-    const sphereAttr = new THREE.BufferAttribute(spheres, 4);
-    sphereAttr.setUsage(THREE.DynamicDrawUsage);
-    geometry.setAttribute("aSphere", sphereAttr);
-    const classAttr = new THREE.BufferAttribute(classes, 2);
-    classAttr.setUsage(THREE.DynamicDrawUsage);
-    geometry.setAttribute("aClass", classAttr);
-    // Lamp irradiance, rgb, written per particle (see `_lampAt`). Buffer #7
-    // of WebGPU's 8 — the last one this geometry can spare.
-    const lampLight = new Float32Array(TOTAL_POOL * LAMP_FLOATS_PER_PARTICLE);
-    const lampAttr = new THREE.BufferAttribute(lampLight, 3);
-    lampAttr.setUsage(THREE.DynamicDrawUsage);
-    geometry.setAttribute("aLamp", lampAttr);
-    geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-    geometry.setDrawRange(0, 0);
+    const puffBuffers = makeBillboardBuffers(TOTAL_POOL);
+    const { geometry, positions, tints, noise, spheres, classes, lampLight } = puffBuffers;
 
     this.noiseMap = makeSmokeNoiseTexture();
     this.uSoftDepth = uniform(settings.softDepth ?? 0.9);
@@ -1157,8 +1179,12 @@ export class ModularRoadDriftSmoke {
     this._lampRadius2 = (settings.lamps?.radius ?? 0.45) ** 2;
     this._lampRange = settings.lamps?.range ?? 9;
 
-    /** True while the spray (streak) shading path is the mesh's material. */
-    this._streakOn = false;
+    /**
+     * The billboard class `_stepPool` is currently writing into — the puffs' or
+     * the spray's buffers. Set before each class is stepped; `_writeParticle`
+     * reads `target.streak` to decide between a round card and a streak.
+     */
+    this._target = null;
     /** Shutter, seconds. How much of a droplet's travel one streak represents —
      *  the same dial a camera's exposure time is. Scaled by `streak`. */
     this._shutter = 0;
@@ -1187,13 +1213,9 @@ export class ModularRoadDriftSmoke {
     wireSmokeOutput(material, shaded);
 
     /**
-     * The SPRAY material — a second, much cheaper shader over the same
-     * geometry, swapped in by `setWetness`.
-     *
-     * Built here rather than on demand so both pipelines are compiled before
-     * anyone drives: switching a material that is already warm is free, whereas
-     * rebuilding a node graph the first time the road turns wet would stall the
-     * frame mid-corner.
+     * The SPRAY material — a second, much cheaper shader, on the spray's OWN
+     * mesh and pool (see DEFAULT_WET_SPRAY_SETTINGS for why it stopped being a
+     * swap on the puffs' mesh).
      *
      * Why a second material at all: the volumetric solver above can only make
      * soft round volumes, because that is what it is — a ray-traced sphere with
@@ -1216,6 +1238,18 @@ export class ModularRoadDriftSmoke {
     this.mesh.renderOrder = 22;
     this.mesh.visible = false;
     scene.add(this.mesh);
+
+    // The spray class: its own buffers, its own mesh, drawn after the puffs so
+    // droplets thrown through a plume sit on top of it.
+    const sprayBuffers = makeBillboardBuffers(SPRAY_POOL_SIZE);
+    this.sprayGeometry = sprayBuffers.geometry;
+    this.sprayMesh = new THREE.Mesh(sprayBuffers.geometry, sprayMaterial);
+    this.sprayMesh.frustumCulled = false;
+    this.sprayMesh.renderOrder = 23;
+    this.sprayMesh.visible = false;
+    scene.add(this.sprayMesh);
+    this._puffTarget = { ...puffBuffers, mesh: this.mesh, streak: false };
+    this._sprayTarget = { ...sprayBuffers, mesh: this.sprayMesh, streak: true };
 
     this.positions = positions;
     this.tints = tints;
@@ -1248,16 +1282,20 @@ export class ModularRoadDriftSmoke {
     }));
     this.particles = makePool(POOL_SIZE);
     this.hazeParticles = makePool(HAZE_POOL_SIZE);
+    this.sprayParticles = makePool(SPRAY_POOL_SIZE);
     /**
      * One emitter per class. Each owns its own round-robin cursor and its own
-     * fractional-emission accumulator (one per rear wheel), which is exactly
-     * what keeps the two budgets from interfering.
+     * fractional-emission accumulator (one per contact), which is exactly what
+     * keeps the budgets from interfering — spray at 950/s can no longer starve
+     * the smoke of slots, because it has none of the smoke's.
      */
-    // Four accumulators: the puff emitter runs from all four contacts once the
-    // road is wet (see `_sprayPoints`). The bank stays on the rear pair and
-    // simply never touches slots 2 and 3.
+    // Four accumulators each. Smoke and the bank stay on the rear pair and never
+    // touch slots 2 and 3; the spray runs from all four contacts (`_sprayPoints`).
     this.puffEmitter = { list: this.particles, size: POOL_SIZE, index: 0, accum: [0, 0, 0, 0] };
     this.hazeEmitter = { list: this.hazeParticles, size: HAZE_POOL_SIZE, index: 0, accum: [0, 0, 0, 0] };
+    this.sprayEmitter = { list: this.sprayParticles, size: SPRAY_POOL_SIZE, index: 0, accum: [0, 0, 0, 0] };
+    /** Live spray particles after the last step; 0 lets a dry frame skip the pool. */
+    this._sprayAlive = 0;
     this._worldDriftPhase = 0;
     /** World-noise frequency / mix of the class currently being stepped. */
     this._worldScaleMul = 1;
@@ -1275,10 +1313,6 @@ export class ModularRoadDriftSmoke {
     this._visible = true;
   }
 
-  /**
-   * How wet the road is, 0..1. Drives the smoke→spray swap; see
-   * DEFAULT_WET_SPRAY_SETTINGS for why it is a swap and not a second class.
-   */
   /** Drift smoke on its own. Spray is unaffected — see `wetSpray.enabled`. */
   setSmokeEnabled(on) {
     this.settings.enabled = !!on;
@@ -1304,41 +1338,29 @@ export class ModularRoadDriftSmoke {
     if (!anyOn) this.reset();
   }
 
+  /**
+   * How wet the road is, 0..1. Decides whether the spray can emit at all and
+   * scales the smoke down (`wetSmoke`); the two are separate classes now.
+   */
   setWetness(w) {
     this._wetness = Math.max(0, Math.min(1, w || 0));
-    // Swap the shading path. Both materials were compiled at construction, so
-    // this is a pointer assignment and not a pipeline build.
-    //
-    // A hard switch rather than a blend, because one mesh can only carry one
-    // material — the settings still dissolve across the threshold, but the
-    // SHADER cannot. Placed at 0.5 so each look owns the half of the range it
-    // is right for; in practice a road is wet or it is not, and drift smoke on
-    // a soaking road is not a case worth splitting a draw call over.
-    const wantStreak = this._wetness >= 0.5;
-    if (wantStreak !== this._streakOn) {
-      this._streakOn = wantStreak;
-      if (this.mesh) this.mesh.material = wantStreak ? this.sprayMaterial : this.material;
-    }
     // Wetness decides whether the spray source can emit at all, so the
     // visibility gate has to be re-evaluated when it changes.
     this._syncEnabled();
   }
 
   /**
-   * The puff settings to emit and step with, given the weather.
+   * The spray class's settings: the smoke's, with every key `wetSpray` names
+   * taking the spray's value. The smoke fills in only what spray has no opinion
+   * on (erosion, noise, lighting dials the streak shader never reads).
    *
-   * Returns the dry settings OBJECT ITSELF when dry — same reference, so a dry
-   * track is byte-identical to before this existed and pays nothing, not even
-   * an allocation per frame.
-   *
-   * Numbers are interpolated rather than switched so the transition is a
-   * dissolve as the rain comes in; colours cross over on the same ramp.
+   * This used to be a wetness BLEND applied to the puffs themselves, which is
+   * why it still reads like one — it is that blend, pinned at fully wet.
    */
-  _puffSettings() {
+  _spraySettings() {
     const s = this.settings;
-    const w = this._wetness ?? 0;
-    const spray = s.wetSpray;
-    if (w <= 0 || !spray) return s;
+    const spray = s.wetSpray ?? {};
+    const w = 1;
     const lerp = (a, b) => a + (b - a) * w;
     const num = (k, dflt) => lerp(s[k] ?? dflt, spray[k] ?? s[k] ?? dflt);
     // Cached and mutated rather than rebuilt: this runs every frame, and the
@@ -1385,11 +1407,12 @@ export class ModularRoadDriftSmoke {
     return out;
   }
 
-  /** Show/hide the whole effect — both the puff quads and the bank spheres. */
+  /** Show/hide the whole effect — puff quads, spray streaks and bank spheres. */
   setVisible(on) {
     this._visible = !!on;
     if (!on) {
       this.mesh.visible = false;
+      if (this.sprayMesh) this.sprayMesh.visible = false;
       if (this.bankMesh) this.bankMesh.visible = false;
     }
   }
@@ -1899,12 +1922,15 @@ export class ModularRoadDriftSmoke {
   }
 
   reset() {
-    for (const e of [this.puffEmitter, this.hazeEmitter]) {
+    for (const e of [this.puffEmitter, this.hazeEmitter, this.sprayEmitter]) {
       for (const p of e.list) p.life = 0;
       e.accum.fill(0);
     }
     this.geometry.setDrawRange(0, 0);
     this.mesh.visible = false;
+    this.sprayGeometry.setDrawRange(0, 0);
+    this.sprayMesh.visible = false;
+    this._sprayAlive = 0;
     if (this.bankMesh) {
       this.bankMesh.count = 0;
       this.bankMesh.visible = false;
@@ -2012,7 +2038,7 @@ export class ModularRoadDriftSmoke {
     // The two sources gate independently — see `wetSpray.enabled`.
     const smokeOn = s.enabled !== false;
     const sprayOn = s.wetSpray?.enabled !== false;
-    let emitSmoke =
+    const emitSmoke =
       smokeOn &&
       hasRear &&
       !inAir &&
@@ -2021,22 +2047,33 @@ export class ModularRoadDriftSmoke {
         (handbrake && speed > ENTRY_SPEED * 0.55));
     let smokeIntensity = smokeOn ? Math.max(driftIntensity, handbrake ? 0.45 : 0) : 0;
 
+    // ── WATER COOLS THE RUBBER, IT DOES NOT STOP IT ─────────────────────────
+    //
+    // A film of water keeps a sliding tyre cool and lubricated, so it makes
+    // far less smoke — but not none: a damp road still smokes under a hard
+    // drift, and a spinning tyre that has cleared its own path heats up again.
+    // So the smoke fades toward `wetSmoke` as the road soaks, instead of being
+    // replaced outright by spray the way it used to be.
+    const wet = this._wetness ?? 0;
+    smokeIntensity *= THREE.MathUtils.lerp(1, s.wetSmoke ?? 0.35, wet);
+
     // ── SPRAY NEEDS NO SLIP ───────────────────────────────────────────────
     //
     // Every term above measures how hard the tyre is sliding, because that is
     // what makes rubber smoke. Water does not care: a tyre rolling straight
     // through standing water throws just as much of it, and at a much lower
-    // speed than it takes to break traction. So on a wet road the gate becomes
-    // "moving and on the ground", and the intensity comes from speed rather
-    // than from slip — with the drift terms still able to raise it, since
-    // sliding does throw more water than rolling.
-    const wet = this._wetness ?? 0;
+    // speed than it takes to break traction. So the spray's gate is "moving and
+    // on the ground", and its intensity comes from speed rather than from slip —
+    // with the drift terms still able to raise it, since sliding does throw more
+    // water than rolling.
+    let emitSpray = false;
+    let sprayIntensity = 0;
     if (sprayOn && wet > 0 && hasRear && !inAir) {
       const entry = this.settings.wetSpray?.entrySpeed ?? 4;
       const rolling = THREE.MathUtils.smoothstep(speed, entry, entry * 3.5);
       if (rolling > 0) {
-        emitSmoke = true;
-        smokeIntensity = Math.max(smokeIntensity, rolling * wet);
+        emitSpray = true;
+        sprayIntensity = Math.max(rolling, driftIntensity) * wet;
       }
     }
 
@@ -2050,30 +2087,41 @@ export class ModularRoadDriftSmoke {
     // and it is the reason this replaced the ellipsoid rather than tuning it.
     this._shutter = (s.wetSpray?.streak ?? 1) * BASE_SHUTTER * wet;
 
-    // Four contacts in the rain, the rear pair when dry — see `_sprayPoints`.
-    const points = wet > 0 ? _sprayPoints : (hasRear ? _rearPoints : []);
+    // Smoke from the rear pair; spray from all four contacts — see `_sprayPoints`.
+    _sprayCall.points = _sprayPoints;
+    _sprayCall.emit = emitSpray;
+    _sprayCall.intensity = sprayIntensity;
     this.update(
       dt,
-      points,
+      hasRear ? _rearPoints : [],
       emitSmoke,
       smokeIntensity,
       body.vel.x,
       body.vel.z,
       camera,
+      _sprayCall,
     );
   }
 
-  update(dt, points, emit, intensity, velocityX, velocityZ, camera) {
-    // THE PUFF CLASS, WEATHERED. Identical object when dry (see _puffSettings),
-    // so nothing about a dry track changes. `this.settings` is still read below
-    // for the shader-wide uniforms, which are shared by both looks.
-    const puff = this._puffSettings();
+  /**
+   * @param {number} dt
+   * @param {THREE.Vector3[]} points   smoke contacts (the rear pair)
+   * @param {boolean} emit             smoke emission
+   * @param {number} intensity         smoke intensity, 0..1
+   * @param {number} velocityX
+   * @param {number} velocityZ
+   * @param {THREE.Camera} camera
+   * @param {{points: THREE.Vector3[], emit: boolean, intensity: number}} [spray]
+   *   the wet spray's own emission — omit for none. Its settings are `wetSpray`.
+   */
+  update(dt, points, emit, intensity, velocityX, velocityZ, camera, spray = null) {
     const s = this.settings;
-    // Backstop only. Which SOURCE may emit is decided in `updateFromVehicle`,
-    // where the distinction between "sliding on dry tarmac" and "rolling
-    // through water" actually exists; this just catches a direct caller when
-    // nothing at all is switched on.
-    if (s.enabled === false && s.wetSpray?.enabled === false) emit = false;
+    // Backstops only. Which source may emit is decided in `updateFromVehicle`,
+    // where "sliding on dry tarmac" and "rolling through water" are told apart;
+    // these just catch a direct caller with a source switched off.
+    if (s.enabled === false) emit = false;
+    const sprayEmit = !!spray?.emit && s.wetSpray?.enabled !== false;
+    const sprayCfg = this._spraySettings();
     this.uSoftDepth.value = Math.max(1e-3, s.softDepth ?? 0.9);
     this.uErodeSoft.value = Math.max(0.01, s.erodeSoft ?? 0.3);
     this.uLightAmount.value = s.sunTint ?? 1;
@@ -2114,8 +2162,15 @@ export class ModularRoadDriftSmoke {
     const haze = s.haze;
     const hazeOn = !!haze && haze.enabled !== false;
 
+    if (sprayEmit) {
+      this._emit(this.sprayEmitter, sprayCfg, sprayCfg.emitRate ?? EMIT_RATE,
+        spray.points, spray.intensity, velocityX, velocityZ, dt);
+    } else {
+      this.sprayEmitter.accum.fill(0);
+    }
+
     if (emit) {
-      this._emit(this.puffEmitter, puff, puff.emitRate ?? EMIT_RATE,
+      this._emit(this.puffEmitter, s, s.emitRate ?? EMIT_RATE,
         points, intensity, velocityX, velocityZ, dt);
       if (hazeOn) {
         // The bank stays on the REAR pair whatever the weather. It is one slow
@@ -2169,29 +2224,38 @@ export class ModularRoadDriftSmoke {
       }
     }
 
-    const alive = this._stepPool(this.particles, puff, dt, false);
+    this._target = this._puffTarget;
+    this._uploadTarget(this._puffTarget, this._stepPool(this.particles, s, dt, false));
+    // The spray steps only while it has something alive or incoming — an empty
+    // pool of 1024 is still 1024 life checks a frame on a dry track.
+    if (sprayEmit || this._sprayAlive > 0) {
+      this._target = this._sprayTarget;
+      this._sprayAlive = this._stepPool(this.sprayParticles, sprayCfg, dt, false, true);
+      this._uploadTarget(this._sprayTarget, this._sprayAlive);
+    }
+  }
+
+  /** Draw range, visibility and GPU upload for one billboard class. */
+  _uploadTarget(target, alive) {
     const vertCount = alive * VERTS_PER_PARTICLE;
-    this.geometry.setDrawRange(0, vertCount);
-    this.mesh.visible = vertCount > 0 && this._visible;
-    if (vertCount > 0) {
-      const posAttr = this.geometry.attributes.position;
-      posAttr.addUpdateRange(0, alive * FLOATS_PER_PARTICLE);
-      posAttr.needsUpdate = true;
-      const tintAttr = this.geometry.attributes.aTint;
-      tintAttr.addUpdateRange(0, alive * TINT_FLOATS_PER_PARTICLE);
-      tintAttr.needsUpdate = true;
-      const noiseAttr = this.geometry.attributes.aNoise;
-      noiseAttr.addUpdateRange(0, alive * NOISE_FLOATS_PER_PARTICLE);
-      noiseAttr.needsUpdate = true;
-      const sphereAttr = this.geometry.attributes.aSphere;
-      sphereAttr.addUpdateRange(0, alive * SPHERE_FLOATS_PER_PARTICLE);
-      sphereAttr.needsUpdate = true;
-      const classAttr = this.geometry.attributes.aClass;
-      classAttr.addUpdateRange(0, alive * CLASS_FLOATS_PER_PARTICLE);
-      classAttr.needsUpdate = true;
-      const lampAttr = this.geometry.attributes.aLamp;
-      lampAttr.addUpdateRange(0, alive * LAMP_FLOATS_PER_PARTICLE);
-      lampAttr.needsUpdate = true;
+    target.geometry.setDrawRange(0, vertCount);
+    target.mesh.visible = vertCount > 0 && this._visible;
+    if (vertCount === 0) return;
+    // Built once per target: this runs every frame for up to two classes.
+    if (!target.uploads) {
+      const a = target.geometry.attributes;
+      target.uploads = [
+        [a.position, FLOATS_PER_PARTICLE],
+        [a.aTint, TINT_FLOATS_PER_PARTICLE],
+        [a.aNoise, NOISE_FLOATS_PER_PARTICLE],
+        [a.aSphere, SPHERE_FLOATS_PER_PARTICLE],
+        [a.aClass, CLASS_FLOATS_PER_PARTICLE],
+        [a.aLamp, LAMP_FLOATS_PER_PARTICLE],
+      ];
+    }
+    for (const [attr, floats] of target.uploads) {
+      attr.addUpdateRange(0, alive * floats);
+      attr.needsUpdate = true;
     }
   }
 
@@ -2225,7 +2289,7 @@ export class ModularRoadDriftSmoke {
    * the whole reason the lingering bank costs no extra draw call and no extra
    * shader: it is the same particle, dialled slow, big and faint.
    */
-  _stepPool(list, cfg, dt, isBank) {
+  _stepPool(list, cfg, dt, isBank, isSpray = false) {
     const erodeStart = cfg.erodeStart ?? 0.06;
     const erodeEnd = cfg.erodeEnd ?? 1.25;
     const noiseDrift = cfg.noiseDrift ?? 0.12;
@@ -2241,11 +2305,11 @@ export class ModularRoadDriftSmoke {
     const opacity = cfg.opacity ?? OPACITY;
     this._worldScaleMul = cfg.worldScaleMul ?? 1;
     this._worldMixMul = cfg.worldMixMul ?? 1;
-    // ── Curl + delayed lift. Both are DRY-smoke behaviours: water spray is
-    // thrown, not convected, so they fade out with wetness (the spray's own
-    // gravity and side-throw take over through _puffSettings).
+    // ── Curl + delayed lift. Both are SMOKE behaviours: water spray is thrown,
+    // not convected, so the spray class gets none of them (its own gravity and
+    // side-throw come through _spraySettings). Smoke keeps them in the wet too.
     const root = this.settings;
-    const dry = 1 - (this._wetness ?? 0);
+    const dry = isSpray ? 0 : 1;
     const curlCfg = root.curl;
     const curlK = (curlCfg && curlCfg.enabled !== false)
       ? (curlCfg.strength ?? 0) * dt * dry * (isBank ? (curlCfg.bankMul ?? 0.35) : 1)
@@ -2529,7 +2593,9 @@ export class ModularRoadDriftSmoke {
     // Flung outboard off the tread as a low sheet. Linear random so the
     // sheet has a spread rather than a bright rope; `side` is ±1 per contact.
     if (emitter === this.puffEmitter) {
-      const dry = 1 - (this._wetness ?? 0);
+      // Smoke's launch and arch hold in the wet too; spray has its own emitter
+      // and never reaches this branch. Kept as a factor so the terms read as before.
+      const dry = 1;
       const out = (this.settings.launchOut ?? 0) * dry;
       if (out > 0) {
         const fling = out * (side || 1) * (0.25 + Math.random() * 0.75);
@@ -2733,7 +2799,9 @@ export class ModularRoadDriftSmoke {
     let cosR = Math.cos(rotation);
     let sinR = Math.sin(rotation);
     let halfLong = half;
-    if (this._streakOn) {
+    // Which class this particle belongs to: the puffs' buffers or the spray's.
+    const T = this._target ?? this._puffTarget;
+    if (T.streak) {
       const sx = this._streakX;
       const sy = this._streakY;
       const sLen = Math.hypot(sx, sy);
@@ -2768,13 +2836,13 @@ export class ModularRoadDriftSmoke {
 
     for (let i = 0; i < VERTS_PER_PARTICLE; i++) {
       const so = sphereOffset + i * 4;
-      this.spheres[so] = center.x;
-      this.spheres[so + 1] = center.y;
-      this.spheres[so + 2] = center.z;
-      this.spheres[so + 3] = radius;
+      T.spheres[so] = center.x;
+      T.spheres[so + 1] = center.y;
+      T.spheres[so + 2] = center.z;
+      T.spheres[so + 3] = radius;
       const co = classOffset + i * 2;
-      this.classes[co] = worldMix;
-      this.classes[co + 1] = worldMul;
+      T.classes[co] = worldMix;
+      T.classes[co + 1] = worldMul;
     }
 
     for (let i = 0; i < VERTS_PER_PARTICLE; i++) {
@@ -2789,26 +2857,26 @@ export class ModularRoadDriftSmoke {
       _smokeCorner.copy(center).add(_smokeHalfRight).add(_smokeHalfUp);
 
       const po = posOffset + i * 3;
-      this.positions[po] = _smokeCorner.x;
-      this.positions[po + 1] = _smokeCorner.y;
-      this.positions[po + 2] = _smokeCorner.z;
+      T.positions[po] = _smokeCorner.x;
+      T.positions[po + 1] = _smokeCorner.y;
+      T.positions[po + 2] = _smokeCorner.z;
 
       const to = tintOffset + i * 4;
-      this.tints[to] = _smokeTint.r;
-      this.tints[to + 1] = _smokeTint.g;
-      this.tints[to + 2] = _smokeTint.b;
-      this.tints[to + 3] = alpha;
+      T.tints[to] = _smokeTint.r;
+      T.tints[to + 1] = _smokeTint.g;
+      T.tints[to + 2] = _smokeTint.b;
+      T.tints[to + 3] = alpha;
 
       const no = noiseOffset + i * 4;
-      this.noise[no] = nu;
-      this.noise[no + 1] = nv;
-      this.noise[no + 2] = nScale;
-      this.noise[no + 3] = thresh;
+      T.noise[no] = nu;
+      T.noise[no + 1] = nv;
+      T.noise[no + 2] = nScale;
+      T.noise[no + 3] = thresh;
 
       const lo = lampOffset + i * 3;
-      this.lampLight[lo] = lamp[0];
-      this.lampLight[lo + 1] = lamp[1];
-      this.lampLight[lo + 2] = lamp[2];
+      T.lampLight[lo] = lamp[0];
+      T.lampLight[lo + 1] = lamp[1];
+      T.lampLight[lo + 2] = lamp[2];
     }
   }
 }

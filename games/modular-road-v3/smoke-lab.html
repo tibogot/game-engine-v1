@@ -481,6 +481,8 @@
       const _rearPts = [_rear0, _rear1];
       const _onePt = [_rear0];
       const _allPts = [_front0, _front1, _rear0, _rear1];
+      /** The spray's own emission, handed to update() each frame. */
+      const labSpray = { points: _allPts, emit: false, intensity: 0 };
 
       async function createTimingDevice() {
         if (!navigator.gpu) return null;
@@ -606,7 +608,9 @@
         };
         copyPool(from.particles, to.particles);
         copyPool(from.hazeParticles, to.hazeParticles);
-        for (const e of ["puffEmitter", "hazeEmitter"]) {
+        copyPool(from.sprayParticles, to.sprayParticles);
+        to._sprayAlive = from._sprayAlive;
+        for (const e of ["puffEmitter", "hazeEmitter", "sprayEmitter"]) {
           to[e].index = from[e].index;
           to[e].accum = [...from[e].accum];
         }
@@ -894,10 +898,12 @@
 
         smoke.setWetness(rig.wetness);
         smoke._shutter = (settings.wetSpray?.streak ?? 1) * (1 / 25) * rig.wetness;
-        const pts = rig.wetness > 0 ? _allPts : rig.wheels === "one" ? _onePt : _rearPts;
+        // Smoke from the rear contacts (or one wheel); the spray is its own class
+        // on all four, only while wet — mirroring updateFromVehicle.
+        const pts = rig.wheels === "one" ? _onePt : _rearPts;
         // The bank emits from the rear contacts whatever the weather (see
         // withLabRear in smokeLabFlipbook.js for why the lab must hand them in).
-        smoke.labRearPoints = rig.wheels === "one" ? _onePt : _rearPts;
+        smoke.labRearPoints = pts;
 
         smoke.setCarFrame(_fwd, _right);
         carRig.updateMatrixWorld(true);
@@ -911,7 +917,11 @@
           else smoke.setLamp(i, _lampPos, _headCol, headI, _fwd, 10);
         });
         const emitting = sdt > 0 && (rig.emit || burstLeft > 0);
-        smoke.update(sdt, pts, emitting, rig.intensity, car.vel.x, car.vel.z, camera);
+        // Same wet scaling the game applies: smoke fades toward `wetSmoke`.
+        const smokeI = rig.intensity * THREE.MathUtils.lerp(1, settings.wetSmoke ?? 0.35, rig.wetness);
+        labSpray.emit = emitting && rig.wetness > 0;
+        labSpray.intensity = rig.intensity * rig.wetness;
+        smoke.update(sdt, pts, emitting, smokeI, car.vel.x, car.vel.z, camera, labSpray);
       }
 
       /* -------------------------------------------------------------- camera */
@@ -1164,8 +1174,9 @@
         },
         {
           id: "wet", title: "Wet spray", ...S,
-          note: "Shown when wetness ≥ 0.5 (W).",
+          note: "Its own particle class, emitted on all four wheels while wetness > 0 (W). Smoke keeps going alongside it, faded by “smoke in the wet”.",
           controls: [
+            { path: "wetSmoke", label: "smoke in the wet", min: 0, max: 1, step: 0.01, ...S },
             ["wetSpray.emitRate", "emit rate /s", 100, 2000, 10],
             ["wetSpray.opacity", "opacity", 0.02, 0.6, 0.005],
             ["wetSpray.sizeMin", "size min", 0.01, 0.2, 0.002],

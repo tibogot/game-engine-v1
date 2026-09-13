@@ -5088,18 +5088,25 @@ export function createRoadDevPanel({ app, game, params }) {
         <div class="section-header">FX — Wet spray</div>
         <div class="section-body">
           <div class="dv-hint">
-            <b>Wet spray</b> is the same puff system wearing a different coat —
-            these values are blended in by road wetness, so a dry track never
-            sees them and none of this costs a second particle pool or an extra
-            draw. Set <b>Wetness</b> above 0 in WEATHER to see any of it.
-            On a wet road all four wheels throw, not just the rears.
-            It switches <b>independently of Drift smoke</b> above — one system,
-            two effects.
+            <b>Wet spray</b> is its own particle class, running ALONGSIDE the
+            drift smoke: all four wheels throw it whenever the car moves on a
+            wet road, no slide needed. Set <b>Wetness</b> above 0 in WEATHER to
+            see any of it — a dry track never emits or draws it. The smoke keeps
+            going too, faded by <b>Smoke in the wet</b> (water keeps a sliding
+            tyre cool, so it smokes less, not never). It switches
+            <b>independently of Drift smoke</b> above.
           </div>
           <div class="prop-row">
             <span class="prop-label">Wet spray</span>
             <div class="prop-value">
               <button class="prop-toggle checked" id="dv-spray" type="button" aria-label="Wet spray">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Smoke in the wet</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-wetsmoke" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-smk-wetsmoke-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -7686,6 +7693,8 @@ export function createRoadDevPanel({ app, game, params }) {
     const spr = smk.wetSpray;
     if (spr) {
       sToggle("dv-spray", () => spr.enabled !== false, (on) => game.setWetSprayEnabled?.(on));
+      // Smoke left on a fully soaked road, as a fraction of dry — see `wetSmoke`.
+      sSlider("dv-smk-wetsmoke", smk, "wetSmoke", (v) => Math.round(v * 100) + "%");
       sSlider("dv-spr-rate", spr, "emitRate", (v) => v.toFixed(0));
       sSlider("dv-spr-op", spr, "opacity", (v) => v.toFixed(3));
       sSlider("dv-spr-streak", spr, "streak", (v) => "x" + v.toFixed(2));

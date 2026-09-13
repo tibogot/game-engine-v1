@@ -28,6 +28,8 @@ const SHADER_MODULES = [
   "games/modular-road-v3/modularRoadRail.js",
   "games/modular-road-v3/modularRoadReflection.js",
   "games/modular-road-v3/modularRoadDriftSmoke.js",
+  "games/modular-road-v3/modularRoadDriftSmokeFlipbook.js",
+  "games/modular-road-v3/modularRoadAerial.js",
   "games/modular-road-v3/modularRoadTireMarks.js",
   "games/modular-road-v3/modularRoadSky.js",
   "games/modular-road-v3/modularRoadClouds.js",

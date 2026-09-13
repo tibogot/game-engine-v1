@@ -44,7 +44,7 @@
 import * as THREE from "three/webgpu";
 import {
   float, vec2, vec4, Fn, If, uniform, texture, uv,
-  normalize, dot, max, min, mix, pow, exp, abs, saturate, select,
+  normalize, dot, min, mix, pow, exp, abs, saturate, select,
 } from "three/tsl";
 
 export const AERIAL_DEFAULTS = {
