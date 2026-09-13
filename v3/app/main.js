@@ -20,6 +20,7 @@ import { streamPowerErode, createStreamPowerScratch } from "../terrain/streamPow
 import { initEditorShell } from "../ui/editorShell.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
+import { STAMP_GROUPS, loadStamp } from "../terrain/brushStamps.js";
 import { createPlayMode, LOD_SNAP } from "../play/playMode.js";
 import { createSpawnPointSystem } from "../play/spawnPoint.js";
 import { buildSpawnPanel } from "../ui/buildSpawnPanel.js";
@@ -1851,10 +1852,14 @@ export async function startV3App(opts = {}) {
   const btnMaskPNG    = document.getElementById("btn-mask-png");
   const maskPreviewEl = document.getElementById("mask-preview");
 
+  const maskStampSelect = document.getElementById("mask-stamp-select");
+
   function updateMaskPreview(tex) {
     const ctx = maskPreviewEl.getContext("2d");
     ctx.clearRect(0, 0, 48, 48);
-    if (tex?.image) ctx.drawImage(tex.image, 0, 0, 48, 48);
+    // Stamps are DataTextures (not drawable) and carry an 8-bit preview canvas.
+    const src = tex?.userData?.preview ?? tex?.image;
+    if (src) ctx.drawImage(src, 0, 0, 48, 48);
   }
 
   const slMaskRot  = document.getElementById("sl-mask-rot");
@@ -1876,7 +1881,34 @@ export async function startV3App(opts = {}) {
     for (const chip of maskChipsEl.querySelectorAll(".option-chip")) {
       chip.classList.toggle("active", chip.dataset.mask === name);
     }
+    // A preset chip or a loaded PNG replaces the stamp; the dropdown says so.
+    maskStampSelect.value = name.startsWith("stamp:") ? name.slice(6) : "";
   }
+
+  for (const group of STAMP_GROUPS) {
+    const og = document.createElement("optgroup");
+    og.label = group.label;
+    for (const s of group.stamps) og.append(new Option(s, s));
+    maskStampSelect.append(og);
+  }
+
+  // Latest pick wins: a slow first fetch must not overwrite a later choice.
+  let _stampPick = 0;
+  maskStampSelect.addEventListener("change", async () => {
+    const name = maskStampSelect.value;
+    const pick = ++_stampPick;
+    if (!name) {
+      setMask("soft", maskCache.soft);
+      return;
+    }
+    try {
+      const tex = await loadStamp(name);
+      if (pick === _stampPick) setMask("stamp:" + name, tex);
+    } catch (err) {
+      console.error(err);
+      if (pick === _stampPick) maskStampSelect.value = "";
+    }
+  });
 
   // Pre-generate all preset textures lazily (only on first click to save startup time).
   const maskCache = { soft: defaultMaskTex };
