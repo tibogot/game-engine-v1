@@ -201,12 +201,18 @@ const conn = KIT.initialConnector();
     return performance.now() - t;
   };
 
-  // Vertex count once, outside the timing loop.
+  // Vertex count once, outside the timing loop — both variants, so the saving
+  // is asserted on WORK AVOIDED rather than on wall-clock time.
+  let plainMirrorVerts = 0, plainMirrorPosts = 0, built = 0;
   for (const e of pieces) {
     try {
-      const b = KIT.buildPiece(e.id, new THREE.Matrix4().fromArray(e.connectorIn), e.pp, rp, gp,
-        e.edges ?? true, { mirrorRail: true });
+      const m = new THREE.Matrix4().fromArray(e.connectorIn);
+      const b = KIT.buildPiece(e.id, m, e.pp, rp, gp, e.edges ?? true, { mirrorRail: true });
       if (b.railMirrorGeometry) mirrorVerts += b.railMirrorGeometry.getAttribute("position").count;
+      const p = KIT.buildPiece(e.id, m, e.pp, rp, gp, e.edges ?? true);
+      if (p.railMirrorGeometry) plainMirrorVerts += p.railMirrorGeometry.getAttribute("position").count;
+      plainMirrorPosts += p.railMirrorPosts?.matrices?.length ?? 0;
+      built++;
     } catch {}
   }
 
@@ -219,23 +225,32 @@ const conn = KIT.initialConnector();
   console.log(`\n  rushline: mirrored rail is ${mirrorVerts} verts ≈ ${bytes(mirrorVerts)} MB`);
   console.log(`            full track build  with mirror ${withMirror.toFixed(0)} ms`);
   console.log(`                              without     ${withoutMirror.toFixed(0)} ms`);
-  /* THRESHOLD RECALIBRATED FROM 0.85 when the measurement was fixed, and the
-   * old number was the artefact rather than this one being a climbdown.
+  console.log(`            (${((1 - withoutMirror / withMirror) * 100).toFixed(0)}% cheaper, medians of 5 — informational)`);
+  /* NO WALL-CLOCK ASSERTION HERE, deliberately.
    *
-   * A single back-to-back pair gave the WITH-mirror pass all of the JIT warmup
-   * and cold-cache cost, which inflated it to 52 ms against 38 and made the
-   * saving look like 27%. Median-of-five, interleaved, puts both variants on
-   * equal footing and the honest figure is ~15%. 0.95 keeps a real assertion —
-   * the mirror build must still cost measurably more — with enough room that
-   * parallel contention cannot flip it.
+   * This used to demand `without < with * 0.85`, then `* 0.95` over interleaved
+   * medians. It still went red in `npm test` from time to time: the real saving
+   * is only ~15% of a ~40 ms build (10-21% measured, 8 copies in parallel), and
+   * one GC pause or a core stolen by a heavy physics suite during a single
+   * sample closes a 5% gap. A test that goes red without a code change teaches
+   * you to ignore red, so the timing is printed, not checked.
    *
-   * The MEMORY saving above (38k verts, 1.16 MB) is the timing-independent half
-   * of this claim, and it is the one that cannot go flaky.
+   * The claim is asserted on WORK AVOIDED instead, which is deterministic: on a
+   * real track a normal build emits no mirrored beam verts and no mirrored post
+   * poses, while the opt-in build emits all of them. If someone makes the
+   * mirror eager again, these fail every run, not one in twenty.
    */
-  check("a normal track build is measurably cheaper without it",
-    withoutMirror < withMirror * 0.95,
-    `${withoutMirror.toFixed(0)} vs ${withMirror.toFixed(0)} ms `
-    + `(${((1 - withoutMirror / withMirror) * 100).toFixed(0)}% cheaper, medians of 5)`);
+  // Non-road entries (checkpoint markers) are not in the catalog and throw by
+  // design; every CATALOG piece must build, or the zero-verts check below is
+  // vacuous.
+  const catalogIds = new Set(KIT.PIECE_CATALOG.map((d) => d.id));
+  const roadPieces = pieces.filter((e) => catalogIds.has(e.id)).length;
+  check("every rushline road piece actually built", built > 0 && built === roadPieces,
+    `${built} of ${roadPieces} (${pieces.length - roadPieces} non-road entries skipped)`);
+  check("opt-in track build produces the mirrored rail", mirrorVerts > 0, `${mirrorVerts} verts`);
+  check("a normal track build does none of the mirror work",
+    plainMirrorVerts === 0 && plainMirrorPosts === 0,
+    `${plainMirrorVerts} verts, ${plainMirrorPosts} post poses`);
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nall good");
