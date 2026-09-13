@@ -279,6 +279,7 @@
       import {
         ModularRoadDriftSmoke,
         DEFAULT_DRIFT_SMOKE_SETTINGS,
+        AAA_LIGHT_SMOKE,
       } from "./modularRoadDriftSmoke.js";
       // Lab-only: the same system with the puff shader swapped for a baked
       // flipbook atlas. The game never imports this.
@@ -365,21 +366,8 @@
         },
       };
 
-      /**
-       * AAA LIGHT — a candidate, not shipped. The AAA shape, with the two things
-       * that read as "too dark, too dense" dialled back. Applied on top of the
-       * game defaults. Starting values, meant to be tuned by eye:
-       *   darker  ← absorb (self-shadow) + ambient + the fresh colour
-       *   denser  ← opacity + opticalK (solid cores) + emit rate
-       */
-      const AAA_LIGHT = {
-        absorb: 1.4,          // 2.2
-        ambient: 0.6,         // 0.42
-        colorHot: "#d2d3d6",  // #b9babe
-        opacity: 0.38,        // 0.55
-        opticalK: 1.2,        // 1.8
-        emitRate: 170,        // 220
-      };
+      /** AAA light: shared with the game's dev panel (see modularRoadDriftSmoke.js). */
+      const AAA_LIGHT = AAA_LIGHT_SMOKE;
 
       /**
        * Time of day. Each drives the scene light, the sky gradient and the

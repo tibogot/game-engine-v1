@@ -150,10 +150,16 @@ import { GapPreview } from "./gapPreview.js";
 import { RunTracker, formatRunTime } from "./modularRoadRun.js";
 import { GhostTrack, createGhostMesh } from "./modularRoadGhost.js";
 import { ModularRoadTireMarks } from "./modularRoadTireMarks.js";
-import { ModularRoadDriftSmoke, DEFAULT_DRIFT_SMOKE_SETTINGS, setDriftSmokeAerial } from "./modularRoadDriftSmoke.js";
+import {
+  ModularRoadDriftSmoke,
+  DEFAULT_DRIFT_SMOKE_SETTINGS,
+  AAA_LIGHT_SMOKE,
+  setDriftSmokeAerial,
+} from "./modularRoadDriftSmoke.js";
 import {
   FlipbookDriftSmoke,
   DEFAULT_FLIPBOOK_SETTINGS,
+  SMOKE_ATLASES,
   loadSmokeAtlases,
   copyDriftSmokeState,
 } from "./modularRoadDriftSmokeFlipbook.js";
@@ -5713,8 +5719,42 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * look nobody picks never costs a pipeline. `driftSmoke` is re-pointed on a
    * switch; everything below reads it at call time.
    */
-  const smokeSettings = { ...DEFAULT_DRIFT_SMOKE_SETTINGS };
-  const smokeFlipSettings = { ...DEFAULT_FLIPBOOK_SETTINGS };
+  // DEEP copies. This was `{ ...DEFAULT }`, which shared every nested block
+  // (haze, curl, arch, lamps, wetSpray) with the module's default object — so a
+  // bank slider edited the DEFAULTS, and nothing could ever be reset or diffed.
+  const smokeSettings = structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS);
+  const smokeFlipSettings = structuredClone(DEFAULT_FLIPBOOK_SETTINGS);
+  /** Merge `src` into `dst` IN PLACE — panel controls hold references into both objects. */
+  const deepAssign = (dst, src) => {
+    for (const k of Object.keys(src)) {
+      const v = src[k];
+      if (v && typeof v === "object" && !Array.isArray(v) && dst[k] && typeof dst[k] === "object") deepAssign(dst[k], v);
+      else dst[k] = v;
+    }
+    return dst;
+  };
+  /** Only what differs from `base` — a tuned look, ready to paste into the defaults. */
+  const diffFrom = (cur, base) => {
+    const out = {};
+    for (const k of Object.keys(cur)) {
+      const v = cur[k];
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const d = diffFrom(v, base?.[k] ?? {});
+        if (Object.keys(d).length) out[k] = d;
+      } else if (JSON.stringify(v) !== JSON.stringify(base?.[k])) {
+        out[k] = v;
+      }
+    }
+    return out;
+  };
+  /** "defaults" = the shipped look; "aaaLight" = defaults + AAA_LIGHT_SMOKE. Flipbook dials reset too. */
+  function applyDriftSmokePreset(name) {
+    deepAssign(smokeSettings, structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS));
+    if (name === "aaaLight") deepAssign(smokeSettings, structuredClone(AAA_LIGHT_SMOKE));
+    deepAssign(smokeFlipSettings, structuredClone(DEFAULT_FLIPBOOK_SETTINGS));
+    // `enabled` flags just came back to their defaults; re-derive visibility.
+    driftSmoke._syncEnabled?.();
+  }
   const smokeAtlases = loadSmokeAtlases().textures;
   const smokeLooks = {
     flipbook: new FlipbookDriftSmoke(scene, smokeSettings, smokeAtlases, smokeFlipSettings),
@@ -9718,6 +9758,13 @@ ${e.message}`);
       getDriftSmokeLook: () => smokeLook,
       setDriftSmokeLook,
       getDriftSmokeFlipSettings: () => smokeFlipSettings,
+      applyDriftSmokePreset,
+      getDriftSmokeAtlases: () => SMOKE_ATLASES,
+      /** Tuned values vs the shipped defaults, for pasting back into the code. */
+      getDriftSmokeDiff: () => ({
+        settings: diffFrom(smokeSettings, DEFAULT_DRIFT_SMOKE_SETTINGS),
+        flipbook: diffFrom(smokeFlipSettings, DEFAULT_FLIPBOOK_SETTINGS),
+      }),
       cameraParams: chase.params,
       // The BUILDER itself, for the panel controls that edit geometry rather
       // than a uniform — the flip ramp's shape has to rewrite placed pieces

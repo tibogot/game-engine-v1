@@ -80,6 +80,21 @@ import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 const _sceneDepthTex = /*#__PURE__*/ viewportDepthTexture();
 
 /**
+ * AAA LIGHT — a candidate preset, applied ON TOP of DEFAULT_DRIFT_SMOKE_SETTINGS.
+ * The AAA shape with the two things that read as "too dark, too dense" dialled
+ * back: darkness is self-shadow + ambient + the fresh colour, density is opacity +
+ * optical depth + emit rate. Shared by smoke-lab.html and the game's dev panel.
+ */
+export const AAA_LIGHT_SMOKE = {
+  absorb: 1.4,          // 2.2
+  ambient: 0.6,         // 0.42
+  colorHot: "#d2d3d6",  // #b9babe
+  opacity: 0.38,        // 0.55
+  opticalK: 1.2,        // 1.8
+  emitRate: 170,        // 220
+};
+
+/**
  * AERIAL PERSPECTIVE CANCEL. The game's aerial composite (modularRoadAerial.js)
  * runs AFTER the scene — smoke included — and hazes each pixel by the depth
  * buffer, which smoke does not write. Over tarmac a puff was hazed as if it were

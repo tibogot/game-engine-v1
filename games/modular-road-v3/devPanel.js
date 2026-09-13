@@ -4519,45 +4519,31 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <!-- Flipbook = baked atlases (smoke-lab.html); Procedural = the old
-               volumetric shader. Live swap, same settings, plume carried over. -->
+               volumetric shader. Live swap, same settings, plume carried over.
+               Rows that only one look reads hide in the other (data-smk-flip /
+               data-smk-proc), so no slider sits there doing nothing. -->
           <div class="prop-row">
             <span class="prop-label">Smoke look</span>
             <div class="prop-value">
               <button class="action-btn" id="dv-smk-look" type="button">Flipbook</button>
             </div>
           </div>
-          <div class="prop-row" data-smk-flip>
-            <span class="prop-label">Flipbook alpha</span>
+          <!-- Presets write IN PLACE, so every control below stays bound. Both
+               also reset the flipbook dials. -->
+          <div class="prop-row">
+            <span class="prop-label">Preset</span>
             <div class="prop-value">
-              <input type="range" id="dv-fb-alpha" min="0.2" max="4" step="0.05" />
-              <span class="prop-num" id="dv-fb-alpha-v"></span>
+              <button class="action-btn" id="dv-smk-preset-def" type="button">Game defaults</button>
+              <button class="action-btn" id="dv-smk-preset-light" type="button">AAA light</button>
             </div>
           </div>
-          <div class="prop-row" data-smk-flip>
-            <span class="prop-label">Flipbook brightness</span>
+          <!-- Nothing here is saved anywhere: a look you like has to get back
+               into the defaults by hand or it dies with the tab. This copies only
+               what differs from them. -->
+          <div class="prop-row">
+            <span class="prop-label">Save look</span>
             <div class="prop-value">
-              <input type="range" id="dv-fb-bright" min="0.5" max="4" step="0.05" />
-              <span class="prop-num" id="dv-fb-bright-v"></span>
-            </div>
-          </div>
-          <div class="prop-row" data-smk-flip>
-            <span class="prop-label">Bank look</span>
-            <div class="prop-value">
-              <button class="action-btn" id="dv-fb-bank" type="button">Flipbook</button>
-            </div>
-          </div>
-          <div class="prop-row" data-smk-flip>
-            <span class="prop-label">Bank flipbook alpha</span>
-            <div class="prop-value">
-              <input type="range" id="dv-fb-balpha" min="0.5" max="25" step="0.1" />
-              <span class="prop-num" id="dv-fb-balpha-v"></span>
-            </div>
-          </div>
-          <div class="prop-row" data-smk-flip>
-            <span class="prop-label">Bank brightness</span>
-            <div class="prop-value">
-              <input type="range" id="dv-fb-bbright" min="0.5" max="6" step="0.05" />
-              <span class="prop-num" id="dv-fb-bbright-v"></span>
+              <button class="action-btn" id="dv-smk-copy" type="button">Copy smoke values</button>
             </div>
           </div>
           <div class="prop-row">
@@ -4582,10 +4568,42 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Puff size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-size" min="0.15" max="1.6" step="0.01" />
+              <span class="prop-num" id="dv-smk-size-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Smoke growth</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-grow" min="0.5" max="7" step="0.1" />
               <span class="prop-num" id="dv-smk-grow-v"></span>
+            </div>
+          </div>
+          <!-- The smoke's base colour: fresh at the tyre, thinned as it drifts.
+               White smoke looks grey from SELF-SHADOW, not from these — but these
+               are the first dial when the whole plume reads dirty. -->
+          <div class="prop-row">
+            <span class="prop-label">Colour fresh</span>
+            <div class="prop-value"><input type="color" id="dv-smk-chot" /></div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Colour thinned</span>
+            <div class="prop-value"><input type="color" id="dv-smk-ccool" /></div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rise</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-rise" min="0" max="3" step="0.02" />
+              <span class="prop-num" id="dv-smk-rise-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Spread</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-spread" min="0" max="2" step="0.02" />
+              <span class="prop-num" id="dv-smk-spread-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -4600,6 +4618,66 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-smk-buoy" min="0" max="3" step="0.05" />
               <span class="prop-num" id="dv-smk-buoy-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- The puffs' flipbook, flipbook look only (the whole section hides in
+           procedural). Self-shadow is the main "too dark" dial: the atlas has its
+           own shadow baked in, so the lighting's self-shadow is scaled by it. -->
+      <div class="inspector-section" data-smk-flip>
+        <div class="section-header">FX — Smoke flipbook</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Atlas</span>
+            <div class="prop-value">
+              <select id="dv-fb-atlas" class="dv-led-input"></select>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Playback fps</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-fps" min="1" max="60" step="1" />
+              <span class="prop-num" id="dv-fb-fps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Flipbook alpha</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-alpha" min="0.2" max="4" step="0.05" />
+              <span class="prop-num" id="dv-fb-alpha-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Flipbook brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-bright" min="0.5" max="4" step="0.05" />
+              <span class="prop-num" id="dv-fb-bright-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Self-shadow ×</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-shadow" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-fb-shadow-v"></span>
+            </div>
+          </div>
+          <!-- Eats each puff away from its thin edges as it ages (the procedural
+               look's erosion, applied to the texture). Dissolve / Wispiness /
+               Erode start in Smoke shape shape the curve. 0 = pure fade. -->
+          <div class="prop-row">
+            <span class="prop-label">Dissolve over life</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-erode" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-fb-erode-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sprite scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-scale" min="0.5" max="1" step="0.01" />
+              <span class="prop-num" id="dv-fb-scale-v"></span>
             </div>
           </div>
         </div>
@@ -4642,14 +4720,14 @@ export function createRoadDevPanel({ app, game, params }) {
       <div class="inspector-section">
         <div class="section-header">FX — Smoke shape</div>
         <div class="section-body">
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Puff detail</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-noise" min="0.3" max="3" step="0.05" />
               <span class="prop-num" id="dv-smk-noise-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Churn</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-drift" min="0" max="0.6" step="0.01" />
@@ -4677,63 +4755,56 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-smk-soft-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Fuse (world noise)</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-fuse" min="0" max="1" step="0.02" />
               <span class="prop-num" id="dv-smk-fuse-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Fuse scale</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-fscale" min="0.1" max="2" step="0.02" />
               <span class="prop-num" id="dv-smk-fscale-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Lumpy silhouette</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-sil" min="0" max="1" step="0.01" />
               <span class="prop-num" id="dv-smk-sil-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Silhouette bite</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-bite" min="0" max="0.8" step="0.01" />
               <span class="prop-num" id="dv-smk-bite-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Volumetric detail</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-vol" min="0" max="1" step="0.01" />
               <span class="prop-num" id="dv-smk-vol-v"></span>
             </div>
           </div>
-          <div class="prop-row">
-            <span class="prop-label">Puff size</span>
-            <div class="prop-value">
-              <input type="range" id="dv-smk-size" min="0.15" max="1.6" step="0.01" />
-              <span class="prop-num" id="dv-smk-size-v"></span>
-            </div>
-          </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Edge carve</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-det" min="0" max="1" step="0.01" />
               <span class="prop-num" id="dv-smk-det-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Carve scale</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-dets" min="1" max="8" step="0.1" />
               <span class="prop-num" id="dv-smk-dets-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Optical depth</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-opt" min="0" max="6" step="0.05" />
@@ -4747,13 +4818,13 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-smk-erst-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Shape A/B</span>
             <div class="prop-value">
               <button class="action-btn" id="dv-smk-shape-ab" type="button">Stock shape</button>
             </div>
           </div>
-          <p class="prop-hint">
+          <p class="prop-hint" data-smk-proc>
             <b>Lumpy silhouette</b> erodes against the RADIUS instead of the
             ray-sphere chord. The chord is vertical at the rim, so it pinned
             every contour within about 1% of the edge and a fresh puff could
@@ -4792,14 +4863,14 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-smk-curlsc-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Churn (boil)</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-churn" min="0" max="1" step="0.01" />
               <span class="prop-num" id="dv-smk-churn-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row" data-smk-proc>
             <span class="prop-label">Churn rate</span>
             <div class="prop-value">
               <input type="range" id="dv-smk-churnr" min="0" max="2" step="0.02" />
@@ -4951,7 +5022,65 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-smk-hhold-v"></span>
             </div>
           </div>
-
+          <!-- Where the bank HANGS: how fast it climbs, and how wide it is laid
+               down behind the wheels. -->
+          <div class="prop-row">
+            <span class="prop-label">Bank rise</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-hrise" min="0" max="1.5" step="0.02" />
+              <span class="prop-num" id="dv-smk-hrise-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bank spread</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smk-hspread" min="0" max="5" step="0.05" />
+              <span class="prop-num" id="dv-smk-hspread-v"></span>
+            </div>
+          </div>
+          <!-- Flipbook look only. The sprite is painted on the bank's spheres and
+               turns to plain haze once the camera is inside one. Bank opacity
+               above is tuned for FILLED spheres, hence the big alpha multiplier. -->
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Bank look</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-fb-bank" type="button">Flipbook</button>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip data-smk-bankflip>
+            <span class="prop-label">Bank atlas</span>
+            <div class="prop-value">
+              <select id="dv-fb-batlas" class="dv-led-input"></select>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip data-smk-bankflip>
+            <span class="prop-label">Bank playback fps</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-bfps" min="1" max="30" step="1" />
+              <span class="prop-num" id="dv-fb-bfps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip data-smk-bankflip>
+            <span class="prop-label">Bank flipbook alpha</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-balpha" min="0.5" max="25" step="0.1" />
+              <span class="prop-num" id="dv-fb-balpha-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip data-smk-bankflip>
+            <span class="prop-label">Bank brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-bbright" min="0.5" max="6" step="0.05" />
+              <span class="prop-num" id="dv-fb-bbright-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip data-smk-bankflip>
+            <span class="prop-label">Haze when inside</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-binside" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-fb-binside-v"></span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -7237,33 +7366,122 @@ export function createRoadDevPanel({ app, game, params }) {
   };
   skidBtn?.addEventListener("click", () => { game.toggleSkidStyle?.(); syncSkidBtn(); });
   syncSkidBtn();
-  toggle("dv-smoke", true, (on) => game.setDriftSmokeEnabled(on));
-  // Smoke look A/B. The flipbook rows only mean anything in the flipbook look,
-  // so they hide in procedural rather than sitting there doing nothing.
+  /*
+   * ── DRIFT SMOKE ───────────────────────────────────────────────────────────
+   *
+   * Every smoke control registers a re-sync here, because the presets rewrite
+   * the settings objects behind the panel's back (in place, so the bindings
+   * themselves stay valid — only the displayed values go stale).
+   */
+  const smokeSyncs = [];
+  const sSlider = (...args) => {
+    const h = slider(...args);
+    if (h) smokeSyncs.push(h.sync);
+    return h;
+  };
+  const sToggle = (id, get, onChange) => {
+    const t = toggle(id, get(), onChange);
+    smokeSyncs.push(() => t.set(get()));
+    return t;
+  };
+  /** A <select> over SMOKE atlas keys, bound to obj[key]. */
+  const sAtlasSelect = (id, obj, key) => {
+    const el = $(`#${id}`);
+    if (!el || !obj) return;
+    const atlases = game.getDriftSmokeAtlases?.() ?? {};
+    el.innerHTML = "";
+    for (const [k, a] of Object.entries(atlases)) {
+      const o = document.createElement("option");
+      o.value = k;
+      o.textContent = a.label ?? k;
+      el.append(o);
+    }
+    const sync = () => { el.value = obj[key]; };
+    sync();
+    el.addEventListener("change", () => { obj[key] = el.value; });
+    smokeSyncs.push(sync);
+  };
+  /** A colour input over a "#rrggbb" string setting. */
+  const sColor = (id, obj, key) => {
+    const el = $(`#${id}`);
+    if (!el || !obj) return;
+    const sync = () => {
+      const v = obj[key];
+      el.value = typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v : "#ffffff";
+    };
+    sync();
+    el.addEventListener("input", () => { obj[key] = el.value; });
+    smokeSyncs.push(sync);
+  };
+
+  const smkSettingsRef = game.getDriftSmokeSettings?.();
+  sToggle("dv-smoke", () => smkSettingsRef?.enabled !== false, (on) => game.setDriftSmokeEnabled(on));
+
+  // Look A/B. Rows only one look reads hide in the other — data-smk-flip /
+  // data-smk-proc — and the flipbook bank rows also hide on the sphere bank.
   const smkLookBtn = $("#dv-smk-look");
   const fbBankBtn = $("#dv-fb-bank");
   const fb = game.getDriftSmokeFlipSettings?.();
   const syncSmokeLook = () => {
-    const look = game.getDriftSmokeLook?.() ?? "procedural";
-    if (smkLookBtn) smkLookBtn.textContent = look === "flipbook" ? "Flipbook" : "Procedural";
-    for (const row of root.querySelectorAll("[data-smk-flip]")) row.style.display = look === "flipbook" ? "" : "none";
+    const flipLook = (game.getDriftSmokeLook?.() ?? "procedural") === "flipbook";
+    const bankFlip = flipLook && fb?.bankStyle === "flipbook";
+    if (smkLookBtn) smkLookBtn.textContent = flipLook ? "Flipbook" : "Procedural";
     if (fbBankBtn && fb) fbBankBtn.textContent = fb.bankStyle === "flipbook" ? "Flipbook" : "Sphere";
+    for (const el of root.querySelectorAll("[data-smk-flip]")) el.style.display = flipLook ? "" : "none";
+    for (const el of root.querySelectorAll("[data-smk-proc]")) el.style.display = flipLook ? "none" : "";
+    for (const el of root.querySelectorAll("[data-smk-bankflip]")) el.style.display = bankFlip ? "" : "none";
   };
+  smokeSyncs.push(syncSmokeLook);
   smkLookBtn?.addEventListener("click", () => {
     game.setDriftSmokeLook?.(game.getDriftSmokeLook?.() === "flipbook" ? "procedural" : "flipbook");
     syncSmokeLook();
   });
   if (fb) {
-    slider("dv-fb-alpha", fb, "alphaMul", (v) => "x" + v.toFixed(2));
-    slider("dv-fb-bright", fb, "bakedGain", (v) => "x" + v.toFixed(2));
-    slider("dv-fb-balpha", fb, "bankAlpha", (v) => "x" + v.toFixed(1));
-    slider("dv-fb-bbright", fb, "bankBright", (v) => "x" + v.toFixed(2));
+    // Puffs.
+    sAtlasSelect("dv-fb-atlas", fb, "puffAtlas");
+    sSlider("dv-fb-fps", fb, "fps", (v) => v.toFixed(0));
+    sSlider("dv-fb-alpha", fb, "alphaMul", (v) => "x" + v.toFixed(2));
+    sSlider("dv-fb-bright", fb, "bakedGain", (v) => "x" + v.toFixed(2));
+    sSlider("dv-fb-shadow", fb, "selfShadow", (v) => "x" + v.toFixed(2));
+    sSlider("dv-fb-erode", fb, "erode");
+    sSlider("dv-fb-scale", fb, "scale");
+    // Bank.
+    sAtlasSelect("dv-fb-batlas", fb, "bankAtlas");
+    sSlider("dv-fb-bfps", fb, "bankFps", (v) => v.toFixed(0));
+    sSlider("dv-fb-balpha", fb, "bankAlpha", (v) => "x" + v.toFixed(1));
+    sSlider("dv-fb-bbright", fb, "bankBright", (v) => "x" + v.toFixed(2));
+    sSlider("dv-fb-binside", fb, "bankInsideFog");
     fbBankBtn?.addEventListener("click", () => {
       fb.bankStyle = fb.bankStyle === "flipbook" ? "sphere" : "flipbook";
       syncSmokeLook();
     });
   }
   syncSmokeLook();
+
+  const refreshSmokePanel = () => smokeSyncs.forEach((s) => s());
+  for (const [id, preset, label] of [
+    ["dv-smk-preset-def", "defaults", "Game defaults"],
+    ["dv-smk-preset-light", "aaaLight", "AAA light"],
+  ]) {
+    $(`#${id}`)?.addEventListener("click", () => {
+      game.applyDriftSmokePreset?.(preset);
+      refreshSmokePanel();
+      console.info(`[ModularRoad-v3] drift smoke preset: ${label}`);
+    });
+  }
+  const copyBtn = $("#dv-smk-copy");
+  copyBtn?.addEventListener("click", async () => {
+    const diff = game.getDriftSmokeDiff?.();
+    if (!diff) return;
+    const text = JSON.stringify(diff, null, 2);
+    // Always logged too: the clipboard can be refused (no focus, permissions).
+    console.info("[ModularRoad-v3] drift smoke — changed from the defaults:\n" + text);
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch { /* logged above */ }
+    const was = copyBtn.textContent;
+    copyBtn.textContent = ok ? "Copied ✓" : "Logged to console";
+    setTimeout(() => { copyBtn.textContent = was; }, 1400);
+  });
   // Smoke look.  is driven directly and lifeMin follows at 45% of it —
   // two independent life sliders is a fiddly way to say "longer plume".
 
@@ -7362,37 +7580,41 @@ export function createRoadDevPanel({ app, game, params }) {
   }
   const smk = game.getDriftSmokeSettings?.();
   if (smk) {
-    slider("dv-smk-rate", smk, "emitRate", (v) => v.toFixed(0));
-    slider("dv-smk-op", smk, "opacity");
-    slider("dv-smk-life", smk, "lifeMax", (v) => v.toFixed(2) + "s",
+    sSlider("dv-smk-rate", smk, "emitRate", (v) => v.toFixed(0));
+    sSlider("dv-smk-op", smk, "opacity");
+    sSlider("dv-smk-life", smk, "lifeMax", (v) => v.toFixed(2) + "s",
       (v) => { smk.lifeMin = v * 0.45; });
-    slider("dv-smk-grow", smk, "sizeGrowth");
-    slider("dv-smk-turb", smk, "turbulence");
-    slider("dv-smk-buoy", smk, "buoyancy");
-    slider("dv-smk-sun", smk, "sunTint");
-    slider("dv-smk-amb", smk, "ambient");
-    slider("dv-smk-scat", smk, "scatter");
-    slider("dv-smk-abs", smk, "absorb");
-    slider("dv-smk-noise", smk, "noiseScale");
-    slider("dv-smk-drift", smk, "noiseDrift");
-    slider("dv-smk-erode", smk, "erodeEnd");
-    slider("dv-smk-esoft", smk, "erodeSoft");
-    slider("dv-smk-soft", smk, "softDepth", (v) => v.toFixed(2) + "m");
-    slider("dv-smk-fuse", smk, "worldNoiseMix");
-    slider("dv-smk-fscale", smk, "worldNoiseScale");
+    sSlider("dv-smk-grow", smk, "sizeGrowth");
+    sColor("dv-smk-chot", smk, "colorHot");
+    sColor("dv-smk-ccool", smk, "colorCool");
+    sSlider("dv-smk-rise", smk, "rise");
+    sSlider("dv-smk-spread", smk, "spread");
+    sSlider("dv-smk-turb", smk, "turbulence");
+    sSlider("dv-smk-buoy", smk, "buoyancy");
+    sSlider("dv-smk-sun", smk, "sunTint");
+    sSlider("dv-smk-amb", smk, "ambient");
+    sSlider("dv-smk-scat", smk, "scatter");
+    sSlider("dv-smk-abs", smk, "absorb");
+    sSlider("dv-smk-noise", smk, "noiseScale");
+    sSlider("dv-smk-drift", smk, "noiseDrift");
+    sSlider("dv-smk-erode", smk, "erodeEnd");
+    sSlider("dv-smk-esoft", smk, "erodeSoft");
+    sSlider("dv-smk-soft", smk, "softDepth", (v) => v.toFixed(2) + "m");
+    sSlider("dv-smk-fuse", smk, "worldNoiseMix");
+    sSlider("dv-smk-fscale", smk, "worldNoiseScale");
 
     // ── SHAPE ────────────────────────────────────────────────────────────────
-    slider("dv-smk-sil", smk, "silhouette");
-    slider("dv-smk-bite", smk, "silhouetteBite");
-    slider("dv-smk-vol", smk, "localNoise");
+    sSlider("dv-smk-sil", smk, "silhouette");
+    sSlider("dv-smk-bite", smk, "silhouetteBite");
+    sSlider("dv-smk-vol", smk, "localNoise");
     // One size dial, with the minimum trailing the maximum — same idea as the
     // life and bank-size sliders above. The ratio is the shipped one.
-    slider("dv-smk-size", smk, "sizeMax", (v) => v.toFixed(2) + "m",
+    sSlider("dv-smk-size", smk, "sizeMax", (v) => v.toFixed(2) + "m",
       (v) => { smk.sizeMin = v * 0.49; });
-    slider("dv-smk-det", smk, "detail");
-    slider("dv-smk-dets", smk, "detailScale", (v) => v.toFixed(1));
-    slider("dv-smk-opt", smk, "opticalK");
-    slider("dv-smk-erst", smk, "erodeStart");
+    sSlider("dv-smk-det", smk, "detail");
+    sSlider("dv-smk-dets", smk, "detailScale", (v) => v.toFixed(1));
+    sSlider("dv-smk-opt", smk, "opticalK");
+    sSlider("dv-smk-erst", smk, "erodeStart");
     // A/B the whole shape pass in one click. The "on" values are read back
     // from the settings the first time it is used, so a tuned look survives
     // the round trip instead of snapping to whatever was hardcoded here.
@@ -7415,42 +7637,44 @@ export function createRoadDevPanel({ app, game, params }) {
 
     // ── MOTION ───────────────────────────────────────────────────────────────
     if (smk.curl) {
-      toggle("dv-smk-curl", smk.curl.enabled !== false, (on) => { smk.curl.enabled = on; });
-      slider("dv-smk-curls", smk.curl, "strength", (v) => v.toFixed(1));
-      slider("dv-smk-curlsc", smk.curl, "scale");
+      sToggle("dv-smk-curl", () => smk.curl.enabled !== false, (on) => { smk.curl.enabled = on; });
+      sSlider("dv-smk-curls", smk.curl, "strength", (v) => v.toFixed(1));
+      sSlider("dv-smk-curlsc", smk.curl, "scale");
     }
-    slider("dv-smk-churn", smk, "churn");
-    slider("dv-smk-churnr", smk, "churnRate");
-    slider("dv-smk-lout", smk, "launchOut");
-    slider("dv-smk-lup", smk, "launchUpMul");
-    slider("dv-smk-lift", smk, "lift");
-    slider("dv-smk-liftd", smk, "liftDelay", (v) => v.toFixed(2) + "s");
+    sSlider("dv-smk-churn", smk, "churn");
+    sSlider("dv-smk-churnr", smk, "churnRate");
+    sSlider("dv-smk-lout", smk, "launchOut");
+    sSlider("dv-smk-lup", smk, "launchUpMul");
+    sSlider("dv-smk-lift", smk, "lift");
+    sSlider("dv-smk-liftd", smk, "liftDelay", (v) => v.toFixed(2) + "s");
 
     // ── WHEEL ARCH + LAMPS ───────────────────────────────────────────────────
     if (smk.arch) {
-      toggle("dv-smk-arch", smk.arch.enabled !== false, (on) => { smk.arch.enabled = on; });
-      slider("dv-smk-arcsw", smk.arch, "sweep", (v) => v.toFixed(0) + "\u00b0");
-      slider("dv-smk-arcthr", smk.arch, "throw");
-      slider("dv-smk-arcvor", smk.arch, "vortex", (v) => v.toFixed(1));
-      slider("dv-smk-arcvt", smk.arch, "vortexTime", (v) => v.toFixed(2) + "s");
+      sToggle("dv-smk-arch", () => smk.arch.enabled !== false, (on) => { smk.arch.enabled = on; });
+      sSlider("dv-smk-arcsw", smk.arch, "sweep", (v) => v.toFixed(0) + "\u00b0");
+      sSlider("dv-smk-arcthr", smk.arch, "throw");
+      sSlider("dv-smk-arcvor", smk.arch, "vortex", (v) => v.toFixed(1));
+      sSlider("dv-smk-arcvt", smk.arch, "vortexTime", (v) => v.toFixed(2) + "s");
     }
     if (smk.lamps) {
-      toggle("dv-smk-lamp", smk.lamps.enabled !== false, (on) => { smk.lamps.enabled = on; });
-      slider("dv-smk-lamps", smk.lamps, "strength");
-      slider("dv-smk-lampr", smk.lamps, "radius", (v) => v.toFixed(2) + "m");
+      sToggle("dv-smk-lamp", () => smk.lamps.enabled !== false, (on) => { smk.lamps.enabled = on; });
+      sSlider("dv-smk-lamps", smk.lamps, "strength");
+      sSlider("dv-smk-lampr", smk.lamps, "radius", (v) => v.toFixed(2) + "m");
     }
     if (smk.haze) {
       const hz = smk.haze;
-      toggle("dv-smk-haze", hz.enabled !== false, (on) => { hz.enabled = on; });
-      slider("dv-smk-hrate", hz, "emitRate", (v) => v.toFixed(0));
-      slider("dv-smk-hop", hz, "opacity", (v) => v.toFixed(3));
+      sToggle("dv-smk-haze", () => hz.enabled !== false, (on) => { hz.enabled = on; });
+      sSlider("dv-smk-hrate", hz, "emitRate", (v) => v.toFixed(0));
+      sSlider("dv-smk-hop", hz, "opacity", (v) => v.toFixed(3));
       // lifeMin trails lifeMax, same as the puff life slider above.
-      slider("dv-smk-hlife", hz, "lifeMax", (v) => v.toFixed(1) + "s",
+      sSlider("dv-smk-hlife", hz, "lifeMax", (v) => v.toFixed(1) + "s",
         (v) => { hz.lifeMin = v * 0.5; });
-      slider("dv-smk-hsize", hz, "sizeMax", (v) => v.toFixed(1) + "m",
+      sSlider("dv-smk-hsize", hz, "sizeMax", (v) => v.toFixed(1) + "m",
         (v) => { hz.sizeMin = v * 0.59; });
-      slider("dv-smk-hgrow", hz, "sizeGrowth", (v) => "x" + v.toFixed(1));
-      slider("dv-smk-hhold", hz, "fadeOutStart");
+      sSlider("dv-smk-hgrow", hz, "sizeGrowth", (v) => "x" + v.toFixed(1));
+      sSlider("dv-smk-hhold", hz, "fadeOutStart");
+      sSlider("dv-smk-hrise", hz, "rise");
+      sSlider("dv-smk-hspread", hz, "spread");
     }
 
     // ── WET SPRAY ───────────────────────────────────────────────────────────
@@ -7461,21 +7685,21 @@ export function createRoadDevPanel({ app, game, params }) {
     // markup points at the WEATHER wetness slider.
     const spr = smk.wetSpray;
     if (spr) {
-      toggle("dv-spray", spr.enabled !== false, (on) => game.setWetSprayEnabled?.(on));
-      slider("dv-spr-rate", spr, "emitRate", (v) => v.toFixed(0));
-      slider("dv-spr-op", spr, "opacity", (v) => v.toFixed(3));
-      slider("dv-spr-streak", spr, "streak", (v) => "x" + v.toFixed(2));
+      sToggle("dv-spray", () => spr.enabled !== false, (on) => game.setWetSprayEnabled?.(on));
+      sSlider("dv-spr-rate", spr, "emitRate", (v) => v.toFixed(0));
+      sSlider("dv-spr-op", spr, "opacity", (v) => v.toFixed(3));
+      sSlider("dv-spr-streak", spr, "streak", (v) => "x" + v.toFixed(2));
       // Width is the ACROSS radius now that length comes from `stretch`, so the
       // min trails the max the same way the puff life slider does.
-      slider("dv-spr-size", spr, "sizeMax", (v) => v.toFixed(2) + "m",
+      sSlider("dv-spr-size", spr, "sizeMax", (v) => v.toFixed(2) + "m",
         (v) => { spr.sizeMin = v * 0.38; });
-      slider("dv-spr-side", spr, "sideThrow", (v) => v.toFixed(1) + " m/s");
-      slider("dv-spr-life", spr, "lifeMax", (v) => v.toFixed(2) + "s",
+      sSlider("dv-spr-side", spr, "sideThrow", (v) => v.toFixed(1) + " m/s");
+      sSlider("dv-spr-life", spr, "lifeMax", (v) => v.toFixed(2) + "s",
         (v) => { spr.lifeMin = v * 0.44; });
-      slider("dv-spr-spread", spr, "spread");
-      slider("dv-spr-rise", spr, "rise");
-      slider("dv-spr-drag", spr, "drag");
-      slider("dv-spr-entry", spr, "entrySpeed", (v) => v.toFixed(1) + " m/s");
+      sSlider("dv-spr-spread", spr, "spread");
+      sSlider("dv-spr-rise", spr, "rise");
+      sSlider("dv-spr-drag", spr, "drag");
+      sSlider("dv-spr-entry", spr, "entrySpeed", (v) => v.toFixed(1) + " m/s");
     }
   }
 
