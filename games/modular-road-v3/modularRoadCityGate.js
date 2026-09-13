@@ -38,6 +38,19 @@
 //                  it, so two gates are never on the same street and a track
 //                  edit can remove a gate but never move one.
 //
+// ── TWO STYLES ───────────────────────────────────────────────────────────────
+//
+//   CIVIC        the gatehouse: two windowed wings, a taller pavilion with a
+//                mansard, one vaulted passage the carriageway runs through.
+//   TRIUMPHAL    the Roman arch: no wings and no windows — one great arch over
+//                the carriageway and a smaller one over each pavement, engaged
+//                columns, an entablature, a tall attic with a bronze plaque. It
+//                stands alone on the two lots it takes, which read as its square.
+//
+// Each site rolls its style from its own dice, like everything else about it.
+// Both are built from the same parts and shaded by the same material, so a city
+// with both still compiles ONE gate pipeline.
+//
 // ── ONE DRAW PER GATE, ONE MATERIAL FOR ALL OF THEM ──────────────────────────
 //
 // Every part — wings, pavilion, voussoir ring, cornices, mansards, lamps — is
@@ -84,6 +97,35 @@ export const GATE_DEFAULTS = {
   /** Where they may stand, as fractions of `extent` from the centre. */
   ringMin: 0.22,
   ringMax: 0.70,
+  /**
+   * WHICH STYLE, decided by where the site stands: a triumphal arch inside
+   * `triumphalWithin` (fraction of extent) — the monument by the old centre —
+   * and the civic gatehouse beyond it, where a city's old walls would have been.
+   * Local and stable like everything else about a site.
+   *
+   * Tried first and dropped: a 50/50 roll per site (the default city rolled two
+   * triumphal arches and no gatehouse), and a checkerboard of coarse cells (two
+   * diagonal neighbours share a colour, and the default city came out all
+   * civic). Any rule that ignores meaning can collide; one that follows it
+   * reads as a city.
+   *
+   * `triumphalShare` forces a style: 0 = all civic, 1 = all triumphal, anything
+   * else lets the ring decide.
+   */
+  triumphalWithin: 0.34,
+  triumphalShare: 0.5,
+
+  /** TRIUMPHAL ARCH. The great arch spans kerb to kerb; each side arch spans the
+   *  pavement band beyond a pier. Heights from the street. */
+  tSpring: 8.5,
+  tRise: 13.0,
+  tMidPier: 2.6,
+  tSideWidth: 4.4,
+  tSideSpring: 4.2,
+  tOuterPier: 5.0,
+  tDepth: 15.0,
+  tEntablature: 25.5,
+  tAtticTop: 38.5,
 
   /** Pavement kept either side of the carriageway, INSIDE the arch. The span is
    *  the street plus this twice, so the pier never stands at the kerb. */
@@ -124,8 +166,18 @@ export const GATE_DEFAULTS = {
   lampNight: 3.2,
 };
 
-/** Per-vertex surface kind. The shader branches on these by `step`, not `If`. */
-export const GATE_KIND = { wall: 0, trim: 1, roof: 2, lamp: 3 };
+/**
+ * Per-vertex surface kind. The shader blends these by `step`, never by `If`.
+ *
+ *   wall    stone WITH windows (the civic gatehouse)
+ *   trim    smooth dressed stone: cornices, plinths, columns, voussoirs
+ *   roof    zinc
+ *   lamp    emissive
+ *   plain   stone with NO windows — the triumphal arch, and any pier face
+ *   vault   the coffered underside of an arch
+ *   panel   bronze plaque
+ */
+export const GATE_KIND = { wall: 0, trim: 1, roof: 2, lamp: 3, plain: 4, vault: 5, panel: 6 };
 
 /** Every dimension the geometry, the collision and the footprint agree on. */
 export function gateDims(P, params = {}) {
@@ -145,6 +197,35 @@ export function gateDims(P, params = {}) {
   };
 }
 
+/**
+ * The triumphal arch's dimensions. `a` / `crown` are the GREAT arch's, so the
+ * test and the planner can ask the same questions of either style.
+ */
+export function triumphalDims(P, params = {}) {
+  const G = { ...GATE_DEFAULTS, ...params };
+  const kerbHalf = Math.max(P.streetLots, 1) * P.lotSize * 0.5;
+  const a = kerbHalf;                                  // great arch: kerb to kerb
+  const sideIn = a + G.tMidPier;
+  const sideOut = sideIn + G.tSideWidth;
+  const W = sideOut + G.tOuterPier;
+  const D = G.tDepth * 0.5;
+  const sideA = G.tSideWidth * 0.5;
+  const top = G.tAtticTop + 1.1;
+  return {
+    G, style: "triumphal", kerbHalf, a, s: G.tSpring, b: G.tRise, crown: G.tSpring + G.tRise,
+    sideIn, sideOut, sideA, sideCx: (sideIn + sideOut) * 0.5, sideS: G.tSideSpring,
+    W, D,
+    /** Footprint half-depth: the columns and cornice stand proud of the faces. */
+    Dp: D + 1.0,
+    entablature: G.tEntablature, atticBase: G.tEntablature + 3.7, atticTop: G.tAtticTop, top,
+  };
+}
+
+/** Dimensions for a style name. */
+export function dimsFor(style, P, params = {}) {
+  return style === "triumphal" ? triumphalDims(P, params) : gateDims(P, params);
+}
+
 // ── Geometry ─────────────────────────────────────────────────────────────────
 
 /** Tag a geometry with a constant kind, drop everything but position+normal,
@@ -158,6 +239,43 @@ function tagged(geo, kind) {
   if (!g.getAttribute("normal")) g.computeVertexNormals();
   const n = g.getAttribute("position").count;
   g.setAttribute("aKind", new THREE.Float32BufferAttribute(new Float32Array(n).fill(kind), 1));
+  // Ambient occlusion baked per vertex: 1 everywhere except inside an arch
+  // opening, where `tagOpenings` darkens toward the middle of the passage.
+  g.setAttribute("aAO", new THREE.Float32BufferAttribute(new Float32Array(n).fill(1), 1));
+  return g;
+}
+
+/**
+ * Re-tag the triangles of an extruded arched mass that face INTO an opening.
+ *
+ * ExtrudeGeometry makes the outer walls, the pier faces and the intrados in one
+ * pass, so they arrive with one kind. A triangle whose normal is not along Z
+ * and whose centroid lies inside an opening's span, under its crown, is either
+ * the vault (above the springing) or a pier face (below it). Both get a baked
+ * occlusion that darkens toward the middle of the passage — done here, per
+ * vertex, so it is right for every opening of every style without the shader
+ * knowing any of their sizes.
+ *
+ * @param {{cx:number, a:number, s:number, b:number}[]} openings
+ */
+function tagOpenings(g, openings, halfDepth) {
+  const pos = g.getAttribute("position");
+  const nrm = g.getAttribute("normal");
+  const kind = g.getAttribute("aKind");
+  const ao = g.getAttribute("aAO");
+  for (let i = 0; i < pos.count; i += 3) {
+    if (Math.abs(nrm.getZ(i)) > 0.5) continue;               // an arched end face
+    const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3;
+    const cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
+    const hit = openings.find((o) => Math.abs(cx - o.cx) <= o.a + 0.03 && cy <= o.s + o.b + 0.03 && cy > 0.01);
+    if (!hit) continue;
+    const k = cy > hit.s + 0.02 ? GATE_KIND.vault : GATE_KIND.plain;
+    for (let j = 0; j < 3; j++) {
+      kind.setX(i + j, k);
+      const t = Math.min(1, Math.abs(pos.getZ(i + j)) / halfDepth);
+      ao.setX(i + j, 0.45 + 0.55 * t * t * (3 - 2 * t));
+    }
+  }
   return g;
 }
 
@@ -209,22 +327,24 @@ function pavilionGeometry(d, segments = 32) {
   shape.lineTo(-Pw, H2);
   shape.closePath();
   const g = new THREE.ExtrudeGeometry(shape, {
-    depth: Dp * 2, bevelEnabled: false, curveSegments: segments, steps: 1,
+    depth: Dp * 2, bevelEnabled: false, curveSegments: segments, steps: 6,
   });
   g.translate(0, 0, -Dp);
   return g;
 }
 
-/** The raised ring of voussoirs round the arch on one face, plus the pilaster
- *  strips down each pier. `zFace` is the face it stands on, `dir` ±1 outward. */
-function voussoirRing(d, zFace, dir, kind) {
-  const { a, s, b } = d;
-  const t = 1.5, proud = 0.32;
+/**
+ * The raised ring of voussoirs round an arch on one face, the pilaster strips
+ * down its piers, and a keystone. `zFace` is the face it stands on, `dir` ±1
+ * outward; `o` is the opening ({cx, a, s, b}); `t` the ring's width.
+ */
+function voussoirRing(o, zFace, dir, kind, { t = 1.5, proud = 0.32, keystone = true, pilasters = true } = {}) {
+  const { cx, a, s, b } = o;
   const shape = new THREE.Shape();
-  shape.moveTo(-(a + t), s);
-  shape.absellipse(0, s, a + t, b + t, Math.PI, 0, true);
-  shape.lineTo(a, s);
-  shape.absellipse(0, s, a, b, 0, Math.PI, false);
+  shape.moveTo(cx - (a + t), s);
+  shape.absellipse(cx, s, a + t, b + t, Math.PI, 0, true);
+  shape.lineTo(cx + a, s);
+  shape.absellipse(cx, s, a, b, 0, Math.PI, false);
   shape.closePath();
   const ring = new THREE.ExtrudeGeometry(shape, {
     depth: proud, bevelEnabled: false, curveSegments: 32, steps: 1,
@@ -233,11 +353,13 @@ function voussoirRing(d, zFace, dir, kind) {
   ring.translate(0, 0, dir > 0 ? zFace : zFace - proud);
   const parts = [tagged(ring, kind)];
   const zc = zFace + dir * proud * 0.5;
-  for (const side of [-1, 1]) {
-    parts.push(box(t, s, proud, side * (a + t / 2), 0, zc, kind));
+  if (pilasters) {
+    for (const side of [-1, 1]) parts.push(box(t, s, proud, cx + side * (a + t / 2), 0, zc, kind));
   }
-  // The keystone, taller than the ring and further proud, at the crown.
-  parts.push(box(2.4, 3.0, proud + 0.3, 0, s + b - 0.6, zFace + dir * (proud + 0.3) * 0.5, kind));
+  if (keystone) {
+    const kw = Math.min(2.4, a * 0.5), kh = Math.min(3.0, b * 0.6);
+    parts.push(box(kw, kh, proud + 0.3, cx, s + b - kh * 0.2, zFace + dir * (proud + 0.3) * 0.5, kind));
+  }
   return parts;
 }
 
@@ -252,7 +374,7 @@ export function buildGateGeometry(d) {
   const parts = [];
 
   // ── Mass ──────────────────────────────────────────────────────────────────
-  parts.push(tagged(pavilionGeometry(d), K.wall));
+  parts.push(tagOpenings(tagged(pavilionGeometry(d), K.wall), [{ cx: 0, a, s, b }], Dp));
   for (const side of [-1, 1]) {
     const x0 = side > 0 ? Pw : -W, x1 = side > 0 ? W : -Pw;
     parts.push(box(x1 - x0, H, D * 2, (x0 + x1) / 2, 0, 0, K.wall));
@@ -274,8 +396,8 @@ export function buildGateGeometry(d) {
   }
 
   // ── The portal ────────────────────────────────────────────────────────────
-  parts.push(...voussoirRing(d, Dp, 1, K.trim));
-  parts.push(...voussoirRing(d, -Dp, -1, K.trim));
+  parts.push(...voussoirRing({ cx: 0, a, s, b }, Dp, 1, K.trim));
+  parts.push(...voussoirRing({ cx: 0, a, s, b }, -Dp, -1, K.trim));
 
   // ── Lamps under the arch ─────────────────────────────────────────────────
   // A continuous strip along each pier just under the springing, and pendants
@@ -312,6 +434,118 @@ export function buildGateGeometry(d) {
   return { geometry, collision };
 }
 
+/**
+ * The Roman triumphal arch, in gate space (X across, Z along, Y up).
+ *
+ * ONE extruded outline with three notches — the great arch over the
+ * carriageway and a side arch over each pavement — up to the top of the
+ * entablature; the attic is a box on top. Then the order applied to both faces:
+ * plinths under the piers, engaged columns with bases and capitals, the
+ * entablature and its cornice, voussoir rings, relief panels over the side
+ * arches, and a bronze plaque framed in the attic.
+ */
+export function buildTriumphalGeometry(d) {
+  const { a, s, b, sideCx, sideA, sideS, W, D, entablature, atticBase, atticTop } = d;
+  const K = GATE_KIND;
+  const parts = [];
+  const openings = [
+    { cx: 0, a, s, b },
+    { cx: -sideCx, a: sideA, s: sideS, b: sideA },
+    { cx: sideCx, a: sideA, s: sideS, b: sideA },
+  ];
+
+  const massShape = (segments) => {
+    const sh = new THREE.Shape();
+    sh.moveTo(-W, 0);
+    // Left side arch, great arch, right side arch — each a notch from the ground.
+    for (const o of [openings[1], openings[0], openings[2]]) {
+      sh.lineTo(o.cx - o.a, 0);
+      sh.lineTo(o.cx - o.a, o.s);
+      sh.absellipse(o.cx, o.s, o.a, o.b, Math.PI, 0, true);
+      sh.lineTo(o.cx + o.a, 0);
+    }
+    sh.lineTo(W, 0);
+    sh.lineTo(W, atticBase);
+    sh.lineTo(-W, atticBase);
+    sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth: D * 2, bevelEnabled: false, curveSegments: segments, steps: 6 });
+    g.translate(0, 0, -D);
+    return g;
+  };
+
+  // ── Mass ──────────────────────────────────────────────────────────────────
+  parts.push(tagOpenings(tagged(massShape(32), K.plain), openings, D));
+  parts.push(box(W * 2 - 1.2, atticTop - atticBase, D * 2 - 1.2, 0, atticBase, 0, K.plain));
+
+  // ── Plinths, under each pier ──────────────────────────────────────────────
+  const piers = [[-W, -(sideCx + sideA)], [-(sideCx - sideA), -a], [a, sideCx - sideA], [sideCx + sideA, W]];
+  const plinthH = 2.2;
+  for (const [x0, x1] of piers) {
+    parts.push(box(x1 - x0 + 0.4, plinthH, D * 2 + 0.8, (x0 + x1) / 2, 0, 0, K.trim));
+  }
+
+  // ── The order: engaged columns on both faces ─────────────────────────────
+  const colR = 0.85, colBase = plinthH, colTop = entablature;
+  const colXs = [];
+  for (const [x0, x1] of piers) colXs.push((x0 + x1) / 2);
+  for (const zf of [D, -D]) {
+    for (const x of colXs) {
+      const shaft = new THREE.CylinderGeometry(colR * 0.92, colR, colTop - colBase - 1.8, 16, 1, false);
+      shaft.translate(x, colBase + 0.8 + (colTop - colBase - 1.8) / 2, zf);
+      parts.push(tagged(shaft, K.trim));
+      parts.push(box(colR * 2.6, 0.8, colR * 2.6, x, colBase, zf, K.trim));          // base
+      parts.push(box(colR * 2.9, 1.0, colR * 2.9, x, colTop - 1.0, zf, K.trim));     // capital
+    }
+  }
+
+  // ── Entablature, cornice, attic cornice ──────────────────────────────────
+  parts.push(box(W * 2 + 0.6, 2.5, D * 2 + 1.0, 0, entablature, 0, K.trim));
+  parts.push(box(W * 2 + 1.8, 1.2, D * 2 + 2.0, 0, entablature + 2.5, 0, K.trim));
+  parts.push(box(W * 2 - 0.2, 1.1, D * 2 + 0.2, 0, atticTop, 0, K.trim));
+
+  // ── Voussoirs, relief panels, the plaque ─────────────────────────────────
+  for (const [zf, dir] of [[D, 1], [-D, -1]]) {
+    parts.push(...voussoirRing(openings[0], zf, dir, K.trim, { t: 1.6, keystone: true, pilasters: false }));
+    for (const o of [openings[1], openings[2]]) {
+      parts.push(...voussoirRing(o, zf, dir, K.trim, { t: 0.7, proud: 0.22, keystone: true, pilasters: false }));
+      // A relief panel above each side arch.
+      parts.push(box(o.a * 2 + 0.6, 4.2, 0.2, o.cx, o.s + o.b + 3.2, zf + dir * 0.1, K.trim));
+    }
+    const plaqueW = Math.min(W * 1.1, a * 1.9), plaqueH = (atticTop - atticBase) * 0.55;
+    const plaqueY = atticBase + (atticTop - atticBase - plaqueH) / 2;
+    const face = zf + dir * (-0.6);
+    parts.push(box(plaqueW + 1.2, plaqueH + 1.2, 0.3, 0, plaqueY - 0.6, face + dir * 0.15, K.trim));
+    parts.push(box(plaqueW, plaqueH, 0.25, 0, plaqueY, face + dir * 0.38, K.panel));
+  }
+
+  // ── Lamps: under the great arch, and one in each side passage ────────────
+  for (const side of [-1, 1]) {
+    parts.push(box(0.16, 0.22, D * 2 - 2.0, side * (a - 0.08), s - 1.2, 0, K.lamp));
+    parts.push(box(0.5, 0.15, D * 2 - 3.0, side * sideCx, sideS + sideA - 0.25, 0, K.lamp));
+  }
+
+  const geometry = mergeGeometries(parts, false);
+  for (const p of parts) p.dispose();
+  if (!geometry) throw new Error("[CityGate] triumphal merge returned null");
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+
+  // Collision: the mass and the attic. The columns stand 0.85 m proud of the
+  // faces a car can only meet head-on, where the pier behind them stops it.
+  const colParts = [massShape(20)];
+  const attic = new THREE.BoxGeometry(W * 2 - 1.2, atticTop - atticBase, D * 2 - 1.2);
+  attic.translate(0, atticBase + (atticTop - atticBase) / 2, 0);
+  colParts.push(attic);
+  const collision = mergeGeometries(colParts.map((g) => {
+    const n = g.index ? g.toNonIndexed() : g;
+    for (const name of Object.keys(n.attributes)) if (name !== "position") n.deleteAttribute(name);
+    return n;
+  }), false);
+  for (const g of colParts) g.dispose();
+  if (!collision) throw new Error("[CityGate] triumphal collision merge returned null");
+  return { geometry, collision };
+}
+
 // ── Material ────────────────────────────────────────────────────────────────
 
 /**
@@ -336,10 +570,18 @@ export function makeGateMaterial(d, { uNight = uniform(0) } = {}) {
   const uLampNight = uniform(G.lampNight);
 
   const kind = attribute("aKind", "float");
-  const isTrim = step(0.5, kind).mul(float(1).sub(step(1.5, kind)));
-  const isRoof = step(1.5, kind).mul(float(1).sub(step(2.5, kind)));
-  const isLamp = step(2.5, kind);
-  const isWall = float(1).sub(step(0.5, kind));
+  const ao = attribute("aAO", "float");
+  /** 1 where `kind` is exactly k. */
+  const is = (k) => step(float(k - 0.5), kind).mul(float(1).sub(step(float(k + 0.5), kind)));
+  const isWall = is(GATE_KIND.wall);
+  const isTrim = is(GATE_KIND.trim);
+  const isRoof = is(GATE_KIND.roof);
+  const isLamp = is(GATE_KIND.lamp);
+  const isPlain = is(GATE_KIND.plain);
+  const isVault = is(GATE_KIND.vault);
+  const isPanel = is(GATE_KIND.panel);
+  /** Every stone surface, windowed or not. */
+  const isStone = isWall.add(isPlain);
 
   const p = positionLocal;
   const n = normalLocal;
@@ -351,15 +593,11 @@ export function makeGateMaterial(d, { uNight = uniform(0) } = {}) {
   const v = p.y;
 
   /*
-   * INSIDE THE PASSAGE: the intrados and the two pier faces. Not a kind of its
-   * own because ExtrudeGeometry makes it in the same pass as the outer walls —
-   * recovered instead from where it is: inside the span, under the crown, and
-   * not one of the two arched end faces.
+   * INSIDE A PASSAGE is decided at BUILD time now (`tagOpenings`): the vault is
+   * its own kind and a pier face is plain stone, both with baked occlusion. The
+   * first version recovered it here from the civic arch's own size, which only
+   * ever worked for the one arch whose numbers the shader was compiled with.
    */
-  const inSpan = step(abs(p.x), float(a + 0.02));
-  const underCrown = step(v, float(s + b + 0.02));
-  const notEndFace = float(1).sub(step(0.5, abs(n.z)));
-  const inPassage = isWall.mul(inSpan).mul(underCrown).mul(notEndFace);
 
   // ── Ashlar ───────────────────────────────────────────────────────────────
   const fw = (x) => max(fwidth(x), float(1e-4));
@@ -417,7 +655,7 @@ export function makeGateMaterial(d, { uNight = uniform(0) } = {}) {
   const edgeX = min(abs(abs(p.x).sub(Pw)), abs(abs(p.x).sub(d.W)));
   const edgeZ = min(abs(abs(p.z).sub(D)), abs(abs(p.z).sub(Dp)));
   const cornerClear = mix(step(1.3, edgeX), step(1.3, edgeZ), facesX);
-  const windowsHere = isWall.mul(vertical).mul(float(1).sub(inPassage))
+  const windowsHere = isWall.mul(vertical)
     .mul(storeysOk).mul(archClear).mul(cornerClear);
   const glass = windowsHere.mul(inWinU).mul(inWinV);
   const surround = windowsHere.mul(inFrameU).mul(inFrameV).mul(float(1).sub(inWinU.mul(inWinV)));
@@ -429,22 +667,20 @@ export function makeGateMaterial(d, { uNight = uniform(0) } = {}) {
   const glassDay = mix(vec3(0.035, 0.045, 0.055), vec3(0.11, 0.13, 0.15), dv.sub(winLo).div(2.3));
   const room = mix(vec3(1.0, 0.72, 0.42), vec3(1.0, 0.86, 0.62), hash(winId.mul(97.0)));
 
-  // ── The passage ──────────────────────────────────────────────────────────
-  // Coffers: ribs every 3 m along the street, and every 12° round the arch.
-  // Across the vault, parameterised by x: coarse near the springing where the
-  // surface is steep, which is where the eye expects the coffers to foreshorten.
-  const around = p.x.div(a);
+  // ── The vault ────────────────────────────────────────────────────────────
+  // Coffers: ribs every 3 m along the passage and every 2.2 m across it, from
+  // gate-space position, so any arch of any size is coffered the same.
   const ribZ = fract(p.z.div(3.0).add(0.5));
-  const ribA = fract(around.mul(4.5).add(0.5));
+  const ribX = fract(p.x.div(2.2).add(0.5));
   const ribMask = max(
     float(1).sub(smoothstep(0.06, 0.06 + 0.02, min(ribZ, float(1).sub(ribZ)))),
-    float(1).sub(smoothstep(0.05, 0.05 + 0.02, min(ribA, float(1).sub(ribA)))),
+    float(1).sub(smoothstep(0.08, 0.08 + 0.03, min(ribX, float(1).sub(ribX)))),
   );
-  const onVault = step(float(s + 0.05), v);
-  const coffer = mix(cStone.mul(0.62), cTrim.mul(0.95), ribMask.mul(onVault));
-  // Darker toward the middle of the passage, where daylight does not reach.
-  const depthDark = mix(float(0.45), float(1.0), smoothstep(float(0), float(Dp), abs(p.z)));
-  const passage = mix(stone.mul(0.8), coffer, onVault).mul(depthDark);
+  const coffer = mix(cStone.mul(0.62), cTrim.mul(0.95), ribMask);
+
+  // Bronze: patinated, darker in its recesses — a plaque, not a painted board.
+  const bronze = mix(vec3(0.16, 0.24, 0.20), vec3(0.28, 0.36, 0.30),
+    hash(floor(p.x.mul(1.3)).add(floor(v.mul(2.1)).mul(19.0))).mul(0.6));
 
   // ── Trim and roof ────────────────────────────────────────────────────────
   const trimJoint = fract(u.div(1.4));
@@ -454,18 +690,23 @@ export function makeGateMaterial(d, { uNight = uniform(0) } = {}) {
   const roof = cRoof.mul(float(1).sub(float(1).sub(smoothstep(0.0, 0.03, min(seam, float(1).sub(seam)))).mul(0.35)));
 
   // ── Compose ──────────────────────────────────────────────────────────────
-  let wall = mix(stone, passage, inPassage);
-  wall = mix(wall, cTrim.mul(0.92), surround);
+  let wall = mix(stone, cTrim.mul(0.92), surround);
   wall = mix(wall, glassDay, glass);
-  const base = wall.mul(isWall).add(trim.mul(isTrim)).add(roof.mul(isRoof))
+  const base = wall.mul(isStone)
+    .add(coffer.mul(isVault))
+    .add(trim.mul(isTrim))
+    .add(roof.mul(isRoof))
+    .add(bronze.mul(isPanel))
+    .mul(ao)
     .add(vec3(1.0, 0.86, 0.6).mul(isLamp));
   mat.colorNode = base;
   mat.roughnessNode = float(0.86)
     .sub(glass.mul(0.72))
     .sub(isRoof.mul(0.4))
     .sub(isTrim.mul(0.1))
-    .sub(isLamp.mul(0.5));
-  mat.metalnessNode = isRoof.mul(0.35);
+    .sub(isLamp.mul(0.5))
+    .sub(isPanel.mul(0.35));
+  mat.metalnessNode = isRoof.mul(0.35).add(isPanel.mul(0.55));
   const lampGlow = mix(uLampDay, uLampNight, uNight);
   mat.emissiveNode = vec3(1.0, 0.84, 0.58).mul(isLamp).mul(lampGlow)
     // 0.7, not the 1.6 it started at: MEASURED in the game at dusk, 1.6 blew
@@ -499,6 +740,7 @@ export function planCityGates({
   originCellX = 0, originCellZ = 0, extent = P.extent, params = {},
 }) {
   const d = gateDims(P, params);
+  const dt = triumphalDims(P, params);
   const { G } = d;
   if (!G.gates || !rand) return null;
 
@@ -531,13 +773,20 @@ export function planCityGates({
       const x = alongZ ? (aCx + 1 + P.streetLots / 2) * L : (aCx + 0.5) * L;
       const z = alongZ ? (aCz + 0.5) * L : (aCz + 1 + P.streetLots / 2) * L;
 
+      // The style is rolled with the site, before any veto — so a veto never
+      // turns one style into the other, it only removes the gate.
+      const style = G.triumphalShare <= 0 ? "civic"
+        : G.triumphalShare >= 1 ? "triumphal"
+          : Math.hypot(x - P.centerX, z - P.centerZ) < extent * G.triumphalWithin ? "triumphal" : "civic";
+      const sd = style === "triumphal" ? dt : d;
+
       const r = Math.hypot(x - P.centerX, z - P.centerZ);
       if (r < extent * G.ringMin || r > extent * G.ringMax) continue;
       if (Number.isFinite(P.bounds)
-        && (Math.abs(x) + d.W > P.bounds - P.boundsMargin || Math.abs(z) + d.W > P.bounds - P.boundsMargin)) continue;
+        && (Math.abs(x) + sd.W > P.bounds - P.boundsMargin || Math.abs(z) + sd.W > P.bounds - P.boundsMargin)) continue;
       if (isPlaza && (isPlaza(aCx, aCz) || isPlaza(bCx, bCz))) continue;
       const site = { x, z, alongZ };
-      if (!footprintClear(site, d, (wx, wz) => (keepOut && keepOut(wx, wz)) || (under && under(wx, wz)))) continue;
+      if (!footprintClear(site, sd, (wx, wz) => (keepOut && keepOut(wx, wz)) || (under && under(wx, wz)))) continue;
 
       const ka = `${aCx},${aCz}`, kb = `${bCx},${bCz}`;
       reserved.add(ka);
@@ -548,12 +797,13 @@ export function planCityGates({
         axis: alongZ ? "z" : "x",
         yaw: alongZ ? 0 : Math.PI / 2,
         cells: [ka, kb],
-        halfSpan: d.W, halfDepth: d.Dp, archHalf: d.a, crown: P.groundY + d.crown,
-        top: P.groundY + d.top,
+        style,
+        halfSpan: sd.W, halfDepth: sd.Dp, archHalf: sd.a, crown: P.groundY + sd.crown,
+        top: P.groundY + sd.top,
       });
     }
   }
-  return { gates, reserved, dims: d };
+  return { gates, reserved, dims: d, dimsTriumphal: dt };
 }
 
 /** True when `blocked` refuses any of a 7×5 grid over the gate's footprint. */
@@ -600,14 +850,24 @@ export function gateFootprint(plan, margin = 1.5) {
 // ── Build ───────────────────────────────────────────────────────────────────
 
 /**
- * Meshes, material and collision for a plan. One geometry is shared by every
- * gate (they are identical in gate space), so N gates are N draws of ONE
- * geometry and ONE material — a single pipeline however many there are.
+ * Meshes, material and collision for a plan. One geometry per STYLE is shared by
+ * every gate of that style (they are identical in gate space), and every gate of
+ * either style shares ONE material — a single pipeline however many there are.
  */
 export function createCityGates({ plan, uNight = uniform(0), castShadows = true } = {}) {
   if (!plan?.gates?.length) return null;
   const d = plan.dims;
-  const { geometry, collision } = buildGateGeometry(d);
+  const built = new Map();
+  const partsFor = (style) => {
+    if (!built.has(style)) {
+      built.set(style, style === "triumphal"
+        ? buildTriumphalGeometry(plan.dimsTriumphal)
+        : buildGateGeometry(d));
+    }
+    return built.get(style);
+  };
+  // The civic dims drive the window layout; a triumphal arch has no windowed
+  // surface, so it never reads them.
   const { material, uniforms } = makeGateMaterial(d, { uNight });
   const group = new THREE.Group();
   group.name = "CityGates";
@@ -615,6 +875,7 @@ export function createCityGates({ plan, uNight = uniform(0), castShadows = true 
   const meshes = [];
   const colliders = [];
   for (const g of plan.gates) {
+    const { geometry, collision } = partsFor(g.style ?? "civic");
     const m = new THREE.Mesh(geometry, material);
     m.name = "CityGate";
     m.position.set(g.x, g.y, g.z);
@@ -646,12 +907,10 @@ export function createCityGates({ plan, uNight = uniform(0), castShadows = true 
     stats: {
       gates: plan.gates.length,
       draws: meshes.length,
-      tris: tris(geometry),
-      collisionTris: tris(collision),
+      styles: Object.fromEntries([...built].map(([k, v]) => [k, { tris: tris(v.geometry), collisionTris: tris(v.collision) }])),
     },
     dispose() {
-      geometry.dispose();
-      collision.dispose();
+      for (const v of built.values()) { v.geometry.dispose(); v.collision.dispose(); }
       material.dispose();
     },
   };

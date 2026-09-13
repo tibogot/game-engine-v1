@@ -180,8 +180,10 @@ console.log("\n=== THE PASSAGE IS CLEAR ===");
 
 console.log("\n=== AND IT IS SOLID WHERE IT IS BUILT ===");
 {
-  const d = GATE.gateDims(P, P.gateParams);
   for (const [i, g] of gates.entries()) {
+    // Each gate against ITS OWN style's numbers — the civic arch clears the
+    // pavement, the triumphal one springs from the kerb.
+    const d = GATE.dimsFor(g.style, P, P.gateParams);
     if (!g._bvh) continue;
     const cast = (o, dir) => {
       const h = g._bvh.raycastFirst(new THREE.Ray(o.clone().applyMatrix4(g._inv), dir.clone().transformDirection(g._inv)), THREE.DoubleSide);
@@ -189,14 +191,24 @@ console.log("\n=== AND IT IS SOLID WHERE IT IS BUILT ===");
     };
     const centre = new THREE.Vector3(g.x, P.groundY + 1.4, g.z);
     const pier = cast(centre, g._across);
-    check(`gate ${i}: the pier wall is where the arch ends`, !!pier && Math.abs(pier.distanceTo(centre) - d.a) < 1e-3,
+    check(`gate ${i} (${g.style}): the pier wall is where the arch ends`, !!pier && Math.abs(pier.distanceTo(centre) - d.a) < 1e-3,
       pier ? `${pier.distanceTo(centre).toFixed(3)} m, arch half-span ${d.a}` : "no hit");
     const up = cast(new THREE.Vector3(g.x, P.groundY + 1, g.z), new THREE.Vector3(0, 1, 0));
     check(`gate ${i}: the vault crown is overhead at its design height`,
       !!up && Math.abs(up.y - (P.groundY + d.crown)) < 0.05, up ? `${(up.y - P.groundY).toFixed(2)} m` : "no hit");
     const face = cast(centre.clone().addScaledVector(g._across, d.a + 8).addScaledVector(g._along, -40), g._along);
     check(`gate ${i}: driving at the pier face meets it`, !!face,
-      face ? `hit ${(face.clone().sub(centre).dot(g._along)).toFixed(2)} m along the street (face at ${-d.Dp})` : "drove through a wall");
+      face ? `hit ${(face.clone().sub(centre).dot(g._along)).toFixed(2)} m along the street` : "drove through a wall");
+    if (g.style === "triumphal") {
+      // The side arches are real passages over the pavement: open at car height.
+      for (const side of [-1, 1]) {
+        const o = centre.clone().addScaledVector(g._across, side * d.sideCx).addScaledVector(g._along, -30);
+        o.y = P.groundY + 1.2;
+        const h = cast(o, g._along);
+        check(`gate ${i}: the ${side < 0 ? "left" : "right"} side arch is a way through`,
+          !h || h.distanceTo(o) > 60, h ? `hit at ${h.distanceTo(o).toFixed(1)} m` : "clear");
+      }
+    }
   }
 }
 
@@ -210,20 +222,61 @@ console.log("\n=== SURFACES ===");
     `${gateMeshes.filter((m) => surfaces?.includes(m)).length} of ${gateMeshes.length}`);
   check("gates cast shadows, so the passage is dark", gateMeshes.every((m) => m.castShadow));
 
-  const { geometry } = GATE.buildGateGeometry(GATE.gateDims(P));
-  geometry.computeBoundingBox();
-  check("the gate stands on the street, not in it", Math.abs(geometry.boundingBox.min.y) < 1e-6,
-    `min y ${geometry.boundingBox.min.y.toFixed(4)}`);
-  const pos = geometry.attributes.position, nrm = geometry.attributes.normal;
-  const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), N = new THREE.Vector3(), n = new THREE.Vector3();
-  let reversed = 0;
-  for (let i = 0; i < pos.count; i += 3) {
-    A.fromBufferAttribute(pos, i); B.fromBufferAttribute(pos, i + 1); C.fromBufferAttribute(pos, i + 2);
-    N.subVectors(B, A).cross(C.clone().sub(A));
-    n.fromBufferAttribute(nrm, i);
-    if (N.lengthSq() > 1e-12 && N.dot(n) < 0) reversed++;
+  for (const [style, built] of [
+    ["civic", GATE.buildGateGeometry(GATE.gateDims(P))],
+    ["triumphal", GATE.buildTriumphalGeometry(GATE.triumphalDims(P))],
+  ]) {
+    const { geometry } = built;
+    geometry.computeBoundingBox();
+    check(`the ${style} gate stands on the street, not in it`, Math.abs(geometry.boundingBox.min.y) < 1e-6,
+      `min y ${geometry.boundingBox.min.y.toFixed(4)}`);
+    const pos = geometry.attributes.position, nrm = geometry.attributes.normal;
+    const kind = geometry.attributes.aKind, ao = geometry.attributes.aAO;
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), N = new THREE.Vector3(), n = new THREE.Vector3();
+    let reversed = 0, vault = 0, darkest = 1;
+    for (let i = 0; i < pos.count; i += 3) {
+      A.fromBufferAttribute(pos, i); B.fromBufferAttribute(pos, i + 1); C.fromBufferAttribute(pos, i + 2);
+      N.subVectors(B, A).cross(C.clone().sub(A));
+      n.fromBufferAttribute(nrm, i);
+      if (N.lengthSq() > 1e-12 && N.dot(n) < 0) reversed++;
+      if (kind.getX(i) === GATE.GATE_KIND.vault) vault++;
+      darkest = Math.min(darkest, ao.getX(i));
+    }
+    check(`${style}: every triangle's winding agrees with its normal`, reversed === 0, `${reversed} of ${pos.count / 3}`);
+    // The passage is found at build time now, so check that it was found.
+    check(`${style}: the arch undersides are tagged as vault`, vault > 20, `${vault} triangles`);
+    check(`${style}: the passage is darker in its middle`, darkest < 0.6, `darkest baked AO ${darkest.toFixed(2)}`);
+    let windowed = 0, bronze = 0;
+    for (let i = 0; i < kind.count; i++) {
+      if (kind.getX(i) === GATE.GATE_KIND.wall) windowed++;
+      if (kind.getX(i) === GATE.GATE_KIND.panel) bronze++;
+    }
+    if (style === "civic") {
+      check("civic: its wings and pavilion carry windows", windowed > 0);
+    } else {
+      check("triumphal: no windows anywhere on a monument", windowed === 0, `${windowed} windowed vertices`);
+      check("triumphal: carries its bronze plaque", bronze > 0);
+    }
   }
-  check("every triangle's winding agrees with its normal", reversed === 0, `${reversed} of ${pos.count / 3}`);
+}
+
+console.log("\n=== BOTH STYLES, AND THE STYLE RIDES WITH THE SITE ===");
+{
+  const civicCity = build({ gateParams: { triumphalShare: 0 } });
+  const romanCity = build({ gateParams: { triumphalShare: 1 } });
+  const cs = civicCity.stats.gateList, rs = romanCity.stats.gateList;
+  check("share 0 builds only civic gatehouses", cs.length > 0 && cs.every((g) => g.style === "civic"), cs.map((g) => g.style).join(","));
+  check("share 1 builds only triumphal arches", rs.length > 0 && rs.every((g) => g.style === "triumphal"), rs.map((g) => g.style).join(","));
+  const key = (g) => `${g.x},${g.z},${g.axis}`;
+  const romanKeys = new Set(rs.map(key));
+  const shared = cs.filter((g) => romanKeys.has(key(g))).length;
+  check("the style is rolled with the site, so both cities stand on the same sites",
+    shared > 0, `${shared} of ${cs.length} sites shared`);
+  const meshes = [];
+  romanCity.group.traverse((o) => { if (o.name === "CityGate") meshes.push(o); });
+  check("a triumphal arch is still one draw", meshes.length === rs.length);
+  civicCity.dispose?.();
+  romanCity.dispose?.();
 }
 
 console.log("\n=== WITH TERRAIN ON THERE IS NO STREET, SO NO GATE ===");
