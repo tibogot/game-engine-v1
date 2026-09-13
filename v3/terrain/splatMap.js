@@ -18,6 +18,7 @@
  */
 import * as THREE from "three";
 import { WORLD_SIZE, SPLAT_SIZE } from "./heightmapTexture.js";
+import { concavityMaskCpu } from "../ui/brushFilterSection.js";
 
 // Configured independently of the heightmap (see heightmapTexture.js). Old
 // configs with no splatSize resolve to the previous half-heightmap value.
@@ -121,9 +122,10 @@ export class SplatMap {
     const maskCos   = maskData ? Math.cos(maskRot) : 1;
     const maskSin   = maskData ? Math.sin(maskRot) : 0;
     const invDiam   = 1 / (2 * r);
-    // Brush filter (height / slope band). Null unless a band is actually on, so
-    // the loop below is the exact old code path when filters are off.
-    const flt = stroke.filter && stroke.filter.hm && (stroke.filter.heightOn || stroke.filter.slopeOn)
+    // Brush filter (height / slope band / concavity). Null unless one is actually
+    // on, so the loop below is the exact old code path when filters are off.
+    const flt = stroke.filter && stroke.filter.hm
+      && (stroke.filter.heightOn || stroke.filter.slopeOn || stroke.filter.concavityOn)
       ? stroke.filter
       : null;
 
@@ -190,6 +192,17 @@ export class SplatMap {
           if (m > 0 && flt.slopeOn) {
             const sD = _slopeDegs(flt.hm, flt.hmSize, su, sv, flt.worldSize, flt.maxHeight);
             m *= _bandMask(sD, flt.slopeMin, flt.slopeMax, flt.slopeSoft);
+          }
+          if (m > 0 && flt.concavityOn) {
+            // Same maths as the sculpt filter (sculptBrush.js filterMask).
+            const r = flt.concavityRadius / flt.worldSize, rd = r * Math.SQRT1_2;
+            const hm = flt.hm, n = flt.hmSize;
+            const ring = (_sampleHm(hm, n, su + r, sv) + _sampleHm(hm, n, su - r, sv)
+              + _sampleHm(hm, n, su, sv + r) + _sampleHm(hm, n, su, sv - r)
+              + _sampleHm(hm, n, su + rd, sv + rd) + _sampleHm(hm, n, su - rd, sv + rd)
+              + _sampleHm(hm, n, su + rd, sv - rd) + _sampleHm(hm, n, su - rd, sv - rd)) * 0.125;
+            const depth = (ring - _sampleHm(hm, n, su, sv)) * flt.maxHeight;
+            m *= concavityMaskCpu(depth, flt.concavityMode, flt.concavityMin, flt.concavitySoft);
           }
           falloff *= m;
           if (falloff <= 0) continue;

@@ -1,6 +1,14 @@
 /**
  * Brush filter — restrict a sculpt or paint brush to ground inside a height
- * band and/or a slope band, the way Unity's Terrain Tools brush filters do.
+ * band, a slope band and/or a concavity test, the way Unity's Terrain Tools
+ * brush filters do.
+ *
+ * CONCAVITY measures how far a point sits below (concave: a crease, a valley
+ * floor, the foot of a slope) or above (convex: a ridge, a hilltop, a cliff lip)
+ * the average of 8 heights on a ring of `concavityRadius` metres around it. The
+ * radius picks the scale: a few metres finds small creases, tens of metres whole
+ * valleys. The test is fully on from `concavityMin` metres of depth (or height,
+ * for convex) and fades out over `concavitySoft` below that.
  *
  * One UI component, one state shape, two implementations of the SAME maths:
  *   sculpt → sculptBrush.js, on the GPU, inside the shared brush falloff
@@ -34,7 +42,25 @@ export function createBrushFilterState(maxHeight = 500) {
     slopeMin: 30,
     slopeMax: 90,
     slopeSoft: 3,
+    concavityOn: false,
+    concavityMode: "concave", // "concave" | "convex"
+    concavityRadius: 8,       // metres
+    concavityMin: 0.5,        // metres of depth for full effect
+    concavitySoft: 1,         // metres over which it fades out
   };
+}
+
+/**
+ * The concavity test's mask for a measured `depth` = ring average − centre
+ * height, in metres (positive in a hollow). Shared shape for GPU and CPU:
+ * full at depth ≥ min, fading to 0 at min − soft. Convex flips the sign.
+ */
+export function concavityMaskCpu(depth, mode, min, soft) {
+  const d = mode === "convex" ? -depth : depth;
+  const w = Math.max(soft, 1e-4);
+  const e0 = min - w, e1 = min;
+  const t = Math.max(0, Math.min(1, (d - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
 }
 
 function _fmt(v, step) {
@@ -101,7 +127,21 @@ function _summary(s) {
   if (s.slopeOn) {
     parts.push(`${Math.round(Math.min(s.slopeMin, s.slopeMax))}–${Math.round(Math.max(s.slopeMin, s.slopeMax))}°`);
   }
+  if (s.concavityOn) parts.push(s.concavityMode === "convex" ? "convex" : "concave");
   return parts.length ? parts.join(" · ") : "off";
+}
+
+function _select(parent, obj, key, { label, options, hint, onChange }) {
+  const row = document.createElement("div");
+  row.className = "prop-row";
+  if (hint) row.title = hint;
+  row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><select class="prop-dropdown">${
+    options.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select></div>`;
+  const sel = row.querySelector("select");
+  sel.value = obj[key];
+  sel.addEventListener("change", () => { obj[key] = sel.value; onChange(); });
+  parent.appendChild(row);
+  return row;
 }
 
 /**
@@ -131,7 +171,7 @@ export function buildBrushFilterSection({ anchorEl, where = "afterend", state, m
   anchorEl.insertAdjacentElement(where, sec);
 
   const renderHeader = () => {
-    const on = state.heightOn || state.slopeOn;
+    const on = state.heightOn || state.slopeOn || state.concavityOn;
     hdr.innerHTML = `${_arrowSvg} Brush filter <span style="margin-left:auto;font-weight:400;text-transform:none;letter-spacing:0;color:${on ? "var(--accent)" : "var(--text-dim)"}">${_summary(state)}</span>`;
     hdr.style.display = "flex";
     hdr.style.alignItems = "center";
@@ -142,7 +182,7 @@ export function buildBrushFilterSection({ anchorEl, where = "afterend", state, m
   const hint = document.createElement("p");
   hint.className = "mode-hint";
   hint.style.marginTop = "2px";
-  hint.textContent = "Limit the brush to ground inside a height or slope band. Full effect inside the band, fading out over Softness. Both off = no effect.";
+  hint.textContent = "Limit the brush to ground inside a height or slope band, or to hollows / ridges. Full effect inside the band, fading out over Softness. All off = no effect.";
   body.appendChild(hint);
 
   const hLo = -Math.round(maxHeight * 0.5);
@@ -160,6 +200,20 @@ export function buildBrushFilterSection({ anchorEl, where = "afterend", state, m
   _slider(body, state, "slopeMin", { label: "Min (°)", min: 0, max: 90, step: 1, onChange: changed });
   _slider(body, state, "slopeMax", { label: "Max (°)", min: 0, max: 90, step: 1, onChange: changed });
   _slider(body, state, "slopeSoft", { label: "Softness (°)", min: 0, max: 30, step: 1, hint: "How far outside the band the effect fades to nothing", onChange: changed });
+
+  const sep2 = document.createElement("div");
+  sep2.className = "prop-separator";
+  body.appendChild(sep2);
+
+  _toggle(body, state, "concavityOn", { label: "Concavity", hint: "Only affect hollows (creases, valley floors) or ridges (hilltops, cliff lips)", onChange: changed });
+  _select(body, state, "concavityMode", {
+    label: "Affect",
+    options: [["concave", "Hollows (concave)"], ["convex", "Ridges (convex)"]],
+    onChange: changed,
+  });
+  _slider(body, state, "concavityRadius", { label: "Radius (m)", min: 1, max: 60, step: 1, hint: "Compare each point with the ground this far around it: small finds creases, large finds whole valleys", onChange: changed });
+  _slider(body, state, "concavityMin", { label: "Min depth (m)", min: 0, max: 20, step: 0.1, hint: "How far below (hollows) or above (ridges) its surroundings a point must be for full effect", onChange: changed });
+  _slider(body, state, "concavitySoft", { label: "Softness (m)", min: 0, max: 10, step: 0.1, hint: "How far below Min depth the effect fades to nothing", onChange: changed });
 
   renderHeader();
   return { refresh: renderHeader };

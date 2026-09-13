@@ -52,7 +52,8 @@ the game.
 10. ~~Heightmap import/export in 16-bit PNG and RAW~~ — DONE 2026-09-13. Sculpt
     panel → Heightmap File (and the toolbar Load accepts .png/.raw/.r16). Round
     trip within half a 16-bit step; other sizes are resampled.
-11. **Concavity filter** (the third Unity brush filter).
+11. ~~Concavity filter~~ — DONE 2026-09-13. Brush filter → Concavity (hollows or
+    ridges, radius, min depth, softness), sculpt and paint.
 12. **Terrain holes** for caves and tunnels (rendering, collision, readback).
     Only with a real need.
 13. **Mirror, clone, copy-paste.**

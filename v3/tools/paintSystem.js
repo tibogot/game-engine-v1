@@ -188,10 +188,12 @@ export class PaintSystem {
   _filterFor(s) {
     const f  = s.filter;
     const hs = this.heightSource;
-    if (!f || !hs || !(f.heightOn || f.slopeOn)) return null;
+    if (!f || !hs || !(f.heightOn || f.slopeOn || f.concavityOn)) return null;
     return {
       heightOn: !!f.heightOn, heightMin: f.heightMin, heightMax: f.heightMax, heightSoft: f.heightSoft,
       slopeOn:  !!f.slopeOn,  slopeMin:  f.slopeMin,  slopeMax:  f.slopeMax,  slopeSoft:  f.slopeSoft,
+      concavityOn: !!f.concavityOn, concavityMode: f.concavityMode, concavityRadius: f.concavityRadius,
+      concavityMin: f.concavityMin, concavitySoft: f.concavitySoft,
       hm: hs.data, hmSize: hs.size, worldSize: hs.worldSize, maxHeight: hs.maxHeight,
     };
   }

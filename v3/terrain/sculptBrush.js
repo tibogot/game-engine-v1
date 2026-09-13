@@ -142,6 +142,12 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   const uFltSMin   = uniform(30);
   const uFltSMax   = uniform(90);
   const uFltSSoft  = uniform(3);
+  // Concavity: ring average of 8 heights at a radius, minus the centre.
+  const uFltCOn       = uniform(0);
+  const uFltCSign     = uniform(1);   // +1 hollows (concave), −1 ridges (convex)
+  const uFltCRadiusUV = uniform(8 / WORLD_SIZE);
+  const uFltCMin      = uniform(0.5); // metres
+  const uFltCSoft     = uniform(1);   // metres
 
   // Fully on inside [lo, hi], fading to zero over `soft` OUTSIDE it — so
   // "min 40" means full effect from exactly 40, not half. The CPU paint filter
@@ -164,7 +170,22 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     const slopeDeg = atan(length(vec2(gx, gz)), float(1)).mul(float(180 / Math.PI));
     const hMask = mix(float(1), filterBand(hM, uFltHMin, uFltHMax, uFltHSoft), uFltHOn);
     const sMask = mix(float(1), filterBand(slopeDeg, uFltSMin, uFltSMax, uFltSSoft), uFltSOn);
-    return hMask.mul(sMask);
+
+    // Concavity — same maths as concavityMaskCpu (brushFilterSection.js) and
+    // the paint filter in splatMap.js: depth = ring average − centre, metres,
+    // full from Min, fading over Soft below it. Off is exactly 1, as above.
+    const r  = uFltCRadiusUV;
+    const rd = r.mul(float(Math.SQRT1_2));
+    const ringTap = (ox, oy) => texture(filterSrc, vec2(uvCoord.x.add(ox), uvCoord.y.add(oy))).r;
+    const ringAvg = ringTap(r, float(0)).add(ringTap(r.negate(), float(0)))
+      .add(ringTap(float(0), r)).add(ringTap(float(0), r.negate()))
+      .add(ringTap(rd, rd)).add(ringTap(rd.negate(), rd))
+      .add(ringTap(rd, rd.negate())).add(ringTap(rd.negate(), rd.negate()))
+      .mul(float(0.125));
+    const depth = ringAvg.mul(float(MAX_HEIGHT)).sub(hM).mul(uFltCSign);
+    const cSoft = max(uFltCSoft, float(1e-4));
+    const cMask = mix(float(1), smoothstep(uFltCMin.sub(cSoft), uFltCMin, depth), uFltCOn);
+    return hMask.mul(sMask).mul(cMask);
   });
 
   const getBrushFalloff = Fn(([uvCoord]) => {
@@ -967,6 +988,11 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
       uFltSMin.value  = Math.min(sA, sB);
       uFltSMax.value  = Math.max(sA, sB);
       uFltSSoft.value = Math.max(0, f?.slopeSoft ?? 0);
+      uFltCOn.value       = f?.concavityOn ? 1 : 0;
+      uFltCSign.value     = f?.concavityMode === "convex" ? -1 : 1;
+      uFltCRadiusUV.value = Math.max(0.1, f?.concavityRadius ?? 8) / WORLD_SIZE;
+      uFltCMin.value      = f?.concavityMin ?? 0.5;
+      uFltCSoft.value     = Math.max(0, f?.concavitySoft ?? 1);
     },
   };
 }
