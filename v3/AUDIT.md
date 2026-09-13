@@ -54,8 +54,11 @@ the game.
     trip within half a 16-bit step; other sizes are resampled.
 11. ~~Concavity filter~~ — DONE 2026-09-13. Brush filter → Concavity (hollows or
     ridges, radius, min depth, softness), sculpt and paint.
-12. **Terrain holes** for caves and tunnels (rendering, collision, readback).
-    Only with a real need.
+12. ~~Terrain holes~~ — phase 1 DONE 2026-09-13. Paint → Hole card (Alt fills
+    back in): see-through terrain and shadow pass, grass/trees/foliage kept
+    out, on-foot play falls in (underground rule + respawn), saved in the
+    project. Cars, ball and plane still see solid ground. Next: tunnel spline
+    tool (tube mesh + auto entrance holes), then cave meshes.
 13. **Mirror, clone, copy-paste.**
 14. **Non-destructive edit layers** like Unreal's. Large; roads and rivers
     already do this per tool.

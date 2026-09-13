@@ -625,13 +625,45 @@ export function createTerrainLOD(
     return createLODMaterial({ ...matArgs, features });
   }
 
+  /**
+   * TERRAIN HOLES. While any hole exists the material gets a maskNode that
+   * discards the pixels inside it — three applies the same mask in the shadow
+   * pass, so the terrain casts no shadow over its own opening.
+   *
+   * It is attached only WHILE holes exist, not left on with nothing to cut:
+   * a fragment that can discard stops the GPU from depth-testing the terrain
+   * early, which would tax every terrain pixel in every project that never
+   * uses a hole. Toggling recompiles the material once (first hole painted,
+   * last hole removed).
+   */
+  let holesEnabled = false;
+  function applyHoles(mat) {
+    if (!mat) return;
+    const want = holesEnabled && splatOverlay?.holeKeepMask ? splatOverlay.holeKeepMask : null;
+    if (mat.maskNode === want) return;
+    mat.maskNode = want;
+    mat.needsUpdate = true;
+  }
+  function setHolesEnabled(on) {
+    const next = Boolean(on);
+    if (next === holesEnabled) return false;
+    holesEnabled = next;
+    applyHoles(mesh.material);
+    return true;
+  }
+
   /** Swap a material built by buildVariant() onto the live clipmap. */
   function setVariant(mat) {
     const next = Array.isArray(mat) ? mat[0] : mat;
     if (!next?.isMaterial) return false;
     mesh.material = next;
+    applyHoles(next);
     return true;
   }
 
-  return { group, mesh, uCenter, update, levels, buildVariant, setVariant };
+  return {
+    group, mesh, uCenter, update, levels, buildVariant, setVariant,
+    setHolesEnabled,
+    get holesEnabled() { return holesEnabled; },
+  };
 }

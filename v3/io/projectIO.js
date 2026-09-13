@@ -34,6 +34,9 @@
  *             how painted layers mix at their edges, plus large-scale variation.
  *             Was saved nowhere, so a game never got the edge the editor showed.
  *   spawn     { x, z, yaw }                 player start; null when unplaced
+ *   splatHoles true when the splat's slice-1 alpha is the terrain HOLE channel.
+ *             Absent in older files, where that alpha was Meadow paint — the
+ *             load zeroes it rather than cutting holes wherever Meadow was.
  *
  * Binary blobs stay raw (heightmap Float32, splat/snow Uint8) — no base64 bloat.
  * Unknown/absent sections are simply skipped on load, so the format can grow.
@@ -57,6 +60,7 @@ export function encodeProjectFile({
   trees, foliage, props, roads, splines, lakes, rivers, rivers2, riversV2,
   paintLayers,          // textureLibrary.exportData() — slot metadata, no pixels
   paintBlend,           // { heightBlend, contrast } — layer edge blending
+  splatHoles,           // true: slice-1 alpha is terrain holes (see manifest)
   environment,          // { worldOcean } — the world LOOK; see the manifest note
   spawn,                // { x, z, yaw } player start, or null
   grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
@@ -98,6 +102,7 @@ export function encodeProjectFile({
     riversV2: riversV2 ?? null,
     paintLayers: paintLayers ?? null,
     paintBlend: paintBlend ?? null,
+    splatHoles: splatHoles ?? false,
     environment: environment ?? null,
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
@@ -164,6 +169,7 @@ export function decodeProjectFile(buffer) {
     riversV2:  manifest.riversV2 ?? null,
     paintLayers: manifest.paintLayers ?? null,
     paintBlend: manifest.paintBlend ?? null,
+    splatHoles: manifest.splatHoles === true,
     environment: manifest.environment ?? null,
     spawn:     manifest.spawn ?? null,
     grassDensity:  blob("grassDensity"),

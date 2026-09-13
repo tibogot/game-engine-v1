@@ -44,6 +44,8 @@ export function createPlayMode({
   getStuntRoadSolidMeshes = () => [],
   /** Player start placed in the editor: { x, z, yaw } — null falls back to the camera target. */
   getSpawnPoint = () => null,
+  /** (wx, wz) => true where the terrain has a hole (null = no holes). */
+  isTerrainHole = null,
   onEnterMenu, onStartWalking, onExit,
   onModeChange,
   loadPlayCast,
@@ -109,6 +111,39 @@ export function createPlayMode({
     const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
     if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
     return sampleTerrainHeight(u, v);
+  }
+
+  /**
+   * TERRAIN HOLES — on foot only (the capsule and the quadrupeds that ride it).
+   * The cars, the ball and the plane still see solid ground for now.
+   *
+   * Over a hole the terrain height is a floor far below the world, so the
+   * capsule's own rules do the right thing with no special case: nothing to
+   * stick to, no slope gate, and the "below the terrain" backstop never fires.
+   *
+   * Once the player has dropped THROUGH the opening they are underground, and
+   * the terrain stays out of the way even under solid ground — otherwise
+   * walking sideways in a cave would snap them up through the ceiling. They
+   * surface again when they are back above the terrain.
+   */
+  const HOLE_FLOOR_Y = -10000;
+  /** Below this the player has fallen out of the world and is put back. */
+  const FELL_OUT_Y = -150;
+  let _underground = false;
+  /** Last spot the player stood on solid terrain — where a fall puts them back. */
+  let _lastSafe = null;
+
+  function updateUnderground() {
+    if (!isTerrainHole) { _underground = false; return; }
+    const p = capsule.position;
+    const surf = getTerrainHeight(p.x, p.z);
+    if (isTerrainHole(p.x, p.z)) _underground = p.y < surf - 0.5;
+    else if (p.y >= surf) _underground = false;
+  }
+
+  function footTerrainHeight(wx, wz) {
+    if (isTerrainHole && (_underground || isTerrainHole(wx, wz))) return HOLE_FLOOR_Y;
+    return getTerrainHeight(wx, wz);
   }
 
   function sampleGroundY(wx, wz, fromY = 99999) {
@@ -764,6 +799,8 @@ export function createPlayMode({
     const tx = spawn ? spawn.x : controls.target.x;
     const tz = spawn ? spawn.z : controls.target.z;
     if (spawn && Number.isFinite(spawn.yaw)) camYaw = spawn.yaw;
+    _underground = false;
+    _lastSafe = null;
     capsule.reset(tx, sampleGroundY(tx, tz), tz);
 
     // camYaw sits BEHIND the player, so the facing is the flip of it — spawning
@@ -869,6 +906,7 @@ export function createPlayMode({
     const wantCrouch = charMode && keys.ctrl && !capsule.inAir && !rolling && !inSlide
       && !character.attacking && !character.inSpell;
 
+    updateUnderground();
     capsule.update(dt, {
       input: {
         mx, mz,
@@ -882,10 +920,26 @@ export function createPlayMode({
           && !character.attacking && !character.inSpell
         : true,
       collider: getCollider(),
-      getTerrainHeight,
+      getTerrainHeight: footTerrainHeight,
       getTerrainNormal: sampleTerrainNormal,
       worldHalf: WORLD_SIZE / 2,
     });
+
+    if (isTerrainHole) {
+      const cp = capsule.position;
+      if (capsule.grounded && !_underground && !isTerrainHole(cp.x, cp.z)) {
+        (_lastSafe ??= new THREE.Vector3()).copy(cp);
+      }
+    }
+    if (capsule.position.y < FELL_OUT_Y) {
+      // Back to the last solid footing. The spawn point is only the fallback:
+      // it may itself sit over a hole, which would loop the fall forever.
+      const spawn = getSpawnPoint();
+      const tx = _lastSafe ? _lastSafe.x : spawn ? spawn.x : (savedTarget?.x ?? 0);
+      const tz = _lastSafe ? _lastSafe.z : spawn ? spawn.z : (savedTarget?.z ?? 0);
+      _underground = false;
+      capsule.reset(tx, sampleGroundY(tx, tz), tz);
+    }
 
     updateOnFootWire(colliderDebugOn && isOnFoot());
 
@@ -899,7 +953,7 @@ export function createPlayMode({
         mx, mz,
         ctrl: capsule,
         collider: getCollider(),
-        getTerrainHeight,
+        getTerrainHeight: footTerrainHeight,
         keys: keysHeld,
         gallop: keys.shift,
         moveSpeed: capsule.debug.moveSpeed,

@@ -270,7 +270,7 @@ export class GrassTerrainData {
    * @param {object} o
    * @param {THREE.WebGPURenderer} o.renderer
    * @param {THREE.DataArrayTexture} o.splatTex  SplatMap.tex — 2 slices:
-   *   slice 0 RGBA = layers 1-4, slice 1 RGB = layers 5-7 (A = meadow, ignored)
+   *   slice 0 RGBA = layers 1-4, slice 1 RGB = layers 5-7, A = terrain holes
    */
   initDensityMask({ renderer, splatTex }) {
     const uBlockA = uniform(new THREE.Vector4(0, 0, 0, 0));
@@ -286,7 +286,10 @@ export class GrassTerrainData {
         const s1 = texture(splatTex, c).depth(int(1));
         const blocked = dot(s0, uBlockA).add(dot(s1, uBlockB));
         // Soft, so the grass thins toward a path edge instead of cutting off.
-        const keep = float(1).sub(smoothstep(0.3, 0.6, blocked));
+        // Terrain holes always clear grass, and a little BEFORE the terrain's
+        // own 0.5 cut so no blade stands on the rim floating over the opening.
+        const keep = float(1).sub(smoothstep(0.3, 0.6, blocked))
+          .mul(float(1).sub(smoothstep(0.2, 0.35, s1.w)));
         const v = d.mul(keep);
         return vec4(v, v, v, 1);
       })();

@@ -4,14 +4,22 @@
  * Uses one 512×512×2 DataArrayTexture covering the entire 2048m world (4m/texel).
  * Same layer encoding as V2's SplatStore:
  *   slice 0: R=L1, G=L2, B=L3, A=L4
- *   slice 1: R=L5, G=L6, B=L7, A=unused (was the retired Meadow mask)
+ *   slice 1: R=L5, G=L6, B=L7, A=TERRAIN HOLES (was the retired Meadow mask)
  *   Layer 0 (base) is implicit: w0 = max(0, 1 – sum(L1..L7))
  *
  * activeLayer mapping:
  *   0       = eraser
  *   1..4    = slice0 R/G/B/A
  *   5..7    = slice1 R/G/B
- *   8       = (retired Meadow; no UI selects it)
+ *   8       = hole  (slice1.A lerped toward 1)
+ *  -8       = hole erase (slice1.A lerped toward 0) — the hole card with Alt
+ *
+ * HOLES live in the channel Meadow freed, so the terrain shader reads them
+ * through the splat texture it already binds (the fragment stage is at
+ * WebGPU's 16-sampler ceiling), and paint undo + project save carry them with
+ * no extra code. They are NOT paint: the eraser, Clear and Fill leave them
+ * alone, and hasAnyPaint() ignores them so a hole never switches the paint
+ * shader branch on by itself.
  *
  * The API is tile-ready: the backing storage can be replaced with chunked
  * tiles for larger worlds without changing the shader or UI.
@@ -23,6 +31,9 @@ import { concavityMaskCpu } from "../ui/brushFilterSection.js";
 // Configured independently of the heightmap (see heightmapTexture.js). Old
 // configs with no splatSize resolve to the previous half-heightmap value.
 export const SPLAT_RES = SPLAT_SIZE;
+
+export const HOLE_LAYER = 8;
+export const HOLE_ERASE_LAYER = -8;
 
 function _makeDataArrayTex(data) {
   const tex = new THREE.DataArrayTexture(data, SPLAT_RES, SPLAT_RES, 2);
@@ -73,19 +84,77 @@ export class SplatMap {
     this._hasPaint      = false; // buffers start zeroed
     this._hasPaintDirty = false;
     this._combinedU32   = new Uint32Array(this._combined.buffer);
+    // hasAnyHoles() cache — decides whether the terrain compiles its hole mask.
+    this._hasHoles      = false;
+    this._holesDirty    = false;
+  }
+
+  /** Mark every derived flag stale after a bulk write. */
+  _markDirty() {
+    this._hasPaintDirty = true;
+    this._holesDirty = true;
+  }
+
+  /** True if any texel of the hole channel (slice1.A) is non-zero. Cached. */
+  hasAnyHoles() {
+    if (this._holesDirty) {
+      this._holesDirty = false;
+      this._hasHoles = false;
+      const d1 = this.data1;
+      for (let i = 3; i < d1.length; i += 4) {
+        if (d1[i] !== 0) { this._hasHoles = true; break; }
+      }
+    }
+    return this._hasHoles;
   }
 
   /**
-   * True if any weight or meadow texel is non-zero. Cached; mutators mark it
-   * dirty and the next call rescans (u32-wide, early-exit — sub-ms worst case).
+   * Hole amount 0..1 at a world position, bilinear on texel centres — the same
+   * sampling the terrain shader does, so "a hole here" means the same on the
+   * CPU (collision, placement) as on screen (the shader cuts at 0.5).
+   */
+  holeAt(wx, wz) {
+    if (!this.hasAnyHoles()) return 0;
+    const fx = (wx + WORLD_SIZE * 0.5) / WORLD_SIZE * SPLAT_RES - 0.5;
+    const fz = (wz + WORLD_SIZE * 0.5) / WORLD_SIZE * SPLAT_RES - 0.5;
+    if (fx < -0.5 || fz < -0.5 || fx > SPLAT_RES - 0.5 || fz > SPLAT_RES - 0.5) return 0;
+    const x0 = Math.max(0, Math.min(SPLAT_RES - 1, Math.floor(fx)));
+    const z0 = Math.max(0, Math.min(SPLAT_RES - 1, Math.floor(fz)));
+    const x1 = Math.min(SPLAT_RES - 1, x0 + 1), z1 = Math.min(SPLAT_RES - 1, z0 + 1);
+    const tx = Math.max(0, Math.min(1, fx - x0)), tz = Math.max(0, Math.min(1, fz - z0));
+    const d1 = this.data1;
+    const a = d1[(z0 * SPLAT_RES + x0) * 4 + 3], b = d1[(z0 * SPLAT_RES + x1) * 4 + 3];
+    const c = d1[(z1 * SPLAT_RES + x0) * 4 + 3], d = d1[(z1 * SPLAT_RES + x1) * 4 + 3];
+    return ((a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz) / 255;
+  }
+
+  /** Zero the hole channel (used on legacy files whose alpha was Meadow paint). */
+  clearHoleChannel() {
+    const d1 = this.data1;
+    for (let i = 3; i < d1.length; i += 4) d1[i] = 0;
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
+    this._markDirty();
+  }
+
+  /**
+   * True if any paint WEIGHT is non-zero (holes excluded). Cached; mutators mark
+   * it dirty and the next call rescans (u32-wide, early-exit — sub-ms worst case).
    */
   hasAnyPaint() {
     if (this._hasPaintDirty) {
       this._hasPaintDirty = false;
       this._hasPaint = false;
       const u32 = this._combinedU32;
-      for (let i = 0; i < u32.length; i++) {
+      const half = u32.length >> 1;
+      for (let i = 0; i < half; i++) {
         if (u32[i] !== 0) { this._hasPaint = true; break; }
+      }
+      // Slice 1: R,G,B only. Little-endian u32 of RGBA bytes is A<<24|B<<16|G<<8|R.
+      if (!this._hasPaint) {
+        for (let i = half; i < u32.length; i++) {
+          if ((u32[i] & 0x00ffffff) !== 0) { this._hasPaint = true; break; }
+        }
       }
     }
     return this._hasPaint;
@@ -131,8 +200,9 @@ export class SplatMap {
 
     const activeLayer = stroke.activeLayer;
     const isEraser    = activeLayer === 0;
+    const isHoleOp    = activeLayer === HOLE_LAYER || activeLayer === HOLE_ERASE_LAYER;
     let targetBuf = 0, targetChan = 0;
-    if (!isEraser) {
+    if (!isEraser && !isHoleOp) {
       if (activeLayer <= 4) { targetBuf = 0; targetChan = activeLayer - 1; }
       else                  { targetBuf = 1; targetChan = activeLayer - 5; }
     }
@@ -221,13 +291,14 @@ export class SplatMap {
           d1[idx]   = Math.max(0, d1[idx]   - delta);
           d1[idx+1] = Math.max(0, d1[idx+1] - delta);
           d1[idx+2] = Math.max(0, d1[idx+2] - delta);
-          d1[idx+3] = Math.max(0, d1[idx+3] - delta);
-        } else if (activeLayer === 8) {
-          // Meadow is an overlay mask, not part of the 7-weight blend —
-          // lerp it toward 1 without disturbing the paint layers.
-          const buf = d1;
-          const t   = buf[idx + targetChan] / 255;
-          buf[idx + targetChan] = Math.min(255, ((t + w * (1 - t)) * 255 + 0.5) | 0);
+          // d1[idx+3] is the HOLE channel: the paint eraser leaves holes alone.
+        } else if (activeLayer === HOLE_LAYER) {
+          // Holes are a mask, not part of the 7-weight blend: lerp toward 1.
+          const t = d1[idx + 3] / 255;
+          d1[idx + 3] = Math.min(255, ((t + Math.min(1, w) * (1 - t)) * 255 + 0.5) | 0);
+        } else if (activeLayer === HOLE_ERASE_LAYER) {
+          const t = d1[idx + 3] / 255;
+          d1[idx + 3] = Math.max(0, ((t * (1 - Math.min(1, w))) * 255 + 0.5) | 0);
         } else {
           // Unity/Unreal-style weight painting: lerp the target layer toward
           // full weight and scale every other layer down to make room, so
@@ -242,7 +313,7 @@ export class SplatMap {
             if (targetBuf === 0 && c === targetChan) continue;
             d0[idx + c] = (d0[idx + c] * k + 0.5) | 0;
           }
-          for (let c = 0; c < 3; c++) { // slice1 alpha (meadow) stays untouched
+          for (let c = 0; c < 3; c++) { // slice1 alpha (holes) stays untouched
             if (targetBuf === 1 && c === targetChan) continue;
             d1[idx + c] = (d1[idx + c] * k + 0.5) | 0;
           }
@@ -253,18 +324,25 @@ export class SplatMap {
     }
 
     if (anyTouched) {
-      // Weight painting rescales channels in BOTH slices; only the meadow
-      // overlay stays confined to slice 1.
-      if (activeLayer === 8) {
+      // Weight painting rescales channels in BOTH slices; holes stay confined
+      // to slice 1.
+      if (isHoleOp) {
         this.tex.addLayerUpdate(1);
       } else {
         this.tex.addLayerUpdate(0);
         this.tex.addLayerUpdate(1);
       }
       this.tex.needsUpdate = true;
-      // Painting adds paint; only erasing could have removed the last of it.
-      if (isEraser) this._hasPaintDirty = true;
-      else { this._hasPaint = true; this._hasPaintDirty = false; }
+      if (isHoleOp) {
+        // Painting a hole adds one; only erasing could remove the last.
+        if (activeLayer === HOLE_LAYER) { this._hasHoles = true; this._holesDirty = false; }
+        else this._holesDirty = true;
+      } else if (isEraser) {
+        // Painting adds paint; only erasing could have removed the last of it.
+        this._hasPaintDirty = true;
+      } else {
+        this._hasPaint = true; this._hasPaintDirty = false;
+      }
     }
     // Touched rect in splat texel coords — used for rect-based undo entries.
     return anyTouched ? { x: u0, y: v0, w: u1 - u0 + 1, h: v1 - v0 + 1 } : null;
@@ -296,7 +374,7 @@ export class SplatMap {
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
-    this._hasPaintDirty = true;
+    this._markDirty();
   }
 
   /** Both slices as one contiguous buffer (project save / splat export). */
@@ -308,7 +386,7 @@ export class SplatMap {
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
-    this._hasPaintDirty = true;
+    this._markDirty();
   }
 
   /**
@@ -331,7 +409,7 @@ export class SplatMap {
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
-    this._hasPaintDirty = true;
+    this._markDirty();
   }
 
   snapshot() {
@@ -342,20 +420,29 @@ export class SplatMap {
     this.data0.set(snap.d0);
     this.data1.set(snap.d1);
     this.tex.needsUpdate = true;
-    this._hasPaintDirty = true;
+    this._markDirty();
+  }
+
+  /** Zero the paint weights of slice 1 but keep its hole channel. */
+  _clearSlice1Weights() {
+    const d1 = this.data1;
+    for (let i = 0; i < d1.length; i += 4) { d1[i] = 0; d1[i + 1] = 0; d1[i + 2] = 0; }
   }
 
   clearAll() {
+    // Paint only — holes are kept (they have their own card and Alt-erase).
     this.data0.fill(0);
-    this.data1.fill(0);
+    this._clearSlice1Weights();
     this.tex.needsUpdate = true;
     this._hasPaint = false;
     this._hasPaintDirty = false;
   }
 
   fillAllWithLayer(activeLayer) {
+    // Filling the whole map with holes would delete the terrain: not a fill.
+    if (activeLayer === HOLE_LAYER || activeLayer === HOLE_ERASE_LAYER) return;
     this.data0.fill(0);
-    this.data1.fill(0);
+    this._clearSlice1Weights();
     this._hasPaint = activeLayer !== 0;
     this._hasPaintDirty = false;
     if (activeLayer === 0) { this.tex.needsUpdate = true; return; }
@@ -368,7 +455,7 @@ export class SplatMap {
 
   /**
    * Bake the auto-paint rules into the splatmap (replaces all paint layers;
-   * meadow overlay untouched). Same model as the live shader auto-material:
+   * holes untouched). Same model as the live shader auto-material:
    * cliff layer past a slope band, optional high-altitude layer above a height
    * band, flat layer as the remainder — with FBM threshold breakup.
    *
@@ -398,7 +485,7 @@ export class SplatMap {
         const su  = (px + 0.5) / SPLAT_RES;
         const idx = (pz * SPLAT_RES + px) * 4;
 
-        // Clear the 7 weight channels (keep meadow d1[idx+3]).
+        // Clear the 7 weight channels (keep the hole channel d1[idx+3]).
         d0[idx] = d0[idx+1] = d0[idx+2] = d0[idx+3] = 0;
         d1[idx] = d1[idx+1] = d1[idx+2] = 0;
 

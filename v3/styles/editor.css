@@ -722,6 +722,11 @@ html, body {
   color: #aaa;
 }
 
+/* Terrain hole: a dark opening in a grass-green ground. */
+.layer-thumb-hole {
+  background: radial-gradient(ellipse 42% 36% at 50% 55%, #050505 0 70%, #2b2418 86%, #5b7a3a 100%);
+}
+
 .layer-card-label {
   font-size: 10px;
   color: var(--text-dim);

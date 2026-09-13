@@ -121,7 +121,7 @@ export function createSplatOverlay(
   const splatUV        = positionWorld.xz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE));
   const splatArrayNode = texture(splatTex, splatUV);
   const splatSlice0    = splatArrayNode.depth(int(0)); // L1..L4
-  const splatSlice1    = splatArrayNode.depth(int(1)); // L5..L7 (A: unused, was Meadow)
+  const splatSlice1    = splatArrayNode.depth(int(1)); // L5..L7 + A = terrain holes
 
   // Zero out splat weights outside terrain bounds — prevents ClampToEdgeWrapping
   // from bleeding edge-pixel paint onto out-of-bounds geometry on outer LOD rings.
@@ -502,7 +502,16 @@ export function createSplatOverlay(
     };
   }
 
+  /**
+   * TERRAIN HOLES — the terrain material's maskNode (true = keep the pixel).
+   * Built from the SAME splat texture node the layers sample, so it adds no
+   * sampler binding. Cut at 0.5 of the bilinear value, which draws a smooth
+   * contour between texels instead of a stair-stepped one.
+   */
+  const holeKeepMask = splatSlice1.a.mul(inBounds).lessThan(float(0.5));
+
   return {
+    holeKeepMask,
     uHasPaint,
     uSoloLayer,
     uHeightBlend,

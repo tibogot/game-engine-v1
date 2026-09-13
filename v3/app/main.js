@@ -651,6 +651,7 @@ export async function startV3App(opts = {}) {
     getSpawnPoint: () => spawnSystem.getSpawn(),
     sampleTerrainHeight: (u, v) => sampleTerrainHeight(u, v) + snowGroundOffset(u, v),
     sampleTerrainNormal: (wx, wz) => sampleTerrainNormal(wx, wz),
+    isTerrainHole: (wx, wz) => splatMap.holeAt(wx, wz) >= 0.5,
     uCursorUV,
     character,
     husky,
@@ -780,6 +781,7 @@ export async function startV3App(opts = {}) {
   // foliage painting off them. Placement only: trees already standing there
   // are never deleted. Lazy — textureLib/splatMap are read at call time.
   const isVegetationBlocked = (wx, wz) => {
+    if (splatMap.holeAt(wx, wz) >= 0.35) return true;
     const flags = textureLib.blocksTreesFlags();
     if (!flags.some(Boolean)) return false;
     return splatMap.flaggedWeightAt(wx, wz, flags) > 0.45;
@@ -3041,6 +3043,8 @@ export async function startV3App(opts = {}) {
       // entirely while their maps are empty. The checks are cached CPU flags —
       // a scan only runs on the first frame after an edit invalidates one.
       splatOverlay.uHasPaint.value = splatMap.hasAnyPaint() ? 1 : 0;
+      // Terrain holes: attaches/detaches the discard mask (one recompile per flip).
+      lod.setHolesEnabled(splatMap.hasAnyHoles());
       snowSystem.shared.u.uHasSnow.value = snowMap.hasAnySnow() ? 1 : 0;
 
       // Re-bake the terrain normal map only when the heightmap actually
@@ -4191,6 +4195,10 @@ export async function startV3App(opts = {}) {
     if (!file) return;
     try {
       const decoded = decodeSplatmapFile(await file.arrayBuffer());
+      // A splatmap file is PAINT. Holes are terrain, so the current ones stay —
+      // and an older file's slice-1 alpha (Meadow) must not cut new ones.
+      const keepHoles = new Uint8Array(splatMap.data1.length / 4);
+      for (let i = 0; i < keepHoles.length; i++) keepHoles[i] = splatMap.data1[i * 4 + 3];
       // A splatmap is weights over the whole world, so a resolution difference
       // is a rescale, not an error — importing older/finer maps just works.
       if (decoded.resolution !== SPLAT_RES) {
@@ -4199,6 +4207,8 @@ export async function startV3App(opts = {}) {
       } else {
         splatMap.setCombined(decoded.data);
       }
+      for (let i = 0; i < keepHoles.length; i++) splatMap.data1[i * 4 + 3] = keepHoles[i];
+      splatMap.setCombined(splatMap.combined);
     } catch (err) {
       console.error(err);
       window.alert(err instanceof Error ? err.message : "Failed to load splatmap.");
@@ -5605,6 +5615,7 @@ export async function startV3App(opts = {}) {
       heightmap: baseHeightmap ?? cpuHeightmap,
       splat:     splatMap.combined,
       splatRes:  SPLAT_RES,
+      splatHoles: true,
       snow:      snowMap.snapshot(),
       snowRes:   SNOW_MAP_RES,
       trees:     { slots: treeToolState.treeSlots, instances: treeInstances },
@@ -5703,6 +5714,8 @@ export async function startV3App(opts = {}) {
         console.info(`[V3] Project splatmap ${srcRes}² → resampled to ${SPLAT_RES}².`);
         splatMap.setCombinedResampled(d.splat, srcRes);
       }
+      // Older files used this alpha for Meadow paint, not holes.
+      if (!d.splatHoles) splatMap.clearHoleChannel();
     }
 
     if (d.snow && d.snowRes === SNOW_MAP_RES) snowMap.restoreSnapshot(d.snow);
@@ -7102,6 +7115,10 @@ export async function startV3App(opts = {}) {
       treeEnv,
       foliageEnv,
       splatOverlay,
+      lod,
+      playMode,
+      camera,
+      paintSys,
       heightmapFiles: { buildExport: buildHeightmapExport, importFile: importHeightmapFormat },
       sculptFilterState,
       paintFilterState: paintState.filter,

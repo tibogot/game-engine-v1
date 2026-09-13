@@ -19,6 +19,8 @@
  * brushMask is an instance of V2's BrushMask class (Float32Array CPU mask).
  */
 
+import { HOLE_LAYER, HOLE_ERASE_LAYER } from "../terrain/splatMap.js";
+
 const MAX_HISTORY          = 32;
 const MAX_STAMPS_PER_EVENT = 16;
 
@@ -134,6 +136,7 @@ export class PaintSystem {
   }
 
   fillWithActiveLayer() {
+    if (this.paintState.activeLayer === HOLE_LAYER) return; // never fill the map with holes
     this._pushUndo(this.splatMap.copyRect(this._fullRect()));
     this.splatMap.fillAllWithLayer(this.paintState.activeLayer);
   }
@@ -152,7 +155,9 @@ export class PaintSystem {
 
   _stampAt(wx, wz, altKey) {
     const s           = this.paintState;
-    const activeLayer = altKey ? 0 : s.activeLayer;
+    // Alt = erase: on the hole card it fills holes back in, elsewhere it is the
+    // paint eraser (which never touches holes).
+    const activeLayer = altKey ? (s.activeLayer === HOLE_LAYER ? HOLE_ERASE_LAYER : 0) : s.activeLayer;
 
     let maskData = null, maskSize = 0, maskRotation = 0;
     const bm = this.brushMask;
