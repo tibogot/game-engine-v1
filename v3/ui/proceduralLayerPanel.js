@@ -74,7 +74,7 @@ export function createProceduralLayerPanel(host, { onChange, onPreset }) {
   swatchRow.className = "prop-row";
   swatchRow.innerHTML = `<span class="prop-label">Colours</span><div class="prop-value" style="display:flex;gap:4px"></div>`;
   const swatchHost = swatchRow.querySelector(".prop-value");
-  for (const [key, tip] of [["dark", "Dark"], ["mid", "Mid"], ["light", "Light"], ["accent", "Accent (flowers, moss, shells…)"]]) {
+  for (const [key, tip] of [["dark", "Dark"], ["mid", "Mid"], ["light", "Light"], ["accent", "Accent (flowers, moss, shells… on a path: the stones)"]]) {
     const inp = document.createElement("input");
     inp.type = "color";
     inp.className = "prop-color";
@@ -87,7 +87,7 @@ export function createProceduralLayerPanel(host, { onChange, onPreset }) {
   host.appendChild(swatchRow);
 
   // ── Sliders ───────────────────────────────────────────────────────────────
-  const slider = (key, { label, min, max, step, hint, labelFn }) => {
+  const slider = (key, { label, min, max, step, hint, labelFn, showFn }) => {
     const row = document.createElement("div");
     row.className = "prop-row";
     if (hint) row.title = hint;
@@ -108,6 +108,7 @@ export function createProceduralLayerPanel(host, { onChange, onPreset }) {
     num.addEventListener("keydown", (e) => { if (e.key === "Enter") num.blur(); });
     host.appendChild(row);
     controls.push(() => {
+      if (showFn) row.hidden = !showFn();
       lbl.textContent = labelFn ? labelFn() : label;
       sl.value = String(params[key]);
       num.value = _fmt(params[key], step);
@@ -118,7 +119,8 @@ export function createProceduralLayerPanel(host, { onChange, onPreset }) {
   slider("patches",   { label: "Patches", min: 0, max: 1, step: 0.01, hint: "Large soft colour patches across the tile" });
   slider("feature",   { label: "Feature", min: 0, max: 1, step: 0.01, labelFn: () => PROC_PATTERNS[params.pattern].feature, hint: "The pattern's own shape: grass clumps, pebbles, rock cracks, sand ripples" });
   slider("detail",    { label: "Detail", min: 0, max: 1, step: 0.01, hint: "Fine grain" });
-  slider("accentAmt", { label: "Accent", min: 0, max: 1, step: 0.01, hint: "How much of the accent colour: flowers on grass, tufts on dirt, moss on rock, shells on sand" });
+  slider("accentAmt", { label: "Accent", min: 0, max: 1, step: 0.01, labelFn: () => PROC_PATTERNS[params.pattern].accent ?? "Accent", hint: "Grass: flowers. Dirt: tufts. Rock: moss. Sand: shells. Path: small marks (crescents, dents, scratches)" });
+  slider("size",      { label: "Size", min: 0, max: 1, step: 0.01, labelFn: () => PROC_PATTERNS[params.pattern].size ?? "Size", showFn: () => Boolean(PROC_PATTERNS[params.pattern].size) });
   slider("rough",     { label: "Roughness", min: 0, max: 1, step: 0.01 });
   slider("bump",      { label: "Bump", min: 0, max: 2, step: 0.01, hint: "Strength of the baked relief in the normal map" });
   slider("ao",        { label: "AO", min: 0, max: 1, step: 0.01, hint: "Darkening in the low parts of the relief" });

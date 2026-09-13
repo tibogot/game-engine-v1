@@ -337,12 +337,25 @@ export function createSplatOverlay(
         const linear = linSum.toVar();
         colV.assign(linear);
 
-        // Height-based blend (UE-style: luminance as height proxy) — ~40 ALU,
-        // branch-skipped at the default uHeightBlend 0.
+        // Height-based blend (UE-style) — ~40 ALU, branch-skipped at the
+        // default uHeightBlend 0.
+        //
+        // The height of each layer is its LUMINANCE, unless the slot carries a
+        // real blend height in its albedo ALPHA (uHeightFromAlpha = 1, set for
+        // procedural slots, whose bake writes one). Luminance is a fine proxy
+        // for a photo texture, but a flat stylized colour has almost none, so
+        // the edge between two such layers stayed a smooth 2 m-per-texel fade.
+        // A real height turns that into the irregular, lobed edge of the
+        // reference. Image slots keep uHeightFromAlpha = 0: their look does not
+        // change, and the alpha is already sampled, so this adds no taps.
         if (F.heightBlend) {
           If(uHeightBlend.greaterThan(0.0), () => {
             const baseH  = baseC.dot(LUM);
-            const layerH = layerColors.map(c => c.dot(LUM));
+            const layerH = layerColors.map((c, i) => {
+              const lum = c.dot(LUM);
+              const hA = layerSlots[i].uHeightFromAlpha;
+              return hA ? mix(lum, layerAlbedos[i].a, hA) : lum;
+            });
             let maxWH = w[0].mul(baseH);
             for (let i = 0; i < NUM_LAYERS; i++) maxWH = max(maxWH, w[i + 1].mul(layerH[i]));
             const thresh = maxWH.sub(uHeightContrast);

@@ -3780,13 +3780,20 @@ export async function startV3App(opts = {}) {
   function guessProcPreset(name = "") {
     const n = name.toLowerCase();
     if (/snow|ice/.test(n)) return "softSnow";
-    if (/sand|beach|desert/.test(n)) return "beachSand";
+    if (/sand|beach|shore|desert/.test(n)) return "genshinShore";
     if (/moss/.test(n)) return "mossyRock";
     if (/rock|cliff|stone|cobble/.test(n)) return "paintedRock";
-    if (/dirt|ground|soil|path|mud|earth/.test(n)) return "dirtPath";
+    if (/dirt|ground|soil|path|mud|earth/.test(n)) return "genshinPath";
     if (/flower|meadow/.test(n)) return "flowerMeadow";
     return "genshinGrass";
   }
+
+  /**
+   * Presets store their tile size in metres; the UV tile is world-relative
+   * (uv = world / WORLD_SIZE × uvScale), and world size is per project. Clamped
+   * to the UV tile slider's 1–200 range.
+   */
+  const procUvScale = (p) => Math.min(200, Math.max(1, Math.round(WORLD_SIZE / p.tileM)));
 
   function requestSlotProcedural(i, params) {
     if (i === texlibActiveSlot) procPanel.setBusy(true);
@@ -3798,8 +3805,8 @@ export async function startV3App(opts = {}) {
   const procPanel = createProceduralLayerPanel(texlibProcSrc, {
     onChange: (p) => requestSlotProcedural(texlibActiveSlot, p),
     onPreset: (p) => {
-      // A preset's look is designed at a tiling size, so it brings its UV tile.
-      textureLib.setUVScale(texlibActiveSlot, p.uvScale);
+      // A preset's look is designed at a tile size, so it brings its UV tile.
+      textureLib.setUVScale(texlibActiveSlot, procUvScale(p));
       requestSlotProcedural(texlibActiveSlot, p);
       syncTexlibEditor();
     },
@@ -3819,7 +3826,7 @@ export async function startV3App(opts = {}) {
     if (chip.dataset.src === "procedural") {
       if (s.procedural) return;
       const p = procParamsFromPreset(guessProcPreset(s.name));
-      textureLib.setUVScale(i, p.uvScale);
+      textureLib.setUVScale(i, procUvScale(p));
       requestSlotProcedural(i, p);
       syncTexlibEditor();
     } else {
@@ -5506,6 +5513,10 @@ export async function startV3App(opts = {}) {
       rivers2,
       riversV2,
       paintLayers: textureLib.exportData(),
+      paintBlend: {
+        heightBlend: splatOverlay.uHeightBlend.value,
+        contrast:    splatOverlay.uHeightContrast.value,
+      },
       /*
        * The world's LOOK, which this format has never carried. Only the ocean so
        * far — light, sky, fog and post are the same gap and the same one-key
@@ -5639,6 +5650,16 @@ export async function startV3App(opts = {}) {
     // Ground-paint slots: which material each layer uses, its tiling and its
     // auto-paint rules. Awaits the boot-time default preload internally, so a
     // project opened during startup is not overwritten by it.
+    // Absent in older files: leave the current values alone, as before.
+    if (d.paintBlend) {
+      const hb = d.paintBlend.heightBlend, hc = d.paintBlend.contrast;
+      if (Number.isFinite(hb)) splatOverlay.uHeightBlend.value = Math.min(1, Math.max(0, hb));
+      if (Number.isFinite(hc)) splatOverlay.uHeightContrast.value = Math.min(1, Math.max(0.01, hc));
+      pslHBlend.value = String(Math.round(splatOverlay.uHeightBlend.value * 100));
+      plblHBlend.textContent = splatOverlay.uHeightBlend.value.toFixed(2);
+      pslHContrast.value = String(Math.round(splatOverlay.uHeightContrast.value * 100));
+      plblHContrast.textContent = splatOverlay.uHeightContrast.value.toFixed(2);
+    }
     if (d.paintLayers) {
       await textureLib.importData(d.paintLayers);
       for (let i = 0; i < 7; i++) refreshLayerThumb(i);

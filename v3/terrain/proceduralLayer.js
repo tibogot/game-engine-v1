@@ -40,8 +40,13 @@ import {
 
 export const PROC_RES = 1024;
 
+/**
+ * `feature` names the pattern's own shape slider. Optional `accent` / `size`
+ * rename the Accent slider and show the Size slider for patterns that use them.
+ */
 export const PROC_PATTERNS = {
   painted: { label: "Painted ground", feature: "Mottles" },
+  path:    { label: "Path ground",    feature: "Stones", accent: "Marks", size: "Stone size" },
   grass: { label: "Grass",  feature: "Clumps"  },
   dirt:  { label: "Dirt",   feature: "Pebbles" },
   rock:  { label: "Rock",   feature: "Cracks"  },
@@ -61,22 +66,25 @@ const BASE_PARAMS = {
   feature: 0.6,   // the pattern's own shape: clumps / pebbles / cracks / ripples
   detail:  0.35,  // fine grain
   accentAmt: 0,   // speckles of the accent colour (flowers, shells, moss)
+  size:    0.5,   // pattern-specific size (path: stone size)
   rough:   0.9,
   bump:    0.5,
   ao:      0.5,
   seed:    1,
-  uvScale: 20,    // suggested terrain UV tile for this preset
+  tileM:   20,    // suggested tile size in METRES (converted to the UV tile with the project's world size)
 };
 
 export const PROC_PRESETS = {
-  genshinGrass:  { label: "Genshin grass",  pattern: "painted", dark: "#42b03f", mid: "#5ace4e", light: "#64df57", accent: "#cdd86a", scale: 8, patches: 0.5,  feature: 0.5,  detail: 0.04, accentAmt: 0,    rough: 0.95, bump: 0.05, ao: 0.1, uvScale: 12 },
-  stylizedGrass: { label: "Stylized grass", pattern: "grass", dark: "#3f7d3a", mid: "#6fae45", light: "#a9d15a", accent: "#f2e27a", scale: 24, patches: 0.3,  feature: 0.6, detail: 0.3, accentAmt: 0,    rough: 0.92, bump: 0.3,  ao: 0.45, uvScale: 40 },
-  flowerMeadow:  { label: "Flower meadow",  pattern: "grass", dark: "#467f33", mid: "#79b447", light: "#b7d766", accent: "#fff3a8", scale: 24, patches: 0.35, feature: 0.5, detail: 0.3, accentAmt: 0.35, rough: 0.92, bump: 0.4,  ao: 0.4,  uvScale: 40 },
-  dirtPath:      { label: "Dirt path",      pattern: "dirt",  dark: "#6b4a2f", mid: "#9b7450", light: "#c9a57a", accent: "#7d8f4a", scale: 16, patches: 0.3,  feature: 0.5, detail: 0.4, accentAmt: 0.1,  rough: 0.95, bump: 0.6,  ao: 0.55, uvScale: 40 },
-  paintedRock:   { label: "Painted rock",   pattern: "rock",  dark: "#4a4a52", mid: "#7d7f86", light: "#b3b5b8", accent: "#6f8f47", scale: 4,  patches: 0.35, feature: 0.45, detail: 0.3, accentAmt: 0,   rough: 0.8,  bump: 0.8,  ao: 0.6,  uvScale: 25 },
-  mossyRock:     { label: "Mossy rock",     pattern: "rock",  dark: "#44484a", mid: "#767a78", light: "#a9ada6", accent: "#5f8a3c", scale: 4,  patches: 0.4,  feature: 0.45, detail: 0.3, accentAmt: 0.45, rough: 0.85, bump: 0.8,  ao: 0.6,  uvScale: 25 },
-  beachSand:     { label: "Beach sand",     pattern: "sand",  dark: "#c9ad7f", mid: "#e2c99b", light: "#f3e3bf", accent: "#fffaf0", scale: 20, patches: 0.3,  feature: 0.5, detail: 0.35, accentAmt: 0.08, rough: 0.9,  bump: 0.35, ao: 0.3,  uvScale: 30 },
-  softSnow:      { label: "Soft snow",      pattern: "sand",  dark: "#b9c8dc", mid: "#e3ecf5", light: "#ffffff", accent: "#ffffff", scale: 10, patches: 0.35, feature: 0.2, detail: 0.2, accentAmt: 0,    rough: 0.7,  bump: 0.25, ao: 0.2,  uvScale: 20 },
+  genshinPath:   { label: "Genshin path",   pattern: "path",    dark: "#e6d485", mid: "#f5e695", light: "#fcf0a8", accent: "#b4bab4", scale: 18, patches: 0.5, feature: 0.3,  size: 0.9,  detail: 0.03, accentAmt: 0.35, rough: 0.95, bump: 0.25, ao: 0.25, tileM: 18 },
+  genshinShore:  { label: "Genshin shore",  pattern: "path",    dark: "#e9d98c", mid: "#f7ea9e", light: "#fdf3b3", accent: "#b4bab4", scale: 18, patches: 0.45, feature: 0.03, size: 0.5,  detail: 0.03, accentAmt: 0.22, rough: 0.95, bump: 0.15, ao: 0.15, tileM: 18 },
+  genshinGrass:  { label: "Genshin grass",  pattern: "painted", dark: "#42b03f", mid: "#5ace4e", light: "#64df57", accent: "#cdd86a", scale: 8, patches: 0.5,  feature: 0.5,  detail: 0.04, accentAmt: 0,    rough: 0.95, bump: 0.05, ao: 0.1, tileM: 85 },
+  stylizedGrass: { label: "Stylized grass", pattern: "grass", dark: "#3f7d3a", mid: "#6fae45", light: "#a9d15a", accent: "#f2e27a", scale: 24, patches: 0.3,  feature: 0.6, detail: 0.3, accentAmt: 0,    rough: 0.92, bump: 0.3,  ao: 0.45, tileM: 26 },
+  flowerMeadow:  { label: "Flower meadow",  pattern: "grass", dark: "#467f33", mid: "#79b447", light: "#b7d766", accent: "#fff3a8", scale: 24, patches: 0.35, feature: 0.5, detail: 0.3, accentAmt: 0.35, rough: 0.92, bump: 0.4,  ao: 0.4,  tileM: 26 },
+  dirtPath:      { label: "Dirt path",      pattern: "dirt",  dark: "#6b4a2f", mid: "#9b7450", light: "#c9a57a", accent: "#7d8f4a", scale: 16, patches: 0.3,  feature: 0.5, detail: 0.4, accentAmt: 0.1,  rough: 0.95, bump: 0.6,  ao: 0.55, tileM: 26 },
+  paintedRock:   { label: "Painted rock",   pattern: "rock",  dark: "#4a4a52", mid: "#7d7f86", light: "#b3b5b8", accent: "#6f8f47", scale: 4,  patches: 0.35, feature: 0.45, detail: 0.3, accentAmt: 0,   rough: 0.8,  bump: 0.8,  ao: 0.6,  tileM: 41 },
+  mossyRock:     { label: "Mossy rock",     pattern: "rock",  dark: "#44484a", mid: "#767a78", light: "#a9ada6", accent: "#5f8a3c", scale: 4,  patches: 0.4,  feature: 0.45, detail: 0.3, accentAmt: 0.45, rough: 0.85, bump: 0.8,  ao: 0.6,  tileM: 41 },
+  beachSand:     { label: "Beach sand",     pattern: "sand",  dark: "#c9ad7f", mid: "#e2c99b", light: "#f3e3bf", accent: "#fffaf0", scale: 20, patches: 0.3,  feature: 0.5, detail: 0.35, accentAmt: 0.08, rough: 0.9,  bump: 0.35, ao: 0.3,  tileM: 34 },
+  softSnow:      { label: "Soft snow",      pattern: "sand",  dark: "#b9c8dc", mid: "#e3ecf5", light: "#ffffff", accent: "#ffffff", scale: 10, patches: 0.35, feature: 0.2, detail: 0.2, accentAmt: 0,    rough: 0.7,  bump: 0.25, ao: 0.2,  tileM: 51 },
 };
 
 /** Complete, validated params for a preset id (unknown ids fall back to grass). */
@@ -103,11 +111,12 @@ export function normalizeProcParams(src) {
   out.feature   = num(src.feature, out.feature, 0, 1);
   out.detail    = num(src.detail, out.detail, 0, 1);
   out.accentAmt = num(src.accentAmt, out.accentAmt, 0, 1);
+  out.size      = num(src.size, out.size, 0, 1);
   out.rough     = num(src.rough, out.rough, 0, 1);
   out.bump      = num(src.bump, out.bump, 0, 2);
   out.ao        = num(src.ao, out.ao, 0, 1);
   out.seed      = Math.round(num(src.seed, out.seed, 0, 9999));
-  out.uvScale   = num(src.uvScale, out.uvScale, 1, 200);
+  out.tileM     = num(src.tileM, out.tileM, 1, 1000);
   return out;
 }
 
@@ -201,6 +210,111 @@ const voronoi = Fn(([p, P, salt]) => {
 const sat = (x) => clamp(x, 0.0, 1.0);
 const ramp3 = (t, c0, c1, c2) => mix(mix(c0, c1, sat(t.mul(2))), c2, sat(t.mul(2).sub(1)));
 
+/** Painted light direction in tile space: bevels are lit from this side. */
+const PAINT_LIGHT = vec2(-0.6, -0.8);
+
+/**
+ * Flat stones pressed into the ground. One candidate stone per lattice cell,
+ * present with probability `density`, each with its own size, rotation,
+ * aspect and tone. Points stay within 0.3..0.7 of their cell and the radius
+ * stays under 0.3, so a stone can never be clipped by a neighbouring cell.
+ *
+ * Returns vec4(coverage, bevel -1..1, tone 0..1, soft shade outside the stone
+ * on the side away from the light). Returned as a vec4, not an object — a TSL
+ * Fn that returns an object collapses to a swizzle (ref_tsl_fn_and_instancing_traps).
+ */
+const stoneField = Fn(([p, P, salt, density, size]) => {
+  const base = floor(p);
+  const cov = float(0).toVar();
+  const bevel = float(0).toVar();
+  const tone = float(0).toVar();
+  const shade = float(0).toVar();
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const cell = base.add(vec2(dx, dy));
+      const h0 = cellHash(cell, P, salt);
+      const h1 = cellHash(cell, P, salt.add(1));
+      const h2 = cellHash(cell, P, salt.add(2));
+      const h3 = cellHash(cell, P, salt.add(3));
+      const h4 = cellHash(cell, P, salt.add(4));
+      const has = density.greaterThanEqual(h0).select(1.0, 0.0);
+      // Points in 0.35..0.65 and radius <= 0.35 keep a stone inside reach of
+      // its own cell, so neighbours never clip it.
+      const pt = cell.add(vec2(h1, h2).mul(0.3).add(0.35));
+      // Wide size spread, skewed small: many small stones, a few big slabs.
+      const r = size.mul(0.22).add(0.08).mul(h3.mul(h3).mul(0.95).add(0.4)).min(0.35);
+      const ang = h4.mul(3.14159);
+      const cs = cos(ang), sn = sin(ang);
+      // Mostly round slabs. Strongly elongated ones read as seeds or chips.
+      const aspect = fract(h4.mul(13.7)).mul(0.25).add(0.75);
+      const v = p.sub(pt);
+      const lv = vec2(v.x.mul(cs).add(v.y.mul(sn)), v.y.mul(cs).sub(v.x.mul(sn)).div(aspect));
+      const d = length(lv).toVar();
+      const c = float(1).sub(smoothstep(r.sub(0.03), r, d)).mul(has).toVar();
+      const facing = dot(v.div(max(length(v), 1e-4)), PAINT_LIGHT);
+      const edge = smoothstep(r.mul(0.5), r, d);
+      const sh = smoothstep(r.sub(0.02), r, d).mul(float(1).sub(smoothstep(r, r.add(0.1), d)))
+        .mul(max(facing.negate(), 0.0)).mul(has);
+      const better = c.greaterThan(cov);
+      bevel.assign(better.select(edge.mul(facing), bevel));
+      tone.assign(better.select(fract(h0.mul(57.3)), tone));
+      cov.assign(better.select(c, cov));
+      shade.assign(max(shade, sh));
+    }
+  }
+  return vec4(cov, bevel, tone, shade);
+});
+
+/**
+ * Small imperfections: one candidate mark per cell, present with probability
+ * `amount`, of one of three kinds — a crescent (a footprint-like half ring),
+ * a dent (dark dot, light rim) or a short scratch. Returns vec2(dark, light).
+ */
+const marksField = Fn(([p, P, salt, amount]) => {
+  const base = floor(p);
+  const dark = float(0).toVar();
+  const lite = float(0).toVar();
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const cell = base.add(vec2(dx, dy));
+      const h0 = cellHash(cell, P, salt);
+      const h1 = cellHash(cell, P, salt.add(1));
+      const h2 = cellHash(cell, P, salt.add(2));
+      const h3 = cellHash(cell, P, salt.add(3));
+      const h4 = cellHash(cell, P, salt.add(4));
+      const has = amount.mul(0.7).greaterThanEqual(h0).select(1.0, 0.0);
+      const pt = cell.add(vec2(h1, h2).mul(0.5).add(0.25));
+      const v = p.sub(pt);
+      const d = length(v).toVar();
+      const ang = h4.mul(6.28318);
+      const o = vec2(cos(ang), sin(ang));
+      // Every mark is SOFT and fairly wide. Thin crisp versions (2–3 cm lines)
+      // read as drawn squiggles in the first test, where the reference shows
+      // faint scuffs.
+      // crescent
+      const rr = fract(h4.mul(7.1)).mul(0.1).add(0.14);
+      const ring = float(1).sub(smoothstep(0.02, 0.07, d.sub(rr).abs()))
+        .mul(smoothstep(0.1, 0.8, dot(v.div(max(d, 1e-4)), o)));
+      // dent
+      const dr = h1.mul(0.05).add(0.05);
+      const dent = float(1).sub(smoothstep(dr.mul(0.2), dr, d));
+      const dentRim = float(1).sub(smoothstep(0.0, 0.04, d.sub(dr.mul(1.3)).abs()));
+      // scratch
+      const L = h2.mul(0.12).add(0.12);
+      const tt = clamp(dot(v, o), L.negate(), L);
+      const scratch = float(1).sub(smoothstep(0.01, 0.04, length(v.sub(o.mul(tt)))));
+      // Mostly crescents and dents; scratches are rare and faint — at any
+      // strength they read as dashes.
+      const isC = h3.lessThan(0.5).select(1.0, 0.0);
+      const isS = h3.greaterThanEqual(0.9).select(1.0, 0.0);
+      const isD = float(1).sub(isC).sub(isS);
+      dark.assign(max(dark, has.mul(isC.mul(ring).mul(0.8).add(isD.mul(dent)).add(isS.mul(scratch).mul(0.35)))));
+      lite.assign(max(lite, has.mul(isD).mul(dentRim).mul(0.6)));
+    }
+  }
+  return vec2(dark, lite);
+});
+
 // ── Patterns ────────────────────────────────────────────────────────────────
 // Each returns { col, h } nodes for tile coordinate `q` in [0,1). The colour
 // and height materials call the same function and only read the half they
@@ -221,6 +335,60 @@ function pattern(name, U, q) {
   const fine = fbm(q.mul(P.mul(4)), P.mul(4), seed.add(40), 2);
   const patchT = big.sub(0.5).mul(U.patches.mul(1.6));
   const fineT  = fine.sub(0.5).mul(U.detail.mul(0.5));
+
+  if (name === "path") {
+    // Genshin path / shore ground, from two gameplay screenshots (2026-09-13):
+    //   - pale warm sand, low saturation, the same soft cloudy washes as the
+    //     grass (same noise, so both read as one painter)
+    //   - flat grey stones with a cool tint pressed into it: irregular rounded
+    //     outlines, flat tops, a painted bevel (light rim toward the light, dark
+    //     rim away), some half buried
+    //   - small low-contrast imperfections: crescents, dents, short scratches
+    //   - almost no real relief; the edge with the grass is a LAYER BLEND, not
+    //     part of this texture
+    const mq = q.add(warp.mul(0.5));
+    const wP = bigP.mul(2);
+    const n = gradFbm(mq.mul(wP), wP, seed.add(70), 5);
+    const nn = sat(n.sub(0.5).mul(2.2).add(0.5));
+    const t = sat(float(0.55).add(nn.sub(0.5).mul(U.patches.mul(0.6))).add(fineT));
+    let col = ramp3(t, U.dark, U.mid, U.light);
+
+    // Irregular outlines: stones and marks sample a periodic warp.
+    const sw = vec2(
+      gradNoise(q.mul(P.mul(2)), P.mul(2), seed.add(90)),
+      gradNoise(q.mul(P.mul(2)), P.mul(2), seed.add(95)),
+    ).sub(0.5);
+    // A second, finer warp breaks the outlines into irregular, slightly angular
+    // slabs; with the coarse warp alone every stone was a smooth ellipse.
+    const swFine = vec2(
+      gradNoise(q.mul(P.mul(7)), P.mul(7), seed.add(96)),
+      gradNoise(q.mul(P.mul(7)), P.mul(7), seed.add(97)),
+    ).sub(0.5);
+    const st = stoneField(q.mul(P).add(sw.mul(0.35)).add(swFine.mul(0.09)), P, seed.add(100), U.feature, U.size);
+    const m1 = marksField(q.mul(P).add(sw.mul(0.2)), P, seed.add(120), U.accentAmt);
+    const m2 = marksField(q.mul(P.mul(2)), P.mul(2), seed.add(140), U.accentAmt);
+    const mDark = max(m1.x, m2.x.mul(0.5));
+    const mLite = max(m1.y, m2.y.mul(0.5));
+    col = mix(col, U.dark.mul(0.9), mDark.mul(0.16));
+    col = mix(col, U.light, mLite.mul(0.2));
+    col = mix(col, U.dark.mul(0.85), st.w.mul(0.15));
+
+    const bury = fract(st.z.mul(7.13)).mul(0.3);
+    // A faint painted bevel only (±7%). A strong one made the stones read as
+    // raised white chips instead of flat slabs set into the ground.
+    const stoneCol = U.accent.mul(st.z.mul(0.14).add(0.93)).mul(st.y.mul(0.07).add(1.0));
+    col = mix(col, mix(stoneCol, col, bury), st.x);
+    const h = sat(nn.mul(0.2).add(st.x.mul(0.3).mul(float(1).sub(bury))).sub(mDark.mul(0.1)));
+    // Blend height (albedo alpha): soft ~1 m sand lobes, so at a painted edge
+    // the sand pushes irregular bays into the grass.
+    //   - Only a SMALL stone bonus. With a big one the stones won deep into
+    //     the grass and the transition band read olive-grey (grass + stone,
+    //     measured ~154,165,116) where the reference band is grass + sand.
+    //   - 3 octaves, gently spread: 4 octaves spread hard made the band speckly.
+    const edgeN = gradFbm(q.mul(P).add(sw.mul(0.5)), P, seed.add(150), 3);
+    const bh = sat(float(0.25).add(sat(edgeN.sub(0.5).mul(1.6).add(0.5)).mul(0.45)).add(st.x.mul(0.12).mul(float(1).sub(bury))));
+    return { col, h, bh };
+  }
 
   if (name === "painted") {
     // Hand-painted ground, the Genshin open-field look, matched to a close-up
@@ -256,7 +424,11 @@ function pattern(name, U, q) {
       .mul(U.accentAmt.greaterThan(0.001).select(1.0, 0.0));
     col = mix(col, U.accent, dry.mul(0.75));
     const h = sat(n.mul(0.8).add(fine.mul(0.2)));
-    return { col, h };
+    // Blend height (albedo alpha): soft ~2 m lobes, so grass tongues reach into
+    // a neighbouring layer instead of a straight fade.
+    const edgeN = gradFbm(mq.mul(P.mul(5)), P.mul(5), seed.add(150), 3);
+    const bh = sat(float(0.25).add(sat(edgeN.sub(0.5).mul(1.6).add(0.5)).mul(0.5)));
+    return { col, h, bh };
   }
 
   if (name === "grass") {
@@ -359,7 +531,7 @@ export class ProceduralLayerBaker {
       light: uniform(new THREE.Vector3()), accent: uniform(new THREE.Vector3()),
       scale: uniform(24), bigScale: uniform(4), seed: uniform(1),
       patches: uniform(0.5), feature: uniform(0.5), detail: uniform(0.3),
-      accentAmt: uniform(0), rough: uniform(0.9), bump: uniform(0.5), ao: uniform(0.5),
+      accentAmt: uniform(0), size: uniform(0.5), rough: uniform(0.9), bump: uniform(0.5), ao: uniform(0.5),
     };
 
     const rgba8 = () => {
@@ -391,7 +563,13 @@ export class ProceduralLayerBaker {
     if (q) return q;
     const U = this.U;
     const cMat = this._baseMaterial();
-    cMat.fragmentNode = Fn(() => vec4(pattern(name, U, uv()).col, 1))();
+    // Alpha carries the BLEND HEIGHT the terrain's height blending reads for
+    // procedural slots (splatOverlayTsl, uHeightFromAlpha). Patterns without a
+    // dedicated one use their relief.
+    cMat.fragmentNode = Fn(() => {
+      const s = pattern(name, U, uv());
+      return vec4(s.col, s.bh ?? s.h);
+    })();
     const hMat = this._baseMaterial();
     hMat.fragmentNode = Fn(() => vec4(pattern(name, U, uv()).h, 0, 0, 1))();
     q = { color: new QuadMesh(cMat), height: new QuadMesh(hMat) };
@@ -437,6 +615,7 @@ export class ProceduralLayerBaker {
     U.feature.value = p.feature;
     U.detail.value = p.detail;
     U.accentAmt.value = p.accentAmt;
+    U.size.value = p.size;
     U.rough.value = p.rough;
     U.bump.value = p.bump;
     U.ao.value = p.ao;

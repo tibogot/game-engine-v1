@@ -136,6 +136,10 @@ export class TextureLibrary {
       // is used, so it is meant for a rock layer on steep ground, not for
       // everything. See the long note in splatOverlayTsl.js.
       uTriplanar: uniform(0.0),
+      // 1 = height blending reads this layer's height from its albedo alpha
+      // instead of its luminance. Set only while the slot is procedural (the
+      // bake writes a blend height there); image slots stay on luminance.
+      uHeightFromAlpha: uniform(0.0),
     }));
   }
 
@@ -450,6 +454,8 @@ export class TextureLibrary {
     this._ormData.set(orm, off);
     this._uploadLayer(this.albedoArrayTex, i);
     this._uploadLayer(this.ormArrayTex, i);
+    // The bake writes a blend height into albedo alpha; let height blending use it.
+    this.slotUniforms[i].uHeightFromAlpha.value = 1;
     this.slots[i].procThumbUrl = albedoThumbnailUrl(albedo);
     this.onProceduralBaked?.(i);
   }
@@ -462,6 +468,7 @@ export class TextureLibrary {
     const was = s.procedural !== null;
     s.procedural = null;
     s.procThumbUrl = null;
+    this.slotUniforms[i].uHeightFromAlpha.value = 0;
     return was;
   }
 

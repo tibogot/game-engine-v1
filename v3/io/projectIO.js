@@ -30,6 +30,8 @@
  *             tiling / normal / AO / roughness strengths and auto-paint rules.
  *             REFERENCES, not pixels — the images live in /textures. A map
  *             loaded from a dropped local file keeps only its name.
+ *   paintBlend { heightBlend, contrast }    how painted layers mix at their edges.
+ *             Was saved nowhere, so a game never got the edge the editor showed.
  *   spawn     { x, z, yaw }                 player start; null when unplaced
  *
  * Binary blobs stay raw (heightmap Float32, splat/snow Uint8) — no base64 bloat.
@@ -53,6 +55,7 @@ export function encodeProjectFile({
   snow, snowRes,        // Uint8Array, texels per side
   trees, foliage, props, roads, splines, lakes, rivers, rivers2, riversV2,
   paintLayers,          // textureLibrary.exportData() — slot metadata, no pixels
+  paintBlend,           // { heightBlend, contrast } — layer edge blending
   environment,          // { worldOcean } — the world LOOK; see the manifest note
   spawn,                // { x, z, yaw } player start, or null
   grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
@@ -93,6 +96,7 @@ export function encodeProjectFile({
     rivers2:  rivers2 ?? null,
     riversV2: riversV2 ?? null,
     paintLayers: paintLayers ?? null,
+    paintBlend: paintBlend ?? null,
     environment: environment ?? null,
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
@@ -158,6 +162,7 @@ export function decodeProjectFile(buffer) {
     rivers2:   manifest.rivers2,
     riversV2:  manifest.riversV2 ?? null,
     paintLayers: manifest.paintLayers ?? null,
+    paintBlend: manifest.paintBlend ?? null,
     environment: manifest.environment ?? null,
     spawn:     manifest.spawn ?? null,
     grassDensity:  blob("grassDensity"),
