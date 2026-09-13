@@ -187,6 +187,7 @@ import { createSurfaceOrbit } from "./surfaceOrbit.js";
 import { createDebugCamera } from "./debugCamera.js";
 import { createGamepadInput } from "./gamepadInput.js";
 import { createPauseMenu } from "./modularRoadPause.js";
+import { createSlowMo, createSlowMoBadge } from "./modularRoadSlowMo.js";
 import { createGearbox, GEARBOX } from "./gearbox.js";
 import { createSegmentDash } from "./segmentDash.js";
 import { createDriftScore, DRIFT_SCORE } from "./driftScore.js";
@@ -958,7 +959,24 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * drive mode always resumes.
    */
   let paused = false;
-  const worldDt = (dt) => (paused ? 0 : dt);
+  /*
+   * AND A RATE, since slow motion landed: the pause is its 0, hold-to-slow its
+   * ~0.3, the dev panel's `timeScale` multiplies in. Written once per frame by
+   * the game loop (see `worldRate = ...` there) and only READ by the hooks, so
+   * it is a plain number here with no dependency on anything declared later —
+   * `timeScale` itself lives thousands of lines below, and reading it from a
+   * hook would be a dead-zone read on the first engine frame.
+   */
+  let worldRate = 1;
+  const worldDt = (dt) => (paused ? 0 : dt * worldRate);
+  /*
+   * The slow-motion ease and its badge, HERE and not beside the game loop that
+   * drives them: `toggleMode()` resets them, and it is called during boot long
+   * before the loop's declarations run. The first cut put them down there and
+   * the game failed to start ("Cannot access 'slowMo' before initialization").
+   */
+  const slowMo = createSlowMo();
+  const slowMoBadge = typeof document !== "undefined" ? createSlowMoBadge() : null;
   /** The menu. Assigned once the run and respawn exist (see setPaused); every
    *  reader tolerates null, so an early key or blur during boot cannot throw. */
   let pauseMenu = null;
@@ -7848,6 +7866,8 @@ ${e.message}`);
   let padRespawnPressed = false;
   /** Set by readControls() when the pad's Start button goes down this frame. */
   let padPausePressed = false;
+  /** Set by readControls(): the pad's X button is held (slow motion). */
+  let padSlowMoHeld = false;
 
   /**
    * Merge keyboard + gamepad into one control frame.
@@ -7887,6 +7907,7 @@ ${e.message}`);
     const gp = gamepad.read();
     padRespawnPressed = !!gp?.respawnPressed;
     padPausePressed = !!gp?.pausePressed;
+    padSlowMoHeld = !!gp?.slowMo;
     if (!gp) {
       return {
         steerTarget: kbSteer,
@@ -9309,6 +9330,9 @@ ${e.message}`);
 
   async function toggleMode() {
     if (paused) setPaused(false);
+    slowMo.reset();
+    worldRate = timeScale;
+    slowMoBadge?.set(0);
     mode = mode === "build" ? "drive" : "build";
     const driving = mode === "drive";
     if (driving) clearBrush(); // no cursor brush while racing
@@ -9456,6 +9480,9 @@ ${e.message}`);
       getCity: () => cityWanted,
       isPaused: () => paused,
       setPaused: (on) => setPaused(on, "api"),
+      /** The live world rate: 0 paused, ~0.3 in slow motion, 1 otherwise. */
+      getWorldRate: () => (paused ? 0 : worldRate),
+      slowMoParams: slowMo.params,
       /** Buildings solid, or drive-through. */
       setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
       getCityCollide: () => cityCollide,
@@ -9948,9 +9975,10 @@ ${e.message}`);
   // One rAF drives game state; the ENGINE renders the scene on its own loop.
   // Physics advances only in whole FIXED_DT ticks so handling, race times and
   // ghosts stay framerate-independent; visuals interpolate the leftover.
-  // timeScale is the slow-mo contract: 1 = realtime. Later, hold-to-slow-mo
-  // sets this to ~0.3; race time is += FIXED_DT per tick so the HUD clock
-  // slows with the world. Do not change FIXED_DT itself.
+  // timeScale is the slow-mo contract: 1 = realtime. Hold-to-slow-mo (T, or the
+  // pad's X) eases the WORLD rate to ~0.3 on top of it — see modularRoadSlowMo.
+  // Race time is += FIXED_DT per tick, so the HUD clock slows with the world.
+  // Do not change FIXED_DT itself.
   let last = performance.now();
   let simAccum = 0;
   let autoLightAccum = 0;
@@ -9969,9 +9997,18 @@ ${e.message}`);
       // back to the keyboard after every fall.
       if (padPausePressed) setPaused(!paused, "pad");
       if (padRespawnPressed && !paused) respawn();
+      /*
+       * THE WORLD RATE, once per frame and before anything reads worldDt. The
+       * ease runs on REAL dt (see modularRoadSlowMo) and holds still while
+       * paused, so a slow-mo held into the pause menu is still eased out of
+       * afterwards rather than snapping.
+       */
+      const slowHeld = !paused && (!!keys.keyt || padSlowMoHeld);
+      worldRate = slowMo.update(paused ? 0 : dt, slowHeld) * timeScale;
+      slowMoBadge?.set(slowMo.amount);
       // Paused: no ticks at all, and no backlog to catch up on when it resumes
       // (`last` is refreshed every frame, so resuming starts from one frame).
-      simAccum += dt * (paused ? 0 : timeScale);
+      simAccum += worldDt(dt);
       let ticks = Math.floor(simAccum / FIXED_DT);
       if (ticks > MAX_SIM_TICKS) {
         ticks = MAX_SIM_TICKS;
@@ -10352,6 +10389,8 @@ ${e.message}`);
     getCity: () => cityWanted,
     isPaused: () => paused,
     setPaused: (on) => setPaused(on, "api"),
+    getWorldRate: () => (paused ? 0 : worldRate),
+    slowMoParams: slowMo.params,
     /** The ground the car stands on at a world point — terrain, city street,
      *  flat debug ground, or NaN where there is none. Same sampler placement
      *  and physics use, exposed for the console and for harnesses. */

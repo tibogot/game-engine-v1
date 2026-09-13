@@ -123,6 +123,9 @@ export function createGamepadInput() {
       analog,
       respawnPressed,
       pausePressed,
+      // X HELD slows the world — held, not edge-detected: slow motion lasts as
+      // long as the thumb stays down, like the keyboard's T.
+      slowMo: down(2) === 1,
     };
   }
 

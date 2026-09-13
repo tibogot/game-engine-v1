@@ -35,7 +35,8 @@ console.log("\n═══ PAUSE ═══\n");
 
 console.log("=== THE WORLD CLOCK EXISTS, AND IS DECLARED BEFORE ITS FIRST READER ===");
 {
-  const decl = SRC.indexOf("const worldDt = (dt) => (paused ? 0 : dt);");
+  // Since slow motion it is a rate: 0 paused, `worldRate` otherwise.
+  const decl = SRC.indexOf("const worldDt = (dt) => (paused ? 0 : dt * worldRate);");
   const firstHook = SRC.indexOf("app.addPreRenderHook?.(updateClouds);");
   check("worldDt is 0 while paused", decl >= 0);
   // The hooks are registered long before the game loop's own declarations; a
@@ -76,7 +77,7 @@ console.log("\n=== EVERY SYSTEM THAT ADVANCES THE WORLD ASKS IT ===");
   check("the ocean no longer runs on the wall clock",
     !/ocean\.update\([^)]*performance\.now\(\)/.test(SRC));
   check("the car's fixed ticks accumulate nothing while paused",
-    /simAccum \+= dt \* \(paused \? 0 : timeScale\)/.test(SRC));
+    /simAccum \+= worldDt\(dt\);/.test(SRC));
   check("rain stops updating (and stays visible) while paused", /if \(rainRunning && !paused\)/.test(SRC));
 }
 
