@@ -150,7 +150,13 @@ import { GapPreview } from "./gapPreview.js";
 import { RunTracker, formatRunTime } from "./modularRoadRun.js";
 import { GhostTrack, createGhostMesh } from "./modularRoadGhost.js";
 import { ModularRoadTireMarks } from "./modularRoadTireMarks.js";
-import { ModularRoadDriftSmoke, DEFAULT_DRIFT_SMOKE_SETTINGS } from "./modularRoadDriftSmoke.js";
+import { ModularRoadDriftSmoke, DEFAULT_DRIFT_SMOKE_SETTINGS, setDriftSmokeAerial } from "./modularRoadDriftSmoke.js";
+import {
+  FlipbookDriftSmoke,
+  DEFAULT_FLIPBOOK_SETTINGS,
+  loadSmokeAtlases,
+  copyDriftSmokeState,
+} from "./modularRoadDriftSmokeFlipbook.js";
 import { createHeadlightBeams } from "./modularRoadHeadlightBeam.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { createGpuStatsPanel } from "../../v3/render/gpuStatsPanel.js";
@@ -1055,6 +1061,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * is there whether the sky has clouds in it or not.
    */
   const aerial = createAerialPerspective({ camera });
+  // The composite runs after the smoke and hazes it by the ground behind it; the
+  // smoke shaders cancel that over their own pixels (see setDriftSmokeAerial). Set
+  // here, before any smoke is constructed, because the node graphs read it on build.
+  setDriftSmokeAerial(aerial.hazeBehind);
 
   /**
    * SKY WEATHER — one preset moving clouds, haze and shadows together. It drives the
@@ -5692,7 +5702,45 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   // 4b) ── DRIVING FX + AUDIO ────────────────────────────────────────────────
   const tireMarks = new ModularRoadTireMarks(scene);
-  const driftSmoke = new ModularRoadDriftSmoke(scene, { ...DEFAULT_DRIFT_SMOKE_SETTINGS });
+  /*
+   * DRIFT SMOKE HAS TWO LOOKS, one settings object. "flipbook" (baked atlases on
+   * the puffs and the bank, tuned in smoke-lab.html) is the default; "procedural"
+   * is the volumetric shader it replaced, kept one click away in the dev panel
+   * while the flipbook is judged in the game.
+   *
+   * Both instances share `smokeSettings`, so every existing panel slider drives
+   * whichever is live. The procedural one is built only on first switch — a
+   * look nobody picks never costs a pipeline. `driftSmoke` is re-pointed on a
+   * switch; everything below reads it at call time.
+   */
+  const smokeSettings = { ...DEFAULT_DRIFT_SMOKE_SETTINGS };
+  const smokeFlipSettings = { ...DEFAULT_FLIPBOOK_SETTINGS };
+  const smokeAtlases = loadSmokeAtlases().textures;
+  const smokeLooks = {
+    flipbook: new FlipbookDriftSmoke(scene, smokeSettings, smokeAtlases, smokeFlipSettings),
+    procedural: null,
+  };
+  let driftSmoke = smokeLooks.flipbook;
+  let smokeLook = "flipbook";
+  function setDriftSmokeLook(kind) {
+    if (kind !== "flipbook" && kind !== "procedural") return;
+    if (kind === smokeLook) return;
+    smokeLooks[kind] ??= new ModularRoadDriftSmoke(scene, smokeSettings);
+    const prev = driftSmoke;
+    const next = smokeLooks[kind];
+    // Carry the live plume, the weather and the light over, so the switch is
+    // an A/B of the same smoke rather than a reset.
+    copyDriftSmokeState(prev, next);
+    prev.setVisible(false);
+    prev.reset();
+    next.setVisible(true);
+    next.setWetness(prev._wetness ?? 0);
+    next.uSunWorld.value.copy(prev.uSunWorld.value);
+    next.uSunColor.value.copy(prev.uSunColor.value);
+    next.setAmbientColors(prev.uSkyCol.value, prev.uGroundCol.value);
+    driftSmoke = next;
+    smokeLook = kind;
+  }
   const sparks = new ModularRoadSparks(scene, { ...DEFAULT_SPARK_SETTINGS });
   // Cones, tyres, gates. Physics props carry collision:"none" so they stay OUT of the
   // static bake — see the note on PROP_CATALOG — and are simulated instead.
@@ -9667,6 +9715,9 @@ ${e.message}`);
       // system hides itself only when neither can produce a particle.
       setDriftSmokeEnabled: (on) => driftSmoke.setSmokeEnabled(on),
       setWetSprayEnabled: (on) => driftSmoke.setSprayEnabled(on),
+      getDriftSmokeLook: () => smokeLook,
+      setDriftSmokeLook,
+      getDriftSmokeFlipSettings: () => smokeFlipSettings,
       cameraParams: chase.params,
       // The BUILDER itself, for the panel controls that edit geometry rather
       // than a uniform — the flip ramp's shape has to rewrite placed pieces
@@ -9899,6 +9950,8 @@ ${e.message}`);
      * Safe to run last: they are cosmetic, nothing downstream reads them, and
      * nothing here feeds the deterministic sim.
      */
+    // Whether the smoke must cancel the aerial composite this frame (see modularRoadAerial).
+    aerial.syncLive();
     if (mode === "drive") {
       syncSmokeLamps();
       driftSmoke.updateFromVehicle(vehicle, camera, dt, keys);
@@ -10324,8 +10377,11 @@ ${e.message}`);
       applyRoadLook();
     },
   };
-  handle.driftSmoke = driftSmoke; // console debugging: lamps, settings, pools
+  // Console debugging: lamps, settings, pools. A getter, because the smoke look
+  // switch re-points `driftSmoke`.
+  Object.defineProperty(handle, "driftSmoke", { get: () => driftSmoke, enumerable: true });
   handle.smokeNightK = () => _smokeNightK;
+  handle.aerial = aerial; // console debugging: .live / .lastComposite / .params
   window.__roadGame = handle; // console debugging (window.__road is just the engine app)
   return handle;
 }

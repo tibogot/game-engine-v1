@@ -5,59 +5,242 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Drift Smoke Lab</title>
     <style>
+      :root {
+        --bg: #0c1018;
+        --panel: rgba(14, 19, 29, 0.94);
+        --panel-2: #151c2a;
+        --line: rgba(140, 170, 215, 0.13);
+        --text: #e8eef7;
+        --dim: #8d9bb0;
+        --faint: #5d6a7e;
+        --accent: #ff7a3d;
+        --accent-2: #4cc3ff;
+        --ok: #5fd68a;
+        --track: #253046;
+      }
       * { box-sizing: border-box; }
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f16; color: #e6ecf5;
-                   font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+                   font: 12px/1.4 ui-sans-serif, system-ui, "Segoe UI", sans-serif; }
       canvas { display: block; width: 100%; height: 100%; }
-      #hud {
+      button { font: inherit; color: inherit; }
+
+      /* ── stats (top-left) ─────────────────────────────────────────── */
+      #stats {
         position: fixed; top: 12px; left: 12px; z-index: 10;
-        min-width: 250px; max-width: 330px;
-        padding: 12px 14px;
-        background: rgba(10, 15, 24, 0.72);
-        border: 1px solid rgba(150, 180, 220, 0.18);
-        border-radius: 10px;
-        backdrop-filter: blur(8px);
-        pointer-events: none;
-        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+        display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none;
       }
-      #hud h1 {
-        margin: 0 0 4px; font-size: 12px; letter-spacing: 0.08em;
-        text-transform: uppercase; color: #7f93ad; font-weight: 700;
+      .stat {
+        background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+        padding: 6px 10px; min-width: 64px;
       }
-      #hud .title { margin: 0 0 8px; font-size: 18px; font-weight: 650; color: #f2f6fb; }
-      #hud .meta { color: #9fb0c6; font-size: 12px; }
-      #hud .meta b { color: #f2f6fb; font-weight: 600; font-variant-numeric: tabular-nums; }
-      #hud .keys {
-        margin-top: 10px; padding-top: 8px;
-        border-top: 1px solid rgba(150, 180, 220, 0.16);
-        color: #7f93ad; font-size: 11px; line-height: 1.55;
+      .stat small { display: block; color: var(--faint); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+      .stat b { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+      .stat.look b { color: var(--accent); }
+
+      /* ── transport (bottom-centre) ────────────────────────────────── */
+      #transport {
+        position: fixed; left: calc((100vw - var(--pw, 360px)) / 2); bottom: 16px; transform: translateX(-50%);
+        z-index: 10; display: flex; align-items: center; gap: 6px;
+        background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.45);
       }
-      #hud .keys b { color: #cfe0f2; font-weight: 600; }
+      body.panel-hidden #transport { left: 50vw; }
+      .tbtn {
+        height: 32px; min-width: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid transparent;
+        background: var(--panel-2); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+        white-space: nowrap;
+      }
+      .tbtn:hover { border-color: var(--line); background: #1c2537; }
+      .tbtn.on { background: rgba(255,122,61,.16); border-color: rgba(255,122,61,.5); color: #ffd2bd; }
+      .tbtn.play { min-width: 44px; font-size: 14px; }
+      .tbtn kbd { color: var(--faint); font: 10px ui-monospace, monospace; }
+      .sep { width: 1px; height: 22px; background: var(--line); margin: 0 2px; }
+
+      /* ── panel (right) ────────────────────────────────────────────── */
+      #panel {
+        position: fixed; top: 0; right: 0; bottom: 0; width: var(--pw, 360px); z-index: 20;
+        background: var(--panel); border-left: 1px solid var(--line);
+        /* ONE scroll for the whole panel — header and footer scroll away with
+           the sections, so an open section gets the full height. */
+        overflow-y: auto;
+        backdrop-filter: blur(10px);
+      }
+      #panel::-webkit-scrollbar { width: 8px; }
+      #panel::-webkit-scrollbar-thumb { background: #243047; border-radius: 4px; }
+      body.panel-hidden #panel { display: none; }
+      #showPanel {
+        position: fixed; top: 12px; right: 12px; z-index: 20; display: none;
+      }
+      body.panel-hidden #showPanel { display: inline-flex; }
+      .ph { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
+      .ph-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+      .ph h1 { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: .02em; }
+      .ph h1 span { color: var(--accent); }
+      .iconbtn { background: none; border: 1px solid var(--line); border-radius: 6px; height: 24px; padding: 0 8px; cursor: pointer; color: var(--dim); }
+      .iconbtn:hover { color: var(--text); }
+
+      .ab { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: #0a0e15; border-radius: 10px; padding: 4px; }
+      .ab button {
+        border: 0; border-radius: 7px; padding: 9px 6px; cursor: pointer; background: transparent; color: var(--dim);
+        font-weight: 600; font-size: 12.5px;
+      }
+      .ab button.on { background: var(--accent); color: #1a0d05; }
+      .ab-note { color: var(--faint); font-size: 10.5px; margin-top: 6px; }
+
+      .quick { padding: 8px 14px 10px; border-bottom: 1px solid var(--line); display: grid; gap: 7px; }
+      .qrow { display: grid; grid-template-columns: 62px 1fr; align-items: center; gap: 8px; }
+      .qrow > span { color: var(--dim); font-size: 11px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+      .chip {
+        border: 1px solid var(--line); background: var(--panel-2); color: var(--dim);
+        border-radius: 999px; padding: 3px 9px; cursor: pointer; font-size: 11px;
+      }
+      .chip:hover { color: var(--text); }
+      .chip.on { color: #06131b; background: var(--accent-2); border-color: var(--accent-2); font-weight: 600; }
+      .chip.tog.on { background: rgba(95,214,138,.18); color: #bff3d2; border-color: rgba(95,214,138,.55); }
+
+      .search { padding: 8px 14px; border-bottom: 1px solid var(--line); }
+      .search input {
+        width: 100%; background: #0a0e15; border: 1px solid var(--line); color: var(--text);
+        border-radius: 7px; padding: 6px 9px; font: inherit; outline: none;
+      }
+      .search input:focus { border-color: rgba(76,195,255,.5); }
+
+      #sections { padding: 4px 0 8px; }
+      .sec { border-bottom: 1px solid var(--line); }
+      .sec-h {
+        display: flex; align-items: center; gap: 8px; padding: 9px 14px; cursor: pointer; user-select: none;
+      }
+      .sec-h:hover { background: rgba(255,255,255,.02); }
+      .sec-h .car { color: var(--faint); width: 10px; transition: transform .12s; }
+      .sec.open .sec-h .car { transform: rotate(90deg); }
+      .sec-h .t { flex: 1; font-weight: 600; }
+      .sec-h .mods { color: var(--accent); font-size: 10.5px; }
+      .sec-h .rst { opacity: 0; }
+      .sec-h:hover .rst { opacity: 1; }
+      .sec-b { display: none; padding: 2px 14px 10px; }
+      .sec.open .sec-b { display: block; }
+      .sec-note { color: var(--faint); font-size: 10.5px; margin: 0 0 6px; }
+
+      .row { display: grid; grid-template-columns: 118px 1fr 52px; align-items: center; gap: 8px; padding: 3px 0; }
+      .row.bool, .row.select, .row.color { grid-template-columns: 118px 1fr; }
+      .row label {
+        color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; position: relative;
+        padding-left: 9px;
+      }
+      .row label::before {
+        content: ""; position: absolute; left: 0; top: 50%; width: 4px; height: 4px; margin-top: -2px;
+        border-radius: 50%; background: transparent;
+      }
+      .row.mod label { color: var(--text); }
+      .row.mod label::before { background: var(--accent); }
+      .row.hide { display: none; }
+      input[type=range] {
+        -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: transparent; cursor: pointer;
+      }
+      input[type=range]::-webkit-slider-runnable-track {
+        height: 4px; border-radius: 2px;
+        background: linear-gradient(to right, var(--accent-2) var(--p, 0%), var(--track) var(--p, 0%));
+      }
+      input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; margin-top: -4px;
+        background: #e9f6ff; border: 0; box-shadow: 0 0 0 3px rgba(76,195,255,.25);
+      }
+      input[type=number] {
+        width: 100%; background: #0a0e15; border: 1px solid transparent; color: var(--text); border-radius: 5px;
+        padding: 2px 4px; font: 11px ui-monospace, monospace; text-align: right; outline: none;
+        -moz-appearance: textfield;
+      }
+      input[type=number]::-webkit-inner-spin-button { display: none; }
+      input[type=number]:focus { border-color: rgba(76,195,255,.5); }
+      input[type=color] { width: 44px; height: 20px; border: 0; padding: 0; background: none; cursor: pointer; }
+      select {
+        background: #0a0e15; color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; font: inherit;
+      }
+      .switch { width: 30px; height: 16px; border-radius: 8px; background: var(--track); position: relative; cursor: pointer; border: 0; padding: 0; }
+      .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #9fb0c6; transition: left .12s; }
+      .switch.on { background: var(--ok); }
+      .switch.on::after { left: 16px; background: #fff; }
+
+      .pf { padding: 10px 14px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+      .pf .btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+      .pf button {
+        background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px; cursor: pointer; color: var(--dim);
+      }
+      .pf button:hover { color: var(--text); }
+      .pf .reset-all { border-color: rgba(255,122,61,.45); color: #ffc7ab; }
+      .pf .reset-all:hover { background: rgba(255,122,61,.14); color: #ffe3d6; }
+      .keys { color: var(--faint); font-size: 10.5px; line-height: 1.6; }
+      .keys kbd { color: var(--dim); font: 10px ui-monospace, monospace; background: #0a0e15; border-radius: 3px; padding: 0 4px; }
+
       #err {
-        position: fixed; left: 12px; bottom: 12px; z-index: 20;
+        position: fixed; left: 12px; bottom: 70px; z-index: 30;
         max-width: 560px; padding: 10px 12px; display: none;
         background: rgba(60, 12, 12, 0.92); border: 1px solid #a44;
         border-radius: 8px; color: #ffb0b0; white-space: pre-wrap;
       }
+      #toast {
+        position: fixed; top: 70px; left: 12px; z-index: 30; padding: 6px 10px; border-radius: 7px;
+        background: var(--panel); border: 1px solid var(--line); color: var(--text); opacity: 0; transition: opacity .2s;
+        pointer-events: none;
+      }
+      #toast.show { opacity: 1; }
     </style>
   </head>
   <body>
-    <div id="hud">
-      <h1>Drift smoke lab</h1>
-      <div class="title" id="s-mode">—</div>
-      <div class="meta">
-        Puffs <b id="s-puffs">0</b> · Bank <b id="s-bank">0</b><br />
-        Sun <b id="s-sun">—</b> · View <b id="s-cam">—</b><br />
-        GPU <b id="s-gpu">—</b> · <b id="s-fps">—</b> fps
-      </div>
-      <div class="keys">
-        <b>M</b> emitter mode (donut / burnout / fly-by)<br />
-        <b>1–4</b> noon / backlit sunset / overcast / night<br />
-        <b>C</b> orbit / chase · <b>E</b> emit on/off<br />
-        <b>T</b> slow motion · <b>W</b> wet spray A/B<br />
-        <b>R</b> reset view · orbit: drag / wheel
-      </div>
+    <div id="stats">
+      <div class="stat look"><small>Puffs look</small><b id="s-look">—</b></div>
+      <div class="stat"><small>GPU</small><b id="s-gpu">—</b></div>
+      <div class="stat"><small>Puffs</small><b id="s-puffs">0</b></div>
+      <div class="stat"><small>Bank</small><b id="s-bank">0</b></div>
+      <div class="stat"><small>FPS</small><b id="s-fps">—</b></div>
     </div>
+    <div id="toast"></div>
+
+    <div id="transport">
+      <button class="tbtn play" id="t-play" title="Play / pause (Space)">❚❚</button>
+      <button class="tbtn" id="t-step" title="Step one frame (.)">Step <kbd>.</kbd></button>
+      <div class="sep"></div>
+      <div id="t-speed" style="display:flex;gap:4px"></div>
+      <div class="sep"></div>
+      <button class="tbtn" id="t-emit" title="Continuous emission (E)">Emit <kbd>E</kbd></button>
+      <button class="tbtn" id="t-burst" title="Emit a short burst (B)">Burst <kbd>B</kbd></button>
+      <button class="tbtn" id="t-clear" title="Clear all particles (X)">Clear <kbd>X</kbd></button>
+    </div>
+
+    <button class="tbtn" id="showPanel">Panel <kbd>H</kbd></button>
+    <aside id="panel">
+      <div class="ph">
+        <div class="ph-top">
+          <h1>Drift smoke <span>lab</span></h1>
+          <button class="iconbtn" id="hidePanel" title="Hide panel (H)">Hide</button>
+        </div>
+        <div class="ab" id="ab"></div>
+        <div class="ab-note">A/B keeps the live particles, so pause and flip to compare the same frame. <b>F</b> toggles.</div>
+      </div>
+      <div class="quick" id="quick"></div>
+      <div class="search"><input id="search" placeholder="Filter settings…  ( / )" /></div>
+      <div id="sections"></div>
+      <div class="pf">
+        <div class="btns">
+          <button id="p-aaa" title="The game's shipping settings (the AAA look)">Game defaults</button>
+          <button id="p-light" title="AAA, lighter and less dense — candidate, not shipped">AAA light</button>
+          <button id="p-old" title="Pre-AAA look, for a before/after">Old look</button>
+        </div>
+        <div class="btns">
+          <button id="io-export">Export .json</button>
+          <button id="io-import">Import .json</button>
+          <button id="io-copy" title="Copy only what differs from the game defaults">Copy diff</button>
+        </div>
+        <button id="p-reset-all" class="reset-all"
+          title="Smoke settings, flipbook dials, view and remembered panel state — back to a fresh start">Reset all</button>
+        <div class="keys">
+          <kbd>Space</kbd> pause · <kbd>.</kbd> step · <kbd>F</kbd> A/B · <kbd>1–4</kbd> time of day · <kbd>M</kbd> emitter ·
+          <kbd>C</kbd> camera · <kbd>W</kbd> wet · <kbd>T</kbd> slow-mo · <kbd>R</kbd> reset view · <kbd>H</kbd> panel ·
+          double-click a label to reset it
+        </div>
+      </div>
+    </aside>
     <div id="err"></div>
 
     <script type="module">
@@ -66,41 +249,47 @@
        *
        * The smoke SYSTEM is imported from the game file, not reimplemented —
        * modularRoadDriftSmoke.js is the exact code road.html runs, so nothing
-       * tuned here can drift from what ships. The 2026-09-05 AAA pass was
-       * developed here behind a lab-only subclass and then folded into that
-       * file; the "AAA pass" folder now binds straight to the shipping
-       * settings, and "Old look" restores the pre-pass numbers for an A/B.
-       * What the lab replaces is the CAR:
-       * a virtual rig drives the emitter contact points, so the smoke can be
-       * judged without physics, a track, or a lap between tweaks.
+       * tuned here can drift from what ships. What the lab replaces is the CAR:
+       * a virtual rig drives the emitter contact points.
        *
-       * Why each fixture is here:
+       * Layout of this page, and why:
        *
-       *   BACKLIGHT ON A KEY. The Henyey-Greenstein silver lining is the
-       *   strongest volume cue the shader has, and it only exists looking
-       *   TOWARD the sun. A lab that opens at noon and stays there never shows
-       *   it. Sun preset 2 puts the sun low and behind the plume from the
-       *   default chase view.
+       *   STATIC BY DEFAULT. The rig opens parked on a burnout — wheels spinning,
+       *   car still — so a plume can be studied from one place. Donut and fly-by
+       *   are one click away for judging it in motion.
        *
-       *   SLOW MOTION. Erosion, fade-in pop, and the puff→bank handoff all
-       *   happen inside two seconds. At 1× the eye reads the aggregate; at
-       *   0.15× it reads each particle's life, which is where the tells live.
+       *   A TRANSPORT BAR. Pause freezes the WORLD (not the camera), so you can
+       *   orbit a frozen plume; Step advances one frame; Burst fires a short
+       *   emission so a single puff's life can be read start to end.
        *
-       *   A CHASE VIEW, matched to the game's boom (7.5 m back, 1.55 m up).
-       *   Smoke tuned from a free orbit is tuned at framings the player never
-       *   sees — same argument as the wet-road lab's grazing camera.
+       *   A/B THAT KEEPS THE PARTICLES. Both looks (procedural volume and the
+       *   baked flipbook) are live instances; switching copies the particle
+       *   state across, so a paused frame compares like for like.
        *
-       *   PROPS ON THE FLOOR. The soft-depth fade and the "puff behind the
-       *   guardrail" case need something to intersect. Two walls and a pillar
-       *   sit on the donut circle on purpose.
+       *   REFERENCE BACKDROP. A black / 18 % grey / white card behind the plume —
+       *   smoke that reads on only one of them is wrongly exposed. The sky is a
+       *   gradient with a sun glow, so the backlit HG lobe has something to
+       *   read against.
        */
       import * as THREE from "three";
+      import {
+        dot, float, max, mix, positionWorldDirection, pow, saturate, uniform,
+      } from "three/tsl";
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-      import GUI from "three/addons/libs/lil-gui.module.min.js";
       import {
         ModularRoadDriftSmoke,
         DEFAULT_DRIFT_SMOKE_SETTINGS,
       } from "./modularRoadDriftSmoke.js";
+      // Lab-only: the same system with the puff shader swapped for a baked
+      // flipbook atlas. The game never imports this.
+      import {
+        LabDriftSmoke,
+        LabFlipbookDriftSmoke,
+        DEFAULT_FLIPBOOK_SETTINGS,
+        SMOKE_ATLASES,
+        loadLabAtlases,
+      } from "./smokeLabFlipbook.js";
+      const ATLAS_OPTIONS = Object.entries(SMOKE_ATLASES).map(([k, a]) => [k, a.label]);
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => {
@@ -109,51 +298,53 @@
         el.textContent = e?.stack || String(e);
         console.error(e);
       };
+      let toastTimer = 0;
+      const toast = (msg) => {
+        const t = $("toast");
+        t.textContent = msg;
+        t.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => t.classList.remove("show"), 1400);
+      };
 
       /* ===================================================================== *
        * STATE                                                                 *
        * ===================================================================== */
 
-      /**
-       * A deep copy, deliberately: the constructor default is the exported
-       * DEFAULT_DRIFT_SMOKE_SETTINGS object ITSELF, and a lab that mutates the
-       * module's default object would leak every slider into any other page
-       * that imports it during the same session.
-       */
+      /** Deep copy: never mutate the module's exported default object. */
       const settings = structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS);
+      const flip = structuredClone(DEFAULT_FLIPBOOK_SETTINGS);
 
-      const MODES = ["donut", "burnout", "flyby"];
+      const MODES = ["burnout", "donut", "flyby"];
+      const MODE_LABEL = { burnout: "Burnout (static)", donut: "Donut", flyby: "Fly-by" };
       const rig = {
-        mode: "donut",
-        /** m/s along the path. Donut default ≈ a held second-gear drift. */
-        speed: 15,
+        mode: "burnout",
+        /** m/s — path speed, or the "wheel speed" of a parked burnout. */
+        speed: 12,
         radius: 12,
-        /** Visual yaw of the proxy car away from its velocity, degrees. Only
-         *  cosmetic — the emitter cares about velocity and contact points. */
         driftYaw: 32,
         intensity: 1.0,
         emit: true,
-        /** 0 = dry smoke, 1 = full wet spray. Mirrors setWetness. */
+        /** "both" rear wheels, or just the left one — a single plume to study. */
+        wheels: "both",
         wetness: 0,
         timeScale: 1.0,
-        /** Lamp drive for the proxy car — the game derives these from the
-         *  chassis and the brake state; here they are dials. */
-        lampsOn: true,
+        paused: false,
+        /** Driven by time of day in applySun (on at sunset/night). */
+        lampsOn: false,
         braking: true,
         tailIntensity: 3.0,
         headIntensity: 5.0,
       };
+      const RIG_DEFAULTS = structuredClone(rig);
 
-      const CAMS = ["orbit", "chase"];
+      const CAMS = ["orbit", "side", "top", "chase"];
       const cam = { mode: "orbit", distance: 7.5, height: 1.55, lookAhead: 9 };
 
-      /**
-       * THE PRE-AAA LOOK, for A/B. These were the game's defaults before the
-       * 2026-09-05 pass (see the header of modularRoadDriftSmoke.js); the new
-       * dials are all set to their "off" value, so the button is an honest
-       * before/after on the same shader. `hemi` drives whether the sun
-       * presets feed the hemisphere ambient (the old look had a flat one).
-       */
+      const scn = { sun: "noon", board: true, props: true, car: true };
+      const look = { hemi: true, puffs: "procedural" };
+
+      /** The pre-AAA look, for a before/after on the same shader. */
       const OLD_LOOK = {
         emitRate: 150, opacity: 0.22,
         sizeMin: 0.42, sizeMax: 0.85, sizeGrowth: 3.4,
@@ -173,73 +364,120 @@
           colorHot: "#6e6f78", colorCool: "#c2c6d0",
         },
       };
-      const look = { hemi: true };
 
       /**
-       * Sun setups. Each drives the scene light, the backdrop and the smoke's
-       * own sun uniforms together — the smoke is unlit-material shaded by hand,
+       * AAA LIGHT — a candidate, not shipped. The AAA shape, with the two things
+       * that read as "too dark, too dense" dialled back. Applied on top of the
+       * game defaults. Starting values, meant to be tuned by eye:
+       *   darker  ← absorb (self-shadow) + ambient + the fresh colour
+       *   denser  ← opacity + opticalK (solid cores) + emit rate
+       */
+      const AAA_LIGHT = {
+        absorb: 1.4,          // 2.2
+        ambient: 0.6,         // 0.42
+        colorHot: "#d2d3d6",  // #b9babe
+        opacity: 0.38,        // 0.55
+        opticalK: 1.2,        // 1.8
+        emitRate: 170,        // 220
+      };
+
+      /**
+       * Time of day. Each drives the scene light, the sky gradient and the
+       * smoke's own sun/ambient uniforms together — the smoke is shaded by hand,
        * so nothing syncs it except us (same contract as roadGame.js).
        */
       const SUNS = {
         noon: {
           label: "Noon",
-          dir: [0.35, 0.85, 0.25], color: 0xfff4e0, intensity: 2.5,
-          sky: 0x8fb0d4, horizon: 0xb8c8da, ground: 0x30343b,
-          hemi: 0.9, exposure: 1.0,
-          // Hemisphere ambient for the smoke: cool skylight from above,
-          // asphalt bounce from below.
+          dir: [0.35, 0.85, 0.25], color: 0xfff1d6, intensity: 2.6,
+          zenith: 0x2f6fc9, horizon: 0xb9d3ec, ground: 0x2a2b2e,
+          hemiSky: 0x9cc2ee, hemiGround: 0x3b3632, hemi: 0.85, exposure: 1.0,
           ambSky: 0xcfe0f5, ambGround: 0x3a3d42,
         },
         sunset: {
-          label: "Backlit sunset",
-          // Low and roughly behind the donut from the opening view, so the
-          // plume sits between camera and sun — the HG lobe's home ground.
-          dir: [-0.85, 0.10, -0.45], color: 0xffa050, intensity: 2.2,
-          sky: 0x2a3352, horizon: 0xff9a4a, ground: 0x1c1a20,
-          hemi: 0.35, exposure: 1.05,
-          // A sunset SKY is warm near the horizon where the smoke lives.
+          label: "Sunset",
+          // Low and behind the plume from the default view — the HG lobe's home.
+          dir: [-0.25, 0.09, -0.97], color: 0xff9448, intensity: 2.2,
+          zenith: 0x28305e, horizon: 0xff9555, ground: 0x1d1a1e,
+          hemiSky: 0x8a6a8a, hemiGround: 0x2a2024, hemi: 0.45, exposure: 1.05,
           ambSky: 0xd8916a, ambGround: 0x2a2024,
         },
         overcast: {
           label: "Overcast",
-          dir: [0.2, 0.9, 0.1], color: 0xccd4e0, intensity: 1.2,
-          sky: 0x6a7484, horizon: 0x9aa4b2, ground: 0x272a30,
-          hemi: 1.3, exposure: 1.0,
+          dir: [0.2, 0.9, 0.1], color: 0xd6dde8, intensity: 1.2,
+          zenith: 0x7b8898, horizon: 0xb5c0cc, ground: 0x2a2c30,
+          hemiSky: 0xb8c2ce, hemiGround: 0x33373d, hemi: 1.3, exposure: 1.0,
           ambSky: 0xb8c2ce, ambGround: 0x33373d,
         },
-      };
-      SUNS.night = {
-        label: "Night",
-        // A moon, faint and blue; the car's own lamps do the lighting.
-        dir: [0.3, 0.7, -0.4], color: 0x7d8fc4, intensity: 0.25,
-        sky: 0x0a0f1e, horizon: 0x141a2c, ground: 0x05060a,
-        hemi: 0.15, exposure: 1.0,
-        ambSky: 0x1a2238, ambGround: 0x07080c,
+        night: {
+          label: "Night",
+          dir: [0.3, 0.7, -0.4], color: 0x7d8fc4, intensity: 0.25,
+          zenith: 0x03060d, horizon: 0x111a2e, ground: 0x050608,
+          hemiSky: 0x1a2238, hemiGround: 0x07080c, hemi: 0.2, exposure: 1.0,
+          ambSky: 0x1a2238, ambGround: 0x07080c,
+        },
       };
       const SUN_ORDER = ["noon", "sunset", "overcast", "night"];
-      let sunName = "noon";
+
+      /* ===================================================================== *
+       * UI PREFS (per browser, convenience only)                              *
+       * ===================================================================== */
+
+      const PREFS_KEY = "smokeLab.prefs.v2";
+      const prefs = (() => {
+        try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; }
+      })();
+      const savePrefs = () => {
+        try {
+          localStorage.setItem(PREFS_KEY, JSON.stringify({
+            open: [...openSections], puffs: look.puffs, sun: scn.sun, cam: cam.mode,
+            board: scn.board, props: scn.props, car: scn.car, hidden: document.body.classList.contains("panel-hidden"),
+            flip,
+          }));
+        } catch { /* private window etc. */ }
+      };
+      const openSections = new Set(prefs.open ?? ["emitter", "flip"]);
+      if (prefs.puffs) look.puffs = prefs.puffs;
+      if (prefs.sun && SUNS[prefs.sun]) scn.sun = prefs.sun;
+      if (prefs.cam && CAMS.includes(prefs.cam)) cam.mode = prefs.cam;
+      for (const k of ["board", "props", "car"]) if (typeof prefs[k] === "boolean") scn[k] = prefs[k];
+      if (prefs.flip) Object.assign(flip, prefs.flip);
+      if (prefs.hidden) document.body.classList.add("panel-hidden");
 
       /* ===================================================================== *
        * SCENE                                                                 *
        * ===================================================================== */
 
       let renderer, scene, camera, controls;
-      let sunLight, hemiLight, sunDisc;
+      let sunLight, hemiLight;
       let smoke = null;
+      /** Both looks, built on demand; only the active one updates and draws. */
+      const instances = { procedural: null, flipbook: null };
+      /** @type {Record<string, THREE.Texture>} */
+      let flipAtlases = {};
+      const hasAtlas = () => Object.keys(flipAtlases).length > 0;
       let carRig = null;
-      let gui = null;
+      let boardGroup = null, propsGroup = null, donutRing = null;
       let hasTimestamps = false;
+      const sky = {
+        zenith: uniform(new THREE.Color()), horizon: uniform(new THREE.Color()),
+        ground: uniform(new THREE.Color()), sunDir: uniform(new THREE.Vector3(0, 1, 0)),
+        sunCol: uniform(new THREE.Color()),
+      };
 
       const perf = { gpuSum: 0, gpuN: 0, since: 0, fps: 0, frames: 0 };
       const timer = new THREE.Timer();
+      /** Frames left to advance while paused (Step). */
+      let stepFrames = 0;
+      /** Seconds of forced emission left (Burst). */
+      let burstLeft = 0;
 
-      /** Virtual car pose + wheel contacts, world space. */
       const car = {
-        pos: new THREE.Vector3(12, 0, 0),
-        vel: new THREE.Vector3(0, 0, 15),
+        pos: new THREE.Vector3(0, 0, 0),
+        vel: new THREE.Vector3(0, 0, 12),
         heading: new THREE.Vector3(0, 0, 1),
-        angle: 0,       // donut phase
-        flyT: -60,      // fly-by parameter
+        angle: 0,
+        flyT: -60,
       };
       const _rear0 = new THREE.Vector3();
       const _rear1 = new THREE.Vector3();
@@ -248,11 +486,12 @@
       const _right = new THREE.Vector3();
       const _fwd = new THREE.Vector3();
       const _tmp = new THREE.Vector3();
+      const _tmp2 = new THREE.Vector3();
       const _lampPos = new THREE.Vector3();
       const _tailCol = new THREE.Color(0xff2020);
       const _headCol = new THREE.Color(0xfff0d0);
-      /** Rear pair dry; all four in the wet, same as updateFromVehicle. */
       const _rearPts = [_rear0, _rear1];
+      const _onePt = [_rear0];
       const _allPts = [_front0, _front1, _rear0, _rear1];
 
       async function createTimingDevice() {
@@ -281,16 +520,17 @@
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        document.body.appendChild(renderer.domElement);
+        document.body.prepend(renderer.domElement);
         await renderer.init();
 
         scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.5, 900);
+        scene.backgroundNode = buildSkyNode();
+        camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.3, 900);
 
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.08;
-        controls.minDistance = 2;
+        controls.minDistance = 1.5;
         controls.maxDistance = 140;
 
         hemiLight = new THREE.HemisphereLight(0xffffff, 0x808080, 1);
@@ -300,134 +540,261 @@
         sunLight.castShadow = true;
         sunLight.shadow.mapSize.set(2048, 2048);
         sunLight.shadow.camera.near = 1;
-        sunLight.shadow.camera.far = 220;
-        sunLight.shadow.camera.left = -45;
-        sunLight.shadow.camera.right = 45;
-        sunLight.shadow.camera.top = 45;
-        sunLight.shadow.camera.bottom = -45;
+        sunLight.shadow.camera.far = 260;
+        for (const k of ["left", "bottom"]) sunLight.shadow.camera[k] = -40;
+        for (const k of ["right", "top"]) sunLight.shadow.camera[k] = 40;
         sunLight.shadow.bias = -0.0006;
         sunLight.shadow.normalBias = 0.03;
         scene.add(sunLight);
         scene.add(sunLight.target);
 
-        // A visible sun. The whole point of the backlit preset is judging the
-        // silver lining against the bright thing causing it.
-        sunDisc = new THREE.Mesh(
-          new THREE.SphereGeometry(14, 24, 16),
-          new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }),
-        );
-        scene.add(sunDisc);
-
         buildGround();
+        buildBoard();
         buildProps();
         buildCarProxy();
+        applySceneToggles();
 
-        buildSmoke();
+        flipAtlases = await loadLabAtlases();
+        if (!Object.keys(flipAtlases).length && look.puffs === "flipbook") look.puffs = "procedural";
+
+        setLook(look.puffs, { silent: true });
         applySun();
-        buildGui();
+        buildUi();
         resetView();
 
         addEventListener("resize", onResize);
         addEventListener("keydown", onKey);
+        // A clicked button keeps keyboard focus, and Space then "clicks" it again
+        // on top of pausing — that silently applied "Old look". Buttons give
+        // focus back after a click, and Space never activates one.
+        document.addEventListener("click", (e) => e.target.closest?.("button")?.blur());
+        addEventListener("keyup", (e) => {
+          if (e.key === " " && e.target?.tagName === "BUTTON") e.preventDefault();
+        }, true);
 
-        window.__smokeLab = { renderer, scene, camera, smoke, settings, rig, cam, perf, look, buildSmoke };
+        window.__smokeLab = {
+          renderer, scene, camera, settings, flip, rig, cam, perf, look, instances,
+          get smoke() { return smoke; }, setLook,
+        };
 
         renderer.setAnimationLoop(frame);
       }
 
-      /** (Re)build the smoke instance — the same constructor call the game makes. */
-      function buildSmoke() {
-        if (smoke) {
-          scene.remove(smoke.mesh);
-          smoke.geometry.dispose();
-          smoke.material.dispose();
-          smoke.sprayMaterial.dispose();
-          if (smoke.bankMesh) {
-            scene.remove(smoke.bankMesh);
-            smoke.bankMesh.geometry.dispose();
-            smoke.bankMesh.material.dispose();
-          }
-        }
-        smoke = new ModularRoadDriftSmoke(scene, settings);
-        if (window.__smokeLab) window.__smokeLab.smoke = smoke;
-        // The new instance boots with default sun/ambient uniforms.
-        if (sunLight) applySun();
-        updateHudMode();
+      /** Gradient sky + sun glow, as the scene background. */
+      function buildSkyNode() {
+        const d = positionWorldDirection;
+        const up = d.y;
+        const above = mix(sky.horizon, sky.zenith, pow(saturate(up), float(0.5)));
+        const below = mix(sky.horizon, sky.ground, saturate(up.negate().mul(6)));
+        const base = mix(below, above, saturate(up.mul(200).add(0.5)));
+        const sd = max(dot(d, sky.sunDir), float(0));
+        const glow = sky.sunCol.mul(pow(sd, float(900)).mul(30).add(pow(sd, float(10)).mul(0.35)));
+        return base.add(glow);
       }
 
-      /** Dark asphalt-ish floor. Big enough that the fly-by never leaves it. */
+      /* ------------------------------------------------------ instances / A/B */
+
+      function makeInstance(kind) {
+        if (kind === "flipbook") {
+          if (!hasAtlas()) return null;
+          return new LabFlipbookDriftSmoke(scene, settings, flipAtlases, flip);
+        }
+        return new LabDriftSmoke(scene, settings);
+      }
+
+      /** Copy live particle state so an A/B compares the same plume. */
+      function transferState(from, to) {
+        const copyPool = (a, b) => {
+          for (let i = 0; i < a.length; i++) {
+            const p = a[i], q = b[i];
+            for (const k in p) {
+              const v = p[k];
+              // Vector3s are COPIED, never replaced: the flipbook keys its
+              // particle lookup on the position object's identity.
+              if (v && v.isVector3) q[k].copy(v);
+              else q[k] = v;
+            }
+          }
+        };
+        copyPool(from.particles, to.particles);
+        copyPool(from.hazeParticles, to.hazeParticles);
+        for (const e of ["puffEmitter", "hazeEmitter"]) {
+          to[e].index = from[e].index;
+          to[e].accum = [...from[e].accum];
+        }
+        to.uTime.value = from.uTime.value;
+        to._curlTime = from._curlTime;
+        to._worldDriftPhase = from._worldDriftPhase;
+      }
+
+      function setLook(kind, { silent = false } = {}) {
+        if (kind === "flipbook" && !hasAtlas()) {
+          toast("Flipbook atlas not loaded");
+          kind = "procedural";
+        }
+        if (!instances[kind]) instances[kind] = makeInstance(kind);
+        const next = instances[kind];
+        if (smoke && smoke !== next) {
+          transferState(smoke, next);
+          smoke.setVisible(false);
+          smoke.reset();
+        }
+        next.setVisible(true);
+        smoke = next;
+        look.puffs = kind;
+        if (sunLight) applySun();
+        // A paused world still redraws: update(0) rewrites the buffers each frame.
+        $("s-look").textContent = kind === "flipbook" ? "Flipbook" : "Procedural";
+        if (!silent) { refreshUi(); savePrefs(); }
+      }
+
+      /* ---------------------------------------------------------------- world */
+
+      function makeAsphaltTexture() {
+        const n = 512;
+        const c = document.createElement("canvas");
+        c.width = c.height = n;
+        const g = c.getContext("2d");
+        g.fillStyle = "#2e3034";
+        g.fillRect(0, 0, n, n);
+        const img = g.getImageData(0, 0, n, n);
+        for (let i = 0; i < img.data.length; i += 4) {
+          const k = (Math.random() - 0.5) * 26 + (Math.random() < 0.04 ? 28 : 0);
+          img.data[i] += k; img.data[i + 1] += k; img.data[i + 2] += k + 1;
+        }
+        g.putImageData(img, 0, 0);
+        // A few darker oil/patch blotches, so the ground has large-scale variation.
+        for (let i = 0; i < 18; i++) {
+          g.fillStyle = `rgba(10,10,12,${0.05 + Math.random() * 0.08})`;
+          g.beginPath();
+          g.ellipse(Math.random() * n, Math.random() * n, 20 + Math.random() * 70, 12 + Math.random() * 40, Math.random() * 3, 0, Math.PI * 2);
+          g.fill();
+        }
+        const t = new THREE.CanvasTexture(c);
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.repeat.set(60, 60);
+        t.anisotropy = 8;
+        return t;
+      }
+
       function buildGround() {
         const ground = new THREE.Mesh(
           new THREE.PlaneGeometry(400, 400),
-          new THREE.MeshStandardMaterial({ color: 0x33363c, roughness: 0.95, metalness: 0 }),
+          new THREE.MeshStandardMaterial({ map: makeAsphaltTexture(), roughness: 0.92, metalness: 0 }),
         );
         ground.rotation.x = -Math.PI / 2;
         ground.receiveShadow = true;
         scene.add(ground);
 
-        // Painted donut ring so the eye has a ground reference through the
-        // plume — scale and drift of the bank are unreadable over a bare plane.
-        const ring = new THREE.Mesh(
-          new THREE.RingGeometry(rig.radius - 1.4, rig.radius + 1.4, 96),
-          new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 0.98 }),
+        // Lane paint. Scale and speed of the plume are unreadable over a bare plane.
+        const paint = (color, w, len, x, z) => {
+          const m = new THREE.Mesh(
+            new THREE.PlaneGeometry(w, len),
+            new THREE.MeshStandardMaterial({ color, roughness: 0.7 }),
+          );
+          m.rotation.x = -Math.PI / 2;
+          m.position.set(x, 0.012, z);
+          m.receiveShadow = true;
+          scene.add(m);
+        };
+        paint(0xe8e6df, 0.18, 300, -4.2, 0);
+        paint(0xe8e6df, 0.18, 300, 4.2, 0);
+        for (let z = -150; z < 150; z += 9) paint(0xf2c230, 0.14, 4, -12.4, z);
+
+        // Kerb blocks along one edge — saturated colour next to the smoke.
+        const kerbGeo = new THREE.BoxGeometry(0.6, 0.12, 1.2);
+        const red = new THREE.MeshStandardMaterial({ color: 0xc8262b, roughness: 0.6 });
+        const white = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.6 });
+        for (let i = -40; i < 40; i++) {
+          const k = new THREE.Mesh(kerbGeo, i % 2 ? red : white);
+          k.position.set(5.2, 0.06, i * 1.2);
+          k.receiveShadow = true;
+          scene.add(k);
+        }
+
+        // Donut circle, only shown in donut mode.
+        donutRing = new THREE.Mesh(
+          new THREE.RingGeometry(rig.radius - 0.12, rig.radius + 0.12, 128),
+          new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.7 }),
         );
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.y = 0.01;
-        ring.receiveShadow = true;
-        scene.add(ring);
+        donutRing.rotation.x = -Math.PI / 2;
+        donutRing.position.y = 0.014;
+        scene.add(donutRing);
       }
 
       /**
-       * Intersection fixtures: a low wall on the donut circle (soft depth fade,
-       * and the "centre behind the wall but near half in front" case that
-       * depthTest:false exists for), plus a pillar and a tall slab.
+       * Reference card: black / 18 % grey / white, UNLIT so the values are
+       * constant under every time of day. Smoke that only reads against one of
+       * them is wrongly exposed or wrongly tinted.
        */
-      function buildProps() {
-        const mat = new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.8 });
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(9, 1.0, 0.5), mat);
-        wall.position.set(0, 0.5, rig.radius + 2.2);
-        wall.castShadow = wall.receiveShadow = true;
-        scene.add(wall);
-
-        const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 6, 12), mat);
-        pillar.position.set(-rig.radius - 2.5, 3, 0);
-        pillar.castShadow = pillar.receiveShadow = true;
-        scene.add(pillar);
-
-        const slab = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 0.6), mat);
-        slab.position.set(rig.radius + 4, 2, -6);
-        slab.castShadow = slab.receiveShadow = true;
-        scene.add(slab);
+      function buildBoard() {
+        boardGroup = new THREE.Group();
+        const vals = [0.02, 0.18, 0.85];
+        vals.forEach((v, i) => {
+          const m = new THREE.Mesh(
+            new THREE.PlaneGeometry(3, 4),
+            new THREE.MeshBasicNodeMaterial({ color: new THREE.Color(v, v, v), fog: false }),
+          );
+          m.position.set((i - 1) * 3, 2, 0);
+          boardGroup.add(m);
+        });
+        const frame = new THREE.Mesh(
+          new THREE.BoxGeometry(9.3, 0.15, 0.15),
+          new THREE.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.5, metalness: 0.6 }),
+        );
+        frame.position.set(0, 4.05, -0.05);
+        boardGroup.add(frame);
+        // Beside the plume, facing the default (side) camera, so the smoke is
+        // seen directly against all three values.
+        boardGroup.position.set(-6, 0, -5.5);
+        boardGroup.rotation.y = Math.PI / 2;
+        scene.add(boardGroup);
       }
 
-      /** A proxy car — box body + wheels. Purely a scale/position reference. */
+      /** Soft-depth / occlusion fixtures sitting IN the plume's path. */
+      function buildProps() {
+        propsGroup = new THREE.Group();
+        const concrete = new THREE.MeshStandardMaterial({ color: 0x8b8e93, roughness: 0.85 });
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(4, 0.9, 0.45), concrete);
+        wall.position.set(2.2, 0.45, -6);
+        const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 5, 16), concrete);
+        pillar.position.set(-2.6, 2.5, -8.5);
+        const tyres = new THREE.Group();
+        const tyreGeo = new THREE.TorusGeometry(0.34, 0.14, 10, 20);
+        const tyreMat = new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.9 });
+        for (let i = 0; i < 4; i++) {
+          const t = new THREE.Mesh(tyreGeo, tyreMat);
+          t.rotation.x = Math.PI / 2;
+          t.position.set(0, 0.14 + i * 0.28, 0);
+          tyres.add(t);
+        }
+        tyres.position.set(-2.4, 0, -3.5);
+        for (const o of [wall, pillar, ...tyres.children]) { o.castShadow = o.receiveShadow = true; }
+        propsGroup.add(wall, pillar, tyres);
+        scene.add(propsGroup);
+      }
+
       function buildCarProxy() {
         carRig = new THREE.Group();
-        const body = new THREE.Mesh(
-          new THREE.BoxGeometry(1.9, 0.6, 4.3),
-          new THREE.MeshStandardMaterial({ color: 0x8a2230, roughness: 0.35, metalness: 0.4 }),
-        );
+        const paint = new THREE.MeshStandardMaterial({ color: 0xd23b2a, roughness: 0.3, metalness: 0.45 });
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 4.3), paint);
         body.position.y = 0.62;
-        body.castShadow = true;
-        carRig.add(body);
         const cabin = new THREE.Mesh(
           new THREE.BoxGeometry(1.6, 0.46, 1.9),
-          new THREE.MeshStandardMaterial({ color: 0x14181f, roughness: 0.2 }),
+          new THREE.MeshStandardMaterial({ color: 0x10141b, roughness: 0.15, metalness: 0.2 }),
         );
         cabin.position.set(0, 1.12, -0.2);
-        cabin.castShadow = true;
-        carRig.add(cabin);
-        const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.3, 14);
+        carRig.add(body, cabin);
+        const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.3, 18);
         wheelGeo.rotateZ(Math.PI / 2);
         const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111214, roughness: 0.9 });
         for (const [x, z] of [[-0.82, 1.45], [0.82, 1.45], [-0.82, -1.45], [0.82, -1.45]]) {
           const w = new THREE.Mesh(wheelGeo, wheelMat);
           w.position.set(x, 0.34, z);
-          w.castShadow = true;
           carRig.add(w);
         }
-        // Lamps: emissive stand-ins at the game's TAILLIGHTS offsets and a
-        // headlamp pair. The smoke is lit from THESE positions each frame.
+        carRig.traverse((o) => { if (o.isMesh) o.castShadow = true; });
         carRig.userData.lamps = [];
         const tailMat = new THREE.MeshStandardMaterial({
           color: 0x1a0304, emissive: new THREE.Color(0xff2418), emissiveIntensity: 3, roughness: 0.3,
@@ -452,10 +819,18 @@
         scene.add(carRig);
       }
 
+      function applySceneToggles() {
+        boardGroup.visible = scn.board;
+        propsGroup.visible = scn.props;
+        carRig.visible = scn.car;
+        donutRing.visible = rig.mode === "donut";
+        donutRing.scale.setScalar(rig.radius / 12);
+      }
+
       /* ----------------------------------------------------------------- sun */
 
       function applySun() {
-        const s = SUNS[sunName];
+        const s = SUNS[scn.sun];
         const dir = new THREE.Vector3(...s.dir).normalize();
 
         sunLight.color.set(s.color);
@@ -464,38 +839,37 @@
         sunLight.target.position.set(0, 0, 0);
         sunLight.target.updateMatrixWorld();
 
-        hemiLight.color.set(s.sky);
-        hemiLight.groundColor.set(s.ground);
+        hemiLight.color.set(s.hemiSky);
+        hemiLight.groundColor.set(s.hemiGround);
         hemiLight.intensity = s.hemi;
 
-        scene.background = new THREE.Color(s.horizon);
-        scene.fog = new THREE.Fog(s.horizon, 120, 500);
+        sky.zenith.value.set(s.zenith);
+        sky.horizon.value.set(s.horizon);
+        sky.ground.value.set(s.ground);
+        sky.sunDir.value.copy(dir);
+        sky.sunCol.value.set(s.color).multiplyScalar(scn.sun === "night" ? 0.4 : 1);
+
+        scene.fog = new THREE.Fog(new THREE.Color(s.horizon), 140, 600);
+        // Car lamps follow the time of day: red brake glow in a noon plume just
+        // hides the shading being judged. The Lamps section can still force it.
+        rig.lampsOn = scn.sun === "night" || scn.sun === "sunset";
         renderer.toneMappingExposure = s.exposure;
 
-        sunDisc.position.copy(dir).multiplyScalar(600);
-        sunDisc.material.color.set(s.color);
-
         // The smoke's OWN light rig — see the same calls in roadGame.js.
-        smoke.setSunDirection(dir);
-        smoke.setSunColor(new THREE.Color(s.color), s.intensity);
-        // Sky/ground ambient follows the time of day (white = the old flat look).
-        smoke.setAmbientColors(
-          new THREE.Color(look.hemi ? (s.ambSky ?? 0xffffff) : 0xffffff),
-          new THREE.Color(look.hemi ? (s.ambGround ?? 0xffffff) : 0xffffff),
-        );
-
-        $("s-sun").textContent = s.label;
+        for (const inst of Object.values(instances)) {
+          if (!inst) continue;
+          inst.setSunDirection(dir);
+          inst.setSunColor(new THREE.Color(s.color), s.intensity);
+          inst.setAmbientColors(
+            new THREE.Color(look.hemi ? s.ambSky : 0xffffff),
+            new THREE.Color(look.hemi ? s.ambGround : 0xffffff),
+          );
+        }
       }
 
       /* ------------------------------------------------------------- the rig */
 
-      /**
-       * Advance the virtual car and feed the smoke. This substitutes for
-       * updateFromVehicle: contact points from the pose, velocity from the
-       * path, intensity from the slider — the parts a real drift computes from
-       * tyre slip are exactly the parts a look-dev lab wants pinned.
-       */
-      function updateRig(dt, sdt) {
+      function updateRig(sdt) {
         const speed = rig.speed;
 
         if (rig.mode === "donut") {
@@ -503,29 +877,25 @@
           const a = car.angle;
           car.pos.set(Math.cos(a) * rig.radius, 0, Math.sin(a) * rig.radius);
           car.vel.set(-Math.sin(a), 0, Math.cos(a)).multiplyScalar(speed);
-          // Nose held INSIDE the circle by driftYaw — the classic held slide.
           car.heading.copy(car.vel).normalize()
             .applyAxisAngle(_tmp.set(0, 1, 0), THREE.MathUtils.degToRad(rig.driftYaw));
         } else if (rig.mode === "burnout") {
           car.pos.set(0, 0, 0);
-          // Stationary, wheels spinning: the throw direction comes from the
-          // "wheel speed", so hand the emitter the heading at full speed while
-          // the car itself stays put.
+          // Parked, wheels spinning: hand the emitter the wheel speed along the
+          // heading so puffs still launch backwards while the car stays put.
           car.heading.set(0, 0, 1);
           car.vel.copy(car.heading).multiplyScalar(speed);
-        } else { // flyby
+        } else {
           car.flyT += speed * sdt;
           if (car.flyT > 70) car.flyT = -70;
-          car.pos.set(car.flyT, 0, -3);
+          car.pos.set(car.flyT, 0, 0);
           car.vel.set(1, 0, 0).multiplyScalar(speed);
           car.heading.set(1, 0, 0);
         }
 
-        // Pose the proxy.
         carRig.position.copy(car.pos);
         carRig.quaternion.setFromUnitVectors(_tmp.set(0, 0, 1), car.heading);
 
-        // Contact points off the pose. MARK_Y_OFFSET-ish lift, like the game.
         _fwd.copy(car.heading);
         _right.crossVectors(_fwd, _tmp.set(0, 1, 0)).negate().normalize();
         const y = 0.05;
@@ -534,17 +904,14 @@
         _front0.copy(car.pos).addScaledVector(_fwd, 1.45).addScaledVector(_right, 0.82).setY(y);
         _front1.copy(car.pos).addScaledVector(_fwd, 1.45).addScaledVector(_right, -0.82).setY(y);
 
-        // Wetness plumbing that updateFromVehicle would otherwise own: the
-        // spray shutter is derived per frame, and the wet path emits from all
-        // four contacts.
         smoke.setWetness(rig.wetness);
         smoke._shutter = (settings.wetSpray?.streak ?? 1) * (1 / 25) * rig.wetness;
-        const pts = rig.wetness > 0 ? _allPts : _rearPts;
+        const pts = rig.wetness > 0 ? _allPts : rig.wheels === "one" ? _onePt : _rearPts;
+        // The bank emits from the rear contacts whatever the weather (see
+        // withLabRear in smokeLabFlipbook.js for why the lab must hand them in).
+        smoke.labRearPoints = rig.wheels === "one" ? _onePt : _rearPts;
 
-        // What updateFromVehicle would set: heading + right for the launch
-        // and the wheel-arch arc.
         smoke.setCarFrame(_fwd, _right);
-        // The car's lamps, world space. Tail = omni red, head = warm beam.
         carRig.updateMatrixWorld(true);
         const tailI = rig.lampsOn ? (rig.braking ? rig.tailIntensity : rig.tailIntensity * 0.2) : 0;
         const headI = rig.lampsOn ? rig.headIntensity : 0;
@@ -555,20 +922,28 @@
           if (L.kind === "tail") smoke.setLamp(i, _lampPos, _tailCol, tailI);
           else smoke.setLamp(i, _lampPos, _headCol, headI, _fwd, 10);
         });
-        // Burnout throws off spinning wheels while parked: pass wheel-speed
-        // velocity, not chassis velocity, so puffs still launch backwards.
-        smoke.update(sdt, pts, rig.emit, rig.intensity, car.vel.x, car.vel.z, camera);
+        const emitting = sdt > 0 && (rig.emit || burstLeft > 0);
+        smoke.update(sdt, pts, emitting, rig.intensity, car.vel.x, car.vel.z, camera);
       }
 
       /* -------------------------------------------------------------- camera */
 
+      /** The plume's focus point: a couple of metres behind the rear axle. */
+      function plumeFocus(out) {
+        return out.copy(car.pos).addScaledVector(car.heading, -4).setY(1.0);
+      }
+
       function resetView() {
-        if (cam.mode === "orbit") {
-          controls.target.set(0, 1.2, 0);
-          camera.position.set(rig.radius + 12, 6.5, rig.radius + 12);
-          controls.update();
-        }
-        $("s-cam").textContent = cam.mode;
+        plumeFocus(_tmp);
+        _right.crossVectors(car.heading, _tmp2.set(0, 1, 0)).negate().normalize();
+        controls.target.copy(_tmp);
+        // Three-quarter from the side, slightly behind the car, looking ACROSS
+        // the plume at the reference card — car at the frame edge, smoke centre.
+        camera.position.copy(_tmp)
+          .addScaledVector(_right, 10)
+          .addScaledVector(car.heading, 1.5)
+          .add(_tmp2.set(0, 1.4, 0));
+        controls.update();
       }
 
       function updateCamera() {
@@ -577,33 +952,534 @@
           controls.update();
           return;
         }
-        // Chase: the game's boom numbers, so tells are judged at the shipping
-        // framing. Astern of the VELOCITY, like the real chase camera — during
-        // a drift the smoke fills the frame exactly as it does in the game.
-        _tmp.copy(car.vel).normalize();
-        camera.position.copy(car.pos)
-          .addScaledVector(_tmp, -cam.distance)
-          .add(new THREE.Vector3(0, cam.height, 0));
         camera.up.set(0, 1, 0);
-        camera.lookAt(
-          car.pos.x + _tmp.x * cam.lookAhead,
-          0.7,
-          car.pos.z + _tmp.z * cam.lookAhead,
-        );
+        if (cam.mode === "chase") {
+          // The game's boom, astern of the VELOCITY like the real chase camera.
+          _tmp.copy(car.vel).normalize();
+          camera.position.copy(car.pos).addScaledVector(_tmp, -cam.distance).setY(cam.height);
+          camera.lookAt(car.pos.x + _tmp.x * cam.lookAhead, 0.7, car.pos.z + _tmp.z * cam.lookAhead);
+          return;
+        }
+        plumeFocus(_tmp);
+        _right.crossVectors(car.heading, _tmp2.set(0, 1, 0)).negate().normalize();
+        if (cam.mode === "side") {
+          camera.position.copy(_tmp).addScaledVector(_right, 11).setY(1.6);
+        } else {
+          camera.position.copy(_tmp).setY(20).addScaledVector(car.heading, 0.01);
+        }
+        camera.lookAt(_tmp);
+      }
+
+      /* ===================================================================== *
+       * UI                                                                    *
+       * ===================================================================== */
+
+      const refreshers = [];
+      const refreshUi = () => refreshers.forEach((f) => f());
+
+      const el = (tag, cls, text) => {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text != null) e.textContent = text;
+        return e;
+      };
+      const getPath = (o, p) => p.split(".").reduce((a, k) => a?.[k], o);
+      const setPath = (o, p, v) => {
+        const ks = p.split(".");
+        const last = ks.pop();
+        const t = ks.reduce((a, k) => a[k], o);
+        t[last] = v;
+      };
+
+      function chips(options, get, set, { toggle = false } = {}) {
+        const wrap = el("div", "chips");
+        const btns = options.map(([value, label]) => {
+          const b = el("button", "chip" + (toggle ? " tog" : ""), label);
+          b.onclick = () => { set(value); refreshUi(); savePrefs(); };
+          wrap.append(b);
+          return [value, b];
+        });
+        refreshers.push(() => btns.forEach(([v, b]) => b.classList.toggle("on", toggle ? !!get(v) : get() === v)));
+        return wrap;
+      }
+
+      /**
+       * Section schema. Each control: [path, label, min, max, step] for ranges,
+       * or { type, path, label, ... } for bools / colours / selects. `root` is the
+       * live object and `defaults` the object "reset" reads from.
+       */
+      const S = { root: settings, defaults: DEFAULT_DRIFT_SMOKE_SETTINGS };
+      const F = { root: flip, defaults: DEFAULT_FLIPBOOK_SETTINGS };
+      const R = { root: rig, defaults: RIG_DEFAULTS };
+      const SECTIONS = [
+        {
+          id: "flip", title: "Flipbook puffs", ...F,
+          note: "Only affects the Flipbook look. The atlas loops at fps from a random frame per puff.",
+          controls: [
+            { type: "select", path: "puffAtlas", label: "atlas", options: ATLAS_OPTIONS },
+            { type: "select", path: "playMode", label: "play mode", options: [["loop", "Loop at fps"], ["life", "Once over life"]] },
+            ["fps", "fps (loop)", 1, 60, 1],
+            { type: "bool", path: "randomStart", label: "random start" },
+            { type: "bool", path: "blendFrames", label: "blend frames" },
+            ["scale", "sprite scale", 0.5, 1, 0.01],
+            ["alphaMul", "alpha ×", 0.2, 4, 0.05],
+            ["baked", "baked shading", 0, 1, 0.01],
+            ["bakedGain", "baked brightness", 0.5, 4, 0.05],
+            ["selfShadow", "self-shadow ×", 0, 1, 0.01],
+            ["erode", "game erosion", 0, 1, 0.01],
+          ],
+        },
+        {
+          id: "flipbank", title: "Flipbook bank", ...F,
+          note: "Flipbook look only. The sprite is painted on the bank's spheres, and turns to plain haze once the camera is inside one. Bank amount/size/life live in Lingering bank.",
+          controls: [
+            { type: "select", path: "bankStyle", label: "bank style", options: [["flipbook", "Flipbook sprite"], ["sphere", "Game sphere (A/B)"]] },
+            { type: "select", path: "bankAtlas", label: "atlas", options: ATLAS_OPTIONS },
+            ["bankFps", "fps", 1, 30, 1],
+            ["bankScale", "sprite scale", 0.5, 1, 0.01],
+            ["bankAlpha", "alpha ×", 0.5, 25, 0.1],
+            ["bankBright", "brightness", 0.5, 6, 0.05],
+            ["bankInsideFog", "haze when inside", 0, 1, 0.01],
+          ],
+        },
+        {
+          id: "emitter", title: "Emitter rig", ...R,
+          controls: [
+            ["speed", "wheel / path speed", 0, 40, 0.5],
+            ["intensity", "slip intensity", 0, 1, 0.01],
+            ["radius", "donut radius", 5, 30, 0.5, () => applySceneToggles()],
+            ["driftYaw", "drift yaw (°)", 0, 60, 1],
+            ["wetness", "wetness", 0, 1, 0.01],
+          ],
+        },
+        {
+          id: "puffs", title: "Puffs", ...S,
+          controls: [
+            ["emitRate", "emit rate /s", 10, 600, 5],
+            ["opacity", "opacity", 0.02, 0.8, 0.005],
+            ["sizeMin", "size min (m)", 0.1, 2, 0.01],
+            ["sizeMax", "size max (m)", 0.1, 3, 0.01],
+            ["sizeGrowth", "growth ×", 0, 8, 0.05],
+            ["lifeMin", "life min (s)", 0.1, 4, 0.05],
+            ["lifeMax", "life max (s)", 0.1, 6, 0.05],
+            ["fadeIn", "fade in", 0, 0.5, 0.01],
+            ["rise", "rise (m/s)", 0, 3, 0.02],
+            ["buoyancy", "buoyancy", -2, 2, 0.02],
+            ["turbulence", "turbulence", 0, 6, 0.05],
+            ["spread", "spread", 0, 2, 0.02],
+            ["drag", "speed drag", 0, 1, 0.01],
+            { type: "color", path: "colorHot", label: "colour fresh" },
+            { type: "color", path: "colorCool", label: "colour thinned" },
+            ["tintJitter", "tint jitter", 0, 0.5, 0.01],
+          ],
+        },
+        {
+          id: "motion", title: "Launch & curl", ...S,
+          controls: [
+            ["launchOut", "launch outboard", 0, 5, 0.05],
+            ["launchUpMul", "launch up ×", 0, 1.5, 0.02],
+            ["lift", "delayed lift", 0, 4, 0.05],
+            ["liftDelay", "lift delay (s)", 0, 1.5, 0.02],
+            { type: "bool", path: "curl.enabled", label: "curl turbulence" },
+            ["curl.strength", "curl strength", 0, 10, 0.1],
+            ["curl.scale", "curl scale (1/m)", 0.05, 1.5, 0.01],
+            ["curl.speed", "curl anim speed", 0, 3, 0.05],
+            ["curl.bankMul", "curl on bank ×", 0, 1, 0.02],
+          ],
+        },
+        {
+          id: "arch", title: "Wheel arch emission", ...S,
+          controls: [
+            { type: "bool", path: "arch.enabled", label: "arch emission" },
+            ["arch.sweep", "arc sweep (°)", 0, 180, 1],
+            ["arch.throw", "rim throw ×", 0, 1, 0.01],
+            ["arch.vortex", "vortex (m/s²)", 0, 20, 0.1],
+            ["arch.vortexTime", "vortex time (s)", 0, 1.5, 0.02],
+            ["arch.treadSpread", "tread spread (m)", 0, 0.5, 0.01],
+            ["arch.out", "outside rubber ×", 0, 0.4, 0.01],
+            ["arch.wheelRadius", "wheel radius (m)", 0.2, 0.6, 0.01],
+          ],
+        },
+        {
+          id: "shape", title: "Shape (procedural)", ...S,
+          note: "Procedural look only — the flipbook's shape is the texture.",
+          controls: [
+            ["silhouette", "lumpy silhouette", 0, 1, 0.01],
+            ["silhouetteBite", "silhouette bite", 0, 0.8, 0.01],
+            ["localNoise", "volumetric detail", 0, 1, 0.01],
+            ["churn", "churn (boil)", 0, 1, 0.01],
+            ["churnRate", "churn rate (Hz)", 0, 2, 0.02],
+            ["detail", "edge detail carve", 0, 1, 0.01],
+            ["detailScale", "detail scale", 1, 8, 0.1],
+            ["opticalK", "optical depth", 0, 6, 0.05],
+            ["noiseScale", "noise scale", 0.3, 4, 0.02],
+            ["noiseDrift", "noise drift", 0, 1, 0.01],
+            ["erodeStart", "erode start", 0, 0.6, 0.01],
+            ["erodeEnd", "erode end", 0.4, 2, 0.01],
+            ["erodeSoft", "erode softness", 0.02, 1, 0.01],
+            ["worldNoiseMix", "world-noise mix", 0, 1, 0.01],
+            ["worldNoiseScale", "world scale", 0.1, 3, 0.02],
+            ["worldNoiseDrift", "world drift", 0, 2, 0.02],
+          ],
+        },
+        {
+          id: "light", title: "Lighting", ...S,
+          controls: [
+            ["sunTint", "lighting amount", 0, 1, 0.01],
+            ["ambient", "ambient", 0, 1.5, 0.01],
+            ["sunStrength", "sun strength", 0, 3, 0.02],
+            ["absorb", "self-shadow", 0, 4, 0.02],
+            ["scatter", "HG scatter", 0, 4, 0.02],
+            ["hgG", "HG anisotropy", 0, 0.95, 0.01],
+            ["softDepth", "soft depth (m)", 0, 3, 0.02],
+            { type: "bool", path: "hemi", label: "hemisphere ambient", root: look, def: true, onChange: () => applySun() },
+          ],
+        },
+        {
+          id: "lamps", title: "Car lamps in smoke", ...S,
+          controls: [
+            { type: "bool", path: "lamps.enabled", label: "lamps light smoke" },
+            ["lamps.strength", "strength", 0, 4, 0.05],
+            ["lamps.radius", "falloff radius (m)", 0.1, 2, 0.01],
+            ["lamps.range", "range (m)", 1, 20, 0.5],
+            { type: "bool", path: "lampsOn", label: "car lamps on", ...R },
+            { type: "bool", path: "braking", label: "braking", ...R },
+            { path: "tailIntensity", label: "tail intensity", min: 0, max: 10, step: 0.1, ...R },
+            { path: "headIntensity", label: "head intensity", min: 0, max: 15, step: 0.1, ...R },
+          ],
+        },
+        {
+          id: "bank", title: "Lingering bank", ...S,
+          controls: [
+            { type: "bool", path: "haze.enabled", label: "enabled" },
+            ["haze.emitRate", "emit rate /s", 0, 40, 0.5],
+            ["haze.opacity", "opacity", 0.01, 0.3, 0.005],
+            ["haze.lifeMin", "life min (s)", 1, 20, 0.5],
+            ["haze.lifeMax", "life max (s)", 1, 30, 0.5],
+            ["haze.sizeMin", "size min (m)", 0.5, 6, 0.1],
+            ["haze.sizeMax", "size max (m)", 0.5, 8, 0.1],
+            ["haze.sizeGrowth", "growth ×", 0, 6, 0.1],
+            ["haze.growthPower", "growth power", 0.3, 1.2, 0.01],
+            ["haze.fadeOutStart", "hold until", 0, 0.9, 0.01],
+            ["haze.rise", "rise", 0, 1.5, 0.02],
+            ["haze.buoyancy", "buoyancy", -0.5, 1, 0.01],
+            ["haze.spread", "spread", 0, 5, 0.05],
+            ["haze.turbulence", "turbulence", 0, 2, 0.02],
+            ["haze.erodeStart", "erode start", 0, 0.6, 0.01],
+            ["haze.erodeEnd", "erode end", 0.4, 2, 0.01],
+            ["haze.erodePower", "erode power", 0.5, 5, 0.05],
+            ["haze.worldScaleMul", "world scale ×", 0.1, 1.5, 0.02],
+            ["haze.worldMixMul", "world mix ×", 0, 2.5, 0.05],
+            { type: "color", path: "haze.colorHot", label: "colour fresh" },
+            { type: "color", path: "haze.colorCool", label: "colour thinned" },
+          ],
+        },
+        {
+          id: "wet", title: "Wet spray", ...S,
+          note: "Shown when wetness ≥ 0.5 (W).",
+          controls: [
+            ["wetSpray.emitRate", "emit rate /s", 100, 2000, 10],
+            ["wetSpray.opacity", "opacity", 0.02, 0.6, 0.005],
+            ["wetSpray.sizeMin", "size min", 0.01, 0.2, 0.002],
+            ["wetSpray.sizeMax", "size max", 0.01, 0.4, 0.002],
+            ["wetSpray.lifeMin", "life min", 0.05, 1, 0.01],
+            ["wetSpray.lifeMax", "life max", 0.05, 2, 0.01],
+            ["wetSpray.rise", "rise", 0, 6, 0.05],
+            ["wetSpray.buoyancy", "gravity", -10, 0, 0.1],
+            ["wetSpray.drag", "speed carry", 0, 1, 0.01],
+            ["wetSpray.sideThrow", "side throw", 0, 8, 0.1],
+            ["wetSpray.streak", "streak (shutter ×)", 0, 3, 0.05],
+          ],
+        },
+      ];
+
+      const decimals = (step) => Math.max(0, (String(step).split(".")[1] || "").length);
+
+      /** Build one control row. Returns { row, reset, isMod, text }. */
+      function controlRow(sec, c) {
+        const spec = Array.isArray(c)
+          ? { path: c[0], label: c[1], min: c[2], max: c[3], step: c[4], onChange: c[5] }
+          : c;
+        const type = spec.type || "range";
+        const root = spec.root || sec.root;
+        const defaults = spec.defaults || sec.defaults;
+        const def = "def" in spec ? spec.def : getPath(defaults, spec.path);
+        const get = () => getPath(root, spec.path);
+        const set = (v) => { setPath(root, spec.path, v); spec.onChange?.(v); if (root === flip) savePrefs(); };
+
+        const row = el("div", "row " + type);
+        const lab = el("label", null, spec.label);
+        lab.title = `${spec.path} — double-click to reset`;
+        row.append(lab);
+
+        let sync;
+        if (type === "range") {
+          const r = el("input");
+          r.type = "range"; r.min = spec.min; r.max = spec.max; r.step = spec.step;
+          const n = el("input");
+          n.type = "number"; n.step = spec.step;
+          const dp = decimals(spec.step);
+          r.oninput = () => { set(Number(r.value)); sync(); };
+          // Release focus so Space/F/1–4 keep working after a drag.
+          r.onchange = () => r.blur();
+          n.onchange = () => { const v = Number(n.value); if (Number.isFinite(v)) set(v); sync(); };
+          // Wheel on a focused number nudges by one step.
+          n.onwheel = (e) => {
+            if (document.activeElement !== n) return;
+            e.preventDefault();
+            set(Number((get() + (e.deltaY < 0 ? 1 : -1) * spec.step).toFixed(dp)));
+            sync();
+          };
+          sync = () => {
+            const v = get() ?? 0;
+            r.value = v;
+            if (document.activeElement !== n) n.value = Number(v).toFixed(dp);
+            const p = ((v - spec.min) / (spec.max - spec.min)) * 100;
+            r.style.setProperty("--p", `${Math.max(0, Math.min(100, p))}%`);
+            row.classList.toggle("mod", def !== undefined && Math.abs(v - def) > spec.step * 0.001);
+          };
+          row.append(r, n);
+        } else if (type === "bool") {
+          const b = el("button", "switch");
+          b.onclick = () => { set(!get()); sync(); };
+          const wrap = el("div");
+          wrap.append(b);
+          sync = () => {
+            b.classList.toggle("on", get() !== false);
+            row.classList.toggle("mod", def !== undefined && (get() !== false) !== (def !== false));
+          };
+          row.append(wrap);
+        } else if (type === "color") {
+          const i = el("input");
+          i.type = "color";
+          i.oninput = () => { set(i.value); sync(); };
+          const wrap = el("div");
+          wrap.append(i);
+          sync = () => {
+            const v = get();
+            i.value = typeof v === "string" && v.startsWith("#") ? v : "#" + new THREE.Color(v).getHexString();
+            row.classList.toggle("mod", def !== undefined && String(v).toLowerCase() !== String(def).toLowerCase());
+          };
+          row.append(wrap);
+        } else if (type === "select") {
+          const s = el("select");
+          for (const [v, l] of spec.options) {
+            const o = el("option", null, l);
+            o.value = v;
+            s.append(o);
+          }
+          s.onchange = () => { set(s.value); sync(); };
+          const wrap = el("div");
+          wrap.append(s);
+          sync = () => { s.value = get(); row.classList.toggle("mod", def !== undefined && get() !== def); };
+          row.append(wrap);
+        }
+        const reset = () => { if (def !== undefined) { set(structuredClone(def)); sync(); } };
+        lab.ondblclick = reset;
+        refreshers.push(sync);
+        return { row, reset, sync, isMod: () => row.classList.contains("mod"), text: `${spec.label} ${spec.path}`.toLowerCase() };
+      }
+
+      function buildUi() {
+        // ── A/B
+        const ab = $("ab");
+        for (const [kind, label] of [["procedural", "Procedural"], ["flipbook", "Flipbook"]]) {
+          const b = el("button", null, label);
+          b.onclick = () => setLook(kind);
+          if (kind === "flipbook" && !hasAtlas()) b.title = "Atlas failed to load";
+          ab.append(b);
+          refreshers.push(() => b.classList.toggle("on", look.puffs === kind));
+        }
+
+        // ── Quick rows
+        const quick = $("quick");
+        const qrow = (label, node) => {
+          const r = el("div", "qrow");
+          r.append(el("span", null, label), node);
+          quick.append(r);
+        };
+        qrow("Emitter", chips(MODES.map((m) => [m, MODE_LABEL[m]]), () => rig.mode, setMode));
+        qrow("Wheels", chips([["both", "Rear pair"], ["one", "One wheel"]], () => rig.wheels, (v) => { rig.wheels = v; }));
+        qrow("Time", chips(SUN_ORDER.map((k, i) => [k, `${i + 1} ${SUNS[k].label}`]), () => scn.sun, (v) => { scn.sun = v; applySun(); }));
+        qrow("Camera", chips([["orbit", "Orbit"], ["side", "Side"], ["top", "Top"], ["chase", "Chase"]], () => cam.mode, setCam));
+        qrow("Show", chips(
+          [["board", "Ref card"], ["props", "Props"], ["car", "Car"], ["wet", "Wet"], ["bank", "Bank"]],
+          (k) => k === "wet" ? rig.wetness > 0 : k === "bank" ? settings.haze.enabled !== false : scn[k],
+          (k) => {
+            if (k === "wet") rig.wetness = rig.wetness > 0 ? 0 : 1;
+            else if (k === "bank") settings.haze.enabled = settings.haze.enabled === false;
+            else scn[k] = !scn[k];
+            applySceneToggles();
+          },
+          { toggle: true },
+        ));
+
+        // ── Sections
+        const host = $("sections");
+        const allRows = [];
+        for (const sec of SECTIONS) {
+          const box = el("div", "sec" + (openSections.has(sec.id) ? " open" : ""));
+          const head = el("div", "sec-h");
+          const car_ = el("span", "car", "▸");
+          const title = el("span", "t", sec.title);
+          const mods = el("span", "mods");
+          const rst = el("button", "iconbtn rst", "Reset");
+          rst.title = "Reset this section to defaults";
+          head.append(car_, title, mods, rst);
+          const body = el("div", "sec-b");
+          if (sec.note) body.append(el("p", "sec-note", sec.note));
+          const rows = sec.controls.map((c) => controlRow(sec, c));
+          rows.forEach((r) => body.append(r.row));
+          head.onclick = (e) => {
+            if (e.target === rst) return;
+            box.classList.toggle("open");
+            if (box.classList.contains("open")) openSections.add(sec.id);
+            else openSections.delete(sec.id);
+            savePrefs();
+          };
+          rst.onclick = () => { rows.forEach((r) => r.reset()); refreshUi(); toast(`${sec.title} reset`); };
+          refreshers.push(() => {
+            const n = rows.filter((r) => r.isMod()).length;
+            mods.textContent = n ? `${n} changed` : "";
+          });
+          box.append(head, body);
+          host.append(box);
+          allRows.push({ box, rows, sec });
+        }
+
+        // ── Filter
+        const search = $("search");
+        search.oninput = () => {
+          const q = search.value.trim().toLowerCase();
+          for (const { box, rows, sec } of allRows) {
+            let any = false;
+            for (const r of rows) {
+              const hit = !q || r.text.includes(q) || sec.title.toLowerCase().includes(q);
+              r.row.classList.toggle("hide", !hit);
+              any ||= hit;
+            }
+            box.style.display = any ? "" : "none";
+            if (q) box.classList.toggle("open", any);
+            else box.classList.toggle("open", openSections.has(sec.id));
+          }
+        };
+
+        // ── Transport
+        $("t-play").onclick = togglePause;
+        $("t-step").onclick = stepOnce;
+        $("t-emit").onclick = () => { rig.emit = !rig.emit; refreshUi(); };
+        $("t-burst").onclick = burst;
+        $("t-clear").onclick = clearParticles;
+        const speedHost = $("t-speed");
+        for (const v of [0.1, 0.25, 0.5, 1]) {
+          const b = el("button", "tbtn", `${v}×`);
+          b.onclick = () => { rig.timeScale = v; refreshUi(); };
+          speedHost.append(b);
+          refreshers.push(() => b.classList.toggle("on", rig.timeScale === v));
+        }
+        refreshers.push(() => {
+          $("t-play").textContent = rig.paused ? "▶" : "❚❚";
+          $("t-play").classList.toggle("on", rig.paused);
+          $("t-emit").classList.toggle("on", rig.emit);
+        });
+
+        // ── Panel footer
+        $("p-aaa").onclick = () => {
+          deepMerge(settings, structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS));
+          look.hemi = true; applySun(); refreshUi(); toast("Game defaults");
+        };
+        $("p-old").onclick = () => {
+          deepMerge(settings, structuredClone(OLD_LOOK));
+          look.hemi = false; applySun(); refreshUi(); toast("Old look (pre-AAA)");
+        };
+        $("p-light").onclick = () => {
+          // From a clean AAA base, so it never inherits Old-look leftovers.
+          deepMerge(settings, structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS));
+          deepMerge(settings, structuredClone(AAA_LIGHT));
+          look.hemi = true; applySun(); refreshUi(); toast("AAA light");
+        };
+        $("p-reset-all").onclick = () => {
+          // Smoke settings are never saved, so dropping the remembered panel
+          // state and reloading IS a fresh start — exactly what a first visit
+          // gets, with no chance of a field being missed by a manual reset.
+          try { localStorage.removeItem(PREFS_KEY); } catch { /* storage blocked */ }
+          location.reload();
+        };
+        $("io-export").onclick = exportSettings;
+        $("io-import").onclick = () => settingsFileInput.click();
+        $("io-copy").onclick = copyDiff;
+        $("hidePanel").onclick = togglePanel;
+        $("showPanel").onclick = togglePanel;
+
+        refreshUi();
+      }
+
+      /* ------------------------------------------------------------ actions */
+
+      function setMode(m) {
+        rig.mode = m;
+        car.angle = 0;
+        car.flyT = -60;
+        smoke.reset();
+        applySceneToggles();
+        updateRig(0);
+        resetView();
+      }
+      function setCam(m) {
+        cam.mode = m;
+        if (m === "orbit") resetView();
+      }
+      function togglePause() { rig.paused = !rig.paused; refreshUi(); }
+      function stepOnce() { rig.paused = true; stepFrames++; refreshUi(); }
+      function burst() {
+        burstLeft = 0.25;
+        if (rig.paused) { rig.paused = false; }
+        refreshUi();
+      }
+      function clearParticles() {
+        for (const inst of Object.values(instances)) inst?.reset();
+      }
+      function togglePanel() {
+        document.body.classList.toggle("panel-hidden");
+        onResize();
+        savePrefs();
       }
 
       /* ------------------------------------------------------------------ io */
 
-      function exportSettings() {
-        const blob = new Blob([JSON.stringify(settings, null, 2)], {
-          type: "application/json",
-        });
-        const url = URL.createObjectURL(blob);
+      function download(name, text) {
+        const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
         const a = document.createElement("a");
         a.href = url;
-        a.download = "drift-smoke-settings.json";
+        a.download = name;
         a.click();
         URL.revokeObjectURL(url);
+      }
+      function exportSettings() {
+        download("drift-smoke-settings.json", JSON.stringify(settings, null, 2));
+      }
+      /** Only the keys that differ from the game defaults — what a tweak really is. */
+      function diff(a, b) {
+        const out = {};
+        for (const k of Object.keys(a)) {
+          if (a[k] && typeof a[k] === "object" && !Array.isArray(a[k])) {
+            const d = diff(a[k], b?.[k] ?? {});
+            if (Object.keys(d).length) out[k] = d;
+          } else if (JSON.stringify(a[k]) !== JSON.stringify(b?.[k])) {
+            out[k] = a[k];
+          }
+        }
+        return out;
+      }
+      async function copyDiff() {
+        const d = { settings: diff(settings, DEFAULT_DRIFT_SMOKE_SETTINGS), flipbook: diff(flip, DEFAULT_FLIPBOOK_SETTINGS) };
+        try {
+          await navigator.clipboard.writeText(JSON.stringify(d, null, 2));
+          toast("Diff copied");
+        } catch {
+          console.log(d);
+          toast("Clipboard blocked — diff logged to console");
+        }
       }
 
       const settingsFileInput = (() => {
@@ -617,11 +1493,11 @@
           if (!file) return;
           try {
             const data = JSON.parse(await file.text());
-            delete data._labExperiments; // older lab exports carried this
-            // Merge, not replace: the live object is captured by the smoke
-            // instance and by every GUI controller.
+            delete data._labExperiments;
+            // Merge, not replace: the live object is captured by the smoke instances.
             deepMerge(settings, data);
-            refreshGui();
+            refreshUi();
+            toast("Settings imported");
           } catch (err) {
             showErr(err);
           }
@@ -640,198 +1516,45 @@
         }
       }
 
-      /* ----------------------------------------------------------------- gui */
-
-      const refreshGui = () => gui?.controllersRecursive().forEach((c) => c.updateDisplay());
-
-      function buildGui() {
-        gui = new GUI({ title: "Drift smoke", width: 320 });
-
-        const fx = gui.addFolder("AAA pass");
-        // The 2026-09-07 shape pass. Both are honest A/Bs: 0 restores exactly
-        // what the smoke did before, so flick them to compare.
-        fx.add(settings, "silhouette", 0, 1, 0.01).name("lumpy silhouette");
-        fx.add(settings, "silhouetteBite", 0, 0.8, 0.01).name("silhouette bite");
-        fx.add(settings, "localNoise", 0, 1, 0.01).name("volumetric detail");
-        fx.add(settings, "churn", 0, 1, 0.01).name("churn (boil)");
-        fx.add(settings, "churnRate", 0, 2, 0.02).name("churn rate (Hz)");
-        fx.add(settings, "detail", 0, 1, 0.01).name("edge detail carve");
-        fx.add(settings, "detailScale", 1, 8, 0.1).name("detail scale");
-        fx.add(settings, "opticalK", 0, 6, 0.05).name("optical depth");
-        fx.add(settings.curl, "enabled").name("curl turbulence");
-        fx.add(settings.curl, "strength", 0, 10, 0.1).name("curl strength");
-        fx.add(settings.curl, "scale", 0.05, 1.5, 0.01).name("curl scale (1/m)");
-        fx.add(settings.curl, "speed", 0, 3, 0.05).name("curl anim speed");
-        fx.add(settings.curl, "bankMul", 0, 1, 0.02).name("curl on bank x");
-        fx.add(settings, "launchOut", 0, 5, 0.05).name("launch outboard");
-        fx.add(settings, "launchUpMul", 0, 1.5, 0.02).name("launch up x");
-        fx.add(settings, "lift", 0, 4, 0.05).name("delayed lift");
-        fx.add(settings, "liftDelay", 0, 1.5, 0.02).name("lift delay (s)");
-        fx.add(look, "hemi").name("hemisphere ambient").onChange(applySun);
-        fx.add({ o: () => {
-          deepMerge(settings, structuredClone(OLD_LOOK));
-          look.hemi = false;
-          applySun();
-          refreshGui();
-        } }, "o").name("Old look (pre-AAA) for A/B");
-        fx.add({ n: () => {
-          deepMerge(settings, structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS));
-          look.hemi = true;
-          applySun();
-          refreshGui();
-        } }, "n").name("AAA look (game defaults)");
-
-        const fl2 = gui.addFolder("Car lights in smoke");
-        fl2.add(settings.lamps, "enabled").name("lamps light smoke");
-        fl2.add(settings.lamps, "strength", 0, 4, 0.05).name("strength");
-        fl2.add(settings.lamps, "radius", 0.1, 2, 0.01).name("falloff radius (m)");
-        fl2.add(settings.lamps, "range", 1, 20, 0.5).name("range (m)");
-        fl2.add(rig, "lampsOn").name("car lamps on");
-        fl2.add(rig, "braking").name("braking (bright tails)");
-        fl2.add(rig, "tailIntensity", 0, 10, 0.1).name("tail intensity");
-        fl2.add(rig, "headIntensity", 0, 15, 0.1).name("head intensity");
-
-        const fa = gui.addFolder("Wheel arch emission");
-        fa.add(settings.arch, "enabled").name("arch emission");
-        fa.add(settings.arch, "sweep", 0, 180, 1).name("arc sweep (°)");
-        fa.add(settings.arch, "throw", 0, 1, 0.01).name("rim throw x speed");
-        fa.add(settings.arch, "vortex", 0, 20, 0.1).name("vortex (m/s²)");
-        fa.add(settings.arch, "vortexTime", 0, 1.5, 0.02).name("vortex time (s)");
-        fa.add(settings.arch, "treadSpread", 0, 0.5, 0.01).name("tread spread (m)");
-        fa.add(settings.arch, "out", 0, 0.4, 0.01).name("outside rubber x");
-        fa.add(settings.arch, "wheelRadius", 0.2, 0.6, 0.01).name("wheel radius (m)");
-
-        const fe = gui.addFolder("Emitter rig");
-        fe.add(rig, "mode", MODES).name("mode (M)").listen().onChange(updateHudMode);
-        fe.add(rig, "speed", 2, 40, 0.5).name("speed (m/s)");
-        fe.add(rig, "radius", 5, 30, 0.5).name("donut radius");
-        fe.add(rig, "driftYaw", 0, 60, 1).name("drift yaw (°)");
-        fe.add(rig, "intensity", 0, 1, 0.01).name("slip intensity");
-        fe.add(rig, "emit").name("emit (E)").listen();
-        fe.add(rig, "wetness", 0, 1, 0.01).name("wetness (W)").listen();
-        fe.add(rig, "timeScale", 0.05, 1, 0.01).name("time scale (T)").listen();
-
-        const fp = gui.addFolder("Puffs");
-        fp.add(settings, "emitRate", 10, 600, 5).name("emit rate /s");
-        fp.add(settings, "opacity", 0.02, 0.8, 0.005).name("opacity");
-        fp.add(settings, "sizeMin", 0.1, 2, 0.01).name("size min (m)");
-        fp.add(settings, "sizeMax", 0.1, 3, 0.01).name("size max (m)");
-        fp.add(settings, "sizeGrowth", 0, 8, 0.05).name("growth ×");
-        fp.add(settings, "lifeMin", 0.1, 4, 0.05).name("life min (s)");
-        fp.add(settings, "lifeMax", 0.1, 6, 0.05).name("life max (s)");
-        fp.add(settings, "fadeIn", 0, 0.5, 0.01).name("fade in");
-        fp.add(settings, "rise", 0, 3, 0.02).name("rise (m/s)");
-        fp.add(settings, "buoyancy", -2, 2, 0.02).name("buoyancy");
-        fp.add(settings, "turbulence", 0, 6, 0.05).name("turbulence");
-        fp.add(settings, "spread", 0, 2, 0.02).name("spread");
-        fp.add(settings, "drag", 0, 1, 0.01).name("speed drag");
-        fp.addColor(settings, "colorHot").name("colour hot");
-        fp.addColor(settings, "colorCool").name("colour cool");
-        fp.add(settings, "tintJitter", 0, 0.5, 0.01).name("tint jitter");
-
-        const fs = gui.addFolder("Shape / erosion");
-        fs.add(settings, "noiseScale", 0.3, 4, 0.02).name("noise scale");
-        fs.add(settings, "noiseDrift", 0, 1, 0.01).name("noise drift");
-        fs.add(settings, "erodeStart", 0, 0.6, 0.01).name("erode start");
-        fs.add(settings, "erodeEnd", 0.4, 2, 0.01).name("erode end");
-        fs.add(settings, "erodeSoft", 0.02, 1, 0.01).name("erode softness");
-        fs.add(settings, "worldNoiseMix", 0, 1, 0.01).name("world-noise mix");
-        fs.add(settings, "worldNoiseScale", 0.1, 3, 0.02).name("world scale");
-        fs.add(settings, "worldNoiseDrift", 0, 2, 0.02).name("world drift");
-        fs.add(settings, "softDepth", 0, 3, 0.02).name("soft depth (m)");
-
-        const fl = gui.addFolder("Lighting");
-        fl.add(settings, "sunTint", 0, 1, 0.01).name("lighting amount");
-        fl.add(settings, "ambient", 0, 1.5, 0.01).name("ambient");
-        fl.add(settings, "sunStrength", 0, 3, 0.02).name("sun strength");
-        fl.add(settings, "absorb", 0, 4, 0.02).name("self-shadow");
-        fl.add(settings, "scatter", 0, 4, 0.02).name("HG scatter");
-        fl.add(settings, "hgG", 0, 0.95, 0.01).name("HG anisotropy");
-
-        const fh = gui.addFolder("Lingering bank");
-        fh.add(settings.haze, "enabled").name("enabled");
-        fh.add(settings.haze, "emitRate", 0, 40, 0.5).name("emit rate /s");
-        fh.add(settings.haze, "opacity", 0.01, 0.3, 0.005).name("opacity");
-        fh.add(settings.haze, "lifeMin", 1, 20, 0.5).name("life min (s)");
-        fh.add(settings.haze, "lifeMax", 1, 30, 0.5).name("life max (s)");
-        fh.add(settings.haze, "sizeMin", 0.5, 6, 0.1).name("size min (m)");
-        fh.add(settings.haze, "sizeMax", 0.5, 8, 0.1).name("size max (m)");
-        fh.add(settings.haze, "sizeGrowth", 0, 6, 0.1).name("growth ×");
-        fh.add(settings.haze, "growthPower", 0.3, 1.2, 0.01).name("growth power");
-        fh.add(settings.haze, "fadeOutStart", 0, 0.9, 0.01).name("hold until");
-        fh.add(settings.haze, "rise", 0, 1.5, 0.02).name("rise");
-        fh.add(settings.haze, "buoyancy", -0.5, 1, 0.01).name("buoyancy");
-        fh.add(settings.haze, "spread", 0, 5, 0.05).name("spread");
-        fh.add(settings.haze, "turbulence", 0, 2, 0.02).name("turbulence");
-        fh.add(settings.haze, "erodeStart", 0, 0.6, 0.01).name("erode start");
-        fh.add(settings.haze, "erodeEnd", 0.4, 2, 0.01).name("erode end");
-        fh.add(settings.haze, "erodePower", 0.5, 5, 0.05).name("erode power");
-        fh.add(settings.haze, "worldScaleMul", 0.1, 1.5, 0.02).name("world scale ×");
-        fh.add(settings.haze, "worldMixMul", 0, 2.5, 0.05).name("world mix ×");
-        fh.addColor(settings.haze, "colorHot").name("colour hot");
-        fh.addColor(settings.haze, "colorCool").name("colour cool");
-
-        const fw = gui.addFolder("Wet spray");
-        fw.add(settings.wetSpray, "emitRate", 100, 2000, 10).name("emit rate /s");
-        fw.add(settings.wetSpray, "opacity", 0.02, 0.6, 0.005).name("opacity");
-        fw.add(settings.wetSpray, "sizeMin", 0.01, 0.2, 0.002).name("size min");
-        fw.add(settings.wetSpray, "sizeMax", 0.01, 0.4, 0.002).name("size max");
-        fw.add(settings.wetSpray, "lifeMin", 0.05, 1, 0.01).name("life min");
-        fw.add(settings.wetSpray, "lifeMax", 0.05, 2, 0.01).name("life max");
-        fw.add(settings.wetSpray, "rise", 0, 6, 0.05).name("rise");
-        fw.add(settings.wetSpray, "buoyancy", -10, 0, 0.1).name("gravity");
-        fw.add(settings.wetSpray, "drag", 0, 1, 0.01).name("speed carry");
-        fw.add(settings.wetSpray, "sideThrow", 0, 8, 0.1).name("side throw");
-        fw.add(settings.wetSpray, "streak", 0, 3, 0.05).name("streak (shutter ×)");
-
-        const fio = gui.addFolder("Settings I/O");
-        fio.add({ e: exportSettings }, "e").name("Export .json");
-        fio.add({ i: () => settingsFileInput.click() }, "i").name("Import .json");
-        fio.add({ r: () => {
-          deepMerge(settings, structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS));
-          refreshGui();
-        } }, "r").name("Reset to game defaults");
-
-        fw.close();
-        fio.close();
-      }
-
       /* --------------------------------------------------------------- input */
 
       function onKey(e) {
+        const tag = e.target?.tagName;
+        if (tag === "BUTTON" && (e.key === " " || e.key === "Enter")) {
+          e.preventDefault();
+          e.target.blur();
+        }
+        if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+          if (e.key === "Escape") e.target.blur();
+          return;
+        }
         // Matched on e.key (the printed label), not e.code — AZERTY-safe.
         const k = e.key.toLowerCase();
         const n = Number(k);
-        if (Number.isInteger(n) && n >= 1 && n <= SUN_ORDER.length) {
-          sunName = SUN_ORDER[n - 1];
+        if (k !== " " && Number.isInteger(n) && n >= 1 && n <= SUN_ORDER.length) {
+          scn.sun = SUN_ORDER[n - 1];
           applySun();
+          refreshUi(); savePrefs();
           return;
         }
         switch (k) {
-          case "m":
-            rig.mode = MODES[(MODES.indexOf(rig.mode) + 1) % MODES.length];
-            smoke.reset();
-            updateHudMode();
-            break;
-          case "c":
-            cam.mode = CAMS[(CAMS.indexOf(cam.mode) + 1) % CAMS.length];
-            resetView();
-            break;
-          case "e":
-            rig.emit = !rig.emit;
-            break;
-          case "t":
-            rig.timeScale = rig.timeScale < 1 ? 1 : 0.15;
-            break;
-          case "w":
-            rig.wetness = rig.wetness > 0 ? 0 : 1;
-            break;
-          case "r":
-            resetView();
-            break;
-          default:
-            break;
+          case " ": e.preventDefault(); togglePause(); break;
+          case ".": case ";": stepOnce(); break;
+          case "f": setLook(look.puffs === "flipbook" ? "procedural" : "flipbook"); break;
+          case "m": setMode(MODES[(MODES.indexOf(rig.mode) + 1) % MODES.length]); break;
+          case "c": setCam(CAMS[(CAMS.indexOf(cam.mode) + 1) % CAMS.length]); break;
+          case "e": rig.emit = !rig.emit; break;
+          case "b": burst(); break;
+          case "x": clearParticles(); break;
+          case "t": rig.timeScale = rig.timeScale < 1 ? 1 : 0.25; break;
+          case "w": rig.wetness = rig.wetness > 0 ? 0 : 1; break;
+          case "r": if (cam.mode !== "orbit") cam.mode = "orbit"; resetView(); break;
+          case "h": togglePanel(); break;
+          case "/": e.preventDefault(); $("search").focus(); break;
+          default: return;
         }
+        refreshUi();
+        savePrefs();
       }
 
       function onResize() {
@@ -842,33 +1565,35 @@
 
       /* --------------------------------------------------------------- frame */
 
-      function updateHudMode() {
-        $("s-mode").textContent = rig.mode;
-      }
-
       function frame() {
         timer.update();
         const dt = Math.min(0.05, timer.getDelta());
-        // Slow motion applies to the WORLD (car + smoke), never the camera —
-        // an orbit that also slows down just feels like a dropped frame rate.
-        const sdt = dt * rig.timeScale;
-
-        updateRig(dt, sdt);
+        // Pause and slow motion apply to the WORLD, never the camera.
+        let sdt = dt * rig.timeScale;
+        if (rig.paused) {
+          if (stepFrames > 0) { sdt = (1 / 60) * rig.timeScale; stepFrames--; }
+          else sdt = 0;
+        }
+        if (burstLeft > 0) {
+          burstLeft -= sdt;
+          if (burstLeft <= 0) refreshUi();
+        }
+        smoke.syncFlip?.();
+        updateRig(sdt);
         updateCamera();
         renderer.render(scene, camera);
 
         if (hasTimestamps) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
 
         const now = performance.now();
-        if (!perf.since) { perf.since = now; updateHudMode(); }
+        if (!perf.since) perf.since = now;
         perf.frames++;
         const ts = renderer.info.render.timestamp;
         if (ts > 0) { perf.gpuSum += ts; perf.gpuN++; }
         if (now - perf.since >= 500) {
           perf.fps = (perf.frames * 1000) / (now - perf.since);
           $("s-fps").textContent = perf.fps.toFixed(0);
-          $("s-gpu").textContent = perf.gpuN
-            ? `${(perf.gpuSum / perf.gpuN).toFixed(2)} ms` : "n/a";
+          $("s-gpu").textContent = perf.gpuN ? `${(perf.gpuSum / perf.gpuN).toFixed(2)} ms` : "n/a";
           $("s-puffs").textContent = String(smoke.geometry.drawRange.count / 6);
           $("s-bank").textContent = String(smoke.bankMesh?.count ?? 0);
           perf.frames = 0;

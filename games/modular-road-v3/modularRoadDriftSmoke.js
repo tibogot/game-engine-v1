@@ -80,6 +80,53 @@ import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 const _sceneDepthTex = /*#__PURE__*/ viewportDepthTexture();
 
 /**
+ * AERIAL PERSPECTIVE CANCEL. The game's aerial composite (modularRoadAerial.js)
+ * runs AFTER the scene — smoke included — and hazes each pixel by the depth
+ * buffer, which smoke does not write. Over tarmac a puff was hazed as if it were
+ * as far away as the ground behind it; over the sky it was not hazed at all: a
+ * hard light/dark seam through the plume exactly on the horizon line.
+ *
+ * The game hands in the composite's `hazeBehind(rd, rayDist, rawDepth)` and every
+ * smoke shader outputs (colour − inscatter) / T, which the composite then turns
+ * back into the colour it would have had drawn over the hazed scene (exact through
+ * stacked layers — see modularRoadAerial). Needs a float scene target, which the
+ * post-FX pass is. Unset (the lab, or a game without air) = no-op.
+ *
+ * Must be set before the first smoke is CONSTRUCTED: the node graphs read it when
+ * they are built.
+ */
+let _aerialHazeBehind = null;
+export function setDriftSmokeAerial(hazeBehind) {
+  _aerialHazeBehind = hazeBehind ?? null;
+}
+export function cancelAerial(rgb, rawDepth, rd, rayDist) {
+  if (!_aerialHazeBehind) return rgb;
+  const h = _aerialHazeBehind(rd, rayDist, rawDepth).toVar();
+  // T is floored by the composite's maxAmount (0.88 → T ≥ 0.12); the extra floor
+  // only guards a mistuned ceiling from dividing by ~0.
+  return rgb.sub(h.xyz).div(max(float(1).sub(h.w), float(0.05)));
+}
+
+/**
+ * Wire a smoke material's shaded vec4 in, WITHOUT three's output clamp.
+ *
+ * NodeMaterial builds its result as `vec4(light, alpha).max(0)` ("force unsigned
+ * floats") before anything is written — which flattened the negative colour the
+ * aerial cancel needs whenever the smoke is darker than the haze behind it. Measured
+ * with the particles frozen: an output of (colour − 1) rendered pixel-identical to
+ * an output of 0, and the horizon seam survived the cancel at ~40% strength.
+ *
+ * A custom `outputNode` replaces that clamped result. Nothing else is lost: its
+ * setupOutput only adds fog and premultiplied alpha, both off here, and tone mapping
+ * / colour space are applied after, on whatever the output is.
+ */
+export function wireSmokeOutput(material, shaded) {
+  material.colorNode = shaded.xyz;
+  material.opacityNode = shaded.w;
+  material.outputNode = vec4(shaded.xyz, shaded.w);
+}
+
+/**
  * WET SPRAY — the same puff system, wearing a different coat.
  *
  * ON A SOAKED ROAD A TYRE DOES NOT SMOKE, IT SPRAYS, and that is why this is a
@@ -1122,8 +1169,7 @@ export class ModularRoadDriftSmoke {
     // (erosion), so one node builds the pair and each slot takes its component.
     // Same node object in both, so the graph is emitted once.
     const shaded = this._buildShadedNode().toVar();
-    material.colorNode = shaded.xyz;
-    material.opacityNode = shaded.w;
+    wireSmokeOutput(material, shaded);
 
     /**
      * The SPRAY material — a second, much cheaper shader over the same
@@ -1145,8 +1191,7 @@ export class ModularRoadDriftSmoke {
       side: THREE.DoubleSide, fog: false,
     });
     const streak = this._buildStreakNode().toVar();
-    sprayMaterial.colorNode = streak.xyz;
-    sprayMaterial.opacityNode = streak.w;
+    wireSmokeOutput(sprayMaterial, streak);
     this.sprayMaterial = sprayMaterial;
 
     this._buildBankMesh(scene);
@@ -1394,8 +1439,7 @@ export class ModularRoadDriftSmoke {
       fog: false,
     });
     const shaded = this._buildBankNode().toVar();
-    mat.colorNode = shaded.xyz;
-    mat.opacityNode = shaded.w;
+    wireSmokeOutput(mat, shaded);
 
     const mesh = shareInstancePipeline(new THREE.InstancedMesh(geo, mat, HAZE_POOL_SIZE));
     mesh.frustumCulled = false;
@@ -1471,9 +1515,8 @@ export class ModularRoadDriftSmoke {
       const t0 = b.negate().sub(sq);
       const t1 = b.negate().add(sq);
 
-      const sceneViewZ = perspectiveDepthToViewZ(
-        _sceneDepthTex.sample(screenUV).r, cameraNear, cameraFar,
-      ).negate();
+      const rawDepth = _sceneDepthTex.sample(screenUV).r.toVar();
+      const sceneViewZ = perspectiveDepthToViewZ(rawDepth, cameraNear, cameraFar).negate();
       const fragViewZ = positionView.z.negate();
       const sceneT = sceneViewZ.mul(dist).div(max(fragViewZ, float(1e-4)));
 
@@ -1560,7 +1603,8 @@ export class ModularRoadDriftSmoke {
         .mul(transmit)
         .add(hemiCol.mul(uAmbient))
         .add(lamps);
-      return vec4(tint.xyz.mul(mix(vec3(1), lit, uLightAmount)), alpha);
+      const rgb = tint.xyz.mul(mix(vec3(1), lit, uLightAmount));
+      return vec4(cancelAerial(rgb, rawDepth, rd, sceneT), alpha);
     })();
   }
 
@@ -1623,9 +1667,8 @@ export class ModularRoadDriftSmoke {
       const alpha = saturate(shape.sub(nParams.w.mul(0.35))).mul(tint.w).toVar();
 
       // Depth fade — the only tap in this shader.
-      const sceneViewZ = perspectiveDepthToViewZ(
-        _sceneDepthTex.sample(screenUV).r, cameraNear, cameraFar,
-      ).negate();
+      const rawDepth = _sceneDepthTex.sample(screenUV).r.toVar();
+      const sceneViewZ = perspectiveDepthToViewZ(rawDepth, cameraNear, cameraFar).negate();
       const fragViewZ = positionView.z.negate();
       alpha.mulAssign(saturate(sceneViewZ.sub(fragViewZ).div(max(softDepth, float(1e-3)))));
 
@@ -1634,7 +1677,12 @@ export class ModularRoadDriftSmoke {
       // Flat lighting. Water spray is bright because it scatters a lot, not
       // because it is shaped — there is no normal here worth lighting.
       const lit = uSunColor.mul(uSunStrength).add(uAmbient);
-      return vec4(tint.xyz.mul(mix(vec3(1), lit, uLightAmount)), alpha);
+      const rgb = tint.xyz.mul(mix(vec3(1), lit, uLightAmount));
+      if (!_aerialHazeBehind) return vec4(rgb, alpha);
+      const toFrag = positionWorld.sub(cameraPosition);
+      const fragDist = length(toFrag);
+      const rayDist = sceneViewZ.mul(fragDist).div(max(fragViewZ, float(1e-4)));
+      return vec4(cancelAerial(rgb, rawDepth, toFrag.div(fragDist), rayDist), alpha);
     })();
   }
 
@@ -1675,9 +1723,8 @@ export class ModularRoadDriftSmoke {
       const t0 = b.negate().sub(sq).toVar();
       const t1 = b.negate().add(sq).toVar();
 
-      const sceneViewZ = perspectiveDepthToViewZ(
-        _sceneDepthTex.sample(screenUV).r, cameraNear, cameraFar,
-      ).negate();
+      const rawDepth = _sceneDepthTex.sample(screenUV).r.toVar();
+      const sceneViewZ = perspectiveDepthToViewZ(rawDepth, cameraNear, cameraFar).negate();
       const fragViewZ = positionView.z.negate();
       const sceneT = sceneViewZ.mul(dist).div(max(fragViewZ, float(1e-4)));
 
@@ -1832,7 +1879,7 @@ export class ModularRoadDriftSmoke {
       // ── end hemisphere ambient ────────────────────────────────────────────
       const rgb = tint.xyz.mul(mix(vec3(1), lit, uLightAmount));
 
-      return vec4(rgb, alpha);
+      return vec4(cancelAerial(rgb, rawDepth, rd, sceneT), alpha);
     })();
   }
 

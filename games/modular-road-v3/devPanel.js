@@ -4518,6 +4518,48 @@ export function createRoadDevPanel({ app, game, params }) {
               <button class="prop-toggle checked" id="dv-smoke" type="button" aria-label="Drift smoke">${CHECK_SVG}</button>
             </div>
           </div>
+          <!-- Flipbook = baked atlases (smoke-lab.html); Procedural = the old
+               volumetric shader. Live swap, same settings, plume carried over. -->
+          <div class="prop-row">
+            <span class="prop-label">Smoke look</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-smk-look" type="button">Flipbook</button>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Flipbook alpha</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-alpha" min="0.2" max="4" step="0.05" />
+              <span class="prop-num" id="dv-fb-alpha-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Flipbook brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-bright" min="0.5" max="4" step="0.05" />
+              <span class="prop-num" id="dv-fb-bright-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Bank look</span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-fb-bank" type="button">Flipbook</button>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Bank flipbook alpha</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-balpha" min="0.5" max="25" step="0.1" />
+              <span class="prop-num" id="dv-fb-balpha-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Bank brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-fb-bbright" min="0.5" max="6" step="0.05" />
+              <span class="prop-num" id="dv-fb-bbright-v"></span>
+            </div>
+          </div>
           <div class="prop-row">
             <span class="prop-label">Smoke amount</span>
             <div class="prop-value">
@@ -7196,6 +7238,32 @@ export function createRoadDevPanel({ app, game, params }) {
   skidBtn?.addEventListener("click", () => { game.toggleSkidStyle?.(); syncSkidBtn(); });
   syncSkidBtn();
   toggle("dv-smoke", true, (on) => game.setDriftSmokeEnabled(on));
+  // Smoke look A/B. The flipbook rows only mean anything in the flipbook look,
+  // so they hide in procedural rather than sitting there doing nothing.
+  const smkLookBtn = $("#dv-smk-look");
+  const fbBankBtn = $("#dv-fb-bank");
+  const fb = game.getDriftSmokeFlipSettings?.();
+  const syncSmokeLook = () => {
+    const look = game.getDriftSmokeLook?.() ?? "procedural";
+    if (smkLookBtn) smkLookBtn.textContent = look === "flipbook" ? "Flipbook" : "Procedural";
+    for (const row of root.querySelectorAll("[data-smk-flip]")) row.style.display = look === "flipbook" ? "" : "none";
+    if (fbBankBtn && fb) fbBankBtn.textContent = fb.bankStyle === "flipbook" ? "Flipbook" : "Sphere";
+  };
+  smkLookBtn?.addEventListener("click", () => {
+    game.setDriftSmokeLook?.(game.getDriftSmokeLook?.() === "flipbook" ? "procedural" : "flipbook");
+    syncSmokeLook();
+  });
+  if (fb) {
+    slider("dv-fb-alpha", fb, "alphaMul", (v) => "x" + v.toFixed(2));
+    slider("dv-fb-bright", fb, "bakedGain", (v) => "x" + v.toFixed(2));
+    slider("dv-fb-balpha", fb, "bankAlpha", (v) => "x" + v.toFixed(1));
+    slider("dv-fb-bbright", fb, "bankBright", (v) => "x" + v.toFixed(2));
+    fbBankBtn?.addEventListener("click", () => {
+      fb.bankStyle = fb.bankStyle === "flipbook" ? "sphere" : "flipbook";
+      syncSmokeLook();
+    });
+  }
+  syncSmokeLook();
   // Smoke look.  is driven directly and lifeMin follows at 45% of it —
   // two independent life sliders is a fiddly way to say "longer plume".
 

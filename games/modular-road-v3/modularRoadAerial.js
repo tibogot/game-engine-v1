@@ -44,7 +44,7 @@
 import * as THREE from "three/webgpu";
 import {
   float, vec2, vec4, Fn, If, uniform, texture, uv,
-  normalize, dot, max, min, mix, pow, exp, abs, saturate,
+  normalize, dot, max, min, mix, pow, exp, abs, saturate, select,
 } from "three/tsl";
 
 export const AERIAL_DEFAULTS = {
@@ -139,23 +139,14 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
       .negate();
   });
 
-  const aerialColor = Fn(() => {
-    // Render-target sampling is Y-flipped versus the canvas under WebGPU.
-    const fuv = vec2(uv().x, uv().y.oneMinus());
-    const out = vec4(0.0).toVar();
-
-    const d = depthTex.sample(fuv).r;
-    const skyDepth = uReversed.oneMinus();
-    // Sky pixels hold the cleared far-plane depth and ALREADY are the sky — hazing them
-    // toward themselves would only wash the horizon out. The sky dome writes no depth,
-    // so this test is exactly "is there something solid here".
-    If(abs(d.sub(skyDepth)).greaterThan(0.0001), () => {
-      const ndc = vec4(fuv.x.mul(2.0).sub(1.0), fuv.y.mul(2.0).sub(1.0), 0.5, 1.0);
-      const wpH = uInvViewProj.mul(ndc);
-      const dirW = normalize(wpH.xyz.div(wpH.w).sub(uCamPos));
-      // depthDist is along the view AXIS; divide by cos to get distance along the RAY,
-      // or the corners of the screen would be under-hazed relative to the centre.
-      const dist = min(depthDist(d).div(dot(dirW, uCamFwd).max(1e-3)), uMaxDist);
+  /**
+   * The haze for a ray `dirW` that travels `dist` metres before hitting something,
+   * premultiplied: vec4(inscatter · amount, amount). The ONE definition of the
+   * effect — the fullscreen composite below uses it, and so does `hazeBehind`, which
+   * transparent effects use to cancel the composite over their own pixels.
+   */
+  const hazeFor = Fn(([dirW, distIn]) => {
+      const dist = min(distIn, uMaxDist);
 
       // Air thins with altitude: use the midpoint of the segment, which is the cheapest
       // stand-in for integrating density along it and is exact enough over a few hundred
@@ -207,10 +198,57 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
       const inscatter = base.add(uSunTint.mul(glow));
 
       // Premultiplied: dst = src.rgb + dst*(1 - src.a) == dst*T + inscatter*(1 - T).
-      out.assign(vec4(inscatter.mul(amount), amount));
+      return vec4(inscatter.mul(amount), amount);
+  });
+
+  const aerialColor = Fn(() => {
+    // Render-target sampling is Y-flipped versus the canvas under WebGPU.
+    const fuv = vec2(uv().x, uv().y.oneMinus());
+    const out = vec4(0.0).toVar();
+
+    const d = depthTex.sample(fuv).r;
+    const skyDepth = uReversed.oneMinus();
+    // Sky pixels hold the cleared far-plane depth and ALREADY are the sky — hazing them
+    // toward themselves would only wash the horizon out. The sky dome writes no depth,
+    // so this test is exactly "is there something solid here".
+    If(abs(d.sub(skyDepth)).greaterThan(0.0001), () => {
+      const ndc = vec4(fuv.x.mul(2.0).sub(1.0), fuv.y.mul(2.0).sub(1.0), 0.5, 1.0);
+      const wpH = uInvViewProj.mul(ndc);
+      const dirW = normalize(wpH.xyz.div(wpH.w).sub(uCamPos));
+      // depthDist is along the view AXIS; divide by cos to get distance along the RAY,
+      // or the corners of the screen would be under-hazed relative to the centre.
+      out.assign(hazeFor(dirW, depthDist(d).div(dot(dirW, uCamFwd).max(1e-3))));
     });
     return out;
   });
+
+  /**
+   * ── TRANSPARENT EFFECTS AND THE COMPOSITE ORDER ──────────────────────────────
+   *
+   * The engine draws the WHOLE scene — transparent effects included — and only then
+   * runs this composite, hazing each pixel by the depth buffer. Smoke writes no depth,
+   * so a puff over the tarmac was hazed as if it were as far away as the tarmac
+   * behind it, and a puff over the sky (cleared depth) was not hazed at all: a hard
+   * light/dark seam through the plume exactly at the horizon line.
+   *
+   * `hazeBehind` lets such an effect CANCEL that over its own pixels. Given the raw
+   * scene depth behind the fragment, the view ray and the ray distance to that depth,
+   * it returns the haze the composite is about to apply there, or zero when it will
+   * not run. An effect that outputs (colour − inscatter) / T instead of colour ends
+   * up, after `dst·T + inscatter`, exactly as if it had been drawn on top of the
+   * hazed scene — and that holds through any number of stacked layers. Its own
+   * distance is metres, so its own haze is negligible and is not added.
+   *
+   * `uLive` gates it on the composite having ACTUALLY run recently (see syncLive):
+   * with post-FX off, or the air disabled, nothing is hazed and nothing may be
+   * cancelled.
+   */
+  const uLive = uniform(0);
+  const hazeBehind = (rd, rayDist, rawDepth) => {
+    const notSky = abs(rawDepth.sub(uReversed.oneMinus())).greaterThan(0.0001);
+    return hazeFor(rd, rayDist).mul(uLive).mul(select(notSky, float(1), float(0)));
+  };
+  let _lastComposite = -1e9;
 
   const material = new THREE.MeshBasicNodeMaterial();
   material.colorNode = aerialColor();
@@ -274,6 +312,17 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
     renderer.setRenderTarget(targetRT);
     renderer.render(scene, cam);
     renderer.autoClear = prevAuto;
+    _lastComposite = performance.now();
+  }
+
+  /**
+   * Call once per frame BEFORE rendering. Effects render ahead of the composite in the
+   * same frame, so "is the air live" has to come from the previous one; a quarter
+   * second of slack covers a dropped frame without leaving the cancel on after the
+   * air has been switched off.
+   */
+  function syncLive() {
+    uLive.value = active() && performance.now() - _lastComposite < 250 ? 1 : 0;
   }
 
   return {
@@ -282,6 +331,11 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
     setDepthSource,
     setSky,
     composite,
+    syncLive,
+    hazeBehind,
+    /** Debug: is the transparent-FX cancel live this frame, and when did the composite last run. */
+    get live() { return uLive.value; },
+    get lastComposite() { return _lastComposite; },
     dispose() {
       material.dispose();
       quad.geometry.dispose();
