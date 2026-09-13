@@ -120,6 +120,8 @@ import { buildRiverV2Panel } from "../ui/buildRiverV2Panel.js";
 import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
 import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
 import { RiverV2System } from "../tools/riverV2System.js";
+import { TunnelSystem, createTunnelToolState } from "../tools/tunnelSystem.js";
+import { buildTunnelPanel } from "../ui/buildTunnelPanel.js";
 import { createLakeToolState } from "./state/lakeState.js";
 import { buildLakePanel } from "../ui/buildLakePanel.js";
 import { LakeSystem } from "../tools/lakeSystem.js";
@@ -588,6 +590,7 @@ export async function startV3App(opts = {}) {
   const riverPanel     = document.getElementById("river-panel");
   const river2Panel    = document.getElementById("river2-panel");
   const riverV2Panel   = document.getElementById("riverv2-panel");
+  const tunnelPanel    = document.getElementById("tunnel-panel");
   const lakePanel      = document.getElementById("lake-panel");
   const roadPanel      = document.getElementById("road-panel");
   const spawnPanel     = document.getElementById("spawn-panel");
@@ -812,6 +815,9 @@ export async function startV3App(opts = {}) {
   const perf = createPerfState();
   let splineSys = null;
   let splineFeatureStore = null;
+  let tunnelColliderStore = null;
+  let _tunnelHolesHv = -1, _tunnelHolesDue = 0;
+  let _legacyMeadowPainted = false;
 
   function getTerrainMeshesForWorld() {
     const out = [];
@@ -1973,6 +1979,10 @@ export async function startV3App(opts = {}) {
   const riverV2Slice = createRiverV2ToolState();
   let riverV2System = null;
   let riverV2Ui = null;
+  // Tunnels (O): walkable tubes that open the terrain where they pass through it.
+  const tunnelToolSlice = createTunnelToolState();
+  let tunnelSystem = null;
+  let tunnelUi = null;
   const lakeToolSlice = createLakeToolState();
   let lakeSystem = null;
   let lakeUi = null;
@@ -2057,6 +2067,10 @@ export async function startV3App(opts = {}) {
     riverV2Panel.style.display = (editorMode === "riverv2" && !playMode.active) ? "" : "none";
   }
 
+  function syncTunnelPanelVisibility() {
+    if (tunnelPanel) tunnelPanel.style.display = (editorMode === "tunnel" && !playMode.active) ? "" : "none";
+  }
+
   function syncLakePanelVisibility() {
     lakePanel.style.display = (editorMode === "lake" && !playMode.active) ? "" : "none";
   }
@@ -2104,6 +2118,7 @@ export async function startV3App(opts = {}) {
         editorMode === "river2" && riverToolSlice.river2.showHandles && !playMode.active;
     }
     riverV2System?.setEditActive(editorMode === "riverv2" && !playMode.active);
+    tunnelSystem?.setEditActive(editorMode === "tunnel" && !playMode.active);
   }
 
   function applySplineModeEffects() {
@@ -2166,12 +2181,14 @@ export async function startV3App(opts = {}) {
       uCursorUV.value.set(-2, -2);
       spawnUi?.refresh();
     } else if (m === "props" || m === "spline" || m === "river" || m === "river2"
-      || m === "riverv2" || m === "road" || m === "lake") {
+      || m === "riverv2" || m === "road" || m === "lake" || m === "tunnel") {
       uCursorUV.value.set(-2, -2);
       if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
       // River v2 snapshots the unconformed terrain from the CPU mirror, so the
       // mirror has to be fresh before the first conform of the session.
       if (m === "riverv2") void ensureCpuHeightmapFromGpu().then(() => riverV2Ui?.refresh());
+      // A tunnel's floor height comes from the ground under the click.
+      if (m === "tunnel") void ensureCpuHeightmapFromGpu().then(() => tunnelUi?.refresh());
       // Lake creation reads terrain height at the click to pick a water level.
       if (m === "lake") void ensureCpuHeightmapFromGpu().then(() => lakeUi?.refresh());
       if (m === "road") {
@@ -2195,6 +2212,7 @@ export async function startV3App(opts = {}) {
     syncRiverPanelVisibility();
     syncRiver2PanelVisibility();
     syncRiverV2PanelVisibility();
+    syncTunnelPanelVisibility();
     syncLakePanelVisibility();
     syncRoadPanelVisibility();
     syncSpawnPanelVisibility();
@@ -2238,12 +2256,14 @@ export async function startV3App(opts = {}) {
     riverPanel.style.display = "none";
     river2Panel.style.display = "none";
     riverV2Panel.style.display = "none";
+    if (tunnelPanel) tunnelPanel.style.display = "none";
     lakePanel.style.display = "none";
     roadPanel.style.display = "none";
     spawnPanel.style.display = "none";
     roadSystem?.setEditActive(false);
     lakeSystem?.setEditActive(false);
     riverV2System?.setEditActive(false);
+    tunnelSystem?.setEditActive(false);
     spawnSystem.setVisible(false);
     helpOverlay.classList.remove("visible");
     tbHelp.classList.remove("active");
@@ -3052,6 +3072,13 @@ export async function startV3App(opts = {}) {
       // RT, so sculpting, erosion, undo/redo and project loads all invalidate
       // it without any of them having to know this exists.
       const _hv = sculpt.getHeightVersion();
+      if (tunnelSystem?.tunnels.length) {
+        if (_hv !== _tunnelHolesHv) { _tunnelHolesHv = _hv; _tunnelHolesDue = now + 400; }
+        if (_tunnelHolesDue && now >= _tunnelHolesDue && !_rendererSideWork && !tunnelSystem.dragging) {
+          _tunnelHolesDue = 0;
+          void ensureCpuHeightmapFromGpu().then(() => tunnelSystem.rebuildHoles());
+        }
+      }
       if (_hv !== _lastNormalBakeVersion && !_rendererSideWork) {
         _lastNormalBakeVersion = _hv;
         terrainNormals.bake();
@@ -3114,6 +3141,9 @@ export async function startV3App(opts = {}) {
       riverSystem?.update(dt);
       river2System?.update(dt);
       riverV2System?.update(dt);
+      tunnelSystem?.update();
+      // Tunnel collision: cheap poll, rebuilds a BVH only when a tunnel mesh changed.
+      tunnelColliderStore?.refresh();
       roadSystem?.update();
 
       tickPerf(perf, now, dt * 1000);
@@ -3364,6 +3394,12 @@ export async function startV3App(opts = {}) {
       setEditorMode(editorMode === "riverv2" ? "view" : "riverv2");
       return;
     }
+    // Tunnel mode — e.key so it is the printed O on AZERTY too.
+    if (e.key?.toLowerCase() === "o" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "tunnel" ? "view" : "tunnel");
+      return;
+    }
     if (e.code === "KeyP" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       if (playMode.active) exitPlay();
@@ -3411,6 +3447,13 @@ export async function startV3App(opts = {}) {
         else splineSys.deleteSelected();
         return;
       }
+    }
+    if (editorMode === "tunnel" && !playMode.active
+        && (e.code === "Delete" || e.code === "Backspace")) {
+      e.preventDefault();
+      tunnelSystem?.deleteSelected();
+      tunnelUi?.refresh();
+      return;
     }
     if (editorMode === "riverv2" && !playMode.active
         && (e.code === "Delete" || e.code === "Backspace")) {
@@ -3514,6 +3557,7 @@ export async function startV3App(opts = {}) {
         else if (editorMode === "river" && riverSystem?.undo()) { /* ok */ }
         else if (editorMode === "river2" && river2System?.undo()) { /* ok */ }
         else if (editorMode === "riverv2" && riverV2System?.undo()) { riverV2Ui?.refresh(); }
+        else if (editorMode === "tunnel" && tunnelSystem?.undo()) { tunnelUi?.refresh(); }
         else if (editorMode === "spline" && splineSys?.undo()) { /* ok */ }
         else if (sculpt.undo()) onHistoryChange();
         return;
@@ -3532,6 +3576,7 @@ export async function startV3App(opts = {}) {
         else if (editorMode === "river" && riverSystem?.redo()) { /* ok */ }
         else if (editorMode === "river2" && river2System?.redo()) { /* ok */ }
         else if (editorMode === "riverv2" && riverV2System?.redo()) { riverV2Ui?.refresh(); }
+        else if (editorMode === "tunnel" && tunnelSystem?.redo()) { tunnelUi?.refresh(); }
         else if (editorMode === "spline" && splineSys?.redo()) { /* ok */ }
         else if (sculpt.redo()) onHistoryChange();
         return;
@@ -4185,7 +4230,7 @@ export async function startV3App(opts = {}) {
 
   // Splat save / load
   function saveSplatmap() {
-    const buf = encodeSplatmapFile(splatMap._combined, { resolution: SPLAT_RES });
+    const buf = encodeSplatmapFile(splatMap.exportCombined(), { resolution: SPLAT_RES });
     const ts  = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     downloadBuffer(buf, `splat-${ts}.v3splat`);
   }
@@ -4197,8 +4242,7 @@ export async function startV3App(opts = {}) {
       const decoded = decodeSplatmapFile(await file.arrayBuffer());
       // A splatmap file is PAINT. Holes are terrain, so the current ones stay —
       // and an older file's slice-1 alpha (Meadow) must not cut new ones.
-      const keepHoles = new Uint8Array(splatMap.data1.length / 4);
-      for (let i = 0; i < keepHoles.length; i++) keepHoles[i] = splatMap.data1[i * 4 + 3];
+      const keepHoles = splatMap.holeUser.slice();
       // A splatmap is weights over the whole world, so a resolution difference
       // is a rescale, not an error — importing older/finer maps just works.
       if (decoded.resolution !== SPLAT_RES) {
@@ -4207,8 +4251,7 @@ export async function startV3App(opts = {}) {
       } else {
         splatMap.setCombined(decoded.data);
       }
-      for (let i = 0; i < keepHoles.length; i++) splatMap.data1[i * 4 + 3] = keepHoles[i];
-      splatMap.setCombined(splatMap.combined);
+      splatMap.setUserHoles(keepHoles);
     } catch (err) {
       console.error(err);
       window.alert(err instanceof Error ? err.message : "Failed to load splatmap.");
@@ -4908,6 +4951,25 @@ export async function startV3App(opts = {}) {
   );
   const splineFeatureCollider = new SolidCollider(splineFeatureStore);
   colliderSources.push(splineFeatureCollider);
+
+  // ── Tunnels ────────────────────────────────────────────────────────────────
+  tunnelSystem = new TunnelSystem({
+    scene,
+    toolState: tunnelToolSlice,
+    splatMap,
+    heightAt: (wx, wz) => {
+      const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE, v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
+      return (u < 0 || u > 1 || v < 0 || v > 1) ? 0 : sampleTerrainHeight(u, v);
+    },
+    worldSize: WORLD_SIZE,
+    splatRes: SPLAT_RES,
+    getCamera: () => camera,
+    onChanged: () => bvhDebug?.update?.(),
+  });
+  // Same PropStore-shaped view the spline objects use: the tube is real
+  // triangles for the capsule (floor, walls, arch), cars and the plane.
+  tunnelColliderStore = createSplineFeatureColliderStore(() => tunnelSystem?.colliderFeatures ?? []);
+  colliderSources.push(new SolidCollider(tunnelColliderStore));
 
   _onLeaveSplineMode = () => {
     splineSys.dragging = false;
@@ -5613,7 +5675,7 @@ export async function startV3App(opts = {}) {
     const buf = encodeProjectFile({
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
       heightmap: baseHeightmap ?? cpuHeightmap,
-      splat:     splatMap.combined,
+      splat:     splatMap.exportCombined(), // painted holes only; tunnels rebuild theirs
       splatRes:  SPLAT_RES,
       splatHoles: true,
       snow:      snowMap.snapshot(),
@@ -5627,6 +5689,7 @@ export async function startV3App(opts = {}) {
       rivers:    riverSystem.exportData(),
       rivers2,
       riversV2,
+      tunnels:   tunnelSystem?.exportData() ?? null,
       paintLayers: textureLib.exportData(),
       paintBlend: {
         heightBlend: splatOverlay.uHeightBlend.value,
@@ -5715,7 +5778,10 @@ export async function startV3App(opts = {}) {
         splatMap.setCombinedResampled(d.splat, srcRes);
       }
       // Older files used this alpha for Meadow paint, not holes.
-      if (!d.splatHoles) splatMap.clearHoleChannel();
+      if (!d.splatHoles) {
+        _legacyMeadowPainted = splatMap.hasAnyHoles();
+        splatMap.clearHoleChannel();
+      }
     }
 
     if (d.snow && d.snowRes === SNOW_MAP_RES) snowMap.restoreSnapshot(d.snow);
@@ -5796,9 +5862,8 @@ export async function startV3App(opts = {}) {
       const usedGround = d.groundTsl?.enabled === true
         || d.groundTsl?.slopeTint?.enabled === true
         || d.groundTsl?.heightTint?.enabled === true;
-      let meadowTexels = 0;
-      const d1 = splatMap.data1;
-      for (let i = 3; i < d1.length; i += 4) if (d1[i] !== 0) { meadowTexels++; break; }
+      const meadowTexels = _legacyMeadowPainted ? 1 : 0;
+      _legacyMeadowPainted = false;
       if (usedGround || meadowTexels) {
         console.warn(
           "[V3] This project used " +
@@ -5854,6 +5919,11 @@ export async function startV3App(opts = {}) {
     riverV2System.importData(d.riversV2 ?? null);
     riverSandShading.syncParams(riverV2Slice.riverV2.sand);
     riverV2Ui?.refresh();
+
+    // Always import (a tunnel-less project clears the old ones). Runs after the
+    // heightmap and splat, because the openings are cut from the loaded ground.
+    tunnelSystem.importData(d.tunnels ?? null);
+    tunnelUi?.refresh();
 
     // Also always import: a project with no player start must clear the old marker.
     spawnSystem.importData(d.spawn ?? null);
@@ -6070,6 +6140,8 @@ export async function startV3App(opts = {}) {
       if (dragging) { dragging = false; lakeSystem.cancelDrag(); }
     });
   }
+
+  tunnelUi = buildTunnelPanel({ tunnelSystem, maxHeight: MAX_HEIGHT });
 
   riverV2Ui = buildRiverV2Panel({
     toolState: { riverV2: riverV2Slice.riverV2 },
@@ -6447,6 +6519,42 @@ export async function startV3App(opts = {}) {
     if (riverV2System.endDrag()) {
       syncEditorOrbitEnabled();
       riverV2Ui?.refresh();
+    }
+  });
+
+  // ── Tunnel mode mouse events ──────────────────────────────────────────────
+  // Click drops a node, Alt+click inserts one into the nearest span, dragging a
+  // node moves it over the ground.
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "tunnel" || !tunnelSystem?.dragging) return;
+    const terrainHit = getTerrainHitWorld(e);
+    tunnelSystem.dragTo({ terrainHit });
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "tunnel" || e.button !== 0 || !tunnelSystem) return;
+    e.preventDefault();
+    refreshMouse(e);
+    raycaster.setFromCamera(mouse, camera);
+    const picked = tunnelSystem.pick(raycaster);
+    if (picked) {
+      tunnelSystem.beginDrag(picked);
+      controls.enabled = false;
+      tunnelUi?.refresh();
+    } else if (e.altKey) {
+      const hit = getTerrainHitWorld(e);
+      if (hit && tunnelSystem.insertNodeNear(hit)) tunnelUi?.refresh();
+    } else {
+      const hit = getTerrainHitWorld(e);
+      if (hit) { tunnelSystem.addNode(hit); tunnelUi?.refresh(); }
+    }
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", () => {
+    if (editorMode !== "tunnel" || !tunnelSystem) return;
+    if (tunnelSystem.endDrag()) {
+      syncEditorOrbitEnabled();
+      tunnelUi?.refresh();
     }
   });
 
@@ -7117,6 +7225,10 @@ export async function startV3App(opts = {}) {
       splatOverlay,
       lod,
       playMode,
+      tunnelSystem,
+      sculpt,
+      ensureCpuHeightmapFromGpu,
+      markHeightmapDirty,
       camera,
       paintSys,
       heightmapFiles: { buildExport: buildHeightmapExport, importFile: importHeightmapFormat },

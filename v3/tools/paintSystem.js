@@ -55,9 +55,11 @@ export class PaintSystem {
     if (!this._preD0) {
       this._preD0 = new Uint8Array(this.splatMap.data0.length);
       this._preD1 = new Uint8Array(this.splatMap.data1.length);
+      this._preHU = new Uint8Array(this.splatMap.holeUser.length);
     }
     this._preD0.set(this.splatMap.data0);
     this._preD1.set(this.splatMap.data1);
+    this._preHU.set(this.splatMap.holeUser);
     this.isPainting  = true;
     this.lastPoint   = null;
     this._strokeDir  = 0;
@@ -95,7 +97,7 @@ export class PaintSystem {
     if (!this.isPainting) return;
     this.isPainting = false;
     if (!this._strokeRect) return; // click without effect — nothing to record
-    this._pushUndo(this.splatMap.copyRect(this._strokeRect, this._preD0, this._preD1));
+    this._pushUndo(this.splatMap.copyRect(this._strokeRect, this._preD0, this._preD1, this._preHU));
     this._strokeRect = null;
   }
 

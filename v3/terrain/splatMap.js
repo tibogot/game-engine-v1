@@ -16,10 +16,15 @@
  *
  * HOLES live in the channel Meadow freed, so the terrain shader reads them
  * through the splat texture it already binds (the fragment stage is at
- * WebGPU's 16-sampler ceiling), and paint undo + project save carry them with
- * no extra code. They are NOT paint: the eraser, Clear and Fill leave them
- * alone, and hasAnyPaint() ignores them so a hole never switches the paint
- * shader branch on by itself.
+ * WebGPU's 16-sampler ceiling). They are NOT paint: the eraser, Clear and Fill
+ * leave them alone, and hasAnyPaint() ignores them so a hole never switches the
+ * paint shader branch on by itself.
+ *
+ * Two SOURCES feed that one channel, and slice1.A is always max(user, proc):
+ *   holeUser — painted with the Hole card. Saved, undone with paint.
+ *   holeProc — owned by tools (tunnels). Rebuilt from their own data, never
+ *              saved. Kept apart so moving or deleting a tunnel can clear its
+ *              old opening without erasing a hole someone painted nearby.
  *
  * The API is tile-ready: the backing storage can be replaced with chunked
  * tiles for larger worlds without changing the shader or UI.
@@ -87,6 +92,58 @@ export class SplatMap {
     // hasAnyHoles() cache — decides whether the terrain compiles its hole mask.
     this._hasHoles      = false;
     this._holesDirty    = false;
+    // Hole sources, one byte per texel (see the header). slice1.A = max of both.
+    this.holeUser       = new Uint8Array(SPLAT_RES * SPLAT_RES);
+    this.holeProc       = new Uint8Array(SPLAT_RES * SPLAT_RES);
+  }
+
+  /** slice1.A = max(user, proc) over a texel rect (inclusive), marks the flag stale. */
+  _composeHoles(x0 = 0, y0 = 0, x1 = SPLAT_RES - 1, y1 = SPLAT_RES - 1) {
+    const d1 = this.data1, u = this.holeUser, p = this.holeProc;
+    for (let y = y0; y <= y1; y++) {
+      let i = y * SPLAT_RES + x0;
+      for (let x = x0; x <= x1; x++, i++) {
+        d1[(i << 2) + 3] = u[i] > p[i] ? u[i] : p[i];
+      }
+    }
+    this._holesDirty = true;
+  }
+
+  /** Take the user hole source from the alpha of slice 1 (after a bulk load). */
+  _userHolesFromAlpha() {
+    const d1 = this.data1, u = this.holeUser;
+    for (let i = 0; i < u.length; i++) u[i] = d1[(i << 2) + 3];
+  }
+
+  /**
+   * Replace the TOOL hole source (tunnels). `bytes` is SPLAT_RES² (0..255), or
+   * null to clear it. Recomposes the channel and uploads slice 1.
+   */
+  setProcHoles(bytes) {
+    if (bytes) this.holeProc.set(bytes); else this.holeProc.fill(0);
+    this._composeHoles();
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
+  }
+
+  /** Replace the USER hole source (e.g. keep holes across a splatmap import). */
+  setUserHoles(bytes) {
+    this.holeUser.set(bytes);
+    this._composeHoles();
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
+  }
+
+  /**
+   * Both slices as one buffer for SAVING: a copy whose hole channel holds only
+   * the USER holes. Tool holes are rebuilt from the tools' own saved data, so
+   * writing them here would bake a tunnel's opening in forever.
+   */
+  exportCombined() {
+    const out = this._combined.slice();
+    const off = SPLAT_RES * SPLAT_RES * 4, u = this.holeUser;
+    for (let i = 0; i < u.length; i++) out[off + (i << 2) + 3] = u[i];
+    return out;
   }
 
   /** Mark every derived flag stale after a bulk write. */
@@ -128,10 +185,10 @@ export class SplatMap {
     return ((a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz) / 255;
   }
 
-  /** Zero the hole channel (used on legacy files whose alpha was Meadow paint). */
+  /** Zero the USER holes (legacy files whose alpha was Meadow paint). Tool holes stay. */
   clearHoleChannel() {
-    const d1 = this.data1;
-    for (let i = 3; i < d1.length; i += 4) d1[i] = 0;
+    this.holeUser.fill(0);
+    this._composeHoles();
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
     this._markDirty();
@@ -215,6 +272,7 @@ export class SplatMap {
 
     let anyTouched = false;
     const d0 = this.data0, d1 = this.data1;
+    const hU = this.holeUser, hP = this.holeProc;
 
     for (let pz = v0; pz <= v1; pz++) {
       const wz = (pz + 0.5) * pxSize - half;
@@ -292,13 +350,17 @@ export class SplatMap {
           d1[idx+1] = Math.max(0, d1[idx+1] - delta);
           d1[idx+2] = Math.max(0, d1[idx+2] - delta);
           // d1[idx+3] is the HOLE channel: the paint eraser leaves holes alone.
-        } else if (activeLayer === HOLE_LAYER) {
-          // Holes are a mask, not part of the 7-weight blend: lerp toward 1.
-          const t = d1[idx + 3] / 255;
-          d1[idx + 3] = Math.min(255, ((t + Math.min(1, w) * (1 - t)) * 255 + 0.5) | 0);
-        } else if (activeLayer === HOLE_ERASE_LAYER) {
-          const t = d1[idx + 3] / 255;
-          d1[idx + 3] = Math.max(0, ((t * (1 - Math.min(1, w))) * 255 + 0.5) | 0);
+        } else if (activeLayer === HOLE_LAYER || activeLayer === HOLE_ERASE_LAYER) {
+          // Holes are a mask, not part of the 7-weight blend: lerp the USER
+          // source toward 1 (hole) or 0 (fill), then recompose with tool holes —
+          // so Alt cannot fill in a tunnel's opening, only a painted hole.
+          const hi = idx >> 2;
+          const t = hU[hi] / 255;
+          const s = Math.min(1, w);
+          hU[hi] = activeLayer === HOLE_LAYER
+            ? Math.min(255, ((t + s * (1 - t)) * 255 + 0.5) | 0)
+            : Math.max(0, ((t * (1 - s)) * 255 + 0.5) | 0);
+          d1[idx + 3] = hU[hi] > hP[hi] ? hU[hi] : hP[hi];
         } else {
           // Unity/Unreal-style weight painting: lerp the target layer toward
           // full weight and scale every other layer down to make room, so
@@ -348,41 +410,63 @@ export class SplatMap {
     return anyTouched ? { x: u0, y: v0, w: u1 - u0 + 1, h: v1 - v0 + 1 } : null;
   }
 
-  /** Copy a sub-rect of both slices (undo storage — ~rect-sized, not map-sized). */
-  copyRect(rect, srcD0 = this.data0, srcD1 = this.data1) {
+  /**
+   * Copy a sub-rect of both slices plus the USER hole source (undo storage —
+   * ~rect-sized, not map-sized). `srcHU` lets a stroke copy its pre-edit state.
+   */
+  copyRect(rect, srcD0 = this.data0, srcD1 = this.data1, srcHU = this.holeUser) {
     const { x, y, w, h } = rect;
     const d0 = new Uint8Array(w * h * 4);
     const d1 = new Uint8Array(w * h * 4);
+    const hu = new Uint8Array(w * h);
     for (let row = 0; row < h; row++) {
       const src = ((y + row) * SPLAT_RES + x) * 4;
       const dst = row * w * 4;
       d0.set(srcD0.subarray(src, src + w * 4), dst);
       d1.set(srcD1.subarray(src, src + w * 4), dst);
+      const s1 = (y + row) * SPLAT_RES + x;
+      hu.set(srcHU.subarray(s1, s1 + w), row * w);
     }
-    return { x, y, w, h, d0, d1 };
+    return { x, y, w, h, d0, d1, hu };
   }
 
-  /** Write a copyRect() patch back into the live splat data. */
+  /**
+   * Write a copyRect() patch back into the live splat data. The hole channel is
+   * recomposed against the CURRENT tool holes, so undoing paint never restores
+   * the opening of a tunnel that has since moved.
+   */
   pasteRect(patch) {
-    const { x, y, w, h, d0, d1 } = patch;
+    const { x, y, w, h, d0, d1, hu } = patch;
     for (let row = 0; row < h; row++) {
       const dst = ((y + row) * SPLAT_RES + x) * 4;
       const src = row * w * 4;
       this.data0.set(d0.subarray(src, src + w * 4), dst);
       this.data1.set(d1.subarray(src, src + w * 4), dst);
+      const u = this.holeUser, base = (y + row) * SPLAT_RES + x;
+      if (hu) u.set(hu.subarray(row * w, row * w + w), base);
+      else for (let i = 0; i < w; i++) u[base + i] = d1[src + (i << 2) + 3];
     }
+    this._composeHoles(x, y, x + w - 1, y + h - 1);
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
     this._markDirty();
   }
 
-  /** Both slices as one contiguous buffer (project save / splat export). */
+  /**
+   * Both slices as one contiguous LIVE buffer — its hole channel includes tool
+   * holes. Use exportCombined() for anything written to disk.
+   */
   get combined() { return this._combined; }
 
-  /** Replace all splat data (project load). Requires SPLAT_RES-sized input. */
+  /**
+   * Replace all splat data (project load). Requires SPLAT_RES-sized input. The
+   * input's hole channel becomes the USER holes; tool holes are re-applied.
+   */
   setCombined(bytes) {
     this._combined.set(bytes);
+    this._userHolesFromAlpha();
+    this._composeHoles();
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
@@ -406,6 +490,8 @@ export class SplatMap {
       : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     _resampleRGBA8(src.subarray(0, sliceBytes),              srcRes, this.data0, SPLAT_RES);
     _resampleRGBA8(src.subarray(sliceBytes, sliceBytes * 2), srcRes, this.data1, SPLAT_RES);
+    this._userHolesFromAlpha();
+    this._composeHoles();
     this.tex.addLayerUpdate(0);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
@@ -413,12 +499,14 @@ export class SplatMap {
   }
 
   snapshot() {
-    return { d0: new Uint8Array(this.data0), d1: new Uint8Array(this.data1) };
+    return { d0: new Uint8Array(this.data0), d1: new Uint8Array(this.data1), hu: new Uint8Array(this.holeUser) };
   }
 
   restoreSnapshot(snap) {
     this.data0.set(snap.d0);
     this.data1.set(snap.d1);
+    if (snap.hu) this.holeUser.set(snap.hu); else this._userHolesFromAlpha();
+    this._composeHoles();
     this.tex.needsUpdate = true;
     this._markDirty();
   }

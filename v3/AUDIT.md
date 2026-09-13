@@ -57,8 +57,11 @@ the game.
 12. ~~Terrain holes~~ — phase 1 DONE 2026-09-13. Paint → Hole card (Alt fills
     back in): see-through terrain and shadow pass, grass/trees/foliage kept
     out, on-foot play falls in (underground rule + respawn), saved in the
-    project. Cars, ball and plane still see solid ground. Next: tunnel spline
-    tool (tube mesh + auto entrance holes), then cave meshes.
+    project. Cars, ball and plane still see solid ground.
+    Phase 2 DONE 2026-09-13: Tunnel mode (O). Click both mouths; horseshoe
+    rock tube with a walkable floor, openings cut automatically (their own
+    hole source, re-cut after sculpting), collision, undo, saved. Next: cave
+    meshes; later maybe mouth trench carving and tunnel interior lighting.
 13. **Mirror, clone, copy-paste.**
 14. **Non-destructive edit layers** like Unreal's. Large; roads and rivers
     already do this per tool.

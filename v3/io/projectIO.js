@@ -34,6 +34,9 @@
  *             how painted layers mix at their edges, plus large-scale variation.
  *             Was saved nowhere, so a game never got the edge the editor showed.
  *   spawn     { x, z, yaw }                 player start; null when unplaced
+ *   tunnels   { version, wallColor, floorColor, tunnels: [{ width, height, thickness,
+ *             nodes: [{ x, z, y, pinned }] }] } — Tunnel mode. Their terrain
+ *             openings are NOT in the splat: they are cut again on load.
  *   splatHoles true when the splat's slice-1 alpha is the terrain HOLE channel.
  *             Absent in older files, where that alpha was Meadow paint — the
  *             load zeroes it rather than cutting holes wherever Meadow was.
@@ -61,6 +64,7 @@ export function encodeProjectFile({
   paintLayers,          // textureLibrary.exportData() — slot metadata, no pixels
   paintBlend,           // { heightBlend, contrast } — layer edge blending
   splatHoles,           // true: slice-1 alpha is terrain holes (see manifest)
+  tunnels,              // tunnelSystem.exportData() or null
   environment,          // { worldOcean } — the world LOOK; see the manifest note
   spawn,                // { x, z, yaw } player start, or null
   grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
@@ -103,6 +107,7 @@ export function encodeProjectFile({
     paintLayers: paintLayers ?? null,
     paintBlend: paintBlend ?? null,
     splatHoles: splatHoles ?? false,
+    tunnels:  tunnels ?? null,
     environment: environment ?? null,
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
@@ -170,6 +175,7 @@ export function decodeProjectFile(buffer) {
     paintLayers: manifest.paintLayers ?? null,
     paintBlend: manifest.paintBlend ?? null,
     splatHoles: manifest.splatHoles === true,
+    tunnels:   manifest.tunnels ?? null,
     environment: manifest.environment ?? null,
     spawn:     manifest.spawn ?? null,
     grassDensity:  blob("grassDensity"),
