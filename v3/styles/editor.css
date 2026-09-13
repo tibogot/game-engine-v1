@@ -675,7 +675,7 @@ html, body {
 
 /* ── Paint panel ─────────────────────────────────────────────────────────── */
 
-/* 3-column layer card grid (Eraser + L1-L7 + Meadow = 9 cards) */
+/* 3-column layer card grid (Eraser + L1-L7 = 8 cards) */
 .layer-card-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -720,13 +720,6 @@ html, body {
   background: repeating-conic-gradient(#444 0% 25%, #2a2a2a 0% 50%) 0 0 / 10px 10px;
   font-size: 14px;
   color: #aaa;
-}
-
-.layer-thumb-meadow {
-  background: linear-gradient(135deg, #2d5a1b 0%, #1a7a3c 50%, #4aaa32 100%);
-  font-size: 8px;
-  letter-spacing: 0.5px;
-  color: rgba(255,255,255,0.9);
 }
 
 .layer-card-label {

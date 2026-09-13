@@ -28,9 +28,13 @@ the game.
 1. ~~Fix the terrain bake's alpha bug~~ — DONE 2026-09-13. It was two bugs: the
    packed height always read 1, AND negative normal components were clamped to
    0 (every slope facing −X or −Z lit too flat).
-2. **Retire Procedural Ground and Meadow.** Measured +3.1 ms and +2.8 ms (Meadow
-   whenever anything is painted). Old projects must still load and look the
-   same. Frees paint slot 8.
+2. ~~Retire Procedural Ground and Meadow~~ — DONE 2026-09-13. No saved project
+   used either; a before/after render and the grass tint are pixel-identical.
+   Paint slot 8's channel (splat slice 1 alpha) is now unused.
+2b. **Triplanar costs ~4.2 ms at 4.76 Mpx (~1 ms native) on any painted
+   terrain even with every layer's switch OFF** (measured 2026-09-13: painting
+   +5.6 ms compiled in vs +1.3 ms compiled out). Fix: compile it in only when a
+   layer actually uses it.
 3. **More Genshin textures** 👁: cliff rock, forest floor, wet sand, snow.
 4. **Target strength.** The Opacity slider only scales stroke strength, so a
    stroke still drives a layer to full weight. Unity caps it (a 30% mud scatter).
@@ -99,7 +103,7 @@ Reopen only for a specific target (a weaker machine, 120 Hz, 1440p).
 
 ## Suggested order
 
-1. Retire Ground and Meadow (2).
+1. Triplanar only compiled when used (2b).
 2. Grass look pass, panel and horizon (16–18), with your eyes.
 3. Heightmap PNG/RAW import (10).
 4. Roads when ready.

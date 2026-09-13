@@ -112,7 +112,7 @@ export function createSplatOverlay(
   const invWS = float(1.0 / WORLD_SIZE);
 
   // ── Branch gate ──────────────────────────────────────────────────────────────
-  // 1 while the splatmap holds ANY paint (weights or meadow). Driven per frame
+  // 1 while the splatmap holds ANY paint. Driven per frame
   // from SplatMap.hasAnyPaint(); 0 skips the entire layer system per pixel.
   const uHasPaint = uniform(0.0);
 
@@ -121,7 +121,7 @@ export function createSplatOverlay(
   const splatUV        = positionWorld.xz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE));
   const splatArrayNode = texture(splatTex, splatUV);
   const splatSlice0    = splatArrayNode.depth(int(0)); // L1..L4
-  const splatSlice1    = splatArrayNode.depth(int(1)); // L5..L7 + meadow
+  const splatSlice1    = splatArrayNode.depth(int(1)); // L5..L7 (A: unused, was Meadow)
 
   // Zero out splat weights outside terrain bounds — prevents ClampToEdgeWrapping
   // from bleeding edge-pixel paint onto out-of-bounds geometry on outer LOD rings.
@@ -190,7 +190,6 @@ export function createSplatOverlay(
   const rw1 = splatSlice0.r.mul(inBounds), rw2 = splatSlice0.g.mul(inBounds);
   const rw3 = splatSlice0.b.mul(inBounds), rw4 = splatSlice0.a.mul(inBounds);
   const rw5 = splatSlice1.r.mul(inBounds), rw6 = splatSlice1.g.mul(inBounds), rw7 = splatSlice1.b.mul(inBounds);
-  const meadowW = splatSlice1.a.mul(inBounds);
 
   const sum7   = rw1.add(rw2).add(rw3).add(rw4).add(rw5).add(rw6).add(rw7);
   const w0raw  = max(float(0), float(1).sub(sum7));
@@ -282,10 +281,8 @@ export function createSplatOverlay(
    *   baseRough   (optional) float — pass to get the roughness blend
    *   geomNormal  (optional) vec3 world normal — pass to get ORM.ba normal
    *               mapping (needs F.normalMap)
-   *   meadowColor (optional) vec3 — blended over the layers by the painted
-   *               meadow mask (layer card 8)
    */
-  function blend({ baseColor, baseRough = null, geomNormal = null, meadowColor = null }) {
+  function blend({ baseColor, baseRough = null, geomNormal = null }) {
     const wantRough = baseRough !== null;
     const wantNrm   = geomNormal !== null && F.normalMap;
 
@@ -296,7 +293,7 @@ export function createSplatOverlay(
 
       // Skipping the branch must equal running it with zero weights: weights
       // all 0 ⇒ w0 = 1 ⇒ every output collapses to its base value. Verified
-      // path by path below (linear, heightBlend, rough clamp, normal, meadow).
+      // path by path below (linear, heightBlend, rough clamp, normal).
       let gateSum = uHasPaint.add(uAutoEnabled).add(uAutoFull);
       if (F.solo) gateSum = gateSum.add(step(float(0), uSoloLayer));
 
@@ -427,12 +424,6 @@ export function createSplatOverlay(
             }
             colV.assign(vec3(soloW, soloW, soloW));
           });
-        }
-
-        // Paintable meadow TSL (layer card 8) — over the layers (and solo view),
-        // exactly where its mask is painted. Applied after solo, like before.
-        if (meadowColor !== null) {
-          colV.assign(mix(colV, meadowColor, meadowW));
         }
 
         if (wantRough) {

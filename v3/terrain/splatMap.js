@@ -4,14 +4,14 @@
  * Uses one 512×512×2 DataArrayTexture covering the entire 2048m world (4m/texel).
  * Same layer encoding as V2's SplatStore:
  *   slice 0: R=L1, G=L2, B=L3, A=L4
- *   slice 1: R=L5, G=L6, B=L7, A=meadow
+ *   slice 1: R=L5, G=L6, B=L7, A=unused (was the retired Meadow mask)
  *   Layer 0 (base) is implicit: w0 = max(0, 1 – sum(L1..L7))
  *
  * activeLayer mapping:
  *   0       = eraser
  *   1..4    = slice0 R/G/B/A
  *   5..7    = slice1 R/G/B
- *   8       = meadow (slice1.A)
+ *   8       = (retired Meadow; no UI selects it)
  *
  * The API is tile-ready: the backing storage can be replaced with chunked
  * tiles for larger worlds without changing the shader or UI.

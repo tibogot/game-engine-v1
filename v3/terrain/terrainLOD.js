@@ -86,8 +86,6 @@ export const LOD_CENTRE_SNAP = BASE_STEP * Math.pow(2, LOD_LEVELS - 1);
 export const TERRAIN_FEATURES = {
   /** Brush ring + mask projection. EDITOR ONLY — a game cannot move the cursor. */
   cursor: true,
-  /** v2 procedural ground TSL under the splat layers (groundProc.uOn). */
-  groundProc: true,
   /** Painted snow: coverage, albedo, roughness and the sparkle emissive. */
   snow: true,
   /** Underwater lakebed tint + caustics. */
@@ -276,7 +274,7 @@ function buildRingGrid(N, step) {
 
 function createLODMaterial({
   heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
-  splatOverlay, snowShared = null, lakebed = null, groundProc = null,
+  splatOverlay, snowShared = null, lakebed = null,
   terrainNormals = null, riverSand = null, features = {},
 }) {
   const F = { ...TERRAIN_FEATURES, ...features };
@@ -317,14 +315,6 @@ function createLODMaterial({
   const vertexY = h.mul(MAX_HEIGHT);
   const displacedY = snowShared ? vertexY.add(snowShared.groundDepth(wxz)) : vertexY;
   mat.positionNode = vec3(positionLocal.x, displacedY, positionLocal.z);
-
-  // FRAGMENT-side height comes from the baked surface texture, not the
-  // heightmap. Sharing one node across both stages would put the heightmap
-  // sampler in the fragment stage too — and that stage is at WebGPU's 16-sampler
-  // ceiling, which is the whole reason the bake carries height in .w.
-  const terrainY = terrainNormals
-    ? terrainNormals.heightAt(hmUV).mul(hmInBounds).mul(MAX_HEIGHT)
-    : vertexY;
 
   // Lighting normal. The heightmap only changes when the user sculpts, so the
   // finite difference is baked into its own texture (terrainNormalMap.js) and
@@ -420,23 +410,13 @@ function createLODMaterial({
     const rough = float(0.95).toVar();
     const emis  = vec3(0).toVar();
 
-    // Procedural ground TSL replaces the grey tile base when enabled — the
-    // splat layers still paint over it.
-    if (groundProc && F.groundProc) {
-      If(groundProc.uOn.greaterThan(0.0), () => {
-        col.assign(mix(col, groundProc.colorAt(wxzV, nrmGeom.y, terrainY), groundProc.uOn));
-      });
-    }
-
-    // Painted splat layers + meadow (branch-gated inside blend()). The meadow
-    // TSL (layer card 8) blends over the image layers wherever it's painted.
+    // Painted splat layers (branch-gated inside blend()).
     const nrmLit = vec3(nrmGeom).toVar();
     if (splatOverlay) {
       const sb = splatOverlay.blend({
         baseColor:   col,
         baseRough:   rough,
         geomNormal:  nrmGeom,
-        meadowColor: (groundProc?.meadowAt && F.groundProc) ? groundProc.meadowAt() : null,
       });
       col.assign(sb.color);
       rough.assign(sb.rough);
@@ -538,7 +518,9 @@ function _mergeClipmapGeometries(geos) {
 
 export function createTerrainLOD(
   heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
-  splatOverlay, snowShared = null, lakebed = null, groundProc = null,
+  // The 9th positional argument used to be `groundProc` (Procedural Ground,
+  // retired 2026-09-13). The slot is kept so existing call sites line up.
+  splatOverlay, snowShared = null, lakebed = null, _retiredGroundProc = null,
   features = {}, terrainNormals = null, riverSand = null,
 ) {
   const group = new THREE.Group();
@@ -561,7 +543,7 @@ export function createTerrainLOD(
   const matArgs = {
     heightTexNode, uCenterXZ: uCenter, uCursorUV, uCursorRadius,
     uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed,
-    groundProc, terrainNormals, riverSand,
+    terrainNormals, riverSand,
   };
 
   const mesh = new THREE.Mesh(geometry, createLODMaterial({ ...matArgs, features }));

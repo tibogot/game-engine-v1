@@ -86,19 +86,6 @@ import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage
 import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
 import { SusukiSystem, SUSUKI_DEFAULTS } from "../render/grass/susukiSystem.js";
 import { buildSusukiPanel } from "../ui/buildSusukiPanel.js";
-import { buildGroundTslPanel, buildMeadowTslSection } from "../ui/buildGroundTslPanel.js";
-import {
-  createGroundTslBundle,
-  GROUND_DEFAULT_PARAMS,
-  GROUND_PRESETS,
-  applyGroundPresetToParams,
-} from "../../v2/core/legacy/chunkGroundTsl.js";
-import {
-  createMeadowTslBundle,
-  MEADOW_DEFAULT_PARAMS,
-  MEADOW_PRESETS,
-  applyMeadowPresetToParams,
-} from "../../v2/core/legacy/chunkMeadowTsl.js";
 import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
 import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
@@ -454,86 +441,12 @@ export async function startV3App(opts = {}) {
     terrainNormals,
   );
 
-  // ── Procedural ground (v2 groundTsl port) ──────────────────────────────────
-  // v2's TSL base-terrain texture: base color + 2 masked noise layers, all
-  // uniform-driven. When enabled it replaces the grey tile base UNDER the splat
-  // layers, and feeds the same color into the grass tint bake — so blades and
-  // ground share one palette (the "full field without more blades" trick).
-  const groundTslState = {
-    enabled: false,
-    ...structuredClone(GROUND_DEFAULT_PARAMS),
-    // v3-only extension rules on top of the v2 bundle: slope-band and
-    // height-band recolors with noise breakup (Genshin-style cliff/summit
-    // color changes without image textures).
-    slopeTint:  { enabled: false, color: "#6b6257", startDeg: 32, endDeg: 50 },
-    heightTint: { enabled: false, color: "#e8e4da", start: 180, end: 240 },
-    bandNoise: 0.25,
-  };
-  const groundBundle = createGroundTslBundle(groundTslState);
-  const uGroundTslOn = uniform(0);
-  const gExt = {
-    uSlopeOn:    uniform(0),
-    uSlopeCol:   uniform(new THREE.Color(groundTslState.slopeTint.color)),
-    uSlopeHiY:   uniform(Math.cos((groundTslState.slopeTint.startDeg * Math.PI) / 180)),
-    uSlopeLoY:   uniform(Math.cos((groundTslState.slopeTint.endDeg * Math.PI) / 180)),
-    uHeightOn:   uniform(0),
-    uHeightCol:  uniform(new THREE.Color(groundTslState.heightTint.color)),
-    uHeightStart: uniform(groundTslState.heightTint.start),
-    uHeightEnd:  uniform(groundTslState.heightTint.end),
-    uBandNoise:  uniform(groundTslState.bandNoise),
-  };
-  const groundProc = {
-    /**
-     * Procedural ground color at world XZ. When the caller can supply the
-     * terrain normal.y and height (metres), the slope/height band rules
-     * apply on top — same world-anchored FBM breakup as the auto-paint
-     * rules so the bands meander instead of tracing contour lines.
-     */
-    colorAt: (xz, ny = null, hMet = null) => {
-      let col = groundBundle.groundColorAtWorldXZ(xz);
-      if (ny && hMet) {
-        const bp = xz.mul(float(0.02));
-        const breakup = mx_noise_float(vec3(bp.x, bp.y, float(7.7))).mul(gExt.uBandNoise);
-        const slopeW = float(1)
-          .sub(smoothstep(gExt.uSlopeLoY, gExt.uSlopeHiY, ny.add(breakup.mul(float(0.15)))))
-          .mul(gExt.uSlopeOn);
-        col = mix(col, gExt.uSlopeCol, slopeW);
-        const heightW = smoothstep(gExt.uHeightStart, gExt.uHeightEnd, hMet.add(breakup.mul(float(40))))
-          .mul(float(1).sub(slopeW))
-          .mul(gExt.uHeightOn);
-        col = mix(col, gExt.uHeightCol, heightW);
-      }
-      return col;
-    },
-    uOn: uGroundTslOn,
-    // Paintable meadow color (mask-gated via splatOverlay.blend meadowColor)
-    meadowAt: () => meadowBundle.meadowProc(),
-  };
-  // ── Meadow (paintable TSL) — v2 chunkMeadowTsl, gated by the splatmap's
-  // meadow mask (layer card 8). Painting the mask IS the enable: wherever it's
-  // painted, this procedural color blends over the image layers.
-  const meadowTslState = structuredClone(MEADOW_DEFAULT_PARAMS);
-  const meadowBundle = createMeadowTslBundle(meadowTslState);
-  function syncMeadowTsl() {
-    meadowBundle.syncFromParams(meadowTslState);
-    grassTintDirty = true;
-  }
-
-  function syncGroundTsl() {
-    groundBundle.syncFromParams(groundTslState);
-    uGroundTslOn.value = groundTslState.enabled ? 1 : 0;
-    const st = groundTslState.slopeTint, ht = groundTslState.heightTint;
-    gExt.uSlopeOn.value  = st.enabled ? 1 : 0;
-    gExt.uSlopeCol.value.set(st.color);
-    gExt.uSlopeHiY.value = Math.cos((st.startDeg * Math.PI) / 180);
-    gExt.uSlopeLoY.value = Math.cos((Math.max(st.endDeg, st.startDeg + 1) * Math.PI) / 180);
-    gExt.uHeightOn.value = ht.enabled ? 1 : 0;
-    gExt.uHeightCol.value.set(ht.color);
-    gExt.uHeightStart.value = ht.start;
-    gExt.uHeightEnd.value   = Math.max(ht.end, ht.start + 1);
-    gExt.uBandNoise.value   = groundTslState.bandNoise;
-    grassTintDirty = true; // re-bake the grass tint from the new ground color
-  }
+  // ── Procedural Ground / Meadow: retired 2026-09-13 ────────────────────────
+  // MEASURED at 4.76 Mpx they cost +3.1 ms and +2.8 ms (Meadow on every terrain
+  // pixel as soon as anything was painted), and no saved project used either.
+  // The same looks are now procedural PAINT LAYERS (proceduralLayer.js), baked
+  // once and costing what an image layer costs. v2's chunkGroundTsl.js and
+  // chunkMeadowTsl.js stay: the v2 editor still uses them.
 
   // Cliff paint mask (v2 parity) — world-XZ brush mask whose R channel forces
   // the terrain look onto cliff surfaces. Shared deps for every cliff blend
@@ -562,7 +475,7 @@ export async function startV3App(opts = {}) {
   // not exist yet — the sources are attached once that system is built.
   const riverSandShading = createRiverSandShading({ worldSize: WORLD_SIZE });
 
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, groundProc, terrainFeatureOverrides, terrainNormals, riverSandShading);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading);
   scene.add(lod.group);
   /**
    * Terrain visibility — see the `terrain` block on the returned handle.
@@ -987,8 +900,6 @@ export async function startV3App(opts = {}) {
   let susukiSystem = null;
   let _susukiBuilding = false;
   let susukiUi = null;
-  let groundTslUi = null;
-  let meadowTslUi = null;
 
   let grassRings = null;
   let _grassBuilding = false;
@@ -1030,30 +941,10 @@ export async function startV3App(opts = {}) {
     const tintMat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
     // Same stack terrainLOD renders: splat layers over the plain tile base,
     // snow albedo on top where covered — grass under snow tints white.
-    // Base under the splat: the same procedural ground the terrain shows when
-    // groundTsl is enabled, else the plain grey tile — grass tint always
-    // matches what the ground actually looks like. The slope/height band
-    // rules need normal.y + height, recomputed here from the heightmap (the
-    // tint plane is flat — it has no real geometry to read them from).
-    const tintUV = positionWorld.xz.div(float(WORLD_SIZE)).add(float(0.5));
-    const tintTexel = float(1.0 / HEIGHTMAP_SIZE);
-    const thC = texture(heightTexNode, tintUV).r;
-    const thL = texture(heightTexNode, vec2(tintUV.x.sub(tintTexel), tintUV.y)).r;
-    const thR = texture(heightTexNode, vec2(tintUV.x.add(tintTexel), tintUV.y)).r;
-    const thD = texture(heightTexNode, vec2(tintUV.x, tintUV.y.sub(tintTexel))).r;
-    const thU = texture(heightTexNode, vec2(tintUV.x, tintUV.y.add(tintTexel))).r;
-    const tintFlat = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
-    const tintNy = tintFlat.div(length(vec3(thL.sub(thR), tintFlat, thD.sub(thU))));
-    const tintBase = mix(
-      uniform(new THREE.Color(0xe6e3e3)),
-      groundProc.colorAt(positionWorld.xz, tintNy, thC.mul(float(MAX_HEIGHT))),
-      uGroundTslOn,
-    );
-    // Painted meadow TSL tints the grass exactly like it tints the terrain
-    let tintCol = splatOverlay.blend({
-      baseColor: tintBase,
-      meadowColor: groundProc.meadowAt(),
-    }).color;
+    // (Procedural Ground and Meadow used to feed in here too; both retired.
+    // With them off — every saved project — they multiplied to exactly this.)
+    const tintBase = uniform(new THREE.Color(0xe6e3e3));
+    let tintCol = splatOverlay.blend({ baseColor: tintBase }).color;
     const snowShared = snowSystem?.shared;
     if (snowShared) {
       tintCol = mix(
@@ -5621,8 +5512,7 @@ export async function startV3App(opts = {}) {
        * far — light, sky, fog and post are the same gap and the same one-key
        * change, and belong here when someone needs them.
        *
-       * Written WHOLE rather than sparsely, matching susuki/groundTsl/meadowTsl
-       * below. The load merges per key and ignores what it no longer knows, so a
+       * Written WHOLE rather than sparsely, matching susuki below. The load merges per key and ignores what it no longer knows, so a
        * param added later keeps its default on an older file instead of arriving
        * `undefined` — the contract lakeSystem.importData already uses.
        */
@@ -5631,8 +5521,6 @@ export async function startV3App(opts = {}) {
       grassDensity:  grassTerrainData.getDensitySnapshot(),
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
       susuki:    { ...susukiState },
-      groundTsl: structuredClone(groundTslState),
-      meadowTsl: structuredClone(meadowTslState),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     downloadBuffer(buf, `project-${ts}.v3proj`);
@@ -5771,28 +5659,23 @@ export async function startV3App(opts = {}) {
       syncTexlibEditor();
     }
 
-    if (d.groundTsl) {
-      groundTslState.enabled = !!d.groundTsl.enabled;
-      if (d.groundTsl.baseColor)  groundTslState.baseColor = d.groundTsl.baseColor;
-      if (Number.isFinite(d.groundTsl.brightness)) groundTslState.brightness = d.groundTsl.brightness;
-      if (Number.isFinite(d.groundTsl.contrast))   groundTslState.contrast = d.groundTsl.contrast;
-      if (d.groundTsl.layer1) Object.assign(groundTslState.layer1, d.groundTsl.layer1);
-      if (d.groundTsl.layer2) Object.assign(groundTslState.layer2, d.groundTsl.layer2);
-      if (d.groundTsl.slopeTint)  Object.assign(groundTslState.slopeTint,  d.groundTsl.slopeTint);
-      if (d.groundTsl.heightTint) Object.assign(groundTslState.heightTint, d.groundTsl.heightTint);
-      if (Number.isFinite(d.groundTsl.bandNoise)) groundTslState.bandNoise = d.groundTsl.bandNoise;
-      syncGroundTsl();
-      groundTslUi?.refresh();
-    }
-
-    if (d.meadowTsl) {
-      if (d.meadowTsl.baseColor) meadowTslState.baseColor = d.meadowTsl.baseColor;
-      if (Number.isFinite(d.meadowTsl.brightness)) meadowTslState.brightness = d.meadowTsl.brightness;
-      if (Number.isFinite(d.meadowTsl.contrast))   meadowTslState.contrast = d.meadowTsl.contrast;
-      if (d.meadowTsl.layer1) Object.assign(meadowTslState.layer1, d.meadowTsl.layer1);
-      if (d.meadowTsl.layer2) Object.assign(meadowTslState.layer2, d.meadowTsl.layer2);
-      syncMeadowTsl();
-      meadowTslUi?.refresh();
+    // Retired features: an older file that actually USED them still loads,
+    // just without that effect — say so instead of changing the look silently.
+    {
+      const usedGround = d.groundTsl?.enabled === true
+        || d.groundTsl?.slopeTint?.enabled === true
+        || d.groundTsl?.heightTint?.enabled === true;
+      let meadowTexels = 0;
+      const d1 = splatMap.data1;
+      for (let i = 3; i < d1.length; i += 4) if (d1[i] !== 0) { meadowTexels++; break; }
+      if (usedGround || meadowTexels) {
+        console.warn(
+          "[V3] This project used " +
+          [usedGround && "Procedural Ground", meadowTexels && "painted Meadow"].filter(Boolean).join(" and ") +
+          ", which were retired (2026-09-13). It loads without that effect; rebuild the look with a " +
+          "procedural paint layer (Texture Library → Source: Procedural).",
+        );
+      }
     }
 
     if (d.trees) {
@@ -6813,20 +6696,6 @@ export async function startV3App(opts = {}) {
     onTextureChanged:  () => susukiSystem?.redrawPlumeTexture(susukiState),
     onFill:  () => { _pushSusukiUndo(); grassTerrainData.fillSusukiDensity(); void ensureSusukiBuilt(); },
     onClear: () => { _pushSusukiUndo(); grassTerrainData.clearSusukiDensity(); },
-  });
-
-  groundTslUi = buildGroundTslPanel(paintPanel, {
-    groundTslState,
-    presets: GROUND_PRESETS,
-    applyPreset: (id) => applyGroundPresetToParams(id, groundTslState),
-    onChanged: syncGroundTsl,
-  });
-
-  meadowTslUi = buildMeadowTslSection(paintPanel, {
-    meadowTslState,
-    presets: MEADOW_PRESETS,
-    applyPreset: (id) => applyMeadowPresetToParams(id, meadowTslState),
-    onChanged: syncMeadowTsl,
   });
 
   let _susukiUndoStack = [];
