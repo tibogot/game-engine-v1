@@ -45,6 +45,7 @@ function shape(v, deadzone, gamma) {
  */
 export function createGamepadInput() {
   let lastRespawn = false;
+  let lastStart = false;
   let connected = false;
   let name = "";
 
@@ -71,6 +72,7 @@ export function createGamepadInput() {
     name = p?.id ?? "";
     if (!p) {
       lastRespawn = false;
+      lastStart = false;
       return null;
     }
     const ax = p.axes ?? [];
@@ -106,6 +108,11 @@ export function createGamepadInput() {
     const respawn = down(3) === 1; // Y
     const respawnPressed = respawn && !lastRespawn;
     lastRespawn = respawn;
+    // START pauses — button 9 on the standard mapping, the one every console
+    // game puts the pause menu behind. Edge-detected like respawn.
+    const start = down(9) === 1;
+    const pausePressed = start && !lastStart;
+    lastStart = start;
 
     return {
       steerTarget,
@@ -115,6 +122,7 @@ export function createGamepadInput() {
       pitch,                  // left stick Y — air pitch (see above)
       analog,
       respawnPressed,
+      pausePressed,
     };
   }
 

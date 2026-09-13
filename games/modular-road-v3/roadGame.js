@@ -186,6 +186,7 @@ import { createChaseCamera } from "./chaseCamera.js";
 import { createSurfaceOrbit } from "./surfaceOrbit.js";
 import { createDebugCamera } from "./debugCamera.js";
 import { createGamepadInput } from "./gamepadInput.js";
+import { createPauseMenu } from "./modularRoadPause.js";
 import { createGearbox, GEARBOX } from "./gearbox.js";
 import { createSegmentDash } from "./segmentDash.js";
 import { createDriftScore, DRIFT_SCORE } from "./driftScore.js";
@@ -939,6 +940,29 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     skyHorizon: 0xc9dcef,
     hazeColor: 0xc9dcef,
   };
+  /*
+   * ── PAUSE: ONE WORLD CLOCK ────────────────────────────────────────────────
+   *
+   * `timeScale = 0` was never a pause. It stops the car's fixed ticks and
+   * nothing else: the traffic, the clouds, the weather, lightning, the birds,
+   * the ocean, the rain, the smoke and the flags all tick on the ENGINE's frame
+   * dt through their own hooks, and would carry on around a frozen car.
+   *
+   * So every system that advances the world asks `worldDt(dt)` instead of
+   * reading dt, and it is 0 while paused. The camera, the renderer and the
+   * LOD/culling keep running on real time — a paused world is still a world
+   * you can look at. Declared HERE, above the first hook that reads it, because
+   * those hooks are registered long before the game loop's own declarations.
+   *
+   * Drive mode only: there is nothing to pause in the builder, and leaving
+   * drive mode always resumes.
+   */
+  let paused = false;
+  const worldDt = (dt) => (paused ? 0 : dt);
+  /** The menu. Assigned once the run and respawn exist (see setPaused); every
+   *  reader tolerates null, so an early key or blur during boot cannot throw. */
+  let pauseMenu = null;
+
   function updateClouds(dt) {
     if (!clouds.enabled) return;
     const s = app.sky?.state;
@@ -953,7 +977,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     // At night the cloud light is the moon — see syncCloudSkyColours, which owns the
     // decision (and the colour) because it is the key-cached path.
     if (_cloudUsingMoon) _cloudSun.copy(_cloudMoonDir);
-    clouds.update(dt, _cloudFrame);
+    clouds.update(worldDt(dt), _cloudFrame);
   }
   app.addPreRenderHook?.(updateClouds);
 
@@ -1948,10 +1972,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   function updateGameSky(dt) {
     // Ticked before the early-out: a weather crossfade must keep running even while
     // the engine sky is showing (F8), or switching back would land mid-fade.
-    weather.update(dt);
+    weather.update(worldDt(dt));
     applyWeatherToSurface();
     if (!gameSkyOn || !gameSky) return;
-    const look = gameSky.update({ camera, dt });
+    const look = gameSky.update({ camera, dt: worldDt(dt) });
     // The atmosphere wants the camera ALTITUDE as well as the sun: half the
     // point of a physical sky is that it changes as you climb. It re-bakes only
     // when the sun or the height actually moved, so a frozen time of day costs
@@ -1964,7 +1988,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      * is a game-sky feature — which is fine, because so is the weather it
      * belongs to.
      */
-    lightning.update(dt);
+    lightning.update(worldDt(dt));
     /*
      * THE DECK LIGHTS UP FROM INSIDE. Most strikes are cloud-to-cloud and the channel
      * is never visible — what you actually see is the cloud itself glowing, so this is
@@ -2401,7 +2425,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       }
     }
     city.setSun(_citySun);
-    city.update(dt, camera);
+    // World time for the traffic, the steam and the window churn; the camera
+    // still drives LOD and culling, so orbiting a paused city stays correct.
+    city.update(worldDt(dt), camera);
     syncTunnelShadowRange();
     /*
      * KNOCKABLE GUARDRAILS, every frame — a barrier in the air cannot wait for
@@ -2419,10 +2445,10 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      */
     if (checkpoints && checkpoints.city !== city) { checkpoints.run?.dispose(); checkpoints = null; }
     if (checkpoints?.run?.running) {
-      const ev = checkpoints.run.update(dt, vehicleRef?.body?.pos ?? null, city.facade?.params?.nightAmount ?? 0, camera);
+      const ev = checkpoints.run.update(worldDt(dt), vehicleRef?.body?.pos ?? null, city.facade?.params?.nightAmount ?? 0, camera);
       if (ev) onCheckpointEvent(ev);
     }
-    const knockedNow = city.updateKnockables?.(dt, vehicleRef?.body ?? null) ?? 0;
+    const knockedNow = city.updateKnockables?.(worldDt(dt), vehicleRef?.body ?? null) ?? 0;
     // The car's window of hittable street furniture. Around the CAR, not the
     // camera — a chase camera trails by ~8 m and a look-back would otherwise
     // slide the window off the thing about to be hit.
@@ -2466,7 +2492,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
      * is the one cost worth going out of the way to avoid.
      */
     if (!birds || !birdsOn) return;
-    _birdT += dt;
+    _birdT += worldDt(dt);
     birds.setTime(_birdT);
     renderer.getSize(_birdSize);
     birds.setViewport(_birdSize.y, camera.fov ?? 60);
@@ -2759,8 +2785,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
         ocean.setSunDir(_oceanSun);
       }
     }
-    ocean.update(dt, performance.now() * 0.001, camera);
+    // A WORLD clock, not performance.now(): the wall clock keeps the swell
+    // rolling under a paused game.
+    _oceanClock += worldDt(dt);
+    ocean.update(worldDt(dt), _oceanClock, camera);
   }
+  let _oceanClock = performance.now() * 0.001;
   app.addPreRenderHook?.(updateDockOcean);
 
   /*
@@ -6959,6 +6989,25 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     e.stopImmediatePropagation();
     if (PREVENT_DEFAULT.has(code)) e.preventDefault();
 
+    /*
+     * PAUSE. Esc or P, drive mode only, matched on `e.key` for P like every
+     * other shortcut here (AZERTY). While the menu is open it owns the keyboard:
+     * nothing reaches the car, the debug cam or the mode switch except through
+     * the menu's own actions.
+     */
+    if (mode === "drive") {
+      const k = (e.key || "").toLowerCase();
+      if (code === "escape" || k === "p") {
+        e.preventDefault();
+        setPaused(!paused, "key");
+        return;
+      }
+      if (paused) {
+        if (pauseMenu?.handleKey(code)) e.preventDefault();
+        return;
+      }
+    }
+
     if (code === "keyb") { toggleMode(); return; }
 
     // SKY A/B — ABOVE the mode split, because comparing two skies is something
@@ -7014,9 +7063,22 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // "down" forever — come back to the tab and the car is driving itself, or
   // flipping, with nothing on the keyboard. Alt-Tab is the usual way in.
   const releaseAllKeys = () => { for (const k in keys) keys[k] = false; };
-  addEventListener("blur", releaseAllKeys);
+  /*
+   * AND THE GAME PAUSES. Losing focus mid-run used to leave the race clock
+   * running while the player was somewhere else, and Chrome throttles a hidden
+   * tab's frames, so coming back meant a clamped burst of catch-up physics. Not
+   * during the city warm-up, which drives the car on purpose and must finish.
+   */
+  const pauseOnFocusLoss = () => {
+    // `warmingUp` is declared far below; a blur during boot reaches this before
+    // that line has run, and reading a `let` in its dead zone throws.
+    let warming = false;
+    try { warming = warmingUp; } catch { return; }
+    if (mode === "drive" && !paused && !warming) setPaused(true, "focus");
+  };
+  addEventListener("blur", () => { releaseAllKeys(); pauseOnFocusLoss(); });
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) releaseAllKeys();
+    if (document.hidden) { releaseAllKeys(); pauseOnFocusLoss(); }
   });
 
   addEventListener("keyup", (e) => {
@@ -7771,6 +7833,8 @@ ${e.message}`);
   const gamepad = createGamepadInput();
   /** Set by readControls() when the pad's respawn button goes down this frame. */
   let padRespawnPressed = false;
+  /** Set by readControls() when the pad's Start button goes down this frame. */
+  let padPausePressed = false;
 
   /**
    * Merge keyboard + gamepad into one control frame.
@@ -7809,6 +7873,7 @@ ${e.message}`);
 
     const gp = gamepad.read();
     padRespawnPressed = !!gp?.respawnPressed;
+    padPausePressed = !!gp?.pausePressed;
     if (!gp) {
       return {
         steerTarget: kbSteer,
@@ -8353,6 +8418,35 @@ ${e.message}`);
   }
 
   /** Drop the car at the resolved spawn (user → Start piece → first piece → …). */
+  /**
+   * Pause or resume the world. See the note on `worldDt` for what stops.
+   * @param {boolean} on
+   * @param {"key"|"pad"|"focus"|"api"} [reason] shown in the menu
+   */
+  function setPaused(on, reason = "api") {
+    on = !!on && mode === "drive";
+    if (on === paused) return paused;
+    paused = on;
+    const ctx = audioSystem.Howler?.ctx;
+    if (paused) {
+      // A key held when pausing never sees its keyup under the menu, and would
+      // drive the car the instant play resumed.
+      releaseAllKeys();
+      if (ctx?.state === "running") ctx.suspend();
+      pauseMenu?.open(reason);
+    } else {
+      pauseMenu?.close();
+      if (ctx && ctx.state === "suspended" && !document.hidden) ctx.resume().catch(() => {});
+      simAccum = 0;
+    }
+    return paused;
+  }
+  pauseMenu = typeof document !== "undefined" ? createPauseMenu({
+    onResume: () => setPaused(false),
+    onRestart: () => { setPaused(false); respawn(); },
+    onBuilder: () => { setPaused(false); toggleMode(); },
+  }) : null;
+
   function respawn() {
     failFallTime = 0;
     const s = resolveSpawn();
@@ -9201,6 +9295,7 @@ ${e.message}`);
   }
 
   async function toggleMode() {
+    if (paused) setPaused(false);
     mode = mode === "build" ? "drive" : "build";
     const driving = mode === "drive";
     if (driving) clearBrush(); // no cursor brush while racing
@@ -9346,6 +9441,8 @@ ${e.message}`);
     get checkpointRun() { return checkpoints?.run ?? null; },
     startCheckpointRush: () => toggleCheckpointRush(),
       getCity: () => cityWanted,
+      isPaused: () => paused,
+      setPaused: (on) => setPaused(on, "api"),
       /** Buildings solid, or drive-through. */
       setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
       getCityCollide: () => cityCollide,
@@ -9857,8 +9954,11 @@ ${e.message}`);
       const input = readControls();
       // Pad Y mirrors the keyboard's R. Without it a gamepad player has to reach
       // back to the keyboard after every fall.
-      if (padRespawnPressed) respawn();
-      simAccum += dt * timeScale;
+      if (padPausePressed) setPaused(!paused, "pad");
+      if (padRespawnPressed && !paused) respawn();
+      // Paused: no ticks at all, and no backlog to catch up on when it resumes
+      // (`last` is refreshed every frame, so resuming starts from one frame).
+      simAccum += dt * (paused ? 0 : timeScale);
       let ticks = Math.floor(simAccum / FIXED_DT);
       if (ticks > MAX_SIM_TICKS) {
         ticks = MAX_SIM_TICKS;
@@ -9903,7 +10003,7 @@ ${e.message}`);
         trackSafePose(); // remember where we were last grounded on the track
       }
       const renderAlpha = simAccum / FIXED_DT;
-      vehicle.syncVisuals(dt, renderAlpha);
+      vehicle.syncVisuals(worldDt(dt), renderAlpha);
 
       // FX are cosmetic, so they run once per FRAME on real dt (not per tick) —
       // they must not affect the deterministic outcome.
@@ -9919,11 +10019,11 @@ ${e.message}`);
       // the camera has not moved yet this frame — see below the rig.
       // Render-rate, not the fixed step: the wave is purely visual and this only
       // advances a uniform — the flags themselves cost no CPU per frame.
-      flags.update(dt);
-      countryFlags.update(dt);
+      flags.update(worldDt(dt));
+      countryFlags.update(worldDt(dt));
       updateDynamicDebug(); // live collider wireframes, when they are switched on
 
-      checkFall(dt); // air-stunt: dropped off the track → last safe / spawn
+      checkFall(worldDt(dt)); // air-stunt: dropped off the track → last safe / spawn
 
       // Ghost replay: same RENDER clock as the live car (last tick + leftover),
       // not discrete `run.currentTime`. Posing on the tick clock hitch-steps
@@ -9939,7 +10039,7 @@ ${e.message}`);
         ghostMesh.visible = false;
       }
 
-      updateRaceHud(dt);
+      updateRaceHud(worldDt(dt));
 
       // Keep the engine's terrain clipmap streaming around the car. The chase
       // rig owns camera.position/up, but `controls.target` is what the engine
@@ -9969,7 +10069,7 @@ ${e.message}`);
 
     // Portal doors animate (shimmer / ring spin) in BOTH modes — this was missing,
     // so doors sat frozen.
-    portals.updateVisuals(dt);
+    portals.updateVisuals(worldDt(dt));
 
     // BOTH MODES, and once per FRAME. Drive mode moves props through the sim;
     // build mode moves them through the gizmo, and there is no single hook for
@@ -9981,8 +10081,10 @@ ${e.message}`);
     // ONE rig owns camera.position/up per frame. Both write it directly, so
     // running both would make them alternate and the view would shake (the same
     // failure the chase rig's controls.update patch exists to prevent).
+    // The debug orbit cam keeps real time so a paused moment can be looked round;
+    // the chase rig holds still with the car.
     if (debugCamActive()) debugCam.update(dt);
-    else chase.update(dt);
+    else chase.update(worldDt(dt));
 
     /* CAMERA-DEPENDENT FX RUN AFTER THE RIG, DELIBERATELY.
      *
@@ -10001,8 +10103,10 @@ ${e.message}`);
     aerial.syncLive();
     if (mode === "drive") {
       syncSmokeLamps();
-      driftSmoke.updateFromVehicle(vehicle, camera, dt, keys);
-      sparks.updateFromVehicle(vehicle, camera, dt);
+      // dt 0 while paused: the emitters accumulate on dt, so nothing new spawns
+      // and every puff and spark holds where it is.
+      driftSmoke.updateFromVehicle(vehicle, camera, worldDt(dt), keys);
+      sparks.updateFromVehicle(vehicle, camera, worldDt(dt));
     }
 
     /* WORLD RAIN — drive mode only, and after the rig for the same reason as
@@ -10019,7 +10123,9 @@ ${e.message}`);
       // motionless in the air, which is a worse bug than no rain at all.
       const rainRunning = rainEnabled && mode === "drive";
       worldRain.setEnabled(rainRunning);
-      if (rainRunning) {
+      // Paused: the field stays VISIBLE and simply stops updating, so every drop
+      // hangs where it was — the frozen-moment look, not an empty sky.
+      if (rainRunning && !paused) {
         _rainFocus.copy(vehicle.body.pos);
         _rainFwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
         // Airflow drags the rain back past the car, the same cue the lens gets
@@ -10050,6 +10156,10 @@ ${e.message}`);
     // just in drive mode) so layers fade out cleanly when the car is parked or
     // you switch back to build.
     audioSystem.update(dt);
+    // Keep the audio context suspended while paused: the audio module resumes
+    // it on its own when the tab becomes visible again, which would otherwise
+    // bring the engine note back under the pause menu.
+    if (paused && audioSystem.Howler?.ctx?.state === "running") audioSystem.Howler.ctx.suspend();
     updateCloudMuffle(dt);
     updateLensFlare(dt);
 
@@ -10227,6 +10337,8 @@ ${e.message}`);
     get checkpointRun() { return checkpoints?.run ?? null; },
     startCheckpointRush: () => toggleCheckpointRush(),
     getCity: () => cityWanted,
+    isPaused: () => paused,
+    setPaused: (on) => setPaused(on, "api"),
     /** The ground the car stands on at a world point — terrain, city street,
      *  flat debug ground, or NaN where there is none. Same sampler placement
      *  and physics use, exposed for the console and for harnesses. */

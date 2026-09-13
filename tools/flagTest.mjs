@@ -98,7 +98,9 @@ console.log("\n=== PLACEMENT COMES FROM THE PROPS SYSTEM ===");
       GAME.match(/onChange:\s*\(\)\s*=>\s*\{[^}]*bakeCollision\(\)[^}]*\}/gs)
         ?.find((cb) => /flags\??\.sync\(\)/.test(cb)) ?? ""));
   check("the wave advances on the RENDER frame, not the physics step",
-    /flags\.update\(dt\)/.test(GAME) && !/flags\.update\(FIXED_DT/.test(GAME));
+    // `worldDt(dt)` is the render frame's dt, zeroed while paused — still the
+    // render frame, which is the point; the pause suite owns the zeroing.
+    /flags\.update\((?:worldDt\()?dt\)?\)/.test(GAME) && !/flags\.update\(FIXED_DT/.test(GAME));
 }
 
 console.log("\n=== IT ACTUALLY RUNS ===");

@@ -255,7 +255,9 @@ console.log("\n=== WIRED INTO THE GAME ===");
     !/buildMergedProps/.test(game));
   // Once per FRAME and OUTSIDE the mode branch: build mode moves props through
   // the gizmo, and per substep would repeat the same GPU upload.
-  const shared = game.slice(game.indexOf("portals.updateVisuals(dt);"));
+  // Anchored on the portals' visual update, whichever clock it is handed (it
+  // reads `worldDt(dt)` since the pause landed).
+  const shared = game.slice(game.search(/portals\.updateVisuals\((?:worldDt\()?dt\)?\);/));
   check("matrices upload once per frame, in both modes",
     /propInstancer\.update\(\);/.test(shared.slice(0, 800)));
   check("the prop set changes are pushed through",
