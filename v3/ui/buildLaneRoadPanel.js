@@ -185,13 +185,34 @@ export function buildLaneRoadPanel(app) {
     // ── Markings ────────────────────────────────────────────────────────────
     const mk = _section(panel, "Markings", true);
     const onColor = () => sys.syncMaterialColors();
-    _toggle(mk, p, "markings", { label: "Markings", onChange: rebuildSoon, hint: "Lane lines, crosswalks, stop/yield lines, arrows — thin geometry, one draw call." });
-    _slider(mk, p, "paintLift", {
-      label: "Paint lift (m)", min: 0.002, max: 0.05, step: 0.001, onChange: rebuildSoon,
-      hint: "Height of the paint above the asphalt. Lower hides the step at grazing angles; too low flickers far away.",
-    });
+    _hint(mk, "Painted by the asphalt shader: lines along roads are drawn from the lane data, junction shapes come from a distance-field atlas. The paint shares the asphalt's wear and wet film.");
+    _toggle(mk, p, "markings", { label: "Markings", onChange: rebuildSoon, hint: "Lane lines, crosswalks, stop/yield lines, arrows." });
+    const onWear = () => sys.syncPaintWear();
+    _slider(mk, p, "wearAmount", { label: "Wear", min: 0, max: 4, step: 0.05, onChange: onWear, hint: "0 = fresh paint. Over 1 clips old stretches to fully worn and leaves fresh ones alone." });
+    _slider(mk, p, "wearBite", { label: "Edge bite", min: 0, max: 1, step: 0.01, onChange: onWear, hint: "How much of a line's half-width worn edges eat away." });
+    _slider(mk, p, "wearBase", { label: "Off wheel paths", min: 0, max: 1, step: 0.01, onChange: onWear, hint: "Wear away from where tyres run, as a fraction of the wheel-path wear." });
+    _slider(mk, p, "crossWear", { label: "Crossing wear", min: 0, max: 2, step: 0.01, onChange: onWear, hint: "Junction shapes (crosswalks, arrows, stop lines) relative to lane lines." });
     _color(mk, p, "paintWhite", { label: "White", onChange: onColor });
     _color(mk, p, "paintYellow", { label: "Yellow", onChange: onColor });
+
+    // ── Asphalt ─────────────────────────────────────────────────────────────
+    const as = _section(panel, "Asphalt (city street surface)", true);
+    const onAsphalt = () => sys.syncAsphalt();
+    _color(as, p, "asphaltDark", { label: "Dark", onChange: onAsphalt });
+    _color(as, p, "asphaltLight", { label: "Light", onChange: onAsphalt });
+    _slider(as, p, "deckBrightness", { label: "Brightness", min: 0.2, max: 2, step: 0.01, onChange: onAsphalt });
+    _slider(as, p, "patchAmount", { label: "Patches", min: 0, max: 1, step: 0.01, onChange: onAsphalt, hint: "Resurfacing patches with sealant seams — darker, glossier." });
+    _slider(as, p, "patchChance", { label: "Patch density", min: 0, max: 1, step: 0.01, onChange: onAsphalt });
+    _slider(as, p, "chipRelief", { label: "Stone relief (m)", min: 0, max: 0.05, step: 0.001, onChange: onAsphalt, hint: "Height of the cellular stones in the normal. Reads most under grazing and headlight light." });
+    _slider(as, p, "gritRelief", { label: "Grit relief (m)", min: 0, max: 0.03, step: 0.001, onChange: onAsphalt });
+
+    // ── Weather ─────────────────────────────────────────────────────────────
+    const we = _section(panel, "Weather", true);
+    _toggle(we, p, "wet", { label: "Wet", onChange: () => { sys.setWet(p.wet); refresh(); }, hint: "Compiles the water film into the asphalt (a material swap, not a slider)." });
+    if (p.wet) {
+      _slider(we, p, "wetAmount", { label: "Wetness", min: 0, max: 1, step: 0.01, onChange: () => sys.syncWetAmounts() });
+      _slider(we, p, "puddleAmount", { label: "Puddles", min: 0, max: 2, step: 0.01, onChange: () => sys.syncWetAmounts() });
+    }
 
     // ── Look ────────────────────────────────────────────────────────────────
     const lk = _section(panel, "Look", false);
@@ -210,7 +231,8 @@ export function buildLaneRoadPanel(app) {
       const ss = _section(panel, "Stats", true);
       _hint(ss, `${st.roads} roads · ${st.nodes} nodes · ${st.junctions} junctions · ${st.roundabouts} roundabouts`);
       _hint(ss, `${st.draws} draw calls · ${st.triangles.toLocaleString()} triangles · ${st.vertices.toLocaleString()} vertices`);
-      _hint(ss, `Build ${st.totalMs.toFixed(1)} ms (network ${st.networkMs.toFixed(1)}, mesh ${st.meshMs.toFixed(1)})`);
+      _hint(ss, `Build ${st.totalMs.toFixed(1)} ms (network ${st.networkMs.toFixed(1)}, mesh ${st.meshMs.toFixed(1)} incl. atlas ${st.atlasMs.toFixed(1)})`);
+      _hint(ss, `Marking atlas: ${st.atlas}`);
       if (st.issues) _hint(ss, `${st.issues} engine issue${st.issues === 1 ? "" : "s"} (warnings/errors) — see the 2D lab for where.`);
     }
   }

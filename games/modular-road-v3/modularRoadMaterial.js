@@ -499,6 +499,20 @@ export function createRoadMaterial(opts = {}) {
   const wetOn = Boolean(opts.wet);
 
   /**
+   * PLAIN DECK — a road that is only ever deck: no kerb/side/tube zones, no
+   * corner drift field, no track paint, no start/finish checker. The lane-road
+   * engine (v3/tools/laneRoadSystem.js) builds its asphalt this way.
+   *
+   * Those three per-vertex constants then become shader constants, which is not
+   * tidiness: the deck pipeline is at WebGPU's 8-vertex-buffer limit, and the
+   * lane road needs the freed slots for its own paint data. Off (the default)
+   * reads every attribute exactly as before.
+   */
+  const plainDeck = Boolean(opts.plainDeck);
+  const PLAIN_CONSTANTS = { aZone: float(1), aCurve: float(0), aPlain: float(1) };
+  const attr = (name, type) => (plainDeck && PLAIN_CONSTANTS[name]) || attribute(name, type);
+
+  /**
    * RAINDROP IMPACT RINGS — a THIRD build-time feature, for the same reason as
    * the other two: nine cells of trig per wet fragment is not a cost a track
    * should pay to multiply by an `impactAmount` of zero. Off means absent from
@@ -679,7 +693,7 @@ export function createRoadMaterial(opts = {}) {
     const lateral = attribute("aLateral", "float");
     // aCurve is signed: + is a right-hand corner. One clamp gives both how hard
     // the corner is and which way it goes.
-    const k = clamp(attribute("aCurve", "float").div(u.driftCurveRef), -1.0, 1.0);
+    const k = clamp(attr("aCurve", "float").div(u.driftCurveRef), -1.0, 1.0);
     const corner = abs(k);
     // Cars drift wide, so the band sits toward the corner's OUTSIDE — the
     // opposite side to the way it turns.
@@ -786,7 +800,7 @@ export function createRoadMaterial(opts = {}) {
    * clearcoat nodes below. Same discipline as `surface` and `driftField`: one
    * node instance shared five ways emits one evaluation per fragment.
    */
-  const wet = wetOn ? createWetShading(u, surface.z, { impacts: impactsOn }) : null;
+  const wet = wetOn ? createWetShading(u, surface.z, { impacts: impactsOn, attr }) : null;
 
   /**
    * HOW FAR THE WATER SURFACE PUSHES A REFLECTION AROUND, in UV. One node,
@@ -869,6 +883,19 @@ export function createRoadMaterial(opts = {}) {
    * Paint-line coverage (0..1). Shared by albedo and the optional bloom write —
    * one node instance, one evaluation per fragment when both paths reference it.
    */
+  /**
+   * CALLER-SUPPLIED PAINT — `opts.paint(u, { surface })` returns
+   * `{ coverage, color }` nodes and replaces the track's centre/edge lines.
+   *
+   * The paint is still shaded HERE, by the same colour, roughness and wet coat
+   * terms as the track's own lines: it darkens by `lineWet`, glosses by
+   * `lineCoat`, and sits in the same water film as the asphalt under it. Only
+   * WHERE the paint is (and its colour) comes from outside — the lane road's
+   * markings (v3/roads/mesh/laneRoadPaint.js) pass their mask and its wear in
+   * through this. `surface` is handed over so the caller's wear can key off the
+   * same aggregate and wheel-path fields instead of a second copy of them.
+   */
+  const paintHook = opts.paint ? opts.paint(u, { surface }) : null;
   const lineAmt = Fn(() => lineCoverageAt(
     u,
     attribute("aLateral", "float"),
@@ -879,8 +906,11 @@ export function createRoadMaterial(opts = {}) {
     // lateral-units-per-pixel, so this keeps both lines crisp AND stable at any
     // distance without the author having to pick a blur that works everywhere.
     fwidth(attribute("aLateral", "float")).mul(0.75),
-    attribute("aPlain", "float"), // 1 on platforms → no lines
+    attr("aPlain", "float"), // 1 on platforms → no lines
   ))();
+  // What every paint consumer below reads. With a caller's paint the track
+  // lines above are never referenced, so they are not compiled.
+  const paintMask = paintHook ? paintHook.coverage : lineAmt;
 
   /**
    * The start / finish checker — `.x` is band coverage, `.y` selects light over
@@ -893,7 +923,8 @@ export function createRoadMaterial(opts = {}) {
    * It shares an attribute with the noise phase because the deck's pipeline is
    * at WebGPU's 8-vertex-buffer limit — see stampPieceConstants.
    */
-  const checker = Fn(() => {
+  // A plain deck has no checker — and its aPiece.y carries the caller's own data.
+  const checker = plainDeck ? null : Fn(() => {
     const line = attribute("aPiece", "vec2").y;
     const along = uv().x;
     const lateral = attribute("aLateral", "float");
@@ -920,13 +951,13 @@ export function createRoadMaterial(opts = {}) {
     const w = max(fwidth(d), 1e-4);
     return vec2(band, smoothstep(w.negate(), w, d));
   })();
-  const checkerAmt = checker.x;
+  const checkerAmt = checker ? checker.x : float(0);
 
   /** Paint of any kind, for the roughness and coat terms that treat it alike. */
-  const paintAmt = max(lineAmt, checkerAmt);
+  const paintAmt = max(paintMask, checkerAmt);
 
   mat.colorNode = Fn(() => {
-    const zone = attribute("aZone", "float");
+    const zone = attr("aZone", "float");
     const along = uv().x;
 
     const macro = surface.x;
@@ -962,28 +993,30 @@ export function createRoadMaterial(opts = {}) {
     // `deckBase` has already taken the full albedo drop, and mixing an untouched
     // line colour in on top of that is what left markings completely unaffected
     // by the weather. Paint does darken, just far less — see `lineWet`.
-    let lineCol = u.lineColor;
+    let lineCol = paintHook ? paintHook.color : u.lineColor;
     if (wet) {
       const lw = wet.film.mul(u.lineWet);
       lineCol = lineCol
         .mul(mix(float(1), u.wetDarken, lw))
         .mul(mix(vec3(1, 1, 1), u.wetTint, lw));
     }
-    let deckCol = mix(deckBase, lineCol, lineAmt);
+    let deckCol = mix(deckBase, lineCol, paintMask);
 
     // THE CHECKER, over the paint and wetted on the same terms — it IS paint,
     // a thermoplastic band like the rest of the markings. Neither colour is
     // pure: a black square with zero albedo and a white one at 1.0 are the two
     // values asphalt never has, and they are what made the old unlit plate read
     // as a decal printed on top of the world rather than laid on the road.
-    let checkerCol = mix(u.checkerDark, u.checkerLight, checker.y);
-    if (wet) {
-      const cw = wet.film.mul(u.lineWet);
-      checkerCol = checkerCol
-        .mul(mix(float(1), u.wetDarken, cw))
-        .mul(mix(vec3(1, 1, 1), u.wetTint, cw));
+    if (checker) {
+      let checkerCol = mix(u.checkerDark, u.checkerLight, checker.y);
+      if (wet) {
+        const cw = wet.film.mul(u.lineWet);
+        checkerCol = checkerCol
+          .mul(mix(float(1), u.wetDarken, cw))
+          .mul(mix(vec3(1, 1, 1), u.wetTint, cw));
+      }
+      deckCol = mix(deckCol, checkerCol, checkerAmt);
     }
-    deckCol = mix(deckCol, checkerCol, checkerAmt);
 
     // Kerbs: solid red by default; hazard stripes only when railStriped is on
     // (reserved for the turn pieces later).
@@ -1022,7 +1055,7 @@ export function createRoadMaterial(opts = {}) {
   // Per-zone roughness sells the material split far more than color alone:
   // matte asphalt, glossy painted kerbs, satin tube shell, dull concrete sides.
   mat.roughnessNode = Fn(() => {
-    const zone = attribute("aZone", "float");
+    const zone = attr("aZone", "float");
 
     // Same `surface` node as colorNode — referenced, not recomputed.
     const macro = surface.x;
@@ -1088,7 +1121,7 @@ export function createRoadMaterial(opts = {}) {
   // material and a separate job.
   if (wet) {
     mat.clearcoatNode = Fn(() => {
-      const zone = attribute("aZone", "float");
+      const zone = attr("aZone", "float");
       // Deck (1) AND kerb (2), the kerb scaled by `kerbWet` so one knob moves
       // its albedo, its roughness and its gloss together.
       const isDeck = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
@@ -1124,7 +1157,7 @@ export function createRoadMaterial(opts = {}) {
    */
   if (anisoOn) {
     mat.anisotropyNode = Fn(() => {
-      const zone = attribute("aZone", "float");
+      const zone = attr("aZone", "float");
       const isDeck = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
 
       // Strongest where tyres actually run — `surface.z` is the wheel-path mask
@@ -1169,7 +1202,7 @@ export function createRoadMaterial(opts = {}) {
   // for, and the one that also dragged the whole neon path into the bloom MRT.
   const neonNode = tubeZones
     ? Fn(() => {
-        const zone = attribute("aZone", "float");
+        const zone = attr("aZone", "float");
         const along = uv().x;
         const innerMask = step(2.5, zone).mul(float(1).sub(step(3.5, zone)));
         return u.neonColor.mul(tubeRingMask(u, along)).mul(u.neonIntensity).mul(innerMask);
@@ -1269,7 +1302,7 @@ export function createRoadMaterial(opts = {}) {
       // Deck + kerb, matching the clearcoat gate. A guardrail's reflection lands
       // mostly on the strip nearest it, and that strip IS the kerb — gating this
       // to the deck alone deleted the very reflection the rails were added for.
-      const rzone = attribute("aZone", "float");
+      const rzone = attr("aZone", "float");
       const onRoad = step(0.5, rzone).mul(oneMinus(step(1.5, rzone)))
         .add(step(1.5, rzone).mul(oneMinus(step(2.5, rzone))).mul(u.kerbWet));
 
@@ -1349,7 +1382,7 @@ export function createRoadMaterial(opts = {}) {
     mat._mirrorDepthTextureNode = mirrorDepthTex;
 
     railNode = Fn(() => {
-      const zone = attribute("aZone", "float");
+      const zone = attr("aZone", "float");
       const deckOnly = step(0.5, zone).mul(oneMinus(step(1.5, zone)));
 
       // The same normal-driven wobble the car's reflection gets — literally the
@@ -1408,7 +1441,7 @@ export function createRoadMaterial(opts = {}) {
   // same mask as the albedo paint, written into emissive (self-light) AND the
   // selective bloom MRT (the halo). Costs almost nothing on top of lines that
   // are already drawn — bloom's fullscreen pyramid already runs for neon/props.
-  const lineGlow = lineAmt.mul(u.lineColor).mul(u.linesBloomIntensity).mul(u.linesBloom);
+  const lineGlow = paintMask.mul(u.lineColor).mul(u.linesBloomIntensity).mul(u.linesBloom);
 
   let emissive = neonNode ? neonNode.add(lineGlow) : lineGlow;
   if (reflectNode) emissive = emissive.add(reflectNode.mul(shadowGate));
@@ -1471,7 +1504,7 @@ export function createRoadMaterial(opts = {}) {
    * slope. Sharing the node for the first and the function for the second is
    * what keeps the relief and the albedo agreeing about where a line is.
    */
-  mat._lineNode = lineAmt;
+  mat._lineNode = paintMask;
   /** The raw vec2(film, pond) field, or null when dry. Exposed so wet-road-lab
    *  can render the drainage model as false colour without re-deriving the
    *  wheel-path mask it is built from — a second copy of that expression is

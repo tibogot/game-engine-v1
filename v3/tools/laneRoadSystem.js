@@ -8,25 +8,27 @@
  * touched: Smart Road 2 (road mode) is a separate system, and this group is
  * not saved in the project.
  *
- * Draw calls: one mesh per material — asphalt, concrete, grass, paint — so 4,
- * plus the concrete mesh in the shadow pass when curb shadows are on.
+ * Draw calls: one mesh per material — asphalt, concrete, grass — so 3, plus
+ * the concrete mesh in the shadow pass when curb shadows are on.
  *
- * Markings are thin geometry 1 cm above the asphalt with a depth bias on the
- * paint material, one mesh for every line, bar, tooth and arrow.
+ * ASPHALT is the shared city-street surface (v3/render/roads/asphaltSurface.js):
+ * cellular stones, streaked macro tone, resurfacing patches, relief normal, wet
+ * film — with the lane road's markings handed in through its `paint` hook
+ * (v3/render/roads/laneRoadPaint.js), so the paint shares its wear and water.
  *
- * Asphalt is the track's own material (games/modular-road-v3/
- * modularRoadMaterial.js) with its track paint switched off per vertex
- * (aPlain), so the city street and the track share one asphalt.
+ * WET is a build-time choice (a clearcoat is compiled in or not), so toggling
+ * it swaps the asphalt material; the amounts are uniforms.
  */
 import * as THREE from "three";
 import { MeshStandardNodeMaterial } from "three/webgpu";
 import {
-  attribute, float, fwidth, max, mix, mx_fractal_noise_float, mx_noise_float, oneMinus, positionWorld, saturate, step, uniform,
+  abs, attribute, float, fract, fwidth, max, mix, mx_fractal_noise_float, mx_noise_float, oneMinus, positionWorld, saturate, smoothstep, step, uniform, uv,
 } from "three/tsl";
 import { buildRoadNetwork } from "../roads/roadNetwork.js";
 import { buildLaneRoadMesh, MESH_DEFAULTS } from "../roads/mesh/laneRoadMesh.js";
 import { PREVIEW_SCENES, flattenNetwork } from "../roads/mesh/previewScenes.js";
-import { createRoadMaterial } from "../../games/modular-road-v3/modularRoadMaterial.js";
+import { createLaneRoadPaint, PAINT_DEFAULTS } from "../render/roads/laneRoadPaint.js";
+import { createAsphaltMaterial, laneRoadFrame, syncAsphaltUniforms, ASPHALT_DEFAULTS } from "../render/roads/asphaltSurface.js";
 
 export function createLaneRoadToolState() {
   return {
@@ -37,16 +39,33 @@ export function createLaneRoadToolState() {
       lift: 0.1,
       curbShadows: true,
       ...MESH_DEFAULTS,
-      slabColor: "#9a968e",
-      curbColor: "#b0ada6",
+      ...PAINT_DEFAULTS,
+      // City street pavement and kerb (modularRoadCityStreets.js walkColor / kerbColor).
+      slabColor: "#74767a",
+      curbColor: "#8d8f92",
+      slabSize: 1.6,
+      // Asphalt look — the shared city-street surface; see ASPHALT_DEFAULTS.
+      asphaltDark: hex(ASPHALT_DEFAULTS.asphaltDark),
+      asphaltLight: hex(ASPHALT_DEFAULTS.asphaltLight),
+      deckBrightness: ASPHALT_DEFAULTS.deckBrightness,
+      patchAmount: ASPHALT_DEFAULTS.patchAmount,
+      patchChance: ASPHALT_DEFAULTS.patchChance,
+      chipRelief: ASPHALT_DEFAULTS.chipRelief,
+      gritRelief: ASPHALT_DEFAULTS.gritRelief,
       apronColor: "#7a736a",
       grassColor: "#4f6b2f",
-      // Road paint is never pure: thermoplastic white sits around 0.7–0.8 albedo.
-      paintWhite: "#d6d5cf",
-      paintYellow: "#d4a12c",
+      wet: false,
+      wetAmount: 0.8,
+      puddleAmount: 1,
     },
   };
 }
+
+const hex = (n) => `#${n.toString(16).padStart(6, "0")}`;
+/** Asphalt panel keys: colours as #hex in the panel, numbers in the material. */
+const ASPHALT_KEYS = ["asphaltDark", "asphaltLight", "deckBrightness", "patchAmount", "patchChance", "chipRelief", "gritRelief", "wetAmount", "puddleAmount"];
+
+const PAINT_UNIFORM_KEYS = Object.keys(PAINT_DEFAULTS).filter((k) => !k.startsWith("paint"));
 
 export class LaneRoadSystem {
   /**
@@ -73,6 +92,7 @@ export class LaneRoadSystem {
     this.stats = null;
     this._materials = null;
     this._meshes = {};
+    this._paint = null;
   }
 
   // ── Materials ──────────────────────────────────────────────────────────────
@@ -84,15 +104,40 @@ export class LaneRoadSystem {
     this._uCurb = uniform(new THREE.Color(p.curbColor));
     this._uApron = uniform(new THREE.Color(p.apronColor));
     this._uGrass = uniform(new THREE.Color(p.grassColor));
-    this._uPaintWhite = uniform(new THREE.Color(p.paintWhite));
-    this._uPaintYellow = uniform(new THREE.Color(p.paintYellow));
+    this._paint = createLaneRoadPaint(p);
     this._materials = {
-      asphalt: createRoadMaterial({ side: THREE.FrontSide }),
+      asphalt: this._asphaltMaterial(),
       concrete: this._concreteMaterial(),
       grass: this._grassMaterial(),
-      paint: this._paintMaterial(),
     };
     return this._materials;
+  }
+
+  _asphaltMaterial() {
+    const p = this.params;
+    const params = {};
+    for (const k of ASPHALT_KEYS) params[k] = typeof p[k] === "string" ? parseInt(p[k].slice(1), 16) : p[k];
+    return createAsphaltMaterial({ frame: laneRoadFrame, params, paint: this._paint.hook, wet: p.wet, side: THREE.FrontSide });
+  }
+
+  /** Asphalt look sliders and colours → the live material's uniforms. */
+  syncAsphalt() {
+    const p = this.params;
+    syncAsphaltUniforms(this._materials?.asphalt, Object.fromEntries(ASPHALT_KEYS.map((k) => [k, p[k]])));
+  }
+
+  /** Wet on/off compiles the water film in or out: swap the asphalt material. */
+  setWet(on) {
+    this.params.wet = on;
+    if (!this._materials) return;
+    const old = this._materials.asphalt;
+    this._materials.asphalt = this._asphaltMaterial();
+    if (this._meshes.asphalt) this._meshes.asphalt.material = this._materials.asphalt;
+    old.dispose();
+  }
+
+  syncWetAmounts() {
+    this.syncAsphalt();
   }
 
   /**
@@ -110,7 +155,19 @@ export class LaneRoadSystem {
     const shade = tone.sub(0.5).mul(0.35).add(1.0);
     let base = mix(this._uSlab, this._uCurb, step(0.5, kind));
     base = mix(base, this._uApron, step(1.5, kind));
-    m.colorNode = base.mul(shade);
+    // Paving slab joints, as the city street draws them (2 cm, 16% darker), on
+    // slab tops only. uv runs along/across a road's sidewalk strips, so the
+    // joints follow the street; corner pieces use plan x/z.
+    const size = uniform(this.params.slabSize);
+    const cuv = uv();
+    const aa = max(fwidth(cuv.x), fwidth(cuv.y)).div(size);
+    const joint1 = (c) => {
+      const d = float(0.5).sub(abs(fract(c.div(size)).sub(0.5)));
+      const hw = float(0.02).div(size);
+      return smoothstep(hw.add(aa), hw.sub(aa), d);
+    };
+    const joint = max(joint1(cuv.x), joint1(cuv.y)).mul(oneMinus(step(0.5, kind)));
+    m.colorNode = base.mul(shade).mul(oneMinus(joint.mul(0.16)));
     m.roughnessNode = float(0.86).add(fine.sub(0.5).mul(0.12)).sub(step(0.5, kind).mul(0.06));
     return m;
   }
@@ -124,34 +181,21 @@ export class LaneRoadSystem {
     return m;
   }
 
-  /**
-   * Paint: white or yellow per vertex (aPaint), a little worn by a world-space
-   * field so a long line is not one flat sheet, and pulled toward the camera
-   * by a depth bias on top of its 1 cm lift so it never fights the asphalt.
-   */
-  _paintMaterial() {
-    const m = new MeshStandardNodeMaterial({
-      roughness: 0.6, metalness: 0, side: THREE.FrontSide,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
-    });
-    const base = mix(this._uPaintWhite, this._uPaintYellow, attribute("aPaint", "float"));
-    const px = max(fwidth(positionWorld.x), fwidth(positionWorld.z));
-    const wear = mx_fractal_noise_float(positionWorld.mul(1.7), 2, 2.0, 0.5, 1.0)
-      .mul(saturate(oneMinus(px.mul(3.0)))).mul(0.5).add(0.5);
-    m.colorNode = base.mul(float(0.8).add(wear.mul(0.2)));
-    m.roughnessNode = float(0.55).add(wear.sub(0.5).mul(0.2));
-    return m;
-  }
-
   syncMaterialColors() {
     if (!this._materials) return;
     const p = this.params;
-    this._uPaintWhite.value.set(p.paintWhite);
-    this._uPaintYellow.value.set(p.paintYellow);
     this._uSlab.value.set(p.slabColor);
     this._uCurb.value.set(p.curbColor);
     this._uApron.value.set(p.apronColor);
     this._uGrass.value.set(p.grassColor);
+    const w = this._paint.uniforms;
+    w.paintWhite.value.set(p.paintWhite);
+    w.paintYellow.value.set(p.paintYellow);
+  }
+
+  syncPaintWear() {
+    if (!this._paint) return;
+    for (const k of PAINT_UNIFORM_KEYS) this._paint.uniforms[k].value = this.params[k];
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -178,9 +222,10 @@ export class LaneRoadSystem {
     const t1 = performance.now();
     const mesh = buildLaneRoadMesh(this.result, p);
     const mats = this._ensureMaterials();
+    this._paint.setAtlas(mesh.atlas);
 
     let draws = 0, triangles = 0;
-    for (const name of ["asphalt", "concrete", "grass", "paint"]) {
+    for (const name of ["asphalt", "concrete", "grass"]) {
       this._setPart(name, mesh[name], mats[name]);
       if (mesh[name].triangleCount) draws++;
       triangles += mesh[name].triangleCount;
@@ -197,6 +242,8 @@ export class LaneRoadSystem {
       issues: this.result.issues.filter((i) => i.level !== "info").length,
       networkMs: t1 - t0,
       meshMs: mesh.stats.ms,
+      atlasMs: mesh.atlas?.stats.ms ?? 0,
+      atlas: mesh.atlas ? `${mesh.atlas.width}×${mesh.atlas.height} @ ${(mesh.atlas.texel * 100).toFixed(0)} cm, ${(mesh.atlas.stats.bytes / 1e6).toFixed(1)} MB` : "none",
       totalMs: performance.now() - t0,
       vertices: mesh.stats.vertices,
       triangles,
@@ -254,6 +301,7 @@ export class LaneRoadSystem {
       this.group.remove(mesh);
     }
     this._meshes = {};
+    this._paint?.setAtlas(null);
     this.loaded = false;
     this.result = null;
     this.stats = null;

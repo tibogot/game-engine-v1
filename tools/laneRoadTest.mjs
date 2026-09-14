@@ -239,6 +239,31 @@ for (const [key, sc] of Object.entries(SCENES)) {
   }
 }
 
+console.log("— lines stop at crossings —");
+{
+  // No painted line (lane, centre, edge, bike...) runs through a zebra bar.
+  for (const [key, def] of Object.entries(SCENES)) {
+    const r = build(def.build());
+    const bars = [];
+    for (const n of r.nodes) for (const m of n.markings) if (m.tag === "zebra") bars.push(m.pts);
+    let hits = 0;
+    const where = [];
+    for (const rr of r.roads) {
+      for (const l of rr.lines) {
+        for (let i = 1; i < l.pts.length; i++) {
+          const a = l.pts[i - 1], b = l.pts[i];
+          const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+          for (let d = 0; d <= len; d += 0.2) {
+            const x = a[0] + ((b[0] - a[0]) * d) / (len || 1), z = a[1] + ((b[1] - a[1]) * d) / (len || 1);
+            if (bars.some((p) => pointInPolygon(x, z, p))) { hits++; if (where.length < 2) where.push(`${rr.id} ${l.mark || "line"}`); break; }
+          }
+        }
+      }
+    }
+    check(`${key}: no line runs through a crosswalk`, hits === 0, `${hits} crossings ${where.join(", ")}`);
+  }
+}
+
 console.log("— edit ops —");
 {
   const d = emptyNetwork();

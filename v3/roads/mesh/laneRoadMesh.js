@@ -13,31 +13,40 @@
 //              small 45° bevel on top, plus the curb band around grass tops.
 //              Property edges get a back face that runs below ground (`skirt`).
 //   grass    — verges, raised medians, the roundabout's central island.
-//   paint    — every marking as thin geometry `paintLift` above the surface it
-//              sits on: lane/edge/centre lines as ribbons (dashes cut in
-//              metres), crosswalk bars, stop lines, yield teeth and arrow heads
-//              triangulated, gore hatching clipped to its area. aPaint 0 white,
-//              1 yellow. Height comes from result.locate(), so paint follows
-//              the road profile or the node it lies on.
 //
-// ATTRIBUTES (asphalt) match games/modular-road-v3/modularRoadMaterial.js:
+// MARKINGS ARE PAINTED BY THE ASPHALT SHADER (v3/render/roads/laneRoadPaint.js),
+// not built as geometry, so they share the asphalt's wear and wet film:
+//   - lines along a road come from per-quad lane data (aEdges), drawn
+//     analytically — any distance, no texture;
+//   - node shapes (crosswalks, stop/yield lines, arrows, hatching, ring lines)
+//     come from a signed-distance atlas (markingAtlas.js) sampled at the local
+//     x/z position; aMark says which region.
+//
+// ATTRIBUTES (asphalt), for modularRoadMaterial's `plainDeck` (so aZone, aCurve
+// and aPlain are shader constants and 7 of WebGPU's 8 vertex buffers are used):
 //   uv       x = metres along the road (station), y = metres across (lateral t);
-//            pads use world x/z (their asphalt fields are high-frequency, so
-//            the phase change at the pad edge is invisible — see that file).
+//            pads use plan x/z.
 //   aLateral −1..1 across EACH driving lane (lane strips are not welded to each
 //            other), so the wheel-path bands land in every lane. 0 elsewhere.
-//   aPiece   (per-road noise phase, −1e4 = no start/finish checker)
-//   aCurve 0, aPlain 1 (no track paint), aZone 1 (deck).
+//   aPiece   (per-road noise phase, drain: −1..1 across the carriageway, 0 at the crown)
+//   aEdges   (inner line t, outer line t, inner line code, outer line code) —
+//            the line on each side of this lane strip; codes from lineCode(),
+//            with the dash phase of the line's run as the fraction.
+//            Asphalt is built as one quad per sample segment so a code can
+//            change between segments without bleeding into its neighbour.
+//   aMark    (atlas offset u, v, 1 = in a node region, 1 = parking bay ticks)
 // concrete carries aKind: 0 slab, 1 curb stone, 2 apron setts.
 //
 // Triangles are wound from the normal they are meant to have, so nothing here
 // depends on the winding the engine happened to build a polygon with.
 
-import { LANE_TYPES } from "../roadCrossSection.js";
+import { LANE_TYPES, layoutEdges } from "../roadCrossSection.js";
 import { profileAt } from "../roadProfile.js";
-import { cleanPolygon, cumulative, polylineAt } from "../roadMath.js";
+import { cleanPolygon } from "../roadMath.js";
 import { armPoint } from "../roadJunction.js";
+import { boundaryKind, centerKind, markingStyle, INTERRUPTED, CROSSING_INTERRUPTED } from "../roadMarkings.js";
 import { dedupe, ring, miters, insideSide, triangulate, offsetLeft } from "./triangulate.js";
+import { buildMarkingAtlas } from "./markingAtlas.js";
 
 export const MESH_DEFAULTS = {
   curbHeight: 0.15, // sidewalks, splitter islands, dead-end caps
@@ -47,18 +56,94 @@ export const MESH_DEFAULTS = {
   bevel: 0.02, // 45° chamfer on every curb's top edge (0 = sharp)
   curbBand: 0.15, // concrete curb stone around grass tops
   skirt: 0.6, // how far back faces run below the road surface
-  // Paint above the asphalt. With the editor's 0.5 m near plane a 24-bit depth
-  // step is ~5 mm at 200 m, so 1 cm plus the material's depth bias holds out to
-  // a few hundred metres, where a 12 cm line is under a pixel anyway.
-  paintLift: 0.01,
   markings: true,
+  atlasTexel: 0.06, // metres per texel of the junction marking atlas (grows to fit 4096²)
 };
 
-export const PAINT_COLOR = { white: 0, yellow: 1 };
-
 export const CONCRETE_KIND = { slab: 0, curb: 1, apron: 2 };
-const NO_CHECKER = -1e4;
 const UP = [0, 1, 0];
+
+/* ------------------------------------------------------------------ line codes */
+
+const DASH_INDEX = { "3,5": 1, "3,9": 2, "6,12": 3, "1.5,1.5": 4 };
+export const DASH_PATTERNS = [null, [3, 5], [3, 9], [6, 12], [1.5, 1.5]];
+
+/**
+ * A marking style as one float the shader decodes:
+ *   width in cm + 50 · dash pattern index + 500 · yellow + 1000 · double.
+ * 0 = no line. Widths stay under 50 cm, so the fields never overlap.
+ */
+export function lineCode(st) {
+  if (!st) return 0;
+  const cm = Math.max(1, Math.min(49, Math.round(st.width * 100)));
+  const dash = st.dash ? (DASH_INDEX[`${st.dash[0]},${st.dash[1]}`] ?? 1) : 0;
+  return cm + 50 * dash + (st.color === "yellow" ? 500 : 0) + (st.double ? 1000 : 0);
+}
+
+/** Inverse of lineCode; `phase` is the dash phase (0..1 of a period) carried as the fraction. */
+export function decodeLineCode(value) {
+  const code = Math.floor(value + 1e-6);
+  const phase = Math.max(0, value - code);
+  const dbl = code >= 1000 ? 1 : 0;
+  let c = code - dbl * 1000;
+  const yellow = c >= 500 ? 1 : 0;
+  c -= yellow * 500;
+  const dash = Math.floor((c + 0.5) / 50);
+  return { width: (c - dash * 50) / 100, dash: DASH_PATTERNS[dash], yellow: !!yellow, double: !!dbl, phase };
+}
+
+/**
+ * The painted line on each side of every lane at one cross-section — the same
+ * rules as buildRoadMarkings (roadMarkings.js), so the 3D paint matches the lab.
+ * Curbs and pave edges are not paint (code 0).
+ */
+function sectionLines(rr, lay, s, style) {
+  const rank = rr.type.rank;
+  const mr = rr.markRange;
+  const inRange = s >= mr[0] - 1e-6 && s <= mr[1] + 1e-6;
+  const wr = rr.walkRange || [-Infinity, Infinity];
+  const inWalk = s >= wr[0] - 1e-6 && s <= wr[1] + 1e-6;
+  const codeOf = (kind) => {
+    if (!kind || kind === "curb" || kind === "paveEdge") return 0;
+    if (INTERRUPTED.has(kind) && !inRange) return 0;
+    if (CROSSING_INTERRUPTED.has(kind) && !inWalk) return 0;
+    return lineCode(markingStyle(kind, style, rank));
+  };
+  const out = { center: { tA: 0, tB: 0, codeA: 0, codeB: 0 } };
+  const first = {};
+  for (const side of ["left", "right"]) {
+    const L = lay[side];
+    const lines = L.map(() => ({ inT: 0, inCode: 0, outT: 0, outCode: 0 }));
+    for (let b = 0; b < L.length; b++) {
+      if (!L[b].present) continue;
+      if (first[side] == null) first[side] = b;
+      let next = -1;
+      for (let k = b + 1; k < L.length; k++) if (L[k].present) { next = k; break; }
+      const code = codeOf(boundaryKind(L[b], next >= 0 ? L[next] : null));
+      lines[b].outT = L[b].tOut; lines[b].outCode = code;
+      if (next >= 0) { lines[next].inT = L[b].tOut; lines[next].inCode = code; }
+    }
+    out[side] = lines;
+  }
+  const cKind = rr.stack.center.kind;
+  const fl = first.left, fr = first.right;
+  const aL = fl != null ? lay.left[fl] : null, aR = fr != null ? lay.right[fr] : null;
+  if (lay.cw < 0.3) {
+    const code = codeOf(centerKind(aL, aR, cKind));
+    const t = ((aL ? aL.tIn : lay.cw / 2) + (aR ? aR.tIn : -lay.cw / 2)) / 2;
+    if (aL) { out.left[fl].inT = t; out.left[fl].inCode = code; }
+    if (aR) { out.right[fr].inT = t; out.right[fr].inCode = code; }
+    out.center = { tA: t, tB: t, codeA: code, codeB: 0 };
+  } else {
+    const kind = cKind === "raised" ? "curb" : cKind === "barrier" ? "edge" : "medianEdge";
+    const code = codeOf(kind);
+    const tl = aL ? aL.tIn : lay.cw / 2, tr = aR ? aR.tIn : -lay.cw / 2;
+    if (aL) { out.left[fl].inT = tl; out.left[fl].inCode = code; }
+    if (aR) { out.right[fr].inT = tr; out.right[fr].inCode = code; }
+    out.center = { tA: tr, tB: tl, codeA: code, codeB: code };
+  }
+  return out;
+}
 
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
@@ -260,7 +345,49 @@ function sameSense(a, b) {
 
 /* ------------------------------------------------------------------ roads */
 
-function buildRoad(rr, parts, o) {
+/**
+ * Cross-sections the asphalt is built from: every alignment sample, plus the
+ * stations where a node's marking zone or the parking-bay run starts or ends,
+ * so those boundaries fall on a quad edge. Inserted rows interpolate between
+ * the two samples on either side (on the chord, like the curb edges built from
+ * the samples, so asphalt and curb stay flush).
+ */
+function asphaltRows(rr, extra) {
+  const S = rr.smp, N = S.s.length;
+  const rows = [];
+  const fromSample = (i) => ({ s: S.s[i], x: S.x[i], z: S.z[i], th: S.th[i], lay: rr.lays[i] });
+  const stations = [...new Set(extra.filter((s) => s > S.s[0] + 0.05 && s < S.s[N - 1] - 0.05))].sort((a, b) => a - b);
+  let e = 0;
+  for (let i = 0; i < N; i++) {
+    while (e < stations.length && stations[e] < S.s[i] - 0.05) {
+      const st = stations[e++];
+      if (i === 0) continue;
+      const f = (st - S.s[i - 1]) / (S.s[i] - S.s[i - 1]);
+      const a = rr.lays[i - 1], b = rr.lays[i];
+      const lerpSide = (side) => a[side].map((la, k) => {
+        const lb = b[side][k];
+        const w = la.w + (lb.w - la.w) * f;
+        return { ...la, w, tIn: la.tIn + (lb.tIn - la.tIn) * f, tOut: la.tOut + (lb.tOut - la.tOut) * f, present: w > 0.05 };
+      });
+      const dth = Math.atan2(Math.sin(S.th[i] - S.th[i - 1]), Math.cos(S.th[i] - S.th[i - 1]));
+      rows.push({
+        s: st, x: S.x[i - 1] + (S.x[i] - S.x[i - 1]) * f, z: S.z[i - 1] + (S.z[i] - S.z[i - 1]) * f,
+        th: S.th[i - 1] + dth * f,
+        lay: { cw: a.cw + (b.cw - a.cw) * f, left: lerpSide("left"), right: lerpSide("right") },
+      });
+    }
+    while (e < stations.length && Math.abs(stations[e] - S.s[i]) <= 0.05) e++;
+    rows.push(fromSample(i));
+  }
+  for (const r of rows) {
+    const p = profileAt(rr.prof, r.s);
+    r.y = p.y; r.g = p.g;
+    r.lx = Math.sin(r.th); r.lz = -Math.cos(r.th);
+  }
+  return rows;
+}
+
+function buildRoad(rr, parts, o, ctx) {
   const S = rr.smp;
   if (!S || S.s.length < 2) return;
   const N = S.s.length;
@@ -275,7 +402,93 @@ function buildRoad(rr, parts, o) {
   const upAt = (i) => norm3(-g[i] * Math.cos(S.th[i]), 1, -g[i] * Math.sin(S.th[i]));
   const at = (i, t) => [S.x[i] + lx[i] * t, S.z[i] + lz[i] * t];
   const phase = hashPhase(rr.id);
-  const deck = { aPiece: [phase, NO_CHECKER], aCurve: 0, aPlain: 1, aZone: 1 };
+  const deck = { aPiece: [phase, 0], aEdges: [0, 0, 0, 0], aMark: [0, 0, 0, 0] };
+
+  // ── ASPHALT: one quad per segment, carrying the lines and the marking region.
+  const zone = ctx.atlas?.zones.get(rr.id) || {};
+  const regionOf = (nodeId) => ctx.atlas?.regions.get(nodeId);
+  const mr = rr.markRange || [rr.s0, rr.s1];
+  const parkFrom = mr[0] + 2, parkTo = mr[1] - 4;
+  const rows = asphaltRows(rr, [zone.a?.sEnd, zone.b?.sStart, parkFrom, parkTo].filter((v) => v != null));
+  const lines = ctx.markings ? rows.map((r) => sectionLines(rr, r.lay, r.s, ctx.style)) : null;
+  const markAt = (sMid) => {
+    const reg = zone.a && sMid < zone.a.sEnd ? regionOf(zone.a.nodeId)
+      : zone.b && sMid > zone.b.sStart ? regionOf(zone.b.nodeId) : null;
+    return reg ? [reg.offset[0], reg.offset[1], 1] : [0, 0, 0];
+  };
+  const rowUp = (r) => norm3(-r.g * Math.cos(r.th), 1, -r.g * Math.sin(r.th));
+  /**
+   * −1..1 across the CARRIAGEWAY this point drains in, 0 at its crown: the
+   * asphalt shader pools water toward ±1 (the kerbs). A raised median splits
+   * the road into two carriageways, each with its own crown.
+   */
+  const drainAt = (r, t) => {
+    const e = layoutEdges(r.lay);
+    let lo = e.curbR, hi = e.curbL;
+    if (raisedCenter) { if (t >= 0) lo = r.lay.cw / 2; else hi = -r.lay.cw / 2; }
+    const w = hi - lo;
+    return w < 0.1 ? 0 : Math.max(-1, Math.min(1, (2 * (t - lo)) / w - 1));
+  };
+  /** A line keeps its code over a segment only if it is painted at both ends (as in the lab). */
+  const segCode = (c0, c1) => (c0 && c1 ? c0 : 0);
+
+  /**
+   * Asphalt between lateral offsets over every segment.
+   *   tA/tB(r)      edges of the strip at row index r
+   *   edge(r)       { inT, outT, inCode, outCode } for row r, or null
+   *   lateral       [value at tA, value at tB]
+   *   parking       bay ticks allowed on this strip
+   */
+  const asphaltStrip = (tA, tB, edge, lateral, parking, width) => {
+    const P = parts.asphalt;
+    // Line code per segment for each side, with the dash phase of its RUN folded
+    // into the fraction: the lab restarts a dash pattern wherever a line starts
+    // or changes style (a pocket's solid line after a dashed one), so a dash
+    // here starts where the lab's does. Both strips sharing a boundary compute
+    // the same runs, so the two halves of a line stay in step.
+    const segs = rows.length - 1;
+    const codes = { in: new Float64Array(segs), out: new Float64Array(segs) };
+    for (const role of ["in", "out"]) {
+      const key = role === "in" ? "inCode" : "outCode";
+      let start = 0;
+      for (let k = 0; k < segs; k++) {
+        const e0 = edge ? edge(k) : null, e1 = edge ? edge(k + 1) : null;
+        const c = e0 && e1 ? segCode(e0[key], e1[key]) : 0;
+        if (k === 0 || c !== Math.floor(codes[role][k - 1])) start = rows[k].s;
+        let frac = 0;
+        const dash = c ? decodeLineCode(c).dash : null;
+        if (dash) {
+          const period = dash[0] + dash[1];
+          frac = Math.min(0.999, (((start % period) + period) % period) / period);
+        }
+        codes[role][k] = c ? c + frac : 0;
+      }
+    }
+    for (let k = 0; k + 1 < rows.length; k++) {
+      const r0 = rows[k], r1 = rows[k + 1];
+      if (Math.abs(tB(k) - tA(k)) < 0.01 && Math.abs(tB(k + 1) - tA(k + 1)) < 0.01) continue;
+      const e0 = edge ? edge(k) : null, e1 = edge ? edge(k + 1) : null;
+      const inCode = codes.in[k];
+      const outCode = codes.out[k];
+      const sMid = (r0.s + r1.s) / 2;
+      const m = markAt(sMid);
+      const park = parking && ctx.markings && sMid > parkFrom && sMid < parkTo && width(k) > 1.5 && width(k + 1) > 1.5 ? 1 : 0;
+      const n = rowUp(r0);
+      const ids = [];
+      for (const [r, ri, e] of [[r0, k, e0], [r1, k + 1, e1]]) {
+        const up = rowUp(r);
+        for (const [t, lat] of [[tA(ri), lateral[0]], [tB(ri), lateral[1]]]) {
+          ids.push(P.vert(r.x + r.lx * t, r.y, r.z + r.lz * t, up, r.s, t, {
+            aLateral: lat,
+            aPiece: [phase, drainAt(r, t)],
+            aEdges: [e ? e.inT : 0, e ? e.outT : 0, inCode, outCode],
+            aMark: [m[0], m[1], m[2], park],
+          }));
+        }
+      }
+      P.quad(ids[0], ids[1], ids[3], ids[2], n);
+    }
+  };
 
   /** Top strip between lateral offsets tA(i) and tB(i), lifted `lift`. */
   const strip = (part, tA, tB, lift, exA, exB) => {
@@ -311,10 +524,11 @@ function buildRoad(rr, parts, o) {
   const raisedCenter = !!rr.center && (ck === "raised" || ck === "barrier");
   if (!raisedCenter) {
     let any = false;
-    for (let i = 0; i < N; i++) if (lays[i].cw > 0.01) { any = true; break; }
+    for (const r of rows) if (r.lay.cw > 0.01) { any = true; break; }
     if (any) {
-      const ex = { ...deck, aLateral: 0 };
-      strip(parts.asphalt, (i) => -lays[i].cw / 2, (i) => lays[i].cw / 2, 0, ex, ex);
+      asphaltStrip((k) => -rows[k].lay.cw / 2, (k) => rows[k].lay.cw / 2,
+        lines ? (k) => { const c = lines[k].center; return { inT: c.tA, outT: c.tB, inCode: c.codeA, outCode: c.codeB }; } : null,
+        [0, 0], false, (k) => rows[k].lay.cw);
     }
   }
 
@@ -333,10 +547,12 @@ function buildRoad(rr, parts, o) {
 
       if (kindOf(b) === "asphalt") {
         const drive = !!LANE_TYPES[lane.type]?.drive;
-        strip(parts.asphalt, tIn, tOut, 0, { ...deck, aLateral: drive ? -1 : 0 }, { ...deck, aLateral: drive ? 1 : 0 });
+        const R = (k) => rows[k].lay[side][b];
+        asphaltStrip((k) => R(k).tIn, (k) => R(k).tOut, lines ? (k) => lines[k][side][b] : null,
+          drive ? [-1, 1] : [0, 0], lane.type === "parking", (k) => R(k).w);
         // Nothing beyond the last carriage lane: close the edge down into the ground.
         if (kindOf(b + 1) === "none") {
-          edgeWall(parts.asphalt, tOut, sg, -o.skirt, 0, 0, { ...deck, aLateral: 0, aZone: 0 }, empty);
+          edgeWall(parts.asphalt, tOut, sg, -o.skirt, 0, 0, { ...deck, aLateral: 0 }, empty);
         }
         return;
       }
@@ -432,10 +648,14 @@ function deadEnd(parts, node, o) {
   cap(parts.concrete, top, [], () => y0 + H, { aKind: CONCRETE_KIND.slab });
 }
 
-function buildNode(node, parts, o) {
+function buildNode(node, parts, o, ctx) {
   const yNode = node.y;
   const flat = () => yNode;
-  const deck = { aLateral: 0, aPiece: [hashPhase(node.id), NO_CHECKER], aCurve: 0, aPlain: 1, aZone: 1 };
+  const reg = ctx.atlas?.regions.get(node.id);
+  const deck = {
+    aLateral: 0, aPiece: [hashPhase(node.id), 0], aEdges: [0, 0, 0, 0],
+    aMark: reg ? [reg.offset[0], reg.offset[1], 1, 0] : [0, 0, 0, 0],
+  };
 
   if (node.kind === "end") { deadEnd(parts, node, o); return; }
   if (node.kind !== "junction" && node.kind !== "roundabout" && node.kind !== "continuation") return;
@@ -468,119 +688,27 @@ function buildNode(node, parts, o) {
   }
 }
 
-/* ------------------------------------------------------------------ markings */
-
-/** Split a polyline into dash pieces, `dash = [on, off]` in metres from its start. */
-export function dashPieces(pts, dash) {
-  if (!dash) return [pts];
-  const cum = cumulative(pts);
-  const total = cum[cum.length - 1];
-  const [on, off] = dash;
-  const period = on + off;
-  const at = (d) => { const p = polylineAt(pts, cum, d); return [p.x, p.z]; };
-  const out = [];
-  for (let d0 = 0; d0 < total - 0.05; d0 += period) {
-    const d1 = Math.min(total, d0 + on);
-    if (d1 - d0 < 0.2) continue;
-    const piece = [at(d0)];
-    for (let i = 0; i < pts.length; i++) if (cum[i] > d0 + 1e-3 && cum[i] < d1 - 1e-3) piece.push(pts[i]);
-    piece.push(at(d1));
-    out.push(piece);
-  }
-  return out;
-}
-
-function paintLine(part, pts, width, color, yAt) {
-  const p = dedupe(pts, false);
-  if (p.length < 2 || width <= 0) return;
-  const L = offsetLeft(p, false, width / 2), R = offsetLeft(p, false, -width / 2);
-  const ex = { aPaint: PAINT_COLOR[color] ?? 0 };
-  let u = 0;
-  const ids = [];
-  for (let i = 0; i < p.length; i++) {
-    if (i) u += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
-    const y = yAt(p[i]);
-    ids.push([part.vert(L[i][0], y, L[i][1], UP, u, 0, ex), part.vert(R[i][0], y, R[i][1], UP, u, width, ex)]);
-  }
-  for (let i = 0; i + 1 < p.length; i++) part.quad(ids[i][0], ids[i][1], ids[i + 1][1], ids[i + 1][0], UP);
-}
-
-function paintPoly(part, pts, color, yAt) {
-  const r = ring(pts, 1e-4);
-  if (!r) return;
-  const { pts: P, tris } = triangulate(r);
-  const ex = { aPaint: PAINT_COLOR[color] ?? 0 };
-  const id = P.map((q) => part.vert(q[0], yAt(q), q[1], UP, q[0], q[1], ex));
-  for (let t = 0; t < tris.length; t += 3) part.tri(id[tris[t]], id[tris[t + 1]], id[tris[t + 2]], UP);
-}
-
-/** Parallel stripes at `angle`, `spacing` apart, clipped to the polygon. */
-function paintHatch(part, m, yAt) {
-  const poly = ring(m.poly);
-  if (!poly) return;
-  const dx = Math.cos(m.angle), dz = Math.sin(m.angle);
-  const nx = -dz, nz = dx;
-  let lo = Infinity, hi = -Infinity;
-  for (const p of poly) { const c = p[0] * nx + p[1] * nz; lo = Math.min(lo, c); hi = Math.max(hi, c); }
-  for (let c = lo + m.spacing / 2; c < hi; c += m.spacing) {
-    const hits = [];
-    for (let i = 0; i < poly.length; i++) {
-      const p = poly[i], q = poly[(i + 1) % poly.length];
-      const dp = p[0] * nx + p[1] * nz - c, dq = q[0] * nx + q[1] * nz - c;
-      if ((dp < 0) === (dq < 0)) continue;
-      const t = dp / (dp - dq);
-      const x = p[0] + (q[0] - p[0]) * t, z = p[1] + (q[1] - p[1]) * t;
-      hits.push({ x, z, u: x * dx + z * dz });
-    }
-    hits.sort((a, b) => a.u - b.u);
-    for (let k = 0; k + 1 < hits.length; k += 2) {
-      if (hits[k + 1].u - hits[k].u < 0.1) continue;
-      paintLine(part, [[hits[k].x, hits[k].z], [hits[k + 1].x, hits[k + 1].z]], m.width, m.color, yAt);
-    }
-  }
-}
-
-function buildMarkings(result, part, o) {
-  // Paint sits on whatever surface is under it: a pad, a road at its profile
-  // height. The fallback only matters for a point just outside every footprint.
-  const heightAt = (fallback) => (p) => (result.locate(p[0], p[1])?.y ?? fallback) + o.paintLift;
-  for (const rr of result.roads) {
-    const yAt = heightAt(rr.yMean ?? 0);
-    for (const line of rr.lines || []) {
-      for (const piece of dashPieces(line.pts, line.dash)) paintLine(part, piece, line.width, line.color, yAt);
-    }
-  }
-  for (const node of result.nodes) {
-    const yAt = heightAt(node.y);
-    for (const m of node.markings || []) {
-      if (m.kind === "poly") paintPoly(part, m.pts, m.color, yAt);
-      else if (m.kind === "line") {
-        for (const piece of dashPieces(m.pts, m.dash)) paintLine(part, piece, m.width, m.color, yAt);
-      } else if (m.kind === "hatch") paintHatch(part, m, yAt);
-    }
-  }
-}
-
 /* ------------------------------------------------------------------ entry */
 
 /**
  * @param {object} result  buildRoadNetwork() output
  * @param {Partial<typeof MESH_DEFAULTS>} [opts]
- * @returns {{ asphalt, concrete, grass, paint, stats: { ms, vertices, triangles } }}
+ * @returns {{ asphalt, concrete, grass, atlas, stats: { ms, vertices, triangles } }}
+ *   atlas: markingAtlas.js output (RGBA data + scale) or null
  */
 export function buildLaneRoadMesh(result, opts = {}) {
   const t0 = now();
   const o = { ...MESH_DEFAULTS, ...opts };
   const parts = {
-    asphalt: new Part({ aLateral: 1, aPiece: 2, aCurve: 1, aPlain: 1, aZone: 1 }),
+    asphalt: new Part({ aLateral: 1, aPiece: 2, aEdges: 4, aMark: 4 }),
     concrete: new Part({ aKind: 1 }),
     grass: new Part({}),
-    paint: new Part({ aPaint: 1 }),
   };
-  for (const rr of result.roads) buildRoad(rr, parts, o);
-  for (const node of result.nodes) buildNode(node, parts, o);
-  if (o.markings) buildMarkings(result, parts.paint, o);
-  const out = {};
+  const atlas = o.markings ? buildMarkingAtlas(result, { texel: o.atlasTexel }) : null;
+  const ctx = { atlas, markings: !!o.markings, style: result.style || "eu" };
+  for (const rr of result.roads) buildRoad(rr, parts, o, ctx);
+  for (const node of result.nodes) buildNode(node, parts, o, ctx);
+  const out = { atlas };
   let vertices = 0, triangles = 0;
   for (const [name, part] of Object.entries(parts)) {
     out[name] = part.finish();

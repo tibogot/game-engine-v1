@@ -6,10 +6,15 @@
 // covered at curb height, curb faces exist along the corner returns, and the
 // asphalt's texture coordinate runs along the road in metres.
 import { buildRoadNetwork } from "../v3/roads/roadNetwork.js";
-import { buildLaneRoadMesh, MESH_DEFAULTS } from "../v3/roads/mesh/laneRoadMesh.js";
+import { buildLaneRoadMesh, MESH_DEFAULTS, lineCode, decodeLineCode } from "../v3/roads/mesh/laneRoadMesh.js";
+import { dashPieces } from "../v3/roads/mesh/markingAtlas.js";
 import { PREVIEW_SCENES, flattenNetwork } from "../v3/roads/mesh/previewScenes.js";
 import { pointInPolygon, polylineLength } from "../v3/roads/roadMath.js";
 import { rng } from "../v3/roads/roadMath.js";
+import { register } from "node:module";
+
+// Lets the TSL materials load in node (maps "three" to the webgpu build).
+register("./threeWebgpuHook.mjs", import.meta.url);
 
 let fail = 0;
 const check = (n, c, d = "") => {
@@ -85,7 +90,7 @@ console.log("— every scene builds clean —");
 for (const key of Object.keys(PREVIEW_SCENES)) {
   const { mesh } = build(key);
   let ok = true, why = "";
-  for (const name of ["asphalt", "concrete", "grass", "paint"]) {
+  for (const name of ["asphalt", "concrete", "grass"]) {
     const p = mesh[name];
     if (!finite(p.position) || !finite(p.normal) || !finite(p.uv)) { ok = false; why = `${name} NaN`; }
     for (const a of Object.values(p.attributes)) if (!finite(a.array)) { ok = false; why = `${name} attr NaN`; }
@@ -226,66 +231,233 @@ console.log("— roundabout —");
   check("splitter islands raised to curb height", onSplitters === splitters, `${onSplitters}/${splitters}`);
 }
 
-console.log("— markings —");
+console.log("— markings (shader paint data) —");
 {
-  const lift = MESH_DEFAULTS.paintLift;
-  for (const key of ["straight", "junction", "roundabout"]) {
-    const { result, mesh } = build(key);
-    const P = mesh.paint.position;
-    let off = 0;
-    for (let v = 0; v < mesh.paint.vertexCount; v++) if (Math.abs(P[v * 3 + 1] - (Y0 + lift)) > 1e-4) off++;
-    check(`${key}: paint present, all of it ${lift * 100} cm above the asphalt`, mesh.paint.triangleCount > 0 && off === 0, `${mesh.paint.triangleCount} tris, ${off} verts off-height`);
-
-    // Paint lies on asphalt, never on a sidewalk or an island.
-    const A = tris(mesh.asphalt);
-    const T = tris(mesh.paint);
-    let offRoad = 0;
-    for (const t of T) {
-      const cx = (t.ax + t.bx + t.cx) / 3, cz = (t.az + t.bz + t.cz) / 3;
-      if (!covered(A, cx, cz, Y0)) offRoad++;
+  // A CPU copy of laneRoadPaint.js's coverage, without wear or antialiasing:
+  // find the asphalt triangle under a plan point, interpolate its attributes,
+  // decode the line codes, sample the atlas. If this agrees with the engine's
+  // own marking data, the shader has the right inputs.
+  function surfaceAt(part, x, z) {
+    const P = part.position, I = part.index, UV = part.uv, N = part.normal;
+    const E = part.attributes.aEdges.array, M = part.attributes.aMark.array;
+    for (let t = 0; t < I.length; t += 3) {
+      const a = I[t], b = I[t + 1], c = I[t + 2];
+      if (N[a * 3 + 1] < 0.9) continue;
+      const ax = P[a * 3], az = P[a * 3 + 2], bx = P[b * 3], bz = P[b * 3 + 2], cx = P[c * 3], cz = P[c * 3 + 2];
+      if (x < Math.min(ax, bx, cx) - 1e-4 || x > Math.max(ax, bx, cx) + 1e-4 || z < Math.min(az, bz, cz) - 1e-4 || z > Math.max(az, bz, cz) + 1e-4) continue;
+      const det = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+      if (Math.abs(det) < 1e-12) continue;
+      const l1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / det;
+      const l2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / det;
+      const l3 = 1 - l1 - l2;
+      if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) continue;
+      const lerp = (arr, size, k) => arr[a * size + k] * l1 + arr[b * size + k] * l2 + arr[c * size + k] * l3;
+      return {
+        s: lerp(UV, 2, 0), t: lerp(UV, 2, 1),
+        edges: [lerp(E, 4, 0), lerp(E, 4, 1), E[a * 4 + 2], E[a * 4 + 3]],
+        mark: [M[a * 4], M[a * 4 + 1], M[a * 4 + 2], M[a * 4 + 3]],
+      };
     }
-    check(`${key}: every paint triangle sits over asphalt`, offRoad === 0, `${offRoad}/${T.length} off the road`);
+    return null;
+  }
+  function lineAt(tLine, code, sf) {
+    if (!code) return null;
+    const st = decodeLineCode(code);
+    let d = Math.abs(sf.t - tLine);
+    if (st.double) d = Math.abs(d - (st.width / 2 + 0.06));
+    if (d > st.width / 2) return null;
+    if (st.dash) {
+      const period = st.dash[0] + st.dash[1];
+      const ph = (((sf.s - st.phase * period) % period) + period) % period;
+      if (ph > st.dash[0]) return null;
+    }
+    return st;
+  }
+  function paintAt(mesh, x, z) {
+    const sf = surfaceAt(mesh.asphalt, x, z);
+    if (!sf) return { surface: false };
+    const hit = lineAt(sf.edges[0], sf.edges[2], sf) || lineAt(sf.edges[1], sf.edges[3], sf);
+    let shape = false;
+    const at = mesh.atlas;
+    if (at && sf.mark[2] > 0.5) {
+      const u = x * at.scale[0] + sf.mark[0], v = z * at.scale[1] + sf.mark[1];
+      const px = Math.floor(u * at.width), py = Math.floor(v * at.height);
+      if (px >= 0 && py >= 0 && px < at.width && py < at.height) shape = at.data[(py * at.width + px) * 2] > 128;
+    }
+    return { surface: true, line: hit, shape, sf };
+  }
 
-    // Painted area matches the data: dash fraction × length × width, plus polygons.
-    let want = 0;
+  {
+    const st = [
+      { color: "white", width: 0.12, dash: [3, 5] }, { color: "yellow", width: 0.12, double: true },
+      { color: "white", width: 0.1, dash: [1.5, 1.5] }, { color: "yellow", width: 0.15 },
+    ];
+    const ok = st.every((s) => {
+      const d = decodeLineCode(lineCode(s));
+      return Math.abs(d.width - s.width) < 1e-9 && String(d.dash) === String(s.dash || null) && d.yellow === (s.color === "yellow") && d.double === !!s.double;
+    });
+    check("line styles round-trip through one float code", ok);
+  }
+
+  for (const key of ["straight", "junction", "roundabout", "boulevard"]) {
+    const { result, mesh } = build(key);
+    // Every painted dash the engine emits is painted by the shader data, in its colour.
+    //
+    // EXACT on straight roads only. The lab measures a dash along its own offset
+    // line, the shader along the road's centreline station; on a bend the two
+    // differ by the line's offset × curvature (1.75% for a line 7 m out on a
+    // 400 m radius), so dash phases slide apart down a curve. Invisible on the
+    // road; on bent lines (curves, tapers) the painted FRACTION is checked instead.
+    // A line that bends or jogs sideways (a pocket taper) is longer than its stations.
+    const straightLine = (pts) => { const a = pts[0], b = pts[pts.length - 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return pts.every((p) => Math.abs((p[0] - a[0]) * (b[1] - a[1]) - (p[1] - a[1]) * (b[0] - a[0])) / L < 0.02); };
+    let n = 0, miss = 0, wrongColour = 0;
+    const misses = [];
+    let fracBad = 0, fracN = 0;
+    const fracNotes = [];
     for (const rr of result.roads) {
       for (const l of rr.lines) {
-        const len = polylineLength(l.pts);
-        const pieces = l.dash ? (() => { let s = 0; for (let d = 0; d < len - 0.05; d += l.dash[0] + l.dash[1]) { const e = Math.min(len, d + l.dash[0]); if (e - d >= 0.2) s += e - d; } return s; })() : len;
-        want += pieces * l.width;
+        if (l.pts.length === 2 && polylineLength(l.pts) < l.width * 1.01 + 3) continue; // parking ticks: checked below
+        if (!straightLine(l.pts)) {
+          const cum = [0];
+          for (let i = 1; i < l.pts.length; i++) cum.push(cum[i - 1] + Math.hypot(l.pts[i][0] - l.pts[i - 1][0], l.pts[i][1] - l.pts[i - 1][1]));
+          const L = cum[cum.length - 1];
+          if (L < 40) continue;
+          let on = 0, total = 0;
+          for (let d = 1; d < L - 1; d += 0.25) {
+            let i = 1;
+            while (i < l.pts.length - 1 && cum[i] < d) i++;
+            const g = (d - cum[i - 1]) / Math.max(1e-9, cum[i] - cum[i - 1]);
+            const p = paintAt(mesh, l.pts[i - 1][0] + (l.pts[i][0] - l.pts[i - 1][0]) * g, l.pts[i - 1][1] + (l.pts[i][1] - l.pts[i - 1][1]) * g);
+            if (!p.surface) continue;
+            total++;
+            if (p.line) { on++; if (p.line.yellow !== (l.color === "yellow")) wrongColour++; }
+          }
+          if (!total) continue;
+          const want = l.dash ? l.dash[0] / (l.dash[0] + l.dash[1]) : 1;
+          fracN++;
+          if (Math.abs(on / total - want) > 0.08) { fracBad++; if (fracNotes.length < 3) fracNotes.push(`${rr.id} ${(on / total).toFixed(2)} vs ${want.toFixed(2)}`); }
+          continue;
+        }
+        for (const piece of dashPieces(l.pts, l.dash)) {
+          const cum = [0];
+          for (let i = 1; i < piece.length; i++) cum.push(cum[i - 1] + Math.hypot(piece[i][0] - piece[i - 1][0], piece[i][1] - piece[i - 1][1]));
+          const L = cum[cum.length - 1];
+          // Probe the middle 60% of each dash (its ends may sit on a segment boundary).
+          for (const f of [0.2, 0.5, 0.8]) {
+            const d = L * f;
+            let i = 1;
+            while (i < piece.length - 1 && cum[i] < d) i++;
+            const g = (d - cum[i - 1]) / Math.max(1e-9, cum[i] - cum[i - 1]);
+            const x = piece[i - 1][0] + (piece[i][0] - piece[i - 1][0]) * g, z = piece[i - 1][1] + (piece[i][1] - piece[i - 1][1]) * g;
+            const p = paintAt(mesh, x, z);
+            if (!p.surface) continue;
+            n++;
+            if (!p.line) { miss++; if (misses.length < 3) misses.push(`${rr.id} (${x.toFixed(1)},${z.toFixed(1)}) ${l.mark || ""}`); }
+            else if (p.line.yellow !== (l.color === "yellow")) wrongColour++;
+          }
+        }
       }
     }
-    const shoelace = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a / 2); };
-    for (const n of result.nodes) {
-      for (const m of n.markings) {
-        if (m.kind === "poly") want += shoelace(m.pts);
-        else if (m.kind === "line") want += polylineLength(m.pts) * m.width * (m.dash ? m.dash[0] / (m.dash[0] + m.dash[1]) : 1);
+    check(`${key}: every lane/edge/centre dash is in the shader data`, (n > 0 || fracN > 0) && miss === 0 && wrongColour === 0 && fracBad === 0,
+      `straight roads ${miss}/${n} missing; curved lines ${fracBad}/${fracN} off in painted fraction ${fracNotes.join("; ")}; ${wrongColour} wrong colour ${misses.join("; ")}`);
+
+    // ...and nothing is painted where the engine paints nothing.
+    const rand = rng(21);
+    let probes = 0, stray = 0;
+    const strays = [];
+    const allPieces = [];
+    for (const rr of result.roads) for (const l of rr.lines) for (const piece of dashPieces(l.pts, l.dash)) allPieces.push({ piece, hw: l.width / 2 });
+    const nearLine = (x, z) => allPieces.some(({ piece, hw }) => {
+      for (let i = 1; i < piece.length; i++) {
+        const a = piece[i - 1], b = piece[i];
+        const dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz || 1;
+        const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L2));
+        if (Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t) < hw + 0.25) return true;
+      }
+      return false;
+    });
+    for (const rr of result.roads) {
+      for (let k = 0; k < 120; k++) {
+        const i = Math.floor(rand() * (rr.smp.s.length - 1));
+        const f = rand();
+        const e = rr.edgesPts;
+        const x = e.curbR[i][0] + (e.curbL[i][0] - e.curbR[i][0]) * f, z = e.curbR[i][1] + (e.curbL[i][1] - e.curbR[i][1]) * f;
+        const p = paintAt(mesh, x, z);
+        if (!p.surface || !p.line || nearLine(x, z)) continue;
+        probes++;
+        stray++;
+        if (strays.length < 3) strays.push(`${rr.id} (${x.toFixed(1)},${z.toFixed(1)}) t=${p.sf.t.toFixed(2)}`);
+      }
+      probes += 0;
+    }
+    check(`${key}: no stray lane paint off the engine's lines`, stray === 0, `${stray} stray ${strays.join("; ")}`);
+
+    // Node shapes: every stop line, yield tooth, crosswalk bar and arrow head is in the atlas.
+    let shapes = 0, shapeMiss = 0;
+    for (const node of result.nodes) {
+      for (const m of node.markings) {
+        if (m.kind !== "poly") continue;
+        const c = m.pts.reduce((s, q) => [s[0] + q[0] / m.pts.length, s[1] + q[1] / m.pts.length], [0, 0]);
+        const p = paintAt(mesh, c[0], c[1]);
+        if (!p.surface) continue;
+        shapes++;
+        if (!p.shape) shapeMiss++;
       }
     }
-    let got = 0;
-    for (const t of T) got += Math.abs((t.bx - t.ax) * (t.cz - t.az) - (t.cx - t.ax) * (t.bz - t.az)) / 2;
-    check(`${key}: painted area matches the marking data`, Math.abs(got - want) / want < 0.06, `${got.toFixed(1)} m² vs ${want.toFixed(1)} m²`);
+    if (key !== "straight") check(`${key}: every junction shape reaches the atlas`, shapes > 0 && shapeMiss === 0, `${shapeMiss}/${shapes} missing`);
   }
+
   {
-    const { result, mesh } = build("junction");
-    const node = result.nodes.find((n) => n.kind === "junction");
-    const T = tris(mesh.paint);
-    const bars = node.markings.filter((m) => m.tag === "zebra");
-    const hit = bars.filter((m) => {
-      const c = m.pts.reduce((s, p) => [s[0] + p[0] / m.pts.length, s[1] + p[1] / m.pts.length], [0, 0]);
-      return covered(T, c[0], c[1], Y0 + lift);
-    }).length;
-    check("junction: every crosswalk bar painted", bars.length > 0 && hit === bars.length, `${hit}/${bars.length}`);
+    const { mesh } = build("straight");
+    // Parking ticks every 6 m in the parking lanes.
+    const rr = build("straight").result.roads[0];
+    const ticks = rr.lines.filter((l) => l.pts.length === 2 && polylineLength(l.pts) < 3);
+    let hit = 0;
+    for (const l of ticks) {
+      const x = (l.pts[0][0] + l.pts[1][0]) / 2, z = (l.pts[0][1] + l.pts[1][1]) / 2;
+      const sf = surfaceAt(mesh.asphalt, x, z);
+      if (sf && sf.mark[3] > 0.5) {
+        const q = ((sf.s / 6) % 1 + 1) % 1;
+        if (Math.min(q, 1 - q) * 6 < 0.05) hit++;
+      }
+    }
+    check("parking bay ticks land on the engine's ticks", ticks.length > 0 && hit === ticks.length, `${hit}/${ticks.length}`);
   }
-  {
-    // Dashes: a [3, 5] lane line over 24 m paints 3 dashes of 3 m.
-    const pieces = (await import("../v3/roads/mesh/laneRoadMesh.js")).dashPieces([[0, 0], [10, 0], [24, 0]], [3, 5]);
-    check("dashes cut in metres along the line", pieces.length === 3 && pieces.every((p) => Math.abs(polylineLength(p) - 3) < 1e-9), pieces.map((p) => polylineLength(p).toFixed(2)).join(", "));
-  }
+
   {
     const { mesh } = build("all");
+    check("atlas for the three test scenes stays small", mesh.atlas && mesh.atlas.stats.bytes < 16e6, mesh.atlas && `${mesh.atlas.width}×${mesh.atlas.height}, ${(mesh.atlas.stats.bytes / 1e6).toFixed(1)} MB, ${mesh.atlas.stats.ms.toFixed(1)} ms`);
     const off = buildLaneRoadMesh(build("all").result, { markings: false });
-    check("markings can be switched off", off.paint.triangleCount === 0 && mesh.paint.triangleCount > 0);
+    let codes = 0;
+    for (let i = 2; i < off.asphalt.attributes.aEdges.array.length; i += 4) codes += off.asphalt.attributes.aEdges.array[i] + off.asphalt.attributes.aEdges.array[i + 1];
+    check("markings off: no atlas, no line codes", off.atlas === null && codes === 0);
+    check("dashes cut in metres along the line", (() => { const p = dashPieces([[0, 0], [10, 0], [24, 0]], [3, 5]); return p.length === 3 && p.every((q) => Math.abs(polylineLength(q) - 3) < 1e-9); })());
+  }
+
+  {
+    // The shared asphalt still builds as a plain deck with the paint hook, dry and wet.
+    const { createRoadMaterial } = await import("../games/modular-road-v3/modularRoadMaterial.js");
+    const { createLaneRoadPaint } = await import("../v3/render/roads/laneRoadPaint.js");
+    const paint = createLaneRoadPaint();
+    let ok = true, why = "";
+    try {
+      for (const wet of [false, true]) {
+        const m = createRoadMaterial({ plainDeck: true, paint: paint.hook, wet });
+        if (!m.colorNode || !m.roughnessNode || (wet && !m.clearcoatNode)) { ok = false; why = `wet=${wet} missing nodes`; }
+      }
+    } catch (e) { ok = false; why = e.message; }
+    check("asphalt material builds as a plain deck with lane paint, dry and wet", ok, why);
+
+    // The shared city-street asphalt the lane road actually uses.
+    const { createAsphaltMaterial, laneRoadFrame } = await import("../v3/render/roads/asphaltSurface.js");
+    let ok2 = true, why2 = "";
+    try {
+      for (const wet of [false, true]) {
+        const m = createAsphaltMaterial({ frame: laneRoadFrame, paint: paint.hook, wet });
+        if (!m.colorNode || !m.roughnessNode || !m.normalNode || (wet && !m.clearcoatNormalNode)) { ok2 = false; why2 = `wet=${wet} missing nodes`; }
+      }
+    } catch (e) { ok2 = false; why2 = e.message; }
+    check("city-street asphalt builds with relief and lane paint, dry and wet", ok2, why2);
   }
 }
 
@@ -293,7 +465,7 @@ console.log("— budget —");
 {
   for (const key of ["straight", "junction", "roundabout", "all"]) {
     const { mesh } = build(key);
-    console.log(`  ${key.padEnd(10)} asphalt ${mesh.asphalt.triangleCount}  concrete ${mesh.concrete.triangleCount}  grass ${mesh.grass.triangleCount}  paint ${mesh.paint.triangleCount}  = ${mesh.stats.triangles} tris  ${mesh.stats.ms.toFixed(1)} ms`);
+    console.log(`  ${key.padEnd(10)} asphalt ${mesh.asphalt.triangleCount}  concrete ${mesh.concrete.triangleCount}  grass ${mesh.grass.triangleCount}  = ${mesh.stats.triangles} tris  ${mesh.stats.ms.toFixed(1)} ms`);
   }
   const { mesh } = build("all");
   check("all three scenes under 20k triangles", mesh.stats.triangles < 20000, `${mesh.stats.triangles}`);

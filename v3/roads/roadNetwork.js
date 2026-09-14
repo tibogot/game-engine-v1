@@ -509,6 +509,8 @@ function buildRoadGeometry(rr, style) {
   const { al, stack, L } = rr;
   const markRange = [Math.max(rr.s0, rr.armA.markStart), Math.min(rr.s1, L - rr.armB.markStart)];
   rr.markRange = markRange;
+  // Edge and bike lines run to the mouth, but break across a crosswalk.
+  rr.walkRange = [rr.armA.crosswalk ? markRange[0] : rr.s0, rr.armB.crosswalk ? markRange[1] : rr.s1];
   const breaks = [...sectionBreaks(stack, L), ...sectionEventStations(stack, L), markRange[0], markRange[1]];
   const smp = sampleAlignment(al, rr.s0, rr.s1, { maxStep: 6, maxAngle: 0.04, breaks });
   const N = smp.s.length;
@@ -590,7 +592,7 @@ function buildRoadGeometry(rr, style) {
     rr.center = { kind, poly: [...right, ...cap(N - 1, 1), ...left.reverse(), ...cap(0, -1)] };
   }
 
-  const mk = buildRoadMarkings(rr, smp, lays, style, markRange);
+  const mk = buildRoadMarkings(rr, smp, lays, style, markRange, rr.walkRange);
   rr.lines = mk.lines;
   rr.curbs = mk.curbs;
 

@@ -61,15 +61,23 @@ export function markingStyle(kind, style, rank) {
   }
 }
 
-/** Kinds that stop at stop lines / crosswalks (edge lines run on). */
+/** Kinds that stop at stop lines / crosswalks at every junction. */
 export const INTERRUPTED = new Set(["lane", "center", "solid", "busLine", "parking"]);
+
+/**
+ * Kinds that run on to the junction mouth — EXCEPT across a crosswalk, where
+ * real roads break them: a bike or edge line never runs through zebra bars.
+ * They stop where the interrupted kinds stop, but only at an end with a crossing.
+ */
+export const CROSSING_INTERRUPTED = new Set(["edge", "leftEdge", "bike", "solidThin", "medianEdge"]);
 
 /**
  * Build marking/curb polylines for one road.
  * smp: alignment samples, lays: layout per sample, markRange: [s0, s1] where
- * interrupted kinds may exist.
+ * interrupted kinds may exist, walkRange: [s0, s1] where crossing-interrupted
+ * kinds may exist (defaults to the whole road).
  */
-export function buildRoadMarkings(rr, smp, lays, style, markRange) {
+export function buildRoadMarkings(rr, smp, lays, style, markRange, walkRange = null) {
   const lines = [];
   const curbs = [];
   const N = smp.s.length;
@@ -101,6 +109,7 @@ export function buildRoadMarkings(rr, smp, lays, style, markRange) {
     for (let i = 0; i < N; i++) {
       let r = fn(i);
       if (r && INTERRUPTED.has(r.kind) && (smp.s[i] < markRange[0] - 1e-6 || smp.s[i] > markRange[1] + 1e-6)) r = null;
+      if (r && walkRange && CROSSING_INTERRUPTED.has(r.kind) && (smp.s[i] < walkRange[0] - 1e-6 || smp.s[i] > walkRange[1] + 1e-6)) r = null;
       if (!r) { flush(); continue; }
       if (run && run.kind !== r.kind) {
         // Close the old run on this sample so the two runs meet without a gap.

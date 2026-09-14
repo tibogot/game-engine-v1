@@ -119,7 +119,44 @@ Done:
   overview, +0.66 ms road filling the view, paint below timer resolution.
   tools/laneRoadMeshTest.mjs.
 
-### Next: markings in the road shader (agreed direction, not started)
+### Markings in the road shader
+
+**DONE 2026-09-14 (50 + the lane-road half of 51 + 52)** 👁 — needs your eye:
+- `v3/render/roads/laneRoadPaint.js` paints through a new `opts.paint` hook in
+  modularRoadMaterial, built as `opts.plainDeck` (aZone/aCurve/aPlain become
+  shader constants; the track's default path is unchanged, road material
+  suites green). Paint is shaded by the track's own paint/wet terms.
+- Lines along roads: analytic from `aEdges` (lateral position + style code,
+  dash-run phase in the fraction), same rules as the lab (`sectionLines`).
+  Checked against the engine's line data headless: straight lines exact, bent
+  lines by painted fraction (the lab measures dashes along each offset line,
+  the shader along the centreline — phases slide ~1.75% on a 400 m bend).
+- Junction shapes: RG8 signed-distance atlas (`markingAtlas.js`), 6 cm
+  texels; 4-way junction 3 MB / 5 ms, three test scenes 8.8 MB, downtown
+  24 MB / 48 ms.
+- Wear: the city street's edge-eating model (fraction of each shape's width);
+  node shapes skip the wheel-path term so a worn edge does not step at the
+  pad boundary. Weather panel: wet toggle (material swap), wetness, puddles.
+- GPU at a road-filling view (1347×849): road hidden 1.44 ms, asphalt without
+  paint 2.29, with paint 2.56 (+0.26), wet 2.95 (+0.39).
+- Found, not changed: the engine does not interrupt bike and edge lines at
+  crosswalks (a 25 cm bike line runs through the zebra bars, in the 2D lab
+  too). Fix in `INTERRUPTED` / markRange if wanted.
+- Left: the track deck and city street still use their own paint/asphalt
+  (the other half of 51); atlas paging for city scale.
+- 2026-09-14 later: bike/edge lines now break at crosswalks (engine rule,
+  `CROSSING_INTERRUPTED` + `rr.walkRange`; test finds 56 crossings without it).
+- 2026-09-14 later: **51 started** — `v3/render/roads/asphaltSurface.js` is the
+  city street's surface re-keyed to a road frame (cellular stones, streaked
+  macro, resurfacing patches, gloss variation, relief normal in road metres
+  instead of screen space, wet with kerb drainage via `aPiece.y`). Lane road
+  uses it; concrete got the city's slab joints and colours. GPU same view:
+  previous asphalt 2.56 ms → city surface 2.49 (dry), 2.95 (wet). The city
+  street and track deck can switch onto it next, each A/B'd.
+- Open question (user): city street lanes in the game are 8.5 m (34 m, 4
+  lanes) vs the engine's real 3.0–3.25 m and a 2.10 m car.
+
+The original plan, for reference:
 
 50. **Paint in the asphalt shader, sharing its wear and wetness** 👁. Geometry
     paint cannot share the asphalt's wet film or eat its edges the way the

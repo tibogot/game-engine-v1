@@ -520,9 +520,9 @@ export const WET_KEYS = [...WET_COLORS, ...WET_NUMBERS];
  *   reference the same node from colour, roughness and clearcoat; the graph
  *   then emits it a single time per fragment.
  */
-export function createWetField(u, wheelPath) {
+export function createWetField(u, wheelPath, attr = attribute) {
   return Fn(() => {
-    const lateral = attribute("aLateral", "float");
+    const lateral = attr("aLateral", "float");
     // NOTE there is no `along`/`across` here any more. The ponding field used to
     // ride per-piece arc length plus `aPiece.x` — a random phase per piece —
     // which decorrelated neighbouring pieces but guaranteed a hard edge through
@@ -540,7 +540,7 @@ export function createWetField(u, wheelPath) {
     // tells us which side. (+aCurve is a right-hand corner; the deck tips down
     // toward the inside, which is +aLateral. Note this is the OPPOSITE sign to
     // driftField, where the rubber sits toward the corner's outside.)
-    const k = clamp(attribute("aCurve", "float").div(u.wetCurveRef), -1.0, 1.0);
+    const k = clamp(attr("aCurve", "float").div(u.wetCurveRef), -1.0, 1.0);
     const corner = abs(k);
     const camberD = abs(lateral).mul(u.wetCamber);
     const bankD = saturate(lateral.mul(sign(k)).mul(0.5).add(0.5)).mul(u.wetBank);
@@ -776,8 +776,10 @@ export function wetImpactSlope(u) {
  *   coatRough: Node, coatNormalPacked: Node,
  * }}
  */
-export function createWetShading(u, wheelPath, { impacts = false } = {}) {
-  const field = createWetField(u, wheelPath);
+export function createWetShading(u, wheelPath, { impacts = false, attr = attribute } = {}) {
+  // `attr` lets a plain deck (createRoadMaterial opts.plainDeck) answer aCurve
+  // with a constant instead of a vertex attribute.
+  const field = createWetField(u, wheelPath, attr);
   const film = field.x;
   const pond = field.y;
   // COAT STRENGTH, which is not the same thing as wetness. A film reflects less
