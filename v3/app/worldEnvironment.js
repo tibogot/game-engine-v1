@@ -23,6 +23,8 @@ import {
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { SkyMesh } from "three/addons/objects/SkyMesh.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
+import { projectAssets } from "../io/projectAssets.js";
+import { mergeKnownKeys } from "./state/mergeKnownKeys.js";
 import { createLensFlareSystem } from "../../v2/effects/lensFlare.js";
 import { createLensFlare2 } from "../../v2/effects/lensFlare2.js";
 import { applyBloomMRT } from "../render/bloomMRT.js";
@@ -551,6 +553,8 @@ export async function createWorldEnvironment({
   let disposeSkyEnv = null;
   let disposeHdrEnv = null;
   let hdrTexture = null;
+  /** What a project saves for the imported HDR: "asset:<hash>" (kept in the project). */
+  let hdrRef = null;
 
   let _procEnvScene = null;
   let _procCubeRT = null;
@@ -817,20 +821,77 @@ export async function createWorldEnvironment({
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".hdr";
-    input.onchange = () => {
+    input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      const url = URL.createObjectURL(file);
-      const loader = new HDRLoader();
-      loader.load(url, (tex) => {
-        URL.revokeObjectURL(url);
+      const ref = await projectAssets.addRef(file);
+      await _loadHdrTexture(projectAssets.resolveUrl(ref));
+      hdrRef = ref;
+      applySkyMode("hdr");
+    };
+    input.click();
+  }
+
+  function _loadHdrTexture(url) {
+    return new Promise((resolve, reject) => {
+      new HDRLoader().load(url, (tex) => {
         tex.mapping = THREE.EquirectangularReflectionMapping;
         if (hdrTexture) hdrTexture.dispose();
         hdrTexture = tex;
-        applySkyMode("hdr");
-      });
-    };
-    input.click();
+        resolve();
+      }, undefined, reject);
+    });
+  }
+
+  /*
+   * ── THE WORLD LOOK IN A PROJECT ──────────────────────────────────────────
+   *
+   * Sky mode and everything that shapes what the sky and light look like:
+   * sun, exposure, both skies' params (time of day lives in proceduralSky),
+   * clouds, fog, lens flare and Post FX. NOT saved: shadow quality (CSM),
+   * render scale, interior lighting, audio — those are machine or tool
+   * settings, not the world's look.
+   *
+   * The load merges per key, only for keys this build still has, so an older
+   * file keeps today's default for a param added later, and a retired param
+   * is ignored (same contract as the ocean and lakes).
+   */
+  const LOOK_SLICES = [
+    "light", "skyExposureByMode", "physicalSky", "proceduralSky",
+    "volumetricCloudDayNight", "cloudShadows", "cloudGodRays", "cloudBloom",
+    "lensFlare", "postFx", "fog",
+  ];
+  const SKY_MODES = ["physical", "hdr", "procedural"];
+
+  function exportLook() {
+    const look = { skyMode: toolState.skyMode, hdr: hdrRef };
+    for (const key of LOOK_SLICES) look[key] = structuredClone(toolState[key]);
+    return look;
+  }
+
+  async function importLook(look) {
+    if (!look) return;
+    for (const key of LOOK_SLICES) {
+      if (look[key] && toolState[key]) mergeKnownKeys(toolState[key], look[key]);
+    }
+    let mode = SKY_MODES.includes(look.skyMode) ? look.skyMode : toolState.skyMode;
+    if (mode === "hdr") {
+      const url = look.hdr ? projectAssets.resolveUrl(look.hdr) : null;
+      try {
+        if (!url) throw new Error("no HDR file in this project");
+        await _loadHdrTexture(url);
+        hdrRef = look.hdr;
+      } catch (err) {
+        console.warn("[V3] Project sky is an HDR that could not be restored; using the procedural sky.", err);
+        mode = "procedural";
+      }
+    }
+    // Same mode as prev: no exposure swap, the saved exposure stays as saved.
+    applySkyMode(mode, mode);
+    if (mode === "procedural") setTimeOfDay(toolState.proceduralSky.timeOfDay);
+    syncFog();
+    driveFogSun();
+    applyPostFxState();
   }
 
   /**
@@ -1387,6 +1448,8 @@ export async function createWorldEnvironment({
     driveFogSun,
     applySkyMode,
     importHdr,
+    exportLook,
+    importLook,
     setTimeOfDay,
     rebuildProceduralSkyEnv,
     rebuildSkyEnv,

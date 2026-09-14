@@ -126,7 +126,13 @@ the game.
     written). Covers paint maps, prop GLBs + LOD1/LOD2, GLB collectibles, prop
     material folders, flag texture, tree GLBs + preset JSON, foliage textures.
     Not covered: a tree preset's own trunk GLB / leaf texture (still by path),
-    brush masks (tool state), sky HDR (sky mode is not saved at all).
+    brush masks (tool state).
+31b. ~~The world look is not saved~~ — DONE 2026-09-14: sky mode (and the HDR
+    file), sun and exposure, both skies' settings incl. time of day, clouds,
+    fog, lens flare and Post FX ride in `environment.look`. Merged per key on
+    load. Games don't take it unless `startV3App({ projectWorldLook: true })`
+    or `loadProjectFromUrl(url, { worldLook: true })` (they set their own
+    look). Not saved: shadow quality, render scale, interior lighting, audio.
 32. **Texture compression.** Paint layers use ~74 MB of VRAM; KTX2 would cut it
     for the games.
 33. **City builder** — its own 4-phase track.

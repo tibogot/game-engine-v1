@@ -775,6 +775,10 @@ export async function startV3App(opts = {}) {
   // editor default — terrain and foliage are curved enough not to show acne at
   // 0.02, but a flat armour deck self-shadows into stripes.
   if (opts.light) Object.assign(worldToolState.light, opts.light);
+  // Whether loading a project also takes its saved sky, sun, clouds, fog and
+  // post FX. The editor turns it on; games default to OFF because they set up
+  // their own look (boot light overrides above, game-owned skies).
+  const projectWorldLook = opts.projectWorldLook === true;
   const treeToolState = createTreeToolState();
   const editorConfig = {
     world: { size: WORLD_SIZE, chunkSize: V2_CONFIG.world.chunkSize },
@@ -5766,8 +5770,13 @@ export async function startV3App(opts = {}) {
     const props = propStore.exportData(propSlots);
     props.customMaterials = await exportCustomPropMaterials();
     const paintLayers = textureLib.exportData();
+    const environment = {
+      worldOcean: structuredClone(worldToolState.worldOcean),
+      // Sky mode, sun, clouds, fog, post FX (worldEnvironment.exportLook).
+      look: worldEnv?.exportLook() ?? null,
+    };
     const buf = encodeProjectFile({
-      assets:    projectAssets.collectFor({ trees: trees.slots, foliage: foliage.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers }),
+      assets:    projectAssets.collectFor({ trees: trees.slots, foliage: foliage.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers, environment }),
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
       heightmap: baseHeightmap ?? cpuHeightmap,
       splat:     splatMap.exportCombined(), // painted holes only; tunnels rebuild theirs
@@ -5802,7 +5811,7 @@ export async function startV3App(opts = {}) {
        * param added later keeps its default on an older file instead of arriving
        * `undefined` — the contract lakeSystem.importData already uses.
        */
-      environment: { worldOcean: structuredClone(worldToolState.worldOcean) },
+      environment,
       spawn:     spawnSystem.exportData(),
       grassDensity:  grassTerrainData.getDensitySnapshot(),
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
@@ -5851,7 +5860,13 @@ export async function startV3App(opts = {}) {
     }
   }
 
-  async function applyProjectData(d) {
+  /**
+   * @param {object} d decoded project
+   * @param {{ worldLook?: boolean }} [opts] worldLook: apply the saved sky, sun,
+   *   clouds, fog and post FX. Defaults to startV3App's `projectWorldLook`
+   *   (the editor: on; games: off, they set up their own look).
+   */
+  async function applyProjectData(d, { worldLook = projectWorldLook } = {}) {
     // Files the project carries (imported textures, GLBs...) before anything
     // that refers to them.
     projectAssets.load(d.assets);
@@ -5912,6 +5927,10 @@ export async function startV3App(opts = {}) {
       worldEnv?.worldOceanChanged();
       // The panel binds to the state object directly, so rebuilding it is how
       // its controls pick up values a load moved underneath them.
+      buildWorldPanelUi();
+    }
+    if (worldLook && d.environment?.look && worldEnv) {
+      await worldEnv.importLook(d.environment.look);
       buildWorldPanelUi();
     }
     if (d.susuki) Object.assign(susukiState, d.susuki);
@@ -6042,18 +6061,21 @@ export async function startV3App(opts = {}) {
    * trees, props, roads, splines, lakes. No file picker, no size-mismatch
    * reload dance (the caller is expected to boot at the project's terrain size).
    */
-  async function loadProjectFromUrl(url) {
+  async function loadProjectFromUrl(url, { worldLook = projectWorldLook } = {}) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Failed to fetch project "${url}" (${res.status})`);
     const buf = await res.arrayBuffer();
     if (!isProjectFile(buf)) throw new Error(`"${url}" is not a V3 project file.`);
-    await applyProjectData(decodeProjectFile(buf));
+    await applyProjectData(decodeProjectFile(buf), { worldLook });
   }
 
-  /** Same full-world restore as loadProjectFromUrl, from raw .v3proj bytes. */
-  async function loadProjectFromBuffer(buf) {
+  /**
+   * Same full-world restore as loadProjectFromUrl, from raw .v3proj bytes.
+   * Pass `{ worldLook: true }` to also take the project's sky and light.
+   */
+  async function loadProjectFromBuffer(buf, { worldLook = projectWorldLook } = {}) {
     if (!isProjectFile(buf)) throw new Error("Not a V3 project file.");
-    await applyProjectData(decodeProjectFile(buf));
+    await applyProjectData(decodeProjectFile(buf), { worldLook });
   }
 
   /** Toolbar Load — sniffs the file: whole project or bare heightmap. */
@@ -7672,6 +7694,8 @@ export async function startV3App(opts = {}) {
       saveProject,
       loadProjectFromBuffer,
       projectAssets,
+      get worldEnv() { return worldEnv; },
+      worldToolState,
       sculpt,
       ensureCpuHeightmapFromGpu,
       markHeightmapDirty,
