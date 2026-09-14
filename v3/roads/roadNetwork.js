@@ -2,7 +2,7 @@
 // city generator needs out.
 //
 // DATA (what gets saved — small, all derived geometry is rebuilt):
-//   { version, style: 'eu'|'us',
+//   { version, style: 'eu'|'us', roadScale?: 1 (see roadCrossSection.js scaledWidth),
 //     nodes: [{ id, x, z, y?, kind?: 'auto'|'junction'|'roundabout'|'split',
 //               radius?, corners?: { 'r1|r2': radius }, control?, crosswalks?,
 //               ring?: { radius, lanes }, trunk? }],
@@ -92,13 +92,15 @@ export function buildRoadNetwork(data, opts = {}) {
   const ground = opts.ground || (() => 0);
   const types = opts.types || ROAD_TYPES;
   const style = data.style || "eu";
+  // How much wider than real the drivable road is (1 = real). opts wins over data.
+  const roadScale = Math.min(3, Math.max(0.5, opts.roadScale ?? data.roadScale ?? 1));
   const issues = [];
 
   /* 1 ─ nodes, roads, arms */
   const nodes = new Map();
   for (const src of data.nodes || []) {
     nodes.set(src.id, {
-      id: src.id, src, x: src.x, z: src.z, y: src.y ?? ground(src.x, src.z),
+      id: src.id, src, x: src.x, z: src.z, y: src.y ?? ground(src.x, src.z), roadScale,
       arms: [], issues: [], markings: [], kind: null, corners: [], sidewalks: [], islands: [], pad: null,
     });
   }
@@ -116,7 +118,7 @@ export function buildRoadNetwork(data, opts = {}) {
       issues.push({ level: "warn", code: "tiny-road", msg: "Road shorter than 2 m ignored", x: A.x, z: A.z, roadId: src.id });
       continue;
     }
-    roads.push({ id: src.id, src, type, stack: resolveStack(src, types), A, B, pts, Lapprox: chord, issues: [] });
+    roads.push({ id: src.id, src, type, stack: resolveStack(src, types, roadScale), A, B, pts, Lapprox: chord, issues: [] });
   }
   const roadsById = new Map(roads.map((r) => [r.id, r]));
   for (const rr of roads) {
@@ -487,7 +489,7 @@ export function buildRoadNetwork(data, opts = {}) {
   }
   const nodeList = [...nodes.values()];
   const result = {
-    style, nodes: nodeList, nodesById: nodes, roads, roadsById, graph, structures, props, blocks, issues,
+    style, roadScale, nodes: nodeList, nodesById: nodes, roads, roadsById, graph, structures, props, blocks, issues,
     stats: {
       ms: now() - T0, timings,
       roads: roads.length, nodes: nodeList.length,

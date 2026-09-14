@@ -143,23 +143,36 @@ export function makeSection(presetKey, from, id, opts = {}) {
   return { id, kind: presetKey, from, d: p.d, taper: p.taper, ops };
 }
 
-function baseStack(road, types) {
+/**
+ * ROAD SCALE — how much wider than real the drivable road is built.
+ *
+ * 1 = real-world widths (a 3.25 m lane for a 2.1 m car). Racing and open-world
+ * games widen roads for playability (typically 1.2–1.5x); this is that knob.
+ * It scales what a CAR uses — carriage lanes (driving, turn, bus, parking, bike,
+ * shoulder), medians, and lanes added by sections — and, in roadJunction.js,
+ * corner radii and roundabout rings. It does NOT scale what a PERSON uses
+ * (sidewalks, verges, barriers), paint widths, or the plan geometry (curves).
+ */
+const scaledWidth = (type, width, scale) => (LANE_TYPES[type]?.carriage ? width * scale : width);
+
+function baseStack(road, types, scale) {
   const t = types[road.type] || types.local;
   const src = road.lanes || t;
   return {
     type: t,
-    center: { width: src.center?.width ?? 0, kind: src.center?.kind ?? "line" },
-    left: (src.left || []).map((l) => ({ ...l })),
-    right: (src.right || []).map((l) => ({ ...l })),
+    center: { width: (src.center?.width ?? 0) * scale, kind: src.center?.kind ?? "line" },
+    left: (src.left || []).map((l) => ({ ...l, width: scaledWidth(l.type, l.width, scale) })),
+    right: (src.right || []).map((l) => ({ ...l, width: scaledWidth(l.type, l.width, scale) })),
   };
 }
 
 /**
  * Resolve a road's stack: stable lane ids, the union order of every lane that
  * ever exists (sections insert into it), and per-lane width modifiers.
+ * `scale` = the network's road scale (see scaledWidth).
  */
-export function resolveStack(road, types = ROAD_TYPES) {
-  const base = baseStack(road, types);
+export function resolveStack(road, types = ROAD_TYPES, scale = 1) {
+  const base = baseStack(road, types, scale);
   const sides = { left: [], right: [] };
   for (const side of ["left", "right"]) {
     base[side].forEach((l, i) => {
@@ -173,13 +186,14 @@ export function resolveStack(road, types = ROAD_TYPES) {
   const sections = (road.sections || []).map((sec, si) => ({ ...sec, index: si }));
   for (const sec of sections) {
     for (const [oi, op] of (sec.ops || []).entries()) {
-      if (op.op === "center") { centerMods.push({ sec, width: op.width }); continue; }
+      if (op.op === "center") { centerMods.push({ sec, width: op.width * scale }); continue; }
       const list = sides[op.side];
       if (!list) continue;
       if (op.op === "add") {
+        const w = scaledWidth(op.lane.type, op.lane.width, scale);
         const lane = {
           id: `S${sec.id ?? si}_${oi}`, side: op.side, type: op.lane.type, turn: op.lane.turn || null,
-          base: 0, full: op.lane.width, mods: [{ sec, width: op.lane.width }], added: true,
+          base: 0, full: w, mods: [{ sec, width: w }], added: true,
         };
         let idx = 0;
         if (op.at === "curb") {
@@ -191,7 +205,7 @@ export function resolveStack(road, types = ROAD_TYPES) {
         for (const l of list) {
           const hit = typeof op.match === "number" ? list.indexOf(l) === op.match : l.type === op.match;
           if (!hit || l.added) continue;
-          l.mods.push(op.op === "grow" ? { sec, grow: op.by } : { sec, width: op.width });
+          l.mods.push(op.op === "grow" ? { sec, grow: op.by } : { sec, width: scaledWidth(l.type, op.width, scale) });
           if (op.op === "grow") l.full = Math.max(l.full, l.base + op.by);
         }
       }

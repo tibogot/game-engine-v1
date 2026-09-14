@@ -239,6 +239,48 @@ for (const [key, sc] of Object.entries(SCENES)) {
   }
 }
 
+console.log("— road scale —");
+{
+  const S = 1.3;
+  {
+    const road = { type: "local" };
+    const e1 = layoutEdges(layoutAt(resolveStack(road), 0, 100));
+    const eS = layoutEdges(layoutAt(resolveStack(road, undefined, S), 0, 100));
+    const carriage1 = e1.curbL - e1.curbR, carriageS = eS.curbL - eS.curbR;
+    const walk1 = (e1.propL - e1.propR) - carriage1, walkS = (eS.propL - eS.propR) - carriageS;
+    check("road scale widens the carriageway", Math.abs(carriageS - carriage1 * S) < 1e-9, `${carriage1.toFixed(2)} → ${carriageS.toFixed(2)} m`);
+    check("...but not the sidewalks", Math.abs(walkS - walk1) < 1e-9, `${walk1.toFixed(2)} m both`);
+  }
+  {
+    // Section ops: a pocket's added turn lane scales, a parking-lane width op scales, a sidewalk grow does not.
+    const road = { type: "local", sections: [makeSection("leftPocket", "end", "s1"), makeSection("bulbOut", "start", "s2")] };
+    const L = 200;
+    const lay1 = layoutAt(resolveStack(road), L, L), layS = layoutAt(resolveStack(road, undefined, S), L, L);
+    const turn = (lay) => [...lay.left, ...lay.right].find((l) => l.type === "turn").w;
+    check("added pocket lanes scale", Math.abs(turn(layS) - turn(lay1) * S) < 1e-9, `${turn(lay1).toFixed(2)} → ${turn(layS).toFixed(2)} m`);
+    const walk = (lay) => lay.left.find((l) => l.type === "sidewalk").w;
+    const b1 = layoutAt(resolveStack(road), 0, L), bS = layoutAt(resolveStack(road, undefined, S), 0, L);
+    check("sidewalk bulb-outs do not", Math.abs(walk(bS) - walk(b1)) < 1e-9, `${walk(b1).toFixed(2)} m both`);
+  }
+  for (const [key, def] of Object.entries(SCENES)) {
+    const count = (r) => r.issues.filter((i) => i.level === "error").length;
+    const base = buildRoadNetwork(def.build(), { ground: terrainFn(def.build().terrain) });
+    const scaled = buildRoadNetwork(def.build(), { ground: terrainFn(def.build().terrain), roadScale: S });
+    const errs = scaled.issues.filter((i) => i.level === "error").map((i) => i.code);
+    check(`${key}: builds at road scale ${S} with no new errors`, count(scaled) <= count(base), `${count(base)} → ${count(scaled)} ${[...new Set(errs)].join(",")}`);
+  }
+  {
+    const d = SCENES.roundabouts.build();
+    const r1 = buildRoadNetwork(d), rS = buildRoadNetwork(SCENES.roundabouts.build(), { roadScale: S });
+    const ring = (r) => r.nodes.find((n) => n.kind === "roundabout").ring.Ro;
+    check("roundabout rings grow with the road", Math.abs(ring(rS) - ring(r1) * S) < 0.5, `${ring(r1).toFixed(1)} → ${ring(rS).toFixed(1)} m`);
+    const widths = (r) => [...new Set(r.roads.flatMap((rr) => rr.lines.map((l) => l.width)))].sort().join(",");
+    check("paint widths stay real", widths(r1) === widths(rS), widths(rS));
+    const dd = { ...SCENES.downtown.build(), roadScale: S };
+    check("roadScale saved in the data is used", buildRoadNetwork(dd).roadScale === S);
+  }
+}
+
 console.log("— lines stop at crossings —");
 {
   // No painted line (lane, centre, edge, bike...) runs through a zebra bar.

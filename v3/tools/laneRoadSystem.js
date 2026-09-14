@@ -37,6 +37,9 @@ export function createLaneRoadToolState() {
       visible: true,
       /** Road surface above the ground under the scene centre (flat ground only). */
       lift: 0.1,
+      /** Drivable road width vs real (1 = real, 3.25 m lanes). 1.3 ≈ a game-widened
+       *  4.2 m lane for the 2.1 m car. Sidewalks, paint and curves stay real. */
+      roadScale: 1.3,
       curbShadows: true,
       ...MESH_DEFAULTS,
       ...PAINT_DEFAULTS,
@@ -218,6 +221,7 @@ export class LaneRoadSystem {
     const t0 = performance.now();
     const y = this.origin.ground + p.lift;
     const data = flattenNetwork(PREVIEW_SCENES[p.scene].build(), y);
+    data.roadScale = p.roadScale;
     this.result = buildRoadNetwork(data, { ground: () => this.origin.ground, blocks: false });
     const t1 = performance.now();
     const mesh = buildLaneRoadMesh(this.result, p);

@@ -171,6 +171,10 @@ export function buildLaneRoadPanel(app) {
 
     // ── Shape ───────────────────────────────────────────────────────────────
     const sh = _section(panel, "Cross-section", true);
+    _slider(sh, p, "roadScale", {
+      label: "Road scale", min: 0.5, max: 2, step: 0.05, onChange: rebuildSoon,
+      hint: "How much wider than real the drivable road is. 1 = real (3.25 m lanes); games use 1.2–1.5. Scales lanes, medians, corner radii and roundabouts; sidewalks, paint and curves stay real.",
+    });
     _slider(sh, p, "lift", {
       label: "Above ground (m)", min: 0, max: 3, step: 0.01, onChange: rebuildSoon,
       hint: "Road surface height over the ground at the scene centre. No terrain fitting yet — use a flat area.",

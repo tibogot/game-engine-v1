@@ -61,7 +61,10 @@ export class LabPanel {
       opt("eu", "EU markings", a.data.style !== "us"), opt("us", "US markings", a.data.style === "us"));
     const terrSel = el("select", { onchange: (e) => a.commit((d) => (d.terrain = e.target.value)) },
       Object.entries(TERRAINS).map(([k, t]) => opt(k, t.label, a.data.terrain === k)));
-    this.styleSel = styleSel; this.terrSel = terrSel;
+    // Road scale: 1 = real widths; games widen the drivable road (1.2–1.5).
+    const scaleIn = el("input", { type: "number", min: 0.5, max: 3, step: 0.05, value: a.data.roadScale ?? 1, title: "Carriage lanes, medians, corner radii and roundabouts. Sidewalks, paint and curves stay real.",
+      onchange: (e) => { const v = Math.min(3, Math.max(0.5, +e.target.value || 1)); a.commit((d) => { if (v === 1) delete d.roadScale; else d.roadScale = v; }); } });
+    this.styleSel = styleSel; this.terrSel = terrSel; this.scaleIn = scaleIn;
     const fileIn = el("input", { type: "file", accept: ".json,application/json", style: "display:none", onchange: (e) => a.importFile(e.target.files[0]) });
 
     this.root.append(
@@ -86,6 +89,7 @@ export class LabPanel {
         el("div", { class: "row" }, sceneSel, el("button", { onclick: () => a.loadScene(sceneSel.value) }, "Load scene")),
         el("label", { class: "row" }, "Markings", styleSel),
         el("label", { class: "row" }, "Terrain", terrSel),
+        el("label", { class: "row" }, "Road scale", scaleIn),
         el("div", { class: "row btns" },
           el("button", { onclick: () => a.exportFile() }, "Export JSON"),
           el("button", { onclick: () => fileIn.click() }, "Import"),
@@ -154,6 +158,7 @@ export class LabPanel {
     for (const b of this.toolBtns.children) b.classList.toggle("on", b.dataset.tool === a.tool);
     this.styleSel.value = a.data.style === "us" ? "us" : "eu";
     this.terrSel.value = a.data.terrain || "flat";
+    if (document.activeElement !== this.scaleIn) this.scaleIn.value = a.data.roadScale ?? 1;
     if (inspector) this.renderInspector();
     this.renderIssues();
   }

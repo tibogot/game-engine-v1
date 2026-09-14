@@ -86,7 +86,9 @@ function cornerRadius(node, ai, aj) {
   const o = node.src.corners?.[key];
   if (o != null) return o;
   if (node.src.radius != null) return node.src.radius;
-  const r = Math.min(ai.type.cornerRadius ?? 8, aj.type.cornerRadius ?? 8);
+  // Type defaults grow with the road scale (a wider road needs a wider return);
+  // radii authored on the node above are taken as given.
+  const r = Math.min(ai.type.cornerRadius ?? 8, aj.type.cornerRadius ?? 8) * (node.roadScale ?? 1);
   // The tangent length is r / tan(φ/2): on an acute corner a full radius
   // pushes the curb return tens of metres back and paves a huge pad. Real
   // acute corners get a tight return, so scale down below 90°.
@@ -163,13 +165,16 @@ export function buildRoundaboutGeometry(node, arms) {
     maxApproach = Math.max(maxApproach, a.approach.length);
   }
   const lanes = clamp(src.ring?.lanes ?? (maxApproach >= 2 ? 2 : 1), 1, 3);
-  const laneW = lanes === 1 ? 5.2 : 4.6;
-  const Ro = Math.max(src.ring?.radius ?? Math.max(15, maxCarriage * 0.9 + 9, lanes * laneW + 8), lanes * laneW + 3);
+  // The whole ring scales with the road scale, authored radius included: a ring
+  // sized for real lanes is too tight for scaled ones and would just error.
+  const sc = node.roadScale ?? 1;
+  const laneW = (lanes === 1 ? 5.2 : 4.6) * sc;
+  const Ro = Math.max(src.ring?.radius != null ? src.ring.radius * sc : Math.max(15 * sc, maxCarriage * 0.9 + 9 * sc, lanes * laneW + 8 * sc), lanes * laneW + 3 * sc);
   const Ri = Ro - lanes * laneW;
   const apron = Math.min(2.2, Ri * 0.3);
   // Entry curb radius scales with the ring: a big flare on a mini roundabout
   // eats the angle between neighbouring entries.
-  const rf = src.radius ?? clamp(Ro * 0.48, 6, 15);
+  const rf = src.radius ?? clamp(Ro * 0.48, 6 * sc, 15 * sc);
   let sw = Infinity;
   for (const a of arms) sw = Math.min(sw, a.edges.curbR - a.edges.propR, a.edges.propL - a.edges.curbL);
   if (!isFinite(sw)) sw = 0;
@@ -238,9 +243,9 @@ export function buildRoundaboutGeometry(node, arms) {
     if (!a.approach.length || !a.depart.length) continue;
     // A raised island needs room: on a narrow arm (an alley) it would fill the lanes.
     const carriage = a.edges.curbL - a.edges.curbR;
-    if (carriage < 8) continue;
+    if (carriage < 8 * sc) continue;
     const s0 = Ro + 1.2, s1 = Math.max(s0 + 3, a.trim + 1);
-    const hw0 = Math.min(1.5, carriage * 0.12), hw1 = 0.35;
+    const hw0 = Math.min(1.5 * sc, carriage * 0.12), hw1 = 0.35;
     const left = [], right = [];
     const N = 10;
     for (let k = 0; k <= N; k++) {

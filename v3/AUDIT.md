@@ -153,8 +153,13 @@ Done:
   uses it; concrete got the city's slab joints and colours. GPU same view:
   previous asphalt 2.56 ms → city surface 2.49 (dry), 2.95 (wet). The city
   street and track deck can switch onto it next, each A/B'd.
-- Open question (user): city street lanes in the game are 8.5 m (34 m, 4
-  lanes) vs the engine's real 3.0–3.25 m and a 2.10 m car.
+- Road width: game city lanes are 8.5 m (34 m, 4 lanes) vs the engine's real
+  3.0–3.25 m and a 2.10 m car. User chose a **road scale** setting — DONE
+  2026-09-14: `data.roadScale` / `opts.roadScale` (1 = real) scales carriage
+  lanes, medians, section lanes, corner radii and roundabout rings; sidewalks,
+  paint and curves stay real. 2D lab and editor panel inputs; editor preview
+  defaults to 1.3 (~4.2 m lanes). All demo scenes build at 1.3 with no errors.
+  Pick the final value by driving on it (needs collision — later step).
 
 The original plan, for reference:
 
