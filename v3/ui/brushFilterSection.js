@@ -23,11 +23,7 @@
  * them, so "min 40 m" means full effect from exactly 40 m, not half.
  * Both filters off = no effect at all (the sculpt mask is exactly 1.0).
  */
-
-const _arrowSvg =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
-const _checkSvg =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+import { slider as _slider, toggle as _toggle, dropdown as _select, ARROW_SVG as _arrowSvg } from "./widgets.js";
 
 /** Default filter state. Both bands off, so creating one changes nothing. */
 export function createBrushFilterState(maxHeight = 500) {
@@ -63,61 +59,6 @@ export function concavityMaskCpu(depth, mode, min, soft) {
   return t * t * (3 - 2 * t);
 }
 
-function _fmt(v, step) {
-  if (step >= 1) return String(Math.round(v));
-  const d = Math.max(0, -Math.floor(Math.log10(step)));
-  return Number(v).toFixed(d);
-}
-
-function _clampSnap(v, min, max, step) {
-  if (!Number.isFinite(v)) return min;
-  const n = Math.round((v - min) / step);
-  let out = min + n * step;
-  const s = String(step);
-  if (s.includes(".")) out = Number(out.toFixed(s.split(".")[1].length));
-  return Math.min(max, Math.max(min, out));
-}
-
-function _slider(parent, obj, key, { label, min, max, step = 1, hint, onChange }) {
-  const row = document.createElement("div");
-  row.className = "prop-row";
-  if (hint) row.title = hint;
-  row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="${min}" max="${max}" step="${step}" value="${obj[key]}"><input type="number" class="prop-num-input" title="Type an exact value" min="${min}" max="${max}" step="${step}" value="${_fmt(obj[key], step)}"></div></div>`;
-  const sl = row.querySelector(".prop-slider");
-  const num = row.querySelector(".prop-num-input");
-  sl.addEventListener("input", () => {
-    obj[key] = _clampSnap(parseFloat(sl.value), min, max, step);
-    num.value = _fmt(obj[key], step);
-    onChange();
-  });
-  num.addEventListener("change", () => {
-    const v = parseFloat(num.value);
-    if (!Number.isFinite(v)) { num.value = _fmt(obj[key], step); return; }
-    obj[key] = _clampSnap(v, min, max, step);
-    sl.value = String(obj[key]);
-    num.value = _fmt(obj[key], step);
-    onChange();
-  });
-  num.addEventListener("keydown", (e) => { if (e.key === "Enter") num.blur(); });
-  parent.appendChild(row);
-  return row;
-}
-
-function _toggle(parent, obj, key, { label, hint, onChange }) {
-  const row = document.createElement("div");
-  row.className = "prop-row";
-  if (hint) row.title = hint;
-  row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><button type="button" class="prop-toggle ${obj[key] ? "checked" : ""}">${_checkSvg}</button></div>`;
-  const btn = row.querySelector(".prop-toggle");
-  btn.addEventListener("click", () => {
-    obj[key] = !obj[key];
-    btn.classList.toggle("checked", obj[key]);
-    onChange();
-  });
-  parent.appendChild(row);
-  return row;
-}
-
 /** Short human summary for the header, so an active filter shows while collapsed. */
 function _summary(s) {
   const parts = [];
@@ -129,19 +70,6 @@ function _summary(s) {
   }
   if (s.concavityOn) parts.push(s.concavityMode === "convex" ? "convex" : "concave");
   return parts.length ? parts.join(" · ") : "off";
-}
-
-function _select(parent, obj, key, { label, options, hint, onChange }) {
-  const row = document.createElement("div");
-  row.className = "prop-row";
-  if (hint) row.title = hint;
-  row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><select class="prop-dropdown">${
-    options.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select></div>`;
-  const sel = row.querySelector("select");
-  sel.value = obj[key];
-  sel.addEventListener("change", () => { obj[key] = sel.value; onChange(); });
-  parent.appendChild(row);
-  return row;
 }
 
 /**

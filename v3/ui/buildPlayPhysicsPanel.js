@@ -2,9 +2,7 @@
  * Play-mode on-foot physics tuning — lives in the play panel (not lil-gui).
  */
 import { HUMAN_CAPSULE_DEFAULTS } from "../play/playMode.js";
-
-const _arrowSvg =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+import { section as _section, slider } from "./widgets.js";
 
 export const PHYSICS_PRESETS = {
   default: { ...HUMAN_CAPSULE_DEFAULTS },
@@ -39,42 +37,6 @@ export const PHYSICS_PRESETS = {
   },
 };
 
-function _fmt(v, step) {
-  if (step >= 1) return String(Math.round(v));
-  const d = Math.max(0, -Math.floor(Math.log10(step)));
-  return Number(v).toFixed(d);
-}
-
-function _clampSnap(v, min, max, step) {
-  if (!Number.isFinite(v)) return min;
-  const n = Math.round((v - min) / step);
-  let out = min + n * step;
-  const stepStr = String(step);
-  let decimals = 0;
-  if (stepStr.includes(".")) decimals = stepStr.split(".")[1].length;
-  if (decimals > 0) out = Number(out.toFixed(decimals));
-  return Math.min(max, Math.max(min, out));
-}
-
-function _section(parent, title, expanded = true) {
-  const sec = document.createElement("div");
-  sec.className = "inspector-section";
-  const hdr = document.createElement("div");
-  hdr.className = "section-header" + (expanded ? "" : " collapsed");
-  hdr.setAttribute("data-toggle", "");
-  hdr.innerHTML = _arrowSvg + " " + title;
-  const body = document.createElement("div");
-  body.className = "section-body" + (expanded ? "" : " hidden");
-  hdr.addEventListener("click", () => {
-    hdr.classList.toggle("collapsed");
-    body.classList.toggle("hidden");
-  });
-  sec.appendChild(hdr);
-  sec.appendChild(body);
-  parent.appendChild(sec);
-  return body;
-}
-
 /**
  * @param {object} app
  * @param {HTMLElement} app.mount
@@ -99,10 +61,7 @@ export function buildPlayPhysicsPanel(app) {
   };
 
   const syncSliders = () => {
-    for (const b of bindings) {
-      b.syncSliderFromValue();
-      b.syncNumDisplay();
-    }
+    for (const b of bindings) b.refresh();
   };
 
   const syncFromPlayMode = () => {
@@ -112,40 +71,17 @@ export function buildPlayPhysicsPanel(app) {
     syncSliders();
   };
 
+  // A hand-tuned value is no longer a preset.
   function _slider(parent, key, opts) {
-    const { label, min, max, step = 0.01, onChange } = opts;
-    const row = document.createElement("div");
-    row.className = "prop-row";
-    const cur = tune[key];
-    row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value"><div class="prop-slider-wrap"><input type="range" class="prop-slider" min="${min}" max="${max}" step="${step}" value="${cur}"><input type="number" class="prop-num-input" title="Type an exact value" min="${min}" max="${max}" step="${step}" value="${_fmt(cur, step)}"></div></div>`;
-    const sl = row.querySelector(".prop-slider");
-    const num = row.querySelector(".prop-num-input");
-    const syncNumDisplay = () => { num.value = _fmt(tune[key], step); };
-    const syncSliderFromValue = () => { sl.value = String(tune[key]); };
-    const push = () => {
-      let v = parseFloat(num.value);
-      if (!Number.isFinite(v)) v = tune[key];
-      v = _clampSnap(v, min, max, step);
-      tune[key] = v;
-      syncNumDisplay();
-      syncSliderFromValue();
-      app.setCapsuleParams({ [key]: v });
-      activePreset = "";
-      presetBtns.forEach((b) => b.classList.remove("active"));
-      onChange?.();
-    };
-    sl.addEventListener("input", () => {
-      tune[key] = _clampSnap(parseFloat(sl.value), min, max, step);
-      syncNumDisplay();
-      app.setCapsuleParams({ [key]: tune[key] });
-      activePreset = "";
-      presetBtns.forEach((b) => b.classList.remove("active"));
-      onChange?.();
-    });
-    num.addEventListener("change", push);
-    num.addEventListener("keydown", (e) => { if (e.key === "Enter") push(); });
-    parent.appendChild(row);
-    bindings.push({ key, syncSliderFromValue, syncNumDisplay });
+    bindings.push(slider(parent, tune, key, {
+      ...opts,
+      onChange: () => {
+        app.setCapsuleParams({ [key]: tune[key] });
+        activePreset = "";
+        presetBtns.forEach((b) => b.classList.remove("active"));
+        opts.onChange?.();
+      },
+    }));
   }
 
   // ── Feel (tier 1) ─────────────────────────────────────────────────────────

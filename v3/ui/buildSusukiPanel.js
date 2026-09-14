@@ -1,3 +1,5 @@
+import { section as _section, slider as _slider, color as _color, toggle as _toggle } from "./widgets.js";
+
 /**
  * Susuki mode panel — paint brush + plant/plume appearance controls.
  * Built dynamically into #susuki-panel (same pattern as buildLakePanel).
@@ -10,84 +12,6 @@
  *   onTextureChanged()    plume strand texture params (canvas redraw)
  *   onFill() / onClear()  fill / clear the painted density layer
  */
-const _arrowSvg =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-arrow"><polyline points="6 9 12 15 18 9"></polyline></svg>';
-const _checkSvg =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-
-function _fmt(v, step) {
-  if (step >= 1) return String(Math.round(v));
-  const d = Math.max(0, -Math.floor(Math.log10(step)));
-  return Number(v).toFixed(d);
-}
-
-function _section(parent, title, expanded = true) {
-  const sec = document.createElement("div");
-  sec.className = "inspector-section";
-  const hdr = document.createElement("div");
-  hdr.className = "section-header" + (expanded ? "" : " collapsed");
-  hdr.setAttribute("data-toggle", "");
-  hdr.innerHTML = _arrowSvg + " " + title;
-  const body = document.createElement("div");
-  body.className = "section-body" + (expanded ? "" : " hidden");
-  hdr.addEventListener("click", () => {
-    hdr.classList.toggle("collapsed");
-    body.classList.toggle("hidden");
-  });
-  sec.appendChild(hdr);
-  sec.appendChild(body);
-  parent.appendChild(sec);
-  return body;
-}
-
-function _slider(parent, obj, key, { label, min, max, step = 0.01, onChange, hint }) {
-  const row = document.createElement("div");
-  row.className = "prop-row";
-  if (hint) row.title = hint;
-  row.innerHTML =
-    `<span class="prop-label">${label}</span><div class="prop-value">` +
-    `<input type="range" min="${min}" max="${max}" step="${step}" value="${obj[key]}" />` +
-    `<span class="prop-num">${_fmt(obj[key], step)}</span></div>`;
-  const sl = row.querySelector("input");
-  const num = row.querySelector(".prop-num");
-  sl.addEventListener("input", () => {
-    obj[key] = parseFloat(sl.value);
-    num.textContent = _fmt(obj[key], step);
-    onChange?.();
-  });
-  parent.appendChild(row);
-  return { refresh() { sl.value = String(obj[key]); num.textContent = _fmt(obj[key], step); } };
-}
-
-function _color(parent, obj, key, { label, onChange }) {
-  const row = document.createElement("div");
-  row.className = "prop-row";
-  row.innerHTML =
-    `<span class="prop-label">${label}</span><div class="prop-value">` +
-    `<input type="color" value="${obj[key]}" style="width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none;border-radius:3px" /></div>`;
-  const inp = row.querySelector("input");
-  inp.addEventListener("input", () => { obj[key] = inp.value; onChange?.(); });
-  parent.appendChild(row);
-  return { refresh() { inp.value = obj[key]; } };
-}
-
-function _toggle(parent, obj, key, { label, onChange, hint }) {
-  const row = document.createElement("div");
-  row.className = "prop-row";
-  if (hint) row.title = hint;
-  row.innerHTML =
-    `<span class="prop-label">${label}</span><div class="prop-value">` +
-    `<button type="button" class="prop-toggle ${obj[key] ? "checked" : ""}">${_checkSvg}</button></div>`;
-  const btn = row.querySelector(".prop-toggle");
-  btn.addEventListener("click", () => {
-    obj[key] = !obj[key];
-    btn.classList.toggle("checked", obj[key]);
-    onChange?.();
-  });
-  parent.appendChild(row);
-  return { refresh() { btn.classList.toggle("checked", !!obj[key]); } };
-}
-
 export function buildSusukiPanel(root, {
   susukiBrush,
   susukiState,

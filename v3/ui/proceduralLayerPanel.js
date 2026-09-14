@@ -7,12 +7,7 @@
  * and no slot state — main.js hands it the active slot's params via setParams.
  */
 import { PROC_PRESETS, PROC_PATTERNS, procParamsFromPreset, normalizeProcParams } from "../terrain/proceduralLayer.js";
-
-function _fmt(v, step) {
-  if (step >= 1) return String(Math.round(v));
-  const d = Math.max(0, -Math.floor(Math.log10(step)));
-  return Number(v).toFixed(d);
-}
+import { fmt as _fmt } from "./widgets.js";
 
 /**
  * @param {HTMLElement} host

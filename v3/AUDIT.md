@@ -423,9 +423,21 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
 
 ### Editor UI (v2 has, v3 lacks)
 
-88. **One shared widget module.** Each v3 panel copies `_section` / `_slider`
-    (buildPropsPanel, brushFilterSection, buildWorldPanel...). v2 already has
-    the extracted factory: `v2/octahedral-v3/custom-ui.js`. Base for 89-92.
+88. ~~One shared widget module~~ — DONE 2026-09-14. `v3/ui/widgets.js` (section,
+    separator, slider with log curve, color, toggle, dropdown, text, button,
+    info, hint + fmt/clampSnap) replaces the copies in 15 panels and the depth
+    water controls (up to 8 versions of one helper; −1,895 lines). Value
+    widgets return `{ row, refresh() }` — the base for live resync (92) and
+    the Inspector (89). Panels import under their old `_name`s, so call sites
+    did not change. Measured in the editor: every panel has the same rows,
+    sections, controls, labels, slider values and selections as before. Two
+    visible changes: the six panels whose buttons used an unstyled class
+    (lake, river, River v2, road, tunnel, lane road) now get the normal button
+    look, and Susuki sliders/colours gained the number box / hex label every
+    other panel has. Deleted: `v3/scripts/extract*.mjs` (regenerated panels
+    from v2 line numbers — running one would overwrite a v3 panel) and their
+    `*PanelWidgets.txt` output. `tools/uiWidgetsTest.mjs` fails if a panel
+    grows its own copy again.
 89. **Editable Inspector.** v2: click the sun, sky, water, road, river, prop in
     the Scene list → editable properties. v3's Info tab is static text. The
     most Unity-like piece v2 has.
