@@ -123,6 +123,7 @@ import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
 import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
 import { RiverV2System } from "../tools/riverV2System.js";
 import { TunnelSystem, createTunnelToolState } from "../tools/tunnelSystem.js";
+import { createSnapshotHistory } from "../tools/snapshotHistory.js";
 import { TUNNEL_DEFAULTS, CAVE_DEFAULTS } from "../tools/tunnelPath.js";
 import { buildTunnelPanel } from "../ui/buildTunnelPanel.js";
 import { createClickDetector, pickNearest, raycastMeshes, nearestXZ } from "./viewportPick.js";
@@ -2387,8 +2388,9 @@ export async function startV3App(opts = {}) {
   tbSave.addEventListener("click", (e) => { e.shiftKey ? saveHeightmap() : saveProject(); });
   tbLoad.title = "Load project / heightmap";
   tbLoad.addEventListener("click", () => { loadAnyFile(); });
-  tbUndo.addEventListener("click", () => { if (sculpt.undo()) onHistoryChange(); });
-  tbRedo.addEventListener("click", () => { if (sculpt.redo()) onHistoryChange(); });
+  // Same routing as Ctrl+Z / Ctrl+Y: the current mode's history.
+  tbUndo.addEventListener("click", () => undoInMode());
+  tbRedo.addEventListener("click", () => redoInMode());
 
   // ── Terrain size: toolbar label, inspector values, New Terrain dialog ──────
   const tbTerrainSize = document.getElementById("tb-terrain-size");
@@ -3405,6 +3407,65 @@ export async function startV3App(opts = {}) {
     requestHeightmapReadback();
   }
 
+  /*
+   * Undo/redo follow the current mode: each tool keeps its own history. A mode
+   * with no history of its own (view, sculpt, spawn...) undoes the terrain, and
+   * so do snow, grass, susuki, rivers, tunnel, spline, road and lake once their
+   * own history is empty. Paint, props, cliff paint, trees and foliage never
+   * fall through. Ctrl+Z/Y and the toolbar buttons both come here.
+   */
+  function undoInMode() { return _stepInMode("undo"); }
+  function redoInMode() { return _stepInMode("redo"); }
+
+  function _stepInMode(dir) {
+    const undo = dir === "undo";
+    // Snapshot stacks kept here in main.js: [from, to, take snapshot, restore].
+    const stackStep = (from, to, snap, restore) => {
+      if (!from.length) return false;
+      to.push(snap());
+      restore(from.pop());
+      return true;
+    };
+    switch (editorMode) {
+      case "paint":      return undo ? paintSys.undo() : paintSys.redo();
+      case "props":      return undo ? propSys.undo() : propSys.redo();
+      case "cliffPaint": return undo ? cliffPaintSystem.undo() : cliffPaintSystem.redo();
+      case "treePaint":  return undo ? treeEnv.treeSystem.undo() : treeEnv.treeSystem.redo();
+      case "foliage":    return undo ? foliageEnv.paintSystem.undo() : foliageEnv.paintSystem.redo();
+    }
+    let done = false;
+    switch (editorMode) {
+      case "snow":
+        done = stackStep(undo ? _snowUndoStack : _snowRedoStack, undo ? _snowRedoStack : _snowUndoStack,
+          () => snowMap.snapshot(), (s) => snowMap.restoreSnapshot(s));
+        break;
+      case "grass": {
+        // Entries are tagged with the layer they snapshot (terrain or cliff).
+        const from = undo ? _grassUndoStack : _grassRedoStack;
+        const to = undo ? _grassRedoStack : _grassUndoStack;
+        const entry = from.at(-1);
+        done = !!entry && stackStep(from, to,
+          () => ({ cliff: entry.cliff, data: _snapGrass(entry.cliff) }),
+          (e) => _restoreGrass(e.cliff, e.data));
+        break;
+      }
+      case "susuki":
+        done = stackStep(undo ? _susukiUndoStack : _susukiRedoStack, undo ? _susukiRedoStack : _susukiUndoStack,
+          () => grassTerrainData.getSusukiDensitySnapshot(), (s) => grassTerrainData.restoreSusukiDensitySnapshot(s));
+        break;
+      case "river":   done = !!(undo ? riverSystem?.undo() : riverSystem?.redo()); break;
+      case "river2":  done = !!(undo ? river2System?.undo() : river2System?.redo()); break;
+      case "riverv2": done = !!(undo ? riverV2System?.undo() : riverV2System?.redo()); if (done) riverV2Ui?.refresh(); break;
+      case "tunnel":  done = !!(undo ? tunnelSystem?.undo() : tunnelSystem?.redo()); if (done) tunnelUi?.refresh(); break;
+      case "spline":  done = !!(undo ? splineSys?.undo() : splineSys?.redo()); break;
+      case "road":    done = undo ? roadHistory.undo() : roadHistory.redo(); break;
+      case "lake":    done = undo ? lakeHistory.undo() : lakeHistory.redo(); break;
+    }
+    if (done) return true;
+    if (undo ? sculpt.undo() : sculpt.redo()) { onHistoryChange(); return true; }
+    return false;
+  }
+
   window.addEventListener("keydown", e => {
     if (playMode.active) {
       if (e.code === "Escape") {
@@ -3531,27 +3592,28 @@ export async function startV3App(opts = {}) {
     if (editorMode === "road" && !playMode.active && roadSystem) {
       if (e.code === "Delete" || e.code === "Backspace") {
         e.preventDefault();
-        if (roadSystem.selectedNodeId !== null) roadSystem.deleteNode(roadSystem.selectedNodeId);
+        if (roadSystem.selectedNodeId !== null) roadHistory.record(() => roadSystem.deleteNode(roadSystem.selectedNodeId));
         return;
       }
       if (e.code === "KeyJ" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (roadSystem.selectedNodeId !== null) roadSystem.cycleNodeType(roadSystem.selectedNodeId);
+        if (roadSystem.selectedNodeId !== null) roadHistory.record(() => roadSystem.cycleNodeType(roadSystem.selectedNodeId));
         return;
       }
       if (e.code === "KeyB" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        roadSystem.toggleBridge(); // bridge on the last-grabbed edge
+        roadHistory.record(() => roadSystem.toggleBridge()); // bridge on the last-grabbed edge
         return;
       }
+      // Holding +/- is one undo step, not one per key repeat.
       if (e.code === "Equal" || e.code === "NumpadAdd") {
         e.preventDefault();
-        roadSystem.adjustNodeLift(e.shiftKey ? 0.1 : 0.5);
+        roadHistory.record(() => roadSystem.adjustNodeLift(e.shiftKey ? 0.1 : 0.5), { coalesce: "lift" });
         return;
       }
       if (e.code === "Minus" || e.code === "NumpadSubtract") {
         e.preventDefault();
-        roadSystem.adjustNodeLift(e.shiftKey ? -0.1 : -0.5);
+        roadHistory.record(() => roadSystem.adjustNodeLift(e.shiftKey ? -0.1 : -0.5), { coalesce: "lift" });
         return;
       }
     }
@@ -3616,40 +3678,12 @@ export async function startV3App(opts = {}) {
       }
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
-        if (editorMode === "paint") paintSys.undo();
-        else if (editorMode === "snow" && _snowUndoStack.length) {
-          _snowRedoStack.push(snowMap.snapshot());
-          snowMap.restoreSnapshot(_snowUndoStack.pop());
-        }
-        else if (editorMode === "props") propSys.undo();
-        else if (editorMode === "cliffPaint") cliffPaintSystem.undo();
-        else if (editorMode === "treePaint") treeEnv.treeSystem.undo();
-        else if (editorMode === "foliage") foliageEnv.paintSystem.undo();
-        else if (editorMode === "river" && riverSystem?.undo()) { /* ok */ }
-        else if (editorMode === "river2" && river2System?.undo()) { /* ok */ }
-        else if (editorMode === "riverv2" && riverV2System?.undo()) { riverV2Ui?.refresh(); }
-        else if (editorMode === "tunnel" && tunnelSystem?.undo()) { tunnelUi?.refresh(); }
-        else if (editorMode === "spline" && splineSys?.undo()) { /* ok */ }
-        else if (sculpt.undo()) onHistoryChange();
+        undoInMode();
         return;
       }
       if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
-        if (editorMode === "paint") paintSys.redo();
-        else if (editorMode === "snow" && _snowRedoStack.length) {
-          _snowUndoStack.push(snowMap.snapshot());
-          snowMap.restoreSnapshot(_snowRedoStack.pop());
-        }
-        else if (editorMode === "props") propSys.redo();
-        else if (editorMode === "cliffPaint") cliffPaintSystem.redo();
-        else if (editorMode === "treePaint") treeEnv.treeSystem.redo();
-        else if (editorMode === "foliage") foliageEnv.paintSystem.redo();
-        else if (editorMode === "river" && riverSystem?.redo()) { /* ok */ }
-        else if (editorMode === "river2" && river2System?.redo()) { /* ok */ }
-        else if (editorMode === "riverv2" && riverV2System?.redo()) { riverV2Ui?.refresh(); }
-        else if (editorMode === "tunnel" && tunnelSystem?.redo()) { tunnelUi?.refresh(); }
-        else if (editorMode === "spline" && splineSys?.redo()) { /* ok */ }
-        else if (sculpt.redo()) onHistoryChange();
+        redoInMode();
         return;
       }
     }
@@ -4406,8 +4440,13 @@ export async function startV3App(opts = {}) {
   gslStr.addEventListener("input", () => { grassBrush.strength = Number(gslStr.value) / 100; glblStr.textContent = grassBrush.strength.toFixed(2); });
   gslFalloff.addEventListener("input", () => { grassBrush.falloff = Number(gslFalloff.value) / 10; glblFalloff.textContent = grassBrush.falloff.toFixed(1); });
   gckErase.addEventListener("change", () => { grassBrush.erase = gckErase.checked; });
-  gbtnFill.addEventListener("click", () => grassTerrainData.fillDensity());
-  gbtnClear.addEventListener("click", () => { if (confirm("Clear all grass density?")) grassTerrainData.clearDensity(); });
+  // Fill/Clear are one undo step each, on the terrain layer whatever the brush target.
+  gbtnFill.addEventListener("click", () => { _pushGrassUndo(false); grassTerrainData.fillDensity(); });
+  gbtnClear.addEventListener("click", () => {
+    if (!confirm("Clear all grass density?")) return;
+    _pushGrassUndo(false);
+    grassTerrainData.clearDensity();
+  });
 
   // ── Cliff grass: paint-target toggle + surface bake + fill/clear ───────────
   const gbtnTargetTerrain = document.getElementById("gbtn-target-terrain");
@@ -4442,11 +4481,15 @@ export async function startV3App(opts = {}) {
   cliffgrassBake?.addEventListener("click", () => { bakeCliffGrassSurface(); updateCliffGrassStatus(); });
   cliffgrassFill?.addEventListener("click", () => {
     bakeCliffGrassSurface();
+    _pushGrassUndo(true);
     grassTerrainData.fillCliffDensity();
     updateCliffGrassStatus();
   });
   cliffgrassClear?.addEventListener("click", () => {
-    if (confirm("Clear all cliff grass?")) grassTerrainData.clearCliffDensity();
+    if (confirm("Clear all cliff grass?")) {
+      _pushGrassUndo(true);
+      grassTerrainData.clearCliffDensity();
+    }
     updateCliffGrassStatus();
   });
 
@@ -4974,6 +5017,17 @@ export async function startV3App(opts = {}) {
     onChanged: () => waterSurfaceMap.markDirty(),
   });
   worldEnv?.addWaterSurface(lakeSystem);
+  // Undo for lake placement: the rectangles and their water level. The water
+  // look (panel material settings) is not part of it, like other panels.
+  const lakeHistory = createSnapshotHistory({
+    capture: () => JSON.stringify(lakeSystem.exportData().lakes),
+    restore: (snap) => {
+      const active = lakeToolSlice.lake.activeIndex;
+      lakeSystem.importData({ lakes: JSON.parse(snap) });
+      lakeSystem.setActiveIndex(active);
+      lakeUi?.refresh();
+    },
+  });
 
   // ── River v2 ───────────────────────────────────────────────────────────────
   riverV2System = new RiverV2System({
@@ -5046,6 +5100,17 @@ export async function startV3App(opts = {}) {
     params: roadState,
   });
   roadSystem.setEditActive(false); // roads are world geometry; handles gated to road mode
+  // Undo for the road network (nodes, edges, bends, bridges, lifts). Selection
+  // is left out so a click that only selects adds no step; the road panel's
+  // width/profile settings are not part of it, like other panels. A restore
+  // rebuilds the road, and the rebuild re-applies live grading.
+  const roadHistory = createSnapshotHistory({
+    capture: () => {
+      const { nodes, edges, nextNodeId } = roadSystem.exportData();
+      return JSON.stringify({ nodes, edges, nextNodeId });
+    },
+    restore: (snap) => roadSystem.importData(JSON.parse(snap)),
+  });
 
   let _roadGradeTimer = 0;
   function applyRoadGradeNow() {
@@ -5075,6 +5140,7 @@ export async function startV3App(opts = {}) {
       _roadDrag.nodeId = null;
       _roadDrag.edge = null;
       roadSystem.setDragging(false);
+      roadHistory.commit();
     }
     // Flush a pending grade before another tool edits the terrain under us.
     if (_roadGradeTimer) applyRoadGradeNow();
@@ -6188,6 +6254,7 @@ export async function startV3App(opts = {}) {
     updateCliffGrassStatus();
 
     if (d.roads) roadSystem.importData(d.roads);
+    roadHistory.reset();
     if (d.splines) splineSys.importData(d.splines);
     // Always import, even when absent: a project with no lakes must clear any
     // lakes left over from the previous scene.
@@ -6196,6 +6263,7 @@ export async function startV3App(opts = {}) {
     // terrain uniforms (the panel callback only fires on user edits).
     lakebedShading.syncParams(lakeToolSlice.lake.lakebed);
     lakeUi?.refresh();
+    lakeHistory.reset();
 
     // Rivers restore like lakes — always import so a river-less project clears
     // leftovers. River+ re-carves the saved (uncarved) base heightmap.
@@ -6387,8 +6455,12 @@ export async function startV3App(opts = {}) {
     maxHeight: MAX_HEIGHT,
     materialChanged:  () => lakeSystem.syncMaterial(),
     lakebedChanged:   () => lakebedShading.syncParams(lakeToolSlice.lake.lakebed),
-    transformChanged: () => {},   // syncActiveTransform already ran inside the panel
-    selectionChanged: () => {},
+    // syncActiveTransform already ran inside the panel. A slider drag fires on
+    // every input; the coalesce key makes the whole drag one undo step.
+    transformChanged: () => lakeHistory.commit({ coalesce: `transform:${lakeToolSlice.lake.activeIndex}` }),
+    // Fires after Delete and after picking another lake; picking changes no
+    // lake, so only a delete becomes a step.
+    selectionChanged: () => lakeHistory.commit(),
   });
 
   {
@@ -6420,7 +6492,10 @@ export async function startV3App(opts = {}) {
     const finish = () => {
       if (!dragging) return;
       dragging = false;
-      if (lakeSystem.endDrag()) lakeUi.refresh();
+      if (lakeSystem.endDrag()) {
+        lakeHistory.commit();
+        lakeUi.refresh();
+      }
     };
     renderer.domElement.addEventListener("mouseup", finish);
     window.addEventListener("mouseup", finish);
@@ -6498,7 +6573,7 @@ export async function startV3App(opts = {}) {
       roadSystem.setEditActive(editorMode === "road" && !playMode.active);
       roadSystem.queueRebuild();
     },
-    roadClearAll: () => roadSystem.setNetwork([], []),
+    roadClearAll: () => roadHistory.record(() => roadSystem.setNetwork([], [])),
     roadGradeParamsChanged: () => scheduleRoadGrade(),
     roadLiveGradeChanged: () => {
       if (roadState.liveGrade) {
@@ -6537,7 +6612,8 @@ export async function startV3App(opts = {}) {
         const file = input.files?.[0];
         if (!file) return;
         try {
-          roadSystem.importData(JSON.parse(await file.text()));
+          const data = JSON.parse(await file.text());
+          roadHistory.record(() => roadSystem.importData(data));
         } catch (err) {
           console.warn("[V3] Road import failed:", err);
         }
@@ -7249,7 +7325,7 @@ export async function startV3App(opts = {}) {
       e.preventDefault();
       const sel = roadSystem.selectedNodeId;
       if (connectKey && sel !== null && sel !== hit.nodeId) {
-        roadSystem.toggleEdge(sel, hit.nodeId);
+        roadHistory.record(() => roadSystem.toggleEdge(sel, hit.nodeId));
         roadSystem.selectNode(hit.nodeId); // chain A→B→C
       } else {
         roadSystem.selectNode(hit.nodeId);
@@ -7271,7 +7347,7 @@ export async function startV3App(opts = {}) {
       const th = getTerrainHitWorld(e);
       if (th) {
         e.preventDefault();
-        roadSystem.addNode(th.x, th.z, true);
+        roadHistory.record(() => roadSystem.addNode(th.x, th.z, true));
       }
       return;
     }
@@ -7283,6 +7359,7 @@ export async function startV3App(opts = {}) {
     _roadDrag.nodeId = null;
     _roadDrag.edge = null;
     roadSystem.setDragging(false); // commit full geometry → live grade fires
+    roadHistory.commit(); // the whole drag is one undo step (none if nothing moved)
     syncEditorOrbitEnabled();
   });
 
@@ -7468,8 +7545,7 @@ export async function startV3App(opts = {}) {
 
   // Undo entries are tagged with the layer they snapshot so terrain and cliff
   // paint share one stack without corrupting each other.
-  function _pushGrassUndo() {
-    const cliff = grassBrush.target === "cliff";
+  function _pushGrassUndo(cliff = grassBrush.target === "cliff") {
     _grassUndoStack.push({
       cliff,
       data: cliff ? grassTerrainData.getCliffDensitySnapshot()
@@ -7638,24 +7714,6 @@ export async function startV3App(opts = {}) {
     susukiUi.refresh();
   }, { passive: false, capture: true });
 
-  window.addEventListener("keydown", e => {
-    if (editorMode !== "susuki") return;
-    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "z") {
-      const entry = _susukiUndoStack.pop();
-      if (!entry) return;
-      _susukiRedoStack.push(grassTerrainData.getSusukiDensitySnapshot());
-      grassTerrainData.restoreSusukiDensitySnapshot(entry);
-      e.stopImmediatePropagation();
-    }
-    if (e.ctrlKey && (e.shiftKey && e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
-      const entry = _susukiRedoStack.pop();
-      if (!entry) return;
-      _susukiUndoStack.push(grassTerrainData.getSusukiDensitySnapshot());
-      grassTerrainData.restoreSusukiDensitySnapshot(entry);
-      e.stopImmediatePropagation();
-    }
-  }, { capture: true });
-
   // ── Tree mode mouse events (v2 treePaint) ─────────────────────────────────
   let _treePainting = false;
   const _treeHit = new THREE.Vector3();
@@ -7784,30 +7842,13 @@ export async function startV3App(opts = {}) {
     }
   }, { passive: false, capture: true });
 
-  // Grass undo/redo — patch into existing Ctrl+Z/Y handler. Each entry carries
-  // whether it snapshots the terrain or the cliff density layer.
+  // Grass undo/redo (routed by undoInMode). Each entry carries whether it
+  // snapshots the terrain or the cliff density layer.
   const _snapGrass  = (cliff) => cliff ? grassTerrainData.getCliffDensitySnapshot()
                                        : grassTerrainData.getDensitySnapshot();
   const _restoreGrass = (cliff, data) => cliff
     ? grassTerrainData.restoreCliffDensitySnapshot(data)
     : grassTerrainData.restoreDensitySnapshot(data);
-  window.addEventListener("keydown", e => {
-    if (editorMode !== "grass") return;
-    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "z") {
-      const entry = _grassUndoStack.pop();
-      if (!entry) return;
-      _grassRedoStack.push({ cliff: entry.cliff, data: _snapGrass(entry.cliff) });
-      _restoreGrass(entry.cliff, entry.data);
-      e.stopImmediatePropagation();
-    }
-    if (e.ctrlKey && (e.shiftKey && e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
-      const entry = _grassRedoStack.pop();
-      if (!entry) return;
-      _grassUndoStack.push({ cliff: entry.cliff, data: _snapGrass(entry.cliff) });
-      _restoreGrass(entry.cliff, entry.data);
-      e.stopImmediatePropagation();
-    }
-  }, { capture: true });
 
   // Re-sync orbit after props/spline wiring (do not reset mode — that felt like a freeze).
   syncEditorOrbitEnabled();
@@ -7872,6 +7913,8 @@ export async function startV3App(opts = {}) {
       frameSelection: () => frameSelection(),
       spawnSystem,
       getRoadSystem: () => roadSystem,
+      roadHistory,
+      lakeHistory,
       laneRoad: laneRoadSystem,
       props: { propStore, propInstancer, propSys, solidCollider, cliffBvh, addPrimitive, addCliff, activatePropSelection, deactivatePropSelection, rebakePlayerBvh, tc, getLivePropManager: () => livePropManager, propSlots, propTextureLibrary, addLiveProp, importPropGlb, importPropLod, importGlbCollectible },
       // Project save/load, and the imported files a project carries.

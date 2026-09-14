@@ -403,8 +403,18 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     slider jumped 12 → ~120 on first touch (listener missed its /10).
     Checked in the editor: author → save → scramble → load restores state,
     panel and uniforms; `tools/projectLookSaveTest.mjs` guards the tables.
-85. **Undo gaps.** The toolbar Undo/Redo buttons only undo sculpt (Ctrl+Z
-    follows the mode); roads and lakes have no undo at all.
+85. ~~Undo gaps~~ — DONE 2026-09-14. Roads and lakes have undo
+    (`v3/tools/snapshotHistory.js`: a snapshot after each finished edit, so a
+    drag, a held +/- or a slider drag is one step and a select-only click is
+    none). Road: add, connect, drag node/bend, delete, J, B, lift, Clear all,
+    import. Lake: drag-place, delete, level/center/size sliders. Both reset on
+    project load. Undo routing is one function (`undoInMode`) used by
+    Ctrl+Z/Y AND the toolbar buttons (they only undid sculpt); the separate
+    grass/susuki key handlers folded into it. Grass Fill/Clear (terrain and
+    cliff) are now undo steps too. Not in history, like other panels: road
+    width/profile settings and the lake water look. Grade bake/remove are
+    terrain edits outside the road history. Checked in the editor with real
+    mouse, keyboard and toolbar input.
 86. **Stale shortcuts and hidden modes.** Toolbar tooltips say Sculpt (S),
     Paint (P), Grass (G), River (V): S and G do nothing, P starts play, V is
     View. Snow, Cliff Paint and River+ exist only in the mode dropdown.
