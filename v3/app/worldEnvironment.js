@@ -848,9 +848,10 @@ export async function createWorldEnvironment({
    *
    * Sky mode and everything that shapes what the sky and light look like:
    * sun, exposure, both skies' params (time of day lives in proceduralSky),
-   * clouds, fog, lens flare and Post FX. NOT saved: shadow quality (CSM),
-   * render scale, interior lighting, audio — those are machine or tool
-   * settings, not the world's look.
+   * clouds, fog, lens flare, Post FX, and interior lighting (how dark tunnels
+   * and caves get — part of the level's look). NOT saved: shadow quality (CSM),
+   * render scale, audio — those are machine or game settings (a game sets CSM
+   * at boot: startV3App({ csm })).
    *
    * The load merges per key, only for keys this build still has, so an older
    * file keeps today's default for a param added later, and a retired param
@@ -859,7 +860,7 @@ export async function createWorldEnvironment({
   const LOOK_SLICES = [
     "light", "skyExposureByMode", "physicalSky", "proceduralSky",
     "volumetricCloudDayNight", "cloudShadows", "cloudGodRays", "cloudBloom",
-    "lensFlare", "postFx", "fog",
+    "lensFlare", "postFx", "fog", "interior",
   ];
   const SKY_MODES = ["physical", "hdr", "procedural"];
 

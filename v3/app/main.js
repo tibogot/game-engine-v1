@@ -22,6 +22,7 @@ import { createProceduralGenPass } from "../terrain/proceduralGenGpu.js";
 import { erodeDroplets, buildErosionKernel, smoothHeights } from "../terrain/globalErosion.js";
 import { streamPowerErode, createStreamPowerScratch } from "../terrain/streamPowerErosion.js";
 import { initEditorShell } from "../ui/editorShell.js";
+import { mergeKnownKeys } from "./state/mergeKnownKeys.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
 import { STAMP_GROUPS, loadStamp } from "../terrain/brushStamps.js";
@@ -1070,6 +1071,10 @@ export async function startV3App(opts = {}) {
       for (const r of rings) r.setEnabled(false);
       grassRings = rings;
       _grassRingsEnabled = false;
+      // Blade shape and uniforms from grassState, which a project load may
+      // have changed while the rings were building.
+      rebuildHybridGrassGeometries(rings, grassState);
+      syncGrassUniforms();
     } catch (err) {
       console.error("[V3 Grass] build failed:", err);
     } finally {
@@ -1095,6 +1100,7 @@ export async function startV3App(opts = {}) {
         cliffDensityTex: grassTerrainData.cliffDensityTex,
       });
       cliffGrassRings = rings;
+      rebuildHybridGrassGeometries(rings, grassState);
       syncGrassUniforms();
     } catch (err) {
       console.error("[V3 Cliff Grass] build failed:", err);
@@ -4097,6 +4103,63 @@ export async function startV3App(opts = {}) {
   pbtnFill.addEventListener("click", () => { paintSys.fillWithActiveLayer(); });
   pbtnClear.addEventListener("click", () => { paintSys.clearAll(); });
 
+  /**
+   * Show loaded state in a hand-written panel: set each control and fire the
+   * event its own listener handles, so labels, uniforms and geometry follow
+   * exactly as if the user had moved it. A range input snaps to its step and
+   * clamps to its range, so the loaded values are put back afterwards — the
+   * caller re-syncs whatever reads them.
+   * @param {Array<[string, string, number?]>} controls [element id, state key, slider units per state unit]
+   */
+  function syncPanelControls(controls, state) {
+    const loaded = { ...state };
+    for (const [id, key, scale = 1] of controls) {
+      const el = document.getElementById(id);
+      const v = state[key];
+      if (!el || v === undefined) continue;
+      if (el.type === "checkbox") {
+        el.checked = Boolean(v);
+        el.dispatchEvent(new Event("change"));
+      } else if (el.tagName === "SELECT") {
+        el.value = String(v);
+        el.dispatchEvent(new Event("change"));
+      } else if (el.type === "color") {
+        el.value = v;
+        el.dispatchEvent(new Event("input"));
+      } else {
+        el.value = String(v * scale);
+        el.dispatchEvent(new Event("input"));
+      }
+    }
+    Object.assign(state, loaded);
+  }
+
+  // Snow look sliders saved in the project: [slider id, snowSystem.params key,
+  // slider units per param unit]. Brush size/strength are tool settings.
+  const SNOW_LOOK_SLIDERS = [
+    ["snow-sl-base", "baseDepth", 100], ["snow-sl-noise", "noiseAmp", 100],
+    ["snow-sl-groove", "grooveScale", 100], ["snow-sl-soft", "trailSoftness", 100],
+    ["snow-sl-rim", "rimScale", 100], ["snow-sl-regrow", "regrowRate", 10000],
+    ["snow-sl-glitter", "glitterIntensity", 10], ["snow-sl-freq", "glitterFreq", 1],
+  ];
+  const SNOW_LOOK_KEYS = SNOW_LOOK_SLIDERS.map(([, key]) => key);
+
+  function applySnowParams(saved) {
+    const p = snowSystem.params;
+    for (const key of SNOW_LOOK_KEYS) {
+      if (Number.isFinite(saved[key])) p[key] = saved[key];
+    }
+    syncPanelControls(SNOW_LOOK_SLIDERS, p);
+    const u = snowSystem.u;
+    u.uBaseDepth.value = p.baseDepth;
+    u.uNoiseAmp.value = p.noiseAmp;
+    u.uGrooveScale.value = p.grooveScale;
+    u.uTrailSoft.value = p.trailSoftness;
+    u.uRimScale.value = p.rimScale;
+    u.uGlitterIntensity.value = p.glitterIntensity;
+    u.uGlitterFreq.value = p.glitterFreq;
+  }
+
   // ── Snow panel controls ────────────────────────────────────────────────────
   {
     const slR = document.getElementById("snow-sl-radius");
@@ -4548,7 +4611,7 @@ export async function startV3App(opts = {}) {
   gcolS2.addEventListener("input",      () => { grassState.specV2Color = gcolS2.value; syncGrassUniforms(); });
   gslS2Nscale.addEventListener("input", () => { grassState.specV2NoiseScale = Number(gslS2Nscale.value) / 10; glblS2Nscale.textContent = grassState.specV2NoiseScale.toFixed(1); syncGrassUniforms(); });
   gslS2Nstr.addEventListener("input",   () => { grassState.specV2NoiseStr = Number(gslS2Nstr.value) / 100; glblS2Nstr.textContent = grassState.specV2NoiseStr.toFixed(2); syncGrassUniforms(); });
-  gslS2Pow.addEventListener("input",    () => { grassState.specV2Power = Number(gslS2Pow.value); glblS2Pow.textContent = gslS2Pow.value; syncGrassUniforms(); });
+  gslS2Pow.addEventListener("input",    () => { grassState.specV2Power = Number(gslS2Pow.value) / 10; glblS2Pow.textContent = grassState.specV2Power.toFixed(1); syncGrassUniforms(); });
 
   const gslS2TipBias  = document.getElementById("gsl-s2-tipbias");
   const glblS2TipBias = document.getElementById("glbl-s2-tipbias");
@@ -4640,6 +4703,47 @@ export async function startV3App(opts = {}) {
   gslIntRad.addEventListener("input",  () => { grassState.interactionRadius = Number(gslIntRad.value) / 10; glblIntRad.textContent = grassState.interactionRadius.toFixed(1) + "m"; syncGrassUniforms(); });
   gslIntStr.addEventListener("input",  () => { grassState.interactionStrength = Number(gslIntStr.value) / 100; glblIntStr.textContent = grassState.interactionStrength.toFixed(2); syncGrassUniforms(); });
   gselIntMode.addEventListener("change", () => { grassState.interactionMode = Number(gselIntMode.value); syncGrassUniforms(); });
+
+  // Every grass control that holds a saved setting: [element id, grassState
+  // key, slider units per state unit]. Used to show a loaded project's grass.
+  const GRASS_PANEL_CONTROLS = [
+    ["gsl-blade-height", "bladeHeight", 10], ["gcol-blade", "bladeColor"], ["gcol-tip", "tipColor"],
+    ["gsl-ao-base", "aoBase", 100], ["gsl-ao-power", "aoPower", 10],
+    ["gck-color-var", "colorVariation"], ["gsl-hue", "cvHueSpread", 100], ["gsl-sat", "cvSatSpread", 100],
+    ["gsl-dry", "cvDryAmount", 100], ["gcol-dry", "cvDryColor"],
+    ["gsl-blade-width", "bladeWidth", 100], ["gck-crossed", "crossed"], ["gsl-segments", "bladeYSegments", 1],
+    ["gsl-taper", "tipTaperStart", 100], ["gsl-clump-scale", "clumpScale", 10], ["gsl-clump-str", "clumpStrength", 100],
+    ["gsl-bend", "bendFocus", 10], ["gsl-stiffness", "stiffness", 100], ["gsl-max-angle", "maxAngle", 100],
+    ["gsl-lean", "naturalLean", 100], ["gsl-sky", "skyBlend", 100], ["gsl-cyl", "cylindrical", 100],
+    ["gsl-thick", "viewThicken", 100], ["gsl-density", "grassDensity", 100], ["gck-shadow", "receiveShadow"],
+    ["gsl-wind-speed", "windSpeed", 100], ["gsl-wind-str", "windStrength", 100], ["gsl-wind-angle", "windAngle", 1],
+    ["gsl-wind-gust", "windGust", 100], ["gsl-wind-wave", "windWaveScale", 100],
+    ["gcol-bss", "bssColor"], ["gsl-bss-int", "bssIntensity", 100], ["gsl-bss-pow", "bssPower", 10],
+    ["gsl-front-scat", "frontScatter", 100], ["gsl-rim", "rimSSS", 100],
+    ["gck-spec1", "specV1Enabled"], ["gsl-s1-int", "specV1Intensity", 100], ["gcol-s1", "specV1Color"],
+    ["gsl-s1-pow", "specV1Power", 10], ["gsl-s1-dirx", "specV1DirX", 100], ["gsl-s1-diry", "specV1DirY", 100],
+    ["gsl-s1-dirz", "specV1DirZ", 100],
+    ["gck-spec2", "specV2Enabled"], ["gsl-s2-int", "specV2Intensity", 100], ["gcol-s2", "specV2Color"],
+    ["gsl-s2-nscale", "specV2NoiseScale", 10], ["gsl-s2-nstr", "specV2NoiseStr", 100], ["gsl-s2-pow", "specV2Power", 10],
+    ["gsl-s2-tipbias", "specV2TipBias", 100], ["gsl-s2-dirx", "specV2DirX", 100], ["gsl-s2-diry", "specV2DirY", 100],
+    ["gsl-s2-dirz", "specV2DirZ", 100],
+    ["gck-slope", "slopeEnabled"], ["gsl-slope-min", "slopeMin", 100], ["gsl-slope-max", "slopeMax", 100],
+    ["gck-tint", "terrainTintEnabled"], ["gsl-tint-str", "terrainTintStrength", 100], ["gsl-tint-root", "terrainTintRootBias", 100],
+    ["gsl-lod-mid", "lodMidDistance", 1], ["gsl-lod-far", "lodFarDistance", 1], ["gsl-lod-max", "lodMaxDistance", 1],
+    ["gsl-lod-mega", "lodMegaMaxDistance", 1], ["gsl-lod-mid-seg", "lodMidSegments", 1], ["gsl-lod-far-seg", "lodFarSegments", 1],
+    ["gsl-lod-far-w", "lodFarBladeWidth", 100], ["gsl-lod-mega-seg", "lodMegaSegments", 1], ["gsl-lod-mega-w", "lodMegaBladeWidth", 100],
+    ["gsl-int-rad", "interactionRadius", 10], ["gsl-int-str", "interactionStrength", 100], ["gsel-int-mode", "interactionMode"],
+  ];
+
+  /** Grass look from a loaded project: state, panel, uniforms and blade geometry. */
+  function applyGrassState(saved) {
+    mergeKnownKeys(grassState, saved);
+    syncPanelControls(GRASS_PANEL_CONTROLS, grassState);
+    if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
+    if (cliffGrassRings) rebuildHybridGrassGeometries(cliffGrassRings, grassState);
+    grassTintDirty = true;
+    syncGrassUniforms();
+  }
 
   // ── Props system ───────────────────────────────────────────────────────────
   const propStore = new PropStore();
@@ -5849,6 +5953,11 @@ export async function startV3App(opts = {}) {
       grassDensity:  grassTerrainData.getDensitySnapshot(),
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
       susuki:    { ...susukiState },
+      cliffGrassDensity: grassTerrainData.getCliffDensitySnapshot(),
+      cliffPaint: cliffPaintMask.getSnapshot(),
+      // lodDebug is a view toggle, not the grass's look.
+      grass:     { ...grassState, lodDebug: undefined },
+      snowParams: Object.fromEntries(SNOW_LOOK_KEYS.map((k) => [k, snowSystem.params[k]])),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     downloadBuffer(buf, `project-${ts}.v3proj`);
@@ -5933,11 +6042,30 @@ export async function startV3App(opts = {}) {
     }
 
     if (d.snow && d.snowRes === SNOW_MAP_RES) snowMap.restoreSnapshot(d.snow);
+    // Older projects have no snow look: keep the current values.
+    if (d.snowParams) applySnowParams(d.snowParams);
+
+    // Grass look before any ring is built, so a fresh build starts from it.
+    if (d.grass) applyGrassState(d.grass);
 
     // Painted grass / susuki density layers (older projects simply lack them)
     if (d.grassDensity?.length === grassTerrainData.densityTex.image.data.length) {
       grassTerrainData.restoreDensitySnapshot(d.grassDensity);
       if (d.grassDensity.some((v) => v > 0)) void ensureGrassBuilt();
+    }
+    // Cliff paint and cliff-top grass: absent in a file means none, so a
+    // project without them clears what the previous scene painted.
+    if (d.cliffPaint?.length === cliffPaintMask.texture.image.data.length) {
+      cliffPaintMask.restoreSnapshot(d.cliffPaint);
+    } else {
+      cliffPaintMask.clearAll();
+    }
+    cliffPaintSystem.undoStack.length = 0;
+    cliffPaintSystem.redoStack.length = 0;
+    if (d.cliffGrassDensity?.length === grassTerrainData.cliffDensityTex.image.data.length) {
+      grassTerrainData.restoreCliffDensitySnapshot(d.cliffGrassDensity);
+    } else {
+      grassTerrainData.clearCliffDensity();
     }
     /*
      * The world's look. Merged PER KEY, and only for keys this build still has —
@@ -6054,6 +6182,10 @@ export async function startV3App(opts = {}) {
       rebakePlayerBvh();
       refreshPropCount();
     }
+    // The cliff-top surface cliff grass grows on is baked from the cliffs, so
+    // it is rebuilt here, once they are loaded, rather than stored.
+    if (grassTerrainData.hasCliffData) bakeCliffGrassSurface();
+    updateCliffGrassStatus();
 
     if (d.roads) roadSystem.importData(d.roads);
     if (d.splines) splineSys.importData(d.splines);
@@ -7720,6 +7852,9 @@ export async function startV3App(opts = {}) {
       get grassState() { return grassState; },
       get grassRings() { return grassRings; },
       get grassTintRT() { return grassTintRT; },
+      get cliffGrassRings() { return cliffGrassRings; },
+      cliffPaintMask,
+      snowSystem,
       get susukiSystem() { return susukiSystem; },
       renderer,
       terrainNormals,

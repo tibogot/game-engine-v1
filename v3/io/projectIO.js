@@ -9,8 +9,16 @@
  *   terrain   { worldSize, heightmapSize, splatSize, maxHeight }
  *             splatSize is absent in files written before it was configurable —
  *             those used splatRes = min(2048, max(256, heightmapSize / 2)).
- *   blobs     { heightmap, splat, snow, grassDensity, susukiDensity }
+ *   blobs     { heightmap, splat, snow, grassDensity, susukiDensity,
+ *               cliffGrassDensity, cliffPaint }
  *             → { offset, length } into the payload
+ *             cliffGrassDensity: grass painted on cliff tops (RGBA 512², .r).
+ *             The cliff-top SURFACE it grows on is not stored: it is baked
+ *             again from the loaded cliffs.
+ *             cliffPaint: terrain ground colour painted onto cliffs (RGBA 512²).
+ *   grass     grass appearance (the Grass panel: blade, colour, wind, SSS,
+ *             specular, slope, tint, LOD, interaction). Merged per key on load.
+ *   snowParams snow surface / trail / glitter look (the Snow panel sliders).
  *   splatRes / snowRes
  *   trees     { slots: [...slot meta...], instances: [[x,z,y,rotY,scale,slotIdx],…] }
  *   foliage   { slots: [...slot meta...], instances: [[x,z,y,rotY,scale,slotIdx,nx,nz],…] }
@@ -23,9 +31,10 @@
  *                                            UNCONFORMED base when it owns it)
  *   rivers2   river2System.exportData()     (River+ carve — heightmap blob is the
  *                                            UNCARVED base; load re-carves)
- *   environment { worldOcean }  the world's LOOK, as opposed to its shape. Only
- *             the ocean so far; light, sky, fog and post are the same gap and the
- *             same one-key-each change, and belong here when they are needed.
+ *   environment { worldOcean, look }  the world's LOOK, as opposed to its shape.
+ *             look = worldEnvironment.exportLook(): sky, sun, clouds, fog, lens
+ *             flare, Post FX, interior (tunnel/cave) lighting. Shadow quality
+ *             (CSM) is deliberately absent: a game owns it at boot.
  *   paintLayers  7 ground-paint slots: name, per-map { name, url } references,
  *             tiling / normal / AO / roughness strengths and auto-paint rules.
  *             A map from /textures is a URL; one imported from disk is an
@@ -74,7 +83,11 @@ export function encodeProjectFile({
   grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
   susukiDensity,        // Uint8Array (RGBA 512²) painted susuki coverage
   susuki,               // susuki appearance params (JSON)
-  groundTsl,            // procedural ground params (JSON)
+  cliffGrassDensity,    // Uint8Array (RGBA 512²) painted cliff-top grass coverage
+  cliffPaint,           // Uint8Array (RGBA 512²) terrain colour painted onto cliffs
+  grass,                // grass appearance params (JSON)
+  snowParams,           // snow look params (JSON)
+  groundTsl,           // procedural ground params (JSON)
   meadowTsl,            // paintable meadow TSL params (JSON)
   assets,               // [{ hash, name, type, bytes }] from projectAssets.collectFor()
 }) {
@@ -93,6 +106,8 @@ export function encodeProjectFile({
   addBlob("snow", snow);
   addBlob("grassDensity", grassDensity);
   addBlob("susukiDensity", susukiDensity);
+  addBlob("cliffGrassDensity", cliffGrassDensity);
+  addBlob("cliffPaint", cliffPaint);
   const assetList = [];
   for (const a of assets ?? []) {
     if (!a?.hash || !a.bytes) continue;
@@ -122,6 +137,8 @@ export function encodeProjectFile({
     environment: environment ?? null,
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
+    grass:    grass ?? null,
+    snowParams: snowParams ?? null,
     groundTsl: groundTsl ?? null,
     meadowTsl: meadowTsl ?? null,
     assets:   assetList,
@@ -193,6 +210,10 @@ export function decodeProjectFile(buffer) {
     grassDensity:  blob("grassDensity"),
     susukiDensity: blob("susukiDensity"),
     susuki:    manifest.susuki ?? null,
+    cliffGrassDensity: blob("cliffGrassDensity"),
+    cliffPaint: blob("cliffPaint"),
+    grass:     manifest.grass ?? null,
+    snowParams: manifest.snowParams ?? null,
     groundTsl: manifest.groundTsl ?? null,
     meadowTsl: manifest.meadowTsl ?? null,
     assets: (manifest.assets ?? [])

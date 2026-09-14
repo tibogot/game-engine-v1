@@ -392,10 +392,17 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
 
 ### v3's own gaps found in the comparison (do first — games load the level)
 
-84. **The .v3proj does not save everything.** Lost on reload: grass appearance
-    (~59 controls), cliff-top grass density, the cliffPaint mask, snow look and
-    deformation settings, shadow quality, interior lighting. A game loading
-    the level will not look like the editor.
+84. ~~The .v3proj does not save everything~~ — DONE 2026-09-14. Now saved:
+    grass appearance (`grass`, every panel control, merged per key), cliff-top
+    grass density and the cliffPaint mask (blobs; the cliff-top surface is
+    re-baked from the loaded cliffs), snow look (`snowParams`), and interior
+    lighting (in `environment.look`). A file without the masks clears them;
+    without `grass`/`snowParams` the current look stays. Shadow quality (CSM)
+    stays out on purpose: cascades can't change live on r184, so a game sets
+    it at boot (`startV3App({ csm })`). Also fixed: the Specular V2 Power
+    slider jumped 12 → ~120 on first touch (listener missed its /10).
+    Checked in the editor: author → save → scramble → load restores state,
+    panel and uniforms; `tools/projectLookSaveTest.mjs` guards the tables.
 85. **Undo gaps.** The toolbar Undo/Redo buttons only undo sculpt (Ctrl+Z
     follows the mode); roads and lakes have no undo at all.
 86. **Stale shortcuts and hidden modes.** Toolbar tooltips say Sculpt (S),
