@@ -438,9 +438,28 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     from v2 line numbers — running one would overwrite a v3 panel) and their
     `*PanelWidgets.txt` output. `tools/uiWidgetsTest.mjs` fails if a panel
     grows its own copy again.
-89. **Editable Inspector.** v2: click the sun, sky, water, road, river, prop in
-    the Scene list → editable properties. v3's Info tab is static text. The
-    most Unity-like piece v2 has.
+89. ~~Editable Inspector~~ — DONE 2026-09-15 (`v3/ui/inspectorPanel.js`). The
+    Info tab is now the Inspector: a Scene-list click or a View-mode viewport
+    click opens the object's properties there; a toolbar tool button goes
+    back to Tools. New "Environment" group in the Scene list (Sun & light,
+    Sky, Fog — not counted as objects). Per kind:
+    - Prop: position / rotation° / scale fields, Focus, Duplicate, Delete;
+      follows gizmo drags live. Multi-selection: count + Focus/Duplicate/Delete.
+    - Lake: level, center, size, Delete (lake undo). Tunnel/cave: length,
+      nodes, width/height/wall, Delete (tunnel undo). River: nodes, length.
+      Road: nodes, segments, bridges. Player start: position, facing, place
+      at camera, clear. Terrain: world/heightmap/splat facts. Groups: count.
+    - Sun & light, Sky (mode + time of day), Fog: the key World-tab values;
+      the World tab rebuilds before it is shown again after an edit here.
+    Every edit goes through the tool's own calls (same undo, rebuild, save);
+    "Edit in tool" opens the full panel. Selections made inside a tool
+    (right-click a prop) update it; switching tools does not.
+    Also fixed on the way: a prop GIZMO DRAG WAS NOT UNDOABLE (no snapshot at
+    drag start). `propSys.beginEdit/endEdit` now brackets gizmo drags and
+    Inspector fields as one step, none when nothing moved
+    (`tools/propEditUndoTest.mjs`). Checked in the editor with real list,
+    viewport, keyboard and toolbar input, incl. undo refreshing the Inspector.
+    Not yet: per-node river/road values, the sky mode switch, props' material.
 90. ~~Resizable panels~~ — DONE 2026-09-14 (`v3/ui/editorLayout.js`). Drag the
     inner edge of the Scene or right panel; double-click resets. Widths drive
     the grid's --left-w/--right-w, so the renderer and the stats overlay

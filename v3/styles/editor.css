@@ -76,6 +76,24 @@ body.panel-resizing #viewport,
 body.panel-resizing #hierarchy,
 body.panel-resizing #right-panel { pointer-events: none; }
 
+/* ── Inspector (v3/ui/inspectorPanel.js) ─────────────────────────────────── */
+.prop-numbers { display: flex; gap: 4px; width: 100%; }
+.prop-numbers .prop-num-input { flex: 1 1 0; min-width: 0; width: auto; }
+.inspector-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+  border-bottom: 1px solid var(--border);
+}
+.inspector-title .inspector-kind { margin-left: auto; font-weight: 400; font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); }
+.inspector-empty { padding: 14px 10px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+.inspector-actions { display: flex; gap: 4px; padding: 4px 8px 8px; }
+.inspector-actions .section-btn { margin-top: 0; }
+
 /* ── Status bar ──────────────────────────────────────────────────────────── */
 #status-bar {
   grid-column: 1 / -1;

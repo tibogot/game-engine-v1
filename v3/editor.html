@@ -114,8 +114,8 @@
       <!-- Right: tools / world / shortcuts -->
       <div id="right-panel">
         <div class="tab-bar">
-          <button class="tab-btn" data-tab="inspector">
-            <i data-lucide="info"></i> Info
+          <button class="tab-btn" data-tab="inspector" title="Properties of the object selected in the Scene list or the viewport">
+            <i data-lucide="info"></i> Inspector
           </button>
           <button class="tab-btn active" data-tab="tools">
             <i data-lucide="wrench"></i> Tools
@@ -125,42 +125,8 @@
           </button>
         </div>
 
-        <!-- Inspector — selected object properties -->
-        <div class="tab-content" id="tab-inspector">
-          <div class="inspector-section">
-            <div class="section-header">Terrain</div>
-            <div class="section-body">
-              <div class="prop-row">
-                <span class="prop-label">World</span>
-                <span class="insp-value" id="insp-world">2048 × 2048 m</span>
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Heightmap</span>
-                <span class="insp-value" id="insp-hmap">1024 × 1024</span>
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Splatmap</span>
-                <span class="insp-value" id="insp-splat">512 × 512</span>
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Max height</span>
-                <span class="insp-value" id="insp-maxh">500 m</span>
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">LOD levels</span>
-                <span class="insp-value" id="insp-lod">5</span>
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Undo steps</span>
-                <span class="insp-value">25</span>
-              </div>
-              <div class="prop-row">
-                <span class="prop-label">Backend</span>
-                <span class="insp-value accent">WebGPU · TSL</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <!-- Inspector — the selected object's properties (v3/ui/inspectorPanel.js) -->
+        <div class="tab-content" id="tab-inspector"></div>
 
         <!-- Tools -->
         <div class="tab-content active" id="tab-tools">

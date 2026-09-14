@@ -59,6 +59,35 @@ export class PropSystem {
     if (this._undoStack.length > this._maxUndo) this._undoStack.shift();
   }
 
+  /** Transforms of the selected props, as a string that changes when any of them moves. */
+  _selectionTransformKey() {
+    let s = "";
+    for (const idx of this.instancer.selectedIndices) {
+      const p = this.store.instances[idx];
+      if (p) s += `${p.id}:${p.px},${p.py},${p.pz},${p.rx},${p.ry},${p.rz},${p.sx},${p.sy},${p.sz};`;
+    }
+    return s;
+  }
+
+  /**
+   * Bracket a transform edit of the selection (a gizmo drag, an Inspector
+   * field) so it becomes ONE undo step — and none if nothing actually moved,
+   * e.g. a click on the gizmo that did not drag.
+   */
+  beginEdit() {
+    if (this._editBefore || !this.instancer.hasSelection) return;
+    this._editBefore = { snap: this.store.snapshot(), key: this._selectionTransformKey() };
+  }
+
+  endEdit() {
+    const before = this._editBefore;
+    this._editBefore = null;
+    if (!before || this._selectionTransformKey() === before.key) return false;
+    this._pushUndo(before.snap);
+    if (this.bvh) this.bvh.invalidate();
+    return true;
+  }
+
   _getActiveTypeIdx() {
     const slotIdx = this.propState.activeSlot;
     const slot = this.propSlots[slotIdx];

@@ -129,6 +129,7 @@ import { TUNNEL_DEFAULTS, CAVE_DEFAULTS } from "../tools/tunnelPath.js";
 import { buildTunnelPanel } from "../ui/buildTunnelPanel.js";
 import { createClickDetector, pickNearest, raycastMeshes, nearestXZ } from "./viewportPick.js";
 import { createSceneOutliner } from "../ui/sceneOutliner.js";
+import { createInspector } from "../ui/inspectorPanel.js";
 import { createLakeToolState } from "./state/lakeState.js";
 import { buildLakePanel } from "../ui/buildLakePanel.js";
 import { LakeSystem } from "../tools/lakeSystem.js";
@@ -2014,6 +2015,7 @@ export async function startV3App(opts = {}) {
   // Scene list (left panel); its per-frame hook is set once every system exists.
   let sceneOutliner = null;
   let _sceneListFrame = null;
+  let inspector = null;
   const lakeToolSlice = createLakeToolState();
   let lakeSystem = null;
   let lakeUi = null;
@@ -2331,10 +2333,24 @@ export async function startV3App(opts = {}) {
     setEditorMode(editorMode, { force: true });  // restore whatever panel was active
   }
 
+  // Picking a tool shows its panel, even if the Inspector tab was open.
   for (const btn of tbModeButtons) {
-    btn.addEventListener("click", () => setEditorMode(btn.dataset.mode));
+    btn.addEventListener("click", () => { setEditorMode(btn.dataset.mode); openRightTab("tools"); });
   }
   toolsModeSelect.addEventListener("change", () => setEditorMode(toolsModeSelect.value));
+
+  /** Switch the right panel to "tools", "inspector" or "world". */
+  function openRightTab(name) {
+    const btn = document.querySelector(`#right-panel .tab-btn[data-tab="${name}"]`);
+    if (btn && !btn.classList.contains("active")) btn.click();
+  }
+
+  // Inspector edits change world settings the World tab shows; it rebuilds
+  // (it binds values when built) the next time it is opened.
+  let _worldPanelStale = false;
+  document.querySelector('#right-panel .tab-btn[data-tab="world"]')?.addEventListener("click", () => {
+    if (_worldPanelStale) { _worldPanelStale = false; buildWorldPanelUi(); }
+  });
 
   tbPlay.addEventListener("click", (e) => {
     if (playMode.active) exitPlay();
@@ -2404,12 +2420,6 @@ export async function startV3App(opts = {}) {
   // ── Terrain size: toolbar label, inspector values, New Terrain dialog ──────
   const tbTerrainSize = document.getElementById("tb-terrain-size");
   tbTerrainSize.textContent = `${WORLD_SIZE} m · ${HEIGHTMAP_SIZE}²`;
-  document.getElementById("insp-world").textContent = `${WORLD_SIZE} × ${WORLD_SIZE} m`;
-  document.getElementById("insp-hmap").textContent  = `${HEIGHTMAP_SIZE} × ${HEIGHTMAP_SIZE}`;
-  document.getElementById("insp-splat").textContent =
-    `${SPLAT_RES} × ${SPLAT_RES} (${+(WORLD_SIZE / SPLAT_RES).toFixed(3)} m/texel)`;
-  document.getElementById("insp-maxh").textContent  = `${MAX_HEIGHT} m`;
-  document.getElementById("insp-lod").textContent   = String(LOD_LEVELS);
 
   const ntOverlay = document.getElementById("terrain-size-overlay");
   const ntWorld   = document.getElementById("nt-world");
@@ -2987,6 +2997,8 @@ export async function startV3App(opts = {}) {
   // Same as v2: disable orbit only while actively dragging the gizmo.
   tc.addEventListener("mouseDown", () => {
     if (tc.enabled) controls.enabled = false;
+    // A prop drag is one undo step (propSys.endEdit runs in _onGizmoDragEnd).
+    if (_gizmoTarget === "prop") propSys.beginEdit();
   });
   tc.addEventListener("mouseUp", () => {
     syncEditorOrbitEnabled();
@@ -5315,7 +5327,10 @@ export async function startV3App(opts = {}) {
   };
 
   _onGizmoDragEnd = () => {
-    if (_gizmoTarget === "prop") propSys.handleTransformEnd();
+    if (_gizmoTarget === "prop") {
+      propSys.handleTransformEnd();
+      propSys.endEdit();
+    }
   };
 
   let _propPreviewHitValid = false;
@@ -6306,6 +6321,8 @@ export async function startV3App(opts = {}) {
     onHistoryChange();
     console.log("[V3] Project loaded.");
     statusBar?.setMessage("Project loaded");
+    // Its key named an object of the previous scene (indices are reused).
+    inspector?.inspect(null);
   }
 
   /**
@@ -6989,7 +7006,10 @@ export async function startV3App(opts = {}) {
   renderer.domElement.addEventListener("mouseup", e => {
     if (e.button !== 0 || editorMode !== "view" || playMode.active || !_viewClick.up(e)) return;
     const best = pickInView(e);
-    if (best) best.source.select(best.hit);
+    if (best) {
+      best.source.select(best.hit);
+      if (inspector.inspect(currentSelectionKey())) openRightTab("inspector");
+    }
   });
 
   // ── Scene list (outliner) ─────────────────────────────────────────────────
@@ -7025,7 +7045,17 @@ export async function startV3App(opts = {}) {
 
   function sceneModel() {
     const groups = [];
-    groups.push({ key: "terrain", label: "Terrain", icon: "mountain", count: null, items: [] });
+    const inspected = inspector?.key ?? null;
+    // World settings, not objects: selectable for the Inspector, not counted.
+    groups.push({
+      key: "environment", label: "Environment", icon: "sun-moon", count: null, inTotal: false,
+      items: [
+        { key: "sun", label: "Sun & light", icon: "sun", selected: inspected === "sun" },
+        { key: "sky", label: "Sky", icon: "cloud-sun", selected: inspected === "sky" },
+        { key: "fog", label: "Fog", icon: "cloud-fog", selected: inspected === "fog" },
+      ],
+    });
+    groups.push({ key: "terrain", label: "Terrain", icon: "mountain", count: null, inTotal: false, items: [] });
 
     const byType = new Map();
     for (const p of propStore.instances) {
@@ -7111,7 +7141,7 @@ export async function startV3App(opts = {}) {
 
   function sceneSignature() {
     return [
-      editorMode, propStore.gen, propInstancer.selectedIds.join(","),
+      inspector?.key, editorMode, propStore.gen, propInstancer.selectedIds.join(","),
       propInstancer.hiddenTypes.size, propInstancer.hiddenIds.size,
       (tunnelSystem?.tunnels ?? []).map((t) => `${t.style}${t.nodes.length}${t.hidden ? "h" : ""}${(t._sampled?.length ?? 0) | 0}`).join(";"), tunnelSystem?.activeIndex,
       (riverV2System?.rivers ?? []).map((r) => `${r.nodes.length}${_hiddenMeshes.has(r) ? "h" : ""}`).join(";"), riverV2Slice.riverV2.activeRiverIndex,
@@ -7155,6 +7185,31 @@ export async function startV3App(opts = {}) {
       case "lake": setEditorMode("lake"); lakeSystem.setActiveIndex(i); lakeUi?.refresh(); break;
       case "roads": case "road": setEditorMode("road"); break;
       case "spawn": case "spawnPoint": setEditorMode("spawn"); break;
+      // Environment entries change no tool; they only open in the Inspector.
+    }
+  }
+
+  /** Scene list click: select it, and show it in the Inspector. */
+  function selectAndInspect(key) {
+    selectSceneObject(key);
+    // Selecting a prop that is part of a group keeps the group.
+    const k = key.startsWith("prop:") && propInstancer.selectionCount > 1 ? "propSelection" : key;
+    inspector.inspect(k);
+    openRightTab("inspector");
+  }
+
+  /** The Scene-list key of what the current tool has selected, or null. */
+  function currentSelectionKey() {
+    switch (editorMode) {
+      case "props":
+        if (propInstancer.selectionCount > 1) return "propSelection";
+        return propInstancer.hasSelection ? `prop:${propInstancer.selectedId}` : null;
+      case "tunnel": return tunnelSystem?.activeTunnel ? `tunnel:${tunnelSystem.activeIndex}` : null;
+      case "riverv2": return riverV2System?.rivers.length ? `river:${riverV2Slice.riverV2.activeRiverIndex | 0}` : null;
+      case "lake": return lakeSystem?.lakes.length ? `lake:${lakeToolSlice.lake.activeIndex | 0}` : null;
+      case "road": return roadSystem?.nodes.length ? "road" : null;
+      case "spawn": return spawnSystem.placed ? "spawnPoint" : null;
+      default: return null;
     }
   }
 
@@ -7243,11 +7298,93 @@ export async function startV3App(opts = {}) {
     container: document.getElementById("hierarchy"),
     getModel: sceneModel,
     signature: sceneSignature,
-    onSelect: selectSceneObject,
-    onFrame: (key) => { selectSceneObject(key); frameBounds(sceneObjectBounds(key)); },
+    onSelect: selectAndInspect,
+    onFrame: (key) => { selectAndInspect(key); frameBounds(sceneObjectBounds(key)); },
     onToggleHidden: toggleSceneHidden,
   });
-  _sceneListFrame = () => { _applyEditorHidden(); sceneOutliner.update(); };
+  // The Inspector follows selections made inside a tool too (right-click a
+  // prop, Shift+right-click a group, a new tunnel becoming active): when what
+  // the tool has selected changes, it shows the new selection. A selection
+  // going away clears it only if that was what it showed, so a Sun opened from
+  // the Scene list stays put.
+  // Switching tools is not a selection, so a mode change only re-baselines.
+  let _toolSelectionKey = null;
+  let _toolSelectionMode = null;
+  function _followToolSelection() {
+    const k = currentSelectionKey();
+    if (editorMode !== _toolSelectionMode) {
+      _toolSelectionMode = editorMode;
+      _toolSelectionKey = k;
+      return;
+    }
+    if (k === _toolSelectionKey) return;
+    const shown = inspector.key;
+    if (k) inspector.inspect(k);
+    else if (shown && shown === _toolSelectionKey) inspector.inspect(null);
+    _toolSelectionKey = k;
+  }
+  _sceneListFrame = () => {
+    _applyEditorHidden();
+    if (!playMode.active) _followToolSelection();
+    sceneOutliner.update();
+    inspector.refresh(performance.now());
+  };
+
+  // ── Inspector (right panel tab) ─────────────────────────────────────────────
+  inspector = createInspector({
+    container: document.getElementById("tab-inspector"),
+    deps: {
+      world: { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT, lodLevels: LOD_LEVELS },
+      env: {
+        light: worldToolState.light,
+        proceduralSky: worldToolState.proceduralSky,
+        fog: worldToolState.fog,
+        skyMode: () => worldToolState.skyMode,
+        setTimeOfDay: (t) => worldEnv?.setTimeOfDay(t),
+        syncFog: () => { worldEnv?.syncFog(); worldEnv?.driveFogSun(); },
+      },
+      props: {
+        store: propStore,
+        instancer: propInstancer,
+        propSys,
+        select: (idx) => { setEditorMode("props"); activatePropSelection(idx); },
+        duplicate: () => {
+          const idx = propSys.handleDuplicate();
+          if (idx != null) activatePropSelection(idx);
+          refreshPropCount();
+        },
+        remove: () => { propSys.handleDelete(); deactivatePropSelection(); refreshPropCount(); },
+        changed: () => {},
+      },
+      lakes: { system: lakeSystem, history: lakeHistory, slice: lakeToolSlice.lake, get ui() { return lakeUi; } },
+      tunnels: { system: tunnelSystem, get ui() { return tunnelUi; } },
+      rivers: { system: riverV2System },
+      road: { get system() { return roadSystem; } },
+      spawn: {
+        system: spawnSystem,
+        get ui() { return spawnUi; },
+        placeAtCamera: () => {
+          const t = controls.target;
+          spawnSystem.setPosition(t.x, t.z, Math.atan2(camera.position.x - t.x, camera.position.z - t.z));
+        },
+      },
+      groups: {
+        props: { label: "Props", mode: "props", count: () => propStore.instances.length },
+        tunnels: { label: "Tunnels & caves", mode: "tunnel", count: () => tunnelSystem?.tunnels.length ?? 0 },
+        rivers: { label: "Rivers", mode: "riverv2", count: () => riverV2System?.rivers.length ?? 0 },
+        lakes: { label: "Lakes", mode: "lake", count: () => lakeSystem?.lakes.length ?? 0 },
+        roads: { label: "Roads", mode: "road", count: () => (roadSystem?.nodes.length ? 1 : 0) },
+        spawn: { label: "Player start", mode: "spawn", count: () => (spawnSystem.placed ? 1 : 0) },
+        environment: { label: "Environment", mode: null, count: () => 3 },
+      },
+      frame: (key) => frameBounds(sceneObjectBounds(key)),
+      frameSelection: () => frameSelection(),
+      openTool: (mode) => { setEditorMode(mode); openRightTab("tools"); },
+      openTab: (name) => openRightTab(name),
+      worldEdited: () => { _worldPanelStale = true; },
+      onChange: () => sceneOutliner?.update(true),
+    },
+  });
 
   // ── Tunnel mode mouse events ──────────────────────────────────────────────
   // Click drops a node, Alt+click inserts one into the nearest span, dragging a

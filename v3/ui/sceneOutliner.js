@@ -3,7 +3,7 @@
  *
  * Pure DOM: the host hands it a model and callbacks, it draws groups and rows.
  *
- *   model = [{ key, label, icon, count, hidden?, canHide?, items: [
+ *   model = [{ key, label, icon, count, inTotal?, hidden?, canHide?, items: [
  *     { key, label, sub?, selected?, hidden?, canHide?, icon?, children?: { total, items } }
  *   ] }]
  *
@@ -51,7 +51,7 @@ function _icon(name) {
 export function createSceneOutliner({ container, getModel, signature, onSelect, onFrame, onToggleHidden }) {
   const list = container.querySelector(".tree-list") ?? container.appendChild(Object.assign(document.createElement("div"), { className: "tree-list" }));
   const header = container.querySelector(".panel-header span");
-  const expanded = new Set(["terrain", "props", "tunnels", "rivers", "lakes", "roads", "spawn"]);
+  const expanded = new Set(["environment", "terrain", "props", "tunnels", "rivers", "lakes", "roads", "spawn"]);
   let lastSig = null;
   let lastDraw = 0;
   let pending = false;
@@ -104,7 +104,7 @@ export function createSceneOutliner({ container, getModel, signature, onSelect, 
     const frag = document.createDocumentFragment();
     let total = 0;
     for (const g of model) {
-      total += g.count ?? g.items.length;
+      if (g.inTotal !== false) total += g.count ?? g.items.length;
       const open = expanded.has(g.key);
       frag.appendChild(row({
         key: g.key, label: g.label, sub: g.count != null ? String(g.count) : null, icon: g.icon, depth: 0,

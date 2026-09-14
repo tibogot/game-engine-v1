@@ -114,6 +114,49 @@ export function slider(parent, obj, key, opts) {
   return { row, refresh() { syncSlider(); syncNum(); } };
 }
 
+/**
+ * One to three number fields on one row, e.g. a position:
+ * `numbers(body, view, ["px", "py", "pz"], { label: "Position", step: 0.1 })`.
+ * For values with no sensible slider range (world coordinates). A field
+ * commits on Enter or blur, so one typed value is one `onChange` (one undo
+ * step). `refresh()` leaves the field being typed in alone.
+ */
+export function numbers(parent, obj, keys, opts) {
+  const { label, step = 0.01, min = -Infinity, max = Infinity, onChange, hint, fieldTitles = [] } = opts;
+  const { row, value } = _row(parent, label, hint);
+  const wrap = document.createElement("div");
+  wrap.className = "prop-numbers";
+  value.appendChild(wrap);
+  const inputs = keys.map((key, i) => {
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.className = "prop-num-input";
+    inp.step = String(step);
+    if (Number.isFinite(min)) inp.min = String(min);
+    if (Number.isFinite(max)) inp.max = String(max);
+    if (fieldTitles[i]) inp.title = fieldTitles[i];
+    inp.value = fmt(obj[key], step);
+    inp.addEventListener("change", () => {
+      const v = parseFloat(inp.value);
+      if (!Number.isFinite(v)) { inp.value = fmt(obj[key], step); return; }
+      obj[key] = Math.min(max, Math.max(min, v));
+      inp.value = fmt(obj[key], step);
+      onChange?.(key);
+    });
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") inp.blur(); });
+    wrap.appendChild(inp);
+    return inp;
+  });
+  return {
+    row,
+    refresh() {
+      keys.forEach((key, i) => {
+        if (document.activeElement !== inputs[i]) inputs[i].value = fmt(obj[key], step);
+      });
+    },
+  };
+}
+
 export function color(parent, obj, key, opts) {
   const { label, onChange, hint } = opts;
   const { row, value } = _row(parent, label, hint);
