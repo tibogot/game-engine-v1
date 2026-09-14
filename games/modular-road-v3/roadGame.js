@@ -226,6 +226,7 @@ import auditTrackUrl from "./audittest.json?url";
 import flipRampTrackUrl from "./flip-ramp-showcase.json?url";
 import bowlTrackUrl from "./bowl-showcase.json?url";
 import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
+import { installPassCull } from "./modularRoadPassCull.js";
 
 /** Cap on physics ticks per frame — a long stall must not queue a huge backlog. */
 const MAX_SIM_TICKS = 8;
@@ -667,6 +668,8 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   let _cityRainSurfaces = null;
   function onCityRebuilt(surfaces) {
     _cityRainSurfaces = surfaces;
+    // New meshes: the pass culler's enrolment is by object.
+    enrollCityPassCull();
     // THE VIADUCT IS IN THE DRIVE-SURFACE BVH, so a city rebuild changes what
     // the car can stand on. Deferred, like every other rebake — `bakeCollision`
     // only marks it stale and the next query builds it.
@@ -2117,6 +2120,59 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * is on, the engine sun's elevation through the same curve otherwise.
    */
   let city = null;
+
+  /*
+   * ── PER-PASS CULLING FOR THE CITY'S INSTANCED MESHES ───────────────────────
+   *
+   * Every city mesh is `frustumCulled = false`, so every caster went to the
+   * main pass and to both cascades whether or not that camera could see any
+   * of its instances — and the shadow pass is paid per submission, not per
+   * triangle. See modularRoadPassCull.js. Enrolled on every (re)build, and
+   * re-scanned now and then for meshes the city adds after the fact.
+   */
+  const passCull = installPassCull(renderer);
+  let _passCullScan = 0;
+  function enrollCityPassCull() {
+    passCull.reset();
+    if (city?.group) passCull.enrollTree(city.group);
+  }
+
+  /*
+   * ── FAR CASCADE AT HALF RATE (dev toggle, default OFF) ────────────────────
+   *
+   * The far cascade re-renders every other frame. Its lookup matrix is only
+   * updated when it renders, so the stale map is sampled with ITS OWN matrix
+   * — a shadow a frame late, never a shadow in the wrong place. What can show:
+   * a moving caster's far shadow stepping at 30 Hz. Measured ~0.7 ms of CPU.
+   * A switch so it can be judged by eye in the game before it is a default.
+   */
+  let farCascadeHalfRate = false;
+  let _farFlip = 0;
+  let _csmNode = null;
+  function csmNode() {
+    if (_csmNode?.lights?.length) return _csmNode;
+    _csmNode = null;
+    scene.traverse((o) => {
+      if (!_csmNode && o.isDirectionalLight && o.shadow?.shadowNode?.lights) _csmNode = o.shadow.shadowNode;
+    });
+    return _csmNode;
+  }
+  function syncFarCascade() {
+    const lights = csmNode()?.lights;
+    if (!lights?.length) return;
+    const far = lights[lights.length - 1].shadow;
+    if (!farCascadeHalfRate) {
+      if (!far.autoUpdate) far.autoUpdate = true;
+      return;
+    }
+    far.autoUpdate = false;
+    _farFlip ^= 1;
+    // Written BOTH ways: ShadowNode only clears needsUpdate when the depth
+    // texture's version did NOT move, and a render moves it — so a flag set
+    // once is never cleared by three and the cascade would render every frame.
+    far.needsUpdate = _farFlip === 1;
+  }
+  app.addPreRenderHook?.(syncFarCascade);
   let cityWanted = false;
   /** Are the buildings solid? Defaults ON: the collider is only ever built
    *  once the city itself is on (see syncCityCollision), so this costs nothing
@@ -2251,6 +2307,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       },
     });
     scene.add(city.group);
+    enrollCityPassCull();
     // Born into whatever weather is already on the track.
     city.setWet?.(roadLook.wetAmount ?? 0);
     syncCityCollision();
@@ -2424,6 +2481,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   function updateCity(dt) {
     if (!city || !cityWanted) return;
+    // Meshes the city adds after a build (async loads) join within ~2 s.
+    // Enrolment is idempotent, so the scan is a traversal and nothing else.
+    if (++_passCullScan >= 120) { _passCullScan = 0; passCull.enrollTree(city.group); }
     city.facade.nightAmount = cityNight();
     // The facade mirrors the sky analytically and casts its own relief
     // shadows, so it needs the same gradient the dome is painted with and the
@@ -9486,6 +9546,17 @@ ${e.message}`);
       /** Buildings solid, or drive-through. */
       setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
       getCityCollide: () => cityCollide,
+      /** Per-pass instanced culling (modularRoadPassCull.js): skip a city mesh in
+       *  a pass whose camera holds none of its instances. */
+      getPassCull: () => passCull.state.enabled,
+      setPassCull: (on) => { passCull.state.enabled = !!on; },
+      /** Small casters (bins, benches, AC units...) cast only near the camera. */
+      getShortSmallShadows: () => passCull.state.shadowCounts,
+      setShortSmallShadows: (on) => { passCull.state.shadowCounts = !!on; },
+      /** Far cascade re-rendered every other frame. */
+      getFarCascadeHalfRate: () => farCascadeHalfRate,
+      setFarCascadeHalfRate: (on) => { farCascadeHalfRate = !!on; },
+      passCull,
       reseedCity,
       getCityStats: () => city?.stats ?? null,
       /** The ground the car stands on at a world point — terrain, city street,
@@ -10397,6 +10468,17 @@ ${e.message}`);
     groundAt: (x, z) => terrainH(x, z),
     setCityCollide: (on) => { cityCollide = !!on; syncCityCollision(); },
     getCityCollide: () => cityCollide,
+    /** Per-pass instanced culling (modularRoadPassCull.js): skip a city mesh in
+     *  a pass whose camera holds none of its instances. */
+    getPassCull: () => passCull.state.enabled,
+    setPassCull: (on) => { passCull.state.enabled = !!on; },
+    /** Small casters (bins, benches, AC units...) cast only near the camera. */
+    getShortSmallShadows: () => passCull.state.shadowCounts,
+    setShortSmallShadows: (on) => { passCull.state.shadowCounts = !!on; },
+    /** Far cascade re-rendered every other frame. */
+    getFarCascadeHalfRate: () => farCascadeHalfRate,
+    setFarCascadeHalfRate: (on) => { farCascadeHalfRate = !!on; },
+    passCull,
     /* ── STREET SURFACE ────────────────────────────────────────────────────
      * The asphalt's own look — chips, wear, streak, relief, kerbs, paint.
      * `streetParams()` is the LIVE params bag (bind sliders to it by

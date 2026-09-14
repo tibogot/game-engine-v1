@@ -67,6 +67,18 @@ export const MOUNT_DEFAULTS = {
   escapeDepth: 1.2,
   escapeRange: 320,
   escapeMax: 4000,
+
+  /**
+   * SHADOW DISTANCE, metres from the camera to the building's surface. Units,
+   * balconies and escapes draw out to their ranges above, but each of the four
+   * meshes is a submission to both cascades. Buildings are already packed
+   * nearest-first, so the instances of buildings inside this reach form a
+   * prefix; that prefix is published as `userData.shadowCount` and the pass
+   * culler (modularRoadPassCull.js) casts only it. 0 = no limit.
+   */
+  acShadowRange: 30,
+  balconyShadowRange: 35,
+  escapeShadowRange: 35,
 };
 
 /**
@@ -332,6 +344,10 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
     }
     near.sort((a, b) => a.d2 - b.d2);
     let na = 0, nb = 0, ne = 0, ns = 0;
+    // Shadow prefixes: the fill count after the LAST building in reach. Near
+    // buildings come first, so this is a superset of "in reach", never less.
+    let sa = 0, sb = 0, se = 0, ss = 0;
+    const shA = M.acShadowRange, shB = M.balconyShadowRange, shE = M.escapeShadowRange;
     const acArr = acMesh.instanceMatrix.array, balArr = balMesh.instanceMatrix.array;
     const escArr = escLandMesh.instanceMatrix.array, escSArr = escStairMesh.instanceMatrix.array;
     // The capacity each mesh was BUILT with. Not `instanceMatrix.count`: the
@@ -366,7 +382,19 @@ export function createCityMounts({ buildings, archetypes, facadeParams, lotSize,
           escSArr.set(e, ns * 16); ns++;
         }
       }
+      const reach = Math.sqrt(pb.d2) - pb.r;
+      if (reach < shA) sa = na;
+      if (reach < shB) sb = nb;
+      if (reach < shE) { se = ne; ss = ns; }
     }
+    const setShadow = (mesh, range, n) => {
+      if (range > 0) mesh.userData.shadowCount = n;
+      else delete mesh.userData.shadowCount;
+    };
+    setShadow(acMesh, shA, sa);
+    setShadow(balMesh, shB, sb);
+    setShadow(escLandMesh, shE, se);
+    setShadow(escStairMesh, shE, ss);
     acMesh.count = na; acMesh.instanceMatrix.needsUpdate = true;
     balMesh.count = nb; balMesh.instanceMatrix.needsUpdate = true;
     escLandMesh.count = ne; escLandMesh.instanceMatrix.needsUpdate = true;

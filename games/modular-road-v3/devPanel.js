@@ -99,6 +99,31 @@ export function createRoadDevPanel({ app, game, params }) {
               <button class="prop-toggle" id="dv-city-collide" type="button" aria-label="City collision">${CHECK_SVG}</button>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Pass culling</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-pass-cull" type="button" aria-label="Per-pass culling">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Short small shadows</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-small-shadows" type="button" aria-label="Short shadows for small furniture">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Far cascade ½ rate</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-far-half" type="button" aria-label="Far shadow cascade at half rate">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Pass culling</b> skips a city mesh in any pass (main view or a shadow
+            cascade) whose camera sees none of its instances — should look identical.
+            <b>Short small shadows</b>: bins, benches, barriers, signs, AC units,
+            balconies and fire escapes cast only within ~30–35&nbsp;m.
+            <b>Far cascade ½ rate</b> redraws the distant shadows every other frame.
+          </div>
           <button class="action-btn" id="dv-city-reseed" type="button">Reseed city</button>
           <div class="dv-hint">
             A procedural skyline to build the track through. Saved <b>with the
@@ -6457,6 +6482,13 @@ export function createRoadDevPanel({ app, game, params }) {
   const cityCollideToggle = toggle(
     "dv-city-collide", game.getCityCollide?.() ?? true, (on) => game.setCityCollide?.(on),
   );
+  const passCullToggle = toggle("dv-pass-cull", game.getPassCull?.() ?? true, (on) => game.setPassCull?.(on));
+  const smallShadowsToggle = toggle(
+    "dv-small-shadows", game.getShortSmallShadows?.() ?? true, (on) => game.setShortSmallShadows?.(on),
+  );
+  const farHalfToggle = toggle(
+    "dv-far-half", game.getFarCascadeHalfRate?.() ?? false, (on) => game.setFarCascadeHalfRate?.(on),
+  );
   $("#dv-city-reseed")?.addEventListener("click", () => game.reseedCity?.());
 
   /* ── CITY STREET SURFACE ───────────────────────────────────────────────────
@@ -7957,6 +7989,9 @@ export function createRoadDevPanel({ app, game, params }) {
     // A track load switches the city on or off behind the panel's back.
     cityToggle.set(game.getCity?.() ?? false);
     cityCollideToggle.set(game.getCityCollide?.() ?? true);
+    passCullToggle.set(game.getPassCull?.() ?? true);
+    smallShadowsToggle.set(game.getShortSmallShadows?.() ?? true);
+    farHalfToggle.set(game.getFarCascadeHalfRate?.() ?? false);
     // Same for the dock and its sea.
     dockToggle.set(game.getDock?.() ?? false);
     oceanToggle.set(game.getOcean?.() ?? false);

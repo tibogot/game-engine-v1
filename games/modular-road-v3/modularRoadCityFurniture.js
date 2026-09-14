@@ -158,6 +158,16 @@ const LAMP_Z = 2.42;
 const LAMP_CUT = 2.34, LAMP_CUT_FULL = 2.38;
 
 export const FURNITURE_DEFAULTS = {
+  /**
+   * SHADOW DISTANCE FOR SMALL CASTERS, in metres from the camera. A bin's or
+   * a bench's shadow is a hand-sized smudge by 35 m, but each kind that casts
+   * is a submission to BOTH cascades wherever its instances are. The LOD tick
+   * packs the instances inside this range first and publishes
+   * `userData.shadowCount`; the pass culler (modularRoadPassCull.js) draws
+   * only those in shadow passes. The main view still draws the full range.
+   * 0 = no limit (every in-range instance casts, as before).
+   */
+  smallShadowRange: 35,
   /** Road lettering — BUS, STOP, SORTIE, TAXI, the bike symbol. One draw for
    *  all of it, off the atlas the viaduct already uses. */
   markings: true,
@@ -2120,18 +2130,21 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // Small, low and close to the road, so they go early. A cone at 200 m is
     // three pixels and there are more of them than of anything except rails.
     { mesh: coneMesh, list: cones, range: 230, casts: false },
-    { mesh: barrierMesh, list: barriers, range: 240, casts: true },
-    { mesh: binMesh, list: bins, range: 190, casts: true },
+    // `small`: casts only inside F.smallShadowRange — see FURNITURE_DEFAULTS.
+    { mesh: barrierMesh, list: barriers, range: 240, casts: true, small: true },
+    { mesh: binMesh, list: bins, range: 190, casts: true, small: true },
     { mesh: palletMesh, list: pallets, range: 170, casts: false },
     // Concrete reads from further than a cone does — that is rather the
     // point of using it — and a plate is flat, so it goes early.
-    { mesh: blockMesh, list: blocks, range: 300, casts: true },
+    { mesh: blockMesh, list: blocks, range: 300, casts: true, small: true },
     { mesh: plateMesh, list: plates, range: 160, casts: false },
-    { mesh: benchMesh, list: benches, range: 190, casts: true },
+    { mesh: benchMesh, list: benches, range: 190, casts: true, small: true },
     // Signs read from further than clutter does — that is their job.
     // Signs read from FURTHER than clutter: their whole job is to be legible
     // before you arrive, and 260 m cut them off inside a single block run.
-    { mesh: signMesh, list: roadSigns, range: 340, casts: false, attr: "aTile", key: "tile" },
+    // `casts: false` here means "frustum-cull it", not "no shadow" — the mesh
+    // itself casts (see THE BOARDS CAST above). A post's shadow is small.
+    { mesh: signMesh, list: roadSigns, range: 340, casts: false, small: true, attr: "aTile", key: "tile" },
     // Read from much further than a kerb sign: that is the whole point of
     // hanging it over the road.
     { mesh: gantryMesh, list: gantries, range: 700, casts: false, attr: "aTile", key: "tile" },
@@ -2184,6 +2197,23 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         if (cullFrustum && !view.inView(e.x, gyBase + 2.5, e.z, 4.0)) { e.idx = -1; continue; }
         if (i !== n) { const t = list[n]; list[n] = e; list[i] = t; }
         n++;
+      }
+      // SHADOW RANGE FIRST: a second partition of the drawn prefix, so the
+      // instances that cast are a prefix of the ones that draw.
+      const sr = k.small ? (F.smallShadowRange ?? 0) : 0;
+      if (sr > 0) {
+        const s2 = sr * sr;
+        let ns = 0;
+        for (let i = 0; i < n; i++) {
+          const e = list[i];
+          const dx = e.x - cam.x, dz = e.z - cam.z;
+          if (dx * dx + dz * dz >= s2) continue;
+          if (i !== ns) { const t = list[ns]; list[ns] = e; list[i] = t; }
+          ns++;
+        }
+        k.mesh.userData.shadowCount = ns;
+      } else if (k.mesh.userData.shadowCount != null) {
+        delete k.mesh.userData.shadowCount;
       }
       /*
        * ── PER-INSTANCE DATA MOVES WITH ITS ENTRY ──────────────────────────
