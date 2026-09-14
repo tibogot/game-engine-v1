@@ -21,9 +21,8 @@ const TMP = join(ROOT, `.bm.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, FIXED_DT, TIRE } = await import(pathToFileURL(TMP).href);
+const { Vehicle, FIXED_DT, TIRE } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
-unlinkSync(TMP);
 
 let fail = 0;
 const check = (n, c, d = "") => {

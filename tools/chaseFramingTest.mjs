@@ -221,11 +221,10 @@ const TMP = join(ROOT, `.chasefr.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, FIXED_DT } = await import(pathToFileURL(TMP).href);
+const { Vehicle, FIXED_DT } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
 const { buildPiece, pieceParams } = await import(
   pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadKit.js")).href);
-unlinkSync(TMP);
 
 // Headless: no renderer, so strip the mesh building.
 Vehicle.prototype._buildMeshes = function () {

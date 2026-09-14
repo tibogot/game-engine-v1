@@ -29,8 +29,7 @@ const TMP = join(ROOT, `.flipramp.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, WHEEL, TIRE, FIXED_DT } = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const { Vehicle, WHEEL, TIRE, FIXED_DT } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 const { PIECE_BY_ID, PIECE_PARAM_DEFAULTS, FOLLOW_ROAD } =
   await import(new URL("../games/modular-road-v3/modularRoadKit.js", import.meta.url).href);

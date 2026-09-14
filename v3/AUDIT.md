@@ -41,8 +41,14 @@ the game.
 5. **Per-layer tint and UV rotation**, to reuse one texture twice.
 6. **Roughness and normals at layer edges** still mix linearly (only visible on
    photo textures).
-7. **Splat size allowed up to 4096.** Paint is CPU-side, so that is 64 MB per
-   layer per stroke. Cap at 2048, or measure first.
+7. ~~Splat size allowed up to 4096~~ — CAPPED at 2048 2026-09-14, measured
+   first: at 4096 a stamp costs 30 ms CPU (7 ms at 2048), a stroke start
+   24-70 ms, ~300 MB of CPU copies. Older 4096 configs/projects clamp or
+   resample to 2048.
+7b. **Every paint stamp re-uploads both whole splat layers.** Measured at 2048:
+   painting frames 23 ms median (16.7 idle), p90 29 ms, and a 50 ms hitch at
+   stroke start (three full-size copies for undo). Fix: upload only the
+   stamp's rectangle, and copy only the stroke's rectangle for undo.
 8. **Top-N layer sampling.** A fully painted world costs 4.5 ms because all 7
    layers are read. Only worth it once worlds are heavily painted.
 9. **Procedural slider edits have no undo.**
@@ -76,8 +82,10 @@ the game.
     / height offset.
 14. **Non-destructive edit layers** like Unreal's. Large; roads and rivers
     already do this per tool.
-15. **Modifier keys in the hints** (Shift lowers, Ctrl smooths, Alt flattens),
-    since Unity and Unreal use different ones.
+15. ~~Modifier keys in the hints~~ — DONE 2026-09-14. The sculpt panel
+    already had them; it now also lists Shift/Alt+scroll. The ? overlay was
+    sculpt-only and out of date: rewritten by group (camera, sculpt, every
+    brush, props, mode keys, project), each checked against the key handlers.
 
 ## Grass and vegetation
 
@@ -136,8 +144,10 @@ the game.
 32. **Texture compression.** Paint layers use ~74 MB of VRAM; KTX2 would cut it
     for the games.
 33. **City builder** — its own 4-phase track.
-34. **Housekeeping:** test harnesses leave `.name.PID.mjs` temp files when
-    interrupted (a try/finally would stop it).
+34. ~~Housekeeping: leftover `.name.PID.mjs` temp files~~ — DONE 2026-09-14.
+    `runAll.mjs` already swept copies a killed run left; now all 48 harnesses
+    delete their copy even when the import throws (`.finally`). Full lane
+    158/158, 0 leftovers.
 
 ## Props and instancing (InstancedMesh2 study, measured 2026-09-14)
 

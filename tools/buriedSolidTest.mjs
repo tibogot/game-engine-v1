@@ -31,9 +31,8 @@ const TMP = join(ROOT, `.buriedSolidTest.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(SRC, "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, FIXED_DT, SOLID } = await import(pathToFileURL(TMP).href);
+const { Vehicle, FIXED_DT, SOLID } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
-unlinkSync(TMP);
 
 Vehicle.prototype._buildMeshes = function () {
   this.group = new THREE.Group();

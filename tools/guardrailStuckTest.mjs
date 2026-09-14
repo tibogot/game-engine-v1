@@ -20,8 +20,7 @@ const TMP = join(ROOT, `.rail.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, STUCK, FIXED_DT } = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const { Vehicle, STUCK, FIXED_DT } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 let fail = 0;
 const check = (n, c, d = "") => { console.log(`${c ? "PASS" : "FAIL"}  ${n}${d ? "  — " + d : ""}`); if (!c) fail++; };

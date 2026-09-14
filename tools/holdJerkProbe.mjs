@@ -32,8 +32,7 @@ const TMP = join(ROOT, `.holdjerk.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const V = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const V = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 const { Vehicle, WHEEL, FIXED_DT, ROAD_HOLD, CHASSIS, GRAVITY } = V;
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
 const { createVehicleGround } = await import(

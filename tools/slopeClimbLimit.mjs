@@ -16,8 +16,7 @@ writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "ut
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
 const { Vehicle, TIRE, AERO, CHASSIS, GRAVITY, FIXED_DT, DRIVETRAIN } =
-  await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+  await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 const D2R = 1 / 57.2958;
 

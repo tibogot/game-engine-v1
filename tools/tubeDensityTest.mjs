@@ -32,8 +32,7 @@ const TMP = join(ROOT, `.tubedens.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, WHEEL, FIXED_DT } = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const { Vehicle, WHEEL, FIXED_DT } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 const kit = await import(new URL("../games/modular-road-v3/modularRoadKit.js", import.meta.url).href);
 const { buildPiece, pieceParams, roadParams, guardrailParams, initialConnector, PIECE_BY_ID, PIECE_CATALOG } = kit;

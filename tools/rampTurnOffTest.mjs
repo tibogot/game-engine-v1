@@ -20,8 +20,7 @@ const TMP = join(ROOT, `.rampTurnOff.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, WHEEL, FIXED_DT } = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const { Vehicle, WHEEL, FIXED_DT } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
 const parkour = await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadParkour.js")).href);

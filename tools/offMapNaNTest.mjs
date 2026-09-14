@@ -47,8 +47,7 @@ const TMP = join(ROOT, `.om.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, FIXED_DT } = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const { Vehicle, FIXED_DT } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 Vehicle.prototype._buildMeshes = function () {
   this.group = new THREE.Group(); this.chassisMesh = new THREE.Object3D();

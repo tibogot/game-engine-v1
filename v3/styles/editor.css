@@ -635,6 +635,16 @@ html, body {
   min-width: 240px;
 }
 #help-overlay.visible { display: block; }
+#help-overlay { max-width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - var(--toolbar-h) - 24px); overflow-y: auto; }
+.help-group {
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text);
+}
+.help-group:first-child { margin-top: 0; }
 
 .help-overlay-title {
   font-size: 10px;

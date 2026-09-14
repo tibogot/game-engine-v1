@@ -32,9 +32,8 @@ writeFileSync(TMP, readFileSync(SRC, "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
 const { CHASSIS, CHASSIS_HULL, DECK_CONTACT, DECK, ROOF } =
-  await import(pathToFileURL(TMP).href);
+  await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
-unlinkSync(TMP);
 
 let fail = 0;
 const check = (name, cond, detail = "") => {

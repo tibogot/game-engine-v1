@@ -42,7 +42,7 @@ writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "ut
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
 const { Vehicle, FIXED_DT, ROAD_HOLD, CHASSIS, GRAVITY, TIRE, WHEEL } =
-  await import(pathToFileURL(TMP).href);
+  await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
 const {
   buildPiece, pieceParams, isFollowRoad, FOLLOW_ROAD,
@@ -50,7 +50,6 @@ const {
 } = await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadKit.js")).href);
 const { CATEGORY_PRESETS } = await import(
   pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadBuilder.js")).href);
-unlinkSync(TMP);
 
 Vehicle.prototype._buildMeshes = function () {
   this.group = new THREE.Group(); this.chassisMesh = new THREE.Object3D();

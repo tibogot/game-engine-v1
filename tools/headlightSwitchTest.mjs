@@ -37,8 +37,7 @@ writeFileSync(TMP, readFileSync(SRC, "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
 
-const { Vehicle, HEADLIGHTS } = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const { Vehicle, HEADLIGHTS } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 let failures = 0;
 function check(name, cond, detail = "") {

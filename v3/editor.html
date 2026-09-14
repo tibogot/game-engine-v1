@@ -518,7 +518,7 @@
                 </div>
               </div>
 
-              <p class="mode-hint">Hold: Shift lower · Ctrl smooth · Alt flatten</p>
+              <p class="mode-hint">Hold while sculpting: <kbd>Shift</kbd> lower · <kbd>Ctrl</kbd> smooth · <kbd>Alt</kbd> flatten<br><kbd>Shift</kbd>+scroll brush size · <kbd>Alt</kbd>+scroll strength</p>
             </div>
           </div>
 
@@ -2222,17 +2222,25 @@
     <!-- Floating shortcuts / docs overlay (toggled by toolbar ? button) -->
     <div id="help-overlay">
       <div class="help-overlay-title">Shortcuts</div>
+      <!-- These modifiers differ from Unity and Unreal, so they are spelled out. -->
       <div class="help-block" style="padding:0">
-        <div><kbd>LMB</kbd> sculpt (sticky tool)</div>
-        <div><kbd>Shift</kbd>+<kbd>LMB</kbd> lower</div>
-        <div><kbd>Ctrl</kbd>+<kbd>LMB</kbd> smooth</div>
-        <div><kbd>Alt</kbd>+<kbd>LMB</kbd> flatten</div>
-        <div><kbd>Shift</kbd>+<kbd>Scroll</kbd> brush size</div>
-        <div><kbd>Alt</kbd>+<kbd>Scroll</kbd> strength</div>
-        <div><kbd>LMB</kbd> / <kbd>MMB</kbd> orbit (view) · <kbd>RMB</kbd> pan · <kbd>Scroll</kbd> zoom</div>
-        <div><kbd>N</kbd> player start · click to place, drag to aim</div>
-        <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</div>
-        <div><kbd>Ctrl</kbd>+<kbd>S</kbd> save</div>
+        <div class="help-group">Camera</div>
+        <div><kbd>LMB</kbd> / <kbd>MMB</kbd> orbit (View) · <kbd>RMB</kbd> pan · <kbd>Scroll</kbd> zoom</div>
+        <div><kbd>Shift</kbd>+<kbd>F</kbd> frame the selection · click an object in View to select it</div>
+        <div class="help-group">Sculpt</div>
+        <div><kbd>LMB</kbd> the chosen tool · hold <kbd>Shift</kbd> lower · <kbd>Ctrl</kbd> smooth · <kbd>Alt</kbd> flatten</div>
+        <div class="help-group">Every brush (sculpt, paint, grass, trees, foliage, snow…)</div>
+        <div><kbd>Shift</kbd>+<kbd>Scroll</kbd> brush size · <kbd>Alt</kbd>+<kbd>Scroll</kbd> strength</div>
+        <div><kbd>Alt</kbd>+paint erases (paint, trees, foliage, props, susuki, snow; on Hole: fills back in) · grass uses its Erase box</div>
+        <div class="help-group">Props</div>
+        <div><kbd>RMB</kbd> select · <kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> move / rotate / scale · <kbd>Q</kbd> local / world</div>
+        <div><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> copy, paste at the cursor · <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect</div>
+        <div class="help-group">Modes (press again to return to View)</div>
+        <div><kbd>V</kbd> View · <kbd>I</kbd> Props · <kbd>T</kbd> Trees · <kbd>F</kbd> Foliage · <kbd>U</kbd> Susuki · <kbd>L</kbd> Lakes</div>
+        <div><kbd>H</kbd> River v2 · <kbd>O</kbd> Tunnels (<kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate) · <kbd>K</kbd> Splines · <kbd>N</kbd> Player start</div>
+        <div><kbd>P</kbd> play · <kbd>Shift</kbd>+<kbd>P</kbd> play immersive · <kbd>Esc</kbd> leave play</div>
+        <div class="help-group">Project</div>
+        <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo (in the current mode) · <kbd>Ctrl</kbd>+<kbd>S</kbd> save</div>
       </div>
     </div>
 

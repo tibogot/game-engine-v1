@@ -3,7 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import Stats from "stats-gl";
 import { texture, uniform, float, mix, positionWorld, vec2, vec3, length, smoothstep, mx_noise_float } from "three/tsl";
-import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
+import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, TERRAIN_SIZE_LIMITS, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
 import { createTerrainLOD, LOD_LEVELS } from "../terrain/terrainLOD.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
@@ -2396,7 +2396,8 @@ export async function startV3App(opts = {}) {
     return Math.min(4096, Math.max(256, Number(ntWorld.value) / Number(ntDetail.value)));
   }
   function ntComputedSplat() {
-    return Math.min(4096, Math.max(256, Math.round(Number(ntWorld.value) / Number(ntSplat.value))));
+    const { min, max } = TERRAIN_SIZE_LIMITS.splatSize;
+    return Math.min(max, Math.max(min, Math.round(Number(ntWorld.value) / Number(ntSplat.value))));
   }
   function syncNtSummary() {
     const res = ntComputedRes();
@@ -2409,7 +2410,7 @@ export async function startV3App(opts = {}) {
       `Heightmap ${res} × ${res} (${eff} m/texel) · ~${mb} MB GPU height data`
       + (res >= 4096 ? " — heavy: desktop GPU recommended" : "")
       + `\nSplatmap ${sRes} × ${sRes} (${sEff} m/texel) · ~${sMb} MB`
-      + (sMb >= 100 ? " — large; 0.5 m/texel is usually enough" : "");
+      + (sEff > Number(ntSplat.value) ? ` — capped at ${sRes}, painting slows down past it` : "");
   }
   ntSummary.style.whiteSpace = "pre-line";
   ntWorld .addEventListener("change", syncNtSummary);

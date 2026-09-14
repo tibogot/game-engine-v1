@@ -37,8 +37,7 @@ const TMP = join(ROOT, `.underpassDriveTest.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(SRC, "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, FIXED_DT, CHASSIS_HULL } = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const { Vehicle, FIXED_DT, CHASSIS_HULL } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 Vehicle.prototype._buildMeshes = function () {
   this.group = new THREE.Group();

@@ -16,7 +16,11 @@ const CONFIG_KEY = "v3.terrainConfig";
 export const TERRAIN_SIZE_LIMITS = {
   worldSize:     { min: 512,  max: 16384 },
   heightmapSize: { min: 256,  max: 4096 },
-  splatSize:     { min: 256,  max: 4096 },
+  // 2048, not 4096. Painting is CPU-side and re-uploads both splat layers per
+  // stamp. Measured 2026-09-14 at 4096: 30 ms per stamp (7 ms at 2048), a
+  // 24-70 ms stroke start, ~300 MB of CPU copies. An older 4096 config or
+  // project is clamped / resampled to 2048 on load.
+  splatSize:     { min: 256,  max: 2048 },
   maxHeight:     { min: 100,  max: 2000 },
 };
 

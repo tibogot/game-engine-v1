@@ -36,8 +36,7 @@ const TMP2 = TMP;
 const {
   Vehicle, CHASSIS, HEADLIGHTS, TAILLIGHTS, CHASSIS_GLB_LIGHTS, TIRE, WHEEL, WHEEL_LOCAL,
   WHEEL_LAYOUT, BODYLEAN,
-} = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+} = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 let fail = 0;
 const check = (n, c, d = "") => { console.log(`${c ? "PASS" : "FAIL"}  ${n}${d ? "  — " + d : ""}`); if (!c) fail++; };

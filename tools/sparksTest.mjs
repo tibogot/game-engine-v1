@@ -67,8 +67,7 @@ writeFileSync(TMP, readFileSync(join(ROOT, "games/modular-road-v3/modularRoadSpa
   .replace(/^import \* as THREE from "three";$/m, 'import * as THREE from "three/webgpu";')
   .replace(/^import \{ output \}.*$/m, "const output = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 const scene = new THREE.Scene();
 const sparks = new ModularRoadSparks(scene, { ...DEFAULT_SPARK_SETTINGS });

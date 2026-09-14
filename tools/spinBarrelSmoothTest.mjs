@@ -35,8 +35,7 @@ writeFileSync(TMP, readFileSync(join(ROOT, "games/modular-road-v3/modularRoadMov
     "const ELEVATOR = { liftSpeed: 1, rise: 8 };"
     + " const makeElevator = () => ({ root: new THREE.Group(), bind: {} });")
   .replace(/MeshStandardNodeMaterial/g, "MeshStandardMaterial"));
-const mover = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const mover = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 const CATALOG = mover.MOVER_CATALOG ?? Object.values(mover).find((v) => Array.isArray(v));
 let fail = 0;

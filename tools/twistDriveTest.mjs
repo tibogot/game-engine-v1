@@ -32,8 +32,7 @@ const TMP = join(ROOT, `.twist.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, WHEEL, FIXED_DT, SURFACE_GRIP } = await import(pathToFileURL(TMP).href);
-unlinkSync(TMP);
+const { Vehicle, WHEEL, FIXED_DT, SURFACE_GRIP } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 const { buildPiece, pieceParams, initialConnector } =
   await import(new URL("../games/modular-road-v3/modularRoadKit.js", import.meta.url).href);
