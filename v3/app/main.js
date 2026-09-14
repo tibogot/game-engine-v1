@@ -22,6 +22,7 @@ import { createProceduralGenPass } from "../terrain/proceduralGenGpu.js";
 import { erodeDroplets, buildErosionKernel, smoothHeights } from "../terrain/globalErosion.js";
 import { streamPowerErode, createStreamPowerScratch } from "../terrain/streamPowerErosion.js";
 import { initEditorShell } from "../ui/editorShell.js";
+import { initPanelSplitters, createStatusBar } from "../ui/editorLayout.js";
 import { mergeKnownKeys } from "./state/mergeKnownKeys.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
@@ -193,6 +194,14 @@ async function createWebGpuDevice() {
 
 export async function startV3App(opts = {}) {
   initEditorShell();
+
+  // Editor chrome (only the editor page has it; games boot without): drag the
+  // panel edges, status bar along the bottom. Before the renderer's first
+  // size, so the viewport starts at the remembered panel widths.
+  const appEl = document.getElementById("app");
+  const statusBarEl = document.getElementById("status-bar");
+  if (appEl && document.getElementById("hierarchy")) initPanelSplitters(appEl);
+  const statusBar = statusBarEl ? createStatusBar(statusBarEl) : null;
 
   const viewport = document.getElementById("viewport");
   const genParams = { ...DEFAULT_GEN };
@@ -3254,6 +3263,16 @@ export async function startV3App(opts = {}) {
       triPanel.update(ktris, _maxTri, 0);
       triPanel.updateGraph(ktris, _maxTri);
       stats.update();
+      statusBar?.update({
+        now,
+        frameMs: perf.fps > 0 ? 1000 / perf.fps : perf.frameMs,
+        draws,
+        triangles: ri.triangles ?? 0,
+        camera: camera.position,
+        fly: !!editorCamera?.flyMode,
+        // The dropdown's label without its "(key)" hint.
+        modeLabel: playMode.active ? "Playing" : (toolsModeSelect.selectedOptions[0]?.textContent ?? editorMode).replace(/\s*\([^)]*\)\s*$/, ""),
+      });
     } catch (_) { /* stats overlay must never block the viewport */ }
   });
 
@@ -6027,6 +6046,7 @@ export async function startV3App(opts = {}) {
     });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     downloadBuffer(buf, `project-${ts}.v3proj`);
+    statusBar?.setMessage(`Project saved — project-${ts}.v3proj (${(buf.byteLength / 1048576).toFixed(1)} MB)`);
   }
 
   /** Best-effort reload of tree slot assets (presets/GLBs) from /models. */
@@ -6285,6 +6305,7 @@ export async function startV3App(opts = {}) {
 
     onHistoryChange();
     console.log("[V3] Project loaded.");
+    statusBar?.setMessage("Project loaded");
   }
 
   /**
@@ -6349,7 +6370,9 @@ export async function startV3App(opts = {}) {
       await applyProjectData(d);
     } catch (err) {
       console.error(err);
-      window.alert(err instanceof Error ? err.message : "Failed to load file.");
+      const message = err instanceof Error ? err.message : "Failed to load file.";
+      statusBar?.setMessage(`Load failed: ${message}`, { kind: "error", holdMs: 0 });
+      window.alert(message);
     }
   }
 

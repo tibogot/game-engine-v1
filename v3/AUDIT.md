@@ -441,8 +441,19 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
 89. **Editable Inspector.** v2: click the sun, sky, water, road, river, prop in
     the Scene list → editable properties. v3's Info tab is static text. The
     most Unity-like piece v2 has.
-90. **Resizable panels** (v2 left/right/bottom splitters; v3 widths are fixed).
-91. **Status bar:** fps/ms, camera XYZ, triangles, status text.
+90. ~~Resizable panels~~ — DONE 2026-09-14 (`v3/ui/editorLayout.js`). Drag the
+    inner edge of the Scene or right panel; double-click resets. Widths drive
+    the grid's --left-w/--right-w, so the renderer and the stats overlay
+    follow; remembered per browser; a panel keeps 160/240 px and the viewport
+    never drops under 320 px (also when the window shrinks). Hidden in
+    immersive play. (v2's bottom file-browser splitter has no v3 panel yet.)
+91. ~~Status bar~~ — DONE 2026-09-14. Message on the left ("Project saved —
+    name (MB)", "Project loaded", load errors in red), then mode, camera XYZ
+    (FLY in fly mode), draw calls, triangles and frame time with a
+    green/amber/red dot; written 4×/s. No GPU ms on purpose: main.js documents
+    the stats-gl GPU number as unreliable, so it stays only in the overlay.
+    Hidden in immersive play. Checked in the editor (drag, clamp, reset,
+    reload, immersive, screenshot); `tools/editorLayoutTest.mjs`.
 92. **Scene list search + right-click menu** (focus, delete, remove all), and
     lighting items (sun, sky, lens flare) in the list. Sliders that resync
     when state changes elsewhere (v3 passes a no-op `refreshLiveSliders`).

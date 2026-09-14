@@ -24,6 +24,7 @@
   --left-w: 220px;
   --right-w: 300px;
   --toolbar-h: 36px;
+  --status-h: 22px;
 }
 
 html, body {
@@ -39,10 +40,73 @@ html, body {
 #app {
   display: grid;
   grid-template-columns: var(--left-w) 1fr var(--right-w);
-  grid-template-rows: var(--toolbar-h) 1fr;
+  grid-template-rows: var(--toolbar-h) 1fr var(--status-h);
   height: 100%;
   width: 100%;
+  position: relative;
 }
+
+/* ── Panel edges (drag to resize; v3/ui/editorLayout.js) ─────────────────── */
+.panel-splitter {
+  position: absolute;
+  top: var(--toolbar-h);
+  bottom: var(--status-h);
+  width: 7px;
+  z-index: 30;
+  cursor: col-resize;
+  touch-action: none;
+}
+.panel-splitter-left  { left: calc(var(--left-w) - 4px); }
+.panel-splitter-right { right: calc(var(--right-w) - 4px); }
+.panel-splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background 0.12s;
+}
+.panel-splitter:hover::after,
+.panel-splitter.active::after { background: var(--accent); width: 2px; left: 2px; }
+/* While dragging, the canvas and panels must not steal the pointer or select text. */
+body.panel-resizing { cursor: col-resize; }
+body.panel-resizing #viewport,
+body.panel-resizing #hierarchy,
+body.panel-resizing #right-panel { pointer-events: none; }
+
+/* ── Status bar ──────────────────────────────────────────────────────────── */
+#status-bar {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 10px;
+  background: var(--bg-dark);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+}
+#status-bar .status-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+}
+#status-bar .status-dot[data-level="slow"] { background: #e0a030; }
+#status-bar .status-dot[data-level="bad"]  { background: #d9534f; }
+#status-bar .status-message { color: var(--text); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#status-bar .status-message.error { color: #ff7b72; }
+#status-bar .status-spacer { flex: 1 1 auto; }
+#status-bar .status-cam,
+#status-bar .status-draws,
+#status-bar .status-tris,
+#status-bar .status-frame { font-family: var(--font-mono); }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 #toolbar {
@@ -999,7 +1063,9 @@ html, body {
 }
 #app.play-fullscreen #toolbar,
 #app.play-fullscreen #hierarchy,
-#app.play-fullscreen #right-panel {
+#app.play-fullscreen #right-panel,
+#app.play-fullscreen #status-bar,
+#app.play-fullscreen .panel-splitter {
   display: none !important;
 }
 #app.play-fullscreen #viewport {
@@ -1073,7 +1139,7 @@ body.play-immersive-cursor #viewport canvas {
 /* Play mode hint bar (shows while pointer is locked) */
 #play-hint {
   position: fixed;
-  bottom: 28px;
+  bottom: calc(var(--status-h) + 10px);
   left: calc(var(--left-w) + 20px);
   right: calc(var(--right-w) + 20px);
   text-align: center;
