@@ -10,6 +10,7 @@
     "dev:surface": "vite --open /games/modular-road-v3/road-surface-lab.html",
     "dev:tube": "vite --open /games/modular-road-v3/tube-lab.html",
     "dev:shavings": "vite --open /games/wood-shavings/index.html",
+    "dev:roads": "vite --open /v3/road-lab.html",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node tools/runAll.mjs --fast",

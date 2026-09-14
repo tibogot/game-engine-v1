@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Lane-based Roads</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0f1317; color: #dfe6ea;
+             font: 13px/1.45 system-ui, sans-serif; }
+      #wrap { display: grid; grid-template-columns: 1fr 360px; height: 100%; }
+      #stage { position: relative; min-width: 0; }
+      #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+      #readout { position: absolute; left: 10px; right: 10px; bottom: 10px; pointer-events: none;
+             background: rgba(12,16,20,0.82); border: 1px solid #26313a; border-radius: 6px;
+             padding: 5px 10px; font: 12px/1.4 ui-monospace, Consolas, monospace; color: #cfd9e0;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #help { position: absolute; left: 10px; top: 10px; background: rgba(12,16,20,0.82);
+             border: 1px solid #26313a; border-radius: 6px; padding: 7px 10px; font-size: 11.5px;
+             color: #9fb0bc; max-width: 330px; }
+      #help b { color: #e6eef3; font-weight: 600; }
+      #help.hide .more { display: none; }
+      #help button { float: right; margin-left: 8px; }
+
+      #panel { overflow-y: auto; background: #131a20; border-left: 1px solid #243039; padding: 10px 12px 40px; }
+      #panel h1 { margin: 0 0 6px; font-size: 14px; letter-spacing: .04em; text-transform: uppercase; color: #8fc3ea;
+             display: flex; align-items: center; gap: 8px; }
+      #panel h1 .tag { font-size: 10px; color: #0f1317; background: #8fc3ea; border-radius: 3px; padding: 1px 5px; }
+      #panel h2 { margin: 12px 0 6px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: #71889a;
+             border-top: 1px solid #22303a; padding-top: 9px; }
+      #panel h3 { margin: 12px 0 5px; font-size: 11.5px; color: #a9bccb; font-weight: 600; }
+      #panel section { margin-bottom: 2px; }
+      .stats { font-size: 11.5px; color: #93a6b4; background: #0e1419; border: 1px solid #22303a; border-radius: 6px; padding: 6px 8px; }
+      .stats b { color: #fff; }
+      .stats .ok { color: #6fd38f; } .stats .warn { color: #ffb54a; } .stats .bad { color: #ff6a5c; }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 5px 0; }
+      .row > select, .row > input[type=number] { max-width: 60%; }
+      .btns { justify-content: flex-start; flex-wrap: wrap; }
+      .seg { display: flex; gap: 4px; }
+      .seg button { flex: 1; }
+      button { background: #1c262e; color: #d3dde3; border: 1px solid #2f3d48; border-radius: 5px; padding: 4px 9px;
+             font-size: 12px; cursor: pointer; }
+      button:hover { background: #24313b; }
+      button.on { background: #2b6cb0; border-color: #4a9ae0; color: #fff; }
+      button.danger { border-color: #6b3434; color: #ffb3aa; }
+      button.x { padding: 1px 7px; }
+      button.add { font-size: 11px; padding: 2px 7px; color: #9fd0ff; }
+      select, input[type=number] { background: #0e1419; color: #e0e8ee; border: 1px solid #2f3d48; border-radius: 4px;
+             padding: 3px 5px; font-size: 12px; }
+      input[type=number] { width: 84px; }
+      input[type=range] { width: 100%; accent-color: #4a9ae0; }
+      .chk { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #b8c6d0; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
+      .muted { color: #74889a; font-size: 11.5px; }
+      .sub { color: #8ea2b1; font-size: 11.5px; margin-bottom: 6px; }
+      .inspector h2 { color: #cfe3f3; font-size: 12px; }
+      canvas.xsec, canvas.profile { width: 100%; border-radius: 5px; background: #0e1419; border: 1px solid #22303a; display: block; }
+      canvas.xsec { height: 75px; }
+      canvas.profile { height: 130px; cursor: crosshair; }
+      .lanes .lane { display: grid; grid-template-columns: 16px 12px 1fr 70px 26px; gap: 5px; align-items: center; margin: 3px 0; }
+      .lanes .lane.center { grid-template-columns: 16px 1fr 70px; background: #0e1419; border-radius: 4px; padding: 2px 0; }
+      .lanes .lane input { width: 100%; box-sizing: border-box; }
+      .lanes .side { font-size: 10px; color: #7890a2; text-align: center; }
+      .lanes .side.left { color: #d9a441; } .lanes .side.right { color: #6fb3ff; }
+      .lanes .sw { width: 12px; height: 16px; border-radius: 2px; border: 1px solid rgba(255,255,255,0.15); }
+      .section-row { display: grid; grid-template-columns: 1fr 64px 80px 26px; gap: 5px; align-items: center; font-size: 11.5px; margin: 3px 0; }
+      .section-row label { display: flex; align-items: center; gap: 3px; color: #7890a2; }
+      .section-row input { width: 44px; }
+      .arm { font-size: 11.5px; color: #a8bac7; padding: 3px 6px; border-radius: 4px; cursor: pointer; }
+      .arm:hover { background: #1c262e; }
+      .facts { font-size: 11.5px; color: #a8bac7; background: #0e1419; border-radius: 5px; padding: 5px 8px; margin: 6px 0; }
+      .issue { display: grid; grid-template-columns: 10px 1fr auto; gap: 7px; align-items: center; padding: 4px 5px; border-radius: 4px;
+             cursor: pointer; font-size: 11.5px; }
+      .issue:hover { background: #1c262e; }
+      .issue .dot { width: 8px; height: 8px; border-radius: 50%; }
+      .issue.error .dot { background: #ff4d3d; } .issue.warn .dot { background: #ffa53a; } .issue.info .dot { background: #5b8fb9; }
+      .issue.info .msg { color: #8397a6; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <div id="stage">
+        <canvas id="view"></canvas>
+        <div id="help">
+          <button id="helpToggle">hide</button>
+          <b>Road Lab</b> — lanes are data, everything else is derived.
+          <div class="more">
+            <b>V</b> select · <b>R</b> draw road · <b>F</b> fit · <b>G</b> snap · <b>T</b> traffic · <b>L</b> lane graph<br />
+            Draw: click points · click a node/road to connect · double-click / Enter to end · right-click ends · Backspace undoes a point · Alt = no snap<br />
+            Select: drag nodes and bend points (drop a node on another to merge) · double-click a road adds a bend · Del deletes<br />
+            Pan: drag empty space, right/middle drag, or Space+drag · wheel zooms · Ctrl+Z / Ctrl+Y
+          </div>
+        </div>
+        <div id="readout">—</div>
+      </div>
+      <aside id="panel"></aside>
+    </div>
+    <script type="module">
+      import { RoadLabApp } from "./roads/lab/roadLabApp.js";
+      const app = new RoadLabApp({
+        canvas: document.getElementById("view"),
+        panel: document.getElementById("panel"),
+        readout: document.getElementById("readout"),
+      });
+      window.roadLab = app;
+      const help = document.getElementById("help");
+      document.getElementById("helpToggle").addEventListener("click", (e) => {
+        help.classList.toggle("hide");
+        e.target.textContent = help.classList.contains("hide") ? "help" : "hide";
+      });
+    </script>
+  </body>
+</html>
