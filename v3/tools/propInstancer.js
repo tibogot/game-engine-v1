@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { MeshBVH } from "three-mesh-bvh";
 
 const _viewInvShared = new THREE.Matrix4();
 import { WORLD_SIZE } from "../terrain/heightmapTexture.js";
@@ -11,12 +12,12 @@ const _tmpPos    = new THREE.Vector3();
 const _tmpQuat   = new THREE.Quaternion();
 const _tmpScl    = new THREE.Vector3();
 const _tmpEul    = new THREE.Euler();
-const _hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
 const _boxColor  = new THREE.Color(0xff8800);
 const MAX_GROUP_BOXES = 128; // selection outline pool cap (selection can exceed this)
 
-const MAX_INSTANCES = 4096;
-export { MAX_INSTANCES as MAX_PROP_INSTANCES_PER_MESH };
+/** Starting capacity of each LOD mesh. Meshes GROW past it (they used to drop). */
+const INITIAL_INSTANCES = 4096;
+export { INITIAL_INSTANCES as MAX_PROP_INSTANCES_PER_MESH };
 const CULL_MARGIN   = 12;
 const LOD_HYST      = 0.1;
 const TIER_UNSET    = 255;
@@ -25,32 +26,76 @@ const CELL_SIZE  = 256;
 const HALF_WORLD = WORLD_SIZE * 0.5;
 const CELL_COUNT = Math.ceil(WORLD_SIZE / CELL_SIZE);
 
+// Picking scratch
+const _pickInv   = new THREE.Matrix4();
+const _pickRay   = new THREE.Ray();
+const _pickPoint = new THREE.Vector3();
+const _corner    = new THREE.Vector3();
+/** One MeshBVH per geometry, shared by every prop type that uses it. */
+const _geoBvh = new WeakMap();
+
 function _cellIdx(wx, wz) {
   const cx = Math.max(0, Math.min(CELL_COUNT - 1, Math.floor((wx + HALF_WORLD) / CELL_SIZE)));
   const cz = Math.max(0, Math.min(CELL_COUNT - 1, Math.floor((wz + HALF_WORLD) / CELL_SIZE)));
   return cz * CELL_COUNT + cx;
 }
 
+function _bvhFor(geometry) {
+  let bvh = _geoBvh.get(geometry);
+  if (!bvh) {
+    // indirect: the BVH keeps its own triangle order instead of rewriting the
+    // index of a geometry that is also being rendered.
+    bvh = new MeshBVH(geometry, { indirect: true });
+    _geoBvh.set(geometry, bvh);
+  }
+  return bvh;
+}
+
+/**
+ * Ray against an axis-aligned box (slab method). Returns the entry distance,
+ * or -1 on a miss. The ray direction must be normalised.
+ */
+function _rayBox(ox, oy, oz, idx, idy, idz, b, o) {
+  let t1 = (b[o] - ox) * idx, t2 = (b[o + 3] - ox) * idx;
+  let tmin = Math.min(t1, t2), tmax = Math.max(t1, t2);
+  t1 = (b[o + 1] - oy) * idy; t2 = (b[o + 4] - oy) * idy;
+  tmin = Math.max(tmin, Math.min(t1, t2)); tmax = Math.min(tmax, Math.max(t1, t2));
+  t1 = (b[o + 2] - oz) * idz; t2 = (b[o + 5] - oz) * idz;
+  tmin = Math.max(tmin, Math.min(t1, t2)); tmax = Math.min(tmax, Math.max(t1, t2));
+  if (tmax < Math.max(tmin, 0)) return -1;
+  return Math.max(tmin, 0);
+}
+
 export class PropInstancer {
-  constructor(scene, propStore, maxInstances = MAX_INSTANCES) {
+  constructor(scene, propStore, initialCapacity = INITIAL_INSTANCES) {
     this.scene = scene;
     this.store = propStore;
-    this.MAX   = maxInstances;
+    this.MAX   = initialCapacity;
 
     this._lastGen    = -1;
     this._lodDirty   = true;
     this._castShadow = true;
 
     this._typeRender  = [];
-    this._selectedIdx = -1;
 
-    // Multi-select: store indices; _selectedIdx stays the "primary" for
-    // single-instance UI (stamp memory, prop panel). Group transforms apply
-    // the proxy's delta matrix to base matrices captured at selection time.
-    this._selection      = new Set();
-    this._groupBaseMats  = null; // Map<storeIdx, Matrix4> at group setup
-    this._groupProxyInv  = null; // inverse of the proxy matrix at group setup
-    this._groupBoxPool   = [];   // extra selection outlines for group members
+    // SELECTION IS BY PROP ID, not by slot. The store swap-removes, so a slot
+    // can hold a different prop a moment later (a brush erase used to make the
+    // gizmo drag the wrong prop). `_selectedId` is the primary (stamp memory,
+    // prop panel); group transforms apply the proxy's delta matrix to base
+    // matrices captured at selection time.
+    this._selectedId     = -1;
+    this._selection      = new Set();  // ids
+    this._groupBaseMats  = null;       // Map<id, Matrix4> at group setup
+    this._groupProxyInv  = null;       // inverse of the proxy matrix at group setup
+    this._groupBoxPool   = [];         // extra selection outlines for group members
+    /** Called when the selected prop(s) stop existing (erased, cleared, undone). */
+    this.onSelectionLost = null;
+
+    // EDITOR visibility (Scene list eye): hidden props are not drawn or picked.
+    // Not saved, and ignored while revealHidden is on (play mode).
+    this.hiddenTypes  = new Set();   // typeIdx
+    this.hiddenIds    = new Set();   // prop ids
+    this.revealHidden = false;
 
     this._cacheCount   = 0;
     this._cacheMats    = null;
@@ -61,6 +106,11 @@ export class PropInstancer {
     this._cacheTiers   = null;
     this._cacheToStore = null;  // cache index → propStore.instances index
     this._cellBuckets  = new Array(CELL_COUNT * CELL_COUNT).fill(null);
+
+    // World-space AABB per cache entry, for picking. Built lazily at pick time,
+    // so a drag (a gen change every frame) never pays for it.
+    this._pickBoxes    = null;
+    this._pickBoxesGen = -1;
 
     this._frustum    = new THREE.Frustum();
     this._projScreen = new THREE.Matrix4();
@@ -83,6 +133,17 @@ export class PropInstancer {
     scene.add(this._selectionBox);
   }
 
+  /** Call after changing hiddenTypes / hiddenIds / revealHidden. */
+  visibilityChanged() {
+    this._lodDirty = true;
+  }
+
+  _hiddenAt(ci) {
+    if (this.revealHidden || (this.hiddenTypes.size === 0 && this.hiddenIds.size === 0)) return false;
+    if (this.hiddenTypes.has(this._cacheTypes[ci])) return true;
+    return this.hiddenIds.size > 0 && this.hiddenIds.has(this.store.instances[this._cacheToStore[ci]]?.id);
+  }
+
   // ── Cast shadow ─────────────────────────────────────────────────────────────
 
   setCastShadow(val) {
@@ -97,16 +158,43 @@ export class PropInstancer {
 
   // ── Type registration ──────────────────────────────────────────────────────
 
+  _makeMesh(geometry, material, capacity) {
+    const im = shareInstancePipeline(new THREE.InstancedMesh(geometry, material, capacity));
+    im.count         = 0;
+    im.castShadow    = this._castShadow;
+    im.receiveShadow = true;
+    im.frustumCulled = false;
+    this.scene.add(im);
+    return im;
+  }
+
   _createLodMeshes(entries) {
     return entries.map(({ geometry, material, localMatrix }) => {
-      const im = shareInstancePipeline(new THREE.InstancedMesh(geometry, material, this.MAX));
-      im.count         = 0;
-      im.castShadow    = this._castShadow;
-      im.receiveShadow = true;
-      im.frustumCulled = false;
-      this.scene.add(im);
-      return { im, localMatrix, _written: false };
+      const im = this._makeMesh(geometry, material, this.MAX);
+      return { im, localMatrix, cap: im.instanceMatrix.count, _written: false };
     });
+  }
+
+  /**
+   * Make room for at least `needed` instances in every mesh of one LOD tier.
+   * A new, larger InstancedMesh replaces each one (same geometry and material,
+   * so the same pipeline); what is already written is copied across.
+   */
+  _growLod(lod, needed) {
+    for (const e of lod) {
+      if (e.cap >= needed) continue;
+      let cap = e.cap;
+      while (cap < needed) cap = cap + (cap >> 1) + 512;   // 1.5x + 512
+      const old = e.im;
+      const im = this._makeMesh(old.geometry, old.material, cap);
+      im.instanceMatrix.array.set(old.instanceMatrix.array.subarray(0, Math.min(old.instanceMatrix.array.length, im.instanceMatrix.array.length)));
+      im.count = old.count;
+      im.visible = old.visible;
+      this.scene.remove(old);
+      old.dispose();
+      e.im = im;
+      e.cap = im.instanceMatrix.count;
+    }
   }
 
   _disposeLodMeshes(meshes) {
@@ -121,23 +209,13 @@ export class PropInstancer {
 
     const lod0      = this._createLodMeshes(type.entries);
     const boxSize   = new THREE.Vector3();
-    const boxCenter = new THREE.Vector3();
     type.mergedBox.getSize(boxSize);
-    type.mergedBox.getCenter(boxCenter);
-
-    const hitboxGeo = new THREE.BoxGeometry(boxSize.x, boxSize.y, boxSize.z);
-    const hitboxIM  = shareInstancePipeline(new THREE.InstancedMesh(hitboxGeo, _hitboxMat, this.MAX));
-    hitboxIM.count         = 0;
-    hitboxIM.frustumCulled = false;
-    this.scene.add(hitboxIM);
 
     this._typeRender[typeIdx] = {
       lod0, lod1: null, lod2: null,
-      hitboxIM, hitboxGeo,
-      boxCenterMatrix: new THREE.Matrix4().makeTranslation(boxCenter.x, boxCenter.y, boxCenter.z),
       boxSize: boxSize.clone(),
-      _globalIndices: [],
     };
+    this._pickBoxesGen = -1;
   }
 
   onTypeLodRegistered(typeIdx, lod) {
@@ -198,8 +276,6 @@ export class PropInstancer {
     this._disposeLodMeshes(tr.lod0);
     this._disposeLodMeshes(tr.lod1);
     this._disposeLodMeshes(tr.lod2);
-    if (tr.hitboxIM) { this.scene.remove(tr.hitboxIM); tr.hitboxIM.dispose(); }
-    tr.hitboxGeo?.dispose();
     this._typeRender[typeIdx] = null;
   }
 
@@ -253,30 +329,22 @@ export class PropInstancer {
       if (tmp[c]) this._cellBuckets[c] = Uint32Array.from(tmp[c]);
     }
     this._lodDirty = true;
+    this._validateSelection();
+  }
 
-    // Rebuild hitboxes — by type, keyed by cache index
-    const byType = new Map();
-    for (let ci2 = 0; ci2 < n; ci2++) {
-      const ti = this._cacheTypes[ci2];
-      if (!byType.has(ti)) byType.set(ti, []);
-      byType.get(ti).push(ci2);
+  /** Drop selected ids that no longer exist; tell the host if the primary went. */
+  _validateSelection() {
+    if (this._selection.size === 0) return;
+    let lost = false;
+    for (const id of [...this._selection]) {
+      if (this.store.indexOfId(id) < 0) { this._selection.delete(id); lost = true; }
     }
-    const wm = this._worldMat;
-    for (let ti = 0; ti < this._typeRender.length; ti++) {
-      const tr = this._typeRender[ti];
-      if (!tr || !tr.hitboxIM) continue;
-      const indices = byType.get(ti) ?? [];
-      tr._globalIndices = indices;
-      tr.hitboxIM.count = indices.length;
-      for (let j = 0; j < indices.length; j++) {
-        const off = indices[j] * 16;
-        for (let k = 0; k < 16; k++) wm.elements[k] = this._cacheMats[off + k];
-        _tmp.multiplyMatrices(wm, tr.boxCenterMatrix);
-        tr.hitboxIM.setMatrixAt(j, _tmp);
-      }
-      tr.hitboxIM.instanceMatrix.needsUpdate = true;
-      tr.hitboxIM.boundingSphere = null;
-      tr.hitboxIM.boundingBox    = null;
+    if (!lost) return;
+    if (this._selection.size === 0 || this.store.indexOfId(this._selectedId) < 0) {
+      this.clearSelection();
+      this.onSelectionLost?.();
+    } else {
+      this._afterSelectionChange(this._selectedId);
     }
   }
 
@@ -388,7 +456,7 @@ export class PropInstancer {
           const ci = bucket[k];
           const ti = this._cacheTypes[ci];
           const tr = this._typeRender[ti];
-          if (!tr) continue;
+          if (!tr || this._hiddenAt(ci)) continue;
 
           const dx    = this._cacheXs[ci] - camX;
           const dz    = this._cacheZs[ci] - camZ;
@@ -404,7 +472,8 @@ export class PropInstancer {
 
           const c   = counts[ti];
           const idx = c[pick.key];
-          if (idx >= this.MAX) continue;
+          // Grow instead of dropping: a type past its capacity used to vanish.
+          if (idx >= pick.lod[0].cap) this._growLod(pick.lod, idx + 1);
 
           const off = ci * 16;
           for (let j = 0; j < 16; j++) wm.elements[j] = this._cacheMats[off + j];
@@ -436,31 +505,101 @@ export class PropInstancer {
     this._assignLod(camera, lodCfg);
   }
 
+  /** World AABB of every cached prop (type bounds × instance matrix), for picking. */
+  _ensurePickBoxes() {
+    if (this.store.gen !== this._lastGen) { this._lastGen = this.store.gen; this._rebuildCache(); }
+    if (this._pickBoxesGen === this._lastGen && this._pickBoxes) return;
+    const n = this._cacheCount;
+    if (!this._pickBoxes || this._pickBoxes.length < n * 6) this._pickBoxes = new Float32Array(Math.max(64, n * 2) * 6);
+    const b = this._pickBoxes, m = this._worldMat.elements;
+    for (let ci = 0; ci < n; ci++) {
+      const box = this.store.types[this._cacheTypes[ci]]?.mergedBox;
+      const o = ci * 6;
+      if (!box) { b[o] = b[o + 1] = b[o + 2] = Infinity; b[o + 3] = b[o + 4] = b[o + 5] = -Infinity; continue; }
+      const off = ci * 16;
+      for (let j = 0; j < 16; j++) m[j] = this._cacheMats[off + j];
+      let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+      for (let k = 0; k < 8; k++) {
+        _corner.set(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z)
+          .applyMatrix4(this._worldMat);
+        if (_corner.x < x0) x0 = _corner.x; if (_corner.x > x1) x1 = _corner.x;
+        if (_corner.y < y0) y0 = _corner.y; if (_corner.y > y1) y1 = _corner.y;
+        if (_corner.z < z0) z0 = _corner.z; if (_corner.z > z1) z1 = _corner.z;
+      }
+      b[o] = x0; b[o + 1] = y0; b[o + 2] = z0; b[o + 3] = x1; b[o + 4] = y1; b[o + 5] = z1;
+    }
+    this._pickBoxesGen = this._lastGen;
+  }
+
+  /**
+   * Pick the prop under a ray by its REAL triangles (it used to be the type's
+   * bounding box, so a small prop inside a big one's box could not be clicked).
+   *
+   * Broad phase: ray vs each prop's world AABB. Narrow phase, nearest box first:
+   * the ray in the prop's local space against each LOD0 mesh's MeshBVH; stop
+   * once the next box starts beyond the best hit.
+   *
+   * @returns {{ instIdx:number, id:number, distance:number, point:THREE.Vector3 } | null}
+   */
   raycast(raycaster) {
+    this._ensurePickBoxes();
+    const ray = raycaster.ray;
+    const ox = ray.origin.x, oy = ray.origin.y, oz = ray.origin.z;
+    const idx = 1 / ray.direction.x, idy = 1 / ray.direction.y, idz = 1 / ray.direction.z;
+    const far = raycaster.far ?? Infinity;
+    const b = this._pickBoxes;
+    const cands = [];
+    for (let ci = 0; ci < this._cacheCount; ci++) {
+      const t = _rayBox(ox, oy, oz, idx, idy, idz, b, ci * 6);
+      if (t >= 0 && t <= far && !this._hiddenAt(ci)) cands.push(t, ci);
+    }
+    if (!cands.length) return null;
+    const order = [];
+    for (let i = 0; i < cands.length; i += 2) order.push(i);
+    order.sort((p, q) => cands[p] - cands[q]);
+
     let best = null, bestDist = Infinity;
-    for (let ti = 0; ti < this._typeRender.length; ti++) {
-      const tr = this._typeRender[ti];
-      if (!tr || !tr.hitboxIM || tr.hitboxIM.count === 0) continue;
-      const hits = raycaster.intersectObject(tr.hitboxIM, false);
-      if (hits.length > 0 && hits[0].distance < bestDist) {
-        bestDist = hits[0].distance;
-        const cacheIdx = tr._globalIndices?.[hits[0].instanceId];
-        const storeIdx = cacheIdx != null ? this._cacheToStore[cacheIdx] : undefined;
-        if (storeIdx != null) best = { instIdx: storeIdx, distance: bestDist };
+    for (const i of order) {
+      if (cands[i] > bestDist) break;
+      const ci = cands[i + 1];
+      const type = this.store.types[this._cacheTypes[ci]];
+      if (!type) continue;
+      const off = ci * 16;
+      for (let j = 0; j < 16; j++) this._worldMat.elements[j] = this._cacheMats[off + j];
+      for (const entry of type.entries) {
+        if (!entry.geometry?.attributes?.position) continue;
+        _tmpMat.multiplyMatrices(this._worldMat, entry.localMatrix);
+        _pickInv.copy(_tmpMat).invert();
+        _pickRay.copy(ray).applyMatrix4(_pickInv);
+        const hit = _bvhFor(entry.geometry).raycastFirst(_pickRay, THREE.DoubleSide);
+        if (!hit) continue;
+        _pickPoint.copy(hit.point).applyMatrix4(_tmpMat);
+        const d = _pickPoint.distanceTo(ray.origin);
+        if (d < bestDist && d <= far) {
+          bestDist = d;
+          const si = this._cacheToStore[ci];
+          best = { instIdx: si, id: this.store.instances[si]?.id, distance: d, point: _pickPoint.clone() };
+        }
       }
     }
     return best;
   }
 
+  // ── Selection (by id) ──────────────────────────────────────────────────────
+
+  _idAt(instIdx) { return this.store.instances[instIdx]?.id ?? -1; }
+  _instById(id) { const i = this.store.indexOfId(id); return i >= 0 ? this.store.instances[i] : null; }
+
   select(instIdx) {
     const inst = this.store.instances[instIdx];
     if (!inst) { this.clearSelection(); return; }
+    if (inst.id == null) this.store._bump();   // a prop pushed without a bump yet
     this._selection.clear();
-    this._selection.add(instIdx);
+    this._selection.add(inst.id);
     this._groupBaseMats = null;
     this._groupProxyInv = null;
     this._hideGroupBoxes();
-    this._selectedIdx = instIdx;
+    this._selectedId = inst.id;
     const RAD_TO_DEG = Math.PI / 180;
     this.proxyObject.position.set(inst.px, inst.py, inst.pz);
     this.proxyObject.rotation.set(inst.rx * RAD_TO_DEG, inst.ry * RAD_TO_DEG, inst.rz * RAD_TO_DEG);
@@ -471,22 +610,23 @@ export class PropInstancer {
 
   /** Shift+click: add/remove an instance from the selection set. */
   toggleSelect(instIdx) {
-    if (!this.store.instances[instIdx]) return;
-    if (this._selection.has(instIdx)) this._selection.delete(instIdx);
-    else this._selection.add(instIdx);
-    this._afterSelectionChange(instIdx);
+    const id = this._idAt(instIdx);
+    if (id < 0) return;
+    if (this._selection.has(id)) this._selection.delete(id);
+    else this._selection.add(id);
+    this._afterSelectionChange(id);
   }
 
-  /** Replace the whole selection (e.g. after group duplicate). */
+  /** Replace the whole selection (e.g. after group duplicate). Takes slots. */
   setSelection(indices, primary = indices[indices.length - 1]) {
-    this._selection = new Set(indices.filter((i) => this.store.instances[i]));
-    this._afterSelectionChange(primary);
+    this._selection = new Set(indices.map((i) => this._idAt(i)).filter((id) => id >= 0));
+    this._afterSelectionChange(this._idAt(primary));
   }
 
-  _afterSelectionChange(primary) {
+  _afterSelectionChange(primaryId) {
     if (this._selection.size === 0) { this.clearSelection(); return; }
-    if (this._selection.size === 1) { this.select([...this._selection][0]); return; }
-    this._selectedIdx = this._selection.has(primary) ? primary : [...this._selection][0];
+    if (this._selection.size === 1) { this.select(this.store.indexOfId([...this._selection][0])); return; }
+    this._selectedId = this._selection.has(primaryId) ? primaryId : [...this._selection][0];
     this._setupGroupProxy();
   }
 
@@ -494,11 +634,13 @@ export class PropInstancer {
    *  member's base matrix so drags apply a clean delta with no drift. */
   _setupGroupProxy() {
     const c = new THREE.Vector3();
-    for (const i of this._selection) {
-      const inst = this.store.instances[i];
-      c.x += inst.px; c.y += inst.py; c.z += inst.pz;
+    let n = 0;
+    for (const id of this._selection) {
+      const inst = this._instById(id);
+      if (!inst) continue;
+      c.x += inst.px; c.y += inst.py; c.z += inst.pz; n++;
     }
-    c.divideScalar(this._selection.size);
+    c.divideScalar(Math.max(1, n));
     this.proxyObject.position.copy(c);
     this.proxyObject.rotation.set(0, 0, 0);
     this.proxyObject.scale.set(1, 1, 1);
@@ -507,9 +649,10 @@ export class PropInstancer {
 
     const DEG = Math.PI / 180;
     this._groupBaseMats = new Map();
-    for (const i of this._selection) {
-      const inst = this.store.instances[i];
-      this._groupBaseMats.set(i, new THREE.Matrix4().compose(
+    for (const id of this._selection) {
+      const inst = this._instById(id);
+      if (!inst) continue;
+      this._groupBaseMats.set(id, new THREE.Matrix4().compose(
         new THREE.Vector3(inst.px, inst.py, inst.pz),
         new THREE.Quaternion().setFromEuler(_tmpEul.set(inst.rx * DEG, inst.ry * DEG, inst.rz * DEG, "XYZ")),
         new THREE.Vector3(inst.sx, inst.sy, inst.sz),
@@ -520,7 +663,7 @@ export class PropInstancer {
   }
 
   clearSelection() {
-    this._selectedIdx          = -1;
+    this._selectedId           = -1;
     this._selection.clear();
     this._groupBaseMats        = null;
     this._groupProxyInv        = null;
@@ -530,9 +673,9 @@ export class PropInstancer {
 
   syncFromProxy() {
     if (this._selection.size > 1) { this._syncGroupFromProxy(); return; }
-    if (this._selectedIdx < 0) return;
-    const inst = this.store.instances[this._selectedIdx];
-    if (!inst) return;
+    if (this._selectedId < 0) return;
+    const inst = this._instById(this._selectedId);
+    if (!inst) return;   // erased since it was selected: never write into its old slot
     const DEG = 180 / Math.PI;
     inst.px = this.proxyObject.position.x;
     inst.py = this.proxyObject.position.y;
@@ -554,8 +697,8 @@ export class PropInstancer {
     // keeps repeated drags exact (no incremental drift).
     _tmpDelta.multiplyMatrices(this.proxyObject.matrix, this._groupProxyInv);
     const DEG = 180 / Math.PI;
-    for (const [i, base] of this._groupBaseMats) {
-      const inst = this.store.instances[i];
+    for (const [id, base] of this._groupBaseMats) {
+      const inst = this._instById(id);
       if (!inst) continue;
       _tmpMat.multiplyMatrices(_tmpDelta, base).decompose(_tmpPos, _tmpQuat, _tmpScl);
       _tmpEul.setFromQuaternion(_tmpQuat, "XYZ");
@@ -569,9 +712,9 @@ export class PropInstancer {
 
   _updateGroupBoxes() {
     let n = 0;
-    for (const i of this._selection) {
+    for (const id of this._selection) {
       if (n >= MAX_GROUP_BOXES) break;
-      const inst = this.store.instances[i];
+      const inst = this._instById(id);
       if (!inst) continue;
       let box = this._groupBoxPool[n];
       if (!box) {
@@ -610,10 +753,14 @@ export class PropInstancer {
     this._placeSelectionBox(this._selectionBox, inst);
   }
 
-  get selectedIdx()     { return this._selectedIdx; }
-  get hasSelection()    { return this._selectedIdx >= 0; }
+  /** Current slot of the primary selection (it can change as the store swap-removes). */
+  get selectedIdx()     { return this._selectedId < 0 ? -1 : this.store.indexOfId(this._selectedId); }
+  get selectedId()      { return this._selectedId; }
+  get hasSelection()    { return this._selectedId >= 0 && this.store.indexOfId(this._selectedId) >= 0; }
   get selectionCount()  { return this._selection.size; }
-  get selectedIndices() { return [...this._selection]; }
+  /** Current slots of the whole selection. */
+  get selectedIndices() { return [...this._selection].map((id) => this.store.indexOfId(id)).filter((i) => i >= 0); }
+  get selectedIds()     { return [...this._selection]; }
 
   dispose() {
     for (let ti = 0; ti < this._typeRender.length; ti++) this.unregisterType(ti);

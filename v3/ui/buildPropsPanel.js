@@ -272,7 +272,7 @@ panel.innerHTML = "";
           `Static (instanced): ${s.staticCount}`,
           `Live groups (flag, procedural…): ${s.liveGroupCount}`,
           `Live instanced (coin/heart/key): ${s.liveInstancedCount}`,
-          `Cap: ${s.maxPerType} instances per static type / submesh`,
+          s.maxPerType ? `Cap: ${s.maxPerType} instances per static type / submesh` : "No per-type cap (meshes grow as needed)",
         ];
         if (s.nearCapTypes?.length) {
           lines.push("");

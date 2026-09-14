@@ -45,10 +45,35 @@ export class PropStore {
     this.types     = [];
     this.instances = [];
     this._gen      = 0;
+    // Stable ids: a prop keeps its id while it exists, whatever slot it is in.
+    // The array is still dense and swap-removed (many readers index it
+    // directly), so SELECTIONS and undo refer to props by id, never by slot.
+    this._nextId   = 1;
+    this._idIndex  = null;   // Map<id, slot>, rebuilt lazily after a change
   }
 
   get gen() { return this._gen; }
-  _bump()   { this._gen++; }
+
+  /** Every change goes through here: ids are assigned to any prop without one. */
+  _bump() {
+    this._gen++;
+    this._idIndex = null;
+    const list = this.instances;
+    for (let i = 0; i < list.length; i++) {
+      const inst = list[i];
+      if (inst.id == null) inst.id = this._nextId++;
+      else if (inst.id >= this._nextId) this._nextId = inst.id + 1;
+    }
+  }
+
+  /** Current slot of a prop id, or -1 if that prop no longer exists. */
+  indexOfId(id) {
+    if (!this._idIndex) {
+      this._idIndex = new Map();
+      for (let i = 0; i < this.instances.length; i++) this._idIndex.set(this.instances[i].id, i);
+    }
+    return this._idIndex.get(id) ?? -1;
+  }
 
   isLiveType(typeIdx) {
     return !!this.types[typeIdx]?.live;
@@ -195,6 +220,7 @@ export class PropStore {
     const src = this.instances[srcIdx];
     if (!src) return -1;
     const copy = { ...src, px: src.px + 0.6, pz: src.pz + 0.6 };
+    delete copy.id;   // a copy is a new prop
     if (src.liveParams) copy.liveParams = { ...src.liveParams };
     const idx = this.instances.length;
     this.instances.push(copy);
@@ -288,7 +314,8 @@ export class PropStore {
         isPrimitive: t.isPrimitive ?? false,
         primShape: t.primShape,
       })),
-      instances: this.instances.map(i => ({ ...i })),
+      // ids are runtime only: a loaded project gets fresh ones.
+      instances: this.instances.map(({ id, ...i }) => i),
       slots: slots?.map(s => ({
         name: s.name,
         builtin: !!s.builtin,
@@ -307,7 +334,8 @@ export class PropStore {
       const typeName  = data.types[saved.typeIdx]?.name;
       const mappedIdx = typeNameToIdx?.[typeName];
       if (mappedIdx == null) continue;
-      this.instances.push({ ...saved, typeIdx: mappedIdx });
+      const { id, ...rest } = saved;
+      this.instances.push({ ...rest, typeIdx: mappedIdx });
     }
     this._bump();
   }

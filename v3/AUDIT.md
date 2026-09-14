@@ -1,6 +1,6 @@
 # v3 editor audit — what is left
 
-Compared against Unity and Unreal terrain editors. Last updated 2026-09-13.
+Compared against Unity and Unreal terrain editors. Last updated 2026-09-14.
 Ordered by value inside each section. 👁 = needs you to look at the result in
 the game.
 
@@ -69,7 +69,11 @@ the game.
     daylight at mouths, zero per-pixel cost), vehicles (car, stunt car, ball,
     plane) use openings and tunnel floors. Remaining: characters are not lit
     by the baked tunnel light.
-13. **Mirror, clone, copy-paste.**
+13. **Mirror, clone, copy-paste** (terrain tools, not objects). Mirror: make one
+    half of the terrain the mirror image of the other (symmetric maps). Clone
+    brush: Alt+click a source, paint to copy its heights and paint elsewhere.
+    Region copy-paste: copy a rectangle of terrain, paste it with rotate / flip
+    / height offset.
 14. **Non-destructive edit layers** like Unreal's. Large; roads and rivers
     already do this per tool.
 15. **Modifier keys in the hints** (Shift lowers, Ctrl smooths, Alt flattens),
@@ -102,13 +106,107 @@ the game.
 
 ## Editor in general
 
-28. **Textures from dropped local files don't survive a reload** (only the name
+28. ~~Select objects in the viewport~~ — DONE 2026-09-14 (View mode left-click;
+    terrain in front hides objects, except at tunnel holes). (Unity/Unreal basics). Today only props
+    select (right-click, Props mode only); tunnels, rivers, lakes and roads only
+    inside their own mode. Wanted: left-click in View mode picks what is under
+    the cursor (props, live props, tunnels/caves, rivers, lakes, roads, player
+    start) with an outline and its inspector; props get the gizmo, spline
+    objects open their mode with that item active. Painted trees, foliage and
+    grass stay brush-edited (Unity cannot select terrain trees either).
+29. ~~A real Scene list (outliner)~~ — DONE 2026-09-14 (groups, click, double-
+    click frames, eye hides in the editor only; everything shows in play). The left panel only says "Terrain". List
+    every object grouped by type; click selects, double-click or F frames it.
+30. ~~Shared shortcuts~~ — DONE 2026-09-14: Shift+F frames (plain F stays
+    Foliage), Ctrl+C / Ctrl+V props (paste at the cursor), Ctrl+D tunnels; props
+    already had Delete / Ctrl+D / Esc / W E R Q.
+31. **Textures from dropped local files don't survive a reload** (only the name
     is saved). An "import to /textures" step would close this.
-29. **Texture compression.** Paint layers use ~74 MB of VRAM; KTX2 would cut it
+32. **Texture compression.** Paint layers use ~74 MB of VRAM; KTX2 would cut it
     for the games.
-30. **City builder** — its own 4-phase track.
-31. **Housekeeping:** test harnesses leave `.name.PID.mjs` temp files when
+33. **City builder** — its own 4-phase track.
+34. **Housekeeping:** test harnesses leave `.name.PID.mjs` temp files when
     interrupted (a try/finally would stop it).
+
+## Props and instancing (InstancedMesh2 study, measured 2026-09-14)
+
+Source: agargaro/instanced-mesh read in full (all src, 25 docs pages, 24
+examples, bvh.js). It is WebGL-only; what carries over is its CPU-side
+algorithms. Measured in the editor on this laptop: 1k / 5k / 20k props (5
+built-in shapes + a cliff) over 800x800 m, GPU at the real canvas 1347x849.
+
+### Confirmed bugs (fix with the selection work)
+
+35. ~~A different prop moves after a brush erase~~ — FIXED 2026-09-14 (ids). Props paint mode: right-click
+    a prop (gizmo stays), Alt+paint over it, drag the gizmo -> another prop
+    teleports (prop at x=90 jumped to x=20). Cause: swap-remove indices.
+    Fix: stable ids (free-id pool + active flag, no compaction, like
+    InstancedMesh2), and clear the selection when its prop is erased.
+36. ~~4,096 props per mesh, extra ones silently dropped~~ — FIXED 2026-09-14 (6,000 placed, 4,096
+    drawn). Fix: growable capacity (theirs: 1.5x + 512).
+37. ~~Clicks hit boxes, not shapes~~ — FIXED 2026-09-14 (0.4 ms at 20k) (a sphere inside a torus hole picks the
+    torus). Fix: BVH over instance bounds for candidates, then an exact
+    triangle test with the per-type MeshBVH SolidCollider already builds.
+
+### Measured performance (worth doing above ~10k props / city scale)
+
+38. **Shadow pass draws every prop.** The sun's shadow map covers 160 m, but all
+    ~13k visible props are drawn into it. GPU: nothing measurable up to ~8k
+    props; +1.8 ms at 11k, +4.4 ms at 17k, +5.9 ms at 20k (about 2/3 of it
+    shadows). Fix: per-camera culling (cull again with the shadow camera; the
+    modular-road pass culler already does this) + **shadow LOD** (separate
+    cheap shadow meshes; frustum from the shadow camera, level chosen from the
+    main camera; proxy switch tied to the shadow box size).
+39. **Coarse culling.** 256 m cells: 51% of drawn props were off screen
+    (7,395 of 14,622, ~4M triangles). Keeping only on-screen props cut 20k from
+    9.2 to 5.4 ms. Fix: per-instance culling through the instance BVH (plane
+    mask: a fully-inside subtree needs no more tests).
+40. **No automatic LOD.** LOD1/LOD2 exist only if hand-made GLBs are imported;
+    built-in shapes and procedural cliffs have none (a 960-triangle sphere at
+    500 m). Fix: generate LODs with **meshoptimizer** (used in their skinning
+    example). Do it better than the example: simplifyWithAttributes (keeps
+    normals/UVs) and compact the vertex buffer (the example only rewrites the
+    index, so memory is not saved). The same simplified meshes serve as shadow
+    LODs (38).
+
+### Measured, not felt on this laptop (do only as a side effect of 35-37)
+
+41. **Every edit rebuilds all props.** Drag frame CPU 0.5 / 1.8 / 6.9 ms at
+    1k / 5k / 20k; brush stamp + rebuild 7-17 ms at 20k; camera LOD <= 1 ms.
+    0 dropped frames even at 20k. With stable ids, updates become per-prop
+    (dirty ranges; BVH move that only re-inserts when a box leaves its parent,
+    with a margin). Could matter on a weaker machine.
+42. **Solid-prop collision loops over every solid prop** (0.23 ms per capsule
+    query at 20k, collider resync 2.1 ms per edit). Use the same instance BVH
+    at city scale.
+43. ~~Click pick 2.1 ms at 20k~~ — now 0.4 ms (box broad phase + MeshBVH). — fine for clicks, too slow for hover
+    highlight every frame; the BVH fixes it.
+
+### Ideas to use later
+
+44. **Per-prop colour / values** (hover and selection highlight on the prop
+    itself, tint variation, per-prop roughness): one instanced buffer read by
+    instanceIndex in TSL. Pairs with selection.
+45. ~~Hide / show a prop without deleting it~~ — DONE with the Scene list. (visibility flag separate from
+    active): for the Scene list's hide and isolate.
+46. **Subtree LOD assignment** in the BVH: a node wholly inside one distance
+    band assigns that LOD to all its props at once. Keep OUR per-prop tier
+    memory (+-10%); theirs is stateless and does not really stop flicker.
+47. **Sorting:** front-to-back for dense solid props, back-to-front for
+    transparent ones (radix sort on 32-bit depth). Not measured; later.
+48. **Animation LOD** (for live props, characters, crowds): animate only what
+    is on screen, update rate by distance (their example: clamp(70 - d, 5, 60)
+    fps), skip hand/foot bones at far LODs.
+49. **One draw for many small prop types:** a per-prop atlas offset or texture
+    array index. Draw calls are not a measured problem today.
+
+Not taken: its WebGL shader patching and data textures (WebGPU uses storage
+buffers), the per-copy entity objects (memory), per-instance morph textures,
+its skinning texture (the crowd's compute skinning is better), its stateless
+hysteresis, and the positions-only simplification.
+
+Wrong claim, dropped: "props just off screen lose their shadows" — tested
+twice with a pillar whose shadow crosses the view; the shadow was correct.
 
 ## Performance
 
@@ -121,8 +219,15 @@ together save only 0.1–0.4 ms unpainted and 0.3–0.6 ms painted at 4.76 Mpx
 (two runs each, ~0.03–0.15 ms native). Their gates work; no change made.
 Large-scale variation was already measured free.
 
-## Suggested order
+## Suggested order (updated 2026-09-14)
 
-1. Grass look pass, panel and horizon (16–18), with your eyes.
-2. More Genshin textures (3), small paint gaps (4, 5, 7).
-3. Roads when ready.
+1. ~~Viewport selection + prop foundation~~ — DONE 2026-09-14 (28-30, 35-37,
+   43, 45). Left open: per-prop highlight tint (44; the orange box outline
+   stays) and per-prop incremental updates (41, not felt).
+2. Dropped textures surviving a reload (31) - quiet data loss, small fix.
+3. Grass look pass, panel and horizon (16-18), with your eyes.
+4. Before the city builder or any scene past ~10k props: shadow culling +
+   shadow LOD (38), per-prop culling (39), meshoptimizer auto-LOD (40).
+5. More Genshin textures (3), small paint gaps (4, 5).
+6. Terrain mirror / clone / region copy-paste (13).
+7. Roads when ready (road undo, 23, first).

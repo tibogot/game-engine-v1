@@ -55,7 +55,7 @@ import { SnowMap, SNOW_MAP_RES } from "../terrain/snowMap.js";
 import { encodeProjectFile, decodeProjectFile, isProjectFile, pickProjectFile } from "../io/projectIO.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { PropStore } from "../tools/propStore.js";
-import { PropInstancer, MAX_PROP_INSTANCES_PER_MESH } from "../tools/propInstancer.js";
+import { PropInstancer } from "../tools/propInstancer.js";
 import { PropSystem } from "../tools/propSystem.js";
 import { PropPlacementPreview } from "../tools/propPlacementPreview.js";
 import { LivePropManager } from "../tools/livePropManager.js";
@@ -123,6 +123,8 @@ import { RiverV2System } from "../tools/riverV2System.js";
 import { TunnelSystem, createTunnelToolState } from "../tools/tunnelSystem.js";
 import { TUNNEL_DEFAULTS, CAVE_DEFAULTS } from "../tools/tunnelPath.js";
 import { buildTunnelPanel } from "../ui/buildTunnelPanel.js";
+import { createClickDetector, pickNearest, raycastMeshes, nearestXZ } from "./viewportPick.js";
+import { createSceneOutliner } from "../ui/sceneOutliner.js";
 import { createLakeToolState } from "./state/lakeState.js";
 import { buildLakePanel } from "../ui/buildLakePanel.js";
 import { LakeSystem } from "../tools/lakeSystem.js";
@@ -1984,6 +1986,9 @@ export async function startV3App(opts = {}) {
   const tunnelToolSlice = createTunnelToolState();
   let tunnelSystem = null;
   let tunnelUi = null;
+  // Scene list (left panel); its per-frame hook is set once every system exists.
+  let sceneOutliner = null;
+  let _sceneListFrame = null;
   const lakeToolSlice = createLakeToolState();
   let lakeSystem = null;
   let lakeUi = null;
@@ -2681,6 +2686,11 @@ export async function startV3App(opts = {}) {
   }
 
   async function ensureCpuHeightmapFromGpu() {
+    // syncHeightmapToCPU returns at once while another readback is in flight,
+    // and that one may have started before the latest height write — so a
+    // caller asking for FRESH heights (tunnel re-cut, mode entry) got the old
+    // mirror. Wait for it to land, then read again.
+    for (let i = 0; readbackInFlight && i < 300; i++) await new Promise((r) => setTimeout(r, 10));
     await syncHeightmapToCPU();
   }
 
@@ -3143,6 +3153,7 @@ export async function startV3App(opts = {}) {
       river2System?.update(dt);
       riverV2System?.update(dt);
       tunnelSystem?.update();
+      _sceneListFrame?.();
       // Tunnel collision: cheap poll, rebuilds a BVH only when a tunnel mesh changed.
       tunnelColliderStore?.refresh();
       roadSystem?.update();
@@ -3417,6 +3428,12 @@ export async function startV3App(opts = {}) {
       setEditorMode(editorMode === "treePaint" ? "view" : "treePaint");
       return;
     }
+    // Shift+F: frame the current selection (plain F stays Foliage).
+    if (e.code === "KeyF" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      frameSelection();
+      return;
+    }
     if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       e.preventDefault();
       setEditorMode(editorMode === "foliage" ? "view" : "foliage");
@@ -3448,6 +3465,11 @@ export async function startV3App(opts = {}) {
         else splineSys.deleteSelected();
         return;
       }
+    }
+    if (editorMode === "tunnel" && !playMode.active && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      if (tunnelSystem?.duplicateActive()) tunnelUi?.refresh();
+      return;
     }
     if (editorMode === "tunnel" && !playMode.active
         && (e.code === "Delete" || e.code === "Backspace")) {
@@ -3526,6 +3548,20 @@ export async function startV3App(opts = {}) {
         e.preventDefault();
         propSys.handleDelete();
         deactivatePropSelection();
+        refreshPropCount();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        const clip = propSys.copySelection();
+        if (clip) { e.preventDefault(); _propClipboard = clip; }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        if (!_propClipboard) return;
+        e.preventDefault();
+        const at = _lastMouseEvent ? getTerrainHitWorld(_lastMouseEvent) : null;
+        const idx = propSys.paste(_propClipboard, at ? { x: at.x, z: at.z } : null);
+        if (idx != null) activatePropSelection(idx);
         refreshPropCount();
         return;
       }
@@ -4740,6 +4776,8 @@ export async function startV3App(opts = {}) {
   );
 
   let _lastMouseEvent = null;
+  /** Props copied with Ctrl+C (session only). */
+  let _propClipboard = null;
   let _propPainting = false;
 
   function _detachGizmo() {
@@ -4986,13 +5024,10 @@ export async function startV3App(opts = {}) {
     let staticCount = 0;
     let liveGroupCount = 0;
     let liveInstancedCount = 0;
-    const perType = [];
-    const typeTotals = new Map();
 
     for (const inst of propStore.instances) {
       const type = propStore.types[inst.typeIdx];
       if (!type) continue;
-      typeTotals.set(inst.typeIdx, (typeTotals.get(inst.typeIdx) ?? 0) + 1);
       if (type.live) {
         if (livePropManager.isInstancedCollectible?.(type.factoryId)) liveInstancedCount++;
         else liveGroupCount++;
@@ -5001,27 +5036,14 @@ export async function startV3App(opts = {}) {
       }
     }
 
-    for (const [typeIdx, count] of typeTotals) {
-      const type = propStore.types[typeIdx];
-      if (!type || type.live) continue;
-      if (count > MAX_PROP_INSTANCES_PER_MESH * 0.85) {
-        perType.push({
-          name: type.name,
-          count,
-          atCap: count >= MAX_PROP_INSTANCES_PER_MESH,
-        });
-      }
-    }
-
-    perType.sort((a, b) => b.count - a.count);
-
     return {
       total: propStore.totalCount,
       staticCount,
       liveGroupCount,
       liveInstancedCount,
-      maxPerType: MAX_PROP_INSTANCES_PER_MESH,
-      nearCapTypes: perType,
+      // Prop meshes grow as needed, so there is no per-type cap to report.
+      maxPerType: null,
+      nearCapTypes: [],
     };
   }
 
@@ -5046,6 +5068,9 @@ export async function startV3App(opts = {}) {
     propPlacementPreview.hide();
     refreshGizmoHud();
   }
+
+  // The selected prop was erased, cleared or undone away: drop the gizmo too.
+  propInstancer.onSelectionLost = () => deactivatePropSelection();
 
   function deactivatePropSelection() {
     propInstancer.clearSelection();
@@ -6523,6 +6548,341 @@ export async function startV3App(opts = {}) {
     }
   });
 
+  // ── View mode: click to select (Unity / Unreal style) ─────────────────────
+  // A click (not an orbit drag) picks whatever is under the cursor across every
+  // tool, and hands it to its own mode with that object selected. Painted
+  // trees, foliage and grass stay brush-edited.
+  const _viewClick = createClickDetector();
+  const _viewPickRay = new THREE.Raycaster();
+  const viewPickSources = [
+    {
+      kind: "prop",
+      pick: (rc) => {
+        const a = propInstancer.raycast(rc), b = livePropManager.raycast(rc);
+        return !a ? b : !b ? a : (b.distance < a.distance ? b : a);
+      },
+      select: (hit) => { setEditorMode("props"); activatePropSelection(hit.instIdx); },
+    },
+    {
+      kind: "tunnel",
+      pick: (rc) => raycastMeshes(rc, tunnelSystem?.tunnels.map((t) => t.mesh) ?? []),
+      select: (hit) => {
+        setEditorMode("tunnel");
+        const t = tunnelSystem.tunnels[hit.index];
+        tunnelSystem.setActiveIndex(hit.index);
+        tunnelSystem.selected = { tunnelIdx: hit.index, nodeIdx: Math.max(0, nearestXZ(t.nodes, hit.point)) };
+        tunnelSystem._rebuildHandles();
+        tunnelUi?.refresh();
+      },
+    },
+    {
+      kind: "river",
+      pick: (rc) => raycastMeshes(rc, riverV2System?.rivers.map((r) => r.mesh) ?? []),
+      select: (hit) => {
+        setEditorMode("riverv2");
+        const r = riverV2System.rivers[hit.index];
+        riverV2System.select({ riverIdx: hit.index, nodeIdx: Math.max(0, nearestXZ(r.nodes, hit.point)) });
+        riverV2Ui?.refresh();
+      },
+    },
+    {
+      kind: "lake",
+      pick: (rc) => raycastMeshes(rc, lakeSystem?.lakes.map((l) => l.mesh) ?? []),
+      select: (hit) => { setEditorMode("lake"); lakeSystem.setActiveIndex(hit.index); lakeUi?.refresh(); },
+    },
+    {
+      kind: "road",
+      pick: (rc) => raycastMeshes(rc, roadSystem ? roadSystem.roadGroup.children.filter((m) => m.isMesh) : []),
+      select: (hit) => {
+        setEditorMode("road");
+        const i = nearestXZ(roadSystem.nodes, hit.point);
+        if (i >= 0) roadSystem.selectNode(roadSystem.nodes[i].id);
+      },
+    },
+    {
+      kind: "spawn",
+      pick: (rc) => (spawnSystem.group.visible ? raycastMeshes(rc, [spawnSystem.group]) : null),
+      select: () => { setEditorMode("spawn"); },
+    },
+  ];
+
+  /** What a View-mode click at this event would select (null for nothing). */
+  function pickInView(e) {
+    refreshMouse(e);
+    _viewPickRay.setFromCamera(mouse, camera);
+    const th = getTerrainHitWorld(e);
+    // The ground in front of an object hides it — except where the terrain has
+    // a hole (a tunnel mouth), which the CPU height march cannot see.
+    const terrainDist = th && splatMap.holeAt(th.x, th.z) < 0.5 ? camera.position.distanceTo(th) : Infinity;
+    return pickNearest(_viewPickRay, viewPickSources, terrainDist);
+  }
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (e.button === 0 && editorMode === "view" && !playMode.active) _viewClick.down(e);
+  });
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button !== 0 || editorMode !== "view" || playMode.active || !_viewClick.up(e)) return;
+    const best = pickInView(e);
+    if (best) best.source.select(best.hit);
+  });
+
+  // ── Scene list (outliner) ─────────────────────────────────────────────────
+  // Every object in the scene, grouped by tool. Click selects (same as clicking
+  // it in the viewport), double-click or F frames it, the eye hides it in the
+  // editor only (not saved; everything shows again in play mode).
+  const _hiddenMeshes = new WeakSet();   // lakes, rivers hidden from the list
+  let _roadsHidden = false;
+
+  // Only objects hidden from the list (or hidden until a moment ago) are
+  // touched, so each tool keeps control of its own visibility toggles.
+  const _forcedHidden = new WeakSet();
+  function _setListHidden(obj, mesh, hidden, reveal) {
+    if (!mesh) return;
+    const hide = hidden && !reveal;
+    if (hide) { mesh.visible = false; _forcedHidden.add(obj); }
+    else if (_forcedHidden.has(obj)) { mesh.visible = true; _forcedHidden.delete(obj); }
+  }
+  let _roadsForced = false;
+  function _applyEditorHidden() {
+    const reveal = playMode.active;
+    for (const l of lakeSystem?.lakes ?? []) _setListHidden(l, l.mesh, _hiddenMeshes.has(l), reveal);
+    for (const r of riverV2System?.rivers ?? []) _setListHidden(r, r.mesh, _hiddenMeshes.has(r), reveal);
+    for (const t of tunnelSystem?.tunnels ?? []) _setListHidden(t, t.mesh, !!t.hidden, reveal);
+    if (roadSystem) {
+      if (_roadsHidden && !reveal) { roadSystem.roadGroup.visible = false; _roadsForced = true; }
+      else if (_roadsForced) { roadSystem.roadGroup.visible = true; _roadsForced = false; }
+    }
+    if (propInstancer.revealHidden !== reveal) { propInstancer.revealHidden = reveal; propInstancer.visibilityChanged(); }
+  }
+
+  const _propTypeSlot = (typeIdx) => propSlots.findIndex((sl) => sl.typeIdx === typeIdx);
+
+  function sceneModel() {
+    const groups = [];
+    groups.push({ key: "terrain", label: "Terrain", icon: "mountain", count: null, items: [] });
+
+    const byType = new Map();
+    for (const p of propStore.instances) {
+      if (!byType.has(p.typeIdx)) byType.set(p.typeIdx, 0);
+      byType.set(p.typeIdx, byType.get(p.typeIdx) + 1);
+    }
+    const selIds = new Set(editorMode === "props" ? propInstancer.selectedIds : []);
+    groups.push({
+      key: "props", label: "Props", icon: "box", count: propStore.instances.length,
+      items: [...byType.entries()].sort((a, b) => a[0] - b[0]).map(([typeIdx, n]) => {
+        const type = propStore.types[typeIdx];
+        const live = !!type?.live;
+        return {
+          key: `propType:${typeIdx}`, label: type?.name ?? `Type ${typeIdx}`, sub: String(n),
+          canHide: !live, hidden: propInstancer.hiddenTypes.has(typeIdx),
+          children: {
+            total: n,
+            items: () => {
+              const out = [];
+              let k = 0;
+              for (const p of propStore.instances) {
+                if (p.typeIdx !== typeIdx) continue;
+                out.push({
+                  key: `prop:${p.id}`, label: `${type?.name ?? "Prop"} #${p.id}`,
+                  sub: `${p.px.toFixed(0)}, ${p.pz.toFixed(0)}`, selected: selIds.has(p.id),
+                  canHide: !live, hidden: propInstancer.hiddenIds.has(p.id),
+                });
+                if (++k >= 200) break;
+              }
+              return out;
+            },
+          },
+        };
+      }),
+    });
+
+    const tunnels = tunnelSystem?.tunnels ?? [];
+    groups.push({
+      key: "tunnels", label: "Tunnels & caves", icon: "rainbow", count: tunnels.length,
+      items: tunnels.map((t, i) => ({
+        key: `tunnel:${i}`, label: `${t.style === "cave" ? "Cave" : "Tunnel"} ${i + 1}`,
+        sub: t._sampled ? `${t._sampled.length.toFixed(0)} m` : `${t.nodes.length} node`,
+        selected: editorMode === "tunnel" && tunnelSystem.activeIndex === i,
+        canHide: true, hidden: !!t.hidden,
+      })),
+    });
+
+    const rivers = riverV2System?.rivers ?? [];
+    groups.push({
+      key: "rivers", label: "Rivers", icon: "waypoints", count: rivers.length,
+      items: rivers.map((r, i) => ({
+        key: `river:${i}`, label: `River ${i + 1}`, sub: `${r.nodes.length} nodes`,
+        selected: editorMode === "riverv2" && (riverV2Slice.riverV2.activeRiverIndex | 0) === i,
+        canHide: true, hidden: _hiddenMeshes.has(r),
+      })),
+    });
+
+    const lakes = lakeSystem?.lakes ?? [];
+    groups.push({
+      key: "lakes", label: "Lakes", icon: "waves", count: lakes.length,
+      items: lakes.map((l, i) => ({
+        key: `lake:${i}`, label: `Lake ${i + 1}`, sub: `${l.sizeX.toFixed(0)}×${l.sizeZ.toFixed(0)} m`,
+        selected: editorMode === "lake" && (lakeToolSlice.lake.activeIndex | 0) === i,
+        canHide: true, hidden: _hiddenMeshes.has(l),
+      })),
+    });
+
+    const roadNodes = roadSystem?.nodes?.length ?? 0;
+    groups.push({
+      key: "roads", label: "Roads", icon: "route", count: roadNodes ? 1 : 0,
+      items: roadNodes ? [{
+        key: "road", label: "Road network", sub: `${roadNodes} nodes`,
+        selected: editorMode === "road", canHide: true, hidden: _roadsHidden,
+      }] : [],
+    });
+
+    groups.push({
+      key: "spawn", label: "Player start", icon: "flag", count: spawnSystem.placed ? 1 : 0,
+      items: spawnSystem.placed ? [{ key: "spawnPoint", label: "Player start", selected: editorMode === "spawn" }] : [],
+    });
+    return groups;
+  }
+
+  function sceneSignature() {
+    return [
+      editorMode, propStore.gen, propInstancer.selectedIds.join(","),
+      propInstancer.hiddenTypes.size, propInstancer.hiddenIds.size,
+      (tunnelSystem?.tunnels ?? []).map((t) => `${t.style}${t.nodes.length}${t.hidden ? "h" : ""}${(t._sampled?.length ?? 0) | 0}`).join(";"), tunnelSystem?.activeIndex,
+      (riverV2System?.rivers ?? []).map((r) => `${r.nodes.length}${_hiddenMeshes.has(r) ? "h" : ""}`).join(";"), riverV2Slice.riverV2.activeRiverIndex,
+      (lakeSystem?.lakes ?? []).map((l) => `${l.sizeX | 0}${l.sizeZ | 0}${_hiddenMeshes.has(l) ? "h" : ""}`).join(";"), lakeToolSlice.lake.activeIndex,
+      roadSystem?.nodes?.length ?? 0, _roadsHidden, spawnSystem.placed,
+    ].join("|");
+  }
+
+  function selectSceneObject(key) {
+    const [kind, arg] = key.split(":");
+    const i = Number(arg);
+    switch (kind) {
+      case "terrain": setEditorMode("sculpt"); break;
+      case "props": setEditorMode("props"); break;
+      case "propType": {
+        setEditorMode("props");
+        const slot = _propTypeSlot(i);
+        if (slot >= 0) { propState.activeSlot = slot; document.getElementById("props-panel")?._rebuildPropUi?.(); }
+        break;
+      }
+      case "prop": {
+        const idx = propStore.indexOfId(i);
+        if (idx >= 0) { setEditorMode("props"); activatePropSelection(idx); }
+        break;
+      }
+      case "tunnels": setEditorMode("tunnel"); break;
+      case "tunnel":
+        setEditorMode("tunnel");
+        tunnelSystem.setActiveIndex(i);
+        tunnelSystem.selected = { tunnelIdx: i, nodeIdx: 0 };
+        tunnelSystem._rebuildHandles();
+        tunnelUi?.refresh();
+        break;
+      case "rivers": setEditorMode("riverv2"); break;
+      case "river":
+        setEditorMode("riverv2");
+        riverV2System.select({ riverIdx: i, nodeIdx: 0 });
+        riverV2Ui?.refresh();
+        break;
+      case "lakes": setEditorMode("lake"); break;
+      case "lake": setEditorMode("lake"); lakeSystem.setActiveIndex(i); lakeUi?.refresh(); break;
+      case "roads": case "road": setEditorMode("road"); break;
+      case "spawn": case "spawnPoint": setEditorMode("spawn"); break;
+    }
+  }
+
+  const _frameBox = new THREE.Box3();
+  const _frameTmp = new THREE.Box3();
+  /** World bounds of a scene-list key, or null. */
+  function sceneObjectBounds(key) {
+    const [kind, arg] = key.split(":");
+    const i = Number(arg);
+    const box = _frameBox.makeEmpty();
+    const propBox = (p) => {
+      const type = propStore.types[p.typeIdx];
+      if (!type?.mergedBox) return;
+      _frameTmp.copy(type.mergedBox).applyMatrix4(propStore.computeInstanceMatrix(p));
+      box.union(_frameTmp);
+    };
+    switch (kind) {
+      case "prop": { const idx = propStore.indexOfId(i); if (idx >= 0) propBox(propStore.instances[idx]); break; }
+      case "propType": for (const p of propStore.instances) if (p.typeIdx === i) propBox(p); break;
+      case "props": for (const p of propStore.instances) propBox(p); break;
+      case "tunnel": { const m = tunnelSystem.tunnels[i]?.mesh; if (m) box.setFromObject(m); break; }
+      case "river": { const m = riverV2System.rivers[i]?.mesh; if (m) box.setFromObject(m); break; }
+      case "lake": { const m = lakeSystem.lakes[i]?.mesh; if (m) box.setFromObject(m); break; }
+      case "road": case "roads": if (roadSystem) box.setFromObject(roadSystem.roadGroup); break;
+      case "spawn": case "spawnPoint": if (spawnSystem.placed) box.setFromObject(spawnSystem.group); break;
+      case "terrain": box.set(new THREE.Vector3(-WORLD_SIZE / 2, 0, -WORLD_SIZE / 2), new THREE.Vector3(WORLD_SIZE / 2, MAX_HEIGHT * 0.3, WORLD_SIZE / 2)); break;
+    }
+    return box.isEmpty() ? null : box;
+  }
+
+  /** Move the orbit camera to look at a box from the current viewing direction. */
+  function frameBounds(box) {
+    if (!box || playMode.active) return false;
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(2, box.getSize(new THREE.Vector3()).length() * 0.5);
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0.6, 1);
+    dir.normalize();
+    const dist = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov) * 0.5) * 1.15;
+    controls.target.copy(center);
+    camera.position.copy(center).addScaledVector(dir, dist);
+    controls.update();
+    return true;
+  }
+
+  /** Shift+F: frame whatever the current mode has selected. */
+  function frameSelection() {
+    let key = null;
+    if (editorMode === "props" && propInstancer.hasSelection) {
+      const box = new THREE.Box3();
+      for (const id of propInstancer.selectedIds) {
+        const b = sceneObjectBounds(`prop:${id}`);
+        if (b) box.union(b);
+      }
+      return frameBounds(box.isEmpty() ? null : box);
+    }
+    if (editorMode === "tunnel" && tunnelSystem?.activeTunnel) key = `tunnel:${tunnelSystem.activeIndex}`;
+    else if (editorMode === "riverv2" && riverV2System?.rivers.length) key = `river:${riverV2Slice.riverV2.activeRiverIndex | 0}`;
+    else if (editorMode === "lake" && lakeSystem?.lakes.length) key = `lake:${lakeToolSlice.lake.activeIndex | 0}`;
+    else if (editorMode === "road") key = "road";
+    else if (editorMode === "spawn") key = "spawnPoint";
+    return key ? frameBounds(sceneObjectBounds(key)) : false;
+  }
+
+  function toggleSceneHidden(key) {
+    const [kind, arg] = key.split(":");
+    const i = Number(arg);
+    switch (kind) {
+      case "propType":
+        if (propInstancer.hiddenTypes.has(i)) propInstancer.hiddenTypes.delete(i); else propInstancer.hiddenTypes.add(i);
+        propInstancer.visibilityChanged();
+        break;
+      case "prop":
+        if (propInstancer.hiddenIds.has(i)) propInstancer.hiddenIds.delete(i); else propInstancer.hiddenIds.add(i);
+        propInstancer.visibilityChanged();
+        break;
+      case "tunnel": { const t = tunnelSystem.tunnels[i]; if (t) t.hidden = !t.hidden; break; }
+      case "river": { const r = riverV2System.rivers[i]; if (r) (_hiddenMeshes.has(r) ? _hiddenMeshes.delete(r) : _hiddenMeshes.add(r)); break; }
+      case "lake": { const l = lakeSystem.lakes[i]; if (l) (_hiddenMeshes.has(l) ? _hiddenMeshes.delete(l) : _hiddenMeshes.add(l)); break; }
+      case "road": _roadsHidden = !_roadsHidden; break;
+    }
+    _applyEditorHidden();
+  }
+
+  sceneOutliner = createSceneOutliner({
+    container: document.getElementById("hierarchy"),
+    getModel: sceneModel,
+    signature: sceneSignature,
+    onSelect: selectSceneObject,
+    onFrame: (key) => { selectSceneObject(key); frameBounds(sceneObjectBounds(key)); },
+    onToggleHidden: toggleSceneHidden,
+  });
+  _sceneListFrame = () => { _applyEditorHidden(); sceneOutliner.update(); };
+
   // ── Tunnel mode mouse events ──────────────────────────────────────────────
   // Click drops a node, Alt+click inserts one into the nearest span, dragging a
   // node moves it over the ground.
@@ -7227,6 +7587,12 @@ export async function startV3App(opts = {}) {
       lod,
       playMode,
       tunnelSystem,
+      pickInView,
+      getSceneOutliner: () => sceneOutliner,
+      frameSelection: () => frameSelection(),
+      spawnSystem,
+      getRoadSystem: () => roadSystem,
+      props: { propStore, propInstancer, propSys, solidCollider, cliffBvh, addPrimitive, addCliff, activatePropSelection, deactivatePropSelection, rebakePlayerBvh, tc, getLivePropManager: () => livePropManager },
       sculpt,
       ensureCpuHeightmapFromGpu,
       markHeightmapDirty,

@@ -439,6 +439,26 @@ export class TunnelSystem {
     this._rebuildHandles();
   }
 
+  /** Ctrl+D: copy the active tunnel beside itself (one undo step); the copy becomes active. */
+  duplicateActive() {
+    const t = this.activeTunnel;
+    if (!t) return false;
+    this._pushUndo();
+    const copy = _parseTunnel(_serializeTunnel(t));
+    const shift = (t.width + t.thickness * 2) * 2;
+    // Offset across the tunnel's own direction, so a copy sits beside it.
+    const a = t.nodes[0], b = t.nodes[t.nodes.length - 1];
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const px = -(b.z - a.z) / len, pz = (b.x - a.x) / len;
+    for (const n of copy.nodes) { n.x += px * shift; n.z += pz * shift; }
+    this.tunnels.push(copy);
+    this.activeIndex = this.tunnels.length - 1;
+    this.selected = { tunnelIdx: this.activeIndex, nodeIdx: 0 };
+    this._rebuildTunnel(this.activeIndex, { holes: true });
+    this._rebuildHandles();
+    return true;
+  }
+
   /** Raise or lower every node of the active tunnel. */
   nudgeActiveTunnel(dy) {
     const t = this.activeTunnel;
@@ -465,6 +485,7 @@ export class TunnelSystem {
       const mesh = new THREE.Mesh(buildTunnelGeometry(sampled, t, { cuts: t._cuts }), this.material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      mesh.visible = !t.hidden;   // Scene list eye (editor only, not saved)
       mesh.name = `Tunnel ${i + 1}`;
       this.group.add(mesh);
       mesh.updateMatrixWorld(true);

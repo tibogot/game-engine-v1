@@ -121,6 +121,62 @@ export class PropSystem {
     return primary;
   }
 
+  /**
+   * Copy the selected props (Ctrl+C): types, transforms relative to their
+   * centroid, live params. Returns a clipboard object, or null with nothing
+   * selected.
+   */
+  copySelection() {
+    if (!this.instancer.hasSelection) return null;
+    this.instancer.syncFromProxy();
+    const list = this.instancer.selectedIndices.map((i) => this.store.instances[i]).filter(Boolean);
+    if (!list.length) return null;
+    const c = { x: 0, y: 0, z: 0 };
+    for (const p of list) { c.x += p.px; c.y += p.py; c.z += p.pz; }
+    c.x /= list.length; c.y /= list.length; c.z /= list.length;
+    const groundAtCentroid = this.getWorldHeight(c.x, c.z);
+    return {
+      heightAboveGround: c.y - groundAtCentroid,
+      centroid: c,
+      items: list.map((p) => ({
+        typeIdx: p.typeIdx, dx: p.px - c.x, dy: p.py - c.y, dz: p.pz - c.z,
+        rx: p.rx, ry: p.ry, rz: p.rz, sx: p.sx, sy: p.sy, sz: p.sz,
+        liveParams: p.liveParams ? { ...p.liveParams } : undefined,
+      })),
+    };
+  }
+
+  /**
+   * Paste a clipboard (Ctrl+V) centred on `at` (a terrain point) — or next to
+   * where it was copied when there is no point — keeping the group's height
+   * above the ground. The copies become the selection. One undo step.
+   * @returns {number|null} slot of the primary pasted prop
+   */
+  paste(clip, at = null) {
+    if (!clip?.items?.length) return null;
+    const cx = at ? at.x : clip.centroid.x + 2;
+    const cz = at ? at.z : clip.centroid.z + 2;
+    const cy = this.getWorldHeight(cx, cz) + clip.heightAboveGround;
+    const before = this.store.snapshot();
+    const slots = [];
+    for (const it of clip.items) {
+      if (!this.store.types[it.typeIdx]) continue;
+      slots.push(this.store.instances.length);
+      this.store.instances.push({
+        typeIdx: it.typeIdx, px: cx + it.dx, py: cy + it.dy, pz: cz + it.dz,
+        rx: it.rx, ry: it.ry, rz: it.rz, sx: it.sx, sy: it.sy, sz: it.sz,
+        ...(it.liveParams ? { liveParams: { ...it.liveParams } } : {}),
+      });
+    }
+    if (!slots.length) return null;
+    this.store._bump();
+    this._pushUndo(before);
+    const primary = slots[slots.length - 1];
+    this.instancer.setSelection(slots, primary);
+    if (this.bvh) this.bvh.invalidate();
+    return primary;
+  }
+
   handleTransformChange() {
     this.instancer.syncFromProxy();
   }
