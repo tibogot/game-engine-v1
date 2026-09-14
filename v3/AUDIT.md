@@ -101,7 +101,121 @@ the game.
     five vegetation modes is NOT recommended: undo is routed by mode and 23
     handlers are mode-gated.
 
-## Roads (later; Smart Road 2 plan has the details)
+## Roads — lane-based engine (v3/roads/), the target
+
+Goal: a road builder at the level of Unreal/Unity road plugins, for a full
+car-game city (GTA, Neverness to Everness, Forza Horizon). Smart Road 2 stays the
+live road mode until this matches it; items 22-27 below are its old gaps.
+
+Done:
+- 2D engine + lab (`npm run dev:roads`, tools/laneRoadTest.mjs): alignments,
+  lane stacks and sections, profiles, junctions, roundabouts, splits, derived
+  markings, lane graph, blocks and lots, props by rule, traffic sim.
+- 2026-09-14: 3D preview in the editor — Lane road mode
+  (`editor.html?laneRoad=junction`). Flat ground only. Asphalt lanes and pads
+  (earcut, island holes), 15 cm sidewalks with beveled curb faces, raised grass
+  medians, roundabout apron + island + splitters, markings as thin geometry.
+  4 draws; all three test scenes 12.6k triangles, ~20 ms rebuild; GPU +0.13 ms
+  overview, +0.66 ms road filling the view, paint below timer resolution.
+  tools/laneRoadMeshTest.mjs.
+
+### Next: markings in the road shader (agreed direction, not started)
+
+50. **Paint in the asphalt shader, sharing its wear and wetness** 👁. Geometry
+    paint cannot share the asphalt's wet film or eat its edges the way the
+    modular-road city street does (wear subtracts from the line's WIDTH, which
+    needs distance-to-edge in the shader), and thin lines shimmer at distance.
+    - Lines along the road (~80-90% of paint): analytic per lane strip from
+      edge line type/width/colour/dash attributes; wear bites the width; fwidth
+      AA fades sub-pixel lines to average coverage. No texture.
+    - Junction shapes (bars, stop/yield, arrows, hatch, ring lines): small
+      signed-distance atlas per node area (5-8 cm texel; downtown ~one 4096²
+      page, ~16 MB), same width-erosion wear. One sampler.
+    - The asphalt deck is at WebGPU's 8 vertex-buffer limit: fold constant
+      attributes into material options and pack the rest.
+    - Remove the geometry paint mesh once this ships.
+51. **One shared asphalt function** taking a road frame {along, across,
+    lateral, wheelPath}: asphalt + paint + paint wear + wet (modularRoadWet).
+    Lane roads first; track deck and city street switch over later, each A/B'd.
+    Ends the city street's hand copy drifting from the track asphalt.
+52. **Wetness in the editor**: wet amount / puddles panel (planar car
+    reflections stay game-only).
+
+### Surface and look
+
+53. Coloured lane surfaces (red bus, green/blue bike, hatched fills).
+54. Curb types: dropped curbs at crossings and driveways, flush curbs, granite
+    vs concrete.
+55. Sidewalk paving that follows the street, joints, tree pits.
+56. Road crown and gutters so water pools at the curb (feeds 52).
+57. Surface decals: manholes, drain grates, patches, cracks, oil, skid marks.
+58. Grime and occlusion at curb bases and road edges.
+59. District surface presets: new/old asphalt, concrete slabs, cobblestone, brick.
+60. Night: retroreflective paint under headlights, raised pavement markers.
+
+### More markings
+
+61. Region styles EU / US / UK / JP.
+62. Crosswalk styles: zebra, ladder, continental, piano.
+63. Box junctions, bike boxes, dotted turn guide lines through junctions.
+64. Text and symbols: STOP, BUS, TAXI, SLOW, speed numbers, bike, disabled,
+    school zone.
+65. Parking: angled, perpendicular, T-marks, loading zones, UK zigzags.
+66. Merge / lane-drop / roundabout lane arrows, highway chevrons and gores,
+    rumble strips.
+
+### Geometry
+
+67. Terrain fitting (roadConformSystem), junction elevation blending on slopes,
+    superelevation in curves. **Next after the shader paint.**
+68. Driveways and alley entrances with curb cuts, bulb-outs, pedestrian refuge
+    islands, median openings for turns.
+69. Bus bays, lay-bys, parking lots, fuel-station aprons.
+70. Bridges (deck, girders, piers, railings, expansion joints), tunnels with
+    lights, overpasses with retaining walls, embankment and cut slopes.
+71. Interchanges (cloverleaf, diamond, flyovers, multi-level ramps), 5-6 arm
+    and staggered junctions.
+72. Engine quirk: a raised median's end cap reaches ~0.45 x its width past the
+    road end (into a dead-end sidewalk cap). Mesh uses median 18 cm vs curb
+    15 cm to avoid coplanar faces; fix the cap in the engine.
+
+### Props by rule
+
+73. Traffic lights with signal phases; signs from lane data (stop, yield, speed,
+    lane direction, street names).
+74. Street lamps with night light pools, guardrails, Jersey barriers, bollards,
+    fences.
+75. Bus shelters, benches, hydrants, bins, utility poles and wires, billboards.
+    All instanced (see 38-40 for the city-scale prop costs).
+
+### Traffic and life
+
+76. Render traffic on the lane graph (sim exists), obey signals and yield/stop.
+77. Pedestrians on sidewalks and crosswalks; parked cars in parking lanes.
+78. Racing lines and GPS routing on the lane graph; minimap.
+79. Curb and island collision for car physics; surface types for tyre audio
+    and grip (paint, asphalt, cobble, wet).
+
+### City
+
+80. Blocks and lots feed the city building system; districts and zoning pick
+    road types and surface presets; street network generator; alleys;
+    entrances meet sidewalks. Ties into 33.
+
+### Editor and scale
+
+81. Draw roads in 3D with snapping; drag nodes and PIs; lane stack and section
+    editing in the viewport; junction editor (corner radius, crosswalks,
+    control); engine issues shown in 3D; undo/redo; saved in the .v3proj.
+    Then switch the road mode from Smart Road 2.
+82. Chunked meshes for culling, per-road dirty rebuilds, build in a worker.
+83. Cheaper far asphalt (full-screen road costs +0.66 ms today), shadow budget
+    per chunk.
+
+Suggested road order: 50-52 → 67 → 70 → 73-75 → 76-77 → 81 → 82-83 →
+61-66 + 57 → 80.
+
+## Roads — Smart Road 2 gaps (superseded by the lane-based engine)
 
 22. **Per-edge road types.** One global width and profile today.
 23. **Road undo.** None exists.
@@ -251,4 +365,5 @@ Large-scale variation was already measured free.
    shadow LOD (38), per-prop culling (39), meshoptimizer auto-LOD (40).
 5. More Genshin textures (3), small paint gaps (4, 5).
 6. Terrain mirror / clone / region copy-paste (13).
-7. Roads when ready (road undo, 23, first).
+7. Roads: the lane-based engine replaces Smart Road 2 — follow the road order in
+   its section (shader paint with wear and wetness, 50-52, first).

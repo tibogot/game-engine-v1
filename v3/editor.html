@@ -38,6 +38,9 @@
           <button class="toolbar-btn" data-mode="road" title="Road (smart)">
             <i data-lucide="route"></i>
           </button>
+          <button class="toolbar-btn" data-mode="laneRoad" title="Lane road (3D preview)">
+            <i data-lucide="milestone"></i>
+          </button>
           <button class="toolbar-btn" data-mode="river" title="River (V)">
             <i data-lucide="droplets"></i>
           </button>
@@ -181,6 +184,7 @@
               <option value="tunnel">Tunnel (O)</option>
               <option value="lake">Lake (L)</option>
               <option value="road">Road (smart)</option>
+              <option value="laneRoad">Lane road (preview)</option>
               <option value="snow">Snow</option>
               <option value="cliffPaint">Cliff paint</option>
               <option value="spawn">Player start (N)</option>
@@ -2135,6 +2139,7 @@
 
         <!-- ROAD panel — built dynamically by buildRoadPanel() -->
         <div id="road-panel" style="display:none"></div>
+        <div id="lane-road-panel" style="display:none"></div>
 
         <!-- SPAWN panel — built dynamically by buildSpawnPanel() -->
         <div id="spawn-panel" style="display:none"></div>

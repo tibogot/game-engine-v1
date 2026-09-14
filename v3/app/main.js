@@ -139,6 +139,8 @@ import { RoadConformSystem } from "../tools/roadConformSystem.js";
 import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
 import { DEFAULT_ROAD_STATE } from "./state/roadState.js";
 import { buildRoadPanel } from "../ui/buildRoadPanel.js";
+import { LaneRoadSystem, createLaneRoadToolState } from "../tools/laneRoadSystem.js";
+import { buildLaneRoadPanel } from "../ui/buildLaneRoadPanel.js";
 import { buildPlayPhysicsPanel } from "../ui/buildPlayPhysicsPanel.js";
 import { buildPlayFlightPanel } from "../ui/buildPlayFlightPanel.js";
 import { createFlyHud } from "../ui/flyHud.js";
@@ -597,7 +599,8 @@ export async function startV3App(opts = {}) {
   const tunnelPanel    = document.getElementById("tunnel-panel");
   const lakePanel      = document.getElementById("lake-panel");
   const roadPanel      = document.getElementById("road-panel");
-  const spawnPanel     = document.getElementById("spawn-panel");
+  const laneRoadPanel  = document.getElementById("lane-road-panel");
+  const spawnPanel    = document.getElementById("spawn-panel");
   const playStatPos    = document.getElementById("play-stat-pos");
   const playStatSpeed  = document.getElementById("play-stat-speed");
   const playStatGround = document.getElementById("play-stat-ground");
@@ -691,6 +694,7 @@ export async function startV3App(opts = {}) {
       syncRiver2PanelVisibility();
       syncLakePanelVisibility();
       syncRoadPanelVisibility();
+      syncLaneRoadPanelVisibility();
       syncCliffPaintPanelVisibility();
       syncSpawnPanelVisibility();
       applyRiverModeEffects();
@@ -2011,6 +2015,11 @@ export async function startV3App(opts = {}) {
   let roadConform = null;
   const roadState = { ...DEFAULT_ROAD_STATE };
   const _roadDrag = { nodeId: null, edge: null };
+  // Lane road: 3D preview of the lane-based road engine (v3/roads/). Separate
+  // from Smart Road 2 above; built on first entry, never saved in the project.
+  const laneRoadToolSlice = createLaneRoadToolState();
+  let laneRoadSystem = null;
+  let laneRoadUi = null;
   const splineState = { ...DEFAULT_SPLINE_STATE };
   let splineToolState = {
     mode: "view",
@@ -2092,6 +2101,10 @@ export async function startV3App(opts = {}) {
 
   function syncRoadPanelVisibility() {
     roadPanel.style.display = (editorMode === "road" && !playMode.active) ? "" : "none";
+  }
+
+  function syncLaneRoadPanelVisibility() {
+    if (laneRoadPanel) laneRoadPanel.style.display = (editorMode === "laneRoad" && !playMode.active) ? "" : "none";
   }
 
   function syncSpawnPanelVisibility() {
@@ -2192,7 +2205,7 @@ export async function startV3App(opts = {}) {
       uCursorUV.value.set(-2, -2);
       spawnUi?.refresh();
     } else if (m === "props" || m === "spline" || m === "river" || m === "river2"
-      || m === "riverv2" || m === "road" || m === "lake" || m === "tunnel") {
+      || m === "riverv2" || m === "road" || m === "lake" || m === "tunnel" || m === "laneRoad") {
       uCursorUV.value.set(-2, -2);
       if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
       // River v2 snapshots the unconformed terrain from the CPU mirror, so the
@@ -2207,6 +2220,13 @@ export async function startV3App(opts = {}) {
         void ensureCpuHeightmapFromGpu().then(() => {
           roadConform?.rebase();
           roadSystem?.queueRebuild();
+        });
+      }
+      // First visit loads the test scene at the view centre, on the ground there.
+      if (m === "laneRoad" && laneRoadSystem && !laneRoadSystem.loaded) {
+        void ensureCpuHeightmapFromGpu().then(() => {
+          laneRoadSystem.load();
+          laneRoadUi?.refresh();
         });
       }
     }
@@ -2226,6 +2246,7 @@ export async function startV3App(opts = {}) {
     syncTunnelPanelVisibility();
     syncLakePanelVisibility();
     syncRoadPanelVisibility();
+    syncLaneRoadPanelVisibility();
     syncSpawnPanelVisibility();
     applySplineModeEffects();
     applyRiverModeEffects();
@@ -2270,6 +2291,7 @@ export async function startV3App(opts = {}) {
     if (tunnelPanel) tunnelPanel.style.display = "none";
     lakePanel.style.display = "none";
     roadPanel.style.display = "none";
+    if (laneRoadPanel) laneRoadPanel.style.display = "none";
     spawnPanel.style.display = "none";
     roadSystem?.setEditActive(false);
     lakeSystem?.setEditActive(false);
@@ -5016,6 +5038,16 @@ export async function startV3App(opts = {}) {
   tunnelColliderStore = createSplineFeatureColliderStore(() => tunnelSystem?.colliderFeatures ?? []);
   colliderSources.push(new SolidCollider(tunnelColliderStore));
 
+  // ── Lane road (3D preview) ─────────────────────────────────────────────────
+  // Meshes only: no terrain edit, no collision, no project data. Nothing is
+  // built until the mode is first entered.
+  laneRoadSystem = new LaneRoadSystem({
+    scene,
+    toolState: laneRoadToolSlice,
+    groundAt: (x, z) => getWorldHeight(x, z),
+    viewTarget: () => controls.target,
+  });
+
   _onLeaveSplineMode = () => {
     splineSys.dragging = false;
     splineSys.clearPreview();
@@ -6266,6 +6298,11 @@ export async function startV3App(opts = {}) {
   }
 
   tunnelUi = buildTunnelPanel({ tunnelSystem, maxHeight: MAX_HEIGHT, defaults: { TUNNEL_DEFAULTS, CAVE_DEFAULTS } });
+
+  laneRoadUi = buildLaneRoadPanel({
+    laneRoadSystem,
+    onFrame: () => frameBounds(new THREE.Box3().setFromObject(laneRoadSystem.group)),
+  });
 
   riverV2Ui = buildRiverV2Panel({
     toolState: { riverV2: riverV2Slice.riverV2 },
@@ -7643,6 +7680,16 @@ export async function startV3App(opts = {}) {
   // Re-sync orbit after props/spline wiring (do not reset mode — that felt like a freeze).
   syncEditorOrbitEnabled();
 
+  // editor.html?laneRoad=junction boots straight into the lane road preview
+  // (scenes: straight, junction, roundabout, all, or an engine demo scene).
+  {
+    const q = new URLSearchParams(location.search).get("laneRoad");
+    if (q != null) {
+      if (q) laneRoadToolSlice.laneRoad.scene = q;
+      setEditorMode("laneRoad");
+    }
+  }
+
   if (import.meta.env?.DEV) {
     window.__V3_DEBUG = {
       get editorMode() { return editorMode; },
@@ -7690,6 +7737,7 @@ export async function startV3App(opts = {}) {
       frameSelection: () => frameSelection(),
       spawnSystem,
       getRoadSystem: () => roadSystem,
+      laneRoad: laneRoadSystem,
       props: { propStore, propInstancer, propSys, solidCollider, cliffBvh, addPrimitive, addCliff, activatePropSelection, deactivatePropSelection, rebakePlayerBvh, tc, getLivePropManager: () => livePropManager, propSlots, propTextureLibrary, addLiveProp, importPropGlb, importPropLod, importGlbCollectible },
       // Project save/load, and the imported files a project carries.
       saveProject,
