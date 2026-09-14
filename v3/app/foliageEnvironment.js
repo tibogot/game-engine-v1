@@ -14,6 +14,7 @@ import {
   applyFoliageSlotTextures,
   loadFoliageTextureFromFile,
 } from "../../v2/core/foliage/foliageTexturePaths.js";
+import { projectAssets, isAssetRef } from "../io/projectAssets.js";
 
 export function createFoliageEnvironment({
   scene,
@@ -119,16 +120,15 @@ export function createFoliageEnvironment({
       const slot = toolState.foliageSlots[slotIdx];
       const projectUrl = await probeFoliageTextureFile(filename);
 
-      const applyTex = (tex, persist) => {
+      const applyTex = async (tex, persist) => {
+        delete slot.texturePreviewName;
         if (persist) {
-          delete slot.texturePreviewName;
           slot.textureUrl = normalizeFoliageTextureRef(filename);
           console.log(`[V3] Foliage slot ${slotIdx} ← ${slot.textureUrl}`);
         } else {
-          slot.texturePreviewName = filename;
-          console.log(
-            `[V3] Foliage slot ${slotIdx} preview: ${filename} (copy to ${FOLIAGE_TEXTURE_DIR} to keep after save)`,
-          );
+          // Not in the project's texture folder: keep the file inside the project.
+          slot.textureUrl = await projectAssets.addRef(file);
+          console.log(`[V3] Foliage slot ${slotIdx} ← ${filename} (kept in the project file)`);
         }
         billboardRenderer.setSlotTexture(slotIdx, tex, slot);
         document
@@ -146,7 +146,7 @@ export function createFoliageEnvironment({
 
       try {
         const tex = await loadFoliageTextureFromFile(file);
-        applyTex(tex, false);
+        await applyTex(tex, false);
       } catch (err) {
         console.warn(`[V3] Foliage slot ${slotIdx}: could not load ${filename}`, err);
       }
@@ -207,12 +207,29 @@ export function createFoliageEnvironment({
         const slot = toolState.foliageSlots[i];
         delete slot.texturePreviewName;
         Object.assign(slot, meta);
-        if (slot.textureUrl) slot.textureUrl = normalizeFoliageTextureRef(slot.textureUrl);
+        if (slot.textureUrl && !isAssetRef(slot.textureUrl)) {
+          slot.textureUrl = normalizeFoliageTextureRef(slot.textureUrl);
+        }
         billboardRenderer.rebuildSlot(i, slot);
         // rebuildSlot keeps the previous texture; drop it if this project has none.
         if (!slot.textureUrl) billboardRenderer.setSlotTexture(i, null, slot);
       });
-      applyFoliageSlotTextures(billboardRenderer, toolState.foliageSlots).catch(() => {});
+      // Textures kept inside the project load straight from their bytes; the
+      // rest go through the texture-folder lookup.
+      const folderSlots = toolState.foliageSlots.map((slot, i) => {
+        if (!isAssetRef(slot.textureUrl)) return slot;
+        const url = projectAssets.resolveUrl(slot.textureUrl);
+        if (!url) {
+          console.warn(`[V3] Foliage slot ${i}: texture ${slot.textureUrl} is not in this project`);
+        } else {
+          new THREE.TextureLoader().load(url, (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            billboardRenderer.setSlotTexture(i, tex, slot);
+          });
+        }
+        return { ...slot, textureUrl: null };
+      });
+      applyFoliageSlotTextures(billboardRenderer, folderSlots).catch(() => {});
     }
     for (const t of d.instances ?? []) {
       foliageStore.addFoliage(t[0], t[1], t[2], t[3], t[4], t[5], t[6] ?? 0, t[7] ?? 0);

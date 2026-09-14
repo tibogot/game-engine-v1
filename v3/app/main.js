@@ -53,6 +53,7 @@ import { SPLAT_RES } from "../terrain/splatMap.js";
 import { createSnowSystem } from "../terrain/snowSystem.js";
 import { SnowMap, SNOW_MAP_RES } from "../terrain/snowMap.js";
 import { encodeProjectFile, decodeProjectFile, isProjectFile, pickProjectFile } from "../io/projectIO.js";
+import { projectAssets } from "../io/projectAssets.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { PropStore } from "../tools/propStore.js";
 import { PropInstancer } from "../tools/propInstancer.js";
@@ -5152,9 +5153,15 @@ export async function startV3App(opts = {}) {
     }
   }
 
-  async function loadGltfAsType(file) {
+  /**
+   * @param {File} file
+   * @param {{ keep?: boolean }} [opts] keep: store the file inside the project
+   *   (default). false for a file fetched back from /models, which reloads by name.
+   */
+  async function loadGltfAsType(file, { keep = true } = {}) {
     const url = URL.createObjectURL(file);
     const name = file.name.replace(/\.[^.]+$/, "");
+    const glbRef = keep ? await projectAssets.addRef(file) : null;
     return new Promise((resolve, reject) => {
       gltfLoader.load(url, (gltf) => {
         URL.revokeObjectURL(url);
@@ -5169,6 +5176,7 @@ export async function startV3App(opts = {}) {
           builtin: false,
           live: false,
           glbFile: file.name,
+          glbRef,
           materialId: "__embedded__",
         });
         propState.activeSlot = slotIdx;
@@ -5184,7 +5192,9 @@ export async function startV3App(opts = {}) {
    * as the built-in coin/heart/key.
    */
   async function importGlbCollectible(preselectedFile = null) {
-    const handle = (file) => new Promise((resolve, reject) => {
+    const handle = async (file) => {
+      const glbRef = await projectAssets.addRef(file);
+      return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const name = file.name.replace(/\.[^.]+$/, "");
       gltfLoader.load(url, (gltf) => {
@@ -5216,6 +5226,7 @@ export async function startV3App(opts = {}) {
             factoryId: spec.kind,
             collectible: true,
             glbFile: file.name,
+            glbRef,
           });
           propState.activeSlot = slotIdx;
           document.getElementById("props-panel")?._rebuildPropUi?.();
@@ -5226,7 +5237,8 @@ export async function startV3App(opts = {}) {
           resolve(typeIdx);
         } catch (err) { reject(err); }
       }, undefined, (err) => { URL.revokeObjectURL(url); reject(err); });
-    });
+      });
+    };
 
     if (preselectedFile) return handle(preselectedFile);
     return new Promise((resolve) => {
@@ -5458,7 +5470,9 @@ export async function startV3App(opts = {}) {
   async function importPropLod(slotIdx, lod, preselectedFile = null) {
     const slot = propSlots[slotIdx];
     if (!slot) return;
-    const loadFile = (file) => new Promise((resolve, reject) => {
+    const loadFile = async (file) => {
+      slot.lodRefs = { ...slot.lodRefs, [lod]: await projectAssets.addRef(file) };
+      return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       gltfLoader.load(url, (gltf) => {
         URL.revokeObjectURL(url);
@@ -5478,7 +5492,8 @@ export async function startV3App(opts = {}) {
         propInstancer.onTypeLodRegistered(slot.typeIdx, lod);
         resolve();
       }, undefined, (err) => { URL.revokeObjectURL(url); reject(err); });
-    });
+      });
+    };
     if (preselectedFile) return loadFile(preselectedFile);
     const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf" });
     inp.onchange = () => { if (inp.files?.[0]) loadFile(inp.files[0]).catch(console.error); };
@@ -5627,6 +5642,41 @@ export async function startV3App(opts = {}) {
     return null;
   }
 
+  /**
+   * Material folders imported in the props panel. Their maps are kept inside
+   * the project, under the same material id the slots refer to.
+   */
+  async function exportCustomPropMaterials() {
+    const out = [];
+    for (const m of propTextureLibrary.materials) {
+      if (!m.sourceFiles?.albedo) continue;
+      const maps = {};
+      for (const [key, file] of Object.entries(m.sourceFiles)) {
+        if (file) maps[key] = await projectAssets.addRef(file);
+      }
+      out.push({
+        id: m.id, name: m.name, maps,
+        uvScale: m.uvScale, normalStrength: m.normalStrength,
+        aoStrength: m.aoStrength, roughStrength: m.roughStrength,
+      });
+    }
+    return out;
+  }
+
+  function importCustomPropMaterials(list) {
+    for (const saved of list ?? []) {
+      const maps = {};
+      for (const [key, ref] of Object.entries(saved.maps ?? {})) maps[key] = projectAssets.fileFor(ref);
+      if (!maps.albedo) {
+        console.warn(`[V3] Prop material "${saved.name}" is missing its textures; slots using it fall back.`);
+        continue;
+      }
+      const mat = propTextureLibrary.addMaterialFromFiles([], { id: saved.id, name: saved.name, maps });
+      if (!mat) continue;
+      propTextureLibrary.applyOverrides({ [mat.id]: saved });
+    }
+  }
+
   /** Re-register prop types from saved slot metadata before instance import. */
   async function restorePropSlots(savedSlots, savedTypes) {
     _clearAllPropTypes();
@@ -5648,15 +5698,26 @@ export async function startV3App(opts = {}) {
 
     for (const meta of slots) {
       try {
-        if (meta.live) {
+        if (meta.live && meta.collectible && meta.glbFile) {
+          const file = (meta.glbRef && projectAssets.fileFor(meta.glbRef)) ?? await _fetchPropModel(meta.glbFile);
+          if (file) await importGlbCollectible(file);
+        } else if (meta.live) {
           addLiveProp(meta.name);
         } else if (meta.glbFile) {
-          const file = await _fetchPropModel(meta.glbFile);
+          // Kept inside the project first; older projects look in /models.
+          const kept = meta.glbRef ? projectAssets.fileFor(meta.glbRef) : null;
+          const file = kept ?? await _fetchPropModel(meta.glbFile);
           if (file) {
-            const typeIdx = await loadGltfAsType(file);
+            const typeIdx = await loadGltfAsType(file, { keep: !!kept });
             if (meta.solid) _applyGlbSolidCliff(typeIdx);
             const slotIdx = propSlots.findIndex((s) => s.typeIdx === typeIdx);
-            if (slotIdx >= 0) _applySavedSlotMaterial(slotIdx, meta);
+            if (slotIdx >= 0) {
+              _applySavedSlotMaterial(slotIdx, meta);
+              for (const [lod, ref] of Object.entries(meta.lodRefs ?? {})) {
+                const lodFile = projectAssets.fileFor(ref);
+                if (lodFile) await importPropLod(slotIdx, Number(lod), lodFile);
+              }
+            }
           }
         } else if (meta.builtin && cliffNames.has(meta.name)) {
           addCliff(meta.name);
@@ -5698,7 +5759,15 @@ export async function startV3App(opts = {}) {
     for (const arr of treeEnv.treeStore.chunks.values()) {
       for (const t of arr) treeInstances.push([t.x, t.z, t.y, t.rotY, t.scale, t.slotIdx]);
     }
+    // Files imported from disk travel inside the project: gather the sections
+    // that can refer to them, then write just the assets they name.
+    const trees = { slots: treeToolState.treeSlots, instances: treeInstances };
+    const foliage = foliageEnv.exportData();
+    const props = propStore.exportData(propSlots);
+    props.customMaterials = await exportCustomPropMaterials();
+    const paintLayers = textureLib.exportData();
     const buf = encodeProjectFile({
+      assets:    projectAssets.collectFor({ trees: trees.slots, foliage: foliage.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers }),
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
       heightmap: baseHeightmap ?? cpuHeightmap,
       splat:     splatMap.exportCombined(), // painted holes only; tunnels rebuild theirs
@@ -5706,9 +5775,9 @@ export async function startV3App(opts = {}) {
       splatHoles: true,
       snow:      snowMap.snapshot(),
       snowRes:   SNOW_MAP_RES,
-      trees:     { slots: treeToolState.treeSlots, instances: treeInstances },
-      foliage:   foliageEnv.exportData(),
-      props:     propStore.exportData(propSlots),
+      trees,
+      foliage,
+      props,
       roads:     roadSystem.exportData(),
       splines:   splineSys.exportData(),
       lakes:     lakeSystem.exportData(),
@@ -5716,7 +5785,7 @@ export async function startV3App(opts = {}) {
       rivers2,
       riversV2,
       tunnels:   tunnelSystem?.exportData() ?? null,
-      paintLayers: textureLib.exportData(),
+      paintLayers,
       paintBlend: {
         heightBlend: splatOverlay.uHeightBlend.value,
         contrast:    splatOverlay.uHeightContrast.value,
@@ -5763,14 +5832,16 @@ export async function startV3App(opts = {}) {
       const s = slots[i];
       if (!s) continue;
       try {
+        // Files kept inside the project first, then the server folders.
+        const kept = (ref) => (ref ? projectAssets.fileFor(ref) : null);
         if (s.presetFile) {
-          const f = await fetchPreset(s.presetFile);
+          const f = kept(s.presetRef) ?? await fetchPreset(s.presetFile);
           if (f) await treeEnv.loadTreePreset(i, f);
         } else if (s.glbFile?.lod0) {
-          const f0 = await fetchModel(s.glbFile.lod0);
+          const f0 = kept(s.glbRef?.lod0) ?? await fetchModel(s.glbFile.lod0);
           if (f0) await treeEnv.importTreeGlb(i, 0, f0);
           if (s.glbFile.lod1) {
-            const f1 = await fetchModel(s.glbFile.lod1);
+            const f1 = kept(s.glbRef?.lod1) ?? await fetchModel(s.glbFile.lod1);
             if (f1) await treeEnv.importTreeGlb(i, 1, f1);
           }
         }
@@ -5781,6 +5852,9 @@ export async function startV3App(opts = {}) {
   }
 
   async function applyProjectData(d) {
+    // Files the project carries (imported textures, GLBs...) before anything
+    // that refers to them.
+    projectAssets.load(d.assets);
     // Drop River+'s captured base BEFORE the heightmap swap: the wrapped
     // replaceHeightData would otherwise schedule a rebase that folds the
     // freshly loaded terrain into the previous scene's base.
@@ -5920,6 +5994,7 @@ export async function startV3App(opts = {}) {
     foliageEnv.importData(d.foliage ?? null);
 
     if (d.props) {
+      importCustomPropMaterials(d.props.customMaterials);
       await restorePropSlots(d.props.slots, d.props.types);
       const nameToIdx = Object.fromEntries(propStore.types.map((t, i) => [t.name, i]));
       propStore.importData(d.props, nameToIdx);
@@ -7592,7 +7667,11 @@ export async function startV3App(opts = {}) {
       frameSelection: () => frameSelection(),
       spawnSystem,
       getRoadSystem: () => roadSystem,
-      props: { propStore, propInstancer, propSys, solidCollider, cliffBvh, addPrimitive, addCliff, activatePropSelection, deactivatePropSelection, rebakePlayerBvh, tc, getLivePropManager: () => livePropManager },
+      props: { propStore, propInstancer, propSys, solidCollider, cliffBvh, addPrimitive, addCliff, activatePropSelection, deactivatePropSelection, rebakePlayerBvh, tc, getLivePropManager: () => livePropManager, propSlots, propTextureLibrary, addLiveProp, importPropGlb, importPropLod, importGlbCollectible },
+      // Project save/load, and the imported files a project carries.
+      saveProject,
+      loadProjectFromBuffer,
+      projectAssets,
       sculpt,
       ensureCpuHeightmapFromGpu,
       markHeightmapDirty,

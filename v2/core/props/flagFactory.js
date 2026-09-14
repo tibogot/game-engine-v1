@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { projectAssets } from "../../../v3/io/projectAssets.js";
 
 const DAMPING = 0.97;
 const DRAG = 0.1;
@@ -266,7 +267,10 @@ function _loadTexture(mat, url) {
     mat.needsUpdate = true;
     return;
   }
-  new THREE.TextureLoader().load(url, (tex) => {
+  // An image imported from disk is saved as an "asset:" reference inside the project.
+  const real = projectAssets.resolveUrl(url);
+  if (!real) { console.warn(`[flag] texture ${url} is not in this project`); return; }
+  new THREE.TextureLoader().load(real, (tex) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
     if (mat.map) mat.map.dispose();

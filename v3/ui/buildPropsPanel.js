@@ -1,4 +1,5 @@
 import { bakeObjectThumbnails } from "../../v2/tools/objectThumbnails.js";
+import { projectAssets, isAssetRef } from "../io/projectAssets.js";
 import { proceduralThumbnailItems } from "../../v2/core/props/proceduralObjectProps.js";
 
 const _arrowSvg =
@@ -838,18 +839,18 @@ panel.innerHTML = "";
         if ("textureUrl" in p) {
           const row = document.createElement("div");
           row.className = "prop-row";
-          row.innerHTML = `<span class="prop-label">Texture</span><div class="prop-value" style="display:flex;gap:4px;align-items:center;"><span class="prop-slider-val" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.textureUrl ? p.textureUrl.split("/").pop() : "(none)"}</span><button class="section-btn" style="padding:2px 8px;font-size:11px;">Import...</button></div>`;
+          row.innerHTML = `<span class="prop-label">Texture</span><div class="prop-value" style="display:flex;gap:4px;align-items:center;"><span class="prop-slider-val" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.textureUrl ? (isAssetRef(p.textureUrl) ? (projectAssets.nameOf(p.textureUrl) ?? "imported") : p.textureUrl.split("/").pop()) : "(none)"}</span><button class="section-btn" style="padding:2px 8px;font-size:11px;">Import...</button></div>`;
           const btn = row.querySelector("button");
           const label = row.querySelector(".prop-slider-val");
           btn.addEventListener("click", () => {
             const input = document.createElement("input");
             input.type = "file";
             input.accept = "image/*";
-            input.addEventListener("change", () => {
+            input.addEventListener("change", async () => {
               const file = input.files[0];
               if (!file) return;
-              const url = URL.createObjectURL(file);
-              p.textureUrl = url;
+              // Kept inside the project, so the flag keeps its image after a reload.
+              p.textureUrl = await projectAssets.addRef(file);
               label.textContent = file.name;
               syncParam("textureUrl", false);
             });

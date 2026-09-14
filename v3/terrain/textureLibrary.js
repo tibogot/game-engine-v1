@@ -13,6 +13,7 @@
 import * as THREE from "three";
 import { uniform } from "three/tsl";
 import { normalizeProcParams, albedoThumbnailUrl, PROC_RES } from "./proceduralLayer.js";
+import { projectAssets, isAssetRef } from "../io/projectAssets.js";
 
 export const NUM_LAYERS = 7;
 /**
@@ -66,6 +67,11 @@ function _resizeImageToSlotRes(bitmap) {
   return canvas.getContext("2d").getImageData(0, 0, SLOT_RES, SLOT_RES).data;
 }
 
+/** Display name for a map reference: the stored asset's filename, or the URL's last segment. */
+function _refName(url) {
+  return isAssetRef(url) ? (projectAssets.nameOf(url) ?? "imported") : url.split("/").pop();
+}
+
 export class TextureLibrary {
   constructor() {
     // ── CPU-side data arrays (modified in-place, textures re-upload via needsUpdate) ──
@@ -109,6 +115,12 @@ export class TextureLibrary {
       normalUrl:   null,
       roughUrl:    null,
       aoUrl:       null,
+      // What the project SAVES for each map: a server path (/textures/…) or,
+      // for a file imported from disk, an "asset:<hash>" kept inside the project.
+      albedoRef:   null,
+      normalRef:   null,
+      roughRef:    null,
+      aoRef:       null,
       // null = the slot shows its image maps. Otherwise the params of a
       // procedural texture baked into this slot (see proceduralLayer.js); the
       // image references above are kept so switching back can restore them.
@@ -204,8 +216,10 @@ export class TextureLibrary {
     const off = slotIndex * SLOT_RES * SLOT_RES * 4;
     this._albedoData.set(px, off);
     this._uploadAll(this.albedoArrayTex);
+    const albedoRef = await projectAssets.addRef(file);
     this.slots[slotIndex].albedoName = file.name;
-    this.slots[slotIndex].albedoUrl  = URL.createObjectURL(file);
+    this.slots[slotIndex].albedoRef  = albedoRef;
+    this.slots[slotIndex].albedoUrl  = projectAssets.resolveUrl(albedoRef);
   }
 
   async loadNormalMap(slotIndex, file) {
@@ -221,8 +235,10 @@ export class TextureLibrary {
       this._ormData[off + i*4+3] = px[i*4+1];   // G → A (normal Y)
     }
     this._uploadAll(this.ormArrayTex);
+    const normalRef = await projectAssets.addRef(file);
     this.slots[slotIndex].normalName = file.name;
-    this.slots[slotIndex].normalUrl  = URL.createObjectURL(file);
+    this.slots[slotIndex].normalRef  = normalRef;
+    this.slots[slotIndex].normalUrl  = projectAssets.resolveUrl(normalRef);
   }
 
   async loadRoughness(slotIndex, file) {
@@ -235,8 +251,10 @@ export class TextureLibrary {
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4] = px[i*4]; // R → roughness
     this._uploadAll(this.ormArrayTex);
+    const roughRef = await projectAssets.addRef(file);
     this.slots[slotIndex].roughName = file.name;
-    this.slots[slotIndex].roughUrl  = URL.createObjectURL(file);
+    this.slots[slotIndex].roughRef  = roughRef;
+    this.slots[slotIndex].roughUrl  = projectAssets.resolveUrl(roughRef);
   }
 
   async loadAO(slotIndex, file) {
@@ -249,8 +267,10 @@ export class TextureLibrary {
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4+1] = px[i*4]; // R → AO
     this._uploadAll(this.ormArrayTex);
+    const aoRef = await projectAssets.addRef(file);
     this.slots[slotIndex].aoName = file.name;
-    this.slots[slotIndex].aoUrl  = URL.createObjectURL(file);
+    this.slots[slotIndex].aoRef  = aoRef;
+    this.slots[slotIndex].aoUrl  = projectAssets.resolveUrl(aoRef);
   }
 
   // Load albedo from drag-dropped image, auto-detect map type by filename keyword
@@ -270,7 +290,9 @@ export class TextureLibrary {
   // ── URL-based loading (for preloading defaults from the server) ─────────────
 
   async _bitmapFromUrl(url) {
-    const resp = await fetch(url);
+    const real = projectAssets.resolveUrl(url);
+    if (!real) throw new Error(`asset not in this project: ${url}`);
+    const resp = await fetch(real);
     const blob = await resp.blob();
     return createImageBitmap(blob);
   }
@@ -282,8 +304,9 @@ export class TextureLibrary {
     const off = slotIndex * SLOT_RES * SLOT_RES * 4;
     this._albedoData.set(px, off);
     this._uploadAll(this.albedoArrayTex);
-    this.slots[slotIndex].albedoName = url.split("/").pop();
-    this.slots[slotIndex].albedoUrl  = url;
+    this.slots[slotIndex].albedoName = _refName(url);
+    this.slots[slotIndex].albedoRef  = url;
+    this.slots[slotIndex].albedoUrl  = projectAssets.resolveUrl(url);
   }
 
   async loadNormalFromUrl(slotIndex, url) {
@@ -297,8 +320,9 @@ export class TextureLibrary {
       this._ormData[off + i*4+3] = px[i*4+1];
     }
     this._uploadAll(this.ormArrayTex);
-    this.slots[slotIndex].normalName = url.split("/").pop();
-    this.slots[slotIndex].normalUrl  = url;
+    this.slots[slotIndex].normalName = _refName(url);
+    this.slots[slotIndex].normalRef  = url;
+    this.slots[slotIndex].normalUrl  = projectAssets.resolveUrl(url);
   }
 
   async loadRoughnessFromUrl(slotIndex, url) {
@@ -309,8 +333,9 @@ export class TextureLibrary {
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4] = px[i*4];
     this._uploadAll(this.ormArrayTex);
-    this.slots[slotIndex].roughName = url.split("/").pop();
-    this.slots[slotIndex].roughUrl  = url;
+    this.slots[slotIndex].roughName = _refName(url);
+    this.slots[slotIndex].roughRef  = url;
+    this.slots[slotIndex].roughUrl  = projectAssets.resolveUrl(url);
   }
 
   async loadAOFromUrl(slotIndex, url) {
@@ -321,8 +346,9 @@ export class TextureLibrary {
     const off = slotIndex * n * 4;
     for (let i = 0; i < n; i++) this._ormData[off + i*4+1] = px[i*4];
     this._uploadAll(this.ormArrayTex);
-    this.slots[slotIndex].aoName = url.split("/").pop();
-    this.slots[slotIndex].aoUrl  = url;
+    this.slots[slotIndex].aoName = _refName(url);
+    this.slots[slotIndex].aoRef  = url;
+    this.slots[slotIndex].aoUrl  = projectAssets.resolveUrl(url);
   }
 
   preloadDefaults() {
@@ -369,6 +395,7 @@ export class TextureLibrary {
     this._uploadAll(this.albedoArrayTex);
     this.slots[slotIndex].albedoName = null;
     this.slots[slotIndex].albedoUrl  = null;
+    this.slots[slotIndex].albedoRef  = null;
   }
 
   clearNormal(slotIndex) {
@@ -381,6 +408,7 @@ export class TextureLibrary {
     this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].normalName = null;
     this.slots[slotIndex].normalUrl  = null;
+    this.slots[slotIndex].normalRef  = null;
   }
 
   clearRoughness(slotIndex) {
@@ -390,6 +418,7 @@ export class TextureLibrary {
     this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].roughName = null;
     this.slots[slotIndex].roughUrl  = null;
+    this.slots[slotIndex].roughRef  = null;
   }
 
   clearAO(slotIndex) {
@@ -399,6 +428,7 @@ export class TextureLibrary {
     this._uploadAll(this.ormArrayTex);
     this.slots[slotIndex].aoName = null;
     this.slots[slotIndex].aoUrl  = null;
+    this.slots[slotIndex].aoRef  = null;
   }
 
   // ── Slot settings ──────────────────────────────────────────────────────────
@@ -484,18 +514,18 @@ export class TextureLibrary {
   async clearProcedural(i) {
     if (!this._dropProcedural(i)) return;
     const s = this.slots[i];
-    const restore = (nameKey, urlKey, loadFromUrl, clear) => {
-      const name = s[nameKey], url = s[urlKey];
+    const restore = (nameKey, refKey, loadFromUrl, clear) => {
+      const name = s[nameKey], url = s[refKey];
       if (!url) { clear(i); return null; }
       return loadFromUrl(i, url)
         .then(() => { s[nameKey] = name ?? s[nameKey]; })
         .catch(() => clear(i));
     };
     await Promise.all([
-      restore("albedoName", "albedoUrl", (k, u) => this.loadAlbedoFromUrl(k, u),    (k) => this.clearAlbedo(k)),
-      restore("normalName", "normalUrl", (k, u) => this.loadNormalFromUrl(k, u),    (k) => this.clearNormal(k)),
-      restore("roughName",  "roughUrl",  (k, u) => this.loadRoughnessFromUrl(k, u), (k) => this.clearRoughness(k)),
-      restore("aoName",     "aoUrl",     (k, u) => this.loadAOFromUrl(k, u),        (k) => this.clearAO(k)),
+      restore("albedoName", "albedoRef", (k, u) => this.loadAlbedoFromUrl(k, u),    (k) => this.clearAlbedo(k)),
+      restore("normalName", "normalRef", (k, u) => this.loadNormalFromUrl(k, u),    (k) => this.clearNormal(k)),
+      restore("roughName",  "roughRef",  (k, u) => this.loadRoughnessFromUrl(k, u), (k) => this.clearRoughness(k)),
+      restore("aoName",     "aoRef",     (k, u) => this.loadAOFromUrl(k, u),        (k) => this.clearAO(k)),
     ]);
   }
 
@@ -534,8 +564,9 @@ export class TextureLibrary {
   exportData() {
     const ref = (name, url) => {
       if (!name && !url) return null;
-      // An object URL from a dropped file dies with the page; keep the filename
-      // so the load can at least say what is missing.
+      // A server path, or "asset:<hash>" for a file kept inside the project.
+      // A bare object URL can only come from an older code path; it dies with
+      // the page, so keep just the name.
       const keep = url && !/^(blob:|data:)/.test(url) ? url : null;
       return { name: name ?? null, url: keep };
     };
@@ -543,10 +574,10 @@ export class TextureLibrary {
       const u = this.slotUniforms[i];
       return {
         name:      s.name,
-        albedo:    ref(s.albedoName, s.albedoUrl),
-        normal:    ref(s.normalName, s.normalUrl),
-        rough:     ref(s.roughName,  s.roughUrl),
-        ao:        ref(s.aoName,     s.aoUrl),
+        albedo:    ref(s.albedoName, s.albedoRef),
+        normal:    ref(s.normalName, s.normalRef),
+        rough:     ref(s.roughName,  s.roughRef),
+        ao:        ref(s.aoName,     s.aoRef),
         uvScale:   u.uUVScale.value,
         normalStr: u.uNormalStr.value,
         aoStr:     u.uAOStr.value,
@@ -612,13 +643,17 @@ export class TextureLibrary {
       if (d.procedural && typeof d.procedural === "object") {
         // Keep the image references (so switching the slot back to Image can
         // restore them) but do not fetch them: the bake owns the pixels.
-        const keepRef = (r, nameKey, urlKey) => {
-          if (r) { s[nameKey] = r.name ?? null; s[urlKey] = r.url ?? null; }
+        const keepRef = (r, key) => {
+          if (r) {
+            s[`${key}Name`] = r.name ?? null;
+            s[`${key}Ref`] = r.url ?? null;
+            s[`${key}Url`] = r.url ? projectAssets.resolveUrl(r.url) : null;
+          }
         };
-        keepRef(d.albedo, "albedoName", "albedoUrl");
-        keepRef(d.normal, "normalName", "normalUrl");
-        keepRef(d.rough,  "roughName",  "roughUrl");
-        keepRef(d.ao,     "aoName",     "aoUrl");
+        keepRef(d.albedo, "albedo");
+        keepRef(d.normal, "normal");
+        keepRef(d.rough,  "rough");
+        keepRef(d.ao,     "ao");
         jobs.push(this.requestProcedural(i, d.procedural).catch((err) => {
           console.warn(`[V3] Paint layer ${i + 1}: procedural bake failed`, err);
         }));
@@ -640,8 +675,8 @@ export class TextureLibrary {
     await Promise.all(jobs);
     if (missing.length) {
       console.warn(
-        `[V3] Paint layers: ${missing.length} texture(s) not restored — they were ` +
-        `loaded from a local file rather than a project path, so only the name survives: ` +
+        `[V3] Paint layers: ${missing.length} texture(s) not restored (saved before imported ` +
+        `files were kept in the project, or not found on the server): ` +
         missing.join(", "),
       );
     }

@@ -14,6 +14,7 @@ import {
   openGlbPicker,
 } from "../../v2/core/foliage/glbLoader.js";
 import { loadFullPresetFromFile } from "../../v2/core/foliage/presetLoader.js";
+import { projectAssets } from "../io/projectAssets.js";
 import { bakeSlotImpostor, IMPOSTOR_BAKE } from "../../v2/render/foliage/impostorBake.js";
 
 const MODELS_SEARCH_PATHS = ["../models/", "models/"];
@@ -412,15 +413,15 @@ export function createTreeEnvironment({
       queueImpostorBake(slotIdx);
       queueThumbnail(slotIdx);
     }
-    const matchedUrl = await probeModelsForFile(file.name);
-    if (matchedUrl) {
-      const slot = toolState.treeSlots[slotIdx];
-      if (!slot.glbFile) slot.glbFile = {};
-      slot.glbFile[lod === 0 ? "lod0" : "lod1"] = file.name;
-      console.log(`[V3] Tree slot ${slotIdx} LOD${lod}: ${submeshes.length} submesh(es) from ${file.name}`);
-    } else {
-      console.warn(`[V3] Tree slot ${slotIdx} LOD${lod}: loaded ${file.name} — put copy in /models for save/restore`);
-    }
+    const slot = toolState.treeSlots[slotIdx];
+    const lodKey = lod === 0 ? "lod0" : "lod1";
+    if (!slot.glbFile) slot.glbFile = {};
+    slot.glbFile[lodKey] = file.name;
+    if (!slot.glbRef) slot.glbRef = {};
+    // A file that is not in /models is kept inside the project instead.
+    slot.glbRef[lodKey] = (await probeModelsForFile(file.name)) ? null : await projectAssets.addRef(file);
+    console.log(`[V3] Tree slot ${slotIdx} LOD${lod}: ${submeshes.length} submesh(es) from ${file.name}`
+      + (slot.glbRef[lodKey] ? " (kept in the project file)" : ""));
     document.getElementById("tree-panel")?._rebuildTreeUi?.();
   }
 
@@ -440,6 +441,9 @@ export function createTreeEnvironment({
       queueImpostorBake(slotIdx);
       queueThumbnail(slotIdx);
       toolState.treeSlots[slotIdx].presetFile = file.name;
+      // The preset JSON is small: always keep it, so a preset picked from disk
+      // reloads too. (Its trunk GLB and leaf texture are still looked up by path.)
+      toolState.treeSlots[slotIdx].presetRef = await projectAssets.addRef(file);
       toolState.treeSlots[slotIdx].name = json.presetName || file.name.replace(/\.json$/, "");
       if (json.trunkScale != null) toolState.treeSlots[slotIdx].baseScale = json.trunkScale;
       const f = toolState.treeSlots[slotIdx].foliage;

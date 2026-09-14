@@ -325,6 +325,10 @@ export class PropStore {
         materialId: s.materialId,
         triplanar: s.triplanar,
         glbFile: s.glbFile,
+        // "asset:<hash>" references to files kept inside the project.
+        glbRef: s.glbRef,
+        lodRefs: s.lodRefs,
+        collectible: s.collectible || undefined,
       })) ?? [],
     };
   }

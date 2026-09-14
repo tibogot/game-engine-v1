@@ -180,11 +180,16 @@ export function createPropTextureLibrary() {
    * create a new material from them, and return it. Returns `null` when no albedo
    * map was found. Missing normal/rough/ao channels fall back to neutral 1×1 textures.
    */
-  function addMaterialFromFiles(files) {
+  function addMaterialFromFiles(files, { id: savedId = null, name: savedName = null, maps = null } = {}) {
+    // Replaying a saved project: the same material again, nothing to do.
+    if (savedId && materials.some((m) => m.id === savedId)) return materials.find((m) => m.id === savedId);
     const picked = { albedo: null, normal: null, rough: null, ao: null };
     let folderName = null;
 
-    for (const f of files) {
+    // `maps` ({ albedo, normal, rough, ao } → File) skips the filename guess,
+    // for a project load where each map's role is already known.
+    if (maps) Object.assign(picked, maps);
+    for (const f of maps ? [] : files) {
       const kind = classifyFile(f.name);
       if (!kind) continue;
       if (!picked[kind]) picked[kind] = f;
@@ -196,8 +201,8 @@ export function createPropTextureLibrary() {
 
     if (!picked.albedo) return null;
 
-    const name = folderName ?? picked.albedo.name.replace(/\.[^.]+$/, "");
-    const id = `custom_${Date.now()}_${_nextId++}`;
+    const name = savedName ?? folderName ?? picked.albedo.name.replace(/\.[^.]+$/, "");
+    const id = savedId ?? `custom_${Date.now()}_${_nextId++}`;
     const uvScale = 2.0;
 
     const mat = {
@@ -222,6 +227,9 @@ export function createPropTextureLibrary() {
       uNormalStr: uniform(1.0),
       uAOStr: uniform(1.0),
       uRoughStr: uniform(1.0),
+      // The imported files, so a project save can keep them (the textures
+      // above only hold object URLs, which die with the page).
+      sourceFiles: { ...picked },
     };
 
     materials.push(mat);

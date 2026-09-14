@@ -28,8 +28,8 @@
  *             same one-key-each change, and belong here when they are needed.
  *   paintLayers  7 ground-paint slots: name, per-map { name, url } references,
  *             tiling / normal / AO / roughness strengths and auto-paint rules.
- *             REFERENCES, not pixels — the images live in /textures. A map
- *             loaded from a dropped local file keeps only its name.
+ *             A map from /textures is a URL; one imported from disk is an
+ *             "asset:<hash>" reference to the assets section.
  *   paintBlend { heightBlend, contrast, macroStrength, macroWarmth, macroScale }
  *             how painted layers mix at their edges, plus large-scale variation.
  *             Was saved nowhere, so a game never got the edge the editor showed.
@@ -37,6 +37,10 @@
  *   tunnels   { version, wallColor, floorColor, tunnels: [{ width, height, thickness,
  *             nodes: [{ x, z, y, pinned }] }] } — Tunnel mode. Their terrain
  *             openings are NOT in the splat: they are cut again on load.
+ *   assets    [{ hash, name, type }] files imported from disk (textures, GLBs,
+ *             material folders…), ORIGINAL bytes as blobs "asset:<hash>". Data
+ *             elsewhere refers to them with "asset:<hash>" strings (see
+ *             v3/io/projectAssets.js). Only referenced files are written.
  *   splatHoles true when the splat's slice-1 alpha is the terrain HOLE channel.
  *             Absent in older files, where that alpha was Meadow paint — the
  *             load zeroes it rather than cutting holes wherever Meadow was.
@@ -72,6 +76,7 @@ export function encodeProjectFile({
   susuki,               // susuki appearance params (JSON)
   groundTsl,            // procedural ground params (JSON)
   meadowTsl,            // paintable meadow TSL params (JSON)
+  assets,               // [{ hash, name, type, bytes }] from projectAssets.collectFor()
 }) {
   const blobs = {};
   const parts = [];
@@ -88,6 +93,12 @@ export function encodeProjectFile({
   addBlob("snow", snow);
   addBlob("grassDensity", grassDensity);
   addBlob("susukiDensity", susukiDensity);
+  const assetList = [];
+  for (const a of assets ?? []) {
+    if (!a?.hash || !a.bytes) continue;
+    addBlob(`asset:${a.hash}`, a.bytes);
+    assetList.push({ hash: a.hash, name: a.name, type: a.type });
+  }
 
   const manifest = {
     version: VERSION,
@@ -113,6 +124,7 @@ export function encodeProjectFile({
     susuki:   susuki ?? null,
     groundTsl: groundTsl ?? null,
     meadowTsl: meadowTsl ?? null,
+    assets:   assetList,
   };
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
 
@@ -183,6 +195,9 @@ export function decodeProjectFile(buffer) {
     susuki:    manifest.susuki ?? null,
     groundTsl: manifest.groundTsl ?? null,
     meadowTsl: manifest.meadowTsl ?? null,
+    assets: (manifest.assets ?? [])
+      .map((a) => ({ ...a, bytes: blob(`asset:${a.hash}`) }))
+      .filter((a) => a.bytes),
   };
 }
 

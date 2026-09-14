@@ -120,8 +120,13 @@ the game.
 30. ~~Shared shortcuts~~ — DONE 2026-09-14: Shift+F frames (plain F stays
     Foliage), Ctrl+C / Ctrl+V props (paste at the cursor), Ctrl+D tunnels; props
     already had Delete / Ctrl+D / Esc / W E R Q.
-31. **Textures from dropped local files don't survive a reload** (only the name
-    is saved). An "import to /textures" step would close this.
+31. ~~Textures from dropped local files don't survive a reload~~ — DONE
+    2026-09-14: files imported from disk are kept INSIDE the .v3proj
+    (`v3/io/projectAssets.js`, stored once per content, only referenced ones
+    written). Covers paint maps, prop GLBs + LOD1/LOD2, GLB collectibles, prop
+    material folders, flag texture, tree GLBs + preset JSON, foliage textures.
+    Not covered: a tree preset's own trunk GLB / leaf texture (still by path),
+    brush masks (tool state), sky HDR (sky mode is not saved at all).
 32. **Texture compression.** Paint layers use ~74 MB of VRAM; KTX2 would cut it
     for the games.
 33. **City builder** — its own 4-phase track.
@@ -224,7 +229,7 @@ Large-scale variation was already measured free.
 1. ~~Viewport selection + prop foundation~~ — DONE 2026-09-14 (28-30, 35-37,
    43, 45). Left open: per-prop highlight tint (44; the orange box outline
    stays) and per-prop incremental updates (41, not felt).
-2. Dropped textures surviving a reload (31) - quiet data loss, small fix.
+2. ~~Dropped textures surviving a reload (31)~~ — DONE 2026-09-14.
 3. Grass look pass, panel and horizon (16-18), with your eyes.
 4. Before the city builder or any scene past ~10k props: shadow culling +
    shadow LOD (38), per-prop culling (39), meshoptimizer auto-LOD (40).
