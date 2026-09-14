@@ -73,7 +73,6 @@ export default defineConfig({
         index: "index.html",
         editor: "v2/editor.html",
         play: "v2/play.html",
-        rts: "games/rts/rts.html",
         rtsV3: "games/rts-v3/rts.html",
         roadV3: "games/modular-road-v3/road.html",
         v3editor: "v3/editor.html",

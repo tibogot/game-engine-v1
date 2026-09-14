@@ -1,7 +1,7 @@
 // ============================================================================
 // RTS GAME (v3) — a game project built ON TOP of the v3 world engine.
 //
-// The model (same as games/rts/ but on the newer v3 engine):
+// The model:
 //   • The v3 EDITOR (v3/editor.html) authors the world and saves a .v3proj.
 //   • This GAME imports the engine's boot (startV3App), LOADS that .v3proj, and
 //     adds RTS-specific gameplay on top (camera, units, selection, AI, UI).

@@ -385,6 +385,74 @@ hysteresis, and the positions-only simplification.
 Wrong claim, dropped: "props just off screen lose their shadows" — tested
 twice with a pillar whose shadow crosses the view; the shadow was correct.
 
+## Left in v2 — port before v2 is deleted (compared 2026-09-14)
+
+Full v2 vs v3 editor comparison, mode by mode and UI. v2 is only deleted once
+this section is empty; what v3 still imports from v2 moves, it is not lost.
+
+### v3's own gaps found in the comparison (do first — games load the level)
+
+84. **The .v3proj does not save everything.** Lost on reload: grass appearance
+    (~59 controls), cliff-top grass density, the cliffPaint mask, snow look and
+    deformation settings, shadow quality, interior lighting. A game loading
+    the level will not look like the editor.
+85. **Undo gaps.** The toolbar Undo/Redo buttons only undo sculpt (Ctrl+Z
+    follows the mode); roads and lakes have no undo at all.
+86. **Stale shortcuts and hidden modes.** Toolbar tooltips say Sculpt (S),
+    Paint (P), Grass (G), River (V): S and G do nothing, P starts play, V is
+    View. Snow, Cliff Paint and River+ exist only in the mode dropdown.
+87. **The Audio mixer (World tab) is wired to nothing** — v3 creates no audio
+    system. See 96.
+
+### Editor UI (v2 has, v3 lacks)
+
+88. **One shared widget module.** Each v3 panel copies `_section` / `_slider`
+    (buildPropsPanel, brushFilterSection, buildWorldPanel...). v2 already has
+    the extracted factory: `v2/octahedral-v3/custom-ui.js`. Base for 89-92.
+89. **Editable Inspector.** v2: click the sun, sky, water, road, river, prop in
+    the Scene list → editable properties. v3's Info tab is static text. The
+    most Unity-like piece v2 has.
+90. **Resizable panels** (v2 left/right/bottom splitters; v3 widths are fixed).
+91. **Status bar:** fps/ms, camera XYZ, triangles, status text.
+92. **Scene list search + right-click menu** (focus, delete, remove all), and
+    lighting items (sun, sky, lens flare) in the list. Sliders that resync
+    when state changes elsewhere (v3 passes a no-op `refreshLiveSliders`).
+    Later: a project asset browser (v2 had a File System Access folder browser).
+
+### Gameplay (needed by games)
+
+93. **Gameplay markers.** v2 actors mode places NPC / enemy spawns
+    (`v2/tools/actors`). Don't port the capsule placeholders as-is: one
+    markers mode (NPC, enemy, trigger zone, checkpoint) saved in the .v3proj.
+    Dialogue runner + graphs (`v2/play/dialogue`) go game-side.
+94. **Barrier (no-go) zones.** Painted invisible play boundary + "fill world
+    edge" (`v2/tools/barrier`). v3 only has visible spline walls.
+95. **Moving platforms / animated props** (`v2/play/movingPlatforms.js` is a
+    demo; the racing game's elevator and movers are the stronger base).
+96. **Audio system.** Howler buses master/sfx/music/voice/ui/vehicle
+    (`v2/audio/createV2AudioSystem.js`); connect the World tab mixer (87).
+
+### World life
+
+97. **Waterfall** (`v2/tools/waterfall`, 525 lines): waterfall + impact splash,
+    gizmo, saved. Do it after River v2 so falls sit on river drops.
+98. **Ambient FX:** painted butterfly and falling-leaf emitters, 3 leaf types
+    with physics (`v2/core/ambientfx`). Cheap, a lot of life.
+99. **Flowers** (`v2/core/legacy/fleur-painter.js`): ground or stemmed, 3 bloom
+    shapes, colour presets, wind and interaction. Rebuild on a density map like
+    susuki rather than copying the position list.
+100. **Decals** (`v2/tools/decals`): image decals, conform to terrain, gizmo.
+     Shares work with road surface decals (57).
+
+### Not ported — v3 is equal or better, or it was retired
+
+Sculpt / procedural / erosion, paint and TSL ground/meadow, cliffs (v3
+procedural cliffs + GLB), hole / cave / tunnel, trees and foliage (ported),
+Gemini / revo / billboard grass, snow v1 and v2, all four v2 road systems,
+v2 river and River+, water bodies, clouds v1-v3, sky / post / lens flare /
+fog (in v3), Lotus and VVV cars (stunt car covers them), chunk streaming.
+The old `games/rts` (v2 prototype) was deleted 2026-09-14.
+
 ## Performance
 
 Nothing left that is felt: the game is vsync-locked with ~4× GPU headroom.
@@ -409,3 +477,9 @@ Large-scale variation was already measured free.
 6. Terrain mirror / clone / region copy-paste (13).
 7. Roads: the lane-based engine replaces Smart Road 2 — follow the road order in
    its section (shader paint with wear and wetness, 50-52, first).
+
+v2 retirement track (agreed 2026-09-14, runs next to the above): save gaps and
+shortcut fixes (84-87) → shared widget module, splitters, status bar (88, 90,
+91) → Inspector + Scene list search/menu (89, 92) → gameplay markers, barrier
+zones, audio (93-96) → waterfall, ambient FX, flowers, decals (97-100) → delete
+v2 (what v3 still imports moves into `engine/`).
