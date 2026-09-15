@@ -191,6 +191,7 @@ export const WHEEL_LOCAL = [
  *  edit to the hub layout. Used by the yaw assist's bicycle-model reference
  *  yaw rate (ω = v·tan δ / L). */
 const WHEELBASE = Math.abs(WHEEL_LOCAL[0].pos.z - WHEEL_LOCAL[2].pos.z);
+const FRONT_AXLE_Z = WHEEL_LOCAL[0].pos.z;
 
 export const TIRE = {
   rayLength: 1.0,
@@ -642,6 +643,65 @@ export const TIRE = {
   // it scales with it (26 was the value for topSpeed 30; 45 for 50).
   steerSpeedRef: 45,
   steerSpeedReduce: 0.50,
+
+  // ── GRIP-LIMITED STEERING (no handbrake: grip by default, slide by choice) ──
+  // A held key asks for full lock, and full lock at driving speed was 2-3x the
+  // angle the front tyre makes its peak force at (atan(1/tireStiffness) ≈ 8°):
+  //     20 m/s 24.5°   30 m/s 21°   45 m/s 15.8°
+  // Past the peak the front has nothing more to give, so the only thing left
+  // deciding the corner was which axle saturated first — and with neutral grip
+  // that is the rear. MEASURED on a flat plane, key held, no handbrake:
+  //     15 m/s 73° slip, spun   30 m/s 176°   40 m/s 180°
+  // and the turn ladder's "1.3 g" was being read at a 6 m radius — the car had
+  // scrubbed down to a crawl. That is the "it either drifts or grips" feel:
+  // there was no way to corner at the limit, only past it.
+  //
+  // So above a walking pace the front wheel is held at `steerGripLimit` of its
+  // peak slip angle, measured against where the FRONT AXLE is actually
+  // travelling (body velocity + yaw rate × lever). Full key = the hardest
+  // corner the tyres can make. Set just under the peak so the front lets go a
+  // touch before the rear: the limit reads as a gentle push, not a spin.
+  //
+  // It only ever REDUCES the angle the player asked for, and never turns the
+  // wheels past centre on its own — so it cannot auto-countersteer. But a
+  // countersteer the player makes is measured against the slide direction, so
+  // it is essentially never limited. Steering further INTO a spin straightens
+  // the wheels, which is what stops "hold the key" from becoming a pirouette.
+  // Drifting stays a choice: handbrake, lift/brake into a corner, or a flick.
+  /** Fraction of the tyre's peak slip angle the front may reach. 0 = off. */
+  // Measured, key held (peak body slip / sustained g at 15-40 m/s):
+  //     off   73-180°, spins   0.75  8-9°, 1.4-1.6 g (planted, a bit dead)
+  //     0.85  10-17°, 1.5-1.8 g   1.0  15-22°, 1.6-2.0 g (lively, edgy)
+  // A quick left-right flick still reaches ~35°, so a slide stays one input away.
+  steerGripLimit: 0.85,
+  /** Speed (m/s) the limiter starts fading in — below it donuts keep full lock. */
+  steerGripLimitFrom: 8,
+  /** Speed (m/s) it is fully in. */
+  steerGripLimitFull: 14,
+  /**
+   * Rate (1/s) the limiter hands over to / back from a HANDBRAKE drift. Held
+   * handbrake = the steering the drift was tuned with (handbrakeStabilityTest,
+   * drift scoring). Faded, not switched: the limit is a clamp on the wheel angle,
+   * so snapping it back on as Space comes up would jerk the front wheels. ~4/s
+   * has it ~90% back ~0.6 s after the slide is released.
+   */
+  steerGripLimitHandbrakeRate: 4,
+  /**
+   * Surface tilt (deg from world up) the limiter is full up to / gone by. ROAD
+   * cornering only: the kit's banks top out ~25°, while walls, tube sides and
+   * loops are driven with raw steering.
+   *
+   * PARK PIECES ARE EXEMPT BY TAG, NOT BY TILT (FREE_CARVE in modularRoadKit.js,
+   * handed over at the same rate as the handbrake). The pipe carve starts on the
+   * FLAT floor, and it is a pivot, not a grip turn — MEASURED in parkPipeTest's
+   * 40 m/s / 50% pulse: raw steering slides the car to 38° and points the nose
+   * 58° at the wall, so it climbs straight up and drops back in; grip-limited it
+   * turns a clean 25°, rides up the wall still moving ALONG the pipe and flies
+   * out of it (8 of 9 speeds). A tilt gate changed nothing, because by the time
+   * the wall is steep the carve has already happened.
+   */
+  steerGripLimitTiltFull: 30,
+  steerGripLimitTiltZero: 45,
 
   // ── LOW-SPEED LOCK BOOST (donuts) ───────────────────────────────────────────
   // Donuts need ~50° of lock; ordinary driving wants ~25°. Those two facts are
@@ -1926,6 +1986,61 @@ export const BODYLEAN = {
 };
 
 /**
+ * TURN ASSIST — hold the key and the car turns; carry too much speed and it
+ * costs speed, not a spin and not a straight line. The arcade-racer layer (NFS,
+ * Burnout, Horizon's arcade handling) that a tyre model alone cannot give.
+ *
+ * WHY IT IS NEEDED. The kit's corners are tighter than the tyres: the Medium
+ * 90 is R40, and at 130 km/h that asks for 3.3 g against the ~1.8 g the tyres
+ * make. No grip car gets round it. The old steering "did" by overdriving the
+ * front until the rear let go — measured on the real piece, key held, EVERY
+ * corner and speed from 70 to 175 km/h ended spun into the rail. Grip-limited
+ * steering (TIRE.steerGripLimit) stopped the spin and then simply went wide.
+ *
+ * WHAT IT DOES. The steering input asks for a lateral acceleration: full key =
+ * `maxG`, never more than the wheel geometry itself implies (so low-speed
+ * steering is untouched). The tyres deliver what they can; whatever the request
+ * exceeds `tyreG` by is added as a force at the centre of mass, across the
+ * velocity in the surface plane. At the CoM, so it cannot roll the car. It is
+ * paid for with drag along the velocity (`scrub` × the assist force), which is
+ * the "carried too much speed" cost, and it shrinks by itself as the car slows.
+ * The yaw assist aims the nose at the resulting path rate (see _applyYawAssist),
+ * so the car points where it is going instead of sliding.
+ *
+ * WHERE IT STANDS DOWN — handed over at `rate`, never switched:
+ *   • off the ground — AIR CONTROL IS UNTOUCHED; it re-engages after landing
+ *     over ~0.4 s, so a landing with the key held turns in rather than yanks
+ *   • handbrake — drifting is still the tyres' and the yaw assist's
+ *   • park pieces (FREE_CARVE), walls and loops (steerGripLimitTilt*), crashes,
+ *     reversing, and below `fromSpeed` (donuts)
+ */
+export const TURN_ASSIST = {
+  enabled: true,
+  /**
+   * Lateral g a FULL steering input asks for at speed. MEASURED on the real
+   * kit corners (straight → curve → straight, rails), keyboard taps following
+   * the lane — Medium R40 from 130 km/h, widest point from the centre line
+   * (lane edge ±8 m) / exit speed:
+   *     assist off (grip-limited)  +6.2 m rail  110 km/h
+   *     3.0 g                      +6.2 m rail  111
+   *     3.5 g                      +6.1 m rail  112
+   *     4.0 g, scrub 0.5           +3.4 m       113
+   * R40 at 160 still reaches the rail and bleeds to ~74 km/h: that corner
+   * needs 5 g, and arriving 60 km/h too fast is meant to cost something.
+   */
+  maxG: 4.0,
+  /** Lateral g the tyres are counted on for — the assist only fills above it. */
+  tyreG: 1.6,
+  /** Drag per newton of assist force. The speed cost of an over-fast corner. */
+  scrub: 0.5,
+  /** Speed (m/s) the assist starts fading in / is fully in. */
+  fromSpeed: 8,
+  fullSpeed: 14,
+  /** Hand-over rate (1/s) on landing, handbrake, park pieces. */
+  rate: 6,
+};
+
+/**
  * LIVE wheel dimensions. `radius` is a PHYSICS parameter, not just a visual one
  * — it scales the tire probe's ray ring (`rayRingScale`) and sphere sweep
  * (`sphereSweepScale`), sets the visual suspension extension, and divides into
@@ -2785,6 +2900,9 @@ class Tire {
      *  from the deck BVH's per-vertex tag; read by _applySurfaceGrip to decide
      *  whether a CONVEX curve gets help. See FOLLOW_ROAD in modularRoadKit.js. */
     this.hitRoadHold = false;
+    /** Is it a park surface (FREE_CARVE in modularRoadKit.js) where the steering
+     *  is not grip-limited? Same per-vertex tag byte. See TIRE.steerGripLimit. */
+    this.hitFreeCarve = false;
     /** Newtons of road hold applied last substep — diagnostics only. See ROAD_HOLD. */
     this.roadHoldForce = 0;
     /** Low-passed contact normal. The rate the surface rotates is read by
@@ -2858,6 +2976,7 @@ class Tire {
     let bestPoint = null;
     let bestSource = null;
     let bestHold = false;
+    let bestCarve = false;
 
     // `dist` lets a caller pass a distance already normalized back to the hub
     // (ring rays / sphere sweep start BELOW the hub, so their raw hit distance
@@ -2876,6 +2995,7 @@ class Tire {
       else this._bestN.set(0, 1, 0);
       bestSource = hit.source || null;
       bestHold = hit.roadHold === true;
+      bestCarve = hit.freeCarve === true;
     };
 
     const sample = (dirVec, off) => {
@@ -2928,7 +3048,7 @@ class Tire {
         // true hub-to-ground gap is sh.distance + sr (sh.distance is how far
         // the center travelled from the hub-raised origin).
         consider(
-          { distance: sh.distance, point: sh.point, normal: sh.normal, roadHold: sh.roadHold },
+          { distance: sh.distance, point: sh.point, normal: sh.normal, roadHold: sh.roadHold, freeCarve: sh.freeCarve },
           sh.distance + sr,
         );
       }
@@ -2936,7 +3056,7 @@ class Tire {
 
     return bestDist === Infinity
       ? null
-      : { dist: bestDist, point: bestPoint, source: bestSource, roadHold: bestHold };
+      : { dist: bestDist, point: bestPoint, source: bestSource, roadHold: bestHold, freeCarve: bestCarve };
   }
 
   /** Drop to the airborne state. Shared by "no probe hit" and the roof guard —
@@ -2947,6 +3067,7 @@ class Tire {
     this.compression = 0;
     this.overDemand = 0;
     this.hitRoadHold = false;
+    this.hitFreeCarve = false;
     this.roadHoldForce = 0;
     this._holdNValid = false;
     this._holdOmega = 0;
@@ -3001,6 +3122,7 @@ class Tire {
     const bestDist = probe.dist;
     this.grounded = true;
     this.hitRoadHold = probe.roadHold === true;
+    this.hitFreeCarve = probe.freeCarve === true;
     this.hitPoint.copy(probe.point);
     this._rawNormal.copy(this._bestN);
     if (this._rawNormal.dot(this._up) < 0) this._rawNormal.negate();
@@ -4347,6 +4469,23 @@ export class Vehicle {
     this._arrowDir = new THREE.Vector3();
     this._geomCenter = new THREE.Vector3();
     this._steerFwd = new THREE.Vector3();
+    this._gripFwd = new THREE.Vector3();
+    this._gripLat = new THREE.Vector3();
+    this._gripVel = new THREE.Vector3();
+    this._gripLimitMix = 1;
+    this._steerSpeed = 0;
+    /** TURN_ASSIST hand-over state (0..1) and this substep's commanded lateral
+     *  acceleration (m/s², 0 when idle) — the yaw assist aims the nose with it. */
+    this._turnAssistMix = 0;
+    this._turnAssistCmd = 0;
+    /** Diagnostics: g the assist added last substep. */
+    this.turnAssistG = 0;
+    this._taN = new THREE.Vector3();
+    this._taV = new THREE.Vector3();
+    this._taLat = new THREE.Vector3();
+    this._taF = new THREE.Vector3();
+    /** Fraction of the asked-for angle the last _steerAngle() call removed. */
+    this._gripLimitCut = 0;
     /** Seconds since the last wheel contact — gates air control (airGroundLockout). */
     this._airTime = 0;
     /**
@@ -4756,6 +4895,17 @@ export class Vehicle {
     this.input.airSteer = this._smoothAirSteer(rollTarget, analog);
     this.input.throttle = controls.throttle ?? 0;
     this.input.handbrake = !!controls.handbrake;
+    // See TIRE.steerGripLimitHandbrakeRate — the handbrake owns the steering,
+    // and so does a park surface (any tyre on a FREE_CARVE deck, last tick).
+    let freeSteer = this.input.handbrake;
+    for (const t of this.tires) if (t.grounded && t.hitFreeCarve) freeSteer = true;
+    this._gripLimitMix += ((freeSteer ? 0 : 1) - this._gripLimitMix)
+      * (1 - Math.exp(-TIRE.steerGripLimitHandbrakeRate * FIXED_DT));
+    // TURN_ASSIST: same hand-overs, plus off the ground. `_rackAirTime` rather
+    // than a wheel count, so a tyre skipping over a seam does not drop it.
+    const assistOn = !freeSteer && this._rackAirTime < 0.1 && this._crashYield <= 0;
+    this._turnAssistMix += ((assistOn ? 1 : 0) - this._turnAssistMix)
+      * (1 - Math.exp(-TURN_ASSIST.rate * FIXED_DT));
     this.input.yaw = controls.yaw ?? 0;
     this.input.pitch = controls.pitch ?? 0; // air pitch — its own key, not throttle
 
@@ -5116,7 +5266,11 @@ export class Vehicle {
     const over = Math.abs(slip) - DRIFT.counterDeadband;
     // Steering toward the slip direction IS the countersteer: with the nose
     // left of the velocity, pointing the wheels left aims them along travel.
-    const counter = over > 0 ? Math.sign(slip) * over * DRIFT.counterSteerVisual * contact : 0;
+    // Scaled down by what the grip limiter already cut: that cut IS the wheel
+    // turning toward travel, so drawing the overlay on top counts it twice.
+    const counter = over > 0
+      ? Math.sign(slip) * over * DRIFT.counterSteerVisual * contact * (1 - this._gripLimitCut)
+      : 0;
     let target = phys + counter;
     const cap = DRIFT.maxVisualSteer;
     if (target > cap) target = cap; else if (target < -cap) target = -cap;
@@ -5127,11 +5281,22 @@ export class Vehicle {
 
   /** Steer angle after speed-sensitive reduction (shared by physics + visuals). */
   _steerAngle() {
+    return this._gripLimitSteer(this._steerRequest(), this._steerSpeed);
+  }
+
+  /**
+   * The angle the steering INPUT asks for — speed reduction and donut boost,
+   * but before the grip limiter. The turn assist reads this: it is what the
+   * player wants the car to do, where `_steerAngle()` is what the tyres get.
+   * Leaves the forward speed it used in `_steerSpeed`.
+   */
+  _steerRequest() {
     // Speed ALONG THE CHASSIS FORWARD axis, not |vel|: total speed includes the
     // vertical component, which numbed the steering exactly when it's needed
     // most — falling toward a landing after a jump or drop.
     this._steerFwd.set(0, 0, 1).applyQuaternion(this.body.quat);
     const speed = Math.abs(this.body.vel.dot(this._steerFwd));
+    this._steerSpeed = speed;
     let t = speed / Math.max(0.1, TIRE.steerSpeedRef);
     if (t > 1) t = 1;
     const factor = 1 - TIRE.steerSpeedReduce * t;
@@ -5142,6 +5307,54 @@ export class Vehicle {
     if (lt > 1) lt = 1;
     const boost = TIRE.lowSpeedExtraLock * (1 - lt * lt);
     return this.input.steer * (TIRE.maxSteerAngle * factor + boost);
+  }
+
+  /** 1 on road-like ground, 0 on a pipe/wall/loop — see steerGripLimitTiltFull. */
+  _gripLimitSurface() {
+    let ny = 0, n = 0;
+    for (const t of this.tires) {
+      if (!t.grounded) continue;
+      ny += t.hitNormal.y;
+      n++;
+    }
+    if (n === 0) return 0;
+    const c1 = Math.cos(TIRE.steerGripLimitTiltFull / 57.2958);
+    const c0 = Math.cos(TIRE.steerGripLimitTiltZero / 57.2958);
+    return Math.min(1, Math.max(0, (ny / n - c0) / Math.max(1e-6, c1 - c0)));
+  }
+
+  /**
+   * Hold the front tyre's slip angle under its peak — see GRIP-LIMITED STEERING
+   * on TIRE. Grounded only: in the air there is no tyre to limit, and the rack
+   * should still let you land already turned into a corner.
+   */
+  _gripLimitSteer(requested, speed) {
+    const k = TIRE.steerGripLimit;
+    this._gripLimitCut = 0;
+    if (k <= 0 || requested === 0 || this.groundedCount < 2) return requested;
+    const span = Math.max(1e-3, TIRE.steerGripLimitFull - TIRE.steerGripLimitFrom);
+    const fade = Math.min(1, Math.max(0, (speed - TIRE.steerGripLimitFrom) / span))
+      * this._gripLimitMix * this._gripLimitSurface();
+    if (fade <= 0) return requested;
+
+    const q = this.body.quat;
+    this._gripFwd.set(0, 0, 1).applyQuaternion(q);
+    // +X is the side a positive steer angle turns toward (see _wheelSteerAngle).
+    this._gripLat.set(1, 0, 0).applyQuaternion(q);
+    // Front axle velocity = body velocity + ω × lever, in the chassis ground plane.
+    this._gripVel.copy(this._gripFwd).multiplyScalar(FRONT_AXLE_Z);
+    this._gripVel.crossVectors(this.body.angVel, this._gripVel).add(this.body.vel);
+    const vLong = this._gripVel.dot(this._gripFwd);
+    if (vLong < 2) return requested; // reversing or crawling — nothing to limit
+    const travel = Math.atan2(this._gripVel.dot(this._gripLat), vLong);
+
+    const aMax = Math.atan(1 / Math.max(0.1, TIRE.tireStiffness)) * k;
+    let limited = requested;
+    if (requested > 0) limited = Math.min(requested, Math.max(0, travel + aMax));
+    else limited = Math.max(requested, Math.min(0, travel - aMax));
+    const out = requested + (limited - requested) * fade;
+    this._gripLimitCut = 1 - out / requested;
+    return out;
   }
 
   /**
@@ -5236,6 +5449,7 @@ export class Vehicle {
       // they fan out over — so it belongs here too, not up with _applyAero: run
       // before the tyres and it would be working off last substep's contacts.
       this._applySurfaceGrip(subDt);
+      this._applyTurnAssist();
       this._applyYawAssist();
       this._applyLandingAssist(subDt);
       this._applyStabilizer(subDt);
@@ -5243,6 +5457,59 @@ export class Vehicle {
       const wMax = TIRE.maxAngVel;
       if (body.angVel.lengthSq() > wMax * wMax) body.angVel.setLength(wMax);
     }
+  }
+
+  /** Turn assist — see TURN_ASSIST. Runs after the tyres, before the yaw assist. */
+  _applyTurnAssist() {
+    this._turnAssistCmd = 0;
+    this.turnAssistG = 0;
+    const A = TURN_ASSIST;
+    const mix = this._turnAssistMix;
+    if (!A.enabled || mix <= 1e-3 || this.input.steer === 0) return;
+    const body = this.body;
+
+    let grounded = 0;
+    this._taN.set(0, 0, 0);
+    for (const t of this.tires) {
+      if (!t.grounded) continue;
+      grounded++;
+      this._taN.add(t.hitNormal);
+    }
+    if (grounded < 2 || this._taN.lengthSq() < 1e-8) return;
+    this._taN.normalize();
+
+    // Road-like ground only — the same tilt fade as the grip limiter.
+    const c1 = Math.cos(TIRE.steerGripLimitTiltFull / 57.2958);
+    const c0 = Math.cos(TIRE.steerGripLimitTiltZero / 57.2958);
+    const tilt = Math.min(1, Math.max(0, (this._taN.y - c0) / Math.max(1e-6, c1 - c0)));
+    if (tilt <= 0) return;
+
+    this._taV.copy(body.vel).addScaledVector(this._taN, -body.vel.dot(this._taN));
+    const speed = this._taV.length();
+    if (speed < A.fromSpeed) return;
+    this._taV.multiplyScalar(1 / speed);
+    // Forward only: reversing, or already spun past 90°, is not a corner.
+    this._taLat.set(0, 0, 1).applyQuaternion(body.quat);
+    if (this._taLat.dot(this._taV) <= 0) return;
+    const fade = Math.min(1, (speed - A.fromSpeed) / Math.max(1e-3, A.fullSpeed - A.fromSpeed));
+
+    // What the input asks for: a share of maxG, never more than the geometry of
+    // the requested wheel angle implies (which is what keeps low speed exact).
+    const kin = (speed * speed * Math.abs(Math.tan(this._steerRequest()))) / WHEELBASE;
+    const cmd = Math.min(kin, Math.abs(this.input.steer) * A.maxG * GRAVITY);
+    const k = mix * fade * tilt * grounded * 0.25;
+    this._turnAssistCmd = cmd * k;
+    const extra = cmd - A.tyreG * GRAVITY;
+    if (extra <= 0) return;
+
+    // Across the velocity, toward the steer side: a positive steer turns toward
+    // +X, and N × travel is +X for a car on flat ground facing +Z.
+    const F = body.mass * extra * k;
+    this._taLat.crossVectors(this._taN, this._taV).multiplyScalar(Math.sign(this.input.steer) * F);
+    body.addForce(this._taLat);
+    this._taF.copy(this._taV).multiplyScalar(-F * A.scrub);
+    body.addForce(this._taF);
+    this.turnAssistG = (extra * k) / GRAVITY;
   }
 
   /**
@@ -5323,7 +5590,17 @@ export class Vehicle {
     //    model). Damping the raw rate would fight the driver's own cornering;
     //    damping the error only removes the overshoot that starts the pendulum.
     const yawRate = body.angVel.dot(this._yawN);
-    const refRate = (speed * Math.tan(this._steerAngle())) / WHEELBASE;
+    let refRate = (speed * Math.tan(this._steerAngle())) / WHEELBASE;
+    // Aim at a rate the car can actually FOLLOW. The bicycle rate from the
+    // wheel angle is 2x the path rate at speed (8° at 36 m/s asks 1.8 rad/s of a
+    // path the tyres + TURN_ASSIST turn at ~0.8), and damping toward it wound the
+    // tail out. While the assist is engaged the path rate is its commanded
+    // acceleration over speed.
+    if (this._turnAssistMix > 1e-3 && speed > 1) {
+      const cap = Math.max(this._turnAssistCmd, TURN_ASSIST.tyreG * GRAVITY) / speed;
+      const capped = Math.max(-cap, Math.min(cap, refRate));
+      refRate += (capped - refRate) * this._turnAssistMix;
+    }
     torque -= (yawRate - refRate) * TIRE.yawRateDamp * driftMul;
 
     body.torqueAccum.addScaledVector(this._yawN, torque * TIRE.yawAssist * contact);

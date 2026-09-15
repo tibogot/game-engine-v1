@@ -17,6 +17,7 @@ import {
   followSpeed,
   heldSpeed,
   isFollowRoad,
+  isFreeCarve,
   PIECE_PARAM_DEFAULTS,
 } from "./modularRoadKit.js";
 import { solveGapArc } from "./gapArc.js";
@@ -2819,6 +2820,8 @@ export class ModularRoadBuilder {
     // knows both the piece id and the mesh. See FOLLOW_ROAD in the kit and
     // ROAD_HOLD in the vehicle.
     mesh.userData.roadHold = isFollowRoad(id);
+    // Park pieces keep free (pivot) steering — FREE_CARVE in the kit.
+    mesh.userData.freeCarve = isFreeCarve(id);
     const railMesh =
       built.railGeometry && this.railMaterial
         ? this._makeMesh(built.railGeometry, this.railMaterial, built.world)

@@ -5944,6 +5944,29 @@ export function isFollowRoad(pieceId) {
 }
 
 /**
+ * PARK PIECES — carved with free steering, not grip-limited steering.
+ *
+ * On road the car's steering is held at the tyre's peak grip angle
+ * (TIRE.steerGripLimit), so a held key corners instead of spinning. A park
+ * pipe or bowl is ridden the other way: you PIVOT on the flat to point the nose
+ * at the wall, and the pieces' verts and radii were tuned against that pivot
+ * (tools/parkPipeTest.mjs — grip-limited, the car rides up the wall along the
+ * pipe and flies out of it). Stamped onto the deck like FOLLOW_ROAD.
+ *
+ * Tubes and half tubes are NOT here: they are road you drive along, and their
+ * walls already hand the steering back through the limiter's tilt fade.
+ */
+export const FREE_CARVE = new Set([
+  "half_pipe", "half_pipe_slope", "half_pipe_curve",
+  "quarterpipe", "quarterpipe_down",
+]);
+
+/** Is this a park piece, carved with free steering? See FREE_CARVE. */
+export function isFreeCarve(pieceId) {
+  return FREE_CARVE.has(pieceId);
+}
+
+/**
  * The car's numbers, for turning a radius into a speed.
  *
  * COPIED, NOT IMPORTED, and deliberately. The kit is geometry and is imported by

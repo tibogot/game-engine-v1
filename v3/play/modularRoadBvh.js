@@ -32,6 +32,12 @@ const _anyEnd = new THREE.Vector3();
 const _f32 = new Float32Array(1);
 const _u32 = new Uint32Array(_f32.buffer);
 
+/** Per-vertex tag bits — see RoadBvh.vertHold. */
+const VERT_HOLD = 1;
+const VERT_CARVE = 2;
+const vertTags = (mesh) =>
+  (mesh.userData?.roadHold ? VERT_HOLD : 0) | (mesh.userData?.freeCarve ? VERT_CARVE : 0);
+
 export class RoadBvh {
   constructor() {
     this.baked = false;
@@ -58,6 +64,11 @@ export class RoadBvh {
      *
      * Null until a bake sees a tagged mesh, so a track with no vertical pieces
      * allocates nothing and pays nothing.
+     *
+     * A BIT FIELD, not a boolean: bit 0 (VERT_HOLD) is road hold, bit 1
+     * (VERT_CARVE) is `userData.freeCarve` — park pieces where the steering is
+     * not grip-limited (FREE_CARVE in modularRoadKit.js, TIRE.steerGripLimit).
+     * Same byte, so a second tag costs no second buffer.
      */
     this.vertHold = null;
     /** Content signature of the meshes this tree was built from — see
@@ -118,7 +129,7 @@ export class RoadBvh {
       mix(posAttr.count);
       // The hold tag is baked into faceHold, so a piece that swapped it without
       // touching its geometry or pose still has to rebuild the tree.
-      mix(mesh.userData?.roadHold ? 1 : 0);
+      mix(vertTags(mesh));
       const e = mesh.matrixWorld.elements;
       for (let i = 0; i < 16; i++) mixNum(e[i]);
     }
@@ -157,7 +168,7 @@ export class RoadBvh {
       vertCount += posAttr.count;
       const idx = mesh.geometry.getIndex();
       indexCount += idx ? idx.count : posAttr.count;
-      if (mesh.userData?.roadHold) anyHold = true;
+      if (vertTags(mesh)) anyHold = true;
     }
 
     if (vertCount === 0) {
@@ -228,9 +239,8 @@ export class RoadBvh {
       } else {
         for (let i = 0; i < count; i++) indices[iw++] = i + vertexOffset;
       }
-      if (vertHold && mesh.userData?.roadHold) {
-        vertHold.fill(1, vertexOffset, vertexOffset + count);
-      }
+      const tags = vertHold ? vertTags(mesh) : 0;
+      if (tags) vertHold.fill(tags, vertexOffset, vertexOffset + count);
       vertexOffset += count;
     }
 
@@ -286,7 +296,15 @@ export class RoadBvh {
     if (!this.vertHold || faceIndex < 0 || !this.geometry) return false;
     const idx = this.geometry.getIndex();
     if (!idx) return false;
-    return this.vertHold[idx.array[faceIndex * 3]] === 1;
+    return (this.vertHold[idx.array[faceIndex * 3]] & VERT_HOLD) !== 0;
+  }
+
+  /** Is the face at `faceIndex` a park surface carved with free steering? See vertHold. */
+  carveAtFace(faceIndex) {
+    if (!this.vertHold || faceIndex < 0 || !this.geometry) return false;
+    const idx = this.geometry.getIndex();
+    if (!idx) return false;
+    return (this.vertHold[idx.array[faceIndex * 3]] & VERT_CARVE) !== 0;
   }
 
   /** First hit along a ray (filtered to `far`). Returns point, distance, faceIndex, normal. */
@@ -303,6 +321,7 @@ export class RoadBvh {
       faceIndex: hit.faceIndex,
       normal: _hitNormal.clone(),
       roadHold: this.holdAtFace(hit.faceIndex),
+      freeCarve: this.carveAtFace(hit.faceIndex),
     };
   }
 
@@ -399,6 +418,7 @@ export class RoadBvh {
     let hitPoint = null;
     let hitNormal = null;
     let hitHold = false;
+    let hitCarve = false;
 
     _sweepBox.min.set(
       Math.min(ox, ox + ndx * maxDist) - radius,
@@ -426,12 +446,13 @@ export class RoadBvh {
           // model), so without this the hold tag would read false on exactly
           // the ticks that matter and the assist would stutter.
           hitHold = this.holdAtFace(triIndex);
+          hitCarve = this.carveAtFace(triIndex);
         }
         return false;
       },
     });
 
-    if (hitPoint) return { distance: minT, point: hitPoint, normal: hitNormal, roadHold: hitHold };
+    if (hitPoint) return { distance: minT, point: hitPoint, normal: hitNormal, roadHold: hitHold, freeCarve: hitCarve };
     return null;
   }
 

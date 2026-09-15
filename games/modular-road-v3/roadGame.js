@@ -62,6 +62,7 @@ import {
   WHEEL,
   WHEEL_LOCAL,
   DRIFT,
+  TURN_ASSIST,
   GRAVITY,
 } from "../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../v3/play/modularRoadBvh.js";
@@ -9514,7 +9515,7 @@ ${e.message}`);
     app,
     params: {
       TIRE, AERO, ROAD_HOLD, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS, CHASSIS_GLB_LIGHTS,
-      WHEEL_LAYOUT, DRIFT, glowPropParams,
+      WHEEL_LAYOUT, DRIFT, TURN_ASSIST, glowPropParams,
     },
     game: {
       /** Volumetric clouds. Off releases every buffer and runs no pass. */

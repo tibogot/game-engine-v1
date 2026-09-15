@@ -303,24 +303,32 @@ console.log("\n=== (2) IN A CORNER, THE FRONT WHEELS POINT INTO THE CORNER ===")
       if (Math.abs(c.body.vel.z) >= target) break;
       c.tick({ steerTarget: 0, throttle: 1, handbrake: false, yaw: 0, pitch: 0 });
     }
-    let phys = 0, vis = 0, slip = 0, sp = 0;
+    let phys = 0, vis = 0, slip = 0, sp = 0, cut = 0;
     for (let i = 0; i < 1.2 / FIXED_DT; i++) {
       c.tick({ steerTarget: steer, throttle: 0.3, handbrake: false, yaw: 0, pitch: 0 });
       vis = c._visualSteerAngle(FIXED_DT);
       phys = c._steerAngle();
+      cut = c._gripLimitCut;
       slip = c.slipAngle;
       sp = Math.hypot(c.body.vel.x, c.body.vel.z);
     }
-    return { phys, vis, slip, sp };
+    return { phys, vis, slip, sp, cut };
   };
   let allOk = true;
   const rows = [];
   for (const [speed, steer] of [[15, 0.2], [25, 0.2], [35, 0.2], [25, 0.12], [35, 0.12]]) {
     const r = corner(speed, steer);
     const sameWay = Math.sign(r.vis) === Math.sign(r.phys);
-    const visible = Math.abs(r.vis) > Math.abs(r.phys) * 0.5;
+    // "Visible" is only owed to a car that is GRIPPING. When the grip-limited
+    // steering (TIRE.steerGripLimit) is cutting most of the asked-for angle the
+    // rear has stepped out and the front wheels are being straightened to catch
+    // it — measured at 31 m/s / 20% steer: physical angle pulled to 0° and
+    // coming back, so the smoothed drawn wheel trails it for a few frames. That
+    // is a recovery, not a corner. Pointing the wrong way is still never allowed.
+    const visible = Math.abs(r.vis) > Math.abs(r.phys) * 0.5 || r.cut > 0.5;
     if (!sameWay || !visible) allOk = false;
-    rows.push(`${r.sp.toFixed(0)}m/s slip${(r.slip * R2D).toFixed(0)}° ${(r.phys * R2D).toFixed(1)}°→${(r.vis * R2D).toFixed(1)}°`);
+    rows.push(`${r.sp.toFixed(0)}m/s slip${(r.slip * R2D).toFixed(0)}° ${(r.phys * R2D).toFixed(1)}°→${(r.vis * R2D).toFixed(1)}°`
+      + (r.cut > 0.5 ? " (limited)" : ""));
   }
   check(
     "the wheels are never drawn steering OUT of a corner the car is gripping",

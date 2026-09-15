@@ -32,7 +32,7 @@ const DEV_PANEL_OPEN_W = 360;
 export function createRoadDevPanel({ app, game, params }) {
   const {
     TIRE, AERO, ROAD_HOLD, DRIVETRAIN, DECK, SOLID, BODYLEAN, HEADLIGHTS,
-    CHASSIS_GLB_LIGHTS, WHEEL_LAYOUT, DRIFT, glowPropParams,
+    CHASSIS_GLB_LIGHTS, WHEEL_LAYOUT, DRIFT, TURN_ASSIST, glowPropParams,
   } = params;
 
   const root = document.createElement("div");
@@ -1121,6 +1121,27 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-st-counter" min="1" max="50" step="0.5" />
               <span class="prop-num" id="dv-st-counter-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" title="Caps the front wheels at this share of the tyre's peak grip angle above ~14 m/s, so a held key corners at the limit instead of spinning. Off = the old full-lock steering.">
+            <span class="prop-label">Grip steer limit</span>
+            <div class="prop-value">
+              <input type="range" id="dv-st-griplimit" min="0" max="1.2" step="0.05" />
+              <span class="prop-num" id="dv-st-griplimit-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" title="Cornering force a FULL steering input asks for. The tyres give ~1.6 g; the rest is added so a held key always turns the car. At or below 1.6 g = off.">
+            <span class="prop-label">Turn assist</span>
+            <div class="prop-value">
+              <input type="range" id="dv-turn-maxg" min="1.5" max="6" step="0.1" />
+              <span class="prop-num" id="dv-turn-maxg-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" title="Speed lost per unit of turn assist — what taking a corner too fast costs. 0 = free.">
+            <span class="prop-label">Corner speed cost</span>
+            <div class="prop-value">
+              <input type="range" id="dv-turn-scrub" min="0" max="1.5" step="0.05" />
+              <span class="prop-num" id="dv-turn-scrub-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -6232,6 +6253,11 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-st-attack", TIRE, "steerAttack", (v) => v.toFixed(1));
   slider("dv-st-release", TIRE, "steerRelease", (v) => v.toFixed(1));
   slider("dv-st-counter", TIRE, "steerCounter", (v) => v.toFixed(1));
+  slider("dv-st-griplimit", TIRE, "steerGripLimit", (v) => (v > 0 ? `${Math.round(v * 100)}%` : "off"));
+  if (TURN_ASSIST) {
+    slider("dv-turn-maxg", TURN_ASSIST, "maxG", (v) => (v > TURN_ASSIST.tyreG ? `${v.toFixed(1)} g` : "off"));
+    slider("dv-turn-scrub", TURN_ASSIST, "scrub", (v) => v.toFixed(2));
+  }
   slider("dv-st-drop", TIRE, "steerRateSpeedDrop", (v) => `${Math.round(v * 100)}%`);
   slider("dv-st-analog", TIRE, "steerAnalogRate", (v) => v.toFixed(0));
   slider("dv-wall-skin", SOLID, "skin", (v) => `${(v * 100).toFixed(0)} cm`);

@@ -30,7 +30,7 @@ const TMP = join(ROOT, `.turn.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, WHEEL, FIXED_DT, GRAVITY, TIRE } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
+const { Vehicle, WHEEL, FIXED_DT, GRAVITY, TIRE, TURN_ASSIST } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 
 const { buildPiece, pieceParams, roadParams, guardrailParams, initialConnector, PIECE_BY_ID } =
   await import(new URL("../games/modular-road-v3/modularRoadKit.js", import.meta.url).href);
@@ -97,13 +97,22 @@ function corner(speed, steer) {
   return { g: best / GRAVITY, R };
 }
 
+// TYRE GRIP, WITH THE TURN ASSIST OFF. The ladder's corner speeds are the
+// speeds you carry through for FREE. TURN_ASSIST lets a held key take the same
+// corner faster, but pays for it in speed (its `scrub`), so it has no steady
+// "sustained g" to measure — at full input the car tightens and slows — and
+// a partial input just reads back input × maxG. Neither is a property of the
+// corner; the tyres are.
+const assistWas = TURN_ASSIST.enabled;
+TURN_ASSIST.enabled = false;
 const held = [];
-console.log("   speed   sustained   implied radius");
+console.log("   speed   sustained   implied radius   (tyres only, turn assist off)");
 for (const speed of [15, 20, 25, 30, 35, 40]) {
   const r = corner(speed, 0.45);
   held.push(r.g);
   console.log(`   ${String(speed).padStart(4)}   ${r.g.toFixed(2).padStart(7)} g   ${r.R.toFixed(0).padStart(11)} m`);
 }
+TURN_ASSIST.enabled = assistWas;
 const lo = Math.min(...held), hi = Math.max(...held);
 // FLATNESS is the property the ladder actually rests on: if grip fell away with
 // speed, v_max = sqrt(R·a) would stop predicting anything and the rungs would
@@ -117,7 +126,15 @@ ok(hi - lo < 0.15, "the car holds a steady g however fast it is going",
 // 2.25 g and turned the car into an understeering one that could not pivot.
 // Reverted in the vehicle rather than re-baselined here, because the number was
 // the symptom and not the decision.
-const A = 1.3;
+//
+// RE-BASELINED 1.3 → 1.8 FOR GRIP-LIMITED STEERING, and this one IS the
+// decision. Look at the old run's radius column: 6 m at EVERY speed. The 1.3 g
+// was read off a car that had spun and scrubbed down to a crawl, because a held
+// 45% steer overdrove the front tyre past its peak and the rear let go. With
+// TIRE.steerGripLimit the same input holds a real corner — 63 m at 15-25 m/s,
+// 110 m at 35-40 — at 1.78-1.92 g. The rungs' RATIOS don't depend on A; every
+// rung is just ~19% faster than the km/h in modularRoadBuilder's comments.
+const A = 1.8;
 ok(lo <= A && A <= hi, `${A} g is inside the measured band, so the tile comment is sound`,
   `${lo.toFixed(2)}–${hi.toFixed(2)} g`);
 

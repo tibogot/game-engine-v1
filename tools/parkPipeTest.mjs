@@ -53,7 +53,7 @@ writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "ut
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
 const { Vehicle, FIXED_DT } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
-const { buildPiece, pieceParams, buildOpenLipCollision } = await import(
+const { buildPiece, pieceParams, buildOpenLipCollision, isFreeCarve } = await import(
   pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadKit.js")).href);
 const { CATEGORY_PRESETS } = await import(
   pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadBuilder.js")).href);
@@ -75,6 +75,8 @@ const mkBvh = (gs) => {
   const b = new RoadBvh();
   b.bakeFromMeshes(gs.map((geo) => {
     const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial());
+    // The builder's deck tag, carried on the geometry since these are bare clones.
+    m.userData.freeCarve = geo.userData.freeCarve === true;
     m.updateMatrixWorld(true); return m;
   }));
   return b.baked ? b : null;
@@ -104,7 +106,12 @@ function ride({ Rt, flat = 0, vert = 0, span = 0, len = 200, speed, steer }) {
       if (!g) continue;
       // The rim caps render but are not road — bake what the game bakes.
       const c = (buildOpenLipCollision(g) ?? g).clone();
-      c.applyMatrix4(p.world); deck.push(c);
+      c.applyMatrix4(p.world);
+      // Stamped as the builder stamps it (FREE_CARVE): the pipe is carved with
+      // free steering, and without the tag this rides grip-limited steering the
+      // game never gives a pipe.
+      c.userData.freeCarve = isFreeCarve(pieceId);
+      deck.push(c);
     }
     if (p.railGeometry) { const r = p.railGeometry.clone(); r.applyMatrix4(p.world); rails.push(r); }
     conn = p.connectorOut;
