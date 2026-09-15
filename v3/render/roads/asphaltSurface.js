@@ -28,7 +28,7 @@
  *     road frame, so they line up with the road instead of the world grid
  *   - roughness: deck + macro/aggregate variation − wheel-path polish − patches
  *   - relief: grit + the SAME cellular stones, as a normal map
- *   - wet: modularRoadWet.js (film, ponding, clearcoat ripple), with drainage
+ *   - wet: wetRoad.js (film, ponding, clearcoat ripple), with drainage
  *     keyed to `drain`
  *   - paint: a caller hook (v3/render/roads/laneRoadPaint.js) shaded with the
  *     track's paint terms (lineRough / lineWet / lineCoat / lineCoatRough)
@@ -49,7 +49,7 @@ import {
   Fn, float, vec2, vec3, vec4, uniform, attribute, uv, floor, fract, mix, min, max, sqrt, abs, step, smoothstep,
   saturate, oneMinus, fwidth, uint, hash, normalMap, length, positionWorld, cameraPosition,
 } from "three/tsl";
-import { WET_DEFAULTS, WET_COLORS, createWetShading, wetClearcoatNormal } from "../../../games/modular-road-v3/modularRoadWet.js";
+import { WET_DEFAULTS, WET_COLORS, createWetShading, wetClearcoatNormal } from "./wetRoad.js";
 
 /** City street defaults (modularRoadCityStreets.js STREET_DEFAULTS) for the terms this file carries. */
 export const ASPHALT_DEFAULTS = {

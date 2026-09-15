@@ -24,7 +24,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SHADER_MODULES = [
   "games/modular-road-v3/modularRoadMaterial.js",
   "games/modular-road-v3/modularRoadSurfaceV2.js",
-  "games/modular-road-v3/modularRoadWet.js",
+  "v3/render/roads/wetRoad.js",
   "games/modular-road-v3/modularRoadRail.js",
   "games/modular-road-v3/modularRoadReflection.js",
   "games/modular-road-v3/modularRoadDriftSmoke.js",

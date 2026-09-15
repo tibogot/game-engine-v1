@@ -2073,7 +2073,7 @@ export function createModularRoadCity({
     },
     /**
      * Same weather the track gets, 0 dry … 1 soaked. The street material runs
-     * the Smart Road's own wet model (modularRoadWet.js, same knob names), so
+     * the Smart Road's own wet model (wetRoad.js, same knob names), so
      * a wet city and a wet track read as the same rain.
      */
     setWet(v) { wetAmount = Math.max(0, Math.min(1, v || 0)); ground?.setWet(wetAmount); },

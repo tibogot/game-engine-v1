@@ -7299,7 +7299,7 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-reflect-slab", weather, "reflectSlab", (v) => v.toFixed(2),
     (v) => game.setReflectSlab?.(v));
   // The guardrail's reflection, drawn as MIRRORED GEOMETRY seen by the normal
-  // camera rather than through the mirror — see modularRoadWet.js. 1 is the
+  // camera rather than through the mirror — see wetRoad.js. 1 is the
   // physically right answer here; the "Rails in mirror" toggle above turns the
   // whole extra pass off.
   slider("dv-rail-reflect", weather, "railReflect", (v) => v.toFixed(2),

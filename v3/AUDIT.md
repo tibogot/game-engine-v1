@@ -177,7 +177,7 @@ The original plan, for reference:
       attributes into material options and pack the rest.
     - Remove the geometry paint mesh once this ships.
 51. **One shared asphalt function** taking a road frame {along, across,
-    lateral, wheelPath}: asphalt + paint + paint wear + wet (modularRoadWet).
+    lateral, wheelPath}: asphalt + paint + paint wear + wet (wetRoad).
     Lane roads first; track deck and city street switch over later, each A/B'd.
     Ends the city street's hand copy drifting from the track asphalt.
 52. **Wetness in the editor**: wet amount / puddles panel (planar car
@@ -629,7 +629,32 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      tangled. Cost to games: ~15 KB gzip once + a few ms of DOM work, nothing
      on screen. ACCEPTED LEFTOVER — shrink it when those sections are edited
      for another reason; not worth a dedicated risky pass.
-104. **Step 4 — split tools + public API.** Runtime half (build from data,
+104. **Step 4 — split tools + public API.**
+     4a DONE 2026-09-15 — one door and a guarded boundary:
+     - `v3/engine.js`: `startV3App`, `createLevelLoader`, terrain size
+       constants, and `PUBLIC_ENGINE_MODULES` (the building blocks a game may
+       import by path: bloom/instancing/water/cloud helpers, wet road, vehicle
+       physics, the v2 prop builders still to move). tools/
+       gameImportBoundaryTest.mjs fails when a game imports anything else
+       from v3/ or v2/, or when the engine imports from games/.
+     - `v3/io/levelLoader.js` replaces three copied world loaders (rts-v3,
+       modular-road, empty-game). The game's own level reloads at its terrain
+       size without asking (before, a size mismatch silently dropped the
+       heightmap); player-picked files ask. Every load ends with
+       refreshWorldHeights. No HEAD probe (the dev server's fallback answers
+       200 for missing files).
+     - Wet road shading moved from games/modular-road-v3/modularRoadWet.js to
+       v3/render/roads/wetRoad.js (v3's asphalt imported it from the game).
+     - Deploy bug fixed: rts.v3proj was outside public/, so the built RTS
+       404'd and ran on flat procedural terrain; now public/games/rts-v3/.
+       Checked in a production build: reloads at the level size, 20 units,
+       real heights.
+     Caveat found: the terrain size lives in localStorage shared by every page
+     on the origin, so a game reloading at its level's size also changes the
+     editor's size next time it opens (and two games with different sizes
+     each reload once when you switch). Fix later: a boot-time terrain size
+     per page instead of the shared setting.
+     Still to do: runtime half (build from data,
      meshes, colliders) vs editor half (handles, brushes, undo) for lakes,
      rivers, tunnels, roads, splines, props; one engine entry file; racing-game
      code out of v3/play; the v2 files still used move in.

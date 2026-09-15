@@ -21,14 +21,14 @@ const src = fs.readFileSync(new URL(`../${FILE}`, import.meta.url), "utf8");
 
 /**
  * Sources the sync lists may be assembled from. The wet-road model owns its own
- * key lists (modularRoadWet.js) and ROAD_LOOK_* spreads them in, so resolving a
+ * key lists (wetRoad.js) and ROAD_LOOK_* spreads them in, so resolving a
  * `...NAME` means looking there too. Its uniforms are still DECLARED in
  * createRoadMaterial's `u` block, which is what keeps the check below honest.
  */
 const SOURCES = {
   [FILE]: src,
-  "games/modular-road-v3/modularRoadWet.js": fs.readFileSync(
-    new URL("../games/modular-road-v3/modularRoadWet.js", import.meta.url), "utf8",
+  "v3/render/roads/wetRoad.js": fs.readFileSync(
+    new URL("../v3/render/roads/wetRoad.js", import.meta.url), "utf8",
   ),
 };
 
@@ -103,14 +103,14 @@ check(stale.length === 0, `no sync entry names a uniform that no longer exists${
 const both = [...numbers].filter((k) => colours.has(k));
 check(both.length === 0, `no uniform synced as both colour and number${both.length ? ` — ${both.join(", ")}` : ""}`);
 
-/* The same trap one level down: modularRoadWet.js documents its knobs on
+/* The same trap one level down: wetRoad.js documents its knobs on
  * WET_DEFAULTS and lists them in WET_COLORS/WET_NUMBERS. A key in the defaults
  * but not the lists never reaches a uniform; a key in the lists but not the
  * defaults reaches one with `undefined` and the uniform quietly keeps whatever
  * the material's own fallback was. */
 const wetKeys = new Set([...list("WET_COLORS"), ...list("WET_NUMBERS")]);
 const wetDefaults = (() => {
-  const text = SOURCES["games/modular-road-v3/modularRoadWet.js"];
+  const text = SOURCES["v3/render/roads/wetRoad.js"];
   const open = text.indexOf("export const WET_DEFAULTS = {");
   const close = text.indexOf("\n};", open);
   if (open < 0 || close < 0) throw new Error("cannot find WET_DEFAULTS");

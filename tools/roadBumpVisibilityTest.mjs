@@ -50,7 +50,7 @@ const S = { ...SURFACE_V2_DEFAULTS, ...SURFACE_V2_GAME };
 
 // ── THE CAMERA ──────────────────────────────────────────────────────────────
 // Read from chaseCamera so this cannot quietly disagree with the game. The
-// numbers in modularRoadWet's reflectFresnel note (3.8 m / 8.7 m) are from an
+// numbers in wetRoad's reflectFresnel note (3.8 m / 8.7 m) are from an
 // older tuning and are NOT the shipping camera; that is exactly the kind of
 // drift a hand-copied constant produces.
 const FOV_DEG = 60;   // v3/app/main.js

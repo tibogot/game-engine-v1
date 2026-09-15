@@ -10,7 +10,7 @@
 // shared TSL node whose .value sculptBrush swaps to the live ping-pong RT, so a
 // decal draped through it keeps tracking the ground while the terrain is edited.
 import { texture, vec2, vec3, float, step } from "three/tsl";
-import { WORLD_SIZE, MAX_HEIGHT } from "../../v3/terrain/heightmapTexture.js";
+import { WORLD_SIZE, MAX_HEIGHT } from "../../v3/engine.js";
 
 /**
  * World Y of the terrain at a world XZ, as a TSL node — the GPU counterpart of

@@ -98,8 +98,8 @@ console.log("\n=== THE BUG CANNOT COME BACK ===");
 
 console.log("\n=== THE SOURCE OF TRUTH IS STILL EXPORTED ===");
 {
-  const wetSrc = readFileSync(join(GAME, "modularRoadWet.js"), "utf8");
-  check("modularRoadWet still owns wetRippleNormal",
+  const wetSrc = readFileSync(join(ROOT, "v3/render/roads/wetRoad.js"), "utf8");
+  check("wetRoad still owns wetRippleNormal",
     /export function wetRippleNormal/.test(wetSrc));
   // There are now TWO height fields on the water — the paver break-up and the
   // raindrop impact rings — and the whole point is that they are summed as

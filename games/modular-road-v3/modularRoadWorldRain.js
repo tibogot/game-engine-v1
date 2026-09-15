@@ -2,7 +2,7 @@
 // WORLD RAIN — drops that actually fall, and actually land on the track.
 //
 // The lens (modularRoadRainLens.js) says "it is raining" and the wet road
-// (modularRoadWet.js) says "it has rained". Nothing fell in between. This is
+// (wetRoad.js) says "it has rained". Nothing fell in between. This is
 // the middle of that chain: streaks in the air, and a splash at the exact
 // point the deck is, whatever height the deck happens to be at.
 //

@@ -249,7 +249,7 @@ export function createDevPanel({
           <button class="action-btn" id="dv-world-load" type="button">Load .v3proj…</button>
           <button class="action-btn" id="dv-world-default" type="button">Reload default</button>
           <button class="action-btn" id="dv-world-reseat" type="button">Re-seat on terrain</button>
-          <div class="dv-hint">Default: <code>rts.v3proj</code>. Or open with <code>?world=/path/file.v3proj</code>. Re-seat drops structures/flag back onto the ground if anything floats.</div>
+          <div class="dv-hint">Default: <code>public/games/rts-v3/rts.v3proj</code>. Or open with <code>?world=/path/file.v3proj</code>. Re-seat drops structures/flag back onto the ground if anything floats.</div>
         </div>
       </div>
 

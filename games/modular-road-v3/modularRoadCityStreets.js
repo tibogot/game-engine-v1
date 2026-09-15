@@ -10,7 +10,7 @@
 // the car DRIVES ON needs, all of it waste on a road it flies OVER at 40 m. A
 // 2.4 km grid of it is hundreds of splines and a draw per piece. What IS worth
 // taking from it is the LOOK, and that is what this file does: the shading
-// model is lifted term for term from modularRoadMaterial.js / modularRoadWet.js
+// model is lifted term for term from modularRoadMaterial.js / wetRoad.js
 // and re-keyed to world space and the block grid instead of spline attributes,
 // so a wet city street and a wet track look like the same weather.
 //
@@ -59,7 +59,7 @@ import { NEON_PALETTE } from "./modularRoadCityFacade.js";
 import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 /**
- * Defaults. The wet block mirrors WET_DEFAULTS in modularRoadWet.js by NAME and
+ * Defaults. The wet block mirrors WET_DEFAULTS in wetRoad.js by NAME and
  * by value, so the game can push the same weather to the city streets it pushes
  * to the track, and the two never disagree about what "wet" means.
  */
@@ -373,7 +373,7 @@ export const STREET_DEFAULTS = {
    */
   crossWear: 0.85,
 
-  // ── WET (modularRoadWet.js WET_DEFAULTS, same names) ──────────────────────
+  // ── WET (wetRoad.js WET_DEFAULTS, same names) ──────────────────────
   wetAmount: 0,
   wetCoatStrength: 0.55,
   wetDarken: 0.48,
@@ -461,7 +461,7 @@ export const STREET_DEFAULTS = {
    *  makes: standing water mirrors the frontage back at you. */
   neonWetGain: 2.2,
 
-  // ── PLANAR REFLECTION (modularRoadWet.js WET_DEFAULTS, same names) ────────
+  // ── PLANAR REFLECTION (wetRoad.js WET_DEFAULTS, same names) ────────
   //
   // The puddles were already here and already correct; what they had to
   // reflect was a smooth gradient sky, which mirrors to nothing at all. That
@@ -829,7 +829,7 @@ export function createCityStreets({
   const kerbHeightAt = (L) => smoothstep(float(0.0), u.kerbWidth, L.intoBlock).mul(u.kerbHeight);
 
   /**
-   * THE WET FIELD — modularRoadWet.js `createWetField`, re-keyed. Returns
+   * THE WET FIELD — wetRoad.js `createWetField`, re-keyed. Returns
    * (film, pond). Crown drainage stands in for the track's camber/bank pair: a
    * city street sheds to both kerbs, so the pool term is |lateral|.
    */
@@ -920,7 +920,7 @@ export function createCityStreets({
   }
 
   /**
-   * The water surface's slope — modularRoadWet.js `wetBreakupSlope`. Three
+   * The water surface's slope — wetRoad.js `wetBreakupSlope`. Three
    * directional cosines (their derivative is free), stretched along the
    * street, faded before they can beat against the pixel grid. `fadeIn` is the
    * fwidth term, taken by the caller at top level.
@@ -1084,7 +1084,7 @@ export function createCityStreets({
     const onKerb = smoothstep(u.kerbWidth.mul(1.35), u.kerbWidth.mul(0.5), L.intoBlock).mul(step(float(0.0), L.intoBlock));
     const walkCol = mix(mix(yard, walk, onWalk), u.kerbColor, onKerb);
 
-    // ── THE WET MODEL (modularRoadWet.js createWetShading) ──────────────────
+    // ── THE WET MODEL (wetRoad.js createWetShading) ──────────────────
     const W = wetField(L);
     const film = W.film.toVar(), pond = W.pond.toVar();
     const coat = saturate(max(film.mul(u.wetCoatStrength), pond)).toVar();

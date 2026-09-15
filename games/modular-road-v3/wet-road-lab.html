@@ -92,7 +92,7 @@
        *   on a bank runs to one side instead of two. On a straight that half of
        *   the model is invisible.
        *
-       * The shading itself is imported, not reimplemented: modularRoadWet.js and
+       * The shading itself is imported, not reimplemented: wetRoad.js and
        * createRoadMaterial are the same code the game ships, so nothing tuned
        * here can drift from what runs.
        */
@@ -114,7 +114,7 @@
         ROAD_LOOK_FORMAT,
         ROAD_LOOK_VERSION,
       } from "./modularRoadMaterial.js";
-      import { WET_DEFAULTS } from "./modularRoadWet.js";
+      import { WET_DEFAULTS } from "../../v3/render/roads/wetRoad.js";
       import { buildRailGeometry, railParams } from "./modularRoadRail.js";
       import { loadChassisModel, chassisGlbMounts, CHASSIS_GLB } from "./chassisModel.js";
       import { WHEEL_LOCAL, WHEEL_LAYOUT } from "../../v3/play/modularRoadVehicle.js";

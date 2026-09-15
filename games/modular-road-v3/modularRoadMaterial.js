@@ -46,7 +46,7 @@ import {
   WET_NUMBERS,
   createWetShading,
   wetClearcoatNormal,
-} from "./modularRoadWet.js";
+} from "../../v3/render/roads/wetRoad.js";
 
 /**
  * An authored sRGB hex as a working-space (linear) Color.
@@ -430,7 +430,7 @@ export function createRoadMaterial(opts = {}) {
     // Declared unconditionally, even when `opts.wet` is off, so that a look
     // file always round-trips the full set and a dry material can be swapped
     // for a wet one without the authored weather being lost. What each of
-    // these MEANS is documented on WET_DEFAULTS in modularRoadWet.js; the
+    // these MEANS is documented on WET_DEFAULTS in wetRoad.js; the
     // model itself lives there too. `wetAmount` defaults to 0, so a wet
     // material with no weather applied is identical to a dry one.
     wetAmount: uniform(opts.wetAmount ?? WET_DEFAULTS.wetAmount),
@@ -1079,7 +1079,7 @@ export function createRoadMaterial(opts = {}) {
       // grazing angle that sheen identifies it more than the darkness does.
       .sub(tarSnakeField.mul(u.tarSnakeGloss));
     // Water fills the pores, so the SUBSTRATE smooths out some — but only some.
-    // The mirror is the coat, not this; see wetRough in modularRoadWet.js.
+    // The mirror is the coat, not this; see wetRough in wetRoad.js.
     if (wet) deck = mix(deck, wet.substrateRough, wet.film);
     // PAINT REPLACES the asphalt's roughness rather than tinting it — none of
     // the terms above (aggregate gloss, wheel polish, old rubber) describe a

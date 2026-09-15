@@ -38,7 +38,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 // asked for /v3/styles/editor.css and got a 404.
 import "../../v3/styles/editor.css";
 import "./palette.css";
-import { startV3App } from "../../v3/app/main.js";
+import { startV3App, createLevelLoader, WORLD_SIZE } from "../../v3/engine.js";
 import { createFlatGround } from "./modularRoadFlatGround.js";
 import { createModularRoadClouds } from "./modularRoadClouds.js";
 import { createBirdFlock } from "./modularRoadBirds.js";
@@ -209,7 +209,6 @@ import { preloadPalm } from "./modularRoadPalm.js";
 import { preloadBarrel } from "./modularRoadBarrel.js";
 import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
-import { loadBootWorld, loadWorldFromFile } from "./worldLoader.js";
 import { createRoadDevPanel } from "./devPanel.js";
 import { relabelKeys } from "./keyLabels.js";
 import { createModularRoadSky, skyColorsAt, moonDirFromTime, SKY_DEFAULTS } from "./modularRoadSky.js";
@@ -219,7 +218,6 @@ import { createWeather, WEATHER_NAMES } from "./modularRoadWeather.js";
 import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
 import { createModularRoadCity, CITY_DEFAULTS } from "./modularRoadCity.js";
 import { createCityCheckpoints } from "./modularRoadCityCheckpoints.js";
-import { WORLD_SIZE } from "../../v3/terrain/heightmapTexture.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
 // /games/modular-road-v3/*.json 404s on deploy: Vite only emits public/ and
 // imported assets — the source folder itself is not published.
@@ -487,10 +485,11 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
   let reflectionEnabled = true;
 
   // 2) ── LOAD THE WORLD ─────────────────────────────────────────────────────
-  const boot = await loadBootWorld(app, { onStatus });
-  // Rivers/lakes carve the heightmap AFTER the project's own height sync, so
-  // pull a fresh CPU mirror before anything below reads ground heights.
-  await app.refreshWorldHeights?.();
+  // Flat empty terrain by default — a stunt track supplies its own scenery. Served
+  // from public/ so it exists in a build too (a runtime URL outside public/ 404s
+  // there). The loader refreshes the CPU height mirror after rivers/lakes carve.
+  const levels = createLevelLoader(app, { defaultUrl: "/games/modular-road-v3/stunt.v3proj", onStatus });
+  const boot = await levels.loadBoot();
 
   // Post-FX: the GAME owns its look. postFx.enabled defaults to FALSE in the
   // engine and is NOT stored in the .v3proj, so without this the game gets no
@@ -9993,10 +9992,9 @@ ${e.message}`);
         moverDeckBvh.triCount + moverSolidsBvh.triCount,
       getWorldName: () => worldName,
       async loadWorldFile(file) {
-        const res = await loadWorldFromFile(app, file, { onStatus: () => {} });
+        const res = await levels.loadFile(file);
         if (res?.loaded) {
           worldName = res.name;
-          await app.refreshWorldHeights?.();
           // The new terrain is a different shape — re-seat the build anchor and
           // re-bake, or the track anchor is left hanging over the old heightfield.
           seedChainAtSpawn();

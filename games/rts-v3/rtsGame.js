@@ -8,7 +8,8 @@
 //
 // Nothing here edits the engine's source — it only imports it. To reshape the
 // terrain or move objects: open v3/editor.html, build/tweak, Save Project, and
-// drop the resulting file here as `rts.v3proj`. This game reloads it on boot.
+// drop the resulting file in public/games/rts-v3/ as `rts.v3proj` (public/, so a
+// build ships it). This game reloads it on boot.
 // ============================================================================
 
 // The dev panel is built out of the v3 editor'''s own classes and :root
@@ -18,7 +19,7 @@
 // HTML at build time, and Vite therefore bundles nothing and the deployed site
 // 404s on /v3/styles/editor.css.
 import "../../v3/styles/editor.css";
-import { startV3App } from "../../v3/app/main.js";
+import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "./rtsCamera.js";
 import { createUnits } from "./units.js";
 import { createUnitRenderer } from "./unitRenderer.js";
@@ -49,11 +50,6 @@ import { createProjectiles } from "./projectiles.js";
 import { createFireSystem } from "./fireSystem.js";
 import { createCraterSystem } from "./craterSystem.js";
 import { createFogOfWar } from "./fogOfWar.js";
-import {
-  loadBootWorld,
-  loadDefaultWorld,
-  loadWorldFromFile,
-} from "./worldLoader.js";
 
 export async function startRtsGame({ container, onStatus = () => {}, fov } = {}) {
   // 1) Boot the v3 engine — renderer, terrain clipmap, sky, grass, water… the
@@ -95,12 +91,12 @@ export async function startRtsGame({ container, onStatus = () => {}, fov } = {})
   }
 
   // 2) Load world — default rts.v3proj, or ?world=/path/to/other.v3proj.
+  // A level of another terrain size reloads the page at that size first; the
+  // loader also refreshes the CPU height mirror after rivers/lakes carve.
+  const levels = createLevelLoader(app, { defaultUrl: "/games/rts-v3/rts.v3proj", onStatus });
   const worldState = { name: "procedural default" };
-  const boot = await loadBootWorld(app, { onStatus });
+  const boot = await levels.loadBoot();
   worldState.name = boot.name;
-  // Rivers/lakes carve the heightmap AFTER the project's own height sync, so
-  // pull a fresh CPU mirror before anything below reads ground heights.
-  await app.refreshWorldHeights?.();
 
   // Post-FX: the GAME owns its look. postFx.enabled defaults to false in the
   // engine and is NOT stored in the .v3proj, so without this the game gets no
@@ -416,14 +412,14 @@ export async function startRtsGame({ container, onStatus = () => {}, fov } = {})
   const devPanel = createDevPanel({
     app, navGrid, rtsCamera, units, minimap,
     worldName: worldState.name,
-    onLoadWorldFile: async (file) => afterWorldLoad(await loadWorldFromFile(app, file, { onStatus })),
-    onLoadDefaultWorld: async () => afterWorldLoad(await loadDefaultWorld(app, { onStatus })),
+    onLoadWorldFile: async (file) => afterWorldLoad(await levels.loadFile(file)),
+    onLoadDefaultWorld: async () => afterWorldLoad(await levels.loadDefault()),
     onReseat: reseatWorld,
   });
   app.devPanel = devPanel;
 
-  app.loadWorldFile = async (file) => afterWorldLoad(await loadWorldFromFile(app, file, { onStatus }));
-  app.loadDefaultWorld = async () => afterWorldLoad(await loadDefaultWorld(app, { onStatus }));
+  app.loadWorldFile = async (file) => afterWorldLoad(await levels.loadFile(file));
+  app.loadDefaultWorld = async () => afterWorldLoad(await levels.loadDefault());
   app.worldName = () => worldState.name;
 
   // Frame the camera on the base at boot.

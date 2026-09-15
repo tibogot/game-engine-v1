@@ -172,7 +172,7 @@
         surfaceV2NeedsRebuild,
         SURFACE_V2_DEFAULTS,
       } from "./modularRoadSurfaceV2.js";
-      import { WET_DEFAULTS, WET_NUMBERS, WET_COLORS } from "./modularRoadWet.js";
+      import { WET_DEFAULTS, WET_NUMBERS, WET_COLORS } from "../../v3/render/roads/wetRoad.js";
       import { vec3, float } from "three/tsl";
       import { CHASE_CAM } from "./chaseCamera.js";
 
@@ -680,7 +680,7 @@
       /**
        * THE POSE THE GAME IS ACTUALLY PLAYED FROM, and the default for a reason.
        *
-       * modularRoadWet.js documents the gap this closes, in the note on
+       * wetRoad.js documents the gap this closes, in the note on
        * reflectFresnel: wet-road-lab's camera sits 1.55 m up at 7.5 m back —
        * about 12° off the deck — while road.html's chase camera is 3.8 m up at
        * 8.7 m back, about 24°. At the original Fresnel exponent that was 0.101
@@ -789,7 +789,7 @@
           .name("Rack")
           .onChange(rebuildPiece);
         // Rails are what a wet deck has to reflect — see the reflection notes in
-        // modularRoadWet. Also gates the KERBS (the kit couples the two).
+        // wetRoad. Also gates the KERBS (the kit couples the two).
         fPiece.add(ctl, "rails").name("Guardrails + kerbs").onChange(rebuildPiece);
         fPiece.open();
 
@@ -888,7 +888,7 @@
         fPuddle.open();
 
         // Where the water RUNS. This is the half that makes puddles land in
-        // believable places instead of being noise blobs — see modularRoadWet.
+        // believable places instead of being noise blobs — see wetRoad.
         const fDrain = gui.addFolder("Drainage (where water goes)");
         fDrain.add(wet, "wetDrainStart", 0, 1, 0.01).name("Pooling starts").onChange(syncPanes);
         fDrain.add(wet, "wetDrainStrength", 0, 0.6, 0.01).name("Downhill bonus").onChange(syncPanes);

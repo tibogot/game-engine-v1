@@ -3640,9 +3640,11 @@ export class Vehicle {
      *  floor follows the heightfield instead of pinning the car to world y=0.
      *  @type {((x:number,z:number)=>number) | null} */
     this.getFloorY = null;
-    /** @type {import("../../games/modular-road-v3/modularRoadParkour.js").ParkourMover[]} */
+    /** Moving platforms the car collides with / rides on — a game supplies them
+     *  (the racing game's ParkourMover, games/modular-road-v3/modularRoadParkour.js).
+     *  @type {object[]} */
     this.dynamicMovers = [];
-    /** @type {import("../../games/modular-road-v3/modularRoadParkour.js").ParkourMover[]} */
+    /** @type {object[]} */
     this.deckCarryMovers = [];
     this.enabled = false;
     this.spawnPos = new THREE.Vector3(0, 0.7, -4);

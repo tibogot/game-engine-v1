@@ -144,17 +144,18 @@ function atHead(rel) {
 // ── 1. Literals: every hex is unchanged, or exactly its rebase. ──────────────
 console.log(`rebased literals (${BASELINE} vs working tree)`);
 
+// [path now, path at BASELINE] — the wet model moved into the engine (was ${GAME}/modularRoadWet.js).
 const FILES = [
-  `${GAME}/modularRoadMaterial.js`,
-  `${GAME}/modularRoadSky.js`,
-  `${GAME}/modularRoadTireMarks.js`,
-  `${GAME}/modularRoadProps.js`,
-  `${GAME}/modularRoadWet.js`,
+  [`${GAME}/modularRoadMaterial.js`],
+  [`${GAME}/modularRoadSky.js`],
+  [`${GAME}/modularRoadTireMarks.js`],
+  [`${GAME}/modularRoadProps.js`],
+  ["v3/render/roads/wetRoad.js", `${GAME}/modularRoadWet.js`],
 ];
 
 let totalChanged = 0;
-for (const rel of FILES) {
-  const head = atHead(rel);
+for (const [rel, then = rel] of FILES) {
+  const head = atHead(then);
   if (head === null) { check(`${rel}: readable at HEAD`, false, "git show failed"); continue; }
   const now = fs.readFileSync(path.join(ROOT, rel), "utf8");
 
