@@ -560,6 +560,45 @@ v2 river and River+, water bodies, clouds v1-v3, sky / post / lens flare /
 fog (in v3), Lotus and VVV cars (stunt car covers them), chunk streaming.
 The old `games/rts` (v2 prototype) was deleted 2026-09-14.
 
+## Engine / game split (agreed 2026-09-15)
+
+The editor builds WORLDS; games add gameplay on top of a loaded level (the
+rts-v3 model). Measured 2026-09-15: both games fetch v3/editor.html, inject the
+whole editor and hide it — rts-v3 loads 249 modules incl. 25 editor panels,
+17 editor tools and 60 v2 files. The ENVIRONMENT (sky, lights, clouds, shadows,
+fog, ocean, post, lens flare) must be optional and replaceable: a game uses the
+default, the level's, or its own (modular-road has its own sky, clouds, ocean).
+
+101. ~~Step 1 — games stop fighting the editor~~ — DONE 2026-09-15.
+     `startV3App({ editor: true })` from the editor page only; a game boots
+     without it and gets no editor shortcuts (RTS: N switched the editor to
+     Player start, P started editor play mode), no editor camera (wheel
+     capture, double-click focus, fly/focus keys), no per-frame orbit
+     re-enable or mouse-button rebinding (the game owns `controls`), no
+     View-mode click-to-select, no gizmo helper in the scene, no Scene list /
+     Inspector / panel refresh, no status bar or splitters. Also fixed: trees,
+     leaf cards, foliage and snow were handed `worldEnv.getSunDir()`, which
+     never existed — they always used a fixed default light direction; they now
+     get the real light (the moon at night) 👁. Checked: RTS (N/P inert, game
+     wheel zoom, dblclick inert, no gizmo helper), modular-road (boots, build
+     wheel zoom now OrbitControls only — it was editor zoom + OrbitControls
+     together, so one wheel step zooms less 👁), editor unchanged.
+102. **Step 2 — environment as optional pieces.** Per piece (sky, clouds,
+     sun/moon lights, CSM, fog, ocean, post FX, lens flare): default / off /
+     game's own. Clean hooks instead of hiding engine meshes by name and
+     finding the sun by scene traversal; the sun direction and light objects on
+     the API; the game's sky drives IBL and lights. modular-road moves onto
+     them; a game with no environment at all still boots and renders.
+103. **Step 3 — world runtime without editor DOM.** `createWorld()` (renderer,
+     terrain+heights, vegetation, props, water, roads/splines/tunnels,
+     collision, project load); the editor attaches on top; game pages stop
+     injecting editor.html. System by system. applyProjectData has ~15
+     editor-panel calls to move out.
+104. **Step 4 — split tools + public API.** Runtime half (build from data,
+     meshes, colliders) vs editor half (handles, brushes, undo) for lakes,
+     rivers, tunnels, roads, splines, props; one engine entry file; racing-game
+     code out of v3/play; the v2 files still used move in.
+
 ## Performance
 
 Nothing left that is felt: the game is vsync-locked with ~4× GPU headroom.

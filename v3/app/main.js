@@ -197,17 +197,23 @@ async function createWebGpuDevice() {
 export async function startV3App(opts = {}) {
   initEditorShell();
 
-  // Editor chrome: drag the panel edges, status bar along the bottom. Only when
-  // the EDITOR asks for it — game pages inject editor.html's markup too (and
-  // hide it), so "the element exists" is not a test: an invisible splitter
-  // there stole clicks at the left edge of the RTS game. Before the renderer's
-  // first size, so the viewport starts at the remembered panel widths.
-  const editorChrome = opts.editorChrome === true;
+  /*
+   * EDITOR or GAME. The editor page passes { editor: true }; a game boots
+   * without it and gets the world with none of the editor's input: no editor
+   * shortcuts (in the RTS, N switched the editor to Player-start mode and P
+   * started the editor's play mode), no editor camera (wheel zoom, double-click
+   * focus, fly mode), no orbit re-enabling every frame, no click-to-select, no
+   * gizmo helper, no Scene list / Inspector / panel refresh, no status bar or
+   * splitters. The game owns the camera controls and the keyboard. Game pages
+   * still inject editor.html's markup for now (the boot reads it), so "the
+   * element exists" is never the test — this flag is.
+   */
+  const isEditor = opts.editor === true;
   const appEl = document.getElementById("app");
-  const statusBarEl = editorChrome ? document.getElementById("status-bar") : null;
-  if (editorChrome && appEl) initPanelSplitters(appEl);
-  const statusBar = statusBarEl ? createStatusBar(statusBarEl) : null;
-  if (!editorChrome) document.getElementById("status-bar")?.remove();
+  // Before the renderer's first size, so the viewport starts at the remembered panel widths.
+  if (isEditor && appEl) initPanelSplitters(appEl);
+  const statusBar = isEditor && document.getElementById("status-bar") ? createStatusBar(document.getElementById("status-bar")) : null;
+  if (!isEditor) document.getElementById("status-bar")?.remove();
 
   const viewport = document.getElementById("viewport");
   const genParams = { ...DEFAULT_GEN };
@@ -369,7 +375,9 @@ export async function startV3App(opts = {}) {
   tc.setMode("translate");
   tc.enabled = false;
   tc.visible = false;
-  scene.add(tc.getHelper());
+  // A game never uses the editor's gizmo; its helper still costs a matrix
+  // update per frame in the scene (the racing game measured ~0.35 ms for five).
+  if (isEditor) scene.add(tc.getHelper());
 
   /** Matches v2 toolState.gizmo — Q toggles space; Shift enables snapping while dragging
    *  (rotation 15°, translation 1 m grid, scale 0.25 steps — greybox-friendly). */
@@ -1456,7 +1464,7 @@ export async function startV3App(opts = {}) {
   });
   btnFlattenPick?.addEventListener("click", () => setPickingHeight(!_pickingHeight));
   window.addEventListener("keydown", (e) => {
-    if (_pickingHeight && e.key === "Escape") setPickingHeight(false);
+    if (isEditor && _pickingHeight && e.key === "Escape") setPickingHeight(false);
   });
 
   function setStickyStamp(s) {
@@ -1523,10 +1531,12 @@ export async function startV3App(opts = {}) {
   }
 
   window.addEventListener("keydown", e => {
+    if (!isEditor) return;
     syncPointerMods(e);
     refreshModeIndicator();
   });
   window.addEventListener("keyup", e => {
+    if (!isEditor) return;
     syncPointerMods(e);
     refreshModeIndicator();
   });
@@ -2975,18 +2985,22 @@ export async function startV3App(opts = {}) {
     return { point: new THREE.Vector3(wx, sampleTerrainHeight(uv.u, uv.v), wz) };
   }
 
+  // In a game it is never active: no wheel capture, double-click focus, fly
+  // mode or focus key. The controller turns OrbitControls' own zoom off (it
+  // zooms itself), so a game gets it back and decides for itself.
   editorCamera = createEditorCameraController({
     camera,
     controls,
     domElement: renderer.domElement,
-    isActive: () => !playMode.active,
+    isActive: () => isEditor && !playMode.active,
     pickWorldAtClient,
     getSelectionFocus: () => tc.object?.position ?? null,
   });
+  if (!isEditor) controls.enableZoom = true;
 
   /** Match v2 mouse map in tool modes; view mode also allows LMB drag (navigation). */
   function syncOrbitMouseBindings() {
-    if (!editorCamera || playMode.active || editorCamera.flyMode) return;
+    if (!isEditor || !editorCamera || playMode.active || editorCamera.flyMode) return;
     const viewNav = editorMode === "view";
     controls.mouseButtons.LEFT   = viewNav ? THREE.MOUSE.ROTATE : null;
     controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
@@ -2994,6 +3008,7 @@ export async function startV3App(opts = {}) {
   }
 
   syncEditorOrbitEnabled = () => {
+    if (!isEditor) return;   // a game sets controls.enabled itself
     controls.enabled = !playMode.active && !editorCamera.flyMode;
     syncOrbitMouseBindings();
   };
@@ -3116,7 +3131,8 @@ export async function startV3App(opts = {}) {
             _mm === "ball" ? 0.5 : 0.3;
         }
         if (_hasLocalSnow) snowSystem.tick(pp.x, pp.z, _snowGrounded, _snowContacts);
-        snowSystem.updateSunDir(worldEnv?.getSunDir?.());
+        // The light that actually lights the scene (the moon at night).
+        snowSystem.updateSunDir(worldEnv?.getEffectiveLightDir?.());
 
         collectibleRuntime?.update(dt, pp, _mm);
       } else {
@@ -3127,7 +3143,7 @@ export async function startV3App(opts = {}) {
         editorCamera.update(dt);
         lod.update(controls.target);
         if (!editorCamera.flyMode) controls.update();
-        if (!editorCamera.flyMode && !controls.enabled) syncEditorOrbitEnabled();
+        if (isEditor && !editorCamera.flyMode && !controls.enabled) syncEditorOrbitEnabled();
         // Sculpting under the marker must not bury it — re-drape every frame.
         spawnSystem.refreshHeight();
       }
@@ -3215,7 +3231,7 @@ export async function startV3App(opts = {}) {
       river2System?.update(dt);
       riverV2System?.update(dt);
       tunnelSystem?.update();
-      _sceneListFrame?.();
+      if (isEditor) _sceneListFrame?.();
       // Tunnel collision: cheap poll, rebuilds a BVH only when a tunnel mesh changed.
       tunnelColliderStore?.refresh();
       roadSystem?.update();
@@ -3225,8 +3241,12 @@ export async function startV3App(opts = {}) {
       // 1 now; report the ring count, which is what this readout meant.
       perf.activeChunks = LOD_LEVELS;
       worldEnv?.updateFrame(dt);
-      treeEnv.updateFrame(camera, worldEnv?.getSunDir?.(), now * 0.001);
-      foliageEnv.updateFrame(camera, worldEnv?.getSunDir?.(), now * 0.001);
+      // worldEnv has no getSunDir: these were always handed `undefined`, so
+      // tree impostors, leaf cards and foliage kept a fixed default light
+      // direction whatever the sun did. The light that lights the scene now.
+      const _lightDir = worldEnv?.getEffectiveLightDir?.();
+      treeEnv.updateFrame(camera, _lightDir, now * 0.001);
+      foliageEnv.updateFrame(camera, _lightDir, now * 0.001);
       bvhDebug?.update();
     } catch (err) {
       if (++_loopErrors === 1) console.error("[V3] Frame update error:", err);
@@ -3294,7 +3314,7 @@ export async function startV3App(opts = {}) {
 
     // Panel controls follow values changed elsewhere (undo, load, presets,
     // the Inspector, time of day advancing). A few times a second is plenty.
-    if (now - _lastWidgetRefresh >= 250 && !playMode.active) {
+    if (isEditor && now - _lastWidgetRefresh >= 250 && !playMode.active) {
       _lastWidgetRefresh = now;
       try { refreshWidgets(); } catch (err) { if (++_loopErrors === 1) console.error("[V3] Panel refresh error:", err); }
     }
@@ -3509,7 +3529,9 @@ export async function startV3App(opts = {}) {
     return false;
   }
 
+  // The editor's shortcuts. A game owns its keyboard, so none of these run there.
   window.addEventListener("keydown", e => {
+    if (!isEditor) return;
     if (playMode.active) {
       if (e.code === "Escape") {
         if (playMode.wheelOpen || playMode.walking) return;
@@ -3733,6 +3755,7 @@ export async function startV3App(opts = {}) {
   });
 
   window.addEventListener("keyup", (e) => {
+    if (!isEditor) return;
     if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
       if (_gizmoShiftHeld) {
         _gizmoShiftHeld = false;
@@ -7025,7 +7048,7 @@ export async function startV3App(opts = {}) {
     if (e.button === 0 && editorMode === "view" && !playMode.active) _viewClick.down(e);
   });
   renderer.domElement.addEventListener("mouseup", e => {
-    if (e.button !== 0 || editorMode !== "view" || playMode.active || !_viewClick.up(e)) return;
+    if (!isEditor || e.button !== 0 || editorMode !== "view" || playMode.active || !_viewClick.up(e)) return;
     const best = pickInView(e);
     if (best) {
       best.source.select(best.hit);

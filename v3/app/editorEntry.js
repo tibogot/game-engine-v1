@@ -4,8 +4,8 @@
 import { startV3App } from "./main.js";
 
 // The editor restores a project's sky and light on load; games opt in.
-// editorChrome: the panel splitters and status bar (games never get them).
-startV3App({ projectWorldLook: true, editorChrome: true }).then((app) => {
+// editor: editor input, camera, panels and chrome. A game boots without it.
+startV3App({ projectWorldLook: true, editor: true }).then((app) => {
   // Console/debug access to the engine handle (same object games receive).
   window.__v3app = app;
 }).catch((err) => {
