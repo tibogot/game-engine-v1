@@ -583,12 +583,24 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      wheel zoom, dblclick inert, no gizmo helper), modular-road (boots, build
      wheel zoom now OrbitControls only — it was editor zoom + OrbitControls
      together, so one wheel step zooms less 👁), editor unchanged.
-102. **Step 2 — environment as optional pieces.** Per piece (sky, clouds,
-     sun/moon lights, CSM, fog, ocean, post FX, lens flare): default / off /
-     game's own. Clean hooks instead of hiding engine meshes by name and
-     finding the sun by scene traversal; the sun direction and light objects on
-     the API; the game's sky drives IBL and lights. modular-road moves onto
-     them; a game with no environment at all still boots and renders.
+102. **Step 2 — environment as optional pieces.** Mostly DONE 2026-09-15:
+     - `startV3App({ environment: false })`: none of it is built; the engine
+       renders plainly; grass/susuki/trees/foliage/snow/lakes/rivers take the
+       game's light (`app.environment.setLightDirection`) or a default; lakes
+       get their clock from the loop. (Found: `syncGrassUniforms` returned
+       early without an environment, skipping the whole grass look.)
+     - Hooks on the default environment: `environment.sky.setVisible` (kept
+       through sky-mode changes — replaces finding domes by name),
+       `environment.ocean.state/set`, `light.sun/hemi/getDirection()`
+       (replaces scene traversal), `shadows.csm` (live), `postFx.apply()`.
+       Existing: `clouds.setSystem`, `envSky.set/invalidate`, `lensFlare.*`,
+       `fog.*`, `light.set`.
+     - `games/empty-game/`: starter template (boot, load a level incl. the
+       reload-at-size pattern, `?env=none` with its own lights). Checked both
+       ways, plus the editor, rts-v3 and modular-road unchanged.
+     Left: modular-road onto the hooks (blocked on its uncommitted edits);
+     boot options that skip BUILDING single pieces (ocean, post FX, lens
+     flare) for games that never use them.
 103. **Step 3 — world runtime without editor DOM.** `createWorld()` (renderer,
      terrain+heights, vegetation, props, water, roads/splines/tunnels,
      collision, project load); the editor attaches on top; game pages stop

@@ -760,6 +760,25 @@ export async function createWorldEnvironment({
     }
   }
 
+  /*
+   * A game with its own sky hides the engine's (setSkyVisible(false)) instead
+   * of finding the dome meshes by name. Every sky-mode change goes through
+   * syncSkyVisibility, so switching modes never brings a hidden sky back.
+   * Lighting, IBL and time of day keep running; point the IBL at the game's
+   * sky with setCustomEnvSky.
+   */
+  let _skyShown = true;
+  function syncSkyVisibility() {
+    const mode = toolState.skyMode;
+    sky.visible = _skyShown && mode === "physical";
+    dayNightSky.mesh.visible = _skyShown && mode === "procedural";
+    if (mode === "hdr") scene.background = _skyShown ? hdrTexture ?? null : null;
+  }
+  function setSkyVisible(on) {
+    _skyShown = !!on;
+    syncSkyVisibility();
+  }
+
   function applySkyMode(mode, prevMode) {
     const prev = prevMode !== undefined ? prevMode : toolState.skyMode;
     if (prev !== mode) {
@@ -814,6 +833,7 @@ export async function createWorldEnvironment({
       scene.backgroundIntensity = 1;
       rebuildProceduralSkyEnv();
     }
+    syncSkyVisibility();
     updateSunSky();
   }
 
@@ -1415,7 +1435,10 @@ export async function createWorldEnvironment({
   return {
     sun,
     hemi,
-    csm,
+    /** The shadow node, or null — it is REBUILT when cascades change, so read it live. */
+    getCsm: () => csm,
+    setSkyVisible,
+    get skyVisible() { return _skyShown; },
     worldOcean,
     getOceanV2: () => oceanV2,
     setOceanHeights,

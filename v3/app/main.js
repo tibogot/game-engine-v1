@@ -863,7 +863,23 @@ export async function startV3App(opts = {}) {
     return out;
   }
 
-  worldEnv = await createWorldEnvironment({
+  /*
+   * THE ENVIRONMENT IS OPTIONAL. `startV3App({ environment: false })` builds
+   * none of it — no sky, sun/ambient lights, shadows, fog, ocean, clouds, post
+   * FX or lens flare — for a game that brings its own. The engine then renders
+   * the scene plainly, and everything that needs a light direction (grass,
+   * susuki, trees, foliage, snow, lakes, rivers) takes the game's
+   * (`app.environment.setLightDirection`), or a fixed default until it does.
+   */
+  const useEnvironment = opts.environment !== false;
+  const _defaultLightDir = new THREE.Vector3(0.5, 0.8, 0.3).normalize();
+  let _gameLightDir = null;
+  /** The direction the scene is lit from: the game's, the environment's, or the default. */
+  function getLightDir() {
+    return _gameLightDir ?? worldEnv?.getEffectiveLightDir?.() ?? _defaultLightDir;
+  }
+
+  if (useEnvironment) worldEnv = await createWorldEnvironment({
     scene,
     renderer,
     camera,
@@ -1135,8 +1151,9 @@ export async function startV3App(opts = {}) {
   }
 
   function syncGrassUniforms() {
-    if (!worldEnv) return;
-    const sunDir = worldEnv.getEffectiveLightDir();
+    // No `if (!worldEnv) return` any more: that skipped the whole grass look
+    // (colours, wind, LOD), not just the light, whenever there was no environment.
+    const sunDir = getLightDir();
     if (grassRings) {
       for (const r of grassRings) r.syncFromState(grassState, sunDir);
       syncHybridGrassLod(grassRings, grassState);
@@ -1177,8 +1194,8 @@ export async function startV3App(opts = {}) {
   }
 
   function syncSusukiUniforms() {
-    if (!susukiSystem || !worldEnv) return;
-    susukiSystem.syncFromState(susukiState, grassState, worldEnv.getEffectiveLightDir());
+    if (!susukiSystem) return;
+    susukiSystem.syncFromState(susukiState, grassState, getLightDir());
   }
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
@@ -3079,7 +3096,8 @@ export async function startV3App(opts = {}) {
   // can show a black viewport until async compile finishes (or fail silently).
   try {
     await renderer.compileAsync(scene, camera);
-    worldEnv.renderFrame(0);
+    if (worldEnv) worldEnv.renderFrame(0);
+    else renderer.render(scene, camera);
   } catch (err) {
     console.warn("[V3] Pipeline precompile failed:", err);
   }
@@ -3090,6 +3108,7 @@ export async function startV3App(opts = {}) {
   let _lastFrameMs = performance.now();
   let _loopErrors = 0;
   let _lastWidgetRefresh = 0;
+  let _noEnvTimeSec = 0;
   const _preRenderHooks = [];
   renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -3132,7 +3151,7 @@ export async function startV3App(opts = {}) {
         }
         if (_hasLocalSnow) snowSystem.tick(pp.x, pp.z, _snowGrounded, _snowContacts);
         // The light that actually lights the scene (the moon at night).
-        snowSystem.updateSunDir(worldEnv?.getEffectiveLightDir?.());
+        snowSystem.updateSunDir(getLightDir());
 
         collectibleRuntime?.update(dt, pp, _mm);
       } else {
@@ -3240,11 +3259,22 @@ export async function startV3App(opts = {}) {
       // The clipmap rings are merged into one mesh, so children.length is always
       // 1 now; report the ring count, which is what this readout meant.
       perf.activeChunks = LOD_LEVELS;
-      worldEnv?.updateFrame(dt);
+      if (worldEnv) {
+        worldEnv.updateFrame(dt);
+      } else {
+        // The environment normally drives the depth-buffer water surfaces: the
+        // light direction for all three, and the lakes' clock. Without it, here.
+        _noEnvTimeSec += dt;
+        const ld = getLightDir();
+        lakeSystem?.setSunDir(ld);
+        river2System?.setSunDir(ld);
+        riverV2System?.setSunDir(ld);
+        lakeSystem?.updateWater(dt, _noEnvTimeSec);
+      }
       // worldEnv has no getSunDir: these were always handed `undefined`, so
       // tree impostors, leaf cards and foliage kept a fixed default light
       // direction whatever the sun did. The light that lights the scene now.
-      const _lightDir = worldEnv?.getEffectiveLightDir?.();
+      const _lightDir = getLightDir();
       treeEnv.updateFrame(camera, _lightDir, now * 0.001);
       foliageEnv.updateFrame(camera, _lightDir, now * 0.001);
       bvhDebug?.update();
@@ -8407,6 +8437,48 @@ export async function startV3App(opts = {}) {
       setSceneColorModifier(fn) {
         worldEnv?.postFxPipeline?.setSceneColorModifier(fn);
       },
+      /** Re-apply `state` after editing its fields directly (e.g. a dev panel). */
+      apply() { worldEnv?.applyPostFxState(); },
+    },
+
+    // ── ENVIRONMENT ───────────────────────────────────────────────────────────
+    // The environment is optional and replaceable, piece by piece:
+    //   - none at all: startV3App({ environment: false }) — no sky, lights,
+    //     shadows, fog, ocean, clouds, post FX or lens flare are built; the game
+    //     adds its own lights and calls setLightDirection so vegetation and
+    //     water are lit from the right side;
+    //   - the default, as is (the editor's look, or the level's with worldLook);
+    //   - the default with pieces swapped: sky.setVisible(false) + envSky.set()
+    //     for a game sky, clouds.setSystem() for game clouds, ocean.set({
+    //     enabled: false }) for a game ocean, fog/postFx/lensFlare/light/shadows
+    //     to tune or turn off the rest.
+    environment: {
+      /** False when booted with `environment: false`. */
+      get enabled() { return !!worldEnv; },
+      /**
+       * The direction the scene is lit FROM (towards the light), used by grass,
+       * susuki, trees, foliage, snow and water. Pass null to hand it back to the
+       * environment. Needed with `environment: false`; with the default
+       * environment it overrides its sun for those systems.
+       */
+      setLightDirection(dir) {
+        _gameLightDir = dir ? new THREE.Vector3().copy(dir).normalize() : null;
+        syncGrassUniforms();
+      },
+      getLightDirection: () => getLightDir(),
+      sky: {
+        /** Hide the engine's sky dome (a game draws its own). Lighting and IBL keep running. */
+        setVisible(on) { worldEnv?.setSkyVisible(!!on); },
+        get visible() { return worldEnv?.skyVisible ?? false; },
+      },
+      ocean: {
+        get state() { return worldToolState.worldOcean; },
+        /** e.g. { enabled: false } for a game with its own water, or { seaLevel: 12 }. */
+        set(params = {}) {
+          Object.assign(worldToolState.worldOcean, params);
+          worldEnv?.worldOceanChanged();
+        },
+      },
     },
     // ── Game-owned cloud system ───────────────────────────────────────────────
     // A game can render its own volumetric clouds instead of the editor's deck. The
@@ -8467,6 +8539,8 @@ export async function startV3App(opts = {}) {
         worldEnv?.syncCsm();
       },
       setEnabled(on) { worldEnv?.setCsmEnabled(!!on); },
+      /** The cascaded shadow node (null without an environment). Rebuilt when cascades change — read it live, don't keep it. */
+      get csm() { return worldEnv?.getCsm?.() ?? null; },
     },
     // ── WORLD LIGHTING ────────────────────────────────────────────────────────
     // NOT stored in the .v3proj. Check encodeProjectFile's manifest: it carries
@@ -8484,6 +8558,12 @@ export async function startV3App(opts = {}) {
       get state() { return worldToolState.light; },
       /** e.g. { exposure: 1.2, dirIntensity: 2.6, hemiIntensity: 0.5 } */
       set(params = {}) { Object.assign(worldToolState.light, params); },
+      /** The sun (a DirectionalLight that is the moon at night), or null without an environment. */
+      get sun() { return worldEnv?.sun ?? null; },
+      /** The ambient HemisphereLight, or null without an environment. */
+      get hemi() { return worldEnv?.hemi ?? null; },
+      /** Direction TOWARDS the light that lights the scene now (the moon at night). */
+      getDirection: () => getLightDir(),
     },
     // ── SKY ───────────────────────────────────────────────────────────────────
     // Sun and sky are ONE system, not two: setTimeOfDay computes the sun's
