@@ -603,7 +603,21 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     commit). Gated by an If on "anything painted".
     Phase 3 (part) DONE 2026-09-15: "Erase this flower only" and a per-type
     terrain height band (±2 m soft), applied in the compute AND the far tint.
-    Not done: "only on paint layer X" and "near water" rules.
+    Rules DONE 2026-09-15: per type "grows on paint layer" (splat weight
+    ≥ ~20%) and "near rivers within X m" (River v2 distance field), shared by
+    the compute and the far tint through flowerRuleKeep (flowerNoise.js; the
+    tint reads splat + river in the terrain vertex stage). Checked: cosmos on
+    "Grass" vanished on unpainted ground and grew back only on a painted Grass
+    patch.
+    Look pass on a real level (rts.v3proj hills, 2026-09-15): white daisies
+    read grey and petal undersides near-black with true curved normals → petal
+    and leaf lighting normals now bent 55% to up and never back-face flipped
+    (stems/centres keep real normals); stem height spread widened to ±35%.
+    Result reads as a stylised game meadow 👁 (user to judge).
+    Painting cost measured: a stamp is 0.05 ms CPU; while painting every frame
+    the median frame is unchanged (16.3 ms), p90 22 ms, worst 27 ms — the 4 MB
+    density upload + mask bake. Editor-only; WebGPU in three r184 has no
+    partial texture upload. Leave unless painting feels heavy.
     Measured (GPU timestamps, 1347×825, a dense field filling the view): render
     1.31 → 2.03 ms with flowers (+0.7 ms); compute ≈0.07 ms total.
     The OLD flower (v2 cup + alpha masks + material) is archived, unused, in

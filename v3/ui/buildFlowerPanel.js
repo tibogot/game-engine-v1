@@ -14,7 +14,7 @@ import { FLOWER_PRESETS, FLOWER_HEIGHT_ANY } from "../app/state/flowerState.js";
  *   onGeometryChanged(i)    a shape setting of type i changed (mesh rebuild)
  *   onFill(type) / onClear()
  */
-export function buildFlowerPanel(root, { flowerBrush, flowerState, onBrushChanged, onStateChanged, onGeometryChanged, onFill, onClear }) {
+export function buildFlowerPanel(root, { flowerBrush, flowerState, getLayerNames, onBrushChanged, onStateChanged, onGeometryChanged, onFill, onClear }) {
   const widgets = [];
   const W = (w) => { widgets.push(w); return w; };
 
@@ -74,6 +74,15 @@ export function buildFlowerPanel(root, { flowerBrush, flowerState, onBrushChange
     W(slider(ty, type, "heightMin", { label: "Grows above (m)", min: FLOWER_HEIGHT_ANY.heightMin, max: FLOWER_HEIGHT_ANY.heightMax, step: 1, onChange: onStateChanged,
       hint: "Terrain height band this flower grows in — valley flowers low, alpine ones high. The full range is no limit." }));
     W(slider(ty, type, "heightMax", { label: "Grows below (m)", min: FLOWER_HEIGHT_ANY.heightMin, max: FLOWER_HEIGHT_ANY.heightMax, step: 1, onChange: onStateChanged }));
+    const layerNames = getLayerNames?.() ?? [];
+    W(dropdown(ty, type, "onLayer", {
+      label: "Grows on layer",
+      options: [[-1, "Any ground"], ...layerNames.map((n, i) => [i, n || "Layer " + (i + 1)])],
+      onChange: onStateChanged,
+      hint: "Only where this paint layer is painted — poppies on the meadow, not on the rock.",
+    }));
+    W(slider(ty, type, "nearRiver", { label: "Near rivers within (m)", min: 0, max: 80, step: 1, onChange: onStateChanged,
+      hint: "Only this close to a River v2 river (measured from its centre line). 0 = anywhere." }));
     W(slider(ty, type, "translucency", { label: "Translucency", min: 0, max: 1.5, step: 0.01, onChange: onStateChanged,
       hint: "How much light comes through the petals with the sun behind them." }));
 

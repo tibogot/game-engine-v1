@@ -61,11 +61,15 @@ export const FLOWER_PRESETS = {
   },
 };
 
-/** Where a type may grow, in world metres of terrain height. The wide default is no limit. */
+/**
+ * Where a type may grow. The defaults mean anywhere: the full height range, any
+ * paint layer (-1) and any distance from a river (0).
+ */
 export const FLOWER_HEIGHT_ANY = { heightMin: -100, heightMax: 3000 };
+export const FLOWER_RULES_ANY = { ...FLOWER_HEIGHT_ANY, onLayer: -1, nearRiver: 0 };
 
 function fromPreset(name, preset) {
-  return { name, preset, ...structuredClone(FLOWER_PRESETS[preset]), ...FLOWER_HEIGHT_ANY };
+  return { name, preset, ...structuredClone(FLOWER_PRESETS[preset]), ...FLOWER_RULES_ANY };
 }
 
 export function createFlowerState() {

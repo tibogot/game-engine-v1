@@ -70,11 +70,11 @@ import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
 import { computeFrustumVisibility } from "../../../v2/core/revoGrass/revoGrassSsboUtils.js";
 import { FLOWER_TYPE_COUNT } from "../../app/state/flowerState.js";
 import { createFlowerTypeGeometry } from "./flowerGeometry.js";
-import { flowerClump } from "./flowerNoise.js";
+import { flowerClump, flowerRuleKeep } from "./flowerNoise.js";
 
 const LODS = 2;
 const DRAWS = FLOWER_TYPE_COUNT * LODS;
-const ROWS = 4; // uniform rows per type
+const ROWS = 5; // uniform rows per type
 
 export class FlowerSystem {
   /**
@@ -84,20 +84,27 @@ export class FlowerSystem {
    *   terrainNormalTex  RGBA float, .xyz = terrain normal
    *   densityTex        masked flower density, one type per channel
    *   grassDensityTex   masked grass density (.x) — flowers rise above painted grass
+   *   splatTex          SplatMap.tex — for the "grows on paint layer" rule
+   *   riverNearTex      River v2 distance field (.r = distance² in UV), or null
    *   windTex           shared wind texture (grass / susuki)
    *   worldSize         terrain edge (m)
    *   fp                flower state (createFlowerState shape)
    *   gp                grassState (wind params, blade height)
    *   tileSize, plantsPerSide  wrap tile (default 192 m / 384 ≈ 147k slots, 0.5 m apart)
    */
-  constructor({ scene, renderer, heightTex, terrainNormalTex, densityTex, grassDensityTex, windTex, worldSize, fp, gp, tileSize = 192, plantsPerSide = 384 }) {
+  constructor({ scene, renderer, heightTex, terrainNormalTex, densityTex, grassDensityTex, splatTex, riverNearTex = null, windTex, worldSize, fp, gp, tileSize = 192, plantsPerSide = 384 }) {
     this.renderer = renderer;
     this.group = new THREE.Group();
     this.group.name = "Flowers";
     scene.add(this.group);
     const count = (this.count = plantsPerSide * plantsPerSide);
+    // No River v2 yet: a field that reads "no river anywhere".
+    const noRiver = new THREE.DataTexture(new Float32Array([1e9, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+    noRiver.needsUpdate = true;
+    const riverTex = riverNearTex ?? noRiver;
 
-    // Per type: (petalBase.rgb, translucency) (petalTip.rgb, size) (centre.rgb, stemHeight) (veins, heightMin, heightMax, 0)
+    // Per type: (petalBase.rgb, translucency) (petalTip.rgb, size) (centre.rgb, stemHeight) (veins, 0, 0, 0)
+    //           (heightMin, heightMax, paint layer or -1, river distance m or 0) — flowerRuleKeep
     this._typeRows = Array.from({ length: FLOWER_TYPE_COUNT * ROWS }, () => new THREE.Vector4());
     const u = (this.u = {
       uAnchorPos: uniform(new THREE.Vector3()),
@@ -208,11 +215,13 @@ export class FlowerSystem {
       const distSq = dxA.mul(dxA).add(dzA.mul(dzA)).toVar();
       const near = float(1).sub(smoothstep(u.uOuterR0.mul(u.uOuterR0), u.uOuterR1.mul(u.uOuterR1), distSq)).toVar();
       const slopeProb = smoothstep(u.uSlopeMinY, u.uSlopeMinY.add(0.12), tN.y);
-      // The picked type's own height band (a meadow flower low, an alpine one high),
-      // softened over ±2 m so the limit is not a contour line.
-      const band = u.uTypes.element(int(floor(typeIdx.add(0.5))).mul(ROWS).add(3));
-      const bandKeep = smoothstep(band.y.sub(2), band.y.add(2), terrainY)
-        .mul(float(1).sub(smoothstep(band.z.sub(2), band.z.add(2), terrainY)));
+      // The picked type's own rules: height band, paint layer, near a river.
+      const rule = u.uTypes.element(int(floor(typeIdx.add(0.5))).mul(ROWS).add(4));
+      const bandKeep = flowerRuleKeep(
+        rule, terrainY,
+        texture(splatTex, terrainUV).depth(int(0)), texture(splatTex, terrainUV).depth(int(1)),
+        texture(riverTex, terrainUV).r, float(worldSize),
+      );
       const stochasticKeep = step(hash(instanceIndex.add(31337)), near.mul(1.6).min(1).mul(slopeProb).mul(bandKeep));
 
       const frustumVis = computeFrustumVisibility(
@@ -305,7 +314,8 @@ export class FlowerSystem {
       const fade = mix(float(0.3), float(1), d.z);
       const size = r1.w.mul(mix(float(1).sub(u.uSizeVar), float(1).add(u.uSizeVar), hash(plant.add(577)))).mul(fade);
       const hasStem = step(0.001, r2.w);
-      const stemH = r2.w.mul(mix(float(0.85), float(1.15), hash(plant.add(911)))).mul(fade).add(d.w.mul(hasStem));
+      // ±35%: a field of equal stems reads as planted lollipops.
+      const stemH = r2.w.mul(mix(float(0.65), float(1.35), hash(plant.add(911)))).mul(fade).add(d.w.mul(hasStem));
       // Stemless blooms: their own small height each (overlapping neighbours
       // never share a depth) plus the grass they stand in.
       const groundLift = float(0.02).add(hash(plant.add(71)).mul(size).mul(0.25)).add(d.w).mul(float(1).sub(hasStem));
@@ -357,7 +367,16 @@ export class FlowerSystem {
     })();
 
     // Smooth analytic normals, in view space, facing the camera on both sides.
-    mat.normalNode = cameraViewMatrix.mul(vec4(normalize(vNormal), 0)).xyz.normalize().mul(faceDirection);
+    // Petals and leaves: bent halfway to UP and never flipped for back faces. A
+    // true curved-petal normal lights a white daisy grey from the side and its
+    // underside near black; foliage in games is lit "from above" so a bloom
+    // reads bright from any angle. Stems and centres keep their real normal.
+    const thin = vPart.lessThan(0.5).or(vPart.greaterThan(2.5));
+    const nW = normalize(vNormal);
+    const nThin = normalize(mix(nW, vec3(0, 1, 0), 0.55));
+    mat.normalNode = select(thin,
+      cameraViewMatrix.mul(vec4(nThin, 0)).xyz.normalize(),
+      cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize().mul(faceDirection));
 
     const baseColor = Fn(() => {
       const r0 = row(vType, 0);
@@ -484,7 +503,8 @@ export class FlowerSystem {
       c.set(t.petalBase); this._typeRows[o].set(c.r, c.g, c.b, t.translucency);
       c.set(t.petalTip);  this._typeRows[o + 1].set(c.r, c.g, c.b, t.size);
       c.set(t.centre);    this._typeRows[o + 2].set(c.r, c.g, c.b, t.stemHeight);
-      this._typeRows[o + 3].set(t.veins, t.heightMin ?? -1e5, t.heightMax ?? 1e5, 0);
+      this._typeRows[o + 3].set(t.veins, 0, 0, 0);
+      this._typeRows[o + 4].set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, t.nearRiver ?? 0);
     }
     for (let k = 0; k < DRAWS; k++) this.meshes[k].receiveShadow = !!fp.receiveShadows && k % LODS === 0;
   }

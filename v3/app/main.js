@@ -527,7 +527,7 @@ export async function startV3App(opts = {}) {
   // not exist yet — the sources are attached once that system is built.
   const riverSandShading = createRiverSandShading({ worldSize: WORLD_SIZE });
   // Built before the flowers exist; pointed at their density once it does.
-  const flowerTintShading = createFlowerTintShading({ worldSize: WORLD_SIZE });
+  const flowerTintShading = createFlowerTintShading({ worldSize: WORLD_SIZE, splatTex: splatMap.tex });
 
   /**
    * Triplanar is compiled into the terrain shader only while at least one paint
@@ -5176,6 +5176,7 @@ export async function startV3App(opts = {}) {
   // The distance field and path texture are stable render targets, so this is a
   // one-time hookup; their CONTENTS change on every conform.
   riverSandShading.setSources(riverV2System.nearTexture, riverV2System.pathTexture);
+  flowerTintShading.setRiverSource(riverV2System.nearTexture);
   riverSandShading.syncParams(riverV2Slice.riverV2.sand);
 
   // Lakes and rivers exist — the lakebed shading's water-surface map can now

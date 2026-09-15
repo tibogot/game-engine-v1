@@ -28,13 +28,13 @@
  */
 import * as THREE from "three";
 import {
-  Fn, If, uniform, float, vec3, vec4, mix, smoothstep, min, max, dot, length, texture,
+  Fn, If, int, uniform, float, vec3, vec4, mix, smoothstep, min, max, dot, length, texture,
   positionWorld, cameraPosition, varying,
 } from "three/tsl";
-import { flowerClump, flowerValueNoise } from "./flowerNoise.js";
+import { flowerClump, flowerValueNoise, flowerRuleKeep } from "./flowerNoise.js";
 import { FLOWER_TYPE_COUNT } from "../../app/state/flowerState.js";
 
-export function createFlowerTintShading({ worldSize }) {
+export function createFlowerTintShading({ worldSize, splatTex }) {
   // 1×1 "nothing painted" stand-in until the flower density exists.
   const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat);
   blank.needsUpdate = true;
@@ -50,12 +50,20 @@ export function createFlowerTintShading({ worldSize }) {
     clumpFreq: uniform(0.25),
     // Per type: visible colour (rgb) + ground coverage at full paint (a).
     types: Array.from({ length: FLOWER_TYPE_COUNT }, () => uniform(new THREE.Vector4(0, 0, 0, 0))),
-    // Per type: the terrain height band it grows in (min, max) — same rule as the 3D flowers.
-    bands: Array.from({ length: FLOWER_TYPE_COUNT }, () => uniform(new THREE.Vector2(-1e5, 1e5))),
+    // Per type: where it may grow — the same rule vec4 as the 3D flowers (flowerRuleKeep).
+    rules: Array.from({ length: FLOWER_TYPE_COUNT }, () => uniform(new THREE.Vector4(-1e5, 1e5, -1, 0))),
   };
 
-  // Sampled per vertex and interpolated (see the header note).
-  const paintV = varying(texture(densityNode, positionWorld.xz.div(float(worldSize)).add(0.5)), "v_flowerPaint");
+  // Sampled per vertex and interpolated (see the header note): the paint, the
+  // splat layers and the river field for the placement rules.
+  const noRiver = new THREE.DataTexture(new Float32Array([1e9, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+  noRiver.needsUpdate = true;
+  const riverNode = texture(noRiver);
+  const vUV = positionWorld.xz.div(float(worldSize)).add(0.5);
+  const paintV = varying(texture(densityNode, vUV), "v_flowerPaint");
+  const s0V = varying(texture(splatTex, vUV).depth(int(0)), "v_flowerSplat0");
+  const s1V = varying(texture(splatTex, vUV).depth(int(1)), "v_flowerSplat1");
+  const riverV = varying(texture(riverNode, vUV).r, "v_flowerRiver");
 
   const apply = (baseColor) => Fn(() => {
     const out = vec3(baseColor).toVar();
@@ -65,12 +73,12 @@ export function createFlowerTintShading({ worldSize }) {
       // In where the 3D flowers go out.
       const far = smoothstep(u.fadeStart, u.fadeEnd, dist);
       If(far.greaterThan(0.001), () => {
-        // Each type counts only inside its own height band, softened like the flowers'.
+        // Each type counts only where its own rules let it grow.
         const y = positionWorld.y;
-        const inBand = (b) => smoothstep(b.x.sub(2), b.x.add(2), y).mul(float(1).sub(smoothstep(b.y.sub(2), b.y.add(2), y)));
+        const keep = (i) => flowerRuleKeep(u.rules[i], y, s0V, s1V, riverV, float(worldSize));
         const paint = vec4(
-          paintV.r.mul(inBand(u.bands[0])), paintV.g.mul(inBand(u.bands[1])),
-          paintV.b.mul(inBand(u.bands[2])), paintV.a.mul(inBand(u.bands[3])),
+          paintV.r.mul(keep(0)), paintV.g.mul(keep(1)),
+          paintV.b.mul(keep(2)), paintV.a.mul(keep(3)),
         ).toVar();
         const total = paint.r.add(paint.g).add(paint.b).add(paint.a).toVar();
         If(total.greaterThan(0.004), () => {
@@ -95,6 +103,8 @@ export function createFlowerTintShading({ worldSize }) {
 
   /** Point at the masked flower density once it exists. */
   function setSource(tex) { if (tex) densityNode.value = tex; }
+  /** Point at River v2's distance field once River v2 exists. */
+  function setRiverSource(tex) { if (tex) riverNode.value = tex; }
   function setActive(on) { u.active.value = on ? 1 : 0; }
 
   /**
@@ -119,9 +129,9 @@ export function createFlowerTintShading({ worldSize }) {
       // Stemmed flowers stand up and fill more of a grazing view.
       const cover = Math.min(1, bloomArea * 4 * (t.stemHeight > 0 ? 1.6 : 1.1));
       u.types[i].value.set(c.r, c.g, c.b, cover);
-      u.bands[i].value.set(t.heightMin ?? -1e5, t.heightMax ?? 1e5);
+      u.rules[i].value.set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, t.nearRiver ?? 0);
     }
   }
 
-  return { apply, setSource, setActive, syncFromState, uniforms: u };
+  return { apply, setSource, setRiverSource, setActive, syncFromState, uniforms: u };
 }
