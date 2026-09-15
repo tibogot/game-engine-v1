@@ -616,12 +616,19 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      editor.css). Checked in dev AND a production build (rts-v3 from `vite
      preview`: boots, 20 units, no editor.html request), editor panels
      identical to the baseline row counts.
-     3b next — stop RUNNING editor code in games: move editor-only sections
-     (panels, tool editing, hotkeys, outliner/inspector, heightmap/erosion/
-     generator UI) out of startV3App into an editor layer, group by group,
-     until the hidden markup copy is unused and deleted. applyProjectData has
-     ~15 editor-panel calls to move out; the play-mode HUDs (mode wheel, fly
-     HUD) are created in games too.
+     3b WRAPPED UP 2026-09-15 (partial, by choice): games no longer build the
+     tool panels (trees, foliage, props, spline, spawn, lake, tunnel, lane
+     road, river v2, rivers, road, susuki), the World panel (also rebuilt on
+     every load), Scene list, Inspector, tab/section wiring, play physics /
+     flight panels, fly HUD, gizmo hint or play fullscreen chrome. Editor
+     panels checked identical control counts vs the previous commit; all
+     three games boot clean. Measured: a game boot still makes ~440 lookups
+     into the hidden copy, nearly all main.js sculpt/paint/generator/erosion/
+     heightmap UI (~1200–2500) and grass/snow/cliff/auto-paint UI
+     (~4000–4850), where panel code and runtime code the games need are
+     tangled. Cost to games: ~15 KB gzip once + a few ms of DOM work, nothing
+     on screen. ACCEPTED LEFTOVER — shrink it when those sections are edited
+     for another reason; not worth a dedicated risky pass.
 104. **Step 4 — split tools + public API.** Runtime half (build from data,
      meshes, colliders) vs editor half (handles, brushes, undo) for lakes,
      rivers, tunnels, roads, splines, props; one engine entry file; racing-game

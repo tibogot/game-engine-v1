@@ -218,13 +218,13 @@ export async function startV3App(opts = {}) {
    */
   const container = !isEditor ? opts.container ?? null : null;
   setUiRoot(container ? await createHiddenEditorMarkup() : document);
-  initEditorShell();
+  if (isEditor) initEditorShell();
 
-  const appEl = uiById("app");
   // Before the renderer's first size, so the viewport starts at the remembered panel widths.
-  if (isEditor && appEl) initPanelSplitters(appEl);
+  if (isEditor && uiById("app")) initPanelSplitters(uiById("app"));
   const statusBar = isEditor && uiById("status-bar") ? createStatusBar(uiById("status-bar")) : null;
-  if (!isEditor) uiById("status-bar")?.remove();
+  // A game page that injected editor.html itself (no container) must not show it.
+  if (!isEditor && !container) uiById("status-bar")?.remove();
 
   const viewport = container ?? uiById("viewport");
   const genParams = { ...DEFAULT_GEN };
@@ -408,7 +408,7 @@ export async function startV3App(opts = {}) {
   applyGizmoSettings();
 
   function refreshGizmoHud() {
-    const el = uiById("gizmo-space-hint");
+    const el = isEditor ? uiById("gizmo-space-hint") : null;
     if (!el) return;
     const show = editorMode === "props" && !playMode.active;
     el.style.display = show ? "" : "none";
@@ -745,7 +745,7 @@ export async function startV3App(opts = {}) {
     },
   });
 
-  const playPhysicsMount = uiById("play-physics-mount");
+  const playPhysicsMount = isEditor ? uiById("play-physics-mount") : null;
   const playPhysicsUi = playPhysicsMount
     ? buildPlayPhysicsPanel({
         mount: playPhysicsMount,
@@ -755,7 +755,7 @@ export async function startV3App(opts = {}) {
       })
     : null;
 
-  const playFlightMount = uiById("play-flight-mount");
+  const playFlightMount = isEditor ? uiById("play-flight-mount") : null;
   const playFlightUi = playFlightMount
     ? buildPlayFlightPanel({
         mount: playFlightMount,
@@ -765,9 +765,10 @@ export async function startV3App(opts = {}) {
       })
     : null;
 
-  const flyHud = createFlyHud();
+  const flyHud = isEditor ? createFlyHud() : null;
 
   function syncPlayEditorChrome(immersive) {
+    if (!isEditor) return;
     const appEl = uiById("app");
     if (immersive) appEl?.classList.add("play-fullscreen");
     else appEl?.classList.remove("play-fullscreen");
@@ -907,6 +908,7 @@ export async function startV3App(opts = {}) {
   });
 
   function buildWorldPanelUi() {
+    if (!isEditor) return;
     buildWorldPanel({
       toolState: worldToolState,
       config: editorConfig,
@@ -3136,7 +3138,7 @@ export async function startV3App(opts = {}) {
         treeBvh?.ensureBaked();
         playMode.update(dt);
         refreshPlayStats();
-        flyHud.update(playMode.getFlightHudState?.(), dt);
+        flyHud?.update(playMode.getFlightHudState?.(), dt);
 
         const pp = playMode.playerPosition;
         _lodSnapVec.set(
@@ -5829,7 +5831,7 @@ export async function startV3App(opts = {}) {
     inp.click();
   }
 
-  buildTreePanel({
+  if (isEditor) buildTreePanel({
     toolState: treeToolState,
     config: editorConfig,
     importTreeGlb: (slotIdx, lod, file) => treeEnv.importTreeGlb(slotIdx, lod, file),
@@ -5850,7 +5852,7 @@ export async function startV3App(opts = {}) {
     treeCastShadowChanged: () => treeEnv.setCastShadow(treeToolState.treeLod.castShadow),
   });
 
-  buildFoliagePanel({
+  if (isEditor) buildFoliagePanel({
     toolState: foliageToolState,
     config: editorConfig,
     loadFoliageTexture: (slotIdx, file) => foliageEnv.loadFoliageTexture(slotIdx, file),
@@ -5862,7 +5864,7 @@ export async function startV3App(opts = {}) {
     clearAllFoliage: () => foliageEnv.paintSystem.clearAll(),
   });
 
-  buildPropsPanel({
+  if (isEditor) buildPropsPanel({
     toolState: { props: propState, propSlots, propLod },
     propTextureLibrary,
     propStore,
@@ -6502,7 +6504,7 @@ export async function startV3App(opts = {}) {
     }
   });
 
-  buildSplinePanel({
+  if (isEditor) buildSplinePanel({
     toolState: splineToolState,
     splineSystem: splineSys,
     getProceduralObjectOptions: () => PROCEDURAL_OBJECT_OPTIONS,
@@ -6558,7 +6560,7 @@ export async function startV3App(opts = {}) {
   applySplineModeEffects();
 
   // ── Spawn panel ────────────────────────────────────────────────────────────
-  spawnUi = buildSpawnPanel({
+  if (isEditor) spawnUi = buildSpawnPanel({
     mount: spawnPanel,
     spawnSystem,
     onPlaceAtCamera: () => {
@@ -6575,7 +6577,7 @@ export async function startV3App(opts = {}) {
   });
 
   // ── Lake panel + drag-to-place ─────────────────────────────────────────────
-  lakeUi = buildLakePanel({
+  if (isEditor) lakeUi = buildLakePanel({
     toolState: lakeToolSlice,
     lakeSystem,
     waterGlobals,
@@ -6622,7 +6624,7 @@ export async function startV3App(opts = {}) {
       dragging = false;
       if (lakeSystem.endDrag()) {
         lakeHistory.commit();
-        lakeUi.refresh();
+        lakeUi?.refresh();
       }
     };
     renderer.domElement.addEventListener("mouseup", finish);
@@ -6632,14 +6634,14 @@ export async function startV3App(opts = {}) {
     });
   }
 
-  tunnelUi = buildTunnelPanel({ tunnelSystem, maxHeight: MAX_HEIGHT, defaults: { TUNNEL_DEFAULTS, CAVE_DEFAULTS } });
+  if (isEditor) tunnelUi = buildTunnelPanel({ tunnelSystem, maxHeight: MAX_HEIGHT, defaults: { TUNNEL_DEFAULTS, CAVE_DEFAULTS } });
 
-  laneRoadUi = buildLaneRoadPanel({
+  if (isEditor) laneRoadUi = buildLaneRoadPanel({
     laneRoadSystem,
     onFrame: () => frameBounds(new THREE.Box3().setFromObject(laneRoadSystem.group)),
   });
 
-  riverV2Ui = buildRiverV2Panel({
+  if (isEditor) riverV2Ui = buildRiverV2Panel({
     toolState: { riverV2: riverV2Slice.riverV2 },
     riverV2System,
     maxHeight: MAX_HEIGHT,
@@ -6650,7 +6652,7 @@ export async function startV3App(opts = {}) {
     visibilityChanged: () => riverV2System.refreshVisibility(),
   });
 
-  buildRiverPanels({
+  if (isEditor) buildRiverPanels({
     toolState: riverToolSlice,
     waterGlobals,
     riverChanged: () => {
@@ -6690,7 +6692,7 @@ export async function startV3App(opts = {}) {
 
   applyRiverModeEffects();
 
-  buildRoadPanel({
+  if (isEditor) buildRoadPanel({
     toolState: { road: roadState },
     roadChanged: () => {
       Object.assign(roadSystem.params, roadState);
@@ -7386,7 +7388,7 @@ export async function startV3App(opts = {}) {
     _applyEditorHidden();
   }
 
-  sceneOutliner = createSceneOutliner({
+  if (isEditor) sceneOutliner = createSceneOutliner({
     container: uiById("hierarchy"),
     getModel: sceneModel,
     signature: sceneSignature,
@@ -7510,7 +7512,7 @@ export async function startV3App(opts = {}) {
   };
 
   // ── Inspector (right panel tab) ─────────────────────────────────────────────
-  inspector = createInspector({
+  if (isEditor) inspector = createInspector({
     container: uiById("tab-inspector"),
     deps: {
       world: { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT, lodLevels: LOD_LEVELS },
@@ -7972,7 +7974,7 @@ export async function startV3App(opts = {}) {
   }, { passive: false, capture: true });
 
   // ── Susuki mode: panel + paint events ──────────────────────────────────────
-  susukiUi = buildSusukiPanel(susukiPanel, {
+  if (isEditor) susukiUi = buildSusukiPanel(susukiPanel, {
     susukiBrush,
     susukiState,
     onBrushChanged:    () => { sculpt.uRadius.value = susukiBrush.radius / WORLD_SIZE; },
@@ -8049,7 +8051,7 @@ export async function startV3App(opts = {}) {
     } else {
       susukiBrush.strength = Math.max(0.05, Math.min(1.0, susukiBrush.strength * factor));
     }
-    susukiUi.refresh();
+    susukiUi?.refresh();
   }, { passive: false, capture: true });
 
   // ── Tree mode mouse events (v2 treePaint) ─────────────────────────────────
