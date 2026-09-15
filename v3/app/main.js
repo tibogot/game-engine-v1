@@ -197,13 +197,17 @@ async function createWebGpuDevice() {
 export async function startV3App(opts = {}) {
   initEditorShell();
 
-  // Editor chrome (only the editor page has it; games boot without): drag the
-  // panel edges, status bar along the bottom. Before the renderer's first
-  // size, so the viewport starts at the remembered panel widths.
+  // Editor chrome: drag the panel edges, status bar along the bottom. Only when
+  // the EDITOR asks for it — game pages inject editor.html's markup too (and
+  // hide it), so "the element exists" is not a test: an invisible splitter
+  // there stole clicks at the left edge of the RTS game. Before the renderer's
+  // first size, so the viewport starts at the remembered panel widths.
+  const editorChrome = opts.editorChrome === true;
   const appEl = document.getElementById("app");
-  const statusBarEl = document.getElementById("status-bar");
-  if (appEl && document.getElementById("hierarchy")) initPanelSplitters(appEl);
+  const statusBarEl = editorChrome ? document.getElementById("status-bar") : null;
+  if (editorChrome && appEl) initPanelSplitters(appEl);
   const statusBar = statusBarEl ? createStatusBar(statusBarEl) : null;
+  if (!editorChrome) document.getElementById("status-bar")?.remove();
 
   const viewport = document.getElementById("viewport");
   const genParams = { ...DEFAULT_GEN };
