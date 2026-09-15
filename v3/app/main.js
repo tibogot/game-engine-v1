@@ -1243,6 +1243,8 @@ export async function startV3App(opts = {}) {
         terrainNormalTex: grassTerrainData.terrainNormalTex,
         densityTex:       flowerDensity.maskedTex,
         grassDensityTex:  grassTerrainData.grassDensityMaskedTex,
+        splatTex:         splatMap.tex,
+        riverNearTex:     riverV2System?.nearTexture ?? null,
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
         fp:               flowerState,
@@ -7966,6 +7968,7 @@ export async function startV3App(opts = {}) {
   if (isEditor && flowerPanel) flowerUi = buildFlowerPanel(flowerPanel, {
     flowerBrush,
     flowerState,
+    getLayerNames: () => textureLib.slots.map((s) => s.name),
     onBrushChanged: () => { sculpt.uRadius.value = flowerBrush.radius / WORLD_SIZE; },
     onStateChanged: () => syncFlowerUniforms(),
     onGeometryChanged: (i) => flowerSystem?.rebuildType(i, flowerState.types[i]),
