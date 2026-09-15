@@ -1293,6 +1293,105 @@ export function buildWorldPanel(app) {
               + "default for that reason. Worth it only where there is something "
               + "on screen worth reflecting.",
           });
+
+          // ── Under the V2 sea ───────────────────────────────────────────────
+          const uwBody = _section(oceanBody, "V2 underwater", false);
+          _toggle(uwBody, v2, "uwEnabled", {
+            label: "Underwater", onChange: woc,
+            hint: "The waterline across the lens, the water between the camera "
+              + "and everything it sees, and the surface's Snell's window from "
+              + "below. Runs only while the camera is within 'Active band' of "
+              + "the sea — above that it is not drawn at all.",
+          });
+          _slider(uwBody, v2, "uwDensity", {
+            label: "Murk", min: 0.1, max: 4, step: 0.05, onChange: woc,
+            hint: "How thick the water is. 0.5 is tropical clarity, 1 clear "
+              + "coastal, 2+ a murky harbour. Red always goes first, which is "
+              + "what turns distance blue-green.",
+          });
+          _color(uwBody, v2, "uwScatterColor", {
+            label: "Water colour", onChange: woc,
+            hint: "The colour of a line of sight that never hits anything, just "
+              + "under the surface. Lit by the scene's own sun and sky, so it "
+              + "darkens at dusk and with depth by itself.",
+          });
+          _slider(uwBody, v2, "uwLightGain", {
+            label: "Light in water", min: 0, max: 3, step: 0.02, onChange: woc,
+          });
+          _slider(uwBody, v2, "uwSunGlow", {
+            label: "Sun glow", min: 0, max: 1, step: 0.01, onChange: woc,
+            hint: "The bright haze toward the sun. Under water the sun is always "
+              + "within ~48° of straight up, whatever its height in the sky.",
+          });
+          _slider(uwBody, v2, "uwWindowSky", {
+            label: "Snell's window", min: 0, max: 3, step: 0.02, onChange: woc,
+            hint: "Brightness of the disc of sky seen through the surface from "
+              + "below. Outside it the surface is a mirror of the water.",
+          });
+          _separator(uwBody);
+          _toggle(uwBody, v2, "uwShaftsEnabled", {
+            label: "Light shafts", onChange: woc,
+            hint: "Sunlight focused by the waves into columns leaning toward the "
+              + "refracted sun. A short march inside the underwater pass — no "
+              + "extra draw, and only pixels under water pay.",
+          });
+          _slider(uwBody, v2, "uwShaftIntensity", {
+            label: "Shaft strength", min: 0, max: 24, step: 0.1, onChange: woc,
+          });
+          _slider(uwBody, v2, "uwShaftDistance", {
+            label: "Shaft reach (m)", min: 5, max: 120, step: 1, onChange: woc,
+            hint: "How far along the view the march looks. Longer reach spreads "
+              + "the same 10 steps thinner, so shafts get grainier.",
+          });
+          _slider(uwBody, v2, "uwShaftScale", {
+            label: "Shaft cells / m", min: 0.01, max: 0.4, step: 0.005, onChange: woc,
+            hint: "Density of the surface pattern the light comes through — "
+              + "higher gives more, narrower shafts.",
+          });
+          _slider(uwBody, v2, "uwShaftSharpness", {
+            label: "Shaft sharpness", min: 0.5, max: 10, step: 0.1, onChange: woc,
+          });
+          _slider(uwBody, v2, "uwShaftSpeed", {
+            label: "Shaft drift", min: 0, max: 3, step: 0.05, onChange: woc,
+          });
+          _separator(uwBody);
+          _slider(uwBody, v2, "uwLineWidth", {
+            label: "Waterline width (px)", min: 0.5, max: 8, step: 0.1, onChange: woc,
+          });
+          _slider(uwBody, v2, "uwLineDarken", {
+            label: "Waterline dark", min: 0, max: 1, step: 0.01, onChange: woc,
+          });
+          _slider(uwBody, v2, "uwLineDistort", {
+            label: "Waterline drag (px)", min: 0, max: 20, step: 0.5, onChange: woc,
+          });
+          _slider(uwBody, v2, "uwActiveBand", {
+            label: "Active band (m)", min: 1, max: 20, step: 0.5, onChange: woc,
+            hint: "Camera height above sea level at which the underwater pass "
+              + "starts running. Must clear the tallest crest.",
+          });
+          _separator(uwBody);
+          _toggle(uwBody, v2, "uwSnowEnabled", { label: "Marine snow", onChange: woc });
+          _slider(uwBody, v2, "uwSnowCount", {
+            label: "Snow specks", min: 0, max: 4000, step: 50, onChange: woc,
+          });
+          _slider(uwBody, v2, "uwSnowIntensity", {
+            label: "Snow brightness", min: 0, max: 3, step: 0.02, onChange: woc,
+          });
+          _slider(uwBody, v2, "uwSnowSize", {
+            label: "Snow size (m)", min: 0.003, max: 0.05, step: 0.001, onChange: woc,
+          });
+          _separator(uwBody);
+          _toggle(uwBody, v2, "uwCausticsEnabled", {
+            label: "Seabed caustics", onChange: woc,
+            hint: "Pattern, speed and colour are shared with the lakebed "
+              + "(Lakes panel); these set how the sea uses them.",
+          });
+          _slider(uwBody, v2, "uwCausticsIntensity", {
+            label: "Caustics", min: 0, max: 3, step: 0.02, onChange: woc,
+          });
+          _slider(uwBody, v2, "uwCausticsMaxDepth", {
+            label: "Caustics depth (m)", min: 2, max: 80, step: 1, onChange: woc,
+          });
         }
         _slider(oceanBody, wo, "seaLevel", {
           label: "Sea level",

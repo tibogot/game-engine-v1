@@ -3228,6 +3228,12 @@ export async function startV3App(opts = {}) {
       perf.activeChunks = LOD_LEVELS;
       if (worldEnv) {
         worldEnv.updateFrame(dt);
+        // Sea-floor caustics follow the V2 ocean (on/off, sea level, reach).
+        // Only V2 has them — the classic ocean is left exactly as it was.
+        const oceanV2 = worldEnv.getOceanV2?.();
+        lakebedShading.setOcean(
+          oceanV2 && worldToolState.worldOcean.mode === "v2" ? oceanV2.getCausticsState() : null,
+        );
       } else {
         // The environment normally drives the depth-buffer water surfaces: the
         // light direction for all three, and the lakes' clock. Without it, here.

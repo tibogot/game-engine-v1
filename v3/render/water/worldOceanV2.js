@@ -42,6 +42,7 @@
 import * as THREE from "three";
 import { createOceanSurface, OCEAN2_DEFAULTS } from "./oceanSurface.js";
 import { createShorelineField } from "./shorelineField.js";
+import { createOceanUnderwater } from "./oceanUnderwater.js";
 import {
   createOceanFFTGPUSimulation,
   OCEAN_FFT_GPU_DEFAULTS,
@@ -219,17 +220,52 @@ export function createWorldOceanV2({
   group.visible = false;
   scene.add(group);
 
-  // ── Underwater tint overlay (DOM, so it costs no GPU at all) ───────────────
-  const uwOverlay = document.createElement("div");
-  uwOverlay.style.cssText =
-    "position:absolute;inset:0;pointer-events:none;z-index:3;opacity:0;";
-  (renderer.domElement.parentElement || document.body).appendChild(uwOverlay);
-
+  // ── Underwater: see oceanUnderwater.js ─────────────────────────────────────
+  const underwater = createOceanUnderwater({ surface });
+  scene.add(underwater.group);
   const uw = {
-    enabled: false, eyeOffset: 0, transitionSpeed: 5,
-    tint: "#08323c", tintMax: 0.7, depthDarken: 0.015,
+    enabled: OCEAN2_DEFAULTS.uwEnabled,
+    snowEnabled: OCEAN2_DEFAULTS.uwSnowEnabled,
+    causticsEnabled: OCEAN2_DEFAULTS.uwCausticsEnabled,
+    causticsIntensity: OCEAN2_DEFAULTS.uwCausticsIntensity,
+    causticsMaxDepth: OCEAN2_DEFAULTS.uwCausticsMaxDepth,
+    causticsRange: OCEAN2_DEFAULTS.uwCausticsRange,
+    lightGain: OCEAN2_DEFAULTS.uwLightGain,
+    activeBand: OCEAN2_DEFAULTS.uwActiveBand,
   };
-  let uwT = 0;
+  underwater.setSnowCount(OCEAN2_DEFAULTS.uwSnowCount);
+  /** Last light handed to setLight, kept so a gain change re-applies it. */
+  const _light = {
+    sun: new THREE.Color(1, 0.96, 0.9), sunIntensity: 3,
+    amb: new THREE.Color(0.55, 0.65, 0.75), ambIntensity: 1,
+  };
+  const _sunDir = new THREE.Vector3(0.4, 0.55, 0.3).normalize();
+  const _refr = new THREE.Vector3();
+
+  /**
+   * Scene lights → the radiance the water scatters. Irradiance on the sea
+   * plane (sun · cos elevation, plus the sky), divided by π like a Lambert
+   * surface does, so the murk and the seabed track each other through the day.
+   */
+  function applyLight() {
+    const g = uw.lightGain / Math.PI;
+    const sunI = _light.sunIntensity * Math.max(_sunDir.y, 0) * g;
+    const ambI = _light.ambIntensity * g;
+    surface.uniforms.uwLightSun.value.set(_light.sun.r * sunI, _light.sun.g * sunI, _light.sun.b * sunI);
+    surface.uniforms.uwLightAmb.value.set(_light.amb.r * ambI, _light.amb.g * ambI, _light.amb.b * ambI);
+    // Direction toward the sun seen from below: Snell on the elevation, so it
+    // never sits lower than ~41° above the horizon under water.
+    const horiz = Math.hypot(_sunDir.x, _sunDir.z);
+    const sinUnder = Math.min(horiz, 1) / 1.333;
+    const cosUnder = Math.sqrt(1 - sinUnder * sinUnder);
+    if (horiz > 1e-5) {
+      _refr.set((_sunDir.x / horiz) * sinUnder, cosUnder, (_sunDir.z / horiz) * sinUnder);
+    } else {
+      _refr.set(0, 1, 0);
+    }
+    surface.uniforms.uwSunDirUnder.value.copy(_refr);
+  }
+  applyLight();
 
   let enabled = false;
   let seaLevel = 0;
@@ -270,20 +306,17 @@ export function createWorldOceanV2({
 
   rebuildClipmap(lodCfg);
 
-  function updateUnderwater(dt, camera) {
-    const active = enabled && uw.enabled;
-    const submerged = active && camera.position.y < seaLevel + uw.eyeOffset;
-    uwT += ((submerged ? 1 : 0) - uwT)
-      * (1 - Math.exp(-uw.transitionSpeed * Math.max(dt, 1e-4)));
-    surface.setUnderwater(uwT);
-    if (uwT < 0.001) {
-      if (uwOverlay.style.opacity !== "0") uwOverlay.style.opacity = "0";
-      return;
-    }
-    const below = Math.max(0, seaLevel - camera.position.y);
-    uwOverlay.style.background = uw.tint;
-    uwOverlay.style.opacity =
-      (uwT * Math.min(0.95, uw.tintMax + below * uw.depthDarken)).toFixed(3);
+  /*
+   * The whole CPU side of "is the camera in the water": one height test. Inside
+   * the band the GPU pass decides per pixel (waves wash over the lens); outside
+   * it both meshes are hidden, so they are not drawn and nothing is copied.
+   * The snow only needs the camera below the tallest possible crest.
+   */
+  function updateUnderwater(camera) {
+    const near = enabled && uw.enabled && camera.position.y < seaLevel + uw.activeBand;
+    underwater.water.visible = near;
+    underwater.snow.visible = near && uw.snowEnabled
+      && camera.position.y < seaLevel + uw.activeBand * 0.5;
   }
 
   return {
@@ -293,10 +326,45 @@ export function createWorldOceanV2({
     shoreField,
     stats,
 
-    setEnabled(v) { enabled = !!v; group.visible = enabled; },
+    underwater,
+
+    setEnabled(v) {
+      enabled = !!v;
+      group.visible = enabled;
+      if (!enabled) underwater.water.visible = underwater.snow.visible = false;
+    },
     setSeaLevel(y) { seaLevel = y; surface.uniforms.waterY.value = y; },
-    setEnvMap() {},   // analytic sky — no PMREM needed
-    setSunDir(v) { surface.setSunDir(v); },
+    setSunDir(v) {
+      surface.setSunDir(v);
+      if (v) { _sunDir.copy(v).normalize(); applyLight(); }
+    },
+    /**
+     * The scene's lights, so the water under the sea is lit by what lights the
+     * world above it. Cheap; call per frame. Optional — without it the water
+     * assumes a plain noon.
+     * @param {{ sunColor?: THREE.Color, sunIntensity?: number,
+     *           ambientColor?: THREE.Color, ambientIntensity?: number }} o
+     */
+    setLight({ sunColor, sunIntensity, ambientColor, ambientIntensity } = {}) {
+      if (sunColor) _light.sun.copy(sunColor);
+      if (sunIntensity != null) _light.sunIntensity = sunIntensity;
+      if (ambientColor) _light.amb.copy(ambientColor);
+      if (ambientIntensity != null) _light.ambIntensity = ambientIntensity;
+      applyLight();
+    },
+    /**
+     * What the terrain needs to draw caustics under this sea. Plain numbers —
+     * the host pushes them into its seabed shader (lakebedTsl.setOcean).
+     */
+    getCausticsState() {
+      return {
+        on: enabled && uw.causticsEnabled,
+        seaLevel,
+        intensity: uw.causticsIntensity,
+        maxDepth: uw.causticsMaxDepth,
+        range: uw.causticsRange,
+      };
+    },
     setSkyColors(zenith, horizon) { surface.setSky({ zenith, horizon }); },
     /** Scene environment map for the reflection; null falls back to the
      *  analytic sky. No-ops unless the texture identity changed. */
@@ -321,16 +389,19 @@ export function createWorldOceanV2({
       fft.syncParams(p);
       if (p.seaLevel != null) this.setSeaLevel(p.seaLevel);
       if (p.enabled != null) this.setEnabled(!!p.enabled);
-      if (p.underwaterEnabled != null) uw.enabled = !!p.underwaterEnabled;
-      if (p.uwEyeOffset != null) uw.eyeOffset = p.uwEyeOffset;
-      if (p.uwTransitionSpeed != null) uw.transitionSpeed = p.uwTransitionSpeed;
-      if (p.uwTint != null) uw.tint = p.uwTint;
-      if (p.uwTintMax != null) uw.tintMax = p.uwTintMax;
-      if (p.uwDepthDarken != null) uw.depthDarken = p.uwDepthDarken;
+      if (p.uwEnabled != null) uw.enabled = !!p.uwEnabled;
+      if (p.uwSnowEnabled != null) uw.snowEnabled = !!p.uwSnowEnabled;
+      if (p.uwSnowCount != null) underwater.setSnowCount(p.uwSnowCount);
+      if (p.uwCausticsEnabled != null) uw.causticsEnabled = !!p.uwCausticsEnabled;
+      if (p.uwCausticsIntensity != null) uw.causticsIntensity = p.uwCausticsIntensity;
+      if (p.uwCausticsMaxDepth != null) uw.causticsMaxDepth = p.uwCausticsMaxDepth;
+      if (p.uwCausticsRange != null) uw.causticsRange = p.uwCausticsRange;
+      if (p.uwActiveBand != null) uw.activeBand = p.uwActiveBand;
+      if (p.uwLightGain != null) { uw.lightGain = p.uwLightGain; applyLight(); }
     },
 
     update(dt, elapsed, camera) {
-      updateUnderwater(dt, camera);
+      updateUnderwater(camera);
       if (!enabled || !mesh) return;
 
       // Snap to a multiple of the finest cell so the grid does not shimmer as
@@ -364,10 +435,11 @@ export function createWorldOceanV2({
         mesh.geometry.dispose();
       }
       scene.remove(group);
+      scene.remove(underwater.group);
+      underwater.dispose();
       surface.dispose();
       shoreField.dispose();
       fft.dispose();
-      uwOverlay.remove();
     },
   };
 }

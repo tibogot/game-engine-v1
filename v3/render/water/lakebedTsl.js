@@ -37,7 +37,7 @@ import * as THREE from "three";
 import {
   Fn, If, uniform, float, vec2, vec3,
   mix, smoothstep, max, abs, pow, sin, cos, length, fract,
-  texture, positionWorld, time,
+  texture, positionWorld, time, cameraPosition,
 } from "three/tsl";
 import { createLakebedState } from "../../app/state/lakebedState.js";
 
@@ -107,6 +107,14 @@ export function createLakebedShading({ waterMapTex, worldSize, params = {} }) {
     causticsMaxDepth:   uniform(p.causticsMaxDepth),
     shoreBlend:         uniform(p.shoreBlend),
     causticsMinDepth:   uniform(p.causticsMinDepth),
+    // The world ocean (V2), pushed per frame by the host via setOcean(). It is
+    // not in the water-surface map — a sea covers the whole map, the map is a
+    // bake of bounded surfaces — so it gets its own term here.
+    oceanOn:            uniform(0),
+    oceanY:             uniform(0),
+    oceanIntensity:     uniform(0.7),
+    oceanMaxDepth:      uniform(28),
+    oceanRange:         uniform(220),
   };
 
   /**
@@ -176,6 +184,35 @@ export function createLakebedShading({ waterMapTex, worldSize, params = {} }) {
       out.assign(mix(out, bedColor, mask));
     });
 
+    /*
+     * ── SEA FLOOR CAUSTICS ────────────────────────────────────────────────────
+     * Caustics ONLY — no sand or deep tint. The V2 ocean already absorbs along
+     * the view path from above, and oceanUnderwater.js does it from below, so
+     * the lake's tint here would colour the seabed twice.
+     *
+     * One pattern sample instead of the lake's three: dispersion fringes are a
+     * few centimetres wide and cannot survive the metres of water a sea floor
+     * sits under. Branched on camera distance as well as depth, so a whole sea
+     * floor in view only pays inside `oceanRange`; the pattern reads no texture,
+     * so the branch is legal.
+     */
+    const depthO = u.oceanY.sub(positionWorld.y);
+    const camDistO = length(positionWorld.xz.sub(cameraPosition.xz));
+    const maskO = smoothstep(float(0), max(u.causticsMinDepth, float(1e-3)), depthO)
+      .mul(float(1).sub(smoothstep(u.oceanMaxDepth.mul(0.35), max(u.oceanMaxDepth, float(1)), depthO)))
+      .mul(float(1).sub(smoothstep(u.oceanRange.mul(0.7), max(u.oceanRange, float(1)), camDistO)))
+      .mul(u.oceanOn);
+
+    If(maskO.greaterThan(0.001), () => {
+      const rUv = wxz.mul(u.causticsScale);
+      const cUv = rUv.add(vec2(
+        sin(rUv.y.mul(0.83).add(rUv.x.mul(0.19))),
+        cos(rUv.x.mul(0.71).sub(rUv.y.mul(0.23))),
+      ).mul(0.35));
+      const c = _caustic(cUv, time.mul(u.causticsSpeed), max(u.causticsSharpness, float(1)));
+      out.addAssign(u.causticsColor.mul(c).mul(u.oceanIntensity).mul(maskO));
+    });
+
     return out;
   })();
 
@@ -202,5 +239,15 @@ export function createLakebedShading({ waterMapTex, worldSize, params = {} }) {
     if (s.causticsMinDepth   != null) u.causticsMinDepth.value   = s.causticsMinDepth;
   }
 
-  return { apply, syncParams, uniforms: u };
+  /** World ocean caustics — worldOceanV2.getCausticsState() shape, or null for off. */
+  function setOcean(s) {
+    u.oceanOn.value = s?.on ? 1 : 0;
+    if (!s) return;
+    u.oceanY.value = s.seaLevel;
+    u.oceanIntensity.value = s.intensity;
+    u.oceanMaxDepth.value = s.maxDepth;
+    u.oceanRange.value = s.range;
+  }
+
+  return { apply, syncParams, setOcean, uniforms: u };
 }

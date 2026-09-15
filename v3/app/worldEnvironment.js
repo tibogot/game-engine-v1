@@ -1351,6 +1351,12 @@ export async function createWorldEnvironment({
        * compares identity and returns immediately when nothing moved.
        */
       oceanV2.setEnvMap(scene.environment ?? null);
+      // The water under the sea is lit by the same two lights as the world
+      // above it — including the moon at night and the interior dimming.
+      oceanV2.setLight({
+        sunColor: sun.color, sunIntensity: sun.intensity,
+        ambientColor: hemi.color, ambientIntensity: hemi.intensity,
+      });
       oceanV2.update(dtSec, _appTimeSec, camera);
     }
 

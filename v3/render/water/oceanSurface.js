@@ -148,7 +148,7 @@ import {
   modelWorldMatrix, cameraPosition, cameraNear, cameraFar,
   cameraViewMatrix, cameraProjectionMatrix, screenUV,
   viewportDepthTexture, viewportSharedTexture, perspectiveDepthToViewZ,
-  pmremTexture,
+  pmremTexture, faceDirection,
 } from "three/tsl";
 
 const TWO_PI = 6.283185307179586;
@@ -604,8 +604,70 @@ export const OCEAN2_DEFAULTS = {
   horizonFadeStart: 2200,
   horizonFadeEnd: 9000,
 
-  // ── Underwater ─────────────────────────────────────────────────────────────
-  underwaterMurk: 0.45,
+  /*
+   * ── UNDERWATER ─────────────────────────────────────────────────────────────
+   * Read by THREE places that must agree: this shader's underside (Snell's
+   * window), oceanUnderwater.js (the waterline + the water between the camera
+   * and everything it sees, + marine snow), and the terrain's seabed caustics
+   * (lakebedTsl.js). One set of numbers, so the surface seen from below and the
+   * volume in front of it are the same water.
+   */
+  uwEnabled: true,
+  /** Per-metre extinction, linear RGB. Red dies in a few metres, blue carries
+   *  tens — which is the entire reason the underwater world turns blue-green
+   *  with distance instead of just going grey. Clear coastal water. */
+  uwExtinction: [0.32, 0.075, 0.05],
+  /** Multiplier on `uwExtinction`. 0.5 = tropical clarity, 2+ = a murky harbour. */
+  uwDensity: 1.0,
+  /** Albedo of the suspended matter: the colour of a horizontal line of sight
+   *  that never hits anything, at the surface, under the scene's own light. */
+  uwScatterColor: "#1c86a6",
+  /** Gain on the scene light the water scatters. 1 = the sun and sky lights
+   *  exactly as the terrain receives them. */
+  uwLightGain: 1.0,
+  /** Forward-scattering glow toward the (refracted) sun. 0 = isotropic murk. */
+  uwSunGlow: 0.55,
+  /** Henyey-Greenstein g of that glow. Higher = a tighter, brighter halo. */
+  uwSunGlowG: 0.78,
+  /** Brightness of the sky seen through Snell's window from below. */
+  uwWindowSky: 1.0,
+  /** Camera metres above sea level at which the underwater pass starts running.
+   *  Must clear the tallest crest or a wave washing over the lens pops in. */
+  uwActiveBand: 6,
+  /** The waterline across the lens: width in pixels, how dark its core is, and
+   *  how many pixels the scene is dragged just below it. */
+  uwLineWidth: 2.5,
+  uwLineDarken: 0.6,
+  uwLineDistort: 5,
+  /** Marine snow: the suspended specks that make motion through water legible. */
+  uwSnowEnabled: true,
+  uwSnowCount: 1400,
+  uwSnowSize: 0.012,
+  uwSnowIntensity: 0.9,
+  /** Metres: the wrapped box of specks that travels with the camera. */
+  uwSnowBox: 18,
+  /*
+   * Light shafts: sunlight focused by the waves into columns, marched along the
+   * view ray inside the underwater pass (no extra draw). They lean toward the
+   * REFRACTED sun and fade with depth and distance on their own.
+   */
+  uwShaftsEnabled: true,
+  uwShaftIntensity: 8,
+  /** Metres along the view ray the march covers. Past it the water is haze. */
+  uwShaftDistance: 45,
+  /** Pattern cells per metre at the surface — the width of a shaft. */
+  uwShaftScale: 0.07,
+  /** >1 pinches the pattern into fewer, thinner, brighter shafts. */
+  uwShaftSharpness: 2,
+  /** Metres/second the pattern drifts with the wind. */
+  uwShaftSpeed: 0.6,
+  /** Caustics on the seabed under the sea — visible from above AND below. */
+  uwCausticsEnabled: true,
+  uwCausticsIntensity: 0.7,
+  /** Metres of water past which the caustic net has faded out. */
+  uwCausticsMaxDepth: 28,
+  /** Camera distance past which caustics are not computed at all. */
+  uwCausticsRange: 220,
 
   opacity: 1.0,
   seaLevel: 0,
@@ -641,7 +703,14 @@ export function createOceanSurface({
    * only resets its cached PMREM, so following a sky change costs no recompile.
    */
   let _envTexture = envMap ?? null;
-  let _envNode = null;
+  /** Every PMREM tap in the graph (the reflection, and Snell's window from
+   *  below) — setEnvMap has to repoint all of them. */
+  const _envNodes = [];
+  const envTap = (dir, rough) => {
+    const n = pmremTexture(_envTexture ?? envPlaceholder(), dir, rough);
+    _envNodes.push(n);
+    return n;
+  };
 
   const D = OCEAN2_DEFAULTS;
   const u = {};
@@ -764,8 +833,38 @@ export function createOceanSurface({
   u.horizonFadeStart = uniform(D.horizonFadeStart);
   u.horizonFadeEnd = uniform(D.horizonFadeEnd);
 
-  u.underwaterT = uniform(0);
-  u.underwaterMurk = uniform(D.underwaterMurk);
+  u.uwExtinction = uniform(new THREE.Vector3(...D.uwExtinction));
+  u.uwDensity = uniform(D.uwDensity);
+  u.uwScatterColor = uniform(new THREE.Color(D.uwScatterColor));
+  u.uwSunGlow = uniform(D.uwSunGlow);
+  u.uwSunGlowG = uniform(D.uwSunGlowG);
+  u.uwWindowSky = uniform(D.uwWindowSky);
+  u.uwActiveBand = uniform(D.uwActiveBand);
+  u.uwLineWidth = uniform(D.uwLineWidth);
+  u.uwLineDarken = uniform(D.uwLineDarken);
+  u.uwLineDistort = uniform(D.uwLineDistort);
+  u.uwSnowSize = uniform(D.uwSnowSize);
+  u.uwSnowIntensity = uniform(D.uwSnowIntensity);
+  u.uwSnowBox = uniform(D.uwSnowBox);
+  u.uwShaftsEnabled = uniform(D.uwShaftsEnabled ? 1 : 0);
+  u.uwShaftIntensity = uniform(D.uwShaftIntensity);
+  u.uwShaftDistance = uniform(D.uwShaftDistance);
+  u.uwShaftScale = uniform(D.uwShaftScale);
+  u.uwShaftSharpness = uniform(D.uwShaftSharpness);
+  u.uwShaftSpeed = uniform(D.uwShaftSpeed);
+  /*
+   * The light the water scatters, split in two because only the sun part is
+   * directional (it gets the forward-scattering lobe). Radiance units — the host
+   * divides the lights' irradiance by π, the same factor a Lambert surface
+   * applies, so murk and seabed brighten and darken together. Pushed per frame
+   * by worldOceanV2.setLight(); these defaults are a plain noon for hosts that
+   * never call it.
+   */
+  u.uwLightSun = uniform(new THREE.Vector3(0.7, 0.67, 0.62));
+  u.uwLightAmb = uniform(new THREE.Vector3(0.16, 0.19, 0.22));
+  /** Direction TOWARD the sun as seen from under the water — refracted, so a
+   *  sunset sun still sits ~48° off vertical down here. */
+  u.uwSunDirUnder = uniform(new THREE.Vector3(0, 1, 0));
   u.opacity = uniform(D.opacity);
 
   const uTerrainSize = uniform(terrainSize);
@@ -904,6 +1003,28 @@ export function createOceanSurface({
     const t = saturate(max(sd, float(0)).div(max(u.shoalDistance, float(0.5))));
     const peak = float(1).add(u.shoalPeak.sub(1).mul(sin(t.mul(float(Math.PI)))));
     return smoothstep(float(0), float(0.35), t).mul(peak);
+  }
+
+  /**
+   * World Y of the displaced surface above a world XZ — for things that are NOT
+   * the surface mesh but must agree with it: the waterline across the camera
+   * lens, and specks that must not float above the water.
+   *
+   * The FFT displaces HORIZONTALLY too (choppiness), so the vertex that ends up
+   * above `xz` started somewhere else. One fixed-point step back
+   * (`p = xz - disp(xz).xz`) recovers it to a few centimetres at default chop;
+   * reading the height straight at `xz` instead puts the waterline visibly off
+   * the crest it should be riding, worst exactly where waves are steepest.
+   *
+   * Run-up is left out on purpose: it only exists on a beach, in a strip a few
+   * metres wide, where nobody is filming from under the water.
+   */
+  function waterHeightAt(xz) {
+    const sd = shoreAt(xz).x;
+    const amp = ampScaleAt(xz).mul(shoalAt(sd));
+    const first = fftDispAt(xz, amp);
+    const back = xz.sub(vec2(first.x, first.z));
+    return u.waterY.add(fftDispAt(back, amp).y);
   }
 
   // ── Analytic sky ───────────────────────────────────────────────────────────
@@ -1106,8 +1227,7 @@ export function createOceanSurface({
      * `envPresent` is 0 until a host calls setEnvMap, so with no environment
      * this collapses to exactly the analytic sky it replaced.
      */
-    _envNode = pmremTexture(_envTexture ?? envPlaceholder(), reflectDir, envRough);
-    const envColor = _envNode.mul(u.envIntensity);
+    const envColor = envTap(reflectDir, envRough).mul(u.envIntensity);
     const reflected = mix(
       skyColor, envColor, saturate(u.envReflect.mul(u.envPresent)),
     ).toVar();
@@ -1543,9 +1663,68 @@ export function createOceanSurface({
     )));
     const aboveWater = mix(composited, skyAhead, hf).toVar();
 
-    // ── Seen from below ──────────────────────────────────────────────────────
-    const under = mix(u.inscatterTint.mul(u.underwaterMurk), reflected, fresnelW);
-    return vec4(mix(aboveWater, under, u.underwaterT), u.opacity);
+    /*
+     * ── SEEN FROM BELOW: SNELL'S WINDOW ──────────────────────────────────────
+     * From under the water the surface is two different things depending on
+     * the angle. Inside ~48.6° of the normal, light gets OUT: you see the whole
+     * sky squeezed into a bright disc. Past it, total internal reflection: the
+     * surface is a perfect mirror of the water beneath it, i.e. dim blue. That
+     * hard ring is the single thing that makes a shot read as underwater, and it
+     * is free here — no extra draw, one refract and one environment tap.
+     *
+     * The water between the camera and this fragment is NOT applied here.
+     * oceanUnderwater.js hazes every pixel by its distance afterwards, the
+     * surface included, so doing it twice would bury the window.
+     *
+     * Back faces only, AND only with the camera near the water: chop can fold a
+     * sliver of back face into view from above, and that sliver must not light
+     * up as a window.
+     */
+    const below = step(faceDirection, float(0))
+      .mul(step(cameraPosition.y, u.waterY.add(u.uwActiveBand))).toVar();
+
+    const nDown = worldN.negate().toVar();
+    const rayUp = viewDir.negate().toVar();            // camera → surface
+    const cosI = saturate(dot(viewDir, nDown)).toVar();
+    const eta = float(1.333);
+    const k = float(1).sub(eta.mul(eta).mul(float(1).sub(cosI.mul(cosI)))).toVar();
+    const tir = step(k, float(0)).toVar();              // 1 = total internal reflection
+    const cosT = sqrt(max(k, float(0))).toVar();
+    // refract(I, N, η) with N facing against I, written out so the TIR case is
+    // an explicit, blendable number rather than a zero vector to normalise.
+    const transDir = normalize(mix(
+      rayUp.mul(eta).add(nDown.mul(eta.mul(cosI).sub(cosT))),
+      vec3(0, 1, 0), tir,
+    )).toVar();
+    // Water → air Fresnel is Schlick on the TRANSMITTED angle; TIR is 1.
+    const oneMinusT = float(1).sub(cosT);
+    const fT = float(0.02).add(float(0.98).mul(pow(oneMinusT, float(5))));
+    const fUnder = mix(fT, float(1), tir).toVar();
+
+    const windowSky = mix(
+      analyticSky(transDir),
+      envTap(transDir, envRough).mul(u.envIntensity),
+      saturate(u.envReflect.mul(u.envPresent)),
+    ).mul(u.uwWindowSky);
+    // The sun through the window: a hard disc and a soft aureole around it.
+    const sunCos = saturate(dot(transDir, u.sunDir));
+    const sunThrough = u.sunColor.mul(
+      pow(sunCos, float(1200)).mul(6).add(pow(sunCos, float(40)).mul(0.25)),
+    ).mul(u.glintIntensity).mul(float(1).sub(tir));
+
+    // The mirror half: radiance of the water column looking DOWN from the
+    // surface — the same closed form oceanUnderwater.js integrates, at depth 0
+    // and infinite length, which reduces to L / (1 - dir.y).
+    const mirrorDir = reflect(rayUp, nDown);
+    const lightIn = u.uwLightAmb.add(u.uwLightSun);
+    const waterBelow = u.uwScatterColor.mul(lightIn)
+      .div(max(float(1).sub(mirrorDir.y), float(1)));
+
+    const under = mix(windowSky.add(sunThrough), waterBelow, fUnder).toVar();
+    // Foam blocks the window: from below it is a dim, sun-lit diffuse sheet.
+    under.assign(mix(under, u.foamColor.mul(lightIn).mul(0.45), foam));
+
+    return vec4(mix(aboveWater, under, below), u.opacity);
   });
 
   // ── Material ───────────────────────────────────────────────────────────────
@@ -1581,15 +1760,19 @@ export function createOceanSurface({
     "envReflect", "envIntensity", "waterRoughness", "specAA", "specAAMax",
     "foamCutoff", "foamTransition", "foamDrift", "foamDetailNear", "foamDetailFar", "foamFarDensity",
     "foamMacroScale", "foamMacroAmt", "foamMacroDrift", "foamLodPixels",
-    "horizonFadeStart", "horizonFadeEnd", "underwaterMurk", "opacity",
+    "horizonFadeStart", "horizonFadeEnd", "opacity",
+    "uwDensity", "uwSunGlow", "uwSunGlowG", "uwWindowSky", "uwActiveBand",
+    "uwLineWidth", "uwLineDarken", "uwLineDistort",
+    "uwSnowSize", "uwSnowIntensity", "uwSnowBox",
+    "uwShaftIntensity", "uwShaftDistance", "uwShaftScale", "uwShaftSharpness", "uwShaftSpeed",
   ];
   const BOOL_KEYS = [
     "fftEnabled", "sssEnabled", "whitecapEnabled", "surfEnabled",
-    "runupEnabled", "foamEnabled", "ssrEnabled",
+    "runupEnabled", "foamEnabled", "ssrEnabled", "uwShaftsEnabled",
   ];
   const COLOR_KEYS = [
     "inscatterTint", "turbidityTint", "skyZenithColor", "skyHorizonColor",
-    "sunColor", "sssColor", "foamColor",
+    "sunColor", "sssColor", "foamColor", "uwScatterColor",
   ];
 
   function syncParams(p) {
@@ -1598,6 +1781,7 @@ export function createOceanSurface({
     for (const k of BOOL_KEYS) if (p[k] != null) u[k].value = p[k] ? 1 : 0;
     for (const k of COLOR_KEYS) if (p[k] != null) u[k].value.set(p[k]);
     if (p.absorption != null) u.absorption.value.set(...p.absorption);
+    if (p.uwExtinction != null) u.uwExtinction.value.set(...p.uwExtinction);
     if (p.windAngleDeg != null) u.windAngle.value = p.windAngleDeg * DEG2RAD;
     if (p.skyHorizonSpread != null) {
       u.skyHorizonSpread.value = Math.sin(p.skyHorizonSpread * DEG2RAD);
@@ -1608,6 +1792,13 @@ export function createOceanSurface({
   return {
     material,
     uniforms: u,
+    /**
+     * The surface's own sampling, for oceanUnderwater.js. Handing these over
+     * rather than re-deriving them is what keeps the waterline on the lens and
+     * the wave mesh in the same place: same cascades, same amplitudes, same
+     * shoaling, same field UVs.
+     */
+    helpers: { waterHeightAt, shoreAt, terrainYAt },
     syncParams,
     update(dt, elapsed) { u.time.value = elapsed; },
     setSunDir(v) { if (v) u.sunDir.value.copy(v).normalize(); },
@@ -1617,7 +1808,6 @@ export function createOceanSurface({
       if (horizon) u.skyHorizonColor.value.copy(horizon);
       if (sun) u.sunColor.value.copy(sun);
     },
-    setUnderwater(t) { u.underwaterT.value = t; },
     /**
      * Point the reflection at the scene's environment map, or null to fall back
      * to the analytic sky. Cheap enough to call every frame — it no-ops unless
@@ -1628,7 +1818,7 @@ export function createOceanSurface({
       if (next === _envTexture) return;
       _envTexture = next;
       u.envPresent.value = next ? 1 : 0;
-      if (_envNode) _envNode.value = next ?? envPlaceholder();
+      for (const n of _envNodes) n.value = next ?? envPlaceholder();
     },
     dispose() { material.dispose(); },
   };
