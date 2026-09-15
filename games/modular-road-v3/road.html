@@ -4,11 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
-      Modular Road game page. The v3 engine (startV3App) wires itself to the
-      editor's DOM shell, so rather than COPY that markup (which drifts every
-      time the editor changes), we fetch v3/editor.html at runtime and inject its
-      #app subtree — editor.html stays the single source of truth. The editor
-      chrome is then hidden with CSS so only the 3D viewport shows.
+      Modular Road game page. The engine draws into #game; the page needs
+      nothing from the editor's page (startV3App({ container })).
 
       The engine loads assets by paths relative to /v3/, so that's the base.
       (Game assets therefore use ABSOLUTE paths — see modularRoadVehicleAudio.js.)
@@ -27,26 +24,16 @@
          Vite then finds nothing to bundle, leaves the tag verbatim, and the
          deployed site 404s on /v3/styles/editor.css. An absolute href is not
          bundled either. A JS import is the only form both agree on. -->
-    <!-- NO LUCIDE HERE, deliberately. v3/editor.html loads it from unpkg for its
-         toolbar/panel icons, and this page used to copy that <script> along with
-         the rest of the head. It was never doing anything: the only `data-lucide`
-         elements on this page arrive inside the injected #app subtree, and every
-         one of them sits in #toolbar, #hierarchy or #right-panel — the first and
-         last are `display:none !important` below, and #hierarchy is completely
-         covered by the fixed full-screen #viewport. The game's own palette and
-         dev panel use inline SVG.
-         So it was a blocking, un-bundled request to a third-party CDN, on the
-         critical path of every boot, for zero visible icons — it fails offline
-         and it is not part of the Vite build. Both `lucide.createIcons()` call
-         sites (v3/app/main.js, v3/ui/editorShell.js) are guarded by
+    <!-- NO LUCIDE HERE, deliberately. The game's own palette and dev panel use
+         inline SVG, and a CDN script on the boot path fails offline and is not
+         part of the Vite build. Both `lucide.createIcons()` call sites
+         (v3/app/main.js, v3/ui/editorShell.js) are guarded by
          `typeof lucide !== "undefined"`, so its absence is a no-op.
          If this page ever DOES need icons, add `lucide` to package.json and
          import it from roadGame.js — do not bring the CDN tag back. -->
     <style>
-      /* Hide the editor chrome — the game shows only the viewport. */
-      #toolbar,
-      #right-panel { display: none !important; }
-      #viewport { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; }
+      /* The engine draws into #game (startV3App({ container })). */
+      #game { position: fixed; inset: 0; }
 
       /* Engine perf stats (stats-gl) — the engine pins it bottom-left on every
          resize, so `!important` moves it clear of the game's HUD.
@@ -325,6 +312,7 @@
     </style>
   </head>
   <body>
+    <div id="game"></div>
     <div id="boot">
       <div class="spinner" id="spinner"></div>
       <div id="msg">Loading…</div>
@@ -924,15 +912,7 @@
       const spinner = document.getElementById("spinner");
 
       try {
-        // 1) Pull the editor's DOM shell (single source of truth) and inject it.
-        msg.textContent = "Loading engine UI…";
-        const html = await (await fetch("/v3/editor.html")).text();
-        const parsed = new DOMParser().parseFromString(html, "text/html");
-        const appEl = parsed.getElementById("app");
-        if (!appEl) throw new Error("Could not find #app in v3/editor.html");
-        document.body.insertBefore(document.importNode(appEl, true), boot);
-
-        // 1b) ?tsltrace — put a FILE AND LINE on TSL's build-time warnings.
+        // 1) ?tsltrace — put a FILE AND LINE on TSL's build-time warnings.
         //
         // three's node warnings ("Return statement used in an inline 'Fn()'",
         // and every other one it emits while compiling a material) arrive with
@@ -952,7 +932,10 @@
         // 2) Boot the game. Relative specifier: ES imports resolve against this
         //    module's URL (not <base>), and Vite code-splits it at build time.
         const { startRoadGame } = await import("./roadGame.js");
-        const game = await startRoadGame({ onStatus: (s) => (msg.textContent = s) });
+        const game = await startRoadGame({
+          container: document.getElementById("game"),
+          onStatus: (s) => (msg.textContent = s),
+        });
         /*
          * THE HANDLE, ON THE WINDOW.
          *

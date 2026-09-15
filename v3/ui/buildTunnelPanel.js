@@ -5,6 +5,7 @@
  * then the active tunnel's cross-section and look.
  */
 import { section as _section, slider as _slider, color as _color, toggle as _toggle, button as _button, hint as _hint } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 
 function _choice(parent, label, options, current, onPick, hint) {
   const row = document.createElement("div");
@@ -26,7 +27,7 @@ const STYLE_OPTIONS = [["tunnel", "Tunnel"], ["cave", "Cave"]];
  * @returns {{ refresh: () => void }}
  */
 export function buildTunnelPanel(app) {
-  const panel = document.getElementById("tunnel-panel");
+  const panel = uiById("tunnel-panel");
   if (!panel) return { refresh: () => {} };
 
   function refresh() {

@@ -1,9 +1,10 @@
 import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, button as _button } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 
 /** Build the v2 spline panel into #spline-panel. */
 
 export function buildSplinePanel(app) {
-const panel = document.getElementById("spline-panel");
+const panel = uiById("spline-panel");
 if (!panel) return null;
 panel.innerHTML = "";
       const sp = app.toolState.spline;

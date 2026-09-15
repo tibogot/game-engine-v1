@@ -1,9 +1,10 @@
 import { ROAD_PROFILES } from "../../v2/tools/smartRoad/smartRoadLabSystem.js";
 import { section as _section, slider as _slider, toggle as _toggle, dropdown as _dropdown, button as _button, hint } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 const _hint = (parent, html) => hint(parent, html, { html: true });
 
 export function buildRoadPanel(app) {
-  const panel = document.getElementById("road-panel");
+  const panel = uiById("road-panel");
   if (!panel) return;
   panel.innerHTML = "";
   const rp = app.toolState.road;

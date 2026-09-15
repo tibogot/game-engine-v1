@@ -55,9 +55,9 @@ import {
   loadWorldFromFile,
 } from "./worldLoader.js";
 
-export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
+export async function startRtsGame({ container, onStatus = () => {}, fov } = {}) {
   // 1) Boot the v3 engine — renderer, terrain clipmap, sky, grass, water… the
-  //    whole runtime. Same entry the editor uses; the page hides editor chrome.
+  //    whole runtime — drawing into the page's `container`.
   onStatus("Starting engine…");
   // csm.cascades is a BOOT-ONLY option (live changes are broken on three r184 —
   // see app.shadows in v3/app/main.js). The RTS camera is a fixed-pitch
@@ -76,6 +76,7 @@ export async function startRtsGame({ onStatus = () => {}, fov } = {}) {
   // castShadow on the turrets alone. Boot-only, like csm (both are read when
   // createWorldEnvironment builds the sun).
   const app = await startV3App({
+    container,
     csm: { cascades, maxFar: 300 },
     light: { shadowNormalBias: 0.12 },
     // Editor-only terrain shader features. A game has no sculpt brush to move

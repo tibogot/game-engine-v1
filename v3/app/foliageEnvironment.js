@@ -15,6 +15,7 @@ import {
   loadFoliageTextureFromFile,
 } from "../../v2/core/foliage/foliageTexturePaths.js";
 import { projectAssets, isAssetRef } from "../io/projectAssets.js";
+import { uiById } from "../ui/uiRoot.js";
 
 export function createFoliageEnvironment({
   scene,
@@ -235,7 +236,7 @@ export function createFoliageEnvironment({
       foliageStore.addFoliage(t[0], t[1], t[2], t[3], t[4], t[5], t[6] ?? 0, t[7] ?? 0);
     }
     syncFoliageHeights();
-    document.getElementById("foliage-panel")?._rebuildFoliageUi?.();
+    uiById("foliage-panel")?._rebuildFoliageUi?.();
   }
 
   return {

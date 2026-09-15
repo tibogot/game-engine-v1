@@ -21,6 +21,7 @@
  */
 import { createAssetPalette } from "./assetPalette.js";
 import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, text as _text, button as _button, hint, ARROW_SVG as _arrowSvg, CHECK_SVG as _checkSvg } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 const _hint = (parent, html) => hint(parent, html, { html: true, className: "mode-hint" });
 
 const GLB_EXTS = new Set(["glb", "gltf"]);
@@ -106,7 +107,7 @@ function _installBvhDebugUi(parent, app) {
 
 /** Build the tree panel into #tree-panel. */
 export function buildTreePanel(app) {
-  const panel = document.getElementById("tree-panel");
+  const panel = uiById("tree-panel");
   if (!panel) return null;
   panel.innerHTML = "";
   const ts = app.toolState;

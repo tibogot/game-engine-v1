@@ -1,6 +1,7 @@
 import { createAssetPalette } from "./assetPalette.js";
 import { projectAssets, isAssetRef } from "../io/projectAssets.js";
 import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, text as _text, button as _button, info, ARROW_SVG as _arrowSvg } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 const _info = (parent, label, value) => info(parent, label, value, { layout: "prop" });
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);
@@ -94,7 +95,7 @@ function _addBrushExtras(parent, ts) {
  * eraser card just toggles it and the paint behaviour is unchanged.
  */
 export function buildFoliagePanel(app) {
-  const panel = document.getElementById("foliage-panel");
+  const panel = uiById("foliage-panel");
   if (!panel) return null;
   panel.innerHTML = "";
   const ts = app.toolState;

@@ -270,9 +270,9 @@ const DEFAULT_BUILD_HEIGHT = 40;
 /** Seconds between auto-headlight sun checks (cheap, but not per-frame work). */
 const AUTO_LIGHT_INTERVAL = 0.5;
 
-export async function startRoadGame({ onStatus = () => {} } = {}) {
+export async function startRoadGame({ container, onStatus = () => {} } = {}) {
   // 1) ── BOOT THE ENGINE ────────────────────────────────────────────────────
-  // Same entry the editor uses; the page hides the editor chrome. Unlike the
+  // Same entry the editor uses, drawing into the page's `container`. Unlike the
   // RTS (fixed top-down view, 2 cascades are plenty) this is a ground-level
   // chase camera looking down a long track, so the shadow config stays near the
   // editor default.
@@ -287,6 +287,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   // when it builds the sun and its cascades (see the opts.light block in
   // v3/app/main.js). Everything here is re-tunable live from the dev panel.
   const app = await startV3App({
+    container,
     light: {
       // The editor default is 0.2 envIntensity / 0.4 hemi, which is why the
       // scene reads dark: almost nothing fills the shadows. A racer wants a
@@ -8181,7 +8182,7 @@ ${e.message}`);
   //
   // It read the last canvas pointer position and claimed to fall back to canvas
   // centre "if your pointer is on the panel". It never did: the canvas is
-  // full-screen (road.html pins #viewport to inset:0) and the dev panel is an
+  // full-screen (road.html pins #game to inset:0) and the dev panel is an
   // overlay sibling, so the last-known pointer was ALWAYS inside the canvas rect
   // and the centre branch was dead code. What you actually got was the road under
   // wherever the mouse happened to cross the viewport on its way to the button —

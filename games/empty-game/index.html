@@ -7,9 +7,8 @@
       Starter game: the smallest page that boots the v3 engine as a GAME, loads
       a level and shows it. Copy this folder to start a new game.
 
-      Like the other games it still injects v3/editor.html's markup (the engine
-      boot reads it) and hides it — that goes away with the engine/game split
-      (v3/AUDIT.md #103).
+      The page owns its layout: the engine draws into #game (any element you
+      size) and needs nothing from the editor's page.
 
       URL options:
         ?world=/path/to/level.v3proj   the level to load (default: the RTS one)
@@ -19,8 +18,8 @@
     <base href="/v3/" />
     <title>Empty game (v3 starter)</title>
     <style>
-      #toolbar, #right-panel, #hierarchy { display: none !important; }
-      #viewport { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+      #game { position: fixed; inset: 0; }
       #boot {
         position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center;
         background: #0a0a0a; color: #cfcfcf; font: 14px system-ui, sans-serif; transition: opacity 0.4s;
@@ -33,20 +32,18 @@
     </style>
   </head>
   <body>
+    <div id="game"></div>
     <div id="boot">Loading…</div>
     <div id="hud"></div>
 
     <script type="module">
       const boot = document.getElementById("boot");
       try {
-        const html = await (await fetch("/v3/editor.html")).text();
-        const appEl = new DOMParser().parseFromString(html, "text/html").getElementById("app");
-        if (!appEl) throw new Error("Could not find #app in v3/editor.html");
-        document.body.insertBefore(document.importNode(appEl, true), boot);
-
         const { startGame } = await import("./game.js");
-        window.__game = await startGame({ onStatus: (s) => (boot.textContent = s) });
-
+        window.__game = await startGame({
+          container: document.getElementById("game"),
+          onStatus: (s) => (boot.textContent = s),
+        });
         boot.classList.add("hidden");
         setTimeout(() => boot.remove(), 500);
       } catch (e) {

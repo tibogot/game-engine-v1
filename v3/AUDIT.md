@@ -605,11 +605,23 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      per-frame mouse-button re-assert removed (the engine no longer rebinds).
      Left: boot options that skip BUILDING single pieces (ocean, post FX,
      lens flare) for games that never use them.
-103. **Step 3 — world runtime without editor DOM.** `createWorld()` (renderer,
-     terrain+heights, vegetation, props, water, roads/splines/tunnels,
-     collision, project load); the editor attaches on top; game pages stop
-     injecting editor.html. System by system. applyProjectData has ~15
-     editor-panel calls to move out.
+103. **Step 3 — world runtime without editor DOM.**
+     3a DONE 2026-09-15 — game pages no longer touch editor.html:
+     `startV3App({ container })` draws into the game's element; every editor
+     element lookup (449 in main.js, the panel builders, tree/foliage env,
+     editorShell) goes through `v3/ui/uiRoot.js` — the page in the editor, a
+     hidden never-attached copy of the editor markup in a game (lazy chunk,
+     ~117 KB, games only). rts-v3, modular-road and empty-game dropped the
+     fetch/inject/hide-with-CSS code (empty-game doesn't even import
+     editor.css). Checked in dev AND a production build (rts-v3 from `vite
+     preview`: boots, 20 units, no editor.html request), editor panels
+     identical to the baseline row counts.
+     3b next — stop RUNNING editor code in games: move editor-only sections
+     (panels, tool editing, hotkeys, outliner/inspector, heightmap/erosion/
+     generator UI) out of startV3App into an editor layer, group by group,
+     until the hidden markup copy is unused and deleted. applyProjectData has
+     ~15 editor-panel calls to move out; the play-mode HUDs (mode wheel, fly
+     HUD) are created in games too.
 104. **Step 4 — split tools + public API.** Runtime half (build from data,
      meshes, colliders) vs editor half (handles, brushes, undo) for lakes,
      rivers, tunnels, roads, splines, props; one engine entry file; racing-game

@@ -4,23 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
-      RTS game page. The v3 engine (startV3App) wires itself to the editor's DOM
-      shell, so rather than COPY that 1900-line markup (which drifts every time
-      the editor changes), we fetch v3/editor.html at runtime and inject its
-      #app subtree — editor.html stays the single source of truth. The editor
-      chrome is then hidden with CSS so only the 3D viewport shows.
+      RTS game page. The engine draws into #game; the page needs nothing from
+      the editor's page (startV3App({ container })).
 
       The engine loads assets by paths relative to /v3/, so that's the base.
     -->
     <base href="/v3/" />
     <title>RTS Game (v3)</title>
     <!-- editor.css is imported from rtsGame.js, NOT linked here — see the note there. -->
+    <!-- lucide: the dev panel's tab icons. -->
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <style>
-      /* Hide the editor chrome — the game shows only the viewport. */
-      #toolbar,
-      #right-panel { display: none !important; }
-      #viewport { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; }
+      #game { position: fixed; inset: 0; }
 
       /* Engine perf stats (stats-gl: FPS / CPU / GPU + DRAW / KTRI) — the engine
          creates and updates it, and pins it to the viewport's BOTTOM-left, which
@@ -54,6 +49,7 @@
     </style>
   </head>
   <body>
+    <div id="game"></div>
     <div id="boot">
       <div class="spinner" id="spinner"></div>
       <div id="msg">Loading…</div>
@@ -67,18 +63,14 @@
       const spinner = document.getElementById("spinner");
 
       try {
-        // 1) Pull the editor's DOM shell (single source of truth) and inject it.
-        msg.textContent = "Loading engine UI…";
-        const html = await (await fetch("/v3/editor.html")).text();
-        const parsed = new DOMParser().parseFromString(html, "text/html");
-        const appEl = parsed.getElementById("app");
-        if (!appEl) throw new Error("Could not find #app in v3/editor.html");
-        document.body.insertBefore(document.importNode(appEl, true), boot);
-
-        // 2) Boot the game. Relative specifier: ES imports resolve against this
-        //    module's URL (not <base>), and Vite code-splits it at build time.
+        // Boot the game. Relative specifier: ES imports resolve against this
+        // module's URL (not <base>), and Vite code-splits it at build time.
         const { startRtsGame } = await import("./rtsGame.js");
-        await startRtsGame({ onStatus: (s) => (msg.textContent = s), fov: 40 });
+        await startRtsGame({
+          container: document.getElementById("game"),
+          onStatus: (s) => (msg.textContent = s),
+          fov: 40,
+        });
 
         boot.classList.add("hidden");
         setTimeout(() => boot.remove(), 600);

@@ -4,7 +4,6 @@
 // Everything a game does with the world goes through the `app` handle that
 // startV3App returns (see the end of v3/app/main.js).
 import * as THREE from "three";
-import "../../v3/styles/editor.css";
 import { startV3App } from "../../v3/app/main.js";
 import { decodeProjectFile, isProjectFile } from "../../v3/io/projectIO.js";
 import { saveTerrainConfig, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../../v3/terrain/heightmapTexture.js";
@@ -12,12 +11,14 @@ import { stashPendingHeightmap } from "../../v3/io/pendingLoad.js";
 
 const DEFAULT_WORLD = "/games/rts-v3/rts.v3proj";
 
-export async function startGame({ onStatus = () => {} } = {}) {
+export async function startGame({ container, onStatus = () => {} } = {}) {
   const params = new URLSearchParams(location.search);
   const ownEnvironment = params.get("env") === "none";
 
   onStatus("Starting engine…");
   const app = await startV3App({
+    // The engine draws into this element; the page needs nothing from the editor.
+    container,
     // Not the editor: no editor shortcuts, camera, panels or selection.
     // environment: false → no engine sky, lights, shadows, fog, ocean, post FX.
     environment: !ownEnvironment,

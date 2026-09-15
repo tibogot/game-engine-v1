@@ -1,5 +1,6 @@
 import { buildDepthWaterControls } from "./depthWaterControls.js";
 import { section as _section, slider as _slider, color as _color, toggle as _toggle, button as _button, hint as _hint } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 
 /**
  * @param {object}   app
@@ -14,7 +15,7 @@ import { section as _section, slider as _slider, color as _color, toggle as _tog
  * @returns {{ refresh: () => void }}
  */
 export function buildLakePanel(app) {
-  const panel = document.getElementById("lake-panel");
+  const panel = uiById("lake-panel");
   if (!panel) return { refresh: () => {} };
 
   function refresh() {

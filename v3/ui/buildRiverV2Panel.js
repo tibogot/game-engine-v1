@@ -7,6 +7,7 @@
  * controls the tool exists for.
  */
 import { section as _section, slider as _slider, color as _color, toggle as _toggle, button as _button, hint as _hint } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 
 /**
  * @param {object}   app
@@ -20,7 +21,7 @@ import { section as _section, slider as _slider, color as _color, toggle as _tog
  * @returns {{ refresh: () => void }}
  */
 export function buildRiverV2Panel(app) {
-  const panel = document.getElementById("riverv2-panel");
+  const panel = uiById("riverv2-panel");
   if (!panel) return { refresh: () => {} };
 
   function refresh() {

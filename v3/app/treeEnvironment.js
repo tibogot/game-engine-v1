@@ -16,6 +16,7 @@ import {
 import { loadFullPresetFromFile } from "../../v2/core/foliage/presetLoader.js";
 import { projectAssets } from "../io/projectAssets.js";
 import { bakeSlotImpostor, IMPOSTOR_BAKE } from "../../v2/render/foliage/impostorBake.js";
+import { uiById } from "../ui/uiRoot.js";
 
 const MODELS_SEARCH_PATHS = ["../models/", "models/"];
 
@@ -142,7 +143,7 @@ export function createTreeEnvironment({
     _thumbChain = _thumbChain
       .then(() => _bakeSlotThumbnail(slotIdx))
       .catch((e) => console.warn(`[V3] Tree thumbnail bake slot ${slotIdx} failed:`, e))
-      .then(() => document.getElementById("tree-panel")?._rebuildTreeUi?.());
+      .then(() => uiById("tree-panel")?._rebuildTreeUi?.());
   }
 
   const _impostorBakeQueue = [];
@@ -422,7 +423,7 @@ export function createTreeEnvironment({
     slot.glbRef[lodKey] = (await probeModelsForFile(file.name)) ? null : await projectAssets.addRef(file);
     console.log(`[V3] Tree slot ${slotIdx} LOD${lod}: ${submeshes.length} submesh(es) from ${file.name}`
       + (slot.glbRef[lodKey] ? " (kept in the project file)" : ""));
-    document.getElementById("tree-panel")?._rebuildTreeUi?.();
+    uiById("tree-panel")?._rebuildTreeUi?.();
   }
 
   async function loadTreePreset(slotIdx, preselectedFile = null) {
@@ -466,7 +467,7 @@ export function createTreeEnvironment({
       if (w.windSpeed != null) f.windSpeed = w.windSpeed;
       if (w.windStr != null) f.windStr = w.windStr;
       if (w.windMicro != null) f.windMicro = w.windMicro;
-      document.getElementById("tree-panel")?._rebuildTreeUi?.();
+      uiById("tree-panel")?._rebuildTreeUi?.();
       console.log(`[V3] Tree preset "${json.presetName}" → slot ${slotIdx}`);
     };
     if (preselectedFile) return handleFile(preselectedFile);
@@ -484,7 +485,7 @@ export function createTreeEnvironment({
     foliageLodRenderer.clearSlot(slotIdx);
     syncLeafField();
     _thumbs.delete(slotIdx);
-    document.getElementById("tree-panel")?._rebuildTreeUi?.();
+    uiById("tree-panel")?._rebuildTreeUi?.();
     console.log(`[V3] Tree slot ${slotIdx} models removed`);
   }
 

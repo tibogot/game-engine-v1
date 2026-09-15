@@ -6,6 +6,7 @@
  */
 import { PREVIEW_SCENES } from "../roads/mesh/previewScenes.js";
 import { section as _section, slider as _slider, color as _color, toggle as _toggle, button as _button, hint as _hint } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 
 function _choice(parent, label, options, current, onPick, hint) {
   const row = document.createElement("div");
@@ -24,7 +25,7 @@ function _choice(parent, label, options, current, onPick, hint) {
  * @returns {{ refresh: () => void }}
  */
 export function buildLaneRoadPanel(app) {
-  const panel = document.getElementById("lane-road-panel");
+  const panel = uiById("lane-road-panel");
   if (!panel) return { refresh: () => {} };
 
   let _rebuildTimer = 0;

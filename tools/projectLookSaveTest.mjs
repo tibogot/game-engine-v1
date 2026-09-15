@@ -68,7 +68,7 @@ check("the table names no unknown grass setting", unknown.length === 0, unknown.
 const scaleMismatch = [];
 let scalesChecked = 0;
 for (const [id, key, scale] of grassTable.filter(([id]) => id.startsWith("gsl-"))) {
-  const varMatch = main.match(new RegExp(`const (\\w+)\\s*=\\s*document\\.getElementById\\("${id}"\\)`));
+  const varMatch = main.match(new RegExp(`const (\\w+)\\s*=\\s*(?:document\\.getElementById|uiById)\\("${id}"\\)`));
   if (!varMatch) continue; // the loop-bound sliders (spec dirs, LOD geometry)
   const listener = main.match(new RegExp(`${varMatch[1]}\\.addEventListener\\("input",[^\\n]*\\n?[^\\n]*grassState\\.${key} = Number\\(${varMatch[1]}\\.value\\)( / ([\\d.]+))?`));
   const got = listener ? Number(listener[2] ?? 1) : null;

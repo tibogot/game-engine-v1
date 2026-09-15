@@ -149,6 +149,7 @@ import { buildLaneRoadPanel } from "../ui/buildLaneRoadPanel.js";
 import { buildPlayPhysicsPanel } from "../ui/buildPlayPhysicsPanel.js";
 import { buildPlayFlightPanel } from "../ui/buildPlayFlightPanel.js";
 import { createFlyHud } from "../ui/flyHud.js";
+import { uiById, uiQuery, uiQueryAll, setUiRoot, createHiddenEditorMarkup } from "../ui/uiRoot.js";
 // OFF by default — the custom GPU stats panel. Uncomment this line AND its
 // block further down (search "GPU STATS PANEL — OFF") to bring it back.
 // import { createGpuStatsPanel } from "../render/gpuStatsPanel.js";
@@ -195,8 +196,6 @@ async function createWebGpuDevice() {
 }
 
 export async function startV3App(opts = {}) {
-  initEditorShell();
-
   /*
    * EDITOR or GAME. The editor page passes { editor: true }; a game boots
    * without it and gets the world with none of the editor's input: no editor
@@ -204,18 +203,30 @@ export async function startV3App(opts = {}) {
    * started the editor's play mode), no editor camera (wheel zoom, double-click
    * focus, fly mode), no orbit re-enabling every frame, no click-to-select, no
    * gizmo helper, no Scene list / Inspector / panel refresh, no status bar or
-   * splitters. The game owns the camera controls and the keyboard. Game pages
-   * still inject editor.html's markup for now (the boot reads it), so "the
+   * splitters. The game owns the camera controls and the keyboard. "The
    * element exists" is never the test — this flag is.
    */
   const isEditor = opts.editor === true;
-  const appEl = document.getElementById("app");
+
+  /*
+   * WHERE THE CANVAS GOES, AND WHERE THE EDITOR MARKUP LIVES. A game passes
+   * `container` (any element it sized — the canvas fills it) and its page needs
+   * nothing from editor.html: the editor code that still runs during a game's
+   * boot works on a hidden copy of that markup, never attached (ui/uiRoot.js).
+   * The editor page — and an older game page that still injects editor.html
+   * itself and passes no container — use the page's own #viewport and markup.
+   */
+  const container = !isEditor ? opts.container ?? null : null;
+  setUiRoot(container ? await createHiddenEditorMarkup() : document);
+  initEditorShell();
+
+  const appEl = uiById("app");
   // Before the renderer's first size, so the viewport starts at the remembered panel widths.
   if (isEditor && appEl) initPanelSplitters(appEl);
-  const statusBar = isEditor && document.getElementById("status-bar") ? createStatusBar(document.getElementById("status-bar")) : null;
-  if (!isEditor) document.getElementById("status-bar")?.remove();
+  const statusBar = isEditor && uiById("status-bar") ? createStatusBar(uiById("status-bar")) : null;
+  if (!isEditor) uiById("status-bar")?.remove();
 
-  const viewport = document.getElementById("viewport");
+  const viewport = container ?? uiById("viewport");
   const genParams = { ...DEFAULT_GEN };
 
   // ── WebGPU device ─────────────────────────────────────────────────────────
@@ -238,6 +249,9 @@ export async function startV3App(opts = {}) {
   // The foliage material uses castShadowNode (alpha-tested leaf shadows);
   // r184 requires this flag for that path (silences the boot warning too).
   renderer.shadowMap.transmitted = true;
+  // editor.css sizes the canvas inside #viewport; in a game's container it
+  // simply fills whatever box the game gave it.
+  if (container) renderer.domElement.style.cssText = "display:block;width:100%;height:100%;outline:none";
   viewport.appendChild(renderer.domElement);
 
   const stats = new Stats({ trackGPU: hasTimestamps, trackCPT: true });
@@ -394,7 +408,7 @@ export async function startV3App(opts = {}) {
   applyGizmoSettings();
 
   function refreshGizmoHud() {
-    const el = document.getElementById("gizmo-space-hint");
+    const el = uiById("gizmo-space-hint");
     if (!el) return;
     const show = editorMode === "props" && !playMode.active;
     el.style.display = show ? "" : "none";
@@ -587,10 +601,10 @@ export async function startV3App(opts = {}) {
   let bvhDebug = null;
   const bvhDebugUi = { enabled: false };
   const syncBvhDebugToggles = () => {
-    for (const el of document.querySelectorAll("[data-bvh-debug-toggle]")) {
+    for (const el of uiQueryAll("[data-bvh-debug-toggle]")) {
       el.classList.toggle("checked", bvhDebugUi.enabled);
     }
-    for (const el of document.querySelectorAll("[data-bvh-debug-cb]")) {
+    for (const el of uiQueryAll("[data-bvh-debug-cb]")) {
       el.checked = bvhDebugUi.enabled;
     }
   };
@@ -610,27 +624,27 @@ export async function startV3App(opts = {}) {
   };
 
   // ── Play mode ──────────────────────────────────────────────────────────────
-  const playPanel      = document.getElementById("play-panel");
-  const playStopBar    = document.getElementById("play-stop-bar");
-  const playStopHint   = document.getElementById("play-stop-hint");
-  const playImmersiveBtn = document.getElementById("play-immersive-btn");
-  const sculptPanel    = document.getElementById("sculpt-panel");
-  const paintPanel     = document.getElementById("paint-panel");
-  const propsPanel     = document.getElementById("props-panel");
-  const splinePanel    = document.getElementById("spline-panel");
-  const riverPanel     = document.getElementById("river-panel");
-  const river2Panel    = document.getElementById("river2-panel");
-  const riverV2Panel   = document.getElementById("riverv2-panel");
-  const tunnelPanel    = document.getElementById("tunnel-panel");
-  const lakePanel      = document.getElementById("lake-panel");
-  const roadPanel      = document.getElementById("road-panel");
-  const laneRoadPanel  = document.getElementById("lane-road-panel");
-  const spawnPanel    = document.getElementById("spawn-panel");
-  const playStatPos    = document.getElementById("play-stat-pos");
-  const playStatSpeed  = document.getElementById("play-stat-speed");
-  const playStatGround = document.getElementById("play-stat-ground");
+  const playPanel      = uiById("play-panel");
+  const playStopBar    = uiById("play-stop-bar");
+  const playStopHint   = uiById("play-stop-hint");
+  const playImmersiveBtn = uiById("play-immersive-btn");
+  const sculptPanel    = uiById("sculpt-panel");
+  const paintPanel     = uiById("paint-panel");
+  const propsPanel     = uiById("props-panel");
+  const splinePanel    = uiById("spline-panel");
+  const riverPanel     = uiById("river-panel");
+  const river2Panel    = uiById("river2-panel");
+  const riverV2Panel   = uiById("riverv2-panel");
+  const tunnelPanel    = uiById("tunnel-panel");
+  const lakePanel      = uiById("lake-panel");
+  const roadPanel      = uiById("road-panel");
+  const laneRoadPanel  = uiById("lane-road-panel");
+  const spawnPanel    = uiById("spawn-panel");
+  const playStatPos    = uiById("play-stat-pos");
+  const playStatSpeed  = uiById("play-stat-speed");
+  const playStatGround = uiById("play-stat-ground");
 
-  const playStatMode   = document.getElementById("play-stat-mode");
+  const playStatMode   = uiById("play-stat-mode");
 
   function refreshPlayStats() {
     if (!playMode?.active) return;
@@ -731,7 +745,7 @@ export async function startV3App(opts = {}) {
     },
   });
 
-  const playPhysicsMount = document.getElementById("play-physics-mount");
+  const playPhysicsMount = uiById("play-physics-mount");
   const playPhysicsUi = playPhysicsMount
     ? buildPlayPhysicsPanel({
         mount: playPhysicsMount,
@@ -741,7 +755,7 @@ export async function startV3App(opts = {}) {
       })
     : null;
 
-  const playFlightMount = document.getElementById("play-flight-mount");
+  const playFlightMount = uiById("play-flight-mount");
   const playFlightUi = playFlightMount
     ? buildPlayFlightPanel({
         mount: playFlightMount,
@@ -754,13 +768,13 @@ export async function startV3App(opts = {}) {
   const flyHud = createFlyHud();
 
   function syncPlayEditorChrome(immersive) {
-    const appEl = document.getElementById("app");
+    const appEl = uiById("app");
     if (immersive) appEl?.classList.add("play-fullscreen");
     else appEl?.classList.remove("play-fullscreen");
   }
 
   function getPlayImmersive() {
-    return document.getElementById("app")?.classList.contains("play-fullscreen") ?? false;
+    return uiById("app")?.classList.contains("play-fullscreen") ?? false;
   }
 
   function syncPlayStopHint() {
@@ -1199,148 +1213,148 @@ export async function startV3App(opts = {}) {
   }
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
-  const btnRaise  = document.getElementById("btn-raise");
-  const btnLower  = document.getElementById("btn-lower");
-  const btnSmooth  = document.getElementById("btn-smooth");
-  const btnFlatten = document.getElementById("btn-flatten");
-  const btnNoise   = document.getElementById("btn-noise");
-  const btnTerrace = document.getElementById("btn-terrace");
-  const slSpacing       = document.getElementById("sl-spacing");
-  const lblSpacing      = document.getElementById("lbl-spacing");
-  const slClampMin  = document.getElementById("sl-clamp-min");
-  const lblClampMin = document.getElementById("lbl-clamp-min");
-  const slClampMax  = document.getElementById("sl-clamp-max");
-  const lblClampMax = document.getElementById("lbl-clamp-max");
-  const subRaiseLower   = document.getElementById("sub-raiselower");
-  const subTerrace      = document.getElementById("sub-terrace");
-  const subFlatten      = document.getElementById("sub-flatten");
-  const subNoise        = document.getElementById("sub-noise");
-  const subErode        = document.getElementById("sub-erode");
-  const subHydro        = document.getElementById("sub-hydro");
-  const subRamp         = document.getElementById("sub-ramp");
-  const btnErode        = document.getElementById("btn-erode");
-  const btnHydro        = document.getElementById("btn-hydro");
-  const btnRamp         = document.getElementById("btn-ramp");
-  const btnSmudge       = document.getElementById("btn-smudge");
-  const btnContrast     = document.getElementById("btn-contrast");
-  const slNoiseOct      = document.getElementById("sl-noise-oct");
-  const lblNoiseOct     = document.getElementById("lbl-noise-oct");
-  const slThermalSlope  = document.getElementById("sl-thermal-slope");
-  const lblThermalSlope = document.getElementById("lbl-thermal-slope");
-  const slThermalIter   = document.getElementById("sl-thermal-iter");
-  const lblThermalIter  = document.getElementById("lbl-thermal-iter");
-  const slHydroStrength = document.getElementById("sl-hydro-strength");
-  const lblHydroStrength = document.getElementById("lbl-hydro-strength");
-  const slHydroWater    = document.getElementById("sl-hydro-water");
-  const lblHydroWater   = document.getElementById("lbl-hydro-water");
-  const slHydroIter     = document.getElementById("sl-hydro-iter");
-  const lblHydroIter    = document.getElementById("lbl-hydro-iter");
-  const slRampWidth     = document.getElementById("sl-ramp-width");
-  const lblRampWidth    = document.getElementById("lbl-ramp-width");
-  const rampHint        = document.getElementById("ramp-hint");
-  const btnStampSmooth  = document.getElementById("btn-stamp-smooth");
-  const btnStampPlateau = document.getElementById("btn-stamp-plateau");
-  const btnStampCrater  = document.getElementById("btn-stamp-crater");
-  const slTerraceStep   = document.getElementById("sl-terrace-step");
-  const lblTerraceStep  = document.getElementById("lbl-terrace-step");
-  const slTerraceSharp  = document.getElementById("sl-terrace-sharp");
-  const lblTerraceSharp = document.getElementById("lbl-terrace-sharp");
-  const slNoiseScale    = document.getElementById("sl-noise-scale");
-  const lblNoiseScale   = document.getElementById("lbl-noise-scale");
-  const tbHelp          = document.getElementById("tb-help");
-  const tbModeButtons   = document.querySelectorAll("#tb-modes .toolbar-btn");
-  const tbPlay          = document.getElementById("tb-play");
-  const toolsModeSelect = document.getElementById("tools-mode-select");
-  const viewNavHint     = document.getElementById("view-nav-hint");
-  const tbSave    = document.getElementById("tb-save");
-  const tbLoad    = document.getElementById("tb-load");
-  const tbUndo    = document.getElementById("tb-undo");
-  const tbRedo    = document.getElementById("tb-redo");
-  const playHint  = document.getElementById("play-hint");
-  const helpOverlay = document.getElementById("help-overlay");
-  const slSize    = document.getElementById("sl-size");
-  const lblSize   = document.getElementById("lbl-size");
-  const slStr     = document.getElementById("sl-str");
-  const lblStr    = document.getElementById("lbl-str");
-  const slFalloff  = document.getElementById("sl-falloff");
-  const lblFalloff = document.getElementById("lbl-falloff");
+  const btnRaise  = uiById("btn-raise");
+  const btnLower  = uiById("btn-lower");
+  const btnSmooth  = uiById("btn-smooth");
+  const btnFlatten = uiById("btn-flatten");
+  const btnNoise   = uiById("btn-noise");
+  const btnTerrace = uiById("btn-terrace");
+  const slSpacing       = uiById("sl-spacing");
+  const lblSpacing      = uiById("lbl-spacing");
+  const slClampMin  = uiById("sl-clamp-min");
+  const lblClampMin = uiById("lbl-clamp-min");
+  const slClampMax  = uiById("sl-clamp-max");
+  const lblClampMax = uiById("lbl-clamp-max");
+  const subRaiseLower   = uiById("sub-raiselower");
+  const subTerrace      = uiById("sub-terrace");
+  const subFlatten      = uiById("sub-flatten");
+  const subNoise        = uiById("sub-noise");
+  const subErode        = uiById("sub-erode");
+  const subHydro        = uiById("sub-hydro");
+  const subRamp         = uiById("sub-ramp");
+  const btnErode        = uiById("btn-erode");
+  const btnHydro        = uiById("btn-hydro");
+  const btnRamp         = uiById("btn-ramp");
+  const btnSmudge       = uiById("btn-smudge");
+  const btnContrast     = uiById("btn-contrast");
+  const slNoiseOct      = uiById("sl-noise-oct");
+  const lblNoiseOct     = uiById("lbl-noise-oct");
+  const slThermalSlope  = uiById("sl-thermal-slope");
+  const lblThermalSlope = uiById("lbl-thermal-slope");
+  const slThermalIter   = uiById("sl-thermal-iter");
+  const lblThermalIter  = uiById("lbl-thermal-iter");
+  const slHydroStrength = uiById("sl-hydro-strength");
+  const lblHydroStrength = uiById("lbl-hydro-strength");
+  const slHydroWater    = uiById("sl-hydro-water");
+  const lblHydroWater   = uiById("lbl-hydro-water");
+  const slHydroIter     = uiById("sl-hydro-iter");
+  const lblHydroIter    = uiById("lbl-hydro-iter");
+  const slRampWidth     = uiById("sl-ramp-width");
+  const lblRampWidth    = uiById("lbl-ramp-width");
+  const rampHint        = uiById("ramp-hint");
+  const btnStampSmooth  = uiById("btn-stamp-smooth");
+  const btnStampPlateau = uiById("btn-stamp-plateau");
+  const btnStampCrater  = uiById("btn-stamp-crater");
+  const slTerraceStep   = uiById("sl-terrace-step");
+  const lblTerraceStep  = uiById("lbl-terrace-step");
+  const slTerraceSharp  = uiById("sl-terrace-sharp");
+  const lblTerraceSharp = uiById("lbl-terrace-sharp");
+  const slNoiseScale    = uiById("sl-noise-scale");
+  const lblNoiseScale   = uiById("lbl-noise-scale");
+  const tbHelp          = uiById("tb-help");
+  const tbModeButtons   = uiQueryAll("#tb-modes .toolbar-btn");
+  const tbPlay          = uiById("tb-play");
+  const toolsModeSelect = uiById("tools-mode-select");
+  const viewNavHint     = uiById("view-nav-hint");
+  const tbSave    = uiById("tb-save");
+  const tbLoad    = uiById("tb-load");
+  const tbUndo    = uiById("tb-undo");
+  const tbRedo    = uiById("tb-redo");
+  const playHint  = uiById("play-hint");
+  const helpOverlay = uiById("help-overlay");
+  const slSize    = uiById("sl-size");
+  const lblSize   = uiById("lbl-size");
+  const slStr     = uiById("sl-str");
+  const lblStr    = uiById("lbl-str");
+  const slFalloff  = uiById("sl-falloff");
+  const lblFalloff = uiById("lbl-falloff");
 
-  const genMode       = document.getElementById("gen-mode");
-  const genSeed       = document.getElementById("gen-seed");
-  const genScale      = document.getElementById("gen-scale");
-  const lblGenScale   = document.getElementById("lbl-gen-scale");
-  const genHeight     = document.getElementById("gen-height");
-  const lblGenHeight  = document.getElementById("lbl-gen-height");
-  const genOctaves    = document.getElementById("gen-octaves");
-  const lblGenOctaves = document.getElementById("lbl-gen-octaves");
-  const genWarp       = document.getElementById("gen-warp");
-  const lblGenWarp    = document.getElementById("lbl-gen-warp");
-  const genShape      = document.getElementById("gen-shape");
-  const genDropoff    = document.getElementById("gen-dropoff");
-  const lblGenDropoff = document.getElementById("lbl-gen-dropoff");
-  const genPlains     = document.getElementById("gen-plains");
-  const lblGenPlains  = document.getElementById("lbl-gen-plains");
-  const genOffsetX    = document.getElementById("gen-offsetX");
-  const lblGenOffsetX = document.getElementById("lbl-gen-offsetX");
-  const genOffsetZ    = document.getElementById("gen-offsetZ");
-  const lblGenOffsetZ = document.getElementById("lbl-gen-offsetZ");
-  const btnGenerate   = document.getElementById("btn-generate");
-  const btnRandomSeed = document.getElementById("btn-random-seed");
+  const genMode       = uiById("gen-mode");
+  const genSeed       = uiById("gen-seed");
+  const genScale      = uiById("gen-scale");
+  const lblGenScale   = uiById("lbl-gen-scale");
+  const genHeight     = uiById("gen-height");
+  const lblGenHeight  = uiById("lbl-gen-height");
+  const genOctaves    = uiById("gen-octaves");
+  const lblGenOctaves = uiById("lbl-gen-octaves");
+  const genWarp       = uiById("gen-warp");
+  const lblGenWarp    = uiById("lbl-gen-warp");
+  const genShape      = uiById("gen-shape");
+  const genDropoff    = uiById("gen-dropoff");
+  const lblGenDropoff = uiById("lbl-gen-dropoff");
+  const genPlains     = uiById("gen-plains");
+  const lblGenPlains  = uiById("lbl-gen-plains");
+  const genOffsetX    = uiById("gen-offsetX");
+  const lblGenOffsetX = uiById("lbl-gen-offsetX");
+  const genOffsetZ    = uiById("gen-offsetZ");
+  const lblGenOffsetZ = uiById("lbl-gen-offsetZ");
+  const btnGenerate   = uiById("btn-generate");
+  const btnRandomSeed = uiById("btn-random-seed");
 
   // ── Paint panel DOM refs ───────────────────────────────────────────────────
-  const layerCardGrid  = document.getElementById("layer-card-grid");
-  const pslRadius      = document.getElementById("psl-radius");
-  const plblRadius     = document.getElementById("plbl-radius");
-  const pslStrength    = document.getElementById("psl-strength");
-  const plblStrength   = document.getElementById("plbl-strength");
-  const pslFalloff     = document.getElementById("psl-falloff");
-  const plblFalloff    = document.getElementById("plbl-falloff");
-  const pslSpacing     = document.getElementById("psl-spacing");
-  const plblSpacing    = document.getElementById("plbl-spacing");
-  const pslOpacity     = document.getElementById("psl-opacity");
-  const plblOpacity    = document.getElementById("plbl-opacity");
-  const pslSolo        = document.getElementById("psl-solo");
-  const pslHBlend      = document.getElementById("psl-hblend");
-  const plblHBlend     = document.getElementById("plbl-hblend");
-  const pslHContrast   = document.getElementById("psl-hcontrast");
-  const plblHContrast  = document.getElementById("plbl-hcontrast");
-  const pslMacroStr    = document.getElementById("psl-macro-str");
-  const plblMacroStr   = document.getElementById("plbl-macro-str");
-  const pslMacroWarm   = document.getElementById("psl-macro-warm");
-  const plblMacroWarm  = document.getElementById("plbl-macro-warm");
-  const pslMacroScale  = document.getElementById("psl-macro-scale");
-  const plblMacroScale = document.getElementById("plbl-macro-scale");
-  const pslNoise       = document.getElementById("psl-noise");
-  const plblNoise      = document.getElementById("plbl-noise");
-  const pslNScale      = document.getElementById("psl-nscale");
-  const plblNScale     = document.getElementById("plbl-nscale");
-  const pslNOct        = document.getElementById("psl-noct");
-  const plblNOct       = document.getElementById("plbl-noct");
-  const pckNEdge       = document.getElementById("pck-nedge");
-  const pmaskPreview   = document.getElementById("pmask-preview");
-  const pmaskChips     = document.getElementById("pmask-chips");
-  const pbtnMaskPng    = document.getElementById("pbtn-mask-png");
-  const pslMaskRot     = document.getElementById("psl-maskrot");
-  const plblMaskRot    = document.getElementById("plbl-maskrot");
-  const pckMaskRand    = document.getElementById("pck-maskrand");
-  const pckMaskFollow  = document.getElementById("pck-maskfollow");
-  const texlibTabsEl   = document.getElementById("texlib-tabs");
-  const texlibNameEl   = document.getElementById("texlib-name");
-  const pbtnFill          = document.getElementById("pbtn-fill");
-  const pbtnClear         = document.getElementById("pbtn-clear");
-  const pbtnSaveSplat     = document.getElementById("pbtn-save-splat");
-  const pbtnLoadSplat     = document.getElementById("pbtn-load-splat");
-  const aptEnabled      = document.getElementById("apt-enabled");
-  const aptFlat         = document.getElementById("apt-flat");
-  const aptCliff        = document.getElementById("apt-cliff");
-  const aptHigh         = document.getElementById("apt-high");
-  const aptSlopeStart   = document.getElementById("apt-slope-start");
-  const aptSlopeEnd     = document.getElementById("apt-slope-end");
-  const aptHighStart    = document.getElementById("apt-high-start");
-  const aptHighEnd      = document.getElementById("apt-high-end");
-  const aptNoise        = document.getElementById("apt-noise");
-  const aptPreview      = document.getElementById("apt-preview");
-  const aptBake         = document.getElementById("apt-bake");
+  const layerCardGrid  = uiById("layer-card-grid");
+  const pslRadius      = uiById("psl-radius");
+  const plblRadius     = uiById("plbl-radius");
+  const pslStrength    = uiById("psl-strength");
+  const plblStrength   = uiById("plbl-strength");
+  const pslFalloff     = uiById("psl-falloff");
+  const plblFalloff    = uiById("plbl-falloff");
+  const pslSpacing     = uiById("psl-spacing");
+  const plblSpacing    = uiById("plbl-spacing");
+  const pslOpacity     = uiById("psl-opacity");
+  const plblOpacity    = uiById("plbl-opacity");
+  const pslSolo        = uiById("psl-solo");
+  const pslHBlend      = uiById("psl-hblend");
+  const plblHBlend     = uiById("plbl-hblend");
+  const pslHContrast   = uiById("psl-hcontrast");
+  const plblHContrast  = uiById("plbl-hcontrast");
+  const pslMacroStr    = uiById("psl-macro-str");
+  const plblMacroStr   = uiById("plbl-macro-str");
+  const pslMacroWarm   = uiById("psl-macro-warm");
+  const plblMacroWarm  = uiById("plbl-macro-warm");
+  const pslMacroScale  = uiById("psl-macro-scale");
+  const plblMacroScale = uiById("plbl-macro-scale");
+  const pslNoise       = uiById("psl-noise");
+  const plblNoise      = uiById("plbl-noise");
+  const pslNScale      = uiById("psl-nscale");
+  const plblNScale     = uiById("plbl-nscale");
+  const pslNOct        = uiById("psl-noct");
+  const plblNOct       = uiById("plbl-noct");
+  const pckNEdge       = uiById("pck-nedge");
+  const pmaskPreview   = uiById("pmask-preview");
+  const pmaskChips     = uiById("pmask-chips");
+  const pbtnMaskPng    = uiById("pbtn-mask-png");
+  const pslMaskRot     = uiById("psl-maskrot");
+  const plblMaskRot    = uiById("plbl-maskrot");
+  const pckMaskRand    = uiById("pck-maskrand");
+  const pckMaskFollow  = uiById("pck-maskfollow");
+  const texlibTabsEl   = uiById("texlib-tabs");
+  const texlibNameEl   = uiById("texlib-name");
+  const pbtnFill          = uiById("pbtn-fill");
+  const pbtnClear         = uiById("pbtn-clear");
+  const pbtnSaveSplat     = uiById("pbtn-save-splat");
+  const pbtnLoadSplat     = uiById("pbtn-load-splat");
+  const aptEnabled      = uiById("apt-enabled");
+  const aptFlat         = uiById("apt-flat");
+  const aptCliff        = uiById("apt-cliff");
+  const aptHigh         = uiById("apt-high");
+  const aptSlopeStart   = uiById("apt-slope-start");
+  const aptSlopeEnd     = uiById("apt-slope-end");
+  const aptHighStart    = uiById("apt-high-start");
+  const aptHighEnd      = uiById("apt-high-end");
+  const aptNoise        = uiById("apt-noise");
+  const aptPreview      = uiById("apt-preview");
+  const aptBake         = uiById("apt-bake");
 
   // ── Paint state + system ───────────────────────────────────────────────────
   const paintState = {
@@ -1379,8 +1393,8 @@ export async function startV3App(opts = {}) {
     // unclosed <div> that nested every later section inside it, which made
     // "after Brush" land at the bottom of the panel; that markup is fixed now,
     // but anchoring on the tools section is correct either way.
-    const sculptToolsSec = document.getElementById("btn-raise")?.closest(".inspector-section");
-    const sculptBrushSec = document.querySelector("#sculpt-panel > .inspector-section");
+    const sculptToolsSec = uiById("btn-raise")?.closest(".inspector-section");
+    const sculptBrushSec = uiQuery("#sculpt-panel > .inspector-section");
     if (sculptToolsSec || sculptBrushSec) {
       buildBrushFilterSection({
         anchorEl: sculptToolsSec ?? sculptBrushSec,
@@ -1391,7 +1405,7 @@ export async function startV3App(opts = {}) {
       });
     }
     sculpt.setFilter(sculptFilterState);
-    const paintBrushSec = document.querySelector("#paint-panel > .inspector-section");
+    const paintBrushSec = uiQuery("#paint-panel > .inspector-section");
     if (paintBrushSec) {
       buildBrushFilterSection({
         anchorEl: paintBrushSec,
@@ -1455,9 +1469,9 @@ export async function startV3App(opts = {}) {
   // with one click, without sculpting — Unity's Set Height / Unreal's flatten
   // target. Applies to Alt+drag flatten too, since that shares the same stamp.
   const flattenState = { fixed: false, heightM: 0 };
-  const ckFlattenFixed    = document.getElementById("ck-flatten-fixed");
-  const numFlattenHeight  = document.getElementById("num-flatten-height");
-  const btnFlattenPick    = document.getElementById("btn-flatten-pick");
+  const ckFlattenFixed    = uiById("ck-flatten-fixed");
+  const numFlattenHeight  = uiById("num-flatten-height");
+  const btnFlattenPick    = uiById("btn-flatten-pick");
   // Declared with var-like hoisting in mind: setMode() (defined above) reads it,
   // but only runs from events, long after this line.
   var _pickingHeight = false;
@@ -1620,11 +1634,11 @@ export async function startV3App(opts = {}) {
     syncGenUI();
   }
 
-  for (const btn of document.querySelectorAll(".preset-btn")) {
+  for (const btn of uiQueryAll(".preset-btn")) {
     btn.addEventListener("click", () => {
       const p = TERRAIN_PRESETS[btn.dataset.preset];
       if (!p) return;
-      document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+      uiQueryAll(".preset-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       pushPresetToUI(p);
       applyProceduralTerrain();
@@ -1641,7 +1655,7 @@ export async function startV3App(opts = {}) {
   btnGenerate.addEventListener("click", () => applyProceduralTerrain());
   btnRandomSeed.addEventListener("click", () => {
     genSeed.value = Math.floor(Math.random() * 100000);
-    document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+    uiQueryAll(".preset-btn").forEach(b => b.classList.remove("active"));
     applyProceduralTerrain();
   });
   syncGenUI();
@@ -1649,15 +1663,15 @@ export async function startV3App(opts = {}) {
   // ── Global hydraulic erosion ─────────────────────────────────────────────
   // CPU droplet sim (v2 port) on the heightmap mirror: readback → erode in
   // metres → pushHeightmapEditsToGpu (undoable via replaceHeightData's stroke).
-  const eroIters    = document.getElementById("sl-ero-iters");
-  const eroRate     = document.getElementById("sl-ero-rate");
-  const eroDeposit  = document.getElementById("sl-ero-deposit");
-  const eroEvap     = document.getElementById("sl-ero-evap");
-  const eroInertia  = document.getElementById("sl-ero-inertia");
-  const eroCapacity = document.getElementById("sl-ero-capacity");
-  const eroRadius   = document.getElementById("sl-ero-radius");
-  const eroSmooth   = document.getElementById("sl-ero-smooth");
-  const btnRunErosion = document.getElementById("btn-run-erosion");
+  const eroIters    = uiById("sl-ero-iters");
+  const eroRate     = uiById("sl-ero-rate");
+  const eroDeposit  = uiById("sl-ero-deposit");
+  const eroEvap     = uiById("sl-ero-evap");
+  const eroInertia  = uiById("sl-ero-inertia");
+  const eroCapacity = uiById("sl-ero-capacity");
+  const eroRadius   = uiById("sl-ero-radius");
+  const eroSmooth   = uiById("sl-ero-smooth");
+  const btnRunErosion = uiById("btn-run-erosion");
 
   function readErosionFromUI() {
     return {
@@ -1674,15 +1688,15 @@ export async function startV3App(opts = {}) {
 
   function syncErosionUI() {
     const p = readErosionFromUI();
-    document.getElementById("lbl-ero-iters").textContent    =
+    uiById("lbl-ero-iters").textContent    =
       p.iterations >= 1e6 ? (p.iterations / 1e6).toFixed(1) + "M" : Math.round(p.iterations / 1000) + "k";
-    document.getElementById("lbl-ero-rate").textContent     = p.erosionRate.toFixed(2);
-    document.getElementById("lbl-ero-deposit").textContent  = p.depositionRate.toFixed(2);
-    document.getElementById("lbl-ero-evap").textContent     = p.evaporation.toFixed(3);
-    document.getElementById("lbl-ero-inertia").textContent  = p.inertia.toFixed(2);
-    document.getElementById("lbl-ero-capacity").textContent = p.capacity.toFixed(1);
-    document.getElementById("lbl-ero-radius").textContent   = String(p.radius);
-    document.getElementById("lbl-ero-smooth").textContent   = String(p.smoothing);
+    uiById("lbl-ero-rate").textContent     = p.erosionRate.toFixed(2);
+    uiById("lbl-ero-deposit").textContent  = p.depositionRate.toFixed(2);
+    uiById("lbl-ero-evap").textContent     = p.evaporation.toFixed(3);
+    uiById("lbl-ero-inertia").textContent  = p.inertia.toFixed(2);
+    uiById("lbl-ero-capacity").textContent = p.capacity.toFixed(1);
+    uiById("lbl-ero-radius").textContent   = String(p.radius);
+    uiById("lbl-ero-smooth").textContent   = String(p.smoothing);
   }
 
   for (const sl of [eroIters, eroRate, eroDeposit, eroEvap, eroInertia, eroCapacity, eroRadius, eroSmooth]) {
@@ -1730,11 +1744,11 @@ export async function startV3App(opts = {}) {
   // ── Global fluvial erosion (stream power) ────────────────────────────────
   // CPU Fastscape-style sim (streamPowerErosion.js): carves the dendritic
   // valley network the droplet sim can't. Same readback → metres → push flow.
-  const speIters    = document.getElementById("sl-spe-iters");
-  const speStrength = document.getElementById("sl-spe-strength");
-  const speUplift   = document.getElementById("sl-spe-uplift");
-  const speSmooth   = document.getElementById("sl-spe-smooth");
-  const btnRunStreamPower = document.getElementById("btn-run-stream-power");
+  const speIters    = uiById("sl-spe-iters");
+  const speStrength = uiById("sl-spe-strength");
+  const speUplift   = uiById("sl-spe-uplift");
+  const speSmooth   = uiById("sl-spe-smooth");
+  const btnRunStreamPower = uiById("btn-run-stream-power");
 
   function readStreamPowerFromUI() {
     return {
@@ -1747,10 +1761,10 @@ export async function startV3App(opts = {}) {
 
   function syncStreamPowerUI() {
     const p = readStreamPowerFromUI();
-    document.getElementById("lbl-spe-iters").textContent    = String(p.iterations);
-    document.getElementById("lbl-spe-strength").textContent = p.strength.toFixed(3);
-    document.getElementById("lbl-spe-uplift").textContent   = p.uplift.toFixed(2) + "m";
-    document.getElementById("lbl-spe-smooth").textContent   = p.smoothing.toFixed(2);
+    uiById("lbl-spe-iters").textContent    = String(p.iterations);
+    uiById("lbl-spe-strength").textContent = p.strength.toFixed(3);
+    uiById("lbl-spe-uplift").textContent   = p.uplift.toFixed(2) + "m";
+    uiById("lbl-spe-smooth").textContent   = p.smoothing.toFixed(2);
   }
 
   for (const sl of [speIters, speStrength, speUplift, speSmooth]) {
@@ -1839,10 +1853,10 @@ export async function startV3App(opts = {}) {
   // (65535) means, and a file of another resolution is resampled to this
   // terrain's. Row 0 = the terrain's −Z edge, for import and export alike, so
   // a round trip is exact.
-  const hmfTop    = document.getElementById("hmf-top");
-  const hmfFlip   = document.getElementById("hmf-flip");
-  const hmfEndian = document.getElementById("hmf-endian");
-  const hmfStatus = document.getElementById("hmf-status");
+  const hmfTop    = uiById("hmf-top");
+  const hmfFlip   = uiById("hmf-flip");
+  const hmfEndian = uiById("hmf-endian");
+  const hmfStatus = uiById("hmf-status");
   hmfTop.value = String(MAX_HEIGHT);
   hmfTop.max = String(MAX_HEIGHT);
   const hmfTopMetres = () => {
@@ -1926,12 +1940,12 @@ export async function startV3App(opts = {}) {
       window.alert(err instanceof Error ? err.message : "Heightmap file operation failed.");
     }
   };
-  document.getElementById("hmf-import").addEventListener("click", () => runHeightmapTask(async () => {
+  uiById("hmf-import").addEventListener("click", () => runHeightmapTask(async () => {
     const file = await pickExternalHeightmap();
     if (file) await importHeightmapFormat(file);
   }));
-  document.getElementById("hmf-export-png").addEventListener("click", () => runHeightmapTask(() => exportHeightmapFormat("png")));
-  document.getElementById("hmf-export-raw").addEventListener("click", () => runHeightmapTask(() => exportHeightmapFormat("raw")));
+  uiById("hmf-export-png").addEventListener("click", () => runHeightmapTask(() => exportHeightmapFormat("png")));
+  uiById("hmf-export-raw").addEventListener("click", () => runHeightmapTask(() => exportHeightmapFormat("raw")));
 
   async function loadHeightmap() {
     const file = await pickHeightmapFile();
@@ -1945,11 +1959,11 @@ export async function startV3App(opts = {}) {
   }
 
   // ── Brush mask ─────────────────────────────────────────────────────────────
-  const maskChipsEl   = document.getElementById("mask-chips");
-  const btnMaskPNG    = document.getElementById("btn-mask-png");
-  const maskPreviewEl = document.getElementById("mask-preview");
+  const maskChipsEl   = uiById("mask-chips");
+  const btnMaskPNG    = uiById("btn-mask-png");
+  const maskPreviewEl = uiById("mask-preview");
 
-  const maskStampSelect = document.getElementById("mask-stamp-select");
+  const maskStampSelect = uiById("mask-stamp-select");
 
   function updateMaskPreview(tex) {
     const ctx = maskPreviewEl.getContext("2d");
@@ -1959,8 +1973,8 @@ export async function startV3App(opts = {}) {
     if (src) ctx.drawImage(src, 0, 0, 48, 48);
   }
 
-  const slMaskRot  = document.getElementById("sl-mask-rot");
-  const lblMaskRot = document.getElementById("lbl-mask-rot");
+  const slMaskRot  = uiById("sl-mask-rot");
+  const lblMaskRot = uiById("lbl-mask-rot");
 
   function syncMaskRotUI() {
     lblMaskRot.textContent = slMaskRot.value + "°";
@@ -2087,12 +2101,12 @@ export async function startV3App(opts = {}) {
   let _onGizmoDragEnd = () => {};
   let _gizmoTarget = null;
 
-  const grassPanel = document.getElementById("grass-panel");
-  const susukiPanel = document.getElementById("susuki-panel");
-  const treePanel  = document.getElementById("tree-panel");
-  const foliagePanel = document.getElementById("foliage-panel");
-  const snowPanel  = document.getElementById("snow-panel");
-  const cliffPaintPanel = document.getElementById("cliffpaint-panel");
+  const grassPanel = uiById("grass-panel");
+  const susukiPanel = uiById("susuki-panel");
+  const treePanel  = uiById("tree-panel");
+  const foliagePanel = uiById("foliage-panel");
+  const snowPanel  = uiById("snow-panel");
+  const cliffPaintPanel = uiById("cliffpaint-panel");
 
   function syncSculptPanelVisibility() {
     sculptPanel.style.display = (editorMode === "sculpt" && !playMode.active) ? "" : "none";
@@ -2378,7 +2392,7 @@ export async function startV3App(opts = {}) {
 
   /** Switch the right panel to "tools", "inspector" or "world". */
   function openRightTab(name) {
-    const btn = document.querySelector(`#right-panel .tab-btn[data-tab="${name}"]`);
+    const btn = uiQuery(`#right-panel .tab-btn[data-tab="${name}"]`);
     if (btn && !btn.classList.contains("active")) btn.click();
   }
 
@@ -2395,19 +2409,19 @@ export async function startV3App(opts = {}) {
     }
   });
 
-  document.getElementById("play-stop-btn").addEventListener("click", () => exitPlay());
+  uiById("play-stop-btn").addEventListener("click", () => exitPlay());
   playImmersiveBtn?.addEventListener("click", () => {
     setPlayImmersive(!getPlayImmersive());
   });
 
-  const playBvhDebugToggle = document.getElementById("play-bvh-debug-toggle");
+  const playBvhDebugToggle = uiById("play-bvh-debug-toggle");
   playBvhDebugToggle?.addEventListener("click", () => {
     setBvhDebugEnabled(!bvhDebugUi.enabled);
   });
 
-  const playCapsuleDebugToggle = document.getElementById("play-capsule-debug-toggle");
-  const playColliderDebugLabel = document.getElementById("play-collider-debug-label");
-  const playColliderDebugHint = document.getElementById("play-collider-debug-hint");
+  const playCapsuleDebugToggle = uiById("play-capsule-debug-toggle");
+  const playColliderDebugLabel = uiById("play-collider-debug-label");
+  const playColliderDebugHint = uiById("play-collider-debug-hint");
   function syncColliderDebugUi() {
     if (playCapsuleDebugToggle) {
       playCapsuleDebugToggle.classList.toggle("checked", !!playMode?.showCollider);
@@ -2449,15 +2463,15 @@ export async function startV3App(opts = {}) {
   tbRedo.addEventListener("click", () => redoInMode());
 
   // ── Terrain size: toolbar label, inspector values, New Terrain dialog ──────
-  const tbTerrainSize = document.getElementById("tb-terrain-size");
+  const tbTerrainSize = uiById("tb-terrain-size");
   tbTerrainSize.textContent = `${WORLD_SIZE} m · ${HEIGHTMAP_SIZE}²`;
 
-  const ntOverlay = document.getElementById("terrain-size-overlay");
-  const ntWorld   = document.getElementById("nt-world");
-  const ntDetail  = document.getElementById("nt-detail");
-  const ntSplat   = document.getElementById("nt-splat");
-  const ntHeight  = document.getElementById("nt-height");
-  const ntSummary = document.getElementById("nt-summary");
+  const ntOverlay = uiById("terrain-size-overlay");
+  const ntWorld   = uiById("nt-world");
+  const ntDetail  = uiById("nt-detail");
+  const ntSplat   = uiById("nt-splat");
+  const ntHeight  = uiById("nt-height");
+  const ntSummary = uiById("nt-summary");
 
   // Set a dropdown to `value`, falling back to the numerically closest option so
   // a config saved outside the preset list still shows something sensible.
@@ -2504,13 +2518,13 @@ export async function startV3App(opts = {}) {
     syncNtSummary();
     ntOverlay.style.display = "flex";
   });
-  document.getElementById("nt-cancel").addEventListener("click", () => {
+  uiById("nt-cancel").addEventListener("click", () => {
     ntOverlay.style.display = "none";
   });
   ntOverlay.addEventListener("click", (e) => {
     if (e.target === ntOverlay) ntOverlay.style.display = "none";
   });
-  document.getElementById("nt-create").addEventListener("click", () => {
+  uiById("nt-create").addEventListener("click", () => {
     saveTerrainConfig({
       worldSize:     Number(ntWorld.value),
       heightmapSize: ntComputedRes(),
@@ -3293,7 +3307,7 @@ export async function startV3App(opts = {}) {
     } catch (err) {
       if (++_loopErrors === 1) {
         console.error("[V3] Render error:", err);
-        const vp = document.getElementById("viewport");
+        const vp = viewport;
         if (vp && !vp.querySelector("[data-v3-loop-error]")) {
           const msg = document.createElement("div");
           msg.dataset.v3LoopError = "1";
@@ -3814,9 +3828,9 @@ export async function startV3App(opts = {}) {
     // field updated it, so the defaults (Grass, Rock...) and names restored from
     // a project never reached the cards. Every path that changes a slot already
     // funnels through here, so the label is refreshed alongside the thumbnail.
-    const label = document.getElementById(`llabel-${slotIdx + 1}`);
+    const label = uiById(`llabel-${slotIdx + 1}`);
     if (label) label.textContent = textureLib.slots[slotIdx].name || `L${slotIdx + 1}`;
-    const thumb = document.getElementById(`lthumb-${slotIdx + 1}`);
+    const thumb = uiById(`lthumb-${slotIdx + 1}`);
     if (!thumb) return;
     const slot = textureLib.slots[slotIdx];
     const url = slot.procedural ? slot.procThumbUrl : slot.albedoUrl;
@@ -3976,7 +3990,7 @@ export async function startV3App(opts = {}) {
       texlibNameEl.value = textureLib.slots[slotIdx].name;
       syncTexlibEditor();
       // Expand Texture Library section if it's collapsed
-      const texlibSection = document.getElementById("texlib-body");
+      const texlibSection = uiById("texlib-body");
       if (texlibSection && texlibSection.classList.contains("hidden")) {
         texlibSection.classList.remove("hidden");
         const hdr = texlibSection.previousElementSibling;
@@ -4013,27 +4027,27 @@ export async function startV3App(opts = {}) {
   });
   texlibNameEl.addEventListener("input", () => {
     textureLib.setSlotName(texlibActiveSlot, texlibNameEl.value);
-    const lbl = document.getElementById(`llabel-${texlibActiveSlot + 1}`);
+    const lbl = uiById(`llabel-${texlibActiveSlot + 1}`);
     if (lbl) lbl.textContent = texlibNameEl.value || `L${texlibActiveSlot + 1}`;
   });
 
   // Texture library UV/strength sliders — scoped to active slot
-  const tslUVScale = document.getElementById("tsl-uvscale");
-  const tlblUV     = document.getElementById("tlbl-uvscale");
-  const tslNStr    = document.getElementById("tsl-nstr");
-  const tlblNStr   = document.getElementById("tlbl-nstr");
-  const tslAOStr   = document.getElementById("tsl-aostr");
-  const tlblAO     = document.getElementById("tlbl-aostr");
-  const tslRStr    = document.getElementById("tsl-rstr");
-  const tlblRStr   = document.getElementById("tlbl-rstr");
-  const tslTriplanar = document.getElementById("tsl-triplanar");
+  const tslUVScale = uiById("tsl-uvscale");
+  const tlblUV     = uiById("tlbl-uvscale");
+  const tslNStr    = uiById("tsl-nstr");
+  const tlblNStr   = uiById("tlbl-nstr");
+  const tslAOStr   = uiById("tsl-aostr");
+  const tlblAO     = uiById("tlbl-aostr");
+  const tslRStr    = uiById("tsl-rstr");
+  const tlblRStr   = uiById("tlbl-rstr");
+  const tslTriplanar = uiById("tsl-triplanar");
 
   tslTriplanar.addEventListener("change", () => {
     textureLib.setTriplanar(texlibActiveSlot, tslTriplanar.checked);
     syncTriplanarCompile();
   });
-  const tslBlockGrass = document.getElementById("tsl-block-grass");
-  const tslBlockTrees = document.getElementById("tsl-block-trees");
+  const tslBlockGrass = uiById("tsl-block-grass");
+  const tslBlockTrees = uiById("tsl-block-trees");
   tslBlockGrass.addEventListener("change", () => {
     textureLib.slots[texlibActiveSlot].blocksGrass = tslBlockGrass.checked;
   });
@@ -4071,16 +4085,16 @@ export async function startV3App(opts = {}) {
     await MAP_LOADERS[mapType](texlibActiveSlot, file);
     const urlProp = { albedo: "albedoUrl", normal: "normalUrl", rough: "roughUrl", ao: "aoUrl" }[mapType];
     const url = textureLib.slots[texlibActiveSlot][urlProp];
-    const thumb = document.getElementById(`tmt-${mapType}`);
-    const cell  = document.getElementById(`tmc-${mapType}`);
+    const thumb = uiById(`tmt-${mapType}`);
+    const cell  = uiById(`tmc-${mapType}`);
     if (thumb) thumb.style.backgroundImage = url ? `url(${url})` : "";
     if (cell) cell.classList.toggle("has-texture", Boolean(url));
     if (mapType === "albedo") refreshLayerThumb(texlibActiveSlot);
   }
 
   MAP_TYPES.forEach(mapType => {
-    const cell  = document.getElementById(`tmc-${mapType}`);
-    const clear = document.getElementById(`tmc-clear-${mapType}`);
+    const cell  = uiById(`tmc-${mapType}`);
+    const clear = uiById(`tmc-clear-${mapType}`);
     if (!cell) return;
     cell.addEventListener("click", e => {
       if (e.target === clear) return;
@@ -4103,7 +4117,7 @@ export async function startV3App(opts = {}) {
         else if (mapType === "rough")  textureLib.clearRoughness(texlibActiveSlot);
         else if (mapType === "ao")     textureLib.clearAO(texlibActiveSlot);
         // Update UI
-        const thumb = document.getElementById(`tmt-${mapType}`);
+        const thumb = uiById(`tmt-${mapType}`);
         if (thumb) thumb.style.backgroundImage = "";
         cell.classList.remove("has-texture");
         if (mapType === "albedo") refreshLayerThumb(texlibActiveSlot);
@@ -4115,9 +4129,9 @@ export async function startV3App(opts = {}) {
   // A slot is either Image (its four map files) or Procedural (a texture baked
   // from colours + a pattern into the same array layers). The terrain shader
   // cannot tell the difference, so neither can its frame cost.
-  const texlibSourceEl = document.getElementById("texlib-source");
-  const texlibImageSrc = document.getElementById("texlib-image-src");
-  const texlibProcSrc  = document.getElementById("texlib-proc-src");
+  const texlibSourceEl = uiById("texlib-source");
+  const texlibImageSrc = uiById("texlib-image-src");
+  const texlibProcSrc  = uiById("texlib-proc-src");
 
   /** First preset for a slot switched to Procedural: a guess from its name. */
   function guessProcPreset(name = "") {
@@ -4221,8 +4235,8 @@ export async function startV3App(opts = {}) {
       ["albedo", "albedoUrl"], ["normal", "normalUrl"], ["rough", "roughUrl"], ["ao", "aoUrl"],
     ]) {
       const url = s[urlProp];
-      const thumb = document.getElementById(`tmt-${mapType}`);
-      const cell  = document.getElementById(`tmc-${mapType}`);
+      const thumb = uiById(`tmt-${mapType}`);
+      const cell  = uiById(`tmc-${mapType}`);
       if (thumb) thumb.style.backgroundImage = url ? `url(${url})` : "";
       if (cell) cell.classList.toggle("has-texture", Boolean(url));
     }
@@ -4244,7 +4258,7 @@ export async function startV3App(opts = {}) {
   function syncPanelControls(controls, state) {
     const loaded = { ...state };
     for (const [id, key, scale = 1] of controls) {
-      const el = document.getElementById(id);
+      const el = uiById(id);
       const v = state[key];
       if (!el || v === undefined) continue;
       if (el.type === "checkbox") {
@@ -4292,30 +4306,30 @@ export async function startV3App(opts = {}) {
 
   // ── Snow panel controls ────────────────────────────────────────────────────
   {
-    const slR = document.getElementById("snow-sl-radius");
-    const lbR = document.getElementById("snow-lbl-radius");
-    const slS = document.getElementById("snow-sl-strength");
-    const lbS = document.getElementById("snow-lbl-strength");
-    const slF = document.getElementById("snow-sl-falloff");
-    const lbF = document.getElementById("snow-lbl-falloff");
-    const slB = document.getElementById("snow-sl-base");
-    const lbB = document.getElementById("snow-lbl-base");
-    const slN = document.getElementById("snow-sl-noise");
-    const lbN = document.getElementById("snow-lbl-noise");
-    const slG = document.getElementById("snow-sl-groove");
-    const lbG = document.getElementById("snow-lbl-groove");
-    const slSo = document.getElementById("snow-sl-soft");
-    const lbSo = document.getElementById("snow-lbl-soft");
-    const slRm = document.getElementById("snow-sl-rim");
-    const lbRm = document.getElementById("snow-lbl-rim");
-    const slRw = document.getElementById("snow-sl-regrow");
-    const lbRw = document.getElementById("snow-lbl-regrow");
-    const slGl = document.getElementById("snow-sl-glitter");
-    const lbGl = document.getElementById("snow-lbl-glitter");
-    const slFq = document.getElementById("snow-sl-freq");
-    const lbFq = document.getElementById("snow-lbl-freq");
-    const btnFill  = document.getElementById("snow-btn-fill");
-    const btnClear = document.getElementById("snow-btn-clear");
+    const slR = uiById("snow-sl-radius");
+    const lbR = uiById("snow-lbl-radius");
+    const slS = uiById("snow-sl-strength");
+    const lbS = uiById("snow-lbl-strength");
+    const slF = uiById("snow-sl-falloff");
+    const lbF = uiById("snow-lbl-falloff");
+    const slB = uiById("snow-sl-base");
+    const lbB = uiById("snow-lbl-base");
+    const slN = uiById("snow-sl-noise");
+    const lbN = uiById("snow-lbl-noise");
+    const slG = uiById("snow-sl-groove");
+    const lbG = uiById("snow-lbl-groove");
+    const slSo = uiById("snow-sl-soft");
+    const lbSo = uiById("snow-lbl-soft");
+    const slRm = uiById("snow-sl-rim");
+    const lbRm = uiById("snow-lbl-rim");
+    const slRw = uiById("snow-sl-regrow");
+    const lbRw = uiById("snow-lbl-regrow");
+    const slGl = uiById("snow-sl-glitter");
+    const lbGl = uiById("snow-lbl-glitter");
+    const slFq = uiById("snow-sl-freq");
+    const lbFq = uiById("snow-lbl-freq");
+    const btnFill  = uiById("snow-btn-fill");
+    const btnClear = uiById("snow-btn-clear");
 
     slR.addEventListener("input", () => {
       snowBrushState.radius = Number(slR.value);
@@ -4385,14 +4399,14 @@ export async function startV3App(opts = {}) {
 
   // ── Cliff paint panel controls ─────────────────────────────────────────────
   {
-    const slR = document.getElementById("cliffpaint-sl-radius");
-    const lbR = document.getElementById("cliffpaint-lbl-radius");
-    const slS = document.getElementById("cliffpaint-sl-strength");
-    const lbS = document.getElementById("cliffpaint-lbl-strength");
-    const slF = document.getElementById("cliffpaint-sl-falloff");
-    const lbF = document.getElementById("cliffpaint-lbl-falloff");
-    const btnFill  = document.getElementById("cliffpaint-btn-fill");
-    const btnClear = document.getElementById("cliffpaint-btn-clear");
+    const slR = uiById("cliffpaint-sl-radius");
+    const lbR = uiById("cliffpaint-lbl-radius");
+    const slS = uiById("cliffpaint-sl-strength");
+    const lbS = uiById("cliffpaint-lbl-strength");
+    const slF = uiById("cliffpaint-sl-falloff");
+    const lbF = uiById("cliffpaint-lbl-falloff");
+    const btnFill  = uiById("cliffpaint-btn-fill");
+    const btnClear = uiById("cliffpaint-btn-clear");
 
     slR.addEventListener("input", () => {
       cliffPaintBrush.radius = Number(slR.value);
@@ -4460,11 +4474,11 @@ export async function startV3App(opts = {}) {
     AUTO.uAutoHighStart.value = p.highStart;
     AUTO.uAutoHighEnd.value   = p.highEnd;
     AUTO.uAutoNoise.value     = p.noise;
-    document.getElementById("apt-lbl-slope-start").textContent = p.slopeStartDeg + "°";
-    document.getElementById("apt-lbl-slope-end").textContent   = p.slopeEndDeg + "°";
-    document.getElementById("apt-lbl-high-start").textContent  = p.highStart + "m";
-    document.getElementById("apt-lbl-high-end").textContent    = p.highEnd + "m";
-    document.getElementById("apt-lbl-noise").textContent       = Math.round(p.noise * 100) + "%";
+    uiById("apt-lbl-slope-start").textContent = p.slopeStartDeg + "°";
+    uiById("apt-lbl-slope-end").textContent   = p.slopeEndDeg + "°";
+    uiById("apt-lbl-high-start").textContent  = p.highStart + "m";
+    uiById("apt-lbl-high-end").textContent    = p.highEnd + "m";
+    uiById("apt-lbl-noise").textContent       = Math.round(p.noise * 100) + "%";
   }
   for (const el of [aptEnabled, aptPreview, aptFlat, aptCliff, aptHigh, aptSlopeStart, aptSlopeEnd, aptHighStart, aptHighEnd, aptNoise]) {
     el.addEventListener("input", syncAutoPaint);
@@ -4522,15 +4536,15 @@ export async function startV3App(opts = {}) {
   // ── Grass panel wiring ─────────────────────────────────────────────────────
 
   // Density brush
-  const gslRadius   = document.getElementById("gsl-radius");
-  const glblRadius  = document.getElementById("glbl-radius");
-  const gslStr      = document.getElementById("gsl-strength");
-  const glblStr     = document.getElementById("glbl-strength");
-  const gslFalloff  = document.getElementById("gsl-falloff");
-  const glblFalloff = document.getElementById("glbl-falloff");
-  const gckErase    = document.getElementById("gck-erase");
-  const gbtnFill    = document.getElementById("gbtn-fill");
-  const gbtnClear   = document.getElementById("gbtn-clear");
+  const gslRadius   = uiById("gsl-radius");
+  const glblRadius  = uiById("glbl-radius");
+  const gslStr      = uiById("gsl-strength");
+  const glblStr     = uiById("glbl-strength");
+  const gslFalloff  = uiById("gsl-falloff");
+  const glblFalloff = uiById("glbl-falloff");
+  const gckErase    = uiById("gck-erase");
+  const gbtnFill    = uiById("gbtn-fill");
+  const gbtnClear   = uiById("gbtn-clear");
 
   gslRadius.addEventListener("input", () => { grassBrush.radius = Number(gslRadius.value); glblRadius.textContent = gslRadius.value + "m"; });
   gslStr.addEventListener("input", () => { grassBrush.strength = Number(gslStr.value) / 100; glblStr.textContent = grassBrush.strength.toFixed(2); });
@@ -4545,12 +4559,12 @@ export async function startV3App(opts = {}) {
   });
 
   // ── Cliff grass: paint-target toggle + surface bake + fill/clear ───────────
-  const gbtnTargetTerrain = document.getElementById("gbtn-target-terrain");
-  const gbtnTargetCliff   = document.getElementById("gbtn-target-cliff");
-  const cliffgrassBake    = document.getElementById("cliffgrass-bake");
-  const cliffgrassFill    = document.getElementById("cliffgrass-fill");
-  const cliffgrassClear   = document.getElementById("cliffgrass-clear");
-  const cliffgrassStatus  = document.getElementById("cliffgrass-status");
+  const gbtnTargetTerrain = uiById("gbtn-target-terrain");
+  const gbtnTargetCliff   = uiById("gbtn-target-cliff");
+  const cliffgrassBake    = uiById("cliffgrass-bake");
+  const cliffgrassFill    = uiById("cliffgrass-fill");
+  const cliffgrassClear   = uiById("cliffgrass-clear");
+  const cliffgrassStatus  = uiById("cliffgrass-status");
 
   function updateCliffGrassStatus() {
     if (!cliffgrassStatus) return;
@@ -4590,22 +4604,22 @@ export async function startV3App(opts = {}) {
   });
 
   // Appearance
-  const gcolBlade   = document.getElementById("gcol-blade");
-  const gcolTip     = document.getElementById("gcol-tip");
-  const gslAoBase   = document.getElementById("gsl-ao-base");
-  const glblAoBase  = document.getElementById("glbl-ao-base");
-  const gslAoPow    = document.getElementById("gsl-ao-power");
-  const glblAoPow   = document.getElementById("glbl-ao-power");
-  const gckColorVar = document.getElementById("gck-color-var");
-  const gslHue      = document.getElementById("gsl-hue");
-  const glblHue     = document.getElementById("glbl-hue");
-  const gslSat      = document.getElementById("gsl-sat");
-  const glblSat     = document.getElementById("glbl-sat");
-  const gslDry      = document.getElementById("gsl-dry");
-  const glblDry     = document.getElementById("glbl-dry");
-  const gcolDry     = document.getElementById("gcol-dry");
-  const gslBladeH   = document.getElementById("gsl-blade-height");
-  const glblBladeH  = document.getElementById("glbl-blade-height");
+  const gcolBlade   = uiById("gcol-blade");
+  const gcolTip     = uiById("gcol-tip");
+  const gslAoBase   = uiById("gsl-ao-base");
+  const glblAoBase  = uiById("glbl-ao-base");
+  const gslAoPow    = uiById("gsl-ao-power");
+  const glblAoPow   = uiById("glbl-ao-power");
+  const gckColorVar = uiById("gck-color-var");
+  const gslHue      = uiById("gsl-hue");
+  const glblHue     = uiById("glbl-hue");
+  const gslSat      = uiById("gsl-sat");
+  const glblSat     = uiById("glbl-sat");
+  const gslDry      = uiById("gsl-dry");
+  const glblDry     = uiById("glbl-dry");
+  const gcolDry     = uiById("gcol-dry");
+  const gslBladeH   = uiById("gsl-blade-height");
+  const glblBladeH  = uiById("glbl-blade-height");
 
   gslBladeH.addEventListener("input", () => {
     grassState.bladeHeight = Number(gslBladeH.value) / 10;
@@ -4623,26 +4637,26 @@ export async function startV3App(opts = {}) {
   gcolDry.addEventListener("input", () => { grassState.cvDryColor = gcolDry.value; syncGrassUniforms(); });
 
   // Shape & Dynamics
-  const gslBladeW  = document.getElementById("gsl-blade-width");
-  const glblBladeW = document.getElementById("glbl-blade-width");
-  const gckCrossed = document.getElementById("gck-crossed");
-  const gslBend    = document.getElementById("gsl-bend");
-  const glblBend   = document.getElementById("glbl-bend");
-  const gslStiff   = document.getElementById("gsl-stiffness");
-  const glblStiff  = document.getElementById("glbl-stiffness");
-  const gslMaxAng  = document.getElementById("gsl-max-angle");
-  const glblMaxAng = document.getElementById("glbl-max-angle");
-  const gslLean    = document.getElementById("gsl-lean");
-  const glblLean   = document.getElementById("glbl-lean");
-  const gslSky     = document.getElementById("gsl-sky");
-  const glblSky    = document.getElementById("glbl-sky");
-  const gslCyl     = document.getElementById("gsl-cyl");
-  const glblCyl    = document.getElementById("glbl-cyl");
-  const gslThick   = document.getElementById("gsl-thick");
-  const glblThick  = document.getElementById("glbl-thick");
-  const gslDens    = document.getElementById("gsl-density");
-  const glblDens   = document.getElementById("glbl-density");
-  const gckShadow  = document.getElementById("gck-shadow");
+  const gslBladeW  = uiById("gsl-blade-width");
+  const glblBladeW = uiById("glbl-blade-width");
+  const gckCrossed = uiById("gck-crossed");
+  const gslBend    = uiById("gsl-bend");
+  const glblBend   = uiById("glbl-bend");
+  const gslStiff   = uiById("gsl-stiffness");
+  const glblStiff  = uiById("glbl-stiffness");
+  const gslMaxAng  = uiById("gsl-max-angle");
+  const glblMaxAng = uiById("glbl-max-angle");
+  const gslLean    = uiById("gsl-lean");
+  const glblLean   = uiById("glbl-lean");
+  const gslSky     = uiById("gsl-sky");
+  const glblSky    = uiById("glbl-sky");
+  const gslCyl     = uiById("gsl-cyl");
+  const glblCyl    = uiById("glbl-cyl");
+  const gslThick   = uiById("gsl-thick");
+  const glblThick  = uiById("glbl-thick");
+  const gslDens    = uiById("gsl-density");
+  const glblDens   = uiById("glbl-density");
+  const gckShadow  = uiById("gck-shadow");
 
   gslBladeW.addEventListener("input", () => {
     grassState.bladeWidth = Number(gslBladeW.value) / 100;
@@ -4655,14 +4669,14 @@ export async function startV3App(opts = {}) {
     if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
     if (cliffGrassRings) rebuildHybridGrassGeometries(cliffGrassRings, grassState);
   });
-  const gslSegments  = document.getElementById("gsl-segments");
-  const glblSegments = document.getElementById("glbl-segments");
-  const gslTaper     = document.getElementById("gsl-taper");
-  const glblTaper    = document.getElementById("glbl-taper");
-  const gslClumpSc   = document.getElementById("gsl-clump-scale");
-  const glblClumpSc  = document.getElementById("glbl-clump-scale");
-  const gslClumpStr  = document.getElementById("gsl-clump-str");
-  const glblClumpStr = document.getElementById("glbl-clump-str");
+  const gslSegments  = uiById("gsl-segments");
+  const glblSegments = uiById("glbl-segments");
+  const gslTaper     = uiById("gsl-taper");
+  const glblTaper    = uiById("glbl-taper");
+  const gslClumpSc   = uiById("gsl-clump-scale");
+  const glblClumpSc  = uiById("glbl-clump-scale");
+  const gslClumpStr  = uiById("gsl-clump-str");
+  const glblClumpStr = uiById("glbl-clump-str");
 
   gslSegments.addEventListener("input", () => {
     grassState.bladeYSegments = Number(gslSegments.value);
@@ -4689,16 +4703,16 @@ export async function startV3App(opts = {}) {
   gckShadow.addEventListener("change", () => { grassState.receiveShadow = gckShadow.checked; syncGrassUniforms(); });
 
   // Wind
-  const gslWindSpeed = document.getElementById("gsl-wind-speed");
-  const glblWindSpeed= document.getElementById("glbl-wind-speed");
-  const gslWindStr   = document.getElementById("gsl-wind-str");
-  const glblWindStr  = document.getElementById("glbl-wind-str");
-  const gslWindAngle = document.getElementById("gsl-wind-angle");
-  const glblWindAngle= document.getElementById("glbl-wind-angle");
-  const gslWindGust  = document.getElementById("gsl-wind-gust");
-  const glblWindGust = document.getElementById("glbl-wind-gust");
-  const gslWindWave  = document.getElementById("gsl-wind-wave");
-  const glblWindWave = document.getElementById("glbl-wind-wave");
+  const gslWindSpeed = uiById("gsl-wind-speed");
+  const glblWindSpeed= uiById("glbl-wind-speed");
+  const gslWindStr   = uiById("gsl-wind-str");
+  const glblWindStr  = uiById("glbl-wind-str");
+  const gslWindAngle = uiById("gsl-wind-angle");
+  const glblWindAngle= uiById("glbl-wind-angle");
+  const gslWindGust  = uiById("gsl-wind-gust");
+  const glblWindGust = uiById("glbl-wind-gust");
+  const gslWindWave  = uiById("gsl-wind-wave");
+  const glblWindWave = uiById("glbl-wind-wave");
 
   gslWindSpeed.addEventListener("input", () => { grassState.windSpeed = Number(gslWindSpeed.value) / 100; glblWindSpeed.textContent = grassState.windSpeed.toFixed(2); syncGrassUniforms(); });
   gslWindStr.addEventListener("input",   () => { grassState.windStrength = Number(gslWindStr.value) / 100; glblWindStr.textContent = grassState.windStrength.toFixed(2); syncGrassUniforms(); });
@@ -4707,15 +4721,15 @@ export async function startV3App(opts = {}) {
   gslWindWave.addEventListener("input",  () => { grassState.windWaveScale = Number(gslWindWave.value) / 100; glblWindWave.textContent = grassState.windWaveScale.toFixed(2); syncGrassUniforms(); });
 
   // SSS
-  const gcolBss    = document.getElementById("gcol-bss");
-  const gslBssInt  = document.getElementById("gsl-bss-int");
-  const glblBssInt = document.getElementById("glbl-bss-int");
-  const gslBssPow  = document.getElementById("gsl-bss-pow");
-  const glblBssPow = document.getElementById("glbl-bss-pow");
-  const gslFront   = document.getElementById("gsl-front-scat");
-  const glblFront  = document.getElementById("glbl-front-scat");
-  const gslRim     = document.getElementById("gsl-rim");
-  const glblRim    = document.getElementById("glbl-rim");
+  const gcolBss    = uiById("gcol-bss");
+  const gslBssInt  = uiById("gsl-bss-int");
+  const glblBssInt = uiById("glbl-bss-int");
+  const gslBssPow  = uiById("gsl-bss-pow");
+  const glblBssPow = uiById("glbl-bss-pow");
+  const gslFront   = uiById("gsl-front-scat");
+  const glblFront  = uiById("glbl-front-scat");
+  const gslRim     = uiById("gsl-rim");
+  const glblRim    = uiById("glbl-rim");
 
   gcolBss.addEventListener("input",   () => { grassState.bssColor = gcolBss.value; syncGrassUniforms(); });
   gslBssInt.addEventListener("input", () => { grassState.bssIntensity = Number(gslBssInt.value) / 100; glblBssInt.textContent = grassState.bssIntensity.toFixed(2); syncGrassUniforms(); });
@@ -4724,22 +4738,22 @@ export async function startV3App(opts = {}) {
   gslRim.addEventListener("input",    () => { grassState.rimSSS = Number(gslRim.value) / 100; glblRim.textContent = grassState.rimSSS.toFixed(2); syncGrassUniforms(); });
 
   // Specular
-  const gckSpec1   = document.getElementById("gck-spec1");
-  const gslS1Int   = document.getElementById("gsl-s1-int");
-  const glblS1Int  = document.getElementById("glbl-s1-int");
-  const gcolS1     = document.getElementById("gcol-s1");
-  const gslS1Pow   = document.getElementById("gsl-s1-pow");
-  const glblS1Pow  = document.getElementById("glbl-s1-pow");
-  const gckSpec2   = document.getElementById("gck-spec2");
-  const gslS2Int   = document.getElementById("gsl-s2-int");
-  const glblS2Int  = document.getElementById("glbl-s2-int");
-  const gcolS2     = document.getElementById("gcol-s2");
-  const gslS2Nscale= document.getElementById("gsl-s2-nscale");
-  const glblS2Nscale=document.getElementById("glbl-s2-nscale");
-  const gslS2Nstr  = document.getElementById("gsl-s2-nstr");
-  const glblS2Nstr = document.getElementById("glbl-s2-nstr");
-  const gslS2Pow   = document.getElementById("gsl-s2-pow");
-  const glblS2Pow  = document.getElementById("glbl-s2-pow");
+  const gckSpec1   = uiById("gck-spec1");
+  const gslS1Int   = uiById("gsl-s1-int");
+  const glblS1Int  = uiById("glbl-s1-int");
+  const gcolS1     = uiById("gcol-s1");
+  const gslS1Pow   = uiById("gsl-s1-pow");
+  const glblS1Pow  = uiById("glbl-s1-pow");
+  const gckSpec2   = uiById("gck-spec2");
+  const gslS2Int   = uiById("gsl-s2-int");
+  const glblS2Int  = uiById("glbl-s2-int");
+  const gcolS2     = uiById("gcol-s2");
+  const gslS2Nscale= uiById("gsl-s2-nscale");
+  const glblS2Nscale=uiById("glbl-s2-nscale");
+  const gslS2Nstr  = uiById("gsl-s2-nstr");
+  const glblS2Nstr = uiById("glbl-s2-nstr");
+  const gslS2Pow   = uiById("gsl-s2-pow");
+  const glblS2Pow  = uiById("glbl-s2-pow");
 
   gckSpec1.addEventListener("change",   () => { grassState.specV1Enabled = gckSpec1.checked; syncGrassUniforms(); });
   gslS1Int.addEventListener("input",    () => { grassState.specV1Intensity = Number(gslS1Int.value) / 100; glblS1Int.textContent = grassState.specV1Intensity.toFixed(2); syncGrassUniforms(); });
@@ -4752,8 +4766,8 @@ export async function startV3App(opts = {}) {
   gslS2Nstr.addEventListener("input",   () => { grassState.specV2NoiseStr = Number(gslS2Nstr.value) / 100; glblS2Nstr.textContent = grassState.specV2NoiseStr.toFixed(2); syncGrassUniforms(); });
   gslS2Pow.addEventListener("input",    () => { grassState.specV2Power = Number(gslS2Pow.value) / 10; glblS2Pow.textContent = grassState.specV2Power.toFixed(1); syncGrassUniforms(); });
 
-  const gslS2TipBias  = document.getElementById("gsl-s2-tipbias");
-  const glblS2TipBias = document.getElementById("glbl-s2-tipbias");
+  const gslS2TipBias  = uiById("gsl-s2-tipbias");
+  const glblS2TipBias = uiById("glbl-s2-tipbias");
   gslS2TipBias.addEventListener("input", () => { grassState.specV2TipBias = Number(gslS2TipBias.value) / 100; glblS2TipBias.textContent = grassState.specV2TipBias.toFixed(2); syncGrassUniforms(); });
 
   // Spec light directions (V1 sharp / V2 noisy) — X/Y/Z sliders, -1..1
@@ -4761,8 +4775,8 @@ export async function startV3App(opts = {}) {
     ["gsl-s1-dirx", "specV1DirX"], ["gsl-s1-diry", "specV1DirY"], ["gsl-s1-dirz", "specV1DirZ"],
     ["gsl-s2-dirx", "specV2DirX"], ["gsl-s2-diry", "specV2DirY"], ["gsl-s2-dirz", "specV2DirZ"],
   ]) {
-    const el  = document.getElementById(sl);
-    const lbl = document.getElementById(sl.replace("gsl-", "glbl-"));
+    const el  = uiById(sl);
+    const lbl = uiById(sl.replace("gsl-", "glbl-"));
     el.addEventListener("input", () => {
       grassState[key] = Number(el.value) / 100;
       lbl.textContent = grassState[key].toFixed(2);
@@ -4771,22 +4785,22 @@ export async function startV3App(opts = {}) {
   }
 
   // Terrain / slope
-  const gckSlope    = document.getElementById("gck-slope");
-  const gslSlopeMin = document.getElementById("gsl-slope-min");
-  const glblSlopeMin= document.getElementById("glbl-slope-min");
-  const gslSlopeMax = document.getElementById("gsl-slope-max");
-  const glblSlopeMax= document.getElementById("glbl-slope-max");
+  const gckSlope    = uiById("gck-slope");
+  const gslSlopeMin = uiById("gsl-slope-min");
+  const glblSlopeMin= uiById("glbl-slope-min");
+  const gslSlopeMax = uiById("gsl-slope-max");
+  const glblSlopeMax= uiById("glbl-slope-max");
 
   gckSlope.addEventListener("change",    () => { grassState.slopeEnabled = gckSlope.checked; syncGrassUniforms(); });
   gslSlopeMin.addEventListener("input",  () => { grassState.slopeMin = Number(gslSlopeMin.value) / 100; glblSlopeMin.textContent = grassState.slopeMin.toFixed(2); syncGrassUniforms(); });
   gslSlopeMax.addEventListener("input",  () => { grassState.slopeMax = Number(gslSlopeMax.value) / 100; glblSlopeMax.textContent = grassState.slopeMax.toFixed(2); syncGrassUniforms(); });
 
   // Terrain tint (baked splat color, img mode)
-  const gckTint      = document.getElementById("gck-tint");
-  const gslTintStr   = document.getElementById("gsl-tint-str");
-  const glblTintStr  = document.getElementById("glbl-tint-str");
-  const gslTintRoot  = document.getElementById("gsl-tint-root");
-  const glblTintRoot = document.getElementById("glbl-tint-root");
+  const gckTint      = uiById("gck-tint");
+  const gslTintStr   = uiById("gsl-tint-str");
+  const glblTintStr  = uiById("glbl-tint-str");
+  const gslTintRoot  = uiById("gsl-tint-root");
+  const glblTintRoot = uiById("glbl-tint-root");
 
   gckTint.addEventListener("change", () => {
     grassState.terrainTintEnabled = gckTint.checked;
@@ -4797,15 +4811,15 @@ export async function startV3App(opts = {}) {
   gslTintRoot.addEventListener("input", () => { grassState.terrainTintRootBias = Number(gslTintRoot.value) / 100; glblTintRoot.textContent = grassState.terrainTintRootBias.toFixed(2); syncGrassUniforms(); });
 
   // LOD
-  const gslLodMid  = document.getElementById("gsl-lod-mid");
-  const glblLodMid = document.getElementById("glbl-lod-mid");
-  const gslLodFar  = document.getElementById("gsl-lod-far");
-  const glblLodFar = document.getElementById("glbl-lod-far");
-  const gslLodMax  = document.getElementById("gsl-lod-max");
-  const glblLodMax = document.getElementById("glbl-lod-max");
-  const gslLodMega = document.getElementById("gsl-lod-mega");
-  const glblLodMega= document.getElementById("glbl-lod-mega");
-  const gckLodDebug= document.getElementById("gck-lod-debug");
+  const gslLodMid  = uiById("gsl-lod-mid");
+  const glblLodMid = uiById("glbl-lod-mid");
+  const gslLodFar  = uiById("gsl-lod-far");
+  const glblLodFar = uiById("glbl-lod-far");
+  const gslLodMax  = uiById("gsl-lod-max");
+  const glblLodMax = uiById("glbl-lod-max");
+  const gslLodMega = uiById("gsl-lod-mega");
+  const glblLodMega= uiById("glbl-lod-mega");
+  const gckLodDebug= uiById("gck-lod-debug");
 
   gslLodMid.addEventListener("input",  () => { grassState.lodMidDistance = Number(gslLodMid.value); glblLodMid.textContent = gslLodMid.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
   gslLodFar.addEventListener("input",  () => { grassState.lodFarDistance = Number(gslLodFar.value); glblLodFar.textContent = gslLodFar.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
@@ -4822,8 +4836,8 @@ export async function startV3App(opts = {}) {
     ["gsl-lod-mega-w",   "lodMegaBladeWidth",(v) => v / 100, (v) => v.toFixed(2) + "m"],
   ];
   for (const [sl, key, toVal, toLabel] of _lodGeoSliders) {
-    const el  = document.getElementById(sl);
-    const lbl = document.getElementById(sl.replace("gsl-", "glbl-"));
+    const el  = uiById(sl);
+    const lbl = uiById(sl.replace("gsl-", "glbl-"));
     el.addEventListener("input", () => {
       grassState[key] = toVal(Number(el.value));
       lbl.textContent = toLabel(grassState[key]);
@@ -4833,11 +4847,11 @@ export async function startV3App(opts = {}) {
   }
 
   // Interaction
-  const gslIntRad  = document.getElementById("gsl-int-rad");
-  const glblIntRad = document.getElementById("glbl-int-rad");
-  const gslIntStr  = document.getElementById("gsl-int-str");
-  const glblIntStr = document.getElementById("glbl-int-str");
-  const gselIntMode= document.getElementById("gsel-int-mode");
+  const gslIntRad  = uiById("gsl-int-rad");
+  const glblIntRad = uiById("glbl-int-rad");
+  const gslIntStr  = uiById("gsl-int-str");
+  const glblIntStr = uiById("glbl-int-str");
+  const gselIntMode= uiById("gsel-int-mode");
 
   gslIntRad.addEventListener("input",  () => { grassState.interactionRadius = Number(gslIntRad.value) / 10; glblIntRad.textContent = grassState.interactionRadius.toFixed(1) + "m"; syncGrassUniforms(); });
   gslIntStr.addEventListener("input",  () => { grassState.interactionStrength = Number(gslIntStr.value) / 100; glblIntStr.textContent = grassState.interactionStrength.toFixed(2); syncGrassUniforms(); });
@@ -5361,7 +5375,7 @@ export async function startV3App(opts = {}) {
   }
 
   function refreshPropCount() {
-    document.getElementById("props-panel")?._refreshPropStats?.();
+    uiById("props-panel")?._refreshPropStats?.();
   }
 
   function activatePropSelection(instIdx) {
@@ -5495,7 +5509,7 @@ export async function startV3App(opts = {}) {
           materialId: "__embedded__",
         });
         propState.activeSlot = slotIdx;
-        document.getElementById("props-panel")?._rebuildPropUi?.();
+        uiById("props-panel")?._rebuildPropUi?.();
         resolve(typeIdx);
       }, undefined, (err) => { URL.revokeObjectURL(url); reject(err); });
     });
@@ -5544,7 +5558,7 @@ export async function startV3App(opts = {}) {
             glbRef,
           });
           propState.activeSlot = slotIdx;
-          document.getElementById("props-panel")?._rebuildPropUi?.();
+          uiById("props-panel")?._rebuildPropUi?.();
           console.log(
             `[V3] GLB collectible "${spec.name}" imported — kind "${spec.kind}", `
             + `${spec.parts.length} draw call(s)`,
@@ -5575,7 +5589,7 @@ export async function startV3App(opts = {}) {
     const existing = propSlots.find((s) => s.name === primitiveName && s.builtin);
     if (existing) {
       propState.activeSlot = propSlots.indexOf(existing);
-      document.getElementById("props-panel")?._rebuildPropUi?.();
+      uiById("props-panel")?._rebuildPropUi?.();
       return;
     }
     const defs = {
@@ -5606,7 +5620,7 @@ export async function startV3App(opts = {}) {
       triplanar: false,
     });
     propState.activeSlot = slotIdx;
-    document.getElementById("props-panel")?._rebuildPropUi?.();
+    uiById("props-panel")?._rebuildPropUi?.();
   }
 
   // Procedural strata cliff — placed/edited like any prop, but the type is
@@ -5618,7 +5632,7 @@ export async function startV3App(opts = {}) {
     const existing = propSlots.find((s) => s.name === presetName && s.builtin);
     if (existing) {
       propState.activeSlot = propSlots.indexOf(existing);
-      document.getElementById("props-panel")?._rebuildPropUi?.();
+      uiById("props-panel")?._rebuildPropUi?.();
       return;
     }
     const geometry = createProceduralCliffGeometry(preset.params);
@@ -5643,7 +5657,7 @@ export async function startV3App(opts = {}) {
       triplanar: true,
     });
     propState.activeSlot = slotIdx;
-    document.getElementById("props-panel")?._rebuildPropUi?.();
+    uiById("props-panel")?._rebuildPropUi?.();
   }
 
   // Grey-box structure kit (props/greyboxKit.js) — parametric building blocks.
@@ -5656,7 +5670,7 @@ export async function startV3App(opts = {}) {
     const existing = propSlots.find((s) => s.name === pieceName && s.builtin);
     if (existing) {
       propState.activeSlot = propSlots.indexOf(existing);
-      document.getElementById("props-panel")?._rebuildPropUi?.();
+      uiById("props-panel")?._rebuildPropUi?.();
       return;
     }
     const geometry = buildGreyboxGeometry(pieceName);
@@ -5679,7 +5693,7 @@ export async function startV3App(opts = {}) {
       triplanar: false,
     });
     propState.activeSlot = slotIdx;
-    document.getElementById("props-panel")?._rebuildPropUi?.();
+    uiById("props-panel")?._rebuildPropUi?.();
   }
 
   // Import a GLB as a solid cliff type — real-triangle collision, same
@@ -5703,7 +5717,7 @@ export async function startV3App(opts = {}) {
       propInstancer.refreshTypeMaterials(typeIdx);
       const slot = propSlots.find((s) => s.typeIdx === typeIdx);
       if (slot) slot.solid = true;
-      document.getElementById("props-panel")?._rebuildPropUi?.();
+      uiById("props-panel")?._rebuildPropUi?.();
       return typeIdx;
     };
     if (preselectedFile) return handle(preselectedFile);
@@ -5732,7 +5746,7 @@ export async function startV3App(opts = {}) {
     const existing = propSlots.find((s) => s.name === livePropName && s.live);
     if (existing) {
       propState.activeSlot = propSlots.indexOf(existing);
-      document.getElementById("props-panel")?._rebuildPropUi?.();
+      uiById("props-panel")?._rebuildPropUi?.();
       return;
     }
     const typeIdx = propStore.registerLiveType(livePropName, def.factoryId, def.defaults);
@@ -5740,7 +5754,7 @@ export async function startV3App(opts = {}) {
     const slotIdx = propSlots.length;
     propSlots.push({ name: livePropName, loaded: true, typeIdx, live: true, factoryId: def.factoryId });
     propState.activeSlot = slotIdx;
-    document.getElementById("props-panel")?._rebuildPropUi?.();
+    uiById("props-panel")?._rebuildPropUi?.();
   }
 
   function setPropSlotSolid(slotIdx, solid) {
@@ -5764,7 +5778,7 @@ export async function startV3App(opts = {}) {
       propState.activeSlot = Math.max(0, propSlots.length - 1);
     }
     deactivatePropSelection();
-    document.getElementById("props-panel")?._rebuildPropUi?.();
+    uiById("props-panel")?._rebuildPropUi?.();
     refreshPropCount();
   }
 
@@ -6051,7 +6065,7 @@ export async function startV3App(opts = {}) {
       }
     }
 
-    document.getElementById("props-panel")?._rebuildPropUi?.();
+    uiById("props-panel")?._rebuildPropUi?.();
   }
 
   async function saveProject() {
@@ -6341,7 +6355,7 @@ export async function startV3App(opts = {}) {
         treeEnv.treeStore.addTree(t[0], t[1], t[2], t[3], t[4], t[5]);
       }
       treeEnv.syncTreeHeights();
-      document.getElementById("tree-panel")?._rebuildTreeUi?.();
+      uiById("tree-panel")?._rebuildTreeUi?.();
     }
 
     // Always import, even when absent: a project with no foliage must clear
@@ -7237,7 +7251,7 @@ export async function startV3App(opts = {}) {
       case "propType": {
         setEditorMode("props");
         const slot = _propTypeSlot(i);
-        if (slot >= 0) { propState.activeSlot = slot; document.getElementById("props-panel")?._rebuildPropUi?.(); }
+        if (slot >= 0) { propState.activeSlot = slot; uiById("props-panel")?._rebuildPropUi?.(); }
         break;
       }
       case "prop": {
@@ -7373,7 +7387,7 @@ export async function startV3App(opts = {}) {
   }
 
   sceneOutliner = createSceneOutliner({
-    container: document.getElementById("hierarchy"),
+    container: uiById("hierarchy"),
     getModel: sceneModel,
     signature: sceneSignature,
     onSelect: selectAndInspect,
@@ -7497,7 +7511,7 @@ export async function startV3App(opts = {}) {
 
   // ── Inspector (right panel tab) ─────────────────────────────────────────────
   inspector = createInspector({
-    container: document.getElementById("tab-inspector"),
+    container: uiById("tab-inspector"),
     deps: {
       world: { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT, lodLevels: LOD_LEVELS },
       env: {
@@ -7791,15 +7805,15 @@ export async function startV3App(opts = {}) {
     const factor = e.deltaY > 0 ? 0.9 : 1.11;
     if (e.shiftKey) {
       snowBrushState.radius = Math.max(5, Math.min(400, snowBrushState.radius * factor));
-      const slR = document.getElementById("snow-sl-radius");
-      const lbR = document.getElementById("snow-lbl-radius");
+      const slR = uiById("snow-sl-radius");
+      const lbR = uiById("snow-lbl-radius");
       if (slR) slR.value = Math.round(snowBrushState.radius);
       if (lbR) lbR.textContent = Math.round(snowBrushState.radius) + "m";
       sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
     } else {
       snowBrushState.strength = Math.max(0.01, Math.min(1.0, snowBrushState.strength * factor));
-      const slS = document.getElementById("snow-sl-strength");
-      const lbS = document.getElementById("snow-lbl-strength");
+      const slS = uiById("snow-sl-strength");
+      const lbS = uiById("snow-lbl-strength");
       if (slS) slS.value = Math.round(snowBrushState.strength * 100);
       if (lbS) lbS.textContent = snowBrushState.strength.toFixed(2);
     }
@@ -7848,15 +7862,15 @@ export async function startV3App(opts = {}) {
     const factor = e.deltaY > 0 ? 0.9 : 1.11;
     if (e.shiftKey) {
       cliffPaintBrush.radius = Math.max(2, Math.min(200, cliffPaintBrush.radius * factor));
-      const slR = document.getElementById("cliffpaint-sl-radius");
-      const lbR = document.getElementById("cliffpaint-lbl-radius");
+      const slR = uiById("cliffpaint-sl-radius");
+      const lbR = uiById("cliffpaint-lbl-radius");
       if (slR) slR.value = Math.round(cliffPaintBrush.radius);
       if (lbR) lbR.textContent = Math.round(cliffPaintBrush.radius) + "m";
       sculpt.uRadius.value = cliffPaintBrush.radius / WORLD_SIZE;
     } else {
       cliffPaintBrush.strength = Math.max(0.01, Math.min(1.0, cliffPaintBrush.strength * factor));
-      const slS = document.getElementById("cliffpaint-sl-strength");
-      const lbS = document.getElementById("cliffpaint-lbl-strength");
+      const slS = uiById("cliffpaint-sl-strength");
+      const lbS = uiById("cliffpaint-lbl-strength");
       if (slS) slS.value = Math.round(cliffPaintBrush.strength * 100);
       if (lbS) lbS.textContent = cliffPaintBrush.strength.toFixed(2);
     }

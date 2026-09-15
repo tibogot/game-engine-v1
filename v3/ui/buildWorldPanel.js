@@ -1,4 +1,5 @@
 import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, button as _button, info as _info } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 
 /** V2 World tab UI — extracted from v2/editor.html buildWorldTab (no volumetric cloud sections). */
 
@@ -694,7 +695,7 @@ function _buildProceduralSkyControls(parent, ts, app) {
 }
 
 export function buildWorldPanel(app) {
-  const container = document.getElementById("tab-world");
+  const container = uiById("tab-world");
   if (!container) return null;
   container.innerHTML = "";
       const ts = app.toolState;

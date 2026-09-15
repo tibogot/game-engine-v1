@@ -1,5 +1,6 @@
 import { buildDepthWaterControls } from "./depthWaterControls.js";
 import { section as _section, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, button as _button, hint as _hint } from "./widgets.js";
+import { uiById } from "./uiRoot.js";
 
 function _buildRiverControls(panel, rp, app, prefix) {
   const body = _section(panel, prefix === "river2" ? "River+ (Auto-Carve)" : "River");
@@ -262,8 +263,8 @@ function _buildRiverControls(panel, rp, app, prefix) {
 /** @returns {{ refresh: () => void }} — call refresh() when shaderStyle changes. */
 export function buildRiverPanels(app) {
   function refresh() {
-    const riverPanel = document.getElementById("river-panel");
-    const river2Panel = document.getElementById("river2-panel");
+    const riverPanel = uiById("river-panel");
+    const river2Panel = uiById("river2-panel");
     if (riverPanel) {
       riverPanel.innerHTML = "";
       _buildRiverControls(riverPanel, app.toolState.river, app, "river");
