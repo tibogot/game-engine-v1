@@ -1,7 +1,7 @@
 import { section, slider, color, toggle, hint } from "./widgets.js";
 
 /**
- * The depth-water control set, shared by the Lake panel and River+'s "Depth" style.
+ * The depth-water control set, used by the Lake panel (River+'s "Depth" style shared it until River+ was removed).
  *
  * Both surfaces run the same shader, so they get the same knobs. They do NOT share
  * values — each passes its own state object. See v3/app/state/depthWaterState.js.

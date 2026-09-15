@@ -1193,7 +1193,7 @@ export async function createWorldEnvironment({
     rebakeShoreIfStale({ immediate: true });
   }
 
-  // Depth-buffer water surfaces (LakeSystem, River+) are owned by main.js but driven
+  // Depth-buffer water surfaces (LakeSystem, River v2) are owned by main.js but driven
   // from here: the effective light direction and the day/night sky colours are only
   // fresh inside updateFrame(). Each surface may implement setSunDir, setSkyColors
   // and updateWater; all three are optional.

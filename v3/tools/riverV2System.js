@@ -278,7 +278,7 @@ export class RiverV2System {
     this._pathTex.needsUpdate = true;
 
     // ── Copy pass ──────────────────────────────────────────────────────────
-    // Preserves G and B: River+ (the older carve tool) tags carved texels in G,
+    // Preserves G and B: the removed River+ carve tool tagged carved texels in G,
     // and blitting zeroes over it would silently break its rebase.
     this._copySrc = texture(this._pathTex);
     const copyMat = new MeshBasicNodeMaterial();

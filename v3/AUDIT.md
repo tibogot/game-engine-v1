@@ -446,8 +446,8 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     terrain edits outside the road history. Checked in the editor with real
     mouse, keyboard and toolbar input.
 86. **Stale shortcuts and hidden modes.** Toolbar tooltips say Sculpt (S),
-    Paint (P), Grass (G), River (V): S and G do nothing, P starts play, V is
-    View. Snow, Cliff Paint and River+ exist only in the mode dropdown.
+    Paint (P), Grass (G): S and G do nothing, P starts play. V is
+    View. Snow and Cliff Paint exist only in the mode dropdown.
 87. **The Audio mixer (World tab) is wired to nothing** — v3 creates no audio
     system. See 96.
 
@@ -560,7 +560,7 @@ v2 river and River+, water bodies, clouds v1-v3, sky / post / lens flare /
 fog (in v3), Lotus and VVV cars (stunt car covers them), chunk streaming.
 The old `games/rts` (v2 prototype) was deleted 2026-09-14.
 
-**Rivers → River v2 only (2026-09-15, deletion pending the user's go):**
+**Rivers → River v2 only (DONE 2026-09-15):**
 - DONE: River v2 Water look → Style: Realistic (default) / Stylized
   (riverV2StylizedMaterial.js — the old River's "Stylized v1" ported term for
   term: across = bank to bank at any width, along = a fixed pattern length
@@ -568,8 +568,20 @@ The old `games/rts` (v2 prototype) was deleted 2026-09-14.
 - DONE: `app.getWaterLevelAt` includes River v2 channels; new
   `app.getRiverChannels()`; rts-v3 navGrid stamps River v2 (no River+ reads left
   in games).
-- LEFT: delete River and River+ from v3 (keep v2/tools/river for the v2
-  editor). River v2 still lacks tributary links and closed loops — only if missed.
+- DONE: River and River+ removed from v3 — toolbar button, mode dropdown,
+  panels, systems (riverSystemGpu.js, the dead v3RiverCarvingSystem.js,
+  buildRiverPanel.js, riverState.js), undo/delete keys, save keys `rivers` /
+  `rivers2` (old files load without their rivers). v2/tools/river stays for
+  the v2 editor.
+
+**River v2 — add only if you ever need them** (River+ had both; not ported):
+- **Tributaries that stay attached.** Today a river ending near another only
+  copies that river's water level once. River+ kept a saved link: the branch
+  mouth snapped onto the parent, kept the parent's level, followed it when the
+  parent moved, and could branch from the middle of a river. The River v2
+  solver already takes a `mouthLevel` (riverV2Channel.js solveRiver), unused.
+- **Closed loops** (a moat, a river round an island). River v2's centreline is
+  always open (riverV2Channel.js sampleCenterline).
 
 ## Engine / game split (agreed 2026-09-15)
 

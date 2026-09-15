@@ -118,11 +118,7 @@ import { buildBrushFilterSection, createBrushFilterState } from "../ui/brushFilt
 import { createFoliageToolState } from "./state/foliageState.js";
 import { createFoliageEnvironment } from "./foliageEnvironment.js";
 import { buildFoliagePanel } from "../ui/buildFoliagePanel.js";
-import { createRiverToolState } from "./state/riverState.js";
-import { buildRiverPanels } from "../ui/buildRiverPanel.js";
 import { buildRiverV2Panel } from "../ui/buildRiverV2Panel.js";
-import { RiverSystem } from "../../v2/tools/river/riverSystem.js";
-import { RiverSystemGPU } from "../tools/riverSystemGpu.js";
 import { RiverV2System } from "../tools/riverV2System.js";
 import { TunnelSystem, createTunnelToolState } from "../tools/tunnelSystem.js";
 import { createSnapshotHistory } from "../tools/snapshotHistory.js";
@@ -506,7 +502,7 @@ export async function startV3App(opts = {}) {
   const cliffBlendDeps = { heightTexNode, splatOverlay, cliffPaintTex: cliffPaintMask.texture, terrainNormals };
 
   // ── Water-surface map + lakebed shading ────────────────────────────────────
-  // A top-down bake of every water surface's world Y (lakes + River+ ribbons).
+  // A top-down bake of every water surface's world Y (lakes + River v2 ribbons).
   // The terrain samples it to shade submerged ground — sand, depth tint, animated
   // caustics (revo-realms' Terrain.ts water block). Sources are registered after
   // the water systems exist below; until then the bake is a no-op.
@@ -632,8 +628,6 @@ export async function startV3App(opts = {}) {
   const paintPanel     = uiById("paint-panel");
   const propsPanel     = uiById("props-panel");
   const splinePanel    = uiById("spline-panel");
-  const riverPanel     = uiById("river-panel");
-  const river2Panel    = uiById("river2-panel");
   const riverV2Panel   = uiById("riverv2-panel");
   const tunnelPanel    = uiById("tunnel-panel");
   const lakePanel      = uiById("lake-panel");
@@ -730,8 +724,6 @@ export async function startV3App(opts = {}) {
       syncTreePanelVisibility();
       syncPropsPanelVisibility();
       syncSplinePanelVisibility();
-      syncRiverPanelVisibility();
-      syncRiver2PanelVisibility();
       syncLakePanelVisibility();
       syncRoadPanelVisibility();
       syncLaneRoadPanelVisibility();
@@ -2044,16 +2036,8 @@ export async function startV3App(opts = {}) {
 
   // ── Editor mode (view / sculpt) ────────────────────────────────────────────
   let editorMode = "view";
-  const riverToolSlice = createRiverToolState();
-  const riverEditorToolState = {
-    get mode() { return editorMode; },
-    river: riverToolSlice.river,
-    river2: riverToolSlice.river2,
-  };
-  let riverSystem = null;
-  let river2System = null;
-  // River v2 — the spline is the master and the terrain conforms to it. Its own
-  // state slice, solver, conform and shader; it shares nothing with River+.
+  // River v2 — the spline is the master and the terrain conforms to it. The
+  // only river tool (the old River and River+ were removed 2026-09-15).
   const riverV2Slice = createRiverV2ToolState();
   let riverV2System = null;
   let riverV2Ui = null;
@@ -2068,7 +2052,7 @@ export async function startV3App(opts = {}) {
   const lakeToolSlice = createLakeToolState();
   let lakeSystem = null;
   let lakeUi = null;
-  // One source of truth for the SSR master, edited from both the lake and River+
+  // One source of truth for the SSR master, edited from both the lake and River v2
   // panels. It is stored on the lake slice (which lakeSystem persists) and mirrored
   // into the module-level uniform that gates every water surface.
   const waterGlobals = {
@@ -2097,8 +2081,6 @@ export async function startV3App(opts = {}) {
   };
   let _onLeavePropsMode = () => {};
   let _onLeaveSplineMode = () => {};
-  let _onLeaveRiverMode = () => {};
-  let _onLeaveRiver2Mode = () => {};
   let _onLeaveRoadMode = () => {};
   let _onGizmoDragEnd = () => {};
   let _gizmoTarget = null;
@@ -2140,14 +2122,6 @@ export async function startV3App(opts = {}) {
 
   function syncSplinePanelVisibility() {
     splinePanel.style.display = (editorMode === "spline" && !playMode.active) ? "" : "none";
-  }
-
-  function syncRiverPanelVisibility() {
-    riverPanel.style.display = (editorMode === "river" && !playMode.active) ? "" : "none";
-  }
-
-  function syncRiver2PanelVisibility() {
-    river2Panel.style.display = (editorMode === "river2" && !playMode.active) ? "" : "none";
   }
 
   function syncRiverV2PanelVisibility() {
@@ -2194,20 +2168,6 @@ export async function startV3App(opts = {}) {
   }
 
   function applyRiverModeEffects() {
-    if (editorMode !== "river" && !playMode.active) {
-      riverSystem?.dragging && (riverSystem.dragging = false);
-    }
-    if (editorMode !== "river2" && !playMode.active) {
-      river2System?.dragging && (river2System.dragging = false);
-    }
-    if (riverSystem?.handleGroup) {
-      riverSystem.handleGroup.visible =
-        editorMode === "river" && riverToolSlice.river.showHandles && !playMode.active;
-    }
-    if (river2System?.handleGroup) {
-      river2System.handleGroup.visible =
-        editorMode === "river2" && riverToolSlice.river2.showHandles && !playMode.active;
-    }
     riverV2System?.setEditActive(editorMode === "riverv2" && !playMode.active);
     tunnelSystem?.setEditActive(editorMode === "tunnel" && !playMode.active);
   }
@@ -2227,8 +2187,6 @@ export async function startV3App(opts = {}) {
       return;
     }
     if (editorMode === "spline" && m !== "spline") _onLeaveSplineMode();
-    if (editorMode === "river" && m !== "river") _onLeaveRiverMode();
-    if (editorMode === "river2" && m !== "river2") _onLeaveRiver2Mode();
     if (editorMode === "riverv2" && m !== "riverv2") riverV2System?.cancelDrag();
     if (editorMode === "lake" && m !== "lake") lakeSystem?.cancelDrag();
     if (editorMode === "road" && m !== "road") _onLeaveRoadMode();
@@ -2273,10 +2231,9 @@ export async function startV3App(opts = {}) {
     } else if (m === "spawn") {
       uCursorUV.value.set(-2, -2);
       spawnUi?.refresh();
-    } else if (m === "props" || m === "spline" || m === "river" || m === "river2"
+    } else if (m === "props" || m === "spline"
       || m === "riverv2" || m === "road" || m === "lake" || m === "tunnel" || m === "laneRoad") {
       uCursorUV.value.set(-2, -2);
-      if (m === "river" || m === "river2") void ensureCpuHeightmapFromGpu();
       // River v2 snapshots the unconformed terrain from the CPU mirror, so the
       // mirror has to be fresh before the first conform of the session.
       if (m === "riverv2") void ensureCpuHeightmapFromGpu().then(() => riverV2Ui?.refresh());
@@ -2311,8 +2268,6 @@ export async function startV3App(opts = {}) {
     syncFoliagePanelVisibility();
     syncPropsPanelVisibility();
     syncSplinePanelVisibility();
-    syncRiverPanelVisibility();
-    syncRiver2PanelVisibility();
     syncRiverV2PanelVisibility();
     syncTunnelPanelVisibility();
     syncLakePanelVisibility();
@@ -2356,8 +2311,6 @@ export async function startV3App(opts = {}) {
     foliagePanel.style.display = "none";
     propsPanel.style.display = "none";
     splinePanel.style.display = "none";
-    riverPanel.style.display = "none";
-    river2Panel.style.display = "none";
     riverV2Panel.style.display = "none";
     if (tunnelPanel) tunnelPanel.style.display = "none";
     lakePanel.style.display = "none";
@@ -3262,8 +3215,6 @@ export async function startV3App(opts = {}) {
       // Cheap poll: rebuilds the spline-object BVHs only when a feature is
       // added, edited, moved or deleted (string-compare on a signature).
       splineFeatureStore?.refresh();
-      riverSystem?.update(dt);
-      river2System?.update(dt);
       riverV2System?.update(dt);
       tunnelSystem?.update();
       if (isEditor) _sceneListFrame?.();
@@ -3283,7 +3234,6 @@ export async function startV3App(opts = {}) {
         _noEnvTimeSec += dt;
         const ld = getLightDir();
         lakeSystem?.setSunDir(ld);
-        river2System?.setSunDir(ld);
         riverV2System?.setSunDir(ld);
         lakeSystem?.updateWater(dt, _noEnvTimeSec);
       }
@@ -3562,8 +3512,6 @@ export async function startV3App(opts = {}) {
         done = stackStep(undo ? _susukiUndoStack : _susukiRedoStack, undo ? _susukiRedoStack : _susukiUndoStack,
           () => grassTerrainData.getSusukiDensitySnapshot(), (s) => grassTerrainData.restoreSusukiDensitySnapshot(s));
         break;
-      case "river":   done = !!(undo ? riverSystem?.undo() : riverSystem?.redo()); break;
-      case "river2":  done = !!(undo ? river2System?.undo() : river2System?.redo()); break;
       case "riverv2": done = !!(undo ? riverV2System?.undo() : riverV2System?.redo()); if (done) riverV2Ui?.refresh(); break;
       case "tunnel":  done = !!(undo ? tunnelSystem?.undo() : tunnelSystem?.redo()); if (done) tunnelUi?.refresh(); break;
       case "spline":  done = !!(undo ? splineSys?.undo() : splineSys?.redo()); break;
@@ -3690,14 +3638,6 @@ export async function startV3App(opts = {}) {
       riverV2System.deleteSelected();
       riverV2Ui?.refresh();
       return;
-    }
-    if ((editorMode === "river" || editorMode === "river2") && !playMode.active) {
-      if (e.code === "Delete" || e.code === "Backspace") {
-        e.preventDefault();
-        if (editorMode === "river") riverSystem.deleteSelected();
-        else river2System.deleteSelected();
-        return;
-      }
     }
     // Smart Road shortcuts (v2 Smart Road 2)
     if (editorMode === "road" && !playMode.active && roadSystem) {
@@ -5089,33 +5029,10 @@ export async function startV3App(opts = {}) {
     maxHeight: MAX_HEIGHT,
     config: splineTerrainConfig,
   });
-  // Shared by lakes and by River+'s Depth style — one texture, both surfaces.
+  // Shared by lakes and River v2's realistic surface.
   const waterNormalMap = new THREE.TextureLoader().load("/textures/waterNormal.webp");
   waterNormalMap.wrapS = waterNormalMap.wrapT = THREE.RepeatWrapping;
   waterNormalMap.colorSpace = THREE.NoColorSpace;   // it's a normal map, not colour
-
-  riverSystem = new RiverSystem({
-    scene,
-    toolState: riverEditorToolState,
-    getWorldHeight,
-  });
-  river2System = new RiverSystemGPU({
-    scene,
-    toolState: riverEditorToolState,
-    renderer,
-    getRT: () => sculpt.getCurrentRT(),
-    heightTexNode,
-    cpuHeightmap,
-    ensureCpuHeightmap: ensureCpuHeightmapFromGpu,
-    waterNormalMap,
-    onCarveCommitted: () => {
-      markHeightmapDirty();
-      requestHeightmapReadback();
-      bvhDebug?.update();
-    },
-    onWaterMeshesChanged: () => waterSurfaceMap.markDirty(),
-  });
-  worldEnv?.addWaterSurface(river2System);
 
   // ── Lakes ──────────────────────────────────────────────────────────────────
   // No terrain hookup: the shoreline comes from the depth buffer every frame, so
@@ -5164,12 +5081,11 @@ export async function startV3App(opts = {}) {
   riverSandShading.setSources(riverV2System.nearTexture, riverV2System.pathTexture);
   riverSandShading.syncParams(riverV2Slice.riverV2.sand);
 
-  // Both water systems exist — the lakebed shading's water-surface map can now
+  // Lakes and rivers exist — the lakebed shading's water-surface map can now
   // see their meshes. Terrain edits change where water meets ground, but the
   // MAP only stores the water surfaces' own Y, so only water edits rebake it.
   waterSurfaceMap.setSourceProvider(() => [
     lakeSystem.group,
-    ...river2System.segments.map((s) => s.mesh).filter(Boolean),
     ...riverV2System.meshes,
   ]);
 
@@ -5184,7 +5100,6 @@ export async function startV3App(opts = {}) {
     const _redo = sculpt.redo;
     const _replace = sculpt.replaceHeightData;
     const terrainEdited = () => {
-      river2System.notifyTerrainEdited();
       riverV2System.notifyTerrainEdited();
     };
     sculpt.endStroke = (...a) => { const r = _endStroke(...a); terrainEdited(); return r; };
@@ -5261,15 +5176,6 @@ export async function startV3App(opts = {}) {
   // Roads no longer autosave to localStorage — they live in the project file
   // (.v3proj) like every other system, so refresh behaviour is consistent.
   try { localStorage.removeItem("v3.smartRoad.network"); } catch (_) {}
-
-  _onLeaveRiverMode = () => {
-    if (riverSystem?.dragging) riverSystem.dragging = false;
-    syncEditorOrbitEnabled();
-  };
-  _onLeaveRiver2Mode = () => {
-    if (river2System?.dragging) river2System.dragging = false;
-    syncEditorOrbitEnabled();
-  };
 
   const splineChunkStreamStub = { markDirtyRects() {} };
   const splineTreeStoreStub = {
@@ -6072,20 +5978,11 @@ export async function startV3App(opts = {}) {
 
   async function saveProject() {
     await syncHeightmapToCPU();
-    // River+ carves the terrain, and its carve profile is derived from the
-    // UNCARVED base ground — so the project stores the base heightmap plus the
-    // river splines, and the load re-carves. Saving the carved result instead
-    // would dig every gorge twice as deep on reload.
-    const rivers2 = river2System.exportData();
+    // River v2 reshapes the terrain from the UNCONFORMED base ground, so the
+    // project stores that base plus the rivers, and the load re-conforms.
+    // Saving the conformed result instead would cut every channel twice.
     const riversV2 = riverV2System.exportData();
-    // Both river systems reshape the terrain and the file holds ONE heightmap,
-    // so it has to be the most original one. River+ captures its base first
-    // (River v2 snapshots whatever the world looks like when it starts, carve
-    // included), so River+'s base is the earlier terrain — and loading it lets
-    // both rebuild in the same order they were built.
-    const baseHeightmap = rivers2.length
-      ? await river2System.exportBaseHeightmap()
-      : (riversV2 ? riverV2System.exportBaseHeightmap() : null);
+    const baseHeightmap = riversV2 ? riverV2System.exportBaseHeightmap() : null;
     const treeInstances = [];
     for (const arr of treeEnv.treeStore.chunks.values()) {
       for (const t of arr) treeInstances.push([t.x, t.z, t.y, t.rotY, t.scale, t.slotIdx]);
@@ -6117,8 +6014,6 @@ export async function startV3App(opts = {}) {
       roads:     roadSystem.exportData(),
       splines:   splineSys.exportData(),
       lakes:     lakeSystem.exportData(),
-      rivers:    riverSystem.exportData(),
-      rivers2,
       riversV2,
       tunnels:   tunnelSystem?.exportData() ?? null,
       paintLayers,
@@ -6203,10 +6098,9 @@ export async function startV3App(opts = {}) {
     // Files the project carries (imported textures, GLBs...) before anything
     // that refers to them.
     projectAssets.load(d.assets);
-    // Drop River+'s captured base BEFORE the heightmap swap: the wrapped
+    // Drop River v2's captured base BEFORE the heightmap swap: the wrapped
     // replaceHeightData would otherwise schedule a rebase that folds the
     // freshly loaded terrain into the previous scene's base.
-    river2System.resetForLoad();
     riverV2System.resetForLoad();
     if (d.heightmap?.length === HEIGHTMAP_SIZE * HEIGHTMAP_SIZE) {
       sculpt.replaceHeightData(d.heightmap);
@@ -6391,9 +6285,7 @@ export async function startV3App(opts = {}) {
     lakeHistory.reset();
 
     // Rivers restore like lakes — always import so a river-less project clears
-    // leftovers. River+ re-carves the saved (uncarved) base heightmap.
-    riverSystem.importData(d.rivers ?? null);
-    river2System.importData(d.rivers2 ?? null);
+    // leftovers. River v2 re-conforms the saved (unconformed) base heightmap.
     riverV2System.importData(d.riversV2 ?? null);
     riverSandShading.syncParams(riverV2Slice.riverV2.sand);
     riverV2Ui?.refresh();
@@ -6652,44 +6544,6 @@ export async function startV3App(opts = {}) {
     visibilityChanged: () => riverV2System.refreshVisibility(),
   });
 
-  if (isEditor) buildRiverPanels({
-    toolState: riverToolSlice,
-    waterGlobals,
-    riverChanged: () => {
-      riverSystem.syncMaterial();
-      riverSystem.rebuildAllMeshes();
-      applyRiverModeEffects();
-    },
-    riverNewRiver: () => riverSystem.startNewRiver(),
-    riverDeleteActive: () => riverSystem.deleteActiveRiver(),
-    riverDeleteSelected: () => riverSystem.deleteSelected(),
-    riverSelectedYChanged: () => riverSystem.setSelectedPointY(riverToolSlice.river.selectedPointY),
-    riverActiveIndexChanged: () => {
-      riverSystem._clampActive();
-      riverSystem.selectedIdx = -1;
-      riverSystem._rebuildVisual();
-    },
-    river2Changed: () => {
-      river2System.syncMaterial();
-      river2System.rebuildAllMeshes();
-      applyRiverModeEffects();
-    },
-    river2MaterialChanged: () => river2System.syncMaterial(),
-    river2CarveChanged: () => {
-      river2System.syncMaterial();
-      river2System.refreshCarving();
-    },
-    river2NewRiver: () => river2System.startNewRiver(),
-    river2DeleteActive: () => river2System.deleteActiveRiver(),
-    river2DeleteSelected: () => river2System.deleteSelected(),
-    river2SelectedYChanged: () => river2System.setSelectedPointY(riverToolSlice.river2.selectedPointY),
-    river2ActiveIndexChanged: () => {
-      river2System._clampActive();
-      river2System.selectedIdx = -1;
-      river2System._rebuildVisual();
-    },
-  });
-
   applyRiverModeEffects();
 
   if (isEditor) buildRoadPanel({
@@ -6902,79 +6756,6 @@ export async function startV3App(opts = {}) {
     if (editorMode !== "spline") return;
     if (splineSys.dragging) {
       splineSys.dragging = false;
-      syncEditorOrbitEnabled();
-    }
-  });
-
-  // ── River mode mouse events ─────────────────────────────────────────────────
-  renderer.domElement.addEventListener("mousemove", e => {
-    if (playMode.active || editorMode !== "river") return;
-    if (riverSystem.dragging && riverSystem.selectedIdx >= 0) {
-      const hit = getTerrainHitWorld(e);
-      if (hit) riverSystem.moveSelected(hit);
-    }
-  });
-
-  renderer.domElement.addEventListener("mousedown", e => {
-    if (playMode.active || editorMode !== "river" || e.button !== 0) return;
-    e.preventDefault();
-    refreshMouse(e);
-    raycaster.setFromCamera(mouse, camera);
-    const picked = riverSystem.pickPoint(raycaster);
-    if (picked >= 0) {
-      riverSystem.selectedIdx = picked;
-      riverSystem.dragging = true;
-      controls.enabled = false;
-      riverSystem._rebuildHandles();
-      riverSystem._updateSelectedY();
-    } else {
-      const hit = getTerrainHitWorld(e);
-      if (hit) riverSystem.addPoint(hit);
-    }
-  }, { capture: true });
-
-  renderer.domElement.addEventListener("mouseup", e => {
-    if (editorMode !== "river") return;
-    if (riverSystem.dragging) {
-      riverSystem.dragging = false;
-      syncEditorOrbitEnabled();
-    }
-  });
-
-  // ── River+ mode mouse events ──────────────────────────────────────────────
-  renderer.domElement.addEventListener("mousemove", e => {
-    if (playMode.active || editorMode !== "river2") return;
-    if (river2System.dragging && river2System.selectedIdx >= 0) {
-      const hit = getTerrainHitWorld(e);
-      if (hit) river2System.moveSelected(hit);
-    }
-  });
-
-  renderer.domElement.addEventListener("mousedown", e => {
-    if (playMode.active || editorMode !== "river2" || e.button !== 0) return;
-    e.preventDefault();
-    refreshMouse(e);
-    raycaster.setFromCamera(mouse, camera);
-    const picked = river2System.pickPoint(raycaster);
-    if (picked) {
-      // Any river's handle — selecting switches the active river too.
-      river2System.selectPoint(picked);
-      river2System.dragging = true;
-      controls.enabled = false;
-    } else if (e.altKey) {
-      // Alt-click near the active centerline inserts a control point there.
-      const hit = getTerrainHitWorld(e);
-      if (hit) river2System.insertPointNear(hit);
-    } else {
-      const hit = getTerrainHitWorld(e);
-      if (hit) river2System.addPoint(hit);
-    }
-  }, { capture: true });
-
-  renderer.domElement.addEventListener("mouseup", e => {
-    if (editorMode !== "river2") return;
-    if (river2System.dragging) {
-      river2System.finalizeMove();
       syncEditorOrbitEnabled();
     }
   });
@@ -8219,7 +8000,6 @@ export async function startV3App(opts = {}) {
       lakebedShading,
       waterSurfaceMap,
       waterSurfaceMap,
-      get river2System() { return river2System; },
       get riverV2System() { return riverV2System; },
       riverSandShading,
       /**
@@ -8280,7 +8060,6 @@ export async function startV3App(opts = {}) {
         renderer.render(grassTintScene, grassTintCam);
         renderer.setRenderTarget(prevRT);
       },
-      get riverToolSlice() { return riverToolSlice; },
       get grassRings() { return grassRings; },
       get cliffGrassRings() { return cliffGrassRings; },
       get grassState() { return grassState; },
@@ -8306,7 +8085,6 @@ export async function startV3App(opts = {}) {
     roadSystem,
     splineSystem: splineSys,
     lakeSystem,
-    river2System,
     treeEnv,
     foliageEnv,
     // Full-world restore (terrain + splat + snow + trees + props + roads + lakes).

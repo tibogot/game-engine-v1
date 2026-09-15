@@ -9,7 +9,7 @@ import { createLakebedState } from "./lakebedState.js";
  * material slice. One params set means one shader program and one material for the
  * whole system.
  *
- * `.water` has the same shape as River+'s Depth-style state (see depthWaterState.js),
+ * `.water` has the depth-water state shape (see depthWaterState.js),
  * but the VALUES are independent — a lake is deep and still, a river is shallow and
  * flows.
  */
@@ -21,7 +21,7 @@ export function createLakeToolState() {
 
       /**
        * Global kill-switch for SSR on ALL water — lakes and rivers. Lives on the lake
-       * slice because lakes own the water settings, but the River+ panel edits the
+       * slice because lakes own the water settings, but the River v2 panel edits the
        * same value through main.js's `waterGlobals` accessor.
        */
       ssrMaster: true,
@@ -35,7 +35,7 @@ export function createLakeToolState() {
       /**
        * Underwater TERRAIN shading (sand + depth tint + caustics), rendered by the
        * terrain shader, not the water. Global: follows every water surface — lakes
-       * and River+ alike — via the shared water-surface map.
+       * and rivers alike — via the shared water-surface map.
        */
       lakebed: createLakebedState(),
     },

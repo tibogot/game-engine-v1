@@ -1,7 +1,7 @@
 /**
  * Shared state shape for the depth-buffer water material (v3/render/water/lakeMaterial.js).
  *
- * Lakes and River+ "Depth" style run the SAME shader but hold SEPARATE values —
+ * Lakes use it (River+'s "Depth" style shared it until River+ was removed). Surfaces hold SEPARATE values —
  * they each build their own material with their own uniforms. A river is two metres
  * deep and flows; a lake is twenty metres deep and doesn't. Forcing one shared set
  * would make tuning one fight the other.

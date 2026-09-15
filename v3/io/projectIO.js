@@ -26,11 +26,8 @@
  *   roads     roadSystem.exportData()
  *   splines   splineSystem.exportData()
  *   lakes     lakeSystem.exportData()
- *   rivers    riverSystem.exportData()      (basic ribbon rivers)
  *   riversV2  riverV2System.exportData()    (River v2 — the heightmap blob is the
  *                                            UNCONFORMED base when it owns it)
- *   rivers2   river2System.exportData()     (River+ carve — heightmap blob is the
- *                                            UNCARVED base; load re-carves)
  *   environment { worldOcean, look }  the world's LOOK, as opposed to its shape.
  *             look = worldEnvironment.exportLook(): sky, sun, clouds, fog, lens
  *             flare, Post FX, interior (tunnel/cave) lighting. Shadow quality
@@ -73,7 +70,7 @@ export function encodeProjectFile({
   heightmap,            // Float32Array
   splat, splatRes,      // Uint8Array (both slices combined), texels per side
   snow, snowRes,        // Uint8Array, texels per side
-  trees, foliage, props, roads, splines, lakes, rivers, rivers2, riversV2,
+  trees, foliage, props, roads, splines, lakes, riversV2,
   paintLayers,          // textureLibrary.exportData() — slot metadata, no pixels
   paintBlend,           // { heightBlend, contrast } — layer edge blending
   splatHoles,           // true: slice-1 alpha is terrain holes (see manifest)
@@ -127,8 +124,6 @@ export function encodeProjectFile({
     roads:    roads ?? null,
     splines:  splines ?? null,
     lakes:    lakes ?? null,
-    rivers:   rivers ?? null,
-    rivers2:  rivers2 ?? null,
     riversV2: riversV2 ?? null,
     paintLayers: paintLayers ?? null,
     paintBlend: paintBlend ?? null,
@@ -198,8 +193,6 @@ export function decodeProjectFile(buffer) {
     roads:     manifest.roads,
     splines:   manifest.splines,
     lakes:     manifest.lakes,
-    rivers:    manifest.rivers,
-    rivers2:   manifest.rivers2,
     riversV2:  manifest.riversV2 ?? null,
     paintLayers: manifest.paintLayers ?? null,
     paintBlend: manifest.paintBlend ?? null,

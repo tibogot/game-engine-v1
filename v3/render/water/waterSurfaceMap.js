@@ -7,7 +7,7 @@
  * drives the lakebed tint + caustics (see lakebedTsl.js) — the terrain-side half of
  * the revo-realms water look.
  *
- * How it works: on demand, every live water mesh (lake quads + River+ ribbons) is
+ * How it works: on demand, every live water mesh (lake quads + River v2 ribbons) is
  * borrowed into a private scene, its material swapped for one that writes
  * positionWorld.y, and rendered once through a top-down orthographic camera. Depth
  * test keeps the HIGHEST surface where waters overlap. A world-sized floor plane at

@@ -93,7 +93,7 @@ export class LakeSystem {
 
   /** Push toolState.lake into the shared material. */
   syncMaterial() {
-    // ssrMaster is global (it also gates River+), so it goes to the module, not
+    // ssrMaster is global (it also gates River v2), so it goes to the module, not
     // to this material's uniforms.
     setWaterSsrEnabled(this.toolState.lake.ssrMaster !== false);
     this._water.syncParams(lakeParamsFromToolState(this.toolState.lake));
@@ -104,7 +104,7 @@ export class LakeSystem {
     this._water.update(dt, elapsed);
   }
 
-  /** worldEnvironment's water-surface hook. River+ drives its own clock from main's loop. */
+  /** worldEnvironment's water-surface hook. River v2 drives its own clock from main's loop. */
   updateWater(dt, elapsed) { this.update(dt, elapsed); }
 
   setSunDir(v)                { this._water.setSunDir(v); }

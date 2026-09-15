@@ -64,7 +64,6 @@ export function buildLakePanel(app) {
       _slider(body, lp, 'flowAngle', { label: 'Drift angle', min: 0, max: 360, step: 1, onChange: onM });
     };
 
-    // Identical control set to River+'s Depth style — same shader, separate values.
     buildDepthWaterControls(panel, lp.water, app.waterGlobals, onM, {
       label: 'this lake',
       extraSurface: surfExtra,
@@ -77,7 +76,7 @@ export function buildLakePanel(app) {
     if (lb) {
       const onB = () => app.lakebedChanged?.();
       const bed = _section(panel, "Lakebed (underwater terrain)", false);
-      _hint(bed, "Shades the ground under EVERY water surface — lakes and River+ alike. Sand colour, a deep-water tint and animated caustics, drawn by the terrain itself.");
+      _hint(bed, "Shades the ground under EVERY water surface — lakes and rivers alike. Sand colour, a deep-water tint and animated caustics, drawn by the terrain itself.");
       _toggle(bed, lb, "enabled", { label: "Enabled", onChange: onB });
       _color(bed, lb, "sandColor", { label: "Sand colour", onChange: onB });
       _slider(bed, lb, "sandMix", { label: "Sand mix", min: 0, max: 1, step: 0.01, onChange: onB,

@@ -6,7 +6,7 @@
  * caustics on top. Purely cosmetic: no heightmap or geometry involvement.
  *
  * ONE global set for the whole world — it follows every water surface (lakes and
- * River+ alike) via the shared water-surface map, so per-lake values would be a
+ * rivers alike) via the shared water-surface map, so per-lake values would be a
  * lie. Lives on the lake slice because lakes own the water look; persists with it.
  *
  * All depths are METRES of vertical water above the terrain (waterY - terrainY),
