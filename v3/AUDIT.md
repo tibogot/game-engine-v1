@@ -445,9 +445,11 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     width/profile settings and the lake water look. Grade bake/remove are
     terrain edits outside the road history. Checked in the editor with real
     mouse, keyboard and toolbar input.
-86. **Stale shortcuts and hidden modes.** Toolbar tooltips say Sculpt (S),
-    Paint (P), Grass (G): S and G do nothing, P starts play. V is
-    View. Snow and Cliff Paint exist only in the mode dropdown.
+86. ~~Stale shortcuts and hidden modes~~ — DONE 2026-09-15. Tooltips name only
+    real shortcuts (Sculpt/Paint/Grass lost their S/P/G; no keys added: S
+    would fire while flying with WASD, P is Play). Snow and Cliff paint got
+    toolbar buttons (they were dropdown-only). The mode dropdown shows every
+    real key (View V, Props I, Spline K…); Load tooltip matches what it does.
 87. **The Audio mixer (World tab) is wired to nothing** — v3 creates no audio
     system. See 96.
 

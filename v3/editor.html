@@ -14,16 +14,24 @@
         <span class="toolbar-title">V3 Terrain Editor</span>
 
         <div class="toolbar-group" id="tb-modes">
-          <button class="toolbar-btn" data-mode="sculpt" title="Sculpt (S)">
+          <!-- Tooltips name only shortcuts that exist (Sculpt, Paint, Grass, Snow
+               and Cliff paint have none: S would fire while flying with WASD, P is Play). -->
+          <button class="toolbar-btn" data-mode="sculpt" title="Sculpt">
             <i data-lucide="mountain"></i>
           </button>
-          <button class="toolbar-btn" data-mode="paint" title="Paint (P)">
+          <button class="toolbar-btn" data-mode="paint" title="Paint">
             <i data-lucide="paintbrush"></i>
+          </button>
+          <button class="toolbar-btn" data-mode="cliffPaint" title="Cliff paint">
+            <i data-lucide="paint-bucket"></i>
+          </button>
+          <button class="toolbar-btn" data-mode="snow" title="Snow">
+            <i data-lucide="snowflake"></i>
           </button>
           <button class="toolbar-btn" data-mode="props" title="Props (I)">
             <i data-lucide="box"></i>
           </button>
-          <button class="toolbar-btn" data-mode="grass" title="Grass (G)">
+          <button class="toolbar-btn" data-mode="grass" title="Grass">
             <i data-lucide="sprout"></i>
           </button>
           <button class="toolbar-btn" data-mode="susuki" title="Susuki plumes (U)">
@@ -77,7 +85,7 @@
           <button class="toolbar-btn" id="tb-save" title="Save (Ctrl+S)">
             <i data-lucide="save"></i>
           </button>
-          <button class="toolbar-btn" id="tb-load" title="Load heightmap">
+          <button class="toolbar-btn" id="tb-load" title="Load project / heightmap">
             <i data-lucide="folder-open"></i>
           </button>
         </div>
@@ -138,7 +146,7 @@
           <div class="tools-mode-bar" id="mode-bar">
             <span class="tools-mode-label">Mode</span>
             <select class="prop-dropdown" id="tools-mode-select">
-              <option value="view">View</option>
+              <option value="view">View (V)</option>
               <option value="sculpt">Sculpt</option>
               <option value="paint">Paint</option>
               <option value="grass">Grass</option>
@@ -146,8 +154,8 @@
               <option value="flowers">Flowers (M)</option>
               <option value="treePaint">Trees (T)</option>
               <option value="foliage">Foliage (F)</option>
-              <option value="props">Props</option>
-              <option value="spline">Spline</option>
+              <option value="props">Props (I)</option>
+              <option value="spline">Spline (K)</option>
               <option value="riverv2">River v2 (H)</option>
               <option value="tunnel">Tunnel (O)</option>
               <option value="lake">Lake (L)</option>
