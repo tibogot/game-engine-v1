@@ -20,10 +20,11 @@ export const FLOWER_DENSITY_RES = 1024;
 /**
  * Add (or with `erase`, remove) paint in a disc. Pure — exported for tests.
  * Paint goes to `channel` only; erase clears every channel, so Alt+paint
- * removes flowers whatever their type.
+ * removes flowers whatever their type — unless `onlyChannel`, which erases
+ * just that type and leaves the others growing.
  * @returns {boolean} true if any texel changed
  */
-export function stampFlowerDensity(data, res, { cx, cz, radius, strength, falloff, worldSize, channel, erase }) {
+export function stampFlowerDensity(data, res, { cx, cz, radius, strength, falloff, worldSize, channel, erase, onlyChannel = false }) {
   const half = worldSize * 0.5;
   const rPx  = (radius / worldSize) * res;
   const cxPx = ((cx + half) / worldSize) * res;
@@ -42,7 +43,9 @@ export function stampFlowerDensity(data, res, { cx, cz, radius, strength, fallof
       const w = Math.pow(Math.max(0, 1 - Math.sqrt(d2) / rPx), falloff) * strength * 255;
       if (w <= 0) continue;
       const i = (z * res + x) * 4;
-      if (erase) {
+      if (erase && onlyChannel) {
+        data[i + channel] = Math.max(0, data[i + channel] - w);
+      } else if (erase) {
         for (let c = 0; c < 4; c++) data[i + c] = Math.max(0, data[i + c] - w);
       } else {
         data[i + channel] = Math.min(255, data[i + channel] + w);

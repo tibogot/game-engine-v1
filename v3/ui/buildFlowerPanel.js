@@ -1,5 +1,5 @@
 import { section, slider, color, toggle, dropdown, button, hint } from "./widgets.js";
-import { FLOWER_PRESETS } from "../app/state/flowerState.js";
+import { FLOWER_PRESETS, FLOWER_HEIGHT_ANY } from "../app/state/flowerState.js";
 
 /**
  * Flower mode panel — paint brush, the flower type being painted (its species,
@@ -43,7 +43,9 @@ export function buildFlowerPanel(root, { flowerBrush, flowerState, onBrushChange
     W(slider(paint, flowerBrush, "radius",   { label: "Radius",   min: 1, max: 150, step: 1, onChange: onBrushChanged }));
     W(slider(paint, flowerBrush, "strength", { label: "Strength", min: 0.05, max: 1, step: 0.05 }));
     W(slider(paint, flowerBrush, "falloff",  { label: "Falloff",  min: 0.5, max: 6, step: 0.1 }));
-    W(toggle(paint, flowerBrush, "erase",    { label: "Erase", hint: "Erasing removes every flower type under the brush." }));
+    W(toggle(paint, flowerBrush, "erase",    { label: "Erase" }));
+    W(toggle(paint, flowerBrush, "eraseOnlyType", { label: "Erase this flower only",
+      hint: "Off: erasing (or Alt+paint) removes every flower under the brush. On: only the flower selected above." }));
     hint(paint, "<kbd>Alt</kbd>+paint = erase · <kbd>Shift</kbd>/<kbd>Alt</kbd>+wheel = radius/strength", { html: true, className: "mode-hint" });
     button(paint, { title: `Fill "${type.name}" everywhere`, onClick: () => onFill?.(flowerBrush.type) });
     button(paint, { title: "Clear all flowers", onClick: () => onClear?.(), style: "color:#f66" });
@@ -54,6 +56,7 @@ export function buildFlowerPanel(root, { flowerBrush, flowerState, onBrushChange
       label: "Species",
       options: Object.keys(FLOWER_PRESETS).map((k) => [k, k[0].toUpperCase() + k.slice(1)]),
       onChange: () => {
+        // Species sets shape and colour; the height band is where it grows here, so it stays.
         Object.assign(type, structuredClone(FLOWER_PRESETS[type.preset]));
         onStateChanged?.();
         onGeometryChanged?.(flowerBrush.type);
@@ -68,6 +71,9 @@ export function buildFlowerPanel(root, { flowerBrush, flowerState, onBrushChange
     W(slider(ty, type, "stemHeight", { label: "Stem height (m)", min: 0, max: 1.6, step: 0.01, onChange: onStateChanged,
       hint: "0 = a bloom sitting on the ground, no stem." }));
     W(slider(ty, type, "veins", { label: "Veins", min: 0, max: 1, step: 0.01, onChange: onStateChanged }));
+    W(slider(ty, type, "heightMin", { label: "Grows above (m)", min: FLOWER_HEIGHT_ANY.heightMin, max: FLOWER_HEIGHT_ANY.heightMax, step: 1, onChange: onStateChanged,
+      hint: "Terrain height band this flower grows in — valley flowers low, alpine ones high. The full range is no limit." }));
+    W(slider(ty, type, "heightMax", { label: "Grows below (m)", min: FLOWER_HEIGHT_ANY.heightMin, max: FLOWER_HEIGHT_ANY.heightMax, step: 1, onChange: onStateChanged }));
     W(slider(ty, type, "translucency", { label: "Translucency", min: 0, max: 1.5, step: 0.01, onChange: onStateChanged,
       hint: "How much light comes through the petals with the sun behind them." }));
 
@@ -121,6 +127,8 @@ export function buildFlowerPanel(root, { flowerBrush, flowerState, onBrushChange
     W(slider(ds, flowerState, "fadeStart", { label: "Fade start (m)", min: 10, max: 90, step: 1, onChange: onStateChanged,
       hint: "Flowers thin out and shrink from here. The plant tile reaches 96 m, so keep the end below that." }));
     W(slider(ds, flowerState, "fadeEnd",   { label: "Fade end (m)", min: 15, max: 95, step: 1, onChange: onStateChanged }));
+    W(slider(ds, flowerState, "farTint", { label: "Far field colour", min: 0, max: 2, step: 0.05, onChange: onStateChanged,
+      hint: "Past the fade distance the ground takes the flowers' colour, so a painted field still reads from a hill. 0 = off." }));
     W(slider(ds, flowerState, "slopeMinY", { label: "Max slope", min: 0, max: 0.95, step: 0.01, onChange: onStateChanged,
       hint: "Terrain steeper than this grows no flowers." }));
     W(toggle(ds, flowerState, "receiveShadows", { label: "Shadows on near flowers", onChange: onStateChanged }));

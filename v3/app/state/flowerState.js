@@ -61,8 +61,11 @@ export const FLOWER_PRESETS = {
   },
 };
 
+/** Where a type may grow, in world metres of terrain height. The wide default is no limit. */
+export const FLOWER_HEIGHT_ANY = { heightMin: -100, heightMax: 3000 };
+
 function fromPreset(name, preset) {
-  return { name, preset, ...structuredClone(FLOWER_PRESETS[preset]) };
+  return { name, preset, ...structuredClone(FLOWER_PRESETS[preset]), ...FLOWER_HEIGHT_ANY };
 }
 
 export function createFlowerState() {
@@ -100,6 +103,8 @@ export function createFlowerState() {
     /** Flowers thin out between these distances from the camera (m). */
     fadeStart: 62,
     fadeEnd: 88,
+    /** Flower colour on distant ground past the fade, so fields read from afar. 0 = off. */
+    farTint: 1,
     /** Terrain normal.y below which flowers stop growing (steep slopes). */
     slopeMinY: 0.7,
     /** Shadows on the detailed flowers (costs a little; far ones never take them). */

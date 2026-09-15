@@ -92,6 +92,8 @@ export const TERRAIN_FEATURES = {
   lakebed: true,
   /** Sand band along a River v2 channel, under and around the water. */
   riverSand: true,
+  /** Painted flower colour on distant ground, where the 3D flowers have faded out. */
+  flowerTint: true,
   /**
    * The grey Unreal/Unity-style grid under the layers. Off = a flat colour at
    * the grid's mean shade, for a game whose world is painted or procedural and
@@ -275,7 +277,7 @@ function buildRingGrid(N, step) {
 function createLODMaterial({
   heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
   splatOverlay, snowShared = null, lakebed = null,
-  terrainNormals = null, riverSand = null, features = {},
+  terrainNormals = null, riverSand = null, flowerTint = null, features = {},
 }) {
   const F = { ...TERRAIN_FEATURES, ...features };
   const mat = createTileMaterial({
@@ -454,6 +456,10 @@ function createLODMaterial({
     // it — and it applies whether or not that stretch is submerged.
     if (riverSand && F.riverSand) col.assign(riverSand.apply(col));
 
+    // Distant flower fields: the ground takes the flowers' colour past the
+    // distance where the 3D flowers fade out (flowerTintTsl.js).
+    if (flowerTint && F.flowerTint) col.assign(flowerTint.apply(col));
+
     // The cursor tint is the ONLY consumer of ring/maskOverlay, so with the
     // cursor compiled out the colour passes straight through.
     if (F.cursor) {
@@ -525,7 +531,7 @@ export function createTerrainLOD(
   // The 9th positional argument used to be `groundProc` (Procedural Ground,
   // retired 2026-09-13). The slot is kept so existing call sites line up.
   splatOverlay, snowShared = null, lakebed = null, _retiredGroundProc = null,
-  features = {}, terrainNormals = null, riverSand = null,
+  features = {}, terrainNormals = null, riverSand = null, flowerTint = null,
 ) {
   const group = new THREE.Group();
 
@@ -547,7 +553,7 @@ export function createTerrainLOD(
   const matArgs = {
     heightTexNode, uCenterXZ: uCenter, uCursorUV, uCursorRadius,
     uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed,
-    terrainNormals, riverSand,
+    terrainNormals, riverSand, flowerTint,
   };
 
   const mesh = new THREE.Mesh(geometry, createLODMaterial({ ...matArgs, features }));

@@ -24,6 +24,9 @@ check("paint outside the brush is untouched", px(200, 200).every((v) => v === 0)
 check("paint falls off toward the edge", px(40, 0)[2] < centre[2] && px(40, 0)[2] > 0, `${px(40, 0)[2]} < ${centre[2]}`);
 stampFlowerDensity(data, res, { cx: 0, cz: 0, radius: 60, strength: 1, falloff: 1, worldSize, channel: 0, erase: false });
 check("a second type mixes in without replacing the first", px(0, 0)[0] > 200 && px(0, 0)[2] > 200, px(0, 0).join(","));
+stampFlowerDensity(data, res, { cx: 0, cz: 0, radius: 60, strength: 1, falloff: 0.2, worldSize, channel: 2, erase: true, onlyChannel: true });
+check("erase this flower only leaves the other types", px(0, 0)[2] === 0 && px(0, 0)[0] > 200, px(0, 0).join(","));
+stampFlowerDensity(data, res, { cx: 0, cz: 0, radius: 60, strength: 1, falloff: 1, worldSize, channel: 2, erase: false });
 stampFlowerDensity(data, res, { cx: 0, cz: 0, radius: 60, strength: 1, falloff: 0.2, worldSize, channel: 3, erase: true });
 check("erase clears every type", px(0, 0).every((v) => v === 0), px(0, 0).join(","));
 check("a brush off the map changes nothing",

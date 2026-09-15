@@ -98,6 +98,7 @@ import { FlowerSystem } from "../render/grass/flowerSystem.js";
 import { FlowerDensity } from "../render/grass/flowerDensity.js";
 import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
+import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
 import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
 import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
@@ -525,6 +526,8 @@ export async function startV3App(opts = {}) {
   // Sand on the river banks. Reads River v2's nearest-segment field, which does
   // not exist yet — the sources are attached once that system is built.
   const riverSandShading = createRiverSandShading({ worldSize: WORLD_SIZE });
+  // Built before the flowers exist; pointed at their density once it does.
+  const flowerTintShading = createFlowerTintShading({ worldSize: WORLD_SIZE });
 
   /**
    * Triplanar is compiled into the terrain shader only while at least one paint
@@ -538,7 +541,7 @@ export async function startV3App(opts = {}) {
     );
   }
 
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading);
   scene.add(lod.group);
   /**
    * Terrain visibility — see the `terrain` block on the returned handle.
@@ -951,6 +954,7 @@ export async function startV3App(opts = {}) {
   // Flowers: their own painted layer (one type per channel), masked the same way.
   const flowerDensity = new FlowerDensity();
   flowerDensity.initMask({ renderer, splatTex: splatMap.tex });
+  flowerTintShading.setSource(flowerDensity.maskedTex);
   const grassWindTex      = createWindTexture();
   const grassSpecNoiseTex = createSpecNoiseTexture();
 
@@ -996,7 +1000,8 @@ export async function startV3App(opts = {}) {
 
   // ── Flowers (painted meadow flowers — own paint layer + instanced system) ──
   const flowerState = createFlowerState();
-  const flowerBrush = { radius: 12, strength: 0.6, falloff: 1.5, erase: false, type: 0 };
+  flowerTintShading.syncFromState(flowerState);
+  const flowerBrush = { radius: 12, strength: 0.6, falloff: 1.5, erase: false, eraseOnlyType: false, type: 0 };
   let flowerSystem = null;
   let _flowerBuilding = false;
   let flowerUi = null;
@@ -1255,6 +1260,7 @@ export async function startV3App(opts = {}) {
   }
 
   function syncFlowerUniforms() {
+    flowerTintShading.syncFromState(flowerState);
     flowerSystem?.syncFromState(flowerState, grassState, getLightDir());
   }
 
@@ -3275,6 +3281,8 @@ export async function startV3App(opts = {}) {
           susukiSystem.update(_susukiAnchor, camera);
         }
       }
+      // The far-field tint follows the paint, whether or not the 3D flowers are built yet.
+      flowerTintShading.setActive(flowerDensity.hasData);
       if (flowerSystem) {
         // Only spend compute while any flower is painted.
         const wantFlowers = flowerDensity.hasData && _terrainVisible;
@@ -7981,6 +7989,7 @@ export async function startV3App(opts = {}) {
       worldSize: WORLD_SIZE,
       channel:   flowerBrush.type,
       erase:     flowerBrush.erase || altErase,
+      onlyChannel: flowerBrush.eraseOnlyType,
     });
   }
 

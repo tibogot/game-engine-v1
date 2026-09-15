@@ -70,23 +70,11 @@ import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
 import { computeFrustumVisibility } from "../../../v2/core/revoGrass/revoGrassSsboUtils.js";
 import { FLOWER_TYPE_COUNT } from "../../app/state/flowerState.js";
 import { createFlowerTypeGeometry } from "./flowerGeometry.js";
+import { flowerClump } from "./flowerNoise.js";
 
 const LODS = 2;
 const DRAWS = FLOWER_TYPE_COUNT * LODS;
 const ROWS = 4; // uniform rows per type
-
-/** 2D value noise from a float hash — for clumping in world space. */
-const valueNoise = Fn(([p]) => {
-  const h = (q) => fract(sin(dot(q, vec2(127.1, 311.7))).mul(43758.5453));
-  const i = floor(p);
-  const f = fract(p);
-  const w = f.mul(f).mul(float(3).sub(f.mul(2)));
-  return mix(
-    mix(h(i), h(i.add(vec2(1, 0))), w.x),
-    mix(h(i.add(vec2(0, 1))), h(i.add(vec2(1, 1))), w.x),
-    w.y,
-  );
-});
 
 export class FlowerSystem {
   /**
@@ -109,7 +97,7 @@ export class FlowerSystem {
     scene.add(this.group);
     const count = (this.count = plantsPerSide * plantsPerSide);
 
-    // Per type: (petalBase.rgb, translucency) (petalTip.rgb, size) (centre.rgb, stemHeight) (veins, 0, 0, 0)
+    // Per type: (petalBase.rgb, translucency) (petalTip.rgb, size) (centre.rgb, stemHeight) (veins, heightMin, heightMax, 0)
     this._typeRows = Array.from({ length: FLOWER_TYPE_COUNT * ROWS }, () => new THREE.Vector4());
     const u = (this.u = {
       uAnchorPos: uniform(new THREE.Vector3()),
@@ -203,10 +191,8 @@ export class FlowerSystem {
       // WHICH type, weighted by each channel's share.
       const paint = texture(densityTex, terrainUV);
       const total = paint.r.add(paint.g).add(paint.b).add(paint.a).toVar();
-      // Clumps and gaps: two octaves of world-space noise swing the density.
-      const nP = vec2(worldX, worldZ).mul(u.uClumpFreq);
-      const clumpN = valueNoise(nP).mul(0.65).add(valueNoise(nP.mul(2.3).add(17.1)).mul(0.35));
-      const clump = mix(float(1), smoothstep(0.3, 0.75, clumpN).mul(1.8), u.uClumping);
+      // Clumps and gaps — the same noise the far-field terrain tint uses.
+      const clump = flowerClump(vec2(worldX, worldZ), u.uClumpFreq, u.uClumping);
       const densityKeep = step(hash(instanceIndex.add(7919)), u.uDensity.mul(min(total, 1)).mul(clump))
         .mul(smoothstep(0.0, 0.005, total));
       const pick = hash(instanceIndex.add(2711)).mul(total);
@@ -222,7 +208,12 @@ export class FlowerSystem {
       const distSq = dxA.mul(dxA).add(dzA.mul(dzA)).toVar();
       const near = float(1).sub(smoothstep(u.uOuterR0.mul(u.uOuterR0), u.uOuterR1.mul(u.uOuterR1), distSq)).toVar();
       const slopeProb = smoothstep(u.uSlopeMinY, u.uSlopeMinY.add(0.12), tN.y);
-      const stochasticKeep = step(hash(instanceIndex.add(31337)), near.mul(1.6).min(1).mul(slopeProb));
+      // The picked type's own height band (a meadow flower low, an alpine one high),
+      // softened over ±2 m so the limit is not a contour line.
+      const band = u.uTypes.element(int(floor(typeIdx.add(0.5))).mul(ROWS).add(3));
+      const bandKeep = smoothstep(band.y.sub(2), band.y.add(2), terrainY)
+        .mul(float(1).sub(smoothstep(band.z.sub(2), band.z.add(2), terrainY)));
+      const stochasticKeep = step(hash(instanceIndex.add(31337)), near.mul(1.6).min(1).mul(slopeProb).mul(bandKeep));
 
       const frustumVis = computeFrustumVisibility(
         vec3(worldX, terrainY, worldZ), u.uCameraMatrix, u.uFx, u.uFy,
@@ -493,7 +484,7 @@ export class FlowerSystem {
       c.set(t.petalBase); this._typeRows[o].set(c.r, c.g, c.b, t.translucency);
       c.set(t.petalTip);  this._typeRows[o + 1].set(c.r, c.g, c.b, t.size);
       c.set(t.centre);    this._typeRows[o + 2].set(c.r, c.g, c.b, t.stemHeight);
-      this._typeRows[o + 3].set(t.veins, 0, 0, 0);
+      this._typeRows[o + 3].set(t.veins, t.heightMin ?? -1e5, t.heightMax ?? 1e5, 0);
     }
     for (let k = 0; k < DRAWS; k++) this.meshes[k].receiveShadow = !!fp.receiveShadows && k % LODS === 0;
   }

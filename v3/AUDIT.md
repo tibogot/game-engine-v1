@@ -593,6 +593,19 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     shadows on the near draws only, soft normals via a view-space normalNode.
     Scene with 4 types: 13 draws total, 60 fps. GPU cost still unmeasured by
     trace.
+    Phase 2 DONE 2026-09-15: far-field colour (render/grass/flowerTintTsl.js,
+    terrain feature `flowerTint`). Past the fade band the terrain takes the
+    paint-weighted type colour × bloom coverage × the SAME clump noise
+    (flowerNoise.js, shared with the compute) × a distance speckle, faded in
+    across the band the 3D flowers fade out in. The paint is sampled in the
+    terrain VERTEX stage: the fragment stage was already at WebGPU's 16-sampler
+    limit, and a 17th texture made the terrain pipeline fail (caught before
+    commit). Gated by an If on "anything painted".
+    Phase 3 (part) DONE 2026-09-15: "Erase this flower only" and a per-type
+    terrain height band (±2 m soft), applied in the compute AND the far tint.
+    Not done: "only on paint layer X" and "near water" rules.
+    Measured (GPU timestamps, 1347×825, a dense field filling the view): render
+    1.31 → 2.03 ms with flowers (+0.7 ms); compute ≈0.07 ms total.
     The OLD flower (v2 cup + alpha masks + material) is archived, unused, in
     v3/render/grass/archive/v2FlowerShape.js with how to bring it back; its
     masks stay in public/textures/flowers/.
