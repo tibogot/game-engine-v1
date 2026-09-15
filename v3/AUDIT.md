@@ -598,9 +598,13 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      - `games/empty-game/`: starter template (boot, load a level incl. the
        reload-at-size pattern, `?env=none` with its own lights). Checked both
        ways, plus the editor, rts-v3 and modular-road unchanged.
-     Left: modular-road onto the hooks (blocked on its uncommitted edits);
-     boot options that skip BUILDING single pieces (ocean, post FX, lens
-     flare) for games that never use them.
+     modular-road moved onto the hooks 2026-09-15: engine sky via
+     `environment.sky.setVisible` (F8 A/B intact), shadow node, shadow light
+     and sun via `shadows.csm` / `light.sun` (checked identical to the old
+     scene lookups first), dev-panel post FX via `postFx.apply()`, and the
+     per-frame mouse-button re-assert removed (the engine no longer rebinds).
+     Left: boot options that skip BUILDING single pieces (ocean, post FX,
+     lens flare) for games that never use them.
 103. **Step 3 — world runtime without editor DOM.** `createWorld()` (renderer,
      terrain+heights, vegetation, props, water, roads/splines/tunnels,
      collision, project load); the editor attaches on top; game pages stop

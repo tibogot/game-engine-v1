@@ -1386,21 +1386,6 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       cloudTier === "volumetric" ? clouds : cloudTier === "painted" ? gamePainted : null;
     app.clouds?.setSystem(cloudSlot);
   }
-  /** Engine sky meshes we hid, with the visibility each had before we did. */
-  let _engineSkyWas = null;
-
-  /**
-   * The engine adds TWO sky meshes and shows whichever its sky mode selects: a
-   * physical `SkyMesh` and a procedural `DayNightSkyDome`. Measured on this
-   * project the game boots PROCEDURAL, so the dome is the one you actually see
-   * and the SkyMesh is already hidden — which is why this hides whatever is
-   * currently visible and restores exactly that, instead of assuming which of
-   * the two it is and accidentally un-hiding the other on the way back.
-   */
-  function engineSkyMeshes() {
-    return scene.children.filter((c) => c.isSkyMesh || c.name === "DayNightSkyDome");
-  }
-
   function buildGameSky() {
     if (gameSky) return;
     gameAtmo = createSkyAtmosphere({ renderer });
@@ -1468,8 +1453,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
     gameSkyOn = on;
     if (on) {
       buildGameSky();
-      _engineSkyWas = engineSkyMeshes().map((m) => ({ mesh: m, was: m.visible }));
-      for (const e of _engineSkyWas) e.mesh.visible = false;
+      // The engine hides its own dome (whichever of its two its sky mode shows)
+      // and keeps it hidden through sky-mode changes; lighting and IBL keep running.
+      app.environment?.sky.setVisible(false);
       gameSky.mesh.visible = true;
       /*
        * THE IBL HAS TO COME FROM THE SKY YOU CAN SEE.
@@ -1487,8 +1473,7 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
       app.envSky?.set({ mesh: gameSky.mesh, setSunDiscScale: gameSky.setSunDiscScale });
     } else {
       if (gameSky) gameSky.mesh.visible = false;
-      for (const e of _engineSkyWas ?? []) e.mesh.visible = e.was;
-      _engineSkyWas = null;
+      app.environment?.sky.setVisible(true);
       app.envSky?.set(null); // hand the environment back to the engine's dome
     }
   }
@@ -2149,17 +2134,9 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    */
   let farCascadeHalfRate = false;
   let _farFlip = 0;
-  let _csmNode = null;
-  function csmNode() {
-    if (_csmNode?.lights?.length) return _csmNode;
-    _csmNode = null;
-    scene.traverse((o) => {
-      if (!_csmNode && o.isDirectionalLight && o.shadow?.shadowNode?.lights) _csmNode = o.shadow.shadowNode;
-    });
-    return _csmNode;
-  }
   function syncFarCascade() {
-    const lights = csmNode()?.lights;
+    // Read live every frame: the engine rebuilds the node when cascades change.
+    const lights = app.shadows?.csm?.lights;
     if (!lights?.length) return;
     const far = lights[lights.length - 1].shadow;
     if (!farCascadeHalfRate) {
@@ -2919,13 +2896,12 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
    * loads, and the overwhelmingly common case is a dry track that should pay
    * nothing at all.
    *
-   * The wet rebuild is handed the scene's shadow-casting DirectionalLight so
-   * the coat IBL and emissive reflections can sit in the umbra instead of
-   * painting over it. Scene-root on purpose: CSM's cascade placeholders are
-   * Object3Ds, not extra DirectionalLights.
+   * The wet rebuild is handed the scene's shadow-casting DirectionalLight — the
+   * engine's sun — so the coat IBL and emissive reflections can sit in the
+   * umbra instead of painting over it.
    */
   function sceneShadowLight() {
-    return scene.children.find((o) => o.isDirectionalLight && o.castShadow) ?? null;
+    return app.light?.sun ?? null;
   }
   /**
    * Surface extras the lab A/B's (bump, streak sharpness, paver joints).
@@ -5987,17 +5963,14 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
 
   // 4c) ── HEADLIGHTS ────────────────────────────────────────────────────────
   // The lab drove headlights from a day/night preset that also moved the sun.
-  // v3 owns time-of-day itself, so instead we READ the sun and switch the lights
-  // to match. `worldToolState.light.sunElevation` isn't on the app's public API,
-  // so the sun's DirectionalLight is located in the scene and its direction used
-  // — no engine source touched.
+  // v3 owns time-of-day itself, so instead we READ the sun (the engine's
+  // DirectionalLight, `app.light.sun`) and switch the lights to match.
   //
   // The car's two SpotLights are the ONLY punctual lights in the game — the rest
   // of the world is the sun plus ambient — so they are also the only thing that
   // can change the scene's light SET, and changing that set costs a full-scene
   // shader rebuild. They no longer do; see HEADLIGHTS in modularRoadVehicle.js.
-  let sunLight = null;
-  scene.traverse((o) => { if (!sunLight && o.isDirectionalLight) sunLight = o; });
+  const sunLight = app.light?.sun ?? null;
 
   let autoHeadlights = false;
   let headlightsOn = false;
@@ -6684,19 +6657,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   /**
-   * The engine's editor loop re-enables `controls.enabled` every frame, so
-   * disabling that alone does nothing — the individual interactions have to go
-   * too, or a mouse drag orbits the camera while the chase rig fights it back.
-   * (Same lesson as games/rts-v3/rtsCamera.js.)
+   * The game owns the OrbitControls: booted as a game, the engine no longer
+   * re-enables them or rebinds their buttons. Orbit, pan and zoom are switched
+   * per mode here, so a mouse drag never orbits while the chase rig drives.
    *
-   * MOUSE MAP — matches the v3 editor exactly (v3/app/main.js:286):
-   *   MIDDLE = orbit, RIGHT = pan, LEFT = free.
-   * LEFT must stay null so the placement gizmo and click-to-place get it. The
-   * engine's own syncOrbitMouseBindings() sets LEFT back to ROTATE whenever its
-   * editorMode is "view", so this is re-asserted every frame below rather than
-   * set once. (Going through app.setEditorMode() to suppress that would drag in
-   * a pile of engine tooling — "road" mode would switch on the Smart Road
-   * system — so re-asserting the three buttons is the narrower fix.)
+   * MOUSE MAP — matches the v3 editor: MIDDLE = orbit, RIGHT = pan, LEFT = free.
+   * LEFT must stay null so the placement gizmo and click-to-place get it. Set
+   * on every mode change (applyControlMode), which also runs at boot.
    */
   // The engine calls controls.update() every frame, and OrbitControls.update()
   // ALWAYS ends with camera.lookAt(controls.target) + a polar-angle clamp —
@@ -6821,17 +6788,13 @@ export async function startRoadGame({ onStatus = () => {} } = {}) {
   }
 
   // 6) ── INPUT (the game OWNS the keyboard) ─────────────────────────────────
-  // The v3 editor binds its shortcuts on window in the BUBBLE phase, gated only
-  // on `!playMode.active` — and this game isn't play mode, so every editor
-  // letter-shortcut (N=spawn, mode keys…) is live under us. Our palette also
-  // listens in bubble, and the editor registered first, so a bubble listener
-  // can't preempt it. The only interception that beats the editor is CAPTURE.
-  //
-  // So the game takes the keyboard outright: one capture-phase handler that
-  // SWALLOWS every non-form key (nothing reaches the editor) and implements the
-  // whole keymap itself — drive controls AND the build shortcuts the palette
-  // used to own. The palette's own key listener simply stops receiving events
-  // (its mouse/tile UI is unaffected); future editor shortcuts can't leak.
+  // One capture-phase handler that SWALLOWS every non-form key and implements
+  // the whole keymap itself — drive controls AND the build shortcuts the
+  // palette used to own. The palette's own key listener simply stops receiving
+  // events (its mouse/tile UI is unaffected). This was first written to beat
+  // the editor's shortcuts, which ran under the game; booted as a game the
+  // engine no longer binds them, and one owner for every key stays the simpler
+  // design.
   const DRIVE_KEYS = new Set([
     "keyw", "keya", "keys", "keyd", "keyq", "keye", "space",
     "arrowup", "arrowdown", "arrowleft", "arrowright",
@@ -10058,10 +10021,6 @@ ${e.message}`);
     const now = performance.now();
     const dt = Math.min((now - last) / 1000, 0.05);
     last = now;
-
-    // Re-assert every frame: the engine's syncOrbitMouseBindings() keeps handing
-    // the LEFT button back to orbit, which would steal it from the gizmo.
-    syncMouseButtons();
 
     if (mode === "drive") {
       const input = readControls();

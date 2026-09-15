@@ -7313,13 +7313,10 @@ export function createRoadDevPanel({ app, game, params }) {
   // LOCAL `{ strength: 0.9, radius: 0.5 }` instead, which meant they showed
   // those two numbers whatever the engine actually had.
   //
-  // `applyPostFxState` is not on the game's app handle (the editor gets it
-  // passed in separately), and only `setEnabled`/`setBloom` re-apply the whole
-  // pipeline. So the sync is `setEnabled` with the CURRENT value: a no-op on
-  // the state, a full re-apply of everything else.
+  // Rows edit `pfx` fields directly; `postFx.apply()` pushes them to the pipeline.
   const pfx = app.postFx?.state ?? null;
   const fog = app.fog?.state ?? null;
-  const syncPostFx = () => app.postFx?.setEnabled(pfx?.enabled ?? true);
+  const syncPostFx = () => app.postFx?.apply();
 
   toggle("dv-pfx", pfx?.enabled !== false, (on) => app.postFx?.setEnabled(on));
   toggle("dv-pfx-fxaa", pfx?.fxaa?.enabled ?? false, (on) => {
