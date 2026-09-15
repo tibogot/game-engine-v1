@@ -7,7 +7,7 @@
 // WHAT IS BUILT
 //   asphalt  — every carriage lane as its own strip along the road samples,
 //              junction and roundabout pads (earcut, the central island cut out
-//              as a hole). Height from the road's elevation profile / node.y.
+//              as a hole). Heights from roadSurface.js (see HEIGHTS below).
 //   concrete — sidewalks, barriers, splitter islands, roundabout apron, and
 //              every curb face: a vertical face along each curb edge with a
 //              small 45° bevel on top, plus the curb band around grass tops.
@@ -37,16 +37,22 @@
 //   aMark    (atlas offset u, v, 1 = in a node region, 1 = parking bay ticks)
 // concrete carries aKind: 0 slab, 1 curb stone, 2 apron setts.
 //
+// HEIGHTS come from roadSurface.js: profile + crown / banking along roads, the
+// node's fitted plane on pads, corners and islands (a road is exactly that
+// plane near its mouth, so the two meet without a step). Asphalt strips get an
+// extra column of vertices on their carriageway's crown line.
+//
 // Triangles are wound from the normal they are meant to have, so nothing here
 // depends on the winding the engine happened to build a polygon with.
 
 import { LANE_TYPES, layoutEdges } from "../roadCrossSection.js";
 import { profileAt } from "../roadProfile.js";
-import { cleanPolygon } from "../roadMath.js";
+import { cleanPolygon, clamp } from "../roadMath.js";
 import { armPoint } from "../roadJunction.js";
 import { boundaryKind, centerKind, markingStyle, INTERRUPTED, CROSSING_INTERRUPTED } from "../roadMarkings.js";
 import { dedupe, ring, miters, insideSide, triangulate, offsetLeft } from "./triangulate.js";
 import { buildMarkingAtlas } from "./markingAtlas.js";
+import { surfaceFrame, surfaceOffset, carriagewayOf, planeY } from "../roadSurface.js";
 
 export const MESH_DEFAULTS = {
   curbHeight: 0.15, // sidewalks, splitter islands, dead-end caps
@@ -56,6 +62,11 @@ export const MESH_DEFAULTS = {
   bevel: 0.02, // 45° chamfer on every curb's top edge (0 = sharp)
   curbBand: 0.15, // concrete curb stone around grass tops
   skirt: 0.6, // how far back faces run below the road surface
+  // Collision only (the `solids` part, never drawn): a wall this tall round the
+  // roundabout's central island, splitter islands and raised medians, so a car
+  // hits them instead of rolling over an 18 cm kerb. 0 = none. Kerbs to
+  // sidewalks are not walls: they are climbed, as the deck.
+  islandWall: 0.5,
   markings: true,
   atlasTexel: 0.06, // metres per texel of the junction marking atlas (grows to fit 4096²)
 };
@@ -178,7 +189,11 @@ class Part {
     const vx = P[c * 3] - ax, vy = P[c * 3 + 1] - ay, vz = P[c * 3 + 2] - az;
     const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
     const d = cx * n[0] + cy * n[1] + cz * n[2];
-    if (cx * cx + cy * cy + cz * cz < 1e-12) return;
+    const c2 = cx * cx + cy * cy + cz * cz;
+    if (c2 < 1e-12) return;
+    // Edge-on to its intended normal (a sliver with no area seen along n, e.g.
+    // collinear plan points at different heights): nothing to draw.
+    if (d * d < 1e-10 * c2) return;
     if (d >= 0) this.idx.push(a, b, c);
     else this.idx.push(a, c, b);
   }
@@ -285,15 +300,26 @@ function boundaryWall(part, pts, poly, { closed = false, yb, yt, bevel = 0, ex }
   return pts.map((p, i) => [p[0] + inside * m[i][0] * bevel, p[1] + inside * m[i][1] * bevel]);
 }
 
-/** Flat cap over an outer ring with holes; uv = world x/z. */
-function cap(part, outer, holes, yAt, ex) {
+/** Cap over an outer ring with holes (planar: `n` is its normal); uv = world x/z. */
+function cap(part, outer, holes, yAt, ex, n = UP) {
   const o = ring(outer);
   if (!o) return 0;
   const hs = holes.map((h) => ring(h)).filter(Boolean);
   const { pts, tris } = triangulate(o, hs);
-  const id = pts.map((p) => part.vert(p[0], yAt(p), p[1], UP, p[0], p[1], ex));
-  for (let t = 0; t < tris.length; t += 3) part.tri(id[tris[t]], id[tris[t + 1]], id[tris[t + 2]], UP);
+  const id = pts.map((p) => part.vert(p[0], yAt(p), p[1], n, p[0], p[1], ex));
+  for (let t = 0; t < tris.length; t += 3) part.tri(id[tris[t]], id[tris[t + 1]], id[tris[t + 2]], n);
   return tris.length / 3;
+}
+
+/** Up normal of a surface rising g along heading θ and c across it (to the left). */
+function slopeNormal(g, th, c) {
+  const ct = Math.cos(th), st = Math.sin(th);
+  return norm3(-(g * ct + c * st), 1, -(g * st - c * ct));
+}
+
+/** Up normal of a node's plane. */
+function planeNormal(node) {
+  return node.plane ? norm3(-node.plane.gx, 1, -node.plane.gz) : UP;
 }
 
 /**
@@ -301,10 +327,13 @@ function cap(part, outer, holes, yAt, ex) {
  * inside a concrete curb band. `hole` cuts a ring out of the top (the apron
  * around the central island).
  */
-function island(parts, poly, o, { yAt, height, base = 0, grass = false, kind = CONCRETE_KIND.slab, hole = null }) {
+function island(parts, poly, o, { yAt, height, base = 0, grass = false, kind = CONCRETE_KIND.slab, hole = null, n = UP, solid = false }) {
   const cleaned = cleanPolygon(dedupe(poly, true));
   const r = ring(cleaned);
   if (!r) return null;
+  if (solid && o.islandWall > 0 && parts.solids) {
+    boundaryWall(parts.solids, r, r, { closed: true, yb: (p) => yAt(p) + base - 0.3, yt: (p) => yAt(p) + base + Math.max(height, o.islandWall) });
+  }
   const top = boundaryWall(parts.concrete, r, r, {
     closed: true,
     yb: (p) => yAt(p) + base,
@@ -319,13 +348,13 @@ function island(parts, poly, o, { yAt, height, base = 0, grass = false, kind = C
     const band = offsetLeft(top, true, inside * o.curbBand);
     const bandRing = ring(band, 0.5);
     if (bandRing && sameSense(top, band)) {
-      cap(parts.concrete, top, [bandRing], yTop, { aKind: CONCRETE_KIND.curb });
-      cap(parts.grass, bandRing, holes, yTop, null);
+      cap(parts.concrete, top, [bandRing], yTop, { aKind: CONCRETE_KIND.curb }, n);
+      cap(parts.grass, bandRing, holes, yTop, null, n);
       return r;
     }
   }
-  if (grass) cap(parts.grass, top, holes, yTop, null);
-  else cap(parts.concrete, top, holes, yTop, { aKind: kind });
+  if (grass) cap(parts.grass, top, holes, yTop, null, n);
+  else cap(parts.concrete, top, holes, yTop, { aKind: kind }, n);
   return r;
 }
 
@@ -355,7 +384,7 @@ function sameSense(a, b) {
 function asphaltRows(rr, extra) {
   const S = rr.smp, N = S.s.length;
   const rows = [];
-  const fromSample = (i) => ({ s: S.s[i], x: S.x[i], z: S.z[i], th: S.th[i], lay: rr.lays[i] });
+  const fromSample = (i) => ({ s: S.s[i], x: S.x[i], z: S.z[i], th: S.th[i], k: S.k[i], lay: rr.lays[i] });
   const stations = [...new Set(extra.filter((s) => s > S.s[0] + 0.05 && s < S.s[N - 1] - 0.05))].sort((a, b) => a - b);
   let e = 0;
   for (let i = 0; i < N; i++) {
@@ -372,7 +401,7 @@ function asphaltRows(rr, extra) {
       const dth = Math.atan2(Math.sin(S.th[i] - S.th[i - 1]), Math.cos(S.th[i] - S.th[i - 1]));
       rows.push({
         s: st, x: S.x[i - 1] + (S.x[i] - S.x[i - 1]) * f, z: S.z[i - 1] + (S.z[i] - S.z[i - 1]) * f,
-        th: S.th[i - 1] + dth * f,
+        th: S.th[i - 1] + dth * f, k: S.k[i - 1] + (S.k[i] - S.k[i - 1]) * f,
         lay: { cw: a.cw + (b.cw - a.cw) * f, left: lerpSide("left"), right: lerpSide("right") },
       });
     }
@@ -383,9 +412,13 @@ function asphaltRows(rr, extra) {
     const p = profileAt(rr.prof, r.s);
     r.y = p.y; r.g = p.g;
     r.lx = Math.sin(r.th); r.lz = -Math.cos(r.th);
+    r.f = surfaceFrame(rr, r.s, r.th, r.k, r.lay);
   }
   return rows;
 }
+
+/** Surface height of a row (or sample frame) at lateral offset t. */
+const rowY = (r, t) => r.y + surfaceOffset(r.f, t);
 
 function buildRoad(rr, parts, o, ctx) {
   const S = rr.smp;
@@ -394,12 +427,20 @@ function buildRoad(rr, parts, o, ctx) {
   const lays = rr.lays;
   const y = new Float64Array(N), g = new Float64Array(N);
   const lx = new Float64Array(N), lz = new Float64Array(N);
+  const frames = new Array(N);
   for (let i = 0; i < N; i++) {
     const p = profileAt(rr.prof, S.s[i]);
     y[i] = p.y; g[i] = p.g;
     lx[i] = Math.sin(S.th[i]); lz[i] = -Math.cos(S.th[i]);
+    frames[i] = surfaceFrame(rr, S.s[i], S.th[i], S.k[i], lays[i]);
   }
-  const upAt = (i) => norm3(-g[i] * Math.cos(S.th[i]), 1, -g[i] * Math.sin(S.th[i]));
+  /** Surface height at sample i, lateral offset t. */
+  const Y = (i, t) => y[i] + surfaceOffset(frames[i], t);
+  /** Up normal at sample i of the surface between offsets ta and tb. */
+  const upAcross = (i, ta, tb) => {
+    const w = tb - ta;
+    return slopeNormal(g[i], S.th[i], Math.abs(w) > 0.01 ? (Y(i, tb) - Y(i, ta)) / w : 0);
+  };
   const at = (i, t) => [S.x[i] + lx[i] * t, S.z[i] + lz[i] * t];
   const phase = hashPhase(rr.id);
   const deck = { aPiece: [phase, 0], aEdges: [0, 0, 0, 0], aMark: [0, 0, 0, 0] };
@@ -416,7 +457,10 @@ function buildRoad(rr, parts, o, ctx) {
       : zone.b && sMid > zone.b.sStart ? regionOf(zone.b.nodeId) : null;
     return reg ? [reg.offset[0], reg.offset[1], 1] : [0, 0, 0];
   };
-  const rowUp = (r) => norm3(-r.g * Math.cos(r.th), 1, -r.g * Math.sin(r.th));
+  const rowUp = (r, ta, tb) => {
+    const w = tb - ta;
+    return slopeNormal(r.g, r.th, Math.abs(w) > 0.01 ? (rowY(r, tb) - rowY(r, ta)) / w : 0);
+  };
   /**
    * −1..1 across the CARRIAGEWAY this point drains in, 0 at its crown: the
    * asphalt shader pools water toward ±1 (the kerbs). A raised median splits
@@ -473,35 +517,56 @@ function buildRoad(rr, parts, o, ctx) {
       const sMid = (r0.s + r1.s) / 2;
       const m = markAt(sMid);
       const park = parking && ctx.markings && sMid > parkFrom && sMid < parkTo && width(k) > 1.5 && width(k + 1) > 1.5 ? 1 : 0;
-      const n = rowUp(r0);
-      const ids = [];
-      for (const [r, ri, e] of [[r0, k, e0], [r1, k + 1, e1]]) {
-        const up = rowUp(r);
-        for (const [t, lat] of [[tA(ri), lateral[0]], [tB(ri), lateral[1]]]) {
-          ids.push(P.vert(r.x + r.lx * t, r.y, r.z + r.lz * t, up, r.s, t, {
-            aLateral: lat,
+      // Columns across the strip: its two edges, plus the crown line when it
+      // runs through the strip at either end of the segment (the surface
+      // creases there).
+      const crownOf = (r, ri) => {
+        const a = tA(ri), b = tB(ri);
+        const [lo, hi] = carriagewayOf(r.f, (a + b) / 2);
+        return (lo + hi) / 2;
+      };
+      const inside = (r, ri) => {
+        const a = Math.min(tA(ri), tB(ri)), b = Math.max(tA(ri), tB(ri)), c = crownOf(r, ri);
+        return c > a + 0.02 && c < b - 0.02;
+      };
+      const split = (r0.f.crown > 0 || r0.f.e !== 0) && (inside(r0, k) || inside(r1, k + 1));
+      const cols = split ? 4 : 2;
+      const ids = [[], []];
+      [[r0, k, e0], [r1, k + 1, e1]].forEach(([r, ri, e], side) => {
+        const a = tA(ri), b = tB(ri);
+        const mid = split ? clamp(crownOf(r, ri), Math.min(a, b), Math.max(a, b)) : 0;
+        // Sub-strips [a, mid] and [mid, b], each with its own vertices so the crease stays sharp.
+        const ts = split ? [a, mid, mid, b] : [a, b];
+        for (let c = 0; c < ts.length; c++) {
+          const t = ts[c];
+          const f = Math.abs(b - a) > 1e-9 ? (t - a) / (b - a) : 0;
+          const up = c % 2 === 0 ? rowUp(r, t, ts[c + 1]) : rowUp(r, ts[c - 1], t);
+          ids[side].push(P.vert(r.x + r.lx * t, rowY(r, t), r.z + r.lz * t, up, r.s, t, {
+            aLateral: lateral[0] + (lateral[1] - lateral[0]) * f,
             aPiece: [phase, drainAt(r, t)],
             aEdges: [e ? e.inT : 0, e ? e.outT : 0, inCode, outCode],
             aMark: [m[0], m[1], m[2], park],
           }));
         }
-      }
-      P.quad(ids[0], ids[1], ids[3], ids[2], n);
+      });
+      const n = rowUp(r0, tA(k), tB(k));
+      for (let c = 0; c + 1 < cols; c += 2) P.quad(ids[0][c], ids[0][c + 1], ids[1][c + 1], ids[1][c], n);
     }
   };
 
   /** Top strip between lateral offsets tA(i) and tB(i), lifted `lift`. */
   const strip = (part, tA, tB, lift, exA, exB) => {
     const ia = new Array(N), ib = new Array(N);
+    const ups = new Array(N);
     for (let i = 0; i < N; i++) {
-      const n = upAt(i);
+      const n = (ups[i] = upAcross(i, tA(i), tB(i)));
       const a = at(i, tA(i)), b = at(i, tB(i));
-      ia[i] = part.vert(a[0], y[i] + lift, a[1], n, S.s[i], tA(i), exA);
-      ib[i] = part.vert(b[0], y[i] + lift, b[1], n, S.s[i], tB(i), exB);
+      ia[i] = part.vert(a[0], Y(i, tA(i)) + lift, a[1], n, S.s[i], tA(i), exA);
+      ib[i] = part.vert(b[0], Y(i, tB(i)) + lift, b[1], n, S.s[i], tB(i), exB);
     }
     for (let i = 0; i + 1 < N; i++) {
       if (Math.abs(tB(i) - tA(i)) < 0.01 && Math.abs(tB(i + 1) - tA(i + 1)) < 0.01) continue;
-      part.quad(ia[i], ib[i], ib[i + 1], ia[i + 1], upAt(i));
+      part.quad(ia[i], ib[i], ib[i + 1], ia[i + 1], ups[i]);
     }
   };
 
@@ -510,7 +575,8 @@ function buildRoad(rr, parts, o, ctx) {
     const P = [];
     for (let i = 0; i < N; i++) {
       const p = at(i, t(i));
-      P.push({ x: p[0], z: p[1], yb: y[i] + yb, yt: y[i] + yt, u: S.s[i] });
+      const base = Y(i, t(i));
+      P.push({ x: p[0], z: p[1], yb: base + yb, yt: base + yt, u: S.s[i] });
     }
     wall(part, P, {
       out: (i) => [outwardSign * lx[i], outwardSign * lz[i]],
@@ -596,34 +662,35 @@ function buildRoad(rr, parts, o, ctx) {
   }
 
   if (raisedCenter) {
-    // Nearest sample gives the height under any point of the median outline.
+    // Nearest sample, and the point's offset across it, give the height under
+    // any point of the median outline (between the two carriageways' inner edges).
     const yAt = (p) => {
       let best = 0, bd = Infinity;
       for (let i = 0; i < N; i++) {
         const d = (S.x[i] - p[0]) ** 2 + (S.z[i] - p[1]) ** 2;
         if (d < bd) { bd = d; best = i; }
       }
-      return y[best];
+      return Y(best, (p[0] - S.x[best]) * lx[best] + (p[1] - S.z[best]) * lz[best]);
     };
-    island(parts, rr.center.poly, o, { yAt, height: o.medianHeight, grass: ck === "raised" });
+    island(parts, rr.center.poly, o, { yAt, height: o.medianHeight, grass: ck === "raised", solid: true });
   }
 }
 
 /* ------------------------------------------------------------------ nodes */
 
-function cornerSidewalk(parts, curbChain, propChain, yNode, o) {
+function cornerSidewalk(parts, curbChain, propChain, yAt, n, o) {
   const cc = dedupe(curbChain, false), pc = dedupe(propChain, false);
   if (cc.length < 2 || pc.length < 2) return;
   const poly = [...cc, ...pc.slice().reverse()];
   if (!ring(poly)) return;
   const H = o.curbHeight;
   const topCurb = boundaryWall(parts.concrete, cc, poly, {
-    yb: () => yNode, yt: () => yNode + H, bevel: o.bevel, ex: { aKind: CONCRETE_KIND.curb },
+    yb: yAt, yt: (p) => yAt(p) + H, bevel: o.bevel, ex: { aKind: CONCRETE_KIND.curb },
   });
   boundaryWall(parts.concrete, pc, poly, {
-    yb: () => yNode - o.skirt, yt: () => yNode + H, bevel: 0, ex: { aKind: CONCRETE_KIND.slab },
+    yb: (p) => yAt(p) - o.skirt, yt: (p) => yAt(p) + H, bevel: 0, ex: { aKind: CONCRETE_KIND.slab },
   });
-  cap(parts.concrete, [...topCurb, ...pc.slice().reverse()], [], () => yNode + H, { aKind: CONCRETE_KIND.slab });
+  cap(parts.concrete, [...topCurb, ...pc.slice().reverse()], [], (p) => yAt(p) + H, { aKind: CONCRETE_KIND.slab }, n);
 }
 
 function deadEnd(parts, node, o) {
@@ -632,25 +699,26 @@ function deadEnd(parts, node, o) {
   const e = arm.edges;
   const depth = Math.max(0, e.curbR - e.propR, e.propL - e.curbL);
   if (depth <= 0.05) return;
-  const y0 = node.y;
+  const yAt = (p) => planeY(node, p[0], p[1]);
+  const n = planeNormal(node);
   const H = o.curbHeight, b = o.bevel;
   const PR = armPoint(arm, 0, e.propR), PL = armPoint(arm, 0, e.propL);
   const CR = armPoint(arm, -depth, e.propR), CL = armPoint(arm, -depth, e.propL);
   // Curb across the carriageway end, facing the road (+σ).
-  const P = [armPoint(arm, 0, e.curbR), armPoint(arm, 0, e.curbL)].map((p, i) => ({ x: p[0], z: p[1], yb: y0, yt: y0 + H, u: i ? e.curbL - e.curbR : 0 }));
+  const P = [armPoint(arm, 0, e.curbR), armPoint(arm, 0, e.curbL)].map((p, i) => ({ x: p[0], z: p[1], yb: yAt(p), yt: yAt(p) + H, u: i ? e.curbL - e.curbR : 0 }));
   const outN = [arm.dx, arm.dz];
   wall(parts.concrete, P, { out: () => outN, seg: () => outN, inset: () => [-arm.dx, -arm.dz], bevel: b, ex: { aKind: CONCRETE_KIND.curb } });
   // Back faces round the three property sides.
   const outline = [PR, CR, CL, PL, armPoint(arm, 0, e.curbL), armPoint(arm, 0, e.curbR)];
-  boundaryWall(parts.concrete, [PR, CR, CL, PL], outline, { yb: () => y0 - o.skirt, yt: () => y0 + H, ex: { aKind: CONCRETE_KIND.slab } });
+  boundaryWall(parts.concrete, [PR, CR, CL, PL], outline, { yb: (p) => yAt(p) - o.skirt, yt: (p) => yAt(p) + H, ex: { aKind: CONCRETE_KIND.slab } });
   // Top, notched back by the bevel between the curbs.
   const top = [PR, CR, CL, PL, armPoint(arm, 0, e.curbL), armPoint(arm, -b, e.curbL), armPoint(arm, -b, e.curbR), armPoint(arm, 0, e.curbR)];
-  cap(parts.concrete, top, [], () => y0 + H, { aKind: CONCRETE_KIND.slab });
+  cap(parts.concrete, top, [], (p) => yAt(p) + H, { aKind: CONCRETE_KIND.slab }, n);
 }
 
 function buildNode(node, parts, o, ctx) {
-  const yNode = node.y;
-  const flat = () => yNode;
+  const flat = (p) => planeY(node, p[0], p[1]);
+  const n = planeNormal(node);
   const reg = ctx.atlas?.regions.get(node.id);
   const deck = {
     aLateral: 0, aPiece: [hashPhase(node.id), 0], aEdges: [0, 0, 0, 0],
@@ -667,24 +735,24 @@ function buildNode(node, parts, o, ctx) {
     apronRing = apron ? ring(apron.poly) : null;
     const grassRing = grassIsland ? ring(grassIsland.poly) : null;
     if (apronRing) {
-      island(parts, apronRing, o, { yAt: flat, height: o.apronHeight, kind: CONCRETE_KIND.apron, hole: grassRing });
+      island(parts, apronRing, o, { yAt: flat, height: o.apronHeight, kind: CONCRETE_KIND.apron, hole: grassRing, n });
     }
     if (grassRing) {
-      island(parts, grassRing, o, { yAt: flat, base: apronRing ? o.apronHeight : 0, height: o.islandHeight, grass: true });
+      island(parts, grassRing, o, { yAt: flat, base: apronRing ? o.apronHeight : 0, height: o.islandHeight, grass: true, n, solid: true });
     }
     for (const isl of node.islands) {
-      if (isl.kind === "raised") island(parts, isl.poly, o, { yAt: flat, height: o.curbHeight });
+      if (isl.kind === "raised") island(parts, isl.poly, o, { yAt: flat, height: o.curbHeight, n, solid: true });
     }
   }
 
   if (node.pad) {
     const pad = ring(cleanPolygon(dedupe(node.pad, true)));
-    if (pad) cap(parts.asphalt, pad, apronRing ? [apronRing] : [], flat, deck);
+    if (pad) cap(parts.asphalt, pad, apronRing ? [apronRing] : [], flat, deck, n);
   }
 
   for (const c of node.corners || []) {
     if (!c.sw || !c.curbChain || !c.propChain) continue;
-    cornerSidewalk(parts, c.curbChain, c.propChain, yNode, o);
+    cornerSidewalk(parts, c.curbChain, c.propChain, flat, n, o);
   }
 }
 
@@ -693,7 +761,8 @@ function buildNode(node, parts, o, ctx) {
 /**
  * @param {object} result  buildRoadNetwork() output
  * @param {Partial<typeof MESH_DEFAULTS>} [opts]
- * @returns {{ asphalt, concrete, grass, atlas, stats: { ms, vertices, triangles } }}
+ * @returns {{ asphalt, concrete, grass, solids, atlas, stats: { ms, vertices, triangles } }}
+ *   solids: collision-only island walls (see MESH_DEFAULTS.islandWall); not in the stats
  *   atlas: markingAtlas.js output (RGBA data + scale) or null
  */
 export function buildLaneRoadMesh(result, opts = {}) {
@@ -703,6 +772,7 @@ export function buildLaneRoadMesh(result, opts = {}) {
     asphalt: new Part({ aLateral: 1, aPiece: 2, aEdges: 4, aMark: 4 }),
     concrete: new Part({ aKind: 1 }),
     grass: new Part({}),
+    solids: new Part({}),
   };
   const atlas = o.markings ? buildMarkingAtlas(result, { texel: o.atlasTexel }) : null;
   const ctx = { atlas, markings: !!o.markings, style: result.style || "eu" };
@@ -712,6 +782,7 @@ export function buildLaneRoadMesh(result, opts = {}) {
   let vertices = 0, triangles = 0;
   for (const [name, part] of Object.entries(parts)) {
     out[name] = part.finish();
+    if (name === "solids") continue; // collision only, not drawn
     vertices += out[name].vertexCount;
     triangles += out[name].triangleCount;
   }

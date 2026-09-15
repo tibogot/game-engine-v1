@@ -5,6 +5,7 @@ import { createModeWheel, V3_MODE_ORDER, V3_MODE_META, V3_QUADRUPED_MODES } from
 import { createFlightMode } from "./flightMode.js";
 import { createBrunoCarMode } from "./brunoCarMode.js";
 import { createStuntCarMode } from "./stuntCarMode.js";
+import { createGameCarMode } from "./gameCarMode.js";
 import { createBallDebugMode, BALL_R } from "./ballDebugMode.js";
 
 const MOUSE_SENSITIVITY = 0.003;
@@ -205,7 +206,7 @@ export function createPlayMode({
     const heading = flipYaw(currentYaw());
     let s = null;
     if (moveMode === "car") s = brunoCar.resetFrom(tx, gy, tz, heading);
-    else if (moveMode === "stunt") s = stuntCar.resetFrom(tx, gy, tz, heading);
+    else if (rigidCar()) s = rigidCar().resetFrom(tx, gy, tz, heading);
     else if (moveMode === "ball") s = ballDebug.resetFrom(tx, gy + BALL_R, tz);
     else if (moveMode === "fly") s = flight.resetFrom(tx, gy + 20, tz, heading);
     if (s) p.set(s.x, s.y, s.z);
@@ -226,7 +227,7 @@ export function createPlayMode({
     getTreeBvh,
   });
 
-  const stuntCar = stunt ?? createStuntCarMode({
+  const rigidCarOpts = {
     scene,
     camera,
     sampleGroundY: (wx, wz, fromY) => {
@@ -237,7 +238,19 @@ export function createPlayMode({
     getTreeBvh,
     getStuntRoadMeshes,
     getStuntRoadSolidMeshes,
-  });
+  };
+  const stuntCar = stunt ?? createStuntCarMode(rigidCarOpts);
+  // The game's own car: built on first use (it is a whole car — meshes, lights).
+  let _gameCar = null;
+  const gameCar = () => (_gameCar ??= createGameCarMode(rigidCarOpts));
+  /** The rigid-body car driving this mode (stunt or game car), or null. */
+  function rigidCar() {
+    return moveMode === "stunt" ? stuntCar : moveMode === "game" ? gameCar() : null;
+  }
+  function hideRigidCars() {
+    stuntCar.hide();
+    _gameCar?.hide();
+  }
 
   const ballDebug = createBallDebugMode({
     scene,
@@ -246,15 +259,16 @@ export function createPlayMode({
   });
 
   function isCarMode() {
-    return moveMode === "car" || moveMode === "stunt";
+    return moveMode === "car" || moveMode === "stunt" || moveMode === "game";
   }
 
   function isBrunoMode() {
     return moveMode === "car";
   }
 
+  /** Stunt car or game car — both rigid-body cars with the same interface. */
   function isStuntMode() {
-    return moveMode === "stunt";
+    return moveMode === "stunt" || moveMode === "game";
   }
 
   function isBallMode() {
@@ -332,6 +346,7 @@ export function createPlayMode({
       case "fly": return flipYaw(flight.state.heading);
       case "car": return flipYaw(brunoCar.heading);
       case "stunt": return flipYaw(stuntCar.heading);
+      case "game": return flipYaw(gameCar().heading);
       case "ball": return flipYaw(camYaw);
       default: return capsule.yaw;
     }
@@ -354,8 +369,9 @@ export function createPlayMode({
     }
     flight.syncVisuals(capsule.position, flyMode);
     if (!brunoMode) brunoCar.hide();
-    if (stuntMode) stuntCar.syncVisuals(true);
-    else stuntCar.hide();
+    if (moveMode !== "stunt") stuntCar.hide();
+    if (moveMode !== "game") _gameCar?.hide();
+    if (stuntMode) rigidCar().syncVisuals(true);
     ballDebug.syncVisuals(capsule.position, moveMode === "ball");
   }
 
@@ -371,13 +387,13 @@ export function createPlayMode({
       quadrupeds[moveMode]?.restoreHumanCapsuleParams?.(capsule);
     }
 
-    if (isCarMode() && target !== "car" && target !== "stunt") {
+    if (isCarMode() && target !== "car" && target !== "stunt" && target !== "game") {
       p.y = sampleGroundY(p.x, p.z);
       capsule.reset(p.x, p.y, p.z);
       charYaw = yaw;
       capsule.yaw = yaw;
       brunoCar.hide();
-      stuntCar.hide();
+      hideRigidCars();
     }
 
     if (target === "fly") {
@@ -433,8 +449,11 @@ export function createPlayMode({
       p.y = spawn.y;
       p.z = spawn.z;
       charYaw = yaw;
-    } else if (target === "stunt") {
-      const spawn = stuntCar.resetFrom(p.x, p.y, p.z, heading);
+    } else if (target === "stunt" || target === "game") {
+      const car = target === "stunt" ? stuntCar : gameCar();
+      if (target === "stunt") _gameCar?.hide();
+      else stuntCar.hide();
+      const spawn = car.resetFrom(p.x, p.y, p.z, heading);
       p.x = spawn.x;
       p.y = spawn.y;
       p.z = spawn.z;
@@ -496,7 +515,7 @@ export function createPlayMode({
       return;
     }
     if (isStuntMode()) {
-      stuntCar.positionCamera(dt);
+      rigidCar().positionCamera(dt);
       return;
     }
     positionCameraOnFoot();
@@ -924,7 +943,7 @@ export function createPlayMode({
     flight.setShowCollider(false);
     flight.syncVisuals(capsule.position, false);
     brunoCar.hide();
-    stuntCar.hide();
+    hideRigidCars();
     ballDebug.hide();
     capsule.setParams({ ...HUMAN_CAPSULE_PARAMS });
 
@@ -1047,7 +1066,7 @@ export function createPlayMode({
       brunoCar.update(dt, keys, capsule.position);
     } else if (isStuntMode()) {
       updateUnderground();
-      stuntCar.update(dt, keys, capsule.position);
+      rigidCar().update(dt, keys, capsule.position);
     } else if (isBallMode()) {
       updateUnderground();
       ballDebug.update(dt, keys, camYaw, capsule.position);
@@ -1077,7 +1096,7 @@ export function createPlayMode({
     // Cars stamp a rut under each wheel; the car modules own the wheel
     // positions and per-wheel ground contact.
     if (moveMode === "car")   return brunoCar.getSnowContacts?.() ?? null;
-    if (moveMode === "stunt") return stuntCar.getSnowContacts?.() ?? null;
+    if (isStuntMode()) return rigidCar().getSnowContacts?.() ?? null;
 
     _snowXZs.fill(0);
     _snowTouch.fill(0);
@@ -1184,8 +1203,8 @@ export function createPlayMode({
         speed = brunoCar.getSpeed();
         grounded = brunoCar.grounded;
       } else if (isStuntMode()) {
-        speed = stuntCar.getSpeed();
-        grounded = stuntCar.grounded;
+        speed = rigidCar().getSpeed();
+        grounded = rigidCar().grounded;
       } else if (isBallMode()) {
         speed = ballDebug.speed;
         grounded = ballDebug.grounded;

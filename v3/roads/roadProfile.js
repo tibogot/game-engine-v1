@@ -47,15 +47,22 @@ export function buildProfile(road, L, ends, groundAt, maxGrade) {
     for (let i = 0; i < N; i++) y[i] = designElevation(vpis, s[i]);
   } else {
     const gmax = maxGrade * 0.92;
-    for (let i = 0; i < N; i++) y[i] = ground[i];
-    y[0] = ya; y[N - 1] = yb;
+    // `ends.fixed(s)` pins stretches near the nodes (their planes, roadSurface.js);
+    // the grade limit and smoothing then work outward from them.
+    const pinned = new Uint8Array(N);
+    for (let i = 0; i < N; i++) {
+      const f = ends.fixed ? ends.fixed(s[i]) : null;
+      if (f != null) { y[i] = f; pinned[i] = 1; } else y[i] = ground[i];
+    }
+    if (!pinned[0]) { y[0] = ya; pinned[0] = 1; }
+    if (!pinned[N - 1]) { y[N - 1] = yb; pinned[N - 1] = 1; }
     const ds = L / (N - 1);
     for (let pass = 0; pass < 3; pass++) {
-      for (let i = 1; i < N - 1; i++) y[i] = clamp(y[i], y[i - 1] - gmax * ds, y[i - 1] + gmax * ds);
-      for (let i = N - 2; i > 0; i--) y[i] = clamp(y[i], y[i + 1] - gmax * ds, y[i + 1] + gmax * ds);
-      // Smooth (≈ vertical curves), ends pinned.
+      for (let i = 1; i < N - 1; i++) if (!pinned[i]) y[i] = clamp(y[i], y[i - 1] - gmax * ds, y[i - 1] + gmax * ds);
+      for (let i = N - 2; i > 0; i--) if (!pinned[i]) y[i] = clamp(y[i], y[i + 1] - gmax * ds, y[i + 1] + gmax * ds);
+      // Smooth (≈ vertical curves), pinned samples kept.
       const tmp = Float64Array.from(y);
-      for (let i = 1; i < N - 1; i++) tmp[i] = (y[i - 1] + 2 * y[i] + y[i + 1]) / 4;
+      for (let i = 1; i < N - 1; i++) if (!pinned[i]) tmp[i] = (y[i - 1] + 2 * y[i] + y[i + 1]) / 4;
       for (let i = 1; i < N - 1; i++) y[i] = tmp[i];
     }
   }

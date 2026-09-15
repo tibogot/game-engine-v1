@@ -164,8 +164,11 @@ export function restoreHeightBox(heightsWorld, snap) {
  * (2) compute every target from the untouched field, (3) write blended heights.
  *
  * @param {Float32Array} heightsWorld heightmapSize², world metres (mutated)
- * @param {Array<{pts:{x,z}[], lifts?:number[]}>} footprints road spines; lift =
- *        deck height above terrain baseline (bridges skip the flatten)
+ * @param {Array<{pts:{x,z}[], lifts?:number[], halfWs?:number[]}>} footprints road
+ *        spines; lift = deck height above terrain baseline (bridges skip the
+ *        flatten). `halfWs` (optional, per point) gives a footprint its own half
+ *        width instead of `halfW` — lane roads of different widths, and node
+ *        discs. Without it (Smart Road) every texel takes the old path exactly.
  * @param {(x:number,z:number)=>number} getSurfaceH road surface height (metres)
  * @returns {{changed:boolean, rect:null|{minIx:number,maxIx:number,minIz:number,maxIz:number}}}
  */
@@ -189,7 +192,12 @@ export function conformToRoadSurface(heightsWorld, {
   // triangle (at any clipmap LOD sampling this field) straddles the deck edge.
   const inner = halfW + 1 + step;
   const outer = Math.max(0.01, shoulder);
-  const reach = inner + outer;
+  let reach = inner + outer;
+  // Per-footprint widths: the window and each footprint's scan grow to the widest.
+  const perFootprint = footprints.some((fp) => fp.halfWs);
+  if (perFootprint) {
+    for (const fp of footprints) if (fp.halfWs) for (const hw of fp.halfWs) reach = Math.max(reach, hw + 1 + step + outer);
+  }
 
   // Union texel window over all footprints.
   let minWX = Infinity, maxWX = -Infinity, minWZ = Infinity, maxWZ = -Infinity;
@@ -213,9 +221,13 @@ export function conformToRoadSurface(heightsWorld, {
   // interpolated lift). Each footprint only scans its own padded bbox.
   const dist = new Float32Array(winW * winH).fill(Infinity);
   const liftArr = new Float32Array(winW * winH);
+  // Per-footprint mode only: the half width at each texel's nearest footprint
+  // point; nearest then means nearest EDGE (distance − half width).
+  const hwArr = perFootprint ? new Float32Array(winW * winH).fill(halfW) : null;
   for (const fp of footprints) {
     const pts = fp.pts;
     const lifts = fp.lifts;
+    const hws = perFootprint ? fp.halfWs : null;
     if (!pts || pts.length === 0) continue;
     let fMinX = Infinity, fMaxX = -Infinity, fMinZ = Infinity, fMaxZ = -Infinity;
     for (const p of pts) {
@@ -234,10 +246,31 @@ export function conformToRoadSurface(heightsWorld, {
         const wx = -half + ix * step;
         let bestSq = Infinity;
         let bestLift = 0;
+        let bestHw = halfW;
         if (pts.length === 1) {
           const ex = wx - pts[0].x, ez = wz - pts[0].z;
           bestSq = ex * ex + ez * ez;
           bestLift = lifts ? lifts[0] : 0;
+          if (hws) bestHw = hws[0];
+        } else if (hws) {
+          // Nearest edge, not nearest spine: a wide road beats a narrow one beside it.
+          let bestEdge = Infinity;
+          for (let k = 0; k < pts.length - 1; k++) {
+            const ax = pts[k].x, az = pts[k].z;
+            const dx = pts[k + 1].x - ax, dz = pts[k + 1].z - az;
+            const lenSq = dx * dx + dz * dz;
+            let t = 0;
+            if (lenSq > 1e-8) t = Math.max(0, Math.min(1, ((wx - ax) * dx + (wz - az) * dz) / lenSq));
+            const ex = wx - (ax + dx * t), ez = wz - (az + dz * t);
+            const sq = ex * ex + ez * ez;
+            const hw = hws[k] + (hws[k + 1] - hws[k]) * t;
+            if (Math.sqrt(sq) - hw < bestEdge) {
+              bestEdge = Math.sqrt(sq) - hw;
+              bestSq = sq;
+              bestHw = hw;
+              bestLift = lifts ? lifts[k] + (lifts[k + 1] - lifts[k]) * t : 0;
+            }
+          }
         } else {
           for (let k = 0; k < pts.length - 1; k++) {
             const ax = pts[k].x, az = pts[k].z;
@@ -254,7 +287,13 @@ export function conformToRoadSurface(heightsWorld, {
           }
         }
         const w = (iz - winMinIz) * winW + (ix - winMinIx);
-        if (bestSq < dist[w] * dist[w]) {
+        if (perFootprint) {
+          if (Math.sqrt(bestSq) - bestHw < dist[w] - hwArr[w]) {
+            dist[w] = Math.sqrt(bestSq);
+            liftArr[w] = bestLift;
+            hwArr[w] = bestHw;
+          }
+        } else if (bestSq < dist[w] * dist[w]) {
           dist[w] = Math.sqrt(bestSq);
           liftArr[w] = bestLift;
         }
@@ -271,10 +310,11 @@ export function conformToRoadSurface(heightsWorld, {
     for (let ix = winMinIx; ix <= winMaxIx; ix++) {
       const w = (iz - winMinIz) * winW + (ix - winMinIx);
       const d = dist[w];
-      if (d >= reach) continue;
+      const inW = hwArr ? hwArr[w] + 1 + step : inner;
+      if (d >= (hwArr ? inW + outer : reach)) continue;
       if (liftArr[w] > liftSkip) continue; // deck is elevated here (bridge/viaduct)
       const wx = -half + ix * step;
-      const s = d <= inner ? 0 : smoothstep(0, 1, (d - inner) / outer);
+      const s = d <= inW ? 0 : smoothstep(0, 1, (d - inW) / outer);
       idxs.push(iz * heightmapSize + ix);
       targets.push(getSurfaceH(wx, wz) + liftArr[w] - embedDepth);
       blends.push(s);

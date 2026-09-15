@@ -18,6 +18,19 @@
  *
  * WET is a build-time choice (a clearcoat is compiled in or not), so toggling
  * it swaps the asphalt material; the amounts are uniforms.
+ *
+ * TERRAIN FIT (fitTerrain on): the network is built on the ground — node
+ * planes, grade-limited profiles, crown and banking (v3/roads/roadSurface.js)
+ * — and the terrain is graded to it through its OWN RoadConformSystem (the
+ * Smart Road conform: a base snapshot taken on entering the mode, each live
+ * re-grade restores the last one first, Bake keeps it). The network drapes on
+ * that base, so grading never feeds back into the road. Off: the old flat
+ * plate at `lift` over the scene centre, terrain untouched.
+ *
+ * COLLISION: collisionMeshes() → { deck, solids }, the same shape the
+ * modular-road game's city hands its collision bake. deck = asphalt, concrete,
+ * grass (wheels climb kerbs); solids = collision-only walls round islands and
+ * raised medians (never drawn).
  */
 import * as THREE from "three";
 import { MeshStandardNodeMaterial } from "three/webgpu";
@@ -29,13 +42,22 @@ import { buildLaneRoadMesh, MESH_DEFAULTS } from "../roads/mesh/laneRoadMesh.js"
 import { PREVIEW_SCENES, flattenNetwork } from "../roads/mesh/previewScenes.js";
 import { createLaneRoadPaint, PAINT_DEFAULTS } from "../render/roads/laneRoadPaint.js";
 import { createAsphaltMaterial, laneRoadFrame, syncAsphaltUniforms, ASPHALT_DEFAULTS } from "../render/roads/asphaltSurface.js";
+import { groundTargetAt, SURFACE_DEFAULTS } from "../roads/roadSurface.js";
 
 export function createLaneRoadToolState() {
   return {
     laneRoad: {
       scene: "all",
       visible: true,
-      /** Road surface above the ground under the scene centre (flat ground only). */
+      /** Build on the terrain and grade it to the roads (off: flat plate at `lift`). */
+      fitTerrain: true,
+      /** Terrain blend width past the road's property line (m). 6 m read as a cliff over a 6-8 m cut. */
+      shoulder: 14,
+      /** How far the terrain sits under the road surface inside the footprint (m). */
+      embed: 0.3,
+      crown: SURFACE_DEFAULTS.crown,
+      banking: SURFACE_DEFAULTS.banking,
+      /** Flat plate only: road surface above the ground under the scene centre. */
       lift: 0.1,
       /** Drivable road width vs real (1 = real, 3.25 m lanes). 1.3 ≈ a game-widened
        *  4.2 m lane for the 2.1 m car. Sidewalks, paint and curves stay real. */
@@ -77,12 +99,24 @@ export class LaneRoadSystem {
    * @param {{ laneRoad: object }} o.toolState
    * @param {(x:number, z:number) => number} o.groundAt   terrain height (metres)
    * @param {() => THREE.Vector3} o.viewTarget            where "place here" drops the scene
+   * @param {import("./roadConformSystem.js").RoadConformSystem} [o.conform]  this system's own conform
+   * @param {() => void} [o.onTerrainEdited]  push cpuHeightmap edits to the GPU (one undoable stroke)
    */
-  constructor({ scene, toolState, groundAt, viewTarget }) {
+  constructor({ scene, toolState, groundAt, viewTarget, conform = null, onTerrainEdited = () => {} }) {
     this.scene = scene;
     this.params = toolState.laneRoad;
     this.groundAt = groundAt;
     this.viewTarget = viewTarget;
+    this.conform = conform;
+    this.onTerrainEdited = onTerrainEdited;
+    this._gradeTimer = 0;
+    /** RoadConformSystem's view of this network (it was written for Smart Road's system). */
+    this._conformView = {
+      getFootprints: () => this._footprints(),
+      roadSurfaceH: (x, z) => this._gradeTarget(x, z),
+      params: { width: 0 }, // widths come per footprint (halfWs)
+    };
+    this.gradeStats = null;
 
     this.group = new THREE.Group();
     this.group.name = "LaneRoads";
@@ -207,22 +241,40 @@ export class LaneRoadSystem {
   load(key = this.params.scene) {
     if (!PREVIEW_SCENES[key]) key = "all";
     this.params.scene = key;
+    // The old grade comes off first, so the base stays the ungraded terrain.
+    this.removeGrade();
     const t = this.viewTarget();
     this.origin.x = t.x;
     this.origin.z = t.z;
-    this.origin.ground = this.groundAt(t.x, t.z);
+    this.origin.ground = this._ground(t.x, t.z);
     this.loaded = true;
     this.rebuild();
+  }
+
+  /** Ground the network is built on: the conform's pre-grade base when there is one. */
+  _ground(x, z) {
+    return this.conform?.hasBase ? this.conform.sampleGround(x, z) : this.groundAt(x, z);
+  }
+
+  get fitting() {
+    return !!(this.params.fitTerrain && this.conform?.hasBase);
   }
 
   rebuild() {
     if (!this.loaded) return;
     const p = this.params;
     const t0 = performance.now();
-    const y = this.origin.ground + p.lift;
-    const data = flattenNetwork(PREVIEW_SCENES[p.scene].build(), y);
+    const ox = this.origin.x, oz = this.origin.z;
+    let data = PREVIEW_SCENES[p.scene].build();
+    let ground;
+    if (this.fitting) {
+      ground = (x, z) => this._ground(x + ox, z + oz);
+    } else {
+      data = flattenNetwork(data, this.origin.ground + p.lift);
+      ground = () => this.origin.ground;
+    }
     data.roadScale = p.roadScale;
-    this.result = buildRoadNetwork(data, { ground: () => this.origin.ground, blocks: false });
+    this.result = buildRoadNetwork(data, { ground, blocks: false, surface: { crown: p.crown, banking: p.banking } });
     const t1 = performance.now();
     const mesh = buildLaneRoadMesh(this.result, p);
     const mats = this._ensureMaterials();
@@ -234,9 +286,12 @@ export class LaneRoadSystem {
       if (mesh[name].triangleCount) draws++;
       triangles += mesh[name].triangleCount;
     }
+    this._setSolids(mesh.solids);
     this.group.position.set(this.origin.x, 0, this.origin.z);
     this.group.visible = p.visible;
     this._applyShadows();
+    if (this.fitting) this.scheduleGrade();
+    else this.removeGrade();
 
     this.stats = {
       roads: this.result.stats.roads,
@@ -281,6 +336,117 @@ export class LaneRoadSystem {
     }
   }
 
+  /** Collision-only island walls: in the group (for its transform), never drawn. */
+  _setSolids(part) {
+    if (this._solids) {
+      this._solids.geometry.dispose();
+      this.group.remove(this._solids);
+      this._solids = null;
+    }
+    if (!part?.triangleCount) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(part.position, 3));
+    geo.setIndex(new THREE.BufferAttribute(part.index, 1));
+    geo.computeBoundingSphere();
+    this._solids = new THREE.Mesh(geo);
+    this._solids.name = "LaneRoad_solids";
+    this._solids.visible = false;
+    this.group.add(this._solids);
+  }
+
+  /**
+   * What cars collide with, in the modular-road game's shape:
+   *   deck   — drive surfaces (wheel probes, deck contact): asphalt, concrete, grass
+   *   solids — chassis walls: the island / median walls
+   * Empty while hidden or not loaded.
+   */
+  collisionMeshes() {
+    if (!this.loaded || !this.params.visible) return { deck: [], solids: [] };
+    return {
+      deck: Object.values(this._meshes),
+      solids: this._solids ? [this._solids] : [],
+    };
+  }
+
+  // ── Terrain grading ────────────────────────────────────────────────────────
+
+  /** Road spines (world x/z, half width to the property line) and node discs. */
+  _footprints() {
+    const r = this.result;
+    if (!r) return [];
+    const ox = this.origin.x, oz = this.origin.z;
+    const out = [];
+    for (const rr of r.roads) {
+      if (!rr.footMid || rr.footMid.length < 2) continue;
+      out.push({ pts: rr.footMid.map((p) => ({ x: p[0] + ox, z: p[1] + oz })), halfWs: Array.from(rr.halfW) });
+    }
+    for (const n of r.nodes) {
+      if (!n.reach || n.kind === "continuation" || n.kind === "isolated") continue;
+      out.push({ pts: [{ x: n.x + ox, z: n.z + oz }], halfWs: [n.reach] });
+    }
+    return out;
+  }
+
+  /**
+   * Terrain height wanted at world (x, z): under the road, the surface less
+   * `embed`; past its edge, just under the top of what is there (sidewalk top,
+   * or the asphalt edge where there is no sidewalk), where the shoulder starts.
+   */
+  _gradeTarget(wx, wz) {
+    const p = this.params;
+    const g = groundTargetAt(this.result, wx - this.origin.x, wz - this.origin.z, { curbHeight: p.curbHeight, reach: p.shoulder + 10 });
+    if (!g) return this._ground(wx, wz);
+    return g.out > 0 ? g.y - 0.05 : g.y - p.embed;
+  }
+
+  /** Debounced live grade: one undoable terrain stroke per edit, not per slider tick. */
+  scheduleGrade() {
+    clearTimeout(this._gradeTimer);
+    this._gradeTimer = setTimeout(() => this.applyGradeNow(), 250);
+  }
+
+  applyGradeNow() {
+    clearTimeout(this._gradeTimer);
+    this._gradeTimer = 0;
+    if (!this.fitting || !this.result) return;
+    const t0 = performance.now();
+    const changed = this.conform.applyLive(this._conformView, this._conformParams());
+    const t1 = performance.now();
+    if (changed) this.onTerrainEdited();
+    this.gradeStats = { conformMs: t1 - t0, pushMs: performance.now() - t1, changed };
+  }
+
+  /** Flush a pending grade (leaving the mode). */
+  flushGrade() {
+    if (this._gradeTimer) this.applyGradeNow();
+  }
+
+  _conformParams() {
+    // Embed is folded into _gradeTarget (it differs inside and outside the footprint).
+    return { sidewalk: false, flattenDepth: 0, shoulder: this.params.shoulder };
+  }
+
+  /** Keep the current grade: it becomes the new base terrain. */
+  bakeGrade() {
+    if (!this.conform?.hasBase) return;
+    this.flushGrade();
+    if (this.conform.bake(this._conformView, this._conformParams())) this.onTerrainEdited();
+  }
+
+  /** Put the terrain back as it was before the live grade. */
+  removeGrade() {
+    clearTimeout(this._gradeTimer);
+    this._gradeTimer = 0;
+    if (this.conform?.removeGrade()) this.onTerrainEdited();
+  }
+
+  /** Entering the mode: fresh base from the current terrain, then re-drape. */
+  rebaseTerrain() {
+    if (!this.conform) return;
+    this.conform.rebase();
+    if (this.loaded) this.rebuild();
+  }
+
   _applyShadows() {
     // Only the concrete casts: its curb faces are what throw the 15 cm shadow
     // line onto the asphalt. Flat asphalt and grass tops add nothing visible.
@@ -300,11 +466,13 @@ export class LaneRoadSystem {
   }
 
   clear() {
+    this.removeGrade();
     for (const mesh of Object.values(this._meshes)) {
       mesh.geometry.dispose();
       this.group.remove(mesh);
     }
     this._meshes = {};
+    this._setSolids(null);
     this._paint?.setAtlas(null);
     this.loaded = false;
     this.result = null;

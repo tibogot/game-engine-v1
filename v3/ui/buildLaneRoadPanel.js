@@ -40,7 +40,7 @@ export function buildLaneRoadPanel(app) {
 
     // ── Scene ───────────────────────────────────────────────────────────────
     const sc = _section(panel, "Lane road (preview)", true);
-    _hint(sc, "3D preview of the new lane-based road engine on flat ground. Pick a test scene; it is placed at the centre of the view. Smart Road 2 is untouched, and nothing here is saved in the project.");
+    _hint(sc, "3D preview of the new lane-based road engine. Pick a test scene; it is placed at the centre of the view, on the terrain. Smart Road 2 is untouched, and nothing here is saved in the project (the terrain grade is a normal undoable edit).");
     _choice(sc, "Scene", Object.entries(PREVIEW_SCENES).map(([k, d]) => [k, d.label]), p.scene,
       (v) => { sys.load(v); refresh(); });
     _button(sc, {
@@ -60,9 +60,15 @@ export function buildLaneRoadPanel(app) {
       label: "Road scale", min: 0.5, max: 2, step: 0.05, onChange: rebuildSoon,
       hint: "How much wider than real the drivable road is. 1 = real (3.25 m lanes); games use 1.2–1.5. Scales lanes, medians, corner radii and roundabouts; sidewalks, paint and curves stay real.",
     });
-    _slider(sh, p, "lift", {
-      label: "Above ground (m)", min: 0, max: 3, step: 0.01, onChange: rebuildSoon,
-      hint: "Road surface height over the ground at the scene centre. No terrain fitting yet — use a flat area.",
+    // Crown is edited in % (the engine takes a fraction).
+    const crownUi = { crownPct: p.crown * 100 };
+    _slider(sh, crownUi, "crownPct", {
+      label: "Crown (%)", min: 0, max: 4, step: 0.1, onChange: () => { p.crown = crownUi.crownPct / 100; rebuildSoon(); },
+      hint: "Cross fall from each carriageway's crown line down to its kerbs, so rain drains to the gutters (the wet asphalt pools there). 2.5 % is typical.",
+    });
+    _toggle(sh, p, "banking", {
+      label: "Banking", onChange: rebuildSoon,
+      hint: "Superelevation on fast curves (rural roads, motorways, ramps), from the engine's design values for speed and radius. City streets are crowned only.",
     });
     _slider(sh, p, "curbHeight", { label: "Curb (m)", min: 0.05, max: 0.3, step: 0.01, onChange: rebuildSoon, hint: "Sidewalks, splitter islands, dead-end caps." });
     _slider(sh, p, "medianHeight", { label: "Median (m)", min: 0.05, max: 0.4, step: 0.01, onChange: rebuildSoon });
@@ -70,6 +76,28 @@ export function buildLaneRoadPanel(app) {
     _slider(sh, p, "islandHeight", { label: "Island (m)", min: 0.05, max: 0.5, step: 0.01, onChange: rebuildSoon, hint: "Roundabout central island." });
     _slider(sh, p, "bevel", { label: "Curb bevel (m)", min: 0, max: 0.05, step: 0.005, onChange: rebuildSoon, hint: "45° chamfer on the top edge of every curb." });
     _slider(sh, p, "curbBand", { label: "Curb stone (m)", min: 0, max: 0.4, step: 0.01, onChange: rebuildSoon, hint: "Concrete band round grass tops (medians, verges, island)." });
+    _slider(sh, p, "islandWall", {
+      label: "Island wall (m)", min: 0, max: 1.5, step: 0.05, onChange: rebuildSoon,
+      hint: "Collision only (not drawn): a wall this tall round the roundabout island, splitter islands and raised medians, so the car hits them. 0 = climbable like a kerb.",
+    });
+
+    // ── Terrain ─────────────────────────────────────────────────────────────
+    const tr = _section(panel, "Terrain", true);
+    _toggle(tr, p, "fitTerrain", {
+      label: "Fit to terrain", onChange: rebuildSoon,
+      hint: "On: junctions sit on planes fitted to the ground, roads follow it within their grade limits, and the terrain is graded under them with a shoulder. Off: a flat plate, terrain untouched (the grade comes off).",
+    });
+    if (p.fitTerrain) {
+      _slider(tr, p, "shoulder", { label: "Shoulder (m)", min: 1, max: 30, step: 0.5, onChange: rebuildSoon, hint: "How far past the property line the graded ground blends back to the hills." });
+      _slider(tr, p, "embed", { label: "Under road (m)", min: 0.05, max: 1, step: 0.05, onChange: rebuildSoon, hint: "How far the terrain sits below the road surface inside the footprint, so it never pokes through." });
+      _button(tr, { title: "Bake grade", hint: "Keep the current grade as the terrain (the base for later grades).", onClick: () => { sys.bakeGrade(); refresh(); } });
+      _button(tr, { title: "Remove grade", hint: "Put the terrain back as it was before this grade (turns fitting off).", onClick: () => { p.fitTerrain = false; sys.rebuild(); refresh(); } });
+    } else {
+      _slider(tr, p, "lift", {
+        label: "Above ground (m)", min: 0, max: 3, step: 0.01, onChange: rebuildSoon,
+        hint: "Flat plate: road surface height over the ground at the scene centre.",
+      });
+    }
 
     // ── Markings ────────────────────────────────────────────────────────────
     const mk = _section(panel, "Markings", true);
@@ -122,6 +150,8 @@ export function buildLaneRoadPanel(app) {
       _hint(ss, `${st.draws} draw calls · ${st.triangles.toLocaleString()} triangles · ${st.vertices.toLocaleString()} vertices`);
       _hint(ss, `Build ${st.totalMs.toFixed(1)} ms (network ${st.networkMs.toFixed(1)}, mesh ${st.meshMs.toFixed(1)} incl. atlas ${st.atlasMs.toFixed(1)})`);
       _hint(ss, `Marking atlas: ${st.atlas}`);
+      const gs = sys.gradeStats;
+      if (sys.fitting && gs) _hint(ss, `Terrain grade ${gs.conformMs.toFixed(1)} ms + GPU push ${gs.pushMs.toFixed(1)} ms`);
       if (st.issues) _hint(ss, `${st.issues} engine issue${st.issues === 1 ? "" : "s"} (warnings/errors) — see the 2D lab for where.`);
     }
   }

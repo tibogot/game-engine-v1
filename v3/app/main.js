@@ -689,8 +689,9 @@ export async function startV3App(opts = {}) {
     getCollider: () => onFootCollider,
     getCliffBvh: () => worldCollider,
     getTreeBvh: () => treeBvh,
-    getStuntRoadMeshes: () => roadSystem?.getColliderMeshes() ?? [],
-    getStuntRoadSolidMeshes: () => [],
+    // Road decks and walls: Smart Road decks + the lane road's { deck, solids }.
+    getStuntRoadMeshes: () => [...(roadSystem?.getColliderMeshes() ?? []), ...(laneRoadSystem?.collisionMeshes().deck ?? [])],
+    getStuntRoadSolidMeshes: () => laneRoadSystem?.collisionMeshes().solids ?? [],
     onStartWalking: () => { playHint.classList.add("visible"); },
     onEnterMenu:    () => { playHint.classList.remove("visible"); },
     onModeChange:   () => { refreshPlayStats(); syncPlayPanels(); },
@@ -2188,6 +2189,8 @@ export async function startV3App(opts = {}) {
     if (editorMode === "riverv2" && m !== "riverv2") riverV2System?.cancelDrag();
     if (editorMode === "lake" && m !== "lake") lakeSystem?.cancelDrag();
     if (editorMode === "road" && m !== "road") _onLeaveRoadMode();
+    // Finish a pending lane-road grade before another tool edits the terrain.
+    if (editorMode === "laneRoad" && m !== "laneRoad") laneRoadSystem?.flushGrade();
     if (editorMode === "props" && m !== "props") _onLeavePropsMode();
     editorMode = m;
     roadSystem?.setEditActive(m === "road" && !playMode.active);
@@ -2245,10 +2248,12 @@ export async function startV3App(opts = {}) {
           roadSystem?.queueRebuild();
         });
       }
+      // Fresh CPU mirror → rebase the grade baseline (as road mode does) → re-drape.
       // First visit loads the test scene at the view centre, on the ground there.
-      if (m === "laneRoad" && laneRoadSystem && !laneRoadSystem.loaded) {
+      if (m === "laneRoad" && laneRoadSystem) {
         void ensureCpuHeightmapFromGpu().then(() => {
-          laneRoadSystem.load();
+          if (laneRoadSystem.loaded) laneRoadSystem.rebaseTerrain();
+          else { laneRoadSystem.conform?.rebase(); laneRoadSystem.load(); }
           laneRoadUi?.refresh();
         });
       }
@@ -3107,7 +3112,7 @@ export async function startV3App(opts = {}) {
         const _mm = playMode.moveMode;
         if (!_snowContacts) {
           snowSystem.params.stampRadius =
-            (_mm === "car" || _mm === "stunt") ? 1.2 :
+            (_mm === "car" || _mm === "stunt" || _mm === "game") ? 1.2 :
             _mm === "ball" ? 0.5 : 0.3;
         }
         if (_hasLocalSnow) snowSystem.tick(pp.x, pp.z, _snowGrounded, _snowContacts);
@@ -5247,13 +5252,22 @@ export async function startV3App(opts = {}) {
   colliderSources.push(new SolidCollider(tunnelColliderStore));
 
   // ── Lane road (3D preview) ─────────────────────────────────────────────────
-  // Meshes only: no terrain edit, no collision, no project data. Nothing is
-  // built until the mode is first entered.
+  // Built on the terrain and grades it (its OWN RoadConformSystem, separate
+  // from Smart Road's, same undoable heightmap push); collides in play mode.
+  // No project data yet. Nothing is built until the mode is first entered.
   laneRoadSystem = new LaneRoadSystem({
     scene,
     toolState: laneRoadToolSlice,
     groundAt: (x, z) => getWorldHeight(x, z),
     viewTarget: () => controls.target,
+    conform: new RoadConformSystem({
+      cpuHeightmap,
+      heightmapSize: HEIGHTMAP_SIZE,
+      worldSize: WORLD_SIZE,
+      maxHeight: MAX_HEIGHT,
+      terrainStore: v3TerrainStore,
+    }),
+    onTerrainEdited: () => pushHeightmapEditsToGpu(),
   });
 
   _onLeaveSplineMode = () => {

@@ -37,6 +37,9 @@ import {
 import { buildRoadMarkings } from "./roadMarkings.js";
 import { buildBlocks } from "./roadBlocks.js";
 import { buildProps } from "./roadProps.js";
+import {
+  SURFACE_DEFAULTS, fitNodePlane, planeY, setupRoadSurface, relaxNodeHeights, pinnedProfile, blendProfileEnds, surfaceFrame, surfaceOffset,
+} from "./roadSurface.js";
 
 export const CLEARANCE = 5.0;
 export const DECK = 1.2;
@@ -94,6 +97,8 @@ export function buildRoadNetwork(data, opts = {}) {
   const style = data.style || "eu";
   // How much wider than real the drivable road is (1 = real). opts wins over data.
   const roadScale = Math.min(3, Math.max(0.5, opts.roadScale ?? data.roadScale ?? 1));
+  // Crown, banking and node-plane limits (roadSurface.js).
+  const surface = { ...SURFACE_DEFAULTS, ...opts.surface };
   const issues = [];
 
   /* 1 ─ nodes, roads, arms */
@@ -195,6 +200,8 @@ export function buildRoadNetwork(data, opts = {}) {
       a.crosswalk = walkable && !!a.type.crosswalks && node.src.crosswalks !== false;
       a.markStart = node.kind === "junction" || node.kind === "roundabout" ? armMouthMarkings(node, a, style) : a.trim;
     }
+    // Every node sits on a plane fitted to the ground under its geometry.
+    fitNodePlane(node, ground, surface);
   }
   lap("nodes");
 
@@ -221,9 +228,20 @@ export function buildRoadNetwork(data, opts = {}) {
       sa *= f; sb *= f;
     }
     rr.s0 = sa; rr.s1 = L - sb;
+    // Near each end the road is its node's plane, then blends into its own profile.
+    setupRoadSurface(rr, surface);
+  }
+  // Nodes too far apart in height for the road between them move toward each
+  // other (cut and fill), so every road can make its climb within its grade.
+  relaxNodeHeights([...nodes.values()], roads);
 
+  for (const rr of roads) {
+    const { armA: aA, armB: aB, type, al, L } = rr;
     const groundAt = (s) => { const e = evalAlignment(al, s); return ground(e.x, e.z); };
-    rr.prof = buildProfile(rr.src, L, { ya: rr.A.y, yb: rr.B.y }, groundAt, type.maxGrade);
+    rr.prof = buildProfile(rr.src, L, {
+      ya: planeY(rr.A, aA.ox, aA.oz), yb: planeY(rr.B, aB.ox, aB.oz), fixed: pinnedProfile(rr),
+    }, groundAt, type.maxGrade);
+    blendProfileEnds(rr);
     for (const iss of rr.prof.issues) {
       const e = evalAlignment(al, iss.s);
       rr.issues.push({ ...iss, x: e.x, z: e.z, roadId: rr.id });
@@ -502,6 +520,7 @@ export function buildRoadNetwork(data, opts = {}) {
     },
   };
   result.locate = (x, z) => locate(result, grid, x, z);
+  result.segGrid = grid;
   return result;
 }
 
@@ -692,7 +711,7 @@ function buildRoadLanes(rr, addPath, link) {
 function locate(result, grid, x, z) {
   for (const node of result.nodes) {
     if (node.pad && pointInPoly(x, z, node.pad)) {
-      return { kind: "node", nodeId: node.id, nodeKind: node.kind, y: node.y, control: node.control };
+      return { kind: "node", nodeId: node.id, nodeKind: node.kind, y: planeY(node, x, z), control: node.control };
     }
   }
   let best = null, bd = Infinity;
@@ -716,9 +735,10 @@ function locate(result, grid, x, z) {
   if (lat > edges.propL + 0.5 || lat < edges.propR - 0.5) return null;
   if (!lane && Math.abs(lat) <= lay.cw / 2) lane = { type: `median (${rr.stack.center.kind})`, w: lay.cw, id: "C" };
   const p = profileAt(rr.prof, s);
+  const cross = surfaceOffset(surfaceFrame(rr, s, e.th, e.k, lay), lat);
   return {
     kind: "road", roadId: rr.id, roadType: rr.type.label, s, L: rr.L, t: lat, lane,
-    y: p.y, grade: p.g, ground: p.ground, radius: Math.abs(e.k) > 1e-6 ? 1 / Math.abs(e.k) : Infinity,
+    y: p.y + cross, grade: p.g, ground: p.ground, radius: Math.abs(e.k) > 1e-6 ? 1 / Math.abs(e.k) : Infinity,
     superelevation: Math.abs(e.k) > 1e-6 ? curveDesign(rr.type.speed, 1 / Math.abs(e.k), !rr.type.spirals).e : 0,
   };
 }

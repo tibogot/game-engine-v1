@@ -1,6 +1,6 @@
 /** Radial play-mode picker — hold G to open, release to confirm (v2-style). */
 
-export const V3_MODE_ORDER = ["capsule", "char", "fly", "husky", "fox", "car", "stunt", "ball"];
+export const V3_MODE_ORDER = ["capsule", "char", "fly", "husky", "fox", "car", "stunt", "game", "ball"];
 
 export const V3_MODE_META = {
   capsule: { label: "Capsule", icon: "◉", digit: "1" },
@@ -10,6 +10,7 @@ export const V3_MODE_META = {
   fox:     { label: "Fox", icon: "🦊", digit: "5" },
   car:     { label: "Bruno", icon: "🚙", digit: "6" },
   stunt:   { label: "Stunt", icon: "🏁", digit: "7" },
+  game:    { label: "Game car", icon: "🏎", digit: "9" }, // the modular-road game's car (gameCarMode.js)
   ball:    { label: "Debug Ball", icon: "🔵", digit: "8" },
 };
 

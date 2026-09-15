@@ -208,8 +208,38 @@ The original plan, for reference:
 
 ### Geometry
 
-67. Terrain fitting (roadConformSystem), junction elevation blending on slopes,
-    superelevation in curves. **Next after the shader paint.**
+67. ~~Terrain fitting (roadConformSystem), junction elevation blending on slopes,
+    superelevation in curves.~~ **DONE 2026-09-15** 👁 (not committed yet):
+    - `v3/roads/roadSurface.js`: every node sits on a plane fitted to the
+      ground (junction ≤ 5 %, roundabout ≤ 3 %, ends/continuations ≤ 3 %
+      across); a road IS that plane from its node to 4 m past the mouth, then
+      blends into its own profile. Terrain profiles grade-limit outward from
+      those pinned stretches. Node heights relax toward each other until every
+      road can make its climb (hills test went from 119 % steps to all roads
+      within limit; junctions move up to ~3.4 m in cut/fill). Mouth gap 0.000 mm,
+      asphalt step across mouths ≤ 1.2 mm.
+    - Crown 2.5 % per carriageway (the same crown line as the shader's drain
+      coordinate), banking = curveDesign e on spiral road types (rural,
+      motorway, ramp); city streets crowned only. Mesh splits strips on the
+      crown line (+160 tris on the three scenes); warm mesh build unchanged
+      (~21 ms, 13 of it the atlas).
+    - Terrain grade: the lane road's OWN RoadConformSystem (base on mode entry,
+      live re-grade restores the last, Bake / Remove grade buttons); shared
+      `conformToRoadSurface` got per-footprint `halfWs` (Smart Road path
+      bit-identical, 40 random cases). Target: surface − 0.3 m inside the
+      footprint, sidewalk top − 5 cm past it, 14 m shoulder. Grade 85 ms warm on
+      a 1 m-texel map (~¼ on the default 2 m), per edit only.
+    - Collision `{ deck, solids }` (the game city's shape): deck = drawn meshes,
+      solids = collision-only 0.5 m walls round roundabout islands, splitters
+      and raised medians. Driven: kerbs climbed, island wall stops the car
+      (0 = drive over it).
+    - Play wheel **Game car (key 9)**: `v3/play/gameCarMode.js` drives the
+      game's v3 Vehicle at its fixed 1/120 s tick (the stunt car is the old v2
+      copy). Pick the final road scale with it.
+    - GPU, eye-level road-filling view: road hidden 1.18 ms, shown 1.57 ms.
+    - Left: batter slopes (shoulder is a fixed width, so a deep cut still reads
+      steep), gutter pooling on banked curves (shader pools both edges), lane
+      road not in the on-foot collider, network not saved in the project.
 68. Driveways and alley entrances with curb cuts, bulb-outs, pedestrian refuge
     islands, median openings for turns.
 69. Bus bays, lay-bys, parking lots, fuel-station aprons.

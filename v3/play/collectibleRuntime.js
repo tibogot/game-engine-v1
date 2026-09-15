@@ -22,6 +22,7 @@ const REACH_BONUS = {
   husky: 0.5,
   car: 1.5,
   stunt: 1.5,
+  game: 1.5,
   ball: 0.8,
   fly: 3.0,
 };
