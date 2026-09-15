@@ -2104,6 +2104,19 @@ export const DRIFT = {
    *  rack gives at speed — a drift-spec car runs extended lock and this is the
    *  only place that shows. Nothing reads it but the renderer. */
   maxVisualSteer: 0.75,
+  /**
+   * The drawn wheels show at least this much lock (rad) × the steering input,
+   * whatever the tyres actually get. ~17° at full key.
+   *
+   * "At speed I barely see the front wheels turn", and the physics is right
+   * about that: speed reduction and the grip limiter put full key at ~7-9° past
+   * 14 m/s, which is also what a real car does (a 15:1 rack turns 30° of wheel
+   * into 2° of tyre). Arcade racers draw it bigger because a turning car is
+   * READ through its front wheels. Never less than the physical angle, never
+   * against it, and the countersteer overlay still rides on top in a drift.
+   * 0 = draw the physical angle only.
+   */
+  minVisualSteer: 0.3,
   /** Ease rate (1/s) so the wheels don't snap between poses. */
   visualSmooth: 12,
 };
@@ -5271,7 +5284,12 @@ export class Vehicle {
     const counter = over > 0
       ? Math.sign(slip) * over * DRIFT.counterSteerVisual * contact * (1 - this._gripLimitCut)
       : 0;
-    let target = phys + counter;
+    // Arcade minimum — see DRIFT.minVisualSteer. Only ever widens the physical
+    // angle in its own direction (or from straight), so it cannot flip a wheel.
+    let base = phys;
+    const shown = this.input.steer * DRIFT.minVisualSteer;
+    if (Math.abs(shown) > Math.abs(base) && (base === 0 || Math.sign(base) === Math.sign(shown))) base = shown;
+    let target = base + counter;
     const cap = DRIFT.maxVisualSteer;
     if (target > cap) target = cap; else if (target < -cap) target = -cap;
     const k = 1 - Math.exp(-DRIFT.visualSmooth * Math.max(1e-4, dt));

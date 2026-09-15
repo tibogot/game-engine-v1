@@ -1222,6 +1222,13 @@ export function createRoadDevPanel({ app, game, params }) {
               <span class="prop-num" id="dv-cs-max-v"></span>
             </div>
           </div>
+          <div class="prop-row" title="Visual only: the drawn front wheels show at least this much lock at full steering, even at speed where the tyres really get only a few degrees. 0 = show the physical angle.">
+            <span class="prop-label">Min visual steer</span>
+            <div class="prop-value">
+              <input type="range" id="dv-cs-min" min="0" max="0.6" step="0.02" />
+              <span class="prop-num" id="dv-cs-min-v"></span>
+            </div>
+          </div>
           <div class="prop-row">
             <span class="prop-label">Landing absorb</span>
             <div class="prop-value">
@@ -6271,6 +6278,7 @@ export function createRoadDevPanel({ app, game, params }) {
   slider("dv-cs-gain", DRIFT, "counterSteerVisual", (v) => `${Math.round(v * 100)}%`);
   slider("dv-cs-dead", DRIFT, "counterDeadband", csDeg);
   slider("dv-cs-max", DRIFT, "maxVisualSteer", csDeg);
+  slider("dv-cs-min", DRIFT, "minVisualSteer", (v) => (v > 0 ? csDeg(v) : "off"));
   slider("dv-land-absorb", TIRE, "landingAbsorb", (v) => `${Math.round(v * 100)}%`);
   slider("dv-land-assist", TIRE, "airLandAssist", (v) => v.toFixed(2));
   slider("dv-land-range", TIRE, "airLandRange", (v) => `${v.toFixed(0)} m`);
