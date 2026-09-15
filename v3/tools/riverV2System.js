@@ -40,6 +40,7 @@ import {
 } from "three/tsl";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { createRiverMaterial } from "../render/water/riverV2Material.js";
+import { createRiverStylizedMaterial } from "../render/water/riverV2StylizedMaterial.js";
 import { riverWaterParams, RIVER_NODE_DEFAULTS } from "../app/state/riverV2State.js";
 import {
   solveRiver, closestStation, planConformChunks, conformStride, LOOP_SEGS, MIN_NODES,
@@ -208,7 +209,11 @@ export class RiverV2System {
     this.arrowGroup.visible = false;
     scene.add(this.arrowGroup);
 
-    this._water = createRiverMaterial({ normalMap: waterNormalMap });
+    // Two looks, one geometry: the realistic surface, and the stylized one
+    // built on first use (params.water.style). `_water` is whichever is shown.
+    this._realistic = createRiverMaterial({ normalMap: waterNormalMap });
+    this._stylized = null;
+    this._water = this._realistic;
 
     // ── Terrain base, held on the CPU ───────────────────────────────────────
     this._cpuBase = null;                       // normalized, unconformed
@@ -1596,7 +1601,16 @@ export class RiverV2System {
   // ═══════════════════════════════════════════════════════════════════════════
 
   syncMaterial() {
-    this._water.syncParams(riverWaterParams(this.params.water));
+    const w = this.params.water;
+    this._realistic.syncParams(riverWaterParams(w));
+    const stylized = w.style === "stylized";
+    if (stylized && !this._stylized) this._stylized = createRiverStylizedMaterial();
+    this._stylized?.syncParams(w);
+    const next = stylized ? this._stylized : this._realistic;
+    if (next !== this._water) {
+      this._water = next;
+      for (const r of this.rivers) if (r.mesh) r.mesh.material = next.material;
+    }
   }
 
   /** Drives its own clock from main's loop, so it does NOT implement the
@@ -1604,6 +1618,7 @@ export class RiverV2System {
   update(dt) {
     this._time += dt;
     this._water.update(dt, this._time);
+    if (this._water !== this._realistic) this._realistic.update(dt, this._time);
     if (this.editActive && this.handleGroup.visible) {
       const sc = this._handleScale();
       for (const h of this.handleGroup.children) {
@@ -1616,8 +1631,8 @@ export class RiverV2System {
   }
 
   /** worldEnvironment water-surface contract (sun/sky only — see update()). */
-  setSunDir(v) { this._water.setSunDir(v); }
-  setSkyColors(z, h) { this._water.setSkyColors(z, h); }
+  setSunDir(v) { this._realistic.setSunDir(v); }
+  setSkyColors(z, h) { this._realistic.setSkyColors(z, h); }
 
   setEditActive(on) {
     this.editActive = !!on;

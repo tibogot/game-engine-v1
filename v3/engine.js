@@ -10,7 +10,7 @@
  *
  * `app` is documented where it is built — the "App handle" block at the end of
  * v3/app/main.js: scene/camera/controls/renderer, terrain queries
- * (getWorldHeight, getWorldNormal, getWaterLevelAt, pickWorldAtClient,
+ * (getWorldHeight, getWorldNormal, getWaterLevelAt, getRiverChannels, pickWorldAtClient,
  * heightTexNode + maxHeight + worldSize), the environment (environment, light,
  * sky, fog, shadows, postFx, clouds, envSky, lensFlare), level data (propStore,
  * treeEnv, lakeSystem, getSpawnPoint, collectibles), flattenArea, terrain

@@ -560,6 +560,17 @@ v2 river and River+, water bodies, clouds v1-v3, sky / post / lens flare /
 fog (in v3), Lotus and VVV cars (stunt car covers them), chunk streaming.
 The old `games/rts` (v2 prototype) was deleted 2026-09-14.
 
+**Rivers → River v2 only (2026-09-15, deletion pending the user's go):**
+- DONE: River v2 Water look → Style: Realistic (default) / Stylized
+  (riverV2StylizedMaterial.js — the old River's "Stylized v1" ported term for
+  term: across = bank to bank at any width, along = a fixed pattern length
+  instead of stretching over the whole river). Saved with the water state.
+- DONE: `app.getWaterLevelAt` includes River v2 channels; new
+  `app.getRiverChannels()`; rts-v3 navGrid stamps River v2 (no River+ reads left
+  in games).
+- LEFT: delete River and River+ from v3 (keep v2/tools/river for the v2
+  editor). River v2 still lacks tributary links and closed loops — only if missed.
+
 ## Engine / game split (agreed 2026-09-15)
 
 The editor builds WORLDS; games add gameplay on top of a loaded level (the

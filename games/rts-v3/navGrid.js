@@ -130,19 +130,14 @@ export function createNavGrid({
     }
   }
 
-  // Rivers are GPU-carved, but their authoring geometry is a CatmullRom curve
-  // through control points with a width — same curve the renderer uses. We
-  // sample it and stamp the channel half-width along its length.
+  // Rivers (River v2). The water test in build() samples cell centres and
+  // corners, which a river narrower than a cell can slip between — so the
+  // channel is also stamped along its solved centreline, at each station's own
+  // width. Stations are a few metres apart, so a circle per station is a
+  // continuous band.
   function stampRivers() {
-    const rs = app.river2System;
-    if (!rs?.segments) return;
-    const rp = rs.toolState?.river2 ?? {};
-    const halfW = (rp.width ?? 8) * 0.5;
-    for (const seg of rs.segments) {
-      if (!seg.points || seg.points.length < 2) continue;
-      const curve = new THREE.CatmullRomCurve3(seg.points, !!rp.closed, "catmullrom", 0.5);
-      const steps = Math.max(2, Math.ceil(curve.getLength() / Math.max(1, halfW)));
-      for (const p of curve.getSpacedPoints(steps)) stampCircle(p.x, p.z, halfW);
+    for (const ch of app.getRiverChannels?.() ?? []) {
+      for (let i = 0; i < ch.count; i++) stampCircle(ch.x[i], ch.z[i], ch.width[i] * 0.5);
     }
   }
 

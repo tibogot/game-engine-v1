@@ -157,6 +157,38 @@ export function createRiverV2ToolState() {
 }
 
 /**
+ * The stylized surface (riverV2StylizedMaterial.js — the old River tool's
+ * "Stylized v1", same default look). Used only when water.style is "stylized";
+ * saved with the rest of the water state either way.
+ */
+export const RIVER_STYLIZED_DEFAULTS = {
+  styDarkColor: "#1a4a6a",
+  styBodyColor: "#5dbfaa",
+  styShimmerColor: "#00fff4",
+  styFoamColor: "#ffffff",
+  styStreakColor: "#ffffff",
+  styOpacity: 0.88,
+  /** Pattern lengths per second (the old tool's units). */
+  styFlowSpeed: 0.15,
+  /** Metres of river one pattern repeat covers along the flow. The old tool
+   *  stretched one repeat over the whole river, whatever its length. */
+  styPatternLength: 100,
+  /** How much the dark/body noise gradient shows. */
+  styDepthStrength: 0.55,
+  /** The cyan band down the middle. */
+  styShimmer: 0.08,
+  /** Fraction of the width, from each bank, that grows foam. */
+  styFoamWidth: 0.18,
+  styFoamInner: 0.5,
+  styFoamOuter: 0.8,
+  /** Lower = more, bigger foam blobs. */
+  styFoamThreshold: 0.12,
+  styStreaks: 0.9,
+  /** Lower = more streak lines. */
+  styStreakThreshold: 0.12,
+};
+
+/**
  * River surface appearance. Deliberately NOT depthWaterState: the lake's set
  * carries shore foam and pulse rings a river has no use for, and this one
  * carries a flow model and whitewater a lake has no use for. Same shading
@@ -164,6 +196,10 @@ export function createRiverV2ToolState() {
  */
 export function createRiverWaterState(overrides = {}) {
   return {
+    /** "realistic" (riverV2Material.js) or "stylized" (riverV2StylizedMaterial.js). */
+    style: "realistic",
+    ...RIVER_STYLIZED_DEFAULTS,
+
     // Beer-Lambert. A river is shallow and reads greener/browner than a lake.
     absorptionR: 0.42,
     absorptionG: 0.14,

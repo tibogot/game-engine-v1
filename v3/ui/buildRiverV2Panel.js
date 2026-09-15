@@ -6,7 +6,7 @@
  * The node section is first because per-node width and level are the two
  * controls the tool exists for.
  */
-import { section as _section, slider as _slider, color as _color, toggle as _toggle, button as _button, hint as _hint } from "./widgets.js";
+import { section as _section, slider as _slider, color as _color, toggle as _toggle, button as _button, hint as _hint, dropdown as _dropdown } from "./widgets.js";
 import { uiById } from "./uiRoot.js";
 
 /**
@@ -235,103 +235,145 @@ export function buildRiverV2Panel(app) {
     _slider(sd, p.sand, "detail", { label: "Keep ground detail", min: 0, max: 1, step: 0.01, onChange: onSand,
       hint: "Multiplies the sand by the ground's own luminance so the painted texture reads through instead of going flat." });
 
-    // ── Water colour ────────────────────────────────────────────────────────
-    const wc = _section(panel, "Water colour", false);
-    _hint(wc, "Beer-Lambert absorption, per channel. Thickness comes from the depth buffer, so the shoreline is pixel-exact against terrain, rocks and anything else standing in the water.");
-    _slider(wc, w, "absorptionR", { label: "Absorb R", min: 0, max: 1, step: 0.01, onChange: onMat });
-    _slider(wc, w, "absorptionG", { label: "Absorb G", min: 0, max: 1, step: 0.01, onChange: onMat });
-    _slider(wc, w, "absorptionB", { label: "Absorb B", min: 0, max: 1, step: 0.01, onChange: onMat });
-    _slider(wc, w, "absorptionScale", { label: "Absorb scale", min: 0, max: 60, step: 0.5, onChange: onMat });
-    _color(wc, w, "inscatterTint", { label: "Inscatter tint", onChange: onMat });
-    _slider(wc, w, "inscatterStrength", { label: "Inscatter", min: 0, max: 3, step: 0.01, onChange: onMat });
-    _slider(wc, w, "depthDistance", { label: "Depth distance (m)", min: 0.3, max: 30, step: 0.1, onChange: onMat,
-      hint: "Metres of water over which absorption reaches full strength. A river wants ~3." });
+    // ── Water look ──────────────────────────────────────────────────────────
+    const stylized = w.style === "stylized";
+    const lk = _section(panel, "Water look", true);
+    _dropdown(lk, w, "style", {
+      label: "Style",
+      options: [["realistic", "Realistic"], ["stylized", "Stylized"]],
+      onChange: () => { onMat(); refresh(); },
+      hint: "Realistic: refraction, depth absorption, reflections, waves and whitewater. Stylized: the old River tool's Stylized v1 — flat colours, a shimmer band, blobby bank foam and sharp white streaks. Same river, only the surface changes.",
+    });
+    if (stylized) {
+      _color(lk, w, "styDarkColor", { label: "Dark", onChange: onMat });
+      _color(lk, w, "styBodyColor", { label: "Body", onChange: onMat });
+      _color(lk, w, "styShimmerColor", { label: "Shimmer", onChange: onMat });
+      _color(lk, w, "styFoamColor", { label: "Foam", onChange: onMat });
+      _color(lk, w, "styStreakColor", { label: "Streaks", onChange: onMat });
+      _slider(lk, w, "styOpacity", { label: "Opacity", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(lk, w, "styFlowSpeed", { label: "Flow speed", min: 0, max: 1, step: 0.005, onChange: onMat,
+        hint: "Pattern repeats per second, downstream." });
+      _slider(lk, w, "styPatternLength", { label: "Pattern length (m)", min: 10, max: 600, step: 1, onChange: onMat,
+        hint: "Metres of river one repeat of the pattern covers. Longer = longer streaks and foam." });
+      _slider(lk, w, "styDepthStrength", { label: "Colour variation", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(lk, w, "styShimmer", { label: "Shimmer", min: 0, max: 1, step: 0.01, onChange: onMat,
+        hint: "The light band down the middle of the river." });
+      _slider(lk, w, "styFoamWidth", { label: "Foam width", min: 0, max: 0.5, step: 0.01, onChange: onMat,
+        hint: "Fraction of the river width, from each bank." });
+      _slider(lk, w, "styFoamInner", { label: "Foam (left bank)", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(lk, w, "styFoamOuter", { label: "Foam (right bank)", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(lk, w, "styFoamThreshold", { label: "Foam amount", min: 0, max: 0.6, step: 0.005, onChange: onMat,
+        hint: "Higher = more and bigger foam blobs." });
+      _slider(lk, w, "styStreaks", { label: "Streaks", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(lk, w, "styStreakThreshold", { label: "Streak amount", min: 0, max: 0.6, step: 0.005, onChange: onMat,
+        hint: "Higher = more streak lines." });
+    }
+
+    if (!stylized) {
+      // ── Water colour ────────────────────────────────────────────────────────
+      const wc = _section(panel, "Water colour", false);
+      _hint(wc, "Beer-Lambert absorption, per channel. Thickness comes from the depth buffer, so the shoreline is pixel-exact against terrain, rocks and anything else standing in the water.");
+      _slider(wc, w, "absorptionR", { label: "Absorb R", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(wc, w, "absorptionG", { label: "Absorb G", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(wc, w, "absorptionB", { label: "Absorb B", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(wc, w, "absorptionScale", { label: "Absorb scale", min: 0, max: 60, step: 0.5, onChange: onMat });
+      _color(wc, w, "inscatterTint", { label: "Inscatter tint", onChange: onMat });
+      _slider(wc, w, "inscatterStrength", { label: "Inscatter", min: 0, max: 3, step: 0.01, onChange: onMat });
+      _slider(wc, w, "depthDistance", { label: "Depth distance (m)", min: 0.3, max: 30, step: 0.1, onChange: onMat,
+        hint: "Metres of water over which absorption reaches full strength. A river wants ~3." });
+    }
 
     // ── Surface ─────────────────────────────────────────────────────────────
     const sf = _section(panel, "Surface", false);
-    _hint(sf, "Two normal layers, each advected in two half-period phases and cross-faded. That is what lets neighbouring fragments move at different speeds without tearing the texture apart.");
-    _slider(sf, w, "normalTiling", { label: "Ripple tiling", min: 0.005, max: 0.5, step: 0.005, onChange: onMat,
-      hint: "Repeats per metre." });
-    _slider(sf, w, "normalStrength", { label: "Ripple strength", min: 0, max: 1, step: 0.01, onChange: onMat });
-    _slider(sf, w, "normalTiling2", { label: "Swell tiling", min: 0.002, max: 0.2, step: 0.002, onChange: onMat });
-    _slider(sf, w, "normalStrength2", { label: "Swell strength", min: 0, max: 1, step: 0.01, onChange: onMat });
+    if (!stylized) {
+      _hint(sf, "Two normal layers, each advected in two half-period phases and cross-faded. That is what lets neighbouring fragments move at different speeds without tearing the texture apart.");
+      _slider(sf, w, "normalTiling", { label: "Ripple tiling", min: 0.005, max: 0.5, step: 0.005, onChange: onMat,
+        hint: "Repeats per metre." });
+      _slider(sf, w, "normalStrength", { label: "Ripple strength", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(sf, w, "normalTiling2", { label: "Swell tiling", min: 0.002, max: 0.2, step: 0.002, onChange: onMat });
+      _slider(sf, w, "normalStrength2", { label: "Swell strength", min: 0, max: 1, step: 0.01, onChange: onMat });
+    }
     _slider(sf, w, "advectPeriod", { label: "Advect period (s)", min: 0.2, max: 6, step: 0.05, onChange: onMat,
       hint: "Seconds before each phase resets. Longer is smoother but stretches more; shorter is crisper but the cross-fade starts to pulse." });
     _slider(sf, w, "flowBias", { label: "Speed bias (m/s)", min: -2, max: 6, step: 0.05, onChange: onMat,
       hint: "Added to the solved velocity everywhere, for art direction." });
-    _hint(sf, "Displacement is real geometry, so it reads at eye level and in silhouette. Swell drifts downstream at one speed for the whole river (a per-station speed shears the wave apart over time); standing waves do not drift at all — that is what makes them standing — and appear only where the solved flow is already breaking.");
-    _toggle(sf, w, "waveEnabled", { label: "Surface waves", onChange: onMat });
-    _slider(sf, w, "swellAmplitude", { label: "Swell height (m)", min: 0, max: 0.6, step: 0.005, onChange: onMat });
-    _slider(sf, w, "swellLength", { label: "Swell length (m)", min: 0.5, max: 40, step: 0.1, onChange: onMat });
-    _slider(sf, w, "swellSpeed", { label: "Swell drift (m/s)", min: 0, max: 8, step: 0.05, onChange: onMat });
-    _slider(sf, w, "standingAmplitude", { label: "Standing waves (m)", min: 0, max: 1.5, step: 0.01, onChange: onMat,
-      hint: "Height at full turbulence. Appears only where the solved flow is already breaking." });
-    _slider(sf, w, "standingLength", { label: "Standing spacing (x depth)", min: 1, max: 25, step: 0.25, onChange: onMat,
-      hint: "Crest spacing as a multiple of the local depth. A fast river is shallow, and its wave train spaces itself off the depth — the deep-water v-squared formula asks for tens of metres here and reads as ocean swell." });
+    if (!stylized) {
+      _hint(sf, "Displacement is real geometry, so it reads at eye level and in silhouette. Swell drifts downstream at one speed for the whole river (a per-station speed shears the wave apart over time); standing waves do not drift at all — that is what makes them standing — and appear only where the solved flow is already breaking.");
+      _toggle(sf, w, "waveEnabled", { label: "Surface waves", onChange: onMat });
+      _slider(sf, w, "swellAmplitude", { label: "Swell height (m)", min: 0, max: 0.6, step: 0.005, onChange: onMat });
+      _slider(sf, w, "swellLength", { label: "Swell length (m)", min: 0.5, max: 40, step: 0.1, onChange: onMat });
+      _slider(sf, w, "swellSpeed", { label: "Swell drift (m/s)", min: 0, max: 8, step: 0.05, onChange: onMat });
+      _slider(sf, w, "standingAmplitude", { label: "Standing waves (m)", min: 0, max: 1.5, step: 0.01, onChange: onMat,
+        hint: "Height at full turbulence. Appears only where the solved flow is already breaking." });
+      _slider(sf, w, "standingLength", { label: "Standing spacing (x depth)", min: 1, max: 25, step: 0.25, onChange: onMat,
+        hint: "Crest spacing as a multiple of the local depth. A fast river is shallow, and its wave train spaces itself off the depth — the deep-water v-squared formula asks for tens of metres here and reads as ocean swell." });
+    }
     _slider(sf, p, "meshStep", { label: "Mesh step (m)", min: 0.25, max: 5, step: 0.05,
       onChange: () => { sys.rebuildMeshes(); },
       hint: "Metres between rows of the water surface. Waves cannot be finer than this." });
     _slider(sf, p, "meshAcross", { label: "Mesh columns", min: 2, max: 48, step: 1,
       onChange: () => { sys.rebuildMeshes(); },
       hint: "Columns across the ribbon." });
-    _slider(sf, w, "streakStrength", { label: "Flow streaks", min: 0, max: 0.6, step: 0.01, onChange: onMat,
-      hint: "Faint lengthwise banding — what reads as moving water even on a calm reach." });
-    _slider(sf, w, "streakScale", { label: "Streak scale", min: 0.05, max: 2, step: 0.01, onChange: onMat });
+    if (!stylized) {
+      _slider(sf, w, "streakStrength", { label: "Flow streaks", min: 0, max: 0.6, step: 0.01, onChange: onMat,
+        hint: "Faint lengthwise banding — what reads as moving water even on a calm reach." });
+      _slider(sf, w, "streakScale", { label: "Streak scale", min: 0.05, max: 2, step: 0.01, onChange: onMat });
 
-    // ── Whitewater ──────────────────────────────────────────────────────────
-    const ww = _section(panel, "Whitewater", false);
-    _hint(ww, "Three sources sharing one advected noise field: rapids from the solved slope and speed, shallows from the depth buffer, and wakes found by looking upstream in screen space — which is what puts foam behind a rock without any per-object work.");
-    _toggle(ww, w, "foamEnabled", { label: "Enabled", onChange: onMat });
-    _color(ww, w, "foamColor", { label: "Colour", onChange: onMat });
-    _slider(ww, w, "turbulence", { label: "Rapids", min: 0, max: 3, step: 0.01, onChange: onMat,
-      hint: "Whitewater from the reach's own slope × speed." });
-    _slider(ww, w, "turbulenceCutoff", { label: "Rapids threshold", min: 0, max: 0.95, step: 0.01, onChange: onMat,
-      hint: "Turbulence below this contributes nothing, so calm reaches stay glassy." });
-    _slider(ww, w, "shallows", { label: "Shallows", min: 0, max: 3, step: 0.01, onChange: onMat,
-      hint: "Foam where the water is thin — bank edges and gravel bars." });
-    _slider(ww, w, "shallowDepth", { label: "Shallow depth (m)", min: 0.02, max: 3, step: 0.01, onChange: onMat });
-    _slider(ww, w, "wake", { label: "Obstacle wake", min: 0, max: 3, step: 0.01, onChange: onMat,
-      hint: "Foam trailing behind rocks, piers, the player — anything solid standing in the river." });
-    _slider(ww, w, "wakeDistance", { label: "Wake reach (m)", min: 0.3, max: 12, step: 0.1, onChange: onMat,
-      hint: "How far upstream the test looks. Roughly the length of the foam tail." });
-    _slider(ww, w, "foamScale", { label: "Noise scale", min: 0.05, max: 3, step: 0.01, onChange: onMat,
-      hint: "Cells per metre, in flow space — so the foam travels with the current." });
-    _slider(ww, w, "foamBreakup", { label: "Breakup", min: 0, max: 1, step: 0.01, onChange: onMat,
-      hint: "How hard the noise chews holes in the foam. 0 = flat white, even where the water is genuinely churning." });
-    _slider(ww, w, "foamContrast", { label: "Breakup contrast", min: 0.5, max: 5, step: 0.05, onChange: onMat,
-      hint: "Stretches the noise so it swings the full range. Low values leave it hovering near its mean, which is what makes saturated foam read as milk." });
-    _slider(ww, w, "foamSharpness", { label: "Sharpness", min: 0.2, max: 4, step: 0.01, onChange: onMat });
-    _slider(ww, w, "foamCutoff", { label: "Cutoff", min: 0, max: 1, step: 0.01, onChange: onMat });
-    _slider(ww, w, "foamTransition", { label: "Edge softness", min: 0.01, max: 0.5, step: 0.005, onChange: onMat });
+      // ── Whitewater ──────────────────────────────────────────────────────────
+      const ww = _section(panel, "Whitewater", false);
+      _hint(ww, "Three sources sharing one advected noise field: rapids from the solved slope and speed, shallows from the depth buffer, and wakes found by looking upstream in screen space — which is what puts foam behind a rock without any per-object work.");
+      _toggle(ww, w, "foamEnabled", { label: "Enabled", onChange: onMat });
+      _color(ww, w, "foamColor", { label: "Colour", onChange: onMat });
+      _slider(ww, w, "turbulence", { label: "Rapids", min: 0, max: 3, step: 0.01, onChange: onMat,
+        hint: "Whitewater from the reach's own slope × speed." });
+      _slider(ww, w, "turbulenceCutoff", { label: "Rapids threshold", min: 0, max: 0.95, step: 0.01, onChange: onMat,
+        hint: "Turbulence below this contributes nothing, so calm reaches stay glassy." });
+      _slider(ww, w, "shallows", { label: "Shallows", min: 0, max: 3, step: 0.01, onChange: onMat,
+        hint: "Foam where the water is thin — bank edges and gravel bars." });
+      _slider(ww, w, "shallowDepth", { label: "Shallow depth (m)", min: 0.02, max: 3, step: 0.01, onChange: onMat });
+      _slider(ww, w, "wake", { label: "Obstacle wake", min: 0, max: 3, step: 0.01, onChange: onMat,
+        hint: "Foam trailing behind rocks, piers, the player — anything solid standing in the river." });
+      _slider(ww, w, "wakeDistance", { label: "Wake reach (m)", min: 0.3, max: 12, step: 0.1, onChange: onMat,
+        hint: "How far upstream the test looks. Roughly the length of the foam tail." });
+      _slider(ww, w, "foamScale", { label: "Noise scale", min: 0.05, max: 3, step: 0.01, onChange: onMat,
+        hint: "Cells per metre, in flow space — so the foam travels with the current." });
+      _slider(ww, w, "foamBreakup", { label: "Breakup", min: 0, max: 1, step: 0.01, onChange: onMat,
+        hint: "How hard the noise chews holes in the foam. 0 = flat white, even where the water is genuinely churning." });
+      _slider(ww, w, "foamContrast", { label: "Breakup contrast", min: 0.5, max: 5, step: 0.05, onChange: onMat,
+        hint: "Stretches the noise so it swings the full range. Low values leave it hovering near its mean, which is what makes saturated foam read as milk." });
+      _slider(ww, w, "foamSharpness", { label: "Sharpness", min: 0.2, max: 4, step: 0.01, onChange: onMat });
+      _slider(ww, w, "foamCutoff", { label: "Cutoff", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(ww, w, "foamTransition", { label: "Edge softness", min: 0.01, max: 0.5, step: 0.005, onChange: onMat });
 
-    // ── Refraction / reflection ─────────────────────────────────────────────
-    const rr = _section(panel, "Refraction / reflection", false);
-    _slider(rr, w, "refractionStrength", { label: "Refraction", min: 0, max: 0.3, step: 0.005, onChange: onMat });
-    _slider(rr, w, "fresnelScale", { label: "Fresnel scale", min: 0, max: 2, step: 0.01, onChange: onMat });
-    _slider(rr, w, "skyReflectIntensity", { label: "Sky reflect", min: 0, max: 3, step: 0.01, onChange: onMat });
-    _slider(rr, w, "shoreFade", { label: "Waterline fade (m)", min: 0, max: 1, step: 0.01, onChange: onMat });
-    _slider(rr, w, "surfaceOpacity", { label: "Surface opacity", min: 0, max: 1, step: 0.01, onChange: onMat });
+      // ── Refraction / reflection ─────────────────────────────────────────────
+      const rr = _section(panel, "Refraction / reflection", false);
+      _slider(rr, w, "refractionStrength", { label: "Refraction", min: 0, max: 0.3, step: 0.005, onChange: onMat });
+      _slider(rr, w, "fresnelScale", { label: "Fresnel scale", min: 0, max: 2, step: 0.01, onChange: onMat });
+      _slider(rr, w, "skyReflectIntensity", { label: "Sky reflect", min: 0, max: 3, step: 0.01, onChange: onMat });
+      _slider(rr, w, "shoreFade", { label: "Waterline fade (m)", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(rr, w, "surfaceOpacity", { label: "Surface opacity", min: 0, max: 1, step: 0.01, onChange: onMat });
 
-    const ssr = _section(panel, "Screen-space reflections", false);
-    _hint(ssr, "Marches the reflected ray against the depth buffer the refraction already grabbed, so only the march costs. Off-screen rays fall back to the sky gradient.");
-    if (app.waterGlobals) {
-      _toggle(ssr, app.waterGlobals, "ssrMaster", { label: "SSR — all water", onChange: onMat,
-        hint: "Master switch across every lake and river at once. This is the perf lever." });
+      const ssr = _section(panel, "Screen-space reflections", false);
+      _hint(ssr, "Marches the reflected ray against the depth buffer the refraction already grabbed, so only the march costs. Off-screen rays fall back to the sky gradient.");
+      if (app.waterGlobals) {
+        _toggle(ssr, app.waterGlobals, "ssrMaster", { label: "SSR — all water", onChange: onMat,
+          hint: "Master switch across every lake and river at once. This is the perf lever." });
+      }
+      _toggle(ssr, w, "ssrEnabled", { label: "SSR — rivers", onChange: onMat });
+      _slider(ssr, w, "ssrStrength", { label: "Strength", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(ssr, w, "ssrMaxDistance", { label: "Max distance (m)", min: 5, max: 200, step: 1, onChange: onMat });
+      _slider(ssr, w, "ssrThickness", { label: "Thickness", min: 0.05, max: 10, step: 0.05, onChange: onMat });
+      _slider(ssr, w, "ssrEdgeFade", { label: "Edge fade", min: 0, max: 0.5, step: 0.005, onChange: onMat });
+
+      // ── Sun glint ───────────────────────────────────────────────────────────
+      const gl = _section(panel, "Sun glint", false);
+      _color(gl, w, "sunColor", { label: "Sun colour", onChange: onMat });
+      _slider(gl, w, "shininess", { label: "Shininess", min: 1, max: 2000, step: 1, onChange: onMat });
+      _slider(gl, w, "glintStrength", { label: "Glow", min: 0, max: 20, step: 0.1, onChange: onMat });
+      _slider(gl, w, "glintFresnel", { label: "Fresnel influence", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(gl, w, "glintSpread", { label: "Spread", min: 0, max: 1, step: 0.01, onChange: onMat });
+      _slider(gl, w, "glintShoreFade", { label: "Shore fade", min: 0, max: 1, step: 0.005, onChange: onMat });
     }
-    _toggle(ssr, w, "ssrEnabled", { label: "SSR — rivers", onChange: onMat });
-    _slider(ssr, w, "ssrStrength", { label: "Strength", min: 0, max: 1, step: 0.01, onChange: onMat });
-    _slider(ssr, w, "ssrMaxDistance", { label: "Max distance (m)", min: 5, max: 200, step: 1, onChange: onMat });
-    _slider(ssr, w, "ssrThickness", { label: "Thickness", min: 0.05, max: 10, step: 0.05, onChange: onMat });
-    _slider(ssr, w, "ssrEdgeFade", { label: "Edge fade", min: 0, max: 0.5, step: 0.005, onChange: onMat });
-
-    // ── Sun glint ───────────────────────────────────────────────────────────
-    const gl = _section(panel, "Sun glint", false);
-    _color(gl, w, "sunColor", { label: "Sun colour", onChange: onMat });
-    _slider(gl, w, "shininess", { label: "Shininess", min: 1, max: 2000, step: 1, onChange: onMat });
-    _slider(gl, w, "glintStrength", { label: "Glow", min: 0, max: 20, step: 0.1, onChange: onMat });
-    _slider(gl, w, "glintFresnel", { label: "Fresnel influence", min: 0, max: 1, step: 0.01, onChange: onMat });
-    _slider(gl, w, "glintSpread", { label: "Spread", min: 0, max: 1, step: 0.01, onChange: onMat });
-    _slider(gl, w, "glintShoreFade", { label: "Shore fade", min: 0, max: 1, step: 0.005, onChange: onMat });
 
     // ── Danger zone ─────────────────────────────────────────────────────────
     if (count > 0) {
