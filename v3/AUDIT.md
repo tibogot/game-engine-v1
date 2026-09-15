@@ -623,8 +623,42 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     The OLD flower (v2 cup + alpha masks + material) is archived, unused, in
     v3/render/grass/archive/v2FlowerShape.js with how to bring it back; its
     masks stay in public/textures/flowers/.
-100. **Decals** (`v2/tools/decals`): image decals, conform to terrain, gizmo.
-     Shares work with road surface decals (57).
+100. ~~**Decals**~~ — DONE 2026-09-15: Decals mode (C), written from scratch
+     (v2's flat polygon-offset quads not used). The Unity/Unreal PROJECTED box
+     decal: back faces of an oriented box, GreaterEqual depth test (works with
+     the camera inside the box), the scene depth under each pixel rebuilt into
+     the real surface point → decal space → texture UV. Follows terrain, props,
+     roads, rocks with no decal mesh and no re-conform after sculpting. Lit by
+     the engine (MeshStandardNodeMaterial; normal from depth derivatives + an
+     optional normal map; shadows looked up at the surface point). Angle, edge
+     and depth fades; tint, opacity, roughness, priority (overlap order).
+     ONE instanced draw for every decal (one interleaved instance buffer —
+     WebGPU caps a draw at 8 vertex buffers); textures are layers of two
+     512² texture arrays, so any number of decal textures is two bindings. CPU
+     sphere-frustum cull + priority sort only when the camera or a decal moved.
+     Editor: click places (projected into the clicked surface or straight
+     down, random or camera-facing rotation, ghost box under the cursor), click
+     a decal selects it (gizmo W/E/R, Q space), Shift+click places on top,
+     Ctrl+D, Del, Esc, undo; Scene list group, Inspector, View-mode click
+     picking, Shift+F frame. Import PNG/JPG/WebP textures (+ normal maps) —
+     they ride inside the .v3proj as assets; save key `decals`, loaded by games
+     too. Files: render/decals/decalSystem.js, decalTextures.js, decalMath.js,
+     tools/decalEditor.js, ui/buildDecalPanel.js; tools/decalEditorTest.mjs.
+     Measured (1347×825, 167 overlapping decals filling the view): draw calls
+     unchanged, GPU 0.18 → 0.47 ms.
+     **Engine fix that came with it:** with Post FX off the editor drew
+     straight onto the multisampled canvas, and WebGPU cannot copy depth out of
+     a multisampled target, so any scene-depth reader (lakes, River v2, decals)
+     got the whole frame rejected ("Sample count (4) … doesn't match").
+     postFxPipeline.setSceneDepthRequired(): while water or decals exist and
+     the full post chain is off, the frame goes through a minimal chain — a
+     non-multisampled scene pass, tone mapping, FXAA. Decals sit in the opaque
+     queue at renderOrder 9 with explicit alpha blending (the transparent queue
+     had the same multisample copy problem).
+     Known limit (as Unity without rendering layers): anything opaque inside the
+     box receives the decal. Not done: decal layers/masks (receive on terrain
+     only), atlases bigger than 512² per layer, road surface decals (57) still
+     separate.
 
 ### Not ported — v3 is equal or better, or it was retired
 

@@ -99,6 +99,9 @@ import { FlowerDensity } from "../render/grass/flowerDensity.js";
 import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
 import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
+import { DecalSystem } from "../render/decals/decalSystem.js";
+import { createDecalEditor } from "../tools/decalEditor.js";
+import { buildDecalPanel } from "../ui/buildDecalPanel.js";
 import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
 import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
@@ -2144,8 +2147,12 @@ export async function startV3App(opts = {}) {
   let _onLeaveRoadMode = () => {};
   let _onGizmoDragEnd = () => {};
   let _gizmoTarget = null;
+  /** Decal mode's editing half (editor only); built after the decal system. */
+  let decalEditor = null;
+  let decalUi = null;
 
   const grassPanel = uiById("grass-panel");
+  const decalPanel = uiById("decal-panel");
   const susukiPanel = uiById("susuki-panel");
   const flowerPanel = uiById("flower-panel");
   const treePanel  = uiById("tree-panel");
@@ -2171,6 +2178,11 @@ export async function startV3App(opts = {}) {
 
   function syncFlowerPanelVisibility() {
     if (flowerPanel) flowerPanel.style.display = (editorMode === "flowers" && !playMode.active) ? "" : "none";
+  }
+
+  function syncDecalPanelVisibility() {
+    if (decalPanel) decalPanel.style.display = (editorMode === "decals" && !playMode.active) ? "" : "none";
+    decalEditor?.setActive(editorMode === "decals" && !playMode.active);
   }
 
   function syncTreePanelVisibility() {
@@ -2300,6 +2312,8 @@ export async function startV3App(opts = {}) {
     } else if (m === "spawn") {
       uCursorUV.value.set(-2, -2);
       spawnUi?.refresh();
+    } else if (m === "decals") {
+      uCursorUV.value.set(-2, -2);
     } else if (m === "props" || m === "spline"
       || m === "riverv2" || m === "road" || m === "lake" || m === "tunnel" || m === "laneRoad") {
       uCursorUV.value.set(-2, -2);
@@ -2334,6 +2348,7 @@ export async function startV3App(opts = {}) {
     syncGrassPanelVisibility();
     syncSusukiPanelVisibility();
     syncFlowerPanelVisibility();
+    syncDecalPanelVisibility();
     syncTreePanelVisibility();
     syncFoliagePanelVisibility();
     syncPropsPanelVisibility();
@@ -2378,6 +2393,7 @@ export async function startV3App(opts = {}) {
     grassPanel.style.display = "none";
     susukiPanel.style.display = "none";
     if (flowerPanel) flowerPanel.style.display = "none";
+    syncDecalPanelVisibility();
     treePanel.style.display = "none";
     foliagePanel.style.display = "none";
     propsPanel.style.display = "none";
@@ -3078,6 +3094,7 @@ export async function startV3App(opts = {}) {
   });
   tc.addEventListener("mouseUp", () => {
     syncEditorOrbitEnabled();
+    if (_gizmoTarget === "decal") decalEditor?.gizmoEnd();
     _onGizmoDragEnd();
     if (editorMode === "props") refreshPropPlacementPreview();
   });
@@ -3092,6 +3109,49 @@ export async function startV3App(opts = {}) {
     exitPlay();
     editorCamera.onPlayEnter();
     setEditorMode("view", { force: true });
+  }
+
+  // Projected decals: one instanced draw, painted onto whatever is inside each box.
+  const decalSystem = new DecalSystem({ scene, resolveUrl: (ref) => projectAssets.resolveUrl(ref) });
+  if (isEditor) {
+    decalEditor = createDecalEditor({
+      system: decalSystem,
+      scene,
+      attachGizmo: (_decal, proxy) => {
+        applyGizmoSettings();
+        tc.attach(proxy);
+        tc.enabled = true;
+        tc.visible = true;
+        _gizmoTarget = "decal";
+      },
+      detachGizmo: () => { if (_gizmoTarget === "decal") _detachGizmo(); },
+      onChanged: () => decalUi?.rebuild(),
+    });
+    if (decalPanel) decalUi = buildDecalPanel(decalPanel, {
+      system: decalSystem,
+      editor: decalEditor,
+      onImportTexture: async (file) => {
+        const ref = await projectAssets.addRef(file);
+        await decalSystem.addSlot({ name: file.name.replace(/\.[^.]+$/, ""), albedoUrl: ref, normalUrl: null });
+        decalEditor.place.slot = decalSystem.textures.slots.length - 1;
+        decalUi?.rebuild();
+      },
+      onNormalMap: async (slot, file) => {
+        await decalSystem.updateSlot(slot, { normalUrl: file ? await projectAssets.addRef(file) : null });
+        decalUi?.rebuild();
+      },
+      onRemoveSlot: async (slot) => {
+        const name = decalSystem.textures.slots[slot]?.name ?? "this texture";
+        const users = decalSystem.decals.filter((d) => d.slot === slot).length;
+        if (users && !window.confirm(`${users} decal${users === 1 ? " uses" : "s use"} “${name}”. They will switch to the first texture. Remove it?`)) return;
+        await decalSystem.removeSlot(slot);
+        decalEditor.place.slot = Math.min(decalEditor.place.slot, decalSystem.textures.slots.length - 1);
+        // Undo steps from before hold the old texture numbering.
+        decalEditor.history.reset();
+        decalUi?.rebuild();
+      },
+      onSlotRenamed: () => sceneOutliner?.update(true),
+    });
   }
 
   // Late-init systems — loop starts before these exist; noop until wired below.
@@ -3135,6 +3195,11 @@ export async function startV3App(opts = {}) {
   // v2 precompiles terrain TSL pipelines before the loop — without this WebGPU
   // can show a black viewport until async compile finishes (or fail silently).
   try {
+    // Same scene-depth rule as the frame loop (see there): the precompile frame
+    // must not draw water or decals straight onto the multisampled canvas.
+    worldEnv?.postFxPipeline?.setSceneDepthRequired(
+      decalSystem.decals.length > 0 || (lakeSystem?.lakes.length ?? 0) > 0 || (riverV2System?.rivers.length ?? 0) > 0,
+    );
     await renderer.compileAsync(scene, camera);
     if (worldEnv) worldEnv.renderFrame(0);
     else renderer.render(scene, camera);
@@ -3293,6 +3358,7 @@ export async function startV3App(opts = {}) {
       }
 
       propInstancer.update(camera, propLod);
+      decalSystem.update(camera);
       livePropManager.update(dt);
       splineSys.update(dt);
       // Cheap poll: rebuilds the spline-object BVHs only when a feature is
@@ -3340,6 +3406,12 @@ export async function startV3App(opts = {}) {
     try {
       renderer.setRenderTarget(null);
       for (const hook of _preRenderHooks) hook(dt);
+      // Water and decals read a copy of the scene depth, which cannot come out
+      // of the multisampled canvas: while any is in the scene, the frame goes
+      // through a non-multisampled scene pass even with post FX off.
+      worldEnv?.postFxPipeline?.setSceneDepthRequired(
+        decalSystem.visibleCount > 0 || (lakeSystem?.lakes.length ?? 0) > 0 || (riverV2System?.rivers.length ?? 0) > 0,
+      );
       if (!_rendererSideWork && worldEnv) {
         worldEnv.renderFrame(dt);
       } else if (!_rendererSideWork) {
@@ -3610,6 +3682,7 @@ export async function startV3App(opts = {}) {
       case "spline":  done = !!(undo ? splineSys?.undo() : splineSys?.redo()); break;
       case "road":    done = undo ? roadHistory.undo() : roadHistory.redo(); break;
       case "lake":    done = undo ? lakeHistory.undo() : lakeHistory.redo(); break;
+      case "decals":  done = !!decalEditor && (undo ? decalEditor.history.undo() : decalEditor.history.redo()); break;
     }
     if (done) return true;
     if (undo ? sculpt.undo() : sculpt.redo()) { onHistoryChange(); return true; }
@@ -3701,6 +3774,28 @@ export async function startV3App(opts = {}) {
       e.preventDefault();
       setEditorMode(editorMode === "spawn" ? "view" : "spawn");
       return;
+    }
+    // Decals — the printed C, whatever the layout.
+    if (e.key?.toLowerCase() === "c" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "decals" ? "view" : "decals");
+      return;
+    }
+    if (editorMode === "decals" && decalEditor && !playMode.active) {
+      const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+      if (e.code === "Delete" || e.code === "Backspace") { e.preventDefault(); decalEditor.deleteSelected(); return; }
+      if (e.code === "Escape") { e.preventDefault(); decalEditor.deselect(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") { e.preventDefault(); decalEditor.duplicateSelected(); return; }
+      if (plain && e.code === "KeyQ") {
+        e.preventDefault();
+        gizmoState.space = gizmoState.space === "local" ? "world" : "local";
+        applyGizmoSettings();
+        return;
+      }
+      if (plain && _gizmoTarget === "decal") {
+        const mode = { KeyW: "translate", KeyE: "rotate", KeyR: "scale" }[e.code];
+        if (mode) { e.preventDefault(); tc.setMode(mode); return; }
+      }
     }
     // Delete clears the player start while spawn mode is active.
     if (editorMode === "spawn" && !playMode.active
@@ -6099,8 +6194,9 @@ export async function startV3App(opts = {}) {
       // Sky mode, sun, clouds, fog, post FX (worldEnvironment.exportLook).
       look: worldEnv?.exportLook() ?? null,
     };
+    const decals = decalSystem.decals.length ? decalSystem.exportData() : null;
     const buf = encodeProjectFile({
-      assets:    projectAssets.collectFor({ trees: trees.slots, foliage: foliage.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers, environment }),
+      assets:    projectAssets.collectFor({ trees: trees.slots, foliage: foliage.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers, environment, decalSlots: decals?.slots }),
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
       heightmap: baseHeightmap ?? cpuHeightmap,
       splat:     splatMap.exportCombined(), // painted holes only; tunnels rebuild theirs
@@ -6114,6 +6210,7 @@ export async function startV3App(opts = {}) {
       roads:     roadSystem.exportData(),
       splines:   splineSys.exportData(),
       lakes:     lakeSystem.exportData(),
+      decals,
       riversV2,
       tunnels:   tunnelSystem?.exportData() ?? null,
       paintLayers,
@@ -6313,6 +6410,10 @@ export async function startV3App(opts = {}) {
     _flowerUndoStack.length = 0;
     _flowerRedoStack.length = 0;
     syncFlowerUniforms();
+
+    // Decals: absent means none (and the default textures).
+    await decalSystem.importData(d.decals ?? null);
+    decalEditor?.reset();
     if (flowerSystem && d.flowers) flowerState.types.forEach((t, i) => flowerSystem.rebuildType(i, t));
     flowerUi?.rebuild();
 
@@ -6732,6 +6833,7 @@ export async function startV3App(opts = {}) {
     if (_gizmoTarget === "prop" && propInstancer.hasSelection) {
       propSys.handleTransformChange();
     }
+    if (_gizmoTarget === "decal" && tc.dragging) decalEditor?.gizmoChanged();
   });
 
   // ── Props mode mouse events (v2: place click / paint brush / right-click select) ──
@@ -6979,7 +7081,19 @@ export async function startV3App(opts = {}) {
       pick: (rc) => (spawnSystem.group.visible ? raycastMeshes(rc, [spawnSystem.group]) : null),
       select: () => { setEditorMode("spawn"); },
     },
+    {
+      // A decal is picked where it is painted: the ground under the cursor lies
+      // in its box. At the ground's distance, so a prop standing on it wins.
+      kind: "decal",
+      pick: () => {
+        const th = _viewTerrainHit;
+        const d = th ? decalSystem.pick(th) : null;
+        return d ? { decal: d, distance: camera.position.distanceTo(th) } : null;
+      },
+      select: (hit) => { setEditorMode("decals"); decalEditor?.select(hit.decal.id); },
+    },
   ];
+  let _viewTerrainHit = null;
 
   /** What a View-mode click at this event would select (null for nothing). */
   function pickInView(e) {
@@ -6989,8 +7103,54 @@ export async function startV3App(opts = {}) {
     // The ground in front of an object hides it — except where the terrain has
     // a hole (a tunnel mouth), which the CPU height march cannot see.
     const terrainDist = th && splatMap.holeAt(th.x, th.z) < 0.5 ? camera.position.distanceTo(th) : Infinity;
+    _viewTerrainHit = Number.isFinite(terrainDist) ? th : null;
     return pickNearest(_viewPickRay, viewPickSources, terrainDist);
   }
+
+  // ── Decal mode mouse events ───────────────────────────────────────────────
+  // Surfaces a decal can go on: the terrain, props, roads and tunnels. Hover
+  // (every mouse move) skips the road/tunnel meshes, which have no BVH.
+  const _decalRay = new THREE.Raycaster();
+  function getDecalSurfaceHit(e, { meshes = true } = {}) {
+    refreshMouse(e);
+    _decalRay.setFromCamera(mouse, camera);
+    let best = null;
+    const consider = (point, normal, distance) => {
+      if (point && (!best || distance < best.distance)) best = { point: point.clone(), normal: normal ? normal.clone() : null, distance };
+    };
+    const th = getTerrainHitWorld(e);
+    if (th && splatMap.holeAt(th.x, th.z) < 0.5) consider(th, sampleTerrainNormal(th.x, th.z), camera.position.distanceTo(th));
+    const ph = propInstancer.raycast?.(_decalRay);
+    if (ph) consider(ph.point, ph.normal, ph.distance);
+    if (meshes) {
+      const list = [
+        ...(roadSystem ? roadSystem.roadGroup.children.filter((m) => m.isMesh && m.visible) : []),
+        ...(tunnelSystem?.tunnels.map((t) => t.mesh).filter(Boolean) ?? []),
+      ];
+      for (const m of list) {
+        const h = _decalRay.intersectObject(m, true)[0];
+        if (h) consider(h.point, h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : null, h.distance);
+      }
+    }
+    // Double-sided hits can report the back face: turn the normal to the camera.
+    if (best?.normal && best.normal.dot(_decalRay.ray.direction) > 0) best.normal.negate();
+    return best;
+  }
+
+  renderer.domElement.addEventListener("mousemove", (e) => {
+    if (!decalEditor || playMode.active || editorMode !== "decals") return;
+    decalEditor.hover(tc.dragging ? null : getDecalSurfaceHit(e, { meshes: false }), camera, { shift: e.shiftKey });
+  });
+  renderer.domElement.addEventListener("mousedown", (e) => {
+    if (!decalEditor || playMode.active || editorMode !== "decals" || e.button !== 0) return;
+    // A press on a gizmo handle belongs to the gizmo.
+    if (tc.dragging || (_gizmoTarget === "decal" && tc.axis)) return;
+    const did = decalEditor.click(getDecalSurfaceHit(e), camera, { shift: e.shiftKey });
+    if (did) {
+      e.preventDefault();
+      decalEditor.hover(null, camera);
+    }
+  });
 
   renderer.domElement.addEventListener("mousedown", e => {
     if (e.button === 0 && editorMode === "view" && !playMode.active) _viewClick.down(e);
@@ -7119,6 +7279,16 @@ export async function startV3App(opts = {}) {
       })),
     });
 
+    const decals = decalSystem.decals;
+    groups.push({
+      key: "decals", label: "Decals", icon: "stamp", count: decals.length,
+      items: decals.slice(0, 300).map((d) => ({
+        key: `decal:${d.id}`, label: `${decalSystem.textures.slots[d.slot]?.name ?? "Decal"} #${d.id}`,
+        sub: `${d.px.toFixed(0)}, ${d.pz.toFixed(0)}`,
+        selected: editorMode === "decals" && decalEditor?.selectedId === d.id,
+      })),
+    });
+
     const roadNodes = roadSystem?.nodes?.length ?? 0;
     groups.push({
       key: "roads", label: "Roads", icon: "route", count: roadNodes ? 1 : 0,
@@ -7143,6 +7313,7 @@ export async function startV3App(opts = {}) {
       (riverV2System?.rivers ?? []).map((r) => `${r.nodes.length}${_hiddenMeshes.has(r) ? "h" : ""}`).join(";"), riverV2Slice.riverV2.activeRiverIndex,
       (lakeSystem?.lakes ?? []).map((l) => `${l.sizeX | 0}${l.sizeZ | 0}${_hiddenMeshes.has(l) ? "h" : ""}`).join(";"), lakeToolSlice.lake.activeIndex,
       roadSystem?.nodes?.length ?? 0, _roadsHidden, spawnSystem.placed,
+      decalSystem.decals.map((d) => `${d.id}${d.slot}${d.px | 0}${d.pz | 0}`).join(";"), decalEditor?.selectedId,
     ].join("|");
   }
 
@@ -7181,6 +7352,8 @@ export async function startV3App(opts = {}) {
       case "lake": setEditorMode("lake"); lakeSystem.setActiveIndex(i); lakeUi?.refresh(); break;
       case "roads": case "road": setEditorMode("road"); break;
       case "spawn": case "spawnPoint": setEditorMode("spawn"); break;
+      case "decals": setEditorMode("decals"); break;
+      case "decal": setEditorMode("decals"); decalEditor?.select(i); break;
       // Environment entries change no tool; they only open in the Inspector.
     }
   }
@@ -7205,6 +7378,7 @@ export async function startV3App(opts = {}) {
       case "lake": return lakeSystem?.lakes.length ? `lake:${lakeToolSlice.lake.activeIndex | 0}` : null;
       case "road": return roadSystem?.nodes.length ? "road" : null;
       case "spawn": return spawnSystem.placed ? "spawnPoint" : null;
+      case "decals": return decalEditor?.selectedId != null ? `decal:${decalEditor.selectedId}` : null;
       default: return null;
     }
   }
@@ -7231,6 +7405,12 @@ export async function startV3App(opts = {}) {
       case "lake": { const m = lakeSystem.lakes[i]?.mesh; if (m) box.setFromObject(m); break; }
       case "road": case "roads": if (roadSystem) box.setFromObject(roadSystem.roadGroup); break;
       case "spawn": case "spawnPoint": if (spawnSystem.placed) box.setFromObject(spawnSystem.group); break;
+      case "decal": case "decals":
+        for (const d of decalSystem.decals) {
+          if (kind === "decal" && d.id !== i) continue;
+          box.union(_frameTmp.set(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5)).applyMatrix4(decalSystem.matrixOf(d)));
+        }
+        break;
       case "terrain": box.set(new THREE.Vector3(-WORLD_SIZE / 2, 0, -WORLD_SIZE / 2), new THREE.Vector3(WORLD_SIZE / 2, MAX_HEIGHT * 0.3, WORLD_SIZE / 2)); break;
     }
     return box.isEmpty() ? null : box;
@@ -7267,6 +7447,7 @@ export async function startV3App(opts = {}) {
     else if (editorMode === "lake" && lakeSystem?.lakes.length) key = `lake:${lakeToolSlice.lake.activeIndex | 0}`;
     else if (editorMode === "road") key = "road";
     else if (editorMode === "spawn") key = "spawnPoint";
+    else if (editorMode === "decals" && decalEditor?.selectedId != null) key = `decal:${decalEditor.selectedId}`;
     return key ? frameBounds(sceneObjectBounds(key)) : false;
   }
 
@@ -7379,6 +7560,8 @@ export async function startV3App(opts = {}) {
         return [inspect, focus, hide, { label: "Edit in Road tool", onClick: () => { setEditorMode("road"); openRightTab("tools"); } }];
       case "spawnPoint":
         return [inspect, focus, sep, del("Clear", () => { spawnSystem.clear(); spawnUi?.refresh(); afterDelete(); })];
+      case "decal":
+        return [inspect, focus, sep, del("Delete", () => { decalEditor?.deleteId(i); afterDelete(); })];
       case "sun": case "sky": case "fog": case "terrain":
         return [inspect, { label: "Open World tab", onClick: () => openRightTab("world") }].slice(0, kind === "terrain" ? 1 : 2);
       default:
@@ -7440,6 +7623,7 @@ export async function startV3App(opts = {}) {
         changed: () => {},
       },
       lakes: { system: lakeSystem, history: lakeHistory, slice: lakeToolSlice.lake, get ui() { return lakeUi; } },
+      decals: { system: decalSystem, editor: decalEditor },
       tunnels: { system: tunnelSystem, get ui() { return tunnelUi; } },
       rivers: { system: riverV2System },
       road: { get system() { return roadSystem; } },
@@ -7456,6 +7640,7 @@ export async function startV3App(opts = {}) {
         tunnels: { label: "Tunnels & caves", mode: "tunnel", count: () => tunnelSystem?.tunnels.length ?? 0 },
         rivers: { label: "Rivers", mode: "riverv2", count: () => riverV2System?.rivers.length ?? 0 },
         lakes: { label: "Lakes", mode: "lake", count: () => lakeSystem?.lakes.length ?? 0 },
+        decals: { label: "Decals", mode: "decals", count: () => decalSystem.decals.length },
         roads: { label: "Roads", mode: "road", count: () => (roadSystem?.nodes.length ? 1 : 0) },
         spawn: { label: "Player start", mode: "spawn", count: () => (spawnSystem.placed ? 1 : 0) },
         environment: { label: "Environment", mode: null, count: () => 3 },
@@ -8217,6 +8402,8 @@ export async function startV3App(opts = {}) {
       snowSystem,
       get susukiSystem() { return susukiSystem; },
       get flowerSystem() { return flowerSystem; },
+      decalSystem,
+      decalEditor,
       flowerDensity,
       flowerState,
       renderer,

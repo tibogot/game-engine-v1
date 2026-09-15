@@ -351,6 +351,37 @@ export function createInspector({ container, deps }) {
       return hs.map((h) => ({ refresh() { pull(); h.refresh(); } }));
     },
 
+    decal(arg) {
+      const S = deps.decals;
+      const id = Number(arg);
+      stillExists = () => !!S.system.get(id);
+      const d = S.system.get(id);
+      if (!d) return null;
+      _title(`${S.system.textures.slots[d.slot]?.name ?? "Decal"} #${id}`, "Decal");
+      // Fields edit the decal in place, then the decal tool records the step.
+      const edited = (k) => {
+        if (S.editor.selectedId !== id) S.editor.select(id);
+        S.editor.edited(k === undefined ? null : `insp-decal-${id}-${k}`);
+      };
+      const t = section(container, "Placement", true);
+      const hs = [
+        numbers(t, d, ["px", "py", "pz"], { label: "Position", step: 0.05, onChange: () => edited(), fieldTitles: ["X", "Y", "Z"] }),
+        numbers(t, d, ["sx", "sy", "sz"], { label: "Size W/D/L", step: 0.05, min: 0.05, onChange: () => edited(), fieldTitles: ["Width", "Projection depth", "Length"] }),
+      ];
+      const l = section(container, "Look", true);
+      hs.push(
+        color(l, d, "tint", { label: "Tint", onChange: () => edited("tint") }),
+        slider(l, d, "opacity", { label: "Opacity", min: 0, max: 1, step: 0.01, onChange: () => edited("opacity") }),
+        slider(l, d, "priority", { label: "Priority", min: -10, max: 10, step: 1, onChange: () => edited("priority") }),
+      );
+      _actions(container, [
+        frameAction(`decal:${id}`),
+        toolAction("decals"),
+        { title: "Delete", onClick: () => { S.editor.deleteId(id); inspect(null); } },
+      ]);
+      return hs;
+    },
+
     group(arg) {
       const g = deps.groups[arg];
       if (!g) return null;
@@ -363,7 +394,7 @@ export function createInspector({ container, deps }) {
     },
   };
 
-  const GROUP_KEYS = new Set(["props", "tunnels", "rivers", "lakes", "roads", "spawn", "environment"]);
+  const GROUP_KEYS = new Set(["props", "tunnels", "rivers", "lakes", "decals", "roads", "spawn", "environment"]);
 
   function _empty() {
     const d = document.createElement("div");

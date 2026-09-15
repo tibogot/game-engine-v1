@@ -53,6 +53,9 @@
           <button class="toolbar-btn" data-mode="lake" title="Lake (L)">
             <i data-lucide="waves"></i>
           </button>
+          <button class="toolbar-btn" data-mode="decals" title="Decals (C)">
+            <i data-lucide="stamp"></i>
+          </button>
           <button class="toolbar-btn" data-mode="spline" title="Spline (K)">
             <i data-lucide="spline"></i>
           </button>
@@ -148,6 +151,7 @@
               <option value="riverv2">River v2 (H)</option>
               <option value="tunnel">Tunnel (O)</option>
               <option value="lake">Lake (L)</option>
+              <option value="decals">Decals (C)</option>
               <option value="road">Road (smart)</option>
               <option value="laneRoad">Lane road (preview)</option>
               <option value="snow">Snow</option>
@@ -2101,6 +2105,9 @@
         <!-- LAKE panel — built dynamically by buildLakePanel() -->
         <div id="lake-panel" style="display:none"></div>
 
+        <!-- DECAL panel — built dynamically by buildDecalPanel() -->
+        <div id="decal-panel" style="display:none"></div>
+
         <!-- ROAD panel — built dynamically by buildRoadPanel() -->
         <div id="road-panel" style="display:none"></div>
         <div id="lane-road-panel" style="display:none"></div>
@@ -2207,9 +2214,11 @@
         <div class="help-group">Props</div>
         <div><kbd>RMB</kbd> select · <kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> move / rotate / scale · <kbd>Q</kbd> local / world</div>
         <div><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> copy, paste at the cursor · <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect</div>
+        <div class="help-group">Decals</div>
+        <div><kbd>LMB</kbd> place · click a decal to select · <kbd>Shift</kbd>+click place on top · <kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> · <kbd>Q</kbd> · <kbd>Ctrl</kbd>+<kbd>D</kbd> · <kbd>Del</kbd> · <kbd>Esc</kbd></div>
         <div class="help-group">Modes (press again to return to View)</div>
         <div><kbd>V</kbd> View · <kbd>I</kbd> Props · <kbd>T</kbd> Trees · <kbd>F</kbd> Foliage · <kbd>U</kbd> Susuki · <kbd>M</kbd> Flowers · <kbd>L</kbd> Lakes</div>
-        <div><kbd>H</kbd> River v2 · <kbd>O</kbd> Tunnels (<kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate) · <kbd>K</kbd> Splines · <kbd>N</kbd> Player start</div>
+        <div><kbd>H</kbd> River v2 · <kbd>O</kbd> Tunnels (<kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate) · <kbd>K</kbd> Splines · <kbd>C</kbd> Decals · <kbd>N</kbd> Player start</div>
         <div><kbd>P</kbd> play · <kbd>Shift</kbd>+<kbd>P</kbd> play immersive · <kbd>Esc</kbd> leave play</div>
         <div class="help-group">Project</div>
         <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo (in the current mode) · <kbd>Ctrl</kbd>+<kbd>S</kbd> save</div>

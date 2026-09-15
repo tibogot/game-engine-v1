@@ -578,7 +578,11 @@ export class PropInstancer {
         if (d < bestDist && d <= far) {
           bestDist = d;
           const si = this._cacheToStore[ci];
-          best = { instIdx: si, id: this.store.instances[si]?.id, distance: d, point: _pickPoint.clone() };
+          // World-space face normal too (decals project into what was clicked).
+          const normal = hit.face?.normal
+            ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(_tmpMat)).normalize()
+            : null;
+          best = { instIdx: si, id: this.store.instances[si]?.id, distance: d, point: _pickPoint.clone(), normal };
         }
       }
     }

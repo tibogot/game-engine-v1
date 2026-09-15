@@ -6,6 +6,7 @@ import {
   mrt,
   normalView,
   output,
+  pass,
   renderOutput,
   texture,
   uniform,
@@ -108,6 +109,19 @@ export class PostFxPipeline {
     this.camera = camera;
 
     this.enabled = false;
+
+    /**
+     * SCENE DEPTH REQUIRED. Water and decals read a copy of the scene depth.
+     * WebGPU cannot copy depth out of a MULTISAMPLED framebuffer, and the plain
+     * render (post FX off) goes straight to the antialiased canvas — so there
+     * the copy failed and the whole frame was rejected. While something that
+     * needs scene depth is in the scene and the full post chain is off, the
+     * frame goes through a MINIMAL chain instead: a non-multisampled scene pass,
+     * tone mapping and FXAA for the edges. None of the user's effects switch on.
+     */
+    this._sceneDepthRequired = false;
+    /** Lazily built minimal chain: { scenePass, pipeline, linearRT, linearPipeline, displayPipeline }. */
+    this._minimal = null;
 
     /** Lazily created on first enable. */
     this._renderPipeline = null;
@@ -267,8 +281,55 @@ export class PostFxPipeline {
    * avoid paying for an empty pipeline pass.
    */
   isActive() {
+    return this._fullActive() || this._sceneDepthRequired;
+  }
+
+  _fullActive() {
     if (!this.enabled || this._renderPipeline === null) return false;
     return this._anyEffectEnabled();
+  }
+
+  /** True while the frame goes through the minimal chain (see _sceneDepthRequired). */
+  _minimalOnly() {
+    return this._sceneDepthRequired && !this._fullActive();
+  }
+
+  /**
+   * Something in the scene (water, decals) reads the scene depth this frame.
+   * Cheap to call every frame; the minimal chain is built on first need.
+   */
+  setSceneDepthRequired(required) {
+    this._sceneDepthRequired = !!required;
+    if (this._sceneDepthRequired && !this._fullActive()) this._ensureMinimal();
+  }
+
+  _ensureMinimal() {
+    if (this._minimal) return;
+    const { renderer, scene, camera } = this;
+    const scenePass = pass(scene, camera);
+    const color = scenePass.getTextureNode("output");
+
+    const pipeline = new THREE.RenderPipeline(renderer);
+    pipeline.outputColorTransform = false;
+    pipeline.outputNode = fxaa(renderOutput(color));
+
+    // Cloud path: solids → linear RT, clouds composite onto it, then display.
+    const linearRT = new THREE.RenderTarget(1, 1, {
+      depthBuffer: false,
+      type: THREE.HalfFloatType,
+      format: THREE.RGBAFormat,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+    });
+    const linearPipeline = new THREE.RenderPipeline(renderer);
+    linearPipeline.outputColorTransform = false;
+    linearPipeline.outputNode = color;
+    const displayPipeline = new THREE.RenderPipeline(renderer);
+    displayPipeline.outputColorTransform = false;
+    displayPipeline.outputNode = fxaa(renderOutput(texture(linearRT.texture)));
+
+    this._minimal = { scenePass, pipeline, linearRT, linearPipeline, displayPipeline };
+    this._resizeLinearRT();
   }
 
   _anyEffectEnabled() {
@@ -478,6 +539,7 @@ export class PostFxPipeline {
    * skip that duplicate render entirely.
    */
   getSceneDepthTexture() {
+    if (this._minimalOnly()) return this._minimal?.scenePass?.renderTarget?.depthTexture ?? null;
     return this._scenePass?.renderTarget?.depthTexture ?? null;
   }
 
@@ -488,6 +550,11 @@ export class PostFxPipeline {
 
   /** Render the post-processed frame. Caller must check `isActive()` first. */
   render() {
+    if (this._minimalOnly()) {
+      this._ensureMinimal();
+      this._minimal.pipeline.render();
+      return;
+    }
     if (!this._renderPipeline) return;
     this._renderPipeline.render();
   }
@@ -501,6 +568,10 @@ export class PostFxPipeline {
    * @param {number} dtSec
    */
   renderWithClouds(cloudSystem, anchorXZ, dtSec) {
+    if (this._minimalOnly() && cloudSystem) {
+      this._renderMinimalWithClouds(cloudSystem, anchorXZ, dtSec);
+      return;
+    }
     if (!this._renderPipeline || !cloudSystem) return;
     this._ensureBuilt();
 
@@ -601,11 +672,40 @@ export class PostFxPipeline {
     this._refreshOutputNode();
   }
 
+  /** renderWithClouds on the minimal chain — same steps, no effects. */
+  _renderMinimalWithClouds(cloudSystem, anchorXZ, dtSec) {
+    this._ensureMinimal();
+    const m = this._minimal;
+    if (!cloudSystem.prepareFrame(anchorXZ, dtSec)) {
+      m.pipeline.render();
+      return;
+    }
+    const { renderer, camera } = this;
+    const prevLayerMask = camera.layers.mask;
+    const prevTarget = renderer.getRenderTarget();
+    const prevAutoClear = renderer.autoClear;
+    try {
+      camera.layers.set(0);
+      this._resizeLinearRT();
+      renderer.setRenderTarget(m.linearRT);
+      renderer.clear();
+      m.linearPipeline.render();
+      cloudSystem.compositeOntoLinearHDR(renderer, m.linearRT);
+      renderer.setRenderTarget(null);
+      m.displayPipeline.render();
+    } finally {
+      camera.layers.mask = prevLayerMask;
+      renderer.setRenderTarget(prevTarget);
+      renderer.autoClear = prevAutoClear;
+    }
+  }
+
   _resizeLinearRT() {
-    if (!this._linearRT || !this.renderer) return;
+    if (!this.renderer) return;
     const size = new THREE.Vector2();
     this.renderer.getDrawingBufferSize(size);
-    this._linearRT.setSize(size.x, size.y);
+    if (this._linearRT) this._linearRT.setSize(size.x, size.y);
+    if (this._minimal) this._minimal.linearRT.setSize(size.x, size.y);
   }
 
   _ensureSsaoBuilt() {
