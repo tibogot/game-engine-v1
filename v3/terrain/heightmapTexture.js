@@ -7,11 +7,22 @@ import * as THREE from "three";
  * The config is resolved from localStorage HERE, at module-evaluation time,
  * before any importer runs — so every module (including module-scope constant
  * derivations) sees the configured values. Changing the size therefore means
- * writing the new config and reloading the editor (Unity semantics: terrain
+ * writing the new config and reloading the page (Unity semantics: terrain
  * resolution is a creation-time decision, resizing rebuilds the terrain).
  */
 
-const CONFIG_KEY = "v3.terrainConfig";
+/*
+ * ONE SAVED SIZE PER PAGE. The editor keeps the original key, so its size is
+ * what it always was. Every other page (each game) gets its own key: a game
+ * reloading at its level's size used to rewrite the editor's size too, and two
+ * games with different level sizes reloaded each other every time you switched.
+ */
+const CONFIG_KEY = (() => {
+  // "/game/" and "/game/index.html" are the same page.
+  const path = typeof location !== "undefined" ? location.pathname.replace(/index\.html$/, "") : "";
+  const isEditor = !path || /\/v3\/editor(\.html)?$/.test(path);
+  return isEditor ? "v3.terrainConfig" : `v3.terrainConfig:${path}`;
+})();
 
 export const TERRAIN_SIZE_LIMITS = {
   worldSize:     { min: 512,  max: 16384 },
@@ -71,8 +82,8 @@ export const SPLAT_SIZE = cfg.splatSize;
 export const MAX_HEIGHT = cfg.maxHeight;
 
 /**
- * Persist a new terrain config. Takes effect on the NEXT page load — callers
- * should reload the editor after this (and stash any pending heightmap to
+ * Persist a new terrain config for THIS page (see CONFIG_KEY). Takes effect on
+ * the NEXT page load — callers should reload after this (and stash any pending heightmap to
  * import via pendingLoad.js first).
  */
 export function saveTerrainConfig({ worldSize, heightmapSize, splatSize, maxHeight }) {

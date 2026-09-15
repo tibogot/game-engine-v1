@@ -672,11 +672,13 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
        404'd and ran on flat procedural terrain; now public/games/rts-v3/.
        Checked in a production build: reloads at the level size, 20 units,
        real heights.
-     Caveat found: the terrain size lives in localStorage shared by every page
-     on the origin, so a game reloading at its level's size also changes the
-     editor's size next time it opens (and two games with different sizes
-     each reload once when you switch). Fix later: a boot-time terrain size
-     per page instead of the shared setting.
+     Terrain size per page (FIXED 2026-09-15): the size was one localStorage
+     key for the whole site, so a game reloading at its level's size changed
+     the editor's size too, and two games with different sizes reloaded each
+     other. The editor keeps `v3.terrainConfig`; every other page saves under
+     `v3.terrainConfig:<path>` (heightmapTexture.js). Checked: editor stays
+     2048 m after the empty game reloads to 1024 m, and the game's second visit
+     does not reload.
      Still to do: runtime half (build from data,
      meshes, colliders) vs editor half (handles, brushes, undo) for lakes,
      rivers, tunnels, roads, splines, props; one engine entry file; racing-game
