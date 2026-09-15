@@ -94,6 +94,10 @@ import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage
 import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
 import { SusukiSystem, SUSUKI_DEFAULTS } from "../render/grass/susukiSystem.js";
 import { buildSusukiPanel } from "../ui/buildSusukiPanel.js";
+import { FlowerSystem } from "../render/grass/flowerSystem.js";
+import { FlowerDensity } from "../render/grass/flowerDensity.js";
+import { createFlowerState } from "./state/flowerState.js";
+import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
 import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
 import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
@@ -944,6 +948,9 @@ export async function startV3App(opts = {}) {
   // out — a GPU bake that only re-runs when the density, the ground paint or
   // a layer's flag changes. See grassTerrainData.initDensityMask.
   grassTerrainData.initDensityMask({ renderer, splatTex: splatMap.tex });
+  // Flowers: their own painted layer (one type per channel), masked the same way.
+  const flowerDensity = new FlowerDensity();
+  flowerDensity.initMask({ renderer, splatTex: splatMap.tex });
   const grassWindTex      = createWindTexture();
   const grassSpecNoiseTex = createSpecNoiseTexture();
 
@@ -986,6 +993,18 @@ export async function startV3App(opts = {}) {
   let susukiSystem = null;
   let _susukiBuilding = false;
   let susukiUi = null;
+
+  // ── Flowers (painted meadow flowers — own paint layer + instanced system) ──
+  const flowerState = createFlowerState();
+  const flowerBrush = { radius: 12, strength: 0.6, falloff: 1.5, erase: false, type: 0 };
+  let flowerSystem = null;
+  let _flowerBuilding = false;
+  let flowerUi = null;
+  // One 4 MB density snapshot per stroke, so the history is kept short. Declared
+  // up here because a project load (which can run during boot) resets it.
+  const FLOWER_UNDO_LIMIT = 16;
+  const _flowerUndoStack = [];
+  const _flowerRedoStack = [];
 
   let grassRings = null;
   let _grassBuilding = false;
@@ -1172,6 +1191,7 @@ export async function startV3App(opts = {}) {
     }
     // Susuki shares the grass wind params — keep it in step with every sync.
     syncSusukiUniforms();
+    syncFlowerUniforms();
   }
 
   // ── Susuki build/sync (lazy, like the grass rings) ─────────────────────────
@@ -1204,6 +1224,38 @@ export async function startV3App(opts = {}) {
   function syncSusukiUniforms() {
     if (!susukiSystem) return;
     susukiSystem.syncFromState(susukiState, grassState, getLightDir());
+  }
+
+  // ── Flower build/sync (lazy, like susuki) ──────────────────────────────────
+  async function ensureFlowersBuilt() {
+    if (flowerSystem || _flowerBuilding) return;
+    _flowerBuilding = true;
+    try {
+      const sys = new FlowerSystem({
+        scene,
+        renderer,
+        heightTex:        grassTerrainData.grassHeightTex,
+        terrainNormalTex: grassTerrainData.terrainNormalTex,
+        densityTex:       flowerDensity.maskedTex,
+        grassDensityTex:  grassTerrainData.grassDensityMaskedTex,
+        windTex:          grassWindTex,
+        worldSize:        WORLD_SIZE,
+        fp:               flowerState,
+        gp:               grassState,
+      });
+      await sys.init(camera);
+      sys.setEnabled(true);
+      flowerSystem = sys;
+      syncFlowerUniforms();
+    } catch (err) {
+      console.error("[V3 Flowers] build failed:", err);
+    } finally {
+      _flowerBuilding = false;
+    }
+  }
+
+  function syncFlowerUniforms() {
+    flowerSystem?.syncFromState(flowerState, grassState, getLightDir());
   }
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
@@ -2087,6 +2139,7 @@ export async function startV3App(opts = {}) {
 
   const grassPanel = uiById("grass-panel");
   const susukiPanel = uiById("susuki-panel");
+  const flowerPanel = uiById("flower-panel");
   const treePanel  = uiById("tree-panel");
   const foliagePanel = uiById("foliage-panel");
   const snowPanel  = uiById("snow-panel");
@@ -2106,6 +2159,10 @@ export async function startV3App(opts = {}) {
 
   function syncSusukiPanelVisibility() {
     susukiPanel.style.display = (editorMode === "susuki" && !playMode.active) ? "" : "none";
+  }
+
+  function syncFlowerPanelVisibility() {
+    if (flowerPanel) flowerPanel.style.display = (editorMode === "flowers" && !playMode.active) ? "" : "none";
   }
 
   function syncTreePanelVisibility() {
@@ -2220,6 +2277,10 @@ export async function startV3App(opts = {}) {
       uCursorUV.value.set(-2, -2);
       sculpt.uRadius.value = susukiBrush.radius / WORLD_SIZE;
       ensureSusukiBuilt();
+    } else if (m === "flowers") {
+      uCursorUV.value.set(-2, -2);
+      sculpt.uRadius.value = flowerBrush.radius / WORLD_SIZE;
+      ensureFlowersBuilt();
     } else if (m === "treePaint") {
       sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
     } else if (m === "foliage") {
@@ -2264,6 +2325,7 @@ export async function startV3App(opts = {}) {
     syncCliffPaintPanelVisibility();
     syncGrassPanelVisibility();
     syncSusukiPanelVisibility();
+    syncFlowerPanelVisibility();
     syncTreePanelVisibility();
     syncFoliagePanelVisibility();
     syncPropsPanelVisibility();
@@ -2307,6 +2369,7 @@ export async function startV3App(opts = {}) {
     snowPanel.style.display  = "none";
     grassPanel.style.display = "none";
     susukiPanel.style.display = "none";
+    if (flowerPanel) flowerPanel.style.display = "none";
     treePanel.style.display = "none";
     foliagePanel.style.display = "none";
     propsPanel.style.display = "none";
@@ -3162,7 +3225,11 @@ export async function startV3App(opts = {}) {
         // Grass surface rides the same gate — one bake per edit, on the GPU.
         grassTerrainData.bakeSurface();
       }
-      if (!_rendererSideWork) grassTerrainData.updateDensityMask(textureLib.blocksGrassFlags());
+      if (!_rendererSideWork) {
+        const blocksGrass = textureLib.blocksGrassFlags();
+        grassTerrainData.updateDensityMask(blocksGrass);
+        flowerDensity.updateMask(blocksGrass);
+      }
 
       bakeGrassTintIfNeeded();
       waterSurfaceMap.bakeIfNeeded(renderer);
@@ -3207,6 +3274,12 @@ export async function startV3App(opts = {}) {
           const _susukiAnchor = playMode.active ? playMode.playerPosition : camera.position;
           susukiSystem.update(_susukiAnchor, camera);
         }
+      }
+      if (flowerSystem) {
+        // Only spend compute while any flower is painted.
+        const wantFlowers = flowerDensity.hasData && _terrainVisible;
+        flowerSystem.setEnabled(wantFlowers);
+        if (wantFlowers) flowerSystem.update(playMode.active ? playMode.playerPosition : camera.position, camera);
       }
 
       propInstancer.update(camera, propLod);
@@ -3518,6 +3591,10 @@ export async function startV3App(opts = {}) {
         done = stackStep(undo ? _susukiUndoStack : _susukiRedoStack, undo ? _susukiRedoStack : _susukiUndoStack,
           () => grassTerrainData.getSusukiDensitySnapshot(), (s) => grassTerrainData.restoreSusukiDensitySnapshot(s));
         break;
+      case "flowers":
+        done = stackStep(undo ? _flowerUndoStack : _flowerRedoStack, undo ? _flowerRedoStack : _flowerUndoStack,
+          () => flowerDensity.getSnapshot(), (s) => flowerDensity.restoreSnapshot(s));
+        break;
       case "riverv2": done = !!(undo ? riverV2System?.undo() : riverV2System?.redo()); if (done) riverV2Ui?.refresh(); break;
       case "tunnel":  done = !!(undo ? tunnelSystem?.undo() : tunnelSystem?.redo()); if (done) tunnelUi?.refresh(); break;
       case "spline":  done = !!(undo ? splineSys?.undo() : splineSys?.redo()); break;
@@ -3602,6 +3679,12 @@ export async function startV3App(opts = {}) {
     if (e.code === "KeyU" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       e.preventDefault();
       setEditorMode(editorMode === "susuki" ? "view" : "susuki");
+      return;
+    }
+    // Matched on the printed key, not e.code: on AZERTY the M key is not KeyM.
+    if (e.key?.toLowerCase() === "m" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "flowers" ? "view" : "flowers");
       return;
     }
     if (e.code === "KeyN" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
@@ -6044,6 +6127,8 @@ export async function startV3App(opts = {}) {
       grassDensity:  grassTerrainData.getDensitySnapshot(),
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
       susuki:    { ...susukiState },
+      flowerDensity: flowerDensity.hasData ? flowerDensity.getSnapshot() : null,
+      flowers:   structuredClone(flowerState),
       cliffGrassDensity: grassTerrainData.getCliffDensitySnapshot(),
       cliffPaint: cliffPaintMask.getSnapshot(),
       // lodDebug is a view toggle, not the grass's look.
@@ -6200,6 +6285,25 @@ export async function startV3App(opts = {}) {
       }
       susukiUi?.refresh();
     }
+
+    // Flowers: absent in a file means none, so a flowerless project clears the
+    // previous scene's meadow. Look settings merge per key (types by index).
+    if (d.flowers) {
+      const { types, ...rest } = d.flowers;
+      Object.assign(flowerState, rest);
+      if (Array.isArray(types)) types.forEach((t, i) => { if (flowerState.types[i] && t) Object.assign(flowerState.types[i], t); });
+    }
+    if (d.flowerDensity?.length === flowerDensity.tex.image.data.length) {
+      flowerDensity.restoreSnapshot(d.flowerDensity);
+      if (flowerDensity.hasData) void ensureFlowersBuilt();
+    } else if (flowerDensity.hasData) {
+      flowerDensity.clear();
+    }
+    _flowerUndoStack.length = 0;
+    _flowerRedoStack.length = 0;
+    syncFlowerUniforms();
+    if (flowerSystem && d.flowers) flowerState.types.forEach((t, i) => flowerSystem.rebuildType(i, t));
+    flowerUi?.rebuild();
 
     // Ground-paint slots: which material each layer uses, its tiling and its
     // auto-paint rules. Awaits the boot-time default preload internally, so a
@@ -7841,6 +7945,82 @@ export async function startV3App(opts = {}) {
     susukiUi?.refresh();
   }, { passive: false, capture: true });
 
+  // ── Flower mode: panel + paint events ──────────────────────────────────────
+  let _flowerPainting = false;
+
+  function _pushFlowerUndo() {
+    _flowerUndoStack.push(flowerDensity.getSnapshot());
+    if (_flowerUndoStack.length > FLOWER_UNDO_LIMIT) _flowerUndoStack.shift();
+    _flowerRedoStack.length = 0;
+  }
+
+  if (isEditor && flowerPanel) flowerUi = buildFlowerPanel(flowerPanel, {
+    flowerBrush,
+    flowerState,
+    onBrushChanged: () => { sculpt.uRadius.value = flowerBrush.radius / WORLD_SIZE; },
+    onStateChanged: () => syncFlowerUniforms(),
+    onGeometryChanged: (i) => flowerSystem?.rebuildType(i, flowerState.types[i]),
+    onFill:  (type) => { _pushFlowerUndo(); flowerDensity.fill(type); void ensureFlowersBuilt(); },
+    onClear: () => { _pushFlowerUndo(); flowerDensity.clear(); },
+  });
+
+  function _flowerPaintXZ(e) {
+    refreshMouse(e);
+    const hit = getUV();
+    uCursorUV.value.set(hit ? hit.u : -2, hit ? hit.v : -2);
+    if (!hit) return null;
+    return { wx: hit.u * WORLD_SIZE - WORLD_SIZE / 2, wz: hit.v * WORLD_SIZE - WORLD_SIZE / 2 };
+  }
+
+  function _stampFlowers(wx, wz, altErase) {
+    flowerDensity.stamp({
+      cx: wx, cz: wz,
+      radius:    flowerBrush.radius,
+      strength:  flowerBrush.strength,
+      falloff:   flowerBrush.falloff,
+      worldSize: WORLD_SIZE,
+      channel:   flowerBrush.type,
+      erase:     flowerBrush.erase || altErase,
+    });
+  }
+
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "flowers") return;
+    const pt = _flowerPaintXZ(e);
+    if (pt) sculpt.uRadius.value = flowerBrush.radius / WORLD_SIZE;
+    if (pt && _flowerPainting) _stampFlowers(pt.wx, pt.wz, e.altKey);
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "flowers" || e.button !== 0) return;
+    const pt = _flowerPaintXZ(e);
+    if (!pt) return;
+    _pushFlowerUndo();
+    _flowerPainting = true;
+    void ensureFlowersBuilt();
+    _stampFlowers(pt.wx, pt.wz, e.altKey);
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button === 0) _flowerPainting = false;
+  });
+
+  // Scroll wheel in flower mode: Shift = radius, Alt = strength
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "flowers") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      flowerBrush.radius = Math.max(1, Math.min(150, flowerBrush.radius * factor));
+      sculpt.uRadius.value = flowerBrush.radius / WORLD_SIZE;
+    } else {
+      flowerBrush.strength = Math.max(0.05, Math.min(1.0, flowerBrush.strength * factor));
+    }
+    flowerUi?.refresh();
+  }, { passive: false, capture: true });
+
   // ── Tree mode mouse events (v2 treePaint) ─────────────────────────────────
   let _treePainting = false;
   const _treeHit = new THREE.Vector3();
@@ -8023,6 +8203,9 @@ export async function startV3App(opts = {}) {
       cliffPaintMask,
       snowSystem,
       get susukiSystem() { return susukiSystem; },
+      get flowerSystem() { return flowerSystem; },
+      flowerDensity,
+      flowerState,
       renderer,
       terrainNormals,
       grassTerrainData,

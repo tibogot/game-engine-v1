@@ -545,9 +545,57 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     gizmo, saved. Do it after River v2 so falls sit on river drops.
 98. **Ambient FX:** painted butterfly and falling-leaf emitters, 3 leaf types
     with physics (`v2/core/ambientfx`). Cheap, a lot of life.
-99. **Flowers** (`v2/core/legacy/fleur-painter.js`): ground or stemmed, 3 bloom
-    shapes, colour presets, wind and interaction. Rebuild on a density map like
-    susuki rather than copying the position list.
+99. ~~**Flowers**~~ — DONE 2026-09-15: Flowers mode (M), rebuilt on the susuki
+    skeleton instead of porting v2's CPU list. Painted areas, up to 4 types
+    (one per channel of a 1024² density map; types mix), v2's bloom cup and 3
+    silhouettes, optional stems, per-type colours/size/stem, per-plant size,
+    yaw and colour jitter, shared grass wind + player push, lit by the scene,
+    "Blocks grass" layers and holes respected, undo (16 strokes), saved
+    (`flowerDensity` blob + `flowers`). ONE compute pass + ONE indirect draw
+    for every flower (v2: full CPU rebuild per stroke and per sculpt, up to 12
+    draws per 64 m chunk, no distance limit, transparent sorting, fixed light).
+    Files: render/grass/flowerSystem.js, flowerDensity.js,
+    app/state/flowerState.js, ui/buildFlowerPanel.js; tools/flowerPaintTest.mjs.
+    Not ported: exact single-flower placement (painted areas by choice).
+
+    **Flowers v2 — rebuild from scratch (user go 2026-09-15: "the best flower
+    mode with the best performance", v2's mode is not a reference).** Gaps of
+    the first version, vs Genshin / Ghost of Tsushima / UE / Unity flowers:
+    1. Shading: faceted cups (no normals), paper-cutout petals, no light
+       through petals, no shadows received (bright under trees).
+    2. Placement: even spread, no clumps and gaps.
+    3. Distance: nothing past ~85 m — fields vanish from a hill. Games tint the
+       terrain with the flower colours far away.
+    4. Shape: one textured cone; no separate curved petals, real centre, leaves,
+       variety; petals do not flutter.
+    5. Grass: stemless flowers sink into tall painted grass.
+    6. Tools: erase one type only; rules (flat only, height band, near water,
+       on a paint layer).
+    7. Alpha-tested masks: edge shimmer and no early depth rejection.
+    8. GPU cost never measured with a trace.
+    Plan: phase 1 = procedural petal geometry per type (no masks, opaque, no
+    alpha test), near/far geometry LOD chosen per plant in the compute (8 draws
+    max, one shared indirect buffer, firstInstance offsets), soft normals +
+    petal/leaf translucency + shadows near, clump noise, grass-aware height,
+    petal flutter, presets. Phase 2 = far-field terrain tint from the flower
+    density. Phase 3 = tools (per-type erase, placement rules).
+    Phase 1 DONE 2026-09-15 (to judge by eye in a real scene 👁):
+    flowerGeometry.js builds each type from numbers — curved petal strips with
+    analytic normals (pointed tips fall back to the centre-line up), optional
+    second layer, domed centre, stem, 0-3 leaves; near ~170-390 tris per
+    preset, far ~22-100. Presets: daisy, poppy, cosmos, tulip, blue star,
+    sunflower. No textures, no alpha test. flowerSystem.js: the compute picks
+    type AND near/far per plant (switch spread ±2 m) and writes one compact
+    list in 8 slices; 8 meshes share one material and one indirect buffer,
+    each draw's firstInstance = its slice. Clump noise (2 octaves),
+    grass-aware height (masked grass density × blade height), per-plant
+    size/yaw/lean/colour, petal + leaf flutter, sun translucency (emissive),
+    shadows on the near draws only, soft normals via a view-space normalNode.
+    Scene with 4 types: 13 draws total, 60 fps. GPU cost still unmeasured by
+    trace.
+    The OLD flower (v2 cup + alpha masks + material) is archived, unused, in
+    v3/render/grass/archive/v2FlowerShape.js with how to bring it back; its
+    masks stay in public/textures/flowers/.
 100. **Decals** (`v2/tools/decals`): image decals, conform to terrain, gizmo.
      Shares work with road surface decals (57).
 

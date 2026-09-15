@@ -9,7 +9,7 @@
  *   terrain   { worldSize, heightmapSize, splatSize, maxHeight }
  *             splatSize is absent in files written before it was configurable —
  *             those used splatRes = min(2048, max(256, heightmapSize / 2)).
- *   blobs     { heightmap, splat, snow, grassDensity, susukiDensity,
+ *   blobs     { heightmap, splat, snow, grassDensity, susukiDensity, flowerDensity,
  *               cliffGrassDensity, cliffPaint }
  *             → { offset, length } into the payload
  *             cliffGrassDensity: grass painted on cliff tops (RGBA 512², .r).
@@ -80,6 +80,8 @@ export function encodeProjectFile({
   grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
   susukiDensity,        // Uint8Array (RGBA 512²) painted susuki coverage
   susuki,               // susuki appearance params (JSON)
+  flowerDensity,        // Uint8Array (RGBA 1024²) painted flowers, one type per channel, or null
+  flowers,              // flower look params (JSON)
   cliffGrassDensity,    // Uint8Array (RGBA 512²) painted cliff-top grass coverage
   cliffPaint,           // Uint8Array (RGBA 512²) terrain colour painted onto cliffs
   grass,                // grass appearance params (JSON)
@@ -103,6 +105,7 @@ export function encodeProjectFile({
   addBlob("snow", snow);
   addBlob("grassDensity", grassDensity);
   addBlob("susukiDensity", susukiDensity);
+  addBlob("flowerDensity", flowerDensity);
   addBlob("cliffGrassDensity", cliffGrassDensity);
   addBlob("cliffPaint", cliffPaint);
   const assetList = [];
@@ -132,6 +135,7 @@ export function encodeProjectFile({
     environment: environment ?? null,
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
+    flowers:  flowers ?? null,
     grass:    grass ?? null,
     snowParams: snowParams ?? null,
     groundTsl: groundTsl ?? null,
@@ -203,6 +207,8 @@ export function decodeProjectFile(buffer) {
     grassDensity:  blob("grassDensity"),
     susukiDensity: blob("susukiDensity"),
     susuki:    manifest.susuki ?? null,
+    flowerDensity: blob("flowerDensity"),
+    flowers:   manifest.flowers ?? null,
     cliffGrassDensity: blob("cliffGrassDensity"),
     cliffPaint: blob("cliffPaint"),
     grass:     manifest.grass ?? null,

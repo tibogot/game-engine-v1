@@ -29,6 +29,9 @@
           <button class="toolbar-btn" data-mode="susuki" title="Susuki plumes (U)">
             <i data-lucide="wheat"></i>
           </button>
+          <button class="toolbar-btn" data-mode="flowers" title="Flowers (M)">
+            <i data-lucide="flower-2"></i>
+          </button>
           <button class="toolbar-btn" data-mode="treePaint" title="Trees (T)">
             <i data-lucide="tree-pine"></i>
           </button>
@@ -137,6 +140,7 @@
               <option value="paint">Paint</option>
               <option value="grass">Grass</option>
               <option value="susuki">Susuki (U)</option>
+              <option value="flowers">Flowers (M)</option>
               <option value="treePaint">Trees (T)</option>
               <option value="foliage">Foliage (F)</option>
               <option value="props">Props</option>
@@ -2080,6 +2084,7 @@
 
         <!-- SUSUKI panel — built dynamically by buildSusukiPanel() -->
         <div id="susuki-panel" style="display:none"></div>
+        <div id="flower-panel" style="display:none"></div>
 
         <!-- ═══════════════════════════════════════════════════════════ -->
         <!-- PROPS panel — built dynamically by buildPropsPanel() (v2 layout) -->
@@ -2198,12 +2203,12 @@
         <div><kbd>LMB</kbd> the chosen tool · hold <kbd>Shift</kbd> lower · <kbd>Ctrl</kbd> smooth · <kbd>Alt</kbd> flatten</div>
         <div class="help-group">Every brush (sculpt, paint, grass, trees, foliage, snow…)</div>
         <div><kbd>Shift</kbd>+<kbd>Scroll</kbd> brush size · <kbd>Alt</kbd>+<kbd>Scroll</kbd> strength</div>
-        <div><kbd>Alt</kbd>+paint erases (paint, trees, foliage, props, susuki, snow; on Hole: fills back in) · grass uses its Erase box</div>
+        <div><kbd>Alt</kbd>+paint erases (paint, trees, foliage, props, susuki, flowers, snow; on Hole: fills back in) · grass uses its Erase box</div>
         <div class="help-group">Props</div>
         <div><kbd>RMB</kbd> select · <kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> move / rotate / scale · <kbd>Q</kbd> local / world</div>
         <div><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> copy, paste at the cursor · <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect</div>
         <div class="help-group">Modes (press again to return to View)</div>
-        <div><kbd>V</kbd> View · <kbd>I</kbd> Props · <kbd>T</kbd> Trees · <kbd>F</kbd> Foliage · <kbd>U</kbd> Susuki · <kbd>L</kbd> Lakes</div>
+        <div><kbd>V</kbd> View · <kbd>I</kbd> Props · <kbd>T</kbd> Trees · <kbd>F</kbd> Foliage · <kbd>U</kbd> Susuki · <kbd>M</kbd> Flowers · <kbd>L</kbd> Lakes</div>
         <div><kbd>H</kbd> River v2 · <kbd>O</kbd> Tunnels (<kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate) · <kbd>K</kbd> Splines · <kbd>N</kbd> Player start</div>
         <div><kbd>P</kbd> play · <kbd>Shift</kbd>+<kbd>P</kbd> play immersive · <kbd>Esc</kbd> leave play</div>
         <div class="help-group">Project</div>
