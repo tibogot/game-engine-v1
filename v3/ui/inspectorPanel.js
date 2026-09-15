@@ -75,19 +75,19 @@ export function createInspector({ container, deps }) {
       if (deps.env.skyMode() === "procedural") {
         hint(b, "The Procedural sky's time of day places the sun, so Azimuth and Elevation follow it (see Sky).");
       }
-      // The renderer reads these every frame; only the World tab needs telling.
-      const onChange = () => deps.worldEdited();
+      // The renderer reads these every frame, and the World tab's controls
+      // follow them live, so no change callback is needed.
       const hs = [
-        slider(b, L, "sunAzimuth", { label: "Azimuth", min: 0, max: 360, step: 1, onChange }),
-        slider(b, L, "sunElevation", { label: "Elevation", min: -90, max: 90, step: 1, onChange }),
-        color(b, L, "dirColor", { label: "Sun color", onChange }),
-        slider(b, L, "dirIntensity", { label: "Intensity", min: 0, max: 5, step: 0.1, onChange }),
+        slider(b, L, "sunAzimuth", { label: "Azimuth", min: 0, max: 360, step: 1 }),
+        slider(b, L, "sunElevation", { label: "Elevation", min: -90, max: 90, step: 1 }),
+        color(b, L, "dirColor", { label: "Sun color" }),
+        slider(b, L, "dirIntensity", { label: "Intensity", min: 0, max: 5, step: 0.1 }),
       ];
       const a = section(container, "Ambient & exposure", true);
       hs.push(
-        slider(a, L, "hemiIntensity", { label: "Ambient", min: 0, max: 3, step: 0.1, onChange }),
-        slider(a, L, "envIntensity", { label: "Env map", min: 0, max: 2, step: 0.01, onChange }),
-        slider(a, L, "exposure", { label: "Exposure", min: 0.1, max: 2, step: 0.05, onChange }),
+        slider(a, L, "hemiIntensity", { label: "Ambient", min: 0, max: 3, step: 0.1 }),
+        slider(a, L, "envIntensity", { label: "Env map", min: 0, max: 2, step: 0.01 }),
+        slider(a, L, "exposure", { label: "Exposure", min: 0.1, max: 2, step: 0.05 }),
       );
       _actions(container, [{ title: "More in World tab", onClick: () => deps.openTab("world") }]);
       return hs;
@@ -102,11 +102,10 @@ export function createInspector({ container, deps }) {
       const hs = [];
       if (mode === "procedural") {
         const t = section(container, "Time of day", true);
-        const edited = () => deps.worldEdited();
         hs.push(
-          slider(t, ps, "timeOfDay", { label: "Time (h)", min: 0, max: 24, step: 0.01, onChange: () => { deps.env.setTimeOfDay(ps.timeOfDay); edited(); } }),
-          toggle(t, ps, "autoAdvance", { label: "Auto-advance", onChange: edited }),
-          slider(t, ps, "daySpeed", { label: "Day speed (h/s)", min: 0.05, max: 4, step: 0.05, onChange: edited }),
+          slider(t, ps, "timeOfDay", { label: "Time (h)", min: 0, max: 24, step: 0.01, onChange: () => deps.env.setTimeOfDay(ps.timeOfDay) }),
+          toggle(t, ps, "autoAdvance", { label: "Auto-advance" }),
+          slider(t, ps, "daySpeed", { label: "Day speed (h/s)", min: 0.05, max: 4, step: 0.05 }),
         );
       } else {
         hint(b, "Time of day, clouds and stars come with the Procedural sky. Switch the mode in the World tab.");
@@ -117,7 +116,7 @@ export function createInspector({ container, deps }) {
 
     fog() {
       const F = deps.env.fog;
-      const sync = () => { deps.env.syncFog(); deps.worldEdited(); };
+      const sync = () => deps.env.syncFog();
       _title("Fog", "World");
       const h = section(container, "Height fog", true);
       const d = section(container, "Distance fog", true);

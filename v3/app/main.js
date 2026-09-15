@@ -23,6 +23,7 @@ import { erodeDroplets, buildErosionKernel, smoothHeights } from "../terrain/glo
 import { streamPowerErode, createStreamPowerScratch } from "../terrain/streamPowerErosion.js";
 import { initEditorShell } from "../ui/editorShell.js";
 import { initPanelSplitters, createStatusBar } from "../ui/editorLayout.js";
+import { refreshWidgets } from "../ui/widgets.js";
 import { mergeKnownKeys } from "./state/mergeKnownKeys.js";
 import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
@@ -128,7 +129,7 @@ import { createSnapshotHistory } from "../tools/snapshotHistory.js";
 import { TUNNEL_DEFAULTS, CAVE_DEFAULTS } from "../tools/tunnelPath.js";
 import { buildTunnelPanel } from "../ui/buildTunnelPanel.js";
 import { createClickDetector, pickNearest, raycastMeshes, nearestXZ } from "./viewportPick.js";
-import { createSceneOutliner } from "../ui/sceneOutliner.js";
+import { createSceneOutliner, outlinerMatches } from "../ui/sceneOutliner.js";
 import { createInspector } from "../ui/inspectorPanel.js";
 import { createLakeToolState } from "./state/lakeState.js";
 import { buildLakePanel } from "../ui/buildLakePanel.js";
@@ -2345,12 +2346,6 @@ export async function startV3App(opts = {}) {
     if (btn && !btn.classList.contains("active")) btn.click();
   }
 
-  // Inspector edits change world settings the World tab shows; it rebuilds
-  // (it binds values when built) the next time it is opened.
-  let _worldPanelStale = false;
-  document.querySelector('#right-panel .tab-btn[data-tab="world"]')?.addEventListener("click", () => {
-    if (_worldPanelStale) { _worldPanelStale = false; buildWorldPanelUi(); }
-  });
 
   tbPlay.addEventListener("click", (e) => {
     if (playMode.active) exitPlay();
@@ -3070,6 +3065,7 @@ export async function startV3App(opts = {}) {
   const _lodSnapVec = new THREE.Vector3();
   let _lastFrameMs = performance.now();
   let _loopErrors = 0;
+  let _lastWidgetRefresh = 0;
   const _preRenderHooks = [];
   renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -3286,6 +3282,13 @@ export async function startV3App(opts = {}) {
         modeLabel: playMode.active ? "Playing" : (toolsModeSelect.selectedOptions[0]?.textContent ?? editorMode).replace(/\s*\([^)]*\)\s*$/, ""),
       });
     } catch (_) { /* stats overlay must never block the viewport */ }
+
+    // Panel controls follow values changed elsewhere (undo, load, presets,
+    // the Inspector, time of day advancing). A few times a second is plenty.
+    if (now - _lastWidgetRefresh >= 250 && !playMode.active) {
+      _lastWidgetRefresh = now;
+      try { refreshWidgets(); } catch (err) { if (++_loopErrors === 1) console.error("[V3] Panel refresh error:", err); }
+    }
   });
 
   // ── Ramp preview: line from the placed start point to the cursor ───────────
@@ -7073,17 +7076,21 @@ export async function startV3App(opts = {}) {
           canHide: !live, hidden: propInstancer.hiddenTypes.has(typeIdx),
           children: {
             total: n,
-            items: () => {
+            // With a search, every match (the list caps what it draws and
+            // counts the rest); without one, the first rows only.
+            items: (query = "") => {
               const out = [];
-              let k = 0;
+              const name = type?.name ?? "Prop";
               for (const p of propStore.instances) {
                 if (p.typeIdx !== typeIdx) continue;
+                const label = `${name} #${p.id}`;
+                if (query && !outlinerMatches(label, query)) continue;
                 out.push({
-                  key: `prop:${p.id}`, label: `${type?.name ?? "Prop"} #${p.id}`,
+                  key: `prop:${p.id}`, label,
                   sub: `${p.px.toFixed(0)}, ${p.pz.toFixed(0)}`, selected: selIds.has(p.id),
                   canHide: !live, hidden: propInstancer.hiddenIds.has(p.id),
                 });
-                if (++k >= 200) break;
+                if (!query && out.length >= 200) break;
               }
               return out;
             },
@@ -7301,7 +7308,94 @@ export async function startV3App(opts = {}) {
     onSelect: selectAndInspect,
     onFrame: (key) => { selectAndInspect(key); frameBounds(sceneObjectBounds(key)); },
     onToggleHidden: toggleSceneHidden,
+    getMenu: sceneRowMenu,
   });
+
+  /**
+   * Right-click menu of a Scene-list row. Deletes go through the same calls as
+   * the tools (and their undo); a delete that would be large asks first.
+   */
+  function sceneRowMenu(key) {
+    const [kind, arg] = key.split(":");
+    const i = Number(arg);
+    const inspect = { label: "Inspect", onClick: () => selectAndInspect(key) };
+    const focus = sceneObjectBounds(key) ? { label: "Focus", onClick: () => { selectAndInspect(key); frameBounds(sceneObjectBounds(key)); } } : null;
+    const hideable = ["propType", "prop", "tunnel", "river", "lake", "road"].includes(kind);
+    const isHidden = () => {
+      switch (kind) {
+        case "propType": return propInstancer.hiddenTypes.has(i);
+        case "prop": return propInstancer.hiddenIds.has(i);
+        case "tunnel": return !!tunnelSystem.tunnels[i]?.hidden;
+        case "river": return _hiddenMeshes.has(riverV2System.rivers[i]);
+        case "lake": return _hiddenMeshes.has(lakeSystem.lakes[i]);
+        case "road": return _roadsHidden;
+        default: return false;
+      }
+    };
+    const hide = hideable ? { label: isHidden() ? "Show in editor" : "Hide in editor", onClick: () => toggleSceneHidden(key) } : null;
+    const sep = { separator: true };
+    const del = (label, fn) => ({ label, danger: true, onClick: fn });
+    const afterDelete = () => { if (inspector.key === key) inspector.inspect(null); };
+
+    switch (kind) {
+      case "prop":
+        return [inspect, focus, hide, sep, del("Delete", () => {
+          const idx = propStore.indexOfId(i);
+          if (idx < 0) return;
+          setEditorMode("props");
+          activatePropSelection(idx);
+          propSys.handleDelete();
+          deactivatePropSelection();
+          refreshPropCount();
+          afterDelete();
+        })];
+      case "propType": {
+        const n = propStore.instances.reduce((c, p) => c + (p.typeIdx === i ? 1 : 0), 0);
+        return [inspect, focus, hide, sep, del(`Delete all ${n}`, () => {
+          if (n > 1 && !window.confirm(`Delete all ${n} “${propStore.types[i]?.name ?? "props"}”? (Undo brings them back.)`)) return;
+          setEditorMode("props");
+          propInstancer.setSelection(propStore.instances.map((p, idx) => (p.typeIdx === i ? idx : -1)).filter((idx) => idx >= 0));
+          propSys.handleDelete();
+          deactivatePropSelection();
+          refreshPropCount();
+          afterDelete();
+        })];
+      }
+      case "lake":
+        return [inspect, focus, hide, sep, del("Delete", () => {
+          setEditorMode("lake");
+          lakeSystem.setActiveIndex(i);
+          lakeSystem.deleteActive();
+          lakeHistory.commit();
+          lakeUi?.refresh();
+          afterDelete();
+        })];
+      case "tunnel":
+        return [inspect, focus, hide, sep, del("Delete", () => {
+          setEditorMode("tunnel");
+          tunnelSystem.setActiveIndex(i);
+          tunnelSystem.deleteActiveTunnel();
+          tunnelUi?.refresh();
+          afterDelete();
+        })];
+      case "river":
+        return [inspect, focus, hide, sep, del("Delete", () => {
+          setEditorMode("riverv2");
+          riverV2System.select({ riverIdx: i, nodeIdx: 0 });
+          riverV2System.deleteActiveRiver();
+          riverV2Ui?.refresh();
+          afterDelete();
+        })];
+      case "road":
+        return [inspect, focus, hide, { label: "Edit in Road tool", onClick: () => { setEditorMode("road"); openRightTab("tools"); } }];
+      case "spawnPoint":
+        return [inspect, focus, sep, del("Clear", () => { spawnSystem.clear(); spawnUi?.refresh(); afterDelete(); })];
+      case "sun": case "sky": case "fog": case "terrain":
+        return [inspect, { label: "Open World tab", onClick: () => openRightTab("world") }].slice(0, kind === "terrain" ? 1 : 2);
+      default:
+        return [inspect, focus];
+    }
+  }
   // The Inspector follows selections made inside a tool too (right-click a
   // prop, Shift+right-click a group, a new tunnel becoming active): when what
   // the tool has selected changes, it shows the new selection. A selection
@@ -7381,7 +7475,6 @@ export async function startV3App(opts = {}) {
       frameSelection: () => frameSelection(),
       openTool: (mode) => { setEditorMode(mode); openRightTab("tools"); },
       openTab: (name) => openRightTab(name),
-      worldEdited: () => { _worldPanelStale = true; },
       onChange: () => sceneOutliner?.update(true),
     },
   });
@@ -8075,6 +8168,7 @@ export async function startV3App(opts = {}) {
       getRoadSystem: () => roadSystem,
       roadHistory,
       lakeHistory,
+      refreshWidgets,
       laneRoad: laneRoadSystem,
       props: { propStore, propInstancer, propSys, solidCollider, cliffBvh, addPrimitive, addCliff, activatePropSelection, deactivatePropSelection, rebakePlayerBvh, tc, getLivePropManager: () => livePropManager, propSlots, propTextureLibrary, addLiveProp, importPropGlb, importPropLod, importGlbCollectible },
       // Project save/load, and the imported files a project carries.

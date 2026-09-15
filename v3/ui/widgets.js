@@ -36,6 +36,40 @@ export function clampSnap(v, min, max, step) {
   return Math.min(max, Math.max(min, out));
 }
 
+// ── Live values ─────────────────────────────────────────────────────────────
+// Every value widget registers here. refreshWidgets() re-reads obj[key] for
+// the ones on screen, so a panel shows a change made elsewhere — undo, a
+// project load, a preset, the Inspector, the renderer (time of day) — without
+// being rebuilt.
+const _live = new Set();
+function _track(handle) {
+  _live.add(handle);
+  return handle;
+}
+
+/** Write an input's value unless the user is in it, and only if it changed. */
+function _setValue(el, v) {
+  if (document.activeElement === el || el.value === v) return;
+  el.value = v;
+}
+
+/**
+ * Refresh every visible widget from its object. Cheap enough to call a few
+ * times a second: rows that left the page are dropped, hidden ones skipped,
+ * and nothing is written unless the value differs.
+ * @returns {number} how many were refreshed
+ */
+export function refreshWidgets() {
+  let n = 0;
+  for (const h of _live) {
+    if (!h.row.isConnected) { _live.delete(h); continue; }
+    if (h.row.offsetParent === null) continue;
+    h.refresh();
+    n++;
+  }
+  return n;
+}
+
 function _row(parent, label, hint) {
   const row = document.createElement("div");
   row.className = "prop-row";
@@ -111,7 +145,18 @@ export function slider(parent, obj, key, opts) {
     onChange?.();
   });
   num.addEventListener("keydown", (e) => { if (e.key === "Enter") num.blur(); });
-  return { row, refresh() { syncSlider(); syncNum(); } };
+  return _track({
+    row,
+    refresh() {
+      if (document.activeElement === sl) return;   // being dragged
+      const target = valToSlider(obj[key]);
+      // A range input snaps what it is given: a value between two steps (0.145
+      // on a 0.01 slider) reads back as 0.15 forever. Redraw only when the
+      // value is a whole step away, or it would be rewritten on every pass.
+      if (Math.abs(parseFloat(sl.value) - target) >= (isLog ? 1e-4 : step * 0.999)) syncSlider();
+      _setValue(num, fmt(obj[key], step));
+    },
+  });
 }
 
 /**
@@ -147,14 +192,12 @@ export function numbers(parent, obj, keys, opts) {
     wrap.appendChild(inp);
     return inp;
   });
-  return {
+  return _track({
     row,
     refresh() {
-      keys.forEach((key, i) => {
-        if (document.activeElement !== inputs[i]) inputs[i].value = fmt(obj[key], step);
-      });
+      keys.forEach((key, i) => _setValue(inputs[i], fmt(obj[key], step)));
     },
-  };
+  });
 }
 
 export function color(parent, obj, key, opts) {
@@ -168,7 +211,15 @@ export function color(parent, obj, key, opts) {
     hex.textContent = inp.value;
     onChange?.();
   });
-  return { row, refresh() { inp.value = obj[key]; hex.textContent = obj[key]; } };
+  return _track({
+    row,
+    refresh() {
+      const v = typeof obj[key] === "string" ? obj[key].toLowerCase() : null;
+      if (!v || document.activeElement === inp) return;   // picker open
+      _setValue(inp, v);
+      if (hex.textContent !== obj[key]) hex.textContent = obj[key];
+    },
+  });
 }
 
 /** On/off switch. `onChange` receives the new value. */
@@ -185,7 +236,7 @@ export function toggle(parent, obj, key, opts) {
     btn.classList.toggle("checked", !!obj[key]);
     onChange?.(obj[key]);
   });
-  return { row, refresh() { btn.classList.toggle("checked", !!obj[key]); } };
+  return _track({ row, refresh() { btn.classList.toggle("checked", !!obj[key]); } });
 }
 
 /**
@@ -212,8 +263,9 @@ export function dropdown(parent, obj, key, opts) {
   // No matching option (e.g. the setting is still unset): leave the browser's
   // default, the first option, rather than a blank select.
   const select = () => {
+    if (document.activeElement === sel) return;   // list open
     const i = pairs.findIndex(([, v]) => String(v) === String(obj[key]));
-    if (i >= 0) sel.selectedIndex = i;
+    if (i >= 0 && sel.selectedIndex !== i) sel.selectedIndex = i;
   };
   select();
   value.appendChild(sel);
@@ -221,7 +273,7 @@ export function dropdown(parent, obj, key, opts) {
     obj[key] = numeric ? Number(sel.value) : sel.value;
     onChange?.();
   });
-  return { row, refresh: select };
+  return _track({ row, refresh: select });
 }
 
 /** Single-line text field; commits on change (blur or Enter). */
@@ -238,7 +290,7 @@ export function text(parent, obj, key, opts) {
     obj[key] = inp.value;
     onChange?.();
   });
-  return { row, refresh() { inp.value = obj[key] ?? ""; } };
+  return _track({ row, refresh() { _setValue(inp, String(obj[key] ?? "")); } });
 }
 
 /** Full-width panel button. Returns the button element. */

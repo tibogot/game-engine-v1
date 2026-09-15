@@ -473,9 +473,27 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     the stats-gl GPU number as unreliable, so it stays only in the overlay.
     Hidden in immersive play. Checked in the editor (drag, clamp, reset,
     reload, immersive, screenshot); `tools/editorLayoutTest.mjs`.
-92. **Scene list search + right-click menu** (focus, delete, remove all), and
-    lighting items (sun, sky, lens flare) in the list. Sliders that resync
-    when state changes elsewhere (v3 passes a no-op `refreshLiveSliders`).
+92. ~~Scene list search + right-click menu + live panel values~~ — DONE
+    2026-09-15. (Sun/sky/fog in the list came with 89.)
+    - Search box on the Scene list: every word must appear, any order;
+      matching groups and prop types open while searching; "Nothing named…";
+      Esc clears; typing does not trigger editor shortcuts.
+    - Right-click a row: Inspect, Focus, Hide/Show in editor, and Delete for
+      props, lakes, tunnels, rivers ("Delete all N" for a prop type, asks
+      first), Clear for the player start — all through the tools' own calls
+      and undo. Closes on outside click, Esc, scroll.
+    - Live values: every shared widget registers; `refreshWidgets()` (4×/s,
+      not in play) re-reads the visible ones, so the World tab, tool panels
+      and Inspector follow undo, loads, presets and Inspector edits without a
+      rebuild. Skips the field being typed in / slider being dragged; writes
+      nothing when unchanged. Measured: 0.3 ms per pass with every World
+      section open (271 controls), 0 writes idle. Found on the way: sliders
+      holding an off-step value (0.145 on a 0.01 step) were rewritten every
+      pass — now only a whole-step difference redraws. The Inspector's
+      "rebuild the World tab when reopened" workaround is gone.
+    - Not covered: the hand-written HTML panels (sculpt/paint/grass/snow
+      sections in editor.html) — the grass look syncs on load via
+      `syncPanelControls`.
     Later: a project asset browser (v2 had a File System Access folder browser).
 
 ### Gameplay (needed by games)
