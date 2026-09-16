@@ -158,6 +158,7 @@ import { buildPlayPhysicsPanel } from "../ui/buildPlayPhysicsPanel.js";
 import { buildPlayFlightPanel } from "../ui/buildPlayFlightPanel.js";
 import { createFlyHud } from "../ui/flyHud.js";
 import { uiById, uiQuery, uiQueryAll, setUiRoot, createHiddenEditorMarkup } from "../ui/uiRoot.js";
+import { createShadowTestScene } from "../debug/shadowTestScene.js";
 // OFF by default — the custom GPU stats panel. Uncomment this line AND its
 // block further down (search "GPU STATS PANEL — OFF") to bring it back.
 // import { createGpuStatsPanel } from "../render/gpuStatsPanel.js";
@@ -904,6 +905,11 @@ export async function startV3App(opts = {}) {
     getTerrainMeshes: getTerrainMeshesForWorld,
   });
 
+  // Declared up here because the World panel is built long before the scene
+  // systems are; it stays null until then and every hook below tolerates that.
+  let shadowTest = null;
+  let _shadowTestTick = 0;
+
   function buildWorldPanelUi() {
     if (!isEditor) return;
     buildWorldPanel({
@@ -912,6 +918,24 @@ export async function startV3App(opts = {}) {
       perf,
       syncCsm: () => worldEnv?.syncCsm(),
       setCsmEnabled: (on) => worldEnv?.setCsmEnabled(on),
+      describeCsm: () => worldEnv?.describeCsm?.() ?? null,
+      shadowTest: {
+        get visible() { return !!shadowTest?.visible; },
+        toggle() {
+          if (!shadowTest) return false;
+          const on = !shadowTest.visible;
+          shadowTest.setVisible(on);
+          if (on) {
+            shadowTest.layOutFrom(camera, controls);
+            shadowTest.syncFromCsm(worldEnv?.describeCsm?.() ?? null);
+          }
+          return on;
+        },
+        stand() {
+          if (!shadowTest?.visible) return;
+          shadowTest.focus(camera, controls);
+        },
+      },
       applyPostFxState: () => worldEnv?.applyPostFxState(),
       syncFog: () => {
         worldEnv?.syncFog();
@@ -3194,6 +3218,15 @@ export async function startV3App(opts = {}) {
     setEditorMode("view", { force: true });
   }
 
+  // A ruler of identical casters for judging the cascades by eye (World panel →
+  // Shadows). Built lazily on first show; nothing exists until you ask for it.
+  if (isEditor) {
+    shadowTest = createShadowTestScene({
+      scene,
+      getWorldHeight: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
+    });
+  }
+
   // Projected decals: one instanced draw, painted onto whatever is inside each box.
   const decalSystem = new DecalSystem({ scene, resolveUrl: (ref) => projectAssets.resolveUrl(ref) });
   if (isEditor) {
@@ -3459,6 +3492,11 @@ export async function startV3App(opts = {}) {
         propInstancer.setShadowDistance?.(_lastCsmShadowFar);
       }
       propInstancer.update(camera, propLod);
+      // Cheap, and only while the ruler is on screen: it recolours its stations
+      // from the live cascade bands, so dragging Near split moves the colours.
+      if (shadowTest?.visible && (++_shadowTestTick & 15) === 0) {
+        shadowTest.syncFromCsm(worldEnv?.describeCsm?.() ?? null);
+      }
       decalSystem.update(camera);
       livePropManager.update(dt);
       splineSys.update(dt);

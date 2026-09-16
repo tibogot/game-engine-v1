@@ -24,6 +24,7 @@ import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { SkyMesh } from "three/addons/objects/SkyMesh.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { projectAssets } from "../io/projectAssets.js";
+import { nearAnchoredSplits, describeCascades } from "./csmSplits.js";
 import { mergeKnownKeys } from "./state/mergeKnownKeys.js";
 import { createLensFlareSystem } from "../../v2/effects/lensFlare.js";
 import { createLensFlare2 } from "../../v2/effects/lensFlare2.js";
@@ -173,6 +174,8 @@ export async function createWorldEnvironment({
   let _lastCsmMapSize = toolState.csm.mapSize;
   let _lastCsmFade = toolState.csm.fade;
   let _lastCsmRadius = toolState.csm.shadowRadius ?? 4;
+  let _lastCsmSplitMode = toolState.csm.splitMode ?? "custom";
+  let _lastCsmNearSplit = toolState.csm.nearSplit ?? 10;
   let _lastCsmEnabled = toolState.csm.enabled;
   let _csmPipelineVersion = 0;
 
@@ -241,8 +244,20 @@ export async function createWorldEnvironment({
       maxFar: Number(cfg.maxFar),
       lightMargin: Number(cfg.lightMargin),
       shadowRadius: Number(cfg.shadowRadius ?? 4),
+      splitMode: String(cfg.splitMode ?? "custom"),
+      nearSplit: Number(cfg.nearSplit ?? 10),
       enabled: !!cfg.enabled,
     };
+  }
+
+  /*
+   * The split callback reads toolState LIVE, so `nearSplit` needs no rebuild —
+   * updateFrustums() re-runs it. Unlike the cascade COUNT (which is baked into
+   * the compiled pipeline and so is boot-only on r184), splits are just uniforms
+   * and ortho boxes: mode and anchor are both safe to change while running.
+   */
+  function csmSplitsCallback(amount, near, far, target) {
+    return nearAnchoredSplits(amount, near, far, toolState.csm.nearSplit ?? 10, target);
   }
 
   function recreateCsm() {
@@ -256,7 +271,8 @@ export async function createWorldEnvironment({
       csm = new CSMShadowNode(sun, {
         cascades: toolState.csm.cascades,
         maxFar: toolState.csm.maxFar,
-        mode: "practical",
+        mode: toolState.csm.splitMode ?? "custom",
+        customSplitsCallback: csmSplitsCallback,
         lightMargin: toolState.csm.lightMargin,
       });
       csm.fade = !!toolState.csm.fade;
@@ -328,6 +344,13 @@ export async function createWorldEnvironment({
     if (cfg.maxFar !== _lastCsmMaxFar) {
       csm.maxFar = cfg.maxFar;
       _lastCsmMaxFar = cfg.maxFar;
+      csm.updateFrustums();
+    }
+    if (cfg.splitMode !== _lastCsmSplitMode || cfg.nearSplit !== _lastCsmNearSplit) {
+      _lastCsmSplitMode = cfg.splitMode;
+      _lastCsmNearSplit = cfg.nearSplit;
+      csm.mode = cfg.splitMode;
+      csm.customSplitsCallback = csmSplitsCallback;
       csm.updateFrustums();
     }
     if (cfg.lightMargin !== _lastCsmMargin) {
@@ -1482,11 +1505,36 @@ export async function createWorldEnvironment({
     postFxPipeline.setSize(w, h);
   }
 
+  /**
+   * What the cascades currently cover and how sharp each one is — the numbers
+   * the World panel prints, and the ones to read before changing `maxFar` or
+   * `nearSplit`. Null when there is no CSM. Texel and pixel sizes are metres.
+   */
+  function describeCsm() {
+    if (!csm) return null;
+    const far = Math.min(camera.far, csm.maxFar);
+    return {
+      maxFar: csm.maxFar,
+      mapSize: Math.round(Number(toolState.csm.mapSize)),
+      mode: csm.mode,
+      cascades: describeCascades({
+        breaks: csm.breaks,
+        near: camera.near,
+        far,
+        fov: camera.fov,
+        aspect: camera.aspect,
+        mapSize: toolState.csm.mapSize,
+        screenHeight: renderer.domElement?.height || 1080,
+      }),
+    };
+  }
+
   return {
     sun,
     hemi,
     /** The shadow node, or null — it is REBUILT when cascades change, so read it live. */
     getCsm: () => csm,
+    describeCsm,
     setSkyVisible,
     get skyVisible() { return _skyShown; },
     worldOcean,

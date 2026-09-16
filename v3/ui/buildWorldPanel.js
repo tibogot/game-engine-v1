@@ -1,5 +1,6 @@
 import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, button as _button, info as _info } from "./widgets.js";
 import { uiById } from "./uiRoot.js";
+import { formatCascades } from "../app/csmSplits.js";
 import { buildOceanV2Controls } from "./buildOceanV2Panel.js";
 
 /** V2 World tab UI — extracted from v2/editor.html buildWorldTab (no volumetric cloud sections). */
@@ -796,11 +797,34 @@ export function buildWorldPanel(app) {
         step: 1,
         onChange: syncCsm,
       });
+      _dropdown(csmBody, ts.csm, "splitMode", {
+        label: "Split mode",
+        options: [
+          ["custom", "Anchored (v3)"],
+          ["practical", "Practical (three)"],
+          ["logarithmic", "Logarithmic"],
+          ["uniform", "Uniform"],
+        ],
+        hint: "Anchored ends cascade 0 at Near split and spaces the rest logarithmically — "
+          + "unlike Practical, shadow range then costs nothing in near-field sharpness.",
+        onChange: syncCsm,
+      });
+      _slider(csmBody, ts.csm, "nearSplit", {
+        label: "Near split",
+        min: 2,
+        max: 60,
+        step: 1,
+        hint: "Anchored mode only: where cascade 0 ends (m) — the distance past which you stop "
+          + "caring whether a foot touches the ground. Smaller = sharper contact shadows.",
+        onChange: syncCsm,
+      });
       _slider(csmBody, ts.csm, "maxFar", {
         label: "Max far",
         min: 30,
         max: 600,
         step: 10,
+        hint: "Shadow range. Prop LOD tiers start at 60/150/500 m and a tier casts only while its "
+          + "start is inside this — so past 150 a whole tier of props starts casting.",
         onChange: syncCsm,
       });
       _slider(csmBody, ts.csm, "lightMargin", {
@@ -824,6 +848,46 @@ export function buildWorldPanel(app) {
         step: 0.5,
         hint: "Shadow filter blur in texels (PCFShadowMap). Try 4–8 for soft edges.",
         onChange: syncCsm,
+      });
+      // What those knobs actually bought: the bands and their texel sizes. A
+      // cascade is over-resolved below ~1 screen pixel per texel and reads
+      // blocky well above it, so this is the readout to tune against.
+      _info(csmBody, "Cascades", "—", {
+        layout: "prop",
+        refresh: () => formatCascades(app.describeCsm?.()?.cascades),
+      });
+
+      // --- Seeing it, rather than reading the numbers ---
+      const testBtn = _button(csmBody, {
+        title: app.shadowTest?.visible ? "Hide shadow test scene" : "Shadow test scene",
+        hint: "A line of identical test posts running away from you, one per distance. "
+          + "Each pad is tinted by the cascade it falls in and labelled with that cascade's "
+          + "texel size; red means past Max far, where nothing casts any more.",
+        onClick: () => {
+          const on = app.shadowTest?.toggle();
+          testBtn.textContent = on ? "Hide shadow test scene" : "Shadow test scene";
+        },
+      });
+      _button(csmBody, {
+        title: "Stand at the line",
+        hint: "Drop the camera at the near end of the test scene at eye height, looking down it.",
+        onClick: () => app.shadowTest?.stand(),
+      });
+      // One click between what v2 shipped and what v3 now defaults to. The
+      // cascade COUNT is the same in both, so this is live-safe.
+      let abOld = false;
+      const abBtn = _button(csmBody, {
+        title: "A/B: try practical @ 80",
+        hint: "Flip between v2's old pairing (practical splits, 80 m) and v3's default "
+          + "(anchored splits, 150 m) without a reload.",
+        onClick: () => {
+          abOld = !abOld;
+          Object.assign(ts.csm, abOld
+            ? { splitMode: "practical", maxFar: 80 }
+            : { splitMode: "custom", maxFar: 150, nearSplit: 10 });
+          syncCsm();
+          abBtn.textContent = abOld ? "A/B: back to anchored @ 150" : "A/B: try practical @ 80";
+        },
       });
 
       // --- Lens Flare ---

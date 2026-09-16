@@ -42,7 +42,38 @@ export function createWorldToolState() {
     cloudBloom: ts.cloudBloom,
     lensFlare: { ...ts.lensFlare, enabled: false },
     postFx: ts.postFx,
-    csm: ts.csm,
+    /*
+     * SHADOWS — v3 diverges from v2 here, see AUDIT #102.
+     *
+     * v2 ships `practical` splits with maxFar 80. That pairing was tuned when
+     * the editor ran FOUR cascades: practical anchors its logarithmic half on
+     * camera.near (0.5 m), which flattens it to nearly uniform, so the first
+     * split lands at about maxFar/3 and shadow RANGE and contact-shadow
+     * sharpness end up fighting over one number. Dropping to 3 cascades — forced
+     * by the Windows WebGPU 16-samplers-per-stage cap — quietly made the near
+     * cascade ~35% coarser (11 m → 15 m first split) without anyone re-picking
+     * the 80.
+     *
+     * v3 anchors the splits instead: cascade 0 ends at `nearSplit`, the rest are
+     * spaced logarithmically out to maxFar (csmSplits.js). At 3 cascades that
+     * gives 0.5–10 / 10–39 / 39–150 m and 1.2 / 4.5 / 17 cm per texel at 2048 —
+     * a SHARPER near cascade than practical@80 managed (1.7 cm) with nearly
+     * double the reach.
+     *
+     * 150 is not arbitrary: prop LOD tiers start at 60 / 150 / 500 m and a tier
+     * casts only while its start distance is inside maxFar. At 80 the LOD1 props
+     * from 80–150 m were drawn into shadow maps that stopped short of them; at
+     * 150 that work becomes visible shadow, and LOD2 still never casts. Going
+     * past 150 would switch a whole tier of casters on.
+     */
+    csm: {
+      ...ts.csm,
+      maxFar: 150,
+      /** "custom" = nearSplit-anchored; "practical"/"logarithmic"/"uniform" are three's own. */
+      splitMode: "custom",
+      /** Where cascade 0 ends (m) — the distance past which contact shadows stop mattering. */
+      nearSplit: 10,
+    },
     fog: ts.fog,
     interior: ts.interior,
     /*

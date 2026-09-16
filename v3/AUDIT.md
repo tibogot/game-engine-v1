@@ -721,6 +721,67 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      GLB import with impostors, placed (non-painted) foliage with the instance
      BVH, and textured cards for plants geometry cannot afford.
 
+102. ~~**CSM splits for an open world**~~ — DONE 2026-09-16. v3 now ships
+     `maxFar: 150` with nearSplit-anchored cascades instead of v2's
+     `practical`@80 (v3/app/csmSplits.js; v2 is untouched, v3 overrides in
+     state/worldState.js).
+     **Why 80 was there.** Found in commit 294dde4 (2026-06-19), in a comment
+     that was lost when the cascade count changed: with FOUR cascades and
+     practical splits, 80 m put the first split at ~11 m, so a character at
+     5-15 m sat in a cascade only ~14 m wide — sub-centimetre texels. It was
+     never a millisecond budget. A road-game measurement agrees: `maxFar`
+     80→400 cost 0.19 ms and drew IDENTICAL triangles and draws, but stretched
+     the near cascade until the car's contact shadow disappeared.
+     **What had drifted.** Dropping to 3 cascades (the Windows WebGPU cap of 16
+     samplers/stage) moved the first split 11 m → 15 m and made the near cascade
+     ~35% coarser, without anyone re-picking the 80 that was chosen for 4.
+     **The actual trap.** `practical` averages a uniform split with a
+     logarithmic one anchored on `camera.near` — 0.5 m here, which flattens the
+     log half to nothing. The first split therefore lands at ≈ maxFar/3, and
+     shadow RANGE and contact-shadow sharpness fight over one knob.
+     **The fix.** Anchor cascade 0 at a chosen distance (`nearSplit`, default
+     10 m) and space the rest logarithmically to maxFar. three sizes each
+     cascade to its slice's far-face DIAGONAL, so a cascade ending at d has a
+     texel of `d·k/mapSize` while a screen pixel there is `d·k'/height` — both
+     linear in d. Constant split ratios therefore put every cascade's far edge
+     at ~1 texel per screen pixel (measured in-browser: 1.08 at all three).
+     MEASURED in the editor at 2048, aspect 1.57: boxes 23.5 / 85 / 324 m =
+     **1.15 / 4.15 / 15.8 cm per texel over 0.5–10 / 10–39 / 39–150 m**, against
+     1.71 cm and 80 m for practical@80. A SHARPER near cascade with nearly
+     double the reach, same cascade count, same map.
+     **Why 150 and not more.** Prop LOD tiers start at 60 / 150 / 500 m and a
+     tier casts only while its start is inside maxFar (item 38). At 80 the LOD1
+     props from 80-150 m were drawn into shadow maps that stopped short of them;
+     at 150 that work becomes visible shadow and LOD2 still never casts. Past
+     150 a whole tier of casters switches on. 150 is the largest range that is
+     free.
+     Splits are LIVE (breaks are uniforms; `updateFrustums()` does not
+     recompile), unlike `cascades`/`fade` — so Split mode, Near split and Max
+     far all A/B from the World panel, which prints the bands and their texel
+     sizes. Cost A/B'd interleaved (3 rounds × 60 frames): 1.638 ms both ways —
+     but in an EMPTY scene, so that only proves the range itself is free, not a
+     loaded one. Re-measure on a world with real casters.
+     **Judge it yourself:** World → Shadows → "Shadow test scene"
+     (v3/debug/shadowTestScene.js) lays ten identical stations at 3-175 m, each
+     a pole, an arch with a gap under it, a six-tooth comb 18 cm apart and a
+     ball resting on the ground, all on a white disc so the shadow is read
+     against flat white rather than painted terrain. Pads are ringed and
+     labelled with their cascade and its texel size, coloured strips mark the
+     splits and maxFar, and everything re-labels live as you drag. "A/B: try
+     practical @ 80" flips between v2's pairing and v3's in one click — the
+     comb at 3 m goes 1.1 cm ↔ 1.6 cm per texel and the three farthest stations
+     lose their shadows entirely. Costs ~370 draws / ~1.5 ms while shown,
+     nothing when hidden, and it is editor-only.
+     Known, not fixed: three's cascade-fade margin is computed against
+     `Math.max(camera.far, maxFar)` and our camera.far is 4096, so the margin is
+     ≈0 — the shader cross-fades without the bounds expansion it assumes. Watch
+     for a band at the split distances. Bias may want re-tuning now the far
+     cascade's texels are larger, and per-cascade `mapSize` is already possible
+     (each cascade light owns its shadow) if the far one should drop to 1024.
+     Not done, and the real answer past ~150 m: terrain self-shadowing by a
+     ray-march against the height texture — resolution-independent, no cascade,
+     kilometres of mountain shade. A cascade is the wrong tool for that.
+
 ### Not ported — v3 is equal or better, or it was retired
 
 Sculpt / procedural / erosion, paint and TSL ground/meadow, cliffs (v3

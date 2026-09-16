@@ -310,7 +310,12 @@ export function button(parent, { title, onClick, hint, style }) {
  * Read-only label / value line. Returns `{ row, update(value) }`.
  * `layout: "prop"` draws it like a control row (label left, value right).
  */
-export function info(parent, label, value, { layout = "info" } = {}) {
+/**
+ * A read-only row. Pass `refresh` — a function returning the text — to have it
+ * join the live-refresh loop, for a value the panel derives rather than owns
+ * (a computed shadow texel size, a count the renderer keeps).
+ */
+export function info(parent, label, value, { layout = "info", refresh } = {}) {
   const row = document.createElement("div");
   const val = document.createElement("span");
   if (layout === "prop") {
@@ -326,7 +331,20 @@ export function info(parent, label, value, { layout = "info" } = {}) {
   val.textContent = value;
   row.appendChild(val);
   parent.appendChild(row);
-  return { row, update(v) { val.textContent = v; } };
+  const handle = { row, update(v) { val.textContent = v; } };
+  if (typeof refresh === "function") {
+    handle.refresh = () => {
+      const v = refresh();
+      if (v != null) _setValue0(val, String(v));
+    };
+    return _track(handle);
+  }
+  return handle;
+}
+
+/** Text equivalent of _setValue: skip the write when nothing changed. */
+function _setValue0(el, v) {
+  if (el.textContent !== v) el.textContent = v;
 }
 
 /**
