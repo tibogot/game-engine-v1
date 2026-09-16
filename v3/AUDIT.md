@@ -89,6 +89,26 @@ the game.
 
 ## Grass and vegetation
 
+15b. ~~Grass floats over crests / sinks into dips~~ — FIXED 2026-09-17. The
+    grass was right: it read the exact heightmap (within 3 mm). The terrain
+    MESH is not the heightmap: clipmap vertices sit on texel corners (a
+    [1 2 1] blur, 0.86 m float on a 60° crest even at 1 m quads) and the outer
+    rings are 2-16 m quads centred on the ORBIT TARGET, not the camera
+    (measured up to +1.5 m over crests, -5.1 m in dips). The grass compute now
+    rebuilds the clipmap triangle under each visible blade, stitching fans
+    included (`terrainSurface` option, 3 taps, only for blades that pass the
+    cull): max blade-vs-mesh error < 0.05 mm over ~600k blades in 4 views
+    (was mean 8-33 cm, max 8 m). Cost ≈ +0.01 ms per ring dispatch at 109k
+    visible blades. Also: the grass height bake now sizes itself to the
+    heightmap (was a fixed 1024, so a 2048² project stood on half-res ground).
+    Still open:
+    - **Terrain-side mismatch** (trees, props, player, susuki and flowers all
+      use the exact heightmap, so they float/sink the same way): vertices on
+      texel centres, and maybe centre the editor clipmap on the camera.
+    - Susuki and flowers do not use `terrainSurface` yet.
+    - Grass ignores snow displacement of the terrain (as before).
+    - Bake staleness after undo / generate / erosion / project load: checked
+      after a whole-map replace only.
 16. **Grass panel cleanup** 👁: 59 controls, 16 of them two hand-placed light
     directions. Named presets plus a few real controls.
 17. **Grass look pass** 👁: match the Genshin ground colour.

@@ -49,8 +49,8 @@ setGridTextureUrl("/textures/grid.png");
 // ring reaches past the world edge (~2× WORLD_SIZE span) at any config —
 // each extra level doubles coverage for a fixed ~16k verts.
 
-const GRID_N     = 128;
-const BASE_STEP  = Math.max(1, WORLD_SIZE / HEIGHTMAP_SIZE);
+export const GRID_N     = 128;
+export const BASE_STEP  = Math.max(1, WORLD_SIZE / HEIGHTMAP_SIZE);
 export const LOD_LEVELS = Math.max(
   4,
   Math.ceil(Math.log2((2 * WORLD_SIZE) / (GRID_N * BASE_STEP))) + 1,

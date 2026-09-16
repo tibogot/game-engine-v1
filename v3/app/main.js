@@ -5,7 +5,7 @@ import Stats from "stats-gl";
 import { texture, uniform, float, mix, positionWorld, vec2, vec3, length, smoothstep, mx_noise_float } from "three/tsl";
 import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, TERRAIN_SIZE_LIMITS, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
-import { createTerrainLOD, LOD_LEVELS } from "../terrain/terrainLOD.js";
+import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N } from "../terrain/terrainLOD.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import {
   encodeHeightmapFile,
@@ -1181,6 +1181,9 @@ export async function startV3App(opts = {}) {
       worldSize:        WORLD_SIZE,
       gp:               grassState,
       terrainShadow:    { shade: terrainShade, visibilityHere: terrainSunVisibilityHere },
+      // Blades stand on the clipmap's triangles, not the exact heightmap, so
+      // they never float over a crest the coarse mesh cuts under.
+      terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2 },
       ...extraShared,
     };
     const rings = GRASS_RING_DEFS.map(({ key, ...def }) =>

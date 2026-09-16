@@ -3,7 +3,7 @@ import { QuadMesh } from "three/webgpu";
 import { Fn, clamp, dot, float, floor, int, max, min, smoothstep, sqrt, texture, uniform, uv, vec2, vec4 } from "three/tsl";
 
 const DENSITY_RES = 512;
-const HEIGHT_RES  = 1024; // must match HEIGHTMAP_SIZE — 1:1 copy, no resampling artefacts
+const HEIGHT_RES  = 1024; // placeholder — initSurfaceBake resizes to the real heightmapSize (1:1 copy)
 const NORMAL_RES  = 512;  // normals can be half-res; still 4× better than before
 const CLIFF_RES   = 512;  // cliff-top height/normal grid — 4m/texel at 2048m world
 
@@ -50,7 +50,7 @@ function _makeDensityRT(res) {
 /**
  * Owns every CPU/GPU texture the hybrid grass rings need:
  *   densityTex      — 512²  Uint8  RGBA; .r = painted coverage (0-255)
- *   grassHeightTex  — 1024² Float32 RGBA; .r = world-space Y in metres
+ *   grassHeightTex  — heightmapSize² Float32 RGBA; .r = world-space Y in metres
  *   terrainNormalTex— 512²  Float32 RGBA; .rgb = FD terrain normal
  *
  * Cliff grass layer (Genshin-style wide-top cliffs — grass on the cliff top
@@ -189,6 +189,13 @@ export class GrassTerrainData {
    * @param {number} o.maxHeight       metres at normalized height 1.0
    */
   initSurfaceBake({ renderer, heightTexNode, heightmapSize, worldSize, maxHeight }) {
+    // 1:1 with the heightmap, whatever the project's size. A fixed 1024 put a
+    // 2048² terrain's grass on a half-resolution ground, and the mesh-matching
+    // blade height (HybridGrassSystem terrainSurface) needs texel parity.
+    if (heightmapSize !== this.heightRes) {
+      this._heightRT.setSize(heightmapSize, heightmapSize);
+      this.heightRes = heightmapSize;
+    }
     const hMat = new THREE.MeshBasicNodeMaterial();
     hMat.toneMapped = hMat.fog = false;
     hMat.depthTest = hMat.depthWrite = false;
