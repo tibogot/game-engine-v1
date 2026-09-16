@@ -1526,6 +1526,13 @@
                   <span class="prop-num" id="glbl-ao-power">2.0</span>
                 </div>
               </div>
+              <div class="prop-row" title="AO floor on the far blade rings, as a fraction of AO base. Lower = darker distant field.">
+                <span class="prop-label">Far AO</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-far-ao" min="0" max="100" step="5" value="100" />
+                  <span class="prop-num" id="glbl-far-ao">1.00</span>
+                </div>
+              </div>
               <div class="prop-separator"></div>
               <div class="prop-row">
                 <span class="prop-label">Color variation</span>
@@ -2009,6 +2016,15 @@
                   <span class="prop-num" id="glbl-lod-mega">400m</span>
                 </div>
               </div>
+              <div class="prop-row" title="Off: blades end with the Mid ring (~200 m) and the ground carries the grass colour from there">
+                <span class="prop-label">Far blades</span>
+                <div class="prop-value">
+                  <label class="toggle-label">
+                    <input type="checkbox" id="gck-far-blades" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+              </div>
               <div class="prop-row">
                 <span class="prop-label">LOD debug</span>
                 <div class="prop-value">
@@ -2043,15 +2059,15 @@
               <div class="prop-row">
                 <span class="prop-label">Mega segments</span>
                 <div class="prop-value">
-                  <input type="range" id="gsl-lod-mega-seg" min="1" max="4" step="1" value="1" />
-                  <span class="prop-num" id="glbl-lod-mega-seg">1</span>
+                  <input type="range" id="gsl-lod-mega-seg" min="1" max="4" step="1" value="2" />
+                  <span class="prop-num" id="glbl-lod-mega-seg">2</span>
                 </div>
               </div>
               <div class="prop-row">
                 <span class="prop-label">Mega width</span>
                 <div class="prop-value">
-                  <input type="range" id="gsl-lod-mega-w" min="5" max="150" step="5" value="70" />
-                  <span class="prop-num" id="glbl-lod-mega-w">0.70m</span>
+                  <input type="range" id="gsl-lod-mega-w" min="5" max="150" step="5" value="50" />
+                  <span class="prop-num" id="glbl-lod-mega-w">0.50m</span>
                 </div>
               </div>
             </div>

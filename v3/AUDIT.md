@@ -112,8 +112,31 @@ the game.
 16. **Grass panel cleanup** 👁: 59 controls, 16 of them two hand-placed light
     directions. Named presets plus a few real controls.
 17. **Grass look pass** 👁: match the Genshin ground colour.
-18. **Grass horizon.** Blades stop around 400 m and bare ground shows beyond.
-    Tint the terrain where grass is painted.
+18. ~~Grass horizon~~ — DONE 2026-09-17, the Ghost of Tsushima way (their far
+    LOD is a texture on the terrain). Past the last blade ring the terrain
+    paints the colour the blades average to wherever grass is painted
+    (`render/grass/grassFarTsl.js`, density read in the terrain VERTEX stage,
+    feature flag `grassFar`). Blades and ground share one colour formula
+    (`v2/render/hybridGrass/grassFieldColor.js`) and converge over the same
+    band (180→360 m, or 80→180 m without Far blades), then the last ring
+    shrinks away. Terrain cost: not measurable (2.741 vs 2.734 ms). Also:
+    - Even thinning like GoT's "drop 3 of 4 blades": Far ring 2.08 m → 1.56 m
+      spacing (384² → 512²), blades 0.7 → 0.5 m wide, 1 → 2 segments.
+      Saved projects keep their own Mega width/segments.
+    - "Far blades" toggle (LOD section), OFF by default (user choice): blades
+      end at the Mid ring; saves 0.10 ms render.
+    - Dark ring before the hand-off (reported 2026-09-17), MEASURED by row
+      brightness from a low camera: a dip to 57 at ~95 m between 68 near and
+      75 far. Not the AO (AO off kept the dip); it was the Mid ring's dark
+      lower blade (root colour + AO ×0.55 floor) where it fully covers the
+      ground, next to a field colour sampled from the upper blade only. Fix:
+      field colour averages the whole blade height, and the far-ring AO floor
+      is a "Far AO" slider (default 1.0, was a hard-coded 0.55). Now a smooth
+      fade 68 → 60 → 59.
+    Still open for the GoT match: dithered terrain grass shadows in the far
+    field, blade folding, displacement buffer for all objects, painted blade
+    height. Ground UNDER near blades is still the painted ground (a GoT-look
+    project should paint a grass-coloured ground there, or add a control).
 19. **Trails through grass** from cars and characters (reuse the snow trail
     pattern).
 20. **One global wind** for grass, susuki, trees and water.

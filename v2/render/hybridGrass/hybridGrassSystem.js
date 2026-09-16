@@ -60,6 +60,7 @@ import { hash42 } from "../../core/foliage/tsl-utils.js";
 import { createBladeGeometry } from "../../core/foliage/grassGemini.js";
 import { wrapTileOffsetXZ } from "../../core/revoGrass/revoGrassTile.js";
 import { computeFrustumVisibility } from "../../core/revoGrass/revoGrassSsboUtils.js";
+import { grassTintBlend, grassFieldAlbedo } from "./grassFieldColor.js";
 
 /**
  * Map the Gemini LOD sliders (lodMidDistance/lodFarDistance/lodMaxDistance/
@@ -105,6 +106,35 @@ export function syncHybridGrassLod(rings, gp) {
         break;
     }
   }
+  return syncHybridGrassHandoff(rings, gp);
+}
+
+/**
+ * Hand-over from blades to the ground colour (Ghost of Tsushima's far LOD:
+ * past the last ring the terrain carries the grass). The LAST ring — Far, or
+ * Mid when `gp.farBlades` is false — shrinks its blades across its outer band,
+ * and the far rings converge their colour to the field colour before it.
+ *
+ * @returns {{ convStart:number, convEnd:number, fadeStart:number, fadeEnd:number }}
+ *   fadeStart..fadeEnd is where the ground takes over — hand it to the terrain.
+ */
+export function syncHybridGrassHandoff(rings, gp) {
+  const farOn = gp.farBlades !== false;
+  const isFar = (r) => r.group.name.endsWith("Far");
+  const isMid = (r) => r.group.name.endsWith("Mid");
+  const last = rings.find(farOn ? isFar : isMid) ?? rings[rings.length - 1];
+  const fadeStart = last.u.uOuterR0.value;
+  const fadeEnd = last.u.uOuterR1.value;
+  const convEnd = fadeStart;
+  const convStart = farOn
+    ? (gp.lodMaxDistance ?? 200) * 0.9
+    : (gp.lodFarDistance ?? 80);
+  for (const r of rings) {
+    r.u.uEdgeShrink.value = r === last ? 1 : 0;
+    r.u.uConvStart.value = Math.min(convStart, convEnd - 1);
+    r.u.uConvEnd.value = convEnd;
+  }
+  return { convStart, convEnd, fadeStart, fadeEnd };
 }
 
 /**
@@ -328,6 +358,13 @@ export class HybridGrassSystem {
       uOuterR0: uniform(outerR0 ?? tileSize * 0.28),
       uOuterR1: uniform(outerR1 ?? tileSize * 0.5),
       uPMin: uniform(pMin),
+      // Hand-over to the ground (see grassFieldColor.js). Far rings converge
+      // their colour to the field colour across [uConvStart..uConvEnd]; the
+      // LAST ring also shrinks its blades across its outer band (uEdgeShrink).
+      // Defaults leave the look untouched.
+      uConvStart: uniform(1e6),
+      uConvEnd: uniform(1e6 + 1),
+      uEdgeShrink: uniform(0),
       uCullPadNdcX: uniform(0.1),
       uCullPadNdcYNear: uniform(0.75),
       uCullPadNdcYFar: uniform(0.2),
@@ -336,6 +373,7 @@ export class HybridGrassSystem {
       uTipCol: uniform(srgb(gp.tipColor ?? "#004d05")),
       uAoBase: uniform(gp.aoBase ?? 0.25),
       uAoPower: uniform(gp.aoPower ?? 2),
+      uFarAoMul: uniform(gp.farAoMul ?? 0.55),
       uColorVar: uniform(gp.colorVariation ? 1 : 0),
       uCvHueSpread: uniform(gp.cvHueSpread ?? 0.08),
       uCvSatSpread: uniform(gp.cvSatSpread ?? 0.3),
@@ -640,6 +678,9 @@ export class HybridGrassSystem {
             clumpInfluence,
           );
         }
+        // Last ring: blades shrink to nothing as they thin out, so the field
+        // ends in the ground colour instead of a line of full-height blades.
+        bladeH = bladeH.mul(float(1).sub(tOut.mul(u.uEdgeShrink)));
 
         // ── Wind (Gemini formulas, baked windTex channels) ──
         const tBase = time.mul(u.uWindSpeed);
@@ -1044,10 +1085,11 @@ export class HybridGrassSystem {
       const N = normalize(vNormal);
 
       // ── Gemini color stack ──
-      // Far rings use Gemini mega's darker AO floor (aoBase × 0.55) — that's
+      // Far rings darken the AO floor by uFarAoMul (Gemini mega used 0.55,
+      // its darker distant tone). Shared with the field colour.
       // the slightly darker distant tone Gemini has.
       const aoFloor =
-        this._normalMode === "flat" ? u.uAoBase.mul(0.55) : u.uAoBase;
+        this._normalMode === "flat" ? u.uAoBase.mul(u.uFarAoMul) : u.uAoBase;
       const ao = mix(aoFloor, float(1.0), pow(hPct, u.uAoPower));
       const baseCol = mix(u.uBladeCol, u.uTipCol, hPct);
 
@@ -1076,36 +1118,27 @@ export class HybridGrassSystem {
       );
       const tintRgb = procTint.mul(isProcMode).add(imgTint.mul(isImgMode));
       const hasMode = isProcMode.add(isImgMode);
-      const rootW = mix(float(1), float(1).sub(hPct), u.uTerrainTintRootBias);
-      const tintAmt = clamp(
-        u.uTerrainTintStrength.mul(rootW).mul(hasMode),
-        float(0),
-        float(1),
+      // Tint maths shared with the far field (grassFieldColor.js).
+      const tintedVaried = grassTintBlend(
+        variedCol, tintRgb, hasMode, hPct,
+        u.uTerrainTintStrength, u.uTerrainTintRootBias,
       );
-      const lumW = vec3(0.299, 0.587, 0.114);
-      const lumB = max(dot(variedCol, lumW), float(0.02));
-      const lumT = max(dot(tintRgb, lumW), float(0.1));
-      const tintMatched = clamp(
-        tintRgb.mul(lumB.div(lumT)),
-        float(0),
-        float(2.5),
-      );
-      // Luminance matching keeps low strengths subtle (no dark×dark crush),
-      // but it also means the grass can never actually BECOME the ground
-      // color — max strength just re-shaded the blade (debug-blue ground
-      // gave dark grass, not blue grass). Past ~0.6 strength, hand the tint
-      // target over to the TRUE ground color so 1.0 = full takeover.
-      const trueGround = smoothstep(float(0.6), float(1.0), u.uTerrainTintStrength);
-      const tintMixed = mix(
-        tintMatched,
-        tintRgb,
-        mix(float(0.45), float(1.0), trueGround),
-      );
-      const tintedVaried = mix(variedCol, tintMixed, tintAmt);
 
       // Lighting comes from the standard material pipeline (scene lights,
       // CSM shadows) — colorNode is pure albedo, exactly like Gemini.
-      const finalAlbedo = tintedVaried.mul(clumpShade).mul(shadeRand).mul(ao);
+      let finalAlbedo = tintedVaried.mul(clumpShade).mul(shadeRand).mul(ao);
+      if (this._normalMode === "flat") {
+        // Far rings converge to the colour the ground paints past the last
+        // ring, so the hand-over has no seam. Near rings never reach the band.
+        const field = grassFieldAlbedo(tintRgb, {
+          bladeCol: u.uBladeCol, tipCol: u.uTipCol,
+          aoBase: u.uAoBase, aoPower: u.uAoPower, farAoMul: u.uFarAoMul,
+          tintOn: hasMode, tintStrength: u.uTerrainTintStrength,
+          tintRootBias: u.uTerrainTintRootBias,
+        });
+        const distA = length(vWorld.xz.sub(u.uAnchorPos.xz));
+        finalAlbedo = mix(finalAlbedo, field, smoothstep(u.uConvStart, u.uConvEnd, distA));
+      }
       const dbg = LOD_DEBUG_TINTS[this.group.name] ?? [1, 0, 1];
       return mix(finalAlbedo, vec3(dbg[0], dbg[1], dbg[2]), u.uLodDebug);
     })();
@@ -1279,6 +1312,7 @@ export class HybridGrassSystem {
     u.uTipCol.value.copy(srgb(gp.tipColor ?? "#004d05"));
     u.uAoBase.value = gp.aoBase ?? 0.25;
     u.uAoPower.value = gp.aoPower ?? 2;
+    u.uFarAoMul.value = gp.farAoMul ?? 0.55;
     u.uColorVar.value = gp.colorVariation ? 1 : 0;
     u.uCvHueSpread.value = gp.cvHueSpread ?? 0.08;
     u.uCvSatSpread.value = gp.cvSatSpread ?? 0.3;

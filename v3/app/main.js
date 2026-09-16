@@ -102,6 +102,7 @@ import { createFoliageScatterState } from "./state/foliageScatterState.js";
 import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
 import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
+import { createGrassFarShading } from "../render/grass/grassFarTsl.js";
 import { DecalSystem } from "../render/decals/decalSystem.js";
 import { createDecalEditor } from "../tools/decalEditor.js";
 import { buildDecalPanel } from "../ui/buildDecalPanel.js";
@@ -543,6 +544,8 @@ export async function startV3App(opts = {}) {
   const riverSandShading = createRiverSandShading({ worldSize: WORLD_SIZE });
   // Built before the flowers exist; pointed at their density once it does.
   const flowerTintShading = createFlowerTintShading({ worldSize: WORLD_SIZE, splatTex: splatMap.tex });
+  // Past the last grass blade ring the terrain carries the grass colour.
+  const grassFarShading = createGrassFarShading({ worldSize: WORLD_SIZE });
 
   /**
    * Triplanar is compiled into the terrain shader only while at least one paint
@@ -556,7 +559,7 @@ export async function startV3App(opts = {}) {
     );
   }
 
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap, grassFarShading);
   scene.add(lod.group);
   /**
    * Terrain visibility — see the `terrain` block on the returned handle.
@@ -981,6 +984,7 @@ export async function startV3App(opts = {}) {
   // out — a GPU bake that only re-runs when the density, the ground paint or
   // a layer's flag changes. See grassTerrainData.initDensityMask.
   grassTerrainData.initDensityMask({ renderer, splatTex: splatMap.tex });
+  grassFarShading.setSource(grassTerrainData.grassDensityMaskedTex);
   // Flowers: their own painted layer (one type per channel), masked the same way.
   const flowerDensity = new FlowerDensity();
   flowerDensity.initMask({ renderer, splatTex: splatMap.tex });
@@ -999,7 +1003,7 @@ export async function startV3App(opts = {}) {
     clumpScale: 1.5, clumpStrength: 0.7,
     grassDensity: 1,
     bladeColor: "#0e300e", tipColor: "#00b30c",
-    aoBase: 0.25, aoPower: 2,
+    aoBase: 0.25, aoPower: 2, farAoMul: 1,
     colorVariation: false,
     cvHueSpread: 0.08, cvSatSpread: 0.3, cvDryAmount: 0.15, cvDryColor: "#8a7a3a",
     skyBlend: 0.8, cylindrical: 0.3, viewThicken: 0.45,
@@ -1018,8 +1022,11 @@ export async function startV3App(opts = {}) {
     interactionRadius: 1.5, interactionStrength: 0.7, interactionMode: 0,
     receiveShadow: true, lodDebug: false,
     lodMidDistance: 40, lodFarDistance: 80, lodMaxDistance: 200, lodMegaMaxDistance: 400,
-    lodMidSegments: 3, lodFarSegments: 2, lodMegaSegments: 1,
-    lodFarBladeWidth: 0.45, lodMegaBladeWidth: 0.7,
+    lodMidSegments: 3, lodFarSegments: 2, lodMegaSegments: 2,
+    lodFarBladeWidth: 0.45, lodMegaBladeWidth: 0.5,
+    // Without the Far ring (default) the ground takes over where the Mid ring
+    // ends (~200 m), like Ghost of Tsushima; with it blades reach ~400 m.
+    farBlades: false,
   };
 
   const grassBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false, target: "terrain" };
@@ -1162,9 +1169,12 @@ export async function startV3App(opts = {}) {
       tileSize: 440, bladesPerSide: 576,
       bladeWidth: 0.45, segments: 2, bladeHeightMul: 1.1,
       innerR0: 64, innerR1: 88, outerR0: 180, outerR1: 218 },
+    // Blade spacing steps ~4x in area per ring, like GoT dropping 3 of 4
+    // blades per LOD: 0.25 / 0.47 / 0.76 / 1.56 m. Far was 2.08 m (7.5x from
+    // Mid) with 0.7 m single-segment blades, which read as blocks.
     { key: "Far",     normalMode: "flat", crossed: false,
-      tileSize: 800, bladesPerSide: 384,
-      bladeWidth: 0.7, segments: 1, bladeHeightMul: 1.2,
+      tileSize: 800, bladesPerSide: 512,
+      bladeWidth: 0.5, segments: 2, bladeHeightMul: 1.2,
       innerR0: 175, innerR1: 215, outerR0: 360, outerR1: 398 },
   ];
 
@@ -1252,18 +1262,23 @@ export async function startV3App(opts = {}) {
     // No `if (!worldEnv) return` any more: that skipped the whole grass look
     // (colours, wind, LOD), not just the light, whenever there was no environment.
     const sunDir = getLightDir();
-    if (grassRings) {
-      for (const r of grassRings) r.syncFromState(grassState, sunDir);
-      syncHybridGrassLod(grassRings, grassState);
-    }
-    if (cliffGrassRings) {
-      for (const r of cliffGrassRings) r.syncFromState(grassState, sunDir);
-      syncHybridGrassLod(cliffGrassRings, grassState);
-    }
+    if (grassRings) for (const r of grassRings) r.syncFromState(grassState, sunDir);
+    if (cliffGrassRings) for (const r of cliffGrassRings) r.syncFromState(grassState, sunDir);
+    syncGrassLod();
+    grassFarShading.syncFromState(grassState);
     // Susuki shares the grass wind params — keep it in step with every sync.
     syncSusukiUniforms();
     syncFlowerUniforms();
   }
+
+  /** Ring windows + the blade-to-ground hand-off band the terrain fades in over. */
+  function syncGrassLod() {
+    if (grassRings) grassFarShading.setBand(syncHybridGrassLod(grassRings, grassState));
+    if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState);
+  }
+
+  /** A ring runs only while grass shows; the Far ring also needs "Far blades". */
+  const _ringWanted = (r, want) => want && (grassState.farBlades !== false || !r.group.name.endsWith("Far"));
 
   // ── Susuki build/sync (lazy, like the grass rings) ─────────────────────────
   async function ensureSusukiBuilt() {
@@ -3448,21 +3463,25 @@ export async function startV3App(opts = {}) {
         // grass with no ground under it is the one thing that looks broken
         // rather than absent.
         const wantGrass = grassTerrainData.hasGrassData && _terrainVisible;
-        if (wantGrass !== _grassRingsEnabled) {
-          _grassRingsEnabled = wantGrass;
-          for (const r of grassRings) r.setEnabled(wantGrass);
+        const _grassKey = `${wantGrass}|${grassState.farBlades !== false}`;
+        if (_grassKey !== _grassRingsEnabled) {
+          _grassRingsEnabled = _grassKey;
+          for (const r of grassRings) r.setEnabled(_ringWanted(r, wantGrass));
         }
+        grassFarShading.setActive(wantGrass);
         if (wantGrass) {
           const _grassAnchor = playMode.active ? playMode.playerPosition : camera.position;
+          grassFarShading.setAnchor(_grassAnchor);
           for (const r of grassRings) r.update(_grassAnchor, camera);
         }
       }
       if (cliffGrassRings) {
         // Only spend compute when there's both a baked cliff surface and paint.
         const wantCliff = grassTerrainData.hasCliffData && grassTerrainData.hasCliffSurface && _terrainVisible;
-        if (wantCliff !== _cliffRingsEnabled) {
-          _cliffRingsEnabled = wantCliff;
-          for (const r of cliffGrassRings) r.setEnabled(wantCliff);
+        const _cliffKey = `${wantCliff}|${grassState.farBlades !== false}`;
+        if (_cliffKey !== _cliffRingsEnabled) {
+          _cliffRingsEnabled = _cliffKey;
+          for (const r of cliffGrassRings) r.setEnabled(_ringWanted(r, wantCliff));
         }
         if (wantCliff) {
           const _cliffAnchor = playMode.active ? playMode.playerPosition : camera.position;
@@ -4953,6 +4972,9 @@ export async function startV3App(opts = {}) {
   gcolTip.addEventListener("input",   () => { grassState.tipColor   = gcolTip.value;   syncGrassUniforms(); });
   gslAoBase.addEventListener("input", () => { grassState.aoBase = Number(gslAoBase.value) / 100; glblAoBase.textContent = grassState.aoBase.toFixed(2); syncGrassUniforms(); });
   gslAoPow.addEventListener("input",  () => { grassState.aoPower = Number(gslAoPow.value) / 10; glblAoPow.textContent = grassState.aoPower.toFixed(1); syncGrassUniforms(); });
+  const gslFarAo  = uiById("gsl-far-ao");
+  const glblFarAo = uiById("glbl-far-ao");
+  gslFarAo.addEventListener("input", () => { grassState.farAoMul = Number(gslFarAo.value) / 100; glblFarAo.textContent = grassState.farAoMul.toFixed(2); syncGrassUniforms(); });
   gckColorVar.addEventListener("change", () => { grassState.colorVariation = gckColorVar.checked; syncGrassUniforms(); });
   gslHue.addEventListener("input", () => { grassState.cvHueSpread = Number(gslHue.value) / 100; glblHue.textContent = grassState.cvHueSpread.toFixed(2); syncGrassUniforms(); });
   gslSat.addEventListener("input", () => { grassState.cvSatSpread = Number(gslSat.value) / 100; glblSat.textContent = grassState.cvSatSpread.toFixed(2); syncGrassUniforms(); });
@@ -5143,11 +5165,13 @@ export async function startV3App(opts = {}) {
   const gslLodMega = uiById("gsl-lod-mega");
   const glblLodMega= uiById("glbl-lod-mega");
   const gckLodDebug= uiById("gck-lod-debug");
+  const gckFarBlades = uiById("gck-far-blades");
+  gckFarBlades.addEventListener("change", () => { grassState.farBlades = gckFarBlades.checked; syncGrassLod(); });
 
-  gslLodMid.addEventListener("input",  () => { grassState.lodMidDistance = Number(gslLodMid.value); glblLodMid.textContent = gslLodMid.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
-  gslLodFar.addEventListener("input",  () => { grassState.lodFarDistance = Number(gslLodFar.value); glblLodFar.textContent = gslLodFar.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
-  gslLodMax.addEventListener("input",  () => { grassState.lodMaxDistance = Number(gslLodMax.value); glblLodMax.textContent = gslLodMax.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
-  gslLodMega.addEventListener("input", () => { grassState.lodMegaMaxDistance = Number(gslLodMega.value); glblLodMega.textContent = gslLodMega.value + "m"; if (grassRings) syncHybridGrassLod(grassRings, grassState); if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState); });
+  gslLodMid.addEventListener("input",  () => { grassState.lodMidDistance = Number(gslLodMid.value); glblLodMid.textContent = gslLodMid.value + "m"; syncGrassLod(); });
+  gslLodFar.addEventListener("input",  () => { grassState.lodFarDistance = Number(gslLodFar.value); glblLodFar.textContent = gslLodFar.value + "m"; syncGrassLod(); });
+  gslLodMax.addEventListener("input",  () => { grassState.lodMaxDistance = Number(gslLodMax.value); glblLodMax.textContent = gslLodMax.value + "m"; syncGrassLod(); });
+  gslLodMega.addEventListener("input", () => { grassState.lodMegaMaxDistance = Number(gslLodMega.value); glblLodMega.textContent = gslLodMega.value + "m"; syncGrassLod(); });
   gckLodDebug.addEventListener("change", () => { grassState.lodDebug = gckLodDebug.checked; syncGrassUniforms(); });
 
   // Per-tier blade geometry (segments / widths) — geometry-baked, needs rebuild
@@ -5184,7 +5208,7 @@ export async function startV3App(opts = {}) {
   // key, slider units per state unit]. Used to show a loaded project's grass.
   const GRASS_PANEL_CONTROLS = [
     ["gsl-blade-height", "bladeHeight", 10], ["gcol-blade", "bladeColor"], ["gcol-tip", "tipColor"],
-    ["gsl-ao-base", "aoBase", 100], ["gsl-ao-power", "aoPower", 10],
+    ["gsl-ao-base", "aoBase", 100], ["gsl-ao-power", "aoPower", 10], ["gsl-far-ao", "farAoMul", 100],
     ["gck-color-var", "colorVariation"], ["gsl-hue", "cvHueSpread", 100], ["gsl-sat", "cvSatSpread", 100],
     ["gsl-dry", "cvDryAmount", 100], ["gcol-dry", "cvDryColor"],
     ["gsl-blade-width", "bladeWidth", 100], ["gck-crossed", "crossed"], ["gsl-segments", "bladeYSegments", 1],
@@ -5206,7 +5230,7 @@ export async function startV3App(opts = {}) {
     ["gck-slope", "slopeEnabled"], ["gsl-slope-min", "slopeMin", 100], ["gsl-slope-max", "slopeMax", 100],
     ["gck-tint", "terrainTintEnabled"], ["gsl-tint-str", "terrainTintStrength", 100], ["gsl-tint-root", "terrainTintRootBias", 100],
     ["gsl-lod-mid", "lodMidDistance", 1], ["gsl-lod-far", "lodFarDistance", 1], ["gsl-lod-max", "lodMaxDistance", 1],
-    ["gsl-lod-mega", "lodMegaMaxDistance", 1], ["gsl-lod-mid-seg", "lodMidSegments", 1], ["gsl-lod-far-seg", "lodFarSegments", 1],
+    ["gsl-lod-mega", "lodMegaMaxDistance", 1], ["gck-far-blades", "farBlades"], ["gsl-lod-mid-seg", "lodMidSegments", 1], ["gsl-lod-far-seg", "lodFarSegments", 1],
     ["gsl-lod-far-w", "lodFarBladeWidth", 100], ["gsl-lod-mega-seg", "lodMegaSegments", 1], ["gsl-lod-mega-w", "lodMegaBladeWidth", 100],
     ["gsl-int-rad", "interactionRadius", 10], ["gsl-int-str", "interactionStrength", 100], ["gsel-int-mode", "interactionMode"],
   ];
@@ -8904,6 +8928,7 @@ export async function startV3App(opts = {}) {
       sculptFilterState,
       paintFilterState: paintState.filter,
       grassTintScene,
+      grassFarShading,
       grassTintCam,
       forceGrassTintBake() {
         const prevRT = renderer.getRenderTarget();
