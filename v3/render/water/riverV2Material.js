@@ -31,6 +31,26 @@
  * thickness, Beer-Lambert absorption and the SSR march are the same proven
  * technique, and both sample the same two engine-wide framebuffer grabs
  * (sceneColorGrab / sceneDepthGrab) so no extra copies are made.
+ *
+ * THE WATERFALL USES THIS SHADER TOO, and that is the point: a fall is the
+ * river's own surface tipped over an edge, so the two can only be guaranteed to
+ * match by being the same code with the same settings, rather than two shaders
+ * tuned toward each other. What a fall needs differently comes in as options,
+ * and every default reproduces the river exactly:
+ *
+ *   inputs      where arc, across, flow, speed, half width, turbulence and
+ *               depth come from (the river reads its own attributes)
+ *   basis       the surface's tangent frame. A river is flat under world up; a
+ *               falling sheet is vertical, and the river's frame would light it
+ *               as though it were lying down.
+ *   thickness   metres of water. A river has a bed and reads the depth buffer;
+ *               a falling sheet has cliff or sky behind it and carries its own.
+ *   coverage    multiplies the final alpha (the fall's ropes, gaps and edges)
+ *   extraFoam   whitewater from elsewhere (the fall's aeration)
+ *   blendOutput colour + alpha for ordinary blending instead of compositing
+ *               over the grabbed backbuffer — see the note where it is built
+ *   waves       the swell/standing displacement, which on a vertical sheet
+ *               would slide vertices ALONG the fall
  */
 
 import * as THREE from "three";
@@ -203,7 +223,12 @@ export const RIVER_MATERIAL_DEFAULTS = {
  *             here because it sets the standing-wave spacing, not because the
  *             shading needs it — thickness comes from the depth buffer.
  */
-export function createRiverMaterial({ normalMap, params = {} }) {
+export function createRiverMaterial({
+  normalMap, params = {},
+  inputs = null, basis = null, thicknessNode = null, verticalDepthNode = null,
+  coverageNode = null, extraFoamNode = null, blendOutput = false,
+  waves = true, waterlineDiscard = true,
+} = {}) {
   const p = { ...RIVER_MATERIAL_DEFAULTS, ...params };
 
   const u = {
@@ -276,6 +301,15 @@ export function createRiverMaterial({ normalMap, params = {} }) {
   material.transparent = false;   // composited against the grabbed backbuffer
   material.depthWrite = false;    // the ribbon overhangs its banks by design
   material.depthTest = true;
+  if (blendOutput) {
+    // Explicit alpha blending, still in the opaque queue (AUDIT #100).
+    material.blending = THREE.CustomBlending;
+    material.blendEquation = THREE.AddEquation;
+    material.blendSrc = THREE.SrcAlphaFactor;
+    material.blendDst = THREE.OneMinusSrcAlphaFactor;
+    material.blendSrcAlpha = THREE.ZeroFactor;
+    material.blendDstAlpha = THREE.OneFactor;
+  }
   // A ribbon's winding flips with the sign of the centreline's curvature, so it
   // can present either face.
   material.side = THREE.DoubleSide;
@@ -336,7 +370,7 @@ export function createRiverMaterial({ normalMap, params = {} }) {
   // The ribbon is tessellated (riverV2System._buildRibbon), so this is real
   // relief rather than a normal-map illusion: it holds up at eye level and in
   // silhouette, which is exactly where a flat ribbon stops convincing.
-  material.positionNode = Fn(() => {
+  if (waves) material.positionNode = Fn(() => {
     const flow = attribute("aFlow", "vec4");
     // Same speed expression the fragment stage uses, or the relief and the
     // shading of it would be computed from different wavelengths.
@@ -347,18 +381,32 @@ export function createRiverMaterial({ normalMap, params = {} }) {
     return positionLocal.add(vec3(0, h, 0));
   })();
 
-  material.colorNode = Fn(() => {
-    // ── 0. Per-station flow, straight off the mesh ──────────────────────────
-    const flow = attribute("aFlow", "vec4").toVar();
-    const flowDir = normalize(vec3(flow.x, 0, flow.y)).toVar();
-    const speed = flow.z.add(u.flowBias).max(0.01).toVar();
-    const halfW = flow.w.max(0.25).toVar();
-    const waveA = attribute("aWave", "vec2").toVar();
-    const turbA = waveA.x.toVar();
-    const depthA = waveA.y.max(0.05).toVar();
+  /**
+   * The whole surface, as (rgb, alpha). Held in one variable so `colorNode` and
+   * `opacityNode` share a single evaluation — the refraction, the SSR march and
+   * the foam are far too expensive to compute twice.
+   */
+  const shaded = Fn(() => {
+    // ── 0. Per-station flow, straight off the mesh (or from `inputs`) ───────
+    const flowAttr = attribute("aFlow", "vec4");
+    const waveAttr = attribute("aWave", "vec2");
+    const IN = inputs ?? {
+      arc: uv().x,             // metres downstream
+      across: uv().y,          // metres from the centreline, signed
+      flowDir: normalize(vec3(flowAttr.x, 0, flowAttr.y)),
+      speed: flowAttr.z,
+      halfW: flowAttr.w,
+      turb: waveAttr.x,
+      depth: waveAttr.y,
+    };
+    const flowDir = IN.flowDir.toVar();
+    const speed = IN.speed.add(u.flowBias).max(0.01).toVar();
+    const halfW = IN.halfW.max(0.25).toVar();
+    const turbA = IN.turb.toVar();
+    const depthA = IN.depth.max(0.05).toVar();
 
-    const arc = uv().x;          // metres downstream
-    const across = uv().y;       // metres from the centreline, signed
+    const arc = IN.arc;
+    const across = IN.across;
 
     // ── 1. Two-phase advection (see header note 2) ─────────────────────────
     // Each phase runs for `advectPeriod` seconds and is then reset; the pair is
@@ -416,17 +464,20 @@ export function createRiverMaterial({ normalMap, params = {} }) {
     // T runs downstream, so wave crests sit ACROSS the current the way they do
     // in a real channel. Using world up for N is a deliberate approximation:
     // river gradients are a few percent, and the profile is smooth by solve.
-    const up = vec3(0, 1, 0);
-    const bino = cross(flowDir, up).normalize();
-    const normal = flowDir.mul(tsn.x).add(bino.mul(tsn.y)).add(up.mul(tsn.z)).normalize().toVar();
+    // A river is flat, so its frame is (downstream, across, world up). A
+    // falling sheet hands over its own, or it would be lit lying down.
+    const up = (basis?.n ?? vec3(0, 1, 0)).toVar();
+    const tang = (basis?.t ?? flowDir).toVar();
+    const bino = (basis?.b ?? cross(flowDir, up)).normalize().toVar();
+    const normal = tang.mul(tsn.x).add(bino.mul(tsn.y)).add(up.mul(tsn.z)).normalize().toVar();
 
     // ── 3. Water thickness from the depth buffer ───────────────────────────
     const fragDist = positionView.z.negate().toVar();
-    const thickness = sceneDistAt(screenUV).sub(fragDist).toVar();
+    const thickness = (thicknessNode ?? sceneDistAt(screenUV).sub(fragDist)).toVar();
 
     // The ribbon deliberately overhangs its banks so the waterline is found per
     // pixel rather than by the mesh edge. This is where that gets cut.
-    Discard(thickness.lessThanEqual(0));
+    if (waterlineDiscard) Discard(thickness.lessThanEqual(0));
 
     // ── 4. Refraction ──────────────────────────────────────────────────────
     const distortion = tsn.xy.mul(
@@ -442,12 +493,14 @@ export function createRiverMaterial({ normalMap, params = {} }) {
 
     const screenColor = sceneColorGrab.sample(safeUv).rgb.toVar();
     const refractedThick = refractedDist.sub(fragDist).max(0);
-    const waterThickness = mix(thickness, refractedThick, isSafe).toVar();
+    // A surface carrying its own thickness keeps it: the refracted depth says
+    // what is BEHIND the sheet, not how much water is in it.
+    const waterThickness = (thicknessNode ?? mix(thickness, refractedThick, isSafe)).toVar();
 
     // Thickness runs along the VIEW RAY and stretches at grazing angles, so
     // every band keyed to a depth in metres uses the vertical drop instead.
     const rayDir = normalize(positionWorld.sub(cameraPosition));
-    const verticalDepth = waterThickness.mul(rayDir.y.abs()).toVar();
+    const verticalDepth = (verticalDepthNode ?? waterThickness.mul(rayDir.y.abs())).toVar();
 
     // ── Which way is up, in the space the framebuffer grabs are indexed? ────
     // Projecting THIS fragment's own world position must reproduce its own
@@ -604,7 +657,8 @@ export function createRiverMaterial({ normalMap, params = {} }) {
       const nUv2 = vec2(arc.sub(travel2), across).mul(u.foamScale).add(vec2(11.3, 7.7));
       const noise = mix(_fbm3(nUv1), _fbm3(nUv2), blend).toVar();
 
-      const raw = saturate(turbSrc.add(shallowSrc).add(wakeSrc));
+      const raw = saturate(turbSrc.add(shallowSrc).add(wakeSrc)
+        .add(extraFoamNode ?? float(0)));
 
       // Break the foam up MULTIPLICATIVELY, and stretch the noise first.
       //
@@ -640,11 +694,50 @@ export function createRiverMaterial({ normalMap, params = {} }) {
     // ── 11. Composite ──────────────────────────────────────────────────────
     const opacity = smoothstep(0, u.shoreFade, waterThickness).mul(u.surfaceOpacity).clamp();
     const shadedWater = mix(throughWater, reflectedColor, fresnelWeight);
-    const withWater = mix(screenColor, shadedWater, opacity);
-    // Foam sits on the water but under the glint — wet foam does not glint.
-    const withFoam = mix(withWater, u.foamColor, foam);
-    return withFoam.add(sunGlint.mul(float(1).sub(foam)));
-  })();
+
+    if (!blendOutput) {
+      const withWater = mix(screenColor, shadedWater, opacity);
+      // Foam sits on the water but under the glint — wet foam does not glint.
+      const withFoam = mix(withWater, u.foamColor, foam);
+      return vec4(withFoam.add(sunGlint.mul(float(1).sub(foam))), float(1));
+    }
+
+    /*
+     * BLENDED, for a surface that must not composite over the grab.
+     *
+     * The grab is taken ONCE a frame, by whichever water draws first, so a
+     * surface drawn later would composite over a backbuffer that does not
+     * contain the water already drawn — a waterfall in front of a lake would
+     * erase the lake. Blending against the real framebuffer cannot do that.
+     *
+     * It is the same result, rearranged. The composite above is `bg·K + rest`,
+     * where K is how much of the background survives.
+     *
+     * K IS PER CHANNEL AND ALPHA IS NOT, and that difference is not small:
+     * water this colour passes 38% of blue and 2% of red, while one alpha can
+     * only take the same bite out of all three. Blending naively turns the
+     * river's teal into flat grey. So the colour carries the correction: with
+     * the grab standing in for what is behind, `bg·K` is rebuilt exactly, and
+     * the alpha only has to carry whatever was drawn after the grab was taken.
+     */
+    const K = float(1).sub(opacity)
+      .add(opacity.mul(float(1).sub(fresnelWeight)).mul(transmittance))
+      .mul(float(1).sub(foam)).toVar();
+    const alpha = float(1).sub(dot(K, vec3(1 / 3)).clamp()).toVar();
+    const rest = inscatter.mul(float(1).sub(transmittance)).mul(float(1).sub(fresnelWeight))
+      .add(reflectedColor.mul(fresnelWeight))
+      .mul(opacity).mul(float(1).sub(foam))
+      .add(u.foamColor.mul(foam))
+      .add(sunGlint.mul(float(1).sub(foam)));
+    // out = C·α + fb·(1−α), and we want bg·K + rest. Where fb is the grab (most
+    // of the screen) this is exact; where it is not, it degrades to the plain
+    // alpha blend instead of erasing what is there.
+    const corrected = rest.add(screenColor.mul(K.sub(float(1).sub(alpha)))).max(0);
+    return vec4(corrected.div(alpha.max(1e-3)), alpha);
+  })().toVar("riverShaded");
+
+  material.colorNode = shaded.rgb;
+  if (blendOutput) material.opacityNode = shaded.a.mul(coverageNode ?? float(1)).clamp();
 
   const _c = (hex, target) => target.set(hex);
 

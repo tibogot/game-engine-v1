@@ -118,6 +118,9 @@ function nearestSearch(uvC, pathTex, prev, uSegStart, uSegEnd) {
     // Row 0 is (u, v, level, halfWidth) — only the position is needed here.
     const a0 = texture(pathTex, vec2(idx.add(0.5).div(W), 0.25));
     const b0 = texture(pathTex, vec2(idx.add(1.5).div(W), 0.25));
+    // Row 1's zw hold the river's OPEN MOUTH (a waterfall lip) in UV, on every
+    // point of that river; z < 0 when the mouth is closed.
+    const a1 = texture(pathTex, vec2(idx.add(0.5).div(W), 0.75));
 
     const ab = b0.xy.sub(a0.xy);
     const len2 = max(dot(ab, ab), float(1e-12));
@@ -126,7 +129,17 @@ function nearestSearch(uvC, pathTex, prev, uSegStart, uSegEnd) {
     const d = uvC.sub(p);
     const d2 = dot(d, d);
 
-    If(d2.lessThan(bestD2), () => {
+    // Past an open mouth the river simply stops: no bed, no bank, no fill.
+    // Ordinarily the end owns a half-disc beyond itself, which is right for a
+    // river petering out on a plain and wrong for one going over a cliff — the
+    // fill there buries the very edge the water is meant to leave. The cut is
+    // a half-plane through the mouth, and EVERY segment of the river honours
+    // it: excluding only the last one hands those texels to the one before,
+    // whose bank flare reaches them just the same.
+    const toMouth = a1.zw.sub(a0.xy);
+    const pastMouth = a1.z.greaterThanEqual(0).and(dot(uvC.sub(a1.zw), toMouth).greaterThan(0));
+
+    If(d2.lessThan(bestD2).and(pastMouth.not()), () => {
       bestD2.assign(d2);
       bestIdx.assign(idx);
       bestT.assign(t);
@@ -214,6 +227,12 @@ export class RiverV2System {
     this._realistic = createRiverMaterial({ normalMap: waterNormalMap });
     this._stylized = null;
     this._water = this._realistic;
+    /**
+     * Rivers whose downstream end is open because a waterfall takes the water:
+     * id → { x, z }, the point the channel runs to (the fall's LIP, which is
+     * the brink — not the last node, which is usually short of it).
+     */
+    this._openMouths = new Map();
 
     // ── Terrain base, held on the CPU ───────────────────────────────────────
     this._cpuBase = null;                       // normalized, unconformed
@@ -268,7 +287,8 @@ export class RiverV2System {
 
     // Path texture: two rows per river.
     //   row 0 — (u, v, level, halfWidth)     positions in UV, level normalized
-    //   row 1 — (depth, bank, 0, 0)          depth normalized, bank in UV
+    //   row 1 — (depth, bank, mouthU, mouthV) depth normalized, bank in UV; the
+    //           open mouth's UV on every point, mouthU = -1 when closed
     this._pathData = new Float32Array(MAX_PATH_POINTS * 2 * 4);
     this._pathTex = new THREE.DataTexture(
       this._pathData, MAX_PATH_POINTS, 2, THREE.RGBAFormat, THREE.FloatType,
@@ -631,8 +651,22 @@ export class RiverV2System {
         d[j * 4 + 3] = (s.width[i] * 0.5) / WORLD_SIZE;
         d[row1 + j * 4 + 0] = s.depth[i] / MAX_HEIGHT;
         d[row1 + j * 4 + 1] = s.bank[i] / WORLD_SIZE;
-        d[row1 + j * 4 + 2] = 0;
-        d[row1 + j * 4 + 3] = 0;
+        // The mouth, if open, on every point (the search tests a half-plane
+        // through it for every segment); z = -1 marks a closed mouth.
+        //
+        // It is the WATERFALL'S LIP, not the last node. The channel has to keep
+        // cutting all the way to the brink, or the natural ground between the
+        // two stands above the water and slices through it.
+        const mouth = this._openMouths.get(river.id);
+        if (mouth) {
+          const mx = Number.isFinite(mouth.x) ? mouth.x : s.x[last];
+          const mz = Number.isFinite(mouth.z) ? mouth.z : s.z[last];
+          d[row1 + j * 4 + 2] = (mx + half) / WORLD_SIZE;
+          d[row1 + j * 4 + 3] = (mz + half) / WORLD_SIZE;
+        } else {
+          d[row1 + j * 4 + 2] = -1;
+          d[row1 + j * 4 + 3] = 0;
+        }
       }
       layout.push({ offset: off, count: n, idxOf, solved: s });
       off += n;
@@ -781,6 +815,53 @@ export class RiverV2System {
 
   /** Panel hook — a conform-affecting parameter changed. */
   refreshConform() { this.applyConform({ commit: true }); }
+
+  // ── Mouths (where a river hands its water to a waterfall) ─────────────────
+
+  /**
+   * Mark a river's downstream end as OPEN: the conform stops dead at the last
+   * station instead of filling a half-disc past it. Set by the waterfall system
+   * when a fall attaches to that river, cleared when it detaches. Re-conforms.
+   */
+  setMouthOpen(riverId, open, x = null, z = null) {
+    const had = this._openMouths.get(riverId) ?? null;
+    if (!open) {
+      if (!had) return;
+      this._openMouths.delete(riverId);
+    } else {
+      const next = { x: Number.isFinite(x) ? x : null, z: Number.isFinite(z) ? z : null };
+      if (had && had.x === next.x && had.z === next.z) return;
+      this._openMouths.set(riverId, next);
+    }
+    if (this.rivers.some((r) => r.id === riverId)) this.applyConform({ commit: true });
+  }
+
+  /**
+   * The downstream end of river `riverId` as a waterfall lip:
+   * `{ x, y, z, yaw, width, speed, depth }`, or null if the river is not solved.
+   * y is the water surface, yaw the direction the water leaves in.
+   */
+  mouthOf(riverId) {
+    const river = this.rivers.find((r) => r.id === riverId);
+    const s = river?.solved;
+    if (!s || s.count < 2) return null;
+    const n = s.count - 1;
+    return {
+      x: s.x[n], y: s.level[n], z: s.z[n],
+      yaw: Math.atan2(s.tanX[n], s.tanZ[n]),
+      width: s.width[n], speed: s.speed[n], depth: s.depth[n],
+    };
+  }
+
+  /** Every river's mouth (for "which river is this fall near?"): [{ id, ...mouthOf }]. */
+  mouths() {
+    const out = [];
+    for (const r of this.rivers) {
+      const m = this.mouthOf(r.id);
+      if (m) out.push({ id: r.id, ...m });
+    }
+    return out;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Ribbon meshes

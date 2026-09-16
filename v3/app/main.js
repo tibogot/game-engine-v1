@@ -102,6 +102,9 @@ import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
 import { DecalSystem } from "../render/decals/decalSystem.js";
 import { createDecalEditor } from "../tools/decalEditor.js";
 import { buildDecalPanel } from "../ui/buildDecalPanel.js";
+import { WaterfallSystem } from "../render/waterfall/waterfallSystem.js";
+import { createWaterfallEditor } from "../tools/waterfallEditor.js";
+import { buildWaterfallPanel } from "../ui/buildWaterfallPanel.js";
 import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
 import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
@@ -2151,9 +2154,14 @@ export async function startV3App(opts = {}) {
   /** Decal mode's editing half (editor only); built after the decal system. */
   let decalEditor = null;
   let decalUi = null;
+  /** Waterfalls (G): the runtime system (games too) and its editing half. Built after River v2. */
+  let waterfallSystem = null;
+  let waterfallEditor = null;
+  let waterfallUi = null;
 
   const grassPanel = uiById("grass-panel");
   const decalPanel = uiById("decal-panel");
+  const waterfallPanel = uiById("waterfall-panel");
   const susukiPanel = uiById("susuki-panel");
   const flowerPanel = uiById("flower-panel");
   const treePanel  = uiById("tree-panel");
@@ -2184,6 +2192,11 @@ export async function startV3App(opts = {}) {
   function syncDecalPanelVisibility() {
     if (decalPanel) decalPanel.style.display = (editorMode === "decals" && !playMode.active) ? "" : "none";
     decalEditor?.setActive(editorMode === "decals" && !playMode.active);
+  }
+
+  function syncWaterfallPanelVisibility() {
+    if (waterfallPanel) waterfallPanel.style.display = (editorMode === "waterfall" && !playMode.active) ? "" : "none";
+    waterfallEditor?.setActive(editorMode === "waterfall" && !playMode.active);
   }
 
   function syncTreePanelVisibility() {
@@ -2315,6 +2328,10 @@ export async function startV3App(opts = {}) {
       spawnUi?.refresh();
     } else if (m === "decals") {
       uCursorUV.value.set(-2, -2);
+    } else if (m === "waterfall") {
+      uCursorUV.value.set(-2, -2);
+      // Falls are solved against the CPU height mirror: freshen it, then re-solve.
+      void ensureCpuHeightmapFromGpu().then(() => { waterfallSystem?.markDirty(); waterfallUi?.rebuild(); });
     } else if (m === "props" || m === "spline"
       || m === "riverv2" || m === "road" || m === "lake" || m === "tunnel" || m === "laneRoad") {
       uCursorUV.value.set(-2, -2);
@@ -2350,6 +2367,7 @@ export async function startV3App(opts = {}) {
     syncSusukiPanelVisibility();
     syncFlowerPanelVisibility();
     syncDecalPanelVisibility();
+    syncWaterfallPanelVisibility();
     syncTreePanelVisibility();
     syncFoliagePanelVisibility();
     syncPropsPanelVisibility();
@@ -2395,6 +2413,7 @@ export async function startV3App(opts = {}) {
     susukiPanel.style.display = "none";
     if (flowerPanel) flowerPanel.style.display = "none";
     syncDecalPanelVisibility();
+    syncWaterfallPanelVisibility();
     treePanel.style.display = "none";
     foliagePanel.style.display = "none";
     propsPanel.style.display = "none";
@@ -3096,6 +3115,7 @@ export async function startV3App(opts = {}) {
   tc.addEventListener("mouseUp", () => {
     syncEditorOrbitEnabled();
     if (_gizmoTarget === "decal") decalEditor?.gizmoEnd();
+    if (_gizmoTarget === "waterfall") waterfallEditor?.gizmoEnd();
     _onGizmoDragEnd();
     if (editorMode === "props") refreshPropPlacementPreview();
   });
@@ -3199,7 +3219,8 @@ export async function startV3App(opts = {}) {
     // Same scene-depth rule as the frame loop (see there): the precompile frame
     // must not draw water or decals straight onto the multisampled canvas.
     worldEnv?.postFxPipeline?.setSceneDepthRequired(
-      decalSystem.decals.length > 0 || (lakeSystem?.lakes.length ?? 0) > 0 || (riverV2System?.rivers.length ?? 0) > 0,
+      decalSystem.decals.length > 0 || (lakeSystem?.lakes.length ?? 0) > 0 || (riverV2System?.rivers.length ?? 0) > 0
+        || (waterfallSystem?.falls.length ?? 0) > 0,
     );
     await renderer.compileAsync(scene, camera);
     if (worldEnv) worldEnv.renderFrame(0);
@@ -3366,6 +3387,15 @@ export async function startV3App(opts = {}) {
       // added, edited, moved or deleted (string-compare on a signature).
       splineFeatureStore?.refresh();
       riverV2System?.update(dt);
+      if (waterfallSystem) {
+        // Sun colour and strength follow the day/night cycle (the direction comes
+        // through worldEnv's water-surface hook, or below without an environment).
+        if (worldEnv?.sun) waterfallSystem.setSunLight(worldEnv.sun.color, worldEnv.sun.intensity);
+        else waterfallSystem.setSunDir(getLightDir());
+        if (worldEnv?.hemi) waterfallSystem.setAmbient(worldEnv.hemi.color, worldEnv.hemi.intensity);
+        waterfallSystem.update(dt, camera);
+        waterfallEditor?.frame();
+      }
       tunnelSystem?.update();
       if (isEditor) _sceneListFrame?.();
       // Tunnel collision: cheap poll, rebuilds a BVH only when a tunnel mesh changed.
@@ -3411,7 +3441,8 @@ export async function startV3App(opts = {}) {
       // of the multisampled canvas: while any is in the scene, the frame goes
       // through a non-multisampled scene pass even with post FX off.
       worldEnv?.postFxPipeline?.setSceneDepthRequired(
-        decalSystem.visibleCount > 0 || (lakeSystem?.lakes.length ?? 0) > 0 || (riverV2System?.rivers.length ?? 0) > 0,
+        decalSystem.visibleCount > 0 || (lakeSystem?.lakes.length ?? 0) > 0 || (riverV2System?.rivers.length ?? 0) > 0
+          || (waterfallSystem?.visibleCount ?? 0) > 0,
       );
       if (!_rendererSideWork && worldEnv) {
         worldEnv.renderFrame(dt);
@@ -3684,6 +3715,7 @@ export async function startV3App(opts = {}) {
       case "road":    done = undo ? roadHistory.undo() : roadHistory.redo(); break;
       case "lake":    done = undo ? lakeHistory.undo() : lakeHistory.redo(); break;
       case "decals":  done = !!decalEditor && (undo ? decalEditor.history.undo() : decalEditor.history.redo()); break;
+      case "waterfall": done = !!waterfallEditor && (undo ? waterfallEditor.history.undo() : waterfallEditor.history.redo()); break;
     }
     if (done) return true;
     if (undo ? sculpt.undo() : sculpt.redo()) { onHistoryChange(); return true; }
@@ -3796,6 +3828,23 @@ export async function startV3App(opts = {}) {
       if (plain && _gizmoTarget === "decal") {
         const mode = { KeyW: "translate", KeyE: "rotate", KeyR: "scale" }[e.code];
         if (mode) { e.preventDefault(); tc.setMode(mode); return; }
+      }
+    }
+    // Waterfalls — the printed G, whatever the layout.
+    if (e.key?.toLowerCase() === "g" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
+      e.preventDefault();
+      setEditorMode(editorMode === "waterfall" ? "view" : "waterfall");
+      return;
+    }
+    if (editorMode === "waterfall" && waterfallEditor && !playMode.active) {
+      const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+      if (e.code === "Delete" || e.code === "Backspace") { e.preventDefault(); waterfallEditor.deleteSelected(); return; }
+      if (e.code === "Escape") { e.preventDefault(); waterfallEditor.deselect(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") { e.preventDefault(); waterfallEditor.duplicateSelected(); return; }
+      if (plain && _gizmoTarget === "waterfall") {
+        // Move and turn only: a fall's shape comes from its panel values.
+        const mode = { KeyW: "translate", KeyE: "rotate" }[e.code];
+        if (mode) { e.preventDefault(); tc.setMode(mode); applyWaterfallGizmoAxes(); return; }
       }
     }
     // Delete clears the player start while spawn mode is active.
@@ -5238,7 +5287,8 @@ export async function startV3App(opts = {}) {
     normalMap: waterNormalMap,
     sampleTerrainHeight,
     worldSize: WORLD_SIZE,
-    onChanged: () => waterSurfaceMap.markDirty(),
+    // A fall landing in a lake re-solves when the lake moves.
+    onChanged: () => { waterSurfaceMap.markDirty(); waterfallSystem?.markDirty(); },
   });
   worldEnv?.addWaterSurface(lakeSystem);
   // Undo for lake placement: the rectangles and their water level. The water
@@ -5267,7 +5317,7 @@ export async function startV3App(opts = {}) {
       requestHeightmapReadback();
       bvhDebug?.update();
     },
-    onWaterMeshesChanged: () => waterSurfaceMap.markDirty(),
+    onWaterMeshesChanged: () => { waterSurfaceMap.markDirty(); waterfallSystem?.markDirty(); },
     onRiverFieldChanged: (hasRivers) => riverSandShading.setActive(hasRivers),
   });
   worldEnv?.addWaterSurface(riverV2System);
@@ -5285,6 +5335,82 @@ export async function startV3App(opts = {}) {
     ...riverV2System.meshes,
   ]);
 
+  // ── Waterfalls ─────────────────────────────────────────────────────────────
+  // Water surface Y at a point: ocean, lakes, River v2 — what a fall lands in.
+  function waterLevelAt(wx, wz) {
+    let level = -Infinity;
+    const o = worldToolState.worldOcean;
+    if (o?.enabled) level = o.seaLevel ?? 0;
+    for (const L of lakeSystem.lakes) {
+      if (Math.abs(wx - L.cx) <= L.sizeX * 0.5 && Math.abs(wz - L.cz) <= L.sizeZ * 0.5 && L.level > level) {
+        level = L.level;
+      }
+    }
+    const f = riverV2System?.sampleFlow(wx, wz);
+    if (f?.inChannel && f.surfaceY > level) level = f.surfaceY;
+    return level;
+  }
+  waterfallSystem = new WaterfallSystem({
+    scene,
+    renderer,
+    // The same tiling normal map the lakes and River v2 use: the fall runs
+    // River v2's shader, so it needs the same input.
+    normalMap: waterNormalMap,
+    // The highest surface at or below yFrom: terrain, or a solid (cliff prop,
+    // spline feature, tunnel) standing on it. The fall clings to whichever.
+    sampleGround: (x, yFrom, z) => {
+      const n = sampleTerrainNormal(x, z);
+      let best = { y: getWorldHeight(x, z), nx: n.x, ny: n.y, nz: n.z };
+      if (worldCollider.baked && yFrom > best.y) {
+        const h = worldCollider.raycastDown(x, yFrom, z, yFrom - best.y + 0.5);
+        if (h && h.y > best.y) best = h;
+      }
+      return best;
+    },
+    sampleWater: waterLevelAt,
+    getRiverWater: () => riverV2Slice.riverV2.water,
+    getRiverMouth: (id) => riverV2System.mouthOf(id),
+    // The ground before any river carved it — see the brink march.
+    sampleBaseGround: (x, z) => riverV2System.sampleBase(x, z),
+    getRiverMouths: () => riverV2System.mouths(),
+    setRiverMouthOpen: (id, open) => riverV2System.setMouthOpen(id, open),
+  });
+  worldEnv?.addWaterSurface(waterfallSystem);
+  /** A fall only turns about Y: the rotate gizmo shows just that ring. */
+  function applyWaterfallGizmoAxes() {
+    const turnOnly = tc.mode === "rotate";
+    tc.showX = !turnOnly;
+    tc.showZ = !turnOnly;
+    tc.showY = true;
+  }
+  if (isEditor) {
+    waterfallEditor = createWaterfallEditor({
+      system: waterfallSystem,
+      scene,
+      attachGizmo: (_fall, proxy) => {
+        applyGizmoSettings();
+        if (tc.mode === "scale") tc.setMode("translate");
+        tc.attach(proxy);
+        tc.enabled = true;
+        tc.visible = true;
+        _gizmoTarget = "waterfall";
+        applyWaterfallGizmoAxes();
+      },
+      detachGizmo: () => {
+        if (_gizmoTarget !== "waterfall") return;
+        tc.showX = tc.showY = tc.showZ = true;
+        _detachGizmo();
+      },
+      onChanged: () => { waterfallUi?.rebuild(); sceneOutliner?.update(true); },
+    });
+    if (waterfallPanel) waterfallUi = buildWaterfallPanel(waterfallPanel, {
+      system: waterfallSystem,
+      editor: waterfallEditor,
+      onLookChanged: () => waterfallSystem.syncLook(),
+      onOpenRiver: () => setEditorMode("riverv2"),
+    });
+  }
+
   // Keep the river system's uncarved-base RT in sync with every non-river
   // terrain edit (sculpt strokes, sculpt undo/redo, procedural gen, spline
   // plateau, heightmap load — the last three all route through
@@ -5297,6 +5423,7 @@ export async function startV3App(opts = {}) {
     const _replace = sculpt.replaceHeightData;
     const terrainEdited = () => {
       riverV2System.notifyTerrainEdited();
+      waterfallSystem?.markDirty();
     };
     sculpt.endStroke = (...a) => { const r = _endStroke(...a); terrainEdited(); return r; };
     sculpt.undo = (...a) => { const r = _undo(...a); if (r) terrainEdited(); return r; };
@@ -6196,6 +6323,7 @@ export async function startV3App(opts = {}) {
       look: worldEnv?.exportLook() ?? null,
     };
     const decals = decalSystem.decals.length ? decalSystem.exportData() : null;
+    const waterfalls = waterfallSystem?.falls.length ? waterfallSystem.exportData() : null;
     const buf = encodeProjectFile({
       assets:    projectAssets.collectFor({ trees: trees.slots, foliage: foliage.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers, environment, decalSlots: decals?.slots }),
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
@@ -6212,6 +6340,7 @@ export async function startV3App(opts = {}) {
       splines:   splineSys.exportData(),
       lakes:     lakeSystem.exportData(),
       decals,
+      waterfalls,
       riversV2,
       tunnels:   tunnelSystem?.exportData() ?? null,
       paintLayers,
@@ -6526,6 +6655,11 @@ export async function startV3App(opts = {}) {
     riverV2System.importData(d.riversV2 ?? null);
     riverSandShading.syncParams(riverV2Slice.riverV2.sand);
     riverV2Ui?.refresh();
+
+    // Waterfalls: after the terrain, lakes and rivers they are solved against.
+    // Absent means none, so a project without falls clears the previous ones.
+    waterfallSystem?.importData(d.waterfalls ?? null);
+    waterfallEditor?.reset();
 
     // Always import (a tunnel-less project clears the old ones). Runs after the
     // heightmap and splat, because the openings are cut from the loaded ground.
@@ -6849,6 +6983,7 @@ export async function startV3App(opts = {}) {
       propSys.handleTransformChange();
     }
     if (_gizmoTarget === "decal" && tc.dragging) decalEditor?.gizmoChanged();
+    if (_gizmoTarget === "waterfall" && tc.dragging) waterfallEditor?.gizmoChanged();
   });
 
   // ── Props mode mouse events (v2: place click / paint brush / right-click select) ──
@@ -7164,6 +7299,31 @@ export async function startV3App(opts = {}) {
     if (did) {
       e.preventDefault();
       decalEditor.hover(null, camera);
+    }
+  });
+
+  // ── Waterfall mode mouse events ───────────────────────────────────────────
+  // The lip goes on the terrain or a solid prop (the same surfaces as decals).
+  function getWaterfallHit(e) {
+    const hit = getDecalSurfaceHit(e, { meshes: false });
+    return hit;
+  }
+  renderer.domElement.addEventListener("mousemove", (e) => {
+    if (!waterfallEditor || playMode.active || editorMode !== "waterfall") return;
+    if (tc.dragging) { waterfallEditor.hover(null, camera); return; }
+    const hit = getWaterfallHit(e);
+    const over = waterfallSystem.raycast(_decalRay);
+    waterfallEditor.hover(hit, camera, { overFall: !!over && (!hit || over.distance <= hit.distance + 0.5) });
+  });
+  renderer.domElement.addEventListener("mousedown", (e) => {
+    if (!waterfallEditor || playMode.active || editorMode !== "waterfall" || e.button !== 0) return;
+    // A press on a gizmo handle belongs to the gizmo.
+    if (tc.dragging || (_gizmoTarget === "waterfall" && tc.axis)) return;
+    const hit = getWaterfallHit(e);
+    const did = waterfallEditor.click(hit, _decalRay, camera);
+    if (did) {
+      e.preventDefault();
+      waterfallEditor.hover(null, camera);
     }
   });
 
@@ -8419,6 +8579,8 @@ export async function startV3App(opts = {}) {
       get flowerSystem() { return flowerSystem; },
       decalSystem,
       decalEditor,
+      get waterfallSystem() { return waterfallSystem; },
+      get waterfallEditor() { return waterfallEditor; },
       flowerDensity,
       flowerState,
       renderer,
@@ -8816,19 +8978,7 @@ export async function startV3App(opts = {}) {
     // covering that point, and River v2 channels (their solved surface at that
     // point), or -Infinity if dry. Used to block ground units from entering
     // water and to keep air units above the surface.
-    getWaterLevelAt: (wx, wz) => {
-      let level = -Infinity;
-      const o = worldToolState.worldOcean;
-      if (o?.enabled) level = o.seaLevel ?? 0;
-      for (const L of lakeSystem.lakes) {
-        if (Math.abs(wx - L.cx) <= L.sizeX * 0.5 && Math.abs(wz - L.cz) <= L.sizeZ * 0.5 && L.level > level) {
-          level = L.level;
-        }
-      }
-      const f = riverV2System?.sampleFlow(wx, wz);
-      if (f?.inChannel && f.surfaceY > level) level = f.surfaceY;
-      return level;
-    },
+    getWaterLevelAt: (wx, wz) => waterLevelAt(wx, wz),
     /**
      * River v2 centrelines, for gameplay that needs the whole channel rather
      * than a point query (nav grids, minimaps): one entry per river,

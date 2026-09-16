@@ -30,6 +30,8 @@
  *             sx,sy,sz, slot, opacity, tint, roughness, normalStrength, angleFade,
  *             edgeFade, priority }] } — projected decals; null when there are none.
  *             An imported texture URL is an "asset:<hash>" reference.
+ *   waterfalls { look: {...}, falls: [{ px,py,pz, yaw, width, speed, depth, spread,
+ *             foam, friction }] } — waterfallSystem.exportData(); null when there are none.
  *   riversV2  riverV2System.exportData()    (River v2 — the heightmap blob is the
  *                                            UNCONFORMED base when it owns it)
  *   environment { worldOcean, look }  the world's LOOK, as opposed to its shape.
@@ -76,6 +78,7 @@ export function encodeProjectFile({
   snow, snowRes,        // Uint8Array, texels per side
   trees, foliage, props, roads, splines, lakes, riversV2,
   decals,               // decalSystem.exportData(): { slots, decals } or null
+  waterfalls,           // waterfallSystem.exportData(): { look, falls } or null
   paintLayers,         // textureLibrary.exportData() — slot metadata, no pixels
   paintBlend,           // { heightBlend, contrast } — layer edge blending
   splatHoles,           // true: slice-1 alpha is terrain holes (see manifest)
@@ -133,6 +136,7 @@ export function encodeProjectFile({
     splines:  splines ?? null,
     lakes:    lakes ?? null,
     decals:   decals ?? null,
+    waterfalls: waterfalls ?? null,
     riversV2: riversV2 ?? null,
     paintLayers: paintLayers ?? null,
     paintBlend: paintBlend ?? null,
@@ -204,6 +208,7 @@ export function decodeProjectFile(buffer) {
     splines:   manifest.splines,
     lakes:     manifest.lakes,
     decals:    manifest.decals ?? null,
+    waterfalls: manifest.waterfalls ?? null,
     riversV2:  manifest.riversV2 ?? null,
     paintLayers: manifest.paintLayers ?? null,
     paintBlend: manifest.paintBlend ?? null,

@@ -253,7 +253,10 @@ export function createRiverWaterState(overrides = {}) {
     //   turbulence — the reach itself is steep and fast (rapids)
     //   shallows   — the water is thin here (bank edges, gravel bars)
     //   wake       — something solid is standing upstream of this fragment
-    foamEnabled: true,
+    // OFF by default. Whitewater is the loudest thing on the surface, and with
+    // it on there is no judging whether a river and the fall it feeds actually
+    // match — which they must, since they are the same shader.
+    foamEnabled: false,
     foamColor: "#eef6f7",
     /** Whitewater from the solved slope×speed of the reach. */
     turbulence: 0.9,
