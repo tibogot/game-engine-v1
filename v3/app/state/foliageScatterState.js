@@ -60,21 +60,18 @@ export const FOLIAGE_PRESETS = {
     fronds: 9, frondLength: 1.2, leaflets: 5, leafletWidth: 1.0, leafletAngle: 60,
     spread: 0.2, arch: 0.45, droop: 0.15, stemWidth: 1, bareStalk: 0,
     colorBase: "#4f8a33", colorTip: "#93c25a", colorHead: "#7e3f1f", size: 2.0, translucency: 0.8,
-    nearRiver: 14,
   },
   plumeReed: {
     kind: "plume",
     fronds: 9, frondLength: 1.25, leaflets: 6, leafletWidth: 1.0, leafletAngle: 60,
     spread: 0.3, arch: 0.85, droop: 0.4, stemWidth: 0.9, bareStalk: 0,
     colorBase: "#5f9a3a", colorTip: "#9ccb5e", colorHead: "#f2e4a8", size: 2.2, translucency: 1.1,
-    nearRiver: 20,
   },
   pampas: {
     kind: "pampas",
     fronds: 9, frondLength: 1.3, leaflets: 5, leafletWidth: 1.0, leafletAngle: 60,
     spread: 0.32, arch: 0.8, droop: 0.45, stemWidth: 0.9, bareStalk: 0,
     colorBase: "#5f9a3a", colorTip: "#9ccb5e", colorHead: "#efe3b0", size: 2.4, translucency: 1.1,
-    nearRiver: 0,
   },
   groundCover: {
     kind: "broadleaf",
@@ -124,9 +121,12 @@ export function createFoliageScatterState() {
     types: TYPE_DEFAULTS.map((t) => ({
       ...t,
       ...structuredClone(FOLIAGE_PRESETS[t.preset]),
+      // Where a plant MAY grow is off by default: painting it somewhere is you
+      // saying it grows there. The rules below are an opt-in filter, for
+      // scattering a plant over a whole world rather than by hand.
       ...FOLIAGE_HEIGHT_ANY,
       onLayer: -1,
-      nearRiver: FOLIAGE_PRESETS[t.preset].nearRiver ?? 0,
+      nearRiver: 0,
     })),
   };
 }

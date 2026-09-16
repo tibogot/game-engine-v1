@@ -83,6 +83,7 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
 
     // ── Where it grows ──
     const gr = section(root, "Where it grows", false);
+    hint(gr, "All off by default: what you paint grows where you paint it. Turn one on to scatter a plant by rule instead — a band of cattails along every river, an alpine plant only high up.");
     W(slider(gr, type, "heightMin", { label: "Grows above (m)", min: FOLIAGE_HEIGHT_ANY.heightMin, max: FOLIAGE_HEIGHT_ANY.heightMax, step: 1, onChange: onStateChanged,
       hint: "Terrain height band — valley ferns low, alpine plants high. The full range is no limit." }));
     W(slider(gr, type, "heightMax", { label: "Grows below (m)", min: FOLIAGE_HEIGHT_ANY.heightMin, max: FOLIAGE_HEIGHT_ANY.heightMax, step: 1, onChange: onStateChanged }));
