@@ -357,24 +357,39 @@ built-in shapes + a cliff) over 800x800 m, GPU at the real canvas 1347x849.
 
 ### Measured performance (worth doing above ~10k props / city scale)
 
-38. **Shadow pass draws every prop.** The sun's shadow map covers 160 m, but all
-    ~13k visible props are drawn into it. GPU: nothing measurable up to ~8k
-    props; +1.8 ms at 11k, +4.4 ms at 17k, +5.9 ms at 20k (about 2/3 of it
-    shadows). Fix: per-camera culling (cull again with the shadow camera; the
-    modular-road pass culler already does this) + **shadow LOD** (separate
-    cheap shadow meshes; frustum from the shadow camera, level chosen from the
-    main camera; proxy switch tied to the shadow box size).
+38. **Shadow pass draws every prop** — PARTLY DONE 2026-09-16. The CSM reaches
+    80 m (maxFar), yet every detail level cast, so props from 150 m to 500 m
+    were drawn into an 80 m shadow map. A tier now casts only when its NEAREST
+    prop can still be inside it (`propInstancer.setShadowDistance`, fed from
+    worldToolState.csm.maxFar each frame). Measured at 12k props: 2.818 → 2.425
+    ms GPU (-0.39). Still open, and where the rest of the win is: PER-INSTANCE
+    shadow culling — LOD1 spans 60-150 m and casts whole, so ~700 props between
+    80 m and 150 m are still drawn into the map for nothing. That needs a
+    shadow-only instance list per type (cull against the shadow camera, draw
+    with the cheapest geometry), which is also what would let props BEHIND the
+    camera cast into view — they cannot today.
 39. **Coarse culling.** 256 m cells: 51% of drawn props were off screen
     (7,395 of 14,622, ~4M triangles). Keeping only on-screen props cut 20k from
     9.2 to 5.4 ms. Fix: per-instance culling through the instance BVH (plane
     mask: a fully-inside subtree needs no more tests).
-40. **No automatic LOD.** LOD1/LOD2 exist only if hand-made GLBs are imported;
-    built-in shapes and procedural cliffs have none (a 960-triangle sphere at
-    500 m). Fix: generate LODs with **meshoptimizer** (used in their skinning
-    example). Do it better than the example: simplifyWithAttributes (keeps
-    normals/UVs) and compact the vertex buffer (the example only rewrites the
-    index, so memory is not saved). The same simplified meshes serve as shadow
-    LODs (38).
+40. ~~**No automatic LOD**~~ — DONE 2026-09-16. v3/render/instancing/autoLod.js
+    builds the missing levels with **meshoptimizer** when a prop type registers
+    (LOD1 at 45% of the triangles, LOD2 at 35% of LOD1), chained off the render
+    path and skipped for types that ship hand-made LOD GLBs. Better than the
+    meshoptimizer example in the two ways the audit asked for:
+    `simplifyWithAttributes` so normals and UVs steer the collapse, and the
+    vertex buffer is COMPACTED afterwards (Sphere 561 → 153 vertices), where
+    the example rewrites only the index and leaves the memory and the dead
+    vertex-shader work in place. Generated levels follow LOD0's material, so a
+    cliff whose material is wrapped after registration does not change
+    appearance at the switch.
+    Measured, 12k props over 800×800 m: **5.046 → 2.425 ms GPU and 22.6M →
+    3.9M triangles** (-52% / -83%). Sphere 960 → 432 → 184 tris, Torus 1024 →
+    460 → 164. Shapes under ~130 triangles (cone, cylinder) simplify to
+    nothing the simplifier will accept and are left alone — they are already
+    cheap. Test: tools/autoLodTest.mjs.
+    Watch for: LOD distances are fixed metres (60/150), not screen size, so a
+    very large prop or cliff switches at the same distance as a pebble.
 
 ### Measured, not felt on this laptop (do only as a side effect of 35-37)
 

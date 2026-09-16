@@ -3246,6 +3246,7 @@ export async function startV3App(opts = {}) {
   // splineSys assigned below (SplineSystem); starts as noop until wired.
   if (!splineSys) splineSys = _noopUpdate;
   let propLod = { lod0Distance: 60, lod1Distance: 150, fadeOutDistance: 500, castShadow: true };
+  let _lastCsmShadowFar = -1;
 
   // True while thumbnail bake / readback owns the shared WebGPU renderer.
   let _rendererSideWork = false;
@@ -3452,6 +3453,11 @@ export async function startV3App(opts = {}) {
         if (wantFoliage) foliageScatter.update(playMode.active ? playMode.playerPosition : camera.position, camera);
       }
 
+      // The shadow map only reaches CSM maxFar; props past it need not cast.
+      if (worldToolState.csm.maxFar !== _lastCsmShadowFar) {
+        _lastCsmShadowFar = worldToolState.csm.maxFar;
+        propInstancer.setShadowDistance?.(_lastCsmShadowFar);
+      }
       propInstancer.update(camera, propLod);
       decalSystem.update(camera);
       livePropManager.update(dt);

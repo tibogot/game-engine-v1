@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "howler": "^2.2.4",
+    "meshoptimizer": "^1.2.0",
     "n8ao-webgpu": "^0.1.0",
     "stats-gl": "^4.1.0",
     "three": "^0.184.0",

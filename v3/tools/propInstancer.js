@@ -4,6 +4,7 @@ import { MeshBVH } from "three-mesh-bvh";
 const _viewInvShared = new THREE.Matrix4();
 import { WORLD_SIZE } from "../terrain/heightmapTexture.js";
 import { shareInstancePipeline } from "../render/instancePipeline.js";
+import { simplifyEntries, simplifierReady } from "../render/instancing/autoLod.js";
 
 const _tmp       = new THREE.Matrix4();
 const _tmpDelta  = new THREE.Matrix4();
@@ -67,6 +68,9 @@ function _rayBox(ox, oy, oz, idx, idy, idz, b, o) {
 }
 
 export class PropInstancer {
+  /** One shared queue: auto-LOD work runs one type at a time, never in parallel. */
+  static _autoLodChain = Promise.resolve();
+
   constructor(scene, propStore, initialCapacity = INITIAL_INSTANCES) {
     this.scene = scene;
     this.store = propStore;
@@ -75,6 +79,10 @@ export class PropInstancer {
     this._lastGen    = -1;
     this._lodDirty   = true;
     this._castShadow = true;
+    // How far the sun's shadow map actually reaches (CSM maxFar). Props past it
+    // cannot darken anything, so their detail levels stop casting.
+    this._shadowFar  = Infinity;
+    this._shadowKey  = "";
 
     this._typeRender  = [];
 
@@ -216,6 +224,50 @@ export class PropInstancer {
       boxSize: boxSize.clone(),
     };
     this._pickBoxesGen = -1;
+    this._queueAutoLod(typeIdx);
+  }
+
+  /**
+   * Build the detail levels a type does not have. Imported props may ship
+   * hand-made LOD GLBs; a built-in shape or a procedural cliff never did, so
+   * it drew its full triangle count at any distance.
+   *
+   * The work is CPU-side milliseconds per mesh, chained and yielding between
+   * types so registering a palette never stalls a frame. A level simplified
+   * from another shares its material, so `refreshTypeMaterials` keeps them in
+   * step with LOD0.
+   */
+  _queueAutoLod(typeIdx) {
+    const type = this.store.types[typeIdx];
+    if (!type || type.live || type._autoLodQueued) return;
+    if (type.lod1Entries && type.lod2Entries) return;   // hand-made, leave alone
+    type._autoLodQueued = true;
+
+    PropInstancer._autoLodChain = PropInstancer._autoLodChain
+      .then(async () => {
+        await simplifierReady;
+        if (!type.lod1Entries) {
+          const lod1 = simplifyEntries(type.entries, { ratio: 0.45 });
+          if (lod1) {
+            type.lod1Entries = lod1;
+            type._autoLod1 = true;
+            this.onTypeLodRegistered(typeIdx, 1);
+          }
+        }
+        if (!type.lod2Entries) {
+          // From LOD1 when there is one: half the work, and the two levels
+          // then differ by a predictable step rather than by two guesses.
+          const from = type.lod1Entries ?? type.entries;
+          const lod2 = simplifyEntries(from, { ratio: 0.35 });
+          if (lod2) {
+            type.lod2Entries = lod2;
+            type._autoLod2 = true;
+            this.onTypeLodRegistered(typeIdx, 2);
+          }
+        }
+        await new Promise((r) => setTimeout(r, 0));
+      })
+      .catch((e) => console.warn(`[V3] Auto-LOD for prop type ${typeIdx} failed:`, e));
   }
 
   onTypeLodRegistered(typeIdx, lod) {
@@ -227,24 +279,33 @@ export class PropInstancer {
     if (!type[ek]) return;
     this._disposeLodMeshes(tr[key]);
     tr[key] = this._createLodMeshes(type[ek]);
+    this._shadowKey = "";   // re-apply the shadow rule to the new meshes
+    this._lodDirty = true;
   }
 
   /**
    * Re-read per-entry materials from the store after they were swapped in
    * place (e.g. wrapping imported cliff GLB materials with the terrain
-   * blend). LOD0 only — LOD1/2 entries carry their own imported materials.
+   * blend). Imported LOD1/2 carry their own materials, but GENERATED ones are
+   * copies of LOD0's submeshes and must follow it, or a cliff would change
+   * appearance at the distance where it switches level.
    */
   refreshTypeMaterials(typeIdx) {
     const tr   = this._typeRender[typeIdx];
     const type = this.store.types[typeIdx];
     if (!tr?.lod0 || !type) return;
     const seen = new Set();
-    tr.lod0.forEach((lodEntry, i) => {
-      const mat = type.entries[i]?.material;
-      if (!mat || lodEntry.im.material === mat) return;
-      seen.add(lodEntry.im.material);
-      lodEntry.im.material = mat;
-    });
+    const apply = (meshes) => {
+      meshes?.forEach((lodEntry, i) => {
+        const mat = type.entries[i]?.material;
+        if (!mat || lodEntry.im.material === mat) return;
+        seen.add(lodEntry.im.material);
+        lodEntry.im.material = mat;
+      });
+    };
+    apply(tr.lod0);
+    if (type._autoLod1) apply(tr.lod1);
+    if (type._autoLod2) apply(tr.lod2);
     for (const m of seen) m?.dispose?.();
   }
 
@@ -491,6 +552,36 @@ export class PropInstancer {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
+  /**
+   * The distance the shadow map covers, from the CSM. Two thirds of the prop
+   * GPU cost was the shadow pass, and most of it was props far beyond this:
+   * with the defaults, everything from 150 m to 500 m was drawn into an 80 m
+   * shadow map. A detail level whose range starts past it no longer casts.
+   */
+  setShadowDistance(metres) {
+    this._shadowFar = Number.isFinite(metres) && metres > 0 ? metres : Infinity;
+    this._lodDirty = true;
+  }
+
+  /** Apply the shadow rule to each tier's meshes; cheap, and only on a change. */
+  _syncShadowCasters(lodCfg) {
+    const key = `${this._castShadow}|${this._shadowFar}|${lodCfg.lod0Distance}|${lodCfg.lod1Distance}`;
+    if (key === this._shadowKey) return;
+    this._shadowKey = key;
+    // A tier casts when its NEAREST prop can still be inside the shadow map.
+    const casts = [
+      this._castShadow,
+      this._castShadow && lodCfg.lod0Distance < this._shadowFar,
+      this._castShadow && lodCfg.lod1Distance < this._shadowFar,
+    ];
+    for (const tr of this._typeRender) {
+      if (!tr) continue;
+      [tr.lod0, tr.lod1, tr.lod2].forEach((lod, i) => {
+        if (lod) for (const e of lod) e.im.castShadow = casts[i];
+      });
+    }
+  }
+
   update(camera, lodCfg) {
     const genChanged = this.store.gen !== this._lastGen;
     if (genChanged) { this._lastGen = this.store.gen; this._rebuildCache(); }
@@ -502,6 +593,7 @@ export class PropInstancer {
     this._lastCam.set(camera.matrixWorld.elements);
     this._lastProj.set(camera.projectionMatrix.elements);
     this._lodDirty = false;
+    this._syncShadowCasters(lodCfg);
     this._assignLod(camera, lodCfg);
   }
 
