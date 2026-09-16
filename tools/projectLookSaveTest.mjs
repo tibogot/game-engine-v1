@@ -19,18 +19,20 @@ const pattern = (n, seed) => Uint8Array.from({ length: n }, (_, i) => (i * 13 + 
 // ── Round trip ────────────────────────────────────────────────────────────
 const cliffGrassDensity = pattern(512 * 512 * 4, 5);
 const cliffPaint = pattern(512 * 512 * 4, 9);
+const grassHeight = pattern(512 * 512 * 4, 3);
 const grass = { bladeHeight: 1.7, tipColor: "#aabbcc", crossed: false, specV2Power: 3.5 };
 const snowParams = { baseDepth: 0.42, glitterFreq: 350 };
-const d = decodeProjectFile(encodeProjectFile({ terrain, heightmap, cliffGrassDensity, cliffPaint, grass, snowParams }));
+const d = decodeProjectFile(encodeProjectFile({ terrain, heightmap, cliffGrassDensity, cliffPaint, grassHeight, grass, snowParams }));
 
 const same = (a, b) => !!a && a.length === b.length && a.every((v, i) => v === b[i]);
 check("cliff-top grass density comes back byte-for-byte", same(d.cliffGrassDensity, cliffGrassDensity));
 check("cliff paint mask comes back byte-for-byte", same(d.cliffPaint, cliffPaint));
+check("painted grass height comes back byte-for-byte", same(d.grassHeight, grassHeight));
 check("grass look comes back", JSON.stringify(d.grass) === JSON.stringify(grass));
 check("snow look comes back", JSON.stringify(d.snowParams) === JSON.stringify(snowParams));
 
 const old = decodeProjectFile(encodeProjectFile({ terrain, heightmap }));
-check("an older file has none of them", old.cliffGrassDensity === null && old.cliffPaint === null && old.grass === null && old.snowParams === null);
+check("an older file has none of them", old.cliffGrassDensity === null && old.cliffPaint === null && old.grassHeight === null && old.grass === null && old.snowParams === null);
 
 // ── Per-key merge (what applyGrassState relies on) ───────────────────────
 const state = { bladeHeight: 1, tipColor: "#00b30c", crossed: true, newParam: 0.5 };

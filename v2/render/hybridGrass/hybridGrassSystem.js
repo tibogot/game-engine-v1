@@ -310,10 +310,14 @@ export class HybridGrassSystem {
     // float over crests and sink into dips (MEASURED up to +1.5 m / -5.1 m).
     // Requires heightTex at heightmap resolution. Absent = exact heightmap.
     terrainSurface = null,
+    // Optional painted blade height (RGBA8, .r / 128 = height multiplier,
+    // 128 = 1×). Terrain rings only. Absent = no extra texture read.
+    bladeHeightTex = null,
   }) {
     this.renderer = renderer;
     this._terrainShadow = terrainShadow;
     this._terrainSurface = terrainSurface;
+    this._bladeHeightTex = bladeHeightTex;
     this.group = new THREE.Group();
     this.group.name = name;
     scene.add(this.group);
@@ -616,7 +620,9 @@ export class HybridGrassSystem {
         u.uCameraMatrix,
         u.uFx,
         u.uFy,
-        u.uBladeHeight.mul(1.6),
+        // Painted height can reach 2×: pad the cull for it so tall blades at
+        // the bottom of the screen are not dropped while still visible.
+        u.uBladeHeight.mul(this._bladeHeightTex && !this._cliffMode ? 3.2 : 1.6),
         u.uCullPadNdcX,
         u.uCullPadNdcYNear,
         u.uCullPadNdcYFar,
@@ -692,6 +698,10 @@ export class HybridGrassSystem {
         // Last ring: blades shrink to nothing as they thin out, so the field
         // ends in the ground colour instead of a line of full-height blades.
         bladeH = bladeH.mul(float(1).sub(tOut.mul(u.uEdgeShrink)));
+        // Painted blade height (short lawn, tall meadow). Cliff tops keep theirs.
+        if (this._bladeHeightTex && !this._cliffMode) {
+          bladeH = bladeH.mul(texture(this._bladeHeightTex, terrainUV).x.mul(255 / 128));
+        }
 
         // ── Wind (Gemini formulas, baked windTex channels) ──
         const tBase = time.mul(u.uWindSpeed);

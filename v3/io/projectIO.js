@@ -9,9 +9,11 @@
  *   terrain   { worldSize, heightmapSize, splatSize, maxHeight }
  *             splatSize is absent in files written before it was configurable —
  *             those used splatRes = min(2048, max(256, heightmapSize / 2)).
- *   blobs     { heightmap, splat, snow, grassDensity, susukiDensity, flowerDensity,
- *               cliffGrassDensity, cliffPaint }
+ *   blobs     { heightmap, splat, snow, grassDensity, grassHeight, susukiDensity,
+ *               flowerDensity, cliffGrassDensity, cliffPaint }
  *             → { offset, length } into the payload
+ *             grassHeight: painted blade height (RGBA 512², .r / 128 = multiplier,
+ *             128 = 1x). Absent in older files = 1x everywhere.
  *             cliffGrassDensity: grass painted on cliff tops (RGBA 512², .r).
  *             The cliff-top SURFACE it grows on is not stored: it is baked
  *             again from the loaded cliffs.
@@ -86,6 +88,7 @@ export function encodeProjectFile({
   environment,          // { worldOcean } — the world LOOK; see the manifest note
   spawn,                // { x, z, yaw } player start, or null
   grassDensity,         // Uint8Array (RGBA 512²) painted grass coverage
+  grassHeight,          // Uint8Array (RGBA 512²) painted blade height, .r/128 = multiplier
   susukiDensity,        // Uint8Array (RGBA 512²) painted susuki coverage
   susuki,               // susuki appearance params (JSON)
   flowerDensity,        // Uint8Array (RGBA 1024²) painted flowers, one type per channel, or null
@@ -115,6 +118,7 @@ export function encodeProjectFile({
   addBlob("splat", splat);
   addBlob("snow", snow);
   addBlob("grassDensity", grassDensity);
+  addBlob("grassHeight", grassHeight);
   addBlob("susukiDensity", susukiDensity);
   addBlob("flowerDensity", flowerDensity);
   addBlob("foliagePaint", foliagePaint);
@@ -223,6 +227,7 @@ export function decodeProjectFile(buffer) {
     environment: manifest.environment ?? null,
     spawn:     manifest.spawn ?? null,
     grassDensity:  blob("grassDensity"),
+    grassHeight:   blob("grassHeight"),
     susukiDensity: blob("susukiDensity"),
     susuki:    manifest.susuki ?? null,
     flowerDensity: blob("flowerDensity"),

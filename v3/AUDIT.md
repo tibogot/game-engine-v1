@@ -148,8 +148,18 @@ the game.
       moves blades toward their clump centre (tufts with gaps). Near ring
       compute per dispatch, A/B against the committed module: 0.087-0.097 ms
       before, 0.069-0.099 ms after (38k visible blades).
-    Still open for the GoT match: painted blade height, displacement buffer
-    for all objects, dithered terrain grass shadows in the far field. Ground UNDER near blades is still the painted ground (a GoT-look
+    - Painted blade height (GoT's artist height data), DONE 2026-09-17: grass
+      brush target "Height" eases a separate 512² layer toward a target
+      (0.25-1.95× Blade height; Alt = back to 1×; Fill all / Clear all set or
+      reset the field). Own layer because every density write fills all four
+      channels, so old saves would read as random heights. Saved as
+      `grassHeight` (absent = 1×), undo/redo on the grass stack (entries now
+      tagged terrain/cliff/height). Verified: painted 0.30×, blades in the
+      strip measured 0.31× the blades beside it; undo and redo exact. Cost:
+      +0.003 ms per Near dispatch (noise); the cull pad doubles for 2× tall
+      blades, ~3% more blades kept on screen.
+    Still open for the GoT match: displacement buffer for all objects,
+    dithered terrain grass shadows in the far field. Ground UNDER near blades is still the painted ground (a GoT-look
     project should paint a grass-coloured ground there, or add a control).
 19. **Trails through grass** from cars and characters (reuse the snow trail
     pattern).

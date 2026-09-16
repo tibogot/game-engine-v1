@@ -1029,7 +1029,9 @@ export async function startV3App(opts = {}) {
     farBlades: false,
   };
 
-  const grassBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false, target: "terrain" };
+  // target: "terrain" | "cliff" density, or "height" (painted blade height,
+  // eased toward heightTarget x Blade height).
+  const grassBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false, target: "terrain", heightTarget: 0.5 };
 
   // ── Susuki (GoT miscanthus plumes — own paint layer + instanced system) ────
   const susukiState = structuredClone(SUSUKI_DEFAULTS);
@@ -1194,6 +1196,7 @@ export async function startV3App(opts = {}) {
       // Blades stand on the clipmap's triangles, not the exact heightmap, so
       // they never float over a crest the coarse mesh cuts under.
       terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2 },
+      bladeHeightTex:   grassTerrainData.bladeHeightTex,
       ...extraShared,
     };
     const rings = GRASS_RING_DEFS.map(({ key, ...def }) =>
@@ -3849,8 +3852,8 @@ export async function startV3App(opts = {}) {
         const to = undo ? _grassRedoStack : _grassUndoStack;
         const entry = from.at(-1);
         done = !!entry && stackStep(from, to,
-          () => ({ cliff: entry.cliff, data: _snapGrass(entry.cliff) }),
-          (e) => _restoreGrass(e.cliff, e.data));
+          () => ({ layer: entry.layer, data: _snapGrass(entry.layer) }),
+          (e) => _restoreGrass(e.layer, e.data));
         break;
       }
       case "susuki":
@@ -4892,13 +4895,32 @@ export async function startV3App(opts = {}) {
   gslStr.addEventListener("input", () => { grassBrush.strength = Number(gslStr.value) / 100; glblStr.textContent = grassBrush.strength.toFixed(2); });
   gslFalloff.addEventListener("input", () => { grassBrush.falloff = Number(gslFalloff.value) / 10; glblFalloff.textContent = grassBrush.falloff.toFixed(1); });
   gckErase.addEventListener("change", () => { grassBrush.erase = gckErase.checked; });
-  // Fill/Clear are one undo step each, on the terrain layer whatever the brush target.
-  gbtnFill.addEventListener("click", () => { _pushGrassUndo(false); grassTerrainData.fillDensity(); });
+  // Fill/Clear are one undo step each. With the Height target they set the
+  // whole field to the target height / reset it to 1x; otherwise they act on
+  // the terrain density whatever the brush target.
+  gbtnFill.addEventListener("click", () => {
+    if (grassBrush.target === "height") {
+      _pushGrassUndo("height");
+      grassTerrainData.fillBladeHeight(grassBrush.heightTarget);
+      return;
+    }
+    _pushGrassUndo("terrain");
+    grassTerrainData.fillDensity();
+  });
   gbtnClear.addEventListener("click", () => {
+    if (grassBrush.target === "height") {
+      if (!confirm("Reset all painted grass height to 1x?")) return;
+      _pushGrassUndo("height");
+      grassTerrainData.resetBladeHeight();
+      return;
+    }
     if (!confirm("Clear all grass density?")) return;
-    _pushGrassUndo(false);
+    _pushGrassUndo("terrain");
     grassTerrainData.clearDensity();
   });
+  const gslHeightTarget  = uiById("gsl-height-target");
+  const glblHeightTarget = uiById("glbl-height-target");
+  gslHeightTarget.addEventListener("input", () => { grassBrush.heightTarget = Number(gslHeightTarget.value) / 100; glblHeightTarget.textContent = grassBrush.heightTarget.toFixed(2) + "×"; });
 
   // ── Cliff grass: paint-target toggle + surface bake + fill/clear ───────────
   const gbtnTargetTerrain = uiById("gbtn-target-terrain");
@@ -4920,26 +4942,31 @@ export async function startV3App(opts = {}) {
     }
   }
 
+  const gbtnTargetHeight = uiById("gbtn-target-height");
+  const grassHeightRow   = uiById("grass-height-target-row");
   function setGrassTarget(target) {
     grassBrush.target = target;
     const cliff = target === "cliff";
-    gbtnTargetTerrain?.classList.toggle("primary", !cliff);
+    gbtnTargetTerrain?.classList.toggle("primary", target === "terrain");
     gbtnTargetCliff?.classList.toggle("primary", cliff);
+    gbtnTargetHeight?.classList.toggle("primary", target === "height");
+    if (grassHeightRow) grassHeightRow.style.display = target === "height" ? "" : "none";
     if (cliff) { ensureFreshCliffSurface(); updateCliffGrassStatus(); }
   }
   gbtnTargetTerrain?.addEventListener("click", () => setGrassTarget("terrain"));
   gbtnTargetCliff?.addEventListener("click", () => setGrassTarget("cliff"));
+  gbtnTargetHeight?.addEventListener("click", () => setGrassTarget("height"));
 
   cliffgrassBake?.addEventListener("click", () => { bakeCliffGrassSurface(); updateCliffGrassStatus(); });
   cliffgrassFill?.addEventListener("click", () => {
     bakeCliffGrassSurface();
-    _pushGrassUndo(true);
+    _pushGrassUndo("cliff");
     grassTerrainData.fillCliffDensity();
     updateCliffGrassStatus();
   });
   cliffgrassClear?.addEventListener("click", () => {
     if (confirm("Clear all cliff grass?")) {
-      _pushGrassUndo(true);
+      _pushGrassUndo("cliff");
       grassTerrainData.clearCliffDensity();
     }
     updateCliffGrassStatus();
@@ -6536,6 +6563,7 @@ export async function startV3App(opts = {}) {
       environment,
       spawn:     spawnSystem.exportData(),
       grassDensity:  grassTerrainData.getDensitySnapshot(),
+      grassHeight:   grassTerrainData.getBladeHeightSnapshot(),
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
       susuki:    { ...susukiState },
       flowerDensity: flowerDensity.hasData ? flowerDensity.getSnapshot() : null,
@@ -6642,6 +6670,12 @@ export async function startV3App(opts = {}) {
     if (d.grassDensity?.length === grassTerrainData.densityTex.image.data.length) {
       grassTerrainData.restoreDensitySnapshot(d.grassDensity);
       if (d.grassDensity.some((v) => v > 0)) void ensureGrassBuilt();
+    }
+    // Painted blade height: absent in a file (older projects) means 1x everywhere.
+    if (d.grassHeight?.length === grassTerrainData.bladeHeightTex.image.data.length) {
+      grassTerrainData.restoreBladeHeightSnapshot(d.grassHeight);
+    } else {
+      grassTerrainData.resetBladeHeight();
     }
     // Cliff paint and cliff-top grass: absent in a file means none, so a
     // project without them clears what the previous scene painted.
@@ -8337,14 +8371,10 @@ export async function startV3App(opts = {}) {
   let _grassRedoStack = [];
   let _grassPainting  = false;
 
-  // Undo entries are tagged with the layer they snapshot so terrain and cliff
-  // paint share one stack without corrupting each other.
-  function _pushGrassUndo(cliff = grassBrush.target === "cliff") {
-    _grassUndoStack.push({
-      cliff,
-      data: cliff ? grassTerrainData.getCliffDensitySnapshot()
-                  : grassTerrainData.getDensitySnapshot(),
-    });
+  // Undo entries are tagged with the layer they snapshot ("terrain", "cliff",
+  // "height") so all grass paint shares one stack without corrupting each other.
+  function _pushGrassUndo(layer = grassBrush.target) {
+    _grassUndoStack.push({ layer, data: _snapGrass(layer) });
     if (_grassUndoStack.length > 32) _grassUndoStack.shift();
     _grassRedoStack = [];
   }
@@ -8381,8 +8411,9 @@ export async function startV3App(opts = {}) {
       worldSize: WORLD_SIZE,
       erase:    grassBrush.erase,
     };
-    if (grassBrush.target === "cliff") grassTerrainData.stampCliffDensity(opts);
-    else                               grassTerrainData.stampDensity(opts);
+    if (grassBrush.target === "cliff")       grassTerrainData.stampCliffDensity(opts);
+    else if (grassBrush.target === "height") grassTerrainData.stampBladeHeight({ ...opts, target: grassBrush.heightTarget });
+    else                                     grassTerrainData.stampDensity(opts);
   }
 
   renderer.domElement.addEventListener("mousemove", e => {
@@ -8720,11 +8751,16 @@ export async function startV3App(opts = {}) {
 
   // Grass undo/redo (routed by undoInMode). Each entry carries whether it
   // snapshots the terrain or the cliff density layer.
-  const _snapGrass  = (cliff) => cliff ? grassTerrainData.getCliffDensitySnapshot()
-                                       : grassTerrainData.getDensitySnapshot();
-  const _restoreGrass = (cliff, data) => cliff
-    ? grassTerrainData.restoreCliffDensitySnapshot(data)
-    : grassTerrainData.restoreDensitySnapshot(data);
+  function _snapGrass(layer) {
+    if (layer === "cliff")  return grassTerrainData.getCliffDensitySnapshot();
+    if (layer === "height") return grassTerrainData.getBladeHeightSnapshot();
+    return grassTerrainData.getDensitySnapshot();
+  }
+  function _restoreGrass(layer, data) {
+    if (layer === "cliff")       grassTerrainData.restoreCliffDensitySnapshot(data);
+    else if (layer === "height") grassTerrainData.restoreBladeHeightSnapshot(data);
+    else                         grassTerrainData.restoreDensitySnapshot(data);
+  }
 
   // Re-sync orbit after props/spline wiring (do not reset mode — that felt like a freeze).
   syncEditorOrbitEnabled();

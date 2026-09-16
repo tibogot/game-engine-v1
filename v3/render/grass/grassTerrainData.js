@@ -10,6 +10,14 @@ const CLIFF_RES   = 512;  // cliff-top height/normal grid — 4m/texel at 2048m 
 const CLIFF_INVALID = -9999; // sentinel Y where no cliff top exists at a texel
 
 /**
+ * Painted blade height: .r / HEIGHT_ONE = multiplier on the blade height.
+ * 128 = 1× (the default everywhere), 32 = 0.25×, 255 ≈ 2×.
+ */
+const HEIGHT_ONE = 128;
+export const GRASS_HEIGHT_MIN = 0.25;
+export const GRASS_HEIGHT_MAX = 255 / HEIGHT_ONE;
+
+/**
  * Float render target for the baked grass surface. Full float wherever the GPU
  * can filter it: half-float quantizes a 500 m height range into ~0.5 m steps,
  * which would read as terraced grass on smooth ground.
@@ -122,6 +130,17 @@ export class GrassTerrainData {
     this.susukiDensityTex.minFilter = this.susukiDensityTex.magFilter = THREE.LinearFilter;
     this.susukiDensityTex.needsUpdate = true;
     this._hasSusukiData = false;
+
+    // ── Painted blade height (Ghost of Tsushima's artist height data) ─────
+    // Its own layer, not a spare channel of the density: every density write
+    // (and so every saved project) fills all four channels with the coverage,
+    // so an old file would load as random heights. Unmasked — height means
+    // nothing where no grass grows.
+    const hData = new Uint8Array(DENSITY_RES * DENSITY_RES * 4).fill(HEIGHT_ONE);
+    this.bladeHeightTex = new THREE.DataTexture(hData, DENSITY_RES, DENSITY_RES, THREE.RGBAFormat);
+    this.bladeHeightTex.wrapS = this.bladeHeightTex.wrapT = THREE.ClampToEdgeWrapping;
+    this.bladeHeightTex.minFilter = this.bladeHeightTex.magFilter = THREE.LinearFilter;
+    this.bladeHeightTex.needsUpdate = true;
 
     // ── Density with blocking paint layers masked out — GPU ──────────────
     // What the grass and susuki rings actually sample. Painted density times
@@ -385,6 +404,54 @@ export class GrassTerrainData {
   restoreDensitySnapshot(s)   { this.densityTex.image.data.set(s); this.densityTex.needsUpdate = true; this._hasGrassData = s.some((v) => v > 0); }
   fillDensity()               { this.densityTex.image.data.fill(255); this.densityTex.needsUpdate = true; this._hasGrassData = true; }
   clearDensity()              { this.densityTex.image.data.fill(0);   this.densityTex.needsUpdate = true; this._hasGrassData = false; }
+
+  // ── Blade height paint layer ─────────────────────────────────────────────
+
+  /**
+   * Ease the painted blade height toward `target` (a multiplier) at world
+   * (cx, cz); `erase` eases back to 1×. Same brush shape as the density.
+   */
+  stampBladeHeight({ cx, cz, radius, strength, falloff, worldSize, target, erase }) {
+    const res  = DENSITY_RES;
+    const data = this.bladeHeightTex.image.data;
+    const half = worldSize * 0.5;
+    const rPx  = (radius / worldSize) * res;
+    const cxPx = ((cx + half) / worldSize) * res;
+    const czPx = ((cz + half) / worldSize) * res;
+    const r2   = rPx * rPx;
+    const x0   = Math.max(0, Math.floor(cxPx - rPx));
+    const x1   = Math.min(res - 1, Math.ceil(cxPx + rPx));
+    const z0   = Math.max(0, Math.floor(czPx - rPx));
+    const z1   = Math.min(res - 1, Math.ceil(czPx + rPx));
+    const goal = erase
+      ? HEIGHT_ONE
+      : Math.min(255, Math.max(0, Math.round(Math.min(GRASS_HEIGHT_MAX, Math.max(GRASS_HEIGHT_MIN, target)) * HEIGHT_ONE)));
+
+    for (let z = z0; z <= z1; z++) {
+      for (let x = x0; x <= x1; x++) {
+        const dx = x - cxPx, dz = z - czPx;
+        if (dx * dx + dz * dz > r2) continue;
+        const t = Math.sqrt(dx * dx + dz * dz) / rPx;
+        const w = Math.min(1, Math.pow(Math.max(0, 1 - t), falloff) * strength);
+        const i = (z * res + x) * 4;
+        const v = Math.round(data[i] + (goal - data[i]) * w);
+        data[i] = data[i + 1] = data[i + 2] = v;
+        data[i + 3] = 255;
+      }
+    }
+    this.bladeHeightTex.needsUpdate = true;
+  }
+
+  /** Every texel to `multiplier` (1 = reset). */
+  fillBladeHeight(multiplier = 1) {
+    const v = Math.round(Math.min(GRASS_HEIGHT_MAX, Math.max(GRASS_HEIGHT_MIN, multiplier)) * HEIGHT_ONE);
+    const data = this.bladeHeightTex.image.data;
+    for (let i = 0; i < data.length; i += 4) { data[i] = data[i + 1] = data[i + 2] = v; data[i + 3] = 255; }
+    this.bladeHeightTex.needsUpdate = true;
+  }
+  resetBladeHeight() { this.fillBladeHeight(1); }
+  getBladeHeightSnapshot()     { return new Uint8Array(this.bladeHeightTex.image.data); }
+  restoreBladeHeightSnapshot(s) { this.bladeHeightTex.image.data.set(s); this.bladeHeightTex.needsUpdate = true; }
 
   // ── Susuki paint layer ───────────────────────────────────────────────────
 
