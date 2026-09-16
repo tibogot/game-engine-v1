@@ -299,6 +299,7 @@ export async function createWorldEnvironment({
     setTerrainShadowParams({
       enabled: toolState.csm.terrainShadows !== false,
       softness: toolState.csm.terrainShadowSoftness ?? 0.5,
+      shadeFloor: toolState.csm.terrainShadeFloor ?? 0.45,
     });
     const focus = playMode?.active ? playMode.playerPosition : controls.target;
     _shadowFocus.copy(focus);

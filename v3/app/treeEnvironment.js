@@ -7,6 +7,7 @@ import { bakeObjectThumbnails } from "../../v2/tools/objectThumbnails.js";
 import { TreeLodRenderer } from "../../v2/render/foliage/treeLodRenderer.js";
 import { FoliageLodRenderer } from "../../v2/render/foliage/foliageLodRenderer.js";
 import { ImpostorFieldRenderer as ImpostorRenderer } from "../render/trees/impostorFieldRenderer.js";
+import { terrainShade } from "../render/lighting/terrainSunShadow.js";
 import { LeafFieldRenderer } from "../render/trees/leafFieldRenderer.js";
 import { TreeSystem } from "../../v2/tools/foliage/treeSystem.js";
 import {
@@ -367,8 +368,22 @@ export function createTreeEnvironment({
     );
   }
 
+  // Mountain shade on the chunked leaf cards (v2 FoliageLodRenderer). Their
+  // materials are made by v2's preset loader and slot merger, so they are
+  // shaded here, once each, the first frame they exist. Leaf cards receive no
+  // shadows and carry the sun's back-light in their colour, so the colour is
+  // what has to darken (terrainSunShadow.js).
+  function shadeLeafMaterial(mat) {
+    if (!mat || mat.userData?.terrainShaded || !mat.colorNode) return;
+    mat.colorNode = terrainShade(mat.colorNode);
+    mat.userData.terrainShaded = true;
+    mat.needsUpdate = true;
+  }
+
   function updateFrame(camera, sunDir, timeSec) {
     treeLodRenderer.update(treeStore, camera, toolState.foliageLod);
+    for (const preset of foliageLodRenderer.slotPresets) shadeLeafMaterial(preset?.material);
+    for (const g of foliageLodRenderer.mergeGroups.groups.values()) shadeLeafMaterial(g?.material);
     foliageLodRenderer.update(treeStore, camera, toolState.foliageLod);
     impostorRenderer.update(treeStore, camera, toolState.foliageLod);
     leafFieldRenderer.update(treeStore, camera, toolState.foliageLod);

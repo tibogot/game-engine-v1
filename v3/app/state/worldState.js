@@ -82,6 +82,11 @@ export function createWorldToolState() {
       terrainShadows: true,
       /** 0 = crisp edge, 1 = very soft. */
       terrainShadowSoftness: 0.5,
+      /**
+       * Brightness left on vegetation that does not receive shadows (far grass
+       * rings, far foliage, susuki) when it stands in a mountain's shade.
+       */
+      terrainShadeFloor: 0.45,
     },
     fog: ts.fog,
     interior: ts.interior,

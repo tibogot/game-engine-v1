@@ -68,6 +68,7 @@ import {
 import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
 import { computeFrustumVisibility } from "../../../v2/core/revoGrass/revoGrassSsboUtils.js";
 import { createBladeGeometry } from "../../../v2/core/foliage/grassGemini.js";
+import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
 function srgb(hex) {
   return new THREE.Color(hex);
@@ -610,7 +611,8 @@ export class SusukiSystem {
         positionLocal.z.add(horiz.mul(bendZ)).add(tuft.y).add(p.y),
       );
     })();
-    stemMat.colorNode = mix(u.uStemBase, u.uStemTip, pow(uv().y, 1.4));
+    // Mountain shade: susuki receives no shadows, so darken it in the shade.
+    stemMat.colorNode = terrainShade(mix(u.uStemBase, u.uStemTip, pow(uv().y, 1.4)));
 
     this.stemMesh = new THREE.Mesh(stemGeo, stemMat);
     this.stemMesh.count = this.count;
@@ -686,19 +688,20 @@ export class SusukiSystem {
 
     const plumeSample = texture(this.plumeTex, uv());
     plumeMat.opacityNode = plumeSample.a;
-    plumeMat.colorNode = Fn(() => {
+    const plumeSunVis = terrainSunVisibilityHere();
+    plumeMat.colorNode = terrainShade(Fn(() => {
       const v = uv().y;
       const col = mix(u.uPlumeBase, u.uPlumeTip, smoothstep(0.1, 0.85, v));
       const warm = mix(col, col.mul(vec3(1.07, 1.0, 0.88)), vPHue); // straw tint
       // dense strand cores brighter than the fringe → soft interior depth
       const strandShade = mix(float(0.8), float(1), plumeSample.a);
       return warm.mul(strandShade).mul(mix(u.uPlumeAO, float(1), smoothstep(0.0, 0.5, v)));
-    })();
+    })(), plumeSunVis);
     plumeMat.emissiveNode = Fn(() => {
       const viewDir = normalize(cameraPosition.sub(vPWorld));
       // silver lining: light traveling -sunDir continues into the camera
       const backlit = pow(max(dot(viewDir, negate(u.uSunDir)), 0), u.uBacklitPow)
-        .mul(u.uBacklitInt);
+        .mul(u.uBacklitInt).mul(plumeSunVis);
       const col = mix(u.uPlumeBase, u.uPlumeTip, uv().y);
       return col.mul(backlit.add(u.uPlumeGlow));
     })();

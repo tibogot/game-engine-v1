@@ -811,6 +811,15 @@ export function buildWorldPanel(app) {
         hint: "Penumbra of the terrain's own shadow: 0 = crisp, 1 = very soft.",
         onChange: syncCsm,
       });
+      _slider(csmBody, ts.csm, "terrainShadeFloor", {
+        label: "Shade on vegetation",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        hint: "How bright far grass, foliage and susuki stay inside a mountain's shadow. "
+          + "Near plants and props receive the real shadow and ignore this.",
+        onChange: syncCsm,
+      });
       _dropdown(csmBody, ts.csm, "splitMode", {
         label: "Split mode",
         options: [

@@ -44,6 +44,7 @@ import {
   setFoliageTexture,
   MAX_MERGED_SLOTS,
 } from "../../../v2/render/foliage/foliageMaterial.js";
+import { terrainShade } from "../lighting/terrainSunShadow.js";
 
 /**
  * Sphere-vs-frustum in NDC with SYMMETRIC radius padding. Deliberately NOT
@@ -408,6 +409,9 @@ export class LeafFieldRenderer {
         data,
       });
     }
+    // Mountain shade. Leaves receive no shadows, so their colour (which also
+    // carries the sun's back-light) is darkened inside a terrain shadow.
+    built.material.colorNode = terrainShade(built.material.colorNode);
     entry.material = built.material;
     entry.uniforms = built.uniforms;
     entry.leafMapNode = built.leafMapNode;

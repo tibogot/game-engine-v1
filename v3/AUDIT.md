@@ -917,10 +917,46 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      animated time of day ≈ 0.19 ms/frame, sculpting +0.5 ms per stroke frame.
      Sweep verified live: one band per frame while the sun moves, the rest of
      the sweep after it stops, then zero; no seams between bands.
+     **Then everything else receives it (same day).** Two paths:
+     - Every SHADOW-RECEIVING material (props, trunks, the player, grass rings,
+       near foliage/flower levels) gets it through `wrapSunShadow`: one read of
+       the baked map at the fragment's world position, multiplied into the
+       sun's shadow term — direct sun only, which is physically right.
+     - Materials that skip shadows (far foliage/flower levels, susuki, v2 leaf
+       cards, v3 leaf field, impostors) use `terrainShade(colour, vis)`, which
+       darkens the colour toward "Shade on vegetation" (World → Shadows,
+       default 0.45). It checks `receiveShadow` at BUILD time so a receiver is
+       never darkened twice. Sun-driven emissive (grass SSS + specular, foliage
+       and flower see-through light, susuki back-light) is multiplied by
+       visibility on every level, since emissive never passes a shadow.
+     v2 files are not made to import v3: the grass takes the helpers through a
+     `terrainShadow` constructor option; v2's chunked leaf cards are shaded
+     from treeEnvironment, once per material (`userData.terrainShaded`).
+     TRAP FOUND: `positionWorld` is a varying built once from the PRE-instancing
+     position. Read inside another VERTEX-stage varying on an InstancedMesh it
+     is the local billboard corner near the world origin, so every impostor
+     and prop read "lit". Proven with a debug colour (red = shaded, green =
+     lit) and by reading the baked map at tree positions: a tree 80 m under the
+     shadow top stayed bright at shade floor 0. Fix: the read is in the
+     FRAGMENT stage, where positionWorld is the interpolated world position
+     all lighting uses. The debug view then matched exactly, including a tall
+     spire whose tip pokes above the shadow line and stays lit.
+     Second trap: `material.needsUpdate` reuses the cached pipeline when the
+     cache key is unchanged, so a runtime A/B of a BUILD-time switch needs a
+     bumped `customProgramCacheKey` (proven: grass vertex shader 12,562 →
+     10,950 chars).
+     Costs, build-time switch in vs out, interleaved at 60 FPS:
+     props + trees + impostors (43 materials) **+0.022 ms**; grass **+0.169 ms**
+     until the colour/emissive read and the shadow-term read were made to
+     share ONE node (`material.terrainSunShadowNode = sunVis`), then
+     **+0.033 ms**. Foliage/flowers share the same way; not measured separately.
+     `setActiveTerrainShadowMap(null)` before materials build is the game-level
+     "off" that removes the reads entirely.
      Open:
-     - **Only the terrain receives it.** Grass, props, trees and foliage in a
-       shadowed valley are still sunlit. The baked map is built for exactly
-       this: `visibilityAt(heightmapUV, worldY)` is one read in any material.
+     - The vegetation shade is a colour multiplier, not a direct-light removal:
+       near (receiving) and far (shaded) foliage levels can differ slightly in
+       a mountain's shade at the LOD boundary. Tune "Shade on vegetation" with
+       eyes.
      - The toggle is a uniform; with the bake it costs almost nothing when off
        (bakes stop, one read per vertex remains).
      - At very fast day speeds a sweep's 16 frames can leave bands a fraction

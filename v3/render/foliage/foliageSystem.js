@@ -24,6 +24,7 @@ import { bakeObjectThumbnails } from "../../../v2/tools/objectThumbnails.js";
 import { ScatterField } from "../scatter/scatterField.js";
 import { createFoliageTypeGeometry, FOLIAGE_LODS } from "./foliageGeometry.js";
 import { FOLIAGE_TYPE_COUNT } from "../../app/state/foliageScatterState.js";
+import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
 const ROWS = 4;
 const RULE_ROW = 2;
@@ -198,12 +199,17 @@ export class FoliageScatterSystem {
       return col.mul(vec3(float(1).add(j.mul(0.6)), float(1).add(j), float(1).sub(j.mul(0.5))));
     });
     const col = baseColor();
-    mat.colorNode = col;
+    // Mountain shade (terrainSunShadow.js): shade the colour on the detail
+    // levels that skip shadows, and take the sun out of the see-through light
+    // everywhere — emissive never passes through any shadow.
+    const sunVis = terrainSunVisibilityHere();
+    mat.colorNode = terrainShade(col, sunVis);
+    mat.terrainSunShadowNode = sunVis;   // shared with the sun's shadow term: one read
 
     // Sunlight through the blades when the sun is behind them.
     mat.emissiveNode = Fn(() => {
       const V = normalize(cameraPosition.sub(vWorld));
-      const behind = pow(saturate(dot(V, u.uSunDir.negate())), 3);
+      const behind = pow(saturate(dot(V, u.uSunDir.negate())), 3).mul(sunVis);
       // Leaves let light through; a stem or a solid head does not.
       const thin = select(vPart.lessThan(0.5), row(vType, 0).w, float(0));
       return col.mul(behind.mul(thin).mul(u.uTransMul).mul(0.9).add(u.uGlowLight));

@@ -55,6 +55,8 @@ import {
   nodeObject,
   uv,
   vec4,
+  varying,
+  positionWorld,
 } from "three/tsl";
 
 /** Direction TOWARDS the light that lights the scene (the moon at night). */
@@ -63,6 +65,13 @@ export const uTerrainSunDir = uniform(new THREE.Vector3(0.4, 0.7, 0.3));
 export const uTerrainShadowStrength = uniform(1);
 /** Penumbra sharpness k: larger is harder. Driven from a 0..1 softness slider. */
 export const uTerrainShadowK = uniform(12);
+/**
+ * How dark a NON-shadow-receiving surface gets in a mountain's shade, as a
+ * multiplier on its colour. Receivers lose only the direct sun, which is right;
+ * vegetation that skips shadows (far detail levels, leaves, susuki) cannot, so
+ * it is darkened as a whole — see `terrainShade`.
+ */
+export const uTerrainShadeFloor = uniform(0.45);
 
 const STEPS = 32;
 
@@ -70,8 +79,9 @@ export function setTerrainSunDirection(dir) {
   uTerrainSunDir.value.copy(dir);
 }
 
-export function setTerrainShadowParams({ enabled = true, softness = 0.5 } = {}) {
+export function setTerrainShadowParams({ enabled = true, softness = 0.5, shadeFloor } = {}) {
   uTerrainShadowStrength.value = enabled ? 1 : 0;
+  if (Number.isFinite(Number(shadeFloor))) uTerrainShadeFloor.value = THREE.MathUtils.clamp(Number(shadeFloor), 0, 1);
   // softness 0 → k 40 (crisp), 1 → k 4 (very soft)
   const s = THREE.MathUtils.clamp(Number(softness) || 0, 0, 1);
   uTerrainShadowK.value = THREE.MathUtils.lerp(40, 4, s);
@@ -307,10 +317,18 @@ export function createTerrainShadowMap({ renderer, heightTexNode, worldSize, max
     })();
   }
 
-  return {
+  /** Same, from a world-space position node. */
+  function visibilityAtWorld(posNode) {
+    const u = posNode.x.add(half).div(worldSize);
+    const v = posNode.z.add(half).div(worldSize);
+    return visibilityAt(vec2(u, v), posNode.y);
+  }
+
+  const api = {
     texture: rt.texture,
     shadowTexNode,
     visibilityAt,
+    visibilityAtWorld,
     bake,
     bakeIfNeeded,
     bakeBand: (i) => renderInto(i % BANDS),
@@ -318,23 +336,84 @@ export function createTerrainShadowMap({ renderer, heightTexNode, worldSize, max
     get bandCount() { return bandCount; },
     bands: BANDS,
     resolution: RES,
-    dispose() { rt.dispose(); bakeMat.dispose(); },
+    dispose() { rt.dispose(); bakeMat.dispose(); if (_activeMap === api) _activeMap = null; },
   };
+  // The one map every material reads. Registered at creation, which happens
+  // before the world's materials are built, so the wrapper below can find it.
+  _activeMap = api;
+  return api;
+}
+
+let _activeMap = null;
+
+/**
+ * Attach or detach the map every material reads. Detaching and rebuilding
+ * materials removes terrain shadow — and its per-vertex read — from everything
+ * but the terrain: the build-time "off" for a game that never wants it.
+ */
+export function setActiveTerrainShadowMap(map) {
+  _activeMap = map ?? null;
+}
+export function getActiveTerrainShadowMap() {
+  return _activeMap;
+}
+
+/**
+ * Sun visibility of whatever is being shaded: one read of the baked map at its
+ * world position. 1 when there is no map.
+ *
+ * FRAGMENT stage, deliberately. `positionWorld` is itself a varying built once
+ * from the PRE-instancing position; read inside another vertex-stage varying on
+ * an InstancedMesh it is the local billboard corner near the world origin — a
+ * sunlit mountain top — so every impostor and every prop came out "lit"
+ * (measured: trees 80 m under the shadow top stayed bright at shade floor 0).
+ * In the fragment stage it is the interpolated world position all of three's
+ * lighting uses. The terrain keeps its own per-vertex read with explicit
+ * coordinates (terrainLOD.js), which never had this problem.
+ */
+export function terrainSunVisibilityHere() {
+  return Fn(() => {
+    if (!_activeMap) return float(1);
+    return _activeMap.visibilityAtWorld(positionWorld);
+  })();
+}
+
+/**
+ * Darken a colour in a mountain's shade — for surfaces that do NOT receive
+ * shadows (far vegetation levels, leaves, susuki), where the sun's shadow term
+ * never runs. Decided at build time per object: a shadow receiver gets the
+ * colour untouched, because the shadow wrapper already removes its direct sun
+ * and doing both would darken it twice.
+ */
+export function terrainShade(colorNode, visNode = null) {
+  return Fn((builder) => {
+    if (builder.object?.receiveShadow) return colorNode;
+    const vis = visNode ?? terrainSunVisibilityHere();
+    return colorNode.mul(mix(uTerrainShadeFloor, float(1), vis));
+  })();
 }
 
 const _wrapped = new WeakMap();
 
 /**
- * The sun's shadow node, with the terrain's own shadow multiplied in for any
- * material that provides one. Cached per inner node so the same CSM always maps
- * to the same wrapper — a new node object would recompile every lit material.
+ * The sun's shadow node with the terrain's own shadow multiplied in. Every
+ * shadow-receiving material gets it — props, trunks, the player, near
+ * vegetation — read from the baked map at its world position. The terrain
+ * brings its own node (`material.terrainSunShadowNode`, displaced height);
+ * a material can opt out with `terrainSunShadowNode = false`.
+ *
+ * Cached per inner node so the same CSM always maps to the same wrapper — a new
+ * node object would recompile every lit material.
  */
 export function wrapSunShadow(inner) {
   if (!inner) return inner;
   let wrapped = _wrapped.get(inner);
   if (!wrapped) {
     wrapped = Fn((builder) => {
-      const terrain = builder.material?.terrainSunShadowNode;
+      const own = builder.material?.terrainSunShadowNode;
+      if (own === false) return nodeObject(inner);
+      // Fragment-stage read: see terrainSunVisibilityHere for why not a varying.
+      const terrain = own ?? (_activeMap ? _activeMap.visibilityAtWorld(positionWorld) : null);
       return terrain ? nodeObject(inner).mul(terrain) : nodeObject(inner);
     })();
     wrapped.isTerrainShadowWrapper = true;

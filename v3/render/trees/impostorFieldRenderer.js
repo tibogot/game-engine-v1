@@ -20,6 +20,7 @@ import {
   attribute, cameraPosition, length, step, uniform, vec2,
 } from "three/tsl";
 import { makeFlatAuxTextures, createImpostorMaterials } from "../../../v2/render/foliage/octahedralCore.js";
+import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
 const INITIAL_CAP     = 4096;
 const FADE_BAND       = 60;   // metres of impostor↔geometry crossfade (matches v2)
@@ -61,6 +62,11 @@ export class ImpostorFieldRenderer {
     );
     built.uniforms.uUnlit.value = 0; // relight live by the scene sun
     built.mainMat.envMapIntensity = 0;
+    // Mountain shade: far trees receive no shadows, so darken both halves of
+    // their relit colour inside a terrain shadow (one visibility read, shared).
+    const impostorSunVis = terrainSunVisibilityHere();
+    built.mainMat.colorNode = terrainShade(built.mainMat.colorNode, impostorSunVis);
+    built.mainMat.emissiveNode = terrainShade(built.mainMat.emissiveNode, impostorSunVis);
 
     // ── Vertex-stage band gate ────────────────────────────────────────────────
     // Instances outside [uFieldNear, uFieldFar] collapse to zero area: no

@@ -71,6 +71,7 @@ import { computeFrustumVisibility } from "../../../v2/core/revoGrass/revoGrassSs
 import { FLOWER_TYPE_COUNT } from "../../app/state/flowerState.js";
 import { createFlowerTypeGeometry } from "./flowerGeometry.js";
 import { scatterClump, scatterRuleKeep } from "../scatter/scatterNoise.js";
+import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
 const LODS = 2;
 const DRAWS = FLOWER_TYPE_COUNT * LODS;
@@ -404,12 +405,15 @@ export class FlowerSystem {
       return col.mul(vec3(float(1).add(j), float(1).add(j.mul(0.4)), float(1).sub(j.mul(0.3))));
     });
     const col = baseColor();
-    mat.colorNode = col;
+    // Mountain shade: see foliageSystem.js — same two halves.
+    const sunVis = terrainSunVisibilityHere();
+    mat.colorNode = terrainShade(col, sunVis);
+    mat.terrainSunShadowNode = sunVis;   // shared with the sun's shadow term: one read
 
     // Light through petals and leaves when the sun is behind them.
     mat.emissiveNode = Fn(() => {
       const V = normalize(cameraPosition.sub(vWorld));
-      const behind = pow(saturate(dot(V, u.uSunDir.negate())), 3);
+      const behind = pow(saturate(dot(V, u.uSunDir.negate())), 3).mul(sunVis);
       const thin = select(vPart.lessThan(0.5), row(vType, 0).w, select(vPart.greaterThan(2.5), float(0.45), float(0)));
       return col.mul(behind.mul(thin).mul(u.uTransMul).mul(1.4).add(u.uGlowLight));
     })();

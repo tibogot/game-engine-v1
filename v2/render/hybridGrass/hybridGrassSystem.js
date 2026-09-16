@@ -269,8 +269,12 @@ export class HybridGrassSystem {
     cliffMode = false, //           sample cliff surface instead of terrain
     cliffHeightTex = null, //       RGBA float: .x cliff Y (-9999 invalid), .yzw normal
     cliffDensityTex = null, //      painted cliff grass density (.x)
+    // Optional terrain self-shadow hooks from v3 (render/lighting/terrainSunShadow.js):
+    // { shade(colorNode, vis), visibilityHere() }. Absent in v2 — nothing changes.
+    terrainShadow = null,
   }) {
     this.renderer = renderer;
+    this._terrainShadow = terrainShadow;
     this.group = new THREE.Group();
     this.group.name = name;
     scene.add(this.group);
@@ -911,7 +915,12 @@ export class HybridGrassSystem {
       return outPos;
     })();
 
-    mat.colorNode = Fn(() => {
+    // Mountain shade: one visibility read per blade vertex, shared by colour and
+    // emissive. Grass that receives shadows loses direct sun through the sun's
+    // shadow term; `shade` only darkens rings that do not.
+    const ts = this._terrainShadow;
+    const sunVis = ts ? ts.visibilityHere() : null;
+    const albedoNode = Fn(() => {
       const clumpShade = vData.x;
       const shadeRand = vData.y;
       const h4 = vData.z;
@@ -985,6 +994,10 @@ export class HybridGrassSystem {
       const dbg = LOD_DEBUG_TINTS[this.group.name] ?? [1, 0, 1];
       return mix(finalAlbedo, vec3(dbg[0], dbg[1], dbg[2]), u.uLodDebug);
     })();
+    mat.colorNode = ts ? ts.shade(albedoNode, sunVis) : albedoNode;
+    // Hand the same node to the sun's shadow term (wrapSunShadow), so a
+    // shadow-receiving ring reads the map ONCE per pixel, not twice.
+    if (sunVis) mat.terrainSunShadowNode = sunVis;
 
     // ── EMISSIVE — SSS + dual specular (Gemini's emissiveNode, verbatim
     // except viewDir/dist use the correct vWorld instead of positionLocal).
@@ -1071,7 +1084,9 @@ export class HybridGrassSystem {
         .mul(tipFade2)
         .mul(u.uSpecV2Enabled);
 
-      return sssCol.add(spec1).add(spec2);
+      const sunLit = sssCol.add(spec1).add(spec2);
+      // SSS and specular are both sunlight; emissive never passes a shadow.
+      return sunVis ? sunLit.mul(sunVis) : sunLit;
     })();
   }
 

@@ -159,7 +159,7 @@ import { buildPlayFlightPanel } from "../ui/buildPlayFlightPanel.js";
 import { createFlyHud } from "../ui/flyHud.js";
 import { uiById, uiQuery, uiQueryAll, setUiRoot, createHiddenEditorMarkup } from "../ui/uiRoot.js";
 import { createShadowTestScene } from "../debug/shadowTestScene.js";
-import { createTerrainShadowMap } from "../render/lighting/terrainSunShadow.js";
+import { createTerrainShadowMap, terrainShade, terrainSunVisibilityHere, setActiveTerrainShadowMap } from "../render/lighting/terrainSunShadow.js";
 // OFF by default — the custom GPU stats panel. Uncomment this line AND its
 // block further down (search "GPU STATS PANEL — OFF") to bring it back.
 // import { createGpuStatsPanel } from "../render/gpuStatsPanel.js";
@@ -1180,6 +1180,7 @@ export async function startV3App(opts = {}) {
       tintTex:          grassTintRT.texture,
       worldSize:        WORLD_SIZE,
       gp:               grassState,
+      terrainShadow:    { shade: terrainShade, visibilityHere: terrainSunVisibilityHere },
       ...extraShared,
     };
     const rings = GRASS_RING_DEFS.map(({ key, ...def }) =>
@@ -8812,6 +8813,8 @@ export async function startV3App(opts = {}) {
        */
       get propInstancer() { return propInstancer; },
       terrainShadowMap,
+      /** Detach (null) / re-attach the map for materials built AFTER the call — for A/Bs. */
+      setActiveTerrainShadowMap,
       propStressClear() {
         propStore.clear();
         propSlots.length = 0;
