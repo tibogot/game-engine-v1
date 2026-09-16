@@ -280,6 +280,7 @@ function createLODMaterial({
   heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
   splatOverlay, snowShared = null, lakebed = null,
   terrainNormals = null, riverSand = null, flowerTint = null, features = {},
+  terrainShadow = null,
 }) {
   const F = { ...TERRAIN_FEATURES, ...features };
   const mat = createTileMaterial({
@@ -324,14 +325,20 @@ function createLODMaterial({
   const displacedY = snowShared ? vertexY.add(snowShared.groundDepth(wxz)) : vertexY;
   mat.positionNode = vec3(positionLocal.x, displacedY, positionLocal.z);
 
-  // Mountain shade: march toward the sun from each vertex and interpolate.
-  // VERTEX stage on purpose — this fragment shader has no sampler left (see
-  // terrainSunShadow.js). The world's sun shadow node picks this up by name.
-  mat.terrainSunShadowNode = varying(terrainSunVisibility({
-    heightTexNode,
-    worldX, worldZ, worldY: displacedY,
-    worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT, baseStep: BASE_STEP,
-  }), "vTerrainSun");
+  // Mountain shade, read in the VERTEX stage and interpolated — this fragment
+  // shader has no sampler left (see terrainSunShadow.js). The world's sun shadow
+  // node picks it up by name. With the baked map it is ONE read per vertex;
+  // without it (a caller that passes none) each vertex marches itself.
+  mat.terrainSunShadowNode = varying(
+    terrainShadow
+      ? terrainShadow.visibilityAt(hmUV, displacedY)
+      : terrainSunVisibility({
+          heightTexNode,
+          worldX, worldZ, worldY: displacedY,
+          worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT, baseStep: BASE_STEP,
+        }),
+    "vTerrainSun",
+  );
 
   // Lighting normal. The heightmap only changes when the user sculpts, so the
   // finite difference is baked into its own texture (terrainNormalMap.js) and
@@ -543,6 +550,7 @@ export function createTerrainLOD(
   // retired 2026-09-13). The slot is kept so existing call sites line up.
   splatOverlay, snowShared = null, lakebed = null, _retiredGroundProc = null,
   features = {}, terrainNormals = null, riverSand = null, flowerTint = null,
+  terrainShadow = null,
 ) {
   const group = new THREE.Group();
 
@@ -564,7 +572,7 @@ export function createTerrainLOD(
   const matArgs = {
     heightTexNode, uCenterXZ: uCenter, uCursorUV, uCursorRadius,
     uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed,
-    terrainNormals, riverSand, flowerTint,
+    terrainNormals, riverSand, flowerTint, terrainShadow,
   };
 
   const mesh = new THREE.Mesh(geometry, createLODMaterial({ ...matArgs, features }));

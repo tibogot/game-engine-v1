@@ -159,6 +159,7 @@ import { buildPlayFlightPanel } from "../ui/buildPlayFlightPanel.js";
 import { createFlyHud } from "../ui/flyHud.js";
 import { uiById, uiQuery, uiQueryAll, setUiRoot, createHiddenEditorMarkup } from "../ui/uiRoot.js";
 import { createShadowTestScene } from "../debug/shadowTestScene.js";
+import { createTerrainShadowMap } from "../render/lighting/terrainSunShadow.js";
 // OFF by default — the custom GPU stats panel. Uncomment this line AND its
 // block further down (search "GPU STATS PANEL — OFF") to bring it back.
 // import { createGpuStatsPanel } from "../render/gpuStatsPanel.js";
@@ -451,6 +452,12 @@ export async function startV3App(opts = {}) {
   // material is built (it supplies the node they sample) and it self-bakes on
   // construction, so the first frame never reads an empty target.
   const terrainNormals = createTerrainNormalMap({ heightTexNode, renderer });
+  // Where the terrain's own shadow reaches, baked only when the sun turns or the
+  // terrain changes (render/lighting/terrainSunShadow.js).
+  const terrainShadowMap = createTerrainShadowMap({
+    renderer, heightTexNode,
+    worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT, heightmapSize: HEIGHTMAP_SIZE,
+  });
   let _lastNormalBakeVersion = -1;
 
   // GPU procedural terrain generator — full-map pass through sculpt.runGeneratorPass.
@@ -549,7 +556,7 @@ export async function startV3App(opts = {}) {
     );
   }
 
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap);
   scene.add(lod.group);
   /**
    * Terrain visibility — see the `terrain` block on the returned handle.
@@ -3551,6 +3558,8 @@ export async function startV3App(opts = {}) {
       // direction whatever the sun did. The light that lights the scene now.
       const _lightDir = getLightDir();
       treeEnv.updateFrame(camera, _lightDir, now * 0.001);
+      // After updateFrame moved the sun, before anything renders with it.
+      if (!_rendererSideWork) terrainShadowMap.bakeIfNeeded(sculpt.getHeightVersion());
       bvhDebug?.update();
     } catch (err) {
       if (++_loopErrors === 1) console.error("[V3] Frame update error:", err);
@@ -8802,6 +8811,7 @@ export async function startV3App(opts = {}) {
        * are not comparable — interleave them instead.
        */
       get propInstancer() { return propInstancer; },
+      terrainShadowMap,
       propStressClear() {
         propStore.clear();
         propSlots.length = 0;

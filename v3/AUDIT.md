@@ -900,12 +900,31 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      acne on the sunny side, and the shadow swings round with the sun.
      Cost **+0.239 ms** (march compiled in vs out, 3 interleaved rounds, 60 FPS,
      whole world in view). Panel: World → Shadows → Terrain shadows + softness.
+     **Then BAKED (same day).** The march now runs into a 1024² float texture
+     (`createTerrainShadowMap`) storing the HEIGHT the shadow reaches (R) and the
+     distance to what casts it (G), so any material can ask "am I above the
+     shadow?" and the penumbra still widens with occluder distance. The terrain
+     reads it once per vertex. Visually identical to the per-vertex march, and
+     slightly sharper far away (1 m texels instead of coarse far vertices).
+     Re-bakes: FULL when the terrain changes or shadows are switched on; while
+     the SUN turns, one of 16 horizontal bands per frame (render-target
+     scissor), sweeping until the sun stops; otherwise nothing.
+     Measured interleaved: per-frame read **0.036 ms** (was 0.239). Bake cost
+     taken as 40 stacked bakes against the 5-tap normal bake, because a single
+     bake timed through `onSubmittedWorkDone` reads a ~3 ms FLOOR for any pass
+     (the normal bake read 3 ms too — a harness artefact, not a cost): full
+     bake **~0.5 ms**, one band **~0.15 ms**. So: fixed sun ≈ 0.04 ms/frame,
+     animated time of day ≈ 0.19 ms/frame, sculpting +0.5 ms per stroke frame.
+     Sweep verified live: one band per frame while the sun moves, the rest of
+     the sweep after it stops, then zero; no seams between bands.
      Open:
      - **Only the terrain receives it.** Grass, props, trees and foliage in a
-       shadowed valley are still sunlit. Next step; those materials have sampler
-       room, so they can sample a shared shadow texture or march per instance.
-     - The toggle is a uniform, so the 0.24 ms is paid even when it is off. A
-       game that never wants it needs a compile-time switch.
+       shadowed valley are still sunlit. The baked map is built for exactly
+       this: `visibilityAt(heightmapUV, worldY)` is one read in any material.
+     - The toggle is a uniform; with the bake it costs almost nothing when off
+       (bakes stop, one read per vertex remains).
+     - At very fast day speeds a sweep's 16 frames can leave bands a fraction
+       of a degree apart; invisible at normal speeds, not checked at extremes.
      - No terrain shadow while CSM is disabled (only the CSM node is wrapped).
      - Resolution is the clipmap's vertex spacing: 1 m near, coarser far, which
        suits mountain shade but cannot draw a thin distant ridge's shadow.
