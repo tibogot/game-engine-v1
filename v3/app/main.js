@@ -8692,6 +8692,48 @@ export async function startV3App(opts = {}) {
 
   if (import.meta.env?.DEV) {
     window.__V3_DEBUG = {
+      /*
+       * A repeatable prop stress scene, for measuring the instancing and shadow
+       * work. It goes through the SAME path the Props tool uses (addPrimitive →
+       * registerPrimitive → onTypeRegistered → auto-LOD), because props added
+       * straight to the store never render: the instancer is told about a type
+       * by the app, not by the store.
+       *
+       *   __V3_DEBUG.propStress()            // 12k spheres over 520 m, camera in the middle
+       *   __V3_DEBUG.propStress({ count: 20000, shape: "Torus", radius: 400 })
+       *   __V3_DEBUG.propStressClear()
+       *
+       * Golden-angle spiral so density is even and the layout is identical
+       * every run — two measurements a week apart are comparable.
+       */
+      propStress({ count = 12000, shape = "Sphere", radius = 260, stand = true } = {}) {
+        addPrimitive(shape);
+        const slot = propSlots.find((s) => s.name === shape && s.builtin);
+        if (!slot) return { error: `unknown primitive "${shape}"` };
+        const typeIdx = slot.typeIdx;
+        for (let i = 0; i < count; i++) {
+          const ang = i * 2.399963;                       // golden angle
+          const rad = radius * Math.sqrt((i + 0.5) / count);
+          const x = Math.cos(ang) * rad, z = Math.sin(ang) * rad;
+          propStore.addInstance(typeIdx, x, terrainStoreAdapter.getWorldHeight(x, z), z, {
+            ry: (i * 0.37) % (Math.PI * 2), sx: 1.2, sy: 1.6, sz: 1.2,
+          });
+        }
+        if (stand) {
+          const y = terrainStoreAdapter.getWorldHeight(0, 0);
+          camera.position.set(0, y + 1.7, 0);
+          controls.target.set(60, terrainStoreAdapter.getWorldHeight(60, 0) + 1, 0);
+          controls.update();
+        }
+        return { typeIdx, instances: propStore.instances.length };
+      },
+      propStressClear() {
+        propStore.clear();
+        propSlots.length = 0;
+        propState.activeSlot = -1;
+        uiById("props-panel")?._rebuildPropUi?.();
+        return { instances: propStore.instances.length };
+      },
       get editorMode() { return editorMode; },
       get playActive() { return playMode.active; },
       getFlightDebug: () => playMode.getFlightDebug?.(),

@@ -357,6 +357,31 @@ built-in shapes + a cliff) over 800x800 m, GPU at the real canvas 1347x849.
 
 ### Measured performance (worth doing above ~10k props / city scale)
 
+**The stress scene these numbers come from** — `__V3_DEBUG.propStress()` in the
+editor console (v3/app/main.js). 12k spheres on a golden-angle spiral over
+800 m with the camera at ground level in the middle; `propStress({ count,
+shape, radius })` to vary it, `propStressClear()` to remove it. It goes through
+the Props tool's own path (addPrimitive → registerPrimitive →
+onTypeRegistered → auto-LOD) because **props added straight to the store never
+render** — the instancer is told about a type by the app, not by the store.
+The spiral is deterministic, so runs weeks apart are comparable.
+
+Two traps that silently produce fake numbers, both hit on 2026-09-16:
+- **A backgrounded tab freezes `renderer.info`.** Draws, triangles and
+  timestamp all hold their last value, so an A/B returns identical figures and
+  looks like "no difference". `select_page` with `bringToFront` first.
+- **`sun.castShadow = false` does nothing** once the CSM shadow node is
+  running: the cascade `LwLight`s carry their own `castShadow`. To measure what
+  props cost the shadow pass, flip `castShadow` on the prop InstancedMeshes
+  (`propInstancer.setCastShadow`).
+Also take the MEAN of raw samples, not the median: the GPU timestamp is
+quantised to a handful of values per 60 frames, so medians collapse onto the
+same number for both sides of an A/B.
+
+BASELINE 2026-09-16, 12k props over 800 m, 4 interleaved rounds × 90 frames:
+whole frame **2.959 ms**, props not casting 1.576 ms, so the **prop shadow pass
+is 1.383 ms — 47% of the frame**, with 6 prop meshes and 9.1 M triangles.
+
 38. **Shadow pass draws every prop** — PARTLY DONE 2026-09-16. The CSM reaches
     80 m (maxFar), yet every detail level cast, so props from 150 m to 500 m
     were drawn into an 80 m shadow map. A tier now casts only when its NEAREST
@@ -372,6 +397,23 @@ built-in shapes + a cliff) over 800x800 m, GPU at the real canvas 1347x849.
     (7,395 of 14,622, ~4M triangles). Keeping only on-screen props cut 20k from
     9.2 to 5.4 ms. Fix: per-instance culling through the instance BVH (plane
     mask: a fully-inside subtree needs no more tests).
+    **Why it could not be done naively, and the way in (checked 2026-09-16).**
+    Camera and shadow share ONE instance list per tier, so culling what the
+    camera cannot see also deletes shadows those props should still cast. The
+    fix is separate lists, and three supports it: `ShadowNode.js:711` keeps a
+    shadow camera's own layer mask as long as any layer above 0 is enabled
+    (otherwise it overwrites it with the main camera's), and `Renderer.js:3054`
+    layer-tests every object against the shadow camera. So camera meshes stay
+    on layer 0 with `castShadow = false`, and each cascade gets its own
+    shadow-only mesh on its own layer holding just the instances inside THAT
+    cascade's ortho box, drawn with the cheapest geometry; every cascade camera
+    keeps layer 0 enabled so terrain, trees and the character are untouched.
+    The prize: props inside maxFar are currently drawn into all three cascades,
+    but cascade 0's box is 23.5 m across and cascade 1's is 85 m — of the ~1,700
+    props within 150 m, cascade 0 needs ~15 and cascade 1 ~135. `frustumCulled`
+    is false on these meshes, so three removes none of it today. It also fixes
+    the rest of 38 for free: culling against the LIGHT rather than the camera is
+    what lets props behind the camera cast into view.
 40. ~~**No automatic LOD**~~ — DONE 2026-09-16. v3/render/instancing/autoLod.js
     builds the missing levels with **meshoptimizer** when a prop type registers
     (LOD1 at 45% of the triangles, LOD2 at 35% of LOD1), chained off the render
