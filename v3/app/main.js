@@ -1329,7 +1329,9 @@ export async function startV3App(opts = {}) {
   }
 
   function syncFoliageScatterUniforms() {
-    foliageScatter?.syncFromState(foliageScatterState, grassState, getLightDir());
+    foliageScatter?.syncFromState(foliageScatterState, grassState, getLightDir(), {
+      hasRivers: (riverV2System?.rivers.length ?? 0) > 0,
+    });
   }
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
@@ -6157,6 +6159,7 @@ export async function startV3App(opts = {}) {
     foliageState: foliageScatterState,
     getLayerNames: () => textureLib.slots.map((s) => s.name),
     getThumbnail: (i) => _foliageThumbs.get(i) ?? null,
+    getHasRivers: () => (riverV2System?.rivers.length ?? 0) > 0,
     onBrushChanged: () => { sculpt.uRadius.value = foliageScatterBrush.radius / WORLD_SIZE; },
     onStateChanged: () => { syncFoliageScatterUniforms(); queueFoliageThumb(foliageScatterBrush.type); },
     onGeometryChanged: (i) => { foliageScatter?.rebuildType(i, foliageScatterState.types[i]); queueFoliageThumb(i); },

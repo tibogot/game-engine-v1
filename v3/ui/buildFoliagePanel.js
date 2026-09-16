@@ -16,7 +16,7 @@ import { FOLIAGE_PRESETS, FOLIAGE_HEIGHT_ANY } from "../app/state/foliageScatter
  *   onFill(type) / onClear()
  *   getThumbnail(i)  PNG data URL of plant i for the picker, or null while it bakes
  */
-export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNames, getThumbnail, onBrushChanged, onStateChanged, onGeometryChanged, onFill, onClear }) {
+export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNames, getThumbnail, getHasRivers, onBrushChanged, onStateChanged, onGeometryChanged, onFill, onClear }) {
   const widgets = [];
   const W = (w) => { widgets.push(w); return w; };
 
@@ -95,6 +95,9 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
     }));
     W(slider(gr, type, "nearRiver", { label: "Near rivers within (m)", min: 0, max: 80, step: 1, onChange: onStateChanged,
       hint: "Only this close to a River v2 river (measured from its centre line). 0 = anywhere." }));
+    if ((type.nearRiver ?? 0) > 0 && getHasRivers && !getHasRivers()) {
+      hint(gr, "This world has no river yet, so the rule above is ignored — the plant grows wherever you paint it. It starts applying as soon as you draw a river.");
+    }
 
     // ── Shape (mesh) ──
     const sh = section(root, "Shape", false);

@@ -302,8 +302,12 @@ export class FoliageScatterSystem {
     for (let lod = 0; lod < FOLIAGE_LODS; lod++) this.field.meshes[i * FOLIAGE_LODS + lod].material = mat;
   }
 
-  /** fs = foliage state, gp = grassState (shared wind, blade height), sunDir toward the sun. */
-  syncFromState(fs, gp, sunDir) {
+  /**
+   * fs = foliage state, gp = grassState (shared wind, blade height), sunDir
+   * toward the sun. `hasRivers` false means the world has no River v2 river at
+   * all, so a "grows near water" rule could never be satisfied.
+   */
+  syncFromState(fs, gp, sunDir, { hasRivers = true } = {}) {
     this.field.syncCommon({
       wind: gp ? { ...gp, windMul: fs.windMul } : null,
       density: fs.density,
@@ -333,7 +337,10 @@ export class FoliageScatterSystem {
       const o = i * ROWS;
       c.set(t.colorBase); rows[o].set(c.r, c.g, c.b, t.translucency);
       c.set(t.colorTip);  rows[o + 1].set(c.r, c.g, c.b, t.size);
-      rows[o + 2].set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, t.nearRiver ?? 0);
+      // With no river in the world the near-water rule is meaningless, and
+      // enforcing it would silently grow nothing where the user just painted.
+      const nearRiver = hasRivers ? (t.nearRiver ?? 0) : 0;
+      rows[o + 2].set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, nearRiver);
       c.set(t.colorHead ?? t.colorTip); rows[o + 3].set(c.r, c.g, c.b, 0);
     }
     this.field.setReceiveShadows(fs.receiveShadows);
