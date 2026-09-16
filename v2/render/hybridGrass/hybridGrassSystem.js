@@ -382,6 +382,7 @@ export class HybridGrassSystem {
       uSkyBlend: uniform(gp.skyBlend ?? 0.8),
       uCylindrical: uniform(gp.cylindrical ?? 0.3),
       uViewThicken: uniform(gp.viewThicken ?? 0.45),
+      uFoldBelow: uniform(gp.foldBelow ?? 0),
       uCameraPos: uniform(new THREE.Vector3()),
       // SSS (emissive — lighting itself comes from the standard pipeline)
       uBssCol: uniform(srgb(gp.bssColor ?? "#2d7a2d")),
@@ -967,7 +968,25 @@ export class HybridGrassSystem {
       // Gemini bend: arc along local X, whole blade (incl. cross ribbon at
       // +90°) rotated by yaw. FrontSide culling makes the field read coherent.
       const isCross = attribute("aCross", "float");
-      const crossedYaw = yaw.add(isCross.mul(Math.PI * 0.5));
+      // Blade folding (Ghost of Tsushima: a short blade's vertices make TWO
+      // blades). Here the cross ribbon is the second blade: for blades shorter
+      // than uFoldBelow × the ring's blade height it leaves the shared root
+      // and stands on its own — own spot within the blade cell, own facing,
+      // own height. Twice the visible blades for the same vertices.
+      // Relative, so the same share of blades folds at any Blade height.
+      // uFoldBelow 0 = off.
+      const fold = isCross.mul(step(bladeH, u.uFoldBelow.mul(u.uBladeHeight)));
+      const crossedYaw = mix(
+        yaw.add(isCross.mul(Math.PI * 0.5)),
+        hash(bladeIdx.add(4409)).mul(PI2),
+        fold,
+      );
+      const bladeHV = bladeH.mul(
+        mix(float(1), mix(float(0.6), float(1), hash(bladeIdx.add(7013))), fold),
+      );
+      const cell = float(this.tileSize / this.bladesPerSide);
+      const foldOffX = hash(bladeIdx.add(1531)).sub(0.5).mul(cell).mul(fold);
+      const foldOffZ = hash(bladeIdx.add(2657)).sub(0.5).mul(cell).mul(fold);
 
       // Distance LOD morph (Gemini's lodMorph equivalent). Gemini keeps the
       // cross ribbon through HIGH+MID (to ~80m) and goes single-ribbon beyond;
@@ -992,7 +1011,7 @@ export class HybridGrassSystem {
       );
       const curveWeight = pow(max(h, 1e-4), u.uBendFocus).mul(baseStiff);
       const angle = totalForce.mul(curveWeight);
-      const L = h.mul(bladeH);
+      const L = h.mul(bladeHV);
       const arcX = sin(angle).mul(L);
       const arcY = cos(angle).mul(L);
       const arcZ = sin(zRoll).mul(L).mul(curveWeight).mul(0.2);
@@ -1008,7 +1027,7 @@ export class HybridGrassSystem {
         .mul(0.025)
         .mul(swayAmp);
       const windPerp = vec2(negate(u.uWindDir.y), u.uWindDir.x);
-      const hh = h.mul(h).mul(bladeH);
+      const hh = h.mul(h).mul(bladeHV);
       const swayX = u.uWindDir.x.mul(swayA).add(windPerp.x.mul(flutterA)).mul(hh);
       const swayZ = u.uWindDir.y.mul(swayA).add(windPerp.y.mul(flutterA)).mul(hh);
 
@@ -1063,9 +1082,9 @@ export class HybridGrassSystem {
       vNormal.assign(nEmissive); // emissive SSS/spec: per-blade on near rings
 
       const outPos = vec3(
-        pYaw.x.add(p.x),
+        pYaw.x.add(p.x).add(foldOffX),
         pYaw.y.add(terrainY),
-        pYaw.z.add(p.y),
+        pYaw.z.add(p.y).add(foldOffZ),
       );
       vWorld.assign(outPos.add(vec3(u.uAnchorPos.x, 0, u.uAnchorPos.z)));
       return outPos;
@@ -1321,6 +1340,7 @@ export class HybridGrassSystem {
     u.uSkyBlend.value = gp.skyBlend ?? 0.8;
     u.uCylindrical.value = gp.cylindrical ?? 0.3;
     u.uViewThicken.value = gp.viewThicken ?? 0.45;
+    u.uFoldBelow.value = gp.foldBelow ?? 0;
     u.uBssCol.value.copy(srgb(gp.bssColor ?? "#2d7a2d"));
     u.uBssIntensity.value = gp.bssIntensity ?? 1.2;
     u.uBssPower.value = gp.bssPower ?? 2;

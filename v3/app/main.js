@@ -1000,7 +1000,7 @@ export async function startV3App(opts = {}) {
     crossed: true,
     bendFocus: 0.5, stiffness: 0, maxAngle: 1.4, naturalLean: 0.9,
     windSpeed: 0.2, windStrength: 1.4, windGust: 0.3, windWaveScale: 0.12, windAngle: 0,
-    clumpScale: 1.5, clumpStrength: 0.7,
+    clumpScale: 1.5, clumpStrength: 0.7, foldBelow: 1.1,
     grassDensity: 1,
     bladeColor: "#0e300e", tipColor: "#00b30c",
     aoBase: 0.25, aoPower: 2, farAoMul: 1,
@@ -5037,6 +5037,9 @@ export async function startV3App(opts = {}) {
   });
   gslClumpSc.addEventListener("input",  () => { grassState.clumpScale = Number(gslClumpSc.value) / 10; glblClumpSc.textContent = grassState.clumpScale.toFixed(1); syncGrassUniforms(); });
   gslClumpStr.addEventListener("input", () => { grassState.clumpStrength = Number(gslClumpStr.value) / 100; glblClumpStr.textContent = grassState.clumpStrength.toFixed(2); syncGrassUniforms(); });
+  const gslFold  = uiById("gsl-fold");
+  const glblFold = uiById("glbl-fold");
+  gslFold.addEventListener("input", () => { grassState.foldBelow = Number(gslFold.value) / 100; glblFold.textContent = grassState.foldBelow > 0 ? grassState.foldBelow.toFixed(2) + "×" : "off"; syncGrassUniforms(); });
   gslBend.addEventListener("input",   () => { grassState.bendFocus = Number(gslBend.value) / 10; glblBend.textContent = grassState.bendFocus.toFixed(1); syncGrassUniforms(); });
   gslStiff.addEventListener("input",  () => { grassState.stiffness = Number(gslStiff.value) / 100; glblStiff.textContent = grassState.stiffness.toFixed(2); syncGrassUniforms(); });
   gslMaxAng.addEventListener("input", () => { grassState.maxAngle = Number(gslMaxAng.value) / 100; glblMaxAng.textContent = grassState.maxAngle.toFixed(2); syncGrassUniforms(); });
@@ -5212,7 +5215,7 @@ export async function startV3App(opts = {}) {
     ["gck-color-var", "colorVariation"], ["gsl-hue", "cvHueSpread", 100], ["gsl-sat", "cvSatSpread", 100],
     ["gsl-dry", "cvDryAmount", 100], ["gcol-dry", "cvDryColor"],
     ["gsl-blade-width", "bladeWidth", 100], ["gck-crossed", "crossed"], ["gsl-segments", "bladeYSegments", 1],
-    ["gsl-taper", "tipTaperStart", 100], ["gsl-clump-scale", "clumpScale", 10], ["gsl-clump-str", "clumpStrength", 100],
+    ["gsl-taper", "tipTaperStart", 100], ["gsl-clump-scale", "clumpScale", 10], ["gsl-clump-str", "clumpStrength", 100], ["gsl-fold", "foldBelow", 100],
     ["gsl-bend", "bendFocus", 10], ["gsl-stiffness", "stiffness", 100], ["gsl-max-angle", "maxAngle", 100],
     ["gsl-lean", "naturalLean", 100], ["gsl-sky", "skyBlend", 100], ["gsl-cyl", "cylindrical", 100],
     ["gsl-thick", "viewThicken", 100], ["gsl-density", "grassDensity", 100], ["gck-shadow", "receiveShadow"],

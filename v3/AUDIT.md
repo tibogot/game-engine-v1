@@ -133,9 +133,16 @@ the game.
       field colour averages the whole blade height, and the far-ring AO floor
       is a "Far AO" slider (default 1.0, was a hard-coded 0.55). Now a smooth
       fade 68 → 60 → 59.
-    Still open for the GoT match: dithered terrain grass shadows in the far
-    field, blade folding, displacement buffer for all objects, painted blade
-    height. Ground UNDER near blades is still the painted ground (a GoT-look
+    - Blade folding (GoT: a short blade's vertices make two blades), DONE
+      2026-09-17: blades shorter than "Fold below" × Blade height send their
+      cross ribbon off as a separate blade (own spot in the blade cell,
+      facing, 0.6-1x height). Same vertices, no measurable cost (3.162 vs
+      3.127 ms). Default 1.1× = the shorter half (measured blade heights:
+      0.65-1.5 m, median 1.09, 51% under 1.1 m at Blade height 1).
+    - Mid ring at 3 segments (GoT far LOD is 7 vertices): +0.06 ms, not
+      visible at 80-200 m on a 1296 px view; kept at 2 ("Far segments").
+    Still open for the GoT match: painted blade height, displacement buffer
+    for all objects, dithered terrain grass shadows in the far field. Ground UNDER near blades is still the painted ground (a GoT-look
     project should paint a grass-coloured ground there, or add a control).
 19. **Trails through grass** from cars and characters (reuse the snow trail
     pattern).
