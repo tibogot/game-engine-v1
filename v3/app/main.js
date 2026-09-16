@@ -96,6 +96,9 @@ import { SusukiSystem, SUSUKI_DEFAULTS } from "../render/grass/susukiSystem.js";
 import { buildSusukiPanel } from "../ui/buildSusukiPanel.js";
 import { FlowerSystem } from "../render/grass/flowerSystem.js";
 import { FlowerDensity } from "../render/grass/flowerDensity.js";
+import { FoliageScatterSystem } from "../render/foliage/foliageSystem.js";
+import { ScatterDensity } from "../render/scatter/scatterDensity.js";
+import { createFoliageScatterState } from "./state/foliageScatterState.js";
 import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
 import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
@@ -126,8 +129,6 @@ import { createTreeToolState } from "./state/treeState.js";
 import { createTreeEnvironment } from "./treeEnvironment.js";
 import { buildTreePanel } from "../ui/buildTreePanel.js";
 import { buildBrushFilterSection, createBrushFilterState } from "../ui/brushFilterSection.js";
-import { createFoliageToolState } from "./state/foliageState.js";
-import { createFoliageEnvironment } from "./foliageEnvironment.js";
 import { buildFoliagePanel } from "../ui/buildFoliagePanel.js";
 import { buildRiverV2Panel } from "../ui/buildRiverV2Panel.js";
 import { RiverV2System } from "../tools/riverV2System.js";
@@ -836,7 +837,6 @@ export async function startV3App(opts = {}) {
     sculpt: { ...V2_CONFIG.sculpt },
     // Tree leaf render cells = chunkGroup × chunkSize (300 m): fewer, bigger
     // leaf meshes → fewer draw calls, at the cost of coarser per-cell LOD.
-    foliageLod: { chunkGroup: 3 },
   };
   // Paint layers flagged "Blocks trees" (a path, a shore) keep tree and
   // foliage painting off them. Placement only: trees already standing there
@@ -861,14 +861,6 @@ export async function startV3App(opts = {}) {
   treeBvh = new TreeBvh(treeEnv.treeStore, (slotIdx) => {
     const s = treeToolState.treeSlots[slotIdx];
     return s ? { radius: s.colliderRadius, height: s.colliderHeight } : null;
-  });
-  const foliageToolState = createFoliageToolState();
-  const foliageEnv = createFoliageEnvironment({
-    scene,
-    config: editorConfig,
-    getWorldHeight: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
-    isPlacementBlocked: isVegetationBlocked,
-    toolState: foliageToolState,
   });
   const perf = createPerfState();
   let splineSys = null;
@@ -962,6 +954,9 @@ export async function startV3App(opts = {}) {
   const flowerDensity = new FlowerDensity();
   flowerDensity.initMask({ renderer, splatTex: splatMap.tex });
   flowerTintShading.setSource(flowerDensity.maskedTex);
+  // Painted foliage (ferns and friends): its own layer on the same scatter core.
+  const foliageDensity = new ScatterDensity({ res: 1024, channels: 8 });
+  foliageDensity.initMask({ renderer, splatTex: splatMap.tex });
   const grassWindTex      = createWindTexture();
   const grassSpecNoiseTex = createSpecNoiseTexture();
 
@@ -1017,6 +1012,18 @@ export async function startV3App(opts = {}) {
   const FLOWER_UNDO_LIMIT = 16;
   const _flowerUndoStack = [];
   const _flowerRedoStack = [];
+
+  // ── Painted foliage (ferns — the same painted layer + GPU scatter as flowers) ──
+  const foliageScatterState = createFoliageScatterState();
+  const foliageScatterBrush = { radius: 14, strength: 0.6, falloff: 1.5, erase: false, eraseOnlyType: false, type: 0 };
+  let foliageScatter = null;
+  let _foliageScatterBuilding = false;
+  let foliageUi = null;
+  // Which plants are painted (so unused ones are not drawn); rechecked after a
+  // stroke, a fill or a load, never per frame.
+  let _foliageUsedDirty = true;
+  const _foliageScatterUndoStack = [];
+  const _foliageScatterRedoStack = [];
 
   let grassRings = null;
   let _grassBuilding = false;
@@ -1271,6 +1278,40 @@ export async function startV3App(opts = {}) {
   function syncFlowerUniforms() {
     flowerTintShading.syncFromState(flowerState);
     flowerSystem?.syncFromState(flowerState, grassState, getLightDir());
+  }
+
+  // ── Painted foliage build/sync (lazy, on the same scatter core) ────────────
+  async function ensureFoliageScatterBuilt() {
+    if (foliageScatter || _foliageScatterBuilding) return;
+    _foliageScatterBuilding = true;
+    try {
+      const sys = new FoliageScatterSystem({
+        scene,
+        renderer,
+        heightTex:        grassTerrainData.grassHeightTex,
+        terrainNormalTex: grassTerrainData.terrainNormalTex,
+        densityTex:       foliageDensity.maskedTexes,
+        grassDensityTex:  grassTerrainData.grassDensityMaskedTex,
+        splatTex:         splatMap.tex,
+        riverNearTex:     riverV2System?.nearTexture ?? null,
+        windTex:          grassWindTex,
+        worldSize:        WORLD_SIZE,
+        fs:               foliageScatterState,
+        gp:               grassState,
+      });
+      await sys.init(camera);
+      sys.setEnabled(true);
+      foliageScatter = sys;
+      syncFoliageScatterUniforms();
+    } catch (err) {
+      console.error("[V3 Foliage] build failed:", err);
+    } finally {
+      _foliageScatterBuilding = false;
+    }
+  }
+
+  function syncFoliageScatterUniforms() {
+    foliageScatter?.syncFromState(foliageScatterState, grassState, getLightDir());
   }
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
@@ -2318,7 +2359,9 @@ export async function startV3App(opts = {}) {
     } else if (m === "treePaint") {
       sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
     } else if (m === "foliage") {
-      sculpt.uRadius.value = foliageToolState.brush.radius / WORLD_SIZE;
+      uCursorUV.value.set(-2, -2);
+      sculpt.uRadius.value = foliageScatterBrush.radius / WORLD_SIZE;
+      void ensureFoliageScatterBuilt();
     } else if (m === "snow") {
       sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
     } else if (m === "cliffPaint") {
@@ -2817,7 +2860,6 @@ export async function startV3App(opts = {}) {
       // its arithmetic.
       const region = isFull ? null : rectToWorldRegion(rect);
       treeEnv.syncTreeHeights(region);
-      foliageEnv.syncFoliageHeights(region);
       /*
        * The v2 ocean's shoreline distance field is derived from the terrain, so
        * a sculpt invalidates it — a coast that moved leaves the foam behind.
@@ -2844,7 +2886,6 @@ export async function startV3App(opts = {}) {
     }
     cpuHeightmapMinY = minH * MAX_HEIGHT;
     treeEnv.syncTreeHeights();
-    foliageEnv.syncFoliageHeights();
   }
 
   async function ensureCpuHeightmapFromGpu() {
@@ -3324,6 +3365,7 @@ export async function startV3App(opts = {}) {
         const blocksGrass = textureLib.blocksGrassFlags();
         grassTerrainData.updateDensityMask(blocksGrass);
         flowerDensity.updateMask(blocksGrass);
+        foliageDensity.updateMask(blocksGrass);
       }
 
       bakeGrassTintIfNeeded();
@@ -3378,6 +3420,16 @@ export async function startV3App(opts = {}) {
         flowerSystem.setEnabled(wantFlowers);
         if (wantFlowers) flowerSystem.update(playMode.active ? playMode.playerPosition : camera.position, camera);
       }
+      if (foliageScatter) {
+        // Only spend compute while any foliage is painted.
+        const wantFoliage = foliageDensity.hasData && _terrainVisible;
+        foliageScatter.setEnabled(wantFoliage);
+        if (wantFoliage && _foliageUsedDirty) {
+          _foliageUsedDirty = false;
+          foliageScatter.field.setUsedTypes(foliageDensity.usedChannels());
+        }
+        if (wantFoliage) foliageScatter.update(playMode.active ? playMode.playerPosition : camera.position, camera);
+      }
 
       propInstancer.update(camera, propLod);
       decalSystem.update(camera);
@@ -3428,7 +3480,6 @@ export async function startV3App(opts = {}) {
       // direction whatever the sun did. The light that lights the scene now.
       const _lightDir = getLightDir();
       treeEnv.updateFrame(camera, _lightDir, now * 0.001);
-      foliageEnv.updateFrame(camera, _lightDir, now * 0.001);
       bvhDebug?.update();
     } catch (err) {
       if (++_loopErrors === 1) console.error("[V3] Frame update error:", err);
@@ -3654,7 +3705,6 @@ export async function startV3App(opts = {}) {
   function onHistoryChange() {
     cancelStroke();
     treeEnv.syncTreeHeights();
-    foliageEnv.syncFoliageHeights();
     markHeightmapDirty();
     requestHeightmapReadback();
   }
@@ -3683,7 +3733,6 @@ export async function startV3App(opts = {}) {
       case "props":      return undo ? propSys.undo() : propSys.redo();
       case "cliffPaint": return undo ? cliffPaintSystem.undo() : cliffPaintSystem.redo();
       case "treePaint":  return undo ? treeEnv.treeSystem.undo() : treeEnv.treeSystem.redo();
-      case "foliage":    return undo ? foliageEnv.paintSystem.undo() : foliageEnv.paintSystem.redo();
     }
     let done = false;
     switch (editorMode) {
@@ -3708,6 +3757,10 @@ export async function startV3App(opts = {}) {
       case "flowers":
         done = stackStep(undo ? _flowerUndoStack : _flowerRedoStack, undo ? _flowerRedoStack : _flowerUndoStack,
           () => flowerDensity.getSnapshot(), (s) => flowerDensity.restoreSnapshot(s));
+        break;
+      case "foliage":
+        done = stackStep(undo ? _foliageScatterUndoStack : _foliageScatterRedoStack, undo ? _foliageScatterRedoStack : _foliageScatterUndoStack,
+          () => foliageDensity.getSnapshot(), (s) => { foliageDensity.restoreSnapshot(s); _foliageUsedDirty = true; });
         break;
       case "riverv2": done = !!(undo ? riverV2System?.undo() : riverV2System?.redo()); if (done) riverV2Ui?.refresh(); break;
       case "tunnel":  done = !!(undo ? tunnelSystem?.undo() : tunnelSystem?.redo()); if (done) tunnelUi?.refresh(); break;
@@ -5504,7 +5557,7 @@ export async function startV3App(opts = {}) {
   const splineTreeStoreStub = {
     addTree: (...args) => treeEnv.treeStore.addTree(...args),
     hasTreeNearby: (...args) => treeEnv.treeStore.hasTreeNearby(...args),
-    syncAllHeights: () => { treeEnv.syncTreeHeights(); foliageEnv.syncFoliageHeights(); },
+    syncAllHeights: () => { treeEnv.syncTreeHeights(); },
   };
 
   splineSys = new SplineSystem({
@@ -6081,16 +6134,15 @@ export async function startV3App(opts = {}) {
     treeCastShadowChanged: () => treeEnv.setCastShadow(treeToolState.treeLod.castShadow),
   });
 
-  if (isEditor) buildFoliagePanel({
-    toolState: foliageToolState,
-    config: editorConfig,
-    loadFoliageTexture: (slotIdx, file) => foliageEnv.loadFoliageTexture(slotIdx, file),
-    isFoliageSlotLoaded: (slotIdx) => foliageEnv.isSlotLoaded(slotIdx),
-    getFoliageThumbnail: (slotIdx) => foliageEnv.getSlotThumbnail(slotIdx),
-    foliageSlotStructureChanged: (slotIdx) => foliageEnv.slotStructureChanged(slotIdx),
-    foliageSlotMaterialChanged: (slotIdx) => foliageEnv.slotMaterialChanged(slotIdx),
-    massPlaceFoliage: () => foliageEnv.paintSystem.massPlace(foliageToolState.foliagePaint.massPlaceCount),
-    clearAllFoliage: () => foliageEnv.paintSystem.clearAll(),
+  if (isEditor && foliagePanel) foliageUi = buildFoliagePanel(foliagePanel, {
+    foliageBrush: foliageScatterBrush,
+    foliageState: foliageScatterState,
+    getLayerNames: () => textureLib.slots.map((s) => s.name),
+    onBrushChanged: () => { sculpt.uRadius.value = foliageScatterBrush.radius / WORLD_SIZE; },
+    onStateChanged: () => syncFoliageScatterUniforms(),
+    onGeometryChanged: (i) => foliageScatter?.rebuildType(i, foliageScatterState.types[i]),
+    onFill:  (type) => { _pushFoliageUndo(); foliageDensity.fill(type); void ensureFoliageScatterBuilt(); },
+    onClear: () => { _pushFoliageUndo(); foliageDensity.clear(); },
   });
 
   if (isEditor) buildPropsPanel({
@@ -6313,7 +6365,6 @@ export async function startV3App(opts = {}) {
     // Files imported from disk travel inside the project: gather the sections
     // that can refer to them, then write just the assets they name.
     const trees = { slots: treeToolState.treeSlots, instances: treeInstances };
-    const foliage = foliageEnv.exportData();
     const props = propStore.exportData(propSlots);
     props.customMaterials = await exportCustomPropMaterials();
     const paintLayers = textureLib.exportData();
@@ -6325,7 +6376,7 @@ export async function startV3App(opts = {}) {
     const decals = decalSystem.decals.length ? decalSystem.exportData() : null;
     const waterfalls = waterfallSystem?.falls.length ? waterfallSystem.exportData() : null;
     const buf = encodeProjectFile({
-      assets:    projectAssets.collectFor({ trees: trees.slots, foliage: foliage.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers, environment, decalSlots: decals?.slots }),
+      assets:    projectAssets.collectFor({ trees: trees.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers, environment, decalSlots: decals?.slots }),
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
       heightmap: baseHeightmap ?? cpuHeightmap,
       splat:     splatMap.exportCombined(), // painted holes only; tunnels rebuild theirs
@@ -6334,7 +6385,6 @@ export async function startV3App(opts = {}) {
       snow:      snowMap.snapshot(),
       snowRes:   SNOW_MAP_RES,
       trees,
-      foliage,
       props,
       roads:     roadSystem.exportData(),
       splines:   splineSys.exportData(),
@@ -6366,6 +6416,9 @@ export async function startV3App(opts = {}) {
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
       susuki:    { ...susukiState },
       flowerDensity: flowerDensity.hasData ? flowerDensity.getSnapshot() : null,
+      foliagePaint:  foliageDensity.hasData ? foliageDensity.getSnapshot() : null,
+      foliagePlants: structuredClone(foliageScatterState.types),
+      foliageField:  (({ types, ...rest }) => rest)(foliageScatterState),
       flowers:   structuredClone(flowerState),
       cliffGrassDensity: grassTerrainData.getCliffDensitySnapshot(),
       cliffPaint: cliffPaintMask.getSnapshot(),
@@ -6620,9 +6673,24 @@ export async function startV3App(opts = {}) {
       uiById("tree-panel")?._rebuildTreeUi?.();
     }
 
-    // Always import, even when absent: a project with no foliage must clear
+    // Painted foliage: absent in a file means none.
     // instances left over from the previous scene.
-    foliageEnv.importData(d.foliage ?? null);
+    if (Array.isArray(d.foliagePlants)) {
+      d.foliagePlants.forEach((t, i) => { if (foliageScatterState.types[i] && t) Object.assign(foliageScatterState.types[i], t); });
+    }
+    if (d.foliageField) Object.assign(foliageScatterState, d.foliageField);
+    if (d.foliagePaint?.length === foliageDensity.tex.image.data.length) {
+      foliageDensity.restoreSnapshot(d.foliagePaint);
+      if (foliageDensity.hasData) void ensureFoliageScatterBuilt();
+    } else if (foliageDensity.hasData) {
+      foliageDensity.clear();
+    }
+    _foliageScatterUndoStack.length = 0;
+    _foliageScatterRedoStack.length = 0;
+    _foliageUsedDirty = true;
+    syncFoliageScatterUniforms();
+    if (foliageScatter) foliageScatterState.types.forEach((t, i) => foliageScatter.rebuildType(i, t));
+    foliageUi?.rebuild();
 
     if (d.props) {
       importCustomPropMaterials(d.props.customMaterials);
@@ -8458,50 +8526,59 @@ export async function startV3App(opts = {}) {
     }
   }, { passive: false, capture: true });
 
-  // ── Foliage mode mouse events (v2 billboard foliage paint) ────────────────
+  // ── Foliage mode: paint events (the same density brush as the flowers) ────
   let _foliagePainting = false;
-  const _foliageHit = new THREE.Vector3();
 
-  function _foliageHitFromEvent(e) {
+  function _pushFoliageUndo() {
+    _foliageScatterUndoStack.push(foliageDensity.getSnapshot());
+    if (_foliageScatterUndoStack.length > FLOWER_UNDO_LIMIT) _foliageScatterUndoStack.shift();
+    _foliageScatterRedoStack.length = 0;
+  }
+
+  function _foliagePaintXZ(e) {
     refreshMouse(e);
     const uv = getUV();
+    uCursorUV.value.set(uv ? uv.u : -2, uv ? uv.v : -2);
     if (!uv) return null;
-    return _foliageHit.set(
-      uv.u * WORLD_SIZE - WORLD_SIZE / 2,
-      sampleTerrainHeight(uv.u, uv.v),
-      uv.v * WORLD_SIZE - WORLD_SIZE / 2,
-    );
+    return { wx: uv.u * WORLD_SIZE - WORLD_SIZE / 2, wz: uv.v * WORLD_SIZE - WORLD_SIZE / 2 };
+  }
+
+  function _stampFoliage(wx, wz, altErase) {
+    foliageDensity.stamp({
+      cx: wx, cz: wz,
+      radius:    foliageScatterBrush.radius,
+      strength:  foliageScatterBrush.strength,
+      falloff:   foliageScatterBrush.falloff,
+      worldSize: WORLD_SIZE,
+      channel:   foliageScatterBrush.type,
+      erase:     foliageScatterBrush.erase || altErase,
+      onlyChannel: foliageScatterBrush.eraseOnlyType,
+    });
   }
 
   renderer.domElement.addEventListener("mousemove", e => {
     if (playMode.active || editorMode !== "foliage") return;
-    refreshMouse(e);
-    const uv = getUV();
-    uCursorUV.value.set(uv ? uv.u : -2, uv ? uv.v : -2);
-    if (uv) sculpt.uRadius.value = foliageToolState.brush.radius / WORLD_SIZE;
-    const pt = _foliageHitFromEvent(e);
-    if (pt && _foliagePainting) foliageEnv.paintSystem.applyAt(pt, e);
+    const pt = _foliagePaintXZ(e);
+    if (pt) sculpt.uRadius.value = foliageScatterBrush.radius / WORLD_SIZE;
+    if (pt && _foliagePainting) _stampFoliage(pt.wx, pt.wz, e.altKey);
   });
 
   renderer.domElement.addEventListener("mousedown", e => {
-    if (playMode.active || editorMode !== "foliage") return;
-    if (e.button !== 0) return;
-    const pt = _foliageHitFromEvent(e);
+    if (playMode.active || editorMode !== "foliage" || e.button !== 0) return;
+    const pt = _foliagePaintXZ(e);
     if (!pt) return;
     e.preventDefault();
+    _pushFoliageUndo();
     _foliagePainting = true;
-    controls.enabled = false;
-    foliageEnv.paintSystem.beginStroke(pt, e);
+    void ensureFoliageScatterBuilt();
+    _stampFoliage(pt.wx, pt.wz, e.altKey);
   }, { capture: true });
 
   renderer.domElement.addEventListener("mouseup", e => {
-    if (e.button !== 0 || editorMode !== "foliage") return;
-    if (!_foliagePainting) return;
-    _foliagePainting = false;
-    foliageEnv.paintSystem.endStroke();
-    syncEditorOrbitEnabled();
+    if (e.button === 0 && _foliagePainting) { _foliagePainting = false; _foliageUsedDirty = true; }
   });
 
+  // Scroll wheel in foliage mode: Shift = radius, Alt = strength
   renderer.domElement.addEventListener("wheel", e => {
     if (playMode.active || editorMode !== "foliage") return;
     if (!e.shiftKey && !e.altKey) return;
@@ -8509,17 +8586,12 @@ export async function startV3App(opts = {}) {
     e.stopImmediatePropagation();
     const factor = e.deltaY > 0 ? 0.9 : 1.11;
     if (e.shiftKey) {
-      foliageToolState.brush.radius = Math.max(
-        editorConfig.sculpt.brushMin,
-        Math.min(editorConfig.sculpt.brushMax, foliageToolState.brush.radius * factor),
-      );
-      sculpt.uRadius.value = foliageToolState.brush.radius / WORLD_SIZE;
+      foliageScatterBrush.radius = Math.max(1, Math.min(150, foliageScatterBrush.radius * factor));
+      sculpt.uRadius.value = foliageScatterBrush.radius / WORLD_SIZE;
     } else {
-      foliageToolState.brush.strength = Math.max(
-        editorConfig.sculpt.strengthMin,
-        Math.min(editorConfig.sculpt.strengthMax, foliageToolState.brush.strength * factor),
-      );
+      foliageScatterBrush.strength = Math.max(0.05, Math.min(1.0, foliageScatterBrush.strength * factor));
     }
+    foliageUi?.refresh();
   }, { passive: false, capture: true });
 
   // Grass undo/redo (routed by undoInMode). Each entry carries whether it
@@ -8579,6 +8651,12 @@ export async function startV3App(opts = {}) {
       get flowerSystem() { return flowerSystem; },
       decalSystem,
       decalEditor,
+      get foliageScatter() { return foliageScatter; },
+      foliageDensity,
+      foliageScatterState,
+      foliageScatterBrush,
+      ensureFoliageScatterBuilt,
+      syncFoliageScatterUniforms,
       get waterfallSystem() { return waterfallSystem; },
       get waterfallEditor() { return waterfallEditor; },
       flowerDensity,
@@ -8589,7 +8667,6 @@ export async function startV3App(opts = {}) {
       splatMap,
       textureLib,
       treeEnv,
-      foliageEnv,
       splatOverlay,
       lod,
       playMode,
@@ -8652,7 +8729,6 @@ export async function startV3App(opts = {}) {
     splineSystem: splineSys,
     lakeSystem,
     treeEnv,
-    foliageEnv,
     // Full-world restore (terrain + splat + snow + trees + props + roads + lakes).
     loadProjectFromUrl,
     loadProjectFromBuffer,

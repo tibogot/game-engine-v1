@@ -1,15 +1,18 @@
 /**
- * The flower meadow's clumping — shared by the 3D flowers (flowerSystem.js
- * compute) and the far-field terrain tint (flowerTintTsl.js), so the colour
- * patches on distant ground are the same clumps the flowers grow in up close.
- * Change it in one place or the two will disagree at the fade distance.
+ * Clumping and placement rules for everything the GPU scatters — flowers,
+ * foliage, and any plant added later.
+ *
+ * Shared on purpose: the 3D plants (the scatter compute) and the far-field
+ * terrain tint must read the SAME noise and the SAME rules, or distant ground
+ * would show plant colour where no plant grows. Change it in one place or the
+ * two disagree at the fade distance.
  */
 import { Fn, abs, dot, float, floor, fract, max, mix, select, sin, smoothstep, sqrt, step, vec2 } from "three/tsl";
 
 const _hash = (q) => fract(sin(dot(q, vec2(127.1, 311.7))).mul(43758.5453));
 
 /** 2D value noise, smooth, 0..1. */
-export const flowerValueNoise = /*#__PURE__*/ Fn(([p]) => {
+export const scatterValueNoise = /*#__PURE__*/ Fn(([p]) => {
   const i = floor(p);
   const f = fract(p);
   const w = f.mul(f).mul(float(3).sub(f.mul(2)));
@@ -27,15 +30,15 @@ export const flowerValueNoise = /*#__PURE__*/ Fn(([p]) => {
  * @param freq     clumps per metre (1 / clump size)
  * @param clumping 0..1
  */
-export const flowerClump = /*#__PURE__*/ Fn(([worldXZ, freq, clumping]) => {
+export const scatterClump = /*#__PURE__*/ Fn(([worldXZ, freq, clumping]) => {
   const p = worldXZ.mul(freq);
-  const n = flowerValueNoise(p).mul(0.65).add(flowerValueNoise(p.mul(2.3).add(17.1)).mul(0.35));
+  const n = scatterValueNoise(p).mul(0.65).add(scatterValueNoise(p.mul(2.3).add(17.1)).mul(0.35));
   return mix(float(1), smoothstep(0.3, 0.75, n).mul(1.8), clumping);
 });
 
 /**
- * Where one flower type may grow, 0..1 — the SAME rules for the 3D flowers and
- * the far colour, or a slope would show flower colour where no flower grows.
+ * Where one plant type may grow, 0..1 — the SAME rules for the 3D plants and
+ * the far colour, or a slope would show plant colour where no plant grows.
  *
  * @param rule        vec4 (heightMin, heightMax, paint layer index or -1 = any, river distance m or 0 = anywhere)
  * @param y           terrain height (m)
@@ -44,7 +47,7 @@ export const flowerClump = /*#__PURE__*/ Fn(([worldXZ, freq, clumping]) => {
  * @param worldSize   metres
  * Edges are soft: ±2 m of height or distance; a layer counts from ~20% paint.
  */
-export const flowerRuleKeep = /*#__PURE__*/ Fn(([rule, y, s0, s1, riverDist2, worldSize]) => {
+export const scatterRuleKeep = /*#__PURE__*/ Fn(([rule, y, s0, s1, riverDist2, worldSize]) => {
   const band = smoothstep(rule.x.sub(2), rule.x.add(2), y)
     .mul(float(1).sub(smoothstep(rule.y.sub(2), rule.y.add(2), y)));
 

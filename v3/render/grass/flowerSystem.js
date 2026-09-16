@@ -70,7 +70,7 @@ import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
 import { computeFrustumVisibility } from "../../../v2/core/revoGrass/revoGrassSsboUtils.js";
 import { FLOWER_TYPE_COUNT } from "../../app/state/flowerState.js";
 import { createFlowerTypeGeometry } from "./flowerGeometry.js";
-import { flowerClump, flowerRuleKeep } from "./flowerNoise.js";
+import { scatterClump, scatterRuleKeep } from "../scatter/scatterNoise.js";
 
 const LODS = 2;
 const DRAWS = FLOWER_TYPE_COUNT * LODS;
@@ -104,7 +104,7 @@ export class FlowerSystem {
     const riverTex = riverNearTex ?? noRiver;
 
     // Per type: (petalBase.rgb, translucency) (petalTip.rgb, size) (centre.rgb, stemHeight) (veins, 0, 0, 0)
-    //           (heightMin, heightMax, paint layer or -1, river distance m or 0) — flowerRuleKeep
+    //           (heightMin, heightMax, paint layer or -1, river distance m or 0) — scatterRuleKeep
     this._typeRows = Array.from({ length: FLOWER_TYPE_COUNT * ROWS }, () => new THREE.Vector4());
     const u = (this.u = {
       uAnchorPos: uniform(new THREE.Vector3()),
@@ -199,7 +199,7 @@ export class FlowerSystem {
       const paint = texture(densityTex, terrainUV);
       const total = paint.r.add(paint.g).add(paint.b).add(paint.a).toVar();
       // Clumps and gaps — the same noise the far-field terrain tint uses.
-      const clump = flowerClump(vec2(worldX, worldZ), u.uClumpFreq, u.uClumping);
+      const clump = scatterClump(vec2(worldX, worldZ), u.uClumpFreq, u.uClumping);
       const densityKeep = step(hash(instanceIndex.add(7919)), u.uDensity.mul(min(total, 1)).mul(clump))
         .mul(smoothstep(0.0, 0.005, total));
       const pick = hash(instanceIndex.add(2711)).mul(total);
@@ -217,7 +217,7 @@ export class FlowerSystem {
       const slopeProb = smoothstep(u.uSlopeMinY, u.uSlopeMinY.add(0.12), tN.y);
       // The picked type's own rules: height band, paint layer, near a river.
       const rule = u.uTypes.element(int(floor(typeIdx.add(0.5))).mul(ROWS).add(4));
-      const bandKeep = flowerRuleKeep(
+      const bandKeep = scatterRuleKeep(
         rule, terrainY,
         texture(splatTex, terrainUV).depth(int(0)), texture(splatTex, terrainUV).depth(int(1)),
         texture(riverTex, terrainUV).r, float(worldSize),

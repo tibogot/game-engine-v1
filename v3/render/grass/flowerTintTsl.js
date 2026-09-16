@@ -9,7 +9,7 @@
  *
  *   - the same painted density texture the flowers grow from (masked by
  *     "Blocks grass" layers and holes), one type per channel
- *   - the same clump noise (flowerNoise.js), so distant patches are the clumps
+ *   - the same clump noise (scatterNoise.js), so distant patches are the clumps
  *     the flowers really grow in
  *   - each type's visible colour and how much ground its blooms cover (from
  *     its size and the meadow density), mixed by the paint
@@ -31,7 +31,7 @@ import {
   Fn, If, int, uniform, float, vec3, vec4, mix, smoothstep, min, max, dot, length, texture,
   positionWorld, cameraPosition, varying,
 } from "three/tsl";
-import { flowerClump, flowerValueNoise, flowerRuleKeep } from "./flowerNoise.js";
+import { scatterClump, scatterValueNoise, scatterRuleKeep } from "../scatter/scatterNoise.js";
 import { FLOWER_TYPE_COUNT } from "../../app/state/flowerState.js";
 
 export function createFlowerTintShading({ worldSize, splatTex }) {
@@ -50,7 +50,7 @@ export function createFlowerTintShading({ worldSize, splatTex }) {
     clumpFreq: uniform(0.25),
     // Per type: visible colour (rgb) + ground coverage at full paint (a).
     types: Array.from({ length: FLOWER_TYPE_COUNT }, () => uniform(new THREE.Vector4(0, 0, 0, 0))),
-    // Per type: where it may grow — the same rule vec4 as the 3D flowers (flowerRuleKeep).
+    // Per type: where it may grow — the same rule vec4 as the 3D flowers (scatterRuleKeep).
     rules: Array.from({ length: FLOWER_TYPE_COUNT }, () => uniform(new THREE.Vector4(-1e5, 1e5, -1, 0))),
   };
 
@@ -75,7 +75,7 @@ export function createFlowerTintShading({ worldSize, splatTex }) {
       If(far.greaterThan(0.001), () => {
         // Each type counts only where its own rules let it grow.
         const y = positionWorld.y;
-        const keep = (i) => flowerRuleKeep(u.rules[i], y, s0V, s1V, riverV, float(worldSize));
+        const keep = (i) => scatterRuleKeep(u.rules[i], y, s0V, s1V, riverV, float(worldSize));
         const paint = vec4(
           paintV.r.mul(keep(0)), paintV.g.mul(keep(1)),
           paintV.b.mul(keep(2)), paintV.a.mul(keep(3)),
@@ -87,9 +87,9 @@ export function createFlowerTintShading({ worldSize, splatTex }) {
           // Paint-weighted colour and coverage of the types growing here.
           const colour = t0.xyz.mul(paint.r).add(t1.xyz.mul(paint.g)).add(t2.xyz.mul(paint.b)).add(t3.xyz.mul(paint.a)).mul(invT);
           const cover = t0.w.mul(paint.r).add(t1.w.mul(paint.g)).add(t2.w.mul(paint.b)).add(t3.w.mul(paint.a)).mul(invT);
-          const clump = flowerClump(wxz, u.clumpFreq, u.clumping);
+          const clump = scatterClump(wxz, u.clumpFreq, u.clumping);
           // Many small blooms, not a flat wash: a speckle that coarsens with distance.
-          const speckle = flowerValueNoise(wxz.mul(float(1.7).div(max(dist.mul(0.012), 1)))).mul(0.9).add(0.55);
+          const speckle = scatterValueNoise(wxz.mul(float(1.7).div(max(dist.mul(0.012), 1)))).mul(0.9).add(0.55);
           const amount = min(total, 1).mul(u.density).mul(clump).mul(cover).mul(speckle).mul(u.strength).mul(far).clamp(0, 0.85);
           // Keep the ground's light and shade: tint by colour, scaled to the ground's own brightness.
           const luma = dot(out, vec3(0.299, 0.587, 0.114));

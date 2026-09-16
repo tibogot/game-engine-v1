@@ -661,6 +661,50 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      box receives the decal. Not done: decal layers/masks (receive on terrain
      only), atlases bigger than 512² per layer, road surface decals (57) still
      separate.
+101. ~~**Foliage**~~ — REBUILT 2026-09-16 (phases 1-2 of 5). The v2 billboard
+     cards are DELETED (v3/app/foliageEnvironment.js, state/foliageState.js and
+     their panel): they drew `visible chunks × slots` draw calls, held three
+     full copies of every instance matrix (one per LOD), had per-chunk LOD with
+     a hard cut at 600 m, faked normals, ignored their own alignToNormal data,
+     and their wind was a global `sin` that was off by default. The user never
+     shipped a scene with them.
+     **The scatter core** (v3/render/scatter/): the machinery every painted
+     plant shares, pulled out of the flowers — camera-following wrap tile, ONE
+     compute pass (paint, type, clumping, slope, per-type rules, map edge,
+     distance fade, frustum cull, LOD pick, wind, player push), and one compact
+     list sliced into indirect draws by `firstInstance`. A plant module adds
+     only its geometry and its shader nodes. Flowers already share the noise and
+     the density layer; moving the rest of flowers (and susuki, the third copy
+     of this architecture) onto it is the next clean-up.
+     **Foliage mode (F)**: EIGHT painted plants (four types fit one RGBA
+     density texture, so the layer carries two pages), each real geometry with
+     no textures and no alpha test: a pinnate FERN (separate round-tipped
+     leaflets on a pale stalk, built against a commercial fern pack), `bush`
+     (leaves over a dome), `broadleaf` (ground cover), `blades` (reeds, tufts),
+     `typha` (cattails — a slim CAPSULE head high on a straight stem, growing
+     within 14 m of a river by default) and `plume` (a bottlebrush ear of
+     hairs). Brush, per-plant shape/colour/rules, field, wind, light and
+     distance controls, undo, and saving (`foliagePaint` blob + `foliagePlants`
+     + `foliageField`).
+     THREE detail levels, one silhouette: every leaflet (~1,400 tris) → a cut
+     sheet (~400) → a plain blade (~120). Types nobody painted are not drawn (an
+     empty indirect draw still costs a submission), so a two-plant scene is 6
+     draws rather than 24. Measured: GPU 1.4-1.7 ms with jungle-scale plants
+     filling the view.
+     **The one textured plant:** `pampas` carries susuki's drawn plume texture
+     (`drawPlumeTexture`) as the ALPHA of two crossed cards — hundreds of fine
+     strands that geometry cannot afford. It has its own material, so only that
+     plant pays the alpha test and every other plant keeps early depth
+     rejection. That is the intended split: geometry for shape, a texture only
+     where the detail is finer than triangles can be.
+     **Bug found and fixed in the shared cull** (it hit the flowers too): the
+     grass frustum test padded only the bottom edge and pulled the TOP edge in
+     by the plant's radius, so a fern within ~2.5 m of a camera looking down
+     vanished. It now pads all four edges outward and always keeps a plant
+     closer than its own radius.
+     Remaining: phase 0 (meshoptimizer auto-LOD, shadow LOD — items 38-40),
+     GLB import with impostors, placed (non-painted) foliage with the instance
+     BVH, and textured cards for plants geometry cannot afford.
 
 ### Not ported — v3 is equal or better, or it was retired
 

@@ -90,6 +90,9 @@ export function encodeProjectFile({
   susuki,               // susuki appearance params (JSON)
   flowerDensity,        // Uint8Array (RGBA 1024²) painted flowers, one type per channel, or null
   flowers,              // flower look params (JSON)
+  foliagePaint,         // Uint8Array (RGBA 1024²) painted foliage, one plant per channel, or null
+  foliagePlants,        // the four plant types: shape, colour, where they grow (JSON)
+  foliageField,         // field-wide foliage params: density, clumping, wind, distance (JSON)
   cliffGrassDensity,    // Uint8Array (RGBA 512²) painted cliff-top grass coverage
   cliffPaint,           // Uint8Array (RGBA 512²) terrain colour painted onto cliffs
   grass,                // grass appearance params (JSON)
@@ -114,6 +117,7 @@ export function encodeProjectFile({
   addBlob("grassDensity", grassDensity);
   addBlob("susukiDensity", susukiDensity);
   addBlob("flowerDensity", flowerDensity);
+  addBlob("foliagePaint", foliagePaint);
   addBlob("cliffGrassDensity", cliffGrassDensity);
   addBlob("cliffPaint", cliffPaint);
   const assetList = [];
@@ -146,6 +150,8 @@ export function encodeProjectFile({
     spawn:    spawn ?? null,
     susuki:   susuki ?? null,
     flowers:  flowers ?? null,
+    foliagePlants: foliagePlants ?? null,
+    foliageField:  foliageField ?? null,
     grass:    grass ?? null,
     snowParams: snowParams ?? null,
     groundTsl: groundTsl ?? null,
@@ -221,6 +227,9 @@ export function decodeProjectFile(buffer) {
     susuki:    manifest.susuki ?? null,
     flowerDensity: blob("flowerDensity"),
     flowers:   manifest.flowers ?? null,
+    foliagePaint:  blob("foliagePaint"),
+    foliagePlants: manifest.foliagePlants ?? null,
+    foliageField:  manifest.foliageField ?? null,
     cliffGrassDensity: blob("cliffGrassDensity"),
     cliffPaint: blob("cliffPaint"),
     grass:     manifest.grass ?? null,
