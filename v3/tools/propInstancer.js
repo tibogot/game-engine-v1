@@ -153,6 +153,12 @@ export class PropInstancer {
     this._pickBoxes    = null;
     this._pickBoxesGen = -1;
 
+    /**
+     * Cull the CAMERA list one instance at a time instead of one 256 m cell at
+     * a time. Turning it off is only useful for measuring — see AUDIT 39.
+     */
+    this.perInstanceCull = true;
+
     // Per-cascade shadow lists. `_shadowCsm` is the CSMShadowNode (read live —
     // it is REBUILT when the cascade count changes), null when a game runs
     // without CSM, in which case we fall back to the old behaviour of letting
@@ -721,6 +727,7 @@ export class PropInstancer {
     const wm    = this._worldMat;
 
     const counts = this._typeRender.map(tr => tr ? { lod0: 0, lod1: 0, lod2: 0 } : null);
+    const sphere = this._sphere;
 
     for (let cz = 0; cz < CELL_COUNT; cz++) {
       for (let cx = 0; cx < CELL_COUNT; cx++) {
@@ -742,10 +749,25 @@ export class PropInstancer {
           const dz    = this._cacheZs[ci] - camZ;
           const dist2 = dx * dx + dz * dz;
 
+          // Tier first, then the cull: the tier carries hysteresis across
+          // frames, so it has to keep being updated even for an instance we
+          // are about to skip, or a prop that walks off screen and back comes
+          // back at whatever level it had when it left.
           let tier  = tiers[ci];
           tier      = this._pickTier(dist2, tier, d0sq, d1sq, dFsq);
           tiers[ci] = tier;
           if (tier === 3) continue;
+
+          // PER-INSTANCE CULL. Only safe now that the shadow lists are
+          // separate: while the camera list also fed the shadow map, dropping
+          // an off-screen prop here deleted a shadow it should still cast.
+          // The 256 m cells are far too coarse to do this job — about half of
+          // what they passed was off screen.
+          if (this.perInstanceCull) {
+            sphere.center.set(this._cacheXs[ci], this._cacheYs[ci], this._cacheZs[ci]);
+            sphere.radius = this._cacheRadii[ci];
+            if (!this._frustum.intersectsSphere(sphere)) continue;
+          }
 
           const pick = this._lodForTier(tr, tier);
           if (!pick) continue;

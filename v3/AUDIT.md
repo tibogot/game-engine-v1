@@ -416,7 +416,26 @@ is 1.383 ms — 47% of the frame**, with 6 prop meshes and 9.1 M triangles.
     shadow-only instance list per type (cull against the shadow camera, draw
     with the cheapest geometry), which is also what would let props BEHIND the
     camera cast into view — they cannot today.
-39. **Coarse culling.** 256 m cells: 51% of drawn props were off screen
+39. ~~**Coarse culling**~~ — DONE 2026-09-16, and the biggest prop win so far.
+    The camera list is now culled one instance at a time (bounding sphere vs
+    the camera frustum, `perInstanceCull`) instead of one 256 m cell at a time.
+    Only possible because 38b split the shadow lists off first: while the
+    camera list also fed the shadow map, dropping an off-screen prop deleted a
+    shadow it should still cast.
+    Measured INTERLEAVED, 12k props over 800 m, 4 rounds × 90 frames at a
+    confirmed 60 FPS: **2.681 → 1.755 ms GPU (−0.926)**, camera instances
+    9,131 → 2,851, triangles 7.26 M → 2.92 M. CPU fell too, 4.4 → 3.5 ms.
+    The rendered image is IDENTICAL — screenshotted both ways — and a 360°
+    sweep in 45° steps keeps 31.2-31.3% of instances at every angle with no
+    popping, spikes or collapses.
+    The tier is still picked BEFORE the cull test, because tier hysteresis has
+    to keep ticking for instances that are off screen; otherwise a prop that
+    leaves the view and comes back returns at whatever level it left with.
+    Still open here: the instance BVH (plane masking, a fully-inside subtree
+    needing no further tests). The flat per-instance loop is cheap enough at
+    12k that the BVH is not yet worth it — measure before building it.
+
+39b. **Coarse culling, original finding.** 256 m cells: 51% of drawn props were off screen
     (7,395 of 14,622, ~4M triangles). Keeping only on-screen props cut 20k from
     9.2 to 5.4 ms. Fix: per-instance culling through the instance BVH (plane
     mask: a fully-inside subtree needs no more tests).
