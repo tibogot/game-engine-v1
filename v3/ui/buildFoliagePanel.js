@@ -1,4 +1,5 @@
 import { section, slider, color, toggle, dropdown, button, hint, text } from "./widgets.js";
+import { createAssetPalette } from "./assetPalette.js";
 import { FOLIAGE_PRESETS, FOLIAGE_HEIGHT_ANY } from "../app/state/foliageScatterState.js";
 
 /**
@@ -13,8 +14,9 @@ import { FOLIAGE_PRESETS, FOLIAGE_HEIGHT_ANY } from "../app/state/foliageScatter
  *   onStateChanged()        any uniform setting changed
  *   onGeometryChanged(i)    a shape setting of type i changed (mesh rebuild)
  *   onFill(type) / onClear()
+ *   getThumbnail(i)  PNG data URL of plant i for the picker, or null while it bakes
  */
-export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNames, onBrushChanged, onStateChanged, onGeometryChanged, onFill, onClear }) {
+export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNames, getThumbnail, onBrushChanged, onStateChanged, onGeometryChanged, onFill, onClear }) {
   const widgets = [];
   const W = (w) => { widgets.push(w); return w; };
 
@@ -34,12 +36,15 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
 
     // ── Paint ──
     const paint = section(root, "Paint Foliage");
-    W(dropdown(paint, foliageBrush, "type", {
-      label: "Plant",
-      options: foliageState.types.map((t, i) => [i, t.name]),
-      onChange: () => build(),
-      hint: "The brush paints this plant; the settings below tune it. Plants mix where you paint more than one.",
-    }));
+    hint(paint, "The brush paints the plant you pick here; the settings below tune it. Plants mix where you paint more than one.");
+    createAssetPalette({
+      container: paint,
+      cards: () => foliageState.types.map((t, i) => ({
+        key: i, label: t.name, kind: "asset", thumb: getThumbnail?.(i) ?? null, title: t.name,
+      })),
+      activeKey: () => foliageBrush.type,
+      onSelect: (key) => { foliageBrush.type = key; build(); },
+    });
     W(slider(paint, foliageBrush, "radius",   { label: "Radius",   min: 1, max: 150, step: 1, onChange: onBrushChanged }));
     W(slider(paint, foliageBrush, "strength", { label: "Strength", min: 0.05, max: 1, step: 0.05 }));
     W(slider(paint, foliageBrush, "falloff",  { label: "Falloff",  min: 0.5, max: 6, step: 0.1 }));
@@ -69,7 +74,7 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
       hint: "Roughly how tall the plant stands. A forest fern is 2-3, ground cover under 1." }));
     W(color(ty, type, "colorBase", { label: "Colour (crown)", onChange: onStateChanged }));
     W(color(ty, type, "colorTip",  { label: "Colour (tips)", onChange: onStateChanged }));
-    if (type.kind === "typha" || type.kind === "plume") {
+    if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas") {
       W(color(ty, type, "colorHead", { label: "Colour (head)", onChange: onStateChanged,
         hint: "The cattail's sausage or the reed's plume." }));
     }
@@ -97,7 +102,7 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
     W(slider(sh, type, "fronds",       { label: "Fronds", min: 3, max: 20, step: 1, ...g,
       hint: "Leaves radiating from the crown. Two of them stand up in the middle; the rest lean out." }));
     W(slider(sh, type, "frondLength",  { label: "Frond length", min: 0.4, max: 1.6, step: 0.01, ...g }));
-    const stalked = type.kind === "typha" || type.kind === "plume";
+    const stalked = type.kind === "typha" || type.kind === "plume" || type.kind === "pampas";
     W(slider(sh, type, "leaflets", {
       label: stalked ? "Stems" : "Leaflets per side", min: stalked ? 1 : 4, max: 40, step: 1, ...g,
       hint: stalked

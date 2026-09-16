@@ -1019,6 +1019,23 @@ export async function startV3App(opts = {}) {
   let foliageScatter = null;
   let _foliageScatterBuilding = false;
   let foliageUi = null;
+  /** Plant pictures for the panel's picker, baked once each and after an edit. */
+  const _foliageThumbs = new Map();
+  let _foliageThumbChain = Promise.resolve();
+  function queueFoliageThumb(i) {
+    _foliageThumbChain = _foliageThumbChain
+      .then(async () => {
+        if (!foliageScatter) return;
+        const url = await foliageScatter.bakeThumbnail(foliageScatterState.types[i], {
+          runRendererSideWork: (fn) => withRendererSideWork(fn),
+        });
+        if (url) { _foliageThumbs.set(i, url); foliageUi?.rebuild(); }
+      })
+      .catch((e) => console.warn(`[V3 Foliage] thumbnail ${i} failed:`, e));
+  }
+  function queueAllFoliageThumbs() {
+    for (let i = 0; i < foliageScatterState.types.length; i++) queueFoliageThumb(i);
+  }
   // Which plants are painted (so unused ones are not drawn); rechecked after a
   // stroke, a fill or a load, never per frame.
   let _foliageUsedDirty = true;
@@ -1303,6 +1320,7 @@ export async function startV3App(opts = {}) {
       sys.setEnabled(true);
       foliageScatter = sys;
       syncFoliageScatterUniforms();
+      queueAllFoliageThumbs();
     } catch (err) {
       console.error("[V3 Foliage] build failed:", err);
     } finally {
@@ -6138,9 +6156,10 @@ export async function startV3App(opts = {}) {
     foliageBrush: foliageScatterBrush,
     foliageState: foliageScatterState,
     getLayerNames: () => textureLib.slots.map((s) => s.name),
+    getThumbnail: (i) => _foliageThumbs.get(i) ?? null,
     onBrushChanged: () => { sculpt.uRadius.value = foliageScatterBrush.radius / WORLD_SIZE; },
-    onStateChanged: () => syncFoliageScatterUniforms(),
-    onGeometryChanged: (i) => foliageScatter?.rebuildType(i, foliageScatterState.types[i]),
+    onStateChanged: () => { syncFoliageScatterUniforms(); queueFoliageThumb(foliageScatterBrush.type); },
+    onGeometryChanged: (i) => { foliageScatter?.rebuildType(i, foliageScatterState.types[i]); queueFoliageThumb(i); },
     onFill:  (type) => { _pushFoliageUndo(); foliageDensity.fill(type); void ensureFoliageScatterBuilt(); },
     onClear: () => { _pushFoliageUndo(); foliageDensity.clear(); },
   });
@@ -6690,6 +6709,7 @@ export async function startV3App(opts = {}) {
     _foliageUsedDirty = true;
     syncFoliageScatterUniforms();
     if (foliageScatter) foliageScatterState.types.forEach((t, i) => foliageScatter.rebuildType(i, t));
+    queueAllFoliageThumbs();
     foliageUi?.rebuild();
 
     if (d.props) {
