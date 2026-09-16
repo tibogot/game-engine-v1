@@ -195,6 +195,12 @@ export function createSkyCloudEnv({ renderer, scene, atmosphere, field, params =
   const pmrem = new THREE.PMREMGenerator(renderer);
   const cubeRT = new THREE.CubeRenderTarget(P.resolution, { type: THREE.HalfFloatType });
   const cubeCam = new THREE.CubeCamera(0.1, 20000, cubeRT);
+  // Faces are rendered one at a time through `children[i]`, so CubeCamera.update()
+  // never runs — and that is the only place three aims the six cameras. Without
+  // this every face looked down −Z: one view pasted six times, a horizon at the
+  // zenith, and a brightness jump in every reflection at each 45° azimuth.
+  cubeCam.coordinateSystem = renderer.coordinateSystem;
+  cubeCam.updateCoordinateSystem();
   cubeCam.updateMatrixWorld(true);
   let envRT = null;
 

@@ -674,6 +674,19 @@ export async function createWorldEnvironment({
     _procEnvScene.add(domeClone);
     _procCubeRT = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType });
     _procCubeCam = new THREE.CubeCamera(0.1, 20000, _procCubeRT);
+    /*
+     * ORIENT THE FACES. three only aims a CubeCamera's six cameras inside
+     * `update()` (which picks the renderer's coordinate system first), and the
+     * faces here are rendered one per frame straight through `children[face]`,
+     * so `update()` never runs. Until 2026-09-15 all six cameras looked down −Z:
+     * every face of the environment was the same view toward −Z, the zenith of
+     * the IBL was a picture of the horizon, and wherever two faces met — at
+     * each 45° azimuth — reflections jumped. The sea showed it as a lighter
+     * rectangle on the horizon; everything else lit by the environment was
+     * just quietly wrong.
+     */
+    _procCubeCam.coordinateSystem = renderer.coordinateSystem;
+    _procCubeCam.updateCoordinateSystem();
     _procCubeCam.updateMatrixWorld(true);
     pmremGenerator = pmremGenerator ?? new THREE.PMREMGenerator(renderer);
   }
@@ -1098,22 +1111,44 @@ export async function createWorldEnvironment({
     return _oceanNormalMap;
   }
 
-  /** Shared with the classic ocean: same quantity, same units, same meaning. */
-  const OCEAN_SHARED_KEYS = [
-    "seaLevel", "windSpeed", "windAngleDeg",
-    "fftSwellAmp", "fftRippleAmp", "fftChoppiness", "fftUpdateHz",
-    "levels", "gridM", "baseCell", "horizonScale",
-  ];
+  /*
+   * Only the sea LEVEL is shared with the classic ocean — it is where the world's
+   * water is, whichever shader draws it. Everything else V2 reads from its own
+   * bag, so tuning one ocean never moves the other. (Wind, swell, choppiness,
+   * sim rate and the mesh used to be forwarded from the top level; projects
+   * saved before the split are migrated on load — see main.js importData.)
+   */
   function oceanV2Params() {
     const o = toolState.worldOcean;
     const out = { ...(o.v2 ?? {}) };
-    for (const k of OCEAN_SHARED_KEYS) if (o[k] !== undefined) out[k] = o[k];
+    if (o.seaLevel !== undefined) out.seaLevel = o.seaLevel;
     return out;
   }
 
+  /**
+   * The shadow node the sea should sample: the live cascades while they are the
+   * sun's shadow, otherwise none. Only the CSM path is wired — with cascades off
+   * the lighting builds its own private node for the sun, and a second one here
+   * would render the sun's shadow map a second time.
+   */
+  function oceanShadowNode() {
+    return csm && toolState.csm.enabled && sun.castShadow && sun.shadow.shadowNode === csm
+      ? csm : null;
+  }
+
+  /** FFT grid the live V2 ocean was BUILT with — it cannot change in place. */
+  let _oceanV2FftSize = null;
+
   function ensureOceanV2() {
     if (oceanV2) return oceanV2;
+    const initial = oceanV2Params();
+    _oceanV2FftSize = initial.fftSize ?? null;
     oceanV2 = createWorldOceanV2({
+      // Build straight into this project's sea state: the spectrum bake is
+      // ~200 ms, and building on defaults would pay it twice.
+      params: initial,
+      lod: initial.fftSize ? { fftSize: initial.fftSize } : {},
+      shadowNode: oceanShadowNode(),
       renderer,
       scene,
       heightTexNode,
@@ -1264,6 +1299,13 @@ export async function createWorldEnvironment({
 
   function worldOceanChanged() {
     worldOcean.syncParams(toolState.worldOcean);
+    // The FFT grid size is baked into the simulation and the shader's cascade
+    // taps, so a new size means a new ocean. One rebuild per change, not per frame.
+    const wantSize = toolState.worldOcean.v2?.fftSize ?? null;
+    if (oceanV2 && wantSize !== _oceanV2FftSize) {
+      oceanV2.dispose();
+      oceanV2 = null;
+    }
     oceanV2?.syncParams(oceanV2Params());
     applyOceanMode();
     rebakeShoreIfStale(); // sea level moved ⇒ the waterline moved
@@ -1357,6 +1399,8 @@ export async function createWorldEnvironment({
         sunColor: sun.color, sunIntensity: sun.intensity,
         ambientColor: hemi.color, ambientIntensity: hemi.intensity,
       });
+      // Identity compare inside; only a shadows on/off toggle recompiles.
+      oceanV2.setShadowNode(oceanShadowNode());
       oceanV2.update(dtSec, _appTimeSec, camera);
     }
 

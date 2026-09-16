@@ -142,13 +142,13 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
 import {
   Fn, If, Break, Discard, uniform, float, vec2, vec3, vec4,
-  mix, smoothstep, step, dot, exp, pow, max, min, abs, saturate, clamp,
+  mix, smoothstep, step, dot, cross, sign, exp, pow, max, min, abs, saturate, clamp,
   floor, fract, sin, cos, sqrt, length, round, log2, fwidth, dFdx, dFdy, Loop, attribute,
   normalize, reflect, texture, positionLocal, positionWorld, positionView,
   modelWorldMatrix, cameraPosition, cameraNear, cameraFar,
   cameraViewMatrix, cameraProjectionMatrix, screenUV,
   viewportDepthTexture, viewportSharedTexture, perspectiveDepthToViewZ,
-  pmremTexture, faceDirection,
+  pmremTexture, faceDirection, nodeObject,
 } from "three/tsl";
 
 const TWO_PI = 6.283185307179586;
@@ -277,6 +277,29 @@ const _worleyFbmLod = /*#__PURE__*/ Fn(([p_immutable, jitter, lod]) => {
     oct.addAssign(float(1));
   });
   return v.div(max(t, float(1e-4)));
+});
+
+/**
+ * Bubble field: the signed distance to the nearest bubble, where every Voronoi
+ * cell carries a bubble of its OWN random radius (`rMin`..`rMax`, in cell
+ * units). Negative = inside a bubble.
+ *
+ * A plain F1 threshold punches the same-sized hole in every cell, evenly
+ * spaced — which reads as dice or cheese, not foam. With a per-cell radius the
+ * holes vary, and neighbours that grow into each other merge into irregular
+ * gaps, which is what thinning foam actually does.
+ */
+const _bubbleSdf = /*#__PURE__*/ Fn(([p, rMin, rMax]) => {
+  const ip = floor(p);
+  const fp = fract(p);
+  const md = float(10).toVar();
+  for (const [nx, ny] of _NEIGHBORS) {
+    const cell = vec2(float(nx), float(ny));
+    const h = _hash22(ip.add(cell));
+    const r = mix(rMin, rMax, _hash21(ip.add(cell).add(vec2(7.3, 1.9))));
+    md.assign(min(md, length(cell.add(h).sub(fp)).sub(r)));
+  }
+  return md;
 });
 
 /** Reoriented Normal Mapping — blends two tangent normals without flattening. */
@@ -414,6 +437,22 @@ export const OCEAN2_DEFAULTS = {
    *  sky gradient anyway. */
   ssrEnd: 260,
 
+  /*
+   * ── SHADOWS ON THE WATER ────────────────────────────────────────────────────
+   * The sun's own shadow map (the terrain's cascades — the same node, so nothing
+   * renders twice). Shade takes away DIRECT sunlight only: the glint, the crest
+   * glow, the sun-lit side of foam, the wet-sand sheen, the sun through Snell's
+   * window. Sky reflection stays, because shade does not remove the sky — which
+   * is exactly what makes water in shadow read as shaded rather than painted.
+   * Reaches as far as the World panel's shadow distance (CSM max far).
+   */
+  shadowsEnabled: true,
+  /** How much the water's own colour darkens in full shade (less sun in the
+   *  water column). 0 = only the direct-sun terms react. */
+  shadowBodyDarken: 0.3,
+  /** How much foam darkens in full shade. Foam is lit mostly by the sun. */
+  shadowFoamDarken: 0.45,
+
   // ── Sun specular ───────────────────────────────────────────────────────────
   glintIntensity: 0.9,
   glintPower: 220,
@@ -433,6 +472,43 @@ export const OCEAN2_DEFAULTS = {
   fftNormalStrength: 1.05,
   windSpeed: 14,
   windAngleDeg: 38,
+  /*
+   * ── SEA STATE (horvath spectrum, physical units) ───────────────────────────
+   * The spectrum is calibrated, so these are real seas, not multipliers. Its
+   * built-in defaults are an open-ocean storm (100 km fetch: Hs 5.5 m at
+   * 14 m/s). These are a moderate coastal sea: ~1 m of wind waves on ~0.8 m of
+   * long swell, Hs ≈ 1.3 m — about what the old two-cascade sea showed, now
+   * with every wavelength between 5 m and 250 m actually present.
+   */
+  /** Km of water the wind has blown across. Height grows with √fetch:
+   *  3 km ≈ 0.8 m, 10 km ≈ 1.5 m, 40 km ≈ 3.4 m of wind sea at 14 m/s. */
+  seaFetchKm: 5,
+  /** Energy of the distant swell; its height grows with √this. */
+  swellStrength: 0.04,
+  /** The far-away wind that raised the swell: its wavelength (6 ≈ 84 m crests). */
+  swellWindSpeed: 6,
+  /** Swell direction relative to the local wind, degrees. */
+  swellAngleOffsetDeg: 32,
+  /** Water depth the spectrum assumes, metres (TMA correction). 500 = deep. */
+  seaDepthM: 500,
+  /** Spectrum random seed — a different sea with the same statistics. */
+  fftSeed: 1337,
+  /** How long whitecap foam lingers after a crest folds; lower = longer. */
+  fftFoamDecay: 0.4,
+  /** FFT simulation rate, Hz. Compute cost, not per-frame. */
+  fftUpdateHz: 30,
+  /** FFT grid per cascade (128 / 256 / 512). Changing it REBUILDS the ocean. */
+  fftSize: 256,
+
+  // ── Mesh (clipmap) ─────────────────────────────────────────────────────────
+  levels: 7,
+  gridM: 64,
+  baseCell: 1,
+  horizonScale: 6,
+
+  /** Marks a V2 bag written after the V2 controls left the shared World Ocean
+   *  sliders. A save without it took wind, swell and mesh from the top level. */
+  ownControls: true,
   /** Displacement fades out between these; past `fftEnd` the FFT is not sampled
    *  at all and the surface shades as a flat mirror. */
   dispFadeStart: 260,
@@ -453,11 +529,39 @@ export const OCEAN2_DEFAULTS = {
   // ── Whitecaps (FFT Jacobian) ───────────────────────────────────────────────
   whitecapEnabled: true,
   whitecapIntensity: 0.9,
-  whitecapThreshold: 0.68,
-  whitecapSoftness: 0.26,
-  /** Voronoi cells per metre for the whitecap breakup. Coarser than the surf
-   *  foam because whitecaps are seen from much further away. */
-  whitecapScale: 0.16,
+  /** Retuned for the horvath spectrum (0.68 under zelda): its 17 m cascade
+   *  folds far more at the same choppiness, and 0.68 turned a moderate sea
+   *  into a field of white blobs. */
+  whitecapThreshold: 0.84,
+  whitecapSoftness: 0.25,
+  /** Power on whitecap coverage. 1 = a solid sheet over the whole fold; higher
+   *  keeps only the fold's core solid and erodes the rest into lace. */
+  whitecapCoreSharpness: 2.5,
+  /** How much whitecap foam is dragged into streaks along the wind. 0 = none. */
+  whitecapStreak: 0.6,
+  /** Streaks per metre ACROSS the wind (they run ~8× longer along it). */
+  whitecapStreakScale: 0.35,
+
+  // ── Contact foam: where water meets geometry ───────────────────────────────
+  contactFoamEnabled: true,
+  /** Metres of water depth over geometry that still foams — the width of the
+   *  ring around a pier leg, and how deep a rock can sit and still show. */
+  contactFoamWidth: 1.5,
+  contactFoamIntensity: 1.0,
+  /** Camera distance past which contact foam fades out (depth precision). */
+  contactFoamEnd: 250,
+
+  // ── Foam bubbles ───────────────────────────────────────────────────────────
+  /** How strongly bubbles punch holes in foam seen up close. 0 = smooth foam. */
+  foamBubbles: 0.85,
+  /** Bubble cells per metre (3 ≈ 33 cm bubbles). */
+  foamBubbleScale: 3,
+
+  // ── Foam relief ────────────────────────────────────────────────────────────
+  /** Apparent height of foam, metres: how strongly its edges catch the sun. */
+  foamRelief: 0.06,
+  /** Camera distance by which the relief has faded out. */
+  foamReliefEnd: 160,
 
   // ── Surf: the travelling part ──────────────────────────────────────────────
   surfEnabled: true,
@@ -695,6 +799,7 @@ export function createOceanSurface({
   heightBase = 0,
   fft = null,
   envMap = null,
+  shadowNode = null,
 }) {
   /*
    * The scene's prefiltered environment. `scene.environment` is already a PMREM
@@ -703,6 +808,13 @@ export function createOceanSurface({
    * only resets its cached PMREM, so following a sky change costs no recompile.
    */
   let _envTexture = envMap ?? null;
+  /**
+   * The sun's shadow node (a CSMShadowNode in the editor), or null for none.
+   * Read when the colour graph is BUILT, so changing it rebuilds the material —
+   * see setShadowNode. Not a uniform on purpose: a dead cascade node left in a
+   * compiled graph keeps running its updateBefore on three r184.
+   */
+  let _sunShadowNode = shadowNode ?? null;
   /** Every PMREM tap in the graph (the reflection, and Snell's window from
    *  below) — setEnvMap has to repoint all of them. */
   const _envNodes = [];
@@ -717,6 +829,8 @@ export function createOceanSurface({
 
   u.time = uniform(0);
   u.waterY = uniform(D.seaLevel);
+  /** Metres per quad in the innermost clipmap ring; the host keeps it current. */
+  u.meshBaseCell = uniform(1);
 
   u.absorption = uniform(new THREE.Vector3(...D.absorption));
   u.absorptionScale = uniform(D.absorptionScale);
@@ -753,6 +867,10 @@ export function createOceanSurface({
   u.ssrEdgeFade = uniform(D.ssrEdgeFade);
   u.ssrEnd = uniform(D.ssrEnd);
 
+  u.shadowsEnabled = uniform(D.shadowsEnabled ? 1 : 0);
+  u.shadowBodyDarken = uniform(D.shadowBodyDarken);
+  u.shadowFoamDarken = uniform(D.shadowFoamDarken);
+
   u.sunDir = uniform(new THREE.Vector3(0.4, 0.55, 0.3).normalize());
   u.glintIntensity = uniform(D.glintIntensity);
   u.glintPower = uniform(D.glintPower);
@@ -782,7 +900,17 @@ export function createOceanSurface({
   u.whitecapIntensity = uniform(D.whitecapIntensity);
   u.whitecapThreshold = uniform(D.whitecapThreshold);
   u.whitecapSoftness = uniform(D.whitecapSoftness);
-  u.whitecapScale = uniform(D.whitecapScale);
+  u.whitecapCoreSharpness = uniform(D.whitecapCoreSharpness);
+  u.whitecapStreak = uniform(D.whitecapStreak);
+  u.whitecapStreakScale = uniform(D.whitecapStreakScale);
+  u.contactFoamEnabled = uniform(D.contactFoamEnabled ? 1 : 0);
+  u.contactFoamWidth = uniform(D.contactFoamWidth);
+  u.contactFoamIntensity = uniform(D.contactFoamIntensity);
+  u.contactFoamEnd = uniform(D.contactFoamEnd);
+  u.foamBubbles = uniform(D.foamBubbles);
+  u.foamBubbleScale = uniform(D.foamBubbleScale);
+  u.foamRelief = uniform(D.foamRelief);
+  u.foamReliefEnd = uniform(D.foamReliefEnd);
 
   u.surfEnabled = uniform(D.surfEnabled ? 1 : 0);
   u.surfHz = uniform(D.surfHz);
@@ -956,11 +1084,29 @@ export function createOceanSurface({
 
   // ── FFT helpers ────────────────────────────────────────────────────────────
 
-  function fftDispAt(xz, ampScale) {
+  /**
+   * Summed cascade displacement at a world XZ.
+   *
+   * `spacing` (metres between the samples that will reconstruct this — a
+   * vertex's grid cell) picks each cascade's mip so the grid never samples
+   * detail it cannot represent. Without it every cascade is read at mip 0,
+   * which is fine for a 128² swell but not for a 5 m cascade at 256²: its
+   * texels are 2 cm, the inner ring's vertices are 1 m apart, and point-
+   * sampling that makes vertices jump between unrelated values every sim tick
+   * — visible as crawling, sparkling geometry. The level puts one texel at
+   * roughly one cell; the fragment normals keep the detail the mesh drops.
+   * Omit it for single-point queries (the waterline on the lens).
+   */
+  function fftDispAt(xz, ampScale, spacing = null) {
     if (!fftCascades.length) return vec3(0);
     let sum = vec3(0);
     fftCascades.forEach((c, i) => {
-      sum = sum.add(texture(c.dispTex, xz.div(c.tileSize)).level(0).xyz.mul(ampForCascade(i)));
+      const tap = texture(c.dispTex, xz.div(c.tileSize));
+      const texelsPerMetre = (c.dispTex.image?.width ?? 128) / c.tileSize;
+      const level = spacing
+        ? log2(max(spacing.mul(texelsPerMetre), float(1)))
+        : float(0);
+      sum = sum.add(tap.level(level).xyz.mul(ampForCascade(i)));
     });
     return sum.mul(ampScale).mul(u.fftEnabled);
   }
@@ -1022,9 +1168,11 @@ export function createOceanSurface({
   function waterHeightAt(xz) {
     const sd = shoreAt(xz).x;
     const amp = ampScaleAt(xz).mul(shoalAt(sd));
-    const first = fftDispAt(xz, amp);
+    // Same mips the INNER clipmap ring reads — the camera is always inside it,
+    // so this is the surface the lens is actually crossing, not a finer one.
+    const first = fftDispAt(xz, amp, u.meshBaseCell);
     const back = xz.sub(vec2(first.x, first.z));
-    return u.waterY.add(fftDispAt(back, amp).y);
+    return u.waterY.add(fftDispAt(back, amp, u.meshBaseCell).y);
   }
 
   // ── Analytic sky ───────────────────────────────────────────────────────────
@@ -1080,7 +1228,9 @@ export function createOceanSurface({
 
     // Swell, faded by distance and shaped by the seabed.
     const amp = ampScaleAt(worldXZ).mul(shoalAt(sd)).toVar();
-    const disp = fftDispAt(worldXZ, amp).toVar();
+    // Effective vertex spacing: the ring's cell, doubling across the morph zone
+    // as vertices snap to the next-coarser grid.
+    const disp = fftDispAt(worldXZ, amp, cell.mul(morphK.add(1))).toVar();
 
     // Local Y is relative to the group, which sits at sea level.
     const waveY = disp.y.toVar();
@@ -1134,6 +1284,16 @@ export function createOceanSurface({
     const camDist = length(wXZ.sub(cameraPosition.xz)).toVar();
     const fragDist = positionView.z.negate().toVar();
     const viewDir = normalize(cameraPosition.sub(positionWorld)).toVar();
+
+    // ── Sun shadow: 1 lit, 0 in full shade ───────────────────────────────────
+    // Sampled here, ahead of every Discard and branch, so it is in uniform
+    // control flow whatever the shadow node's sampler turns out to need. The
+    // cascade node already renders its maps for the terrain; this only reads
+    // them at the water's own world position.
+    const sunLit = float(1).toVar();
+    if (_sunShadowNode) {
+      sunLit.assign(mix(float(1), nodeObject(_sunShadowNode).r, u.shadowsEnabled));
+    }
 
     // Where the water's edge is right now, and therefore what is wet.
     const surge = runupAt(wXZ).toVar();
@@ -1334,7 +1494,9 @@ export function createOceanSurface({
     // distance to shore, so it hugs the coast rather than following bathymetry.
     const turbid = float(1).sub(smoothstep(float(0), u.turbidityReach, max(sd, float(0))));
     const inscatter = u.inscatterTint.mul(u.inscatterStrength)
-      .add(u.turbidityTint.mul(u.turbidityStrength.mul(turbid)));
+      .add(u.turbidityTint.mul(u.turbidityStrength.mul(turbid)))
+      // Less sun into the water column in shade: the body dims, partly.
+      .mul(mix(float(1).sub(u.shadowBodyDarken), float(1), sunLit));
     const throughWater = mix(inscatter, screenColor, transmittance).toVar();
 
     // ── Fresnel (Schlick, F0 = 0.02) ─────────────────────────────────────────
@@ -1359,49 +1521,105 @@ export function createOceanSurface({
     const a2 = saturate(ggxAlpha.mul(ggxAlpha).add(kernelRough));
     const denom = NdotH.mul(NdotH).mul(a2.sub(1)).add(1);
     const specD = a2.mul(a2).div(denom.mul(denom));
-    body.addAssign(u.sunColor.mul(specD.mul(NdotL).mul(u.glintIntensity).mul(fresnelW.add(0.15))));
+    body.addAssign(u.sunColor.mul(specD.mul(NdotL).mul(u.glintIntensity).mul(fresnelW.add(0.15)))
+      .mul(sunLit));
 
     // ── Subsurface scatter on thin, backlit crests ───────────────────────────
     If(u.sssEnabled.greaterThan(0), () => {
       const thin = saturate(float(1).sub(jacobian));
       const lit = saturate(dot(worldN, u.sunDir).negate());
       const toward = saturate(dot(viewDir, u.sunDir.negate()));
-      const amount = lit.mul(toward).mul(float(1).add(thin.mul(2.5))).mul(u.sssIntensity);
+      const amount = lit.mul(toward).mul(float(1).add(thin.mul(2.5))).mul(u.sssIntensity).mul(sunLit);
       body.addAssign(u.sssColor.mul(amount));
     });
 
     // ═══ FOAM ════════════════════════════════════════════════════════════════
-    // Three contributions, all in metres along the ground:
-    //   crest — the breaking line, travelling shoreward
-    //   wake  — what the crest left behind, decaying until the next one
-    //   edge  — the permanent lace at the water's edge, which moves with it
-    // and one Worley field breaking all three up. The whole block is branched
-    // out beyond the surf zone, which offshore is almost the entire ocean.
+    /*
+     * ONE PATTERN, THREE SOURCES OF COVERAGE.
+     *
+     * Every foam on this sea is the same material — the domain-warped Voronoi
+     * FBM, eroded by a coverage-driven threshold — and only COVERAGE differs by
+     * where the foam comes from:
+     *
+     *   surf     — the travelling breaker, its wake, and the lace at the edge
+     *              (metres along the ground, from the shore field)
+     *   whitecap — open-sea crests folding over (the FFT's persistent fold
+     *              trail), streaked along the wind
+     *   contact  — water thinner than a hand's depth over ANY geometry: rocks
+     *              just under the surface, pier legs, hulls, a cliff foot —
+     *              read straight off the depth buffer, no authoring
+     *
+     * The whitecaps used to be their own single Voronoi octave with no warp.
+     * One octave cannot tear, so a high coverage filled whole cells: flat white
+     * shapes with smooth edges — the "paper cutout" blobs. Sharing the surf
+     * pattern gives them the same fractal edge, and the same erosion makes them
+     * age the same way: sheet → lace → flecks.
+     *
+     * All three coverages are cheap arithmetic up here; the pattern (the
+     * expensive part) runs once, in a branch, only where some coverage exists.
+     */
     const foam = float(0).toVar();
     const foamShade = float(1).toVar();
 
     // Falls off over most of the surf zone rather than sitting at full strength
-    // out to a cliff edge at `surfReach`. A plateau put an even sheet of foam
-    // across the whole zone the instant a crest passed; foam belongs densest at
-    // the shore and thinning seaward, with only the crest line reaching the
-    // outer edge.
+    // out to a cliff edge at `surfReach`: foam belongs densest at the shore and
+    // thinning seaward, with only the crest line reaching the outer edge.
     const surfBand = float(1).sub(smoothstep(u.surfReach.mul(0.22), u.surfReach, max(sd, float(0))));
     const nearEdge = float(1).sub(smoothstep(u.edgeWidth, u.edgeWidth.mul(3), abs(sdEff)));
     const foamWanted = max(surfBand.mul(u.surfEnabled), nearEdge).mul(u.foamEnabled).toVar();
 
+    const windDir = vec2(cos(u.windAngle), sin(u.windAngle)).toVar();
+
+    // ── Whitecap coverage ────────────────────────────────────────────────────
+    // `jacobian` is the FFT's persistent fold trail (it snaps down when a crest
+    // folds and recovers at `fftFoamDecay`), so this is a crest AND its wake.
+    // Gated on distance FROM SHORE, not on the surf band: waves steepen most as
+    // they shoal, so an ungated term fires hardest exactly where the surf model
+    // already draws foam and the two sum into an even white mat.
+    //
+    // SHAPED BY A POWER CURVE, and this is what makes it lace rather than a
+    // blob. Erosion only draws filaments where coverage sits mid-range; full
+    // coverage passes the whole pattern and draws a solid sheet. The surf gets
+    // that for free — only its crest LINE is full, the wide wake behind it is
+    // mid. A fold's coverage is a wide dome that is near-full over most of its
+    // area, so unshaped it eroded into solid white shapes. Raised to a power,
+    // only the fold's core reaches a sheet and the rest of the dome falls into
+    // the lace range.
+    const wcCover = pow(smoothstep(
+      u.whitecapThreshold, u.whitecapThreshold.add(u.whitecapSoftness),
+      saturate(float(1).sub(jacobian)),
+    ), max(u.whitecapCoreSharpness, float(0.1))).mul(u.whitecapIntensity)
+      .mul(smoothstep(u.surfReach, u.surfReach.mul(2.5), max(sd, float(0))))
+      .mul(u.whitecapEnabled)
+      .toVar();
+
+    // ── Contact coverage ─────────────────────────────────────────────────────
+    // `thickness` runs along the view ray; times the ray's steepness it is the
+    // VERTICAL depth of water over whatever the ray hits next. Shallower than
+    // `contactFoamWidth` = foam. That is a ring hugging every object that
+    // pierces the surface, and a skin over rocks just below it. Faded out with
+    // distance, where depth precision cannot tell a hand's depth from a metre.
+    const contactDepth = thickness.mul(max(abs(viewDir.y), float(0.05))).toVar();
+    // Square root: dense right against the object, thinning only near the
+    // band's outer edge. A linear ramp left most of the ring at mid coverage,
+    // which the erosion turns into a few specks.
+    const contactCover = sqrt(float(1).sub(smoothstep(float(0), max(u.contactFoamWidth, float(0.01)), contactDepth)))
+      .mul(float(1).sub(smoothstep(u.contactFoamEnd.mul(0.6), u.contactFoamEnd, fragDist)))
+      // A slow surge, so the ring breathes instead of sitting painted on.
+      .mul(sin(u.time.mul(1.7).add(dot(wXZ, windDir).mul(0.35))).mul(0.2).add(0.8))
+      .mul(u.contactFoamIntensity).mul(u.contactFoamEnabled)
+      .toVar();
+
+    const anyFoam = max(foamWanted, max(wcCover, contactCover)).toVar();
+
     /*
      * How many metres of ground one pixel covers here, measured rather than
-     * guessed. This is the number the foam LOD needs, and it has to be taken
-     * OUT HERE: WGSL only allows derivatives under uniform control flow, and
-     * the foam block below is branched on a per-fragment value. Same rule that
-     * keeps mipmapped textureSample out of these branches — and it fails the
-     * same silent way, so it is worth the hoist even though the value is only
-     * used inside.
+     * guessed — the number the pattern LOD needs. Taken OUT HERE because WGSL
+     * only allows derivatives under uniform control flow and the pattern below
+     * is branched on a per-fragment value.
      *
-     * `foamLod` is then the octave index at which a Voronoi cell has shrunk to
-     * `foamLodPixels` pixels: octave k has cells 1/(scale·2^k) metres across,
-     * so the octave that reaches the limit is log2 of the ratio between the
-     * base cell size and the pixel footprint.
+     * `foamLod` is the octave index at which a Voronoi cell has shrunk to
+     * `foamLodPixels` pixels: octave k has cells 1/(scale·2^k) metres across.
      */
     const mPerPx = max(fwidth(wXZ.x), fwidth(wXZ.y)).toVar();
     const baseCellM = float(1).div(max(u.foamNoiseScale, float(1e-4)));
@@ -1409,139 +1627,52 @@ export function createOceanSurface({
       max(baseCellM.div(max(mPerPx.mul(u.foamLodPixels), float(1e-5))), float(1)),
     ).toVar();
 
-    If(foamWanted.greaterThan(0.002), () => {
+    If(anyFoam.greaterThan(0.002), () => {
       // Steep bed → plunging breaker: a tight, bright line that dies fast.
-      // Shallow bed → spilling: wide, soft, long-lived. One number from the
-      // shore field, and the coast stops looking uniform.
+      // Shallow bed → spilling: wide, soft, long-lived.
       const steep = saturate(slope.mul(u.slopeGain)).toVar();
       const sharp = mix(u.crestSharpness.mul(0.45), u.crestSharpness, steep);
       const decay = mix(u.foamDecay.mul(0.6), u.foamDecay, steep);
 
-      // ── Domain-warped Voronoi FBM ─────────────────────────────────────────
-      // The classic, and the reason it works: a plain Voronoi is visibly a grid
-      // of cells, and no amount of octaves hides the regularity. Pushing the
-      // lookup around with a value-noise FBM first destroys the grid and leaves a
-      // ragged, organic web — that warp is doing as much for the look as the
-      // Voronoi is. `foamDrift` scrolls it offshore, in the shore field's own
-      // direction, so the backwash pulls correctly in every bay.
       /*
-       * Advected along the WIND, which is one constant vector for the whole
-       * ocean, not along `offDir`.
-       *
-       * Drifting along the offshore direction sounds better and is the second
-       * version of the same bug as the rotating frame above. `offDir` varies
-       * per fragment, so `offDir · t` is a displacement whose DIRECTION varies
-       * across the surface and whose magnitude grows without bound — after a
-       * minute neighbouring fragments are sampling points tens of metres apart
-       * in different directions, which shears the noise into layered contour
-       * striations that get worse the longer you watch. A constant vector is a
-       * pure translation and cannot distort anything.
-       *
-       * The shoreward motion that actually reads is not the texture sliding
-       * anyway: it is `surfPhase` moving COVERAGE, which is smooth in `sd` and
-       * already correct in every bay.
+       * ── THE PATTERN ───────────────────────────────────────────────────────
+       * Domain-warped Worley FBM in PLAIN WORLD SPACE, advected along the WIND
+       * (one constant vector: a pure translation, which cannot shear the noise
+       * the way a per-fragment offshore direction did), contrast, then the soft
+       * threshold below. What matters, each learned the hard way:
+       *  - five octaves, because foam's edge is fractal down to the pixel;
+       *  - a high-frequency WEAK warp (3.0 / 0.6) that jitters cells, not a
+       *    strong low one that bends boundaries into fingerprints;
+       *  - a real threshold shoulder, or thin foam is absent instead of thin.
        */
-      const windDir = vec2(cos(u.windAngle), sin(u.windAngle)).toVar();
       const drift = windDir.mul(u.time.mul(u.foamDrift));
-
-      /*
-       * Sampled in PLAIN WORLD SPACE. Rotating the coordinate into the shore
-       * field's own frame to squash the cells across the beach was tried and is
-       * wrong: `offDir` turns from fragment to fragment, so the noise frame
-       * turns with it, and a noise field whose frame rotates is no longer a
-       * smooth function of position. It whorls. The top-down view filled with
-       * concentric contour rings centred wherever the offshore direction swung
-       * — wood grain, not water.
-       *
-       * Anisotropy has to come from something that varies smoothly. Translation
-       * does (`foamDrift` below, and the macro field's along-shore drift); a
-       * per-fragment rotation does not, and no amount of tuning fixes a
-       * coordinate that is discontinuous in the first place.
-       */
       const base = wXZ.add(drift).mul(u.foamNoiseScale).toVar();
-
       const warpP = base.mul(u.foamWarpScale);
       const warp = vec2(_warpFbm(warpP).sub(0.5), _warpFbm(warpP.add(vec2(4, 4))).sub(0.5));
       const wp = base.add(warp.mul(u.foamWarpStrength)).toVar();
-
-      /*
-       * ── THE PATTERN ───────────────────────────────────────────────────────
-       * Domain-warped Worley FBM, contrast, then a SOFT threshold. Ported from
-       * a reference implementation of this exact effect rather than rederived,
-       * after several rounds of rederiving it badly.
-       *
-       * Three things matter and all three had been wrong:
-       *
-       *  - OCTAVES. Five. Foam's edge is fractal, and an edge is only fractal if
-       *    there is structure at every scale down to the pixel. At two octaves
-       *    the field is smooth blobs and no threshold recovers detail that was
-       *    never generated.
-       *
-       *  - THE WARP IS HIGH FREQUENCY AND WEAK (scale 3.0, strength 0.6). It
-       *    jitters individual cells. The old low-frequency strong warp (0.5,
-       *    1.0) displaced whole regions coherently, which bends the cell
-       *    boundaries into long parallel curves — the fingerprint pattern.
-       *
-       *  - THE THRESHOLD HAS A REAL SHOULDER (~0.18 wide). A near-binary cut
-       *    turns any field, however good, into flat shapes with drawn edges.
-       *    The shoulder is what lets thin foam be thin instead of absent.
-       *
-       * Not inverted. The earlier note claiming the inverted form was needed for
-       * connected sheets was solving a problem that only existed because there
-       * were too few octaves.
-       */
       const nRaw = _worleyFbmLod(wp, u.foamJitter, foamLod).toVar();
       const shaped = pow(saturate(nRaw.mul(u.foamGain)), u.foamContrast).toVar();
 
       const detFade = float(1).sub(smoothstep(u.foamDetailNear, u.foamDetailFar, camDist)).toVar();
 
+      // ── Surf coverage ─────────────────────────────────────────────────────
       const ph = surfPhase(wXZ, sd).toVar();
       const age = fract(ph).toVar();
-
-      // Crest: a thin bright arc where the phase peaks.
       const crest = pow(saturate(sin(ph.mul(float(TWO_PI)))), sharp)
         .mul(u.crestIntensity).mul(surfBand).mul(u.surfEnabled).toVar();
-
-      // Wake: laid down as the crest passes, decaying over the rest of the cycle.
       const wake = pow(saturate(float(1).sub(age)), decay)
         .mul(u.foamWakeIntensity).mul(surfBand).mul(u.surfEnabled);
-
-      // Edge lace at the moving waterline.
       const edge = nearEdge.mul(u.edgeIntensity);
+      const surfCover = max(crest, max(wake, edge)).mul(u.foamEnabled);
 
-      // ── EROSION, not fading ───────────────────────────────────────────────
-      // Coverage does not scale the foam's brightness — it drives a THRESHOLD.
-      // Full coverage passes almost the whole field (a solid sheet at the
-      // breaking crest); as the wake ages and coverage drops, the threshold
-      // climbs and only the densest cores survive, so the sheet breaks up into
-      // filaments and then into scattered flecks before it goes.
-      //
-      // That is what foam actually does, and it is the difference between foam
-      // and a white shape getting more transparent. Same mechanism as the drift
-      // smoke's rising erosion threshold.
       /*
        * ── THE MACRO FIELD ──────────────────────────────────────────────────
-       * A single Voronoi octave at ~33 m, drifting along the shore, folded into
-       * COVERAGE before the threshold is taken. It is deliberately not part of
-       * the pattern above: mixing it into the texture would only have made the
-       * static coarser. Driving coverage instead means a low-macro patch does
-       * not get dimmer foam, it gets foam torn open with holes in it and then
-       * none at all — which is how a spent sheet actually leaves the water.
-       *
-       * This is the scale the whole band was missing. Everything else here
-       * lives under 2 m, so at any real viewing distance it averaged to one
-       * even ribbon; a 33 m term is what gives sheets, gaps, and the sense that
-       * a set broke HERE and not twenty metres along.
-       *
-       * Inverted (1 - F1) so cell interiors are the dense sheets and the cell
-       * boundaries are the tears between them, which is the way round that puts
-       * the gaps in a connected network rather than isolating the foam.
+       * One warped Voronoi octave at ~33 m drifting on the wind, folded into
+       * COVERAGE rather than into the pattern: a low-macro patch does not get
+       * dimmer foam, it gets foam torn open and then none. It is the scale that
+       * gives sheets and gaps instead of one even ribbon, and it now breaks the
+       * whitecaps up the same way — a sea does not foam uniformly either.
        */
-      // Warped like everything else. Unwarped, a single Voronoi octave this
-      // large reads as exactly what it is — round holes with clean circular
-      // edges punched out of the band — and the eye finds a circle instantly.
-      // Along the wind for the same reason as the sheet field: a per-fragment
-      // drift direction is not a translation, it is a shear that grows with time.
       const macroBase = wXZ.add(windDir.mul(u.time.mul(u.foamMacroDrift))).mul(u.foamMacroScale);
       const macroWarp = vec2(
         _warpFbm(macroBase.mul(1.9)).sub(0.5),
@@ -1549,91 +1680,108 @@ export function createOceanSurface({
       );
       const macroP = macroBase.add(macroWarp.mul(0.75)).toVar();
       const macroRaw = float(1).sub(_worleyF1(macroP, u.foamJitter)).toVar();
-      // Recentred on its own mean so `foamMacroAmt` fades toward "no modulation"
-      // rather than toward "everything is dimmer".
       const macro = saturate(macroRaw.sub(0.35).mul(1.7).add(0.5)).toVar();
       const macroMod = mix(float(1), macro, u.foamMacroAmt).toVar();
 
-      const cover = saturate(max(crest, max(wake, edge)).mul(macroMod)).toVar();
+      /*
+       * ── WIND STREAKS ─────────────────────────────────────────────────────
+       * Whitecap foam is dragged downwind into long streaks. A value noise in
+       * the WIND's frame — long along it, tight across it — modulates whitecap
+       * coverage. The frame is one constant rotation for the whole sea, so the
+       * field stays smooth (unlike a per-fragment frame, which whorls).
+       */
+      const along = dot(wXZ, windDir);
+      const across = dot(wXZ, vec2(windDir.y.negate(), windDir.x));
+      const sq = vec2(
+        along.mul(u.whitecapStreakScale.mul(0.12)).sub(u.time.mul(0.05)),
+        across.mul(u.whitecapStreakScale),
+      );
+      const streak = _vnoise2(sq).mul(0.65).add(_vnoise2(sq.mul(2.3).add(vec2(17, 3))).mul(0.35));
+      const streakMod = mix(float(1), saturate(streak.mul(1.8).sub(0.25)), u.whitecapStreak);
+
+      const cover = saturate(max(
+        surfCover.mul(macroMod),
+        max(wcCover.mul(macroMod).mul(streakMod), contactCover),
+      )).toVar();
 
       /*
        * ── EROSION, not fading ───────────────────────────────────────────────
-       * Coverage does not scale the foam's brightness — it drives the
-       * THRESHOLD. Full coverage passes most of the field (a sheet at the
-       * breaking crest); as the wake ages and coverage drops, the threshold
-       * climbs and only the densest cores survive, so the sheet breaks into
-       * filaments and then into flecks before it goes. That is what foam does,
-       * and it is the difference between foam and a white shape fading out.
-       *
-       * `foamTransition` is the shoulder width, and it earns its keep now: the
-       * smoothstep is the only thing making thin foam translucent instead of
-       * simply absent.
+       * Coverage drives the THRESHOLD, not the brightness. Full coverage passes
+       * most of the field (a sheet); as coverage drops the threshold climbs and
+       * only the densest cores survive, so foam breaks into filaments and then
+       * flecks before it goes — whichever source laid it down.
        */
       const thr = mix(float(0.985), u.foamCutoff, pow(cover, u.foamErode)).toVar();
       const eroded = smoothstep(thr, thr.add(max(u.foamTransition, float(0.01))), shaped).toVar();
 
-      // ── Distance: stop resolving detail, start averaging ──────────────────
-      // Past a few tens of metres a Voronoi cell is smaller than a pixel, and
-      // resolving a field you cannot sample is how procedural foam turns into
-      // crawling sparkle. The per-octave LOD above handles most of this; these
-      // two only catch the far horizon, where what is actually wanted is the
-      // area average of the eroded field — and `cover` is already that number.
+      /*
+       * ── BUBBLES ──────────────────────────────────────────────────────────
+       * The pattern's octaves halve in weight, so below about a metre it has
+       * almost no structure left: seen from a few metres, a whitecap or a
+       * patch of surf is a smooth solid shape. What real foam has at that
+       * scale is bubbles — dark holes, tens of centimetres across, that grow
+       * as the foam thins until only their rims are left.
+       *
+       * One small Voronoi octave: F1 is ~0 at a cell's centre, so a threshold
+       * on it punches a hole there and keeps the rim. The hole radius follows
+       * coverage — tiny in a fresh sheet, wide in old foam — so foam ages into
+       * bubbly lace instead of merely shrinking. Faded out once a bubble is
+       * under ~3 px, which is also what leaves the far foam exactly as it was.
+       */
+      // Bubbles grow as coverage falls: pinholes in a fresh sheet, merged gaps
+      // in old foam. Two sizes at unrelated scales so the spacing never reads
+      // as a grid.
+      const grow = float(1).sub(cover).mul(0.8).add(0.2);
+      const bubbleP = wXZ.add(drift).mul(u.foamBubbleScale).add(warp.mul(0.8)).toVar();
+      const bigB = _bubbleSdf(bubbleP, grow.mul(0.05), grow.mul(0.42));
+      const smallB = _bubbleSdf(bubbleP.mul(2.37).add(vec2(5.1, 9.7)), grow.mul(0.0), grow.mul(0.3));
+      const inBubble = min(bigB, smallB.mul(0.42));      // small field in big-cell units
+      const holes = smoothstep(float(-0.02), float(0.06), inBubble);
+      const bubbleVisible = saturate(float(1.5).sub(mPerPx.mul(u.foamBubbleScale).mul(3)));
+      eroded.mulAssign(mix(float(1), holes, bubbleVisible.mul(u.foamBubbles)));
+
+      // Past resolvable detail, converge on the eroded field's area average,
+      // which `cover` already is.
       foam.assign(saturate(mix(cover.mul(u.foamFarDensity), eroded, detFade)));
 
-      // Foam is not one flat white. Thin lace lets a little water through and
-      // sits in its own shadow; the dense cores are the only part that is paper
-      // white. Driven by DENSITY now, so the shading follows the same soft
-      // gradient the coverage does instead of being keyed to the raw pattern.
+      // Thin lace lets water through and sits in its own shadow; only the dense
+      // cores are paper white.
       foamShade.assign(mix(float(0.7), float(1.0), saturate(eroded.mul(1.15).add(0.1))));
     });
 
-    // ── Whitecaps out at sea, from the FFT's own crest pinching ──────────────
-    // Two things this needs that the raw Jacobian threshold did not have.
-    //
-    // It must NOT reach into the surf zone. The Jacobian goes low wherever waves
-    // steepen, and waves steepen most as they shoal — so an ungated whitecap term
-    // fires hardest exactly where the surf model is already drawing foam, and the
-    // two sum into an even white mat over the whole nearshore.
-    //
-    // And it must have STRUCTURE. `smoothstep` of a smooth field is smooth blobs;
-    // at a distance a field of those reads as uniform speckle, which is what it
-    // looked like. One Voronoi octave (9 hashes — a quarter of what the surf foam
-    // spends) breaks them into crests with torn edges.
-    // Safe to branch: `jacobian` was read above, so nothing here touches a texture.
-    If(u.whitecapEnabled.greaterThan(0), () => {
-      const cover = smoothstep(
-        u.whitecapThreshold, u.whitecapThreshold.add(u.whitecapSoftness),
-        saturate(float(1).sub(jacobian)),
-      // Gated on DISTANCE FROM SHORE, not on `surfBand`. Keying it to the band
-      // looks equivalent and is not: the band has already decayed to near zero a
-      // few metres out, so the gate opens right where shoaling drives the
-      // Jacobian lowest and the whitecaps simply replace the surf foam. Whitecaps
-      // belong to open water, and open water starts past the surf zone.
-      ).mul(u.whitecapIntensity)
-        .mul(smoothstep(u.surfReach, u.surfReach.mul(2.5), max(sd, float(0))))
-        .toVar();
+    /*
+     * ── FOAM RELIEF ──────────────────────────────────────────────────────────
+     * Foam is a layer of bubbles standing proud of the water, and its edges
+     * catch the sun. Treat the finished foam amount as a height and bump the
+     * normal with its screen-space derivatives (Mikkelsen's surface gradient):
+     * free — no second evaluation of the pattern — and exactly as detailed as
+     * the pattern on screen.
+     *
+     * Out HERE, after the branch closes, because derivatives need uniform
+     * control flow; `foam` is only a value by now. Faded with distance: past a
+     * pixel's worth of pattern the derivatives are noise, not relief.
+     */
+    const reliefFade = float(1).sub(smoothstep(u.foamReliefEnd.mul(0.5), u.foamReliefEnd, camDist));
+    const foamH = foam.mul(u.foamRelief).mul(reliefFade).toVar();
+    const dpdxW = dFdx(positionWorld).toVar();
+    const dpdyW = dFdy(positionWorld).toVar();
+    const dhdx = dFdx(foamH);
+    const dhdy = dFdy(foamH);
+    const r1 = cross(dpdyW, worldN);
+    const r2 = cross(worldN, dpdxW);
+    const det = dot(dpdxW, r1);
+    const surfGrad = r1.mul(dhdx).add(r2.mul(dhdy)).mul(sign(det));
+    const foamN = normalize(worldN.mul(abs(det)).sub(surfGrad)).toVar();
 
-      If(cover.greaterThan(0.003), () => {
-        const p = wXZ.mul(u.whitecapScale).add(
-          vec2(cos(u.windAngle), sin(u.windAngle)).mul(u.time.mul(0.4)),
-        );
-        const n = float(1).sub(_worleyF1(p, u.foamJitter)).mul(u.foamGain);
-        // Same erosion contract as the surf foam: coverage sets a threshold.
-        const t = mix(float(0.97), u.foamCutoff, pow(cover, u.foamErode));
-        foam.assign(saturate(max(foam, smoothstep(t, t.add(u.foamTransition), n))));
-      });
-    });
-
-    // Foam is LIT, not a flat white decal. It is a dense scattering medium, so it
-    // has no specular to speak of, but it very much has a light side and a shaded
-    // side — and a constant white is the last thing keeping this reading as paint
-    // rather than as a surface. A wrapped diffuse term (half-Lambert) is the
-    // right shape: foam scatters so much that even the side facing away from the
-    // sun is far from black.
-    const foamLit = saturate(dot(worldN, u.sunDir).mul(0.5).add(0.5));
+    // Foam is LIT, not a flat white decal: a dense scattering medium with a
+    // light side and a shaded side. Wrapped diffuse (half-Lambert), because it
+    // scatters so much that even the side facing away from the sun is far from
+    // black — on the bumped normal, so the relief reads.
+    const foamLit = saturate(dot(foamN, u.sunDir).mul(0.5).add(0.5));
     const foamCol = u.foamColor
       .mul(foamShade)
-      .mul(mix(float(1), u.sunColor.mul(mix(float(0.62), float(1.15), foamLit)), u.foamSunLit));
+      .mul(mix(float(1), u.sunColor.mul(mix(float(0.62), float(1.15), foamLit)), u.foamSunLit))
+      .mul(mix(float(1).sub(u.shadowFoamDarken), float(1), sunLit));
     const withFoam = mix(body, foamCol, foam).toVar();
 
     // ── Wet sand behind the backwash ─────────────────────────────────────────
@@ -1641,7 +1789,7 @@ export function createOceanSurface({
     // transparent, darkening what it lies on and adding a low gloss. It is the
     // cheapest part of this file and does more for the coast than anything but
     // the run-up itself.
-    const wetSheen = u.sunColor.mul(specD.mul(u.wetGloss));
+    const wetSheen = u.sunColor.mul(specD.mul(u.wetGloss)).mul(sunLit);
     const wetLook = mix(screenColor.mul(float(1).sub(u.wetDarken.mul(0.6))).add(wetSheen),
       withFoam, saturate(foam.add(0.15)));
     const shaded = mix(withFoam, wetLook, isWetSand.mul(float(1).sub(wetT))).toVar();
@@ -1676,12 +1824,16 @@ export function createOceanSurface({
      * oceanUnderwater.js hazes every pixel by its distance afterwards, the
      * surface included, so doing it twice would bury the window.
      *
-     * Back faces only, AND only with the camera near the water: chop can fold a
-     * sliver of back face into view from above, and that sliver must not light
-     * up as a window.
+     * Back faces only, AND only where this bit of surface is ABOVE the camera.
+     * Choppy waves fold their crests over, so from above the water you do see
+     * back faces — on every steep crest in a rough sea. Gating on "camera within
+     * a few metres of sea level" (the first version) let those folds light up
+     * as bright sky discs whenever the camera was low, which in a storm meant
+     * large flat white shapes on every wave. A fold seen from above is below
+     * the camera; the underside of the sea seen from beneath is above it.
      */
     const below = step(faceDirection, float(0))
-      .mul(step(cameraPosition.y, u.waterY.add(u.uwActiveBand))).toVar();
+      .mul(step(cameraPosition.y, positionWorld.y)).toVar();
 
     const nDown = worldN.negate().toVar();
     const rayUp = viewDir.negate().toVar();            // camera → surface
@@ -1710,7 +1862,7 @@ export function createOceanSurface({
     const sunCos = saturate(dot(transDir, u.sunDir));
     const sunThrough = u.sunColor.mul(
       pow(sunCos, float(1200)).mul(6).add(pow(sunCos, float(40)).mul(0.25)),
-    ).mul(u.glintIntensity).mul(float(1).sub(tir));
+    ).mul(u.glintIntensity).mul(float(1).sub(tir)).mul(sunLit);
 
     // The mirror half: radiance of the water column looking DOWN from the
     // surface — the same closed form oceanUnderwater.js integrates, at depth 0
@@ -1750,7 +1902,10 @@ export function createOceanSurface({
     "glintSpread", "sssIntensity", "fftSwellAmp", "fftRippleAmp", "fftNormalStrength",
     "dispFadeStart", "dispFadeEnd", "fftEnd", "shoalDistance", "shoalPeak",
     "normalTiling", "normalStrength", "normalFlowSpeed", "detailEnd",
-    "whitecapIntensity", "whitecapThreshold", "whitecapSoftness", "whitecapScale",
+    "whitecapIntensity", "whitecapThreshold", "whitecapSoftness",
+    "whitecapStreak", "whitecapStreakScale", "whitecapCoreSharpness",
+    "contactFoamWidth", "contactFoamIntensity", "contactFoamEnd", "foamRelief", "foamReliefEnd",
+    "foamBubbles", "foamBubbleScale",
     "surfHz", "surfLength", "surfReach", "surfAlongShore", "crestSharpness",
     "crestIntensity", "foamDecay", "foamWakeIntensity", "slopeGain",
     "runupReach", "runupRush", "runupShape", "runupMaxSlope", "filmThickness",
@@ -1765,10 +1920,12 @@ export function createOceanSurface({
     "uwLineWidth", "uwLineDarken", "uwLineDistort",
     "uwSnowSize", "uwSnowIntensity", "uwSnowBox",
     "uwShaftIntensity", "uwShaftDistance", "uwShaftScale", "uwShaftSharpness", "uwShaftSpeed",
+    "shadowBodyDarken", "shadowFoamDarken",
   ];
   const BOOL_KEYS = [
     "fftEnabled", "sssEnabled", "whitecapEnabled", "surfEnabled",
-    "runupEnabled", "foamEnabled", "ssrEnabled", "uwShaftsEnabled",
+    "runupEnabled", "foamEnabled", "ssrEnabled", "uwShaftsEnabled", "shadowsEnabled",
+    "contactFoamEnabled",
   ];
   const COLOR_KEYS = [
     "inscatterTint", "turbidityTint", "skyZenithColor", "skyHorizonColor",
@@ -1801,6 +1958,21 @@ export function createOceanSurface({
     helpers: { waterHeightAt, shoreAt, terrainYAt },
     syncParams,
     update(dt, elapsed) { u.time.value = elapsed; },
+    /**
+     * Receive the sun's shadow: its shadow node (the editor's CSMShadowNode, or
+     * a light's `shadow.shadowNode`), or null for none. Rebuilds the colour
+     * graph — one pipeline compile — so call it when the node CHANGES (shadows
+     * toggled), not per frame; it no-ops when handed the node it already has.
+     */
+    setShadowNode(node) {
+      const next = node ?? null;
+      if (next === _sunShadowNode) return;
+      _sunShadowNode = next;
+      const f = oceanColor();
+      material.colorNode = f.rgb;
+      material.opacityNode = f.a;
+      material.needsUpdate = true;
+    },
     setSunDir(v) { if (v) u.sunDir.value.copy(v).normalize(); },
     /** Host-supplied sky, so the reflection matches the sky actually in frame. */
     setSky({ zenith, horizon, sun } = {}) {

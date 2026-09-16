@@ -488,10 +488,41 @@ export function createOceanFFTGPUSimulation(opts = {}) {
   const mode = cfg.spectrumMode ?? "zelda";
   // Horvath state (mutable so the wind sliders can re-derive the param sets).
   const hv = structuredClone({ ...HORVATH_DEFAULTS, ...(cfg.horvath || {}) });
+  /** Swell direction relative to the wind, so turning the wind turns both. */
+  let swellOffsetDeg = hv.swell.windDirection - hv.local.windDirection;
   const deriveHv = () => {
     hv._local = hvParamSet(hv.local, GRAVITY);
     hv._swell = hvParamSet(hv.swell, GRAVITY);
   };
+  /**
+   * Sea-state knobs in physical units (horvath only). Returns true when the
+   * spectrum has to be rebaked. The same keys work at construction and in
+   * syncParams, so a host never bakes the Poseidon storm defaults first.
+   *
+   *   seaFetchKm          km of water the wind has blown over. Wave height
+   *                       grows with √fetch: 3 km ≈ 0.8 m, 100 km ≈ 5.5 m at
+   *                       14 m/s. THE calm-coast ↔ open-ocean control.
+   *   swellStrength       energy scale of the distant swell (height ∝ √it)
+   *   swellWindSpeed      wind that raised the swell far away — sets its
+   *                       wavelength (6 m/s over 300 km ≈ 84 m crests)
+   *   swellAngleOffsetDeg swell direction relative to the local wind
+   *   seaDepthM           water depth for the TMA correction — shallow water
+   *                       shortens and steepens the long waves
+   */
+  const applyHv = (p) => {
+    let changed = false;
+    if (p.windSpeed != null) { hv.local.windSpeed = p.windSpeed; changed = true; }
+    if (p.windAngleDeg != null) { hv.local.windDirection = p.windAngleDeg; changed = true; }
+    if (p.jonswapGamma != null) { hv.local.peakEnhancement = p.jonswapGamma; changed = true; }
+    if (p.seaFetchKm != null) { hv.local.fetch = Math.max(0.05, p.seaFetchKm) * 1000; changed = true; }
+    if (p.swellStrength != null) { hv.swell.scale = Math.max(0, p.swellStrength); changed = true; }
+    if (p.swellWindSpeed != null) { hv.swell.windSpeed = Math.max(0.5, p.swellWindSpeed); changed = true; }
+    if (p.swellAngleOffsetDeg != null) { swellOffsetDeg = p.swellAngleOffsetDeg; changed = true; }
+    if (p.seaDepthM != null) { hv.depth = Math.max(1, p.seaDepthM); changed = true; }
+    hv.swell.windDirection = hv.local.windDirection + swellOffsetDeg;
+    return changed;
+  };
+  applyHv(cfg);
   deriveHv();
 
   let cascades;
@@ -590,18 +621,11 @@ export function createOceanFFTGPUSimulation(opts = {}) {
 
     syncParams(p) {
       if (!p) return;
-      let rebuild = false;
-      if (p.windSpeed != null) {
-        windSpeed = p.windSpeed;
-        hv.local.windSpeed = p.windSpeed; // horvath: wind slider drives the local sea
-        rebuild = true;
-      }
-      if (p.windAngleDeg != null) {
-        windDirRad = p.windAngleDeg * (Math.PI / 180);
-        hv.local.windDirection = p.windAngleDeg;
-        rebuild = true;
-      }
-      if (p.jonswapGamma != null) { gamma = p.jonswapGamma; hv.local.peakEnhancement = p.jonswapGamma; rebuild = true; }
+      // horvath: the wind sliders drive the local sea, plus the sea-state knobs.
+      let rebuild = applyHv(p);
+      if (p.windSpeed != null) windSpeed = p.windSpeed;
+      if (p.windAngleDeg != null) windDirRad = p.windAngleDeg * (Math.PI / 180);
+      if (p.jonswapGamma != null) gamma = p.jonswapGamma;
       if (p.windSpreadPow != null) { spreadPow = p.windSpreadPow; rebuild = true; }
       if (mode === "zelda") {
         if (p.fftSwellAmp != null) { swell.amp = p.fftSwellAmp; swell.uAmp.value = p.fftSwellAmp; }

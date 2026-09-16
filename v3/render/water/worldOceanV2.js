@@ -21,15 +21,21 @@
  *    (This is the same lesson the terrain clipmap already learned. It matters
  *    more in the racing game than in the editor: that game counts draws.)
  *
- * 2. THE SPECTRUM IS OPT-IN TO HORVATH.
- *    `ocean-fft-gpu.js` has shipped two spectra for a while. The old ocean has
- *    only ever asked for `"zelda"` — two cascades, JONSWAP + Phillips. The other,
- *    `"horvath"`, is the Poseidon open-ocean model: three cascades on disjoint
- *    wavenumber bands, fetch-based JONSWAP with a TMA depth correction and
- *    Donelan-Banner spreading. It is strictly the better sea and it was sitting
- *    there unused. It is not the default here only because that file warns it has
- *    no CPU mirror, so anything sampling wave height on the CPU for buoyancy
- *    would be wrong — there are no boats in this game, but the flag stays honest.
+ * 2. HORVATH, THREE CASCADES, 256².
+ *    `ocean-fft-gpu.js` ships two spectra. `"zelda"` is two cascades (512 m and
+ *    48 m) at 128²: one sample every 4 m on the swell, and NOTHING between 48 m
+ *    and 512 m — which is exactly the band that makes open water read as sea
+ *    rather than swell with ripples painted on. `"horvath"` is the Poseidon
+ *    open-ocean model: 250 / 17 / 5 m on disjoint wavenumber bands, fetch-based
+ *    JONSWAP with a TMA depth correction and Donelan-Banner spreading.
+ *
+ *    Its one drawback — no CPU mirror, so CPU buoyancy would be wrong — costs
+ *    nothing here: nothing in v3 or the games samples wave height on the CPU.
+ *    The classic ocean keeps zelda; this is a host default, not the module's.
+ *
+ *    256² is where every production sea starts. The FFT is compute at the
+ *    throttled `fftUpdateHz`, not per frame; see the measurement in the ocean
+ *    notes before changing it.
  *
  * 3. THE SHORE FIELD IS OWNED HERE.
  *    Rebaked when the terrain or the sea level changes, never per frame. See
@@ -58,8 +64,11 @@ export const OCEAN2_LOD_DEFAULTS = {
   /** Multiple of the base clipmap extent the sea must still reach. */
   horizonScale: 6.0,
   fftUpdateHz: 30,
-  /** "zelda" (2 cascades, CPU-mirrored) or "horvath" (3 cascades, better sea). */
-  spectrumMode: "zelda",
+  /** "horvath" (3 cascades, 250/17/5 m) or "zelda" (2 cascades, 512/48 m).
+   *  Build-time: it sets how many cascades the shader samples. */
+  spectrumMode: "horvath",
+  /** FFT grid per cascade, power of two. Build-time. */
+  fftSize: 256,
 };
 
 /**
@@ -188,14 +197,58 @@ export function createWorldOceanV2({
   normalMap = null,
   lod = {},
   envMap = null,
+  params = null,
+  shadowNode = null,
 }) {
   const lodCfg = { ...OCEAN2_LOD_DEFAULTS, ...lod };
+
+  /*
+   * The spectrum is baked on the CPU — ~200 ms at 256² × 3 cascades, measured —
+   * so it is built ONCE with this ocean's own sea state (not the module's storm
+   * defaults, which would be baked and then thrown away), and later changes are
+   * coalesced: a wind-slider drag fires syncParams on every pointer move, and a
+   * 200 ms stall per move is not a slider. Only a real change rebakes.
+   */
+  const SPECTRUM_KEYS = [
+    "windSpeed", "windAngleDeg", "jonswapGamma", "windSpreadPow", "fftSeed",
+    "seaFetchKm", "swellStrength", "swellWindSpeed", "swellAngleOffsetDeg", "seaDepthM",
+  ];
+  const _spectrum = {};
+  for (const k of SPECTRUM_KEYS) {
+    const v = params?.[k] ?? OCEAN2_DEFAULTS[k] ?? OCEAN_FFT_GPU_DEFAULTS[k];
+    if (v != null) _spectrum[k] = v;
+  }
+  let _bakedSpectrum = JSON.stringify(_spectrum);
+  let _spectrumTimer = 0;
 
   const fft = createOceanFFTGPUSimulation({
     renderer,
     ...OCEAN_FFT_GPU_DEFAULTS,
+    ..._spectrum,
+    seed: _spectrum.fftSeed,
     spectrumMode: lodCfg.spectrumMode,
+    size: lodCfg.fftSize,
   });
+
+  /** Split spectrum keys out of `p`; schedule one rebake if they moved. */
+  function syncSpectrum(p) {
+    const rest = { ...p };
+    for (const k of SPECTRUM_KEYS) {
+      if (p[k] == null) continue;
+      _spectrum[k] = p[k];
+      delete rest[k];
+    }
+    const sig = JSON.stringify(_spectrum);
+    if (sig !== _bakedSpectrum) {
+      clearTimeout(_spectrumTimer);
+      _spectrumTimer = setTimeout(() => {
+        _spectrumTimer = 0;
+        _bakedSpectrum = JSON.stringify(_spectrum);
+        fft.syncParams({ ..._spectrum });
+      }, 150);
+    }
+    return rest;
+  }
 
   const shoreField = createShorelineField({
     size: heightmapSize,
@@ -213,6 +266,7 @@ export function createWorldOceanV2({
     heightBase,
     fft,
     envMap,
+    shadowNode,
   });
 
   const group = new THREE.Group();
@@ -275,7 +329,10 @@ export function createWorldOceanV2({
   let snapStep = 2;
   let lodSig = "";
   let mesh = null;
-  const stats = { rings: 0, triangles: 0, draws: 0, reach: 0, shoreBakeMs: 0 };
+  const stats = {
+    rings: 0, triangles: 0, draws: 0, reach: 0, shoreBakeMs: 0,
+    fftSize: lodCfg.fftSize, cascades: fft.cascades.length, spectrumMode: lodCfg.spectrumMode,
+  };
 
   function rebuildClipmap(cfg) {
     const sig = `${cfg.levels}|${cfg.gridM}|${cfg.baseCell}|${cfg.horizonScale}`;
@@ -290,6 +347,7 @@ export function createWorldOceanV2({
 
     const clip = buildClipmapGeometry(cfg);
     snapStep = clip.snapStep;
+    surface.uniforms.meshBaseCell.value = cfg.baseCell;
     mesh = new THREE.Mesh(clip.geometry, surface.material);
     mesh.frustumCulled = false;
     // Opaque objects sort front-to-back, so without an explicit order the sea
@@ -334,6 +392,8 @@ export function createWorldOceanV2({
       if (!enabled) underwater.water.visible = underwater.snow.visible = false;
     },
     setSeaLevel(y) { seaLevel = y; surface.uniforms.waterY.value = y; },
+    /** The sun's shadow node, or null. Recompiles on change only. See oceanSurface. */
+    setShadowNode(node) { surface.setShadowNode(node); },
     setSunDir(v) {
       surface.setSunDir(v);
       if (v) { _sunDir.copy(v).normalize(); applyLight(); }
@@ -386,7 +446,7 @@ export function createWorldOceanV2({
       rebuildClipmap({ ...lodCfg, ...p });
       if (p.fftUpdateHz != null) fftHz = p.fftUpdateHz;
       surface.syncParams(p);
-      fft.syncParams(p);
+      fft.syncParams(syncSpectrum(p));
       if (p.seaLevel != null) this.setSeaLevel(p.seaLevel);
       if (p.enabled != null) this.setEnabled(!!p.enabled);
       if (p.uwEnabled != null) uw.enabled = !!p.uwEnabled;
@@ -435,6 +495,7 @@ export function createWorldOceanV2({
         mesh.geometry.dispose();
       }
       scene.remove(group);
+      clearTimeout(_spectrumTimer);
       scene.remove(underwater.group);
       underwater.dispose();
       surface.dispose();

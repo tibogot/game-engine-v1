@@ -930,6 +930,7 @@ export async function startV3App(opts = {}) {
       syncInteriorUniforms: () => worldEnv?.syncInteriorUniforms(),
       rebuildInteriorVolumes: () => worldEnv?.rebuildInteriorVolumes(),
       worldOceanChanged: () => worldEnv?.worldOceanChanged(),
+      getOceanV2Stats: () => worldEnv?.getOceanV2?.()?.stats ?? null,
       onConfigChanged: () => {},
       renderQuality,
       onRenderScaleChanged: () => applyRenderScale(),
@@ -6369,6 +6370,20 @@ export async function startV3App(opts = {}) {
           if (src.v2[k] !== undefined) dst.v2[k] = src.v2[k];
         }
       }
+      /*
+       * V2 used to take these from the SHARED World Ocean sliders, so in a
+       * project saved before it got its own controls the V2 bag holds untouched
+       * defaults and the real values sit at the top level. Carry them over once;
+       * a bag written since carries `ownControls` and is left alone.
+       */
+      if (dst.v2 && !src.v2?.ownControls) {
+        for (const k of [
+          "windSpeed", "windAngleDeg", "fftSwellAmp", "fftRippleAmp", "fftChoppiness",
+          "fftUpdateHz", "levels", "gridM", "baseCell", "horizonScale",
+        ]) {
+          if (src[k] !== undefined) dst.v2[k] = src[k];
+        }
+      }
       worldEnv?.worldOceanChanged();
       // The panel binds to the state object directly, so rebuilding it is how
       // its controls pick up values a load moved underneath them.
@@ -8656,6 +8671,8 @@ export async function startV3App(opts = {}) {
       },
       ocean: {
         get state() { return worldToolState.worldOcean; },
+        /** The live V2 ocean (createWorldOceanV2 handle), or null until V2 is selected. */
+        get v2() { return worldEnv?.getOceanV2?.() ?? null; },
         /** e.g. { enabled: false } for a game with its own water, or { seaLevel: 12 }. */
         set(params = {}) {
           Object.assign(worldToolState.worldOcean, params);
