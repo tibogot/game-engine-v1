@@ -8734,6 +8734,64 @@ export async function startV3App(opts = {}) {
         return { typeIdx, instances: propStore.instances.length };
       },
       /*
+       * A MIXED world, closer to a real level than 12k identical spheres:
+       * five primitive shapes as scatter, heavy procedural cliffs, and a
+       * forest from the tree tool's own synthetic preset. Deterministic (seeded)
+       * so runs compare.
+       *
+       *   await __V3_DEBUG.worldStress()                    // 20k props + 3k trees
+       *   await __V3_DEBUG.worldStress({ props: 40000, trees: 6000, radius: 480 })
+       *   __V3_DEBUG.propStressClear()                      // props only
+       */
+      async worldStress({ props = 20000, trees = 3000, radius = 450, cliffShare = 0.03, stand = true } = {}) {
+        let seed = 0x9e3779b9;
+        const rnd = () => {                                // mulberry32
+          seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        const slotOf = (name) => propSlots.find((s) => s.name === name && s.builtin)?.typeIdx;
+        const scatter = ["Cube", "Sphere", "Cylinder", "Cone", "Torus"];
+        const cliffs = ["Cliff: Crag", "Cliff: Spire", "Cliff: Wall", "Cliff: Ledge"];
+        for (const s of scatter) addPrimitive(s);
+        for (const c of cliffs) addCliff(c);
+        const scatterTypes = scatter.map(slotOf).filter((t) => t != null);
+        const cliffTypes = cliffs.map(slotOf).filter((t) => t != null);
+
+        for (let i = 0; i < props; i++) {
+          const ang = rnd() * Math.PI * 2;
+          const rad = radius * Math.sqrt(rnd());
+          const x = Math.cos(ang) * rad, z = Math.sin(ang) * rad;
+          const y = terrainStoreAdapter.getWorldHeight(x, z);
+          const cliff = cliffTypes.length && rnd() < cliffShare;
+          if (cliff) {
+            const s = 0.6 + rnd() * 0.9;
+            propStore.addInstance(cliffTypes[(rnd() * cliffTypes.length) | 0], x, y - 1, z, {
+              ry: rnd() * Math.PI * 2, sx: s, sy: s * (0.7 + rnd() * 0.6), sz: s,
+            });
+          } else {
+            const s = 0.4 + rnd() * 2.2;
+            propStore.addInstance(scatterTypes[(rnd() * scatterTypes.length) | 0], x, y, z, {
+              rx: (rnd() - 0.5) * 0.4, ry: rnd() * Math.PI * 2, rz: (rnd() - 0.5) * 0.4,
+              sx: s, sy: s * (0.6 + rnd() * 0.9), sz: s,
+            });
+          }
+        }
+        let planted = 0;
+        if (trees > 0 && window.__treeDebug?.spawnTestForest) {
+          await window.__treeDebug.spawnTestForest(trees, radius);
+          planted = trees;
+        }
+        if (stand) {
+          const y = terrainStoreAdapter.getWorldHeight(0, 0);
+          camera.position.set(0, y + 1.7, 0);
+          controls.target.set(60, terrainStoreAdapter.getWorldHeight(60, 0) + 1, 0);
+          controls.update();
+        }
+        return { props: propStore.instances.length, types: propSlots.length, trees: planted };
+      },
+      /*
        * The instancer itself, so an A/B can switch between the per-cascade
        * shadow lists and the old whole-tier gate INSIDE one measurement:
        *

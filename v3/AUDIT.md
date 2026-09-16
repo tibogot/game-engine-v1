@@ -378,6 +378,21 @@ Also take the MEAN of raw samples, not the median: the GPU timestamp is
 quantised to a handful of values per 60 frames, so medians collapse onto the
 same number for both sides of an A/B.
 
+**A mixed world** for when identical spheres are too kind:
+`await __V3_DEBUG.worldStress()` — 20k props over five primitive shapes at
+mixed scales and tilts, ~3% procedural cliffs, plus 3k trees from the tree
+tool's own test preset. Seeded, so it rebuilds identically. Measured
+2026-09-16 with shadow lists + per-instance cull vs neither: ground level
+4.560 → 3.861 ms (8.99 → 4.48 M tris), 120 m overview 5.388 → 4.645 ms. Here
+the SHADOW LISTS carry the win and the per-instance cull adds only
+0.05-0.19 ms, the reverse of the sphere scene — most scatter is cheap (a cube
+is 12 triangles), so skipping off-screen ones saves little.
+Found with it: **procedural cliffs never get auto-LOD** — they are
+non-indexed, and simplifyGeometry skips non-indexed input. Not measurable at
+589 cliffs (hiding them made the frame slower, probably because they occlude
+what is behind them — unverified). Any replacement rock/cliff generator
+should emit INDEXED geometry.
+
 BASELINE 2026-09-16, 12k props over 800 m, 4 interleaved rounds × 90 frames:
 whole frame **2.959 ms**, props not casting 1.576 ms, so the **prop shadow pass
 is 1.383 ms — 47% of the frame**, with 6 prop meshes and 9.1 M triangles.
