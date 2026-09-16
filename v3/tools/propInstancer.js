@@ -27,6 +27,39 @@ const CELL_SIZE  = 256;
 const HALF_WORLD = WORLD_SIZE * 0.5;
 const CELL_COUNT = Math.ceil(WORLD_SIZE / CELL_SIZE);
 
+/*
+ * SHADOW LISTS LIVE ON THEIR OWN LAYERS.
+ *
+ * The camera list and the shadow list want opposite things: the camera wants
+ * what is on screen, the sun wants what is inside a cascade — which includes
+ * props BEHIND the camera. While one instanced mesh served both, culling for
+ * one broke the other, so nothing could be culled at all (`frustumCulled` is
+ * false on these meshes) and every prop inside maxFar was drawn into all three
+ * cascades. Cascade 0's box is ~24 m across and cascade 1's ~85 m, so most of
+ * that was work no fragment could ever sample.
+ *
+ * Now each cascade owns an instanced mesh on layer SHADOW_LAYER_BASE + i,
+ * holding only the instances inside THAT cascade, drawn with the cheapest
+ * geometry the type has. three makes this work in two places: a shadow camera
+ * keeps its own layer mask as long as any layer above 0 is enabled
+ * (ShadowNode.js — otherwise it inherits the main camera's), and every object
+ * is layer-tested against the camera it is being rendered for (Renderer.js).
+ * The main camera never enables these layers, so it never sees them; each
+ * cascade camera keeps layer 0, so terrain, trees and the player still cast
+ * into every cascade exactly as before.
+ *
+ * Layers 1-7 are free in v3 (the cloud deck uses 18).
+ */
+const SHADOW_LAYER_BASE     = 1;
+const MAX_SHADOW_CASCADES   = 4;
+/*
+ * The cascade cameras are positioned by the CSM during the render, so the
+ * boxes we test against here are one frame old. At 60 Hz a sprinting camera
+ * moves ~0.2 m in a frame; 3 m of slack costs a handful of instances and
+ * removes any chance of a shadow popping in at a cascade edge.
+ */
+const SHADOW_CULL_MARGIN    = 3;
+
 // Picking scratch
 const _pickInv   = new THREE.Matrix4();
 const _pickRay   = new THREE.Ray();
@@ -120,6 +153,19 @@ export class PropInstancer {
     this._pickBoxes    = null;
     this._pickBoxesGen = -1;
 
+    // Per-cascade shadow lists. `_shadowCsm` is the CSMShadowNode (read live —
+    // it is REBUILT when the cascade count changes), null when a game runs
+    // without CSM, in which case we fall back to the old behaviour of letting
+    // the camera meshes cast.
+    this._shadowCsm     = null;
+    this._shadowCascades = 0;
+    this._lastShadowCamN = -1;
+    this._lastShadowCam  = new Float32Array(32).fill(NaN);
+    this._shadowFrusta  = [];
+    this._shadowProj    = new THREE.Matrix4();
+    this._sphere        = new THREE.Sphere();
+    this._cacheRadii    = null;
+
     this._frustum    = new THREE.Frustum();
     this._projScreen = new THREE.Matrix4();
     this._box        = new THREE.Box3();
@@ -156,6 +202,11 @@ export class PropInstancer {
 
   setCastShadow(val) {
     this._castShadow = val;
+    // The per-cascade lists exist only to cast, so switching casting off drops
+    // them entirely rather than leaving empty meshes to be walked every frame.
+    if (!val) this._disposeAllShadowMeshes();
+    this._shadowKey = "";
+    this._lodDirty = true;
     for (const tr of this._typeRender) {
       if (!tr) continue;
       for (const lod of [tr.lod0, tr.lod1, tr.lod2]) {
@@ -222,9 +273,153 @@ export class PropInstancer {
     this._typeRender[typeIdx] = {
       lod0, lod1: null, lod2: null,
       boxSize: boxSize.clone(),
+      shadow: null,      // built on demand, once the cascade count is known
+      shadowKey: "",     // which geometry the shadow meshes were built from
     };
     this._pickBoxesGen = -1;
     this._queueAutoLod(typeIdx);
+  }
+
+  // ── Per-cascade shadow lists ───────────────────────────────────────────────
+
+  /**
+   * One instanced mesh per cascade, on that cascade's layer, using the cheapest
+   * level the type has. Rebuilt when the cascade count changes or when auto-LOD
+   * hands us a cheaper geometry than the one we built from.
+   */
+  _ensureShadowMeshes(typeIdx, cascades) {
+    const tr = this._typeRender[typeIdx];
+    if (!tr) return null;
+    const pick = this._lodForTier(tr, 2);
+    if (!pick) return null;
+    const key = `${cascades}|${pick.key}`;
+    if (tr.shadow && tr.shadowKey === key) return tr.shadow;
+
+    this._disposeShadowMeshes(tr);
+    const sets = [];
+    for (let i = 0; i < cascades; i++) {
+      const entries = pick.lod.map(({ im, localMatrix }) => {
+        const inst = shareInstancePipeline(
+          new THREE.InstancedMesh(im.geometry, im.material, this.MAX),
+        );
+        inst.count         = 0;
+        inst.castShadow    = true;
+        inst.receiveShadow = false;            // it is never seen, only sampled
+        inst.frustumCulled = false;
+        inst.layers.set(SHADOW_LAYER_BASE + i);
+        this.scene.add(inst);
+        return { im: inst, localMatrix, cap: inst.instanceMatrix.count, _written: false };
+      });
+      sets.push(entries);
+    }
+    tr.shadow = sets;
+    tr.shadowKey = key;
+    return sets;
+  }
+
+  _disposeShadowMeshes(tr) {
+    if (!tr?.shadow) return;
+    for (const set of tr.shadow) this._disposeLodMeshes(set);
+    tr.shadow = null;
+    tr.shadowKey = "";
+  }
+
+  /** Drop every shadow list — used when the CSM goes away or is rebuilt. */
+  _disposeAllShadowMeshes() {
+    for (const tr of this._typeRender) this._disposeShadowMeshes(tr);
+  }
+
+  /**
+   * Fill each cascade's list with the instances inside it. Unlike the camera
+   * pass this culls against the LIGHT, so a prop behind the camera still casts
+   * into view — which it could never do while the two shared one list.
+   */
+  _assignShadow() {
+    const lights = this._shadowCsm?.lights;
+    const n = Math.min(lights?.length ?? 0, MAX_SHADOW_CASCADES);
+    if (!n || !this._castShadow) return false;
+
+    // Cascade frusta, from the cameras the CSM positioned last frame.
+    this._shadowFrusta.length = n;
+    for (let i = 0; i < n; i++) {
+      const cam = lights[i].shadow?.camera;
+      if (!cam) return false;
+      cam.updateMatrixWorld();
+      this._shadowProj.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      (this._shadowFrusta[i] ??= new THREE.Frustum()).setFromProjectionMatrix(this._shadowProj);
+      // A cascade camera must keep layer 0 (terrain, trees, the player) AND
+      // its own layer. Enabling a layer above 0 is also what stops three
+      // overwriting the mask with the main camera's.
+      cam.layers.enable(SHADOW_LAYER_BASE + i);
+    }
+    this._shadowCascades = n;
+
+    const counts = [];
+    for (let ti = 0; ti < this._typeRender.length; ti++) {
+      const tr = this._typeRender[ti];
+      if (!tr) { counts.push(null); continue; }
+      const sets = this._ensureShadowMeshes(ti, n);
+      if (!sets) { counts.push(null); continue; }
+      for (const set of sets) for (const e of set) { e.im.count = 0; e._written = false; }
+      counts.push(new Array(n).fill(0));
+    }
+
+    const wm = this._worldMat;
+    const sph = this._sphere;
+
+    for (let i = 0; i < n; i++) {
+      const fr = this._shadowFrusta[i];
+      for (let cz = 0; cz < CELL_COUNT; cz++) {
+        for (let cx = 0; cx < CELL_COUNT; cx++) {
+          const bucket = this._cellBuckets[cz * CELL_COUNT + cx];
+          if (!bucket) continue;
+          const minX = -HALF_WORLD + cx * CELL_SIZE;
+          const minZ = -HALF_WORLD + cz * CELL_SIZE;
+          this._box.min.set(minX - CULL_MARGIN, -100, minZ - CULL_MARGIN);
+          this._box.max.set(minX + CELL_SIZE + CULL_MARGIN, 600, minZ + CELL_SIZE + CULL_MARGIN);
+          if (!fr.intersectsBox(this._box)) continue;
+
+          for (let k = 0; k < bucket.length; k++) {
+            const ci = bucket[k];
+            const ti = this._cacheTypes[ci];
+            const tr = this._typeRender[ti];
+            if (!tr?.shadow || this._hiddenAt(ci)) continue;
+
+            sph.center.set(this._cacheXs[ci], this._cacheYs[ci], this._cacheZs[ci]);
+            sph.radius = this._cacheRadii[ci] + SHADOW_CULL_MARGIN;
+            if (!fr.intersectsSphere(sph)) continue;
+
+            const set = tr.shadow[i];
+            const idx = counts[ti][i];
+            if (idx >= set[0].cap) this._growLod(set, idx + 1);
+
+            const off = ci * 16;
+            for (let j = 0; j < 16; j++) wm.elements[j] = this._cacheMats[off + j];
+            for (const entry of set) {
+              _tmp.multiplyMatrices(wm, entry.localMatrix);
+              entry.im.setMatrixAt(idx, _tmp);
+              entry._written = true;
+            }
+            counts[ti][i]++;
+          }
+        }
+      }
+    }
+
+    for (let ti = 0; ti < this._typeRender.length; ti++) {
+      const tr = this._typeRender[ti];
+      if (!tr?.shadow || !counts[ti]) continue;
+      for (let i = 0; i < n; i++) {
+        for (const e of tr.shadow[i]) {
+          const nv = counts[ti][i];
+          if (e._written || e.im.count !== nv) {
+            e.im.count = nv;
+            if (e._written || nv > 0) e.im.instanceMatrix.needsUpdate = true;
+          }
+        }
+      }
+    }
+    return true;
   }
 
   /**
@@ -279,6 +474,9 @@ export class PropInstancer {
     if (!type[ek]) return;
     this._disposeLodMeshes(tr[key]);
     tr[key] = this._createLodMeshes(type[ek]);
+    // The shadow lists borrow the cheapest level's geometry, which just
+    // changed underneath them — drop them and let the next frame rebuild.
+    this._disposeShadowMeshes(tr);
     this._shadowKey = "";   // re-apply the shadow rule to the new meshes
     this._lodDirty = true;
   }
@@ -306,6 +504,8 @@ export class PropInstancer {
     apply(tr.lod0);
     if (type._autoLod1) apply(tr.lod1);
     if (type._autoLod2) apply(tr.lod2);
+    this._disposeShadowMeshes(tr);
+    this._lodDirty = true;
     for (const m of seen) m?.dispose?.();
   }
 
@@ -322,6 +522,10 @@ export class PropInstancer {
         if (prev && prev !== newMaterial) seen.add(prev);
       }
     }
+    // Shadow lists borrow these materials; rebuild them rather than leave a
+    // disposed one behind.
+    this._disposeShadowMeshes(tr);
+    this._lodDirty = true;
     for (const m of seen) m.dispose?.();
   }
 
@@ -337,6 +541,7 @@ export class PropInstancer {
     this._disposeLodMeshes(tr.lod0);
     this._disposeLodMeshes(tr.lod1);
     this._disposeLodMeshes(tr.lod2);
+    this._disposeShadowMeshes(tr);
     this._typeRender[typeIdx] = null;
   }
 
@@ -360,6 +565,7 @@ export class PropInstancer {
       this._cacheTypes   = new Uint16Array(cap);
       this._cacheTiers   = new Uint8Array(cap);
       this._cacheToStore = new Uint32Array(cap);
+      this._cacheRadii   = new Float32Array(cap);
     }
     this._cacheCount = n;
     this._cacheTiers.fill(TIER_UNSET, 0, n);
@@ -376,6 +582,19 @@ export class PropInstancer {
       this._cacheXs[ci]      = inst.px;
       this._cacheYs[ci]      = inst.py;
       this._cacheZs[ci]      = inst.pz;
+      // Bounding sphere for the shadow cull, scale included. Centred on the
+      // instance ORIGIN, which for a prop is the foot, so the radius has to
+      // reach the top of the box rather than half of it.
+      const mb = this.store.types[inst.typeIdx]?.mergedBox;
+      if (mb) {
+        const sx = Math.abs(inst.sx ?? 1), sy = Math.abs(inst.sy ?? 1), sz = Math.abs(inst.sz ?? 1);
+        const ex = Math.max(Math.abs(mb.min.x), Math.abs(mb.max.x)) * sx;
+        const ey = Math.max(Math.abs(mb.min.y), Math.abs(mb.max.y)) * sy;
+        const ez = Math.max(Math.abs(mb.min.z), Math.abs(mb.max.z)) * sz;
+        this._cacheRadii[ci] = Math.sqrt(ex * ex + ey * ey + ez * ez);
+      } else {
+        this._cacheRadii[ci] = 2;
+      }
 
       const c = _cellIdx(inst.px, inst.pz);
       if (!tmp[c]) tmp[c] = [];
@@ -563,13 +782,36 @@ export class PropInstancer {
     this._lodDirty = true;
   }
 
+  /**
+   * The cascaded shadow node, so props can be culled per cascade instead of
+   * every prop inside maxFar being drawn into all of them. Pass null (or never
+   * call it) and the old whole-tier gate is used instead, so a game with CSM
+   * off still gets prop shadows.
+   *
+   * Read live and re-read every frame: the node is REBUILT when the cascade
+   * count changes, and its cameras move with the camera and the sun.
+   */
+  setShadowCsm(csm) {
+    if (csm === this._shadowCsm) return;
+    this._shadowCsm = csm ?? null;
+    this._disposeAllShadowMeshes();
+    this._lastShadowCamN = -1;
+    this._shadowKey = "";
+    this._lodDirty = true;
+  }
+
   /** Apply the shadow rule to each tier's meshes; cheap, and only on a change. */
-  _syncShadowCasters(lodCfg) {
-    const key = `${this._castShadow}|${this._shadowFar}|${lodCfg.lod0Distance}|${lodCfg.lod1Distance}`;
+  _syncShadowCasters(lodCfg, perCascade) {
+    const key = `${this._castShadow}|${this._shadowFar}|${lodCfg.lod0Distance}|${lodCfg.lod1Distance}|${perCascade}`;
     if (key === this._shadowKey) return;
     this._shadowKey = key;
-    // A tier casts when its NEAREST prop can still be inside the shadow map.
-    const casts = [
+    // With per-cascade lists the camera meshes hand their shadow job over
+    // entirely: they would otherwise cast the SAME props a second time, into
+    // every cascade, which is the cost this replaced.
+    //
+    // Without a CSM (a game that turned it off) the old tier gate still
+    // applies: a tier casts when its NEAREST prop can still be inside the map.
+    const casts = perCascade ? [false, false, false] : [
       this._castShadow,
       this._castShadow && lodCfg.lod0Distance < this._shadowFar,
       this._castShadow && lodCfg.lod1Distance < this._shadowFar,
@@ -586,15 +828,40 @@ export class PropInstancer {
     const genChanged = this.store.gen !== this._lastGen;
     if (genChanged) { this._lastGen = this.store.gen; this._rebuildCache(); }
     if (!camera || !lodCfg) return;
-    if (!this._lodDirty && !genChanged && this._sameLodCfg(lodCfg) && this._sameCamera(camera)) return;
+    // The cascade boxes follow the camera AND the sun, so a static camera under
+    // a moving sun still needs the shadow lists rebuilt.
+    if (!this._lodDirty && !genChanged && this._sameLodCfg(lodCfg)
+        && this._sameCamera(camera) && this._sameShadowCams()) return;
     this._lastLod0 = lodCfg.lod0Distance;
     this._lastLod1 = lodCfg.lod1Distance;
     this._lastFade = lodCfg.fadeOutDistance;
     this._lastCam.set(camera.matrixWorld.elements);
     this._lastProj.set(camera.projectionMatrix.elements);
     this._lodDirty = false;
-    this._syncShadowCasters(lodCfg);
+    const perCascade = this._assignShadow();
+    this._syncShadowCasters(lodCfg, perCascade);
+    if (!perCascade) this._disposeAllShadowMeshes();
     this._assignLod(camera, lodCfg);
+  }
+
+  /** Have the cascade cameras moved since the last assignment? */
+  _sameShadowCams() {
+    const lights = this._shadowCsm?.lights;
+    const n = Math.min(lights?.length ?? 0, MAX_SHADOW_CASCADES);
+    if (n !== this._lastShadowCamN) { this._lastShadowCamN = n; return false; }
+    if (!n) return true;
+    const e = lights[0].shadow?.camera?.matrixWorld?.elements;
+    const p = lights[n - 1].shadow?.camera?.projectionMatrix?.elements;
+    if (!e || !p) return false;
+    const last = this._lastShadowCam;
+    let same = true;
+    for (let i = 0; i < 16; i++) {
+      if (last[i] !== e[i] || last[16 + i] !== p[i]) { same = false; break; }
+    }
+    if (!same) {
+      for (let i = 0; i < 16; i++) { last[i] = e[i]; last[16 + i] = p[i]; }
+    }
+    return same;
   }
 
   /** World AABB of every cached prop (type bounds × instance matrix), for picking. */

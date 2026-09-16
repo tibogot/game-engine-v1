@@ -3491,6 +3491,12 @@ export async function startV3App(opts = {}) {
         _lastCsmShadowFar = worldToolState.csm.maxFar;
         propInstancer.setShadowDistance?.(_lastCsmShadowFar);
       }
+      // Per-cascade prop shadow lists. Read live: the node is REBUILT whenever
+      // the cascade count changes, and it is null while CSM is off, which is
+      // the instancer's cue to fall back to the whole-tier gate above.
+      propInstancer.setShadowCsm?.(
+        worldToolState.csm.enabled ? (worldEnv?.getCsm?.() ?? null) : null,
+      );
       propInstancer.update(camera, propLod);
       // Cheap, and only while the ruler is on screen: it recolours its stations
       // from the live cascade bands, so dragging Near split moves the colours.
@@ -8727,6 +8733,17 @@ export async function startV3App(opts = {}) {
         }
         return { typeIdx, instances: propStore.instances.length };
       },
+      /*
+       * The instancer itself, so an A/B can switch between the per-cascade
+       * shadow lists and the old whole-tier gate INSIDE one measurement:
+       *
+       *   __V3_DEBUG.propInstancer.setShadowCsm(null)                  // old
+       *   __V3_DEBUG.propInstancer.setShadowCsm(__v3app.shadows.csm)   // new
+       *
+       * This laptop's GPU clock drifts over a minute, so two runs taken apart
+       * are not comparable — interleave them instead.
+       */
+      get propInstancer() { return propInstancer; },
       propStressClear() {
         propStore.clear();
         propSlots.length = 0;

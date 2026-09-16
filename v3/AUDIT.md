@@ -382,6 +382,29 @@ BASELINE 2026-09-16, 12k props over 800 m, 4 interleaved rounds × 90 frames:
 whole frame **2.959 ms**, props not casting 1.576 ms, so the **prop shadow pass
 is 1.383 ms — 47% of the frame**, with 6 prop meshes and 9.1 M triangles.
 
+38b. ~~**Per-instance shadow culling**~~ — DONE 2026-09-16, the rest of 38.
+    Each cascade now owns an instanced mesh on layer SHADOW_LAYER_BASE + i
+    holding only the instances inside THAT cascade's box, drawn with the
+    cheapest level the type has; the camera meshes drop to `castShadow = false`.
+    Cascade cameras keep layer 0, so terrain, trees and the player are
+    untouched, and with no CSM the old whole-tier gate still applies.
+    Measured INTERLEAVED in one run (12k props, 800 m, 4 rounds × 90 frames,
+    60 FPS confirmed): **2.532 → 2.275 ms, −0.257 ms**, shadow instance
+    submissions 5,064 → 4,196, draws 14 → 11. A second run gave −0.254 ms; the
+    absolutes moved 0.4 ms between runs (this laptop's clock drifts) while the
+    delta held, which is why the A/B has to be interleaved.
+    Instance split across cascades: 38 / 313 / 3,845. Less than the arithmetic
+    promised, and the reason is worth remembering: cascade 2's box is 324 m
+    across, so it picks up everything around AND behind the camera, where the
+    old code only cast what was in front. Cascades 0 and 1 get the big cuts and
+    cascade 2 gives most of it back.
+    **The correctness half is the better half:** 577 of 4,237 casters (13.6%)
+    are behind the camera and could never cast before.
+    **What it really bought is item 39.** Camera and shadow shared one list, so
+    culling what the camera cannot see deleted shadows those props should still
+    cast. The lists are now independent, so the camera list can be culled
+    per-instance — which is where the ~40% is.
+
 38. **Shadow pass draws every prop** — PARTLY DONE 2026-09-16. The CSM reaches
     80 m (maxFar), yet every detail level cast, so props from 150 m to 500 m
     were drawn into an 80 m shadow map. A tier now casts only when its NEAREST
