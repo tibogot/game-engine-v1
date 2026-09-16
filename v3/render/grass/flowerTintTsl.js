@@ -112,7 +112,7 @@ export function createFlowerTintShading({ worldSize, splatTex }) {
    * Coverage per type: how much of a square metre of full-strength paint its
    * blooms hide — bloom area × plants per m² (the 0.5 m plant grid = 4), capped.
    */
-  function syncFromState(fp) {
+  function syncFromState(fp, { hasRivers = true } = {}) {
     const c = new THREE.Color(), tip = new THREE.Color();
     u.strength.value = fp.farTint ?? 1;
     u.fadeStart.value = fp.fadeStart;
@@ -129,7 +129,7 @@ export function createFlowerTintShading({ worldSize, splatTex }) {
       // Stemmed flowers stand up and fill more of a grazing view.
       const cover = Math.min(1, bloomArea * 4 * (t.stemHeight > 0 ? 1.6 : 1.1));
       u.types[i].value.set(c.r, c.g, c.b, cover);
-      u.rules[i].value.set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, t.nearRiver ?? 0);
+      u.rules[i].value.set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, hasRivers ? (t.nearRiver ?? 0) : 0);
     }
   }
 

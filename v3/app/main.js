@@ -1293,8 +1293,9 @@ export async function startV3App(opts = {}) {
   }
 
   function syncFlowerUniforms() {
-    flowerTintShading.syncFromState(flowerState);
-    flowerSystem?.syncFromState(flowerState, grassState, getLightDir());
+    const opts = { hasRivers: (riverV2System?.rivers.length ?? 0) > 0 };
+    flowerTintShading.syncFromState(flowerState, opts);
+    flowerSystem?.syncFromState(flowerState, grassState, getLightDir(), opts);
   }
 
   // ── Painted foliage build/sync (lazy, on the same scatter core) ────────────
@@ -5391,7 +5392,14 @@ export async function startV3App(opts = {}) {
       bvhDebug?.update();
     },
     onWaterMeshesChanged: () => { waterSurfaceMap.markDirty(); waterfallSystem?.markDirty(); },
-    onRiverFieldChanged: (hasRivers) => riverSandShading.setActive(hasRivers),
+    onRiverFieldChanged: (hasRivers) => {
+      riverSandShading.setActive(hasRivers);
+      // "Grows near water" is ignored while the world has no river, so the
+      // first river (or the last one deleted) changes where plants may grow.
+      syncFlowerUniforms();
+      syncFoliageScatterUniforms();
+      foliageUi?.rebuild();
+    },
   });
   worldEnv?.addWaterSurface(riverV2System);
   // The distance field and path texture are stable render targets, so this is a

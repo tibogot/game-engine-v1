@@ -465,8 +465,12 @@ export class FlowerSystem {
     this.group.visible = this._enabled;
   }
 
-  /** fp = flower state, gp = grassState (shared wind, blade height), sunDir toward the sun. */
-  syncFromState(fp, gp, sunDir) {
+  /**
+   * fp = flower state, gp = grassState (shared wind, blade height), sunDir
+   * toward the sun. `hasRivers` false means the world has no River v2 river, so
+   * a "grows near water" rule could never be satisfied and is ignored.
+   */
+  syncFromState(fp, gp, sunDir, { hasRivers = true } = {}) {
     const u = this.u;
     u.uWindSpeed.value = gp.windSpeed ?? 0.2;
     u.uWindStrength.value = (gp.windStrength ?? 1.4) * (fp.windMul ?? 1);
@@ -504,7 +508,7 @@ export class FlowerSystem {
       c.set(t.petalTip);  this._typeRows[o + 1].set(c.r, c.g, c.b, t.size);
       c.set(t.centre);    this._typeRows[o + 2].set(c.r, c.g, c.b, t.stemHeight);
       this._typeRows[o + 3].set(t.veins, 0, 0, 0);
-      this._typeRows[o + 4].set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, t.nearRiver ?? 0);
+      this._typeRows[o + 4].set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, hasRivers ? (t.nearRiver ?? 0) : 0);
     }
     for (let k = 0; k < DRAWS; k++) this.meshes[k].receiveShadow = !!fp.receiveShadows && k % LODS === 0;
   }
