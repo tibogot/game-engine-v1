@@ -25,6 +25,12 @@ import { SkyMesh } from "three/addons/objects/SkyMesh.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { projectAssets } from "../io/projectAssets.js";
 import { nearAnchoredSplits, describeCascades } from "./csmSplits.js";
+import {
+  wrapSunShadow,
+  unwrapSunShadow,
+  setTerrainSunDirection,
+  setTerrainShadowParams,
+} from "../render/lighting/terrainSunShadow.js";
 import { mergeKnownKeys } from "./state/mergeKnownKeys.js";
 import { createLensFlareSystem } from "../../v2/effects/lensFlare.js";
 import { createLensFlare2 } from "../../v2/effects/lensFlare2.js";
@@ -277,7 +283,7 @@ export async function createWorldEnvironment({
       });
       csm.fade = !!toolState.csm.fade;
       syncCascadeShadowSettings();
-      if (toolState.csm.enabled) sun.shadow.shadowNode = csm;
+      if (toolState.csm.enabled) sun.shadow.shadowNode = wrapSunShadow(csm);
     } catch (err) {
       console.warn(
         "[V3] CSMShadowNode recreate failed; using non-CSM directional shadow.",
@@ -289,6 +295,11 @@ export async function createWorldEnvironment({
 
   function syncCsmFromToolState() {
     const cfg = csmCfgNum(toolState.csm);
+    // Uniforms only: flipping terrain shadows never recompiles anything.
+    setTerrainShadowParams({
+      enabled: toolState.csm.terrainShadows !== false,
+      softness: toolState.csm.terrainShadowSoftness ?? 0.5,
+    });
     const focus = playMode?.active ? playMode.playerPosition : controls.target;
     _shadowFocus.copy(focus);
     shadowTarget.position.set(_shadowFocus.x, 0, _shadowFocus.z);
@@ -305,7 +316,7 @@ export async function createWorldEnvironment({
 
     sun.castShadow = true;
     const prevEnabled = _lastCsmEnabled;
-    sun.shadow.shadowNode = cfg.enabled ? csm : null;
+    sun.shadow.shadowNode = cfg.enabled ? wrapSunShadow(csm) : null;
 
     if (cfg.enabled !== prevEnabled) {
       _lastCsmEnabled = cfg.enabled;
@@ -330,7 +341,7 @@ export async function createWorldEnvironment({
       _lastCsmMargin = cfg.lightMargin;
       _lastCsmRadius = cfg.shadowRadius;
       recreateCsm();
-      sun.shadow.shadowNode = csm;
+      sun.shadow.shadowNode = wrapSunShadow(csm);
       setCsmCascadeLightsInScene(true);
       invalidateSunShadowPipeline();
       return;
@@ -381,7 +392,7 @@ export async function createWorldEnvironment({
   if (renderer.shadowMap) {
     recreateCsm();
     if (toolState.csm.enabled) {
-      sun.shadow.shadowNode = csm;
+      sun.shadow.shadowNode = wrapSunShadow(csm);
       setCsmCascadeLightsInScene(true);
     }
   }
@@ -973,6 +984,9 @@ export async function createWorldEnvironment({
     sun.position
       .copy(shadowTarget.position)
       .addScaledVector(_effectiveLightDir, toolState.light.sunDistance);
+    // The terrain's own shadow marches toward whichever light is lighting the
+    // scene — the moon at night, like the cascades.
+    setTerrainSunDirection(_effectiveLightDir);
   }
 
   function updateSunSky() {
@@ -1155,7 +1169,7 @@ export async function createWorldEnvironment({
    * would render the sun's shadow map a second time.
    */
   function oceanShadowNode() {
-    return csm && toolState.csm.enabled && sun.castShadow && sun.shadow.shadowNode === csm
+    return csm && toolState.csm.enabled && sun.castShadow && unwrapSunShadow(sun.shadow.shadowNode) === csm
       ? csm : null;
   }
 

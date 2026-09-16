@@ -73,6 +73,15 @@ export function createWorldToolState() {
       splitMode: "custom",
       /** Where cascade 0 ends (m) — the distance past which contact shadows stop mattering. */
       nearSplit: 10,
+      /**
+       * Mountains shade valleys at ANY distance, not just inside maxFar: a
+       * per-vertex march toward the sun through the heightmap
+       * (render/lighting/terrainSunShadow.js). Uniform-driven, so toggling and
+       * softness never recompile.
+       */
+      terrainShadows: true,
+      /** 0 = crisp edge, 1 = very soft. */
+      terrainShadowSoftness: 0.5,
     },
     fog: ts.fog,
     interior: ts.interior,

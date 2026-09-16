@@ -19,7 +19,9 @@ import {
   uniform,
   positionLocal,
   cameraViewMatrix,
+  varying,
 } from "three/tsl";
+import { terrainSunVisibility } from "../render/lighting/terrainSunShadow.js";
 import {
   createTileMaterial,
   setGridTextureUrl,
@@ -321,6 +323,15 @@ function createLODMaterial({
   const vertexY = h.mul(MAX_HEIGHT);
   const displacedY = snowShared ? vertexY.add(snowShared.groundDepth(wxz)) : vertexY;
   mat.positionNode = vec3(positionLocal.x, displacedY, positionLocal.z);
+
+  // Mountain shade: march toward the sun from each vertex and interpolate.
+  // VERTEX stage on purpose — this fragment shader has no sampler left (see
+  // terrainSunShadow.js). The world's sun shadow node picks this up by name.
+  mat.terrainSunShadowNode = varying(terrainSunVisibility({
+    heightTexNode,
+    worldX, worldZ, worldY: displacedY,
+    worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT, baseStep: BASE_STEP,
+  }), "vTerrainSun");
 
   // Lighting normal. The heightmap only changes when the user sculpts, so the
   // finite difference is baked into its own texture (terrainNormalMap.js) and

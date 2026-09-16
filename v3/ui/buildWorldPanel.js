@@ -797,6 +797,20 @@ export function buildWorldPanel(app) {
         step: 1,
         onChange: syncCsm,
       });
+      _toggle(csmBody, ts.csm, "terrainShadows", {
+        label: "Terrain shadows",
+        hint: "Mountains and ridges shade the ground behind them at any distance — "
+          + "beyond Max far too. Marched through the heightmap per terrain vertex.",
+        onChange: syncCsm,
+      });
+      _slider(csmBody, ts.csm, "terrainShadowSoftness", {
+        label: "Terrain shadow soft",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        hint: "Penumbra of the terrain's own shadow: 0 = crisp, 1 = very soft.",
+        onChange: syncCsm,
+      });
       _dropdown(csmBody, ts.csm, "splitMode", {
         label: "Split mode",
         options: [

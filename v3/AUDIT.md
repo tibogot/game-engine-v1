@@ -881,6 +881,35 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      ray-march against the height texture — resolution-independent, no cascade,
      kilometres of mountain shade. A cascade is the wrong tool for that.
 
+102b. ~~**Terrain self-shadowing**~~ — DONE 2026-09-16 for the TERRAIN
+     (render/lighting/terrainSunShadow.js). Before it the terrain cast nothing
+     at all: it is not a CSM caster, so a ridge at sunset lit both its sides.
+     Each terrain VERTEX marches 32 exponential steps toward the sun through the
+     heightmap with a k·clearance/t penumbra, and the result is interpolated.
+     Vertex stage because the terrain FRAGMENT shader is still at exactly 16/16
+     samplers (re-checked live); the vertex stage had room and already reads the
+     heightmap, so this adds no binding. Nothing is baked: the sun can move every
+     frame and a sculpt shows its new shadow at once.
+     It reaches lighting by wrapping the SUN'S SHADOW NODE, not via
+     `receivedShadowNode` — CSMShadowNode only calls that hook inside its
+     cascades, so past maxFar (where mountain shade matters) it would never run.
+     The wrapper branches at shader BUILD time on `material.terrainSunShadowNode`;
+     every other material gets the plain CSM node and pays nothing.
+     Verified in the editor on a 250 m ridge under a 14° sun: a ~1 km soft
+     shadow across the plain, sunlit back-slope ridges correctly occluded, no
+     acne on the sunny side, and the shadow swings round with the sun.
+     Cost **+0.239 ms** (march compiled in vs out, 3 interleaved rounds, 60 FPS,
+     whole world in view). Panel: World → Shadows → Terrain shadows + softness.
+     Open:
+     - **Only the terrain receives it.** Grass, props, trees and foliage in a
+       shadowed valley are still sunlit. Next step; those materials have sampler
+       room, so they can sample a shared shadow texture or march per instance.
+     - The toggle is a uniform, so the 0.24 ms is paid even when it is off. A
+       game that never wants it needs a compile-time switch.
+     - No terrain shadow while CSM is disabled (only the CSM node is wrapped).
+     - Resolution is the clipmap's vertex spacing: 1 m near, coarser far, which
+       suits mountain shade but cannot draw a thin distant ridge's shadow.
+
 ### Not ported — v3 is equal or better, or it was retired
 
 Sculpt / procedural / erosion, paint and TSL ground/meadow, cliffs (v3
