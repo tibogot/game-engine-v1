@@ -350,6 +350,7 @@ export class HybridGrassSystem {
       // clump
       uClumpScale: uniform(gp.clumpScale ?? 1.5),
       uClumpStrength: uniform(gp.clumpStrength ?? 0.7),
+      uClumpPull: uniform(gp.clumpPull ?? 0),
       // density / culls — radial ring window [innerR0..innerR1 ramp in,
       // outerR0..outerR1 ramp out to pMin]
       uGrassDensity: uniform(gp.grassDensity ?? 1),
@@ -476,7 +477,7 @@ export class HybridGrassSystem {
     // bufPos: x,y = tile-local offset (wraps with anchor), z = bendAng, w free
     // bufA:   x = visibility, y = bend force (lean+wind), z = zRoll, w = terrainY
     // bufB:   x = bladeH, y = yaw, z = clumpShade, w = shadeRand
-    // bufC:   x = h4 hue, y = h5 sat/dry, z = terrainNx, w = terrainNz
+    // bufC:   x,y = clump pull offset XZ, z = terrainNx, w = terrainNz
     const bufPos = instancedArray(this.count, "vec4");
     const bufA = instancedArray(this.count, "vec4");
     const bufB = instancedArray(this.count, "vec4");
@@ -630,11 +631,25 @@ export class HybridGrassSystem {
         const slot = atomicAdd(indirectStorage.element(1), uint(1));
         compactBuf.element(slot).assign(instanceIndex);
 
+        // Clumps (near rings only): the nearest clump, and how far this blade
+        // is pulled toward its centre. Before the ground height, because a
+        // pulled blade stands somewhere else.
+        const clump = this._normalMode === "flat" ? null : this._nearestClump(worldXZ, u);
+        const pull = clump ? clump.toCentre.mul(u.uClumpPull) : vec2(0, 0);
+        const standX = worldX.add(pull.x);
+        const standZ = worldZ.add(pull.y);
+
         // The cull above keeps the cheap one-tap height; only blades that
         // survive it pay for the mesh-matching one (3 taps).
-        const groundY = this._terrainSurface && !this._cliffMode
-          ? this._clipmapGroundY(worldX, worldZ, heightTex, u.uTerrainSize)
-          : terrainY;
+        // (Cliff tops keep their own surface height: a pull is well under a
+        // metre and the cliff height texture is 4 m per texel.)
+        const groundY = this._cliffMode
+          ? terrainY
+          : this._terrainSurface
+            ? this._clipmapGroundY(standX, standZ, heightTex, u.uTerrainSize)
+            : clump
+              ? texture(heightTex, vec2(standX, standZ).div(u.uTerrainSize).add(0.5)).x
+              : terrainY;
 
         a.x.assign(vis);
         a.w.assign(groundY);
@@ -643,8 +658,6 @@ export class HybridGrassSystem {
         const h1 = hash(instanceIndex.add(8521));
         const h2 = hash(instanceIndex.add(3197));
         const h3 = hash(instanceIndex.add(577));
-        const h4 = hash(instanceIndex.add(911));
-        const h5 = hash(instanceIndex.add(2741));
 
         // ── Per-blade shape — Gemini HIGH (clumped) vs FAR/MEGA (uniform) ──
         // Far rings skip Voronoi clumping entirely like Gemini's mega path:
@@ -657,13 +670,10 @@ export class HybridGrassSystem {
           bladeH = u.uBladeHeight.mul(mix(float(0.82), float(1.08), h2));
           clumpShade = float(1.0);
         } else {
-          // World-space Voronoi clumping (Gemini HIGH)
-          const cellP = worldXZ.div(u.uClumpScale);
-          const cellID = floor(cellP);
-          const cellFrac = fract(cellP);
-          const cv = hash42(cellID);
-          const clumpDist = length(vec2(cv.x, cv.y).sub(cellFrac));
-          const clumpInfluence = smoothstep(0.75, 0.05, clumpDist).mul(
+          // World-space Voronoi clumping: the nearest clump's own randoms
+          // (see _nearestClump) steer facing, lean, height and shade.
+          const cv = clump.params;
+          const clumpInfluence = smoothstep(0.75, 0.05, clump.dist).mul(
             u.uClumpStrength,
           );
           yaw = mix(h0, cv.z, clumpInfluence).mul(PI2);
@@ -787,8 +797,10 @@ export class HybridGrassSystem {
         b.z.assign(clumpShade);
         b.w.assign(pushDirW.y.mul(pushAmt).mul(u.uInteractionMode));
 
-        c.x.assign(h4);
-        c.y.assign(h5);
+        // x,y = clump pull offset (metres); the colour-variation randoms that
+        // used to live here are recomputed from the blade index in the VS.
+        c.x.assign(pull.x);
+        c.y.assign(pull.y);
         c.z.assign(tN.x);
         c.w.assign(tN.z);
       });
@@ -850,6 +862,43 @@ export class HybridGrassSystem {
    *   only changes WHERE they are taken and how they are weighted.
    * - Vertices outside the map read 0, like the terrain's hmInBounds.
    */
+  /**
+   * Nearest clump centre (true Voronoi over the 3×3 neighbouring cells, like
+   * Ghost of Tsushima). Checking only the blade's own cell cut any clump whose
+   * centre sat near a cell edge along a straight line, so the field showed a
+   * faint square grid. Branchless running minimum, compute stage only.
+   *
+   * @returns {{ dist, toCentre, params }} dist in cell units (as before),
+   *   toCentre in metres, params = the clump's own randoms: x height, y shade,
+   *   z facing, w lean — a hash of the cell id that is NOT the one that places
+   *   the centre, so a clump's height no longer follows where its centre sits.
+   */
+  _nearestClump(worldXZ, u) {
+    const cellP = worldXZ.div(u.uClumpScale);
+    const base = floor(cellP);
+    const frac = cellP.sub(base);
+    let bestD = float(1e4);
+    let bestRel = vec2(0, 0);
+    let bestCell = base;
+    for (let oz = -1; oz <= 1; oz++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const off = vec2(ox, oz);
+        const cell = base.add(off);
+        const rel = off.add(hash42(cell).xy).sub(frac);
+        const d = length(rel);
+        const closer = step(d, bestD);
+        bestD = mix(bestD, d, closer);
+        bestRel = mix(bestRel, rel, closer);
+        bestCell = mix(bestCell, cell, closer);
+      }
+    }
+    return {
+      dist: bestD,
+      toCentre: bestRel.mul(u.uClumpScale),
+      params: hash42(bestCell.add(vec2(37.17, 91.73))),
+    };
+  }
+
   _clipmapGroundY(worldX, worldZ, heightTex, uTerrainSize) {
     const s = this._terrainSurface;
     this._uClipCenter ??= uniform(s.centerXZ); // same Vector2 → tracks lod.update()
@@ -963,7 +1012,8 @@ export class HybridGrassSystem {
 
       // shadeRand recomputed from hash — its old slot (b.w) carries push Z
       const shadeRand = mix(float(0.75), float(1.0), hash(bladeIdx.add(8521)));
-      vData.assign(vec4(b.z, shadeRand, c.x, c.y));
+      // h4 / h5 colour-variation randoms: same hashes the compute used to store.
+      vData.assign(vec4(b.z, shadeRand, hash(bladeIdx.add(911)), hash(bladeIdx.add(2741))));
 
       // Gemini bend: arc along local X, whole blade (incl. cross ribbon at
       // +90°) rotated by yaw. FrontSide culling makes the field read coherent.
@@ -1082,9 +1132,9 @@ export class HybridGrassSystem {
       vNormal.assign(nEmissive); // emissive SSS/spec: per-blade on near rings
 
       const outPos = vec3(
-        pYaw.x.add(p.x).add(foldOffX),
+        pYaw.x.add(p.x).add(foldOffX).add(c.x),
         pYaw.y.add(terrainY),
-        pYaw.z.add(p.y).add(foldOffZ),
+        pYaw.z.add(p.y).add(foldOffZ).add(c.y),
       );
       vWorld.assign(outPos.add(vec3(u.uAnchorPos.x, 0, u.uAnchorPos.z)));
       return outPos;
@@ -1326,6 +1376,7 @@ export class HybridGrassSystem {
     u.uWindDir.value.set(Math.cos(wr), Math.sin(wr));
     u.uClumpScale.value = gp.clumpScale ?? 1.5;
     u.uClumpStrength.value = gp.clumpStrength ?? 0.7;
+    u.uClumpPull.value = gp.clumpPull ?? 0;
     u.uGrassDensity.value = gp.grassDensity ?? 1;
     u.uBladeCol.value.copy(srgb(gp.bladeColor ?? "#0e300e"));
     u.uTipCol.value.copy(srgb(gp.tipColor ?? "#004d05"));

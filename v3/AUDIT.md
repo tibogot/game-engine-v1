@@ -141,6 +141,13 @@ the game.
       0.65-1.5 m, median 1.09, 51% under 1.1 m at Blade height 1).
     - Mid ring at 3 segments (GoT far LOD is 7 vertices): +0.06 ms, not
       visible at 80-200 m on a 1296 px view; kept at 2 ("Far segments").
+    - Clumping made GoT-style, 2026-09-17: nearest clump over the 3×3
+      neighbouring cells (was the blade's own cell only, which cut clumps on
+      straight cell edges), clump height/shade/facing/lean from their own
+      random (was the same random that placed the centre), and "Clump pull"
+      moves blades toward their clump centre (tufts with gaps). Near ring
+      compute per dispatch, A/B against the committed module: 0.087-0.097 ms
+      before, 0.069-0.099 ms after (38k visible blades).
     Still open for the GoT match: painted blade height, displacement buffer
     for all objects, dithered terrain grass shadows in the far field. Ground UNDER near blades is still the painted ground (a GoT-look
     project should paint a grass-coloured ground there, or add a control).
