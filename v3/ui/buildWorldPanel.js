@@ -1853,8 +1853,9 @@ export function buildWorldPanel(app) {
           min: 2,
           max: 20,
           step: 1,
-          hint: "A heavier line every Nth fine cell. 10 puts it at 1 m, the "
-            + "human-scale unit Unreal reasons rooms and doors in.",
+          hint: "A heavier line every Nth fine cell. 5 is what every Unreal "
+            + "template shows, and with a 0.2 m fine cell it puts the heavy line "
+            + "at 1 m — the human-scale unit rooms and doors are reasoned in.",
           onChange: live,
         });
         _slider(gbBody, gb, "wallCellScale", {
@@ -1862,10 +1863,11 @@ export function buildWorldPanel(app) {
           min: 1,
           max: 4,
           step: 0.5,
-          hint: "Vertical faces multiply the FINE cell by this (Unreal uses 2, so "
-            + "0.2 m on walls against 0.1 m on floors) — a wall is read at an "
-            + "oblique angle where the fine grid turns to clutter. The heavy 1 m "
-            + "line is unchanged, so a wall and its floor still agree on metres.",
+          hint: "Vertical faces multiply the FINE cell by this. 1 = walls match "
+            + "floors, which is what Unreal looks like. Epic's docs describe a 2x "
+            + "split (coarser on walls, read at oblique angles); the heavy 1 m "
+            + "line is unchanged either way, so a wall and its floor always agree "
+            + "on metres.",
           onChange: live,
         });
         _slider(gbBody, gb, "minorWidth", {

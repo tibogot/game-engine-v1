@@ -35,7 +35,7 @@
  *
  * WHAT IT DRAWS
  * ─────────────
- * Two decades of line (minor = `minorCell` metres, major = minorCell × 10), a
+ * Two levels of line (minor = `minorCell` metres, major = minorCell × 5), a
  * gentle per-major-cell brightness break-up so the surface reads as tiled rather
  * than printed, and a groove darkening (ambient occlusion folded into albedo)
  * plus a roughness break on the lines so the surface responds to a moving sun
@@ -105,7 +105,7 @@ import {
 export const GRID_DEFAULTS = {
   /** Base surface colour between the lines. */
   baseColor: "#efede8",
-  /** Minor line colour (the fine 10 cm grid). */
+  /** Minor line colour (the fine 20 cm grid). */
   lineColor: "#dedcd6",
   /**
    * Major line colour — the 1 m line, and the only one meant to be read at a
@@ -115,43 +115,45 @@ export const GRID_DEFAULTS = {
    */
   majorColor: "#adaba5",
   /*
-   * ── THE TWO CELL SIZES ARE UNREAL'S, NOT INVENTED ────────────────────────
+   * ── THE CELL SIZES: 0.2 m FINE, 1 m HEAVY ────────────────────────────────
    *
-   * Epic's level-blockout documentation, describing SM_Cube and its material:
-   *   "This block is 1m x 1m x 1m ... The dark lines on the material create a
-   *    1m grid, and the light lines on the floor material create a 0.1m grid.
-   *    The light lines on vertical surfaces are 0.2m grids."
+   * The 1 m heavy line is documented. Epic's level-blockout page, on SM_Cube:
+   * "This block is 1m x 1m x 1m ... The dark lines on the material create a 1m
+   * grid". It is the human-scale unit — Unreal's default character is 180 uu, so
+   * a person stands just under two dark cells, and doors, stairs and ceilings are
+   * all reasoned in metres from there. 1 uu = 1 cm and the grid is base-10
+   * because the world is metric (UE3/UDK snapped power-of-two, UE4 moved to
+   * base-10 and Epic still recommends it, since meshes from any external DCC are
+   * metric too).
    *
-   * So: light 10 cm, dark 1 m, and 20 cm rather than 10 on walls. Three reasons
-   * those are the right numbers rather than merely Epic's numbers:
+   * THE FINE LINE IS 0.2 m — FIVE PER METRE — ON EVERY FACE, AND THAT IS AN
+   * OBSERVED NUMBER, NOT A DOCUMENTED ONE. The same Epic page says the light
+   * lines are 0.1 m on floors and 0.2 m only on vertical surfaces. Every actual
+   * Unreal template shows five subdivisions per metre on the FLOOR as well — the
+   * user checked a dozen of them, and that is broader evidence than one sentence.
+   * The likeliest reading is that the sentence describes the faces of that one
+   * cube rather than the template floors, but it does not matter much: five is
+   * what the engine looks like, so five is what we draw.
    *
-   *   • 1 uu = 1 cm and the grid is base-10 because the world is metric. UE3 and
-   *     UDK snapped power-of-two (8/16/32/128); UE4 moved to base-10 and Epic
-   *     still recommends it, because meshes arriving from any external DCC are
-   *     metric too.
-   *   • THE FINE GRID IS THE SNAP INCREMENT MADE VISIBLE. The same page: "By
-   *     default, the grid size for moving objects is 10 units, or 10cm." The
-   *     light grid is not decoration — it is a picture of where a dragged object
-   *     will actually land.
-   *   • The dark 1 m grid is the human-scale unit. Unreal's default character is
-   *     180 uu, so a person is just under two dark cells, and doors, stairs and
-   *     ceilings are all reasoned in metres from there.
+   * Corollary worth keeping: `wallCellScale` stays in the material but defaults
+   * to 1, because with floors already at 0.2 there is nothing to differentiate.
    *
-   * We shipped 1 m / 5 m first, which is one whole level too coarse: our LIGHT
-   * line was sitting where Unreal's DARK line sits.
+   * Shipped 1 m / 5 m first (a whole level too coarse — our LIGHT line sat where
+   * Unreal's DARK line sits), then 0.1 / 1 from the doc. This is the third set
+   * and the one that matches what the engine actually looks like.
    */
   /** Minor cell edge, in METRES. This is the number that makes the grid a ruler. */
-  minorCell: 0.1,
-  /** Major cell = minorCell × this, i.e. the 1 m line. */
-  majorRatio: 10,
+  minorCell: 0.2,
+  /** Major cell = minorCell × this, i.e. the 1 m line. Five per metre. */
+  majorRatio: 5,
   /**
-   * On VERTICAL faces the minor cell is multiplied by this — Unreal's 0.2 m
-   * instead of 0.1 m. Vertical surfaces are read at oblique angles, where a
-   * 10 cm grid turns to clutter. The major line stays at 1 m on every face.
-   * Free for us: the dominant-axis projection already knows which way a face
+   * Multiplies the minor cell on VERTICAL faces only; the major line is unchanged
+   * on every face. 1 = walls match floors, which is what Unreal looks like now
+   * that floors are 0.2. Set it to 2 for the split Epic's page describes.
+   * Free either way: the dominant-axis projection already knows which way a face
    * points. The terrain is a floor and never uses it.
    */
-  wallCellScale: 2,
+  wallCellScale: 1,
   /** Minor line width in METRES (not a UV fraction) — 4 mm, a hairline. */
   minorWidth: 0.004,
   /** Major line width in METRES — 2 cm, five times the minor line. */

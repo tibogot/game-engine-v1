@@ -526,7 +526,7 @@ export async function startV3App(opts = {}) {
    * user probably never touched). Without this, anyone who had the editor open
    * once is pinned to the old look forever and new defaults appear to do nothing.
    */
-  const GROUND_BASE_VERSION = 8;
+  const GROUND_BASE_VERSION = 9;
   const GROUND_BASE_MODES = ["grid", "tile", "flat"];
   /*
    * `moveSnap` and `followSnap` are editor BEHAVIOUR, not grid uniforms, so they
