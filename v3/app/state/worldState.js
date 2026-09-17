@@ -43,7 +43,7 @@ export function createWorldToolState() {
     lensFlare: { ...ts.lensFlare, enabled: false },
     postFx: ts.postFx,
     /*
-     * SHADOWS — v3 diverges from v2 here, see AUDIT #102.
+     * SHADOWS — v3 diverges from v2 here, see AUDIT #108.
      *
      * v2 ships `practical` splits with maxFar 80. That pairing was tuned when
      * the editor ran FOUR cascades: practical anchors its logarithmic half on

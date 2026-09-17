@@ -100,7 +100,8 @@ the game.
     daylight at mouths, zero per-pixel cost), vehicles (car, stunt car, ball,
     plane) use openings and tunnel floors. Remaining: characters are not lit
     by the baked tunnel light.
-13. **Mirror, clone, copy-paste** (terrain tools, not objects). Mirror: make one
+13. ~~**Mirror, clone, copy-paste**~~ — DONE 2026-09-17, all three slices
+    (terrain tools, not objects). Mirror: make one
     half of the terrain the mirror image of the other (symmetric maps). Clone
     brush: Alt+click a source, paint to copy its heights and paint elsewhere.
     Region copy-paste: copy a rectangle of terrain, paste it with rotate / flip
@@ -148,6 +149,23 @@ the game.
     TRAP: three's WebGPU renderer does not draw THREE.LineLoop — it logs an
     error EVERY frame (25,560 in one test) and draws nothing; a `visible` check
     still passes. Use a Line closed by repeating its first point.
+    **CLONE BRUSH — DONE 2026-09-17** (slice 3 of 3). Sculpt → Clone: Alt+click
+    sets the source (magenta ring on the ground), then paint. Aligned (the
+    source follows the brush, Photoshop-style) or fixed source; Height: Match
+    ground (shifts the copy by the height difference between source and brush
+    point at stroke start) or Keep heights; Opacity (default 60%); Ground paint.
+    Heights: sculptBrush.clone reads rtPreStroke at uv + offset, so a stroke
+    never re-clones its own output when source and destination overlap; blend =
+    falloff^k × opacity × edge fade, nothing written where the source is off
+    the map. Paint + painted holes: the CPU twin (splatMap.beginClone /
+    cloneStamp / endClone) reads a snapshot taken at stroke start and returns
+    before/after patches of the touched rect, attached to the sculpt stroke —
+    one Ctrl+Z for the whole stroke, heights and paint together.
+    Verified live on generated terrain: cloned heights match the source within
+    0.43 m; undo puts the destination line back exactly, redo reapplies
+    exactly; a painted blob clones 127 → 125 texels and undo returns it to 0.
+    Test: tools/terrainClonePaintTest.mjs (no smear on overlap, opacity
+    convergence, holes, off-map source, exact undo/redo patches).
     Test: tools/terrainRegionPasteTest.mjs (18 checks: in-place no-op, move,
     rotate 90 direction, flips, feather, holes, exact undo patch, off-map).
     Still to do: clone brush (slice 3).
@@ -578,7 +596,8 @@ is 1.383 ms — 47% of the frame**, with 6 prop meshes and 9.1 M triangles.
     cast. The lists are now independent, so the camera list can be culled
     per-instance — which is where the ~40% is.
 
-38. **Shadow pass draws every prop** — PARTLY DONE 2026-09-16. The CSM reaches
+38. ~~**Shadow pass draws every prop**~~ — DONE 2026-09-16 (tier gate here,
+    per-instance half in 38b above). The CSM reaches
     80 m (maxFar), yet every detail level cast, so props from 150 m to 500 m
     were drawn into an 80 m shadow map. A tier now casts only when its NEAREST
     prop can still be inside it (`propInstancer.setShadowDistance`, fed from
@@ -933,7 +952,7 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      box receives the decal. Not done: decal layers/masks (receive on terrain
      only), atlases bigger than 512² per layer, road surface decals (57) still
      separate.
-101. ~~**Foliage**~~ — REBUILT 2026-09-16 (phases 1-2 of 5). The v2 billboard
+107. ~~**Foliage**~~ — REBUILT 2026-09-16 (phases 1-2 of 5). The v2 billboard
      cards are DELETED (v3/app/foliageEnvironment.js, state/foliageState.js and
      their panel): they drew `visible chunks × slots` draw calls, held three
      full copies of every instance matrix (one per LOD), had per-chunk LOD with
@@ -978,7 +997,7 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      GLB import with impostors, placed (non-painted) foliage with the instance
      BVH, and textured cards for plants geometry cannot afford.
 
-102. ~~**CSM splits for an open world**~~ — DONE 2026-09-16. v3 now ships
+108. ~~**CSM splits for an open world**~~ — DONE 2026-09-16. v3 now ships
      `maxFar: 150` with nearSplit-anchored cascades instead of v2's
      `practical`@80 (v3/app/csmSplits.js; v2 is untouched, v3 overrides in
      state/worldState.js).
@@ -1039,7 +1058,7 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      ray-march against the height texture — resolution-independent, no cascade,
      kilometres of mountain shade. A cascade is the wrong tool for that.
 
-102b. ~~**Terrain self-shadowing**~~ — DONE 2026-09-16 for the TERRAIN
+109. ~~**Terrain self-shadowing**~~ — DONE 2026-09-16 for the TERRAIN
      (render/lighting/terrainSunShadow.js). Before it the terrain cast nothing
      at all: it is not a CSM caster, so a ridge at sunset lit both its sides.
      Each terrain VERTEX marches 32 exponential steps toward the sun through the
@@ -1322,17 +1341,19 @@ together save only 0.1–0.4 ms unpainted and 0.3–0.6 ms painted at 4.76 Mpx
 (two runs each, ~0.03–0.15 ms native). Their gates work; no change made.
 Large-scale variation was already measured free.
 
-## Suggested order (updated 2026-09-14)
+## Suggested order (updated 2026-09-17)
 
 1. ~~Viewport selection + prop foundation~~ — DONE 2026-09-14 (28-30, 35-37,
    43, 45). Left open: per-prop highlight tint (44; the orange box outline
    stays) and per-prop incremental updates (41, not felt).
 2. ~~Dropped textures surviving a reload (31)~~ — DONE 2026-09-14.
 3. Grass look pass, panel and horizon (16-18), with your eyes.
-4. Before the city builder or any scene past ~10k props: shadow culling +
-   shadow LOD (38), per-prop culling (39), meshoptimizer auto-LOD (40).
+4. ~~Before the city builder or any scene past ~10k props: shadow culling +
+   shadow LOD (38), per-prop culling (39), meshoptimizer auto-LOD (40).~~ —
+   DONE 2026-09-16 (38, 38b, 39, 40); CSM splits (108) and terrain
+   self-shadowing (109) on top.
 5. More Genshin textures (3), small paint gaps (4, 5).
-6. Terrain mirror / clone / region copy-paste (13).
+6. ~~Terrain mirror / clone / region copy-paste (13).~~ — DONE 2026-09-17.
 7. Roads: the lane-based engine replaces Smart Road 2 — follow the road order in
    its section (shader paint with wear and wetness, 50-52, first).
 

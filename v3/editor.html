@@ -375,6 +375,9 @@
                 <button id="btn-region" class="tool-btn" type="button" title="Copy a rectangle of terrain and paste it elsewhere, turned, flipped and blended in">
                   <i data-lucide="copy"></i><span>Copy</span>
                 </button>
+                <button id="btn-clone" class="tool-btn" type="button" title="Clone brush: Alt+click a source, then paint to copy its ground elsewhere">
+                  <i data-lucide="stamp"></i><span>Clone</span>
+                </button>
               </div>
               <!-- Dynamic tool options zone — contents change per active tool -->
               <div id="tool-options" style="margin-top:6px">
@@ -572,6 +575,38 @@
                   </div>
                   <button type="button" class="action-btn" id="btn-region-new" style="width:100%;margin-top:4px">New selection</button>
                   <p class="mode-hint" style="margin-top:4px">Click to paste, as often as you like. Esc clears the copy. Heights and ground paint only: grass, foliage, trees, props, roads and rivers are not copied. Each paste is one Ctrl+Z.</p>
+                </div>
+                <div id="sub-clone" class="tool-sub" style="display:none">
+                  <p class="mode-hint" id="clone-status" style="margin:0 0 6px">Alt+click the terrain to pick a source.</p>
+                  <div class="prop-row" title="On: the distance between the brush and the source stays the same for every stroke. Off: each stroke starts again from the source.">
+                    <span class="prop-label">Aligned</span>
+                    <div class="prop-value">
+                      <button type="button" class="prop-toggle checked" id="ck-clone-aligned" aria-label="Keep the source aligned between strokes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></button>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Match ground: the source is lifted or lowered to the height where the stroke starts, so relief is copied, not altitude. Keep heights: copy the exact heights.">
+                    <span class="prop-label">Height</span>
+                    <div class="prop-value">
+                      <div class="option-chips" id="clone-height-chips">
+                        <button class="option-chip active" type="button" data-clone-height="match">Match ground</button>
+                        <button class="option-chip" type="button" data-clone-height="keep">Keep heights</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Opacity</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-clone-opacity" min="5" max="100" step="1" value="60" />
+                      <span class="prop-num" id="lbl-clone-opacity">60%</span>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Clone the ground paint (and painted holes) with the heights.">
+                    <span class="prop-label">Ground paint</span>
+                    <div class="prop-value">
+                      <button type="button" class="prop-toggle checked" id="ck-clone-paint" aria-label="Clone ground paint too"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></button>
+                    </div>
+                  </div>
+                  <p class="mode-hint" style="margin-top:4px">Uses the brush size, mask and falloff above. The magenta ring shows what is being copied. Esc forgets the source. Each stroke is one Ctrl+Z.</p>
                 </div>
                 <div id="sub-ramp" class="tool-sub" style="display:none">
                   <div class="prop-row">

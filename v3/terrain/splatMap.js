@@ -594,6 +594,98 @@ export class SplatMap {
     return { before };
   }
 
+  // -- Clone brush, paint half -------------------------------------------------
+  // The CPU twin of sculptBrush.clone(). Like the heights, it reads the paint as
+  // it was when the stroke STARTED, so a stroke never re-clones its own output.
+
+  /** Start a clone stroke: snapshot the paint the stroke will read from. */
+  beginClone() {
+    if (!this._clonePre0) {
+      this._clonePre0 = new Uint8Array(this.data0.length);
+      this._clonePre1 = new Uint8Array(this.data1.length);
+      this._clonePreHU = new Uint8Array(this.holeUser.length);
+    }
+    this._clonePre0.set(this.data0);
+    this._clonePre1.set(this.data1);
+    this._clonePreHU.set(this.holeUser);
+    this._cloneRect = null;
+    this._cloneOpen = true;
+  }
+
+  /**
+   * One clone stamp: every texel within `radius` of (cx, cz) blends toward the
+   * pre-stroke texel at +(offsetX, offsetZ) metres, by
+   * (1 - d/radius)^falloff * opacity. Weights and painted holes blend alike.
+   */
+  cloneStamp({ cx, cz, radius, falloff = 2, opacity = 1, offsetX, offsetZ }) {
+    if (!this._cloneOpen) this.beginClone();
+    const R = SPLAT_RES, W = WORLD_SIZE, half = W * 0.5, px2m = W / R;
+    const ox = Math.round(offsetX / px2m), oz = Math.round(offsetZ / px2m);
+    const u0 = Math.max(0, Math.floor((cx - radius + half) / px2m));
+    const u1 = Math.min(R - 1, Math.ceil((cx + radius + half) / px2m));
+    const v0 = Math.max(0, Math.floor((cz - radius + half) / px2m));
+    const v1 = Math.min(R - 1, Math.ceil((cz + radius + half) / px2m));
+    const op = Math.max(0, Math.min(1, opacity));
+    const pre0 = this._clonePre0, pre1 = this._clonePre1, preHU = this._clonePreHU;
+    let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
+    for (let pz = v0; pz <= v1; pz++) {
+      const sz = pz + oz;
+      if (sz < 0 || sz >= R) continue;
+      const dz = (pz + 0.5) * px2m - half - cz;
+      for (let px = u0; px <= u1; px++) {
+        const sx = px + ox;
+        if (sx < 0 || sx >= R) continue;
+        const dx = (px + 0.5) * px2m - half - cx;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d > radius) continue;
+        const w = Math.pow(Math.max(0, 1 - d / radius), falloff) * op;
+        if (w <= 0) continue;
+        const di = pz * R + px, si = sz * R + sx;
+        const d4 = di * 4, s4 = si * 4;
+        for (let c = 0; c < 4; c++) {
+          this.data0[d4 + c] = (this.data0[d4 + c] + (pre0[s4 + c] - this.data0[d4 + c]) * w + 0.5) | 0;
+        }
+        for (let c = 0; c < 3; c++) {
+          this.data1[d4 + c] = (this.data1[d4 + c] + (pre1[s4 + c] - this.data1[d4 + c]) * w + 0.5) | 0;
+        }
+        this.holeUser[di] = (this.holeUser[di] + (preHU[si] - this.holeUser[di]) * w + 0.5) | 0;
+        if (px < x0) x0 = px; if (px > x1) x1 = px;
+        if (pz < y0) y0 = pz; if (pz > y1) y1 = pz;
+      }
+    }
+    if (x1 < 0) return null;
+    this._composeHoles(x0, y0, x1, y1);
+    const rect = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    if (!this._cloneRect) this._cloneRect = rect;
+    else {
+      const a = this._cloneRect;
+      const nx0 = Math.min(a.x, rect.x), ny0 = Math.min(a.y, rect.y);
+      const nx1 = Math.max(a.x + a.w, rect.x + rect.w), ny1 = Math.max(a.y + a.h, rect.y + rect.h);
+      this._cloneRect = { x: nx0, y: ny0, w: nx1 - nx0, h: ny1 - ny0 };
+    }
+    this.tex.addLayerUpdate(0);
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
+    this._markDirty();
+    return rect;
+  }
+
+  /**
+   * Close the clone stroke. Returns `{ before, after }` patches of everything it
+   * touched (for one undo step), or null if it touched nothing.
+   */
+  endClone() {
+    if (!this._cloneOpen) return null;
+    this._cloneOpen = false;
+    const rect = this._cloneRect;
+    this._cloneRect = null;
+    if (!rect) return null;
+    return {
+      before: this.copyRect(rect, this._clonePre0, this._clonePre1, this._clonePreHU),
+      after: this.copyRect(rect),
+    };
+  }
+
   /**
    * Both slices as one contiguous LIVE buffer — its hole channel includes tool
    * holes. Use exportCombined() for anything written to disk.

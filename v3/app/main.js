@@ -1455,11 +1455,13 @@ export async function startV3App(opts = {}) {
   const subRamp         = uiById("sub-ramp");
   const subMirror       = uiById("sub-mirror");
   const subRegion       = uiById("sub-region");
+  const subClone        = uiById("sub-clone");
   const btnErode        = uiById("btn-erode");
   const btnHydro        = uiById("btn-hydro");
   const btnRamp         = uiById("btn-ramp");
   const btnMirror       = uiById("btn-mirror");
   const btnRegion       = uiById("btn-region");
+  const btnClone        = uiById("btn-clone");
   const btnSmudge       = uiById("btn-smudge");
   const btnContrast     = uiById("btn-contrast");
   const slNoiseOct      = uiById("sl-noise-oct");
@@ -1665,6 +1667,7 @@ export async function startV3App(opts = {}) {
     btnContrast.classList.toggle("active", m === "contrast");
     btnMirror?.classList.toggle("active", m === "mirror");
     btnRegion?.classList.toggle("active", m === "region");
+    btnClone?.classList.toggle("active", m === "clone");
     // Tool options always track stickyMode so modifier-key overrides don't hide the zone.
     subRaiseLower.style.display = (stickyMode === "raise" || stickyMode === "lower") ? "" : "none";
     subTerrace   .style.display = stickyMode === "terrace" ? "" : "none";
@@ -1677,6 +1680,8 @@ export async function startV3App(opts = {}) {
     if (subMirror) subMirror.style.display = stickyMode === "mirror" ? "" : "none";
     if (subRegion) subRegion.style.display = stickyMode === "region" ? "" : "none";
     if (stickyMode !== "region") _regionHideSafe();
+    if (subClone) subClone.style.display = stickyMode === "clone" ? "" : "none";
+    if (stickyMode !== "clone") _cloneHideSafe();
   }
 
   btnRaise  .addEventListener("click", () => { stickyMode = "raise";   refreshModeIndicator(); });
@@ -1809,6 +1814,100 @@ export async function startV3App(opts = {}) {
     syncRegionUi();
   }
   uiById("btn-region-new")?.addEventListener("click", regionClearClip);
+
+  // -- Clone brush (AUDIT 13, slice 3) --------------------------------------
+  // Alt+click picks a source; painting copies from brush + offset. Heights come
+  // from the pre-stroke map on the GPU (sculptBrush.clone), paint from the
+  // pre-stroke paint on the CPU (splatMap.cloneStamp), so overlapping source
+  // and destination never smear. Aligned keeps the offset between strokes.
+  var _cloneRingReady;
+  function _cloneHideSafe() {
+    if (_cloneRingReady) cloneRing.visible = false;
+  }
+  const cloneState = {
+    source: null,            // world {x, z}
+    offset: null,            // world {x, z} from brush to source, fixed once aligned
+    aligned: true, heightMode: "match", opacity: 0.6, paint: true,
+    strokeOffset: null, strokeHeightNorm: 0, paintOpen: false,
+  };
+  const cloneStatus      = uiById("clone-status");
+  const slCloneOpacity   = uiById("sl-clone-opacity");
+  const lblCloneOpacity  = uiById("lbl-clone-opacity");
+  function syncCloneUi() {
+    const cs = cloneState;
+    uiById("ck-clone-aligned")?.classList.toggle("checked", cs.aligned);
+    uiById("ck-clone-paint")?.classList.toggle("checked", cs.paint);
+    for (const b of document.querySelectorAll("[data-clone-height]")) b.classList.toggle("active", b.dataset.cloneHeight === cs.heightMode);
+    if (slCloneOpacity) slCloneOpacity.value = String(Math.round(cs.opacity * 100));
+    if (lblCloneOpacity) lblCloneOpacity.textContent = `${Math.round(cs.opacity * 100)}%`;
+    if (cloneStatus) {
+      cloneStatus.textContent = cs.source
+        ? `Source at ${Math.round(cs.source.x)}, ${Math.round(cs.source.z)}. Paint to clone; Alt+click to move it.`
+        : "Alt+click the terrain to pick a source.";
+    }
+  }
+  uiById("ck-clone-aligned")?.addEventListener("click", () => { cloneState.aligned = !cloneState.aligned; cloneState.offset = null; syncCloneUi(); });
+  uiById("ck-clone-paint")?.addEventListener("click", () => { cloneState.paint = !cloneState.paint; syncCloneUi(); });
+  uiById("clone-height-chips")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-clone-height]");
+    if (!b) return;
+    cloneState.heightMode = b.dataset.cloneHeight;
+    syncCloneUi();
+  });
+  slCloneOpacity?.addEventListener("input", () => { cloneState.opacity = Number(slCloneOpacity.value) / 100; syncCloneUi(); });
+  btnClone?.addEventListener("click", () => { stickyMode = "clone"; syncCloneUi(); refreshModeIndicator(); });
+
+  /** Alt+click: the new source. A new source restarts the alignment. */
+  function cloneSetSource(hit) {
+    cloneState.source = { x: (hit.u - 0.5) * WORLD_SIZE, z: (hit.v - 0.5) * WORLD_SIZE };
+    cloneState.offset = null;
+    syncCloneUi();
+    cloneRefreshRing(hit);
+  }
+  /** Mouse down: fix this stroke's offset and height lift, open the paint half. */
+  function cloneBeginStroke(hit) {
+    const cs = cloneState;
+    if (!cs.source) return false;
+    const x = (hit.u - 0.5) * WORLD_SIZE, z = (hit.v - 0.5) * WORLD_SIZE;
+    const offset = cs.aligned && cs.offset ? cs.offset : { x: cs.source.x - x, z: cs.source.z - z };
+    if (cs.aligned) cs.offset = offset;
+    cs.strokeOffset = offset;
+    cs.strokeHeightNorm = cs.heightMode === "match"
+      ? (_groundAt(x, z) - _groundAt(x + offset.x, z + offset.z)) / MAX_HEIGHT
+      : 0;
+    if (cs.paint) { splatMap.beginClone(); cs.paintOpen = true; }
+    return true;
+  }
+  function cloneStampAt(u, v) {
+    const cs = cloneState;
+    if (!cs.strokeOffset) return;
+    sculpt.clone(u, v, {
+      offsetUV: { u: cs.strokeOffset.x / WORLD_SIZE, v: cs.strokeOffset.z / WORLD_SIZE },
+      opacity: cs.opacity,
+      heightOffsetNorm: cs.strokeHeightNorm,
+    });
+    if (cs.paintOpen) {
+      splatMap.cloneStamp({
+        cx: (u - 0.5) * WORLD_SIZE, cz: (v - 0.5) * WORLD_SIZE,
+        radius: sculpt.uRadius.value * WORLD_SIZE, falloff: sculpt.uFalloff.value,
+        opacity: cs.opacity, offsetX: cs.strokeOffset.x, offsetZ: cs.strokeOffset.z,
+      });
+    }
+  }
+  /** Before the sculpt stroke closes: tie the paint change to its undo step. */
+  function cloneClosePaint() {
+    const cs = cloneState;
+    cs.strokeOffset = null;
+    if (!cs.paintOpen) return;
+    cs.paintOpen = false;
+    const res = splatMap.endClone();
+    if (res) {
+      sculpt.attachToStroke({
+        undo: () => splatMap.pasteRect(res.before),
+        redo: () => splatMap.pasteRect(res.after),
+      });
+    }
+  }
   btnRegion?.addEventListener("click", () => { stickyMode = "region"; syncRegionUi(); refreshModeIndicator(); });
   btnMirror?.addEventListener("click", () => { stickyMode = "mirror"; syncMirrorUi(); refreshModeIndicator(); });
 
@@ -1908,6 +2007,8 @@ export async function startV3App(opts = {}) {
 
   /** Modifier keys temporarily override the sticky chip selection. */
   function getStrokeMode() {
+    // Alt+click picks the clone source, so the clone brush ignores modifiers.
+    if (stickyMode === "clone") return "clone";
     if (pointerMods.alt) return "flatten";
     if (pointerMods.ctrl) return "smooth";
     if (pointerMods.shift) return "lower";
@@ -2574,7 +2675,7 @@ export async function startV3App(opts = {}) {
       return;
     }
     if (editorMode === "spline" && m !== "spline") _onLeaveSplineMode();
-    if (m !== "sculpt") _regionHideSafe();   // the copy outline belongs to Sculpt
+    if (m !== "sculpt") { _regionHideSafe(); _cloneHideSafe(); }   // Sculpt-only overlays
     if (editorMode === "riverv2" && m !== "riverv2") riverV2System?.cancelDrag();
     if (editorMode === "lake" && m !== "lake") lakeSystem?.cancelDrag();
     if (editorMode === "road" && m !== "road") _onLeaveRoadMode();
@@ -3261,6 +3362,7 @@ export async function startV3App(opts = {}) {
     else if (mode === "hydro")    sculpt.hydro(u, v);
     else if (mode === "smudge")   sculpt.smudge(u, v);
     else if (mode === "contrast") sculpt.contrast(u, v);
+    else if (mode === "clone")    cloneStampAt(u, v);
     else sculpt.paint(u, v, mode === "lower" ? -1 : 1, stickyStamp);
   }
 
@@ -4008,6 +4110,34 @@ export async function startV3App(opts = {}) {
     sculpt.endStroke();
     onHistoryChange();
   }
+  // Clone source ring: where the brush is copying FROM, brush-sized, on the ground.
+  const CLONE_RING_PTS = 48;
+  const cloneRing = new THREE.Line(
+    new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array((CLONE_RING_PTS + 1) * 3), 3)),
+    new THREE.LineBasicMaterial({ color: 0xff55dd, depthTest: false, transparent: true, opacity: 0.95 }),
+  );
+  cloneRing.renderOrder = 999;
+  cloneRing.frustumCulled = false;
+  cloneRing.visible = false;
+  scene.add(cloneRing);
+  _cloneRingReady = true;
+  function cloneRefreshRing(hit) {
+    const cs = cloneState;
+    if (stickyMode !== "clone" || editorMode !== "sculpt" || !cs.source) { _cloneHideSafe(); return; }
+    let cx = cs.source.x, cz = cs.source.z;
+    const off = cs.strokeOffset ?? (cs.aligned ? cs.offset : null);
+    if (off && hit) { cx = (hit.u - 0.5) * WORLD_SIZE + off.x; cz = (hit.v - 0.5) * WORLD_SIZE + off.z; }
+    const r = sculpt.uRadius.value * WORLD_SIZE;
+    const arr = cloneRing.geometry.getAttribute("position");
+    for (let i = 0; i <= CLONE_RING_PTS; i++) {
+      const t = (i / CLONE_RING_PTS) * Math.PI * 2;
+      const x = cx + Math.cos(t) * r, z = cz + Math.sin(t) * r;
+      arr.setXYZ(i, x, _groundAt(x, z) + 1.5, z);
+    }
+    arr.needsUpdate = true;
+    cloneRing.visible = true;
+  }
+
   // A drag released outside the canvas still finishes the selection.
   window.addEventListener("mouseup", (e) => {
     if (e.button !== 0 || !regionState.dragStart) return;
@@ -4033,6 +4163,7 @@ export async function startV3App(opts = {}) {
     uCursorUV.value.set(hit && !noRing ? hit.u : -2, hit && !noRing ? hit.v : -2);
     updateRampPreview(hit);
     if (stickyMode === "region") { if (hit) _regionCursor = hit; regionRefreshOutline(hit); }
+    if (stickyMode === "clone") cloneRefreshRing(hit);
     // Throttled readback so the cursor ring stays accurate while hovering.
     const now = performance.now();
     if (now - lastReadbackMs > 150) { lastReadbackMs = now; requestHeightmapReadback(); }
@@ -4040,7 +4171,7 @@ export async function startV3App(opts = {}) {
 
   renderer.domElement.addEventListener("mouseleave", () => {
     uCursorUV.value.set(-2, -2);
-    if (isPainting) sculpt.endStroke();
+    if (isPainting) { cloneClosePaint(); sculpt.endStroke(); }
     isPainting = false;
     lastPaintUV = null;
   });
@@ -4068,6 +4199,18 @@ export async function startV3App(opts = {}) {
 
     // Mirror has no stroke: clicking the ground does nothing, Apply does the work.
     if (stickyMode === "mirror") return;
+
+    // Clone: Alt+click picks the source; a plain drag clones from it.
+    if (stickyMode === "clone") {
+      const uvHit = getUV();
+      if (!uvHit) return;
+      if (e.altKey) { cloneSetSource(uvHit); return; }
+      if (!cloneBeginStroke(uvHit)) return;
+      sculpt.beginStroke();
+      isPainting = true;
+      lastPaintUV = null;
+      return;
+    }
 
     // Region: with nothing copied a drag selects; with a copy every click pastes.
     if (stickyMode === "region") {
@@ -4111,6 +4254,7 @@ export async function startV3App(opts = {}) {
     if (e.button !== 0) return;
     isPainting = false;
     lastPaintUV = null;
+    cloneClosePaint();  // the clone's paint joins this stroke's undo step
     sculpt.endStroke(); // close the stroke → push its dirty-rect undo entry
   });
 
@@ -4140,7 +4284,7 @@ export async function startV3App(opts = {}) {
   // system that a project file touches — trees, props, roads, splines — exists.)
 
   function cancelStroke() {
-    if (isPainting) sculpt.endStroke();
+    if (isPainting) { cloneClosePaint(); sculpt.endStroke(); }
     isPainting = false;
     lastPaintUV = null;
   }
@@ -4229,6 +4373,15 @@ export async function startV3App(opts = {}) {
       return;
     }
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+    // Escape forgets the clone source.
+    if (e.code === "Escape" && editorMode === "sculpt" && stickyMode === "clone" && cloneState.source && !isPainting) {
+      e.preventDefault();
+      cloneState.source = null;
+      cloneState.offset = null;
+      syncCloneUi();
+      _cloneHideSafe();
+      return;
+    }
     // Escape cancels a region drag, or clears the copied region.
     if (e.code === "Escape" && editorMode === "sculpt" && stickyMode === "region" && (regionState.dragStart || regionState.clip)) {
       e.preventDefault();

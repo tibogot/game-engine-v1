@@ -7,7 +7,7 @@
  * uniformly: the first split lands at roughly maxFar/3. That ties contact-shadow
  * sharpness to shadow RANGE through a single knob — every extra metre of reach
  * is paid for in near-field texels, which is why this editor sat at maxFar 80
- * for so long (see AUDIT #102 for the measurements).
+ * for so long (see AUDIT #108 for the measurements).
  *
  * `nearAnchoredSplits` cuts that knot. You say where the FIRST cascade ends —
  * the distance past which you stop caring whether a foot touches the ground —

@@ -250,6 +250,28 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   })();
   const flattenQuad = new QuadMesh(flattenMat);
 
+  // -- Clone brush -------------------------------------------------------------
+  // Blends toward the height at (this texel + offset), read from the PRE-STROKE
+  // copy: a stroke never re-clones what it has just painted, so a source that
+  // overlaps its destination does not smear into itself. Same mask, filter,
+  // falloff, clamp and edge fade as every other brush.
+  const cloneSrcNode    = texture(rtPreStroke.texture);
+  const uCloneOffset    = uniform(new THREE.Vector2(0, 0));   // UV: source = texel + offset
+  const uCloneOpacity   = uniform(1);
+  const uCloneHeight    = uniform(0);                         // normalized lift added to the source
+  const cloneMat = new THREE.MeshBasicNodeMaterial();
+  cloneMat.fragmentNode = Fn(() => {
+    const uvCoord  = uv();
+    const currentH = texture(srcNode, uvCoord).r;
+    const s        = uvCoord.add(uCloneOffset);
+    const inSrc    = step(float(0), s.x).mul(step(s.x, float(1))).mul(step(float(0), s.y)).mul(step(s.y, float(1)));
+    const srcH     = texture(cloneSrcNode, s).r.add(uCloneHeight);
+    const falloff  = getBrushFalloff(uvCoord);
+    const amt      = clamp(pow(falloff, uFalloff).mul(uCloneOpacity).mul(edgeFade(uvCoord)).mul(inSrc), float(0), float(1));
+    return vec4(clamp(mix(currentH, srcH, amt), uClampMin, uClampMax), float(0), float(0), float(1));
+  })();
+  const cloneQuad = new QuadMesh(cloneMat);
+
   // ── Noise brush (coherent Perlin FBM) ─────────────────────────────────────
   // The FBM lattice lives in fixed UV space (not brush space) so overlapping
   // stamps along a stroke reinforce the same bumps instead of averaging to mush.
@@ -813,6 +835,18 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     _applyBrush(flattenQuad, _brushRect());
   }
 
+  /**
+   * One clone stamp. `offsetUV` points from the brush to its source; the source
+   * is the pre-stroke map, so beginStroke() must have run for this stroke.
+   */
+  function clone(brushUVx, brushUVy, { offsetUV, opacity = 1, heightOffsetNorm = 0 }) {
+    uBrushUV.value.set(brushUVx, brushUVy);
+    uCloneOffset.value.set(offsetUV.u, offsetUV.v);
+    uCloneOpacity.value = Math.max(0, Math.min(1, opacity));
+    uCloneHeight.value = heightOffsetNorm;
+    _applyBrush(cloneQuad, _brushRect());
+  }
+
   function noise(brushUVx, brushUVy) {
     uBrushUV.value.set(brushUVx, brushUVy);
     _applyBrush(noiseQuad, _brushRect());
@@ -1098,6 +1132,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     mirror,
     copyRegion,
     pasteRegion,
+    clone,
     undo,
     redo,
     replaceHeightData,
