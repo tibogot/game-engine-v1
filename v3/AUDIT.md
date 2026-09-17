@@ -36,8 +36,12 @@ the game.
    all off +5.6 → +1.6–2.1 ms; Rock triplanar on +2.3–2.6 ms. Toggling a layer's
    Triplanar recompiles the terrain shader (one-off pause).
 3. **More Genshin textures** 👁: cliff rock, forest floor, wet sand, snow.
-4. **Target strength.** The Opacity slider only scales stroke strength, so a
-   stroke still drives a layer to full weight. Unity caps it (a 30% mud scatter).
+4. ~~**Target strength.**~~ — DONE 2026-09-17. Paint panel → Target strength
+   (5-100%). The stroke core (splatMap.applySplatStroke) lerps the layer toward
+   the TARGET instead of full weight and skips texels already at or above it,
+   so scrubbing settles at the target (0.298 at 30% after 40 real strokes) and
+   a low-target stroke never strips stronger paint. Other layers still make
+   room and weights still sum to 1. Test: tools/paintTargetStrengthTest.mjs.
 5. **Per-layer tint and UV rotation**, to reuse one texture twice.
 6. **Roughness and normals at layer edges** still mix linearly (only visible on
    photo textures).
@@ -49,9 +53,30 @@ the game.
    painting frames 23 ms median (16.7 idle), p90 29 ms, and a 50 ms hitch at
    stroke start (three full-size copies for undo). Fix: upload only the
    stamp's rectangle, and copy only the stroke's rectangle for undo.
+   **RE-MEASURED 2026-09-17 — no longer felt, not fixed on purpose.** Same 2048²
+   paint, stamping every frame (`__V3_DEBUG.paintSys` drives strokes): 15 m
+   brush 16.7 ms median / 17.3 p90, 0 of 270 frames over 20 ms; 40 m brush the
+   same; 80 m brush 2 of 120 frames over 20 ms (5.5 ms stamp CPU — brush-area
+   work, not the upload). Stroke start 3-5 ms, not 50. What remains is ~+1 ms
+   GPU while painting from the whole-layer uploads; the rectangle upload would
+   mean writing the GPU texture behind three's back (three r184 uploads array
+   layers whole), a real risk for a cost that is not felt. Reopen for a weaker
+   machine.
 8. **Top-N layer sampling.** A fully painted world costs 4.5 ms because all 7
    layers are read. Only worth it once worlds are heavily painted.
-9. **Procedural slider edits have no undo.**
+9. ~~**Procedural slider edits have no undo.**~~ — DONE 2026-09-17. Procedural
+   paint layer edits (sliders, colours, pattern, seed, presets) are ACTIONS in
+   the paint history (PaintSystem.recordAction), interleaved with strokes, so
+   Ctrl+Z in Paint mode walks back through both in order. A step restores the
+   settings, tile size and the path preset's blocks-grass/trees flags, and
+   re-bakes. A slider drag is ONE step (same key < 800 ms apart; a stroke in
+   between splits it; a drag back to the start leaves none). Verified live: a
+   12-tick drag = 1 step, undo 55 → 8 with re-bake, redo back to 55.
+   Also fixed on the way: paint history was never cleared on project load, so
+   Ctrl+Z could paste the previous project's pixels into the new one —
+   `paintSys.clearHistory()` now runs with the other history resets.
+   Not covered: switching a slot's SOURCE (image ↔ procedural) — restoring an
+   image needs its pixels. Test: tools/paintHistoryActionsTest.mjs.
 
 ## Sculpt
 

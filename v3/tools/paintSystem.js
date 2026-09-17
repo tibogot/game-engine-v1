@@ -12,16 +12,27 @@
  * captures the current rect for redo before restoring.
  *
  * paintState shape:
- *   { activeLayer, brushOpacity, brush:{radius,strength,falloff,spacingFactor},
+ *   { activeLayer, brushOpacity, targetStrength, brush:{radius,strength,falloff,spacingFactor},
  *     noiseMask, noiseScale, noiseOctaves, noiseEdgeOnly,
  *     maskRotation, maskRandomRotation, maskFollowStroke }
  *
  * brushMask is an instance of V2's BrushMask class (Float32Array CPU mask).
+ *
+ * The history also carries ACTIONS — paint-mode edits that are not splat
+ * pixels (a procedural layer's settings). They sit in the same stacks as the
+ * stroke patches, so Ctrl+Z in Paint mode walks back through strokes and layer
+ * edits in the order they were made. See recordAction().
  */
 
 import { HOLE_LAYER, HOLE_ERASE_LAYER } from "../terrain/splatMap.js";
 
+function _sameJson(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 const MAX_HISTORY          = 32;
+/** Edits to the same action key closer together than this are ONE undo step (a slider drag). */
+const ACTION_COALESCE_MS   = 800;
 const MAX_STAMPS_PER_EVENT = 16;
 
 export class PaintSystem {
@@ -43,9 +54,10 @@ export class PaintSystem {
     this._preD0 = null; // pre-stroke copies of the splat slices
     this._preD1 = null;
 
-    /** @type {Array<{x,y,w,h,d0,d1}>} rect patches of pre-edit content */
+    /** @type {Array<{x,y,w,h,d0,d1} | {kind:"action",key,before,after,apply}>} */
     this.undoStack = [];
     this.redoStack = [];
+    this._actionAt = 0;   // time of the last recorded action, for coalescing
   }
 
   // ── Stroke lifecycle ───────────────────────────────────────────────────────
@@ -104,6 +116,7 @@ export class PaintSystem {
   // ── History ────────────────────────────────────────────────────────────────
 
   _pushUndo(patch) {
+    if (patch.kind !== "action") this._actionAt = 0;
     this.undoStack.push(patch);
     this.redoStack.length = 0;
     if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift();
@@ -113,6 +126,12 @@ export class PaintSystem {
     this.endStroke();
     const patch = this.undoStack.pop();
     if (!patch) return false;
+    if (patch.kind === "action") {
+      patch.apply(patch.before);
+      this._actionAt = 0;                  // the next edit starts a fresh step
+      this.redoStack.push(patch);
+      return true;
+    }
     this.redoStack.push(this.splatMap.copyRect(patch)); // current content for redo
     this.splatMap.pasteRect(patch);
     return true;
@@ -122,9 +141,56 @@ export class PaintSystem {
     this.endStroke();
     const patch = this.redoStack.pop();
     if (!patch) return false;
+    if (patch.kind === "action") {
+      patch.apply(patch.after);
+      this._actionAt = 0;
+      this.undoStack.push(patch);
+      return true;
+    }
     this.undoStack.push(this.splatMap.copyRect(patch));
     this.splatMap.pasteRect(patch);
     return true;
+  }
+
+  /**
+   * Record a paint-mode edit that is not splat pixels, as one undo step.
+   *
+   * `before` / `after` are opaque states and `apply(state)` puts one back. A
+   * burst of edits with the same `key` (a slider drag: dozens of inputs a
+   * second) folds into ONE step that keeps the first `before` and the latest
+   * `after` — otherwise Ctrl+Z would spend a press per slider tick. Returns
+   * false (and records nothing) when before and after are the same.
+   *
+   * @param {{ key: string, before: any, after: any, apply: (state: any) => void,
+   *           same?: (a: any, b: any) => boolean, now?: number }} a
+   */
+  recordAction({ key, before, after, apply, same = _sameJson, now = performance.now() }) {
+    const top = this.undoStack.at(-1);
+    if (top?.kind === "action" && top.key === key && this._actionAt
+        && now - this._actionAt < ACTION_COALESCE_MS) {
+      top.after = after;
+      this._actionAt = now;
+      this.redoStack.length = 0;
+      // A drag that ends where it started leaves nothing to undo.
+      if (same(top.before, top.after)) { this.undoStack.pop(); this._actionAt = 0; }
+      return true;
+    }
+    if (same(before, after)) return false;
+    this._pushUndo({ kind: "action", key, before, after, apply });
+    this._actionAt = now;
+    return true;
+  }
+
+  /**
+   * Forget every step — after the splat data or the layers were replaced
+   * wholesale (a project load). Otherwise Ctrl+Z pastes the PREVIOUS project's
+   * pixels, or re-bakes its layer settings, into the one just opened.
+   */
+  clearHistory() {
+    this.endStroke();
+    this.undoStack.length = 0;
+    this.redoStack.length = 0;
+    this._actionAt = 0;
   }
 
   get canUndo() { return this.undoStack.length > 0; }
@@ -177,6 +243,7 @@ export class PaintSystem {
       cz:            wz,
       radius:        s.brush.radius,
       strength:      s.brush.strength * s.brushOpacity,
+      target:        s.targetStrength ?? 1,
       falloff:       s.brush.falloff,
       activeLayer,
       noiseMask:     s.noiseMask,

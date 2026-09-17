@@ -257,6 +257,13 @@ export class SplatMap {
 
     const activeLayer = stroke.activeLayer;
     const isEraser    = activeLayer === 0;
+    // TARGET STRENGTH (Unity's name): the most weight a stroke may give its
+    // layer. Opacity alone only slows a stroke down — keep scrubbing and any
+    // opacity reaches 100%. With a target of 0.3 the layer creeps to 30% and
+    // stops, so "a light scatter of mud" can be painted and STAYS light. It is
+    // a ceiling, not a setting: texels already above it are left alone, so a
+    // low-target stroke never strips paint that was put down stronger.
+    const target      = Math.min(1, Math.max(0, stroke.target ?? 1));
     const isHoleOp    = activeLayer === HOLE_LAYER || activeLayer === HOLE_ERASE_LAYER;
     let targetBuf = 0, targetChan = 0;
     if (!isEraser && !isHoleOp) {
@@ -369,7 +376,8 @@ export class SplatMap {
           const buf  = targetBuf === 0 ? d0 : d1;
           const s    = Math.min(1, w);
           const t    = buf[idx + targetChan] / 255;
-          const tNew = t + s * (1 - t);
+          if (t >= target) continue;           // at or above the ceiling already
+          const tNew = t + s * (target - t);
           const k    = (1 - t) > 1e-4 ? (1 - tNew) / (1 - t) : 0;
           for (let c = 0; c < 4; c++) {
             if (targetBuf === 0 && c === targetChan) continue;

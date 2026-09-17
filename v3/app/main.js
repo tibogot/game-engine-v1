@@ -1534,6 +1534,8 @@ export async function startV3App(opts = {}) {
   const plblSpacing    = uiById("plbl-spacing");
   const pslOpacity     = uiById("psl-opacity");
   const plblOpacity    = uiById("plbl-opacity");
+  const pslTarget      = uiById("psl-target");
+  const plblTarget     = uiById("plbl-target");
   const pslSolo        = uiById("psl-solo");
   const pslHBlend      = uiById("psl-hblend");
   const plblHBlend     = uiById("plbl-hblend");
@@ -1581,6 +1583,8 @@ export async function startV3App(opts = {}) {
   const paintState = {
     activeLayer: 1,
     brushOpacity: 1.0,
+    /** Ceiling on the weight a stroke can give its layer (0..1). See splatMap.js. */
+    targetStrength: 1.0,
     brush: { radius: 80, strength: 0.50, falloff: 2.0, spacingFactor: 0.10 },
     noiseMask: 0.0, noiseScale: 3.0, noiseOctaves: 3, noiseEdgeOnly: false,
     maskRotation: 0, maskRandomRotation: false, maskFollowStroke: false,
@@ -4288,6 +4292,10 @@ export async function startV3App(opts = {}) {
     paintState.brushOpacity = Number(pslOpacity.value) / 100;
     plblOpacity.textContent = paintState.brushOpacity.toFixed(2);
   });
+  pslTarget?.addEventListener("input", () => {
+    paintState.targetStrength = Number(pslTarget.value) / 100;
+    plblTarget.textContent = Math.round(paintState.targetStrength * 100) + "%";
+  });
 
   // Solo & height blend
   pslSolo.addEventListener("change", () => {
@@ -4561,15 +4569,50 @@ export async function startV3App(opts = {}) {
       .finally(() => { if (i === texlibActiveSlot) procPanel.setBusy(false); });
   }
 
+  /*
+   * UNDO FOR PROCEDURAL LAYER EDITS (AUDIT 9). They go into the PAINT history,
+   * next to the brush strokes, so Ctrl+Z in Paint mode walks back through both
+   * in the order they happened. A step holds everything an edit can change on
+   * the slot: its settings, the tile size and the path "blocks grass/trees"
+   * flags a preset brings. Restoring re-bakes the layer.
+   */
+  function procSlotState(i) {
+    const s = textureLib.slots[i];
+    return {
+      procedural: s.procedural ? { ...s.procedural } : null,
+      uvScale: textureLib.slotUniforms[i].uUVScale.value,
+      blocksGrass: !!s.blocksGrass,
+      blocksTrees: !!s.blocksTrees,
+    };
+  }
+  function applyProcSlotState(i, st) {
+    textureLib.setUVScale(i, st.uvScale);
+    textureLib.slots[i].blocksGrass = st.blocksGrass;
+    textureLib.slots[i].blocksTrees = st.blocksTrees;
+    if (st.procedural) requestSlotProcedural(i, st.procedural);
+    if (i === texlibActiveSlot) syncTexlibEditor();
+  }
+  function recordProcEdit(key, i, edit) {
+    const before = procSlotState(i);
+    edit();
+    paintSys.recordAction({
+      key: `${key}:${i}`,
+      before,
+      after: procSlotState(i),
+      apply: (st) => applyProcSlotState(i, st),
+    });
+  }
+
   const procPanel = createProceduralLayerPanel(texlibProcSrc, {
-    onChange: (p) => requestSlotProcedural(texlibActiveSlot, p),
-    onPreset: (p) => {
+    // Slider drags coalesce into one undo step (same key, < 800 ms apart).
+    onChange: (p) => recordProcEdit("proc", texlibActiveSlot, () => requestSlotProcedural(texlibActiveSlot, p)),
+    onPreset: (p) => recordProcEdit("procPreset", texlibActiveSlot, () => {
       // A preset's look is designed at a tile size, so it brings its UV tile.
       textureLib.setUVScale(texlibActiveSlot, procUvScale(p));
       applyPresetBlocking(texlibActiveSlot, p);
       requestSlotProcedural(texlibActiveSlot, p);
       syncTexlibEditor();
-    },
+    }),
   });
 
   textureLib.onProceduralBaked = (i) => {
@@ -6990,6 +7033,8 @@ export async function startV3App(opts = {}) {
 
     if (d.roads) roadSystem.importData(d.roads);
     roadHistory.reset();
+    // Paint strokes and procedural layer edits belong to the previous scene.
+    paintSys.clearHistory();
     if (d.splines) splineSys.importData(d.splines);
     // Always import, even when absent: a project with no lakes must clear any
     // lakes left over from the previous scene.
@@ -9098,6 +9143,8 @@ export async function startV3App(opts = {}) {
        * are not comparable — interleave them instead.
        */
       get propInstancer() { return propInstancer; },
+      /** The ground-paint system — drive strokes from the console for painting A/Bs. */
+      get paintSys() { return paintSys; },
       terrainShadowMap,
       /** Detach (null) / re-attach the map for materials built AFTER the call — for A/Bs. */
       setActiveTerrainShadowMap,
