@@ -105,8 +105,15 @@ import {
 export const GRID_DEFAULTS = {
   /** Base surface colour between the lines. */
   baseColor: "#efede8",
-  /** Minor line colour (the fine 20 cm grid). */
-  lineColor: "#dedcd6",
+  /**
+   * Minor line colour (the fine 20 cm grid). MUST BE VISIBLE. The first value
+   * (#dedcd6) measured a 1.04 contrast ratio against the tile face — a line you
+   * could only find by looking for it — and the effect on the user was that the
+   * whole grid READ as 1 m squares: right numbers, five times too coarse to the
+   * eye. Every Unreal template draws the fine line as a clear soft grey. This
+   * lands at ~1.13 with the width below; the heavy line stays at ~2.0.
+   */
+  lineColor: "#bdbbb5",
   /**
    * Major line colour — the 1 m line, and the only one meant to be read at a
    * glance. Clearly darker than the minor grid (measured: it lands at ~2.4x the
@@ -154,8 +161,12 @@ export const GRID_DEFAULTS = {
    * points. The terrain is a floor and never uses it.
    */
   wallCellScale: 1,
-  /** Minor line width in METRES (not a UV fraction) — 4 mm, a hairline. */
-  minorWidth: 0.004,
+  /**
+   * Minor line width in METRES (not a UV fraction) — 1 cm, 5% of a 20 cm cell.
+   * 4 mm was a hairline that the derivative fade dimmed to nothing a few metres
+   * out, which is the other half of why the fine grid used to vanish.
+   */
+  minorWidth: 0.01,
   /** Major line width in METRES — 2 cm, five times the minor line. */
   majorWidth: 0.02,
   /**
