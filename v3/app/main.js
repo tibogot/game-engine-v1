@@ -7806,7 +7806,9 @@ export async function startV3App(opts = {}) {
       key: "spawn", label: "Player start", icon: "flag", count: spawnSystem.placed ? 1 : 0,
       items: spawnSystem.placed ? [{ key: "spawnPoint", label: "Player start", selected: editorMode === "spawn" }] : [],
     });
-    return groups;
+    // Object groups appear once they hold something; Environment and Terrain
+    // (count null) are world settings and always stay.
+    return groups.filter((g) => g.count == null || g.count > 0);
   }
 
   function sceneSignature() {
