@@ -127,6 +127,10 @@ export function createWorldToolState() {
     groundBase: {
       /** "grid" | "tile" | "flat" — see TERRAIN_FEATURES.baseStyle. */
       style: "grid",
+      /** Gizmo Shift-snap, in metres. Also the heavy grid line when followSnap. */
+      moveSnap: 1,
+      /** Heavy line = moveSnap, fine line = moveSnap / majorRatio. */
+      followSnap: true,
       ...structuredClone(GRID_DEFAULTS),
     },
     audio: ts.audio,

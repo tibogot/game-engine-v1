@@ -1,4 +1,4 @@
-import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, button as _button, info as _info, hint as _hint } from "./widgets.js";
+import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, button as _button, info as _info, hint as _hint, refreshWidgets as _refreshWidgets } from "./widgets.js";
 import { uiById } from "./uiRoot.js";
 import { formatCascades } from "../app/csmSplits.js";
 import { buildOceanV2Controls } from "./buildOceanV2Panel.js";
@@ -1804,6 +1804,9 @@ export function buildWorldPanel(app) {
         const gb = ts.groundBase;
         const gbBody = _section(container, "Ground material", false);
         const live = () => app.groundBase.onChanged?.(false);
+        // Changing the snap rewrites the derived cell sliders, so the widgets
+        // have to be re-read or they keep showing the old numbers.
+        const snapped = () => { app.groundBase.onChanged?.(false); _refreshWidgets(); };
         _dropdown(gbBody, gb, "style", {
           label: "Style",
           options: {
@@ -1818,14 +1821,31 @@ export function buildWorldPanel(app) {
             + "at the same GPU clock. Flat drops the lines entirely.",
           onChange: () => app.groundBase.onChanged?.(true),
         });
+        _dropdown(gbBody, gb, "moveSnap", {
+          label: "Move snap (m)",
+          options: { "5 cm": 0.05, "10 cm": 0.1, "25 cm": 0.25, "50 cm": 0.5, "1 m": 1, "2 m": 2, "5 m": 5 },
+          hint: "How far the gizmo steps while Shift is held. With \"Grid follows "
+            + "snap\" on this is also the heavy grid line, so the floor shows "
+            + "exactly where a dragged object will land — which is why Unreal's "
+            + "fine grid is 10 cm: that is its default snap.",
+          onChange: snapped,
+        });
+        _toggle(gbBody, gb, "followSnap", {
+          label: "Grid follows snap",
+          hint: "Heavy line = the snap, fine line = a tenth of it. Off: the two "
+            + "cell sliders below rule and the grid ignores the snap.",
+          onChange: snapped,
+        });
         _slider(gbBody, gb, "minorCell", {
           label: "Fine cell (m)",
-          min: 0.05,
+          // Reaches 0.005 because the snap link derives this: the finest snap
+          // (5 cm) over the default ratio of 10 lands here, and a slider that
+          // cannot show its own derived value reads as a bug.
+          min: 0.005,
           max: 2,
-          step: 0.05,
-          hint: "Edge of one fine square, in metres. Unreal uses 0.1 m, which is "
-            + "its default move-snap increment — the fine grid is a picture of "
-            + "where a dragged object will actually land.",
+          step: 0.005,
+          hint: "Edge of one fine square, in metres. Derived from the snap while "
+            + "\"Grid follows snap\" is on.",
           onChange: live,
         });
         _slider(gbBody, gb, "majorRatio", {
@@ -1899,6 +1919,26 @@ export function buildWorldPanel(app) {
           min: 0.3,
           max: 1,
           step: 0.01,
+          onChange: live,
+        });
+        _slider(gbBody, gb, "breakup", {
+          label: "Surface break-up",
+          min: 0,
+          max: 0.35,
+          step: 0.01,
+          hint: "Slow variation in roughness only — no normal map. With this at 0 "
+            + "every pixel of the ground answers the sun identically and the "
+            + "floor reads as printed paper; give it some and the surface catches "
+            + "light unevenly as you move, which is what sells it as real.",
+          onChange: live,
+        });
+        _slider(gbBody, gb, "breakupScale", {
+          label: "Break-up size (m)",
+          min: 1,
+          max: 40,
+          step: 1,
+          hint: "Blotch size. Keep it well above the cell size — near it, the "
+            + "variation reads as dirt on the grid rather than as the surface.",
           onChange: live,
         });
         _button(gbBody, {

@@ -87,23 +87,16 @@ import {
 } from "three/tsl";
 
 /**
- * Defaults. Colours are sRGB hex — the uniforms hold LINEAR, converted once on
- * write (see proj_modular_road_color_space: converting twice costs 5-10x).
- */
-/**
- * Defaults, matched to Unreal's blockout floor rather than invented.
+ * Defaults, matched to Unreal's blockout floor rather than invented. Colours are
+ * sRGB hex — the uniforms hold LINEAR, converted once on write (see
+ * proj_modular_road_color_space: converting twice costs 5-10x).
  *
- * The first pass got three things wrong against that reference, all visible side
- * by side:
- *   • the subdivision was a DECADE (10 minor cells per major). Unreal's reads as
- *     5, and 5 is the better choice anyway — at 10 the minor lines are already
- *     sub-pixel by the time the major cell is big enough to see, so one of the
- *     two decades is always wasted.
- *   • the major line was near-black (#4a4a47 and then darkened AGAIN by the
- *     groove AO, so it landed around 0x33). The reference's heavy lines are a
- *     soft mid-grey: they separate blocks without drawing the eye.
- *   • the base was too dark and the groove too deep, which together read as a
- *     dirty industrial floor instead of a neutral measuring surface.
+ * Two earlier passes were rejected on sight, and both failures are worth keeping:
+ *   • the major line was near-black (#4a4a47, then darkened AGAIN by the groove
+ *     AO, landing near 0x33). Unreal's heavy lines are a soft mid-grey — they
+ *     separate blocks without drawing the eye.
+ *   • the cells were a whole level too coarse (light 1 m, dark 5 m), so our LIGHT
+ *     line sat where Unreal's DARK line sits. See the block on minorCell.
  *
  * The line colours are deliberately close together and close to the base. A
  * blockout grid is there to be READ WHEN LOOKED AT and ignored otherwise; high
@@ -191,10 +184,55 @@ export const GRID_DEFAULTS = {
   roughness: 0.95,
   /** Roughness on the lines — grooves catch dirt, so slightly rougher. */
   roughLine: 1.0,
+  /*
+   * ── SURFACE BREAK-UP ──────────────────────────────────────────────────────
+   *
+   * Broad, slow variation in roughness and nothing else. This is the difference
+   * between a floor that reads as a SURFACE and one that reads as printed paper:
+   * with roughness flat, every pixel of the ground answers the sun identically,
+   * so the only shading in a blockout comes from geometry. Give it slow blotches
+   * and the floor catches light unevenly as the camera moves, which is what the
+   * eye uses to decide something is real.
+   *
+   * Roughness ONLY — deliberately no normal perturbation. A normal would fight
+   * the painted layers' normals on terrain and the baked terrain normal, for a
+   * smaller gain.
+   */
+  /**
+   * Strength of the blotches. Drives ROUGHNESS and, at `BREAKUP_ALBEDO` of this,
+   * albedo.
+   *
+   * It has to touch albedo, and that is a measured result rather than a taste
+   * call. Screenshot-diffed on the bare editor floor: driving roughness alone
+   * over its whole sane range (±0.12, and even ±0.35) moved a mean of 0.03-0.06
+   * luminance levels — nothing. Pushing the BASE roughness 0.95 → 0.30, a swing
+   * five times larger than any break-up would use, still only reached a mean of
+   * 1.06. On a bright, fully diffuse, non-metal floor, roughness is simply a very
+   * weak lever: specular is swamped by the diffuse term at every angle that is
+   * not grazing. Albedo is the one that shows, so the blotches drive both and
+   * roughness became the supporting half rather than the whole effect.
+   */
+  breakup: 0.12,
+  /** Blotch size in METRES. Must be well above the cell size or it reads as dirt. */
+  breakupScale: 8,
 };
 
 /** Style values accepted by the terrain and by createGridMaterial. */
 export const GRID_MODES = ["world", "object", "checker", "flat"];
+
+/**
+ * How much of `breakup` reaches ALBEDO, relative to how much reaches roughness.
+ * Fixed rather than exposed: one slider should mean one idea, and the ratio
+ * between the two halves is a property of the effect, not a preference.
+ *
+ * 1.0 rather than something smaller because this floor fights the effect. At
+ * 0.35 the default worked out to a ±2% albedo swing, which screenshot-diffed to
+ * a max of 2 luminance levels — invisible. At 1.0 the default is ±6%, which
+ * moves about a quarter of the ground's pixels by up to ~5 levels: present when
+ * you look, not a texture. See `breakup` for why roughness alone could not
+ * carry this.
+ */
+const BREAKUP_ALBEDO = 1.0;
 
 // ── Uniforms ──────────────────────────────────────────────────────────────────
 
@@ -233,6 +271,8 @@ export function getGridUniforms() {
     ao: uniform(float(d.ao)),
     objectTint: uniform(float(d.objectTint)),
     wallCellScale: uniform(float(d.wallCellScale)),
+    breakup: uniform(float(d.breakup)),
+    breakupScale: uniform(float(d.breakupScale)),
     roughness: uniform(float(d.roughness)),
     roughLine: uniform(float(d.roughLine)),
   };
@@ -261,6 +301,8 @@ export function applyGridConfig(cfg = {}) {
   if (cfg.ao !== undefined) u.ao.value = cfg.ao;
   if (cfg.objectTint !== undefined) u.objectTint.value = cfg.objectTint;
   if (cfg.wallCellScale !== undefined) u.wallCellScale.value = Math.max(1, cfg.wallCellScale);
+  if (cfg.breakup !== undefined) u.breakup.value = cfg.breakup;
+  if (cfg.breakupScale !== undefined) u.breakupScale.value = Math.max(0.1, cfg.breakupScale);
   if (cfg.roughness !== undefined) u.roughness.value = cfg.roughness;
   if (cfg.roughLine !== undefined) u.roughLine.value = cfg.roughLine;
   return u;
@@ -322,6 +364,27 @@ const cellHash = /*@__PURE__*/ Fn(([p]) =>
 });
 
 /**
+ * Smooth value noise, 0..1 — four hashes bilinearly blended with a smoothstep
+ * weight so the result has no visible lattice. One octave on purpose: this drives
+ * a slow roughness blotch, and a second octave would only add detail small enough
+ * to alias into specular sparkle.
+ */
+const valueNoise = /*@__PURE__*/ Fn(([p]) => {
+  const i = floor(vec2(p));
+  const f = fract(vec2(p));
+  const w = f.mul(f).mul(float(3.0).sub(f.mul(2.0)));
+  return mix(
+    mix(cellHash(i), cellHash(i.add(vec2(1, 0))), w.x),
+    mix(cellHash(i.add(vec2(0, 1))), cellHash(i.add(vec2(1, 1))), w.x),
+    w.y,
+  );
+}).setLayout({
+  name: "v3GridValueNoise",
+  type: "float",
+  inputs: [{ name: "p", type: "vec2" }],
+});
+
+/**
  * The greybox surface at a point on a plane.
  *
  * @param p2 vec2 node — position on the surface plane, in METRES. World XZ for
@@ -374,9 +437,27 @@ export function gridSurface(p2, u = getGridUniforms(), minorScale = null) {
   // ~4 px, which at 1 m is roughly 100 m out.
   const cellsPerPx = max(mPerPx.x, mPerPx.y).div(u.majorCell);
   const varFade = saturate(float(1.0).sub(cellsPerPx.mul(4.0)));
-  const shade = float(1.0).add(
-    cellHash(floor(majorUV)).sub(0.5).mul(u.variation).mul(varFade),
+
+  // Slow blotches — the "this is a surface" term, and the one thing that stops a
+  // blockout floor reading as printed paper. Faded toward the blotch's MEAN
+  // rather than toward zero strength, so the distance where it gives out is not
+  // also a brightness step; gone entirely once a blotch is under ~4 px, which at
+  // 8 m is far enough out that the ground is flat grey anyway.
+  const pxPerBlotch = max(mPerPx.x, mPerPx.y).div(u.breakupScale);
+  const blotch = mix(
+    float(0.5),
+    valueNoise(p.div(u.breakupScale)),
+    saturate(float(1.0).sub(pxPerBlotch.mul(4.0))),
   );
+  const roughBase = u.roughness.sub(blotch.mul(u.breakup));
+
+  // Both variations ride the BASE colour, not the final one, so the lines keep
+  // their own tone and only the surface between them moves.
+  const shade = float(1.0)
+    .add(cellHash(floor(majorUV)).sub(0.5).mul(u.variation).mul(varFade))
+    // Centred on zero so blotches lighten as well as darken — a one-sided term
+    // reads as the floor getting dimmer, not as variation.
+    .sub(blotch.sub(0.5).mul(u.breakup).mul(BREAKUP_ALBEDO));
 
   // Groove AO. The lines are engraved, so they lose ambient — this is what
   // separates "a surface with lines cut into it" from "a surface with lines
@@ -390,7 +471,7 @@ export function gridSurface(p2, u = getGridUniforms(), minorScale = null) {
 
   return {
     col: tinted.mul(float(1.0).sub(lines.mul(u.ao))),
-    rough: mix(u.roughness, u.roughLine, lines),
+    rough: mix(roughBase, u.roughLine, lines),
     lines,
   };
 }
@@ -410,7 +491,11 @@ export function flatSurface(u = getGridUniforms()) {
     vec3(u.lineColor),
     saturate(meanInk),
   ).mul(float(1.0).sub(meanInk.mul(u.ao)));
-  return { col, rough: float(u.roughness), lines: float(0) };
+  // The blotch's own mean, as a constant — no noise and no derivatives here, but
+  // flat still has to sit at the same average roughness as the grid or switching
+  // between the two is a visible step in how the ground catches the sun.
+  const rough = u.roughness.sub(u.breakup.mul(0.5));
+  return { col, rough, lines: float(0) };
 }
 
 // ── UV checker (imported meshes) ──────────────────────────────────────────────

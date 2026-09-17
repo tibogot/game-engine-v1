@@ -526,9 +526,35 @@ export async function startV3App(opts = {}) {
    * user probably never touched). Without this, anyone who had the editor open
    * once is pinned to the old look forever and new defaults appear to do nothing.
    */
-  const GROUND_BASE_VERSION = 6;
+  const GROUND_BASE_VERSION = 8;
   const GROUND_BASE_MODES = ["grid", "tile", "flat"];
-  const groundBase = { style: "grid", ...structuredClone(GRID_DEFAULTS) };
+  /*
+   * `moveSnap` and `followSnap` are editor BEHAVIOUR, not grid uniforms, so they
+   * sit beside `style` rather than in GRID_DEFAULTS — but they are persisted in
+   * the same blob because they are the same idea. Unreal's fine grid is 10 cm
+   * because its default move-snap is 10 cm: the light grid is a picture of where
+   * a dragged object will land. With `followSnap` on, ours is that by
+   * construction rather than by coincidence — the heavy line IS the snap and the
+   * fine line is a tenth of it.
+   */
+  const groundBase = {
+    style: "grid",
+    moveSnap: 1,
+    followSnap: true,
+    ...structuredClone(GRID_DEFAULTS),
+  };
+
+  /**
+   * Derive the cell sizes from the move snap. Returns whether anything moved, so
+   * callers can skip a pointless uniform write and widget refresh.
+   */
+  function syncGroundCellsToSnap(gb) {
+    if (!gb.followSnap) return false;
+    const next = gb.moveSnap / Math.max(2, gb.majorRatio);
+    if (Math.abs(next - gb.minorCell) < 1e-9) return false;
+    gb.minorCell = next;
+    return true;
+  }
   if (isEditor) {
     try {
       const saved = JSON.parse(localStorage.getItem(GROUND_BASE_KEY) || "null");
@@ -545,7 +571,12 @@ export async function startV3App(opts = {}) {
       // A corrupt entry must not stop the editor booting — keep the defaults.
     }
   }
+  syncGroundCellsToSnap(groundBase);
   applyGridConfig(groundBase);
+  // The gizmo is the other half of the same setting; it was built above with the
+  // default, so hand it whatever was restored.
+  gizmoState.translateSnap = groundBase.moveSnap;
+  applyGizmoSettings();
 
   // A game's explicit terrainFeatures wins over the editor's saved style.
   const terrainFeatureOverrides = { baseStyle: groundBase.style, ...(opts.terrainFeatures ?? {}) };
@@ -1011,6 +1042,9 @@ export async function startV3App(opts = {}) {
 
   function applyGroundBase(styleChanged = false) {
     const gb = worldToolState.groundBase;
+    syncGroundCellsToSnap(gb);
+    gizmoState.translateSnap = gb.moveSnap;
+    applyGizmoSettings();
     applyGridConfig(gb);
     if (styleChanged && lod) {
       if (!_groundVariants.has(groundBase.style)) {
@@ -1028,7 +1062,12 @@ export async function startV3App(opts = {}) {
   function resetGroundBase() {
     const gb = worldToolState.groundBase;
     const styleChanged = gb.style !== "grid";
-    Object.assign(gb, { style: "grid", ...structuredClone(GRID_DEFAULTS) });
+    Object.assign(gb, {
+      style: "grid",
+      moveSnap: 1,
+      followSnap: true,
+      ...structuredClone(GRID_DEFAULTS),
+    });
     applyGroundBase(styleChanged);
   }
 
