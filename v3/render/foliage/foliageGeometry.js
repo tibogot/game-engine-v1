@@ -182,11 +182,23 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
           const out = norm(add([fwd[0] * ca, fwd[1] * ca, fwd[2] * ca], side, side2 * sa));
           const planeN0 = norm(cross(fwd, side));
           const planeN = planeN0[1] < 0 ? [-planeN0[0], -planeN0[1], -planeN0[2]] : planeN0;
-          const wide = norm(cross(planeN, out));
-          // Each leaflet lifts a little off the frond plane, alternating, so
-          // the blade has thickness instead of reading as a flat cut-out.
+          const wide0 = norm(cross(planeN, out));
+          // ROLLED, alternating and jittered, about the leaflet's own length.
+          // The leaflets used to be exactly coplanar with their frond, so a
+          // frond seen edge-on drew as a HAIRLINE streak across the view — a
+          // whole blade one pixel wide. Rolled, they never present one flat
+          // plane: edge-on, half of them still catch the light. It costs
+          // nothing (the same vertices, moved) and a real pinnate leaf is
+          // V-ed like this anyway.
+          const roll = (k % 2 ? 1 : -1) * 0.22 + (lr - 0.5) * 0.5;
+          const wide = norm(add(add([0, 0, 0], wide0, Math.cos(roll)), planeN, Math.sin(roll)));
+          const nRoll0 = norm(cross(out, wide));
+          const nRoll = nRoll0[0] * planeN[0] + nRoll0[1] * planeN[1] + nRoll0[2] * planeN[2] < 0
+            ? [-nRoll0[0], -nRoll0[1], -nRoll0[2]] : nRoll0;
+          // Each leaflet also lifts a little off the frond plane, alternating,
+          // so the blade has thickness instead of reading as a flat cut-out.
           const lift = (k % 2 ? 1 : -1) * 0.05 + (lr - 0.5) * 0.06;
-          const n = norm(add(planeN, wide, lift * side2));
+          const n = norm(add(nRoll, wide, lift * side2));
           // Narrower than the gap between neighbours (measured across the
           // leaflet, so the forward lean is accounted for): the gaps are what
           // make them read as leaflets instead of one serrated blade.
@@ -267,21 +279,29 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
       }
     }
 
-    // ── Stalk (near only): a thin strip on edge, so the pale rachis reads ──
+    // ── Stalk (near only): the pale rachis, as a CROSS of two strips ──
+    // One strip turned edge-on is a flat sheet, and a sheet running the whole
+    // length of a frond draws as a HAIRLINE streak across the view. Crossed,
+    // the stalk always shows a face. 12 triangles a frond.
     if (near) {
-      const base = P.length / 3;
       const segs = 6;
-      for (let q = 0; q <= segs; q++) {
-        const { p, fwd, v } = at((q / segs) * rows);
-        const w = stemW * (1 - v * 0.75);
-        const n = norm(cross(fwd, side));
-        for (const s of [-1, 1]) {
-          push(add(p, side, s * w), n, s * 0.5 + 0.5, v, [1, v, fr, 0]);
+      for (const across of [true, false]) {
+        const base = P.length / 3;
+        for (let q = 0; q <= segs; q++) {
+          const { p, fwd, v } = at((q / segs) * rows);
+          const w = stemW * (1 - v * 0.75);
+          // Strip 1 lies in the frond's plane, strip 2 stands perpendicular
+          // to it — both follow the frond's arch.
+          const axis = across ? side : norm(cross(fwd, side));
+          const n = norm(cross(fwd, axis));
+          for (const s of [-1, 1]) {
+            push(add(p, axis, s * w), n, s * 0.5 + 0.5, v, [1, v, fr, 0]);
+          }
         }
-      }
-      for (let q = 0; q < segs; q++) {
-        const i0 = base + q * 2;
-        I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3);
+        for (let q = 0; q < segs; q++) {
+          const i0 = base + q * 2;
+          I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3);
+        }
       }
     }
   }

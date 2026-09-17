@@ -100,6 +100,7 @@ export class ScatterField {
    *                     whole fade window)
    *   slopeBand         normal.y width of the slope cut-off's soft edge
    *   shadows           build the shadow-only lists (see the header)
+   *   nearFade          metres: plants this close to the camera thin out
    *   onKeep            optional hook, called inside the compute for plants that
    *                     survive: ({ worldX, worldZ, terrainUV, terrainY, normal,
    *                     typeIdx, near, distSq, p, d }) => void
@@ -108,7 +109,8 @@ export class ScatterField {
     scene, renderer, name = "Scatter", typeCount, lods = 2, parts = 1, rows, ruleRow = null,
     worldSize, tileSize = 192, plantsPerSide = 384,
     heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex = null, windTex,
-    grassDensityTex = null, cullRadius = 2, fadeKeepGain = 1.6, slopeBand = 0.12, shadows = false, onKeep = null,
+    grassDensityTex = null, cullRadius = 2, fadeKeepGain = 1.6, slopeBand = 0.12, shadows = false,
+    nearFade = 0.9, onKeep = null,
   }) {
     this.renderer = renderer;
     this.name = name;
@@ -172,6 +174,9 @@ export class ScatterField {
       uCullPadNdcYFar: uniform(0.35),
       uTypes: uniformArray(this.typeRows, "vec4"),
       uShadowDist: uniform(35),
+      // Plants closer than this to the CAMERA thin out (see the compute).
+      uNearFade: uniform(nearFade),
+      uCamPos: uniform(new THREE.Vector3()),
     });
     // 1 per type that casts; read by the compute, set by setShadowCasters().
     this._shadowCastValues = new Array(typeCount).fill(0);
@@ -263,6 +268,15 @@ export class ScatterField {
       );
       const stochasticKeep = step(hash(instanceIndex.add(31337)), near.mul(fadeKeepGain).min(1).mul(slopeProb).mul(bandKeep));
 
+      // RIGHT AT THE CAMERA a plant is a wall of leaves, and a leaf turned
+      // edge-on is a flat sheet: it draws as a hairline streak across the
+      // view. Plants inside uNearFade thin out stochastically (no pop, like
+      // the detail switch), so you never end up inside one. They keep casting:
+      // the shadow list below ignores this.
+      const camDist = length(vec2(worldX.sub(u.uCamPos.x), worldZ.sub(u.uCamPos.z)));
+      const nearKeep = step(hash(instanceIndex.add(9137)),
+        smoothstep(u.uNearFade.mul(0.35), u.uNearFade, camDist));
+
       const frustumVis = scatterFrustumVisible(
         vec3(worldX, terrainY, worldZ), u.uCameraMatrix, u.uFx, u.uFy,
         typeof cullRadius === "number" ? float(cullRadius) : cullRadius,
@@ -279,7 +293,7 @@ export class ScatterField {
       const inView = frustumVis.greaterThan(0.5);
 
       If(densityKeep.mul(mapStay).mul(stochasticKeep).mul(max(frustumVis, castsShadow)).greaterThan(0.5), () => {
-        If(inView, () => {
+        If(inView.and(nearKeep.greaterThan(0.5)), () => {
           // Near or far detail. The switch distance is spread ±2 m per plant so
           // the change never forms a visible ring.
           const dither = hash(instanceIndex.add(555)).mul(4).sub(2);
@@ -564,6 +578,7 @@ export class ScatterField {
     for (const m of this.shadowMeshes) m.position.set(anchorPos.x, 0, anchorPos.z);
     this._lastAnchor.copy(anchorPos);
 
+    u.uCamPos.value.setFromMatrixPosition(camera.matrixWorld);
     this._cameraMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     u.uCameraMatrix.value.copy(this._cameraMatrix);
     const e = camera.projectionMatrix.elements;

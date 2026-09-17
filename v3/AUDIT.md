@@ -1104,9 +1104,33 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      and nothing seemed to react. Verified in play mode: plants within the
      radius lean away (off/on diff = exactly the plant beside the character)
      and the plumes read as plumes again.
-     Not the push, and not a bug: a fern frond on a plant a few centimetres
-     from the camera shows as a hairline, because leaves are flat.
-     Next (5b): wind sway for placed plants. Not planned yet: impostors for
+     **THE HAIRLINE — FIXED 2026-09-17.** A thin streak crossed the view near
+     ferns. It was not the push (it survived wind, push and flex at zero) and
+     not a stray triangle (every foliage mesh checked headless: no edge longer
+     than the plant): a fern's RACHIS was one flat strip running the whole
+     length of the frond, and a sheet seen edge-on draws one pixel wide. It is
+     a CROSS of two strips now, so a stalk always shows a face (12 tris a
+     frond; fern near 1,404 -> 1,529 tris, GPU unchanged at 1.54 ms with a
+     filled field). Leaflets also roll about their own length, alternating and
+     jittered, so a frond never presents one flat plane — free, and a real
+     pinnate leaf is V-ed like that. And plants within uNearFade (0.9 m,
+     susuki 0.7) of the CAMERA now thin out stochastically, so you never stand
+     inside one; they keep casting shadows.
+     **WIND FOR PLACED PLANTS — 5b DONE 2026-09-17.** An imported GLB plant is
+     an instanced prop, and a prop's vertex shader runs BEFORE the instance
+     transform (InstanceNode applies instanceMatrix to positionLocal after the
+     material's positionNode), so a placed plant cannot know where it stands
+     or which way it faces: its sway is LOCAL, each plant on its own phase,
+     rather than a row leaning downwind together. Good for bushes and shrubs;
+     a field of tall thin plants wants the painted systems.
+     v3/render/instancing/plantSway.js: the GLB's materials become node
+     materials (the loader's plain MeshStandardMaterials are mapped internally
+     by the renderer and are not reachable) with a positionNode that bends by
+     height (h^1.6) plus a faster leaf wobble. Amplitude and speed come from
+     the world's wind × the plant's own "Wind ×" (slot.plant.wind), synced per
+     frame; shadows follow, since the shadow pass reads the same positionNode.
+     Generated LOD1/2 share LOD0's material and sway; an imported LOD carries
+     its own and stands still. Not planned yet: impostors for
      GLB plants far away (the tree impostor baker takes prop-shaped entries).
      **Foliage mode (F)**: EIGHT painted plants (four types fit one RGBA
      density texture, so the layer carries two pages), each real geometry with
@@ -1134,9 +1158,36 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      by the plant's radius, so a fern within ~2.5 m of a camera looking down
      vanished. It now pads all four edges outward and always keeps a plant
      closer than its own radius.
-     Remaining: phase 0 (meshoptimizer auto-LOD, shadow LOD — items 38-40),
-     GLB import with impostors, placed (non-painted) foliage with the instance
-     BVH, and textured cards for plants geometry cannot afford.
+     **VEGETATION — WHAT REMAINS (left off 2026-09-17, in the order I would
+     pick them up).** Everything above this line is done and committed; the
+     work below has not been started.
+     a. **Imported LOD meshes do not sway.** A plant's sway lives on its
+        material, and generated LOD1/2 share LOD0's. A LOD you import yourself
+        (importPropLod) brings its own material and stands still while the
+        near one moves. Fix: run toPlantNodeMaterial + applySway over an
+        imported LOD's materials too, with the same sway uniforms.
+     b. **A plant-set brush**, the rock set's trick for plants: one stroke
+        lays down a MIX (a fern here, two ground covers there, the odd bush),
+        with per-plant weights. Placed plants already have the hook
+        (propSys.scatterPlanner, v3/tools/rockSetBrush.js is the pattern);
+        painted plants would mix by weighting the density channels a stroke
+        writes.
+     c. **Impostors for placed GLB plants.** A shrub is ~3k triangles and
+        stays that at 200 m. The tree impostor baker (v2/render/foliage/
+        impostorBake.js) already takes `{geometry, material, localMatrix}`
+        entries, which is exactly a prop type's shape, so this is mostly
+        wiring: bake per plant type, draw the far tier as the octahedral quad
+        (v3/render/trees/impostorFieldRenderer.js is tied to the tree store
+        and would need a prop-instancer twin).
+     d. **Textured leaf cards** for plants geometry cannot afford (a birch,
+        a palm): today only pampas and susuki carry a texture, on their
+        plumes.
+     e. **Vegetation in play mode, judged by eye** — the "Shade on vegetation"
+        strength, and whether the shadow distance (35 m) is the right trade.
+     Older notes, still true: phase 0 of the foliage rebuild (meshoptimizer
+     auto-LOD and shadow LOD for painted plants — items 38-40 did this for
+     props, not for the scatter fields) and painted foliage's own instance BVH
+     if placed plants ever need collision beyond the prop box proxy.
 
 108. ~~**CSM splits for an open world**~~ — DONE 2026-09-16. v3 now ships
      `maxFar: 150` with nearSplit-anchored cascades instead of v2's

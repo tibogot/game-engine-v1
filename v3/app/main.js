@@ -62,6 +62,7 @@ import { PropStore } from "../tools/propStore.js";
 import { PropInstancer } from "../tools/propInstancer.js";
 import { PropSystem } from "../tools/propSystem.js";
 import { PLACED_PLANT_DEFAULTS, SpacingGrid, planPlacedPlants, removePlantsInRadius } from "../tools/placedPlants.js";
+import { createSwayUniforms, applySway, toPlantNodeMaterial } from "../render/instancing/plantSway.js";
 import { buildPlacedPlantPanel } from "../ui/buildPlacedPlantPanel.js";
 import { planRockStamp, ROCK_SET_DEFAULTS } from "../tools/rockSetBrush.js";
 import { PropPlacementPreview } from "../tools/propPlacementPreview.js";
@@ -1068,6 +1069,7 @@ export async function startV3App(opts = {}) {
   let placedUi = null;
   let _vegPlacedSlot = -1;          // prop slot index of the selected placed plant
   const _placedThumbs = new WeakMap(); // prop slot -> picture
+  const _plantSway = new Map();        // prop slot -> its wind uniforms
   // ONE undo history for all three, so Ctrl+Z walks strokes in the order they
   // happened whichever plant they painted, and an erase that cleared every
   // kind of plant is one step. An entry holds a density snapshot per system it
@@ -1390,6 +1392,8 @@ export async function startV3App(opts = {}) {
         renderer,
         name:             "Susuki",
         typeCount:        1,
+        // A cane is tall and thin: you can stand closer before it fills the view.
+        nearFade:         0.7,
         tileSize:         SUSUKI_FIELD.tileSize,
         plantsPerSide:    SUSUKI_FIELD.plantsPerSide,
         heightTex:        grassTerrainData.grassHeightTex,
@@ -3900,6 +3904,8 @@ export async function startV3App(opts = {}) {
         flowerSystem.setEnabled(wantFlowers);
         if (wantFlowers) flowerSystem.update(playMode.active ? playMode.playerPosition : camera.position, camera);
       }
+      // Placed plants breathe with the world's wind; a handful of uniforms.
+      if (_plantSway.size) syncAllPlantSway();
       if (foliageScatter) {
         // Only spend compute while any foliage is painted.
         const wantFoliage = foliageDensity.hasData && _terrainVisible;
@@ -6640,16 +6646,42 @@ export async function startV3App(opts = {}) {
     const type = slot && propStore.types[slot.typeIdx];
     if (!type) return;
     slot.plant = { ...PLACED_PLANT_DEFAULTS, ...settings };
-    for (const m of type.embeddedMaterials ?? []) {
-      for (const mat of Array.isArray(m) ? m : [m]) {
-        if (!mat) continue;
-        fixFoliageTransparency(mat);
-        mat.needsUpdate = true;
+    // Leaves cut out, then the material becomes a NODE material so the plant
+    // can sway (plantSway.js). Generated LOD1/2 share LOD0's material; an
+    // imported LOD carries its own and stands still.
+    const sway = _plantSway.get(slot) ?? createSwayUniforms();
+    _plantSway.set(slot, sway);
+    for (const e of type.entries) {
+      for (const mat of Array.isArray(e.material) ? e.material : [e.material]) {
+        if (mat) fixFoliageTransparency(mat);
       }
+      if (!Array.isArray(e.material)) e.material = applySway(toPlantNodeMaterial(e.material), sway);
     }
+    type.embeddedMaterials = type.entries.map((e) => e.material);
     type.noCollide = !slot.plant.collide;
+    syncPlantSway(slot);
+    propInstancer.refreshTypeMaterials(slot.typeIdx);
     propStore._bump();
     propSys.bvh?.invalidate();
+  }
+
+  /**
+   * Feed one plant's sway from its own Wind × and the world's wind, so placed
+   * plants breathe with the grass and the painted plants.
+   */
+  function syncPlantSway(slot) {
+    const u = _plantSway.get(slot);
+    const type = slot && propStore.types[slot.typeIdx];
+    if (!u || !type) return;
+    const h = Math.max(0.05, type.mergedBox.max.y - Math.min(0, type.mergedBox.min.y));
+    const wind = (slot.plant?.wind ?? 1) * ((grassState.windStrength ?? 1.4) / 1.4);
+    u.uPlantHeight.value = h;
+    u.uSwayAmp.value = h * 0.05 * wind;
+    u.uLeafAmp.value = h * 0.02 * wind;
+    u.uSwaySpeed.value = 0.9 * ((grassState.windSpeed ?? 0.2) / 0.2);
+  }
+  function syncAllPlantSway() {
+    for (const slot of propSlots) if (slot?.plant) syncPlantSway(slot);
   }
 
   /** The picker picture of a placed plant: its own meshes, baked once. */
@@ -9550,6 +9582,7 @@ export async function startV3App(opts = {}) {
       propStore._bump();
       propSys.bvh?.invalidate();
     },
+    onWindChanged: () => syncPlantSway(propSlots[_vegPlacedSlot]),
     onImport: () => importPlantGlb(),
     onRemove: () => {
       const s = propSlots[_vegPlacedSlot];

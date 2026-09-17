@@ -29,6 +29,8 @@ export const PLACED_PLANT_DEFAULTS = Object.freeze({
   sink: 0.04,
   /** Plants do not block the player unless asked. */
   collide: false,
+  /** Wind sway, as a multiple of the world's wind. 0 = dead still. */
+  wind: 1,
 });
 
 /**

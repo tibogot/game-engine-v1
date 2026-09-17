@@ -13,7 +13,7 @@ import { section, slider, toggle, hint, button } from "./widgets.js";
  *   onImport()         open the GLB picker
  *   onRemove()         remove every placed copy of this plant
  */
-export function buildPlacedPlantPanel(root, { getSlot, getCount, onCollideChanged, onImport, onRemove }) {
+export function buildPlacedPlantPanel(root, { getSlot, getCount, onCollideChanged, onWindChanged, onImport, onRemove }) {
   const widgets = [];
   const W = (w) => { widgets.push(w); return w; };
 
@@ -42,6 +42,8 @@ export function buildPlacedPlantPanel(root, { getSlot, getCount, onCollideChange
       hint: "Steeper ground grows nothing." }));
     W(slider(sec, p, "sink",      { label: "Sink", min: 0, max: 0.5, step: 0.01,
       hint: "Share of the plant's height pushed into the ground, so roots never float on a slope." }));
+    W(slider(sec, p, "wind", { label: "Wind ×", min: 0, max: 3, step: 0.05, onChange: () => onWindChanged?.(),
+      hint: "Sway, as a multiple of the world's wind (Grass → Wind). Each plant sways on its own phase: an imported plant cannot know which way it faces, so a row does not lean downwind together." }));
     W(toggle(sec, p, "collide",   { label: "Blocks the player", onChange: () => onCollideChanged?.() }));
     button(sec, { title: `Remove every placed ${slot.name}`, onClick: () => onRemove?.(), style: "color:#f66" });
     hint(sec, "The model, its materials and LOD are the prop's: Props mode lists it too.");
