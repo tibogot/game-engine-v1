@@ -1,53 +1,29 @@
-import { section as _section, slider as _slider, color as _color, toggle as _toggle } from "./widgets.js";
+import { section as _section, slider as _slider, color as _color } from "./widgets.js";
 
 /**
- * Susuki mode panel — paint brush + plant/plume appearance controls.
- * Built dynamically into #susuki-panel (same pattern as buildLakePanel).
+ * Susuki settings under the Vegetation header — plant and plume appearance.
+ * Built into #susuki-panel. The picker, brush, fill and clear live in the
+ * header (buildVegetationHeader.js).
  *
  * Callbacks:
- *   onBrushChanged()      brush radius changed (cursor ring update)
  *   onStateChanged()      any uniform-driven appearance param changed
  *   onPlumeGeoChanged()   plumeWidth / plumeHeight / plumeDroop (geometry bake)
  *   onStemGeoChanged()    stemWidth (geometry bake)
  *   onTextureChanged()    plume strand texture params (canvas redraw)
- *   onFill() / onClear()  fill / clear the painted density layer
  */
 export function buildSusukiPanel(root, {
-  susukiBrush,
   susukiState,
-  onBrushChanged,
   onStateChanged,
   onPlumeGeoChanged,
   onStemGeoChanged,
   onTextureChanged,
-  onFill,
-  onClear,
 }) {
   root.innerHTML = "";
   const widgets = [];
   const W = (w) => { widgets.push(w); return w; };
 
-  // ── Paint ──
-  const paint = _section(root, "Paint Susuki");
-  W(_slider(paint, susukiBrush, "radius",   { label: "Radius",   min: 5, max: 300, step: 5, onChange: onBrushChanged }));
-  W(_slider(paint, susukiBrush, "strength", { label: "Strength", min: 0.05, max: 1, step: 0.05 }));
-  W(_slider(paint, susukiBrush, "falloff",  { label: "Falloff",  min: 0.5, max: 6, step: 0.1 }));
-  W(_toggle(paint, susukiBrush, "erase",    { label: "Erase", hint: "Alt+paint also erases" }));
-  const hint = document.createElement("p");
-  hint.className = "mode-hint";
-  hint.innerHTML = "<kbd>Alt</kbd>+paint = erase · <kbd>Shift</kbd>/<kbd>Alt</kbd>+wheel = radius/strength";
-  paint.appendChild(hint);
-  const btnRow = document.createElement("div");
-  btnRow.style.cssText = "display:flex;gap:4px;margin-top:4px";
-  btnRow.innerHTML =
-    '<button type="button" class="action-btn primary" style="flex:1">Fill all</button>' +
-    '<button type="button" class="action-btn" style="flex:1;color:#f66">Clear all</button>';
-  btnRow.children[0].addEventListener("click", () => onFill?.());
-  btnRow.children[1].addEventListener("click", () => onClear?.());
-  paint.appendChild(btnRow);
-
   // ── Plants ──
-  const plants = _section(root, "Plants");
+  const plants = _section(root, "Susuki");
   W(_slider(plants, susukiState, "density",       { label: "Density",     min: 0.05, max: 1, step: 0.05, onChange: onStateChanged }));
   W(_slider(plants, susukiState, "tufts",         { label: "Stems/plant", min: 1, max: 8, step: 1, hint: "Optional bunching: stems per painted plant", onChange: () => { onStemGeoChanged?.(); onPlumeGeoChanged?.(); } }));
   W(_slider(plants, susukiState, "plumesPerFlower", { label: "Plumes/flower", min: 1, max: 8, step: 1, hint: "Plumes in the flower head atop each stem", onChange: onPlumeGeoChanged }));

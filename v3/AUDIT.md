@@ -975,9 +975,40 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      compute pass (paint, type, clumping, slope, per-type rules, map edge,
      distance fade, frustum cull, LOD pick, wind, player push), and one compact
      list sliced into indirect draws by `firstInstance`. A plant module adds
-     only its geometry and its shader nodes. Flowers already share the noise and
-     the density layer; moving the rest of flowers (and susuki, the third copy
-     of this architecture) onto it is the next clean-up.
+     only its geometry and its shader nodes.
+     **ONE CORE — DONE 2026-09-17:** flowers and susuki now run on it too, so
+     the three copies are one (flowerSystem 536 → 308 lines, susuki 835 → 601).
+     The field gained PARTS (several meshes showing the same plants: susuki's
+     opaque stems + alpha-tested plumes) and three per-system knobs (cull radius
+     as a node, fade thinning, slope edge width), all defaulting to the old
+     behaviour. Checked against the previous code at the same camera:
+     susuki with wind frozen is pixel-identical (1 px of 875k); flowers land in
+     the same places (the diff is only wind-motion outlines). Flowers also pick
+     up the fixed frustum pad (a plant near a camera looking down no longer
+     vanishes). Susuki's wind micro-sway is now the shared 0.10 at 4.1 Hz
+     instead of its own 0.07 at 3.5 Hz.
+     **ONE MODE — DONE 2026-09-17: Vegetation (F).** Susuki (U), Flowers (M)
+     and Foliage (F) were three toolbar modes doing one job. Now one button and
+     one mode-list entry; a header (v3/ui/buildVegetationHeader.js) holds the
+     plant grid in three groups (Plants = the 8 foliage types with their baked
+     pictures, Flowers = 4 drawn from their colours and petal count, Plumes =
+     susuki drawn from its own strand texture), ONE brush (size, strength,
+     falloff, erase), Fill the selected plant and Clear all vegetation. The
+     selected plant's own settings show underneath. Picking a card switches
+     which system paints; F reopens the kind last painted, U and M still jump
+     straight to susuki and flowers.
+     Internally the three modes, paint layers and save keys are unchanged, so
+     projects load as before. The three brush objects keep their own `type`
+     and read the shared settings through accessors.
+     Erase (or Alt+paint) removes EVERY plant under the brush, whatever kind is
+     selected; "Erase selected plant only" limits it. ONE undo history for all
+     three: an entry snapshots each system the stroke could change, so an
+     erase-everything is one Ctrl+Z and undo walks strokes in the order they
+     happened across kinds. Verified live with real mouse events: fern + poppy +
+     susuki on one spot, Alt-erase from Flowers clears all three, Ctrl+Z
+     restores all three, redo clears them again, erase-selected-only removes
+     just the poppy, two more undos walk back poppy-erase then the susuki
+     stroke. Brush sliders and Shift+wheel share one radius (1-300 m, log).
      **Foliage mode (F)**: EIGHT painted plants (four types fit one RGBA
      density texture, so the layer carries two pages), each real geometry with
      no textures and no alpha test: a pinnate FERN (separate round-tipped

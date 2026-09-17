@@ -16,6 +16,9 @@
  *     compact list and ONE indirect buffer: each draw's `firstInstance` points
  *     at its own slice, so `instance_index` in the vertex shader already
  *     addresses the right plants. Culled plants cost nothing.
+ *   - A draw can have several PARTS — meshes with their own geometry and
+ *     material that show the same plants (susuki: opaque stems + alpha-tested
+ *     plumes). Every part of a draw gets the same instance count and slice.
  *
  * Per-plant state is two vec4s:
  *   bufPos  (tile x, tile z, type, terrain Y)
@@ -77,23 +80,32 @@ export class ScatterField {
    *   riverNearTex      River v2 distance field (.r = distance² in UV), or null
    *   windTex           shared wind texture (grass / susuki / flowers)
    *   grassDensityTex   masked grass density (.x), or null — plants rise above painted grass
-   *   cullRadius        metres of slack in the frustum test (a tall plant needs more)
+   *   parts             meshes per draw that show the same plants (default 1)
+   *   cullRadius        metres of slack in the frustum test (a tall plant needs
+   *                     more) — a number, or a float node
+   *   fadeKeepGain      how early the distance fade starts thinning plants out
+   *                     (keep = fade × gain, capped at 1; 1 = thin across the
+   *                     whole fade window)
+   *   slopeBand         normal.y width of the slope cut-off's soft edge
    *   onKeep            optional hook, called inside the compute for plants that
    *                     survive: ({ worldX, worldZ, terrainUV, terrainY, normal,
    *                     typeIdx, near, distSq, p, d }) => void
    */
   constructor({
-    scene, renderer, name = "Scatter", typeCount, lods = 2, rows, ruleRow = null,
+    scene, renderer, name = "Scatter", typeCount, lods = 2, parts = 1, rows, ruleRow = null,
     worldSize, tileSize = 192, plantsPerSide = 384,
     heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex = null, windTex,
-    grassDensityTex = null, cullRadius = 2, onKeep = null,
+    grassDensityTex = null, cullRadius = 2, fadeKeepGain = 1.6, slopeBand = 0.12, onKeep = null,
   }) {
     this.renderer = renderer;
     this.name = name;
     this.typeCount = typeCount;
     this.lods = lods;
+    this.parts = parts;
     this.rows = rows;
     const draws = (this.draws = typeCount * lods);
+    // One mesh (and one indirect entry) per draw × part.
+    const meshCount = (this.meshCount = draws * parts);
     const count = (this.count = plantsPerSide * plantsPerSide);
 
     this.group = new THREE.Group();
@@ -149,15 +161,15 @@ export class ScatterField {
     const compactBuf = instancedArray(count * draws, "uint");
     this.nodes = { bufPos, bufDir, compactBuf };
 
-    // One indirect buffer: 5 args per draw; firstInstance = the draw's slice.
-    const args = new Uint32Array(draws * 5);
-    for (let k = 0; k < draws; k++) args[k * 5 + 4] = k * count;
+    // One indirect buffer: 5 args per mesh; firstInstance = its draw's slice.
+    const args = new Uint32Array(meshCount * 5);
+    for (let m = 0; m < meshCount; m++) args[m * 5 + 4] = Math.floor(m / parts) * count;
     const indirect = new THREE.IndirectStorageBufferAttribute(args, 5);
     this._indirect = indirect;
-    const indirectStorage = storage(indirect, "uint", draws * 5).toAtomic();
+    const indirectStorage = storage(indirect, "uint", meshCount * 5).toAtomic();
 
     this.computeReset = Fn(() => {
-      for (let k = 0; k < draws; k++) atomicStore(indirectStorage.element(k * 5 + 1), uint(0));
+      for (let m = 0; m < meshCount; m++) atomicStore(indirectStorage.element(m * 5 + 1), uint(0));
     })().compute(1, [1]);
 
     const fSide = float(plantsPerSide);
@@ -218,18 +230,19 @@ export class ScatterField {
       const dzA = worldZ.sub(u.uAnchorPos.z);
       const distSq = dxA.mul(dxA).add(dzA.mul(dzA)).toVar();
       const near = float(1).sub(smoothstep(u.uOuterR0.mul(u.uOuterR0), u.uOuterR1.mul(u.uOuterR1), distSq)).toVar();
-      const slopeProb = smoothstep(u.uSlopeMinY, u.uSlopeMinY.add(0.12), tN.y);
+      const slopeProb = smoothstep(u.uSlopeMinY, u.uSlopeMinY.add(slopeBand), tN.y);
       // The picked type's own rules: height band, paint layer, near a river.
       const bandKeep = ruleRow === null ? float(1) : scatterRuleKeep(
         u.uTypes.element(int(floor(typeIdx.add(0.5))).mul(rows).add(ruleRow)), terrainY,
         texture(splatTex, terrainUV).depth(int(0)), texture(splatTex, terrainUV).depth(int(1)),
         texture(riverTex, terrainUV).r, float(worldSize),
       );
-      const stochasticKeep = step(hash(instanceIndex.add(31337)), near.mul(1.6).min(1).mul(slopeProb).mul(bandKeep));
+      const stochasticKeep = step(hash(instanceIndex.add(31337)), near.mul(fadeKeepGain).min(1).mul(slopeProb).mul(bandKeep));
 
       const frustumVis = scatterFrustumVisible(
         vec3(worldX, terrainY, worldZ), u.uCameraMatrix, u.uFx, u.uFy,
-        float(cullRadius), u.uCullPadNdcX, u.uCullPadNdcYNear, u.uCullPadNdcYFar,
+        typeof cullRadius === "number" ? float(cullRadius) : cullRadius,
+        u.uCullPadNdcX, u.uCullPadNdcYNear, u.uCullPadNdcYFar,
       );
 
       If(densityKeep.mul(mapStay).mul(stochasticKeep).mul(frustumVis).greaterThan(0.5), () => {
@@ -245,8 +258,10 @@ export class ScatterField {
         const drawK = int(typeIdx.mul(lods).add(lod));
         for (let k = 0; k < draws; k++) {
           If(drawK.equal(k), () => {
-            const slot = atomicAdd(indirectStorage.element(k * 5 + 1), uint(1));
+            const slot = atomicAdd(indirectStorage.element(k * parts * 5 + 1), uint(1));
             compactBuf.element(slot.add(uint(k * count))).assign(instanceIndex);
+            // The other parts only need the same count.
+            for (let q = 1; q < parts; q++) atomicAdd(indirectStorage.element((k * parts + q) * 5 + 1), uint(1));
           });
         }
 
@@ -289,7 +304,7 @@ export class ScatterField {
     })().compute(count, [64]);
 
     this.meshes = [];
-    this.triangles = new Array(draws).fill(0);
+    this.triangles = new Array(meshCount).fill(0);
     this._lastAnchor = new THREE.Vector3();
     this._cameraMatrix = new THREE.Matrix4();
     this._initDone = false;
@@ -301,16 +316,26 @@ export class ScatterField {
     return this.u.uTypes.element(int(floor(typeNode.add(0.5))).mul(this.rows).add(r));
   }
 
-  /** Create the draws once the plant module's material exists. */
+  /** Mesh index of (type, detail level, part). */
+  meshIndex(type, lod = 0, part = 0) { return (type * this.lods + lod) * this.parts + part; }
+
+  /**
+   * Create the meshes once the plant module's material exists.
+   * @param {THREE.Material|THREE.Material[]} material one for every part, or one per part
+   */
   attachMaterial(material) {
-    this.material = material;
-    for (let k = 0; k < this.draws; k++) {
-      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
+    const mats = Array.isArray(material) ? material : [material];
+    this.material = mats[0];
+    for (let m = 0; m < this.meshCount; m++) {
+      const part = m % this.parts;
+      const k = Math.floor(m / this.parts);
+      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mats[Math.min(part, mats.length - 1)]);
       mesh.count = this.count;
       mesh.frustumCulled = false;   // the compute culls, per plant
       mesh.castShadow = false;
       mesh.receiveShadow = false;
-      mesh.name = `${this.name}:type${Math.floor(k / this.lods)}:lod${k % this.lods}`;
+      mesh.name = `${this.name}:type${Math.floor(k / this.lods)}:lod${k % this.lods}` +
+        (this.parts > 1 ? `:part${part}` : "");
       this.meshes.push(mesh);
       this.group.add(mesh);
     }
@@ -319,26 +344,32 @@ export class ScatterField {
   /**
    * Rebuild one type's meshes after a shape setting changed.
    * @param {number} i type index
-   * @param {(lod:number) => { geometry: THREE.BufferGeometry, triangles: number }} makeGeometry
+   * @param {(lod:number, part:number) => { geometry: THREE.BufferGeometry, triangles: number }} makeGeometry
+   * @param {number[]} [onlyParts] rebuild just these parts (default: all)
    */
-  rebuildType(i, makeGeometry) {
+  rebuildType(i, makeGeometry, onlyParts = null) {
     for (let lod = 0; lod < this.lods; lod++) {
-      const k = i * this.lods + lod;
-      const { geometry, triangles } = makeGeometry(lod);
-      this._indirect.array[k * 5] = geometry.index.count;
-      geometry.setIndirect(this._indirect, k * 5 * 4);
-      const mesh = this.meshes[k];
-      const old = mesh.geometry;
-      mesh.geometry = geometry;
-      old?.dispose();
-      this.triangles[k] = triangles;
+      for (let part = 0; part < this.parts; part++) {
+        if (onlyParts && !onlyParts.includes(part)) continue;
+        const m = this.meshIndex(i, lod, part);
+        const { geometry, triangles } = makeGeometry(lod, part);
+        this._indirect.array[m * 5] = geometry.index.count;
+        geometry.setIndirect(this._indirect, m * 5 * 4);
+        const mesh = this.meshes[m];
+        const old = mesh.geometry;
+        mesh.geometry = geometry;
+        old?.dispose();
+        this.triangles[m] = triangles;
+      }
     }
     this._indirect.needsUpdate = true;
   }
 
   /** Shadows on the near detail level only, and only when asked. */
   setReceiveShadows(on) {
-    for (let k = 0; k < this.draws; k++) this.meshes[k].receiveShadow = !!on && k % this.lods === 0;
+    for (let m = 0; m < this.meshCount; m++) {
+      this.meshes[m].receiveShadow = !!on && Math.floor(m / this.parts) % this.lods === 0;
+    }
   }
 
   /**
@@ -350,7 +381,7 @@ export class ScatterField {
     const key = used.map((u) => (u ? 1 : 0)).join("");
     if (key === this._usedKey) return;
     this._usedKey = key;
-    for (let k = 0; k < this.draws; k++) this.meshes[k].visible = !!used[Math.floor(k / this.lods)];
+    for (let m = 0; m < this.meshCount; m++) this.meshes[m].visible = !!used[Math.floor(m / (this.parts * this.lods))];
   }
 
   /**

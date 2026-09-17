@@ -34,16 +34,10 @@
           <button class="toolbar-btn" data-mode="grass" title="Grass">
             <i data-lucide="sprout"></i>
           </button>
-          <button class="toolbar-btn" data-mode="susuki" title="Susuki plumes (U)">
-            <i data-lucide="wheat"></i>
-          </button>
-          <button class="toolbar-btn" data-mode="flowers" title="Flowers (M)">
-            <i data-lucide="flower-2"></i>
-          </button>
           <button class="toolbar-btn" data-mode="treePaint" title="Trees (T)">
             <i data-lucide="tree-pine"></i>
           </button>
-          <button class="toolbar-btn" data-mode="foliage" title="Foliage (F)">
+          <button class="toolbar-btn" data-mode="foliage" title="Vegetation (F) — foliage, flowers, susuki">
             <i data-lucide="leaf"></i>
           </button>
           <button class="toolbar-btn" data-mode="road" title="Road (smart)">
@@ -153,10 +147,8 @@
               <option value="sculpt">Sculpt</option>
               <option value="paint">Paint</option>
               <option value="grass">Grass</option>
-              <option value="susuki">Susuki (U)</option>
-              <option value="flowers">Flowers (M)</option>
               <option value="treePaint">Trees (T)</option>
-              <option value="foliage">Foliage (F)</option>
+              <option value="foliage">Vegetation (F)</option>
               <option value="props">Props (I)</option>
               <option value="spline">Spline (K)</option>
               <option value="riverv2">River v2 (H)</option>
@@ -2303,7 +2295,9 @@
         <!-- TREE panel — built dynamically by buildTreePanel() (v2 layout) -->
         <div id="tree-panel" style="display:none"></div>
 
-        <!-- FOLIAGE panel — built dynamically by buildFoliagePanel() (v2 layout) -->
+        <!-- VEGETATION header (picker, brush) over the selected plant's settings:
+             buildVegetationHeader() + buildFoliagePanel / buildSusukiPanel / buildFlowerPanel -->
+        <div id="vegetation-header" style="display:none"></div>
         <div id="foliage-panel" style="display:none"></div>
 
         <!-- SUSUKI panel — built dynamically by buildSusukiPanel() -->
@@ -2433,7 +2427,7 @@
         <div><kbd>LMB</kbd> the chosen tool · hold <kbd>Shift</kbd> lower · <kbd>Ctrl</kbd> smooth · <kbd>Alt</kbd> flatten</div>
         <div class="help-group">Every brush (sculpt, paint, grass, trees, foliage, snow…)</div>
         <div><kbd>Shift</kbd>+<kbd>Scroll</kbd> brush size · <kbd>Alt</kbd>+<kbd>Scroll</kbd> strength</div>
-        <div><kbd>Alt</kbd>+paint erases (paint, trees, foliage, props, susuki, flowers, snow; on Hole: fills back in) · grass uses its Erase box</div>
+        <div><kbd>Alt</kbd>+paint erases (paint, trees, vegetation, props, snow; on Hole: fills back in) · grass uses its Erase box</div>
         <div class="help-group">Props</div>
         <div><kbd>RMB</kbd> select · <kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> move / rotate / scale · <kbd>Q</kbd> local / world</div>
         <div><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> copy, paste at the cursor · <kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect</div>
@@ -2442,7 +2436,7 @@
         <div class="help-group">Waterfalls</div>
         <div>hover a cliff edge to preview · <kbd>LMB</kbd> place · click a fall to select · <kbd>W</kbd> <kbd>E</kbd> move / turn · <kbd>Ctrl</kbd>+<kbd>D</kbd> · <kbd>Del</kbd> · <kbd>Esc</kbd></div>
         <div class="help-group">Modes (press again to return to View)</div>
-        <div><kbd>V</kbd> View · <kbd>I</kbd> Props · <kbd>T</kbd> Trees · <kbd>F</kbd> Foliage · <kbd>U</kbd> Susuki · <kbd>M</kbd> Flowers · <kbd>L</kbd> Lakes</div>
+        <div><kbd>V</kbd> View · <kbd>I</kbd> Props · <kbd>T</kbd> Trees · <kbd>F</kbd> Vegetation (<kbd>U</kbd> / <kbd>M</kbd> jump to susuki / flowers) · <kbd>L</kbd> Lakes</div>
         <div><kbd>H</kbd> River v2 · <kbd>O</kbd> Tunnels (<kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate) · <kbd>K</kbd> Splines · <kbd>C</kbd> Decals · <kbd>G</kbd> Waterfalls · <kbd>N</kbd> Player start</div>
         <div><kbd>P</kbd> play · <kbd>Shift</kbd>+<kbd>P</kbd> play immersive · <kbd>Esc</kbd> leave play</div>
         <div class="help-group">Project</div>

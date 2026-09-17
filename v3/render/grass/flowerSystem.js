@@ -1,31 +1,28 @@
 /**
  * Meadow flowers — real petal geometry, placed and culled on the GPU.
  *
- *   - camera-following wrap tile: a fixed instance budget, however much is painted
- *   - ONE compute pass per frame does all per-plant work: painted type and
- *     density (blocking paint layers and holes already masked out), clumping,
- *     slope, grass height, radial fade, frustum cull, near/far detail, wind and
- *     player push
- *   - every (type × detail) is its own indirect draw — at most 8 — and all of
- *     them share ONE compact list and ONE indirect buffer: each draw's
- *     `firstInstance` points at its own slice, so `instance_index` in the vertex
- *     shader already addresses the right plants. Culled plants cost nothing.
- *
- * Per-plant state is two vec4s (tile position, terrain Y, type; bend vector,
- * fade, grass height); size, yaw, colour jitter and lean come from hash(id).
+ * All the placement machinery (camera-following wrap tile, ONE compute pass for
+ * paint, clumping, slope, rules, fade, frustum cull, near/far detail, wind and
+ * player push, indirect draws sliced by `firstInstance`) is the shared scatter
+ * field: v3/render/scatter/scatterField.js — which was first written here and
+ * pulled out. This file is only what a flower IS: its per-type uniform rows,
+ * its geometry and how it is shaded.
  *
  * Why geometry rather than alpha-masked cards: the petals' outline is exact at
  * every distance and never shimmers, MSAA smooths it like any mesh edge, and
  * no fragment is discarded, so hidden flowers are rejected by the depth test
  * before shading. See flowerGeometry.js.
+ *
+ * Per type, 5 uniform rows:
+ *   0 (petalBase.rgb, translucency)
+ *   1 (petalTip.rgb, size)
+ *   2 (centre.rgb, stemHeight)
+ *   3 (veins, 0, 0, 0)
+ *   4 (heightMin, heightMax, paint layer or -1, river distance m or 0) — the rules
  */
 import * as THREE from "three";
 import {
   Fn,
-  If,
-  abs,
-  atomicAdd,
-  atomicStore,
   attribute,
   cameraPosition,
   cameraViewMatrix,
@@ -38,11 +35,8 @@ import {
   fract,
   hash,
   instanceIndex,
-  instancedArray,
-  int,
   length,
   max,
-  min,
   mix,
   normalLocal,
   normalize,
@@ -53,12 +47,8 @@ import {
   sin,
   smoothstep,
   step,
-  storage,
-  texture,
   time,
-  uint,
   uniform,
-  uniformArray,
   uv,
   varying,
   vec2,
@@ -66,16 +56,14 @@ import {
   vec4,
   PI2,
 } from "three/tsl";
-import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
-import { computeFrustumVisibility } from "../../../v2/core/revoGrass/revoGrassSsboUtils.js";
 import { FLOWER_TYPE_COUNT } from "../../app/state/flowerState.js";
 import { createFlowerTypeGeometry } from "./flowerGeometry.js";
-import { scatterClump, scatterRuleKeep } from "../scatter/scatterNoise.js";
+import { ScatterField } from "../scatter/scatterField.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
 const LODS = 2;
-const DRAWS = FLOWER_TYPE_COUNT * LODS;
 const ROWS = 5; // uniform rows per type
+const RULE_ROW = 4;
 
 export class FlowerSystem {
   /**
@@ -94,188 +82,27 @@ export class FlowerSystem {
    *   tileSize, plantsPerSide  wrap tile (default 192 m / 384 ≈ 147k slots, 0.5 m apart)
    */
   constructor({ scene, renderer, heightTex, terrainNormalTex, densityTex, grassDensityTex, splatTex, riverNearTex = null, windTex, worldSize, fp, gp, tileSize = 192, plantsPerSide = 384 }) {
+    const field = (this.field = new ScatterField({
+      scene, renderer, name: "Flowers",
+      typeCount: FLOWER_TYPE_COUNT, lods: LODS, rows: ROWS, ruleRow: RULE_ROW,
+      worldSize, tileSize, plantsPerSide,
+      heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex, windTex, grassDensityTex,
+      cullRadius: 2,
+    }));
+    this.group = field.group;
     this.renderer = renderer;
-    this.group = new THREE.Group();
-    this.group.name = "Flowers";
-    scene.add(this.group);
-    const count = (this.count = plantsPerSide * plantsPerSide);
-    // No River v2 yet: a field that reads "no river anywhere".
-    const noRiver = new THREE.DataTexture(new Float32Array([1e9, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
-    noRiver.needsUpdate = true;
-    const riverTex = riverNearTex ?? noRiver;
+    this.count = field.count;
 
-    // Per type: (petalBase.rgb, translucency) (petalTip.rgb, size) (centre.rgb, stemHeight) (veins, 0, 0, 0)
-    //           (heightMin, heightMax, paint layer or -1, river distance m or 0) — scatterRuleKeep
-    this._typeRows = Array.from({ length: FLOWER_TYPE_COUNT * ROWS }, () => new THREE.Vector4());
     const u = (this.u = {
-      uAnchorPos: uniform(new THREE.Vector3()),
-      uAnchorDeltaXZ: uniform(new THREE.Vector2()),
-      uTileSize: uniform(tileSize),
-      uTerrainSize: uniform(worldSize),
-      uCameraMatrix: uniform(new THREE.Matrix4()),
-      uFx: uniform(1),
-      uFy: uniform(1),
-      uWindSpeed: uniform(0.2),
-      uWindStrength: uniform(1.4),
-      uWindGust: uniform(0.3),
-      uWindWaveScale: uniform(0.12),
-      uWindDir: uniform(new THREE.Vector2(1, 0)),
-      uPlayerPos: uniform(new THREE.Vector3()),
-      uInteractRadius: uniform(1.2),
-      uInteractStrength: uniform(0.9),
-      uDensity: uniform(0.55),
-      uSizeVar: uniform(0.25),
-      uColorVar: uniform(0.1),
-      uClumping: uniform(0.7),
-      uClumpFreq: uniform(0.25),
-      uGrassHeight: uniform(1),
-      uGrassLift: uniform(0.8),
-      uFlex: uniform(0.5),
       uFlutter: uniform(0.6),
       uGlowLight: uniform(0.08),
       uTransMul: uniform(1),
       uSunDir: uniform(new THREE.Vector3(0.5, 0.8, 0.3).normalize()),
       uStemBase: uniform(new THREE.Color()),
       uStemTop: uniform(new THREE.Color()),
-      uLodDist: uniform(18),
-      uOuterR0: uniform(62),
-      uOuterR1: uniform(88),
-      uSlopeMinY: uniform(0.7),
-      uCullPadNdcX: uniform(0.35),
-      uCullPadNdcYNear: uniform(0.6),
-      uCullPadNdcYFar: uniform(0.35),
-      uTypes: uniformArray(this._typeRows, "vec4"),
     });
-
-    // ── SSBOs ──
-    // bufPos: x,y = tile-local offset, z = type, w = terrain Y
-    // bufDir: x,y = smoothed world-space bend, z = distance fade (1 near → 0), w = grass lift (m)
-    const bufPos = instancedArray(count, "vec4");
-    const bufDir = instancedArray(count, "vec4");
-    // One compact list, DRAWS slices of `count` each.
-    const compactBuf = instancedArray(count * DRAWS, "uint");
-
-    // One indirect buffer: 5 args per draw; firstInstance = the draw's slice.
-    const args = new Uint32Array(DRAWS * 5);
-    for (let k = 0; k < DRAWS; k++) args[k * 5 + 4] = k * count;
-    const indirect = new THREE.IndirectStorageBufferAttribute(args, 5);
-    this._indirect = indirect;
-    const indirectStorage = storage(indirect, "uint", DRAWS * 5).toAtomic();
-
-    this.computeReset = Fn(() => {
-      for (let k = 0; k < DRAWS; k++) atomicStore(indirectStorage.element(k * 5 + 1), uint(0));
-    })().compute(1, [1]);
-
-    const fSide = float(plantsPerSide);
-    const fSpacing = float(tileSize / plantsPerSide);
-    const fHalf = float(tileSize * 0.5);
-
-    this.computeInit = Fn(() => {
-      const p = bufPos.element(instanceIndex);
-      const row = floor(float(instanceIndex).div(fSide));
-      const col = float(instanceIndex).mod(fSide);
-      p.x.assign(col.mul(fSpacing).sub(fHalf).add(hash(instanceIndex.add(4321)).mul(fSpacing)));
-      p.y.assign(row.mul(fSpacing).sub(fHalf).add(hash(instanceIndex.add(1234)).mul(fSpacing)));
-      p.z.assign(0);
-      p.w.assign(0);
-      const d = bufDir.element(instanceIndex);
-      d.assign(vec4(0));
-    })().compute(count, [64]);
-
-    // ── UPDATE: once per plant ──
-    this.computeUpdate = Fn(() => {
-      const p = bufPos.element(instanceIndex);
-      const wrapped = wrapTileOffsetXZ(vec2(p.x, p.y), u.uAnchorDeltaXZ, u.uTileSize);
-      p.x.assign(wrapped.x);
-      p.y.assign(wrapped.y);
-
-      const worldX = wrapped.x.add(u.uAnchorPos.x);
-      const worldZ = wrapped.y.add(u.uAnchorPos.z);
-      const terrainUV = vec2(worldX, worldZ).div(u.uTerrainSize).add(0.5);
-      const terrainY = texture(heightTex, terrainUV).x;
-      const tN = texture(terrainNormalTex, terrainUV).xyz;
-
-      // Paint: the total decides whether a plant grows; a second hash picks
-      // WHICH type, weighted by each channel's share.
-      const paint = texture(densityTex, terrainUV);
-      const total = paint.r.add(paint.g).add(paint.b).add(paint.a).toVar();
-      // Clumps and gaps — the same noise the far-field terrain tint uses.
-      const clump = scatterClump(vec2(worldX, worldZ), u.uClumpFreq, u.uClumping);
-      const densityKeep = step(hash(instanceIndex.add(7919)), u.uDensity.mul(min(total, 1)).mul(clump))
-        .mul(smoothstep(0.0, 0.005, total));
-      const pick = hash(instanceIndex.add(2711)).mul(total);
-      const typeIdx = step(paint.r, pick)
-        .add(step(paint.r.add(paint.g), pick))
-        .add(step(paint.r.add(paint.g).add(paint.b), pick)).toVar();
-
-      const mapHalf = u.uTerrainSize.mul(0.5);
-      const mapStay = float(1).sub(smoothstep(mapHalf.sub(2), mapHalf.add(0.35), max(abs(worldX), abs(worldZ))));
-
-      const dxA = worldX.sub(u.uAnchorPos.x);
-      const dzA = worldZ.sub(u.uAnchorPos.z);
-      const distSq = dxA.mul(dxA).add(dzA.mul(dzA)).toVar();
-      const near = float(1).sub(smoothstep(u.uOuterR0.mul(u.uOuterR0), u.uOuterR1.mul(u.uOuterR1), distSq)).toVar();
-      const slopeProb = smoothstep(u.uSlopeMinY, u.uSlopeMinY.add(0.12), tN.y);
-      // The picked type's own rules: height band, paint layer, near a river.
-      const rule = u.uTypes.element(int(floor(typeIdx.add(0.5))).mul(ROWS).add(4));
-      const bandKeep = scatterRuleKeep(
-        rule, terrainY,
-        texture(splatTex, terrainUV).depth(int(0)), texture(splatTex, terrainUV).depth(int(1)),
-        texture(riverTex, terrainUV).r, float(worldSize),
-      );
-      const stochasticKeep = step(hash(instanceIndex.add(31337)), near.mul(1.6).min(1).mul(slopeProb).mul(bandKeep));
-
-      const frustumVis = computeFrustumVisibility(
-        vec3(worldX, terrainY, worldZ), u.uCameraMatrix, u.uFx, u.uFy,
-        float(2), u.uCullPadNdcX, u.uCullPadNdcYNear, u.uCullPadNdcYFar,
-      );
-
-      If(densityKeep.mul(mapStay).mul(stochasticKeep).mul(frustumVis).greaterThan(0.5), () => {
-        // Near or far detail. The switch distance is spread ±2 m per plant so
-        // the change never forms a visible ring.
-        const lodR = u.uLodDist.add(hash(instanceIndex.add(555)).mul(4).sub(2));
-        const lod = step(lodR.mul(lodR), distSq);
-        const drawK = int(typeIdx.mul(LODS).add(lod));
-        for (let k = 0; k < DRAWS; k++) {
-          If(drawK.equal(k), () => {
-            const slot = atomicAdd(indirectStorage.element(k * 5 + 1), uint(1));
-            compactBuf.element(slot.add(uint(k * count))).assign(instanceIndex);
-          });
-        }
-
-        // Wind — the same baked channels as the grass and susuki.
-        const tBase = time.mul(u.uWindSpeed);
-        const dirX = u.uWindDir.x, dirZ = u.uWindDir.y;
-        const waveUV = vec2(
-          worldX.mul(u.uWindWaveScale).add(dirX.mul(tBase)).div(8.0),
-          worldZ.mul(u.uWindWaveScale).add(dirZ.mul(tBase)).div(8.0),
-        );
-        const gustUV = vec2(
-          worldX.mul(u.uWindWaveScale).mul(0.25).add(dirX.mul(tBase).mul(0.3)).div(3.0),
-          worldZ.mul(u.uWindWaveScale).mul(0.25).add(dirZ.mul(tBase).mul(0.3)).div(3.0),
-        );
-        const wave = texture(windTex, waveUV).x.mul(2).sub(1);
-        const gust = smoothstep(0.5, 0.9, texture(windTex, gustUV).y.mul(2).sub(1)).mul(u.uWindGust);
-        const micro = sin(tBase.add(hash(instanceIndex).mul(PI2)).mul(4.1)).mul(0.1);
-        const windMag = wave.mul(0.5).add(0.5).add(gust).add(micro).mul(u.uWindStrength).mul(u.uFlex).mul(0.3);
-
-        const toPlant = vec2(worldX.sub(u.uPlayerPos.x), worldZ.sub(u.uPlayerPos.z));
-        const pDist = length(toPlant);
-        const pFall = float(1).sub(smoothstep(0.2, u.uInteractRadius, pDist));
-        const pushDir = toPlant.div(max(pDist, 0.001));
-        const pushMag = pFall.mul(u.uInteractStrength);
-
-        const d = bufDir.element(instanceIndex);
-        const kF = float(0.18);
-        d.x.assign(d.x.add(dirX.mul(windMag).add(pushDir.x.mul(pushMag)).sub(d.x).mul(kF)));
-        d.y.assign(d.y.add(dirZ.mul(windMag).add(pushDir.y.mul(pushMag)).sub(d.y).mul(kF)));
-        d.z.assign(near);
-        // Rise above painted grass, by its blade height.
-        d.w.assign(texture(grassDensityTex, terrainUV).x.mul(u.uGrassHeight).mul(u.uGrassLift));
-        p.z.assign(typeIdx);
-        p.w.assign(terrainY);
-      });
-    })().compute(count, [64]);
+    const { bufPos, bufDir, compactBuf } = field.nodes;
+    const fu = field.u;
 
     // ── Material (shared by every draw) ──
     const mat = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide, roughness: 0.72, metalness: 0 });
@@ -291,7 +118,7 @@ export class FlowerSystem {
     const vNormal = varying(vec3(0, 1, 0), "v_fl_normal");
 
     // ROUND the type, never truncate: an interpolated 1 can arrive as 0.99999.
-    const row = (t, r) => u.uTypes.element(int(floor(t.add(0.5))).mul(ROWS).add(r));
+    const row = (t, r) => field.rowOf(t, r);
 
     /** Rotate v so +Y leans toward (bx, bz) by angle a. */
     const tilt = (v, a, bx, bz) => {
@@ -313,7 +140,7 @@ export class FlowerSystem {
       const r2 = row(p.z, 2);
 
       const fade = mix(float(0.3), float(1), d.z);
-      const size = r1.w.mul(mix(float(1).sub(u.uSizeVar), float(1).add(u.uSizeVar), hash(plant.add(577)))).mul(fade);
+      const size = r1.w.mul(mix(float(1).sub(fu.uSizeVar), float(1).add(fu.uSizeVar), hash(plant.add(577)))).mul(fade);
       const hasStem = step(0.001, r2.w);
       // ±35%: a field of equal stems reads as planted lollipops.
       const stemH = r2.w.mul(mix(float(0.65), float(1.35), hash(plant.add(911)))).mul(fade).add(d.w.mul(hasStem));
@@ -363,7 +190,7 @@ export class FlowerSystem {
       vPlant.assign(hash(plant.add(3197)));
       vNormal.assign(nrm);
       const out = vec3(pos.x.add(p.x), pos.y.add(p.w).add(groundLift), pos.z.add(p.y));
-      vWorld.assign(out.add(vec3(u.uAnchorPos.x, 0, u.uAnchorPos.z)));
+      vWorld.assign(out.add(vec3(fu.uAnchorPos.x, 0, fu.uAnchorPos.z)));
       return out;
     })();
 
@@ -401,7 +228,7 @@ export class FlowerSystem {
       const leaf = mix(u.uStemBase, u.uStemTop, float(0.35).add(uv().y.mul(0.5)))
         .mul(float(0.85).add(exp(c.x.sub(0.5).mul(c.x.sub(0.5)).mul(-200)).mul(0.25)));
       const col = select(vPart.lessThan(0.5), petal, select(vPart.lessThan(1.5), centre, select(vPart.lessThan(2.5), stem, leaf)));
-      const j = vPlant.sub(0.5).mul(2).mul(u.uColorVar);
+      const j = vPlant.sub(0.5).mul(2).mul(fu.uColorVar);
       return col.mul(vec3(float(1).add(j), float(1).add(j.mul(0.4)), float(1).sub(j.mul(0.3))));
     });
     const col = baseColor();
@@ -418,56 +245,22 @@ export class FlowerSystem {
       return col.mul(behind.mul(thin).mul(u.uTransMul).mul(1.4).add(u.uGlowLight));
     })();
 
-    // ── Meshes: one per (type × detail), sharing the material, buffer and list ──
-    this.meshes = [];
-    for (let k = 0; k < DRAWS; k++) {
-      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
-      mesh.count = count;
-      mesh.frustumCulled = false;
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-      mesh.name = `Flowers:type${Math.floor(k / LODS)}:lod${k % LODS}`;
-      this.meshes.push(mesh);
-      this.group.add(mesh);
-    }
-    this.triangles = new Array(DRAWS).fill(0);
+    field.attachMaterial(mat);
     for (let i = 0; i < FLOWER_TYPE_COUNT; i++) this.rebuildType(i, fp.types[i]);
-
-    this._lastAnchor = new THREE.Vector3();
-    this._cameraMatrix = new THREE.Matrix4();
-    this._initDone = false;
-    this._enabled = false;
-    this.group.visible = false;
     this.syncFromState(fp, gp);
   }
 
+  get meshes() { return this.field.meshes; }
+  get triangles() { return this.field.triangles; }
+
   /** Rebuild one type's near + far meshes after a shape setting changed. */
   rebuildType(i, type) {
-    for (let lod = 0; lod < LODS; lod++) {
-      const k = i * LODS + lod;
-      const { geometry, triangles } = createFlowerTypeGeometry(type, { lod });
-      this._indirect.array[k * 5] = geometry.index.count;
-      geometry.setIndirect(this._indirect, k * 5 * 4);
-      const mesh = this.meshes[k];
-      const old = mesh.geometry;
-      mesh.geometry = geometry;
-      old?.dispose();
-      this.triangles[k] = triangles;
-    }
-    this._indirect.needsUpdate = true;
+    this.field.rebuildType(i, (lod) => createFlowerTypeGeometry(type, { lod }));
   }
 
-  async init(camera) {
-    await this.renderer.computeAsync(this.computeInit);
-    await this.renderer.computeAsync([this.computeReset, this.computeUpdate]);
-    this._initDone = true;
-    for (const m of this.meshes) await this.renderer.compileAsync(m, camera);
-  }
-
-  setEnabled(on) {
-    this._enabled = !!on;
-    this.group.visible = this._enabled;
-  }
+  init(camera) { return this.field.init(camera); }
+  setEnabled(on) { this.field.setEnabled(on); }
+  update(anchorPos, camera) { this.field.update(anchorPos, camera); }
 
   /**
    * fp = flower state, gp = grassState (shared wind, blade height), sunDir
@@ -475,62 +268,41 @@ export class FlowerSystem {
    * a "grows near water" rule could never be satisfied and is ignored.
    */
   syncFromState(fp, gp, sunDir, { hasRivers = true } = {}) {
+    this.field.syncCommon({
+      wind: gp ? { ...gp, windMul: fp.windMul } : null,
+      density: fp.density,
+      sizeVar: fp.sizeVar,
+      colorVar: fp.colorVar,
+      clumping: fp.clumping,
+      clumpSize: fp.clumpSize,
+      grassLift: fp.grassLift,
+      flex: fp.flex,
+      interactRadius: fp.interactRadius,
+      interactStrength: fp.interactStrength,
+      lodDistance: fp.lodDistance,
+      fadeStart: fp.fadeStart,
+      fadeEnd: fp.fadeEnd,
+      slopeMinY: fp.slopeMinY,
+    });
     const u = this.u;
-    u.uWindSpeed.value = gp.windSpeed ?? 0.2;
-    u.uWindStrength.value = (gp.windStrength ?? 1.4) * (fp.windMul ?? 1);
-    u.uWindGust.value = gp.windGust ?? 0.3;
-    u.uWindWaveScale.value = gp.windWaveScale ?? 0.12;
-    const wr = ((gp.windAngle ?? 0) * Math.PI) / 180;
-    u.uWindDir.value.set(Math.cos(wr), Math.sin(wr));
-    u.uGrassHeight.value = gp.bladeHeight ?? 1;
-
-    u.uDensity.value = fp.density;
-    u.uSizeVar.value = fp.sizeVar;
-    u.uColorVar.value = fp.colorVar;
-    u.uClumping.value = fp.clumping;
-    u.uClumpFreq.value = 1 / Math.max(0.5, fp.clumpSize);
-    u.uGrassLift.value = fp.grassLift;
-    u.uFlex.value = fp.flex;
     u.uFlutter.value = fp.flutter;
     u.uGlowLight.value = fp.glowLight;
     u.uTransMul.value = fp.translucencyMul;
     u.uStemBase.value.set(fp.stemBase);
     u.uStemTop.value.set(fp.stemTop);
-    u.uInteractRadius.value = fp.interactRadius;
-    u.uInteractStrength.value = fp.interactStrength;
-    u.uLodDist.value = fp.lodDistance;
-    u.uOuterR0.value = fp.fadeStart;
-    u.uOuterR1.value = Math.max(fp.fadeEnd, fp.fadeStart + 1);
-    u.uSlopeMinY.value = fp.slopeMinY;
     if (sunDir) u.uSunDir.value.copy(sunDir).normalize();
 
     const c = new THREE.Color();
+    const rows = this.field.typeRows;
     for (let i = 0; i < FLOWER_TYPE_COUNT; i++) {
       const t = fp.types[i];
       const o = i * ROWS;
-      c.set(t.petalBase); this._typeRows[o].set(c.r, c.g, c.b, t.translucency);
-      c.set(t.petalTip);  this._typeRows[o + 1].set(c.r, c.g, c.b, t.size);
-      c.set(t.centre);    this._typeRows[o + 2].set(c.r, c.g, c.b, t.stemHeight);
-      this._typeRows[o + 3].set(t.veins, 0, 0, 0);
-      this._typeRows[o + 4].set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, hasRivers ? (t.nearRiver ?? 0) : 0);
+      c.set(t.petalBase); rows[o].set(c.r, c.g, c.b, t.translucency);
+      c.set(t.petalTip);  rows[o + 1].set(c.r, c.g, c.b, t.size);
+      c.set(t.centre);    rows[o + 2].set(c.r, c.g, c.b, t.stemHeight);
+      rows[o + 3].set(t.veins, 0, 0, 0);
+      rows[o + 4].set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, hasRivers ? (t.nearRiver ?? 0) : 0);
     }
-    for (let k = 0; k < DRAWS; k++) this.meshes[k].receiveShadow = !!fp.receiveShadows && k % LODS === 0;
-  }
-
-  update(anchorPos, camera) {
-    if (!this._initDone || !this._enabled) return;
-    const u = this.u;
-    u.uAnchorDeltaXZ.value.set(anchorPos.x - this._lastAnchor.x, anchorPos.z - this._lastAnchor.z);
-    u.uAnchorPos.value.copy(anchorPos);
-    u.uPlayerPos.value.copy(anchorPos);
-    for (const m of this.meshes) m.position.set(anchorPos.x, 0, anchorPos.z);
-    this._lastAnchor.copy(anchorPos);
-
-    this._cameraMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    u.uCameraMatrix.value.copy(this._cameraMatrix);
-    const e = camera.projectionMatrix.elements;
-    u.uFx.value = e[0];
-    u.uFy.value = e[5];
-    this.renderer.compute([this.computeReset, this.computeUpdate]);
+    this.field.setReceiveShadows(fp.receiveShadows);
   }
 }

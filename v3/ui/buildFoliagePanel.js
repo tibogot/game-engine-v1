@@ -1,22 +1,18 @@
-import { section, slider, color, toggle, dropdown, button, hint, text } from "./widgets.js";
-import { createAssetPalette } from "./assetPalette.js";
+import { section, slider, color, toggle, dropdown, hint, text } from "./widgets.js";
 import { FOLIAGE_PRESETS, FOLIAGE_HEIGHT_ANY } from "../app/state/foliageScatterState.js";
 
 /**
- * Foliage mode panel — the plant being painted (its shape, colour and where it
- * may grow) and the field as a whole. Built into #foliage-panel.
- *
- * Same idea as the flower panel: the brush paints the plant you are looking at,
- * so what you tune is what you paint.
+ * Foliage settings under the Vegetation header — the selected plant (its shape,
+ * colour and where it may grow) and the foliage field as a whole. Built into
+ * #foliage-panel. The picker, brush, fill and clear live in the header
+ * (buildVegetationHeader.js); `foliageBrush.type` is the plant it selected.
  *
  * Callbacks:
- *   onBrushChanged()        brush radius changed (cursor ring)
  *   onStateChanged()        any uniform setting changed
  *   onGeometryChanged(i)    a shape setting of type i changed (mesh rebuild)
- *   onFill(type) / onClear()
- *   getThumbnail(i)  PNG data URL of plant i for the picker, or null while it bakes
+ *   onRenamed()             a plant's name changed (the header's card label)
  */
-export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNames, getThumbnail, getHasRivers, onBrushChanged, onStateChanged, onGeometryChanged, onFill, onClear }) {
+export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNames, getHasRivers, onStateChanged, onGeometryChanged, onRenamed }) {
   const widgets = [];
   const W = (w) => { widgets.push(w); return w; };
 
@@ -34,30 +30,9 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
     widgets.length = 0;
     const type = foliageState.types[foliageBrush.type];
 
-    // ── Paint ──
-    const paint = section(root, "Paint Foliage");
-    hint(paint, "The brush paints the plant you pick here; the settings below tune it. Plants mix where you paint more than one.");
-    createAssetPalette({
-      container: paint,
-      cards: () => foliageState.types.map((t, i) => ({
-        key: i, label: t.name, kind: "asset", thumb: getThumbnail?.(i) ?? null, title: t.name,
-      })),
-      activeKey: () => foliageBrush.type,
-      onSelect: (key) => { foliageBrush.type = key; build(); },
-    });
-    W(slider(paint, foliageBrush, "radius",   { label: "Radius",   min: 1, max: 150, step: 1, onChange: onBrushChanged }));
-    W(slider(paint, foliageBrush, "strength", { label: "Strength", min: 0.05, max: 1, step: 0.05 }));
-    W(slider(paint, foliageBrush, "falloff",  { label: "Falloff",  min: 0.5, max: 6, step: 0.1 }));
-    W(toggle(paint, foliageBrush, "erase",    { label: "Erase" }));
-    W(toggle(paint, foliageBrush, "eraseOnlyType", { label: "Erase this plant only",
-      hint: "Off: erasing (or Alt+paint) removes every plant under the brush. On: only the plant selected above." }));
-    hint(paint, "<kbd>Alt</kbd>+paint = erase · <kbd>Shift</kbd>/<kbd>Alt</kbd>+wheel = radius/strength", { html: true, className: "mode-hint" });
-    button(paint, { title: `Fill "${type.name}" everywhere`, onClick: () => onFill?.(foliageBrush.type) });
-    button(paint, { title: "Clear all foliage", onClick: () => onClear?.(), style: "color:#f66" });
-
     // ── The selected plant ──
     const ty = section(root, type.name);
-    W(text(ty, type, "name", { label: "Name", onChange: () => build() }));
+    W(text(ty, type, "name", { label: "Name", onChange: () => { build(); onRenamed?.(); } }));
     W(dropdown(ty, type, "preset", {
       label: "Species",
       options: Object.keys(FOLIAGE_PRESETS).map((k) => [k, k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())]),
@@ -126,7 +101,7 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
     W(slider(sh, type, "stemWidth",    { label: "Stalk width", min: 0.3, max: 3, step: 0.05, ...g }));
 
     // ── The field ──
-    const fd = section(root, "Field");
+    const fd = section(root, "Foliage Field", false);
     W(slider(fd, foliageState, "density",   { label: "Density", min: 0.02, max: 1, step: 0.01, onChange: onStateChanged,
       hint: "Share of plant spots that grow where the paint is full strength. Big plants need less." }));
     W(slider(fd, foliageState, "clumping",  { label: "Clumping", min: 0, max: 1, step: 0.01, onChange: onStateChanged,

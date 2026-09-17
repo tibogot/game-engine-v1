@@ -1,20 +1,17 @@
-import { section, slider, color, toggle, dropdown, button, hint } from "./widgets.js";
+import { section, slider, color, toggle, dropdown, hint } from "./widgets.js";
 import { FLOWER_PRESETS, FLOWER_HEIGHT_ANY } from "../app/state/flowerState.js";
 
 /**
- * Flower mode panel — paint brush, the flower type being painted (its species,
- * colours and shape), and the meadow-wide look. Built into #flower-panel.
- *
- * The type picker does double duty on purpose: the brush paints the type you
- * are looking at, so what you tune is what you paint.
+ * Flower settings under the Vegetation header — the selected flower (species,
+ * colours, shape, where it grows) and the meadow-wide look. Built into
+ * #flower-panel. The picker, brush, fill and clear live in the header
+ * (buildVegetationHeader.js); `flowerBrush.type` is the flower it selected.
  *
  * Callbacks:
- *   onBrushChanged()        brush radius changed (cursor ring)
  *   onStateChanged()        any uniform setting changed
  *   onGeometryChanged(i)    a shape setting of type i changed (mesh rebuild)
- *   onFill(type) / onClear()
  */
-export function buildFlowerPanel(root, { flowerBrush, flowerState, getLayerNames, onBrushChanged, onStateChanged, onGeometryChanged, onFill, onClear }) {
+export function buildFlowerPanel(root, { flowerBrush, flowerState, getLayerNames, onStateChanged, onGeometryChanged }) {
   const widgets = [];
   const W = (w) => { widgets.push(w); return w; };
 
@@ -31,24 +28,6 @@ export function buildFlowerPanel(root, { flowerBrush, flowerState, getLayerNames
     root.innerHTML = "";
     widgets.length = 0;
     const type = flowerState.types[flowerBrush.type];
-
-    // ── Paint ──
-    const paint = section(root, "Paint Flowers");
-    W(dropdown(paint, flowerBrush, "type", {
-      label: "Flower",
-      options: flowerState.types.map((t, i) => [i, t.name]),
-      onChange: () => build(),
-      hint: "The brush paints this flower; the settings below tune it. Types mix where you paint more than one.",
-    }));
-    W(slider(paint, flowerBrush, "radius",   { label: "Radius",   min: 1, max: 150, step: 1, onChange: onBrushChanged }));
-    W(slider(paint, flowerBrush, "strength", { label: "Strength", min: 0.05, max: 1, step: 0.05 }));
-    W(slider(paint, flowerBrush, "falloff",  { label: "Falloff",  min: 0.5, max: 6, step: 0.1 }));
-    W(toggle(paint, flowerBrush, "erase",    { label: "Erase" }));
-    W(toggle(paint, flowerBrush, "eraseOnlyType", { label: "Erase this flower only",
-      hint: "Off: erasing (or Alt+paint) removes every flower under the brush. On: only the flower selected above." }));
-    hint(paint, "<kbd>Alt</kbd>+paint = erase · <kbd>Shift</kbd>/<kbd>Alt</kbd>+wheel = radius/strength", { html: true, className: "mode-hint" });
-    button(paint, { title: `Fill "${type.name}" everywhere`, onClick: () => onFill?.(flowerBrush.type) });
-    button(paint, { title: "Clear all flowers", onClick: () => onClear?.(), style: "color:#f66" });
 
     // ── The selected type: species + colour ──
     const ty = section(root, type.name);
@@ -105,7 +84,7 @@ export function buildFlowerPanel(root, { flowerBrush, flowerState, getLayerNames
     hint(sh, "Leaves grow on stemmed flowers only.");
 
     // ── Meadow ──
-    const md = section(root, "Meadow");
+    const md = section(root, "Meadow", false);
     W(slider(md, flowerState, "density",   { label: "Density", min: 0.05, max: 1, step: 0.05, onChange: onStateChanged,
       hint: "Share of plant spots that grow a flower where the paint is full strength." }));
     W(slider(md, flowerState, "clumping",  { label: "Clumping", min: 0, max: 1, step: 0.01, onChange: onStateChanged,

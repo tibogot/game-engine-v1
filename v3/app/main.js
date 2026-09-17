@@ -97,6 +97,7 @@ import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage
 import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
 import { SusukiSystem, SUSUKI_DEFAULTS } from "../render/grass/susukiSystem.js";
 import { buildSusukiPanel } from "../ui/buildSusukiPanel.js";
+import { buildVegetationHeader, drawFlowerThumb, drawSusukiThumb } from "../ui/buildVegetationHeader.js";
 import { FlowerSystem } from "../render/grass/flowerSystem.js";
 import { FlowerDensity } from "../render/grass/flowerDensity.js";
 import { FoliageScatterSystem } from "../render/foliage/foliageSystem.js";
@@ -1044,9 +1045,36 @@ export async function startV3App(opts = {}) {
   // eased toward heightTarget x Blade height).
   const grassBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false, target: "terrain", heightTarget: 0.5 };
 
+  // ── Vegetation mode: foliage, flowers and susuki painted from one mode ──────
+  // Three scatter systems with their own paint layers and saves, one brush.
+  // Each system's brush object keeps its own `type` and reads the shared size,
+  // strength, falloff and erase settings through accessors, so the stroke code
+  // of each system is unchanged. The editor modes stay separate internally
+  // ("foliage", "flowers", "susuki" — the input handlers and panels key on
+  // them); the toolbar, the mode list and F show them as one.
+  const VEG_MODES = ["foliage", "flowers", "susuki"];
+  const vegBrush = { radius: 14, strength: 0.6, falloff: 1.5, erase: false, eraseOnlyType: false };
+  const _shareVegBrush = (b) => {
+    for (const k of Object.keys(vegBrush)) {
+      Object.defineProperty(b, k, { get: () => vegBrush[k], set: (v) => { vegBrush[k] = v; }, enumerable: true });
+    }
+    return b;
+  };
+  let _lastVegMode = "foliage";
+  let vegUi = null;
+  // ONE undo history for all three, so Ctrl+Z walks strokes in the order they
+  // happened whichever plant they painted, and an erase that cleared every
+  // kind of plant is one step. An entry holds a density snapshot per system it
+  // touched ({ foliage?, flowers?, susuki? }); a paint stroke touches one.
+  // A 4-8 MB snapshot per system per step, so the history is kept short.
+  // Declared up here because a project load (which can run during boot) resets it.
+  const VEG_UNDO_LIMIT = 16;
+  const _vegUndoStack = [];
+  const _vegRedoStack = [];
+
   // ── Susuki (GoT miscanthus plumes — own paint layer + instanced system) ────
   const susukiState = structuredClone(SUSUKI_DEFAULTS);
-  const susukiBrush = { radius: 60, strength: 0.7, falloff: 2.0, erase: false };
+  const susukiBrush = _shareVegBrush({});
   let susukiSystem = null;
   let _susukiBuilding = false;
   let susukiUi = null;
@@ -1054,19 +1082,14 @@ export async function startV3App(opts = {}) {
   // ── Flowers (painted meadow flowers — own paint layer + instanced system) ──
   const flowerState = createFlowerState();
   flowerTintShading.syncFromState(flowerState);
-  const flowerBrush = { radius: 12, strength: 0.6, falloff: 1.5, erase: false, eraseOnlyType: false, type: 0 };
+  const flowerBrush = _shareVegBrush({ type: 0 });
   let flowerSystem = null;
   let _flowerBuilding = false;
   let flowerUi = null;
-  // One 4 MB density snapshot per stroke, so the history is kept short. Declared
-  // up here because a project load (which can run during boot) resets it.
-  const FLOWER_UNDO_LIMIT = 16;
-  const _flowerUndoStack = [];
-  const _flowerRedoStack = [];
 
   // ── Painted foliage (ferns — the same painted layer + GPU scatter as flowers) ──
   const foliageScatterState = createFoliageScatterState();
-  const foliageScatterBrush = { radius: 14, strength: 0.6, falloff: 1.5, erase: false, eraseOnlyType: false, type: 0 };
+  const foliageScatterBrush = _shareVegBrush({ type: 0 });
   let foliageScatter = null;
   let _foliageScatterBuilding = false;
   let foliageUi = null;
@@ -1080,7 +1103,7 @@ export async function startV3App(opts = {}) {
         const url = await foliageScatter.bakeThumbnail(foliageScatterState.types[i], {
           runRendererSideWork: (fn) => withRendererSideWork(fn),
         });
-        if (url) { _foliageThumbs.set(i, url); foliageUi?.rebuild(); }
+        if (url) { _foliageThumbs.set(i, url); vegUi?.refreshCards(); }
       })
       .catch((e) => console.warn(`[V3 Foliage] thumbnail ${i} failed:`, e));
   }
@@ -1090,8 +1113,6 @@ export async function startV3App(opts = {}) {
   // Which plants are painted (so unused ones are not drawn); rechecked after a
   // stroke, a fill or a load, never per frame.
   let _foliageUsedDirty = true;
-  const _foliageScatterUndoStack = [];
-  const _foliageScatterRedoStack = [];
 
   let grassRings = null;
   let _grassBuilding = false;
@@ -2566,6 +2587,7 @@ export async function startV3App(opts = {}) {
   const flowerPanel = uiById("flower-panel");
   const treePanel  = uiById("tree-panel");
   const foliagePanel = uiById("foliage-panel");
+  const vegHeaderEl = uiById("vegetation-header");
   const snowPanel  = uiById("snow-panel");
   const cliffPaintPanel = uiById("cliffpaint-panel");
 
@@ -2605,6 +2627,7 @@ export async function startV3App(opts = {}) {
 
   function syncFoliagePanelVisibility() {
     foliagePanel.style.display = (editorMode === "foliage" && !playMode.active) ? "" : "none";
+    if (vegHeaderEl) vegHeaderEl.style.display = (VEG_MODES.includes(editorMode) && !playMode.active) ? "" : "none";
   }
 
   function syncPropsPanelVisibility() {
@@ -2673,7 +2696,7 @@ export async function startV3App(opts = {}) {
 
   function setEditorMode(m, { force = false } = {}) {
     if (!force && m === editorMode) {
-      toolsModeSelect.value = m;
+      toolsModeSelect.value = VEG_MODES.includes(m) ? "foliage" : m;
       syncEditorOrbitEnabled();
       return;
     }
@@ -2686,12 +2709,16 @@ export async function startV3App(opts = {}) {
     if (editorMode === "laneRoad" && m !== "laneRoad") laneRoadSystem?.flushGrade();
     if (editorMode === "props" && m !== "props") _onLeavePropsMode();
     editorMode = m;
+    const isVeg = VEG_MODES.includes(m);
+    if (isVeg) _lastVegMode = m;
     roadSystem?.setEditActive(m === "road" && !playMode.active);
     if (splineToolState) splineToolState.mode = m;
     for (const btn of tbModeButtons) {
-      btn.classList.toggle("active", btn.dataset.mode === m);
+      // The one Vegetation button stands for all three plant modes.
+      btn.classList.toggle("active", btn.dataset.mode === m || (isVeg && btn.dataset.mode === "foliage"));
     }
-    toolsModeSelect.value = m;
+    toolsModeSelect.value = isVeg ? "foliage" : m;
+    if (isVeg) vegUi?.rebuild();
     paintSys.endStroke(); // leaving paint mid-drag must close the stroke
     if (rampState === "waiting_end") cancelRampPlacement();
     if (m === "view") {
@@ -2710,17 +2737,17 @@ export async function startV3App(opts = {}) {
       ensureGrassBuilt();
     } else if (m === "susuki") {
       uCursorUV.value.set(-2, -2);
-      sculpt.uRadius.value = susukiBrush.radius / WORLD_SIZE;
+      sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
       ensureSusukiBuilt();
     } else if (m === "flowers") {
       uCursorUV.value.set(-2, -2);
-      sculpt.uRadius.value = flowerBrush.radius / WORLD_SIZE;
+      sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
       ensureFlowersBuilt();
     } else if (m === "treePaint") {
       sculpt.uRadius.value = treeToolState.brush.radius / WORLD_SIZE;
     } else if (m === "foliage") {
       uCursorUV.value.set(-2, -2);
-      sculpt.uRadius.value = foliageScatterBrush.radius / WORLD_SIZE;
+      sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
       void ensureFoliageScatterBuilt();
     } else if (m === "snow") {
       sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
@@ -2853,9 +2880,14 @@ export async function startV3App(opts = {}) {
 
   // Picking a tool shows its panel, even if the Inspector tab was open.
   for (const btn of tbModeButtons) {
-    btn.addEventListener("click", () => { setEditorMode(btn.dataset.mode); openRightTab("tools"); });
+    btn.addEventListener("click", () => {
+      // Vegetation reopens the plant kind that was last painted.
+      setEditorMode(btn.dataset.mode === "foliage" ? _lastVegMode : btn.dataset.mode);
+      openRightTab("tools");
+    });
   }
-  toolsModeSelect.addEventListener("change", () => setEditorMode(toolsModeSelect.value));
+  toolsModeSelect.addEventListener("change", () =>
+    setEditorMode(toolsModeSelect.value === "foliage" ? _lastVegMode : toolsModeSelect.value));
 
   /** Switch the right panel to "tools", "inspector" or "world". */
   function openRightTab(name) {
@@ -4341,17 +4373,15 @@ export async function startV3App(opts = {}) {
         break;
       }
       case "susuki":
-        done = stackStep(undo ? _susukiUndoStack : _susukiRedoStack, undo ? _susukiRedoStack : _susukiUndoStack,
-          () => grassTerrainData.getSusukiDensitySnapshot(), (s) => grassTerrainData.restoreSusukiDensitySnapshot(s));
-        break;
       case "flowers":
-        done = stackStep(undo ? _flowerUndoStack : _flowerRedoStack, undo ? _flowerRedoStack : _flowerUndoStack,
-          () => flowerDensity.getSnapshot(), (s) => flowerDensity.restoreSnapshot(s));
+      case "foliage": {
+        const from = undo ? _vegUndoStack : _vegRedoStack;
+        const to = undo ? _vegRedoStack : _vegUndoStack;
+        const entry = from.at(-1);
+        // The opposite step snapshots the same systems the entry restores.
+        done = !!entry && stackStep(from, to, () => _vegSnapshot(Object.keys(entry)), _vegRestore);
         break;
-      case "foliage":
-        done = stackStep(undo ? _foliageScatterUndoStack : _foliageScatterRedoStack, undo ? _foliageScatterRedoStack : _foliageScatterUndoStack,
-          () => foliageDensity.getSnapshot(), (s) => { foliageDensity.restoreSnapshot(s); _foliageUsedDirty = true; });
-        break;
+      }
       case "riverv2": done = !!(undo ? riverV2System?.undo() : riverV2System?.redo()); if (done) riverV2Ui?.refresh(); break;
       case "tunnel":  done = !!(undo ? tunnelSystem?.undo() : tunnelSystem?.redo()); if (done) tunnelUi?.refresh(); break;
       case "spline":  done = !!(undo ? splineSys?.undo() : splineSys?.redo()); break;
@@ -4447,7 +4477,7 @@ export async function startV3App(opts = {}) {
     }
     if (e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
       e.preventDefault();
-      setEditorMode(editorMode === "foliage" ? "view" : "foliage");
+      setEditorMode(VEG_MODES.includes(editorMode) ? "view" : _lastVegMode);
       return;
     }
     if (e.code === "KeyU" && !e.ctrlKey && !e.metaKey && !e.altKey && !playMode.active) {
@@ -7009,13 +7039,10 @@ export async function startV3App(opts = {}) {
     foliageBrush: foliageScatterBrush,
     foliageState: foliageScatterState,
     getLayerNames: () => textureLib.slots.map((s) => s.name),
-    getThumbnail: (i) => _foliageThumbs.get(i) ?? null,
     getHasRivers: () => (riverV2System?.rivers.length ?? 0) > 0,
-    onBrushChanged: () => { sculpt.uRadius.value = foliageScatterBrush.radius / WORLD_SIZE; },
     onStateChanged: () => { syncFoliageScatterUniforms(); queueFoliageThumb(foliageScatterBrush.type); },
     onGeometryChanged: (i) => { foliageScatter?.rebuildType(i, foliageScatterState.types[i]); queueFoliageThumb(i); },
-    onFill:  (type) => { _pushFoliageUndo(); foliageDensity.fill(type); void ensureFoliageScatterBuilt(); },
-    onClear: () => { _pushFoliageUndo(); foliageDensity.clear(); },
+    onRenamed: () => vegUi?.refreshCards(),
   });
 
   if (isEditor) buildPropsPanel({
@@ -7494,8 +7521,8 @@ export async function startV3App(opts = {}) {
     } else if (flowerDensity.hasData) {
       flowerDensity.clear();
     }
-    _flowerUndoStack.length = 0;
-    _flowerRedoStack.length = 0;
+    _vegUndoStack.length = 0;
+    _vegRedoStack.length = 0;
     syncFlowerUniforms();
 
     // Decals: absent means none (and the default textures).
@@ -7575,8 +7602,6 @@ export async function startV3App(opts = {}) {
     } else if (foliageDensity.hasData) {
       foliageDensity.clear();
     }
-    _foliageScatterUndoStack.length = 0;
-    _foliageScatterRedoStack.length = 0;
     _foliageUsedDirty = true;
     syncFoliageScatterUniforms();
     if (foliageScatter) foliageScatterState.types.forEach((t, i) => foliageScatter.rebuildType(i, t));
@@ -9197,26 +9222,111 @@ export async function startV3App(opts = {}) {
 
   // ── Susuki mode: panel + paint events ──────────────────────────────────────
   if (isEditor) susukiUi = buildSusukiPanel(susukiPanel, {
-    susukiBrush,
     susukiState,
-    onBrushChanged:    () => { sculpt.uRadius.value = susukiBrush.radius / WORLD_SIZE; },
-    onStateChanged:    () => syncSusukiUniforms(),
+    onStateChanged:    () => { syncSusukiUniforms(); vegUi?.refreshCards(); },
     onPlumeGeoChanged: () => susukiSystem?.rebuildPlumeGeometry(susukiState),
     onStemGeoChanged:  () => susukiSystem?.rebuildStemGeometry(susukiState),
-    onTextureChanged:  () => susukiSystem?.redrawPlumeTexture(susukiState),
-    onFill:  () => { _pushSusukiUndo(); grassTerrainData.fillSusukiDensity(); void ensureSusukiBuilt(); },
-    onClear: () => { _pushSusukiUndo(); grassTerrainData.clearSusukiDensity(); },
+    onTextureChanged:  () => { susukiSystem?.redrawPlumeTexture(susukiState); vegUi?.refreshCards(); },
   });
 
-  let _susukiUndoStack = [];
-  let _susukiRedoStack = [];
   let _susukiPainting  = false;
 
-  function _pushSusukiUndo() {
-    _susukiUndoStack.push(grassTerrainData.getSusukiDensitySnapshot());
-    if (_susukiUndoStack.length > 32) _susukiUndoStack.shift();
-    _susukiRedoStack = [];
+  // ── Vegetation: one undo history, erase-everything, the header ─────────────
+  function _vegSnapshot(kinds) {
+    const e = {};
+    for (const k of kinds) {
+      if (k === "susuki") e.susuki = grassTerrainData.getSusukiDensitySnapshot();
+      else if (k === "flowers") e.flowers = flowerDensity.getSnapshot();
+      else if (k === "foliage") e.foliage = foliageDensity.getSnapshot();
+    }
+    return e;
   }
+  function _vegRestore(e) {
+    if (e.susuki) grassTerrainData.restoreSusukiDensitySnapshot(e.susuki);
+    if (e.flowers) flowerDensity.restoreSnapshot(e.flowers);
+    if (e.foliage) { foliageDensity.restoreSnapshot(e.foliage); _foliageUsedDirty = true; }
+  }
+  function _pushVegUndo(kinds) {
+    _vegUndoStack.push(_vegSnapshot(kinds));
+    if (_vegUndoStack.length > VEG_UNDO_LIMIT) _vegUndoStack.shift();
+    _vegRedoStack.length = 0;
+  }
+  const _vegHasData = (k) =>
+    k === "susuki" ? grassTerrainData.hasSusukiData : k === "flowers" ? flowerDensity.hasData : foliageDensity.hasData;
+  /** Is this stamp an erase of EVERY plant under the brush (not just the selected one)? */
+  const _vegEraseAll = (altErase) => (vegBrush.erase || altErase) && !vegBrush.eraseOnlyType;
+  /** Systems a stroke about to start in `kind` can change — what its undo step must hold. */
+  const _vegStrokeKinds = (kind, altErase) =>
+    _vegEraseAll(altErase) ? VEG_MODES.filter((k) => k === kind || _vegHasData(k)) : [kind];
+  function _eraseAllVeg(wx, wz) {
+    const o = {
+      cx: wx, cz: wz, radius: vegBrush.radius, strength: vegBrush.strength, falloff: vegBrush.falloff,
+      worldSize: WORLD_SIZE, erase: true,
+    };
+    if (foliageDensity.hasData) foliageDensity.stamp({ ...o, channel: 0, onlyChannel: false });
+    if (flowerDensity.hasData) flowerDensity.stamp({ ...o, channel: 0, onlyChannel: false });
+    if (grassTerrainData.hasSusukiData) grassTerrainData.stampSusukiDensity(o);
+  }
+  const _vegBrushOf = (mode) => (mode === "flowers" ? flowerBrush : mode === "susuki" ? susukiBrush : foliageScatterBrush);
+  const _vegPanelOf = (mode) => (mode === "flowers" ? flowerUi : mode === "susuki" ? susukiUi : foliageUi);
+  // Card pictures for flowers and susuki are 2D sketches, redrawn only when
+  // what they show changed.
+  const _vegThumbCache = new Map();
+  function _vegThumb(key, sig, draw) {
+    const hit = _vegThumbCache.get(key);
+    if (hit && hit.sig === sig) return hit.url;
+    const url = draw();
+    _vegThumbCache.set(key, { sig, url });
+    return url;
+  }
+  const _flowerThumb = (i) => {
+    const t = flowerState.types[i];
+    const sig = JSON.stringify([t.petals, t.petalLength, t.petalWidth, t.doubleLayer, t.petalBase, t.petalTip, t.centre, t.centreSize]);
+    return _vegThumb(`flower:${i}`, sig, () => drawFlowerThumb(t));
+  };
+  const _susukiThumb = () => {
+    const s = susukiState;
+    const sig = JSON.stringify([s.texStrands, s.texSpread, s.texStrandLen, s.texDroop, s.plumeBase, s.plumeTip, s.stemTip]);
+    return _vegThumb("susuki", sig, () => drawSusukiThumb(s));
+  };
+
+  const vegFill = (mode, type) => {
+    _pushVegUndo([mode]);
+    if (mode === "flowers") { flowerDensity.fill(type); void ensureFlowersBuilt(); }
+    else if (mode === "susuki") { grassTerrainData.fillSusukiDensity(); void ensureSusukiBuilt(); }
+    else { foliageDensity.fill(type); _foliageUsedDirty = true; void ensureFoliageScatterBuilt(); }
+  };
+
+  if (isEditor && vegHeaderEl) vegUi = buildVegetationHeader(vegHeaderEl, {
+    brush: vegBrush,
+    groups: () => [
+      { mode: "foliage", title: "Plants", types: foliageScatterState.types.map((t, i) => ({ get name() { return t.name; }, thumb: () => _foliageThumbs.get(i) ?? null })) },
+      { mode: "flowers", title: "Flowers", types: flowerState.types.map((t, i) => ({ get name() { return t.name; }, thumb: () => _flowerThumb(i) })) },
+      { mode: "susuki", title: "Plumes", types: [{ name: "Susuki", thumb: _susukiThumb }] },
+    ],
+    active: () => {
+      const mode = VEG_MODES.includes(editorMode) ? editorMode : _lastVegMode;
+      return { mode, type: mode === "susuki" ? 0 : _vegBrushOf(mode).type };
+    },
+    onSelect: (mode, type) => {
+      if (mode !== "susuki") _vegBrushOf(mode).type = type;
+      // The settings panel shows the picked plant, whichever kind it is.
+      _vegPanelOf(mode)?.rebuild?.();
+      if (editorMode !== mode) setEditorMode(mode);
+      else vegUi.rebuild();
+    },
+    onBrushChanged: () => { sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE; },
+    onFill: vegFill,
+    onClearAll: () => {
+      const kinds = VEG_MODES.filter(_vegHasData);
+      if (!kinds.length) return;
+      _pushVegUndo(kinds);
+      foliageDensity.clear();
+      flowerDensity.clear();
+      grassTerrainData.clearSusukiDensity();
+      _foliageUsedDirty = true;
+    },
+  });
 
   function _susukiPaintXZ(e) {
     refreshMouse(e);
@@ -9227,6 +9337,7 @@ export async function startV3App(opts = {}) {
   }
 
   function _stampSusuki(wx, wz, altErase) {
+    if (_vegEraseAll(altErase)) { _eraseAllVeg(wx, wz); return; }
     grassTerrainData.stampSusukiDensity({
       cx: wx, cz: wz,
       radius:    susukiBrush.radius,
@@ -9249,7 +9360,7 @@ export async function startV3App(opts = {}) {
     if (e.button !== 0) return;
     const pt = _susukiPaintXZ(e);
     if (!pt) return;
-    _pushSusukiUndo();
+    _pushVegUndo(_vegStrokeKinds("susuki", e.altKey));
     _susukiPainting = true;
     void ensureSusukiBuilt();
     _stampSusuki(pt.wx, pt.wz, e.altKey);
@@ -9257,6 +9368,7 @@ export async function startV3App(opts = {}) {
 
   renderer.domElement.addEventListener("mouseup", e => {
     if (e.button !== 0) return;
+    if (_susukiPainting) _foliageUsedDirty = true;   // an erase-all may have cleared foliage
     _susukiPainting = false;
   });
 
@@ -9268,32 +9380,23 @@ export async function startV3App(opts = {}) {
     e.stopImmediatePropagation();
     const factor = e.deltaY > 0 ? 0.9 : 1.11;
     if (e.shiftKey) {
-      susukiBrush.radius = Math.max(5, Math.min(300, susukiBrush.radius * factor));
-      sculpt.uRadius.value = susukiBrush.radius / WORLD_SIZE;
+      vegBrush.radius = Math.max(1, Math.min(300, vegBrush.radius * factor));
+      sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
     } else {
-      susukiBrush.strength = Math.max(0.05, Math.min(1.0, susukiBrush.strength * factor));
+      vegBrush.strength = Math.max(0.05, Math.min(1.0, vegBrush.strength * factor));
     }
-    susukiUi?.refresh();
+    vegUi?.refresh();
   }, { passive: false, capture: true });
 
   // ── Flower mode: panel + paint events ──────────────────────────────────────
   let _flowerPainting = false;
 
-  function _pushFlowerUndo() {
-    _flowerUndoStack.push(flowerDensity.getSnapshot());
-    if (_flowerUndoStack.length > FLOWER_UNDO_LIMIT) _flowerUndoStack.shift();
-    _flowerRedoStack.length = 0;
-  }
-
   if (isEditor && flowerPanel) flowerUi = buildFlowerPanel(flowerPanel, {
     flowerBrush,
     flowerState,
     getLayerNames: () => textureLib.slots.map((s) => s.name),
-    onBrushChanged: () => { sculpt.uRadius.value = flowerBrush.radius / WORLD_SIZE; },
-    onStateChanged: () => syncFlowerUniforms(),
-    onGeometryChanged: (i) => flowerSystem?.rebuildType(i, flowerState.types[i]),
-    onFill:  (type) => { _pushFlowerUndo(); flowerDensity.fill(type); void ensureFlowersBuilt(); },
-    onClear: () => { _pushFlowerUndo(); flowerDensity.clear(); },
+    onStateChanged: () => { syncFlowerUniforms(); vegUi?.refreshCards(); },
+    onGeometryChanged: (i) => { flowerSystem?.rebuildType(i, flowerState.types[i]); vegUi?.refreshCards(); },
   });
 
   function _flowerPaintXZ(e) {
@@ -9305,6 +9408,7 @@ export async function startV3App(opts = {}) {
   }
 
   function _stampFlowers(wx, wz, altErase) {
+    if (_vegEraseAll(altErase)) { _eraseAllVeg(wx, wz); return; }
     flowerDensity.stamp({
       cx: wx, cz: wz,
       radius:    flowerBrush.radius,
@@ -9328,14 +9432,16 @@ export async function startV3App(opts = {}) {
     if (playMode.active || editorMode !== "flowers" || e.button !== 0) return;
     const pt = _flowerPaintXZ(e);
     if (!pt) return;
-    _pushFlowerUndo();
+    _pushVegUndo(_vegStrokeKinds("flowers", e.altKey));
     _flowerPainting = true;
     void ensureFlowersBuilt();
     _stampFlowers(pt.wx, pt.wz, e.altKey);
   }, { capture: true });
 
   renderer.domElement.addEventListener("mouseup", e => {
-    if (e.button === 0) _flowerPainting = false;
+    if (e.button !== 0) return;
+    if (_flowerPainting) _foliageUsedDirty = true;   // an erase-all may have cleared foliage
+    _flowerPainting = false;
   });
 
   // Scroll wheel in flower mode: Shift = radius, Alt = strength
@@ -9346,12 +9452,12 @@ export async function startV3App(opts = {}) {
     e.stopImmediatePropagation();
     const factor = e.deltaY > 0 ? 0.9 : 1.11;
     if (e.shiftKey) {
-      flowerBrush.radius = Math.max(1, Math.min(150, flowerBrush.radius * factor));
-      sculpt.uRadius.value = flowerBrush.radius / WORLD_SIZE;
+      vegBrush.radius = Math.max(1, Math.min(300, vegBrush.radius * factor));
+      sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
     } else {
-      flowerBrush.strength = Math.max(0.05, Math.min(1.0, flowerBrush.strength * factor));
+      vegBrush.strength = Math.max(0.05, Math.min(1.0, vegBrush.strength * factor));
     }
-    flowerUi?.refresh();
+    vegUi?.refresh();
   }, { passive: false, capture: true });
 
   // ── Tree mode mouse events (v2 treePaint) ─────────────────────────────────
@@ -9421,12 +9527,6 @@ export async function startV3App(opts = {}) {
   // ── Foliage mode: paint events (the same density brush as the flowers) ────
   let _foliagePainting = false;
 
-  function _pushFoliageUndo() {
-    _foliageScatterUndoStack.push(foliageDensity.getSnapshot());
-    if (_foliageScatterUndoStack.length > FLOWER_UNDO_LIMIT) _foliageScatterUndoStack.shift();
-    _foliageScatterRedoStack.length = 0;
-  }
-
   function _foliagePaintXZ(e) {
     refreshMouse(e);
     const uv = getUV();
@@ -9436,6 +9536,7 @@ export async function startV3App(opts = {}) {
   }
 
   function _stampFoliage(wx, wz, altErase) {
+    if (_vegEraseAll(altErase)) { _eraseAllVeg(wx, wz); return; }
     foliageDensity.stamp({
       cx: wx, cz: wz,
       radius:    foliageScatterBrush.radius,
@@ -9460,7 +9561,7 @@ export async function startV3App(opts = {}) {
     const pt = _foliagePaintXZ(e);
     if (!pt) return;
     e.preventDefault();
-    _pushFoliageUndo();
+    _pushVegUndo(_vegStrokeKinds("foliage", e.altKey));
     _foliagePainting = true;
     void ensureFoliageScatterBuilt();
     _stampFoliage(pt.wx, pt.wz, e.altKey);
@@ -9478,12 +9579,12 @@ export async function startV3App(opts = {}) {
     e.stopImmediatePropagation();
     const factor = e.deltaY > 0 ? 0.9 : 1.11;
     if (e.shiftKey) {
-      foliageScatterBrush.radius = Math.max(1, Math.min(150, foliageScatterBrush.radius * factor));
-      sculpt.uRadius.value = foliageScatterBrush.radius / WORLD_SIZE;
+      vegBrush.radius = Math.max(1, Math.min(300, vegBrush.radius * factor));
+      sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
     } else {
-      foliageScatterBrush.strength = Math.max(0.05, Math.min(1.0, foliageScatterBrush.strength * factor));
+      vegBrush.strength = Math.max(0.05, Math.min(1.0, vegBrush.strength * factor));
     }
-    foliageUi?.refresh();
+    vegUi?.refresh();
   }, { passive: false, capture: true });
 
   // Grass undo/redo (routed by undoInMode). Each entry carries whether it
