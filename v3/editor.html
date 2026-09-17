@@ -2125,6 +2125,20 @@
                   </select>
                 </div>
               </div>
+              <div class="prop-row" title="How far the player, wheels and game objects bend grass (the push field, Ghost of Tsushima's displacement buffer). 0 = off.">
+                <span class="prop-label">Trail strength</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-trail-str" min="0" max="100" step="5" value="100" />
+                  <span class="prop-num" id="glbl-trail-str">1.00</span>
+                </div>
+              </div>
+              <div class="prop-row" title="Seconds for pushed grass to spring back (about three times this until it is fully upright).">
+                <span class="prop-label">Trail recovery</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-trail-rec" min="5" max="100" step="5" value="25" />
+                  <span class="prop-num" id="glbl-trail-rec">2.5s</span>
+                </div>
+              </div>
             </div>
           </div>
 

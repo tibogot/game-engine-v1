@@ -158,8 +158,28 @@ the game.
       strip measured 0.31× the blades beside it; undo and redo exact. Cost:
       +0.003 ms per Near dispatch (noise); the cull pad doubles for 2× tall
       blades, ~3% more blades kept on screen.
-    Still open for the GoT match: displacement buffer for all objects,
-    dithered terrain grass shadows in the far field. Ground UNDER near blades is still the painted ground (a GoT-look
+    - Push field (GoT displacement buffer), DONE 2026-09-17 — item 19 too:
+      `render/grass/grassPushField.js`, 256² over 64 m around the grass
+      anchor, scrolls in whole texels like the snow trail. Play mode stamps
+      the pawn (and each wheel of a car, spaced along the path); games call
+      `stampGrassPush(x, z, radius, strength)`. Pushes recover over "Trail
+      recovery" (default 2.5 s); "Trail strength" scales the bend. Near rings
+      read it with one tap. MEASURED: one pass ≈ 0.09 ms, and passes run only
+      while something stamps or recovers — 0 when idle, and 0 again once a
+      pawn has stood still for the recovery window (checked in play mode:
+      30/30 passes per half second, then 0/31). Near dispatch +~0.005 ms.
+      First look was wrong (user, 2026-09-17), three causes measured:
+      stamps pushed RADIALLY, so each new stamp pushed the grass behind it
+      backward (trail leaned toward where the walker came from) — stamps now
+      carry the motion direction (centreline after a walk: push 0.64, 0.63 of
+      it forward); the push SHEARED the tip and squashed the blade — it now
+      rotates the blade about its root, up to ~75° at the tip; and the old
+      one-point player push ignored height, so a jumping player still bent
+      grass — it fades out above the blade tops (extra bend near the player
+      1.02 standing, 0.07 at a 2.9 m jump apex).
+      Not yet: susuki, flowers and foliage still use their own one-point push.
+    Still open for the GoT match: dithered terrain grass shadows in the far
+    field. Ground UNDER near blades is still the painted ground (a GoT-look
     project should paint a grass-coloured ground there, or add a control).
 19. **Trails through grass** from cars and characters (reuse the snow trail
     pattern).

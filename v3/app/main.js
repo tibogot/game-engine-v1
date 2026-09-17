@@ -103,6 +103,7 @@ import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
 import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
 import { createGrassFarShading } from "../render/grass/grassFarTsl.js";
+import { createGrassPushField } from "../render/grass/grassPushField.js";
 import { DecalSystem } from "../render/decals/decalSystem.js";
 import { createDecalEditor } from "../tools/decalEditor.js";
 import { buildDecalPanel } from "../ui/buildDecalPanel.js";
@@ -985,6 +986,8 @@ export async function startV3App(opts = {}) {
   // a layer's flag changes. See grassTerrainData.initDensityMask.
   grassTerrainData.initDensityMask({ renderer, splatTex: splatMap.tex });
   grassFarShading.setSource(grassTerrainData.grassDensityMaskedTex);
+  // Anything can bend grass: player, wheels, a game's own objects (stamp()).
+  const grassPush = createGrassPushField({ renderer });
   // Flowers: their own painted layer (one type per channel), masked the same way.
   const flowerDensity = new FlowerDensity();
   flowerDensity.initMask({ renderer, splatTex: splatMap.tex });
@@ -1020,6 +1023,7 @@ export async function startV3App(opts = {}) {
     specV2DirX: -1, specV2DirY: 0.45, specV2DirZ: 1,
     specV2NoiseScale: 3, specV2NoiseStr: 0.6, specV2Power: 12, specV2TipBias: 0.5,
     interactionRadius: 1.5, interactionStrength: 0.7, interactionMode: 0,
+    trailStrength: 1, trailRecovery: 2.5,
     receiveShadow: true, lodDebug: false,
     lodMidDistance: 40, lodFarDistance: 80, lodMaxDistance: 200, lodMegaMaxDistance: 400,
     lodMidSegments: 3, lodFarSegments: 2, lodMegaSegments: 2,
@@ -1197,6 +1201,7 @@ export async function startV3App(opts = {}) {
       // they never float over a crest the coarse mesh cuts under.
       terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2 },
       bladeHeightTex:   grassTerrainData.bladeHeightTex,
+      pushField:        grassPush.field,
       ...extraShared,
     };
     const rings = GRASS_RING_DEFS.map(({ key, ...def }) =>
@@ -1269,6 +1274,7 @@ export async function startV3App(opts = {}) {
     if (cliffGrassRings) for (const r of cliffGrassRings) r.syncFromState(grassState, sunDir);
     syncGrassLod();
     grassFarShading.syncFromState(grassState);
+    grassPush.params.recovery = grassState.trailRecovery;
     // Susuki shares the grass wind params — keep it in step with every sync.
     syncSusukiUniforms();
     syncFlowerUniforms();
@@ -1278,6 +1284,41 @@ export async function startV3App(opts = {}) {
   function syncGrassLod() {
     if (grassRings) grassFarShading.setBand(syncHybridGrassLod(grassRings, grassState));
     if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState);
+  }
+
+  /**
+   * The play-mode pawn pushes grass: its body, plus each wheel of a car.
+   * Stamps are spaced along the path since last frame so a fast car leaves a
+   * continuous trail, not a dotted one (capped, so a teleport cannot flood).
+   */
+  const _grassPushPrev = new Float32Array(10).fill(NaN); // body + 4 contact slots
+  function _stampAlong(slot, x, z, radius, strength) {
+    const px = _grassPushPrev[slot * 2], pz = _grassPushPrev[slot * 2 + 1];
+    _grassPushPrev[slot * 2] = x; _grassPushPrev[slot * 2 + 1] = z;
+    const dist = Number.isNaN(px) ? 0 : Math.hypot(x - px, z - pz);
+    // Moving (more than ~1 cm this frame) = push along the way it goes.
+    const dx = dist > 0.01 ? x - px : 0, dz = dist > 0.01 ? z - pz : 0;
+    const n = Math.min(6, Math.floor(dist / Math.max(0.1, radius * 0.5)));
+    for (let i = 1; i <= n; i++) {
+      const t = i / (n + 1);
+      grassPush.stamp(px + (x - px) * t, pz + (z - pz) * t, radius, strength, dx, dz);
+    }
+    grassPush.stamp(x, z, radius, strength, dx, dz);
+  }
+  function _stampPlayerGrass() {
+    const stats = playMode.getStats();
+    if (!stats.grounded || stats.grounded === "fly") { _grassPushPrev.fill(NaN); return; }
+    const pp = playMode.playerPosition;
+    const mm = playMode.moveMode;
+    const vehicle = mm === "car" || mm === "stunt" || mm === "game";
+    _stampAlong(0, pp.x, pp.z, vehicle ? 1.8 : grassState.interactionRadius * 0.7, 1);
+    const c = vehicle ? playMode.getSnowContacts?.() : null;
+    if (c?.xzs && c.touching) {
+      for (let i = 0; i < 4; i++) {
+        if (c.touching[i]) _stampAlong(1 + i, c.xzs[i * 2], c.xzs[i * 2 + 1], 0.6, 1);
+        else { _grassPushPrev[(1 + i) * 2] = NaN; }
+      }
+    }
   }
 
   /** A ring runs only while grass shows; the Far ring also needs "Far blades". */
@@ -2555,6 +2596,8 @@ export async function startV3App(opts = {}) {
     if (!playMode.active) return;
     snowSystem.setPlayMode(false);
     snowSystem.resetTrail();
+    grassPush.reset();
+    _grassPushPrev.fill(NaN);
     playPhysicsUi?.setVisible(false);
     playFlightUi?.setVisible(false);
     flyHud?.setVisible(false);
@@ -3475,6 +3518,9 @@ export async function startV3App(opts = {}) {
         if (wantGrass) {
           const _grassAnchor = playMode.active ? playMode.playerPosition : camera.position;
           grassFarShading.setAnchor(_grassAnchor);
+          grassPush.setAnchor(_grassAnchor.x, _grassAnchor.z);
+          if (playMode.active) _stampPlayerGrass();
+          grassPush.update(dt);
           for (const r of grassRings) r.update(_grassAnchor, camera);
         }
       }
@@ -5236,6 +5282,12 @@ export async function startV3App(opts = {}) {
   gslIntRad.addEventListener("input",  () => { grassState.interactionRadius = Number(gslIntRad.value) / 10; glblIntRad.textContent = grassState.interactionRadius.toFixed(1) + "m"; syncGrassUniforms(); });
   gslIntStr.addEventListener("input",  () => { grassState.interactionStrength = Number(gslIntStr.value) / 100; glblIntStr.textContent = grassState.interactionStrength.toFixed(2); syncGrassUniforms(); });
   gselIntMode.addEventListener("change", () => { grassState.interactionMode = Number(gselIntMode.value); syncGrassUniforms(); });
+  const gslTrailStr  = uiById("gsl-trail-str");
+  const glblTrailStr = uiById("glbl-trail-str");
+  const gslTrailRec  = uiById("gsl-trail-rec");
+  const glblTrailRec = uiById("glbl-trail-rec");
+  gslTrailStr.addEventListener("input", () => { grassState.trailStrength = Number(gslTrailStr.value) / 100; glblTrailStr.textContent = grassState.trailStrength.toFixed(2); syncGrassUniforms(); });
+  gslTrailRec.addEventListener("input", () => { grassState.trailRecovery = Number(gslTrailRec.value) / 10; glblTrailRec.textContent = grassState.trailRecovery.toFixed(1) + "s"; syncGrassUniforms(); });
 
   // Every grass control that holds a saved setting: [element id, grassState
   // key, slider units per state unit]. Used to show a loaded project's grass.
@@ -5266,6 +5318,7 @@ export async function startV3App(opts = {}) {
     ["gsl-lod-mega", "lodMegaMaxDistance", 1], ["gck-far-blades", "farBlades"], ["gsl-lod-mid-seg", "lodMidSegments", 1], ["gsl-lod-far-seg", "lodFarSegments", 1],
     ["gsl-lod-far-w", "lodFarBladeWidth", 100], ["gsl-lod-mega-seg", "lodMegaSegments", 1], ["gsl-lod-mega-w", "lodMegaBladeWidth", 100],
     ["gsl-int-rad", "interactionRadius", 10], ["gsl-int-str", "interactionStrength", 100], ["gsel-int-mode", "interactionMode"],
+    ["gsl-trail-str", "trailStrength", 100], ["gsl-trail-rec", "trailRecovery", 10],
   ];
 
   /** Grass look from a loaded project: state, panel, uniforms and blade geometry. */
@@ -8971,6 +9024,7 @@ export async function startV3App(opts = {}) {
       paintFilterState: paintState.filter,
       grassTintScene,
       grassFarShading,
+      grassPush,
       grassTintCam,
       forceGrassTintBake() {
         const prevRT = renderer.getRenderTarget();
@@ -8990,6 +9044,14 @@ export async function startV3App(opts = {}) {
   // caller; a game (games/rts-v3/…) imports this same boot, gets this handle,
   // loads its own .v3proj through loadProjectFromUrl, and builds gameplay on top.
   return {
+    /**
+     * Bend grass away from a world point this frame (a car, an NPC, a horse).
+     * Call every frame the object should push; it leaves a trail that springs
+     * back over the grass panel's Trail recovery. The play-mode pawn is
+     * stamped automatically. radius in metres, strength 0..1; dirX/dirZ =
+     * the way the object is moving (grass leans along it), 0,0 when still.
+     */
+    stampGrassPush: (x, z, radius, strength = 1, dirX = 0, dirZ = 0) => grassPush.stamp(x, z, radius, strength, dirX, dirZ),
     /** Pull in the editor's default PBR palette. A game that boots with
      *  `preloadPaintTextures: false` calls this when terrain first turns on,
      *  so the 104 MB belongs to the mode that wants it. */

@@ -313,11 +313,16 @@ export class HybridGrassSystem {
     // Optional painted blade height (RGBA8, .r / 128 = height multiplier,
     // 128 = 1×). Terrain rings only. Absent = no extra texture read.
     bladeHeightTex = null,
+    // Optional push field (Ghost of Tsushima's displacement buffer):
+    // { textureNode, center: Vector2 (live), worldSize } — rg = push XZ.
+    // Near rings only. Absent = only the one-point player push below.
+    pushField = null,
   }) {
     this.renderer = renderer;
     this._terrainShadow = terrainShadow;
     this._terrainSurface = terrainSurface;
     this._bladeHeightTex = bladeHeightTex;
+    this._pushField = pushField;
     this.group = new THREE.Group();
     this.group.name = name;
     scene.add(this.group);
@@ -435,6 +440,7 @@ export class HybridGrassSystem {
       uInteractionRadius: uniform(gp.interactionRadius ?? 1.5),
       uInteractionStrength: uniform(gp.interactionStrength ?? 0.7),
       uInteractionMode: uniform(gp.interactionMode ?? 0),
+      uTrailStrength: uniform(gp.trailStrength ?? 1),
     });
     this._bladeHeightMul = bladeHeightMul;
     this._groundColorAtWorldXZ = groundColorAtWorldXZ ?? ((_xz) => vec3(1, 1, 1));
@@ -752,11 +758,30 @@ export class HybridGrassSystem {
         const pFall = float(1).sub(
           smoothstep(float(0.5), u.uInteractionRadius, pDist),
         );
-        const pushAmt = pFall.mul(u.uInteractionStrength);
+        // Only while the pusher is down among the blades: a jumping player
+        // (or a camera above the field) no longer bends grass it cannot touch.
+        const pusherAbove = u.uPlayerPos.y.sub(groundY);
+        const pContact = float(1).sub(
+          smoothstep(u.uBladeHeight.mul(0.4), u.uBladeHeight.mul(0.95), pusherAbove),
+        );
+        const pushAmt = pFall.mul(u.uInteractionStrength).mul(pContact);
         const pushForce = pushAmt
           .mul(1.4)
           .mul(float(1).sub(u.uInteractionMode));
         const pushDirW = toBlade.div(max(pDist, float(0.001)));
+
+        // ── Push field: every other object, with trails that recover ──
+        // One tap, near rings, visible blades only; it tilts the blade like
+        // radial parting whatever the interaction mode.
+        let trail = null;
+        if (this._pushField && this._normalMode !== "flat" && !this._cliffMode) {
+          const pf = this._pushField;
+          this._uPushCenter ??= uniform(pf.center);
+          const puv = worldXZ.sub(this._uPushCenter).div(float(pf.worldSize)).add(0.5);
+          const edge = max(abs(puv.x.sub(0.5)), abs(puv.y.sub(0.5)));
+          const fade = float(1).sub(smoothstep(float(0.42), float(0.5), edge));
+          trail = pf.textureNode.sample(puv.clamp(0, 1)).xy.mul(fade).mul(u.uTrailStrength);
+        }
 
         // ── Gemini-style scalar bend force, temporally smoothed ──
         // Bend happens along the blade's own yaw (rotated in the VS), exactly
@@ -775,7 +800,8 @@ export class HybridGrassSystem {
         p.w.assign(newZRoll);
 
         // a.x / b.w carry the radial push vector (zero in agitation mode)
-        a.x.assign(pushDirW.x.mul(pushAmt).mul(u.uInteractionMode));
+        const pushX = pushDirW.x.mul(pushAmt).mul(u.uInteractionMode);
+        a.x.assign(trail ? pushX.add(trail.x) : pushX);
         a.y.assign(newForce);
         a.z.assign(newZRoll);
 
@@ -805,7 +831,8 @@ export class HybridGrassSystem {
         b.x.assign(bladeH);
         b.y.assign(yaw.add(deltaYaw));
         b.z.assign(clumpShade);
-        b.w.assign(pushDirW.y.mul(pushAmt).mul(u.uInteractionMode));
+        const pushZ = pushDirW.y.mul(pushAmt).mul(u.uInteractionMode);
+        b.w.assign(trail ? pushZ.add(trail.y) : pushZ);
 
         // x,y = clump pull offset (metres); the colour-variation randoms that
         // used to live here are recomputed from the blade index in the VS.
@@ -1100,19 +1127,23 @@ export class HybridGrassSystem {
       );
       const pRot = rotY(crossedYaw, pArc);
 
-      // Radial parting (interaction mode 1): world-space tilt away from the
-      // player, tip-weighted, with a slight press-down so blades read as
-      // rotated rather than sheared. Zero vector in agitation mode.
-      const pushX = a.x;
-      const pushZ = b.w;
-      const pushMag = abs(pushX).add(abs(pushZ));
-      const pressDown = float(1).sub(
-        clamp(pushMag.mul(h).mul(0.45), float(0), float(0.55)),
-      );
+      // Push (radial parting + the push field): the blade ROTATES about its
+      // root toward the push, more toward the tip, so it lies over instead
+      // of stretching. (It used to shear the tip sideways and squash the
+      // height, which made pushed grass look rubbery.) Up to ~75° at a full
+      // push. No push = tilt 0 = exactly the unpushed blade.
+      const pushV = vec2(a.x, b.w);
+      const pushLen = length(pushV);
+      const pushDir = pushV.div(max(pushLen, float(1e-4)));
+      const tilt = clamp(pushLen, float(0), float(1)).mul(1.3).mul(h.mul(0.6).add(0.4));
+      const sT = sin(tilt);
+      const cT = cos(tilt);
+      const along = pRot.x.mul(pushDir.x).add(pRot.z.mul(pushDir.y));
+      const alongShift = along.mul(cT).add(pRot.y.mul(sT)).sub(along);
       const pYaw = vec3(
-        pRot.x.add(swayX).add(pushX.mul(hh).mul(1.3)),
-        pRot.y.mul(pressDown),
-        pRot.z.add(swayZ).add(pushZ.mul(hh).mul(1.3)),
+        pRot.x.add(swayX).add(pushDir.x.mul(alongShift)),
+        pRot.y.mul(cT).sub(along.mul(sT)),
+        pRot.z.add(swayZ).add(pushDir.y.mul(alongShift)),
       );
 
       // Normal: flat blade normal fanned cylindrically, blended to terrain
@@ -1441,6 +1472,7 @@ export class HybridGrassSystem {
     u.uInteractionRadius.value = gp.interactionRadius ?? 1.5;
     u.uInteractionStrength.value = gp.interactionStrength ?? 0.7;
     u.uInteractionMode.value = gp.interactionMode ?? 0;
+    u.uTrailStrength.value = gp.trailStrength ?? 1;
     if (sunDir) u.uSunDir.value.copy(sunDir);
   }
 
