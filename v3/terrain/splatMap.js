@@ -462,6 +462,64 @@ export class SplatMap {
   }
 
   /**
+   * Make the ground paint symmetric — the CPU twin of sculptBrush.mirror(), with
+   * the same modes and the same seam blend, so paint and heights stay aligned.
+   * Painted (user) holes are mirrored too; tool holes are recomposed on top.
+   *
+   * Reads from a full pre-copy (the blend band reads across the axis, where the
+   * target is being overwritten) and returns `{ before }`: a copyRect() patch
+   * of only the region that could change, for undo.
+   *
+   * @param {{ mode?: "x"|"z"|"rotate", keep?: "low"|"high", blendM?: number }} o
+   */
+  mirrorPaint({ mode = "x", keep = "low", blendM = 0 } = {}) {
+    const R = SPLAT_RES;
+    const pre0 = this.data0.slice(), pre1 = this.data1.slice(), preHU = this.holeUser.slice();
+    const isZ = mode === "z", isRot = mode === "rotate";
+    const keepLow = keep !== "high";
+    const blend = Math.max(0, Number(blendM) || 0) / WORLD_SIZE;   // UV units
+
+    // Only texels whose weight can be non-zero change: the replaced half plus
+    // the blend band on the kept side.
+    const bandTex = Math.ceil(blend * R) + 1;
+    const half = R >> 1;
+    const lo = keepLow ? Math.max(0, half - bandTex) : 0;
+    const hi = keepLow ? R : Math.min(R, half + bandTex);
+    const rect = isZ ? { x: 0, y: lo, w: R, h: hi - lo } : { x: lo, y: 0, w: hi - lo, h: R };
+    const before = this.copyRect(rect, pre0, pre1, preHU);
+
+    const smooth = (e0, e1, x) => {
+      const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+      return t * t * (3 - 2 * t);
+    };
+    for (let py = rect.y; py < rect.y + rect.h; py++) {
+      for (let px = rect.x; px < rect.x + rect.w; px++) {
+        const side = ((isZ ? py : px) + 0.5) / R;
+        const d = keepLow ? side - 0.5 : 0.5 - side;
+        const w = blend > 0 ? smooth(-blend, blend, d) : (d >= 0 ? 1 : 0);
+        if (w <= 0) continue;
+        const mx = (isZ ? px : R - 1 - px);
+        const my = (isZ || isRot) ? R - 1 - py : py;
+        const di = (py * R + px), si = (my * R + mx);
+        const d4 = di * 4, s4 = si * 4;
+        for (let c = 0; c < 4; c++) {
+          this.data0[d4 + c] = (pre0[d4 + c] + (pre0[s4 + c] - pre0[d4 + c]) * w + 0.5) | 0;
+        }
+        for (let c = 0; c < 3; c++) {
+          this.data1[d4 + c] = (pre1[d4 + c] + (pre1[s4 + c] - pre1[d4 + c]) * w + 0.5) | 0;
+        }
+        this.holeUser[di] = (preHU[di] + (preHU[si] - preHU[di]) * w + 0.5) | 0;
+      }
+    }
+    this._composeHoles(rect.x, rect.y, rect.x + rect.w - 1, rect.y + rect.h - 1);
+    this.tex.addLayerUpdate(0);
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
+    this._markDirty();
+    return { before };
+  }
+
+  /**
    * Both slices as one contiguous LIVE buffer — its hole channel includes tool
    * holes. Use exportCombined() for anything written to disk.
    */

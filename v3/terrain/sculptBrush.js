@@ -562,6 +562,41 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   )();
   const copyQuad = new QuadMesh(copyMat);
 
+  // ── Mirror / rotational symmetry (whole map) ─────────────────────────────
+  // Reads the PRE-STROKE copy (beginStroke just made it) and writes rtMain, so
+  // the pass never samples the target it renders into. The replaced side gets
+  // the kept side reflected (x or z) or turned half a turn about the centre
+  // (point symmetry, for two-player maps). `uMirBlend` widens the seam into a
+  // smooth band: a reflection already meets itself at the axis, but a rotated
+  // half does not.
+  // Texel centres map onto texel centres (u = (i+0.5)/S → 1-u = (S-1-i+0.5)/S),
+  // so the copy is exact — no filtering blur.
+  const mirSrcNode   = texture(rtMain.texture);
+  const uMirMode     = uniform(0);   // 0 = mirror across x=½, 1 = across z=½, 2 = rotate 180°
+  const uMirKeepLow  = uniform(1);   // 1 = keep the u/v < ½ side, 0 = keep the > ½ side
+  const uMirBlend    = uniform(0);   // seam half-width, UV units
+  const mirMat = new THREE.MeshBasicNodeMaterial();
+  mirMat.fragmentNode = Fn(() => {
+    const c = uv();
+    const isZ = step(0.5, uMirMode).mul(step(uMirMode, 1.5));          // mode 1
+    const isRot = step(1.5, uMirMode);                                  // mode 2
+    const side = mix(c.x, c.y, isZ);                                    // rotate splits on x too
+    // Signed distance into the side being REPLACED.
+    const d = mix(float(0.5).sub(side), side.sub(0.5), uMirKeepLow);
+    const hard = step(0, d);
+    const soft = smoothstep(uMirBlend.negate(), uMirBlend, d);
+    const w = mix(hard, soft, step(1e-7, uMirBlend));
+    const flipU = float(1).sub(isZ);                                    // x-mirror and rotate flip u
+    const flipV = max(isZ, isRot);                                      // z-mirror and rotate flip v
+    const m = vec2(
+      mix(c.x, float(1).sub(c.x), flipU),
+      mix(c.y, float(1).sub(c.y), flipV),
+    );
+    const h = mix(texture(mirSrcNode, c).r, texture(mirSrcNode, m).r, w);
+    return vec4(h, float(0), float(0), float(1));
+  })();
+  const mirrorQuad = new QuadMesh(mirMat);
+
   // Snapshot: read a sub-rect of a big RT into a small rect-sized RT.
   const snapSrcNode = texture(rtMain.texture);
   const uSnapOffset = uniform(new THREE.Vector2(0, 0));
@@ -670,6 +705,10 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   const redoStack   = [];
   let strokeOpen  = false;
   let strokeRect  = null;
+  // Something else the open stroke changed (the ground paint a mirror also
+  // flips), undone and redone in the SAME step as the heights — see
+  // attachToStroke().
+  let strokeExtra = null;
 
   function blitFull(srcTexture, dstRT) {
     srcNode.value = srcTexture;
@@ -846,17 +885,47 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     if (strokeOpen) endStroke();
     blitFull(rtMain.texture, rtPreStroke);
     strokeRect = null;
+    strokeExtra = null;
     strokeOpen = true;
+  }
+
+  /**
+   * Tie a non-height change to the open stroke: `extra.undo()` runs when this
+   * step is undone and `extra.redo()` when it is redone, so one Ctrl+Z reverts
+   * a mirror's heights AND its paint together.
+   */
+  function attachToStroke(extra) {
+    if (strokeOpen) strokeExtra = extra ?? null;
+  }
+
+  /**
+   * Make the map symmetric. Opens and fills a stroke; the caller may
+   * attachToStroke() anything else it changed, then MUST endStroke().
+   *
+   * @param {{ mode?: "x"|"z"|"rotate", keep?: "low"|"high", blendM?: number }} o
+   *   keep "low" keeps the side nearer world −X (or −Z for "z").
+   */
+  function mirror({ mode = "x", keep = "low", blendM = 0 } = {}) {
+    beginStroke();
+    uMirMode.value = mode === "z" ? 1 : mode === "rotate" ? 2 : 0;
+    uMirKeepLow.value = keep === "high" ? 0 : 1;
+    uMirBlend.value = Math.max(0, Number(blendM) || 0) / WORLD_SIZE;
+    mirSrcNode.value = rtPreStroke.texture;
+    _render(mirrorQuad, rtMain, null);
+    strokeRect = { ...FULL_RECT };
   }
 
   /** Close the stroke and push its dirty rect (pre-stroke content) onto undo. */
   function endStroke() {
     if (!strokeOpen) return;
     strokeOpen = false;
-    if (!strokeRect) return; // click without stamps — nothing to record
+    if (!strokeRect) { strokeExtra = null; return; } // click without stamps — nothing to record
     disposeStack(redoStack);
     trimStack(undoStack);
-    undoStack.push(snapshotRect(rtPreStroke, strokeRect));
+    const entry = snapshotRect(rtPreStroke, strokeRect);
+    entry.extra = strokeExtra;
+    strokeExtra = null;
+    undoStack.push(entry);
     strokeRect = null;
   }
 
@@ -865,8 +934,11 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     if (undoStack.length === 0) return false;
     trimStack(redoStack);
     const entry = undoStack.pop();
-    redoStack.push(snapshotRect(rtMain, entry.rect));
+    const redoEntry = snapshotRect(rtMain, entry.rect);
+    redoEntry.extra = entry.extra;
+    redoStack.push(redoEntry);
     restoreRect(entry);
+    entry.extra?.undo?.();
     entry.rt.dispose();
     return true;
   }
@@ -876,8 +948,11 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     if (redoStack.length === 0) return false;
     trimStack(undoStack);
     const entry = redoStack.pop();
-    undoStack.push(snapshotRect(rtMain, entry.rect));
+    const undoEntry = snapshotRect(rtMain, entry.rect);
+    undoEntry.extra = entry.extra;
+    undoStack.push(undoEntry);
     restoreRect(entry);
+    entry.extra?.redo?.();
     entry.rt.dispose();
     return true;
   }
@@ -938,6 +1013,8 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     ramp,
     beginStroke,
     endStroke,
+    attachToStroke,
+    mirror,
     undo,
     redo,
     replaceHeightData,

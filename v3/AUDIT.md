@@ -105,6 +105,27 @@ the game.
     brush: Alt+click a source, paint to copy its heights and paint elsewhere.
     Region copy-paste: copy a rectangle of terrain, paste it with rotate / flip
     / height offset.
+    **MIRROR — DONE 2026-09-17** (slice 1 of 3). Sculpt → Mirror: Left/Right,
+    Front/Back or Rotate 180 (point symmetry for two-player maps), keep the
+    −/+ half, optional seam blend (Rotate starts at 30 m — a half-turn does not
+    meet itself at the centre line), ground paint on/off, Apply.
+    Heights: one full-map GPU pass (sculptBrush.mirror) reading the PRE-STROKE
+    copy, so it never samples its own target; texel centres map onto texel
+    centres, so the copy is exact. Paint + painted holes: the CPU twin
+    (splatMap.mirrorPaint) with identical conventions, reading a pre-copy
+    because the blend band reads across the axis.
+    ONE undo step for both: sculpt strokes can now carry an attached
+    `{undo, redo}` (sculptBrush.attachToStroke), restored with the heights.
+    Paint undo keeps only the half + band that can change.
+    Verified live on a generated 200 m terrain (54 of 81 left/right sample
+    pairs differed by > 1 m): after Left/Right all 81 match to 0.00 m and the
+    kept side is untouched; Rotate 180: 176/176 point-symmetric pairs, 0.000 m
+    outside the seam, 1.27 m max step across the centre line over 2 m; paint
+    blobs land at the symmetric points; undo/redo walks mirror → generator →
+    mirror both ways with heights AND paint restored at each step.
+    Not mirrored (stated in the panel): grass/foliage/flower/snow density,
+    trees, props, roads, rivers. Test: tools/terrainMirrorPaintTest.mjs.
+    Still to do: region copy-paste (slice 2), clone brush (slice 3).
 14. **Non-destructive edit layers** like Unreal's. Large; roads and rivers
     already do this per tool.
 15. ~~Modifier keys in the hints~~ — DONE 2026-09-14. The sculpt panel

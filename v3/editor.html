@@ -369,6 +369,9 @@
                 <button id="btn-contrast" class="tool-btn" type="button">
                   <i data-lucide="contrast"></i><span>Contrast</span>
                 </button>
+                <button id="btn-mirror" class="tool-btn" type="button" title="Make the terrain symmetric: mirror or rotate one half onto the other">
+                  <i data-lucide="flip-horizontal-2"></i><span>Mirror</span>
+                </button>
               </div>
               <!-- Dynamic tool options zone — contents change per active tool -->
               <div id="tool-options" style="margin-top:6px">
@@ -473,6 +476,44 @@
                     </div>
                   </div>
                   <p class="mode-hint">Carves flowing-water gullies under the brush. Hold to deepen.</p>
+                </div>
+                <div id="sub-mirror" class="tool-sub" style="display:none">
+                  <div class="prop-row">
+                    <span class="prop-label">Symmetry</span>
+                    <div class="prop-value">
+                      <div class="option-chips" id="mirror-mode-chips">
+                        <button class="option-chip active" type="button" data-mirror-mode="x" title="Reflect across the X axis (left and right)">Left / Right</button>
+                        <button class="option-chip" type="button" data-mirror-mode="z" title="Reflect across the Z axis (front and back)">Front / Back</button>
+                        <button class="option-chip" type="button" data-mirror-mode="rotate" title="Turn one half 180 degrees around the centre: point symmetry, for two-player maps">Rotate 180</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Keep</span>
+                    <div class="prop-value">
+                      <div class="option-chips" id="mirror-keep-chips">
+                        <button class="option-chip active" type="button" data-mirror-keep="low" id="mirror-keep-low">-X half</button>
+                        <button class="option-chip" type="button" data-mirror-keep="high" id="mirror-keep-high">+X half</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Blend the two halves over this width around the seam. A reflection already meets itself at the axis; a 180 degree rotation needs a blend or the halves step at the centre line.">
+                    <span class="prop-label">Seam blend</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-mirror-blend" min="0" max="150" step="5" value="0" />
+                      <span class="prop-num" id="lbl-mirror-blend">0m</span>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Mirror the ground paint (and painted holes) together with the heights.">
+                    <span class="prop-label">Ground paint</span>
+                    <div class="prop-value">
+                      <button type="button" class="prop-toggle checked" id="ck-mirror-paint" aria-label="Mirror ground paint too">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <button type="button" class="action-btn" id="btn-mirror-apply" style="width:100%;margin-top:4px">Apply mirror</button>
+                  <p class="mode-hint" style="margin-top:4px">Copies the kept half onto the other half. Heights and ground paint only: grass, foliage, trees, props, roads and rivers are not mirrored. Ctrl+Z undoes it.</p>
                 </div>
                 <div id="sub-ramp" class="tool-sub" style="display:none">
                   <div class="prop-row">

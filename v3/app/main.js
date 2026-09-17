@@ -1453,9 +1453,11 @@ export async function startV3App(opts = {}) {
   const subErode        = uiById("sub-erode");
   const subHydro        = uiById("sub-hydro");
   const subRamp         = uiById("sub-ramp");
+  const subMirror       = uiById("sub-mirror");
   const btnErode        = uiById("btn-erode");
   const btnHydro        = uiById("btn-hydro");
   const btnRamp         = uiById("btn-ramp");
+  const btnMirror       = uiById("btn-mirror");
   const btnSmudge       = uiById("btn-smudge");
   const btnContrast     = uiById("btn-contrast");
   const slNoiseOct      = uiById("sl-noise-oct");
@@ -1659,6 +1661,7 @@ export async function startV3App(opts = {}) {
     btnRamp   .classList.toggle("active", m === "ramp");
     btnSmudge .classList.toggle("active", m === "smudge");
     btnContrast.classList.toggle("active", m === "contrast");
+    btnMirror?.classList.toggle("active", m === "mirror");
     // Tool options always track stickyMode so modifier-key overrides don't hide the zone.
     subRaiseLower.style.display = (stickyMode === "raise" || stickyMode === "lower") ? "" : "none";
     subTerrace   .style.display = stickyMode === "terrace" ? "" : "none";
@@ -1668,6 +1671,7 @@ export async function startV3App(opts = {}) {
     subErode     .style.display = stickyMode === "erode"   ? "" : "none";
     subHydro     .style.display = stickyMode === "hydro"   ? "" : "none";
     subRamp      .style.display = stickyMode === "ramp"    ? "" : "none";
+    if (subMirror) subMirror.style.display = stickyMode === "mirror" ? "" : "none";
   }
 
   btnRaise  .addEventListener("click", () => { stickyMode = "raise";   refreshModeIndicator(); });
@@ -1680,6 +1684,61 @@ export async function startV3App(opts = {}) {
   btnHydro   .addEventListener("click", () => { stickyMode = "hydro";    refreshModeIndicator(); });
   btnSmudge  .addEventListener("click", () => { stickyMode = "smudge";   refreshModeIndicator(); });
   btnContrast.addEventListener("click", () => { stickyMode = "contrast"; refreshModeIndicator(); });
+  // -- Mirror (whole-map symmetry, AUDIT 13) ---------------------------------
+  // Not a brush: it has no stroke. Pick a symmetry and a half, press Apply.
+  // Heights (GPU, sculptBrush.mirror) and ground paint (CPU, splatMap
+  // .mirrorPaint) follow the same conventions and undo as ONE step.
+  const mirrorState = { mode: "x", keep: "low", blendM: 0, paint: true };
+  const slMirrorBlend  = uiById("sl-mirror-blend");
+  const lblMirrorBlend = uiById("lbl-mirror-blend");
+  const ckMirrorPaint  = uiById("ck-mirror-paint");
+  const mirrorKeepLow  = uiById("mirror-keep-low");
+  const mirrorKeepHigh = uiById("mirror-keep-high");
+  function syncMirrorUi() {
+    for (const b of document.querySelectorAll("[data-mirror-mode]")) b.classList.toggle("active", b.dataset.mirrorMode === mirrorState.mode);
+    for (const b of document.querySelectorAll("[data-mirror-keep]")) b.classList.toggle("active", b.dataset.mirrorKeep === mirrorState.keep);
+    const axis = mirrorState.mode === "z" ? "Z" : "X";
+    if (mirrorKeepLow) mirrorKeepLow.textContent = `-${axis} half`;
+    if (mirrorKeepHigh) mirrorKeepHigh.textContent = `+${axis} half`;
+    ckMirrorPaint?.classList.toggle("checked", mirrorState.paint);
+    if (slMirrorBlend) slMirrorBlend.value = String(mirrorState.blendM);
+    if (lblMirrorBlend) lblMirrorBlend.textContent = `${mirrorState.blendM}m`;
+  }
+  uiById("mirror-mode-chips")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mirror-mode]");
+    if (!b) return;
+    mirrorState.mode = b.dataset.mirrorMode;
+    // A half-turn never meets itself at the centre line; start it with a seam.
+    if (mirrorState.mode === "rotate" && mirrorState.blendM === 0) mirrorState.blendM = 30;
+    syncMirrorUi();
+  });
+  uiById("mirror-keep-chips")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mirror-keep]");
+    if (!b) return;
+    mirrorState.keep = b.dataset.mirrorKeep;
+    syncMirrorUi();
+  });
+  slMirrorBlend?.addEventListener("input", () => {
+    mirrorState.blendM = Number(slMirrorBlend.value);
+    syncMirrorUi();
+  });
+  ckMirrorPaint?.addEventListener("click", () => { mirrorState.paint = !mirrorState.paint; syncMirrorUi(); });
+  function applyTerrainMirror(opts = mirrorState) {
+    const o = { mode: opts.mode, keep: opts.keep, blendM: opts.blendM };
+    sculpt.mirror(o);
+    if (opts.paint) {
+      const { before } = splatMap.mirrorPaint(o);
+      sculpt.attachToStroke({
+        undo: () => splatMap.pasteRect(before),
+        redo: () => { splatMap.mirrorPaint(o); },
+      });
+    }
+    sculpt.endStroke();
+    onHistoryChange();
+  }
+  uiById("btn-mirror-apply")?.addEventListener("click", () => applyTerrainMirror());
+  btnMirror?.addEventListener("click", () => { stickyMode = "mirror"; syncMirrorUi(); refreshModeIndicator(); });
+
   btnRamp   .addEventListener("click", () => {
     stickyMode = "ramp";
     rampState = "idle";
@@ -3799,6 +3858,9 @@ export async function startV3App(opts = {}) {
       setPickingHeight(false);
       return;
     }
+
+    // Mirror has no stroke: clicking the ground does nothing, Apply does the work.
+    if (stickyMode === "mirror") return;
 
     // Ramp: two-click workflow — first click sets A, second click bakes the ramp.
     if (stickyMode === "ramp") {
