@@ -1825,14 +1825,13 @@ export function buildWorldPanel(app) {
           label: "Move snap (m)",
           options: { "5 cm": 0.05, "10 cm": 0.1, "25 cm": 0.25, "50 cm": 0.5, "1 m": 1, "2 m": 2, "5 m": 5 },
           hint: "How far the gizmo steps while Shift is held. With \"Grid follows "
-            + "snap\" on this is also the heavy grid line, so the floor shows "
-            + "exactly where a dragged object will land — which is why Unreal's "
-            + "fine grid is 10 cm: that is its default snap.",
+            + "snap\" on this is also the fine grid cell, so the floor shows "
+            + "exactly where a dragged object will land.",
           onChange: snapped,
         });
         _toggle(gbBody, gb, "followSnap", {
           label: "Grid follows snap",
-          hint: "Heavy line = the snap, fine line = a tenth of it. Off: the two "
+          hint: "Fine cell = the snap, heavy line every N of them. Off: the two "
             + "cell sliders below rule and the grid ignores the snap.",
           onChange: snapped,
         });
@@ -1842,7 +1841,7 @@ export function buildWorldPanel(app) {
           // (5 cm) over the default ratio of 10 lands here, and a slider that
           // cannot show its own derived value reads as a bug.
           min: 0.005,
-          max: 2,
+          max: 10,
           step: 0.005,
           hint: "Edge of one fine square, in metres. Derived from the snap while "
             + "\"Grid follows snap\" is on.",
@@ -1854,8 +1853,7 @@ export function buildWorldPanel(app) {
           max: 20,
           step: 1,
           hint: "A heavier line every Nth fine cell. 5 is what every Unreal "
-            + "template shows, and with a 0.2 m fine cell it puts the heavy line "
-            + "at 1 m — the human-scale unit rooms and doors are reasoned in.",
+            + "template shows: 1 m cells grouped into 5 m blocks.",
           onChange: live,
         });
         _slider(gbBody, gb, "wallCellScale", {

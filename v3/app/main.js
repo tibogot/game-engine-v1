@@ -526,16 +526,16 @@ export async function startV3App(opts = {}) {
    * user probably never touched). Without this, anyone who had the editor open
    * once is pinned to the old look forever and new defaults appear to do nothing.
    */
-  const GROUND_BASE_VERSION = 10;
+  const GROUND_BASE_VERSION = 11;
   const GROUND_BASE_MODES = ["grid", "tile", "flat"];
   /*
    * `moveSnap` and `followSnap` are editor BEHAVIOUR, not grid uniforms, so they
    * sit beside `style` rather than in GRID_DEFAULTS — but they are persisted in
-   * the same blob because they are the same idea. Unreal's fine grid is 10 cm
-   * because its default move-snap is 10 cm: the light grid is a picture of where
-   * a dragged object will land. With `followSnap` on, ours is that by
-   * construction rather than by coincidence — the heavy line IS the snap and the
-   * fine line is a tenth of it.
+   * the same blob because they are the same idea: the grid is a picture of
+   * where a dragged object will land. With `followSnap` on, ours is that by
+   * construction rather than by coincidence — the FINE cell IS the snap, and
+   * the heavy line is `majorRatio` of them. At the defaults (1 m snap, 5) that
+   * is the 1 m / 5 m grid every Unreal template shows.
    */
   const groundBase = {
     style: "grid",
@@ -550,7 +550,7 @@ export async function startV3App(opts = {}) {
    */
   function syncGroundCellsToSnap(gb) {
     if (!gb.followSnap) return false;
-    const next = gb.moveSnap / Math.max(2, gb.majorRatio);
+    const next = gb.moveSnap;
     if (Math.abs(next - gb.minorCell) < 1e-9) return false;
     gb.minorCell = next;
     return true;

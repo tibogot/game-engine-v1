@@ -106,7 +106,7 @@ export const GRID_DEFAULTS = {
   /** Base surface colour between the lines. */
   baseColor: "#efede8",
   /**
-   * Minor line colour (the fine 20 cm grid). MUST BE VISIBLE. The first value
+   * Minor line colour (the fine 1 m grid). MUST BE VISIBLE. The first value
    * (#dedcd6) measured a 1.04 contrast ratio against the tile face — a line you
    * could only find by looking for it — and the effect on the user was that the
    * whole grid READ as 1 m squares: right numbers, five times too coarse to the
@@ -122,53 +122,55 @@ export const GRID_DEFAULTS = {
    */
   majorColor: "#adaba5",
   /*
-   * ── THE CELL SIZES: 0.2 m FINE, 1 m HEAVY ────────────────────────────────
+   * ── THE CELL SIZES: 1 m FINE, 5 m HEAVY ──────────────────────────────────
    *
-   * The 1 m heavy line is documented. Epic's level-blockout page, on SM_Cube:
-   * "This block is 1m x 1m x 1m ... The dark lines on the material create a 1m
-   * grid". It is the human-scale unit — Unreal's default character is 180 uu, so
-   * a person stands just under two dark cells, and doors, stairs and ceilings are
-   * all reasoned in metres from there. 1 uu = 1 cm and the grid is base-10
-   * because the world is metric (UE3/UDK snapped power-of-two, UE4 moved to
-   * base-10 and Epic still recommends it, since meshes from any external DCC are
-   * metric too).
+   * The visible cell in every Unreal template is ONE METRE, grouped in fives.
+   * The test that settles it is FOV-independent because it lives on the floor
+   * plane: a standing character's footprint (~0.7 m) sits inside one fine cell.
+   * It cannot sit inside a 0.2 m cell — a single foot is wider than that. The
+   * user said "it is always 5x5" on day one and was right the whole time.
    *
-   * THE FINE LINE IS 0.2 m — FIVE PER METRE — ON EVERY FACE, AND THAT IS AN
-   * OBSERVED NUMBER, NOT A DOCUMENTED ONE. The same Epic page says the light
-   * lines are 0.1 m on floors and 0.2 m only on vertical surfaces. Every actual
-   * Unreal template shows five subdivisions per metre on the FLOOR as well — the
-   * user checked a dozen of them, and that is broader evidence than one sentence.
-   * The likeliest reading is that the sentence describes the faces of that one
-   * cube rather than the template floors, but it does not matter much: five is
-   * what the engine looks like, so five is what we draw.
+   * The 1 m line is ALSO the documented one. Epic's blockout page, on SM_Cube:
+   * "The dark lines on the material create a 1m grid". It is the human-scale
+   * unit — Unreal's default character is 180 uu, so a person stands just under
+   * two cells tall, and doors, stairs and ceilings are reasoned in metres from
+   * there. 1 uu = 1 cm and the grid is base-10 because the world is metric.
    *
-   * Corollary worth keeping: `wallCellScale` stays in the material but defaults
-   * to 1, because with floors already at 0.2 there is nothing to differentiate.
+   * The same page mentions light 0.1 m lines. They exist and they are
+   * sub-pixel in every screenshot ever taken of the engine, which is why no one
+   * has ever seen them and why we do not draw them. A faint third level at
+   * 0.1 m for close-up work would cost one more gridLayer if ever wanted.
    *
-   * Shipped 1 m / 5 m first (a whole level too coarse — our LIGHT line sat where
-   * Unreal's DARK line sits), then 0.1 / 1 from the doc. This is the third set
-   * and the one that matches what the engine actually looks like.
+   * HISTORY, because this went round four times: shipped 1 m / 5 m; moved to
+   * 0.1 / 1 on that doc sentence; then 0.2 / 1 on my own pixel-counting of the
+   * user's screenshots; back to 1 / 5 on the footprint argument. Two lessons —
+   * one documented sentence about one asset does not outrank repeated
+   * observation of the shipping engine, and a cell size argued from a
+   * compressed screenshot is not a measurement.
    */
   /** Minor cell edge, in METRES. This is the number that makes the grid a ruler. */
-  minorCell: 0.2,
-  /** Major cell = minorCell × this, i.e. the 1 m line. Five per metre. */
+  minorCell: 1,
+  /** Major cell = minorCell × this: the 5 m block every template groups by. */
   majorRatio: 5,
   /**
    * Multiplies the minor cell on VERTICAL faces only; the major line is unchanged
-   * on every face. 1 = walls match floors, which is what Unreal looks like now
-   * that floors are 0.2. Set it to 2 for the split Epic's page describes.
+   * on every face. 1 = walls match floors, which is what Unreal looks like.
+   * Kept because Epic's page describes a coarser grid on walls; set 2 for that.
    * Free either way: the dominant-axis projection already knows which way a face
    * points. The terrain is a floor and never uses it.
    */
   wallCellScale: 1,
   /**
-   * Minor line width in METRES (not a UV fraction) — 1 cm, 5% of a 20 cm cell.
-   * 4 mm was a hairline that the derivative fade dimmed to nothing a few metres
-   * out, which is the other half of why the fine grid used to vanish.
+   * Minor line width in METRES (not a UV fraction) — 1.5 cm on a 1 m cell. A
+   * 4 mm hairline was once tried and the derivative fade dimmed it to nothing a
+   * few metres out; the fine grid has to survive to the character's distance.
    */
-  minorWidth: 0.01,
-  /** Major line width in METRES — 2 cm, five times the minor line. */
-  majorWidth: 0.02,
+  minorWidth: 0.015,
+  /**
+   * Major line width in METRES — 5 cm, so the 5 m block edge is still visibly
+   * heavier than the fine line once both have clamped to a pixel at distance.
+   */
+  majorWidth: 0.05,
   /**
    * Per-tile brightness break-up, ±this fraction. Applied on the MAJOR (1 m)
    * cell: that is the "tile" the eye reads as a tile, and a 10 cm hash would be
@@ -441,14 +443,13 @@ export function gridSurface(p2, u = getGridUniforms(), minorScale = null) {
     vec2(u.majorWidth.div(u.majorCell)),
   );
 
-  // Per-TILE brightness break-up, on the MAJOR (1 m) cell — that is the square
-  // the eye reads as a tile. A hash on the 10 cm minor cell would be sub-pixel
-  // noise at any useful camera distance and would alias exactly the way an
-  // unguarded line does.
+  // Per-TILE brightness break-up, on the MINOR (1 m) cell — that is the square
+  // the eye reads as a tile; on the 5 m block it would read as uneven lighting.
   //
-  // Faded out on the same rule the lines use — gone once the cell drops under
-  // ~4 px, which at 1 m is roughly 100 m out.
-  const cellsPerPx = max(mPerPx.x, mPerPx.y).div(u.majorCell);
+  // A 1 m hash across a 2 km terrain IS sub-pixel noise at distance and would
+  // alias exactly the way an unguarded line does, so it fades out on the same
+  // rule the lines use — gone once a cell drops under ~4 px, roughly 100 m out.
+  const cellsPerPx = max(mPerPx.x, mPerPx.y).div(minorCell);
   const varFade = saturate(float(1.0).sub(cellsPerPx.mul(4.0)));
 
   // Slow blotches — the "this is a surface" term, and the one thing that stops a
@@ -467,7 +468,7 @@ export function gridSurface(p2, u = getGridUniforms(), minorScale = null) {
   // Both variations ride the BASE colour, not the final one, so the lines keep
   // their own tone and only the surface between them moves.
   const shade = float(1.0)
-    .add(cellHash(floor(majorUV)).sub(0.5).mul(u.variation).mul(varFade))
+    .add(cellHash(floor(minorUV)).sub(0.5).mul(u.variation).mul(varFade))
     // Centred on zero so blotches lighten as well as darken — a one-sided term
     // reads as the floor getting dimmer, not as variation.
     .sub(blotch.sub(0.5).mul(u.breakup).mul(BREAKUP_ALBEDO));
