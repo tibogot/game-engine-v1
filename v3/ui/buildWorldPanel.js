@@ -1,4 +1,4 @@
-import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, button as _button, info as _info } from "./widgets.js";
+import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, button as _button, info as _info, hint as _hint } from "./widgets.js";
 import { uiById } from "./uiRoot.js";
 import { formatCascades } from "../app/csmSplits.js";
 import { buildOceanV2Controls } from "./buildOceanV2Panel.js";
@@ -1797,6 +1797,120 @@ export function buildWorldPanel(app) {
             + "so 0.75 costs roughly half the GPU time of 1.0. Saved per browser.",
           onChange: () => app.onRenderScaleChanged?.(),
         });
+      }
+
+      // --- Ground material (the greybox surface under the paint) ---
+      if (app.groundBase && ts.groundBase) {
+        const gb = ts.groundBase;
+        const gbBody = _section(container, "Ground material", false);
+        const live = () => app.groundBase.onChanged?.(false);
+        _dropdown(gbBody, gb, "style", {
+          label: "Style",
+          options: {
+            "Grid (metric)": "grid",
+            "Tile (legacy)": "tile",
+            "Flat": "flat",
+          },
+          hint: "Grid is analytic: cells are a real number of metres, lines hold "
+            + "their width on screen and fade out instead of aliasing, and it "
+            + "costs no texture sampler. Tile is the old grid.png material, kept "
+            + "for comparison — it swaps in without a reload so both are measured "
+            + "at the same GPU clock. Flat drops the lines entirely.",
+          onChange: () => app.groundBase.onChanged?.(true),
+        });
+        _slider(gbBody, gb, "minorCell", {
+          label: "Fine cell (m)",
+          min: 0.05,
+          max: 2,
+          step: 0.05,
+          hint: "Edge of one fine square, in metres. Unreal uses 0.1 m, which is "
+            + "its default move-snap increment — the fine grid is a picture of "
+            + "where a dragged object will actually land.",
+          onChange: live,
+        });
+        _slider(gbBody, gb, "majorRatio", {
+          label: "Heavy every",
+          min: 2,
+          max: 20,
+          step: 1,
+          hint: "A heavier line every Nth fine cell. 10 puts it at 1 m, the "
+            + "human-scale unit Unreal reasons rooms and doors in.",
+          onChange: live,
+        });
+        _slider(gbBody, gb, "wallCellScale", {
+          label: "Wall cell ×",
+          min: 1,
+          max: 4,
+          step: 0.5,
+          hint: "Vertical faces multiply the FINE cell by this (Unreal uses 2, so "
+            + "0.2 m on walls against 0.1 m on floors) — a wall is read at an "
+            + "oblique angle where the fine grid turns to clutter. The heavy 1 m "
+            + "line is unchanged, so a wall and its floor still agree on metres.",
+          onChange: live,
+        });
+        _slider(gbBody, gb, "minorWidth", {
+          label: "Fine line (m)",
+          min: 0.001,
+          max: 0.02,
+          step: 0.001,
+          onChange: live,
+        });
+        _slider(gbBody, gb, "majorWidth", {
+          label: "Heavy line (m)",
+          min: 0.004,
+          max: 0.1,
+          step: 0.002,
+          onChange: live,
+        });
+        _color(gbBody, gb, "baseColor",  { label: "Base",       onChange: live });
+        _color(gbBody, gb, "lineColor",  { label: "Minor line", onChange: live });
+        _color(gbBody, gb, "majorColor", { label: "Major line", onChange: live });
+        _slider(gbBody, gb, "ao", {
+          label: "Groove depth",
+          min: 0,
+          max: 0.8,
+          step: 0.02,
+          hint: "Ambient darkening in the lines. This is what makes the surface "
+            + "read as engraved rather than printed once the sky is lighting it.",
+          onChange: live,
+        });
+        _slider(gbBody, gb, "variation", {
+          label: "Cell variation",
+          min: 0,
+          max: 0.3,
+          step: 0.01,
+          hint: "Per-major-cell brightness break-up. Fades out with distance, so "
+            + "it never becomes noise.",
+          onChange: live,
+        });
+        _slider(gbBody, gb, "objectTint", {
+          label: "Object shade",
+          min: 0.4,
+          max: 1,
+          step: 0.02,
+          hint: "How much darker props and grey-box pieces are than the ground. "
+            + "They keep the SAME grid — same cells, same lines, still lined up "
+            + "with the floor — and differ only in value, so a box reads against "
+            + "the ground it stands on. 1.0 = identical to the ground.",
+          onChange: live,
+        });
+        _slider(gbBody, gb, "roughness", {
+          label: "Roughness",
+          min: 0.3,
+          max: 1,
+          step: 0.01,
+          onChange: live,
+        });
+        _button(gbBody, {
+          title: "Reset ground material",
+          onClick: () => {
+            app.groundBase.reset?.();
+            app.ui?.refreshLiveSliders?.();
+          },
+        });
+        _hint(gbBody, "Saved per browser, not in the project — it describes how "
+          + "this editor draws un-authored surface. A game pins its own with "
+          + "startV3App({ terrainFeatures: { baseStyle } }).");
       }
 
       const lodWorldBody = _section(container, "Terrain / LOD", false);

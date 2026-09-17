@@ -6,6 +6,7 @@ import { texture, uniform, float, mix, positionWorld, vec2, vec3, length, smooth
 import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, TERRAIN_SIZE_LIMITS, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
 import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N } from "../terrain/terrainLOD.js";
+import { GRID_DEFAULTS, applyGridConfig, createGridMaterial } from "../render/materials/gridMaterial.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import {
   encodeHeightmapFile,
@@ -504,7 +505,50 @@ export async function startV3App(opts = {}) {
   // single-layer greyscale view. Do NOT blanket-disable snow/lakebed/groundProc/
   // autoPaint/heightBlend/normalMap here: those are project-dependent, and a
   // saved world that uses one would silently render wrong.
-  const terrainFeatureOverrides = opts.terrainFeatures ?? {};
+  /*
+   * ── BARE GROUND (the greybox surface) ──────────────────────────────────────
+   *
+   * Loaded HERE, ~70 lines before createTerrainLOD, because `style` is a
+   * compile-time terrain feature: it has to be known before the first material
+   * is built. worldToolState does not exist yet, so the values land in a plain
+   * object now and are copied onto its `groundBase` slice once it does.
+   *
+   * localStorage is read ONLY in the editor. Games are pages on the same origin,
+   * so a shared key would let an editor session set the racing game's ground
+   * style behind the user's back; a game says what it wants through
+   * `startV3App({ terrainFeatures: { baseStyle } })` and nothing else.
+   */
+  const GROUND_BASE_KEY = "v3.groundBase";
+  /*
+   * Bump whenever GRID_DEFAULTS changes what the grid LOOKS like. A saved blob
+   * from an older version keeps its `style` (which is a working choice — an A/B
+   * the user set) and drops its colours and cell sizes (which are a default the
+   * user probably never touched). Without this, anyone who had the editor open
+   * once is pinned to the old look forever and new defaults appear to do nothing.
+   */
+  const GROUND_BASE_VERSION = 6;
+  const GROUND_BASE_MODES = ["grid", "tile", "flat"];
+  const groundBase = { style: "grid", ...structuredClone(GRID_DEFAULTS) };
+  if (isEditor) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(GROUND_BASE_KEY) || "null");
+      if (saved && typeof saved === "object") {
+        if (saved.v === GROUND_BASE_VERSION) {
+          for (const k of Object.keys(groundBase)) {
+            if (saved[k] !== undefined) groundBase[k] = saved[k];
+          }
+        } else if (GROUND_BASE_MODES.includes(saved.style)) {
+          groundBase.style = saved.style;
+        }
+      }
+    } catch {
+      // A corrupt entry must not stop the editor booting — keep the defaults.
+    }
+  }
+  applyGridConfig(groundBase);
+
+  // A game's explicit terrainFeatures wins over the editor's saved style.
+  const terrainFeatureOverrides = { baseStyle: groundBase.style, ...(opts.terrainFeatures ?? {}) };
   const splatFeatureOverrides   = opts.splatFeatures   ?? {};
 
   const splatOverlay = createSplatOverlay(
@@ -832,6 +876,10 @@ export async function startV3App(opts = {}) {
   }
 
   const worldToolState = createWorldToolState();
+  // The ground-base values were resolved before the terrain compiled (see the
+  // block above createTerrainLOD); the panel edits this slice, so it has to hold
+  // the same numbers the uniforms already carry.
+  Object.assign(worldToolState.groundBase, groundBase);
   // Boot-time CSM override — startV3App({ csm: { cascades: 2 } }). MUST land
   // before createWorldEnvironment builds the CSMShadowNode: on three r184 a
   // LIVE cascade-count change is broken at the renderer level — the old node's
@@ -925,6 +973,84 @@ export async function startV3App(opts = {}) {
     getTerrainMeshes: getTerrainMeshesForWorld,
   });
 
+  /*
+   * ── BARE GROUND, the live half ─────────────────────────────────────────────
+   *
+   * Every knob except `style` is a uniform shared by the terrain and by every
+   * prop that took the default material, so a slider drag is one uniform write
+   * and no recompile. `style` is a compile-time terrain feature and goes through
+   * buildVariant/setVariant instead — the same swap the shader A/Bs use, which
+   * is what makes "grid" and "tile" comparable inside the same second and
+   * therefore at the same GPU clock (a reload cannot be: measured, this laptop
+   * runs the identical scene at 4 ms or 64 ms depending on where the GPU clock
+   * happens to sit — see user_msi_thin15_gpu_throttle).
+   *
+   * Props are NOT re-materialised on a style change. They are built at
+   * registration and a swap would have to walk every type and every LOD entry;
+   * the comparison that matters is the terrain's, and prop materials rebuild on
+   * the next reload anyway.
+   */
+  /**
+   * One material per style, built on first use and kept. Toggling the dropdown
+   * back and forth would otherwise compile a new pipeline every time — and the
+   * second half of an A/B has to be instant, or the comparison is measuring the
+   * compile. The boot style's material is the live one, so it is seeded rather
+   * than built.
+   */
+  const _groundVariants = new Map();
+
+  function groundVariant(style) {
+    let m = _groundVariants.get(style);
+    if (!m) {
+      terrainFeatureOverrides.baseStyle = style;
+      m = lod.buildVariant(terrainFeatureOverrides);
+      _groundVariants.set(style, m);
+    }
+    return m;
+  }
+
+  function applyGroundBase(styleChanged = false) {
+    const gb = worldToolState.groundBase;
+    applyGridConfig(gb);
+    if (styleChanged && lod) {
+      if (!_groundVariants.has(groundBase.style)) {
+        _groundVariants.set(groundBase.style, lod.mesh.material);
+      }
+      lod.setVariant(groundVariant(gb.style));
+    }
+    try {
+      localStorage.setItem(GROUND_BASE_KEY, JSON.stringify({ v: GROUND_BASE_VERSION, ...gb }));
+    } catch {
+      // Private mode / quota: the look is still applied, it just will not persist.
+    }
+  }
+
+  function resetGroundBase() {
+    const gb = worldToolState.groundBase;
+    const styleChanged = gb.style !== "grid";
+    Object.assign(gb, { style: "grid", ...structuredClone(GRID_DEFAULTS) });
+    applyGroundBase(styleChanged);
+  }
+
+  /**
+   * Material for a prop slot. The library's `__none__` entry used to mean "flat
+   * grey 0xcccccc", which gave a blockout no sense of scale at all — a 4 m kit
+   * wall and a 1 m cube were the same featureless surface. It now means the
+   * shared metric grid, in WORLD space, so a prop's cells line up with the
+   * terrain's underneath it and with the next prop along.
+   *
+   * World and not object space because props are InstancedMesh: one world matrix
+   * for every instance, so an object-origin grid would put every copy's origin
+   * in the same place (see createGridMaterial). World space is correct per
+   * instance by construction.
+   *
+   * Anything with a real material in the library is untouched.
+   */
+  function propMaterialFor(libMat, opts = {}) {
+    if (libMat && libMat.type !== "none") return createMaterialForLibrary(libMat, opts);
+    return createGridMaterial({ mode: "world", triplanar: !!opts.triplanar });
+  }
+
   // Declared up here because the World panel is built long before the scene
   // systems are; it stays null until then and every hook below tolerates that.
   let shadowTest = null;
@@ -973,6 +1099,11 @@ export async function startV3App(opts = {}) {
       onConfigChanged: () => {},
       renderQuality,
       onRenderScaleChanged: () => applyRenderScale(),
+      groundBase: {
+        modes: GROUND_BASE_MODES,
+        onChanged: (styleChanged) => applyGroundBase(styleChanged),
+        reset: () => resetGroundBase(),
+      },
       ui: { refreshLiveSliders: () => {} },
     });
     if (typeof lucide !== "undefined") lucide.createIcons();
@@ -6082,7 +6213,7 @@ export async function startV3App(opts = {}) {
 
     const propMat = propTextureLibrary.getById(slot.materialId);
     if (!propMat) return false;
-    const newMat = createMaterialForLibrary(propMat, { triplanar: !!slot.triplanar });
+    const newMat = propMaterialFor(propMat, { triplanar: !!slot.triplanar });
     // Procedural rocks/cliffs keep their baked shading through a material
     // change or a project load. Solid ROCKS never took the cliff grass blend:
     // before this, a reload gave boulders grass tops they did not have when added.
@@ -6806,7 +6937,7 @@ export async function startV3App(opts = {}) {
     const geometry = factory();
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
-    const material = createMaterialForLibrary(defaultPropMat, { triplanar: false });
+    const material = propMaterialFor(defaultPropMat, { triplanar: false });
     const typeIdx = propStore.registerPrimitive(primitiveName, geometry, material);
     if (typeIdx < 0) return;
     propInstancer.onTypeRegistered(typeIdx);
@@ -6838,7 +6969,7 @@ export async function startV3App(opts = {}) {
     const geometry = getRockGeometry(preset.params);
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
-    const material = createMaterialForLibrary(defaultPropMat, { triplanar: true });
+    const material = propMaterialFor(defaultPropMat, { triplanar: true });
     _finishKitMaterial(material, "cliff", defaultPropMat?.id === "__none__");
     const typeIdx = propStore.registerPrimitive(presetName, geometry, material);
     if (typeIdx < 0) return;
@@ -6890,7 +7021,7 @@ export async function startV3App(opts = {}) {
     const geometry = createRockKitGeometry(rockName);
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
-    const material = createMaterialForLibrary(defaultPropMat, { triplanar: false });
+    const material = propMaterialFor(defaultPropMat, { triplanar: false });
     _finishKitMaterial(material, "rock", defaultPropMat?.id === "__none__");
     const typeIdx = propStore.registerPrimitive(rockName, geometry, material);
     if (typeIdx < 0) return;
@@ -7021,7 +7152,7 @@ export async function startV3App(opts = {}) {
     if (!geometry) return;
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
-    const material = createMaterialForLibrary(defaultPropMat, { triplanar: false });
+    const material = propMaterialFor(defaultPropMat, { triplanar: false });
     const typeIdx = propStore.registerPrimitive(pieceName, geometry, material);
     if (typeIdx < 0) return;
     if (piece.solid) propStore.types[typeIdx].solid = true;

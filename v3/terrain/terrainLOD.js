@@ -28,6 +28,7 @@ import {
   getTileGridTexture,
   tileColorAtWorldXZ,
 } from "../../v2/core/legacy/tileMaterial.js";
+import { gridSurface, flatSurface } from "../render/materials/gridMaterial.js";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 
 setGridTextureUrl("/textures/grid.png");
@@ -103,8 +104,26 @@ export const TERRAIN_FEATURES = {
    * the grid's mean shade, for a game whose world is painted or procedural and
    * never shows bare ground. Greybox PROPS keep their own tile material either
    * way — this only decides what the TERRAIN computes per pixel.
+   *
+   * LEGACY. Superseded by `baseStyle`; `tileGrid: false` with no baseStyle still
+   * means "flat" so a game that already passes it keeps working.
    */
   tileGrid: true,
+  /**
+   * Which material draws the bare ground under the painted layers.
+   *
+   *   "grid"  render/materials/gridMaterial.js — analytic, metric (cells are a
+   *           number of METRES), antialiased, no texture, no sampler. Default.
+   *   "tile"  v2/core/legacy/tileMaterial.js — the grid.png sampler. Kept so the
+   *           two can be A/B'd back to back through buildVariant/setVariant at
+   *           the same GPU clock; the two shaders are otherwise identical.
+   *   "flat"  no grid at all, at the shade the grid averages to.
+   *
+   * Compile-time, like every other flag here: the base is a different expression
+   * tree, not a uniform. Everything ABOUT the grid (cell size, colours, widths,
+   * groove depth) is a shared uniform and changes live.
+   */
+  baseStyle: "grid",
 };
 
 // ── Full grid (level 0) ───────────────────────────────────────────────────────
@@ -285,13 +304,20 @@ function createLODMaterial({
   terrainShadow = null, grassFar = null,
 }) {
   const F = { ...TERRAIN_FEATURES, ...features };
-  const mat = createTileMaterial({
-    roughness:     0.95,
-    textureScale:  400,
-    tileColor:     0xe6e3e3,
-    gridColor:     0x444444,
-    gridLineColor: 0x111111,
-  });
+  const baseStyle = F.baseStyle ?? (F.tileGrid === false ? "flat" : "grid");
+  // Only the legacy style needs the tile material built: createTileMaterial
+  // eagerly loads grid.png and assembles a tri-planar colorNode that the surface
+  // struct below would immediately overwrite. The other styles get a bare
+  // MeshStandardNodeMaterial and never fetch the texture at all.
+  const mat = baseStyle === "tile"
+    ? createTileMaterial({
+        roughness:     0.95,
+        textureScale:  400,
+        tileColor:     0xe6e3e3,
+        gridColor:     0x444444,
+        gridLineColor: 0x111111,
+      })
+    : new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0.0 });
   // The paint blend's generated code depends on build-time switches (per-layer
   // triplanar is compiled in only while a layer uses it); registering lets it
   // recompile this material when one flips.
@@ -406,22 +432,32 @@ function createLODMaterial({
   // slots share a single computation instead of quadruplicating the taps.
   // Base look under the layers.
   //
-  // The tile material's own colorNode is TRI-PLANAR: three projections, six
-  // grid taps and three hashes, weighted by the world normal. On the clipmap
-  // that normal is the constant up vector every vertex was built with (the
-  // displaced position never touches it — lighting takes its normal from the
-  // bake instead), so the XY and YZ weights are exactly zero on every terrain
-  // pixel and their four taps are multiplied away. tileColorAtWorldXZ is the
-  // XZ projection alone: the same picture, two taps and one hash.
+  // BARE GROUND — see TERRAIN_FEATURES.baseStyle.
   //
-  // MEASURED (vsync off, back-to-back variant swap): the tri-planar base was
-  // 27-33% of the terrain's GPU time in both the editor and the road game.
+  // All three styles project on world XZ only. The clipmap's attribute normal is
+  // the constant up vector every vertex was built with (the displaced position
+  // never touches it — lighting takes its normal from the bake instead), so a
+  // tri-planar base would weight its XY and YZ projections by exactly zero on
+  // every terrain pixel and then multiply their taps away. MEASURED (vsync off,
+  // back-to-back variant swap): that dead weight was 27-33% of the terrain's GPU
+  // time in both the editor and the road game.
   //
-  // With the grid off the base is the tile colour at 0.45, the shade the
-  // hash-varied cells average to, so a flat base reads as the same brightness.
-  const tileColorNode = F.tileGrid
-    ? tileColorAtWorldXZ(getTileGridTexture(), mat._tileUniforms, wxz)
-    : vec3(mat._tileUniforms.tileColor).mul(float(0.45));
+  // "grid" is the default and costs no sampler at all, which matters here more
+  // than the ALU does: this fragment stage sits at exactly 16 samplers on
+  // Windows WebGPU (see terrainNormalMap.js) and grid.png was one of them.
+  //
+  // "flat" is the shade the grid averages to, so switching styles is not a step
+  // change in brightness.
+  const base = baseStyle === "tile"
+    ? {
+        col: F.tileGrid
+          ? tileColorAtWorldXZ(getTileGridTexture(), mat._tileUniforms, wxz)
+          : vec3(mat._tileUniforms.tileColor).mul(float(0.45)),
+        rough: float(0.95),
+      }
+    : baseStyle === "flat"
+      ? flatSurface()
+      : gridSurface(wxz);
   const SurfaceOut = struct(
     { col: "vec3", rough: "float", emis: "vec3", nrm: "vec3" },
     "TerrainSurface",
@@ -432,8 +468,8 @@ function createLODMaterial({
     const wxzV    = vec2(worldX, worldZ).toVar();
     const nrmGeom = worldNormal.toVar();
 
-    const col   = vec3(tileColorNode).toVar();
-    const rough = float(0.95).toVar();
+    const col   = vec3(base.col).toVar();
+    const rough = float(base.rough).toVar();
     const emis  = vec3(0).toVar();
 
     // Painted splat layers (branch-gated inside blend()).

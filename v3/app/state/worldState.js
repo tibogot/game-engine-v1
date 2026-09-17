@@ -1,5 +1,6 @@
 import { createToolState } from "../../../v2/app/state/toolState.js";
 import { OCEAN2_DEFAULTS } from "../../render/water/oceanSurface.js";
+import { GRID_DEFAULTS } from "../../render/materials/gridMaterial.js";
 
 /** World-tab toolState slice — same defaults as v2 createToolState(). */
 export function createWorldToolState() {
@@ -109,6 +110,24 @@ export function createWorldToolState() {
       ...ts.worldOcean,
       mode: "classic",
       v2: structuredClone(OCEAN2_DEFAULTS),
+    },
+    /*
+     * BARE GROUND — the greybox surface under the painted layers, and the
+     * default material on primitives and grey-box kit pieces.
+     *
+     * `style` is compile-time (terrainLOD rebuilds its variant); everything else
+     * is a shared uniform in render/materials/gridMaterial.js and is live on the
+     * terrain and on every prop at once.
+     *
+     * Persisted in localStorage, not in the .v3proj: it describes how this
+     * EDITOR draws un-authored surface, the same way render scale describes the
+     * machine. A game pins it instead through `terrainFeatures.baseStyle` at
+     * boot, which is the path that ships.
+     */
+    groundBase: {
+      /** "grid" | "tile" | "flat" — see TERRAIN_FEATURES.baseStyle. */
+      style: "grid",
+      ...structuredClone(GRID_DEFAULTS),
     },
     audio: ts.audio,
   };
