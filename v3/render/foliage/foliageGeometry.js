@@ -403,9 +403,36 @@ function buildStalked(type, ctx, head) {
       return { p: [dir[0] * r, y, dir[2] * r], fwd: norm([Math.sin(th) * dir[0], Math.cos(th), Math.sin(th) * dir[2]]) };
     };
 
-    // ── The stem: a thin strip on edge (a susuki cane is twice as wide) ──
-    {
-      const w = 0.006 * (fan ? 2 : 1) * (type.stemWidth ?? 1) * height;
+    // ── The stem ──
+    // A susuki cane is a CYLINDER: it is a stiff round stalk, not a blade of
+    // grass, and a flat strip turned edge-on to the camera disappears — which
+    // is what made the plumes look unattached. Every other stalked plant keeps
+    // the cheap strip.
+    if (fan) {
+      const r0 = 0.004 * (type.stemWidth ?? 1) * height;
+      const sides2 = near ? 5 : far ? 3 : 4;
+      const base = vcount();
+      for (let q = 0; q <= segs; q++) {
+        const t = q / segs;
+        const { p, fwd } = at(t * stemTop);
+        const across = norm(cross(fwd, side));
+        const r = r0 * (1 - 0.25 * t);            // tapers a little toward the head
+        // The seam vertex is pushed twice so the ring's uv runs 0..1.
+        for (let k3 = 0; k3 <= sides2; k3++) {
+          const ang = (k3 / sides2) * Math.PI * 2;
+          const off = add(add([0, 0, 0], across, Math.cos(ang) * r), side, Math.sin(ang) * r);
+          push(add(p, off), norm(off), k3 / sides2, t, [1, t, sr, 0]);
+        }
+      }
+      for (let q = 0; q < segs; q++) {
+        for (let k3 = 0; k3 < sides2; k3++) {
+          const i0 = base + q * (sides2 + 1) + k3, i1 = i0 + 1;
+          const i2 = i0 + (sides2 + 1), i3 = i2 + 1;
+          I.push(i0, i2, i1, i1, i2, i3);
+        }
+      }
+    } else {
+      const w = 0.006 * (type.stemWidth ?? 1) * height;
       const base = vcount();
       for (let q = 0; q <= segs; q++) {
         const t = q / segs;

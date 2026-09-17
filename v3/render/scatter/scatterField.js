@@ -332,7 +332,9 @@ export class ScatterField {
         const pDist = length(toPlant);
         const pFall = float(1).sub(smoothstep(0.2, u.uInteractRadius, pDist));
         const pushDir = toPlant.div(max(pDist, 0.001));
-        const pushMag = pFall.mul(u.uInteractStrength);
+        // Scaled by the plant's flex, like the wind above: walking through
+        // stiff canes must not fold them flat when it only bows a fern.
+        const pushMag = pFall.mul(u.uInteractStrength).mul(u.uFlex);
 
         const d = bufDir.element(instanceIndex);
         // Smoothed over frames: wind and push arrive as a bend vector, never a jump.

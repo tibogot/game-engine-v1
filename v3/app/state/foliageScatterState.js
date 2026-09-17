@@ -160,7 +160,9 @@ export function createFoliageScatterState() {
     windMul: 0,
     flex: 0.6,
     flutter: 0,
-    interactRadius: 1.4,
+    // Wide enough that plants PART around someone walking through: at 1.4 m
+    // the ring was barely wider than the character, so nothing seemed to react.
+    interactRadius: 2.2,
     interactStrength: 1.0,
     // ── Light ──
     translucencyMul: 1,

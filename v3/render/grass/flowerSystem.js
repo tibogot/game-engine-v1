@@ -37,6 +37,7 @@ import {
   instanceIndex,
   length,
   max,
+  min,
   mix,
   normalLocal,
   normalize,
@@ -151,7 +152,9 @@ export class FlowerSystem {
       const mag = length(vec2(d.x, d.y));
       const inv = float(1).div(max(mag, 1e-4));
       const bx = d.x.mul(inv), bz = d.y.mul(inv);
-      const lean = mag.add(hash(plant.add(313)).mul(0.14));
+      // Capped like the foliage (see foliageSystem): a flower bows, it does
+      // not lie flat when you stand on it.
+      const lean = min(mag, float(0.8)).add(hash(plant.add(313)).mul(0.14));
 
       const yaw = hash(plant.add(131)).mul(PI2);
       const cy = cos(yaw), sy = sin(yaw);

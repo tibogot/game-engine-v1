@@ -1087,6 +1087,25 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      Cost, worst case (whole map filled, camera inside): ~5.0 ms GPU vs ~4.1
      for the old renderer (leaves + full fans up close); its shadows are
      within noise. Fewer plumes/stalks or a shorter near-detail distance trim it.
+     **PLANTS STRETCHED NEAR THE PLAYER — FIXED 2026-09-17** (user: "the player
+     interaction makes the foliage stretch", then "it still stretches, look at
+     the plumes"). THE REAL CAUSE was the bend, not the push: the foliage
+     shader turned a vertex's `t` — how far along its OWN frond or plume it
+     sits — into its bend angle. A plume's root has t = 0 and its tip t = 1, so
+     the root stayed put while the tip swung: the head SHEARED into streaks
+     instead of tilting. The angle now grows with a vertex's HEIGHT on the
+     plant (each type's unscaled height, measured off its near mesh, rides in
+     uniform row 3's w), so every vertex at one height turns by one angle: a
+     head rides its stalk rigidly and only the stalk bends. Three smaller
+     fixes found on the way: the push is scaled by uFlex like the wind (a
+     stiff cane resists what bows a fern); the bend is CAPPED at 0.6 rad (35°,
+     flowers 0.8) so nothing folds flat however close you stand; and the push
+     radius went 1.4 → 2.2 m, since 1.4 m was barely wider than the character
+     and nothing seemed to react. Verified in play mode: plants within the
+     radius lean away (off/on diff = exactly the plant beside the character)
+     and the plumes read as plumes again.
+     Not the push, and not a bug: a fern frond on a plant a few centimetres
+     from the camera shows as a hairline, because leaves are flat.
      Next (5b): wind sway for placed plants. Not planned yet: impostors for
      GLB plants far away (the tree impostor baker takes prop-shaped entries).
      **Foliage mode (F)**: EIGHT painted plants (four types fit one RGBA

@@ -11,12 +11,13 @@
  *   0 (colorBase.rgb, translucency)
  *   1 (colorTip.rgb, size in metres)
  *   2 (heightMin, heightMax, paint layer or -1, river distance m or 0) — the rules
- *   3 (colorHead.rgb, 0) — a cattail's sausage or a reed's plume
+ *   3 (colorHead.rgb, local height) — a cattail's sausage or a reed's plume,
+ *     plus the type's unscaled height, which the bend needs (see positionNode)
  */
 import * as THREE from "three";
 import {
   Discard, Fn, attribute, cameraPosition, cameraViewMatrix, cos, dot, exp, faceDirection, float,
-  hash, instanceIndex, length, max, mix, normalLocal, normalize, pow, positionLocal, saturate,
+  hash, instanceIndex, length, max, min, mix, normalLocal, normalize, pow, positionLocal, saturate,
   select, sin, smoothstep, step, texture, time, uniform, uv, varying, vec2, vec3, vec4, PI2,
 } from "three/tsl";
 import { drawPlumeTexture } from "./plumeTexture.js";
@@ -202,7 +203,12 @@ export class FoliageScatterSystem {
       const inv = float(1).div(max(mag, 1e-4));
       const bx = d.x.mul(inv), bz = d.y.mul(inv);
       // A fern is springier than a flower stem: it leans further for the same wind.
-      const lean = mag.mul(1.25).add(hash(plant.add(313)).mul(0.1));
+      // CAPPED. Wind and the player's push arrive as one bend vector, and a
+      // plant standing next to the player used to take the whole push: at
+      // strength 1.2 that is 86 deg, which reads as the plant STRETCHING
+      // across the view rather than bowing. A plant bows to 35 deg and no
+      // further, however hard the wind blows or how close you stand.
+      const lean = min(mag.mul(1.25), float(0.6)).add(hash(plant.add(313)).mul(0.1));
 
       const yaw = hash(plant.add(131)).mul(PI2);
       const cy = cos(yaw), sy = sin(yaw);
@@ -214,8 +220,17 @@ export class FoliageScatterSystem {
 
       const local = yawRot(positionLocal.mul(size), cy, sy).add(vec3(0, flutter.mul(size), 0));
       const nLocal = yawRot(normalLocal, cy, sy);
-      // Stiff at the base, loose at the top — the whole plant bows from the crown.
-      const bendAngle = lean.mul(pow(max(t, 1e-4), 1.4));
+      // Stiff at the base, loose at the top: the angle grows with a vertex's
+      // HEIGHT on the plant.
+      //
+      // It used to grow with `t` — how far along its own frond or plume a
+      // vertex sits — which is not the same thing at all: a plume's root sat
+      // at t = 0 and its tip at t = 1, so the root stayed put while the tip
+      // swung, and the head SHEARED into streaks instead of tilting. Every
+      // vertex at one height now turns by one angle, so a head rides the stalk
+      // rigidly and only the stalk bends.
+      const hFrac = saturate(positionLocal.y.div(max(row(p.z, 3).w, float(0.01))));
+      const bendAngle = lean.mul(pow(max(hFrac, 1e-4), 1.4));
       const pos = tilt(local, bendAngle, bx, bz);
       const nrm = tilt(nLocal, bendAngle, bx, bz);
 
@@ -315,6 +330,10 @@ export class FoliageScatterSystem {
     return mat;
     };
 
+    // Each type's unscaled height, read off its near mesh — the bend below
+    // needs to know how high a vertex sits on ITS plant.
+    this._localH = new Array(typeCount).fill(1);
+
     const mat = makeMaterial(null);
     this._mat = mat;
     this._plumeMat = makeMaterial(plumeTex);
@@ -332,7 +351,15 @@ export class FoliageScatterSystem {
 
   /** Rebuild one type's meshes after a shape setting changed. */
   rebuildType(i, type) {
-    this.field.rebuildType(i, (lod) => createFoliageTypeGeometry(type, { lod }));
+    this.field.rebuildType(i, (lod) => {
+      const made = createFoliageTypeGeometry(type, { lod });
+      if (lod === 0) {
+        made.geometry.computeBoundingBox();
+        this._localH[i] = Math.max(0.05, made.geometry.boundingBox.max.y);
+        this.field.typeRows[i * ROWS + 3].w = this._localH[i];
+      }
+      return made;
+    });
     // Only the textured-plume plants pay for the alpha test.
     const mat = usesPlumeTexture(type.kind) ? this._plumeMat : this._mat;
     for (let lod = 0; lod < FOLIAGE_LODS; lod++) this.field.meshes[i * FOLIAGE_LODS + lod].material = mat;
@@ -379,7 +406,7 @@ export class FoliageScatterSystem {
       // enforcing it would silently grow nothing where the user just painted.
       const nearRiver = hasRivers ? (t.nearRiver ?? 0) : 0;
       rows[o + 2].set(t.heightMin ?? -1e5, t.heightMax ?? 1e5, t.onLayer ?? -1, nearRiver);
-      c.set(t.colorHead ?? t.colorTip); rows[o + 3].set(c.r, c.g, c.b, 0);
+      c.set(t.colorHead ?? t.colorTip); rows[o + 3].set(c.r, c.g, c.b, this._localH[i] ?? 1);
     }
     this.field.setReceiveShadows(fs.receiveShadows);
     this.field.setShadowCasters(
