@@ -55,6 +55,8 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
     }
     W(slider(ty, type, "translucency", { label: "Translucency", min: 0, max: 1.5, step: 0.01, onChange: onStateChanged,
       hint: "How much light comes through the leaves with the sun behind them." }));
+    W(toggle(ty, type, "castShadow", { label: "Casts shadow", onChange: onStateChanged,
+      hint: "Near the camera only (Light → Shadow distance), drawn with the plant's simplest shape. Worth it for tall plants; ground cover is too low to show one." }));
 
     // ── Where it grows ──
     const gr = section(root, "Where it grows", false);
@@ -127,6 +129,10 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
     W(slider(li, foliageState, "translucencyMul", { label: "Sun through leaves ×", min: 0, max: 2, step: 0.05, onChange: onStateChanged }));
     W(slider(li, foliageState, "glowLight", { label: "Self glow", min: 0, max: 0.6, step: 0.01, onChange: onStateChanged }));
     W(toggle(li, foliageState, "receiveShadows", { label: "Shadows on near plants", onChange: onStateChanged }));
+    W(toggle(li, foliageState, "castShadows", { label: "Plants cast shadows", onChange: onStateChanged,
+      hint: "Master switch for every plant's own \"Casts shadow\"." }));
+    W(slider(li, foliageState, "shadowDistance", { label: "Shadow distance (m)", min: 5, max: 90, step: 1, onChange: onStateChanged,
+      hint: "Plants closer than this cast, in front of the camera or behind it. Farther ones sit in the far shadow cascades, where a plant is a pixel." }));
 
     // ── Distance & detail ──
     const ds = section(root, "Distance & Detail", false);

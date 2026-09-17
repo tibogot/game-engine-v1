@@ -1,4 +1,4 @@
-import { section as _section, slider as _slider, color as _color } from "./widgets.js";
+import { section as _section, slider as _slider, color as _color, toggle as _toggle } from "./widgets.js";
 
 /**
  * Susuki settings under the Vegetation header — plant and plume appearance.
@@ -64,6 +64,10 @@ export function buildSusukiPanel(root, {
   const dist = _section(root, "Distance & Growth", false);
   W(_slider(dist, susukiState, "fadeStart", { label: "Fade start", min: 40, max: 400, step: 5, onChange: onStateChanged, hint: "Plumes start thinning here (m)" }));
   W(_slider(dist, susukiState, "fadeEnd",   { label: "Fade end",   min: 60, max: 500, step: 5, onChange: onStateChanged }));
+  W(_toggle(dist, susukiState, "castShadows", { label: "Cast shadows", onChange: onStateChanged,
+    hint: "Near the camera only. Susuki is tall; without a shadow a field in full sun looks pasted on." }));
+  W(_slider(dist, susukiState, "shadowDistance", { label: "Shadow distance", min: 5, max: 90, step: 1, onChange: onStateChanged,
+    hint: "Plants closer than this cast, in front of the camera or behind it (m)." }));
   W(_slider(dist, susukiState, "slopeMinY", { label: "Max slope",  min: 0, max: 0.95, step: 0.05, onChange: onStateChanged, hint: "Terrain normal.y below this rejects susuki" }));
 
   return {

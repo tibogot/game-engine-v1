@@ -38,6 +38,12 @@ export const LAYERS = Object.freeze({
 
   /** SET: per-cascade prop shadow lists, cascade i on SHADOW_CASCADE_BASE + i. */
   SHADOW_CASCADE_BASE: 4,
+  /**
+   * SET: painted plants' shadow-only lists (scatterField.js). Enabled on the
+   * NEAR cascade cameras only, so a plant casts into the cascades that reach it
+   * and the main camera never draws the list.
+   */
+  SCATTER_SHADOW: 8,
 
   /** SET: the engine's day/night cloud deck (dayNightCloudLayer.js). */
   CLOUD_DECK: 18,

@@ -20,6 +20,17 @@
  *     material that show the same plants (susuki: opaque stems + alpha-tested
  *     plumes). Every part of a draw gets the same instance count and slice.
  *
+ * SHADOWS (opt-in, `shadows: true`). The camera list is culled against the
+ * camera, so it cannot cast: a plant just behind you would drop its shadow
+ * from the frame the moment it left the screen, and every plant would cast
+ * with its full leaf geometry. So the same compute fills a SECOND list per
+ * type: every kept plant of a type that casts (uShadowCast) within
+ * uShadowDist of the camera, in front or behind. It is drawn with the type's
+ * cheapest detail level, on LAYERS.SCATTER_SHADOW, which only the near
+ * cascade cameras enable (setShadowCameras) — the main camera never sees it.
+ * Plants that only cast (behind the camera) still get their wind, so their
+ * shadows move with the rest.
+ *
  * Per-plant state is two vec4s:
  *   bufPos  (tile x, tile z, type, terrain Y)
  *   bufDir  (bend x, bend z, distance fade 1→0, lift above painted grass in m)
@@ -38,6 +49,7 @@ import {
 } from "three/tsl";
 import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
 import { scatterClump, scatterRuleKeep } from "./scatterNoise.js";
+import { LAYERS } from "../layers.js";
 
 /**
  * Is a plant of this radius at this base point on screen? The base is
@@ -87,6 +99,7 @@ export class ScatterField {
    *                     (keep = fade × gain, capped at 1; 1 = thin across the
    *                     whole fade window)
    *   slopeBand         normal.y width of the slope cut-off's soft edge
+   *   shadows           build the shadow-only lists (see the header)
    *   onKeep            optional hook, called inside the compute for plants that
    *                     survive: ({ worldX, worldZ, terrainUV, terrainY, normal,
    *                     typeIdx, near, distSq, p, d }) => void
@@ -95,7 +108,7 @@ export class ScatterField {
     scene, renderer, name = "Scatter", typeCount, lods = 2, parts = 1, rows, ruleRow = null,
     worldSize, tileSize = 192, plantsPerSide = 384,
     heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex = null, windTex,
-    grassDensityTex = null, cullRadius = 2, fadeKeepGain = 1.6, slopeBand = 0.12, onKeep = null,
+    grassDensityTex = null, cullRadius = 2, fadeKeepGain = 1.6, slopeBand = 0.12, shadows = false, onKeep = null,
   }) {
     this.renderer = renderer;
     this.name = name;
@@ -106,6 +119,11 @@ export class ScatterField {
     const draws = (this.draws = typeCount * lods);
     // One mesh (and one indirect entry) per draw × part.
     const meshCount = (this.meshCount = draws * parts);
+    // Shadow lists: one slice per type after the draws' slices, and one mesh
+    // (and indirect entry) per type × part after the draws' meshes.
+    this.shadows = !!shadows;
+    const shadowCount = (this.shadowMeshCount = shadows ? typeCount * parts : 0);
+    const slices = draws + (shadows ? typeCount : 0);
     const count = (this.count = plantsPerSide * plantsPerSide);
 
     this.group = new THREE.Group();
@@ -153,23 +171,29 @@ export class ScatterField {
       uCullPadNdcYNear: uniform(0.6),
       uCullPadNdcYFar: uniform(0.35),
       uTypes: uniformArray(this.typeRows, "vec4"),
+      uShadowDist: uniform(35),
     });
+    // 1 per type that casts; read by the compute, set by setShadowCasters().
+    this._shadowCastValues = new Array(typeCount).fill(0);
+    u.uShadowCast = uniformArray(this._shadowCastValues, "float");
 
     const bufPos = instancedArray(count, "vec4");
     const bufDir = instancedArray(count, "vec4");
-    // One compact list, `draws` slices of `count` each.
-    const compactBuf = instancedArray(count * draws, "uint");
+    // One compact list: a slice of `count` per draw, then one per type's shadow list.
+    const compactBuf = instancedArray(count * slices, "uint");
     this.nodes = { bufPos, bufDir, compactBuf };
 
-    // One indirect buffer: 5 args per mesh; firstInstance = its draw's slice.
-    const args = new Uint32Array(meshCount * 5);
+    // One indirect buffer: 5 args per mesh; firstInstance = its slice.
+    const entries = meshCount + shadowCount;
+    const args = new Uint32Array(entries * 5);
     for (let m = 0; m < meshCount; m++) args[m * 5 + 4] = Math.floor(m / parts) * count;
+    for (let m = 0; m < shadowCount; m++) args[(meshCount + m) * 5 + 4] = (draws + Math.floor(m / parts)) * count;
     const indirect = new THREE.IndirectStorageBufferAttribute(args, 5);
     this._indirect = indirect;
-    const indirectStorage = storage(indirect, "uint", meshCount * 5).toAtomic();
+    const indirectStorage = storage(indirect, "uint", entries * 5).toAtomic();
 
     this.computeReset = Fn(() => {
-      for (let m = 0; m < meshCount; m++) atomicStore(indirectStorage.element(m * 5 + 1), uint(0));
+      for (let m = 0; m < entries; m++) atomicStore(indirectStorage.element(m * 5 + 1), uint(0));
     })().compute(1, [1]);
 
     const fSide = float(plantsPerSide);
@@ -245,23 +269,46 @@ export class ScatterField {
         u.uCullPadNdcX, u.uCullPadNdcYNear, u.uCullPadNdcYFar,
       );
 
-      If(densityKeep.mul(mapStay).mul(stochasticKeep).mul(frustumVis).greaterThan(0.5), () => {
-        // Near or far detail. The switch distance is spread ±2 m per plant so
-        // the change never forms a visible ring.
-        const dither = hash(instanceIndex.add(555)).mul(4).sub(2);
-        const lodR = u.uLodDist.add(dither);
-        let lod = lods > 1 ? step(lodR.mul(lodR), distSq) : float(0);
-        if (lods > 2) {
-          const lodR2 = u.uLodDist2.add(dither.mul(2));
-          lod = lod.add(step(lodR2.mul(lodR2), distSq));
-        }
-        const drawK = int(typeIdx.mul(lods).add(lod));
-        for (let k = 0; k < draws; k++) {
-          If(drawK.equal(k), () => {
-            const slot = atomicAdd(indirectStorage.element(k * parts * 5 + 1), uint(1));
-            compactBuf.element(slot.add(uint(k * count))).assign(instanceIndex);
-            // The other parts only need the same count.
-            for (let q = 1; q < parts; q++) atomicAdd(indirectStorage.element((k * parts + q) * 5 + 1), uint(1));
+      // Casts a shadow: its type casts and it is within the shadow distance —
+      // on screen or not. The distance is spread ±3 m per plant so the last
+      // shadows fade out instead of ending on a circle.
+      const shadowR = u.uShadowDist.add(hash(instanceIndex.add(777)).mul(6).sub(3));
+      const castsShadow = shadows
+        ? u.uShadowCast.element(int(floor(typeIdx.add(0.5)))).mul(step(distSq, shadowR.mul(shadowR)))
+        : float(0);
+      const inView = frustumVis.greaterThan(0.5);
+
+      If(densityKeep.mul(mapStay).mul(stochasticKeep).mul(max(frustumVis, castsShadow)).greaterThan(0.5), () => {
+        If(inView, () => {
+          // Near or far detail. The switch distance is spread ±2 m per plant so
+          // the change never forms a visible ring.
+          const dither = hash(instanceIndex.add(555)).mul(4).sub(2);
+          const lodR = u.uLodDist.add(dither);
+          let lod = lods > 1 ? step(lodR.mul(lodR), distSq) : float(0);
+          if (lods > 2) {
+            const lodR2 = u.uLodDist2.add(dither.mul(2));
+            lod = lod.add(step(lodR2.mul(lodR2), distSq));
+          }
+          const drawK = int(typeIdx.mul(lods).add(lod));
+          for (let k = 0; k < draws; k++) {
+            If(drawK.equal(k), () => {
+              const slot = atomicAdd(indirectStorage.element(k * parts * 5 + 1), uint(1));
+              compactBuf.element(slot.add(uint(k * count))).assign(instanceIndex);
+              // The other parts only need the same count.
+              for (let q = 1; q < parts; q++) atomicAdd(indirectStorage.element((k * parts + q) * 5 + 1), uint(1));
+            });
+          }
+        });
+        if (shadows) {
+          If(castsShadow.greaterThan(0.5), () => {
+            const typeK = int(floor(typeIdx.add(0.5)));
+            for (let t = 0; t < typeCount; t++) {
+              If(typeK.equal(t), () => {
+                const slot = atomicAdd(indirectStorage.element((meshCount + t * parts) * 5 + 1), uint(1));
+                compactBuf.element(slot.add(uint((draws + t) * count))).assign(instanceIndex);
+                for (let q = 1; q < parts; q++) atomicAdd(indirectStorage.element((meshCount + t * parts + q) * 5 + 1), uint(1));
+              });
+            }
           });
         }
 
@@ -304,7 +351,10 @@ export class ScatterField {
     })().compute(count, [64]);
 
     this.meshes = [];
+    this.shadowMeshes = [];
     this.triangles = new Array(meshCount).fill(0);
+    this._shadowCams = new Set();
+    this._usedTypes = new Array(typeCount).fill(true);
     this._lastAnchor = new THREE.Vector3();
     this._cameraMatrix = new THREE.Matrix4();
     this._initDone = false;
@@ -339,12 +389,30 @@ export class ScatterField {
       this.meshes.push(mesh);
       this.group.add(mesh);
     }
+    for (let m = 0; m < this.shadowMeshCount; m++) {
+      const part = m % this.parts;
+      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mats[Math.min(part, mats.length - 1)]);
+      mesh.count = this.count;
+      mesh.frustumCulled = false;
+      mesh.castShadow = true;
+      mesh.receiveShadow = false;   // never seen, only rendered into the shadow map
+      mesh.layers.set(LAYERS.SCATTER_SHADOW);
+      mesh.visible = false;         // until its type casts (setShadowCasters)
+      mesh.name = `${this.name}:type${Math.floor(m / this.parts)}:shadow` + (this.parts > 1 ? `:part${part}` : "");
+      this.shadowMeshes.push(mesh);
+      this.group.add(mesh);
+    }
   }
+
+  /** Shadow mesh index of (type, part). */
+  shadowMeshIndex(type, part = 0) { return type * this.parts + part; }
 
   /**
    * Rebuild one type's meshes after a shape setting changed.
    * @param {number} i type index
-   * @param {(lod:number, part:number) => { geometry: THREE.BufferGeometry, triangles: number }} makeGeometry
+   * @param {(lod:number, part:number, o:{shadow:boolean}) => { geometry: THREE.BufferGeometry, triangles: number }} makeGeometry
+   *   called with `{ shadow: true }` (and the cheapest lod) for the shadow list,
+   *   so a module can hand the shadow an even cheaper shape
    * @param {number[]} [onlyParts] rebuild just these parts (default: all)
    */
   rebuildType(i, makeGeometry, onlyParts = null) {
@@ -352,7 +420,7 @@ export class ScatterField {
       for (let part = 0; part < this.parts; part++) {
         if (onlyParts && !onlyParts.includes(part)) continue;
         const m = this.meshIndex(i, lod, part);
-        const { geometry, triangles } = makeGeometry(lod, part);
+        const { geometry, triangles } = makeGeometry(lod, part, { shadow: false });
         this._indirect.array[m * 5] = geometry.index.count;
         geometry.setIndirect(this._indirect, m * 5 * 4);
         const mesh = this.meshes[m];
@@ -362,7 +430,55 @@ export class ScatterField {
         this.triangles[m] = triangles;
       }
     }
+    // The shadow list draws the cheapest detail level: a shadow shows no leaflet.
+    for (let part = 0; part < this.parts && this.shadows; part++) {
+      if (onlyParts && !onlyParts.includes(part)) continue;
+      const s = this.shadowMeshIndex(i, part);
+      const { geometry } = makeGeometry(this.lods - 1, part, { shadow: true });
+      this._indirect.array[(this.meshCount + s) * 5] = geometry.index.count;
+      geometry.setIndirect(this._indirect, (this.meshCount + s) * 5 * 4);
+      const mesh = this.shadowMeshes[s];
+      const old = mesh.geometry;
+      mesh.geometry = geometry;
+      old?.dispose();
+    }
     this._indirect.needsUpdate = true;
+  }
+
+  /**
+   * Which types cast, and how far from the camera plants still cast (m).
+   * @param {boolean[]} casts one flag per type
+   */
+  setShadowCasters(casts, distance) {
+    if (!this.shadows) return;
+    for (let t = 0; t < this.typeCount; t++) this._shadowCastValues[t] = casts[t] ? 1 : 0;
+    if (distance !== undefined) this.u.uShadowDist.value = distance;
+    this._syncShadowVisibility();
+  }
+
+  _syncShadowVisibility() {
+    for (let m = 0; m < this.shadowMeshCount; m++) {
+      const t = Math.floor(m / this.parts);
+      this.shadowMeshes[m].visible = this._shadowCastValues[t] > 0.5 && !!this._usedTypes[t];
+    }
+  }
+
+  /**
+   * The shadow cameras that should draw the shadow lists — the near cascades.
+   * Called every frame with the live list: a CSM rebuilds its cameras when the
+   * cascade count changes, and the ones no longer passed are given back.
+   * @param {THREE.Camera[]} cams
+   */
+  setShadowCameras(cams) {
+    if (!this.shadows) return;
+    for (const cam of this._shadowCams) {
+      if (!cams.includes(cam)) { cam.layers.disable(LAYERS.SCATTER_SHADOW); this._shadowCams.delete(cam); }
+    }
+    for (const cam of cams) {
+      // Enabled every call: three may hand a cascade camera a fresh mask.
+      cam.layers.enable(LAYERS.SCATTER_SHADOW);
+      this._shadowCams.add(cam);
+    }
   }
 
   /** Shadows on the near detail level only, and only when asked. */
@@ -381,7 +497,9 @@ export class ScatterField {
     const key = used.map((u) => (u ? 1 : 0)).join("");
     if (key === this._usedKey) return;
     this._usedKey = key;
+    this._usedTypes = used.slice();
     for (let m = 0; m < this.meshCount; m++) this.meshes[m].visible = !!used[Math.floor(m / (this.parts * this.lods))];
+    this._syncShadowVisibility();
   }
 
   /**
@@ -429,6 +547,8 @@ export class ScatterField {
   setEnabled(on) {
     this._enabled = !!on;
     this.group.visible = this._enabled;
+    // Nothing to cast while hidden: hand the cascade cameras their layer back.
+    if (!this._enabled) this.setShadowCameras([]);
   }
 
   /** Per frame: move the tile with the anchor, then run the compute. */
@@ -439,6 +559,7 @@ export class ScatterField {
     u.uAnchorPos.value.copy(anchorPos);
     u.uPlayerPos.value.copy(anchorPos);
     for (const m of this.meshes) m.position.set(anchorPos.x, 0, anchorPos.z);
+    for (const m of this.shadowMeshes) m.position.set(anchorPos.x, 0, anchorPos.z);
     this._lastAnchor.copy(anchorPos);
 
     this._cameraMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);

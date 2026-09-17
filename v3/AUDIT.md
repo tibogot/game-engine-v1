@@ -1009,6 +1009,69 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      restores all three, redo clears them again, erase-selected-only removes
      just the poppy, two more undos walk back poppy-erase then the susuki
      stroke. Brush sliders and Shift+wheel share one radius (1-300 m, log).
+     **PLANT SHADOWS — DONE 2026-09-17.** Painted plants never cast: their
+     draws were culled against the camera, so casting from them would have
+     dropped a plant's shadow the moment it left the screen, and cast every
+     leaflet. The scatter compute now fills a SECOND list per type (opt-in,
+     `shadows: true`): kept plants of a type that casts within a shadow
+     distance of the camera, in front OR behind (±3 m per-plant dither so the
+     edge is not a circle), drawn with the type's cheapest shape on
+     LAYERS.SCATTER_SHADOW (8, new in the layer table), which only the cascade
+     cameras whose near edge is inside that distance enable. Plants that only
+     cast still get their wind. The pampas and susuki plume cards cast their
+     strands, not rectangles (maskShadowNode — the shadow pass ignores
+     opacityNode and alphaTest). Susuki's shadow head keeps 2 of its 5 plumes.
+     Foliage: "Casts shadow" per plant (on for all but Ground cover), master
+     switch + distance (35 m) under Light. Susuki: Cast shadows + distance.
+     Flowers do not cast (too low to read).
+     Measured INTERLEAVED, worst case = the whole map filled, camera at 2.5 m
+     inside the field, 6 rounds x 120 frames: foliage (fern + bush everywhere)
+     1.85 -> 2.08 ms GPU, **+0.22 ms**; susuki everywhere **+0.39 ms** at 35 m,
+     +0.31 at 20 m (+0.98 before the shadow head was cut to 2 plumes). Compute
+     +0.003 ms. A painted patch costs a fraction of this.
+     Remaining: shadows only with CSM on (like the per-cascade prop lists).
+     Card pictures: bakeFoliageThumbnail needs only the renderer, so the plant
+     pictures bake the first time Vegetation opens, whichever kind it opens on
+     (they used to wait for the foliage field to be built and showed initials).
+     **SCATTER COMPUTE — MEASURED 2026-09-17, nothing to fix.** Each system's
+     per-frame pass (reset + update, shadow lists included) costs **0.04-0.05
+     ms wall time** whether a small patch is painted or the whole map is
+     filled with the camera inside the field: foliage (65k slots) 0.048 /
+     0.049, flowers (147k) 0.040 / 0.040, susuki (83k) 0.052 / 0.042. About
+     half is dispatch overhead (a 1-invocation pass costs 0.026-0.038); the
+     GPU work is 0.003-0.024 ms. A system with nothing painted does not
+     dispatch at all (gated on hasData). So skipping the pass while the camera
+     stands still would save under 0.15 ms for all three together, at the
+     price of tracking every input that invalidates the lists (paint, sculpt,
+     wind, push, settings) — not worth it. The cost of plants is the DRAW
+     (foliage filled ~2 ms), not the scatter.
+     Method (renderer.info.compute.timestamp is flat here — see the perf
+     traps): k = 16/64/128 stacked dispatches between two
+     onSubmittedWorkDone awaits, 10 interleaved rounds, least-squares slope,
+     minus a 1-invocation pass.
+     **PLACED PLANTS (GLB) — slice 5a DONE 2026-09-17.** Vegetation grid has a
+     4th group, "Placed plants (GLB)": an Import card (click, or drop a GLB on
+     it) and one card per imported plant with its baked picture. A placed plant
+     IS a prop type (the prop instancer's LOD, per-instance cull, per-cascade
+     shadows) whose slot carries `plant` brush rules (v3/tools/placedPlants.js):
+     density per 100 m², min spacing against EVERY standing prop (a spacing
+     grid built once per stroke — the store's hasNearby is O(N) per attempt),
+     scale range, lean with slope (quaternion tilt then own-axis yaw, so the
+     yaw never swings the lean off the slope), max slope, sink by a share of
+     the plant's height, blocks-the-player (off by default). Import cuts leaf
+     materials out (fixFoliageTransparency, now exported: alphaTest, both
+     sides, depth-written) and turns collision off. Saved on the prop slot
+     (`plant`), restored on load, games included.
+     Erase and Clear all vegetation remove placed plants but NEVER other props;
+     undo snapshots only the plant instances, so it cannot undo a rock. The
+     shared brush and one undo history cover it like the other three kinds.
+     Verified live with real mouse events on cliff_shrub_for_terrain.glb: drop
+     import → picture + panel; paint 61, Alt-erase, undo, redo; two cubes
+     under every erase and Clear all survive; a flowers-mode erase-all clears
+     placed plants too; save → load keeps settings, cut-out leaves, collision
+     and instances. Test: tools/placedPlantsTest.mjs (19 checks).
+     Next (5b): wind sway for placed plants. Not planned yet: impostors for
+     GLB plants far away (the tree impostor baker takes prop-shaped entries).
      **Foliage mode (F)**: EIGHT painted plants (four types fit one RGBA
      density texture, so the layer carries two pages), each real geometry with
      no textures and no alpha test: a pinnate FERN (separate round-tipped

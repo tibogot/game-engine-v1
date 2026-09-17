@@ -29,6 +29,86 @@ import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunSh
 const ROWS = 4;
 const RULE_ROW = 2;
 
+/**
+ * The plume strand texture the thumbnails draw pampas with. Its own copy, made
+ * on first use, so a picture can be baked before any foliage system exists.
+ */
+let _thumbPlumeTex = null;
+function thumbPlumeTexture() {
+  if (_thumbPlumeTex) return _thumbPlumeTex;
+  const canvas = document.createElement("canvas");
+  canvas.width = 256; canvas.height = 512;
+  drawPlumeTexture(canvas, { texSpread: 54, texStrands: 420, texStrandLen: 0.34, texDroop: 0.6 });
+  _thumbPlumeTex = new THREE.CanvasTexture(canvas);
+  _thumbPlumeTex.colorSpace = THREE.NoColorSpace;
+  _thumbPlumeTex.needsUpdate = true;
+  return _thumbPlumeTex;
+}
+
+/**
+ * A PNG of one plant for the Vegetation picker. The live material is instanced
+ * and reads the scatter buffers, so the thumbnail builds its own plain mesh:
+ * the same geometry, its colours baked per vertex from the type, and the head
+ * split into its own group so a textured plume keeps its alpha.
+ *
+ * Needs only a renderer — NOT a built foliage field — so the picker shows real
+ * pictures the first time Vegetation opens, whichever plant kind it opens on.
+ * @returns {Promise<string|null>} data URL
+ */
+export async function bakeFoliageThumbnail(type, { renderer, size = 128, runRendererSideWork = null } = {}) {
+  const { geometry } = createFoliageTypeGeometry(type, { lod: 0 });
+  const aPlant = geometry.getAttribute("aPlant");
+  const count = aPlant.count;
+
+  const c = new THREE.Color();
+  const base = new THREE.Color(type.colorBase ?? "#3f6f26");
+  const tip = new THREE.Color(type.colorTip ?? "#8fbf45");
+  const head = new THREE.Color(type.colorHead ?? type.colorTip ?? "#8fbf45");
+  const stalk = new THREE.Color().copy(tip).lerp(new THREE.Color(0.72, 0.8, 0.4), 0.5);
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const part = aPlant.getX(i), t = aPlant.getY(i), along = aPlant.getW(i);
+    if (part > 1.5) c.copy(head).multiplyScalar(0.85 + along * 0.3);
+    else if (part > 0.5) c.copy(stalk);
+    else c.copy(base).lerp(tip, Math.min(1, t * 0.65 + along * 0.35));
+    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+  }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+  // Head triangles last, so they can carry the plume texture on their own.
+  const idx = Array.from(geometry.index.array);
+  const bodyTris = [], headTris = [];
+  for (let i = 0; i < idx.length; i += 3) {
+    (aPlant.getX(idx[i]) > 1.5 ? headTris : bodyTris).push(idx[i], idx[i + 1], idx[i + 2]);
+  }
+  geometry.setIndex([...bodyTris, ...headTris]);
+  geometry.clearGroups();
+
+  const opts = { vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, metalness: 0 };
+  const body = new THREE.MeshStandardMaterial(opts);
+  // A plant with no head (a fern) gets no second group: an empty draw is a
+  // WebGPU warning, not a no-op.
+  const headMat = headTris.length
+    ? new THREE.MeshStandardMaterial(
+      type.kind === "pampas" ? { ...opts, alphaMap: thumbPlumeTexture(), alphaTest: 0.4, transparent: false } : opts,
+    )
+    : null;
+  if (headMat) {
+    geometry.addGroup(0, bodyTris.length, 0);
+    geometry.addGroup(bodyTris.length, headTris.length, 1);
+  }
+  const mesh = new THREE.Mesh(geometry, headMat ? [body, headMat] : body);
+  const run = () => bakeObjectThumbnails({ renderer, size, items: [{ key: "p", make: () => mesh }] });
+  try {
+    const out = await (runRendererSideWork ? runRendererSideWork(run) : run());
+    return out.get("p") ?? null;
+  } finally {
+    geometry.dispose();
+    body.dispose();
+    headMat?.dispose();
+  }
+}
+
 export class FoliageScatterSystem {
   /**
    * @param {object} o
@@ -49,6 +129,7 @@ export class FoliageScatterSystem {
       worldSize, tileSize, plantsPerSide,
       heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex, windTex, grassDensityTex,
       cullRadius: 5,   // a jungle fern is metres across, not centimetres
+      shadows: true,   // tall plants cast (per type, near cascades only)
     }));
     this.group = field.group;
     this.renderer = renderer;
@@ -223,6 +304,9 @@ export class FoliageScatterSystem {
         Discard(a.lessThan(0.4));
         return float(1);
       })();
+      // The shadow pass ignores opacityNode: without this the plume casts
+      // the whole card.
+      mat.maskShadowNode = vPart.lessThan(1.5).or(texture(headTex, uv()).a.greaterThanEqual(0.4));
     }
     return mat;
     };
@@ -239,66 +323,8 @@ export class FoliageScatterSystem {
   get triangles() { return this.field.triangles; }
   get meshes() { return this.field.meshes; }
 
-  /**
-   * A PNG of one plant for the panel's picker. The live material is instanced
-   * and reads the scatter buffers, so the thumbnail builds its own plain mesh:
-   * the same geometry, its colours baked per vertex from the type, and the head
-   * split into its own group so a textured plume keeps its alpha.
-   * @returns {Promise<string|null>} data URL
-   */
-  async bakeThumbnail(type, { size = 128, runRendererSideWork = null } = {}) {
-    const { geometry } = createFoliageTypeGeometry(type, { lod: 0 });
-    const aPlant = geometry.getAttribute("aPlant");
-    const count = aPlant.count;
-
-    const c = new THREE.Color();
-    const base = new THREE.Color(type.colorBase ?? "#3f6f26");
-    const tip = new THREE.Color(type.colorTip ?? "#8fbf45");
-    const head = new THREE.Color(type.colorHead ?? type.colorTip ?? "#8fbf45");
-    const stalk = new THREE.Color().copy(tip).lerp(new THREE.Color(0.72, 0.8, 0.4), 0.5);
-    const colors = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      const part = aPlant.getX(i), t = aPlant.getY(i), along = aPlant.getW(i);
-      if (part > 1.5) c.copy(head).multiplyScalar(0.85 + along * 0.3);
-      else if (part > 0.5) c.copy(stalk);
-      else c.copy(base).lerp(tip, Math.min(1, t * 0.65 + along * 0.35));
-      colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
-    }
-    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-
-    // Head triangles last, so they can carry the plume texture on their own.
-    const idx = Array.from(geometry.index.array);
-    const bodyTris = [], headTris = [];
-    for (let i = 0; i < idx.length; i += 3) {
-      (aPlant.getX(idx[i]) > 1.5 ? headTris : bodyTris).push(idx[i], idx[i + 1], idx[i + 2]);
-    }
-    geometry.setIndex([...bodyTris, ...headTris]);
-    geometry.clearGroups();
-
-    const opts = { vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, metalness: 0 };
-    const body = new THREE.MeshStandardMaterial(opts);
-    // A plant with no head (a fern) gets no second group: an empty draw is a
-    // WebGPU warning, not a no-op.
-    const headMat = headTris.length
-      ? new THREE.MeshStandardMaterial(
-        type.kind === "pampas" ? { ...opts, alphaMap: this._plumeTex, alphaTest: 0.4, transparent: false } : opts,
-      )
-      : null;
-    if (headMat) {
-      geometry.addGroup(0, bodyTris.length, 0);
-      geometry.addGroup(bodyTris.length, headTris.length, 1);
-    }
-    const mesh = new THREE.Mesh(geometry, headMat ? [body, headMat] : body);
-    const run = () => bakeObjectThumbnails({ renderer: this.renderer, size, items: [{ key: "p", make: () => mesh }] });
-    try {
-      const out = await (runRendererSideWork ? runRendererSideWork(run) : run());
-      return out.get("p") ?? null;
-    } finally {
-      geometry.dispose();
-      body.dispose();
-      headMat?.dispose();
-    }
-  }
+  /** A PNG of one plant for the picker — see bakeFoliageThumbnail. */
+  bakeThumbnail(type, o = {}) { return bakeFoliageThumbnail(type, { renderer: this.renderer, ...o }); }
 
   /** Rebuild one type's meshes after a shape setting changed. */
   rebuildType(i, type) {
@@ -306,6 +332,8 @@ export class FoliageScatterSystem {
     // Only the textured-plume plants pay for the alpha test.
     const mat = type.kind === "pampas" ? this._plumeMat : this._mat;
     for (let lod = 0; lod < FOLIAGE_LODS; lod++) this.field.meshes[i * FOLIAGE_LODS + lod].material = mat;
+    const sh = this.field.shadowMeshes[this.field.shadowMeshIndex(i)];
+    if (sh) sh.material = mat;
   }
 
   /**
@@ -350,7 +378,14 @@ export class FoliageScatterSystem {
       c.set(t.colorHead ?? t.colorTip); rows[o + 3].set(c.r, c.g, c.b, 0);
     }
     this.field.setReceiveShadows(fs.receiveShadows);
+    this.field.setShadowCasters(
+      fs.types.map((t) => fs.castShadows !== false && t.castShadow === true),
+      fs.shadowDistance ?? 35,
+    );
   }
+
+  /** Near cascade cameras the shadow lists draw into — see ScatterField.setShadowCameras. */
+  setShadowCameras(cams) { this.field.setShadowCameras(cams); }
 
   init(camera) { return this.field.init(camera); }
   setEnabled(on) { this.field.setEnabled(on); }

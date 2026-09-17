@@ -85,6 +85,8 @@ export const SUSUKI_DEFAULTS = {
   windMul: 1,
   interactRadius: 2.2,   // player/horse push radius (m)
   interactStrength: 1.2,
+  castShadows: true,     // near the camera only, like the tall foliage
+  shadowDistance: 35,
   fadeStart: 150,        // radial plume fade-out window (m from camera)
   fadeEnd: 195,
   slopeMinY: 0.55,       // terrain normal.y below which susuki stops growing
@@ -378,6 +380,7 @@ export class SusukiSystem {
       // as the susuki was tuned before it moved onto the shared field.
       fadeKeepGain: 1,
       slopeBand: 0.15,
+      shadows: true,
     }));
     this.group = field.group;
     this.count = field.count;
@@ -509,6 +512,11 @@ export class SusukiSystem {
 
     const plumeSample = texture(this.plumeTex, uv());
     plumeMat.opacityNode = plumeSample.a;
+    // The shadow pass ignores opacityNode and alphaTest: without this every
+    // plume card casts a solid rectangle.
+    const uShadowAlpha = uniform(sp.alphaTest ?? 0.2);
+    this._uShadowAlpha = uShadowAlpha;
+    plumeMat.maskShadowNode = plumeSample.a.greaterThan(uShadowAlpha);
     const plumeSunVis = terrainSunVisibilityHere();
     plumeMat.colorNode = terrainShade(Fn(() => {
       const v = uv().y;
@@ -529,7 +537,7 @@ export class SusukiSystem {
     this._plumeMat = plumeMat;
 
     field.attachMaterial([stemMat, plumeMat]);
-    field.rebuildType(0, (lod, part) => this._makePart(part, sp));
+    field.rebuildType(0, (lod, part, o) => this._makePart(part, sp, o));
     this.syncFromState(sp, gp);
   }
 
@@ -537,16 +545,21 @@ export class SusukiSystem {
   get stemMesh() { return this.field.meshes[0]; }
   get plumeMesh() { return this.field.meshes[1]; }
 
-  _makePart(part, sp) {
+  _makePart(part, sp, { shadow = false } = {}) {
+    // The shadow's plume head keeps two of its plumes: the spray's outline
+    // on the ground reads the same, and the alpha-tested cards are what the
+    // shadow pass pays for.
     const geometry = part === 0
       ? createStemGeometry(sp.stemWidth ?? 0.03, this._tufts)
-      : createPlumeGeometry(sp, this._tufts);
+      : createPlumeGeometry(shadow ? { ...sp, plumesPerFlower: Math.min(2, sp.plumesPerFlower ?? 5) } : sp, this._tufts);
     return { geometry, triangles: geometry.index.count / 3 };
   }
 
   init(camera) { return this.field.init(camera); }
   setEnabled(on) { this.field.setEnabled(on); }
   update(anchorPos, camera) { this.field.update(anchorPos, camera); }
+  /** Near cascade cameras the shadow list draws into — see ScatterField.setShadowCameras. */
+  setShadowCameras(cams) { this.field.setShadowCameras(cams); }
 
   /** Redraw the plume strand texture after texStrands/texSpread/... changes. */
   redrawPlumeTexture(sp) {
@@ -557,13 +570,13 @@ export class SusukiSystem {
   /** Swap plume geometry (plumeWidth/Height/Droop + tufts are baked). */
   rebuildPlumeGeometry(sp) {
     this._tufts = Math.max(1, Math.round(sp.tufts ?? this._tufts));
-    this.field.rebuildType(0, (lod, part) => this._makePart(part, sp), [1]);
+    this.field.rebuildType(0, (lod, part, o) => this._makePart(part, sp, o), [1]);
   }
 
   /** Swap stem geometry (stemWidth + tufts are baked). */
   rebuildStemGeometry(sp) {
     this._tufts = Math.max(1, Math.round(sp.tufts ?? this._tufts));
-    this.field.rebuildType(0, (lod, part) => this._makePart(part, sp), [0]);
+    this.field.rebuildType(0, (lod, part, o) => this._makePart(part, sp, o), [0]);
   }
 
   /** Live sync — sp = susuki state, gp = grassState (shared wind), sunDir. */
@@ -592,6 +605,8 @@ export class SusukiSystem {
     u.uBacklitInt.value = sp.backlitIntensity ?? 1.7;
     u.uBacklitPow.value = sp.backlitPower ?? 6;
     u.uFlutter.value = sp.flutter ?? 0.05;
+    this.field.setShadowCasters([sp.castShadows !== false], sp.shadowDistance ?? 35);
+    this._uShadowAlpha.value = sp.alphaTest ?? 0.2;
     if (this._plumeMat.alphaTest !== (sp.alphaTest ?? 0.2)) {
       this._plumeMat.alphaTest = sp.alphaTest ?? 0.2;
       this._plumeMat.needsUpdate = true;

@@ -81,15 +81,17 @@ export const FOLIAGE_PRESETS = {
   },
 };
 
+// castShadow: tall plants ground themselves with a shadow; ground cover is
+// too low for one to read and is the most numerous, so it does not cast.
 const TYPE_DEFAULTS = [
-  { name: "Fern", preset: "fern" },
-  { name: "Bush", preset: "bush" },
-  { name: "Cattails", preset: "typha" },
-  { name: "Plume reeds", preset: "plumeReed" },
-  { name: "Ground cover", preset: "groundCover" },
-  { name: "Reeds", preset: "reeds" },
-  { name: "Pampas", preset: "pampas" },
-  { name: "Bracken", preset: "bracken" },
+  { name: "Fern", preset: "fern", castShadow: true },
+  { name: "Bush", preset: "bush", castShadow: true },
+  { name: "Cattails", preset: "typha", castShadow: true },
+  { name: "Plume reeds", preset: "plumeReed", castShadow: true },
+  { name: "Ground cover", preset: "groundCover", castShadow: false },
+  { name: "Reeds", preset: "reeds", castShadow: true },
+  { name: "Pampas", preset: "pampas", castShadow: true },
+  { name: "Bracken", preset: "bracken", castShadow: true },
 ];
 
 export function createFoliageScatterState() {
@@ -113,6 +115,11 @@ export function createFoliageScatterState() {
     translucencyMul: 1,
     glowLight: 0.02,
     receiveShadows: true,
+    // Plants cast into the near shadow cascades only, drawn with their
+    // cheapest shape, within this distance of the camera (per-type switch on
+    // each plant).
+    castShadows: true,
+    shadowDistance: 35,
     // ── Distance: every leaflet up close, a cut sheet, then a plain blade ──
     lodDistance: 18,
     lodDistance2: 45,

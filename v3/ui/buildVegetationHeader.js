@@ -17,7 +17,8 @@ import { drawPlumeTexture } from "../render/grass/susukiSystem.js";
  * @param {HTMLElement} root
  * @param {object} o
  *   brush           the shared brush { radius, strength, falloff, erase, eraseOnlyType }
- *   groups          () => [{ mode, title, types: [{ name, thumb }] }]
+ *   groups          () => [{ mode, title, types: [{ name, thumb, key?, kind? }], onDropFile?, canFill? }]
+ *                   key defaults to the card's index; kind "empty" draws a "+" card
  *   active          () => { mode, type }
  *   onSelect(mode, type)
  *   onBrushChanged()   radius changed (cursor ring)
@@ -45,14 +46,19 @@ export function buildVegetationHeader(root, { brush, groups, active, onSelect, o
       pick.appendChild(label);
       palettes.push(createAssetPalette({
         container: pick,
-        cards: () => g.types.map((t, i) => ({ key: i, label: t.name, kind: "asset", thumb: t.thumb?.() ?? null, title: t.name })),
+        cards: () => g.types.map((t, i) => ({
+          key: t.key ?? i, label: t.name, kind: t.kind ?? "asset", thumb: t.thumb?.() ?? null, title: t.title ?? t.name,
+        })),
         activeKey: () => (active().mode === g.mode ? active().type : null),
         onSelect: (key) => onSelect(g.mode, key),
+        onDropFile: g.onDropFile ?? null,
+        acceptExts: g.onDropFile ? new Set(["glb", "gltf"]) : null,
+        dropHint: "Drop a plant GLB",
       }));
     }
 
     const selGroup = gs.find((g) => g.mode === sel.mode);
-    const selName = selGroup?.types[sel.type]?.name ?? "plant";
+    const selName = selGroup?.types.find((t, i) => (t.key ?? i) === sel.type)?.name ?? "plant";
 
     const br = section(root, "Brush");
     W(slider(br, brush, "radius",   { label: "Radius",   min: 1, max: 300, step: 1, curve: "log", onChange: onBrushChanged }));
@@ -60,9 +66,11 @@ export function buildVegetationHeader(root, { brush, groups, active, onSelect, o
     W(slider(br, brush, "falloff",  { label: "Falloff",  min: 0.5, max: 6, step: 0.1 }));
     W(toggle(br, brush, "erase",    { label: "Erase" }));
     W(toggle(br, brush, "eraseOnlyType", { label: "Erase selected plant only",
-      hint: "Off: erasing (or Alt+paint) removes every plant under the brush — foliage, flowers and susuki. On: only the plant selected above." }));
+      hint: "Off: erasing (or Alt+paint) removes every plant under the brush — foliage, flowers, susuki and placed plants (never other props). On: only the plant selected above." }));
     hint(br, "<kbd>Alt</kbd>+paint = erase · <kbd>Shift</kbd>/<kbd>Alt</kbd>+wheel = radius/strength", { html: true, className: "mode-hint" });
-    button(br, { title: `Fill "${selName}" everywhere`, onClick: () => onFill?.(sel.mode, sel.type) });
+    if (selGroup?.canFill !== false) {
+      button(br, { title: `Fill "${selName}" everywhere`, onClick: () => onFill?.(sel.mode, sel.type) });
+    }
     button(br, { title: "Clear all vegetation", onClick: () => onClearAll?.(), style: "color:#f66" });
   }
 

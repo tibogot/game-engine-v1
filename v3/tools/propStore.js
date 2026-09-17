@@ -329,6 +329,8 @@ export class PropStore {
         glbRef: s.glbRef,
         lodRefs: s.lodRefs,
         collectible: s.collectible || undefined,
+        // A placed plant's brush rules (v3/tools/placedPlants.js).
+        plant: s.plant ? { ...s.plant } : undefined,
       })) ?? [],
     };
   }

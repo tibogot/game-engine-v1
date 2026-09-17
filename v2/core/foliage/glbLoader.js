@@ -103,7 +103,8 @@ function extractSubmeshes(root) {
   return submeshes;
 }
 
-function fixFoliageTransparency(mat) {
+/** Leaf cards: cut out with alphaTest, both sides, depth-written — never blended. */
+export function fixFoliageTransparency(mat) {
   if (!mat.alphaMap && !mat.map) return;
   if (mat.transparent || mat.alphaTest > 0 || (mat.map && mat.map.format === THREE.RGBAFormat)) {
     mat.transparent = false;

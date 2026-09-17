@@ -57,10 +57,12 @@ import { createSnowSystem } from "../terrain/snowSystem.js";
 import { SnowMap, SNOW_MAP_RES } from "../terrain/snowMap.js";
 import { encodeProjectFile, decodeProjectFile, isProjectFile, pickProjectFile } from "../io/projectIO.js";
 import { projectAssets } from "../io/projectAssets.js";
-import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader, initGlbLoaderRenderer, fixFoliageTransparency } from "../../v2/core/foliage/glbLoader.js";
 import { PropStore } from "../tools/propStore.js";
 import { PropInstancer } from "../tools/propInstancer.js";
 import { PropSystem } from "../tools/propSystem.js";
+import { PLACED_PLANT_DEFAULTS, SpacingGrid, planPlacedPlants, removePlantsInRadius } from "../tools/placedPlants.js";
+import { buildPlacedPlantPanel } from "../ui/buildPlacedPlantPanel.js";
 import { planRockStamp, ROCK_SET_DEFAULTS } from "../tools/rockSetBrush.js";
 import { PropPlacementPreview } from "../tools/propPlacementPreview.js";
 import { LivePropManager } from "../tools/livePropManager.js";
@@ -100,7 +102,7 @@ import { buildSusukiPanel } from "../ui/buildSusukiPanel.js";
 import { buildVegetationHeader, drawFlowerThumb, drawSusukiThumb } from "../ui/buildVegetationHeader.js";
 import { FlowerSystem } from "../render/grass/flowerSystem.js";
 import { FlowerDensity } from "../render/grass/flowerDensity.js";
-import { FoliageScatterSystem } from "../render/foliage/foliageSystem.js";
+import { FoliageScatterSystem, bakeFoliageThumbnail } from "../render/foliage/foliageSystem.js";
 import { ScatterDensity } from "../render/scatter/scatterDensity.js";
 import { createFoliageScatterState } from "./state/foliageScatterState.js";
 import { createFlowerState } from "./state/flowerState.js";
@@ -1052,7 +1054,7 @@ export async function startV3App(opts = {}) {
   // of each system is unchanged. The editor modes stay separate internally
   // ("foliage", "flowers", "susuki" — the input handlers and panels key on
   // them); the toolbar, the mode list and F show them as one.
-  const VEG_MODES = ["foliage", "flowers", "susuki"];
+  const VEG_MODES = ["foliage", "flowers", "susuki", "vegPlaced"];
   const vegBrush = { radius: 14, strength: 0.6, falloff: 1.5, erase: false, eraseOnlyType: false };
   const _shareVegBrush = (b) => {
     for (const k of Object.keys(vegBrush)) {
@@ -1062,6 +1064,12 @@ export async function startV3App(opts = {}) {
   };
   let _lastVegMode = "foliage";
   let vegUi = null;
+  // Placed plants (imported GLBs painted as prop instances, placedPlants.js).
+  // Up here: a project load during boot restores plant slots before the
+  // Vegetation code further down has run.
+  let placedUi = null;
+  let _vegPlacedSlot = -1;          // prop slot index of the selected placed plant
+  const _placedThumbs = new WeakMap(); // prop slot -> picture
   // ONE undo history for all three, so Ctrl+Z walks strokes in the order they
   // happened whichever plant they painted, and an erase that cleared every
   // kind of plant is one step. An entry holds a density snapshot per system it
@@ -1097,17 +1105,21 @@ export async function startV3App(opts = {}) {
   const _foliageThumbs = new Map();
   let _foliageThumbChain = Promise.resolve();
   function queueFoliageThumb(i) {
+    if (!isEditor) return;   // a picker picture; a game has no picker
     _foliageThumbChain = _foliageThumbChain
       .then(async () => {
-        if (!foliageScatter) return;
-        const url = await foliageScatter.bakeThumbnail(foliageScatterState.types[i], {
+        // Needs only the renderer: the pictures come before the field is built.
+        const url = await bakeFoliageThumbnail(foliageScatterState.types[i], {
+          renderer,
           runRendererSideWork: (fn) => withRendererSideWork(fn),
         });
         if (url) { _foliageThumbs.set(i, url); vegUi?.refreshCards(); }
       })
       .catch((e) => console.warn(`[V3 Foliage] thumbnail ${i} failed:`, e));
   }
+  let _foliageThumbsQueued = false;
   function queueAllFoliageThumbs() {
+    _foliageThumbsQueued = true;
     for (let i = 0; i < foliageScatterState.types.length; i++) queueFoliageThumb(i);
   }
   // Which plants are painted (so unused ones are not drawn); rechecked after a
@@ -1420,6 +1432,26 @@ export async function startV3App(opts = {}) {
     flowerSystem?.syncFromState(flowerState, grassState, getLightDir(), opts);
   }
 
+  /**
+   * The cascade cameras a painted plant within `distance` m can land in: every
+   * cascade whose near edge is closer than that. Empty with CSM off — the
+   * shadow lists are a CSM feature, like the per-cascade prop lists.
+   */
+  const _scatterShadowCams = [];
+  function scatterShadowCameras(distance) {
+    _scatterShadowCams.length = 0;
+    const csm = worldToolState.csm.enabled ? worldEnv?.getCsm?.() : null;
+    const lights = csm?.lights;
+    if (!lights?.length || !(distance > 0)) return _scatterShadowCams;
+    const far = Math.min(camera.far, csm.maxFar);
+    for (let i = 0; i < lights.length; i++) {
+      const nearEdge = (i === 0 ? 0 : csm.breaks[i - 1] ?? 1) * far;
+      const cam = lights[i].shadow?.camera;
+      if (cam && nearEdge < distance) _scatterShadowCams.push(cam);
+    }
+    return _scatterShadowCams;
+  }
+
   // ── Painted foliage build/sync (lazy, on the same scatter core) ────────────
   async function ensureFoliageScatterBuilt() {
     if (foliageScatter || _foliageScatterBuilding) return;
@@ -1443,7 +1475,6 @@ export async function startV3App(opts = {}) {
       sys.setEnabled(true);
       foliageScatter = sys;
       syncFoliageScatterUniforms();
-      queueAllFoliageThumbs();
     } catch (err) {
       console.error("[V3 Foliage] build failed:", err);
     } finally {
@@ -2588,6 +2619,7 @@ export async function startV3App(opts = {}) {
   const treePanel  = uiById("tree-panel");
   const foliagePanel = uiById("foliage-panel");
   const vegHeaderEl = uiById("vegetation-header");
+  const vegPlacedEl = uiById("veg-placed-panel");
   const snowPanel  = uiById("snow-panel");
   const cliffPaintPanel = uiById("cliffpaint-panel");
 
@@ -2628,6 +2660,7 @@ export async function startV3App(opts = {}) {
   function syncFoliagePanelVisibility() {
     foliagePanel.style.display = (editorMode === "foliage" && !playMode.active) ? "" : "none";
     if (vegHeaderEl) vegHeaderEl.style.display = (VEG_MODES.includes(editorMode) && !playMode.active) ? "" : "none";
+    if (vegPlacedEl) vegPlacedEl.style.display = (editorMode === "vegPlaced" && !playMode.active) ? "" : "none";
   }
 
   function syncPropsPanelVisibility() {
@@ -2718,7 +2751,11 @@ export async function startV3App(opts = {}) {
       btn.classList.toggle("active", btn.dataset.mode === m || (isVeg && btn.dataset.mode === "foliage"));
     }
     toolsModeSelect.value = isVeg ? "foliage" : m;
-    if (isVeg) vegUi?.rebuild();
+    if (isVeg) {
+      // The plant pictures are baked the first time Vegetation opens.
+      if (!_foliageThumbsQueued) { _foliageThumbsQueued = true; queueAllFoliageThumbs(); }
+      vegUi?.rebuild();
+    }
     paintSys.endStroke(); // leaving paint mid-drag must close the stroke
     if (rampState === "waiting_end") cancelRampPlacement();
     if (m === "view") {
@@ -2749,6 +2786,11 @@ export async function startV3App(opts = {}) {
       uCursorUV.value.set(-2, -2);
       sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
       void ensureFoliageScatterBuilt();
+    } else if (m === "vegPlaced") {
+      uCursorUV.value.set(-2, -2);
+      sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
+      if (!propSlots[_vegPlacedSlot]?.plant) _vegPlacedSlot = propSlots.findIndex((s) => s?.plant);
+      placedUi?.rebuild();
     } else if (m === "snow") {
       sculpt.uRadius.value = snowBrushState.radius / WORLD_SIZE;
     } else if (m === "cliffPaint") {
@@ -3821,6 +3863,7 @@ export async function startV3App(opts = {}) {
         susukiSystem.setEnabled(wantSusuki);
         if (wantSusuki) {
           const _susukiAnchor = playMode.active ? playMode.playerPosition : camera.position;
+          susukiSystem.setShadowCameras(scatterShadowCameras(susukiState.shadowDistance ?? 35));
           susukiSystem.update(_susukiAnchor, camera);
         }
       }
@@ -3840,7 +3883,10 @@ export async function startV3App(opts = {}) {
           _foliageUsedDirty = false;
           foliageScatter.field.setUsedTypes(foliageDensity.usedChannels());
         }
-        if (wantFoliage) foliageScatter.update(playMode.active ? playMode.playerPosition : camera.position, camera);
+        if (wantFoliage) {
+          foliageScatter.setShadowCameras(scatterShadowCameras(foliageScatterState.shadowDistance));
+          foliageScatter.update(playMode.active ? playMode.playerPosition : camera.position, camera);
+        }
       }
 
       // The shadow map only reaches CSM maxFar; props past it need not cast.
@@ -4374,7 +4420,8 @@ export async function startV3App(opts = {}) {
       }
       case "susuki":
       case "flowers":
-      case "foliage": {
+      case "foliage":
+      case "vegPlaced": {
         const from = undo ? _vegUndoStack : _vegRedoStack;
         const to = undo ? _vegRedoStack : _vegUndoStack;
         const entry = from.at(-1);
@@ -6557,6 +6604,61 @@ export async function startV3App(opts = {}) {
   }
 
   /**
+   * Make a GLB prop slot a PLACED PLANT (Vegetation → Placed plants): brush
+   * rules on the slot, leaf materials cut out instead of blended (a GLB's
+   * BLEND leaves sort badly and write no depth), and no collision unless the
+   * plant asks for it. Runs in games too — a loaded level's plants need the
+   * same materials and collision.
+   */
+  function makePlantSlot(slotIdx, settings) {
+    const slot = propSlots[slotIdx];
+    const type = slot && propStore.types[slot.typeIdx];
+    if (!type) return;
+    slot.plant = { ...PLACED_PLANT_DEFAULTS, ...settings };
+    for (const m of type.embeddedMaterials ?? []) {
+      for (const mat of Array.isArray(m) ? m : [m]) {
+        if (!mat) continue;
+        fixFoliageTransparency(mat);
+        mat.needsUpdate = true;
+      }
+    }
+    type.noCollide = !slot.plant.collide;
+    propStore._bump();
+    propSys.bvh?.invalidate();
+  }
+
+  /** The picker picture of a placed plant: its own meshes, baked once. */
+  async function queuePlacedThumb(slotIdx) {
+    if (!isEditor) return;
+    const slot = propSlots[slotIdx];
+    const type = slot && propStore.types[slot.typeIdx];
+    if (!type) return;
+    try {
+      const tiles = await withRendererSideWork(() => bakeObjectThumbnails({
+        renderer,
+        size: 128,
+        items: [{
+          key: "p",
+          make: () => {
+            const g = new THREE.Group();
+            for (const e of type.entries) {
+              const m = new THREE.Mesh(e.geometry, e.material);
+              m.matrixAutoUpdate = false;
+              m.matrix.copy(e.localMatrix);
+              g.add(m);
+            }
+            return g;
+          },
+        }],
+      }));
+      const url = tiles.get("p");
+      if (url) { _placedThumbs.set(slot, url); vegUi?.refreshCards(); }
+    } catch (err) {
+      console.warn(`[V3] plant thumbnail "${slot.name}" failed:`, err);
+    }
+  }
+
+  /**
    * Import a GLB as a collectible kind. Its submeshes join the GPU collectible field, so every
    * placed copy is drawn by the same handful of instanced calls and picked up by the same runtime
    * as the built-in coin/heart/key.
@@ -7230,6 +7332,7 @@ export async function startV3App(opts = {}) {
             const slotIdx = propSlots.findIndex((s) => s.typeIdx === typeIdx);
             if (slotIdx >= 0) {
               _applySavedSlotMaterial(slotIdx, meta);
+              if (meta.plant) { makePlantSlot(slotIdx, meta.plant); void queuePlacedThumb(slotIdx); }
               for (const [lod, ref] of Object.entries(meta.lodRefs ?? {})) {
                 const lodFile = projectAssets.fileFor(ref);
                 if (lodFile) await importPropLod(slotIdx, Number(lod), lodFile);
@@ -9238,6 +9341,7 @@ export async function startV3App(opts = {}) {
       if (k === "susuki") e.susuki = grassTerrainData.getSusukiDensitySnapshot();
       else if (k === "flowers") e.flowers = flowerDensity.getSnapshot();
       else if (k === "foliage") e.foliage = foliageDensity.getSnapshot();
+      else if (k === "vegPlaced") e.vegPlaced = _plantInstancesSnapshot();
     }
     return e;
   }
@@ -9245,6 +9349,7 @@ export async function startV3App(opts = {}) {
     if (e.susuki) grassTerrainData.restoreSusukiDensitySnapshot(e.susuki);
     if (e.flowers) flowerDensity.restoreSnapshot(e.flowers);
     if (e.foliage) { foliageDensity.restoreSnapshot(e.foliage); _foliageUsedDirty = true; }
+    if (e.vegPlaced) _restorePlantInstances(e.vegPlaced);
   }
   function _pushVegUndo(kinds) {
     _vegUndoStack.push(_vegSnapshot(kinds));
@@ -9252,7 +9357,10 @@ export async function startV3App(opts = {}) {
     _vegRedoStack.length = 0;
   }
   const _vegHasData = (k) =>
-    k === "susuki" ? grassTerrainData.hasSusukiData : k === "flowers" ? flowerDensity.hasData : foliageDensity.hasData;
+    k === "susuki" ? grassTerrainData.hasSusukiData
+      : k === "flowers" ? flowerDensity.hasData
+        : k === "vegPlaced" ? _plantInstanceCount() > 0
+          : foliageDensity.hasData;
   /** Is this stamp an erase of EVERY plant under the brush (not just the selected one)? */
   const _vegEraseAll = (altErase) => (vegBrush.erase || altErase) && !vegBrush.eraseOnlyType;
   /** Systems a stroke about to start in `kind` can change — what its undo step must hold. */
@@ -9266,9 +9374,159 @@ export async function startV3App(opts = {}) {
     if (foliageDensity.hasData) foliageDensity.stamp({ ...o, channel: 0, onlyChannel: false });
     if (flowerDensity.hasData) flowerDensity.stamp({ ...o, channel: 0, onlyChannel: false });
     if (grassTerrainData.hasSusukiData) grassTerrainData.stampSusukiDensity(o);
+    _removePlants(wx, wz, vegBrush.radius, _plantTypeTest());
   }
+
+  // ── Placed plants: imported GLBs painted as prop instances ─────────────────
+  /** Which prop types are placed plants (read fresh: slots come and go). */
+  function _plantTypeTest() {
+    const set = new Set();
+    for (const s of propSlots) if (s?.plant && s.typeIdx != null) set.add(s.typeIdx);
+    return (t) => set.has(t);
+  }
+  function _plantInstanceCount(typeIdx = null) {
+    const isPlant = _plantTypeTest();
+    let n = 0;
+    for (const p of propStore.instances) if (typeIdx == null ? isPlant(p.typeIdx) : p.typeIdx === typeIdx) n++;
+    return n;
+  }
+  /** Undo holds only the placed PLANTS, so undoing a stroke never touches rocks or buildings. */
+  function _plantInstancesSnapshot() {
+    const isPlant = _plantTypeTest();
+    return propStore.instances.filter((p) => isPlant(p.typeIdx)).map((p) => ({ ...p }));
+  }
+  function _restorePlantInstances(list) {
+    const isPlant = _plantTypeTest();
+    propStore.instances = propStore.instances.filter((p) => !isPlant(p.typeIdx)).concat(list.map((p) => ({ ...p })));
+    propStore._bump();
+    propSys.bvh?.invalidate();
+    refreshPropCount();
+    placedUi?.rebuild();
+  }
+  function _removePlants(wx, wz, radius, matches) {
+    const n = removePlantsInRadius(propStore.instances, wx, wz, radius, matches);
+    if (n) propStore._bump();
+    return n;
+  }
+
+  let _placedPainting = false;
+  let _placedLast = null;
+  let _placedGrid = null;
+  function _placedStamp(hit, altErase) {
+    const r = vegBrush.radius;
+    if (_placedLast && Math.hypot(hit.x - _placedLast.x, hit.z - _placedLast.z) < r * 0.25) return;
+    _placedLast = { x: hit.x, z: hit.z };
+    if (_vegEraseAll(altErase)) { _eraseAllVeg(hit.x, hit.z); return; }
+    const slot = propSlots[_vegPlacedSlot];
+    if (!slot?.plant) return;
+    if (vegBrush.erase || altErase) { _removePlants(hit.x, hit.z, r, (t) => t === slot.typeIdx); return; }
+    const type = propStore.types[slot.typeIdx];
+    if (!type) return;
+    const recs = planPlacedPlants({
+      wx: hit.x, wz: hit.z, radius: r, strength: vegBrush.strength,
+      settings: slot.plant, typeIdx: slot.typeIdx,
+      typeHeight: Math.max(0.01, type.mergedBox.max.y - type.mergedBox.min.y),
+      getHeight: (x, z) => propSys.getWorldHeight(x, z),
+      grid: _placedGrid, worldSize: WORLD_SIZE,
+    });
+    if (recs.length) { propStore.instances.push(...recs); propStore._bump(); }
+  }
+
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "vegPlaced") return;
+    _foliagePaintXZ(e);   // the brush ring
+    sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
+    if (!_placedPainting) return;
+    const hit = getTerrainHitWorld(e);
+    if (hit) _placedStamp(hit, e.altKey);
+  });
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "vegPlaced" || e.button !== 0) return;
+    const hit = getTerrainHitWorld(e);
+    if (!hit) return;
+    e.preventDefault();
+    _pushVegUndo(_vegStrokeKinds("vegPlaced", e.altKey));
+    // Everything already standing counts for spacing — rocks and buildings too.
+    const slot = propSlots[_vegPlacedSlot];
+    _placedGrid = new SpacingGrid(Math.max(1, slot?.plant?.minSpacing ?? 2));
+    for (const p of propStore.instances) _placedGrid.add(p.px, p.pz);
+    _placedPainting = true;
+    _placedLast = null;
+    _placedStamp(hit, e.altKey);
+  }, { capture: true });
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button !== 0 || !_placedPainting) return;
+    _placedPainting = false;
+    _placedGrid = null;
+    _foliageUsedDirty = true;   // an erase-all may have cleared foliage
+    propSys.bvh?.invalidate();
+    refreshPropCount();
+    placedUi?.rebuild();
+  });
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "vegPlaced") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      vegBrush.radius = Math.max(1, Math.min(300, vegBrush.radius * factor));
+      sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
+    } else {
+      vegBrush.strength = Math.max(0.05, Math.min(1.0, vegBrush.strength * factor));
+    }
+    vegUi?.refresh();
+  }, { passive: false, capture: true });
+
+  async function importPlantGlb(file = null) {
+    const run = async (f) => {
+      const typeIdx = await loadGltfAsType(f);
+      const slotIdx = propSlots.findIndex((s) => s.typeIdx === typeIdx);
+      if (slotIdx < 0) return;
+      makePlantSlot(slotIdx, {});
+      _vegPlacedSlot = slotIdx;
+      void queuePlacedThumb(slotIdx);
+      if (editorMode !== "vegPlaced") setEditorMode("vegPlaced");
+      else { placedUi?.rebuild(); vegUi?.rebuild(); }
+    };
+    if (file) {
+      try { await run(file); } catch (err) { console.error("[V3] Plant GLB load failed:", err); }
+      return;
+    }
+    const inp = Object.assign(document.createElement("input"), { type: "file", accept: ".glb,.gltf", multiple: true });
+    inp.onchange = async () => {
+      for (const f of inp.files ?? []) {
+        try { await run(f); } catch (err) { console.error("[V3] Plant GLB load failed:", err); }
+      }
+    };
+    inp.click();
+  }
+
+  if (isEditor && vegPlacedEl) placedUi = buildPlacedPlantPanel(vegPlacedEl, {
+    getSlot: () => propSlots[_vegPlacedSlot] ?? null,
+    getCount: () => {
+      const s = propSlots[_vegPlacedSlot];
+      return s ? _plantInstanceCount(s.typeIdx) : 0;
+    },
+    onCollideChanged: () => {
+      const s = propSlots[_vegPlacedSlot];
+      const t = s && propStore.types[s.typeIdx];
+      if (!t) return;
+      t.noCollide = !s.plant.collide;
+      propStore._bump();
+      propSys.bvh?.invalidate();
+    },
+    onImport: () => importPlantGlb(),
+    onRemove: () => {
+      const s = propSlots[_vegPlacedSlot];
+      if (!s || !_plantInstanceCount(s.typeIdx)) return;
+      _pushVegUndo(["vegPlaced"]);
+      _restorePlantInstances(_plantInstancesSnapshot().filter((p) => p.typeIdx !== s.typeIdx));
+    },
+  });
   const _vegBrushOf = (mode) => (mode === "flowers" ? flowerBrush : mode === "susuki" ? susukiBrush : foliageScatterBrush);
-  const _vegPanelOf = (mode) => (mode === "flowers" ? flowerUi : mode === "susuki" ? susukiUi : foliageUi);
+  const _vegPanelOf = (mode) =>
+    (mode === "flowers" ? flowerUi : mode === "susuki" ? susukiUi : mode === "vegPlaced" ? placedUi : foliageUi);
   // Card pictures for flowers and susuki are 2D sketches, redrawn only when
   // what they show changed.
   const _vegThumbCache = new Map();
@@ -9303,13 +9561,28 @@ export async function startV3App(opts = {}) {
       { mode: "foliage", title: "Plants", types: foliageScatterState.types.map((t, i) => ({ get name() { return t.name; }, thumb: () => _foliageThumbs.get(i) ?? null })) },
       { mode: "flowers", title: "Flowers", types: flowerState.types.map((t, i) => ({ get name() { return t.name; }, thumb: () => _flowerThumb(i) })) },
       { mode: "susuki", title: "Plumes", types: [{ name: "Susuki", thumb: _susukiThumb }] },
+      {
+        mode: "vegPlaced", title: "Placed plants (GLB)", canFill: false,
+        onDropFile: (key, file) => importPlantGlb(file),
+        types: [
+          ...propSlots.map((s, i) => [s, i]).filter(([s]) => s?.plant).map(([s, i]) => ({
+            key: i, get name() { return s.name; }, thumb: () => _placedThumbs.get(s) ?? null,
+          })),
+          { key: "import", name: "Import GLB", kind: "empty", title: "Import a plant GLB — or drop one on this card" },
+        ],
+      },
     ],
     active: () => {
       const mode = VEG_MODES.includes(editorMode) ? editorMode : _lastVegMode;
-      return { mode, type: mode === "susuki" ? 0 : _vegBrushOf(mode).type };
+      return { mode, type: mode === "susuki" ? 0 : mode === "vegPlaced" ? _vegPlacedSlot : _vegBrushOf(mode).type };
     },
     onSelect: (mode, type) => {
-      if (mode !== "susuki") _vegBrushOf(mode).type = type;
+      if (mode === "vegPlaced") {
+        if (type === "import") { void importPlantGlb(); return; }
+        _vegPlacedSlot = type;
+      } else if (mode !== "susuki") {
+        _vegBrushOf(mode).type = type;
+      }
       // The settings panel shows the picked plant, whichever kind it is.
       _vegPanelOf(mode)?.rebuild?.();
       if (editorMode !== mode) setEditorMode(mode);
@@ -9324,6 +9597,7 @@ export async function startV3App(opts = {}) {
       foliageDensity.clear();
       flowerDensity.clear();
       grassTerrainData.clearSusukiDensity();
+      if (kinds.includes("vegPlaced")) _restorePlantInstances([]);
       _foliageUsedDirty = true;
     },
   });
