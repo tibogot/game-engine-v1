@@ -157,7 +157,14 @@ export class TextureLibrary {
       // instead of its luminance. Set only while the slot is procedural (the
       // bake writes a blend height there); image slots stay on luminance.
       uHeightFromAlpha: uniform(0.0),
+      // AUDIT 5 — reuse one texture twice. Tint multiplies the layer's albedo
+      // (white = unchanged). The UV rotation turns the straight-down projection
+      // about world Y; the shader wants its cos/sin, the panel and the save
+      // file want degrees, which live on the slot (uvRotation).
+      uTint:  uniform(new THREE.Color(1, 1, 1)),
+      uUVRot: uniform(new THREE.Vector2(1, 0)),
     }));
+    for (const s of this.slots) s.uvRotation = 0;
   }
 
   // ── GPU upload ─────────────────────────────────────────────────────────────
@@ -538,6 +545,16 @@ export class TextureLibrary {
   setNormalStr(i, v)  { this.slotUniforms[i].uNormalStr.value = v; }
   setAOStr(i, v)      { this.slotUniforms[i].uAOStr.value     = v; }
   setRoughStr(i, v)   { this.slotUniforms[i].uRoughStr.value  = v; }
+  /** Albedo multiplier as "#rrggbb" (sRGB, like a colour input). */
+  setTint(i, hex)     { this.slotUniforms[i].uTint.value.set(hex); }
+  getTintHex(i)       { return `#${this.slotUniforms[i].uTint.value.getHexString()}`; }
+  /** Projection turn in degrees, any value (stored wrapped to 0..360). */
+  setUVRotation(i, deg) {
+    const d = ((Number(deg) % 360) + 360) % 360;
+    this.slots[i].uvRotation = d;
+    const r = d * Math.PI / 180;
+    this.slotUniforms[i].uUVRot.value.set(Math.cos(r), Math.sin(r));
+  }
 
   // ── Preview colour for a slot (centre pixel of the albedo layer) ───────────
   getPreviewColor(i) {
@@ -583,6 +600,8 @@ export class TextureLibrary {
         aoStr:     u.uAOStr.value,
         roughStr:  u.uRoughStr.value,
         triplanar: u.uTriplanar.value > 0.5,
+        tint:      this.getTintHex(i),
+        uvRotation: s.uvRotation,
         // Params only, never pixels: the bake is deterministic, so loading
         // re-generates exactly the same texture.
         procedural: s.procedural ? { ...s.procedural } : null,
@@ -630,6 +649,9 @@ export class TextureLibrary {
       if (Number.isFinite(d.aoStr))     u.uAOStr.value     = d.aoStr;
       if (Number.isFinite(d.roughStr))  u.uRoughStr.value  = d.roughStr;
       if (d.triplanar != null) u.uTriplanar.value = d.triplanar ? 1 : 0;
+      // Absent in older files = white / 0, which is what they rendered.
+      this.setTint(i, typeof d.tint === "string" && /^#[0-9a-f]{6}$/i.test(d.tint) ? d.tint : "#ffffff");
+      this.setUVRotation(i, Number.isFinite(d.uvRotation) ? d.uvRotation : 0);
       const a = d.auto;
       if (a) {
         s.autoEnabled = !!a.enabled;

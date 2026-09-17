@@ -4678,13 +4678,20 @@ export async function startV3App(opts = {}) {
     if (!thumb) return;
     const slot = textureLib.slots[slotIdx];
     const url = slot.procedural ? slot.procThumbUrl : slot.albedoUrl;
+    // The tint shows on the swatch too, so two layers sharing a texture can be
+    // told apart: the colour multiplies the image underneath it.
+    const tint = textureLib.getTintHex(slotIdx);
     if (url) {
       thumb.style.backgroundImage = `url(${url})`;
-      thumb.style.backgroundColor = '';
+      thumb.style.backgroundColor = tint === '#ffffff' ? '' : tint;
+      thumb.style.backgroundBlendMode = tint === '#ffffff' ? '' : 'multiply';
     } else {
       const [r, g, b] = textureLib.getPreviewColor(slotIdx);
+      const t = parseInt(tint.slice(1), 16);
+      const m = (c, sh) => Math.round(c * ((t >> sh) & 255) / 255);
       thumb.style.backgroundImage = '';
-      thumb.style.backgroundColor = `rgb(${r},${g},${b})`;
+      thumb.style.backgroundBlendMode = '';
+      thumb.style.backgroundColor = `rgb(${m(r, 16)},${m(g, 8)},${m(b, 0)})`;
     }
   }
 
@@ -4889,6 +4896,26 @@ export async function startV3App(opts = {}) {
   const tslRStr    = uiById("tsl-rstr");
   const tlblRStr   = uiById("tlbl-rstr");
   const tslTriplanar = uiById("tsl-triplanar");
+  const tslTint      = uiById("tsl-tint");
+  const tslTintReset = uiById("tsl-tint-reset");
+  const tslUVRot     = uiById("tsl-uvrot");
+  const tlblUVRot    = uiById("tlbl-uvrot");
+  tslTint.addEventListener("input", () => {
+    textureLib.setTint(texlibActiveSlot, tslTint.value);
+    refreshLayerThumb(texlibActiveSlot);
+    grassTintDirty = true; // the grass tint samples the painted ground colour
+  });
+  tslTintReset.addEventListener("click", () => {
+    textureLib.setTint(texlibActiveSlot, "#ffffff");
+    tslTint.value = "#ffffff";
+    refreshLayerThumb(texlibActiveSlot);
+    grassTintDirty = true;
+  });
+  tslUVRot.addEventListener("input", () => {
+    textureLib.setUVRotation(texlibActiveSlot, Number(tslUVRot.value));
+    tlblUVRot.textContent = `${tslUVRot.value}°`;
+    grassTintDirty = true;
+  });
 
   tslTriplanar.addEventListener("change", () => {
     textureLib.setTriplanar(texlibActiveSlot, tslTriplanar.checked);
@@ -5101,6 +5128,9 @@ export async function startV3App(opts = {}) {
     tslRStr.value = Math.round(u.uRoughStr.value * 10);
     tlblRStr.textContent = u.uRoughStr.value.toFixed(1);
     tslTriplanar.checked = u.uTriplanar.value > 0.5;
+    tslTint.value = textureLib.getTintHex(texlibActiveSlot);
+    tslUVRot.value = Math.round(s.uvRotation);
+    tlblUVRot.textContent = `${Math.round(s.uvRotation)}°`;
     tslBlockGrass.checked = s.blocksGrass;
     tslBlockTrees.checked = s.blocksTrees;
     texlibNameEl.value = s.name;

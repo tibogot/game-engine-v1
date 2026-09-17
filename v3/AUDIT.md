@@ -42,7 +42,18 @@ the game.
    so scrubbing settles at the target (0.298 at 30% after 40 real strokes) and
    a low-target stroke never strips stronger paint. Other layers still make
    room and weights still sum to 1. Test: tools/paintTargetStrengthTest.mjs.
-5. **Per-layer tint and UV rotation**, to reuse one texture twice.
+5. ~~**Per-layer tint and UV rotation**~~ — DONE 2026-09-17, to reuse one
+   texture twice. Paint → layer settings: Tint (colour multiply, Reset = white)
+   and UV rotate (0-359°). Saved in the project per layer; older files load
+   white and unturned. The swatch shows the tint.
+   Shader (splatOverlayTsl): one vec2 rotation per layer shared by its albedo
+   and ORM taps, so no extra taps and no new sampler (the terrain is at 16/16).
+   The normal map's tangent frame turns with it. Triplanar side projections
+   stay unturned. The height blend reads the UNTINTED colour, so recolouring a
+   layer does not move its edges.
+   Measured INTERLEAVED (8 rounds x 120 frames, whole screen on a tinted 45°
+   layer, 1745x808 @1.1): 3.164 -> 3.186 ms GPU, **+0.022 ms**, every round
+   the same sign. Test: tools/paintLayerTintRotationTest.mjs.
 6. **Roughness and normals at layer edges** still mix linearly (only visible on
    photo textures).
 7. ~~Splat size allowed up to 4096~~ — CAPPED at 2048 2026-09-14, measured
@@ -1369,7 +1380,7 @@ Large-scale variation was already measured free.
    shadow LOD (38), per-prop culling (39), meshoptimizer auto-LOD (40).~~ —
    DONE 2026-09-16 (38, 38b, 39, 40); CSM splits (108) and terrain
    self-shadowing (109) on top.
-5. More Genshin textures (3), small paint gaps (4, 5).
+5. More Genshin textures (3). ~~Small paint gaps (4, 5)~~ — DONE 2026-09-17.
 6. ~~Terrain mirror / clone / region copy-paste (13).~~ — DONE 2026-09-17.
 7. Roads: the lane-based engine replaces Smart Road 2 — follow the road order in
    its section (shader paint with wear and wetness, 50-52, first).

@@ -1280,6 +1280,21 @@
                       </label>
                     </div>
                   </div>
+                  <div class="prop-row" title="Multiplies this layer's colour. White leaves it as it is. Load the same texture in two layers and tint one to get a second ground type for free.">
+                    <span class="prop-label">Tint</span>
+                    <div class="prop-value">
+                      <input type="color" id="tsl-tint" value="#ffffff"
+                        style="width:36px;height:22px;border:none;padding:0;cursor:pointer;background:none;border-radius:3px" />
+                      <button class="option-chip" id="tsl-tint-reset" type="button" style="margin-left:6px;flex:0 0 auto" title="Back to white (no tint)">Reset</button>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Turns the texture on the ground. A second layer with the same texture turned stops tiling in step with the first. Costs nothing.">
+                    <span class="prop-label">UV rotate</span>
+                    <div class="prop-value">
+                      <input type="range" id="tsl-uvrot" min="0" max="359" step="1" value="0" />
+                      <span class="prop-num" id="tlbl-uvrot">0°</span>
+                    </div>
+                  </div>
                   <div class="prop-row">
                     <span class="prop-label">UV tile</span>
                     <div class="prop-value">

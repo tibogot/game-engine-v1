@@ -92,7 +92,9 @@ function macroValueNoise(p) {
 
 /**
  * @param {object[]} layerSlots  — 7 objects, each with TSL uniforms:
- *   { uUVScale, uNormalStr, uAOStr, uRoughStr }
+ *   { uUVScale, uNormalStr, uAOStr, uRoughStr, uTint?, uUVRot? }
+ *   uTint (vec3 albedo multiplier) and uUVRot (vec2 cos/sin of the projection
+ *   turn) are optional; without them a layer renders as before.
  * @param {THREE.DataArrayTexture} albedoArrayTex — 7-layer albedo array
  * @param {THREE.DataArrayTexture} ormArrayTex    — 7-layer ORM array
  *   ORM packing: R=roughness, G=AO, B=normalX_encoded, A=normalY_encoded
@@ -211,9 +213,9 @@ export function createSplatOverlay(
    * at shader BUILD time — TSL executes a Fn's body per build — so the flags
    * decide what is generated, not what runs.
    */
-  function sampleLayer(i, arrNode, triWeights) {
+  function sampleLayer(i, arrNode, triWeights, topUV) {
     const p   = positionWorld.mul(invWS).mul(layerSlots[i].uUVScale);
-    const top = arrNode.sample(p.xz).depth(int(i));
+    const top = arrNode.sample(topUV).depth(int(i));
     if (compileState.triplanarSlots[i] && triWeights) {
       const side  = arrNode.sample(p.zy).depth(int(i)); // X-facing wall
       const front = arrNode.sample(p.xy).depth(int(i)); // Z-facing wall
@@ -354,11 +356,26 @@ export function createSplatOverlay(
           ).toVar();
           triW = nSharp.div(max(nSharp.x.add(nSharp.y).add(nSharp.z), float(1e-5))).toVar();
         }
+        // PER-LAYER UV ROTATION (AUDIT 5): the straight-down projection turns
+        // about world Y, so one texture painted in two slots stops repeating in
+        // lock-step. One vec2 rotation per layer, shared by its albedo and ORM
+        // taps — no extra taps. Triplanar side projections stay unturned: they
+        // are walls, and turning a wall texture is not what the slider means.
+        // uv' = (c·x − s·z, s·x + c·z)
+        const layerUV = layerSlots.map((slot) => {
+          const p = positionWorld.xz.mul(invWS).mul(slot.uUVScale);
+          if (!slot.uUVRot) return p;
+          const cs = slot.uUVRot;
+          return vec2(
+            cs.x.mul(p.x).sub(cs.y.mul(p.y)),
+            cs.y.mul(p.x).add(cs.x.mul(p.y)),
+          ).toVar();
+        });
         const layerAlbedos = [];
         const layerOrms    = [];
         for (let i = 0; i < NUM_LAYERS; i++) {
-          layerAlbedos.push(sampleLayer(i, albedoArrNode, triW));
-          layerOrms.push(sampleLayer(i, ormArrNode, triW));
+          layerAlbedos.push(sampleLayer(i, albedoArrNode, triW, layerUV[i]));
+          layerOrms.push(sampleLayer(i, ormArrNode, triW, layerUV[i]));
         }
 
         // Auto-material redistributes w0 to the rule layers (uAutoEnabled), or
@@ -384,12 +401,14 @@ export function createSplatOverlay(
           });
         }
 
-        // Layer colors (albedo × AO)
+        // Layer colors (albedo × AO × tint). The height blend below reads the
+        // UNTINTED colour, so recolouring a layer does not move its edges.
+        const layerShaded = [];
         const layerColors = [];
         for (let i = 0; i < NUM_LAYERS; i++) {
-          layerColors.push(
-            layerAlbedos[i].rgb.mul(mix(float(1), layerOrms[i].g, layerSlots[i].uAOStr)),
-          );
+          const shaded = layerAlbedos[i].rgb.mul(mix(float(1), layerOrms[i].g, layerSlots[i].uAOStr));
+          layerShaded.push(shaded);
+          layerColors.push(layerSlots[i].uTint ? shaded.mul(layerSlots[i].uTint).toVar() : shaded);
         }
 
         // Linear weight blend — the one path that is always needed.
@@ -412,7 +431,7 @@ export function createSplatOverlay(
         if (F.heightBlend) {
           If(uHeightBlend.greaterThan(0.0), () => {
             const baseH  = baseC.dot(LUM);
-            const layerH = layerColors.map((c, i) => {
+            const layerH = layerShaded.map((c, i) => {
               const lum = c.dot(LUM);
               const hA = layerSlots[i].uHeightFromAlpha;
               return hA ? mix(lum, layerAlbedos[i].a, hA) : lum;
@@ -475,6 +494,8 @@ export function createSplatOverlay(
 
         // Decode per-layer tangent-space normals from ORM.ba and blend by weight.
         // Terrain TBN: T=(1,0,0)  B=(0,0,1)  N=geomWorldNormal (XZ world UV mapping).
+        // A turned layer turns its tangent frame with it: +u' runs along world
+        // (c, −s) and +v' along (s, c), so the bump still faces the right way.
         if (wantNrm) {
           let accumN = nrmV.mul(w[0]);
           for (let i = 0; i < NUM_LAYERS; i++) {
@@ -482,8 +503,11 @@ export function createSplatOverlay(
             const nx  = orm.b.mul(float(2.0)).sub(float(1.0));
             const ny  = orm.a.mul(float(2.0)).sub(float(1.0));
             const nz  = sqrt(max(float(0.0), float(1.0).sub(nx.mul(nx)).sub(ny.mul(ny))));
+            const cs  = layerSlots[i].uUVRot;
+            const tx  = cs ? cs.x.mul(nx).add(cs.y.mul(ny)) : nx;
+            const tz  = cs ? cs.x.mul(ny).sub(cs.y.mul(nx)) : ny;
             // TBN transform: T*nx + B*ny + N*nz  →  (nx, 0, ny) + geomN*nz
-            const worldN = normalize(vec3(nx, float(0), ny).add(nrmV.mul(nz)));
+            const worldN = normalize(vec3(tx, float(0), tz).add(nrmV.mul(nz)));
             // Lerp between pure geometric normal and normal-mapped based on per-layer strength
             const layerN = mix(nrmV, worldN, layerSlots[i].uNormalStr);
             accumN = accumN.add(layerN.mul(w[i + 1]));
