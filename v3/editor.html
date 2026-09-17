@@ -372,6 +372,9 @@
                 <button id="btn-mirror" class="tool-btn" type="button" title="Make the terrain symmetric: mirror or rotate one half onto the other">
                   <i data-lucide="flip-horizontal-2"></i><span>Mirror</span>
                 </button>
+                <button id="btn-region" class="tool-btn" type="button" title="Copy a rectangle of terrain and paste it elsewhere, turned, flipped and blended in">
+                  <i data-lucide="copy"></i><span>Copy</span>
+                </button>
               </div>
               <!-- Dynamic tool options zone — contents change per active tool -->
               <div id="tool-options" style="margin-top:6px">
@@ -514,6 +517,61 @@
                   </div>
                   <button type="button" class="action-btn" id="btn-mirror-apply" style="width:100%;margin-top:4px">Apply mirror</button>
                   <p class="mode-hint" style="margin-top:4px">Copies the kept half onto the other half. Heights and ground paint only: grass, foliage, trees, props, roads and rivers are not mirrored. Ctrl+Z undoes it.</p>
+                </div>
+                <div id="sub-region" class="tool-sub" style="display:none">
+                  <p class="mode-hint" id="region-status" style="margin:0 0 6px">Drag a rectangle on the terrain to copy it.</p>
+                  <div class="prop-row">
+                    <span class="prop-label">Rotation</span>
+                    <div class="prop-value" style="display:flex;gap:4px;align-items:center">
+                      <button type="button" class="action-btn" id="btn-region-rot-l" title="Turn 90 degrees one way" style="margin:0;padding:2px 6px;flex:none">-90</button>
+                      <input type="range" id="sl-region-rot" min="0" max="359" step="1" value="0" style="flex:1;min-width:0" />
+                      <button type="button" class="action-btn" id="btn-region-rot-r" title="Turn 90 degrees the other way" style="margin:0;padding:2px 6px;flex:none">+90</button>
+                      <span class="prop-num" id="lbl-region-rot">0</span>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Flip X</span>
+                    <div class="prop-value">
+                      <button type="button" class="prop-toggle" id="ck-region-flipx" aria-label="Flip left and right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></button>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Flip Z</span>
+                    <div class="prop-value">
+                      <button type="button" class="prop-toggle" id="ck-region-flipz" aria-label="Flip front and back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></button>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Match ground: lift or lower the copy so its edges sit at the height of the ground you paste onto. Keep heights: paste the exact heights it was copied with.">
+                    <span class="prop-label">Height</span>
+                    <div class="prop-value">
+                      <div class="option-chips" id="region-height-chips">
+                        <button class="option-chip active" type="button" data-region-height="match">Match ground</button>
+                        <button class="option-chip" type="button" data-region-height="keep">Keep heights</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="prop-row">
+                    <span class="prop-label">Offset</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-region-offset" min="-200" max="200" step="1" value="0" />
+                      <span class="prop-num" id="lbl-region-offset">0m</span>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Blend the paste into the ground over this width at its edges.">
+                    <span class="prop-label">Edge feather</span>
+                    <div class="prop-value">
+                      <input type="range" id="sl-region-feather" min="0" max="80" step="1" value="12" />
+                      <span class="prop-num" id="lbl-region-feather">12m</span>
+                    </div>
+                  </div>
+                  <div class="prop-row" title="Copy and paste the ground paint (and painted holes) with the heights.">
+                    <span class="prop-label">Ground paint</span>
+                    <div class="prop-value">
+                      <button type="button" class="prop-toggle checked" id="ck-region-paint" aria-label="Copy ground paint too"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></button>
+                    </div>
+                  </div>
+                  <button type="button" class="action-btn" id="btn-region-new" style="width:100%;margin-top:4px">New selection</button>
+                  <p class="mode-hint" style="margin-top:4px">Click to paste, as often as you like. Esc clears the copy. Heights and ground paint only: grass, foliage, trees, props, roads and rivers are not copied. Each paste is one Ctrl+Z.</p>
                 </div>
                 <div id="sub-ramp" class="tool-sub" style="display:none">
                   <div class="prop-row">

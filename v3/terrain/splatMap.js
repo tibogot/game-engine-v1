@@ -520,6 +520,81 @@ export class SplatMap {
   }
 
   /**
+   * Copy the paint (weights + painted holes) under a WORLD rectangle — the
+   * clipboard half of terrain copy-paste. Returns a copyRect() patch plus the
+   * world size it covers, or null when the rectangle misses the map.
+   */
+  copyRegionWorld(minX, minZ, maxX, maxZ) {
+    const R = SPLAT_RES, W = WORLD_SIZE, half = W * 0.5;
+    const x0 = Math.max(0, Math.floor((minX + half) / W * R));
+    const y0 = Math.max(0, Math.floor((minZ + half) / W * R));
+    const x1 = Math.min(R, Math.ceil((maxX + half) / W * R));
+    const y1 = Math.min(R, Math.ceil((maxZ + half) / W * R));
+    if (x1 - x0 < 1 || y1 - y0 < 1) return null;
+    const patch = this.copyRect({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+    patch.worldW = (x1 - x0) * W / R;
+    patch.worldH = (y1 - y0) * W / R;
+    return patch;
+  }
+
+  /**
+   * Paste a copyRegionWorld() patch — the CPU twin of sculptBrush.pasteRegion,
+   * same conventions: world = centre + R(angle) * local on (x, z) with
+   * R = [[cos, -sin], [sin, cos]], flips applied in local space, a feathered
+   * edge `featherM` metres wide. Weights and painted holes blend by the same
+   * weight; tool holes are recomposed on top. Returns `{ before }` for undo, or
+   * null when nothing on the map is covered.
+   */
+  pasteRegion(clip, { centerX, centerZ, angle = 0, flipX = false, flipZ = false, featherM = 0 }) {
+    if (!clip) return null;
+    const R = SPLAT_RES, W = WORLD_SIZE, half = W * 0.5, px2m = W / R;
+    const hw = clip.worldW / 2, hh = clip.worldH / 2;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const bx = Math.abs(cos) * hw + Math.abs(sin) * hh;
+    const bz = Math.abs(sin) * hw + Math.abs(cos) * hh;
+    const x0 = Math.max(0, Math.floor((centerX - bx + half) / px2m) - 1);
+    const y0 = Math.max(0, Math.floor((centerZ - bz + half) / px2m) - 1);
+    const x1 = Math.min(R, Math.ceil((centerX + bx + half) / px2m) + 1);
+    const y1 = Math.min(R, Math.ceil((centerZ + bz + half) / px2m) + 1);
+    if (x1 - x0 < 1 || y1 - y0 < 1) return null;
+    const rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    const before = this.copyRect(rect);
+    const fx = flipX ? -1 : 1, fz = flipZ ? -1 : 1;
+    const feather = Math.max(0, Number(featherM) || 0);
+    const smooth = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+
+    for (let py = y0; py < y1; py++) {
+      const wz = (py + 0.5) * px2m - half - centerZ;
+      for (let px = x0; px < x1; px++) {
+        const wx = (px + 0.5) * px2m - half - centerX;
+        const lx = (wx * cos + wz * sin) * fx;
+        const lz = (wz * cos - wx * sin) * fz;
+        const edge = Math.min(hw - Math.abs(lx), hh - Math.abs(lz));
+        if (edge < 0) continue;
+        const w = feather > 0 ? smooth(edge / feather) : 1;
+        if (w <= 0) continue;
+        const sx = Math.min(clip.w - 1, Math.max(0, Math.floor((lx / clip.worldW + 0.5) * clip.w)));
+        const sz = Math.min(clip.h - 1, Math.max(0, Math.floor((lz / clip.worldH + 0.5) * clip.h)));
+        const si = sz * clip.w + sx, di = py * R + px;
+        const s4 = si * 4, d4 = di * 4;
+        for (let c = 0; c < 4; c++) {
+          this.data0[d4 + c] = (this.data0[d4 + c] + (clip.d0[s4 + c] - this.data0[d4 + c]) * w + 0.5) | 0;
+        }
+        for (let c = 0; c < 3; c++) {
+          this.data1[d4 + c] = (this.data1[d4 + c] + (clip.d1[s4 + c] - this.data1[d4 + c]) * w + 0.5) | 0;
+        }
+        if (clip.hu) this.holeUser[di] = (this.holeUser[di] + (clip.hu[si] - this.holeUser[di]) * w + 0.5) | 0;
+      }
+    }
+    this._composeHoles(x0, y0, x1 - 1, y1 - 1);
+    this.tex.addLayerUpdate(0);
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
+    this._markDirty();
+    return { before };
+  }
+
+  /**
    * Both slices as one contiguous LIVE buffer — its hole channel includes tool
    * holes. Use exportCombined() for anything written to disk.
    */

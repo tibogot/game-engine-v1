@@ -597,6 +597,42 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   })();
   const mirrorQuad = new QuadMesh(mirMat);
 
+  // -- Region paste ----------------------------------------------------------
+  // Writes a copied rectangle (the clipboard RT) back into the map, turned by
+  // an angle, optionally flipped, lifted by a height offset, with a feathered
+  // edge. For each destination texel the pass goes BACK into clipboard space:
+  //   local = R(-angle) * (texel - centre), then flip, then scale to 0..1.
+  // The destination is read from rtScratch (the write rect copied first), so
+  // the pass never samples the target it renders.
+  // Convention shared with splatMap.pasteRegion and the editor's outline:
+  // world = centre + R(angle) * local, R = [[cos, -sin], [sin, cos]] on (x, z).
+  const pasteClipNode = texture(rtMain.texture);
+  const pasteDstNode  = texture(rtMain.texture);
+  const uPasteCenter  = uniform(new THREE.Vector2(0.5, 0.5));   // UV
+  const uPasteHalf    = uniform(new THREE.Vector2(0.05, 0.05)); // half size, UV
+  const uPasteCos     = uniform(1);
+  const uPasteSin     = uniform(0);
+  const uPasteFlip    = uniform(new THREE.Vector2(1, 1));
+  const uPasteOffset  = uniform(0);                             // normalized height
+  const uPasteFeather = uniform(0);                             // UV
+  const pasteMat = new THREE.MeshBasicNodeMaterial();
+  pasteMat.fragmentNode = Fn(() => {
+    const c = uv();
+    const d = c.sub(uPasteCenter);
+    const lx = d.x.mul(uPasteCos).add(d.y.mul(uPasteSin)).mul(uPasteFlip.x);
+    const ly = d.y.mul(uPasteCos).sub(d.x.mul(uPasteSin)).mul(uPasteFlip.y);
+    const edge = min(uPasteHalf.x.sub(lx.abs()), uPasteHalf.y.sub(ly.abs()));
+    const hard = step(0, edge);
+    const soft = smoothstep(0, uPasteFeather, edge);
+    const w = mix(hard, soft, step(1e-7, uPasteFeather));
+    const su = lx.div(uPasteHalf.x.mul(2)).add(0.5);
+    const sv = ly.div(uPasteHalf.y.mul(2)).add(0.5);
+    const hs = texture(pasteClipNode, vec2(su, sv)).r.add(uPasteOffset);
+    const hd = texture(pasteDstNode, c).r;
+    return vec4(mix(hd, hs, w), float(0), float(0), float(1));
+  })();
+  const pasteQuad = new QuadMesh(pasteMat);
+
   // Snapshot: read a sub-rect of a big RT into a small rect-sized RT.
   const snapSrcNode = texture(rtMain.texture);
   const uSnapOffset = uniform(new THREE.Vector2(0, 0));
@@ -905,6 +941,51 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
    * @param {{ mode?: "x"|"z"|"rotate", keep?: "low"|"high", blendM?: number }} o
    *   keep "low" keeps the side nearer world −X (or −Z for "z").
    */
+  /**
+   * Copy a texel rect of the live map into its own RT (the clipboard). The
+   * caller owns the result and must dispose `rt` when it is replaced.
+   */
+  function copyRegion(rect) {
+    const r = _clampRect(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+    return r ? snapshotRect(rtMain, r) : null;
+  }
+
+  /**
+   * Paste a copyRegion() result. Opens a stroke and fills it; the caller may
+   * attachToStroke() the paint, then MUST endStroke().
+   *
+   * @param {{rt, rect}} clip
+   * @param {{ centerUV: {u:number,v:number}, angle?: number, flipX?: boolean,
+   *           flipZ?: boolean, offsetNorm?: number, featherUV?: number }} o
+   * @returns {{x,y,w,h}|null} the texel rect that was written
+   */
+  function pasteRegion(clip, { centerUV, angle = 0, flipX = false, flipZ = false, offsetNorm = 0, featherUV = 0 }) {
+    if (!clip) return null;
+    const S = HEIGHTMAP_SIZE;
+    const halfU = clip.rect.w / S / 2, halfV = clip.rect.h / S / 2;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    // Bounding box of the turned rectangle, in UV.
+    const bu = Math.abs(cos) * halfU + Math.abs(sin) * halfV;
+    const bv = Math.abs(sin) * halfU + Math.abs(cos) * halfV;
+    const writeRect = _rectFromUV(centerUV.u - bu, centerUV.v - bv, centerUV.u + bu, centerUV.v + bv, 2);
+    if (!writeRect) return null;
+    beginStroke();
+    uPasteCenter.value.set(centerUV.u, centerUV.v);
+    uPasteHalf.value.set(halfU, halfV);
+    uPasteCos.value = cos;
+    uPasteSin.value = sin;
+    uPasteFlip.value.set(flipX ? -1 : 1, flipZ ? -1 : 1);
+    uPasteOffset.value = offsetNorm;
+    uPasteFeather.value = Math.max(0, featherUV);
+    srcNode.value = rtMain.texture;
+    _render(copyQuad, rtScratch, writeRect);
+    pasteDstNode.value = rtScratch.texture;
+    pasteClipNode.value = clip.rt.texture;
+    _render(pasteQuad, rtMain, writeRect);
+    strokeRect = { ...writeRect };
+    return writeRect;
+  }
+
   function mirror({ mode = "x", keep = "low", blendM = 0 } = {}) {
     beginStroke();
     uMirMode.value = mode === "z" ? 1 : mode === "rotate" ? 2 : 0;
@@ -1015,6 +1096,8 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     endStroke,
     attachToStroke,
     mirror,
+    copyRegion,
+    pasteRegion,
     undo,
     redo,
     replaceHeightData,

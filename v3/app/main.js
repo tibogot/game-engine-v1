@@ -1454,10 +1454,12 @@ export async function startV3App(opts = {}) {
   const subHydro        = uiById("sub-hydro");
   const subRamp         = uiById("sub-ramp");
   const subMirror       = uiById("sub-mirror");
+  const subRegion       = uiById("sub-region");
   const btnErode        = uiById("btn-erode");
   const btnHydro        = uiById("btn-hydro");
   const btnRamp         = uiById("btn-ramp");
   const btnMirror       = uiById("btn-mirror");
+  const btnRegion       = uiById("btn-region");
   const btnSmudge       = uiById("btn-smudge");
   const btnContrast     = uiById("btn-contrast");
   const slNoiseOct      = uiById("sl-noise-oct");
@@ -1662,6 +1664,7 @@ export async function startV3App(opts = {}) {
     btnSmudge .classList.toggle("active", m === "smudge");
     btnContrast.classList.toggle("active", m === "contrast");
     btnMirror?.classList.toggle("active", m === "mirror");
+    btnRegion?.classList.toggle("active", m === "region");
     // Tool options always track stickyMode so modifier-key overrides don't hide the zone.
     subRaiseLower.style.display = (stickyMode === "raise" || stickyMode === "lower") ? "" : "none";
     subTerrace   .style.display = stickyMode === "terrace" ? "" : "none";
@@ -1672,6 +1675,8 @@ export async function startV3App(opts = {}) {
     subHydro     .style.display = stickyMode === "hydro"   ? "" : "none";
     subRamp      .style.display = stickyMode === "ramp"    ? "" : "none";
     if (subMirror) subMirror.style.display = stickyMode === "mirror" ? "" : "none";
+    if (subRegion) subRegion.style.display = stickyMode === "region" ? "" : "none";
+    if (stickyMode !== "region") _regionHideSafe();
   }
 
   btnRaise  .addEventListener("click", () => { stickyMode = "raise";   refreshModeIndicator(); });
@@ -1737,6 +1742,74 @@ export async function startV3App(opts = {}) {
     onHistoryChange();
   }
   uiById("btn-mirror-apply")?.addEventListener("click", () => applyTerrainMirror());
+
+  // setMode() and setEditorMode() run during boot, long before the outline
+  // below exists; a `const` touched that early throws (temporal dead zone).
+  // `var` is hoisted as undefined, so this guard is safe from anywhere.
+  var _regionOutlineReady;
+  function _regionHideSafe() {
+    if (_regionOutlineReady) regionOutline.visible = false;
+  }
+
+  // -- Region copy-paste (AUDIT 13, slice 2) -------------------------------
+  // Drag a rectangle to copy it (heights into a clipboard RT, paint into a CPU
+  // patch); then every click pastes it under the cursor, turned, flipped,
+  // lifted and feathered. The clipboard survives a project load, so a piece of
+  // one world can be pasted into another.
+  const regionState = {
+    clip: null,              // { heights: {rt, rect}, paint: patch|null, worldW, worldH, borderMean }
+    dragStart: null,         // world {x, z} while dragging a selection
+    angleDeg: 0, flipX: false, flipZ: false,
+    heightMode: "match", offsetM: 0, featherM: 12, paint: true,
+  };
+  const regionStatus    = uiById("region-status");
+  const slRegionRot     = uiById("sl-region-rot");
+  const lblRegionRot    = uiById("lbl-region-rot");
+  const slRegionOffset  = uiById("sl-region-offset");
+  const lblRegionOffset = uiById("lbl-region-offset");
+  const slRegionFeather = uiById("sl-region-feather");
+  const lblRegionFeather= uiById("lbl-region-feather");
+  function syncRegionUi() {
+    const rs = regionState;
+    if (slRegionRot) slRegionRot.value = String(rs.angleDeg);
+    if (lblRegionRot) lblRegionRot.textContent = `${rs.angleDeg}`;
+    uiById("ck-region-flipx")?.classList.toggle("checked", rs.flipX);
+    uiById("ck-region-flipz")?.classList.toggle("checked", rs.flipZ);
+    uiById("ck-region-paint")?.classList.toggle("checked", rs.paint);
+    for (const b of document.querySelectorAll("[data-region-height]")) b.classList.toggle("active", b.dataset.regionHeight === rs.heightMode);
+    if (slRegionOffset) slRegionOffset.value = String(rs.offsetM);
+    if (lblRegionOffset) lblRegionOffset.textContent = `${rs.offsetM}m`;
+    if (slRegionFeather) slRegionFeather.value = String(rs.featherM);
+    if (lblRegionFeather) lblRegionFeather.textContent = `${rs.featherM}m`;
+    if (regionStatus) {
+      regionStatus.textContent = rs.clip
+        ? `Copied ${Math.round(rs.clip.worldW)} x ${Math.round(rs.clip.worldH)} m. Click to paste.`
+        : "Drag a rectangle on the terrain to copy it.";
+    }
+  }
+  slRegionRot?.addEventListener("input", () => { regionState.angleDeg = Number(slRegionRot.value); syncRegionUi(); regionRefreshOutline(); });
+  uiById("btn-region-rot-l")?.addEventListener("click", () => { regionState.angleDeg = (regionState.angleDeg + 270) % 360; syncRegionUi(); regionRefreshOutline(); });
+  uiById("btn-region-rot-r")?.addEventListener("click", () => { regionState.angleDeg = (regionState.angleDeg + 90) % 360; syncRegionUi(); regionRefreshOutline(); });
+  uiById("ck-region-flipx")?.addEventListener("click", () => { regionState.flipX = !regionState.flipX; syncRegionUi(); });
+  uiById("ck-region-flipz")?.addEventListener("click", () => { regionState.flipZ = !regionState.flipZ; syncRegionUi(); });
+  uiById("ck-region-paint")?.addEventListener("click", () => { regionState.paint = !regionState.paint; syncRegionUi(); });
+  uiById("region-height-chips")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-region-height]");
+    if (!b) return;
+    regionState.heightMode = b.dataset.regionHeight;
+    syncRegionUi();
+  });
+  slRegionOffset?.addEventListener("input", () => { regionState.offsetM = Number(slRegionOffset.value); syncRegionUi(); });
+  slRegionFeather?.addEventListener("input", () => { regionState.featherM = Number(slRegionFeather.value); syncRegionUi(); });
+  function regionClearClip() {
+    regionState.clip?.heights?.rt?.dispose();
+    regionState.clip = null;
+    regionState.dragStart = null;
+    regionHideOutline();
+    syncRegionUi();
+  }
+  uiById("btn-region-new")?.addEventListener("click", regionClearClip);
+  btnRegion?.addEventListener("click", () => { stickyMode = "region"; syncRegionUi(); refreshModeIndicator(); });
   btnMirror?.addEventListener("click", () => { stickyMode = "mirror"; syncMirrorUi(); refreshModeIndicator(); });
 
   btnRamp   .addEventListener("click", () => {
@@ -2501,6 +2574,7 @@ export async function startV3App(opts = {}) {
       return;
     }
     if (editorMode === "spline" && m !== "spline") _onLeaveSplineMode();
+    if (m !== "sculpt") _regionHideSafe();   // the copy outline belongs to Sculpt
     if (editorMode === "riverv2" && m !== "riverv2") riverV2System?.cancelDrag();
     if (editorMode === "lake" && m !== "lake") lakeSystem?.cancelDrag();
     if (editorMode === "road" && m !== "road") _onLeaveRoadMode();
@@ -3810,6 +3884,137 @@ export async function startV3App(opts = {}) {
     rampPreviewLine.visible = true;
   }
 
+  // -- Region copy-paste: outline + copy + paste ----------------------------
+  const REGION_EDGE_PTS = 24;
+  // A plain Line closed by repeating its first point: three's WebGPU renderer
+  // does not draw LineLoop at all (it logs an error every frame instead).
+  const regionOutline = new THREE.Line(
+    new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array((REGION_EDGE_PTS * 4 + 1) * 3), 3)),
+    new THREE.LineBasicMaterial({ color: 0xffe066, depthTest: false, transparent: true, opacity: 0.95 }),
+  );
+  regionOutline.renderOrder = 999;
+  regionOutline.frustumCulled = false;
+  regionOutline.visible = false;
+  scene.add(regionOutline);
+  _regionOutlineReady = true;
+  let _regionCursor = null;   // last cursor hit {u, v}
+
+  const _wToU = (x) => (x + WORLD_SIZE / 2) / WORLD_SIZE;
+  const _groundAt = (x, z) => {
+    const u = _wToU(x), v = _wToU(z);
+    return (u >= 0 && u <= 1 && v >= 0 && v <= 1) ? sampleTerrainHeight(u, v) : 0;
+  };
+  /** Points around a rectangle (centre, half sizes, angle), `per` per edge, on the ground. */
+  function _rectRing(cx, cz, hw, hh, angle, per, lift = 1.5) {
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]];
+    const pts = [];
+    for (let e = 0; e < 4; e++) {
+      const [ax, az] = corners[e], [bx, bz] = corners[(e + 1) % 4];
+      for (let i = 0; i < per; i++) {
+        const t = i / per;
+        const lx = ax + (bx - ax) * t, lz = az + (bz - az) * t;
+        const x = cx + lx * cos - lz * sin, z = cz + lx * sin + lz * cos;
+        pts.push(x, _groundAt(x, z) + lift, z);
+      }
+    }
+    return pts;
+  }
+  function _setOutline(pts, color) {
+    const attr = regionOutline.geometry.getAttribute("position");
+    attr.array.set(pts);
+    attr.array.set(pts.slice(0, 3), pts.length);    // close the ring
+    attr.needsUpdate = true;
+    regionOutline.material.color.setHex(color);
+    regionOutline.visible = true;
+  }
+  function regionHideOutline() { _regionHideSafe(); }
+  function regionRefreshOutline(hit = _regionCursor) {
+    if (stickyMode !== "region" || editorMode !== "sculpt" || !hit) { regionHideOutline(); return; }
+    const rs = regionState;
+    const x = (hit.u - 0.5) * WORLD_SIZE, z = (hit.v - 0.5) * WORLD_SIZE;
+    if (rs.dragStart) {
+      const x0 = Math.min(rs.dragStart.x, x), x1 = Math.max(rs.dragStart.x, x);
+      const z0 = Math.min(rs.dragStart.z, z), z1 = Math.max(rs.dragStart.z, z);
+      _setOutline(_rectRing((x0 + x1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (z1 - z0) / 2, 0, REGION_EDGE_PTS), 0xffe066);
+    } else if (rs.clip) {
+      _setOutline(_rectRing(x, z, rs.clip.worldW / 2, rs.clip.worldH / 2, rs.angleDeg * Math.PI / 180, REGION_EDGE_PTS), 0x66ddff);
+    } else {
+      regionHideOutline();
+    }
+  }
+  /** Mean ground height along a rectangle's edge — what "Match ground" lines up. */
+  function _borderMean(cx, cz, hw, hh, angle) {
+    const pts = _rectRing(cx, cz, hw, hh, angle, 16, 0);
+    let sum = 0;
+    for (let i = 1; i < pts.length; i += 3) sum += pts[i];
+    return sum / (pts.length / 3);
+  }
+  function regionFinishCopy(hit) {
+    const rs = regionState;
+    const start = rs.dragStart;
+    rs.dragStart = null;
+    if (!start || !hit) { regionRefreshOutline(); return; }
+    const x = (hit.u - 0.5) * WORLD_SIZE, z = (hit.v - 0.5) * WORLD_SIZE;
+    const x0 = Math.min(start.x, x), x1 = Math.max(start.x, x);
+    const z0 = Math.min(start.z, z), z1 = Math.max(start.z, z);
+    if (x1 - x0 < 4 || z1 - z0 < 4) { regionRefreshOutline(); return; }   // a click, not a selection
+    const S = HEIGHTMAP_SIZE;
+    const rect = {
+      x: Math.floor(_wToU(x0) * S), y: Math.floor(_wToU(z0) * S),
+      w: Math.ceil(_wToU(x1) * S) - Math.floor(_wToU(x0) * S),
+      h: Math.ceil(_wToU(z1) * S) - Math.floor(_wToU(z0) * S),
+    };
+    const heights = sculpt.copyRegion(rect);
+    if (!heights) { regionRefreshOutline(); return; }
+    const hx0 = heights.rect.x / S * WORLD_SIZE - WORLD_SIZE / 2, hz0 = heights.rect.y / S * WORLD_SIZE - WORLD_SIZE / 2;
+    const worldW = heights.rect.w / S * WORLD_SIZE, worldH = heights.rect.h / S * WORLD_SIZE;
+    rs.clip?.heights?.rt?.dispose();
+    rs.clip = {
+      heights,
+      paint: splatMap.copyRegionWorld(hx0, hz0, hx0 + worldW, hz0 + worldH),
+      worldW, worldH,
+      borderMean: _borderMean(hx0 + worldW / 2, hz0 + worldH / 2, worldW / 2, worldH / 2, 0),
+    };
+    syncRegionUi();
+    regionRefreshOutline(hit);
+  }
+  function regionPasteAt(hit) {
+    const rs = regionState;
+    if (!rs.clip || !hit) return;
+    const angle = rs.angleDeg * Math.PI / 180;
+    const cx = (hit.u - 0.5) * WORLD_SIZE, cz = (hit.v - 0.5) * WORLD_SIZE;
+    let offsetM = rs.offsetM;
+    if (rs.heightMode === "match") {
+      offsetM += _borderMean(cx, cz, rs.clip.worldW / 2, rs.clip.worldH / 2, angle) - rs.clip.borderMean;
+    }
+    const written = sculpt.pasteRegion(rs.clip.heights, {
+      centerUV: hit, angle, flipX: rs.flipX, flipZ: rs.flipZ,
+      offsetNorm: offsetM / MAX_HEIGHT,
+      featherUV: rs.featherM / WORLD_SIZE,
+    });
+    if (!written) return;
+    if (rs.paint && rs.clip.paint) {
+      const o = { centerX: cx, centerZ: cz, angle, flipX: rs.flipX, flipZ: rs.flipZ, featherM: rs.featherM };
+      const clipPaint = rs.clip.paint;
+      const res = splatMap.pasteRegion(clipPaint, o);
+      if (res) {
+        sculpt.attachToStroke({
+          undo: () => splatMap.pasteRect(res.before),
+          redo: () => { splatMap.pasteRegion(clipPaint, o); },
+        });
+      }
+    }
+    sculpt.endStroke();
+    onHistoryChange();
+  }
+  // A drag released outside the canvas still finishes the selection.
+  window.addEventListener("mouseup", (e) => {
+    if (e.button !== 0 || !regionState.dragStart) return;
+    refreshMouse(e);
+    regionFinishCopy(getUV() ?? _regionCursor);
+  });
+
   function cancelRampPlacement() {
     rampState = "idle";
     rampStartUV = null;
@@ -3824,8 +4029,10 @@ export async function startV3App(opts = {}) {
     refreshModeIndicator();
     refreshMouse(e);
     const hit = getUV();
-    uCursorUV.value.set(hit ? hit.u : -2, hit ? hit.v : -2);
+    const noRing = stickyMode === "mirror" || stickyMode === "region";
+    uCursorUV.value.set(hit && !noRing ? hit.u : -2, hit && !noRing ? hit.v : -2);
     updateRampPreview(hit);
+    if (stickyMode === "region") { if (hit) _regionCursor = hit; regionRefreshOutline(hit); }
     // Throttled readback so the cursor ring stays accurate while hovering.
     const now = performance.now();
     if (now - lastReadbackMs > 150) { lastReadbackMs = now; requestHeightmapReadback(); }
@@ -3861,6 +4068,20 @@ export async function startV3App(opts = {}) {
 
     // Mirror has no stroke: clicking the ground does nothing, Apply does the work.
     if (stickyMode === "mirror") return;
+
+    // Region: with nothing copied a drag selects; with a copy every click pastes.
+    if (stickyMode === "region") {
+      const uvHit = getUV();
+      if (!uvHit) return;
+      _regionCursor = uvHit;
+      if (regionState.clip) {
+        regionPasteAt(uvHit);
+      } else {
+        regionState.dragStart = { x: (uvHit.u - 0.5) * WORLD_SIZE, z: (uvHit.v - 0.5) * WORLD_SIZE };
+        regionRefreshOutline(uvHit);
+      }
+      return;
+    }
 
     // Ramp: two-click workflow — first click sets A, second click bakes the ramp.
     if (stickyMode === "ramp") {
@@ -4008,6 +4229,12 @@ export async function startV3App(opts = {}) {
       return;
     }
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+    // Escape cancels a region drag, or clears the copied region.
+    if (e.code === "Escape" && editorMode === "sculpt" && stickyMode === "region" && (regionState.dragStart || regionState.clip)) {
+      e.preventDefault();
+      if (regionState.dragStart) { regionState.dragStart = null; regionRefreshOutline(); } else regionClearClip();
+      return;
+    }
     // Escape cancels a pending ramp start point (before mode-specific handlers).
     if (e.code === "Escape" && editorMode === "sculpt" && rampState === "waiting_end") {
       e.preventDefault();

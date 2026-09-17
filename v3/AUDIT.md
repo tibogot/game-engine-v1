@@ -125,7 +125,32 @@ the game.
     mirror both ways with heights AND paint restored at each step.
     Not mirrored (stated in the panel): grass/foliage/flower/snow density,
     trees, props, roads, rivers. Test: tools/terrainMirrorPaintTest.mjs.
-    Still to do: region copy-paste (slice 2), clone brush (slice 3).
+    **REGION COPY-PASTE — DONE 2026-09-17** (slice 2 of 3). Sculpt → Copy:
+    drag a rectangle to copy heights (GPU clipboard RT, sculptBrush.copyRegion)
+    and paint + painted holes (CPU patch, splatMap.copyRegionWorld); then every
+    click pastes under the cursor. Rotation (free, +/-90 buttons), Flip X/Z,
+    Height: Match ground (lines the copy's edge mean up with the edge mean of
+    the ground it lands on) or Keep heights, plus an offset, Edge feather, Ground
+    paint. Esc cancels a drag or clears the copy; the copy survives a project
+    load, so terrain can move between worlds.
+    One convention for GPU, CPU and the outline: world = centre + R(angle) *
+    local on (x, z), R = [[cos, -sin], [sin, cos]], flips in local space. The
+    paste pass goes BACK into clipboard space per destination texel, reads the
+    destination from rtScratch, and renders only the turned box's bounds.
+    Each paste is one sculpt stroke with the paint attached (one Ctrl+Z).
+    Verified live on generated terrain: a 161 x 122 m copy pasted with Keep
+    heights / no feather matches the source within 1.1 m where the source spans
+    59-129 m (the residual is sub-metre click alignment on steep slopes); Match
+    ground + 90 deg + 12 m feather onto a low flank lifts the centre 0.9 → 21.4 m
+    with no step at the box edge; undo restores the destination to 0.000 m and
+    redo reapplies. The outline drapes on the ground (yellow while selecting,
+    blue turned preview while pasting).
+    TRAP: three's WebGPU renderer does not draw THREE.LineLoop — it logs an
+    error EVERY frame (25,560 in one test) and draws nothing; a `visible` check
+    still passes. Use a Line closed by repeating its first point.
+    Test: tools/terrainRegionPasteTest.mjs (18 checks: in-place no-op, move,
+    rotate 90 direction, flips, feather, holes, exact undo patch, off-map).
+    Still to do: clone brush (slice 3).
 14. **Non-destructive edit layers** like Unreal's. Large; roads and rivers
     already do this per tool.
 15. ~~Modifier keys in the hints~~ — DONE 2026-09-14. The sculpt panel
