@@ -129,8 +129,8 @@ export function createWorldToolState() {
       style: "grid",
       /** Gizmo Shift-snap, in metres. Also the fine grid cell when followSnap. */
       moveSnap: 1,
-      /** Fine cell = moveSnap, heavy line = moveSnap × majorRatio. */
-      followSnap: true,
+      /** Opt-in: fine cell = moveSnap / majorRatio. Off so it cannot override. */
+      followSnap: false,
       ...structuredClone(GRID_DEFAULTS),
     },
     audio: ts.audio,

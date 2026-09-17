@@ -35,7 +35,7 @@
  *
  * WHAT IT DRAWS
  * ─────────────
- * Two levels of line (minor = `minorCell` metres, major = minorCell × 5), a
+ * Two levels of line (fine = `minorCell` metres, heavy = minorCell × 5), a
  * gentle per-major-cell brightness break-up so the surface reads as tiled rather
  * than printed, and a groove darkening (ambient occlusion folded into albedo)
  * plus a roughness break on the lines so the surface responds to a moving sun
@@ -106,7 +106,7 @@ export const GRID_DEFAULTS = {
   /** Base surface colour between the lines. */
   baseColor: "#efede8",
   /**
-   * Minor line colour (the fine 1 m grid). MUST BE VISIBLE. The first value
+   * Minor line colour (the fine 0.2 m grid). MUST BE VISIBLE. The first value
    * (#dedcd6) measured a 1.04 contrast ratio against the tile face — a line you
    * could only find by looking for it — and the effect on the user was that the
    * whole grid READ as 1 m squares: right numbers, five times too coarse to the
@@ -122,35 +122,32 @@ export const GRID_DEFAULTS = {
    */
   majorColor: "#adaba5",
   /*
-   * ── THE CELL SIZES: 1 m FINE, 5 m HEAVY ──────────────────────────────────
+   * ── THE CELL SIZES: 0.2 m FINE, 1 m HEAVY ────────────────────────────────
    *
-   * The visible cell in every Unreal template is ONE METRE, grouped in fives.
-   * The test that settles it is FOV-independent because it lives on the floor
-   * plane: a standing character's footprint (~0.7 m) sits inside one fine cell.
-   * It cannot sit inside a 0.2 m cell — a single foot is wider than that. The
-   * user said "it is always 5x5" on day one and was right the whole time.
+   * Five fine cells per metre, which is the "5x5" the user identified on day one
+   * and stuck to through four of my wrong answers.
    *
-   * The 1 m line is ALSO the documented one. Epic's blockout page, on SM_Cube:
-   * "The dark lines on the material create a 1m grid". It is the human-scale
-   * unit — Unreal's default character is 180 uu, so a person stands just under
-   * two cells tall, and doors, stairs and ceilings are reasoned in metres from
-   * there. 1 uu = 1 cm and the grid is base-10 because the world is metric.
+   * Measure it off any Unreal screenshot with a character in it, at the
+   * character's own depth so perspective cancels: a 1.8 m figure is ~265 px and
+   * one fine cell is ~25 px, i.e. ~147 px per metre and a cell of ~0.17 m. Round
+   * to 0.2. The heavy line then lands on 1 m, which is the one number Epic
+   * documents ("The dark lines on the material create a 1m grid") and the
+   * human-scale unit rooms, doors and stairs are reasoned in.
    *
-   * The same page mentions light 0.1 m lines. They exist and they are
-   * sub-pixel in every screenshot ever taken of the engine, which is why no one
-   * has ever seen them and why we do not draw them. A faint third level at
-   * 0.1 m for close-up work would cost one more gridLayer if ever wanted.
+   * Epic's page also says the light lines are 0.1 m on floors. Those exist and
+   * are sub-pixel in every screenshot ever taken of the engine, which is why no
+   * one sees them. What people SEE — and therefore what a greybox grid has to
+   * be — is 0.2 / 1.
    *
-   * HISTORY, because this went round four times: shipped 1 m / 5 m; moved to
-   * 0.1 / 1 on that doc sentence; then 0.2 / 1 on my own pixel-counting of the
-   * user's screenshots; back to 1 / 5 on the footprint argument. Two lessons —
-   * one documented sentence about one asset does not outrank repeated
-   * observation of the shipping engine, and a cell size argued from a
-   * compressed screenshot is not a measurement.
+   * WHAT ACTUALLY WENT WRONG, since the number itself was right twice before:
+   * `followSnap` shipped ON and derived the fine cell from the 1 m move snap, so
+   * every boot overwrote this constant with 1 m and the grid rendered five times
+   * too coarse whatever was written here. The defaults were never the bug after
+   * the first pass; a convenience silently outranking them was.
    */
   /** Minor cell edge, in METRES. This is the number that makes the grid a ruler. */
-  minorCell: 1,
-  /** Major cell = minorCell × this: the 5 m block every template groups by. */
+  minorCell: 0.2,
+  /** Major cell = minorCell × this: five fine cells, so the heavy line is 1 m. */
   majorRatio: 5,
   /**
    * Multiplies the minor cell on VERTICAL faces only; the major line is unchanged
@@ -161,16 +158,16 @@ export const GRID_DEFAULTS = {
    */
   wallCellScale: 1,
   /**
-   * Minor line width in METRES (not a UV fraction) — 1.5 cm on a 1 m cell. A
-   * 4 mm hairline was once tried and the derivative fade dimmed it to nothing a
-   * few metres out; the fine grid has to survive to the character's distance.
+   * Minor line width in METRES (not a UV fraction) — 1 cm, 5% of a 0.2 m cell.
+   * A 4 mm hairline was once tried and the derivative fade dimmed it to nothing
+   * a few metres out; the fine grid has to survive to the character's distance.
    */
-  minorWidth: 0.015,
+  minorWidth: 0.01,
   /**
-   * Major line width in METRES — 5 cm, so the 5 m block edge is still visibly
-   * heavier than the fine line once both have clamped to a pixel at distance.
+   * Major line width in METRES — 2 cm, twice the fine line, so the 1 m edge
+   * stays visibly heavier once both have clamped to a pixel at distance.
    */
-  majorWidth: 0.05,
+  majorWidth: 0.02,
   /**
    * Per-tile brightness break-up, ±this fraction. Applied on the MAJOR (1 m)
    * cell: that is the "tile" the eye reads as a tile, and a 10 cm hash would be

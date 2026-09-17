@@ -1821,6 +1821,22 @@ export function buildWorldPanel(app) {
             + "at the same GPU clock. Flat drops the lines entirely.",
           onChange: () => app.groundBase.onChanged?.(true),
         });
+        // Grid size as one named choice. The fine cell and the ratio are still
+        // below for anything in between, but the sizes people actually want are
+        // a click, and each label states the metres so nothing has to be guessed.
+        _dropdown(gbBody, gb, "minorCell", {
+          label: "Grid size",
+          options: {
+            "0.1 m · heavy 0.5 m": 0.1,
+            "0.2 m · heavy 1 m (Unreal)": 0.2,
+            "0.25 m · heavy 1.25 m": 0.25,
+            "0.5 m · heavy 2.5 m": 0.5,
+            "1 m · heavy 5 m": 1,
+          },
+          hint: "Fine cell, with the heavy line at five of them. 0.2 m is what "
+            + "Unreal's templates show: five squares to the metre.",
+          onChange: snapped,
+        });
         _dropdown(gbBody, gb, "moveSnap", {
           label: "Move snap (m)",
           options: { "5 cm": 0.05, "10 cm": 0.1, "25 cm": 0.25, "50 cm": 0.5, "1 m": 1, "2 m": 2, "5 m": 5 },
@@ -1831,8 +1847,9 @@ export function buildWorldPanel(app) {
         });
         _toggle(gbBody, gb, "followSnap", {
           label: "Grid follows snap",
-          hint: "Fine cell = the snap, heavy line every N of them. Off: the two "
-            + "cell sliders below rule and the grid ignores the snap.",
+          hint: "Off by default. On, the fine cell is derived from the snap "
+            + "(snap / \"heavy every\"), so the floor shows where a dragged "
+            + "object lands — but it then OVERRIDES the grid size above.",
           onChange: snapped,
         });
         _slider(gbBody, gb, "minorCell", {
@@ -1843,8 +1860,8 @@ export function buildWorldPanel(app) {
           min: 0.005,
           max: 10,
           step: 0.005,
-          hint: "Edge of one fine square, in metres. Derived from the snap while "
-            + "\"Grid follows snap\" is on.",
+          hint: "Same value as the Grid size preset above, for anything in "
+            + "between. Derived from the snap while \"Grid follows snap\" is on.",
           onChange: live,
         });
         _slider(gbBody, gb, "majorRatio", {

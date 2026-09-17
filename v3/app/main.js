@@ -526,7 +526,7 @@ export async function startV3App(opts = {}) {
    * user probably never touched). Without this, anyone who had the editor open
    * once is pinned to the old look forever and new defaults appear to do nothing.
    */
-  const GROUND_BASE_VERSION = 11;
+  const GROUND_BASE_VERSION = 12;
   const GROUND_BASE_MODES = ["grid", "tile", "flat"];
   /*
    * `moveSnap` and `followSnap` are editor BEHAVIOUR, not grid uniforms, so they
@@ -540,7 +540,11 @@ export async function startV3App(opts = {}) {
   const groundBase = {
     style: "grid",
     moveSnap: 1,
-    followSnap: true,
+    // OFF by default. It was on, and because it derives the cell from the snap it
+    // silently overrode GRID_DEFAULTS at every boot — the grid looked 5x too
+    // coarse no matter what the defaults said. A convenience must never be able
+    // to quietly win an argument with the thing it is a convenience for.
+    followSnap: false,
     ...structuredClone(GRID_DEFAULTS),
   };
 
@@ -550,7 +554,7 @@ export async function startV3App(opts = {}) {
    */
   function syncGroundCellsToSnap(gb) {
     if (!gb.followSnap) return false;
-    const next = gb.moveSnap;
+    const next = gb.moveSnap / Math.max(2, gb.majorRatio);
     if (Math.abs(next - gb.minorCell) < 1e-9) return false;
     gb.minorCell = next;
     return true;
@@ -1065,7 +1069,7 @@ export async function startV3App(opts = {}) {
     Object.assign(gb, {
       style: "grid",
       moveSnap: 1,
-      followSnap: true,
+      followSnap: false,
       ...structuredClone(GRID_DEFAULTS),
     });
     applyGroundBase(styleChanged);
