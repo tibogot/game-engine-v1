@@ -37,9 +37,11 @@ const UV_WEIGHT = 0.8;
  * @param {number} [o.ratio=0.5]     share of triangles to keep
  * @param {number} [o.error=0.05]    how far the silhouette may move, in units of the mesh size
  * @param {number} [o.minTriangles]  never simplify below this
+ * @param {Record<string, number>} [o.attributeWeights]  extra attributes that
+ *   steer the collapse, by name (e.g. a baked edge mask that must not smear)
  * @returns {THREE.BufferGeometry}
  */
-export function simplifyGeometry(geometry, { ratio = 0.5, error = 0.05, minTriangles = 24 } = {}) {
+export function simplifyGeometry(geometry, { ratio = 0.5, error = 0.05, minTriangles = 24, attributeWeights = null } = {}) {
   const index = geometry.getIndex();
   const posAttr = geometry.getAttribute("position");
   if (!index || !posAttr) return geometry;
@@ -56,6 +58,10 @@ export function simplifyGeometry(geometry, { ratio = 0.5, error = 0.05, minTrian
   const attrParts = [];
   if (normal) attrParts.push({ attr: normal, size: 3, weight: NORMAL_WEIGHT });
   if (uv) attrParts.push({ attr: uv, size: 2, weight: UV_WEIGHT });
+  for (const [name, weight] of Object.entries(attributeWeights ?? {})) {
+    const attr = geometry.getAttribute(name);
+    if (attr) attrParts.push({ attr, size: attr.itemSize, weight });
+  }
   const attrStride = attrParts.reduce((a, p) => a + p.size, 0);
 
   const attrs = new Float32Array(vertexCount * Math.max(1, attrStride));

@@ -121,6 +121,7 @@ const CLIFF_PRESETS = [...ROCK_CLIFF_PRESETS];
 import { simplifierReady } from "../render/instancing/autoLod.js";
 import { GREYBOX_KIT, buildGreyboxGeometry } from "../props/greyboxKit.js";
 import { applyCliffTerrainBlend, createCliffGlbBlendMaterial } from "../props/cliffTerrainBlend.js";
+import { applyRockShading, ROCK_BASE_COLOR } from "../props/rockShading.js";
 import { CliffPaintMask } from "../../v2/core/cliffs/cliffPaintMask.js";
 import { CliffPaintSystem } from "../../v2/tools/cliffs/cliffPaintSystem.js";
 import { TreeBvh } from "../../v2/core/foliage/treeBvh.js";
@@ -5456,7 +5457,11 @@ export async function startV3App(opts = {}) {
     const propMat = propTextureLibrary.getById(slot.materialId);
     if (!propMat) return false;
     const newMat = createMaterialForLibrary(propMat, { triplanar: !!slot.triplanar });
-    if (slot.solid) applyCliffTerrainBlend(newMat, cliffBlendDeps);
+    // Procedural rocks/cliffs keep their baked shading through a material
+    // change or a project load. Solid ROCKS never took the cliff grass blend:
+    // before this, a reload gave boulders grass tops they did not have when added.
+    if (slot.kit) _finishKitMaterial(newMat, slot.kit, propMat.id === "__none__");
+    else if (slot.solid) applyCliffTerrainBlend(newMat, cliffBlendDeps);
     for (const e of type.entries) e.material = newMat;
     propInstancer.setTypeMaterial(slot.typeIdx, newMat);
     return true;
@@ -6127,9 +6132,7 @@ export async function startV3App(opts = {}) {
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
     const material = createMaterialForLibrary(defaultPropMat, { triplanar: true });
-    // Genshin-style terrain integration: painted terrain color on up-facing
-    // tops + per-pixel contact band from the GPU heightmap hides the base seam.
-    applyCliffTerrainBlend(material, cliffBlendDeps);
+    _finishKitMaterial(material, "cliff", defaultPropMat?.id === "__none__");
     const typeIdx = propStore.registerPrimitive(presetName, geometry, material);
     if (typeIdx < 0) return;
     propStore.types[typeIdx].solid = true;
@@ -6141,11 +6144,27 @@ export async function startV3App(opts = {}) {
       typeIdx,
       builtin: true,
       solid: true,
+      kit: "cliff",
       materialId: defaultPropMat?.id ?? "__none__",
       triplanar: true,
     });
     propState.activeSlot = slotIdx;
     uiById("props-panel")?._rebuildPropUi?.();
+  }
+
+  /**
+   * Material for a procedural rock ("rock") or cliff ("cliff"): baked rock
+   * shading, then for cliffs the terrain blend (grass tops, contact band) on
+   * top of it. `plain` = the grey "none" material, which gets the rock base
+   * colour instead of its neutral grey.
+   */
+  function _finishKitMaterial(mat, kind, plain) {
+    if (plain && mat.color) mat.color.setHex(ROCK_BASE_COLOR);
+    applyRockShading(mat);
+    // Genshin-style terrain integration: painted terrain color on up-facing
+    // tops + per-pixel contact band from the GPU heightmap hides the base seam.
+    if (kind === "cliff") applyCliffTerrainBlend(mat, cliffBlendDeps);
+    return mat;
   }
 
   // Procedural rock kit (props/proceduralRock.js) — chipped boulders down to
@@ -6165,6 +6184,7 @@ export async function startV3App(opts = {}) {
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
     const material = createMaterialForLibrary(defaultPropMat, { triplanar: false });
+    _finishKitMaterial(material, "rock", defaultPropMat?.id === "__none__");
     const typeIdx = propStore.registerPrimitive(rockName, geometry, material);
     if (typeIdx < 0) return;
     const cls = ROCK_CLASSES[kit.cls];
@@ -6181,6 +6201,7 @@ export async function startV3App(opts = {}) {
       typeIdx,
       builtin: true,
       solid: type.solid,
+      kit: "rock",
       materialId: defaultPropMat?.id ?? "__none__",
       triplanar: false,
     });

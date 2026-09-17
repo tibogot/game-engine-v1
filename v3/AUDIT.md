@@ -1202,7 +1202,24 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      DELETED; projects that used it skip those slots with a console warning.
      Open: user verdict; ~0.7 s per cliff on the main thread (worker/cache
      before it is a kit); the arch/holes stay Blender or kitbash.
-106. **Procedural rock kit — shape approved 👁 2026-09-17, shading next.**
+106. **Procedural rock kit — shape approved 👁 2026-09-17; shading in
+     (look being judged 👁).** Shading, shared by rocks and cliffs, no
+     samplers: the generator bakes `rockShade` (x = edge bend from vertex
+     normals, 2 blur passes; y = height 0..1) and props/rockShading.js turns it
+     into a cool blue-grey base → light top gradient, darker downward faces,
+     brighter chip edges (smoothstep 0.012–0.06 on the bend: flat facets
+     measure ~0.002, edges 0.03–0.1), world-space mottling, base AO. All knobs
+     are uniforms in `material.userData.rockShading` (tune live, no rebake).
+     Boulders, lumps and cliffs weight the attribute in the simplifier so the
+     edge band does not smear (`attributeWeights` added to autoLod
+     simplifyGeometry; triangle budgets unchanged). Measured: +0.065 ms GPU at
+     5k rocks (1.864 vs 1.799 ms, 5 interleaved rounds, 69 draws both).
+     Fixed on the way: a project reload rebuilt every `solid` slot's material
+     with the cliff grass blend, so boulders came back with grass tops; slots
+     now carry `kit: "rock" | "cliff"` and one `_finishKitMaterial` is used on
+     add, material change and load. Save → load round trip checked in the
+     browser (instances, shading, blend, lodScale, collision flags).
+     Earlier notes:
      v3/props/proceduralRock.js: dense sphere pushed radially to the nearer of
      an egg (lumps) and ~55 chip planes + a few big cuts, soft-min chip edges,
      then meshoptimizer to a budget. INDEXED. Kit = 12 types: Boulder A-D,
@@ -1216,12 +1233,12 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      vs +1.15 ms, 69 draws either way, rock tris 1.04 M vs 2.88 M. Kit
      generation 0.7 s total. Debug: `__V3_DEBUG.rockPreview()`,
      `rockStress({ count, radius })`.
-     Open: shading (dark underside, chip-edge highlight + crevice AO baked in
-     vertex attributes, one triplanar detail texture); boulder LOD0 reads a bit
+     Open: user look check on the shading; a real tileable detail texture
+     (triplanar) instead of noise mottling; no crease AO yet (these shapes are
+     convex, the bake found no concave vertices); boulder LOD0 reads a bit
      low-poly up close at scale 3+ (try 2000 tris, LOD1 takes over at 60 m);
      paint brush picks ONE type — a "rock set" brush (random kit shape, tilt,
-     non-uniform scale) is what makes a field look natural; save/load round
-     trip not yet checked in the browser.
+     non-uniform scale) is what makes a field look natural.
 
 ## Performance
 

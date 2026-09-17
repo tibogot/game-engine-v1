@@ -68,7 +68,67 @@ export const DEFAULT_ROCK_PARAMS = {
   targetTriangles: 1500,
   /** Max surface deviation allowed by the simplifier, fraction of mean size. */
   simplifyError: 0.004,
+  /** rockShade bake: neighbour blur passes (widens the edge band). */
+  shadeBlur: 2,
+  /** How strongly the simplifier protects the baked edge band (0 = not at all;
+   *  1 costs +36% triangles on a boulder, 2.4× on a pebble). */
+  shadeWeight: 0,
 };
+
+/**
+ * Bake `rockShade` (vec2) on the dense mesh, read by rockShading.js:
+ *   x = edge curvature, +1 convex chip edge … −1 concave crease, 0 flat
+ *   y = height within the shape, 0 bottom … 1 top (object space, so it
+ *       follows the instance's scale and rotation)
+ * Curvature per vertex = mean of n·(pj − pi)/|pj − pi| over its edges: 0 on a
+ * flat facet, negative where neighbours fall away (a convex edge). A couple of
+ * neighbour blurs widen the band past the one-vertex ring of the soft edge.
+ */
+function _bakeShade(geo, p) {
+  const pos = geo.getAttribute("position").array;
+  const nrm = geo.getAttribute("normal").array;
+  const idx = geo.getIndex().array;
+  const vc = pos.length / 3;
+  const sum = new Float32Array(vc), cnt = new Uint16Array(vc);
+  const edge = (a, b) => {
+    const dx = pos[b * 3] - pos[a * 3], dy = pos[b * 3 + 1] - pos[a * 3 + 1], dz = pos[b * 3 + 2] - pos[a * 3 + 2];
+    const l = Math.hypot(dx, dy, dz) || 1;
+    sum[a] += (nrm[a * 3] * dx + nrm[a * 3 + 1] * dy + nrm[a * 3 + 2] * dz) / l;
+    cnt[a]++;
+  };
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+    edge(a, b); edge(b, a); edge(b, c); edge(c, b); edge(c, a); edge(a, c);
+  }
+  // raw bend (≈ sin of half the dihedral angle), independent of tessellation
+  // for a sharp chip edge; the shader thresholds it, so tuning needs no rebake
+  let curv = new Float32Array(vc);
+  for (let i = 0; i < vc; i++) {
+    const v = cnt[i] ? sum[i] / cnt[i] : 0;
+    curv[i] = Math.max(-1, Math.min(1, -v));
+  }
+  for (let it = 0; it < p.shadeBlur; it++) {
+    const acc = new Float32Array(vc), n = new Uint16Array(vc);
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+      acc[a] += curv[b] + curv[c]; n[a] += 2;
+      acc[b] += curv[a] + curv[c]; n[b] += 2;
+      acc[c] += curv[a] + curv[b]; n[c] += 2;
+    }
+    const next = new Float32Array(vc);
+    for (let i = 0; i < vc; i++) next[i] = n[i] ? (curv[i] + acc[i] / n[i]) * 0.5 : curv[i];
+    curv = next;
+  }
+  let yMin = Infinity, yMax = -Infinity;
+  for (let i = 0; i < vc; i++) { const y = pos[i * 3 + 1]; if (y < yMin) yMin = y; if (y > yMax) yMax = y; }
+  const shade = new Float32Array(vc * 2);
+  const inv = 1 / Math.max(1e-6, yMax - yMin);
+  for (let i = 0; i < vc; i++) {
+    shade[i * 2] = curv[i];
+    shade[i * 2 + 1] = (pos[i * 3 + 1] - yMin) * inv;
+  }
+  geo.setAttribute("rockShade", new THREE.BufferAttribute(shade, 2));
+}
 
 /**
  * @param {Partial<typeof DEFAULT_ROCK_PARAMS>} params
@@ -170,6 +230,7 @@ export function createRockGeometry(params = {}) {
     pos.setXYZ(i, x * r, y * r, z * r);
   }
   geo.computeVertexNormals();
+  _bakeShade(geo, p);
   const denseTris = geo.getIndex().count / 3;
 
   if (_simplifierLoaded && denseTris > p.targetTriangles) {
@@ -181,6 +242,9 @@ export function createRockGeometry(params = {}) {
       ratio: p.targetTriangles / denseTris,
       error: (p.simplifyError * meanSize) / extent,
       minTriangles: 48,
+      // keep the edge band: without a weight the collapse spreads a chip
+      // edge's highlight across the whole neighbouring facet
+      attributeWeights: { rockShade: p.shadeWeight },
     });
   }
   geo.computeBoundingBox();
@@ -201,8 +265,8 @@ export function createRockGeometry(params = {}) {
  * `simplifyError` is generous on purpose: the budget decides, not the error.
  */
 export const ROCK_PRESETS = {
-  boulder: { sizeX: 0.85, sizeY: 1.1, sizeZ: 0.75, egg: 0.18, chips: 55, chipMax: 0.1, chipBias: 2.2, chipJitter: 0.7, bigCuts: 5, edgeSoft: 0.006, targetTriangles: 1200, simplifyError: 0.02 },
-  lump:    { sizeX: 1.1, sizeY: 0.75, sizeZ: 0.9, egg: 0.1, chips: 45, chipMax: 0.12, chipBias: 2.2, chipJitter: 0.7, bigCuts: 4, edgeSoft: 0.006, baseCut: 0.2, targetTriangles: 1000, simplifyError: 0.02 },
+  boulder: { sizeX: 0.85, sizeY: 1.1, sizeZ: 0.75, egg: 0.18, chips: 55, chipMax: 0.1, chipBias: 2.2, chipJitter: 0.7, bigCuts: 5, edgeSoft: 0.006, targetTriangles: 1200, simplifyError: 0.02, shadeWeight: 1 },
+  lump:    { sizeX: 1.1, sizeY: 0.75, sizeZ: 0.9, egg: 0.1, chips: 45, chipMax: 0.12, chipBias: 2.2, chipJitter: 0.7, bigCuts: 4, edgeSoft: 0.006, baseCut: 0.2, targetTriangles: 1000, simplifyError: 0.02, shadeWeight: 1 },
   rock:    { sizeX: 0.55, sizeY: 0.35, sizeZ: 0.45, egg: 0.05, chips: 22, chipMin: 0.04, chipMax: 0.2, chipJitter: 0.7, bigCuts: 2, edgeSoft: 0.008, baseCut: 0.18, detail: 28, targetTriangles: 400, simplifyError: 0.03 },
   pebble:  { sizeX: 0.18, sizeY: 0.1, sizeZ: 0.14, egg: 0, chips: 12, chipMin: 0.06, chipMax: 0.25, chipJitter: 0.7, edgeSoft: 0.01, baseCut: 0.2, detail: 16, targetTriangles: 120, simplifyError: 0.05 },
 };
@@ -245,7 +309,7 @@ const CLIFF_BASE = {
   chips: 160, chipMin: 0.02, chipMax: 0.06, chipBias: 1.3, chipJitter: 0.7,
   bigCuts: 4, bigMin: 0.06, bigMax: 0.12, maxChipUp: 0.7,
   topCut: 0.3, baseCut: 0.15, edgeSoft: 0.006,
-  detail: 60, targetTriangles: 8000, simplifyError: 0.006,
+  detail: 60, targetTriangles: 8000, simplifyError: 0.006, shadeWeight: 1,
 };
 export const ROCK_CLIFF_PRESETS = [
   { name: "Cliff: Chip Pillar", generator: "rock", params: { ...CLIFF_BASE, seed: 1, sizeX: 9, sizeY: 21, sizeZ: 8, egg: -0.25, topCut: 0.28 } },
