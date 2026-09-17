@@ -261,6 +261,35 @@ panel.innerHTML = "";
         });
       }
 
+      // Rock-set brush: Paint mode lays a natural mix of the whole kit
+      if (app.rockSetState) {
+        const rs = app.rockSetState;
+        const setHint = document.createElement("p");
+        setHint.style.cssText =
+          "margin:8px 0 4px; font-size:11px; color:var(--text-dim); line-height:1.35;";
+        setHint.textContent =
+          "Rock set: in Paint mode, each stroke lays a mix of every rock shape — tilted, unevenly scaled, small rocks gathered around big ones. Density and scale come from Paint Settings; Alt erases.";
+        rockBody.appendChild(setHint);
+        const setOpts = document.createElement("div");
+        _toggle(rockBody, rs, "enabled", {
+          label: "Paint as rock set",
+          onChange: (on) => {
+            app.setRockSetEnabled(on);
+            setOpts.style.display = on ? "" : "none";
+            rebuildAll();
+          },
+        });
+        rockBody.appendChild(setOpts);
+        _slider(setOpts, rs, "boulder", { label: "Boulders", min: 0, max: 1, step: 0.01 });
+        _slider(setOpts, rs, "lump", { label: "Lumps", min: 0, max: 1, step: 0.01 });
+        _slider(setOpts, rs, "rock", { label: "Stones", min: 0, max: 1, step: 0.01 });
+        _slider(setOpts, rs, "pebble", { label: "Pebbles", min: 0, max: 1, step: 0.01 });
+        _toggle(setOpts, rs, "satellites", { label: "Small rocks around big ones" });
+        _slider(setOpts, rs, "tilt", { label: "Tilt", min: 0, max: 2, step: 0.05 });
+        _slider(setOpts, rs, "spread", { label: "Spread", min: 0.6, max: 2, step: 0.05 });
+        setOpts.style.display = rs.enabled ? "" : "none";
+      }
+
       // --- Cliffs (solid: real-triangle collision, acts like terrain) ---
       const cliffBody = _section(panel, "Add Cliff (solid)", false);
       const cliffHint = document.createElement("p");

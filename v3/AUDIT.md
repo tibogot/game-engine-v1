@@ -1326,9 +1326,17 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      Open: user look check on the shading; a real tileable detail texture
      (triplanar) instead of noise mottling; no crease AO yet (these shapes are
      convex, the bake found no concave vertices); boulder LOD0 reads a bit
-     low-poly up close at scale 3+ (try 2000 tris, LOD1 takes over at 60 m);
-     paint brush picks ONE type — a "rock set" brush (random kit shape, tilt,
-     non-uniform scale) is what makes a field look natural.
+     low-poly up close at scale 3+ (try 2000 tris, LOD1 takes over at 60 m).
+     Rock-set brush DONE 2026-09-17 (look 👁): Props → Add Rock → "Paint as
+     rock set", then Paint mode. v3/tools/rockSetBrush.js plans each stamp —
+     class by mix weights (boulder/lump/stone/pebble sliders), random kit
+     shape, per-class tilt, uneven scale, sink by height; size-aware spacing
+     (similar sizes keep footprints apart, a pebble may touch a boulder's
+     base); boulders/lumps drop 2-6 small "satellite" rocks. PropSystem gained
+     an optional `scatterPlanner` hook; one stroke = one undo step (checked).
+     Measured: 642 rocks from 6 strokes in 6.2 ms total (planner 0.06 ms per
+     stamp in Node); big-rock footprints never overlap. Brush settings are
+     session-only (not saved with the project).
 
 ## Performance
 

@@ -25,6 +25,12 @@ export class PropSystem {
 
     /** @type {Map<number, { rx: number, ry: number, rz: number, sx: number, sy: number, sz: number }>} */
     this._lastStampByType = new Map();
+
+    /**
+     * Optional paint override: `(wx, wz, radius) => instance records`. Set by
+     * the app for multi-type brushes (the rock set); null = paint the active slot.
+     */
+    this.scatterPlanner = null;
   }
 
   _defaultStamp() {
@@ -241,6 +247,13 @@ export class PropSystem {
   }
 
   _scatter(wx, wz, radius) {
+    if (this.scatterPlanner) {
+      const planned = this.scatterPlanner(wx, wz, radius);
+      if (!planned?.length) return;
+      for (const rec of planned) this.store.instances.push(rec);
+      this.store._bump();
+      return;
+    }
     const p = this.propState;
     const typeIdx = this._getActiveTypeIdx();
     if (typeIdx == null) return;

@@ -61,6 +61,7 @@ import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliag
 import { PropStore } from "../tools/propStore.js";
 import { PropInstancer } from "../tools/propInstancer.js";
 import { PropSystem } from "../tools/propSystem.js";
+import { planRockStamp, ROCK_SET_DEFAULTS } from "../tools/rockSetBrush.js";
 import { PropPlacementPreview } from "../tools/propPlacementPreview.js";
 import { LivePropManager } from "../tools/livePropManager.js";
 import { createFlag } from "../props/liveProps.js";
@@ -6694,6 +6695,40 @@ export async function startV3App(opts = {}) {
     uiById("props-panel")?._rebuildPropUi?.();
   }
 
+  // Rock-set brush (tools/rockSetBrush.js): in Paint mode, one stroke lays a
+  // natural mix of the whole kit instead of the active slot's single shape.
+  const rockSetState = { ...ROCK_SET_DEFAULTS };
+
+  function setRockSetEnabled(on) {
+    rockSetState.enabled = !!on;
+    if (!rockSetState.enabled) { propSys.scatterPlanner = null; return; }
+    // every kit shape must be a registered type; registering must not steal
+    // the slot the user had active
+    const keepSlot = propState.activeSlot;
+    const missing = ROCK_KIT.filter((k) => !propSlots.some((s) => s.name === k.name && s.builtin));
+    for (const k of missing) addRock(k.name);
+    propState.activeSlot = keepSlot;
+    if (missing.length) uiById("props-panel")?._rebuildPropUi?.();
+    propSys.scatterPlanner = (wx, wz, radius) => {
+      const typesByClass = {};
+      for (const k of ROCK_KIT) {
+        const slot = propSlots.find((s) => s.name === k.name && s.builtin);
+        if (slot && !propInstancer.hiddenTypes.has(slot.typeIdx)) (typesByClass[k.cls] ??= []).push(slot.typeIdx);
+      }
+      return planRockStamp({
+        wx, wz, radius,
+        density: propState.density,
+        scaleMin: propState.scaleMin,
+        scaleMax: propState.scaleMax,
+        settings: rockSetState,
+        typesByClass,
+        store: propStore,
+        getWorldHeight: (x, z) => terrainStoreAdapter.getWorldHeight(x, z),
+        halfWorld: WORLD_SIZE * 0.5,
+      });
+    };
+  }
+
   // Grey-box structure kit (props/greyboxKit.js) — parametric building blocks.
   // Each preset is one primitive type = one InstancedMesh = one draw call for any
   // count. Pieces with holes/slopes (`solid`) go through SolidCollider so the
@@ -6907,6 +6942,8 @@ export async function startV3App(opts = {}) {
     addCliff,
     addRock,
     getRockKitNames: () => ROCK_KIT.map((k) => k.name),
+    rockSetState,
+    setRockSetEnabled,
     addKitPiece,
     getKitPieceNames: () => GREYBOX_KIT.map((p) => p.name),
     importCliffGlb,
