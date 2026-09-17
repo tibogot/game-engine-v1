@@ -19,10 +19,10 @@ import {
   hash, instanceIndex, length, max, mix, normalLocal, normalize, pow, positionLocal, saturate,
   select, sin, smoothstep, step, texture, time, uniform, uv, varying, vec2, vec3, vec4, PI2,
 } from "three/tsl";
-import { drawPlumeTexture } from "../grass/susukiSystem.js";
+import { drawPlumeTexture } from "./plumeTexture.js";
 import { bakeObjectThumbnails } from "../../../v2/tools/objectThumbnails.js";
 import { ScatterField } from "../scatter/scatterField.js";
-import { createFoliageTypeGeometry, FOLIAGE_LODS } from "./foliageGeometry.js";
+import { createFoliageTypeGeometry, FOLIAGE_LODS, usesPlumeTexture } from "./foliageGeometry.js";
 import { FOLIAGE_TYPE_COUNT } from "../../app/state/foliageScatterState.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
@@ -90,7 +90,7 @@ export async function bakeFoliageThumbnail(type, { renderer, size = 128, runRend
   // WebGPU warning, not a no-op.
   const headMat = headTris.length
     ? new THREE.MeshStandardMaterial(
-      type.kind === "pampas" ? { ...opts, alphaMap: thumbPlumeTexture(), alphaTest: 0.4, transparent: false } : opts,
+      usesPlumeTexture(type.kind) ? { ...opts, alphaMap: thumbPlumeTexture(), alphaTest: 0.4, transparent: false } : opts,
     )
     : null;
   if (headMat) {
@@ -122,10 +122,14 @@ export class FoliageScatterSystem {
   constructor({
     scene, renderer, heightTex, terrainNormalTex, densityTex, grassDensityTex, splatTex,
     riverNearTex = null, windTex, worldSize, fs, gp, tileSize = 192, plantsPerSide = 256,
+    name = "Foliage", typeCount = FOLIAGE_TYPE_COUNT,
   }) {
+    // Foliage runs 8 types on a 192 m tile; susuki runs this same system with
+    // one type on a 400 m tile so its fields stay visible to ~195 m.
+    this.typeCount = typeCount;
     const field = (this.field = new ScatterField({
-      scene, renderer, name: "Foliage",
-      typeCount: FOLIAGE_TYPE_COUNT, lods: FOLIAGE_LODS, rows: ROWS, ruleRow: RULE_ROW,
+      scene, renderer, name,
+      typeCount, lods: FOLIAGE_LODS, rows: ROWS, ruleRow: RULE_ROW,
       worldSize, tileSize, plantsPerSide,
       heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex, windTex, grassDensityTex,
       cullRadius: 5,   // a jungle fern is metres across, not centimetres
@@ -316,7 +320,7 @@ export class FoliageScatterSystem {
     this._plumeMat = makeMaterial(plumeTex);
 
     field.attachMaterial(mat);
-    for (let i = 0; i < FOLIAGE_TYPE_COUNT; i++) this.rebuildType(i, fs.types[i]);
+    for (let i = 0; i < typeCount; i++) this.rebuildType(i, fs.types[i]);
     this.syncFromState(fs, gp);
   }
 
@@ -330,7 +334,7 @@ export class FoliageScatterSystem {
   rebuildType(i, type) {
     this.field.rebuildType(i, (lod) => createFoliageTypeGeometry(type, { lod }));
     // Only the textured-plume plants pay for the alpha test.
-    const mat = type.kind === "pampas" ? this._plumeMat : this._mat;
+    const mat = usesPlumeTexture(type.kind) ? this._plumeMat : this._mat;
     for (let lod = 0; lod < FOLIAGE_LODS; lod++) this.field.meshes[i * FOLIAGE_LODS + lod].material = mat;
     const sh = this.field.shadowMeshes[this.field.shadowMeshIndex(i)];
     if (sh) sh.material = mat;
@@ -366,7 +370,7 @@ export class FoliageScatterSystem {
 
     const c = new THREE.Color();
     const rows = this.field.typeRows;
-    for (let i = 0; i < FOLIAGE_TYPE_COUNT; i++) {
+    for (let i = 0; i < this.typeCount; i++) {
       const t = fs.types[i];
       const o = i * ROWS;
       c.set(t.colorBase); rows[o].set(c.r, c.g, c.b, t.translucency);

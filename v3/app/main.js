@@ -97,14 +97,12 @@ import { downloadProps, importPropsFromFile } from "../io/propsIO.js";
 import { HybridGrassSystem, syncHybridGrassLod, rebuildHybridGrassGeometries } from "../../v2/render/hybridGrass/hybridGrassSystem.js";
 import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage/windTexture.js";
 import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
-import { SusukiSystem, SUSUKI_DEFAULTS } from "../render/grass/susukiSystem.js";
-import { buildSusukiPanel } from "../ui/buildSusukiPanel.js";
-import { buildVegetationHeader, drawFlowerThumb, drawSusukiThumb } from "../ui/buildVegetationHeader.js";
+import { buildVegetationHeader, drawFlowerThumb } from "../ui/buildVegetationHeader.js";
 import { FlowerSystem } from "../render/grass/flowerSystem.js";
 import { FlowerDensity } from "../render/grass/flowerDensity.js";
 import { FoliageScatterSystem, bakeFoliageThumbnail } from "../render/foliage/foliageSystem.js";
 import { ScatterDensity } from "../render/scatter/scatterDensity.js";
-import { createFoliageScatterState } from "./state/foliageScatterState.js";
+import { createFoliageScatterState, createSusukiPlantState, SUSUKI_FIELD } from "./state/foliageScatterState.js";
 import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
 import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
@@ -1080,12 +1078,29 @@ export async function startV3App(opts = {}) {
   const _vegUndoStack = [];
   const _vegRedoStack = [];
 
-  // ── Susuki (GoT miscanthus plumes — own paint layer + instanced system) ────
-  const susukiState = structuredClone(SUSUKI_DEFAULTS);
+  // ── Susuki (GoT miscanthus plumes — own paint layer, own scatter field) ────
+  // The FOLIAGE system with one plant (pampas with a fan of plumes on stiff
+  // stalks) on a far-reaching field: see createSusukiPlantState. Same shape
+  // code, material, panel and shadows as every other plant.
+  const susukiState = createSusukiPlantState();
   const susukiBrush = _shareVegBrush({});
   let susukiSystem = null;
   let _susukiBuilding = false;
   let susukiUi = null;
+  let _susukiThumbUrl = null;
+  let _susukiThumbChain = Promise.resolve();
+  function queueSusukiThumb() {
+    if (!isEditor) return;
+    _susukiThumbChain = _susukiThumbChain
+      .then(async () => {
+        const url = await bakeFoliageThumbnail(susukiState.types[0], {
+          renderer,
+          runRendererSideWork: (fn) => withRendererSideWork(fn),
+        });
+        if (url) { _susukiThumbUrl = url; vegUi?.refreshCards(); }
+      })
+      .catch((e) => console.warn("[V3 Susuki] thumbnail failed:", e));
+  }
 
   // ── Flowers (painted meadow flowers — own paint layer + instanced system) ──
   const flowerState = createFlowerState();
@@ -1120,6 +1135,7 @@ export async function startV3App(opts = {}) {
   let _foliageThumbsQueued = false;
   function queueAllFoliageThumbs() {
     _foliageThumbsQueued = true;
+    queueSusukiThumb();
     for (let i = 0; i < foliageScatterState.types.length; i++) queueFoliageThumb(i);
   }
   // Which plants are painted (so unused ones are not drawn); rechecked after a
@@ -1369,15 +1385,22 @@ export async function startV3App(opts = {}) {
     if (susukiSystem || _susukiBuilding) return;
     _susukiBuilding = true;
     try {
-      const sys = new SusukiSystem({
+      const sys = new FoliageScatterSystem({
         scene,
         renderer,
+        name:             "Susuki",
+        typeCount:        1,
+        tileSize:         SUSUKI_FIELD.tileSize,
+        plantsPerSide:    SUSUKI_FIELD.plantsPerSide,
         heightTex:        grassTerrainData.grassHeightTex,
         terrainNormalTex: grassTerrainData.terrainNormalTex,
         densityTex:       grassTerrainData.susukiDensityMaskedTex,
+        grassDensityTex:  grassTerrainData.grassDensityMaskedTex,
+        splatTex:         splatMap.tex,
+        riverNearTex:     riverV2System?.nearTexture ?? null,
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
-        sp:               susukiState,
+        fs:               susukiState,
         gp:               grassState,
       });
       await sys.init(camera);
@@ -1393,7 +1416,9 @@ export async function startV3App(opts = {}) {
 
   function syncSusukiUniforms() {
     if (!susukiSystem) return;
-    susukiSystem.syncFromState(susukiState, grassState, getLightDir());
+    susukiSystem.syncFromState(susukiState, grassState, getLightDir(), {
+      hasRivers: (riverV2System?.rivers.length ?? 0) > 0,
+    });
   }
 
   // ── Flower build/sync (lazy, like susuki) ──────────────────────────────────
@@ -7428,7 +7453,9 @@ export async function startV3App(opts = {}) {
       grassDensity:  grassTerrainData.getDensitySnapshot(),
       grassHeight:   grassTerrainData.getBladeHeightSnapshot(),
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
-      susuki:    { ...susukiState },
+      // version 2 = susuki is a foliage plant (createSusukiPlantState). Older
+      // files carried the retired renderer's params; they load as defaults.
+      susuki:    { version: 2, plant: structuredClone(susukiState.types[0]), field: (({ types, ...rest }) => rest)(susukiState) },
       flowerDensity: flowerDensity.hasData ? flowerDensity.getSnapshot() : null,
       foliagePaint:  foliageDensity.hasData ? foliageDensity.getSnapshot() : null,
       foliagePlants: structuredClone(foliageScatterState.types),
@@ -7595,20 +7622,22 @@ export async function startV3App(opts = {}) {
       await worldEnv.importLook(d.environment.look);
       buildWorldPanelUi();
     }
-    if (d.susuki) Object.assign(susukiState, d.susuki);
+    if (d.susuki?.version === 2) {
+      if (d.susuki.field) Object.assign(susukiState, d.susuki.field);
+      if (d.susuki.plant) Object.assign(susukiState.types[0], d.susuki.plant);
+    }
     if (d.susukiDensity?.length === grassTerrainData.susukiDensityTex.image.data.length) {
       grassTerrainData.restoreSusukiDensitySnapshot(d.susukiDensity);
     }
     if (d.susuki || d.susukiDensity) {
       if (susukiSystem) {
         syncSusukiUniforms();
-        susukiSystem.rebuildPlumeGeometry(susukiState);
-        susukiSystem.rebuildStemGeometry(susukiState);
-        susukiSystem.redrawPlumeTexture(susukiState);
+        susukiSystem.rebuildType(0, susukiState.types[0]);
       } else if (grassTerrainData.hasSusukiData) {
         void ensureSusukiBuilt();
       }
-      susukiUi?.refresh();
+      queueSusukiThumb();
+      susukiUi?.rebuild();
     }
 
     // Flowers: absent in a file means none, so a flowerless project clears the
@@ -9324,12 +9353,17 @@ export async function startV3App(opts = {}) {
   }, { passive: false, capture: true });
 
   // ── Susuki mode: panel + paint events ──────────────────────────────────────
-  if (isEditor) susukiUi = buildSusukiPanel(susukiPanel, {
-    susukiState,
-    onStateChanged:    () => { syncSusukiUniforms(); vegUi?.refreshCards(); },
-    onPlumeGeoChanged: () => susukiSystem?.rebuildPlumeGeometry(susukiState),
-    onStemGeoChanged:  () => susukiSystem?.rebuildStemGeometry(susukiState),
-    onTextureChanged:  () => { susukiSystem?.redrawPlumeTexture(susukiState); vegUi?.refreshCards(); },
+  if (isEditor) susukiUi = buildFoliagePanel(susukiPanel, {
+    foliageBrush: { type: 0 },
+    foliageState: susukiState,
+    getLayerNames: () => textureLib.slots.map((s) => s.name),
+    getHasRivers: () => (riverV2System?.rivers.length ?? 0) > 0,
+    onStateChanged: () => { syncSusukiUniforms(); queueSusukiThumb(); },
+    onGeometryChanged: () => { susukiSystem?.rebuildType(0, susukiState.types[0]); queueSusukiThumb(); },
+    onRenamed: () => vegUi?.refreshCards(),
+    fieldTitle: "Susuki Field",
+    tileReach: SUSUKI_FIELD.tileSize / 2,
+    showSpecies: false,
   });
 
   let _susukiPainting  = false;
@@ -9542,11 +9576,6 @@ export async function startV3App(opts = {}) {
     const sig = JSON.stringify([t.petals, t.petalLength, t.petalWidth, t.doubleLayer, t.petalBase, t.petalTip, t.centre, t.centreSize]);
     return _vegThumb(`flower:${i}`, sig, () => drawFlowerThumb(t));
   };
-  const _susukiThumb = () => {
-    const s = susukiState;
-    const sig = JSON.stringify([s.texStrands, s.texSpread, s.texStrandLen, s.texDroop, s.plumeBase, s.plumeTip, s.stemTip]);
-    return _vegThumb("susuki", sig, () => drawSusukiThumb(s));
-  };
 
   const vegFill = (mode, type) => {
     _pushVegUndo([mode]);
@@ -9558,17 +9587,30 @@ export async function startV3App(opts = {}) {
   if (isEditor && vegHeaderEl) vegUi = buildVegetationHeader(vegHeaderEl, {
     brush: vegBrush,
     groups: () => [
-      { mode: "foliage", title: "Plants", types: foliageScatterState.types.map((t, i) => ({ get name() { return t.name; }, thumb: () => _foliageThumbs.get(i) ?? null })) },
-      { mode: "flowers", title: "Flowers", types: flowerState.types.map((t, i) => ({ get name() { return t.name; }, thumb: () => _flowerThumb(i) })) },
-      { mode: "susuki", title: "Plumes", types: [{ name: "Susuki", thumb: _susukiThumb }] },
       {
-        mode: "vegPlaced", title: "Placed plants (GLB)", canFill: false,
-        onDropFile: (key, file) => importPlantGlb(file),
-        types: [
-          ...propSlots.map((s, i) => [s, i]).filter(([s]) => s?.plant).map(([s, i]) => ({
-            key: i, get name() { return s.name; }, thumb: () => _placedThumbs.get(s) ?? null,
+        title: "Plants",
+        cards: [
+          ...foliageScatterState.types.map((t, i) => ({
+            mode: "foliage", key: i, get name() { return t.name; }, thumb: () => _foliageThumbs.get(i) ?? null,
           })),
-          { key: "import", name: "Import GLB", kind: "empty", title: "Import a plant GLB — or drop one on this card" },
+          // Its own far-reaching field, but a plant like the rest.
+          { mode: "susuki", key: 0, get name() { return susukiState.types[0].name; }, thumb: () => _susukiThumbUrl },
+        ],
+      },
+      {
+        title: "Flowers",
+        cards: flowerState.types.map((t, i) => ({
+          mode: "flowers", key: i, get name() { return t.name; }, thumb: () => _flowerThumb(i),
+        })),
+      },
+      {
+        title: "Placed plants (GLB)",
+        onDropFile: (key, file) => importPlantGlb(file),
+        cards: [
+          ...propSlots.map((s, i) => [s, i]).filter(([s]) => s?.plant).map(([s, i]) => ({
+            mode: "vegPlaced", key: i, canFill: false, get name() { return s.name; }, thumb: () => _placedThumbs.get(s) ?? null,
+          })),
+          { mode: "vegPlaced", key: "import", name: "Import GLB", kind: "empty", canFill: false, title: "Import a plant GLB — or drop one on this card" },
         ],
       },
     ],

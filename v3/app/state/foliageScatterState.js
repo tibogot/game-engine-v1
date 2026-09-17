@@ -11,6 +11,7 @@ export const FOLIAGE_TYPE_COUNT = 8;
 /** Shape keys — changing one of these rebuilds that type's meshes. */
 export const FOLIAGE_GEOMETRY_KEYS = [
   "kind", "fronds", "frondLength", "leaflets", "leafletWidth", "leafletAngle", "spread", "arch", "droop", "stemWidth", "bareStalk",
+  "plumesPerStem", "plumeSpread",
 ];
 
 /** Height band that means "no limit" (the full slider range). */
@@ -73,6 +74,14 @@ export const FOLIAGE_PRESETS = {
     spread: 0.32, arch: 0.8, droop: 0.45, stemWidth: 0.9, bareStalk: 0,
     colorBase: "#5f9a3a", colorTip: "#9ccb5e", colorHead: "#efe3b0", size: 2.4, translucency: 1.1,
   },
+  // Pampas with a fan of plumes per stalk, on stiff cane-like stalks.
+  susuki: {
+    kind: "susuki",
+    fronds: 10, frondLength: 1.2, leaflets: 4, leafletWidth: 1.0, leafletAngle: 60,
+    spread: 0.3, arch: 0.8, droop: 0.5, stemWidth: 1.8, bareStalk: 0,
+    plumesPerStem: 4, plumeSpread: 22,
+    colorBase: "#5f9a3a", colorTip: "#9ccb5e", colorHead: "#f6f1e3", size: 2.2, translucency: 1.1,
+  },
   groundCover: {
     kind: "broadleaf",
     fronds: 16, frondLength: 0.9, leaflets: 4, leafletWidth: 1.3, leafletAngle: 60,
@@ -93,6 +102,48 @@ const TYPE_DEFAULTS = [
   { name: "Pampas", preset: "pampas", castShadow: true },
   { name: "Bracken", preset: "bracken", castShadow: true },
 ];
+
+/**
+ * SUSUKI — one plant type on its own scatter field. The shape and material are
+ * foliage's (pampas with a fan of plumes); the field is what differs: a 400 m
+ * tile at 1.4 m spacing so a susuki field stays visible to 150-195 m, where the
+ * foliage field (192 m, 0.75 m) fades out by 95 m.
+ */
+export const SUSUKI_FIELD = { tileSize: 400, plantsPerSide: 288 };
+
+export function createSusukiPlantState() {
+  return {
+    density: 1,
+    clumping: 0,
+    clumpSize: 8,
+    sizeVar: 0.18,
+    colorVar: 0.05,
+    grassLift: 0,
+    slopeMinY: 0.55,
+    // Stiff canes: the whole plant sways less than a fern.
+    windMul: 1,
+    flex: 0.3,
+    flutter: 0.4,
+    interactRadius: 2.2,
+    interactStrength: 1.2,
+    translucencyMul: 1.1,
+    glowLight: 0.06,
+    receiveShadows: true,
+    castShadows: true,
+    shadowDistance: 35,
+    lodDistance: 25,
+    lodDistance2: 70,
+    fadeStart: 150,
+    fadeEnd: 195,
+    types: [{
+      name: "Susuki", preset: "susuki", castShadow: true,
+      ...structuredClone(FOLIAGE_PRESETS.susuki),
+      ...FOLIAGE_HEIGHT_ANY,
+      onLayer: -1,
+      nearRiver: 0,
+    }],
+  };
+}
 
 export function createFoliageScatterState() {
   return {

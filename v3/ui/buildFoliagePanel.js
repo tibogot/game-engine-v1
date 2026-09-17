@@ -12,7 +12,12 @@ import { FOLIAGE_PRESETS, FOLIAGE_HEIGHT_ANY } from "../app/state/foliageScatter
  *   onGeometryChanged(i)    a shape setting of type i changed (mesh rebuild)
  *   onRenamed()             a plant's name changed (the header's card label)
  */
-export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNames, getHasRivers, onStateChanged, onGeometryChanged, onRenamed }) {
+export function buildFoliagePanel(root, {
+  foliageBrush, foliageState, getLayerNames, getHasRivers, onStateChanged, onGeometryChanged, onRenamed,
+  // The same panel serves susuki's one-type field: its own section name, and a
+  // tile that reaches 200 m instead of 96.
+  fieldTitle = "Foliage Field", tileReach = 96, showSpecies = true,
+}) {
   const widgets = [];
   const W = (w) => { widgets.push(w); return w; };
 
@@ -33,7 +38,7 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
     // ── The selected plant ──
     const ty = section(root, type.name);
     W(text(ty, type, "name", { label: "Name", onChange: () => { build(); onRenamed?.(); } }));
-    W(dropdown(ty, type, "preset", {
+    if (showSpecies) W(dropdown(ty, type, "preset", {
       label: "Species",
       options: Object.keys(FOLIAGE_PRESETS).map((k) => [k, k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())]),
       onChange: () => {
@@ -49,7 +54,7 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
       hint: "Roughly how tall the plant stands. A forest fern is 2-3, ground cover under 1." }));
     W(color(ty, type, "colorBase", { label: "Colour (crown)", onChange: onStateChanged }));
     W(color(ty, type, "colorTip",  { label: "Colour (tips)", onChange: onStateChanged }));
-    if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas") {
+    if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
       W(color(ty, type, "colorHead", { label: "Colour (head)", onChange: onStateChanged,
         hint: "The cattail's sausage or the reed's plume." }));
     }
@@ -83,7 +88,7 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
     W(slider(sh, type, "fronds",       { label: "Fronds", min: 3, max: 20, step: 1, ...g,
       hint: "Leaves radiating from the crown. Two of them stand up in the middle; the rest lean out." }));
     W(slider(sh, type, "frondLength",  { label: "Frond length", min: 0.4, max: 1.6, step: 0.01, ...g }));
-    const stalked = type.kind === "typha" || type.kind === "plume" || type.kind === "pampas";
+    const stalked = type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki";
     W(slider(sh, type, "leaflets", {
       label: stalked ? "Stems" : "Leaflets per side", min: stalked ? 1 : 4, max: 40, step: 1, ...g,
       hint: stalked
@@ -101,9 +106,15 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
     W(slider(sh, type, "bareStalk",    { label: "Bare stalk", min: 0, max: 0.5, step: 0.01, ...g,
       hint: "Share of the frond nearest the crown that carries no leaflets." }));
     W(slider(sh, type, "stemWidth",    { label: "Stalk width", min: 0.3, max: 3, step: 0.05, ...g }));
+    if (type.kind === "susuki") {
+      W(slider(sh, type, "plumesPerStem", { label: "Plumes per stalk", min: 1, max: 8, step: 1, ...g,
+        hint: "The fan of plumes at the top of each stalk. 1 is pampas." }));
+      W(slider(sh, type, "plumeSpread",   { label: "Plume spread °", min: 5, max: 70, step: 1, ...g,
+        hint: "How far the plumes open away from the stalk." }));
+    }
 
     // ── The field ──
-    const fd = section(root, "Foliage Field", false);
+    const fd = section(root, fieldTitle, false);
     W(slider(fd, foliageState, "density",   { label: "Density", min: 0.02, max: 1, step: 0.01, onChange: onStateChanged,
       hint: "Share of plant spots that grow where the paint is full strength. Big plants need less." }));
     W(slider(fd, foliageState, "clumping",  { label: "Clumping", min: 0, max: 1, step: 0.01, onChange: onStateChanged,
@@ -140,9 +151,9 @@ export function buildFoliagePanel(root, { foliageBrush, foliageState, getLayerNa
       hint: "Full leaflets nearer than this; a cut blade beyond." }));
     W(slider(ds, foliageState, "lodDistance2", { label: "Cut blade up to (m)", min: 10, max: 120, step: 1, onChange: onStateChanged,
       hint: "Past this the plant is a plain blade — cheapest, and most of a field is here." }));
-    W(slider(ds, foliageState, "fadeStart", { label: "Fade start (m)", min: 10, max: 160, step: 1, onChange: onStateChanged,
-      hint: "Plants thin out and shrink from here. The plant tile reaches 96 m, so keep the end below that." }));
-    W(slider(ds, foliageState, "fadeEnd",   { label: "Fade end (m)", min: 15, max: 190, step: 1, onChange: onStateChanged }));
+    W(slider(ds, foliageState, "fadeStart", { label: "Fade start (m)", min: 10, max: Math.max(160, tileReach * 2), step: 1, onChange: onStateChanged,
+      hint: `Plants thin out and shrink from here. The plant tile reaches ${tileReach} m, so keep the end below that.` }));
+    W(slider(ds, foliageState, "fadeEnd",   { label: "Fade end (m)", min: 15, max: Math.max(190, tileReach * 2), step: 1, onChange: onStateChanged }));
   }
 
   build();

@@ -1,6 +1,5 @@
 import { section, slider, toggle, button, hint } from "./widgets.js";
 import { createAssetPalette } from "./assetPalette.js";
-import { drawPlumeTexture } from "../render/grass/susukiSystem.js";
 
 /**
  * VEGETATION MODE — the one place to paint plants.
@@ -17,8 +16,11 @@ import { drawPlumeTexture } from "../render/grass/susukiSystem.js";
  * @param {HTMLElement} root
  * @param {object} o
  *   brush           the shared brush { radius, strength, falloff, erase, eraseOnlyType }
- *   groups          () => [{ mode, title, types: [{ name, thumb, key?, kind? }], onDropFile?, canFill? }]
- *                   key defaults to the card's index; kind "empty" draws a "+" card
+ *   groups          () => [{ title, cards: [{ mode, key, name, thumb?, kind?, title?, canFill? }], onDropFile? }]
+ *                   A group is what the artist sees together (Plants, Flowers…);
+ *                   each card names the system (`mode`) and plant (`key`) it
+ *                   paints, so one group can mix systems — susuki sits in
+ *                   Plants though it has its own field. kind "empty" = a "+" card.
  *   active          () => { mode, type }
  *   onSelect(mode, type)
  *   onBrushChanged()   radius changed (cursor ring)
@@ -44,21 +46,22 @@ export function buildVegetationHeader(root, { brush, groups, active, onSelect, o
       label.textContent = g.title;
       label.style.cssText = "font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim);margin:8px 0 4px";
       pick.appendChild(label);
+      const id = (c) => `${c.mode}:${c.key}`;
       palettes.push(createAssetPalette({
         container: pick,
-        cards: () => g.types.map((t, i) => ({
-          key: t.key ?? i, label: t.name, kind: t.kind ?? "asset", thumb: t.thumb?.() ?? null, title: t.title ?? t.name,
+        cards: () => g.cards.map((c) => ({
+          key: id(c), label: c.name, kind: c.kind ?? "asset", thumb: c.thumb?.() ?? null, title: c.title ?? c.name,
         })),
-        activeKey: () => (active().mode === g.mode ? active().type : null),
-        onSelect: (key) => onSelect(g.mode, key),
+        activeKey: () => { const a = active(); return `${a.mode}:${a.type}`; },
+        onSelect: (key) => { const c = g.cards.find((x) => id(x) === key); if (c) onSelect(c.mode, c.key); },
         onDropFile: g.onDropFile ?? null,
         acceptExts: g.onDropFile ? new Set(["glb", "gltf"]) : null,
         dropHint: "Drop a plant GLB",
       }));
     }
 
-    const selGroup = gs.find((g) => g.mode === sel.mode);
-    const selName = selGroup?.types.find((t, i) => (t.key ?? i) === sel.type)?.name ?? "plant";
+    const selCard = gs.flatMap((g) => g.cards).find((c) => c.mode === sel.mode && c.key === sel.type);
+    const selName = selCard?.name ?? "plant";
 
     const br = section(root, "Brush");
     W(slider(br, brush, "radius",   { label: "Radius",   min: 1, max: 300, step: 1, curve: "log", onChange: onBrushChanged }));
@@ -68,7 +71,7 @@ export function buildVegetationHeader(root, { brush, groups, active, onSelect, o
     W(toggle(br, brush, "eraseOnlyType", { label: "Erase selected plant only",
       hint: "Off: erasing (or Alt+paint) removes every plant under the brush — foliage, flowers, susuki and placed plants (never other props). On: only the plant selected above." }));
     hint(br, "<kbd>Alt</kbd>+paint = erase · <kbd>Shift</kbd>/<kbd>Alt</kbd>+wheel = radius/strength", { html: true, className: "mode-hint" });
-    if (selGroup?.canFill !== false) {
+    if (selCard?.canFill !== false) {
       button(br, { title: `Fill "${selName}" everywhere`, onClick: () => onFill?.(sel.mode, sel.type) });
     }
     button(br, { title: "Clear all vegetation", onClick: () => onClearAll?.(), style: "color:#f66" });
@@ -129,37 +132,5 @@ export function drawFlowerThumb(type) {
   g.beginPath();
   g.arc(cx, cy, cr, 0, Math.PI * 2);
   g.fill();
-  return c.toDataURL();
-}
-
-/** A susuki stem and its plume, drawn with the plume texture in the plume colour. */
-export function drawSusukiThumb(state) {
-  const tex = document.createElement("canvas");
-  tex.width = 256; tex.height = 512;
-  drawPlumeTexture(tex, state);
-  // Tint the white strands: keep the texture's alpha, paint the colour into it.
-  const tint = document.createElement("canvas");
-  tint.width = 256; tint.height = 512;
-  const tg = tint.getContext("2d");
-  tg.drawImage(tex, 0, 0);
-  tg.globalCompositeOperation = "source-in";
-  const grad = tg.createLinearGradient(0, 512, 0, 0);
-  grad.addColorStop(0, state.plumeBase ?? "#d0c8b2");
-  grad.addColorStop(1, state.plumeTip ?? "#f7f4ea");
-  tg.fillStyle = grad;
-  tg.fillRect(0, 0, 256, 512);
-
-  const c = document.createElement("canvas");
-  c.width = c.height = THUMB;
-  const g = c.getContext("2d");
-  g.fillStyle = "#1b1b1b";
-  g.fillRect(0, 0, THUMB, THUMB);
-  g.strokeStyle = state.stemTip ?? "#6f7a40";
-  g.lineWidth = 2;
-  g.beginPath();
-  g.moveTo(THUMB * 0.5, THUMB);
-  g.quadraticCurveTo(THUMB * 0.5, THUMB * 0.6, THUMB * 0.56, THUMB * 0.46);
-  g.stroke();
-  g.drawImage(tint, THUMB * 0.3, THUMB * 0.02, THUMB * 0.5, THUMB * 0.62);
   return c.toDataURL();
 }

@@ -73,6 +73,11 @@ function archCurve(rows, len, tilt, arch) {
  * @param {{ lod?: number }} [o]  0 near · 1 mid · 2 far
  * @returns {{ geometry: THREE.BufferGeometry, triangles: number }}
  */
+/** Plants whose head is drawn with the plume strand texture (their own, alpha-tested material). */
+export function usesPlumeTexture(kind) {
+  return kind === "pampas" || kind === "susuki";
+}
+
 export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
   const near = lod === 0, far = lod === 2;
   const P = [], N = [], UV = [], A = [], I = [];
@@ -95,8 +100,8 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
 
   // Plants that are not pinnate have their own builders.
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
-  if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas") {
-    const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : "plume";
+  if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
+    const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : type.kind === "susuki" ? "fan" : "plume";
     return buildStalked(type, { near, far, rand, push, vcount, I, finish }, head);
   }
   if (type.kind === "broadleaf" || type.kind === "bush") {
@@ -344,6 +349,10 @@ function addBladeFan({ rand, push, vcount, I }, { count, rows, len: baseLen, wid
  * soft pale plume of reed grass (`plume`).
  *
  * The head is `part` 2, so the material gives it its own colour.
+ *
+ * `susuki` (head "fan") is pampas with a different head: several plumes
+ * fanning out of the stalk's tip instead of one running down it, and a
+ * stiffer, thicker stalk that ENDS where the plumes begin — so the join reads.
  */
 function buildStalked(type, ctx, head) {
   const plume = head !== "capsule";
@@ -368,7 +377,12 @@ function buildStalked(type, ctx, head) {
   const headR = (plume ? 0.032 : 0.023) * (type.leafletWidth ?? 1) * height;
   // Where the head starts up the stem, and how far it runs. A plume is a long
   // slim ear (about 6× longer than wide); a cattail is a short fat sausage.
-  const h0 = head === "plume" ? 0.58 : plume ? 0.64 : 0.7, h1 = plume ? 0.99 : 0.9;
+  const fan = head === "fan";
+  const h0 = head === "plume" ? 0.58 : fan ? 0.7 : plume ? 0.64 : 0.7, h1 = plume ? 0.99 : 0.9;
+  // Where the stem strip stops. A fan's stalk runs a little way INTO the base
+  // of its plumes: the plume texture is faint at its root, and a stalk that
+  // stopped exactly there would read as not joined.
+  const stemTop = fan ? Math.min(h1, h0 + 0.08) : h1;
 
   for (let k = 0; k < stems; k++) {
     const a = k * 2.39996 + rand() * 0.7;
@@ -377,8 +391,9 @@ function buildStalked(type, ctx, head) {
     const dir = [Math.cos(a), 0, Math.sin(a)];
     const side = [-Math.sin(a), 0, Math.cos(a)];
     // Nearly upright, leaning a little and bending under the head's weight.
-    const lean = 0.06 + sr * 0.14;
-    const bend = (type.droop ?? 0.3) * (plume ? 0.5 : 0.22);
+    // Susuki stalks are cane-like: they barely lean and do not bow.
+    const lean = fan ? 0.03 + sr * 0.07 : 0.06 + sr * 0.14;
+    const bend = (type.droop ?? 0.3) * (fan ? 0.08 : plume ? 0.5 : 0.22);
     const line = archCurve(Math.max(segs, rings + 2), len, lean, bend);
     const at = (t) => {
       const jf = t * (line.length - 1);
@@ -388,13 +403,13 @@ function buildStalked(type, ctx, head) {
       return { p: [dir[0] * r, y, dir[2] * r], fwd: norm([Math.sin(th) * dir[0], Math.cos(th), Math.sin(th) * dir[2]]) };
     };
 
-    // ── The stem: a thin strip on edge ──
+    // ── The stem: a thin strip on edge (a susuki cane is twice as wide) ──
     {
-      const w = 0.006 * (type.stemWidth ?? 1) * height;
+      const w = 0.006 * (fan ? 2 : 1) * (type.stemWidth ?? 1) * height;
       const base = vcount();
       for (let q = 0; q <= segs; q++) {
         const t = q / segs;
-        const { p, fwd } = at(t * h1);
+        const { p, fwd } = at(t * stemTop);
         const n = norm(cross(fwd, side));
         for (const s of [-1, 1]) push(add(p, side, s * w), n, s * 0.5 + 0.5, t, [1, t, sr, 0]);
       }
@@ -435,6 +450,46 @@ function buildStalked(type, ctx, head) {
           const tipH = add(add(p, outDir, hairLen), [0, -1, 0], (type.droop ?? 0.4) * hairLen * 0.3);
           push(tipH, n, 0.5, 1, [2, t, hr, 1]);
           I.push(base, base + 2, base + 1, base + 1, base + 2, base + 3, base + 2, base + 4, base + 3);
+        }
+      }
+    } else if (fan) {
+      // ── A FAN of plumes out of the stalk's tip, the miscanthus flower head:
+      // each plume is two crossed cards carrying the strand texture, leaving
+      // the tip at its own angle round the stalk and drooping outward. ──
+      const count = Math.max(1, Math.round((type.plumesPerStem ?? 4) * (far ? 0.5 : 1)));
+      const spread = ((type.plumeSpread ?? 30) * Math.PI) / 180;
+      const segsP = near ? 5 : far ? 2 : 3;
+      const tip = at(h0);
+      const across = norm(cross(tip.fwd, side));
+      const plumeLen = (h1 - h0) * len * 1.35;
+      for (let k2 = 0; k2 < count; k2++) {
+        const pr = rand();
+        // Round the stalk, the first plume carrying on straight up the middle.
+        const ring = k2 * 2.39996 + pr * 0.6;
+        const tilt = count === 1 || k2 === 0 ? spread * 0.2 : spread * (0.6 + pr * 0.5);
+        const radial = norm(add(add([0, 0, 0], across, Math.cos(ring)), side, Math.sin(ring)));
+        const dir = norm(add(add([0, 0, 0], tip.fwd, Math.cos(tilt)), radial, Math.sin(tilt)));
+        const Lk = plumeLen * (0.8 + pr * 0.35);
+        const halfW = Lk * 0.2 * (type.leafletWidth ?? 1);
+        // Plumes rise and only arc over toward their tips.
+        const droop = (type.droop ?? 0.5) * 0.2;
+        for (const cardAngle of [0, Math.PI / 2]) {
+          const ca = Math.cos(cardAngle), sa = Math.sin(cardAngle);
+          const dAcross = norm(cross(dir, [0, 1, 0.001]));
+          const dUp = norm(cross(dAcross, dir));
+          const wide = norm(add(add([0, 0, 0], dAcross, ca), dUp, sa));
+          const n = norm(cross(dir, wide));
+          const base = vcount();
+          for (let q = 0; q <= segsP; q++) {
+            const v = q / segsP;
+            // Droops with length: the plume hangs from the tip, heaviest at its end.
+            const c = add(add(tip.p, dir, Lk * v), [0, -1, 0], droop * Lk * v * v);
+            for (const s of [-1, 1]) push(add(c, wide, s * halfW), n, s * 0.5 + 0.5, v, [2, v, pr, v]);
+          }
+          for (let q = 0; q < segsP; q++) {
+            const i0 = base + q * 2;
+            I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3);
+          }
         }
       }
     } else if (head === "plume") {

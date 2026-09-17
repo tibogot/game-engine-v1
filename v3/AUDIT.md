@@ -1070,6 +1070,23 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
      under every erase and Clear all survive; a flowers-mode erase-all clears
      placed plants too; save → load keeps settings, cut-out leaves, collision
      and instances. Test: tools/placedPlantsTest.mjs (19 checks).
+     **SUSUKI = A FOLIAGE PLANT — DONE 2026-09-17** (user: stems looked
+     detached, plumes grey, stems too dark and too bendy, and why a separate
+     section). The old renderer (susukiSystem.js: dark ribbon stems that taper
+     to nothing under plume cards whose texture is empty at the root) and its
+     panel are deleted. Susuki is now the foliage system run a second time with
+     ONE plant — kind `susuki`: pampas's leaves and material with a FAN of 4
+     plumes (plumesPerStem, plumeSpread) rising out of each stalk's tip — on
+     its own far field (SUSUKI_FIELD: 400 m tile, 288² slots, fade 150-195 m;
+     foliage's 192 m tile fades by 95 m). Stalks are canes: twice the strip
+     width, barely lean, no bow, field flex 0.3; the stalk runs 8% into the
+     plume base so the join reads. Card in Plants (the header's groups now
+     hold cards from any system), the standard plant panel, shadows included.
+     Paint layer unchanged; save key `susuki` is now `{ version: 2, plant,
+     field }` — older files keep their paint and get the new look's defaults.
+     Cost, worst case (whole map filled, camera inside): ~5.0 ms GPU vs ~4.1
+     for the old renderer (leaves + full fans up close); its shadows are
+     within noise. Fewer plumes/stalks or a shorter near-detail distance trim it.
      Next (5b): wind sway for placed plants. Not planned yet: impostors for
      GLB plants far away (the tree impostor baker takes prop-shaped entries).
      **Foliage mode (F)**: EIGHT painted plants (four types fit one RGBA
