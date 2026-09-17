@@ -267,7 +267,7 @@ panel.innerHTML = "";
       cliffHint.style.cssText =
         "margin:2px 0 6px; font-size:11px; color:var(--text-dim); line-height:1.35;";
       cliffHint.textContent =
-        "Procedural debug cliffs — walk, drive and land on their real shape (not a box). Rotate/scale/overlap freely; collision follows instantly, no rebake needed.";
+        "Procedural chipped cliffs (same generator as the rocks, flat top) — walk, drive and land on their real shape (not a box). Rotate/scale/overlap freely; collision follows instantly, no rebake needed.";
       cliffBody.appendChild(cliffHint);
       for (const presetName of app.getCliffPresetNames?.() ?? []) {
         _button(cliffBody, {

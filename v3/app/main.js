@@ -115,8 +115,9 @@ import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
 import { createColliderGroup } from "../physics/colliderGroup.js";
 import { createSplineFeatureColliderStore } from "../physics/splineFeatureCollider.js";
-import { createProceduralCliffGeometry, CLIFF_PRESETS } from "../props/proceduralCliff.js";
-import { createRockKitGeometry, ROCK_CLASSES, ROCK_KIT } from "../props/proceduralRock.js";
+import { createRockGeometry, createRockKitGeometry, ROCK_CLASSES, ROCK_KIT, ROCK_CLIFF_PRESETS } from "../props/proceduralRock.js";
+// Cliffs are the rock generator with a flat top (the strata kit is gone).
+const CLIFF_PRESETS = [...ROCK_CLIFF_PRESETS];
 import { simplifierReady } from "../render/instancing/autoLod.js";
 import { GREYBOX_KIT, buildGreyboxGeometry } from "../props/greyboxKit.js";
 import { applyCliffTerrainBlend, createCliffGlbBlendMaterial } from "../props/cliffTerrainBlend.js";
@@ -6110,7 +6111,7 @@ export async function startV3App(opts = {}) {
     uiById("props-panel")?._rebuildPropUi?.();
   }
 
-  // Procedural strata cliff — placed/edited like any prop, but the type is
+  // Procedural chipped cliff — placed/edited like any prop, but the type is
   // flagged `solid` so SolidCollider gives it real-triangle collision and the
   // box-proxy player bake skips it.
   function addCliff(presetName) {
@@ -6122,7 +6123,7 @@ export async function startV3App(opts = {}) {
       uiById("props-panel")?._rebuildPropUi?.();
       return;
     }
-    const geometry = createProceduralCliffGeometry(preset.params);
+    const geometry = createRockGeometry(preset.params);
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
     const material = createMaterialForLibrary(defaultPropMat, { triplanar: true });
@@ -8941,6 +8942,33 @@ export async function startV3App(opts = {}) {
         }
         return stats;
       },
+      /*
+       * Chipped cliff test: the rock generator with a top cut (see
+       * ROCK_CLIFF_PRESETS). Each entry = one cliff type, in a row at the
+       * orbit target, through addCliff (solid + terrain blend). Entries are
+       * overrides on the "Cliff: Chip Pillar" preset. Session-only.
+       *
+       *   __V3_DEBUG.cliffPreview([{ seed: 1 }, { seed: 2, topCut: 0.4 }])
+       */
+      cliffPreview(list = [{ seed: 1 }, { seed: 2 }, { seed: 3 }, { seed: 4 }], { spacing = 40, scale = 1 } = {}) {
+        const cx = controls.target.x, cz = controls.target.z;
+        const out = [];
+        const base = ROCK_CLIFF_PRESETS[0].params;
+        list.forEach((over, i) => {
+          const params = { ...base, ...over };
+          const name = `Cliff: Chip test ${JSON.stringify(over)}`;
+          if (!CLIFF_PRESETS.some((c) => c.name === name)) CLIFF_PRESETS.push({ name, generator: "rock", params });
+          addCliff(name);
+          const slot = propSlots.find((s) => s.name === name && s.builtin);
+          if (!slot) return;
+          const x = cx + (i - (list.length - 1) / 2) * spacing * scale, z = cz;
+          propStore.addInstance(slot.typeIdx, x, terrainStoreAdapter.getWorldHeight(x, z) - 1 * scale, z, {
+            ry: i * 73, sx: scale, sy: scale, sz: scale,
+          });
+          out.push(propStore.types[slot.typeIdx].entries[0].geometry.userData.rock);
+        });
+        return out;
+      },
       rockStress({ count = 5000, radius = 150, stand = true } = {}) {
         let seed = 0x2545f491;
         const rnd = () => {                                // mulberry32
@@ -8998,7 +9026,7 @@ export async function startV3App(opts = {}) {
         };
         const slotOf = (name) => propSlots.find((s) => s.name === name && s.builtin)?.typeIdx;
         const scatter = ["Cube", "Sphere", "Cylinder", "Cone", "Torus"];
-        const cliffs = ["Cliff: Crag", "Cliff: Spire", "Cliff: Wall", "Cliff: Ledge"];
+        const cliffs = ROCK_CLIFF_PRESETS.map((c) => c.name);
         for (const s of scatter) addPrimitive(s);
         for (const c of cliffs) addCliff(c);
         const scatterTypes = scatter.map(slotOf).filter((t) => t != null);

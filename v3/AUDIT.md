@@ -1187,12 +1187,21 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
 
 ## Rocks & cliffs — made in Blender, not generated (decided 2026-09-17)
 
-105. ~~Procedural rock & cliff generator~~ — DROPPED, do not reopen. An SDF
-     generator (rounded prisms + carved grooves, surface nets, meshoptimizer)
-     was built and judged unusable against the stylized reference look, then
-     removed. Cliffs and rocks are modelled in Blender and brought in with
-     Props → Add Cliff → Import Cliff GLB (solid collision + terrain blend).
-     No procedural cliff work is needed.
+105. **Procedural cliffs = the rock generator with a flat top (2026-09-17,
+     look being judged 👁).** Two dead ends first: an SDF generator (rounded
+     prisms + carved grooves, surface nets) and a "chipped column" generator
+     (straight walls, stacked fused eggs) — both unusable: a chip plane only
+     stays small on a surface that curves away in every direction, so straight
+     walls turn chips into rim bevels or vertical strips. The reference cliffs
+     are LUMPS with flat tops, so proceduralRock.js gained `topCut`,
+     `maxChipUp` and `squareness` (rock kit output unchanged) and
+     ROCK_CLIFF_PRESETS (Chip Pillar / Slab / Mesa / Block) go through addCliff.
+     Facet size follows chip DEPTH (~sqrt(2·R·d) spread): cliff-scale facets
+     need many shallow chips, few big cuts, simplifier error below chip depth.
+     The strata kit (proceduralCliff.js, Crag/Butte/Spire/Wall/Ledge/Mesa) is
+     DELETED; projects that used it skip those slots with a console warning.
+     Open: user verdict; ~0.7 s per cliff on the main thread (worker/cache
+     before it is a kit); the arch/holes stay Blender or kitbash.
 106. **Procedural rock kit — shape approved 👁 2026-09-17, shading next.**
      v3/props/proceduralRock.js: dense sphere pushed radially to the nearer of
      an egg (lumps) and ~55 chip planes + a few big cuts, soft-min chip edges,

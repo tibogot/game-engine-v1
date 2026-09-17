@@ -54,6 +54,12 @@ export const DEFAULT_ROCK_PARAMS = {
   bigMax: 0.3,
   /** Flat base cut depth, fraction of sizeY (0 = round bottom). */
   baseCut: 0.12,
+  /** Flat TOP cut depth, fraction of sizeY (0 = none). Cliffs: ~0.3. */
+  topCut: 0,
+  /** Chips facing more upward than this are skipped (keeps a cut top flat). */
+  maxChipUp: 1,
+  /** Body profile: 2 = ellipsoid, higher = straighter walls, flatter caps. */
+  squareness: 2,
   /** Chip edge softness, fraction of mean size. */
   edgeSoft: 0.012,
   /** Sphere tessellation (IcosahedronGeometry detail). */
@@ -85,7 +91,18 @@ export function createRockGeometry(params = {}) {
   const eggR = (x, y, z) => {
     const ey = 1 + p.egg * -y; // wider where y < 0
     const ax = p.sizeX * ey, az = p.sizeZ * ey;
-    let r = 1 / Math.sqrt((x / ax) ** 2 + (y / p.sizeY) ** 2 + (z / az) ** 2);
+    let r;
+    if (p.squareness === 2) {
+      r = 1 / Math.sqrt((x / ax) ** 2 + (y / p.sizeY) ** 2 + (z / az) ** 2);
+    } else {
+      // superellipsoid: straighter walls and flatter caps, still curved
+      // everywhere so chips stay local
+      const e = p.squareness;
+      r = 1 / Math.pow(
+        Math.pow(Math.abs(x / ax), e) + Math.pow(Math.abs(y / p.sizeY), e) + Math.pow(Math.abs(z / az), e),
+        1 / e,
+      );
+    }
     let l = 0;
     for (const o of lobes) {
       const c = Math.max(0, o.v.x * x + o.v.y * y + o.v.z * z);
@@ -110,15 +127,18 @@ export function createRockGeometry(params = {}) {
     tmp.x += (rng() - 0.5) * j; tmp.y += (rng() - 0.5) * j; tmp.z += (rng() - 0.5) * j;
     tmp.normalize().applyQuaternion(rot);
     const depth = p.chipMin + (p.chipMax - p.chipMin) * Math.pow(rng(), p.chipBias);
+    if (tmp.y > p.maxChipUp) continue;
     planes.push(tmp.x, tmp.y, tmp.z, eggR(tmp.x, tmp.y, tmp.z) * (1 - depth));
   }
   for (let i = 0; i < p.bigCuts; i++) {
     // mostly on the sides and upper half — the lower half is buried or in shade
     tmp.set(rng() * 2 - 1, rng() * 1.4 - 0.5, rng() * 2 - 1).normalize();
     const depth = p.bigMin + (p.bigMax - p.bigMin) * rng();
+    if (tmp.y > p.maxChipUp) continue;
     planes.push(tmp.x, tmp.y, tmp.z, eggR(tmp.x, tmp.y, tmp.z) * (1 - depth));
   }
   if (p.baseCut > 0) planes.push(0, -1, 0, p.sizeY * (1 - p.baseCut));
+  if (p.topCut > 0) planes.push(0, 1, 0, p.sizeY * (1 - p.topCut));
   const P = new Float64Array(planes);
   const pc = P.length / 4;
 
@@ -210,6 +230,28 @@ export const ROCK_KIT = [
   ...[1, 2, 3].map((seed, i) => ({ name: `Rock: Lump ${"ABC"[i]}`, cls: "lump", seed })),
   ...[1, 2, 3].map((seed, i) => ({ name: `Rock: Stone ${"ABC"[i]}`, cls: "rock", seed })),
   ...[1, 2].map((seed, i) => ({ name: `Rock: Pebble ${"AB"[i]}`, cls: "pebble", seed })),
+];
+
+/**
+ * Cliffs are the SAME generator: a lump, wider at the top (negative egg),
+ * straighter walls, chipped, with a flat walkable top cut. Being proven —
+ * the strata presets stay until then.
+ */
+// Facet size follows chip DEPTH (a cut d deep on a body of radius R spreads
+// ~sqrt(2Rd)), so cliff-scale facets of 2-5 m need many SHALLOW chips, few
+// big cuts, and a simplifier error budget below the chip depth.
+const CLIFF_BASE = {
+  egg: -0.3, lump: 0.06, squareness: 2.4,
+  chips: 160, chipMin: 0.02, chipMax: 0.06, chipBias: 1.3, chipJitter: 0.7,
+  bigCuts: 4, bigMin: 0.06, bigMax: 0.12, maxChipUp: 0.7,
+  topCut: 0.3, baseCut: 0.15, edgeSoft: 0.006,
+  detail: 60, targetTriangles: 8000, simplifyError: 0.006,
+};
+export const ROCK_CLIFF_PRESETS = [
+  { name: "Cliff: Chip Pillar", generator: "rock", params: { ...CLIFF_BASE, seed: 1, sizeX: 9, sizeY: 21, sizeZ: 8, egg: -0.25, topCut: 0.28 } },
+  { name: "Cliff: Chip Slab",   generator: "rock", params: { ...CLIFF_BASE, seed: 2, sizeX: 18, sizeY: 12, sizeZ: 10, topCut: 0.35 } },
+  { name: "Cliff: Chip Mesa",   generator: "rock", params: { ...CLIFF_BASE, seed: 3, sizeX: 16, sizeY: 10, sizeZ: 14, egg: -0.2, topCut: 0.4 } },
+  { name: "Cliff: Chip Block",  generator: "rock", params: { ...CLIFF_BASE, seed: 5, sizeX: 18, sizeY: 12, sizeZ: 10, topCut: 0.35, squareness: 3 } },
 ];
 
 /** Geometry for a kit entry by name, or null. */
