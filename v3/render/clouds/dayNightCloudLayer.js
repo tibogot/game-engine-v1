@@ -39,8 +39,9 @@ import {
 } from "three/tsl";
 import { createGodRaysPass } from "./godRaysPass.js";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
+import { LAYERS } from "../layers.js";
 
-const CLOUD_LAYER = 18;
+const CLOUD_LAYER = LAYERS.CLOUD_DECK;
 const MAX_OCC_STEPS = 16;
 // V2 NOTE: lab uses 8000, but v2's main camera has `far = 5000`, so an 8000
 // dome is clip-space culled and the raymarch never rasterizes (no clouds). The

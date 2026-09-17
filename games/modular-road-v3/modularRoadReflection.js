@@ -38,6 +38,7 @@
  */
 
 import * as THREE from "three";
+import { LAYERS } from "../../v3/render/layers.js";
 
 /**
  * The layer reflection-only geometry lives on.
@@ -52,7 +53,7 @@ import * as THREE from "three";
  * so a light left on layer 0 lights the car in the main view and leaves it
  * black in the mirror.
  */
-export const REFLECT_LAYER = 1;
+export const REFLECT_LAYER = LAYERS.REFLECT;
 
 /**
  * The layer for geometry that is ALREADY MIRRORED, drawn with the REAL camera.
@@ -71,7 +72,7 @@ export const REFLECT_LAYER = 1;
  * Objects here SET the layer instead of enabling it: a mirrored rail must never
  * appear in the main view.
  */
-export const PREMIRROR_LAYER = 2;
+export const PREMIRROR_LAYER = LAYERS.PREMIRROR;
 
 /**
  * Clip → 0..1 texture space, WITH V FLIPPED.

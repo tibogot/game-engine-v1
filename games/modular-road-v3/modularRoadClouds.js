@@ -62,9 +62,10 @@ import {
   BASE_SIZE, DETAIL_SIZE, NEAR_SIZE, WEATHER_SIZE, BLUE_NOISE_SIZE, bakeBlueNoise,
   densityAtCPU, SOLID_BASE_SIZE, SOLID_WEATHER_SIZE, solidDensityAtCPU,
 } from "./modularRoadCloudNoise.js";
+import { LAYERS } from "../../v3/render/layers.js";
 
 /** Layer the cloud dome lives on, so the main scene pass skips it and we march it alone. */
-export const CLOUD_LAYER = 19;
+export const CLOUD_LAYER = LAYERS.GAME_CLOUDS;
 
 /** Loop bounds. TSL `Loop` compiles to a fixed trip count, so these are compile-time
  *  ceilings; the runtime uniforms (`steps`, `lightSteps`) cut the loop short via Break. */

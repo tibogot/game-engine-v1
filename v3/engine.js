@@ -41,6 +41,7 @@ export const PUBLIC_ENGINE_MODULES = [
   // The editor stylesheet — game dev panels reuse its look
   "v3/styles/editor.css",
   // Rendering helpers
+  "v3/render/layers.js",
   "v3/render/bloomMRT.js",
   "v3/render/instancePipeline.js",
   "v3/render/gpuStatsPanel.js",

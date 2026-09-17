@@ -30,6 +30,7 @@
  */
 import * as THREE from "three/webgpu";
 import { createDayNightCloudLayer } from "../../v3/render/clouds/dayNightCloudLayer.js";
+import { LAYERS } from "../../v3/render/layers.js";
 
 /**
  * The editor deck's shipped defaults, copied from v2/app/config.js
@@ -130,7 +131,7 @@ export function createCloudBenchmark({ renderer, scene, camera, clouds, sunDir, 
   }
 
   const GAME_LAYER = clouds.CLOUD_LAYER;
-  const DECK_LAYER = 18; // CLOUD_LAYER in dayNightCloudLayer.js
+  const DECK_LAYER = LAYERS.CLOUD_DECK;
 
   /** Baseline: the scene with no cloud system at all, straight to the canvas. */
   function renderNone() {

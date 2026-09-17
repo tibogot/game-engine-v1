@@ -5,6 +5,7 @@ const _viewInvShared = new THREE.Matrix4();
 import { WORLD_SIZE } from "../terrain/heightmapTexture.js";
 import { shareInstancePipeline } from "../render/instancePipeline.js";
 import { simplifyEntries, simplifierReady } from "../render/instancing/autoLod.js";
+import { MAX_SHADOW_CASCADE_LAYERS, shadowCascadeLayer } from "../render/layers.js";
 
 const _tmp       = new THREE.Matrix4();
 const _tmpDelta  = new THREE.Matrix4();
@@ -38,7 +39,7 @@ const CELL_COUNT = Math.ceil(WORLD_SIZE / CELL_SIZE);
  * cascades. Cascade 0's box is ~24 m across and cascade 1's ~85 m, so most of
  * that was work no fragment could ever sample.
  *
- * Now each cascade owns an instanced mesh on layer SHADOW_LAYER_BASE + i,
+ * Now each cascade owns an instanced mesh on layer shadowCascadeLayer(i),
  * holding only the instances inside THAT cascade, drawn with the cheapest
  * geometry the type has. three makes this work in two places: a shadow camera
  * keeps its own layer mask as long as any layer above 0 is enabled
@@ -48,10 +49,13 @@ const CELL_COUNT = Math.ceil(WORLD_SIZE / CELL_SIZE);
  * cascade camera keeps layer 0, so terrain, trees and the player still cast
  * into every cascade exactly as before.
  *
- * Layers 1-7 are free in v3 (the cloud deck uses 18).
+ * The layer numbers come from v3/render/layers.js. They were 1-4 once, which
+ * modular-road-v3 already used for its reflection, pre-mirror and rain passes.
+ * And the layers are only enabled while there is a prop to cast: enabling one
+ * also stops three copying the main camera's mask onto the cascade camera, a
+ * change a game with no engine props should never see.
  */
-const SHADOW_LAYER_BASE     = 1;
-const MAX_SHADOW_CASCADES   = 4;
+const MAX_SHADOW_CASCADES   = MAX_SHADOW_CASCADE_LAYERS;
 /*
  * The cascade cameras are positioned by the CSM during the render, so the
  * boxes we test against here are one frame old. At 60 Hz a sprinting camera
@@ -312,7 +316,7 @@ export class PropInstancer {
         inst.castShadow    = true;
         inst.receiveShadow = false;            // it is never seen, only sampled
         inst.frustumCulled = false;
-        inst.layers.set(SHADOW_LAYER_BASE + i);
+        inst.layers.set(shadowCascadeLayer(i));
         this.scene.add(inst);
         return { im: inst, localMatrix, cap: inst.instanceMatrix.count, _written: false };
       });
@@ -330,6 +334,15 @@ export class PropInstancer {
     tr.shadowKey = "";
   }
 
+  /** Take the shadow-list layers back off a CSM's cascade cameras. */
+  _releaseShadowLayers(csm) {
+    const lights = csm?.lights;
+    if (!lights) return;
+    for (let i = 0; i < Math.min(lights.length, MAX_SHADOW_CASCADES); i++) {
+      lights[i].shadow?.camera?.layers.disable(shadowCascadeLayer(i));
+    }
+  }
+
   /** Drop every shadow list — used when the CSM goes away or is rebuilt. */
   _disposeAllShadowMeshes() {
     for (const tr of this._typeRender) this._disposeShadowMeshes(tr);
@@ -343,7 +356,11 @@ export class PropInstancer {
   _assignShadow() {
     const lights = this._shadowCsm?.lights;
     const n = Math.min(lights?.length ?? 0, MAX_SHADOW_CASCADES);
-    if (!n || !this._castShadow) return false;
+    // Nothing to cast: leave the cascade cameras exactly as three set them up.
+    if (!n || !this._castShadow || this._cacheCount === 0) {
+      this._releaseShadowLayers(this._shadowCsm);
+      return false;
+    }
 
     // Cascade frusta, from the cameras the CSM positioned last frame.
     this._shadowFrusta.length = n;
@@ -356,7 +373,7 @@ export class PropInstancer {
       // A cascade camera must keep layer 0 (terrain, trees, the player) AND
       // its own layer. Enabling a layer above 0 is also what stops three
       // overwriting the mask with the main camera's.
-      cam.layers.enable(SHADOW_LAYER_BASE + i);
+      cam.layers.enable(shadowCascadeLayer(i));
     }
     this._shadowCascades = n;
 
@@ -823,6 +840,7 @@ export class PropInstancer {
    */
   setShadowCsm(csm) {
     if (csm === this._shadowCsm) return;
+    this._releaseShadowLayers(this._shadowCsm);
     this._shadowCsm = csm ?? null;
     this._disposeAllShadowMeshes();
     this._lastShadowCamN = -1;

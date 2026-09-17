@@ -116,17 +116,16 @@ import {
   instancedArray, instanceIndex, hash, deltaTime, time,
   positionWorld, positionGeometry, billboarding, cameraPosition,
 } from "three/tsl";
+import { LAYERS } from "../../v3/render/layers.js";
 
 /**
- * The layer a mesh must enable to STOP RAIN.
- *
- * 1 and 2 are REFLECT_LAYER and PREMIRROR_LAYER (modularRoadReflection.js),
- * 18 and 19 are the two cloud decks. 3 is free.
+ * The layer a mesh must enable to STOP RAIN. Allocated in v3/render/layers.js
+ * with every other layer, so nothing else can land on it.
  *
  * Objects ENABLE this rather than being moved to it, so a deck piece collides
  * with rain and still draws normally, with no clone and no second material.
  */
-export const RAIN_COLLIDER_LAYER = 3;
+export const RAIN_COLLIDER_LAYER = LAYERS.RAIN_COLLIDER;
 
 /**
  * Authored defaults. Everything the look depends on is a uniform, so the lab
