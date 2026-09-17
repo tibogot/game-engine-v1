@@ -82,6 +82,8 @@ import {
   registerProceduralObjectFactories,
 } from "../../v2/core/props/proceduralObjectProps.js";
 import { buildPropsPanel, defaultBakeProceduralThumbnails } from "../ui/buildPropsPanel.js";
+import { bakeObjectThumbnails } from "../../v2/tools/objectThumbnails.js";
+import { thumbKey, getThumb, putThumb } from "../props/rockThumbnailCache.js";
 import { buildSplinePanel } from "../ui/buildSplinePanel.js";
 import { DEFAULT_SPLINE_STATE } from "./state/splineState.js";
 import { SplineSystem } from "../../v2/tools/spline/splineSystem.js";
@@ -116,7 +118,7 @@ import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
 import { createColliderGroup } from "../physics/colliderGroup.js";
 import { createSplineFeatureColliderStore } from "../physics/splineFeatureCollider.js";
-import { createRockGeometry, createRockKitGeometry, ROCK_CLASSES, ROCK_KIT, ROCK_CLIFF_PRESETS } from "../props/proceduralRock.js";
+import { getRockGeometry, createRockKitGeometry, rockKitParams, ROCK_CLASSES, ROCK_KIT, ROCK_CLIFF_PRESETS } from "../props/proceduralRock.js";
 // Cliffs are the rock generator with a flat top (the strata kit is gone).
 const CLIFF_PRESETS = [...ROCK_CLIFF_PRESETS];
 import { simplifierReady } from "../render/instancing/autoLod.js";
@@ -6614,7 +6616,7 @@ export async function startV3App(opts = {}) {
       uiById("props-panel")?._rebuildPropUi?.();
       return;
     }
-    const geometry = createRockGeometry(preset.params);
+    const geometry = getRockGeometry(preset.params);
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
     const material = createMaterialForLibrary(defaultPropMat, { triplanar: true });
@@ -6727,6 +6729,60 @@ export async function startV3App(opts = {}) {
         halfWorld: WORLD_SIZE * 0.5,
       });
     };
+  }
+
+  // Panel thumbnails for the rock kit and the chipped cliffs. Baked in the
+  // background one tile at a time (yielding between, a cliff generation is
+  // ~0.7 s), cached in IndexedDB by generator params, replayed from memory to
+  // any later listener. The generated geometry is memoised, so clicking a card
+  // after its thumbnail baked reuses the mesh instead of generating it again.
+  const _kitThumbs = new Map();          // preset name → data URL
+  const _kitThumbListeners = new Set();
+  let _kitThumbBake = null;
+
+  function bakeKitThumbnails(onTile, size = 128) {
+    for (const [name, url] of _kitThumbs) onTile(name, url);
+    _kitThumbListeners.add(onTile);
+    _kitThumbBake ??= _runKitThumbBake(size).catch((err) => {
+      console.warn("[V3] rock/cliff thumbnail bake failed:", err);
+      _kitThumbBake = null;
+    });
+    return _kitThumbBake;
+  }
+
+  async function _runKitThumbBake(size) {
+    await simplifierReady;
+    const entries = [
+      ...ROCK_KIT.map((k) => ({ name: k.name, params: rockKitParams(k.name) })),
+      ...ROCK_CLIFF_PRESETS.map((c) => ({ name: c.name, params: c.params })),
+    ];
+    let material = null;
+    for (const e of entries) {
+      if (_kitThumbs.has(e.name)) continue;
+      const key = thumbKey(e.params, size);
+      let url = await getThumb(key);
+      if (!url) {
+        // let the editor draw a frame between generations
+        await new Promise((r) => setTimeout(r, 60));
+        material ??= applyRockShading(new THREE.MeshStandardNodeMaterial({ color: ROCK_BASE_COLOR, roughness: 0.6 }));
+        const geometry = getRockGeometry(e.params);
+        // normalise to a 2 m sphere: the baker clamps tiny objects to a 0.5 m
+        // radius, which framed pebbles as specks
+        if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+        const unit = 1 / Math.max(1e-3, geometry.boundingSphere.radius);
+        const tiles = await withRendererSideWork(() => bakeObjectThumbnails({
+          renderer,
+          size,
+          fill: 1.25,
+          items: [{ key: e.name, make: () => { const m = new THREE.Mesh(geometry, material); m.scale.setScalar(unit); return m; } }],
+        }));
+        url = tiles.get(e.name) ?? null;
+        if (url) putThumb(key, url);
+      }
+      if (!url) continue;
+      _kitThumbs.set(e.name, url);
+      for (const fn of _kitThumbListeners) fn(e.name, url);
+    }
   }
 
   // Grey-box structure kit (props/greyboxKit.js) — parametric building blocks.
@@ -6944,6 +7000,7 @@ export async function startV3App(opts = {}) {
     getRockKitNames: () => ROCK_KIT.map((k) => k.name),
     rockSetState,
     setRockSetEnabled,
+    bakeKitThumbnails,
     addKitPiece,
     getKitPieceNames: () => GREYBOX_KIT.map((p) => p.name),
     importCliffGlb,

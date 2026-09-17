@@ -58,6 +58,36 @@ function installDropZone(el, { pickFile, onFile, hint = "Drop here" }) {
   };
 }
 
+/**
+ * A grid of thumbnail cards (same look as Procedural Objects) for preset
+ * names. Registers each card's picture element in `thumbs` so the background
+ * bake can fill it in later.
+ */
+function _kitThumbGrid(parent, names, prefix, columns, thumbs, onPick) {
+  const grid = document.createElement("div");
+  grid.style.cssText = `display:grid;grid-template-columns:repeat(${columns},1fr);gap:6px;padding:4px 0;`;
+  parent.appendChild(grid);
+  for (const name of names) {
+    const label = name.replace(prefix, "");
+    const card = document.createElement("button");
+    card.className = "section-btn";
+    card.title = name;
+    card.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:4px;height:auto;padding:6px;";
+    const thumb = document.createElement("div");
+    thumb.style.cssText =
+      "width:100%;aspect-ratio:1/1;background:#1b1b1b;border:1px solid var(--border,#3c3c3c);border-radius:4px;background-size:contain;background-repeat:no-repeat;background-position:center;";
+    const cap = document.createElement("span");
+    cap.textContent = label;
+    cap.style.cssText = "font-size:11px;line-height:1.15;text-align:center;white-space:normal;";
+    card.appendChild(thumb);
+    card.appendChild(cap);
+    card.addEventListener("click", () => onPick(name));
+    grid.appendChild(card);
+    thumbs.set(name, thumb);
+  }
+  return grid;
+}
+
 export async function defaultBakeProceduralThumbnails(renderer, size = 192) {
   return bakeObjectThumbnails({
     renderer,
@@ -251,15 +281,11 @@ panel.innerHTML = "";
       rockHint.textContent =
         "Boulders and lumps are solid, stones collide as a box, pebbles don't collide. Paint with random rotation and a scale range for variety.";
       rockBody.appendChild(rockHint);
-      for (const rockName of app.getRockKitNames?.() ?? []) {
-        _button(rockBody, {
-          title: rockName.replace(/^Rock: /, ""),
-          onClick: () => {
-            app.addRock(rockName);
-            rebuildAll();
-          },
-        });
-      }
+      const kitThumbs = new Map();   // preset name → thumbnail element (rocks + cliffs)
+      _kitThumbGrid(rockBody, app.getRockKitNames?.() ?? [], /^Rock: /, 3, kitThumbs, (name) => {
+        app.addRock(name);
+        rebuildAll();
+      });
 
       // Rock-set brush: Paint mode lays a natural mix of the whole kit
       if (app.rockSetState) {
@@ -298,15 +324,16 @@ panel.innerHTML = "";
       cliffHint.textContent =
         "Procedural chipped cliffs (same generator as the rocks, flat top) — walk, drive and land on their real shape (not a box). Rotate/scale/overlap freely; collision follows instantly, no rebake needed.";
       cliffBody.appendChild(cliffHint);
-      for (const presetName of app.getCliffPresetNames?.() ?? []) {
-        _button(cliffBody, {
-          title: presetName.replace(/^Cliff: /, ""),
-          onClick: () => {
-            app.addCliff(presetName);
-            rebuildAll();
-          },
-        });
-      }
+      _kitThumbGrid(cliffBody, app.getCliffPresetNames?.() ?? [], /^Cliff: /, 2, kitThumbs, (name) => {
+        app.addCliff(name);
+        rebuildAll();
+      });
+      // Thumbnails bake in the background (cached after the first time) and
+      // fill in as they arrive; a card works before its picture does.
+      app.bakeKitThumbnails?.((name, url) => {
+        const el = kitThumbs.get(name);
+        if (el) el.style.backgroundImage = `url("${url}")`;
+      });
       _button(cliffBody, {
         title: "Import Cliff GLB...",
         onClick: async () => {

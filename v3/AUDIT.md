@@ -1337,6 +1337,15 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      Measured: 642 rocks from 6 strokes in 6.2 ms total (planner 0.06 ms per
      stamp in Node); big-rock footprints never overlap. Brush settings are
      session-only (not saved with the project).
+     Panel thumbnails DONE 2026-09-17: Add Rock / Add Cliff are thumbnail
+     card grids (same look as Procedural Objects). Baked in the background at
+     editor boot, one tile per task, via bakeObjectThumbnails; cached in
+     IndexedDB (props/rockThumbnailCache.js, key = generator params + size +
+     THUMB_VERSION — bump it when the look changes without params changing).
+     Geometry is memoised (getRockGeometry), so the thumbnail's generation is
+     reused when a card is clicked: adding a cliff went ~0.7 s → 2 ms. Cold
+     bake cost: four ~200 ms frames at boot (the cliffs), once; a warm load
+     reads the 16 tiles from IndexedDB.
 
 ## Performance
 

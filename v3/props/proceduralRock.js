@@ -320,7 +320,30 @@ export const ROCK_CLIFF_PRESETS = [
 
 /** Geometry for a kit entry by name, or null. */
 export function createRockKitGeometry(name) {
+  const params = rockKitParams(name);
+  return params ? getRockGeometry(params) : null;
+}
+
+/** Generator params of a kit entry by name, or null. */
+export function rockKitParams(name) {
   const entry = ROCK_KIT.find((k) => k.name === name);
-  if (!entry) return null;
-  return createRockGeometry({ ...ROCK_PRESETS[entry.cls], seed: entry.seed });
+  return entry ? { ...ROCK_PRESETS[entry.cls], seed: entry.seed } : null;
+}
+
+/**
+ * Memoised createRockGeometry: the panel thumbnails and the prop type share
+ * one generation (a cliff is ~0.7 s). Only SIMPLIFIED results are kept — one
+ * made before the meshoptimizer WASM loaded is dense and must not stick.
+ * The geometry is shared, so callers must not dispose or mutate it.
+ */
+const _geometryCache = new Map();
+export function getRockGeometry(params) {
+  const key = JSON.stringify(params);
+  const hit = _geometryCache.get(key);
+  if (hit) return hit;
+  const geo = createRockGeometry(params);
+  if (geo.userData.rock.simplified || geo.userData.rock.denseTriangles <= (params.targetTriangles ?? 0)) {
+    _geometryCache.set(key, geo);
+  }
+  return geo;
 }
