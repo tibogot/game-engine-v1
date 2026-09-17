@@ -1185,6 +1185,35 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      rivers, tunnels, roads, splines, props; one engine entry file; racing-game
      code out of v3/play; the v2 files still used move in.
 
+## Rocks & cliffs — made in Blender, not generated (decided 2026-09-17)
+
+105. ~~Procedural rock & cliff generator~~ — DROPPED, do not reopen. An SDF
+     generator (rounded prisms + carved grooves, surface nets, meshoptimizer)
+     was built and judged unusable against the stylized reference look, then
+     removed. Cliffs and rocks are modelled in Blender and brought in with
+     Props → Add Cliff → Import Cliff GLB (solid collision + terrain blend).
+     No procedural cliff work is needed.
+106. **Procedural rock kit — shape approved 👁 2026-09-17, shading next.**
+     v3/props/proceduralRock.js: dense sphere pushed radially to the nearer of
+     an egg (lumps) and ~55 chip planes + a few big cuts, soft-min chip edges,
+     then meshoptimizer to a budget. INDEXED. Kit = 12 types: Boulder A-D,
+     Lump A-C, Stone A-C, Pebble A-B (props panel → Add Rock; restored on
+     load). LOD0 budgets 1200 / 1000 / 400 / 200 tris; auto-LOD builds 1 & 2.
+     Size classes, opt-in per type in propInstancer/propStore: `lodScale`
+     (LOD + fade distances × 1 / 1 / 0.5 / 0.2), `maxShadowCascade`
+     (stones ≤1, pebbles 0), collision solid / solid / box / `noCollide`.
+     Measured (1296×825, 4 interleaved rounds × 90 frames, mean): 5k rocks
+     +0.44 ms GPU with the size rules vs +0.65 ms without; 20k rocks +0.59 ms
+     vs +1.15 ms, 69 draws either way, rock tris 1.04 M vs 2.88 M. Kit
+     generation 0.7 s total. Debug: `__V3_DEBUG.rockPreview()`,
+     `rockStress({ count, radius })`.
+     Open: shading (dark underside, chip-edge highlight + crevice AO baked in
+     vertex attributes, one triplanar detail texture); boulder LOD0 reads a bit
+     low-poly up close at scale 3+ (try 2000 tris, LOD1 takes over at 60 m);
+     paint brush picks ONE type — a "rock set" brush (random kit shape, tilt,
+     non-uniform scale) is what makes a field look natural; save/load round
+     trip not yet checked in the browser.
+
 ## Performance
 
 Nothing left that is felt: the game is vsync-locked with ~4× GPU headroom.

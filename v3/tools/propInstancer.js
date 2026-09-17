@@ -390,6 +390,8 @@ export class PropInstancer {
             const ti = this._cacheTypes[ci];
             const tr = this._typeRender[ti];
             if (!tr?.shadow || this._hiddenAt(ci)) continue;
+            // opt-in per type: small things only cast into the near cascades
+            if (i > (this.store.types[ti]?.maxShadowCascade ?? Infinity)) continue;
 
             sph.center.set(this._cacheXs[ci], this._cacheYs[ci], this._cacheZs[ci]);
             sph.radius = this._cacheRadii[ci] + SHADOW_CULL_MARGIN;
@@ -728,6 +730,12 @@ export class PropInstancer {
 
     const counts = this._typeRender.map(tr => tr ? { lod0: 0, lod1: 0, lod2: 0 } : null);
     const sphere = this._sphere;
+    // Per-type `lodScale` (opt-in, e.g. procedural pebbles): the global LOD and
+    // fade distances × scale. Applied to distance² so _pickTier is unchanged.
+    const lodInv2 = this._typeRender.map((_, ti) => {
+      const s = this.store.types[ti]?.lodScale;
+      return s > 0 ? 1 / (s * s) : 1;
+    });
 
     for (let cz = 0; cz < CELL_COUNT; cz++) {
       for (let cx = 0; cx < CELL_COUNT; cx++) {
@@ -754,7 +762,7 @@ export class PropInstancer {
           // are about to skip, or a prop that walks off screen and back comes
           // back at whatever level it had when it left.
           let tier  = tiers[ci];
-          tier      = this._pickTier(dist2, tier, d0sq, d1sq, dFsq);
+          tier      = this._pickTier(dist2 * lodInv2[ti], tier, d0sq, d1sq, dFsq);
           tiers[ci] = tier;
           if (tier === 3) continue;
 

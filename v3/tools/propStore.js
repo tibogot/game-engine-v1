@@ -260,7 +260,7 @@ export class PropStore {
   forEachMeshInstance(cb) {
     for (const inst of this.instances) {
       const type = this.types[inst.typeIdx];
-      if (!type || type.live || type.solid) continue;
+      if (!type || type.live || type.solid || type.noCollide) continue;
       _ensureProxyGeo(type);
       if (!type.proxyGeo) continue;
 

@@ -116,6 +116,8 @@ import { SolidCollider } from "../physics/solidCollider.js";
 import { createColliderGroup } from "../physics/colliderGroup.js";
 import { createSplineFeatureColliderStore } from "../physics/splineFeatureCollider.js";
 import { createProceduralCliffGeometry, CLIFF_PRESETS } from "../props/proceduralCliff.js";
+import { createRockKitGeometry, ROCK_CLASSES, ROCK_KIT } from "../props/proceduralRock.js";
+import { simplifierReady } from "../render/instancing/autoLod.js";
 import { GREYBOX_KIT, buildGreyboxGeometry } from "../props/greyboxKit.js";
 import { applyCliffTerrainBlend, createCliffGlbBlendMaterial } from "../props/cliffTerrainBlend.js";
 import { CliffPaintMask } from "../../v2/core/cliffs/cliffPaintMask.js";
@@ -6145,6 +6147,46 @@ export async function startV3App(opts = {}) {
     uiById("props-panel")?._rebuildPropUi?.();
   }
 
+  // Procedural rock kit (props/proceduralRock.js) — chipped boulders down to
+  // pebbles. Meant for thousands of instances, so each size class carries its
+  // own LOD distance scale, last shadow cascade and collision (boulders solid,
+  // stones a box, pebbles nothing).
+  function addRock(rockName) {
+    const kit = ROCK_KIT.find((k) => k.name === rockName);
+    if (!kit) return;
+    const existing = propSlots.find((s) => s.name === rockName && s.builtin);
+    if (existing) {
+      propState.activeSlot = propSlots.indexOf(existing);
+      uiById("props-panel")?._rebuildPropUi?.();
+      return;
+    }
+    const geometry = createRockKitGeometry(rockName);
+    const defaultPropMat =
+      propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
+    const material = createMaterialForLibrary(defaultPropMat, { triplanar: false });
+    const typeIdx = propStore.registerPrimitive(rockName, geometry, material);
+    if (typeIdx < 0) return;
+    const cls = ROCK_CLASSES[kit.cls];
+    const type = propStore.types[typeIdx];
+    type.lodScale = cls.lodScale;
+    type.maxShadowCascade = cls.maxShadowCascade;
+    type.solid = cls.collide === "solid";
+    type.noCollide = cls.collide === "none";
+    propInstancer.onTypeRegistered(typeIdx);
+    const slotIdx = propSlots.length;
+    propSlots.push({
+      name: rockName,
+      loaded: true,
+      typeIdx,
+      builtin: true,
+      solid: type.solid,
+      materialId: defaultPropMat?.id ?? "__none__",
+      triplanar: false,
+    });
+    propState.activeSlot = slotIdx;
+    uiById("props-panel")?._rebuildPropUi?.();
+  }
+
   // Grey-box structure kit (props/greyboxKit.js) — parametric building blocks.
   // Each preset is one primitive type = one InstancedMesh = one draw call for any
   // count. Pieces with holes/slopes (`solid`) go through SolidCollider so the
@@ -6356,6 +6398,8 @@ export async function startV3App(opts = {}) {
     importPropGlb,
     addPrimitive,
     addCliff,
+    addRock,
+    getRockKitNames: () => ROCK_KIT.map((k) => k.name),
     addKitPiece,
     getKitPieceNames: () => GREYBOX_KIT.map((p) => p.name),
     importCliffGlb,
@@ -6539,6 +6583,11 @@ export async function startV3App(opts = {}) {
           _applySavedSlotMaterial(propSlots.length - 1, meta);
         } else if (meta.builtin && kitNames.has(meta.name)) {
           addKitPiece(meta.name);
+          _applySavedSlotMaterial(propSlots.length - 1, meta);
+        } else if (meta.builtin && ROCK_KIT.some((k) => k.name === meta.name)) {
+          // rocks are simplified at generation; without the WASM they come out dense
+          await simplifierReady;
+          addRock(meta.name);
           _applySavedSlotMaterial(propSlots.length - 1, meta);
         } else if (meta.builtin) {
           addPrimitive(meta.name);
@@ -8864,6 +8913,70 @@ export async function startV3App(opts = {}) {
           controls.update();
         }
         return { typeIdx, instances: propStore.instances.length };
+      },
+      /*
+       * Procedural rock kit (props/proceduralRock.js), through the real
+       * addRock path.
+       *
+       *   __V3_DEBUG.rockPreview()        // one of each kit shape in a row
+       *   __V3_DEBUG.rockStress()         // 5000 mixed rocks over 150 m, seeded
+       *   __V3_DEBUG.rockStress({ count: 20000, radius: 300 })
+       */
+      rockPreview({ scale = 2 } = {}) {
+        const cx = controls.target.x, cz = controls.target.z;
+        const rowZ = { boulder: 0, lump: 10, rock: 18, pebble: 24 };
+        const col = {};
+        const stats = {};
+        for (const kit of ROCK_KIT) {
+          addRock(kit.name);
+          const slot = propSlots.find((s) => s.name === kit.name && s.builtin);
+          if (!slot) continue;
+          const i = col[kit.cls] = (col[kit.cls] ?? -1) + 1;
+          const spacing = { boulder: 4.5, lump: 4.5, rock: 2.6, pebble: 1.2 }[kit.cls] * scale;
+          const x = cx + (i - 1.5) * spacing, z = cz + rowZ[kit.cls];
+          propStore.addInstance(slot.typeIdx, x, terrainStoreAdapter.getWorldHeight(x, z) - 0.05 * scale, z, {
+            ry: kit.seed * 47, sx: scale, sy: scale, sz: scale,
+          });
+          stats[kit.name] = propStore.types[slot.typeIdx].entries[0].geometry.userData.rock;
+        }
+        return stats;
+      },
+      rockStress({ count = 5000, radius = 150, stand = true } = {}) {
+        let seed = 0x2545f491;
+        const rnd = () => {                                // mulberry32
+          seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        for (const kit of ROCK_KIT) addRock(kit.name);
+        const byCls = {};
+        for (const kit of ROCK_KIT) {
+          const slot = propSlots.find((s) => s.name === kit.name && s.builtin);
+          if (slot) (byCls[kit.cls] ??= []).push(slot.typeIdx);
+        }
+        // a natural mix: few big, many small
+        const mix = [["boulder", 0.08, 1.5, 3.5], ["lump", 0.1, 1.2, 3], ["rock", 0.32, 0.8, 2], ["pebble", 0.5, 0.8, 2.5]];
+        for (let i = 0; i < count; i++) {
+          let r = rnd(), m = mix[mix.length - 1];
+          for (const e of mix) { if (r < e[1]) { m = e; break; } r -= e[1]; }
+          const types = byCls[m[0]];
+          if (!types) continue;
+          const ang = rnd() * Math.PI * 2, rad = radius * Math.sqrt(rnd());
+          const x = Math.cos(ang) * rad, z = Math.sin(ang) * rad;
+          const s = m[2] + (m[3] - m[2]) * rnd();
+          propStore.addInstance(types[(rnd() * types.length) | 0], x, terrainStoreAdapter.getWorldHeight(x, z) - 0.05 * s, z, {
+            rx: (rnd() - 0.5) * 16, ry: rnd() * 360, rz: (rnd() - 0.5) * 16,
+            sx: s * (0.85 + rnd() * 0.3), sy: s * (0.8 + rnd() * 0.4), sz: s * (0.85 + rnd() * 0.3),
+          });
+        }
+        if (stand) {
+          const y = terrainStoreAdapter.getWorldHeight(0, 0);
+          camera.position.set(0, y + 1.7, 0);
+          controls.target.set(40, terrainStoreAdapter.getWorldHeight(40, 0) + 1, 0);
+          controls.update();
+        }
+        return { instances: propStore.instances.length, types: propStore.types.length };
       },
       /*
        * A MIXED world, closer to a real level than 12k identical spheres:

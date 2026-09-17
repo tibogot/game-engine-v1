@@ -243,6 +243,24 @@ panel.innerHTML = "";
         });
       }
 
+      // --- Procedural rocks (chipped boulders → pebbles) ---
+      const rockBody = _section(panel, "Add Rock (procedural)", false);
+      const rockHint = document.createElement("p");
+      rockHint.style.cssText =
+        "margin:2px 0 6px; font-size:11px; color:var(--text-dim); line-height:1.35;";
+      rockHint.textContent =
+        "Boulders and lumps are solid, stones collide as a box, pebbles don't collide. Paint with random rotation and a scale range for variety.";
+      rockBody.appendChild(rockHint);
+      for (const rockName of app.getRockKitNames?.() ?? []) {
+        _button(rockBody, {
+          title: rockName.replace(/^Rock: /, ""),
+          onClick: () => {
+            app.addRock(rockName);
+            rebuildAll();
+          },
+        });
+      }
+
       // --- Cliffs (solid: real-triangle collision, acts like terrain) ---
       const cliffBody = _section(panel, "Add Cliff (solid)", false);
       const cliffHint = document.createElement("p");
