@@ -1077,21 +1077,29 @@ export async function startV3App(opts = {}) {
   }
 
   /**
-   * Material for a prop slot. The library's `__none__` entry used to mean "flat
-   * grey 0xcccccc", which gave a blockout no sense of scale at all — a 4 m kit
-   * wall and a 1 m cube were the same featureless surface. It now means the
-   * shared metric grid, in WORLD space, so a prop's cells line up with the
-   * terrain's underneath it and with the next prop along.
+   * Material for a prop slot.
    *
-   * World and not object space because props are InstancedMesh: one world matrix
-   * for every instance, so an object-origin grid would put every copy's origin
-   * in the same place (see createGridMaterial). World space is correct per
-   * instance by construction.
+   * The library's `__none__` entry used to mean "flat grey 0xcccccc", which gave
+   * a blockout no sense of scale — a 4 m kit wall and a 1 m cube were the same
+   * featureless surface. For BLOCKOUT props it now means the shared metric grid,
+   * in WORLD space, so a prop's cells line up with the terrain's underneath it
+   * and with the next prop along. World and not object space because props are
+   * InstancedMesh: one world matrix for every instance, so an object-origin grid
+   * would put every copy's origin in the same place (see createGridMaterial).
    *
-   * Anything with a real material in the library is untouched.
+   * `plain: true` is for props that HAVE A LOOK OF THEIR OWN. On a rock or a
+   * cliff, `__none__` does not mean "nothing" — it means "use the kit's own
+   * procedural shading", and that shading is a LAYER: both applyRockShading and
+   * applyCliffTerrainBlend do `mat.colorNode ?? materialColor` and multiply over
+   * it. Hand them a grid and the grid gets baked into the stone instead of
+   * replaced by it. Those callers ask for the flat base the layers expect.
+   *
+   * Anything with a real material in the library is untouched either way — a PBR
+   * rock texture is exactly what the shading layers want underneath them.
    */
   function propMaterialFor(libMat, opts = {}) {
     if (libMat && libMat.type !== "none") return createMaterialForLibrary(libMat, opts);
+    if (opts.plain) return createMaterialForLibrary(null, opts);
     return createGridMaterial({ mode: "world", triplanar: !!opts.triplanar });
   }
 
@@ -6284,7 +6292,10 @@ export async function startV3App(opts = {}) {
 
     const propMat = propTextureLibrary.getById(slot.materialId);
     if (!propMat) return false;
-    const newMat = propMaterialFor(propMat, { triplanar: !!slot.triplanar });
+    // `slot.kit` (rock/cliff kits) and bare `slot.solid` (imported cliff GLBs)
+    // both run a shading layer below, and both multiply over the base colour.
+    const layered = Boolean(slot.kit) || Boolean(slot.solid);
+    const newMat = propMaterialFor(propMat, { triplanar: !!slot.triplanar, plain: layered });
     // Procedural rocks/cliffs keep their baked shading through a material
     // change or a project load. Solid ROCKS never took the cliff grass blend:
     // before this, a reload gave boulders grass tops they did not have when added.
@@ -7040,7 +7051,7 @@ export async function startV3App(opts = {}) {
     const geometry = getRockGeometry(preset.params);
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
-    const material = propMaterialFor(defaultPropMat, { triplanar: true });
+    const material = propMaterialFor(defaultPropMat, { triplanar: true, plain: true });
     _finishKitMaterial(material, "cliff", defaultPropMat?.id === "__none__");
     const typeIdx = propStore.registerPrimitive(presetName, geometry, material);
     if (typeIdx < 0) return;
@@ -7068,7 +7079,15 @@ export async function startV3App(opts = {}) {
    * colour instead of its neutral grey.
    */
   function _finishKitMaterial(mat, kind, plain) {
-    if (plain && mat.color) mat.color.setHex(ROCK_BASE_COLOR);
+    if (plain) {
+      // Clear any base the factory supplied before the shading layers read it.
+      // They multiply over `mat.colorNode`, so a greybox grid left here would be
+      // baked into the rock rather than replaced by it — and with a colorNode
+      // set, `mat.color` is ignored entirely, so ROCK_BASE_COLOR would be lost
+      // too. Belt and braces: propMaterialFor already avoids making one.
+      mat.colorNode = null;
+      if (mat.color) mat.color.setHex(ROCK_BASE_COLOR);
+    }
     applyRockShading(mat);
     // Genshin-style terrain integration: painted terrain color on up-facing
     // tops + per-pixel contact band from the GPU heightmap hides the base seam.
@@ -7092,7 +7111,7 @@ export async function startV3App(opts = {}) {
     const geometry = createRockKitGeometry(rockName);
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
-    const material = propMaterialFor(defaultPropMat, { triplanar: false });
+    const material = propMaterialFor(defaultPropMat, { triplanar: false, plain: true });
     _finishKitMaterial(material, "rock", defaultPropMat?.id === "__none__");
     const typeIdx = propStore.registerPrimitive(rockName, geometry, material);
     if (typeIdx < 0) return;
