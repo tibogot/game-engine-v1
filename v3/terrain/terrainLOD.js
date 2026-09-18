@@ -15,6 +15,12 @@ import {
   smoothstep,
   step,
   length,
+  abs,
+  clamp,
+  fwidth,
+  max,
+  min,
+  pow,
   texture,
   uniform,
   positionLocal,
@@ -301,7 +307,7 @@ function createLODMaterial({
   heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
   splatOverlay, snowShared = null, lakebed = null,
   terrainNormals = null, riverSand = null, flowerTint = null, features = {},
-  terrainShadow = null, grassFar = null,
+  terrainShadow = null, grassFar = null, uCursorFalloff = null,
 }) {
   const F = { ...TERRAIN_FEATURES, ...features };
   const baseStyle = F.baseStyle ?? (F.tileGrid === false ? "flat" : "grid");
@@ -390,11 +396,32 @@ function createLODMaterial({
   // fetch, a smoothstep, two rotations and six steps per pixel, drawing a brush
   // cursor that a game has no way to move and no reason to show.
   let ring = null;
+  let ringFill = null;
   let maskOverlay = null;
   if (F.cursor) {
-    const d    = length(hmUV.sub(uCursorUV));
-    ring = step(uCursorRadius.sub(float(0.003)), d)
-         .mul(step(d, uCursorRadius.add(float(0.003))));
+    const d = length(hmUV.sub(uCursorUV)).toVar();
+
+    // OUTLINE, one crisp antialiased line at any brush size or zoom.
+    //
+    // It used to be two hard steps at a FIXED ±0.003 of heightmap UV — about
+    // 6 m of ground whatever the brush, so a 60 m brush drew a thin ring and a
+    // 5 m brush drew a blob wider than itself; it also thickened as you zoomed
+    // in and aliased badly. Unreal and Unity keep the outline the same on
+    // screen, so the width comes from the distance field's own pixel footprint
+    // instead, capped at a quarter of the radius for a brush smaller than a
+    // few pixels.
+    //
+    // fwidth stays in UNIFORM control flow (this block is a compile-time flag,
+    // never a shader branch): a derivative inside a branch is undefined in
+    // WGSL — see the TSL notes in the repo's memory.
+    // Line thickness in PIXELS (the one number to tune this cursor by).
+    const RING_PX = 2.6;
+    const pxUV  = fwidth(d).toVar();
+    const halfW = min(pxUV.mul(float(RING_PX * 0.5)), uCursorRadius.mul(float(0.25))).toVar();
+    ring = float(1).sub(
+      smoothstep(halfW.mul(float(0.6)), halfW.mul(float(1.4)), abs(d.sub(uCursorRadius))),
+    );
+
 
     const brushLocalUV = hmUV.sub(uCursorUV).div(uCursorRadius.mul(float(2))).add(float(0.5));
     const mc           = brushLocalUV.sub(float(0.5));
@@ -410,6 +437,13 @@ function createLODMaterial({
     // (square, diamond, etc.) don't produce hard straight boundary lines on far LOD.
     const radialFade   = smoothstep(uCursorRadius, uCursorRadius.mul(float(0.8)), d);
     maskOverlay = texture(uBrushMaskNode, rotBrushUV).r.mul(inBoundsX).mul(inBoundsY).mul(radialFade);
+
+    // FILL: where the stroke is STRONG, not just where it ends (Unity and
+    // Unreal both preview this). It is the brush's real footprint — the same
+    // mask^falloff the sculpt pass applies (sculptBrush getBrushFalloff) — so
+    // a square or diamond brush previews its own shape, not a circle. Faint:
+    // it must never hide the ground it describes.
+    ringFill = pow(maskOverlay, uCursorFalloff ?? float(2));
   }
 
   // ── Surface assembly — one Fn, real branches ───────────────────────────────
@@ -527,7 +561,12 @@ function createLODMaterial({
       col.assign(mix(
         col,
         vec3(float(1.0), float(0.95), float(0.2)),
-        ring.mul(float(0.9)).add(maskOverlay.mul(float(0.28))),
+        clamp(
+          ring.mul(float(0.9))
+            .add(ringFill.mul(float(0.10)))
+            .add(maskOverlay.mul(float(0.28))),
+          float(0), float(1),
+        ),
       ));
     }
 
@@ -593,7 +632,7 @@ export function createTerrainLOD(
   // retired 2026-09-13). The slot is kept so existing call sites line up.
   splatOverlay, snowShared = null, lakebed = null, _retiredGroundProc = null,
   features = {}, terrainNormals = null, riverSand = null, flowerTint = null,
-  terrainShadow = null, grassFar = null,
+  terrainShadow = null, grassFar = null, uCursorFalloff = null,
 ) {
   const group = new THREE.Group();
 
@@ -615,7 +654,7 @@ export function createTerrainLOD(
   const matArgs = {
     heightTexNode, uCenterXZ: uCenter, uCursorUV, uCursorRadius,
     uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed,
-    terrainNormals, riverSand, flowerTint, terrainShadow, grassFar,
+    terrainNormals, riverSand, flowerTint, terrainShadow, grassFar, uCursorFalloff,
   };
 
   const mesh = new THREE.Mesh(geometry, createLODMaterial({ ...matArgs, features }));

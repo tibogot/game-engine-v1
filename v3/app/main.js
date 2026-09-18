@@ -656,7 +656,10 @@ export async function startV3App(opts = {}) {
     );
   }
 
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap, grassFarShading);
+  // The cursor's fill shows the ACTIVE brush's falloff (see terrainLOD), kept
+  // in step by syncCursorFalloff() in the frame loop.
+  const uCursorFalloff = uniform(2);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap, grassFarShading, uCursorFalloff);
   scene.add(lod.group);
   /**
    * Terrain visibility — see the `terrain` block on the returned handle.
@@ -1590,6 +1593,23 @@ export async function startV3App(opts = {}) {
         else { _grassPushPrev[(1 + i) * 2] = NaN; }
       }
     }
+  }
+
+  /**
+   * The brush cursor's falloff, per mode — the fill under the ring is the
+   * stroke's own curve, so what you see is where the brush is strong.
+   */
+  function syncCursorFalloff() {
+    const f =
+      editorMode === "sculpt"     ? sculpt.uFalloff.value :
+      editorMode === "paint"      ? paintState.brush.falloff :
+      editorMode === "grass"      ? grassBrush.falloff :
+      editorMode === "susuki" || editorMode === "flowers"
+        || editorMode === "foliage" || editorMode === "vegPlaced" ? vegBrush.falloff :
+      editorMode === "treePaint"  ? (treeToolState.brush.falloff ?? 2) :
+      editorMode === "snow"       ? snowBrushState.falloff :
+      editorMode === "cliffPaint" ? cliffPaintBrush.falloff : 2;
+    uCursorFalloff.value = Math.max(0.05, f);
   }
 
   /** A ring runs only while grass shows; the Far ring also needs "Far blades". */
@@ -4027,6 +4047,7 @@ export async function startV3App(opts = {}) {
       // Branch gates: the terrain shader skips the splat and snow blocks
       // entirely while their maps are empty. The checks are cached CPU flags —
       // a scan only runs on the first frame after an edit invalidates one.
+      syncCursorFalloff();
       splatOverlay.uHasPaint.value = splatMap.hasAnyPaint() ? 1 : 0;
       // Terrain holes: attaches/detaches the discard mask (one recompile per flip).
       lod.setHolesEnabled(splatMap.hasAnyHoles());

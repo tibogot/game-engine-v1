@@ -211,6 +211,22 @@ the game.
     sculpt-only and out of date: rewritten by group (camera, sculpt, every
     brush, props, mode keys, project), each checked against the key handlers.
 
+## Editor polish
+
+15e. ~~Brush cursor ring~~ — FIXED 2026-09-18 (user: at a small radius the
+    circle gets a big width). The outline was two hard steps at a FIXED
+    ±0.003 of heightmap UV — about 6 m of ground whatever the brush, so a
+    60 m brush drew a thin ring and a 5 m brush drew a band wider than
+    itself; it also thickened as you zoomed in and had no antialiasing.
+    Now the width comes from the distance field's own pixel footprint
+    (`fwidth`, capped at a quarter of the radius), i.e. constant on screen
+    like Unreal/Unity: MEASURED median 3 px at both a 60 m and a 5 m brush,
+    2-3 px with the camera at 14 m instead of 90 m. Added the filled falloff
+    preview underneath (10% of the cursor colour) built from the brush's real
+    footprint, mask^falloff — the same the sculpt pass applies — so a square
+    or diamond brush previews its own shape. A per-mode `uCursorFalloff`
+    uniform feeds it. Editor-only code, compiled out of games.
+
 ## Grass and vegetation
 
 15b. ~~Grass floats over crests / sinks into dips~~ — FIXED 2026-09-17. The
