@@ -33,22 +33,36 @@
  */
 import * as THREE from "three";
 import {
-  Discard, Fn, attribute, cameraPosition, cameraViewMatrix, cos, dot, faceDirection, float,
-  floor, instanceIndex, int, mix, normalize, pow, saturate, sin, texture, uniform, varying,
-  vec2, vec3, vec4,
+  Discard, Fn, attribute, cameraPosition, cameraViewMatrix, cameraWorldMatrix, cos, dot,
+  faceDirection, float, floor, instanceIndex, int, length, mix, normalize, pow, saturate,
+  smoothstep, sin, texture, uniform, varying, vec2, vec3, vec4, PI2,
 } from "three/tsl";
 import { AmbientField } from "./ambientField.js";
+import { worldSizeForPixels } from "../scatter/gpuCull.js";
 import { createAmbientAtlas, ATLAS_TILES, AMBIENT_ART } from "./ambientAtlas.js";
-import { createCardGeometry } from "./ambientShapes.js";
+import { createBillboardGeometry, createCardGeometry } from "./ambientShapes.js";
 import { ageFade, cardFrame, cardRoll } from "./ambientMotion.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 import {
   AMBIENT_EFFECT_COUNT, AMBIENT_MAX_PARTICLES, AMBIENT_ROWS, dayWindow, sliceBudgets,
 } from "../../app/state/ambientFxState.js";
 
-/** Shape classes. One indirect draw each; this slice ships only the card. */
+/**
+ * Shape classes. ONE INDIRECT DRAW EACH, and the only reason there are two is
+ * that they belong in different passes:
+ *
+ *   CARD       alpha-tested painted artwork, in the OPAQUE pass, where a great
+ *              many small overlapping quads get early-Z.
+ *   BILLBOARD  a soft additive blob with no depth write, which has to come
+ *              after the opaque geometry.
+ *
+ * That is a pass difference, not a look difference, so no uniform row could
+ * have papered over it. Anything else an effect wants to be — its artwork, its
+ * colour, its motion, its rules — is data, and adds no draw.
+ */
 const SHAPE_CARD = 0;
-const SHAPE_COUNT = 1;
+const SHAPE_BILLBOARD = 1;
+const SHAPE_COUNT = 2;
 
 /** How long a card is along its spine, as a fraction of its span. */
 const CARD_ASPECT = 0.85;
@@ -89,7 +103,10 @@ export class AmbientFxSystem {
       uGlow: uniform(1),
     });
 
-    field.attachShapes([this._buildCardMaterial(atlas, u)], () => createCardGeometry());
+    field.attachShapes(
+      [this._buildCardMaterial(atlas, u), this._buildBillboardMaterial(u)],
+      (shape) => (shape === SHAPE_BILLBOARD ? createBillboardGeometry() : createCardGeometry()),
+    );
     this.syncFromState(fx);
   }
 
@@ -130,12 +147,16 @@ export class AmbientFxSystem {
 
       const e = field.effectOf(slot);
       const row = (r) => field.u.uRows.element(e.mul(AMBIENT_ROWS).add(r));
-      const r0 = row(0), r1 = row(1), r2 = row(2), r4 = row(4), r5 = row(5), r6 = row(6);
+      const r0 = row(0), r1 = row(1), r2 = row(2), r4 = row(4), r5 = row(5), r6 = row(6),
+        r8 = row(8), r9 = row(9);
 
       // Salt 41 — the SAME random the compute's screen-size gate sized this
       // card with. Two different randoms here and the gate would be culling a
       // card that is not the one being drawn.
-      const size = r0.w.mul(mix(float(1).sub(r1.w), float(1).add(r1.w), field.slotRand(slot, 41)));
+      const authored = r0.w.mul(mix(float(1).sub(r1.w), float(1).add(r1.w), field.slotRand(slot, 41)));
+      // ...and the same pixel floor the gate applied, for the same reason.
+      const camDist = length(cameraPosition.sub(pos));
+      const size = authored.max(worldSizeForPixels(r9.x, camDist, field.u.uFy, field.u.uViewportH));
       const phase = field.slotRand(slot, 31);
       const seed = field.slotRand(slot, 32);
 
@@ -159,8 +180,13 @@ export class AmbientFxSystem {
       const y0 = cu.mul(span).mul(sin(ang));
       const z0 = cv.sub(0.5).mul(size).mul(CARD_ASPECT);
 
-      // Roll about the spine — how a falling leaf tumbles.
-      const roll = cardRoll(r2.x, state, age, phase, r4.y, r4.w);
+      // Roll about the spine — the leaf's tumble, plus the camera-facing bias
+      // that stops a flat card becoming a hairline streak (see cardRoll).
+      const toCam = normalize(cameraPosition.sub(pos).add(vec3(0, 1e-5, 0)));
+      const roll = cardRoll({
+        motionId: r2.x, state, age, phase, flapRate: r4.y, turbulence: r4.w,
+        faceCamera: r8.x, toCam, rgt, upv,
+      });
       const cr = cos(roll), sr = sin(roll);
       const xr = x0.mul(cr).sub(y0.mul(sr));
       const yr = x0.mul(sr).add(y0.mul(cr));
@@ -246,6 +272,92 @@ export class AmbientFxSystem {
     return mat;
   }
 
+  /* -- the billboard material ---------------------------------------------- */
+  _buildBillboardMaterial(u) {
+    const field = this.field;
+    const { bufA, bufB, bufC, compactBuf } = field.nodes;
+
+    // Unlit and ADDITIVE. A dust mote catching the sun and a firefly are both
+    // light rather than surface, and lighting a two-triangle blob would buy
+    // nothing but a pipeline. No depth write, so they never occlude each
+    // other and need no sort.
+    const mat = new THREE.MeshBasicNodeMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      // FrontSide, and it matters: three renders a DOUBLE-sided TRANSPARENT
+      // material in two passes (back faces, then front) to get the sorting
+      // right, which measured as a second draw call for nothing. A quad built
+      // from the camera's own right and up vectors never shows its back.
+      side: THREE.FrontSide,
+      toneMapped: true,
+    });
+    mat.fog = true;
+
+    const vUv = varying(vec2(0), "v_ab_uv");
+    const vColor = varying(vec3(1), "v_ab_color");
+    const vAlpha = varying(float(1), "v_ab_alpha");
+
+    mat.positionNode = Fn(() => {
+      const slot = compactBuf.element(instanceIndex);
+      const a = bufA.element(slot);
+      const b = bufB.element(slot);
+      const c = bufC.element(slot);
+      const pos = a.xyz, age = a.w, life = b.w, state = c.z;
+
+      const e = field.effectOf(slot);
+      const row = (r) => field.u.uRows.element(e.mul(AMBIENT_ROWS).add(r));
+      const r0 = row(0), r1 = row(1), r5 = row(5), r8 = row(8), r9 = row(9);
+
+      // Salt 41, the same random the compute sized this particle with for its
+      // screen-size gate, and the same pixel floor. Two different randoms and
+      // the gate would be measuring a blob that is not the one being drawn.
+      const authored = r0.w.mul(mix(float(1).sub(r1.w), float(1).add(r1.w), field.slotRand(slot, 41)));
+      const camDist = length(cameraPosition.sub(pos));
+      const size = authored.max(worldSizeForPixels(r9.x, camDist, field.u.uFy, field.u.uViewportH));
+      const phase = field.slotRand(slot, 31);
+
+      const card = attribute("aCard", "vec4");
+      const q = vec2(card.y.sub(0.5), card.z.sub(0.5));
+
+      // Camera right and up straight out of the camera's world matrix: no
+      // orientation of its own, and no chance of the degenerate frame a
+      // velocity-aligned card has to guard against.
+      const camRight = cameraWorldMatrix[0].xyz;
+      const camUp = cameraWorldMatrix[1].xyz;
+      const world = pos.add(camRight.mul(q.x.mul(size))).add(camUp.mul(q.y.mul(size)));
+
+      // The blink. A firefly is a pulse of light, not a lamp; dust sits at
+      // pulse 0 and is simply steady.
+      const blink = sin(age.mul(r8.y).mul(PI2).add(phase.mul(PI2))).mul(0.5).add(0.5);
+      const pulse = mix(float(1), blink, saturate(r8.z));
+
+      const j = field.slotRand(slot, 45).sub(0.5).mul(2).mul(r5.w);
+      const col = mix(r0.xyz, r1.xyz, field.slotRand(slot, 46));
+      vColor.assign(col.mul(float(1).add(j.mul(0.4))).mul(r8.w).mul(u.uGlow));
+      vUv.assign(card.yz);
+      // Same per-particle dissolve threshold as the cards (salt 51), so both
+      // classes thin out the same way rather than in two different idioms.
+      vAlpha.assign(saturate(ageFade(age, life, state).sub(field.slotRand(slot, 51).mul(0.6)).mul(3))
+        .mul(pulse));
+
+      return world;
+    })();
+
+    // fragmentNode, not colorNode: a colorNode's alpha is discarded, and the
+    // alpha here IS the shape.
+    mat.fragmentNode = Fn(() => {
+      const d = length(vUv.sub(0.5).mul(2));
+      // Soft all the way to the rim. A hard-edged additive disc reads as a
+      // sprite the moment two of them overlap.
+      const falloff = smoothstep(1.0, 0.0, d);
+      const core = pow(falloff, 3);
+      return vec4(vColor.mul(core.mul(0.7).add(falloff.mul(0.3))), falloff.mul(vAlpha));
+    })();
+
+    return mat;
+  }
+
   get triangles() { return this.field.triangles; }
   get meshes() { return this.field.meshes; }
 
@@ -259,7 +371,7 @@ export class AmbientFxSystem {
   syncFromState(fx, gp = null, sunDir = null) {
     const field = this.field;
     const slices = sliceBudgets(fx.effects, AMBIENT_MAX_PARTICLES);
-    field.setSlices(slices, fx.effects.map(() => SHAPE_CARD));
+    field.setSlices(slices, fx.effects.map((e) => (e.shape === "billboard" ? SHAPE_BILLBOARD : SHAPE_CARD)));
     field.syncCommon({
       volumeXZ: fx.volumeXZ,
       volumeY: fx.volumeY,
@@ -288,11 +400,18 @@ export class AmbientFxSystem {
       rows[o + 6].set(e.translucency, e.settleTime, e.flapAmp, e.tint ?? 0);
       const w = dayWindow(e.dayStart, e.dayEnd, e.daySoft);
       rows[o + 7].set(e.area === "painted" ? 0 : 1, w.s01, w.len01, w.soft01);
+        rows[o + 8].set(e.faceCamera ?? 0, e.pulseRate ?? 0, e.pulseAmount ?? 0, e.glow ?? 1);
+      rows[o + 9].set(e.pixelFloor ?? 0, 0, 0, 0);
     }
 
-    // Nothing painted, nothing budgeted: skip the draw entirely.
+    // A shape nobody uses is not drawn. An indirect draw with no instances is
+    // still a submission, and most worlds use one of the two classes.
+    const used = new Array(SHAPE_COUNT).fill(false);
+    fx.effects.forEach((e, i) => {
+      if (slices.lengths[i] > 0) used[e.shape === "billboard" ? SHAPE_BILLBOARD : SHAPE_CARD] = true;
+    });
     this._anyLive = slices.total > 0;
-    field.setShapeUsed([this._anyLive]);
+    field.setShapeUsed(used);
   }
 
   /** True while at least one effect has live slots. */

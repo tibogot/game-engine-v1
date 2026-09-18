@@ -318,8 +318,23 @@ try {
 }
 
 if (system) {
-  check("one shape class means ONE draw for every card effect",
-    system.meshes.length === 1, `${system.meshes.length} meshes`);
+  // TWO draws for the whole mode, for ever: one per SHAPE CLASS, never one
+  // per effect. The classes exist because they belong in different passes
+  // (alpha-tested opaque vs additive), which no uniform row could paper over.
+  check("the whole mode is TWO draws, whatever the effects are",
+    system.meshes.length === 2, `${system.meshes.length} meshes`);
+  check("a shape nobody uses is not submitted", (() => {
+    const only = createAmbientFxState();
+    only.effects.forEach((e) => { e.enabled = e.shape === "card"; });
+    system.syncFromState(only);
+    return system.meshes[1].visible === false && system.meshes[0].visible === true;
+  })(), "an indirect draw with no instances is still a submission");
+  check("both shapes are submitted once both are in use", (() => {
+    const both = createAmbientFxState();
+    both.effects.forEach((e) => { e.enabled = true; });
+    system.syncFromState(both);
+    return system.meshes.every((m) => m.visible);
+  })());
   check("the card mesh never casts (a butterfly's shadow is not worth a cascade)",
     system.meshes.every((m) => !m.castShadow && !m.receiveShadow));
   check("the card mesh is not CPU frustum culled (the compute culls per particle)",
@@ -329,6 +344,26 @@ if (system) {
   check("the field allocates one uniform row block per effect",
     system.field.effectRows.length === AMBIENT_EFFECT_COUNT * AMBIENT_ROWS,
     `${system.field.effectRows.length}`);
+
+  // The presets that ship, and the one rule that keeps a world from changing
+  // under someone who never asked for it.
+  {
+    const st = createAmbientFxState();
+    const shapes = st.effects.map((e) => e.shape);
+    check("the billboard effects are shipped OFF",
+      st.effects.every((e) => e.shape !== "billboard" || e.enabled === false),
+      st.effects.map((e) => `${e.name}:${e.shape}:${e.enabled}`).join(" "));
+    check("both shape classes are represented by a preset",
+      shapes.includes("card") && shapes.includes("billboard"), shapes.join());
+    const ff = st.effects.find((e) => e.name === "Fireflies");
+    check("fireflies blink, come out at night, and are a billboard",
+      ff && ff.pulseAmount > 0.5 && ff.shape === "billboard" && ff.dayStart > 12 && ff.dayEnd < 12,
+      ff ? `${ff.pulseAmount} ${ff.shape} ${ff.dayStart}-${ff.dayEnd}` : "missing");
+    const dm = st.effects.find((e) => e.name === "Dust motes");
+    check("dust does not blink and is mostly moved by the wind",
+      dm && dm.pulseAmount === 0 && dm.windCoupling > dm.speed,
+      dm ? `pulse ${dm.pulseAmount}, wind ${dm.windCoupling} vs speed ${dm.speed}` : "missing");
+  }
 
   let wgsl = null;
   try {
@@ -358,6 +393,28 @@ if (system) {
       system.meshes[0].material.transparent !== true, "");
     check("the vertex stage really read the card attribute (not a substituted default)",
       /aCard/.test(wgsl.v), "aCard missing — the builder used a stub geometry");
+
+    // The billboard is the other pass, so it has to compile on its own.
+    try {
+      const bb = system.meshes[1];
+      const probe2 = new THREE.Mesh(bb.geometry, bb.material);
+      const b2 = buildWGSL(bb.material, { instanced: probe2 });
+      check("the billboard material compiles to WGSL",
+        (b2.vertexShader ?? "").length > 0 && (b2.fragmentShader ?? "").length > 0);
+      check("the billboard is additive and writes no depth",
+        bb.material.blending === THREE.AdditiveBlending && bb.material.depthWrite === false
+        && bb.material.transparent === true,
+        `${bb.material.blending} / ${bb.material.depthWrite} / ${bb.material.transparent}`);
+      // Measured: a DOUBLE-sided transparent material is drawn in two passes
+      // (back faces then front) so three can sort it, which cost a whole extra
+      // draw call for a quad that never shows its back.
+      check("the billboard is single-sided, or it costs a second draw call",
+        bb.material.side === THREE.FrontSide, `side ${bb.material.side}`);
+      check("the billboard is two triangles", bb.geometry.index.count === 6,
+        `${bb.geometry.index.count} indices`);
+    } catch (err) {
+      check("the billboard material compiles to WGSL", false, err.message);
+    }
   }
 
   // The compute is where every integrator, the respawn and all four cull gates
@@ -450,6 +507,20 @@ if (system) {
       Math.abs(r7(1).z - 10 / 24) < 1e-9, `${r7(1).z * 24} h`);
     check("butterflies ship with a daytime window, not always",
       r7(0).z < 0.999, `len01 ${r7(0).z}`);
+
+    // The camera-facing bias. A leaf leans less than a butterfly on purpose:
+    // its tumble is the thing that makes it read, and faceCamera 1 stops a
+    // tumble dead.
+    const r8 = (i) => system.field.effectRows[i * AMBIENT_ROWS + 8];
+    const st = createAmbientFxState();
+    system.syncFromState(st);
+    check("the camera-facing bias reaches the uniform row",
+      r8(0).x > 0 && r8(1).x > 0, `${r8(0).x} / ${r8(1).x}`);
+    check("leaves lean toward the camera LESS than butterflies do",
+      r8(1).x < r8(0).x, `leaf ${r8(1).x} vs butterfly ${r8(0).x}`);
+    check("nothing faces the camera fully (that would kill the tumble)",
+      st.effects.every((e) => (e.faceCamera ?? 0) < 1),
+      st.effects.map((e) => e.faceCamera).join());
   }
 }
 

@@ -21,6 +21,11 @@
  *      stops, lies down on the terrain normal, and holds for `settleTime`
  *      before it dies and is respawned up in the canopy.
  *
+ *   2  FLOAT — dust motes, pollen, anything that HANGS. Almost no gravity
+ *      and a very slow heading, so the motion you read is the wind rather
+ *      than the particle: a mote should look like it is being carried,
+ *      not like it is swimming.
+ *
  * ── WHY NO NOISE TEXTURE ────────────────────────────────────────────────────
  * Curl noise is the textbook answer and it costs several taps per particle per
  * frame. Sines of (time, seed) cost a handful of ALU, never repeat within a
@@ -34,12 +39,14 @@
  * `bufB.xyz`, flagged by `state = 1`. No fourth buffer, no unpacking.
  */
 import {
-  If, cos, cross, float, max, mix, normalize, saturate, sin, smoothstep, vec2, vec3, PI2,
+  If, atan, cos, cross, dot, float, max, mix, normalize, round, saturate, sin, smoothstep,
+  vec2, vec3, PI, PI2,
 } from "three/tsl";
 
 /** Motion ids — must match MOTION in v3/app/state/ambientFxState.js. */
 export const MOTION_WANDER = 0;
 export const MOTION_FALL = 1;
+export const MOTION_FLOAT = 2;
 
 /** How close to the ground a leaf has to get before it lies down, metres. */
 const SETTLE_REACH = 0.06;
@@ -146,6 +153,33 @@ export function integrateMotion(c) {
     // Settled: nothing to integrate. It lies there until `life` catches `age`,
     // which the caller checks, and the fade-out is driven from the same pair.
   });
+  /* ── 2 · FLOAT ──────────────────────────────────────────────────────── */
+  If(motionId.greaterThanEqual(1.5), () => {
+    // Gentle, decorrelated, and SLOW — an order below the butterfly's. Dust
+    // that steers itself reads as insects; dust that hangs and gets pushed
+    // reads as dust, so most of what moves a mote here is the wind term.
+    const w = age.mul(turbulence).mul(0.35).add(ph);
+    const dir = vec3(
+      sin(w.mul(0.31)),
+      sin(w.mul(0.23).add(sd)).mul(0.5),
+      cos(w.mul(0.27).add(sd)),
+    );
+    vel.assign(mix(vel, dir.mul(speed), saturate(dt.mul(0.8))));
+    vel.addAssign(wind.mul(windCoupling).mul(dt).mul(2.5));
+
+    // A very soft pull back into the band. A mote is neutrally buoyant, so
+    // this is the only thing stopping the field draining slowly upward.
+    const targetY = groundY.add(mix(band.x, band.y, seed));
+    vel.y.addAssign(targetY.sub(pos.y).mul(0.45).mul(dt));
+    pos.addAssign(vel.mul(dt));
+
+    const floorY = groundY.add(0.05);
+    If(pos.y.lessThan(floorY), () => {
+      pos.y.assign(floorY);
+      vel.y.assign(max(vel.y, float(0)));
+    });
+  });
+
 }
 
 /**
@@ -215,10 +249,60 @@ export function cardFrame(c) {
   hinge.assign(wander.select(flap, settled.select(flapAmp.mul(0.5), fold)));
 }
 
-/** A leaf's roll about its own spine, radians. Zero for anything else. */
-export function cardRoll(motionId, state, age, phase, flapRate, turbulence) {
+/**
+ * The card's roll about its own spine, radians — the leaf's tumble, plus the
+ * camera-facing bias that keeps a flat card from becoming a hairline.
+ *
+ * ── WHY THE BIAS EXISTS ─────────────────────────────────────────────────────
+ *
+ * A butterfly in level flight holds its wings roughly horizontal, so a camera
+ * at the same height sees the EDGE of the card: a one-pixel streak of colour
+ * with no shape at all. The flap swings through it, which helps, but at the
+ * top and bottom of the stroke the wings are flat again. The foliage has the
+ * same note about a leaf turned edge-on, and it is the reason plants right at
+ * the camera are thinned out rather than drawn.
+ *
+ * So the card rolls PART OF THE WAY toward showing its face to the camera.
+ * `faceCamera` 0 is pure physics, 1 always shows the face. It is a lie about
+ * orientation that reads as the thing banking, which butterflies do anyway.
+ *
+ * ── WHY IT IS DONE AS A ROLL AND NOT BY BLENDING THE UP VECTOR ──────────────
+ *
+ * The obvious version — mix(worldUp, toCamera, face) — has a hole in it: a
+ * particle directly above the camera has toCamera antiparallel to worldUp, the
+ * mix passes through the zero vector, and the frame explodes. Rolling about an
+ * axis has no such case.
+ *
+ * The angle is WRAPPED into (-90, 90] degrees first. The card is two-sided, so
+ * "face the camera" has two answers 180 degrees apart; taking the nearer one
+ * puts the discontinuity exactly where the card is edge-on to begin with,
+ * which is the one place a jump cannot be seen.
+ *
+ * @param rgt, upv  the card's frame from cardFrame(), before this roll
+ * @param toCam     unit vector from the particle toward the camera
+ */
+export function cardRoll({
+  motionId, state, age, phase, flapRate, turbulence, faceCamera, toCam, rgt, upv,
+}) {
   const tumbling = motionId.greaterThanEqual(0.5).and(state.lessThan(0.5));
-  const roll = age.mul(flapRate).mul(1.7).add(phase.mul(PI2))
+  const spin = age.mul(flapRate).mul(1.7).add(phase.mul(PI2))
     .mul(float(0.6).add(turbulence.mul(0.8)));
-  return tumbling.select(roll, phase.mul(PI2));
+  const base = tumbling.select(spin, phase.mul(PI2));
+
+  // Rolling by t takes the card's normal to (-sin t)*rgt + (cos t)*upv, so the
+  // roll that points it at the camera is atan2(-cx, cy).
+  const cx = dot(toCam, rgt);
+  const cy = dot(toCam, upv);
+  const want = atan(cx.negate(), cy);
+  // The DIFFERENCE from where the card already is, wrapped — not the target
+  // angle itself. Blending toward an absolute angle would drag a tumbling
+  // leaf's spin to a halt as `faceCamera` rose; blending the difference
+  // leaves the tumble running at its own rate and merely leans it toward the
+  // viewer. At faceCamera 1 they coincide and the spin does stop, which is
+  // what asking for "always show me the face" means.
+  const d = want.sub(base);
+  const dw = d.sub(float(PI).mul(round(d.div(PI))));
+  // A leaf on the ground lies on the ground. Nothing rolls it to be seen.
+  const face = state.greaterThan(0.5).select(float(0), faceCamera);
+  return base.add(dw.mul(face));
 }

@@ -65,3 +65,23 @@ export const scatterFrustumVisible = /*#__PURE__*/ Fn(([worldPos, cameraMatrix, 
 export const screenRadiusPixels = /*#__PURE__*/ Fn(([radius, clipW, fy, viewportH]) => {
   return fy.mul(radius).div(clipW.abs().max(1e-4)).mul(viewportH);
 });
+
+/**
+ * The world size something must have to cover `pixels` on screen at `dist`.
+ *
+ * The inverse of the above, and the other half of the sub-pixel problem. The
+ * screen-size CULL drops what is too small to draw honestly; this GROWS what
+ * has to stay visible anyway. modularRoadBirds.js has carried the same floor
+ * since the flock was written, and its note is the argument: growing a thing
+ * in world space to hold a constant screen size is a lie about its distance
+ * that nobody has been able to see, and the alternative — fading it out -
+ * loses the flock exactly where the flock is most of what you can see.
+ *
+ * Painted ambient FX has the same shape of problem. A butterfly is 8 cm wide,
+ * which at twenty metres is four pixels: the painted wing is thrown away and
+ * what is left is a speck that crawls. Either it is drawn bigger than life or
+ * it is not worth drawing.
+ */
+export const worldSizeForPixels = /*#__PURE__*/ Fn(([pixels, dist, fy, viewportH]) => {
+  return pixels.mul(dist).div(fy.mul(viewportH).max(1e-4));
+});

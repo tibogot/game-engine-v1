@@ -39,7 +39,7 @@ export function buildAmbientFxPanel(root, {
     const on = section(root, "Ambient FX");
     toggle(on, fxState, "enabled", { label: "On", onChange: changed,
       hint: "The whole mode. Off costs nothing at all — no compute, no draw." });
-    hint(on, "Butterflies and falling leaves, simulated on the GPU inside a box that follows the camera. One compute pass and one draw call however many effects are on.");
+    hint(on, "Butterflies, falling leaves, dust and fireflies, simulated on the GPU inside a box that follows the camera. ONE compute pass however many effects are on, and one draw call per shape class in use — two at most.");
 
     /* ── which effect ── */
     const pick = section(root, "Effect");
@@ -67,14 +67,25 @@ export function buildAmbientFxPanel(root, {
 
     /* ── what it is ── */
     const _tintShown = (e.tint ?? 0) > 0.001;
+    const isCard = e.shape !== "billboard";
     const what = section(root, "What it is");
+    dropdown(what, e, "shape", {
+      label: "Drawn as",
+      options: [["card", "Card (painted artwork)"], ["billboard", "Billboard (soft light)"]],
+      onChange: () => { changed(); build(); },
+      hint: "The ONE choice here that costs a draw call: cards are alpha-tested painted art in the opaque pass, billboards are additive light after it. Everything else about an effect is free.",
+    });
     dropdown(what, e, "motion", {
       label: "Motion",
-      options: [[MOTION.wander, "Wander (flies)"], [MOTION.fall, "Fall (settles)"]],
-      onChange: changed,
+      options: [
+        [MOTION.wander, "Wander (flies)"],
+        [MOTION.fall, "Fall (settles)"],
+        [MOTION.float, "Float (hangs)"],
+      ],
+      onChange: () => { changed(); build(); },
       hint: "Wander seeks a drifting heading and bobs on the wing beat. Fall drops to a terminal speed, tumbles on the way down, and lies on the ground where it lands.",
     });
-    dropdown(what, e, "tile", {
+    if (isCard) dropdown(what, e, "tile", {
       label: "Artwork",
       options: AMBIENT_ART.map((a, i) => [i, a.name]),
       onChange: changed,
@@ -83,16 +94,26 @@ export function buildAmbientFxPanel(root, {
     slider(what, e, "size", { label: "Size (m)", min: 0.01, max: 0.6, step: 0.005, onChange: changed,
       hint: "Tip to tip. A real butterfly is 0.06-0.10; an oak leaf about 0.12." });
     slider(what, e, "sizeVar", { label: "Size variation", min: 0, max: 0.8, step: 0.01, onChange: changed });
-    slider(what, e, "tint", { label: "Tint over the art", min: 0, max: 1, step: 0.01, onChange: () => { changed(); if (((e.tint ?? 0) > 0.001) !== _tintShown) build(); },
+    if (isCard) slider(what, e, "tint", { label: "Tint over the art", min: 0, max: 1, step: 0.01, onChange: () => { changed(); if (((e.tint ?? 0) > 0.001) !== _tintShown) build(); },
       hint: "0 leaves the painting exactly as it is — the right setting for a hand-painted butterfly. Turn it up to recolour, which a drift of one photographed leaf wants." });
-    if ((e.tint ?? 0) > 0.001) {
-      color(what, e, "colorA", { label: "Tint (spine)", onChange: changed });
-      color(what, e, "colorB", { label: "Tint (tip)", onChange: changed });
+    if (!isCard || (e.tint ?? 0) > 0.001) {
+      color(what, e, "colorA", { label: isCard ? "Tint (spine)" : "Colour", onChange: changed });
+      color(what, e, "colorB", { label: isCard ? "Tint (tip)" : "Colour (second)", onChange: changed });
     }
     slider(what, e, "colorVar", { label: "Per-individual drift", min: 0, max: 1, step: 0.01, onChange: changed,
       hint: "A little hue and brightness variation per particle, so a swarm is not one image repeated." });
-    slider(what, e, "translucency", { label: "Backlight", min: 0, max: 1.5, step: 0.01, onChange: changed,
-      hint: "How much the sun glows through it from behind. A wing does; a dry leaf hardly." });
+    if (isCard) {
+      slider(what, e, "translucency", { label: "Backlight", min: 0, max: 1.5, step: 0.01, onChange: changed,
+        hint: "How much the sun glows through it from behind. A wing does; a dry leaf hardly." });
+    } else {
+      slider(what, e, "glow", { label: "Brightness", min: 0, max: 5, step: 0.05, onChange: changed,
+        hint: "Additive, so this really is how much light it adds to the scene." });
+      slider(what, e, "pulseAmount", { label: "Blink depth", min: 0, max: 1, step: 0.01, onChange: changed,
+        hint: "0 is a steady light \u2014 dust. Turn it up and it pulses, which is the whole of what makes a firefly a firefly." });
+      if ((e.pulseAmount ?? 0) > 0.001) {
+        slider(what, e, "pulseRate", { label: "Blinks / s", min: 0.05, max: 6, step: 0.05, onChange: changed });
+      }
+    }
 
     /* ── how it moves ── */
     const mv = section(root, "How it moves");
@@ -103,9 +124,11 @@ export function buildAmbientFxPanel(root, {
     });
     slider(mv, e, "turbulence", { label: e.motion === MOTION.fall ? "Tumble swing" : "Wander", min: 0, max: 2, step: 0.01, onChange: changed,
       hint: "How far off a straight line it goes — the side-to-side stall of a falling leaf, or how erratically a butterfly turns." });
-    slider(mv, e, "flapRate", { label: e.motion === MOTION.fall ? "Tumbles / s" : "Wing beats / s", min: 0.1, max: 16, step: 0.1, onChange: changed });
-    slider(mv, e, "flapAmp", { label: "Hinge swing (rad)", min: 0, max: 1.4, step: 0.01, onChange: changed,
+    if (isCard) slider(mv, e, "flapRate", { label: e.motion === MOTION.fall ? "Tumbles / s" : "Wing beats / s", min: 0.1, max: 16, step: 0.1, onChange: changed });
+    if (isCard) slider(mv, e, "flapAmp", { label: "Hinge swing (rad)", min: 0, max: 1.4, step: 0.01, onChange: changed,
       hint: "How far the card folds at its spine. A butterfly's full wing stroke is around 1. Leaves sit at 0 and stay flat — a photographed leaf's midrib does not run down the middle of the image, so folding one looks wrong." });
+    if (isCard) slider(mv, e, "faceCamera", { label: "Turns to face you", min: 0, max: 1, step: 0.01, onChange: changed,
+      hint: "A flat card seen edge-on is a one-pixel streak, and a butterfly in level flight holds its wings horizontal — so from a camera at the same height that is most of what you would see. This rolls it part of the way toward showing its face. 0 is pure physics; 1 always faces you and stops a leaf tumbling." });
     slider(mv, e, "windCoupling", { label: "Carried by wind", min: 0, max: 1.5, step: 0.01, onChange: changed,
       hint: "How much of the world's wind it takes. The wind itself is the Grass panel's." });
     slider(mv, e, "lifetime", { label: "Lifetime (s)", min: 2, max: 60, step: 0.5, onChange: changed,
@@ -166,8 +189,10 @@ export function buildAmbientFxPanel(root, {
     slider(cu, e, "fadeStart", { label: "Fades from (m)", min: 2, max: 120, step: 1, onChange: changed });
     slider(cu, e, "fadeEnd", { label: "Gone by (m)", min: 3, max: 140, step: 1, onChange: changed,
       hint: "Clamped inside the spawn box, so the field never ends on a visible wall. Raise Volume to push it out." });
+    slider(cu, e, "pixelFloor", { label: "Never smaller than (px)", min: 0, max: 24, step: 0.5, onChange: changed,
+      hint: "Below this it GROWS in world space rather than shrinking away. A real butterfly is 8 cm, which at twenty metres is four pixels and throws the painted wing away. Growing it is a lie about its distance nobody can see \u2014 the birds in this engine have done it for years. 0 turns it off, which is what dust wants." });
     slider(cu, e, "minPixels", { label: "Smallest on screen (px)", min: 0, max: 12, step: 0.1, onChange: changed,
-      hint: "Below this a card is not drawn at all. Something smaller than a pixel does not fade out, it crawls and sparkles." });
+      hint: "Below this it is not drawn at all. The other half of the same problem: something smaller than a pixel does not fade out, it crawls. Leave at 0 for anything with a pixel floor above." });
 
     /* ── the field ── */
     const fl = section(root, "The field", false);

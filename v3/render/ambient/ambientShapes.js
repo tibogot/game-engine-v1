@@ -88,3 +88,39 @@ export function createCardGeometry() {
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
   return { geometry, triangles: index.length / 3 };
 }
+
+/**
+ * The BILLBOARD — the second shape class, and the second (and last) draw call.
+ *
+ * A single quad that always faces the camera. Everything a card is not: no
+ * hinge, no spine, no orientation of its own, no painted artwork. It is a soft
+ * round blob of light, which is the honest shape for a dust mote catching the
+ * sun or a firefly, and trying to give either of those a silhouette is how you
+ * end up with visible sprites.
+ *
+ * It is its own draw because it is its own PASS: cards are alpha-tested and
+ * live with the opaque geometry, where they get early-Z over a great many
+ * small overlapping quads. These are additive with no depth write, so they
+ * have to come afterwards. That difference is not something a uniform row can
+ * paper over, which is exactly what makes it a shape class.
+ *
+ * `aCard` is kept as the attribute name so the two classes stay
+ * interchangeable from the field's side: (0, u, v, 0), u and v the corner.
+ */
+export function createBillboardGeometry() {
+  const card = new Float32Array([
+    0, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 1, 1, 0,
+    0, 0, 1, 0,
+  ]);
+  const pos = new Float32Array([
+    -0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0,
+  ]);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geometry.setAttribute("aCard", new THREE.BufferAttribute(card, 4));
+  geometry.setIndex([0, 1, 2, 0, 2, 3]);
+  geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
+  return { geometry, triangles: 2 };
+}

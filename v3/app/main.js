@@ -10477,6 +10477,17 @@ export async function startV3App(opts = {}) {
           volumeY: f.u.uVolumeY.value,
           center: f.u.uCenter.value.toArray().map((v) => +v.toFixed(1)),
           dt: +f.u.uDt.value.toFixed(4),
+          viewportH: f.u.uViewportH.value,
+          fy: +f.u.uFy.value.toFixed(4),
+          // Per effect: authored size, pixel floor, and the world size that
+          // floor implies at 20 m - the number to check when something is
+          // still a speck.
+          sizes: f.effectRows.length ? Array.from({ length: f.effectCount }, (_, i) => {
+            const rows = f.effectRows, R = rows.length / f.effectCount;
+            const size = rows[i * R].w, floorPx = rows[i * R + 9].x;
+            const at20 = floorPx * 20 / (f.u.uFy.value * f.u.uViewportH.value);
+            return { size: +size.toFixed(4), floorPx, worldAt20m: +at20.toFixed(4) };
+          }) : null,
           // What the frame actually cost. The instance count lives in an
           // indirect buffer the GPU writes, and reading a storage buffer back
           // hands you the stale CPU copy — so the only honest measure of "are

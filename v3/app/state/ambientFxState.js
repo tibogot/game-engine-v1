@@ -25,7 +25,7 @@
  */
 
 /** Motion integrator ids — must match the branches in ambientMotion.js. */
-export const MOTION = Object.freeze({ wander: 0, fall: 1 });
+export const MOTION = Object.freeze({ wander: 0, fall: 1, float: 2 });
 
 /**
  * Atlas tiles — the index into AMBIENT_ART in ambientAtlas.js. Re-exported
@@ -35,7 +35,7 @@ export const MOTION = Object.freeze({ wander: 0, fall: 1 });
 export { ART_TILE as TILE } from "../../render/ambient/ambientAtlas.js";
 
 /** vec4 uniform rows per effect. Keep in step with pack() in ambientField.js. */
-export const AMBIENT_ROWS = 8;
+export const AMBIENT_ROWS = 10;
 
 /** How many effects the field allocates rows and a paint channel for. */
 export const AMBIENT_EFFECT_COUNT = 4;
@@ -55,7 +55,14 @@ export function createAmbientEffect(over = {}) {
     budget: 600,
 
     motion: MOTION.wander,
-    /** Index into AMBIENT_ART — which painted shape it wears. */
+    /**
+     * "card" or "billboard" — the only choice here that costs a draw call,
+     * because the two live in different passes (see ambientFxSystem.js).
+     * A card wears painted artwork and is alpha—tested; a billboard is a soft
+     * additive blob of light and ignores `tile` entirely.
+     */
+    shape: "card",
+    /** Index into AMBIENT_ART — which painted shape it wears (cards only). */
     tile: 0,
 
     /* ── Look ── */
@@ -84,12 +91,29 @@ export function createAmbientEffect(over = {}) {
     flapRate: 7.0,
     /** How far the hinge swings, radians. A butterfly's wing stroke. */
     flapAmp: 0.85,
+    /**
+     * How far the card rolls to show its face to the camera, 0..1.
+     *
+     * A flat card seen edge-on is a one-pixel streak with no shape at all, and
+     * a butterfly in level flight holds its wings horizontal — so from a
+     * camera at the same height that is most of what you would see. 0 is pure
+     * physics, 1 always shows the face and stops a leaf's tumble dead.
+     * Somewhere in between is a lie that reads as the thing banking.
+     */
+    faceCamera: 0.55,
     /** How far the wind carries it, 0..1 of the world's wind. */
     windCoupling: 0.35,
     /** Seconds before it dies and respawns somewhere the rule allows. */
     lifetime: 16,
     /** Seconds a settled leaf lies on the ground before it fades (fall only). */
     settleTime: 12,
+
+    /* -- Billboards only -- */
+    /** Blinks per second, and how deep the blink goes (0 = a steady light). */
+    pulseRate: 1.4,
+    pulseAmount: 0,
+    /** How bright the blob burns. Additive, so this really is its brightness. */
+    glow: 1,
 
     /* ── Where it lives ── */
     /** Metres above the terrain at that point. */
@@ -132,6 +156,19 @@ export function createAmbientEffect(over = {}) {
     fadeEnd: 38,
     /** Below this many pixels across, it is not drawn — it would only crawl. */
     minPixels: 2.2,
+    /**
+     * Never drawn SMALLER than this many pixels across: below it the card
+     * grows in world space to hold the size.
+     *
+     * The other half of the same problem `minPixels` solves, and the more
+     * important half here. A real butterfly is 8 cm, which at twenty metres
+     * is four pixels — the painted wing is thrown away and what is left is a
+     * speck. The birds in this repo have carried the same floor since they
+     * were written; growing the thing is a lie about its distance that nobody
+     * has ever been able to see. 0 turns it off, which is what something that
+     * SHOULD vanish with distance (dust) wants.
+     */
+    pixelFloor: 0,
 
     ...over,
   };
@@ -145,7 +182,9 @@ export const AMBIENT_PRESETS = {
     name: "Butterflies",
     motion: MOTION.wander,
     tile: 0,                 // the painted Ulysses
-    budget: 500,
+    // 500 in a 36 m radius is one butterfly per 8 square metres, which reads
+    // as a plague rather than a meadow. Looked at and cut by 3.5x.
+    budget: 150,
     size: 0.085,
     sizeVar: 0.28,
     tint: 0,                 // keep the painting's own blue
@@ -157,6 +196,7 @@ export const AMBIENT_PRESETS = {
     turbulence: 0.7,
     flapRate: 7.5,
     flapAmp: 0.95,
+    faceCamera: 0.6,
     windCoupling: 0.3,
     lifetime: 18,
     altMin: 0.35,
@@ -167,13 +207,17 @@ export const AMBIENT_PRESETS = {
     daySoft: 1.5,
     fadeStart: 24,
     fadeEnd: 36,
-    minPixels: 2.2,
+    minPixels: 0,        // it grows instead of vanishing
+    // 9 px was still a blob; at 14 the painted wing is actually legible,
+    // which is the whole reason for using a painted wing.
+    pixelFloor: 14,
   },
   fallingLeaves: {
     name: "Falling leaves",
     motion: MOTION.fall,
     tile: 1,                 // the photographic maple
-    budget: 700,
+    // Same cut, same reason: 700 falling at once inside 42 m was a blizzard.
+    budget: 240,
     size: 0.13,
     sizeVar: 0.35,
     // A little tint, so a drift of leaves is not one photograph repeated.
@@ -189,6 +233,9 @@ export const AMBIENT_PRESETS = {
     // hinge across the painting looks wrong — and a falling leaf is nearly
     // flat anyway. It reads through its tumble, not through a fold.
     flapAmp: 0,
+    // Low: the tumble IS the leaf, and rolling it flat toward the camera
+    // would trade the one motion that makes it read for a bigger silhouette.
+    faceCamera: 0.2,
     windCoupling: 0.6,
     lifetime: 26,
     settleTime: 14,
@@ -197,7 +244,66 @@ export const AMBIENT_PRESETS = {
     slopeMinY: 0.3,
     fadeStart: 28,
     fadeEnd: 42,
-    minPixels: 2.6,
+    minPixels: 0,
+    pixelFloor: 11,      // a leaf needs less than a wing, but not much less
+  },
+  dustMotes: {
+    name: "Dust motes",
+    enabled: false,        // opt-in: an existing world must not suddenly haze over
+    shape: "billboard",
+    motion: MOTION.float,
+    budget: 900,
+    size: 0.035,
+    sizeVar: 0.55,
+    colorA: "#fff2d4",
+    colorB: "#ffd9a0",
+    colorVar: 0.25,
+    glow: 0.55,
+    pulseAmount: 0,        // steady; dust does not blink
+    speed: 0.12,           // barely steers itself - the wind moves it
+    turbulence: 0.5,
+    windCoupling: 0.9,
+    lifetime: 22,
+    altMin: 0.3,
+    altMax: 6,
+    slopeMinY: 0,          // dust hangs over a cliff face as readily as a lawn
+    fadeStart: 9,
+    fadeEnd: 20,           // close work: a mote further off is a sub-pixel speck
+    minPixels: 1.6,
+    pixelFloor: 0,         // dust SHOULD vanish with distance, not hold size
+    faceCamera: 0,         // a billboard already faces you
+  },
+  fireflies: {
+    name: "Fireflies",
+    enabled: false,
+    shape: "billboard",
+    motion: MOTION.wander,
+    budget: 400,
+    size: 0.055,
+    sizeVar: 0.3,
+    colorA: "#d8ff7a",
+    colorB: "#8fdd2e",
+    colorVar: 0.2,
+    glow: 2.2,             // they are the brightest thing in a night meadow
+    pulseRate: 0.9,
+    pulseAmount: 0.85,     // the blink IS the firefly
+    speed: 0.5,
+    turbulence: 0.5,
+    flapRate: 0,           // nothing to flap
+    flapAmp: 0,
+    windCoupling: 0.15,
+    lifetime: 20,
+    altMin: 0.25,
+    altMax: 1.8,
+    slopeMinY: 0.4,
+    dayStart: 19.5,        // out after dusk, gone before dawn
+    dayEnd: 4.5,
+    daySoft: 1.2,
+    fadeStart: 18,
+    fadeEnd: 34,
+    minPixels: 0,
+    pixelFloor: 3.5,       // a distant firefly is still a point of light
+    faceCamera: 0,
   },
 };
 

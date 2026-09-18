@@ -79,7 +79,7 @@ import {
   instancedArray, int, length, max, min, mix, sin, smoothstep, sqrt, step, storage, texture, time,
   uint, uniform, uniformArray, vec2, vec3, vec4, PI2,
 } from "three/tsl";
-import { frustumVisibleAtClip, screenRadiusPixels } from "../scatter/gpuCull.js";
+import { frustumVisibleAtClip, screenRadiusPixels, worldSizeForPixels } from "../scatter/gpuCull.js";
 import { integrateMotion } from "./ambientMotion.js";
 
 /** Never integrate more than this in one step: a hitch must not teleport the field. */
@@ -217,7 +217,9 @@ export class AmbientField {
       // r5 (fadeStart, fadeEnd, minPixels, colorVar)
       // r6 (translucency, settleTime, flapAmp, -)
       // r7 (area "everywhere", day start01, day len01, day soft01)
-      const r2 = row(2), r3 = row(3), r4 = row(4), r5 = row(5), r6 = row(6), r7 = row(7);
+      // r8 (faceCamera, pulseRate, pulseAmount, glow)   r9 (pixelFloor, -, -, -)
+      const r2 = row(2), r3 = row(3), r4 = row(4), r5 = row(5), r6 = row(6), r7 = row(7),
+        r9 = row(9);
 
       // Inside the live part of its slice? `uTier` scales every slice at once.
       const localIdx = fi.sub(u.uSliceStart.element(e));
@@ -358,12 +360,18 @@ export class AmbientField {
 
         /* ── CULL AND COMPACT ──────────────────────────────────────────── */
         If(age.lessThan(life), () => {
-          const size = row(0).w.mul(mix(float(1).sub(row(1).w), float(1).add(row(1).w), sRnd(41)));
+          const authored = row(0).w.mul(mix(float(1).sub(row(1).w), float(1).add(row(1).w), sRnd(41)));
+          const dist = length(pos.sub(u.uCamPos));
+          // The pixel floor is applied HERE as well as in the material, and
+          // it has to be: the screen-size gate below would otherwise cull a
+          // particle at its authored size that the vertex stage was about to
+          // grow, and the two would disagree about what is on screen.
+          const size = max(authored,
+            worldSizeForPixels(r9.x, dist, u.uFy, u.uViewportH)).toVar();
           const clip = u.uCameraMatrix.mul(vec4(pos, 1));
           const vis = frustumVisibleAtClip(clip, u.uFx, u.uFy, size,
             u.uCullPadNdc, u.uCullPadNdc, u.uCullPadNdc);
 
-          const dist = length(pos.sub(u.uCamPos));
           // Thinned out across the whole fade window, not switched off at the
           // end of it, so the edge of the field is never a line.
           const distKeep = step(sRnd(42),

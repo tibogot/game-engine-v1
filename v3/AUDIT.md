@@ -923,7 +923,7 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
 
 97. **Waterfall** (`v2/tools/waterfall`, 525 lines): waterfall + impact splash,
     gizmo, saved. Do it after River v2 so falls sit on river drops.
-98. **Ambient FX** — IN PROGRESS (slices 1-2 landed 2026-09-18/19). Ambient FX mode
+98. **Ambient FX** — IN PROGRESS (slices 1-3 landed 2026-09-18/19). Ambient FX mode
     in the toolbar: butterflies and falling leaves, GPU-simulated. NOT a port
     of `v2/core/ambientfx` — that was taken as a list of effects someone
     wanted, nothing more. Built the way Niagara/VFX Graph do ambient work.
@@ -1011,7 +1011,75 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
       leaves keep falling; `area: painted` with nothing painted shows nothing
       and Fill brings them back.
 
+    SLICE 3 (2026-09-19) - polish, and the second shape class.
+    - EDGE-ON SLIVERS FIXED. A butterfly in level flight holds its wings
+      horizontal, so a camera at the same height saw the EDGE of the card: a
+      one-pixel streak with no shape at all. Each effect now has `faceCamera`,
+      which rolls the card part of the way toward showing its face. It is a
+      lie about orientation that reads as the thing banking, which butterflies
+      do anyway. Butterflies 0.6; leaves only 0.2, because the tumble is what
+      makes a leaf read and faceCamera 1 stops a tumble dead.
+      Done as a ROLL, not by blending the up vector: mix(worldUp, toCamera)
+      passes through the zero vector for anything directly above the camera
+      and the frame explodes. The angle is wrapped into +/-90 degrees first,
+      so the discontinuity lands where the card is edge-on anyway - the one
+      place a jump cannot be seen. And the DIFFERENCE is blended, not the
+      absolute angle, or a rising faceCamera would drag a tumble to a halt.
+    - THE BILLBOARD SHAPE CLASS, and with it dust motes and fireflies. A soft
+      additive blob, single quad, no artwork - the honest shape for a mote
+      catching the sun, and giving either of those a silhouette is how you get
+      visible sprites. It is a second DRAW because it is a second PASS (cards
+      are alpha-tested in the opaque pass for early-Z; these are additive with
+      no depth write and must come after), which no uniform row could paper
+      over. Everything else an effect wants to be is still free.
+    - MOTION 2, FLOAT: almost no gravity and a very slow heading, so what you
+      read is the wind rather than the particle. Dust that steers itself looks
+      like insects.
+    - Presets `dustMotes` and `fireflies`, both shipped DISABLED so no
+      existing world suddenly hazes over. Fireflies blink (pulseAmount 0.85 -
+      the blink is the whole of what makes a firefly one) and are out
+      19:30 -> 04:30 on the day window from slice 2.
+    - MEASURED, and a real saving: the billboard was first written DoubleSide,
+      and three renders a double-sided TRANSPARENT material in two passes
+      (back faces then front) to sort it - a whole extra draw call for a quad
+      built from the camera's own axes, which never shows its back. FrontSide,
+      and there is a test that says so.
+    - Draw calls, measured with the mode toggled and several frames read per
+      side: baseline 5, cards only 6, billboards only 6, ALL FOUR EFFECTS 7.
+      One draw per shape class in use, two at most, whatever is painted.
+
+    LOOKED AT, 2026-09-19, and the four things it changed. Screenshots at a
+    fixed camera, A/B'd one term at a time.
+    — THE SLIVER FIX WORKS, verified rather than assumed: at faceCamera 0
+      roughly half the butterflies were flattened horizontal smears; at 0.6
+      almost all read as butterflies. One residual case survives and always
+      will — a butterfly flying directly toward or away from you, where
+      rolling about the spine cannot change anything. That one is correct.
+    — THE DEFAULT SIZE WAS WRONG, and this was the real finding. At the
+      authored 8.5 cm a butterfly is 3-5 px at a normal distance, so the
+      painted Ulysses was thrown away entirely and what was left crawled.
+      Added `pixelFloor` (gpuCull.worldSizeForPixels): below it the card GROWS
+      in world space rather than shrinking away — the birds' trick, and the
+      same argument. Butterflies 14 px, leaves 11, fireflies 3.5, dust 0
+      (dust SHOULD vanish with distance). Applied in the compute as well as
+      the material, or the screen-size gate culls a particle at its authored
+      size that the vertex stage was about to grow.
+    — THE DEFAULT BUDGETS WERE 3-4x TOO HIGH. 500 butterflies inside a 36 m
+      fade radius is one per 8 square metres, which is a plague, and 700
+      leaves inside 42 m is a blizzard. 150 and 240 now.
+    — Settled leaves lie flush and read as maples.
+
     Still to do:
+    — The clipmap-float question is STILL OPEN, not verified: default terrain
+      is dead flat, so there is no clipmap error to see. It needs sculpted
+      ground to test.
+    — Dust motes are invisible at their defaults over a bright sky and pale
+      ground, because additive over near-white adds nothing. That is arguably
+      correct — real motes only show in a shaft of light against something
+      dark — but it means the preset cannot be judged in an empty test world.
+    — Everything above was judged against a FEATURELESS GREY PLANE, which
+      this repo's own note says is the unreliable way to do it. Density and
+      brightness want a second look in a world with grass and trees.
     - The remaining spawn rules: near water (`waterSurfaceMap` — one tap,
       covers lakes AND rivers and gives the surface Y, so midges can hover
       just above it), near trees (needs a NEW `canopyMap.js`, ~120 lines,
