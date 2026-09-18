@@ -34,6 +34,7 @@ import {
   positionWorld, smoothstep, abs, length, mx_noise_float, floor, fract, hash, uint,
 } from "three/tsl";
 import { WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
+import { cliffRockTint, createCliffRockUniforms } from "./cliffRockTsl.js";
 
 const NUM_LAYERS = 7;
 const LUM        = vec3(0.299, 0.587, 0.114);
@@ -149,15 +150,37 @@ export function createSplatOverlay(
   // Materials whose generated code depends on them register here, so a change
   // gives them a different program cache key and recompiles them.
   // triplanarSlots[i] = layer i's triplanar projection is generated at all.
-  const compileState = { triplanar: false, triplanarSlots: new Array(NUM_LAYERS).fill(false) };
+  const compileState = {
+    triplanar: false,
+    triplanarSlots: new Array(NUM_LAYERS).fill(false),
+    // Layers shaded like the rock props (cliffRockTsl) — same gate, same reason.
+    rockShadeSlots: new Array(NUM_LAYERS).fill(false),
+  };
   const _compileConsumers = new Set();
   const _triKey = () => compileState.triplanarSlots.map((on) => (on ? 1 : 0)).join("");
+  const _rockKey = () => compileState.rockShadeSlots.map((on) => (on ? 1 : 0)).join("");
   function registerMaterial(mat) {
     if (!mat || _compileConsumers.has(mat)) return mat;
     _compileConsumers.add(mat);
     const baseKey = mat.customProgramCacheKey.bind(mat);
-    mat.customProgramCacheKey = () => `${baseKey()}|splatTri:${_triKey()}`;
+    mat.customProgramCacheKey = () => `${baseKey()}|splatTri:${_triKey()}|splatRock:${_rockKey()}`;
     return mat;
+  }
+
+  // The terrain half of the rock look; its own knobs, the rocks' palette.
+  const cliffRock = createCliffRockUniforms();
+
+  /**
+   * Which layers are shaded like the rock props. Generated per layer and
+   * without a branch, exactly like triplanar: a layer that does not ask for it
+   * pays nothing, and turning it on recompiles (a one-off pause).
+   */
+  function setRockShadeCompiled(slots) {
+    const next = Array.from({ length: NUM_LAYERS }, (_, i) => Boolean(slots?.[i]));
+    if (next.every((v, i) => v === compileState.rockShadeSlots[i])) return false;
+    compileState.rockShadeSlots = next;
+    for (const mat of _compileConsumers) mat.needsUpdate = true;
+    return true;
   }
   /**
    * Compile triplanar for exactly the layers that use it. `slots` is a
@@ -403,10 +426,33 @@ export function createSplatOverlay(
 
         // Layer colors (albedo × AO × tint). The height blend below reads the
         // UNTINTED colour, so recolouring a layer does not move its edges.
+        //
+        // A layer can also be shaded like the rock PROPS instead of relying on
+        // its texture's drawn cracks: the same recipe off terrain relief and
+        // convexity (cliffRockTsl). Computed once and shared by the layers
+        // that ask for it — a cliff and a boulder then read as one stone.
+        let rockTint = null;
+        if (compileState.rockShadeSlots.some(Boolean) && terrainNormals && geomNormal !== null) {
+          rockTint = cliffRockTint({
+            surfaceAt: (node) => terrainNormals.surfaceAt(node),
+            uv: splatUV,
+            normalYNode: normalize(vec3(geomNormal)).y,
+            worldSize: WORLD_SIZE,
+            cu: cliffRock,
+          }).toVar();
+        }
         const layerShaded = [];
         const layerColors = [];
         for (let i = 0; i < NUM_LAYERS; i++) {
-          const shaded = layerAlbedos[i].rgb.mul(mix(float(1), layerOrms[i].g, layerSlots[i].uAOStr));
+          let shaded = layerAlbedos[i].rgb.mul(mix(float(1), layerOrms[i].g, layerSlots[i].uAOStr));
+          if (rockTint && compileState.rockShadeSlots[i]) {
+            // REPLACES the texture rather than tinting it: the rock props have
+            // no texture at all, and a cliff still carrying drawn cracks can
+            // never match one. The layer keeps its ORM (roughness, normal) and
+            // its own tint, so it can still be pushed warmer or darker.
+            const amt = layerSlots[i].uRockShade ?? float(1);
+            shaded = mix(shaded, vec3(cliffRock.uBase).mul(rockTint), amt);
+          }
           layerShaded.push(shaded);
           layerColors.push(layerSlots[i].uTint ? shaded.mul(layerSlots[i].uTint).toVar() : shaded);
         }
@@ -546,6 +592,8 @@ export function createSplatOverlay(
     blend,
     registerMaterial,
     setTriplanarCompiled,
+    setRockShadeCompiled,
+    cliffRock,
     get triplanarCompiled() { return compileState.triplanar; },
     auto: {
       uAutoEnabled, uAutoFull, uAutoFlat, uAutoCliff, uAutoHigh,

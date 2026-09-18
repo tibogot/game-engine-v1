@@ -36,6 +36,30 @@ the game.
    all off +5.6 → +1.6–2.1 ms; Rock triplanar on +2.3–2.6 ms. Toggling a layer's
    Triplanar recompiles the terrain shader (one-off pause).
 3. **More Genshin textures** 👁: cliff rock, forest floor, wet sand, snow.
+   **CLIFF ROCK — done differently, 2026-09-18: no texture at all.** A terrain
+   cliff painted with a tiling rock texture can never match the procedural rock
+   and cliff PROPS, because the drawn cracks and pebble blobs are exactly what
+   the props do not have: a boulder standing against a painted cliff always
+   read as a different material (checked side by side in the editor first).
+   So a paint layer can now be SHADED like the props instead: Paint → layer →
+   "Rock shading". The layer drops its albedo and runs the props' own recipe
+   (v3/props/rockShading.js, now shared: `rockShadeUniforms`, `rockShadeTint`)
+   off terrain data (v3/terrain/cliffRockTsl.js) —
+   "how high on the rock" becomes height above the surrounding land (four taps
+   at ~70 m; measured close, every point on a long face reads equally high and
+   the wall comes out one flat value), and the chip-edge light becomes
+   convexity over a short step (~9 m). Undersides, mottling and the base-to-top
+   gradient are the shared code, so tuning the rocks tunes the cliffs.
+   No new sampler (it re-reads the baked surface texture the terrain already
+   samples — the fragment stage is at 16/16) and compiled per layer like
+   triplanar, so a layer that does not ask for it pays nothing. The layer keeps
+   its ORM and tint. Saved per layer (`rockShade`).
+   Measured interleaved (6 rounds x 120 frames, rock layers over most of the
+   view): 2.48 → 2.85 ms GPU, **+0.37 ms**.
+   OPEN, for the look pass: the shared stone is very PALE (the props' base is a
+   light cool grey), so a whole mountain reads near-white — both should
+   probably come down to a mid grey, which is one shared knob. Also unjudged:
+   whether the ridge highlight reads as chipped rock or too soft.
 4. ~~**Target strength.**~~ — DONE 2026-09-17. Paint panel → Target strength
    (5-100%). The stroke core (splatMap.applySplatStroke) lerps the layer toward
    the TARGET instead of full weight and skips texels already at or above it,

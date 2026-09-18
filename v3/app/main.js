@@ -649,6 +649,13 @@ export async function startV3App(opts = {}) {
     );
   }
 
+  /** Same story for the layers shaded like the rock props (cliffRockTsl). */
+  function syncRockShadeCompile() {
+    splatOverlay.setRockShadeCompiled(
+      textureLib.slotUniforms.map((u) => u.uRockShade.value > 0.001),
+    );
+  }
+
   const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap, grassFarShading);
   scene.add(lod.group);
   /**
@@ -5219,6 +5226,11 @@ export async function startV3App(opts = {}) {
     textureLib.setTriplanar(texlibActiveSlot, tslTriplanar.checked);
     syncTriplanarCompile();
   });
+  const tslRockShade = uiById("tsl-rockshade");
+  tslRockShade.addEventListener("change", () => {
+    textureLib.setRockShade(texlibActiveSlot, tslRockShade.checked ? 1 : 0);
+    syncRockShadeCompile();
+  });
   const tslBlockGrass = uiById("tsl-block-grass");
   const tslBlockTrees = uiById("tsl-block-trees");
   tslBlockGrass.addEventListener("change", () => {
@@ -5426,6 +5438,7 @@ export async function startV3App(opts = {}) {
     tslRStr.value = Math.round(u.uRoughStr.value * 10);
     tlblRStr.textContent = u.uRoughStr.value.toFixed(1);
     tslTriplanar.checked = u.uTriplanar.value > 0.5;
+    tslRockShade.checked = u.uRockShade.value > 0.001;
     tslTint.value = textureLib.getTintHex(texlibActiveSlot);
     tslUVRot.value = Math.round(s.uvRotation);
     tlblUVRot.textContent = `${Math.round(s.uvRotation)}°`;
@@ -7938,6 +7951,7 @@ export async function startV3App(opts = {}) {
     if (d.paintLayers) {
       await textureLib.importData(d.paintLayers);
       syncTriplanarCompile();
+      syncRockShadeCompile();
       for (let i = 0; i < 7; i++) refreshLayerThumb(i);
       syncTexlibEditor();
     }

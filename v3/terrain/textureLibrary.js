@@ -163,6 +163,9 @@ export class TextureLibrary {
       // file want degrees, which live on the slot (uvRotation).
       uTint:  uniform(new THREE.Color(1, 1, 1)),
       uUVRot: uniform(new THREE.Vector2(1, 0)),
+      // 1 = shade this layer like the procedural rock props (cliffRockTsl),
+      // so a cliff and a boulder read as the same stone. Compiled per layer.
+      uRockShade: uniform(0.0),
     }));
     for (const s of this.slots) s.uvRotation = 0;
   }
@@ -541,6 +544,7 @@ export class TextureLibrary {
   blocksTreesFlags() { return this.slots.map((s) => s.blocksTrees); }
 
   setTriplanar(i, on) { this.slotUniforms[i].uTriplanar.value = on ? 1 : 0; }
+  setRockShade(i, v)  { this.slotUniforms[i].uRockShade.value = Math.max(0, Math.min(1, Number(v) || 0)); }
   setUVScale(i, v)    { this.slotUniforms[i].uUVScale.value   = v; }
   setNormalStr(i, v)  { this.slotUniforms[i].uNormalStr.value = v; }
   setAOStr(i, v)      { this.slotUniforms[i].uAOStr.value     = v; }
@@ -602,6 +606,7 @@ export class TextureLibrary {
         triplanar: u.uTriplanar.value > 0.5,
         tint:      this.getTintHex(i),
         uvRotation: s.uvRotation,
+        rockShade: u.uRockShade.value,
         // Params only, never pixels: the bake is deterministic, so loading
         // re-generates exactly the same texture.
         procedural: s.procedural ? { ...s.procedural } : null,
@@ -652,6 +657,7 @@ export class TextureLibrary {
       // Absent in older files = white / 0, which is what they rendered.
       this.setTint(i, typeof d.tint === "string" && /^#[0-9a-f]{6}$/i.test(d.tint) ? d.tint : "#ffffff");
       this.setUVRotation(i, Number.isFinite(d.uvRotation) ? d.uvRotation : 0);
+      this.setRockShade(i, Number.isFinite(d.rockShade) ? d.rockShade : 0);
       const a = d.auto;
       if (a) {
         s.autoEnabled = !!a.enabled;
