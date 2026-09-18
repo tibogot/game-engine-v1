@@ -33,6 +33,9 @@ export const GRASS_PRESETS = {
       bssColor: "#2d7a2d", bssIntensity: 1.2, bssPower: 2,
       frontScatter: 0.3, rimSSS: 0.25,
       terrainTintEnabled: false, terrainTintStrength: 0.5, terrainTintRootBias: 0.35,
+      // Grass stops climbing steep ground (~32° to ~49°); a cliff's grass is
+      // the cliff-top layer's job, not the terrain field's.
+      slopeEnabled: true, slopeMin: 0.65, slopeMax: 0.85,
       lodMidSegments: 3, lodFarSegments: 2, lodMegaSegments: 2,
       lodFarBladeWidth: 0.45, lodMegaBladeWidth: 0.5,
       farBlades: false,
@@ -62,6 +65,8 @@ export const GRASS_PRESETS = {
       bssColor: "#8ed17a", bssIntensity: 0.45, bssPower: 2,
       frontScatter: 0.15, rimSSS: 0.1,
       terrainTintEnabled: true, terrainTintStrength: 1, terrainTintRootBias: 0.12,
+      // Stylised worlds are even stricter about bare cliffs.
+      slopeEnabled: true, slopeMin: 0.7, slopeMax: 0.88,
       lodMidSegments: 2, lodFarSegments: 2, lodMegaSegments: 2,
       lodFarBladeWidth: 0.5, lodMegaBladeWidth: 0.55,
       farBlades: false,

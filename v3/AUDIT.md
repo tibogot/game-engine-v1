@@ -241,6 +241,23 @@ the game.
     MEASURED: painted rock at world z = +300, read the bake the way the blades
     do — green at +300, grey (sat 0.14) at -300; after swapping the camera's
     top/bottom, grey at +300 and green at -300, with X still correct.
+15d. ~~Grass took the colour of rock, and grew on it~~ — FIXED 2026-09-18
+    (user: "the tint is for matching ground grass texture, not to blend a
+    blade with a rock texture, and there shouldn't be grass where the cliff
+    texture is").
+    - The tint bake now HOLDS OUT every layer flagged "Blocks grass"
+      (splatOverlay.blend gains `layerKeep`; applied AFTER the auto-paint
+      rules, so an auto-painted meadow still counts and only the auto-painted
+      rock is dropped, and the removed share goes to the layers still painted
+      there rather than to the base tile). MEASURED: tint over a rock blob
+      went from grey (sat 0.14) to the meadow green (sat 0.87).
+    - Rock/cliff procedural presets now set "Blocks grass" (and trees) like
+      the path presets already did. MEASURED: blades inside a rock blob
+      55,340 → 7,123 (the rest is the paint's soft edge), unchanged outside.
+    - Both grass presets turn slope rejection ON, so the terrain field stops
+      climbing steep faces; a cliff's grass is the cliff-top layer's job.
+    - The far-field terrain colour needed no change: it already reads the
+      MASKED density, so it paints nothing on a blocking layer.
 16b. **Grass presets** — DONE 2026-09-18. `app/state/grassPresets.js` +
     a Preset dropdown at the top of the grass Appearance section: "Ghost of
     Tsushima" (today's realistic defaults, restored exactly — verified by a

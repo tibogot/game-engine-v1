@@ -345,7 +345,15 @@ export function createSplatOverlay(
    *   geomNormal  (optional) vec3 world normal — pass to get ORM.ba normal
    *               mapping (needs F.normalMap)
    */
-  function blend({ baseColor, baseRough = null, geomNormal = null }) {
+  /**
+   * @param layerKeep optional per-layer 0..1 nodes (index 0 = layer 1). A layer
+   *   at 0 is held out AFTER the auto-paint rules have run, and its share is
+   *   handed to the layers that remain here — so the result is the ground as
+   *   the kept layers alone would paint it, not a hole and not the base tile.
+   *   The grass tint bake uses it to drop layers flagged "Blocks grass": a
+   *   blade must never take the colour of rock or a path it cannot grow on.
+   */
+  function blend({ baseColor, baseRough = null, geomNormal = null, layerKeep = null }) {
     const wantRough = baseRough !== null;
     const wantNrm   = geomNormal !== null && F.normalMap;
 
@@ -422,6 +430,23 @@ export function createSplatOverlay(
               fullPrev,
             ));
           });
+        }
+
+        // Hold out layers the caller does not want (see layerKeep). After the
+        // auto rules, so an auto-painted meadow still counts and only the
+        // auto-painted rock is dropped; the removed share goes to the layers
+        // still standing here rather than to the base tile colour.
+        if (layerKeep) {
+          const kept = [];
+          let sumAll = float(0), sumKept = float(0);
+          for (let i = 0; i < NUM_LAYERS; i++) {
+            const k = w[i + 1].mul(layerKeep[i]).toVar();
+            kept.push(k);
+            sumAll = sumAll.add(w[i + 1]);
+            sumKept = sumKept.add(k);
+          }
+          const refill = sumAll.div(max(sumKept, float(1e-4))).toVar();
+          for (let i = 0; i < NUM_LAYERS; i++) w[i + 1].assign(kept[i].mul(refill));
         }
 
         // Layer colors (albedo × AO × tint). The height blend below reads the

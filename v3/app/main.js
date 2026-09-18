@@ -1371,6 +1371,12 @@ export async function startV3App(opts = {}) {
   const grassTintCam = new THREE.OrthographicCamera(
     WORLD_SIZE / 2, -WORLD_SIZE / 2, -WORLD_SIZE / 2, WORLD_SIZE / 2, 0.1, 50,
   );
+  // Layers grass cannot grow on are LEFT OUT of the tint. A blade must never
+  // take the colour of rock, a cliff or a path — that was showing up as grey
+  // blades wherever a grass edge met stone. Their share goes to the layers
+  // still painted there, so a blade beside a rock keeps the meadow colour.
+  // Declared out here because syncGrassTintLayers() below writes it.
+  const tintLayerKeep = Array.from({ length: 7 }, () => uniform(1));
   grassTintCam.position.set(0, 10, 0);
   grassTintCam.up.set(0, 0, 1);
   grassTintCam.lookAt(0, 0, 0);
@@ -1384,7 +1390,7 @@ export async function startV3App(opts = {}) {
     // (Procedural Ground and Meadow used to feed in here too; both retired.
     // With them off — every saved project — they multiplied to exactly this.)
     const tintBase = uniform(new THREE.Color(0xe6e3e3));
-    let tintCol = splatOverlay.blend({ baseColor: tintBase }).color;
+    let tintCol = splatOverlay.blend({ baseColor: tintBase, layerKeep: tintLayerKeep }).color;
     const snowShared = snowSystem?.shared;
     if (snowShared) {
       tintCol = mix(
@@ -1402,6 +1408,16 @@ export async function startV3App(opts = {}) {
     tintPlane.frustumCulled = false;
     grassTintScene.add(tintPlane);
   }
+  /** "Blocks grass" flags → the tint bake's held-out layers. */
+  function syncGrassTintLayers(flags) {
+    let changed = false;
+    for (let i = 0; i < tintLayerKeep.length; i++) {
+      const keep = flags[i] ? 0 : 1;
+      if (tintLayerKeep[i].value !== keep) { tintLayerKeep[i].value = keep; changed = true; }
+    }
+    if (changed) grassTintDirty = true;
+  }
+
   let grassTintDirty = true;
   let _grassTintFrame = 0;
   function bakeGrassTintIfNeeded() {
@@ -4036,6 +4052,7 @@ export async function startV3App(opts = {}) {
       }
       if (!_rendererSideWork) {
         const blocksGrass = textureLib.blocksGrassFlags();
+        syncGrassTintLayers(blocksGrass);
         grassTerrainData.updateDensityMask(blocksGrass);
         flowerDensity.updateMask(blocksGrass);
         foliageDensity.updateMask(blocksGrass);
@@ -5339,7 +5356,10 @@ export async function startV3App(opts = {}) {
 
   /** A path or shore is walked on: its presets keep grass and trees off it. */
   function applyPresetBlocking(i, p) {
-    if (p.pattern !== "path") return;
+    // A path is walked on and a rock face is stone: neither grows grass or
+    // trees. Rock used to allow both, so a cliff came out furry and — once a
+    // preset raised the terrain tint — the blades on it went stone grey.
+    if (p.pattern !== "path" && p.pattern !== "rock") return;
     textureLib.slots[i].blocksGrass = true;
     textureLib.slots[i].blocksTrees = true;
   }
