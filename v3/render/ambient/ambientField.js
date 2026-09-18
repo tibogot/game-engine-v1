@@ -75,9 +75,9 @@
  */
 import * as THREE from "three";
 import {
-  Fn, If, abs, atomicAdd, atomicStore, clamp, cos, float, hash, instanceIndex, instancedArray,
-  int, length, max, min, mix, sin, smoothstep, sqrt, step, storage, texture, time, uint, uniform,
-  uniformArray, vec2, vec3, vec4, PI2,
+  Fn, If, abs, atomicAdd, atomicStore, clamp, cos, float, fract, hash, instanceIndex,
+  instancedArray, int, length, max, min, mix, sin, smoothstep, sqrt, step, storage, texture, time,
+  uint, uniform, uniformArray, vec2, vec3, vec4, PI2,
 } from "three/tsl";
 import { frustumVisibleAtClip, screenRadiusPixels } from "../scatter/gpuCull.js";
 import { integrateMotion } from "./ambientMotion.js";
@@ -98,12 +98,16 @@ export class AmbientField {
    *   heightTex       RGBA float, .x = terrain world Y
    *   terrainNormalTex RGBA float, .xyz = terrain normal
    *   windTex         the shared wind texture (grass / susuki / flowers)
+   *   densityTex      painted density, one effect per channel — a single
+   *                   texture, or an array when there are more than four
+   *                   effects (four fit in one RGBA page). Null = no paint,
+   *                   and every effect behaves as "everywhere".
    *   hintRadius      how far a respawn looks around its last success, metres
    */
   constructor({
     scene, renderer, name = "AmbientFX",
     effectCount, rows, maxParticles, shapeCount = 1,
-    worldSize, heightTex, terrainNormalTex, windTex, hintRadius = 9,
+    worldSize, heightTex, terrainNormalTex, windTex, densityTex = null, hintRadius = 9,
   }) {
     this.renderer = renderer;
     this.name = name;
@@ -138,6 +142,8 @@ export class AmbientField {
 
       uWorldSize: uniform(worldSize),
       uDt: uniform(0),
+      /** The world's clock, 0..24. Drives each effect's time-of-day window. */
+      uHour: uniform(12),
       /** Bumped every frame — the ONLY place a per-frame random is wanted. */
       uSeed: uniform(0),
 
@@ -157,6 +163,8 @@ export class AmbientField {
       /** Metres: a card closer than this to the camera thins out. */
       uNearFade: uniform(0.8),
     });
+
+    const densityPages = densityTex ? (Array.isArray(densityTex) ? densityTex : [densityTex]) : [];
 
     const bufA = instancedArray(count, "vec4");   // pos.xyz, age
     const bufB = instancedArray(count, "vec4");   // vel.xyz (or ground normal), life
@@ -208,7 +216,8 @@ export class AmbientField {
       // r4 (slopeMinY, flapRate, windCoupling, turbulence)
       // r5 (fadeStart, fadeEnd, minPixels, colorVar)
       // r6 (translucency, settleTime, flapAmp, -)
-      const r2 = row(2), r3 = row(3), r4 = row(4), r5 = row(5), r6 = row(6);
+      // r7 (area "everywhere", day start01, day len01, day soft01)
+      const r2 = row(2), r3 = row(3), r4 = row(4), r5 = row(5), r6 = row(6), r7 = row(7);
 
       // Inside the live part of its slice? `uTier` scales every slice at once.
       const localIdx = fi.sub(u.uSliceStart.element(e));
@@ -250,14 +259,43 @@ export class AmbientField {
           const gY = texture(heightTex, uvT).x;
           const gN = texture(terrainNormalTex, uvT).xyz;
 
-          // The rule. Height band and slope now; the painted mask and the
-          // water / canopy / time-of-day rules multiply in here next.
+          // ── THE RULE ──────────────────────────────────────────────────
+          // Everything multiplies, and the product is a PROBABILITY, not a
+          // yes/no: half-painted ground gets half as many butterflies, and
+          // the edge of a brush stroke thins out instead of ending on a line.
           const band = smoothstep(r3.z.sub(2), r3.z.add(2), gY)
             .mul(float(1).sub(smoothstep(r3.w.sub(2), r3.w.add(2), gY)));
           const slope = smoothstep(r4.x, r4.x.add(0.12), gN.y);
           const mapHalf = u.uWorldSize.mul(0.5);
           const inMap = float(1).sub(smoothstep(mapHalf.sub(3), mapHalf, max(abs(cand.x), abs(cand.y))));
-          const accept = step(fRnd(16), band.mul(slope).mul(inMap));
+
+          // Painted density — one effect per channel, four to a page. An
+          // effect set to "everywhere" (r7.x) ignores it entirely.
+          const paint = float(1).toVar();
+          if (densityPages.length) {
+            const chans = [];
+            for (const tex of densityPages) {
+              const d = texture(tex, uvT);
+              chans.push(d.x, d.y, d.z, d.w);
+            }
+            const picked = float(0).toVar();
+            for (let k = 0; k < Math.min(effectCount, chans.length); k++) {
+              If(e.equal(k), () => { picked.assign(chans[k]); });
+            }
+            paint.assign(mix(picked, float(1), r7.x));
+          }
+
+          // Time of day. The window wraps (fireflies at 19 → 5), and len01 = 1
+          // is the "always" case the CPU flags rather than encoding as a
+          // zero-length span.
+          const day = float(1).toVar();
+          If(r7.z.lessThan(0.999), () => {
+            const t = fract(u.uHour.div(24).sub(r7.y));
+            day.assign(smoothstep(float(0), r7.w, t)
+              .mul(float(1).sub(smoothstep(r7.z.sub(r7.w), r7.z, t))));
+          });
+
+          const accept = step(fRnd(16), band.mul(slope).mul(inMap).mul(paint).mul(day));
 
           If(accept.greaterThan(0.5), () => {
             pos.assign(vec3(cand.x, gY.add(mix(r3.x, r3.y, fRnd(17))), cand.y));
@@ -509,6 +547,9 @@ export class AmbientField {
 
     this.renderer.compute([this.computeReset, this.computeUpdate]);
   }
+
+  /** The world's clock, 0..24 — each effect's time-of-day window reads it. */
+  setHour(h) { this.u.uHour.value = h; }
 
   /** Render height in pixels — the screen-size cull needs it. */
   setViewportHeight(h) { this.u.uViewportH.value = Math.max(1, h); }

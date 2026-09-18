@@ -35,7 +35,7 @@ export const MOTION = Object.freeze({ wander: 0, fall: 1 });
 export { ART_TILE as TILE } from "../../render/ambient/ambientAtlas.js";
 
 /** vec4 uniform rows per effect. Keep in step with pack() in ambientField.js. */
-export const AMBIENT_ROWS = 7;
+export const AMBIENT_ROWS = 8;
 
 /** How many effects the field allocates rows and a paint channel for. */
 export const AMBIENT_EFFECT_COUNT = 4;
@@ -101,6 +101,31 @@ export function createAmbientEffect(over = {}) {
     /** Steeper than this (normal.y below it) and nothing spawns. */
     slopeMinY: 0.45,
 
+    /**
+     * "painted" — only where this effect is painted.
+     * "everywhere" — anywhere its height and slope allow.
+     *
+     * A new effect starts everywhere so the mode shows something the moment
+     * you open it; the FIRST brush stroke flips it to painted, because
+     * painting an effect that ignores paint is the one genuinely confusing
+     * state this could be in.
+     */
+    area: "everywhere",
+
+    /**
+     * The hours it is out, on a 24 h clock. The window WRAPS, so fireflies at
+     * 19 → 5 is a normal thing to ask for, and start === end means always.
+     *
+     * It gates SPAWN, not opacity. An effect going out of season drains over
+     * a lifetime or two instead of dimming — butterflies going home one by
+     * one, which reads far better than the whole swarm fading together, and
+     * costs nothing in the vertex stage.
+     */
+    dayStart: 0,
+    dayEnd: 24,
+    /** Hours of soft edge at each end of that window. */
+    daySoft: 1.2,
+
     /* ── Culling (the budget you can trade) ── */
     /** Metres from the anchor where it starts thinning out, and where it is gone. */
     fadeStart: 26,
@@ -137,6 +162,9 @@ export const AMBIENT_PRESETS = {
     altMin: 0.35,
     altMax: 2.4,
     slopeMinY: 0.45,
+    dayStart: 7,          // out in the day, gone by dusk
+    dayEnd: 19,
+    daySoft: 1.5,
     fadeStart: 24,
     fadeEnd: 36,
     minPixels: 2.2,
@@ -211,6 +239,31 @@ export function createAmbientFxState() {
 
 /** Pool size. Every effect's budget is a slice of this; the sum may not exceed it. */
 export const AMBIENT_MAX_PARTICLES = 8192;
+
+/**
+ * The time-of-day window, normalised for the GPU.
+ *
+ * Pure, and tested, because the wrap is the part that is easy to get wrong:
+ * a window from 19:00 to 05:00 is ten hours long, not minus fourteen, and
+ * "always" has to be distinguishable from "a zero-length window" when both
+ * arrive as start === end.
+ *
+ * @returns {{ s01:number, len01:number, soft01:number }}
+ *   s01     window start, 0..1 of a day
+ *   len01   its length, 0..1; 1 means ALWAYS (the shader special-cases it)
+ *   soft01  soft edge at each end, never zero (smoothstep needs a width)
+ */
+export function dayWindow(start = 0, end = 24, softHours = 1) {
+  const span = (((end - start) % 24) + 24) % 24;
+  // start === end and a full 24 h both mean "always", and a zero-length
+  // window is not a thing anybody wants to express.
+  const always = end - start >= 24 || span === 0;
+  const len01 = always ? 1 : span / 24;
+  // The soft edge cannot eat more than half the window from each end, or the
+  // ramps cross and the effect never reaches full strength.
+  const soft01 = Math.max(0.002, Math.min(softHours / 24, len01 * 0.45));
+  return { s01: ((start % 24) + 24) % 24 / 24, len01, soft01 };
+}
 
 /**
  * Slice starts and lengths from the effects' budgets, clamped so the sum fits

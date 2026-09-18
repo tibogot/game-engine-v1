@@ -923,7 +923,7 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
 
 97. **Waterfall** (`v2/tools/waterfall`, 525 lines): waterfall + impact splash,
     gizmo, saved. Do it after River v2 so falls sit on river drops.
-98. **Ambient FX** — IN PROGRESS (slice 1 landed 2026-09-18). Ambient FX mode
+98. **Ambient FX** — IN PROGRESS (slices 1-2 landed 2026-09-18/19). Ambient FX mode
     in the toolbar: butterflies and falling leaves, GPU-simulated. NOT a port
     of `v2/core/ambientfx` — that was taken as a list of effects someone
     wanted, nothing more. Built the way Niagara/VFX Graph do ambient work.
@@ -978,14 +978,45 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
     trick the world rain used (3×, 9× the pixels). For a budget decision the
     reading is: budget is not the constraint here.
 
+    SLICE 2 (2026-09-19) — painted into a world, and a clock.
+    - PAINT. `ScatterDensity` at 1024², one effect per RGBA channel, and the
+      RAW texture rather than a masked copy: grass reads a copy with every
+      "Blocks grass" layer and every terrain hole cut out because a plant
+      cannot grow on a path, but a butterfly flies over the path. Skipping the
+      mask skips its bake too.
+    - Its OWN brush, deliberately not the shared vegetation one — an Alt-erase
+      that clears every kind of plant must not also wipe the butterflies —
+      with its own 12-step undo, Shift/Alt wheel, fill and per-effect clear.
+    - Per effect, `area` is "painted" or "everywhere". A new effect starts
+      everywhere so the mode shows something when you open it, and the FIRST
+      brush stroke flips it to painted, because painting an effect that
+      ignores paint is the one genuinely confusing state this could be in.
+    - The paint is a PROBABILITY, not a mask: half-painted ground gets half
+      the butterflies and a soft brush edge really does thin the swarm out
+      instead of ending it on a line.
+    - TIME OF DAY. A per-effect window on the world's clock that WRAPS, so
+      fireflies at 19 → 5 is a normal thing to ask for and start === end means
+      always. It gates SPAWNING, not opacity: an effect going out of season
+      drains over a lifetime or two — butterflies going home one by one —
+      which reads better than the whole swarm dimming together and costs
+      nothing in the vertex stage. Butterflies ship at 07:00 → 19:00.
+      `dayWindow()` is pure and tested; the wrap is the part that is easy to
+      get wrong.
+    - SAVE/LOAD. `ambientPaint` (blob), `ambientEffects` and `ambientField`.
+      NOTE FOR THE NEXT PERSON ADDING A PAINT LAYER: a blob that is not
+      registered in `v3/io/projectIO.js` is silently DROPPED on save — you
+      find out by reopening a world and finding it empty. This nearly shipped
+      exactly that; there is now a round-trip check for it.
+    - Verified live: the day gate drains butterflies while the always-on
+      leaves keep falling; `area: painted` with nothing painted shows nothing
+      and Fill brings them back.
+
     Still to do:
-    - PAINT. The mode currently fills anywhere height and slope allow.
-      `ScatterDensity` verbatim (4 effects per RGBA page) + the vegetation
-      brush + save/load into `.v3proj`.
-    - The rest of the spawn rules: painted mask, near water (`waterSurfaceMap`
-      — one tap, covers lakes AND rivers and gives the surface Y), near trees
-      (needs a NEW `canopyMap.js`, ~120 lines, splatting TreeStore), time of
-      day (fireflies at night), weather.
+    - The remaining spawn rules: near water (`waterSurfaceMap` — one tap,
+      covers lakes AND rivers and gives the surface Y, so midges can hover
+      just above it), near trees (needs a NEW `canopyMap.js`, ~120 lines,
+      splatting TreeStore, which is what makes leaves fall from UNDER a canopy
+      rather than out of the open sky), and weather.
     - More leaf art. Only ONE single-leaf PNG exists; `leaf_atlas.png` and the
       `Leaf-Billboard-Texture-*` files are canopy clusters, no good for a
       falling leaf. Drop singles into `public/textures/` and append to

@@ -43,7 +43,7 @@ import { createCardGeometry } from "./ambientShapes.js";
 import { ageFade, cardFrame, cardRoll } from "./ambientMotion.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 import {
-  AMBIENT_EFFECT_COUNT, AMBIENT_MAX_PARTICLES, AMBIENT_ROWS, sliceBudgets,
+  AMBIENT_EFFECT_COUNT, AMBIENT_MAX_PARTICLES, AMBIENT_ROWS, dayWindow, sliceBudgets,
 } from "../../app/state/ambientFxState.js";
 
 /** Shape classes. One indirect draw each; this slice ships only the card. */
@@ -58,9 +58,10 @@ export class AmbientFxSystem {
    * @param {object} o
    *   scene, renderer, worldSize
    *   heightTex, terrainNormalTex, windTex
+   *   densityTex  painted density, one effect per channel (or null)
    *   fx   ambient FX state (createAmbientFxState shape)
    */
-  constructor({ scene, renderer, heightTex, terrainNormalTex, windTex, worldSize, fx }) {
+  constructor({ scene, renderer, heightTex, terrainNormalTex, windTex, densityTex = null, worldSize, fx }) {
     this.renderer = renderer;
     this.effectCount = AMBIENT_EFFECT_COUNT;
 
@@ -70,7 +71,7 @@ export class AmbientFxSystem {
       rows: AMBIENT_ROWS,
       maxParticles: AMBIENT_MAX_PARTICLES,
       shapeCount: SHAPE_COUNT,
-      worldSize, heightTex, terrainNormalTex, windTex,
+      worldSize, heightTex, terrainNormalTex, windTex, densityTex,
     }));
     this.group = field.group;
 
@@ -285,6 +286,8 @@ export class AmbientFxSystem {
       const fadeEnd = Math.min(e.fadeEnd, wall);
       rows[o + 5].set(Math.min(e.fadeStart, fadeEnd - 1), fadeEnd, e.minPixels, e.colorVar);
       rows[o + 6].set(e.translucency, e.settleTime, e.flapAmp, e.tint ?? 0);
+      const w = dayWindow(e.dayStart, e.dayEnd, e.daySoft);
+      rows[o + 7].set(e.area === "painted" ? 0 : 1, w.s01, w.len01, w.soft01);
     }
 
     // Nothing painted, nothing budgeted: skip the draw entirely.
@@ -294,6 +297,9 @@ export class AmbientFxSystem {
 
   /** True while at least one effect has live slots. */
   get anyLive() { return !!this._anyLive; }
+
+  /** The world's clock, 0..24. */
+  setHour(h) { this.field.setHour(h); }
 
   init(camera) { return this.field.init(camera); }
   setEnabled(on) { this.field.setEnabled(on); }

@@ -96,6 +96,9 @@ export function encodeProjectFile({
   foliagePaint,         // Uint8Array (RGBA 1024²) painted foliage, one plant per channel, or null
   foliagePlants,        // the four plant types: shape, colour, where they grow (JSON)
   foliageField,         // field-wide foliage params: density, clumping, wind, distance (JSON)
+  ambientPaint,         // Uint8Array (RGBA 1024²) painted ambient FX, one effect per channel, or null
+  ambientEffects,       // the ambient effects: motion, art, colours, rules, budget (JSON)
+  ambientField,         // field-wide ambient params: volume, tier, wind (JSON)
   cliffGrassDensity,    // Uint8Array (RGBA 512²) painted cliff-top grass coverage
   cliffPaint,           // Uint8Array (RGBA 512²) terrain colour painted onto cliffs
   grass,                // grass appearance params (JSON)
@@ -122,6 +125,7 @@ export function encodeProjectFile({
   addBlob("susukiDensity", susukiDensity);
   addBlob("flowerDensity", flowerDensity);
   addBlob("foliagePaint", foliagePaint);
+  addBlob("ambientPaint", ambientPaint);
   addBlob("cliffGrassDensity", cliffGrassDensity);
   addBlob("cliffPaint", cliffPaint);
   const assetList = [];
@@ -156,6 +160,8 @@ export function encodeProjectFile({
     flowers:  flowers ?? null,
     foliagePlants: foliagePlants ?? null,
     foliageField:  foliageField ?? null,
+    ambientEffects: ambientEffects ?? null,
+    ambientField:   ambientField ?? null,
     grass:    grass ?? null,
     snowParams: snowParams ?? null,
     groundTsl: groundTsl ?? null,
@@ -235,6 +241,9 @@ export function decodeProjectFile(buffer) {
     foliagePaint:  blob("foliagePaint"),
     foliagePlants: manifest.foliagePlants ?? null,
     foliageField:  manifest.foliageField ?? null,
+    ambientPaint:   blob("ambientPaint"),
+    ambientEffects: manifest.ambientEffects ?? null,
+    ambientField:   manifest.ambientField ?? null,
     cliffGrassDensity: blob("cliffGrassDensity"),
     cliffPaint: blob("cliffPaint"),
     grass:     manifest.grass ?? null,

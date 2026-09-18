@@ -40,8 +40,9 @@ globalThis.Image = class {
 };
 
 const { buildWGSL, buildComputeWGSL, THREE } = await import("./wgslBuilderStub.mjs");
-const { sliceBudgets, createAmbientFxState, AMBIENT_MAX_PARTICLES, AMBIENT_EFFECT_COUNT, AMBIENT_ROWS, MOTION, TILE } =
+const { sliceBudgets, dayWindow, createAmbientFxState, AMBIENT_MAX_PARTICLES, AMBIENT_EFFECT_COUNT, AMBIENT_ROWS, MOTION, TILE } =
   await import("../v3/app/state/ambientFxState.js");
+const { stampScatterDensity } = await import("../v3/render/scatter/scatterDensity.js");
 const { createCardGeometry } = await import("../v3/render/ambient/ambientShapes.js");
 const { tileUv, ATLAS_TILES, AMBIENT_ART, ART_TILE } = await import("../v3/render/ambient/ambientAtlas.js");
 const { AmbientFxSystem } = await import("../v3/render/ambient/ambientFxSystem.js");
@@ -152,6 +153,78 @@ const effectOfTruth = (starts, lengths, i) => {
     Array.from({ length: lengths[e] }, (_, k) => k).filter((k) => k + 0.5 < lengths[e] * tier).length);
   check("tier 0.25 thins BOTH effects, not just the last",
     live[0] === 100 && live[1] === 100, live.join());
+}
+
+/* ── 2b · the time-of-day window ──────────────────────────────────────────── */
+
+{
+  // What the shader does with the window, replicated: t = fract(h01 - s01),
+  // inside while t < len01. This is the check that the WRAP is right — a
+  // night window is the normal case, not the exotic one.
+  const activeAt = (start, end, soft, hour) => {
+    const { s01, len01, soft01 } = dayWindow(start, end, soft);
+    if (len01 >= 0.999) return 1;
+    const t = ((hour / 24 - s01) % 1 + 1) % 1;
+    const up = Math.min(1, Math.max(0, (t - 0) / soft01));
+    const dn = Math.min(1, Math.max(0, (t - (len01 - soft01)) / soft01));
+    const sm = (x) => x * x * (3 - 2 * x);
+    return sm(up) * (1 - sm(dn));
+  };
+
+  check("start === end means ALWAYS, not a zero-length window",
+    dayWindow(0, 0).len01 === 1 && dayWindow(9, 9).len01 === 1,
+    `${dayWindow(0, 0).len01} / ${dayWindow(9, 9).len01}`);
+  check("the default 0 → 24 is always", dayWindow(0, 24).len01 === 1, `${dayWindow(0, 24).len01}`);
+
+  const night = dayWindow(19, 5, 1);
+  check("a window that crosses midnight is TEN hours, not minus fourteen",
+    Math.abs(night.len01 - 10 / 24) < 1e-9, `${night.len01 * 24} h`);
+
+  check("fireflies (19 → 5) are out at midnight and at 03:00",
+    activeAt(19, 5, 1, 0) > 0.99 && activeAt(19, 5, 1, 3) > 0.99,
+    `${activeAt(19, 5, 1, 0).toFixed(3)} / ${activeAt(19, 5, 1, 3).toFixed(3)}`);
+  check("and gone at noon", activeAt(19, 5, 1, 12) === 0, `${activeAt(19, 5, 1, 12)}`);
+
+  check("butterflies (7 → 19) are out at noon and gone at midnight",
+    activeAt(7, 19, 1.5, 12) > 0.99 && activeAt(7, 19, 1.5, 0) === 0,
+    `${activeAt(7, 19, 1.5, 12).toFixed(3)} / ${activeAt(7, 19, 1.5, 0)}`);
+
+  // The two ramps must not overlap, or the effect never reaches full strength
+  // in the middle of its own window.
+  const tiny = dayWindow(12, 13, 6);
+  check("a soft edge wider than the window is clamped, not left to cross",
+    tiny.soft01 <= tiny.len01 * 0.5 + 1e-9, `soft ${tiny.soft01} of len ${tiny.len01}`);
+  const mid = (12 + 13) / 2;
+  check("a one-hour window still reaches full strength in the middle",
+    activeAt(12, 13, 6, mid) > 0.9, `${activeAt(12, 13, 6, mid).toFixed(3)}`);
+
+  check("the soft edge is never zero (smoothstep needs a width)",
+    dayWindow(8, 16, 0).soft01 > 0, `${dayWindow(8, 16, 0).soft01}`);
+}
+
+/* ── 2c · the paint channel ───────────────────────────────────────────────── */
+
+{
+  // "Clear this effect" wipes ONE channel and leaves the others painted. It
+  // goes through the same stamp the brush does, at world radius.
+  const res = 64, world = 1024;
+  const data = new Uint8Array(res * res * 4);
+  for (let c = 0; c < 4; c++) {
+    stampScatterDensity(data, res, {
+      cx: 0, cz: 0, radius: world, strength: 1, falloff: 0,
+      worldSize: world, channel: c, erase: false,
+    });
+  }
+  const any = (c) => { for (let i = c; i < data.length; i += 4) if (data[i] > 0) return true; return false; };
+  check("filling paints the channel it was asked for", [0, 1, 2, 3].every(any));
+
+  stampScatterDensity(data, res, {
+    cx: 0, cz: 0, radius: world, strength: 1, falloff: 0,
+    worldSize: world, channel: 1, erase: true, onlyChannel: true,
+  });
+  check("clearing one effect leaves the other three painted",
+    !any(1) && any(0) && any(2) && any(3),
+    [0, 1, 2, 3].map(any).join());
 }
 
 /* ── 3 · the card ─────────────────────────────────────────────────────────── */
@@ -302,6 +375,49 @@ if (system) {
   }
 }
 
+/* ── 4b · the .v3proj round trip ──────────────────────────────────────────── */
+
+{
+  // The paint is a BLOB, and a blob that is not in projectIO's manifest is
+  // silently dropped on save — you find out by reopening a world and finding
+  // your butterflies gone. Nearly shipped exactly that.
+  const { encodeProjectFile, decodeProjectFile } = await import("../v3/io/projectIO.js");
+  const terrain = { worldSize: 100, heightmapSize: 4, splatSize: 4, maxHeight: 10 };
+  const heightmap = new Float32Array(16).fill(1);
+  const ambientPaint = Uint8Array.from({ length: 1024 }, (_, i) => (i * 7 + 3) & 255);
+
+  const state = createAmbientFxState();
+  state.effects[0].area = "painted";
+  state.effects[0].dayStart = 6.5;
+  state.effects[1].tint = 0.42;
+  state.tier = 0.6;
+  state.volumeXZ = 111;
+  const { effects, ...field } = state;
+
+  const d = decodeProjectFile(encodeProjectFile({
+    terrain, heightmap, ambientPaint,
+    ambientEffects: structuredClone(effects),
+    ambientField: field,
+  }));
+
+  const same = (a, b) => !!a && a.length === b.length && a.every((v, i) => v === b[i]);
+  check("painted ambient FX survives the file byte-for-byte", same(d.ambientPaint, ambientPaint),
+    d.ambientPaint ? `${d.ambientPaint.length} bytes` : "the blob came back NULL — not in the manifest");
+  check("each effect's settings survive",
+    d.ambientEffects?.[0]?.area === "painted" && d.ambientEffects[0].dayStart === 6.5
+    && d.ambientEffects[1].tint === 0.42,
+    JSON.stringify(d.ambientEffects?.[0]?.area));
+  check("the field's settings survive",
+    d.ambientField?.tier === 0.6 && d.ambientField.volumeXZ === 111,
+    JSON.stringify(d.ambientField));
+
+  // A world nobody opened the mode in must not carry 4 MB of zeros.
+  const empty = decodeProjectFile(encodeProjectFile({ terrain, heightmap }));
+  check("a file with no ambient FX carries no ambient blob",
+    empty.ambientPaint === null && empty.ambientEffects === null,
+    `${empty.ambientPaint} / ${empty.ambientEffects}`);
+}
+
 /* ── 5 · the fade window can never reach the box wall ─────────────────────── */
 
 {
@@ -319,6 +435,21 @@ if (system) {
       `fadeEnd ${worst} vs wall ${wall}`);
     check("fadeStart stays below fadeEnd after clamping",
       fx.effects.every((_, i) => rows[i * AMBIENT_ROWS + 5].x < rows[i * AMBIENT_ROWS + 5].y));
+
+    // Row 7 carries the area flag and the day window. An effect set to
+    // "painted" must send 0, or it would ignore the paint it was just given.
+    const fx2 = createAmbientFxState();
+    fx2.effects[0].area = "painted";
+    fx2.effects[1].area = "everywhere";
+    fx2.effects[1].dayStart = 19; fx2.effects[1].dayEnd = 5;
+    system.syncFromState(fx2);
+    const r7 = (i) => system.field.effectRows[i * AMBIENT_ROWS + 7];
+    check("the area flag reaches the uniform row", r7(0).x === 0 && r7(1).x === 1,
+      `${r7(0).x} / ${r7(1).x}`);
+    check("a night window reaches the uniform row as ten hours",
+      Math.abs(r7(1).z - 10 / 24) < 1e-9, `${r7(1).z * 24} h`);
+    check("butterflies ship with a daytime window, not always",
+      r7(0).z < 0.999, `len01 ${r7(0).z}`);
   }
 }
 

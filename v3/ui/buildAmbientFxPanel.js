@@ -1,4 +1,4 @@
-import { section, slider, color, toggle, dropdown, hint, text, info } from "./widgets.js";
+import { section, slider, color, toggle, dropdown, hint, text, info, button } from "./widgets.js";
 import {
   AMBIENT_PRESETS, AMBIENT_MAX_PARTICLES, MOTION, sliceBudgets,
 } from "../app/state/ambientFxState.js";
@@ -17,7 +17,17 @@ import { AMBIENT_ART } from "../render/ambient/ambientAtlas.js";
  *   onStateChanged()   any setting changed — re-pack the uniform rows
  *   onRenamed()        an effect's name changed
  */
-export function buildAmbientFxPanel(root, { fxState, getSelected, setSelected, onStateChanged, onRenamed }) {
+/** 18.5 → "18:30". */
+function fmtHour(h) {
+  const hh = Math.floor(((h % 24) + 24) % 24);
+  const mm = Math.round((h - Math.floor(h)) * 60);
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+export function buildAmbientFxPanel(root, {
+  fxState, getSelected, setSelected, onStateChanged, onRenamed,
+  brush, onFill, onClear, getPainted,
+}) {
   const changed = () => onStateChanged?.();
 
   function build() {
@@ -105,14 +115,45 @@ export function buildAmbientFxPanel(root, { fxState, getSelected, setSelected, o
         hint: "A landed leaf holds its slot this long, then fades. Permanent leaf litter is a paint job, not a particle." });
     }
 
+    /* ── the brush ── */
+    if (brush) {
+      const br = section(root, "Paint");
+      dropdown(br, e, "area", {
+        label: "Where",
+        options: [["painted", "Only where painted"], ["everywhere", "Everywhere"]],
+        onChange: () => { changed(); build(); },
+        hint: "A new effect starts everywhere so the mode shows something when you open it. The first brush stroke switches it to painted.",
+      });
+      if (e.area === "painted" && getPainted && !getPainted(idx)) {
+        hint(br, `Nothing is painted for ${e.name} yet, so none are showing. Drag on the terrain to paint some, or set Where to Everywhere.`);
+      }
+      hint(br, "Drag to paint this effect. Alt+drag erases it. Shift+wheel is the brush size, Alt+wheel its strength.");
+      slider(br, brush, "radius", { label: "Brush size (m)", min: 1, max: 300, step: 1 });
+      slider(br, brush, "strength", { label: "Strength", min: 0.05, max: 1, step: 0.01 });
+      slider(br, brush, "falloff", { label: "Edge falloff", min: 0.2, max: 6, step: 0.1,
+        hint: "How quickly the stroke fades toward its rim. The paint is a PROBABILITY, so a soft edge really does thin the swarm out rather than ending it on a line." });
+      toggle(br, brush, "erase", { label: "Erase" });
+      button(br, { title: `Fill the world with ${e.name}`, onClick: () => { onFill?.(idx); build(); } });
+      button(br, { title: `Clear ${e.name}`, onClick: () => { onClear?.(idx); build(); } });
+    }
+
     /* ── where it lives ── */
     const wh = section(root, "Where it lives", false);
-    hint(wh, "Painting comes next. For now an effect fills anywhere its height and slope allow.");
     slider(wh, e, "altMin", { label: "Lowest (m above ground)", min: 0, max: 40, step: 0.1, onChange: changed });
     slider(wh, e, "altMax", { label: "Highest (m above ground)", min: 0, max: 40, step: 0.1, onChange: changed,
       hint: "Leaves are born up in the canopy and fall out of it; butterflies stay low." });
     slider(wh, e, "slopeMinY", { label: "Flattest ground needed", min: 0, max: 1, step: 0.01, onChange: changed,
       hint: "0 = any slope including a cliff face, 1 = dead level only." });
+
+    /* ── when it is out ── */
+    const wn = section(root, "When it is out", false);
+    const always = e.dayStart === e.dayEnd || e.dayEnd - e.dayStart >= 24;
+    info(wn, "Window", always ? "Always" : `${fmtHour(e.dayStart)} → ${fmtHour(e.dayEnd)}`);
+    hint(wn, "Hours on the world's clock. It wraps, so 19 → 5 is a normal night window, and setting both the same means always. It gates SPAWNING, not opacity — an effect going out of season drains over a lifetime or two instead of the whole swarm dimming at once.");
+    slider(wn, e, "dayStart", { label: "Out from (h)", min: 0, max: 24, step: 0.5, onChange: () => { changed(); build(); } });
+    slider(wn, e, "dayEnd", { label: "Gone by (h)", min: 0, max: 24, step: 0.5, onChange: () => { changed(); build(); } });
+    slider(wn, e, "daySoft", { label: "Soft edge (h)", min: 0, max: 6, step: 0.1, onChange: changed,
+      hint: "How gradually it comes out and goes in at each end of the window." });
 
     /* ── the budget ── */
     const cu = section(root, "Budget and culling");

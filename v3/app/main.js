@@ -105,7 +105,7 @@ import { FlowerDensity } from "../render/grass/flowerDensity.js";
 import { FoliageScatterSystem, bakeFoliageThumbnail } from "../render/foliage/foliageSystem.js";
 import { ScatterDensity } from "../render/scatter/scatterDensity.js";
 import { AmbientFxSystem } from "../render/ambient/ambientFxSystem.js";
-import { createAmbientFxState } from "./state/ambientFxState.js";
+import { createAmbientFxState, AMBIENT_EFFECT_COUNT } from "./state/ambientFxState.js";
 import { createFoliageScatterState, createSusukiPlantState, SUSUKI_FIELD } from "./state/foliageScatterState.js";
 import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
@@ -1615,6 +1615,7 @@ export async function startV3App(opts = {}) {
       editorMode === "grass"      ? grassBrush.falloff :
       editorMode === "susuki" || editorMode === "flowers"
         || editorMode === "foliage" || editorMode === "vegPlaced" ? vegBrush.falloff :
+      editorMode === "ambientFx"  ? ambientBrush.falloff :
       editorMode === "treePaint"  ? (treeToolState.brush.falloff ?? 2) :
       editorMode === "snow"       ? snowBrushState.falloff :
       editorMode === "cliffPaint" ? cliffPaintBrush.falloff : 2;
@@ -1765,6 +1766,23 @@ export async function startV3App(opts = {}) {
   let _ambientFxBuilding = false;
   let _ambientFxSelected = 0;
 
+  /**
+   * Where each effect is painted — one RGBA page, one effect per channel.
+   *
+   * The RAW texture, not a masked copy. Grass and foliage read a copy with
+   * every "Blocks grass" layer and every terrain hole cut out of it, because
+   * a plant cannot grow on a path. A butterfly flies over the path. Skipping
+   * the mask also skips its bake.
+   */
+  const ambientDensity = new ScatterDensity({ res: 1024, channels: AMBIENT_EFFECT_COUNT });
+  /** Its own brush, deliberately NOT the shared vegetation one: an Alt-erase
+   *  that clears every kind of plant must not also wipe the butterflies. */
+  const ambientBrush = { radius: 22, strength: 0.7, falloff: 1.5, erase: false, eraseOnlyType: true };
+  let _ambientPainting = false;
+  const AMBIENT_UNDO_LIMIT = 12;
+  const _ambientUndoStack = [];
+  const _ambientRedoStack = [];
+
   async function ensureAmbientFxBuilt() {
     if (ambientFx || _ambientFxBuilding) return;
     _ambientFxBuilding = true;
@@ -1775,6 +1793,7 @@ export async function startV3App(opts = {}) {
         heightTex:        grassTerrainData.grassHeightTex,
         terrainNormalTex: grassTerrainData.terrainNormalTex,
         windTex:          grassWindTex,
+        densityTex:       ambientDensity.tex,
         worldSize:        WORLD_SIZE,
         fx:               ambientFxState,
       });
@@ -3100,6 +3119,7 @@ export async function startV3App(opts = {}) {
       void ensureFoliageScatterBuilt();
     } else if (m === "ambientFx") {
       uCursorUV.value.set(-2, -2);
+      sculpt.uRadius.value = ambientBrush.radius / WORLD_SIZE;
       // Opening the mode IS the request to see it. A world nobody opened it in
       // keeps the flag off, so no existing project grows butterflies by itself.
       ambientFxState.enabled = true;
@@ -4220,6 +4240,7 @@ export async function startV3App(opts = {}) {
         ambientFx.setEnabled(wantAmbient);
         if (wantAmbient) {
           ambientFx.u.uSunDir.value.copy(getLightDir()).normalize();
+          ambientFx.setHour(worldToolState.proceduralSky?.timeOfDay ?? 12);
           ambientFx.setViewportHeight(renderer.domElement.height);
           ambientFx.update(
             playMode.active ? playMode.playerPosition : camera.position,
@@ -4768,6 +4789,10 @@ export async function startV3App(opts = {}) {
         done = !!entry && stackStep(from, to, () => _vegSnapshot(Object.keys(entry)), _vegRestore);
         break;
       }
+      case "ambientFx":
+        done = stackStep(undo ? _ambientUndoStack : _ambientRedoStack, undo ? _ambientRedoStack : _ambientUndoStack,
+          () => ambientDensity.getSnapshot(), (snap) => ambientDensity.restoreSnapshot(snap));
+        break;
       case "riverv2": done = !!(undo ? riverV2System?.undo() : riverV2System?.redo()); if (done) riverV2Ui?.refresh(); break;
       case "tunnel":  done = !!(undo ? tunnelSystem?.undo() : tunnelSystem?.redo()); if (done) tunnelUi?.refresh(); break;
       case "spline":  done = !!(undo ? splineSys?.undo() : splineSys?.redo()); break;
@@ -7545,9 +7570,26 @@ export async function startV3App(opts = {}) {
   if (isEditor && ambientFxPanel) {
     ambientFxUi = buildAmbientFxPanel(ambientFxPanel, {
       fxState: ambientFxState,
+      brush: ambientBrush,
       getSelected: () => _ambientFxSelected,
       setSelected: (i) => { _ambientFxSelected = i; },
+      getPainted: (i) => ambientDensity.usedChannels()[i],
       onStateChanged: () => { void ensureAmbientFxBuilt(); syncAmbientFxUniforms(); },
+      onFill: (i) => {
+        _pushAmbientUndo();
+        ambientDensity.fill(i);
+        ambientFxState.effects[i].area = "painted";
+        void ensureAmbientFxBuilt();
+        syncAmbientFxUniforms();
+      },
+      onClear: (i) => {
+        _pushAmbientUndo();
+        // Clear THIS effect's channel only — the others keep their paint.
+        ambientDensity.stamp({
+          cx: 0, cz: 0, radius: WORLD_SIZE, strength: 1, falloff: 0,
+          worldSize: WORLD_SIZE, channel: i, erase: true, onlyChannel: true,
+        });
+      },
     });
   }
   if (isEditor && foliagePanel) foliageUi = buildFoliagePanel(foliagePanel, {
@@ -7848,6 +7890,12 @@ export async function startV3App(opts = {}) {
       foliagePaint:  foliageDensity.hasData ? foliageDensity.getSnapshot() : null,
       foliagePlants: structuredClone(foliageScatterState.types),
       foliageField:  (({ types, ...rest }) => rest)(foliageScatterState),
+      // Ambient FX. Written whole, like the foliage above, and the paint only
+      // when there is any: a world nobody opened the mode in saves three
+      // nulls rather than 4 MB of zeros.
+      ambientPaint:   ambientDensity.hasData ? ambientDensity.getSnapshot() : null,
+      ambientEffects: structuredClone(ambientFxState.effects),
+      ambientField:   (({ effects, ...rest }) => rest)(ambientFxState),
       flowers:   structuredClone(flowerState),
       cliffGrassDensity: grassTerrainData.getCliffDensitySnapshot(),
       cliffPaint: cliffPaintMask.getSnapshot(),
@@ -8117,6 +8165,25 @@ export async function startV3App(opts = {}) {
       d.foliagePlants.forEach((t, i) => { if (foliageScatterState.types[i] && t) Object.assign(foliageScatterState.types[i], t); });
     }
     if (d.foliageField) Object.assign(foliageScatterState, d.foliageField);
+    // Ambient FX: absent in a file means the mode was never opened there.
+    if (Array.isArray(d.ambientEffects)) {
+      d.ambientEffects.forEach((e, i) => { if (ambientFxState.effects[i] && e) Object.assign(ambientFxState.effects[i], e); });
+    }
+    if (d.ambientField) Object.assign(ambientFxState, d.ambientField);
+    // Length checked arithmetically, not against a fresh getSnapshot(): that
+    // would allocate and fill 4 MB on every project load just to read .length.
+    const _ambientPaintBytes = ambientDensity.res * ambientDensity.res * 4 * ambientDensity.pages;
+    if (d.ambientPaint?.length === _ambientPaintBytes) {
+      ambientDensity.restoreSnapshot(d.ambientPaint);
+    } else {
+      ambientDensity.clear();
+    }
+    _ambientUndoStack.length = 0;
+    _ambientRedoStack.length = 0;
+    if (ambientFx) syncAmbientFxUniforms();
+    else if (ambientFxState.enabled) void ensureAmbientFxBuilt();
+    ambientFxUi?.rebuild();
+
     if (d.foliagePaint?.length === foliageDensity.tex.image.data.length) {
       foliageDensity.restoreSnapshot(d.foliagePaint);
       if (foliageDensity.hasData) void ensureFoliageScatterBuilt();
@@ -10277,6 +10344,73 @@ export async function startV3App(opts = {}) {
     if (e.button === 0 && _foliagePainting) { _foliagePainting = false; _foliageUsedDirty = true; }
   });
 
+  /* ── Ambient FX painting ───────────────────────────────────────────────── */
+
+  function _ambientStamp(wx, wz, altErase) {
+    const e = ambientFxState.effects[_ambientFxSelected];
+    ambientDensity.stamp({
+      cx: wx, cz: wz,
+      radius:    ambientBrush.radius,
+      strength:  ambientBrush.strength,
+      falloff:   ambientBrush.falloff,
+      worldSize: WORLD_SIZE,
+      channel:   _ambientFxSelected,
+      erase:     ambientBrush.erase || altErase,
+      onlyChannel: true,   // this mode's erase is always "just this effect"
+    });
+    // Painting an effect that ignores paint is the one genuinely confusing
+    // state this could be in, so the first stroke switches it over.
+    if (!(ambientBrush.erase || altErase) && e && e.area !== "painted") {
+      e.area = "painted";
+      syncAmbientFxUniforms();
+      ambientFxUi?.rebuild();
+    }
+  }
+
+  function _pushAmbientUndo() {
+    _ambientUndoStack.push(ambientDensity.getSnapshot());
+    if (_ambientUndoStack.length > AMBIENT_UNDO_LIMIT) _ambientUndoStack.shift();
+    _ambientRedoStack.length = 0;
+  }
+
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "ambientFx") return;
+    const pt = _foliagePaintXZ(e);
+    if (pt) sculpt.uRadius.value = ambientBrush.radius / WORLD_SIZE;
+    if (pt && _ambientPainting) _ambientStamp(pt.wx, pt.wz, e.altKey);
+  });
+
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "ambientFx" || e.button !== 0) return;
+    const pt = _foliagePaintXZ(e);
+    if (!pt) return;
+    e.preventDefault();
+    _pushAmbientUndo();
+    _ambientPainting = true;
+    void ensureAmbientFxBuilt();
+    _ambientStamp(pt.wx, pt.wz, e.altKey);
+  }, { capture: true });
+
+  renderer.domElement.addEventListener("mouseup", e => {
+    if (e.button === 0 && _ambientPainting) _ambientPainting = false;
+  });
+
+  // Shift = radius, Alt = strength, as in every other paint mode.
+  renderer.domElement.addEventListener("wheel", e => {
+    if (playMode.active || editorMode !== "ambientFx") return;
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY > 0 ? 0.9 : 1.11;
+    if (e.shiftKey) {
+      ambientBrush.radius = Math.max(1, Math.min(300, ambientBrush.radius * factor));
+      sculpt.uRadius.value = ambientBrush.radius / WORLD_SIZE;
+    } else {
+      ambientBrush.strength = Math.max(0.05, Math.min(1, ambientBrush.strength * factor));
+    }
+    ambientFxUi?.rebuild();
+  }, { passive: false, capture: true });
+
   // Scroll wheel in foliage mode: Shift = radius, Alt = strength
   renderer.domElement.addEventListener("wheel", e => {
     if (playMode.active || editorMode !== "foliage") return;
@@ -10353,14 +10487,19 @@ export async function startV3App(opts = {}) {
       },
       /**
        * Drive the ambient field's settings from the console, for A/Bs.
-       * `effects` is applied to EVERY effect, the rest to the field.
+       * `effects` is applied to every effect (or just `only`), the rest to
+       * the field.
        *   __V3_DEBUG.ambientSet({ effects: { budget: 4000 } })
+       *   __V3_DEBUG.ambientSet({ only: 0, effects: { dayStart: 20, dayEnd: 22 } })
        *   __V3_DEBUG.ambientSet({ enabled: false })
        */
       ambientSet(patch = {}) {
-        const { effects, ...field } = patch;
+        const { effects, only, ...field } = patch;
         Object.assign(ambientFxState, field);
-        if (effects) for (const e of ambientFxState.effects) Object.assign(e, effects);
+        if (effects) {
+          const targets = only === undefined ? ambientFxState.effects : [ambientFxState.effects[only]];
+          for (const e of targets) if (e) Object.assign(e, effects);
+        }
         syncAmbientFxUniforms();
         ambientFxUi?.rebuild();
         return window.__V3_DEBUG.ambientFx();
