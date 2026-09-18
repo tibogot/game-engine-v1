@@ -40,7 +40,10 @@ import "../../v3/styles/editor.css";
 import "./palette.css";
 import { startV3App, createLevelLoader, WORLD_SIZE } from "../../v3/engine.js";
 import { createFlatGround } from "./modularRoadFlatGround.js";
-import { createModularRoadClouds } from "./modularRoadClouds.js";
+import { createModularRoadClouds } from "../../v3/render/clouds/volumetricCloudDeck.js";
+import { createCloudSkyLight } from "../../v3/render/sky/cloudSkyLight.js";
+import { createSkyWorldLight } from "../../v3/render/sky/skyWorldLight.js";
+import { SKY_LENS_FLARE_LOOK } from "../../v3/render/sky/skyLensFlareLook.js";
 import { createBirdFlock } from "./modularRoadBirds.js";
 import {
   Vehicle,
@@ -213,11 +216,11 @@ import { preloadDecal, settleDecals } from "./modularRoadDecals.js";
 import { ModularRoadFlags, FLAG, COUNTRY_FLAG } from "./modularRoadFlags.js";
 import { createRoadDevPanel } from "./devPanel.js";
 import { relabelKeys } from "./keyLabels.js";
-import { createModularRoadSky, skyColorsAt, moonDirFromTime, SKY_DEFAULTS } from "./modularRoadSky.js";
-import { createPaintedClouds, PAINTED_CLOUD_DEFAULTS } from "./modularRoadPaintedClouds.js";
+import { createAtmosphereSky, skyColorsAt, moonDirFromTime, SKY_DEFAULTS } from "../../v3/render/sky/atmosphereSkyDome.js";
+import { createPaintedClouds, PAINTED_CLOUD_DEFAULTS } from "../../v3/render/clouds/paintedCloudDeck.js";
 import { createAerialPerspective } from "./modularRoadAerial.js";
 import { createWeather, WEATHER_NAMES } from "./modularRoadWeather.js";
-import { createSkyAtmosphere, sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
+import { createSkyAtmosphere, sunTransmittanceCPU } from "../../v3/render/sky/skyAtmosphere.js";
 import { createModularRoadCity, CITY_DEFAULTS } from "./modularRoadCity.js";
 import { createCityCheckpoints } from "./modularRoadCityCheckpoints.js";
 // Vite `?url` copies these into dist (dev AND Vercel). A raw fetch of
@@ -793,160 +796,31 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
    * change while you are driving a track 170 m under the deck — hence the
    * coarse altitude bucket rather than an exact compare.
    */
-  const _cloudSkyParams = { ...SKY_DEFAULTS };
-  /**
-   * HOW MUCH OF THE SKY'S COLOUR THE CLOUDS TAKE. 1 = exactly what the sky
-   * model says, 0 = neutral grey of the same brightness.
-   *
-   * Not 1 by default, because the sky's sun colour is authored for the SUN DISC
-   * and the horizon wash: `evaluateSky` lerps it 85% toward #ff4a12 as the sun
-   * nears the horizon. On a disc that is right. Used as the LIGHT COLOUR for a
-   * cloud deck it makes every cloud a single flat neon orange, far more
-   * saturated than the sky behind it — which reads as a bug even though each
-   * half is behaving as designed.
-   *
-   * Saturation only: the mix target is the colour's own luminance, so dawn
-   * stays as bright as it was and night stays as dark. Only the vividness moves.
+  /*
+   * The derivation itself now lives in the ENGINE — v3/render/sky/cloudSkyLight.js —
+   * because the v3 editor's "Atmosphere" sky mode needs exactly the same thing, and a
+   * second copy of ~120 lines of hard-won colour decisions would have drifted from this
+   * one within a week. Every comment that used to be here moved with it; read that file
+   * before changing any number.
    */
-  const CLOUD_LIGHT = { skyTint: 0.6 };
-  const _tintSun = new THREE.Color();
-  const _sunTransScratch = [0, 0, 0];
-  const _tintZenith = new THREE.Color();
-  const _tintHorizon = new THREE.Color();
-  const _tintHaze = new THREE.Color();
-  const _tintHazeSun = new THREE.Color();
-  const _tintGrey = new THREE.Color();
-  const temperTint = (src, dst) => {
-    dst.copy(src);
-    const t = CLOUD_LIGHT.skyTint;
-    if (t >= 1) return dst;
-    const l = src.r * 0.2126 + src.g * 0.7152 + src.b * 0.0722;
-    return dst.lerp(_tintGrey.setRGB(l, l, l), 1 - t);
-  };
-  let _cloudSkyKey = "";
-  function syncCloudSkyColours(s, camY) {
-    // Latitude / day-of-year / moon age as well as the hour: the look is driven
-    // by the sun's ELEVATION, and those are what place the sun in the sky.
-    const tod = s.timeOfDay ?? 12;
-    const lat = s.latitude ?? _cloudSkyParams.latitude;
-    const doy = s.dayOfYear ?? _cloudSkyParams.dayOfYear;
-    const age = s.moonAge ?? _cloudSkyParams.moonAge;
-    const band = Math.round(camY / 25);
-    // skyTint is in the key so dragging its slider re-evaluates — without it the
-    // cache would hold the old tint until the clock happened to move.
-    const key = `${tod.toFixed(3)}|${lat}|${doy}|${age}|${band}|${CLOUD_LIGHT.skyTint}`;
-    if (key === _cloudSkyKey) return;
-    _cloudSkyKey = key;
-    _cloudSkyParams.timeOfDay = tod;
-    _cloudSkyParams.latitude = lat;
-    _cloudSkyParams.dayOfYear = doy;
-    _cloudSkyParams.moonAge = age;
-    const look = skyColorsAt(camY, _cloudSkyParams);
-    // THREE.Color in, THREE.Color out: `uSunColor.value.set(color)` copies and
-    // does NOT re-apply the sRGB decode a hex string would have gone through,
-    // and these are already working-space — so no double conversion.
-    /*
-     * SUN COLOUR = REAL TRANSMITTANCE, NOT THE SKY MODEL'S DISC COLOUR.
-     *
-     * `look.sunColor` is authored for the sun DISC: evaluateSky lerps it 85%
-     * toward #ff4a12 as the sun drops. On a disc that is right; used as the
-     * LIGHT on a whole cloud deck it floods every mass with one flat saturated
-     * salmon — worst at golden hour, where the multiple-scattering floor paints
-     * cloud interiors with pure sun colour. The physical answer is the same one
-     * the game sky itself uses: how much of each wavelength actually survives
-     * the slant path to the cloud's altitude. Warm white at noon, gold at 10°,
-     * ember at 2°, gone below the horizon — and cloud SHADING keeps its
-     * contrast, because only the direct terms carry the colour while ambient
-     * stays the sky's. Computed per clock change (this branch is key-cached),
-     * ~40 exp() calls, no GPU readback.
-     */
-    const elRad = THREE.MathUtils.degToRad(look.look.sunElevation);
-    const cloudMidAlt =
-      (clouds.params.base ?? 260) + (clouds.params.thickness ?? 620) * 0.5;
-    sunTransmittanceCPU(Math.sin(elRad), cloudMidAlt, undefined, _sunTransScratch);
-    _cloudFrame.sunColor = _tintSun.setRGB(
-      _sunTransScratch[0], _sunTransScratch[1], _sunTransScratch[2],
-    );
-    /*
-     * NIGHT: THE MOON IS THE LIGHT. The march has exactly one directional light,
-     * and with sun-only the deck went pitch black at night — no silvery tops, no
-     * lit edges, nothing for the eye to read the sky by. Once the sun is truly
-     * down its transmittance is zero, so the light slot is FREE: hand it the
-     * moon. Direction snaps rather than lerps (two directions cannot share one
-     * march), but the snap happens inside the window where BOTH colours are
-     * near-black, so nothing pops. Intensity is cinematic, not physical — the
-     * real sun:moon ratio (~1/400000) tone-maps to nothing, same dial as the
-     * atmosphere's moonIntensity.
-     */
-    _cloudUsingMoon = look.look.sunElevation < -5;
-    if (_cloudUsingMoon) {
-      moonDirFromTime(_cloudSkyParams, _cloudMoonDir);
-      const moonEl = Math.asin(THREE.MathUtils.clamp(_cloudMoonDir.y, -1, 1));
-      sunTransmittanceCPU(Math.sin(moonEl), cloudMidAlt, undefined, _sunTransScratch);
-      // Moonlight = sunlight off a grey rock, read blue by night vision (Purkinje).
-      // 0.25 is cinematic: through the transmittance, phase and density chain it puts a
-      // near-full moon's clouds at ~5% of their daytime brightness — clearly readable
-      // silver, nowhere near daylight. 0.055 (the first guess) was invisible.
-      const moonAmp = 0.25 * (look.look.moonIllum ?? 1);
-      _tintSun.setRGB(
-        _sunTransScratch[0] * 0.62 * moonAmp,
-        _sunTransScratch[1] * 0.72 * moonAmp,
-        _sunTransScratch[2] * 1.0 * moonAmp,
-      );
-    }
-    _cloudFrame.skyZenith = temperTint(look.zenith, _tintZenith);
-    _cloudFrame.skyHorizon = temperTint(look.horizon, _tintHorizon);
-    /*
-     * AT TWILIGHT, AMBIENT LEANS ON THE DOME, NOT THE HORIZON BAND. The cloud
-     * shader lights bases with `skyHorizon` and tops with `skyZenith`, which is
-     * right in daylight where the horizon is just paler blue. At dusk the
-     * authored horizon is a saturated orange BAND — a thin strip of sky — while
-     * the shadowed underside of a cloud sees mostly the (blue) dome above it.
-     * Feeding the band colour straight in painted every anti-solar cloud as a
-     * red-rock butte. Verified by elimination: killing the ms floor left the
-     * orange untouched — it was ambient all along.
-     */
-    const _twF = look.look.twilightF ?? 0;
-    _tintHorizon.lerp(_tintZenith, 0.55 * _twF);
-    /*
-     * AERIAL TARGET = THE HORIZON SKY, NOT THE NADIR HAZE, AND NOT TEMPERED.
-     *
-     * Distant clouds fade toward this colour, and they sit ON the horizon sky —
-     * so if the target is darker than that sky, every far cloud converges to a
-     * dirty grey-brown band pasted across a bright horizon. That is exactly
-     * what `look.haze` (the NADIR colour — what you see looking DOWN into the
-     * murk) was doing, and cloud-lab never showed it because the lab passes its
-     * own horizon colour here. Untempered because the temper exists to keep the
-     * sky model's saturated sun off the cloud LIGHTING; the aerial term is not
-     * lighting, it is the sky showing through, and it should match that sky.
-     */
-    _cloudFrame.hazeColor = _tintHaze.copy(look.horizon);
-    /*
-     * DIRECTIONAL at twilight: the sky model already evaluates a warm sunward
-     * wash (`twilight`) and a cool anti-solar limb (`anti`) for the dome — hand
-     * the same pair to the clouds' aerial term, weighted by how deep into
-     * twilight we are, so far clouds go bright gold toward the sun and stay
-     * dusky blue opposite it instead of one uniform cream. In full day
-     * twilightF is 0 and both targets collapse to the plain horizon.
-     */
-    const twF = look.look.twilightF ?? 0;
-    _cloudFrame.hazeSunColor = _tintHazeSun.copy(look.horizon).lerp(look.look.twilight, twF * 0.85);
-    _cloudFrame.hazeColor.lerp(look.look.anti, twF * 0.6);
-    _cloudFrame.skyLook = look.look;
-  }
-
-  /** Drive the deck from the engine's live sun/sky so clouds match time of day. */
+  const cloudSkyLight = createCloudSkyLight({ skyTint: 0.6 });
+  /** Dev panel binds this BY REFERENCE (see `cloudLight` in the panel wiring). */
+  const CLOUD_LIGHT = cloudSkyLight.params;
+  /** What `clouds.update()` reads. `sunDir` is written by updateClouds below. */
+  const _cloudFrame = cloudSkyLight.frame;
+  const _cloudSun = cloudSkyLight.frame.sunDir;
+  const _cloudMoonDir = cloudSkyLight.moonDir;
   const _white = new THREE.Color(1, 1, 1);
-  const _cloudSun = new THREE.Vector3();
-  const _cloudMoonDir = new THREE.Vector3();
-  let _cloudUsingMoon = false;
-  const _cloudFrame = {
-    sunDir: _cloudSun,
-    sunColor: 0xfff2dc,
-    skyZenith: 0x3f78c8,
-    skyHorizon: 0xc9dcef,
-    hazeColor: 0xc9dcef,
-  };
+  /**
+   * Mid-height of the deck being lit — the altitude the slant-path transmittance is
+   * integrated to. Read live, so a track that raises the deck also moves the colour it
+   * is lit with.
+   */
+  const cloudMidAlt = () =>
+    (clouds.params.base ?? 260) + (clouds.params.thickness ?? 620) * 0.5;
+  function syncCloudSkyColours(s, camY) {
+    cloudSkyLight.sync(s, camY, cloudMidAlt());
+  }
   /*
    * ── PAUSE: ONE WORLD CLOCK ────────────────────────────────────────────────
    *
@@ -1000,7 +874,7 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
     if (s) syncCloudSkyColours(s, camera.position.y);
     // At night the cloud light is the moon — see syncCloudSkyColours, which owns the
     // decision (and the colour) because it is the key-cached path.
-    if (_cloudUsingMoon) _cloudSun.copy(_cloudMoonDir);
+    if (cloudSkyLight.usingMoon()) _cloudSun.copy(_cloudMoonDir);
     clouds.update(worldDt(dt), _cloudFrame);
   }
   app.addPreRenderHook?.(updateClouds);
@@ -1024,7 +898,7 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
    * track underneath it. Matching the IBL is the next step, once you have
    * decided the sky itself is the one you want.
    */
-  let gameSky = null;   // createModularRoadSky() — built lazily, see setGameSky
+  let gameSky = null;   // createAtmosphereSky() — built lazily, see setGameSky
   let gameAtmo = null;  // createSkyAtmosphere()  — ditto
   let gamePainted = null; // createPaintedClouds() — only in the "painted" tier
   let gameSkyOn = false;
@@ -1213,7 +1087,7 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
    *   lightning    the clock. Off = no strikes, so the world flash, the cloud
    *                glow and the bolt are all inert by construction.
    *   cloudFlash   the deck lighting from inside. Behind a real `If` in
-   *                modularRoadPaintedClouds — off is one compare per cloud pixel.
+   *                paintedCloudDeck — off is one compare per cloud pixel.
    *   bolt         the visible channel. Off = a hidden mesh, which draws nothing.
    *   carRain      beads on the paint. Behind an `If` in chassisModel — off is
    *                one compare per bodywork pixel.
@@ -1407,7 +1281,7 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
     // The atmosphere is handed IN rather than added as a second dome, so the
     // physical sky replaces the authored gradient while keeping the stars, the
     // moon and the cloud sea that live in the same shader.
-    gameSky = createModularRoadSky({
+    gameSky = createAtmosphereSky({
       atmosphere: gameAtmo,
       paintedClouds: gamePainted,
       params: {
@@ -1552,11 +1426,14 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
    * sun moves the engine was already rebuilding its sun/sky on that same key —
    * `sunElevation` is in its own change signature — so this adds no new work.
    */
-  const SKY_LIGHT = {
-    enabled: true,
-    /** 0 = keep today's neutral lamp, 1 = full atmospheric reddening. */
-    warmth: 1.0,
-  };
+  /*
+   * The derivation lives in the engine (v3/render/sky/skyWorldLight.js) so the v3 editor's
+   * Atmosphere sky mode lights its world the same way. These two are the module's OWN
+   * objects, aliased under the game's long-standing names, so the dev panel keeps binding
+   * them by reference and every edit reaches the maths.
+   */
+  const skyWorldLight = createSkyWorldLight();
+  const SKY_LIGHT = skyWorldLight.params;
   /*
    * A FLOOR UNDER THE NIGHT AMBIENT.
    *
@@ -1577,36 +1454,16 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
    * dusk. The car's own share is the rim in chassisModel.js (CAR_NIGHT), which
    * is per-object and costs the world nothing.
    */
-  const NIGHT_AMBIENT = {
-    enabled: true,
-    /** Hemisphere intensity at full night, as a fraction of the noon reference. */
-    intensity: 1.0,
-    /** What the night sky hands a surface facing up … */
-    skyColor: "#7799cc",
-    /** … and what the ground bounces back up at it. */
-    groundColor: "#33404f",
-  };
+  const NIGHT_AMBIENT = skyWorldLight.night;
   const NIGHT_AMBIENT_DEFAULTS = { ...NIGHT_AMBIENT };
-  // Built from hex, so these are WORKING (linear) space like the sky's own
-  // colours — the lerp below mixes two values in the same space, and
-  // applyWorldLight re-encodes to sRGB on the way out. See the colour-space note
-  // in syncWorldLightToSky; this project has been bitten by that twice.
-  const _nightAmbSky = new THREE.Color(NIGHT_AMBIENT.skyColor);
-  const _nightAmbGnd = new THREE.Color(NIGHT_AMBIENT.groundColor);
-  /** Re-read the two colours after a panel edit. Intensity is read live. */
+  /** Re-read after a panel edit — the colours are read live inside the module now. */
   function applyNightAmbientParams() {
-    _nightAmbSky.set(NIGHT_AMBIENT.skyColor);
-    _nightAmbGnd.set(NIGHT_AMBIENT.groundColor);
-    _skyLightKey = ""; // force syncWorldLightToSky past its elevation cache
+    skyWorldLight.invalidate(); // force compute() past its elevation cache
   }
   /** Boot values, captured as the NOON REFERENCE so this cannot regress the
    *  look that was hand-tuned at midday — everything is scaled to land on them
    *  when the sun is high, and only the variation around that is new. */
   const _lightRef = { dir: 2.6, hemi: 0.6, exposure: 1.0, env: 0.45, captured: false };
-  const _sunLitRgb = [1, 1, 1];
-  /** Moonlight chromaticity — sunlight off grey rock, read blue by night vision
-   *  (Purkinje). Same tint the clouds use once the moon takes the light slot. */
-  const _moonKeyCol = new THREE.Color(0.62, 0.72, 1.0);
   const _skyKeyCol = new THREE.Color();
   const _hemiSkyCol = new THREE.Color();
   const _hemiGndCol = new THREE.Color();
@@ -1639,73 +1496,34 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
       _lightRef.env = Li.envIntensity ?? 0.45;
       _lightRef.captured = true;
     }
-    const el = look.sunElevation ?? 0;
-    const key = `${el.toFixed(2)}|${SKY_LIGHT.warmth}|${Math.round(camera.position.y / 50)}`
-      + `|${(look.moonLight ?? 0).toFixed(3)}`;
-    if (key === _skyLightKey) return;
-    _skyLightKey = key;
-
     /*
-     * KEY COLOUR = the sun's own transmittance, reduced to CHROMATICITY.
+     * THE DERIVATION IS THE ENGINE'S — v3/render/sky/skyWorldLight.js. It was ~140 lines
+     * here; the v3 editor's Atmosphere sky mode needs exactly the same thing, and without
+     * it the editor sat on static defaults and read visibly darker and flatter than this
+     * game under the same sky. Every comment that was here moved with it.
      *
-     * The raw transmittance is nearly black at sunset — that is what makes it
-     * red — but the engine already owns the brightness (it multiplies by its
-     * own horizon fade). Feeding the full value would dim twice and lose the
-     * sunset entirely. Dividing by the max channel keeps the HUE and hands the
-     * magnitude back to the engine, which is the clean split.
+     * It returns null when nothing moved (key-cached on solar elevation), which is why
+     * everything below the early-out is the per-elevation work and `applyWorldLight` —
+     * cheap, every frame — is what carries the lightning flash.
      */
-    /*
-     * FLOORED AT THE HORIZON, not below it. Sampling transmittance at a NEGATIVE sun
-     * elevation returns essentially zero through every channel, so the chromaticity
-     * divide produced BLACK — a key light with no colour at all. Clamping to y = 0
-     * keeps the reddest VALID hue.
-     *
-     * AND THEN HANDED TO THE MOON. The first version stopped at the clamp, on the
-     * belief that the engine "never reads this value below the horizon". It does: the
-     * engine keeps the moon's INTENSITY and DIRECTION at night, but the COLOUR written
-     * here wins every frame — so the whole world was lit by a saturated sunset orange
-     * (#ff5502, measured at -21 deg) from dusk until dawn. Below the horizon the key
-     * light is the moon, so the chromaticity has to become moonlight; it blends across
-     * the first six degrees under the horizon, the same window in which the clouds
-     * swap their light source, so nothing pops.
-     */
-    sunTransmittanceCPU(Math.max(look.sunDir.y, 0.0), 0, undefined, _sunLitRgb);
-    const m = Math.max(_sunLitRgb[0], _sunLitRgb[1], _sunLitRgb[2], 1e-4);
-    _skyKeyCol.setRGB(_sunLitRgb[0] / m, _sunLitRgb[1] / m, _sunLitRgb[2] / m);
-    if (SKY_LIGHT.warmth < 1) _skyKeyCol.lerp(_white, 1 - SKY_LIGHT.warmth);
-    const nightK = THREE.MathUtils.clamp(-look.sunDir.y / 0.1045, 0, 1); // 0 at horizon, 1 at -6 deg
-    if (nightK > 0) _skyKeyCol.lerp(_moonKeyCol, nightK);
-
-    // Ambient from the sky itself: zenith overhead, haze underfoot.
     const cols = gameSky.getColors(camera.position.y);
-    // 1 below the horizon, 0 once the sun is ~14° up. See syncSmokeLamps.
+    const lit = skyWorldLight.compute(look, cols, _lightRef, camera.position.y);
+    if (!lit) return;
+
+    // The car's own rim rides the same curve, so the body lifts off the background at
+    // exactly the moment the world stops lighting it.
+    setCarNight(lit.nightK);
+    // 1 below the horizon, 0 once the sun is ~14 deg up. See syncSmokeLamps.
     _smokeNightK = THREE.MathUtils.clamp(1 - look.sunDir.y / 0.25, 0, 1);
     _smokeNightFromSky = true;
-    // The SKY's solar elevation, kept for updateAutoHeadlights — which cannot
-    // use the scene's key light, because at night that light is the moon.
+    // The SKY's solar elevation, kept for updateAutoHeadlights — which cannot use the
+    // scene's key light, because at night that light is the moon.
     _skySunY = look.sunDir.y;
-    _hemiSkyCol.copy(cols.zenith);
-    _hemiGndCol.copy(cols.haze);
-    // The night floor (see NIGHT_AMBIENT). nightK is 0 at the horizon and 1 six
-    // degrees under it, so this is inert all day and fully in at true night.
-    const ambK = NIGHT_AMBIENT.enabled ? nightK : 0;
-    if (ambK > 0) {
-      _hemiSkyCol.lerp(_nightAmbSky, ambK);
-      _hemiGndCol.lerp(_nightAmbGnd, ambK);
-    }
-    // The car's own rim rides the same curve, so the body lifts off the
-    // background at exactly the moment the world stops lighting it.
-    setCarNight(nightK);
+    _skyKeyCol.copy(lit.dirColor);
+    // The drift smoke takes its ambient from these two (see setAmbientColors).
+    _hemiSkyCol.copy(lit.hemiSkyColor);
+    _hemiGndCol.copy(lit.hemiGroundColor);
 
-    /*
-     * COLOUR SPACE, and this project has been bitten here before: the engine
-     * consumes these as authored sRGB HEX STRINGS (`sun.color.set(Li.dirColor)`
-     * decodes sRGB -> linear). Our values are already linear working space, so
-     * they must be ENCODED back to sRGB on the way out or they get decoded a
-     * second time and land 5-10x too dark. `getHexString(SRGBColorSpace)` is
-     * that encode.
-     */
-    const dayRef = 3.1, hemiDayRef = 0.62; // evaluateSky's own daylight values
     // The haze is tinted by the same sky and the same sun that light the world, so
     // distance, ground and cloud cannot disagree about what colour the air is.
     aerial.setSky({
@@ -1716,55 +1534,29 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
     });
 
     /*
-     * THE BASE LIGHTING IS CACHED, NOT APPLIED DIRECTLY.
-     *
-     * Everything above this line is expensive and keyed on solar elevation, so
-     * with a frozen clock — the default — it runs ONCE and this function then
-     * early-outs forever. That is exactly right for the sky and exactly wrong
-     * for lightning, which has to change the world's light several times a
-     * second. The first attempt added the flash here and it never fired once,
-     * because the function it was written into had already returned.
-     *
-     * So the sky's answer is stored, and `applyWorldLight` — which is only a
-     * few colour lerps and one `app.light.set` — is what runs every frame.
+     * THE BASE LIGHTING IS CACHED, NOT APPLIED DIRECTLY. Everything above is keyed on
+     * solar elevation, so with a frozen clock — the default — it runs once and then early
+     * -outs forever. That is exactly right for the sky and exactly wrong for lightning,
+     * which has to change the world's light several times a second. The first attempt put
+     * the flash here and it never fired once, because the function had already returned.
      */
     _skyLitBase = {
-      dirColor: _skyKeyCol.clone(),
-      dirIntensity: (look.dirIntensity / dayRef) * _lightRef.dir,
-      hemiSkyColor: _hemiSkyCol.clone(),
-      hemiGroundColor: _hemiGndCol.clone(),
-      // Lerped, not multiplied: at ambK 0 this IS the old expression.
-      hemiIntensity: THREE.MathUtils.lerp(
-        (look.hemiIntensity / hemiDayRef) * _lightRef.hemi,
-        NIGHT_AMBIENT.intensity * _lightRef.hemi,
-        ambK,
-      ),
-      exposure: look.exposure * _lightRef.exposure,
-      /*
-       * THE MOON AS A REAL KEY LIGHT. In the engine's procedural sky mode a below-horizon
-       * sun makes it swap the directional light to its own moon branch, which reads
-       * `moonIntensity` and IGNORES the `dirIntensity` computed above — so our moon phase
-       * never reached the world and every night was lit the same. Handing it our own
-       * figure (illuminated fraction x how high the moon is) is what makes a full moon
-       * overhead light the track and a new moon leave it dark.
-       */
-      moonIntensity: (look.moonLight ?? 0) * 0.55,
-      /*
-       * The env map's CONTENT follows the sky once our dome is the one being baked,
-       * but its strength was a constant 0.45 at every hour — so reflections stayed at
-       * noon brightness at midnight. Scaled on the same daylight curve as the hemi,
-       * against the boot value, so noon is unchanged.
-       */
-      envIntensity: (look.hemiIntensity / hemiDayRef) * _lightRef.env,
+      dirColor: lit.dirColor.clone(),
+      dirIntensity: lit.dirIntensity,
+      hemiSkyColor: lit.hemiSkyColor.clone(),
+      hemiGroundColor: lit.hemiGroundColor.clone(),
+      hemiIntensity: lit.hemiIntensity,
+      exposure: lit.exposure,
+      moonIntensity: lit.moonIntensity,
+      envIntensity: lit.envIntensity,
     };
     applyWorldLight();
-    // The engine invalidates the IBL on ITS sky's parameters and has no idea ours
-    // moved. This is already key-cached on solar elevation, so it fires only when the
-    // sun actually moves — and the bake itself is spread one cube face per frame.
+    // The engine invalidates the IBL on ITS sky's parameters and has no idea ours moved.
+    // Already key-cached on solar elevation, so it fires only when the sun actually moves.
     //
     // Deliberately NOT in applyWorldLight: a lightning flash must never rebake the
-    // environment. It lasts a quarter of a second and the IBL would still be
-    // catching up long after it had gone.
+    // environment. It lasts a quarter of a second and the IBL would still be catching up
+    // long after it had gone.
     app.envSky?.invalidate();
   }
 
@@ -1849,69 +1641,7 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
   let _flareOcc = 1;
   let _flareInit = false;
   const _flareSun = new THREE.Vector3();
-  /**
-   * The game owns the flare's look, because the values it would otherwise inherit are
-   * the EDITOR's — intensity 3, halation 3, ghosts 2 — which blow the whole frame to
-   * white. Tuned here for a chase camera: present when the sun swings into frame on a
-   * turn, never fighting the road for attention.
-   */
-  const LENS_FLARE_LOOK = {
-    // On by default: this is a racing game with a chase camera, and the effect is the
-    // point. Turn it off from the panel, or per-machine if it is not to taste.
-    enabled: true,
-    intensity: 1.15,
-    halationSize: 0.42,
-    halationColor: "#ffd9a8",
-    streakLength: 1.0,
-    streakOpacity: 0.6,
-    streakColor: "#ffc98a",
-    ghostOpacity: 0.62,
-    ghostSpacing: 1.0,
-    dirtOpacity: 0.22,
-    /*
-     * ── THE STOCK-FLARE BLOCK (lensFlare2 only) ────────────────────────────────────
-     *
-     * The first version of this file was tuned from optics and it still read as a
-     * sibling of the original flare. What a film flare actually is, is the stock
-     * optical look, and these are the knobs that carry it:
-     *
-     *   • `rayCount` — a DENSE FAN of fine rays at random lengths, which is what the
-     *     eye reads first. `spikes` blends the physically-derived blade diffraction
-     *     back over it; at 0 it is the pure stock fan.
-     *   • `arc*` — the huge deep-red striated ring, usually only partly on screen.
-     *   • `spectral` — the little iridescent dashes along the chain.
-     *
-     * Toned DOWN from the reference on purpose: a stock flare is authored over black,
-     * and the same values over a bright daylit sky are a white-out. Judge these in
-     * road.html, never in a lab.
-     */
-    starburst: 0.8,
-    starburstSize: 0.95,
-    rayCount: 110,
-    spikes: 0.16,
-    haloOpacity: 0.08,
-    haloSize: 0.42,
-    arcOpacity: 0.45,
-    arcSize: 1.15,
-    arcColor: "#ff2a10",
-    arcT: 0.46,
-    spectral: 0.7,
-    blades: 8,
-    irisAngle: 0.13,
-    /* Veiling glare — the low-contrast wash that lifts the blacks. MEASURED: the veil quad
-     * and the arc are the flare's only real costs and both are pure FILL, so `veilSize` and
-     * `arcSize` are the two dials that actually buy milliseconds back. */
-    veil: 0.32,
-    veilSize: 1.0,
-    chroma: 0.016,
-    scintillation: 0.35,
-    bloom: 0.85,
-    /* Take most of the colour from the sky's live sun rather than the constant above,
-     * so the flare goes deep orange at sunset instead of staying noon-warm all day. */
-    sourceColorMix: 0.85,
-    /** true = run the ORIGINAL v2/effects/lensFlare.js instead. Dev-panel A/B. */
-    legacy: false,
-  };
+  const LENS_FLARE_LOOK = SKY_LENS_FLARE_LOOK;
   /**
    * The flare params with the game's look applied, or null before the engine has built
    * it. Lazy rather than done at construction because worldEnvironment creates the flare

@@ -22,7 +22,7 @@
  * edges rather than wasting rows on empty sky.
  */
 import * as THREE from "three/webgpu";
-import { seededRandom, makePeriodicPerlin, perlinFbm } from "./modularRoadCloudNoise.js";
+import { seededRandom, makePeriodicPerlin, perlinFbm } from "../noise/periodicPerlin.js";
 
 export const MW_WIDTH = 512;
 export const MW_HEIGHT = 128;

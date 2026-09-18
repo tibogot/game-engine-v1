@@ -1,19 +1,29 @@
 /**
- * Physical atmosphere for the modular-road sky — Hillaire 2020, lab-owned.
+ * Physical atmosphere — Hillaire 2020. A reusable light model, not a sky.
  *
  * ─────────────────────────────────────────────────────────────────────────────────────
- * WHY THIS EXISTS, given `modularRoadSky.js` already produces a sky.
+ * WHY THIS IS ITS OWN MODULE, given `atmosphereSkyDome.js` already produces a sky.
  *
- * That one is five authored colour looks (night / dawn / dusk / golden / day) blended by
- * solar elevation and camera altitude. It is cheap and fully art-directable, and it will
- * never look physical, because it is not modelling anything: it cannot redden the sun
- * through real optical depth, cannot fill twilight from multiple scattering, and cannot
- * know what the sky looks like from 900 m instead of from the ground. Every one of those
- * is free here.
+ * That one starts from five authored colour looks (night / dawn / dusk / golden / day)
+ * blended by solar elevation and camera altitude. Cheap and fully art-directable, and it
+ * will never look physical on its own, because it is not modelling anything: it cannot
+ * redden the sun through real optical depth, cannot fill twilight from multiple
+ * scattering, and cannot know what the sky looks like from 900 m instead of from the
+ * ground. Every one of those is free here.
  *
- * NOTHING IS IMPORTED FROM v3. `v3/render/sky/dayNightSky.js` is an existing Hillaire
- * implementation and was read as a reference for the parameterisation, but this file is
- * standalone so the lab owns its own sky end to end.
+ * But the bigger reason for the split is that the atmosphere is NOT only a sky. It hands
+ * out two things anyone can use: `skyRadiance(dir)` as a TSL node, and
+ * `sunTransmittanceCPU()` — the same T-LUT integral on the CPU, which is what lets a
+ * cloud deck take its key-light colour from the same model the sky is drawn with, so the
+ * two agree through the whole day instead of drifting apart as two authored palettes.
+ * Welding this inside a dome (which is how `dayNightSky.js` carries its own LUT chain)
+ * means nothing else can read it.
+ *
+ * There are currently TWO Hillaire implementations in the engine: this one and
+ * `dayNightSky.js`'s internal chain. They use different constants (atmosphere top
+ * 6460 km here vs 6420 km there, different sky-view LUT resolutions), so the two skies
+ * will NOT match at the same time of day. That duplication is known and on the list —
+ * see v3/AUDIT.md, "Sky".
  *
  * ─────────────────────────────────────────────────────────────────────────────────────
  * THE THREE LUTS, AND WHY THE BAKE ORDER IS NOT OPTIONAL.

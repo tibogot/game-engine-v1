@@ -18,8 +18,23 @@
  * Everything is TILEABLE (periodic Perlin lattice, wrapped Worley cell grids) so the
  * volumes can repeat across the sky without visible seams.
  *
- * @see modularRoadCloudNoiseWorker.js — runs the bakes off the main thread.
+ * @see cloudNoiseWorker.js — runs the bakes off the main thread.
  */
+
+/*
+ * The three PRIMITIVES (seeded PRNG, periodic Perlin, Perlin FBM) now live in the engine
+ * — the sky moved into v3/render/sky/ on 2026-09-18 and its moon and Milky Way bakes need
+ * them, and the engine may not import from games/. Only the primitives moved: the volume
+ * bakes and the frequency budget above are still this game's, for the reasons stated.
+ * Re-exported so every existing importer of this file is unaffected.
+ */
+import {
+  seededRandom,
+  makePeriodicPerlin,
+  perlinFbm,
+} from "../noise/periodicPerlin.js";
+
+export { seededRandom, makePeriodicPerlin, perlinFbm };
 
 /** World metres one wrap of the 128³ base volume covers. ~9.4 m / voxel. */
 export const BASE_TILE_M = 1200;
@@ -82,78 +97,6 @@ export function bakeBlueNoise(seed = 6079, N = BLUE_NOISE_SIZE) {
     out[i] = v; out[i + 1] = v; out[i + 2] = v; out[i + 3] = 255;
   }
   return out;
-}
-
-/** Deterministic PRNG so a given seed always bakes the same sky. */
-export function seededRandom(seed) {
-  let s = seed >>> 0;
-  return function next() {
-    let t = (s += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/**
- * Periodic (tileable) improved Perlin noise. Lattice coordinates wrap at `period`, so an
- * FBM whose octave frequency equals its period tiles seamlessly — no 8-corner blend, which
- * costs 8x and muddies contrast. Returns roughly [-1, 1].
- */
-export function makePeriodicPerlin(rng) {
-  const p = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) p[i] = i;
-  for (let i = 255; i > 0; i--) {
-    const j = (rng() * (i + 1)) | 0;
-    const t = p[i]; p[i] = p[j]; p[j] = t;
-  }
-  const perm = new Uint8Array(512);
-  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
-
-  const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
-  const lerp = (a, b, t) => a + (b - a) * t;
-  function grad(hash, x, y, z) {
-    const h = hash & 15;
-    const u = h < 8 ? x : y;
-    const v = h < 4 ? y : (h === 12 || h === 14) ? x : z;
-    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
-  }
-
-  return function noise(x, y, z, period) {
-    const Xf = Math.floor(x), Yf = Math.floor(y), Zf = Math.floor(z);
-    const xf = x - Xf, yf = y - Yf, zf = z - Zf;
-    const X0 = ((Xf % period) + period) % period;
-    const Y0 = ((Yf % period) + period) % period;
-    const Z0 = ((Zf % period) + period) % period;
-    const X1 = (X0 + 1) % period, Y1 = (Y0 + 1) % period, Z1 = (Z0 + 1) % period;
-    const u = fade(xf), v = fade(yf), w = fade(zf);
-    const h = (xi, yi, zi) => perm[perm[perm[xi] + yi] + zi];
-    return lerp(
-      lerp(
-        lerp(grad(h(X0, Y0, Z0), xf, yf, zf), grad(h(X1, Y0, Z0), xf - 1, yf, zf), u),
-        lerp(grad(h(X0, Y1, Z0), xf, yf - 1, zf), grad(h(X1, Y1, Z0), xf - 1, yf - 1, zf), u),
-        v,
-      ),
-      lerp(
-        lerp(grad(h(X0, Y0, Z1), xf, yf, zf - 1), grad(h(X1, Y0, Z1), xf - 1, yf, zf - 1), u),
-        lerp(grad(h(X0, Y1, Z1), xf, yf - 1, zf - 1), grad(h(X1, Y1, Z1), xf - 1, yf - 1, zf - 1), u),
-        v,
-      ),
-      w,
-    );
-  };
-}
-
-/** Tileable Perlin FBM over the unit cube; octave frequency = wrap period. → 0..1 */
-export function perlinFbm(noise, x, y, z, baseFreq, octaves) {
-  let sum = 0, amp = 1, norm = 0, freq = baseFreq;
-  for (let o = 0; o < octaves; o++) {
-    sum += noise(x * freq, y * freq, z * freq, freq) * amp;
-    norm += amp;
-    amp *= 0.5;
-    freq *= 2;
-  }
-  return (sum / norm) * 0.5 + 0.5;
 }
 
 /**
@@ -462,7 +405,7 @@ const _remapUnit = (v, lo, hi) => _clamp01((v - lo) / Math.max(hi - lo, 1e-4));
  * CPU mirror of the shader's `sampleDensity`, minus the near-field octave (which is a
  * view-distance effect and meaningless without a ray).
  *
- * MUST BE KEPT IN SYNC with sampleDensity() in modularRoadClouds.js. If the two drift,
+ * MUST BE KEPT IN SYNC with sampleDensity() in volumetricCloudDeck.js. If the two drift,
  * "is the car in a cloud" starts disagreeing with what the player sees.
  *
  * @param {object} vols  { base, detail, weather } — the raw Uint8Arrays
@@ -478,7 +421,7 @@ export function densityAtCPU(vols, P, wind, x, y, z, scratch = { b: [0, 0, 0, 0]
     (x + wind.x * 0.35) / WEATHER_TILE_M, (z + wind.z * 0.35) / WEATHER_TILE_M, scratch.w,
   );
   // Coverage is a THRESHOLD on the weather channel, not a multiplier — must match
-  // sampleWeather() in modularRoadClouds.js (see CLOUD_DEFAULTS.coverage there for why).
+  // sampleWeather() in volumetricCloudDeck.js (see CLOUD_DEFAULTS.coverage there for why).
   const covSoft = P.coverageSoft ?? 0.16;
   const covRaw = _clamp01(w[0] + P.coverageBias);
   const covBar = (1 + covSoft) - P.coverage * (1 + 2 * covSoft);
@@ -525,13 +468,13 @@ export function densityAtCPU(vols, P, wind, x, y, z, scratch = { b: [0, 0, 0, 0]
 
 /*
  * ═══════════════════════════════════════════════════════════════════════════════════
- * THE "SOLID" MODEL'S NOISE — for modularRoadClouds' `model: "solid"` path.
+ * THE "SOLID" MODEL'S NOISE — for volumetricCloudDeck's `model: "solid"` path.
  *
  * A different recipe from the Nubis bakes above, on purpose: that model does not sample
  * a soft density, it builds a SOLID with a height-field top and an eroded base, so its
  * volume is three Worley-FBM sets at octave-spaced frequencies (one per channel) and its
  * weather map is a wide-range Perlin FBM that IS the cloud-top height, not a coverage
- * mask. Both are written from the model's description in modularRoadClouds.js; see the
+ * mask. Both are written from the model's description in volumetricCloudDeck.js; see the
  * SOLID block there for how the channels are combined.
  *
  * Sizes: 64³ over 8 km is a 125 m voxel, and the erosion lookup reads the same volume

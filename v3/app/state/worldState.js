@@ -1,19 +1,62 @@
 import { createToolState } from "../../../v2/app/state/toolState.js";
 import { OCEAN2_DEFAULTS } from "../../render/water/oceanSurface.js";
+import { SKY_DEFAULTS as ATMOSPHERE_SKY_DEFAULTS } from "../../render/sky/atmosphereSkyDome.js";
+import { CLOUD_DEFAULTS } from "../../render/clouds/volumetricCloudDeck.js";
+import { PAINTED_CLOUD_DEFAULTS } from "../../render/clouds/paintedCloudDeck.js";
 import { GRID_DEFAULTS } from "../../render/materials/gridMaterial.js";
 
-/** World-tab toolState slice — same defaults as v2 createToolState(). */
-export function createWorldToolState() {
+/**
+ * World-tab toolState slice — same defaults as v2 createToolState().
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.editor] true on the editor page. Only affects the default SKY
+ *   MODE; see `skyMode` below for why a game must not inherit it.
+ * @param {string}  [opts.skyMode] an explicit mode, for a game that wants one.
+ */
+export function createWorldToolState({ editor = false, skyMode } = {}) {
   const ts = createToolState();
   return {
     light: ts.light,
-    skyMode: ts.skyMode,
+    /*
+     * THE EDITOR BOOTS INTO THE ATMOSPHERE SKY.
+     *
+     * The physically-scattered dome with its painted cloud deck, the same pair the racing
+     * game ships — so a new world opens under the sky the games actually use instead of
+     * under a mode you have to go and find. The other three (`physical`, `hdr`,
+     * `procedural`) are unchanged and one dropdown away.
+     *
+     * A saved project keeps whatever IT saved: `skyMode` rides in the look block, so this
+     * default only applies to a world that has never chosen one.
+     *
+     * COSTS ~0.6 s AT BOOT, once: three LUT bakes and a large shader compile that used to
+     * be paid lazily on the first switch into the mode. The editor makes that trade
+     * deliberately, so the build lands inside boot rather than as a hitch later.
+     *
+     * THE EDITOR ONLY, and that is not a detail. A game that draws its OWN sky — as
+     * modular-road does — hides the engine's dome the moment it boots, so defaulting to
+     * this mode everywhere made the engine build a whole second atmosphere dome and cloud
+     * deck, pay the LUT bakes and the shader compile, and then hide the result. Caught by
+     * counting meshes: the game's scene had TWO `AtmosphereSkyDome`s. A game that wants
+     * this sky asks for it (`startV3App({ skyMode: "atmosphere" })`); a game that does not
+     * keeps the old default and pays nothing.
+     */
+    skyMode: skyMode ?? (editor ? "atmosphere" : ts.skyMode),
     skyExposureByMode: ts.skyExposureByMode,
     physicalSky: ts.physicalSky,
     // V3 optimized sky (lab dayNightSky.js): astronomical arc + sky-view LUT +
     // smooth-horizon band fix. These params don't exist in v2's frozen toolState.
     proceduralSky: {
       ...ts.proceduralSky,
+      /*
+       * THE CLOCK IS SHARED BY BOTH DOMES, and it is set to the racing game's boot hour
+       * (GAME_TIME_OF_DAY) rather than v2's 9.5, so the editor and the game open on the
+       * SAME sky and can be compared side by side without first dialling one to match the
+       * other. Everything else that places the sun — latitude, day of year, moon age —
+       * already agreed; the hour was the only thing that did not.
+       */
+      timeOfDay: 10.5,
+      /** Matches the sky module's own default, so the two advance at the same rate. */
+      daySpeed: 0.4,
       latitude: 45, // observer latitude (°) — tilts the sun/moon arc
       dayOfYear: 172, // 1..365 → solar declination (172 ≈ N summer solstice)
       moonAge: 0.55, // synodic age 0=new .5=full 1=new → moon position + phase
@@ -32,6 +75,97 @@ export function createWorldToolState() {
       // With the haze gone the extra artistic glow reads doubled — v2's 0.55
       // was tuned to punch through βM 21e-6. Keep a modest kiss of it.
       sunGlowStrength: 0.25,
+    },
+    /*
+     * The "Atmosphere" sky mode (v3/render/sky/atmosphereSkyDome.js) — the second dome,
+     * here to be judged against `proceduralSky` in a real world rather than in a lab.
+     * Both are Hillaire; they use different constants, so they will NOT agree at the same
+     * hour. That is the comparison, not a bug. See v3/AUDIT.md, "Sky".
+     *
+     * Its own `timeOfDay` deliberately is NOT kept here: time of day is one world fact and
+     * `proceduralSky.timeOfDay` already owns it, so switching modes does not teleport the
+     * sun. Everything else is the dome's own look.
+     */
+    atmosphereSky: {
+      ...ATMOSPHERE_SKY_DEFAULTS,
+      /*
+       * PHYSICAL, NOT THE GRADIENT FALLBACK. `uAtmoMix` is born at 0 inside the module,
+       * which is the authored gradient — measured saturation 0.17 against the physical
+       * path's 0.45 in the same frame. The racing game hit exactly this: its A/B showed
+       * the FALLBACK and made the new sky look grey next to the engine's.
+       */
+      atmosphereMix: 1,
+      /*
+       * NO FAKE CLOUD SEA. The dome can paint a "sea of clouds seen from above" below the
+       * horizon, on at 0.55 by default, gated on cloudBase + cloudThickness = 480 m — a
+       * lab altitude. In an editor you fly past 480 m all the time, and it drops a band of
+       * mottled grey value-noise below the horizon that reads as choppy water, even with
+       * the cloud deck off. The knob stays for sky-lab.
+       */
+      cloudSea: 0,
+      /**
+       * Which cloud deck this sky draws: "volumetric" | "painted" | "off".
+       *
+       * PAINTED BY DEFAULT, the same boot tier the racing game ships and for the reason it
+       * gives: the fallback became the shipping look. It was written as the cheap tier and
+       * stayed opt-in while it looked like one, and it no longer does — it marches a slab
+       * so its clouds have real thickness and self-occlusion, curves with the planet so
+       * the deck ends at a horizon instead of smearing, casts ground shadows, and carries
+       * a second cirrus layer for depth, at ~0.29 ms against the volumetric deck's
+       * ~1.07 ms.
+       *
+       * Volumetric is NOT retired — it is the one you can fly THROUGH (the painted deck is
+       * camera-relative, so you can never get inside or above it) and it is one click away
+       * in the Clouds panel.
+       *
+       * Whether the painted deck exists is a SHADER difference rather than a uniform — its
+       * texture fetches are either compiled into the dome or they are not — so changing to
+       * or from it rebuilds the dome (~0.7 s). That is why it is a tier and not a
+       * checkbox, and why whichever tier is not selected is genuinely absent rather than
+       * merely hidden.
+       */
+      cloudTier: "painted",
+      /** How much of the sky's colour the clouds take. See cloudSkyLight.js. */
+      cloudSkyTint: 0.6,
+    },
+
+    /*
+     * The two cloud decks that came over from the racing game with its sky
+     * (v3/render/clouds/). Seeded from each module's defaults plus the GAME's art
+     * direction, not the lab's — the module defaults are a tuning ground (coverage 0.9 is
+     * a total whiteout), and the point of this mode is to look like the game.
+     */
+    atmosphereClouds: {
+      ...CLOUD_DEFAULTS,
+      enabled: true,
+      /**
+       * COVERAGE IS THE WHOLE LOOK. 0.9 (the module default) is a solid sheet from horizon
+       * to zenith with no sky left; 0.55 reads as broken cumulus with real blue between
+       * the masses. Not a small window — it is the difference between "clouds" and
+       * "overcast".
+       */
+      coverage: 0.55,
+      /** Halved from the module default: at full strength everything past ~2 km washes
+       *  into a structureless fog wall against the bright horizon. */
+      aerialDensity: 0.0001,
+      /** Slightly harder mass edges than the module default — crisper cumulus. */
+      coverageSoft: 0.12,
+      sunIntensity: 3.8,
+      emptyStepMul: 5,
+    },
+    atmospherePaintedClouds: {
+      ...PAINTED_CLOUD_DEFAULTS,
+      /*
+       * 0.60, NOT the module's 0.46 — because 0.60 is what the racing game actually shows.
+       *
+       * The game never authors this number: when it builds the painted deck it seeds the
+       * coverage from the VOLUMETRIC deck's (0.55 + 0.05), so that switching tier changes
+       * the COST and not the art direction. That seeding rule only exists because the game
+       * switches tiers at runtime; the editor boots straight into painted, so it takes the
+       * value the rule produces instead of re-deriving it. Measured live in the game to be
+       * sure: 0.6000000000000001.
+       */
+      coverage: 0.6,
     },
     volumetricCloudDayNight: ts.volumetricCloudDayNight,
     cloudShadows: ts.cloudShadows,

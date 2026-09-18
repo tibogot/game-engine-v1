@@ -47,7 +47,7 @@ export const LAYERS = Object.freeze({
 
   /** SET: the engine's day/night cloud deck (dayNightCloudLayer.js). */
   CLOUD_DECK: 18,
-  /** SET: modular-road-v3's volumetric cloud dome (modularRoadClouds.js). */
+  /** SET: modular-road-v3's volumetric cloud dome (volumetricCloudDeck.js). */
   GAME_CLOUDS: 19,
 });
 

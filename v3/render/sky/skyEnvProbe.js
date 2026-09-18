@@ -37,8 +37,8 @@
  * quantity it carries — the average colour of the sky — changes on the timescale of
  * weather and time of day, not of frames.
  *
- * @see modularRoadClouds.js — `field`, the density recipe (one source of truth)
- * @see modularRoadSkyAtmosphere.js — `skyRadiance`, the sky this convolves
+ * @see volumetricCloudDeck.js — `field`, the density recipe (one source of truth)
+ * @see v3/render/sky/skyAtmosphere.js — `skyRadiance`, the sky this convolves
  */
 import * as THREE from "three/webgpu";
 import {

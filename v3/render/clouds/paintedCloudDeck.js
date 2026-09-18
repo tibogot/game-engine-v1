@@ -25,12 +25,12 @@
  * so it adds no draw call at all.
  *
  * The shape recipe is the volumetric deck's, ported down a dimension: Perlin-Worley
- * masses, coverage as a THRESHOLD (never a multiplier — see modularRoadClouds.js),
+ * masses, coverage as a THRESHOLD (never a multiplier — see volumetricCloudDeck.js),
  * per-cell cloud TOPS so neighbours differ in height, and Worley billow erosion whose
  * lookup shifts with altitude so a mass is not merely its own outline extruded.
  *
- * @see modularRoadClouds.js — the expensive tier this stands in for
- * @see modularRoadSky.js    — composites this last, so cloud occludes stars/moon/sun
+ * @see volumetricCloudDeck.js — the expensive tier this stands in for
+ * @see v3/render/sky/atmosphereSkyDome.js    — composites this last, so cloud occludes stars/moon/sun
  */
 import * as THREE from "three/webgpu";
 import {
@@ -40,7 +40,7 @@ import {
 } from "three/tsl";
 import {
   seededRandom, makePeriodicPerlin, perlinFbm, makeWorley, normalizeChannel,
-} from "./modularRoadCloudNoise.js";
+} from "./cloudNoise.js";
 
 /** Bake resolution. 256² over a few km is ~15 m per texel — finer than the billow
  *  octave the shader erodes with, and 256 KB of VRAM. */
@@ -608,7 +608,7 @@ export function createPaintedClouds({ seed = 4177, params = {}, camera = null } 
   // that excess over the guarded divisor blew up to full density — stepped ghost
   // columns standing in an otherwise clear sky.
   /** Set by the sky before it builds its shader: returns {zenith, sun, anti} sky-radiance
-   *  nodes, evaluated where the deck needs them. See modularRoadSky. */
+   *  nodes, evaluated where the deck needs them. See v3/render/sky/atmosphereSkyDome.js. */
   let ambientProvider = null;
   const setAmbientProvider = (fn) => { ambientProvider = fn; };
 

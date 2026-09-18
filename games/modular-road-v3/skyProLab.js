@@ -20,16 +20,16 @@
  *
  * So this lab exists to hold three things in one frame:
  *
- *   1. the physical atmosphere (`modularRoadSkyAtmosphere.js`),
- *   2. the volumetric deck (`modularRoadClouds.js`),
+ *   1. the physical atmosphere (`v3/render/sky/skyAtmosphere.js`),
+ *   2. the volumetric deck (`v3/render/clouds/volumetricCloudDeck.js`),
  *   3. a LIT WORLD underneath both — terrain, pillars, metal, wet asphalt —
  *
  * and to A/B the two new couplings between them, because their contribution is invisible
  * until you can switch them off:
  *
- *   • CLOUD SHADOWS (`modularRoadCloudShadowMap.js`) — a proper sun-ray march projected
+ *   • CLOUD SHADOWS (`v3/render/clouds/cloudShadowMap.js`) — a proper sun-ray march projected
  *     onto the world, rather than the existing one-sample screen-space darkening.
- *   • CLOUDS IN THE ENVIRONMENT (`modularRoadSkyEnv.js`) — the IBL that lights every
+ *   • CLOUDS IN THE ENVIRONMENT (`v3/render/sky/skyEnvProbe.js`) — the IBL that lights every
  *     surface knows there is an overcast overhead.
  *
  * Toggle either off (keys `X` and `V`, or the panel) and the frame goes back to looking
@@ -44,11 +44,11 @@ import * as THREE from "three/webgpu";
 import {
   Fn, vec3, vec4, uv, positionWorld, cameraPosition, output, uniform, texture,
 } from "three/tsl";
-import { createModularRoadSky, applyTimePreset } from "./modularRoadSky.js";
-import { createModularRoadClouds, CLOUD_LAYER } from "./modularRoadClouds.js";
-import { createSkyAtmosphere } from "./modularRoadSkyAtmosphere.js";
-import { createCloudShadowMap } from "./modularRoadCloudShadowMap.js";
-import { createSkyCloudEnv } from "./modularRoadSkyEnv.js";
+import { createAtmosphereSky, applyTimePreset } from "../../v3/render/sky/atmosphereSkyDome.js";
+import { createModularRoadClouds, CLOUD_LAYER } from "../../v3/render/clouds/volumetricCloudDeck.js";
+import { createSkyAtmosphere } from "../../v3/render/sky/skyAtmosphere.js";
+import { createCloudShadowMap } from "../../v3/render/clouds/cloudShadowMap.js";
+import { createSkyCloudEnv } from "../../v3/render/sky/skyEnvProbe.js";
 
 /**
  * Deck presets. The hero deck is what a reference demo shows — high, thick, viewed from
@@ -183,7 +183,7 @@ const DECKS = {
   },
   /**
    * SKY PRO — the reference renderer's own deck geometry and march numbers, on the
-   * `solid` model (see the SOLID block in modularRoadClouds.js). Only meaningful when the
+   * `solid` model (see the SOLID block in v3/render/clouds/volumetricCloudDeck.js). Only meaningful when the
    * lab was booted with that model (`?model=solid`, the default): the Nubis shader
    * ignores every `solid*` key, and the solid shader ignores the Nubis shape keys.
    *
@@ -308,7 +308,7 @@ export async function startSkyProLab() {
 
   // ── Sky ────────────────────────────────────────────────────────────────────────────
   const atmo = createSkyAtmosphere({ renderer });
-  const sky = createModularRoadSky({ atmosphere: atmo });
+  const sky = createAtmosphereSky({ atmosphere: atmo });
   sky.setAtmosphereMix(1);
   scene.add(sky.mesh);
   const SP = sky.params;

@@ -72,8 +72,9 @@ export function createInspector({ container, deps }) {
       const L = deps.env.light;
       _title("Sun & light", "World");
       const b = section(container, "Sun", true);
-      if (deps.env.skyMode() === "procedural") {
-        hint(b, "The Procedural sky's time of day places the sun, so Azimuth and Elevation follow it (see Sky).");
+      const skyMode = deps.env.skyMode();
+      if (skyMode === "procedural" || skyMode === "atmosphere") {
+        hint(b, "This sky's time of day places the sun, so Azimuth and Elevation follow it (see Sky).");
       }
       // The renderer reads these every frame, and the World tab's controls
       // follow them live, so no change callback is needed.
@@ -98,9 +99,16 @@ export function createInspector({ container, deps }) {
       const mode = deps.env.skyMode();
       _title("Sky", "World");
       const b = section(container, "Sky", true);
-      info(b, "Mode", { physical: "Physical", hdr: "HDR image", procedural: "Procedural (day/night)" }[mode] ?? mode, { layout: "prop" });
+      info(b, "Mode", {
+        physical: "Physical (three.js)",
+        hdr: "HDR image",
+        procedural: "Procedural (day/night)",
+        atmosphere: "Atmosphere (scattering)",
+      }[mode] ?? mode, { layout: "prop" });
       const hs = [];
-      if (mode === "procedural") {
+      // Both domes run off the same clock (proceduralSky's time of day), so this block is
+      // the right one for either of them.
+      if (mode === "procedural" || mode === "atmosphere") {
         const t = section(container, "Time of day", true);
         hs.push(
           slider(t, ps, "timeOfDay", { label: "Time (h)", min: 0, max: 24, step: 0.01, onChange: () => deps.env.setTimeOfDay(ps.timeOfDay) }),
@@ -108,7 +116,7 @@ export function createInspector({ container, deps }) {
           slider(t, ps, "daySpeed", { label: "Day speed (h/s)", min: 0.05, max: 4, step: 0.05 }),
         );
       } else {
-        hint(b, "Time of day, clouds and stars come with the Procedural sky. Switch the mode in the World tab.");
+        hint(b, "Time of day, clouds and stars come with the Procedural and Atmosphere skies. Switch the mode in the World tab.");
       }
       _actions(container, [{ title: "More in World tab", onClick: () => deps.openTab("world") }]);
       return hs;

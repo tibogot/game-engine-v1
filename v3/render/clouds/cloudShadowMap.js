@@ -2,7 +2,7 @@
  * Cloud shadow map — the clouds cast onto the world, instead of onto themselves only.
  *
  * ─────────────────────────────────────────────────────────────────────────────────────
- * WHY THIS EXISTS, given `modularRoadClouds.js` already darkens the ground.
+ * WHY THIS EXISTS, given `volumetricCloudDeck.js` already darkens the ground.
  *
  * The existing ground darkening (`shadowFactor` in the cloud module) is a SCREEN-SPACE
  * trick: for each visible pixel it reconstructs a world position from the depth buffer,
@@ -49,7 +49,7 @@
  * quantised to whole texels, so the footprint moves in texel jumps and the pattern on the
  * ground stays put.
  *
- * @see modularRoadClouds.js — `field`, the density recipe this marches (one source of truth)
+ * @see volumetricCloudDeck.js — `field`, the density recipe this marches (one source of truth)
  * @see skyProLab.js — the harness that shows it against a lit ground
  */
 import * as THREE from "three/webgpu";
@@ -194,7 +194,7 @@ export function createCloudShadowMap({ renderer, field, params = {} }) {
     const gx = p.x.sub(uSunDir.x.div(sy).mul(p.y));
     const gz = p.z.sub(uSunDir.z.div(sy).mul(p.y));
     // NO FLIP HERE, deliberately — the bake already carries it. Render targets read back
-    // Y-flipped versus `uv()` on a bake quad (the same trap `modularRoadSkyAtmosphere.js`
+    // Y-flipped versus `uv()` on a bake quad (the same trap `v3/render/sky/skyAtmosphere.js`
     // documents at `bakeUv`), so the flip belongs on exactly one side. Adding it here as
     // well double-flips: measured from directly above with the wind stopped, the shadow
     // blob sat most of a footprint away from the cloud casting it.

@@ -46,6 +46,21 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/instancePipeline.js",
   "v3/render/gpuStatsPanel.js",
   "v3/render/clouds/dayNightCloudLayer.js",
+  // Sky — the atmosphere dome and its Hillaire model (moved out of modular-road
+  // 2026-09-18; the game still drives its own instance, the editor has a mode for it)
+  "v3/render/sky/atmosphereSkyDome.js",
+  "v3/render/sky/skyAtmosphere.js",
+  "v3/render/sky/skyEnvProbe.js",
+  "v3/render/sky/cloudSkyLight.js",
+  "v3/render/sky/skyWorldLight.js",
+  "v3/render/sky/skyLensFlareLook.js",
+  "v3/render/noise/periodicPerlin.js",
+  // Cloud decks — the game's two tiers, moved into the engine 2026-09-18 so the
+  // editor's Atmosphere sky mode draws the same clouds the game does
+  "v3/render/clouds/volumetricCloudDeck.js",
+  "v3/render/clouds/paintedCloudDeck.js",
+  "v3/render/clouds/cloudShadowMap.js",
+  "v3/render/clouds/cloudNoise.js",
   "v3/render/water/lakeMaterial.js",
   "v3/render/water/worldOceanV2.js",
   "v3/render/roads/wetRoad.js",

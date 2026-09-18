@@ -46,7 +46,7 @@
  * Note what is NOT here: the editor's post-FX path renders the whole scene a second time
  * purely to obtain a depth buffer for the cloud march. This path renders the scene once.
  *
- * @see modularRoadCloudNoise.js — the volumes, and why their frequencies are what they are
+ * @see cloudNoise.js — the volumes, and why their frequencies are what they are
  * @see cloud-lab.html           — tuning harness with a free-fly camera and GPU timing
  */
 import * as THREE from "three/webgpu";
@@ -61,8 +61,8 @@ import {
   BASE_TILE_M, DETAIL_TILE_M, NEAR_TILE_M, WEATHER_TILE_M,
   BASE_SIZE, DETAIL_SIZE, NEAR_SIZE, WEATHER_SIZE, BLUE_NOISE_SIZE, bakeBlueNoise,
   densityAtCPU, SOLID_BASE_SIZE, SOLID_WEATHER_SIZE, solidDensityAtCPU,
-} from "./modularRoadCloudNoise.js";
-import { LAYERS } from "../../v3/render/layers.js";
+} from "./cloudNoise.js";
+import { LAYERS } from "../layers.js";
 
 /** Layer the cloud dome lives on, so the main scene pass skips it and we march it alone. */
 export const CLOUD_LAYER = LAYERS.GAME_CLOUDS;
@@ -2375,7 +2375,7 @@ function bakeInWorker(seed, onSpawn, solid = false) {
     let worker;
     try {
       worker = new Worker(
-        new URL("./modularRoadCloudNoiseWorker.js", import.meta.url),
+        new URL("./cloudNoiseWorker.js", import.meta.url),
         { type: "module" },
       );
     } catch (err) {

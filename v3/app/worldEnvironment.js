@@ -37,6 +37,13 @@ import { createLensFlare2 } from "../../v2/effects/lensFlare2.js";
 import { applyBloomMRT } from "../render/bloomMRT.js";
 import { PostFxPipeline } from "../../v2/render/post/postFxPipeline.js";
 import { createDayNightSky } from "../render/sky/dayNightSky.js";
+import { createAtmosphereSky, skyBandWeights } from "../render/sky/atmosphereSkyDome.js";
+import { createSkyAtmosphere } from "../render/sky/skyAtmosphere.js";
+import { createCloudSkyLight } from "../render/sky/cloudSkyLight.js";
+import { createSkyWorldLight, WORLD_LIGHT_REFERENCE } from "../render/sky/skyWorldLight.js";
+import { SKY_LENS_FLARE_LOOK } from "../render/sky/skyLensFlareLook.js";
+import { createModularRoadClouds } from "../render/clouds/volumetricCloudDeck.js";
+import { createPaintedClouds } from "../render/clouds/paintedCloudDeck.js";
 import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
 import { createWorldOcean } from "../render/water/worldOcean.js";
 import { createWorldOceanV2 } from "../render/water/worldOceanV2.js";
@@ -75,6 +82,29 @@ export async function createWorldEnvironment({
   const _cloudAmbColor = new THREE.Color();
   const _cloudAmbNight = new THREE.Color();
   const _fogAwayColor = new THREE.Color();
+  /**
+   * This frame's zenith/horizon/sun from the atmosphere dome's look — see
+   * driveAtmosphereSky. Scratch colours because the fog, the cloud deck and the ocean all
+   * read them every frame. LINEAR, like everything that came out of a `Color.set(hex)`, so
+   * consumers must `copy` and never `set` again — see the colour-space note on driveFogSun.
+   *
+   * DECLARED UP HERE, with the other scratch, and not beside the rest of the atmosphere
+   * state further down. `syncFog()` and `driveFogSun()` run during setup, ABOVE that
+   * block, and driveFogSun reads `_atmoColors`. While the editor booted into another sky
+   * mode the `skyMode === "atmosphere"` test short-circuited before touching it; the day
+   * that became the DEFAULT mode, the same line became a temporal-dead-zone ReferenceError
+   * and the editor failed to start.
+   */
+  const _atmoZenith = new THREE.Color();
+  const _atmoHorizon = new THREE.Color();
+  const _atmoSunColor = new THREE.Color();
+  const _atmoScratch = new THREE.Color();
+  /** Null until the dome has been driven once; then always these same three colours. */
+  let _atmoColors = null;
+  const _atmoColorsRef = {
+    zenith: _atmoZenith, horizon: _atmoHorizon, sunColor: _atmoSunColor,
+  };
+
   const _fogAwayNight = new THREE.Color();
   const _interiorFocusPos = new THREE.Vector3();
 
@@ -537,7 +567,11 @@ export async function createWorldEnvironment({
     uDFogSunTint.value.set(D.sunTint);
     uDFogTintPow.value = D.tintPow ?? 2.0;
     uDFogSunStrength.value = THREE.MathUtils.clamp((sunUp + 0.1) / 0.15, 0, 1);
-    if (D.matchSky && toolState.skyMode === "procedural") {
+    if (D.matchSky && toolState.skyMode === "atmosphere" && _atmoColors) {
+      // Same job as the procedural branch below — distant geometry dissolves into the
+      // horizon BEHIND it — but read off the dome that is actually drawing that horizon.
+      uDFogColor.value.copy(_atmoColors.horizon);
+    } else if (D.matchSky && toolState.skyMode === "procedural") {
       const ps = toolState.proceduralSky;
       const dayF = THREE.MathUtils.clamp((sunUp + 0.15) / 0.4, 0, 1);
       /*
@@ -584,6 +618,339 @@ export async function createWorldEnvironment({
   dayNightSky.mesh.visible = false;
   scene.add(dayNightSky.mesh);
 
+  /*
+   * ── THE SECOND DOME: "atmosphere" sky mode ────────────────────────────────
+   *
+   * v3/render/sky/atmosphereSkyDome.js, on v3/render/sky/skyAtmosphere.js. It came out of
+   * the racing game (where it is the boot default) so the editor and every game share one
+   * sky; it is a fourth MODE rather than a replacement because the point is to judge it
+   * against the other three in a real world. Nothing is deleted until that comparison is
+   * made — see v3/AUDIT.md, "Sky".
+   *
+   * BUILT LAZILY. Three LUT bakes plus a large shader is ~0.7 s of one-off compile, and
+   * nobody who never picks this mode should pay it at editor boot. The cost lands on the
+   * frame you switch to it, once per session.
+   */
+  let atmoSky = null;   // createAtmosphereSky()
+  let atmoModel = null; // createSkyAtmosphere() — the Hillaire LUT chain it draws with
+  /*
+   * ── AND ITS CLOUDS ────────────────────────────────────────────────────────
+   *
+   * This mode brings the racing game's two cloud decks with it, because a sky and the
+   * clouds under it are one look, not two features: `cloudSkyLight` derives the deck's key
+   * light, its ambient and its aerial target from the SAME atmosphere the dome is drawn
+   * with, so they track the day cycle together. The editor's own `dayNightCloudLayer` is a
+   * different deck (base 1900 m vs 260 m) and stays with the Procedural mode.
+   *
+   * `atmoPainted` is built BEFORE the dome and handed in, because whether it exists is a
+   * shader difference — see `cloudTier`.
+   */
+  let atmoClouds = null;   // createModularRoadClouds() — the marched deck
+  let atmoPainted = null;  // createPaintedClouds() — the cheap tier, compiled into the dome
+  const atmoCloudLight = createCloudSkyLight();
+  /*
+   * ── AND THE WORLD IT LIGHTS ───────────────────────────────────────────────
+   *
+   * Without this the editor draws the game's sky over a world lit by static defaults, and
+   * it reads visibly darker and flatter than the same sky in the game. Measured side by
+   * side at the same moment: exposure 0.70 vs 0.997, env 0.20 vs 0.447, sun 2.2 vs 2.577,
+   * ambient 0.4 vs 0.595 — every game value a computed fraction, every editor value a
+   * round default, which is the tell that one end was being driven and the other was not.
+   *
+   * The reference is the racing game's, and the game wrote down why: the editor's own
+   * 0.2 env / 0.4 hemi is "why the scene reads dark — almost nothing fills the shadows".
+   * Held per-MODE rather than written into toolState.light, so choosing this sky cannot
+   * quietly relight the other three modes or a project saved under them.
+   */
+  const atmoWorldLight = createSkyWorldLight();
+  const atmoLightRef = { ...WORLD_LIGHT_REFERENCE };
+  /** toolState.light values from before this mode took the lights over. */
+  let _atmoLightSaved = null;
+  /** The tuned flare look is applied once, the first time this mode is entered. */
+  let _atmoFlareApplied = false;
+  /** The tier the current dome+deck pair was BUILT for; a change means a rebuild. */
+  let _atmoBuiltTier = null;
+
+  function isDomeMode(mode) {
+    return mode === "procedural" || mode === "atmosphere";
+  }
+
+  function ensureAtmosphereSky() {
+    const tier = toolState.atmosphereSky.cloudTier ?? "volumetric";
+    if (atmoSky && _atmoBuiltTier === tier) return atmoSky;
+    // A tier change across the painted boundary is a REBUILD, not a uniform — see below.
+    if (atmoSky) disposeAtmosphereSky();
+    try {
+      atmoModel = createSkyAtmosphere({ renderer });
+      /*
+       * The painted deck goes IN to the dome; the volumetric one draws itself and is
+       * composited separately (see renderFrame). Handing `null` when the tier is not
+       * "painted" leaves the painted fetches out of the compiled dome entirely, so a tier
+       * that is not being used costs nothing per sky pixel — which is the one thing a
+       * performance fallback must never get wrong.
+       */
+      if (tier === "painted") {
+        atmoPainted = createPaintedClouds({
+          params: toolState.atmospherePaintedClouds,
+          camera,
+        });
+      }
+      atmoSky = createAtmosphereSky({
+        atmosphere: atmoModel,
+        paintedClouds: atmoPainted,
+        params: toolState.atmosphereSky,
+      });
+      atmoSky.mesh.visible = false;
+      scene.add(atmoSky.mesh);
+
+      if (tier === "volumetric") {
+        atmoClouds = createModularRoadClouds({
+          renderer, scene, camera,
+          params: toolState.atmosphereClouds,
+        });
+        // The deck does NOT parent its own mesh — it hands one back and the caller places
+        // it (the game does the same). It lives on LAYERS.GAME_CLOUDS, so the main scene
+        // pass skips it and the deck marches it alone.
+        scene.add(atmoClouds.mesh);
+      }
+      _atmoBuiltTier = tier;
+    } catch (err) {
+      console.warn("[V3] Atmosphere sky failed to init; staying on the current sky.", err);
+      disposeAtmosphereSky();
+    }
+    return atmoSky;
+  }
+
+  /**
+   * Tear the whole pair down. `dispose()` on the dome frees its geometry and material but
+   * does NOT unparent the mesh, so dropping the reference without removing it leaves a
+   * dead dome in scene.children on every tier switch.
+   */
+  function disposeAtmosphereSky() {
+    if (atmoSky) {
+      scene.remove(atmoSky.mesh);
+      atmoSky.dispose?.();
+    }
+    atmoSky = null;
+    // Three render targets and three materials — dropping the reference leaks all six.
+    atmoModel?.dispose?.();
+    atmoModel = null;
+    if (atmoClouds) {
+      scene.remove(atmoClouds.mesh); // dispose frees buffers, it does not unparent
+      atmoClouds.dispose?.();
+    }
+    atmoClouds = null;
+    atmoPainted?.dispose?.();
+    atmoPainted = null;
+    _atmoBuiltTier = null;
+    _atmoColors = null;
+  }
+
+  /** Switch cloud tier. Rebuilds, because the painted deck is compiled into the dome. */
+  function setAtmosphereCloudTier(tier) {
+    if (!["volumetric", "painted", "off"].includes(tier)) return;
+    /*
+     * NO "has it changed?" GUARD AGAINST toolState.
+     *
+     * The panel's dropdown is BOUND to `atmosphereSky.cloudTier` — it writes the new value
+     * into the object and THEN calls this. Comparing the argument against that field
+     * therefore always found them equal and returned without doing anything, so the tier
+     * silently never switched. `_atmoBuiltTier` (what the current dome+deck pair was
+     * actually built for) is the only honest thing to compare against, and
+     * ensureAtmosphereSky already does exactly that.
+     */
+    toolState.atmosphereSky.cloudTier = tier;
+    if (toolState.skyMode !== "atmosphere") return; // built lazily on the next switch in
+    if (_atmoBuiltTier === tier) return;
+    ensureAtmosphereSky();
+    if (atmoSky) {
+      atmoSky.mesh.visible = _skyShown;
+      driveAtmosphereSky(0);
+    }
+    resetProcEnvRig();
+  }
+
+  /**
+   * Per-frame drive for the atmosphere dome. Time of day comes from `proceduralSky`, not
+   * from this dome's own `timeOfDay`: the hour is one world fact, so switching modes must
+   * not teleport the sun. `setTimeOfDay` on the dome only writes its params — the SUN
+   * itself is still placed by the engine's `setTimeOfDay`/`updateSunSky`, so shadows,
+   * CSM and the sun disc keep agreeing.
+   */
+  function driveAtmosphereSky(dtSec) {
+    if (!atmoSky) return;
+    const A = toolState.atmosphereSky;
+    const ps = toolState.proceduralSky;
+    /*
+     * THE LIGHT IS THE SUN — the dome does NOT get to derive its own.
+     *
+     * Standalone, this dome computes the sun from its own clock. In the editor that is
+     * the wrong master: the sun is the directional light, placed from
+     * `light.sunAzimuth/sunElevation`, and time of day is only ONE of the things that
+     * writes those — dragging the sun sliders moves the light and never touches the
+     * clock. dayNightSky has always been handed `sunDir` for exactly this reason.
+     *
+     * Getting this wrong is not subtle: measured on a default editor, the clock sat at
+     * 21.27 while the light was at +12° elevation, so the dome painted a night sky over
+     * a world lit for midday. The moon is `_skyMoonDir`, the same realistic moon the
+     * other dome is given, not the `_moonDir` antipode the clouds use.
+     *
+     * The mirrored params below still matter for everything the direction does not carry:
+     * `autoAdvance` OFF so the engine's clock is the only one advancing the hour, and the
+     * observer numbers so the dome's own moon maths agrees if it ever falls back to them.
+     */
+    A.timeOfDay = ps.timeOfDay;
+    A.latitude = ps.latitude;
+    A.dayOfYear = ps.dayOfYear;
+    A.moonAge = ps.moonAge;
+    A.autoAdvance = false;
+    /*
+     * PUSH THE PANEL'S VALUES IN. `createAtmosphereSky` does `{ ...SKY_DEFAULTS, ...params }`
+     * — it COPIES the params object rather than holding it, which is right for a game that
+     * configures its sky once at build time and wrong for an editor, where every slider
+     * writes to `toolState.atmosphereSky` and would otherwise move nothing at all.
+     *
+     * Safe to assign wholesale: the only keys the dome writes back are `sunElevation` /
+     * `sunAzimuth` (not in this slice, so never clobbered) and `sunDiscCos`, which is
+     * re-derived from `sunSizeDeg` inside the same update a few lines later.
+     */
+    Object.assign(atmoSky.params, A);
+    computeMoonDir(_skyMoonDir);
+    const look = atmoSky.update({
+      dt: dtSec,
+      camera,
+      sunDir,          // the light's direction, not the dome's own clock
+      moonDir: _skyMoonDir,
+    });
+    /*
+     * BAKE THE LUTS. Without this line the sky is BLACK — and not obviously as a
+     * bake failure, because every other part of the dome (stars, moon, the authored
+     * gradient underneath) still draws correctly.
+     *
+     * `skyRadiance` is a sampler read of the sky-view render target, and nothing else
+     * ever renders into it. The dome does not bake it: the atmosphere is handed IN, so
+     * whoever owns it owns its clock. The game does this on its own line for the same
+     * reason. The atmosphere also wants the camera ALTITUDE, because half the point of
+     * a physical sky is that it changes as you climb.
+     *
+     * Cheap by design: it re-bakes only when the sun, the moon or the height actually
+     * moved, so a frozen time of day costs nothing per frame.
+     */
+    if (look) {
+      atmoModel?.update(look.sunDir, Math.max(0, camera.position.y), look.moonDir);
+    }
+
+    /*
+     * ── THE CLOUDS UNDER THIS SKY ─────────────────────────────────────────────
+     *
+     * Everything the deck is lit by comes out of the same atmosphere the dome is drawn
+     * with: the key light is the real slant-path transmittance to the deck's altitude
+     * (warm white at noon, ember at 2°, the moon once the sun is truly down), ambient is
+     * the sky's own zenith and horizon, and distant clouds fade toward the horizon they
+     * sit on. That derivation is shared with the game — see cloudSkyLight.js, and do not
+     * re-derive any of it here.
+     */
+    if (atmoClouds?.enabled) {
+      atmoCloudLight.params.skyTint = A.cloudSkyTint ?? 0.6;
+      const mid = (atmoClouds.params.base ?? 260) + (atmoClouds.params.thickness ?? 620) * 0.5;
+      atmoCloudLight.sync(A, camera.position.y, mid);
+      // The caller owns the sun; `sync` only takes the slot over once the sun is down,
+      // because the march has exactly one directional light and the swap has to happen
+      // together with the colour that goes with it.
+      if (atmoCloudLight.usingMoon()) atmoCloudLight.frame.sunDir.copy(atmoCloudLight.moonDir);
+      else atmoCloudLight.frame.sunDir.copy(sunDir);
+      atmoClouds.update(dtSec, atmoCloudLight.frame);
+    }
+
+    /*
+     * ── AND THE WORLD UNDER IT ────────────────────────────────────────────────
+     *
+     * Key colour from the sun's own transmittance, ambient from the sky's zenith and
+     * haze, exposure and env strength on the sky's daylight curve, the moon as a real key
+     * light at night. Key-cached on solar elevation, so with a frozen clock this computes
+     * once and returns null forever.
+     */
+    if (atmoWorldLight.params.enabled && _atmoColors && look) {
+      const lit = atmoWorldLight.compute(look, _atmoColors, atmoLightRef, camera.position.y);
+      if (lit) {
+        const Li = toolState.light;
+        if (!_atmoLightSaved) {
+          // Snapshot once, so leaving the mode gives the world back exactly as it was.
+          _atmoLightSaved = {
+            dirColor: Li.dirColor, dirIntensity: Li.dirIntensity,
+            hemiSkyColor: Li.hemiSkyColor, hemiGroundColor: Li.hemiGroundColor,
+            hemiIntensity: Li.hemiIntensity, exposure: Li.exposure,
+            moonIntensity: Li.moonIntensity, envIntensity: Li.envIntensity,
+          };
+        }
+        // Encoded back to sRGB hex: the engine consumes these as authored strings and
+        // decodes them, so handing over linear values would land 5-10x too dark.
+        Li.dirColor = atmoWorldLight.toHex(lit.dirColor);
+        Li.dirIntensity = lit.dirIntensity;
+        Li.hemiSkyColor = atmoWorldLight.toHex(lit.hemiSkyColor);
+        Li.hemiGroundColor = atmoWorldLight.toHex(lit.hemiGroundColor);
+        Li.hemiIntensity = lit.hemiIntensity;
+        Li.exposure = lit.exposure;
+        Li.moonIntensity = lit.moonIntensity;
+        Li.envIntensity = lit.envIntensity;
+        updateSunSky();
+        _procEnvNeeds = true; // the sky moved, so the IBL has to follow
+      }
+    }
+
+    /*
+     * ── AND THE FLARE ─────────────────────────────────────────────────────────
+     *
+     * Two couplings, both per-frame and both cheap:
+     *
+     * SIZE follows the sky's own sun. The flare was authored against `sunSizeDeg` 3.4 and
+     * is otherwise sized purely in screen fractions, so dialling the sun up left its
+     * halation and starburst behind and the two stopped reading as the same object. Only
+     * the parts that are an IMAGE OF THE SOURCE follow this — ghosts and halo are images
+     * of the LENS and keep their own size (see setSourceScale).
+     *
+     * COLOUR is the sky's, not a constant, so the flare goes deep orange at sunset instead
+     * of staying noon-warm all day. `look.sunColor` is the sun through the current air
+     * mass and is ALREADY LINEAR (the dome builds it with toLinearHex), so it goes
+     * straight across — converting it again is the 5-10x error that stays self-consistent
+     * and therefore hides. It is shared scratch inside the dome, so the flare copies it.
+     */
+    if (look && toolState.lensFlare.enabled) {
+      const size = A.sunSizeDeg;
+      if (size) {
+        // Fed to BOTH, so the dev-panel A/B between the two flares never leaves one
+        // holding a stale sun size.
+        lensFlareLegacy.setSourceScale?.(size / 3.4);
+        lensFlareNext.setSourceScale?.(size / 3.4);
+      }
+      // Only the analytic flare has a notion of a live source colour.
+      if (look.sunColor) lensFlareNext.setSourceColor?.(look.sunColor);
+    }
+    /*
+     * Blend the look's three altitude bands into scratch, ONCE, for the fog, the cloud
+     * deck and the ocean below. Each of those used to read `proceduralSky`'s authored
+     * day/night colour PAIRS, which this dome does not have — its look is a function of
+     * the hour, not a pair to lerp.
+     *
+     * Deliberately not `atmoSky.getColors()`, which is the same arithmetic but re-runs
+     * `evaluateSky` — the full authored-look blend that `update()` just finished — and
+     * allocates about twenty Colors doing it. Per frame, for three consumers, that is a
+     * second evaluation and a steady stream of garbage for nothing. The band weights are
+     * exported and allocation-free, and the look is right here.
+     */
+    if (look) {
+      const b = skyBandWeights(camera.position.y, A);
+      _atmoZenith.copy(look.zenithBelow).multiplyScalar(b.below)
+        .add(_atmoScratch.copy(look.zenithInside).multiplyScalar(b.inside))
+        .add(_atmoScratch.copy(look.zenithAbove).multiplyScalar(b.above));
+      _atmoHorizon.copy(look.horizonBelow).multiplyScalar(b.below)
+        .add(_atmoScratch.copy(look.horizonInside).multiplyScalar(b.inside))
+        .add(_atmoScratch.copy(look.horizonAbove).multiplyScalar(b.above));
+      _atmoSunColor.copy(look.sunColor);
+      _atmoColors = _atmoColorsRef;
+    }
+  }
+
   let pmremGenerator = null;
   let disposeSkyEnv = null;
   let disposeHdrEnv = null;
@@ -603,6 +970,35 @@ export async function createWorldEnvironment({
    * one sky while standing under another. Contract: `{ mesh, setSunDiscScale? }`.
    */
   let customEnvSky = null;
+
+  /**
+   * The sky the IBL is baked from: a game's registered one wins, otherwise whichever of
+   * the engine's two domes the sky mode is showing. Without the atmosphere branch the
+   * world would be lit and reflected by the procedural dome while a different sky is
+   * drawn overhead — the exact two-skies-in-one-frame bug setCustomEnvSky exists to stop,
+   * and it shows first on wet and metallic surfaces.
+   */
+  function activeEnvSky() {
+    if (customEnvSky) return customEnvSky;
+    if (toolState.skyMode === "atmosphere" && atmoSky) return atmoSky;
+    return dayNightSky;
+  }
+
+  /**
+   * Drop the capture rig so it is rebuilt around whatever dome is current, and ask for an
+   * immediate re-bake. Shared by setCustomEnvSky and by switching between the two dome
+   * modes — the rig holds a CLONE of the dome mesh, so without this the environment keeps
+   * showing the previous sky until something else happens to invalidate it.
+   */
+  function resetProcEnvRig() {
+    _procEnvScene = null;
+    if (_procCubeRT) { _procCubeRT.dispose(); _procCubeRT = null; }
+    _procCubeCam = null;
+    _procEnvFace = -1;
+    _procEnvIdle = 0;
+    _procEnvNeeds = true;
+  }
+
   let _procEnvFace = -1;
   let _procEnvIdle = 0;
   let _procEnvNeeds = false;
@@ -702,7 +1098,7 @@ export async function createWorldEnvironment({
     // (see setCustomEnvSky) would otherwise be lit and reflected by the engine's dome
     // while a different sky is drawn on screen — two skies in one frame, which shows up
     // first on wet and metallic surfaces.
-    const envSkyMesh = customEnvSky?.mesh ?? dayNightSky.mesh;
+    const envSkyMesh = activeEnvSky().mesh;
     const domeClone = envSkyMesh.clone();
     domeClone.visible = true;
     domeClone.position.set(0, 0, 0);
@@ -732,7 +1128,7 @@ export async function createWorldEnvironment({
     // Sun disc OUT of the IBL: its energy already reaches surfaces via the
     // directional light — capturing it in the env map counted it twice (lifted
     // ambient + a phantom specular sun). The aureole/glow stays in.
-    const envSky = customEnvSky ?? dayNightSky;
+    const envSky = activeEnvSky();
     envSky.setSunDiscScale?.(0);
     renderer.setRenderTarget(_procCubeRT, face);
     renderer.render(_procEnvScene, _procCubeCam.children[face]);
@@ -753,12 +1149,7 @@ export async function createWorldEnvironment({
    */
   function setCustomEnvSky(sky) {
     customEnvSky = sky ?? null;
-    _procEnvScene = null;
-    if (_procCubeRT) { _procCubeRT.dispose(); _procCubeRT = null; }
-    _procCubeCam = null;
-    _procEnvFace = -1;
-    _procEnvIdle = 0;
-    _procEnvNeeds = true;
+    resetProcEnvRig();
   }
 
   /**
@@ -796,7 +1187,10 @@ export async function createWorldEnvironment({
   function rebuildProceduralSkyEnv() {
     try {
       updateSunSky();
-      driveProceduralSky();
+      // Drive the dome the rig is about to clone. Driving the other one would bake the
+      // environment from a dome still holding last frame's sun.
+      if (toolState.skyMode === "atmosphere") driveAtmosphereSky(0);
+      else driveProceduralSky();
       ensureProcEnvRig();
       for (let f = 0; f < 6; f++) renderProcEnvFace(f);
       convolveProcEnv();
@@ -820,6 +1214,15 @@ export async function createWorldEnvironment({
     const mode = toolState.skyMode;
     sky.visible = _skyShown && mode === "physical";
     dayNightSky.mesh.visible = _skyShown && mode === "procedural";
+    if (atmoSky) atmoSky.mesh.visible = _skyShown && mode === "atmosphere";
+    /*
+     * Belt and braces. The deck sits on LAYERS.GAME_CLOUDS (19) and the main camera only
+     * renders layer 0, so it cannot draw in another mode anyway — but its `update()` is
+     * the only thing that writes `mesh.visible`, and that stops running the moment the
+     * mode changes, which would leave a stale `true` for anyone who later points a camera
+     * with that layer enabled at the scene.
+     */
+    if (atmoClouds) atmoClouds.mesh.visible = _skyShown && mode === "atmosphere" && atmoClouds.enabled;
     if (mode === "hdr") scene.background = _skyShown ? hdrTexture ?? null : null;
   }
   function setSkyVisible(on) {
@@ -827,18 +1230,41 @@ export async function createWorldEnvironment({
     syncSkyVisibility();
   }
 
+  /**
+   * Hand the world's lighting back exactly as it was before the Atmosphere mode took it
+   * over. Without this, leaving the mode would strand the other three under whatever the
+   * sky happened to be doing at that hour — and a project saved afterwards would carry it.
+   */
+  function restoreLightFromAtmosphere() {
+    if (!_atmoLightSaved) return;
+    Object.assign(toolState.light, _atmoLightSaved);
+    _atmoLightSaved = null;
+    atmoWorldLight.invalidate();
+  }
+
   function applySkyMode(mode, prevMode) {
     const prev = prevMode !== undefined ? prevMode : toolState.skyMode;
+    if (prev === "atmosphere" && mode !== "atmosphere") restoreLightFromAtmosphere();
     if (prev !== mode) {
       toolState.skyExposureByMode[prev] = toolState.light.exposure;
-      const nextExposure =
-        toolState.skyExposureByMode[mode] ?? (mode === "procedural" ? 0.7 : 0.5);
+      /*
+       * The Atmosphere sky owns its own exposure — skyWorldLight writes it every time the
+       * sun moves, off the reference (1.0, the racing game's). Seeding it from the
+       * per-mode memory here would be overwritten a frame later anyway, and 0.7 (which
+       * this mode inherited from Procedural) is most of why it first read dark.
+       */
+      const nextExposure = mode === "atmosphere"
+        ? atmoLightRef.exposure
+        : toolState.skyExposureByMode[mode] ?? (isDomeMode(mode) ? 0.7 : 0.5);
       if (toolState.light.exposure !== nextExposure) {
         toolState.light.exposure = nextExposure;
       }
     }
     toolState.skyMode = mode;
     dayNightSky.mesh.visible = mode === "procedural";
+    if (atmoSky) atmoSky.mesh.visible = mode === "atmosphere";
+    // Moving between the two domes changes which mesh the IBL rig holds a clone of.
+    if (isDomeMode(mode) && isDomeMode(prev) && mode !== prev) resetProcEnvRig();
     if (mode === "physical") {
       if (disposeHdrEnv) {
         disposeHdrEnv();
@@ -867,7 +1293,7 @@ export async function createWorldEnvironment({
         scene.backgroundIntensity = 1;
         scene.environment = null;
       }
-    } else if (mode === "procedural") {
+    } else if (isDomeMode(mode)) {
       sky.visible = false;
       if (disposeSkyEnv) {
         disposeSkyEnv();
@@ -879,6 +1305,34 @@ export async function createWorldEnvironment({
       }
       scene.background = null;
       scene.backgroundIntensity = 1;
+      /*
+       * The ~0.7 s build lands HERE, on the switch, rather than at editor boot — three LUT
+       * bakes and a large shader. If it throws, ensureAtmosphereSky has already warned and
+       * left atmoSky null; falling through to the procedural dome's rebuild keeps the
+       * world lit by a sky that exists instead of going black.
+       */
+      if (mode === "atmosphere") {
+        /*
+         * THE FLARE'S LOOK, ONCE. The editor's flare defaults (intensity 3, halation 3,
+         * ghosts 2) blow the frame to white next to a physically-scattered sun; this is
+         * the look tuned against that sun. Applied the first time the mode is entered and
+         * never again, so anything dialled afterwards stays dialled — and the flare is
+         * left OFF unless the user turned it on, because arriving in a new sky mode is no
+         * reason to switch an effect on for them.
+         */
+        if (!_atmoFlareApplied) {
+          _atmoFlareApplied = true;
+          const wasEnabled = toolState.lensFlare.enabled;
+          mergeKnownKeys(toolState.lensFlare, SKY_LENS_FLARE_LOOK);
+          toolState.lensFlare.enabled = wasEnabled;
+          syncFlareChoice();
+        }
+        ensureAtmosphereSky();
+        if (atmoSky) {
+          atmoSky.mesh.visible = _skyShown;
+          driveAtmosphereSky(0);
+        }
+      }
       rebuildProceduralSkyEnv();
     }
     syncSkyVisibility();
@@ -926,11 +1380,12 @@ export async function createWorldEnvironment({
    * is ignored (same contract as the ocean and lakes).
    */
   const LOOK_SLICES = [
-    "light", "skyExposureByMode", "physicalSky", "proceduralSky",
+    "light", "skyExposureByMode", "physicalSky", "proceduralSky", "atmosphereSky",
+    "atmosphereClouds", "atmospherePaintedClouds",
     "volumetricCloudDayNight", "cloudShadows", "cloudGodRays", "cloudBloom",
     "lensFlare", "postFx", "fog", "interior",
   ];
-  const SKY_MODES = ["physical", "hdr", "procedural"];
+  const SKY_MODES = ["physical", "hdr", "procedural", "atmosphere"];
 
   function exportLook() {
     const look = { skyMode: toolState.skyMode, hdr: hdrRef };
@@ -957,7 +1412,7 @@ export async function createWorldEnvironment({
     }
     // Same mode as prev: no exposure swap, the saved exposure stays as saved.
     applySkyMode(mode, mode);
-    if (mode === "procedural") setTimeOfDay(toolState.proceduralSky.timeOfDay);
+    if (isDomeMode(mode)) setTimeOfDay(toolState.proceduralSky.timeOfDay);
     syncFog();
     driveFogSun();
     applyPostFxState();
@@ -994,7 +1449,7 @@ export async function createWorldEnvironment({
     const Li = toolState.light;
     sunDirectionFromAngles(Li.sunAzimuth, Li.sunElevation, sunDir);
     const sunUp = sunDir.y;
-    if (toolState.skyMode === "procedural" && sunUp < 0) {
+    if (isDomeMode(toolState.skyMode) && sunUp < 0) {
       _effectiveLightDir.copy(sunDir).negate();
       placeSun();
       sun.color.set(toolState.proceduralSky.moonColor);
@@ -1005,10 +1460,9 @@ export async function createWorldEnvironment({
       _effectiveLightDir.copy(sunDir);
       placeSun();
       sun.color.set(Li.dirColor);
-      const sunFade =
-        toolState.skyMode === "procedural"
-          ? THREE.MathUtils.smoothstep(sunUp, -0.05, 0.1)
-          : 1;
+      const sunFade = isDomeMode(toolState.skyMode)
+        ? THREE.MathUtils.smoothstep(sunUp, -0.05, 0.1)
+        : 1;
       sun.intensity = Li.dirIntensity * sunFade;
     }
     hemi.color.set(Li.hemiSkyColor);
@@ -1035,7 +1489,6 @@ export async function createWorldEnvironment({
   }
 
   updateSunSky();
-  applySkyMode(toolState.skyMode);
 
   /*
    * TWO FLARES, ONE PARAMS OBJECT.
@@ -1077,6 +1530,37 @@ export async function createWorldEnvironment({
     lensFlare.group.visible = false;
     lensFlare = want;
   }
+
+  /*
+   * THE FIRST applySkyMode RUNS HERE, below the flares, not up beside updateSunSky().
+   *
+   * Applying a dome mode drives the sky once so the world is not lit by nothing on frame
+   * 0, and that drive touches the flare (size from the sun's angular size, colour from the
+   * sun through the current air mass). While the editor booted into another mode the
+   * atmosphere branch short-circuited and the order never mattered; the day the atmosphere
+   * sky became the DEFAULT, running before `lensFlareNext` existed was a temporal-dead-zone
+   * ReferenceError and the editor failed to start. Nothing between there and here depends
+   * on the sky mode having been applied.
+   */
+  applySkyMode(toolState.skyMode);
+
+  /*
+   * PUT THE SUN WHERE THE CLOCK SAYS, ONCE, AT BOOT.
+   *
+   * The hour and the sun's angles are two independent pieces of state: `setTimeOfDay`
+   * writes the angles FROM the hour, but nothing called it at startup, so a fresh editor
+   * booted with a clock reading 10.5 and a light sitting at the v2 default 43° / 135° —
+   * which is 10.5 h nowhere on Earth (at latitude 45 on day 172 it is 61.6°). Nobody
+   * noticed while the domes were driven purely by the light, because their LOOK never
+   * consulted the clock. The atmosphere dome's dawn-vs-dusk bias does, and the racing
+   * game has always done this on its own boot line, so the two disagreed on what hour it
+   * was even when they agreed on the number.
+   *
+   * ONCE, and only for a dome mode: doing it inside `applySkyMode` would throw away
+   * hand-placed sun angles every time the mode changed, and a loaded project already
+   * reconciles the same way at the end of `importLook`.
+   */
+  if (isDomeMode(toolState.skyMode)) setTimeOfDay(toolState.proceduralSky.timeOfDay);
 
   const postFxPipeline = new PostFxPipeline({ renderer, scene, camera });
   // v3 uses SELECTIVE bloom: only the emissive MRT buffer blooms (lanterns,
@@ -1307,6 +1791,20 @@ export async function createWorldEnvironment({
     _cloudAmbColor.set(ps.horizonDay);
     _cloudAmbNight.set(ps.horizonNight);
     _cloudAmbColor.lerp(_cloudAmbNight, 1 - dayF);
+    /*
+     * UNDER THE ATMOSPHERE DOME, THE DECK IS LIT BY THAT SKY.
+     *
+     * The lines above blend `proceduralSky`'s authored day/night colour PAIRS, which the
+     * atmosphere dome does not have — its look is a function of the hour, run through the
+     * same transmittance integral the sky is drawn with. Leaving the deck on the pairs is
+     * exactly the bug the racing game fixed: clouds lit by a frozen noon palette at every
+     * hour, so a sunset only ever dimmed a noon-white lamp while the sky behind them went
+     * gold. `_atmoColors` is this frame's evaluation, computed once in driveAtmosphereSky.
+     */
+    if (toolState.skyMode === "atmosphere" && _atmoColors) {
+      if (sunUp >= 0) _cloudLightColor.copy(_atmoColors.sunColor);
+      _cloudAmbColor.copy(_atmoColors.horizon);
+    }
     dayNightCloudLayer.update(P, {
       dt: Math.min(dtSec, 0.05),
       camera,
@@ -1331,7 +1829,7 @@ export async function createWorldEnvironment({
       P: toolState.cloudGodRays,
       frame: { camera, sunDir, lightColor: _cloudLightColor },
       occluders: getTerrainMeshes(),
-      skyMesh: dayNightSky.mesh,
+      skyMesh: activeEnvSky().mesh,
     });
   }
 
@@ -1372,14 +1870,31 @@ export async function createWorldEnvironment({
 
     if (toolState.fog.distance.enabled) driveFogSun();
 
-    if (toolState.skyMode === "procedural") {
+    if (isDomeMode(toolState.skyMode)) {
       const ps = toolState.proceduralSky;
       const procDt = Math.min(dtSec, 0.05);
+      /*
+       * ONE CLOCK for both domes. The hour lives in `proceduralSky` whichever dome is
+       * drawing it, so switching modes does not teleport the sun and a project saves one
+       * time of day rather than two that disagree.
+       */
       if (ps.autoAdvance) {
         setTimeOfDay((ps.timeOfDay + ps.daySpeed * procDt) % 24);
       }
-      driveProceduralSky();
-      const procSnap = `${Li.sunAzimuth},${Li.sunElevation},${ps.scatter},${ps.rayleigh},${ps.mie},${ps.mieG},${ps.sunIntensity},${ps.msAmount},${ps.zenithDay},${ps.horizonDay},${ps.zenithNight},${ps.horizonNight},${ps.sunsetColor},${ps.groundColor},${ps.sunColor},${ps.moonColor},${ps.cloudEnabled},${ps.cloudCoverage},${ps.cloudColor}`;
+      let procSnap;
+      if (toolState.skyMode === "atmosphere") {
+        driveAtmosphereSky(procDt);
+        /*
+         * The IBL re-bake key. It has to name everything that moves this dome's look or
+         * the environment freezes at whatever it baked first — a failure that looks like
+         * nothing is wrong until you drag the time of day and the world does not follow.
+         */
+        const A = toolState.atmosphereSky;
+        procSnap = `atmo,${Li.sunAzimuth},${Li.sunElevation},${ps.timeOfDay},${ps.latitude},${ps.dayOfYear},${ps.moonAge},${A.atmosphereMix},${A.cloudBase},${A.cloudThickness},${A.airglow},${A.starBrightness},${A.milkyWay},${A.sunDiscBright},${A.moonDiscBright},${A.horizonPow},${A.horizonGlow},${A.nadirPow},${A.zenithDepth}`;
+      } else {
+        driveProceduralSky();
+        procSnap = `${Li.sunAzimuth},${Li.sunElevation},${ps.scatter},${ps.rayleigh},${ps.mie},${ps.mieG},${ps.sunIntensity},${ps.msAmount},${ps.zenithDay},${ps.horizonDay},${ps.zenithNight},${ps.horizonNight},${ps.sunsetColor},${ps.groundColor},${ps.sunColor},${ps.moonColor},${ps.cloudEnabled},${ps.cloudCoverage},${ps.cloudColor}`;
+      }
       if (procSnap !== _lastProcSkySnap) {
         _lastProcSkySnap = procSnap;
         _procEnvNeeds = true;
@@ -1404,7 +1919,7 @@ export async function createWorldEnvironment({
       fillScale = THREE.MathUtils.lerp(1, Int.ambientScale ?? 0.22, interiorAmb);
     }
     hemi.intensity = Li.hemiIntensity * fillScale;
-    if (toolState.skyMode === "physical" || toolState.skyMode === "procedural") {
+    if (toolState.skyMode === "physical" || isDomeMode(toolState.skyMode)) {
       scene.environmentIntensity = Li.envIntensity * fillScale;
     } else if (toolState.skyMode === "hdr") {
       scene.environmentIntensity = (Li.hdrEnvIntensity ?? 1) * fillScale;
@@ -1418,6 +1933,12 @@ export async function createWorldEnvironment({
     const dayT = THREE.MathUtils.clamp((sunY + 0.1) / 0.35, 0, 1);
     _oceanZenith.set(ps.zenithDay).lerp(_tmpOceanC.set(ps.zenithNight), 1 - dayT);
     _oceanHorizon.set(ps.horizonDay).lerp(_tmpOceanC.set(ps.horizonNight), 1 - dayT);
+    // The sea mirrors the sky it is under — see the cloud deck above for why the authored
+    // day/night pairs are the wrong source when the atmosphere dome is the one overhead.
+    if (toolState.skyMode === "atmosphere" && _atmoColors) {
+      _oceanZenith.copy(_atmoColors.zenith);
+      _oceanHorizon.copy(_atmoColors.horizon);
+    }
     worldOcean.setSkyColors(_oceanZenith, _oceanHorizon);
     worldOcean.update(dtSec, _appTimeSec, camera);
     if (oceanV2) {
@@ -1471,6 +1992,29 @@ export async function createWorldEnvironment({
   function renderFrame(dtSec) {
     const cloudFollowAnchor = playMode?.active ? playMode.playerPosition : controls.target;
 
+    /*
+     * The Atmosphere sky's own marched deck. It goes through exactly the same composite
+     * path a game's registered deck does — it IS the same module — but it is the engine's,
+     * so it must not shadow a game that registered one of its own: a game's system still
+     * wins below. Only reached in that sky mode; every other mode falls through.
+     */
+    /*
+     * BOTH decks come through here, for different reasons. The volumetric one marches
+     * itself and composites its colour; the PAINTED one is drawn by the sky dome and
+     * registers only to cast its ground shadows and god rays — which is why routing it
+     * matters even though you can already see it.
+     */
+    const deck = atmoClouds ?? atmoPainted;
+    if (!customCloudSystem?.enabled && toolState.skyMode === "atmosphere" && deck?.enabled) {
+      if (postFxPipeline.isActive()) {
+        deck.setDepthSource?.(postFxPipeline.getSceneDepthTexture?.() ?? null);
+        postFxPipeline.renderWithClouds(deck, cloudFollowAnchor, dtSec);
+        return;
+      }
+      deck.setDepthSource?.(null);
+      if (deck.renderFrame()) return;
+    }
+
     // Game clouds take priority over the editor deck when registered AND enabled. Disabled
     // costs nothing: we fall straight through to the normal path below.
     if (customCloudSystem?.enabled) {
@@ -1485,6 +2029,12 @@ export async function createWorldEnvironment({
       if (customCloudSystem.renderFrame()) return;
     }
 
+    /*
+     * The editor's OWN deck belongs to the Procedural sky only. The Atmosphere sky brought
+     * its own two decks with it (handled above), and they are a different deck entirely —
+     * base 260 m and tuned to be flown through, against this one's 1900 m ceiling. Running
+     * both would draw two cloud layers at once.
+     */
     const dncOn =
       toolState.skyMode === "procedural" && toolState.volumetricCloudDayNight.enabled;
 
@@ -1502,7 +2052,7 @@ export async function createWorldEnvironment({
           godRays: toolState.cloudGodRays,
           frame: { camera, sunDir, lightColor: _cloudLightColor },
           occluders: getTerrainMeshes(),
-          skyMesh: dayNightSky.mesh,
+          skyMesh: activeEnvSky().mesh,
         });
       }
     }
@@ -1584,6 +2134,12 @@ export async function createWorldEnvironment({
     syncFog,
     driveFogSun,
     applySkyMode,
+    /** The atmosphere dome, or null until the mode has been switched on once (lazy). */
+    getAtmosphereSky: () => atmoSky,
+    /** The Atmosphere sky's marched deck, or null (lazy / not on that tier). */
+    getAtmosphereClouds: () => atmoClouds,
+    setAtmosphereCloudTier,
+
     importHdr,
     exportLook,
     importLook,

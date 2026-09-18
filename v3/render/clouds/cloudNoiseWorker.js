@@ -9,7 +9,7 @@
  *
  * Transfers the buffers rather than copying them (they total ~9.5 MB).
  */
-import { bakeAll } from "./modularRoadCloudNoise.js";
+import { bakeAll } from "./cloudNoise.js";
 
 self.onmessage = (e) => {
   const { seed = 137, jobId = 0, solid = false } = e.data ?? {};

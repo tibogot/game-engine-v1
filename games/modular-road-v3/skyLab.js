@@ -1,5 +1,5 @@
 /**
- * Sky lab — time-of-day + altitude harness for `modularRoadSky.js`.
+ * Sky lab — time-of-day + altitude harness for `v3/render/sky/atmosphereSkyDome.js`.
  *
  * Standalone: no v3 engine, no game. Adds the game's volumetric clouds and a
  * wet/chrome strip that samples a PMREM of this sky, so the four views that
@@ -8,16 +8,16 @@
 import * as THREE from "three/webgpu";
 import { Fn as TSL_Fn, positionWorld as positionWorldTSL, cameraPosition as cameraPositionTSL, output as outputTSL, vec4 as vec4TSL } from "three/tsl";
 import {
-  createModularRoadSky,
+  createAtmosphereSky,
   SKY_DEFAULTS,
   TIME_PRESETS,
   applyTimePreset,
   skyBandName,
   sunDirFromTime,
   moonDirFromTime,
-} from "./modularRoadSky.js";
-import { createModularRoadClouds, CLOUD_LAYER } from "./modularRoadClouds.js";
-import { createSkyAtmosphere } from "./modularRoadSkyAtmosphere.js";
+} from "../../v3/render/sky/atmosphereSkyDome.js";
+import { createModularRoadClouds, CLOUD_LAYER } from "../../v3/render/clouds/volumetricCloudDeck.js";
+import { createSkyAtmosphere } from "../../v3/render/sky/skyAtmosphere.js";
 
 const TRACK_Y = 40;
 
@@ -119,7 +119,7 @@ export async function startSkyLab() {
   // The atmosphere is handed to the sky so it can replace the authored GRADIENT while
   // keeping stars, moon and cloud sea — a separate dome would have lost the night sky.
   const atmo = createSkyAtmosphere({ renderer });
-  const sky = createModularRoadSky({ atmosphere: atmo });
+  const sky = createAtmosphereSky({ atmosphere: atmo });
   scene.add(sky.mesh);
 
   let usePhysicalSky = true;

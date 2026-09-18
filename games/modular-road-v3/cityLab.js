@@ -14,7 +14,7 @@
 // now, and it mirrors an ANALYTIC sky rather than the env map — but the point
 // stands: judge a look under the lighting the game will actually show.)
 //
-// So the lab now imports `modularRoadSky.js` + `modularRoadSkyAtmosphere.js`
+// So the lab now imports `v3/render/sky/atmosphereSkyDome.js` + `skyAtmosphere.js`
 // with the same parameters roadGame.js boots on, bakes a PMREM of that sky for
 // IBL, and applies its aerial perspective. The cheap gradient is still one
 // keypress away (F8) and the lighting is identical in both modes, so the
@@ -65,8 +65,8 @@ import { createModularRoadCity, CITY_DEFAULTS } from "./modularRoadCity.js";
 import { FACADE_DEFAULTS } from "./modularRoadCityFacade.js";
 import { KIT_DEFAULTS } from "./modularRoadCityKit.js";
 import { STREET_DEFAULTS } from "./modularRoadCityStreets.js";
-import { createModularRoadSky, TIME_PRESETS, skyBandName } from "./modularRoadSky.js";
-import { createSkyAtmosphere } from "./modularRoadSkyAtmosphere.js";
+import { createAtmosphereSky, TIME_PRESETS, skyBandName } from "../../v3/render/sky/atmosphereSkyDome.js";
+import { createSkyAtmosphere } from "../../v3/render/sky/skyAtmosphere.js";
 
 /**
  * SUN-TO-AMBIENT BALANCE, the lab's biggest look dial.
@@ -157,7 +157,7 @@ export async function startCityLab() {
   // from `evaluateSky` in both modes, so F8 changes cost and backdrop, never
   // the light the city is judged under.
   const atmo = createSkyAtmosphere({ renderer });
-  const sky = createModularRoadSky({
+  const sky = createAtmosphereSky({
     atmosphere: atmo,
     params: { timeOfDay: TIME_PRESETS.hero, autoAdvance: false, atmosphereMix: 1, cloudSea: 0 },
   });

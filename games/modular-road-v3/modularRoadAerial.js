@@ -39,7 +39,7 @@
  * falls straight out of `src.rgb + dst·(1 − src.a)` — and the colour of distance is
  * carried by the inscatter term anyway, which is where the eye reads it.
  *
- * @see modularRoadSky.js — supplies the zenith/horizon/sun colours this tints with
+ * @see v3/render/sky/atmosphereSkyDome.js — supplies the zenith/horizon/sun colours this tints with
  */
 import * as THREE from "three/webgpu";
 import {
@@ -128,7 +128,7 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
   const _depthPlaceholder = new THREE.DepthTexture(1, 1);
   const depthTex = texture(_depthPlaceholder);
 
-  // Mirrors the same two helpers in modularRoadPaintedClouds — deliberately duplicated
+  // Mirrors the same two helpers in paintedCloudDeck — deliberately duplicated
   // rather than shared, so this module has no dependency on the cloud tier that happens
   // to be running (it must work in all three).
   const normDepth = Fn(([d]) => mix(d, d.oneMinus(), uReversed));
@@ -188,7 +188,7 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
        * the moon — because a full moon is opposite the sun — and leaving the
        * GROUND brighter than the SKY, which is backwards.
        *
-       * The window is civil twilight, the same one modularRoadSky's key light
+       * The window is civil twilight, the same one the sky dome's key light
        * already blends moonlight over: full at the horizon, gone by 6° under it.
        * Cutting it AT the horizon instead would throw away the best thing this
        * lobe does — the low sun that turns distant ground to gold.

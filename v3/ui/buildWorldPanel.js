@@ -67,11 +67,14 @@ export async function defaultBakeProceduralThumbnails(renderer, size = 192) {
   });
 }
 
-function _buildProceduralSkyControls(parent, ts, app) {
+/*
+ * ONE CLOCK, TWO DOMES. Both the Procedural and the Atmosphere sky modes are driven by
+ * `ts.proceduralSky`'s time of day, latitude, day of year and moon age — the hour is a
+ * world fact, not a property of whichever dome is drawing it, so switching modes must not
+ * teleport the sun. Shared here so the two panels cannot drift apart.
+ */
+function _buildTimeOfDayControls(wrap, ts, app) {
   const ps = ts.proceduralSky;
-  const wrap = document.createElement("div");
-  parent.appendChild(wrap);
-
   const tod = _section(wrap, "Time of day", true);
   _slider(tod, ps, "timeOfDay", {
     label: "Time (0–24h)",
@@ -108,6 +111,15 @@ function _buildProceduralSkyControls(parent, ts, app) {
     hint: "Season → solar declination. 172 ≈ N summer solstice, 355 ≈ winter.",
     onChange: () => app.setTimeOfDay?.(ps.timeOfDay),
   });
+  return tod;
+}
+
+function _buildProceduralSkyControls(parent, ts, app) {
+  const ps = ts.proceduralSky;
+  const wrap = document.createElement("div");
+  parent.appendChild(wrap);
+
+  _buildTimeOfDayControls(wrap, ts, app);
 
   const atmo = _section(wrap, "Atmosphere (scattering)", true);
   _toggle(atmo, ps, "scatter", {
@@ -413,7 +425,7 @@ function _buildProceduralSkyControls(parent, ts, app) {
   const vcSec = _section(wrap, "Cloud layer (volumetric)", false);
   _toggle(vcSec, vc, "enabled", {
     label: "enabled",
-    hint: "Raymarched cloud deck (daynight-sky port). Procedural sky only.",
+    hint: "Raymarched cloud deck (daynight-sky port). Both dome skies: Procedural and Atmosphere.",
   });
   _slider(vcSec, vc, "coverage", {
     label: "coverage",
@@ -689,6 +701,178 @@ function _buildProceduralSkyControls(parent, ts, app) {
 
   const ibl = _section(wrap, "Lighting (IBL)", false);
   _button(ibl, {
+    title: "Rebake Sky IBL",
+    onClick: () => app.rebuildProceduralSkyEnv?.(),
+  });
+
+  return wrap;
+}
+
+/**
+ * Controls for the "Atmosphere" sky mode — v3/render/sky/atmosphereSkyDome.js.
+ *
+ * Deliberately SHORTER than the procedural panel. This dome is here to be judged against
+ * the other three, so what it exposes is what the comparison turns on: the crossfade to
+ * the physical model, the sun and its aureole, the night sky, and the horizon floor.
+ * The authored day/dusk/night colour looks are not on sliders — they are a table inside
+ * the module, and putting 27 colours on a panel would suggest they are meant to be dialled
+ * rather than replaced by the physical model.
+ */
+function _buildAtmosphereSkyControls(parent, ts, app) {
+  const A = ts.atmosphereSky;
+  const wrap = document.createElement("div");
+  parent.appendChild(wrap);
+
+  _buildTimeOfDayControls(wrap, ts, app);
+
+  const model = _section(wrap, "Atmosphere (Hillaire)", true);
+  _slider(model, A, "atmosphereMix", {
+    label: "Physical mix",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hint: "1 = the scattering model, 0 = the authored gradient underneath it. A crossfade, so the authored look can be dialled back in as a grade.",
+  });
+  _slider(model, A, "airglow", {
+    label: "Airglow",
+    min: 0,
+    max: 0.3,
+    step: 0.005,
+    hint: "Oxygen/sodium emission — the floor that keeps a new-moon night dim rather than pure black.",
+  });
+
+  const sunSec = _section(wrap, "Sun", true);
+  _slider(sunSec, A, "sunSizeDeg", {
+    label: "Size (° across)",
+    min: 0.2,
+    max: 8,
+    step: 0.05,
+    hint: "The real sun is 0.53°. The default is ~6x that: at true angular size the disc is a couple of pixels and reads as a bug.",
+  });
+  _slider(sunSec, A, "sunDiscBright", { label: "Brightness", min: 0, max: 40, step: 0.5 });
+  _slider(sunSec, A, "aureole", {
+    label: "Aureole",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hint: "The fierce halo hugging the disc — forward scattering off haze, not the lens flare and not the god rays.",
+  });
+  _slider(sunSec, A, "aureoleG", { label: "Aureole tightness", min: 0.3, max: 0.98, step: 0.01 });
+  _slider(sunSec, A, "aureoleHaze", { label: "Aureole swell (low sun)", min: 0, max: 8, step: 0.1 });
+  _slider(sunSec, A, "sunLimb", { label: "Limb darkening", min: 0, max: 1, step: 0.01 });
+  _slider(sunSec, A, "sunFlatten", {
+    label: "Horizon flatten",
+    min: 0,
+    max: 0.5,
+    step: 0.01,
+    hint: "How far refraction squashes the disc vertically at the horizon. 0.22 is close to the real figure.",
+  });
+  _slider(sunSec, A, "sunBloom", {
+    label: "Bloom feed",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    hint: "Needs Post FX on: v3 blooms only what a material writes to the emissive buffer, so with Post FX off the sun will not bloom at all.",
+  });
+
+  const night = _section(wrap, "Night sky", false);
+  _slider(night, A, "starBrightness", { label: "Stars", min: 0, max: 3, step: 0.05 });
+  _slider(night, A, "starDensity", { label: "Star density", min: 20, max: 600, step: 10 });
+  _slider(night, A, "starBloom", { label: "Star bloom", min: 0, max: 2, step: 0.05 });
+  _slider(night, A, "milkyWay", { label: "Milky Way", min: 0, max: 2, step: 0.05 });
+  _slider(night, A, "moonSizeDeg", { label: "Moon size (°)", min: 0.2, max: 6, step: 0.05 });
+  _slider(night, A, "moonDiscBright", { label: "Moon brightness", min: 0, max: 12, step: 0.1 });
+  _slider(night, A, "moonEarthshine", { label: "Earthshine", min: 0, max: 0.3, step: 0.005 });
+  _slider(night, A, "moonBloom", { label: "Moon bloom", min: 0, max: 2, step: 0.05 });
+
+  const tw = _section(wrap, "Twilight", false);
+  _slider(tw, A, "earthShadow", {
+    label: "Earth shadow",
+    min: 0,
+    max: 2,
+    step: 0.02,
+    hint: "The planet's own shadow on the air, opposite a setting sun — with the Belt of Venus pink above it.",
+  });
+  _slider(tw, A, "earthShadowRise", { label: "Shadow rise", min: 0, max: 4, step: 0.05 });
+  _slider(tw, A, "earthShadowSoft", { label: "Shadow edge", min: 0.005, max: 0.3, step: 0.005 });
+  _slider(tw, A, "belt", { label: "Belt of Venus", min: 0, max: 2, step: 0.02 });
+  _slider(tw, A, "beltWidth", { label: "Belt width", min: 0.01, max: 0.3, step: 0.005 });
+
+  /*
+   * THE FLOOR. Below the horizon the Hillaire model draws the planet — a sun-lit ball with
+   * a colourless albedo, i.e. a GREY floor, and it is what made this sky's horizon read
+   * worse than the old dome's. The dome does not use it: downward rays sample the
+   * atmosphere AT the horizon (azimuth kept, so a sunset floor glows warm sunward) and
+   * then deepen into the zenith blue. These two dials shape that curve. Do NOT try to fix
+   * a grey floor by tinting the model's ground albedo — that was tried and it stays grey.
+   */
+  const floor = _section(wrap, "Horizon & floor", false);
+  _slider(floor, A, "horizonPow", { label: "Horizon falloff", min: 0.05, max: 2, step: 0.01 });
+  _slider(floor, A, "horizonGlow", { label: "Horizon glow", min: 0, max: 1, step: 0.01 });
+  _slider(floor, A, "nadirPow", {
+    label: "Floor depth",
+    min: 0.2,
+    max: 4,
+    step: 0.05,
+    hint: "How fast the below-horizon floor deepens from the horizon band into navy.",
+  });
+  _slider(floor, A, "zenithDepth", { label: "Zenith depth", min: 0, max: 2, step: 0.02 });
+
+  /*
+   * ── THE CLOUDS UNDER THIS SKY ────────────────────────────────────────────────────
+   *
+   * They belong to the sky mode, not to the world, because they are lit BY it — key light,
+   * ambient and aerial target all come out of the same scattering model the dome is drawn
+   * with (see cloudSkyLight.js). The Procedural sky's own deck has its own section further
+   * down and the two never run together.
+   */
+  const cl = _section(wrap, "Clouds", true);
+  _dropdown(cl, A, "cloudTier", {
+    label: "Deck",
+    options: { Volumetric: "volumetric", Painted: "painted", Off: "off" },
+    hint: "Volumetric is the marched deck; Painted is the cheap stand-in. Switching rebuilds the sky (~0.7 s) because the painted deck is compiled INTO the dome rather than being a uniform.",
+    onChange: () => app.setAtmosphereCloudTier?.(A.cloudTier),
+  });
+  _slider(cl, A, "cloudSkyTint", {
+    label: "Sky tint",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hint: "How much of the sky's colour the clouds take. 1 = exactly the sky model, 0 = neutral grey of the same brightness. Not 1 by default: the sky's sun colour is authored for the DISC and turns every cloud flat neon orange at golden hour.",
+  });
+
+  const vc = ts.atmosphereClouds;
+  const vcs = _section(wrap, "Clouds — volumetric", false);
+  _toggle(vcs, vc, "enabled", { label: "Enabled" });
+  _slider(vcs, vc, "coverage", {
+    label: "Coverage",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hint: "Fraction of sky covered. This is the whole look: 0.55 is broken cumulus with blue between, 0.9 is a solid overcast sheet.",
+  });
+  _slider(vcs, vc, "coverageSoft", { label: "Edge softness", min: 0, max: 0.5, step: 0.01 });
+  _slider(vcs, vc, "base", { label: "Base (m)", min: 40, max: 3000, step: 10 });
+  _slider(vcs, vc, "thickness", { label: "Thickness (m)", min: 40, max: 2000, step: 10 });
+  _slider(vcs, vc, "sunIntensity", { label: "Sun intensity", min: 0, max: 12, step: 0.1 });
+  _slider(vcs, vc, "aerialDensity", {
+    label: "Aerial fade",
+    min: 0,
+    max: 0.001,
+    step: 0.00001,
+    hint: "How fast distant clouds melt into the horizon they sit on. Full strength washes everything past ~2 km into a fog wall.",
+  });
+  _slider(vcs, vc, "windDeg", { label: "Wind dir", min: 0, max: 360, step: 1 });
+  _slider(vcs, vc, "windSpeed", { label: "Wind speed", min: 0, max: 40, step: 0.5 });
+
+  const pcs = _section(wrap, "Clouds — painted", false);
+  const pc = ts.atmospherePaintedClouds;
+  _slider(pcs, pc, "coverage", { label: "Coverage", min: 0, max: 1, step: 0.01 });
+  _slider(pcs, pc, "windDeg", { label: "Wind dir", min: 0, max: 360, step: 1 });
+  _slider(pcs, pc, "windSpeed", { label: "Wind speed", min: 0, max: 40, step: 0.5 });
+
+  const ibl2 = _section(wrap, "Lighting (IBL)", false);
+  _button(ibl2, {
     title: "Rebake Sky IBL",
     onClick: () => app.rebuildProceduralSkyEnv?.(),
   });
@@ -1517,17 +1701,27 @@ export function buildWorldPanel(app) {
       let lastSkyMode = ts.skyMode;
       _dropdown(skyBody, ts, "skyMode", {
         label: "Mode",
+        /*
+         * "Physical" used to be this list's word for three's SkyMesh. With a second
+         * physically-modelled sky in the list that name stopped saying anything, so the
+         * LABELS now name the implementation. The saved values are untouched — an older
+         * project still loads its "physical" or "procedural" mode unchanged.
+         */
         options: {
-          Physical: "physical",
+          "Physical (three.js)": "physical",
           "Import HDR": "hdr",
-          Procedural: "procedural",
+          "Procedural (day/night)": "procedural",
+          "Atmosphere (scattering)": "atmosphere",
         },
         onChange: () => {
           const newMode = ts.skyMode;
           app.applySkyMode(newMode, lastSkyMode);
           lastSkyMode = newMode;
           syncSkyWidgets();
-          refreshLiveSliders();
+          // Guarded, like every other call site. Bare, it is not defined in this module:
+          // changing the sky mode threw here, which skipped BOTH the widget swap below and
+          // the pane refresh, so the panel kept showing the previous mode's controls.
+          app.ui?.refreshLiveSliders?.();
           refreshTp();
         },
       });
@@ -1637,6 +1831,12 @@ export function buildWorldPanel(app) {
       // Procedural (daynight-sky) dome controls — one wrapper toggled by mode.
       const procWrap = _buildProceduralSkyControls(skyBody, ts, app);
       skyModeWidgets.push({ el: procWrap, mode: "procedural" });
+
+      // The second dome (atmosphereSkyDome.js). Its wrapper is built at panel time like
+      // the others — that is DOM only; the dome itself and its ~0.7 s of LUT bakes are
+      // built lazily by the engine on the first switch into the mode.
+      const atmoWrap = _buildAtmosphereSkyControls(skyBody, ts, app);
+      skyModeWidgets.push({ el: atmoWrap, mode: "atmosphere" });
 
       function syncSkyWidgets() {
         for (const { el, mode } of skyModeWidgets) {

@@ -1615,6 +1615,343 @@ default, the level's, or its own (modular-road has its own sky, clouds, ocean).
      bake cost: four ~200 ms frames at boot (the cliffs), once; a warm load
      reads the 16 tiles from IndexedDB.
 
+## Sky — four modes, one owner (started 2026-09-18)
+
+The editor had three sky modes: `physical` (three's `SkyMesh`), `hdr` (an image,
+which also lights the world) and `procedural` (`v3/render/sky/dayNightSky.js`,
+our day/night dome). The racing game had a fourth of its own. This is the work
+to share ONE sky and then decide what to delete — the river treatment: compare
+first, port what is worth keeping, delete only on the user's go.
+
+**Both domes are already Hillaire, and that reframes the whole comparison.**
+`dayNightSky.js` runs a three-LUT chain (transmittance 256x64 → Ψms 32x32 →
+sky-view 256x256) — it is NOT a painted gradient. The game's sky is a SECOND,
+independent Hillaire implementation (sky-view 192x108) with different constants
+(atmosphere top 6460 km vs 6420 km), so the two do not agree at the same hour.
+That is the comparison, not a bug.
+
+110. **Step 1 — the sky moved into the engine.** DONE 2026-09-18. Four files out
+     of `games/modular-road-v3/` into `v3/render/sky/`: `modularRoadSky.js` →
+     `atmosphereSkyDome.js`, `modularRoadSkyAtmosphere.js` → `skyAtmosphere.js`,
+     `modularRoadMoon.js` → `moonSurface.js`, `modularRoadMilkyWay.js` →
+     `milkyWay.js`, plus the three noise primitives they bake from into
+     `v3/render/noise/periodicPerlin.js` (the game's 637-line cloud-noise file
+     keeps its volume bakes and re-exports the primitives, so nothing there
+     changed). `createModularRoadSky` → `createAtmosphereSky`; the dome mesh is
+     `AtmosphereSkyDome`. Added to `PUBLIC_ENGINE_MODULES`; the game and four lab
+     pages import from the new paths. `tools/shaderLint.mjs` and
+     `tools/lookRebaseTest.mjs` re-pointed (lookRebase uses its existing
+     `[path now, path at BASELINE]` form, same as the wet-road move).
+     Checked: boundary test green, 178/178 fast lane, production build clean,
+     the game boots with its sky drawing (60 FPS, 3.28 GPU ms, 29 draws).
+
+     WHY THE SPLIT IS THE POINT, independent of which dome wins the look:
+     `skyAtmosphere.js` hands out `skyRadiance(dir)` as a TSL node AND
+     `sunTransmittanceCPU()` — the same T-LUT integral on the CPU. That is what
+     lets a cloud deck take its key-light colour from the model the sky is drawn
+     with, so the two agree through the day instead of drifting apart as two
+     authored palettes. `dayNightSky.js` welds its LUT chain inside the dome,
+     where nothing else can read it.
+
+111. **Step 2 — a fourth editor mode, `atmosphere`.** DONE 2026-09-18.
+     `toolState.atmosphereSky` (in `LOOK_SLICES`, so a project saves it; an older
+     project without the block just takes the defaults — sparse merge). Built
+     LAZILY on the first switch: measured **565 ms** of LUT bakes and shader
+     compile, once per session, so nobody who never picks it pays at boot.
+     - ONE CLOCK for both domes. Time of day, latitude, day of year and moon age
+       stay in `proceduralSky` and are mirrored into the dome each frame, so
+       switching modes does not teleport the sun. Both files derive the sun from
+       those four numbers with the same formula (checked line for line) — leave
+       them to drift and the dome paints its disc in one place while the light,
+       the cascades and the flare use another, which reads as a shadow bug.
+       `autoAdvance` is forced off on the dome so the hour is not advanced twice.
+     - `skyMode === "procedural"` became `isDomeMode()` at ~12 sites: visibility,
+       the night moon-key branch, the time-of-day clock, the IBL re-bake, env
+       intensity, and the volumetric cloud deck's gate — the deck belongs to
+       EITHER dome, or the new mode could only ever be judged with a bare sky.
+     - THE IBL COMES FROM THE SKY YOU CAN SEE. `activeEnvSky()` picks the game's
+       registered sky, else whichever dome the mode shows; switching between the
+       two domes tears down the capture rig (it holds a CLONE of the mesh) and
+       re-bakes. Without that the world is lit and reflected by one sky while a
+       different one is drawn overhead — visible first on wet and metal.
+     - The dome's own IBL re-bake key had to be written from scratch: a stale key
+       freezes the environment at whatever it baked first, which looks like
+       nothing is wrong until you drag the time of day and the world does not
+       follow.
+     - Fog `matchSky`, the cloud deck's key/ambient and the ocean's sky
+       reflection all read `proceduralSky`'s authored day/night colour PAIRS,
+       which this dome does not have (its look is a function of the hour). Each
+       got an atmosphere branch fed from one per-frame evaluation. Deliberately
+       NOT `getColors()`, which re-runs the full `evaluateSky` that `update()`
+       just finished and allocates ~20 Colors doing it; the band weights are
+       exported and allocation-free. Colours are LINEAR out of the look, so
+       consumers `copy` and never `set` again.
+     - Panel: the dropdown LABELS now name the implementation — "Physical
+       (three.js)" / "Procedural (day/night)" / "Atmosphere (scattering)" —
+       because "Physical" stopped meaning anything with two physical skies in
+       the list. Saved values unchanged. Time-of-day controls factored into
+       `_buildTimeOfDayControls` and shared by both dome panels.
+     - THE FLOOR TRAP travelled with the dome and needed no new fix: below the
+       horizon the model draws the planet as a sun-lit grey ball. The dome does
+       not use it — downward rays sample the atmosphere AT the horizon (azimuth
+       kept, so a sunset floor glows warm sunward) then deepen into the zenith
+       blue. Two documented failed attempts: gating the mix to the authored nadir
+       (itself a pale blue-grey), and mirroring the horizon band down with a
+       gentle dim (stayed pale). Do NOT tint the model's ground albedo.
+
+     TWO BUGS IN THE FIRST CUT, both found by the user looking at it, both mine:
+     - **THE SKY WAS BLACK.** `createSkyAtmosphere` is handed IN to the dome, so
+       whoever owns it owns its clock — and nothing was calling
+       `atmosphere.update(sunDir, camY, moonDir)`, which is what bakes the
+       sky-view LUT. `skyRadiance` is a plain sampler read of that target, so it
+       returned black, and with `atmosphereMix: 1` that is the whole sky. It did
+       NOT look like a bake failure: the stars, the moon and the authored
+       gradient underneath all still drew correctly. The game has always had this
+       on its own line right after the dome's update; the editor just never got
+       it. Worth remembering as a shape: a handed-in resource with its own bake
+       step is a second thing to drive, not just a second thing to construct.
+     - **THE DOME DERIVED ITS OWN SUN.** Standalone it owns the clock; in the
+       editor it must not, because the sun IS the directional light and time of
+       day is only one of the things that writes it — dragging the sun sliders
+       moves the light and never touches the clock. Measured on a default
+       editor: clock at 21.27 while the light sat at +12° elevation, so the dome
+       would have painted night over a world lit for midday even once the LUTs
+       baked. `evaluateSky(P, override)` now takes `{ sunDir, moonDir }` and the
+       editor passes the light's direction and `_skyMoonDir`, exactly as it has
+       always done for dayNightSky. STILL ON THE CLOCK, and a known limit: the
+       dawn-vs-dusk warmth bias (`duskBias`) reads `timeOfDay`, so if you place
+       the sun by slider rather than by hour, twilight can pick the wrong one of
+       the two warm palettes. Fix that by making time of day two-way, if it ever
+       matters.
+
+     CLOUDS — the editor has one deck, the game has two, and only one of those
+     is a port gap:
+     - The volumetric deck (`dayNightCloudLayer`) is the editor's own and now
+       runs under BOTH domes (verified drawing under the atmosphere dome). It is
+       `enabled: false` by default (v2/app/config.js) and always has been, in
+       every sky mode — so "no clouds" in a fresh editor is the default, not the
+       port. World → Cloud layer (volumetric).
+     - The PAINTED deck is `games/modular-road-v3/modularRoadPaintedClouds.js`,
+       still game-owned; the editor passes `null` for it, which leaves its
+       texture fetches out of the compiled dome entirely. Bringing it over is a
+       further move: ~2000 lines, and it pulls `makeWorley` and
+       `normalizeChannel` out of the game's cloud-noise bakes, which deliberately
+       did NOT move (their frequency budget is tuned for a car flying through the
+       deck, not for an editor camera 2 km below a ceiling). NOT DONE — needs a
+       decision, because it is the game's cheap tier rather than a better deck.
+
+     FOUND AND FIXED ON THE WAY, pre-existing at HEAD: the World panel's sky-mode
+     dropdown called a bare `refreshLiveSliders()` that is not defined in that
+     module, so **every sky-mode change threw**, skipping both the widget swap
+     and the pane refresh. Now guarded like every other call site.
+
+112. **Step 2b — the CLOUDS came too ("stage A").** DONE 2026-09-18. Step 2
+     shipped the dome only, over the EDITOR's cloud deck — which is a different
+     deck (1900 m ceiling vs 260 m, tuned for a camera 2 km below rather than
+     one flying through) and off by default. The user's read of "the game's sky"
+     was the whole environment, and they were right: a sky and the clouds under
+     it are ONE look, not two features. Six more modules moved:
+     `modularRoadClouds.js` → `v3/render/clouds/volumetricCloudDeck.js`,
+     `modularRoadPaintedClouds.js` → `paintedCloudDeck.js`,
+     `modularRoadCloudNoise.js` → `cloudNoise.js` (+ its worker, which is loaded
+     by `new URL(..., import.meta.url)` so it had to land in the same folder),
+     `modularRoadCloudShadowMap.js` → `cloudShadowMap.js`,
+     `modularRoadSkyEnv.js` → `v3/render/sky/skyEnvProbe.js`. The last two are
+     LAB-ONLY — checked, `roadGame` imports neither — so they moved for tidiness,
+     not for parity.
+
+     THE ORCHESTRATION MOVED WITH THEM, which is the part that matters.
+     `syncCloudSkyColours` (~120 lines inside roadGame) is now
+     `v3/render/sky/cloudSkyLight.js` and BOTH the game and the editor use it —
+     the game's local copy is gone, not duplicated. It is what makes the deck
+     belong to the sky: key light is the real slant-path transmittance to the
+     deck's mid-altitude (not the sky's disc colour, which floods every cloud
+     flat salmon at golden hour), the moon takes the light slot once the sun is
+     truly down, ambient leans off the horizon BAND toward the dome at twilight,
+     and the aerial target is the horizon the clouds sit on. Every constant in
+     there was arrived at by looking at a wrong frame; the comments say which.
+
+     Editor state: `atmosphereSky.cloudTier` ("volumetric" | "painted" | "off",
+     the game's three tiers), `atmosphereClouds` and `atmospherePaintedClouds`,
+     all in LOOK_SLICES. Seeded from the GAME's art direction, not the module
+     defaults — coverage 0.55 rather than 0.9, which is the difference between
+     broken cumulus and a solid overcast sheet. The marched deck goes through
+     the same `renderWithClouds` composite a registered game deck does, but a
+     game's own system still wins. Checked: game boots unchanged (3.20 ms, 29
+     draws, same as before the orchestration swap), editor draws the deck at
+     1.93 ms GPU / 8 draws / 60 fps, all three tiers switch and switch back.
+
+     TWO TRAPS, both cost time:
+     - `createModularRoadClouds` does NOT parent its own mesh — it hands one
+       back and the caller adds it (roadGame:770 always did). Miss that and
+       everything constructs, no error is thrown, and nothing draws.
+     - The tier switch had a `if (tier === toolState...cloudTier) return;`
+       guard, and the panel dropdown is BOUND to that field — it writes the new
+       value and THEN calls the handler, so the guard always found them equal
+       and the tier silently never changed. Compare against what was actually
+       BUILT (`_atmoBuiltTier`), never against the bound state.
+
+     STILL NOT THERE (stage B): weather, aerial haze, world rain, lens rain —
+     `modularRoadWeather.js`, `modularRoadAerial.js`, `modularRoadWorldRain.js`,
+     `modularRoadRainLens.js`, ~2150 lines. Note the boundary agreed with the
+     user: the weather chain also drives ROAD WETNESS and the car's grip, and
+     that half is gameplay and stays in the game.
+
+113. **Step 2c — the world lit BY the sky, and the flare.** DONE 2026-09-18.
+     The user looked at the two side by side and said the editor was darker, the
+     sun different, the flare different. All three were real, and the first was
+     a piece of the sky system nobody had inventoried.
+
+     MEASURED at the same moment, game vs editor: exposure 0.9969 / 0.70, env
+     0.4466 / 0.20, sun 2.5771 / 2.20, ambient 0.5955 / 0.40. Every game value a
+     computed fraction, every editor value a round default — which is the tell
+     that one end was being driven and the other was not. The game has
+     `syncWorldLightToSky`; the editor had nothing, so it drew the game's sky
+     over a world lit by static defaults.
+     - Now `v3/render/sky/skyWorldLight.js`, shared: the game's copy is gone.
+       Key colour is the sun's own transmittance reduced to CHROMATICITY (the
+       engine owns the brightness; feeding the full value dims twice and loses
+       the sunset), floored at the horizon and handed to the moon below it —
+       skip that and the world is lit by saturated sunset orange from dusk till
+       dawn. Ambient is the sky's zenith and haze, over a night floor, because
+       the sky's honest night radiance is #010104 and that renders silhouettes.
+       Exposure and env strength ride the same daylight curve.
+     - It COMPUTES, it does not apply: key-cached on solar elevation, so with a
+       frozen clock it runs once and returns null forever. That is right for the
+       sky and wrong for a lightning flash, which is why the game keeps its own
+       `applyWorldLight` on top. (The first version of that, in the game, put
+       the flash inside the cached function and it never fired once.)
+     - The reference (noon: dir 2.6 / hemi 0.6 / exposure 1.0 / env 0.45) is the
+       racing game's, and the game wrote down why: the editor's own 0.2 env /
+       0.4 hemi is "why the scene reads dark — almost nothing fills the shadows".
+       Held PER MODE, not written into `toolState.light`, so choosing this sky
+       cannot relight the other three or a project saved under them; leaving the
+       mode restores the previous lighting exactly (verified).
+     - Flare: `SKY_LENS_FLARE_LOOK` moved to `v3/render/sky/skyLensFlareLook.js`
+       and is applied ONCE on first entry to the mode (never re-applied, so
+       anything dialled afterwards stays), leaving `enabled` alone — arriving in
+       a sky mode is no reason to switch an effect on for someone. Per frame the
+       flare's SIZE follows `sunSizeDeg / 3.4` and its COLOUR is the sky's live
+       `sunColor` (already linear — converting again is the 5-10x error that
+       stays self-consistent and hides).
+
+     VERIFIED by matching numbers, not by eye: editor and game now agree to four
+     decimals at 12 h, 19.2 h and 22 h — e.g. at 19.2 h both read exposure
+     0.7731, env 0.2507, sun 0.8979, ambient 0.3343, key #ffb15a. Editor 61 fps,
+     1.67 ms GPU, 8 draws.
+
+     NOT A BUG, for the record: the "different sun" was just a different clock —
+     game 14.2 h, editor 14.67 h. The editor's light was exactly consistent with
+     its own hour (14.67 h at lat 45 / doy 172 → 51.04° computed, 51.07° actual).
+
+     OPEN QUESTION the user raised: whether the EDITOR's global light defaults
+     (2.2 / 0.4 / 0.2) should become the game's (2.6 / 0.6 / 0.45). It would make
+     every mode brighter, and it would change how everything tuned against the
+     current defaults reads — grass, terrain, cliffs and rocks were all tuned in
+     the days before this. Needs the user's eyes, separately from the sky work.
+
+114. **Step 2d — the editor BOOTS into it.** DONE 2026-09-18, at the user's ask:
+     `skyMode: "atmosphere"` with `cloudTier: "painted"`, the same pair the
+     racing game ships. Painted is the game's boot tier for the reason it gives —
+     "the fallback became the shipping look": a marched slab with real thickness
+     and self-occlusion, curving to a horizon, casting ground shadows, with a
+     second cirrus layer, at ~0.29 ms against the volumetric deck's ~1.07 ms.
+     Volumetric is one click away and is still the one you can fly through.
+     A saved project keeps whatever it saved — `skyMode` rides in the look block.
+     Editor measured after: 60 fps, 2.91 ms GPU, 5 draws.
+
+     THE PAINTED DECK STILL NEEDS THE COMPOSITE SLOT, which is not obvious
+     because you can already see it: the deck itself is drawn by the sky dome,
+     and its `prepareFrame`/`compositeOntoLinearHDR` exist only to cast its
+     GROUND SHADOWS and god rays. Route only the volumetric deck and you get
+     painted clouds with no shadow under them.
+
+     THREE BUGS THAT ONLY A DEFAULT COULD HAVE FOUND — all three were latent the
+     whole time, hidden behind `skyMode === "atmosphere"` short-circuiting:
+     - `driveFogSun()` runs during setup, ABOVE where the atmosphere state is
+       declared, and reads `_atmoColors`. Booting into the mode turned that into
+       a temporal-dead-zone ReferenceError and the editor failed to start.
+       Scratch hoisted to the top with the rest.
+     - The first `applySkyMode` sat above the lens flares and now drives the sky
+       once, which touches the flare. Same TDZ, same result. Moved below them.
+     - THE GAME GOT A SECOND SKY. `createWorldToolState` is shared, so the new
+       default applied to games too — and modular-road hides the engine's dome at
+       boot, so the engine built a whole atmosphere dome and painted deck, paid
+       the LUT bakes and the shader compile, and hid it. Caught by counting
+       meshes: the game's scene had TWO `AtmosphereSkyDome`s. The default is now
+       EDITOR-ONLY (`createWorldToolState({ editor, skyMode })`), and a game can
+       opt in with `startV3App({ skyMode: "atmosphere" })`. Verified after: the
+       game is back to one dome and its own reference lighting (1.0 / 2.6 / 0.6).
+
+115. **Step 2e — the editor and the game now boot on the SAME sky.** DONE
+     2026-09-18. Diffed every default that feeds the sky, live, in both. All of
+     them already agreed (latitude 45, day 172, moon age 0.55, cloud base 260 /
+     thickness 220, atmosphereMix 1, cloudSea 0, sun 3.4° / disc 11 / aureole
+     0.18) except three:
+     - **The hour.** v2's 9.5 vs the game's `GAME_TIME_OF_DAY` 10.5. The clock is
+       shared by both domes, so it moved to 10.5 (and `daySpeed` to the module's
+       0.4, so they advance together).
+     - **Painted coverage**, 0.46 vs 0.60. The game never authors 0.60 — it seeds
+       the painted deck from the VOLUMETRIC deck (0.55 + 0.05) so that switching
+       tier changes the cost and not the art direction. That rule only exists
+       because the game switches at runtime; the editor boots straight into
+       painted and takes the value the rule produces. Measured live to be sure.
+     - **THE SUN WAS NOT WHERE THE CLOCK SAID.** The hour and the sun's angles
+       are independent state: `setTimeOfDay` writes the angles from the hour, and
+       nothing called it at startup. A fresh editor booted with a clock reading
+       10.5 and a light at the v2 default 43° / 135° — which is 10.5 h nowhere on
+       Earth (latitude 45, day 172 → 61.7°). It went unnoticed while the domes
+       were driven purely by the light, because their look never consulted the
+       clock; the atmosphere dome's dawn/dusk bias does. Now reconciled ONCE at
+       boot, for a dome mode only — inside `applySkyMode` it would throw away
+       hand-placed angles on every mode change, and a loaded project already
+       reconciles the same way at the end of `importLook`. This also closes the
+       `duskBias`-reads-a-stale-clock limit noted in 111.
+
+     VERIFIED by reading both at boot: timeOfDay 10.5, sun 61.719° / 42.178°,
+     exposure 1, env 0.45, dir 2.6, hemi 0.6, key #fff5e6, painted coverage
+     0.6000000000000001 — identical on every value.
+
+     WHAT STILL WILL NOT MATCH, and it is bigger than any of the above: CAMERA
+     ALTITUDE. The dome blends its look across three altitude bands (below /
+     inside / above), switching between ~180–280 m and ~450–580 m. The game's
+     chase camera is a few metres up and always "below"; the editor's orbit
+     camera starts at 300 m, already inside the blend. Same sky, same hour,
+     genuinely different colours — and no default can fix it. For a real
+     side-by-side, put the editor camera near the ground. (Then weather and
+     aerial perspective, which are stage B.)
+
+116. **Step 3 — judge it, then decide deletions.** OPEN — needs the user's eyes.
+     MEASURED 2026-09-18, editor at 1347x825, camera aimed so the sky fills most
+     of the frame, 5 interleaved rounds of 100 frames each (GPU timestamps
+     quantise at 65.5 µs; frame means dither past it):
+
+     | arm | GPU ms | runs |
+     |---|---|---|
+     | procedural, as shipped (cirrus ON) | **0.582** | .592 .579 .579 .583 .579 |
+     | procedural, cirrus OFF | **0.277** | .269 .276 .279 .277 .282 |
+     | atmosphere | **0.493** | .495 .493 .490 .491 .496 |
+
+     THE RACING GAME'S A/B WAS MEASURING THE CIRRUS, NOT THE MODEL. That result
+     ("physical scattering beats the dome AND is ~0.5 ms cheaper") compared two
+     whole DOMES, and `dayNightSky.js` ships `cloudEnabled: true` — analytic
+     painted cirrus streaks in the same shader, which is also what the A/B named
+     as the fakest thing in the frame. Turn the cirrus off and the engine's dome
+     is the CHEAPEST of the three by 0.216 ms, not the dearest. The atmosphere
+     dome is 0.089 ms cheaper than procedural-as-shipped and that is the whole
+     of its cost win.
+     So the look question is still open and is now the only question. Left to
+     judge, with the user's eyes, in the user's own worlds: day, night, twilight,
+     and a high camera; and the honest arm is procedural WITH CIRRUS OFF.
+     Nothing deleted, nothing chosen.
+
+     KNOWN WART CARRIED OVER, not fixed: the dome's `cloudBase + cloudThickness`
+     (260 + 220 = 480 m) drives its below/inside/above palette AND its fake
+     "cloud sea", neither of which matches any real deck. In an editor you fly
+     past 480 m routinely. The mode ships `cloudSea: 0` (as the game does) so the
+     sea never appears; the band-weight mismatch is still there and would want a
+     real number before this dome could be anyone's default.
+
 ## Performance
 
 Nothing left that is felt: the game is vsync-locked with ~4× GPU headroom.

@@ -147,7 +147,7 @@ console.log(`rebased literals (${BASELINE} vs working tree)`);
 // [path now, path at BASELINE] — the wet model moved into the engine (was ${GAME}/modularRoadWet.js).
 const FILES = [
   [`${GAME}/modularRoadMaterial.js`],
-  [`${GAME}/modularRoadSky.js`],
+  ["v3/render/sky/atmosphereSkyDome.js", `${GAME}/modularRoadSky.js`],
   [`${GAME}/modularRoadTireMarks.js`],
   [`${GAME}/modularRoadProps.js`],
   ["v3/render/roads/wetRoad.js", `${GAME}/modularRoadWet.js`],

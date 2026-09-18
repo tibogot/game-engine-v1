@@ -36,7 +36,7 @@
  * the edge squashes the way a real one does.
  */
 import * as THREE from "three/webgpu";
-import { seededRandom, makePeriodicPerlin, perlinFbm } from "./modularRoadCloudNoise.js";
+import { seededRandom, makePeriodicPerlin, perlinFbm } from "../noise/periodicPerlin.js";
 
 /** Disc texture resolution. The Moon is ~0.5° wide, so even oversized it covers a few
  *  hundred pixels at most — 256² is already more than the screen can show. */

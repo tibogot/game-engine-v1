@@ -921,7 +921,9 @@ export async function startV3App(opts = {}) {
     syncPlayImmersiveButtonLabel();
   }
 
-  const worldToolState = createWorldToolState();
+  // `editor` picks the default SKY MODE only — the editor opens in the atmosphere sky,
+  // a game keeps the old default unless it asks. See worldState.js.
+  const worldToolState = createWorldToolState({ editor: isEditor, skyMode: opts.skyMode });
   // The ground-base values were resolved before the terrain compiled (see the
   // block above createTerrainLOD); the panel edits this slice, so it has to hold
   // the same numbers the uniforms already carry.
@@ -1150,6 +1152,7 @@ export async function startV3App(opts = {}) {
         worldEnv?.driveFogSun();
       },
       applySkyMode: (mode, prev) => worldEnv?.applySkyMode(mode, prev),
+      setAtmosphereCloudTier: (tier) => worldEnv?.setAtmosphereCloudTier(tier),
       importHdr: () => worldEnv?.importHdr(),
       setTimeOfDay: (t) => worldEnv?.setTimeOfDay(t),
       rebuildProceduralSkyEnv: () => worldEnv?.rebuildProceduralSkyEnv(),

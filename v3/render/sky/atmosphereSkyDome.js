@@ -1,14 +1,25 @@
 /**
- * Game-owned sky for modular-road — independent of v3's dayNightSky.
+ * Sky dome built on the physical atmosphere — the editor's "Atmosphere" sky mode.
  *
  * Time of day is the master: an astronomical sun (latitude + day-of-year + hour)
  * picks among four authored looks (night / twilight / golden / day), then altitude
  * blends below / inside / above the cloud deck. The nadir is always haze, never a
  * pit. Dawn vs dusk is a warmth bias on the twilight look, not a fifth sky.
  *
- * Not wired into the game. sky-lab.html is the harness.
+ * The authored looks are not the sky you see — `skyAtmosphere.js` is crossfaded in over
+ * the gradient (`atmosphereMix`, 1 by default at both entry points). What the authored
+ * layer is still FOR: the model is correctly black once the sun is down, so everything
+ * it does not simulate — stars, the Milky Way, the moon's disc and surface, the floor
+ * below the horizon — comes from here. See the atmosphere swap inside `skyColorNode`.
  *
- * @see sky-lab.html
+ * ENGINE-OWNED since 2026-09-18. It was `games/modular-road-v3/modularRoadSky.js`, where
+ * it won its A/B against the engine's dome and became that game's boot default. It moved
+ * so the editor and every game share one sky; the racing game now imports it from here
+ * and is otherwise unchanged. The engine's other dome, `dayNightSky.js`, is still the
+ * "Procedural" mode and the two are being compared — see v3/AUDIT.md, "Sky".
+ *
+ * @see v3/render/sky/skyAtmosphere.js — the Hillaire model this draws with
+ * @see games/modular-road-v3/sky-lab.html — the time-of-day / altitude harness
  */
 import * as THREE from "three/webgpu";
 import {
@@ -18,10 +29,10 @@ import {
   sin, fract, floor, abs, length, step, saturate, atan,
 } from "three/tsl";
 
-import { sunTransmittanceCPU } from "./modularRoadSkyAtmosphere.js";
-import { createMoonSurface } from "./modularRoadMoon.js";
-import { createMilkyWay, galacticBasis, BAND_SIN } from "./modularRoadMilkyWay.js";
-import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
+import { sunTransmittanceCPU } from "./skyAtmosphere.js";
+import { createMoonSurface } from "./moonSurface.js";
+import { createMilkyWay, galacticBasis, BAND_SIN } from "./milkyWay.js";
+import { applyBloomMRT } from "../bloomMRT.js";
 
 const SKY_RADIUS = 4000;
 /** Scratch for the painted deck's key-light integrals — reused, allocates nothing. */
@@ -330,9 +341,26 @@ function twilightPair(dawnLook, duskLook, duskBias, key, band, out) {
  * Evaluate the full sky at the current clock / altitude.
  * Colour fields are linear. Shared objects — copy if you retain them.
  */
-export function evaluateSky(P = SKY_DEFAULTS) {
-  sunDirFromTime(P, _sunDir);
-  moonDirFromTime(P, _moonDir);
+/**
+ * @param {object} [P] the sky params
+ * @param {object} [override] optional `{ sunDir, moonDir }` — use THESE directions instead
+ *   of deriving them from `P.timeOfDay`.
+ *
+ * WHY AN OVERRIDE EXISTS. Standalone (the game, the labs) this dome owns the clock and
+ * derives its own sun. Inside the v3 editor it does not: the sun is the DIRECTIONAL LIGHT,
+ * placed from `light.sunAzimuth/sunElevation`, and time of day is only one of the things
+ * that can write those — dragging the sun sliders moves the light without touching the
+ * clock. The engine's other dome (dayNightSky.js) has always been handed `sunDir` for
+ * exactly this reason.
+ *
+ * Measured the day it was missed: the editor's clock sat at 21.27 while the light was at
+ * +12° elevation, so the sky drew a night while the world was lit for day.
+ */
+export function evaluateSky(P = SKY_DEFAULTS, override = null) {
+  if (override?.sunDir) _sunDir.copy(override.sunDir);
+  else sunDirFromTime(P, _sunDir);
+  if (override?.moonDir) _moonDir.copy(override.moonDir);
+  else moonDirFromTime(P, _moonDir);
   const elDeg = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(_sunDir.y, -1, 1)));
   const azDeg = (THREE.MathUtils.radToDeg(Math.atan2(_sunDir.z, _sunDir.x)) + 360) % 360;
   const w = skyLookWeights(elDeg);
@@ -454,7 +482,7 @@ export function skyColorsAt(camY, P = SKY_DEFAULTS) {
  *   tier. Handed in rather than built here for the same reason the atmosphere is: it
  *   costs a bake, and a caller running the volumetric deck should never pay for it.
  */
-export function createModularRoadSky({ params, atmosphere, paintedClouds } = {}) {
+export function createAtmosphereSky({ params, atmosphere, paintedClouds } = {}) {
   const P = { ...SKY_DEFAULTS, ...params };
 
   const uCamY = uniform(40);
@@ -495,7 +523,7 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
    * the forward-scatter term puts a real glow on thin cloud crossing in front of it.
    */
   const uDeckLightDir = uniform(new THREE.Vector3(0.4, 0.8, 0.3).normalize());
-  /** Baked near-side albedo — see modularRoadMoon.js. ~40 ms once, at sky construction. */
+  /** Baked near-side albedo — see moonSurface.js. ~40 ms once, at sky construction. */
   const moonSurface = createMoonSurface({ seed: P.moonSeed ?? 7919 });
   const moonTex = texture(moonSurface.map);
   /** Angular RADIUS in radians, for the disc-space projection. */
@@ -547,7 +575,7 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
   const uStarDensity = uniform(P.starDensity);
   const uStarBar = uniform(P.starBar);
   const uStarSize = uniform(P.starSize);
-  /** Baked galactic band — see modularRoadMilkyWay.js. One fetch, no per-pixel noise. */
+  /** Baked galactic band — see milkyWay.js. One fetch, no per-pixel noise. */
   const milkyWay = createMilkyWay({ seed: P.milkyWaySeed ?? 20287 });
   const milkyTex = texture(milkyWay.map);
   const _gal = galacticBasis();
@@ -603,7 +631,7 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
      *
      * Sampled in galactic coordinates: latitude is one dot product against the pole,
      * longitude one atan of the two in-plane components. That is the whole projection —
-     * the structure itself was baked (see modularRoadMilkyWay.js), so what happens here
+     * the structure itself was baked (see milkyWay.js), so what happens here
      * per pixel is a projection and a fetch, not noise.
      *
      * It lives inside starField rather than beside it because both want the same night
@@ -1066,7 +1094,7 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(SKY_RADIUS, 32, 16), material);
   mesh.renderOrder = -2;
   mesh.frustumCulled = false;
-  mesh.name = "ModularRoadSkyDome";
+  mesh.name = "AtmosphereSkyDome";
 
   let _timeSec = 0;
   let _lastLook = null;
@@ -1166,7 +1194,9 @@ export function createModularRoadSky({ params, atmosphere, paintedClouds } = {})
     const cam = frame.camera;
     const y = cam?.position.y ?? 0;
     if (cam) mesh.position.copy(cam.position);
-    const look = evaluateSky(P);
+    // `frame` may carry { sunDir, moonDir } — the host owns the sun (the v3 editor does;
+    // the game and the labs do not, and pass neither). See evaluateSky.
+    const look = evaluateSky(P, frame);
     _lastLook = look;
     pushLook(y, look);
     paintedClouds?.update(dt, cam?.position, look.sunDir, uCloudKey.value);

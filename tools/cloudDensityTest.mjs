@@ -8,7 +8,7 @@
  * bugs were found.
  *
  * The density function itself is NOT reimplemented here: it is `densityAtCPU` from
- * modularRoadCloudNoise.js, the same one the game uses to answer "is the car in a cloud".
+ * v3/render/clouds/cloudNoise.js, the same one the game uses to answer "is the car in a cloud".
  * One CPU mirror of the shader, one place for it to drift from.
  *
  * Run: node tools/cloudDensityTest.mjs
@@ -16,7 +16,7 @@
 import { pathToFileURL } from "node:url";
 import {
   bakeBaseVolume, bakeDetailVolume, bakeWeatherMap, densityAtCPU,
-} from "../games/modular-road-v3/modularRoadCloudNoise.js";
+} from "../v3/render/clouds/cloudNoise.js";
 
 const NO_WIND = { x: 0, y: 0, z: 0 };
 

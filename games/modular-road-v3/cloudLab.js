@@ -1,5 +1,5 @@
 /**
- * Cloud lab — tuning + measurement harness for `modularRoadClouds.js`.
+ * Cloud lab — tuning + measurement harness for `v3/render/clouds/volumetricCloudDeck.js`.
  *
  * Exists because the thing that has to be judged is a fly-through, and the game is a slow
  * way to get a camera inside a cloud. Here the camera is free, the four viewpoints that
@@ -12,7 +12,7 @@
  */
 import * as THREE from "three/webgpu";
 import { Fn, vec3, vec4, positionWorld, uniform, mix, smoothstep, normalize, dot, max, pow } from "three/tsl";
-import { createModularRoadClouds, CLOUD_LAYER, CLOUD_DEFAULTS } from "./modularRoadClouds.js";
+import { createModularRoadClouds, CLOUD_LAYER, CLOUD_DEFAULTS } from "../../v3/render/clouds/volumetricCloudDeck.js";
 
 /** Camera presets — the four cases that actually decide whether this works. */
 const VIEWPOINTS = {

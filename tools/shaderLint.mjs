@@ -31,8 +31,8 @@ const SHADER_MODULES = [
   "games/modular-road-v3/modularRoadDriftSmokeFlipbook.js",
   "games/modular-road-v3/modularRoadAerial.js",
   "games/modular-road-v3/modularRoadTireMarks.js",
-  "games/modular-road-v3/modularRoadSky.js",
-  "games/modular-road-v3/modularRoadClouds.js",
+  "v3/render/sky/atmosphereSkyDome.js",
+  "v3/render/clouds/volumetricCloudDeck.js",
   // Builds TSL graphs too, as of the tail-light housing mask — see
   // makeTailHousingMaterial. Added here per the rule in the header: a shader
   // module that is not listed is not checked, and what it can ship is a black
