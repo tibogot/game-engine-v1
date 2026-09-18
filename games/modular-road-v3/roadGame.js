@@ -8040,8 +8040,14 @@ ${e.message}`);
     // the one place the player is looking hardest. Nothing stops being solid.
     // The CAR moves instead, onto the middle of the nearest carriageway —
     // clear of the kerbs the lamps and trees stand on, and of the parking lane.
-    if (city && cityWanted && !terrainOn && city.streetSpawnNear) {
-      const st = city.streetSpawnNear(0, 0);
+    //
+    // `carSpawnNear`, not `streetSpawnNear`: the nearest carriageway to the
+    // origin is the one the UNDERPASS runs down, so the plain snap put the car
+    // in the tunnel — at street level over a 6.5 m trench, wedged against its
+    // wall thirty metres later. The car version steps to the first street that
+    // is really ground for a run in both directions.
+    if (city && cityWanted && !terrainOn && (city.carSpawnNear || city.streetSpawnNear)) {
+      const st = (city.carSpawnNear ?? city.streetSpawnNear).call(city, 0, 0);
       return { x: st.x, y: groundBaseY(st.x, st.z), z: st.z, yaw: st.yaw };
     }
     return { x: 0, y: groundBaseY(0, 0), z: 0, yaw: 0 };
@@ -8887,6 +8893,26 @@ ${e.message}`);
    * the dev panel and switches the city on. The city then compiles its whole
    * pipeline set under the player, which is the failure the warm-up exists to
    * prevent, arriving through the warm-up itself.
+   *
+   * ── AND IT HAS TO BE AWAITABLE ────────────────────────────────────────────
+   *
+   * Queueing alone still lost the race, because the queued call RETURNED
+   * IMMEDIATELY. `toggleMode` awaits its "Preparing race…" warm-up and starts
+   * the race on the other side of that await, so a B pressed while the city
+   * was still warming resolved instantly: `beginRace()` fired, the cover came
+   * down, and the real warm-up ran afterwards — under the player, which is the
+   * exact failure this whole system exists to prevent. It is intermittent by
+   * nature, because it only happens when the two overlap.
+   *
+   * MEASURED: switching the city on while the boot warm-up was still running
+   * took 58.7 s to clear; the same switch after it had finished took 16.8 s.
+   * The overlap is real and it is expensive, so the caller must be able to
+   * wait for the run its request actually turned into.
+   *
+   * So the queue slot carries a promise. Everyone who asks while a warm-up is
+   * running gets the SAME promise, and it resolves when the queued run — not
+   * the running one — has finished. Coalesced deliberately: two requests during
+   * one warm-up want one warm-up afterwards, not two.
    */
   let warmQueued = null;
   /**
@@ -8941,7 +8967,16 @@ ${e.message}`);
   const WARM_DRIVE_STEP_M = 45;
 
   async function warmUpTrackPipelines({ label = "Preparing track…" } = {}) {
-    if (warmingUp) { warmQueued = { label }; return; }
+    if (warmingUp) {
+      if (warmQueued) {
+        warmQueued.label = label;   // latest caller names the cover
+      } else {
+        let resolve;
+        const promise = new Promise((res) => { resolve = res; });
+        warmQueued = { label, promise, resolve };
+      }
+      return warmQueued.promise;
+    }
     const pieces = builder.pieces ?? [];
     /*
      * A TRACK IS NOT THE ONLY THING WORTH WARMING.
@@ -9256,13 +9291,64 @@ ${e.message}`);
        * resident — and it is the only one that reproduces what the player is
        * about to do.
        */
-      if (cityToWarm && vehicleRef?.body?.pos) {
-        const st = city.streetSpawnNear?.(vehicleRef.body.pos.x, vehicleRef.body.pos.z);
+      if (cityToWarm) {
+        /*
+         * ANCHORED ON THE SPAWN, NOT ON THE CAR'S CURRENT BODY.
+         *
+         * This used to read `vehicleRef.body.pos`, and on the B path that is
+         * right by accident — `toggleMode` calls `respawn()` immediately before
+         * awaiting this, so the body IS the resolved spawn. On the path that
+         * actually builds the city it is wrong: `syncCity` warms in BUILD mode,
+         * where the body is wherever it was last left (the boot pose, or the
+         * end of the previous drive), and nothing respawns it on the way in.
+         *
+         * MEASURED, city on + terrain off, from a fresh boot. The body sits at
+         * z = -4, four metres off the origin, which is enough to flip
+         * `streetSpawnNear`'s nearer-axis test: the warm-up drove the street at
+         * z = -17 running along X, and B then spawned the car at x = -17 on the
+         * street running along Z — a PERPENDICULAR street it had never drawn.
+         * The race warm-up picked up the bill: 8.2 s and 31 programs that this
+         * pass was supposed to have covered already.
+         *
+         * `resolveSpawn` is the same source `respawn()` uses, so the two agree
+         * by construction now rather than by luck. Feeding a point that is
+         * already a street centre back through `streetSpawnNear` is idempotent,
+         * so the city case costs nothing; a track spawn still snaps to whatever
+         * street it stands on, exactly as the body position used to.
+         */
+        const sp = resolveSpawn();
+        // The same clear-road rule the spawn itself uses, so the warm-up cannot
+        // end up driving a trench the car will never be put on.
+        const st = (city.carSpawnNear ?? city.streetSpawnNear)?.call(city, sp.x, sp.z);
         if (st) {
-          // Along the street, both ways, so the run is not one-directional.
-          const ax = Math.sin(st.yaw), az = Math.cos(st.yaw);
+          /*
+           * Along the street, both ways, so the run is not one-directional.
+           *
+           * ── AND FACING THE WAY THE CAR WILL ─────────────────────────────────
+           *
+           * NEGATED, and that is not a tidy-up. A spawn `yaw` is stored as the
+           * car's heading MINUS π — the convention `respawn` undoes with its
+           * `setFromAxisAngle(Y, s.yaw + Math.PI)`, and the same one
+           * updateSpawnMarker's `+ Math.PI` exists for. Reading it straight as a
+           * bearing therefore points the WRONG WAY DOWN THE STREET: measured at
+           * the spawn, the warm camera looked along (0, +1) while the car faced
+           * (0, -1) — a dot of exactly -1.
+           *
+           * The positions were fine either way (the sweep is symmetric about
+           * d = 0, so it covers the same corridor mirrored), which is why this
+           * warmed well enough to hide. What it got wrong is every VIEW in it:
+           * the whole pass looked at the backs of the buildings the player is
+           * about to drive towards, and the final pose — the one that now parks
+           * the editor camera on the spawn — showed the street in reverse.
+           * Spotted from the game, not from the code.
+           */
+          const ax = -Math.sin(st.yaw), az = -Math.cos(st.yaw);
           const gy = city.params?.groundY ?? 0;
           if (!_warmPose) _warmPose = { pos: new THREE.Vector3(), at: new THREE.Vector3() };
+          const poseAt = (d) => {
+            _warmPose.pos.set(st.x + ax * d, gy + 2.4, st.z + az * d);
+            _warmPose.at.set(st.x + ax * (d + 60), gy + 1.6, st.z + az * (d + 60));
+          };
           app.addPreRenderHook?.(warmDriveHook);
           try {
             const driveTotal = WARM_DRIVE_STEPS * 2 + 1;
@@ -9275,10 +9361,40 @@ ${e.message}`);
                */
               coverProgress(0.30 + 0.55 * ((i + WARM_DRIVE_STEPS) / driveTotal),
                 `city shaders  ${i + WARM_DRIVE_STEPS + 1}/${driveTotal}`);
-              const d = i * WARM_DRIVE_STEP_M;
-              _warmPose.pos.set(st.x + ax * d, gy + 2.4, st.z + az * d);
-              _warmPose.at.set(st.x + ax * (d + 60), gy + 1.6, st.z + az * (d + 60));
+              poseAt(i * WARM_DRIVE_STEP_M);
               await new Promise((res) => requestAnimationFrame(() => res()));
+            }
+            /*
+             * AND FINISH WHERE THE CAR WILL START.
+             *
+             * The loop ends at +720 m, and the hook is the REAL camera — so
+             * without this the pass left the editor's view parked a kilometre
+             * down the street (MEASURED: camera at x = 720 after switching the
+             * city on from the origin), and left the city's LOD configured for
+             * there too. One more frame at d = 0 costs nothing, hands the LOD
+             * back the set the player is about to see, and puts the view on the
+             * street the car will spawn on — which is what the street-level
+             * camera was ALWAYS meant to be showing.
+             */
+            poseAt(0);
+            await new Promise((res) => requestAnimationFrame(() => res()));
+            /*
+             * AND THE ORBIT TARGET COMES WITH IT, or the view points at the sky.
+             *
+             * The hook writes `camera.position` directly; `controls.target` is
+             * whatever it was before — on a fresh boot, (0, 40, 0), framing the
+             * build anchor from 300 m up. The moment the orbit controls take
+             * back over they aim the camera from street level at a point forty
+             * metres in the air, so switching the city on left the editor
+             * looking straight up. Reported from the game; it is not on purpose.
+             *
+             * Build mode only in practice: in drive mode the chase rig
+             * overwrites both every frame (see the `controls.target.copy` in
+             * frame()), so this cannot fight it.
+             */
+            if (controls?.target) {
+              controls.target.copy(_warmPose.at);
+              controls.update?.();
             }
           } finally {
             app.removePreRenderHook?.(warmDriveHook);
@@ -9327,10 +9443,18 @@ ${e.message}`);
       warmingUp = false;
       // Anything asked for while this one was running runs NOW, rather than
       // being forgotten. Scheduled rather than awaited: this is a `finally`.
+      // Its promise is settled when that run finishes, so whoever queued it is
+      // released at the right moment instead of at this one — see warmQueued.
+      // `resolve`, never `reject`: the callers `await` this without a catch,
+      // and a warm-up is an optimisation that must never take the race down.
       if (warmQueued) {
         const next = warmQueued;
         warmQueued = null;
-        setTimeout(() => { warmUpTrackPipelines(next).catch(() => {}); }, 0);
+        setTimeout(() => {
+          warmUpTrackPipelines({ label: next.label })
+            .catch(() => {})
+            .then(() => next.resolve());
+        }, 0);
       }
       try {
         if (forcedCityMeshes) { for (const [m, c] of forcedCityMeshes) m.count = c; }

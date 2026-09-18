@@ -507,6 +507,81 @@ export function createModularRoadCity({
   /** The whole run, for keeping street furniture off it. */
   let underUnder = null;
   let underRoof = null;
+
+  /**
+   * The street plane's height at (x, z), or NaN where there is no street.
+   *
+   * A function rather than only a method on the handle, because `streetSpawnNear`
+   * has to ask the same question — "is there actually ground here?" — and the
+   * answer has to be the SAME one the vehicle gets, not a second opinion that
+   * can drift away from it. `streetHeightAt` is now a one-line delegate.
+   */
+  /**
+   * A street-centre pose near (x, z), `step` whole blocks off the nearest one.
+   *
+   * The shared half of `streetSpawnNear` and `carSpawnNear`: one owns "where is
+   * the road", the other "where can the car stand", and both need the same band
+   * arithmetic. `axis` picks which of the two crossing streets to ride —
+   * `null` takes the NEARER one (the original behaviour, and what makes the
+   * car land on the length of a street rather than in the middle of a
+   * junction); `"other"` takes the perpendicular one.
+   *
+   * @returns {{x:number, z:number, yaw:number}} yaw points ALONG the street.
+   */
+  function streetBand(x, z, step = 0, axis = null) {
+    const pitch = (P.blockLots + P.streetLots) * P.lotSize;
+    const blockW = P.blockLots * P.lotSize;
+    const streetW = Math.max(P.streetLots * P.lotSize, 1);
+    const ox = originCellX * P.lotSize, oz = originCellZ * P.lotSize;
+    /** Centre of the street band nearest `v` on one axis. */
+    const centre = (v, o) => {
+      const k = Math.round((v - o - blockW - streetW / 2) / pitch);
+      return o + k * pitch + blockW + streetW / 2;
+    };
+    const cx = centre(x, ox), cz = centre(z, oz);
+    const nearerIsZ = Math.abs(cx - x) <= Math.abs(cz - z);
+    const useZ = axis === "other" ? !nearerIsZ : nearerIsZ;
+    return useZ
+      // A street running along Z: fix x at its centre, keep z, face +Z.
+      ? { x: cx + step * pitch, z, yaw: 0 }
+      // One running along X: fix z, keep x, face +X.
+      : { x, z: cz + step * pitch, yaw: Math.PI / 2 };
+  }
+
+  function streetHeight(x, z) {
+    if (!ground || !P.ground) return NaN;
+    const halfPlane = P.extent * 1.3;   // the plane is extent * 2.6 across
+    if (Math.abs(x - P.centerX) > halfPlane || Math.abs(z - P.centerZ) > halfPlane) return NaN;
+    /*
+     * THERE IS NO GROUND OVER A HOLE.
+     *
+     * NaN is not a special case bolted on here — it is what this function
+     * already returns outside the city and with terrain on, and everything
+     * downstream reads it as "no surface". So the open trench simply stops
+     * being street, and the underpass road's own BVH takes over.
+     *
+     * Without it the car drives straight across the top of the hole on the
+     * street it is supposed to be driving under, and the tunnel is scenery
+     * you can see into and never enter.
+     */
+    if (underOpen && underOpen(x, z)) return NaN;
+    /*
+     * AND NONE UNDER THE ROOF EITHER, which is the half of this that took
+     * three attempts to see. Over the covered section the street is still
+     * there — you drive over it — so it was left alone, and the tunnel stayed
+     * unenterable: a height function has no notion of above or below, so
+     * inside the tunnel this answered "the surface here is street level" and
+     * the suspension spent every frame trying to climb 5.9 m to reach it.
+     * MEASURED: the car entered the portal at 12 m/s and left it going 12 m/s
+     * STRAIGHT UP, one frame after its nose crossed `cov0`. Every scene-wide
+     * triangle scan of that spot found nothing, because the thing throwing
+     * the car was not geometry at all.
+     *
+     * The street above is given back by the lid mesh — see `coveredRect`.
+     */
+    if (underRoof && underRoof(x, z)) return NaN;
+    return P.groundY;
+  }
   /** The gate plan (placements + dims), its footprint test, and its meshes. */
   let gatesAt = null;
   let gateUnder = null;
@@ -1809,40 +1884,98 @@ export function createModularRoadCity({
     setRoofs(on) { P.roofs = !!on; syncRoofs(); },
 
     /**
-     * A clear stretch of ROAD near (x, z) — where to put the car.
+     * The nearest STREET CENTRE to (x, z), as a pose along that street.
      *
-     * The alternative was a hole in the collision around the spawn, and that
-     * is a bad trade: it leaves two lamp posts you can see and drive straight
-     * through, at the one place the player is looking hardest. Move the car
-     * instead. Nothing about the city changes, and nothing stops being solid.
+     * A pure snap, and it has to stay pure. The grid makes it exact rather than
+     * a search: streets are the band [blockW, pitch) of each period, so the
+     * centre line of the nearest one is arithmetic — and the point returned is
+     * mid-carriageway, clear of the kerbs the lamps and trees stand on and of
+     * the parking lane.
      *
-     * The grid makes this exact rather than a search. Streets are the band
-     * [blockW, pitch) of each period, so the centre line of the nearest one is
-     * a snap, not a scan — and the point returned is mid-carriageway, clear of
-     * the kerbs the lamps and trees stand on and of the parking lane.
+     * ── IT IS AN ORACLE, NOT ONLY A SPAWN ─────────────────────────────────────
+     *
+     * It used to be called `where to put the car`, and the underpass check that
+     * a car spawn needs was added straight into it. That broke two callers that
+     * had quietly come to depend on the pure version as a "distance to the
+     * nearest carriageway" measure: the checkpoint router, and the kit test that
+     * proves every lamp and signal arm reaches OVER the road rather than into
+     * the building behind it (it compares the post's distance to a street centre
+     * against the head's). Skipping a street 170 m sideways makes that distance
+     * meaningless — MEASURED: 5 of 300 signal heads went from right to wrong
+     * with no geometry changed at all.
+     *
+     * So the two jobs are separate now. This one answers "where is the road";
+     * `carSpawnNear` answers "where can the car stand", and is built on it.
      *
      * @returns {{x:number, z:number, yaw:number}} yaw points ALONG the street.
      */
     streetSpawnNear(x = 0, z = 0) {
-      const pitch = (P.blockLots + P.streetLots) * P.lotSize;
-      const blockW = P.blockLots * P.lotSize;
-      const streetW = Math.max(P.streetLots * P.lotSize, 1);
-      const ox = originCellX * P.lotSize, oz = originCellZ * P.lotSize;
-      /** Centre of the street band nearest `v` on one axis. */
-      const centre = (v, o) => {
-        const k = Math.round((v - o - blockW - streetW / 2) / pitch);
-        return o + k * pitch + blockW + streetW / 2;
+      return streetBand(x, z, 0, null);
+    },
+
+    /**
+     * Somewhere the car can actually be put down, near (x, z).
+     *
+     * `streetSpawnNear` returns the nearest street band, which is "a clear
+     * stretch of road" only while every band IS road. The underpass is a band
+     * that is not: it replaces a street with a trench, and over both the open
+     * trench and the roofed section `streetHeight` returns NaN, because a height
+     * function cannot say "road below, lid above".
+     *
+     * MEASURED, default city, terrain off: the underpass lands on the street at
+     * x = -17 — the one nearest the origin — so the game's default spawn, which
+     * is `streetSpawnNear(0, 0)` when there is no track, put the car in the
+     * tunnel. `groundBaseY` answers 0 in sky mode whatever the city says, so the
+     * car was placed at street level over a 6.5 m hole and wedged against the
+     * trench wall thirty metres later. Reported from the game as "it's spawning
+     * the car where the tunnel is".
+     *
+     * So: step outward, street by street, and take the first band that is really
+     * ground. The RUN is tested, not just the point — a spawn nine metres from a
+     * hole is not a spawn — and both axes are tried at each ring, so a city with
+     * one bad axis still spawns close to where it was asked. Nearest-first, so a
+     * city with no underpass is unaffected: ring zero passes and this returns
+     * exactly what `streetSpawnNear` would have.
+     *
+     * @returns {{x:number, z:number, yaw:number}} never null — see the fallback.
+     */
+    carSpawnNear(x = 0, z = 0) {
+      const RUN_M = 120;    // how much clear road the spawn needs ahead and behind
+      /*
+       * STRIDE, AND IT IS MEASURED, NOT PICKED.
+       *
+       * The first version sampled nine points across the 120 m run — 30 m apart
+       * — and stepped clean over the thing it was looking for: the trench is
+       * 18 m across (MEASURED, default city: the hole spans x = -26 … -8 about
+       * its centre line at x = -17). It passed a spawn eight metres from the
+       * edge, facing it. Anything at or under half the hole width puts at least
+       * two samples inside it.
+       */
+      const STEP_M = 4;
+      const RINGS = 6;      // how far out to look before giving up
+      const clear = (p) => {
+        if (!ground || !P.ground) return true;   // no street plane to be wrong about
+        const ax = Math.sin(p.yaw), az = Math.cos(p.yaw);
+        for (let d = -RUN_M; d <= RUN_M; d += STEP_M) {
+          if (!Number.isFinite(streetHeight(p.x + ax * d, p.z + az * d))) return false;
+        }
+        return true;
       };
-      const cx = centre(x, ox), cz = centre(z, oz);
-      // Take the axis whose street is NEARER, and run along it — the other
-      // coordinate stays where it was, so the car lands on the length of a
-      // street rather than in the middle of a junction.
-      const dx = Math.abs(cx - x), dz = Math.abs(cz - z);
-      return dx <= dz
-        // A street running along Z: fix x at its centre, keep z, face +Z.
-        ? { x: cx, z, yaw: 0 }
-        // One running along X: fix z, keep x, face +X.
-        : { x, z: cz, yaw: Math.PI / 2 };
+      const nearest = streetBand(x, z, 0, null);
+      for (let n = 0; n <= RINGS; n++) {
+        // 0, then +1/-1, +2/-2 … so a rejected band is left by the shortest hop.
+        for (const s of (n === 0 ? [0] : [n, -n])) {
+          // Both axes at every ring, nearer one first.
+          for (const axis of [null, "other"]) {
+            const p = streetBand(x, z, s, axis);
+            if (clear(p)) return p;
+          }
+        }
+      }
+      // Nothing clear within RINGS. Return the nearest band anyway rather than
+      // nothing: every caller needs a pose, and the old behaviour is a better
+      // failure than no spawn at all.
+      return nearest;
     },
 
     /**
@@ -2037,40 +2170,7 @@ export function createModularRoadCity({
       const rt = roundTowers ? roundTowers.collisionMeshes() : { deck: [], solids: [] };
       return { deck: [...v.deck, ...u.deck], solids: [...v.solids, ...u.solids, ...g.solids, ...rt.solids] };
     },
-    streetHeightAt(x, z) {
-      if (!ground || !P.ground) return NaN;
-      const halfPlane = P.extent * 1.3;   // the plane is extent * 2.6 across
-      if (Math.abs(x - P.centerX) > halfPlane || Math.abs(z - P.centerZ) > halfPlane) return NaN;
-      /*
-       * THERE IS NO GROUND OVER A HOLE.
-       *
-       * NaN is not a special case bolted on here — it is what this function
-       * already returns outside the city and with terrain on, and everything
-       * downstream reads it as "no surface". So the open trench simply stops
-       * being street, and the underpass road's own BVH takes over.
-       *
-       * Without it the car drives straight across the top of the hole on the
-       * street it is supposed to be driving under, and the tunnel is scenery
-       * you can see into and never enter.
-       */
-      if (underOpen && underOpen(x, z)) return NaN;
-      /*
-       * AND NONE UNDER THE ROOF EITHER, which is the half of this that took
-       * three attempts to see. Over the covered section the street is still
-       * there — you drive over it — so it was left alone, and the tunnel stayed
-       * unenterable: a height function has no notion of above or below, so
-       * inside the tunnel this answered "the surface here is street level" and
-       * the suspension spent every frame trying to climb 5.9 m to reach it.
-       * MEASURED: the car entered the portal at 12 m/s and left it going 12 m/s
-       * STRAIGHT UP, one frame after its nose crossed `cov0`. Every scene-wide
-       * triangle scan of that spot found nothing, because the thing throwing
-       * the car was not geometry at all.
-       *
-       * The street above is given back by the lid mesh — see `coveredRect`.
-       */
-      if (underRoof && underRoof(x, z)) return NaN;
-      return P.groundY;
-    },
+    streetHeightAt(x, z) { return streetHeight(x, z); },
     /**
      * Same weather the track gets, 0 dry … 1 soaked. The street material runs
      * the Smart Road's own wet model (wetRoad.js, same knob names), so
