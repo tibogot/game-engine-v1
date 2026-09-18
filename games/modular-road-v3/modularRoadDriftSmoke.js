@@ -95,6 +95,30 @@ export const AAA_LIGHT_SMOKE = {
 };
 
 /**
+ * THE LOOK THIS REPLACED, for a one-click A/B in the dev panel.
+ *
+ * The tyre plume used to play the DENSE atlas (02) and fire at a 7° slip angle,
+ * over a bank that lived nine seconds — three separate reasons the car read as
+ * permanently on fire rather than as occasionally sideways. Each is restored
+ * here so the two looks can be compared in the game rather than argued about;
+ * the flipbook half of it is PREV_LOOK_FLIPBOOK in the flipbook module.
+ */
+export const PREV_LOOK_SMOKE = {
+  trigger: 0.04,        // 0.13
+  colorHot: "#b9babe",  // #dcdde0
+  colorCool: "#f2f3f5", // #fbfbfc
+  haze: {
+    emitRate: 5,        // 3
+    lifeMin: 5,         // 3.5
+    lifeMax: 9,         // 6.5
+    colorHot: "#c4c5ca",  // #dfe0e4
+    colorCool: "#e6e8ec", // #f6f7f9
+  },
+  /** The engine's plume did not exist, so the A/B has to switch it off. */
+  exhaust: { enabled: false },
+};
+
+/**
  * AERIAL PERSPECTIVE CANCEL. The game's aerial composite (modularRoadAerial.js)
  * runs AFTER the scene — smoke included — and hazes each pixel by the depth
  * buffer, which smoke does not write. Over tarmac a puff was hazed as if it were
@@ -322,13 +346,168 @@ export const DEFAULT_WET_SPRAY_SETTINGS = {
   colorCool: 0xc8d2dc,
 };
 
+/**
+ * ── THE ENGINE, NOT THE TYRES ────────────────────────────────────────────────
+ *
+ * A SECOND SOURCE, and a different effect in every way that matters. Everything
+ * else in this file is rubber boiling off a contact patch; this is hot gas
+ * leaving a pipe, and the reasons it has its own settings block rather than a
+ * tuned copy of the puffs are physical:
+ *
+ *   SMALL AND FAST, NOT BIG AND SLOW. A tailpipe is 6 cm across and the gas is
+ *     out of it at some tens of m/s. Tyre smoke is born a third of a metre wide
+ *     and barely moving. The pipe's plume only becomes visible once it has
+ *     expanded, so `sizeMin` is tiny and `sizeGrowth` is the highest in the
+ *     file — it blooms rather than inflates.
+ *   IT LEAVES WITH THE CAR. Gas exits BACKWARDS relative to a car that is
+ *     itself going forwards, so in world space it mostly travels forwards, gets
+ *     left behind, and stops. That is `follow` (how much of the car's velocity
+ *     it keeps) minus the jet — not the tyre model's `drag`, which is about
+ *     rubber being dragged along a road that is moving under it.
+ *   IT IS BUOYANT FROM BIRTH. Exhaust is a few hundred degrees and it climbs
+ *     immediately, where tyre smoke is held down by the wake first (`liftDelay`).
+ *   IT PULSES. This is the thing the reference footage has and a steady emitter
+ *     cannot fake: an engine is a series of explosions, so the plume comes in
+ *     BURSTS — off a throttle stab, off a gear change — over a thin idle
+ *     trickle. See `stabBurst` / `shiftBurst`, and `burstSpeed`, which is what
+ *     makes a burst read as a bark rather than as "more smoke".
+ *
+ * Costs one draw call. The particles are the same billboards on the same model
+ * with a different settings block, and in the flipbook look they are the only
+ * reason there is a second mesh at all: they play a different ATLAS, which is
+ * baked into a material's node graph. Sampling both atlases in the puff shader
+ * and choosing per particle would be two more texture taps under every pixel of
+ * every plume — far worse than one more draw of ~100 small quads.
+ */
+export const DEFAULT_EXHAUST_SETTINGS = {
+  enabled: true,
+  /**
+   * The pipes, in the chassis's own frame (metres). `side` is mirrored for the
+   * second pipe; `back` is distance BEHIND the body origin. Defaults put twin
+   * tips just under the rear valance, below and inboard of the tail lights
+   * (TAILLIGHTS sits at side 0.62, up 0.12, back 1.78).
+   */
+  pipes: 2,
+  pipeSide: 0.36,
+  pipeUp: -0.24,
+  /**
+   * BEHIND the rear valance, not level with it. At 1.92 the tips sat just
+   * inside the bodywork, so every puff spent its first tenth of a second
+   * within the car's own silhouette — where the scene-depth fade quite
+   * correctly erases it (see `softDepth` below). The plume did not appear
+   * until it was a car's length back.
+   */
+  pipeBack: 2.06,
+  /**
+   * Metres of scene-depth fade, and it is deliberately a QUARTER of the tyre
+   * plume's. This source is born touching a solid object; the tyres' 0.9 m
+   * exists to stop their quads slicing the tarmac, and applied here it deletes
+   * the puff at the pipe instead. Small enough to live against the bumper,
+   * large enough to still soften where the plume meets the road.
+   */
+  softDepth: 0.22,
+  /** Particles/s per pipe with the engine idling — a thin, barely-there wisp. */
+  idleRate: 8,
+  /** Added per pipe at full load. Load is throttle weighted by revs. */
+  loadRate: 46,
+  /** Particles/s per pipe added as the revs reach the limiter. Scaled by the
+   *  throttle as well as the revs — see the note at the sum in `_emitExhaust`. */
+  revRate: 22,
+  /**
+   * THE BARK. Particles released in one go, per pipe, when the throttle is
+   * stabbed — `stabRise` is how fast it has to open (units/s) to count. A burst
+   * is what an engine picking up load actually looks like; without it the only
+   * thing that changes when you floor it is the DENSITY of a steady stream,
+   * which reads as a fog machine rather than a motor.
+   */
+  stabBurst: 5,
+  stabRise: 2.5,
+  /** The same again on a gear change — the upshift pop. */
+  shiftBurst: 7,
+  /** × the exit speed and ÷ the size of a burst particle: a bark is a fast,
+   *  tight jet that opens up downstream, not a bigger puff. */
+  burstSpeed: 2.8,
+  burstSize: 0.7,
+  /** Exit speed along the pipe, m/s, idle → full load. */
+  exitSpeed: 2.2,
+  exitSpeedLoad: 8.5,
+  /** Half-angle of the jet, degrees. Tight: a pipe is a nozzle. */
+  cone: 13,
+  /**
+   * Fraction of the car's own velocity the gas leaves with, before the jet is
+   * subtracted. 1 = it travels with the car forever (and the plume would never
+   * separate); 0 = it is born stationary in the world and the car appears to
+   * drive out of a wall of it. Real gas is dragged along by the wake and then
+   * left, which is this plus `damp`.
+   */
+  follow: 0.80,
+  lifeMin: 0.30,
+  lifeMax: 0.85,
+  sizeMin: 0.06,
+  sizeMax: 0.14,
+  /** Blooms: ×7 over life, on a near-√ curve, so the visible plume is a metre
+   *  across by the time it is a car length behind. */
+  sizeGrowth: 7.0,
+  growthPower: 0.45,
+  opacity: 0.55,
+  fadeIn: 0.06,
+  fadeOutStart: 0.18,
+  tailPower: 1.1,
+  /** Hot gas climbs from birth — no `liftDelay` here (that is a wake effect). */
+  rise: 0.15,
+  buoyancy: 1.4,
+  /** High: the jet is gone within a few tenths and the puff then hangs. */
+  damp: 2.6,
+  turbulence: 1.2,
+  spinRate: 2.2,
+  spread: 0.06,
+  erodeStart: 0.10,
+  erodeEnd: 1.20,
+  erodePower: 1.1,
+  /** Finer than the tyres': a small puff wants small features or it reads as a
+   *  scaled-down copy of the big one. */
+  noiseScale: 1.5,
+  noiseDrift: 0.28,
+  tintJitter: 0.10,
+  /**
+   * A TOUCH darker than tyre smoke, and no more than that.
+   *
+   * Black exhaust is a FAULT — unburnt fuel, a rich mixture, a tired diesel. A
+   * healthy petrol engine's plume is near-invisible, and what you do see of it
+   * is pale. #93959b was sooty on purpose and it was the wrong call: it made a
+   * car that looks like it is running badly.
+   *
+   * Still the darkest of the three sources, because exhaust does carry some
+   * carbon and because that contrast is what tells you the pipes and the tyres
+   * are two different things — but light enough to read as a working engine.
+   */
+  colorHot: "#b6b9bf",
+  colorCool: "#e2e4e8",
+};
+
 export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
   enabled: true,
   emitRate: 220,
-  trigger: 0.04,
+  /**
+   * Slip below which nothing is emitted at all.
+   *
+   * WAS 0.04, AND THAT IS WHY THE CAR LOOKED PERMANENTLY ON FIRE. The drift
+   * term is (slipAngle − 0.1 rad) / 0.5, so 0.04 fires at a slip angle of
+   * 6.9° — which is not a drift, it is the attitude an ordinary car carries
+   * through an ordinary corner. Every bend smoked.
+   *
+   * 0.13 puts the threshold at 13°, which is the point where the car is
+   * visibly sideways and the tyre really is scrubbing. The trade is that a
+   * gentle slide now makes nothing rather than a wisp; the alternative is
+   * smoke that never means anything because it is always there.
+   */
+  trigger: 0.13,
   /** The wet spray — its own particle class, see DEFAULT_WET_SPRAY_SETTINGS.
    *  Emits only while `setWetness` is above 0, so a dry track is untouched. */
   wetSpray: { ...DEFAULT_WET_SPRAY_SETTINGS },
+  /** The engine's own smoke — see DEFAULT_EXHAUST_SETTINGS. Driven by the
+   *  throttle and the revs, not by slip, so it is alive whenever the car is. */
+  exhaust: { ...DEFAULT_EXHAUST_SETTINGS },
   /**
    * How much smoke is left on a FULLY soaked road, as a multiple of the dry
    * intensity; it fades linearly with wetness. Water keeps a sliding tyre cool,
@@ -367,10 +546,29 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    * smoke looks like confetti — the puffs never change, so the eye reads them
    * as a repeating sprite instead of a dispersing volume.
    */
-  // WHITE. The grey inside real tyre smoke is self-shadow (`absorb`), not
-  // pigment; a dark tint plus weak absorption is the "dirty fog" look.
-  colorHot: "#b9babe",   // fresh at the contact patch
-  colorCool: "#f2f3f5",  // thinned out and drifting
+  // ── WHITE, AND IT REALLY HAS TO BE WHITE ─────────────────────────────────
+  //
+  // Burning rubber makes WHITE smoke. The grey you see in a photograph of it is
+  // self-shadow (`absorb`) inside the volume, not pigment — the note above this
+  // has said so since the AAA pass, but the value under it did not, and in the
+  // flipbook look that cost the plume twice over:
+  //
+  //   #b9babe decodes to 0.485 LINEAR, so a fresh puff started at half
+  //   brightness before a photon touched it;
+  //   and the flipbook then multiplies by the ATLAS's own baked grey shading
+  //   (03b averages 0.235 linear × bakedGain), which is a second, independent
+  //   darkening of the same thing.
+  //
+  // Measured, the pair put a mid-life puff at tint 0.70 × baked 0.40 ≈ 0.28 of
+  // its lit value — a brown-grey plume over a pale road, which reads as an
+  // engine fire rather than as tyre smoke. `selfShadow` (0.25) already exists to
+  // stop Beer-Lambert double-darkening the atlas; this is the same argument
+  // applied to the tint, which nobody had made.
+  //
+  // Near-white here, and the contrast comes from `absorb` and the atlas — which
+  // is where it should come from, and is why the cores still go grey.
+  colorHot: "#dcdde0",   // fresh at the contact patch
+  colorCool: "#fbfbfc",  // thinned out and drifting
   /**
    * Per-particle brightness spread, ±fraction. Even with the hot→cool ramp,
    * two puffs of the same age are otherwise the exact same colour, which the
@@ -633,10 +831,19 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
    */
   haze: {
     enabled: true,
-    /** Per rear wheel. Few, because each one ends large — see sizeGrowth. */
-    emitRate: 5,
-    lifeMin: 5,
-    lifeMax: 9,
+    /**
+     * Per rear wheel. Few, because each one ends large — see sizeGrowth.
+     *
+     * The rate and the life came DOWN together (5 → 3, 9 s → 6.5 s) because
+     * this class, not the puffs, is what reads as "there is a huge cloud around
+     * this car all the time": a bank particle is metres across and outlives the
+     * drift that made it by the best part of ten seconds, so on a twisty
+     * section the car was never out of its own smoke. The puffs are the EVENT;
+     * the bank is supposed to be what is left of it.
+     */
+    emitRate: 3,
+    lifeMin: 3.5,
+    lifeMax: 6.5,
     sizeMin: 1.0,
     sizeMax: 1.8,
     /**
@@ -699,8 +906,10 @@ export const DEFAULT_DRIFT_SMOKE_SETTINGS = {
      *  plane; a puff is gone before the eye could tell either way. */
     worldMixMul: 1.6,
     tintJitter: 0.1,
-    colorHot: "#c4c5ca",
-    colorCool: "#e6e8ec",
+    // Lifted with the puffs' — the bank is the same smoke, older. Left at the
+    // old values it turned into a dark shelf sitting under a white plume.
+    colorHot: "#dfe0e4",
+    colorCool: "#f6f7f9",
   },
 };
 
@@ -725,6 +934,14 @@ const TOTAL_POOL = POOL_SIZE + HAZE_POOL_SIZE;
  * recycling live droplets (which reads as the plume flickering).
  */
 const SPRAY_POOL_SIZE = 1024;
+/**
+ * The engine's pool. Steady state is `pipes × (idleRate + loadRate) × meanLife`
+ * ≈ 2 × 48 × 0.58 ≈ 56 flat out, plus whatever bursts land on top — so 192 is
+ * roughly three times the worst case and the ring buffer never recycles a live
+ * puff. Small on purpose: this is a detail at the back of the car, and every
+ * slot is a quad the chase camera is looking straight at.
+ */
+const EXHAUST_POOL_SIZE = 192;
 const VERTS_PER_PARTICLE = 6;
 const FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 3;
 const TINT_FLOATS_PER_PARTICLE = VERTS_PER_PARTICLE * 4;
@@ -901,6 +1118,16 @@ const _contactSide = [1, -1, 1, -1];
 const _sprayRight = new THREE.Vector3(1, 0, 0);
 /** Reused spray argument for `update` — no allocation per frame. */
 const _sprayCall = { points: _sprayPoints, emit: false, intensity: 0 };
+/**
+ * The car's FULL 3D frame, for the exhaust. `_chassisFwd` and `_sprayRight` are
+ * flattened to the ground plane because the tyres emit at a contact patch, which
+ * is always on it — a tailpipe is not: on a banked wall or mid-flip the pipe has
+ * to follow the car's actual roll, or the plume pours out of the floor.
+ */
+const _carFwd = new THREE.Vector3(0, 0, 1);
+const _carRight = new THREE.Vector3(1, 0, 0);
+const _carUp = new THREE.Vector3(0, 1, 0);
+const _pipePos = new THREE.Vector3();
 
 /**
  * One pooled billboard class's CPU buffers + geometry: 6 verts per particle, the
@@ -1248,8 +1475,22 @@ export class ModularRoadDriftSmoke {
     this.sprayMesh.renderOrder = 23;
     this.sprayMesh.visible = false;
     scene.add(this.sprayMesh);
+    // The engine's own class. Same billboards, same shader — in the PROCEDURAL
+    // look it is literally the same material object, so the only thing this
+    // second mesh costs there is one draw call. The flipbook look swaps in its
+    // own material because a different atlas is a different node graph
+    // (see DEFAULT_EXHAUST_SETTINGS for why that beats a per-particle choice).
+    const exhaustBuffers = makeBillboardBuffers(EXHAUST_POOL_SIZE);
+    this.exhaustGeometry = exhaustBuffers.geometry;
+    this.exhaustMesh = new THREE.Mesh(exhaustBuffers.geometry, material);
+    this.exhaustMesh.frustumCulled = false;
+    this.exhaustMesh.renderOrder = 22;
+    this.exhaustMesh.visible = false;
+    scene.add(this.exhaustMesh);
+
     this._puffTarget = { ...puffBuffers, mesh: this.mesh, streak: false };
     this._sprayTarget = { ...sprayBuffers, mesh: this.sprayMesh, streak: true };
+    this._exhaustTarget = { ...exhaustBuffers, mesh: this.exhaustMesh, streak: false };
 
     this.positions = positions;
     this.tints = tints;
@@ -1283,6 +1524,7 @@ export class ModularRoadDriftSmoke {
     this.particles = makePool(POOL_SIZE);
     this.hazeParticles = makePool(HAZE_POOL_SIZE);
     this.sprayParticles = makePool(SPRAY_POOL_SIZE);
+    this.exhaustParticles = makePool(EXHAUST_POOL_SIZE);
     /**
      * One emitter per class. Each owns its own round-robin cursor and its own
      * fractional-emission accumulator (one per contact), which is exactly what
@@ -1294,8 +1536,24 @@ export class ModularRoadDriftSmoke {
     this.puffEmitter = { list: this.particles, size: POOL_SIZE, index: 0, accum: [0, 0, 0, 0] };
     this.hazeEmitter = { list: this.hazeParticles, size: HAZE_POOL_SIZE, index: 0, accum: [0, 0, 0, 0] };
     this.sprayEmitter = { list: this.sprayParticles, size: SPRAY_POOL_SIZE, index: 0, accum: [0, 0, 0, 0] };
+    // The pipes are the exhaust's "contacts" — slots 0 and 1, same accumulator
+    // machinery, so a fractional rate at idle still spaces its puffs evenly
+    // instead of rounding to zero or to one per frame.
+    this.exhaustEmitter = { list: this.exhaustParticles, size: EXHAUST_POOL_SIZE, index: 0, accum: [0, 0, 0, 0] };
     /** Live spray particles after the last step; 0 lets a dry frame skip the pool. */
     this._sprayAlive = 0;
+    /** Same, for the engine: a parked car with the exhaust off pays nothing. */
+    this._exhaustAlive = 0;
+    /**
+     * Engine state for the exhaust, written by `updateFromVehicle` (or by a
+     * direct `setEngine` caller — the lab). Null until something has set it,
+     * which is what keeps the exhaust out of a bare `update()` call.
+     */
+    this._engine = null;
+    this._prevThrottle = 0;
+    /** Set by `_emitExhaust` when it spawned anything, so the step below it can
+     *  skip a pool that is empty and staying empty. */
+    this._exhaustPending = false;
     this._worldDriftPhase = 0;
     /** World-noise frequency / mix of the class currently being stepped. */
     this._worldScaleMul = 1;
@@ -1325,6 +1583,12 @@ export class ModularRoadDriftSmoke {
     this._syncEnabled();
   }
 
+  /** Engine smoke on its own. Tyre smoke and spray are unaffected. */
+  setExhaustEnabled(on) {
+    if (this.settings.exhaust) this.settings.exhaust.enabled = !!on;
+    this._syncEnabled();
+  }
+
   /**
    * Show or hide the meshes and free the pool according to whether ANY source
    * can still emit. Wetness is part of that: with smoke switched off on a dry
@@ -1333,7 +1597,11 @@ export class ModularRoadDriftSmoke {
   _syncEnabled() {
     const smokeOn = this.settings.enabled !== false;
     const sprayOn = this.settings.wetSpray?.enabled !== false && (this._wetness ?? 0) > 0;
-    const anyOn = smokeOn || sprayOn;
+    // Independent, for the reason spelled out on `wetSpray.enabled`: these are
+    // one particle SYSTEM but three EFFECTS, and a switch labelled "drift smoke"
+    // silently taking the engine's plume with it is the same trap.
+    const exhaustOn = this.settings.exhaust?.enabled !== false;
+    const anyOn = smokeOn || sprayOn || exhaustOn;
     this.setVisible(anyOn);
     if (!anyOn) this.reset();
   }
@@ -1413,6 +1681,7 @@ export class ModularRoadDriftSmoke {
     if (!on) {
       this.mesh.visible = false;
       if (this.sprayMesh) this.sprayMesh.visible = false;
+      if (this.exhaustMesh) this.exhaustMesh.visible = false;
       if (this.bankMesh) this.bankMesh.visible = false;
     }
   }
@@ -1922,7 +2191,7 @@ export class ModularRoadDriftSmoke {
   }
 
   reset() {
-    for (const e of [this.puffEmitter, this.hazeEmitter, this.sprayEmitter]) {
+    for (const e of [this.puffEmitter, this.hazeEmitter, this.sprayEmitter, this.exhaustEmitter]) {
       for (const p of e.list) p.life = 0;
       e.accum.fill(0);
     }
@@ -1931,6 +2200,9 @@ export class ModularRoadDriftSmoke {
     this.sprayGeometry.setDrawRange(0, 0);
     this.sprayMesh.visible = false;
     this._sprayAlive = 0;
+    this.exhaustGeometry.setDrawRange(0, 0);
+    this.exhaustMesh.visible = false;
+    this._exhaustAlive = 0;
     if (this.bankMesh) {
       this.bankMesh.count = 0;
       this.bankMesh.visible = false;
@@ -1958,10 +2230,30 @@ export class ModularRoadDriftSmoke {
     _chassisFwd.y = 0;
     if (_chassisFwd.lengthSq() > 1e-8) _chassisFwd.normalize();
 
+    // ── SLIP IS AN AXIS, NOT A DIRECTION ─────────────────────────────────────
+    //
+    // ABS, AND THAT IS THE WHOLE FIX FOR "REVERSING MAKES A HUGE CLOUD".
+    //
+    // Signed, this dot is −1 when the car travels straight backwards, so
+    // `acos` returned 180° — the largest angle it can produce — and reversing
+    // in a dead straight line was scored as a harder drift than any real one.
+    // Measured before the fix: 59 km/h in reverse read a 179.9° "drift angle"
+    // and filled the pool (685 puffs).
+    //
+    // A tyre rolls along its own plane in EITHER direction and scrubs in
+    // neither, so what makes smoke is how far the velocity lies OFF that plane:
+    // 0° rolling forwards, 0° rolling backwards, 90° sliding sideways. That is
+    // the angle to the axis, which is what the absolute value measures.
+    //
+    // A genuine spin still smokes, and is not what this removes: a car coming
+    // round passes through 90° — full intensity — on its way to pointing
+    // backwards, and once it is travelling straight backwards the tyres really
+    // are just rolling. What is left at that point is the brake and handbrake
+    // terms, which is correct.
     let driftAngle = 0;
     if (speed > 0.5 && _chassisFwd.lengthSq() > 1e-8) {
       driftAngle = Math.acos(
-        THREE.MathUtils.clamp(_velHoriz.dot(_chassisFwd) / speed, -1, 1),
+        THREE.MathUtils.clamp(Math.abs(_velHoriz.dot(_chassisFwd)) / speed, 0, 1),
       );
     }
 
@@ -2086,6 +2378,17 @@ export class ModularRoadDriftSmoke {
     // fell out of orienting by apparent motion instead of by the car's heading,
     // and it is the reason this replaced the ellipsoid rather than tuning it.
     this._shutter = (s.wetSpray?.streak ?? 1) * BASE_SHUTTER * wet;
+
+    // The engine's plume, from the pipes. Independent of every gate above: an
+    // idling car smokes a little and a car at full throttle smokes a lot,
+    // whatever the tyres are doing. Emitted before the step below so this
+    // frame's puffs are drawn on the frame they were born.
+    // The throttle is on the vehicle, so it is read here rather than waiting for
+    // a `setEngine` call; revs and gear changes are not (the gearbox is a HUD
+    // module) and stay at whatever the game last pushed in. A caller that never
+    // pushes anything still gets a throttle-driven plume, just no upshift pops.
+    this.setEngine(vehicle.input?.throttle ?? 0, this._engine?.rpm ?? 0, false);
+    this._emitExhaust(body, dt);
 
     // Smoke from the rear pair; spray from all four contacts — see `_sprayPoints`.
     _sprayCall.points = _sprayPoints;
@@ -2233,6 +2536,34 @@ export class ModularRoadDriftSmoke {
       this._sprayAlive = this._stepPool(this.sprayParticles, sprayCfg, dt, false, true);
       this._uploadTarget(this._sprayTarget, this._sprayAlive);
     }
+    // Same guard as the spray's, and it matters more here: the engine's plume is
+    // small and short-lived, so between bursts the pool is genuinely empty.
+    if (this._exhaustPending || this._exhaustAlive > 0) {
+      this._exhaustPending = false;
+      this._target = this._exhaustTarget;
+      this._exhaustAlive = this._stepPool(this.exhaustParticles, s.exhaust ?? {}, dt, false);
+      this._uploadTarget(this._exhaustTarget, this._exhaustAlive);
+    }
+  }
+
+  /**
+   * The engine's state, for the exhaust. Everything else in this file is
+   * derived from the car's POSE; this is the only thing that needs the drive
+   * train, so it comes in from outside rather than being guessed from speed.
+   *
+   * @param {number} throttle  0..1 (negative = braking, treated as closed)
+   * @param {number} rpm       0..1+, 1 = redline (the gearbox's tach reading)
+   * @param {boolean} shifted  true on the frame a gear change happened
+   */
+  setEngine(throttle, rpm, shifted) {
+    if (!this._engine) this._engine = { throttle: 0, rpm: 0, shifted: false };
+    this._engine.throttle = Math.max(0, Math.min(1, throttle || 0));
+    this._engine.rpm = Math.max(0, rpm || 0);
+    // LATCHED, not overwritten. A shift is a one-FRAME pulse from the gearbox
+    // and the exhaust is emitted from `updateFromVehicle`, which the game runs
+    // after the HUD — but a paused or slow-motion frame can put several of
+    // these between two emissions, and dropping the pulse loses the pop.
+    if (shifted) this._engine.shifted = true;
   }
 
   /** Draw range, visibility and GPU upload for one billboard class. */
@@ -2279,6 +2610,123 @@ export class ModularRoadDriftSmoke {
         emitter.accum[i] -= 1;
       }
     }
+  }
+
+  /**
+   * THE ENGINE'S EMISSION. Run from `updateFromVehicle`, where the chassis pose
+   * is in hand; a bare `update()` caller (the lab) never reaches it and gets no
+   * exhaust, which is the behaviour it had before this existed.
+   *
+   * Two things are happening at once here and they are deliberately separate:
+   *
+   *   A RATE — idle trickle + throttle load + a bump near the limiter. This is
+   *     the plume that is always there, and it is emitted through the same
+   *     fractional accumulator as everything else so a 6/s idle spaces its puffs
+   *     instead of rounding to zero at 60 fps.
+   *   A BURST — a whole handful released in ONE frame on a throttle stab or a
+   *     gear change, faster and tighter than the trickle. This is the difference
+   *     the reference footage has: an engine is a series of explosions, and a
+   *     rate alone can only ever make the same plume denser.
+   */
+  _emitExhaust(body, dt) {
+    const cfg = this.settings.exhaust;
+    const e = this._engine;
+    const th = e?.throttle ?? 0;
+    // A stab is a RATE of opening, so the previous frame's throttle has to be
+    // tracked even on the frames this returns early — otherwise switching the
+    // exhaust back on, or unpausing, fires a phantom burst off a stale value.
+    const rise = dt > 0 ? (th - this._prevThrottle) / dt : 0;
+    this._prevThrottle = th;
+    if (!cfg || cfg.enabled === false || !e || dt <= 0) return;
+    const rpm = e.rpm;
+    // Load: an engine on a closed throttle makes almost nothing however fast it
+    // is spinning (that is over-run), so throttle is the gate and revs only
+    // weight it.
+    const load = THREE.MathUtils.clamp(th * (0.35 + 0.65 * Math.min(rpm, 1)), 0, 1);
+
+    // Holding the throttle wide open is a steady plume; snapping it open from
+    // nothing is a bark.
+    const stab = rise > (cfg.stabRise ?? 2.5) && th > 0.45;
+    const shifted = e.shifted;
+    e.shifted = false;
+
+    _carFwd.set(0, 0, 1).applyQuaternion(body.quat);
+    _carRight.set(1, 0, 0).applyQuaternion(body.quat);
+    _carUp.set(0, 1, 0).applyQuaternion(body.quat);
+
+    // The limiter term is gated by the THROTTLE as well, not just the revs.
+    // Ungated it fired on the over-run — lift off at 140 km/h in top and the car
+    // poured smoke out of the back while coasting, which is backwards: a closed
+    // throttle cuts the fuel, so a screaming engine on no throttle makes LESS
+    // than an idling one, not four times more.
+    const perSecond = (cfg.idleRate ?? 6)
+      + (cfg.loadRate ?? 42) * load
+      + (cfg.revRate ?? 22) * th * THREE.MathUtils.smoothstep(rpm, 0.82, 1);
+    const burst = (stab ? Math.round(cfg.stabBurst ?? 5) : 0)
+      + (shifted ? Math.round(cfg.shiftBurst ?? 7) : 0);
+    if (perSecond <= 0 && burst <= 0) return;
+
+    const pipes = Math.max(1, Math.min(2, Math.round(cfg.pipes ?? 2)));
+    const em = this.exhaustEmitter;
+    for (let i = 0; i < pipes; i++) {
+      const sx = pipes === 1 ? 0 : (i === 0 ? -1 : 1);
+      _pipePos.copy(body.pos)
+        .addScaledVector(_carRight, sx * (cfg.pipeSide ?? 0.36))
+        .addScaledVector(_carUp, cfg.pipeUp ?? -0.28)
+        .addScaledVector(_carFwd, -(cfg.pipeBack ?? 1.92));
+      em.accum[i] += perSecond * dt;
+      while (em.accum[i] >= 1) {
+        this.emitExhaustAt(cfg, _pipePos, body, load);
+        em.accum[i] -= 1;
+      }
+      // Bursts skip the accumulator entirely — the whole point is that they all
+      // leave together. Load is floored because a stab's first frame is still
+      // reading the throttle it had on the way up.
+      for (let b = 0; b < burst; b++) {
+        this.emitExhaustAt(cfg, _pipePos, body, Math.max(load, 0.75),
+          cfg.burstSpeed ?? 2.8, cfg.burstSize ?? 0.7);
+      }
+    }
+    this._exhaustPending = true;
+  }
+
+  /** One puff out of one pipe. `speedMul`/`sizeMul` are what make a burst a burst. */
+  emitExhaustAt(cfg, pipe, body, load, speedMul = 1, sizeMul = 1) {
+    const em = this.exhaustEmitter;
+    const p = em.list[em.index];
+    em.index = (em.index + 1) % em.size;
+
+    const jitter = cfg.spread ?? 0.06;
+    p.position.set(
+      pipe.x + (Math.random() - 0.5) * jitter,
+      pipe.y + (Math.random() - 0.5) * jitter,
+      pipe.z + (Math.random() - 0.5) * jitter,
+    );
+
+    // The jet: straight back down the pipe, inside a cone. √random on the radius
+    // spreads the directions evenly over the cone's disc instead of piling them
+    // up on the axis.
+    const cone = Math.tan(THREE.MathUtils.degToRad(cfg.cone ?? 13));
+    const a = Math.random() * Math.PI * 2;
+    const r = cone * Math.sqrt(Math.random());
+    const rx = Math.cos(a) * r;
+    const ry = Math.sin(a) * r;
+    const exit = ((cfg.exitSpeed ?? 2.2) + (cfg.exitSpeedLoad ?? 8.5) * load)
+      * speedMul * (0.7 + Math.random() * 0.6);
+    p.velocity.set(
+      (_carRight.x * rx + _carUp.x * ry - _carFwd.x) * exit,
+      (_carRight.y * rx + _carUp.y * ry - _carFwd.y) * exit,
+      (_carRight.z * rx + _carUp.z * ry - _carFwd.z) * exit,
+    );
+    // ...on top of the share of the car's own motion the gas leaves with. This
+    // is why the plume trails the car instead of the car driving out of a wall
+    // of it: at 30 m/s the exhaust still goes FORWARDS in world space, just
+    // slower than the car, and `damp` then leaves it behind.
+    p.velocity.addScaledVector(body.vel, cfg.follow ?? 0.8);
+    p.velocity.y += cfg.rise ?? 0.15;
+    // No shed vortex: that is a spinning wheel's, not a pipe's.
+    p.vortexT = 0;
+    this._rollParticle(p, cfg, 1, sizeMul);
   }
 
   /**
@@ -2639,6 +3087,16 @@ export class ModularRoadDriftSmoke {
       }
     }
 
+    this._rollParticle(p, s, intensity);
+  }
+
+  /**
+   * The half of a birth that is the same for every source: life, size, spin and
+   * the noise window. Position and velocity are what tell a tyre from a pipe;
+   * everything below is the particle MODEL, and it is shared so that a setting
+   * means the same thing in any block that names it.
+   */
+  _rollParticle(p, s, intensity, sizeMul = 1) {
     const lifeMin = Math.max(0.05, s.lifeMin ?? LIFE_MIN);
     const lifeMax = Math.max(lifeMin, s.lifeMax ?? LIFE_MAX);
     p.maxLife = THREE.MathUtils.lerp(lifeMin, lifeMax, Math.random());
@@ -2648,7 +3106,8 @@ export class ModularRoadDriftSmoke {
     const sizeMax = Math.max(sizeMin, s.sizeMax ?? SIZE_MAX);
     p.size =
       THREE.MathUtils.lerp(sizeMin, sizeMax, Math.random()) *
-      THREE.MathUtils.lerp(0.75, 1.25, THREE.MathUtils.clamp(intensity, 0, 1));
+      THREE.MathUtils.lerp(0.75, 1.25, THREE.MathUtils.clamp(intensity, 0, 1)) *
+      sizeMul;
     p.rotation = Math.random() * Math.PI * 2;
     // Slow for the bank: a large, faint mass that tumbles at puff speed reads as
     // a spinning sprite, which is exactly the tell all of this is trying to lose.

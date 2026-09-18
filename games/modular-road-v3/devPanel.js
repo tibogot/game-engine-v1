@@ -4588,6 +4588,7 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <button class="action-btn" id="dv-smk-preset-def" type="button">Game defaults</button>
               <button class="action-btn" id="dv-smk-preset-light" type="button">AAA light</button>
+              <button class="action-btn" id="dv-smk-preset-prev" type="button" title="The look before the tyre/engine atlas split — dense 02 on the tyres, 7° trigger, 9 s bank, no engine smoke">Previous look</button>
             </div>
           </div>
           <!-- Nothing here is saved anywhere: a look you like has to get back
@@ -4731,6 +4732,189 @@ export function createRoadDevPanel({ app, game, params }) {
             <div class="prop-value">
               <input type="range" id="dv-fb-scale" min="0.5" max="1" step="0.01" />
               <span class="prop-num" id="dv-fb-scale-v"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- The ENGINE's smoke — a second source with its own rate, its own
+           burst behaviour and (in the flipbook look) its own atlas. Rows the
+           procedural look cannot read hide with data-smk-flip, same as above. -->
+      <div class="inspector-section">
+        <div class="section-header">FX — Engine smoke</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Engine smoke</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-exh" type="button" aria-label="Engine smoke">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Atlas</span>
+            <div class="prop-value">
+              <select id="dv-exh-atlas" class="dv-led-input"></select>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Playback fps</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-fps" min="1" max="60" step="1" />
+              <span class="prop-num" id="dv-exh-fps-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Flipbook alpha</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-alpha" min="0.2" max="4" step="0.05" />
+              <span class="prop-num" id="dv-exh-alpha-v"></span>
+            </div>
+          </div>
+          <div class="prop-row" data-smk-flip>
+            <span class="prop-label">Flipbook brightness</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-bright" min="0.5" max="4" step="0.05" />
+              <span class="prop-num" id="dv-exh-bright-v"></span>
+            </div>
+          </div>
+          <!-- Rate: what is always there. Idle is the wisp at a standstill,
+               load is what the throttle adds, revs is the bump at the limiter. -->
+          <div class="prop-row">
+            <span class="prop-label">Idle rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-idle" min="0" max="40" step="1" />
+              <span class="prop-num" id="dv-exh-idle-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Throttle rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-load" min="0" max="160" step="1" />
+              <span class="prop-num" id="dv-exh-load-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Redline rate</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-rev" min="0" max="120" step="1" />
+              <span class="prop-num" id="dv-exh-rev-v"></span>
+            </div>
+          </div>
+          <!-- Burst: what makes it read as an engine rather than a fog machine.
+               A whole handful released in ONE frame, faster and tighter. -->
+          <div class="prop-row">
+            <span class="prop-label">Throttle-stab burst</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-stab" min="0" max="24" step="1" />
+              <span class="prop-num" id="dv-exh-stab-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Upshift burst</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-shift" min="0" max="24" step="1" />
+              <span class="prop-num" id="dv-exh-shift-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Burst speed ×</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-bspeed" min="1" max="6" step="0.1" />
+              <span class="prop-num" id="dv-exh-bspeed-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Exit speed (load)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-exit" min="0" max="30" step="0.5" />
+              <span class="prop-num" id="dv-exh-exit-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Jet cone °</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-cone" min="0" max="45" step="1" />
+              <span class="prop-num" id="dv-exh-cone-v"></span>
+            </div>
+          </div>
+          <!-- How much of the car's own motion the gas leaves with. 1 = it never
+               separates; 0 = the car drives out of a wall of it. -->
+          <div class="prop-row">
+            <span class="prop-label">Follows the car</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-follow" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-exh-follow-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Opacity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-op" min="0" max="1" step="0.01" />
+              <span class="prop-num" id="dv-exh-op-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Puff size</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-size" min="0.02" max="0.6" step="0.01" />
+              <span class="prop-num" id="dv-exh-size-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Bloom ×</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-grow" min="1" max="16" step="0.1" />
+              <span class="prop-num" id="dv-exh-grow-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Life</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-life" min="0.1" max="3" step="0.05" />
+              <span class="prop-num" id="dv-exh-life-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Rise</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-buoy" min="-2" max="4" step="0.05" />
+              <span class="prop-num" id="dv-exh-buoy-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Colour fresh / old</span>
+            <div class="prop-value">
+              <input type="color" id="dv-exh-hot" />
+              <input type="color" id="dv-exh-cool" />
+            </div>
+          </div>
+          <!-- The tips, in the car's own frame. Side is mirrored for the second
+               pipe; back is distance behind the body origin. -->
+          <div class="prop-row">
+            <span class="prop-label">Pipes</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-pipes" min="1" max="2" step="1" />
+              <span class="prop-num" id="dv-exh-pipes-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Pipe side / up / back</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-px" min="0" max="1.2" step="0.01" />
+              <span class="prop-num" id="dv-exh-px-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Pipe height</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-py" min="-1" max="1" step="0.01" />
+              <span class="prop-num" id="dv-exh-py-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Pipe back</span>
+            <div class="prop-value">
+              <input type="range" id="dv-exh-pz" min="0" max="3.5" step="0.01" />
+              <span class="prop-num" id="dv-exh-pz-v"></span>
             </div>
           </div>
         </div>
@@ -7525,6 +7709,44 @@ export function createRoadDevPanel({ app, game, params }) {
       fb.bankStyle = fb.bankStyle === "flipbook" ? "sphere" : "flipbook";
       syncSmokeLook();
     });
+    // The engine's own atlas and playback — see DEFAULT_FLIPBOOK_SETTINGS for
+    // why the two sources want different sheets.
+    sAtlasSelect("dv-exh-atlas", fb, "exhaustAtlas");
+    sSlider("dv-exh-fps", fb, "exhaustFps", (v) => v.toFixed(0));
+    sSlider("dv-exh-alpha", fb, "exhaustAlphaMul", (v) => "x" + v.toFixed(2));
+    sSlider("dv-exh-bright", fb, "exhaustBright", (v) => "x" + v.toFixed(2));
+  }
+
+  // ── Engine smoke ──────────────────────────────────────────────────────────
+  // Its own source with its own gate, exactly like the wet spray: turning drift
+  // smoke off must not silently take the exhaust with it.
+  const exh = smkSettingsRef?.exhaust;
+  if (exh) {
+    sToggle("dv-exh", () => exh.enabled !== false, (on) => game.setDriftSmokeExhaustEnabled?.(on));
+    sSlider("dv-exh-idle", exh, "idleRate", (v) => v.toFixed(0) + "/s");
+    sSlider("dv-exh-load", exh, "loadRate", (v) => v.toFixed(0) + "/s");
+    sSlider("dv-exh-rev", exh, "revRate", (v) => v.toFixed(0) + "/s");
+    sSlider("dv-exh-stab", exh, "stabBurst", (v) => v.toFixed(0));
+    sSlider("dv-exh-shift", exh, "shiftBurst", (v) => v.toFixed(0));
+    sSlider("dv-exh-bspeed", exh, "burstSpeed", (v) => "x" + v.toFixed(1));
+    sSlider("dv-exh-exit", exh, "exitSpeedLoad", (v) => v.toFixed(1) + " m/s");
+    sSlider("dv-exh-cone", exh, "cone", (v) => v.toFixed(0) + "°");
+    sSlider("dv-exh-follow", exh, "follow");
+    sSlider("dv-exh-op", exh, "opacity");
+    // One handle for the grain: `sizeMax` is driven and `sizeMin` follows at
+    // 45% of it, the same shorthand the tyre life slider uses.
+    sSlider("dv-exh-size", exh, "sizeMax", (v) => v.toFixed(2) + " m",
+      (v) => { exh.sizeMin = v * 0.45; });
+    sSlider("dv-exh-grow", exh, "sizeGrowth", (v) => "x" + v.toFixed(1));
+    sSlider("dv-exh-life", exh, "lifeMax", (v) => v.toFixed(2) + " s",
+      (v) => { exh.lifeMin = v * 0.45; });
+    sSlider("dv-exh-buoy", exh, "buoyancy", (v) => v.toFixed(2));
+    sColor("dv-exh-hot", exh, "colorHot");
+    sColor("dv-exh-cool", exh, "colorCool");
+    sSlider("dv-exh-pipes", exh, "pipes", (v) => v.toFixed(0));
+    sSlider("dv-exh-px", exh, "pipeSide", (v) => v.toFixed(2) + " m");
+    sSlider("dv-exh-py", exh, "pipeUp", (v) => v.toFixed(2) + " m");
+    sSlider("dv-exh-pz", exh, "pipeBack", (v) => v.toFixed(2) + " m");
   }
   syncSmokeLook();
 
@@ -7532,6 +7754,7 @@ export function createRoadDevPanel({ app, game, params }) {
   for (const [id, preset, label] of [
     ["dv-smk-preset-def", "defaults", "Game defaults"],
     ["dv-smk-preset-light", "aaaLight", "AAA light"],
+    ["dv-smk-preset-prev", "prev", "Previous look"],
   ]) {
     $(`#${id}`)?.addEventListener("click", () => {
       game.applyDriftSmokePreset?.(preset);

@@ -61,8 +61,18 @@ export const DEFAULT_FLIPBOOK_SETTINGS = {
   /** Atlas edge in pixels — for the half-texel inset. Known up front because
    *  the shader is built before the image has necessarily arrived. */
   atlasSize: 1024,
-  /** Which atlas the puffs use (key of SMOKE_ATLASES). */
-  puffAtlas: "02",
+  /**
+   * Which atlas the TYRE puffs use (key of SMOKE_ATLASES).
+   *
+   * 03b, the thin one. 02 is a dense, dark, fully-formed ball of smoke in every
+   * cell — on a plume that is already hundreds of overlapping cards it stacks
+   * into a solid dark mass, which is the "the car is on fire" read. The thin
+   * atlas has the same silhouette detail at a fraction of the alpha, so the
+   * same number of particles integrates into a big soft cloud instead. 02 goes
+   * to the pipes, where there are twenty particles and each one has to carry
+   * its own shape (see `exhaustAtlas`).
+   */
+  puffAtlas: "03b",
   /** "loop" = play at fps from a random start frame (a looping atlas);
    *  "life" = play the atlas exactly once over each particle's life. */
   playMode: "loop",
@@ -74,11 +84,37 @@ export const DEFAULT_FLIPBOOK_SETTINGS = {
   /** Sprite size on its card (the card already circumscribes the puff's
    *  sphere). <1 shrinks it; it can never exceed 1 without cropping the cell. */
   scale: 1,
-  alphaMul: 1.4,
+  /**
+   * ALPHA IS PER ATLAS, and the two differ by a factor of three and a half.
+   *
+   * Measured over all 64 cells: 02 has a mean alpha of 0.225 and 21.6% of its
+   * texels above 0.5; 03b has a mean of 0.063 and 0.9% above 0.5. So the same
+   * number here produces two completely different plumes, and moving the puffs
+   * to 03b without moving this would have deleted them.
+   *
+   * 3.0 puts 03b's mean density at ~0.19 against 02's ~0.30 at the old 1.4 —
+   * deliberately about two thirds, because the complaint the atlas swap is
+   * answering is that the plume was a dark solid mass. The top ~6% of texels
+   * still clip to 1, which is what keeps the cores opaque.
+   */
+  alphaMul: 3.0,
   /** How much of the atlas's baked grey shading to use (0 = flat white card). */
   baked: 1,
-  /** Brightness of the baked RGB — the atlas tops out at ~183/255. */
-  bakedGain: 2.0,
+  /**
+   * Brightness of the baked RGB, and this is the atlas's WHOLE contribution —
+   * `baked` is a straight multiply on the tint, so anything under ~4 here is a
+   * darkening, not a gain.
+   *
+   * Measured means where alpha > 0.1: 02 is 0.392 and 03b is 0.524 in sRGB,
+   * which is 0.125 and 0.235 LINEAR — 02 carries a much deeper baked core
+   * shadow. At 1.7 the thin atlas contributed ×0.40 and the plume came out
+   * brown-grey over a pale road; 3.0 puts it at ×0.70, so the smoke is white
+   * where it is thin and grey only where the atlas and `absorb` shade it.
+   *
+   * Per atlas, like `alphaMul`: swapping the puffs back to 02 wants roughly
+   * double this to land in the same place.
+   */
+  bakedGain: 3.0,
   /** × the game's self-shadow (absorb). Low: the atlas has its own shadow baked in. */
   selfShadow: 0.25,
   /** Apply the game's erosion threshold on top of the texture alpha. */
@@ -102,6 +138,49 @@ export const DEFAULT_FLIPBOOK_SETTINGS = {
   bankBright: 3,
   /** Opacity of the plain haze the bank becomes once the camera is INSIDE it. */
   bankInsideFog: 0.35,
+
+  // ── The engine's plume ──────────────────────────────────────────────────
+  /**
+   * 02, the dense one, and this is the pairing the reference footage uses.
+   *
+   * A tailpipe puff is ON ITS OWN: a handful of them, small, and each one is
+   * read individually rather than as part of a mass. That wants a cell that
+   * already looks like a puff of smoke — opaque core, curled edges — which is
+   * exactly what 02 is and exactly why it is wrong for the tyres.
+   */
+  exhaustAtlas: "02",
+  /** Faster than the tyres': a small hot puff boils quickly. */
+  exhaustFps: 34,
+  /**
+   * HIGHER THAN THE TYRES' ON PURPOSE, even though 02 is the denser atlas.
+   *
+   * What you see is per-card alpha times how many cards are stacked on that
+   * pixel, and the two sources are at opposite ends of that trade: the tyre
+   * plume is hundreds of thin cards integrating into a mass, the exhaust is
+   * twenty puffs spread over a few metres with barely two overlapping
+   * anywhere. At the tyres' density it was a rumour.
+   */
+  exhaustAlphaMul: 2.2,
+  /**
+   * The engine's own. HIGHER than the tyres' number for a DARKER result: it
+   * multiplies 02, whose linear mean is 0.125 against 03b's 0.235, so 4.0 here
+   * lands at ×0.50 where the puffs' 3.0 lands at ×0.70. That gap is deliberate
+   * — exhaust carries some carbon — but at the old 1.7 it was ×0.21, which is
+   * the sooty plume of an engine running badly.
+   */
+  exhaustBright: 4.0,
+  exhaustScale: 1,
+};
+
+/**
+ * The flipbook half of the previous look — see PREV_LOOK_SMOKE for the rest and
+ * for why. Dense atlas on the tyres, and the alpha and brightness it was
+ * balanced against.
+ */
+export const PREV_LOOK_FLIPBOOK = {
+  puffAtlas: "02",      // 03b
+  alphaMul: 1.4,        // 3.0
+  bakedGain: 2.0,       // 3.0
 };
 
 /**
@@ -154,8 +233,12 @@ export function copyDriftSmokeState(from, to) {
   copyPool(from.particles, to.particles);
   copyPool(from.hazeParticles, to.hazeParticles);
   copyPool(from.sprayParticles, to.sprayParticles);
+  copyPool(from.exhaustParticles, to.exhaustParticles);
   to._sprayAlive = from._sprayAlive;
-  for (const e of ["puffEmitter", "hazeEmitter", "sprayEmitter"]) {
+  to._exhaustAlive = from._exhaustAlive;
+  to._engine = from._engine ? { ...from._engine } : null;
+  to._prevThrottle = from._prevThrottle;
+  for (const e of ["puffEmitter", "hazeEmitter", "sprayEmitter", "exhaustEmitter"]) {
     to[e].index = from[e].index;
     to[e].accum = [...from[e].accum];
   }
@@ -238,7 +321,34 @@ export class FlipbookDriftSmoke extends ModularRoadDriftSmoke {
     this._flipByPos = new Map();
     this.particles.forEach((p, i) => this._flipByPos.set(p.position, { p, slot: i }));
     this.hazeParticles.forEach((p, i) => this._flipByPos.set(p.position, { p, slot: 5003 + i }));
+    this.exhaustParticles.forEach((p, i) => this._flipByPos.set(p.position, { p, slot: 9007 + i }));
     this._flipPos = null;
+
+    // ── THE ENGINE'S MESH ─────────────────────────────────────────────────
+    // The base class built it pointing at the puffs' material; it plays a
+    // different atlas, so it needs its own graph. Three dials get their own
+    // uniform (sprite scale, alpha, brightness) and everything else — the frame
+    // layout, the light model, the self-shadow — is the same uniform object the
+    // puffs use, so tuning the lighting once tunes both.
+    this._flipXU = {
+      ...this._flipU,
+      uScale: uniform(1), uAlphaMul: uniform(1), uBakedGain: uniform(1.7),
+      uSoftDepth: uniform(0.22),
+    };
+    const exhaustMat = new MeshBasicNodeMaterial({
+      transparent: true, depthWrite: false, depthTest: false,
+      side: THREE.DoubleSide, fog: false,
+    });
+    wireSmokeOutput(
+      exhaustMat,
+      this._buildCardNode(
+        this.atlases[flip.exhaustAtlas] ?? Object.values(this.atlases)[0],
+        this._flipXU,
+        (nodes) => { this._exhaustTexNodes = nodes; },
+      ).toVar(),
+    );
+    this.exhaustMesh.material = exhaustMat;
+    this._exhaustMat = exhaustMat;
 
     // The bank: keep the procedural sphere material for the "sphere" style and
     // add a flipbook one over the SAME instanced spheres. Swap = pointer write.
@@ -281,6 +391,18 @@ export class FlipbookDriftSmoke extends ModularRoadDriftSmoke {
     const bankTex = this.atlases[f.bankAtlas];
     if (bankTex) for (const n of this._bankTexNodes ?? []) n.value = bankTex;
 
+    const x = this._flipXU;
+    if (x) {
+      x.uScale.value = Math.max(0.05, f.exhaustScale ?? 1);
+      x.uAlphaMul.value = f.exhaustAlphaMul ?? 1;
+      x.uBakedGain.value = f.exhaustBright ?? 1.7;
+      // From the settings block, not the flipbook dials: it is a property of
+      // where the source SITS, so the procedural look wants the same number.
+      x.uSoftDepth.value = Math.max(1e-3, this.settings.exhaust?.softDepth ?? 0.22);
+      const exTex = this.atlases[f.exhaustAtlas];
+      if (exTex) for (const n of this._exhaustTexNodes ?? []) n.value = exTex;
+    }
+
     const want = this._bankIsFlip ? this._bankFlipMat : this._bankSphereMat;
     if (this.bankMesh.material !== want) this.bankMesh.material = want;
   }
@@ -309,22 +431,28 @@ export class FlipbookDriftSmoke extends ModularRoadDriftSmoke {
 
   _writeParticle(index, ...rest) {
     super._writeParticle(index, ...rest);
-    // Frame indices are a PUFF thing; the spray class writes its own buffers
-    // with the streak shader and must not have its aClass touched.
-    if (this._target !== this._puffTarget) return;
+    // Frame indices are a CARD thing — the puffs' mesh and the engine's. The
+    // spray writes its own buffers with the streak shader, which reads aClass
+    // for something else entirely and must not have it touched.
+    const isPuff = this._target === this._puffTarget;
+    if (!isPuff && this._target !== this._exhaustTarget) return;
     const rec = this._flipByPos?.get(this._flipPos);
     if (!rec) return;
     const { p, slot } = rec;
     const f = this.flip;
     const frames = f.cols * f.rows;
     let frame;
-    if (f.playMode === "life") {
+    if (isPuff && f.playMode === "life") {
       const age = 1 - p.life / p.maxLife;
       frame = Math.min(age * frames, frames - 1.001);
     } else {
-      frame = (p.maxLife - p.life) * f.fps + this._seed(p, slot) * frames;
+      // The engine's plume always loops: its particles are far shorter-lived
+      // than one play-through of a 64-frame atlas, so "life" mode would show
+      // every one of them the same opening few cells.
+      const fps = isPuff ? f.fps : f.exhaustFps;
+      frame = (p.maxLife - p.life) * fps + this._seed(p, slot) * frames;
     }
-    const classes = this._puffTarget.classes;
+    const classes = this._target.classes;
     const o = index * 12; // VERTS_PER_PARTICLE (6) × CLASS floats (2)
     for (let i = 0; i < 6; i++) classes[o + i * 2] = frame;
   }
@@ -346,25 +474,57 @@ export class FlipbookDriftSmoke extends ModularRoadDriftSmoke {
   _buildShadedNode() {
     const { atlases, flip } = FlipbookDriftSmoke._pending;
     const atlas = atlases[flip.puffAtlas] ?? Object.values(atlases)[0];
-    const u = (this._flipU = {
+    const u = (this._flipU = this._makeFlipUniforms());
+    return this._buildCardNode(atlas, u, (nodes) => { this._puffTexNodes = nodes; });
+  }
+
+  /** @returns the flipbook's uniform set. Built once; the exhaust borrows most
+   *  of it and overrides only the three dials it wants its own value of. */
+  _makeFlipUniforms() {
+    return {
       uScale: uniform(1), uAlphaMul: uniform(1), uBaked: uniform(1),
       uBakedGain: uniform(2), uErode: uniform(0), uCols: uniform(8), uRows: uniform(8),
       uAtlasSize: uniform(1024), uBlend: uniform(1), uShadowMul: uniform(0.25),
       uBankScale: uniform(1), uBankAlpha: uniform(1), uBankBright: uniform(3), uInsideFog: uniform(0.35),
       uCamRight: uniform(new THREE.Vector3(1, 0, 0)), uCamUp: uniform(new THREE.Vector3(0, 1, 0)),
-    });
+    };
+  }
+
+  /**
+   * One billboard class's shader: a flipbook cell on a camera-facing card, lit
+   * on the particle's sphere normal. The tyre puffs and the engine's plume are
+   * the same graph over different atlases and different `u`, which is the whole
+   * reason the second source costs one draw call and no new code.
+   *
+   * @param {THREE.Texture} atlas
+   * @param {object} u          uniform set (see `_makeFlipUniforms`)
+   * @param {(nodes: any[]) => void} keepNodes  receives the two texture nodes so
+   *   the caller can retarget them on an atlas change without a rebuild.
+   */
+  _buildCardNode(atlas, u, keepNodes) {
     const st = uv();
     const tint = attribute("aTint", "vec4");
     const nParams = attribute("aNoise", "vec4");
     const sphere = attribute("aSphere", "vec4");
     const cls = attribute("aClass", "vec2");
     const lampIn = attribute("aLamp", "vec3");
-    const { uSoftDepth, uErodeSoft, uLightAmount } = this;
+    const { uErodeSoft, uLightAmount } = this;
+    // SOFT DEPTH IS PER CLASS, and the engine's plume is why.
+    //
+    // The tyre puffs want a metre of it: they lie across the tarmac at a
+    // glancing angle and without it the quads slice the road along a razor
+    // line. The exhaust is born ON the car — a few centimetres from the rear
+    // valance, INSIDE the car's own silhouette from a chase camera — so the same
+    // metre deleted it outright for the first stretch of its life, and the plume
+    // did not appear until it was a car's length behind the bumper. Its own,
+    // much tighter value lets it exist at the pipe and still soften where it
+    // meets the road.
+    const uSoftDepth = u.uSoftDepth ?? this.uSoftDepth;
 
     return Fn(() => {
       const s = st.sub(0.5).div(u.uScale).add(0.5).toVar();
       const { smp: smpRaw, nodes, vignette } = sampleAtlas(atlas, s, cls.x, u);
-      this._puffTexNodes = nodes;
+      keepNodes(nodes);
       const smp = smpRaw.toVar();
 
       const density = saturate(smp.a.mul(u.uAlphaMul)).toVar();

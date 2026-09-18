@@ -155,12 +155,14 @@ import {
   ModularRoadDriftSmoke,
   DEFAULT_DRIFT_SMOKE_SETTINGS,
   AAA_LIGHT_SMOKE,
+  PREV_LOOK_SMOKE,
   setDriftSmokeAerial,
 } from "./modularRoadDriftSmoke.js";
 import {
   FlipbookDriftSmoke,
   DEFAULT_FLIPBOOK_SETTINGS,
   SMOKE_ATLASES,
+  PREV_LOOK_FLIPBOOK,
   loadSmokeAtlases,
   copyDriftSmokeState,
 } from "./modularRoadDriftSmokeFlipbook.js";
@@ -5845,11 +5847,19 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
     }
     return out;
   };
-  /** "defaults" = the shipped look; "aaaLight" = defaults + AAA_LIGHT_SMOKE. Flipbook dials reset too. */
+  /**
+   * "defaults" = the shipped look; "aaaLight" = defaults + AAA_LIGHT_SMOKE;
+   * "prev" = the look before the atlas split (see PREV_LOOK_SMOKE), which is
+   * the only preset that also has to move the FLIPBOOK dials, because what it
+   * restores is mostly which atlas the tyres play. Flipbook dials reset first
+   * either way.
+   */
   function applyDriftSmokePreset(name) {
     deepAssign(smokeSettings, structuredClone(DEFAULT_DRIFT_SMOKE_SETTINGS));
     if (name === "aaaLight") deepAssign(smokeSettings, structuredClone(AAA_LIGHT_SMOKE));
+    if (name === "prev") deepAssign(smokeSettings, structuredClone(PREV_LOOK_SMOKE));
     deepAssign(smokeFlipSettings, structuredClone(DEFAULT_FLIPBOOK_SETTINGS));
+    if (name === "prev") deepAssign(smokeFlipSettings, structuredClone(PREV_LOOK_FLIPBOOK));
     // `enabled` flags just came back to their defaults; re-derive visibility.
     driftSmoke._syncEnabled?.();
   }
@@ -8716,6 +8726,12 @@ ${e.message}`);
     _hudFwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
     const g = gearbox.update(speedMs, TIRE.topSpeed, vehicle.body.vel.dot(_hudFwd));
 
+    // The exhaust plume is the only FX that needs the DRIVE TRAIN rather than
+    // the car's pose, and the gearbox lives here — so it is pushed from the HUD.
+    // `shifted` is a one-frame pulse and the smoke latches it (see setEngine),
+    // which is what survives the gap to updateFromVehicle further down the frame.
+    driftSmoke.setEngine(vehicle.input?.throttle ?? 0, g.rpm, g.shifted);
+
     // Segment dash. Same numbers as the arc speedo drove — only the drawing
     // changed — so the two can run side by side if the old markup comes back.
     dash.update(dt, {
@@ -10047,10 +10063,12 @@ ${e.message}`);
       getSkidStyle: () => tireMarks.style,
       toggleSkidStyle: () =>
         tireMarks.setStyle(tireMarks.style === "textured" ? "solid" : "textured"),
-      // Two effects, one system: each gates its own emission, and the smoke
-      // system hides itself only when neither can produce a particle.
+      // Three effects, one system: tyres, weather and the engine each gate their
+      // own emission, and the smoke system hides itself only when NONE of them
+      // can produce a particle.
       setDriftSmokeEnabled: (on) => driftSmoke.setSmokeEnabled(on),
       setWetSprayEnabled: (on) => driftSmoke.setSprayEnabled(on),
+      setDriftSmokeExhaustEnabled: (on) => driftSmoke.setExhaustEnabled(on),
       getDriftSmokeLook: () => smokeLook,
       setDriftSmokeLook,
       getDriftSmokeFlipSettings: () => smokeFlipSettings,
