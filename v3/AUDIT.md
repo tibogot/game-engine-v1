@@ -209,6 +209,14 @@ the game.
     - Grass ignores snow displacement of the terrain (as before).
     - Bake staleness after undo / generate / erosion / project load: checked
       after a whole-map replace only.
+15c. ~~Terrain tint sampled the wrong half of the world~~ — FIXED 2026-09-18.
+    The grass tint bake (main.js grassTintCam) flipped world X for the render
+    target's axes but never Z, so blades took the ground colour MIRRORED in Z.
+    Invisible while the ground was one colour; with the Genshin preset (tint
+    at full takeover) it showed as grey-blue blades nowhere near any rock.
+    MEASURED: painted rock at world z = +300, read the bake the way the blades
+    do — green at +300, grey (sat 0.14) at -300; after swapping the camera's
+    top/bottom, grey at +300 and green at -300, with X still correct.
 16. **Grass panel cleanup** 👁: 59 controls, 16 of them two hand-placed light
     directions. Named presets plus a few real controls.
 17. **Grass look pass** 👁: match the Genshin ground colour.

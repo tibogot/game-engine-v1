@@ -1342,11 +1342,18 @@ export async function startV3App(opts = {}) {
   grassTintRT.texture.flipY = false;
   grassTintRT.texture.name = "GrassTerrainTint";
   const grassTintScene = new THREE.Scene();
-  // left/right swapped on purpose: a straight-down lookAt with up=(0,0,1)
-  // mirrors world X in camera space; the swap flips it back so RT u/v match
-  // the grass shader's tintUv = worldXZ / WORLD_SIZE + 0.5.
+  // BOTH axes are swapped on purpose (left/right AND top/bottom): a
+  // straight-down lookAt with up=(0,0,1) mirrors world X in camera space, and
+  // the render target's row order mirrors world Z, so the bake has to flip
+  // both to match the grass shader's tintUv = worldXZ / WORLD_SIZE + 0.5.
+  //
+  // The Z half was missing and nobody could see it while the ground was one
+  // colour: MEASURED 2026-09-18 by painting rock at world z = +300 and reading
+  // the bake the way the blades read it — green at +300, GREY at -300. With
+  // the Genshin preset (tint at full takeover) that showed up as grey-blue
+  // blades nowhere near any rock, mirrored across the map.
   const grassTintCam = new THREE.OrthographicCamera(
-    WORLD_SIZE / 2, -WORLD_SIZE / 2, WORLD_SIZE / 2, -WORLD_SIZE / 2, 0.1, 50,
+    WORLD_SIZE / 2, -WORLD_SIZE / 2, -WORLD_SIZE / 2, WORLD_SIZE / 2, 0.1, 50,
   );
   grassTintCam.position.set(0, 10, 0);
   grassTintCam.up.set(0, 0, 1);
