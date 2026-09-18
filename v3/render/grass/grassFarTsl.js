@@ -44,6 +44,7 @@ export function createGrassFarShading({ worldSize }) {
     aoBase: uniform(0.25),
     aoPower: uniform(2),
     farAoMul: uniform(0.55),
+    shadeVar: uniform(1),
     tintOn: uniform(0),
     tintStrength: uniform(0.5),
     tintRootBias: uniform(0.35),
@@ -64,7 +65,7 @@ export function createGrassFarShading({ worldSize }) {
         const field = grassFieldAlbedo(out, {
           bladeCol: u.bladeCol, tipCol: u.tipCol,
           aoBase: u.aoBase, aoPower: u.aoPower, farAoMul: u.farAoMul,
-          tintOn: u.tintOn, tintStrength: u.tintStrength, tintRootBias: u.tintRootBias,
+          shadeVar: u.shadeVar, tintOn: u.tintOn, tintStrength: u.tintStrength, tintRootBias: u.tintRootBias,
         });
         out.assign(mix(out, field, cover.mul(far)));
       });
@@ -91,6 +92,7 @@ export function createGrassFarShading({ worldSize }) {
     u.aoBase.value = gp.aoBase ?? 0.25;
     u.aoPower.value = gp.aoPower ?? 2;
     u.farAoMul.value = gp.farAoMul ?? 0.55;
+    u.shadeVar.value = gp.shadeVariation ?? 1;
     u.grassDensity.value = gp.grassDensity ?? 1;
     u.tintOn.value = gp.terrainTintEnabled ? 1 : 0;
     u.tintStrength.value = gp.terrainTintStrength ?? 0.5;

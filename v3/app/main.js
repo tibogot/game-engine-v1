@@ -110,6 +110,7 @@ import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
 import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
 import { createGrassFarShading } from "../render/grass/grassFarTsl.js";
 import { createGrassPushField } from "../render/grass/grassPushField.js";
+import { GRASS_PRESETS } from "./state/grassPresets.js";
 import { DecalSystem } from "../render/decals/decalSystem.js";
 import { createDecalEditor } from "../tools/decalEditor.js";
 import { buildDecalPanel } from "../ui/buildDecalPanel.js";
@@ -1189,7 +1190,7 @@ export async function startV3App(opts = {}) {
     clumpScale: 1.5, clumpStrength: 0.7, clumpPull: 0, foldBelow: 1.1,
     grassDensity: 1,
     bladeColor: "#0e300e", tipColor: "#00b30c",
-    aoBase: 0.25, aoPower: 2, farAoMul: 1,
+    aoBase: 0.25, aoPower: 2, farAoMul: 1, shadeVariation: 1,
     colorVariation: false,
     cvHueSpread: 0.08, cvSatSpread: 0.3, cvDryAmount: 0.15, cvDryColor: "#8a7a3a",
     skyBlend: 0.8, cylindrical: 0.3, viewThicken: 0.45,
@@ -5856,6 +5857,14 @@ export async function startV3App(opts = {}) {
   gcolTip.addEventListener("input",   () => { grassState.tipColor   = gcolTip.value;   syncGrassUniforms(); });
   gslAoBase.addEventListener("input", () => { grassState.aoBase = Number(gslAoBase.value) / 100; glblAoBase.textContent = grassState.aoBase.toFixed(2); syncGrassUniforms(); });
   gslAoPow.addEventListener("input",  () => { grassState.aoPower = Number(gslAoPow.value) / 10; glblAoPow.textContent = grassState.aoPower.toFixed(1); syncGrassUniforms(); });
+  const gselGrassPreset = uiById("gsel-grass-preset");
+  gselGrassPreset?.addEventListener("change", () => {
+    if (!gselGrassPreset.value) return;
+    applyGrassPreset(gselGrassPreset.value);
+  });
+  const gslShadeVar  = uiById("gsl-shade-var");
+  const glblShadeVar = uiById("glbl-shade-var");
+  gslShadeVar.addEventListener("input", () => { grassState.shadeVariation = Number(gslShadeVar.value) / 100; glblShadeVar.textContent = grassState.shadeVariation.toFixed(2); syncGrassUniforms(); });
   const gslFarAo  = uiById("gsl-far-ao");
   const glblFarAo = uiById("glbl-far-ao");
   gslFarAo.addEventListener("input", () => { grassState.farAoMul = Number(gslFarAo.value) / 100; glblFarAo.textContent = grassState.farAoMul.toFixed(2); syncGrassUniforms(); });
@@ -6104,7 +6113,7 @@ export async function startV3App(opts = {}) {
   // key, slider units per state unit]. Used to show a loaded project's grass.
   const GRASS_PANEL_CONTROLS = [
     ["gsl-blade-height", "bladeHeight", 10], ["gcol-blade", "bladeColor"], ["gcol-tip", "tipColor"],
-    ["gsl-ao-base", "aoBase", 100], ["gsl-ao-power", "aoPower", 10], ["gsl-far-ao", "farAoMul", 100],
+    ["gsl-ao-base", "aoBase", 100], ["gsl-ao-power", "aoPower", 10], ["gsl-far-ao", "farAoMul", 100], ["gsl-shade-var", "shadeVariation", 100],
     ["gck-color-var", "colorVariation"], ["gsl-hue", "cvHueSpread", 100], ["gsl-sat", "cvSatSpread", 100],
     ["gsl-dry", "cvDryAmount", 100], ["gcol-dry", "cvDryColor"],
     ["gsl-blade-width", "bladeWidth", 100], ["gck-crossed", "crossed"], ["gsl-segments", "bladeYSegments", 1],
@@ -6133,6 +6142,18 @@ export async function startV3App(opts = {}) {
   ];
 
   /** Grass look from a loaded project: state, panel, uniforms and blade geometry. */
+  /**
+   * One grass system, two art directions (state/grassPresets.js). A preset is
+   * only a set of Grass panel values — everything stays tweakable after.
+   */
+  function applyGrassPreset(id) {
+    const preset = GRASS_PRESETS[id];
+    if (!preset) return;
+    applyGrassState(preset.values);
+    const hint = uiById("grass-preset-hint");
+    if (hint) hint.textContent = preset.hint;
+  }
+
   function applyGrassState(saved) {
     mergeKnownKeys(grassState, saved);
     syncPanelControls(GRASS_PANEL_CONTROLS, grassState);

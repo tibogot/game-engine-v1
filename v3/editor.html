@@ -1647,6 +1647,17 @@
               Appearance
             </div>
             <div class="section-body">
+              <div class="prop-row" title="Load a complete look. Every control below stays editable afterwards.">
+                <span class="prop-label">Preset</span>
+                <div class="prop-value">
+                  <select class="prop-dropdown" id="gsel-grass-preset">
+                    <option value="">Choose…</option>
+                    <option value="got">Ghost of Tsushima</option>
+                    <option value="genshin">Genshin / Zelda</option>
+                  </select>
+                </div>
+              </div>
+              <p class="mode-hint" id="grass-preset-hint">Realistic by default; pick a preset to switch the whole look.</p>
               <div class="prop-row">
                 <span class="prop-label">Blade height</span>
                 <div class="prop-value">
@@ -1680,6 +1691,13 @@
                 <div class="prop-value">
                   <input type="range" id="gsl-ao-power" min="5" max="60" step="1" value="20" />
                   <span class="prop-num" id="glbl-ao-power">2.0</span>
+                </div>
+              </div>
+              <div class="prop-row" title="How much each blade and clump differs in brightness. 1 = a realistic, noisy field; 0 = every blade the same shade (the stylised look).">
+                <span class="prop-label">Shade variation</span>
+                <div class="prop-value">
+                  <input type="range" id="gsl-shade-var" min="0" max="100" step="5" value="100" />
+                  <span class="prop-num" id="glbl-shade-var">1.00</span>
                 </div>
               </div>
               <div class="prop-row" title="AO floor on the far blade rings, as a fraction of AO base. Lower = darker distant field.">

@@ -35,8 +35,8 @@ export function grassTintBlend(variedCol, tintRgb, hasMode, hPct, strength, root
   return mix(variedCol, tintMixed, tintAmt);
 }
 
-/** Mean of the per-blade brightness random (mix(0.75, 1, hash)). */
-const MEAN_BLADE_SHADE = 0.875;
+/** Mean of the per-blade brightness random mix(0.75, 1, hash), at scatter s. */
+const meanBladeShade = (s) => float(1).sub(s.mul(0.125));
 
 /**
  * What a field of far-ring blades averages to: the blade colour stack
@@ -47,7 +47,8 @@ const MEAN_BLADE_SHADE = 0.875;
  * blades read as a dark ring before it.
  *
  * @param ground ground colour at this point (the tint source)
- * @param p { bladeCol, tipCol, aoBase, aoPower, farAoMul, tintOn, tintStrength, tintRootBias }
+ * @param p { bladeCol, tipCol, aoBase, aoPower, farAoMul, shadeVar, tintOn,
+ *            tintStrength, tintRootBias }
  */
 export function grassFieldAlbedo(ground, p) {
   const at = (h) => {
@@ -58,5 +59,6 @@ export function grassFieldAlbedo(ground, p) {
     return tinted.mul(ao);
   };
   // Midpoint rule over [0, 1] in four slices.
-  return at(0.125).add(at(0.375)).add(at(0.625)).add(at(0.875)).mul(0.25 * MEAN_BLADE_SHADE);
+  return at(0.125).add(at(0.375)).add(at(0.625)).add(at(0.875))
+    .mul(0.25).mul(meanBladeShade(p.shadeVar));
 }

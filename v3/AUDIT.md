@@ -217,6 +217,17 @@ the game.
     MEASURED: painted rock at world z = +300, read the bake the way the blades
     do — green at +300, grey (sat 0.14) at -300; after swapping the camera's
     top/bottom, grey at +300 and green at -300, with X still correct.
+16b. **Grass presets** — DONE 2026-09-18. `app/state/grassPresets.js` +
+    a Preset dropdown at the top of the grass Appearance section: "Ghost of
+    Tsushima" (today's realistic defaults, restored exactly — verified by a
+    round trip) and "Genshin / Zelda" (blades take the ground colour at full
+    tint, flat shading, 3 segments, wider blades, little SSS). A preset is
+    only a set of panel values, applied through mergeKnownKeys; everything
+    stays editable after. New control it needed: "Shade variation" (the
+    per-blade and per-clump brightness scatter, 1 = realistic, 0 = flat) —
+    the far-field colour uses the same value. Cost, same scene interleaved:
+    GoT 3.30 ms, Genshin 2.77 ms. projectLookSaveTest now checks every preset
+    key is a real grass setting and that no preset carries paint or view state.
 16. **Grass panel cleanup** 👁: 59 controls, 16 of them two hand-placed light
     directions. Named presets plus a few real controls.
 17. **Grass look pass** 👁: match the Genshin ground colour.

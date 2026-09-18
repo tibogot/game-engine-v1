@@ -383,6 +383,10 @@ export class HybridGrassSystem {
       uTipCol: uniform(srgb(gp.tipColor ?? "#004d05")),
       uAoBase: uniform(gp.aoBase ?? 0.25),
       uAoPower: uniform(gp.aoPower ?? 2),
+      // How much of the per-blade and per-clump brightness scatter to keep.
+      // 1 = the realistic field; 0 = every blade the same shade, which is what
+      // a stylised (Genshin / Zelda) field wants.
+      uShadeVar: uniform(gp.shadeVariation ?? 1),
       uFarAoMul: uniform(gp.farAoMul ?? 0.55),
       uColorVar: uniform(gp.colorVariation ? 1 : 0),
       uCvHueSpread: uniform(gp.cvHueSpread ?? 0.08),
@@ -1048,7 +1052,11 @@ export class HybridGrassSystem {
       const yaw = b.y;
 
       // shadeRand recomputed from hash — its old slot (b.w) carries push Z
-      const shadeRand = mix(float(0.75), float(1.0), hash(bladeIdx.add(8521)));
+      const shadeRand = mix(
+        float(1),
+        mix(float(0.75), float(1.0), hash(bladeIdx.add(8521))),
+        u.uShadeVar,
+      );
       // h4 / h5 colour-variation randoms: same hashes the compute used to store.
       vData.assign(vec4(b.z, shadeRand, hash(bladeIdx.add(911)), hash(bladeIdx.add(2741))));
 
@@ -1236,14 +1244,17 @@ export class HybridGrassSystem {
 
       // Lighting comes from the standard material pipeline (scene lights,
       // CSM shadows) — colorNode is pure albedo, exactly like Gemini.
-      let finalAlbedo = tintedVaried.mul(clumpShade).mul(shadeRand).mul(ao);
+      let finalAlbedo = tintedVaried
+        .mul(mix(float(1), clumpShade, u.uShadeVar))
+        .mul(shadeRand)
+        .mul(ao);
       if (this._normalMode === "flat") {
         // Far rings converge to the colour the ground paints past the last
         // ring, so the hand-over has no seam. Near rings never reach the band.
         const field = grassFieldAlbedo(tintRgb, {
           bladeCol: u.uBladeCol, tipCol: u.uTipCol,
           aoBase: u.uAoBase, aoPower: u.uAoPower, farAoMul: u.uFarAoMul,
-          tintOn: hasMode, tintStrength: u.uTerrainTintStrength,
+          shadeVar: u.uShadeVar, tintOn: hasMode, tintStrength: u.uTerrainTintStrength,
           tintRootBias: u.uTerrainTintRootBias,
         });
         const distA = length(vWorld.xz.sub(u.uAnchorPos.xz));
@@ -1423,6 +1434,7 @@ export class HybridGrassSystem {
     u.uTipCol.value.copy(srgb(gp.tipColor ?? "#004d05"));
     u.uAoBase.value = gp.aoBase ?? 0.25;
     u.uAoPower.value = gp.aoPower ?? 2;
+    u.uShadeVar.value = gp.shadeVariation ?? 1;
     u.uFarAoMul.value = gp.farAoMul ?? 0.55;
     u.uColorVar.value = gp.colorVariation ? 1 : 0;
     u.uCvHueSpread.value = gp.cvHueSpread ?? 0.08;

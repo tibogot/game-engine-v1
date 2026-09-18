@@ -66,6 +66,13 @@ check("every grass setting with a control is in the table", uncovered.length ===
 const unknown = [...tableKeys].filter((k) => !grassKeys.includes(k));
 check("the table names no unknown grass setting", unknown.length === 0, unknown.join(", "));
 
+// Every preset value names a real grass setting (a typo would apply nothing).
+const { GRASS_PRESETS } = await import("../v3/app/state/grassPresets.js");
+const presetKeys = [...new Set(Object.values(GRASS_PRESETS).flatMap((p) => Object.keys(p.values)))];
+const strayPreset = presetKeys.filter((k) => !grassKeys.includes(k));
+check("every preset key is a grass setting", strayPreset.length === 0, strayPreset.join(", "));
+check("presets carry no view toggle or painted density", !presetKeys.some((k) => k === "lodDebug" || /density$/i.test(k)));
+
 // A slider's listener divides by the same factor the table multiplies by.
 const scaleMismatch = [];
 let scalesChecked = 0;
