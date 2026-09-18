@@ -69,6 +69,23 @@ const stubRenderer = {
 const backendForBuilder = new THREE.WebGPUBackend({});
 stubRenderer.backend.createNodeBuilder = (o, r) => backendForBuilder.createNodeBuilder(o, r);
 
+/**
+ * The same, for a COMPUTE node — `Fn(...)().compute(n, [w])`.
+ *
+ * Added 2026-09-18 with the ambient FX field. Until then nothing could ask
+ * whether a compute pass compiles without a browser, and this repo has several
+ * of them (the scatter field, the leaf field, the crowd skinning, the rain).
+ * A TSL mistake inside a compute is otherwise a silent no-op at runtime.
+ *
+ * @param {object} computeNode  the node returned by `.compute()`
+ * @returns {object} the built node builder — read `.computeShader`
+ */
+export function buildComputeWGSL(computeNode) {
+  const builder = stubRenderer.backend.createNodeBuilder(computeNode, stubRenderer);
+  builder.build();
+  return builder;
+}
+
 export function buildWGSL(material, { withLight = true, instanced = null } = {}) {
   // An instanced material reads per-instance data through InstanceNode, which
   // only exists when the OBJECT being built is the InstancedMesh itself.

@@ -259,6 +259,15 @@ export function createGpuStatsPanel(renderer, opts = {}) {
         passes: passCounts[passCounts.length - 1] ?? 0,
         topPasses: topPasses.map((p) => ({ ...p })),
         raw: renderer?.info?.render?.timestamp ?? 0,
+        /**
+         * The raw per-frame totals behind the summary, newest last.
+         *
+         * An A/B needs these and not the median: WebGPU's timestamp quantises
+         * to a handful of distinct values per second, so both sides of a real
+         * difference can land on the same median. Take the MEAN of these
+         * instead, interleaved over several rounds.
+         */
+        frameTotals: [...frameTotals],
         clearedAtStart,
         poolSize: getPool()?.timestamps?.size ?? 0,
       };

@@ -104,6 +104,8 @@ import { FlowerSystem } from "../render/grass/flowerSystem.js";
 import { FlowerDensity } from "../render/grass/flowerDensity.js";
 import { FoliageScatterSystem, bakeFoliageThumbnail } from "../render/foliage/foliageSystem.js";
 import { ScatterDensity } from "../render/scatter/scatterDensity.js";
+import { AmbientFxSystem } from "../render/ambient/ambientFxSystem.js";
+import { createAmbientFxState } from "./state/ambientFxState.js";
 import { createFoliageScatterState, createSusukiPlantState, SUSUKI_FIELD } from "./state/foliageScatterState.js";
 import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
@@ -143,6 +145,7 @@ import { createTreeEnvironment } from "./treeEnvironment.js";
 import { buildTreePanel } from "../ui/buildTreePanel.js";
 import { buildBrushFilterSection, createBrushFilterState } from "../ui/brushFilterSection.js";
 import { buildFoliagePanel } from "../ui/buildFoliagePanel.js";
+import { buildAmbientFxPanel } from "../ui/buildAmbientFxPanel.js";
 import { buildRiverV2Panel } from "../ui/buildRiverV2Panel.js";
 import { RiverV2System } from "../tools/riverV2System.js";
 import { TunnelSystem, createTunnelToolState } from "../tools/tunnelSystem.js";
@@ -315,6 +318,8 @@ export async function startV3App(opts = {}) {
   // this panel exists to distrust. Turn it back on before believing them.
   // const gpuStats = hasTimestamps ? createGpuStatsPanel(renderer) : null;
   // window.__v3GpuStats = gpuStats; // console probe: __v3GpuStats.sample()
+  /** Created on demand by __V3_DEBUG.gpu(); nothing runs while it is null. */
+  let _gpuStatsPanel = null;
   let _maxDraw = 1;
   let _maxTri  = 1;
   renderer.info.autoReset = false;
@@ -1314,6 +1319,7 @@ export async function startV3App(opts = {}) {
   let foliageScatter = null;
   let _foliageScatterBuilding = false;
   let foliageUi = null;
+  let ambientFxUi = null;
   /** Plant pictures for the panel's picker, baked once each and after an edit. */
   const _foliageThumbs = new Map();
   let _foliageThumbChain = Promise.resolve();
@@ -1751,6 +1757,40 @@ export async function startV3App(opts = {}) {
     foliageScatter?.syncFromState(foliageScatterState, grassState, getLightDir(), {
       hasRivers: (riverV2System?.rivers.length ?? 0) > 0,
     });
+  }
+
+  // ── Ambient FX (butterflies, falling leaves) — one compute, one draw ──────
+  const ambientFxState = createAmbientFxState();
+  let ambientFx = null;
+  let _ambientFxBuilding = false;
+  let _ambientFxSelected = 0;
+
+  async function ensureAmbientFxBuilt() {
+    if (ambientFx || _ambientFxBuilding) return;
+    _ambientFxBuilding = true;
+    try {
+      const sys = new AmbientFxSystem({
+        scene,
+        renderer,
+        heightTex:        grassTerrainData.grassHeightTex,
+        terrainNormalTex: grassTerrainData.terrainNormalTex,
+        windTex:          grassWindTex,
+        worldSize:        WORLD_SIZE,
+        fx:               ambientFxState,
+      });
+      await sys.init(camera);
+      sys.setEnabled(true);
+      ambientFx = sys;
+      syncAmbientFxUniforms();
+    } catch (err) {
+      console.error("[V3 Ambient FX] build failed:", err);
+    } finally {
+      _ambientFxBuilding = false;
+    }
+  }
+
+  function syncAmbientFxUniforms() {
+    ambientFx?.syncFromState(ambientFxState, grassState, getLightDir());
   }
 
   // ── UI wiring ──────────────────────────────────────────────────────────────
@@ -2883,6 +2923,7 @@ export async function startV3App(opts = {}) {
   const flowerPanel = uiById("flower-panel");
   const treePanel  = uiById("tree-panel");
   const foliagePanel = uiById("foliage-panel");
+  const ambientFxPanel = uiById("ambientfx-panel");
   const vegHeaderEl = uiById("vegetation-header");
   const vegPlacedEl = uiById("veg-placed-panel");
   const snowPanel  = uiById("snow-panel");
@@ -2926,6 +2967,12 @@ export async function startV3App(opts = {}) {
     foliagePanel.style.display = (editorMode === "foliage" && !playMode.active) ? "" : "none";
     if (vegHeaderEl) vegHeaderEl.style.display = (VEG_MODES.includes(editorMode) && !playMode.active) ? "" : "none";
     if (vegPlacedEl) vegPlacedEl.style.display = (editorMode === "vegPlaced" && !playMode.active) ? "" : "none";
+  }
+
+  function syncAmbientFxPanelVisibility() {
+    if (ambientFxPanel) {
+      ambientFxPanel.style.display = (editorMode === "ambientFx" && !playMode.active) ? "" : "none";
+    }
   }
 
   function syncPropsPanelVisibility() {
@@ -3051,6 +3098,13 @@ export async function startV3App(opts = {}) {
       uCursorUV.value.set(-2, -2);
       sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
       void ensureFoliageScatterBuilt();
+    } else if (m === "ambientFx") {
+      uCursorUV.value.set(-2, -2);
+      // Opening the mode IS the request to see it. A world nobody opened it in
+      // keeps the flag off, so no existing project grows butterflies by itself.
+      ambientFxState.enabled = true;
+      void ensureAmbientFxBuilt();
+      ambientFxUi?.rebuild();
     } else if (m === "vegPlaced") {
       uCursorUV.value.set(-2, -2);
       sculpt.uRadius.value = vegBrush.radius / WORLD_SIZE;
@@ -3107,6 +3161,7 @@ export async function startV3App(opts = {}) {
     syncWaterfallPanelVisibility();
     syncTreePanelVisibility();
     syncFoliagePanelVisibility();
+    syncAmbientFxPanelVisibility();
     syncPropsPanelVisibility();
     syncSplinePanelVisibility();
     syncRiverV2PanelVisibility();
@@ -4155,6 +4210,21 @@ export async function startV3App(opts = {}) {
         if (wantFoliage) {
           foliageScatter.setShadowCameras(scatterShadowCameras(foliageScatterState.shadowDistance));
           foliageScatter.update(playMode.active ? playMode.playerPosition : camera.position, camera);
+        }
+      }
+      // Ambient FX: one compute and one draw, and only while something is
+      // budgeted. The sun moves, so its direction is refreshed every frame
+      // rather than only on a panel edit — it is two uniform writes.
+      if (ambientFx) {
+        const wantAmbient = ambientFxState.enabled && ambientFx.anyLive && _terrainVisible;
+        ambientFx.setEnabled(wantAmbient);
+        if (wantAmbient) {
+          ambientFx.u.uSunDir.value.copy(getLightDir()).normalize();
+          ambientFx.setViewportHeight(renderer.domElement.height);
+          ambientFx.update(
+            playMode.active ? playMode.playerPosition : camera.position,
+            camera, dt, ambientFxState.forwardOffset,
+          );
         }
       }
 
@@ -7472,6 +7542,14 @@ export async function startV3App(opts = {}) {
     treeCastShadowChanged: () => treeEnv.setCastShadow(treeToolState.treeLod.castShadow),
   });
 
+  if (isEditor && ambientFxPanel) {
+    ambientFxUi = buildAmbientFxPanel(ambientFxPanel, {
+      fxState: ambientFxState,
+      getSelected: () => _ambientFxSelected,
+      setSelected: (i) => { _ambientFxSelected = i; },
+      onStateChanged: () => { void ensureAmbientFxBuilt(); syncAmbientFxUniforms(); },
+    });
+  }
   if (isEditor && foliagePanel) foliageUi = buildFoliagePanel(foliagePanel, {
     foliageBrush: foliageScatterBrush,
     foliageState: foliageScatterState,
@@ -10243,6 +10321,81 @@ export async function startV3App(opts = {}) {
 
   if (import.meta.env?.DEV) {
     window.__V3_DEBUG = {
+      /**
+       * What the ambient field is actually doing this frame — the honest
+       * numbers, read off the live objects rather than off the state.
+       *   __V3_DEBUG.ambientFx()
+       */
+      ambientFx() {
+        if (!ambientFx) return { built: false };
+        const f = ambientFx.field;
+        return {
+          built: true,
+          enabled: ambientFxState.enabled,
+          visible: f.group.visible,
+          draws: f.meshes.filter((m) => m.visible).length,
+          trianglesPerCard: f.triangles[0],
+          poolSlots: f.count,
+          sliceStart: f._sliceStart.slice(),
+          sliceLen: f._sliceLen.slice(),
+          tier: f.u.uTier.value,
+          volumeXZ: f.u.uVolumeXZ.value,
+          volumeY: f.u.uVolumeY.value,
+          center: f.u.uCenter.value.toArray().map((v) => +v.toFixed(1)),
+          dt: +f.u.uDt.value.toFixed(4),
+          // What the frame actually cost. The instance count lives in an
+          // indirect buffer the GPU writes, and reading a storage buffer back
+          // hands you the stale CPU copy — so the only honest measure of "are
+          // any alive" is the triangles that reached the rasteriser.
+          drawCalls: renderer.info.render.drawCalls,
+          triangles: renderer.info.render.triangles,
+        };
+      },
+      /**
+       * Drive the ambient field's settings from the console, for A/Bs.
+       * `effects` is applied to EVERY effect, the rest to the field.
+       *   __V3_DEBUG.ambientSet({ effects: { budget: 4000 } })
+       *   __V3_DEBUG.ambientSet({ enabled: false })
+       */
+      ambientSet(patch = {}) {
+        const { effects, ...field } = patch;
+        Object.assign(ambientFxState, field);
+        if (effects) for (const e of ambientFxState.effects) Object.assign(e, effects);
+        syncAmbientFxUniforms();
+        ambientFxUi?.rebuild();
+        return window.__V3_DEBUG.ambientFx();
+      },
+      /**
+       * The per-pass GPU timing panel, created on demand.
+       *
+       * It is off by default (see the note where it is imported) because the
+       * numbers it exists to distrust are the ones stats-gl shows. Any A/B in
+       * this editor should come through here rather than through
+       * `renderer.info.render.timestamp`, which under-reports partial frames
+       * by an order of magnitude.
+       *   const g = await __V3_DEBUG.gpu(); g.sample().frameTotals
+       */
+      async gpu() {
+        if (!hasTimestamps) return null;
+        if (!_gpuStatsPanel) {
+          const { createGpuStatsPanel } = await import("../render/gpuStatsPanel.js");
+          _gpuStatsPanel = createGpuStatsPanel(renderer);
+        }
+        return _gpuStatsPanel;
+      },
+      /**
+       * Stand on the ground at (x, z) looking level. Ambient FX is a
+       * head-height effect — from the default camera 300 m up, every particle
+       * is past its own fade distance and correctly draws nothing.
+       *   __V3_DEBUG.ambientStand()
+       */
+      ambientStand(x = 0, z = 0) {
+        const y = terrainStoreAdapter.getWorldHeight(x, z);
+        camera.position.set(x, y + 1.7, z);
+        controls.target.set(x + 12, y + 1.4, z);
+        controls.update();
+        return { at: [x, +(y + 1.7).toFixed(2), z] };
+      },
       /*
        * A repeatable prop stress scene, for measuring the instancing and shadow
        * work. It goes through the SAME path the Props tool uses (addPrimitive →

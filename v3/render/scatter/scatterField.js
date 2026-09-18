@@ -49,28 +49,8 @@ import {
 } from "three/tsl";
 import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
 import { scatterClump, scatterRuleKeep } from "./scatterNoise.js";
+import { scatterFrustumVisible } from "./gpuCull.js";
 import { LAYERS } from "../layers.js";
-
-/**
- * Is a plant of this radius at this base point on screen? The base is
- * projected, then the screen edges are pushed OUT by the plant's radius on
- * every side (the grass's test only padded the bottom and pulled the top IN,
- * which culled every fern within a few metres of a camera looking down).
- * A plant closer to the camera than its own radius is always kept: its
- * projection is meaningless there and it is certainly in view.
- */
-const scatterFrustumVisible = Fn(([worldPos, cameraMatrix, fx, fy, radius, padX, padYNear, padYFar]) => {
-  const clip = cameraMatrix.mul(vec4(worldPos, 1));
-  const depth = clip.w.abs().max(1e-4);
-  const ndc = clip.xyz.div(depth);
-  const rX = fx.mul(radius).div(depth).add(padX);
-  const rY = fy.mul(radius).div(depth);
-  const inX = step(float(-1).sub(rX), ndc.x).mul(step(ndc.x, float(1).add(rX)));
-  const inY = step(float(-1).sub(rY).sub(padYNear), ndc.y).mul(step(ndc.y, float(1).add(rY).add(padYFar)));
-  const inFront = step(float(0), clip.w).mul(step(ndc.z, float(1)));
-  const nearCamera = step(clip.w.abs(), radius);
-  return max(nearCamera, inX.mul(inY).mul(inFront));
-});
 
 export class ScatterField {
   /**

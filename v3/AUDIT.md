@@ -923,8 +923,85 @@ this section is empty; what v3 still imports from v2 moves, it is not lost.
 
 97. **Waterfall** (`v2/tools/waterfall`, 525 lines): waterfall + impact splash,
     gizmo, saved. Do it after River v2 so falls sit on river drops.
-98. **Ambient FX:** painted butterfly and falling-leaf emitters, 3 leaf types
-    with physics (`v2/core/ambientfx`). Cheap, a lot of life.
+98. **Ambient FX** — IN PROGRESS (slice 1 landed 2026-09-18). Ambient FX mode
+    in the toolbar: butterflies and falling leaves, GPU-simulated. NOT a port
+    of `v2/core/ambientfx` — that was taken as a list of effects someone
+    wanted, nothing more. Built the way Niagara/VFX Graph do ambient work.
+
+    Landed:
+    - `v3/render/ambient/ambientField.js` — the shared core. A camera-following
+      BOX (not scatterField's wrap tile: scatter is stateless placement, this
+      is stateful simulation), one persistent pool statically sliced so an
+      effect's BUDGET IS ITS SLICE LENGTH, one compute pass per frame, atomic
+      compaction, indirect draws sliced by `firstInstance`.
+    - Respawn is REJECTION SAMPLING against the effect's rule — no CPU, no
+      prefix sum, self-balancing. A slot remembers where it last succeeded and
+      samples a disc around it, so refill after a teleport is immediate rather
+      than a second of fade-up.
+    - Four cull gates, all in the compute: frustum (the SAME test the plants
+      use — `scatterFrustumVisible` lifted into `v3/render/scatter/gpuCull.js`,
+      scatterField now imports it), distance, SCREEN SIZE (below `minPixels` a
+      card is not drawn; sub-pixel triangles crawl rather than fade — the
+      starfield lesson), and near-camera.
+    - Scalability tier: one uniform scaling every slice's live length. No
+      reallocation, free to change per frame.
+    - Two integrators (`ambientMotion.js`), plain JS inlining TSL rather than
+      `Fn` (an Fn returning an object collapses to one node): WANDER, with the
+      vertical bob locked to the wing beat that makes an insect read as one;
+      and FALL, with the autorotation swing that makes a leaf a leaf and not
+      snow, then SETTLE — it lies down on the terrain normal, which is written
+      OVER the velocity it no longer needs, and holds for `settleTime`.
+    - ONE DRAW CALL for every card effect (measured: 5 → 6). Draws are per
+      SHAPE CLASS, not per effect; effects differ only by uniform row.
+    - Painted artwork, not procedural shapes: `ambientAtlas.js` packs
+      `butterfly.png` and `leaf1-tiny.png` into one texture at load. The
+      texture exists from frame 0 and fills in, so no recompile and no stall.
+      Each tile is a WHOLE shape and the card's two halves take the painting's
+      two halves (`texU = 0.5 + side·u·0.5`), so a wing keeps its own painted
+      asymmetry. Per-effect colour is a TINT over the art, 0 by default.
+      A file that will not load draws a placeholder and WARNS — v2 loaded a
+      `moth.png` that is not in the repo and silently showed nothing.
+    - `tools/ambientFxTest.mjs` (32 checks) and `buildComputeWGSL` added to
+      `tools/wgslBuilderStub.mjs` — until now nothing in this repo could ask
+      whether a COMPUTE pass compiles without a browser, and several systems
+      have one.
+    - Console probes: `__V3_DEBUG.ambientFx()`, `.ambientSet()`,
+      `.ambientStand()`, `.gpu()` (the timestamp panel, on demand).
+
+    COST, measured and honest: +1 draw call and +1 compute dispatch, and the
+    GPU time is BELOW THE 0.065 ms TIMESTAMP QUANTUM — at 1200 particles, at
+    8000, and at a deliberately absurd worst case of 4000 metre-wide cards
+    filling the screen. Four interleaved rounds, means not medians, tab in
+    front. The deltas came back non-monotonic (600 particles "costing" more
+    than 4000 big ones), which is the signature of noise, not a measurement.
+    It is not "free" — it is unresolved. Separating it needs the pixel-ratio
+    trick the world rain used (3×, 9× the pixels). For a budget decision the
+    reading is: budget is not the constraint here.
+
+    Still to do:
+    - PAINT. The mode currently fills anywhere height and slope allow.
+      `ScatterDensity` verbatim (4 effects per RGBA page) + the vegetation
+      brush + save/load into `.v3proj`.
+    - The rest of the spawn rules: painted mask, near water (`waterSurfaceMap`
+      — one tap, covers lakes AND rivers and gives the surface Y), near trees
+      (needs a NEW `canopyMap.js`, ~120 lines, splatting TreeStore), time of
+      day (fireflies at night), weather.
+    - More leaf art. Only ONE single-leaf PNG exists; `leaf_atlas.png` and the
+      `Leaf-Billboard-Texture-*` files are canopy clusters, no good for a
+      falling leaf. Drop singles into `public/textures/` and append to
+      `AMBIENT_ART`.
+    - Not built, architecture leaves room: the BILLBOARD shape class (a second
+      draw) for dust motes, pollen, fireflies; the `float` and `rise`
+      integrators.
+    - Birds stay closed-form and separate (`modularRoadBirds.js`: 1 draw, 0
+      compute, already tested). Agreed to move into the engine as
+      `v3/render/ambient/birdFlocks.js` and host in this mode — NOT folded
+      into the particle pool, which would cost a compute slice and lose the
+      flock read. Not done; it touches a game file.
+    - Watch for: settled leaves use `heightTex`, not the clipmap mesh. Grass
+      floated for exactly this reason. Near the camera the error is small and
+      a flat leaf hides it, but if they float, lift v2's `_clipmapGroundY` out
+      of `hybridGrassSystem` into a shared TSL helper.
 99. ~~**Flowers**~~ — DONE 2026-09-15: Flowers mode (M), rebuilt on the susuki
     skeleton instead of porting v2's CPU list. Painted areas, up to 4 types
     (one per channel of a 1024² density map; types mix), v2's bloom cup and 3

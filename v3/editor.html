@@ -64,6 +64,9 @@
           <button class="toolbar-btn" data-mode="spline" title="Spline (K)">
             <i data-lucide="spline"></i>
           </button>
+          <button class="toolbar-btn" data-mode="ambientFx" title="Ambient FX — butterflies, falling leaves">
+            <i data-lucide="sparkles"></i>
+          </button>
           <button class="toolbar-btn" data-mode="spawn" title="Player start (N)">
             <i data-lucide="flag"></i>
           </button>
@@ -156,6 +159,7 @@
               <option value="lake">Lake (L)</option>
               <option value="decals">Decals (C)</option>
               <option value="waterfall">Waterfall (G)</option>
+              <option value="ambientFx">Ambient FX</option>
               <option value="road">Road (smart)</option>
               <option value="laneRoad">Lane road (preview)</option>
               <option value="snow">Snow</option>
@@ -2352,6 +2356,9 @@
 
         <!-- WATERFALL panel — built dynamically by buildWaterfallPanel() -->
         <div id="waterfall-panel" style="display:none"></div>
+
+        <!-- AMBIENT FX panel — built dynamically by buildAmbientFxPanel() -->
+        <div id="ambientfx-panel" style="display:none"></div>
 
         <!-- ROAD panel — built dynamically by buildRoadPanel() -->
         <div id="road-panel" style="display:none"></div>
