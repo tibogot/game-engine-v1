@@ -1372,6 +1372,7 @@ export async function startV3App(opts = {}) {
   // nothing at all.
   let revoGrass = null;
   let _revoBuilding = false;
+  let revoUi = null;          // its panel, rebuilt when a load changes the values
 
   // ── Terrain tint bake ──────────────────────────────────────────────────────
   // v2 fed the grass a procedural ground-color TSL fn; v3's terrain color is
@@ -6145,7 +6146,7 @@ export async function startV3App(opts = {}) {
   const gselGrassSystem = uiById("gsel-grass-system");
   const revoPanelRoot = uiById("revo-grass-panel");
   if (revoPanelRoot) {
-    buildRevoGrassPanel(revoPanelRoot, {
+    revoUi = buildRevoGrassPanel(revoPanelRoot, {
       revoGrassState,
       onStateChanged: () => syncGrassUniforms(),
       onGeometryChanged: () => syncRevoGrass(),
@@ -6475,8 +6476,10 @@ export async function startV3App(opts = {}) {
   function applyGrassState(saved) {
     mergeKnownKeys(grassState, saved);
     syncPanelControls(GRASS_PANEL_CONTROLS, grassState);
-    // A loaded world may run the other grass system; the panel follows it.
+    // A loaded world may run the other grass system, with its own values; the
+    // panel and the dropdown both follow it.
     syncGrassSystemUi();
+    revoUi?.rebuild();
     if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
     if (cliffGrassRings) rebuildHybridGrassGeometries(cliffGrassRings, grassState);
     grassTintDirty = true;

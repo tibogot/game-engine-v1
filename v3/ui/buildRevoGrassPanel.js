@@ -1,5 +1,5 @@
 import { section, slider, color, toggle, dropdown, hint } from "./widgets.js";
-import { REVO_GRASS_QUALITY } from "../app/state/revoGrassState.js";
+import { REVO_GRASS_QUALITY, REVO_GRASS_PRESETS, REVO_GRASS_GEOMETRY_KEYS } from "../app/state/revoGrassState.js";
 
 /**
  * The revo grass system's own controls, built into #revo-grass-panel and shown
@@ -21,7 +21,33 @@ export function buildRevoGrassPanel(root, { revoGrassState: rp, onStateChanged, 
     requestAnimationFrame(() => { queued = false; onGeometryChanged?.(); });
   };
 
+  // Applying a preset rewrites most of the values below, so the panel is
+  // rebuilt rather than left showing the old numbers.
+  function build() {
   root.innerHTML = "";
+
+  // ── Camera style ──
+  // Which camera the field is dressed for. A preset is only a set of the
+  // values below; everything stays editable after applying one.
+  const cam = section(root, "Camera style");
+  const applyPreset = (id) => {
+    const preset = REVO_GRASS_PRESETS[id];
+    if (!preset) return;
+    const geometry = REVO_GRASS_GEOMETRY_KEYS.some((k) => k in preset.values && rp[k] !== preset.values[k]);
+    Object.assign(rp, preset.values);
+    rp.preset = id;
+    onStateChanged?.();
+    if (geometry) onGeometryChanged?.();
+    build();
+  };
+  dropdown(cam, rp, "preset", {
+    label: "Preset",
+    options: Object.entries(REVO_GRASS_PRESETS).map(([k, p]) => [k, p.label]),
+    onChange: () => applyPreset(rp.preset),
+  });
+  hint(cam, REVO_GRASS_PRESETS[rp.preset]?.hint ?? "");
+  slider(cam, rp, "faceCamera", { label: "Face camera", min: 0, max: 1, step: 0.01, onChange: onStateChanged,
+    hint: "0 = blades keep their own up. 1 = they roll over to show their face to the camera, which is what a top-down camera needs. A camera standing in the grass is left alone either way — the tilt follows how far ABOVE each blade the camera is." });
 
   const fld = section(root, "Field");
   dropdown(fld, rp, "quality", {
@@ -84,4 +110,8 @@ export function buildRevoGrassPanel(root, { revoGrassState: rp, onStateChanged, 
   slider(push, rp, "pushBend", { label: "Lay over", min: 0, max: 3, step: 0.05, onChange: onStateChanged });
   slider(push, rp, "crushMin", { label: "Crushed height", min: 0.05, max: 1, step: 0.01, onChange: onStateChanged,
     hint: "How short a fully flattened blade gets. 1 = it only leans." });
+  }
+
+  build();
+  return { rebuild: build };
 }

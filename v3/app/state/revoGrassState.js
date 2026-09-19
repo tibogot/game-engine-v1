@@ -22,6 +22,7 @@ export const REVO_GRASS_QUALITY = {
 };
 
 export const REVO_GRASS_DEFAULTS = {
+  preset: "openWorld",    // which camera style was last applied (see below)
   quality: "high",
   // 90 m of tile at 512² is ~32 blades per square metre. The original's 130 m
   // is only 15, which for a system whose whole argument is density reads as a
@@ -77,7 +78,48 @@ export const REVO_GRASS_DEFAULTS = {
 
   pushBend: 1,            // how hard the push field lays blades over
   crushMin: 0.35,         // shortest a fully crushed blade gets, as a fraction
+
+  // 0 = the blade keeps its own up (right for a camera standing in the
+  // field), 1 = it rolls over to show its face to the camera, which is what
+  // an RTS camera looking DOWN the blade needs. Driven by the camera's
+  // elevation over each blade, so a ground camera is left alone whatever this
+  // says — there is no separate RTS mode to switch.
+  faceCamera: 0,
   receiveShadow: true,
+};
+
+/**
+ * Two camera styles, as sets of the values above — the same idea as the
+ * hybrid grass's art-direction presets (app/state/grassPresets.js). Nothing
+ * here is a code path, and every control stays editable after applying one.
+ */
+export const REVO_GRASS_PRESETS = {
+  openWorld: {
+    label: "Open world (camera in the grass)",
+    hint: "Upright blades, reach and silhouette. What you are looking at is the field's horizon.",
+    values: {
+      faceCamera: 0, bladeHeight: 1.1, bladeWidth: 0.07, lean: 0.3,
+      tileSize: 90, fadeStart: 16, fadeEnd: 44, fadeKeep: 0.15,
+      clumpStrength: 0.35, clumpScale: 2, minPixels: 1.4,
+    },
+  },
+  rts: {
+    label: "Top-down (RTS camera)",
+    hint: "Blades roll to show their faces, wider and shorter, spent close in: from up there you read the field, not the blades.",
+    values: {
+      // Face fully: from an RTS camera an upright blade is an edge.
+      faceCamera: 1,
+      // A blade seen from above reads as its AREA, so it wants width, and its
+      // height is what you cannot see — lower it and the field stops looking
+      // like a lawn made of spikes.
+      bladeHeight: 0.8, bladeWidth: 0.11, lean: 0.35,
+      // You see less distance from up there, so the blades are spent closer in
+      // and the near field gets denser for the same cost.
+      tileSize: 60, fadeStart: 14, fadeEnd: 34, fadeKeep: 0.2,
+      // Clumps are most of the texture of a field seen from above.
+      clumpStrength: 0.55, clumpScale: 2.6, minPixels: 1.4,
+    },
+  },
 };
 
 /** Changing one of these rebuilds the mesh and the buffers, not just uniforms. */

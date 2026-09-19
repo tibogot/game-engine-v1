@@ -19,7 +19,7 @@
 // ============================================================================
 
 const { buildWGSL, buildComputeWGSL, THREE, TSL } = await import("./wgslBuilderStub.mjs");
-const { revoGrassConfig, createRevoGrassState, REVO_GRASS_QUALITY, REVO_GRASS_GEOMETRY_KEYS, REVO_GRASS_DEFAULTS } =
+const { revoGrassConfig, createRevoGrassState, REVO_GRASS_QUALITY, REVO_GRASS_GEOMETRY_KEYS, REVO_GRASS_DEFAULTS, REVO_GRASS_PRESETS } =
   await import("../v3/app/state/revoGrassState.js");
 const { RevoGrassSystem } = await import("../v3/render/grass/revoGrassSystem.js");
 const { createRevoBladeGeometry } = await import("../v2/core/revoGrass/revoGrassGeometry.js");
@@ -61,6 +61,15 @@ const dataTex = (v) => {
   const state = createRevoGrassState();
   check("the geometry keys all name real settings",
     REVO_GRASS_GEOMETRY_KEYS.every((k) => k in state), REVO_GRASS_GEOMETRY_KEYS.join());
+  // Same rule for the camera-style presets — a preset key that is not a real
+  // setting is a value that applies once and vanishes on the next save.
+  const strayPreset = Object.entries(REVO_GRASS_PRESETS)
+    .flatMap(([id, p]) => Object.keys(p.values).filter((k) => !(k in state)).map((k) => `${id}.${k}`));
+  check("every preset value names a real setting", strayPreset.length === 0, strayPreset.join(", "));
+  check("both camera styles say which way the blade faces",
+    Object.values(REVO_GRASS_PRESETS).every((p) => typeof p.values.faceCamera === "number"));
+  check("the open-world style keeps blades upright and the RTS one does not",
+    REVO_GRASS_PRESETS.openWorld.values.faceCamera === 0 && REVO_GRASS_PRESETS.rts.values.faceCamera > 0.5);
   check("the defaults carry no painted data", !("paint" in REVO_GRASS_DEFAULTS));
   check("fade goes outward, not inward", REVO_GRASS_DEFAULTS.fadeEnd > REVO_GRASS_DEFAULTS.fadeStart);
 }

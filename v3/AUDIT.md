@@ -2194,9 +2194,41 @@ That is the comparison, not a bug.
        original's per-blade 5 rad/s sway went to 1.8 with it: every blade
        vibrating on its own phase is not wind.
 
+     SLICE 2 (2026-09-19) — the RTS camera, and why it is a knob and not a mode.
+     From a high pitched-down camera the field was hairs over bright ground:
+     a yaw-only blade keeps its own up, so an overhead camera looks DOWN the
+     blade's length and every one of them is an edge. That is the whole reason
+     the original is a full sprite.
+     - `faceCamera` 0→1 rolls the blade's up axis about its width axis until
+       the card's normal IS the view direction (at 1 and the full angle, that
+       is the sprite exactly). Done as a ROTATION, not a mix toward the camera:
+       blending up vectors passes through the zero vector overhead — the
+       ambient cards' lesson.
+     - NO "is this an RTS camera" toggle is needed, and this is the part worth
+       keeping: the angle is the camera's ELEVATION OVER EACH BLADE, so a
+       camera standing in the grass is left alone whatever the knob says.
+       Verified: at `faceCamera` 1 the ground-level view is unchanged and the
+       overhead one is a carpet. A gate (10°→40°) keeps the blades under your
+       feet upright, and a 75° cap keeps a blade catching some light.
+     - The NORMAL survives it: the lift toward straight up is scaled by
+       cos(tilt), so a blade lying flat for an overhead camera has an up
+       normal, which is also the true answer. That is how this keeps real sun
+       and CSM where the original has to bake a lightmap.
+     - Two camera-style presets (`REVO_GRASS_PRESETS`): Open world, and
+       Top-down (RTS) — facing 1, blades wider and shorter, the tile spent
+       closer in (60 m), stronger clumping, because from up there you read the
+       field's texture, not blade silhouettes.
+     - MEASURED, same RTS camera, 3 interleaved rounds: facing off 3.03 ms,
+       facing on 3.19 ms. The +0.16 ms is FILL, not the maths — a blade
+       showing its face covers more pixels than one showing its edge.
+
      Still to do:
      - Judge the MOTION in the editor, which no screenshot can answer.
      - Colour, density and reach are at first-guess defaults.
+     - The facing helper stays inside the revo system for now. The foliage
+       cards and flowers have the same problem from an RTS camera; lift it
+       into a shared helper when a second system wants it (the clipmapGroundY
+       pattern), not before.
      - No cliff-top layer (hybrid's second ring set has one) and no terrain
        tint takeover; the ground hand-off uses revo's own colours over its
        fade band.
@@ -2204,6 +2236,54 @@ That is the comparison, not a bug.
        asked for it.
      - The tile is a SQUARE, so its corners reach ~1.4x further than its
        sides. Invisible so far because the stochastic fade ends first.
+
+118. **Ideas still on the shelf at alezen9/revo-realms.** Written down because
+     we keep going back to that repo for one thing and finding three.
+     Re-read 2026-09-19 (it has moved on since the July reading). His world is
+     a fixed 512 m map with baked heightmap / grassMap / shadowMap textures, so
+     anything that reads those does NOT transfer to v3's infinite clipmap.
+
+     Worth taking, in value order:
+     - `systems/WindManager.ts` — ONE GLOBAL WIND (`uDirection`,
+       `uIntensityBase`, `uIntensityDirectional`) that grass, trees, water and
+       his wind streaks all read. This engine has no such thing: grass, susuki,
+       foliage, flowers, trees and now the revo tile each roll their own wind,
+       so they sway out of phase with each other. This is the biggest single
+       win on the list and it gets worse with every system we add. (His current
+       version is gameplay-driven — the player aims a gust at a landmark,
+       ramp → hold 3 s → decay. The reusable part is the ONE-wind shape.)
+     - `entities/WindAmbiance/WindAmbianceStreaks.ts` — 12 instanced ribbons
+       (PlaneGeometry 1×1×24) whose spines are simulated in a compute pass
+       (12 states + 312 spine points), width tapering (1-t)^1.5, opacity =
+       life × edge × head, and the ribbon blending between camera-facing and
+       world-perpendicular by `smoothstep(0.05, 0.2, cameraSideLength)`. In our
+       terms that is an AMBIENT FX effect (#98) and the obvious first consumer
+       of a global wind. `WindAmbianceParticles.ts` sits beside it.
+     - `systems/FrameScheduler.ts` — measures the display's real refresh rate
+       (median of 61 rAF deltas, snapped to a 30..240 list) and renders on
+       `frame % ceil(refreshHz / targetFps)`. A clean way to offer a 30 fps
+       mode on a throttling laptop without touching any system.
+     - `systems/LandmarkManager.ts` — points of interest with an icon, a
+       discovery radius and an arrival radius, firing discovery events,
+       checked every 16th frame. That is item 93 (gameplay markers), still
+       unported from v2, with a design already written.
+     - `PrewarmManager.ts` — force-render everything with frustum culling off
+       behind a 2.5 s timeout, to compile shaders before gameplay. Ours is the
+       moving warm-up drive in the racing game; his is the general version.
+     - `utils/TSLUtils.ts` — `packUnits` / `packFlag` / `packAngle` bit-packing
+       into float mantissas. The payoff is VRAM (~78 MB on his grass), not
+       speed, and packing costs ALU. Measure before believing it.
+
+     Already here, do NOT "port": his `computeVisibility` and
+     `computeStochasticKeep` (both live in `v2/core/revoGrass/`, and our grass
+     adds compaction + an indirect draw on top), and his `CullingManager`,
+     which is CPU frustum culling of whole meshes every 16th frame where we
+     cull per instance on the GPU.
+
+     Skip: his ocean (v3's is better), his terrain shader (fixed 512 m, baked
+     maps), his post chain (bloom only), his asset/atlas manager,
+     `systems/runtime/*` (dev/prod tooling flags) and `entities/CoolStuff/*`
+     (fan-art set pieces).
 
 ## Performance
 

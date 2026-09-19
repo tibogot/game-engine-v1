@@ -32,6 +32,7 @@ import {
   Fn,
   If,
   abs,
+  asin,
   atomicAdd,
   atomicStore,
   cameraPosition,
@@ -190,6 +191,7 @@ export class RevoGrassSystem {
       uPushBend:      uniform(rp.pushBend ?? 1),
       uCrushMin:      uniform(rp.crushMin ?? 0.35),
       uLean:          uniform(rp.lean ?? 0.3),
+      uFaceCamera:    uniform(rp.faceCamera ?? 0),
       uMinPixels:     uniform(rp.minPixels ?? 1.4),
       uViewportH:     uniform(1080),
 
@@ -457,11 +459,39 @@ export class RevoGrassSystem {
     const h = uv().y;                       // 0 at the root, 1 at the tip
     const bendProfile = h.mul(h);           // a blade bends from its own height up
 
-    // ── Cylindrical billboard: yaw toward the camera, never pitch ──
+    // ── Billboard: yaw toward the camera, and pitch toward it by `faceCamera` ──
+    // Yaw alone (a cylindrical billboard) is right for a camera standing in
+    // the field: the blade turns to show its face and keeps its own up. From
+    // an RTS camera it is wrong for exactly the same reason — you are looking
+    // DOWN the blade's length, so every blade is an edge and the field reads
+    // as bare ground with hairs on it. The original (revo-realms) is a full
+    // sprite, which is why its field holds up from above.
+    //
+    // So the blade's up axis rolls about its own width axis, toward lying
+    // down and showing its face. At `faceCamera` 1 and the full angle the
+    // card's normal IS the view direction, which is the sprite exactly; at 0
+    // it stands up as before. The angle is the camera's ELEVATION over this
+    // blade, so the knob needs no companion "is this an RTS camera" toggle:
+    // a camera in the grass has almost no elevation over the field it is
+    // looking across, and nothing happens on its own.
     const worldXZ = vec2(offX.add(u.uAnchorPos.x), offZ.add(u.uAnchorPos.z));
     const toCam = cameraPosition.xz.sub(worldXZ);
     const facing = toCam.div(max(length(toCam), float(1e-3)));
     const right = vec3(facing.y, 0, facing.x.negate());
+    const toCam3 = cameraPosition.sub(vec3(worldXZ.x, groundY, worldXZ.y));
+    const elevation = asin(clamp(toCam3.normalize().y, float(-0.999), float(0.999)));
+    // Gated so the blades under your feet in a walking camera are left alone
+    // (they have a high elevation too, and flattening them reads as the grass
+    // getting out of the way), and capped short of flat so a blade always
+    // keeps some height to catch the light.
+    const faceAmt = u.uFaceCamera.mul(smoothstep(float(0.17), float(0.7), elevation));
+    const tilt = min(elevation.mul(faceAmt), float(1.31));    // 75 degrees
+    // Roll the frame about `right`: up' = up·cos - n·sin, where n (the card's
+    // normal) is the horizontal facing. Blending the up vector toward the
+    // camera instead passes through the zero vector overhead and explodes —
+    // the ambient cards' lesson, so this is a rotation, not a mix.
+    const upAxis = vec3(0, 1, 0).mul(cos(tilt))
+      .sub(vec3(facing.x, 0, facing.y).mul(sin(tilt)));
 
     // ── Width, with a floor in PIXELS ──
     // A 7 cm blade is under a pixel wide by 25 m, and a sub-pixel triangle
@@ -514,14 +544,18 @@ export class RevoGrassSystem {
     // the wind picks up, which reads as stretching rather than as bending.
     const drop = float(1).sub(leanFrac.mul(leanFrac).mul(0.35).mul(bendProfile));
     const stand = vec3(offX, groundY, offZ)
-      .add(vec3(0, positionLocal.y.mul(heightScale).mul(drop), 0));
+      .add(upAxis.mul(positionLocal.y.mul(heightScale).mul(drop)));
 
     mat.positionNode = stand.add(lateral).add(vec3(lean.x, 0, lean.y));
 
     // A card's own normal would light the field like a wall of mirrors facing
     // the camera; grass reads as a soft surface, so the normal leans most of
-    // the way back to straight up (the foliage cards' lesson).
-    mat.normalNode = normalize(vec3(facing.x.mul(0.45), 1, facing.y.mul(0.45)));
+    // the way back to straight up (the foliage cards' lesson). The flatter the
+    // blade lies for an overhead camera, the more straight up is also the
+    // TRUE answer — which is why this survives `faceCamera` without the baked
+    // lightmap the original needs.
+    const nLift = float(0.45).mul(cos(tilt));
+    mat.normalNode = normalize(vec3(facing.x.mul(nLift), 1, facing.y.mul(nLift)));
 
     // ── Colour: root-to-tip ramp, per-blade jitter, root AO, wind tint ──
     const albedo = Fn(() => {
@@ -578,6 +612,7 @@ export class RevoGrassSystem {
     u.uPushBend.value = rp.pushBend ?? 1;
     u.uCrushMin.value = rp.crushMin ?? 0.35;
     u.uLean.value = rp.lean ?? 0.3;
+    u.uFaceCamera.value = rp.faceCamera ?? 0;
     u.uMinPixels.value = rp.minPixels ?? 1.4;
     u.uBaseColor.value.copy(srgb(rp.baseColor ?? "#3d4f1c"));
     u.uTipColor.value.copy(srgb(rp.tipColor ?? "#8fb84a"));
