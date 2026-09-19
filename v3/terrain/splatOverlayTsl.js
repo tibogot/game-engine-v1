@@ -509,7 +509,15 @@ export function createSplatOverlay(
             });
             let maxWH = w[0].mul(baseH);
             for (let i = 0; i < NUM_LAYERS; i++) maxWH = max(maxWH, w[i + 1].mul(layerH[i]));
-            const thresh = maxWH.sub(uHeightContrast);
+            // CLAMPED AT ZERO, and it has to be. `maxWH` is a weight times a
+            // texture's LUMINANCE, so on fully painted ground it is only ~0.3-0.4
+            // — below `uHeightContrast` over most of that slider's range. A
+            // negative threshold then turns every `max(0, wh - thresh)` into
+            // `wh + |thresh|`, which hands the BASE a positive weight even where
+            // its painted weight is exactly zero: the greybox grid bleeds through
+            // the whole terrain, everywhere, the moment height blending is
+            // switched on. A layer with no weight must contribute nothing.
+            const thresh = max(float(0), maxWH.sub(uHeightContrast));
 
             const aw = [max(float(0), w[0].mul(baseH).sub(thresh))];
             for (let i = 0; i < NUM_LAYERS; i++) aw.push(max(float(0), w[i + 1].mul(layerH[i]).sub(thresh)));
