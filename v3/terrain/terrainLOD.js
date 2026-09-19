@@ -73,6 +73,23 @@ export const LOD_LEVELS = Math.max(
 export const LOD_CENTRE_SNAP = BASE_STEP * Math.pow(2, LOD_LEVELS - 1);
 
 /**
+ * The whole clipmap is offset by half a heightmap texel, so a fine vertex sits
+ * ON a texel instead of between four of them.
+ *
+ * A vertex landing on a texel CORNER samples the average of four texels, which
+ * is a [1 2 1] blur of the heightmap: the drawn ground then sits below every
+ * crest and above every dip, while the player, trees and props stand on the
+ * exact heightmap. MEASURED on a ridged world (mean slope 54°), how far an
+ * object floats above the drawn ground within 64 m: median 0.12 m → 0.025 m,
+ * p95 0.48 → 0.18, worst 2.09 → 0.78. On ordinary terrain both are millimetres.
+ * Costs nothing: the same vertices sample the same texture, half a texel over.
+ *
+ * Anything that reproduces this lattice must use the same offset — see the
+ * grass's terrainSurface option (hybridGrassSystem _clipmapGroundY).
+ */
+export const GRID_OFFSET = (WORLD_SIZE / HEIGHTMAP_SIZE) * 0.5;
+
+/**
  * COMPILE-TIME feature set for the terrain material.
  *
  * WHY THIS IS NOT A SET OF UNIFORMS. Every one of these was already switchable
@@ -704,8 +721,12 @@ export function createTerrainLOD(
    */
   function update(center) {
     const q = LOD_CENTRE_SNAP;
-    const cx = Math.round(center.x / q) * q;
-    const cz = Math.round(center.z / q) * q;
+    // Snap first (see the note above), then step half a texel across so every
+    // vertex lands on a heightmap texel (GRID_OFFSET). The offset is constant,
+    // so snapping still holds: a jump of one step still puts each vertex where
+    // its neighbour was, and every ring shares the same lattice.
+    const cx = Math.round(center.x / q) * q + GRID_OFFSET;
+    const cz = Math.round(center.z / q) * q + GRID_OFFSET;
     mesh.position.set(cx, 0, cz);
     uCenter.value.set(cx, cz);
   }

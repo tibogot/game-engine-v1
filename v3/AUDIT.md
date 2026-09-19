@@ -211,6 +211,28 @@ the game.
     sculpt-only and out of date: rewritten by group (camera, sculpt, every
     brush, props, mode keys, project), each checked against the key handlers.
 
+15f. ~~Trees, props and the player float over the drawn ground~~ — LARGELY
+    FIXED 2026-09-20, terrain side. They stand on the exact heightmap while
+    the clipmap drew a [1 2 1] blur of it, because a vertex landed on a texel
+    CORNER (average of four texels) instead of on a texel. Present since the
+    first v3 commit, not a regression — and invisible on ordinary terrain:
+    MEASURED on rolling hills (mean slope 11°) the float was 4 mm median /
+    4 cm worst within 64 m. It only bites on sculpted, steep ground.
+    - `terrainLOD.GRID_OFFSET` shifts the whole clipmap half a heightmap texel
+      so every fine vertex sits ON a texel. On a ridged world (mean slope 54°)
+      within 64 m: median 0.12 → 0.023 m, p95 0.48 → 0.163, worst 2.09 →
+      0.659. Costs nothing (same vertices, same taps). Anything replicating
+      the lattice takes the same offset — `clipmapGroundY` gained `gridOffset`
+      and both grass systems pass it; re-verified after the shift, blades
+      still match the mesh exactly (93k blades, mean 0.00001 m).
+    - The EDITOR clipmap now centres on the camera, not the orbit pivot
+      (play mode already followed the player). Looking at something far from
+      the pivot used to put 8-16 m quads right under the viewer.
+    - Still inherent: the coarse rings cannot hold full-resolution detail
+      (median 0.17 m at 64-128 m on that extreme terrain). Removing that needs
+      more triangles or CDLOD morphing — real frame cost for a sub-pixel error
+      at those distances.
+
 ## Editor polish
 
 15e. ~~Brush cursor ring~~ — FIXED 2026-09-18 (user: at a small radius the

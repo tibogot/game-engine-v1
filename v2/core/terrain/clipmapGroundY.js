@@ -66,8 +66,11 @@ export function createClipmapGroundY(surface) {
     // round: pow(2, n) is not guaranteed exact on every driver
     const stepW = base.mul(floor(pow(float(2), lvl).add(0.5)));
 
-    const gx = worldX.div(stepW);
-    const gz = worldZ.div(stepW);
+    // The lattice is offset half a heightmap texel (terrainLOD GRID_OFFSET),
+    // so its cell walls sit there too.
+    const off = float(s.gridOffset ?? 0);
+    const gx = worldX.sub(off).div(stepW);
+    const gz = worldZ.sub(off).div(stepW);
     const cellX = floor(gx);
     const cellZ = floor(gz);
     const fx = gx.sub(cellX);
@@ -81,8 +84,8 @@ export function createClipmapGroundY(surface) {
     const nW2 = mix(fz, one.sub(fx), k);    // C (0,1)
 
     // ── Fan row? Cell offset from the centre, in cells of this level ──
-    const rx = cellX.sub(floor(c.x.div(stepW).add(0.5)));
-    const rz = cellZ.sub(floor(c.y.div(stepW).add(0.5)));
+    const rx = cellX.sub(floor(c.x.sub(off).div(stepW).add(0.5)));
+    const rz = cellZ.sub(floor(c.y.sub(off).div(stepW).add(0.5)));
     const eq = (a, n) => step(float(n - 0.5), a).mul(step(a, float(n + 0.5)));
     const span = (a) => step(float(-inner - 0.5), a).mul(step(a, float(inner - 0.5)));
     const bot = eq(rz, -inner - 1).mul(span(rx));
@@ -119,8 +122,8 @@ export function createClipmapGroundY(surface) {
     const w2 = mix(nW2, fW2, fan);
 
     const tap = (p) => {
-      const wx = cellX.add(p.x).mul(stepW);
-      const wz = cellZ.add(p.y).mul(stepW);
+      const wx = cellX.add(p.x).mul(stepW).add(off);
+      const wz = cellZ.add(p.y).mul(stepW).add(off);
       const tu = wx.div(uTerrainSize).add(0.5);
       const tv = wz.div(uTerrainSize).add(0.5);
       const inB = step(float(0), tu).mul(step(tu, one))

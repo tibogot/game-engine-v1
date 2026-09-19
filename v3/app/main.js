@@ -5,7 +5,7 @@ import Stats from "stats-gl";
 import { texture, uniform, float, mix, positionWorld, vec2, vec3, length, smoothstep, mx_noise_float } from "three/tsl";
 import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, TERRAIN_SIZE_LIMITS, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
-import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N } from "../terrain/terrainLOD.js";
+import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "../terrain/terrainLOD.js";
 import { GRID_DEFAULTS, applyGridConfig, createGridMaterial } from "../render/materials/gridMaterial.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import {
@@ -1503,7 +1503,7 @@ export async function startV3App(opts = {}) {
       terrainShadow:    { shade: terrainShade, visibilityHere: terrainSunVisibilityHere },
       // Blades stand on the clipmap's triangles, not the exact heightmap, so
       // they never float over a crest the coarse mesh cuts under.
-      terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2 },
+      terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2, gridOffset: GRID_OFFSET },
       bladeHeightTex:   grassTerrainData.bladeHeightTex,
       pushField:        grassPush.field,
       ...extraShared,
@@ -1592,7 +1592,7 @@ export async function startV3App(opts = {}) {
         densityTex:       grassTerrainData.grassDensityMaskedTex,
         bladeHeightTex:   grassTerrainData.bladeHeightTex,
         pushField:        grassPush.field,
-        terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2 },
+        terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2, gridOffset: GRID_OFFSET },
         terrainShadow:    { shade: terrainShade, visibilityHere: terrainSunVisibilityHere },
         rp:               revoGrassState,
         gp:               grassState,
@@ -4200,7 +4200,10 @@ export async function startV3App(opts = {}) {
           if (hit) applySculptStroke(hit.u, hit.v);
         }
         editorCamera.update(dt);
-        lod.update(controls.target);
+        // The camera, not the orbit pivot: looking at something far from the
+        // pivot used to put 8-16 m quads right under the viewer, which is
+        // where the metre-sized float on sculpted ground came from.
+        lod.update(camera.position);
         if (!editorCamera.flyMode) controls.update();
         if (isEditor && !editorCamera.flyMode && !controls.enabled) syncEditorOrbitEnabled();
         // Sculpting under the marker must not bury it — re-drape every frame.
