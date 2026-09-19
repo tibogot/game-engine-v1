@@ -82,6 +82,50 @@ export const AERIAL_DEFAULTS = {
    */
   groundHaze: 0.00055,
   groundHazeHeight: 160,
+  /**
+   * ── THE GROUND LAYER THINS AS THE SUN GOES DOWN ───────────────────────────
+   *
+   * Fraction of `groundHaze` left with the sun on the horizon. 1 disables the
+   * curve entirely and restores the old behaviour exactly.
+   *
+   * WHY. The ground layer is doing its job at noon and you cannot see it,
+   * because the light it scatters is white. At dusk the in-scatter target is
+   * the horizon colour, which is the most saturated thing in the sky — so the
+   * same layer that gave the skyline depth at midday paints every surface
+   * within a couple of hundred metres sepia, and the city reads as a filter
+   * rather than as evening.
+   *
+   * MEASURED in the game at 17:15, street level, one term at a time:
+   *   groundHaze 0.00055  the whole street brown; colour gone out of the
+   *                       traffic, the trees and the crossing
+   *   groundHaze 0        neutral, and the SKYLINE LOSES ITS DEPTH
+   *   groundHaze 0.00020  near and mid field clean and coloured, far end of
+   *                       the street still sinking into warm haze — the depth
+   *                       cue kept, the wash gone
+   * 0.36 is that 0.00020 as a fraction, which is where this number comes from.
+   *
+   * The env map was the other suspect and was ruled out by the same method:
+   * killing it (0.354 → 0.02) turned the SHADOWS blue and left the buildings
+   * exactly as brown, because the cast is distance-dependent and the env is
+   * not. Noon is untouched — `duskFadeDeg` is where the curve starts, and
+   * above it this is 1.
+   */
+  duskGroundHaze: 0.36,
+  /**
+   * The window, in degrees of sun elevation: no change at or above
+   * `duskFadeDeg`, fully thinned at or below `duskFullDeg`.
+   *
+   * A WINDOW AND NOT A SINGLE NUMBER, because the first version ramped from
+   * one threshold down to the horizon and was measured doing nothing at the
+   * hour it was built for: 17:15 — the shot this was tuned on — is +24.6°, not
+   * the 2° that "dusk" suggests, so a fade starting at 25° was still 0.999 of
+   * the way to noon there. The wash is already the dominant problem in the
+   * twenties and the sun does not reach the horizon until well past the hour
+   * anybody wants to drive. So: gone by 20°, absent by 50°, and the stunt
+   * track's own +61.7° sits clear above the window with room to spare.
+   */
+  duskFadeDeg: 50,
+  duskFullDeg: 20,
   /** Strength of the forward-scatter lobe: haze looking INTO the sun goes bright and warm. */
   sunGlow: 1.35,
   /** Tightness of that lobe. Higher = a smaller, hotter halo around the sun. */
@@ -279,6 +323,32 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
     if (tex) depthTex.value = tex;
   }
 
+  /**
+   * How much of the ground layer survives at the sun's current elevation.
+   *
+   * Exported so a harness can check the curve without a renderer, and so the
+   * two facts it has to satisfy are testable rather than asserted: it is
+   * EXACTLY 1 above `duskFadeDeg` (noon cannot regress through here), and it is
+   * smooth — a hard knee would show as the haze stepping while the sun moves.
+   *
+   * Below the horizon it holds at the dusk value rather than continuing down:
+   * night has its own fill, and there is no sunset colour left to over-apply.
+   */
+  function groundHazeScale() {
+    const k = P.duskGroundHaze ?? 1;
+    if (!(k < 1)) return 1;
+    const hi = P.duskFadeDeg ?? 50;
+    const lo = Math.min(P.duskFullDeg ?? 20, hi);
+    const el = Math.asin(Math.max(-1, Math.min(1, uSunDir.value.y))) * (180 / Math.PI);
+    const span = hi - lo;
+    // A zero-width window is a hard switch at `hi`, not a divide by zero.
+    const t = span <= 1e-6
+      ? (el >= hi ? 0 : 1)
+      : Math.max(0, Math.min(1, (hi - el) / span));
+    const s = t * t * (3 - 2 * t);                        // smoothstep, no visible knee
+    return 1 + (k - 1) * s;
+  }
+
   /** Push the sky's current look. Cheap — call it whenever the sun or the look moves. */
   function setSky({ sunDir, zenith, horizon, sunTint } = {}) {
     if (sunDir) uSunDir.value.copy(sunDir).normalize();
@@ -293,7 +363,7 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
     uDensity.value = P.density;
     uMaxAmount.value = P.maxAmount;
     uInvScaleH.value = 1 / Math.max(1, P.scaleHeight);
-    uGroundHaze.value = P.groundHaze;
+    uGroundHaze.value = P.groundHaze * groundHazeScale();
     uInvGroundH.value = 1 / Math.max(1, P.groundHazeHeight);
     uSunGlow.value = P.sunGlow;
     uSunGlowPow.value = P.sunGlowPow;
@@ -333,6 +403,8 @@ export function createAerialPerspective({ camera, params = {} } = {}) {
     composite,
     syncLive,
     hazeBehind,
+    /** The dusk curve, for a harness and for reading it live while driving. */
+    groundHazeScale,
     /** Debug: is the transparent-FX cancel live this frame, and when did the composite last run. */
     get live() { return uLive.value; },
     get lastComposite() { return _lastComposite; },

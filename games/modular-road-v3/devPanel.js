@@ -3527,6 +3527,27 @@ export function createRoadDevPanel({ app, game, params }) {
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Ground haze</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ap-ground" min="0" max="0.0016" step="0.00005" />
+              <span class="prop-num" id="dv-ap-ground-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Ground haze at dusk</span>
+            <div class="prop-value">
+              <input type="range" id="dv-ap-duskground" min="0.1" max="1" step="0.02" />
+              <span class="prop-num" id="dv-ap-duskground-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">
+            <b>Ground haze</b> is the shallow layer the city sits in — it gives the
+            skyline its depth, and at dusk it is also what washes every nearby
+            building sepia. <b>At dusk</b> is how much of it survives with the sun
+            on the horizon; <b>1.00 = off</b>, which is the old behaviour. Noon is
+            never affected either way.
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Sun glow</span>
             <div class="prop-value">
               <input type="range" id="dv-ap-glow" min="0" max="4" step="0.05" />
@@ -7050,6 +7071,8 @@ export function createRoadDevPanel({ app, game, params }) {
   aslider("dv-ap-density", "density", (v) => (v <= 0 ? "off" : v.toFixed(5)));
   aslider("dv-ap-max", "maxAmount", (v) => v.toFixed(2));
   aslider("dv-ap-scaleh", "scaleHeight", (v) => (v / 1000).toFixed(1) + " km");
+  aslider("dv-ap-ground", "groundHaze", (v) => (v <= 0 ? "off" : v.toFixed(5)));
+  aslider("dv-ap-duskground", "duskGroundHaze", (v) => (v >= 0.999 ? "1.00 (off)" : v.toFixed(2)));
   aslider("dv-ap-glow", "sunGlow", (v) => v.toFixed(2));
   aslider("dv-ap-glowpow", "sunGlowPow", (v) => v.toFixed(1));
 
