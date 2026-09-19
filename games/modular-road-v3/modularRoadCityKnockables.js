@@ -30,7 +30,7 @@
 // ============================================================================
 import * as THREE from "three";
 import { RigidBody, FIXED_DT } from "../../v3/play/modularRoadVehicle.js";
-import { PropContactSolver, buildContactShape, setShapeInertia } from "./modularRoadPropContact.js";
+import { PropContactSolver, buildContactShape, setShapeInertia, flatGroundAt } from "./modularRoadPropContact.js";
 
 export const CITY_KNOCK = {
   enabled: true,
@@ -83,14 +83,7 @@ export function createCityKnockables({ groups = [], groundY = 0, params = {} }) 
   let acc = 0;
 
   /** A flat street at groundY, for callers that have no collider to share. */
-  const flatGround = {
-    baked: true,
-    raycastFirst(o, _d, far) {
-      const dist = o.y - groundY;
-      if (dist < -1 || dist > far) return null;
-      return { distance: dist, point: { x: o.x, y: groundY, z: o.z }, normal: { x: 0, y: 1, z: 0 } };
-    },
-  };
+  const flatGround = flatGroundAt(groundY);
 
   /**
    * The car as the solver sees it during one substep. The vehicle has already

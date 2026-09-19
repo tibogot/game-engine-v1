@@ -64,6 +64,23 @@ export const PROP_CONTACT = {
 };
 
 /**
+ * A flat plane at `y`, in the shape of a collider, for owners that have no real
+ * one to share. The city builds its street as a plane and hands the vehicle's
+ * BVH in only when there is one, and every owner of this solver then needs the
+ * same fallback — so it lives here rather than in each of them.
+ */
+export function flatGroundAt(y) {
+  return {
+    baked: true,
+    raycastFirst(o, _d, far) {
+      const dist = o.y - y;
+      if (dist < -1 || dist > far) return null;
+      return { distance: dist, point: { x: o.x, y, z: o.z }, normal: { x: 0, y: 1, z: 0 } };
+    },
+  };
+}
+
+/**
  * THE CAR'S NOSE, for prop hits only.
  *
  * CHASSIS_HULL is a box whose front is a flat wall up to the roofline (1.26 m

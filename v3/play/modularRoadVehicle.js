@@ -4311,6 +4311,12 @@ export class Vehicle {
     this._tripVel = new THREE.Vector3();
     /** Exact analytic colliders — see setSolidCapsules. */
     this.solidCapsules = [];
+    /** Surface velocity of the moving capsules in contact — see _resolveSolidCapsules. */
+    this._capV = new THREE.Vector3();
+    this._capSurfV = new THREE.Vector3();
+    /** Handed to _applySolidContact, which asks for a velocity at a point. The
+     *  capsule set has already been averaged into one, so the point is unused. */
+    this._capSurfFn = (_p, out) => out.copy(this._capSurfV);
     this._sphC = new THREE.Vector3();
     this._sphN = new THREE.Vector3();
     // Capsule solver scratch — see _closestHullToSegment.
@@ -6921,6 +6927,24 @@ export class Vehicle {
     let hits = 0;
     this._solidN.set(0, 0, 0);
     this._solidPoint.set(0, 0, 0);
+    /*
+     * A CAPSULE MAY BE MOVING, and one that is must not be resolved as a wall.
+     *
+     * Every capsule was static when this was written — lamp posts, gate posts,
+     * trees, parked cars — so the closing speed could be read straight off the
+     * car in world space. A capsule that carries `velAt` (the city's wrecked
+     * traffic) breaks that: a car you have just shoved away at 20 m/s still
+     * reads as a 20 m/s impact, so the solver kills all of it and the thing you
+     * are pushing stops you dead. It feels exactly like a wall because it is
+     * being solved as one.
+     *
+     * So the surface velocity is accumulated the same way the normal is —
+     * weighted by penetration — and handed to _applySolidContact, which already
+     * knows how to resolve in a moving surface's frame for the movers. With no
+     * moving capsule in contact this stays null and nothing changes at all.
+     */
+    let moving = 0;
+    this._capSurfV.set(0, 0, 0);
 
     let gap = Infinity;
     for (const cap of this.solidCapsules) {
@@ -6934,6 +6958,11 @@ export class Vehicle {
       this._solidN.addScaledVector(this._capN, pen);
       this._geomToWorld(this._capQ, this._sphC);
       this._solidPoint.add(this._sphC);
+      if (cap.velAt) {
+        cap.velAt(this._sphC, this._capV);
+        this._capSurfV.addScaledVector(this._capV, pen);
+        moving += pen;
+      }
       if (pen > deepest) deepest = pen;
     }
     if (!hits) return;
@@ -6941,7 +6970,17 @@ export class Vehicle {
     if (this._solidN.lengthSq() < 1e-10) return;
     this._solidN.normalize();
     this._solidGap = Math.max(0, gap);
-    this._applySolidContact(deepest, null, dt);
+    if (moving > 0) {
+      // Share of the contact that is actually moving: half a bumper against a
+      // wreck and half against a kerb must not carry the wreck's whole velocity.
+      this._capSurfV.multiplyScalar(1 / moving);
+      // `fromMover` false: this is a moving OBSTACLE, not a parkour mover, and
+      // the mover branch of the crash attribution is not about this. A hard hit
+      // still arms the crash through the ordinary relative-speed test.
+      this._applySolidContact(deepest, this._capSurfFn, dt, false);
+    } else {
+      this._applySolidContact(deepest, null, dt);
+    }
   }
 
   /**
@@ -7231,14 +7270,26 @@ export class Vehicle {
    *
    * Expects `this._solidN` normalised and `this._solidPoint` averaged.
    */
-  _applySolidContact(deepest, surfaceVelFn, dt) {
+  /**
+   * @param {number} deepest  worst penetration this pass
+   * @param {?function} surfaceVelFn  velocity of the surface at a point, when it
+   *        is not static — the contact is then resolved in ITS frame
+   * @param {number} dt
+   * @param {boolean} [fromMover=true]  whether a moving surface is a PARKOUR
+   *        MOVER. Only movers get the crash attribution below; a moving capsule
+   *        (a wrecked traffic car) is an obstacle that happens to be sliding,
+   *        and it arms the crash through the ordinary relative-speed test like
+   *        anything else. Defaults true so every caller that predates moving
+   *        capsules behaves exactly as it did.
+   */
+  _applySolidContact(deepest, surfaceVelFn, dt, fromMover = true) {
     const body = this.body;
     this._solidTouch = true; // feeds the stuck detector in tick()
     // Snapshot for sparks BEFORE a later substep / mover / capsule pass clears
     // `_solidPoint`. See _updateScrapeLatch.
     this._scrapePoint.copy(this._solidPoint);
     this._scrapeNormal.copy(this._solidN);
-    if (surfaceVelFn) this._solidFromMover = true;
+    if (surfaceVelFn && fromMover) this._solidFromMover = true;
 
     // 1) POSITIONAL — move out of the surface. No force, so no stored energy.
     body.pos.addScaledVector(this._solidN, deepest * SOLID.push);
@@ -7263,7 +7314,7 @@ export class Vehicle {
     // road — the boosted restitution and spin were never once applied to a
     // static barrier. The car took a 60 m/s impact with SOLID's deliberately
     // dead 0.05 restitution and 0.15 spin and simply stopped. See CRASH.minHold.
-    const moverSlam = !!surfaceVelFn && closing >= CRASH.moverSpeed;
+    const moverSlam = !!surfaceVelFn && fromMover && closing >= CRASH.moverSpeed;
     const violent = CRASH.enabled && (
       moverSlam
       || this._crashYield > 0

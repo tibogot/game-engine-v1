@@ -97,7 +97,7 @@ import {
 import { createCityStreets, STREET_DEFAULTS } from "./modularRoadCityStreets.js";
 import { createCityFurniture } from "./modularRoadCityFurniture.js";
 import { createCityCollider } from "./modularRoadCityCollider.js";
-import { createCityObstacles } from "./modularRoadCityObstacles.js";
+import { createCityObstacles, OBSTACLE_DEFAULTS } from "./modularRoadCityObstacles.js";
 import { createCityKnockables } from "./modularRoadCityKnockables.js";
 import { createCityRoofs } from "./modularRoadCityRoofs.js";
 import { createLodView } from "./modularRoadCityLodView.js";
@@ -1854,7 +1854,17 @@ export function createModularRoadCity({
      * — with terrain on, the terrain is the ground and none of this exists.
      */
     obstacleCapsulesNear(x, z, radius) {
-      return obstacles ? obstacles.capsulesNear(x, z, radius) : [];
+      const base = obstacles ? obstacles.capsulesNear(x, z, radius) : [];
+      /*
+       * WRECKED TRAFFIC JOINS THE SAME WINDOW. A car you have hit is a car
+       * lying in the road, so it is solid on the channel a PARKED one already
+       * uses — without this the solver shoves it and then lets you drive
+       * straight through it, which is what the one-way coupling does once the
+       * virtual car's momentum is spent. The capsules handed back are the
+       * wrecks' own objects, so they keep moving between window rebuilds.
+       */
+      const wrecked = furniture?.trafficWreckCapsules?.(x, z, radius ?? OBSTACLE_DEFAULTS.radius);
+      return wrecked?.length ? base.concat(wrecked) : base;
     },
     /**
      * Drive the knockable street clutter. EVERY FRAME — a body in the air
@@ -1868,6 +1878,17 @@ export function createModularRoadCity({
       const before = knockables.stats.knocked;
       knockables.update(dt, car, ground);
       return knockables.stats.knocked - before;
+    },
+    /**
+     * Drive the moving traffic's impacts. EVERY FRAME, and after `update()` —
+     * it reads the poses that frame's updateTraffic recorded. Separate from the
+     * knockables on purpose: a wreck is not in the obstacle capsule table, so
+     * it must not force the capsule window to rebuild the way a knocked rail
+     * does. Same arguments, same clock.
+     * @returns {number} moving cars struck this frame
+     */
+    updateTrafficImpacts(dt, car, ground = null) {
+      return furniture?.updateTrafficImpacts?.(dt, car, ground) ?? 0;
     },
     /** The furniture handle — its placement lists are what the obstacle table
      *  and the knockable pool both read. */

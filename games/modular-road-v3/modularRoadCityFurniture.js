@@ -48,6 +48,7 @@ import {
 import {
   STEAM_DEFAULTS, buildSteamGeometry, makeSteamMaterial,
 } from "./modularRoadCitySteam.js";
+import { createTrafficImpacts } from "./modularRoadCityTrafficImpact.js";
 import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
 /**
@@ -328,6 +329,9 @@ export const FURNITURE_DEFAULTS = {
   trafficTurnLook: 26,
   /** How far from the camera a moving car is still updated and drawn. */
   trafficRange: 380,
+  /** Hitting the moving traffic — see modularRoadCityTrafficImpact.js.
+   *  `{ enabled: false }` removes it entirely rather than idling it. */
+  trafficImpactParams: {},
   /** Head and tail lamp strength at night (they bloom). */
   headlightBoost: 6.0,
   taillightBoost: 2.6,
@@ -1391,6 +1395,19 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
         body: pickCarBody(h2(li, i, 64)),
         m: new THREE.Matrix4(),
         x: 0, z: 0,
+        /*
+         * THE DRAWN POSE, DECLARED HERE RATHER THAN GROWN LATER.
+         *
+         * updateTraffic writes these on every car it draws, and the impact
+         * broadphase reads `poseF`/`wx`/`wz` on every car in the fleet. Adding
+         * them on first draw gave the fleet TWO hidden classes — the cars that
+         * had been in range once, and the ones that never had — and the read
+         * in that loop went megamorphic. MEASURED in the game, 1244 cars: the
+         * broadphase cost 0.34 ms a frame with nothing awake; declared here it
+         * is a tenth of that. `poseF: -1` is "never drawn", which no real frame
+         * counter can equal.
+         */
+        wx: 0, wy: 0, wz: 0, yaw: 0, slot: -1, poseF: -1,
       });
     }
   }
@@ -1660,6 +1677,42 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     return im;
   });
   const trafficMesh = trafficMeshes.find(Boolean) || null;
+
+  /*
+   * ── THE CARS YOU CAN HIT ───────────────────────────────────────────────────
+   *
+   * A struck car stops being traffic: it is spliced out of its lane's ring and
+   * out of the fleet, and becomes a rigid body on the clutter solver. All of
+   * that lives in modularRoadCityTrafficImpact.js — what belongs HERE is the
+   * one operation only this file can do safely, which is taking a car out of a
+   * ring, and the frame stamp that says which cars were drawn.
+   *
+   * `detach` is called from the impact update, which runs AFTER updateTraffic
+   * in the frame — never from inside stepTraffic, which is iterating these very
+   * arrays. Same reason the turns are collected and applied at the end of a
+   * step rather than during one.
+   */
+  let trafficFrame = 0;
+  function detachCar(c) {
+    const row = laneCars[c.li];
+    const at = row.indexOf(c);
+    if (at >= 0) row.splice(at, 1);
+    const ti = traffic.indexOf(c);
+    if (ti >= 0) traffic.splice(ti, 1);
+    // A half-finished corner would otherwise be re-entered if this object were
+    // ever seen again, and the pending list is cleared inside the step it is
+    // filled in, so there is nothing else holding it.
+    c.turn = null;
+  }
+  const impacts = F.traffic && trafficMesh
+    ? createTrafficImpacts({
+      fleet: { list: () => traffic, frame: () => trafficFrame, detach: detachCar },
+      meshes: trafficMeshes,
+      bodies: CAR_BODIES,
+      groundY: gyBase,
+      params: F.trafficImpactParams,
+    })
+    : null;
 
   /**
    * Advance the traffic. `t` is seconds; `cam` is the camera position, so only
@@ -1932,6 +1985,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     // The signals ride the same clock; it is already here every frame.
     uSignalTime.value = t;
     if (!trafficMesh) return;
+    // Stamped onto every car this pass actually draws. See detachCar above.
+    trafficFrame++;
     const r2 = F.trafficRange * F.trafficRange;
     // One write cursor per body. The cars in range are packed to the front of
     // their own mesh, so a body with nothing near the camera draws nothing.
@@ -2066,6 +2121,16 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       _tq.setFromAxisAngle(UP, yaw);
       im.setMatrixAt(slot, _tm.compose(_tp, _tq, _ts));
       /*
+       * THE POSE, RECORDED ON THE CAR, for the impact test — see
+       * modularRoadCityTrafficImpact.js. It is written HERE, with the matrix,
+       * and stamped with the frame, because those two facts have to be the same
+       * fact: a car this loop skipped (out of range, or over the open trench at
+       * the underpass) keeps whatever pose it last had, and the stamp is what
+       * stops it being hittable in a place it is not drawn.
+       */
+      c.wx = x; c.wy = _tp.y; c.wz = z; c.yaw = yaw;
+      c.slot = slot; c.poseF = trafficFrame;
+      /*
        * THE COLOUR IS WRITTEN HERE, WITH THE MATRIX, and it has to be. The
        * loop compacts — instance `slot` is whichever car happened to be in
        * range, not car `i` — so a colour uploaded once at build time by list
@@ -2074,6 +2139,24 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
        */
       im.setColorAt(slot, _c.set(c.color));
       n[bi]++;
+    }
+    /*
+     * THE WRECKS, packed in behind the live cars of their own body.
+     *
+     * Capacity cannot be exceeded and it needs no check: every wreck WAS a live
+     * car of this body, so live-in-range plus wrecks is at most the number the
+     * mesh was sized for. They are not range-culled — there are at most
+     * `keep` of them, and one you drove past is worth seeing again.
+     */
+    if (impacts) {
+      impacts.forEach((w) => {
+        const im = trafficMeshes[w.bi];
+        if (!im) return;
+        const slot = n[w.bi]++;
+        im.setMatrixAt(slot, w.matrix);
+        im.setColorAt(slot, w.color);
+        w.slot = slot;
+      });
     }
     for (let bi = 0; bi < trafficMeshes.length; bi++) {
       const im = trafficMeshes[bi];
@@ -2320,6 +2403,8 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
       cars: cars.length, carBodies: CAR_BODIES.map((b, i) => `${b.name}:${carsByBody[i].length}`).join(" "),
       trees: trees.length, lights: lights.length, rails: rails.length,
       traffic: traffic.length, lanes: lanes.length,
+      /** Live — struck cars, wrecks in the world, and how many are simulated. */
+      trafficImpacts: impacts?.stats ?? null,
       clutter: { cones: cones.length, barriers: barriers.length, bins: bins.length, pallets: pallets.length, blocks: blocks.length, plates: plates.length, benches: benches.length },
       roadSigns: roadSigns.length,
       gantries: gantries.length,
@@ -2338,6 +2423,23 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     applyLod,
     /** Drive the moving traffic. `t` seconds, `cam` a Vector3. Every frame. */
     updateTraffic,
+    /**
+     * Hit the moving traffic. EVERY FRAME, and AFTER updateTraffic — it reads
+     * the poses that pass records and detaches from the rings that step walks.
+     * `car` is the vehicle body (its speed is scrubbed by an impact); `ground`
+     * the collider the vehicle drives on.
+     * @returns {number} cars struck this frame
+     */
+    updateTrafficImpacts(dt, car, ground) {
+      return impacts ? impacts.update(dt, car, ground) : 0;
+    },
+    /** The wrecks' solid capsules near (x, z) — the city folds these into its
+     *  obstacle window so a wreck stops the car the way a parked one does. */
+    trafficWreckCapsules(x, z, radius) {
+      return impacts ? impacts.capsulesNear(x, z, radius) : null;
+    },
+    /** Live impact params, or null when traffic or the feature is off. */
+    get trafficImpacts() { return impacts ? impacts.params : null; },
     dispose() {
       disposed = true;                    // stops an in-flight preset load attaching
       // Nothing to remove from the group — preset trees live in the engine's

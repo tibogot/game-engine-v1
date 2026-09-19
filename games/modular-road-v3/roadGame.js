@@ -2238,10 +2238,23 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
     }
     const knockedNow = city.updateKnockables?.(worldDt(dt),
       vehicleRef?.enabled ? vehicleRef.body : null, vehicleRef?.groundBvh ?? null) ?? 0;
+    /*
+     * THE MOVING TRAFFIC, on the same clock and the same collider. A struck car
+     * leaves its lane and becomes a body — see modularRoadCityTrafficImpact.js
+     * — and unlike the clutter it charges the car for the momentum it takes, so
+     * this has to run while the vehicle's velocity is still this frame's.
+     */
+    const struckNow = city.updateTrafficImpacts?.(worldDt(dt),
+      vehicleRef?.enabled ? vehicleRef.body : null, vehicleRef?.groundBvh ?? null) ?? 0;
     // The car's window of hittable street furniture. Around the CAR, not the
     // camera — a chase camera trails by ~8 m and a look-back would otherwise
     // slide the window off the thing about to be hit.
-    syncCityCapsules(vehicleRef?.body?.pos ?? camera.position, knockedNow > 0);
+    //
+    // A STRUCK CAR FORCES IT TOO, for the same reason a knocked rail does: the
+    // wreck becomes a solid capsule at the bumper, and the window would
+    // otherwise not pick it up for another 18 m of driving — so you would hit
+    // the car and then drive through the wreck of it.
+    syncCityCapsules(vehicleRef?.body?.pos ?? camera.position, knockedNow > 0 || struckNow > 0);
   }
   app.addPreRenderHook?.(updateCity);
 
