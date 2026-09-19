@@ -52,6 +52,11 @@ export function createLevelLoader(app, {
 } = {}) {
   // Per page, so two games on one origin never pick up each other's reload.
   const pendingKey = `v3.pendingLevel:${location.pathname}`;
+  // Whether the stashed level carried its own look, remembered ACROSS the
+  // size reload: the pending branch of loadBoot never sees the buffer again,
+  // so without this every level that arrives through a resize reports
+  // hasLook:false and the game stamps its own fog over the level's.
+  const pendingLookKey = `v3.pendingLevelLook:${location.pathname}`;
   const nameOf = (url) => url.split("/").pop() || url;
 
   async function finish(name, hasLook = false) {
@@ -74,6 +79,7 @@ export function createLevelLoader(app, {
       if (!ok) return { name, loaded: false, hasLook: false };
       saveTerrainConfig(t);
       sessionStorage.setItem(pendingKey, name);
+      sessionStorage.setItem(pendingLookKey, hasLook ? "1" : "0");
       await stashPendingHeightmap(buf);
       location.reload();
       // The page is going away: never resolve, so a booting game does not go on
@@ -111,10 +117,12 @@ export function createLevelLoader(app, {
   async function loadBoot() {
     const pendingName = sessionStorage.getItem(pendingKey);
     if (pendingName) {
+      const pendingLook = sessionStorage.getItem(pendingLookKey) === "1";
       sessionStorage.removeItem(pendingKey);
+      sessionStorage.removeItem(pendingLookKey);
       onStatus(`Loading ${pendingName}…`);
       await app.pendingWorldImport;
-      return finish(pendingName);
+      return finish(pendingName, pendingLook);
     }
     const param = urlParam ? new URLSearchParams(location.search).get(urlParam) : null;
     if (param) {
