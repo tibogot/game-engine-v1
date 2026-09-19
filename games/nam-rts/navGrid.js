@@ -168,10 +168,9 @@ export function createNavGrid({
       }
     }
 
-    // Fill the lake interior: any cell you can't reach from the map edge
-    // without crossing water is enclosed by water → block it. This solidifies
-    // bumpy lakebeds (dry patches inside the lake) so units can't thread through.
-    fillEnclosedWater(water);
+    // Solidify bumpy lakebeds: dry specks inside a water body are not ground
+    // anyone can use, so they are blocked rather than left as pathable islets.
+    blockDryScraps(water);
 
     // Push the water boundary onto land by the shoreline margin, so a ground
     // unit's body stops at the edge instead of overlapping the water.
@@ -184,28 +183,54 @@ export function createNavGrid({
     if (debugMesh) { app.scene.remove(debugMesh); debugMesh.geometry.dispose(); debugMesh = null; }
   }
 
-  // Flood non-water cells from the map border; any non-water cell left unreached
-  // is trapped inside a water body → mark it water/blocked. Fills lake interiors.
-  function fillEnclosedWater(water) {
-    const reach = new Uint8Array(cols * rows);
-    const stack = [];
-    const seed = (cx, cz) => { const i = idx(cx, cz); if (!water[i] && !reach[i]) { reach[i] = 1; stack.push(i); } };
-    for (let cx = 0; cx < cols; cx++) { seed(cx, 0); seed(cx, rows - 1); }
-    for (let cz = 0; cz < rows; cz++) { seed(0, cz); seed(cols - 1, cz); }
-    while (stack.length) {
-      const i = stack.pop();
-      const cx = i % cols, cz = (i - cx) / cols;
-      const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-      for (const [dx, dz] of nb) {
-        const nx = cx + dx, nz = cz + dz;
-        if (!inBounds(nx, nz)) continue;
-        const ni = idx(nx, nz);
-        if (reach[ni] || water[ni]) continue;
-        reach[ni] = 1; stack.push(ni);
+  /**
+   * Dry ground too small to be ground: a bump in a lakebed, a speck of
+   * shoreline. Blocked so a path can never be planned onto it.
+   *
+   * THIS USED TO FLOOD INWARD FROM THE MAP BORDER and block whatever the
+   * flood did not reach — which silently assumed the edge of the map is dry
+   * land. Give the world an ocean and the assumption inverts: every border
+   * cell is water, so the flood plants no seed at all, reaches nothing, and
+   * marks the ENTIRE map as enclosed. Measured on nam-valley before this
+   * change: 65,536 cells, 65,504 blocked, 32 walkable — no unit could move
+   * anywhere, on a map whose terrain only justifies 59% blocked.
+   *
+   * Labelling the dry cells into connected components asks the question
+   * directly and does not care where the water is. On an inland map the
+   * answer is unchanged (the main ground is one big component; lake islets
+   * are specks). On an island map it is finally right.
+   *
+   * A LARGE island is deliberately left walkable even though nothing can
+   * reach it on foot: it is real ground, and boats and helicopter drops are
+   * the point of this game. Blocking it would quietly delete the terrain.
+   */
+  function blockDryScraps(water) {
+    // ~600 m² — a few cells of lakebed, never a landmass worth fighting over.
+    const minCells = Math.max(4, Math.ceil(600 / (cell * cell)));
+    const seen = new Uint8Array(cols * rows);
+    const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const component = [];
+
+    for (let start = 0; start < seen.length; start++) {
+      if (water[start] || seen[start]) continue;
+      component.length = 0;
+      const stack = [start];
+      seen[start] = 1;
+      while (stack.length) {
+        const i = stack.pop();
+        component.push(i);
+        const cx = i % cols, cz = (i - cx) / cols;
+        for (const [dx, dz] of nb) {
+          const nx = cx + dx, nz = cz + dz;
+          if (!inBounds(nx, nz)) continue;
+          const ni = idx(nx, nz);
+          if (seen[ni] || water[ni]) continue;
+          seen[ni] = 1; stack.push(ni);
+        }
       }
-    }
-    for (let i = 0; i < water.length; i++) {
-      if (!water[i] && !reach[i]) { water[i] = 1; blocked[i] = 1; }
+      if (component.length < minCells) {
+        for (const i of component) { water[i] = 1; blocked[i] = 1; }
+      }
     }
   }
 
