@@ -1579,6 +1579,22 @@
         <!-- GRASS panel — shown only in grass mode                     -->
         <!-- ═══════════════════════════════════════════════════════════ -->
         <div id="grass-panel" style="display:none">
+          <!-- GRASS SYSTEM -------------------------------------------- -->
+          <div class="inspector-section">
+            <div class="section-header">Grass System</div>
+            <div class="section-body">
+              <div class="prop-row" title="Two different grass engines. The painted density, the painted height and the slope rule are shared, so switching is a look change, not a repaint.">
+                <span class="prop-label">System</span>
+                <div class="prop-value">
+                  <select class="prop-dropdown" id="gsel-grass-system">
+                    <option value="hybrid">Hybrid blades</option>
+                    <option value="revo">Revo tile</option>
+                  </select>
+                </div>
+              </div>
+              <p class="mode-hint" id="grass-system-hint">Separate lit blades in LOD rings, out to 200 m.</p>
+            </div>
+          </div>
 
           <!-- PAINT DENSITY ------------------------------------------ -->
           <div class="inspector-section">
@@ -1635,7 +1651,7 @@
           </div>
 
           <!-- CLIFF GRASS --------------------------------------------- -->
-          <div class="inspector-section">
+          <div class="inspector-section" data-grass-system="hybrid">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
               Cliff Grass
@@ -1654,7 +1670,7 @@
           </div>
 
           <!-- APPEARANCE --------------------------------------------- -->
-          <div class="inspector-section">
+          <div class="inspector-section" data-grass-system="hybrid">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
               Appearance
@@ -1762,7 +1778,7 @@
           </div>
 
           <!-- SHAPE & DYNAMICS --------------------------------------- -->
-          <div class="inspector-section">
+          <div class="inspector-section" data-grass-system="hybrid">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
               Shape &amp; Dynamics
@@ -1895,7 +1911,7 @@
           </div>
 
           <!-- WIND --------------------------------------------------- -->
-          <div class="inspector-section">
+          <div class="inspector-section" data-grass-system="hybrid">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
               Wind
@@ -1940,7 +1956,7 @@
           </div>
 
           <!-- SUBSURFACE SCATTER -------------------------------------- -->
-          <div class="inspector-section">
+          <div class="inspector-section" data-grass-system="hybrid">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
               Subsurface Scatter
@@ -1985,7 +2001,7 @@
           </div>
 
           <!-- SPECULAR ------------------------------------------------ -->
-          <div class="inspector-section">
+          <div class="inspector-section" data-grass-system="hybrid">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
               Specular
@@ -2183,7 +2199,7 @@
           </div>
 
           <!-- LOD ----------------------------------------------------- -->
-          <div class="inspector-section">
+          <div class="inspector-section" data-grass-system="hybrid">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
               LOD
@@ -2321,6 +2337,7 @@
             </div>
           </div>
 
+          <div id="revo-grass-panel" style="display:none"></div>
         </div><!-- /#grass-panel -->
 
         <!-- TREE panel — built dynamically by buildTreePanel() (v2 layout) -->

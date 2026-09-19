@@ -20,6 +20,9 @@
  *             cliffPaint: terrain ground colour painted onto cliffs (RGBA 512²).
  *   grass     grass appearance (the Grass panel: blade, colour, wind, SSS,
  *             specular, slope, tint, LOD, interaction). Merged per key on load.
+ *             `grass.system` picks WHICH grass system runs; revoGrass holds
+ *             the other one's look, so switching back and forth keeps both.
+ *   revoGrass the revo grass system's look (blade, tile, wind, colour, fade).
  *   snowParams snow surface / trail / glitter look (the Snow panel sliders).
  *   splatRes / snowRes
  *   trees     { slots: [...slot meta...], instances: [[x,z,y,rotY,scale,slotIdx],…] }
@@ -102,6 +105,7 @@ export function encodeProjectFile({
   cliffGrassDensity,    // Uint8Array (RGBA 512²) painted cliff-top grass coverage
   cliffPaint,           // Uint8Array (RGBA 512²) terrain colour painted onto cliffs
   grass,                // grass appearance params (JSON)
+  revoGrass,            // the second grass system's own look params (JSON)
   snowParams,           // snow look params (JSON)
   groundTsl,           // procedural ground params (JSON)
   meadowTsl,            // paintable meadow TSL params (JSON)
@@ -163,6 +167,7 @@ export function encodeProjectFile({
     ambientEffects: ambientEffects ?? null,
     ambientField:   ambientField ?? null,
     grass:    grass ?? null,
+    revoGrass: revoGrass ?? null,
     snowParams: snowParams ?? null,
     groundTsl: groundTsl ?? null,
     meadowTsl: meadowTsl ?? null,
@@ -247,6 +252,7 @@ export function decodeProjectFile(buffer) {
     cliffGrassDensity: blob("cliffGrassDensity"),
     cliffPaint: blob("cliffPaint"),
     grass:     manifest.grass ?? null,
+    revoGrass: manifest.revoGrass ?? null,
     snowParams: manifest.snowParams ?? null,
     groundTsl: manifest.groundTsl ?? null,
     meadowTsl: manifest.meadowTsl ?? null,

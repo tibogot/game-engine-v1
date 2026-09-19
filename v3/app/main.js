@@ -113,6 +113,9 @@ import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
 import { createGrassFarShading } from "../render/grass/grassFarTsl.js";
 import { createGrassPushField } from "../render/grass/grassPushField.js";
 import { GRASS_PRESETS } from "./state/grassPresets.js";
+import { RevoGrassSystem } from "../render/grass/revoGrassSystem.js";
+import { createRevoGrassState, REVO_GRASS_GEOMETRY_KEYS } from "./state/revoGrassState.js";
+import { buildRevoGrassPanel } from "../ui/buildRevoGrassPanel.js";
 import { DecalSystem } from "../render/decals/decalSystem.js";
 import { createDecalEditor } from "../tools/decalEditor.js";
 import { buildDecalPanel } from "../ui/buildDecalPanel.js";
@@ -1209,6 +1212,11 @@ export async function startV3App(opts = {}) {
   const grassSpecNoiseTex = createSpecNoiseTexture();
 
   const grassState = {
+    // The grass system this world runs — "hybrid" (LOD rings of separate lit
+    // blades) or "revo" (one dense camera-following tile). Not a look preset,
+    // two engines. See state/revoGrassState.js. Its control is the System
+    // dropdown, kept in step by syncGrassSystemUi, not by the slider table.
+    system: "hybrid",
     bladeHeight: 1, bladeWidth: 0.15, bladeYSegments: 7, tipTaperStart: 0.5,
     crossed: true,
     bendFocus: 0.5, stiffness: 0, maxAngle: 1.4, naturalLean: 0.9,
@@ -1358,6 +1366,12 @@ export async function startV3App(opts = {}) {
   let cliffGrassRings = null;   // second ring set, cliffMode — grass on cliff tops
   let _cliffGrassBuilding = false;
   let _cliffRingsEnabled = false;
+  // The OTHER grass system (revoGrassSystem.js) — one camera-following tile of
+  // small camera-facing blades. `grassState.system` picks which one runs; only
+  // the chosen one is ever built, so a world that never asks for it pays
+  // nothing at all.
+  let revoGrass = null;
+  let _revoBuilding = false;
 
   // ── Terrain tint bake ──────────────────────────────────────────────────────
   // v2 fed the grass a procedural ground-color TSL fn; v3's terrain color is
@@ -1555,6 +1569,58 @@ export async function startV3App(opts = {}) {
     }
   }
 
+  // ── The other grass system ────────────────────────────────────────────────
+  // Same painted density, same painted blade height, same slope rule, same
+  // push field — only the blades are different. Built the first time a world
+  // asks for it and kept afterwards, so flipping the dropdown to compare the
+  // two costs one build, not one per switch.
+  const revoGrassState = createRevoGrassState();
+  let _revoGeomKey = null;
+  const _revoGeometryKey = () => REVO_GRASS_GEOMETRY_KEYS.map((k) => revoGrassState[k]).join("|");
+
+  async function ensureRevoGrassBuilt() {
+    if (revoGrass || _revoBuilding) return;
+    _revoBuilding = true;
+    try {
+      const sys = new RevoGrassSystem({
+        scene,
+        renderer,
+        worldSize:        WORLD_SIZE,
+        heightTex:        grassTerrainData.grassHeightTex,
+        terrainNormalTex: grassTerrainData.terrainNormalTex,
+        densityTex:       grassTerrainData.grassDensityMaskedTex,
+        bladeHeightTex:   grassTerrainData.bladeHeightTex,
+        pushField:        grassPush.field,
+        terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2 },
+        terrainShadow:    { shade: terrainShade, visibilityHere: terrainSunVisibilityHere },
+        rp:               revoGrassState,
+        gp:               grassState,
+      });
+      await sys.init(camera);
+      revoGrass = sys;
+      _revoGeomKey = _revoGeometryKey();
+      revoGrass.syncFromState(revoGrassState, grassState, getLightDir());
+    } catch (err) {
+      console.error("[V3 Revo Grass] build failed:", err);
+    } finally {
+      _revoBuilding = false;
+    }
+  }
+
+  /** Panel edit: uniforms, or a full rebuild when the blade or the tile changed. */
+  function syncRevoGrass() {
+    if (!revoGrass) return;
+    const key = _revoGeometryKey();
+    if (key !== _revoGeomKey) {
+      _revoGeomKey = key;
+      void revoGrass.rebuild().then(() => {
+        revoGrass?.syncFromState(revoGrassState, grassState, getLightDir());
+      });
+      return;
+    }
+    revoGrass.syncFromState(revoGrassState, grassState, getLightDir());
+  }
+
   function syncGrassUniforms() {
     // No `if (!worldEnv) return` any more: that skipped the whole grass look
     // (colours, wind, LOD), not just the light, whenever there was no environment.
@@ -1562,8 +1628,14 @@ export async function startV3App(opts = {}) {
     if (grassRings) for (const r of grassRings) r.syncFromState(grassState, sunDir);
     if (cliffGrassRings) for (const r of cliffGrassRings) r.syncFromState(grassState, sunDir);
     syncGrassLod();
-    grassFarShading.syncFromState(grassState);
+    // The ground takes the grass's colour where the blades thin out. In revo
+    // mode that colour is revo's, not the hybrid blades' — same field, other
+    // paint pot.
+    grassFarShading.syncFromState(grassState.system === "revo"
+      ? { ...grassState, bladeColor: revoGrassState.baseColor, tipColor: revoGrassState.tipColor }
+      : grassState);
     grassPush.params.recovery = grassState.trailRecovery;
+    syncRevoGrass();
     // Susuki shares the grass wind params — keep it in step with every sync.
     syncSusukiUniforms();
     syncFlowerUniforms();
@@ -1571,7 +1643,13 @@ export async function startV3App(opts = {}) {
 
   /** Ring windows + the blade-to-ground hand-off band the terrain fades in over. */
   function syncGrassLod() {
-    if (grassRings) grassFarShading.setBand(syncHybridGrassLod(grassRings, grassState));
+    if (grassState.system === "revo") {
+      // Revo has no rings: the blades thin out stochastically, so the ground
+      // converges over exactly that band.
+      grassFarShading.setBand({ convStart: revoGrassState.fadeStart, convEnd: revoGrassState.fadeEnd });
+    } else if (grassRings) {
+      grassFarShading.setBand(syncHybridGrassLod(grassRings, grassState));
+    }
     if (cliffGrassRings) syncHybridGrassLod(cliffGrassRings, grassState);
   }
 
@@ -4165,7 +4243,39 @@ export async function startV3App(opts = {}) {
 
       bakeGrassTintIfNeeded();
       waterSurfaceMap.bakeIfNeeded(renderer);
-      if (grassRings) {
+      // Which grass system the world runs. Only the chosen one is built, and
+      // the other one's rings/tile are disabled rather than disposed, so
+      // comparing the two is a dropdown, not a reload.
+      const _revoMode = grassState.system === "revo";
+      if (_revoMode && !revoGrass && !_revoBuilding
+          && grassTerrainData.hasGrassData && !_rendererSideWork) {
+        void ensureRevoGrassBuilt();
+      }
+      if (_revoMode && (!revoGrass || !grassTerrainData.hasGrassData)) {
+        // Nothing to hand off to yet: the ground must not tint itself green
+        // while the tile is still building or the world is unpainted.
+        grassFarShading.setActive(false);
+      }
+      if (revoGrass) {
+        const wantRevo = _revoMode && grassTerrainData.hasGrassData && _terrainVisible;
+        if (wantRevo !== revoGrass.enabled) revoGrass.setEnabled(wantRevo);
+        if (wantRevo) {
+          const _revoAnchor = playMode.active ? playMode.playerPosition : camera.position;
+          grassFarShading.setActive(true);
+          grassFarShading.setAnchor(_revoAnchor);
+          grassPush.setAnchor(_revoAnchor.x, _revoAnchor.z);
+          if (playMode.active) _stampPlayerGrass();
+          grassPush.update(dt);
+          revoGrass.update(_revoAnchor, camera);
+        }
+      }
+      if (grassRings && _revoMode) {
+        // The rings stop dispatching the moment the other system takes over.
+        if (_grassRingsEnabled !== "revo") {
+          _grassRingsEnabled = "revo";
+          for (const r of grassRings) r.setEnabled(false);
+        }
+      } else if (grassRings) {
         // Only spend compute + draws when there is grass to show. update() is
         // what dispatches the per-ring compute, and it early-returns while the
         // ring is disabled — measured 4 compute dispatches/frame -> 0, and the
@@ -6028,6 +6138,48 @@ export async function startV3App(opts = {}) {
     if (!gselGrassPreset.value) return;
     applyGrassPreset(gselGrassPreset.value);
   });
+
+  // ── Which grass system the world runs ─────────────────────────────────────
+  // The shared parts of the panel (Paint Density, Terrain, Interaction) stay
+  // put; the sections that only describe hybrid blades swap out for revo's.
+  const gselGrassSystem = uiById("gsel-grass-system");
+  const revoPanelRoot = uiById("revo-grass-panel");
+  if (revoPanelRoot) {
+    buildRevoGrassPanel(revoPanelRoot, {
+      revoGrassState,
+      onStateChanged: () => syncGrassUniforms(),
+      onGeometryChanged: () => syncRevoGrass(),
+    });
+  }
+  const GRASS_SYSTEM_HINTS = {
+    hybrid: "Separate lit blades in LOD rings, out to 200 m.",
+    revo: "One dense tile of small camera-facing blades around you — cheaper per blade, and many more of them.",
+  };
+  // Elements are looked up per call rather than captured: a project can load
+  // during boot, before this part of the panel has been wired, and a captured
+  // const would be in its temporal dead zone.
+  function syncGrassSystemUi() {
+    const revo = grassState.system === "revo";
+    const sel = uiById("gsel-grass-system");
+    if (sel && sel.value !== grassState.system) sel.value = grassState.system;
+    const revoRoot = uiById("revo-grass-panel");
+    for (const el of uiQueryAll('#grass-panel [data-grass-system="hybrid"]')) {
+      el.style.display = revo ? "none" : "";
+    }
+    if (revoRoot) revoRoot.style.display = revo ? "" : "none";
+    const h = uiById("grass-system-hint");
+    if (h) h.textContent = GRASS_SYSTEM_HINTS[grassState.system] ?? "";
+  }
+  gselGrassSystem?.addEventListener("change", () => {
+    grassState.system = gselGrassSystem.value === "revo" ? "revo" : "hybrid";
+    syncGrassSystemUi();
+    // Both systems read the same paint, so the one taking over needs building
+    // only the first time it is asked for.
+    if (grassState.system === "revo") void ensureRevoGrassBuilt();
+    else void ensureGrassBuilt();
+    syncGrassUniforms();
+  });
+  syncGrassSystemUi();
   const gslShadeVar  = uiById("gsl-shade-var");
   const glblShadeVar = uiById("glbl-shade-var");
   gslShadeVar.addEventListener("input", () => { grassState.shadeVariation = Number(gslShadeVar.value) / 100; glblShadeVar.textContent = grassState.shadeVariation.toFixed(2); syncGrassUniforms(); });
@@ -6323,6 +6475,8 @@ export async function startV3App(opts = {}) {
   function applyGrassState(saved) {
     mergeKnownKeys(grassState, saved);
     syncPanelControls(GRASS_PANEL_CONTROLS, grassState);
+    // A loaded world may run the other grass system; the panel follows it.
+    syncGrassSystemUi();
     if (grassRings) rebuildHybridGrassGeometries(grassRings, grassState);
     if (cliffGrassRings) rebuildHybridGrassGeometries(cliffGrassRings, grassState);
     grassTintDirty = true;
@@ -7915,6 +8069,9 @@ export async function startV3App(opts = {}) {
       cliffPaint: cliffPaintMask.getSnapshot(),
       // lodDebug is a view toggle, not the grass's look.
       grass:     { ...grassState, lodDebug: undefined },
+      // The other grass system's look, saved whether or not it is the one
+      // running: switching back should find the field you left.
+      revoGrass: { ...revoGrassState },
       snowParams: Object.fromEntries(SNOW_LOOK_KEYS.map((k) => [k, snowSystem.params[k]])),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -8004,6 +8161,9 @@ export async function startV3App(opts = {}) {
     if (d.snowParams) applySnowParams(d.snowParams);
 
     // Grass look before any ring is built, so a fresh build starts from it.
+    // The revo settings go first: applyGrassState is what pushes the chosen
+    // system's look out to the panel and the uniforms.
+    if (d.revoGrass) mergeKnownKeys(revoGrassState, d.revoGrass);
     if (d.grass) applyGrassState(d.grass);
 
     // Painted grass / susuki density layers (older projects simply lack them)
@@ -10892,6 +11052,40 @@ export async function startV3App(opts = {}) {
       get grassRings() { return grassRings; },
       get cliffGrassRings() { return cliffGrassRings; },
       get grassState() { return grassState; },
+      get revoGrassState() { return revoGrassState; },
+      /**
+       * Which grass system is actually drawing, and what the revo tile holds.
+       *   __V3_DEBUG.grassSystem()
+       * The live instance count is NOT readable: it lives in an indirect
+       * buffer the GPU writes, and reading a storage buffer back hands you the
+       * stale CPU copy. Triangles from renderer.info are the honest measure.
+       */
+      grassSystem() {
+        return {
+          system: grassState.system,
+          hybrid: { built: !!grassRings, rings: grassRings?.length ?? 0,
+            enabled: grassRings?.filter((r) => r.group.visible).length ?? 0 },
+          revo: revoGrass ? {
+            built: true,
+            enabled: revoGrass.enabled,
+            visible: revoGrass.group.visible,
+            blades: revoGrass.config.count,
+            tileSize: revoGrass.config.tileSize,
+            segments: revoGrass.config.segments,
+            trianglesPerBlade: revoGrass.mesh ? revoGrass.mesh.geometry.index.count / 3 : 0,
+          } : { built: false },
+          painted: grassTerrainData.hasGrassData,
+        };
+      },
+      /** Switch grass systems from the console: "hybrid" | "revo". */
+      grassSystemSet(which) {
+        grassState.system = which === "revo" ? "revo" : "hybrid";
+        syncGrassSystemUi();
+        if (grassState.system === "revo") void ensureRevoGrassBuilt();
+        else void ensureGrassBuilt();
+        syncGrassUniforms();
+        return grassState.system;
+      },
       renderer,
     };
   }

@@ -58,8 +58,10 @@ check("every table control exists in the editor", missingEls.length === 0, missi
 
 const stateStart = main.indexOf("const grassState = {");
 const grassKeys = [...main.slice(stateStart, main.indexOf("};", stateStart)).matchAll(/(\w+):/g)].map((m) => m[1]);
-// Not panel controls: a view toggle and two fixed tint-mode settings.
-const NO_CONTROL = new Set(["lodDebug", "terrainTintAutoSource", "terrainTintManualMode"]);
+// Not panel controls: a view toggle, two fixed tint-mode settings, and the
+// grass SYSTEM, whose control is a dropdown driven by syncGrassSystemUi (the
+// table is sliders, colours and checkboxes).
+const NO_CONTROL = new Set(["lodDebug", "terrainTintAutoSource", "terrainTintManualMode", "system"]);
 const tableKeys = new Set(grassTable.map(([, key]) => key));
 const uncovered = grassKeys.filter((k) => !NO_CONTROL.has(k) && !tableKeys.has(k));
 check("every grass setting with a control is in the table", uncovered.length === 0, uncovered.join(", "));

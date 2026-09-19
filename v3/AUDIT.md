@@ -2128,6 +2128,83 @@ That is the comparison, not a bug.
      sea never appears; the band-weight mismatch is still there and would want a
      real number before this dome could be anyone's default.
 
+117. **A second grass SYSTEM — the revo tile.** Slice 1 landed 2026-09-19.
+     Asked for as "the revo grass as another grass option, because they are
+     really different types and it changes with the game I am building". So it
+     is not a preset (the Preset dropdown is one system's two art directions,
+     #909ce05): it is a **System** dropdown at the top of the Grass panel, and
+     the sections that only describe hybrid blades swap for revo's own.
+
+     `v3/render/grass/revoGrassSystem.js` + `app/state/revoGrassState.js` +
+     `ui/buildRevoGrassPanel.js`. The look is alezen9/revo-realms (MIT) — the
+     jittered grid in a wrapping tile, stochastic thinning with distance, wind
+     from their packed 4-channel noise atlas, base-to-tip ramp with a gust
+     tint. Everything under it is this engine's, and that is the whole of what
+     makes it belong here rather than being v2's file moved:
+     - THE SAME PAINTED DENSITY the hybrid grass reads, as a PROBABILITY, so a
+       world painted for one system shows in the other and a soft brush edge
+       thins the field instead of ending it on a line. Painted blade height
+       and the Terrain slope rule are shared for the same reason. (v2's port
+       read an "exclusion" mask of its own.)
+     - BLADES STAND ON THE CLIPMAP'S TRIANGLE, not the heightmap: the same
+       floating-grass bug, so the same fix. `_clipmapGroundY` lifted out of
+       hybridGrassSystem into `v2/core/terrain/clipmapGroundY.js`, now shared
+       by both — the ambient FX note asked for exactly this extraction.
+     - THE PUSH FIELD bends it, so cars, wheels and a game's own objects lay
+       grass down, not only the player. v2's single-anchor trail and its fake
+       player-shadow blob are gone; the field carries its own recovery, so a
+       blade needs no crushed-grass memory.
+     - COMPACTED INDIRECT DRAW: the compute appends visible blades and writes
+       its own instance count, so culled blades cost zero vertex work. The
+       original pays the vertex shader for all 262k.
+     - MeshStandardNodeMaterial, so sun, sky and CSM light it like everything
+       else. The original is an unlit sprite, which in a world with a day
+       cycle is grass that never notices the sun set. Billboarding is
+       CYLINDRICAL (yaw only): a sprite blade lies down when you look from
+       above, which is exactly when you can see that it did.
+
+     MEASURED (editor, 1024² fbm world filled with grass, camera at head
+     height on a slope, rAF-sampled frame means, 3-4 interleaved rounds —
+     `renderer.info.render.timestamp`, not the panel median):
+     | arm | GPU ms |
+     |---|---|
+     | no grass at all | 2.25 |
+     | hybrid rings | 4.32 (grass = 2.06) |
+     | revo tile, High 262k | 4.35 (grass = 2.10) |
+     Draws 8 vs 6. Quality tiers, same scene: Balanced 147k 3.36, High 262k
+     4.23, Ultra 590k 4.95. So the two systems cost the SAME here — but the
+     hybrid rings spend it out to 200 m and revo spends it inside 45 m, which
+     is the actual choice between them.
+
+     LOOKED AT, and three things changed after the user's eyes:
+     — THE WIND WAS A PERMANENT GALE. `windIntensity` is a ramp from the calm
+       strength to a full gust and the original ships it at 1. Now 0.3, the
+       lean is capped and expressed as a FRACTION OF BLADE HEIGHT (a 30 cm
+       blade and a 2 m one lean by the same angle, not the same metre), and a
+       leaning blade loses height — without that the field grows in a gust,
+       which reads as stretching. Same lesson as the susuki plumes.
+     — THEN THEY STOOD TO ATTENTION, so each blade now keeps its own resting
+       lean in its own direction (`lean`, 0.3) and the wind bends it from
+       there.
+     — THE FAR FIELD SHIMMERED even standing still: a 7 cm blade is under a
+       pixel wide by 25 m and a sub-pixel triangle crawls rather than fades.
+       `minPixels` (1.4) grows the blade in world space instead — the birds'
+       and the ambient cards' floor, `gpuCull.worldSizeForPixels`. It costs
+       ~0.15 ms and it is what makes the distance read as a field. The
+       original's per-blade 5 rad/s sway went to 1.8 with it: every blade
+       vibrating on its own phase is not wind.
+
+     Still to do:
+     - Judge the MOTION in the editor, which no screenshot can answer.
+     - Colour, density and reach are at first-guess defaults.
+     - No cliff-top layer (hybrid's second ring set has one) and no terrain
+       tint takeover; the ground hand-off uses revo's own colours over its
+       fade band.
+     - The third grass in v2 (`billboardGrass`) is still unported; nothing has
+       asked for it.
+     - The tile is a SQUARE, so its corners reach ~1.4x further than its
+       sides. Invisible so far because the stochastic fade ends first.
+
 ## Performance
 
 Nothing left that is felt: the game is vsync-locked with ~4× GPU headroom.
