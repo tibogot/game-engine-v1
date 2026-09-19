@@ -307,7 +307,12 @@ export class GrassTerrainData {
       m.depthTest = m.depthWrite = false;
       m.fragmentNode = Fn(() => {
         const c = uv();
-        const d = texture(srcTex, c).x;
+        // ALL THREE CHANNELS, not just .x. The grass reads R only, but the
+        // tall-plant layer carries one plant per channel (see
+        // stampSusukiDensity), and collapsing to vec4(v,v,v,1) here threw away
+        // everything painted into G and B — the plants existed in the paint
+        // texture and never appeared in the world.
+        const d = texture(srcTex, c).xyz;
         const s0 = texture(splatTex, c).depth(int(0));
         const s1 = texture(splatTex, c).depth(int(1));
         const blocked = dot(s0, uBlockA).add(dot(s1, uBlockB));
@@ -317,7 +322,7 @@ export class GrassTerrainData {
         const keep = float(1).sub(smoothstep(0.3, 0.6, blocked))
           .mul(float(1).sub(smoothstep(0.2, 0.35, s1.w)));
         const v = d.mul(keep);
-        return vec4(v, v, v, 1);
+        return vec4(v.x, v.y, v.z, 1);
       })();
       return new QuadMesh(m);
     };
@@ -453,10 +458,24 @@ export class GrassTerrainData {
   getBladeHeightSnapshot()     { return new Uint8Array(this.bladeHeightTex.image.data); }
   restoreBladeHeightSnapshot(s) { this.bladeHeightTex.image.data.set(s); this.bladeHeightTex.needsUpdate = true; }
 
-  // ── Susuki paint layer ───────────────────────────────────────────────────
+  // ── TALL-PLANT paint layer (historically "susuki") ───────────────────────
+  //
+  // One RGBA texture, ONE TYPE PER CHANNEL — the contract ScatterField already
+  // documents for its density pages. It carried a single plant (susuki) for a
+  // long time and wrote the same coverage into R, G and B; it now carries up
+  // to four tall plants, which is what lets bamboo, palms and banana share
+  // susuki's far-reaching field (400 m tile, visible to ~195 m) instead of the
+  // ground-foliage one that fades out at 95 m — far too near for an RTS
+  // camera that sits 18-280 m out.
+  //
+  // The "susuki" name is kept throughout because it is load-bearing in saved
+  // projects and in ~120 call sites; only what it MEANS has widened.
 
-  /** Paint or erase susuki density at world position (cx, cz). */
-  stampSusukiDensity({ cx, cz, radius, strength, falloff, worldSize, erase }) {
+  /**
+   * Paint or erase tall-plant density at world position (cx, cz).
+   * @param {number} [o.channel=0] which of the four plant types to write
+   */
+  stampSusukiDensity({ cx, cz, radius, strength, falloff, worldSize, erase, channel = 0 }) {
     const res  = DENSITY_RES;
     const data = this.susukiDensityTex.image.data;
     const half = worldSize * 0.5;
@@ -475,12 +494,12 @@ export class GrassTerrainData {
         if (dx * dx + dz * dz > r2) continue;
         const t = Math.sqrt(dx * dx + dz * dz) / rPx;
         const w = Math.pow(Math.max(0, 1 - t), falloff) * strength;
-        const i = (z * res + x) * 4;
-        const v = erase
+        // Only the picked type's channel: writing all three (which this did
+        // while the field held one plant) would paint every tall plant at once.
+        const i = (z * res + x) * 4 + Math.min(2, Math.max(0, channel | 0));
+        data[i] = erase
           ? Math.max(0,   data[i] - w * 255)
           : Math.min(255, data[i] + w * 255);
-        data[i] = data[i + 1] = data[i + 2] = v;
-        data[i + 3] = 255;
       }
     }
     this.susukiDensityTex.needsUpdate = true;
@@ -493,8 +512,27 @@ export class GrassTerrainData {
     this.susukiDensityTex.needsUpdate = true;
     this._hasSusukiData = s.some((v) => v > 0);
   }
-  fillSusukiDensity()  { this.susukiDensityTex.image.data.fill(255); this.susukiDensityTex.needsUpdate = true; this._hasSusukiData = true; }
+  /** Fill ONE tall-plant type over the whole map (or all of them with -1). */
+  fillSusukiDensity(channel = 0) {
+    const d = this.susukiDensityTex.image.data;
+    if (channel < 0) d.fill(255);
+    else for (let i = Math.min(2, channel | 0); i < d.length; i += 4) d[i] = 255;
+    this.susukiDensityTex.needsUpdate = true;
+    this._hasSusukiData = true;
+  }
   clearSusukiDensity() { this.susukiDensityTex.image.data.fill(0);   this.susukiDensityTex.needsUpdate = true; this._hasSusukiData = false; }
+
+  /**
+   * A project saved before the field went multi-type wrote its one plant into
+   * R, G AND B. Loaded as-is that is three plants at full coverage — a map
+   * where every bamboo and palm we later put in slots 1-2 erupts everywhere.
+   * Keep channel 0 (the susuki that was painted) and drop the copies.
+   */
+  collapseSusukiToChannel0() {
+    const d = this.susukiDensityTex.image.data;
+    for (let i = 0; i < d.length; i += 4) { d[i + 1] = 0; d[i + 2] = 0; }
+    this.susukiDensityTex.needsUpdate = true;
+  }
 
   // ── Cliff-top grass layer ────────────────────────────────────────────────
 

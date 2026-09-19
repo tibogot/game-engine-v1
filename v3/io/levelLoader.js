@@ -54,17 +54,24 @@ export function createLevelLoader(app, {
   const pendingKey = `v3.pendingLevel:${location.pathname}`;
   const nameOf = (url) => url.split("/").pop() || url;
 
-  async function finish(name) {
+  async function finish(name, hasLook = false) {
     await app.refreshWorldHeights?.();
-    return { name, loaded: true };
+    return { name, loaded: true, hasLook };
   }
 
   async function loadBuffer(buf, { name = "level", ask = confirmResize } = {}) {
     if (!isProjectFile(buf)) throw new Error(`"${name}" is not a .v3proj file.`);
-    const t = decodeProjectFile(buf).terrain ?? {};
+    const decoded = decodeProjectFile(buf);
+    const t = decoded.terrain ?? {};
+    // Did this level bring its OWN sky/sun/fog (worldEnvironment.exportLook)?
+    // A game that hard-codes a look after loading makes every level wear the
+    // same one: the RTS's valley fog is banded 8-42 m, which drowns any map
+    // whose floor sits above that and leaves any lower map unfogged. A level
+    // that carries a look should keep it; the game's numbers are the FALLBACK.
+    const hasLook = !!decoded.environment?.look;
     if (terrainSizeDiffers(t)) {
       const ok = typeof ask === "function" ? ask(t, name) : !!ask;
-      if (!ok) return { name, loaded: false };
+      if (!ok) return { name, loaded: false, hasLook: false };
       saveTerrainConfig(t);
       sessionStorage.setItem(pendingKey, name);
       await stashPendingHeightmap(buf);
@@ -75,7 +82,7 @@ export function createLevelLoader(app, {
     }
     onStatus(`Loading ${name}…`);
     await app.loadProjectFromBuffer(buf);
-    return finish(name);
+    return finish(name, hasLook);
   }
 
   async function loadUrl(url, { ask = confirmResize } = {}) {

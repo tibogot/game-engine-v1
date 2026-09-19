@@ -33,8 +33,72 @@
  *   2 FAR   the same sheet uncut, fewer fronds (~100)
  */
 import * as THREE from "three";
+import { buildBamboo } from "./bambooGeometry.js";
+import { buildPalm } from "./palmGeometry.js";
+import { buildCardFern } from "./fernCardGeometry.js";
+import { buildBanana } from "./bananaGeometry.js";
 
 export const FOLIAGE_LODS = 3;
+
+/**
+ * ── ROUNDED LEAF NORMALS ─────────────────────────────────────────────────────
+ *
+ * Diagnosed 2026-09-20 in the editor: with the foliage not casting shadows at
+ * all, a fern field still went black under a 14° sun. Every leaf's shading
+ * normal was bent 95% to straight UP in the shader (foliageSystem.js), so at
+ * a low sun NO leaf faced the light — only the stalks, which keep their true
+ * normal, showed as bright slivers. The undersides going black in the evening
+ * is this, not the shadow map.
+ *
+ * The fix is the trick every tree renderer uses: bend each leaf's normal
+ * toward the direction from the plant's CENTRE out through the leaf, so a
+ * plant shades as a rounded mass — sunward side lit, far side falling off,
+ * and at a low sun the leaves facing the sun still catch it. Baked here into
+ * the normal attribute (free) rather than computed in the shader (which has
+ * no spare uniform row for a centre). The shader then blends only about half
+ * way to up, instead of 95%.
+ *
+ * Per kind: where the centre sits (in plant heights) and how far to round.
+ * A ground rosette's centre sits BELOW the ground so every normal points up
+ * and out — a hemisphere — and no leaf underside is ever lit from below by a
+ * normal that points down. A bush is a near-sphere. A palm rounds only a
+ * little, so its V-folded halves keep their contrast, and from the crown.
+ * Stalks (part 1) and culms/trunks (part 3) keep their true normals.
+ */
+const LEAF_ROUNDING = {
+  fern:      [-0.15, 0.7],
+  cardFern:  [-0.15, 0.7],
+  blades:    [0.1, 0.6],
+  typha:     [0.2, 0.55],
+  plume:     [0.2, 0.55],
+  pampas:    [0.2, 0.55],
+  susuki:    [0.2, 0.55],
+  broadleaf: [0.05, 0.75],
+  bush:      [0.4, 0.85],
+  bamboo:    [0.75, 0.5],
+  palm:      [1.0, 0.4],
+  banana:    [0.8, 0.5],
+  taro:      [0.05, 0.6],
+};
+
+function roundLeafNormals(type, P, N, A) {
+  const [cyRel, k] = LEAF_ROUNDING[type.kind] ?? [0.1, 0.6];
+  let h = 0;
+  for (let i = 1; i < P.length; i += 3) if (P[i] > h) h = P[i];
+  const cy = cyRel * Math.max(h, 0.01);
+  for (let v = 0, n = A.length / 4; v < n; v++) {
+    const part = A[v * 4];
+    if (part > 0.5 && part < 1.5) continue;   // stalk
+    if (part > 2.5 && part < 3.5) continue;   // culm / trunk
+    const x = P[v * 3], y = P[v * 3 + 1] - cy, z = P[v * 3 + 2];
+    const l = Math.hypot(x, y, z) || 1;
+    let nx = N[v * 3] * (1 - k) + (x / l) * k;
+    let ny = N[v * 3 + 1] * (1 - k) + (y / l) * k;
+    let nz = N[v * 3 + 2] * (1 - k) + (z / l) * k;
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    N[v * 3] = nx / nl; N[v * 3 + 1] = ny / nl; N[v * 3 + 2] = nz / nl;
+  }
+}
 
 function rng(seed) {
   let s = seed >>> 0 || 1;
@@ -73,9 +137,29 @@ function archCurve(rows, len, tilt, arch) {
  * @param {{ lod?: number }} [o]  0 near · 1 mid · 2 far
  * @returns {{ geometry: THREE.BufferGeometry, triangles: number }}
  */
+/**
+ * Which alpha-card texture a kind's card parts use, or null for a plant that
+ * is solid geometry throughout. foliageSystem.js keeps one material per key.
+ *   plume  part 2 heads — pampas, susuki (plumeTexture.js)
+ *   spray  part 4 sprays — bamboo (bambooSprayTexture.js)
+ *   frond  part 5 half-fronds — palm (palmFrondTexture.js)
+ *   fern   part 5 half-fronds — the card fern (fernFrondTexture.js)
+ */
+export function cardTextureOf(kind) {
+  switch (kind) {
+    case "pampas": case "susuki": return "plume";
+    case "bamboo": return "spray";
+    case "palm": return "frond";
+    case "cardFern": return "fern";
+    case "banana": return "banana";
+    case "taro": return "taro";
+    default: return null;
+  }
+}
+
 /** Plants whose head is drawn with the plume strand texture (their own, alpha-tested material). */
 export function usesPlumeTexture(kind) {
-  return kind === "pampas" || kind === "susuki";
+  return cardTextureOf(kind) === "plume";
 }
 
 export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
@@ -89,6 +173,7 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
   };
   const vcount = () => P.length / 3;
   const finish = () => {
+    roundLeafNormals(type, P, N, A);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(N), 3));
@@ -99,6 +184,10 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
   };
 
   // Plants that are not pinnate have their own builders.
+  if (type.kind === "bamboo") return buildBamboo(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "palm") return buildPalm(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "cardFern") return buildCardFern(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "banana" || type.kind === "taro") return buildBanana(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
     const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : type.kind === "susuki" ? "fan" : "plume";

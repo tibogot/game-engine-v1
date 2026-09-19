@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Vegetation (bamboo, palm, ferns)</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #0e1410; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10;
+             background: rgba(10,16,12,0.88); border: 1px solid #27352a;
+             border-radius: 8px; padding: 10px 12px; min-width: 232px; }
+      #hud h1 { margin: 0 0 6px; font-size: 12px; letter-spacing: .05em;
+                text-transform: uppercase; color: #cfd8b8; }
+      .row { display: flex; justify-content: space-between; gap: 14px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .note { margin-top: 7px; padding-top: 6px; border-top: 1px solid #27352a;
+              color: #8b998b; font-size: 11px; }
+      .keys { color: #9fb39f; }
+      .keys b { color: #d8e4c8; font-weight: 600; }
+      #err { color: #ff8c8c; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Vegetation Lab</h1>
+      <div class="row"><span>Plant</span><b id="s-plant">—</b></div>
+      <div class="row"><span>Tris / plant</span><b id="s-tris">—</b></div>
+      <div class="row"><span>Plants drawn</span><b id="s-count">—</b></div>
+      <div class="row"><span>Triangles</span><b id="s-total">—</b></div>
+      <div class="row"><span>Draw calls</span><b id="s-draws">—</b></div>
+      <div class="row"><span>Camera dist</span><b id="s-dist">—</b></div>
+      <div class="row"><span>FPS</span><b id="s-fps">—</b></div>
+      <div class="note keys">
+        <b>1</b> close · <b>2</b> RTS · <b>3</b> far · <b>0</b> eye level<br />
+        <b>L</b> cycle LOD · <b>G</b> single plant / grove
+      </div>
+      <div class="note" id="err"></div>
+    </div>
+
+    <script type="module">
+      // ── VEGETATION LAB ───────────────────────────────────────────────────────
+      //
+      // Tunes the ENGINE's plant geometry, not a copy of it: the geometry comes
+      // from createFoliageTypeGeometry and the presets come from the engine's
+      // own state file, so a number that looks right here is a number that can
+      // be pasted into FOLIAGE_PRESETS and behave.
+      //
+      // The shading deliberately MIRRORS foliageSystem.js's node material —
+      // canopy normal for leaves, true normal for stalks and culms, colour by
+      // `part`, backlit translucency — rather than being a pretty lab material.
+      // A plant that only looks good under a lab's private lighting is a lie,
+      // and the fern/susuki work already paid for that lesson once.
+      //
+      // What it is FOR (the three things a plant fails at, in order):
+      //   • silhouette at distance — press 2 and 3, that is where the plant
+      //     actually lives in a game
+      //   • LOD agreement — press L and watch the outline, not the detail
+      //   • density — one plant always looks fine; a field is the real test
+      //
+      // The 1.75 m figure is not decoration. Bamboo and palm are the two plants
+      // whose scale is easiest to get wrong by a factor of two.
+      import * as THREE from "three";
+      import {
+        Discard, Fn, attribute, cameraPosition, cameraViewMatrix, cos, dot, exp, faceDirection,
+        float, fract, hash, instanceIndex, max, min, mix, normalLocal, normalize, pow, positionLocal,
+        saturate, select, sin, smoothstep, texture, time, uniform, uv, varying, vec2, vec3, vec4, PI2,
+      } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "three/addons/libs/lil-gui.module.min.js";
+      import { createFoliageTypeGeometry, FOLIAGE_LODS } from "./render/foliage/foliageGeometry.js";
+      import { drawPlumeTexture, PLUME_TEX_W, PLUME_TEX_H } from "./render/foliage/plumeTexture.js";
+      import { drawBambooSprayTexture, SPRAY_TEX_W, SPRAY_TEX_H } from "./render/foliage/bambooSprayTexture.js";
+      import { drawPalmFrondTexture, FROND_TEX_W, FROND_TEX_H } from "./render/foliage/palmFrondTexture.js";
+      import { drawFernFrondTexture, FERN_TEX_W, FERN_TEX_H } from "./render/foliage/fernFrondTexture.js";
+      import { drawBananaLeafTexture, drawTaroLeafTexture, BROADLEAF_TEX_W, BROADLEAF_TEX_H } from "./render/foliage/broadleafTextures.js";
+      import { cardTextureOf } from "./render/foliage/foliageGeometry.js";
+      import { FOLIAGE_PRESETS } from "./app/state/foliageScatterState.js";
+
+      // The two card textures the engine draws (susuki plume, bamboo spray),
+      // made the same way so the lab shows the same alpha the game will.
+      function canvasTexture(w, h, draw) {
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        draw(canvas);
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.NoColorSpace;
+        tex.anisotropy = 8;
+        tex.needsUpdate = true;
+        return tex;
+      }
+      const plumeTex = canvasTexture(PLUME_TEX_W, PLUME_TEX_H,
+        (c) => drawPlumeTexture(c, { texSpread: 54, texStrands: 420, texStrandLen: 0.34, texDroop: 0.6 }));
+      const sprayTex = canvasTexture(SPRAY_TEX_W, SPRAY_TEX_H, (c) => drawBambooSprayTexture(c));
+      const frondTex = canvasTexture(FROND_TEX_W, FROND_TEX_H, (c) => drawPalmFrondTexture(c));
+      const fernTex = canvasTexture(FERN_TEX_W, FERN_TEX_H, (c) => drawFernFrondTexture(c));
+      // Part 5 (half-frond cards) is shared by the palm and the card fern; the
+      // engine gives each kind its own material, the lab swaps the texture.
+      const bananaTex = canvasTexture(BROADLEAF_TEX_W, BROADLEAF_TEX_H, (c) => drawBananaLeafTexture(c));
+      const taroTex = canvasTexture(BROADLEAF_TEX_W, BROADLEAF_TEX_H, (c) => drawTaroLeafTexture(c));
+      const frondSlot = { plume: plumeTex, spray: sprayTex, frond: frondTex, fern: fernTex, banana: bananaTex, taro: taroTex };
+
+      const $ = (id) => document.getElementById(id);
+      const err = (e) => { $("err").textContent = String(e?.stack || e?.message || e); console.error(e); };
+
+      // ── Parameters ───────────────────────────────────────────────────────────
+      const P = {
+        preset: "banana",
+        // grove
+        count: 140,
+        radius: 20,
+        sizeVar: 0.22,
+        // Boots on ONE plant. A grove hides a bad shape behind its neighbours —
+        // the first thing to look at is the plant, alone, from outside it.
+        single: true,
+        // detail
+        lodMode: "auto",          // auto | 0 | 1 | 2
+        lod1Dist: 28,
+        lod2Dist: 70,
+        // light / sky
+        sunAzimuth: 38,
+        sunElevation: 26,
+        sunIntensity: 3.1,
+        sunColor: "#fff3df",
+        hemiSky: "#9fc4e8",
+        hemiGround: "#4a5136",
+        hemiIntensity: 0.85,
+        exposure: 1.0,
+        fogColor: "#b9cbd2",
+        fogNear: 150,
+        fogFar: 820,
+        groundColor: "#5a6b3c",
+        // wind
+        windStrength: 0.16,
+        windSpeed: 0.75,
+        windDir: 35,
+        flutter: 1.0,
+        // look
+        translucency: 1.0,
+        colorVar: 0.09,
+      };
+
+      // The plant's own numbers — a live copy of the preset, edited by the GUI.
+      let T = structuredClone(FOLIAGE_PRESETS[P.preset]);
+
+      // ── Renderer ─────────────────────────────────────────────────────────────
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.toneMapping = THREE.NeutralToneMapping;
+      renderer.toneMappingExposure = P.exposure;
+      renderer.info.autoReset = false;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(P.fogColor);
+      scene.fog = new THREE.Fog(new THREE.Color(P.fogColor), P.fogNear, P.fogFar);
+
+      const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.2, 1200);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.maxPolarAngle = Math.PI * 0.495;
+
+      const hemi = new THREE.HemisphereLight(P.hemiSky, P.hemiGround, P.hemiIntensity);
+      scene.add(hemi);
+      const sun = new THREE.DirectionalLight(P.sunColor, P.sunIntensity);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.near = 1;
+      sun.shadow.camera.far = 220;
+      const SH = 60;
+      Object.assign(sun.shadow.camera, { left: -SH, right: SH, top: SH, bottom: -SH });
+      sun.shadow.bias = -0.0008;
+      sun.shadow.normalBias = 0.12;   // thin blades self-shadow into black at 0.04
+      scene.add(sun);
+      scene.add(sun.target);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+      function placeSun() {
+        const az = (P.sunAzimuth * Math.PI) / 180;
+        const el = (P.sunElevation * Math.PI) / 180;
+        const d = new THREE.Vector3(
+          Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az),
+        );
+        sun.position.copy(d).multiplyScalar(120);
+        sun.target.position.set(0, 0, 0);
+        sun.target.updateMatrixWorld();
+        U.uSunDir.value.copy(d).normalize();
+      }
+
+      // ── Ground ───────────────────────────────────────────────────────────────
+      const ground = new THREE.Mesh(
+        new THREE.CircleGeometry(600, 64).rotateX(-Math.PI / 2),
+        new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(P.groundColor), roughness: 1 }),
+      );
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      // A 1.75 m person, for scale. The single most useful object in the lab.
+      const figure = new THREE.Group();
+      {
+        const mat = new THREE.MeshStandardNodeMaterial({ color: 0xcf9a6a, roughness: 0.9 });
+        const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.05, 4, 10), mat);
+        body.position.y = 0.87;
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 12, 10), mat);
+        head.position.y = 1.64;
+        body.castShadow = head.castShadow = true;
+        figure.add(body, head);
+        figure.position.set(2.2, 0, 2.2);
+        scene.add(figure);
+      }
+
+      // ── Uniforms shared with the plant material ──────────────────────────────
+      const U = {
+        uSunDir: uniform(new THREE.Vector3(0, 1, 0)),
+        uWindDir: uniform(new THREE.Vector2(1, 0)),
+        uWindStrength: uniform(P.windStrength),
+        uWindSpeed: uniform(P.windSpeed),
+        uFlutter: uniform(P.flutter),
+        uPlantHeight: uniform(1),
+        uTrans: uniform(P.translucency),
+        uColorVar: uniform(P.colorVar),
+        uBase: uniform(new THREE.Color(T.colorBase)),
+        uTip: uniform(new THREE.Color(T.colorTip)),
+        uHead: uniform(new THREE.Color(T.colorHead ?? T.colorTip)),
+      };
+
+      // ── The plant material — a mirror of foliageSystem.js ────────────────────
+      // Kept structurally identical (same parts, same normal treatment, same
+      // colour terms) so the lab and the engine cannot drift apart silently.
+      function makePlantMaterial() {
+        const mat = new THREE.MeshStandardNodeMaterial({
+          side: THREE.DoubleSide, roughness: 0.92, metalness: 0,
+        });
+
+        const vPart = varying(float(0), "v_veg_part");
+        const vAlong = varying(float(0), "v_veg_along");
+        const vHeight = varying(float(0), "v_veg_h");
+        const vRand = varying(float(0), "v_veg_rand");
+        const vPlant = varying(float(0), "v_veg_plant");
+        const vNormal = varying(vec3(0, 1, 0), "v_veg_n");
+        const vWorld = varying(vec3(0), "v_veg_w");
+
+        /** Rodrigues: tilt `p` toward the horizontal direction (bx, bz) by `ang`. */
+        const tilt = (p, ang, bx, bz) => {
+          // Axis perpendicular to the bend direction, so +ang leans that way.
+          const kx = bz, kz = bx.negate();
+          const c = cos(ang), s = sin(ang);
+          const kDotP = kx.mul(p.x).add(kz.mul(p.z));
+          const crossK = vec3(
+            kz.mul(p.y).negate(),
+            kx.mul(p.z).sub(kz.mul(p.x)),
+            kx.mul(p.y),
+          );
+          return p.mul(c).add(crossK.mul(s)).add(vec3(kx, float(0), kz).mul(kDotP.mul(float(1).sub(c))));
+        };
+
+        // Per-plant yaw happens HERE, not in the instance matrix — the same
+        // place the engine does it (foliageSystem's `yawRot`). It matters: the
+        // normal handed to the fragment stage is treated as a world normal, so
+        // a yaw that lives only in the instance matrix rotates every plant's
+        // geometry and leaves its shading behind. Culms lit by a normal 40° off
+        // their own surface go black against the sky, which is exactly how this
+        // showed up.
+        const yaw = hash(instanceIndex.add(131)).mul(PI2);
+        const cy = cos(yaw), sy = sin(yaw);
+        const yawRot = (p) => vec3(
+          p.x.mul(cy).add(p.z.mul(sy)),
+          p.y,
+          p.z.mul(cy).sub(p.x.mul(sy)),
+        );
+
+        mat.positionNode = Fn(() => {
+          const a = attribute("aPlant", "vec4");
+          const part = a.x, t = a.y, along = a.w;
+
+          const phase = hash(instanceIndex).mul(PI2);
+          const tt = time.mul(U.uWindSpeed);
+          // Two waves an octave apart: a gust that never repeats on the beat.
+          const gust = sin(tt.add(phase)).mul(0.62)
+            .add(sin(tt.mul(1.73).add(phase.mul(1.7))).mul(0.38));
+
+          // Leaves flutter across their own width; stalks and culms only bend.
+          // A spray card (part 4) flutters as one thing, on its own phase.
+          const isLeaf = part.lessThan(0.5).or(part.greaterThan(3.5));
+          const flutter = sin(time.mul(5.2).add(a.z.mul(29)).add(phase.mul(13)))
+            .mul(U.uFlutter).mul(0.02).mul(along).mul(select(isLeaf, float(1), float(0)));
+
+          const local = yawRot(positionLocal).add(vec3(0, flutter, 0));
+          const nLocal = yawRot(normalLocal);
+          // Stiff at the base, loose at the top — by HEIGHT on the plant, never
+          // by `t`, or a crown shears instead of tilting (foliageSystem.js).
+          const hFrac = saturate(positionLocal.y.div(max(U.uPlantHeight, float(0.01))));
+          const bend = pow(max(hFrac, 1e-4), float(1.4)).mul(U.uWindStrength).mul(gust);
+          const bx = U.uWindDir.x, bz = U.uWindDir.y;
+          const pos = tilt(local, bend, bx, bz);
+
+          vPart.assign(part);
+          vAlong.assign(along);
+          vHeight.assign(t);
+          vRand.assign(a.z);
+          vPlant.assign(hash(instanceIndex.add(3197)));
+          vNormal.assign(tilt(nLocal, bend, bx, bz));
+          vWorld.assign(pos);
+          return pos;
+        })();
+
+        // Leaves are lit as a canopy: normal bent almost all the way to UP and
+        // always turned toward the viewer, so a blade hanging toward the camera
+        // does not go black beside a lit neighbour. A stalk (1) and a bamboo
+        // CULM (3) keep their true normal — a pole has to read as round.
+        const nW = normalize(vNormal);
+        const nLeaf = normalize(mix(nW, vec3(0, 1, 0), 0.55));   // rounded normals are baked; see foliageGeometry
+        const nLeafView = cameraViewMatrix.mul(vec4(nLeaf, 0)).xyz.normalize();
+        const nLeafFacing = select(nLeafView.z.lessThan(0), nLeafView.negate(), nLeafView);
+        const isLeafPart = vPart.lessThan(0.5).or(vPart.greaterThan(3.5));
+        const isSoft = isLeafPart.or(vPart.greaterThan(1.5).and(vPart.lessThan(2.5)));
+        // A culm gets a PARTIAL lift toward up — not the leaves' 95%, which
+        // would flatten the pole, and not the stalk's 0%, which turned it
+        // black. A standing cylinder's true normal is horizontal, so with a
+        // low sun the whole camera-facing side falls off a cliff; in life the
+        // culm is glossy and reads the sky instead. 45% keeps the round
+        // gradient and lifts the shaded side out of the floor.
+        const nCulm = normalize(mix(nW, vec3(0, 1, 0), 0.45));
+        const trueView = cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize().mul(faceDirection);
+        const culmView = cameraViewMatrix.mul(vec4(nCulm, 0)).xyz.normalize().mul(faceDirection);
+        // Palm frond half-cards (part 5): lifted only half way, so the two
+        // halves of the V-fold shade apart (mirrors foliageSystem.js).
+        const nFrond = normalize(mix(nW, vec3(0, 1, 0), fract(vPart)));
+        const nFrondView = cameraViewMatrix.mul(vec4(nFrond, 0)).xyz.normalize();
+        const nFrondFacing = select(nFrondView.z.lessThan(0), nFrondView.negate(), nFrondView);
+        mat.normalNode = select(vPart.greaterThan(4.5), nFrondFacing,
+          select(isSoft, nLeafFacing,
+            select(vPart.greaterThan(2.5), culmView, trueView)));
+
+        const baseColor = Fn(() => {
+          const c = uv();
+          const up = vHeight.mul(0.65).add(vAlong.mul(0.35));
+          const leaf = mix(U.uBase, U.uTip, smoothstep(0.05, 0.95, up).mul(0.9)).toVar();
+          leaf.mulAssign(mix(vec3(1), vec3(1.14, 1.1, 0.88), smoothstep(0.55, 1.0, vHeight)));
+          const cx = c.x.sub(0.5).mul(2);
+          leaf.mulAssign(float(1).add(exp(cx.mul(cx).mul(-30)).mul(0.06)));
+          leaf.mulAssign(mix(float(0.55), float(1), smoothstep(0.0, 0.3, vHeight)));
+          leaf.mulAssign(float(0.94).add(min(vRand, float(1)).mul(0.12)));
+          // Dead leaf (rand ≥ 2, a palm's skirt): brown.
+          const dead = vRand.greaterThan(1.5);
+          leaf.assign(select(dead, vec3(0.62, 0.42, 0.17).mul(float(0.85).add(vHeight.mul(0.3))), leaf));
+
+          const stem = mix(U.uTip, vec3(0.72, 0.8, 0.4), float(0.5))
+            .mul(mix(float(0.5), float(1), smoothstep(0.0, 0.12, vHeight)));
+          const head = U.uHead.mul(mix(float(0.82), float(1.12), vAlong));
+          // Culm (part 3): vAlong is the signed distance to the nearest node
+          // — scar on it, waxy bloom just above, striations round it, ramp up
+          // it, ageing per culm. Mirrors foliageSystem.js exactly.
+          const nd = vAlong;
+          const scar = float(1).sub(smoothstep(0.0, 0.09, nd.abs())).mul(0.34);
+          const bloom = smoothstep(0.03, 0.08, nd).mul(float(1).sub(smoothstep(0.18, 0.36, nd))).mul(0.26);
+          const striae = sin(c.x.mul(PI2).mul(41)).mul(0.035);
+          const culmTone = mix(U.uHead, U.uHead.mul(vec3(1.14, 1.04, 0.66)), vRand.mul(0.55));
+          const culm = culmTone
+            .mul(mix(float(0.82), float(1.18), vHeight))
+            .mul(float(1).sub(scar).add(bloom).add(striae));
+
+          const col = select(isLeafPart, leaf,
+            select(vPart.lessThan(1.5), stem,
+              select(vPart.lessThan(2.5), head, culm)));
+          const j = vPlant.sub(0.5).mul(2).mul(U.uColorVar);
+          return col.mul(vec3(float(1).add(j.mul(0.6)), float(1).add(j), float(1).sub(j.mul(0.5))));
+        });
+        const col = baseColor();
+        mat.colorNode = col;
+
+        // Sunlight through the blades when the sun is behind them. Leaves let
+        // light through; a stalk or a culm does not.
+        mat.emissiveNode = Fn(() => {
+          const V = normalize(cameraPosition.sub(vWorld));
+          const behind = pow(saturate(dot(V, U.uSunDir.negate())), float(3));
+          const thin = select(isLeafPart.and(vRand.lessThan(1.5)), U.uTrans, float(0));
+          return col.mul(behind.mul(thin).mul(0.9));
+        })();
+
+        // Cards: a plume head (part 2) is cut by the plume texture, a bamboo
+        // spray (part 4) by the spray texture. Everything else stays opaque.
+        // Both textures live on one material here, which the engine splits
+        // into two materials; the shading is the same either way.
+        const isPlume = vPart.greaterThan(1.5).and(vPart.lessThan(2.5));
+        const isSpray = vPart.greaterThan(3.5).and(vPart.lessThan(4.5));
+        const isFrond = vPart.greaterThan(4.5);
+        frondTexNode = texture(frondTex, uv());
+        const cardAlpha = () => select(isPlume, texture(plumeTex, uv()).a,
+          select(isSpray, texture(sprayTex, uv()).a,
+            select(isFrond, frondTexNode.a, float(1))));
+        mat.opacityNode = Fn(() => {
+          const a = cardAlpha();
+          Discard(a.lessThan(0.4));
+          return float(1);
+        })();
+        mat.maskShadowNode = cardAlpha().greaterThanEqual(0.4);
+
+        return mat;
+      }
+
+      let frondTexNode = null;
+      const plantMat = makePlantMaterial();
+      /** Point the part-5 card slot at the texture this kind uses. */
+      function syncFrondTexture() {
+        const key = cardTextureOf(T.kind);
+        if (frondTexNode && key && key !== "plume" && key !== "spray") frondTexNode.value = frondSlot[key];
+      }
+      syncFrondTexture();
+
+      // ── The grove ────────────────────────────────────────────────────────────
+      const MAX_INSTANCES = 600;
+      const lods = [];           // { mesh, triangles }
+      const layout = [];         // { x, z, yaw, scale, dist }
+      const _m = new THREE.Matrix4();
+      const _q = new THREE.Quaternion();
+      const _v = new THREE.Vector3();
+      const _s = new THREE.Vector3();
+
+      function disposeLods() {
+        for (const l of lods) {
+          scene.remove(l.mesh);
+          l.mesh.geometry.dispose();
+        }
+        lods.length = 0;
+      }
+
+      /** Rebuild all three detail levels from the current plant numbers. */
+      function rebuildGeometry() {
+        disposeLods();
+        let localHeight = 1;
+        for (let lod = 0; lod < FOLIAGE_LODS; lod++) {
+          const { geometry, triangles } = createFoliageTypeGeometry(T, { lod });
+          geometry.computeBoundingBox();
+          if (lod === 0) {
+            const b = geometry.boundingBox;
+            localHeight = Math.max(0.01, b.max.y);
+            // How far the plant reaches sideways, for framing a wide rosette.
+            plantExtent = Math.max(Math.abs(b.min.x), b.max.x, Math.abs(b.min.z), b.max.z);
+          }
+          const mesh = new THREE.InstancedMesh(geometry, plantMat, MAX_INSTANCES);
+          mesh.frustumCulled = false;      // instances live anywhere
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.count = 0;
+          scene.add(mesh);
+          lods.push({ mesh, triangles });
+        }
+        U.uPlantHeight.value = localHeight;
+        $("s-tris").textContent = lods.map((l) => l.triangles.toLocaleString()).join(" / ");
+        $("s-plant").textContent = `${P.preset} (${T.kind})`;
+      }
+
+      /** Where the plants stand. Rebuilt when the grove's numbers change. */
+      function rebuildLayout() {
+        layout.length = 0;
+        if (P.single) {
+          layout.push({ x: 0, z: 0, yaw: 0.4, scale: 1 });
+        } else {
+          // Golden-angle spiral: even coverage, no visible rows, deterministic
+          // so two runs are comparable.
+          let seed = 12345;
+          const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+          for (let i = 0; i < P.count; i++) {
+            const t = (i + 0.5) / P.count;
+            // A 3 m clearing at the middle: the eye-level view and the scale
+            // figure stand there, and a culm through the lens tells you nothing.
+            const r = 3 + (P.radius - 3) * Math.sqrt(t);
+            const a = i * 2.39996;
+            layout.push({
+              x: Math.cos(a) * r + (rnd() - 0.5) * 2.4,
+              z: Math.sin(a) * r + (rnd() - 0.5) * 2.4,
+              yaw: rnd() * Math.PI * 2,
+              scale: 1 + (rnd() - 0.5) * 2 * P.sizeVar,
+            });
+          }
+        }
+      }
+
+      /** Assign each plant to a detail level and write its matrix. */
+      function syncInstances() {
+        const n = [0, 0, 0];
+        const size = T.size ?? 1;
+        for (const p of layout) {
+          const d = Math.hypot(camera.position.x - p.x, camera.position.z - p.z);
+          const lod = P.lodMode === "auto"
+            ? (d < P.lod1Dist ? 0 : d < P.lod2Dist ? 1 : 2)
+            : Number(P.lodMode);
+          // No rotation here: yaw is a per-instance hash inside the shader, so
+          // position and normal are yawed together (see makePlantMaterial).
+          _q.identity();
+          _v.set(p.x, 0, p.z);
+          _s.setScalar(size * p.scale);
+          _m.compose(_v, _q, _s);
+          const l = lods[lod];
+          if (l && n[lod] < MAX_INSTANCES) l.mesh.setMatrixAt(n[lod]++, _m);
+        }
+        let tris = 0;
+        for (let i = 0; i < lods.length; i++) {
+          lods[i].mesh.count = n[i];
+          lods[i].mesh.visible = n[i] > 0;   // a count-0 instanced mesh still draws
+          lods[i].mesh.instanceMatrix.needsUpdate = true;
+          tris += n[i] * lods[i].triangles;
+        }
+        return { drawn: n[0] + n[1] + n[2], tris };
+      }
+
+      // ── Camera presets — the distances a plant actually has to survive ───────
+      let plantExtent = 0.5;
+      function frame(kind) {
+        // The plant's real size: a palm's crown rises well above its trunk,
+        // a fern's fronds reach twice as far sideways as it stands tall.
+        const size = T.size ?? 1;
+        const h = Math.max(size * (U.uPlantHeight.value || 1), size * plantExtent * 1.7);
+        const look = new THREE.Vector3(0, h * 0.45, 0);
+        if (kind === "eye") {
+          camera.position.set(3.2, 1.7, 7.0);
+          look.set(0, 2.2, 0);
+        } else if (kind === "close") {
+          // Far enough OUT to see the whole plant against the sky: the shape
+          // cannot be judged from inside the thicket.
+          camera.position.set(h * 0.55, h * 0.62, h * 1.55);
+        } else if (kind === "rts") {
+          // The RTS camera: high, pitched about 40°, 120 m out.
+          camera.position.set(0, 120 * Math.sin(0.7), 120 * Math.cos(0.7));
+        } else {
+          camera.position.set(0, 280 * Math.sin(0.6), 280 * Math.cos(0.6));
+        }
+        controls.target.copy(look);
+        controls.update();
+      }
+
+      addEventListener("keydown", (e) => {
+        const k = e.key.toLowerCase();
+        if (k === "0") frame("eye");
+        else if (k === "1") frame("close");
+        else if (k === "2") frame("rts");
+        else if (k === "3") frame("far");
+        else if (k === "l") {
+          const order = ["auto", "0", "1", "2"];
+          P.lodMode = order[(order.indexOf(P.lodMode) + 1) % order.length];
+          lodCtrl.updateDisplay();
+        } else if (k === "g") {
+          P.single = !P.single;
+          singleCtrl.updateDisplay();
+          rebuildLayout();
+        }
+      });
+
+      // ── GUI ──────────────────────────────────────────────────────────────────
+      const gui = new GUI({ title: "Vegetation" });
+      gui.domElement.style.maxHeight = "92vh";
+      gui.domElement.style.overflowY = "auto";
+
+      const shapeFolder = gui.addFolder("Shape");
+      let shapeCtrls = [];
+      function rebuildShapeGui() {
+        for (const c of shapeCtrls) c.destroy();
+        shapeCtrls = [];
+        const onShape = () => rebuildGeometry();
+        const add = (key, min, max, step) => {
+          if (T[key] === undefined) return;
+          shapeCtrls.push(shapeFolder.add(T, key, min, max, step).onFinishChange(onShape));
+        };
+        // Bamboo re-reads the shared keys, so the labels below are what they
+        // MEAN for a bamboo; for a fern they mean what their names say.
+        add("fronds", 1, 40, 1);          // bamboo: culms in the clump
+        add("frondLength", 0.2, 2.0, 0.01);
+        add("leaflets", 2, 40, 1);        // bamboo: internodes per culm
+        add("leafletWidth", 0.2, 3, 0.01);
+        add("leafletAngle", 10, 90, 1);   // bamboo: branch angle
+        add("spread", 0.05, 2.0, 0.01);   // bamboo: clump splay
+        add("arch", 0.0, 2.0, 0.01);
+        add("droop", 0.0, 1.5, 0.01);
+        add("stemWidth", 0.2, 4, 0.05);
+        add("bareStalk", 0.0, 0.9, 0.01); // bamboo: clean lower pole
+        add("plumesPerStem", 1, 14, 1);   // bamboo: leaves per spray
+        add("plumeSpread", 2, 80, 1);
+        shapeCtrls.push(shapeFolder.add(T, "size", 0.2, 20, 0.1).name("size (m)"));
+      }
+
+      const colorFolder = gui.addFolder("Colour");
+      colorFolder.addColor(T, "colorBase").onChange((v) => U.uBase.value.set(v));
+      colorFolder.addColor(T, "colorTip").onChange((v) => U.uTip.value.set(v));
+      colorFolder.addColor(T, "colorHead").name("colorHead / culm").onChange((v) => U.uHead.value.set(v));
+      colorFolder.add(P, "colorVar", 0, 0.4, 0.005).onChange((v) => (U.uColorVar.value = v));
+      colorFolder.add(P, "translucency", 0, 2, 0.05).onChange((v) => (U.uTrans.value = v));
+
+      const groveFolder = gui.addFolder("Grove");
+      groveFolder.add(P, "count", 1, MAX_INSTANCES, 1).onChange(rebuildLayout);
+      groveFolder.add(P, "radius", 2, 160, 1).onChange(rebuildLayout);
+      groveFolder.add(P, "sizeVar", 0, 0.6, 0.01).onChange(rebuildLayout);
+      const singleCtrl = groveFolder.add(P, "single").name("single plant (G)").onChange(rebuildLayout);
+
+      const lodFolder = gui.addFolder("Detail");
+      const lodCtrl = lodFolder.add(P, "lodMode", ["auto", "0", "1", "2"]).name("LOD (L)");
+      lodFolder.add(P, "lod1Dist", 2, 200, 1).name("LOD1 from (m)");
+      lodFolder.add(P, "lod2Dist", 4, 400, 1).name("LOD2 from (m)");
+
+      const windFolder = gui.addFolder("Wind");
+      windFolder.add(P, "windStrength", 0, 0.8, 0.01).onChange((v) => (U.uWindStrength.value = v));
+      windFolder.add(P, "windSpeed", 0, 3, 0.05).onChange((v) => (U.uWindSpeed.value = v));
+      windFolder.add(P, "flutter", 0, 3, 0.05).onChange((v) => (U.uFlutter.value = v));
+      windFolder.add(P, "windDir", 0, 360, 1).onChange((v) => {
+        const a = (v * Math.PI) / 180;
+        U.uWindDir.value.set(Math.sin(a), Math.cos(a));
+      });
+
+      const lightFolder = gui.addFolder("Light");
+      lightFolder.add(P, "sunAzimuth", 0, 360, 1).onChange(placeSun);
+      lightFolder.add(P, "sunElevation", 2, 89, 1).onChange(placeSun);
+      lightFolder.add(P, "sunIntensity", 0, 8, 0.05).onChange((v) => (sun.intensity = v));
+      lightFolder.addColor(P, "sunColor").onChange((v) => sun.color.set(v));
+      lightFolder.add(P, "hemiIntensity", 0, 3, 0.05).onChange((v) => (hemi.intensity = v));
+      lightFolder.addColor(P, "hemiSky").onChange((v) => hemi.color.set(v));
+      lightFolder.addColor(P, "hemiGround").onChange((v) => hemi.groundColor.set(v));
+      lightFolder.add(P, "exposure", 0.2, 2.5, 0.01).onChange((v) => (renderer.toneMappingExposure = v));
+      lightFolder.addColor(P, "fogColor").onChange((v) => {
+        scene.background.set(v); scene.fog.color.set(v);
+      });
+      lightFolder.add(P, "fogNear", 1, 300, 1).onChange((v) => (scene.fog.near = v));
+      lightFolder.add(P, "fogFar", 20, 900, 1).onChange((v) => (scene.fog.far = v));
+      lightFolder.addColor(P, "groundColor").onChange((v) => ground.material.color.set(v));
+      lightFolder.close();
+
+      gui.add(P, "preset", Object.keys(FOLIAGE_PRESETS)).name("plant").onChange((k) => {
+        T = structuredClone(FOLIAGE_PRESETS[k]);
+        U.uBase.value.set(T.colorBase);
+        U.uTip.value.set(T.colorTip);
+        U.uHead.value.set(T.colorHead ?? T.colorTip);
+        rebuildShapeGui();
+        colorFolder.controllers.forEach((c) => c.object === T || c.updateDisplay());
+        syncFrondTexture();
+        rebuildGeometry();
+        rebuildLayout();
+        frame("close");
+      });
+
+      gui.add({
+        dump() {
+          // Paste straight into FOLIAGE_PRESETS.
+          const out = {};
+          for (const k of Object.keys(FOLIAGE_PRESETS[P.preset])) out[k] = T[k];
+          console.log(JSON.stringify(out, null, 2));
+          navigator.clipboard?.writeText(JSON.stringify(out, null, 2));
+        },
+      }, "dump").name("copy preset → clipboard");
+
+      // ── Go ───────────────────────────────────────────────────────────────────
+      try {
+        rebuildShapeGui();
+        placeSun();
+        U.uWindDir.value.set(Math.sin((P.windDir * Math.PI) / 180), Math.cos((P.windDir * Math.PI) / 180));
+        rebuildGeometry();
+        rebuildLayout();
+        frame("close");
+      } catch (e) { err(e); }
+
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+
+      let last = performance.now(), frames = 0, fps = 0;
+      renderer.setAnimationLoop(() => {
+        try {
+          controls.update();
+          const { drawn, tris } = syncInstances();
+          renderer.info.reset();
+          renderer.render(scene, camera);
+
+          frames++;
+          const now = performance.now();
+          if (now - last > 500) {
+            fps = Math.round((frames * 1000) / (now - last));
+            frames = 0; last = now;
+            $("s-fps").textContent = fps;
+            $("s-count").textContent = drawn;
+            $("s-total").textContent = tris.toLocaleString();
+            $("s-draws").textContent = renderer.info.render.drawCalls;
+            $("s-dist").textContent = `${camera.position.length().toFixed(0)} m`;
+          }
+        } catch (e) { err(e); renderer.setAnimationLoop(null); }
+      });
+    </script>
+  </body>
+</html>

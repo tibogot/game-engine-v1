@@ -17,13 +17,17 @@
 import * as THREE from "three";
 import {
   Discard, Fn, attribute, cameraPosition, cameraViewMatrix, cos, dot, exp, faceDirection, float,
-  hash, instanceIndex, length, max, min, mix, normalLocal, normalize, pow, positionLocal, saturate,
+  fract, hash, instanceIndex, length, max, min, mix, normalLocal, normalize, pow, positionLocal, saturate,
   select, sin, smoothstep, step, texture, time, uniform, uv, varying, vec2, vec3, vec4, PI2,
 } from "three/tsl";
-import { drawPlumeTexture } from "./plumeTexture.js";
+import { drawPlumeTexture, PLUME_TEX_W, PLUME_TEX_H } from "./plumeTexture.js";
+import { drawBambooSprayTexture, SPRAY_TEX_W, SPRAY_TEX_H } from "./bambooSprayTexture.js";
+import { drawPalmFrondTexture, FROND_TEX_W, FROND_TEX_H } from "./palmFrondTexture.js";
+import { drawFernFrondTexture, FERN_TEX_W, FERN_TEX_H } from "./fernFrondTexture.js";
+import { drawBananaLeafTexture, drawTaroLeafTexture, BROADLEAF_TEX_W, BROADLEAF_TEX_H } from "./broadleafTextures.js";
 import { bakeObjectThumbnails } from "../../../v2/tools/objectThumbnails.js";
 import { ScatterField } from "../scatter/scatterField.js";
-import { createFoliageTypeGeometry, FOLIAGE_LODS, usesPlumeTexture } from "./foliageGeometry.js";
+import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
 import { FOLIAGE_TYPE_COUNT } from "../../app/state/foliageScatterState.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
@@ -31,19 +35,43 @@ const ROWS = 4;
 const RULE_ROW = 2;
 
 /**
- * The plume strand texture the thumbnails draw pampas with. Its own copy, made
- * on first use, so a picture can be baked before any foliage system exists.
+ * THE CARD TEXTURES — one canvas-drawn alpha per `cardTextureOf` key. Geometry
+ * cannot afford strand, spray or lace detail; a texture can, and a card of it
+ * sways as one thing. Each is drawn white; colour is the shader's.
  */
-let _thumbPlumeTex = null;
-function thumbPlumeTexture() {
-  if (_thumbPlumeTex) return _thumbPlumeTex;
+const CARD_TEXTURES = {
+  plume: {
+    w: PLUME_TEX_W, h: PLUME_TEX_H,
+    draw: (c) => drawPlumeTexture(c, { texSpread: 54, texStrands: 420, texStrandLen: 0.34, texDroop: 0.6 }),
+  },
+  spray: { w: SPRAY_TEX_W, h: SPRAY_TEX_H, draw: drawBambooSprayTexture },
+  frond: { w: FROND_TEX_W, h: FROND_TEX_H, draw: drawPalmFrondTexture },
+  fern:  { w: FERN_TEX_W,  h: FERN_TEX_H,  draw: drawFernFrondTexture },
+  banana: { w: BROADLEAF_TEX_W, h: BROADLEAF_TEX_H, draw: drawBananaLeafTexture },
+  taro:   { w: BROADLEAF_TEX_W, h: BROADLEAF_TEX_H, draw: drawTaroLeafTexture },
+};
+
+/** Draw one card texture. `anisotropy` for the live field; the thumbnails go without. */
+function makeCardTexture(key, anisotropy = 0) {
+  const spec = CARD_TEXTURES[key];
   const canvas = document.createElement("canvas");
-  canvas.width = 256; canvas.height = 512;
-  drawPlumeTexture(canvas, { texSpread: 54, texStrands: 420, texStrandLen: 0.34, texDroop: 0.6 });
-  _thumbPlumeTex = new THREE.CanvasTexture(canvas);
-  _thumbPlumeTex.colorSpace = THREE.NoColorSpace;
-  _thumbPlumeTex.needsUpdate = true;
-  return _thumbPlumeTex;
+  canvas.width = spec.w; canvas.height = spec.h;
+  spec.draw(canvas);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.NoColorSpace;
+  if (anisotropy) tex.anisotropy = anisotropy;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * The thumbnails' own copies, made on first use, so a picture can be baked
+ * before any foliage system exists.
+ */
+const _thumbCardTex = new Map();
+function thumbCardTexture(key) {
+  if (!_thumbCardTex.has(key)) _thumbCardTex.set(key, makeCardTexture(key));
+  return _thumbCardTex.get(key);
 }
 
 /**
@@ -69,18 +97,33 @@ export async function bakeFoliageThumbnail(type, { renderer, size = 128, runRend
   const colors = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
     const part = aPlant.getX(i), t = aPlant.getY(i), along = aPlant.getW(i);
-    if (part > 1.5) c.copy(head).multiplyScalar(0.85 + along * 0.3);
+    // Part 3 is a bamboo culm: `along` is the signed distance to the nearest
+    // node (bambooGeometry.js), so the scar and the waxy bloom survive into
+    // the picker's thumbnail as a coarse version of the live shader's bands.
+    if (part > 2.5 && part < 3.5) {
+      const ad = Math.abs(along);
+      const scar = ad < 0.09 ? (1 - ad / 0.09) * 0.34 : 0;
+      const bloom = along > 0.03 && along < 0.36 ? 0.26 : 0;
+      c.copy(head).multiplyScalar((0.82 + t * 0.36) * (1 - scar + bloom));
+    } else if (part > 1.5) c.copy(head).multiplyScalar(0.85 + along * 0.3);
     else if (part > 0.5) c.copy(stalk);
+    // Part 0 is a leaf, parts 4 and 5 are leaf CARDS (alpha-tested spray or
+    // frond): same colour. A dead frond (rand ≥ 2) is brown.
+    else if (aPlant.getZ(i) >= 1.5) c.setRGB(0.62, 0.42, 0.17);
     else c.copy(base).lerp(tip, Math.min(1, t * 0.65 + along * 0.35));
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
   }
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
-  // Head triangles last, so they can carry the plume texture on their own.
+  // Textured triangles last, so they can carry their alpha on their own: a
+  // plume head (part 2) or a bamboo spray card (part 4). A culm (part 3) is
+  // solid geometry and must stay in the body group, or an alpha-mapped
+  // material would eat it.
   const idx = Array.from(geometry.index.array);
   const bodyTris = [], headTris = [];
   for (let i = 0; i < idx.length; i += 3) {
-    (aPlant.getX(idx[i]) > 1.5 ? headTris : bodyTris).push(idx[i], idx[i + 1], idx[i + 2]);
+    const pv = aPlant.getX(idx[i]);
+    ((pv > 1.5 && pv < 2.5) || pv > 3.5 ? headTris : bodyTris).push(idx[i], idx[i + 1], idx[i + 2]);
   }
   geometry.setIndex([...bodyTris, ...headTris]);
   geometry.clearGroups();
@@ -89,9 +132,11 @@ export async function bakeFoliageThumbnail(type, { renderer, size = 128, runRend
   const body = new THREE.MeshStandardMaterial(opts);
   // A plant with no head (a fern) gets no second group: an empty draw is a
   // WebGPU warning, not a no-op.
+  const cardKey = cardTextureOf(type.kind);
+  const cardTex = cardKey ? thumbCardTexture(cardKey) : null;
   const headMat = headTris.length
     ? new THREE.MeshStandardMaterial(
-      usesPlumeTexture(type.kind) ? { ...opts, alphaMap: thumbPlumeTexture(), alphaTest: 0.4, transparent: false } : opts,
+      cardTex ? { ...opts, alphaMap: cardTex, alphaTest: 0.4, transparent: false } : opts,
     )
     : null;
   if (headMat) {
@@ -149,18 +194,11 @@ export class FoliageScatterSystem {
     const { bufPos, bufDir, compactBuf } = field.nodes;
     const fu = field.u;
 
-    // The susuki plume texture: hundreds of fine arcing strands drawn white,
-    // used as the ALPHA of a plume card. Geometry cannot afford that detail, so
-    // the one plant that needs it (pampas) gets its own material and pays the
+    // Card plants (plume heads, bamboo sprays, palm and fern fronds) get a
+    // material per texture key, made on first use in rebuildType, and pay the
     // alpha test; every other plant keeps plain early-depth-rejected geometry.
-    const plumeCanvas = document.createElement("canvas");
-    plumeCanvas.width = 256; plumeCanvas.height = 512;
-    drawPlumeTexture(plumeCanvas, { texSpread: 54, texStrands: 420, texStrandLen: 0.34, texDroop: 0.6 });
-    const plumeTex = new THREE.CanvasTexture(plumeCanvas);
-    plumeTex.colorSpace = THREE.NoColorSpace;
-    plumeTex.anisotropy = 8;
-    plumeTex.needsUpdate = true;
-    this._plumeTex = plumeTex;
+    this._cardTex = {};
+    this._cardMats = {};
 
     // Matte: a fern has no highlights to speak of, and a specular term on a
     // saturated green reads as plastic.
@@ -214,8 +252,10 @@ export class FoliageScatterSystem {
       const yaw = hash(plant.add(131)).mul(PI2);
       const cy = cos(yaw), sy = sin(yaw);
 
-      // Leaflets flutter across their own width; the rachis only bends.
-      const isLeaf = part.lessThan(0.5);
+      // Leaflets flutter across their own width; the rachis only bends. A
+      // spray CARD (part 4) flutters as one thing — `along` runs up the card
+      // and `a.z` is per card, so the whole fan moves on its own phase.
+      const isLeaf = part.lessThan(0.5).or(part.greaterThan(3.5));
       const flutter = sin(time.mul(5.2).add(a.z.mul(29)).add(hash(plant).mul(13)))
         .mul(u.uFlutter).mul(0.06).mul(along).mul(select(isLeaf, float(1), float(0)));
 
@@ -257,7 +297,11 @@ export class FoliageScatterSystem {
     const nW = normalize(vNormal);
     // (Almost all the way: game ferns are lit as a flat canopy; what little
     // geometric normal remains keeps the fronds from looking like paper.)
-    const nLeaf = normalize(mix(nW, vec3(0, 1, 0), 0.95));
+    // 0.55, not 0.95: the geometry now carries a ROUNDED normal per leaf
+    // (foliageGeometry roundLeafNormals — see its header for the low-sun
+    // diagnosis), so the shader only has to soften it, not replace it. At
+    // 0.95 no leaf ever faced a low sun and the whole field went black.
+    const nLeaf = normalize(mix(nW, vec3(0, 1, 0), 0.55));
     const nLeafView = cameraViewMatrix.mul(vec4(nLeaf, 0)).xyz.normalize();
     // …and always toward the viewer: a frond hanging toward the camera shows
     // its underside, which must not go dark next to a lit neighbour.
@@ -265,10 +309,31 @@ export class FoliageScatterSystem {
     // Heads (part 2) are bodies of revolution, so half of one faces away from
     // the sun and goes muddy; they are soft and pale in life, so they get the
     // same canopy normal as the leaves. Only the stalk keeps its true normal.
-    const isSoft = vPart.lessThan(0.5).or(vPart.greaterThan(1.5));
-    mat.normalNode = select(isSoft,
-      nLeafFacing,
-      cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize().mul(faceDirection));
+    // A bamboo culm (part 3) is neither. The leaves' 95% lift would flatten a
+    // pole into a green stripe; the stalk's true normal turned it BLACK, which
+    // is the physically correct answer and the wrong picture — a standing
+    // cylinder's normal is horizontal, so under a low sun its whole
+    // camera-facing side falls off a cliff, top to bottom, unshadowed. A real
+    // culm is glossy and reads the sky there. 45% keeps the round gradient and
+    // lifts the shaded side off the floor.
+    // Part 4 (a leaf card) is a leaf in every way but its alpha.
+    const isLeafPart = vPart.lessThan(0.5).or(vPart.greaterThan(3.5));
+    const isSoft = isLeafPart.or(vPart.greaterThan(1.5).and(vPart.lessThan(2.5)));
+    const nCulm = normalize(mix(nW, vec3(0, 1, 0), 0.45));
+    const trueView = cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize().mul(faceDirection);
+    const culmView = cameraViewMatrix.mul(vec4(nCulm, 0)).xyz.normalize().mul(faceDirection);
+    // A palm frond half-card (part 5) is lifted only HALF way to up. The
+    // leaves' 95% would shade both halves of the V-fold the same and flatten
+    // the frond into a comb; at 50% the sunward half and the shaded half
+    // read apart, which is the whole reason the frond is two cards.
+    // The lift rides in the part id's fraction (palmGeometry addFrondCards):
+    // 5.5 for a palm, 5.85 for a ground fern.
+    const nFrond = normalize(mix(nW, vec3(0, 1, 0), fract(vPart)));
+    const nFrondView = cameraViewMatrix.mul(vec4(nFrond, 0)).xyz.normalize();
+    const nFrondFacing = select(nFrondView.z.lessThan(0), nFrondView.negate(), nFrondView);
+    mat.normalNode = select(vPart.greaterThan(4.5), nFrondFacing,
+      select(isSoft, nLeafFacing,
+        select(vPart.greaterThan(2.5), culmView, trueView)));
 
     const baseColor = Fn(() => {
       const r0 = row(vType, 0);
@@ -287,7 +352,11 @@ export class FoliageScatterSystem {
       leaf.mulAssign(float(1).add(vein.mul(0.06)));
       // The heart of the rosette is its darkest green.
       leaf.mulAssign(mix(float(0.55), float(1), smoothstep(0.0, 0.3, vHeight)));
-      leaf.mulAssign(float(0.94).add(vRand.mul(0.12)));
+      leaf.mulAssign(float(0.94).add(min(vRand, float(1)).mul(0.12)));
+      // A DEAD leaf — a palm's hanging skirt — is flagged by rand ≥ 2 (the
+      // only spare channel): brown, and opaque to the backlight below.
+      const dead = vRand.greaterThan(1.5);
+      leaf.assign(select(dead, vec3(0.62, 0.42, 0.17).mul(float(0.85).add(vHeight.mul(0.3))), leaf));
       // The stalk: only a little paler and yellower than the blade, and as
       // dark as the blade toward the crown.
       const stem = mix(r1.xyz, vec3(0.72, 0.8, 0.4), float(0.5))
@@ -295,7 +364,29 @@ export class FoliageScatterSystem {
       // The head (a cattail's sausage, a reed's plume): its own colour, a
       // little darker where it meets the stem and paler at the tip.
       const head = row(vType, 3).xyz.mul(mix(float(0.82), float(1.12), vAlong));
-      const col = select(vPart.lessThan(0.5), leaf, select(vPart.lessThan(1.5), stem, head));
+      // A bamboo culm (part 3). `vAlong` is the SIGNED distance to the nearest
+      // node in half-internodes (bambooGeometry.js): 0 on the node, ±1 in the
+      // middle of an internode, negative below the node. A node is drawn from
+      // it as the two things geometry cannot make crisp on a 40 cm quad:
+      //   scar   a thin dark line on the node itself (the leaf-sheath scar)
+      //   bloom  the pale waxy band a few centimetres ABOVE it
+      // (the raised ridge is geometry). Fine vertical striations round the
+      // culm, the up-culm ramp from green at the foot to straw at the crown
+      // read from `vHeight`, and older culms (per-culm `vRand`) yellowing all
+      // over — the same hue shift a grove shows between this year's canes and
+      // last year's.
+      const nd = vAlong;
+      const scar = float(1).sub(smoothstep(0.0, 0.09, nd.abs())).mul(0.34);
+      const bloom = smoothstep(0.03, 0.08, nd).mul(float(1).sub(smoothstep(0.18, 0.36, nd))).mul(0.26);
+      const striae = sin(uv().x.mul(PI2).mul(41)).mul(0.035);
+      const culmRow = row(vType, 3).xyz;
+      const culmTone = mix(culmRow, culmRow.mul(vec3(1.14, 1.04, 0.66)), vRand.mul(0.55));
+      const culm = culmTone
+        .mul(mix(float(0.82), float(1.18), vHeight))
+        .mul(float(1).sub(scar).add(bloom).add(striae));
+      const col = select(isLeafPart, leaf,
+        select(vPart.lessThan(1.5), stem,
+          select(vPart.lessThan(2.5), head, culm)));
       const j = vPlant.sub(0.5).mul(2).mul(fu.uColorVar);
       return col.mul(vec3(float(1).add(j.mul(0.6)), float(1).add(j), float(1).sub(j.mul(0.5))));
     });
@@ -312,21 +403,23 @@ export class FoliageScatterSystem {
       const V = normalize(cameraPosition.sub(vWorld));
       const behind = pow(saturate(dot(V, u.uSunDir.negate())), 3).mul(sunVis);
       // Leaves let light through; a stem or a solid head does not.
-      const thin = select(vPart.lessThan(0.5), row(vType, 0).w, float(0));
+      const thin = select(isLeafPart.and(vRand.lessThan(1.5)), row(vType, 0).w, float(0));
       return col.mul(behind.mul(thin).mul(u.uTransMul).mul(0.9).add(u.uGlowLight));
     })();
 
     if (headTex) {
-      // The plume's shape lives in the texture's alpha; everything else on the
-      // plant is solid geometry and stays fully opaque.
+      // The card's shape lives in the texture's alpha — a plume head (part 2)
+      // or a bamboo spray (part 4); everything else on the plant is solid
+      // geometry and stays fully opaque.
+      const isCard = vPart.greaterThan(1.5).and(vPart.lessThan(2.5)).or(vPart.greaterThan(3.5));
       mat.opacityNode = Fn(() => {
-        const a = select(vPart.greaterThan(1.5), texture(headTex, uv()).a, float(1));
+        const a = select(isCard, texture(headTex, uv()).a, float(1));
         Discard(a.lessThan(0.4));
         return float(1);
       })();
-      // The shadow pass ignores opacityNode: without this the plume casts
-      // the whole card.
-      mat.maskShadowNode = vPart.lessThan(1.5).or(texture(headTex, uv()).a.greaterThanEqual(0.4));
+      // The shadow pass ignores opacityNode: without this the card casts
+      // its whole rectangle.
+      mat.maskShadowNode = isCard.not().or(texture(headTex, uv()).a.greaterThanEqual(0.4));
     }
     return mat;
     };
@@ -337,7 +430,14 @@ export class FoliageScatterSystem {
 
     const mat = makeMaterial(null);
     this._mat = mat;
-    this._plumeMat = makeMaterial(plumeTex);
+    /** The material for one card texture key, built on first use. */
+    this._cardMat = (key) => {
+      if (!this._cardMats[key]) {
+        this._cardTex[key] = makeCardTexture(key, 8);
+        this._cardMats[key] = makeMaterial(this._cardTex[key]);
+      }
+      return this._cardMats[key];
+    };
 
     field.attachMaterial(mat);
     for (let i = 0; i < typeCount; i++) this.rebuildType(i, fs.types[i]);
@@ -361,8 +461,9 @@ export class FoliageScatterSystem {
       }
       return made;
     });
-    // Only the textured-plume plants pay for the alpha test.
-    const mat = usesPlumeTexture(type.kind) ? this._plumeMat : this._mat;
+    // Only the card-carrying plants pay for the alpha test.
+    const cardKey = cardTextureOf(type.kind);
+    const mat = cardKey ? this._cardMat(cardKey) : this._mat;
     for (let lod = 0; lod < FOLIAGE_LODS; lod++) this.field.meshes[i * FOLIAGE_LODS + lod].material = mat;
     const sh = this.field.shadowMeshes[this.field.shadowMeshIndex(i)];
     if (sh) sh.material = mat;

@@ -106,7 +106,7 @@ import { FoliageScatterSystem, bakeFoliageThumbnail } from "../render/foliage/fo
 import { ScatterDensity } from "../render/scatter/scatterDensity.js";
 import { AmbientFxSystem } from "../render/ambient/ambientFxSystem.js";
 import { createAmbientFxState, AMBIENT_EFFECT_COUNT } from "./state/ambientFxState.js";
-import { createFoliageScatterState, createSusukiPlantState, SUSUKI_FIELD } from "./state/foliageScatterState.js";
+import { createFoliageScatterState, createSusukiPlantState, SUSUKI_FIELD, TALL_PLANT_COUNT } from "./state/foliageScatterState.js";
 import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
 import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
@@ -1286,23 +1286,29 @@ export async function startV3App(opts = {}) {
   // stalks) on a far-reaching field: see createSusukiPlantState. Same shape
   // code, material, panel and shadows as every other plant.
   const susukiState = createSusukiPlantState();
-  const susukiBrush = _shareVegBrush({});
+  // `type` is per-brush (radius/strength/erase are shared through vegBrush).
+  // This one had none while the field held a single plant.
+  const susukiBrush = _shareVegBrush({ type: 0 });
   let susukiSystem = null;
   let _susukiBuilding = false;
   let susukiUi = null;
-  let _susukiThumbUrl = null;
+  const _susukiThumbs = new Map();
   let _susukiThumbChain = Promise.resolve();
-  function queueSusukiThumb() {
+  /** Bake one tall plant's picker card, or all of them when `which` is null. */
+  function queueSusukiThumb(which = null) {
     if (!isEditor) return;
-    _susukiThumbChain = _susukiThumbChain
-      .then(async () => {
-        const url = await bakeFoliageThumbnail(susukiState.types[0], {
-          renderer,
-          runRendererSideWork: (fn) => withRendererSideWork(fn),
-        });
-        if (url) { _susukiThumbUrl = url; vegUi?.refreshCards(); }
-      })
-      .catch((e) => console.warn("[V3 Susuki] thumbnail failed:", e));
+    const list = which == null ? susukiState.types.map((_, i) => i) : [which];
+    for (const i of list) {
+      _susukiThumbChain = _susukiThumbChain
+        .then(async () => {
+          const url = await bakeFoliageThumbnail(susukiState.types[i], {
+            renderer,
+            runRendererSideWork: (fn) => withRendererSideWork(fn),
+          });
+          if (url) { _susukiThumbs.set(i, url); vegUi?.refreshCards(); }
+        })
+        .catch((e) => console.warn("[V3 Tall plants] thumbnail failed:", e));
+    }
   }
 
   // ── Flowers (painted meadow flowers — own paint layer + instanced system) ──
@@ -1633,8 +1639,8 @@ export async function startV3App(opts = {}) {
       const sys = new FoliageScatterSystem({
         scene,
         renderer,
-        name:             "Susuki",
-        typeCount:        1,
+        name:             "Tall plants",
+        typeCount:        TALL_PLANT_COUNT,
         // A cane is tall and thin: you can stand closer before it fills the view.
         nearFade:         0.7,
         tileSize:         SUSUKI_FIELD.tileSize,
@@ -7885,7 +7891,15 @@ export async function startV3App(opts = {}) {
       susukiDensity: grassTerrainData.getSusukiDensitySnapshot(),
       // version 2 = susuki is a foliage plant (createSusukiPlantState). Older
       // files carried the retired renderer's params; they load as defaults.
-      susuki:    { version: 2, plant: structuredClone(susukiState.types[0]), field: (({ types, ...rest }) => rest)(susukiState) },
+      // version 3 = the field carries THREE tall plants, one per RGB channel
+      // of susukiDensity (`plants`, not `plant`); v2 wrote one plant and the
+      // same coverage into all three channels, so it migrates on load.
+      susuki:    {
+        version: 3,
+        plants: structuredClone(susukiState.types),
+        plant: structuredClone(susukiState.types[0]),   // v2 readers
+        field: (({ types, ...rest }) => rest)(susukiState),
+      },
       flowerDensity: flowerDensity.hasData ? flowerDensity.getSnapshot() : null,
       foliagePaint:  foliageDensity.hasData ? foliageDensity.getSnapshot() : null,
       foliagePlants: structuredClone(foliageScatterState.types),
@@ -8058,17 +8072,25 @@ export async function startV3App(opts = {}) {
       await worldEnv.importLook(d.environment.look);
       buildWorldPanelUi();
     }
-    if (d.susuki?.version === 2) {
+    if (d.susuki?.version >= 2) {
       if (d.susuki.field) Object.assign(susukiState, d.susuki.field);
-      if (d.susuki.plant) Object.assign(susukiState.types[0], d.susuki.plant);
+      // v3 saves every tall plant; v2 saved the one the field used to hold.
+      if (Array.isArray(d.susuki.plants)) {
+        d.susuki.plants.forEach((p, i) => { if (susukiState.types[i]) Object.assign(susukiState.types[i], p); });
+      } else if (d.susuki.plant) {
+        Object.assign(susukiState.types[0], d.susuki.plant);
+      }
     }
     if (d.susukiDensity?.length === grassTerrainData.susukiDensityTex.image.data.length) {
       grassTerrainData.restoreSusukiDensitySnapshot(d.susukiDensity);
+      // A v2 file wrote its one plant into R, G AND B. Read as three plants
+      // that is bamboo and palms erupting over the whole map; keep channel 0.
+      if (!(d.susuki?.version >= 3)) grassTerrainData.collapseSusukiToChannel0();
     }
     if (d.susuki || d.susukiDensity) {
       if (susukiSystem) {
         syncSusukiUniforms();
-        susukiSystem.rebuildType(0, susukiState.types[0]);
+        for (let i = 0; i < susukiState.types.length; i++) susukiSystem.rebuildType(i, susukiState.types[i]);
       } else if (grassTerrainData.hasSusukiData) {
         void ensureSusukiBuilt();
       }
@@ -9810,16 +9832,16 @@ export async function startV3App(opts = {}) {
 
   // ── Susuki mode: panel + paint events ──────────────────────────────────────
   if (isEditor) susukiUi = buildFoliagePanel(susukiPanel, {
-    foliageBrush: { type: 0 },
+    foliageBrush: susukiBrush,
     foliageState: susukiState,
     getLayerNames: () => textureLib.slots.map((s) => s.name),
     getHasRivers: () => (riverV2System?.rivers.length ?? 0) > 0,
-    onStateChanged: () => { syncSusukiUniforms(); queueSusukiThumb(); },
-    onGeometryChanged: () => { susukiSystem?.rebuildType(0, susukiState.types[0]); queueSusukiThumb(); },
+    onStateChanged: () => { syncSusukiUniforms(); queueSusukiThumb(susukiBrush.type); },
+    onGeometryChanged: (i) => { susukiSystem?.rebuildType(i, susukiState.types[i]); queueSusukiThumb(i); },
     onRenamed: () => vegUi?.refreshCards(),
-    fieldTitle: "Susuki Field",
+    fieldTitle: "Tall Plant Field",
     tileReach: SUSUKI_FIELD.tileSize / 2,
-    showSpecies: false,
+    showSpecies: true,   // three slots now: pick the species per slot
   });
 
   let _susukiPainting  = false;
@@ -10037,7 +10059,7 @@ export async function startV3App(opts = {}) {
   const vegFill = (mode, type) => {
     _pushVegUndo([mode]);
     if (mode === "flowers") { flowerDensity.fill(type); void ensureFlowersBuilt(); }
-    else if (mode === "susuki") { grassTerrainData.fillSusukiDensity(); void ensureSusukiBuilt(); }
+    else if (mode === "susuki") { grassTerrainData.fillSusukiDensity(type); void ensureSusukiBuilt(); }
     else { foliageDensity.fill(type); _foliageUsedDirty = true; void ensureFoliageScatterBuilt(); }
   };
 
@@ -10050,8 +10072,11 @@ export async function startV3App(opts = {}) {
           ...foliageScatterState.types.map((t, i) => ({
             mode: "foliage", key: i, get name() { return t.name; }, thumb: () => _foliageThumbs.get(i) ?? null,
           })),
-          // Its own far-reaching field, but a plant like the rest.
-          { mode: "susuki", key: 0, get name() { return susukiState.types[0].name; }, thumb: () => _susukiThumbUrl },
+          // The tall plants: their own far-reaching field (visible to ~195 m
+          // where the foliage field stops at 95), but plants like the rest.
+          ...susukiState.types.map((t, i) => ({
+            mode: "susuki", key: i, get name() { return t.name; }, thumb: () => _susukiThumbs.get(i) ?? null,
+          })),
         ],
       },
       {
@@ -10073,13 +10098,13 @@ export async function startV3App(opts = {}) {
     ],
     active: () => {
       const mode = VEG_MODES.includes(editorMode) ? editorMode : _lastVegMode;
-      return { mode, type: mode === "susuki" ? 0 : mode === "vegPlaced" ? _vegPlacedSlot : _vegBrushOf(mode).type };
+      return { mode, type: mode === "vegPlaced" ? _vegPlacedSlot : _vegBrushOf(mode).type };
     },
     onSelect: (mode, type) => {
       if (mode === "vegPlaced") {
         if (type === "import") { void importPlantGlb(); return; }
         _vegPlacedSlot = type;
-      } else if (mode !== "susuki") {
+      } else {
         _vegBrushOf(mode).type = type;
       }
       // The settings panel shows the picked plant, whichever kind it is.
@@ -10118,6 +10143,7 @@ export async function startV3App(opts = {}) {
       falloff:   susukiBrush.falloff,
       worldSize: WORLD_SIZE,
       erase:     susukiBrush.erase || altErase,
+      channel:   susukiBrush.type ?? 0,
     });
   }
 
@@ -10753,6 +10779,28 @@ export async function startV3App(opts = {}) {
         uiById("props-panel")?._rebuildPropUi?.();
         return { instances: propStore.instances.length };
       },
+      /**
+       * Foliage diagnosis hooks (2026-09-20, the "black leaf undersides").
+       *   await __V3_DEBUG.foliageFill(0)        // paint type 0 everywhere, build the field
+       *   __V3_DEBUG.foliageShadows(false)       // stop the foliage CASTING (its shadow lists)
+       *   __V3_DEBUG.foliage                     // the live FoliageScatterSystem
+       * Black patches that vanish when the foliage stops casting are shadow
+       * ACNE (self-shadowing of thin leaves); undersides that merely go evenly
+       * dark are real shade with too little fill light.
+       */
+      async foliageFill(channel = 0) {
+        foliageDensity.fill(channel);
+        await ensureFoliageScatterBuilt();
+        return { types: foliageDensity.usedChannels() };
+      },
+      foliageShadows(on = true) {
+        const f = foliageScatter?.field;
+        if (!f) return false;
+        // castShadow, not visible: the field re-asserts visibility every update.
+        for (const m of f.shadowMeshes ?? []) if (m) m.castShadow = !!on;
+        return !!on;
+      },
+      get foliage() { return foliageScatter; },
       get editorMode() { return editorMode; },
       get playActive() { return playMode.active; },
       getFlightDebug: () => playMode.getFlightDebug?.(),
