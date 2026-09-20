@@ -1904,9 +1904,18 @@ export async function startV3App(opts = {}) {
   const _scatterShadowCams = [];
   function scatterShadowCameras(distance) {
     _scatterShadowCams.length = 0;
+    if (!(distance > 0)) return _scatterShadowCams;
     const csm = worldToolState.csm.enabled ? worldEnv?.getCsm?.() : null;
     const lights = csm?.lights;
-    if (!lights?.length || !(distance > 0)) return _scatterShadowCams;
+    // Cascades OFF: one fitted shadow camera renders everything, so the
+    // scatter fields' shadow lists go to it. Without this they went to NO
+    // camera at all and every painted plant stopped casting — invisible as a
+    // bug, because it just looks like the lighting got flatter.
+    if (!lights?.length) {
+      const sunCam = worldEnv?.getSunShadowCamera?.();
+      if (sunCam) _scatterShadowCams.push(sunCam);
+      return _scatterShadowCams;
+    }
     const far = Math.min(camera.far, csm.maxFar);
     for (let i = 0; i < lights.length; i++) {
       const nearEdge = (i === 0 ? 0 : csm.breaks[i - 1] ?? 1) * far;

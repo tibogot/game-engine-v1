@@ -342,9 +342,30 @@ export class RevoGrassSystem {
       // rather than ending on a drawn line.
       const waterY = texture(this._waterMapTex, terrainUV).r;
       const dry = smoothstep(waterY.add(0.02), waterY.add(0.42), groundY);
+      /*
+       * THE TILE'S OWN EDGE, which is a SQUARE.
+       *
+       * The distance fade floors at `fadeKeep` — by design, so the far field
+       * thins to a floor rather than vanishing. But the tile WRAPS per axis at
+       * +/-tileSize/2, so that floor was still ~30% alive when it reached the
+       * boundary and then stopped dead. Zoomed out far enough for the boundary
+       * to be on screen, that reads as a square of grass sliding around with
+       * the camera.
+       *
+       * The giveaway is the shape: the distance fade is radial and can only
+       * ever draw a CIRCLE. A straight edge is the wrap, nothing else.
+       *
+       * So the last fifth of the tile takes whatever the distance fade left
+       * down to nothing. Folded into the keep PROBABILITY rather than applied
+       * to the result, so blades dissolve stochastically instead of a soft
+       * edge appearing — and `visible` below stays the 0/1 it has to be.
+       */
+      const tileHalf = u.uTileSize.mul(0.5);
+      const edgeDist = max(abs(wrapped.x), abs(wrapped.y));
+      const edgeKeep = float(1).sub(smoothstep(tileHalf.mul(0.78), tileHalf.mul(0.97), edgeDist));
       const keep = step(
         hash(instanceIndex.add(60493)),
-        painted.mul(u.uDensity).mul(slopeProb).mul(dry),
+        painted.mul(u.uDensity).mul(slopeProb).mul(dry).mul(edgeKeep),
       ).mul(inMap);
 
       const stochastic = computeStochasticKeep(

@@ -24,6 +24,7 @@ import {
   vec3,
 } from "three/tsl";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
+import { groundPatch } from "../render/viewGroundBand.js";
 import { SkyMesh } from "three/addons/objects/SkyMesh.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { projectAssets } from "../io/projectAssets.js";
@@ -164,21 +165,71 @@ export async function createWorldEnvironment({
     return equatorialToDir(Hsun + raSun - raMoon, declMoon, lat, out);
   }
 
+  /*
+   * FIT THE SUN'S SHADOW TO THE GROUND THE CAMERA CAN ACTUALLY SEE.
+   *
+   * The old version sized the box from the camera-to-focus DISTANCE
+   * (`half = dist * 0.55`), which is not the same question and under-covered
+   * badly: at a 52 m orbit it gave +/-28 m while the visible ground ran from
+   * 23 m to 97 m out and 130 m wide, so most of the screen simply had no
+   * shadows in it. groundPatch answers the real question.
+   *
+   * TEXEL SNAPPING is the part a naive fit leaves out, and it is not optional.
+   * A frustum that follows the camera slides by a fraction of a texel every
+   * frame, and every shadow edge in the scene crawls and fizzes as it does.
+   * Quantising the centre to whole texels IN LIGHT SPACE makes the map move in
+   * discrete jumps that land on the same texels, so edges sit still.
+   *
+   * The radius is also quantised, for the same reason applied to size rather
+   * than position: a frustum that grows smoothly re-scales the texel grid every
+   * frame, which no amount of position snapping can hide.
+   */
+  const _fitEye = new THREE.Vector3();
+  const _fitCentre = new THREE.Vector3();
+  const _fitView = new THREE.Matrix4();
+  const _fitUp = new THREE.Vector3(0, 1, 0);
+  const _fitSide = new THREE.Vector3(1, 0, 0);
+  const _fitAxisX = new THREE.Vector3();
+  const _fitAxisY = new THREE.Vector3();
   function fitDirectionalShadowToView(cam, focus, maxFar, lightMargin) {
     const shadowCam = sun.shadow.camera;
-    _shadowCamDist.subVectors(cam.position, focus);
-    const dist = _shadowCamDist.length();
-    const half = THREE.MathUtils.clamp(
-      Math.max(12, Math.min(maxFar * 0.4, dist * 0.55)),
-      12,
-      maxFar,
-    );
+    const patch = groundPatch(cam, focus?.y ?? 0);
+
+    // Quantise the size so the texel grid only changes when the view really
+    // does — 8% steps are invisible and stop the per-frame re-scale.
+    const raw = THREE.MathUtils.clamp(patch.radius, 12, Math.max(24, maxFar));
+    const half = Math.pow(2, Math.ceil(Math.log2(raw) * 12) / 12);
+    const mapSize = sun.shadow.mapSize.x || 2048;
+    const texel = (2 * half) / mapSize;
+
+    _fitCentre.set(patch.cx, focus?.y ?? 0, patch.cz);
+    // Snap in LIGHT space: build the light's view basis, quantise the centre's
+    // x/y in it, and put it back. Snapping in world space does nothing, because
+    // the grid that matters is the shadow map's, not the world's.
+    _fitEye.copy(_fitCentre).addScaledVector(_effectiveLightDir, lightMargin + half * 2);
+    const upish = Math.abs(_effectiveLightDir.y) > 0.99 ? _fitSide : _fitUp;
+    _fitView.lookAt(_fitEye, _fitCentre, upish);
+    _fitView.setPosition(0, 0, 0);
+    _fitView.invert();                                  // world -> light basis
+    _fitAxisX.setFromMatrixColumn(_fitView, 0);
+    _fitAxisY.setFromMatrixColumn(_fitView, 1);
+    const lx = _fitCentre.dot(_fitAxisX);
+    const ly = _fitCentre.dot(_fitAxisY);
+    _fitCentre
+      .addScaledVector(_fitAxisX, Math.round(lx / texel) * texel - lx)
+      .addScaledVector(_fitAxisY, Math.round(ly / texel) * texel - ly);
+
+    shadowTarget.position.copy(_fitCentre);
+    placeSun();
+
     shadowCam.left = -half;
     shadowCam.right = half;
     shadowCam.top = half;
     shadowCam.bottom = -half;
     shadowCam.near = 0.5;
-    shadowCam.far = half * 2 + lightMargin + 50;
+    // Deep enough that a caster standing OUTSIDE the patch, up-light of it,
+    // still reaches the map — a low sun throws long shadows in from off screen.
+    shadowCam.far = half * 4 + lightMargin + 50;
     shadowCam.updateProjectionMatrix();
     sun.shadow.needsUpdate = true;
   }
@@ -2178,6 +2229,17 @@ export async function createWorldEnvironment({
     hemi,
     /** The shadow node, or null — it is REBUILT when cascades change, so read it live. */
     getCsm: () => csm,
+    /**
+     * The plain sun's own shadow camera — what renders the shadow map when the
+     * cascades are OFF and fitDirectionalShadowToView is driving instead.
+     *
+     * Systems that keep their own shadow-only draw lists (the scatter fields)
+     * need to know which cameras will render them, and they were asking the CSM
+     * alone. With cascades off that list came back EMPTY and every painted
+     * plant silently stopped casting — which reads as "the new shadow mode
+     * looks flatter" rather than as a missing render pass.
+     */
+    getSunShadowCamera: () => sun.shadow?.camera ?? null,
     describeCsm,
     setSkyVisible,
     get skyVisible() { return _skyShown; },
