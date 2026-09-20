@@ -1857,8 +1857,47 @@ export function buildWorldPanel(app) {
         label: "Enabled",
         onChange: fogCb,
       });
+      _dropdown(hfBody, ts.fog.height, "mode", {
+        label: "Model",
+        options: {
+          analytic: "Analytic (Crytek)",
+          valley: "Valley band",
+          monsoon: "Monsoon (top-down)",
+        },
+        hint: "Analytic is the half-space integral — correct looking up or level, but it clamps DOWNWARD rays and so collapses to almost nothing for a top-down camera. Valley is a flat world-Y band. Monsoon is the same integral evaluated from the lower endpoint so it survives looking down, plus stratified sheets and a glow toward the sun.",
+        onChange: () => { fogCb(); refreshTp(); },
+      });
       _color(hfBody, ts.fog.height, "color", {
         label: "Color",
+        onChange: fogCb,
+      });
+      _slider(hfBody, ts.fog.height, "monDensity", {
+        label: "Monsoon density", min: 0.002, max: 0.12, step: 0.002,
+        hint: "Extinction per metre at the layer height. Monsoon only.",
+        onChange: fogCb,
+      });
+      _slider(hfBody, ts.fog.height, "monFalloff", {
+        label: "Monsoon falloff", min: 0.005, max: 0.2, step: 0.005,
+        hint: "Vertical decay; the layer is roughly 1/value metres thick. Monsoon only.",
+        onChange: fogCb,
+      });
+      _slider(hfBody, ts.fog.height, "monHeight", {
+        label: "Monsoon layer Y", min: -40, max: 200, step: 1,
+        hint: "World height the layer is measured from — put it near the valley floors. Monsoon only.",
+        onChange: fogCb,
+      });
+      _slider(hfBody, ts.fog.height, "monStrata", {
+        label: "Monsoon sheets", min: 0, max: 1.2, step: 0.05,
+        hint: "How hard the mist breaks into layers. 0 is a smooth gradient. Monsoon only.",
+        onChange: fogCb,
+      });
+      _slider(hfBody, ts.fog.height, "monSunStrength", {
+        label: "Monsoon sun glow", min: 0, max: 1.5, step: 0.05,
+        hint: "Backlit haze toward the sun — the Apocalypse Now look. Monsoon only.",
+        onChange: fogCb,
+      });
+      _color(hfBody, ts.fog.height, "monSunTint", {
+        label: "Monsoon sun tint",
         onChange: fogCb,
       });
       _slider(hfBody, ts.fog.height, "density", {

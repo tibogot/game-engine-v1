@@ -474,7 +474,12 @@ export const V2_CONFIG = {
     // decay (≈ 1/falloff m layer thickness).
     height: {
       enabled: false,
-      /** "analytic" = Crytek ray-integrated fog; "valley" = world-Y band (three.js webgpu_custom_fog). */
+      /** "analytic" = Crytek ray-integrated fog; "valley" = world-Y band
+       *  (three.js webgpu_custom_fog); "monsoon" = the same half-space integral
+       *  done for a camera that LOOKS DOWN, plus stratified sheets and a sun
+       *  glow. See worldEnvironment's note: analytic clamps downward rays to
+       *  dodge an overflow, which collapses it to the density at the camera —
+       *  ~0 for a top-down game, which is why it does nothing in an RTS. */
       mode: "analytic",
       color: "#a8c4e0",
       density: 0.015,
@@ -487,6 +492,15 @@ export const V2_CONFIG = {
       noiseWobble: 22,
       noiseScaleA: 0.005,
       noiseScaleB: 0.01,
+      // Monsoon — jungle valley mist for a top-down camera.
+      monDensity: 0.02,      // extinction/m at monHeight
+      monFalloff: 0.045,     // vertical decay; layer ~1/value metres thick
+      monHeight: 12,         // world Y the layer is measured from
+      monStrata: 0.45,       // how hard the sheets modulate density
+      monStrataScale: 0.02,  // sheet size (Y is scaled x4 inside, to stratify)
+      monSunTint: "#ffcf9a", // backlit haze toward the sun
+      monSunStrength: 0.75,
+      monTintPow: 3.0,       // how tightly the glow hugs the sun
     },
     distance: {
       enabled: false,

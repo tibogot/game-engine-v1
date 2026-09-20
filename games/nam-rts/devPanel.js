@@ -187,6 +187,16 @@ export function createDevPanel({
         <div class="section-header">Fog</div>
         <div class="section-body">
           <div class="prop-row">
+            <span class="prop-label">Model</span>
+            <div class="prop-value">
+              <select class="prop-select" id="dv-fog-mode">
+                <option value="analytic">Analytic (Crytek)</option>
+                <option value="valley">Valley band</option>
+                <option value="monsoon">Monsoon (top-down)</option>
+              </select>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label">Height fog</span>
             <div class="prop-value">
               <button class="prop-toggle checked" id="dv-fog" type="button" aria-label="Height fog">${CHECK_SVG}</button>
@@ -324,6 +334,13 @@ export function createDevPanel({
     #rts-dev .prop-row { min-width: 0; }
     #rts-dev .prop-label { width: 100px; min-width: 100px; flex-shrink: 0; }
     #rts-dev .prop-value { min-width: 0; overflow: visible; }
+    /* The editor's shell has no select style — this is the only one in here. */
+    #rts-dev .prop-select {
+      flex: 1 1 auto; min-width: 0;
+      background: var(--bg-2, #1b1f24); color: var(--fg, #dfe6ee);
+      border: 1px solid var(--line, #333a42); border-radius: 4px;
+      padding: 2px 6px; font: inherit; font-size: 11px;
+    }
     #rts-dev .prop-num {
       width: auto; min-width: 58px; flex-shrink: 0;
       white-space: nowrap; font-variant-numeric: tabular-nums;
@@ -553,13 +570,19 @@ export function createDevPanel({
   const fogState = app?.fog?.state?.height ?? {};
   const distState = app?.fog?.state?.distance ?? {};
 
+  // The MODEL is picked here rather than being pinned to "valley" by the
+  // toggle: the point of a second fog is being able to flip between them on
+  // the same frame and see which one the map wants.
+  const fogMode = $("#dv-fog-mode");
+  fogMode.value = fogState.mode ?? "valley";
   const fogBtn = $("#dv-fog");
-  const setFogChecked = (on) => {
+  const applyFog = (on) => {
     fogBtn.classList.toggle("checked", !!on);
-    app?.fog?.setHeight?.({ enabled: !!on, mode: "valley" });
+    app?.fog?.setHeight?.({ enabled: !!on, mode: fogMode.value });
   };
-  setFogChecked(fogState.enabled !== false);
-  fogBtn.addEventListener("click", () => setFogChecked(!fogBtn.classList.contains("checked")));
+  applyFog(fogState.enabled !== false);
+  fogBtn.addEventListener("click", () => applyFog(!fogBtn.classList.contains("checked")));
+  fogMode.addEventListener("change", () => applyFog(fogBtn.classList.contains("checked")));
 
   const fogColor = $("#dv-fog-color");
   fogColor.value = fogState.color ?? "#c8d8e4";

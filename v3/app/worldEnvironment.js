@@ -19,6 +19,9 @@ import {
   select,
   triNoise3D,
   densityFogFactor,
+  min,
+  max,
+  vec3,
 } from "three/tsl";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { SkyMesh } from "three/addons/objects/SkyMesh.js";
@@ -430,7 +433,10 @@ export async function createWorldEnvironment({
 
   const F = toolState.fog;
   const uHFogEnabled = uniform(F.height.enabled ? 1 : 0);
-  const uHFogValleyMode = uniform(F.height.mode === "valley" ? 1 : 0);
+  // 0 = analytic (Crytek half-space), 1 = valley band, 2 = monsoon. Was a
+  // boolean; a third mode needed a number, and naming it after the mode
+  // rather than one of its values stops the next one needing another rename.
+  const uHFogMode = uniform(F.height.mode === "monsoon" ? 2 : F.height.mode === "valley" ? 1 : 0);
   /*
    * FOG COLOURS CONVERT ONCE — here and at every `.set(hex)` below.
    *
@@ -464,6 +470,15 @@ export async function createWorldEnvironment({
   const uValleyNoiseScaleA = uniform(F.height.noiseScaleA ?? 0.005);
   const uValleyNoiseScaleB = uniform(F.height.noiseScaleB ?? 0.01);
   const uValleyTime = uniform(0);
+  // ── MONSOON mode ──────────────────────────────────────────────────────────
+  const uMonDensity = uniform(F.height.monDensity ?? 0.02);
+  const uMonFalloff = uniform(F.height.monFalloff ?? 0.045);
+  const uMonHeight = uniform(F.height.monHeight ?? 12);
+  const uMonStrata = uniform(F.height.monStrata ?? 0.45);
+  const uMonStrataScale = uniform(F.height.monStrataScale ?? 0.02);
+  const uMonSunTint = uniform(new THREE.Color(F.height.monSunTint ?? "#ffcf9a"));
+  const uMonSunStrength = uniform(F.height.monSunStrength ?? 0.75);
+  const uMonTintPow = uniform(F.height.monTintPow ?? 3.0);
   const uDFogEnabled = uniform(F.distance.enabled ? 1 : 0);
   const uDFogColor = uniform(new THREE.Color(F.distance.color));
   const uDFogSunTint = uniform(new THREE.Color(F.distance.sunTint));
@@ -516,7 +531,54 @@ export async function createWorldEnvironment({
     .mul(densityFogFactor(uValleyHaze).oneMinus())
     .oneMinus();
 
-  const _hFactorRaw = select(uHFogValleyMode.greaterThan(0.5), _valleyFactorRaw, _analyticFactorRaw);
+  /*
+   * ── MONSOON: the height-fog integral done for a camera that LOOKS DOWN ────
+   *
+   * The analytic mode above is the Crytek half-space integral and it is right,
+   * but only for rays going UP or level. `_hfRayY` clamps a downward ray to
+   * zero — a real fix for a real NaN (exp of a big positive number), and the
+   * reason the height fog does almost nothing in a top-down game: with the ray
+   * flattened, the whole integral collapses to the density AT THE CAMERA, and
+   * an RTS camera sits 30-110 m above the layer where that density is ~0.
+   *
+   * The integral is symmetric in its endpoints, so there is no need to clamp
+   * anything: evaluate it from the LOWER of camera and fragment and the
+   * exponent is never positive, whichever way the ray points. Same closed
+   * form, same cost, and it works looking straight down.
+   *
+   *   tau = density · e^(-falloff·(yLow - h)) · dist · (1 - e^-k)/k,  k = falloff·dy
+   *
+   * On top of that, the two things that make jungle mist read as air rather
+   * than grey paint: it lies in SHEETS (triNoise3D squashed in Y, so the wisps
+   * stratify instead of clumping), and it GLOWS toward the sun, which is the
+   * whole Apocalypse Now look — backlit haze with the hills as flat cutouts.
+   */
+  const _monLowY = min(cameraPosition.y, positionWorld.y);
+  const _monDy = max(cameraPosition.y, positionWorld.y).sub(_monLowY);
+  const _monK = uMonFalloff.mul(_monDy);
+  const _monG = select(
+    _monK.lessThan(1e-4),
+    float(1),
+    _monK.negate().exp().oneMinus().div(_monK.max(1e-4)),
+  );
+  // e^(-falloff·(yLow - h)); yLow below the layer height makes this > 1, which
+  // is correct (denser down there) and is the one term that can still run away,
+  // so it keeps the same min(50) guard the analytic mode uses.
+  const _monBase = uMonFalloff.mul(uMonHeight.sub(_monLowY)).min(50).exp();
+  // Sheets: Y scaled up so the noise stratifies into layers rather than blobs.
+  const _monWisp = triNoise3D(
+    vec3(positionWorld.x, positionWorld.y.mul(4.0), positionWorld.z).mul(uMonStrataScale),
+    float(0.15),
+    uValleyTime,
+  );
+  const _monStrataMul = float(1).add(_monWisp.sub(0.5).mul(uMonStrata).mul(2));
+  const _monTau = uMonDensity.mul(_monBase).mul(_hfDist).mul(_monG).mul(max(_monStrataMul, 0));
+  const _monsoonFactorRaw = _monTau.negate().min(50).exp().oneMinus();
+
+  const _hFactorRaw = select(
+    uHFogMode.greaterThan(1.5), _monsoonFactorRaw,
+    select(uHFogMode.greaterThan(0.5), _valleyFactorRaw, _analyticFactorRaw),
+  );
   const _hFactor = select(uHFogEnabled.greaterThan(0.5), _hFactorRaw, float(0));
   const _dFactorRaw = densityFogFactor(uDFogDensity);
   const _dFactor = select(uDFogEnabled.greaterThan(0.5), _dFactorRaw, float(0));
@@ -534,7 +596,16 @@ export async function createWorldEnvironment({
     uDFogSunTint,
     pow(_fogSunAmt, uDFogTintPow).mul(uDFogSunStrength),
   );
-  const _weatherFogColor = mix(uHFogColor, _distFogColor, _dFactor.div(_weatherW));
+  // Monsoon carries its OWN sun tint, so backlit haze works with distance fog
+  // off. Toward the sun the mist glows; away from it, it keeps its own colour.
+  const _monSunAmt = clamp(dot(_fogView, uDFogSunDir), 0, 1);
+  const _monsoonColor = mix(
+    uHFogColor,
+    uMonSunTint,
+    pow(_monSunAmt, uMonTintPow).mul(uMonSunStrength),
+  );
+  const _hFogColorEff = select(uHFogMode.greaterThan(1.5), _monsoonColor, uHFogColor);
+  const _weatherFogColor = mix(_hFogColorEff, _distFogColor, _dFactor.div(_weatherW));
   const _blendedFogColor = mix(
     _weatherFogColor,
     interiorNodes.uColor,
@@ -544,7 +615,15 @@ export async function createWorldEnvironment({
 
   function syncFog() {
     uHFogEnabled.value = F.height.enabled ? 1 : 0;
-    uHFogValleyMode.value = F.height.mode === "valley" ? 1 : 0;
+    uHFogMode.value = F.height.mode === "monsoon" ? 2 : F.height.mode === "valley" ? 1 : 0;
+    uMonDensity.value = F.height.monDensity ?? 0.02;
+    uMonFalloff.value = F.height.monFalloff ?? 0.045;
+    uMonHeight.value = F.height.monHeight ?? 12;
+    uMonStrata.value = F.height.monStrata ?? 0.45;
+    uMonStrataScale.value = F.height.monStrataScale ?? 0.02;
+    uMonSunTint.value.set(F.height.monSunTint ?? "#ffcf9a");
+    uMonSunStrength.value = F.height.monSunStrength ?? 0.75;
+    uMonTintPow.value = F.height.monTintPow ?? 3.0;
     uHFogColor.value.set(F.height.color);
     uHFogDensity.value = F.height.density;
     uHFogFalloff.value = F.height.falloff ?? 0.05;
