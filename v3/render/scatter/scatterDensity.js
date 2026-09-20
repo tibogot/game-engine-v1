@@ -112,6 +112,36 @@ export class ScatterDensity {
   get hasData() { return this._hasData; }
 
   /**
+   * How much of anything is painted at a world point, 0..1 — the STRONGEST
+   * channel, not their sum, so "is there vegetation here" does not depend on
+   * how many species happen to be painted on top of each other.
+   *
+   * Readable on the CPU because the paint has always LIVED on the CPU: these
+   * are DataTextures whose `image.data` is the authority and the GPU copy is
+   * the mirror. No readback, no async, no frame latency. That is what makes it
+   * usable from a fixed-step simulation, which cannot wait for a GPU fence.
+   *
+   * Nearest-texel on purpose. At 1024 over a 2 km world a texel is about two
+   * metres, which is finer than anything asking the question, and bilinear
+   * would cost four fetches to smooth data that is already smooth.
+   */
+  sampleAt(x, z, worldSize) {
+    if (!this._hasData) return 0;
+    const res = this.res;
+    const half = worldSize * 0.5;
+    const px = Math.floor(((x + half) / worldSize) * res);
+    const pz = Math.floor(((z + half) / worldSize) * res);
+    if (px < 0 || pz < 0 || px >= res || pz >= res) return 0;
+    const i = (pz * res + px) * 4;
+    let best = 0;
+    for (let p = 0; p < this.pages; p++) {
+      const d = this.texes[p].image.data;
+      for (let c = 0; c < 4; c++) if (d[i + c] > best) best = d[i + c];
+    }
+    return best / 255;
+  }
+
+  /**
    * @param {object} o
    * @param {THREE.WebGPURenderer} o.renderer
    * @param {THREE.DataArrayTexture} o.splatTex  SplatMap.tex (slice 1 alpha = holes)

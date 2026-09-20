@@ -11714,6 +11714,38 @@ export async function startV3App(opts = {}) {
     // ── Terrain queries a game builds on ──────────────────────────────────────
     // Ground height at a world X/Z (RTS unit clamping, building placement).
     getWorldHeight,
+    /**
+     * How dense the painted GROUND FOLIAGE is at a world X/Z, 0..1.
+     *
+     * The companion to getWorldHeight for anything that needs to know what the
+     * ground is COVERED IN rather than how high it is: a stealth or cover rule
+     * that asks "is this unit in the jungle", a spawner that will not drop a
+     * crate inside a thicket, an ambient system that wants insect noise only
+     * under canopy. All of those otherwise end up re-deriving the answer from
+     * whatever proxy they can reach, and drifting apart from the paint.
+     *
+     * Synchronous, because the paint lives on the CPU (see sampleAt) — a
+     * fixed-step simulation cannot wait on a GPU readback.
+     */
+    sampleFoliageDensity: (x, z) => foliageDensity.sampleAt(x, z, WORLD_SIZE),
+    /**
+     * The same, for the TALL-PLANT field (susuki, elephant grass) — the other
+     * thing on this terrain a standing man can disappear into. Its three types
+     * live in R/G/B of one 512 map, so the strongest channel is the answer for
+     * the same reason it is above.
+     */
+    sampleTallPlantDensity: (x, z) => {
+      const tex = grassTerrainData?.susukiDensityTex;
+      if (!tex) return 0;
+      const res = grassTerrainData.densityRes;
+      const half = WORLD_SIZE * 0.5;
+      const px = Math.floor(((x + half) / WORLD_SIZE) * res);
+      const pz = Math.floor(((z + half) / WORLD_SIZE) * res);
+      if (px < 0 || pz < 0 || px >= res || pz >= res) return 0;
+      const i = (pz * res + px) * 4;
+      const d = tex.image.data;
+      return Math.max(d[i], d[i + 1], d[i + 2]) / 255;
+    },
     // GPU-side counterpart of getWorldHeight: the live heightmap as a TSL texture
     // node, for shaders that must drape geometry over the terrain in the vertex
     // stage instead of paying a CPU sample per vertex (RTS selection rings).

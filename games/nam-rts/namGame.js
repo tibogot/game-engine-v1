@@ -71,6 +71,10 @@ import { createProjectiles } from "./projectiles.js";
 import { createFireSystem } from "./fireSystem.js";
 import { createSmokeField } from "./smokeField.js";
 import { createNapalmStrike } from "./napalmStrike.js";
+import { createCover } from "./cover.js";
+import { createAbilities } from "./abilities.js";
+import { createAbilityTargeting } from "./abilityTargeting.js";
+import { createCoverOverlay } from "./coverOverlay.js";
 import { createCraterSystem } from "./craterSystem.js";
 import { createFogOfWar } from "./fogOfWar.js";
 import { createSimClock } from "./simClock.js";
@@ -330,8 +334,15 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   });
   app.projectiles = projectiles;
 
+  // COVER AND CONCEALMENT, before combat because combat asks it on every
+  // acquire. Concealment reads the engine's painted vegetation live; cover is
+  // baked from the props, which on nam-valley are placed AFTER the level
+  // loads — so bake() is called once the world is up, not here.
+  const cover = createCover({ app, worldSize: app.worldSize ?? 2048 });
+  app.cover = cover;
+
   const combat = createCombat({
-    units, structures, fx, structuresRenderer, projectiles, fire, craters, smoke,
+    units, structures, fx, structuresRenderer, projectiles, fire, craters, smoke, cover,
     onDeath: (entity) => { app.selection?.remove?.(entity); },
   });
   combatRef = combat;
@@ -343,6 +354,20 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     app, fire, smoke, craters, combat, units, structures,
   });
   app.napalm = napalm;
+
+  // The player's verbs. The rule lives here and in the sim; the cursor is a
+  // separate file that never casts anything itself.
+  const abilities = createAbilities({ game: { smoke, napalm }, resources });
+  app.abilities = abilities;
+
+  // Hold V to see the ground. Armed only when something is selected: the
+  // question it answers is "where do I send THESE men", and with nothing
+  // selected there is nobody to send.
+  const coverOverlay = createCoverOverlay({
+    app, cover,
+    isArmed: () => (app.selection?.selected?.length ?? 0) > 0,
+  });
+  app.coverOverlay = coverOverlay;
 
   // The opponent. Enemy waves muster off-map, march on the base, and fight — all
   // of it through the EXISTING combat system, which is team-based and never knew
@@ -370,6 +395,19 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
 
   // Player-facing HUD: command card (bottom-right). Shows unit commands, or the
   // base's PRODUCTION queue when the base is selected.
+  // The ability cursor. getSelection is a thunk because selection is built
+  // AFTER the command card (the card is one of its listeners), so the reference
+  // has to be resolved at click time rather than captured here.
+  const abilityTargeting = createAbilityTargeting({
+    app, abilities,
+    getSelection: () => app.selection?.selected ?? [],
+    onCast: (a, at) => {
+      abilities.cast(a, app.selection?.selected ?? [], at);
+      commandCard.render(app.selection?.selected ?? []);   // repaint the cooldown
+    },
+  });
+  app.abilityTargeting = abilityTargeting;
+
   const commandCard = createCommandCard({
     thumbnails: unitRenderer.thumbnails,
     // What a selected structure can produce: the base makes ground units +
@@ -400,6 +438,36 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     ],
     buildingCosts: BUILDING_COST,
     onBuildStructure: (key, selected) => buildPlacement.begin(key, selected),
+    // Abilities the current selection can cast, with their live cooldowns. The
+    // card asks every frame rather than being pushed at, for the same reason it
+    // re-checks affordability: a cooldown that only refreshed on re-selection
+    // would show "ready" on a button that is not.
+    abilitiesFor: (selected) => abilities.forSelection(selected).map((a) => {
+      const c = abilities.check(a, selected);
+      return {
+        key: a.key, label: a.label, hint: a.hint, cost: a.cost,
+        ready: c.ok, cooldown: Math.ceil(abilities.cooldownLeft(a, c.caster ?? abilities.pickCaster(a, selected))),
+      };
+    }),
+    // What the selection's LEAD unit is standing in. The lead rather than an
+    // average: a group strung across a treeline is partly concealed and partly
+    // not, and averaging that into "40% hidden" tells the player nothing they
+    // can act on.
+    stanceFor: (selected) => {
+      const u = selected?.find((e) => !e.isStructure) ?? selected?.[0];
+      if (!u?.position) return null;
+      return {
+        concealment: cover.concealmentAt(u.position.x, u.position.z),
+        cover: cover.coverAt(u.position.x, u.position.z),
+        revealed: (u.revealed ?? 0) > 0,
+      };
+    },
+    onAbility: (key, selected) => {
+      const a = abilities.ABILITIES[key];
+      if (!a || !abilities.check(a, selected).ok) return;
+      buildPlacement.cancel();
+      abilityTargeting.begin(a);
+    },
     onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
     onFocus: () => {
       const sel = app.selection?.selected ?? [];
@@ -432,6 +500,10 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     for (const s of structures.list) {
       if (s.alive) navGrid.addStructureObstacle(s);
     }
+    // Cover reads the SAME props nav does, so it is rebaked in the same breath.
+    // Letting them drift would give the player a rock that blocks movement but
+    // stops no bullets, and they would be right to call it a bug.
+    cover.bake();
   };
 
   const match = createMatch({
@@ -539,6 +611,8 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     fire.update(dt, sim.simTime);         // burning wrecks
     smoke.step(dt);                       // columns age here; the puffs do not
     napalm.step(dt);                      // the run lands, burns, kills, scars
+    abilities.step(dt, units.list);       // cooldowns
+    cover.step(dt, units.list);           // "I just fired" reveal timers
   };
 
   // The RENDER clock the smoke puffs ride. Deliberately not sim.simTime: the
@@ -561,6 +635,15 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     selectionRings.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
     smoke.render(renderTime, app.environment?.getLightDirection?.());
+    // Point the overlay at the selection until the pointer has moved, so
+    // holding V before touching the mouse reveals the ground under the men
+    // rather than a patch of the map's centre.
+    {
+      const sel = app.selection?.selected ?? [];
+      const u = sel.find((e) => !e.isStructure) ?? sel[0];
+      if (u?.position) coverOverlay.setFallback(u.position.x, u.position.z);
+    }
+    coverOverlay.update(dt);              // hold V — decides nothing, only draws
     baseFlag?.update(dt);                 // HQ flag cloth sim
     commandCard.tick();                   // live production bar + affordability
     resourceHud.update(resources, units); // supplies / harvesters / nodes left
@@ -568,6 +651,13 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     minimap.draw();
   };
   app.addPreRenderHook(tick);
+
+  // Bake cover once the world is fully up. It cannot go next to createCover:
+  // on nam-valley the 1,312 rocks arrive with the level, which loads after the
+  // systems are constructed, so baking early would silently produce an empty
+  // grid — cover that is simply absent, with nothing to notice.
+  onStatus("Baking cover…");
+  console.log(`[cover] ${cover.bake()} obstacles`);
 
   // The console handle. Every subsystem already hangs off `app`, so one global
   // covers all of them: __NAM.smoke.spawn({x, z, kind: "screen"}).

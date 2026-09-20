@@ -21,7 +21,7 @@ const SMOKE_BLIND = 0.6;
 
 export function createCombat({
   units, structures, fx, structuresRenderer, projectiles, fire, craters,
-  smoke = null, onDeath = () => {},
+  smoke = null, cover = null, onDeath = () => {},
 }) {
   const _muzzle = new THREE.Vector3();
 
@@ -45,7 +45,16 @@ export function createCombat({
   const canSee = (a, b) => !smoke || smoke.occlusionBetween(
     a.position.x, a.position.z, b.position.x, b.position.z) < SMOKE_BLIND;
 
-  /** Nearest valid enemy within acquire range that is not behind smoke. */
+  /**
+   * Nearest valid enemy that can actually be PICKED UP — within range, not
+   * behind smoke, and not lying concealed in the jungle further out than the
+   * jungle lets you see.
+   *
+   * Concealment shortens the reach per CANDIDATE rather than dimming the
+   * seer's range as a whole, because it is a property of where the target is
+   * standing: a soldier in elephant grass and a tank in the open, both at 30 m,
+   * are not equally findable, and a single scaled range could not say so.
+   */
   function acquire(e) {
     let best = null, bestD = Infinity;
     const reach = e.range * ACQUIRE_MULT;
@@ -55,8 +64,9 @@ export function createCombat({
       if (o.isAir && !e.canHitAir) continue; // jeeps can't shoot helicopters
       const d = flat(e, o);
       if (d > reach || d >= bestD) continue;
-      // Sight LAST: it is the most expensive test and the rarest to fail, so
-      // range and team throw out almost everything before it runs.
+      // Concealment before smoke: it is a grid lookup and two float compares,
+      // where the smoke test walks every live column.
+      if (cover && d > reach * cover.acquireRangeScale(e.position.x, e.position.z, o)) continue;
       if (!canSee(e, o)) continue;
       bestD = d; best = o;
     }
@@ -64,9 +74,21 @@ export function createCombat({
   }
 
   /** Called when a rocket connects (damage lands on IMPACT, not on fire). */
-  function onImpact(target, amount, at) {
+  function onImpact(target, amount, at, owner = null) {
     if (!target?.alive) return;
     fx.impact(at.x, at.y, at.z);
+
+    // HARD COVER takes a bite out of the damage. Applied here, at the moment of
+    // impact, and measured from where the shot CAME from — so the same sandbag
+    // wall protects against the enemy in front and not against the one who has
+    // worked around the flank, which is the entire point of cover.
+    //
+    // A shot with no owner (burning napalm, a scripted hit) is not coming from
+    // anywhere, so nothing shelters you from it.
+    if (cover && owner?.position) {
+      amount *= 1 - cover.coverBetween(
+        owner.position.x, owner.position.z, target.position.x, target.position.z);
+    }
 
     if (target.takeDamage) target.takeDamage(amount);
     else {
@@ -156,6 +178,10 @@ export function createCombat({
         const from = muzzleOf(e);
         fx.muzzle(from.x, from.y, from.z);
         projectiles.spawn(from, tgt, e.damage, e);
+        // A muzzle flash in a dark jungle is the loudest thing on the map.
+        // This is what stops concealment being a free permanent buff: it buys
+        // an AMBUSH, and spends itself the moment you take it.
+        cover?.reveal(e);
       }
     }
   }

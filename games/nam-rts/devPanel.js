@@ -363,8 +363,16 @@ export function createDevPanel({
               <button class="prop-toggle" id="dv-nav" type="button" aria-label="Show nav grid">${CHECK_SVG}</button>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Cover overlay</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-cover" type="button" aria-label="Pin cover overlay">${CHECK_SVG}</button>
+            </div>
+          </div>
           <button class="action-btn" id="dv-rebuild" type="button">Rebuild nav + minimap</button>
-          <div class="dv-hint">Rebuild after changing the world or loading a new .v3proj.</div>
+          <div class="dv-hint">Nav shows where units can WALK; cover shows what the
+            ground is WORTH — green hard cover, cyan concealment. Hold V for the
+            same thing under the cursor; the toggle pins it on for inspecting a bake.</div>
         </div>
       </div>
 
@@ -375,7 +383,8 @@ export function createDevPanel({
             <b>Left-click / drag</b> select (Shift adds)<br />
             <b>Right-click</b> move order<br />
             <b>WASD</b> pan · <b>wheel</b> zoom · <b>Q/E</b> rotate<br />
-            <b>C</b> camera mode · <b>N</b> nav grid
+            <b>C</b> camera mode · <b>N</b> nav grid<br />
+            <b>hold V</b> cover &amp; concealment under the cursor
           </div>
         </div>
       </div>
@@ -838,6 +847,15 @@ export function createDevPanel({
     navGrid.rebuild();
     minimap?.rebuildTerrain?.();
     navGrid.setDebug(wasOn); // the rebuild drops the old overlay mesh
+  });
+
+  // Pinning the cover overlay is a DEV view of the whole bake; players hold V.
+  const coverBtn = $("#dv-cover");
+  coverBtn.classList.toggle("checked", !!app?.coverOverlay?.pinned);
+  coverBtn.addEventListener("click", () => {
+    const on = !coverBtn.classList.contains("checked");
+    coverBtn.classList.toggle("checked", on);
+    app?.coverOverlay?.setPinned(on);
   });
 
   // ── Shortcuts (moved here from the old top-left bar) ─────────────────────────
