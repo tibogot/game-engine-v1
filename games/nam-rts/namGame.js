@@ -71,6 +71,7 @@ import { createProjectiles } from "./projectiles.js";
 import { createFireSystem } from "./fireSystem.js";
 import { createCraterSystem } from "./craterSystem.js";
 import { createFogOfWar } from "./fogOfWar.js";
+import { createSimClock } from "./simClock.js";
 
 export async function startNamGame({ container, onStatus = () => {}, fov } = {}) {
   // 1) Boot the v3 engine — renderer, terrain clipmap, sky, grass, water… the
@@ -456,24 +457,47 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   rtsCamera.focusOn(structures.base.position.x, structures.base.position.z);
 
   // 5) ── THE GAME LOOP ──────────────────────────────────────────────────────
-  //    One pre-render hook drives everything, in a deliberate order: input/camera
-  //    → unit logic → push logic into meshes → HUD. Running on the engine loop
-  //    (not a separate rAF) keeps fog-of-war in sync with the render pass.
-  let elapsed = 0;
-  const tick = (dt) => {
-    elapsed += dt;
+  //
+  //    Two clocks, and the split is the point.
+  //
+  //    THE SIM runs in fixed 60 Hz steps (simClock.js). Everything that decides
+  //    an OUTCOME lives here — how fast a unit walks, when a weapon comes off
+  //    cooldown, when a building finishes, when a wave spawns, when a rocket
+  //    lands. These used to advance by however long the last frame happened to
+  //    take, which means the game behaved differently on a 144 Hz monitor than
+  //    a 60 Hz one, and differently again across a hitch.
+  //
+  //    THE FRAME runs once per render with the real dt: the camera, everything
+  //    that pushes state into meshes, the HUD and the minimap. None of it
+  //    decides anything; it only draws what the sim already decided.
+  //
+  //    Order still matters inside each: input/camera → sim → push into meshes →
+  //    HUD. Both run in ONE pre-render hook on the engine loop (not a separate
+  //    rAF), which is what keeps fog-of-war in sync with the render pass.
+  //
+  //    projectiles and fire are MIXED — rocket homing and wreck timers next to
+  //    billboard puffs — and sit on the sim side, because when damage lands is
+  //    an outcome and a puff is not. At 60 Hz they draw identically anyway.
+  const sim = createSimClock({ hz: 60 });
+  app.simClock = sim;
 
-    rtsCamera.update(dt);
+  const simStep = (dt) => {
     waves.update(dt);                     // spawn the next wave, keep them marching
     structures.updateProduction(dt, (key, x, z, opts) => units.spawn(key, x, z, opts));
     buildings.update(dt);                 // construction ramp + helipad production
     resources.tickCaptureIncome(dt, buildings);
     harvesting.update(dt);                // node → fill → base → unload → repeat
     units.update(dt);
-    fogOfWar.update(dt);                  // vision grid → GPU shroud texture
     combat.update(dt);                    // acquire → chase → launch rockets
     match.update(dt);                     // win/lose when enemy HQ match is on
     projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
+    fire.update(dt, sim.simTime);         // burning wrecks
+  };
+
+  const tick = (dt) => {
+    rtsCamera.update(dt);                 // input, at the real frame rate
+    sim.advance(dt, simStep);
+    fogOfWar.update(dt);                  // vision grid → GPU shroud texture
     resourceRenderer.sync();              // only rewrites when a node visibly drains
     healthBars.begin();                   // both renderers push their bars into it
     selectionRings.begin();               // unitRenderer pushes a ring per selected unit
@@ -483,7 +507,6 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     healthBars.commit();
     selectionRings.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
-    fire.update(dt, elapsed);             // burning wrecks
     baseFlag?.update(dt);                 // HQ flag cloth sim
     commandCard.tick();                   // live production bar + affordability
     resourceHud.update(resources, units); // supplies / harvesters / nodes left
