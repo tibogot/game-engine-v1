@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — RTS Objects (parts kit, emplacements, buildings)</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #0d100e; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10;
+             background: rgba(10,14,11,0.9); border: 1px solid #2a352c;
+             border-radius: 8px; padding: 10px 12px; min-width: 262px; }
+      #hud h1 { margin: 0 0 6px; font-size: 12px; letter-spacing: .05em;
+                text-transform: uppercase; color: #cfd8b8; }
+      #hud h2 { margin: 9px 0 4px; font-size: 10px; letter-spacing: .06em;
+                text-transform: uppercase; color: #74876f;
+                border-top: 1px solid #222c24; padding-top: 7px; }
+      .row { display: flex; justify-content: space-between; gap: 14px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .row.warn b { color: #e8b860; }
+      .row.bad b  { color: #e07a7a; }
+      .note { margin-top: 7px; padding-top: 6px; border-top: 1px solid #222c24;
+              color: #8b998b; font-size: 11px; }
+      .note b { color: #d8e4c8; font-weight: 600; }
+      #err { color: #ff8c8c; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>RTS Objects Lab</h1>
+      <div class="row"><span>Object</span><b id="s-obj">—</b></div>
+      <h2>Triangle budget</h2>
+      <div class="row"><span>LOD0</span><b id="s-l0">—</b></div>
+      <div class="row"><span>LOD1</span><b id="s-l1">—</b></div>
+      <div class="row"><span>LOD2</span><b id="s-l2">—</b></div>
+      <div class="row" id="r-x100"><span>×100 placed (LOD1)</span><b id="s-x100">—</b></div>
+      <h2>Frame</h2>
+      <div class="row"><span>Instances</span><b id="s-inst">—</b></div>
+      <div class="row"><span>Triangles</span><b id="s-tris">—</b></div>
+      <div class="row"><span>Draw calls</span><b id="s-draws">—</b></div>
+      <div class="row"><span>Camera dist</span><b id="s-dist">—</b></div>
+      <div class="row"><span>FPS</span><b id="s-fps">—</b></div>
+      <div class="note">
+        <b>1</b> close (18 m) · <b>2</b> RTS (52 m) · <b>3</b> far (140 m)<br />
+        <b>L</b> cycle LOD · <b>F</b> single / field
+      </div>
+      <div class="note" id="err"></div>
+    </div>
+
+    <script type="module">
+      // ── RTS OBJECTS LAB ──────────────────────────────────────────────────────
+      //
+      // Builds the structures a Vietnam-war RTS needs, one at a time, out of the
+      // shared parts kit in render/objects/rtsParts.js. Military architecture is
+      // boxes, panels, stacked bags and timber frames, so it is the subject that
+      // wants code rather than a sculpting tool.
+      //
+      // What makes this different from the old v2 objects lab, and why it exists
+      // rather than that one being extended:
+      //
+      //   • NODE materials, so an object dropped into v3 takes fog, terrain
+      //     shadow and wind. A plain MeshStandardMaterial in a WebGPU scene never
+      //     refreshes its fogNode — a v2 object in a v3 world keeps whatever fog
+      //     it was compiled with while everything around it fogs correctly.
+      //   • LODs are built WITH the object, not bolted on. An RTS places hundreds.
+      //   • Two tiers. A hero object (HQ, helipad) is merged and placed a handful
+      //     of times; a scattered one (emplacement, barrels, fence posts) is
+      //     INSTANCED. Press F to see the scattered case honestly.
+      //   • A budget readout. You cannot optimise what you do not measure, and
+      //     the number that decides whether an asset ships is not its own
+      //     triangle count — it is what a hundred of them cost.
+      //
+      // Camera presets are the ranges nam-rts actually uses: 18 m is its minimum
+      // zoom, 52 m its default, and 140 m is roughly as far out as it goes. An
+      // object is judged at 2 and 3, not at 1.
+      import * as THREE from "three";
+      import { Fn, attribute, clamp, float, floor, fract, hash, instanceIndex, mix, mod, texture, uniform, uv, vec2 } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import GUI from "./ui/labGui.js";
+      import { MAT, PARTS, triCount } from "./render/objects/rtsParts.js";
+      import { RTS_OBJECTS } from "./render/objects/rtsEmplacement.js";
+      import { HUT_OBJECT } from "./render/objects/rtsHut.js";
+      import { ATLAS_COLS, ATLAS_PAD, ATLAS_ROWS, rtsAtlas } from "./render/objects/rtsTextures.js";
+      import { VILLAGE_HUT_OBJECT } from "./render/objects/rtsVillageHut.js";
+
+      const $ = (id) => document.getElementById(id);
+      const err = (e) => { $("err").textContent = String(e?.stack ?? e); console.error(e); };
+      addEventListener("error", (e) => err(e.message));
+      addEventListener("unhandledrejection", (e) => err(e.reason));
+
+      // Every part is also selectable on its own, so a bag can be tuned without
+      // rebuilding the thing it is stacked into.
+      const CATALOG = {};
+      for (const [id, p] of Object.entries(PARTS)) {
+        CATALOG[`part:${id}`] = {
+          label: `Part — ${p.label}`, tier: "part",
+          build: (o) => { const g = p.build(o); return { lods: [g], tris: [triCount(g)] }; },
+          defaults: p.defaults,
+          schema: Object.entries(p.defaults)
+            .filter(([, v]) => typeof v === "number")
+            .map(([key]) => ({ key, label: key })),
+        };
+      }
+      for (const [id, o] of Object.entries(RTS_OBJECTS)) CATALOG[id] = o;
+      CATALOG[HUT_OBJECT.id] = HUT_OBJECT;
+      CATALOG[VILLAGE_HUT_OBJECT.id] = VILLAGE_HUT_OBJECT;
+
+      const P = {
+        object: "villageHut",
+        lodMode: "auto",
+        field: false,
+        fieldCount: 100,
+        fieldSpread: 90,
+        colorA: "#8d8468",     // sandbag hessian
+        colorB: "#6b6450",     // shaded / dirty
+        colorMetal: "#5c6157",  // olive drab drum
+        colorTimber: "#6a5238", // creosoted post
+        tintVar: 0.30,
+        aoAmount: 1.0,
+        roughness: 0.94,
+        metalness: 0.0,
+        sunAzimuth: 42,
+        sunElevation: 55,
+        sunIntensity: 2.3,
+        hemi: 1.15,
+        exposure: 1.0,
+        ground: "#6d7354",
+      };
+
+      // ── renderer / scene ─────────────────────────────────────────────────────
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.toneMapping = THREE.NeutralToneMapping;
+      renderer.toneMappingExposure = P.exposure;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color("#9fb4c4");
+      scene.fog = new THREE.Fog("#9fb4c4", 60, 420);
+
+      const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 2000);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 1.2, 0);
+      controls.enableDamping = true;
+
+      const sun = new THREE.DirectionalLight(0xfff3d8, P.sunIntensity);
+      scene.add(sun, sun.target);
+      const hemi = new THREE.HemisphereLight(0xcfe4f2, 0x7a7850, P.hemi);
+      scene.add(hemi);
+      function placeSun() {
+        const a = (P.sunAzimuth * Math.PI) / 180, e = (P.sunElevation * Math.PI) / 180;
+        sun.position.set(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e)).multiplyScalar(80);
+        sun.intensity = P.sunIntensity;
+      }
+
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(1200, 1200),
+        new THREE.MeshStandardNodeMaterial({ color: new THREE.Color(P.ground), roughness: 1 }),
+      );
+      ground.rotation.x = -Math.PI / 2;
+      scene.add(ground);
+
+      // A 2 m figure, because "is this the right size" is the question a lab
+      // answers worst without one.
+      const figure = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.28, 1.34, 4, 10),
+        new THREE.MeshStandardNodeMaterial({ color: new THREE.Color("#c08a5a"), roughness: 0.9 }),
+      );
+      figure.position.set(5.6, 0.95, 4.4);   // clear of a 3.4 m parapet
+      scene.add(figure);
+
+      // ── material ─────────────────────────────────────────────────────────────
+      // Per-instance tint from the instance index, so a field of a hundred is not
+      // a hundred identical objects. This is the whole reason the scattered tier
+      // gets instanced rather than merged: one draw, still varied.
+      const ATLAS = rtsAtlas();
+      const uTintVar = uniform(P.tintVar);
+      const uAo = uniform(P.aoAmount);
+      const material = new THREE.MeshStandardNodeMaterial({ roughness: P.roughness, metalness: P.metalness });
+      material.colorNode = Fn(() => {
+        const id = attribute("matId", "float");
+        const tone = attribute("tone", "float");
+        const ao = attribute("ao", "float");
+
+        // ONE fetch, whichever surface this vertex is. A select() chain over
+        // seven textures would sample all seven per pixel — select is not a
+        // branch. The cell has to be tiled by hand because the atlas cannot
+        // wrap, and inset by ATLAS_PAD so mips do not bleed into the neighbour.
+        const cols = float(ATLAS_COLS), rows = float(ATLAS_ROWS);
+        const col = mod(id, cols);
+        // CanvasTexture flips Y, so canvas row 0 lands at the TOP of the
+        // texture — v 0.5..1 on a 2-row atlas. Indexing rows straight down
+        // therefore swaps the two halves and every surface samples the wrong
+        // one. Flip the row, not the texture: the WITHIN-cell orientation is
+        // already right (the generators write v=1 at canvas top).
+        const row = rows.sub(float(1)).sub(floor(id.div(cols)));
+        const pad = float(ATLAS_PAD);
+        const inCell = clamp(fract(uv()), pad, float(1).sub(pad));
+        const st = vec2(col.add(inCell.x).div(cols), row.add(inCell.y).div(rows));
+        const surf = texture(ATLAS, st).rgb;
+
+        // Per-PART tone: patched sheets, older bags, newer bamboo.
+        const toned = surf.mul(mix(float(0.74), float(1.20), tone).mul(uTintVar).add(float(1).sub(uTintVar)));
+        // Per-INSTANCE tint, so a hamlet is not one house repeated.
+        const inst = mix(float(0.88), float(1.10), hash(instanceIndex.add(19)));
+        // Baked contact AO — what stops it reading as a flat cut-out.
+        return toned.mul(inst).mul(mix(float(1), ao, uAo));
+      })();
+
+      // ── build ────────────────────────────────────────────────────────────────
+      let built = null;         // { lods:[geo], tris:[n] }
+      let meshes = [];          // one InstancedMesh per LOD (only one visible)
+      let params = {};          // live params for the selected object
+
+      function disposeMeshes() {
+        for (const m of meshes) { scene.remove(m); m.geometry.dispose(); }
+        meshes = [];
+      }
+
+      function fieldMatrices(n, spread) {
+        const out = [];
+        const m = new THREE.Matrix4();
+        const q = new THREE.Quaternion();
+        const e = new THREE.Euler();
+        const side = Math.ceil(Math.sqrt(n));
+        let s = 12345;
+        const r = () => { s = Math.imul(s ^ (s >>> 15), 2246822519); s = (s ^ (s >>> 13)) >>> 0; return s / 4294967296; };
+        for (let i = 0; i < n; i++) {
+          const gx = (i % side) / Math.max(1, side - 1) - 0.5;
+          const gz = Math.floor(i / side) / Math.max(1, side - 1) - 0.5;
+          e.set(0, r() * Math.PI * 2, 0);
+          q.setFromEuler(e);
+          m.compose(
+            new THREE.Vector3(gx * spread + (r() - 0.5) * 6, 0, gz * spread + (r() - 0.5) * 6),
+            q, new THREE.Vector3(1, 1, 1),
+          );
+          out.push(m.clone());
+        }
+        return out;
+      }
+
+      function rebuild() {
+        try {
+          disposeMeshes();
+          const def = CATALOG[P.object];
+          built = def.build(params);
+          const count = P.field ? Math.max(1, P.fieldCount | 0) : 1;
+          const mats = P.field ? fieldMatrices(count, P.fieldSpread) : [new THREE.Matrix4()];
+          for (const geo of built.lods) {
+            const im = new THREE.InstancedMesh(geo, material, count);
+            for (let i = 0; i < count; i++) im.setMatrixAt(i, mats[i]);
+            im.instanceMatrix.needsUpdate = true;
+            im.frustumCulled = false;
+            im.visible = false;
+            scene.add(im);
+            meshes.push(im);
+          }
+          syncLodVisibility();
+          $("s-obj").textContent = def.label;
+          const t = built.tris;
+          $("s-l0").textContent = (t[0] ?? 0).toLocaleString();
+          $("s-l1").textContent = t[1] != null ? t[1].toLocaleString() : "—";
+          $("s-l2").textContent = t[2] != null ? t[2].toLocaleString() : "—";
+          // The number that decides whether it ships.
+          const per = t[1] ?? t[0] ?? 0;
+          const x100 = per * 100;
+          $("s-x100").textContent = x100.toLocaleString();
+          const row = $("r-x100");
+          row.className = x100 > 400000 ? "row bad" : x100 > 150000 ? "row warn" : "row";
+          $("err").textContent = "";
+        } catch (e) { err(e); }
+      }
+
+      function pickLod() {
+        if (P.lodMode !== "auto") return Math.min(built.lods.length - 1, Number(P.lodMode));
+        const d = camera.position.distanceTo(controls.target);
+        if (d < 34 || built.lods.length === 1) return 0;
+        return d < 110 ? Math.min(1, built.lods.length - 1) : built.lods.length - 1;
+      }
+
+      function syncLodVisibility() {
+        if (!meshes.length) return;
+        const k = pickLod();
+        meshes.forEach((m, i) => (m.visible = i === k));
+      }
+
+      function loadParams() {
+        params = structuredClone(CATALOG[P.object].defaults);
+      }
+
+      function frame(preset) {
+        const d = preset === "close" ? 18 : preset === "rts" ? 52 : 140;
+        const pitch = preset === "close" ? 0.26 : 0.55;   // 0.70 buried the horizon
+        controls.target.set(0, 1.0, 0);
+        camera.position.set(
+          controls.target.x + Math.cos(0.9) * d * Math.cos(pitch),
+          controls.target.y + d * Math.sin(pitch),
+          controls.target.z + Math.sin(0.9) * d * Math.cos(pitch),
+        );
+        camera.lookAt(controls.target);
+        controls.update();
+      }
+
+      // ── GUI ──────────────────────────────────────────────────────────────────
+      const gui = new GUI({ title: "RTS Objects" });
+      let shapeFolder = gui.addFolder("Shape");
+      let shapeCtrls = [];
+
+      function rebuildShapeGui() {
+        for (const c of shapeCtrls) c.destroy();
+        shapeCtrls = [];
+        const def = CATALOG[P.object];
+        for (const s of def.schema ?? []) {
+          if (s.sep) continue;
+          if (typeof params[s.key] !== "number") continue;
+          const lo = s.min ?? 0;
+          const hi = s.max ?? Math.max(1, params[s.key] * 3);
+          const st = s.step ?? (Number.isInteger(params[s.key]) ? 1 : 0.01);
+          shapeCtrls.push(
+            shapeFolder.add(params, s.key, lo, hi, st).name(s.label ?? s.key).onFinishChange(rebuild),
+          );
+        }
+      }
+
+      gui.add(P, "object", Object.keys(CATALOG)).name("object").onChange(() => {
+        loadParams();
+        rebuildShapeGui();
+        rebuild();
+      });
+
+      const viewF = gui.addFolder("View");
+      viewF.add(P, "lodMode", ["auto", "0", "1", "2"]).name("LOD (L)").onChange(syncLodVisibility);
+      viewF.add(P, "field").name("field of many (F)").onChange(rebuild);
+      viewF.add(P, "fieldCount", 1, 600, 1).name("count").onFinishChange(rebuild);
+      viewF.add(P, "fieldSpread", 20, 400, 1).name("spread (m)").onFinishChange(rebuild);
+
+      const matF = gui.addFolder("Material");
+      matF.add(P, "tintVar", 0, 1, 0.01).name("panel variation").onChange((v) => (uTintVar.value = v));
+      matF.add(P, "aoAmount", 0, 1, 0.01).name("contact AO").onChange((v) => (uAo.value = v));
+      matF.add(P, "roughness", 0, 1, 0.01).onChange((v) => (material.roughness = v));
+      matF.add(P, "metalness", 0, 1, 0.01).onChange((v) => (material.metalness = v));
+
+      const lightF = gui.addFolder("Light").close();
+      lightF.add(P, "sunAzimuth", 0, 360, 1).onChange(placeSun);
+      lightF.add(P, "sunElevation", 3, 89, 1).onChange(placeSun);
+      lightF.add(P, "sunIntensity", 0, 8, 0.05).onChange(placeSun);
+      lightF.add(P, "hemi", 0, 2, 0.01).onChange((v) => (hemi.intensity = v));
+      lightF.add(P, "exposure", 0.2, 2.5, 0.01).onChange((v) => (renderer.toneMappingExposure = v));
+      lightF.addColor(P, "ground").onChange((v) => ground.material.color.set(v));
+
+      gui.add({
+        dump() {
+          const out = JSON.stringify(params, null, 2);
+          console.log(out);
+          navigator.clipboard?.writeText(out);
+        },
+      }, "dump").name("copy params → clipboard");
+
+      addEventListener("keydown", (e) => {
+        const k = e.key.toLowerCase();
+        if (k === "1") frame("close");
+        else if (k === "2") frame("rts");
+        else if (k === "3") frame("far");
+        else if (k === "l") {
+          const order = ["auto", "0", "1", "2"];
+          P.lodMode = order[(order.indexOf(P.lodMode) + 1) % order.length];
+          syncLodVisibility();
+        } else if (k === "f") { P.field = !P.field; rebuild(); }
+      });
+
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+
+      // ── go ───────────────────────────────────────────────────────────────────
+      placeSun();
+      loadParams();
+      rebuildShapeGui();
+      rebuild();
+      frame("close");   // boot where you can SEE what you are tuning; 2 and 3 judge it
+
+      let last = performance.now(), frames = 0;
+      renderer.setAnimationLoop(() => {
+        try {
+          controls.update();
+          if (P.lodMode === "auto") syncLodVisibility();
+          renderer.info.reset();
+          renderer.render(scene, camera);
+          frames++;
+          const now = performance.now();
+          if (now - last > 500) {
+            $("s-fps").textContent = Math.round((frames * 1000) / (now - last));
+            frames = 0; last = now;
+            const vis = meshes.find((m) => m.visible);
+            $("s-inst").textContent = vis ? vis.count.toLocaleString() : "0";
+            $("s-tris").textContent = vis ? (triCount(vis.geometry) * vis.count).toLocaleString() : "0";
+            $("s-draws").textContent = renderer.info.render.drawCalls;
+            $("s-dist").textContent = `${camera.position.distanceTo(controls.target).toFixed(0)} m`;
+          }
+        } catch (e) { err(e); renderer.setAnimationLoop(null); }
+      });
+    </script>
+  </body>
+</html>
