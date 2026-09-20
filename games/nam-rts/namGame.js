@@ -45,7 +45,7 @@ import { createRtsCamera } from "./namCamera.js";
 import { createUnits } from "./units.js";
 import { createUnitRenderer } from "./unitRenderer.js";
 import { createSelection } from "./selection.js";
-import { createNavGrid } from "./navGrid.js";
+import { createNavGrid, NAV_MAX_SLOPE_DEG } from "./navGrid.js";
 import { createMinimap } from "./minimap.js";
 import { createUnitBar } from "./unitBar.js";
 import { createCommandCard } from "./commandCard.js";
@@ -195,6 +195,21 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   onStatus("Building navigation…");
   const navGrid = createNavGrid({ app });
   app.navGrid = navGrid;
+
+  // GROUND THE UNITS REFUSE MUST LOOK LIKE IT.
+  //
+  // The band ENDS at the pathfinder's own limit, so solid rock means "no" and
+  // nothing else does. Below it the rock fades in over four degrees, which
+  // reads as a warning — the rockier it gets the worse it is — rather than as
+  // a contour line drawn across the hill. It only paints ground the map left
+  // unpainted, so nam-valley's hand-painted cliffs are untouched; what it
+  // fills in is precisely the steep ground nobody got to, which is the ground
+  // players find inexplicable.
+  app.setSlopeCliffRule?.({
+    layer: 5,                            // "Cliff Rock" in nam-valley
+    startDeg: NAV_MAX_SLOPE_DEG - 4,
+    endDeg: NAV_MAX_SLOPE_DEG,
+  });
 
   // 4) ── RTS GAMEPLAY ───────────────────────────────────────────────────────
   //    Unit LOGIC is mesh-free (units.js); the RENDERER (unitRenderer.js) turns

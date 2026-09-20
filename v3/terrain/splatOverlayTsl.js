@@ -279,6 +279,21 @@ export function createSplatOverlay(
   const uAutoHighStart = uniform(200.0); // metres
   const uAutoHighEnd   = uniform(280.0);
   const uAutoNoise     = uniform(0.25);  // threshold breakup 0..1
+  /**
+   * SLOPE LOCK — 0 = off, 1 = past the cliff band the cliff layer OWNS the
+   * pixel, hand-painted or not.
+   *
+   * Distinct from the auto rules above, and the difference is the whole point.
+   * Auto-paint redistributes the UNPAINTED remainder w0, so on a map somebody
+   * has finished painting it does nothing at all. A game that blocks movement
+   * past a slope needs the stronger promise — that ground the pathfinder
+   * refuses ALWAYS reads as rock — and that means overriding the paint rather
+   * than filling in around it.
+   *
+   * It reuses the cliff band's own `cliffW`, so it costs a mix per layer and
+   * no extra taps, and it is skipped entirely while zero.
+   */
+  const uSlopeLock     = uniform(0.0);
 
   // Auto-rule ingredient nodes — referenced only inside blend()'s auto sub-branch.
   let autoIngredients = null;
@@ -452,7 +467,7 @@ export function createSplatOverlay(
         // replaces ALL weights with the rules (uAutoFull preview). Both off is
         // the common case — skip the 5 heightmap taps + FBM entirely.
         if (autoIngredients) {
-          If(uAutoEnabled.add(uAutoFull).greaterThan(0.0), () => {
+          If(uAutoEnabled.add(uAutoFull).add(uSlopeLock).greaterThan(0.0), () => {
             const { cliffW, highW, flatW, eq, assignedW } = autoIngredients;
             // baseShare snapshots w0 BEFORE any weight is reassigned.
             const baseShare = w[0].mul(uAutoEnabled).mul(inBounds).toVar();
@@ -468,6 +483,16 @@ export function createSplatOverlay(
               float(1).sub(assignedW),
               fullPrev,
             ));
+
+            // The slope lock, AFTER the auto rules so it has the last word.
+            // Past the band the cliff layer takes the pixel outright: this is
+            // a legibility guarantee, not a suggestion, and a rule a player
+            // can only half-trust is worse than none.
+            const lock = cliffW.mul(uSlopeLock).mul(inBounds).toVar();
+            for (let i = 0; i < NUM_LAYERS; i++) {
+              w[i + 1].assign(mix(w[i + 1], eq(uAutoCliff, i), lock));
+            }
+            w[0].assign(w[0].mul(float(1).sub(lock)));
           });
         }
 
@@ -670,6 +695,7 @@ export function createSplatOverlay(
     auto: {
       uAutoEnabled, uAutoFull, uAutoFlat, uAutoCliff, uAutoHigh,
       uAutoSlopeHiY, uAutoSlopeLoY, uAutoHighStart, uAutoHighEnd, uAutoNoise,
+      uSlopeLock,
     },
   };
 }

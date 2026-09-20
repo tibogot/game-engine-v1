@@ -12,9 +12,21 @@
 // debug" overlay (red = blocked) can be toggled to verify the grid.
 import * as THREE from "three";
 
+/**
+ * The slope a ground unit refuses to climb, degrees.
+ *
+ * Exported because the TERRAIN has to agree with it. Ground the pathfinder
+ * will not cross must read as rock, or the player sees a green hillside,
+ * orders men up it and watches them refuse, with nothing on screen to explain
+ * why. namGame feeds this number to app.setSlopeCliffRule so there is exactly
+ * one of it — two constants that mean the same thing drift, and this pair
+ * would drift silently.
+ */
+export const NAV_MAX_SLOPE_DEG = 34;
+
 export function createNavGrid({
   app,
-  maxSlopeDeg = 34,
+  maxSlopeDeg = NAV_MAX_SLOPE_DEG,
   maxCellsPerSide = 256,
   minPropRadius = 1.0,     // props smaller than this don't block (grass, flowers…)
   shorelineMargin = 3.5,   // metres of clearance kept between ground units and water

@@ -269,6 +269,44 @@ export const ROCK_PRESETS = {
   lump:    { sizeX: 1.1, sizeY: 0.75, sizeZ: 0.9, egg: 0.1, chips: 45, chipMax: 0.12, chipBias: 2.2, chipJitter: 0.7, bigCuts: 4, edgeSoft: 0.006, baseCut: 0.2, targetTriangles: 1000, simplifyError: 0.02, shadeWeight: 1 },
   rock:    { sizeX: 0.55, sizeY: 0.35, sizeZ: 0.45, egg: 0.05, chips: 22, chipMin: 0.04, chipMax: 0.2, chipJitter: 0.7, bigCuts: 2, edgeSoft: 0.008, baseCut: 0.18, detail: 28, targetTriangles: 400, simplifyError: 0.03 },
   pebble:  { sizeX: 0.18, sizeY: 0.1, sizeZ: 0.14, egg: 0, chips: 12, chipMin: 0.06, chipMax: 0.25, chipJitter: 0.7, edgeSoft: 0.01, baseCut: 0.2, detail: 16, targetTriangles: 120, simplifyError: 0.05 },
+  /**
+   * MEGALITH — the jungle boulder, 6-13 m. Not a scaled-up boulder.
+   *
+   * Scaling `boulder` up by six does not work, and the reason is written at
+   * the top of the cliff presets: a chip cut `d` deep into a body of radius
+   * `R` spreads about sqrt(2Rd), so depth expressed as a FRACTION of radius
+   * grows its facet with the rock. A boulder's chipMax of 0.1 gives a
+   * pleasant 20 cm facet at 2 m and a 1.2 m crater at 12 m — the shape stops
+   * reading as stone and starts reading as a low-poly blob.
+   *
+   * So the chips get shallower (0.018-0.06 instead of 0.02-0.1) and far more
+   * numerous, the simplifier's error budget drops below the chip depth, and
+   * the triangle budget sits between a boulder's 1,200 and a cliff's 8,000.
+   * It keeps the boulder's ROUNDED egg rather than the cliff's flat-topped
+   * mesa: this is a rock you walk around, not one you stand on.
+   */
+  megalith: {
+    sizeX: 3.1, sizeY: 2.7, sizeZ: 2.8, egg: 0.14,
+    // SILHOUETTE FIRST. The first attempt kept the boulder's lump of 0.07 and
+    // came out a smooth faceted EGG — and the giveaway was the outline, not
+    // the surface. A low-poly rock with an irregular silhouette reads as stone
+    // however broad its facets are; a regular one reads as a gemstone however
+    // fine they get. So the low-frequency lumps more than double and the big
+    // cuts, which are the only thing that actually bites into the outline, go
+    // from five to eight and get deeper.
+    lump: 0.17, squareness: 2.1,
+    chips: 170, chipMin: 0.01, chipMax: 0.035, chipBias: 1.7, chipJitter: 0.75,
+    bigCuts: 8, bigMin: 0.06, bigMax: 0.15, maxChipUp: 0.85,
+    baseCut: 0.14, edgeSoft: 0.005,
+    // A facet spreads ~sqrt(2Rd), so on a 3 m radius the 0.035 chip above
+    // gives ~0.8 m facets: coarse enough to stay cheap, fine enough that the
+    // 14 px/m camera sees several across each face.
+    // detail 60 is the cliff presets' own figure and it is proven at this
+    // scale; 68 was tried and took the tab out generating five of them at once
+    // (the raw mesh is ~95k triangles BEFORE the simplifier sees it, and five
+    // of those at once is half a million).
+    detail: 60, targetTriangles: 4800, simplifyError: 0.006, shadeWeight: 1,
+  },
 };
 
 /**
@@ -283,6 +321,8 @@ export const ROCK_CLASSES = {
   lump:    { lodScale: 1,    maxShadowCascade: Infinity, collide: "solid" },
   rock:    { lodScale: 0.5,  maxShadowCascade: 1,        collide: "box" },
   pebble:  { lodScale: 0.2,  maxShadowCascade: 0,        collide: "none" },
+  // A landmark: worth drawing, and worth a shadow, from anywhere on the map.
+  megalith: { lodScale: 2.2, maxShadowCascade: Infinity, collide: "solid" },
 };
 
 /**
@@ -294,6 +334,16 @@ export const ROCK_KIT = [
   ...[1, 2, 3].map((seed, i) => ({ name: `Rock: Lump ${"ABC"[i]}`, cls: "lump", seed })),
   ...[1, 2, 3].map((seed, i) => ({ name: `Rock: Stone ${"ABC"[i]}`, cls: "rock", seed })),
   ...[1, 2].map((seed, i) => ({ name: `Rock: Pebble ${"AB"[i]}`, cls: "pebble", seed })),
+  // Landmarks. Each carries its own proportions rather than relying on an
+  // instance scale, because a megalith stretched on one axis reads as a
+  // stretched TEXTURE — the facets go with it.
+  { name: "Rock: Megalith A", cls: "megalith", seed: 11 },
+  { name: "Rock: Megalith B", cls: "megalith", seed: 12, sizeX: 4.2, sizeY: 3.1, sizeZ: 3.6 },
+  { name: "Rock: Megalith C", cls: "megalith", seed: 13, sizeX: 2.6, sizeY: 3.6, sizeZ: 2.4, egg: 0.2 },
+  // Karst towers: taller than wide, undercut (negative egg), the shape that
+  // says "limestone" and the one people picture when they picture Vietnam.
+  { name: "Rock: Karst A", cls: "megalith", seed: 21, sizeX: 2.9, sizeY: 5.4, sizeZ: 2.6, egg: -0.16, squareness: 2.1 },
+  { name: "Rock: Karst B", cls: "megalith", seed: 22, sizeX: 3.8, sizeY: 6.6, sizeZ: 3.2, egg: -0.22, squareness: 2.2 },
 ];
 
 /**
@@ -327,7 +377,11 @@ export function createRockKitGeometry(name) {
 /** Generator params of a kit entry by name, or null. */
 export function rockKitParams(name) {
   const entry = ROCK_KIT.find((k) => k.name === name);
-  return entry ? { ...ROCK_PRESETS[entry.cls], seed: entry.seed } : null;
+  if (!entry) return null;
+  // Per-entry overrides ride on top of the class, so one class can carry a
+  // family of proportions without a preset each.
+  const { name: _n, cls: _c, ...overrides } = entry;
+  return { ...ROCK_PRESETS[entry.cls], ...overrides };
 }
 
 /**

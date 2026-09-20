@@ -11057,7 +11057,10 @@ export async function startV3App(opts = {}) {
        */
       rockPreview({ scale = 2 } = {}) {
         const cx = controls.target.x, cz = controls.target.z;
-        const rowZ = { boulder: 0, lump: 10, rock: 18, pebble: 24 };
+        // Megaliths get their own row and a scale of ONE: a 13 m karst tower
+        // multiplied by the preview's default 2 is a 26 m building, and the
+        // point of looking at it is to judge it at the size it will be placed.
+        const rowZ = { boulder: 0, lump: 10, rock: 18, pebble: 24, megalith: -26 };
         const col = {};
         const stats = {};
         for (const kit of ROCK_KIT) {
@@ -11065,10 +11068,12 @@ export async function startV3App(opts = {}) {
           const slot = propSlots.find((s) => s.name === kit.name && s.builtin);
           if (!slot) continue;
           const i = col[kit.cls] = (col[kit.cls] ?? -1) + 1;
-          const spacing = { boulder: 4.5, lump: 4.5, rock: 2.6, pebble: 1.2 }[kit.cls] * scale;
-          const x = cx + (i - 1.5) * spacing, z = cz + rowZ[kit.cls];
-          propStore.addInstance(slot.typeIdx, x, terrainStoreAdapter.getWorldHeight(x, z) - 0.05 * scale, z, {
-            ry: kit.seed * 47, sx: scale, sy: scale, sz: scale,
+          const big = kit.cls === "megalith";
+          const sc = big ? 1 : scale;
+          const spacing = { boulder: 4.5, lump: 4.5, rock: 2.6, pebble: 1.2, megalith: 16 }[kit.cls] * sc;
+          const x = cx + (i - 1.5) * spacing, z = cz + (rowZ[kit.cls] ?? 0);
+          propStore.addInstance(slot.typeIdx, x, terrainStoreAdapter.getWorldHeight(x, z) - 0.05 * sc, z, {
+            ry: kit.seed * 47, sx: sc, sy: sc, sz: sc,
           });
           stats[kit.name] = propStore.types[slot.typeIdx].entries[0].geometry.userData.rock;
         }
@@ -11714,6 +11719,48 @@ export async function startV3App(opts = {}) {
     // ── Terrain queries a game builds on ──────────────────────────────────────
     // Ground height at a world X/Z (RTS unit clamping, building placement).
     getWorldHeight,
+    /**
+     * Texture everything steeper than `startDeg` with a paint layer — the
+     * "ground too steep to walk on should LOOK too steep to walk on" rule.
+     *
+     * A game that blocks movement past some slope has a legibility problem the
+     * terrain art cannot solve on its own: a player sees a green hillside,
+     * orders men up it, and they refuse, with nothing on screen to say why.
+     * Handing the game the same number its pathfinder uses closes that, and
+     * closes it permanently — the two cannot drift apart if there is only one
+     * of them.
+     *
+     * IT OVERRIDES THE PAINT, and it has to. The editor's auto-paint
+     * redistributes only the UNPAINTED remainder, so on a map somebody has
+     * finished painting it changes nothing — measured on nam-valley, whose
+     * steep river banks are hand-painted sand and stayed sand. A legibility
+     * rule a player can only half-trust is worse than none, so past `endDeg`
+     * the cliff layer takes the pixel outright.
+     *
+     * The band below `endDeg` is a WARNING, not a boundary: rock fading in
+     * over a few degrees reads as "the worse this gets the less you want to be
+     * here", where a hard edge would read as a contour line drawn on the hill.
+     * `noise` meanders the threshold so it never traces one.
+     *
+     * @param o.layer     paint layer index (0..6) to use as the cliff
+     * @param o.startDeg  where rock begins to show
+     * @param o.endDeg    where it is solid rock — put the pathfinder's limit HERE
+     * @param o.strength  0..1, how completely rock wins past the band
+     * @param o.noise     0..1 threshold breakup, so the band is not a contour line
+     */
+    setSlopeCliffRule({
+      enabled = true, layer = 5, startDeg = 30, endDeg = 34,
+      strength = 1, noise = 0.25,
+    } = {}) {
+      const A = splatOverlay?.auto;
+      if (!A) return false;
+      A.uAutoCliff.value = layer;
+      A.uAutoSlopeHiY.value = Math.cos(startDeg * Math.PI / 180);
+      A.uAutoSlopeLoY.value = Math.cos(endDeg * Math.PI / 180);
+      A.uAutoNoise.value = noise;
+      A.uSlopeLock.value = enabled ? Math.max(0, Math.min(1, strength)) : 0;
+      return true;
+    },
     /**
      * How dense the painted GROUND FOLIAGE is at a world X/Z, 0..1.
      *
