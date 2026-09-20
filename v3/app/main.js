@@ -10915,6 +10915,23 @@ export async function startV3App(opts = {}) {
         return _gpuStatsPanel;
       },
       /**
+       * A GPU A/B whose numbers survive being checked — interleaved rounds,
+       * the MEAN of raw per-frame totals (the median collapses on a quantised
+       * timestamp), and a settle after every state change. Read its header
+       * before trusting any perf claim made without it.
+       *   const g = await __V3_DEBUG.gpu();
+       *   await __V3_DEBUG.gpuAB({ sample: g.sample, cases: { a, b }, reset });
+       */
+      async gpuAB(opts) {
+        const { gpuAB } = await import("../render/gpuAbHarness.js");
+        if (!opts?.sample) {
+          const g = await this.gpu();
+          if (!g) throw new Error("gpuAB: no timestamp support on this device");
+          opts = { ...opts, sample: g.sample };
+        }
+        return gpuAB(opts);
+      },
+      /**
        * Stand on the ground at (x, z) looking level. Ambient FX is a
        * head-height effect — from the default camera 300 m up, every particle
        * is past its own fade distance and correctly draws nothing.
