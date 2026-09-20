@@ -208,28 +208,70 @@ export function createDevPanel({
               <input type="color" id="dv-fog-color" />
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row dv-fog-monsoon">
+            <span class="prop-label">Density</span>
+            <div class="prop-value">
+              <input type="range" id="dv-mon-density" min="0.002" max="0.06" step="0.001" />
+              <span class="prop-num" id="dv-mon-density-v"></span>
+            </div>
+          </div>
+          <div class="prop-row dv-fog-monsoon">
+            <span class="prop-label">Falloff</span>
+            <div class="prop-value">
+              <input type="range" id="dv-mon-falloff" min="0.01" max="0.16" step="0.005" />
+              <span class="prop-num" id="dv-mon-falloff-v"></span>
+            </div>
+          </div>
+          <div class="prop-row dv-fog-monsoon">
+            <span class="prop-label">Layer (Y)</span>
+            <div class="prop-value">
+              <input type="range" id="dv-mon-height" min="-20" max="120" step="1" />
+              <span class="prop-num" id="dv-mon-height-v"></span>
+            </div>
+          </div>
+          <div class="prop-row dv-fog-monsoon">
+            <span class="prop-label">Sheets</span>
+            <div class="prop-value">
+              <input type="range" id="dv-mon-strata" min="0" max="1.2" step="0.05" />
+              <span class="prop-num" id="dv-mon-strata-v"></span>
+            </div>
+          </div>
+          <div class="prop-row dv-fog-monsoon">
+            <span class="prop-label">Sun glow</span>
+            <div class="prop-value">
+              <input type="range" id="dv-mon-sun" min="0" max="1.5" step="0.05" />
+              <span class="prop-num" id="dv-mon-sun-v"></span>
+            </div>
+          </div>
+          <div class="prop-row dv-fog-monsoon">
+            <span class="prop-label">Sun tint</span>
+            <div class="prop-value">
+              <input type="color" id="dv-mon-tint" />
+            </div>
+          </div>
+          <div class="dv-hint dv-fog-monsoon">Layer Y near the valley floors (nam-valley plays at y 0-40; the hilltop is 66). Falloff sets thickness ≈ 1/value metres. Keep density LOW — you have to read the battlefield through it. Sun glow only shows looking toward a LOW sun.</div>
+          <div class="prop-row dv-fog-valley">
             <span class="prop-label">Base (Y)</span>
             <div class="prop-value">
               <input type="range" id="dv-fog-base" min="-40" max="80" step="1" />
               <span class="prop-num" id="dv-fog-base-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row dv-fog-valley">
             <span class="prop-label">Top (Y)</span>
             <div class="prop-value">
               <input type="range" id="dv-fog-top" min="10" max="200" step="1" />
               <span class="prop-num" id="dv-fog-top-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row dv-fog-valley">
             <span class="prop-label">Haze</span>
             <div class="prop-value">
               <input type="range" id="dv-fog-haze" min="0" max="0.005" step="0.0001" />
               <span class="prop-num" id="dv-fog-haze-v"></span>
             </div>
           </div>
-          <div class="prop-row">
+          <div class="prop-row dv-fog-valley">
             <span class="prop-label">Wobble</span>
             <div class="prop-value">
               <input type="range" id="dv-fog-wobble" min="0" max="40" step="1" />
@@ -576,13 +618,41 @@ export function createDevPanel({
   const fogMode = $("#dv-fog-mode");
   fogMode.value = fogState.mode ?? "valley";
   const fogBtn = $("#dv-fog");
+  // Each model has its own controls and they do nothing for the others, so
+  // only the live model's are shown. Four dead sliders is how you end up
+  // tuning the wrong thing for ten minutes.
+  const showFogRows = () => {
+    const m = fogMode.value;
+    for (const el of root.querySelectorAll(".dv-fog-valley")) el.style.display = m === "valley" ? "" : "none";
+    for (const el of root.querySelectorAll(".dv-fog-monsoon")) el.style.display = m === "monsoon" ? "" : "none";
+  };
   const applyFog = (on) => {
     fogBtn.classList.toggle("checked", !!on);
     app?.fog?.setHeight?.({ enabled: !!on, mode: fogMode.value });
+    showFogRows();
   };
   applyFog(fogState.enabled !== false);
   fogBtn.addEventListener("click", () => applyFog(!fogBtn.classList.contains("checked")));
   fogMode.addEventListener("change", () => applyFog(fogBtn.classList.contains("checked")));
+
+  // ── Monsoon controls ────────────────────────────────────────────────────────
+  const monSlider = (id, key, digits) => {
+    const el = $(`#${id}`), out = $(`#${id}-v`);
+    el.value = fogState[key];
+    out.textContent = (+el.value).toFixed(digits);
+    el.addEventListener("input", () => {
+      out.textContent = (+el.value).toFixed(digits);
+      app?.fog?.setHeight?.({ [key]: +el.value });
+    });
+  };
+  monSlider("dv-mon-density", "monDensity", 3);
+  monSlider("dv-mon-falloff", "monFalloff", 3);
+  monSlider("dv-mon-height", "monHeight", 0);
+  monSlider("dv-mon-strata", "monStrata", 2);
+  monSlider("dv-mon-sun", "monSunStrength", 2);
+  const monTint = $("#dv-mon-tint");
+  monTint.value = fogState.monSunTint ?? "#ffcf9a";
+  monTint.addEventListener("input", () => app?.fog?.setHeight?.({ monSunTint: monTint.value }));
 
   const fogColor = $("#dv-fog-color");
   fogColor.value = fogState.color ?? "#c8d8e4";
