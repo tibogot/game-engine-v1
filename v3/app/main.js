@@ -1755,6 +1755,46 @@ export async function startV3App(opts = {}) {
    * and a blade that wraps on screen is a pop. At 0.35 of a 90 m tile the
    * wrap edge sits ~17 m beyond the farthest ground the default zoom can see.
    */
+  /*
+   * WHAT THE CAMERA CAN SEE, in metres of ground.
+   *
+   * Grass tile size, blade fade, foliage LOD steps and fade windows are every
+   * one of them an answer to the same question — "how far away is the ground I
+   * can see" — and every one of them was a constant stored per MAP. Hand-fitted
+   * to one zoom, they go stale the moment the camera changes, and they did:
+   * ground foliage once had LOD steps at 18 m and 45 m on a camera whose
+   * nearest visible ground was 53 m, so no plant ever drew at full detail.
+   *
+   * Derived here rather than handed in by the game, because the ENGINE owns
+   * the camera and the editor's orbit camera deserves the same answer as a
+   * game's. The pitch comes from where the camera is actually looking, so this
+   * works for an orbit camera, an RTS camera and a walking one alike, with no
+   * mode to keep in sync.
+   *
+   * Flat ground at the focus height is a deliberate approximation: real
+   * terrain rises and falls, but a raycast against a moving hillside gives a
+   * number that jitters frame to frame, and an LOD distance wants stability
+   * far more than it wants the exact metre.
+   */
+  const _viewFwd = new THREE.Vector3();
+  const _viewBand = { near: 0, far: 0 };
+  function viewGroundBand() {
+    const target = controls?.target;
+    const h = Math.max(camera.position.y - (target ? target.y : 0), 0.01);
+    _viewFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    // Angle below the horizon of the view centre, and half the vertical FOV.
+    const pitch = Math.asin(THREE.MathUtils.clamp(-_viewFwd.y, -1, 1));
+    const halfFov = THREE.MathUtils.degToRad(camera.fov ?? 60) * 0.5;
+    const reach = (a) => (a > 1e-3 ? h / Math.tan(a) : Infinity);
+    _viewBand.near = Math.min(reach(pitch + halfFov), camera.far);
+    _viewBand.far = Math.min(reach(pitch - halfFov), camera.far);
+    // Looking level or up, the top of the frustum never meets the ground and
+    // `far` is the far plane — useless as an LOD distance. Fall back to a
+    // multiple of the near edge, which is the only real scale we have.
+    if (!(_viewBand.far > _viewBand.near)) _viewBand.far = _viewBand.near * 4;
+    return _viewBand;
+  }
+
   const _grassAnchorV = new THREE.Vector3();
   const GRASS_ANCHOR_LEAD = 0.35;   // of tileSize, toward the look-at point
   function grassViewAnchor(tileSize) {
@@ -4400,6 +4440,12 @@ export async function startV3App(opts = {}) {
         susukiSystem.setEnabled(wantSusuki);
         if (wantSusuki) {
           const _susukiAnchor = playMode.active ? playMode.playerPosition : camera.position;
+          if (susukiState.autoDistances !== false) {
+            const band = viewGroundBand();
+            // A tall plant is visible further than a ground one of the same
+            // screen size, so its steps sit further out for the same view.
+            susukiSystem.field.setViewDistances(band.near * 1.2, band.far * 1.25);
+          }
           susukiSystem.setShadowCameras(scatterShadowCameras(susukiState.shadowDistance ?? 35));
           susukiSystem.update(_susukiAnchor, camera);
         }
@@ -4423,6 +4469,14 @@ export async function startV3App(opts = {}) {
           foliageScatter.field.setUsedTypes(foliageDensity.usedChannels());
         }
         if (wantFoliage) {
+          // The camera decides the LOD steps and the fade window; the map keeps
+          // the BUDGET (tile size and plant count), which is a cost decision
+          // rather than a view one. `autoDistances: false` hands them back to
+          // the panel sliders.
+          if (foliageScatterState.autoDistances !== false) {
+            const band = viewGroundBand();
+            foliageScatter.field.setViewDistances(band.near, band.far);
+          }
           foliageScatter.setShadowCameras(scatterShadowCameras(foliageScatterState.shadowDistance));
           foliageScatter.update(playMode.active ? playMode.playerPosition : camera.position, camera);
         }

@@ -107,6 +107,7 @@ export class ScatterField {
     this.lods = lods;
     this.parts = parts;
     this.rows = rows;
+    this.tileSize = tileSize;
     const draws = (this.draws = typeCount * lods);
     // One mesh (and one indirect entry) per draw × part.
     const meshCount = (this.meshCount = draws * parts);
@@ -571,6 +572,39 @@ export class ScatterField {
     set(u.uOuterR0, fadeStart);
     if (fadeEnd !== undefined) u.uOuterR1.value = Math.max(fadeEnd, (fadeStart ?? 0) + 1);
     set(u.uSlopeMinY, slopeMinY);
+  }
+
+  /**
+   * THE CAMERA DECIDES THE DISTANCES.
+   *
+   * LOD steps and the fade window are answers to one question — "how far away
+   * is the ground I can see" — and storing them per MAP means hand-fitting
+   * them to one zoom and watching them go stale the moment the camera changes.
+   * They did: the ground foliage once had its LOD steps at 18 m and 45 m on a
+   * camera whose nearest visible ground was 53 m, so every plant drew at its
+   * cheapest shape and never once at full detail. Hand-fitting them again just
+   * moves the staleness.
+   *
+   * @param {number} near  nearest visible ground, metres from the anchor
+   * @param {number} far   farthest visible ground, metres from the anchor
+   *
+   * The LOD steps land INSIDE the visible band, so both switches are somewhere
+   * a player can actually see, and the fade starts past the far edge so plants
+   * are not thinning where they are still being looked at. Everything is
+   * capped against the wrap tile: a plant fading at more than half the tile
+   * width is a plant popping as it wraps.
+   */
+  setViewDistances(near, far) {
+    if (!(far > 0)) return;
+    const u = this.u;
+    const n = Math.max(0, near);
+    const span = Math.max(far - n, 1);
+    // The tile wraps at half its width; keep everything clear of that edge.
+    const cap = this.tileSize * 0.45;
+    u.uLodDist.value  = Math.min(n + span * 0.55, cap);
+    u.uLodDist2.value = Math.min(n + span * 0.85, cap) + 2;
+    u.uOuterR0.value  = Math.min(far * 1.05, cap);
+    u.uOuterR1.value  = Math.min(far * 1.35, cap) + 1;
   }
 
   async init(camera) {

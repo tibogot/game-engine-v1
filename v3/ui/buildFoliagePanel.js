@@ -147,6 +147,11 @@ export function buildFoliagePanel(root, {
 
     // ── Distance & detail ──
     const ds = section(root, "Distance & Detail", false);
+    W(toggle(ds, foliageState, "autoDistances", { label: "Follow the camera", onChange: () => { onStateChanged(); build(); },
+      hint: "ON: the four distances below are derived every frame from how far away the ground the camera can SEE is, so they stay right as you zoom. They are the only sane default — hand-set metres are fitted to one zoom and go stale the moment the camera changes. OFF hands them back to these sliders." }));
+    if (foliageState.autoDistances !== false) {
+      W(hint(ds, "Following the camera — the sliders below are off. Turn it off to set metres by hand."));
+    } else {
     W(slider(ds, foliageState, "lodDistance", { label: "Every leaflet up to (m)", min: 4, max: 60, step: 1, onChange: onStateChanged,
       hint: "Full leaflets nearer than this; a cut blade beyond." }));
     W(slider(ds, foliageState, "lodDistance2", { label: "Cut blade up to (m)", min: 10, max: 120, step: 1, onChange: onStateChanged,
@@ -154,6 +159,7 @@ export function buildFoliagePanel(root, {
     W(slider(ds, foliageState, "fadeStart", { label: "Fade start (m)", min: 10, max: Math.max(160, tileReach * 2), step: 1, onChange: onStateChanged,
       hint: `Plants thin out and shrink from here. The plant tile reaches ${tileReach} m, so keep the end below that.` }));
     W(slider(ds, foliageState, "fadeEnd",   { label: "Fade end (m)", min: 15, max: Math.max(190, tileReach * 2), step: 1, onChange: onStateChanged }));
+    }
   }
 
   build();

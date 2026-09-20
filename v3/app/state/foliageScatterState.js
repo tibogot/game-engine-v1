@@ -273,6 +273,11 @@ export function createSusukiPlantState() {
     // LOD2 is mostly culm — so it dropped to bare pale stalks while it still
     // filled a good part of the screen, and a grove read as yellow spikes
     // instead of green crowns. LOD distance has to follow plant HEIGHT.
+    // The four distances below are DERIVED from what the camera can see
+    // (main.js viewGroundBand) unless this is false. Metres fitted by hand
+    // are fitted to one zoom, and go stale the moment the camera changes —
+    // these four have been wrong twice already for exactly that reason.
+    autoDistances: true,
     lodDistance: 60,
     lodDistance2: 140,
     fadeStart: 150,
@@ -322,6 +327,11 @@ export function createFoliageScatterState() {
     castShadows: true,
     shadowDistance: 35,
     // ── Distance: every leaflet up close, a cut sheet, then a plain blade ──
+    // Derived from what the camera can see unless autoDistances is false; see
+    // the note on the other state. These four are what got it wrong before:
+    // LOD steps at 18 m and 45 m on a camera whose nearest visible ground was
+    // 53 m meant no plant ever drew at full detail.
+    autoDistances: true,
     lodDistance: 18,
     lodDistance2: 45,
     fadeStart: 70,
