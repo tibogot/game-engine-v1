@@ -28,21 +28,34 @@ import {
   buildLadder, buildThatchSlope, rng, triCount,
 } from "./rtsParts.js";
 
+/*
+ * SIZED FOR AN RTS CAMERA, NOT FOR A TAPE MEASURE.
+ *
+ * A real hut of this kind is about 4.4 m across, and at that size it renders
+ * SMALLER THAN A HUEY (12 m long, 8.8 m rotor) — which reads as an object the
+ * units walk past rather than a place they go to. RTS buildings are drawn
+ * oversized for exactly this reason. MEASURED side by side at 1.0 / 1.6 / 2.2
+ * against the units: 1.6 puts a building at roughly helicopter scale, which is
+ * what a player expects; 2.2 starts to read as a monument.
+ *
+ * The SPANS are scaled, not the whole model — plank, rib and pole thickness
+ * stay real, so it reads as a bigger building rather than a zoomed one.
+ */
 export const VILLAGE_HUT_DEFAULTS = {
-  width: 5.0,           // along X, the gable ends
-  depth: 4.0,           // along Z, the eaves sides
-  stilt: 0.85,          // floor height above ground; 0 sits it on the earth
-  wallHeight: 1.95,
+  width: 8.0,           // along X, the gable ends
+  depth: 6.4,           // along Z, the eaves sides
+  stilt: 1.2,           // floor height above ground; 0 sits it on the earth
+  wallHeight: 2.8,
   pitch: 0.95,          // rise / half span — thatch is STEEP so rain sheds
-  overhang: 1.05,       // deep eaves, shading the walls
-  gableOverhang: 0.45,
+  overhang: 1.5,        // deep eaves, shading the walls
+  gableOverhang: 0.65,
   courses: 9,           // thatch bundles up each slope
   ragged: 0.22,
   thatchThickness: 0.14,
   poleRadius: 0.055,
   internodes: 6,
-  wallPanels: 3,
-  doorWidth: 1.0,
+  wallPanels: 4,
+  doorWidth: 1.45,
   ladder: 1,
   seed: 9,
   aoStrength: 0.55,

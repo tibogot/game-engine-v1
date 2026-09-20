@@ -11313,7 +11313,7 @@ export async function startV3App(opts = {}) {
       lakeHistory,
       refreshWidgets,
       laneRoad: laneRoadSystem,
-      props: { propStore, propInstancer, propSys, solidCollider, cliffBvh, addPrimitive, addCliff, activatePropSelection, deactivatePropSelection, rebakePlayerBvh, tc, getLivePropManager: () => livePropManager, propSlots, propTextureLibrary, addLiveProp, importPropGlb, importPropLod, importGlbCollectible },
+      props: { propStore, propInstancer, propSys, solidCollider, cliffBvh, addPrimitive, addCliff, addRock, getRockKitNames: () => ROCK_KIT.map((k) => k.name), activatePropSelection, deactivatePropSelection, rebakePlayerBvh, tc, getLivePropManager: () => livePropManager, propSlots, propTextureLibrary, addLiveProp, importPropGlb, importPropLod, importGlbCollectible },
       // Project save/load, and the imported files a project carries.
       saveProject,
       loadProjectFromBuffer,

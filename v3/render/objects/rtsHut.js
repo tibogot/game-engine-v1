@@ -26,19 +26,32 @@ import {
   buildSandbagWall, rng, triCount,
 } from "./rtsParts.js";
 
+/*
+ * SIZED FOR AN RTS CAMERA, NOT FOR A TAPE MEASURE.
+ *
+ * A real hut of this kind is about 4.4 m across, and at that size it renders
+ * SMALLER THAN A HUEY (12 m long, 8.8 m rotor) — which reads as an object the
+ * units walk past rather than a place they go to. RTS buildings are drawn
+ * oversized for exactly this reason. MEASURED side by side at 1.0 / 1.6 / 2.2
+ * against the units: 1.6 puts a building at roughly helicopter scale, which is
+ * what a player expects; 2.2 starts to read as a monument.
+ *
+ * The SPANS are scaled, not the whole model — plank, rib and pole thickness
+ * stay real, so it reads as a bigger building rather than a zoomed one.
+ */
 export const HUT_DEFAULTS = {
-  width: 4.4,          // along X — the door wall
-  depth: 3.6,          // along Z
-  wallHeight: 2.35,
+  width: 7.0,          // along X — the door wall
+  depth: 5.8,          // along Z
+  wallHeight: 3.3,
   pitch: 0.30,         // roof rise / half span
-  overhang: 0.42,
+  overhang: 0.6,
   postWidth: 0.15,
-  panelsPerWall: 4,
+  panelsPerWall: 6,
   ribs: 7,
   ribDepth: 0.032,
   lean: 1.0,           // how far from plumb the panels sit
   sag: 0.09,           // ridge dip, in metres
-  doorWidth: 1.05,
+  doorWidth: 1.5,
   sandbags: 3,         // courses stacked against the back wall
   drums: 1,
   stovepipe: 1,
