@@ -1734,6 +1734,46 @@ export async function startV3App(opts = {}) {
   /** A ring runs only while grass shows; the Far ring also needs "Far blades". */
   const _ringWanted = (r, want) => want && (grassState.farBlades !== false || !r.group.name.endsWith("Far"));
 
+  /*
+   * WHERE THE GRASS TILE SITS.
+   *
+   * Both grass systems are a fixed instance budget spread over a tile that
+   * follows you, so where that tile is centred decides how much of it you can
+   * actually see. Centring it on the CAMERA is right only for a camera standing
+   * in the field. MEASURED on nam-rts at its default zoom: the camera is 34 m
+   * up and 40 m behind the point it looks at, and the ground on screen runs
+   * 17-69 m away — so with a 90 m tile the back half held grass behind the
+   * camera and the front edge stopped 24 m short of the top of the screen.
+   *
+   * So the tile slides toward what the camera is LOOKING at. One rule, no "is
+   * this an RTS camera" switch: a camera close to its target barely moves,
+   * one high above it moves the most, which is exactly when it should. The
+   * shift is capped at a fraction of the tile so the tile can never leave the
+   * camera behind — including when something parks the orbit target far away.
+   *
+   * It must stay a fraction well under 1/2: the tile WRAPS at its half-width,
+   * and a blade that wraps on screen is a pop. At 0.35 of a 90 m tile the
+   * wrap edge sits ~17 m beyond the farthest ground the default zoom can see.
+   */
+  const _grassAnchorV = new THREE.Vector3();
+  const GRASS_ANCHOR_LEAD = 0.35;   // of tileSize, toward the look-at point
+  function grassViewAnchor(tileSize) {
+    if (playMode.active) return playMode.playerPosition;
+    const t = controls?.target;
+    if (!t) return camera.position;
+    let dx = t.x - camera.position.x;
+    let dz = t.z - camera.position.z;
+    const d = Math.hypot(dx, dz);
+    _grassAnchorV.copy(camera.position);
+    if (d > 1e-3) {
+      const lead = Math.min(d, GRASS_ANCHOR_LEAD * (tileSize || 90));
+      _grassAnchorV.x += (dx / d) * lead;
+      _grassAnchorV.z += (dz / d) * lead;
+      _grassAnchorV.y = t.y;
+    }
+    return _grassAnchorV;
+  }
+
   // ── Susuki build/sync (lazy, like the grass rings) ─────────────────────────
   async function ensureSusukiBuilt() {
     if (susukiSystem || _susukiBuilding) return;
@@ -4295,7 +4335,7 @@ export async function startV3App(opts = {}) {
         const wantRevo = _revoMode && grassTerrainData.hasGrassData && _terrainVisible;
         if (wantRevo !== revoGrass.enabled) revoGrass.setEnabled(wantRevo);
         if (wantRevo) {
-          const _revoAnchor = playMode.active ? playMode.playerPosition : camera.position;
+          const _revoAnchor = grassViewAnchor(revoGrassState.tileSize);
           grassFarShading.setActive(true);
           grassFarShading.setAnchor(_revoAnchor);
           grassPush.setAnchor(_revoAnchor.x, _revoAnchor.z);
@@ -4329,6 +4369,10 @@ export async function startV3App(opts = {}) {
         }
         grassFarShading.setActive(wantGrass);
         if (wantGrass) {
+          // The rings are NOT led like the revo tile: they are concentric and
+          // the innermost is only tens of metres across, so sliding the centre
+          // forward would empty the ground under the camera. They already reach
+          // 200 m, which is the problem the lead exists to solve.
           const _grassAnchor = playMode.active ? playMode.playerPosition : camera.position;
           grassFarShading.setAnchor(_grassAnchor);
           grassPush.setAnchor(_grassAnchor.x, _grassAnchor.z);
