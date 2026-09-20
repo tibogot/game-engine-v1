@@ -86,6 +86,7 @@ import {
   registerProceduralObjectFactories,
 } from "../../v2/core/props/proceduralObjectProps.js";
 import { buildPropsPanel, defaultBakeProceduralThumbnails } from "../ui/buildPropsPanel.js";
+import { registerRtsObjectFactories, RTS_PROP_DEFS, RTS_PROP_LABELS } from "../render/objects/rtsObjectProps.js";
 import { bakeObjectThumbnails } from "../../v2/tools/objectThumbnails.js";
 import { thumbKey, getThumb, putThumb } from "../props/rockThumbnailCache.js";
 import { buildSplinePanel } from "../ui/buildSplinePanel.js";
@@ -6792,6 +6793,9 @@ export async function startV3App(opts = {}) {
   livePropManager.registerFactory("flag",  createFlag);
 
   registerProceduralObjectFactories(livePropManager);
+  // The RTS kit (sandbag emplacements, huts, drums…). Separate from v2's road
+  // objects because it is drawn for a camera 34 m up — see rtsObjectProps.
+  registerRtsObjectFactories(livePropManager);
 
   // Collectibles: the field renders them (GPU-instanced), the runtime owns pickups.
   collectibleBurst = createCollectibleBurst(scene);
@@ -7874,6 +7878,7 @@ export async function startV3App(opts = {}) {
       Heart: { factoryId: "heart", defaults: HEART_DEFAULTS },
       Key:   { factoryId: "key",   defaults: KEY_DEFAULTS },
       ...PROCEDURAL_PROP_DEFS,
+      ...RTS_PROP_DEFS,
     };
     const def = defs[livePropName];
     if (!def) return;
