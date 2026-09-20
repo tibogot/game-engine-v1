@@ -81,8 +81,23 @@ export class LivePropManager {
     const params = inst.liveParams ? { ...inst.liveParams } : { ...type.defaultParams };
     const obj = factory(params);
     if (!obj?.group) return null;
+    // The factory builds at the LOCAL ORIGIN and _applyTransform places it
+    // afterwards, so this is the moment the group's own bounds are readable.
+    // Games use it for footprints — a bridge deck carving nav, say — which a
+    // world-space AABB of a rotated span could not give.
+    const localBox = new THREE.Box3().setFromObject(obj.group);
     this.scene.add(obj.group);
-    return { obj, factoryId: type.factoryId };
+    return { obj, factoryId: type.factoryId, localBox };
+  }
+
+  /**
+   * The untransformed bounds of a live prop's geometry, or null if it has none
+   * (a GPU-resident collectible, or an instance that is not built yet).
+   * @param {number} storeIdx index into propStore.instances
+   * @returns {THREE.Box3|null} read-only — callers must not mutate it
+   */
+  localBoxFor(storeIdx) {
+    return this._live.get(storeIdx)?.localBox ?? null;
   }
 
   _destroyEntry(entry) {

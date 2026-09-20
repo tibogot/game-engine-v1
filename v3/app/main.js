@@ -11612,6 +11612,15 @@ export async function startV3App(opts = {}) {
       .map((r) => r.solved)
       .filter((s) => s && s.count >= 2)
       .map((s) => ({ count: s.count, x: s.x, z: s.z, width: s.width, level: s.level })),
+    /**
+     * A LIVE prop's own bounds, before its instance transform — the footprint
+     * of a procedural object (a bridge deck, a fence run). Static prop types
+     * carry `mergedBox`; live ones are built per instance, so this is where
+     * theirs lives. Null when the instance has no group (a collectible, or one
+     * not built yet). Read-only.
+     * @param {number} instIdx index into propStore.instances
+     */
+    getLivePropLocalBox: (instIdx) => livePropManager?.localBoxFor?.(instIdx) ?? null,
     // Screen pixel → { point: Vector3 } on the terrain (mouse move-orders,
     // box-select, building ghost). Returns null when the ray misses the ground.
     pickWorldAtClient,

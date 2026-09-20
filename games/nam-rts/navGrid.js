@@ -115,18 +115,26 @@ export function createNavGrid({
   // they span — a river, say. Runs AFTER all obstacle stamping so it wins. This
   // is the one place editor-authored geometry maps to a nav *override*: place a
   // bridge model in the editor and it becomes a real crossing automatically.
+  //
+  // The engine's bridges are PROCEDURAL objects, which are live props built per
+  // instance, so they have no type-level mergedBox — their footprint comes from
+  // the manager instead. Imported bridge models are static and keep theirs.
+  const _boxSize = new THREE.Vector3();
   function carveBridges() {
     const ps = app.propStore;
     if (!ps?.instances) return;
-    for (const inst of ps.instances) {
+    for (let i = 0; i < ps.instances.length; i++) {
+      const inst = ps.instances[i];
       const type = ps.types?.[inst.typeIdx];
-      if (!type || type.live || !/bridge/i.test(type.name || "")) continue;
-      const box = type.mergedBox;
+      if (!type || !/bridge/i.test(type.name || "")) continue;
+      const box = type.live ? app.getLivePropLocalBox?.(i) : type.mergedBox;
       if (!box) continue;
-      const size = box.getSize(new THREE.Vector3());
-      const halfX = 0.5 * size.x * (inst.sx ?? 1);
-      const halfZ = 0.5 * size.z * (inst.sz ?? 1);
-      carveOrientedRect(inst.px, inst.pz, halfX, halfZ, inst.ry ?? 0);
+      box.getSize(_boxSize);
+      const halfX = 0.5 * _boxSize.x * (inst.sx ?? 1);
+      const halfZ = 0.5 * _boxSize.z * (inst.sz ?? 1);
+      // inst.ry is DEGREES (propStore applies * DEG everywhere it is used);
+      // carveOrientedRect works in radians.
+      carveOrientedRect(inst.px, inst.pz, halfX, halfZ, (inst.ry ?? 0) * Math.PI / 180);
     }
   }
 
