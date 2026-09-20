@@ -35,6 +35,15 @@ const ROWS = 4;
 const RULE_ROW = 2;
 
 /**
+ * How much of a leaf's canopy normal-lift survives when the camera is looking
+ * straight down at it (1 = the lift a ground camera gets, 0 = the leaf's true
+ * normal). See the long note beside `liftToUp`: the lift cures a ground
+ * camera's two-tone and causes a top-down camera's flatness, so it is scaled
+ * by the camera's elevation rather than chosen once.
+ */
+const FOLIAGE_TOPDOWN_LIFT = 0.45;
+
+/**
  * THE CARD TEXTURES — one canvas-drawn alpha per `cardTextureOf` key. Geometry
  * cannot afford strand, spray or lace detail; a texture can, and a card of it
  * sways as one thing. Each is drawn white; colour is the shader's.
@@ -298,13 +307,46 @@ export class FoliageScatterSystem {
     // the sun would otherwise go black next to a lit neighbour, a hard
     // two-tone no real fern shows.
     const nW = normalize(vNormal);
+
+    /*
+     * HOW FAR TOWARD UP — AND WHY THE CAMERA GETS A VOTE.
+     *
+     * Every lift below is a CANOPY approximation. It exists so a leaflet whose
+     * true normal tilts away from the sun does not go black beside a lit
+     * neighbour, which is the failure a camera STANDING IN THE FIELD sees.
+     *
+     * From an RTS camera looking DOWN it causes the opposite failure. Bending
+     * the normals toward up puts nearly all of them within ~45 degrees of the
+     * view direction, so every leaf takes the same light: the field goes flat
+     * and reads too bright, and a plant loses the form its geometry has. A
+     * banana shows it worst — a big flat card has the least geometric normal
+     * left to survive the bend.
+     *
+     * So the lift RELAXES as the camera climbs, by the same rule revo grass
+     * uses for faceCamera: the camera's own ELEVATION OVER THIS PLANT decides
+     * it. A camera in the field is untouched whatever the value, so there is
+     * no "is this an RTS camera" mode to keep in sync. sin(elevation) is just
+     * the y of the direction to the camera, so no trigonometry is needed.
+     *
+     * It relaxes rather than switching off: at zero lift the two-tone the lift
+     * was added to cure comes straight back, so from overhead a leaf keeps
+     * FOLIAGE_TOPDOWN_LIFT of its canopy bend and gets the rest of its normal
+     * back.
+     */
+    const _camUpW = cameraPosition.sub(vWorld).normalize().y;
+    // 10 degrees -> 40 degrees, the gate revo grass uses: the blades (here,
+    // leaves) under a walking camera have a high elevation too, and relaxing
+    // those would read as the plant flinching away from you.
+    const _overhead = smoothstep(float(0.17), float(0.64), _camUpW);
+    const _liftScale = mix(float(1), float(FOLIAGE_TOPDOWN_LIFT), _overhead);
+    const liftToUp = (n, amount) => normalize(mix(n, vec3(0, 1, 0), float(amount).mul(_liftScale)));
     // (Almost all the way: game ferns are lit as a flat canopy; what little
     // geometric normal remains keeps the fronds from looking like paper.)
     // 0.55, not 0.95: the geometry now carries a ROUNDED normal per leaf
     // (foliageGeometry roundLeafNormals — see its header for the low-sun
     // diagnosis), so the shader only has to soften it, not replace it. At
     // 0.95 no leaf ever faced a low sun and the whole field went black.
-    const nLeaf = normalize(mix(nW, vec3(0, 1, 0), 0.55));
+    const nLeaf = liftToUp(nW, 0.55);
     const nLeafView = cameraViewMatrix.mul(vec4(nLeaf, 0)).xyz.normalize();
     // …and always toward the viewer: a frond hanging toward the camera shows
     // its underside, which must not go dark next to a lit neighbour.
@@ -322,7 +364,7 @@ export class FoliageScatterSystem {
     // Part 4 (a leaf card) is a leaf in every way but its alpha.
     const isLeafPart = vPart.lessThan(0.5).or(vPart.greaterThan(3.5));
     const isSoft = isLeafPart.or(vPart.greaterThan(1.5).and(vPart.lessThan(2.5)));
-    const nCulm = normalize(mix(nW, vec3(0, 1, 0), 0.45));
+    const nCulm = liftToUp(nW, 0.45);
     const trueView = cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize().mul(faceDirection);
     const culmView = cameraViewMatrix.mul(vec4(nCulm, 0)).xyz.normalize().mul(faceDirection);
     // A palm frond half-card (part 5) is lifted only HALF way to up. The
@@ -331,7 +373,7 @@ export class FoliageScatterSystem {
     // read apart, which is the whole reason the frond is two cards.
     // The lift rides in the part id's fraction (palmGeometry addFrondCards):
     // 5.5 for a palm, 5.85 for a ground fern.
-    const nFrond = normalize(mix(nW, vec3(0, 1, 0), fract(vPart)));
+    const nFrond = liftToUp(nW, fract(vPart));
     const nFrondView = cameraViewMatrix.mul(vec4(nFrond, 0)).xyz.normalize();
     const nFrondFacing = select(nFrondView.z.lessThan(0), nFrondView.negate(), nFrondView);
     mat.normalNode = select(vPart.greaterThan(4.5), nFrondFacing,
