@@ -56,7 +56,22 @@ setGridTextureUrl("/textures/grid.png");
 // ring reaches past the world edge (~2× WORLD_SIZE span) at any config —
 // each extra level doubles coverage for a fixed ~16k verts.
 
-export const GRID_N     = 128;
+/*
+ * 256, raised from 128 (2026-09-20).
+ *
+ * Level 0 spans ±GRID_N/2 · BASE_STEP around the camera, so at 128 the 1 m
+ * ring reached only ±64 m and everything past that stepped to 2, 4, 8 m. A
+ * river channel is a ~15 m-wide feature with ~4 m banks, and a clipmap quad
+ * splits along one diagonal — so a coarse ring folds the banks into a visible
+ * DIAMOND lattice, which is what "the river sand looks blocky" was. Sampling
+ * the measured cross-section at the 4 m step lost 0.5-0.8 m of a 4 m channel.
+ *
+ * MEASURED on nam-valley at 256: terrain 132,096 -> 427,520 triangles, GPU
+ * 0.28 -> 0.33 ms, draws unchanged at 24 — and the lattice is gone. Any
+ * narrow carved feature (river, road cut, trench) has the same problem, so
+ * this is not specific to one map.
+ */
+export const GRID_N     = 256;
 export const BASE_STEP  = Math.max(1, WORLD_SIZE / HEIGHTMAP_SIZE);
 export const LOD_LEVELS = Math.max(
   4,

@@ -48,6 +48,7 @@ import {
   vec2, vec3, vec4, PI2,
 } from "three/tsl";
 import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
+import { createClipmapGroundY } from "../../../v2/core/terrain/clipmapGroundY.js";
 import { scatterClump, scatterRuleKeep } from "./scatterNoise.js";
 import { scatterFrustumVisible } from "./gpuCull.js";
 import { LAYERS } from "../layers.js";
@@ -91,7 +92,12 @@ export class ScatterField {
     heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex = null, windTex,
     grassDensityTex = null, cullRadius = 2, fadeKeepGain = 1.6, slopeBand = 0.12, shadows = false,
     nearFade = 0.9, onKeep = null,
+    // The clipmap description ({ centerXZ, baseStep, levels, halfCells,
+    // gridOffset }), as the grass takes it. Omit it and plants fall back to
+    // the raw heightmap and float wherever the mesh is coarse.
+    terrainSurface = null,
   }) {
+    const clipGroundY = terrainSurface ? createClipmapGroundY(terrainSurface) : null;
     this.renderer = renderer;
     this.name = name;
     this.typeCount = typeCount;
@@ -206,7 +212,15 @@ export class ScatterField {
       const worldX = wrapped.x.add(u.uAnchorPos.x);
       const worldZ = wrapped.y.add(u.uAnchorPos.z);
       const terrainUV = vec2(worldX, worldZ).div(u.uTerrainSize).add(0.5);
-      const terrainY = texture(heightTex, terrainUV).x;
+      // Stand on the MESH, not the heightmap. They are different surfaces: a
+      // clipmap vertex sits on its level's lattice and reads one filtered tap,
+      // so a plant placed at the exact heightmap height floats over any crest
+      // the coarse mesh cuts under — which is what a river bank is made of.
+      // Grass has stood on the triangles since hybridGrassSystem; this is the
+      // same helper, so foliage and the tall plants now agree with it.
+      const terrainY = clipGroundY
+        ? clipGroundY(worldX, worldZ, heightTex, u.uTerrainSize)
+        : texture(heightTex, terrainUV).x;
       const tN = texture(terrainNormalTex, terrainUV).xyz;
 
       // Paint: the total decides whether a plant grows; a second hash picks

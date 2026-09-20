@@ -169,6 +169,7 @@ export class FoliageScatterSystem {
     scene, renderer, heightTex, terrainNormalTex, densityTex, grassDensityTex, splatTex,
     riverNearTex = null, windTex, worldSize, fs, gp, tileSize = 192, plantsPerSide = 256,
     name = "Foliage", typeCount = FOLIAGE_TYPE_COUNT, nearFade = 0.9,
+    terrainSurface = null,
   }) {
     // Foliage runs 8 types on a 192 m tile; susuki runs this same system with
     // one type on a 400 m tile so its fields stay visible to ~195 m.
@@ -178,6 +179,7 @@ export class FoliageScatterSystem {
       typeCount, lods: FOLIAGE_LODS, rows: ROWS, ruleRow: RULE_ROW,
       worldSize, tileSize, plantsPerSide,
       heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex, windTex, grassDensityTex,
+      terrainSurface,  // stand on the mesh, like the grass does
       cullRadius: 5,   // a jungle fern is metres across, not centimetres
       shadows: true,   // tall plants cast (per type, near cascades only)
       nearFade,        // plants right at the camera thin out

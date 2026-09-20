@@ -72,6 +72,33 @@ function _refName(url) {
   return isAssetRef(url) ? (projectAssets.nameOf(url) ?? "imported") : url.split("/").pop();
 }
 
+/**
+ * Which map a filename is. ONE rule, shared by drag-drop and the URL loader, so
+ * a file and its link always land in the same place.
+ *
+ * The short names — "ao", "nor", "arm" — are matched as whole TOKENS between
+ * separators, because as substrings they are landmines: "chaos_rock_diff"
+ * contains "ao" and would import a colour map as ambient occlusion. The long
+ * unambiguous words stay substring matches so `rockNormal.png`, which has no
+ * separators at all, still routes.
+ *
+ * "arm" is recognised only in order to be REFUSED. It packs AO / Roughness /
+ * Metalness into RGB, while loadRoughness and loadAO each read the source's RED
+ * channel — which in an ARM map is AO. Dropped in blind it would either become
+ * the colour map (it matches no other keyword) or silently shade the ground
+ * with occlusion data. Both are worse than an error.
+ */
+export function detectMapKind(filename) {
+  const name = String(filename).toLowerCase();
+  const tokens = name.replace(/\.[a-z0-9]+$/, "").split(/[_\-.\s]+/);
+  const token = (t) => tokens.includes(t);
+  if (token("arm")) return "arm";
+  if (token("nor") || token("nrm") || name.includes("normal") || name.includes("nrm")) return "normal";
+  if (name.includes("rough")) return "rough";
+  if (token("ao") || name.includes("ambient") || name.includes("occlusion")) return "ao";
+  return "albedo";
+}
+
 export class TextureLibrary {
   constructor() {
     // ── CPU-side data arrays (modified in-place, textures re-upload via needsUpdate) ──
@@ -283,18 +310,56 @@ export class TextureLibrary {
     this.slots[slotIndex].aoUrl  = projectAssets.resolveUrl(aoRef);
   }
 
-  // Load albedo from drag-dropped image, auto-detect map type by filename keyword
+  /**
+   * Load a dropped image into whichever map its filename names. Returns the
+   * kind so a caller can say where it went; throws on a packed ARM map.
+   */
   async loadFileAutoDetect(slotIndex, file) {
-    const name = file.name.toLowerCase();
-    if (name.includes("normal") || name.includes("nrm") || name.includes("nor")) {
-      await this.loadNormalMap(slotIndex, file);
-    } else if (name.includes("rough") || name.includes("roughness")) {
-      await this.loadRoughness(slotIndex, file);
-    } else if (name.includes("ao") || name.includes("ambient") || name.includes("occlusion")) {
-      await this.loadAO(slotIndex, file);
-    } else {
-      await this.loadAlbedo(slotIndex, file);
+    const kind = detectMapKind(file.name);
+    if (kind === "arm") {
+      // No filename here: callers already name the file they were given.
+      throw new Error(
+        'packed ARM map (AO + Roughness + Metalness) — load the separate "rough" and "ao" maps instead',
+      );
     }
+    if (kind === "normal")      await this.loadNormalMap(slotIndex, file);
+    else if (kind === "rough")  await this.loadRoughness(slotIndex, file);
+    else if (kind === "ao")     await this.loadAO(slotIndex, file);
+    else                        await this.loadAlbedo(slotIndex, file);
+    return kind;
+  }
+
+  /**
+   * Load a map from a URL and EMBED it in the project.
+   *
+   * Deliberately NOT one of the `*FromUrl` methods above. Those record the URL
+   * itself as the slot's reference, which is right for the defaults shipped
+   * under /textures but would make a saved project re-fetch a third-party CDN
+   * on every load — including the deployed game. Fetching into a File and
+   * handing it to the ordinary import path sends the bytes through
+   * projectAssets, so they travel inside the .v3proj like any other import.
+   */
+  async loadFromUrlEmbedded(slotIndex, url) {
+    const clean = String(url).trim();
+    let resp;
+    try {
+      resp = await fetch(clean, { mode: "cors" });
+    } catch {
+      // A cross-origin host without permissive CORS fails here, before status.
+      throw new Error("blocked — the host sent no CORS header, or it is unreachable");
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    if (!blob.type.startsWith("image/")) {
+      throw new Error(`not an image (${blob.type || "unknown type"})`);
+    }
+    const name = decodeURIComponent(
+      clean.split("?")[0].split("#")[0].split("/").pop() || "texture",
+    );
+    const kind = await this.loadFileAutoDetect(
+      slotIndex, new File([blob], name, { type: blob.type }),
+    );
+    return { kind, name, bytes: blob.size };
   }
 
   // ── URL-based loading (for preloading defaults from the server) ─────────────

@@ -1247,6 +1247,20 @@
                     </div>
                   </div>
                   <p class="mode-hint" style="margin-top:3px">Drop image or click cell to load. Filename with "normal"/"rough"/"ao" auto-routes.</p>
+                  <!-- Load maps straight from a link (Polyhaven &c). The bytes are
+                       fetched and EMBEDDED, so the saved project never hotlinks. -->
+                  <div class="tex-url">
+                    <textarea id="texlib-url" class="tex-url-input" rows="3" spellcheck="false"
+                      placeholder="…or paste image URLs (one per line) — routed by filename"></textarea>
+                    <div class="tex-url-actions">
+                      <label class="tex-url-auto" title="Paste one Polyhaven map and fetch its siblings from the same folder — normal, rough and AO at the same resolution and format. Missing ones are skipped.">
+                        <input type="checkbox" id="texlib-url-auto" checked />
+                        <span>fetch matching maps</span>
+                      </label>
+                      <button type="button" class="option-chip tex-url-btn" id="texlib-url-load">Load</button>
+                    </div>
+                    <div class="tex-url-status" id="texlib-url-status" hidden></div>
+                  </div>
                   </div><!-- /#texlib-image-src -->
                   <!-- Per-slot parameters -->
                   <div class="prop-row" title="Project this layer on all three world axes instead of straight down, so it stops stretching on steep ground. Costs 3x the texture taps for this layer - turn it on for rock, not for grass.">

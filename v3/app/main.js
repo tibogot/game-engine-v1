@@ -1488,6 +1488,20 @@ export async function startV3App(opts = {}) {
       innerR0: 175, innerR1: 215, outerR0: 360, outerR1: 398 },
   ];
 
+  /*
+   * The clipmap surface everything scattered stands on.
+   *
+   * ONE definition: the heightmap and the drawn mesh are different surfaces,
+   * and anything that disagrees about which one is "the ground" floats or
+   * sinks. Grass, foliage and the tall plants all read this, so they cannot
+   * drift apart. `centerXZ` is the live Vector2 the clipmap updates, so the
+   * caller tracks lod.update() with no per-frame work.
+   */
+  const terrainSurfaceDesc = () => ({
+    centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS,
+    halfCells: GRID_N / 2, gridOffset: GRID_OFFSET,
+  });
+
   async function _buildGrassRingSet(namePrefix, extraShared) {
     const shared = {
       scene,
@@ -1503,7 +1517,7 @@ export async function startV3App(opts = {}) {
       terrainShadow:    { shade: terrainShade, visibilityHere: terrainSunVisibilityHere },
       // Blades stand on the clipmap's triangles, not the exact heightmap, so
       // they never float over a crest the coarse mesh cuts under.
-      terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2, gridOffset: GRID_OFFSET },
+      terrainSurface:   terrainSurfaceDesc(),
       bladeHeightTex:   grassTerrainData.bladeHeightTex,
       pushField:        grassPush.field,
       ...extraShared,
@@ -1592,7 +1606,7 @@ export async function startV3App(opts = {}) {
         densityTex:       grassTerrainData.grassDensityMaskedTex,
         bladeHeightTex:   grassTerrainData.bladeHeightTex,
         pushField:        grassPush.field,
-        terrainSurface:   { centerXZ: lod.uCenter.value, baseStep: BASE_STEP, levels: LOD_LEVELS, halfCells: GRID_N / 2, gridOffset: GRID_OFFSET },
+        terrainSurface:   terrainSurfaceDesc(),
         terrainShadow:    { shade: terrainShade, visibilityHere: terrainSunVisibilityHere },
         rp:               revoGrassState,
         gp:               grassState,
@@ -1732,6 +1746,7 @@ export async function startV3App(opts = {}) {
         riverNearTex:     riverV2System?.nearTexture ?? null,
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
+        terrainSurface:   terrainSurfaceDesc(),
         fs:               susukiState,
         gp:               grassState,
       });
@@ -1825,6 +1840,7 @@ export async function startV3App(opts = {}) {
         riverNearTex:     riverV2System?.nearTexture ?? null,
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
+        terrainSurface:   terrainSurfaceDesc(),
         fs:               foliageScatterState,
         gp:               grassState,
       });
@@ -5429,6 +5445,10 @@ export async function startV3App(opts = {}) {
       refreshLayerThumb(slotIdx);
       // A drop turns a procedural slot back into an image slot.
       if (slotIdx === texlibActiveSlot) syncTexlibEditor();
+    }).catch((err) => {
+      // A packed ARM map is refused rather than taken as colour — say so.
+      statusBar?.setMessage(`${file.name}: ${err.message}`);
+      console.warn("[V3] texture drop:", file.name, err.message);
     });
   });
 
@@ -5440,11 +5460,120 @@ export async function startV3App(opts = {}) {
     texlibTabsEl.querySelectorAll(".texlib-tab").forEach(t => t.classList.toggle("active", t === tab));
     texlibNameEl.value = textureLib.slots[texlibActiveSlot].name;
     syncTexlibEditor();
+    texlibUrlSay([]);            // last slot's result does not belong to this one
   });
   texlibNameEl.addEventListener("input", () => {
     textureLib.setSlotName(texlibActiveSlot, texlibNameEl.value);
     const lbl = uiById(`llabel-${texlibActiveSlot + 1}`);
     if (lbl) lbl.textContent = texlibNameEl.value || `L${texlibActiveSlot + 1}`;
+  });
+
+  // ── Load slot maps from a link ──────────────────────────────────────────────
+  /*
+   * Auditioning a ground texture used to mean downloading four files before you
+   * could see one of them on the terrain. This takes the links instead, and goes
+   * through textureLib.loadFromUrlEmbedded so the BYTES land in the project —
+   * a .v3proj that stored the URL would re-fetch someone else's CDN on every
+   * load, including the deployed game.
+   */
+  const texlibUrlEl   = uiById("texlib-url");
+  const texlibUrlAuto = uiById("texlib-url-auto");
+  const texlibUrlBtn  = uiById("texlib-url-load");
+  const texlibUrlStat = uiById("texlib-url-status");
+
+  /*
+   * Polyhaven names every map `<asset>_<map>_<res>.<ext>` inside a folder that
+   * is already per-format and per-resolution, so the other three maps of a set
+   * are one substitution away. `nor_gl` comes before `nor` in the alternation
+   * because the regex is greedy-first, not longest-match.
+   */
+  // `diffuse` before `diff`: a few assets spell the colour map out in full, and
+  // the alternation is first-match, not longest-match.
+  const PH_MAP_RE = /_(diffuse|diff|nor_gl|nor_dx|nor|rough|ao|arm|disp)_(\d+k)(\.[a-z0-9]+)$/i;
+
+  function siblingMapUrls(url) {
+    const base = url.split("?")[0];
+    const m = base.match(PH_MAP_RE);
+    if (!m) return [];
+    const from = m[1].toLowerCase();
+    const fromIsNormal = from.startsWith("nor");
+    return ["diff", "nor_gl", "rough", "ao"]
+      // Never re-fetch what was pasted, and never answer a `nor_dx` with the
+      // `nor_gl` of the same map — that would import two rival normals.
+      .filter((k) => k !== from && !(fromIsNormal && k.startsWith("nor")))
+      .map((k) => base.replace(PH_MAP_RE, `_${k}_${m[2]}${m[3]}`));
+  }
+
+  function texlibUrlSay(rows) {
+    texlibUrlStat.textContent = "";
+    texlibUrlStat.hidden = rows.length === 0;
+    for (const r of rows) {
+      const line = document.createElement("div");
+      if (r.cls) line.className = r.cls;
+      line.textContent = r.text;              // pasted text, never innerHTML
+      texlibUrlStat.appendChild(line);
+    }
+  }
+
+  let texlibUrlBusy = false;
+  async function texlibLoadUrls() {
+    if (texlibUrlBusy) return;
+    const pasted = texlibUrlEl.value.split(/\s+/).filter((s) => /^https?:\/\//i.test(s));
+    if (!pasted.length) {
+      texlibUrlSay([{ cls: "err", text: "Paste an image URL first." }]);
+      return;
+    }
+
+    // One link, option on: try the rest of its set. Those are GUESSES, so a
+    // miss is skipped in silence — only what was actually pasted can fail.
+    const solo = pasted.length === 1 && texlibUrlAuto.checked;
+    // An ARM link on its own is the one case where we know what was MEANT: it
+    // names a real Polyhaven set, and the maps we can use sit beside it. Fetch
+    // those and skip the ARM itself, rather than refusing and then loading the
+    // set anyway — which is what reporting it as a failure would look like.
+    const armSolo = solo && /_arm_\d+k\.[a-z0-9]+$/i.test(pasted[0].split("?")[0]);
+    const queue = armSolo ? [] : pasted.slice();
+    const guessed = new Set();
+    if (solo) {
+      for (const s of siblingMapUrls(pasted[0])) { queue.push(s); guessed.add(s); }
+    }
+
+    const slotIdx = texlibActiveSlot;
+    texlibUrlBusy = true;
+    texlibUrlBtn.disabled = true;
+    const rows = armSolo
+      ? [{ cls: "", text: "ARM is packed (AO+Rough+Metal) — loading the separate maps beside it" }]
+      : [];
+    let failed = false;
+    for (let i = 0; i < queue.length; i++) {
+      texlibUrlBtn.textContent = `${i + 1}/${queue.length}`;
+      try {
+        const { kind, name, bytes } = await textureLib.loadFromUrlEmbedded(slotIdx, queue[i]);
+        rows.push({ cls: "ok", text: `✓ ${kind} — ${name} · ${Math.round(bytes / 1024)} KB` });
+        refreshLayerThumb(slotIdx);
+        if (slotIdx === texlibActiveSlot) syncTexlibEditor();
+      } catch (err) {
+        if (guessed.has(queue[i])) continue;
+        failed = true;
+        rows.push({ cls: "err", text: `✗ ${queue[i].split("/").pop()} — ${err.message}` });
+      }
+      texlibUrlSay(rows);                     // report as it goes, not at the end
+    }
+    texlibUrlBtn.textContent = "Load";
+    texlibUrlBtn.disabled = false;
+    texlibUrlBusy = false;
+    if (!failed) texlibUrlEl.value = "";      // ready for the next paste
+    texlibUrlSay(rows.length ? rows : [{ cls: "err", text: "Nothing loaded." }]);
+  }
+
+  texlibUrlBtn.addEventListener("click", texlibLoadUrls);
+  texlibUrlEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    // Enter sends a single pasted link. Once there are several lines it has to
+    // stay a newline, so Ctrl/Cmd+Enter sends those.
+    if (texlibUrlEl.value.trim().includes("\n") && !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    texlibLoadUrls();
   });
 
   // Texture library UV/strength sliders — scoped to active slot
@@ -11007,6 +11136,11 @@ export async function startV3App(opts = {}) {
       foliageScatterBrush,
       ensureFoliageScatterBuilt,
       syncFoliageScatterUniforms,
+      // The tall-plant field's state and its sync, beside the ground foliage's.
+      // Every sibling state is already here; leaving this one out just meant
+      // bamboo and palms could not be tuned from the console like the rest.
+      susukiState,
+      syncSusukiUniforms,
       get waterfallSystem() { return waterfallSystem; },
       get waterfallEditor() { return waterfallEditor; },
       flowerDensity,
