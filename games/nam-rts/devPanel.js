@@ -184,6 +184,28 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Smoke</div>
+        <div class="section-body">
+          <button class="action-btn" id="dv-smoke-violet" type="button">Violet marker (M18)</button>
+          <button class="action-btn" id="dv-smoke-screen" type="button">Screening grenade</button>
+          <button class="action-btn" id="dv-smoke-wreck" type="button">Wreck smoke</button>
+          <button class="action-btn" id="dv-smoke-napalm" type="button">Napalm pall</button>
+          <button class="action-btn primary" id="dv-napalm-run" type="button">NAPALM RUN</button>
+          <button class="action-btn" id="dv-smoke-clear" type="button">Clear all</button>
+          <div class="prop-row">
+            <span class="prop-label">Opacity</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smoke-op" min="0" max="150" step="5" />
+              <span class="prop-num" id="dv-smoke-op-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">Drops at the camera focus. Violet is a SIGNAL and never
+            blocks; screening and napalm break line of sight, so units inside stop
+            shooting through it. <span id="dv-smoke-n">0 live</span>.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Fog</div>
         <div class="section-body">
           <div class="prop-row">
@@ -608,6 +630,52 @@ export function createDevPanel({
     flagWindV.textContent = flagWind.value;
   });
 
+  // ── Smoke ───────────────────────────────────────────────────────────────────
+  // Drops a column at whatever the camera is looking at, which is the only
+  // placement that makes sense before units can throw their own: you evaluate
+  // smoke by standing the camera where a player would and rotating around it.
+  const dropSmoke = (kind) => {
+    const v = rtsCamera?.getView?.();
+    const f = v?.focus;
+    app?.smoke?.spawn({ x: f?.x ?? 0, z: f?.z ?? 0, kind });
+  };
+  for (const kind of ["violet", "screen", "wreck", "napalm"]) {
+    $(`#dv-smoke-${kind}`).addEventListener("click", () => dropSmoke(kind));
+  }
+  $("#dv-smoke-clear").addEventListener("click", () => {
+    app?.smoke?.clear?.();
+    app?.napalm?.clear?.();
+  });
+
+  // A run flies along the direction the camera is FACING, which is the heading
+  // a player would mean by pointing at the ground and is also the one that
+  // reads best — the corridor it denies runs away from you into the screen.
+  $("#dv-napalm-run").addEventListener("click", () => {
+    const v = rtsCamera?.getView?.();
+    if (!v) return;
+    app?.napalm?.strike?.({
+      x: v.focus.x - Math.sin(v.yaw) * 35,
+      z: v.focus.z - Math.cos(v.yaw) * 35,
+      dirX: Math.sin(v.yaw), dirZ: Math.cos(v.yaw),
+    });
+  });
+
+  const smokeOp = $("#dv-smoke-op"), smokeOpV = $("#dv-smoke-op-v");
+  smokeOp.value = 100;
+  smokeOpV.textContent = "1.00";
+  smokeOp.addEventListener("input", () => {
+    const v = +smokeOp.value / 100;
+    smokeOpV.textContent = v.toFixed(2);
+    // Visual only — losOpacity is a separate number, so turning the look down
+    // to inspect the geometry does not quietly change what blocks.
+    if (app?.smoke) app.smoke.params.uOpacity.value = v;
+  });
+
+  const smokeN = $("#dv-smoke-n");
+  const smokeTimer = setInterval(() => {
+    smokeN.textContent = `${app?.smoke?.activeCount?.() ?? 0} live`;
+  }, 500);
+
   // ── Fog ─────────────────────────────────────────────────────────────────────
   const fogState = app?.fog?.state?.height ?? {};
   const distState = app?.fog?.state?.distance ?? {};
@@ -786,6 +854,7 @@ export function createDevPanel({
     setWorldName,
     getNavDebug: () => navBtn.classList.contains("checked"),
     dispose() {
+      clearInterval(smokeTimer);
       window.removeEventListener("keydown", onKey);
       root.remove(); style.remove();
     },

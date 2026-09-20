@@ -11,8 +11,17 @@ import * as THREE from "three";
 
 const ACQUIRE_MULT = 1.15; // auto-acquire slightly beyond weapon range
 
+/**
+ * How smoked a sight line has to be before a weapon gives up on it. A mature
+ * screening grenade reads 0.85 through its middle and about 0.17 at its rim,
+ * so 0.6 means the cloud has to be genuinely between the two — standing at the
+ * edge of someone else's smoke does not make you invisible.
+ */
+const SMOKE_BLIND = 0.6;
+
 export function createCombat({
-  units, structures, fx, structuresRenderer, projectiles, fire, craters, onDeath = () => {},
+  units, structures, fx, structuresRenderer, projectiles, fire, craters,
+  smoke = null, onDeath = () => {},
 }) {
   const _muzzle = new THREE.Vector3();
 
@@ -26,7 +35,17 @@ export function createCombat({
 
   const flat = (a, b) => Math.hypot(b.position.x - a.position.x, b.position.z - a.position.z);
 
-  /** Nearest valid enemy within acquire range, or null. */
+  /**
+   * Can `a` see `b`, or is there smoke in the way?
+   *
+   * Asked of the sim's smoke COLUMNS, never of the particles — the answer has
+   * to be the same on every machine and at every frame rate. Cheap enough to
+   * ask per candidate: about half a microsecond with all 24 columns live.
+   */
+  const canSee = (a, b) => !smoke || smoke.occlusionBetween(
+    a.position.x, a.position.z, b.position.x, b.position.z) < SMOKE_BLIND;
+
+  /** Nearest valid enemy within acquire range that is not behind smoke. */
   function acquire(e) {
     let best = null, bestD = Infinity;
     const reach = e.range * ACQUIRE_MULT;
@@ -35,7 +54,11 @@ export function createCombat({
       if (o.passive) continue;
       if (o.isAir && !e.canHitAir) continue; // jeeps can't shoot helicopters
       const d = flat(e, o);
-      if (d <= reach && d < bestD) { bestD = d; best = o; }
+      if (d > reach || d >= bestD) continue;
+      // Sight LAST: it is the most expensive test and the rarest to fail, so
+      // range and team throw out almost everything before it runs.
+      if (!canSee(e, o)) continue;
+      bestD = d; best = o;
     }
     return best;
   }
@@ -113,6 +136,16 @@ export function createCombat({
         // In range — hold position and shoot. haltMovement (not stop) so the
         // attack order survives; stop() would forget the target we're shooting.
         if (e.isMoving) e.haltMovement();
+      }
+
+      // Smoke rolling in between breaks the shot. An AUTO-acquired target is
+      // forgotten so the unit looks for someone it can actually see; an
+      // explicit attack order is KEPT — the player pointed at that thing, and
+      // silently retargeting would be the game overruling them. Either way it
+      // holds fire, which is what makes a screening grenade worth throwing.
+      if (!canSee(e, tgt)) {
+        if (!e.attackTarget) e.target = null;
+        continue;
       }
 
       if (d <= e.range && e.cooldown <= 0) {

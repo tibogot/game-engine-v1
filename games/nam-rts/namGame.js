@@ -69,6 +69,8 @@ import { createCombatFx } from "./combatFx.js";
 import { createCombat } from "./combat.js";
 import { createProjectiles } from "./projectiles.js";
 import { createFireSystem } from "./fireSystem.js";
+import { createSmokeField } from "./smokeField.js";
+import { createNapalmStrike } from "./napalmStrike.js";
 import { createCraterSystem } from "./craterSystem.js";
 import { createFogOfWar } from "./fogOfWar.js";
 import { createSimClock } from "./simClock.js";
@@ -243,7 +245,16 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   const units = createUnits({ app, navGrid, origin: structures.base.position });
   app.units = units;
 
-  const buildings = createBuildings({ app, structures, units, navGrid });
+  const buildings = createBuildings({
+    app, structures, units, navGrid,
+    // A relay coming online pops M18 VIOLET — the Apocalypse Now marker. Read
+    // through app because the smoke field is built further down; by the time a
+    // building can finish, the loop is running and it exists.
+    onComplete: (b) => {
+      if (b.typeKey !== "captureNode") return;
+      app.smoke?.spawn({ x: b.position.x, z: b.position.z, kind: "violet" });
+    },
+  });
   app.buildings = buildings;
 
   const fogOfWar = createFogOfWar({
@@ -301,6 +312,12 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   const fire = createFireSystem({ app });
   app.fire = fire;
 
+  // Smoke is the one effect that is also a RULE: a screening cloud really does
+  // break a firing line. Its columns are sim state, aged on the fixed clock,
+  // and combat asks them whether it can see. See smokeField.js.
+  const smoke = createSmokeField({ app });
+  app.smoke = smoke;
+
   onStatus("Loading crater decals…");
   const craters = await createCraterSystem({ app });
   app.craters = craters;
@@ -314,11 +331,18 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   app.projectiles = projectiles;
 
   const combat = createCombat({
-    units, structures, fx, structuresRenderer, projectiles, fire, craters,
+    units, structures, fx, structuresRenderer, projectiles, fire, craters, smoke,
     onDeath: (entity) => { app.selection?.remove?.(entity); },
   });
   combatRef = combat;
   app.combat = combat;
+
+  // Napalm is assembled from fire + smoke + craters + combat; it owns only the
+  // SHAPE of a run and what it does to whoever is standing in it.
+  const napalm = createNapalmStrike({
+    app, fire, smoke, craters, combat, units, structures,
+  });
+  app.napalm = napalm;
 
   // The opponent. Enemy waves muster off-map, march on the base, and fight — all
   // of it through the EXISTING combat system, which is team-based and never knew
@@ -513,9 +537,17 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     match.update(dt);                     // win/lose when enemy HQ match is on
     projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
     fire.update(dt, sim.simTime);         // burning wrecks
+    smoke.step(dt);                       // columns age here; the puffs do not
+    napalm.step(dt);                      // the run lands, burns, kills, scars
   };
 
+  // The RENDER clock the smoke puffs ride. Deliberately not sim.simTime: the
+  // sim can take several steps in one frame or none, and a puff that jumped
+  // would read as a stutter in something that should drift.
+  let renderTime = 0;
+
   const tick = (dt) => {
+    renderTime += dt;
     rtsCamera.update(dt);                 // input, at the real frame rate
     sim.advance(dt, simStep);
     fogOfWar.update(dt);                  // vision grid → GPU shroud texture
@@ -528,6 +560,7 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     healthBars.commit();
     selectionRings.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
+    smoke.render(renderTime, app.environment?.getLightDirection?.());
     baseFlag?.update(dt);                 // HQ flag cloth sim
     commandCard.tick();                   // live production bar + affordability
     resourceHud.update(resources, units); // supplies / harvesters / nodes left
@@ -535,6 +568,10 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     minimap.draw();
   };
   app.addPreRenderHook(tick);
+
+  // The console handle. Every subsystem already hangs off `app`, so one global
+  // covers all of them: __NAM.smoke.spawn({x, z, kind: "screen"}).
+  window.__NAM = app;
 
   onStatus("ready");
   return app;

@@ -116,7 +116,7 @@ function makeBuilding(app, type, x, z) {
   };
 }
 
-export function createBuildings({ app, structures, units, navGrid = null }) {
+export function createBuildings({ app, structures, units, navGrid = null, onComplete = null }) {
   const list = [];
 
   /**
@@ -175,7 +175,7 @@ export function createBuildings({ app, structures, units, navGrid = null }) {
       // Construction ramp — the builder raising it (buildingRenderer shows the rise).
       if (b.constructing) {
         b.built = Math.min(1, b.built + dt / b.type.buildTime);
-        if (b.built >= 1) b.constructing = false;
+        if (b.built >= 1) { b.constructing = false; onComplete?.(b); }
         continue; // no production, and no shooting, until it's up
       }
 
