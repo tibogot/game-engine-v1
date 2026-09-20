@@ -55,15 +55,36 @@ export function createDevPanel({
           <div class="prop-row">
             <span class="prop-label">Pan speed</span>
             <div class="prop-value">
-              <input type="range" id="dv-pan" min="0.2" max="3" step="0.1" />
+              <input type="range" id="dv-pan" min="10" max="160" step="5" />
               <span class="prop-num" id="dv-pan-v"></span>
             </div>
           </div>
           <div class="prop-row">
-            <span class="prop-label">Pitch</span>
+            <span class="prop-label">Pitch in</span>
             <div class="prop-value">
-              <input type="range" id="dv-pitch" min="25" max="85" step="1" />
-              <span class="prop-num" id="dv-pitch-v"></span>
+              <input type="range" id="dv-pitch-near" min="18" max="70" step="1" />
+              <span class="prop-num" id="dv-pitch-near-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Pitch out</span>
+            <div class="prop-value">
+              <input type="range" id="dv-pitch-far" min="25" max="85" step="1" />
+              <span class="prop-num" id="dv-pitch-far-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Max zoom</span>
+            <div class="prop-value">
+              <input type="range" id="dv-dist-max" min="40" max="200" step="5" />
+              <span class="prop-num" id="dv-dist-max-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Zoom ease</span>
+            <div class="prop-value">
+              <input type="range" id="dv-zoom-smooth" min="0" max="30" step="1" />
+              <span class="prop-num" id="dv-zoom-smooth-v"></span>
             </div>
           </div>
           <div class="prop-row">
@@ -73,7 +94,13 @@ export function createDevPanel({
               <span class="prop-num" id="dv-height-smooth-v"></span>
             </div>
           </div>
-          <div class="dv-hint">Height ease damps terrain follow while panning. 0 = snap (old feel).</div>
+          <div class="prop-row">
+            <span class="prop-label">Edge scroll</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-edge" type="button" aria-label="Edge scroll">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">Pitch goes from <b>in</b> to <b>out</b> across the zoom, CoH-style: horizontal among the units, top-down to read the map. Height ease damps terrain follow while panning; 0 = snap.</div>
         </div>
       </div>
 
@@ -415,13 +442,34 @@ export function createDevPanel({
     panV.textContent = (+pan.value).toFixed(1);
   });
 
-  const pitch = $("#dv-pitch"), pitchV = $("#dv-pitch-v");
-  pitch.value = Math.round(rtsCamera.params.pitch / DEG);
-  pitchV.textContent = `${pitch.value}°`;
-  pitch.addEventListener("input", () => {
-    rtsCamera.params.pitch = +pitch.value * DEG;
-    pitchV.textContent = `${pitch.value}°`;
-  });
+  const bindAngle = (id, key) => {
+    const el = $(`#${id}`), out = $(`#${id}-v`);
+    el.value = Math.round(rtsCamera.params[key] / DEG);
+    out.textContent = `${el.value}°`;
+    el.addEventListener("input", () => {
+      rtsCamera.params[key] = +el.value * DEG;
+      out.textContent = `${el.value}°`;
+    });
+  };
+  bindAngle("dv-pitch-near", "pitchNear");
+  bindAngle("dv-pitch-far", "pitchFar");
+
+  const bindNum = (id, key, digits = 0) => {
+    const el = $(`#${id}`), out = $(`#${id}-v`);
+    el.value = rtsCamera.params[key];
+    out.textContent = (+el.value).toFixed(digits);
+    el.addEventListener("input", () => {
+      rtsCamera.params[key] = +el.value;
+      out.textContent = (+el.value).toFixed(digits);
+    });
+  };
+  bindNum("dv-dist-max", "distMax");
+  bindNum("dv-zoom-smooth", "zoomSmooth");
+
+  const edgeBtn = $("#dv-edge");
+  const setEdge = (on) => { edgeBtn.classList.toggle("checked", !!on); rtsCamera.params.edgeScroll = !!on; };
+  setEdge(rtsCamera.params.edgeScroll);
+  edgeBtn.addEventListener("click", () => setEdge(!edgeBtn.classList.contains("checked")));
 
   const heightSmooth = $("#dv-height-smooth"), heightSmoothV = $("#dv-height-smooth-v");
   heightSmooth.value = rtsCamera.params.heightSmooth;
