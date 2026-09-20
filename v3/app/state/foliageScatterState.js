@@ -190,15 +190,25 @@ export const FOLIAGE_PRESETS = {
 
 // castShadow: tall plants ground themselves with a shadow; ground cover is
 // too low for one to read and is the most numerous, so it does not cast.
+/*
+ * The eight ground plants, picked for a South-East Asian setting rather than a
+ * temperate one — the card ferns, banana, nipa and sugar cane earn their slots;
+ * plume reed, pampas and typha read as European riverbank and were using three
+ * of the eight for one silhouette between them.
+ *
+ * NOTE these are not saved per project (projectIO writes `foliageField` with
+ * `types` stripped), so this list IS the plant set for every map. Change the
+ * ORDER and every painted density channel shifts with it — channel N is type N.
+ */
 const TYPE_DEFAULTS = [
-  { name: "Fern", preset: "fern", castShadow: true },
-  { name: "Bush", preset: "bush", castShadow: true },
-  { name: "Cattails", preset: "typha", castShadow: true },
-  { name: "Plume reeds", preset: "plumeReed", castShadow: true },
+  { name: "Card fern",   preset: "cardFern",    castShadow: true },
+  { name: "Bush",        preset: "bush",        castShadow: true },
+  { name: "Nipa palm",   preset: "nipaPalm",    castShadow: true },
+  { name: "Banana",      preset: "banana",      castShadow: true },
   { name: "Ground cover", preset: "groundCover", castShadow: false },
-  { name: "Reeds", preset: "reeds", castShadow: true },
-  { name: "Pampas", preset: "pampas", castShadow: true },
-  { name: "Bracken", preset: "bracken", castShadow: true },
+  { name: "Reeds",       preset: "reeds",       castShadow: true },
+  { name: "Sugar cane",  preset: "sugarCane",   castShadow: true },
+  { name: "Giant fern",  preset: "giantFern",   castShadow: true },
 ];
 
 /**
@@ -216,6 +226,25 @@ const TYPE_DEFAULTS = [
  * own, not a plant). Slot 0 stays susuki so projects painted before the field
  * went multi-type keep the plant they painted.
  */
+/**
+ * THE GROUND-FOLIAGE FIELD.
+ *
+ * Was 192 m at 256 a side (0.75 m apart) — a walking camera's numbers, and
+ * badly wrong for anything you look ACROSS. MEASURED on nam-rts at mid zoom:
+ * the camera sits 91 m up and the ground it can see runs from 53 m to 251 m
+ * away. A 192 m tile therefore WRAPS inside the view, and the field's own fade
+ * (70-95 m) emptied the screen a third of the way up — the band then sweeps
+ * across as you pan, which is exactly the "vegetation appears and changes"
+ * that gets noticed.
+ *
+ * Same trade the tall plants already made: grow the tile and the spacing
+ * TOGETHER so the slot count barely moves. 384 m at 288 a side is 1.33 m apart
+ * — 4x the area for 27% more slots — and at 53 m you cannot resolve 0.75 m
+ * spacing anyway, so nothing is lost where it could be seen. `density` carries
+ * the apparent thickness from there.
+ */
+export const FOLIAGE_FIELD = { tileSize: 384, plantsPerSide: 288 };
+
 export const SUSUKI_FIELD = { tileSize: 400, plantsPerSide: 288 };
 export const TALL_PLANT_COUNT = 3;
 

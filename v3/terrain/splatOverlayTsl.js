@@ -394,8 +394,40 @@ export function createSplatOverlay(
         // are walls, and turning a wall texture is not what the slider means.
         // uv' = (c·x − s·z, s·x + c·z)
         const layerUV = layerSlots.map((slot) => {
-          const p = positionWorld.xz.mul(invWS).mul(slot.uUVScale);
-          if (!slot.uUVRot) return p;
+          let p = positionWorld.xz.mul(invWS).mul(slot.uUVScale);
+
+          /*
+           * CONTOUR ALIGNMENT — for sand, mainly.
+           *
+           * Beach ripples are cut by swash running up the sand and back, so they
+           * lie PARALLEL TO THE WATERLINE. A layer tiled in fixed world XZ has
+           * them running one way over the whole map, which is right on whichever
+           * stretch of coast happens to face that way and wrong on every other,
+           * and obviously wrong around a bay.
+           *
+           * The beach slopes toward the water, so the terrain CONTOUR is the
+           * shore direction. `geomNormal.xz` points downhill on a heightfield,
+           * so turning its perpendicular onto +u lines the ripples up with the
+           * shore everywhere, round curves included, for a few ALU and no taps.
+           *
+           * Blended toward identity where the ground is flat: with no gradient
+           * there is no contour, and the direction would be noise.
+           */
+          if (slot.uContourAlign && geomNormal !== null) {
+            const g = vec2(vec3(geomNormal).x, vec3(geomNormal).z);
+            const gLen = length(g);
+            const dn = g.div(max(gLen, float(1e-4)));
+            const w = slot.uContourAlign.mul(smoothstep(float(0.03), float(0.14), gLen));
+            // (cos, sin) turning the contour onto +u. Normalising the blend
+            // keeps it a rotation at every w, so nothing stretches on the way.
+            const cs = normalize(mix(vec2(1, 0), vec2(dn.y, dn.x), w));
+            p = vec2(
+              cs.x.mul(p.x).sub(cs.y.mul(p.y)),
+              cs.y.mul(p.x).add(cs.x.mul(p.y)),
+            );
+          }
+
+          if (!slot.uUVRot) return p.toVar();
           const cs = slot.uUVRot;
           return vec2(
             cs.x.mul(p.x).sub(cs.y.mul(p.y)),

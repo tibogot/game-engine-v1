@@ -193,6 +193,11 @@ export class TextureLibrary {
       // 1 = shade this layer like the procedural rock props (cliffRockTsl),
       // so a cliff and a boulder read as the same stone. Compiled per layer.
       uRockShade: uniform(0.0),
+      // 0..1 — turn this layer's projection to follow the terrain CONTOUR
+      // instead of world XZ. Sand wants it: beach ripples run parallel to the
+      // waterline, and a fixed world direction only agrees with the shore on
+      // whichever stretch happens to face that way. See splatOverlayTsl.
+      uContourAlign: uniform(0.0),
     }));
     for (const s of this.slots) s.uvRotation = 0;
   }
@@ -617,6 +622,13 @@ export class TextureLibrary {
   /** Albedo multiplier as "#rrggbb" (sRGB, like a colour input). */
   setTint(i, hex)     { this.slotUniforms[i].uTint.value.set(hex); }
   getTintHex(i)       { return `#${this.slotUniforms[i].uTint.value.getHexString()}`; }
+  /** 0 = tile in world XZ, 1 = follow the terrain contour (see the uniform). */
+  setContourAlign(i, v) {
+    const a = Math.min(1, Math.max(0, Number(v) || 0));
+    this.slots[i].contourAlign = a;
+    this.slotUniforms[i].uContourAlign.value = a;
+  }
+
   /** Projection turn in degrees, any value (stored wrapped to 0..360). */
   setUVRotation(i, deg) {
     const d = ((Number(deg) % 360) + 360) % 360;

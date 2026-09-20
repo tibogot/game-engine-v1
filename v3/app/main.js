@@ -106,7 +106,7 @@ import { FoliageScatterSystem, bakeFoliageThumbnail } from "../render/foliage/fo
 import { ScatterDensity } from "../render/scatter/scatterDensity.js";
 import { AmbientFxSystem } from "../render/ambient/ambientFxSystem.js";
 import { createAmbientFxState, AMBIENT_EFFECT_COUNT } from "./state/ambientFxState.js";
-import { createFoliageScatterState, createSusukiPlantState, SUSUKI_FIELD, TALL_PLANT_COUNT } from "./state/foliageScatterState.js";
+import { createFoliageScatterState, createSusukiPlantState, FOLIAGE_FIELD, SUSUKI_FIELD, TALL_PLANT_COUNT } from "./state/foliageScatterState.js";
 import { createFlowerState } from "./state/flowerState.js";
 import { buildFlowerPanel } from "../ui/buildFlowerPanel.js";
 import { createFlowerTintShading } from "../render/grass/flowerTintTsl.js";
@@ -1841,6 +1841,8 @@ export async function startV3App(opts = {}) {
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
         terrainSurface:   terrainSurfaceDesc(),
+        tileSize:         FOLIAGE_FIELD.tileSize,
+        plantsPerSide:    FOLIAGE_FIELD.plantsPerSide,
         fs:               foliageScatterState,
         gp:               grassState,
       });
@@ -8501,7 +8503,8 @@ export async function startV3App(opts = {}) {
     else if (ambientFxState.enabled) void ensureAmbientFxBuilt();
     ambientFxUi?.rebuild();
 
-    if (d.foliagePaint?.length === foliageDensity.tex.image.data.length) {
+    // Against the WHOLE snapshot, not page 0 — see ScatterDensity.snapshotLength.
+    if (d.foliagePaint?.length === foliageDensity.snapshotLength) {
       foliageDensity.restoreSnapshot(d.foliagePaint);
       if (foliageDensity.hasData) void ensureFoliageScatterBuilt();
     } else if (foliageDensity.hasData) {
