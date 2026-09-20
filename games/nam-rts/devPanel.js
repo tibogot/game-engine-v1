@@ -99,10 +99,10 @@ export function createDevPanel({
           <div class="prop-row">
             <span class="prop-label">Enabled</span>
             <div class="prop-value">
-              <button class="prop-toggle checked" id="dv-fow" type="button" aria-label="Fog of war">${CHECK_SVG}</button>
+              <button class="prop-toggle" id="dv-fow" type="button" aria-label="Fog of war">${CHECK_SVG}</button>
             </div>
           </div>
-          <div class="dv-hint">CoH-style shroud. Enemy units hidden until scouted.</div>
+          <div class="dv-hint">CoH-style shroud. Enemy units hidden until scouted. <b>Off by default</b> while the map is being built — turn it on to play.</div>
         </div>
       </div>
 

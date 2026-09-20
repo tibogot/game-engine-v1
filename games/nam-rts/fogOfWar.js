@@ -56,7 +56,7 @@ function boxBlur(src, size, radius) {
   return dst;
 }
 
-export function createFogOfWar({ app, units, structures, buildings, getRadioIntel = () => false }) {
+export function createFogOfWar({ app, units, structures, buildings, getRadioIntel = () => false, enabled: startEnabled = false }) {
   const map = app.worldSize ?? 2048;
   const half = map * 0.5;
   const cell = map / TEX_RES;
@@ -82,7 +82,11 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
   miniCanvas.width = miniCanvas.height = TEX_RES;
   const miniCtx = miniCanvas.getContext("2d");
 
-  let enabled = true;
+  // OFF by default. The shroud hides the map you are building, and while this
+  // game is being BUILT that is almost always the wrong trade — you want to see
+  // the terrain, the vegetation and the props you just placed. It is one click
+  // in the dev panel, and a match that wants it can ask for it at construction.
+  let enabled = startEnabled;
 
   const idx = (c, r) => r * cols + c;
   const inGrid = (c, r) => c >= 0 && r >= 0 && c < cols && r < rows;
@@ -313,6 +317,9 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     post = createPostModifier(appRef.camera);
     appRef.postFx?.setSceneColorModifier?.((color) => post.node(color));
     post.syncCamera(appRef.camera);
+    // The modifier is created enabled; it has to learn the state it missed,
+    // because setEnabled may well have run before there was a `post` to tell.
+    post.setEnabled(enabled);
   }
 
   return {
