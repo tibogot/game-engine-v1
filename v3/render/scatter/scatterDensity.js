@@ -190,6 +190,16 @@ export class ScatterDensity {
     }
   }
 
+  /**
+   * Bytes a snapshot occupies — EVERY page, not one.
+   *
+   * Callers validating a saved blob before restoring it must compare against
+   * this, not against `tex.image.data.length`: `tex` is page 0 alone, so with
+   * more than four channels the two never match. That mismatch silently threw
+   * away the ground-foliage paint of every project on load.
+   */
+  get snapshotLength() { return this.res * this.res * 4 * this.pages; }
+
   /** Every page, end to end — one blob for the project file and for undo. */
   getSnapshot() {
     const page = this.res * this.res * 4;
