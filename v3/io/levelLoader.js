@@ -87,7 +87,14 @@ export function createLevelLoader(app, {
       return new Promise(() => {});
     }
     onStatus(`Loading ${name}…`);
-    await app.loadProjectFromBuffer(buf);
+    // APPLY the look when the level carries one. `worldLook` defaults to
+    // startV3App's `projectWorldLook`, which is OFF for games — so without this
+    // the level's sky, sun and fog were decoded, reported through `hasLook`,
+    // and then thrown away. The game then skipped its own fallback fog BECAUSE
+    // hasLook said the level had its own, and the result was a map with no
+    // atmosphere at all: nam-valley booted with both fogs off and the module's
+    // default sun, and had done since the day it started carrying a look.
+    await app.loadProjectFromBuffer(buf, { worldLook: hasLook });
     return finish(name, hasLook);
   }
 

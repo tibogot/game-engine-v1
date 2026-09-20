@@ -85,8 +85,24 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // maxFar 300: the editor default (80) is tuned for a ground-level camera — the
   // RTS camera orbits 50-280 m up, so at 80 every shadow faded out before the
   // player could see it. 300 covers the whole zoom range (DIST_MAX 280).
+  // DEFAULT: cascades OFF, one shadow frustum fitted to the ground the camera
+  // can actually see (worldEnvironment fitDirectionalShadowToView). MEASURED on
+  // this map with 2 cascades at 2048:
+  //
+  //     cascade 0  +/-15.1 m  0.015 m/texel  covers the first 10 m of view
+  //     cascade 1  +/-415  m  0.405 m/texel  covers 10-300 m
+  //     visible ground at the default zoom and beyond: 23 - 141 m
+  //
+  // The sharp cascade is aimed entirely at ground this camera cannot see — it
+  // never gets nearer than 8 m to the ground, and 23 m at the zoom you play at
+  // — so EVERY pixel on screen was shaded by the 40 cm/texel one. A fitted
+  // frustum gives 0.061-0.195 m/texel across the zoom range, in one pass
+  // instead of two: 114 -> 94 draws.
+  //
+  // `?csm=2` (or 1/3/4) brings the cascades back to A/B against this.
   const csmParam = Number(new URLSearchParams(location.search).get("csm"));
   const cascades = csmParam >= 1 && csmParam <= 4 ? Math.round(csmParam) : 2;
+  const fittedShadows = !(csmParam >= 1 && csmParam <= 4);
   // shadowNormalBias 0.12 (editor default 0.02): this game is all hard-surface
   // structures with big FLAT decks, and a flat up-facing face self-shadows into
   // diagonal stripes at the editor's bias. Terrain and foliage are curved enough
@@ -137,6 +153,11 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // 40 m — the whole map turns white and reads as a failed load. A level that
   // carries a look (worldEnvironment.exportLook, saved in the .v3proj) has its
   // fog authored against its own heights, so leave it alone.
+  // Cascades are a GAME decision, not a map one — worldEnvironment.exportLook
+  // deliberately leaves shadow quality out of the .v3proj, so it has to be said
+  // here rather than saved with the level.
+  if (fittedShadows) app.shadows?.setEnabled?.(false);
+
   if (!boot.hasLook) {
     app.fog?.setHeight({
       enabled: true,
