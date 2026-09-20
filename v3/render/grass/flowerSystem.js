@@ -76,18 +76,19 @@ export class FlowerSystem {
    *   grassDensityTex   masked grass density (.x) — flowers rise above painted grass
    *   splatTex          SplatMap.tex — for the "grows on paint layer" rule
    *   riverNearTex      River v2 distance field (.r = distance² in UV), or null
+   *   waterMapTex       waterSurfaceMap (.r = water surface Y), or null
    *   windTex           shared wind texture (grass / susuki)
    *   worldSize         terrain edge (m)
    *   fp                flower state (createFlowerState shape)
    *   gp                grassState (wind params, blade height)
    *   tileSize, plantsPerSide  wrap tile (default 192 m / 384 ≈ 147k slots, 0.5 m apart)
    */
-  constructor({ scene, renderer, heightTex, terrainNormalTex, densityTex, grassDensityTex, splatTex, riverNearTex = null, windTex, worldSize, fp, gp, tileSize = 192, plantsPerSide = 384 }) {
+  constructor({ scene, renderer, heightTex, terrainNormalTex, densityTex, grassDensityTex, splatTex, riverNearTex = null, waterMapTex = null, windTex, worldSize, fp, gp, tileSize = 192, plantsPerSide = 384 }) {
     const field = (this.field = new ScatterField({
       scene, renderer, name: "Flowers",
       typeCount: FLOWER_TYPE_COUNT, lods: LODS, rows: ROWS, ruleRow: RULE_ROW,
       worldSize, tileSize, plantsPerSide,
-      heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex, windTex, grassDensityTex,
+      heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex, waterMapTex, windTex, grassDensityTex,
       cullRadius: 2,
     }));
     this.group = field.group;

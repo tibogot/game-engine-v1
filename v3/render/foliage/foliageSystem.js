@@ -159,7 +159,8 @@ export class FoliageScatterSystem {
   /**
    * @param {object} o
    *   scene, renderer, worldSize
-   *   heightTex, terrainNormalTex, densityTex, grassDensityTex, splatTex, riverNearTex, windTex
+   *   heightTex, terrainNormalTex, densityTex, grassDensityTex, splatTex, riverNearTex,
+   *   waterMapTex, windTex
    *   fs  foliage state (createFoliageScatterState shape)
    *   gp  grassState — the shared wind and blade height
    *   tileSize, plantsPerSide  wrap tile (192 m / 256 ≈ 65k slots, 0.75 m apart:
@@ -167,7 +168,7 @@ export class FoliageScatterSystem {
    */
   constructor({
     scene, renderer, heightTex, terrainNormalTex, densityTex, grassDensityTex, splatTex,
-    riverNearTex = null, windTex, worldSize, fs, gp, tileSize = 192, plantsPerSide = 256,
+    riverNearTex = null, waterMapTex = null, windTex, worldSize, fs, gp, tileSize = 192, plantsPerSide = 256,
     name = "Foliage", typeCount = FOLIAGE_TYPE_COUNT, nearFade = 0.9,
     terrainSurface = null,
   }) {
@@ -178,7 +179,7 @@ export class FoliageScatterSystem {
       scene, renderer, name,
       typeCount, lods: FOLIAGE_LODS, rows: ROWS, ruleRow: RULE_ROW,
       worldSize, tileSize, plantsPerSide,
-      heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex, windTex, grassDensityTex,
+      heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex, waterMapTex, windTex, grassDensityTex,
       terrainSurface,  // stand on the mesh, like the grass does
       cullRadius: 5,   // a jungle fern is metres across, not centimetres
       shadows: true,   // tall plants cast (per type, near cascades only)

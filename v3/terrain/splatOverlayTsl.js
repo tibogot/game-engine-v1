@@ -405,26 +405,33 @@ export function createSplatOverlay(
            * stretch of coast happens to face that way and wrong on every other,
            * and obviously wrong around a bay.
            *
-           * The beach slopes toward the water, so the terrain CONTOUR is the
-           * shore direction. `geomNormal.xz` points downhill on a heightfield,
-           * so turning its perpendicular onto +u lines the ripples up with the
-           * shore everywhere, round curves included, for a few ALU and no taps.
+           * The beach slopes toward the water, so a ripple is an ISO-HEIGHT
+           * BAND: v is simply the terrain's own height.
            *
-           * Blended toward identity where the ground is flat: with no gradient
-           * there is no contour, and the direction would be noise.
+           * The obvious version of this — rotate the world-XZ UV per pixel so
+           * its u axis follows the contour — does NOT work, and fails in a way
+           * worth recording: you cannot comb a curved vector field into a
+           * coordinate unless that field is a gradient. Rotating by an angle
+           * that itself turns through space makes the mapping swirl, and on a
+           * rounded beach, where the contour direction turns about the bay, it
+           * draws concentric CIRCLES.
+           *
+           * Contours are the level sets of height, so here the integral does
+           * exist and it is just the height. Using it directly gives bands that
+           * follow every curve exactly, and they bunch where the beach steepens
+           * — which is what real swash marks do. One tap, no trigonometry.
            */
-          if (slot.uContourAlign && geomNormal !== null) {
-            const g = vec2(vec3(geomNormal).x, vec3(geomNormal).z);
-            const gLen = length(g);
-            const dn = g.div(max(gLen, float(1e-4)));
-            const w = slot.uContourAlign.mul(smoothstep(float(0.03), float(0.14), gLen));
-            // (cos, sin) turning the contour onto +u. Normalising the blend
-            // keeps it a rotation at every w, so nothing stretches on the way.
-            const cs = normalize(mix(vec2(1, 0), vec2(dn.y, dn.x), w));
-            p = vec2(
-              cs.x.mul(p.x).sub(cs.y.mul(p.y)),
-              cs.y.mul(p.x).add(cs.x.mul(p.y)),
-            );
+          if (slot.uContourAlign && terrainNormals) {
+            const hW = terrainNormals.surfaceAt(splatUV).w.mul(float(MAX_HEIGHT));
+            // u only has to break up repetition ALONG the band. A 45 degree
+            // world diagonal avoids degenerating on both N-S and E-W coasts.
+            const along = p.x.add(p.y).mul(float(0.7071));
+            // Bands follow the tiling slider like every other axis does. The
+            // gain is what makes one tile of RISE cover about as much ground as
+            // one tile ACROSS on a beach-grade slope, so the texture stays
+            // roughly square instead of smearing into stripes.
+            const across = hW.mul(invWS).mul(slot.uUVScale).mul(float(20.0));
+            p = mix(p, vec2(along, across), slot.uContourAlign);
           }
 
           if (!slot.uUVRot) return p.toVar();

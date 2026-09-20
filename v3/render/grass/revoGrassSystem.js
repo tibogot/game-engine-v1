@@ -108,6 +108,7 @@ export class RevoGrassSystem {
    * @param {THREE.Texture} o.terrainNormalTex  .xyz world normal
    * @param {THREE.Texture} o.densityTex  painted grass density, already masked
    * @param {THREE.Texture} o.bladeHeightTex   painted blade height (.x/128)
+   * @param {THREE.Texture} o.waterMapTex  waterSurfaceMap (.r = water surface Y), or null
    * @param {object} o.pushField          { textureNode, center, worldSize }
    * @param {object} o.terrainSurface     the clipmap description (see clipmapGroundY)
    * @param {object} o.terrainShadow      { shade(colorNode, vis), visibilityHere() }
@@ -116,7 +117,7 @@ export class RevoGrassSystem {
    */
   constructor({
     scene, renderer, name = "RevoGrass", worldSize,
-    heightTex, terrainNormalTex, densityTex, bladeHeightTex,
+    heightTex, terrainNormalTex, densityTex, bladeHeightTex, waterMapTex = null,
     pushField = null, terrainSurface = null, terrainShadow = null,
     rp, gp,
   }) {
@@ -127,6 +128,14 @@ export class RevoGrassSystem {
     this._terrainNormalTex = terrainNormalTex;
     this._densityTex = densityTex;
     this._bladeHeightTex = bladeHeightTex;
+    // No water map: one texel far below any terrain, so the dry test below is a
+    // constant 1 for the cost of a 1x1 tap.
+    if (!waterMapTex) {
+      const dry = new THREE.DataTexture(new Float32Array([-1e4, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+      dry.needsUpdate = true;
+      waterMapTex = dry;
+    }
+    this._waterMapTex = waterMapTex;
     this._pushField = pushField;
     this._terrainSurface = terrainSurface;
     this._terrainShadow = terrainShadow;
@@ -326,9 +335,16 @@ export class RevoGrassSystem {
       );
       const inMap = step(float(0), terrainUV.x).mul(step(terrainUV.x, float(1)))
         .mul(step(float(0), terrainUV.y)).mul(step(terrainUV.y, float(1)));
+      // Nothing grows under water: .r of the water-surface map is the water's
+      // world Y here (far below any terrain where there is none), so one tap
+      // against the ground this blade stands on keeps the field out of the
+      // river. Soft over the first 0.4 m of bank so it thins toward the water
+      // rather than ending on a drawn line.
+      const waterY = texture(this._waterMapTex, terrainUV).r;
+      const dry = smoothstep(waterY.add(0.02), waterY.add(0.42), groundY);
       const keep = step(
         hash(instanceIndex.add(60493)),
-        painted.mul(u.uDensity).mul(slopeProb),
+        painted.mul(u.uDensity).mul(slopeProb).mul(dry),
       ).mul(inMap);
 
       const stochastic = computeStochasticKeep(

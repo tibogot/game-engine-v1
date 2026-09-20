@@ -301,6 +301,10 @@ export class HybridGrassSystem {
     cliffMode = false, //           sample cliff surface instead of terrain
     cliffHeightTex = null, //       RGBA float: .x cliff Y (-9999 invalid), .yzw normal
     cliffDensityTex = null, //      painted cliff grass density (.x)
+    // Optional (v3): the water-surface map, .r = water world Y at this XZ and
+    // far below any terrain where there is none. Blades standing under it are
+    // dropped, so a river never grows a lawn down its middle.
+    waterMapTex = null,
     // Optional terrain self-shadow hooks from v3 (render/lighting/terrainSunShadow.js):
     // { shade(colorNode, vis), visibilityHere() }. Absent in v2 — nothing changes.
     terrainShadow = null,
@@ -471,6 +475,7 @@ export class HybridGrassSystem {
     this._cliffMode = !!cliffMode && !!cliffHeightTex && !!cliffDensityTex;
     this._cliffHeightTex = cliffHeightTex;
     this._cliffDensityTex = cliffDensityTex;
+    this._waterMapTex = waterMapTex;
     this._normalMode = normalMode;
     this._crossed = crossed;
     this._crossFadeR0 = crossFadeR0;
@@ -586,7 +591,17 @@ export class HybridGrassSystem {
       }
       const worldPos = vec3(worldX, terrainY, worldZ);
       const densityHash = hash(instanceIndex.add(7919));
-      const densityKeep = step(densityHash, u.uGrassDensity.mul(painted)).mul(
+      // Nothing grows under water. Soft over the first 0.4 m of bank so the
+      // field thins toward the waterline instead of ending on a drawn line.
+      // A cliff ring is exempt: its surface is not the terrain at all.
+      const dryKeep = this._waterMapTex && !this._cliffMode
+        ? smoothstep(
+            texture(this._waterMapTex, terrainUV).r.add(0.02),
+            texture(this._waterMapTex, terrainUV).r.add(0.42),
+            terrainY,
+          )
+        : float(1);
+      const densityKeep = step(densityHash, u.uGrassDensity.mul(painted).mul(dryKeep)).mul(
         hasDensity,
       );
 

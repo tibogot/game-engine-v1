@@ -966,8 +966,16 @@ export async function startV3App(opts = {}) {
   // Paint layers flagged "Blocks trees" (a path, a shore) keep tree and
   // foliage painting off them. Placement only: trees already standing there
   // are never deleted. Lazy — textureLib/splatMap are read at call time.
+  //
+  // Water blocks them too, and for a plainer reason: a brush swept across a
+  // valley does not know the river is there, so it plants trunks on the
+  // riverbed with the water drawn straight through them. waterLevelAt covers
+  // the ocean, lakes and River v2 alike, and is -Infinity on dry ground.
+  // 0.25 m of slack leaves the very edge of the bank plantable.
   const isVegetationBlocked = (wx, wz) => {
     if (splatMap.holeAt(wx, wz) >= 0.35) return true;
+    const wl = waterLevelAt(wx, wz);
+    if (wl > -Infinity && wl > terrainStoreAdapter.getWorldHeight(wx, wz) - 0.25) return true;
     const flags = textureLib.blocksTreesFlags();
     if (!flags.some(Boolean)) return false;
     return splatMap.flaggedWeightAt(wx, wz, flags) > 0.45;
@@ -1519,6 +1527,7 @@ export async function startV3App(opts = {}) {
       // they never float over a crest the coarse mesh cuts under.
       terrainSurface:   terrainSurfaceDesc(),
       bladeHeightTex:   grassTerrainData.bladeHeightTex,
+      waterMapTex:      waterSurfaceMap.texture,   // nothing grows under water
       pushField:        grassPush.field,
       ...extraShared,
     };
@@ -1605,6 +1614,7 @@ export async function startV3App(opts = {}) {
         terrainNormalTex: grassTerrainData.terrainNormalTex,
         densityTex:       grassTerrainData.grassDensityMaskedTex,
         bladeHeightTex:   grassTerrainData.bladeHeightTex,
+        waterMapTex:      waterSurfaceMap.texture,   // nothing grows under water
         pushField:        grassPush.field,
         terrainSurface:   terrainSurfaceDesc(),
         terrainShadow:    { shade: terrainShade, visibilityHere: terrainSunVisibilityHere },
@@ -1744,6 +1754,7 @@ export async function startV3App(opts = {}) {
         grassDensityTex:  grassTerrainData.grassDensityMaskedTex,
         splatTex:         splatMap.tex,
         riverNearTex:     riverV2System?.nearTexture ?? null,
+        waterMapTex:      waterSurfaceMap.texture,   // nothing grows under water
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
         terrainSurface:   terrainSurfaceDesc(),
@@ -1782,6 +1793,7 @@ export async function startV3App(opts = {}) {
         grassDensityTex:  grassTerrainData.grassDensityMaskedTex,
         splatTex:         splatMap.tex,
         riverNearTex:     riverV2System?.nearTexture ?? null,
+        waterMapTex:      waterSurfaceMap.texture,   // nothing grows under water
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
         fp:               flowerState,
@@ -1838,6 +1850,7 @@ export async function startV3App(opts = {}) {
         grassDensityTex:  grassTerrainData.grassDensityMaskedTex,
         splatTex:         splatMap.tex,
         riverNearTex:     riverV2System?.nearTexture ?? null,
+        waterMapTex:      waterSurfaceMap.texture,   // nothing grows under water
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
         terrainSurface:   terrainSurfaceDesc(),
@@ -11124,6 +11137,10 @@ export async function startV3App(opts = {}) {
       sampleRiverFlowAt: (x, y, z) => riverV2System?.sampleFlowAt(x, y, z) ?? null,
       riverFlowForceAt: (x, y, z, drag) => riverV2System?.flowForceAt(x, y, z, drag) ?? null,
       get grassState() { return grassState; },
+      // Push edits to grassState / revoGrassState into the live systems, the
+      // way the editor panel does — so a game page can A/B the field without
+      // an editor open. Rebuilds the tile if the blade or the tile changed.
+      syncGrass: () => syncGrassUniforms(),
       get grassRings() { return grassRings; },
       get grassTintRT() { return grassTintRT; },
       get cliffGrassRings() { return cliffGrassRings; },

@@ -71,6 +71,8 @@ export class ScatterField {
    *                     four types (four fit in one RGBA page)
    *   splatTex          SplatMap.tex — the "grows on paint layer" rule
    *   riverNearTex      River v2 distance field (.r = distance² in UV), or null
+   *   waterMapTex       waterSurfaceMap (.r = water surface world Y, NO_WATER_Y
+   *                     where dry), or null — nothing grows under water
    *   windTex           shared wind texture (grass / susuki / flowers)
    *   grassDensityTex   masked grass density (.x), or null — plants rise above painted grass
    *   parts             meshes per draw that show the same plants (default 1)
@@ -90,6 +92,7 @@ export class ScatterField {
     scene, renderer, name = "Scatter", typeCount, lods = 2, parts = 1, rows, ruleRow = null,
     worldSize, tileSize = 192, plantsPerSide = 384,
     heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex = null, windTex,
+    waterMapTex = null,
     grassDensityTex = null, cullRadius = 2, fadeKeepGain = 1.6, slopeBand = 0.12, shadows = false,
     nearFade = 0.9, onKeep = null,
     // The clipmap description ({ centerXZ, baseStep, levels, halfCells,
@@ -123,6 +126,11 @@ export class ScatterField {
     const noRiver = new THREE.DataTexture(new Float32Array([1e9, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
     noRiver.needsUpdate = true;
     const riverTex = riverNearTex ?? noRiver;
+    // No water map: one texel far below any terrain, so the dry test is a
+    // constant 1 and costs a single tap of a 1×1 texture.
+    const noWater = new THREE.DataTexture(new Float32Array([-1e4, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+    noWater.needsUpdate = true;
+    const waterTex = waterMapTex ?? noWater;
     const densityPages = Array.isArray(densityTex) ? densityTex : [densityTex];
 
     this.typeRows = Array.from({ length: typeCount * rows }, () => new THREE.Vector4());
@@ -260,7 +268,27 @@ export class ScatterField {
         texture(splatTex, terrainUV).depth(int(0)), texture(splatTex, terrainUV).depth(int(1)),
         texture(riverTex, terrainUV).r, float(worldSize),
       );
-      const stochasticKeep = step(hash(instanceIndex.add(31337)), near.mul(fadeKeepGain).min(1).mul(slopeProb).mul(bandKeep));
+      /*
+       * NOTHING GROWS UNDER WATER. The rules above can say "within N metres of
+       * a river", which is what a reed bed wants, but nothing said "and not IN
+       * it" — so a painted band across a valley put a hedge straight down the
+       * middle of the channel, plants standing on the riverbed with the water
+       * drawn through them.
+       *
+       * The water-surface map already holds the answer: .r is the water's world
+       * Y at this XZ, or far below any terrain where there is none, on the same
+       * worldXZ/worldSize + 0.5 UV as every other world map here. So the test is
+       * one tap and one compare against the ground the plant is standing on.
+       *
+       * Soft over the first 0.6 m of bank rather than hard at the waterline:
+       * folded into the stochastic keep, it thins out toward the water instead
+       * of ending on a drawn line, and it still leaves the margin for the reeds
+       * and the nipa palm that are meant to have their feet wet.
+       */
+      const waterY = texture(waterTex, terrainUV).r;
+      const dryKeep = smoothstep(waterY.add(0.05), waterY.add(0.65), terrainY);
+      const stochasticKeep = step(hash(instanceIndex.add(31337)),
+        near.mul(fadeKeepGain).min(1).mul(slopeProb).mul(bandKeep).mul(dryKeep));
 
       // RIGHT AT THE CAMERA a plant is a wall of leaves, and a leaf turned
       // edge-on is a flat sheet: it draws as a hairline streak across the

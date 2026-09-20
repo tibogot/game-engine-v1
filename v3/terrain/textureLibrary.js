@@ -199,7 +199,7 @@ export class TextureLibrary {
       // whichever stretch happens to face that way. See splatOverlayTsl.
       uContourAlign: uniform(0.0),
     }));
-    for (const s of this.slots) s.uvRotation = 0;
+    for (const s of this.slots) { s.uvRotation = 0; s.contourAlign = 0; }
   }
 
   // ── GPU upload ─────────────────────────────────────────────────────────────
@@ -683,6 +683,7 @@ export class TextureLibrary {
         triplanar: u.uTriplanar.value > 0.5,
         tint:      this.getTintHex(i),
         uvRotation: s.uvRotation,
+        contourAlign: s.contourAlign ?? 0,
         rockShade: u.uRockShade.value,
         // Params only, never pixels: the bake is deterministic, so loading
         // re-generates exactly the same texture.
@@ -734,6 +735,7 @@ export class TextureLibrary {
       // Absent in older files = white / 0, which is what they rendered.
       this.setTint(i, typeof d.tint === "string" && /^#[0-9a-f]{6}$/i.test(d.tint) ? d.tint : "#ffffff");
       this.setUVRotation(i, Number.isFinite(d.uvRotation) ? d.uvRotation : 0);
+      this.setContourAlign(i, Number.isFinite(d.contourAlign) ? d.contourAlign : 0);
       this.setRockShade(i, Number.isFinite(d.rockShade) ? d.rockShade : 0);
       const a = d.auto;
       if (a) {
