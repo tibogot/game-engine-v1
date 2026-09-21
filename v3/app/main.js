@@ -7116,8 +7116,14 @@ export async function startV3App(opts = {}) {
     const _undo = sculpt.undo;
     const _redo = sculpt.redo;
     const _replace = sculpt.replaceHeightData;
+    // The rebase folds the CPU mirror into the river's base, so the mirror has
+    // to hold the edit first. It is refreshed by an async GPU readback, and the
+    // rebase's own 60 ms debounce does not wait for it: at a game's boot the
+    // readback is slower than that, the rebase took the PRE-edit heights as the
+    // base, and its resolve pass wrote them back over the whole terrain — every
+    // building site nam-rts flattened came back sloped.
     const terrainEdited = () => {
-      riverV2System.notifyTerrainEdited();
+      ensureCpuHeightmapFromGpu().then(() => riverV2System.notifyTerrainEdited());
       waterfallSystem?.markDirty();
     };
     sculpt.endStroke = (...a) => { const r = _endStroke(...a); terrainEdited(); return r; };
@@ -11530,6 +11536,52 @@ export async function startV3App(opts = {}) {
       sculpt.uFalloff.value       = prev.f;
       sculpt.uFlattenTarget.value = prev.t;
 
+      markHeightmapDirty();
+      await ensureCpuHeightmapFromGpu();
+    },
+
+    /**
+     * Level an axis-aligned RECTANGLE (centre wx,wz, half-extents in metres) to
+     * targetY — a building pad the shape of the building. One flatten stamp only
+     * levels fully out to ~60% of its radius (falloff^3 · strength · 20 ≥ 1 at
+     * falloff 3), so a single disc under a long building leaves its corners on
+     * the blended rim. Here the rectangle is tiled with stamps whose FULLY-flat
+     * cores overlap, and the rim only lies outside it (`rim` metres wide).
+     * One GPU→CPU readback at the end, not one per stamp.
+     */
+    async flattenRect(wx, wz, halfX, halfZ, targetY, { rim = 5, passes = 8 } = {}) {
+      const radius = rim / 0.4;      // the outer 40% of a stamp is its rim
+      const core = radius * 0.6;
+      const step = core * 1.2;       // < core·√2: cores cover the gaps between stamps
+      const prev = {
+        r: sculpt.uRadius.value, s: sculpt.uStrength.value,
+        f: sculpt.uFalloff.value, t: sculpt.uFlattenTarget.value,
+      };
+      sculpt.uRadius.value        = radius / WORLD_SIZE;
+      sculpt.uStrength.value      = 1;
+      sculpt.uFalloff.value       = 3;
+      sculpt.uFlattenTarget.value = THREE.MathUtils.clamp(targetY / MAX_HEIGHT, 0, 1);
+      // Stamp centres inset by core/√2, so a corner of the rectangle is exactly
+      // a core's reach from the corner stamp and the flat ground stops close to
+      // the rectangle instead of a whole core radius past it.
+      const inset = core * Math.SQRT1_2;
+      const ex = Math.max(0, halfX - inset), ez = Math.max(0, halfZ - inset);
+      const nx = Math.max(1, Math.ceil((2 * ex) / step) + 1);
+      const nz = Math.max(1, Math.ceil((2 * ez) / step) + 1);
+      sculpt.beginStroke();
+      for (let iz = 0; iz < nz; iz++) {
+        for (let ix = 0; ix < nx; ix++) {
+          const x = nx === 1 ? wx : wx - ex + (2 * ex * ix) / (nx - 1);
+          const z = nz === 1 ? wz : wz - ez + (2 * ez * iz) / (nz - 1);
+          const u = (x + WORLD_SIZE / 2) / WORLD_SIZE, v = (z + WORLD_SIZE / 2) / WORLD_SIZE;
+          for (let i = 0; i < passes; i++) sculpt.flatten(u, v);
+        }
+      }
+      sculpt.endStroke();
+      sculpt.uRadius.value        = prev.r;
+      sculpt.uStrength.value      = prev.s;
+      sculpt.uFalloff.value       = prev.f;
+      sculpt.uFlattenTarget.value = prev.t;
       markHeightmapDirty();
       await ensureCpuHeightmapFromGpu();
     },

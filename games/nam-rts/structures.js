@@ -17,6 +17,12 @@ export const STRUCTURE_TYPES = {
     team: "player",
     maxHp: 3000,
     radius: 14,      // combat hit footprint
+    // The ground levelled under the building, offset from the base point (world
+    // metres, door toward -Z): the Quonset's blast walls reach 13 m in front of
+    // the base point and its gable 12 m behind, 11 m either side, masts at 13.
+    // The round site stamp alone left the door end on its blended rim, 1-1.5 m
+    // under the sandbag skirts.
+    pad: { dz: -1, halfX: 13.5, halfZ: 14 },
     navRadius: 24,   // pathfinding block — hangar apron (~17 m) + unit clearance
     // Walkable corridor on the −Z face (door / production exit). Carved after the
     // nav circle is stamped so units path around the HQ but still drive out.
@@ -128,6 +134,12 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
       return null;
     }
     await prepareSite(app, site.x, site.z, type.radius, site.y);
+    // A pad the shape of the building, at the same level: the round stamp is
+    // only fully flat to ~60% of its radius.
+    if (type.pad && app.flattenRect) {
+      const p = type.pad;
+      await app.flattenRect(site.x + (p.dx ?? 0), site.z + (p.dz ?? 0), p.halfX, p.halfZ, site.y);
+    }
     const s = makeStructure(app, type, site.x, site.z); // reads the NEW height
     list.push(s);
     return s;
@@ -255,6 +267,10 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
           continue;
         }
         await prepareSite(app, site.x, site.z, s.radius, site.y);
+        if (s.type.pad && app.flattenRect) {
+          const p = s.type.pad;
+          await app.flattenRect(site.x + (p.dx ?? 0), site.z + (p.dz ?? 0), p.halfX, p.halfZ, site.y);
+        }
         s.position.set(site.x, site.y, site.z);
       }
       if (base?.alive) {
