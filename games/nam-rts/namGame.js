@@ -128,6 +128,9 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // instead of two: 114 -> 94 draws.
   //
   // `?csm=2` (or 1/3/4) brings the cascades back to A/B against this.
+  // `?fat=1` compiles the terrain features this map does not use, for A/B.
+  const leanTerrain = new URLSearchParams(location.search).get("fat") !== "1";
+
   const csmParam = Number(new URLSearchParams(location.search).get("csm"));
   const cascades = csmParam >= 1 && csmParam <= 4 ? Math.round(csmParam) : 2;
   const fittedShadows = !(csmParam >= 1 && csmParam <= 4);
@@ -150,12 +153,39 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     // running one fitted shadow.
     csm: { cascades, maxFar: 300, enabled: !fittedShadows },
     light: { shadowNormalBias: 0.12 },
-    // Editor-only terrain shader features. A game has no sculpt brush to move
-    // and no paint panel, so both are dead code here — and `cursor` also costs a
-    // sampler binding for the brush mask, in a fragment stage that sits at
-    // WebGPU's 16-sampler ceiling. Project-dependent features (snow, lakebed,
-    // groundProc, autoPaint...) stay ON: the .v3proj decides those.
-    terrainFeatures: { cursor: false },
+    /*
+     * THE TERRAIN SHADER IS 40% OF THE FRAME, so what it compiles matters more
+     * here than anywhere else. MEASURED at 4x pixel ratio (which lifts the
+     * frame clear of vsync, the only way a fragment saving is visible at all):
+     * hiding the terrain saves 26.4 ms of a 43 ms frame — 6.6 ms at native,
+     * out of 16.7.
+     *
+     * Almost none of that is in the features that can be switched with a
+     * uniform: slope lock 0.24 ms, height contrast 0.12, macro variation 0.11,
+     * height blend 0.08, auto-paint 0.03, triplanar 0.00. It is the
+     * unconditional per-pixel blend itself, so the only lever that moves is
+     * compiling less of it.
+     *
+     * These three are dead on THIS map, counted from its own splatmap rather
+     * than assumed:
+     *
+     *   cursor     a game has no sculpt brush; also costs a sampler binding in
+     *              a fragment stage already at WebGPU's 16-sampler ceiling
+     *   snow       the snow layer covers 0.0% of nam-valley
+     *   baseStyle  the base under the painted layers has weight exactly 0 on
+     *              100.00% of the map — every pixel is fully painted, so the
+     *              analytic grid is computed and then completely covered
+     *
+     * They are COMPILE-TIME, so switching them off removes the instructions
+     * instead of multiplying them by zero. Anything the .v3proj actually uses
+     * (lakebed, riverSand, flowerTint, grassFar, autoPaint) stays on.
+     *
+     * `?fat=1` restores the full set, so the saving can be A/B'd at any time
+     * rather than taken on trust.
+     */
+    terrainFeatures: leanTerrain
+      ? { cursor: false, snow: false, baseStyle: "flat" }
+      : { cursor: false },
     splatFeatures:   { solo: false },
   });
   window.__rts = app; // handy for console debugging
