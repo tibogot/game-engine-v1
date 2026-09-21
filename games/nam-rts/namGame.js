@@ -266,6 +266,24 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   rtsCamera.setMode("rts"); // start in RTS view
   app.rtsCamera = rtsCamera;
 
+  /**
+   * FEWER PLANTS THE FURTHER OUT YOU ZOOM. Foliage is the biggest single cost
+   * in the zoomed-out frame and it is a PIXEL cost: MEASURED at max zoom-out,
+   * 1919x888, hiding the field saved ~4.3 ms of 21.1, its shadows ~0, and its
+   * cost fell with plant count (density x0.5 → ~49% of it). Zooming out puts
+   * thousands more plants on screen at a size where losing some of them is the
+   * hardest thing to see, so the keep fraction follows zoomT: every plant up
+   * to `from`, easing down to `far` at full zoom-out. The plants that go are
+   * fixed per plant, so the field only changes while the camera zooms.
+   * The dev panel edits `far` (Performance section).
+   */
+  const foliageZoom = { from: 0.35, far: 0.5 };
+  const foliageKeepAt = (zoomT) => {
+    const t = Math.min(1, Math.max(0, (zoomT - foliageZoom.from) / Math.max(1e-3, 1 - foliageZoom.from)));
+    const s = t * t * (3 - 2 * t);
+    return 1 + (foliageZoom.far - 1) * s;
+  };
+
   // Nav grid — built once the world is loaded from terrain slope + lakes +
   // props + trees, so ground units path around steep terrain, water, and
   // obstacles. Toggle the debug overlay (N) to see blocked cells.
@@ -656,7 +674,7 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   };
 
   const devPanel = createDevPanel({
-    app, navGrid, rtsCamera, units, minimap,
+    app, navGrid, rtsCamera, units, minimap, foliageZoom,
     worldName: worldState.name,
     onLoadWorldFile: async (file) => afterWorldLoad(await levels.loadFile(file)),
     onLoadDefaultWorld: async () => afterWorldLoad(await levels.loadDefault()),
@@ -721,6 +739,7 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   const tick = (dt) => {
     renderTime += dt;
     rtsCamera.update(dt);                 // input, at the real frame rate
+    app.setFoliageThin?.(foliageKeepAt(rtsCamera.getView().zoomT));
     sim.advance(dt, simStep);
     fogOfWar.update(dt);                  // vision grid → GPU shroud texture
     resourceRenderer.sync();              // only rewrites when a node visibly drains

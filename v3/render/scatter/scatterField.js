@@ -171,6 +171,8 @@ export class ScatterField {
       uShadowDist: uniform(35),
       // Plants closer than this to the CAMERA thin out (see the compute).
       uNearFade: uniform(nearFade),
+      // Fraction of the plants that survive, on top of density — see setThin.
+      uThin: uniform(1),
       uCamPos: uniform(new THREE.Vector3()),
     });
     // 1 per type that casts; read by the compute, set by setShadowCasters().
@@ -314,8 +316,12 @@ export class ScatterField {
         ? u.uShadowCast.element(int(floor(typeIdx.add(0.5)))).mul(step(distSq, shadowR.mul(shadowR)))
         : float(0);
       const inView = frustumVis.greaterThan(0.5);
+      // A runtime thinning, independent of the painted density: its own hash,
+      // so the plants that go are always the same ones and a still camera never
+      // flickers. 1 keeps every plant — bit for bit the old field.
+      const thinKeep = step(hash(instanceIndex.add(6151)), u.uThin);
 
-      If(densityKeep.mul(mapStay).mul(stochasticKeep).mul(max(frustumVis, castsShadow)).greaterThan(0.5), () => {
+      If(densityKeep.mul(mapStay).mul(stochasticKeep).mul(thinKeep).mul(max(frustumVis, castsShadow)).greaterThan(0.5), () => {
         If(inView.and(nearKeep.greaterThan(0.5)), () => {
           // Near or far detail. The switch distance is spread ±2 m per plant so
           // the change never forms a visible ring.
@@ -539,6 +545,18 @@ export class ScatterField {
     this._usedTypes = used.slice();
     for (let m = 0; m < this.meshCount; m++) this.meshes[m].visible = !!used[Math.floor(m / (this.parts * this.lods))];
     this._syncShadowVisibility();
+  }
+
+  /**
+   * Keep only this fraction of the plants the paint and density would grow,
+   * 0..1. A RUNTIME lever, not a look setting: it is not saved and syncCommon
+   * never touches it, so a game can drive it every frame — e.g. from camera
+   * zoom, because a plant's cost is its screen pixels and a zoomed-out view
+   * stacks thousands of them. Which plants go is fixed per plant, so the field
+   * only changes while the value does.
+   */
+  setThin(k) {
+    this.u.uThin.value = Math.max(0, Math.min(1, Number.isFinite(k) ? k : 1));
   }
 
   /**

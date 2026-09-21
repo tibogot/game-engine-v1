@@ -1340,6 +1340,7 @@ export async function startV3App(opts = {}) {
   const foliageScatterState = createFoliageScatterState();
   const foliageScatterBrush = _shareVegBrush({ type: 0 });
   let foliageScatter = null;
+  let _foliageThin = 1;   // app.setFoliageThin — runtime, never saved
   let _foliageScatterBuilding = false;
   let foliageUi = null;
   let ambientFxUi = null;
@@ -1957,6 +1958,7 @@ export async function startV3App(opts = {}) {
       await sys.init(camera);
       sys.setEnabled(true);
       foliageScatter = sys;
+      sys.field.setThin(_foliageThin);   // a game may have set it before the build
       syncFoliageScatterUniforms();
     } catch (err) {
       console.error("[V3 Foliage] build failed:", err);
@@ -11769,6 +11771,19 @@ export async function startV3App(opts = {}) {
      * that reads well close up but costs more than it shows from an RTS
      * camera.
      */
+    /**
+     * Keep this fraction (0..1) of the foliage plants the map paints — a
+     * runtime lever on top of the saved density, meant to be driven every
+     * frame (from camera zoom, say). Foliage costs screen PIXELS: MEASURED at
+     * RTS zoom-out, density x0.5 took ~49% of its cost and x0.25 ~73%. The
+     * plants that go are fixed per plant, so nothing flickers while it holds.
+     */
+    get foliageThin() { return _foliageThin; },
+    setFoliageThin(k) {
+      _foliageThin = Math.max(0, Math.min(1, Number.isFinite(k) ? k : 1));
+      foliageScatter?.field?.setThin(_foliageThin);
+      return _foliageThin;
+    },
     get grassEnabled() { return _grassSwitch; },
     setGrassEnabled(on) {
       _grassSwitch = !!on;

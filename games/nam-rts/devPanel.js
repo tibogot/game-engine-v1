@@ -24,7 +24,7 @@ const ARROW_SVG =
   + '<polyline points="6 9 12 15 18 9"></polyline></svg>';
 
 export function createDevPanel({
-  app, navGrid, rtsCamera, units, minimap,
+  app, navGrid, rtsCamera, units, minimap, foliageZoom = null,
   worldName = "procedural default",
   onLoadWorldFile,
   onLoadDefaultWorld,
@@ -205,6 +205,16 @@ export function createDevPanel({
               <button class="prop-toggle checked" id="dv-grass" type="button" aria-label="Grass">${CHECK_SVG}</button>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Far foliage</span>
+            <div class="prop-value">
+              <input type="range" id="dv-foliage-far" min="20" max="100" step="5" />
+              <span class="prop-num" id="dv-foliage-far-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">Share of the jungle plants kept at full zoom-out; the
+            full set returns as you zoom in. Foliage is the biggest cost of the
+            zoomed-out frame and scales with plant count. <span id="dv-foliage-now"></span></div>
           <div class="dv-hint">Every grass blade system, compute and draws, plus the
             green tint it lays on distant ground. MEASURED: about <b>1.4 ms</b> zoomed
             out and <b>0.8 ms</b> close up at native resolution — it costs most where it
@@ -697,6 +707,28 @@ export function createDevPanel({
     localStorage.setItem(RSCALE_KEY, String(pct / 100));
     requestAnimationFrame(() => showScale(pct));
   });
+
+  // How thin the jungle gets at full zoom-out (namGame's foliageZoom.far).
+  const FOLIAGE_FAR_KEY = "namrts.foliageFar";
+  const folFar = $("#dv-foliage-far"), folFarV = $("#dv-foliage-far-v"), folNow = $("#dv-foliage-now");
+  if (foliageZoom) {
+    const saved = parseFloat(localStorage.getItem(FOLIAGE_FAR_KEY));
+    if (Number.isFinite(saved)) foliageZoom.far = Math.max(0.2, Math.min(1, saved));
+    folFar.value = String(Math.round(foliageZoom.far * 100));
+    folFarV.textContent = `${folFar.value}%`;
+    folFar.addEventListener("input", () => {
+      foliageZoom.far = Number(folFar.value) / 100;
+      folFarV.textContent = `${folFar.value}%`;
+      localStorage.setItem(FOLIAGE_FAR_KEY, String(foliageZoom.far));
+    });
+    // What the camera is using right now — the value changes as you zoom.
+    setInterval(() => {
+      if (!folNow.isConnected) return;
+      folNow.textContent = `Now: ${Math.round((app?.foliageThin ?? 1) * 100)}%.`;
+    }, 250);
+  } else {
+    folFar.disabled = true;
+  }
 
   // Grass is a taste call per camera: it sells a close view and is mostly
   // invisible from the top-down one, so it is the player's switch, remembered.
