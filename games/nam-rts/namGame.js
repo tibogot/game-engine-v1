@@ -858,6 +858,8 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
 
   // DEV: ?showcase=1 places the props being judged around the HQ.
   if (new URLSearchParams(location.search).get("showcase") === "1") {
+    const { placeCampPerimeter } = await import("./campPerimeter.js");
+    app.perimeter = await placeCampPerimeter(app);
     const { placePropShowcase } = await import("./propShowcase.js");
     app.showcase = await placePropShowcase(app);
   }

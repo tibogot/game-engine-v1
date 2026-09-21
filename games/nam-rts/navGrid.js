@@ -150,6 +150,21 @@ export function createNavGrid({
     }
   }
 
+  // Barriers: lines units cannot cross — wire, fences, a berm's crest. Kept
+  // here and re-stamped on every build (a rebuild wipes every stamp), and
+  // stamped as overlapping circles every half cell, so a line is a continuous
+  // band; with corner-cutting refused in findPath, nothing leaks diagonally.
+  const barriers = [];
+  function stampBarrier(b) {
+    const step = cell * 0.5;
+    for (let i = 0; i < b.points.length - 1; i++) {
+      const a = b.points[i], c = b.points[i + 1];
+      const len = Math.hypot(c.x - a.x, c.z - a.z);
+      const n = Math.max(1, Math.ceil(len / step));
+      for (let k = 0; k <= n; k++) stampCircle(a.x + ((c.x - a.x) * k) / n, a.z + ((c.z - a.z) * k) / n, b.halfWidth);
+    }
+  }
+
   // Rivers (River v2). The water test in build() samples cell centres and
   // corners, which a river narrower than a cell can slip between — so the
   // channel is also stamped along its solved centreline, at each station's own
@@ -199,6 +214,7 @@ export function createNavGrid({
     stampRivers();
     stampProps();
     stampTrees();
+    for (const b of barriers) stampBarrier(b);
     carveBridges(); // last: bridges override obstacles to make crossings walkable
     if (debugMesh) { app.scene.remove(debugMesh); debugMesh.geometry.dispose(); debugMesh = null; }
   }
@@ -425,6 +441,18 @@ export function createNavGrid({
     /** Block a circle (legacy — prefer addStructureObstacle for buildings). */
     addObstacle: (wx, wz, radius) => { stampCircle(wx, wz, radius); },
     addStructureObstacle,
+    /**
+     * A line units cannot cross (world points {x, z}), kept across rebuilds.
+     * `halfWidth` defaults to 3/4 of a cell so the band is solid. Returns a
+     * handle for removeBarrier.
+     */
+    addBarrier: (points, halfWidth = cell * 0.75) => {
+      const b = { points: points.map((p) => ({ x: p.x, z: p.z })), halfWidth };
+      barriers.push(b);
+      stampBarrier(b);
+      return b;
+    },
+    removeBarrier: (b) => { const i = barriers.indexOf(b); if (i >= 0) barriers.splice(i, 1); },
     /** Straight-line walkability between two world points (waypoint lookahead). */
     hasLOS: (ax, az, bx, bz) => hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }),
     setDebug,

@@ -88,5 +88,7 @@ export const PUBLIC_ENGINE_MODULES = [
   "v2/objects/floodlight.js",
   "v2/objects/chainLinkFence.js",
   "v2/objects/barbWire.js",
+  "v2/objects/powerLine.js",
+  "v2/objects/stringLights.js",
   "v2/objects/windmill.js",
 ];

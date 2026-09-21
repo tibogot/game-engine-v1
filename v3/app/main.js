@@ -11590,6 +11590,55 @@ export async function startV3App(opts = {}) {
       await ensureCpuHeightmapFromGpu();
     },
 
+    /**
+     * Raise an earth BERM along a path of world points: the bulldozed wall a
+     * firebase was ringed with. Adds a profile on top of the ground under it —
+     * `height` metres at the crest, `top` metres of rounded crest, falling to
+     * nothing `base`/2 from the line (a cosine shoulder, so the toe meets the
+     * ground softly; its steepest slope is π/2 · height / (base/2 - top/2), so
+     * keep that under the map's cliff-paint angle or the sides turn to rock).
+     * `gaps` [{x, z, r}] taper it to nothing between `r` and `r + taper` m —
+     * a gate. Written straight into the CPU heightmap and pushed in ONE upload
+     * (a path of flatten stamps cannot make a triangular section: each stamp
+     * is flat-topped). Returns once the CPU mirror holds the new ground.
+     */
+    async raiseBerm(points, { height = 2.2, base = 10, top = 1.5, closed = false, gaps = [], taper = 3 } = {}) {
+      if (!points || points.length < 2) return;
+      await ensureCpuHeightmapFromGpu();
+      const pts = closed ? [...points, points[0]] : points;
+      const halfB = base / 2, halfT = top / 2;
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
+      const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * HEIGHTMAP_SIZE);
+      const tx0 = Math.max(0, toTexel(x0 - halfB)), tx1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(x1 + halfB));
+      const tz0 = Math.max(0, toTexel(z0 - halfB)), tz1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(z1 + halfB));
+      const add = height / MAX_HEIGHT;
+      for (let ty = tz0; ty <= tz1; ty++) {
+        const wz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const wx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+          // Distance to the path.
+          let d = Infinity;
+          for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i], b = pts[i + 1];
+            const ex = b.x - a.x, ez = b.z - a.z, L2 = ex * ex + ez * ez || 1;
+            const t = Math.max(0, Math.min(1, ((wx - a.x) * ex + (wz - a.z) * ez) / L2));
+            d = Math.min(d, Math.hypot(wx - (a.x + ex * t), wz - (a.z + ez * t)));
+          }
+          if (d >= halfB) continue;
+          const s = d <= halfT ? 0 : (d - halfT) / (halfB - halfT);
+          let prof = 0.5 + 0.5 * Math.cos(Math.PI * s);
+          for (const g of gaps) {
+            const gd = Math.hypot(wx - g.x, wz - g.z);
+            prof *= THREE.MathUtils.smoothstep(gd, g.r, g.r + taper);
+          }
+          if (prof > 0) cpuHeightmap[ty * HEIGHTMAP_SIZE + tx] += add * prof;
+        }
+      }
+      pushHeightmapEditsToGpu();
+      await ensureCpuHeightmapFromGpu();
+    },
+
     // Resolves once the world stashed across a terrain-size reload has been
     // imported (immediately when there is none). Await before reading heights.
     pendingWorldImport,

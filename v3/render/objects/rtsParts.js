@@ -40,7 +40,7 @@ export function rng(seed = 1) {
  */
 export const MAT = {
   hessian: 0, metal: 1, timber: 2, earth: 3, thatch: 4, bamboo: 5, woven: 6, paint: 7,
-  canvas: 8, camo: 9, concrete: 10,
+  canvas: 8, camo: 9, concrete: 10, white: 11,
 };
 
 /** Strip anything merge would choke on, and guarantee the attribute set. */

@@ -80,7 +80,7 @@ export async function placePropShowcase(app) {
   add(kit(buildGunPit()), 13, -22, Math.PI, 1, 6, true);
   add(kit(buildCrateStack()), 15, 16, -0.2, 1, 4, true);
   add(kit(buildTent()), 34, 4, Math.PI / 2 + 0.05, 1, 11, true);
-  add(kit(buildTent({ medic: true, seed: 19 })), 50, -50, Math.PI / 2 - 0.05, 1, 11, true);
+  add(kit(buildTent({ medic: true, seed: 19 })), 30, -36, Math.PI / 2 - 0.05, 1, 11, true);
   add(kit(buildConexYard()), -34, 14, 0.2, 1, 7, true);
   add(kit(buildConex({ mat: MAT.camo })), -26, 22, Math.PI - 0.4, 1, 4, true);
   add(kit(buildContainer({ mat: MAT.camo })), -44, -22, Math.PI + 0.35, 1, 7, true);

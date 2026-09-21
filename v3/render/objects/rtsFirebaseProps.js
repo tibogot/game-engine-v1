@@ -812,6 +812,58 @@ export function buildRadioStation({ seed = 41 } = {}) {
   return geo;
 }
 
+// ── 10. Camp gate ────────────────────────────────────────────────────────────
+/**
+ * The way into a firebase: an opening `width` metres wide (real) across X,
+ * the road running through it along Z, sandbag walls flanking it on the
+ * perimeter line, a sandbagged guard booth inside on the -X side, and a
+ * striped barrier boom on a pivot post — RAISED, so units driving through
+ * never pass through it.
+ */
+export function buildGate({ seed = 43, width = 5 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const P = (geo, pos, mat, tone = 0.5, rot) => parts.push({ geo, pos, rot, mat, tone });
+  const hw = (width * S) / 2;
+  const bag = { length: 0.52 * S, width: 0.30 * S, height: 0.19 * S, segU: 6, segV: 4 };
+  // Flanking walls on the perimeter line.
+  for (const sx of [-1, 1]) {
+    parts.push({ geo: buildSandbagWall({ length: 3.2 * S, courses: 5, seed: seed + (sx > 0 ? 1 : 2), bag, batter: 0.03 }), pos: [sx * (hw + 1.8 * S), 0, 0], mat: null });
+  }
+  // Guard booth: posts, plank half-walls, open above them, a single-slope roof.
+  const bx = -(hw + 2.2 * S), bz = 2.6 * S, bw = 1.9 * S, bd = 1.9 * S, bh = 2.3 * S;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) P(buildBox(0.12 * S, bh, 0.12 * S), [bx + sx * (bw / 2 - 0.06 * S), bh / 2, bz + sz * (bd / 2 - 0.06 * S)], MAT.timber, 0.35);
+  const wallH = 1.05 * S;
+  // Walls set in between the posts: flush with their outer faces, they z-fought.
+  P(buildBox(bw - 0.12 * S, wallH, 0.05 * S), [bx, wallH / 2, bz - bd / 2 + 0.06 * S], MAT.timber, 0.45 + R() * 0.2);
+  P(buildBox(bw - 0.12 * S, wallH, 0.05 * S), [bx, wallH / 2, bz + bd / 2 - 0.06 * S], MAT.timber, 0.45 + R() * 0.2);
+  P(buildBox(0.05 * S, wallH - 0.01 * S, bd - 0.12 * S), [bx - bw / 2 + 0.06 * S, (wallH - 0.01 * S) / 2, bz], MAT.timber, 0.45 + R() * 0.2);
+  // The road side stays open above a sill, where the guard leans out.
+  P(buildBox(0.05 * S, 0.35 * S, bd - 0.12 * S), [bx + bw / 2 - 0.06 * S, wallH - 0.185 * S, bz], MAT.white, 0.5);
+  const roof = buildCorrugatedPanel({ width: bd + 0.5 * S, height: bw + 0.5 * S, thickness: 0.02 * S, ribs: 8, ribDepth: 0.03 * S });
+  // Laid flat (height → -Z), turned so the sheet runs across X, pitched to
+  // shed toward the road.
+  roof.rotateX(-Math.PI / 2).translate(0, 0, (bw + 0.5 * S) / 2).rotateY(Math.PI / 2).rotateZ(-0.12).translate(bx, bh + 0.08 * S, bz);
+  P(roof, [0, 0, 0], MAT.metal, 0.45);
+  parts.push({ geo: buildSandbagRing({ radius: 1.55 * S, courses: 3, seed: seed + 5, bag, gapDeg: 70 }), pos: [bx, 0, bz], rot: [0, -Math.PI / 2, 0], mat: null });
+  // Barrier: pivot post with its counterweight, the boom raised 72°.
+  const px = -hw + 0.15 * S, pz = -0.6 * S, ph = 1.0 * S;
+  P(buildBox(0.22 * S, ph, 0.22 * S), [px, ph / 2, pz], MAT.white, 0.5);
+  const boomL = width * S + 0.6 * S, seg = 0.55 * S, n = Math.ceil(boomL / seg), up = 1.25;
+  const dir = new THREE.Vector3(Math.cos(up), Math.sin(up), 0);
+  for (let k = 0; k < n; k++) {
+    const a = new THREE.Vector3(px, ph + 0.06 * S, pz).addScaledVector(dir, k * seg);
+    const b = a.clone().addScaledVector(dir, Math.min(seg, boomL - k * seg));
+    parts.push({ geo: beamGeo(a, b, 0.09 * S), mat: k % 2 ? MAT.paint : MAT.white, tone: k % 2 ? 0.3 : 0.55 });
+  }
+  const cw = new THREE.Vector3(px, ph + 0.06 * S, pz).addScaledVector(dir, -0.55 * S);
+  P(buildBox(0.3 * S, 0.3 * S, 0.3 * S), [cw.x, cw.y, cw.z], MAT.concrete, 0.4);
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.18 * S, radius: 2, strength: 0.35, groundFade: 0.3, floor: 0.55 });
+  geo.userData.footprint = { cx: -1.2 * S, cz: 1.0 * S, hx: hw + 4 * S, hz: 3 * S };
+  return geo;
+}
+
 /** A small Conex yard: two side by side, one stacked, one turned. */
 export function buildConexYard({ seed = 23 } = {}) {
   const R = rng(seed);

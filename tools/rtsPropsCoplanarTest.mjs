@@ -18,7 +18,7 @@
  */
 import {
   buildConex, buildConexYard, buildContainer, buildCrateStack, buildFuelDump, buildGuardTower, buildGunPit,
-  buildRadioStation, buildTent,
+  buildGate, buildRadioStation, buildTent,
 } from "../v3/render/objects/rtsFirebaseProps.js";
 import { buildCorrugatedPanel, buildTrapezoidPanel, MAT } from "../v3/render/objects/rtsParts.js";
 
@@ -102,6 +102,7 @@ check("conex yard", buildConexYard());
 check("container (olive)", buildContainer());
 check("container (camo)", buildContainer({ mat: MAT.camo }));
 check("radio station", buildRadioStation());
+check("camp gate", buildGate());
 
 console.log("Quonset HQ");
 check("quonset shell", buildQuonsetShellGeometry().shellGeo);

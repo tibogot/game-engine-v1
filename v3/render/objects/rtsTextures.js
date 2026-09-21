@@ -538,6 +538,39 @@ export function makeConcreteTexture({ size = 512, seed = 83 } = {}) {
   });
 }
 
+// ── whitewash ────────────────────────────────────────────────────────────────
+
+/**
+ * Lime whitewash / white paint: the barrier boom's stripes, the painted stones
+ * lining a base's roads, a guard booth's trim. Not pure white — chalky, with
+ * brush streaks and the red-brown dust every white thing in-country wore.
+ */
+export function makeWhitewashTexture({ size = 512, seed = 97 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const mott = fbm(u * P * 2 + seed, v * P * 2, P * 2, 3);
+        let k = lerp(196, 222, mott);
+        const streak = vnoise(u * P * 30, v * P * 2, P * 30) - 0.5;
+        k += streak * 10;
+        // Dust climbing from the foot, red-brown.
+        const dust = clamp01(1 - v * 3) * (0.5 + 0.5 * fbm(u * P * 6, v * P * 6, P * 6, 2));
+        const i = (y * S + x) * 4;
+        d[i] = lerp(k, 150, dust * 0.6);
+        d[i + 1] = lerp(k * 0.98, 118, dust * 0.6);
+        d[i + 2] = lerp(k * 0.93, 92, dust * 0.6);
+        d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 // ── atlas ────────────────────────────────────────────────────────────────────
 
 export const ATLAS_COLS = 4;
@@ -575,7 +608,7 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeCanvasTexture({ size: cell }),
     makeCamoTexture({ size: cell }),
     makeConcreteTexture({ size: cell }),
-    // Cell 11 is free.
+    makeWhitewashTexture({ size: cell }),
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;
