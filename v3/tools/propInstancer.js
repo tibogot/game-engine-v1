@@ -439,7 +439,16 @@ export class PropInstancer {
           const nv = counts[ti][i];
           if (e._written || e.im.count !== nv) {
             e.im.count = nv;
-            if (e._written || nv > 0) e.im.instanceMatrix.needsUpdate = true;
+            // Upload only the matrices in use. Without a range three writes
+            // the WHOLE buffer — 4096 × 64 bytes = 256 KB for a mesh drawing
+            // three rocks — and the WebGPU backend honours ranges exactly.
+            // Nothing past `count` is ever read, so nothing past it is sent.
+            if (nv > 0) {
+              const attr = e.im.instanceMatrix;
+              attr.clearUpdateRanges();
+              attr.addUpdateRange(0, nv * 16);
+              attr.needsUpdate = true;
+            }
           }
         }
       }
@@ -655,10 +664,20 @@ export class PropInstancer {
 
   // ── LOD assignment ─────────────────────────────────────────────────────────
 
+  /**
+   * Compared through Math.fround, and it has to be: `_lastCam` is a
+   * Float32Array, the camera's elements are doubles, and `a[i] !== last[i]`
+   * is false for any value that does not survive the round trip to float32 —
+   * which is nearly every one. So this returned "changed" on EVERY frame,
+   * the whole LOD and shadow assignment ran every frame, and every LOD mesh
+   * re-uploaded its full instance-matrix buffer every frame, on a camera that
+   * had not moved. MEASURED on nam-rts at rest: 30 rebuilds in 30 frames,
+   * 4 MB of attribute uploads a frame; with the round trip, 0 and 0.
+   */
   _sameCamera(cam) {
     const a = cam.matrixWorld.elements, p = cam.projectionMatrix.elements;
     for (let i = 0; i < 16; i++) {
-      if (a[i] !== this._lastCam[i] || p[i] !== this._lastProj[i]) return false;
+      if (Math.fround(a[i]) !== this._lastCam[i] || Math.fround(p[i]) !== this._lastProj[i]) return false;
     }
     return true;
   }
@@ -689,7 +708,16 @@ export class PropInstancer {
         for (const e of lod) {
           if (e._written || e.im.count !== nv) {
             e.im.count = nv;
-            if (e._written || nv > 0) e.im.instanceMatrix.needsUpdate = true;
+            // Upload only the matrices in use. Without a range three writes
+            // the WHOLE buffer — 4096 × 64 bytes = 256 KB for a mesh drawing
+            // three rocks — and the WebGPU backend honours ranges exactly.
+            // Nothing past `count` is ever read, so nothing past it is sent.
+            if (nv > 0) {
+              const attr = e.im.instanceMatrix;
+              attr.clearUpdateRanges();
+              attr.addUpdateRange(0, nv * 16);
+              attr.needsUpdate = true;
+            }
           }
         }
       }

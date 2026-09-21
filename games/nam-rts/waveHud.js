@@ -74,14 +74,26 @@ export function createWaveHud() {
   let bannerT = 0;
   let shownOutcome = null;
 
+  // WRITE THE DOM ONLY WHEN THE TEXT CHANGES. This ran every frame with
+  // unconditional textContent / innerHTML / hidden assignments, and each one
+  // invalidates style and layout even when the value is identical — Chrome's
+  // trace flagged the result as forced reflow, and the profile put this
+  // function at ~0.4 ms a frame before the layout it triggered. The values
+  // change a few times a second at most; the writes now happen that often.
+  const last = { obj: null, objText: null, waveN: null, enemies: null, enemiesNone: null, next: null };
+  const setText = (key, el, text) => { if (last[key] !== text) { last[key] = text; el.textContent = text; } };
+
   return {
     /** Called every frame with live wave + match state. */
     update(dt, waves, match = null) {
       const matchOn = !!match?.enabled;
       const spawning = !!match?.spawning;
-      $("wave-objective").hidden = !matchOn;
-      $("wave-objective-sep").hidden = !matchOn;
-      $("wave-objective").textContent = spawning ? "Deploying enemy HQ…" : "Destroy enemy HQ";
+      if (last.obj !== matchOn) {
+        last.obj = matchOn;
+        $("wave-objective").hidden = !matchOn;
+        $("wave-objective-sep").hidden = !matchOn;
+      }
+      setText("objText", $("wave-objective"), spawning ? "Deploying enemy HQ…" : "Destroy enemy HQ");
 
       const n = waves.wave;
 
@@ -96,18 +108,19 @@ export function createWaveHud() {
         if (bannerT <= 0) banner.classList.remove("show");
       }
 
-      $("wave-n").textContent = n > 0 ? `Wave ${n}` : "Wave —";
+      setText("waveN", $("wave-n"), n > 0 ? `Wave ${n}` : "Wave —");
 
       const alive = waves.enemiesAlive;
       const e = $("wave-enemies");
-      e.textContent = alive > 0 ? `${alive} enemy${alive === 1 ? "" : " units"}` : "no contact";
-      e.classList.toggle("none", alive === 0);
+      setText("enemies", e, alive > 0 ? `${alive} enemy${alive === 1 ? "" : " units"}` : "no contact");
+      if (last.enemiesNone !== (alive === 0)) { last.enemiesNone = alive === 0; e.classList.toggle("none", alive === 0); }
 
-      $("wave-next").innerHTML = !waves.enabled
+      const next = !waves.enabled
         ? `<b>waves off</b>`
         : n > 0
           ? `next in <b>${mmss(waves.nextWaveIn)}</b>`
           : `first wave in <b>${mmss(waves.nextWaveIn)}</b>`;
+      if (last.next !== next) { last.next = next; $("wave-next").innerHTML = next; }
 
       const outcome = match?.outcome ?? (waves.enabled ? waves.outcome : null);
       if (!outcome || outcome === shownOutcome) return;

@@ -139,7 +139,16 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // createWorldEnvironment builds the sun).
   const app = await startV3App({
     container,
-    csm: { cascades, maxFar: 300 },
+    // `enabled` MUST be decided here, at boot, not by app.shadows.setEnabled
+    // afterwards. The environment builds the CSM node into every lit material
+    // the moment it is enabled, and switching it off later only nulls the
+    // sun's reference: the compiled graphs keep the CSM node, its two cascade
+    // casters stay in the scene, and BOTH cascade shadow maps keep rendering
+    // every frame while the fitted frustum this game asked for never renders
+    // at all. MEASURED: two orthographic passes of 18 and 24 objects at
+    // 2048², the sun's own camera absent, on a build that believed it was
+    // running one fitted shadow.
+    csm: { cascades, maxFar: 300, enabled: !fittedShadows },
     light: { shadowNormalBias: 0.12 },
     // Editor-only terrain shader features. A game has no sculpt brush to move
     // and no paint panel, so both are dead code here — and `cursor` also costs a
