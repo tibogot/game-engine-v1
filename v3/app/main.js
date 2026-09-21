@@ -4173,7 +4173,17 @@ export async function startV3App(opts = {}) {
   }
 
   // Projected decals: one instanced draw, painted onto whatever is inside each box.
-  const decalSystem = new DecalSystem({ scene, resolveUrl: (ref) => projectAssets.resolveUrl(ref) });
+  const decalSystem = new DecalSystem({
+    scene,
+    resolveUrl: (ref) => projectAssets.resolveUrl(ref),
+    // Ground only: a road's wheel ruts were painted onto the jeeps driving
+    // along them. The same world→UV mapping the terrain uses, and the shared
+    // heightTexNode, so it tracks the live heightmap through sculpting.
+    groundHeight: (wx, wz) => texture(heightTexNode, vec2(
+      wx.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)),
+      wz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)),
+    )).r.mul(float(MAX_HEIGHT)),
+  });
   if (isEditor) {
     decalEditor = createDecalEditor({
       system: decalSystem,

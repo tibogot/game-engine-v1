@@ -39,9 +39,19 @@
  *   - Fragment cost only where a box covers the screen, and the surface test
  *     discards most of it cheaply.
  *
- * Known limit, same as Unity's screen-space decals without rendering layers:
- * anything opaque inside the box receives the decal (grass blades, a character
- * walking through). The angle fade stops it smearing onto steep sides.
+ * GROUND ONLY, when given `groundHeight`. A screen-space decal paints whatever
+ * opaque surface is inside its box — and on nam-rts that was the jeeps and
+ * soldiers driving through a road's wheel ruts, and the buildings standing on
+ * a crater. The surface point the shader already reconstructs is compared with
+ * the terrain's own height at that XZ (one heightmap tap) and the decal fades
+ * out over 0.35-0.75 m above it: ground and road keep it, anything standing on
+ * them does not. The half metre of slack covers the clipmap mesh sitting a
+ * little off the heightmap it was built from. The price is that a decal cannot
+ * be laid on a raised prop (a bridge deck) while this is on.
+ *
+ * Without `groundHeight` it is the old rule, as Unity's screen-space decals
+ * without rendering layers: anything opaque inside the box receives the decal.
+ * Either way the angle fade stops it smearing onto steep sides.
  */
 import * as THREE from "three";
 import {
@@ -86,7 +96,13 @@ export class DecalSystem {
    * @param {(ref:string) => string|null} [o.resolveUrl] turns a saved texture
    *   reference (e.g. "asset:<hash>") into a loadable URL
    */
-  constructor({ scene, resolveUrl }) {
+  /**
+   * @param {object} o
+   * @param {function} [o.groundHeight]  (wx, wz) TSL nodes → terrain Y node; when
+   *   given, decals land on the ground only (see the header)
+   */
+  constructor({ scene, resolveUrl, groundHeight = null }) {
+    this._groundHeight = groundHeight;
     this.decals = [];
     this.textures = new DecalTextures({ resolveUrl });
     this.group = new THREE.Group();
@@ -338,7 +354,11 @@ export class DecalSystem {
       const depthFade = float(1).sub(smoothstep(0.35, 0.5, abs(local.y)));
       const facing = dot(surfN, axisY);
       const angle = smoothstep(P.w, P.w.add(0.15), facing);
-      return inside.mul(edgeFade).mul(depthFade).mul(angle);
+      const cov = inside.mul(edgeFade).mul(depthFade).mul(angle);
+      if (!this._groundHeight) return cov;
+      // Ground only: gone by 0.75 m above the terrain at this XZ.
+      const above = surfaceWorld.y.sub(this._groundHeight(surfaceWorld.x, surfaceWorld.z));
+      return cov.mul(float(1).sub(smoothstep(0.35, 0.75, above)));
     })().toVar("decalCoverage");
 
     mat.opacityNode = Fn(() => {

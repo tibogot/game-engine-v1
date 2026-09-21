@@ -362,14 +362,35 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // A FIREBASE IS BULLDOZED BARE. nam-valley's jungle paint runs straight over
   // the HQ site, and with a hangar box it did not show — the palms were inside
   // it. The Quonset is a barrel you can see over, and palms came up through it.
-  // Cleared around the BUILDING's own centre, which is 6 m behind the base
-  // point: the door is on the -Z face and the barrel runs 28 m back from it.
+  // Cleared around the BUILDING's own centre, which is 2 m behind the base
+  // point: the door is on the -Z face and the barrel runs 20 m back from it.
   // Grass too, over a tighter disc — it grew up through the Quonset's floor and
   // showed in the open doorway; the yard around an HQ is bare, trampled earth.
   // Runtime only (see app.clearVegetation), so it runs again after every load.
+  //
+  // And PROPS whose footprint overlaps the building: nam-valley has a
+  // megalith on the terrace edge behind the HQ, and it read as a rock on the
+  // Quonset's roof. Removed from the loaded scene only — the map keeps it.
+  // Footprint in world space (the HQ is rotated PI, door toward -Z): 11 m
+  // either side (blast walls included), from the blast walls' front 13 m before
+  // the base point to the gable 12 m behind it, plus a metre of air.
   const clearHqGround = () => {
     const b = structures.base;
-    if (b?.alive !== false) app.clearVegetation?.(b.position.x, b.position.z + 6, 30, { grass: 26 });
+    if (b?.alive === false) return;
+    app.clearVegetation?.(b.position.x, b.position.z + 2, 27, { grass: 23 });
+    const ps = app.propStore;
+    if (!ps?.instances) return;
+    const x0 = b.position.x - 12, x1 = b.position.x + 12;
+    const z0 = b.position.z - 14, z1 = b.position.z + 13;
+    for (let i = ps.instances.length - 1; i >= 0; i--) {
+      const inst = ps.instances[i];
+      const box = ps.types[inst.typeIdx]?.mergedBox;
+      if (!box) continue;
+      const r = Math.max(Math.abs(box.min.x), Math.abs(box.max.x), Math.abs(box.min.z), Math.abs(box.max.z))
+        * Math.max(Math.abs(inst.sx ?? 1), Math.abs(inst.sz ?? 1));
+      const cx = Math.max(x0, Math.min(inst.px, x1)), cz = Math.max(z0, Math.min(inst.pz, z1));
+      if (Math.hypot(inst.px - cx, inst.pz - cz) < r) ps.removeInstance(i);
+    }
   };
   clearHqGround();
 
@@ -819,6 +840,12 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // systems are constructed, so baking early would silently produce an empty
   // grid — cover that is simply absent, with nothing to notice.
   onStatus("Baking cover…");
+  // The props are in by now, so the HQ can take its footprint back from them
+  // (clearHqGround ran once before they arrived, for the vegetation) — and the
+  // nav grid is rebuilt after, or a removed rock would still block the path.
+  clearHqGround();
+  navGrid.rebuild();
+  for (const s of structures.list) if (s.alive) navGrid.addStructureObstacle(s);
   console.log(`[cover] ${cover.bake()} obstacles`);
 
   // The console handle. Every subsystem already hangs off `app`, so one global

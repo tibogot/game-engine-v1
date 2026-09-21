@@ -9,8 +9,8 @@
  * SCALE. Built at the game's RTS scale — real size x 1.3, the same factor as
  * its units (nam-rts unitTypes.js RTS_SCALE), so a 2.3 m soldier comes out of
  * a door in proportion. A 40 x 100 ft hangar Quonset (12.2 m across, 6.1 m to
- * the crown) at 1.3x is 15.8 m across and 7.9 m high; 28 m long keeps it in
- * the base's nav circle. The door is 8 x 5.5 m: a 1.3x tank fits.
+ * the crown) at 1.3x is 15.8 m across and 7.9 m high; 20 m long (a 50 ft
+ * hut) keeps it on the base's flattened ground and inside its nav circle. The door is 8 x 5.5 m: a 1.3x tank fits.
  *
  * CONTRACT with the game (structuresRenderer + structures.js), kept from the
  * hangar it replaces: origin at the ground centre, the door on +Z with its
@@ -30,7 +30,10 @@ import { rtsObjectMaterial } from "./rtsObjectProps.js";
 export const QUONSET_DEFAULTS = {
   scale: 1.3,          // RTS scale: real size x this (sandbags, masts, trim)
   radius: 7.9,         // arch radius = half the width = crown height
-  length: 28,          // along Z, back from the door gable
+  // along Z, back from the door gable. 20, not the 28 it shipped with: on
+  // nam-valley the terraced hillside rises 3-12 m from 16 m behind the door,
+  // and a 28 m barrel ran into the terrace wall with a megalith on its roof.
+  length: 20,
   frontZ: 8,           // the door gable's plane (door mouth, structures.js DOOR_MOUTH)
   doorW: 8, doorH: 5.5,
   corrPitch: 0.6,      // corrugation wavelength along the length, m (RTS-readable)
@@ -237,7 +240,9 @@ export function buildQuonsetHQ(opts = {}, emissive = null) {
 
   // Radio masts at the back: the tall one carries the beacon.
   const mastH = 16 * o.scale, mast2H = 11 * o.scale;
-  const mastPos = [-Rr * 0.55, F - L - 2.5], mast2Pos = [Rr * 0.6, F - L - 2.0];
+  // Beside the rear corners, not behind the building: whatever stands behind
+  // an HQ is outside the ground its site flattened (on nam-valley, a terrace).
+  const mastPos = [-(Rr + 2.6), F - L + 2.5], mast2Pos = [Rr + 2.4, F - L + 4.5];
   parts.push({ geo: buildPost({ height: mastH, width: 0.42, depth: 0.42, taper: 0.5, round: true }), pos: [mastPos[0], 0, mastPos[1]], mat: MAT.metal, tone: 0.25 });
   parts.push({ geo: buildPost({ height: mast2H, width: 0.34, depth: 0.34, taper: 0.5, round: true }), pos: [mast2Pos[0], 0, mast2Pos[1]], mat: MAT.metal, tone: 0.25 });
   // Cross-arms: the silhouette that says "antenna", not "pole".
