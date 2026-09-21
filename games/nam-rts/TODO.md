@@ -42,6 +42,23 @@ Keep this file current: tick things off here, add new asks here.
       in a V, crows), and flocks **flushed** from the jungle by any explosion or
       crater — mostly white so they read from above. One draw. Dev: BIRDS section
 
+## UI (your ask, 2026-09-22) — **you** are gathering references (YouTube)
+
+- [ ] **Small radii only** — no pill shapes / big rounded panels
+- [ ] **Wave pill** (top centre) → dev panel only; waves are a later mode
+- [ ] **Supplies pill** (top) → into the new bottom HUD
+- [ ] **One bottom HUD bar**: minimap left · selection centre · command card
+      right · resources in the bar (today these are 4 separate floating boxes)
+- [ ] The "Build a Radio Station for tactical map intel" text (bottom left) is
+      the minimap's locked state — needs a proper locked minimap design
+- [x] **Loading screen**: `nam-cover.webp` full screen (100svh, object-fit: cover), the
+      `namlogowebp.webp` logo over the lit sky, a real progress bar (level download in bytes via the level loader's
+      new `onProgress`; other stages scaled by this machine's timings from the
+      previous boot), rotating gameplay tips
+- [ ] Sharper cover art: nam-cover.webp is 1536×1024 and is upscaled to fill
+      a 1080p+ screen; ~2560×1707 (same 3:2) would be crisp on 1440p
+- [ ] rts-chibs has a better UI — ideas only, don't copy
+
 ## Ambient life — suggestions (not agreed yet)
 
 - [ ] **Cloud shadows** sweeping the map (engine has `cloudShadowMap`) — reads
@@ -75,7 +92,8 @@ Keep this file current: tick things off here, add new asks here.
 - [ ] Nature/road extras: fallen logs, stumps, termite mounds
 - [ ] More sign faces (propaganda boards, shop signs, tin ads, arrows)
 - [ ] Kit bug: `rtsParts.buildSheetRoof` stands its sheets on edge (only the lab
-      uses it)- [x] Quonset HQ with opening doors · US flag · guard tower · billboards (2/4
+      uses it)
+- [x] Quonset HQ with opening doors · US flag · guard tower · billboards (2/4
       posts) + sign sheet · MINES sign · gun pit, fuel dump, crate stack · GP tent
       + **medic tent** · Conex + yard · ISO container · radio station (kit) ·
       stencil markings (U.S. ARMY, red cross, codes) · camo surface · old

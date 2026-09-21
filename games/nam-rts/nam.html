@@ -10,7 +10,10 @@
       The engine loads assets by paths relative to /v3/, so that's the base.
     -->
     <base href="/v3/" />
-    <title>Vietnam RTS</title>
+    <title>NAM — Vietnam RTS</title>
+    <!-- The cover art first, so the loading screen is never a black screen. -->
+    <link rel="preload" as="image" href="/textures/nam-cover.webp" />
+    <link rel="preload" as="image" href="/textures/namlogowebp.webp" />
     <!-- editor.css is imported from rtsGame.js, NOT linked here — see the note there. -->
     <!-- lucide: the dev panel's tab icons. -->
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
@@ -27,23 +30,59 @@
         left: 8px !important;
       }
 
+      /* ── Loading screen ────────────────────────────────────────────────────
+         Full-screen cover art (object-fit: cover — the art has no lettering of
+         its own to crop) with the NAM logo over the bright sky of its top
+         third: the logo's letters are dark, so they sit where the art is light. */
       #boot {
-        position: fixed; inset: 0; z-index: 9999;
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 14px; background: #0a0a0a; color: #cfcfcf;
-        font-family: system-ui, -apple-system, sans-serif;
-        transition: opacity 0.5s ease;
+        /* Above everything, the engine's perf overlay included (it is created
+           during boot and drew over the art). */
+        position: fixed; inset: 0; z-index: 2147483000; overflow: hidden;
+        height: 100svh;
+        background: #0b0c0a; color: #e6dfcc;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        transition: opacity 0.6s ease;
       }
       #boot.hidden { opacity: 0; pointer-events: none; }
-      #boot .spinner {
-        width: 34px; height: 34px; border: 3px solid #333; border-top-color: #6ab0ff;
-        border-radius: 50%; animation: spin 0.9s linear infinite;
+      #boot .art {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: cover; object-position: center 40%;
       }
-      @keyframes spin { to { transform: rotate(360deg); } }
+      /* Darken the foot of the art so the bar and tips read over the foliage. */
+      #boot .shade {
+        position: absolute; inset: 0;
+        background: linear-gradient(to top, rgba(8, 9, 7, 0.78) 0%, rgba(8, 9, 7, 0) 32%);
+      }
+      #boot .logo {
+        position: absolute; left: 50%; top: 5svh; transform: translateX(-50%);
+        width: min(44vw, 760px); height: auto;
+        filter: drop-shadow(0 0 18px rgba(236, 226, 196, 0.35)) drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35));
+      }
+      #boot .load {
+        position: absolute; left: 50%; bottom: 6.5%; transform: translateX(-50%);
+        width: min(560px, 72vw);
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+      }
+      #boot .tip {
+        min-height: 1.4em; margin-bottom: 14px; text-align: center;
+        font-size: 12px; letter-spacing: 0.12em; color: #cfc6ae;
+        transition: opacity 0.5s ease;
+      }
+      #boot .row {
+        display: flex; justify-content: space-between; align-items: baseline;
+        margin-bottom: 7px; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase;
+      }
+      #boot .pct { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0.1em; }
+      #boot .bar { height: 3px; background: rgba(230, 223, 204, 0.16); }
+      #boot .fill {
+        height: 100%; width: 0%; background: #e6dfcc;
+        box-shadow: 0 0 8px rgba(230, 223, 204, 0.55);
+      }
       #boot .err {
-        max-width: 640px; margin-top: 8px; padding: 12px 16px;
-        font-size: 13px; line-height: 1.5; color: #ff8c8c;
-        background: #1c0f0f; border: 1px solid #532; border-radius: 6px;
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        max-width: 640px; padding: 12px 16px;
+        font-size: 13px; line-height: 1.5; color: #ff9a8c;
+        background: rgba(20, 10, 10, 0.92); border: 1px solid #5a3328; border-radius: 2px;
         white-space: pre-wrap; display: none;
       }
     </style>
@@ -51,16 +90,88 @@
   <body>
     <div id="game"></div>
     <div id="boot">
-      <div class="spinner" id="spinner"></div>
-      <div id="msg">Loading…</div>
+      <img class="art" src="/textures/nam-cover.webp" alt="" />
+      <div class="shade"></div>
+      <img class="logo" src="/textures/namlogowebp.webp" alt="NAM" />
+      <div class="load">
+        <div class="tip" id="tip"></div>
+        <div class="row"><span id="msg">Loading</span><span class="pct" id="pct">0%</span></div>
+        <div class="bar"><div class="fill" id="fill"></div></div>
+      </div>
       <div class="err" id="err"></div>
     </div>
 
     <script type="module">
       const boot = document.getElementById("boot");
       const msg = document.getElementById("msg");
+      const pctEl = document.getElementById("pct");
+      const fill = document.getElementById("fill");
+      const tipEl = document.getElementById("tip");
       const err = document.getElementById("err");
-      const spinner = document.getElementById("spinner");
+
+      // ── Tips: things that are true about how this game plays ─────────────
+      const TIPS = [
+        "Smoke blocks line of sight — screen your advance.",
+        "The jungle hides you. Sandbags stop bullets. Know the difference.",
+        "Birds bursting from the treeline mean fighting nearby.",
+        "Hold V to see the cover around your units.",
+        "Napalm denies ground — and burns the jungle that hid the enemy.",
+        "The wire has one gate. Hold it.",
+      ];
+      let tipI = Math.floor(Math.random() * TIPS.length);
+      const showTip = () => {
+        tipEl.style.opacity = 0;
+        setTimeout(() => { tipEl.textContent = TIPS[tipI++ % TIPS.length]; tipEl.style.opacity = 1; }, 450);
+      };
+      tipEl.textContent = TIPS[tipI++ % TIPS.length];
+      const tipTimer = setInterval(showTip, 6500);
+
+      // ── A progress bar that knows how long each stage takes ──────────────
+      // Every boot records how long each status stage lasted and the next boot
+      // uses those as the bar's scale, so it tracks reality instead of jumping
+      // in equal steps. Within a stage the bar creeps toward that stage's share
+      // (never stalls, never overshoots); the level download reports real bytes.
+      // The first boot on a machine uses these rough weights.
+      const KEY = "namrts.bootStages";
+      const DEFAULT = {
+        order: ["Starting engine…", "Loading level…", "Loading nam-valley.v3proj…", "Setting up camera…",
+          "Building navigation…", "Placing structures…", "Seeding resource nodes…", "Re-baking navigation…",
+          "Spawning units…", "Building unit visuals…", "Loading crater decals…", "Baking cover…"],
+        ms: { "Starting engine…": 2500, "Loading level…": 4000, "Loading nam-valley.v3proj…": 2500,
+          "Placing structures…": 2000, "Building unit visuals…": 1500, "Baking cover…": 3000 },
+      };
+      let learned = DEFAULT;
+      try { learned = JSON.parse(localStorage.getItem(KEY) || "null") || DEFAULT; } catch { /* private mode */ }
+      const expectMs = (s) => learned.ms[s] ?? 600;
+      const total = Math.max(1, learned.order.reduce((a, s) => a + expectMs(s), 0));
+
+      const seen = [];          // [{ s, t0 }]
+      let dl = -1;              // download fraction of the current stage, if any
+      let shown = 0;
+      const pretty = (s) => s.replace(/…$/, "").replace(/\.v3proj$/, "");
+      const onStatus = (s) => {
+        seen.push({ s, t0: performance.now() });
+        dl = -1;
+        if (s !== "ready") msg.textContent = pretty(s);
+      };
+      const onProgress = (f) => { dl = f; };
+      const progress = () => {
+        if (!seen.length) return 0;
+        let done = 0;
+        for (let i = 0; i < seen.length - 1; i++) done += expectMs(seen[i].s);
+        const cur = seen[seen.length - 1];
+        const e = expectMs(cur.s);
+        const within = dl >= 0 ? dl : 1 - Math.exp(-(performance.now() - cur.t0) / e);
+        return Math.min(0.99, (done + e * Math.min(0.97, within)) / Math.max(total, done + e));
+      };
+      let raf = 0;
+      const tick = () => {
+        shown = Math.max(shown, progress());            // never goes backwards
+        fill.style.width = `${(shown * 100).toFixed(1)}%`;
+        pctEl.textContent = `${Math.floor(shown * 100)}%`;
+        raf = requestAnimationFrame(tick);
+      };
+      tick();
 
       try {
         // Boot the game. Relative specifier: ES imports resolve against this
@@ -68,16 +179,33 @@
         const { startNamGame } = await import("./namGame.js");
         await startNamGame({
           container: document.getElementById("game"),
-          onStatus: (s) => (msg.textContent = s),
+          onStatus,
+          onProgress,
           fov: 40,
         });
 
-        boot.classList.add("hidden");
-        setTimeout(() => boot.remove(), 600);
+        // Learn this machine's stage times for the next boot (smoothed).
+        const end = performance.now();
+        const ms = { ...learned.ms };
+        for (let i = 0; i < seen.length; i++) {
+          const next = i + 1 < seen.length ? seen[i + 1].t0 : end;
+          const d = next - seen[i].t0;
+          ms[seen[i].s] = learned.ms[seen[i].s] ? 0.5 * learned.ms[seen[i].s] + 0.5 * d : d;
+        }
+        try { localStorage.setItem(KEY, JSON.stringify({ order: seen.map((x) => x.s), ms })); } catch { /* private mode */ }
+
+        cancelAnimationFrame(raf);
+        clearInterval(tipTimer);
+        fill.style.width = "100%";
+        pctEl.textContent = "100%";
+        msg.textContent = "Ready";
+        setTimeout(() => boot.classList.add("hidden"), 250);
+        setTimeout(() => boot.remove(), 900);
       } catch (e) {
         console.error("[RTS-v3] failed to start", e);
-        spinner.style.display = "none";
-        msg.textContent = "Failed to start the RTS game.";
+        cancelAnimationFrame(raf);
+        clearInterval(tipTimer);
+        msg.textContent = "Failed to start";
         err.style.display = "block";
         err.textContent = e?.stack || e?.message || String(e);
       }

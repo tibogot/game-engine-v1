@@ -103,7 +103,7 @@ import { createFogOfWar } from "./fogOfWar.js";
 import { createSimClock } from "./simClock.js";
 import { createStressTest } from "./stressTest.js";
 
-export async function startNamGame({ container, onStatus = () => {}, fov } = {}) {
+export async function startNamGame({ container, onStatus = () => {}, onProgress = null, fov } = {}) {
   // 1) Boot the v3 engine — renderer, terrain clipmap, sky, grass, water… the
   //    whole runtime — drawing into the page's `container`.
   onStatus("Starting engine…");
@@ -216,7 +216,7 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // 2) Load world — default rts.v3proj, or ?world=/path/to/other.v3proj.
   // A level of another terrain size reloads the page at that size first; the
   // loader also refreshes the CPU height mirror after rivers/lakes carve.
-  const levels = createLevelLoader(app, { defaultUrl: "/levels/nam-valley.v3proj", onStatus });
+  const levels = createLevelLoader(app, { defaultUrl: "/levels/nam-valley.v3proj", onStatus, onProgress });
   const worldState = { name: "procedural default" };
   const boot = await levels.loadBoot();
   worldState.name = boot.name;

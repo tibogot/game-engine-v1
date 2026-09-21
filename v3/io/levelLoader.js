@@ -36,6 +36,7 @@ export function terrainSizeDiffers(t) {
  * @param {object} [o]
  * @param {string} [o.defaultUrl]   the level loadBoot/loadDefault use
  * @param {(msg: string) => void} [o.onStatus]
+ * @param {(fraction: number) => void} [o.onProgress]  download progress of a level fetched by URL
  * @param {boolean | ((t: object, name: string) => boolean)} [o.confirmResize]
  *   For a level the PLAYER picks (loadFile, loadBuffer, loadUrl) of another
  *   terrain size: true (reload without asking), false (refuse), or a function
@@ -47,6 +48,7 @@ export function terrainSizeDiffers(t) {
 export function createLevelLoader(app, {
   defaultUrl = null,
   onStatus = () => {},
+  onProgress = null,
   confirmResize = askToReload,
   urlParam = "world",
 } = {}) {
@@ -102,7 +104,33 @@ export function createLevelLoader(app, {
     onStatus("Loading level…");
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Failed to fetch "${url}" (${res.status})`);
-    return loadBuffer(await res.arrayBuffer(), { name: nameOf(url), ask });
+    return loadBuffer(await readWithProgress(res), { name: nameOf(url), ask });
+  }
+
+  /**
+   * The body as an ArrayBuffer, reporting download progress (0..1) to
+   * onProgress as it streams — a level is tens of MB and is most of a boot, so
+   * a loading bar that cannot see it is guessing. Falls back to a plain read
+   * with no onProgress, no stream, or no Content-Length (a compressed response
+   * reports the COMPRESSED length, so progress is capped at 1).
+   */
+  async function readWithProgress(res) {
+    const total = Number(res.headers.get("content-length")) || 0;
+    if (!onProgress || !total || !res.body?.getReader) return res.arrayBuffer();
+    const reader = res.body.getReader();
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.byteLength;
+      onProgress(Math.min(1, got / total));
+    }
+    const out = new Uint8Array(got);
+    let o = 0;
+    for (const c of chunks) { out.set(c, o); o += c.byteLength; }
+    return out.buffer;
   }
 
   async function loadFile(file) {
