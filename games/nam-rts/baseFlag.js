@@ -11,7 +11,7 @@ import { createFlag } from "../../v3/props/liveProps.js";
 const FLAG_PARAMS = {
   poleHeight: 30,
   poleRadius: 0.32,
-  clothWidth: 11,
+  clothWidth: 12.35,   // 1.9 : 1, the US flag's own proportion
   clothHeight: 6.5,
   xSegs: 12,   // a bigger cloth needs a few more segments to fold nicely
   ySegs: 9,
@@ -21,6 +21,50 @@ const FLAG_PARAMS = {
   windDirection: 0,
   showPole: true,
 };
+
+/**
+ * The US flag of the war years (50 stars from July 1960), drawn to the
+ * federal specification (Executive Order 10834): hoist 1, fly 1.9, thirteen
+ * stripes, a union 7 stripes deep and 0.76 of the hoist wide, 50 stars in nine
+ * rows alternating six and five. Drawn, not downloaded: exact at any size,
+ * nothing to ship. Returns a PNG data: URL for the cloth's texture slot.
+ */
+export function drawUsFlagDataUrl(hoistPx = 520) {
+  const H = hoistPx, W = Math.round(H * 1.9);
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  const stripe = H / 13;
+  for (let i = 0; i < 13; i++) {
+    g.fillStyle = i % 2 === 0 ? "#b22234" : "#ffffff";
+    g.fillRect(0, Math.round(i * stripe), W, Math.ceil(stripe) + 1);
+  }
+  const uw = H * 0.76, uh = stripe * 7;
+  g.fillStyle = "#3c3b6e";
+  g.fillRect(0, 0, uw, uh);
+  // Stars: 11 column steps across (E/12 = 0.063), 10 row steps down (F/10 =
+  // 0.054); rows of six on even rows, five offset on odd. Diameter 0.0616.
+  const star = (cx, cy, r) => {
+    g.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI / 2 + (k * Math.PI) / 5;
+      const rr = k % 2 === 0 ? r : r * 0.382;
+      g.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+    }
+    g.closePath(); g.fill();
+  };
+  g.fillStyle = "#ffffff";
+  const r = (H * 0.0616) / 2;
+  for (let row = 0; row < 9; row++) {
+    const y = (row + 1) * (uh / 10);
+    const odd = row % 2 === 1;
+    for (let col = 0; col < (odd ? 5 : 6); col++) {
+      const x = (2 * col + (odd ? 2 : 1)) * (uw / 12);
+      star(x, y, r);
+    }
+  }
+  return c.toDataURL("image/png");
+}
 
 /**
  * Plant the flag near the base.
@@ -54,6 +98,7 @@ export function createBaseFlag({ app, structures, offset = { x: 30, z: -16 } }) 
     flag.setParam("flagColor", hasTexture ? "#ffffff" : FLAG_PARAMS.flagColor);
     flag.setParam("textureUrl", url);
   };
+  applyTexture(drawUsFlagDataUrl());
 
   return {
     group: flag.group,

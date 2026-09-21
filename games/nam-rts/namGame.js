@@ -327,6 +327,13 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     startDeg: NAV_MAX_SLOPE_DEG - 4,
     endDeg: NAV_MAX_SLOPE_DEG,
   });
+  // The grass stops where the rock starts: none on ground units cannot walk,
+  // thinning over the same band the cliff paint fades in. nam-valley saved the
+  // grass slope rule OFF, and blades stood up the terrace walls.
+  app.setGrassSlopeRule?.({
+    startDeg: NAV_MAX_SLOPE_DEG - 4,
+    endDeg: NAV_MAX_SLOPE_DEG,
+  });
 
   // 4) ── RTS GAMEPLAY ───────────────────────────────────────────────────────
   //    Unit LOGIC is mesh-free (units.js); the RENDERER (unitRenderer.js) turns
@@ -703,6 +710,7 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     await app.refreshWorldHeights?.();
     await structures.reanchorToTerrain(app);
     clearHqGround();              // the load restored the saved paint over it
+    app.setGrassSlopeRule?.({ startDeg: NAV_MAX_SLOPE_DEG - 4, endDeg: NAV_MAX_SLOPE_DEG }); // and the grass state
     for (const b of buildings.list) {
       b.position.y = app.getWorldHeight?.(b.position.x, b.position.z) ?? b.position.y;
     }

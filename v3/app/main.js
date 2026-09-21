@@ -11541,7 +11541,7 @@ export async function startV3App(opts = {}) {
     },
 
     /**
-     * Level an axis-aligned RECTANGLE (centre wx,wz, half-extents in metres) to
+     * Level a RECTANGLE (centre wx,wz, half-extents in metres, turned by rotY) to
      * targetY — a building pad the shape of the building. One flatten stamp only
      * levels fully out to ~60% of its radius (falloff^3 · strength · 20 ≥ 1 at
      * falloff 3), so a single disc under a long building leaves its corners on
@@ -11549,7 +11549,8 @@ export async function startV3App(opts = {}) {
      * cores overlap, and the rim only lies outside it (`rim` metres wide).
      * One GPU→CPU readback at the end, not one per stamp.
      */
-    async flattenRect(wx, wz, halfX, halfZ, targetY, { rim = 5, passes = 8 } = {}) {
+    async flattenRect(wx, wz, halfX, halfZ, targetY, { rim = 5, passes = 8, rotY = 0 } = {}) {
+      const cr = Math.cos(rotY), sr = Math.sin(rotY);
       const radius = rim / 0.4;      // the outer 40% of a stamp is its rim
       const core = radius * 0.6;
       const step = core * 1.2;       // < core·√2: cores cover the gaps between stamps
@@ -11571,8 +11572,11 @@ export async function startV3App(opts = {}) {
       sculpt.beginStroke();
       for (let iz = 0; iz < nz; iz++) {
         for (let ix = 0; ix < nx; ix++) {
-          const x = nx === 1 ? wx : wx - ex + (2 * ex * ix) / (nx - 1);
-          const z = nz === 1 ? wz : wz - ez + (2 * ez * iz) / (nz - 1);
+          // Local offsets in the rectangle's frame, turned by rotY (three.js
+          // Y rotation: local +X → (cos, -sin), local +Z → (sin, cos)).
+          const lx = nx === 1 ? 0 : -ex + (2 * ex * ix) / (nx - 1);
+          const lz = nz === 1 ? 0 : -ez + (2 * ez * iz) / (nz - 1);
+          const x = wx + lx * cr + lz * sr, z = wz - lx * sr + lz * cr;
           const u = (x + WORLD_SIZE / 2) / WORLD_SIZE, v = (z + WORLD_SIZE / 2) / WORLD_SIZE;
           for (let i = 0; i < passes; i++) sculpt.flatten(u, v);
         }
@@ -11914,6 +11918,20 @@ export async function startV3App(opts = {}) {
      * @param o.strength  0..1, how completely rock wins past the band
      * @param o.noise     0..1 threshold breakup, so the band is not a contour line
      */
+    /**
+     * Keep the grass off steep ground: blades thin from `startDeg` and are gone
+     * past `endDeg`. Both grass systems (hybrid rings and revo) already read
+     * this rule from grassState; a project saves it, OFF by default, so a game
+     * that wants its grass to agree with its own walkable limit says so here —
+     * after the level loads, since a load replaces grassState.
+     */
+    setGrassSlopeRule({ enabled = true, startDeg = 30, endDeg = 34 } = {}) {
+      grassState.slopeEnabled = !!enabled;
+      grassState.slopeMax = Math.cos(startDeg * Math.PI / 180);  // full grass at or below this steepness
+      grassState.slopeMin = Math.cos(endDeg * Math.PI / 180);    // none at or past this
+      syncGrassUniforms();
+      return true;
+    },
     setSlopeCliffRule({
       enabled = true, layer = 5, startDeg = 30, endDeg = 34,
       strength = 1, noise = 0.25,
