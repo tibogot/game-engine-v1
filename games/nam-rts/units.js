@@ -26,6 +26,18 @@
 //   5. SEPARATION stays, but only as a last-resort overlap fix, not the plan.
 import * as THREE from "three";
 import { UNIT_TYPES, UNIT_TYPE_KEYS } from "./unitTypes.js";
+import { createSpatialGrid } from "./spatialGrid.js";
+
+/**
+ * Metres added to every grid query. The grid is rebuilt at the start of a tick
+ * and units then move within it, so a neighbour can have drifted a little from
+ * the cell it was filed under; this keeps it inside the searched square.
+ */
+const GRID_PAD = 1;
+/** Scratch for avoidance's neighbour query — units update one at a time. */
+const _avoidNear = [];
+const _avoidKept = [];
+const byGridIdx = (a, b) => a._gridIdx - b._gridIdx;
 
 /** Shortest-way angular step from a → b, clamped to maxStep. */
 function turnToward(a, b, maxStep) {
@@ -35,7 +47,7 @@ function turnToward(a, b, maxStep) {
   return a + THREE.MathUtils.clamp(d, -maxStep, maxStep);
 }
 
-function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
+function makeUnit(app, type, navGrid, x, z, near, team = "player") {
   const pos = new THREE.Vector3(x, 0, z);
   const target = new THREE.Vector3(x, 0, z);
   const waypoints = [];
@@ -79,13 +91,29 @@ function makeUnit(app, type, navGrid, x, z, getUnits, team = "player") {
    * units break symmetry instead of locking.
    */
   function avoidance(dirX, dirZ) {
-    const units = getUnits();
     const look = type.radius * 5;
+    if (unit.ghost) return { x: 0, z: 0 }; // phasing through — steer for nobody
+    // Living units near us only (see createUnits' grid). The whole list used to
+    // be scanned — dead ones included, which nothing ever removes, so units
+    // kept steering round the spots where others had died.
+    const cand = near(pos.x, pos.z, look + GRID_PAD, _avoidNear);
+    // The grid gives a square of cells; keep only who is within `look` NOW
+    // (the loop's own test below is unchanged), then put those back into list
+    // order: the steering is a SUM, and a crowd amplifies even last-digit
+    // differences in summation order into metres within seconds — which would
+    // make the sim depend on how the grid happened to file things.
+    const units = _avoidKept;
+    units.length = 0;
+    const look2 = look * look;
+    for (const o of cand) {
+      const dx = o.position.x - pos.x, dz = o.position.z - pos.z;
+      if (dx * dx + dz * dz <= look2) units.push(o);
+    }
+    units.sort(byGridIdx);
     let ax = 0, az = 0;
     // "Right" of our heading, on the ground plane.
     const px = dirZ, pz = -dirX;
 
-    if (unit.ghost) return { x: 0, z: 0 }; // phasing through — steer for nobody
     for (const other of units) {
       if (other === unit || other.isAir !== type.isAir || other.ghost) continue;
       const ox = other.position.x - pos.x;
@@ -514,7 +542,18 @@ export function createUnits({
   origin = { x: 0, z: 0 }, // the starting army musters here (the base)
 } = {}) {
   const units = [];
-  const getUnits = () => units;
+
+  // Every LIVING unit, filed by 4 m cell — see spatialGrid.js for why. Small
+  // cells because a packed crowd is the case that matters: with 8 m cells one
+  // avoidance query returned a 16 m square of soldiers to sift. Stamped with
+  // its index in `units`, which separation and avoidance use to keep order.
+  const grid = createSpatialGrid({ cellSize: 4 });
+  const rebuildGrid = () => grid.rebuild(units, (u, i) => {
+    if (!u.alive) return false;
+    u._gridIdx = i;
+    return true;
+  });
+  const near = (x, z, r, out) => grid.query(x, z, r, out);
   // Fan the starting army out AROUND the muster point, facing up-map.
   // Muster on the base's -Z side — the side the RTS camera faces (where the HQ's
   // door is), so the starting army sits in view, not behind the building.
@@ -540,21 +579,47 @@ export function createUnits({
       let z = o.z + gz * gap;
       // Ground units must not spawn in a lake or on a cliff.
       if (!type.isAir && navGrid) ({ x, z } = navGrid.nearestOpenWorld(x, z));
-      units.push(makeUnit(app, type, navGrid, x, z, getUnits));
+      units.push(makeUnit(app, type, navGrid, x, z, near));
     }
   }
 
   // ── Separation ──────────────────────────────────────────────────────────────
   // A LAST-RESORT overlap fix, not the collision plan — avoidance steering above
-  // is what actually keeps units apart. O(n²) is fine for dozens; swap in a
-  // spatial hash before this reaches hundreds.
+  // is what actually keeps units apart.
+  //
+  // Pairs come from the grid, not from every j > i: each pass re-files the
+  // units (the previous pass moved them) and asks for the cells within reach of
+  // `a`. The candidates are then sorted back into index order, so the pairs are
+  // visited in the order the all-pairs loop used — pairs that are not
+  // overlapping were always skipped, and the pad covers what earlier pushes in
+  // the same pass can move a neighbour. So the same pushes happen; only the
+  // pairs that could never touch are no longer looked at. (A neighbour shoved
+  // further than the pad within ONE pass would be caught on the next pass.)
   const SEP_PASSES = 2;
+  const _sepNear = [];
+  const _sepIdx = [];
+  const byIndex = (p, q) => p - q;
   function separate() {
     for (let pass = 0; pass < SEP_PASSES; pass++) {
+      rebuildGrid();
+      // One largest radius for the overlap itself, two more for how far pushes
+      // earlier in this pass can have moved a neighbour since it was filed (a
+      // single push is at most one radius).
+      const reachPad = grid.maxRadius * 3 + GRID_PAD;
       for (let i = 0; i < units.length; i++) {
         const a = units[i];
         if (a.ghost || !a.alive) continue; // phasing through a tangle / dead
-        for (let j = i + 1; j < units.length; j++) {
+        const reach = a.radius + reachPad;
+        near(a.position.x, a.position.z, reach, _sepNear);
+        _sepIdx.length = 0;
+        const ax0 = a.position.x, az0 = a.position.z, reach2 = reach * reach;
+        for (const b of _sepNear) {
+          if (b._gridIdx <= i) continue;
+          const dx = b.position.x - ax0, dz = b.position.z - az0;
+          if (dx * dx + dz * dz <= reach2) _sepIdx.push(b._gridIdx);
+        }
+        _sepIdx.sort(byIndex);
+        for (const j of _sepIdx) {
           const b = units[j];
           if (a.isAir !== b.isAir || b.ghost || !b.alive) continue; // air flies over ground
           let dx = b.position.x - a.position.x;
@@ -613,7 +678,7 @@ export function createUnits({
       if (!type) return null;
       let px = x, pz = z;
       if (snap && !type.isAir && navGrid) ({ x: px, z: pz } = navGrid.nearestOpenWorld(x, z));
-      const u = makeUnit(app, type, navGrid, px, pz, getUnits, team);
+      const u = makeUnit(app, type, navGrid, px, pz, near, team);
       units.push(u);
       onSpawn(u);
       return u;
@@ -621,9 +686,20 @@ export function createUnits({
 
     /** Driven by the single game loop in rtsGame.js. */
     update(dt) {
+      rebuildGrid();                 // for avoidance, as the units move
       for (const u of units) if (u.alive) u.update(dt);
-      separate();
+      separate();                    // re-files per pass
+      rebuildGrid();                 // final positions, for combat right after
     },
+
+    /**
+     * Living units within about `r` of (x, z) — a SUPERSET from the grid: every
+     * unit in the cells the circle touches, as of the last units.update. Keep
+     * your own exact distance test. Fills and returns `out`.
+     */
+    near(x, z, r, out) { return near(x, z, r + GRID_PAD, out); },
+    /** A unit type's collision radius, metres. */
+    radiusOf(typeKey) { return UNIT_TYPES[typeKey]?.radius; },
     setSpeedScale(s) { for (const u of units) u.speedScale = s; },
     get alive() { return units.filter((u) => u.alive); },
   };

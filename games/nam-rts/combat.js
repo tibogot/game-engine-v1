@@ -24,8 +24,8 @@ export function createCombat({
   smoke = null, cover = null, onDeath = () => {},
 }) {
   const _muzzle = new THREE.Vector3();
-
-  const combatants = () => [...units.list, ...structures.list];
+  /** Scratch for acquire's grid query — acquisition runs one combatant at a time. */
+  const _nearUnits = [];
 
   /** Where a shot leaves from. */
   function muzzleOf(e) {
@@ -58,18 +58,23 @@ export function createCombat({
   function acquire(e) {
     let best = null, bestD = Infinity;
     const reach = e.range * ACQUIRE_MULT;
-    for (const o of combatants()) {
-      if (!o.alive || o.team === e.team) continue;
-      if (o.passive) continue;
-      if (o.isAir && !e.canHitAir) continue; // jeeps can't shoot helicopters
+    const consider = (o) => {
+      if (!o.alive || o.team === e.team) return;
+      if (o.passive) return;
+      if (o.isAir && !e.canHitAir) return; // jeeps can't shoot helicopters
       const d = flat(e, o);
-      if (d > reach || d >= bestD) continue;
+      if (d > reach || d >= bestD) return;
       // Concealment before smoke: it is a grid lookup and two float compares,
       // where the smoke test walks every live column.
-      if (cover && d > reach * cover.acquireRangeScale(e.position.x, e.position.z, o)) continue;
-      if (!canSee(e, o)) continue;
+      if (cover && d > reach * cover.acquireRangeScale(e.position.x, e.position.z, o)) return;
+      if (!canSee(e, o)) return;
       bestD = d; best = o;
-    }
+    };
+    // Units from the spatial grid (only those within reach are ever looked
+    // at — this was every unit, for every idle unit, every tick: O(n²) and an
+    // array copy per call), then the structures, which are few.
+    for (const o of units.near(e.position.x, e.position.z, reach, _nearUnits)) consider(o);
+    for (const o of structures.list) consider(o);
     return best;
   }
 
@@ -119,71 +124,77 @@ export function createCombat({
     }
   }
 
-  function update(dt) {
-    for (const e of combatants()) {
-      if (!e.alive || !e.range) continue;
-      // A building still rising out of the ground, or a turret still running its
-      // calibration sweep, is a target but not yet a shooter. (It stays in
-      // `acquire`'s candidate list — enemies can and should shoot it meanwhile.)
-      if (e.constructing || (e.deploy ?? 1) < 1) continue;
-      e.cooldown = Math.max(0, (e.cooldown ?? 0) - dt);
+  /** One combatant's turn: forget, acquire, close in, shoot. */
+  function engage(e, dt) {
+    if (!e.alive || !e.range) return;
+    // A building still rising out of the ground, or a turret still running its
+    // calibration sweep, is a target but not yet a shooter. (It stays in
+    // `acquire`'s candidate list — enemies can and should shoot it meanwhile.)
+    if (e.constructing || (e.deploy ?? 1) < 1) return;
+    e.cooldown = Math.max(0, (e.cooldown ?? 0) - dt);
 
-      // Forget dead targets.
-      if (e.target && !e.target.alive) e.target = null;
-      if (e.attackTarget && !e.attackTarget.alive) e.attackTarget = null;
+    // Forget dead targets.
+    if (e.target && !e.target.alive) e.target = null;
+    if (e.attackTarget && !e.attackTarget.alive) e.attackTarget = null;
 
-      // An explicit attack order beats auto-acquire.
-      let tgt = e.attackTarget ?? e.target;
-      if (!tgt || !tgt.alive) {
-        tgt = acquire(e);
-        e.target = tgt;
-      }
-      if (!tgt) continue;
-
-      const d = flat(e, tgt);
-
-      // Units close the distance; structures can't move, so they just wait.
-      if (!e.isStructure) {
-        if (d > e.range * 0.9) {
-          // Chase — re-issue periodically so we track a moving target without
-          // running A* every frame. orderTo (not moveOrder) so the attack order
-          // survives.
-          e.chaseCd = (e.chaseCd ?? 0) - dt;
-          if (e.chaseCd <= 0) {
-            e.orderTo(tgt.position.x, tgt.position.z);
-            e.chaseCd = 0.5;
-          }
-          continue; // still closing — hold fire
-        }
-        // In range — hold position and shoot. haltMovement (not stop) so the
-        // attack order survives; stop() would forget the target we're shooting.
-        if (e.isMoving) e.haltMovement();
-      }
-
-      // Smoke rolling in between breaks the shot. An AUTO-acquired target is
-      // forgotten so the unit looks for someone it can actually see; an
-      // explicit attack order is KEPT — the player pointed at that thing, and
-      // silently retargeting would be the game overruling them. Either way it
-      // holds fire, which is what makes a screening grenade worth throwing.
-      if (!canSee(e, tgt)) {
-        if (!e.attackTarget) e.target = null;
-        continue;
-      }
-
-      if (d <= e.range && e.cooldown <= 0) {
-        e.cooldown = 1 / (e.fireRate || 1);
-        e.target = tgt;
-        // Fire a VISIBLE rocket. Damage lands when it connects (see onImpact),
-        // not instantly — so shots read on screen and can chase a moving target.
-        const from = muzzleOf(e);
-        fx.muzzle(from.x, from.y, from.z);
-        projectiles.spawn(from, tgt, e.damage, e);
-        // A muzzle flash in a dark jungle is the loudest thing on the map.
-        // This is what stops concealment being a free permanent buff: it buys
-        // an AMBUSH, and spends itself the moment you take it.
-        cover?.reveal(e);
-      }
+    // An explicit attack order beats auto-acquire.
+    let tgt = e.attackTarget ?? e.target;
+    if (!tgt || !tgt.alive) {
+      tgt = acquire(e);
+      e.target = tgt;
     }
+    if (!tgt) return;
+
+    const d = flat(e, tgt);
+
+    // Units close the distance; structures can't move, so they just wait.
+    if (!e.isStructure) {
+      if (d > e.range * 0.9) {
+        // Chase — re-issue periodically so we track a moving target without
+        // running A* every frame. orderTo (not moveOrder) so the attack order
+        // survives.
+        e.chaseCd = (e.chaseCd ?? 0) - dt;
+        if (e.chaseCd <= 0) {
+          e.orderTo(tgt.position.x, tgt.position.z);
+          e.chaseCd = 0.5;
+        }
+        return; // still closing — hold fire
+      }
+      // In range — hold position and shoot. haltMovement (not stop) so the
+      // attack order survives; stop() would forget the target we're shooting.
+      if (e.isMoving) e.haltMovement();
+    }
+
+    // Smoke rolling in between breaks the shot. An AUTO-acquired target is
+    // forgotten so the unit looks for someone it can actually see; an
+    // explicit attack order is KEPT — the player pointed at that thing, and
+    // silently retargeting would be the game overruling them. Either way it
+    // holds fire, which is what makes a screening grenade worth throwing.
+    if (!canSee(e, tgt)) {
+      if (!e.attackTarget) e.target = null;
+      return;
+    }
+
+    if (d <= e.range && e.cooldown <= 0) {
+      e.cooldown = 1 / (e.fireRate || 1);
+      e.target = tgt;
+      // Fire a VISIBLE rocket. Damage lands when it connects (see onImpact),
+      // not instantly — so shots read on screen and can chase a moving target.
+      const from = muzzleOf(e);
+      fx.muzzle(from.x, from.y, from.z);
+      projectiles.spawn(from, tgt, e.damage, e);
+      // A muzzle flash in a dark jungle is the loudest thing on the map.
+      // This is what stops concealment being a free permanent buff: it buys
+      // an AMBUSH, and spends itself the moment you take it.
+      cover?.reveal(e);
+    }
+  }
+
+  // Two plain loops rather than one over [...units, ...structures]: that
+  // spread built a fresh array of every combatant every tick.
+  function update(dt) {
+    for (const e of units.list) engage(e, dt);
+    for (const e of structures.list) engage(e, dt);
   }
 
   return { update, acquire, onImpact };
