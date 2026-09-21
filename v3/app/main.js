@@ -4589,6 +4589,9 @@ export async function startV3App(opts = {}) {
     try {
       renderer.setRenderTarget(null);
       for (const hook of _preRenderHooks) hook(dt);
+      // After the hooks, which is where a game moves its camera: culling
+      // against last frame's view pops the river in a frame late at the edge.
+      riverV2System?.cullForCamera(camera);
       // Water and decals read a copy of the scene depth, which cannot come out
       // of the multisampled canvas: while any is in the scene, the frame goes
       // through a non-multisampled scene pass even with post FX off.

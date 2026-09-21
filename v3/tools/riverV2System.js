@@ -56,6 +56,12 @@ const MAX_UNDO = 64;
 const ARROW_SPACING = 14;
 /** Metres the ribbon overhangs each bank so the depth test finds the waterline. */
 const RIBBON_OVERHANG = 2.5;
+/** Ribbon rows per culling chunk: at the default 0.8 m step, ~50 m of river. */
+const RIVER_CULL_ROWS = 64;
+/** Metres added to each chunk sphere: wave lift, plus a margin at the view edge. */
+const RIVER_CULL_SLACK = 4;
+const _cullMat = new THREE.Matrix4();
+const _cullFrustum = new THREE.Frustum();
 
 const COL_ACTIVE = 0x7fe9ff;
 const COL_IDLE = 0x2c7f96;
@@ -977,8 +983,79 @@ export class RiverV2System {
     mesh.frustumCulled = true;
     mesh.renderOrder = 10;
     river.mesh = mesh;
+    river.cullChunks = this._ribbonChunks(pos, rows, cols);
+    mesh.userData.viewCulled = true;   // waterSurfaceMap restores the full range
     this.group.add(mesh);
   }
+
+  /**
+   * Bounding spheres for runs of RIVER_CULL_ROWS rows, with the index range
+   * each one covers — what cullForCamera tests instead of the one sphere.
+   *
+   * One sphere around a whole river is useless for culling: nam-valley's is
+   * 362 m across, so it touches the view from most of the map. MEASURED at RTS
+   * zoom-out with 0 of the river's 13,949 vertices on screen, it was still
+   * drawn every frame, and drawing ANY water triggers the two full-resolution
+   * framebuffer copies every water shader shares (lakeMaterial.js
+   * sceneColorGrab / sceneDepthGrab): 1.9 ms at 1919x888 for no water pixels.
+   */
+  _ribbonChunks(pos, rows, cols) {
+    const chunks = [];
+    const stride = cols + 1;
+    const box = new THREE.Box3(), p = new THREE.Vector3();
+    for (let r0 = 0; r0 < rows - 1; r0 += RIVER_CULL_ROWS) {
+      const r1 = Math.min(rows - 1, r0 + RIVER_CULL_ROWS);   // last row, inclusive
+      box.makeEmpty();
+      for (let r = r0; r <= r1; r++) {
+        for (let c = 0; c <= cols; c++) {
+          const v = (r * stride + c) * 3;
+          box.expandByPoint(p.set(pos[v], pos[v + 1], pos[v + 2]));
+        }
+      }
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      sphere.radius += RIVER_CULL_SLACK;
+      chunks.push({ sphere, start: r0 * cols * 6, end: r1 * cols * 6 });
+    }
+    return chunks;
+  }
+
+  /**
+   * Draw only the stretch of each river the camera can see: one contiguous
+   * drawRange from the first visible chunk to the last, or nothing at all. Call
+   * once per frame AFTER the camera has moved and BEFORE the render — a stale
+   * camera would pop the river in a frame late at the screen edge.
+   *
+   * The ribbon's group is the identity (the vertices are world space), so the
+   * chunk spheres are tested as they are. Anything else that renders these
+   * meshes with its own camera must restore the full range first — see
+   * waterSurfaceMap's bake.
+   */
+  cullForCamera(camera) {
+    camera.updateMatrixWorld();
+    _cullMat.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    // The same call three's own culling makes (common/Renderer.js).
+    _cullFrustum.setFromProjectionMatrix(_cullMat, camera.coordinateSystem, camera.reversedDepth);
+    let visible = 0;
+    for (const r of this.rivers) {
+      const m = r.mesh, chunks = r.cullChunks;
+      if (!m || !chunks?.length) continue;
+      let first = -1, last = -1;
+      for (let i = 0; i < chunks.length; i++) {
+        if (!_cullFrustum.intersectsSphere(chunks[i].sphere)) continue;
+        if (first < 0) first = i;
+        last = i;
+      }
+      m.visible = first >= 0;
+      if (first >= 0) {
+        m.geometry.setDrawRange(chunks[first].start, chunks[last].end - chunks[first].start);
+        visible++;
+      }
+    }
+    this._visibleCount = visible;
+  }
+
+  /** Rivers that drew anything in the last cullForCamera. */
+  get visibleCount() { return this._visibleCount ?? this.rivers.length; }
 
   rebuildMeshes() {
     for (const r of this.rivers) this._buildRibbon(r);

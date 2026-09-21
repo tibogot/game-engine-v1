@@ -120,8 +120,18 @@ export function createWaterSurfaceMap({ worldSize, maxHeight, resolution = 1024 
       scene.add(obj);
       obj.traverse((c) => {
         if (c.isMesh) {
-          _swapped.push({ mesh: c, material: c.material });
+          // Whole surface, whatever the view camera culled it to: River v2
+          // trims its drawRange and hides reaches that are off screen
+          // (riverV2System.cullForCamera), and this map must hold all of it.
+          // Only meshes flagged `viewCulled` — a lake hidden on purpose stays
+          // out of the bake as before.
+          const dr = c.geometry.drawRange;
+          _swapped.push({ mesh: c, material: c.material, visible: c.visible, start: dr.start, count: dr.count });
           c.material = heightMat;
+          if (c.userData.viewCulled) {
+            c.visible = true;
+            c.geometry.setDrawRange(0, Infinity);
+          }
         }
       });
     }
@@ -131,7 +141,11 @@ export function createWaterSurfaceMap({ worldSize, maxHeight, resolution = 1024 
     renderer.render(scene, camera);
     renderer.setRenderTarget(prevRT);
 
-    for (const { mesh, material } of _swapped) mesh.material = material;
+    for (const { mesh, material, visible, start, count } of _swapped) {
+      mesh.material = material;
+      mesh.visible = visible;
+      mesh.geometry.setDrawRange(start, count);
+    }
     for (const { obj, parent } of _borrowed) {
       if (parent) parent.add(obj);
       else scene.remove(obj);
