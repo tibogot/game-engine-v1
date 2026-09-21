@@ -248,7 +248,9 @@ export class FoliageScatterSystem {
       const fade = mix(float(0.35), float(1), d.z);
       const size = row(p.z, 1).w
         .mul(mix(float(1).sub(fu.uSizeVar), float(1).add(fu.uSizeVar), hash(plant.add(577))))
-        .mul(fade);
+        .mul(fade)
+        // Zoom thinning: shrink away rather than pop (ScatterField.thinScale).
+        .mul(field.thinScale(plant));
 
       const mag = length(vec2(d.x, d.y));
       const inv = float(1).div(max(mag, 1e-4));

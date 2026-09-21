@@ -53,6 +53,17 @@ import { scatterClump, scatterRuleKeep } from "./scatterNoise.js";
 import { scatterFrustumVisible } from "./gpuCull.js";
 import { LAYERS } from "../layers.js";
 
+/** Hash seed of the setThin keep test — shared by the compute and thinScale. */
+const THIN_SEED = 6151;
+/** Share of the hash range over which a thinned plant shrinks from full to 0. */
+const THIN_BAND = 0.1;
+/**
+ * The hash a plant must be under to stay, from the thin fraction k. Stretched
+ * by the band so k = 1 leaves every plant at FULL size (no hash is within a
+ * band of 1 + band), and k = 0 still removes them all.
+ */
+const thinThreshold = (k) => k.mul(1 + THIN_BAND);
+
 export class ScatterField {
   /**
    * @param {object} o
@@ -318,8 +329,10 @@ export class ScatterField {
       const inView = frustumVis.greaterThan(0.5);
       // A runtime thinning, independent of the painted density: its own hash,
       // so the plants that go are always the same ones and a still camera never
-      // flickers. 1 keeps every plant — bit for bit the old field.
-      const thinKeep = step(hash(instanceIndex.add(6151)), u.uThin);
+      // flickers. 1 keeps every plant — bit for bit the old field. The vertex
+      // stage shrinks a plant to nothing on its way out (thinScale), so this
+      // cut happens at zero size and never shows as a pop.
+      const thinKeep = step(hash(instanceIndex.add(THIN_SEED)), thinThreshold(u.uThin));
 
       If(densityKeep.mul(mapStay).mul(stochasticKeep).mul(thinKeep).mul(max(frustumVis, castsShadow)).greaterThan(0.5), () => {
         If(inView.and(nearKeep.greaterThan(0.5)), () => {
@@ -557,6 +570,18 @@ export class ScatterField {
    */
   setThin(k) {
     this.u.uThin.value = Math.max(0, Math.min(1, Number.isFinite(k) ? k : 1));
+  }
+
+  /**
+   * Size multiplier (0..1) for a plant under setThin, for the plant module's
+   * vertex stage: 1 for a plant well inside the kept share, falling to 0 at
+   * the point the compute drops it. So while the camera zooms, plants grow in
+   * and shrink away instead of popping. The same hash as the compute's keep,
+   * on the same plant id (the compact buffer's value), so the two agree.
+   * @param {Node} plant  the plant's index into bufPos / bufDir
+   */
+  thinScale(plant) {
+    return smoothstep(0, THIN_BAND, thinThreshold(this.u.uThin).sub(hash(plant.add(THIN_SEED))));
   }
 
   /**
