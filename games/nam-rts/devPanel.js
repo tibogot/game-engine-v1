@@ -24,7 +24,7 @@ const ARROW_SVG =
   + '<polyline points="6 9 12 15 18 9"></polyline></svg>';
 
 export function createDevPanel({
-  app, navGrid, rtsCamera, units, minimap, foliageZoom = null,
+  app, navGrid, rtsCamera, units, minimap, foliageZoom = null, stress = null,
   worldName = "procedural default",
   onLoadWorldFile,
   onLoadDefaultWorld,
@@ -219,6 +219,31 @@ export function createDevPanel({
             green tint it lays on distant ground. MEASURED: about <b>1.4 ms</b> zoomed
             out and <b>0.8 ms</b> close up at native resolution — it costs most where it
             shows least. Off, open ground shows its terrain paint (sand reads as sand).</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Stress</div>
+        <div class="section-body">
+          <button class="action-btn" id="dv-st-soldiers" type="button">+50 soldiers</button>
+          <button class="action-btn" id="dv-st-smoke" type="button">+4 smoke</button>
+          <button class="action-btn" id="dv-st-fires" type="button">+10 fires</button>
+          <button class="action-btn" id="dv-st-gunfire" type="button">Gunfire: off</button>
+          <button class="action-btn" id="dv-st-clear" type="button">Clear stress</button>
+          <div class="dv-hint">Spawned at the camera focus, straight into the systems — no
+            combat, no waves. Soldiers idle on your side. <span id="dv-st-live"></span></div>
+          <div class="prop-row">
+            <span class="prop-label">Also close-up</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-st-close" type="button" aria-label="Also close-up">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <button class="action-btn primary" id="dv-st-run" type="button">Run price list</button>
+          <div class="dv-hint" id="dv-st-status">Prices each ingredient at full zoom-out (and at the
+            play zoom if ticked), at two resolutions above native so vsync cannot hide it,
+            extrapolated to native. About 3 minutes a view: <b>keep this tab focused and
+            do not touch the mouse or keys</b> — it aborts if the page loses focus.</div>
+          <div id="dv-st-results"></div>
         </div>
       </div>
 
@@ -491,6 +516,13 @@ export function createDevPanel({
       margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--text-dim);
     }
     #rts-dev .dv-hint b { color: var(--text); font-weight: 600; }
+    #rts-dev .dv-stress-table { width: 100%; margin-top: 6px; border-collapse: collapse; font-size: 11px; }
+    #rts-dev .dv-stress-table th, #rts-dev .dv-stress-table td {
+      padding: 2px 4px; text-align: right; border-bottom: 1px solid var(--border); color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    #rts-dev .dv-stress-table th { color: var(--text-dim); font-weight: 500; }
+    #rts-dev .dv-stress-table td:first-child, #rts-dev .dv-stress-table th:first-child { text-align: left; }
     #rts-dev .dv-world-name {
       flex: 1; min-width: 0; max-width: none;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -744,6 +776,74 @@ export function createDevPanel({
     setGrass(on);
     localStorage.setItem(GRASS_KEY, on ? "1" : "0");
   });
+
+  // ── Stress ──────────────────────────────────────────────────────────────────
+  // Manual spawners to LOOK at a busy battlefield, and the price list that
+  // measures one. See stressTest.js for what is measured and why.
+  {
+    const live = $("#dv-st-live"), status = $("#dv-st-status"), results = $("#dv-st-results");
+    const gunBtn = $("#dv-st-gunfire"), closeBtn = $("#dv-st-close"), runBtn = $("#dv-st-run");
+    let gunOn = false;
+    const showLive = () => {
+      if (!stress || !live.isConnected) return;
+      live.textContent = `${stress.soldierCount} stress soldiers, ${app?.smoke?.activeCount?.() ?? 0} smoke, `
+        + `${app?.fire?.activeCount?.() ?? 0} fires.`;
+    };
+    setInterval(showLive, 500);
+    if (!stress) {
+      for (const id of ["soldiers", "smoke", "fires", "gunfire", "clear", "run"]) $(`#dv-st-${id}`).disabled = true;
+    } else {
+      $("#dv-st-soldiers").addEventListener("click", () => stress.soldiers(50));
+      $("#dv-st-smoke").addEventListener("click", () => stress.smoke(4));
+      $("#dv-st-fires").addEventListener("click", () => stress.fires(10));
+      gunBtn.addEventListener("click", () => {
+        gunOn = !gunOn;
+        stress.setGunfire(gunOn);
+        gunBtn.textContent = `Gunfire: ${gunOn ? "on" : "off"}`;
+      });
+      $("#dv-st-clear").addEventListener("click", () => {
+        stress.clear();
+        gunOn = false;
+        gunBtn.textContent = "Gunfire: off";
+      });
+      closeBtn.addEventListener("click", () => closeBtn.classList.toggle("checked"));
+
+      const cell = (v) => (Number.isFinite(v) ? v.toFixed(2) : "–");
+      const render = (r) => {
+        let html = "";
+        for (const [view, v] of Object.entries(r.views)) {
+          html += `<div class="dv-hint"><b>${view === "out" ? "Full zoom-out" : "Play zoom"}</b> — baseline `
+            + `${cell(v.baseNative)} → ${cell(v.baseEndNative)} ms at native (start → end; a big move is drift).</div>`;
+          html += `<table class="dv-stress-table"><tr><th>adds</th><th>frame ms</th><th>CPU ms</th></tr>`;
+          for (const row of v.rows) {
+            html += `<tr><td>${row.what}</td><td>+${cell(row["frame ms, native est."])}</td>`
+              + `<td>+${cell(row["game CPU ms"])}</td></tr>`;
+          }
+          html += `</table>`;
+        }
+        results.innerHTML = html;
+      };
+
+      runBtn.addEventListener("click", async () => {
+        if (stress.running) { stress.stop(); return; }
+        gunOn = false;
+        gunBtn.textContent = "Gunfire: off";
+        runBtn.textContent = "Stop";
+        results.innerHTML = "";
+        const views = closeBtn.classList.contains("checked") ? ["out", "close"] : ["out"];
+        const r = await stress.run({ views, onProgress: (t) => { status.textContent = `Measuring ${t}… keep this tab focused.`; } });
+        runBtn.textContent = "Run price list";
+        if (r) {
+          status.textContent = "Done. Native estimates; the full table (both resolutions, per unit) is in the console and window.__NAM_STRESS.";
+          render(r);
+        } else {
+          status.textContent = stress.abortReason
+            ? `Aborted: ${stress.abortReason}. Nothing is reported from a partial run.`
+            : "Stopped.";
+        }
+      });
+    }
+  }
 
   // ── Smoke ───────────────────────────────────────────────────────────────────
   // Drops a column at whatever the camera is looking at, which is the only

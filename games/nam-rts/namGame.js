@@ -100,6 +100,7 @@ import { createCoverOverlay } from "./coverOverlay.js";
 import { createCraterSystem } from "./craterSystem.js";
 import { createFogOfWar } from "./fogOfWar.js";
 import { createSimClock } from "./simClock.js";
+import { createStressTest } from "./stressTest.js";
 
 export async function startNamGame({ container, onStatus = () => {}, fov } = {}) {
   // 1) Boot the v3 engine — renderer, terrain clipmap, sky, grass, water… the
@@ -476,6 +477,12 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   const abilities = createAbilities({ game: { smoke, napalm }, resources });
   app.abilities = abilities;
 
+  // Dev: the stress benchmark prices each ingredient of a battle — spawned
+  // directly, never through combat or waves, which will change. Idle unless
+  // the dev panel's Stress section is used.
+  const stress = createStressTest({ app, units, smoke, fire, fx, projectiles, napalm, rtsCamera });
+  app.stress = stress;
+
   // Hold V to see the ground. Armed only when something is selected: the
   // question it answers is "where do I send THESE men", and with nothing
   // selected there is nobody to send.
@@ -674,7 +681,7 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   };
 
   const devPanel = createDevPanel({
-    app, navGrid, rtsCamera, units, minimap, foliageZoom,
+    app, navGrid, rtsCamera, units, minimap, foliageZoom, stress,
     worldName: worldState.name,
     onLoadWorldFile: async (file) => afterWorldLoad(await levels.loadFile(file)),
     onLoadDefaultWorld: async () => afterWorldLoad(await levels.loadDefault()),
@@ -736,7 +743,13 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // would read as a stutter in something that should drift.
   let renderTime = 0;
 
+  // The game's own CPU per frame — everything in tick — for the stress
+  // benchmark's price list. Two performance.now() calls; nothing else reads it.
+  const frameStats = { tickMs: 0 };
+  app.frameStats = frameStats;
+
   const tick = (dt) => {
+    const tickStart = performance.now();
     renderTime += dt;
     rtsCamera.update(dt);                 // input, at the real frame rate
     app.setFoliageThin?.(foliageKeepAt(rtsCamera.getView().zoomT));
@@ -766,6 +779,8 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     resourceHud.update(resources, units); // supplies / harvesters / nodes left
     waveHud.update(dt, waves, match);     // wave counter, match objective, win/lose
     minimap.draw();
+    stress.update(dt);                    // dev: continuous effect spawners, if running
+    frameStats.tickMs = performance.now() - tickStart;
   };
   app.addPreRenderHook(tick);
 

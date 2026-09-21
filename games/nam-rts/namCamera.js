@@ -264,6 +264,16 @@ export function createRtsCamera({ app } = {}) {
      * Looking at or above the horizon the top ray never lands, so `farGround`
      * clamps to the camera's own far plane.
      */
+    /**
+     * Zoom to `t` (0 = closest, 1 = furthest — the same scale as zoomT). By
+     * default it lands at once, so a scripted view (the stress benchmark, a
+     * cutscene) is exact on the next frame; `snap: false` eases like the wheel.
+     */
+    setZoom(t, { snap = true } = {}) {
+      const hi = Math.min(params.distMax, DIST_CEILING);
+      distTarget = clampDist(DIST_MIN + THREE.MathUtils.clamp(t, 0, 1) * (hi - DIST_MIN));
+      if (snap) dist = distTarget;
+    },
     getView() {
       const halfFov = (camera.fov ?? 60) * DEG * 0.5;
       const h = Math.max(camera.position.y - focus.y, 0.01);

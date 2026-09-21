@@ -237,5 +237,13 @@ export function createFireSystem({ app }) {
     }
   }
 
-  return { addFire, update, params: u };
+  /** Put every fire out; their flames finish the life they are in and go. */
+  function clear() {
+    for (const f of fires) f.timeLeft = 0;
+  }
+
+  /** Live fires — the blob pool (MAX_BLOBS) is shared, so this can exceed what burns visibly. */
+  function activeCount() { return fires.length; }
+
+  return { addFire, update, clear, activeCount, params: u };
 }
