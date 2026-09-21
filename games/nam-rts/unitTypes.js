@@ -2,6 +2,24 @@
 // (unitRenderer.js). Logic fields (speed, radius, hp) and render fields (model,
 // scale, bar size) live together here because they describe one unit type, but
 // the two consumers stay independent.
+//
+// ── THE SCALE RULE: real size × RTS_SCALE, for units AND for anything built ──
+//
+// One factor for the whole man-made world, so a soldier, the jeep he rides, the
+// sandbags he hides behind and the HQ he comes out of are in proportion to each
+// other. NATURE STAYS REAL (palms, grass, the terrain): nobody notices a 1.3x
+// oil drum beside a palm, but everyone notices a 3.8 m man standing head and
+// shoulders above elephant grass that is supposed to hide him — which is what
+// the old 2.1x soldier did to the concealment rule.
+//
+// 1.3 and not 1 because a top-down camera needs a little help: at play zoom the
+// screen resolves ~14 px per metre (rtsObjectProps.js), so a 2.3 m soldier is
+// ~33 px tall — about a StarCraft II marine. Readability beyond that comes from
+// rings, health bars and silhouettes, not from giants.
+export const RTS_SCALE = 1.3;
+/** Real sizes the numbers below are derived from, metres. */
+const REAL = { soldierHeight: 1.8, jeepLength: 3.35 /* M151 MUTT */ };
+
 export const UNIT_TYPES = {
   helicopter: {
     typeKey: "helicopter",
@@ -36,9 +54,9 @@ export const UNIT_TYPES = {
     isAir: false,
     hover: 0,
     speed: 20,
-    // The jeep model is ~5 m long, so a 2.6 radius circle only just circumscribes
-    // it — two "correctly separated" jeeps still look like they're touching.
-    radius: 3.4,
+    // Radius a little over half the length, so two "correctly separated" jeeps
+    // do not look like they are touching (2.6 against the old 5 m model did).
+    radius: 2.9,
     turnRate: 3.4,  // rad/s — heading follows ACTUAL motion, rate-limited
     maxHp: 120,
     // combat
@@ -50,12 +68,12 @@ export const UNIT_TYPES = {
 
     // render
     url: "/models/jeep_compressed.glb",
-    targetLength: 5,
+    targetLength: REAL.jeepLength * RTS_SCALE,   // 4.4 m (was 5: 1.5x)
     excludeRotorsFromBox: false,
     facingOffset: 0,
-    ringRadius: 4,
-    barWidth: 4.5,
-    barY: 4,
+    ringRadius: 3.5,
+    barWidth: 4,
+    barY: 3.6,
     castShadow: true,
   },
   builder: {
@@ -207,7 +225,11 @@ UNIT_TYPES.soldier = {
   isAir: false,
   hover: 0,
   speed: 11,
-  radius: 2.6,
+  // Personal space, not the body: a 2.3 m man is ~0.8 m wide, and a metre of
+  // radius keeps a squad about two metres apart — close enough to read as a
+  // group, and to fit in cover. Was 2.6 (a 5.2 m circle) for the 3.8 m soldier;
+  // it also sets avoidance's look-ahead (5 radii), so crowds got cheaper too.
+  radius: 1.0,
   turnRate: 6,
   maxHp: 60,
   // combat — rifle: fast, weak, can plink at helicopters
@@ -220,12 +242,13 @@ UNIT_TYPES.soldier = {
   // and scales by HEIGHT (a humanoid's horizontal footprint is meaningless).
   url: "/models/testsolanim.glb",
   skinned: true,
-  targetHeight: 3.8,
+  targetHeight: REAL.soldierHeight * RTS_SCALE,   // 2.34 m (was 3.8: 2.1x)
   excludeRotorsFromBox: false,
   facingOffset: 0,
-  ringRadius: 4.4,
-  barWidth: 6,
-  barY: 5.6,
+  ringRadius: 1.7,
+  // Narrower than the 3.2 m muster spacing, or a squad's bars merge into strips.
+  barWidth: 2.2,
+  barY: 3.4,
   // Soldiers cast shadows again. They were switched off when each one was his own
   // SkinnedMesh: the shadow pass redraws every caster once per CSM cascade, so six
   // soldiers cost 18 draws. Now the whole crowd is ONE compute-skinned mesh

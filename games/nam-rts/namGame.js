@@ -359,6 +359,19 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   const structures = await createStructures({ app, navGrid, resources });
   app.structures = structures;
 
+  // A FIREBASE IS BULLDOZED BARE. nam-valley's jungle paint runs straight over
+  // the HQ site, and with a hangar box it did not show — the palms were inside
+  // it. The Quonset is a barrel you can see over, and palms came up through it.
+  // Cleared around the BUILDING's own centre, which is 6 m behind the base
+  // point: the door is on the -Z face and the barrel runs 28 m back from it.
+  // Grass too, over a tighter disc — it grew up through the Quonset's floor and
+  // showed in the open doorway; the yard around an HQ is bare, trampled earth.
+  // Runtime only (see app.clearVegetation), so it runs again after every load.
+  const clearHqGround = () => {
+    const b = structures.base;
+    if (b?.alive !== false) app.clearVegetation?.(b.position.x, b.position.z + 6, 30, { grass: 26 });
+  };
+  clearHqGround();
 
   onStatus("Seeding resource nodes…");
   await resources.placeNodes(structures.base.position);
@@ -668,6 +681,7 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     // a fresh CPU mirror so re-seating reads the FINAL ground, not a stale one.
     await app.refreshWorldHeights?.();
     await structures.reanchorToTerrain(app);
+    clearHqGround();              // the load restored the saved paint over it
     for (const b of buildings.list) {
       b.position.y = app.getWorldHeight?.(b.position.x, b.position.z) ?? b.position.y;
     }

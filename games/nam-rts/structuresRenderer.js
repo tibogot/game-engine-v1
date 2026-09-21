@@ -14,6 +14,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materialColor } from "three/tsl";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
+import { buildQuonsetHQ } from "../../v3/render/objects/rtsQuonset.js";
 import {
   turretBodyGeometry, turretHeadGeometry, turretEyeGeometry, turretHeadMatrix,
   TURRET_PALETTE, HEAD_Y, MUZZLE_LOCAL, EYE_LOCAL,
@@ -258,7 +259,14 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
   const kindOfMesh = new Map(Object.values(kinds).map((k) => [k.im, k]));
 
   // ── Base views: animated hangar groups (player + optional enemy HQ) ─────────
-  const baseView = buildBaseView(structureMat, bloom, "player");
+  // The PLAYER'S HQ is a Quonset (v3/render/objects/rtsQuonset.js): the building
+  // of the American war, at the game's 1.3x scale, with hinged doors that swing
+  // open while it produces. It exposes the same userData the old hangar did —
+  // beacon, lamps as `strips` — plus setDoor(t), which the sync below prefers.
+  // The enemy's HQ keeps the old model until the other side gets its own.
+  const quonset = buildQuonsetHQ({}, bloom);
+  const baseView = quonset.group;
+  baseView.userData = { beacon: quonset.beacon, strips: quonset.lamps, setDoor: quonset.setDoor };
   if (structures.base) {
     const bp = structures.base.position;
     baseView.position.set(bp.x, bp.y, bp.z);
@@ -356,9 +364,17 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         baseView.position.set(base.position.x, base.position.y, base.position.z);
         const producing = (base.queue?.length ?? 0) > 0 || (base.progress ?? 0) > 0;
         doorOpen += ((producing ? 1 : 0) - doorOpen) * Math.min(1, dt * 4);
-        baseView.userData.door.position.y = DOOR_CLOSED_Y + doorOpen * DOOR_TRAVEL;
-        const s = producing ? 1.2 + 0.5 * Math.sin(_t2 * 6) : 0.7;
-        baseView.userData.strips.scale.set(s, 1, s);
+        const ud = baseView.userData;
+        if (ud.setDoor) {
+          ud.setDoor(doorOpen);
+          // Work lamps: steady when idle, pulsing while a unit is being built.
+          const s = producing ? 1.15 + 0.35 * Math.sin(_t2 * 6) : 0.85;
+          for (const l of ud.strips.children) l.scale.setScalar(s);
+        } else {
+          ud.door.position.y = DOOR_CLOSED_Y + doorOpen * DOOR_TRAVEL;
+          const s = producing ? 1.2 + 0.5 * Math.sin(_t2 * 6) : 0.7;
+          ud.strips.scale.set(s, 1, s);
+        }
       }
     }
 

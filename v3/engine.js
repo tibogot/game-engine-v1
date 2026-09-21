@@ -65,6 +65,8 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/water/worldOceanV2.js",
   "v3/render/roads/wetRoad.js",
   "v3/props/liveProps.js",
+  // RTS object kit: structures built from the shared parts (a game places them)
+  "v3/render/objects/rtsQuonset.js",
   // Vehicle physics (also drives the editor's play-mode cars)
   "v3/play/modularRoadVehicle.js",
   "v3/play/modularRoadBvh.js",

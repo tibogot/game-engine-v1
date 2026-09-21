@@ -104,7 +104,7 @@ import { buildVegetationHeader, drawFlowerThumb } from "../ui/buildVegetationHea
 import { FlowerSystem } from "../render/grass/flowerSystem.js";
 import { FlowerDensity } from "../render/grass/flowerDensity.js";
 import { FoliageScatterSystem, bakeFoliageThumbnail } from "../render/foliage/foliageSystem.js";
-import { ScatterDensity } from "../render/scatter/scatterDensity.js";
+import { ScatterDensity, stampScatterDensity } from "../render/scatter/scatterDensity.js";
 import { AmbientFxSystem } from "../render/ambient/ambientFxSystem.js";
 import { createAmbientFxState, AMBIENT_EFFECT_COUNT } from "./state/ambientFxState.js";
 import { createFoliageScatterState, createSusukiPlantState, FOLIAGE_FIELD, SUSUKI_FIELD, TALL_PLANT_COUNT } from "./state/foliageScatterState.js";
@@ -11879,6 +11879,27 @@ export async function startV3App(opts = {}) {
      * fixed-step simulation cannot wait on a GPU readback.
      */
     sampleFoliageDensity: (x, z) => foliageDensity.sampleAt(x, z, WORLD_SIZE),
+    /**
+     * Clear the painted jungle in a disc: ground foliage (palms, ferns, bamboo…)
+     * and the tall-plant field (susuki, elephant grass) out to `radius`, and the
+     * short grass out to `grass` metres (0 = leave the grass). Fully cleared
+     * inside ~2/3 of each radius, feathering to untouched at its edge, so a
+     * clearing has a ragged margin rather than a drawn circle.
+     *
+     * For a game site that must not be overgrown — a firebase was bulldozed
+     * bare. RUNTIME ONLY: it edits the loaded paint and is not saved, so call it
+     * after a level load (which restores the saved paint over it). Anything that
+     * reads the paint (sampleFoliageDensity, concealment) sees the clearing at
+     * once, because the paint lives on the CPU.
+     */
+    clearVegetation(x, z, radius, { edge = 1, grass = 0 } = {}) {
+      const erase = { cx: x, cz: z, radius, strength: 3, falloff: edge, worldSize: WORLD_SIZE, channel: 0, erase: true };
+      foliageDensity.stamp(erase);
+      _foliageUsedDirty = true;
+      const tall = grassTerrainData?.susukiDensityTex;
+      if (tall && stampScatterDensity(tall.image.data, grassTerrainData.densityRes, erase)) tall.needsUpdate = true;
+      if (grass > 0) grassTerrainData?.stampDensity({ ...erase, radius: grass });
+    },
     /**
      * The same, for the TALL-PLANT field (susuki, elephant grass) — the other
      * thing on this terrain a standing man can disappear into. Its three types
