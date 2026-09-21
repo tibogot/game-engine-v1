@@ -186,7 +186,23 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     terrainFeatures: leanTerrain
       ? { cursor: false, snow: false, baseStyle: "flat" }
       : { cursor: false },
-    splatFeatures:   { solo: false },
+    /**
+     * SIX PAINT LAYERS, NOT SEVEN. nam-valley's slot 6 is "Snow", and the
+     * splatmap says it is painted on 0.00% of the map — counted over all
+     * 2048² texels, not assumed. It was still sampled on every pixel, because
+     * the layer block costs what is DECLARED, not what is painted.
+     *
+     * This is the only kind of terrain saving this backend gives up: a runtime
+     * branch around the same taps is already known not to work (splatOverlayTsl
+     * measured seven uniform branches costing 4.3 ms while switched off), and
+     * neither smaller textures nor lower anisotropy moved the frame much. Only
+     * the static tap count does.
+     *
+     * The slot still exists everywhere else — save format, texture library,
+     * editor panel — so the map keeps its seventh layer and opens unchanged in
+     * the editor. `?fat=1` compiles all seven back for the A/B.
+     */
+    splatFeatures:   leanTerrain ? { solo: false, layerBudget: 6 } : { solo: false },
   });
   window.__rts = app; // handy for console debugging
 

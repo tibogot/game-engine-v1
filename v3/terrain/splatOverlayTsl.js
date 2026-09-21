@@ -69,6 +69,32 @@ export const SPLAT_FEATURES = {
   triplanar: true,
   /** Large-scale world colour variation (uMacroStrength / uMacroWarmth). */
   macroVariation: true,
+  /**
+   * HOW MANY PAINT LAYERS THIS BUILD COMPILES. The FIRST n slots, 1..NUM_LAYERS.
+   *
+   * The layer block is the single largest thing the terrain shader does and it
+   * is paid PER SLOT DECLARED, not per slot painted: every layer is sampled on
+   * every pixel and the ones with no weight are multiplied by zero. A slot a
+   * map never paints therefore costs exactly as much as the one under 97% of
+   * it.
+   *
+   * MEASURED on nam-valley at RTS zoom-out, 1.70 Mpx, A/B/A with the same
+   * camera: compiling 4 layers instead of 7 took the frame from 22.07 ms to
+   * 20.57 ms. That is the ONLY kind of change this backend rewards — a runtime
+   * branch around the same taps saves nothing (see sampleLayer), and neither
+   * does shrinking the textures (1024 → 512 was 0.2 ms) or dropping anisotropy
+   * (8 → 1 was 0.6 ms). The static tap count is the whole cost.
+   *
+   * Lowering it drops the LAST slots. Their weights stop being read and the
+   * share they held returns to the base colour, so only lower it past a slot a
+   * map genuinely leaves empty — count the splatmap, do not assume. The slots
+   * still EXIST: the texture library, the save format, the panel and every
+   * uniform keep all NUM_LAYERS either way, so a project saved by a lean game
+   * still opens in the editor with its layers intact.
+   *
+   * Default NUM_LAYERS, i.e. bit-for-bit the previous shader.
+   */
+  layerBudget: NUM_LAYERS,
 };
 
 /**
@@ -111,6 +137,12 @@ export function createSplatOverlay(
     throw new Error(`createSplatOverlay: need ${NUM_LAYERS} layer slots, got ${layerSlots.length}`);
   }
   const F = { ...SPLAT_FEATURES, ...features };
+
+  // How many of the NUM_LAYERS slots this build actually compiles (see
+  // SPLAT_FEATURES.layerBudget). Every per-pixel layer loop below runs to NL,
+  // never to NUM_LAYERS; the per-slot CONFIG arrays stay full length so the
+  // caller, the panel and the save format keep their shape.
+  const NL = Math.max(1, Math.min(NUM_LAYERS, Math.round(F.layerBudget ?? NUM_LAYERS)));
 
   const invWS = float(1.0 / WORLD_SIZE);
 
@@ -250,19 +282,21 @@ export function createSplatOverlay(
   }
 
   // ── Weight extraction (pre-auto-paint) ────────────────────────────────────────
-  const rw1 = splatSlice0.r.mul(inBounds), rw2 = splatSlice0.g.mul(inBounds);
-  const rw3 = splatSlice0.b.mul(inBounds), rw4 = splatSlice0.a.mul(inBounds);
-  const rw5 = splatSlice1.r.mul(inBounds), rw6 = splatSlice1.g.mul(inBounds), rw7 = splatSlice1.b.mul(inBounds);
+  // Only the first NL are read. A dropped slot's channel is never fetched, so
+  // its share falls out of the sum and returns to the base colour — which is
+  // why the budget may only be lowered past slots a map leaves EMPTY. Slice 1
+  // is still sampled below NL=5 for the terrain holes in its alpha.
+  const rwAll = [
+    splatSlice0.r.mul(inBounds), splatSlice0.g.mul(inBounds),
+    splatSlice0.b.mul(inBounds), splatSlice0.a.mul(inBounds),
+    splatSlice1.r.mul(inBounds), splatSlice1.g.mul(inBounds), splatSlice1.b.mul(inBounds),
+  ].slice(0, NL);
 
-  const sum7   = rw1.add(rw2).add(rw3).add(rw4).add(rw5).add(rw6).add(rw7);
-  const w0raw  = max(float(0), float(1).sub(sum7));
-  const totalW = max(float(1e-5), w0raw.add(sum7));
+  const sumLayers = rwAll.reduce((a, b) => a.add(b));
+  const w0raw  = max(float(0), float(1).sub(sumLayers));
+  const totalW = max(float(1e-5), w0raw.add(sumLayers));
 
-  const nwExpr = [
-    w0raw.div(totalW),
-    rw1.div(totalW), rw2.div(totalW), rw3.div(totalW), rw4.div(totalW),
-    rw5.div(totalW), rw6.div(totalW), rw7.div(totalW),
-  ];
+  const nwExpr = [w0raw.div(totalW), ...rwAll.map((r) => r.div(totalW))];
 
   // ── Live auto-paint (Unreal-style auto-material) ─────────────────────────
   // Slope/height rules texture the UNPAINTED remainder (the implicit base
@@ -458,7 +492,7 @@ export function createSplatOverlay(
         });
         const layerAlbedos = [];
         const layerOrms    = [];
-        for (let i = 0; i < NUM_LAYERS; i++) {
+        for (let i = 0; i < NL; i++) {
           layerAlbedos.push(sampleLayer(i, albedoArrNode, triW, layerUV[i]));
           layerOrms.push(sampleLayer(i, ormArrNode, triW, layerUV[i]));
         }
@@ -472,7 +506,7 @@ export function createSplatOverlay(
             // baseShare snapshots w0 BEFORE any weight is reassigned.
             const baseShare = w[0].mul(uAutoEnabled).mul(inBounds).toVar();
             const fullPrev  = uAutoFull.mul(inBounds).toVar();
-            for (let i = 0; i < NUM_LAYERS; i++) {
+            for (let i = 0; i < NL; i++) {
               const autoW = cliffW.mul(eq(uAutoCliff, i))
                 .add(flatW.mul(eq(uAutoFlat, i)))
                 .add(highW.mul(eq(uAutoHigh, i)));
@@ -489,7 +523,7 @@ export function createSplatOverlay(
             // a legibility guarantee, not a suggestion, and a rule a player
             // can only half-trust is worse than none.
             const lock = cliffW.mul(uSlopeLock).mul(inBounds).toVar();
-            for (let i = 0; i < NUM_LAYERS; i++) {
+            for (let i = 0; i < NL; i++) {
               w[i + 1].assign(mix(w[i + 1], eq(uAutoCliff, i), lock));
             }
             w[0].assign(w[0].mul(float(1).sub(lock)));
@@ -503,14 +537,14 @@ export function createSplatOverlay(
         if (layerKeep) {
           const kept = [];
           let sumAll = float(0), sumKept = float(0);
-          for (let i = 0; i < NUM_LAYERS; i++) {
+          for (let i = 0; i < NL; i++) {
             const k = w[i + 1].mul(layerKeep[i]).toVar();
             kept.push(k);
             sumAll = sumAll.add(w[i + 1]);
             sumKept = sumKept.add(k);
           }
           const refill = sumAll.div(max(sumKept, float(1e-4))).toVar();
-          for (let i = 0; i < NUM_LAYERS; i++) w[i + 1].assign(kept[i].mul(refill));
+          for (let i = 0; i < NL; i++) w[i + 1].assign(kept[i].mul(refill));
         }
 
         // Layer colors (albedo × AO × tint). The height blend below reads the
@@ -532,7 +566,7 @@ export function createSplatOverlay(
         }
         const layerShaded = [];
         const layerColors = [];
-        for (let i = 0; i < NUM_LAYERS; i++) {
+        for (let i = 0; i < NL; i++) {
           let shaded = layerAlbedos[i].rgb.mul(mix(float(1), layerOrms[i].g, layerSlots[i].uAOStr));
           if (rockTint && compileState.rockShadeSlots[i]) {
             // REPLACES the texture rather than tinting it: the rock props have
@@ -548,7 +582,7 @@ export function createSplatOverlay(
 
         // Linear weight blend — the one path that is always needed.
         let linSum = baseC.mul(w[0]);
-        for (let i = 0; i < NUM_LAYERS; i++) linSum = linSum.add(layerColors[i].mul(w[i + 1]));
+        for (let i = 0; i < NL; i++) linSum = linSum.add(layerColors[i].mul(w[i + 1]));
         const linear = linSum.toVar();
         colV.assign(linear);
 
@@ -572,7 +606,7 @@ export function createSplatOverlay(
               return hA ? mix(lum, layerAlbedos[i].a, hA) : lum;
             });
             let maxWH = w[0].mul(baseH);
-            for (let i = 0; i < NUM_LAYERS; i++) maxWH = max(maxWH, w[i + 1].mul(layerH[i]));
+            for (let i = 0; i < NL; i++) maxWH = max(maxWH, w[i + 1].mul(layerH[i]));
             // CLAMPED AT ZERO, and it has to be. `maxWH` is a weight times a
             // texture's LUMINANCE, so on fully painted ground it is only ~0.3-0.4
             // — below `uHeightContrast` over most of that slider's range. A
@@ -584,13 +618,13 @@ export function createSplatOverlay(
             const thresh = max(float(0), maxWH.sub(uHeightContrast));
 
             const aw = [max(float(0), w[0].mul(baseH).sub(thresh))];
-            for (let i = 0; i < NUM_LAYERS; i++) aw.push(max(float(0), w[i + 1].mul(layerH[i]).sub(thresh)));
+            for (let i = 0; i < NL; i++) aw.push(max(float(0), w[i + 1].mul(layerH[i]).sub(thresh)));
             let totalAW = aw[0];
-            for (let i = 1; i <= NUM_LAYERS; i++) totalAW = totalAW.add(aw[i]);
+            for (let i = 1; i <= NL; i++) totalAW = totalAW.add(aw[i]);
             totalAW = max(float(1e-5), totalAW);
 
             let hBlended = baseC.mul(aw[0].div(totalAW));
-            for (let i = 0; i < NUM_LAYERS; i++) hBlended = hBlended.add(layerColors[i].mul(aw[i + 1].div(totalAW)));
+            for (let i = 0; i < NL; i++) hBlended = hBlended.add(layerColors[i].mul(aw[i + 1].div(totalAW)));
 
             colV.assign(mix(linear, hBlended, uHeightBlend));
           });
@@ -618,8 +652,8 @@ export function createSplatOverlay(
         // Solo mode (greyscale single-layer visualisation) — an EDITOR affordance.
         if (F.solo) {
           If(uSoloLayer.greaterThanEqual(float(0)), () => {
-            let soloW = w[NUM_LAYERS];
-            for (let i = NUM_LAYERS - 1; i >= 0; i--) {
+            let soloW = w[NL];
+            for (let i = NL - 1; i >= 0; i--) {
               soloW = mix(w[i], soloW, step(float(i + 0.5), uSoloLayer));
             }
             colV.assign(vec3(soloW, soloW, soloW));
@@ -628,7 +662,7 @@ export function createSplatOverlay(
 
         if (wantRough) {
           let rSum = roughV.mul(w[0]);
-          for (let i = 0; i < NUM_LAYERS; i++) {
+          for (let i = 0; i < NL; i++) {
             const lr = mix(float(0.88), layerOrms[i].r, layerSlots[i].uRoughStr);
             rSum = rSum.add(lr.mul(w[i + 1]));
           }
@@ -641,7 +675,7 @@ export function createSplatOverlay(
         // (c, −s) and +v' along (s, c), so the bump still faces the right way.
         if (wantNrm) {
           let accumN = nrmV.mul(w[0]);
-          for (let i = 0; i < NUM_LAYERS; i++) {
+          for (let i = 0; i < NL; i++) {
             const orm = layerOrms[i];
             const nx  = orm.b.mul(float(2.0)).sub(float(1.0));
             const ny  = orm.a.mul(float(2.0)).sub(float(1.0));
