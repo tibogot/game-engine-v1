@@ -38,7 +38,7 @@ export function rng(seed = 1) {
  * Splitting an emplacement into three meshes to get three looks would triple
  * the draws on the structure that gets placed most.
  */
-export const MAT = { hessian: 0, metal: 1, timber: 2, earth: 3, thatch: 4, bamboo: 5, woven: 6 };
+export const MAT = { hessian: 0, metal: 1, timber: 2, earth: 3, thatch: 4, bamboo: 5, woven: 6, paint: 7 };
 
 /** Strip anything merge would choke on, and guarantee the attribute set. */
 function normalise(geo, matId = MAT.hessian, tone = 0.5) {

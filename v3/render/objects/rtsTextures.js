@@ -353,6 +353,51 @@ export function makeEarthTexture({ size = 512, seed = 41 } = {}) {
   });
 }
 
+// ── painted olive drab ───────────────────────────────────────────────────────
+
+/**
+ * Army paint: the olive drab on fuel drums, ammo crates, jerry cans, generator
+ * housings — everything issued rather than built. The atlas had a free cell,
+ * and without it a drum could only be bare corrugated steel.
+ *
+ * Kept CLEAN over most of the surface, on purpose: wear everywhere reads as
+ * camouflage in big blotches and as granite in small ones (both tried on the
+ * first firebase props). Chips and a rust tidemark gather at the bottom, where
+ * things are dragged and stand in the wet; faint vertical brush streaks keep
+ * a big flat face from reading as plastic.
+ */
+export function makePaintedTexture({ size = 512, seed = 53 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        // Base: OD green, faintly mottled where coats overlap. A couple of steps
+        // LIGHTER than true olive drab (~#4B5320): judged in the game, the real
+        // value read as black-green stumps under the RTS camera and its haze.
+        const mott = fbm(u * P * 1.8 + seed, v * P * 1.8, P * 2, 3);
+        let r = lerp(98, 118, mott), gg = lerp(106, 124, mott), b = lerp(58, 70, mott);
+        // Brush streaks, running up the surface.
+        const streak = vnoise(u * P * 40, v * P * 3, P * 40) - 0.5;
+        r += streak * 7; gg += streak * 7; b += streak * 5;
+        // Chips down to primer and metal, mostly in the bottom third.
+        const low = clamp01(1.3 - v * 2.4);
+        const chip = clamp01((fbm(u * P * 9 + seed * 2, v * P * 9, P * 9, 3) - 0.66) * 6) * (0.25 + low);
+        r = lerp(r, 118, chip * 0.7); gg = lerp(gg, 104, chip * 0.7); b = lerp(b, 84, chip * 0.7);
+        // Rust tidemark at the foot, and dust.
+        const rust = clamp01(1 - v * 7) * (0.5 + 0.5 * fbm(u * P * 6, v * P * 6, P * 6, 2));
+        r = lerp(r, 104, rust * 0.6); gg = lerp(gg, 62, rust * 0.6); b = lerp(b, 36, rust * 0.6);
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 // ── atlas ────────────────────────────────────────────────────────────────────
 
 export const ATLAS_COLS = 4;
@@ -386,6 +431,7 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeThatchTexture({ size: cell }),
     makeBambooPoleTexture({ size: cell }),
     makeWovenBambooTexture({ size: cell }),
+    makePaintedTexture({ size: cell }),
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;
