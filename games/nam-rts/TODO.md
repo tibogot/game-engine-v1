@@ -31,6 +31,30 @@ Keep this file current: tick things off here, add new asks here.
       burn-barrel pit, jerry cans, ammo bunker, white-painted stones along roads
       (the whitewash surface exists)
 
+## Now — time of day + birds (your ask, 2026-09-22)
+
+- [x] **Light section in the dev panel**: time of day, sun, sky light, sky
+      fill, reflections, exposure, warmth — live; Keep (this browser), Reset,
+      Copy (values to write into the map)
+- [ ] Write the look you settle on into nam-valley / namGame.js (send me the
+      Copy output)
+- [x] **Birds** (`rtsBirds.js`): transit flocks crossing the view (white egrets
+      in a V, crows), and flocks **flushed** from the jungle by any explosion or
+      crater — mostly white so they read from above. One draw. Dev: BIRDS section
+
+## Ambient life — suggestions (not agreed yet)
+
+- [ ] **Cloud shadows** sweeping the map (engine has `cloudShadowMap`) — reads
+      beautifully from top-down, near-free
+- [ ] **Distant Hueys** crossing the map like the transit birds, with rotor
+      shadows — "the war is elsewhere", very Apocalypse Now
+- [ ] Water buffalo in the paddies, chickens/pigs in the village (once those exist)
+- [ ] Thin cooking-fire smoke over villages (smoke system, tiny budget)
+- [ ] Horizon artillery flashes / smoke columns off-map; tracers at night
+- [ ] Monsoon rain showers passing over (world rain exists in modular-road)
+- [ ] Fireflies at dusk/night (editor Ambient FX mode has them — check they
+      read at RTS distance first; butterflies/pollen won't)
+
 ## Props → a real part of the game
 
 - [ ] Props into the **editor as placeable types**, each with: a declared
@@ -60,10 +84,7 @@ Keep this file current: tick things off here, add new asks here.
 
 ## Map & look
 
-- [ ] **Birds** — cross the map in lines and leave (not the modular-road circles);
-      **flushed from the canopy by explosions** as a "something's happening
-      there" signal under fog of war. Engine already has a flock
-      (`modularRoadBirds.js`, screen-size floor trick)
+- [x] **Birds** — transit + flushed by explosions (see Now)
 - [ ] **Grass coverage at zoom-out**: fade uses camera distance → zoom-driven
       tile/fade/width at a constant blade count (proposal). Cheap knobs first:
       Min width (px) ↑, Clumping ↑, Variation ↓, root shade

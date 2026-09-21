@@ -2235,8 +2235,11 @@ export async function createWorldEnvironment({
      * are in the sky-light cache key, so the change lands on the next frame. Only
      * the Atmosphere mode reads them.
      */
-    setWorldLight({ skyFill, ...ref } = {}) {
+    /** The world-light settings in force: { skyFill, warmth, dir, hemi, exposure, env }. */
+    getWorldLight: () => ({ skyFill: atmoWorldLight.params.skyFill, warmth: atmoWorldLight.params.warmth, ...atmoLightRef }),
+    setWorldLight({ skyFill, warmth, ...ref } = {}) {
       if (Number.isFinite(skyFill)) atmoWorldLight.params.skyFill = skyFill;
+      if (Number.isFinite(warmth)) atmoWorldLight.params.warmth = warmth;
       for (const k of ["dir", "hemi", "exposure", "env"]) {
         if (Number.isFinite(ref[k])) atmoLightRef[k] = ref[k];
       }

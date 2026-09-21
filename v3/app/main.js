@@ -11827,6 +11827,8 @@ export async function startV3App(opts = {}) {
        * worldEnvironment.setWorldLight. e.g. { skyFill: 0.6, hemi: 1.25, exposure: 1.08 }.
        */
       setWorldLight(p) { worldEnv?.setWorldLight?.(p); },
+      /** The world-light settings in force (for a game's own light controls). */
+      getWorldLight() { return worldEnv?.getWorldLight?.() ?? null; },
     },
     // ── Fog override ──────────────────────────────────────────────────────────
     // Height + distance fog live in worldToolState.fog and sync to scene.fogNode.

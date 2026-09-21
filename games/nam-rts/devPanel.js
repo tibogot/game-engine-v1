@@ -281,6 +281,85 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Light</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Time of day</span>
+            <div class="prop-value">
+              <input type="range" id="dv-tod" min="4" max="21" step="0.05" />
+              <span class="prop-num" id="dv-tod-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sun</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wl-dir" min="0" max="6" step="0.05" />
+              <span class="prop-num" id="dv-wl-dir-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sky light</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wl-hemi" min="0" max="3" step="0.05" />
+              <span class="prop-num" id="dv-wl-hemi-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Sky fill</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wl-fill" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-wl-fill-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Reflections</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wl-env" min="0" max="2" step="0.05" />
+              <span class="prop-num" id="dv-wl-env-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Exposure</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wl-exp" min="0.3" max="2.5" step="0.02" />
+              <span class="prop-num" id="dv-wl-exp-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Warmth</span>
+            <div class="prop-value">
+              <input type="range" id="dv-wl-warm" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-wl-warm-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label"></span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-light-keep" type="button" title="Keep this look in this browser across reloads">Keep</button>
+              <button class="action-btn" id="dv-light-reset" type="button" title="Back to the map's own look">Reset</button>
+              <button class="action-btn" id="dv-light-copy" type="button" title="Copy the values, to write them into the map">Copy</button>
+            </div>
+          </div>
+          <div class="dv-hint">Live. <b>Keep</b> saves the look in this browser; <b>Copy</b> gives the values to write into the map for good.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Birds</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Enabled</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-birds" type="button" aria-label="Birds">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <button class="action-btn" id="dv-birds-transit" type="button">Send a flock</button>
+          <button class="action-btn" id="dv-birds-flush" type="button">Flush here</button>
+          <div class="dv-hint">Flocks cross the view now and then. Any explosion near jungle flushes one out of the canopy — <b>Flush here</b> fakes one at the view centre.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Fog</div>
         <div class="section-body">
           <div class="prop-row">
@@ -921,6 +1000,77 @@ export function createDevPanel({
     smokeN.textContent = `${app?.smoke?.activeCount?.() ?? 0} live`
       + (b && b.drawn < 0.999 ? `, drawing ${Math.round(b.drawn * 100)}% of each column's puffs` : "");
   }, 500);
+
+  // ── Light ───────────────────────────────────────────────────────────────────
+  // The Atmosphere sky derives every light from the sun (key colour, sky fill,
+  // exposure, env on the daylight curve); these scale that derivation through
+  // app.sky.setWorldLight, and time of day moves the sun itself. All live.
+  // "Keep" stores the look in this browser and re-applies it at the next boot
+  // — tuning survives reloads without touching the map; "Copy" hands over the
+  // numbers to write into nam-valley / namGame.js for good.
+  const LIGHT_KEY = "namrts.light";
+  const wl0 = app?.sky?.getWorldLight?.() ?? {};
+  const tod0 = app?.sky?.state?.timeOfDay ?? 12.5;
+  const mapLook = { tod: tod0, dir: wl0.dir, hemi: wl0.hemi, skyFill: wl0.skyFill, env: wl0.env, exposure: wl0.exposure, warmth: wl0.warmth };
+  const look = { ...mapLook };
+  try { Object.assign(look, JSON.parse(localStorage.getItem(LIGHT_KEY) || "null") || {}); } catch { /* private mode */ }
+  const applyLook = () => {
+    app?.sky?.setTimeOfDay?.(look.tod);
+    app?.sky?.setWorldLight?.({ dir: look.dir, hemi: look.hemi, skyFill: look.skyFill, env: look.env, exposure: look.exposure, warmth: look.warmth });
+  };
+  const hhmm = (v) => {
+    const h = Math.floor(v), m = Math.round((v - h) * 60) % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  };
+  const lightRows = [];
+  const lightSlider = (id, key, fmt) => {
+    const el = $(`#${id}`), out = $(`#${id}-v`);
+    if (!el) return;
+    const show = () => { el.value = look[key]; out.textContent = fmt(+el.value); };
+    show();
+    lightRows.push(show);
+    el.addEventListener("input", () => { look[key] = +el.value; out.textContent = fmt(+el.value); applyLook(); });
+  };
+  const f2 = (v) => v.toFixed(2);
+  lightSlider("dv-tod", "tod", hhmm);
+  lightSlider("dv-wl-dir", "dir", f2);
+  lightSlider("dv-wl-hemi", "hemi", f2);
+  lightSlider("dv-wl-fill", "skyFill", f2);
+  lightSlider("dv-wl-env", "env", f2);
+  lightSlider("dv-wl-exp", "exposure", f2);
+  lightSlider("dv-wl-warm", "warmth", f2);
+  let kept = false;
+  try { kept = !!localStorage.getItem(LIGHT_KEY); } catch { /* private mode */ }
+  if (kept) applyLook();   // a kept look wins over the map's at boot
+  $("#dv-light-keep")?.addEventListener("click", () => {
+    try { localStorage.setItem(LIGHT_KEY, JSON.stringify(look)); } catch { /* private mode */ }
+  });
+  $("#dv-light-reset")?.addEventListener("click", () => {
+    try { localStorage.removeItem(LIGHT_KEY); } catch { /* private mode */ }
+    Object.assign(look, mapLook);
+    applyLook();
+    for (const show of lightRows) show();
+  });
+  $("#dv-light-copy")?.addEventListener("click", async () => {
+    const r = (v) => Math.round(v * 100) / 100;
+    const text = `nam-rts light: timeOfDay ${r(look.tod)} (${hhmm(look.tod)}) · setWorldLight({ dir: ${r(look.dir)}, hemi: ${r(look.hemi)}, skyFill: ${r(look.skyFill)}, env: ${r(look.env)}, exposure: ${r(look.exposure)}, warmth: ${r(look.warmth)} })`;
+    console.info(text);
+    try { await navigator.clipboard.writeText(text); } catch { /* logged above */ }
+  });
+
+  // ── Birds ───────────────────────────────────────────────────────────────────
+  const birdsBtn = $("#dv-birds");
+  birdsBtn?.addEventListener("click", () => {
+    const on = !birdsBtn.classList.contains("checked");
+    birdsBtn.classList.toggle("checked", on);
+    app?.birds?.setEnabled?.(on);
+  });
+  $("#dv-birds-transit")?.addEventListener("click", () => app?.birds?.spawnTransit?.());
+  $("#dv-birds-flush")?.addEventListener("click", () => {
+    const t = app?.controls?.target;
+    // A dev flush ignores the "is there jungle here" test: the point is to see it.
+    if (t) app?.birds?.flush?.(t.x, t.z, { force: true });
+  });
 
   // ── Fog ─────────────────────────────────────────────────────────────────────
   const fogState = app?.fog?.state?.height ?? {};

@@ -93,6 +93,7 @@ import { createProjectiles } from "./projectiles.js";
 import { createFireSystem } from "./fireSystem.js";
 import { createSmokeField } from "./smokeField.js";
 import { createNapalmStrike } from "./napalmStrike.js";
+import { createRtsBirds } from "./rtsBirds.js";
 import { createCover } from "./cover.js";
 import { createAbilities } from "./abilities.js";
 import { createAbilityTargeting } from "./abilityTargeting.js";
@@ -500,6 +501,19 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   const craters = await createCraterSystem({ app });
   app.craters = craters;
 
+  // Birds: flocks crossing the view, and flocks FLUSHED out of the jungle by
+  // any blast — every explosion and every crater (shells, napalm bombs) asks;
+  // the birds decide (jungle there? this spot flushed recently?). A sign of
+  // fighting you can read from across the map. See rtsBirds.js.
+  const birds = createRtsBirds({ app });
+  app.birds = birds;
+  {
+    const explosion = fx.explosion;
+    fx.explosion = (x, y, z) => { explosion(x, y, z); birds.flush(x, z); };
+    const addCrater = craters.addCrater?.bind(craters);
+    if (addCrater) craters.addCrater = (x, z, ...rest) => { const r = addCrater(x, z, ...rest); birds.flush(x, z); return r; };
+  }
+
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combatRef = null;
   const projectiles = createProjectiles({
@@ -839,6 +853,7 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
     waveHud.update(dt, waves, match);     // wave counter, match objective, win/lose
     minimap.draw();
     stress.update(dt);                    // dev: continuous effect spawners, if running
+    birds.update(dt);                     // transit flocks, flushes
     frameStats.tickMs = performance.now() - tickStart;
   };
   app.addPreRenderHook(tick);
