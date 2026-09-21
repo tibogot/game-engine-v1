@@ -38,7 +38,10 @@ export function rng(seed = 1) {
  * Splitting an emplacement into three meshes to get three looks would triple
  * the draws on the structure that gets placed most.
  */
-export const MAT = { hessian: 0, metal: 1, timber: 2, earth: 3, thatch: 4, bamboo: 5, woven: 6, paint: 7 };
+export const MAT = {
+  hessian: 0, metal: 1, timber: 2, earth: 3, thatch: 4, bamboo: 5, woven: 6, paint: 7,
+  canvas: 8, camo: 9, concrete: 10,
+};
 
 /** Strip anything merge would choke on, and guarantee the attribute set. */
 function normalise(geo, matId = MAT.hessian, tone = 0.5) {
@@ -360,12 +363,16 @@ export function buildCorrugatedPanel(opts = {}) {
     const a = i, b = (i + 1) % m, c = a + m, d = b + m;
     idx.push(a, c, b, b, c, d);
   }
-  // Caps: a fan over the closed loop at each end.
+  // Caps: a STRIP between the front and back rows at each end. (A fan from one
+  // vertex over this wavy, non-convex loop folds back over itself, and the
+  // overlapping coplanar triangles z-fight — the sheet edges shimmered.)
+  // Loop order is front 0..n then back n..0, so front i is i and back i is m-1-i.
   for (let s = 0; s < 2; s++) {
     const off = s * m;
-    for (let i = 1; i < m - 1; i++) {
-      if (s === 0) idx.push(off, off + i + 1, off + i);
-      else idx.push(off, off + i, off + i + 1);
+    for (let i = 0; i < n; i++) {
+      const f0 = off + i, f1 = off + i + 1, b0 = off + m - 1 - i, b1 = off + m - 2 - i;
+      if (s === 0) idx.push(f0, b0, f1, f1, b0, b1);
+      else idx.push(f0, f1, b0, f1, b1, b0);
     }
   }
   const g = new THREE.BufferGeometry();
@@ -373,6 +380,107 @@ export function buildCorrugatedPanel(opts = {}) {
   g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   g.setIndex(idx);
   g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * Trapezoidal corrugation — the profile of a shipping container's walls
+ * (flat crest, sloped web, flat trough), as against the round sine of sheet
+ * roofing. Same construction as buildCorrugatedPanel: a closed extruded
+ * profile standing in XY, ribs vertical, outer face +Z, strip-capped ends.
+ * UVs in metres / 2, v up the panel.
+ */
+// Profile corners per pitch: trough, rise, crest, fall (fraction of a pitch, ±1).
+const TRAP_PROFILE = [[0, -1], [0.3, -1], [0.45, 1], [0.8, 1], [0.95, -1], [1, -1]];
+
+/**
+ * The outer face of a buildTrapezoidPanel at the panel's own x: its z (outward)
+ * there, and the x of every profile corner — so something laid ON the sheet
+ * (a painted stencil) can follow it exactly instead of cutting the corners.
+ */
+export function trapezoidProfile({ width = 2, thickness = 0.02, pitch = 0.28, depth = 0.036, offset = 0 } = {}) {
+  const ribs = Math.max(1, Math.round(width / pitch));
+  const p = width / ribs;
+  const zAt = (x) => {
+    const u = Math.min(ribs - 1e-9, Math.max(0, (x + width / 2) / p));
+    const k = Math.floor(u), f = u - k;
+    for (let i = 0; i < TRAP_PROFILE.length - 1; i++) {
+      const [f0, s0] = TRAP_PROFILE[i], [f1, s1] = TRAP_PROFILE[i + 1];
+      if (f <= f1) return (s0 + ((s1 - s0) * (f - f0)) / (f1 - f0)) * depth / 2 + thickness / 2 + offset;
+    }
+    return -depth / 2 + thickness / 2 + offset;
+  };
+  const corners = [];
+  for (let k = 0; k < ribs; k++) for (const [f] of TRAP_PROFILE) corners.push(-width / 2 + (k + f) * p);
+  return { zAt, corners };
+}
+
+export function buildTrapezoidPanel({ width = 2, height = 2, thickness = 0.02, pitch = 0.28, depth = 0.036, offset = 0 } = {}) {
+  const ribs = Math.max(1, Math.round(width / pitch));
+  const p = width / ribs;
+  const prof = TRAP_PROFILE.slice(0, -1);
+  const front = [], back = [];
+  for (let k = 0; k < ribs; k++) {
+    for (const [t, s] of prof) front.push([-width / 2 + (k + t) * p, s * depth / 2]);
+  }
+  front.push([width / 2, -depth / 2]);
+  for (const [x, z] of front) back.push([x, z - thickness]);
+  for (const q of front) q[1] += thickness / 2 + offset;
+  for (const q of back) q[1] += thickness / 2 + offset;
+  const loop = [...front, ...back.reverse()];
+  const m = loop.length, n = front.length - 1;
+  const pos = [], uvs = [], idx = [];
+  for (let s = 0; s < 2; s++) {
+    const y = s * height;
+    for (let i = 0; i < m; i++) {
+      pos.push(loop[i][0], y, loop[i][1]);
+      uvs.push((loop[i][0] + width / 2) / 2, y / 2);
+    }
+  }
+  for (let i = 0; i < m; i++) {
+    const a = i, b = (i + 1) % m, c = a + m, d = b + m;
+    idx.push(a, c, b, b, c, d);
+  }
+  for (let s = 0; s < 2; s++) {
+    const off = s * m;
+    for (let i = 0; i < n; i++) {
+      const f0 = off + i, f1 = off + i + 1, b0 = off + m - 1 - i, b1 = off + m - 2 - i;
+      if (s === 0) idx.push(f0, b0, f1, f1, b0, b1);
+      else idx.push(f0, f1, b0, f1, b1, b0);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  g.setIndex(idx);
+  // Flat-shaded look for the webs: split nothing, but the crest/trough flats
+  // are wide enough that smooth normals across the corners read as folded steel.
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * A box whose UVs are in METRES / 2 on every face, like the panels — so a
+ * patterned surface (camo, paint wear) keeps one scale across a whole object
+ * instead of stretching over each face as BoxGeometry's 0..1 UVs do. v runs up
+ * the side faces.
+ */
+export function buildBox(w, h, d) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const uv = g.attributes.uv;
+  // Face groups: +x, -x, +y, -y, +z, -z — each face's (u, v) spans (a, b) metres.
+  const span = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  const done = new Set();
+  for (const grp of g.groups) {
+    const [a, b] = span[grp.materialIndex];
+    for (let k = grp.start; k < grp.start + grp.count; k++) {
+      const vi = g.index.getX(k);
+      if (done.has(vi)) continue;
+      done.add(vi);
+      uv.setXY(vi, (uv.getX(vi) * a) / 2, (uv.getY(vi) * b) / 2);
+    }
+  }
+  g.clearGroups();
   return g;
 }
 

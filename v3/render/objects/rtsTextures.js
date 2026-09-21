@@ -398,15 +398,155 @@ export function makePaintedTexture({ size = 512, seed = 53 } = {}) {
   });
 }
 
+// ── tent canvas ──────────────────────────────────────────────────────────────
+
+/**
+ * Olive cotton duck: the GP tent, the tarp, the truck cover. Browner and
+ * flatter than the paint, with the tight weave of canvas rather than the open
+ * weave of hessian. Sun-bleached toward the top, dark and mildewed at the foot
+ * where it sits in the mud, water stains in soft tidelines.
+ */
+export function makeCanvasTexture({ size = 512, seed = 61 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    const threads = 110;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const weave = Math.sin(u * Math.PI * 2 * threads) * Math.sin(v * Math.PI * 2 * threads);
+        const mott = fbm(u * P * 1.5 + seed, v * P * 1.5, P * 1.5, 4);
+        let r = lerp(92, 116, mott), gg = lerp(96, 114, mott), b = lerp(62, 74, mott);
+        r += weave * 4; gg += weave * 4; b += weave * 3;
+        // Sun fade, strongest on the upper cloth.
+        const sun = clamp01(v * 1.2 - 0.2) * 0.35;
+        r = lerp(r, 140, sun); gg = lerp(gg, 136, sun); b = lerp(b, 100, sun);
+        // Water stains: soft tidelines, a band of fbm thresholded twice.
+        const w = fbm(u * P * 2.5 + 7, v * P * 2.5, P * 2.5, 3);
+        const tide = clamp01(1 - Math.abs(w - 0.55) * 22) * 0.35;
+        r -= tide * 30; gg -= tide * 28; b -= tide * 18;
+        // Sewn seams between the panels, running up the cloth (constant u): a
+        // dark stitched lap either side of a lighter felled edge. Two per tile.
+        // From the air they are what makes a roof read as CANVAS, not a slab.
+        const su = (u * 2) % 1;
+        const seam = Math.min(su, 1 - su) * S / 2;          // px to the nearest seam
+        // Drawn wider than a real 3 cm seam (a tile spans ~2.6 m of cloth): at
+        // the RTS camera's distance a true-width seam mips away to nothing.
+        const lap = clamp01(1 - Math.abs(seam - 9) / 7) * 0.8 + clamp01(1 - seam / 3) * -0.3;
+        r -= lap * 40; gg -= lap * 38; b -= lap * 26;
+        // Mud and mildew at the foot.
+        const foot = clamp01(1 - v * 5) * (0.55 + 0.45 * fbm(u * P * 5, v * P * 5, P * 5, 3));
+        r = lerp(r, 58, foot * 0.7); gg = lerp(gg, 54, foot * 0.7); b = lerp(b, 38, foot * 0.7);
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
+// ── camouflage ───────────────────────────────────────────────────────────────
+
+/**
+ * Four-colour woodland camouflage (the ERDL palette: light green, brown, dark
+ * green, black) as PAINT on a structure — hard-edged blobs from layered
+ * thresholded noise, each colour laid over the last the way a crew sprayed
+ * them. Tiles, so a hut, a bunker or a truck can all wear it. Patches are
+ * about a quarter of the tile: with 2 m of surface per tile (the kit's UV
+ * convention) that is the half-metre blotch of the real pattern, and larger
+ * than the RTS camera's pixel.
+ */
+export function makeCamoTexture({ size = 512, seed = 71 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    // Periods are integers and the warp is itself periodic, so the tile wraps.
+    const P = 3;
+    const cols = [
+      [98, 108, 66],    // light green (the ground colour of the pattern)
+      [92, 70, 46],     // brown
+      [50, 64, 38],     // dark green
+      [30, 31, 27],     // black
+    ];
+    // A soft threshold: paint from a spray gun has a 1-2 px feathered edge.
+    const cover = (n, t) => clamp01((n - t) * 40 + 0.5);
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        // Domain warp: bend the lookup by another noise field, so the shapes
+        // come out as leaves and tongues rather than the round blobs of raw
+        // noise. (Stretching one axis would break the wrap — both axes must
+        // span whole periods — so the warp alone shapes them.)
+        const wx = (fbm(u * P + 31, v * P + 7, P, 3) - 0.5) * 0.9;
+        const wy = (fbm(u * P + 57, v * P + 91, P, 3) - 0.5) * 0.9;
+        const ux = u * P + wx, vy = v * P + wy;
+        // 3 octaves, not 4: the fourth is what threw the speckles.
+        const n1 = fbm(ux + seed, vy, P, 3);
+        const n2 = fbm(ux + seed * 2 + 13, vy + 5, P, 3);
+        // Black as narrow strokes: the band where a third field crosses 0.5,
+        // so it draws branch-like lines, not more blobs.
+        const n3 = fbm((ux * 4) / 3 + seed * 3 + 29, (vy * 4) / 3 + 11, 4, 3);
+        const stroke = clamp01(1 - Math.abs(n3 - 0.5) * 26) * cover(n2, 0.45);
+        let c = cols[0].slice();
+        const mix3 = (k, col) => { for (let j = 0; j < 3; j++) c[j] = lerp(c[j], col[j], k); };
+        mix3(cover(n1, 0.5), cols[1]);
+        mix3(cover(n2, 0.53), cols[2]);
+        mix3(stroke, cols[3]);
+        // Weathering: a faint grain and a little sun-fade toward the top.
+        const grain = fbm(u * 48 + 3, v * 48, 48, 2) - 0.5;
+        const fade = clamp01(v * 0.8) * 0.1;
+        const i = (y * S + x) * 4;
+        d[i] = lerp(c[0] + grain * 10, 140, fade);
+        d[i + 1] = lerp(c[1] + grain * 10, 138, fade);
+        d[i + 2] = lerp(c[2] + grain * 8, 108, fade);
+        d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
+// ── concrete ─────────────────────────────────────────────────────────────────
+
+/** Cast concrete: grey, pitted, with rain streaks down from the top and a damp foot. */
+export function makeConcreteTexture({ size = 512, seed = 83 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const mott = fbm(u * P * 2 + seed, v * P * 2, P * 2, 4);
+        let k = lerp(128, 158, mott);
+        // Pits: small dark specks.
+        if (hash2(x * 7 + seed, y * 13) > 0.985) k -= 38;
+        // Rain streaks, running down from the top edge of the pour.
+        const streak = clamp01((vnoise(u * P * 24, v * P * 1.2, P * 24) - 0.55) * 4) * clamp01(v * 1.4 - 0.1);
+        k -= streak * 26;
+        const foot = clamp01(1 - v * 6) * 0.5;
+        k = lerp(k, 92, foot);
+        const i = (y * S + x) * 4;
+        d[i] = k; d[i + 1] = k * 0.99; d[i + 2] = k * 0.95; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 // ── atlas ────────────────────────────────────────────────────────────────────
 
 export const ATLAS_COLS = 4;
-export const ATLAS_ROWS = 2;
+export const ATLAS_ROWS = 3;
 /** Fraction of a cell kept clear at its border, so mips cannot bleed across. */
 export const ATLAS_PAD = 0.004;
 
 /**
- * Every surface in ONE texture, 4x2 cells, indexed by MAT.
+ * Every surface in ONE texture, 4x3 cells, indexed by MAT.
  *
  * WHY. The shader picks a surface per vertex from `matId`. With seven separate
  * textures and a select() chain the GPU evaluates EVERY arm — select is not a
@@ -432,6 +572,10 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeBambooPoleTexture({ size: cell }),
     makeWovenBambooTexture({ size: cell }),
     makePaintedTexture({ size: cell }),
+    makeCanvasTexture({ size: cell }),
+    makeCamoTexture({ size: cell }),
+    makeConcreteTexture({ size: cell }),
+    // Cell 11 is free.
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;

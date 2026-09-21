@@ -30,14 +30,14 @@
  *
  * Each object builds `{ lods: [geometry], tris: [n] }`; LOD0 is what a placed
  * prop shows. They share ONE material: a per-vertex `matId` picks a cell of a
- * 4x2 canvas atlas, so hessian, iron, timber, thatch, bamboo and matting all
+ * 4x3 canvas atlas, so hessian, iron, timber, thatch, bamboo and matting all
  * shade from ONE texture fetch in ONE draw. (A select() over seven textures
  * would sample all seven per pixel — select is not a branch.)
  */
 import * as THREE from "three";
 import {
   Fn, attribute, clamp, float, floor, fract, hash, instanceIndex, mix, mod,
-  texture, uniform, uv, vec2,
+  step, texture, uniform, uv, vec2,
 } from "three/tsl";
 import { rtsAtlas, ATLAS_COLS, ATLAS_ROWS, ATLAS_PAD } from "./rtsTextures.js";
 import { RTS_OBJECTS } from "./rtsEmplacement.js";
@@ -77,7 +77,11 @@ export function rtsObjectMaterial() {
     const pad = float(ATLAS_PAD);
     // Tiled by hand, because an atlas cell cannot wrap; inset by ATLAS_PAD so
     // mips do not bleed into the neighbouring cell.
-    const inCell = clamp(fract(uv()), pad, float(1).sub(pad));
+    // Camouflage tiles 2.5x larger than every other surface: its shapes are the
+    // pattern, and at the kit's 2 m per tile they repeat as visible stripes down
+    // a container or a hut. (One multiply; MAT.camo is 9.)
+    const camoScale = mix(float(1), float(0.4), step(float(8.5), id).mul(step(id, float(9.5))));
+    const inCell = clamp(fract(uv().mul(camoScale)), pad, float(1).sub(pad));
     const st = vec2(col.add(inCell.x).div(cols), row.add(inCell.y).div(rows));
     const surf = texture(atlas, st).rgb;
     // Per-PART tone (patched sheets, older bags) and per-INSTANCE tint, so a

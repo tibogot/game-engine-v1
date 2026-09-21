@@ -153,7 +153,7 @@ function gablePlanks({ radius, z, door = null, plank = 0.7, thick = 0.22, R }) {
 }
 
 // ── The door leaf (a separate, moving mesh) ──────────────────────────────────
-function buildDoorLeaf(w, h, seed) {
+export function buildDoorLeaf(w, h, seed) {
   const R = rng(seed);
   const parts = [];
   // Corrugated cladding on a timber frame: the frame is what reads when the
@@ -162,7 +162,12 @@ function buildDoorLeaf(w, h, seed) {
     pos: [0, 0.1, 0], mat: MAT.metal, tone: 0.5 + R() * 0.2 });
   const t = 0.26;
   for (const x of [-(w / 2 - t / 2), w / 2 - t / 2]) parts.push({ geo: new THREE.BoxGeometry(t, h, t), pos: [x, h / 2, 0.02], mat: MAT.timber, tone: 0.4 });
-  for (const y of [t / 2, h / 2, h - t / 2]) parts.push({ geo: new THREE.BoxGeometry(w, t, t), pos: [0, y, 0.02], mat: MAT.timber, tone: 0.45 });
+  // Rails fit BETWEEN the stiles (1 cm into each) and sit 2 cm back, as framed
+  // joinery does: run full width at full depth, their ends and faces were
+  // flush with the stiles' and z-fought. The top rail stops 1 cm under the top.
+  for (const y of [t / 2, h / 2, h - t / 2 - 0.01]) {
+    parts.push({ geo: new THREE.BoxGeometry(w - 2 * t + 0.02, t, t * 0.85), pos: [0, y, 0.02 - t * 0.075], mat: MAT.timber, tone: 0.45 });
+  }
   // The diagonal brace every barn door has — a Z you can see from the air.
   const diag = Math.hypot(w - t, h / 2 - t);
   const ang = Math.atan2(h / 2 - t, w - t);
@@ -181,7 +186,13 @@ function buildDoorLeaf(w, h, seed) {
  * `emissive(color)` builds the glowing material for beacon and lamps (the game
  * passes its bloom material); without it they are plain.
  */
-export function buildQuonsetHQ(opts = {}, emissive = null) {
+/**
+ * The static shell as ONE merged geometry — pad, arch, ribs, gables, door
+ * frame, windows, cowls, sandbags, masts — with no material and no renderer,
+ * so it can be built (and checked) anywhere, Node included. buildQuonsetHQ
+ * adds the moving parts and the lights around it.
+ */
+export function buildQuonsetShellGeometry(opts = {}) {
   const o = { ...QUONSET_DEFAULTS, ...opts };
   const R = rng(o.seed);
   const Rr = o.radius, L = o.length, F = o.frontZ;
@@ -196,7 +207,9 @@ export function buildQuonsetHQ(opts = {}, emissive = null) {
   // Joint ribs along the length — the lines that make it a Quonset from above.
   const ribs = Math.floor(L / o.ribEvery);
   for (let k = 0; k <= ribs; k++) {
-    const z = F - Math.min(L - 0.18, k * o.ribEvery);
+    // Kept 3 cm inside each end: a rib flush with the shell's end put its rim
+    // in the same plane as the shell's, and the two z-fought at the door arch.
+    const z = F - Math.min(L - 0.21, Math.max(0.03, k * o.ribEvery));
     parts.push({ geo: buildArchRib(Rr), pos: [0, 0.3, z], mat: MAT.metal, tone: 0.3 + R() * 0.2 });
   }
 
@@ -208,7 +221,8 @@ export function buildQuonsetHQ(opts = {}, emissive = null) {
   for (const x of [-door.w / 2 - 0.2, door.w / 2 + 0.2]) {
     parts.push({ geo: new THREE.BoxGeometry(0.45, door.h + 0.6, 0.45), pos: [x, 0.3 + (door.h + 0.6) / 2, F - 0.05], mat: MAT.timber, tone: 0.3 });
   }
-  parts.push({ geo: new THREE.BoxGeometry(door.w + 1.3, 0.5, 0.5), pos: [0, 0.3 + door.h + 0.25, F - 0.05], mat: MAT.timber, tone: 0.3 });
+  // Lintel top 3 cm clear of the gable planks' row: 1 mm apart, the two tops shimmered.
+  parts.push({ geo: new THREE.BoxGeometry(door.w + 1.3, 0.5, 0.5), pos: [0, 0.3 + door.h + 0.28, F - 0.05], mat: MAT.timber, tone: 0.3 });
   // Windows in the gable either side of the door: dark glass in timber frames.
   for (const sx of [-1, 1]) {
     const x = sx * (door.w / 2 + 1.6);
@@ -252,7 +266,11 @@ export function buildQuonsetHQ(opts = {}, emissive = null) {
   const shellGeo = assemble(parts);
   shell.dispose();
   bakeContactAO(shellGeo, { cell: 0.6, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
+  return { shellGeo, o, door, F, mastPos, mastH };
+}
 
+export function buildQuonsetHQ(opts = {}, emissive = null) {
+  const { shellGeo, door, F, mastPos, mastH } = buildQuonsetShellGeometry(opts);
   const mat = rtsObjectMaterial();
   const group = new THREE.Group();
   group.name = "QuonsetHQ";

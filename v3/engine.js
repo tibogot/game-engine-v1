@@ -70,6 +70,9 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/objects/rtsFirebaseProps.js",
   "v3/render/objects/rtsSigns.js",
   "v3/render/objects/rtsObjectProps.js",
+  "v3/render/objects/rtsParts.js",
+  "v3/render/objects/rtsStencils.js",
+  "v3/render/objects/rtsTextures.js",
   // Vehicle physics (also drives the editor's play-mode cars)
   "v3/play/modularRoadVehicle.js",
   "v3/play/modularRoadBvh.js",
