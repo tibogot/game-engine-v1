@@ -134,7 +134,7 @@ const CLIFF_PRESETS = [...ROCK_CLIFF_PRESETS];
 import { simplifierReady } from "../render/instancing/autoLod.js";
 import { GREYBOX_KIT, buildGreyboxGeometry } from "../props/greyboxKit.js";
 import { applyCliffTerrainBlend, createCliffGlbBlendMaterial } from "../props/cliffTerrainBlend.js";
-import { applyRockShading, ROCK_BASE_COLOR } from "../props/rockShading.js";
+import { applyRockShading, rockShadeUniforms, ROCK_BASE_COLOR } from "../props/rockShading.js";
 import { CliffPaintMask } from "../../v2/core/cliffs/cliffPaintMask.js";
 import { CliffPaintSystem } from "../../v2/tools/cliffs/cliffPaintSystem.js";
 import { TreeBvh } from "../../v2/core/foliage/treeBvh.js";
@@ -11719,6 +11719,33 @@ export async function startV3App(opts = {}) {
     // ── Terrain queries a game builds on ──────────────────────────────────────
     // Ground height at a world X/Z (RTS unit clamping, building placement).
     getWorldHeight,
+    /**
+     * Retune the STONE — rock props and the terrain's cliff layer together.
+     *
+     * They share one recipe (rockShading.js) on purpose, so a boulder standing
+     * against a terrain cliff reads as the same rock. That also means there is
+     * exactly one place to change it, and this is it.
+     *
+     * Every value defaults to "leave it alone", so a project that never calls
+     * this looks exactly as it always did — which matters because the editor's
+     * kit was authored against the painted cool grey and other games use it.
+     * A game that wants different stone asks for it at boot; nothing is saved.
+     *
+     * @param o.tint       multiplies the whole stone (hex or THREE.Color)
+     * @param o.moss       0 = bare rock, ~0.5 = jungle
+     * @param o.mossColor  what the moss is
+     * @param o.mossScale  size of a moss patch, 1/m
+     * @param o.bottomTint what the base of a rock fades toward
+     */
+    setRockPalette({ tint, moss, mossColor, mossScale, bottomTint } = {}) {
+      const u = rockShadeUniforms;
+      if (tint != null) u.uTint.value.set(tint);
+      if (Number.isFinite(moss)) u.uMoss.value = moss;
+      if (mossColor != null) u.uMossColor.value.set(mossColor);
+      if (Number.isFinite(mossScale)) u.uMossScale.value = mossScale;
+      if (bottomTint != null) u.uBottomTint.value.set(bottomTint);
+      return true;
+    },
     /**
      * Texture everything steeper than `startDeg` with a paint layer — the
      * "ground too steep to walk on should LOOK too steep to walk on" rule.

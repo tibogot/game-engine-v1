@@ -46,6 +46,28 @@ import { createUnits } from "./units.js";
 import { createUnitRenderer } from "./unitRenderer.js";
 import { createSelection } from "./selection.js";
 import { createNavGrid, NAV_MAX_SLOPE_DEG } from "./navGrid.js";
+
+/**
+ * What stone looks like in this valley.
+ *
+ * Judged in the game against BOTH places rock appears — a boulder field in the
+ * jungle and the stones lining the river — because the two pull opposite ways:
+ * dark enough to sit down into the canopy, light enough to still read against
+ * sand.
+ *
+ * `mossColor` was the one that had to be measured rather than reasoned. The
+ * first two attempts used a near-black green, which is what moss actually is
+ * in shadow and which is invisible against dark grey stone: probing the mask
+ * with magenta showed it had been working all along and simply had nothing to
+ * show. A mid olive reads; a realistic one does not.
+ */
+const NAM_ROCK_PALETTE = {
+  tint: 0x9b978c,
+  bottomTint: 0x4d5543,
+  moss: 0.9,
+  mossColor: 0x63803a,
+  mossScale: 0.42,
+};
 import { createMinimap } from "./minimap.js";
 import { createUnitBar } from "./unitBar.js";
 import { createCommandCard } from "./commandCard.js";
@@ -205,6 +227,12 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // unpainted, so nam-valley's hand-painted cliffs are untouched; what it
   // fills in is precisely the steep ground nobody got to, which is the ground
   // players find inexplicable.
+  // JUNGLE STONE. The editor kit's painted cool grey was authored for a
+  // different world and reads as marble against this one; these numbers are
+  // this GAME's, set at boot and saved nowhere, so the editor default and
+  // every other game keep the look they were built around.
+  app.setRockPalette?.(NAM_ROCK_PALETTE);
+
   app.setSlopeCliffRule?.({
     layer: 5,                            // "Cliff Rock" in nam-valley
     startDeg: NAV_MAX_SLOPE_DEG - 4,

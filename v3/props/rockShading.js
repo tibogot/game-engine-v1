@@ -48,6 +48,22 @@ export function createRockShadeUniforms() {
     uMottleScale: uniform(0.25),                             // world-space noise frequency (1/m)
     uMottle:     uniform(0.07),                              // noise amplitude
     uAoBottom:   uniform(0.5),                               // indirect-light AO at the base
+
+    // ── THE PALETTE, off by default ────────────────────────────────────────
+    //
+    // Everything above describes ONE stone — the painted cool grey the editor
+    // kit was built around. These three retune it for a world without
+    // regenerating a rock or forking the recipe, and they default to
+    // "unchanged" so a project that never touches them looks exactly as it
+    // always did.
+    //
+    /** Multiplies the whole stone. 1,1,1 = the kit's own colour. */
+    uTint:       uniform(new THREE.Color(1, 1, 1)),
+    /** 0 = bare rock. Above that, moss creeps in. */
+    uMoss:       uniform(0.0),
+    uMossColor:  uniform(new THREE.Color(0.22, 0.30, 0.16)),
+    /** World-space size of a moss patch, 1/m. */
+    uMossScale:  uniform(0.55),
   };
 }
 
@@ -71,7 +87,30 @@ export function rockShadeTint({ edge01, h01, normalYNode }, u = rockShadeUniform
   const down = float(1).sub(clamp(normalYNode.negate(), 0, 1).mul(u.uDownDark));
   const mottle = float(1).add(mx_noise_float(positionWorld.mul(u.uMottleScale)).mul(u.uMottle));
   const lift = float(1).add(edge01.mul(u.uEdgeBright));
-  return gradient.mul(down).mul(mottle).mul(lift);
+  const stone = gradient.mul(down).mul(mottle).mul(lift).mul(u.uTint);
+
+  // ── MOSS ──
+  //
+  // Where it grows, and each factor is doing a job:
+  //
+  //   UP-FACING, because moss wants rain. This is also what makes it read from
+  //     an RTS camera at all — a rule that put moss only at the base would be
+  //     invisible from directly above, which is the one angle this game has.
+  //   NOT ON RIDGES (1 - edge01), because a sharp chip edge is where the rock
+  //     is freshest and most exposed. This is the term that keeps the facets
+  //     legible instead of drowning the silhouette in green.
+  //   PATCHY, from the same world-space noise the mottling uses at a coarser
+  //     scale, so neighbouring rocks are mossy in different places and the
+  //     boulder fields stop looking stamped.
+  //
+  // Slightly base-weighted on top of all that, but only slightly.
+  const wet = clamp(normalYNode, 0, 1).pow(0.6);
+  const sheltered = float(1).sub(edge01);
+  const patch = smoothstep(float(-0.15), float(0.35),
+    mx_noise_float(positionWorld.mul(u.uMossScale)));
+  const damp = mix(float(1), float(0.55), h01);
+  const moss = clamp(u.uMoss.mul(wet).mul(sheltered).mul(patch).mul(damp), 0, 1);
+  return mix(stone, u.uMossColor, moss);
 }
 
 export function applyRockShading(mat, u = rockShadeUniforms) {
