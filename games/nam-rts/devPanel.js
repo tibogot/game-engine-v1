@@ -199,6 +199,16 @@ export function createDevPanel({
             <b>100% = 18.5 ms</b> (5% of frames inside budget), <b>90% = 16.6 ms</b>
             (95%). Below 90% buys nothing until something else is added — the
             limit becomes vsync, not the GPU.</div>
+          <div class="prop-row">
+            <span class="prop-label">Grass</span>
+            <div class="prop-value">
+              <button class="prop-toggle checked" id="dv-grass" type="button" aria-label="Grass">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="dv-hint">Every grass blade system, compute and draws, plus the
+            green tint it lays on distant ground. MEASURED: about <b>1.4 ms</b> zoomed
+            out and <b>0.8 ms</b> close up at native resolution — it costs most where it
+            shows least. Off, open ground shows its terrain paint (sand reads as sand).</div>
         </div>
       </div>
 
@@ -686,6 +696,21 @@ export function createDevPanel({
     app?.setRenderScale?.(pct / 100, { persist: false });
     localStorage.setItem(RSCALE_KEY, String(pct / 100));
     requestAnimationFrame(() => showScale(pct));
+  });
+
+  // Grass is a taste call per camera: it sells a close view and is mostly
+  // invisible from the top-down one, so it is the player's switch, remembered.
+  const GRASS_KEY = "namrts.grass";
+  const grassBtn = $("#dv-grass");
+  const setGrass = (on) => {
+    grassBtn.classList.toggle("checked", !!on);
+    app?.setGrassEnabled?.(!!on);
+  };
+  setGrass(localStorage.getItem(GRASS_KEY) !== "0");
+  grassBtn.addEventListener("click", () => {
+    const on = !grassBtn.classList.contains("checked");
+    setGrass(on);
+    localStorage.setItem(GRASS_KEY, on ? "1" : "0");
   });
 
   // ── Smoke ───────────────────────────────────────────────────────────────────

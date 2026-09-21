@@ -1372,6 +1372,11 @@ export async function startV3App(opts = {}) {
   let grassRings = null;
   let _grassBuilding = false;
   let _grassRingsEnabled = false;
+  // A game's master switch over EVERY grass blade system — hybrid rings, revo
+  // tile, cliff rings — see app.setGrassEnabled. It gates the same `want…`
+  // conditions the frame loop already uses, so off stops the compute
+  // dispatches and the draws, not just the meshes' visibility.
+  let _grassSwitch = true;
   let cliffGrassRings = null;   // second ring set, cliffMode — grass on cliff tops
   let _cliffGrassBuilding = false;
   let _cliffRingsEnabled = false;
@@ -4381,8 +4386,9 @@ export async function startV3App(opts = {}) {
         // while the tile is still building or the world is unpainted.
         grassFarShading.setActive(false);
       }
+      if (_revoMode && !_grassSwitch) grassFarShading.setActive(false);
       if (revoGrass) {
-        const wantRevo = _revoMode && grassTerrainData.hasGrassData && _terrainVisible;
+        const wantRevo = _grassSwitch && _revoMode && grassTerrainData.hasGrassData && _terrainVisible;
         if (wantRevo !== revoGrass.enabled) revoGrass.setEnabled(wantRevo);
         if (wantRevo) {
           const _revoAnchor = grassViewAnchor(revoGrassState.tileSize);
@@ -4411,7 +4417,7 @@ export async function startV3App(opts = {}) {
         // ran update() would keep dispatching for blades nobody can see, and
         // grass with no ground under it is the one thing that looks broken
         // rather than absent.
-        const wantGrass = grassTerrainData.hasGrassData && _terrainVisible;
+        const wantGrass = _grassSwitch && grassTerrainData.hasGrassData && _terrainVisible;
         const _grassKey = `${wantGrass}|${grassState.farBlades !== false}`;
         if (_grassKey !== _grassRingsEnabled) {
           _grassRingsEnabled = _grassKey;
@@ -4433,7 +4439,7 @@ export async function startV3App(opts = {}) {
       }
       if (cliffGrassRings) {
         // Only spend compute when there's both a baked cliff surface and paint.
-        const wantCliff = grassTerrainData.hasCliffData && grassTerrainData.hasCliffSurface && _terrainVisible;
+        const wantCliff = _grassSwitch && grassTerrainData.hasCliffData && grassTerrainData.hasCliffSurface && _terrainVisible;
         const _cliffKey = `${wantCliff}|${grassState.farBlades !== false}`;
         if (_cliffKey !== _cliffRingsEnabled) {
           _cliffRingsEnabled = _cliffKey;
@@ -11750,6 +11756,23 @@ export async function startV3App(opts = {}) {
     },
     /** Native pixel ratio before `renderScale` — what 1.0 means here. */
     get basePixelRatio() { return _basePixelRatio; },
+    /**
+     * Master switch over every grass blade system: the hybrid rings, the revo
+     * tile and the cliff rings, whichever the world runs. Off stops their
+     * compute dispatches and draws in the frame loop (not just .visible), and
+     * drops the far-ground grass tint with them so the near and far ground
+     * do not disagree. Nothing is disposed, so switching back is instant.
+     * Not saved in the project: it is a game's runtime choice, e.g. grass
+     * that reads well close up but costs more than it shows from an RTS
+     * camera.
+     */
+    get grassEnabled() { return _grassSwitch; },
+    setGrassEnabled(on) {
+      _grassSwitch = !!on;
+      _grassRingsEnabled = null;   // force the edge-triggered ring sync to rerun
+      _cliffRingsEnabled = null;
+      return _grassSwitch;
+    },
     /**
      * Retune the STONE — rock props and the terrain's cliff layer together.
      *
