@@ -848,6 +848,12 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   for (const s of structures.list) if (s.alive) navGrid.addStructureObstacle(s);
   console.log(`[cover] ${cover.bake()} obstacles`);
 
+  // DEV: ?showcase=1 places the props being judged around the HQ.
+  if (new URLSearchParams(location.search).get("showcase") === "1") {
+    const { placePropShowcase } = await import("./propShowcase.js");
+    app.showcase = await placePropShowcase(app);
+  }
+
   // The console handle. Every subsystem already hangs off `app`, so one global
   // covers all of them: __NAM.smoke.spawn({x, z, kind: "screen"}).
   window.__NAM = app;

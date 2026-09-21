@@ -22,7 +22,9 @@
  */
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { MAT, assemble, bakeContactAO, buildSandbagRing, rng, triCount } from "./rtsParts.js";
+import {
+  MAT, assemble, bakeContactAO, buildCorrugatedPanel, buildLadder, buildSandbagRing, buildSandbagWall, rng, triCount,
+} from "./rtsParts.js";
 import { rtsObjectMaterial } from "./rtsObjectProps.js";
 
 /** Real size x this — the same factor as the game's units. */
@@ -251,6 +253,94 @@ export function buildMinesSign() {
   m.name = "MinesSign";
   m.castShadow = m.receiveShadow = true;
   return m;
+}
+
+// ── 5. Guard tower ───────────────────────────────────────────────────────────
+/** A squared timber from a to b (world metres), `s` square. */
+function beamGeo(a, b, s) {
+  const d = new THREE.Vector3().subVectors(b, a);
+  const g = new THREE.BoxGeometry(s, d.length(), s);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
+  const m = a.clone().add(b).multiplyScalar(0.5);
+  return g.translate(m.x, m.y, m.z);
+}
+
+/**
+ * A firebase guard tower: four splayed timber legs, X-braced in two tiers, a
+ * plank deck behind a sandbag parapet, corner posts carrying a corrugated
+ * roof, and a ladder up to a gap in the bags. What was built on every perimeter
+ * in-country — timber and bags, not the clean concrete of the old model.
+ */
+export function buildGuardTower({ seed = 13, deckHeight = 5.2 } = {}) {
+  const R = rng(seed);
+  const v = (x, y, z) => new THREE.Vector3(x * S, y * S, z * S);
+  const H = deckHeight, b0 = 1.75, b1 = 1.4; // leg half-spread at the foot / at the deck
+  const parts = [];
+  const leg = (sx, sz, t) => v(sx * (b0 + (b1 - b0) * t), H * t, sz * (b0 + (b1 - b0) * t));
+  const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  for (const [sx, sz] of corners) {
+    parts.push({ geo: beamGeo(leg(sx, sz, -0.06), leg(sx, sz, 1), 0.2 * S), mat: MAT.timber, tone: 0.3 + R() * 0.2 });
+  }
+  // X-braces on every side, two tiers, and a ledger at the tier line.
+  for (let k = 0; k < 4; k++) {
+    const [ax, az] = corners[k], [bx, bz] = corners[(k + 1) % 4];
+    for (const [t0, t1] of [[0.04, 0.5], [0.5, 0.96]]) {
+      parts.push({ geo: beamGeo(leg(ax, az, t0), leg(bx, bz, t1), 0.1 * S), mat: MAT.timber, tone: 0.4 + R() * 0.25 });
+      parts.push({ geo: beamGeo(leg(bx, bz, t0), leg(ax, az, t1), 0.1 * S), mat: MAT.timber, tone: 0.4 + R() * 0.25 });
+    }
+    parts.push({ geo: beamGeo(leg(ax, az, 0.5), leg(bx, bz, 0.5), 0.12 * S), mat: MAT.timber, tone: 0.35 });
+  }
+  // Deck: joists, then planks running across them, overhanging the legs.
+  const dh = 1.75; // deck half-width
+  for (const z of [-1.3, 0, 1.3]) parts.push({ geo: new THREE.BoxGeometry(dh * 2 * S, 0.16 * S, 0.14 * S), pos: [0, (H - 0.08) * S, z * S], mat: MAT.timber, tone: 0.3 });
+  const planks = 9;
+  for (let i = 0; i < planks; i++) {
+    const x = (-dh + (i + 0.5) * (2 * dh / planks)) * S;
+    parts.push({ geo: new THREE.BoxGeometry((2 * dh / planks) * 0.9 * S, 0.06 * S, dh * 2 * S), pos: [x, (H + 0.03) * S, 0], mat: MAT.timber, tone: 0.35 + R() * 0.35 });
+  }
+  // Sandbag parapet round the deck edge, a gap at the ladder (-Z).
+  const bag = { length: 0.52 * S, width: 0.30 * S, height: 0.19 * S, segU: 6, segV: 4 };
+  const top = (H + 0.06) * S, edge = (dh - 0.17) * S, courses = 5;
+  const wall = (len, x, z, ry, s2) => ({ geo: buildSandbagWall({ length: len * S, courses, seed: seed + s2, bag, batter: 0.02 }), pos: [x, top, z], rot: [0, ry, 0], mat: null });
+  parts.push(wall(dh * 2, 0, edge, 0, 1));
+  parts.push(wall(dh * 2 - 0.3, edge, 0, Math.PI / 2, 2));
+  parts.push(wall(dh * 2 - 0.3, -edge, 0, Math.PI / 2, 3));
+  const side = dh - 0.45; // the -Z wall in two runs either side of the gap
+  parts.push(wall(side, -(dh - side / 2) * S, -edge, 0, 4));
+  parts.push(wall(side, (dh - side / 2) * S, -edge, 0, 5));
+  // Corner posts carrying the roof, and the roof itself.
+  const roofY = H + 2.35;
+  for (const [sx, sz] of corners) {
+    parts.push({ geo: new THREE.BoxGeometry(0.14 * S, (roofY - H) * S, 0.14 * S), pos: [sx * (dh - 0.08) * S, (H + (roofY - H) / 2) * S, sz * (dh - 0.08) * S], mat: MAT.timber, tone: 0.35 });
+  }
+  // A low gable of two corrugated sheets, ridge along X. (The kit's
+  // buildSheetRoof stands its sheets on edge — its Euler order turns the
+  // sheet's width vertical — so the sheets are laid here explicitly.)
+  const half = dh + 0.35, rise = 0.45, slope = Math.hypot(half, rise), tilt = Math.atan2(rise, half);
+  for (const s of [-1, 1]) {
+    const sheet = buildCorrugatedPanel({ width: (dh * 2 + 0.7) * S, height: slope * S, thickness: 0.025 * S, ribs: 12, ribDepth: 0.035 * S, offset: s * 0.004 });
+    // Built standing in XY; laid so its height runs from the ridge out along ±Z,
+    // then dropped at the eave.
+    sheet.rotateX(s > 0 ? Math.PI / 2 : -Math.PI / 2).rotateX(s * tilt).translate(0, (roofY + rise) * S, 0);
+    parts.push({ geo: sheet, mat: MAT.metal, tone: s > 0 ? 0.5 : 0.4 });
+  }
+  parts.push({ geo: new THREE.BoxGeometry((dh * 2 + 0.8) * S, 0.08 * S, 0.22 * S), pos: [0, (roofY + rise + 0.04) * S, 0], mat: MAT.metal, tone: 0.35 });
+  // Rafters under the sheets, from the corner posts' tops to the ridge.
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    parts.push({ geo: beamGeo(v(sx * (dh - 0.08), roofY, sz * (dh - 0.08)), v(sx * (dh - 0.08), roofY + rise - 0.06, 0), 0.1 * S), mat: MAT.timber, tone: 0.35 });
+  }
+  // Ladder up the -Z face to the gap, leaning in.
+  const lad = buildLadder({ height: (H + 0.9) * S, width: 0.55 * S, rail: 0.08 * S, rungs: 14, rung: 0.05 * S });
+  parts.push({ geo: lad, pos: [0, -0.1 * S, -(dh + 0.55) * S], rot: [0.1, 0, 0], mat: MAT.timber, tone: 0.5 });
+  // A searchlight on the front corner and a drum of water at the foot.
+  parts.push({ geo: new THREE.CylinderGeometry(0.2 * S, 0.24 * S, 0.34 * S, 12).rotateX(Math.PI / 2 - 0.3), pos: [(dh - 0.3) * S, top + (courses * 0.17 + 0.15) * S, (dh - 0.3) * S], rot: [0, 0.6, 0], mat: MAT.metal, tone: 0.3 });
+  const drum = drumGeometry();
+  parts.push({ geo: drum, pos: [(b0 + 0.6) * S, 0, -(b0 - 0.2) * S], rot: [0, R() * 6.28, 0], mat: MAT.paint, tone: 0.5 });
+  const geo = assemble(parts);
+  for (const p of parts) if (p.geo !== drum) p.geo.dispose();
+  drum.dispose();
+  bakeContactAO(geo, { cell: 0.2 * S, radius: 2, strength: 0.4, groundFade: 0.25, floor: 0.5 });
+  return geo;
 }
 
 /** Every piece as a ready mesh (the sign as a small group), for previews. */

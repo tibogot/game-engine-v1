@@ -67,6 +67,9 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/props/liveProps.js",
   // RTS object kit: structures built from the shared parts (a game places them)
   "v3/render/objects/rtsQuonset.js",
+  "v3/render/objects/rtsFirebaseProps.js",
+  "v3/render/objects/rtsSigns.js",
+  "v3/render/objects/rtsObjectProps.js",
   // Vehicle physics (also drives the editor's play-mode cars)
   "v3/play/modularRoadVehicle.js",
   "v3/play/modularRoadBvh.js",
