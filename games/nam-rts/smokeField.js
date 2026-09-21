@@ -52,7 +52,7 @@
 import * as THREE from "three";
 import {
   Fn, attribute, cameraPosition, cameraWorldMatrix, cos, dot, float, fract, int,
-  max, mix, normalize, positionLocal, pow, saturate, sin, smoothstep, uniform,
+  max, mix, normalize, positionLocal, pow, saturate, sin, smoothstep, step, uniform,
   uniformArray, uv, varying, vec3, vec4,
 } from "three/tsl";
 
@@ -60,6 +60,25 @@ import {
 export const MAX_SOURCES = 24;
 /** Puffs per column. The silhouette comes from this many, at varied sizes. */
 export const PUFFS_PER_SOURCE = 128;
+
+/**
+ * THE RENDER BUDGET — columns' worth of full-detail puffs, however many burn.
+ *
+ * Smoke is the one battle effect that costs real frame time, and all of it is
+ * pixels: MEASURED at full zoom-out, 4 / 12 / 24 columns = +0.2 / +2.0 / +4.4 ms
+ * at 1919x888 (12.5 ms at 2x), ~0.18 ms a column. Up to this many columns draw
+ * all their puffs; past it, EVERY column draws a share, so the whole field
+ * costs about this many columns' worth. A cap on the LOOK, never on the rule:
+ * the sim still holds MAX_SOURCES columns and every one of them still blocks
+ * sight exactly as before — nobody loses a smoke screen to a perf setting.
+ */
+export const FULL_DETAIL_COLUMNS = 8;
+/** Share of the rank range over which a dropped puff fades rather than pops. */
+const PUFF_FADE_BAND = 0.1;
+/** Seconds the drawn share takes to follow a change (a column lit or gone). */
+const KEEP_EASE = 0.8;
+/** Surviving puffs scale by keep^-this (see the vertex stage). */
+const SIZE_COMPENSATION = 0.2;
 
 /** vec4 rows per source in the uniform array. */
 const ROWS = 5;
@@ -217,6 +236,8 @@ export function createSmokeField({
   const uTime = uniform(0);
   const uSunDir = uniform(new THREE.Vector3(0.5, 0.6, 0.4).normalize());
   const uOpacity = uniform(1);
+  // Share of each column's puffs drawn (see FULL_DETAIL_COLUMNS), eased.
+  const uKeep = uniform(1);
 
   // ── Geometry: one quad per puff, rebuilt in the vertex stage ──────────────
   const quad = new THREE.PlaneGeometry(1, 1);
@@ -227,12 +248,19 @@ export function createSmokeField({
   geo.instanceCount = count;
   const seeds = new Float32Array(count);
   const slots = new Float32Array(count);
+  const ranks = new Float32Array(count);
   for (let i = 0; i < count; i++) {
     seeds[i] = (i * 0.6180339887498949) % 1;   // golden ratio: even, no clumps
     slots[i] = Math.floor(i / puffsPerSource);
+    // A puff's place in its column, 0..1. The budget keeps the LOWEST ranks,
+    // and because the seeds are a golden-ratio sequence, any prefix of a
+    // column is itself evenly spread — dropping the top half leaves an even
+    // half, not a lopsided column.
+    ranks[i] = (i % puffsPerSource) / puffsPerSource;
   }
   geo.setAttribute("aSeed", new THREE.InstancedBufferAttribute(seeds, 1));
   geo.setAttribute("aSlot", new THREE.InstancedBufferAttribute(slots, 1));
+  geo.setAttribute("aRank", new THREE.InstancedBufferAttribute(ranks, 1));
   quad.dispose();
 
   // FrontSide, and it matters: three renders a DOUBLE-sided TRANSPARENT
@@ -308,7 +336,12 @@ export function createSmokeField({
     // Varied per puff AND growing as it disperses. The variation matters more
     // than it sounds: a column of equal-sized blobs reads as bubbles, because
     // a repeated circle is the one shape the eye refuses to merge.
-    const size = r2.x.mul(mix(float(0.55), float(1.5), h3)).mul(mix(float(1), r2.y, t));
+    // Under the render budget each surviving puff grows a little to close the
+    // gaps its dropped neighbours leave — keep^-0.2: 1.25x at a third drawn.
+    // Bigger puffs cost pixels, so this gives back part of the saving; it is
+    // the price of the column staying a haze instead of turning into lumps.
+    const budgetGrow = pow(max(uKeep, float(0.05)), float(-SIZE_COMPENSATION));
+    const size = r2.x.mul(mix(float(0.55), float(1.5), h3)).mul(mix(float(1), r2.y, t)).mul(budgetGrow);
 
     // ── FADES, all multiplied into one alpha ──
     const fadeIn = smoothstep(float(0), float(0.12), t);
@@ -320,7 +353,16 @@ export function createSmokeField({
     // quad to a point AND zeroes its alpha, so the instance costs one vertex
     // shader and no fragments.
     const liveGate = saturate(srcAge.mul(1e6));
-    vAlpha.assign(fadeIn.mul(fadeOut).mul(srcFade).mul(r2.z).mul(uOpacity).mul(liveGate));
+    // The render budget: puffs ranked past the drawn share collapse the same
+    // way a dead slot does (one vertex shader, no fragments), and the ones
+    // just inside it fade over PUFF_FADE_BAND, so a share that moves makes
+    // puffs thin away rather than blink out.
+    const rank = attribute("aRank", "float");
+    // Stretched by the band so a share of 1 leaves every puff at full alpha —
+    // the unbudgeted look, untouched.
+    const keepGate = smoothstep(float(0), float(PUFF_FADE_BAND), uKeep.mul(1 + PUFF_FADE_BAND).sub(rank));
+    const drawGate = liveGate.mul(keepGate);
+    vAlpha.assign(fadeIn.mul(fadeOut).mul(srcFade).mul(r2.z).mul(uOpacity).mul(drawGate));
 
     // ── LIGHT ──
     // This is what stops smoke reading as grey paint. The top of a column sees
@@ -337,7 +379,7 @@ export function createSmokeField({
     // ── The camera-facing quad ──
     const camRight = cameraWorldMatrix[0].xyz;
     const camUp = cameraWorldMatrix[1].xyz;
-    const corner = positionLocal.xy.mul(size).mul(liveGate);
+    const corner = positionLocal.xy.mul(size).mul(step(float(1e-5), drawGate));
     return world.add(camRight.mul(corner.x)).add(camUp.mul(corner.y));
   })();
 
@@ -347,7 +389,13 @@ export function createSmokeField({
   material.colorNode = Fn(() => {
     const d = uv().sub(0.5).length().mul(2);
     const soft = float(1).sub(smoothstep(float(0.2), float(1), d));
-    return vec4(vCol, vAlpha.mul(soft).mul(soft));
+    const a = vAlpha.mul(soft).mul(soft);
+    // Fewer layers, same smoke: k layers of alpha a let through (1 - a)^k, so
+    // a share `keep` of them must each let through (1 - a)^(1/keep) to leave
+    // the column as opaque as before — the same Beer-Lambert the sight rule
+    // uses. At keep = 1 this is a exactly.
+    const keep = max(uKeep, float(0.05));
+    return vec4(vCol, float(1).sub(pow(float(1).sub(a.min(0.999)), float(1).div(keep))));
   })();
 
   const mesh = new THREE.Mesh(geo, material);
@@ -359,6 +407,8 @@ export function createSmokeField({
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   scene.add(mesh);
+
+  const budget = { fullColumns: FULL_DETAIL_COLUMNS, viewKeep: 1 };
 
   const _c = new THREE.Color();
   function writeSlot(i) {
@@ -416,9 +466,32 @@ export function createSmokeField({
 
     /** PER FRAME — the clock the puffs ride, and the sun they are lit by. */
     render(elapsed, sunDir) {
+      const dt = Math.min(0.25, Math.max(0, elapsed - uTime.value));
       uTime.value = elapsed;
       if (sunDir) uSunDir.value.copy(sunDir).normalize();
+      // The drawn share: every puff up to `fullColumns` live columns, then a
+      // share that keeps the field at about that many columns' worth — times
+      // whatever the game asks for the current view. Eased, so a column lit
+      // or burnt out thins the others gradually instead of at once.
+      let live = 0;
+      for (const s of sources) if (s.alive) live++;
+      const target = Math.min(1, budget.fullColumns / Math.max(1, live)) * budget.viewKeep;
+      const k = dt > 0 ? 1 - Math.exp(-dt / KEEP_EASE * 3) : 1;
+      uKeep.value += (target - uKeep.value) * k;
     },
+
+    /**
+     * The render budget (see FULL_DETAIL_COLUMNS). `fullColumns`: how many
+     * columns may draw every puff before all of them share. `viewKeep` 0..1: a
+     * further share for the current view, e.g. from camera zoom — looking
+     * straight down a column stacks all its puffs on the same pixels. Neither
+     * touches the sim: sight is still tested against every live column.
+     */
+    setBudget({ fullColumns, viewKeep } = {}) {
+      if (Number.isFinite(fullColumns)) budget.fullColumns = Math.max(1, fullColumns);
+      if (Number.isFinite(viewKeep)) budget.viewKeep = Math.max(0.05, Math.min(1, viewKeep));
+    },
+    get budget() { return { ...budget, drawn: uKeep.value }; },
 
     /** How much smoke sits between two points, 0..1. See occlusionAlong. */
     occlusionBetween(ax, az, bx, bz) { return occlusionAlong(sources, ax, az, bx, bz); },

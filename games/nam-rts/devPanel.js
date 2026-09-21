@@ -263,6 +263,17 @@ export function createDevPanel({
               <span class="prop-num" id="dv-smoke-op-v"></span>
             </div>
           </div>
+          <div class="prop-row">
+            <span class="prop-label">Full-detail cols</span>
+            <div class="prop-value">
+              <input type="range" id="dv-smoke-budget" min="4" max="24" step="1" />
+              <span class="prop-num" id="dv-smoke-budget-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint">Render budget: up to this many columns draw every puff;
+            past it they all draw a share, denser and a little larger, so the field
+            costs about this many columns' worth. Look only — every column still blocks
+            sight. MEASURED (2x res): 24 columns 14.7 ms unbudgeted, 7.0 ms at 8.</div>
           <div class="dv-hint">Drops at the camera focus. Violet is a SIGNAL and never
             blocks; screening and napalm break line of sight, so units inside stop
             shooting through it. <span id="dv-smoke-n">0 live</span>.</div>
@@ -886,9 +897,29 @@ export function createDevPanel({
     if (app?.smoke) app.smoke.params.uOpacity.value = v;
   });
 
+  // The render budget (smokeField FULL_DETAIL_COLUMNS): look against cost,
+  // never the rule — every live column still blocks sight.
+  const SMOKE_BUDGET_KEY = "namrts.smokeBudget";
+  const smokeBud = $("#dv-smoke-budget"), smokeBudV = $("#dv-smoke-budget-v");
+  {
+    const saved = parseInt(localStorage.getItem(SMOKE_BUDGET_KEY), 10);
+    const start = Number.isFinite(saved) ? saved : (app?.smoke?.budget?.fullColumns ?? 8);
+    app?.smoke?.setBudget?.({ fullColumns: start });
+    smokeBud.value = String(start);
+    smokeBudV.textContent = String(start);
+  }
+  smokeBud.addEventListener("input", () => {
+    const n = Number(smokeBud.value);
+    smokeBudV.textContent = String(n);
+    app?.smoke?.setBudget?.({ fullColumns: n });
+    localStorage.setItem(SMOKE_BUDGET_KEY, String(n));
+  });
+
   const smokeN = $("#dv-smoke-n");
   const smokeTimer = setInterval(() => {
-    smokeN.textContent = `${app?.smoke?.activeCount?.() ?? 0} live`;
+    const b = app?.smoke?.budget;
+    smokeN.textContent = `${app?.smoke?.activeCount?.() ?? 0} live`
+      + (b && b.drawn < 0.999 ? `, drawing ${Math.round(b.drawn * 100)}% of each column's puffs` : "");
   }, 500);
 
   // ── Fog ─────────────────────────────────────────────────────────────────────
