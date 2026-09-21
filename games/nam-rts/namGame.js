@@ -307,6 +307,21 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   // every other game keep the look they were built around.
   app.setRockPalette?.(NAM_ROCK_PALETTE);
 
+  // READABLE DAYLIGHT. MEASURED on nam-valley at play zoom (sRGB luma, game area):
+  //
+  //                                           mean   near-black (<40)
+  //   16:48, zenith-only fill (as saved)        42         63%
+  //   12:30, zenith-only fill                   65         14%
+  //   12:30, whole-sky fill, hemi 1.25, 1.08    78          9%
+  //
+  // The sun time is the map's (saved in nam-valley.v3proj). This is the game's
+  // noon: the Atmosphere sky takes its fill colour from the ZENITH alone, a deep
+  // navy (#0c266f) that lit every shadow under the canopy almost black, while
+  // skylight really comes from the whole dome, the pale haze included. skyFill
+  // blends toward it. Set at boot and saved nowhere, like the rock palette, so
+  // the editor and the other games keep their light.
+  app.sky?.setWorldLight?.({ skyFill: 0.6, hemi: 1.25, exposure: 1.08 });
+
   app.setSlopeCliffRule?.({
     layer: 5,                            // "Cliff Rock" in nam-valley
     startDeg: NAV_MAX_SLOPE_DEG - 4,
@@ -343,6 +358,7 @@ export async function startNamGame({ container, onStatus = () => {}, fov } = {})
   onStatus("Placing structures…");
   const structures = await createStructures({ app, navGrid, resources });
   app.structures = structures;
+
 
   onStatus("Seeding resource nodes…");
   await resources.placeNodes(structures.base.position);

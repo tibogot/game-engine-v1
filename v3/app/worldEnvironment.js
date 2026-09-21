@@ -2227,6 +2227,20 @@ export async function createWorldEnvironment({
   return {
     sun,
     hemi,
+    /**
+     * How the Atmosphere sky lights the world, for a game that wants a different
+     * NOON from the editor's: `{ skyFill, dir, hemi, exposure, env }`. The last four
+     * are the noon reference the sky's day curve multiplies (WORLD_LIGHT_REFERENCE),
+     * so every other hour follows; `skyFill` is skyWorldLight's ambient source. Both
+     * are in the sky-light cache key, so the change lands on the next frame. Only
+     * the Atmosphere mode reads them.
+     */
+    setWorldLight({ skyFill, ...ref } = {}) {
+      if (Number.isFinite(skyFill)) atmoWorldLight.params.skyFill = skyFill;
+      for (const k of ["dir", "hemi", "exposure", "env"]) {
+        if (Number.isFinite(ref[k])) atmoLightRef[k] = ref[k];
+      }
+    },
     /** The shadow node, or null — it is REBUILT when cascades change, so read it live. */
     getCsm: () => csm,
     /**

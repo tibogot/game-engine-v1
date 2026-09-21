@@ -11707,6 +11707,11 @@ export async function startV3App(opts = {}) {
       set(params = {}) { Object.assign(worldToolState.proceduralSky, params); },
       /** Hours, 0–24. Drives the sun angles AND the scattering. */
       setTimeOfDay(t) { worldEnv?.setTimeOfDay(t); },
+      /**
+       * The Atmosphere sky's noon lighting for this game — see
+       * worldEnvironment.setWorldLight. e.g. { skyFill: 0.6, hemi: 1.25, exposure: 1.08 }.
+       */
+      setWorldLight(p) { worldEnv?.setWorldLight?.(p); },
     },
     // ── Fog override ──────────────────────────────────────────────────────────
     // Height + distance fog live in worldToolState.fog and sync to scene.fogNode.

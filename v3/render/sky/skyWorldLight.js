@@ -51,8 +51,19 @@ export const WORLD_LIGHT_REFERENCE = {
 };
 
 export function createSkyWorldLight() {
-  /** 0 = keep a neutral lamp, 1 = full atmospheric reddening. */
-  const params = { enabled: true, warmth: 1.0 };
+  /**
+   * warmth: 0 = keep a neutral lamp, 1 = full atmospheric reddening.
+   *
+   * skyFill: where the ambient's SKY colour comes from — 0 = the zenith alone (the
+   * default, every existing look), 1 = the haze. Skylight on the ground is the
+   * integral of the WHOLE dome, and the bright pale band near the horizon carries
+   * much of it; the zenith alone is the darkest, most saturated patch of the sky.
+   * MEASURED on nam-rts at 12:30, zenith-only fill gave #0c266f navy and left 14%
+   * of the frame near-black under a jungle canopy; a dome-like fill is what lets
+   * a top-down game read into its own shadows. A game opts in; the editor and the
+   * racing game keep 0.
+   */
+  const params = { enabled: true, warmth: 1.0, skyFill: 0 };
 
   /*
    * A FLOOR UNDER THE NIGHT AMBIENT.
@@ -121,7 +132,7 @@ export function createSkyWorldLight() {
   function compute(look, colors, ref = WORLD_LIGHT_REFERENCE, camY = 0) {
     if (!params.enabled || !look) return null;
     const el = look.sunElevation ?? 0;
-    const key = `${el.toFixed(2)}|${params.warmth}|${Math.round(camY / 50)}`
+    const key = `${el.toFixed(2)}|${params.warmth}|${params.skyFill}|${Math.round(camY / 50)}`
       + `|${(look.moonLight ?? 0).toFixed(3)}|${ref.dir},${ref.hemi},${ref.exposure},${ref.env}`
       + `|${night.enabled ? night.intensity : -1}`;
     if (key === _key) return null;
@@ -155,9 +166,11 @@ export function createSkyWorldLight() {
     const nightK = THREE.MathUtils.clamp(-look.sunDir.y / 0.1045, 0, 1);
     if (nightK > 0) _keyCol.lerp(_moonKeyCol, nightK);
 
-    // Ambient from the sky itself: zenith overhead, haze underfoot.
-    _hemiSky.copy(colors.zenith);
+    // Ambient from the sky itself: zenith overhead (toward the haze by skyFill —
+    // see params), haze underfoot.
     _hemiGnd.copy(colors.haze ?? colors.horizon);
+    _hemiSky.copy(colors.zenith);
+    if (params.skyFill > 0) _hemiSky.lerp(_hemiGnd, Math.min(1, params.skyFill));
     const ambK = night.enabled ? nightK : 0;
     if (ambK > 0) {
       _nightSky.set(night.skyColor);
