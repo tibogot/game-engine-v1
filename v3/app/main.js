@@ -11720,6 +11720,37 @@ export async function startV3App(opts = {}) {
     // Ground height at a world X/Z (RTS unit clamping, building placement).
     getWorldHeight,
     /**
+     * RENDER SCALE — the fraction of native resolution the scene is drawn at.
+     *
+     * The machinery already existed for the editor's World panel; this is the
+     * part a GAME can reach. 1 is native. The renderer's pixel ratio is
+     * `min(devicePixelRatio, 2) * scale`, so 1 means native on any display.
+     *
+     * It is the bluntest lever in the engine and, on a frame limited by
+     * shading rather than by draw calls, the most effective: MEASURED on
+     * nam-rts at play zoom, 1.00 gave 18.5 ms with 5% of frames inside the
+     * 16.7 ms budget and 0.90 gave 16.6 ms with 95%, while 0.75 gave nothing
+     * further because by then the limit is vsync rather than the GPU. A ten
+     * per cent reduction was the difference between 53 and 61 FPS.
+     *
+     * `persist` writes it to localStorage under the engine's own key, which is
+     * shared with the editor because the right value is a property of the
+     * MACHINE rather than of a project. A game that wants its own preference —
+     * an editor wants fidelity where a game wants frames — should pass
+     * `persist: false` and keep its own.
+     */
+    get renderScale() { return renderQuality.scale; },
+    setRenderScale(v, { persist = true } = {}) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return renderQuality.scale;
+      renderQuality.scale = Math.max(0.5, Math.min(2, n));
+      if (persist) applyRenderScale();
+      else resizeRenderer();
+      return renderQuality.scale;
+    },
+    /** Native pixel ratio before `renderScale` — what 1.0 means here. */
+    get basePixelRatio() { return _basePixelRatio; },
+    /**
      * Retune the STONE — rock props and the terrain's cliff layer together.
      *
      * They share one recipe (rockShading.js) on purpose, so a boulder standing

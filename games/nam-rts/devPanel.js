@@ -184,6 +184,25 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Performance</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Render scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-rscale" min="60" max="100" step="5" />
+              <span class="prop-num" id="dv-rscale-v"></span>
+            </div>
+          </div>
+          <div class="dv-hint" id="dv-rscale-hint"></div>
+          <div class="dv-hint">The scene is drawn at this fraction of native and
+            scaled up; the HUD stays sharp either way. MEASURED at play zoom:
+            <b>100% = 18.5 ms</b> (5% of frames inside budget), <b>90% = 16.6 ms</b>
+            (95%). Below 90% buys nothing until something else is added — the
+            limit becomes vsync, not the GPU.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Smoke</div>
         <div class="section-body">
           <button class="action-btn" id="dv-smoke-violet" type="button">Violet marker (M18)</button>
@@ -637,6 +656,36 @@ export function createDevPanel({
   flagWind.addEventListener("input", () => {
     app?.baseFlag?.setParam?.("windIntensity", +flagWind.value);
     flagWindV.textContent = flagWind.value;
+  });
+
+  // ── Performance ─────────────────────────────────────────────────────────────
+  // Its OWN preference, not the engine's: the editor shares one key across
+  // every project because the right value is a property of the machine, but an
+  // editor wants fidelity where this game wants frames, and the two should not
+  // overwrite each other.
+  const RSCALE_KEY = "namrts.renderScale";
+  const rScale = $("#dv-rscale"), rScaleV = $("#dv-rscale-v"), rScaleHint = $("#dv-rscale-hint");
+  const showScale = (pct) => {
+    rScaleV.textContent = `${pct}%`;
+    const base = app?.basePixelRatio ?? 1;
+    const el = app?.renderer?.domElement;
+    rScaleHint.innerHTML = el
+      ? `drawing <b>${el.width}x${el.height}</b> (native ${Math.round(el.clientWidth * base)}x${Math.round(el.clientHeight * base)})`
+      : "";
+  };
+  {
+    const saved = parseFloat(localStorage.getItem(RSCALE_KEY));
+    const start = Number.isFinite(saved) ? saved : (app?.renderScale ?? 1);
+    app?.setRenderScale?.(start, { persist: false });
+    rScale.value = String(Math.round(start * 100));
+    // One frame later, so the canvas has resized before the hint reads it.
+    requestAnimationFrame(() => showScale(Math.round(start * 100)));
+  }
+  rScale.addEventListener("input", () => {
+    const pct = Number(rScale.value);
+    app?.setRenderScale?.(pct / 100, { persist: false });
+    localStorage.setItem(RSCALE_KEY, String(pct / 100));
+    requestAnimationFrame(() => showScale(pct));
   });
 
   // ── Smoke ───────────────────────────────────────────────────────────────────
