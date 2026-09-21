@@ -52,6 +52,37 @@ export const DEFAULT_ROCK_PARAMS = {
   /** Depth range of the big cuts, fraction of radius. */
   bigMin: 0.15,
   bigMax: 0.3,
+  /**
+   * Chips aimed FURTHER DOWN than this are skipped, as maxChipUp does above.
+   * 1 = no limit, which is every existing preset's behaviour.
+   *
+   * It exists for FLAT bodies, and the reason is geometric. A chip's plane
+   * takes the radius direction as its normal and the radius length as its
+   * offset — which for a sphere is the tangent plane and cuts nothing it
+   * should not. On a slab the radius direction and the true surface normal
+   * diverge hard near the short axis, so a plane placed against the thin top
+   * (offset ~0.85 m) stays perpendicular to that radius and slices straight
+   * through the wide middle: a 7 m slab came out 3.3 m. Keeping chips near the
+   * equator keeps every plane's offset large, and the flat faces a slab wants
+   * come from topCut/baseCut anyway.
+   */
+  maxChipDown: 1,
+  /**
+   * ONE FLAT VERTICAL FACE, as if the rock had split, 0 = none.
+   *
+   * Every plane here carves the WHOLE body — the surface is a soft min over
+   * half-spaces — so a plane through the middle does not open a cleft, it
+   * slices the rock and keeps one side. A split boulder therefore cannot be
+   * one mesh; what it can be is one HALF, which is the more useful prop
+   * anyway: alone it reads as a rock whose other half weathered away, and two
+   * of them at opposing `sliceYaw` set a few metres apart read as a boulder
+   * that split. The flat faces match because they are the same cut.
+   *
+   * Fraction of the radius in that direction, like a chip.
+   */
+  sliceCut: 0,
+  /** Which way the flat face looks, radians. */
+  sliceYaw: 0,
   /** Flat base cut depth, fraction of sizeY (0 = round bottom). */
   baseCut: 0.12,
   /** Flat TOP cut depth, fraction of sizeY (0 = none). Cliffs: ~0.3. */
@@ -187,15 +218,19 @@ export function createRockGeometry(params = {}) {
     tmp.x += (rng() - 0.5) * j; tmp.y += (rng() - 0.5) * j; tmp.z += (rng() - 0.5) * j;
     tmp.normalize().applyQuaternion(rot);
     const depth = p.chipMin + (p.chipMax - p.chipMin) * Math.pow(rng(), p.chipBias);
-    if (tmp.y > p.maxChipUp) continue;
+    if (tmp.y > p.maxChipUp || tmp.y < -p.maxChipDown) continue;
     planes.push(tmp.x, tmp.y, tmp.z, eggR(tmp.x, tmp.y, tmp.z) * (1 - depth));
   }
   for (let i = 0; i < p.bigCuts; i++) {
     // mostly on the sides and upper half — the lower half is buried or in shade
     tmp.set(rng() * 2 - 1, rng() * 1.4 - 0.5, rng() * 2 - 1).normalize();
     const depth = p.bigMin + (p.bigMax - p.bigMin) * rng();
-    if (tmp.y > p.maxChipUp) continue;
+    if (tmp.y > p.maxChipUp || tmp.y < -p.maxChipDown) continue;
     planes.push(tmp.x, tmp.y, tmp.z, eggR(tmp.x, tmp.y, tmp.z) * (1 - depth));
+  }
+  if (p.sliceCut > 0) {
+    const sx = Math.cos(p.sliceYaw), sz = Math.sin(p.sliceYaw);
+    planes.push(sx, 0, sz, eggR(sx, 0, sz) * (1 - p.sliceCut));
   }
   if (p.baseCut > 0) planes.push(0, -1, 0, p.sizeY * (1 - p.baseCut));
   if (p.topCut > 0) planes.push(0, 1, 0, p.sizeY * (1 - p.topCut));
@@ -344,6 +379,16 @@ export const ROCK_KIT = [
   // says "limestone" and the one people picture when they picture Vietnam.
   { name: "Rock: Karst A", cls: "megalith", seed: 21, sizeX: 2.9, sizeY: 5.4, sizeZ: 2.6, egg: -0.16, squareness: 2.1 },
   { name: "Rock: Karst B", cls: "megalith", seed: 22, sizeX: 3.8, sizeY: 6.6, sizeZ: 3.2, egg: -0.22, squareness: 2.2 },
+  // SLABS. Wide and low, which is the shape that reads best from directly
+  // above — you are looking at the roof, and a slab is almost all roof. The
+  // flat top also gives infantry something that looks like it should be stood
+  // on, which is worth more than another round boulder.
+  { name: "Rock: Slab A", cls: "megalith", seed: 31, sizeX: 3.5, sizeY: 0.85, sizeZ: 2.5, egg: 0.02, squareness: 2.7, topCut: 0.22, baseCut: 0.3, bigCuts: 5, maxChipUp: 0.3, maxChipDown: 0.3 },
+  { name: "Rock: Slab B", cls: "megalith", seed: 32, sizeX: 4.6, sizeY: 1.15, sizeZ: 3.0, egg: 0.02, squareness: 2.9, topCut: 0.26, baseCut: 0.3, bigCuts: 6, maxChipUp: 0.3, maxChipDown: 0.3 },
+  // SPLIT halves, cut on opposing faces so a pair set a few metres apart reads
+  // as one boulder that came apart. Either works alone.
+  { name: "Rock: Split A", cls: "megalith", seed: 41, sizeX: 2.9, sizeY: 3.1, sizeZ: 2.7, sliceCut: 0.42, sliceYaw: 0 },
+  { name: "Rock: Split B", cls: "megalith", seed: 41, sizeX: 2.9, sizeY: 3.1, sizeZ: 2.7, sliceCut: 0.42, sliceYaw: Math.PI },
 ];
 
 /**
