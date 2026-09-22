@@ -33,22 +33,42 @@ export const REQUISITION = {
 /** Can this unit capture? Infantry only. */
 const captures = (u) => u.alive && !u.isAir && u.typeKey === "soldier";
 
-export function createRequisition({ app, resources, params = REQUISITION, onCapture = null, onLost = null, hqStanding = null }) {
+/**
+ * `enemyResources` / `enemyHqStanding`: the same pay for the other side — the
+ * enemy AI's purse (enemyAI.js). Points it holds pay it incomePerPoint, its HQ
+ * pays baseIncome while it stands. Both optional: without them the enemy
+ * holds ground for nothing, as before.
+ */
+export function createRequisition({
+  app, resources, params = REQUISITION, onCapture = null, onLost = null, hqStanding = null,
+  enemyResources = null, enemyHqStanding = null,
+}) {
   const points = [];
 
-  /** Fan the points out in front of the base, alternating sides, widening. */
-  function placePoints(basePos) {
-    for (let i = 0; i < params.count; i++) {
-      const dist = params.firstDist + i * params.spacing;
-      const ang = (i % 2 ? 1 : -1) * (0.32 + i * 0.11);
-      const x = basePos.x + Math.sin(ang) * dist;
-      const z = basePos.z + Math.cos(ang) * dist;
-      const site = findBuildSite(app, x, z, 6, { searchRadius: 140, maxSpread: 6 });
+  /**
+   * Place the points: on the map's authored `sites` ({letter, name, x, z},
+   * pointSites.js) when it has them, else fanned out in front of the base,
+   * alternating sides, widening.
+   */
+  function placePoints(basePos, sites = null) {
+    const n = sites ? sites.length : params.count;
+    for (let i = 0; i < n; i++) {
+      let x, z, search = 140;
+      if (sites) { ({ x, z } = sites[i]); search = 40; }
+      else {
+        const dist = params.firstDist + i * params.spacing;
+        const ang = (i % 2 ? 1 : -1) * (0.32 + i * 0.11);
+        x = basePos.x + Math.sin(ang) * dist;
+        z = basePos.z + Math.cos(ang) * dist;
+      }
+      const site = findBuildSite(app, x, z, 6, { searchRadius: search, maxSpread: 6 });
       if (!site) { console.warn(`[requisition] no ground for point ${i} — skipped`); continue; }
+      const letter = sites?.[i]?.letter ?? String.fromCharCode(65 + i);   // A, B, C…
       points.push({
         kind: "requisitionPoint",
         id: i,
-        name: `Point ${String.fromCharCode(65 + i)}`,   // A, B, C…
+        letter,
+        name: sites?.[i]?.name ?? `Point ${letter}`,
         position: new THREE.Vector3(site.x, site.y, site.z),
         radius: params.radius,
         progress: 0,
@@ -89,10 +109,15 @@ export function createRequisition({ app, resources, params = REQUISITION, onCapt
         onCapture?.(p, p.owner);
       }
     }
-    // Income from what you hold.
+    // Income from what each side holds.
     const held = points.reduce((n, p) => n + (p.owner === "player" ? 1 : 0), 0);
     const base = hqStanding?.() ? params.baseIncome : 0;
     if (held || base) resources?.earn?.((held * params.incomePerPoint + base) * dt);
+    if (enemyResources) {
+      const theirs = points.reduce((n, p) => n + (p.owner === "enemy" ? 1 : 0), 0);
+      const theirBase = enemyHqStanding?.() ? params.baseIncome : 0;
+      if (theirs || theirBase) enemyResources.earn((theirs * params.incomePerPoint + theirBase) * dt);
+    }
   }
 
   return {

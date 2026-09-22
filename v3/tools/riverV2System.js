@@ -439,6 +439,21 @@ export class RiverV2System {
 
   get hasBase() { return this._cpuBase !== null; }
 
+  /**
+   * An external edit that must hold INSIDE the river's footprint too — a bridge
+   * landing graded to its deck. Everything else folds into the base only
+   * outside the footprint (_rebaseNow), so inside it the next re-conform put the
+   * pre-river bank straight back. `apply(base)` edits the normalized base in
+   * place; the channel is then re-conformed against it. False with no river.
+   */
+  editBase(apply) {
+    if (!this._cpuBase) return false;
+    apply(this._cpuBase);
+    this._uploadBase();
+    this.applyConform({ commit: true });
+    return true;
+  }
+
   /** Snapshot the CURRENT terrain as the unconformed base. The caller must have
    *  refreshed the CPU mirror first (main.js awaits ensureCpuHeightmapFromGpu). */
   _ensureBase() {

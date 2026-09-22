@@ -147,6 +147,32 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Enemy AI</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Commander</span>
+            <div class="prop-value">
+              <button class="prop-toggle" id="dv-ai" type="button" aria-label="Enemy AI">${CHECK_SVG}</button>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Difficulty</span>
+            <div class="prop-value">
+              <select class="prop-select" id="dv-ai-diff">
+                <option value="easy">Easy</option>
+                <option value="normal" selected>Normal</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+          </div>
+          <pre class="dv-hint" id="dv-ai-status" style="white-space:pre-wrap;font-size:10px;margin:4px 0 0"></pre>
+          <div class="dv-hint">Squads of five take, hold and attack points, gather out of sight
+            before an attack, fall back when worn down. It only knows what its men can see.
+            <b>?ai=0</b> boots without it (no enemy HQ).</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Enemy Waves</div>
         <div class="section-body">
           <div class="prop-row">
@@ -763,6 +789,32 @@ export function createDevPanel({
   };
   setMatchChecked(app?.match?.enabled ?? false);
   matchBtn.addEventListener("click", () => setMatchChecked(!matchBtn.classList.contains("checked")));
+
+  // ── Enemy AI ────────────────────────────────────────────────────────────────
+  const aiBtn = $("#dv-ai");
+  const setAiChecked = (on) => {
+    aiBtn.classList.toggle("checked", !!on);
+    app?.enemyAI?.setEnabled?.(!!on);
+  };
+  setAiChecked(app?.enemyAI?.enabled ?? false);
+  aiBtn.addEventListener("click", () => setAiChecked(!aiBtn.classList.contains("checked")));
+  $("#dv-ai-diff").addEventListener("change", (e) => app?.enemyAI?.setDifficulty?.(e.target.value));
+  {
+    const out = $("#dv-ai-status");
+    let lastText = "";
+    setInterval(() => {
+      const ai = app?.enemyAI;
+      if (!ai || !out.isConnected || out.offsetParent === null) return;   // section closed: no layout work
+      const req = app.requisition;
+      const text = [
+        `supplies ${Math.floor(ai.purse.stock)} · points ${req?.heldByEnemy ?? 0}/${req?.points.length ?? 0}`,
+        ...ai.summary(),
+        "",
+        ...ai.log.slice(-6),
+      ].join("\n");
+      if (text !== lastText) { lastText = text; out.textContent = text; }
+    }, 500);
+  }
 
   // ── Enemy waves ─────────────────────────────────────────────────────────────
   const wavesBtn = $("#dv-waves");

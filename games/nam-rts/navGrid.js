@@ -329,48 +329,132 @@ export function createNavGrid({
     [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
   ];
 
-  function findPath(sx, sz, tx, tz) {
-    const start = nearestOpen(sx, sz);
-    const goal = nearestOpen(tx, tz);
-    if (!start || !goal) return null;
-    const startI = idx(start.cx, start.cz);
-    const goalI = idx(goal.cx, goal.cz);
-    if (startI === goalI) return [{ x: tx, z: tz }];
-
-    const h = (cx, cz) => Math.hypot(cx - goal.cx, cz - goal.cz);
-    const gScore = new Float32Array(cols * rows).fill(Infinity);
-    const came = new Int32Array(cols * rows).fill(-1);
-    const closed = new Uint8Array(cols * rows);
-    const open = new MinHeap();
-    gScore[startI] = 0;
-    open.push(startI, h(start.cx, start.cz));
-
-    while (open.size) {
-      const cur = open.pop();
-      if (cur === goalI) return reconstruct(came, cur, tx, tz);
-      if (closed[cur]) continue;
-      closed[cur] = 1;
-      const ccx = cur % cols, ccz = (cur - ccx) / cols;
-      for (const [dx, dz, cost] of NB) {
-        const nx = ccx + dx, nz = ccz + dz;
-        if (isBlocked(nx, nz)) continue;
-        if (cost > 1 && (isBlocked(ccx + dx, ccz) || isBlocked(ccx, ccz + dz))) continue;
-        const ni = idx(nx, nz);
-        if (closed[ni]) continue;
-        const tentative = gScore[cur] + cost;
-        if (tentative < gScore[ni]) {
-          gScore[ni] = tentative;
-          came[ni] = cur;
-          open.push(ni, tentative + h(nx, nz));
+  /**
+   * An A* search with its own scratch, which can run to the end at once
+   * (findPath) or a slice at a time (the path queue below). A cell's
+   * gScore/came are valid only when stamp[i] === gen — a new search bumps gen
+   * instead of refilling three 65k arrays — and closed[i] === gen marks it
+   * expanded.
+   */
+  function createSearch() {
+    const N = cols * rows;
+    const gScore = new Float32Array(N);
+    const came = new Int32Array(N);
+    const stamp = new Uint32Array(N);
+    const closed = new Uint32Array(N);
+    const open = new MinHeap(4096);
+    let gen = 0, goalI = -1, gx = 0, gz = 0, tx = 0, tz = 0;
+    // OCTILE distance — the true free-ground cost on an 8-way grid, tighter
+    // than the straight line — with a 0.1% nudge toward the goal to break the
+    // wide plateaus of equal cost it makes (octile ALONE was measured slower:
+    // the search spread across the ties). Paths stay within 0.1% of shortest.
+    const h = (cx, cz) => {
+      const dx = Math.abs(cx - gx), dz = Math.abs(cz - gz);
+      return (dx + dz + (Math.SQRT2 - 2) * Math.min(dx, dz)) * 1.001;
+    };
+    const search = {
+      /** Cells expanded by the last run(). */
+      pops: 0,
+      /** Set up a search. Returns {path} when it is already answered (no ground, same cell), else null. */
+      begin(sx, sz, x1, z1) {
+        const start = nearestOpen(sx, sz);
+        const goal = nearestOpen(x1, z1);
+        if (!start || !goal) return { path: null };
+        const startI = idx(start.cx, start.cz);
+        goalI = idx(goal.cx, goal.cz);
+        if (startI === goalI) return { path: [{ x: x1, z: z1 }] };
+        gx = goal.cx; gz = goal.cz; tx = x1; tz = z1;
+        if (++gen === 0xffffffff) { stamp.fill(0); closed.fill(0); gen = 1; }
+        open.clear();
+        gScore[startI] = 0; came[startI] = -1; stamp[startI] = gen;
+        open.push(startI, h(start.cx, start.cz));
+        return null;
+      },
+      /** Expand up to `maxPops` cells: undefined = not finished yet; else the path, or null when there is none. */
+      run(maxPops = Infinity) {
+        let n = 0;
+        while (open.size) {
+          if (n >= maxPops) { search.pops = n; return undefined; }
+          const cur = open.pop(); n++;
+          if (cur === goalI) { search.pops = n; open.clear(); return reconstruct(came, cur, tx, tz); }
+          if (closed[cur] === gen) continue;
+          closed[cur] = gen;
+          const ccx = cur % cols, ccz = (cur - ccx) / cols;
+          const gCur = gScore[cur];
+          for (let k = 0; k < 8; k++) {
+            const nb = NB[k];
+            const dx = nb[0], dz = nb[1], cost = nb[2];
+            const nx = ccx + dx, nz = ccz + dz;
+            if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) continue;
+            const ni = nz * cols + nx;
+            if (blocked[ni] === 1) continue;
+            // No corner-cutting: both orthogonal neighbours of a diagonal step open.
+            if (cost > 1 && (blocked[ccz * cols + nx] === 1 || blocked[nz * cols + ccx] === 1)) continue;
+            if (closed[ni] === gen) continue;
+            const tentative = gCur + cost;
+            if (stamp[ni] !== gen || tentative < gScore[ni]) {
+              stamp[ni] = gen;
+              gScore[ni] = tentative;
+              came[ni] = cur;
+              open.push(ni, tentative + h(nx, nz));
+            }
+          }
         }
+        search.pops = n;
+        return null;
+      },
+    };
+    return search;
+  }
+
+  const now = createSearch();
+  /** A path, found now. The player's orders use this: a click is answered at once. */
+  function findPath(sx, sz, tx, tz) {
+    const b = now.begin(sx, sz, tx, tz);
+    return b ? b.path : now.run();
+  }
+
+  // ── The path QUEUE: searches on a budget ─────────────────────────────────────
+  // A search across the map into the walled camp expands most of the grid —
+  // MEASURED 13–27 ms, one frame, whenever the enemy AI sent a squad at the HQ.
+  // Queued searches run `maxPops` cells a sim step instead (a few frames for
+  // the longest; nobody sees a squad start a quarter-second later), on their
+  // OWN scratch, so findPath can still answer a click mid-search.
+  const queue = [];
+  let queued = null;     // the search under way
+  let slow = null;       // its scratch, made on first use
+  /** Ask for a path; `cb(path | null)` is called from pumpPaths. Returns a job with cancel(). */
+  function requestPath(sx, sz, tx, tz, cb) {
+    const job = { sx, sz, tx, tz, cb, cancelled: false, cancel() { job.cancelled = true; } };
+    queue.push(job);
+    return job;
+  }
+  /** Run queued searches for up to `maxPops` expanded cells. Call once a sim step. */
+  function pumpPaths(maxPops = 3000) {
+    slow ??= createSearch();
+    let budget = maxPops;
+    while (budget > 0) {
+      if (!queued) {
+        const job = queue.shift();
+        if (!job) return;
+        if (job.cancelled) continue;
+        const b = slow.begin(job.sx, job.sz, job.tx, job.tz);
+        budget -= 16;                        // nearestOpen's own work, roughly
+        if (b) { job.cb(b.path); continue; }
+        queued = job;
       }
+      const r = slow.run(budget);
+      budget -= slow.pops;
+      if (r === undefined) return;          // budget spent mid-search: next step
+      const job = queued;
+      queued = null;
+      if (!job.cancelled) job.cb(r);
     }
-    return null;
   }
 
   function reconstruct(came, endI, tx, tz) {
     const cells = [];
-    for (let i = endI; i !== -1; i = came[i]) cells.push(i);
+    for (let i = endI; i !== -1; i = came[i]) cells.push(i);   // the start's came is -1
     cells.reverse();
     const pts = cells.map((ci) => { const cx = ci % cols; return cellToWorld(cx, (ci - cx) / cols); });
     const pulled = stringPull(pts);
@@ -442,11 +526,60 @@ export function createNavGrid({
   }
   function toggleDebug() { setDebug(!(debugMesh?.visible)); return !!debugMesh?.visible; }
 
+  // ── Regions ─────────────────────────────────────────────────────────────────
+  // Every walkable cell labelled with its connected component (8-connected,
+  // no corner-cutting, as findPath walks), so "can I get there at all?" is two
+  // lookups instead of a search. A search to somewhere unreachable floods the
+  // whole of the start's region before it gives up — MEASURED 31 ms when the
+  // enemy AI tested stage spots on a cliff-ringed shelf. Labelled lazily, on
+  // the first question after the grid changed.
+  const region = new Int32Array(cols * rows);
+  let regionsDirty = true;
+  function labelRegions() {
+    region.fill(0);
+    const stack = new Int32Array(cols * rows);
+    let label = 0;
+    for (let s = 0; s < region.length; s++) {
+      if (blocked[s] === 1 || region[s] !== 0) continue;
+      label++;
+      let top = 0;
+      stack[top++] = s; region[s] = label;
+      while (top) {
+        const cur = stack[--top];
+        const ccx = cur % cols, ccz = (cur - ccx) / cols;
+        for (let k = 0; k < 8; k++) {
+          const nb = NB[k];
+          const nx = ccx + nb[0], nz = ccz + nb[1];
+          if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) continue;
+          const ni = nz * cols + nx;
+          if (blocked[ni] === 1 || region[ni] !== 0) continue;
+          if (nb[2] > 1 && (blocked[ccz * cols + nx] === 1 || blocked[nz * cols + ccx] === 1)) continue;
+          region[ni] = label;
+          stack[top++] = ni;
+        }
+      }
+    }
+    regionsDirty = false;
+  }
+  /** Can a ground unit at (ax, az) walk to (bx, bz)? Both snapped to open ground first, as findPath does. */
+  function sameRegion(ax, az, bx, bz) {
+    if (regionsDirty) labelRegions();
+    const a = nearestOpen(ax, az), b = nearestOpen(bx, bz);
+    if (!a || !b) return false;
+    return region[idx(a.cx, a.cz)] === region[idx(b.cx, b.cz)];
+  }
+  const dirty = (fn) => (...args) => { regionsDirty = true; return fn(...args); };
+
   build();
 
   return {
     cell, cols, rows,
     findPath,
+    requestPath,
+    pumpPaths,
+    /** Searches waiting or under way (dev readout). */
+    get queuedPaths() { return queue.length + (queued ? 1 : 0); },
+    sameRegion,
     isBlockedAtWorld: (wx, wz) => { const c = worldToCell(wx, wz); return isBlocked(c.cx, c.cz); },
     /**
      * Nearest walkable world point. Returns the point UNCHANGED when it's
@@ -459,32 +592,32 @@ export function createNavGrid({
       const c = nearestOpen(wx, wz);
       return c ? cellToWorld(c.cx, c.cz) : { x: wx, z: wz };
     },
-    rebuild: build,
+    rebuild: dirty(build),
     /** Block a circle (legacy — prefer addStructureObstacle for buildings). */
-    addObstacle: (wx, wz, radius) => { stampCircle(wx, wz, radius); },
-    addStructureObstacle,
+    addObstacle: dirty((wx, wz, radius) => { stampCircle(wx, wz, radius); }),
+    addStructureObstacle: dirty(addStructureObstacle),
     /**
      * A line units cannot cross (world points {x, z}), kept across rebuilds.
      * `halfWidth` defaults to 3/4 of a cell so the band is solid. Returns a
      * handle for removeBarrier.
      */
-    addBarrier: (points, halfWidth = cell * 0.75) => {
+    addBarrier: dirty((points, halfWidth = cell * 0.75) => {
       const b = { points: points.map((p) => ({ x: p.x, z: p.z })), halfWidth };
       barriers.push(b);
       stampBarrier(b);
       return b;
-    },
+    }),
     removeBarrier: (b) => { const i = barriers.indexOf(b); if (i >= 0) barriers.splice(i, 1); },
     /**
      * An oriented rectangle units cannot enter — a placed building's footprint
      * (centre, half extents, yaw), kept across rebuilds. Returns a handle.
      */
-    addFootprint: (x, z, hx, hz, ry = 0) => {
+    addFootprint: dirty((x, z, hx, hz, ry = 0) => {
       const f = { x, z, hx, hz, ry };
       footprints.push(f);
       stampFootprint(f);
       return f;
-    },
+    }),
     removeFootprint: (f) => { const i = footprints.indexOf(f); if (i >= 0) footprints.splice(i, 1); },
     /** Straight-line walkability between two world points (waypoint lookahead). */
     hasLOS: (ax, az, bx, bz) => hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }),
@@ -493,38 +626,48 @@ export function createNavGrid({
   };
 }
 
-// Binary min-heap keyed by priority; stores grid indices.
+// Binary min-heap keyed by priority; stores grid indices. Typed arrays, grown
+// by doubling, reused across searches (clear() only resets the count). The
+// comparisons and swap order are the old array heap's exactly, and priorities
+// stay 64-bit, so it pops in the same order and every path is the same — it
+// was the swap's destructuring (two throwaway arrays per swap) that made a
+// search across the river cost 31 ms.
 class MinHeap {
-  constructor() { this.items = []; this.prio = []; }
-  get size() { return this.items.length; }
+  constructor(cap = 1024) { this.items = new Int32Array(cap); this.prio = new Float64Array(cap); this.size = 0; }
+  clear() { this.size = 0; }
   push(item, prio) {
-    this.items.push(item); this.prio.push(prio);
-    let i = this.items.length - 1;
+    if (this.size === this.items.length) {
+      const it = new Int32Array(this.size * 2); it.set(this.items); this.items = it;
+      const pr = new Float64Array(this.size * 2); pr.set(this.prio); this.prio = pr;
+    }
+    const items = this.items, P = this.prio;
+    let i = this.size++;
+    items[i] = item; P[i] = prio;
     while (i > 0) {
       const p = (i - 1) >> 1;
-      if (this.prio[p] <= this.prio[i]) break;
-      this._swap(i, p); i = p;
+      if (P[p] <= P[i]) break;
+      const ti = items[i]; items[i] = items[p]; items[p] = ti;
+      const tp = P[i]; P[i] = P[p]; P[p] = tp;
+      i = p;
     }
   }
   pop() {
-    const top = this.items[0];
-    const last = this.items.length - 1;
-    this._swap(0, last);
-    this.items.pop(); this.prio.pop();
+    const items = this.items, P = this.prio;
+    const top = items[0];
+    const last = --this.size;
+    items[0] = items[last]; P[0] = P[last];
     let i = 0;
-    const n = this.items.length;
+    const n = this.size;
     while (true) {
       const l = 2 * i + 1, r = 2 * i + 2;
       let s = i;
-      if (l < n && this.prio[l] < this.prio[s]) s = l;
-      if (r < n && this.prio[r] < this.prio[s]) s = r;
+      if (l < n && P[l] < P[s]) s = l;
+      if (r < n && P[r] < P[s]) s = r;
       if (s === i) break;
-      this._swap(i, s); i = s;
+      const ti = items[i]; items[i] = items[s]; items[s] = ti;
+      const tp = P[i]; P[i] = P[s]; P[s] = tp;
+      i = s;
     }
     return top;
-  }
-  _swap(a, b) {
-    [this.items[a], this.items[b]] = [this.items[b], this.items[a]];
-    [this.prio[a], this.prio[b]] = [this.prio[b], this.prio[a]];
   }
 }

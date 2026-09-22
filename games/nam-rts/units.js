@@ -230,10 +230,10 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
      * Player MOVE order — cancels any attack. (combat.js chases with orderTo(),
      * which must NOT clear the attack target, hence the separate entry point.)
      */
-    moveOrder(tx, tz) {
+    moveOrder(tx, tz, shared = null) {
       unit.attackTarget = null;
       unit.target = null;
-      unit.orderTo(tx, tz);
+      unit.orderTo(tx, tz, shared);
     },
 
     /** Point the unit at a world direction immediately (no turn). Used at spawn so
@@ -259,10 +259,14 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       if (unit.hp <= 0) { unit.hp = 0; unit.alive = false; }
     },
 
-    orderTo(tx, tz) {
+    /**
+     * `shared`: a path already found by someone standing close by (a squad's
+     * one search, enemyAI.js), so a group of five costs one A* rather than five.
+     */
+    orderTo(tx, tz, shared = null) {
       if (type.isAir || !navGrid) { unit.moveTo(tx, tz); return; }
       goal.set(tx, 0, tz); hasGoal = true;
-      const path = navGrid.findPath(pos.x, pos.z, tx, tz);
+      const path = shared ?? navGrid.findPath(pos.x, pos.z, tx, tz);
       if (path?.length) {
         waypoints.length = 0; waypoints.push(...path);
         arrived = false; stuckT = 0; repathCd = 0; bestTgtDist = Infinity; escalation = 0;

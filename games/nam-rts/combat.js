@@ -132,6 +132,9 @@ export function createCombat({
     // `acquire`'s candidate list — enemies can and should shoot it meanwhile.)
     if (e.constructing || (e.deploy ?? 1) < 1) return;
     e.cooldown = Math.max(0, (e.cooldown ?? 0) - dt);
+    // Holding fire (a squad falling back, enemyAI.js): no targets, or combat
+    // would halt the man in range to shoot and the retreat would never happen.
+    if (e.holdFire) { e.target = null; return; }
 
     // Forget dead targets.
     if (e.target && !e.target.alive) e.target = null;

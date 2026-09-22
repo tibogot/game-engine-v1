@@ -183,7 +183,10 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
       if (i >= 0) list.splice(i, 1);
       enemyBase = null;
     }
-    const s = await place(STRUCTURE_TYPES.enemyBase, 0, half * 0.72, {
+    // 0.78 (was 0.72): behind its line of nests, with its door lane (32 m
+    // toward -Z) clear of the centre nest — at 0.72 on nam-valley the HQ
+    // stood 25 m from that nest and its lane ran through it.
+    const s = await place(STRUCTURE_TYPES.enemyBase, 0, half * 0.78, {
       searchRadius: half * 0.5,
       maxSpread: 8,
     });

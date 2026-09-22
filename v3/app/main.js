@@ -11639,6 +11639,46 @@ export async function startV3App(opts = {}) {
       await ensureCpuHeightmapFromGpu();
     },
 
+    /**
+     * Grade a straight RAMP from `a` to `b` ({x, z, y} world metres): the
+     * ground along the line is set to the height interpolated between the two
+     * ends, `halfWidth` metres either side fully, easing back to the natural
+     * ground over `shoulder` metres further out (and round the far end). A
+     * bridge landing or a road cutting — a flatten stamp cannot do it, because
+     * a stamp levels to ONE height and a ramp needs a slope. Written straight
+     * into the CPU heightmap and pushed in one upload, like raiseBerm — and into
+     * River v2's unconformed base as well, because a landing sits in a river's
+     * footprint, where every re-conform rebuilds the ground from that base.
+     */
+    async gradeRamp(a, b, { halfWidth = 4, shoulder = 6 } = {}) {
+      await ensureCpuHeightmapFromGpu();
+      const reach = halfWidth + shoulder;
+      const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * HEIGHTMAP_SIZE);
+      const tx0 = Math.max(0, toTexel(Math.min(a.x, b.x) - reach)), tx1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(Math.max(a.x, b.x) + reach));
+      const tz0 = Math.max(0, toTexel(Math.min(a.z, b.z) - reach)), tz1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(Math.max(a.z, b.z) + reach));
+      const ex = b.x - a.x, ez = b.z - a.z, L2 = ex * ex + ez * ez || 1;
+      const grade = (map) => {
+        for (let ty = tz0; ty <= tz1; ty++) {
+          const wz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+          for (let tx = tx0; tx <= tx1; tx++) {
+            const wx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+            const t = Math.max(0, Math.min(1, ((wx - a.x) * ex + (wz - a.z) * ez) / L2));
+            const d = Math.hypot(wx - (a.x + ex * t), wz - (a.z + ez * t));
+            if (d >= reach) continue;
+            const s = d <= halfWidth ? 0 : (d - halfWidth) / shoulder;
+            const w = 1 - s * s * (3 - 2 * s);
+            const i = ty * HEIGHTMAP_SIZE + tx;
+            const target = (a.y + (b.y - a.y) * t) / MAX_HEIGHT;
+            map[i] += (target - map[i]) * w;
+          }
+        }
+      };
+      grade(cpuHeightmap);
+      pushHeightmapEditsToGpu();
+      riverV2System?.editBase?.(grade);
+      await ensureCpuHeightmapFromGpu();
+    },
+
     // Resolves once the world stashed across a terrain-size reload has been
     // imported (immediately when there is none). Await before reading heights.
     pendingWorldImport,

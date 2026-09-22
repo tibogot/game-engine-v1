@@ -10,10 +10,14 @@ Keep this file current: tick things off here, add new asks here.
 
 ## PRIORITY — what to do next, most important first (2026-09-22)
 
-1. **Enemy AI** — now that points exist, the enemy must take and hold them,
-   attack, retreat, use cover and terrain. Without it there is no game.
-2. **Requisition sites** — pick real ground (hills, crossroads, the bridge),
-   not the old node fan. Small; do it with #1
+1. ~~**Enemy AI**~~ DONE (first version, infantry only) — see Gameplay. NEXT on
+   it: play it and tune (your call); it cannot yet use vehicles, mortars or
+   ambushes, and the enemy's soldiers still wear US uniforms
+2. ~~**Requisition sites**~~ DONE — 7 sites on real ground (pointSites.js), both
+   bridges made crossable
+2b. **Enemy buildings BEFORE enemy vehicles** (your call 2026-09-22): the enemy HQ
+   is still the old grey box — French colonial HQ, tunnel entrances (forward
+   recruit points), DShK nests exist; then the AI builds/uses them
 3. ~~**Vehicles rebuilt**~~ DONE for the US side — M113, M48, M151, M551, M35,
    UH-1 all procedural. Enemy vehicles come with #7
 4. **The jungle: big trees + palm variety + Vietnam plants** (areca, sago,
@@ -167,6 +171,10 @@ Everything else below is in its section.
       harvester nodes + a buildable "Supply Relay"; capture points change that
       design — **DECIDED: replace harvesting with requisition points**
       (harvesting can survive as an optional mode)
+- [ ] **Real cloth flags on the requisition masts** (your ask 2026-09-22): the HQ's
+      Verlet flag (baseFlag.js, 130 particles) on every mast instead of the stiff
+      instanced cloth — climbs the pole with the capture, US / NLF image by owner,
+      sim skipped off-screen. Cheap: ~0.02 ms CPU for 7, one small draw each, culled
 - [ ] **Supply drops (later)**: a plane (C-130 / C-123 Provider) flies over and
       drops crates on parachutes to your units — resupply as an event or an
       ability, like the real war
@@ -312,8 +320,30 @@ Everything else below is in its section.
 
 ## Gameplay
 
-- [ ] **Enemy AI** — flanking, retreat, using terrain (biggest gap; you said
-      "not now")
+- [x] **Enemy AI** (`enemyAI.js`, test `namEnemyAITest`, dev panel ENEMY AI:
+      on/off, difficulty, live squad list + log; `?ai=0` boots without it): the
+      enemy HQ stands from the start and the match is on (destroy it to win).
+      Squads of 5 recruited from its own purse (points it holds + HQ trickle);
+      take neutral points, relieve threatened ones, attack yours only with
+      enough men for what they can SEE (no cheating — sightings remembered
+      60 s), GATHER out of sight at one reachable stage and go in together,
+      pull back to the stage when they meet more than expected, retreat home
+      holding fire when worn down, refit; hold points from the best
+      concealment/cover spots; leash on chasers; the HQ is the last objective
+      once it holds half the map. Deterministic (seeded). MEASURED 15 min of
+      battle: 0.015 ms a step, p99.9 0.7 ms (path searches go through a
+      budgeted QUEUE — navGrid.requestPath/pumpPaths)
+- [ ] Enemy AI, next: use vehicles/mortars when they exist, ambush from
+      concealment on your approach routes, flank (stage on the side you are
+      not facing), booby traps; difficulty tuning after you play it
+- [x] **Bridges crossable again** (`bridgeLandings.js`, engine `app.gradeRamp`):
+      both decks had stopped meeting their banks (11 m wall / 40° banks) — the
+      river cut the map in two. Graded ramps, written into River v2's base too
+- [x] **Pathfinding 5–10x faster** (navGrid: typed heap — the old swap made two
+      arrays per swap — reused scratch, octile heuristic): 31 → 3 ms across the
+      river; a group order shares ONE search per cluster (selection.js)
+- [ ] Long path searches into the walled camp are still 5–15 ms for YOUR
+      orders (one per group now); hierarchical/cached paths if it shows
 - [ ] **Rocket / indirect-fire artillery** (your ask 2026-09-22, not urgent):
       rockets that ARC high and fall far, out of line of sight. Enemy: the
       107 mm Type 63 (12 tubes on a light towed carriage) and 122 mm Grad

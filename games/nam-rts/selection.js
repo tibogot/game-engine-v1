@@ -265,6 +265,24 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       return { x: hit.point.x + gx * spacing, z: hit.point.z + gz * spacing };
     });
 
+    // ONE path search per cluster of units, not one per unit: every ground
+    // unit within 15 m of a unit that already searched takes a copy of that
+    // path, ending on its own slot. A search across the map is several ms
+    // (MEASURED up to 5 ms after the navGrid rewrite, 31 before it), so a
+    // twenty-unit order was a visible hitch. A slot on blocked ground (a
+    // click at the water's edge) searches its own, as before.
+    const nav = app.navGrid;
+    const shared = [];
+    const pathFor = (u, slot) => {
+      if (u.isAir || !nav?.findPath || nav.isBlockedAtWorld(slot.x, slot.z)) return null;
+      let c = shared.find((s) => Math.hypot(s.x - u.position.x, s.z - u.position.z) < 15);
+      if (!c) {
+        c = { x: u.position.x, z: u.position.z, path: nav.findPath(u.position.x, u.position.z, hit.point.x, hit.point.z) };
+        shared.push(c);
+      }
+      return c.path?.length ? [...c.path.slice(0, -1), { x: slot.x, z: slot.z }] : null;
+    };
+
     const pool = [...arr];
     for (const slot of slots) {
       let best = 0, bestD = Infinity;
@@ -273,7 +291,8 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
         if (d < bestD) { bestD = d; best = i; }
       }
       // moveOrder (not orderTo) — a move command cancels any attack order.
-      pool.splice(best, 1)[0].moveOrder(slot.x, slot.z);
+      const u = pool.splice(best, 1)[0];
+      u.moveOrder(slot.x, slot.z, pathFor(u, slot));
     }
   };
 

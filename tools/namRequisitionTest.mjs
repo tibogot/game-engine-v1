@@ -106,5 +106,21 @@ console.log("base income");
   ok("a fallen HQ pays nothing", stock === before);
 }
 
+console.log("enemy income");
+{
+  let mine = 0, theirs = 0;
+  const req = createRequisition({
+    app: {}, resources: { earn: (n) => { mine += n; } }, hqStanding: () => false,
+    enemyResources: { earn: (n) => { theirs += n; } }, enemyHqStanding: () => true,
+  });
+  req.points.push({ position: new THREE.Vector3(0, 0, 0), radius: REQUISITION.radius, progress: 0, owner: null, contested: false, capturing: 0 });
+  run(req, [man("enemy")], T * 1.05);
+  const before = theirs;
+  run(req, [], 10);
+  ok("a point the enemy holds pays the enemy, plus its HQ",
+    Math.abs(theirs - before - 10 * (REQUISITION.incomePerPoint + REQUISITION.baseIncome)) < 0.05, `${(theirs - before).toFixed(2)} in 10 s`);
+  ok("and pays you nothing", mine === 0);
+}
+
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

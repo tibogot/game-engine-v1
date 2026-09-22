@@ -84,6 +84,8 @@ import { createHudBar } from "./hudBar.js";
 import { createHarvesting } from "./harvesting.js";
 import { createRequisition } from "./requisition.js";
 import { createRequisitionRenderer } from "./requisitionRenderer.js";
+import { pointSitesFor } from "./pointSites.js";
+import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
 import { createWaves } from "./waves.js";
 import { createMatch } from "./match.js";
@@ -104,6 +106,7 @@ import { createCover } from "./cover.js";
 import { createPlacedObjects } from "./placedObjects.js";
 import { placeCampPerimeter } from "./campPerimeter.js";
 import { placeCampLayout } from "./campLayout.js";
+import { gradeBridgeLandings } from "./bridgeLandings.js";
 import { createAbilities } from "./abilities.js";
 import { createAbilityTargeting } from "./abilityTargeting.js";
 import { createCoverOverlay } from "./coverOverlay.js";
@@ -380,6 +383,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     app, resources,
     // The HQ's own trickle, while it stands (read late: structures come next).
     hqStanding: () => app.structures?.base?.alive !== false && !!app.structures?.base,
+    // The enemy commander is paid by the same rules, into its own purse
+    // (enemyAI.js, built once the units exist — read late).
+    enemyResources: { earn: (n) => app.enemyAI?.purse.earn(n) },
+    enemyHqStanding: () => !!app.structures?.enemyBase?.alive,
     // Taking a point pops M18 VIOLET — the Apocalypse Now marker.
     onCapture: (p, team) => { if (team === "player") app.smoke?.spawn({ x: p.position.x, z: p.position.z, kind: "violet" }); },
   });
@@ -390,6 +397,12 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   onStatus("Placing structures…");
   const structures = await createStructures({ app, navGrid, resources });
   app.structures = structures;
+
+  // THE ENEMY PLAYS (enemyAI.js): its HQ stands from the start — it recruits
+  // there — and the match is on: destroy it to win, lose yours and you lose.
+  // ?ai=0 boots the old sandbox (no enemy HQ, no commander).
+  const AI_ON = new URLSearchParams(location.search).get("ai") !== "0";
+  if (AI_ON) await structures.spawnEnemyBase();
 
   // A FIREBASE IS BULLDOZED BARE. nam-valley's jungle paint runs straight over
   // the HQ site, and with a hangar box it did not show — the palms were inside
@@ -424,6 +437,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
         if (Math.abs(inst.px - x) < MAST_FP.hx + 2 && Math.abs(inst.pz - z) < MAST_FP.hz + 2) ps.removeInstance(i);
       }
     }
+    // The enemy HQ's own clearing.
+    const eb = structures.enemyBase;
+    if (eb?.alive) app.clearVegetation?.(eb.position.x, eb.position.z, 24, { grass: 18 });
     const b = structures.base;
     if (b?.alive === false) return;
     app.clearVegetation?.(b.position.x, b.position.z + 2, 27, { grass: 23 });
@@ -450,7 +466,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
    */
   async function placeRequisitionPoints() {
     const fp = MAST_FP;
-    for (const p of requisition.placePoints(structures.base.position)) {
+    // The map's authored sites (pointSites.js), or the old fan.
+    for (const p of requisition.placePoints(structures.base.position, pointSitesFor(boot.name))) {
       const x = p.position.x + fp.cx, z = p.position.z + fp.cz;
       await app.flattenRect?.(x, z, fp.hx + 0.5, fp.hz + 0.5, p.position.y, { rim: 3 });
       p.position.y = app.getWorldHeight(p.position.x, p.position.z);
@@ -643,6 +660,12 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const waves = createWaves({ app, units, structures, navGrid });
   app.waves = waves;
 
+  // The enemy commander: squads that take, hold and attack points, fall back,
+  // and fight from cover. Orders only — combat.js still does the fighting.
+  const enemyAI = createEnemyAI({ units, structures, requisition, navGrid, cover });
+  enemyAI.setEnabled(AI_ON);
+  app.enemyAI = enemyAI;
+
   const waveHud = createWaveHud();
   app.waveHud = waveHud;
 
@@ -797,6 +820,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     },
   });
   app.match = match;
+  if (AI_ON) match.setEnabled(true);   // the HQ is already standing: no terrain change
 
   // DEV UI (not player-facing): tune camera feel, unit speed, and the nav grid
   // while building the game. Collapsible, top-right.
@@ -812,6 +836,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // a fresh CPU mirror so re-seating reads the FINAL ground, not a stale one.
     await app.refreshWorldHeights?.();
     await structures.reanchorToTerrain(app);
+    await gradeBridgeLandings(app).catch((e) => console.warn("[bridges] landings failed:", e));
     clearHqGround();              // the load restored the saved paint over it
     app.setGrassSlopeRule?.({ startDeg: NAV_MAX_SLOPE_DEG - 4, endDeg: NAV_MAX_SLOPE_DEG }); // and the grass state
     for (const b of buildings.list) {
@@ -887,6 +912,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
 
   const simStep = (dt) => {
     waves.update(dt);                     // spawn the next wave, keep them marching
+    enemyAI.step(dt);                     // the enemy commander: recruit, choose, order
     structures.updateProduction(dt, (key, x, z, opts) => units.spawn(key, x, z, opts));
     buildings.update(dt);                 // construction ramp + helipad production
     resources.tickCaptureIncome(dt, buildings);
@@ -901,6 +927,14 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     napalm.step(dt);                      // the run lands, burns, kills, scars
     abilities.step(dt, units.list);       // cooldowns
     cover.step(dt, units.list);           // "I just fired" reveal timers
+  };
+
+  // Dev: run the SIM ahead without drawing — to watch the enemy commander
+  // play out minutes of a battle in seconds (and in a background tab, whose
+  // frames the browser throttles to almost nothing). __NAM.fastForward(120)
+  app.fastForward = (seconds) => {
+    const n = Math.round(seconds / sim.stepSeconds);
+    for (let i = 0; i < n; i++) simStep(sim.stepSeconds);
   };
 
   // The RENDER clock the smoke puffs ride. Deliberately not sim.simTime: the
@@ -974,6 +1008,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     }
   }
 
+  // Every bridge gets ground at both ends that meets its deck — without it
+  // the river cut the map in two (bridgeLandings.js). The props are in now.
+  onStatus("Grading bridge landings…");
+  try { await gradeBridgeLandings(app); } catch (e) { console.warn("[bridges] landings failed:", e); }
+
   onStatus("Baking cover…");
   // The props are in by now, so the HQ can take its footprint back from them
   // (clearHqGround ran once before they arrived, for the vegetation) — and the
@@ -982,6 +1021,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   navGrid.rebuild();
   for (const s of structures.list) if (s.alive) navGrid.addStructureObstacle(s);
   console.log(`[cover] ${cover.bake()} obstacles`);
+  // Label the nav regions now (~6 ms), not on the first question in the fight.
+  navGrid.sameRegion(0, 0, 0, 0);
 
   // The console handle. Every subsystem already hangs off `app`, so one global
   // covers all of them: __NAM.smoke.spawn({x, z, kind: "screen"}).
