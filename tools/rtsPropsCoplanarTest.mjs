@@ -29,6 +29,11 @@ import {
   buildBoobyTrap, buildMortarPit, buildMortarTube, buildPunjiPit, buildSpiderHole, buildSpiderMan,
   buildSupplyCache, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
 } from "../v3/render/objects/rtsEnemyKit.js";
+import {
+  buildBambooClump, buildBananaClump, buildBigRoofHouse, buildCookHearth, buildDryingRack,
+  buildFence, buildGranary, buildJarCluster, buildOxCart, buildPigPen, buildShrine,
+  buildStrawRick, buildWashingLine, buildWell,
+} from "../v3/render/objects/rtsVillage.js";
 import { buildGunPitBody, buildGunPitGun, buildBunker, buildHelipad, buildNestBody, buildNestGun, buildRequisitionMast, buildSandbagWallPiece } from "../v3/render/objects/rtsBuildables.js";
 
 let failed = 0;
@@ -184,6 +189,22 @@ check("booby trap", buildBoobyTrap());
 check("supply cache", buildSupplyCache());
 check("spider hole", buildSpiderHole());
 check("spider hole fighter", buildSpiderMan());
+
+console.log("Hamlet kit");
+check("big-roofed house", buildBigRoofHouse());
+check("rice granary", buildGranary());
+check("village well", buildWell());
+check("spirit shrine", buildShrine());
+check("bamboo fence", buildFence());
+check("water jars", buildJarCluster());
+check("drying rack", buildDryingRack());
+check("straw rick", buildStrawRick());
+check("cooking hearth", buildCookHearth());
+check("ox cart", buildOxCart());
+check("bamboo clump", buildBambooClump());
+check("banana clump", buildBananaClump());
+check("pig pen", buildPigPen());
+check("washing line", buildWashingLine());
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

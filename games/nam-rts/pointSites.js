@@ -48,6 +48,21 @@ export const TUNNEL_SITES = {
   ],
 };
 
+/**
+ * HAMLETS (village.js). Chosen by walking the map's height field: the flattest
+ * 84 x 52 m the hamlet needs, with no nav blocked in it, at least 90 m from
+ * every HQ and requisition point, and — the part that matters for the game —
+ * ON THE WAY. This one sits astride the axis of advance 120 m south of the
+ * résidence, with its lane running roughly north, so an attack up the valley
+ * goes THROUGH it: houses to fight round, and a village to be careful in.
+ * MEASURED at the site: 3.9 m of fall across the whole hamlet, nothing blocked.
+ */
+export const HAMLET_SITES = {
+  "nam-valley": [
+    { name: "Ap Bang", x: -10, z: 280, rotY: 1.4 },
+  ],
+};
+
 const mapKey = (worldName) => String(worldName ?? "").replace(/\.v3proj$/i, "").replace(/^.*[\\/]/, "");
 
 /** The authored sites for a level ("nam-valley.v3proj" → "nam-valley"), or null. */
@@ -58,4 +73,9 @@ export function pointSitesFor(worldName) {
 /** The level's tunnel entrances, or an empty list. */
 export function tunnelSitesFor(worldName) {
   return TUNNEL_SITES[mapKey(worldName)] ?? [];
+}
+
+/** The level's hamlets, or an empty list. */
+export function hamletSitesFor(worldName) {
+  return HAMLET_SITES[mapKey(worldName)] ?? [];
 }

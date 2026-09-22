@@ -85,7 +85,8 @@ import { createHarvesting } from "./harvesting.js";
 import { createRequisition } from "./requisition.js";
 import { createTraps } from "./traps.js";
 import { createRequisitionRenderer } from "./requisitionRenderer.js";
-import { pointSitesFor, tunnelSitesFor } from "./pointSites.js";
+import { hamletSitesFor, pointSitesFor, tunnelSitesFor } from "./pointSites.js";
+import { placeHamlet } from "./village.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
 import { createWaves } from "./waves.js";
@@ -1071,6 +1072,23 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       await placeCampLayout(app, placed);
     } catch (e) {
       console.warn("[camp] failed to place:", e);
+    }
+  }
+
+  // The hamlets (village.js): houses, granaries, fences and the clutter of
+  // people living there, laid out round a lane. Through the same placedObjects
+  // path as the camp — pads, nav on the real footprints, cover, merged draws —
+  // and before the nav rebuild below, which then includes them. ?village=0
+  // boots without them.
+  if (new URLSearchParams(location.search).get("village") !== "0") {
+    onStatus("Raising the village…");
+    for (const site of hamletSitesFor(boot.name)) {
+      try {
+        const n = await placeHamlet(app, placed, site);
+        console.log(`[village] ${site.name}: ${n} pieces at (${site.x}, ${site.z})`);
+      } catch (e) {
+        console.warn(`[village] ${site.name} failed:`, e);
+      }
     }
   }
 

@@ -52,6 +52,8 @@ export const VILLAGE_HUT_DEFAULTS = {
   courses: 9,           // thatch bundles up each slope
   ragged: 0.22,
   thatchThickness: 0.14,
+  thatchTone: 0.3,      // 0.1 = weathered grey-brown, 0.6 = new straw
+  thatchToneSpread: 0.6,
   poleRadius: 0.055,
   internodes: 6,
   wallPanels: 4,
@@ -120,6 +122,10 @@ function thatchRoof(o, r, eaveY) {
     const geo = buildThatchSlope({
       width: depth, slope, courses: o.courses,
       thickness: o.thatchThickness, ragged: o.ragged,
+      // How weathered this roof is (rtsParts THATCH_DEFAULTS): new straw is
+      // pale, a roof that has stood two monsoons is grey-brown. A hamlet wants
+      // both, or every house in it reads as the same house.
+      tone: o.thatchTone, toneSpread: o.thatchToneSpread,
       // Segments follow the course count: LOD1 halves the courses, so this
       // halves with them. Left fixed, LOD1 costs almost what LOD0 does.
       seg: Math.max(6, Math.round(depth * 1.4 * Math.min(1, o.courses / 9))),

@@ -634,6 +634,15 @@ export function buildBambooPole(opts = {}) {
 export const THATCH_DEFAULTS = {
   width: 4, slope: 3, courses: 8,
   overlap: 1.7, thickness: 0.09, ragged: 0.16, seg: 18, seed: 1,
+  // How bright the courses run, and how much they vary between them. Fresh
+  // straw is pale; a palm roof that has stood two monsoons is grey-brown and
+  // wants `tone` around 0.15 — without this every thatched thing on the map
+  // was the same new-straw colour, and a village of them read as one material.
+  tone: 0.3, toneSpread: 0.6,
+  // The width at the TOP of the slope. Equal to `width` (the default) is a
+  // gable's rectangle; shorter makes the trapezoid of a hipped roof's side;
+  // near zero makes its triangular hip end.
+  topWidth: null,
 };
 
 /**
@@ -665,16 +674,23 @@ export function buildThatchSlope(opts = {}) {
     // Each course sits slightly PROUDER than the one below. Without this the
     // upper edges all share a depth and the laps z-fight.
     const lift = c * th * 0.16;
+    // TAPER: the courses narrow as they climb, so one slope can be the
+    // trapezoid of a HIPPED roof (or, taken to nothing, its triangular hip
+    // end). Without it a roof can only be a gable, and faking a hip by laying
+    // rectangles over the ends leaves them standing out as flat shards.
+    const top = o.topWidth ?? o.width;
+    const wAt = (y) => o.width + (top - o.width) * Math.min(1, Math.max(0, y / o.slope));
+    const wBot = wAt(y0), wTop = wAt(y1);
     for (let i = 0; i <= seg; i++) {
       const u = i / seg;
-      const x = (u - 0.5) * o.width;
+      const xb = (u - 0.5) * wBot, x = (u - 0.5) * wTop;
       // Ragged: every bundle hangs a little differently.
       const droop = (r() - 0.5) * 2 * o.ragged * rise;
       const z0 = th * (0.35 + 0.65 * r());
       const yb = y0 + droop;
       // 0 upper-outer, 1 lower-outer, 2 upper-inner, 3 lower-inner
       const zt = th * 0.25 + lift;
-      pos.push(x, y1, zt, x, yb, z0 + lift, x, y1, zt - th, x, yb, z0 + lift - th);
+      pos.push(x, y1, zt, xb, yb, z0 + lift, x, y1, zt - th, xb, yb, z0 + lift - th);
       const uu = u * o.width * 0.5;
       uvs.push(uu, y1 * 0.5, uu, yb * 0.5, uu, y1 * 0.5, uu, yb * 0.5);
     }
@@ -691,7 +707,7 @@ export function buildThatchSlope(opts = {}) {
     g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     g.setIndex(idx);
     g.computeVertexNormals();
-    parts.push({ geo: g, mat: MAT.thatch, tone: 0.3 + r() * 0.6 });
+    parts.push({ geo: g, mat: MAT.thatch, tone: o.tone + r() * o.toneSpread });
   }
   const out = assemble(parts);
   for (const p of parts) p.geo.dispose();

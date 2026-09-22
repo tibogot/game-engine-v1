@@ -100,10 +100,31 @@ Keep this file current: tick things off here, add new asks here.
    pandanus, nipa, banana, flame tree) — the look you asked for.
    **RE-ASKED 2026-09-22 (evening), along with the VILLAGE and RUINS** — after
    the Molotova and the cheap nasty kit, these three are the next block:
-   · **a village** (the modular kit under Props, incl. the big banana-leaf
-     roof) placed as a real hamlet — paths, well, fences, a clearing
+   · [x] **A VILLAGE** — DONE (`v3/render/objects/rtsVillage.js` +
+     `games/nam-rts/village.js`, test `namVillageTest`, sited in
+     `pointSites.HAMLET_SITES`, `?village=0` boots without it).
+     **Ap Bang** stands at (−10, 280) on nam-valley — astride the axis of
+     advance 120 m south of the résidence, its lane running north, so an
+     attack up the valley goes THROUGH it. 49 pieces, ~2 extra draw calls
+     (all merged), nothing blocked, the lane walkable end to end (detour 1.03).
+     KIT: big-roofed ground house (a true HIPPED thatch roof — four slopes to a
+     short ridge, hip ends steeper than the sides), the stilt house at hamlet
+     proportions (lower walls, 2 m eaves), rice granary on rat-guarded legs,
+     well, spirit shrine, woven fences, water jars, drying rack with chillies,
+     straw rick, cooking hearth, ox cart, PLANTED BAMBOO and BANANA, pig pen,
+     washing line. `buildThatchSlope` gained `topWidth` (trapezoid/triangle
+     courses = a hip roof) and `tone` (weathered vs new straw).
+     THE ARRANGEMENT is the point: a lane with two staggered rows facing it,
+     fenced yards with a gate in front of each door, clutter only at doorways,
+     the well and shrine on open ground in the middle.
+     NEXT on it, if we want more: bare-earth PAINT for the lane and yards (a
+     map patch, the biggest remaining win), a banyan at the centre, more house
+     variety (a shop, a school), a buffalo pen with an animal, cooking-fire
+     smoke (note: smoke blocks line of sight — it would be a gameplay change)
    · **ruins** — a bombed hamlet and a wrecked colonial building to fight over
-     (the colonial HQ's parts can be broken up for it)
+     (the colonial HQ's parts can be broken up for it). NOW ALSO, your ask
+     2026-09-23: **Cambodian/Khmer temple ruins**, Apocalypse Now — see THE
+     ENEMY SIDE below, which is where that whole thread lives
    · **another vegetation pass** — the plants above, plus colour variety and
      the readability thinning
 5. **See-through for hidden units** — needed before the jungle gets denser
@@ -117,6 +138,63 @@ Keep this file current: tick things off here, add new asks here.
 11. **Night / dusk lighting** — floodlights and searchlights earn their place
 
 Everything else below is in its section.
+
+## THE ENEMY SIDE — your asks, 2026-09-23 (next block after ruins/vegetation)
+
+Your words: their base is still empty next to ours, the default turrets are the
+old ones, they need their own kind of guard tower — and it should feel like
+Vietnam, like Apocalypse Now.
+
+- [ ] **Replace the default enemy turrets.** Five DShK nests stand in a line
+      across the top of the map from boot (structures.js `turretCount`), sited
+      by a formula, not by the ground. Replace with a MIXED, sited line: DShK
+      nests where they cover open ground, ZPU-4s on the approaches your
+      helicopters use, a 12.7 mm on a bamboo tower where they need to see, and
+      spider holes and wire between them (the cheap nasty kit is already built).
+      Site them the way the requisition points were sited — by path and by what
+      they actually overlook, not on a line
+- [ ] **Their guard tower**: NOT our steel-and-timber one. A lashed BAMBOO
+      tower — four raked poles, a split-bamboo platform, a thatch cap, a ladder
+      of lashed rungs, a bell or a length of shell casing hung to beat as an
+      alarm. Gives vision like ours (and a man in it, like the spider hole)
+- [ ] **Fill their base** (the résidence is bare next to our camp). An NVA/VC
+      base camp, not a firebase: cook house with a Dien Bien Phu smokeless
+      stove (the trench that hides the smoke), rice store, a bamboo-and-thatch
+      barracks under the trees, a weapons rack, an arms-cleaning bench, bicycle
+      park (supply bicycles), a map table under a tarp, ammunition in the
+      colonial building's arcade, a well, wash line, bomb-crater latrine,
+      camouflage netting slung between trees, trench and one-man fighting holes
+      round the perimeter, a captured US truck being stripped, propaganda
+      board with a loudspeaker, NLF flag on a bamboo pole, buried-jar cache
+- [ ] **Bamboo prisoner cages** (your ask): the tiger cages — low bamboo cages
+      on the mud, one with a man in it, the POW pit with a grating over it.
+      Could be a real objective: reach it and free the prisoners
+- [ ] **KURTZ COUNTRY — the Cambodian temple and its ruins** (your ask). The
+      Apocalypse Now compound: a Khmer temple half taken by the jungle — laterite
+      blocks, a corbelled doorway, a four-faced Bayon tower, nāga balustrade,
+      apsara reliefs, a collapsed gallery, strangler-fig roots over the walls —
+      with the tribe's village built INTO it: thatch lean-tos against the stone,
+      cooking fires, painted standing stones. And the dressing that makes it
+      that place: heads on pikes along the approach, heads on the steps, bodies
+      hung in the trees, a hanging man in a doorway, smoke drifting across it,
+      hundreds of small fires at dusk. At RTS zoom these read as SILHOUETTES,
+      which is the right register — dread, not gore
+- [ ] **My other suggestions for that stretch of map** (say which you want):
+      · the **sampan village on the water** — stilt houses over a backwater,
+        fish traps, nets on frames, a floating market boat
+      · a **shot-down Huey** in the canopy, rotor buried in the trees, and a
+        **crashed Skyraider** with its tail up out of a paddy
+      · the **Do Lung bridge**: a bridge lit by flares and rebuilt every night,
+        wrecks in the water under it, wire and bunkers on the banks
+      · **French plantation**: rubber trees in ROWS with a colonial house and
+        tapping cups — rows of trees look extraordinary from the RTS camera
+      · a **bombed pagoda** with a standing Buddha and a broken bell tower
+      · **B-52 crater field** — a straight line of overlapping craters across
+        the map, jungle flattened, standing water in them
+      · **tiger-striped standing stones and totems** on the paths into Kurtz's
+        ground, so the player feels the boundary before they see the temple
+      · **a burned-out hamlet** (the ruins job below) on the way to it, so the
+        two read as the same story
 
 ## Now — the camp (your ask, 2026-09-22)
 
