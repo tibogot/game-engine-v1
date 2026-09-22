@@ -1,6 +1,6 @@
-// Camp perimeter — DEV (placed by the ?showcase=1 path until the editor can
-// author it as splines, which is where it belongs: the wire, fence, lights and
-// power line below are the editor's own spline objects).
+// Camp perimeter — placed in code at every boot until the editor can author it
+// as splines, which is where it belongs: the wire, fence, lights and power
+// line below are the editor's own spline objects.
 //
 // A firebase was a bulldozed ring: an earth BERM, and outside it the wire —
 // chain-link, then concertina — with one gate. Laid out here as a U around
@@ -71,7 +71,7 @@ function splitAtGate(pts, gate, half) {
   return runs.filter((r) => r.length > 1).map((r) => r.filter((_, i) => i % 4 === 0 || i === r.length - 1));
 }
 
-export async function placeCampPerimeter(app) {
+export async function placeCampPerimeter(app, placed) {
   const base = app.structures?.base;
   if (!base) return null;
   const bp = base.position;
@@ -135,30 +135,17 @@ export async function placeCampPerimeter(app) {
   });
   if (pl) group.add(pl);
 
-  // 5) The gate itself (its pad went in first), and guard towers on the two
-  //    south corners.
+  // 5) The gate itself (its pad went in first; the road runs through it, so
+  //    it blocks nothing), and guard towers on the two south corners — 16 m in
+  //    from both berm lines: closer, a tower's pad cut into the berm's slope.
   const mat = rtsObjectMaterial();
-  const put = (geo, x, z, ry) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, h(x, z) - 0.02, z);
-    m.rotation.y = ry;
-    m.castShadow = m.receiveShadow = true;
-    group.add(m);
-    return m;
-  };
-  put(gateGeo, gate.x, gate.z, 0);
-  // 16 m in from both berm lines: closer, a tower's pad cut into the berm's inner slope.
+  const items = [{ obj: new THREE.Mesh(gateGeo, mat), x: gate.x, z: gate.z, pad: false, nav: false, cover: false }];
   for (const [dx, dz] of [[-50, -46], [50, -46]]) {
     const p = W(dx, dz);
-    await app.flattenRect?.(p.x, p.z, 3.2 * S, 3.2 * S, h(p.x, p.z), { rim: 3 });
-    put(buildGuardTower({ seed: 13 + dx }), p.x, p.z, Math.PI / 4 * Math.sign(dx));
-    app.clearVegetation?.(p.x, p.z, 7, { grass: 6 });
+    items.push({ obj: new THREE.Mesh(buildGuardTower({ seed: 13 + dx }), mat), x: p.x, z: p.z, rotY: Math.PI / 4 * Math.sign(dx), clear: 6 });
   }
-
-  // The ground changed (berm, pads): rebuild nav with the wire as a barrier,
-  // re-stamp the buildings, re-bake cover.
-  app.navGrid?.rebuild();
-  for (const s of app.structures.list) if (s.alive) app.navGrid?.addStructureObstacle(s);
-  app.cover?.bake?.();
+  await placed.place(items);
+  // The caller rebuilds nav (the wire is a barrier now) and re-bakes cover
+  // once the rest of the camp is down too.
   return group;
 }

@@ -10,7 +10,7 @@ Keep this file current: tick things off here, add new asks here.
 
 ## Now — the camp (your ask, 2026-09-22)
 
-- [x] **Perimeter** (`campPerimeter.js`, on `?showcase=1`): earth **berm** raised
+- [x] **Perimeter** (`campPerimeter.js`, every boot; `?camp=0` for the bare map): earth **berm** raised
       into the terrain (`app.raiseBerm`), chain-link (+5 m), 2+1 concertina
       (+9 m) as a **nav barrier** — the gate is the only way in (verified with the
       pathfinder from S, W and E) — gate with guard booth and raised striped boom,
@@ -81,17 +81,18 @@ Keep this file current: tick things off here, add new asks here.
 - [x] **Selected buildings show it** (`selectionFrameField.js`): corner
       brackets on square buildings (HQ on its pad, radio station), rings on
       round ones (helipad, turrets, supply relay); enemy buildings in red
-- [ ] **Base decoration placed from the start** — most of the kit pieces we
-      built stand in the camp already (not only on `?showcase=1`)
+- [x] **Base decoration placed from the start** (`campLayout.js`) — the kit pieces we
+      built stand in the camp at every boot; signs + tank traps moved out to the gate
 - [ ] **Builder-built buildings rebuilt on the new kit**: what the builder
       raises (helipad, turret, radio, supply relay…) still looks like the old
       game — radio station = the old GLB; others procedural, at our standard;
       some kit pieces become buildable
 - [ ] Then **fill the jungle** (village, debris, paddies… — Map & look below)
-- [ ] **Placed-building system** (the foundation for the three above): one path
+- [~] **Placed-building system** (`placedObjects.js`, the foundation for the three above): one path
       for decoration AND builder buildings — kit geometry + footprint → flat pad,
       nav collision on the real footprint, cover, grass cleared, selection
-      marker. Today the showcase and the builder each do half
+      marker. DONE for the camp (pads, nav footprints, cover, one draw per
+      material); NEXT: the builder's buildings through it, + selection marker
 - [ ] **Builder buildings, my proposal** (you trust me on gameplay): helipad =
       PSP matting + painted H + windsock + sandbag revetments · turret = sandbagged
       M60 gun pit (or the guard tower) · radio = the old GLB · supply relay =

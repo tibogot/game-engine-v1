@@ -155,6 +155,23 @@ export function createNavGrid({
   // stamped as overlapping circles every half cell, so a line is a continuous
   // band; with corner-cutting refused in findPath, nothing leaks diagonally.
   const barriers = [];
+  // Footprints: placed buildings and props (placedObjects.js) — an oriented
+  // rectangle each, blocked, kept across rebuilds like the barriers.
+  const footprints = [];
+  function stampFootprint(f) {
+    const cos = Math.cos(f.ry), sin = Math.sin(f.ry);
+    const rad = Math.hypot(f.hx, f.hz);
+    const min = worldToCell(f.x - rad, f.z - rad);
+    const max = worldToCell(f.x + rad, f.z + rad);
+    for (let cz = min.cz; cz <= max.cz; cz++) {
+      for (let cx = min.cx; cx <= max.cx; cx++) {
+        const c = cellToWorld(cx, cz);
+        const dx = c.x - f.x, dz = c.z - f.z;
+        const lx = cos * dx - sin * dz, lz = sin * dx + cos * dz;
+        if (Math.abs(lx) <= f.hx && Math.abs(lz) <= f.hz) blocked[idx(cx, cz)] = 1;
+      }
+    }
+  }
   function stampBarrier(b) {
     const step = cell * 0.5;
     for (let i = 0; i < b.points.length - 1; i++) {
@@ -215,6 +232,7 @@ export function createNavGrid({
     stampProps();
     stampTrees();
     for (const b of barriers) stampBarrier(b);
+    for (const f of footprints) stampFootprint(f);
     carveBridges(); // last: bridges override obstacles to make crossings walkable
     if (debugMesh) { app.scene.remove(debugMesh); debugMesh.geometry.dispose(); debugMesh = null; }
   }
@@ -453,6 +471,17 @@ export function createNavGrid({
       return b;
     },
     removeBarrier: (b) => { const i = barriers.indexOf(b); if (i >= 0) barriers.splice(i, 1); },
+    /**
+     * An oriented rectangle units cannot enter — a placed building's footprint
+     * (centre, half extents, yaw), kept across rebuilds. Returns a handle.
+     */
+    addFootprint: (x, z, hx, hz, ry = 0) => {
+      const f = { x, z, hx, hz, ry };
+      footprints.push(f);
+      stampFootprint(f);
+      return f;
+    },
+    removeFootprint: (f) => { const i = footprints.indexOf(f); if (i >= 0) footprints.splice(i, 1); },
     /** Straight-line walkability between two world points (waypoint lookahead). */
     hasLOS: (ax, az, bx, bz) => hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }),
     setDebug,

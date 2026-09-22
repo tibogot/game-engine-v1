@@ -136,9 +136,9 @@
       const DEFAULT = {
         order: ["Starting engine…", "Loading level…", "Loading nam-valley.v3proj…", "Setting up camera…",
           "Building navigation…", "Placing structures…", "Seeding resource nodes…", "Re-baking navigation…",
-          "Spawning units…", "Building unit visuals…", "Loading crater decals…", "Baking cover…"],
+          "Spawning units…", "Building unit visuals…", "Loading crater decals…", "Building the camp…", "Baking cover…"],
         ms: { "Starting engine…": 2500, "Loading level…": 4000, "Loading nam-valley.v3proj…": 2500,
-          "Placing structures…": 2000, "Building unit visuals…": 1500, "Baking cover…": 3000 },
+          "Placing structures…": 2000, "Building unit visuals…": 1500, "Building the camp…": 2500, "Baking cover…": 3000 },
       };
       let learned = DEFAULT;
       try { learned = JSON.parse(localStorage.getItem(KEY) || "null") || DEFAULT; } catch { /* private mode */ }

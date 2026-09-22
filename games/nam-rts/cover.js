@@ -139,6 +139,9 @@ export function createCover({ app, worldSize = 2048, params = COVER } = {}) {
       const radius = 0.5 * Math.max(sx, sz) * Math.max(inst.sx ?? 1, inst.sz ?? 1);
       yield { x: inst.px, z: inst.pz, radius };
     }
+    // Placed camp pieces (placedObjects.js): each footprint as a row of circles
+    // — the same pieces the nav grid blocks.
+    for (const p of app.placed?.coverCircles?.() ?? []) yield p;
     // Buildings and the boot structures: a sandbag emplacement is the best
     // cover on the map and would otherwise be missed entirely.
     for (const b of [...(app.buildings?.list ?? []), ...(app.structures?.list ?? [])]) {

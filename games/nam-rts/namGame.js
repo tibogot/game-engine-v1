@@ -97,6 +97,9 @@ import { createSmokeField } from "./smokeField.js";
 import { createNapalmStrike } from "./napalmStrike.js";
 import { createRtsBirds } from "./rtsBirds.js";
 import { createCover } from "./cover.js";
+import { createPlacedObjects } from "./placedObjects.js";
+import { placeCampPerimeter } from "./campPerimeter.js";
+import { placeCampLayout } from "./campLayout.js";
 import { createAbilities } from "./abilities.js";
 import { createAbilityTargeting } from "./abilityTargeting.js";
 import { createCoverOverlay } from "./coverOverlay.js";
@@ -880,6 +883,22 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // on nam-valley the 1,312 rocks arrive with the level, which loads after the
   // systems are constructed, so baking early would silently produce an empty
   // grid — cover that is simply absent, with nothing to notice.
+  // The camp: perimeter (berm, wire, gate, towers) and its dressing, every
+  // piece through placedObjects.js (pad, nav footprint, cover, merged draws).
+  // Before the nav rebuild and cover bake below, which then include it.
+  // ?camp=0 boots the bare map.
+  const placed = createPlacedObjects(app);
+  app.placed = placed;
+  if (new URLSearchParams(location.search).get("camp") !== "0") {
+    onStatus("Building the camp…");
+    try {
+      app.perimeter = await placeCampPerimeter(app, placed);
+      await placeCampLayout(app, placed);
+    } catch (e) {
+      console.warn("[camp] failed to place:", e);
+    }
+  }
+
   onStatus("Baking cover…");
   // The props are in by now, so the HQ can take its footprint back from them
   // (clearHqGround ran once before they arrived, for the vegetation) — and the
@@ -888,14 +907,6 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   navGrid.rebuild();
   for (const s of structures.list) if (s.alive) navGrid.addStructureObstacle(s);
   console.log(`[cover] ${cover.bake()} obstacles`);
-
-  // DEV: ?showcase=1 places the props being judged around the HQ.
-  if (new URLSearchParams(location.search).get("showcase") === "1") {
-    const { placeCampPerimeter } = await import("./campPerimeter.js");
-    app.perimeter = await placeCampPerimeter(app);
-    const { placePropShowcase } = await import("./propShowcase.js");
-    app.showcase = await placePropShowcase(app);
-  }
 
   // The console handle. Every subsystem already hangs off `app`, so one global
   // covers all of them: __NAM.smoke.spawn({x, z, kind: "screen"}).
