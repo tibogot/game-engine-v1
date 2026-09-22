@@ -63,12 +63,16 @@ export function createCombat({
       if (o.passive) return;
       if (o.isAir && !e.canHitAir) return; // jeeps can't shoot helicopters
       const d = flat(e, o);
-      if (d > reach || d >= bestD) return;
+      // An AA gun (the ZPU) takes any aircraft in reach over anything on the
+      // ground: aircraft are ranked as if much nearer. The reach test below
+      // still uses the real distance.
+      const rank = e.prefersAir && o.isAir ? d * 0.25 : d;
+      if (d > reach || rank >= bestD) return;
       // Concealment before smoke: it is a grid lookup and two float compares,
       // where the smoke test walks every live column.
       if (cover && d > reach * cover.acquireRangeScale(e.position.x, e.position.z, o)) return;
       if (!canSee(e, o)) return;
-      bestD = d; best = o;
+      bestD = rank; best = o;
     };
     // Units from the spatial grid (only those within reach are ever looked
     // at — this was every unit, for every idle unit, every tick: O(n²) and an
@@ -146,6 +150,16 @@ export function createCombat({
       tgt = acquire(e);
       e.target = tgt;
     }
+    // An AA gun busy with something on the ground looks up every half second:
+    // a helicopter coming into reach takes over.
+    if (e.prefersAir && tgt && !tgt.isAir && !e.attackTarget) {
+      e.reacquireCd = (e.reacquireCd ?? 0) - dt;
+      if (e.reacquireCd <= 0) {
+        e.reacquireCd = 0.5;
+        const up = acquire(e);
+        if (up?.isAir) { tgt = up; e.target = up; }
+      }
+    }
     if (!tgt) return;
 
     const d = flat(e, tgt);
@@ -185,7 +199,10 @@ export function createCombat({
       // not instantly — so shots read on screen and can chase a moving target.
       const from = muzzleOf(e);
       fx.muzzle(from.x, from.y, from.z);
-      projectiles.spawn(from, tgt, e.damage, e);
+      // An AA gun hits aircraft harder than ground (airMul / groundMul, 1 for
+      // everything else).
+      const dmg = e.damage * (tgt.isAir ? (e.airMul ?? 1) : (e.groundMul ?? 1));
+      projectiles.spawn(from, tgt, dmg, e);
       // A muzzle flash in a dark jungle is the loudest thing on the map.
       // This is what stops concealment being a free permanent buff: it buys
       // an AMBUSH, and spends itself the moment you take it.

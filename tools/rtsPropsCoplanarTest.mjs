@@ -25,7 +25,7 @@ import { buildCorrugatedPanel, buildTrapezoidPanel, MAT } from "../v3/render/obj
 import { buildDoorLeaf, buildQuonsetShellGeometry } from "../v3/render/objects/rtsQuonset.js";
 import { buildM113, buildM151, buildM35, buildM48, buildM551, buildUH1 } from "../v3/render/objects/rtsVehicles.js";
 import { buildColonialHQ } from "../v3/render/objects/rtsColonial.js";
-import { buildTunnelEntrance } from "../v3/render/objects/rtsEnemyKit.js";
+import { buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount } from "../v3/render/objects/rtsEnemyKit.js";
 import { buildGunPitBody, buildGunPitGun, buildBunker, buildHelipad, buildNestBody, buildNestGun, buildRequisitionMast, buildSandbagWallPiece } from "../v3/render/objects/rtsBuildables.js";
 
 let failed = 0;
@@ -160,6 +160,9 @@ check("quonset door leaf", buildDoorLeaf(3.94, 5.45, 51));
 console.log("Enemy buildings");
 check("French colonial HQ", buildColonialHQ());
 check("tunnel entrance", buildTunnelEntrance());
+check("ZPU-4 pit + carriage", buildZpuBody());
+check("ZPU-4 mount + gunner", buildZpuMount());
+check("ZPU-4 guns", buildZpuGuns());
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

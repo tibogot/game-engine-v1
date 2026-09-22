@@ -25,7 +25,14 @@ Keep this file current: tick things off here, add new asks here.
    `pointSites.TUNNEL_SITES`): the AI recruits at the most forward SAFE tunnel
    and falls back to the nearest one; hard to spot, its bar shows only once
    one of yours is within 35 m; 350 hp.
-   NEXT: your look check on both · the AI digging NEW tunnels (a sapper) ·
+   [x] **ZPU-4 AA gun** (`rtsEnemyKit.js`: pit + carriage, mount with its
+   gunner in a pith helmet, four barrels that turn AND elevate): range 62 (the
+   Huey has 44, the M48 48), picks aircraft first and switches to one arriving
+   within 0.5 s, x1.8 damage to air (~65/s against a Huey's 80 hp) and x0.6 to
+   ground, 350 hp. One stands at the enemy HQ from the start; the AI digs more
+   in at held points (20 s, 220 supplies) where your helicopters were SEEN,
+   else ~one per three points held, max 5.
+   NEXT: your look check on all three · the AI digging NEW tunnels (a sapper) ·
    punji pits / booby traps · supply cache (hits their income) · spider holes ·
    enemy camp dressing round the résidence (well, sheds, cooking fire smoke)
 3. ~~**Vehicles rebuilt**~~ DONE for the US side — M113, M48, M151, M551, M35,

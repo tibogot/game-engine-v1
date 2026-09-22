@@ -20,7 +20,9 @@ import {
 } from "../../v3/render/objects/rtsBuildables.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { buildColonialHQ } from "../../v3/render/objects/rtsColonial.js";
-import { buildTunnelEntrance } from "../../v3/render/objects/rtsEnemyKit.js";
+import {
+  ZPU_MOUNT_Y, ZPU_MUZZLE, ZPU_TRUNNION_Y, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
+} from "../../v3/render/objects/rtsEnemyKit.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
 const MAX_PER_KIND = 64; // instance capacity per structure kind
@@ -138,7 +140,7 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     for (const s of structures.list) {
       if (!s.alive) continue;
       if (s.isBuilding) continue;      // runtime buildings have their own renderer
-      if (s.typeKey === "base" || s.typeKey === "enemyBase" || s.typeKey === "turret" || s.typeKey === "tunnel") continue;
+      if (s.typeKey === "base" || s.typeKey === "enemyBase" || s.typeKey === "turret" || s.typeKey === "tunnel" || s.typeKey === "zpu") continue;
       const g = bodyGeoOf(s).clone();
       g.translate(s.position.x, s.position.y, s.position.z);
       parts.push(g);
@@ -179,6 +181,18 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     head: makeKind(buildNestGun(), kitMat, { shadow: true }),
     // The Front's tunnel entrances: one draw for all of them.
     tunnel: makeKind(buildTunnelEntrance(), kitMat, { shadow: true }),
+    // ZPU-4s: the pit (still), the mount (turns), the guns (turn and elevate).
+    zpuBody: makeKind(buildZpuBody(), kitMat, { shadow: true }),
+    zpuMount: makeKind(buildZpuMount(), kitMat, { shadow: true }),
+    zpuGuns: makeKind(buildZpuGuns(), kitMat, { shadow: true }),
+  };
+  const _x = new THREE.Vector3(1, 0, 0);
+  const _qp = new THREE.Quaternion();
+  /** A ZPU's guns: at the trunnions, turned to its yaw, elevated to its pitch. */
+  const zpuGunMatrix = (s, out) => {
+    const sink = (1 - (s.deploy ?? 1)) * 1.2;
+    _q.setFromAxisAngle(_up, s.turretYaw ?? 0).multiply(_qp.setFromAxisAngle(_x, -(s.turretPitch ?? 0.15)));
+    return out.compose(_pivot.set(s.position.x, s.position.y + ZPU_TRUNNION_Y - sink, s.position.z), _q, _one);
   };
   const _spot = [];
   /** A tunnel shows its bar only once found: one of yours near it, or it has been hit or picked. */
@@ -253,6 +267,7 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
 
   /** World-space muzzle point of a turret (where its tracer should start). */
   function muzzleOf(s) {
+    if (s.typeKey === "zpu") return ZPU_MUZZLE.clone().applyMatrix4(zpuGunMatrix(s, _head));
     if (s.typeKey !== "turret") {
       return _muzzle.set(s.position.x, s.position.y + 6, s.position.z).clone();
     }
@@ -343,6 +358,25 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         push(kinds.nest, _m, s);
         headMatrix(s, _head);
         push(kinds.head, _head, s);
+      }
+
+      if (s.typeKey === "zpu") {
+        if (s.team === "enemy" && fogOfWar?.enabled && !fogOfWar.canSeeEntity(s)) continue;
+        // Turn and elevate on the target: an aircraft is aimed at where it
+        // flies, a man at his chest. Clamped to the mount's real arc.
+        const t = s.target?.alive ? s.target : null;
+        if (t) {
+          const dx = t.position.x - s.position.x, dz = t.position.z - s.position.z;
+          s.turretYaw = Math.atan2(dx, dz);
+          const dy = t.position.y + (t.isAir ? 0 : 1) - (s.position.y + ZPU_TRUNNION_Y);
+          s.turretPitch = Math.max(-0.08, Math.min(1.4, Math.atan2(dy, Math.hypot(dx, dz))));
+        }
+        _m.makeTranslation(s.position.x, s.position.y, s.position.z);
+        push(kinds.zpuBody, _m, s);
+        const sink = (1 - (s.deploy ?? 1)) * 1.2;
+        _head.compose(_pivot.set(s.position.x, s.position.y + ZPU_MOUNT_Y - sink, s.position.z), _q.setFromAxisAngle(_up, s.turretYaw ?? 0), _one);
+        push(kinds.zpuMount, _head, s);
+        push(kinds.zpuGuns, zpuGunMatrix(s, _head), s);
       }
 
       if (s.typeKey === "tunnel") {

@@ -7,7 +7,9 @@ import { buildRadioTower } from "./radioKit.js";
 import { buildQuonsetHQ } from "../../v3/render/objects/rtsQuonset.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { buildColonialHQ } from "../../v3/render/objects/rtsColonial.js";
-import { buildTunnelEntrance } from "../../v3/render/objects/rtsEnemyKit.js";
+import {
+  ZPU_MOUNT_Y, ZPU_TRUNNION_Y, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
+} from "../../v3/render/objects/rtsEnemyKit.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import {
   GUN_PIT_HEAD_Y, NEST_HEAD_Y, buildBunker, buildGunPitBody, buildGunPitGun, buildHelipad, buildMedicTent,
@@ -46,6 +48,18 @@ const ITEMS = [
   ["struct:enemy:turret", () => withGun(buildNestBody(), buildNestGun(), NEST_HEAD_Y)],
   ["struct:enemy:enemyBase", () => kit(buildColonialHQ())],
   ["struct:enemy:tunnel", () => kit(buildTunnelEntrance())],
+  ["struct:enemy:zpu", () => {
+    // Turned toward the camera, the guns up at 30°: the four barrels read.
+    const g = new THREE.Group();
+    g.add(kit(buildZpuBody()));
+    const mount = kit(buildZpuMount());
+    mount.position.y = ZPU_MOUNT_Y; mount.rotation.y = 0.7;
+    g.add(mount);
+    const guns = kit(buildZpuGuns());
+    guns.position.y = ZPU_TRUNNION_Y; guns.rotation.set(-0.5, 0.7, 0, "YXZ");
+    g.add(guns);
+    return g;
+  }],
 ];
 
 /** Bake every structure portrait into `into` (the units' thumbnail map). */

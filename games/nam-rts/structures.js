@@ -80,6 +80,29 @@ export const STRUCTURE_TYPES = {
     barWidth: 3,
     barY: 3,
   },
+  // The ZPU-4 (rtsEnemyKit.js): the quad 14.5 mm the helicopter crews feared
+  // most. Outranges every gun you field (62 m against the Huey's 44 and the
+  // M48's 48), picks aircraft first, and hits them hard — four barrels,
+  // ~65 damage a second into a helicopter, which has 80 — but it is an AA gun
+  // in a pit: against ground targets a third of that. What kills one is a
+  // tank taking its time (M48 wins 1v1, ~15 s) or riflemen in the grass.
+  zpu: {
+    typeKey: "zpu",
+    name: "ZPU-4 AA Gun",
+    team: "enemy",
+    maxHp: 350,
+    radius: 3.5,
+    footprint: { cx: 0, cz: 0, hx: 3.6, hz: 3.6 },
+    range: 62,
+    damage: 9,
+    fireRate: 4,
+    canHitAir: true,
+    prefersAir: true,
+    airMul: 1.8,
+    groundMul: 0.6,
+    barWidth: 5,
+    barY: 4.2,
+  },
   // Unarmed targets for close-range crater / combat tests — no need to cross the map.
   trainingDummy: {
     typeKey: "trainingDummy",
@@ -117,6 +140,10 @@ function makeStructure(app, type, x, z) {
     damage: type.damage ?? 0,
     fireRate: type.fireRate ?? 0,
     canHitAir: !!type.canHitAir,
+    // An AA gun picks aircraft first and hits them harder (combat.js).
+    prefersAir: !!type.prefersAir,
+    airMul: type.airMul ?? 1,
+    groundMul: type.groundMul ?? 1,
     cooldown: 0,
     target: null,
     turretYaw: 0,      // rendered head rotation
@@ -290,8 +317,25 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
       }
       return out;
     },
+    /** Boot-time: one enemy structure on a levelled site near (x, z). */
+    async placeEnemy(typeKey, x, z) {
+      return place(STRUCTURE_TYPES[typeKey], x, z, { searchRadius: 30, maxSpread: 4 });
+    },
+    /**
+     * IN PLAY: an enemy structure dug in at (x, z) as it stands — no terrain
+     * edit (a flatten is a GPU round trip and re-conforms the river: a hitch
+     * mid-battle). It starts `deploy` 0 — combat.js holds its fire until the
+     * owner has brought it to 1 — and the caller stamps its nav.
+     */
+    addNow(typeKey, x, z) {
+      const s = makeStructure(app, STRUCTURE_TYPES[typeKey], x, z);
+      s.deploy = 0;
+      list.push(s);
+      return s;
+    },
     get turrets() { return list.filter((s) => s.typeKey === "turret" && s.alive); },
     get tunnels() { return list.filter((s) => s.typeKey === "tunnel" && s.alive); },
+    get zpus() { return list.filter((s) => s.typeKey === "zpu" && s.alive); },
     /** Re-seat every structure on the current terrain (after loading a .v3proj). */
     async reanchorToTerrain(app) {
       for (const s of list) {

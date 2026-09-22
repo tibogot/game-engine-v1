@@ -406,6 +406,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     await structures.spawnEnemyBase();
     // And its tunnel entrances, where its men come up (pointSites.js).
     await structures.placeTunnels(tunnelSitesFor(boot.name));
+    // A ZPU-4 in front of the résidence from the start: your Hueys do not
+    // get to shoot up its HQ for free.
+    const eb = structures.enemyBase;
+    if (eb) await structures.placeEnemy("zpu", eb.position.x + 16, eb.position.z - 22);
   }
 
   // A FIREBASE IS BULLDOZED BARE. nam-valley's jungle paint runs straight over
@@ -428,6 +432,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // through the pit. A dug position has its own ground — the jungle stays
     // round it, which is what hides it.
     for (const t of structures.turrets) app.clearVegetation?.(t.position.x, t.position.z, 8, { grass: 6 });
+    for (const z of structures.zpus) app.clearVegetation?.(z.position.x, z.position.z, 7, { grass: 5 });
     // A tunnel mouth: the shaft and its spoil ring, trodden bare — the jungle
     // round it is the point. At 3.5 m the ferns (metres across) still closed
     // over it and it could not be found even by looking straight at it.
@@ -675,7 +680,19 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
 
   // The enemy commander: squads that take, hold and attack points, fall back,
   // and fight from cover. Orders only — combat.js still does the fighting.
-  const enemyAI = createEnemyAI({ units, structures, requisition, navGrid, cover });
+  const enemyAI = createEnemyAI({
+    units, structures, requisition, navGrid, cover,
+    // Digging in, in play: the structure as the ground stands (no flatten —
+    // a GPU round trip mid-battle), its footprint into nav, its pit cleared
+    // of jungle, cover re-baked (~4 ms, once).
+    emplace: (typeKey, x, z) => {
+      const s = structures.addNow(typeKey, x, z);
+      navGrid.addStructureObstacle(s);
+      app.clearVegetation?.(x, z, 6, { grass: 4.5 });
+      cover.bake();
+      return s;
+    },
+  });
   enemyAI.setEnabled(AI_ON);
   app.enemyAI = enemyAI;
 

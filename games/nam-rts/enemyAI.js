@@ -25,6 +25,10 @@
 //             to shoot), goes home — the nearest safe tunnel, or the HQ — and
 //             refills from recruits who come up right there
 //
+//   AA        a ZPU-4 dug in (the `emplace` hook, paid from its purse) at the
+//             held point your helicopters were seen near — or, holding three
+//             or more, at the most forward one; up in `zpuDigTime` s
+//
 // WHAT IT KNOWS is what it could see: your units near a point count only if
 // one of its own men or buildings is within `seeRange` of them, and a sighting
 // is remembered for `memory` seconds. It does not read your army from memory.
@@ -54,6 +58,13 @@ export const ENEMY_AI = {
   threatRadius: 40,
   memory: 60,
   pathBudget: 1500,     // A* cells expanded per sim step for the squads' queued searches (MEASURED 3,000 ≈ 2.3 ms)
+  // ZPU-4s dug in at points it holds (the `emplace` hook).
+  zpuCost: 220,
+  zpuReserve: 100,      // kept back for recruits
+  zpuMax: 5,
+  zpuDigTime: 20,       // seconds from the first spade to the first burst
+  zpuEvery: 5,          // seconds between decisions
+  airMemory: 120,       // a helicopter seen near a point is remembered this long
 };
 
 export const DIFFICULTY = {
@@ -78,8 +89,13 @@ function seeded(seed) {
 const power = (u) => (u.alive ? u.hp / 60 : 0);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
+/**
+ * `emplace(typeKey, x, z)`: dig a structure in, in play (namGame stamps its
+ * nav and clears its pit) — returns it, with `deploy` 0 for this AI to bring
+ * up. Optional: without it the commander builds nothing.
+ */
 export function createEnemyAI({
-  units, structures, requisition, navGrid = null, cover = null,
+  units, structures, requisition, navGrid = null, cover = null, emplace = null,
   params = { ...ENEMY_AI }, seed = 1337, unitKey = "soldier",
 }) {
   const rand = seeded(seed);
@@ -613,6 +629,55 @@ export function createEnemyAI({
     }
   }
 
+  // ── AA: where your helicopters have been seen, and ZPUs dug in there ──────
+  const airSeen = new Map();   // point id → last time a helicopter of yours was seen near it
+  let zpuT = 0;
+  function watchTheSky() {
+    for (const u of units.list) {
+      if (!u.alive || !u.isAir || u.team !== "player" || !seen(u)) continue;
+      let best = null, bd = 150;
+      for (const p of requisition.points) { const d = dist(u.position, p.position); if (d < bd) { bd = d; best = p; } }
+      if (best) airSeen.set(best.id, clock);
+    }
+  }
+  const zpuNear = (p, r = 35) => (structures.zpus ?? []).some((z) => dist(z.position, p) < r);
+  /** Dig a ZPU in at the held point that most needs one — if there is one, and the money. */
+  function digInAA() {
+    if (!emplace || !hq()) return;
+    if ((structures.zpus ?? []).length >= params.zpuMax) return;
+    if (purse.stock < params.zpuCost + params.zpuReserve) return;
+    const held = requisition.points.filter((p) => p.owner === "enemy");
+    const front = structures.base?.position;
+    // Without a helicopter seen, AA "just in case" stays thin: about one gun
+    // per three points held (the HQ's own counts). Seen helicopters are a reason.
+    const spare = (structures.zpus ?? []).length < Math.floor(held.length / 3) + 1;
+    let best = null, bestScore = 0;
+    for (const p of held) {
+      if (zpuNear(p.position) || !safeAt(p.position)) continue;
+      const air = clock - (airSeen.get(p.id) ?? -1e9) <= params.airMemory;
+      if (!air && (held.length < 3 || !spare)) continue;
+      // Helicopters seen there first; then the point nearest your HQ (the front).
+      const score = (air ? 3 : 1) + (front ? 1 - Math.min(1, dist(p.position, front) / 800) : 0);
+      if (score > bestScore) { bestScore = score; best = p; }
+    }
+    if (!best) return;
+    // Its pit: 11–16 m off the mast, open ground you can walk to, clear of
+    // other works, the most concealed of those.
+    let site = null;
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2 + rand() * 0.4, r = 11 + rand() * 5;
+      const x = best.position.x + Math.cos(a) * r, z = best.position.z + Math.sin(a) * r;
+      if (navGrid?.isBlockedAtWorld(x, z)) continue;
+      if (navGrid?.sameRegion && !navGrid.sameRegion(x, z, best.position.x, best.position.z)) continue;
+      if (structures.list.some((s) => s.alive && dist(s.position, { x, z }) < 9)) continue;
+      const score = (cover?.concealmentAt?.(x, z) ?? 0) + rand() * 0.05;
+      if (!site || score > site.score) site = { x, z, score };
+    }
+    if (!site || !purse.spend(params.zpuCost)) return;
+    const s = emplace("zpu", site.x, site.z);
+    if (s) say(`ZPU-4 dug in at ${best.name}`);
+  }
+
   function prune() {
     for (let i = squads.length - 1; i >= 0; i--) {
       const s = squads[i];
@@ -656,8 +721,12 @@ export function createEnemyAI({
     navGrid?.pumpPaths?.(params.pathBudget);
     if (!deployed) deployed = deploy();
     recruit(dt);
+    // Guns being dug in come up over zpuDigTime (combat holds their fire till then).
+    for (const z of structures.zpus ?? []) if ((z.deploy ?? 1) < 1) z.deploy = Math.min(1, z.deploy + dt / params.zpuDigTime);
     tickT -= dt;
-    if (tickT <= 0) { tickT = params.tick; prune(); }
+    if (tickT <= 0) { tickT = params.tick; prune(); watchTheSky(); }
+    zpuT -= dt;
+    if (zpuT <= 0) { zpuT = params.zpuEvery; digInAA(); }
     // Each squad thinks once a tick, but on ITS OWN step of it, not all on the
     // same one: a squad's orders cost a path search per man, and MEASURED with
     // nine squads that was 3.2 ms landing in one frame every second — a hitch.

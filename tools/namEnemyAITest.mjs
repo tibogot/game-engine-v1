@@ -42,7 +42,11 @@ function world({ points = [], enemyBase = true, tunnels = [] } = {}) {
   const eb = { alive: enemyBase, team: "enemy", range: 0, position: { x: 0, y: 0, z: 400 }, type: { navRadius: 24, doorApproach: { dirX: 0, dirZ: -1 } } };
   const base = { alive: true, team: "player", range: 0, position: { x: 0, y: 0, z: -380 } };
   const tun = tunnels.map(([x, z]) => ({ alive: true, team: "enemy", range: 0, typeKey: "tunnel", position: { x, y: 0, z } }));
-  const structures = { list: [eb, base, ...tun], enemyBase: eb, base, get tunnels() { return tun.filter((t) => t.alive); } };
+  const structures = {
+    list: [eb, base, ...tun], enemyBase: eb, base,
+    get tunnels() { return tun.filter((t) => t.alive); },
+    get zpus() { return this.list.filter((s) => s.typeKey === "zpu" && s.alive); },
+  };
   const requisition = { points };
   return { units, structures, requisition };
 }
@@ -198,6 +202,49 @@ console.log("tunnels");
   run(ai, ENEMY_AI.tick * 1.5);
   const last = s.members.find((u) => u.alive).orders.at(-1);
   ok("a beaten squad falls back to the nearest tunnel, not the HQ", s.state === "retreat" && Math.abs(last[2] - 96) < 12, JSON.stringify(last));
+}
+
+console.log("AA");
+{
+  const setup = ({ heli = true, stock = 1000, held = 1 } = {}) => {
+    const pts = [point(0, 0, 100, "enemy"), point(1, 200, 250, held > 1 ? "enemy" : null), point(2, -200, 250, held > 2 ? "enemy" : null)];
+    const w = world({ points: pts });
+    w.units.list.push(man("enemy", 2, 104));                 // a sentry on the point
+    if (heli) { const h = man("player", 10, 120, "helicopter"); h.isAir = true; w.units.list.push(h); }
+    const dug = [];
+    const emplace = (typeKey, x, z) => {
+      const s = { typeKey, alive: true, team: "enemy", range: 62, position: { x, y: 0, z }, deploy: 0 };
+      w.structures.list.push(s); dug.push(s); return s;
+    };
+    const ai = createEnemyAI({ ...w, emplace, params: { ...ENEMY_AI, startSquads: 0, startingStock: stock, maxSquads: 0 } });
+    return { w, ai, dug };
+  };
+  {
+    const { ai, dug } = setup();
+    run(ai, ENEMY_AI.zpuEvery + ENEMY_AI.tick);
+    const d = dug[0] && Math.hypot(dug[0].position.x, dug[0].position.z - 100);
+    ok("a helicopter seen over a held point: a ZPU is dug in there", dug.length === 1 && d >= 10 && d <= 17, dug.length ? `${d.toFixed(1)} m off the mast` : "none");
+    ok("it starts in the ground, not firing", dug[0]?.deploy < 0.5, `deploy ${dug[0]?.deploy.toFixed(2)}`);
+    run(ai, ENEMY_AI.zpuDigTime);
+    ok("and is up after zpuDigTime", dug[0]?.deploy === 1);
+    run(ai, ENEMY_AI.zpuEvery * 3);
+    ok("one to a point", dug.length === 1, `${dug.length}`);
+  }
+  {
+    const { ai, dug } = setup({ heli: false });
+    run(ai, ENEMY_AI.zpuEvery * 3);
+    ok("no helicopters, one point held: nothing dug", dug.length === 0);
+    const b = setup({ heli: false, held: 3 });
+    run(b.ai, ENEMY_AI.tick);
+    ok("holding three points, it digs one in anyway", b.dug.length === 1);
+    run(b.ai, ENEMY_AI.zpuEvery * 6);
+    ok("…but stays thin without a reason: one per three points held", b.dug.length === Math.floor(3 / 3) + 1, `${b.dug.length} guns`);
+  }
+  {
+    const { ai, dug } = setup({ stock: ENEMY_AI.zpuCost + ENEMY_AI.zpuReserve - 1 });
+    run(ai, ENEMY_AI.zpuEvery * 3);
+    ok("not with the recruits' money", dug.length === 0);
+  }
 }
 
 console.log("determinism");
