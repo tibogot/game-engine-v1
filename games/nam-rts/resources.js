@@ -124,6 +124,11 @@ export async function createResources({ app, startingStock = STARTING_STOCK, nod
       stock -= n;
       return true;
     },
+    /** Income that is not a delivery — requisition points (requisition.js). */
+    earn(n) {
+      stock += n;
+      earned += n;
+    },
     /** A harvester unloading at the base. */
     deposit(n) {
       stock += n;

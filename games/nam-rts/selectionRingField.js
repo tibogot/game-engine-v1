@@ -30,11 +30,13 @@ const _col = new THREE.Color();
  *
  * @param {{ scene: THREE.Scene, heightTexNode: object }} app — the v3 app handle
  */
-export function createSelectionRingField({ app, max = 512, color = 0x6ab0ff }) {
+// `inner` / `segments` / `opacity`: a second pool can draw other rings the same
+// way — requisition zones are a thin, faint band on a much bigger circle.
+export function createSelectionRingField({ app, max = 512, color = 0x6ab0ff, inner = INNER, segments = SEGMENTS, opacity = 0.95 }) {
   const { scene, heightTexNode } = app;
 
   // Unit-radius ring in the XZ plane; the per-instance radius scales it.
-  const src = new THREE.RingGeometry(INNER, 1, SEGMENTS).rotateX(-Math.PI / 2);
+  const src = new THREE.RingGeometry(inner, 1, segments).rotateX(-Math.PI / 2);
 
   const geo = new THREE.InstancedBufferGeometry();
   geo.index = src.index;
@@ -61,7 +63,7 @@ export function createSelectionRingField({ app, max = 512, color = 0x6ab0ff }) {
   // Ground-hugging decal, so depthTest stays ON — the unit standing on the ring
   // properly occludes it, which depthTest:false would break.
   const mat = new MeshBasicNodeMaterial({
-    transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+    transparent: true, opacity, side: THREE.DoubleSide,
     depthWrite: false, depthTest: true, fog: false, // selection UI — never fogged
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });

@@ -329,6 +329,97 @@ export function buildBunker({ seed = 81 } = {}) {
   return geo;
 }
 
+// ── Requisition point: the big antenna ───────────────────────────────────────
+/**
+ * A relay mast on a captured hilltop: a triangular lattice tower — three legs
+ * tapering to the top, a ring every few metres, a zig-zag brace up each face —
+ * with dipoles and a light at the head, guys to three anchors, a sandbagged
+ * equipment hut at its foot and a flagpole beside it for whoever holds it.
+ * Tall on purpose: it has to stand over the canopy and be seen across the
+ * map. The lattice is thin, so its shape reads from the braces, not a mass.
+ *
+ * userData: pole { x, z, bottom, top } (the flag climbs it), light [x, y, z].
+ */
+export const MAST_HEIGHT = 26 * S;
+
+export function buildRequisitionMast({ seed = 91 } = {}) {
+  const parts = [];
+  const H = MAST_HEIGHT, r0 = 1.6 * S, r1 = 0.35 * S;
+  const legAt = (k, y) => {
+    const a = (k / 3) * Math.PI * 2 + Math.PI / 6, r = r0 + (r1 - r0) * (y / H);
+    return new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r);
+  };
+  const tube = (a, b, w) => {
+    const d = new THREE.Vector3().subVectors(b, a);
+    const g = new THREE.CylinderGeometry(w, w, d.length(), 5);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
+    const m = a.clone().add(b).multiplyScalar(0.5);
+    return g.translate(m.x, m.y, m.z);
+  };
+  // Legs.
+  for (let k = 0; k < 3; k++) parts.push({ geo: tube(legAt(k, 0), legAt(k, H), 0.07 * S), mat: MAT.metal, tone: 0.55 });
+  // Rings and the zig-zag braces, bay by bay. Each brace runs from one leg to
+  // the next, alternating up and down the bay.
+  const bays = 11;
+  for (let i = 0; i < bays; i++) {
+    const y0 = (i / bays) * H, y1 = ((i + 1) / bays) * H;
+    for (let k = 0; k < 3; k++) {
+      const k2 = (k + 1) % 3;
+      parts.push({ geo: tube(legAt(k, y1), legAt(k2, y1), 0.03 * S), mat: MAT.metal, tone: 0.5 });
+      const up = (i + k) % 2 === 0;
+      parts.push({ geo: tube(legAt(k, up ? y0 : y1), legAt(k2, up ? y1 : y0), 0.025 * S), mat: MAT.metal, tone: 0.5 });
+    }
+  }
+  // Painted bands near the head — aviation orange-and-white is what a real
+  // relay mast wears; the kit has white, so white bands on the grey steel.
+  for (const f of [0.82, 0.9]) {
+    const y = f * H;
+    for (let k = 0; k < 3; k++) parts.push({ geo: tube(legAt(k, y), legAt(k, y + 0.9 * S), 0.085 * S), mat: MAT.white, tone: 0.6 });
+  }
+  // Head: a platform, two crossed dipole arms, a whip.
+  parts.push({ geo: new THREE.CylinderGeometry(r1 + 0.5 * S, r1 + 0.5 * S, 0.12 * S, 6), pos: [0, H, 0], mat: MAT.metal, tone: 0.4 });
+  // The second arm a hand higher: crossed at one height, their faces z-fought.
+  for (const [a, dy] of [[0, 0], [Math.PI / 2, 0.1 * S]]) {
+    const y = H - 1.2 * S + dy;
+    parts.push({ geo: buildBox(4.2 * S, 0.08 * S, 0.08 * S), pos: [0, y, 0], rot: [0, a, 0], mat: MAT.metal, tone: 0.35 });
+    for (const s of [-1, 1]) {
+      const x = s * 2.0 * S * Math.cos(a), z = -s * 2.0 * S * Math.sin(a);
+      parts.push({ geo: new THREE.CylinderGeometry(0.02 * S, 0.02 * S, 1.8 * S, 4), pos: [x, y - 0.9 * S, z], mat: MAT.metal, tone: 0.35 });
+    }
+  }
+  parts.push({ geo: new THREE.CylinderGeometry(0.02 * S, 0.035 * S, 5 * S, 4), pos: [0, H + 2.5 * S, 0], mat: MAT.metal, tone: 0.3 });
+  // Guys: from two heights to three anchors.
+  const gr = 13 * S;
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + Math.PI / 6;
+    const anchor = new THREE.Vector3(Math.cos(a) * gr, 0.15, Math.sin(a) * gr);
+    for (const f of [0.45, 0.85]) parts.push({ geo: tube(legAt(k, f * H), anchor, 0.012 * S), mat: MAT.metal, tone: 0.2 });
+    parts.push({ geo: buildBox(0.5 * S, 0.3 * S, 0.5 * S), pos: [anchor.x, 0.15 * S, anchor.z], mat: MAT.concrete, tone: 0.45 });
+  }
+  // Footing pads under the legs.
+  for (let k = 0; k < 3; k++) {
+    const p = legAt(k, 0);
+    parts.push({ geo: buildBox(0.7 * S, 0.3 * S, 0.7 * S), pos: [p.x, 0.15 * S, p.z], mat: MAT.concrete, tone: 0.5 });
+  }
+  // The equipment hut: a corrugated box behind a low bag wall.
+  const hx = -3.4 * S, hz = -1.2 * S;
+  parts.push({ geo: buildBox(2.2 * S, 2.0 * S, 1.8 * S), pos: [hx, 1.0 * S, hz], rot: [0, 0.35, 0], mat: MAT.paint, tone: 0.45 });
+  parts.push({ geo: buildBox(2.5 * S, 0.1 * S, 2.1 * S), pos: [hx, 2.05 * S, hz], rot: [0, 0.35, 0], mat: MAT.metal, tone: 0.3 });
+  const bag = { length: 0.52 * S, width: 0.30 * S, height: 0.19 * S, segU: 6, segV: 4 };
+  parts.push({ geo: buildSandbagWall({ length: 3.2 * S, courses: 3, seed, bag, batter: 0.04 }), pos: [hx - 0.4 * S, 0, hz + 1.9 * S], rot: [0, 0.35, 0], mat: null });
+  // The flagpole, beside the tower on the other side.
+  const px = 2.8 * S, pz = 1.4 * S, poleH = 9 * S;
+  parts.push({ geo: buildPost({ height: poleH, width: 0.1 * S, depth: 0.1 * S, taper: 0.3, round: true }), pos: [px, 0, pz], mat: MAT.white, tone: 0.5 });
+  parts.push({ geo: new THREE.SphereGeometry(0.14 * S, 8, 6), pos: [px, poleH + 0.05, pz], mat: MAT.metal, tone: 0.6 });
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.3 * S, radius: 2, strength: 0.3, groundFade: 0.3, floor: 0.6 });
+  geo.userData.pole = { x: px, z: pz, bottom: 1.0 * S, top: poleH - 0.2 * S };
+  geo.userData.light = [0, H + 5 * S + 0.2, 0];
+  geo.userData.footprint = { cx: -1.0 * S, cz: 0, hx: 4.8 * S, hz: 3.4 * S };
+  geo.userData.height = H;
+  return geo;
+}
+
 // ── Watch tower, medic tent ──────────────────────────────────────────────────
 /** The kit's guard tower as a building: its footprint is its legs' spread. */
 export function buildWatchTower({ seed = 13 } = {}) {

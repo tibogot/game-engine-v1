@@ -39,12 +39,32 @@ export function createResourceHud({ mount = document.body } = {}) {
 
   let lastAmount = -1, lastHarv = -1, lastNodes = -1;
 
-  /** Called each frame; only touches the DOM when a displayed value changes. */
-  function update(resources, units) {
+  let lastPts = "";
+
+  /**
+   * Called each frame; only touches the DOM when a displayed value changes.
+   * With `requisition` (the default economy) the strip reads points held and
+   * income a minute instead of harvesters and nodes.
+   */
+  function update(resources, units, requisition = null) {
     const amount = Math.floor(resources.stock);
     if (amount !== lastAmount) {
       lastAmount = amount;
       elAmount.textContent = amount.toLocaleString();
+    }
+
+    if (requisition) {
+      const held = requisition.held, total = requisition.points.length;
+      const key = `${held}/${total}/${requisition.heldByEnemy}`;
+      if (key !== lastPts) {
+        lastPts = key;
+        elHarv.innerHTML = `<b class="hud-num">${held}</b>/${total} points`;
+        elHarv.classList.toggle("none", held === 0);
+        elNodes.innerHTML = `+<b class="hud-num">${requisition.incomePerMinute}</b>/min`
+          + (requisition.heldByEnemy ? ` · enemy <b class="hud-num">${requisition.heldByEnemy}</b>` : "");
+        elNodes.classList.remove("low", "out");
+      }
+      return;
     }
 
     const harvesters = units.list.filter(

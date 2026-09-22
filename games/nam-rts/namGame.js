@@ -82,6 +82,9 @@ import { createResourceRenderer } from "./resourceRenderer.js";
 import { createResourceHud } from "./resourceHud.js";
 import { createHudBar } from "./hudBar.js";
 import { createHarvesting } from "./harvesting.js";
+import { createRequisition } from "./requisition.js";
+import { createRequisitionRenderer } from "./requisitionRenderer.js";
+import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
 import { createWaves } from "./waves.js";
 import { createMatch } from "./match.js";
 import { createWaveHud } from "./waveHud.js";
@@ -370,6 +373,16 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // but its nodes are placed after — node siting flattens terrain too, and doing
   // it in one pass with the structures keeps the nav rebuild to a single pass.
   const resources = await createResources({ app });
+  // The economy is REQUISITION POINTS: ground you hold pays supplies
+  // (requisition.js). The harvester economy survives as ?econ=harvest.
+  const HARVEST = new URLSearchParams(location.search).get("econ") === "harvest";
+  const requisition = createRequisition({
+    app, resources,
+    // Taking a point pops M18 VIOLET — the Apocalypse Now marker.
+    onCapture: (p, team) => { if (team === "player") app.smoke?.spawn({ x: p.position.x, z: p.position.z, kind: "violet" }); },
+  });
+  app.requisition = requisition;
+  const MAST_FP = buildRequisitionMast().userData.footprint;
   app.resources = resources;
 
   onStatus("Placing structures…");
@@ -396,6 +409,19 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // through the pit. A dug position has its own ground — the jungle stays
     // round it, which is what hides it.
     for (const t of structures.turrets) app.clearVegetation?.(t.position.x, t.position.z, 8, { grass: 6 });
+    // And the requisition masts: the jungle off the tower and its hut, the
+    // grass kept — the zone round it is ground to fight over, not a lawn.
+    for (const p of requisition.points) {
+      app.clearVegetation?.(p.position.x - 1.3, p.position.z, 9, { grass: 5 });
+      // Rocks inside the mast's footprint go (the props arrive with the level,
+      // after the points are sited — this runs again once they are in).
+      const ps = app.propStore;
+      const x = p.position.x + MAST_FP.cx, z = p.position.z + MAST_FP.cz;
+      for (let i = (ps?.instances?.length ?? 0) - 1; i >= 0; i--) {
+        const inst = ps.instances[i];
+        if (Math.abs(inst.px - x) < MAST_FP.hx + 2 && Math.abs(inst.pz - z) < MAST_FP.hz + 2) ps.removeInstance(i);
+      }
+    }
     const b = structures.base;
     if (b?.alive === false) return;
     app.clearVegetation?.(b.position.x, b.position.z + 2, 27, { grass: 23 });
@@ -415,8 +441,25 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   };
   clearHqGround();
 
+  /**
+   * The requisition points: sited like the old nodes, each mast on a levelled
+   * pad, its footprint blocked in nav (the legs, the hut, the bags), the rocks
+   * inside it removed.
+   */
+  async function placeRequisitionPoints() {
+    const fp = MAST_FP;
+    for (const p of requisition.placePoints(structures.base.position)) {
+      const x = p.position.x + fp.cx, z = p.position.z + fp.cz;
+      await app.flattenRect?.(x, z, fp.hx + 0.5, fp.hz + 0.5, p.position.y, { rim: 3 });
+      p.position.y = app.getWorldHeight(p.position.x, p.position.z);
+      navGrid.addFootprint(x, z, fp.hx, fp.hz, 0);
+    }
+    clearHqGround();
+  }
+
   onStatus("Seeding resource nodes…");
-  await resources.placeNodes(structures.base.position);
+  if (HARVEST) await resources.placeNodes(structures.base.position);
+  else await placeRequisitionPoints();
 
   onStatus("Re-baking navigation…");
   navGrid.rebuild(); // the ground under every building AND node changed
@@ -434,7 +477,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   app.baseFlag = baseFlag;
 
   onStatus("Spawning units…");
-  const units = createUnits({ app, navGrid, origin: structures.base.position });
+  // No harvesters without the harvest economy: the opening army takes points.
+  const units = createUnits({
+    app, navGrid, origin: structures.base.position,
+    ...(HARVEST ? {} : { spawn: { jeep: 8, helicopter: 4, soldier: 6 } }),
+  });
   app.units = units;
 
   const buildings = createBuildings({
@@ -474,6 +521,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
 
   const buildingRenderer = createBuildingRenderer({ app, buildings, healthBars });
   app.buildingRenderer = buildingRenderer;
+
+  const requisitionRenderer = createRequisitionRenderer({ app, requisition, fogOfWar });
+  app.requisitionRenderer = requisitionRenderer;
 
   // Ghost placement: select a builder → Build Helipad → site it → the builder
   // drives there and raises it (buildings.updateBuilders).
@@ -637,7 +687,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     productionFor: (s) => (
       s.typeKey === "base"
         ? [
-            { key: "harvester", label: "Harvester", cost: UNIT_COST.harvester },
+            ...(HARVEST ? [{ key: "harvester", label: "Harvester", cost: UNIT_COST.harvester }] : []),
             { key: "soldier", label: "Soldier", cost: UNIT_COST.soldier },
             { key: "jeep", label: "Jeep", cost: UNIT_COST.jeep },
             { key: "builder", label: "Builder", cost: UNIT_COST.builder },
@@ -657,7 +707,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       { key: "helipad", label: "Helipad", tip: "Helipad — builds helicopters" },
       { key: "turret", label: "M60 Pit", tip: "M60 gun pit — defends itself, hits air" },
       { key: "radio", label: "Radio", tip: "Radio Station — the tactical map and wider vision" },
-      { key: "captureNode", label: "Relay", tip: "Supply Relay — income" },
+      ...(HARVEST ? [{ key: "captureNode", label: "Relay", tip: "Supply Relay — income" }] : []),
       { key: "watchTower", label: "Tower", tip: "Guard Tower — sees 110 m, over the canopy" },
       { key: "medicTent", label: "Aid Stn", tip: "Aid Station — heals infantry within 18 m" },
       { key: "sandbagWall", label: "Bags", tip: "Sandbag Wall — cover you build, faces away from the HQ" },
@@ -723,7 +773,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
 
   // Player-facing HUD: minimap (bottom-left). Baked terrain + unit blips +
   // camera viewport; click/drag to move the camera.
-  const minimap = createMinimap({ app, units, buildings, structures, fogOfWar, mount: hud.left });
+  const minimap = createMinimap({ app, units, buildings, structures, fogOfWar, requisition, mount: hud.left });
   app.minimap = minimap;
 
   const syncNavObstacles = () => {
@@ -770,6 +820,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     for (const n of resources.nodes) {
       n.position.y = app.getWorldHeight?.(n.position.x, n.position.z) ?? n.position.y;
     }
+    for (const p of requisition.points) p.position.y = app.getWorldHeight?.(p.position.x, p.position.z) ?? p.position.y;
+    requisitionRenderer.placeMasts();
     baseFlag?.reanchor();
     const navOn = devPanel?.getNavDebug?.() ?? false;
     navGrid.rebuild();
@@ -836,6 +888,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     structures.updateProduction(dt, (key, x, z, opts) => units.spawn(key, x, z, opts));
     buildings.update(dt);                 // construction ramp + helipad production
     resources.tickCaptureIncome(dt, buildings);
+    requisition.step(dt, units.list);      // who stands on which point; income
     harvesting.update(dt);                // node → fill → base → unload → repeat
     units.update(dt);
     combat.update(dt);                    // acquire → chase → launch rockets
@@ -872,6 +925,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     unitRenderer.sync(dt, app.camera);
     structuresRenderer.sync(dt, app.camera);
     buildingRenderer.sync(dt, app.camera);
+    requisitionRenderer.sync(dt);
     healthBars.commit();
     selectionRings.commit();
     selectionFrames.commit();
@@ -889,7 +943,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     baseFlag?.update(dt);                 // HQ flag cloth sim
     commandCard.tick();                   // live production bar + affordability
     unitBar.tick();                       // a single selected unit's health
-    resourceHud.update(resources, units); // supplies / harvesters / nodes left
+    resourceHud.update(resources, units, HARVEST ? null : requisition); // supplies · points / harvesters
     waveHud.update(dt, waves, match);     // wave counter, match objective, win/lose
     minimap.draw();
     stress.update(dt);                    // dev: continuous effect spawners, if running

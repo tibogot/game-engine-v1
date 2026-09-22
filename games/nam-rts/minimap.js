@@ -77,7 +77,7 @@ function bakeTerrain(app) {
   return canvas;
 }
 
-export function createMinimap({ app, units, buildings = null, structures = null, fogOfWar = null, mount = document.body }) {
+export function createMinimap({ app, units, buildings = null, structures = null, fogOfWar = null, requisition = null, mount = document.body }) {
   const map = app.worldSize ?? 1000;
   let terrain = bakeTerrain(app);
 
@@ -168,6 +168,27 @@ export function createMinimap({ app, units, buildings = null, structures = null,
     ctx.restore();
   }
 
+  /** A requisition point: a diamond in its owner's colour, the capture as an arc round it. */
+  function drawPoint(x, y, p) {
+    const col = p.owner === "player" ? "#58a8ff" : p.owner === "enemy" ? "#ff6a5a" : "#d8cfae";
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = col;
+    ctx.strokeStyle = "rgba(10,12,8,0.8)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -4.5); ctx.lineTo(4.5, 0); ctx.lineTo(0, 4.5); ctx.lineTo(-4.5, 0);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    if (Math.abs(p.progress) > 0.01 && Math.abs(p.progress) < 0.999) {
+      ctx.strokeStyle = p.progress > 0 ? "#58a8ff" : "#ff6a5a";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, 7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.abs(p.progress));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawHq(x, y, hostile) {
     ctx.fillStyle = hostile ? "#ff6a5a" : "#64d2ff";
     ctx.strokeStyle = hostile ? "rgba(255,106,90,0.95)" : "rgba(100,210,255,0.95)";
@@ -239,6 +260,12 @@ export function createMinimap({ app, units, buildings = null, structures = null,
         const { x, y } = worldToMini(b.position.x, b.position.z);
         drawCaptureNode(x, y);
       }
+    }
+
+    for (const p of requisition?.points ?? []) {
+      if (fogOfWar?.enabled && !fogOfWar.isExplored(p.position.x, p.position.z)) continue;
+      const { x, y } = worldToMini(p.position.x, p.position.z);
+      drawPoint(x, y, p);
     }
 
     for (const u of units.list) {

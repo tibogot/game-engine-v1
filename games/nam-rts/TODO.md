@@ -129,7 +129,17 @@ Keep this file current: tick things off here, add new asks here.
       "NO SMOKING WITHIN 50 FT" on fuel dumps, sandbagged "LZ" letters on a pad
 - [ ] **A small lake** somewhere on nam-valley: sculpt a hollow + the lake mode's
       water at the right height (your lake mode; I can also do it from code)
-- [ ] **Requisition points**: map points you CAPTURE (not build) — a big
+- [x] **Requisition points** (`requisition.js`, `requisitionRenderer.js`, test `namRequisitionTest`): DONE —
+      7 relay masts (26 m lattice towers, guys, hut, flagpole); INFANTRY in the
+      16 m zone capture in 12 s (faster with more men, capped at 4), contested =
+      frozen, held until pulled back to neutral; +96 supplies/min per point;
+      the flag CLIMBS the pole (US / NLF), violet M18 on your capture; zone ring
+      in the owner's colour; minimap diamonds with a capture arc; HUD strip
+      "2/7 points +192/min". Harvesting off (`?econ=harvest` brings it back).
+      NEXT: choose the SITES (they reuse the old node fan: A sits behind the HQ
+      on the terrace, G on the beach at the map edge) — author them in the
+      editor or pick hills/crossroads; the enemy AI does not go for points yet
+- [ ] (was) **Requisition points**: map points you CAPTURE (not build) — a big
       antenna mast on each, and the **violet M18 smoke** when the point is taken
       (the violet smoke kind already exists). Note: today's economy is
       harvester nodes + a buildable "Supply Relay"; capture points change that
