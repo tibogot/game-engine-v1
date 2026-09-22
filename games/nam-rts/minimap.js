@@ -1,7 +1,8 @@
-// RTS minimap — GAME UI (player-facing). Bottom-left panel, adapted from the
-// rts-chibs minimap to the v3 engine handle.
+// RTS minimap — GAME UI (player-facing). The HUD bar's left slot (hudBar.js),
+// adapted from the rts-chibs minimap to the v3 engine handle.
 //
-//   • Hidden until the player builds a Radio Station (CoH intel gate).
+//   • Locked until the player builds a Radio Station (CoH intel gate): the
+//     slot shows a dead screen stamped NO RADIO, not a line of floating text.
 //   • Bakes the terrain once (height shading + slope for cliffs + water tint).
 //   • FoW shroud overlay when fog of war is active.
 //   • Each frame draws unit blips and the camera's ground footprint rectangle.
@@ -9,7 +10,7 @@
 import * as THREE from "three";
 
 const BAKE_RES = 160;
-const VIEW_PX  = 210;
+const VIEW_PX  = 160;   // fills the HUD bar's left slot
 
 const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const _ray = new THREE.Raycaster();
@@ -76,7 +77,7 @@ function bakeTerrain(app) {
   return canvas;
 }
 
-export function createMinimap({ app, units, buildings = null, structures = null, fogOfWar = null }) {
+export function createMinimap({ app, units, buildings = null, structures = null, fogOfWar = null, mount = document.body }) {
   const map = app.worldSize ?? 1000;
   let terrain = bakeTerrain(app);
 
@@ -85,34 +86,18 @@ export function createMinimap({ app, units, buildings = null, structures = null,
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = VIEW_PX;
   root.appendChild(canvas);
-  document.body.appendChild(root);
-
-  const hint = document.createElement("div");
-  hint.id = "rts-minimap-hint";
-  hint.textContent = "Build a Radio Station for tactical map intel";
-  document.body.appendChild(hint);
+  mount.appendChild(root);
 
   const ctx = canvas.getContext("2d");
 
   const style = document.createElement("style");
   style.textContent = `
-    #rts-minimap {
-      position: fixed; left: 12px; bottom: 12px; z-index: 55;
-      width: ${VIEW_PX}px; height: ${VIEW_PX}px; padding: 6px;
-      background: rgba(16,18,22,0.72); border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 10px; backdrop-filter: blur(6px);
-      display: none;
+    #rts-minimap { width: 100%; height: 100%; }
+    #rts-minimap canvas {
+      width: 100%; height: 100%; display: block; cursor: crosshair;
+      border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius);
     }
-    #rts-minimap.show { display: block; }
-    #rts-minimap canvas { width: 100%; height: 100%; border-radius: 6px; cursor: crosshair; display: block; }
-    #rts-minimap-hint {
-      position: fixed; left: 12px; bottom: 12px; z-index: 54;
-      padding: 8px 12px; max-width: ${VIEW_PX}px;
-      font: 11px/1.35 system-ui, sans-serif; color: #9aa4b2;
-      background: rgba(16,18,22,0.55); border: 1px dashed rgba(255,255,255,0.12);
-      border-radius: 8px;
-    }
-    #rts-minimap-hint.hide { display: none; }
+    #rts-minimap.locked canvas { cursor: default; }
   `;
   document.head.appendChild(style);
 
@@ -125,7 +110,7 @@ export function createMinimap({ app, units, buildings = null, structures = null,
     const wz = (0.5 - (ev.clientY - rect.top) / rect.height) * map;
     app.rtsCamera?.focusOn?.(wx, wz);
   };
-  const onDown = (e) => { dragging = true; jump(e); e.preventDefault(); };
+  const onDown = (e) => { if (!hasRadioIntel()) return; dragging = true; jump(e); e.preventDefault(); };
   const onMove = (e) => { if (dragging) jump(e); };
   const onUp = () => { dragging = false; };
   canvas.addEventListener("pointerdown", onDown);
@@ -193,13 +178,40 @@ export function createMinimap({ app, units, buildings = null, structures = null,
     ctx.stroke();
   }
 
+  /**
+   * No radio, no map: a dead screen — faint static, scan lines and a stencil
+   * stamp. Redrawn a few times a second so the static lives, not every frame.
+   */
+  let lockT = 0;
+  function drawLocked() {
+    const now = performance.now();
+    if (now - lockT < 180) return;
+    lockT = now;
+    ctx.fillStyle = "#15170f";
+    ctx.fillRect(0, 0, VIEW_PX, VIEW_PX);
+    for (let i = 0; i < 420; i++) {
+      const v = 30 + Math.random() * 40;
+      ctx.fillStyle = `rgb(${v},${v + 4},${v - 6})`;
+      ctx.fillRect(Math.random() * VIEW_PX, Math.random() * VIEW_PX, 1 + Math.random() * 2, 1);
+    }
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    for (let y = 0; y < VIEW_PX; y += 3) ctx.fillRect(0, y, VIEW_PX, 1);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#8d8a78";
+    ctx.font = "bold 15px 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText("NO  RADIO", VIEW_PX / 2, VIEW_PX / 2 - 8);
+    ctx.font = "9px 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = "#6b6a5c";
+    ctx.fillText("BUILD A RADIO STATION", VIEW_PX / 2, VIEW_PX / 2 + 12);
+  }
+
   function draw() {
     const intel = hasRadioIntel();
-    root.classList.toggle("show", intel);
-    hint.classList.toggle("hide", intel);
+    root.classList.toggle("locked", !intel);
+    if (!intel) { drawLocked(); return; }
+    lockT = 0;
 
     ctx.clearRect(0, 0, VIEW_PX, VIEW_PX);
-    if (!intel) return;
 
     ctx.drawImage(terrain, 0, 0, VIEW_PX, VIEW_PX);
 
@@ -260,7 +272,7 @@ export function createMinimap({ app, units, buildings = null, structures = null,
       canvas.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      root.remove(); hint.remove(); style.remove();
+      root.remove(); style.remove();
     },
   };
 }

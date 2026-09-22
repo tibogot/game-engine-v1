@@ -1,9 +1,8 @@
-// Command card — GAME UI (player-facing), bottom-right.
+// Command card — GAME UI (player-facing), the HUD bar's right slot (hudBar.js).
 //
 // Two faces:
 //   • UNITS selected    → portrait, name, count, Stop / Focus.
 //   • The BASE selected → production: build buttons + queue + progress bar.
-import { DEV_PANEL_OPEN_W } from "./devPanel.js";
 
 export function createCommandCard({
   thumbnails,
@@ -18,71 +17,60 @@ export function createCommandCard({
   abilitiesFor = () => [],     // (selected) → [{ key, label, hint, cost, ready, cooldown }]
   onAbility = () => {},        // (key, selected) — enter targeting
   stanceFor = () => null,      // (selected) → { concealment, cover } | null
+  mount = document.body,
 }) {
   const root = document.createElement("div");
   root.id = "rts-cmd-card";
-  document.body.appendChild(root);
+  mount.appendChild(root);
 
   const style = document.createElement("style");
   style.textContent = `
-    #rts-cmd-card {
-      position: fixed; right: ${DEV_PANEL_OPEN_W + 12}px; bottom: 12px; z-index: 55; width: 232px;
-      display: none; flex-direction: column; gap: 8px; padding: 10px;
-      background: rgba(16,18,22,0.72); border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 10px; backdrop-filter: blur(6px);
-      font-family: system-ui, -apple-system, sans-serif; color: #e8e8e8;
-    }
-    #rts-cmd-card.show { display: flex; }
+    #rts-cmd-card { height: 100%; display: flex; flex-direction: column; gap: 7px; font-family: var(--hud-sans); color: var(--hud-text); }
     #rts-cmd-card .cc-head { display: flex; gap: 10px; align-items: center; }
     #rts-cmd-card .cc-portrait {
-      width: 64px; height: 64px; border-radius: 8px; flex: none;
-      background: #11151c center/90% no-repeat; border: 1px solid rgba(255,255,255,0.14);
+      width: 44px; height: 44px; flex: none;
+      background: #1b1e17 center/90% no-repeat; border: 1px solid #454c3a; border-radius: var(--hud-radius);
     }
-    #rts-cmd-card .cc-name { font-weight: 700; font-size: 14px; }
-    #rts-cmd-card .cc-sub { font-size: 12px; color: #9aa4b2; }
-    #rts-cmd-card .cc-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    #rts-cmd-card .cc-name { font-weight: 600; font-size: 13px; letter-spacing: 0.03em; }
+    #rts-cmd-card .cc-sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hud-dim); margin-top: 2px; }
+    #rts-cmd-card .cc-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
     #rts-cmd-card button {
-      cursor: pointer; font: 12px system-ui, sans-serif; color: #e8e8e8;
-      padding: 7px 0; border-radius: 6px; background: #23303f; border: 1px solid rgba(255,255,255,0.14);
+      cursor: pointer; font: 11px var(--hud-sans); color: var(--hud-text); line-height: 1.15;
+      padding: 5px 3px; border-radius: var(--hud-radius); background: #252920; border: 1px solid #454c3a;
     }
-    #rts-cmd-card button:hover { background: #2d3f52; border-color: #6ab0ff; }
+    #rts-cmd-card button:hover { background: #2d3226; border-color: var(--hud-brass); }
     #rts-cmd-card button .cc-cost {
-      display: block; font-size: 10px; color: #f0c86a; font-weight: 600; margin-top: 2px;
+      font: 600 10px var(--hud-mono); color: var(--hud-brass); margin-left: 5px;   /* one line: the slot is 152 px tall */
     }
     /* Can't afford it — still clickable (the click just no-ops), but clearly dead. */
-    #rts-cmd-card button.poor { opacity: 0.45; border-color: rgba(255,255,255,0.08); }
-    #rts-cmd-card button.poor:hover { background: #23303f; border-color: rgba(255,255,255,0.08); }
-    #rts-cmd-card button.poor .cc-cost { color: #e4483a; }
-    #rts-cmd-card .cc-bar {
-      height: 6px; border-radius: 3px; background: #11151c; overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.12);
-    }
-    #rts-cmd-card .cc-bar i { display: block; height: 100%; width: 0%; background: #2a6df0; }
-    #rts-cmd-card .cc-queue { display: flex; gap: 4px; flex-wrap: wrap; min-height: 18px; }
+    #rts-cmd-card button.poor { opacity: 0.45; }
+    #rts-cmd-card button.poor:hover { background: #252920; border-color: #454c3a; }
+    #rts-cmd-card button.poor .cc-cost { color: var(--hud-red); }
+    #rts-cmd-card .cc-bar { height: 4px; background: #23261d; border: 1px solid #3a4031; overflow: hidden; }
+    #rts-cmd-card .cc-bar i { display: block; height: 100%; width: 0%; background: var(--hud-brass); }
+    #rts-cmd-card .cc-queue { display: flex; gap: 4px; flex-wrap: wrap; min-height: 16px; }
     /* Abilities read differently from production: they are VERBS, not purchases,
        so they get their own colour and sit above Stop/Focus where a player's
        eye lands first. */
-    #rts-cmd-card .cc-abil button { background: #3a2d1c; border-color: rgba(240,200,106,0.35); }
-    #rts-cmd-card .cc-abil button:hover { background: #4a3a24; border-color: #f0c86a; }
-    #rts-cmd-card .cc-abil button.cooling {
-      background: #1b2430; border-color: rgba(255,255,255,0.08); color: #7b8492; cursor: default;
-    }
-    #rts-cmd-card .cc-abil button.cooling:hover { background: #1b2430; border-color: rgba(255,255,255,0.08); }
-    #rts-cmd-card .cc-abil .cc-cd { display: block; font-size: 10px; color: #9aa4b2; margin-top: 2px; }
+    #rts-cmd-card .cc-abil button { background: #33301c; border-color: rgba(201,165,74,0.45); }
+    #rts-cmd-card .cc-abil button:hover { background: #3e3a22; border-color: var(--hud-brass); }
+    #rts-cmd-card .cc-abil button.cooling { background: #1d2019; border-color: #33382b; color: #6f6d60; cursor: default; }
+    #rts-cmd-card .cc-abil button.cooling:hover { background: #1d2019; border-color: #33382b; }
+    #rts-cmd-card .cc-abil .cc-cd { font: 10px var(--hud-mono); color: var(--hud-dim); margin-left: 5px; }
     /* Cover and concealment are RULES the player cannot see on the terrain.
        Two chips are the whole readout: without them a unit that has stopped
        shooting looks broken rather than outplayed. */
-    #rts-cmd-card .cc-stance { display: flex; gap: 5px; min-height: 17px; }
+    #rts-cmd-card .cc-stance { display: flex; gap: 5px; min-height: 16px; }
     #rts-cmd-card .cc-tag {
-      font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
-      padding: 2px 7px; border-radius: 4px; border: 1px solid;
+      font-size: 9px; font-weight: 600; letter-spacing: 0.1em;
+      padding: 2px 6px; border-radius: var(--hud-radius); border: 1px solid;
     }
-    #rts-cmd-card .cc-tag.conceal { color: #7fd99a; border-color: rgba(127,217,154,0.4); background: rgba(46,94,62,0.35); }
-    #rts-cmd-card .cc-tag.cover   { color: #9cc4f0; border-color: rgba(156,196,240,0.4); background: rgba(40,66,99,0.35); }
-    #rts-cmd-card .cc-tag.seen    { color: #eaa04a; border-color: rgba(234,160,74,0.4); background: rgba(94,62,25,0.35); }
+    #rts-cmd-card .cc-tag.conceal { color: #9fcf7a; border-color: rgba(159,207,122,0.4); background: rgba(52,74,38,0.4); }
+    #rts-cmd-card .cc-tag.cover   { color: #c9b98a; border-color: rgba(201,185,138,0.4); background: rgba(74,66,42,0.4); }
+    #rts-cmd-card .cc-tag.seen    { color: #e0905a; border-color: rgba(224,144,90,0.45); background: rgba(94,52,25,0.4); }
     #rts-cmd-card .cc-chip {
-      font-size: 10px; padding: 2px 6px; border-radius: 4px;
-      background: #1b2430; border: 1px solid rgba(255,255,255,0.12); color: #c3ccd6;
+      font-size: 10px; padding: 1px 5px; border-radius: var(--hud-radius);
+      background: #1d2019; border: 1px solid #3a4031; color: var(--hud-dim);
     }
   `;
   document.head.appendChild(style);
@@ -267,7 +255,7 @@ export function createCommandCard({
 
   function render(selected) {
     selRef = selected;
-    if (!selected.length) { root.classList.remove("show"); baseRef = null; return; }
+    if (!selected.length) { baseRef = null; root.innerHTML = `<div class="empty">No orders</div>`; return; }
     // A selected PRODUCING structure (base or a finished building) shows its queue.
     const producer = selected.find((e) => e.isStructure && e.enqueue);
     const mobile = selected.filter((e) => !e.isStructure);
@@ -275,7 +263,6 @@ export function createCommandCard({
     else if (mobile.length) { renderUnits(mobile); refreshStance(); }
     // Nothing mobile and nothing producing — a lone turret or other silent structure.
     else renderStructure(selected[0]);
-    root.classList.add("show");
   }
 
   /** Called each frame — keeps the production bar/queue/affordability live. */
@@ -292,6 +279,8 @@ export function createCommandCard({
       if (queue.innerHTML !== chips) queue.innerHTML = chips;
     }
   }
+
+  render([]);
 
   return {
     root,

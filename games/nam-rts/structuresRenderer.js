@@ -406,6 +406,15 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
 
       if (s.typeKey === "enemyBase" && !showEnemyHq) continue;
 
+      // Selected: brackets round a building with a declared footprint (the HQ's
+      // pad), a ring round the rest (turrets). Enemy red.
+      if (s.selected) {
+        const tint = s.team === "enemy" ? 0xff6a5a : undefined;
+        const pad = s.type.pad;
+        if (pad) app.selectionFrames?.add(s.position.x + (pad.dx ?? 0), s.position.z + (pad.dz ?? 0), pad.halfX, pad.halfZ, 0, tint);
+        else app.selectionRings?.add(s.position.x, s.position.z, (s.radius ?? 4) + 1.5, tint);
+      }
+
       // Health bar — one instance in the shared field (see healthBar.js).
       healthBars.add(
         s.position.x, s.position.y + (s.type.barY ?? 10), s.position.z,

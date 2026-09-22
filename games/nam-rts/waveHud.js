@@ -1,17 +1,14 @@
-// Wave + match HUD — player-facing. Top-centre: wave counter when waves are on,
-// match objective when a symmetric HQ match is active, and win/lose banners.
+// Wave + match HUD. The wave STATUS (wave n · enemies · next wave) is a debug
+// readout now and lives in the dev panel's Enemy Waves section (#dv-wave-status)
+// — waves are a later mode, and the top of the screen stays clear. The
+// player-facing parts stay: the "Wave n incoming" banner and the win/lose screen.
 const CSS = `
 #wave-hud {
-  position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-  z-index: 50; pointer-events: none;
-  display: flex; align-items: center; gap: 14px;
-  padding: 7px 16px; border-radius: 999px;
-  background: rgba(12,16,20,0.82); border: 1px solid #2a343c;
-  color: #dfe6ea; font: 13px/1 system-ui, sans-serif;
-  font-variant-numeric: tabular-nums;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px;
+  font: 11px/1.3 system-ui, sans-serif; font-variant-numeric: tabular-nums; color: #cfd8de;
 }
 #wave-hud .w { font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8fb8d8; }
-#wave-hud .sep { width: 1px; height: 16px; background: #2f3b45; }
+#wave-hud .sep { width: 1px; height: 11px; background: #3a4450; }
 #wave-hud .enemies { color: #ff8a7a; font-weight: 600; }
 #wave-hud .enemies.none { color: #6f7c86; font-weight: 400; }
 #wave-hud .next { color: #cfd8de; }
@@ -56,7 +53,10 @@ export function createWaveHud() {
     <span class="sep"></span>
     <span class="next" id="wave-next">first wave in <b>—</b></span>
   `;
+  // Parked until the dev panel exists (it is built after this), then moved in.
+  hud.style.display = "none";
   document.body.appendChild(hud);
+  let docked = false;
 
   const banner = document.createElement("div");
   banner.id = "wave-banner";
@@ -86,6 +86,10 @@ export function createWaveHud() {
   return {
     /** Called every frame with live wave + match state. */
     update(dt, waves, match = null) {
+      if (!docked) {
+        const slot = document.getElementById("dv-wave-status");
+        if (slot) { slot.appendChild(hud); hud.style.display = ""; docked = true; }
+      }
       const matchOn = !!match?.enabled;
       const spawning = !!match?.spawning;
       if (last.obj !== matchOn) {

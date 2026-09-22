@@ -156,7 +156,8 @@ export function createDevPanel({
             </div>
           </div>
           <button class="action-btn" id="dv-wave-now" type="button">Spawn wave now</button>
-          <div class="dv-hint">Off by default. Turn on for timed attacks, or spawn one manually.</div>
+          <div id="dv-wave-status"></div>
+          <div class="dv-hint">Off by default. Turn on for timed attacks, or spawn one manually. The status line is what used to sit at the top of the screen.</div>
         </div>
       </div>
 
@@ -670,6 +671,8 @@ export function createDevPanel({
   const collapseBtn = $(".dv-collapse");
   const setCollapsed = (collapsed) => {
     root.classList.toggle("collapsed", collapsed);
+    // The HUD bar ends where this panel begins (hudBar.js reads it).
+    document.documentElement.style.setProperty("--rts-dev-w", collapsed ? "0px" : `${DEV_PANEL_OPEN_W}px`);
     collapseBtn.innerHTML = collapsed
       ? '<i data-lucide="panel-right-open"></i> Dev'
       : '<i data-lucide="panel-right-close"></i>';

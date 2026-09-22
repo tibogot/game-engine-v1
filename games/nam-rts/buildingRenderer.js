@@ -171,8 +171,21 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
     return e * Math.PI * 2;
   }
 
+  /**
+   * Selected: round buildings (helipad, turret, supply relay) get a ring, the
+   * square one (radio station) corner brackets. Enemy red.
+   */
+  const SQUARE = new Set(["radio"]);
+  function markSelected(b) {
+    if (!b.selected || !b.alive) return;
+    const tint = b.team === "enemy" ? 0xff6a5a : undefined;
+    if (SQUARE.has(b.typeKey)) app.selectionFrames?.add(b.position.x, b.position.z, b.radius * 0.75, b.radius * 0.75, 0, tint);
+    else app.selectionRings?.add(b.position.x, b.position.z, b.radius + 1, tint);
+  }
+
   /** One instance in the shared health-bar field. Rides the rise so it never floats. */
   function addBar(b, y, camera) {
+    markSelected(b);
     if (!healthBars || !camera) return;
     healthBars.add(
       b.position.x, b.position.y + y + (b.type.barY ?? 8), b.position.z,

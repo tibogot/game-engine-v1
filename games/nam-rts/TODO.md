@@ -44,13 +44,17 @@ Keep this file current: tick things off here, add new asks here.
 
 ## UI (your ask, 2026-09-22) — **you** are gathering references (YouTube)
 
-- [ ] **Small radii only** — no pill shapes / big rounded panels
-- [ ] **Wave pill** (top centre) → dev panel only; waves are a later mode
-- [ ] **Supplies pill** (top) → into the new bottom HUD
-- [ ] **One bottom HUD bar**: minimap left · selection centre · command card
-      right · resources in the bar (today these are 4 separate floating boxes)
-- [ ] The "Build a Radio Station for tactical map intel" text (bottom left) is
-      the minimap's locked state — needs a proper locked minimap design
+- [x] **Small radii only** (2 px), field-equipment look (`hudBar.js` tokens)
+- [x] **Wave pill** → dev panel (Enemy Waves); banner + win/lose stay on screen
+- [x] **Supplies** → the HUD bar's status strip
+- [x] **HUD in two corner blocks** (`hudBar.js`, Company of Heroes style — the
+      full-width bar was too much): minimap bottom-left; bottom-right block =
+      supplies strip on top, selection (one unit or building: portrait/monogram
+      + health; several: tiles by type) + command card
+- [x] Locked minimap: a NO RADIO static screen in its own slot
+- [ ] **Your references** from other RTS games → next pass on the HUD's look
+- [ ] Edge scroll: the corner blocks cover the bottom edge under them (the
+      camera only scrolls over the canvas) — middle of the edge still scrolls
 - [x] **Loading screen**: `nam-cover.webp` full screen (100svh, object-fit: cover), the
       `namlogowebp.webp` logo over the lit sky, a real progress bar (level download in bytes via the level loader's
       new `onProgress`; other stages scaled by this machine's timings from the
@@ -71,6 +75,49 @@ Keep this file current: tick things off here, add new asks here.
 - [ ] Monsoon rain showers passing over (world rain exists in modular-road)
 - [ ] Fireflies at dusk/night (editor Ambient FX mode has them — check they
       read at RTS distance first; butterflies/pollen won't)
+
+## Your asks, 2026-09-22 (evening)
+
+- [x] **Selected buildings show it** (`selectionFrameField.js`): corner
+      brackets on square buildings (HQ on its pad, radio station), rings on
+      round ones (helipad, turrets, supply relay); enemy buildings in red
+- [ ] **Base decoration placed from the start** — most of the kit pieces we
+      built stand in the camp already (not only on `?showcase=1`)
+- [ ] **Builder-built buildings rebuilt on the new kit**: what the builder
+      raises (helipad, turret, radio, supply relay…) still looks like the old
+      game — radio station = the old GLB; others procedural, at our standard;
+      some kit pieces become buildable
+- [ ] Then **fill the jungle** (village, debris, paddies… — Map & look below)
+- [ ] **Placed-building system** (the foundation for the three above): one path
+      for decoration AND builder buildings — kit geometry + footprint → flat pad,
+      nav collision on the real footprint, cover, grass cleared, selection
+      marker. Today the showcase and the builder each do half
+- [ ] **Builder buildings, my proposal** (you trust me on gameplay): helipad =
+      PSP matting + painted H + windsock + sandbag revetments · turret = sandbagged
+      M60 gun pit (or the guard tower) · radio = the old GLB · supply relay =
+      supply dump (crates, drums, tarp). New ones only if they have a JOB:
+      guard tower (sees further), medic tent (heals nearby), sandbag wall (cover
+      you build), bunker (hard cover)
+
+## Your asks, 2026-09-22 (night)
+
+- [ ] **US Army star in a circle** as a marking on buildings and billboards
+      (the stencil sheet already has the `star` cell — place it). Other
+      markings worth having: unit patches (1st Cav horse-head shield, 25th
+      Tropic Lightning, 173rd), hazard stripes on barriers/generators, "DANGER
+      HIGH VOLTAGE" on the generator, vehicle/tent numbers ("HQ-7", "A-12"),
+      "NO SMOKING WITHIN 50 FT" on fuel dumps, sandbagged "LZ" letters on a pad
+- [ ] **A small lake** somewhere on nam-valley: sculpt a hollow + the lake mode's
+      water at the right height (your lake mode; I can also do it from code)
+- [ ] **Requisition points**: map points you CAPTURE (not build) — a big
+      antenna mast on each, and the **violet M18 smoke** when the point is taken
+      (the violet smoke kind already exists). Note: today's economy is
+      harvester nodes + a buildable "Supply Relay"; capture points change that
+      design — **DECIDED: replace harvesting with requisition points**
+      (harvesting can survive as an optional mode)
+- [ ] **Supply drops (later)**: a plane (C-130 / C-123 Provider) flies over and
+      drops crates on parachutes to your units — resupply as an event or an
+      ability, like the real war
 
 ## Props → a real part of the game
 

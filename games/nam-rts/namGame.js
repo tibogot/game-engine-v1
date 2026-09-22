@@ -76,9 +76,11 @@ import { createStructures } from "./structures.js";
 import { createStructuresRenderer } from "./structuresRenderer.js";
 import { createHealthBarField } from "./healthBar.js";
 import { createSelectionRingField } from "./selectionRingField.js";
+import { createSelectionFrameField } from "./selectionFrameField.js";
 import { createResources, UNIT_COST, BUILDING_COST } from "./resources.js";
 import { createResourceRenderer } from "./resourceRenderer.js";
 import { createResourceHud } from "./resourceHud.js";
+import { createHudBar } from "./hudBar.js";
 import { createHarvesting } from "./harvesting.js";
 import { createWaves } from "./waves.js";
 import { createMatch } from "./match.js";
@@ -356,6 +358,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // costs 1 draw call and no CPU height sampling at all.
   const selectionRings = createSelectionRingField({ app });
   app.selectionRings = selectionRings;
+  // Square buildings get corner brackets instead (selectionFrameField.js).
+  const selectionFrames = createSelectionFrameField({ app });
+  app.selectionFrames = selectionFrames;
 
   // The economy. Created BEFORE structures so the base can charge for production,
   // but its nodes are placed after — node siting flattens terrain too, and doing
@@ -480,7 +485,12 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const harvesting = createHarvesting({ units, structures, resources });
   app.harvesting = harvesting;
 
-  const resourceHud = createResourceHud();
+  // ONE bottom HUD bar: status strip (supplies), minimap · selection · command
+  // card. The modules below render into its slots; see hudBar.js.
+  const hud = createHudBar();
+  app.hud = hud;
+
+  const resourceHud = createResourceHud({ mount: hud.strip });
   app.resourceHud = resourceHud;
 
   // Combat: units fire VISIBLE rockets with exhaust trails; damage lands on
@@ -584,6 +594,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       app.selection?.select(units.list.filter(
         (u) => u.alive && u.team === "player" && u.typeKey === key,
       )),
+    mount: hud.centre,
   });
   app.unitBar = unitBar;
 
@@ -670,6 +681,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       const cz = sel.reduce((s, u) => s + u.position.z, 0) / sel.length;
       rtsCamera.focusOn(cx, cz);
     },
+    mount: hud.right,
   });
   app.commandCard = commandCard;
 
@@ -678,7 +690,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     resourceRenderer, harvesting, // right-click a node → send harvesters to it
     // The unit bar shows units only; buildings live in the command card.
     onChange: (sel) => {
-      unitBar.render(sel.filter((e) => !e.isStructure));
+      // Units if any; otherwise the selected building, so the centre is never
+      // blank while something is selected.
+      const mobile = sel.filter((e) => !e.isStructure);
+      unitBar.render(mobile.length ? mobile : sel.slice(0, 1));
       commandCard.render(sel);
     },
   });
@@ -686,7 +701,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
 
   // Player-facing HUD: minimap (bottom-left). Baked terrain + unit blips +
   // camera viewport; click/drag to move the camera.
-  const minimap = createMinimap({ app, units, buildings, structures, fogOfWar });
+  const minimap = createMinimap({ app, units, buildings, structures, fogOfWar, mount: hud.left });
   app.minimap = minimap;
 
   const syncNavObstacles = () => {
@@ -831,11 +846,13 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     resourceRenderer.sync();              // only rewrites when a node visibly drains
     healthBars.begin();                   // both renderers push their bars into it
     selectionRings.begin();               // unitRenderer pushes a ring per selected unit
+    selectionFrames.begin();              // square buildings push corner brackets
     unitRenderer.sync(dt, app.camera);
     structuresRenderer.sync(dt, app.camera);
     buildingRenderer.sync(dt, app.camera);
     healthBars.commit();
     selectionRings.commit();
+    selectionFrames.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
     smoke.render(renderTime, app.environment?.getLightDirection?.());
     // Point the overlay at the selection until the pointer has moved, so
@@ -849,6 +866,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     coverOverlay.update(dt);              // hold V — decides nothing, only draws
     baseFlag?.update(dt);                 // HQ flag cloth sim
     commandCard.tick();                   // live production bar + affordability
+    unitBar.tick();                       // a single selected unit's health
     resourceHud.update(resources, units); // supplies / harvesters / nodes left
     waveHud.update(dt, waves, match);     // wave counter, match objective, win/lose
     minimap.draw();
