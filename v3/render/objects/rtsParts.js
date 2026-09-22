@@ -44,6 +44,9 @@ export const MAT = {
   // Vehicles: tyres were drawn in the rusty corrugated iron (the only metal),
   // and read as rust. Rubber for tyres, clean dark steel for tracks and guns.
   steel: 12, rubber: 13,
+  // The enemy's French colonial HQ: ochre limewashed stucco, terracotta tile.
+  // The atlas is full at 16.
+  stucco: 14, tile: 15,
 };
 
 /** Strip anything merge would choke on, and guarantee the attribute set. */

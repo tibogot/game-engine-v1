@@ -19,10 +19,12 @@ import {
   GUN_PIT_HEAD_Y, GUN_PIT_MUZZLE, NEST_HEAD_Y, NEST_MUZZLE, buildNestBody, buildNestGun,
 } from "../../v3/render/objects/rtsBuildables.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
+import { buildColonialHQ } from "../../v3/render/objects/rtsColonial.js";
+import { buildTunnelEntrance } from "../../v3/render/objects/rtsEnemyKit.js";
+import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
 const MAX_PER_KIND = 64; // instance capacity per structure kind
 
-const C_BODY = 0x5a6472;
 const C_DARK = 0x333a45;
 const C_ENEMY = 0x6e4a4a;
 const C_MARK = 0xff6a3a;
@@ -75,86 +77,6 @@ function mergePainted(parts, name) {
 }
 
 // ── The rigid geometry of each kind, built once ──────────────────────────────
-
-const C_DOOR = 0x455066;   // hangar door
-const C_ROOF = 0x2a313b;   // roof / caps
-
-const BASE_PALETTE = {
-  player: { body: C_BODY, dark: C_DARK, door: C_DOOR, roof: C_ROOF, beacon: 0x64d2ff, strips: 0x64d2ff },
-  enemy: { body: 0x5a4048, dark: 0x3a2830, door: 0x4a3848, roof: 0x2a2028, beacon: 0xff6a3a, strips: 0xff6a3a },
-};
-
-// Base hangar dimensions (origin at ground centre; +Z faces the enemy/rally).
-const B_WX = 24, B_DZ = 16, B_HY = 13;  // hangar width / depth / height
-const B_OW = 11, B_OH = 6.5;            // door opening width / height
-const DOOR_CLOSED_Y = B_OH / 2;         // door centre when shut
-const DOOR_TRAVEL = B_OH + 0.4;         // slides up out of the opening
-
-/**
- * Player HQ — a hangar with a sliding front door, a control tower, and the
- * beacon. The static SHELL is merged into one mesh (one draw, one shadow caster);
- * only the door and the emissive parts (beacon, door-frame strips) are separate,
- * because they move / glow. The door faces +Z so produced units drive straight
- * out toward the rally point.
- */
-function buildBaseView(structureMat, bloom, paletteKey = "player") {
-  const pal = BASE_PALETTE[paletteKey] ?? BASE_PALETTE.player;
-  const group = new THREE.Group();
-
-  // ── Static shell (merged) ───────────────────────────────────────────────────
-  const shell = [];
-  const add = (geo, hex) => shell.push(paint(geo, hex));
-
-  // Foundation apron under the building.
-  add(new THREE.CylinderGeometry(16, 17, 1.2, 28).translate(0, 0.6, 0), pal.dark);
-
-  const cy = B_HY / 2;
-  // Back + side walls.
-  add(new THREE.BoxGeometry(B_WX, B_HY, 1.2).translate(0, cy, -B_DZ / 2), pal.body);
-  add(new THREE.BoxGeometry(1.2, B_HY, B_DZ).translate(-B_WX / 2, cy, 0), pal.body);
-  add(new THREE.BoxGeometry(1.2, B_HY, B_DZ).translate(B_WX / 2, cy, 0), pal.body);
-  // Front face = two pillars either side of the door + a header above it.
-  const pillarW = (B_WX - B_OW) / 2;
-  const pillarX = B_OW / 2 + pillarW / 2;
-  add(new THREE.BoxGeometry(pillarW, B_HY, 1.2).translate(-pillarX, cy, B_DZ / 2), pal.body);
-  add(new THREE.BoxGeometry(pillarW, B_HY, 1.2).translate(pillarX, cy, B_DZ / 2), pal.body);
-  add(new THREE.BoxGeometry(B_WX, B_HY - B_OH, 1.2).translate(0, B_OH + (B_HY - B_OH) / 2, B_DZ / 2), pal.body);
-  add(new THREE.BoxGeometry(B_WX + 2, 1.0, B_DZ + 2).translate(0, B_HY + 0.5, 0), pal.roof);
-  add(new THREE.BoxGeometry(3, 1.4, 3).translate(-6, B_HY + 1.6, -3), pal.dark);
-  add(new THREE.BoxGeometry(3, 1.4, 3).translate(6, B_HY + 1.6, -3), pal.dark);
-  add(new THREE.BoxGeometry(5, 20, 5).translate(-9, 10, -5), pal.body);
-  add(new THREE.BoxGeometry(6, 1, 6).translate(-9, 20.5, -5), pal.roof);
-  add(new THREE.CylinderGeometry(0.35, 0.35, 4, 8).translate(-9, 22.5, -5), pal.dark);
-
-  const shellMesh = new THREE.Mesh(mergePainted(shell, "base"), structureMat);
-  shellMesh.castShadow = true;
-  shellMesh.receiveShadow = true;
-  group.add(shellMesh);
-
-  // ── Door (slides up) ────────────────────────────────────────────────────────
-  const door = new THREE.Mesh(
-    paint(new THREE.BoxGeometry(B_OW - 0.4, B_OH - 0.2, 0.6), pal.door),
-    structureMat,
-  );
-  door.position.set(0, DOOR_CLOSED_Y, B_DZ / 2 - 0.4); // recessed so the header hides it when up
-  door.castShadow = true;
-  door.receiveShadow = true;
-  group.add(door);
-
-  // ── Emissive (beacon + door-frame strips), no shadow ────────────────────────
-  const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.0, 14, 10), bloom(pal.beacon));
-  beacon.position.set(-9, 25, -5); // atop the tower mast
-  group.add(beacon);
-
-  // Two vertical light strips flanking the door — one mesh, pulse while producing.
-  const stripL = new THREE.BoxGeometry(0.4, B_OH, 0.4).translate(-(B_OW / 2 + 0.5), B_OH / 2, B_DZ / 2);
-  const stripR = new THREE.BoxGeometry(0.4, B_OH, 0.4).translate(B_OW / 2 + 0.5, B_OH / 2, B_DZ / 2);
-  const strips = new THREE.Mesh(mergeGeometries([stripL, stripR], false), bloom(pal.strips));
-  group.add(strips);
-
-  group.userData = { door, beacon, strips };
-  return group;
-}
 
 /** Unarmed practice target — bright so it's easy to spot near the base. */
 function dummyGeometry() {
@@ -216,7 +138,7 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     for (const s of structures.list) {
       if (!s.alive) continue;
       if (s.isBuilding) continue;      // runtime buildings have their own renderer
-      if (s.typeKey === "base" || s.typeKey === "enemyBase" || s.typeKey === "turret") continue;
+      if (s.typeKey === "base" || s.typeKey === "enemyBase" || s.typeKey === "turret" || s.typeKey === "tunnel") continue;
       const g = bodyGeoOf(s).clone();
       g.translate(s.position.x, s.position.y, s.position.z);
       parts.push(g);
@@ -255,7 +177,13 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     // and both hidden together under the fog of war.
     nest: makeKind(buildNestBody(), kitMat, { shadow: true }),
     head: makeKind(buildNestGun(), kitMat, { shadow: true }),
+    // The Front's tunnel entrances: one draw for all of them.
+    tunnel: makeKind(buildTunnelEntrance(), kitMat, { shadow: true }),
   };
+  const _spot = [];
+  /** A tunnel shows its bar only once found: one of yours near it, or it has been hit or picked. */
+  const spotted = (s) => s.selected || s.hp < s.maxHp
+    || (app.units?.near(s.position.x, s.position.z, 35, _spot) ?? []).some((u) => u.team === "player" && u.alive);
 
   const kindOfMesh = new Map(Object.values(kinds).map((k) => [k.im, k]));
 
@@ -276,9 +204,19 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     scene.add(baseView);
   }
 
-  const enemyBaseView = buildBaseView(structureMat, bloom, "enemy");
+  // The ENEMY'S HQ: the French colonial résidence the Front has taken over
+  // (v3/render/objects/rtsColonial.js), on the kit's atlas material, its
+  // banner and star on the stencil sheet. Built with its front toward -Z.
+  const enemyBaseView = new THREE.Group();
+  {
+    const geo = buildColonialHQ();
+    const body = new THREE.Mesh(geo, kitMat);
+    body.castShadow = body.receiveShadow = true;
+    enemyBaseView.add(body);
+    const st = stencilMesh(geo.userData.stencil);
+    if (st) enemyBaseView.add(st);
+  }
   enemyBaseView.visible = false;
-  enemyBaseView.rotation.y = Math.PI; // door toward the player (−Z)
   scene.add(enemyBaseView);
 
   let doorOpen = 0;
@@ -373,16 +311,10 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         const producing = (base.queue?.length ?? 0) > 0 || (base.progress ?? 0) > 0;
         doorOpen += ((producing ? 1 : 0) - doorOpen) * Math.min(1, dt * 4);
         const ud = baseView.userData;
-        if (ud.setDoor) {
-          ud.setDoor(doorOpen);
-          // Work lamps: steady when idle, pulsing while a unit is being built.
-          const s = producing ? 1.15 + 0.35 * Math.sin(_t2 * 6) : 0.85;
-          for (const l of ud.strips.children) l.scale.setScalar(s);
-        } else {
-          ud.door.position.y = DOOR_CLOSED_Y + doorOpen * DOOR_TRAVEL;
-          const s = producing ? 1.2 + 0.5 * Math.sin(_t2 * 6) : 0.7;
-          ud.strips.scale.set(s, 1, s);
-        }
+        ud.setDoor(doorOpen);
+        // Work lamps: steady when idle, pulsing while a unit is being built.
+        const s = producing ? 1.15 + 0.35 * Math.sin(_t2 * 6) : 0.85;
+        for (const l of ud.strips.children) l.scale.setScalar(s);
       }
     }
 
@@ -411,6 +343,13 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         push(kinds.nest, _m, s);
         headMatrix(s, _head);
         push(kinds.head, _head, s);
+      }
+
+      if (s.typeKey === "tunnel") {
+        if (fogOfWar?.enabled && !fogOfWar.canSeeEntity(s)) continue;
+        _m.makeTranslation(s.position.x, s.position.y, s.position.z);
+        push(kinds.tunnel, _m, s);
+        if (!spotted(s)) continue;
       }
 
       if (s.typeKey === "enemyBase" && !showEnemyHq) continue;

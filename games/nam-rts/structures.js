@@ -35,17 +35,23 @@ export const STRUCTURE_TYPES = {
     barWidth: 14,
     barY: 20,
   },
+  // The French colonial résidence the Front has taken over (rtsColonial.js):
+  // 21 x 14 m, front (arcade, steps) toward -Z. Nav blocks the building's own
+  // rectangle plus a man's clearance — no door lane: nobody drives in, the
+  // recruits come out of the front at doorOf (enemyAI.js), navRadius + 8 out.
   enemyBase: {
     typeKey: "enemyBase",
-    name: "Enemy Command Base",
+    name: "Front HQ (Résidence)",
     team: "enemy",
     maxHp: 3000,
     radius: 14,
-    navRadius: 24,
-    doorApproach: { halfWidth: 7, length: 32, dirX: 0, dirZ: -1 },
+    navRadius: 16,
+    footprint: { cx: 0, cz: -0.6, hx: 12.6, hz: 9.8 },
+    pad: { dz: -1.2, halfX: 13, halfZ: 11 },
+    frame: { dz: -0.6, halfX: 11.4, halfZ: 8.6 },
     range: 0,
     barWidth: 14,
-    barY: 20,
+    barY: 19,
   },
   turret: {
     typeKey: "turret",
@@ -59,6 +65,20 @@ export const STRUCTURE_TYPES = {
     canHitAir: true,
     barWidth: 6,
     barY: 4.5,
+  },
+  // A Cu Chi trapdoor (rtsEnemyKit.js): where the Front's men come up. Unarmed,
+  // low and in the jungle — concealment (cover.js) makes it hard to pick up —
+  // and not very tough once found: a squad with rifles closes it.
+  tunnel: {
+    typeKey: "tunnel",
+    name: "Tunnel Entrance",
+    team: "enemy",
+    maxHp: 350,
+    radius: 2.5,
+    footprint: { cx: 0, cz: 0, hx: 1.6, hz: 1.6 },
+    range: 0,
+    barWidth: 3,
+    barY: 3,
   },
   // Unarmed targets for close-range crater / combat tests — no need to cross the map.
   trainingDummy: {
@@ -85,6 +105,8 @@ function makeStructure(app, type, x, z) {
     passive: !!type.passive,
     isAir: false,
     isStructure: true,
+    // A declared rectangle blocks nav instead of a circle (navGrid.addStructureObstacle).
+    footprint: type.footprint ?? null,
     radius: type.radius,
     maxHp: type.maxHp,
     hp: type.maxHp,
@@ -259,7 +281,17 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
     updateProduction,
     /** Add a runtime structure (a player-built building) so combat/selection see it. */
     add(s) { list.push(s); },
+    /** Dig the Front's tunnel entrances at authored sites ({x, z}); returns those placed. */
+    async placeTunnels(sites) {
+      const out = [];
+      for (const t of sites) {
+        const s = await place(STRUCTURE_TYPES.tunnel, t.x, t.z, { searchRadius: 30, maxSpread: 3 });
+        if (s) out.push(s);
+      }
+      return out;
+    },
     get turrets() { return list.filter((s) => s.typeKey === "turret" && s.alive); },
+    get tunnels() { return list.filter((s) => s.typeKey === "tunnel" && s.alive); },
     /** Re-seat every structure on the current terrain (after loading a .v3proj). */
     async reanchorToTerrain(app) {
       for (const s of list) {

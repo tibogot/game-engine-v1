@@ -7,8 +7,9 @@
 // It thinks in SQUADS of men (`squadSize`), once a `tick` on the sim clock:
 //
 //   recruit   its own purse (requisition pays it for points it holds, and its
-//             HQ's trickle), one man every `recruitTime` s at the HQ door; a
-//             full squad goes out
+//             HQ's trickle), one man every `recruitTime` s, coming up at the
+//             most forward TUNNEL nobody of yours is watching (the HQ's door
+//             if there is none); a full squad goes out
 //   choose    each free squad scores every point — take a neutral one, relieve
 //             a threatened one of its own, attack one of yours IF it is strong
 //             enough for what it knows is there — and the nearest, least-claimed
@@ -21,7 +22,8 @@
 //             called back — or one jeep drives the whole garrison off the hill
 //   retreat   a squad worn down to `retreatAt` of its strength, or badly
 //             outnumbered, breaks off (holding fire, so combat cannot halt it
-//             to shoot), goes home and refills from the recruits
+//             to shoot), goes home — the nearest safe tunnel, or the HQ — and
+//             refills from recruits who come up right there
 //
 // WHAT IT KNOWS is what it could see: your units near a point count only if
 // one of its own men or buildings is within `seeRange` of them, and a sighting
@@ -134,6 +136,43 @@ export function createEnemyAI({
     squads.push(s);
     return s;
   }
+  // ── Tunnels: where the men come up ─────────────────────────────────────────
+  const tunnels = () => structures.tunnels ?? [];
+  /** A tunnel's mouth, on open ground a few metres off the shaft. */
+  const mouthOf = (t) => open(t.position.x, t.position.z - 4);
+  /** Nothing of yours seen within threatRadius of it. */
+  const safeAt = (p) => visiblePowerAt(p.x, p.z, params.threatRadius) === 0;
+  /**
+   * Where recruits come up: the safe tunnel nearest YOUR HQ — the most forward
+   * one — so a new squad starts at the front instead of a 400 m walk from the
+   * résidence. No tunnel, or all of them watched: the HQ's door.
+   */
+  function musterPoint() {
+    const target = structures.base?.position;
+    let best = null, bestD = Infinity;
+    for (const t of tunnels()) {
+      if (!safeAt(t.position)) continue;
+      const d = target ? dist(t.position, target) : 0;
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    if (best) return mouthOf(best);
+    const base = hq();
+    return base ? doorOf(base) : null;
+  }
+  /** Where a squad falls back to: the nearest safe tunnel if it beats the HQ. */
+  function homeFor(s) {
+    const c = centroid(s);
+    const base = hq();
+    let best = base ? doorOf(base) : c, bestD = base && c ? dist(c, best) : Infinity;
+    if (!c) return best;
+    for (const t of tunnels()) {
+      if (!safeAt(t.position)) continue;
+      const m = mouthOf(t), d = dist(c, m);
+      if (d < bestD) { bestD = d; best = m; }
+    }
+    return best;
+  }
+
   function recruit(dt) {
     const base = hq();
     if (!base) return;
@@ -144,14 +183,16 @@ export function createEnemyAI({
     const cost = UNIT_COST[unitKey] ?? 50;
     if (!purse.spend(cost)) return;
     recruitT = params.recruitTime;
-    const door = doorOf(base);
-    const u = spawnMan(door);
-    if (!u) return;
-    // A squad at home refitting takes the recruit first.
+    // A squad at home refitting takes the recruit first — and he comes up
+    // where it is waiting (its post IS a tunnel mouth or the HQ's door).
     const refit = squads.find((s) => s.state === "refit" && living(s).length < params.squadSize);
-    if (refit) { refit.members.push(u); u.squad = refit; u.orderTo(refit.post?.x ?? door.x, refit.post?.z ?? door.z); return; }
+    const at = refit?.post ?? musterPoint();
+    if (!at) return;
+    const u = spawnMan(at);
+    if (!u) return;
+    if (refit) { refit.members.push(u); u.squad = refit; u.orderTo(at.x, at.z); return; }
     forming.push(u);
-    u.orderTo(door.x + (rand() - 0.5) * 16, door.z - 6 - rand() * 10);
+    u.orderTo(at.x + (rand() - 0.5) * 16, at.z - 6 - rand() * 10);
     const ready = forming.filter((m) => m.alive);
     if (ready.length >= params.squadSize) {
       forming.length = 0;
@@ -412,9 +453,8 @@ export function createEnemyAI({
 
   // ── Driving each squad ─────────────────────────────────────────────────────
   function retreat(s, why) {
-    const base = hq();
+    const home = homeFor(s);
     setTask(s, "retreat");
-    const home = base ? doorOf(base) : centroid(s);
     const m = living(s);
     // Stop where they stand until the path comes: no targets, no chasing.
     for (const u of m) { u.target = null; u.attackTarget = null; u.stop?.(); }

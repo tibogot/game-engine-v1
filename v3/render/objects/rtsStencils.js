@@ -39,6 +39,11 @@ export const STENCILS = {
   bumperCode:   { x: 320, y: 832, w: 512, h: 96 },
   // A helicopter's tail number, black, for the fin.
   tailNumber:   { x: 320, y: 928, w: 384, h: 96 },
+  // The National Liberation Front's flag as a cloth banner (red over blue, the
+  // yellow star), opaque, for hanging off the enemy HQ's loggia.
+  nlfBanner:    { x: 832, y: 768, w: 192, h: 128 },
+  // The yellow star on a red disc, painted over the pediment's oculus.
+  nlfStar:      { x: 832, y: 896, w: 128, h: 128 },
 };
 for (const s of Object.values(STENCILS)) s.aspect = s.w / s.h;
 
@@ -119,6 +124,22 @@ function drawSheet() {
   }
   c = STENCILS.tailNumber; text("69-15078", c.x, c.y, c.w, c.h, "#1d1d1a", 70); wear(c.x, c.y, c.w, c.h, 60);
   c = STENCILS.bumperCode; text("11 ACR   A-13", c.x, c.y, c.w, c.h, "#e9e6dc", 64); wear(c.x, c.y, c.w, c.h, 140);
+  const star5 = (cx, cy, R, col) => {
+    g.fillStyle = col; g.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI / 2 + (k * Math.PI) / 5, r = k % 2 === 0 ? R : R * 0.382;
+      g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    }
+    g.closePath(); g.fill();
+  };
+  c = STENCILS.nlfBanner;
+  g.fillStyle = "#b8141f"; g.fillRect(c.x + 2, c.y + 2, c.w - 4, c.h / 2 - 2);
+  g.fillStyle = "#1a5aa8"; g.fillRect(c.x + 2, c.y + c.h / 2, c.w - 4, c.h / 2 - 2);
+  star5(c.x + c.w / 2, c.y + c.h / 2, c.h * 0.3, "#f2c31a");
+  c = STENCILS.nlfStar;
+  g.fillStyle = "#b8141f"; g.beginPath(); g.arc(c.x + c.w / 2, c.y + c.h / 2, c.w / 2 - 4, 0, Math.PI * 2); g.fill();
+  star5(c.x + c.w / 2, c.y + c.h / 2 + 3, c.w * 0.36, "#f2c31a");
+  wear(c.x, c.y, c.w, c.h, 60);
   c = STENCILS.pspHoles;
   {
     // M8A1 plank: a row of punched holes down the middle, each with the lip

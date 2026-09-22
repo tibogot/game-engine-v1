@@ -15,9 +15,19 @@ Keep this file current: tick things off here, add new asks here.
    ambushes, and the enemy's soldiers still wear US uniforms
 2. ~~**Requisition sites**~~ DONE — 7 sites on real ground (pointSites.js), both
    bridges made crossable
-2b. **Enemy buildings BEFORE enemy vehicles** (your call 2026-09-22): the enemy HQ
-   is still the old grey box — French colonial HQ, tunnel entrances (forward
-   recruit points), DShK nests exist; then the AI builds/uses them
+2b. **Enemy buildings BEFORE enemy vehicles** (your call 2026-09-22) — STARTED:
+   [x] **French colonial HQ** (`rtsColonial.js`, 8.9k tris): ochre stucco résidence,
+   red-tiled hipped roof, arcade + loggia, pediment with the NLF star, NLF banner,
+   shell hole in the roof, flaked + bullet-pocked stucco, sandbagged arches,
+   palm mats on the back slope; nav footprint = the building (no door lane).
+   New atlas surfaces: stucco (14), roof tile (15) — the atlas is now FULL.
+   [x] **Tunnel entrances** (`rtsEnemyKit.js`, 4 on nam-valley in jungle,
+   `pointSites.TUNNEL_SITES`): the AI recruits at the most forward SAFE tunnel
+   and falls back to the nearest one; hard to spot, its bar shows only once
+   one of yours is within 35 m; 350 hp.
+   NEXT: your look check on both · the AI digging NEW tunnels (a sapper) ·
+   punji pits / booby traps · supply cache (hits their income) · spider holes ·
+   enemy camp dressing round the résidence (well, sheds, cooking fire smoke)
 3. ~~**Vehicles rebuilt**~~ DONE for the US side — M113, M48, M151, M551, M35,
    UH-1 all procedural. Enemy vehicles come with #7
 4. **The jungle: big trees + palm variety + Vietnam plants** (areca, sago,
@@ -408,3 +418,13 @@ Everything else below is in its section.
 - [ ] `cityKitTest` flaky under load
 - [ ] Per-layer `auto` paint rules are dead state
 - [ ] Passability overlay in the editor (see the nav map while sculpting)
+
+## Shipping — RTS alone on Vercel (own domain) and Steam (your question 2026-09-22)
+
+What the game loads is listed in [ASSETS.md](ASSETS.md) (~100 MB of the 715 MB `public/`).
+- [ ] Pass `preloadPaintTextures: false`: boot downloads 47 MB of ground textures the map then replaces
+- [ ] Shrink cliff_rocks_07 (12 MB normal PNG) and check `.v3proj` gets gzipped
+- [ ] RTS-only Vite config + RTS-only public folder → second Vercel project + domain
+- [ ] "Needs WebGPU" screen instead of a black canvas
+- [ ] Later: Electron wrapper → Steamworks (steamworks.js), saves to files, Steam page early for wishlists
+- [ ] Confirm ASSETS.md once with a DevTools Network capture

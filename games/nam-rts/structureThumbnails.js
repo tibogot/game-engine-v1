@@ -6,6 +6,8 @@ import { bakeThumbnails } from "./thumbnails.js";
 import { buildRadioTower } from "./radioKit.js";
 import { buildQuonsetHQ } from "../../v3/render/objects/rtsQuonset.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
+import { buildColonialHQ } from "../../v3/render/objects/rtsColonial.js";
+import { buildTunnelEntrance } from "../../v3/render/objects/rtsEnemyKit.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import {
   GUN_PIT_HEAD_Y, NEST_HEAD_Y, buildBunker, buildGunPitBody, buildGunPitGun, buildHelipad, buildMedicTent,
@@ -42,6 +44,8 @@ const ITEMS = [
   ["struct:sandbagWall", () => kit(buildSandbagWallPiece())],
   ["struct:bunker", () => kit(buildBunker())],
   ["struct:enemy:turret", () => withGun(buildNestBody(), buildNestGun(), NEST_HEAD_Y)],
+  ["struct:enemy:enemyBase", () => kit(buildColonialHQ())],
+  ["struct:enemy:tunnel", () => kit(buildTunnelEntrance())],
 ];
 
 /** Bake every structure portrait into `into` (the units' thumbnail map). */

@@ -27,8 +27,35 @@ export const POINT_SITES = {
   ],
 };
 
+/**
+ * The Front's TUNNEL ENTRANCES (rtsEnemyKit.buildTunnelEntrance): where its
+ * men come up. All in jungle (foliage density 0.55–0.73 at the site) and all
+ * on its side of the map — two forward on the flanks, two behind its ridge —
+ * measured by path like the points (your path / theirs):
+ *
+ *   west flank   884 / 433      east flank   713 / 529
+ *   west ridge  1007 / 233      north       1189 / 142
+ *
+ * The bare summit and the open east ridge were left out: a tunnel in the open
+ * is a hole with a man standing in it.
+ */
+export const TUNNEL_SITES = {
+  "nam-valley": [
+    { x: -210, z: 70 },
+    { x: 257, z: 97 },
+    { x: -110, z: 185 },
+    { x: -23, z: 239 },
+  ],
+};
+
+const mapKey = (worldName) => String(worldName ?? "").replace(/\.v3proj$/i, "").replace(/^.*[\\/]/, "");
+
 /** The authored sites for a level ("nam-valley.v3proj" → "nam-valley"), or null. */
 export function pointSitesFor(worldName) {
-  const key = String(worldName ?? "").replace(/\.v3proj$/i, "").replace(/^.*[\\/]/, "");
-  return POINT_SITES[key] ?? null;
+  return POINT_SITES[mapKey(worldName)] ?? null;
+}
+
+/** The level's tunnel entrances, or an empty list. */
+export function tunnelSitesFor(worldName) {
+  return TUNNEL_SITES[mapKey(worldName)] ?? [];
 }

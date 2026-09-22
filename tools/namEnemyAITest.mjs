@@ -24,7 +24,7 @@ const ok = (name, cond, extra = "") => {
   else { failed++; console.log(`  FAIL ${name}${extra ? "  " + extra : ""}`); }
 };
 
-function world({ points = [], enemyBase = true } = {}) {
+function world({ points = [], enemyBase = true, tunnels = [] } = {}) {
   const list = [];
   const units = {
     list,
@@ -41,7 +41,8 @@ function world({ points = [], enemyBase = true } = {}) {
   };
   const eb = { alive: enemyBase, team: "enemy", range: 0, position: { x: 0, y: 0, z: 400 }, type: { navRadius: 24, doorApproach: { dirX: 0, dirZ: -1 } } };
   const base = { alive: true, team: "player", range: 0, position: { x: 0, y: 0, z: -380 } };
-  const structures = { list: [eb, base], enemyBase: eb, base };
+  const tun = tunnels.map(([x, z]) => ({ alive: true, team: "enemy", range: 0, typeKey: "tunnel", position: { x, y: 0, z } }));
+  const structures = { list: [eb, base, ...tun], enemyBase: eb, base, get tunnels() { return tun.filter((t) => t.alive); } };
   const requisition = { points };
   return { units, structures, requisition };
 }
@@ -165,6 +166,38 @@ console.log("leash");
   const back = u.orders.some((o) => o[0] === "move");
   const last = u.orders.at(-1);
   ok("a man chasing too far is called back to his spot", back && !u.target && Math.hypot(last[1], last[2] - 100) < 16, JSON.stringify(last));
+}
+
+console.log("tunnels");
+{
+  const recruitsAt = (w) => {
+    const ai = createEnemyAI({ ...w, params: { ...ENEMY_AI, startSquads: 0, startingStock: 1000 } });
+    run(ai, 0.1);
+    return enemySoldiers(w)[0]?.position;
+  };
+  // Your HQ is at z = -380: the tunnel at z = 100 is the forward one.
+  const p = recruitsAt(world({ tunnels: [[0, 300], [0, 100]] }));
+  ok("recruits come up at the most forward tunnel", p && Math.abs(p.z - 96) < 6, p && `z ${p.z.toFixed(1)}`);
+  // Something of yours next to it, seen (the tunnel itself watches): not that one.
+  const w = world({ tunnels: [[0, 300], [0, 100]] });
+  w.units.list.push(man("player", 5, 104));
+  const q = recruitsAt(w);
+  ok("…but not at a tunnel you are standing on", q && Math.abs(q.z - 296) < 6, q && `z ${q.z.toFixed(1)}`);
+  const r = recruitsAt(world());
+  ok("no tunnels: at the HQ", r && r.z > 350, r && `z ${r.z.toFixed(1)}`);
+}
+{
+  const w = world({ points: [point(0, 0, 140)], tunnels: [[0, 100]] });
+  const ai = createEnemyAI({ ...w, params: { ...ENEMY_AI, startSquads: 1, startingStock: 0 } });
+  run(ai, ENEMY_AI.tick);
+  arrive(w);
+  const s = ai.squads[0];
+  const foe = man("player", 0, 150);
+  w.units.list.push(foe);
+  s.members.forEach((u, i) => { if (i < 3) { u.alive = false; u.hp = 0; } else { u.hp = 30; u.target = foe; } });
+  run(ai, ENEMY_AI.tick * 1.5);
+  const last = s.members.find((u) => u.alive).orders.at(-1);
+  ok("a beaten squad falls back to the nearest tunnel, not the HQ", s.state === "retreat" && Math.abs(last[2] - 96) < 12, JSON.stringify(last));
 }
 
 console.log("determinism");

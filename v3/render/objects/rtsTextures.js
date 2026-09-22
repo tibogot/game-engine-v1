@@ -640,6 +640,102 @@ export function makeSteelTexture({ size = 512, seed = 103 } = {}) {
   });
 }
 
+// ── French colonial stucco ───────────────────────────────────────────────────
+
+/**
+ * The yellow-ochre limewash every French colonial building in Indochina wore —
+ * post office, résidence, plantation house — thirty years into the war it has
+ * not been renewed: the wash is patchy and has flaked to grey plaster, black
+ * mould runs down from under the cornice, green-black damp climbs from the
+ * foot, and the walls are pocked with bullet strikes, a few of them spalled
+ * through to the brick. Pocks are 6–12 px (3–5 cm): under ~8 px they crawl.
+ */
+export function makeStuccoTexture({ size = 512, seed = 107 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    // Strikes: position + radius, placed on the wrapping lattice so it tiles.
+    const hits = [];
+    for (let k = 0; k < 26; k++) {
+      hits.push({ x: hash2(k * 7 + seed, 3) * S, y: hash2(k * 11 + seed, 5) * S, r: 3 + hash2(k, seed) * 5, spall: hash2(k * 3, seed + 1) > 0.8 });
+    }
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const mott = fbm(u * P * 2 + seed, v * P * 2, P * 2, 4);
+        // Ochre limewash…
+        let r = lerp(196, 226, mott), gg = lerp(150, 178, mott), b = lerp(78, 100, mott);
+        // …flaked to grey plaster where the wash has let go.
+        const flake = clamp01((fbm(u * P * 4 + 9, v * P * 4, P * 4, 4) - 0.6) * 7);
+        r = lerp(r, 168, flake); gg = lerp(gg, 160, flake); b = lerp(b, 146, flake);
+        // Mould streaks down from the top edge (under a cornice or sill).
+        const streak = clamp01((vnoise(u * P * 20, v * P * 1.5, P * 20) - 0.5) * 3) * clamp01(v * 1.6 - 0.35);
+        const mould = streak * 0.35 + clamp01(1 - v * 4) * 0.4 * fbm(u * P * 6, v * P * 3, P * 6, 2);
+        r = lerp(r, 58, mould); gg = lerp(gg, 60, mould); b = lerp(b, 44, mould);
+        // Bullet strikes: a dark crater with a pale chipped rim; some spalled to brick.
+        for (const h of hits) {
+          let dx = Math.abs(x - h.x), dy = Math.abs(y - h.y);
+          dx = Math.min(dx, S - dx); dy = Math.min(dy, S - dy);
+          const dd = Math.hypot(dx, dy);
+          if (h.spall && dd < h.r * 2.6) {
+            const brick = ((((y / 9) | 0) % 2) ? (x + 11) : x) % 22 < 1.5 || y % 9 < 1.2;
+            r = brick ? 150 : 158; gg = brick ? 140 : 76; b = brick ? 126 : 52;
+          } else if (dd < h.r) { r *= 0.45; gg *= 0.45; b *= 0.45; }
+          else if (dd < h.r * 1.7) { r = lerp(r, 220, 0.5); gg = lerp(gg, 214, 0.5); b = lerp(b, 196, 0.5); }
+        }
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
+/**
+ * Terracotta roof tile, laid in courses up the slope (v) with the tiles side
+ * by side along it (u). Nine tiles across a cell and five courses up it
+ * (a cell is 2 m: 22 cm tiles, 40 cm courses — 57 and 102 px, well clear of
+ * the crawl limit). Each tile is rounded (lit down its crown, dark in the
+ * troughs), each course casts a dark lip on the one below, every tile has its
+ * own fired colour, and lichen and soot have got into the old roof.
+ */
+export function makeRoofTileTexture({ size = 512, seed = 109 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const NU = 9, NV = 5, P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const tu = u * NU, tv = v * NV;
+        const iu = Math.floor(tu) % NU, iv = Math.floor(tv) % NV;
+        const fu = tu - Math.floor(tu), fv = tv - Math.floor(tv);
+        // The tile's own firing.
+        const t = hash2(iu + seed, iv * 13 + (iu % 2));
+        let r = lerp(150, 190, t), gg = lerp(66, 92, t), b = lerp(40, 54, t);
+        // Rounded: bright down the crown, dark in the trough between tiles.
+        const crown = Math.sin(fu * Math.PI);
+        const k = lerp(0.55, 1.08, crown);
+        // The lip of the course above shades the top of this one; its own
+        // lower edge is lit.
+        const lip = fv > 0.86 ? 0.62 : fv < 0.08 ? 1.08 : 1;
+        r *= k * lip; gg *= k * lip; b *= k * lip;
+        // Lichen (grey-green, yellow) and soot, in patches over the old roof.
+        const lich = clamp01((fbm(u * P * 3 + seed, v * P * 3, P * 3, 4) - 0.58) * 5);
+        r = lerp(r, 128, lich * 0.7); gg = lerp(gg, 124, lich * 0.7); b = lerp(b, 86, lich * 0.7);
+        const soot = clamp01((fbm(u * P * 2 + 40, v * P * 2 + 7, P * 2, 3) - 0.62) * 4);
+        r = lerp(r, 48, soot * 0.6); gg = lerp(gg, 40, soot * 0.6); b = lerp(b, 36, soot * 0.6);
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 export const ATLAS_COLS = 4;
 export const ATLAS_ROWS = 4;
 /** Fraction of a cell kept clear at its border, so mips cannot bleed across. */
@@ -678,6 +774,8 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeWhitewashTexture({ size: cell }),
     makeSteelTexture({ size: cell }),
     makeRubberTexture({ size: cell }),
+    makeStuccoTexture({ size: cell }),
+    makeRoofTileTexture({ size: cell }),
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;

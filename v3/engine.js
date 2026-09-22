@@ -70,6 +70,8 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/objects/rtsFirebaseProps.js",
   "v3/render/objects/rtsBuildables.js",
   "v3/render/objects/rtsVehicles.js",
+  "v3/render/objects/rtsColonial.js",
+  "v3/render/objects/rtsEnemyKit.js",
   "v3/render/objects/rtsSigns.js",
   "v3/render/objects/rtsObjectProps.js",
   "v3/render/objects/rtsParts.js",

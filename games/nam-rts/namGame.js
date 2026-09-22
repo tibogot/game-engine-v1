@@ -84,7 +84,7 @@ import { createHudBar } from "./hudBar.js";
 import { createHarvesting } from "./harvesting.js";
 import { createRequisition } from "./requisition.js";
 import { createRequisitionRenderer } from "./requisitionRenderer.js";
-import { pointSitesFor } from "./pointSites.js";
+import { pointSitesFor, tunnelSitesFor } from "./pointSites.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
 import { createWaves } from "./waves.js";
@@ -402,7 +402,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // there — and the match is on: destroy it to win, lose yours and you lose.
   // ?ai=0 boots the old sandbox (no enemy HQ, no commander).
   const AI_ON = new URLSearchParams(location.search).get("ai") !== "0";
-  if (AI_ON) await structures.spawnEnemyBase();
+  if (AI_ON) {
+    await structures.spawnEnemyBase();
+    // And its tunnel entrances, where its men come up (pointSites.js).
+    await structures.placeTunnels(tunnelSitesFor(boot.name));
+  }
 
   // A FIREBASE IS BULLDOZED BARE. nam-valley's jungle paint runs straight over
   // the HQ site, and with a hangar box it did not show — the palms were inside
@@ -424,6 +428,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // through the pit. A dug position has its own ground — the jungle stays
     // round it, which is what hides it.
     for (const t of structures.turrets) app.clearVegetation?.(t.position.x, t.position.z, 8, { grass: 6 });
+    // A tunnel mouth: the shaft and its spoil ring, trodden bare — the jungle
+    // round it is the point. At 3.5 m the ferns (metres across) still closed
+    // over it and it could not be found even by looking straight at it.
+    for (const t of structures.tunnels) app.clearVegetation?.(t.position.x, t.position.z, 6, { grass: 4.5 });
     // And the requisition masts: the jungle off the tower and its hut, the
     // grass kept — the zone round it is ground to fight over, not a lawn.
     for (const p of requisition.points) {
@@ -437,9 +445,14 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
         if (Math.abs(inst.px - x) < MAST_FP.hx + 2 && Math.abs(inst.pz - z) < MAST_FP.hz + 2) ps.removeInstance(i);
       }
     }
-    // The enemy HQ's own clearing.
+    // The enemy HQ's own clearing, and a forecourt in front of it (-Z, toward
+    // the camera): an 11 m palm leaning in from 23 m out laid its crown right
+    // across the façade.
     const eb = structures.enemyBase;
-    if (eb?.alive) app.clearVegetation?.(eb.position.x, eb.position.z, 24, { grass: 18 });
+    if (eb?.alive) {
+      app.clearVegetation?.(eb.position.x, eb.position.z, 24, { grass: 18 });
+      app.clearVegetation?.(eb.position.x, eb.position.z - 18, 22);
+    }
     const b = structures.base;
     if (b?.alive === false) return;
     app.clearVegetation?.(b.position.x, b.position.z + 2, 27, { grass: 23 });
