@@ -49,7 +49,8 @@ export const UNIT_TYPES = {
   },
   jeep: {
     typeKey: "jeep",
-    name: "Jeep",
+    // The M151A1 MUTT gun jeep, built in code (rtsVehicles.js).
+    name: "M151 Jeep",
     // logic
     isAir: false,
     hover: 0,
@@ -67,8 +68,7 @@ export const UNIT_TYPES = {
     vision: 38,
 
     // render
-    url: "/models/jeep_compressed.glb",
-    targetLength: REAL.jeepLength * RTS_SCALE,   // 4.4 m (was 5: 1.5x)
+    procedural: "m151",   // rtsVehicles.buildM151 — its own length sets the scale
     excludeRotorsFromBox: false,
     facingOffset: 0,
     ringRadius: 3.5,
@@ -106,7 +106,8 @@ export const UNIT_TYPES = {
   // toward what it's shooting, so it reads fine at RTS zoom.
   tank: {
     typeKey: "tank",
-    name: "Battle Tank",
+    // The M48A3 Patton, built in code (rtsVehicles.js).
+    name: "M48A3 Patton",
     // logic — the heavy. Slow and turns slowly, but out-ranges and out-hits
     // everything on the ground. No AA: helicopters are its hard counter.
     isAir: false,
@@ -122,8 +123,7 @@ export const UNIT_TYPES = {
     canHitAir: false,
     vision: 36,
     // render
-    url: "/models/rts/tankmilitary_compressed.glb",
-    targetLength: 8,
+    procedural: "m48",   // rtsVehicles.buildM48 — its own length sets the scale
     excludeRotorsFromBox: false,
     facingOffset: 0,
     ringRadius: 6,
@@ -133,10 +133,10 @@ export const UNIT_TYPES = {
   },
   bigtank: {
     typeKey: "bigtank",
-    // The model is a BTR — a wheeled APC, not a tank — so it's named and tuned as
-    // one: faster and cheaper than the Battle Tank, and its lighter gun CAN
-    // elevate onto aircraft, which is what makes it worth fielding alongside.
-    name: "Heavy APC",
+    // The M113 ACAV, built in code (rtsVehicles.js) — it replaced a BTR GLB,
+    // the wrong side and the wrong war. Tuned as the APC it is: faster and
+    // cheaper than the Battle Tank, and its .50 cal CAN reach aircraft.
+    name: "M113 ACAV",
     isAir: false,
     hover: 0,
     speed: 22,
@@ -150,8 +150,7 @@ export const UNIT_TYPES = {
     canHitAir: true,
     vision: 38,
     // render
-    url: "/models/rts/bigtank_compressed.glb",
-    targetLength: 7,
+    procedural: "m113",   // rtsVehicles.buildM113 — its own length sets the scale
     excludeRotorsFromBox: false,
     facingOffset: 0,
     ringRadius: 5,

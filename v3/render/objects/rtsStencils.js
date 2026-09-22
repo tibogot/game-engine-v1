@@ -35,6 +35,8 @@ export const STENCILS = {
   sockBands:    { x: 256, y: 768, w: 64,  h: 256 },
   // One PSP plank's punched holes and pressed ribs, laid along a plank.
   pspHoles:     { x: 320, y: 768, w: 512, h: 48 },
+  // A vehicle's bumper code, white, for trim vanes and bumpers.
+  bumperCode:   { x: 320, y: 832, w: 512, h: 96 },
 };
 for (const s of Object.values(STENCILS)) s.aspect = s.w / s.h;
 
@@ -113,6 +115,7 @@ function drawSheet() {
     g.fillStyle = k % 2 === 0 ? "#c4401e" : "#e9e6dc";
     g.fillRect(c.x, c.y + c.h - ((k + 1) * c.h) / 5, c.w, c.h / 5 + 1);
   }
+  c = STENCILS.bumperCode; text("11 ACR   A-13", c.x, c.y, c.w, c.h, "#e9e6dc", 64); wear(c.x, c.y, c.w, c.h, 140);
   c = STENCILS.pspHoles;
   {
     // M8A1 plank: a row of punched holes down the middle, each with the lip

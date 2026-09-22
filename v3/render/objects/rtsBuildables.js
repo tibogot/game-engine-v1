@@ -157,23 +157,23 @@ export function buildGunPitGun() {
   const parts = [];
   const P = (geo, pos, mat, tone, rot) => parts.push({ geo, pos, mat, tone, rot });
   const dark = 0.06;
-  P(buildBox(g(0.07), g(0.08), g(0.14)), [0, g(-0.07), 0], MAT.metal, 0.2);                      // cradle
-  P(buildBox(g(0.09), g(0.13), g(0.42)), [0, 0, g(0.05)], MAT.metal, dark);                      // receiver
-  P(buildBox(g(0.1), g(0.03), g(0.2)), [0, g(0.08), g(0.1)], MAT.metal, dark + 0.05);            // feed cover
+  P(buildBox(g(0.07), g(0.08), g(0.14)), [0, g(-0.07), 0], MAT.steel, 0.2);                      // cradle
+  P(buildBox(g(0.09), g(0.13), g(0.42)), [0, 0, g(0.05)], MAT.steel, dark);                      // receiver
+  P(buildBox(g(0.1), g(0.03), g(0.2)), [0, g(0.08), g(0.1)], MAT.steel, dark + 0.05);            // feed cover
   const barrel = new THREE.CylinderGeometry(g(0.022), g(0.024), g(0.56), 8).rotateX(Math.PI / 2);
-  P(barrel, [0, g(0.01), g(0.54)], MAT.metal, dark);
+  P(barrel, [0, g(0.01), g(0.54)], MAT.steel, dark);
   const gas = new THREE.CylinderGeometry(g(0.02), g(0.02), g(0.3), 8).rotateX(Math.PI / 2);
-  P(gas, [0, g(-0.04), g(0.45)], MAT.metal, dark);
+  P(gas, [0, g(-0.04), g(0.45)], MAT.steel, dark);
   const hider = new THREE.CylinderGeometry(g(0.032), g(0.03), g(0.09), 8).rotateX(Math.PI / 2);
-  P(hider, [0, g(0.01), g(0.87)], MAT.metal, dark);
-  P(buildBox(g(0.02), g(0.05), g(0.14)), [0, g(0.1), g(0.4)], MAT.metal, dark);                  // carry handle
-  P(buildBox(g(0.065), g(0.11), g(0.32)), [0, g(-0.02), g(-0.31)], MAT.metal, 0.03);             // stock
-  P(buildBox(g(0.04), g(0.11), g(0.05)), [0, g(-0.1), g(-0.08)], MAT.metal, 0.03, [0.3, 0, 0]);  // pistol grip
+  P(hider, [0, g(0.01), g(0.87)], MAT.steel, dark);
+  P(buildBox(g(0.02), g(0.05), g(0.14)), [0, g(0.1), g(0.4)], MAT.steel, dark);                  // carry handle
+  P(buildBox(g(0.065), g(0.11), g(0.32)), [0, g(-0.02), g(-0.31)], MAT.steel, 0.03);             // stock
+  P(buildBox(g(0.04), g(0.11), g(0.05)), [0, g(-0.1), g(-0.08)], MAT.steel, 0.03, [0.3, 0, 0]);  // pistol grip
   // Bipod folded under the barrel.
-  for (const sx of [-1, 1]) P(buildBox(g(0.015), g(0.015), g(0.3)), [sx * g(0.025), g(-0.05), g(0.62)], MAT.metal, dark);
+  for (const sx of [-1, 1]) P(buildBox(g(0.015), g(0.015), g(0.3)), [sx * g(0.025), g(-0.05), g(0.62)], MAT.steel, dark);
   // The ammunition can hung on the left, the belt running up into the feed.
   P(buildBox(g(0.1), g(0.18), g(0.28)), [g(-0.12), g(-0.07), g(0.08)], MAT.paint, 0.5);
-  P(buildBox(g(0.06), g(0.02), g(0.1)), [g(-0.07), g(0.04), g(0.1)], MAT.metal, 0.7, [0, 0, 0.6]);
+  P(buildBox(g(0.06), g(0.02), g(0.1)), [g(-0.07), g(0.04), g(0.1)], MAT.steel, 0.7, [0, 0, 0.6]);
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.05 * GUN, radius: 1, strength: 0.25, groundFade: 0, floor: 0.6 });
   return geo;
@@ -240,17 +240,17 @@ export function buildNestGun() {
   const P = (geo, pos, mat, tone, rot) => parts.push({ geo, pos, mat, tone, rot });
   const dark = 0.05;
   const alongZ = (r0, r1, len, seg = 10) => new THREE.CylinderGeometry(r0, r1, len, seg).rotateX(Math.PI / 2);
-  P(buildBox(g(0.08), g(0.09), g(0.16)), [0, g(-0.08), 0], MAT.metal, 0.2);                      // cradle
-  P(buildBox(g(0.12), g(0.14), g(0.5)), [0, 0, g(-0.04)], MAT.metal, dark);                      // receiver
-  P(alongZ(g(0.03), g(0.034), g(0.95)), [0, g(0.01), g(0.68)], MAT.metal, dark);                 // barrel
-  for (let k = 0; k < 7; k++) P(alongZ(g(0.052), g(0.052), g(0.025)), [0, g(0.01), g(0.26 + k * 0.055)], MAT.metal, dark + 0.04);  // cooling fins
-  P(alongZ(g(0.05), g(0.045), g(0.13)), [0, g(0.01), g(1.18)], MAT.metal, dark);                 // muzzle brake
+  P(buildBox(g(0.08), g(0.09), g(0.16)), [0, g(-0.08), 0], MAT.steel, 0.2);                      // cradle
+  P(buildBox(g(0.12), g(0.14), g(0.5)), [0, 0, g(-0.04)], MAT.steel, dark);                      // receiver
+  P(alongZ(g(0.03), g(0.034), g(0.95)), [0, g(0.01), g(0.68)], MAT.steel, dark);                 // barrel
+  for (let k = 0; k < 7; k++) P(alongZ(g(0.052), g(0.052), g(0.025)), [0, g(0.01), g(0.26 + k * 0.055)], MAT.steel, dark + 0.04);  // cooling fins
+  P(alongZ(g(0.05), g(0.045), g(0.13)), [0, g(0.01), g(1.18)], MAT.steel, dark);                 // muzzle brake
   // The ring anti-aircraft sight on its post: the DShK's silhouette.
-  P(buildBox(g(0.015), g(0.12), g(0.015)), [0, g(0.12), g(0.72)], MAT.metal, dark);
+  P(buildBox(g(0.015), g(0.12), g(0.015)), [0, g(0.12), g(0.72)], MAT.steel, dark);
   const ring = new THREE.TorusGeometry(g(0.12), g(0.008), 4, 18);
-  P(ring, [0, g(0.24), g(0.72)], MAT.metal, dark + 0.1);
+  P(ring, [0, g(0.24), g(0.72)], MAT.steel, dark + 0.1);
   // Spade grips and the butt plate.
-  P(buildBox(g(0.14), g(0.1), g(0.03)), [0, 0, g(-0.3)], MAT.metal, dark);
+  P(buildBox(g(0.14), g(0.1), g(0.03)), [0, 0, g(-0.3)], MAT.steel, dark);
   for (const sx of [-1, 1]) P(buildBox(g(0.025), g(0.1), g(0.025)), [sx * g(0.06), g(-0.02), g(-0.36)], MAT.timber, 0.3);
   // The ammunition box on the right, feeding across.
   P(buildBox(g(0.12), g(0.17), g(0.32)), [g(0.14), g(-0.06), g(0.02)], MAT.paint, 0.35);

@@ -13,11 +13,17 @@
 import * as THREE from "three";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { materialColor } from "three/tsl";
+import { materialColor, texture } from "three/tsl";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
+import { buildM113, buildM151, buildM48, rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
+import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
+import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+
+/** Vehicles built in code, by a unit type's `procedural` key. */
+const PROCEDURAL_VEHICLES = { m113: () => buildM113(), m48: () => buildM48(), m151: () => buildM151() };
 import { UNIT_TYPES, UNIT_TYPE_KEYS } from "./unitTypes.js";
 
 // Mesh → owning unit, for selection raycasts. A WeakMap (not mesh.userData)
@@ -180,8 +186,9 @@ function mergeTemplateParts(root) {
 
   root.traverse((o) => {
     if (!o.isMesh) return;
-    if (o.name === "MainRotor" || o.name === "TailRotor") return; // own pivots — leave them
+    if (o.name === "MainRotor" || o.name === "TailRotor" || o.name === "Turret") return; // own pivots — leave them
     if (o.material.map) return;                                   // textured — can't share the material
+    if (o.material.isNodeMaterial) return;                        // the parts kit's (atlas, rolling gear): kept apart
     if (o.isSkinnedMesh) {
       // Skinned geometry is in bind space; a non-identity mesh matrix would have
       // to be baked in, which would fight the bind matrix. GLTF skins are always
@@ -264,6 +271,18 @@ const _quat = new THREE.Quaternion();
  * material's own color AND its map, so the model keeps its texture.
  */
 function refreshingMaterial(src) {
+  // The parts kit's own materials: the atlas material carries its colorNode
+  // (which keeps its uniforms live) and is kept as it is; the stencil sheet
+  // gets a copy with one, keeping its alpha test and polygon offset.
+  if (src.isNodeMaterial) {
+    if (src.colorNode) return src;
+    const m = src.clone();
+    m.colorNode = materialColor;
+    // colorNode feeds RGB only — the cut-out would be lost and every stencil
+    // drawn as a solid square. The alpha test reads opacity: give it the sheet's.
+    if (src.map) m.opacityNode = texture(src.map).a;
+    return m;
+  }
   const m = new THREE.MeshStandardNodeMaterial({
     color: src.color,
     map: src.map ?? null,
@@ -288,7 +307,7 @@ function buildInstancedType(tpl, scene) {
   root.traverse((o) => {
     if (!o.isMesh) return;
 
-    const kind = o.name === "MainRotor" ? "main" : o.name === "TailRotor" ? "tail" : null;
+    const kind = o.name === "MainRotor" ? "main" : o.name === "TailRotor" ? "tail" : o.name === "Turret" ? "turret" : null;
 
     const geo = o.geometry.clone();
     dequantizeGeometry(geo);
@@ -331,7 +350,8 @@ function buildInstancedType(tpl, scene) {
 
   // The template's own scale (buildTemplate normalises model size) is part of
   // every unit's transform, so instances carry it too.
-  return { parts, scale: root.scale.x, n: 0, unitAt: [] };
+  const odometer = parts.map((p) => p.im.material.userData?.odometer).find(Boolean) ?? null;
+  return { parts, scale: root.scale.x, n: 0, unitAt: [], turret: parts.some((p) => p.kind === "turret"), odometer };
 }
 
 // ── Crowd (skinned types) ────────────────────────────────────────────────────
@@ -392,8 +412,37 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   const { scene } = app;
   initGlbLoaderRenderer(app.renderer); // idempotent; wires KTX2 support
 
-  // One template per type.
-  const loaded = await Promise.all(UNIT_TYPE_KEYS.map((k) => loadGltf(UNIT_TYPES[k].url)));
+  // One template per type: a GLB, or a vehicle built in code on the parts kit
+  // (`procedural`: rtsVehicles.js) — built at its true size, so its
+  // targetLength is its own length and the template scale comes out at 1.
+  const loaded = await Promise.all(UNIT_TYPE_KEYS.map((k) => {
+    const t = UNIT_TYPES[k];
+    if (!t.procedural) return loadGltf(t.url);
+    const geo = PROCEDURAL_VEHICLES[t.procedural]();
+    const body = new THREE.Mesh(geo, rtsObjectMaterial());
+    const st = stencilMesh(geo.userData.stencil);
+    if (st) body.add(st);
+    const scene = new THREE.Group();
+    scene.add(body);
+    // A turret that turns to its target (instanced as kind "turret", like a
+    // rotor), and running gear that rolls in its own shader.
+    const tur = geo.userData.turret;
+    if (tur) {
+      const m = new THREE.Mesh(tur.geo, rtsObjectMaterial());
+      m.name = "Turret";
+      m.position.set(tur.pivot[0], tur.pivot[1], tur.pivot[2]);
+      // The turret's own markings turn with it: named "Turret" too, so the
+      // instancer treats them as a pivoted part (their origin IS the pivot).
+      const tst = stencilMesh(tur.stencil);
+      if (tst) { tst.name = "Turret"; m.add(tst); }
+      scene.add(m);
+    }
+    if (geo.userData.gear) scene.add(new THREE.Mesh(geo.userData.gear, rtsRunningGearMaterial()));
+    geo.computeBoundingBox();
+    const b = geo.boundingBox;
+    t.targetLength = Math.max(b.max.x - b.min.x, b.max.z - b.min.z);
+    return { scene, animations: [] };
+  }));
   const templates = {};
   UNIT_TYPE_KEYS.forEach((k, i) => {
     const t = UNIT_TYPES[k];
@@ -463,6 +512,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       views.set(unit, {
         inst, xform,
         bob: Math.random() * 6, mainAngle: Math.random() * 6, tailAngle: 0,
+        turretAngle: 0, odo: 0, lastX: unit.position.x, lastZ: unit.position.z,
       });
       return;
     }
@@ -613,6 +663,22 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
 
       v.mainAngle += dt * 28;
       v.tailAngle += dt * 28 * 2.4;
+      if (v.inst?.turret) {
+        // The cupola turns to its target, in the hull's frame, eased; with no
+        // target it comes back to the front.
+        let want = 0;
+        const tg = unit.target;
+        if (tg?.alive) want = Math.atan2(tg.position.x - p.x, tg.position.z - p.z) - yaw;
+        let d = want - v.turretAngle;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        v.turretAngle += d * Math.min(1, dt * 5);
+      }
+      if (v.inst?.odometer) {
+        // Distance travelled along the hull's own forward: reversing rolls back.
+        const mx = p.x - v.lastX, mz = p.z - v.lastZ;
+        v.odo += mx * Math.sin(yaw) + mz * Math.cos(yaw);
+        v.lastX = p.x; v.lastZ = p.z;
+      }
 
       // Instanced unit: write one matrix per template part and move on.
       if (v.inst) {
@@ -625,6 +691,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             if (part.kind) {
               _euler.copy(part.baseEuler);
               if (part.kind === "main") _euler.y = v.mainAngle;
+              else if (part.kind === "turret") _euler.y = part.baseEuler.y + v.turretAngle;
               else _euler.x = v.tailAngle;
               _local.compose(part.basePos, _quat.setFromEuler(_euler), part.baseScale);
               _mat.multiplyMatrices(part.parentRel, _local).premultiply(x.matrix);
@@ -634,6 +701,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             part.im.setMatrixAt(i, _mat);
             part.im.setColorAt(i, tint); // same material, different side
           }
+          if (inst.odometer) inst.odometer.setX(i, v.odo);
           inst.unitAt[i] = unit; // so a raycast on instanceId finds this unit
           inst.n = i + 1;
         }
@@ -689,6 +757,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           part.im.visible = inst.n > 0;
           part.im.instanceMatrix.needsUpdate = true;
           part.im.instanceColor.needsUpdate = true;
+        }
+        if (inst.odometer && inst.n) {
+          inst.odometer.needsUpdate = true;
+          inst.odometer.clearUpdateRanges?.();
+          inst.odometer.addUpdateRange?.(0, inst.n);   // only the live units' slots
         }
       }
       // Uploads the per-soldier buffers and dispatches the skinning compute pass.

@@ -36,7 +36,7 @@
  */
 import * as THREE from "three";
 import {
-  Fn, attribute, clamp, float, floor, fract, hash, instanceIndex, mix, mod,
+  Fn, attribute, clamp, float, floor, fract, hash, instanceIndex, mix,
   step, texture, uniform, uv, vec2,
 } from "three/tsl";
 import { rtsAtlas, ATLAS_COLS, ATLAS_ROWS, ATLAS_PAD } from "./rtsTextures.js";
@@ -53,27 +53,30 @@ export const RTS_OBJECT_CATALOG = {
 
 let _material = null;
 
+const uTintVar = uniform(0.3);
+const uAo = uniform(1.0);
+
 /**
- * The one material every RTS object shares. Built on first use — it bakes a
- * canvas atlas, which is not work to do at module load.
+ * The kit's surface colour for any UV: matId → atlas cell, tiled by hand,
+ * toned per part and per instance, contact AO. rtsObjectMaterial is this on
+ * uv(); a variant material (a vehicle's rolling track) passes its own.
  */
-export function rtsObjectMaterial() {
-  if (_material) return _material;
+export function rtsAtlasColor(uvNode) {
   const atlas = rtsAtlas();
-  const uTintVar = uniform(0.3);
-  const uAo = uniform(1.0);
-  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.94, metalness: 0 });
-  m.name = "RtsObject";
-  m.colorNode = Fn(() => {
+  return Fn(() => {
     const id = attribute("matId", "float");
     const tone = attribute("tone", "float");
     const ao = attribute("ao", "float");
     const cols = float(ATLAS_COLS), rows = float(ATLAS_ROWS);
-    const col = mod(id, cols);
+    // Row and column from the id with half a unit of slack: on the GPU 12 / 4
+    // came out 2.9999998, floored to 2, and matId 12 sampled a row up and a
+    // column past the edge (the clamp smeared whitewash into white stripes).
+    const rowIdx = floor(id.add(0.5).div(cols));
+    const col = floor(id.add(0.5).sub(rowIdx.mul(cols)));
     // CanvasTexture flips Y, so canvas row 0 lands at the TOP of the texture.
     // Indexing rows straight down swaps the two halves and every surface
     // samples the wrong one — flip the ROW, not the texture.
-    const row = rows.sub(float(1)).sub(floor(id.div(cols)));
+    const row = rows.sub(float(1)).sub(rowIdx);
     const pad = float(ATLAS_PAD);
     // Tiled by hand, because an atlas cell cannot wrap; inset by ATLAS_PAD so
     // mips do not bleed into the neighbouring cell.
@@ -81,7 +84,7 @@ export function rtsObjectMaterial() {
     // pattern, and at the kit's 2 m per tile they repeat as visible stripes down
     // a container or a hut. (One multiply; MAT.camo is 9.)
     const camoScale = mix(float(1), float(0.4), step(float(8.5), id).mul(step(id, float(9.5))));
-    const inCell = clamp(fract(uv().mul(camoScale)), pad, float(1).sub(pad));
+    const inCell = clamp(fract(uvNode.mul(camoScale)), pad, float(1).sub(pad));
     const st = vec2(col.add(inCell.x).div(cols), row.add(inCell.y).div(rows));
     const surf = texture(atlas, st).rgb;
     // Per-PART tone (patched sheets, older bags) and per-INSTANCE tint, so a
@@ -91,6 +94,17 @@ export function rtsObjectMaterial() {
     // Baked contact AO — what stops it reading as a flat cut-out from above.
     return toned.mul(inst).mul(mix(float(1), ao, uAo));
   })();
+}
+
+/**
+ * The one material every RTS object shares. Built on first use — it bakes a
+ * canvas atlas, which is not work to do at module load.
+ */
+export function rtsObjectMaterial() {
+  if (_material) return _material;
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.94, metalness: 0 });
+  m.name = "RtsObject";
+  m.colorNode = rtsAtlasColor(uv());
   _material = m;
   return m;
 }

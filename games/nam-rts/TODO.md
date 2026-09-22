@@ -8,6 +8,28 @@ Keep this file current: tick things off here, add new asks here.
 
 ---
 
+## PRIORITY — what to do next, most important first (2026-09-22)
+
+1. **Enemy AI** — now that points exist, the enemy must take and hold them,
+   attack, retreat, use cover and terrain. Without it there is no game.
+2. **Requisition sites** — pick real ground (hills, crossroads, the bridge),
+   not the old node fan. Small; do it with #1
+3. **Vehicles rebuilt** — M113, M151 jeep, M35 truck, M48; the Huey (maybe
+   your Blender). The current ones are rts-v3 GLBs, one of them a Soviet BTR
+4. **The jungle: big trees + palm variety + Vietnam plants** (areca, sago,
+   pandanus, nipa, banana, flame tree) — the look you asked for
+5. **See-through for hidden units** — needed before the jungle gets denser
+6. **THE HILLTOP GPU SPOT** — must be fixed; parked by your choice for now
+   (everything known is written under Performance)
+7. **Enemy side looks like an enemy** — enemy HQ (French colonial building),
+   VC/NVA units, enemy camp dressing
+8. **Audio** — nothing yet; howler is installed
+9. **UI pass** from your references · edge scroll under the HUD
+10. **Fill the map** — village kit, battle debris, a small lake, paddies
+11. **Night / dusk lighting** — floodlights and searchlights earn their place
+
+Everything else below is in its section.
+
 ## Now — the camp (your ask, 2026-09-22)
 
 - [x] **Perimeter** (`campPerimeter.js`, every boot; `?camp=0` for the bare map): earth **berm** raised
@@ -86,7 +108,7 @@ Keep this file current: tick things off here, add new asks here.
       round ones (helipad, turrets, supply relay); enemy buildings in red
 - [x] **Base decoration placed from the start** (`campLayout.js`) — the kit pieces we
       built stand in the camp at every boot; signs + tank traps moved out to the gate
-- [~] **Builder-built buildings rebuilt on the new kit** (`rtsBuildables.js`):
+- [x] **Builder-built buildings rebuilt on the new kit** (`rtsBuildables.js`):
       DONE helipad (PSP matting with punched holes, painted H, revetments,
       windsock, corner lamps), M60 gun pit (the gun turns, tracers leave its
       muzzle), radio post (the kit station + star + U.S. ARMY); pads, nav and
@@ -105,12 +127,12 @@ Keep this file current: tick things off here, add new asks here.
       game — radio station = the old GLB; others procedural, at our standard;
       some kit pieces become buildable
 - [ ] Then **fill the jungle** (village, debris, paddies… — Map & look below)
-- [~] **Placed-building system** (`placedObjects.js`, the foundation for the three above): one path
+- [x] **Placed-building system** (`placedObjects.js`, the foundation for the three above): one path
       for decoration AND builder buildings — kit geometry + footprint → flat pad,
       nav collision on the real footprint, cover, grass cleared, selection
       marker. DONE for the camp (pads, nav footprints, cover, one draw per
       material); NEXT: the builder's buildings through it, + selection marker
-- [ ] **Builder buildings, my proposal** (you trust me on gameplay): helipad =
+- [x] **Builder buildings, my proposal** (you trust me on gameplay): helipad =
       PSP matting + painted H + windsock + sandbag revetments · turret = sandbagged
       M60 gun pit (or the guard tower) · radio = the old GLB · supply relay =
       supply dump (crates, drums, tarp). New ones only if they have a JOB:
@@ -139,7 +161,7 @@ Keep this file current: tick things off here, add new asks here.
       NEXT: choose the SITES (they reuse the old node fan: A sits behind the HQ
       on the terrace, G on the beach at the map edge) — author them in the
       editor or pick hills/crossroads; the enemy AI does not go for points yet
-- [ ] (was) **Requisition points**: map points you CAPTURE (not build) — a big
+- [x] (was) **Requisition points**: map points you CAPTURE (not build) — a big
       antenna mast on each, and the **violet M18 smoke** when the point is taken
       (the violet smoke kind already exists). Note: today's economy is
       harvester nodes + a buildable "Supply Relay"; capture points change that
@@ -169,7 +191,28 @@ Keep this file current: tick things off here, add new asks here.
       flame tree / poinciana orange, a few)
 - [ ] **Readability pass after**: thin the small foliage where it hides units
       and combat (ties in with see-through, below)
-- [ ] **Vehicles are too low poly** — rebuild them for this game: procedural
+- [~] **Vehicles rebuilt** — FIRST DONE: **M113 ACAV** (`rtsVehicles.js`, 5.1k tris, 2 draws for
+      every one on the map): sloped hull + trim vane, 5 road wheels, sprocket,
+      idler, a track of shoes, ACAV shields round the .50 cal and both M60s,
+      stowage, stars + bumper code; replaces the BTR as the HQ's APC.
+      FINISHED (your go 2026-09-22): the ACAV cupola TURNS to its target; the
+      wheels turn and the track shoes roll in the vertex shader from each
+      vehicle's odometer (one draw, no CPU per wheel; gear attributes
+      interleaved — WebGPU's 8-buffer limit); 4.4k tris. Canvas texture's
+      weave was at the pixel limit and crawled like z-fighting — fixed.
+      **M48A3 Patton** DONE (replaces the Battle Tank): cast hull + egg turret,
+      90 mm with bore evacuator + T brake, xenon searchlight, cupola .50,
+      fenders + stowage boxes, basket, 6 road wheels + return rollers, rear
+      sprocket; turret turns, tracks roll; 6.9k tris.
+      **M151A1 MUTT jeep** DONE (replaces the rts-v3 jeep, a closed modern
+      box): open tub, slotted grille, hood star, windshield folded under
+      canvas, wire-cutter bar, M60 on a pedestal with its gunner (they turn
+      together to the target), driver, camo-covered helmets, spare wheel,
+      jerry can, whip; wheels roll; 2.8k tris.
+      ROSTER (Vietnam only): US — (M151 done), M35 gun truck, UH-1 Huey,
+      AH-1 Cobra, M132 Zippo, PBR boat · enemy — PT-76, Type 59/T-54, ZPU AA,
+      Molotova truck, sampans, supply bicycles. Then delete the rts-v3 GLBs;
+      dust behind tracks. Was: **Vehicles are too low poly** — rebuild them for this game: procedural
       on the parts kit (like the buildings) or your Blender work; LODs; the
       silhouette readable from the RTS camera (M113, M151 jeep, M35 truck,
       M48 tank, Huey); instanced so 100 cost a handful of draws
@@ -226,16 +269,48 @@ Keep this file current: tick things off here, add new asks here.
       unit/prop scale 1.3, revo grass, tall-plant field, foliage LOD from the RTS
       view, no grass on cliffs, labs on custom UI, fog of war off by default
 
+## Economy + Company of Heroes ideas (your question 2026-09-22 — not agreed yet)
+
+- [ ] **Base income** so you are never stuck (HQ trickle ~+60/min; points on
+      top). TODAY: start 400, only points pay (+96/min each), the M48 costs 420
+      — you cannot build it until you hold ground
+- [ ] **Two resources**: Supplies (men, buildings) and **Fuel** (vehicles) —
+      most points give supplies, a few special ones (fuel depot, truck park)
+      give fuel, so armour depends on ground you fight for
+- [ ] **Supply lines**: a point only pays if connected through your points to
+      the HQ; cut the chain and everything behind goes dead
+- [ ] **Upkeep**: a bigger army lowers income (stops snowballing)
+- [ ] **Victory points** as the main win condition (ticket bleed), not "destroy the HQ"
+- [ ] **Squads** of 4–6 men (shared job, reinforce near the HQ / a point)
+- [ ] **Suppression / pinning** from MGs (makes the pits and nests matter)
+- [ ] **Retreat** button (keep veterans alive)
+- [ ] **Directional armour** (tanks weak at the sides and rear; turrets already turn)
+- [ ] **Weapon teams with firing arcs** (MG team, mortar)
+- [ ] **Veterancy** · **garrisoning** bunkers and huts · engineers laying
+      mines/wire/sandbags/tank traps · call-ins and **doctrines** (airmobile vs
+      armour; artillery, air strikes, napalm) · **craters as cover**
+
 ## Gameplay
 
 - [ ] **Enemy AI** — flanking, retreat, using terrain (biggest gap; you said
       "not now")
+- [ ] **Rocket / indirect-fire artillery** (your ask 2026-09-22, not urgent):
+      rockets that ARC high and fall far, out of line of sight. Enemy: the
+      107 mm Type 63 (12 tubes on a light towed carriage) and 122 mm Grad
+      rockets fired into firebases — firing gives the launch site away. US:
+      the M109 self-propelled howitzer, and 81 mm mortar pits/teams in the camp.
+      Needs: a ballistic arc projectile, a landing marker/warning, splash damage
+- [ ] **Fire from the gun** (your ask 2026-09-22): every unit's tracers and
+      muzzle flashes leave its real muzzle — the tank's cannon tip, the M113's
+      .50 cal, the Huey's door guns — turned with its turret. The procedural
+      vehicles can carry a `muzzle` point in their turret frame (the buildings'
+      gun pits and nests already do, structuresRenderer.muzzleOf)
 - [ ] Suppression / pinning · squads · armour matchups · high-ground bonus ·
       retreat · garrisoning · veterancy · win conditions beyond "destroy HQ"
 - [ ] **Napalm aftermath** — `burnedAt` → vegetation/grass density, burnt
       ground, stumps, haze (burned ground = no concealment)
 - [ ] Nav from vegetation (bamboo blocks, ferns don't) + river **fords**
-- [ ] Pink/violet smoke on **capture points** — the M18 violet kind exists;
+- [x] Pink/violet smoke on **capture points** — the M18 violet kind exists;
       capture points to trigger it
 - [ ] Two factions in `unitTypes` · Vietnam units (Huey, M113, PBR) — **you**
       build the units
@@ -258,7 +333,22 @@ Keep this file current: tick things off here, add new asks here.
       plane — off in RTS mode, back with C; measure each first
 - [ ] Staggered target acquisition — **your** call (changes reaction timing)
 - [ ] Terrain index blending (top-4 layers/texel), ~1 ms — engine, new chat
-- [ ] The 10 ms hilltop GPU spot (parked)
+- [ ] **THE HILLTOP GPU SPOT — must be fixed** (your call 2026-09-22: important,
+      but parked after a long session on it). WHAT IS KNOWN, so nobody starts
+      over: at (120, −40) the GPU takes **10.6 ms** where the bridge and the
+      grass flats take **0.8** at the same camera height; seen again at
+      requisition Points B/C (8.7–9.5 ms before anything was added there).
+      · ~2/3 is PER-PIXEL: at 1/4 the pixels 10.9 → 4.1 ms
+      · an EMPTY scene there still costs 4.5 ms (1.5 at the bridge): the sky
+        BACKGROUND (full-screen atmosphere, not the DayNightSkyDome mesh) is
+        view-direction dependent — looking out from high ground shows it
+      · scene content ~6 ms on top: terrain 2.15 ms is the only object clearly
+        above the noise; shadow RECEIVING ~0.8 (at the noise floor)
+      · ruled out: fog of war, bamboo, ground foliage, sky dome mesh, CSM
+        casting, depth prepass, draw order, post-FX, triplanar
+      NEXT STEP when we come back: per-PASS averaging in the timing panel
+      (single-frame per-pass numbers swung 2x and misled three times), then
+      attribute the sky background and the terrain cost at that view
 - [x] River culling, foliage zoom thinning + no popping, layer budget, lean
       terrain, smoke cap, grass on/off switch in the dev panel
 

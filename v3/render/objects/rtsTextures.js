@@ -411,7 +411,11 @@ export function makeCanvasTexture({ size = 512, seed = 61 } = {}) {
     const img = g.createImageData(S, S);
     const d = img.data;
     const P = 8;
-    const threads = 110;
+    // 32 threads a tile, ~16 px apart. It was 110 — a thread every 4.65 px, at
+    // the pixel limit — and a pattern that fine beats against the pixel grid:
+    // it drew as crawling waves on the M113's rucksacks and tarp that looked
+    // like z-fighting. Keep any drawn pattern well over ~8 px a period.
+    const threads = 32;
     for (let y = 0; y < S; y++) {
       const v = 1 - y / (S - 1);
       for (let x = 0; x < S; x++) {
@@ -573,8 +577,71 @@ export function makeWhitewashTexture({ size = 512, seed = 97 } = {}) {
 
 // ── atlas ────────────────────────────────────────────────────────────────────
 
+/**
+ * Tyre rubber: matte, near-black, dusty toward the edges. 24 tread grooves run
+ * across the cell in u — a tyre's cylinder wraps the cell once round its
+ * circumference, so that is 24 tread blocks round the wheel.
+ */
+export function makeRubberTexture({ size = 512, seed = 101 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const mott = fbm(u * P * 3 + seed, v * P * 3, P * 3, 3);
+        let k = lerp(30, 44, mott);
+        // Tread: a groove every 1/24 of the way round, ~6 px wide (well over the
+        // ~8 px-period floor that keeps a pattern from crawling).
+        const tu = (u * 24) % 1;
+        if (tu < 0.28) k *= 0.7;
+        // A faint film of dried mud. Only faint: a tyre's SIDEWALL (the cylinder's
+        // cap) samples this whole cell as a disc, and a tan "shoulder dust" band
+        // read there as white speckle in the midday sun.
+        const dust = fbm(u * P * 6, v * P * 6, P * 6, 2) * 0.18;
+        const i = (y * S + x) * 4;
+        d[i] = lerp(k, 74, dust);
+        d[i + 1] = lerp(k, 64, dust);
+        d[i + 2] = lerp(k * 0.95, 52, dust);
+        d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
+/**
+ * Clean dark steel: gun metal, track links, hubs — oiled, not rusted. A faint
+ * grain and a few worn, lighter streaks where hands and dirt rub it.
+ */
+export function makeSteelTexture({ size = 512, seed = 103 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const mott = fbm(u * P * 2 + seed, v * P * 2, P * 2, 4);
+        let k = lerp(52, 70, mott);
+        const wear = Math.max(0, fbm(u * P * 5 + 3, v * P * 1.5, P * 5, 3) - 0.62) * 2.2;
+        k += wear * 38;
+        const i = (y * S + x) * 4;
+        d[i] = k * 0.97;
+        d[i + 1] = k;
+        d[i + 2] = k * 0.95;
+        d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 export const ATLAS_COLS = 4;
-export const ATLAS_ROWS = 3;
+export const ATLAS_ROWS = 4;
 /** Fraction of a cell kept clear at its border, so mips cannot bleed across. */
 export const ATLAS_PAD = 0.004;
 
@@ -609,6 +676,8 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeCamoTexture({ size: cell }),
     makeConcreteTexture({ size: cell }),
     makeWhitewashTexture({ size: cell }),
+    makeSteelTexture({ size: cell }),
+    makeRubberTexture({ size: cell }),
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;

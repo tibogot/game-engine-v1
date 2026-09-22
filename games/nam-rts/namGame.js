@@ -689,11 +689,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
         ? [
             ...(HARVEST ? [{ key: "harvester", label: "Harvester", cost: UNIT_COST.harvester }] : []),
             { key: "soldier", label: "Soldier", cost: UNIT_COST.soldier },
-            { key: "jeep", label: "Jeep", cost: UNIT_COST.jeep },
+            { key: "jeep", label: "M151 Jeep", cost: UNIT_COST.jeep },
             { key: "builder", label: "Builder", cost: UNIT_COST.builder },
-            { key: "bigtank", label: "Heavy APC", cost: UNIT_COST.bigtank },
+            { key: "bigtank", label: "M113 ACAV", cost: UNIT_COST.bigtank },
             { key: "lightTank", label: "Light Tank", cost: UNIT_COST.lightTank },
-            { key: "tank", label: "Battle Tank", cost: UNIT_COST.tank },
+            { key: "tank", label: "M48 Patton", cost: UNIT_COST.tank },
           ]
         // Helipad units are free in this pass — only base production is costed.
         : s.typeKey === "helipad"

@@ -23,6 +23,7 @@ import {
 import { buildCorrugatedPanel, buildTrapezoidPanel, MAT } from "../v3/render/objects/rtsParts.js";
 
 import { buildDoorLeaf, buildQuonsetShellGeometry } from "../v3/render/objects/rtsQuonset.js";
+import { buildM113, buildM151, buildM48 } from "../v3/render/objects/rtsVehicles.js";
 import { buildGunPitBody, buildGunPitGun, buildBunker, buildHelipad, buildNestBody, buildNestGun, buildRequisitionMast, buildSandbagWallPiece } from "../v3/render/objects/rtsBuildables.js";
 
 let failed = 0;
@@ -112,6 +113,26 @@ check("DShK", buildNestGun());
 check("sandbag wall", buildSandbagWallPiece());
 check("bunker", buildBunker());
 check("requisition mast", buildRequisitionMast());
+
+console.log("vehicles");
+{
+  const m = buildM113();
+  check("M113 ACAV hull", m);
+  check("M113 ACAV turret", m.userData.turret.geo);
+  check("M113 ACAV running gear", m.userData.gear);
+}
+{
+  const m = buildM48();
+  check("M48A3 hull", m);
+  check("M48A3 turret", m.userData.turret.geo);
+  check("M48A3 running gear", m.userData.gear);
+}
+{
+  const m = buildM151();
+  check("M151 hull", m);
+  check("M151 turret (M60 + gunner)", m.userData.turret.geo);
+  check("M151 wheels", m.userData.gear);
+}
 
 console.log("Quonset HQ");
 check("quonset shell", buildQuonsetShellGeometry().shellGeo);
