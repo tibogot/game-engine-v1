@@ -1256,6 +1256,153 @@ export function buildM551({ seed = 551 } = {}) {
   return geo;
 }
 
+// ── PT-76 (the other side's light tank) ──────────────────────────────────────
+/**
+ * The NVA's amphibious light tank — the armour that came down the trail and
+ * overran Lang Vei. What makes it a PT-76 and not one of ours: a BOAT hull,
+ * tall-sided and slab-flat, with a folded trim vane across the bow and two
+ * water-jet outlets at the stern; a low truncated CONE of a turret set well
+ * forward; the long 76 mm with its bore evacuator and a double-baffle muzzle
+ * brake; six big road wheels a side and no return rollers. 6.9 m, 3.1 m wide
+ * (real) — longer and wider than the Sheridan, and it reads that way from the
+ * RTS camera, which is the point: you should know at a glance whose it is.
+ *
+ * Its green is the other side's: a flat dark khaki, not olive drab, with the
+ * white hull number the NVA painted on the turret.
+ *
+ * userData: stencil, turret { geo, stencil, pivot, muzzle }, gear, length.
+ */
+export function buildPT76({ seed = 76 } = {}) {
+  const R = rng(seed);
+  const NVA = 0.30;                       // lighter, greyer green than US OD (0.16)
+  const hull = [], turret = [], gear = [], spins = [];
+  const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
+  const T = (geo, pos, mat, tone = 0.5, rot) => turret.push({ geo, pos, mat, tone, rot });
+  const G = (geo, pos, mat, tone, rot, spin) => { gear.push({ geo, pos, mat, tone, rot }); spins.push({ spin, n: geo.attributes.position.count }); };
+  const HW = 1.06, DECK = 1.62;
+  const pivot = [0, DECK, 0.55];          // the turret sits forward of centre
+
+  // ── Hull: the boat. Flat bottom, a long sloped bow, vertical sides, a flat
+  //    deck — the shape that lets it swim, and the one thing you cannot mistake.
+  const shape = new THREE.Shape();
+  shape.moveTo(-3.35, 0.30);
+  shape.lineTo(2.55, 0.30);
+  shape.lineTo(3.45, 0.86);               // the cutwater
+  shape.lineTo(3.12, DECK);
+  shape.lineTo(-3.4, DECK);
+  shape.lineTo(-3.45, 0.62);
+  shape.closePath();
+  const bev = 0.05;
+  const body = new THREE.ExtrudeGeometry(shape, { depth: 2 * HW - 2 * bev, bevelEnabled: true, bevelThickness: bev, bevelSize: bev, bevelSegments: 2 });
+  body.rotateY(-Math.PI / 2);
+  body.computeBoundingBox();
+  body.translate(-(body.boundingBox.min.x + body.boundingBox.max.x) / 2, 0, 0);
+  P(indexed(body), [0, 0, 0], MAT.paint, NVA);
+  const deckY = DECK + bev;
+
+  // The trim vane, folded flat down the bow (raised, it is the swimming board).
+  P(buildBox(1.9, 0.07, 1.25), [0, 1.3, 2.86], MAT.paint, NVA * 0.92, [0.52, 0, 0]);
+  for (const sx of [-1, 1]) P(buildBox(0.05, 0.05, 0.5), [sx * 0.8, 1.42, 2.55], MAT.steel, 0.25, [0.52, 0, 0]);
+  // Driver's hatch on the bow deck, with its periscopes.
+  P(new THREE.CylinderGeometry(0.31, 0.33, 0.08, 14), [0, deckY + 0.04, 2.0], MAT.paint, NVA * 1.06);
+  for (let k = 0; k < 3; k++) P(buildBox(0.13, 0.07, 0.07), [-0.22 + k * 0.22, deckY + 0.12, 2.18], MAT.steel, 0.04);
+  // Headlight and its guard, on the left bow as the Soviets fitted it.
+  P(new THREE.CylinderGeometry(0.13, 0.13, 0.1, 12).rotateX(Math.PI / 2), [-0.72, deckY + 0.14, 2.92], MAT.white, 0.4);
+  P(new THREE.TorusGeometry(0.16, 0.02, 4, 10), [-0.72, deckY + 0.14, 2.96], MAT.steel, 0.2);
+  // Engine deck: louvred grilles, fuel drums lashed at the stern, tow hooks.
+  for (let k = 0; k < 7; k++) P(buildBox(1.5, 0.035, 0.07), [0, deckY + 0.02, -1.35 - k * 0.2], MAT.steel, 0.1);
+  for (const sx of [-1, 1]) P(axleX(0.26, 0.9, 12).rotateY(Math.PI / 2), [sx * 0.62, deckY + 0.28, -2.75], MAT.paint, NVA * 0.85);
+  for (const sx of [-1, 1]) P(buildBox(0.16, 0.16, 0.2), [sx * 0.62, 0.62, 3.2], MAT.steel, 0.3);
+  // The water jets: two round outlets in the stern plate — the amphibian's tell.
+  for (const sx of [-1, 1]) {
+    P(new THREE.CylinderGeometry(0.26, 0.28, 0.16, 14).rotateX(Math.PI / 2), [sx * 0.62, 0.75, -3.45], MAT.steel, 0.12);
+    P(new THREE.CylinderGeometry(0.19, 0.19, 0.06, 14).rotateX(Math.PI / 2), [sx * 0.62, 0.75, -3.52], MAT.metal, 0.02);
+  }
+  // Spare track shoes and a tarp roll across the rear deck.
+  for (let k = 0; k < 4; k++) P(buildBox(0.4, 0.06, 0.15), [-0.75 + k * 0.5, deckY + 0.05, -1.05], MAT.steel, 0.1);
+  P(axleX(0.15, 1.5, 10), [0, deckY + 0.16, -3.05], MAT.canvas, 0.32);
+
+  // ── Turret: a truncated cone, low and forward, with a single big hatch.
+  T(new THREE.CylinderGeometry(0.88, 1.04, 0.56, 22), [0, 0.28, 0], MAT.paint, NVA * 1.04);
+  T(new THREE.CylinderGeometry(0.86, 0.88, 0.07, 22), [0, 0.59, 0], MAT.paint, NVA * 1.1);
+  T(new THREE.CylinderGeometry(0.34, 0.36, 0.07, 14), [-0.3, 0.64, -0.12], MAT.paint, NVA * 1.14);   // hatch
+  T(buildBox(0.14, 0.1, 0.1), [0.34, 0.64, 0.3], MAT.steel, 0.06);                                    // periscope
+  // Mantlet and the 76 mm: bore evacuator a third along, double-baffle brake.
+  T(buildBox(0.66, 0.4, 0.3), [0, 0.3, 0.95], MAT.paint, NVA * 0.96);
+  T(alongZ(0.115, 0.1, 0.55, 14), [0, 0.3, 1.25], MAT.paint, NVA * 0.9);
+  T(alongZ(0.075, 0.07, 2.5, 14), [0, 0.3, 2.65], MAT.paint, NVA * 0.9);
+  T(alongZ(0.13, 0.13, 0.34, 14), [0, 0.3, 2.05], MAT.paint, NVA * 0.95);                             // bore evacuator
+  for (const z of [3.62, 3.86]) T(alongZ(0.12, 0.12, 0.12, 12), [0, 0.3, z], MAT.steel, 0.06);        // muzzle brake baffles
+  T(alongZ(0.055, 0.055, 0.3, 10), [0, 0.3, 3.74], MAT.steel, 0.06);
+  // Coaxial machine gun, to the gun's right.
+  T(alongZ(0.035, 0.035, 0.7, 8), [0.26, 0.26, 1.5], MAT.steel, 0.06);
+  // Grab rails round the turret, and the aerial at its left rear.
+  for (const sx of [-1, 1]) for (const z of [0.25, -0.35]) {
+    T(buildBox(0.04, 0.12, 0.34), [sx * 0.94, 0.36, z], MAT.steel, 0.24);
+  }
+  T(new THREE.CylinderGeometry(0.05, 0.06, 0.1, 8), [-0.72, 0.62, -0.6], MAT.steel, 0.25);
+  T(new THREE.CylinderGeometry(0.008, 0.016, 2.6, 4).translate(0, 1.3, 0), [-0.72, 0.66, -0.6], MAT.steel, 0.3, [-0.1, 0, 0.05]);
+
+  // ── Running gear: six road wheels a side, idler forward, sprocket at the
+  //    back, and no return rollers — the top run rides on the wheels.
+  const wheelR = 0.36, t = 0.05;
+  const wheelsZ = [2.05, 1.23, 0.41, -0.41, -1.23, -2.05];
+  const idler = { c: [2.85, 0.6], r: 0.3 }, sprocket = { c: [-2.9, 0.68], r: 0.32 };
+  const path = trackPath({ front: idler, rear: sprocket, wheelsZ, wheelR, t });
+  const wheel = (cy, cz, r) => [cy, cz, r, 1];
+  for (const sx of [-1, 1]) {
+    const xc = sx * (HW + 0.22), tw = 0.46;
+    G(indexed(trackBand(path, xc, tw, t)), [0, 0, 0], MAT.steel, 0.05, undefined, [0, 0, 0, 2]);
+    for (const z of wheelsZ) {
+      const w = wheel(wheelR + t, z, wheelR);
+      G(axleX(wheelR, 0.38, 18), [xc, wheelR + t, z], MAT.rubber, 0.5, undefined, w);
+      G(axleX(0.24, 0.4, 14), [xc, wheelR + t, z], MAT.paint, NVA * 0.9, undefined, w);
+      G(axleX(0.09, 0.43, 8), [xc, wheelR + t, z], MAT.steel, 0.3, undefined, w);
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * Math.PI * 2;
+        G(buildBox(0.42, 0.04, 0.04), [xc, wheelR + t + Math.sin(a) * 0.15, z + Math.cos(a) * 0.15], MAT.steel, 0.35, undefined, w);
+      }
+    }
+    const iw = wheel(idler.c[1], idler.c[0], idler.r);
+    G(axleX(idler.r, 0.38, 16), [xc, idler.c[1], idler.c[0]], MAT.rubber, 0.45, undefined, iw);
+    G(axleX(0.18, 0.4, 12), [xc, idler.c[1], idler.c[0]], MAT.paint, NVA * 0.9, undefined, iw);
+    const sw = wheel(sprocket.c[1], sprocket.c[0], sprocket.r);
+    G(axleX(sprocket.r - 0.03, 0.34, 16), [xc, sprocket.c[1], sprocket.c[0]], MAT.paint, NVA * 0.85, undefined, sw);
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      G(buildBox(0.3, 0.07, 0.07), [xc, sprocket.c[1] + Math.sin(a) * (sprocket.r - 0.01), sprocket.c[0] + Math.cos(a) * (sprocket.r - 0.01)], MAT.steel, 0.25, [a, 0, 0], sw);
+    }
+  }
+
+  const geo = assemble(hull);
+  bakeContactAO(geo, { cell: 0.12, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
+  const turretGeo = assemble(turret);
+  bakeContactAO(turretGeo, { cell: 0.1, radius: 2, strength: 0.35, groundFade: 0, floor: 0.55 });
+  const gearGeo = assemble(gear);
+  bakeContactAO(gearGeo, { cell: 0.08, radius: 1, strength: 0.3, groundFade: 0.2, floor: 0.55 });
+
+  // Markings: the white hull number on both turret cheeks, painted on the cone.
+  const tst = [];
+  for (const sx of [-1, 1]) {
+    const nx = sx * 0.99, nz = -0.05;
+    tst.push(stencilPatch("hullNumber", flatSurface([nx, 0.33, nz], [sx * 0.97, 0.24, 0], [0, 0, -sx], 0.78, "hullNumber"), { lift: 0.012 }));
+  }
+  const turretStencil = mergeStencils(tst);
+
+  for (const g of [geo, turretGeo, gearGeo, turretStencil]) g?.scale(S, S, S);
+  packGear(gearGeo, spins);
+  geo.computeBoundingBox();
+  geo.userData.stencil = null;
+  geo.userData.turret = {
+    geo: turretGeo, stencil: turretStencil,
+    pivot: pivot.map((c) => c * S),
+    muzzle: [0, 0.3 * S, 3.95 * S],
+  };
+  geo.userData.gear = gearGeo;
+  geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
+  return geo;
+}
+
 // ── M35A2 "deuce-and-a-half" (engineer truck) ────────────────────────────────
 /**
  * The 2½-ton truck that carried the war. Built as the builder's truck: what

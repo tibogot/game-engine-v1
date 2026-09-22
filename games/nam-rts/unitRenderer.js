@@ -18,12 +18,12 @@ import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
-import { buildM113, buildM151, buildM35, buildM48, buildM551, buildUH1, rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
+import { buildM113, buildM151, buildM35, buildM48, buildM551, buildPT76, buildUH1, rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
 /** Vehicles built in code, by a unit type's `procedural` key. */
-const PROCEDURAL_VEHICLES = { m113: () => buildM113(), m48: () => buildM48(), m151: () => buildM151(), uh1: () => buildUH1(), m551: () => buildM551(), m35: () => buildM35() };
+const PROCEDURAL_VEHICLES = { m113: () => buildM113(), m48: () => buildM48(), m151: () => buildM151(), uh1: () => buildUH1(), m551: () => buildM551(), m35: () => buildM35(), pt76: () => buildPT76() };
 import { UNIT_TYPES, UNIT_TYPE_KEYS } from "./unitTypes.js";
 
 // Mesh → owning unit, for selection raycasts. A WeakMap (not mesh.userData)
@@ -547,8 +547,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     // Skinned units can't carry an instanceColor, so a non-player team takes a
     // tinted clone of the shared material. Player units keep sharing the
     // template's material — no clone, no extra pipeline, for the common case.
-    if (!isUntinted(unit.team)) {
-      const tint = teamTint(unit.team);
+    if (!isUntinted(unit.team, t)) {
+      const tint = teamTint(unit.team, t);
       root.traverse((o) => {
         if (!o.isMesh) return;
         o.material = o.material.clone();
@@ -697,7 +697,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         const i = inst.n;
         if (i < MAX_PER_TYPE) {
           x.updateMatrix(); // off-scene: nothing else will do this for us
-          const tint = teamTint(unit.team);
+          const tint = teamTint(unit.team, unit.type);
           for (const part of inst.parts) {
             if (part.kind) {
               _euler.copy(part.baseEuler);

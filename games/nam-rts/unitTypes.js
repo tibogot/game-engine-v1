@@ -184,6 +184,38 @@ export const UNIT_TYPES = {
     barY: 4.2,
     castShadow: true,
   },
+  // The other side's armour (enemyAI.js buys it; you cannot build one). A
+  // PT-76 is thinner-skinned than an M48 and its 76 mm hits softer, but it is
+  // FAST — it swims rivers in life, and here it leads the Front's attacks and
+  // outruns anything it does not want to fight.
+  pt76: {
+    typeKey: "pt76",
+    name: "PT-76",
+    // logic
+    isAir: false,
+    hover: 0,
+    speed: 19,
+    radius: 4.8,
+    turnRate: 2.2,
+    maxHp: 230,
+    // combat
+    range: 40,
+    damage: 24,
+    fireRate: 0.8,
+    canHitAir: false,
+    vision: 36,
+    // render
+    procedural: "pt76",   // rtsVehicles.buildPT76
+    // Painted in the Front's khaki with their hull number: no red team wash
+    // over it (teams.js) — the red bar and ring already say whose it is.
+    nativeTeam: "enemy",
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 5.6,
+    barWidth: 6.5,
+    barY: 4.2,
+    castShadow: true,
+  },
   harvester: {
     typeKey: "harvester",
     name: "Harvester",

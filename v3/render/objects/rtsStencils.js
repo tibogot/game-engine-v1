@@ -44,6 +44,8 @@ export const STENCILS = {
   nlfBanner:    { x: 832, y: 768, w: 192, h: 128 },
   // The yellow star on a red disc, painted over the pediment's oculus.
   nlfStar:      { x: 832, y: 896, w: 128, h: 128 },
+  // A hull number in white, for the other side's armour (PT-76 turret cheeks).
+  hullNumber:   { x: 704, y: 928, w: 128, h: 96 },
 };
 for (const s of Object.values(STENCILS)) s.aspect = s.w / s.h;
 
@@ -123,6 +125,7 @@ function drawSheet() {
     g.fillRect(c.x, c.y + c.h - ((k + 1) * c.h) / 5, c.w, c.h / 5 + 1);
   }
   c = STENCILS.tailNumber; text("69-15078", c.x, c.y, c.w, c.h, "#1d1d1a", 70); wear(c.x, c.y, c.w, c.h, 60);
+  c = STENCILS.hullNumber; text("555", c.x, c.y, c.w, c.h, "#e9e6dc", 78); wear(c.x, c.y, c.w, c.h, 90);
   c = STENCILS.bumperCode; text("11 ACR   A-13", c.x, c.y, c.w, c.h, "#e9e6dc", 64); wear(c.x, c.y, c.w, c.h, 140);
   const star5 = (cx, cy, R, col) => {
     g.fillStyle = col; g.beginPath();

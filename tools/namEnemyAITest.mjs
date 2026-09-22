@@ -286,6 +286,56 @@ console.log("mortars");
   ok("never onto its own men", shots.length === before || shots.slice(before).every((s) => Math.abs(s.z - 40) > 4), `${shots.length - before} more`);
 }
 
+console.log("armour (and saving up for it)");
+{
+  const setup = ({ held = 2, stock = 2000 } = {}) => {
+    const pts = [point(0, 0, 100, held > 0 ? "enemy" : null), point(1, 0, 260, held > 1 ? "enemy" : null)];
+    const w = world({ points: pts });
+    const ai = createEnemyAI({ ...w, params: { ...ENEMY_AI, startSquads: 2, startingStock: stock, zpuMax: 0, mortarMax: 0 } });
+    run(ai, ENEMY_AI.tick);
+    return { w, ai };
+  };
+  {
+    const { w, ai } = setup();
+    run(ai, ENEMY_AI.armourEvery + ENEMY_AI.tick);
+    const tanks = w.units.list.filter((u) => u.typeKey === "pt76" && u.alive);
+    ok("holding ground, it buys a PT-76", tanks.length >= 1, `${tanks.length}`);
+    ok("…at its HQ, not a tunnel", tanks.every((t) => t.position.z > 350), tanks.map((t) => t.position.z.toFixed(0)).join(","));
+    const withTank = ai.squads.filter((s) => s.members.some((u) => u.typeKey === "pt76"));
+    ok("…and every one joins a squad, one apiece", withTank.length === tanks.length,
+      `${tanks.length} tanks, ${withTank.length} squads`);
+    // A squad's SIZE is its men: the tank must not fill a rifle slot.
+    ok("the squad still counts five men", ai.summary()[0].includes("5/5"), ai.summary()[0]);
+  }
+  {
+    const { w, ai } = setup({ held: 0 });
+    run(ai, ENEMY_AI.armourEvery * 3);
+    ok("holding nothing, it buys none", w.units.list.filter((u) => u.typeKey === "pt76").length === 0);
+  }
+  {
+    // It SAVES for a tank (recruits and digging wait), so the only bar is the
+    // price itself — with the purse under it, nothing is bought.
+    const { w, ai } = setup({ stock: ENEMY_AI.armourCost - 1 });
+    run(ai, ENEMY_AI.armourEvery * 2);
+    ok("under the price, no tank", w.units.list.filter((u) => u.typeKey === "pt76").length === 0);
+  }
+  {
+    const { w, ai } = setup();
+    run(ai, ENEMY_AI.armourEvery * (ENEMY_AI.armourMax + 3));
+    ok("and never more than armourMax", w.units.list.filter((u) => u.typeKey === "pt76").length <= ENEMY_AI.armourMax,
+      `${w.units.list.filter((u) => u.typeKey === "pt76").length}`);
+  }
+  {
+    // The point of the plan: recruits do not eat the tank fund. Two squads are
+    // on the field, the purse is a tank's price — the next man must WAIT.
+    const { w, ai } = setup({ stock: ENEMY_AI.armourCost });
+    const before = w.units.list.filter((u) => u.typeKey === "soldier").length;
+    run(ai, ENEMY_AI.recruitTime * 2);
+    const after = w.units.list.filter((u) => u.typeKey === "soldier").length;
+    ok("it saves for the tank instead of recruiting", after === before, `${after - before} men recruited`);
+  }
+}
+
 console.log("determinism");
 {
   const game = () => {

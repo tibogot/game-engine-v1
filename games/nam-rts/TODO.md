@@ -47,7 +47,21 @@ Keep this file current: tick things off here, add new asks here.
    punji pits / booby traps · supply cache (hits their income) · spider holes ·
    enemy camp dressing round the résidence (well, sheds, cooking fire smoke)
 3. ~~**Vehicles rebuilt**~~ DONE for the US side — M113, M48, M151, M551, M35,
-   UH-1 all procedural. Enemy vehicles come with #7
+   UH-1 all procedural. ENEMY armour started:
+   [x] **PT-76** (`rtsVehicles.buildPT76`, 5.3k tris): boat hull, folded trim
+   vane, cone turret with the white hull number, 76 mm with bore evacuator and
+   double-baffle brake, two water jets in the stern, six road wheels, no return
+   rollers. 230 hp, range 40, speed 19 — thinner and softer than an M48, faster
+   than anything you own. Painted in THEIR khaki: `nativeTeam: "enemy"` in
+   unitTypes means no red team wash over it (teams.js).
+   The AI buys them at its HQ (300, max 4, once it holds 2 points) and attaches
+   one to the squad that needs it most — the one gathering to attack, else the
+   one nearest your HQ. The tank takes the spot FACING you while the men take
+   the cover; a squad's size still counts men only.
+   **It SAVES for them** (`plan()`): recruits and digging wait rather than eat
+   the fund — without that it never reached 300 (MEASURED: 5 min, 7 points, 0
+   tanks; after: first tank at 2 min, four by 5).
+   NEXT enemy vehicles: Molotova supply truck, ZPU on a truck, sampans, bicycles
 4. **The jungle: big trees + palm variety + Vietnam plants** (areca, sago,
    pandanus, nipa, banana, flame tree) — the look you asked for
 5. **See-through for hidden units** — needed before the jungle gets denser

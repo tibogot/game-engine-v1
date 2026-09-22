@@ -29,6 +29,11 @@
 //             dropping a round every `mortarReload` s on the thickest knot of
 //             your men ITS OWN MEN CAN SEE, inside 28–130 m and never on its
 //             own (the `fireMortar` hook → projectiles.spawnArc)
+//   armour    a PT-76 bought at the HQ (not a tunnel — a tank does not climb
+//             out of a hole) and attached to the squad that most needs one:
+//             the one gathering for an attack, else the one nearest your HQ.
+//             It holds the spot facing you while the men take the cover
+//             (`armourKey`, `armourCost`, `armourMax`)
 //   AA        a ZPU-4 dug in (the `emplace` hook, paid from its purse) at the
 //             held point your helicopters were seen near — or, holding three
 //             or more, at the most forward one; up in `zpuDigTime` s
@@ -78,6 +83,12 @@ export const ENEMY_AI = {
   mortarMin: 28,
   mortarDamage: 34,
   mortarSplash: 9,
+  // Armour: PT-76s, bought at the HQ and attached to squads.
+  armourKey: "pt76",
+  armourCost: 300,
+  armourMax: 4,
+  armourMinPoints: 2,   // it holds this much ground before it buys a tank
+  armourEvery: 8,       // seconds between decisions
 };
 
 export const DIFFICULTY = {
@@ -135,6 +146,30 @@ export function createEnemyAI({
   };
 
   const say = (msg) => { log.push(`${clock.toFixed(0).padStart(4)}s  ${msg}`); if (log.length > 12) log.shift(); };
+
+  /**
+   * WHAT IT IS SAVING FOR. Without this it never bought a tank: recruits cost
+   * 50 every few seconds and drain the purse faster than seven points fill it,
+   * so the 300 for a PT-76 was never on the table (MEASURED: 5 minutes, 7
+   * points held, 0 tanks). So it plans like a player — men enough to hold the
+   * line first, then armour — and everything cheaper waits rather than eating
+   * the fund. `null` means nothing is being saved for: spend freely.
+   */
+  function plan() {
+    const men = squads.reduce((n, s) => n + menOf(s).length, 0);
+    if (men < params.squadSize * 2) return null;                 // two squads before anything
+    const held = requisition.points.filter((p) => p.owner === "enemy").length;
+    if (params.armourKey && allArmour() < params.armourMax && held >= params.armourMinPoints) {
+      return { kind: "armour", cost: params.armourCost };
+    }
+    return null;
+  }
+  /** Can it spend `cost` on `kind` without robbing what it is saving for? */
+  function canSpend(cost, kind) {
+    if (stock < cost) return false;
+    const p = plan();
+    return !p || p.kind === kind || stock - cost >= p.cost;
+  }
   const hq = () => (structures.enemyBase?.alive ? structures.enemyBase : null);
   const open = (x, z) => (navGrid ? navGrid.nearestOpenWorld(x, z) : { x, z });
   const living = (s) => s.members.filter((u) => u.alive);
@@ -147,7 +182,15 @@ export function createEnemyAI({
     return { x: x / m.length, z: z / m.length };
   }
   const squadPower = (s) => living(s).reduce((n, u) => n + power(u), 0);
-  const strength = (s) => squadPower(s) / params.squadSize;
+  /** Its armour, and its men. A squad is men plus (sometimes) a tank riding with them. */
+  const armourOf = (s) => living(s).filter((u) => u.typeKey === params.armourKey);
+  const menOf = (s) => living(s).filter((u) => u.typeKey === unitKey);
+  /**
+   * The retreat gauge, counted on the MEN only: a tank is worth four riflemen
+   * in `squadPower`, so counting it here would show a squad whose infantry is
+   * dead as still fit to fight.
+   */
+  const strength = (s) => menOf(s).reduce((n, u) => n + power(u), 0) / params.squadSize;
 
   // ── Recruiting ─────────────────────────────────────────────────────────────
   function doorOf(base) {
@@ -155,8 +198,8 @@ export function createEnemyAI({
     const ap = base.type?.doorApproach;
     return { x: base.position.x + (ap?.dirX ?? 0) * r, z: base.position.z + (ap?.dirZ ?? -1) * r };
   }
-  function spawnMan(at) {
-    const u = units.spawn(unitKey, at.x + (rand() - 0.5) * 6, at.z + (rand() - 0.5) * 6, { team: "enemy" });
+  function spawnMan(at, key = unitKey) {
+    const u = units.spawn(key, at.x + (rand() - 0.5) * 6, at.z + (rand() - 0.5) * 6, { team: "enemy" });
     return u;
   }
   function makeSquad(members) {
@@ -205,16 +248,16 @@ export function createEnemyAI({
   function recruit(dt) {
     const base = hq();
     if (!base) return;
-    const men = squads.reduce((n, s) => n + living(s).length, 0) + forming.filter((u) => u.alive).length;
+    const men = squads.reduce((n, s) => n + menOf(s).length, 0) + forming.filter((u) => u.alive).length;
     if (men >= params.maxSquads * params.squadSize) return;
     recruitT -= dt;
     if (recruitT > 0) return;
     const cost = UNIT_COST[unitKey] ?? 50;
-    if (!purse.spend(cost)) return;
+    if (!canSpend(cost, "men") || !purse.spend(cost)) return;
     recruitT = params.recruitTime;
     // A squad at home refitting takes the recruit first — and he comes up
     // where it is waiting (its post IS a tunnel mouth or the HQ's door).
-    const refit = squads.find((s) => s.state === "refit" && living(s).length < params.squadSize);
+    const refit = squads.find((s) => s.state === "refit" && menOf(s).length < params.squadSize);
     const at = refit?.post ?? musterPoint();
     if (!at) return;
     const u = spawnMan(at);
@@ -387,7 +430,23 @@ export function createEnemyAI({
     const spots = spotsFor(p);
     const sharing = squads.filter((o) => o !== s && o.point === p && (o.state === "hold" || o.state === "move"));
     const offset = (sharing.length * params.squadSize) % spots.length;
-    s.spots = living(s).map((u, i) => spots[(offset + i) % spots.length]);
+    // The tank stands where it can shoot: the spot of this squad's share that
+    // faces YOUR side. Concealment is for the men; armour wants the field.
+    const front = structures.base?.position;
+    const mine = living(s);
+    const picks = mine.map((u, i) => spots[(offset + i) % spots.length]);
+    if (front) {
+      const armour = mine.map((u, i) => (u.typeKey === params.armourKey ? i : -1)).filter((i) => i >= 0);
+      if (armour.length) {
+        const order = picks.map((sp, i) => ({ i, d: Math.hypot(sp.x - front.x, sp.z - front.z) }))
+          .sort((a, b) => a.d - b.d);
+        for (let k = 0; k < armour.length && k < order.length; k++) {
+          const a = armour[k], b = order[k].i;
+          [picks[a], picks[b]] = [picks[b], picks[a]];
+        }
+      }
+    }
+    s.spots = picks;
     orderSquad(s, p.position.x, p.position.z, s.spots);
     s.post = { x: p.position.x, z: p.position.z };
   }
@@ -633,7 +692,7 @@ export function createEnemyAI({
       }
 
       case "refit": {
-        if (living(s).length / params.squadSize >= params.rejoinAt && strength(s) >= params.rejoinAt * 0.8) {
+        if (menOf(s).length / params.squadSize >= params.rejoinAt && strength(s) >= params.rejoinAt * 0.8) {
           setTask(s, "idle");
           say(`squad ${s.id} back in the fight`);
         }
@@ -658,7 +717,7 @@ export function createEnemyAI({
   function digInAA() {
     if (!emplace || !hq()) return;
     if ((structures.zpus ?? []).length >= params.zpuMax) return;
-    if (purse.stock < params.zpuCost + params.zpuReserve) return;
+    if (purse.stock < params.zpuCost + params.zpuReserve || !canSpend(params.zpuCost, "zpu")) return;
     const held = requisition.points.filter((p) => p.owner === "enemy");
     const front = structures.base?.position;
     // Without a helicopter seen, AA "just in case" stays thin: about one gun
@@ -736,7 +795,7 @@ export function createEnemyAI({
   function digInMortar() {
     if (!emplace || !hq()) return;
     if ((structures.mortars ?? []).length >= params.mortarMax) return;
-    if (purse.stock < params.mortarCost + params.zpuReserve) return;
+    if (purse.stock < params.mortarCost + params.zpuReserve || !canSpend(params.mortarCost, "mortar")) return;
     const held = requisition.points.filter((p) => p.owner === "enemy");
     if (held.length < 2) return;
     const front = structures.base?.position;
@@ -763,6 +822,43 @@ export function createEnemyAI({
     }
     if (!site || !purse.spend(params.mortarCost)) return;
     if (emplace("mortar", site.x, site.z)) say(`mortar dug in behind ${best.name}`);
+  }
+
+  // ── Armour ────────────────────────────────────────────────────────────────
+  let armourT = 0;
+  const allArmour = () => squads.reduce((n, s) => n + armourOf(s).length, 0);
+  /**
+   * Buy a PT-76 and send it to the squad that most needs one. It comes out of
+   * the HQ — not a tunnel; a tank does not climb out of a hole — and drives to
+   * join them (orderSquad gives a straggler its own path). Preference: a squad
+   * gathering for an attack first, then the squad nearest YOUR HQ, so armour
+   * goes where the fighting is instead of guarding a quiet hill.
+   */
+  function buyArmour() {
+    const base = hq();
+    if (!base || !params.armourKey) return;
+    if (allArmour() >= params.armourMax) return;
+    if (!canSpend(params.armourCost, "armour")) return;
+    const held = requisition.points.filter((p) => p.owner === "enemy").length;
+    if (held < params.armourMinPoints) return;
+    const front = structures.base?.position;
+    const want = squads.filter((s) => armourOf(s).length === 0 && menOf(s).length >= 2
+      && s.state !== "retreat" && s.state !== "refit");
+    if (!want.length) return;
+    const rank = (s) => {
+      const c = centroid(s);
+      const staging = s.state === "stage" || s.state === "assault" ? -1000 : 0;
+      return staging + (c && front ? Math.hypot(c.x - front.x, c.z - front.z) : 1e6);
+    };
+    want.sort((a, b) => rank(a) - rank(b));
+    const s = want[0];
+    if (!purse.spend(params.armourCost)) return;
+    const u = spawnMan(doorOf(base), params.armourKey);
+    if (!u) return;
+    s.members.push(u);
+    u.squad = s;
+    u.orderTo(s.post?.x ?? doorOf(base).x, s.post?.z ?? doorOf(base).z);
+    say(`PT-76 joins squad ${s.id}`);
   }
 
   function prune() {
@@ -816,6 +912,8 @@ export function createEnemyAI({
     if (tickT <= 0) { tickT = params.tick; prune(); watchTheSky(); }
     zpuT -= dt;
     if (zpuT <= 0) { zpuT = params.zpuEvery; digInAA(); digInMortar(); }
+    armourT -= dt;
+    if (armourT <= 0) { armourT = params.armourEvery; buyArmour(); }
     // Each squad thinks once a tick, but on ITS OWN step of it, not all on the
     // same one: a squad's orders cost a path search per man, and MEASURED with
     // nine squads that was 3.2 ms landing in one frame every second — a hitch.
@@ -840,7 +938,7 @@ export function createEnemyAI({
     get earned() { return earnedTotal; },
     /** For the dev panel: one line per squad. */
     summary() {
-      return squads.map((s) => `S${s.id} ${s.state}${s.point ? " " + s.point.name : ""} ${living(s).length}/${params.squadSize} ${(strength(s) * 100) | 0}%`);
+      return squads.map((s) => `S${s.id} ${s.state}${s.point ? " " + s.point.name : ""} ${menOf(s).length}/${params.squadSize}${armourOf(s).length ? "+" + armourOf(s).length + "T" : ""} ${(strength(s) * 100) | 0}%`);
     },
     // Exposed for tests.
     _scorePoint: scorePoint,

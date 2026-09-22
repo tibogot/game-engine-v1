@@ -19,12 +19,20 @@ export const TEAM_TINT = {
 
 const _white = TEAM_TINT.player;
 
-/** The tint for a team (unknown teams render untinted rather than vanishing). */
-export function teamTint(team) {
+/**
+ * The tint for a team (unknown teams render untinted rather than vanishing).
+ *
+ * `type.nativeTeam` says a model is already painted for a side — the PT-76 is
+ * the Front's own tank, in their khaki with their hull number — and that side
+ * gets no wash: tinting it red would paint it twice and lose the model. It is
+ * still read as theirs by the red health bar and selection ring.
+ */
+export function teamTint(team, type = null) {
+  if (type?.nativeTeam && type.nativeTeam === team) return _white;
   return TEAM_TINT[team] ?? _white;
 }
 
 /** True when a team needs no tinting at all — lets us skip per-unit material clones. */
-export function isUntinted(team) {
-  return teamTint(team).equals(_white);
+export function isUntinted(team, type = null) {
+  return teamTint(team, type).equals(_white);
 }
