@@ -174,11 +174,11 @@ if (sys?.mesh) {
   const heightmap = new Float32Array(16).fill(1);
   const revo = { ...createRevoGrassState(), tileSize: 70, baseColor: "#123456", quality: "ultra" };
   const grass = { system: "revo", bladeHeight: 1 };
-  const d = decodeProjectFile(encodeProjectFile({ terrain, heightmap, grass, revoGrass: revo }));
+  const d = await decodeProjectFile(await encodeProjectFile({ terrain, heightmap, grass, revoGrass: revo }));
   check("the revo look survives a save and a load", JSON.stringify(d.revoGrass) === JSON.stringify(revo));
   check("which system runs is saved with the grass", d.grass?.system === "revo");
   check("a file written before this existed simply has none",
-    decodeProjectFile(encodeProjectFile({ terrain, heightmap })).revoGrass === null);
+    (await decodeProjectFile(await encodeProjectFile({ terrain, heightmap }))).revoGrass === null);
   // The load path is a per-key merge, like every other look block.
   const state = createRevoGrassState();
   mergeKnownKeys(state, { tileSize: 70, retired: 9 });

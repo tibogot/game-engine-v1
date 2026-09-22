@@ -110,9 +110,9 @@ const decals = {
   slots: [{ name: "Crater", albedoUrl: "/textures/crater-decal.png", normalUrl: null }, { name: "Mine", albedoUrl: "asset:" + "a".repeat(40), normalUrl: null }],
   decals: system.decals.map(({ id, ...r }) => r),
 };
-const out = decodeProjectFile(encodeProjectFile({ terrain: { worldSize: 1024 }, decals }));
+const out = await decodeProjectFile(await encodeProjectFile({ terrain: { worldSize: 1024 }, decals }));
 check("decals survive the project file", JSON.stringify(out.decals) === JSON.stringify(decals));
-check("a project without decals loads none", decodeProjectFile(encodeProjectFile({ terrain: { worldSize: 1024 } })).decals === null);
+check("a project without decals loads none", (await decodeProjectFile(await encodeProjectFile({ terrain: { worldSize: 1024 } }))).decals === null);
 check("an imported decal texture is written with the project", ProjectAssets.referencedHashes({ decalSlots: decals.slots }).has("a".repeat(40)));
 
 if (fail) { console.log(`\n${fail} failed`); process.exit(1); }

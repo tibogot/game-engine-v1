@@ -106,9 +106,9 @@ check("…unless unlinked", effectiveWaterfallLook({ ...look, followRiver: false
 
 // ── Project file ──
 const waterfalls = { look, falls: system.falls.map(({ id, ...r }) => r) };
-const out = decodeProjectFile(encodeProjectFile({ terrain: { worldSize: 1024 }, waterfalls }));
+const out = await decodeProjectFile(await encodeProjectFile({ terrain: { worldSize: 1024 }, waterfalls }));
 check("waterfalls survive the project file", JSON.stringify(out.waterfalls) === JSON.stringify(waterfalls));
-check("a project without waterfalls loads none", decodeProjectFile(encodeProjectFile({ terrain: { worldSize: 1024 } })).waterfalls === null);
+check("a project without waterfalls loads none", (await decodeProjectFile(await encodeProjectFile({ terrain: { worldSize: 1024 } }))).waterfalls === null);
 
 if (fail) { console.log(`\n${fail} failed`); process.exit(1); }
 console.log("\nall passed");

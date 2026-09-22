@@ -8292,7 +8292,7 @@ export async function startV3App(opts = {}) {
     };
     const decals = decalSystem.decals.length ? decalSystem.exportData() : null;
     const waterfalls = waterfallSystem?.falls.length ? waterfallSystem.exportData() : null;
-    const buf = encodeProjectFile({
+    const buf = await encodeProjectFile({
       assets:    projectAssets.collectFor({ trees: trees.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers, environment, decalSlots: decals?.slots }),
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
       heightmap: baseHeightmap ?? cpuHeightmap,
@@ -8736,7 +8736,7 @@ export async function startV3App(opts = {}) {
     if (!res.ok) throw new Error(`Failed to fetch project "${url}" (${res.status})`);
     const buf = await res.arrayBuffer();
     if (!isProjectFile(buf)) throw new Error(`"${url}" is not a V3 project file.`);
-    await applyProjectData(decodeProjectFile(buf), { worldLook });
+    await applyProjectData(await decodeProjectFile(buf), { worldLook });
   }
 
   /**
@@ -8745,7 +8745,7 @@ export async function startV3App(opts = {}) {
    */
   async function loadProjectFromBuffer(buf, { worldLook = projectWorldLook } = {}) {
     if (!isProjectFile(buf)) throw new Error("Not a V3 project file.");
-    await applyProjectData(decodeProjectFile(buf), { worldLook });
+    await applyProjectData(await decodeProjectFile(buf), { worldLook });
   }
 
   /** Toolbar Load — sniffs the file: whole project or bare heightmap. */
@@ -8764,7 +8764,7 @@ export async function startV3App(opts = {}) {
         await loadHeightmapBuffer(buf);
         return;
       }
-      const d = decodeProjectFile(buf);
+      const d = await decodeProjectFile(buf);
       const t = d.terrain ?? {};
       const mismatch = t.heightmapSize !== HEIGHTMAP_SIZE
         || Math.round(t.worldSize) !== WORLD_SIZE
@@ -8800,7 +8800,7 @@ export async function startV3App(opts = {}) {
     if (!buf) return;
     try {
       if (isProjectFile(buf)) {
-        await applyProjectData(decodeProjectFile(buf));
+        await applyProjectData(await decodeProjectFile(buf));
       } else {
         const decoded = decodeHeightmapFile(buf);
         if (decoded.width === HEIGHTMAP_SIZE && decoded.height === HEIGHTMAP_SIZE) {

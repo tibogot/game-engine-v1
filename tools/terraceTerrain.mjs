@@ -27,6 +27,7 @@
  * the same few metres wide, whatever it was cut from.
  */
 import fs from "node:fs";
+import { readProject, writeProject } from "./lib/v3proj.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (k, d) => {
@@ -49,22 +50,16 @@ const OPT = {
 };
 
 /* ── the file ────────────────────────────────────────────────────────────── */
-const buf = fs.readFileSync(LEVEL);
-const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-if (buf.toString("ascii", 0, 4) !== "V3PJ") { console.error("bad magic"); process.exit(1); }
-const version = dv.getUint32(4, true);
-const manLen = dv.getUint32(8, true);
-const manifest = JSON.parse(buf.toString("utf8", 12, 12 + manLen));
-const payload = buf.subarray(12 + manLen);
-const hb = manifest.blobs?.heightmap;
-if (!hb) { console.error("no heightmap blob"); process.exit(1); }
+// Through tools/lib/v3proj.mjs: a v2 file's manifest and blobs are gzipped.
+const { manifest, blobs } = await readProject(LEVEL);
+const hCopy = blobs.get("heightmap");
+if (!hCopy) { console.error("no heightmap blob"); process.exit(1); }
 
 const N = manifest.terrain.heightmapSize;
 const WS = manifest.terrain.worldSize;
 const MH = manifest.terrain.maxHeight;
-// Aligned copy: the payload's offset inside the file is not a multiple of 4.
-const hCopy = Buffer.from(payload.subarray(hb.offset, hb.offset + hb.length));
-const norm = new Float32Array(hCopy.buffer, hCopy.byteOffset, hb.length / 4);
+// Aligned copy: a blob's offset inside the file is not a multiple of 4.
+const norm = new Float32Array(hCopy.buffer, hCopy.byteOffset, hCopy.length / 4);
 const H = new Float32Array(norm.length);          // METRES; nobody thinks in 0..1
 for (let i = 0; i < H.length; i++) H[i] = norm[i] * MH;
 const ORIG = Float32Array.from(H);
@@ -278,14 +273,8 @@ for (const r of ramps) console.log(`  at (${r.x}, ${r.z}) reconnecting ${r.recon
 
 if (OPT.dry) { console.log("\ndry run — nothing written"); process.exit(0); }
 
+// `norm` is a view over the heightmap blob's own bytes: writing it IS the edit.
 for (let i = 0; i < H.length; i++) norm[i] = clamp(H[i] / MH, 0, 1);
-const newPayload = Buffer.from(payload);
-hCopy.copy(newPayload, hb.offset);
-const manBuf = Buffer.from(JSON.stringify(manifest), "utf8");
-const head = Buffer.alloc(12);
-head.write("V3PJ", 0, "ascii");
-head.writeUInt32LE(version, 4);
-head.writeUInt32LE(manBuf.length, 8);
 fs.copyFileSync(LEVEL, LEVEL + ".bak");
-fs.writeFileSync(LEVEL, Buffer.concat([head, manBuf, newPayload]));
-console.log(`\nwrote ${LEVEL}; previous kept at nam-valley.v3proj.bak`);
+const written = await writeProject(LEVEL, { manifest, blobs });
+console.log(`\nwrote ${LEVEL} (${written} B); previous kept at nam-valley.v3proj.bak`);

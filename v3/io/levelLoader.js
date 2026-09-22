@@ -68,7 +68,7 @@ export function createLevelLoader(app, {
 
   async function loadBuffer(buf, { name = "level", ask = confirmResize } = {}) {
     if (!isProjectFile(buf)) throw new Error(`"${name}" is not a .v3proj file.`);
-    const decoded = decodeProjectFile(buf);
+    const decoded = await decodeProjectFile(buf);
     const t = decoded.terrain ?? {};
     // Did this level bring its OWN sky/sun/fog (worldEnvironment.exportLook)?
     // A game that hard-codes a look after loading makes every level wear the

@@ -68,15 +68,40 @@
  */
 
 export const PROJECT_MAGIC = 0x4a503356; // "V3PJ" little-endian
-const VERSION      = 1;
+/**
+ * 2: the manifest and every blob that gains by it are GZIPPED.
+ *
+ * The paint is raw pixels, and raw pixels are mostly the same pixel: MEASURED
+ * on nam-valley, a 2048² splat is 33.6 MB and deflates to 3.9, the foliage
+ * paint 8.4 → 2.4, the whole file 62 MB → 22. That mattered the day GitHub
+ * warned about a 62 MB file, and it matters more in the git history, where
+ * every save is another copy. Already-compressed blobs (imported JPEGs, PNGs)
+ * gain nothing and are kept raw — `enc` says which is which, per blob.
+ *
+ * Version 1 files load unchanged (no `enc`, plain manifest).
+ */
+const VERSION      = 2;
 const HEADER_BYTES = 12;
+/** Keep the compressed copy only when it actually saves something. */
+const GAIN = 0.9;
+
+/** gzip / gunzip through the platform's own streams — no dependency, Chrome and Node both. */
+async function gzip(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function gunzip(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
 
 export function isProjectFile(buffer) {
   return buffer.byteLength >= HEADER_BYTES
     && new DataView(buffer).getUint32(0, true) === PROJECT_MAGIC;
 }
 
-export function encodeProjectFile({
+/** Async since version 2: the blobs and the manifest are gzipped on the way out. */
+export async function encodeProjectFile({
   terrain,
   heightmap,            // Float32Array
   splat, splatRes,      // Uint8Array (both slices combined), texels per side
@@ -113,13 +138,13 @@ export function encodeProjectFile({
 }) {
   const blobs = {};
   const parts = [];
+  const pending = [];
   let offset = 0;
+  // Collected first, compressed together below: `addBlob` stays the plain call
+  // every section makes, and the gzipping is one pass over what it gathered.
   const addBlob = (name, typedArray) => {
     if (!typedArray) return;
-    const bytes = new Uint8Array(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength);
-    blobs[name] = { offset, length: bytes.byteLength };
-    parts.push(bytes);
-    offset += bytes.byteLength;
+    pending.push({ name, bytes: new Uint8Array(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength) });
   };
   addBlob("heightmap", heightmap);
   addBlob("splat", splat);
@@ -137,6 +162,19 @@ export function encodeProjectFile({
     if (!a?.hash || !a.bytes) continue;
     addBlob(`asset:${a.hash}`, a.bytes);
     assetList.push({ hash: a.hash, name: a.name, type: a.type });
+  }
+
+  // Gzip what gains by it. `raw` is what it inflates back to, so a reader can
+  // size the buffer before it starts.
+  for (const p of pending) {
+    const packed = await gzip(p.bytes);
+    const worth = packed.byteLength < p.bytes.byteLength * GAIN;
+    const bytes = worth ? packed : p.bytes;
+    blobs[p.name] = worth
+      ? { offset, length: bytes.byteLength, enc: "gzip", raw: p.bytes.byteLength }
+      : { offset, length: bytes.byteLength };
+    parts.push(bytes);
+    offset += bytes.byteLength;
   }
 
   const manifest = {
@@ -173,7 +211,9 @@ export function encodeProjectFile({
     meadowTsl: meadowTsl ?? null,
     assets:   assetList,
   };
-  const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
+  // The manifest carries every tree and prop instance — 2 MB on nam-valley,
+  // and JSON gzips to a fifth of itself. Version 2 always gzips it.
+  const manifestBytes = await gzip(new TextEncoder().encode(JSON.stringify(manifest)));
 
   const total = HEADER_BYTES + manifestBytes.byteLength + offset;
   const buf   = new ArrayBuffer(total);
@@ -188,7 +228,8 @@ export function encodeProjectFile({
   return buf;
 }
 
-export function decodeProjectFile(buffer) {
+/** Async since version 2: gzipped blobs and manifest are inflated on the way in. */
+export async function decodeProjectFile(buffer) {
   if (!isProjectFile(buffer)) throw new Error("Not a V3 project file (bad magic).");
   const view = new DataView(buffer);
   const version = view.getUint32(4, true);
@@ -199,18 +240,23 @@ export function decodeProjectFile(buffer) {
   if (HEADER_BYTES + manifestLen > buffer.byteLength) {
     throw new Error("Corrupt project file (manifest length exceeds file size).");
   }
-  const manifest = JSON.parse(
-    new TextDecoder().decode(new Uint8Array(buffer, HEADER_BYTES, manifestLen)),
-  );
+  const manifestBytes = new Uint8Array(buffer, HEADER_BYTES, manifestLen);
+  const manifest = JSON.parse(new TextDecoder().decode(
+    version >= 2 ? await gunzip(manifestBytes) : manifestBytes,
+  ));
   const payloadStart = HEADER_BYTES + manifestLen;
-  const blob = (name) => {
-    const b = manifest.blobs?.[name];
-    if (!b) return null;
+  // Every blob is read (and inflated) up front: the rest of this function is
+  // synchronous, and a blob is small next to the file it came out of.
+  const raw = new Map();
+  for (const [name, b] of Object.entries(manifest.blobs ?? {})) {
+    if (!b) continue;
     if (payloadStart + b.offset + b.length > buffer.byteLength) {
       throw new Error(`Corrupt project file (blob "${name}" out of range).`);
     }
-    return new Uint8Array(buffer, payloadStart + b.offset, b.length);
-  };
+    const bytes = new Uint8Array(buffer, payloadStart + b.offset, b.length);
+    raw.set(name, b.enc === "gzip" ? await gunzip(bytes) : bytes);
+  }
+  const blob = (name) => raw.get(name) ?? null;
 
   const hmBytes = blob("heightmap");
   return {

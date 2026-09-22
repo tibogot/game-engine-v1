@@ -34,14 +34,14 @@ const data = {
 const assets = store.collectFor(data);
 check("only referenced assets are written", assets.length === 2, `${assets.length}`);
 
-const buf = encodeProjectFile({
+const buf = await encodeProjectFile({
   terrain: { worldSize: 100, heightmapSize: 4, splatSize: 4, maxHeight: 10 },
   heightmap: new Float32Array(16).fill(2.5),
   paintLayers: data.paintLayers,
   props: data.props,
   assets,
 });
-const d = decodeProjectFile(buf instanceof ArrayBuffer ? buf : buf.buffer);
+const d = await decodeProjectFile(buf instanceof ArrayBuffer ? buf : buf.buffer);
 check("the manifest lists the assets", d.assets?.length === 2);
 check("heights still decode next to the assets", d.heightmap?.[5] === 2.5);
 

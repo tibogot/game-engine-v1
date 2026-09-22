@@ -451,7 +451,7 @@ if (system) {
   state.volumeXZ = 111;
   const { effects, ...field } = state;
 
-  const d = decodeProjectFile(encodeProjectFile({
+  const d = await decodeProjectFile(await encodeProjectFile({
     terrain, heightmap, ambientPaint,
     ambientEffects: structuredClone(effects),
     ambientField: field,
@@ -469,7 +469,7 @@ if (system) {
     JSON.stringify(d.ambientField));
 
   // A world nobody opened the mode in must not carry 4 MB of zeros.
-  const empty = decodeProjectFile(encodeProjectFile({ terrain, heightmap }));
+  const empty = await decodeProjectFile(await encodeProjectFile({ terrain, heightmap }));
   check("a file with no ambient FX carries no ambient blob",
     empty.ambientPaint === null && empty.ambientEffects === null,
     `${empty.ambientPaint} / ${empty.ambientEffects}`);
