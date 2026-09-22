@@ -8,6 +8,9 @@
  *     its lid (a board box with the jungle floor glued to it) propped open, a
  *     low ring of spoil, cut fronds laid over it. Where the Front's men come up
  *     behind you (enemyAI.js recruits at the most forward safe one).
+ *   · MORTAR PIT — an 82 mm tube on its baseplate in a sandbagged pit, with
+ *     its two-man crew. The one weapon here that shoots at GROUND it cannot
+ *     see (enemyAI.js aims it; projectiles.spawnArc throws the shell).
  *   · ZPU-4 — the quad 14.5 mm anti-aircraft gun the helicopter crews feared
  *     most, dug into an earth pit on its four-wheel carriage. Three pieces, as
  *     the game draws it: the BODY (pit, carriage, ammunition — still), the
@@ -19,7 +22,7 @@
  * `userData.footprint`.
  */
 import * as THREE from "three";
-import { MAT, assemble, bakeContactAO, buildBox, rng } from "./rtsParts.js";
+import { MAT, assemble, bakeContactAO, buildBox, buildSandbagRing, rng } from "./rtsParts.js";
 
 const S = 1.3;
 
@@ -77,6 +80,95 @@ export function buildTunnelEntrance({ seed = 7 } = {}) {
   bakeContactAO(geo, { cell: 0.12 * S, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
   geo.userData.footprint = { cx: 0, cz: 0, hx: 1.2 * S, hz: 1.2 * S };
   geo.userData.height = 1.6 * S;
+  return geo;
+}
+
+// ── 82 mm mortar ─────────────────────────────────────────────────────────────
+const MG = S * 1.5;                       // the weapon, drawn up so it reads
+/** The tube's pivot height above the pit floor, and its muzzle in the tube's own frame. */
+export const MORTAR_TUBE_Y = 0.2 * S;
+const TUBE_LEN = 1.5 * MG, TUBE_TILT = 0.35;   // ~70° elevation, leaning toward +Z
+export const MORTAR_MUZZLE = new THREE.Vector3(0, MORTAR_TUBE_Y + TUBE_LEN * Math.cos(TUBE_TILT), TUBE_LEN * Math.sin(TUBE_TILT));
+
+/** A seated or kneeling figure of the Front, in his pith helmet. `s` scales him. */
+function crewman(parts, x, z, face, { kneeling = true, scale = 1, tone = 0.35 } = {}) {
+  const g = (v) => v * MG * scale;
+  const q = (geo, px, py, pz, mat, t, rot) => parts.push({ geo, pos: [x + px, py, z + pz], mat, tone: t, rot: rot ?? [0, face, 0] });
+  // Sized against the game's own soldiers (2.34 m at RTS scale), not life:
+  // at real proportions the crew came out half the height of the men round them.
+  const h = kneeling ? 0.72 : 1.05;
+  q(buildBox(g(0.26), g(h * 0.55), g(0.2)), 0, g(h * 0.72), 0, MAT.canvas, tone);                     // torso
+  q(buildBox(g(0.12), g(h * 0.5), g(0.12)), g(-0.08), g(h * 0.25), 0, MAT.canvas, tone + 0.05);       // legs
+  q(buildBox(g(0.12), g(h * 0.5), g(0.12)), g(0.08), g(h * 0.25), 0, MAT.canvas, tone + 0.05);
+  q(new THREE.SphereGeometry(g(0.085), 10, 8), 0, g(h * 1.06), 0, MAT.hessian, 0.6);                  // head
+  q(new THREE.SphereGeometry(g(0.15), 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.62, 1.1), 0, g(h * 1.1), 0, MAT.paint, 0.7);
+  q(new THREE.CylinderGeometry(g(0.19), g(0.19), g(0.018), 14).scale(1, 1, 1.12), 0, g(h * 1.09), 0, MAT.paint, 0.68);
+}
+
+/** The pit, its bags, the ammunition and the crew — everything that stays put. */
+export function buildMortarPit({ seed = 82 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const rIn = 2.3 * S, rOut = 3.5 * S, crest = 0.5 * S;
+  const prof = [[rOut, 0], [rOut - 0.5 * S, 0.18 * S], [rIn + 0.4 * S, crest], [rIn + 0.1, crest * 0.85], [rIn - 0.05, 0.02]]
+    .map(([r, y]) => new THREE.Vector2(r, y));
+  const gap = 1.0;
+  parts.push({ geo: new THREE.LatheGeometry(prof, 24, Math.PI + gap / 2, Math.PI * 2 - gap), mat: MAT.earth, tone: 0.38 });
+  parts.push({ geo: new THREE.CylinderGeometry(rIn, rIn, 0.04, 20), pos: [0, 0.02, 0], mat: MAT.earth, tone: 0.24 });
+  // Bags round the lip, open at the back where the crew works.
+  parts.push({
+    geo: buildSandbagRing({ radius: rIn + 0.45 * S, courses: 2, seed, gapDeg: 84, batter: 0.05, bag: { length: 0.52 * S, width: 0.3 * S, height: 0.19 * S, segU: 6, segV: 4 } }),
+    pos: [0, crest * 0.7, 0], rot: [0, Math.PI, 0], mat: null,
+  });
+  // The baseplate the tube stands on.
+  parts.push({ geo: new THREE.CylinderGeometry(0.42 * MG, 0.46 * MG, 0.08 * MG, 12), pos: [0, 0.04 * MG, 0], mat: MAT.steel, tone: 0.22 });
+  // Ammunition: a crate, an open one, and three bombs stood up in the earth.
+  for (let k = 0; k < 2; k++) {
+    parts.push({ geo: buildBox(0.62 * S, 0.3 * S - k * 0.02, 0.36 * S), pos: [(k - 0.5) * 0.8 * S, 0.15 * S, -rIn + 0.55 * S], rot: [0, (R() - 0.5) * 0.3, 0], mat: MAT.paint, tone: 0.3 + R() * 0.25 });
+  }
+  for (let k = 0; k < 3; k++) {
+    const x = 0.95 * S + k * 0.22 * S, z = -rIn + 0.9 * S + (R() - 0.5) * 0.2;
+    parts.push({ geo: new THREE.CylinderGeometry(0.05 * MG, 0.055 * MG, 0.42 * MG, 8), pos: [x, 0.21 * MG, z], rot: [0.1, 0, 0.06], mat: MAT.steel, tone: 0.15 });
+    parts.push({ geo: new THREE.ConeGeometry(0.05 * MG, 0.13 * MG, 8), pos: [x, 0.48 * MG, z], mat: MAT.steel, tone: 0.18 });
+  }
+  // The crew: the gunner kneeling at the tube's left, the loader behind him.
+  crewman(parts, -0.62 * MG, 0.15 * MG, 1.4, { kneeling: true, tone: 0.32 });
+  crewman(parts, 0.5 * MG, -1.15 * MG, 2.6, { kneeling: false, tone: 0.4 });
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.16 * S, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
+  geo.userData.footprint = { cx: 0, cz: 0, hx: rIn + 0.4 * S, hz: rIn + 0.4 * S };
+  geo.userData.height = 2.2 * S;
+  return geo;
+}
+
+/** The tube on its bipod: turns about the baseplate, fixed at its firing elevation. */
+export function buildMortarTube() {
+  const g = (v) => v * MG;
+  const parts = [];
+  const tube = new THREE.CylinderGeometry(0.075 * MG, 0.085 * MG, TUBE_LEN, 12);
+  const half = TUBE_LEN / 2;
+  parts.push({ geo: tube, pos: [0, MORTAR_TUBE_Y + half * Math.cos(TUBE_TILT), half * Math.sin(TUBE_TILT)], rot: [TUBE_TILT, 0, 0], mat: MAT.steel, tone: 0.12 });
+  // The muzzle ring and the ball at the foot, in its socket on the plate.
+  parts.push({ geo: new THREE.CylinderGeometry(0.095 * MG, 0.09 * MG, 0.1 * MG, 12), pos: [MORTAR_MUZZLE.x, MORTAR_MUZZLE.y - 0.04 * MG, MORTAR_MUZZLE.z - 0.02 * MG], rot: [TUBE_TILT, 0, 0], mat: MAT.steel, tone: 0.2 });
+  parts.push({ geo: new THREE.SphereGeometry(0.1 * MG, 10, 8), pos: [0, MORTAR_TUBE_Y + 0.02 * MG, 0], mat: MAT.steel, tone: 0.18 });
+  // Bipod: two legs forward to the ground, and the elevating screw between them.
+  const legTop = [0, MORTAR_TUBE_Y + 0.62 * TUBE_LEN * Math.cos(TUBE_TILT), 0.62 * TUBE_LEN * Math.sin(TUBE_TILT)];
+  for (const sx of [-1, 1]) {
+    const foot = [sx * g(0.42), 0, g(0.62)];
+    const mid = [(legTop[0] + foot[0]) / 2, (legTop[1] + foot[1]) / 2, (legTop[2] + foot[2]) / 2];
+    const len = Math.hypot(foot[0] - legTop[0], foot[1] - legTop[1], foot[2] - legTop[2]);
+    const leg = buildBox(g(0.05), len, g(0.05));
+    const q = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(foot[0] - legTop[0], foot[1] - legTop[1], foot[2] - legTop[2]).normalize(),
+    );
+    parts.push({ geo: leg, matrix: new THREE.Matrix4().compose(new THREE.Vector3(...mid), q, new THREE.Vector3(1, 1, 1)), mat: MAT.steel, tone: 0.2 });
+  }
+  parts.push({ geo: buildBox(g(0.06), g(0.34), g(0.06)), pos: [g(0.12), legTop[1] - g(0.2), legTop[2] - g(0.06)], mat: MAT.steel, tone: 0.28 });
+  // The sight on its bracket, to the left.
+  parts.push({ geo: buildBox(g(0.07), g(0.16), g(0.07)), pos: [-g(0.24), legTop[1] + g(0.04), legTop[2] - g(0.04)], mat: MAT.paint, tone: 0.5 });
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.06 * MG, radius: 1, strength: 0.25, groundFade: 0.2, floor: 0.6 });
   return geo;
 }
 

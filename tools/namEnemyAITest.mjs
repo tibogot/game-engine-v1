@@ -46,6 +46,7 @@ function world({ points = [], enemyBase = true, tunnels = [] } = {}) {
     list: [eb, base, ...tun], enemyBase: eb, base,
     get tunnels() { return tun.filter((t) => t.alive); },
     get zpus() { return this.list.filter((s) => s.typeKey === "zpu" && s.alive); },
+    get mortars() { return this.list.filter((s) => s.typeKey === "mortar" && s.alive); },
   };
   const requisition = { points };
   return { units, structures, requisition };
@@ -211,13 +212,14 @@ console.log("AA");
     const w = world({ points: pts });
     w.units.list.push(man("enemy", 2, 104));                 // a sentry on the point
     if (heli) { const h = man("player", 10, 120, "helicopter"); h.isAir = true; w.units.list.push(h); }
-    const dug = [];
+    const all = [];
     const emplace = (typeKey, x, z) => {
       const s = { typeKey, alive: true, team: "enemy", range: 62, position: { x, y: 0, z }, deploy: 0 };
-      w.structures.list.push(s); dug.push(s); return s;
+      w.structures.list.push(s); all.push(s); return s;
     };
     const ai = createEnemyAI({ ...w, emplace, params: { ...ENEMY_AI, startSquads: 0, startingStock: stock, maxSquads: 0 } });
-    return { w, ai, dug };
+    const dug = { get length() { return all.filter((s) => s.typeKey === "zpu").length; }, get 0() { return all.find((s) => s.typeKey === "zpu"); } };
+    return { w, ai, dug, all };
   };
   {
     const { ai, dug } = setup();
@@ -245,6 +247,43 @@ console.log("AA");
     run(ai, ENEMY_AI.zpuEvery * 3);
     ok("not with the recruits' money", dug.length === 0);
   }
+}
+
+console.log("mortars");
+{
+  // Two points held, a squad of yours standing on the near one, one of its
+  // men watching them: the tube is dug in behind and starts dropping rounds.
+  const pts = [point(0, 0, 60, "enemy"), point(1, 0, 260, "enemy")];
+  const w = world({ points: pts });
+  w.units.list.push(man("enemy", 6, 66));                    // the spotter
+  for (let i = 0; i < 4; i++) w.units.list.push(man("player", i * 2, 40));
+  const built = [];
+  const shots = [];
+  const emplace = (typeKey, x, z) => {
+    const s = { typeKey, alive: true, team: "enemy", range: 0, position: { x, y: 0, z }, deploy: 0 };
+    w.structures.list.push(s); built.push(s); return s;
+  };
+  const ai = createEnemyAI({
+    ...w, emplace, fireMortar: (m, x, z, o) => shots.push({ m, x, z, ...o }),
+    params: { ...ENEMY_AI, startSquads: 0, startingStock: 2000, maxSquads: 0, zpuMax: 0 },
+  });
+  run(ai, ENEMY_AI.zpuEvery + ENEMY_AI.tick);
+  const m0 = built.find((s) => s.typeKey === "mortar");
+  ok("a tube is dug in behind a held point", !!m0, m0 ? `at (${m0.position.x.toFixed(0)}, ${m0.position.z.toFixed(0)})` : "none");
+  // Behind = further from your HQ (z = -380) than the point it covers.
+  ok("…behind it, not in front", m0 && m0.position.z > 60, m0 && `z ${m0.position.z.toFixed(0)}`);
+  run(ai, 2);
+  ok("it holds fire while it is being dug", shots.length === 0);
+  run(ai, ENEMY_AI.mortarDigTime + ENEMY_AI.mortarReload);
+  ok("then it drops rounds on your men", shots.length >= 1, `${shots.length} rounds`);
+  const s0 = shots[0];
+  ok("on the group, not on nothing", s0 && Math.abs(s0.z - 40) < ENEMY_AI.mortarSplash, s0 && `z ${s0.z.toFixed(1)}`);
+  ok("with its blast and damage", s0?.splash === ENEMY_AI.mortarSplash && s0?.damage === ENEMY_AI.mortarDamage);
+  // Its own men in the blast: it holds.
+  const before = shots.length;
+  w.units.list.push(man("enemy", 1, 41));
+  run(ai, ENEMY_AI.mortarReload * 2);
+  ok("never onto its own men", shots.length === before || shots.slice(before).every((s) => Math.abs(s.z - 40) > 4), `${shots.length - before} more`);
 }
 
 console.log("determinism");

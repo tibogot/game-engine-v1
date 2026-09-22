@@ -433,6 +433,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // round it, which is what hides it.
     for (const t of structures.turrets) app.clearVegetation?.(t.position.x, t.position.z, 8, { grass: 6 });
     for (const z of structures.zpus) app.clearVegetation?.(z.position.x, z.position.z, 7, { grass: 5 });
+    for (const m of structures.mortars) app.clearVegetation?.(m.position.x, m.position.z, 5, { grass: 4 });
     // A tunnel mouth: the shaft and its spoil ring, trodden bare — the jungle
     // round it is the point. At 3.5 m the ferns (metres across) still closed
     // over it and it could not be found even by looking straight at it.
@@ -627,6 +628,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const projectiles = createProjectiles({
     app,
     onImpact: (target, dmg, at, owner) => combatRef?.onImpact(target, dmg, at, owner),
+    // A mortar shell lands on GROUND, not on a unit (projectiles.spawnArc).
+    onArcImpact: (at, dmg, splash, owner) => combatRef?.splashAt(at, dmg, splash, owner),
   });
   app.projectiles = projectiles;
 
@@ -691,6 +694,14 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       app.clearVegetation?.(x, z, 6, { grass: 4.5 });
       cover.bake();
       return s;
+    },
+    // A tube fires: the shell leaves its muzzle and arcs onto the ground at
+    // (x, z) — the warning ring is drawn while it is up (projectiles.js).
+    fireMortar: (m, x, z, { damage, splash }) => {
+      const from = structuresRenderer.muzzleOf(m);
+      const y = app.getWorldHeight?.(x, z) ?? 0;
+      projectiles.spawnArc(from, { x, y, z }, { damage, splash, owner: m });
+      fx.muzzle(from.x, from.y, from.z);
     },
   });
   enemyAI.setEnabled(AI_ON);
@@ -987,6 +998,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     resourceRenderer.sync();              // only rewrites when a node visibly drains
     healthBars.begin();                   // both renderers push their bars into it
     selectionRings.begin();               // unitRenderer pushes a ring per selected unit
+    projectiles.drawWarnings(selectionRings); // where a shell in the air is going to land
     selectionFrames.begin();              // square buildings push corner brackets
     unitRenderer.sync(dt, app.camera);
     structuresRenderer.sync(dt, app.camera);

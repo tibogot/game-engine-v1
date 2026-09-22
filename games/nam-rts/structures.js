@@ -103,6 +103,21 @@ export const STRUCTURE_TYPES = {
     barWidth: 5,
     barY: 4.2,
   },
+  // The 82 mm mortar (rtsEnemyKit.js). `range: 0` on purpose: combat.js only
+  // knows about shooting at what you can see, and this shoots at GROUND its
+  // own men have eyes on, from behind cover. The commander aims it
+  // (enemyAI.js) and projectiles.spawnArc throws the shell.
+  mortar: {
+    typeKey: "mortar",
+    name: "82 mm Mortar",
+    team: "enemy",
+    maxHp: 240,
+    radius: 3,
+    footprint: { cx: 0, cz: 0, hx: 3, hz: 3 },
+    range: 0,
+    barWidth: 4,
+    barY: 3.4,
+  },
   // Unarmed targets for close-range crater / combat tests — no need to cross the map.
   trainingDummy: {
     typeKey: "trainingDummy",
@@ -336,6 +351,7 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
     get turrets() { return list.filter((s) => s.typeKey === "turret" && s.alive); },
     get tunnels() { return list.filter((s) => s.typeKey === "tunnel" && s.alive); },
     get zpus() { return list.filter((s) => s.typeKey === "zpu" && s.alive); },
+    get mortars() { return list.filter((s) => s.typeKey === "mortar" && s.alive); },
     /** Re-seat every structure on the current terrain (after loading a .v3proj). */
     async reanchorToTerrain(app) {
       for (const s of list) {

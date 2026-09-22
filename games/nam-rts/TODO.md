@@ -32,7 +32,18 @@ Keep this file current: tick things off here, add new asks here.
    ground, 350 hp. One stands at the enemy HQ from the start; the AI digs more
    in at held points (20 s, 220 supplies) where your helicopters were SEEN,
    else ~one per three points held, max 5.
-   NEXT: your look check on all three · the AI digging NEW tunnels (a sapper) ·
+   [x] **82 mm mortar** (`rtsEnemyKit.js`: pit, bags, crates, bombs, a kneeling
+   gunner and a standing loader — both 2.34 m, the game's own soldier height;
+   the tube turns to its aim): the first INDIRECT fire. `projectiles.spawnArc`
+   throws a ballistic shell that lands on a POINT (warning ring on the ground
+   while it is up, tightening and turning red), `combat.splashAt` blasts
+   everything on the ground within 9 m — falling off to the rim, aircraft
+   exempt, and COVER DOES NOT SHELTER (it comes from above). The AI digs tubes
+   in behind held points (180 supplies, 18 s, max 3) and drops a round every
+   7 s on the thickest knot of your men ITS OWN MEN CAN SEE, never on its own.
+   MEASURED: six men standing still died in ~19 s; with no spotter alive it
+   stops firing. Ready to reuse for the US 81 mm pit, the M109 and the rockets.
+   NEXT: your look check on all four · the AI digging NEW tunnels (a sapper) ·
    punji pits / booby traps · supply cache (hits their income) · spider holes ·
    enemy camp dressing round the résidence (well, sheds, cooking fire smoke)
 3. ~~**Vehicles rebuilt**~~ DONE for the US side — M113, M48, M151, M551, M35,
@@ -361,7 +372,11 @@ Everything else below is in its section.
       river; a group order shares ONE search per cluster (selection.js)
 - [ ] Long path searches into the walled camp are still 5–15 ms for YOUR
       orders (one per group now); hierarchical/cached paths if it shows
-- [ ] **Rocket / indirect-fire artillery** (your ask 2026-09-22, not urgent):
+- [~] **Rocket / indirect-fire artillery** (your ask 2026-09-22): the ARC and the
+      SPLASH now exist (projectiles.spawnArc + combat.splashAt + the warning
+      ring), carrying the enemy's 82 mm mortar. Left: the US side (81 mm pit,
+      M109), the 107 mm Type 63 and 122 mm Grad, and a real launch signature.
+      Was:
       rockets that ARC high and fall far, out of line of sight. Enemy: the
       107 mm Type 63 (12 tubes on a light towed carriage) and 122 mm Grad
       rockets fired into firebases — firing gives the launch site away. US:

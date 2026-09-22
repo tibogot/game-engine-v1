@@ -21,7 +21,8 @@ import {
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { buildColonialHQ } from "../../v3/render/objects/rtsColonial.js";
 import {
-  ZPU_MOUNT_Y, ZPU_MUZZLE, ZPU_TRUNNION_Y, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
+  MORTAR_MUZZLE, ZPU_MOUNT_Y, ZPU_MUZZLE, ZPU_TRUNNION_Y,
+  buildMortarPit, buildMortarTube, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
 } from "../../v3/render/objects/rtsEnemyKit.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
@@ -140,7 +141,7 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     for (const s of structures.list) {
       if (!s.alive) continue;
       if (s.isBuilding) continue;      // runtime buildings have their own renderer
-      if (s.typeKey === "base" || s.typeKey === "enemyBase" || s.typeKey === "turret" || s.typeKey === "tunnel" || s.typeKey === "zpu") continue;
+      if (["base", "enemyBase", "turret", "tunnel", "zpu", "mortar"].includes(s.typeKey)) continue;
       const g = bodyGeoOf(s).clone();
       g.translate(s.position.x, s.position.y, s.position.z);
       parts.push(g);
@@ -182,6 +183,9 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     // The Front's tunnel entrances: one draw for all of them.
     tunnel: makeKind(buildTunnelEntrance(), kitMat, { shadow: true }),
     // ZPU-4s: the pit (still), the mount (turns), the guns (turn and elevate).
+    // Mortar pits: the pit and crew (still) and the tube (turns to its aim).
+    mortarBody: makeKind(buildMortarPit(), kitMat, { shadow: true }),
+    mortarTube: makeKind(buildMortarTube(), kitMat, { shadow: true }),
     zpuBody: makeKind(buildZpuBody(), kitMat, { shadow: true }),
     zpuMount: makeKind(buildZpuMount(), kitMat, { shadow: true }),
     zpuGuns: makeKind(buildZpuGuns(), kitMat, { shadow: true }),
@@ -268,6 +272,11 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
   /** World-space muzzle point of a turret (where its tracer should start). */
   function muzzleOf(s) {
     if (s.typeKey === "zpu") return ZPU_MUZZLE.clone().applyMatrix4(zpuGunMatrix(s, _head));
+    if (s.typeKey === "mortar") {
+      return MORTAR_MUZZLE.clone()
+        .applyAxisAngle(_up, s.turretYaw ?? 0)
+        .add(_muzzle.set(s.position.x, s.position.y, s.position.z));
+    }
     if (s.typeKey !== "turret") {
       return _muzzle.set(s.position.x, s.position.y + 6, s.position.z).clone();
     }
@@ -358,6 +367,15 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         push(kinds.nest, _m, s);
         headMatrix(s, _head);
         push(kinds.head, _head, s);
+      }
+
+      if (s.typeKey === "mortar") {
+        if (s.team === "enemy" && fogOfWar?.enabled && !fogOfWar.canSeeEntity(s)) continue;
+        _m.makeTranslation(s.position.x, s.position.y, s.position.z);
+        push(kinds.mortarBody, _m, s);
+        const sink = (1 - (s.deploy ?? 1)) * 0.9;
+        _head.compose(_pivot.set(s.position.x, s.position.y - sink, s.position.z), _q.setFromAxisAngle(_up, s.turretYaw ?? 0), _one);
+        push(kinds.mortarTube, _head, s);
       }
 
       if (s.typeKey === "zpu") {

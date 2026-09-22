@@ -128,6 +128,29 @@ export function createCombat({
     }
   }
 
+  /**
+   * A shell lands: everything on the ground within `radius` of the point takes
+   * damage, full at the centre and falling off to nothing at the rim. Aircraft
+   * are not touched, and COVER DOES NOT SHELTER anyone — a mortar bomb comes
+   * down from above, which is exactly what makes it the answer to men dug in
+   * behind sandbags. The owner's own side is not hit.
+   */
+  const _splashNear = [];
+  function splashAt(at, damage, radius, owner = null) {
+    fx.explosion(at.x, at.y, at.z);
+    craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7));
+    const hit = (o) => {
+      if (!o.alive || o.isAir || o.passive) return;
+      if (owner && o.team === owner.team) return;
+      const d = Math.hypot(o.position.x - at.x, o.position.z - at.z);
+      if (d > radius) return;
+      const amount = damage * (1 - (d / radius) ** 1.5);
+      if (amount > 0) onImpact(o, amount, at, null);       // null owner: no directional cover
+    };
+    for (const o of units.near(at.x, at.z, radius, _splashNear)) hit(o);
+    for (const o of structures.list) hit(o);
+  }
+
   /** One combatant's turn: forget, acquire, close in, shoot. */
   function engage(e, dt) {
     if (!e.alive || !e.range) return;
@@ -217,5 +240,5 @@ export function createCombat({
     for (const e of structures.list) engage(e, dt);
   }
 
-  return { update, acquire, onImpact };
+  return { update, acquire, onImpact, splashAt };
 }

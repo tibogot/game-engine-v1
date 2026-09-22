@@ -20,7 +20,12 @@ const ROCKET_R = 0.55;    // rocket radius
 const ROCKET_L = 3.2;     // rocket length
 const PUFF_SIZE = 2.6;    // trail puff quad
 
-export function createProjectiles({ app, onImpact = () => {} }) {
+/** Shells in the air at once, and how hard their arc is thrown. */
+const MAX_SHELLS = 24;
+const SHELL_G = 34;       // metres/s² — a game arc, not ballistics: it has to read in ~3 s
+const SHELL_R = 0.42;
+
+export function createProjectiles({ app, onImpact = () => {}, onArcImpact = () => {} }) {
   const { scene } = app;
 
   // ── Rocket bodies — one InstancedMesh for every rocket in flight ────────────
@@ -53,6 +58,61 @@ export function createProjectiles({ app, onImpact = () => {} }) {
     scene, max: MAX_PUFFS, color: 0xff9a3c, size: PUFF_SIZE, bloomScale: BLOOM.tracer,
     scaleAt: (p) => 0.35 + p * 1.05,
   });
+
+  // ── Mortar shells — the other kind of shot: an ARC, at a PLACE ─────────────
+  // A rocket flies at a thing it can see. A mortar bomb goes up and comes down
+  // on a patch of ground, out of anyone's line of sight, and hurts whoever is
+  // standing there when it lands. Dark and small in flight on purpose: what
+  // you are meant to see is the warning ring on the ground (drawWarnings).
+  const shellMat = new THREE.MeshStandardNodeMaterial({ color: 0x2b2b28, roughness: 0.8, metalness: 0.2 });
+  const shellGeo = new THREE.CapsuleGeometry(SHELL_R, SHELL_R * 2.4, 3, 7).rotateX(Math.PI / 2);
+  const shellMesh = new THREE.InstancedMesh(shellGeo, shellMat, MAX_SHELLS);
+  shellMesh.count = 0;
+  shellMesh.frustumCulled = false;
+  shellMesh.castShadow = false;
+  scene.add(shellMesh);
+
+  const shells = [];
+  for (let i = 0; i < MAX_SHELLS; i++) {
+    shells.push({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), to: new THREE.Vector3(), t: 0, flight: 0, damage: 0, splash: 0, owner: null });
+  }
+
+  /**
+   * Lob a shell from `from` onto the point `to`, landing in `flight` seconds
+   * (default: further is longer). `splash` metres of blast; the game decides
+   * what that does (onArcImpact → combat.splashAt).
+   */
+  function spawnArc(from, to, { damage = 30, splash = 9, owner = null, flight = null } = {}) {
+    const s = shells.find((r) => !r.alive);
+    if (!s) return null;
+    s.alive = true;
+    s.pos.copy(from);
+    s.to.copy(to);
+    s.damage = damage;
+    s.splash = splash;
+    s.owner = owner;
+    s.t = 0;
+    s.flight = flight ?? Math.min(5.5, 1.9 + from.distanceTo(to) / 80);
+    // The velocity that puts it on the point in exactly that time under SHELL_G.
+    s.vel.subVectors(to, from).divideScalar(s.flight);
+    s.vel.y += 0.5 * SHELL_G * s.flight;
+    return s;
+  }
+
+  /**
+   * The rings on the ground under everything in the air — call between a ring
+   * field's begin() and commit(), on the RENDER side. They tighten and turn
+   * red as the shell comes down: the second or so you have to move.
+   */
+  function drawWarnings(rings) {
+    if (!rings) return;
+    for (const s of shells) {
+      if (!s.alive) continue;
+      const left = Math.max(0, 1 - s.t / s.flight);            // 1 → 0
+      const r = s.splash * (1 + left * 0.9);
+      rings.add(s.to.x, s.to.z, r, left < 0.35 ? 0xff3a2a : 0xffb020);
+    }
+  }
 
   const freeRocket = () => rockets.find((r) => !r.alive) ?? null;
 
@@ -146,8 +206,31 @@ export function createProjectiles({ app, onImpact = () => {} }) {
     bodyMesh.visible = n > 0;
     bodyMesh.instanceMatrix.needsUpdate = true;
 
+    // Shells: ballistic, and they land on the POINT, whatever has moved.
+    let m = 0;
+    for (const s of shells) {
+      if (!s.alive) continue;
+      s.t += dt;
+      s.vel.y -= SHELL_G * dt;
+      s.pos.addScaledVector(s.vel, dt);
+      if (s.t >= s.flight) {
+        s.alive = false;
+        onArcImpact(s.to.clone(), s.damage, s.splash, s.owner);
+        continue;
+      }
+      _obj.position.copy(s.pos);
+      _obj.lookAt(_look.copy(s.pos).add(s.vel));
+      _obj.scale.setScalar(1);
+      _obj.updateMatrix();
+      shellMesh.setMatrixAt(m, _obj.matrix);
+      m++;
+    }
+    shellMesh.count = m;
+    shellMesh.visible = m > 0;
+    shellMesh.instanceMatrix.needsUpdate = true;
+
     puffs.update(dt, camera);
   }
 
-  return { spawn, update };
+  return { spawn, spawnArc, drawWarnings, update, get shellsInAir() { return shells.filter((s) => s.alive).length; } };
 }

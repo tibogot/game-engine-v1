@@ -25,6 +25,10 @@
 //             to shoot), goes home — the nearest safe tunnel, or the HQ — and
 //             refills from recruits who come up right there
 //
+//   shelling  82 mm mortars dug in behind held points (`emplace`), each
+//             dropping a round every `mortarReload` s on the thickest knot of
+//             your men ITS OWN MEN CAN SEE, inside 28–130 m and never on its
+//             own (the `fireMortar` hook → projectiles.spawnArc)
 //   AA        a ZPU-4 dug in (the `emplace` hook, paid from its purse) at the
 //             held point your helicopters were seen near — or, holding three
 //             or more, at the most forward one; up in `zpuDigTime` s
@@ -65,6 +69,15 @@ export const ENEMY_AI = {
   zpuDigTime: 20,       // seconds from the first spade to the first burst
   zpuEvery: 5,          // seconds between decisions
   airMemory: 120,       // a helicopter seen near a point is remembered this long
+  // 82 mm mortars behind its line (the `emplace` and `fireMortar` hooks).
+  mortarCost: 180,
+  mortarMax: 3,
+  mortarDigTime: 18,
+  mortarReload: 7,      // seconds between rounds
+  mortarRange: 130,     // and it cannot drop one closer than mortarMin
+  mortarMin: 28,
+  mortarDamage: 34,
+  mortarSplash: 9,
 };
 
 export const DIFFICULTY = {
@@ -95,7 +108,7 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
  * up. Optional: without it the commander builds nothing.
  */
 export function createEnemyAI({
-  units, structures, requisition, navGrid = null, cover = null, emplace = null,
+  units, structures, requisition, navGrid = null, cover = null, emplace = null, fireMortar = null,
   params = { ...ENEMY_AI }, seed = 1337, unitKey = "soldier",
 }) {
   const rand = seeded(seed);
@@ -678,6 +691,80 @@ export function createEnemyAI({
     if (s) say(`ZPU-4 dug in at ${best.name}`);
   }
 
+  // ── Mortars: shelling ground its own men have eyes on ─────────────────────
+  const _barrage = [];
+  /**
+   * Where this tube should drop its next round: the thickest knot of your men
+   * it can SEE, inside its arc (mortarMin..mortarRange) and clear of its own.
+   * It aims where they are, not where they will be — a mortar is for ground
+   * you have to hold, and moving off it is the answer.
+   */
+  function aimPoint(m) {
+    const near = units.near(m.position.x, m.position.z, params.mortarRange, _barrage);
+    let best = null, bestN = 0;
+    for (const u of near) {
+      if (u.team !== "player" || !u.alive || u.isAir) continue;
+      const d = dist(u.position, m.position);
+      if (d > params.mortarRange || d < params.mortarMin) continue;
+      if (!seen(u)) continue;
+      let n = 0, mine = false;
+      for (const o of near) {
+        if (!o.alive || o.isAir) continue;
+        const dd = dist(o.position, u.position);
+        if (dd > params.mortarSplash) continue;
+        if (o.team === "player") n++;
+        else if (o.team === "enemy") mine = true;           // never on its own men
+      }
+      if (!mine && n > bestN) { bestN = n; best = u; }
+    }
+    return best ? { x: best.position.x, z: best.position.z, men: bestN } : null;
+  }
+  function workTheTubes(dt) {
+    if (!fireMortar) return;
+    for (const m of structures.mortars ?? []) {
+      if ((m.deploy ?? 1) < 1) continue;
+      m.reload = (m.reload ?? rand() * params.mortarReload) - dt;
+      if (m.reload > 0) continue;
+      const at = aimPoint(m);
+      if (!at) { m.reload = 1.5; continue; }               // nothing seen: look again shortly
+      m.turretYaw = Math.atan2(at.x - m.position.x, at.z - m.position.z);
+      fireMortar(m, at.x, at.z, { damage: params.mortarDamage, splash: params.mortarSplash });
+      m.reload = params.mortarReload;
+    }
+  }
+  /** Dig a tube in BEHIND a held point — away from your HQ, where it can work unseen. */
+  function digInMortar() {
+    if (!emplace || !hq()) return;
+    if ((structures.mortars ?? []).length >= params.mortarMax) return;
+    if (purse.stock < params.mortarCost + params.zpuReserve) return;
+    const held = requisition.points.filter((p) => p.owner === "enemy");
+    if (held.length < 2) return;
+    const front = structures.base?.position;
+    let best = null, bestD = Infinity;
+    for (const p of held) {
+      if ((structures.mortars ?? []).some((m) => dist(m.position, p.position) < 60)) continue;
+      const d = front ? dist(p.position, front) : 0;        // the point nearest you: the one being fought over
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    if (!best) return;
+    // Its pit: 14–22 m on the far side of the point from your HQ.
+    const away = front
+      ? Math.atan2(best.position.x - front.x, best.position.z - front.z)
+      : rand() * Math.PI * 2;
+    let site = null;
+    for (let k = 0; k < 10; k++) {
+      const a = away + (rand() - 0.5) * 1.2, r = 14 + rand() * 8;
+      const x = best.position.x + Math.sin(a) * r, z = best.position.z + Math.cos(a) * r;
+      if (navGrid?.isBlockedAtWorld(x, z)) continue;
+      if (navGrid?.sameRegion && !navGrid.sameRegion(x, z, best.position.x, best.position.z)) continue;
+      if (structures.list.some((s) => s.alive && dist(s.position, { x, z }) < 9)) continue;
+      const score = (cover?.concealmentAt?.(x, z) ?? 0) + rand() * 0.05;
+      if (!site || score > site.score) site = { x, z, score };
+    }
+    if (!site || !purse.spend(params.mortarCost)) return;
+    if (emplace("mortar", site.x, site.z)) say(`mortar dug in behind ${best.name}`);
+  }
+
   function prune() {
     for (let i = squads.length - 1; i >= 0; i--) {
       const s = squads[i];
@@ -721,12 +808,14 @@ export function createEnemyAI({
     navGrid?.pumpPaths?.(params.pathBudget);
     if (!deployed) deployed = deploy();
     recruit(dt);
-    // Guns being dug in come up over zpuDigTime (combat holds their fire till then).
+    // Works being dug in come up over their dig time (they hold fire till then).
     for (const z of structures.zpus ?? []) if ((z.deploy ?? 1) < 1) z.deploy = Math.min(1, z.deploy + dt / params.zpuDigTime);
+    for (const m of structures.mortars ?? []) if ((m.deploy ?? 1) < 1) m.deploy = Math.min(1, m.deploy + dt / params.mortarDigTime);
+    workTheTubes(dt);
     tickT -= dt;
     if (tickT <= 0) { tickT = params.tick; prune(); watchTheSky(); }
     zpuT -= dt;
-    if (zpuT <= 0) { zpuT = params.zpuEvery; digInAA(); }
+    if (zpuT <= 0) { zpuT = params.zpuEvery; digInAA(); digInMortar(); }
     // Each squad thinks once a tick, but on ITS OWN step of it, not all on the
     // same one: a squad's orders cost a path search per man, and MEASURED with
     // nine squads that was 3.2 ms landing in one frame every second — a hitch.

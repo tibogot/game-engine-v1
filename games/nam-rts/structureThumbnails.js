@@ -8,7 +8,8 @@ import { buildQuonsetHQ } from "../../v3/render/objects/rtsQuonset.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { buildColonialHQ } from "../../v3/render/objects/rtsColonial.js";
 import {
-  ZPU_MOUNT_Y, ZPU_TRUNNION_Y, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
+  ZPU_MOUNT_Y, ZPU_TRUNNION_Y,
+  buildMortarPit, buildMortarTube, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
 } from "../../v3/render/objects/rtsEnemyKit.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import {
@@ -48,6 +49,14 @@ const ITEMS = [
   ["struct:enemy:turret", () => withGun(buildNestBody(), buildNestGun(), NEST_HEAD_Y)],
   ["struct:enemy:enemyBase", () => kit(buildColonialHQ())],
   ["struct:enemy:tunnel", () => kit(buildTunnelEntrance())],
+  ["struct:enemy:mortar", () => {
+    const g = new THREE.Group();
+    g.add(kit(buildMortarPit()));
+    const tube = kit(buildMortarTube());
+    tube.rotation.y = 0.5;
+    g.add(tube);
+    return g;
+  }],
   ["struct:enemy:zpu", () => {
     // Turned toward the camera, the guns up at 30°: the four barrels read.
     const g = new THREE.Group();
