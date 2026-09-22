@@ -893,6 +893,99 @@ export function buildConexYard({ seed = 23 } = {}) {
   return geo;
 }
 
+// ── Range target ─────────────────────────────────────────────────────────────
+/**
+ * A TARGET ON THE CAMP RANGE — the thing you sight a new weapon in on, and
+ * what the game's practice dummies are drawn as.
+ *
+ * What a range in Vietnam was: a butt of earth and sandbags to stop the
+ * rounds, an E-type plywood silhouette staked in front of it, a numbered
+ * board so the range officer can call the lane, and the ground in front
+ * chewed up. The SILHOUETTE is the whole read — a man-shape standing alone on
+ * bare earth says "shoot at this" from any distance, which five dark boxes did
+ * not.
+ *
+ * Built at the game's own soldier height (2.34 m, unitTypes RTS_SCALE), not at
+ * life size: a target has to read as a MAN next to the men, and the enemy kit
+ * learned the same lesson with its gun crews.
+ */
+export function buildTrainingTarget({ seed = 61 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const H = 2.34;                       // the game's soldier, head to heel
+  // The butt: a low earth bank with two courses of bags along its crest,
+  // standing a metre behind the target where the rounds end up.
+  // A BANK, not a box: a four-sided frustum, so its sides batter back the way
+  // thrown earth does. Kept LOW (under a metre) and set well back — built as
+  // tall as a real butt it stood over the silhouette and swallowed it, and the
+  // silhouette is the only part of this that has to read.
+  const buttZ = -2.3 * S, buttW = 2.9 * S, buttH = 0.72 * S;
+  const bank = new THREE.CylinderGeometry(0.62, 0.86, buttH, 4).rotateY(Math.PI / 4);
+  bank.scale(buttW / 1.2, 1, 1.35);
+  parts.push({ geo: bank, pos: [0, buttH / 2, buttZ], mat: MAT.earth, tone: 0.3 + R() * 0.2 });
+  // Two courses of bags along its crest: pale hessian behind a dark silhouette
+  // is what makes the man-shape read from the air.
+  parts.push({
+    geo: buildSandbagWall({ length: buttW - 0.4, courses: 2, seed: seed + 3, batter: 0.04, bag: { length: 0.5 * S, width: 0.3 * S, height: 0.19 * S, segU: 6, segV: 4 } }),
+    pos: [0, buttH - 0.04, buttZ - 0.05], mat: null,
+  });
+  // The frame: two stakes carrying the silhouette, leaning a little as
+  // everything driven into wet ground does.
+  const lean = (R() - 0.5) * 0.06;
+  for (const sx of [-1, 1]) {
+    parts.push({
+      geo: buildBox(0.08 * S, H * 0.78, 0.08 * S), pos: [sx * 0.34 * S, H * 0.39, 0.05],
+      rot: [0, 0, lean], mat: MAT.timber, tone: 0.24 + R() * 0.25,
+    });
+  }
+  // The E-type silhouette: head, shoulders and torso out of one sheet of ply,
+  // olive drab, hung from the stakes with its feet clear of the ground.
+  // A WHOLE MAN, not the E-type's head and shoulders: at the RTS camera the
+  // upper-body plate was a postage stamp on a bank, and the one thing this
+  // prop has to say is "a man is standing there". Legs, torso, shoulders,
+  // head — each plate a good 8 mm THINNER than the last, because cut to one
+  // thickness their faces land in a plane and z-fight (this kit's oldest
+  // lesson). Sized to the game's own soldier, 2.34 m.
+  const sil = [];
+  const t = 0.05;
+  for (const sx of [-1, 1]) {
+    sil.push({ geo: buildBox(0.17 * S, H * 0.42, t - 0.004 * sx), pos: [sx * 0.13 * S, H * 0.25, 0] }); // legs
+  }
+  sil.push({ geo: buildBox(0.5 * S, H * 0.34, t), pos: [0, H * 0.62, 0] });                  // torso
+  sil.push({ geo: buildBox(0.66 * S, H * 0.1, t - 0.008), pos: [0, H * 0.76, 0] });          // shoulders
+  sil.push({ geo: buildBox(0.16 * S, H * 0.05, t - 0.016), pos: [0, H * 0.83, 0] });         // neck
+  sil.push({ geo: buildBox(0.22 * S, H * 0.12, t - 0.024), pos: [0, H * 0.91, 0] });         // head
+  for (const p of sil) parts.push({ ...p, mat: MAT.paint, tone: 0.16 + R() * 0.1, rot: [0, 0, lean] });
+  // Hits: holes punched through it, and the white paint ring round the group
+  // somebody marked after a good shoot.
+  // Spread round the group by a sweep rather than at random (two holes landing
+  // on each other put their end caps in one plane), and each punched a little
+  // deeper than the last so no two caps share a plane either.
+  for (let k = 0; k < 9; k++) {
+    const a = (k / 9) * Math.PI * 2 + R() * 0.5, rr = (0.06 + R() * 0.18) * S;
+    parts.push({
+      geo: new THREE.CylinderGeometry(0.022 * S, 0.021 * S, t + 0.02 + k * 0.006, 6).rotateX(Math.PI / 2),
+      pos: [Math.cos(a) * rr, H * 0.62 + Math.sin(a) * rr, 0], mat: MAT.steel, tone: 0.02,
+    });
+  }
+  // The lane board on its own stake, off to one side.
+  parts.push({ geo: buildBox(0.06 * S, 0.9 * S, 0.06 * S), pos: [0.72 * S, 0.45 * S, 0.1], mat: MAT.timber, tone: 0.3 });
+  parts.push({ geo: buildBox(0.34 * S, 0.26 * S, 0.03), pos: [0.72 * S, 0.95 * S, 0.12], rot: [0, 0.12, 0], mat: MAT.white, tone: 0.62 + R() * 0.3 });
+  // Brass and a ration tin in the churned dirt in front of it.
+  for (let k = 0; k < 5; k++) {
+    parts.push({
+      geo: new THREE.CylinderGeometry(0.02, 0.018, 0.09, 5).rotateZ(Math.PI / 2),
+      pos: [(R() - 0.5) * 1.6 * S, 0.02, 0.6 * S + R() * 0.8 * S],
+      rot: [0, R() * 3, 0], mat: MAT.metal, tone: 0.75 + R() * 0.2,
+    });
+  }
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.14, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
+  geo.userData.footprint = { cx: 0, cz: buttZ / 2, hx: buttW / 2, hz: 1.6 * S };
+  geo.userData.height = H;
+  return geo;
+}
+
 /** Every piece as a ready mesh (the sign as a small group), for previews. */
 export function buildFirebasePreviewSet() {
   const mat = rtsObjectMaterial();

@@ -11,14 +11,13 @@
 //   • enemy MG nests and their guns are instanced kinds (the kit's DShK nest)
 //   • beacons are their own meshes — emissive MRT material (they bloom)
 import * as THREE from "three";
-import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { materialColor } from "three/tsl";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
 import { buildQuonsetHQ } from "../../v3/render/objects/rtsQuonset.js";
 import {
   GUN_PIT_HEAD_Y, GUN_PIT_MUZZLE, NEST_HEAD_Y, NEST_MUZZLE, buildNestBody, buildNestGun,
 } from "../../v3/render/objects/rtsBuildables.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
+import { buildTrainingTarget } from "../../v3/render/objects/rtsFirebaseProps.js";
 import { buildColonialHQ } from "../../v3/render/objects/rtsColonial.js";
 import {
   MORTAR_MUZZLE, SPIDER_MUZZLE, ZPU_MOUNT_Y, ZPU_MUZZLE, ZPU_TRUNNION_Y,
@@ -29,70 +28,16 @@ import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
 const MAX_PER_KIND = 64; // instance capacity per structure kind
 
-const C_DARK = 0x333a45;
-const C_ENEMY = 0x6e4a4a;
-const C_MARK = 0xff6a3a;
-
 /** Found traps get a ring on the ground: orange for a pit, red for a charge. */
 const TRAP_RING = { punji: 0xff8a3a, boobyTrap: 0xff4438 };
 
-/**
- * The shared material for every structure kind.
- *
- * `vertexColors` carries the per-part color that used to need one material per
- * part. The `colorNode` is NOT cosmetic: an InstancedMesh never moves (its
- * instances do), and three's NodeMaterialObserver only re-uploads uniforms for a
- * material that carries a node — so without it the scene fog uniforms FREEZE at
- * whatever they were on first render. `materialColor` just reads the material's
- * own (white) color uniform. See unitRenderer.js for the same fix.
- */
-function makeStructureMaterial() {
-  const m = new THREE.MeshStandardNodeMaterial({
-    color: 0xffffff, // white: the vertex colors ARE the color
-    roughness: 0.87,
-    metalness: 0.18,
-    vertexColors: true,
-  });
-  m.colorNode = materialColor;
-  return m;
-}
-
-/** Tag every vertex of `geo` with `hex`, so merged parts keep their colors. */
-function paint(geo, hex) {
-  const c = new THREE.Color(hex); // already in linear working space
-  const n = geo.attributes.position.count;
-  const arr = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) {
-    arr[i * 3] = c.r;
-    arr[i * 3 + 1] = c.g;
-    arr[i * 3 + 2] = c.b;
-  }
-  geo.setAttribute("color", new THREE.BufferAttribute(arr, 3));
-  return geo;
-}
-
-/**
- * Merge painted parts into one geometry.
- *
- * mergeGeometries returns null on ANY attribute mismatch, so an untagged part
- * would silently delete a whole structure — throw instead of shipping a missing base.
- */
-function mergePainted(parts, name) {
-  const geo = mergeGeometries(parts, false);
-  if (!geo) throw new Error(`[rts-v3] ${name}: mergeGeometries failed (attribute mismatch)`);
-  return geo;
-}
-
 // ── The rigid geometry of each kind, built once ──────────────────────────────
 
-/** Unarmed practice target — bright so it's easy to spot near the base. */
-function dummyGeometry() {
-  return mergePainted([
-    paint(new THREE.CylinderGeometry(2.2, 2.6, 0.5, 12).translate(0, 0.25, 0), C_DARK),
-    paint(new THREE.BoxGeometry(3, 3, 3).translate(0, 2, 0), C_ENEMY),
-    paint(new THREE.BoxGeometry(3.1, 0.5, 3.1).translate(0, 2.8, 0), C_MARK),
-  ], "trainingDummy");
-}
+// The practice targets are the camp's RANGE now — an earth-and-sandbag butt
+// with an E-type silhouette staked in front of it (rtsFirebaseProps
+// buildTrainingTarget), instanced on the kit's atlas material like every other
+// dug-in thing. They were three painted boxes, which read as placeholder art
+// standing in the jungle outside a finished camp.
 
 // Turret geometry lives in v3/render/objects/rtsBuildables.js: the enemy's DShK
 // nest here, the player's M60 gun pit in buildingRenderer.js.
@@ -101,67 +46,6 @@ export const structureByMesh = new WeakMap(); // kept for API compatibility
 
 export function createStructuresRenderer({ app, structures, healthBars, fogOfWar = null }) {
   const { scene } = app;
-
-  // ── One merged mesh for every static structure body ─────────────────────────
-  // Structure bodies NEVER move (only on a world reload, or when one is
-  // destroyed), so they're merged into a single world-space mesh: one draw, and
-  // — the part that actually matters — ONE shadow caster. The shadow pass redraws
-  // every caster once per CSM cascade, so caster COUNT, not mesh count, is what
-  // sets the shadow bill.
-  //
-  // Not a BatchedMesh: it looks like the right tool (many geometries, one draw,
-  // per-instance culling), but this WebGPU backend has no `multi-draw-indirect`,
-  // so three falls back to ONE DRAW PER INSTANCE — measured at 19 draws for 16
-  // structures, worse than what we started with.
-  //
-  // Not an InstancedMesh either: the bodies are four different geometries, and
-  // instancing them per kind loses the per-object frustum culling that separate
-  // meshes got for free.
-  // The base is NOT in the merged mesh — it animates (sliding door), so it gets
-  // its own view below. Only the turrets and dummies merge.
-  // The enemy's turrets are NOT in it any more: they are the kit's DShK nest
-  // (rtsBuildables), on the kit's material, instanced below with their guns.
-  const geos = {
-    dummy: dummyGeometry(),
-  };
-  const bodyGeoOf = () => geos.dummy;
-
-  const structureMat = makeStructureMaterial();
-  let staticMesh = null;
-  let staticRanges = []; // [{ s, endTri }] — maps a hit triangle back to its structure
-  let staticKey = "";    // rebuild only when the set of live structures changes
-
-  /** Rebuild the merged body mesh (rare: a death, or a world reload). */
-  function rebuildStatic() {
-    if (staticMesh) {
-      scene.remove(staticMesh);
-      staticMesh.geometry.dispose();
-      staticMesh = null;
-    }
-    staticRanges = [];
-
-    const parts = [];
-    let tri = 0;
-    for (const s of structures.list) {
-      if (!s.alive) continue;
-      if (s.isBuilding) continue;      // runtime buildings have their own renderer
-      if (["base", "enemyBase", "turret", "tunnel", "zpu", "mortar",
-        "punji", "boobyTrap", "cache", "spiderHole"].includes(s.typeKey)) continue;
-      const g = bodyGeoOf(s).clone();
-      g.translate(s.position.x, s.position.y, s.position.z);
-      parts.push(g);
-      tri += (g.index ? g.index.count : g.attributes.position.count) / 3;
-      staticRanges.push({ s, endTri: tri });
-    }
-    if (!parts.length) return;
-
-    const merged = mergeGeometries(parts, false);
-    if (!merged) throw new Error("[rts-v3] structure bodies: mergeGeometries failed");
-    staticMesh = new THREE.Mesh(merged, structureMat);
-    staticMesh.castShadow = true;
-    staticMesh.receiveShadow = true;
-    scene.add(staticMesh);
-  }
 
   const bloom = (color) => makeBloomMaterial(
     { color, blending: THREE.NormalBlending, depthWrite: true, transparent: false },
@@ -202,6 +86,8 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     cache: makeKind(buildSupplyCache(), kitMat, { shadow: true }),
     spiderHole: makeKind(buildSpiderHole(), kitMat, { shadow: true }),
     spiderMan: makeKind(buildSpiderMan(), kitMat, { shadow: true }),
+    // The camp's range: a butt and a silhouette, one draw for the whole line.
+    trainingDummy: makeKind(buildTrainingTarget(), kitMat, { shadow: true }),
   };
   const _x = new THREE.Vector3(1, 0, 0);
   const _qp = new THREE.Quaternion();
@@ -256,7 +142,6 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
   const roots = [];
   const refreshRoots = () => {
     roots.length = 0;
-    if (staticMesh) roots.push(staticMesh);
     for (const k of Object.values(kinds)) roots.push(k.im);
     roots.push(baseView);
     if (structures.enemyBase?.alive) roots.push(enemyBaseView);
@@ -314,13 +199,6 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     const kind = kindOfMesh.get(hit.object);
     if (kind) return kind.at[hit.instanceId] ?? null;
 
-    if (hit.object === staticMesh) {
-      // The bodies are merged, so the hit names a TRIANGLE, not an object. The
-      // merge recorded where each structure's triangles end, so a scan finds it.
-      for (const r of staticRanges) {
-        if (hit.faceIndex < r.endTri) return r.s;
-      }
-    }
     return null;
   }
 
@@ -330,17 +208,11 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     // a cheap signature catches both without rebuilding every frame. Y MUST be
     // in the key: re-seating after a terrain swap often keeps x/z and only moves
     // y, and without it the merged bodies stayed floating at the old altitude.
-    let key = "";
-    for (const s of structures.list) {
-      if (s.alive && !s.isBuilding) {
-        key += `${s.position.x.toFixed(1)},${s.position.y.toFixed(1)},${s.position.z.toFixed(1)};`;
-      }
-    }
-    if (key !== staticKey) {
-      staticKey = key;
-      rebuildStatic();
-      refreshRoots();
-    }
+    // The raycast targets change when the enemy HQ appears or something dies.
+    // The set is a dozen meshes now that nothing is merged into a world-space
+    // body, so rebuilding the list each frame is cheaper than the signature
+    // that used to guard it.
+    refreshRoots();
 
     for (const k of Object.values(kinds)) k.n = 0;
 
@@ -425,6 +297,13 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         if (!spotted(s)) continue;
       }
 
+      // The range targets: the silhouette faces the firing point (-Z, where
+      // the camp is), which is the way every piece of this kit is built.
+      if (s.typeKey === "trainingDummy") {
+        _m.makeTranslation(s.position.x, s.position.y, s.position.z);
+        push(kinds.trainingDummy, _m, s);
+      }
+
       // ── The cheap nasty kit, once found ──────────────────────────────────
       if (kinds[s.typeKey] && s.concealed) {
         if (fogOfWar?.enabled && !fogOfWar.canSeeEntity(s)) continue;
@@ -480,7 +359,6 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     muzzleOf,
     sync,
     dispose() {
-      if (staticMesh) scene.remove(staticMesh);
       for (const k of Object.values(kinds)) scene.remove(k.im);
     },
   };

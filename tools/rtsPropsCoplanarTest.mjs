@@ -18,7 +18,7 @@
  */
 import {
   buildConex, buildConexYard, buildContainer, buildCrateStack, buildFuelDump, buildGuardTower, buildGunPit,
-  buildGate, buildRadioStation, buildTent,
+  buildGate, buildRadioStation, buildTent, buildTrainingTarget,
 } from "../v3/render/objects/rtsFirebaseProps.js";
 import { buildCorrugatedPanel, buildTrapezoidPanel, MAT } from "../v3/render/objects/rtsParts.js";
 
@@ -115,6 +115,7 @@ check("container (olive)", buildContainer());
 check("container (camo)", buildContainer({ mat: MAT.camo }));
 check("radio station", buildRadioStation());
 check("camp gate", buildGate());
+check("range target", buildTrainingTarget());
 check("helipad", buildHelipad());
 check("gun pit body (M60 post)", buildGunPitBody());
 check("M60", buildGunPitGun());

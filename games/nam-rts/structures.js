@@ -285,7 +285,7 @@ const DOOR_MOUTH = 8;
  * because flattening round-trips the GPU heightmap — the caller must rebuild the
  * nav grid afterwards, since the terrain has genuinely changed.
  */
-export async function createStructures({ app, navGrid, turretCount = 5, resources = null } = {}) {
+export async function createStructures({ app, navGrid, turretCount = 5, resources = null, dummies = true } = {}) {
   const list = [];
   const world = app.worldSize ?? 1000;
   const half = world / 2;
@@ -376,16 +376,21 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
     await place(STRUCTURE_TYPES.turret, tx, tz, { searchRadius: 120, maxSpread: 4 });
   }
 
-  // ── Training targets: a short row north of the base (+Z toward the enemy) ───
-  // Unarmed dummies so you can test craters / combat without trekking across the map.
-  const dummyOffsets = [-28, -14, 0, 14, 28];
-  for (let i = 0; i < dummyOffsets.length; i++) {
-    await place(
-      STRUCTURE_TYPES.trainingDummy,
-      base.position.x + dummyOffsets[i],
-      base.position.z + 52 + (i % 2) * 6,
-      { searchRadius: 50, maxSpread: 3 },
-    );
+  // ── The range: a short row north of the base (+Z toward the enemy) ─────────
+  // Targets to test craters and combat on without trekking across the map —
+  // and, drawn as a real firing range (rtsFirebaseProps.buildTrainingTarget),
+  // part of the camp rather than five placeholder boxes in the jungle.
+  // ?dummies=0 boots without them.
+  if (dummies) {
+    const dummyOffsets = [-28, -14, 0, 14, 28];
+    for (let i = 0; i < dummyOffsets.length; i++) {
+      await place(
+        STRUCTURE_TYPES.trainingDummy,
+        base.position.x + dummyOffsets[i],
+        base.position.z + 52 + (i % 2) * 6,
+        { searchRadius: 50, maxSpread: 3 },
+      );
+    }
   }
 
   /**

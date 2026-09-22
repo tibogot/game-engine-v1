@@ -397,7 +397,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   app.resources = resources;
 
   onStatus("Placing structures…");
-  const structures = await createStructures({ app, navGrid, resources });
+  const structures = await createStructures({
+    app, navGrid, resources,
+    // The camp's firing range — targets to test craters and combat on.
+    dummies: new URLSearchParams(location.search).get("dummies") !== "0",
+  });
   app.structures = structures;
 
   // THE ENEMY PLAYS (enemyAI.js): its HQ stands from the start — it recruits

@@ -145,6 +145,17 @@ Your words: their base is still empty next to ours, the default turrets are the
 old ones, they need their own kind of guard tower — and it should feel like
 Vietnam, like Apocalypse Now.
 
+- [x] **The old boxes in the jungle were the TRAINING TARGETS**, not the
+      turrets (your screenshot 2026-09-23): five placeholder box-and-slab
+      dummies planted north of the camp at every boot since the sandbox days.
+      Kept (they are useful for testing craters and combat) but rebuilt as a
+      RANGE: `rtsFirebaseProps.buildTrainingTarget` — a battered earth bank with
+      two courses of bags on its crest, a full man-shaped plywood silhouette on
+      stakes in front of it at the game's own soldier height, bullet holes
+      punched through the group, a lane board and spent brass in the dirt.
+      848 tris, one instanced draw for the whole line. `?dummies=0` boots
+      without them. (The merged-body renderer path went with them — the
+      dummies were the only thing left in it.)
 - [ ] **Replace the default enemy turrets.** Five DShK nests stand in a line
       across the top of the map from boot (structures.js `turretCount`), sited
       by a formula, not by the ground. Replace with a MIXED, sited line: DShK
@@ -179,11 +190,22 @@ Vietnam, like Apocalypse Now.
       hung in the trees, a hanging man in a doorway, smoke drifting across it,
       hundreds of small fires at dusk. At RTS zoom these read as SILHOUETTES,
       which is the right register — dread, not gore
+- [ ] **A CRASH SITE near Kurtz's place** (your ask 2026-09-23 — agreed, after
+      the ruins). A wreck in the jungle on the way in, so the approach tells
+      the story before the temple does. YES, this is cheap and good: the UH-1
+      is already built part by part (`rtsVehicles.buildUH1` — lofted skin,
+      boom, blades, skids), so a WRECK is that model taken apart rather than a
+      new one — fuselage on its side with the skin split behind the cabin, the
+      tail boom snapped off and lying clear, one rotor blade bent over the
+      cabin and another thrown 20 m into the trees, the mast bare, doors gone,
+      a burnt patch and scorched craters under it, panels and perspex scattered
+      on the approach, vines already over the boom. Same for a fixed-wing if
+      you want a second: an A-1 Skyraider nose-in with its tail up, or a C-123
+      broken-backed in a clearing. Both want the crater/burn ground under them
+      (craterSystem + the burnt-ground work) to sell it
 - [ ] **My other suggestions for that stretch of map** (say which you want):
       · the **sampan village on the water** — stilt houses over a backwater,
         fish traps, nets on frames, a floating market boat
-      · a **shot-down Huey** in the canopy, rotor buried in the trees, and a
-        **crashed Skyraider** with its tail up out of a paddy
       · the **Do Lung bridge**: a bridge lit by flares and rebuilt every night,
         wrecks in the water under it, wire and bunkers on the banks
       · **French plantation**: rubber trees in ROWS with a colonial house and
