@@ -23,6 +23,10 @@ export const STRUCTURE_TYPES = {
     // The round site stamp alone left the door end on its blended rim, 1-1.5 m
     // under the sandbag skirts.
     pad: { dz: -1, halfX: 13.5, halfZ: 14 },
+    // The selection outline: the Quonset and its blast walls (world, door -Z:
+    // blast walls 13 m in front of the base point, the gable 12 m behind),
+    // inside the pad — the pad's own edge meets the terrace wall.
+    frame: { dz: -0.5, halfX: 10.5, halfZ: 12 },
     navRadius: 24,   // pathfinding block — hangar apron (~17 m) + unit clearance
     // Walkable corridor on the −Z face (door / production exit). Carved after the
     // nav circle is stamped so units path around the HQ but still drive out.

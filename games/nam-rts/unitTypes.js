@@ -89,7 +89,7 @@ export const UNIT_TYPES = {
     maxHp: 160,
     range: 0,          // no weapon — combat.js skips anything with range 0
     vision: 34,
-    builds: ["helipad", "turret", "radio", "captureNode"],
+    builds: ["helipad", "turret", "radio", "captureNode", "watchTower", "medicTent", "sandbagWall", "bunker"],
     // render
     url: "/models/rts/truckmilitary_compressed.glb",
     targetLength: 6,

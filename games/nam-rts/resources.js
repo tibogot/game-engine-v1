@@ -28,6 +28,10 @@ export const BUILDING_COST = {
   turret: 0,
   radio: 120,
   captureNode: 180,
+  watchTower: 60,
+  medicTent: 100,
+  sandbagWall: 15,
+  bunker: 140,
 };
 
 const NODE_RADIUS = 5;

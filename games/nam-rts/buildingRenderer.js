@@ -20,7 +20,8 @@ import { buildRadioTower } from "./radioKit.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import {
-  GUN_PIT_HEAD_Y, buildGunPitBody, buildGunPitGun, buildHelipad, buildRadioPost,
+  GUN_PIT_HEAD_Y, buildBunker, buildGunPitBody, buildGunPitGun, buildHelipad, buildMedicTent, buildRadioPost,
+  buildSandbagWallPiece, buildWatchTower,
 } from "../../v3/render/objects/rtsBuildables.js";
 
 const lamp = (color, r) => new THREE.Mesh(
@@ -41,6 +42,19 @@ function kitView(geo) {
 }
 
 let _helipadGeo = null, _radioGeo = null;
+
+/** The buildings that are just a kit mesh: one shared geometry per type. */
+const KIT_VIEWS = {
+  watchTower: buildWatchTower,
+  medicTent: buildMedicTent,
+  sandbagWall: buildSandbagWallPiece,
+  bunker: buildBunker,
+};
+const _kitGeos = new Map();
+const plainKitView = (key) => {
+  if (!_kitGeos.has(key)) _kitGeos.set(key, KIT_VIEWS[key]());
+  return kitView(_kitGeos.get(key));
+};
 
 /** The PSP helipad (rtsBuildables) with its four corner lamps, which pulse
  *  while a helicopter is being readied. */
@@ -131,7 +145,9 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
     if (b.typeKey === "helipad") g = helipadView();
     else if (b.typeKey === "radio") g = radioView();
     else if (b.typeKey === "captureNode") g = buildRadioTower("capture");
+    else if (KIT_VIEWS[b.typeKey]) g = plainKitView(b.typeKey);
     else return null;
+    g.rotation.y = b.rotY ?? 0;
     g.frustumCulled = false;
     scene.add(g);
     views.set(b, g);
@@ -170,7 +186,7 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
     if (!b.selected || !b.alive) return;
     const tint = b.team === "enemy" ? 0xff6a5a : undefined;
     const fp = b.footprint;
-    if (fp && !ROUND.has(b.typeKey)) app.selectionFrames?.add(b.position.x + fp.cx, b.position.z + fp.cz, fp.hx + 0.6, fp.hz + 0.6, 0, tint);
+    if (fp && !ROUND.has(b.typeKey)) app.selectionFrames?.add(b.position.x + fp.cx, b.position.z + fp.cz, fp.hx + 0.6, fp.hz + 0.6, fp.ry ?? 0, tint, b.position.y + 0.8);
     else app.selectionRings?.add(b.position.x, b.position.z, b.radius + 1, tint);
   }
 

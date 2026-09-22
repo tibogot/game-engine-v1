@@ -115,7 +115,7 @@ export function createNavGrid({
     // A building that declares its footprint (buildings.js) blocks exactly
     // that rectangle, not a circle round its bounding radius.
     const fp = s.footprint;
-    if (fp) stampFootprint({ x: wx + fp.cx, z: wz + fp.cz, hx: fp.hx, hz: fp.hz, ry: 0 });
+    if (fp) stampFootprint({ x: wx + fp.cx, z: wz + fp.cz, hx: fp.hx, hz: fp.hz, ry: fp.ry ?? 0 });
     else stampCircle(wx, wz, structureNavRadius(s));
     const ap = s.type?.doorApproach;
     if (!ap) return;

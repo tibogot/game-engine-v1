@@ -9,7 +9,9 @@
 // production queue that launches HELICOPTERS off the pad.
 import * as THREE from "three";
 import { findBuildSite, prepareSite } from "./sitePlanner.js";
-import { buildGunPitBody, buildHelipad, buildRadioPost } from "../../v3/render/objects/rtsBuildables.js";
+import {
+  buildBunker, buildGunPitBody, buildHelipad, buildMedicTent, buildRadioPost, buildSandbagWallPiece, buildWatchTower,
+} from "../../v3/render/objects/rtsBuildables.js";
 
 export const BUILDING_TYPES = {
   helipad: {
@@ -52,6 +54,61 @@ export const BUILDING_TYPES = {
     barWidth: 8,
     barY: 18,
     role: "intel",       // unlocks tactical minimap + extended vision
+  },
+  // ── Buildings with a job (each earns its place, or it is not here) ─────────
+  watchTower: {
+    typeKey: "watchTower",
+    name: "Guard Tower",
+    team: "player",
+    maxHp: 300,
+    radius: 5,
+    buildTime: 5,
+    // Sees further: the one reason to build it. A unit sees 40 m, a
+    // structure 52; from the deck, over the canopy, 110.
+    vision: 110,
+    barWidth: 6,
+    barY: 10,
+  },
+  medicTent: {
+    typeKey: "medicTent",
+    name: "Aid Station",
+    team: "player",
+    maxHp: 350,
+    radius: 9,
+    buildTime: 7,
+    // Heals INFANTRY standing near it — men, not machines.
+    healRadius: 18,
+    healRate: 4,         // hp per second, per man
+    barWidth: 9,
+    barY: 6,
+  },
+  sandbagWall: {
+    typeKey: "sandbagWall",
+    name: "Sandbag Wall",
+    team: "player",
+    maxHp: 220,
+    radius: 4,
+    buildTime: 2,
+    // Cover you build: circles all along the run, at full strength, turned
+    // to face away from the HQ (the way the enemy comes from).
+    cover: "wall",
+    facesOut: true,
+    barWidth: 5,
+    barY: 2.6,
+  },
+  bunker: {
+    typeKey: "bunker",
+    name: "Bunker",
+    team: "player",
+    maxHp: 1100,
+    radius: 5,
+    buildTime: 9,
+    // HARD cover: takes more off a shot than a rock or a wall does (cover.js
+    // maxHardCover), for men fighting from round it.
+    cover: "hard",
+    facesOut: true,
+    barWidth: 7,
+    barY: 4.5,
   },
   captureNode: {
     typeKey: "captureNode",
@@ -126,7 +183,39 @@ const FOOTPRINT_BUILDERS = {
   helipad: () => buildHelipad(),
   turret: () => buildGunPitBody(),
   radio: () => buildRadioPost(),
+  watchTower: () => buildWatchTower(),
+  medicTent: () => buildMedicTent(),
+  sandbagWall: () => buildSandbagWallPiece(),
+  bunker: () => buildBunker(),
 };
+
+/** A footprint (building frame) turned by `ry` into world axes, around the origin. */
+function turnFootprint(fp, ry) {
+  const c = Math.cos(ry), s = Math.sin(ry);
+  return { cx: fp.cx * c + fp.cz * s, cz: -fp.cx * s + fp.cz * c, hx: fp.hx, hz: fp.hz, ry };
+}
+
+/**
+ * What the cover bake stamps for a building (cover.js staticObstacles).
+ * A wall is a row of full-strength circles down its length — one blob would
+ * hand cover to the open ground past its ends; a bunker is one HARD circle;
+ * the rest keep their round footprint.
+ */
+function coverCirclesFor(b) {
+  const fp = b.footprint, t = b.type;
+  if (!fp || !t.cover) return [{ x: b.position.x, z: b.position.z, radius: b.radius }];
+  const px = b.position.x + fp.cx, pz = b.position.z + fp.cz;
+  if (t.cover === "hard") return [{ x: px, z: pz, radius: Math.max(fp.hx, fp.hz), size: 1, hard: true }];
+  // Wall: along the footprint's long axis (local X, turned by ry).
+  const ax = Math.cos(fp.ry ?? 0), az = -Math.sin(fp.ry ?? 0);
+  const out = [];
+  const n = Math.max(2, Math.round((2 * fp.hx) / 1.6));
+  for (let k = 0; k < n; k++) {
+    const u = -fp.hx + 0.8 + ((2 * fp.hx - 1.6) * k) / (n - 1);
+    out.push({ x: px + ax * u, z: pz + az * u, radius: 1.0, size: 1 });
+  }
+  return out;
+}
 const _footprints = new Map();
 function footprintOf(typeKey) {
   if (!_footprints.has(typeKey)) {
@@ -175,14 +264,21 @@ export function createBuildings({ app, structures, units, navGrid = null, onComp
 
     const site = findBuildSite(app, x, z, type.radius, { searchRadius: 40, maxSpread: 6 });
     if (!site) return null;
+    // A wall or a bunker faces away from the HQ — its front (+Z) toward
+    // where the enemy comes from.
+    const hq = structures.base?.position;
+    const rotY = type.facesOut && hq ? Math.atan2(site.x - hq.x, site.z - hq.z) : 0;
     // A building on the kit levels a pad to its own footprint, as the camp's
     // pieces do; the rest keep the round site.
-    const fp = footprintOf(typeKey);
-    if (fp && app.flattenRect) await app.flattenRect(site.x + fp.cx, site.z + fp.cz, fp.hx + 0.5, fp.hz + 0.5, site.y, { rim: 3 });
+    const local = footprintOf(typeKey);
+    const fp = local ? turnFootprint(local, rotY) : null;
+    if (fp && app.flattenRect) await app.flattenRect(site.x + fp.cx, site.z + fp.cz, fp.hx + 0.5, fp.hz + 0.5, site.y, { rim: 3, rotY });
     else await prepareSite(app, site.x, site.z, type.radius, site.y);
 
     const b = makeBuilding(app, type, site.x, site.z);
+    b.rotY = rotY;
     if (fp) b.footprint = fp;
+    b.coverCircles = coverCirclesFor(b);
     clearGround(site.x + (fp?.cx ?? 0), site.z + (fp?.cz ?? 0), fp ? Math.hypot(fp.hx, fp.hz) : type.radius);
     list.push(b);
     structures.add?.(b);       // combat / selection / waves now see it
@@ -234,6 +330,16 @@ export function createBuildings({ app, structures, units, navGrid = null, onComp
       // combat.js holds fire while this is under 1 (see its `deploying` check).
       if (b.deploy < 1 && b.type.deployDur) {
         b.deploy = Math.min(1, b.deploy + dt / b.type.deployDur);
+      }
+
+      // Aid station: men standing near it get their health back.
+      if (b.type.healRate) {
+        const r2 = b.type.healRadius ** 2;
+        for (const u of units.list) {
+          if (!u.alive || u.team !== b.team || u.typeKey !== "soldier" || u.hp >= u.maxHp) continue;
+          const dx = u.position.x - b.position.x, dz = u.position.z - b.position.z;
+          if (dx * dx + dz * dz <= r2) u.hp = Math.min(u.maxHp, u.hp + b.type.healRate * dt);
+        }
       }
 
       // Production.

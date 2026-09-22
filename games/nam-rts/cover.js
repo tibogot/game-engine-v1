@@ -74,6 +74,8 @@ export const COVER = {
 
   /** Cover: the most damage a perfect piece of hard cover can take off. */
   maxCover: 0.55,
+  /** The same for HARD cover — a bunker's logs and earth, not a rock or bags. */
+  maxHardCover: 0.8,
   /** How far behind a prop still counts as using it, metres. */
   coverReach: 4.0,
   /** Props smaller than this are debris, not cover. */
@@ -91,6 +93,8 @@ export function createCover({ app, worldSize = 2048, params = COVER } = {}) {
   const half = worldSize * 0.5;
   /** 0..255 per cell — how much hard cover stands in it. */
   const coverGrid = new Uint8Array(n * n);
+  /** 0..255 per cell — the part of that cover that is HARD (bunkers). */
+  const hardGrid = new Uint8Array(n * n);
 
   /**
    * The same two numbers as a texture, for the ground overlay to read.
@@ -144,8 +148,11 @@ export function createCover({ app, worldSize = 2048, params = COVER } = {}) {
     for (const p of app.placed?.coverCircles?.() ?? []) yield p;
     // Buildings and the boot structures: a sandbag emplacement is the best
     // cover on the map and would otherwise be missed entirely.
+    // A building can say what it stamps (buildings.js coverCirclesFor): a
+    // sandbag wall as a row of circles, a bunker as one HARD one.
     for (const b of [...(app.buildings?.list ?? []), ...(app.structures?.list ?? [])]) {
       if (!b.alive || b.constructing) continue;
+      if (b.coverCircles) { for (const c of b.coverCircles) yield c; continue; }
       yield { x: b.position.x, z: b.position.z, radius: b.radius ?? 0 };
     }
   }
@@ -159,6 +166,7 @@ export function createCover({ app, worldSize = 2048, params = COVER } = {}) {
    */
   function bake() {
     coverGrid.fill(0);
+    hardGrid.fill(0);
     let stamped = 0;
     for (const p of staticObstacles()) {
       const r = p.radius;
@@ -186,10 +194,13 @@ export function createCover({ app, worldSize = 2048, params = COVER } = {}) {
           const t = d <= r ? 1 : 1 - (d - r) / params.coverReach;
           // Bigger props are better cover, saturating: a 3 m boulder is not
           // three times the protection of a 1 m one, it is just enough.
-          const size = Math.min(1, r / 2.5);
+          // A built piece says its own size (a sandbag wall is thin but it
+          // is exactly what cover is for).
+          const size = p.size ?? Math.min(1, r / 2.5);
           const v = Math.round(255 * t * (0.45 + 0.55 * size));
           const i = cz * n + cx;
           if (v > coverGrid[i]) coverGrid[i] = v;
+          if (p.hard && v > hardGrid[i]) hardGrid[i] = v;
         }
       }
       stamped++;
@@ -238,12 +249,16 @@ export function createCover({ app, worldSize = 2048, params = COVER } = {}) {
     const ux = -dx / m, uz = -dz / m;
     // The best of three wins: you are either behind something or you are not,
     // and an average would dilute real cover with the open ground beside it.
+    // Hard cover (a bunker) counts on its own, higher, scale: the best of the
+    // two wins.
     let best = 0;
     for (const s of [1.2, 2.8, 4.4]) {
-      const v = coverAt(tx + ux * s, tz + uz * s);
+      const x = tx + ux * s, z = tz + uz * s;
+      const i = toCell(z) * n + toCell(x);
+      const v = Math.max((coverGrid[i] / 255) * params.maxCover, (hardGrid[i] / 255) * params.maxHardCover);
       if (v > best) best = v;
     }
-    return best * params.maxCover;
+    return best;
   }
 
   /**

@@ -87,6 +87,7 @@ import { createMatch } from "./match.js";
 import { createWaveHud } from "./waveHud.js";
 import { createBuildings } from "./buildings.js";
 import { createBuildingRenderer } from "./buildingRenderer.js";
+import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { createBuildPlacement } from "./buildPlacement.js";
 import { createBaseFlag } from "./baseFlag.js";
 import { createCombatFx } from "./combatFx.js";
@@ -593,6 +594,12 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const waveHud = createWaveHud();
   app.waveHud = waveHud;
 
+  // Portraits for the HQ, every building and the enemy's nests, into the same
+  // map as the units' (structureThumbnails.js, keyed by thumbKeyOf).
+  if (unitRenderer.thumbnails) {
+    await bakeStructureThumbnails(app.renderer, unitRenderer.thumbnails).catch((e) => console.warn("[thumbs] structures:", e));
+  }
+
   // Player-facing HUD: bottom-center bar shows the selected units as baked
   // 3D thumbnail tiles (grouped by type + count).
   //   click     → select only that type (from the current selection)
@@ -646,10 +653,15 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     canAfford: (cost) => resources.canAfford(cost),
     onBuild: (structure, key) => structure.enqueue(key),
     structureBuilds: [
-      { key: "helipad", label: "Build Helipad" },
-      { key: "turret", label: "Build M60 Pit" },
-      { key: "radio", label: "Radio Station" },
-      { key: "captureNode", label: "Supply Relay" },
+      // Short labels (four across in the card); the tooltip says what it does.
+      { key: "helipad", label: "Helipad", tip: "Helipad — builds helicopters" },
+      { key: "turret", label: "M60 Pit", tip: "M60 gun pit — defends itself, hits air" },
+      { key: "radio", label: "Radio", tip: "Radio Station — the tactical map and wider vision" },
+      { key: "captureNode", label: "Relay", tip: "Supply Relay — income" },
+      { key: "watchTower", label: "Tower", tip: "Guard Tower — sees 110 m, over the canopy" },
+      { key: "medicTent", label: "Aid Stn", tip: "Aid Station — heals infantry within 18 m" },
+      { key: "sandbagWall", label: "Bags", tip: "Sandbag Wall — cover you build, faces away from the HQ" },
+      { key: "bunker", label: "Bunker", tip: "Bunker — HARD cover (80%, against 55% for rocks and bags)" },
     ],
     buildingCosts: BUILDING_COST,
     onBuildStructure: (key, selected) => buildPlacement.begin(key, selected),

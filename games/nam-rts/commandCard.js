@@ -34,6 +34,10 @@ export function createCommandCard({
     #rts-cmd-card .cc-name { font-weight: 600; font-size: 13px; letter-spacing: 0.03em; }
     #rts-cmd-card .cc-sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hud-dim); margin-top: 2px; }
     #rts-cmd-card .cc-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+    /* A builder has eight builds: four across, so two rows leave room for its abilities. */
+    #rts-cmd-card .cc-builds, #rts-cmd-card .cc-orders { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    #rts-cmd-card .cc-builds button { padding: 5px 2px; white-space: nowrap; }
+    #rts-cmd-card .cc-builds .cc-cost { margin-left: 3px; }
     #rts-cmd-card button {
       cursor: pointer; font: 11px var(--hud-sans); color: var(--hud-text); line-height: 1.15;
       padding: 5px 3px; border-radius: var(--hud-radius); background: #252920; border: 1px solid #454c3a;
@@ -84,15 +88,21 @@ export function createCommandCard({
    * a radio station, and two copies would drift.
    */
   function abilityRow(selected) {
+    const inner = abilityButtons(selected);
+    return inner ? `<div class="cc-actions cc-abil">${inner}</div>` : "";
+  }
+
+  /** Just the ability buttons, for a row that also holds other orders. */
+  function abilityButtons(selected) {
     const list = abilitiesFor(selected);
     if (!list.length) return "";
-    return `<div class="cc-actions cc-abil">${list.map((a) => `
+    return `${list.map((a) => `
       <button data-abil="${a.key}" class="${a.ready ? "" : "cooling"}" title="${a.hint ?? ""}">
         ${a.label}
         ${a.ready
           ? (a.cost ? `<span class="cc-cost">${a.cost}</span>` : "")
           : `<span class="cc-cd">${a.cooldown > 0 ? `${a.cooldown}s` : "—"}</span>`}
-      </button>`).join("")}</div>`;
+      </button>`).join("")}`;
   }
 
   /** Wire whatever ability buttons the last render produced. */
@@ -124,14 +134,15 @@ export function createCommandCard({
           <div class="cc-sub">${selected.length} unit${selected.length > 1 ? "s" : ""}</div>
         </div>
       </div>
-      ${builds.length ? `<div class="cc-actions">${builds.map((b) => {
+      ${builds.length ? `<div class="cc-actions cc-builds">${builds.map((b) => {
         const cost = buildingCosts[b.key] ?? 0;
         const poor = cost > 0 && !canAfford(cost);
-        return `<button data-struct="${b.key}" class="${poor ? "poor" : ""}">${b.label}${cost ? `<span class="cc-cost">${cost}</span>` : ""}</button>`;
+        return `<button data-struct="${b.key}" class="${poor ? "poor" : ""}" title="${b.tip ?? b.label}">${b.label}${cost ? `<span class="cc-cost">${cost}</span>` : ""}</button>`;
       }).join("")}</div>` : ""}
       <div class="cc-stance" id="cc-stance"></div>
-      ${abilityRow(selected)}
-      <div class="cc-actions">
+      <!-- Abilities and the standing orders share one row: the slot is 152 px tall. -->
+      <div class="cc-actions cc-orders">
+        ${abilityButtons(selected)}
         <button data-act="stop">Stop</button>
         <button data-act="focus">Focus</button>
       </div>

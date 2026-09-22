@@ -52,7 +52,7 @@ Keep this file current: tick things off here, add new asks here.
       supplies strip on top, selection (one unit or building: portrait/monogram
       + health; several: tiles by type) + command card
 - [x] Locked minimap: a NO RADIO static screen in its own slot
-- [ ] **Thumbnails for everything selectable** (your ask): the HQ, every
+- [x] **Thumbnails for everything selectable** (`structureThumbnails.js`): the HQ, every
       building, the enemy nest — a real rendered portrait in the selection
       panel like the vehicles have, not the stencilled monogram
 - [ ] **Your references** from other RTS games → next pass on the HUD's look
@@ -94,9 +94,13 @@ Keep this file current: tick things off here, add new asks here.
       reads from the RTS camera. Enemy turrets → **DShK nest** (log-lined pit,
       earth mound, leaf mats, the finned DShK with its ring sight), jungle
       cleared off the pit; `turretKit.js` deleted. Cover re-bakes when a
-      building finishes (~4 ms, once). LEFT: supply relay → requisition points
-      (step 3); new buildables with a job (guard tower, medic tent, sandbag
-      wall, bunker). Was: what the builder
+      building finishes (~4 ms, once). **Buildings with a job** (DONE):
+      Guard Tower (vision 110 m), Aid Station (heals infantry 4 hp/s within
+      18 m), Sandbag Wall (full-strength cover down its length, faces away
+      from the HQ), Bunker (HARD cover, 80% vs 55% — new hard-cover grid in
+      cover.js). Build menu four across with tooltips. LEFT: supply relay →
+      requisition points (step 3); cover is still 4 m cells, so a wall covers
+      both its sides a few metres out. Was: what the builder
       raises (helipad, turret, radio, supply relay…) still looks like the old
       game — radio station = the old GLB; others procedural, at our standard;
       some kit pieces become buildable

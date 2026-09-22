@@ -9,7 +9,7 @@
 // a small hut and the HQ carry the same weight of line.
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
-import { Fn, attribute } from "three/tsl";
+import { Fn, attribute, min, vec3 } from "three/tsl";
 import { drapedPosition } from "./terrainDrape.js";
 
 const LIFT = 0.25;       // off the ground, as the rings
@@ -49,7 +49,11 @@ export function createSelectionFrameField({ app, max = 64, color = 0x6ab0ff }) {
   const geo = bracketGeometry();
   const frameA = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4); // x, z, halfX, halfZ
   const frameB = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4); // cos, sin, arm, thick
-  const colorAttr = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);
+  // r, g, b, and a height CEILING: the frame drapes on the ground but never
+  // rises above its building's floor — or a bracket next to a terrace wall
+  // climbs it (the HQ's did, on nam-valley). Where the ground is higher it
+  // runs into the wall instead.
+  const colorAttr = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4);
   for (const a of [frameA, frameB, colorAttr]) a.setUsage(THREE.DynamicDrawUsage);
   geo.setAttribute("aFrameA", frameA);
   geo.setAttribute("aFrameB", frameB);
@@ -65,7 +69,8 @@ export function createSelectionFrameField({ app, max = 64, color = 0x6ab0ff }) {
     // Turn to the building (three's Y rotation) and move to it.
     const wx = A.x.add(lx.mul(B.x)).add(lz.mul(B.y));
     const wz = A.y.sub(lx.mul(B.y)).add(lz.mul(B.x));
-    return drapedPosition(heightTexNode, wx, wz, LIFT);
+    const p = drapedPosition(heightTexNode, wx, wz, LIFT);
+    return vec3(p.x, min(p.y, attribute("aFrameColor", "vec4").w), p.z);
   });
 
   const mat = new MeshBasicNodeMaterial({
@@ -75,7 +80,7 @@ export function createSelectionFrameField({ app, max = 64, color = 0x6ab0ff }) {
   });
   mat.forceSinglePass = true;
   mat.positionNode = vertex();
-  mat.colorNode = attribute("aFrameColor", "vec3");
+  mat.colorNode = attribute("aFrameColor", "vec4").xyz;
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -89,13 +94,13 @@ export function createSelectionFrameField({ app, max = 64, color = 0x6ab0ff }) {
      * Queue one frame: footprint centre (x, z), half extents (halfX, halfZ) in
      * metres, `rotY` the building's yaw.
      */
-    add(x, z, halfX, halfZ, rotY = 0, tint = color) {
+    add(x, z, halfX, halfZ, rotY = 0, tint = color, ceilY = 1e6) {
       if (n >= max) return;
       const arm = Math.max(1.5, Math.min(halfX, halfZ) * 0.45);
       frameA.setXYZW(n, x, z, halfX, halfZ);
       frameB.setXYZW(n, Math.cos(rotY), Math.sin(rotY), arm, 0.45);
       _col.set(tint);
-      colorAttr.setXYZ(n, _col.r, _col.g, _col.b);
+      colorAttr.setXYZW(n, _col.r, _col.g, _col.b, ceilY);
       n++;
     },
     commit() {

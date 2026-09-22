@@ -3,6 +3,8 @@
 // Several: the selection grouped by type, each a 3D-baked thumbnail tile with
 // a count (click: only that type · double-click: every one on the map).
 // Nothing: a quiet NO SELECTION, so the bar never changes shape.
+import { thumbKeyOf } from "./thumbnails.js";
+
 export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllType = () => {}, mount = document.body }) {
   const root = document.createElement("div");
   root.id = "rts-unit-bar";
@@ -54,8 +56,8 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
   function renderOne(u) {
     single = u;
     lastHp = -1;   // a new unit: write its bar even if its HP equals the last one's
-    const url = u.isStructure ? null : thumbnails?.get(u.typeKey);
-    // Buildings have no baked thumbnail: a stencilled monogram stands in.
+    const url = thumbnails?.get(thumbKeyOf(u));
+    // Anything without a baked portrait (the old enemy HQ): a stencilled monogram.
     const mono = (u.name ?? u.typeKey).split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
     root.innerHTML = `
       <div class="one">
@@ -91,7 +93,7 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
     for (const [key, g] of groups) {
       const tile = document.createElement("div");
       tile.className = "tile";
-      const url = thumbnails?.get(key);
+      const url = thumbnails?.get(thumbKeyOf(g.unit));
       if (url) tile.style.backgroundImage = `url(${url})`;
       tile.innerHTML =
         `<span class="name">${g.unit.name ?? key}</span>` +

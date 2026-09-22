@@ -17,7 +17,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { MAT, assemble, bakeContactAO, buildBox, buildPost, buildSandbagWall, rng } from "./rtsParts.js";
-import { buildGunPit, buildRadioStation } from "./rtsFirebaseProps.js";
+import { buildGuardTower, buildGunPit, buildRadioStation, buildTent } from "./rtsFirebaseProps.js";
 import { flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
 
 const S = 1.3;
@@ -256,6 +256,94 @@ export function buildNestGun() {
   P(buildBox(g(0.12), g(0.17), g(0.32)), [g(0.14), g(-0.06), g(0.02)], MAT.paint, 0.35);
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.05 * GUN, radius: 1, strength: 0.25, groundFade: 0, floor: 0.6 });
+  return geo;
+}
+
+// ── Sandbag wall ─────────────────────────────────────────────────────────────
+/**
+ * A straight run of bags, four courses — chest height to a kneeling man, the
+ * height you fight from. Along local X; the game turns it to face the enemy.
+ */
+export function buildSandbagWallPiece({ seed = 71, length = 5.5 * S } = {}) {
+  const bag = { length: 0.52 * S, width: 0.30 * S, height: 0.19 * S, segU: 6, segV: 4 };
+  const courses = 4;
+  const geo = assemble([
+    // Two skins, the back one a course lower: a wall two bags thick, stepped
+    // on the friendly side to kneel on.
+    { geo: buildSandbagWall({ length, courses, seed, bag, batter: 0.05 }), pos: [0, 0, 0.17 * S], mat: null },
+    { geo: buildSandbagWall({ length: length - 0.3 * S, courses: courses - 1, seed: seed + 1, bag, batter: 0.05 }), pos: [0, 0, -0.17 * S], mat: null },
+  ]);
+  bakeContactAO(geo, { cell: 0.14 * S, radius: 2, strength: 0.35, groundFade: 0.3, floor: 0.55 });
+  geo.userData.footprint = { cx: 0, cz: 0, hx: length / 2 + 0.2, hz: 0.55 * S };
+  geo.userData.height = 1.4;
+  return geo;
+}
+
+// ── Bunker ───────────────────────────────────────────────────────────────────
+/**
+ * A sandbagged bunker: bag walls round a timber frame, a firing slit across
+ * the front (+Z) under a roof of logs, a layer of earth and a course of bags
+ * on top, the door at the back. What a firebase dug in at its corners.
+ */
+export function buildBunker({ seed = 81 } = {}) {
+  const R = rng(seed);
+  const bag = { length: 0.52 * S, width: 0.30 * S, height: 0.19 * S, segU: 6, segV: 4 };
+  const hw = 2.4 * S;                      // half the outer width
+  const course = bag.height, wallC = 5, frontC = 4;
+  const wallH = course * wallC, roofY = wallH + 0.06;
+  const door = 1.1 * S;
+  const parts = [];
+  // Side walls (along Z), full height.
+  for (const sx of [-1, 1]) {
+    parts.push({ geo: buildSandbagWall({ length: 2 * hw, courses: wallC, seed: seed + (sx > 0 ? 1 : 2), bag, batter: 0.04 }), pos: [sx * hw, 0, 0], rot: [0, Math.PI / 2, 0], mat: null });
+  }
+  // Front wall a course lower: the firing slit is the gap under the roof.
+  parts.push({ geo: buildSandbagWall({ length: 2 * hw - 0.5 * S, courses: frontC, seed: seed + 3, bag, batter: 0.04 }), pos: [0, 0, hw], mat: null });
+  // Back wall in two runs either side of the door.
+  const run = hw - door / 2 - 0.1 * S;
+  for (const sx of [-1, 1]) {
+    parts.push({ geo: buildSandbagWall({ length: run, courses: wallC, seed: seed + 5 + sx, bag, batter: 0.04 }), pos: [sx * (door / 2 + run / 2), 0, -hw], mat: null });
+  }
+  // Corner and door posts carrying the roof.
+  for (const [x, z] of [[-hw + 0.35, -hw + 0.35], [hw - 0.35, -hw + 0.35], [-hw + 0.35, hw - 0.4], [hw - 0.35, hw - 0.4], [-door / 2 - 0.12, -hw + 0.3], [door / 2 + 0.12, -hw + 0.3]]) {
+    parts.push({ geo: buildPost({ height: roofY, width: 0.2 * S, depth: 0.2 * S, taper: 0.05 }), pos: [x, 0, z], mat: MAT.timber, tone: 0.3 });
+  }
+  // Roof: logs across, then earth, then a course of bags round the edge.
+  const logs = 11, logR = 0.12 * S;
+  for (let k = 0; k < logs; k++) {
+    const z = -hw - 0.2 + ((k + 0.5) * (2 * hw + 0.4)) / logs;
+    const log = new THREE.CylinderGeometry(logR * (0.9 + R() * 0.2), logR, 2 * hw + 0.7, 7).rotateZ(Math.PI / 2);
+    parts.push({ geo: log, pos: [0, roofY + logR, z], mat: MAT.timber, tone: 0.25 + R() * 0.3 });
+  }
+  const slabY = roofY + 2 * logR;
+  parts.push({ geo: buildBox(2 * hw + 0.3, 0.3 * S, 2 * hw + 0.3), pos: [0, slabY + 0.15 * S, 0], mat: MAT.earth, tone: 0.45 });
+  const topY = slabY + 0.3 * S;
+  for (const sz of [-1, 1]) parts.push({ geo: buildSandbagWall({ length: 2 * hw, courses: 1, seed: seed + 9 + sz, bag }), pos: [0, topY, sz * (hw - 0.1)], mat: null });
+  for (const sx of [-1, 1]) parts.push({ geo: buildSandbagWall({ length: 2 * hw - 0.8 * S, courses: 1, seed: seed + 12 + sx, bag }), pos: [sx * (hw - 0.1), topY, 0], rot: [0, Math.PI / 2, 0], mat: null });
+  // The slit's dark inside: a back board so the gap reads as depth, not sky.
+  parts.push({ geo: buildBox(2 * hw - 0.9, roofY - course * frontC + 0.1, 0.05), pos: [0, course * frontC + (roofY - course * frontC) / 2, -hw + 0.5], mat: MAT.metal, tone: 0.0 });
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.2 * S, radius: 2, strength: 0.45, groundFade: 0.3, floor: 0.45 });
+  geo.userData.footprint = { cx: 0, cz: 0, hx: hw + 0.4 * S, hz: hw + 0.4 * S };
+  geo.userData.height = topY + 0.4;
+  return geo;
+}
+
+// ── Watch tower, medic tent ──────────────────────────────────────────────────
+/** The kit's guard tower as a building: its footprint is its legs' spread. */
+export function buildWatchTower({ seed = 13 } = {}) {
+  const geo = buildGuardTower({ seed });
+  geo.computeBoundingBox();
+  const b = geo.boundingBox;
+  geo.userData.footprint = { cx: (b.min.x + b.max.x) / 2, cz: (b.min.z + b.max.z) / 2, hx: (b.max.x - b.min.x) / 2, hz: (b.max.z - b.min.z) / 2 };
+  geo.userData.height = b.max.y;
+  return geo;
+}
+
+/** The aid-station tent (walls down, red crosses) as a building. */
+export function buildMedicTent({ seed = 19 } = {}) {
+  const geo = buildTent({ medic: true, seed });
+  geo.userData.height = 4.5;
   return geo;
 }
 

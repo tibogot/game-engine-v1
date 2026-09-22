@@ -4,6 +4,16 @@
 import * as THREE from "three";
 
 /**
+ * The thumbnail key for anything selectable. Units by type; structures under
+ * "struct:" (structureThumbnails.js) — the enemy's by team too, since its
+ * "turret" is a DShK nest, not the player's M60 pit.
+ */
+export function thumbKeyOf(e) {
+  if (!e?.isStructure) return e?.typeKey;
+  return e.team === "enemy" ? `struct:enemy:${e.typeKey}` : `struct:${e.typeKey}`;
+}
+
+/**
  * @param {object} o
  * @param {THREE.WebGPURenderer} o.renderer
  * @param {{key:string, make:()=>THREE.Object3D}[]} o.items

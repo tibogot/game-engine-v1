@@ -125,7 +125,8 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     if (e.typeKey === "base") return DEFAULT_VISION.base;
     if (e.typeKey === "radio") return DEFAULT_VISION.radio;
     if (e.typeKey === "captureNode") return DEFAULT_VISION.captureNode;
-    if (e.isStructure) return DEFAULT_VISION.structure;
+    // A structure can see further by type — the guard tower does (buildings.js).
+    if (e.isStructure) return e.type?.vision ?? DEFAULT_VISION.structure;
     return e.type?.vision ?? DEFAULT_VISION.unit;
   }
 
