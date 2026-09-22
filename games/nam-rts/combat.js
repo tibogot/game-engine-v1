@@ -134,9 +134,13 @@ export function createCombat({
    * are not touched, and COVER DOES NOT SHELTER anyone — a mortar bomb comes
    * down from above, which is exactly what makes it the answer to men dug in
    * behind sandbags. The owner's own side is not hit.
+   *
+   * `vehicleMul` scales what anything that is not a rifleman takes: a mortar
+   * bomb does not care, but the Front's booby traps (traps.js) are a grenade in
+   * a tin, and a grenade in a tin does not hurt an M48.
    */
   const _splashNear = [];
-  function splashAt(at, damage, radius, owner = null) {
+  function splashAt(at, damage, radius, owner = null, { vehicleMul = 1 } = {}) {
     fx.explosion(at.x, at.y, at.z);
     craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7));
     const hit = (o) => {
@@ -144,7 +148,8 @@ export function createCombat({
       if (owner && o.team === owner.team) return;
       const d = Math.hypot(o.position.x - at.x, o.position.z - at.z);
       if (d > radius) return;
-      const amount = damage * (1 - (d / radius) ** 1.5);
+      const soft = o.isStructure || o.typeKey === "soldier";
+      const amount = damage * (1 - (d / radius) ** 1.5) * (soft ? 1 : vehicleMul);
       if (amount > 0) onImpact(o, amount, at, null);       // null owner: no directional cover
     };
     for (const o of units.near(at.x, at.z, radius, _splashNear)) hit(o);

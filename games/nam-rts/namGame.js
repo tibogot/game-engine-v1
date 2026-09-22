@@ -83,6 +83,7 @@ import { createResourceHud } from "./resourceHud.js";
 import { createHudBar } from "./hudBar.js";
 import { createHarvesting } from "./harvesting.js";
 import { createRequisition } from "./requisition.js";
+import { createTraps } from "./traps.js";
 import { createRequisitionRenderer } from "./requisitionRenderer.js";
 import { pointSitesFor, tunnelSitesFor } from "./pointSites.js";
 import { createEnemyAI } from "./enemyAI.js";
@@ -647,6 +648,23 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   combatRef = combat;
   app.combat = combat;
 
+  // The Front's cheap war (traps.js): what is hidden out there, who has found
+  // it, and what it does to the man who did not. It needs combat for the
+  // damage, the nav grid to make a FOUND trap walkable-around, and both purses
+  // — a cache pays them while it stands and pays you when it burns.
+  const traps = createTraps({
+    structures, units, combat, navGrid, resources,
+    enemyEarn: (n) => app.enemyAI?.purse.earn(n),
+    // Found: the jungle comes off it. A cache is a big thing under a mat and
+    // needs a yard; a tripwire only needs the leaves round its stakes gone.
+    onReveal: (s) => {
+      const r = s.typeKey === "cache" ? 5 : s.typeKey === "boobyTrap" ? 2.4 : 3.6;
+      app.clearVegetation?.(s.position.x, s.position.z, r, { grass: r * 0.8 });
+    },
+    onLog: (line) => console.log(`[traps] ${line}`),
+  });
+  app.traps = traps;
+
   // Napalm is assembled from fire + smoke + craters + combat; it owns only the
   // SHAPE of a run and what it does to whoever is standing in it.
   const napalm = createNapalmStrike({
@@ -690,6 +708,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // of jungle, cover re-baked (~4 ms, once).
     emplace: (typeKey, x, z) => {
       const s = structures.addNow(typeKey, x, z);
+      // The cheap nasty kit is HIDDEN: no nav stamp (your pathfinder walking
+      // round an invisible pit would give it away), no clearing (the jungle
+      // over it is what hides it), no cover. traps.js stamps it when it is
+      // found, and that is the reward for finding it.
+      if (s.concealed) return s;
       navGrid.addStructureObstacle(s);
       app.clearVegetation?.(x, z, 6, { grass: 4.5 });
       cover.bake();
@@ -961,6 +984,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     harvesting.update(dt);                // node → fill → base → unload → repeat
     units.update(dt);
     combat.update(dt);                    // acquire → chase → launch rockets
+    traps.step(dt);                       // who found what; who stepped on what
     match.update(dt);                     // win/lose when enemy HQ match is on
     projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
     fire.update(dt, sim.simTime);         // burning wrecks
@@ -1065,6 +1089,28 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   console.log(`[cover] ${cover.bake()} obstacles`);
   // Label the nav regions now (~6 ms), not on the first question in the fight.
   navGrid.sameRegion(0, 0, 0, 0);
+
+  // ── The Front's opening kit (traps.js) ─────────────────────────────────────
+  // Two pits and a wire on the open approach to the résidence (-Z, the side you
+  // come from), a spider hole watching them, and a rice cache in the back yard.
+  // `addNow`, not `placeEnemy`: none of it levels ground — a flattened disc in
+  // the jungle is exactly the tell a hidden thing must not have. Laid after the
+  // last nav rebuild so a pit never lands inside a cliff, and the commander
+  // adds to it as the match goes on (enemyAI.layCheapKit).
+  if (AI_ON && structures.enemyBase?.alive) {
+    const eb = structures.enemyBase.position;
+    let laid = 0;
+    for (const [key, dx, dz] of [
+      ["punji", -20, -44], ["punji", 17, -50], ["boobyTrap", -2, -57],
+      ["spiderHole", 24, -36], ["cache", -28, 16],
+    ]) {
+      const x = eb.x + dx, z = eb.z + dz;
+      if (navGrid.isBlockedAtWorld(x, z)) continue;
+      structures.addNow(key, x, z);
+      laid++;
+    }
+    console.log(`[traps] ${laid} hidden at the résidence`);
+  }
 
   // The console handle. Every subsystem already hangs off `app`, so one global
   // covers all of them: __NAM.smoke.spawn({x, z, kind: "screen"}).

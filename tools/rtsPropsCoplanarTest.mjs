@@ -25,7 +25,10 @@ import { buildCorrugatedPanel, buildTrapezoidPanel, MAT } from "../v3/render/obj
 import { buildDoorLeaf, buildQuonsetShellGeometry } from "../v3/render/objects/rtsQuonset.js";
 import { buildM113, buildM151, buildM35, buildM48, buildM551, buildMolotova, buildPT76, buildUH1 } from "../v3/render/objects/rtsVehicles.js";
 import { buildColonialHQ } from "../v3/render/objects/rtsColonial.js";
-import { buildMortarPit, buildMortarTube, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount } from "../v3/render/objects/rtsEnemyKit.js";
+import {
+  buildBoobyTrap, buildMortarPit, buildMortarTube, buildPunjiPit, buildSpiderHole, buildSpiderMan,
+  buildSupplyCache, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
+} from "../v3/render/objects/rtsEnemyKit.js";
 import { buildGunPitBody, buildGunPitGun, buildBunker, buildHelipad, buildNestBody, buildNestGun, buildRequisitionMast, buildSandbagWallPiece } from "../v3/render/objects/rtsBuildables.js";
 
 let failed = 0;
@@ -176,6 +179,11 @@ check("mortar tube", buildMortarTube());
 check("ZPU-4 pit + carriage", buildZpuBody());
 check("ZPU-4 mount + gunner", buildZpuMount());
 check("ZPU-4 guns", buildZpuGuns());
+check("punji pit", buildPunjiPit());
+check("booby trap", buildBoobyTrap());
+check("supply cache", buildSupplyCache());
+check("spider hole", buildSpiderHole());
+check("spider hole fighter", buildSpiderMan());
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

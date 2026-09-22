@@ -21,8 +21,9 @@ import {
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { buildColonialHQ } from "../../v3/render/objects/rtsColonial.js";
 import {
-  MORTAR_MUZZLE, ZPU_MOUNT_Y, ZPU_MUZZLE, ZPU_TRUNNION_Y,
-  buildMortarPit, buildMortarTube, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
+  MORTAR_MUZZLE, SPIDER_MUZZLE, ZPU_MOUNT_Y, ZPU_MUZZLE, ZPU_TRUNNION_Y,
+  buildBoobyTrap, buildMortarPit, buildMortarTube, buildPunjiPit, buildSpiderHole, buildSpiderMan,
+  buildSupplyCache, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
 } from "../../v3/render/objects/rtsEnemyKit.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
@@ -31,6 +32,9 @@ const MAX_PER_KIND = 64; // instance capacity per structure kind
 const C_DARK = 0x333a45;
 const C_ENEMY = 0x6e4a4a;
 const C_MARK = 0xff6a3a;
+
+/** Found traps get a ring on the ground: orange for a pit, red for a charge. */
+const TRAP_RING = { punji: 0xff8a3a, boobyTrap: 0xff4438 };
 
 /**
  * The shared material for every structure kind.
@@ -141,7 +145,8 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     for (const s of structures.list) {
       if (!s.alive) continue;
       if (s.isBuilding) continue;      // runtime buildings have their own renderer
-      if (["base", "enemyBase", "turret", "tunnel", "zpu", "mortar"].includes(s.typeKey)) continue;
+      if (["base", "enemyBase", "turret", "tunnel", "zpu", "mortar",
+        "punji", "boobyTrap", "cache", "spiderHole"].includes(s.typeKey)) continue;
       const g = bodyGeoOf(s).clone();
       g.translate(s.position.x, s.position.y, s.position.z);
       parts.push(g);
@@ -189,6 +194,14 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     zpuBody: makeKind(buildZpuBody(), kitMat, { shadow: true }),
     zpuMount: makeKind(buildZpuMount(), kitMat, { shadow: true }),
     zpuGuns: makeKind(buildZpuGuns(), kitMat, { shadow: true }),
+    // The cheap nasty kit. These are drawn ONLY once your men have found them
+    // (traps.js sets `hidden`), so the instance count is the number of traps
+    // you know about, not the number that are out there.
+    punji: makeKind(buildPunjiPit(), kitMat, { shadow: true }),
+    boobyTrap: makeKind(buildBoobyTrap(), kitMat, { shadow: true }),
+    cache: makeKind(buildSupplyCache(), kitMat, { shadow: true }),
+    spiderHole: makeKind(buildSpiderHole(), kitMat, { shadow: true }),
+    spiderMan: makeKind(buildSpiderMan(), kitMat, { shadow: true }),
   };
   const _x = new THREE.Vector3(1, 0, 0);
   const _qp = new THREE.Quaternion();
@@ -277,6 +290,11 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         .applyAxisAngle(_up, s.turretYaw ?? 0)
         .add(_muzzle.set(s.position.x, s.position.y, s.position.z));
     }
+    if (s.typeKey === "spiderHole") {
+      return SPIDER_MUZZLE.clone()
+        .applyAxisAngle(_up, s.turretYaw ?? 0)
+        .add(_muzzle.set(s.position.x, s.position.y, s.position.z));
+    }
     if (s.typeKey !== "turret") {
       return _muzzle.set(s.position.x, s.position.y + 6, s.position.z).clone();
     }
@@ -354,6 +372,9 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     for (const s of structures.list) {
       if (!s.alive) continue;
       if (s.isBuilding) continue;
+      // Not found yet: no mesh, no bar, no ring, nothing to raycast. The only
+      // honest way to hide something is not to draw it (traps.js).
+      if (s.hidden) continue;
 
       if (s.typeKey === "turret") {
         if (s.team === "enemy" && fogOfWar?.enabled && !fogOfWar.canSeeEntity(s)) continue;
@@ -402,6 +423,25 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         _m.makeTranslation(s.position.x, s.position.y, s.position.z);
         push(kinds.tunnel, _m, s);
         if (!spotted(s)) continue;
+      }
+
+      // ── The cheap nasty kit, once found ──────────────────────────────────
+      if (kinds[s.typeKey] && s.concealed) {
+        if (fogOfWar?.enabled && !fogOfWar.canSeeEntity(s)) continue;
+        _m.makeTranslation(s.position.x, s.position.y, s.position.z);
+        push(kinds[s.typeKey], _m, s);
+        // The man in the hole turns to whoever he is shooting at, rifle and all.
+        if (s.typeKey === "spiderHole") {
+          const t = s.target?.alive ? s.target : null;
+          if (t) s.turretYaw = Math.atan2(t.position.x - s.position.x, t.position.z - s.position.z);
+          _head.compose(_pivot.set(s.position.x, s.position.y, s.position.z), _q.setFromAxisAngle(_up, s.turretYaw ?? 0), _one);
+          push(kinds.spiderMan, _head, s);
+        }
+        // A DANGER RING on ground you now know is mined. This is the whole
+        // reward for finding one: the trap is still there, but from here on it
+        // is a place on the map you can see and walk around.
+        const danger = TRAP_RING[s.typeKey];
+        if (danger) app.selectionRings?.add(s.position.x, s.position.z, (s.type.trap?.trigger ?? 3) + 0.6, danger);
       }
 
       if (s.typeKey === "enemyBase" && !showEnemyHq) continue;

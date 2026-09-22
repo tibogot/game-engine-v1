@@ -92,6 +92,18 @@ export const ENEMY_AI = {
   armourMax: 4,
   armourMinPoints: 2,   // it holds this much ground before it buys a tank
   armourEvery: 8,       // seconds between decisions
+  // The cheap nasty kit (traps.js): pits and wire on the ways into what it
+  // holds, a spider hole to cover them, caches in the rear that pay it. All of
+  // it costs less than one rifleman and none of it can be seen until it is
+  // walked into, which is the point.
+  trapCost: 35,
+  trapMax: 10,
+  holeCost: 80,
+  holeMax: 4,
+  cacheCost: 110,
+  cacheMax: 3,
+  kitEvery: 11,         // seconds between decisions
+  kitReserve: 60,       // never dug out of the last of the purse
   // Supply trucks: the Molotova's run pays when it gets through.
   truckKey: "molotova",
   truckCost: 120,
@@ -838,6 +850,63 @@ export function createEnemyAI({
     if (emplace("mortar", site.x, site.z)) say(`mortar dug in behind ${best.name}`);
   }
 
+  // ── The cheap nasty kit ───────────────────────────────────────────────────
+  // Everything the Front can dig with a spade. It lays it where you have to
+  // walk: pits and wire on the side of its points that FACES your HQ, spider
+  // holes beside them to shoot whoever stops to look, and rice caches on the
+  // far side, in its own rear, where they can pay for a while before you find
+  // them. Cheap enough to come out of spare change, capped so the map never
+  // turns into a minefield.
+  let kitT = 0;
+  const countOf = (key) => structures.list.filter((s) => s.alive && s.typeKey === key).length;
+  /** A buildable spot near `p`, `r0`..`r1` out, on the bearing `aim` ± spread. */
+  function digSite(p, aim, spread, r0, r1, tries = 10) {
+    let site = null;
+    for (let k = 0; k < tries; k++) {
+      const a = aim + (rand() - 0.5) * spread, r = r0 + rand() * (r1 - r0);
+      const x = p.x + Math.sin(a) * r, z = p.z + Math.cos(a) * r;
+      if (navGrid?.isBlockedAtWorld(x, z)) continue;
+      if (navGrid?.sameRegion && !navGrid.sameRegion(x, z, p.x, p.z)) continue;
+      if (structures.list.some((s) => s.alive && dist(s.position, { x, z }) < 8)) continue;
+      const score = (cover?.concealmentAt?.(x, z) ?? 0) + rand() * 0.05;
+      if (!site || score > site.score) site = { x, z, score };
+    }
+    return site;
+  }
+  function layCheapKit() {
+    if (!emplace || !hq()) return;
+    const held = requisition.points.filter((p) => p.owner === "enemy");
+    if (!held.length) return;
+    // Whichever part of the kit is furthest from its cap goes down next, so it
+    // does not lay ten pits before the first hole.
+    const want = [
+      { kind: "trap", n: countOf("punji") + countOf("boobyTrap"), max: params.trapMax, cost: params.trapCost },
+      { kind: "spiderHole", n: countOf("spiderHole"), max: params.holeMax, cost: params.holeCost },
+      { kind: "cache", n: countOf("cache"), max: params.cacheMax, cost: params.cacheCost },
+    ].filter((w) => w.n < w.max).sort((a, b) => a.n / a.max - b.n / b.max);
+    const pick = want.find((w) => purse.stock >= w.cost + params.kitReserve && canSpend(w.cost, "kit"));
+    if (!pick) return;
+
+    const front = structures.base?.position;
+    const bearing = (p, toward) => (front
+      ? Math.atan2((toward ? front.x - p.x : p.x - front.x), (toward ? front.z - p.z : p.z - front.z))
+      : rand() * Math.PI * 2);
+    let best = null, bestD = pick.kind === "cache" ? -Infinity : Infinity;
+    for (const p of held) {
+      const d = front ? dist(p.position, front) : 0;
+      // Traps go on the point closest to you; a cache on the one furthest away.
+      if (pick.kind === "cache" ? d > bestD : d < bestD) { bestD = d; best = p; }
+    }
+    if (!best) return;
+    const toward = pick.kind !== "cache";
+    const site = digSite(best.position, bearing(best.position, toward), toward ? 1.5 : 1.1,
+      toward ? 12 : 14, toward ? 26 : 28);
+    if (!site || !purse.spend(pick.cost)) return;
+    const typeKey = pick.kind === "trap" ? (rand() < 0.62 ? "punji" : "boobyTrap") : pick.kind;
+    const s = emplace(typeKey, site.x, site.z);
+    if (s) say(`${typeKey === "cache" ? "cache hidden behind" : typeKey === "spiderHole" ? "hole dug at" : "trap laid on the way into"} ${best.name}`);
+  }
+
   // ── Supply trucks ─────────────────────────────────────────────────────────
   // A Molotova shuttles between the HQ and the forward point it holds. Each
   // run that GETS THROUGH pays — so the road between their base and the front
@@ -988,6 +1057,8 @@ export function createEnemyAI({
     if (tickT <= 0) { tickT = params.tick; prune(); watchTheSky(); }
     zpuT -= dt;
     if (zpuT <= 0) { zpuT = params.zpuEvery; digInAA(); digInMortar(); }
+    kitT -= dt;
+    if (kitT <= 0) { kitT = params.kitEvery; layCheapKit(); }
     armourT -= dt;
     if (armourT <= 0) { armourT = params.armourEvery; buyArmour(); }
     runTrucks(dt);

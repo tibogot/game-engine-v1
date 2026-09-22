@@ -43,9 +43,35 @@ Keep this file current: tick things off here, add new asks here.
    7 s on the thickest knot of your men ITS OWN MEN CAN SEE, never on its own.
    MEASURED: six men standing still died in ~19 s; with no spotter alive it
    stops firing. Ready to reuse for the US 81 mm pit, the M109 and the rockets.
+   [x] **THE CHEAP NASTY KIT** (`rtsEnemyKit.js` + new `traps.js`, test
+   `namTrapsTest`): punji pit, booby trap, spider hole, supply cache. All four
+   are CONCEALED — not drawn, not targetable, not on the minimap, not in the
+   nav grid — until your men find them, and finding is a ROLL: each rifleman
+   within the spotting ring gets his own chance per second, and **vehicles
+   notice nothing**. So a squad sweeping a trail usually finds what is on it,
+   one man hurrying often does not, and armour with no infantry in front finds
+   everything the hard way. Hidden is spelled with flags combat.js already had
+   (`passive` + `deploy`), so no targeting code knows traps exist.
+   · **punji pit**: infantry only, 30 damage and a 9 s limp at 0.45 speed — it
+     takes a man out of the line rather than killing him; re-arms after 8 s and
+     never catches the same man twice
+   · **booby trap**: a grenade in a ration tin on a wire — 58 damage in an 8 m
+     splash, spent in one bang, and x0.12 against armour (new `vehicleMul` on
+     combat.splashAt)
+   · **spider hole**: opens up at 30 m and shoots at 24, so you always see the
+     lid go back before the first round; 130 hp, the man turns with his rifle
+   · **supply cache**: pays the Front 0.35/s while it stands (a fifth of a
+     point) and pays YOU 150 when it burns — the only way to cut their income
+     between points
+   FOUND = drawn + a danger ring on the ground + STAMPED INTO NAV, so your men
+   walk around it from then on. Knowing where it is IS the counter.
+   The commander lays more as the match runs (`layCheapKit`, 35/80/110 out of
+   spare change, capped 10/4/3): traps on the side of its points facing your
+   HQ, holes beside them, caches in its rear. MEASURED: 5 laid at boot, 11 on
+   the map after 280 s.
    NEXT: your look check on all four · the AI digging NEW tunnels (a sapper) ·
-   punji pits / booby traps · supply cache (hits their income) · spider holes ·
-   enemy camp dressing round the résidence (well, sheds, cooking fire smoke)
+   enemy camp dressing round the résidence (well, sheds, cooking fire smoke) ·
+   a minesweeper/engineer verb to clear a found trap
 3. ~~**Vehicles rebuilt**~~ DONE for the US side — M113, M48, M151, M551, M35,
    UH-1 all procedural. ENEMY armour started:
    [x] **PT-76** (`rtsVehicles.buildPT76`, 5.3k tris): boat hull, folded trim

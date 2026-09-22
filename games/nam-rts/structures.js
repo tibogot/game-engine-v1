@@ -118,6 +118,83 @@ export const STRUCTURE_TYPES = {
     barWidth: 4,
     barY: 3.4,
   },
+  // ── The cheap nasty kit (rtsEnemyKit.js) ───────────────────────────────────
+  //
+  // Four things the Front can afford that do not win a fight: they make WALKING
+  // somewhere expensive. All four are CONCEALED — not drawn, not shot at, not
+  // on the minimap — until your men find them (traps.js).
+  //
+  // `concealed.spot` is how close a RIFLEMAN has to be to have a chance of
+  // noticing, `notice` his odds of it per second. Vehicles notice nothing: the
+  // man walking in front is the mine detector, and driving blind up a trail is
+  // how you find out what is on it. `navBlock` says the thing is walked around
+  // once it has been found — knowing where a pit is IS the counter to it.
+  punji: {
+    typeKey: "punji",
+    name: "Punji Pit",
+    team: "enemy",
+    maxHp: 50,
+    radius: 2,
+    range: 0,
+    concealed: { spot: 10, notice: 0.85 },
+    navBlock: { cx: 0, cz: 0, hx: 1.6, hz: 1.6 },
+    // Infantry only — a stake pit does nothing to a tracked vehicle — and it
+    // does not kill: half a man's health and a limp, which is worse for you
+    // than a death, because he walks home instead of fighting.
+    trap: { trigger: 2.6, damage: 30, limp: 9, limpScale: 0.45, infantryOnly: true, rearm: 8 },
+    barWidth: 3,
+    barY: 2.6,
+  },
+  boobyTrap: {
+    typeKey: "boobyTrap",
+    name: "Booby Trap",
+    team: "enemy",
+    maxHp: 30,
+    radius: 1.5,
+    range: 0,
+    concealed: { spot: 9, notice: 0.8 },
+    // One bang: it takes the man who walked into it and whoever bunched up
+    // behind him, and it is spent. Armour barely notices (vehicleMul).
+    trap: { trigger: 3, damage: 58, splash: 8, vehicleMul: 0.12, oneShot: true },
+    barWidth: 3,
+    barY: 2.2,
+  },
+  cache: {
+    typeKey: "cache",
+    name: "Supply Cache",
+    team: "enemy",
+    maxHp: 260,
+    radius: 3,
+    range: 0,
+    concealed: { spot: 15, notice: 1.4 },   // a rice stack under a mat: easier to find
+    navBlock: { cx: 0, cz: 0, hx: 2.4, hz: 2.4 },
+    // It pays the Front while it stands (a fifth of a requisition point), and
+    // what is left of it pays YOU when it burns. Raiding their rear is worth
+    // the walk — and it is the only way to cut their income between points.
+    income: 0.35,
+    loot: 150,
+    barWidth: 5,
+    barY: 3.4,
+  },
+  spiderHole: {
+    typeKey: "spiderHole",
+    name: "Spider Hole",
+    team: "enemy",
+    maxHp: 130,
+    radius: 1.8,
+    // Short-ranged and not very dangerous in a straight fight. What it does is
+    // open up behind you, from ground you have already walked past.
+    range: 24,
+    damage: 7,
+    fireRate: 2.2,
+    canHitAir: false,
+    // `ambush`: he throws the lid back and starts shooting at this range —
+    // further than he can hit at, so you always see him before the first round.
+    concealed: { spot: 8, notice: 0.7, ambush: 30 },
+    navBlock: { cx: 0, cz: 0, hx: 1.2, hz: 1.2 },
+    barWidth: 3.5,
+    barY: 3,
+  },
   // Unarmed targets for close-range crater / combat tests — no need to cross the map.
   trainingDummy: {
     typeKey: "trainingDummy",
@@ -134,7 +211,7 @@ export const STRUCTURE_TYPES = {
 
 function makeStructure(app, type, x, z) {
   const pos = new THREE.Vector3(x, app.getWorldHeight?.(x, z) ?? 0, z);
-  return {
+  const s = {
     kind: "structure",
     type,
     typeKey: type.typeKey,
@@ -165,6 +242,25 @@ function makeStructure(app, type, x, z) {
     get position() { return pos; },
     setSelected(v) { this.selected = !!v; },
   };
+  // CONCEALED things (the cheap nasty kit) start hidden, and hidden is spelled
+  // in the two flags combat.js already understands: `passive` keeps them out of
+  // everyone's target list, `deploy` 0 keeps the one that shoots from shooting.
+  // Nothing in combat had to learn about traps.
+  if (type.concealed) {
+    s.concealed = type.concealed;
+    s.hidden = true;
+    s.passive = true;
+    s.deploy = 0;
+    /** Found: it becomes an ordinary structure — drawn, shot at, and shooting back. */
+    s.reveal = function reveal() {
+      if (!this.hidden) return false;
+      this.hidden = false;
+      this.passive = !!type.passive;
+      this.deploy = 1;
+      return true;
+    };
+  }
+  return s;
 }
 
 /** Seconds to build each unit type. */

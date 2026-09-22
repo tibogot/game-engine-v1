@@ -110,6 +110,11 @@ export function createNavGrid({
 
   /** Stamp a structure footprint on the nav grid; HQ types also carve a door lane. */
   function addStructureObstacle(s) {
+    // A CONCEALED thing blocks nothing while it is still concealed (traps.js):
+    // men walking round an invisible pit is exactly how a player learns where
+    // the invisible pits are. Revealed, it stamps like anything else — and it
+    // re-stamps here on every rebuild, so a found trap stays found.
+    if (s.hidden) return;
     const wx = s.position.x;
     const wz = s.position.z;
     // A building that declares its footprint (buildings.js) blocks exactly
