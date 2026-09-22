@@ -83,7 +83,13 @@ Keep this file current: tick things off here, add new asks here.
       round ones (helipad, turrets, supply relay); enemy buildings in red
 - [x] **Base decoration placed from the start** (`campLayout.js`) — the kit pieces we
       built stand in the camp at every boot; signs + tank traps moved out to the gate
-- [ ] **Builder-built buildings rebuilt on the new kit**: what the builder
+- [~] **Builder-built buildings rebuilt on the new kit** (`rtsBuildables.js`):
+      DONE helipad (PSP matting with punched holes, painted H, revetments,
+      windsock, corner lamps), M60 gun pit (the gun turns, tracers leave its
+      muzzle), radio post (the kit station + star + U.S. ARMY); pads, nav and
+      selection brackets from their real footprints. LEFT: supply relay (→
+      requisition points), enemy turrets still the old sci-fi turret, cover
+      re-bake when a building goes up. Was: what the builder
       raises (helipad, turret, radio, supply relay…) still looks like the old
       game — radio station = the old GLB; others procedural, at our standard;
       some kit pieces become buildable
@@ -102,7 +108,9 @@ Keep this file current: tick things off here, add new asks here.
 
 ## Your asks, 2026-09-22 (night)
 
-- [ ] **US Army star in a circle** as a marking on buildings and billboards
+- [~] **US Army star in a circle** — DONE on the Quonset HQ (both flanks,
+      painted over the ribs), the GP tents' roofs, the radio post's roof;
+      LEFT: billboards. Was: as a marking on buildings and billboards
       (the stencil sheet already has the `star` cell — place it). Other
       markings worth having: unit patches (1st Cav horse-head shield, 25th
       Tropic Lightning, 173rd), hazard stripes on barriers/generators, "DANGER
@@ -119,6 +127,31 @@ Keep this file current: tick things off here, add new asks here.
 - [ ] **Supply drops (later)**: a plane (C-130 / C-123 Provider) flies over and
       drops crates on parachutes to your units — resupply as an event or an
       ability, like the real war
+
+## Your asks, 2026-09-22 (late) — trees, palms, vehicles
+
+- [ ] **Big trees — the jungle has none but the palms.** A canopy layer: tall
+      emergent trees (dipterocarp: straight pale trunk, buttress roots, a crown
+      high above everything), banyan / strangler fig (aerial roots, huge wide
+      crown), rubber trees in plantation ROWS (a French plantation is a great
+      map feature), bamboo clumps already exist. Built in the **vegetation lab**
+- [ ] **Palm variety for free**: the palm is procedural, so every instance can
+      differ at no draw cost — trunk curve/lean, height, crown size, frond
+      count/droop, dead hanging fronds. Per-instance params, not new types
+- [ ] **New palm-like types** (your photos): **areca palm** (clumps of thin
+      ringed canes, feathery arching fronds), **sago / cycad** (short fat trunk,
+      stiff dark rosette), **spike-leaf** yucca/dracaena/pandanus look (stiff
+      sword leaves in a ball on a trunk; pandanus has stilt roots — riverbanks),
+      nipa palm (no trunk, fronds straight out of the mud — river/delta edges),
+      banana (big torn paddle leaves, around villages)
+- [ ] **Colour variety** in the foliage (reds, yellows, flowering trees —
+      flame tree / poinciana orange, a few)
+- [ ] **Readability pass after**: thin the small foliage where it hides units
+      and combat (ties in with see-through, below)
+- [ ] **Vehicles are too low poly** — rebuild them for this game: procedural
+      on the parts kit (like the buildings) or your Blender work; LODs; the
+      silhouette readable from the RTS camera (M113, M151 jeep, M35 truck,
+      M48 tank, Huey); instanced so 100 cost a handful of draws
 
 ## Props → a real part of the game
 

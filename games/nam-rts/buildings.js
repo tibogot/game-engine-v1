@@ -9,6 +9,7 @@
 // production queue that launches HELICOPTERS off the pad.
 import * as THREE from "three";
 import { findBuildSite, prepareSite } from "./sitePlanner.js";
+import { buildGunPitBody, buildHelipad, buildRadioPost } from "../../v3/render/objects/rtsBuildables.js";
 
 export const BUILDING_TYPES = {
   helipad: {
@@ -22,11 +23,11 @@ export const BUILDING_TYPES = {
     produceTime: 7,      // seconds per helicopter
     launchDur: 1.8,      // heli rise-off-the-pad animation length
     barWidth: 11,
-    barY: 8,
+    barY: 5,
   },
   turret: {
     typeKey: "turret",
-    name: "Turret",
+    name: "M60 Gun Pit",
     team: "player",
     maxHp: 400,
     radius: 4,
@@ -39,7 +40,7 @@ export const BUILDING_TYPES = {
     canHitAir: true,
     deployDur: 1.1,      // head's calibration sweep once it finishes rising
     barWidth: 6,
-    barY: 10,
+    barY: 4.5,
   },
   radio: {
     typeKey: "radio",
@@ -116,8 +117,52 @@ function makeBuilding(app, type, x, z) {
   };
 }
 
+/**
+ * The footprint a kit building declares (rtsBuildables: helipad, gun pit,
+ * radio post), read once from its geometry — so the pad, the nav block and
+ * the model can never disagree. null for a type still on the old renderer.
+ */
+const FOOTPRINT_BUILDERS = {
+  helipad: () => buildHelipad(),
+  turret: () => buildGunPitBody(),
+  radio: () => buildRadioPost(),
+};
+const _footprints = new Map();
+function footprintOf(typeKey) {
+  if (!_footprints.has(typeKey)) {
+    const make = FOOTPRINT_BUILDERS[typeKey];
+    let fp = null;
+    if (make) {
+      const geo = make();
+      fp = geo.userData.footprint ?? null;
+      geo.userData.stencil?.dispose();
+      geo.dispose();
+    }
+    _footprints.set(typeKey, fp);
+  }
+  return _footprints.get(typeKey);
+}
+
 export function createBuildings({ app, structures, units, navGrid = null, onComplete = null }) {
   const list = [];
+
+  /** Grass and foliage off the site, and the map's rocks out of it. */
+  function clearGround(x, z, r) {
+    app.clearVegetation?.(x, z, r + 2, { grass: r });
+    const ps = app.propStore;
+    if (!ps?.instances) return;
+    let removed = false;
+    for (let i = ps.instances.length - 1; i >= 0; i--) {
+      const inst = ps.instances[i];
+      if (Math.hypot(inst.px - x, inst.pz - z) < r) { ps.removeInstance(i); removed = true; }
+    }
+    // A removed rock must stop blocking the path; the rebuild drops the
+    // structures' stamps, so they go back on.
+    if (removed && navGrid) {
+      navGrid.rebuild();
+      for (const s of structures.list) if (s.alive) navGrid.addStructureObstacle(s);
+    }
+  }
 
   /**
    * Raise a building at/near (x, z). Flattens the site first (async, GPU
@@ -130,9 +175,15 @@ export function createBuildings({ app, structures, units, navGrid = null, onComp
 
     const site = findBuildSite(app, x, z, type.radius, { searchRadius: 40, maxSpread: 6 });
     if (!site) return null;
-    await prepareSite(app, site.x, site.z, type.radius, site.y);
+    // A building on the kit levels a pad to its own footprint, as the camp's
+    // pieces do; the rest keep the round site.
+    const fp = footprintOf(typeKey);
+    if (fp && app.flattenRect) await app.flattenRect(site.x + fp.cx, site.z + fp.cz, fp.hx + 0.5, fp.hz + 0.5, site.y, { rim: 3 });
+    else await prepareSite(app, site.x, site.z, type.radius, site.y);
 
     const b = makeBuilding(app, type, site.x, site.z);
+    if (fp) b.footprint = fp;
+    clearGround(site.x + (fp?.cx ?? 0), site.z + (fp?.cz ?? 0), fp ? Math.hypot(fp.hx, fp.hz) : type.radius);
     list.push(b);
     structures.add?.(b);       // combat / selection / waves now see it
     // Block pathing under the footprint so units route around it, not over it.

@@ -640,7 +640,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     onBuild: (structure, key) => structure.enqueue(key),
     structureBuilds: [
       { key: "helipad", label: "Build Helipad" },
-      { key: "turret", label: "Build Turret" },
+      { key: "turret", label: "Build M60 Pit" },
       { key: "radio", label: "Radio Station" },
       { key: "captureNode", label: "Supply Relay" },
     ],

@@ -15,6 +15,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materialColor } from "three/tsl";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
 import { buildQuonsetHQ } from "../../v3/render/objects/rtsQuonset.js";
+import { GUN_PIT_HEAD_Y, GUN_PIT_MUZZLE } from "../../v3/render/objects/rtsBuildables.js";
 import {
   turretBodyGeometry, turretHeadGeometry, turretEyeGeometry, turretHeadMatrix,
   TURRET_PALETTE, HEAD_Y, MUZZLE_LOCAL, EYE_LOCAL,
@@ -311,6 +312,12 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
   function muzzleOf(s) {
     if (s.typeKey !== "turret") {
       return _muzzle.set(s.position.x, s.position.y + 6, s.position.z).clone();
+    }
+    // The player's built turret is the M60 gun pit (buildingRenderer.js).
+    if (s.isBuilding) {
+      _head.compose(_muzzle.set(s.position.x, s.position.y + GUN_PIT_HEAD_Y, s.position.z),
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.turretYaw ?? 0), new THREE.Vector3(1, 1, 1));
+      return GUN_PIT_MUZZLE.clone().applyMatrix4(_head);
     }
     headMatrix(s, _head);
     return _muzzle.copy(MUZZLE_LOCAL).applyMatrix4(_head).clone();

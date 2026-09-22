@@ -26,6 +26,7 @@ import {
   MAT, assemble, bakeContactAO, buildCorrugatedPanel, buildPost, buildSandbagWall, rng, triCount,
 } from "./rtsParts.js";
 import { rtsObjectMaterial } from "./rtsObjectProps.js";
+import { mergeStencils, stencilMesh, stencilPatch } from "./rtsStencils.js";
 
 export const QUONSET_DEFAULTS = {
   scale: 1.3,          // RTS scale: real size x this (sandbags, masts, trim)
@@ -266,7 +267,51 @@ export function buildQuonsetShellGeometry(opts = {}) {
   const shellGeo = assemble(parts);
   shell.dispose();
   bakeContactAO(shellGeo, { cell: 0.6, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
+  shellGeo.userData.stencil = quonsetStars(o, ribs);
   return { shellGeo, o, door, F, mastPos, mastH };
+}
+
+/**
+ * The Army star in its ring, white, on each flank of the arch — what makes the
+ * barrel read as AMERICAN from the air. Painted ON the sheet: the patch follows
+ * the corrugation and rides up over the joint ribs, with a station either side
+ * of every rib edge so no rib pokes through the paint.
+ */
+function quonsetStars(o, ribs) {
+  const Rr = o.radius, L = o.length, F = o.frontZ, lift = 0.02;
+  const ribW = 0.18, ribProud = 0.09;
+  const ribZ = [];
+  for (let k = 0; k <= ribs; k++) ribZ.push(F - Math.min(L - 0.21, Math.max(0.03, k * o.ribEvery)));
+  // Outer radius of the roof at local z: the corrugated sheet, or a rib on it.
+  const radiusAt = (z) => {
+    for (const zr of ribZ) if (z <= zr + 1e-4 && z >= zr - ribW - 1e-4) return Rr + ribProud;
+    return Rr + Math.sin(((F - z) / o.corrPitch) * Math.PI * 2) * o.corrDepth;
+  };
+  const size = 4.6;                     // the ring's diameter, m
+  const zc = F - L / 2;                 // centred along the barrel
+  const arc = size / Rr;                // its angular height on the arch
+  const thC = 0.62;                     // centre, radians down from the crown
+  const out = [];
+  for (const sx of [-1, 1]) {
+    // s runs along the barrel (the viewer's right), t up the flank to the crown.
+    // Seen from outside the +X flank, the viewer's right is -Z.
+    const zAt = (s) => zc - sx * (s - 0.5) * size;
+    const sList = [];
+    for (let i = 0; i <= 60; i++) sList.push(i / 60);
+    for (const zr of ribZ) for (const z of [zr + 0.004, zr - 0.004, zr - ribW + 0.004, zr - ribW - 0.004]) {
+      const s = (zc - z) / (sx * size) + 0.5;
+      if (s > 0 && s < 1) sList.push(s);
+    }
+    sList.sort((a, b) => a - b);
+    out.push(stencilPatch("star", (s, t) => {
+      const z = zAt(s);
+      const th = Math.PI / 2 - sx * (thC + (0.5 - t) * arc);   // angle from +X foot
+      const r = radiusAt(z) + lift;
+      const n = new THREE.Vector3(Math.cos(th), Math.sin(th), 0);
+      return { p: new THREE.Vector3(Math.cos(th) * r, 0.3 + Math.sin(th) * r, z), n };
+    }, { segT: 16, sList, lift: 0 }));
+  }
+  return mergeStencils(out);
 }
 
 export function buildQuonsetHQ(opts = {}, emissive = null) {
@@ -277,6 +322,8 @@ export function buildQuonsetHQ(opts = {}, emissive = null) {
   const shellMesh = new THREE.Mesh(shellGeo, mat);
   shellMesh.castShadow = shellMesh.receiveShadow = true;
   group.add(shellMesh);
+  const stars = stencilMesh(shellGeo.userData.stencil);
+  if (stars) shellMesh.add(stars);
 
   // Doors: hinged at the outer edge of the opening, swinging OUT toward +Z.
   const leafW = door.w / 2, leafH = door.h;

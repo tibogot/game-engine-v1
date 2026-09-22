@@ -5,86 +5,75 @@
 // of the ground while the builder raises them, and the helipad's corner lights
 // pulse while it's producing.
 //
-// Two strategies, chosen by how many of each the player can end up with:
-//   • HELIPAD — one animated Group each. You build a couple; each has fiddly
-//     per-instance state (pulsing corner lights), so a Group is the honest fit.
-//   • TURRET  — INSTANCED (body / head / eye). Turrets are free and unlimited, so
-//     a Group each would put us straight back to a draw call per building. Three
-//     instanced kinds cover any number of turrets, and the rise animation is just
-//     a Y offset baked into each instance matrix — instancing costs us no motion.
-// The turret shape itself is shared with the enemy turrets (turretKit.js).
+// The shapes are the parts kit's (v3/render/objects/rtsBuildables.js). Two
+// strategies, chosen by how many of each the player can end up with:
+//   • HELIPAD, RADIO — one animated Group each (shared geometry). You build a
+//     couple; each has per-instance state (pulsing lamps), so a Group fits.
+//   • TURRET — the M60 gun pit, INSTANCED (pit / gun). Turrets are free and
+//     unlimited, so a Group each would put us back to a draw call per building.
+//     Two instanced kinds cover any number, and the rise animation is just a Y
+//     offset baked into each instance matrix — instancing costs us no motion.
+// The enemy's turrets are still turretKit.js (structuresRenderer).
 import * as THREE from "three";
-import { materialColor } from "three/tsl";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
 import { buildRadioTower } from "./radioKit.js";
+import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
+import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import {
-  turretBodyGeometry, turretHeadGeometry, turretEyeGeometry, turretHeadMatrix,
-  TURRET_PALETTE, EYE_LOCAL,
-} from "./turretKit.js";
+  GUN_PIT_HEAD_Y, buildGunPitBody, buildGunPitGun, buildHelipad, buildRadioPost,
+} from "../../v3/render/objects/rtsBuildables.js";
 
-const C_PAD = 0x2b2f36;
-const C_RIM = 0x3d4550;
-const C_MARK = 0xf0c020; // the landing "H"
+const lamp = (color, r) => new THREE.Mesh(
+  new THREE.SphereGeometry(r, 10, 6),
+  makeBloomMaterial({ color, blending: THREE.NormalBlending, depthWrite: true, transparent: false }, BLOOM.beacon),
+);
 
-/** Refreshing standard material — a colorNode keeps its fog uniforms live (see
- *  structuresRenderer.js for why a static mesh needs this). */
-function mat(color, { rough = 0.9, metal = 0.2 } = {}) {
-  const m = new THREE.MeshStandardNodeMaterial({ color, roughness: rough, metalness: metal });
-  m.colorNode = materialColor;
-  return m;
+/** A kit building: one mesh, its markings riding as a child. Geometry shared. */
+function kitView(geo) {
+  const g = new THREE.Group();
+  const m = new THREE.Mesh(geo, rtsObjectMaterial());
+  m.castShadow = m.receiveShadow = true;
+  const st = stencilMesh(geo.userData.stencil);
+  if (st) m.add(st);
+  g.add(m);
+  g.userData.height = geo.userData.height ?? 3;
+  return g;
 }
 
-/** Procedural helipad: disc + rim + painted H + four corner lights. */
-function buildHelipad(radius) {
-  const g = new THREE.Group();
+let _helipadGeo = null, _radioGeo = null;
 
-  // Landing disc.
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1.0, 40), mat(C_PAD));
-  disc.position.y = 0.5;
-  disc.receiveShadow = true;
-  disc.castShadow = true;
-  g.add(disc);
-
-  // Raised rim.
-  const rim = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.5, 40, 1, true), mat(C_RIM, { metal: 0.4 }));
-  rim.position.y = 1.15;
-  rim.castShadow = true;
-  g.add(rim);
-
-  // Landing "H", painted flat on the deck (three bars).
-  const markMat = mat(C_MARK, { rough: 0.6 });
-  const bar = (w, d, x) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), markMat);
-    m.position.set(x, 1.05, 0);
-    g.add(m);
-  };
-  bar(0.9, radius * 0.9, -radius * 0.28); // left upright
-  bar(0.9, radius * 0.9, radius * 0.28);  // right upright
-  const cross = new THREE.Mesh(new THREE.BoxGeometry(radius * 0.62, 0.12, 0.9), markMat);
-  cross.position.set(0, 1.05, 0);
-  g.add(cross);
-
-  // Corner lights — emissive (they bloom). Kept as refs so production can pulse them.
+/** The PSP helipad (rtsBuildables) with its four corner lamps, which pulse
+ *  while a helicopter is being readied. */
+function helipadView() {
+  _helipadGeo ??= buildHelipad();
+  const g = kitView(_helipadGeo);
   const lights = [];
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-    const L = new THREE.Mesh(
-      new THREE.SphereGeometry(0.5, 12, 8),
-      makeBloomMaterial({ color: 0x64d2ff, blending: THREE.NormalBlending, depthWrite: true, transparent: false }, BLOOM.beacon),
-    );
-    L.position.set(Math.cos(a) * (radius - 0.8), 1.4, Math.sin(a) * (radius - 0.8));
+  const mat = lamp(0xffc46a, 0.2).material;
+  for (const [x, y, z] of _helipadGeo.userData.lights) {
+    const L = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 6), mat);
+    L.position.set(x, y, z);
     g.add(L);
     lights.push(L);
   }
-
-  // Total vertical extent, for the rise-from-ground construction animation.
-  g.userData.height = 2.0;
   g.userData.lights = lights;
   return g;
 }
 
+/** The radio post (rtsBuildables), with a red aviation light on the mast head
+ *  that pulses once it is on the air. */
+function radioView() {
+  _radioGeo ??= buildRadioPost();
+  const g = kitView(_radioGeo);
+  const S = 1.3, hw = 1.1 * S;
+  const beacon = lamp(0xff3a2a, 0.22);
+  beacon.position.set(-hw - 3.2 * S, 11 * S + 0.15, -0.4 * S);   // the mast head (rtsFirebaseProps radio station)
+  g.add(beacon);
+  g.userData.beacon = beacon;
+  return g;
+}
+
 const MAX_TURRETS = 128; // instance capacity — turrets are free, so be generous
-const TURRET_HEIGHT = 7;  // total vertical extent, for the rise-from-ground animation
+const TURRET_HEIGHT = 2.4; // total vertical extent, for the rise-from-ground animation
 
 /** How far a building sinks below ground at built = 0. */
 const riseOffset = (b, height) => -(1 - b.built) * (height + 1.5);
@@ -97,9 +86,8 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
   const roots = [];             // raycast targets for selection
   const buildingOfGroup = new Map();
 
-  // ── Instanced turret kinds ──────────────────────────────────────────────────
-  const turretMat = mat(0xffffff, { rough: 0.87, metal: 0.18 });
-  turretMat.vertexColors = true; // the merged geometry carries the team palette
+  // ── Instanced gun pits: the pit, and the M60 that turns ─────────────────────
+  const kitMat = rtsObjectMaterial();
 
   const makeKind = (geometry, material, { shadow = false } = {}) => {
     const im = new THREE.InstancedMesh(geometry, material, MAX_TURRETS);
@@ -112,21 +100,23 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
   };
 
   const turretKinds = {
-    body: makeKind(turretBodyGeometry("player"), turretMat, { shadow: true }),
-    head: makeKind(turretHeadGeometry("player"), turretMat, { shadow: true }),
-    // Emissive sensor — no shadow (a light casting a shadow of itself is a bug).
-    eye: makeKind(turretEyeGeometry(), makeBloomMaterial(
-      { color: TURRET_PALETTE.player.eye, blending: THREE.NormalBlending, depthWrite: true, transparent: false },
-      BLOOM.beacon,
-    )),
+    body: makeKind(buildGunPitBody(), kitMat, { shadow: true }),
+    head: makeKind(buildGunPitGun(), kitMat, { shadow: true }),
   };
   const kindOfMesh = new Map(Object.values(turretKinds).map((k) => [k.im, k]));
   for (const k of Object.values(turretKinds)) roots.push(k.im);
 
   const _m = new THREE.Matrix4();
   const _head = new THREE.Matrix4();
-  const _eye = new THREE.Matrix4();
-  const _eyeOffset = new THREE.Matrix4().makeTranslation(EYE_LOCAL.x, EYE_LOCAL.y, EYE_LOCAL.z);
+  const _q = new THREE.Quaternion();
+  const _p = new THREE.Vector3();
+  const _one = new THREE.Vector3(1, 1, 1);
+  const _up = new THREE.Vector3(0, 1, 0);
+  /** The gun's world matrix: on its post, yawed, riding the rise. */
+  const gunMatrix = (b, out, yOffset) => out.compose(
+    _p.set(b.position.x, b.position.y + GUN_PIT_HEAD_Y + yOffset, b.position.z),
+    _q.setFromAxisAngle(_up, b.turretYaw ?? 0), _one,
+  );
 
   const push = (kind, matrix, b) => {
     if (kind.n >= MAX_TURRETS) return;
@@ -138,8 +128,8 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
   function ensureView(b) {
     let g = views.get(b);
     if (g) return g;
-    if (b.typeKey === "helipad") g = buildHelipad(b.radius);
-    else if (b.typeKey === "radio") g = buildRadioTower("radio");
+    if (b.typeKey === "helipad") g = helipadView();
+    else if (b.typeKey === "radio") g = radioView();
     else if (b.typeKey === "captureNode") g = buildRadioTower("capture");
     else return null;
     g.frustumCulled = false;
@@ -172,14 +162,15 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
   }
 
   /**
-   * Selected: round buildings (helipad, turret, supply relay) get a ring, the
-   * square one (radio station) corner brackets. Enemy red.
+   * Selected: square buildings (helipad, radio post) get corner brackets round
+   * their footprint, round ones (gun pit, supply relay) a ring. Enemy red.
    */
-  const SQUARE = new Set(["radio"]);
+  const ROUND = new Set(["turret", "captureNode"]);
   function markSelected(b) {
     if (!b.selected || !b.alive) return;
     const tint = b.team === "enemy" ? 0xff6a5a : undefined;
-    if (SQUARE.has(b.typeKey)) app.selectionFrames?.add(b.position.x, b.position.z, b.radius * 0.75, b.radius * 0.75, 0, tint);
+    const fp = b.footprint;
+    if (fp && !ROUND.has(b.typeKey)) app.selectionFrames?.add(b.position.x + fp.cx, b.position.z + fp.cz, fp.hx + 0.6, fp.hz + 0.6, 0, tint);
     else app.selectionRings?.add(b.position.x, b.position.z, b.radius + 1, tint);
   }
 
@@ -223,10 +214,7 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
 
         _m.makeTranslation(b.position.x, b.position.y + y, b.position.z);
         push(turretKinds.body, _m, b);
-
-        turretHeadMatrix(b, _head, y);
-        push(turretKinds.head, _head, b);
-        push(turretKinds.eye, _eye.multiplyMatrices(_head, _eyeOffset), b);
+        push(turretKinds.head, gunMatrix(b, _head, y), b);
         continue;
       }
 

@@ -29,6 +29,12 @@ export const STENCILS = {
   containerId:  { x: 0,   y: 640, w: 512, h: 128 },
   medical:      { x: 512, y: 512, w: 512, h: 128 },
   noSmoking:    { x: 512, y: 640, w: 512, h: 128 },
+  // The landing H in its ring, white, for a helipad's deck.
+  helipadH:     { x: 0,   y: 768, w: 256, h: 256 },
+  // Red and white bands across the cell (t runs along them): a windsock's cloth.
+  sockBands:    { x: 256, y: 768, w: 64,  h: 256 },
+  // One PSP plank's punched holes and pressed ribs, laid along a plank.
+  pspHoles:     { x: 320, y: 768, w: 512, h: 48 },
 };
 for (const s of Object.values(STENCILS)) s.aspect = s.w / s.h;
 
@@ -88,6 +94,42 @@ function drawSheet() {
   c = STENCILS.containerId; text("USAU 204518", c.x, c.y, c.w, c.h, "#e9e6dc", 84); wear(c.x, c.y, c.w, c.h);
   c = STENCILS.medical; text("BN AID STATION", c.x, c.y, c.w, c.h, "#b3201b", 72); wear(c.x, c.y, c.w, c.h);
   c = STENCILS.noSmoking; text("NO SMOKING", c.x, c.y, c.w, c.h, "#b3201b", 88); wear(c.x, c.y, c.w, c.h);
+  c = STENCILS.helipadH;
+  {
+    const cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+    g.strokeStyle = "#e9e6dc"; g.lineWidth = 14;
+    g.beginPath(); g.arc(cx, cy, 108, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = "#e9e6dc";
+    g.fillRect(cx - 52, cy - 66, 26, 132);
+    g.fillRect(cx + 26, cy - 66, 26, 132);
+    g.fillRect(cx - 26, cy - 12, 52, 24);
+    wear(c.x, c.y, c.w, c.h, 260);
+  }
+  c = STENCILS.sockBands;
+  // Canvas y runs DOWN the cell and t runs UP it: band 0 (the mouth, t = 0)
+  // is the bottom one. Five bands, red at the mouth and the tail. Opaque, so
+  // the cloth is solid under the alpha test.
+  for (let k = 0; k < 5; k++) {
+    g.fillStyle = k % 2 === 0 ? "#c4401e" : "#e9e6dc";
+    g.fillRect(c.x, c.y + c.h - ((k + 1) * c.h) / 5, c.w, c.h / 5 + 1);
+  }
+  c = STENCILS.pspHoles;
+  {
+    // M8A1 plank: a row of punched holes down the middle, each with the lip
+    // the punch pressed up round it catching the light, and a pressed rib
+    // either side. Dark earth shows through the holes.
+    const n = 16, cy = c.y + c.h / 2;
+    g.fillStyle = "#8d8474";
+    g.fillRect(c.x + 6, c.y + 5, c.w - 12, 4);
+    g.fillRect(c.x + 6, c.y + c.h - 9, c.w - 12, 4);
+    for (let k = 0; k < n; k++) {
+      const cx = c.x + ((k + 0.5) * c.w) / n;
+      g.fillStyle = "#9a907e";
+      g.beginPath(); g.ellipse(cx, cy, 13, 12, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "#231d15";
+      g.beginPath(); g.ellipse(cx, cy, 10, 9, 0, 0, Math.PI * 2); g.fill();
+    }
+  }
   return cv;
 }
 

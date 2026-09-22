@@ -498,23 +498,28 @@ export function buildTent({ seed = 17, blastWall = true, medic = false } = {}) {
   const edge = blastWall ? wo + 0.4 * S : 0.4 * S;
   geo.userData.footprint = { cx: 0, cz: 0, hx: hw + edge, hz: hl + edge };
 
-  if (medic) {
-    const st = [];
-    // A white square with the red cross on each long slope, laid ON the
-    // sagging canvas (the same height function the roof is built from): the
-    // marking an aid station wore so it could be seen from the air.
-    const sq = 2.4 * S;
-    for (const sx of [-1, 1]) {
-      const x0 = sx * 0.2 * hw, x1 = sx * 0.88 * hw;           // eave-ward to ridge-ward, in plan
-      st.push(stencilPatch("medicSquare", (s, t) => {
-        const x = x1 + (x0 - x1) * t, z = (s - 0.5) * sq * -sx;
-        const e = 0.05;
-        const y = tentRoofAt(x, z, roofPrm).y;
-        const dx = (tentRoofAt(x + e, z, roofPrm).y - tentRoofAt(x - e, z, roofPrm).y) / (2 * e);
-        const dz = (tentRoofAt(x, z + e, roofPrm).y - tentRoofAt(x, z - e, roofPrm).y) / (2 * e);
-        return { p: new THREE.Vector3(x, y, z), n: new THREE.Vector3(-dx, 1, -dz).normalize() };
-      }, { segS: 10, segT: 10, lift: 0.015 * S }));
-    }
+  // A marking on each long slope, laid ON the sagging canvas (the same height
+  // function the roof is built from), so it dips with the cloth.
+  const onRoof = (cell, sx, zc = 0) => {
+    const x0 = sx * 0.2 * hw, x1 = sx * 0.88 * hw;           // eave-ward to ridge-ward, in plan
+    // Width from the length UP THE SLOPE, so the ring stays round.
+    const w = Math.hypot(x1 - x0, tentRoofAt(x1, zc, roofPrm).y - tentRoofAt(x0, zc, roofPrm).y) * STENCILS[cell].aspect;
+    return stencilPatch(cell, (s, t) => {
+      const x = x1 + (x0 - x1) * t, z = zc + (s - 0.5) * w * -sx;
+      const e = 0.05;
+      const y = tentRoofAt(x, z, roofPrm).y;
+      const dx = (tentRoofAt(x + e, z, roofPrm).y - tentRoofAt(x - e, z, roofPrm).y) / (2 * e);
+      const dz = (tentRoofAt(x, z + e, roofPrm).y - tentRoofAt(x, z - e, roofPrm).y) / (2 * e);
+      return { p: new THREE.Vector3(x, y, z), n: new THREE.Vector3(-dx, 1, -dz).normalize() };
+    }, { segS: 10, segT: 10, lift: 0.015 * S });
+  };
+  if (!medic) {
+    // The Army star in its ring on both slopes: from the air, an American tent.
+    geo.userData.stencil = mergeStencils([onRoof("star", -1), onRoof("star", 1)]);
+  } else {
+    // The white square with the red cross: the marking an aid station wore so
+    // it could be seen from the air.
+    const st = [onRoof("medicSquare", -1), onRoof("medicSquare", 1)];
     // Crosses high on both long walls, clear of the sandbags.
     for (const sx of [-1, 1]) {
       st.push(stencilPatch("medicCross", flatSurface([sx * (wx + wt / 2), 1.22 * S, 0], [sx, 0, 0], [0, 0, -sx], 0.9 * S, "medicCross"), { lift: 0.006 * S }));

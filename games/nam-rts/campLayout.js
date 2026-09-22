@@ -8,7 +8,7 @@
 // so a door on a piece's +Z end faces it at rotY ≈ PI.
 import * as THREE from "three";
 import {
-  buildConex, buildConexYard, buildContainer, buildCrateStack, buildFuelDump, buildGuardTower, buildGunPit, buildMinesSign, buildRadioStation, buildTent,
+  buildConex, buildConexYard, buildContainer, buildCrateStack, buildFuelDump, buildGuardTower, buildGunPit, buildMinesSign, buildTent,
 } from "../../v3/render/objects/rtsFirebaseProps.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { buildBillboard, buildPostSign } from "../../v3/render/objects/rtsSigns.js";
@@ -79,7 +79,6 @@ export async function placeCampLayout(app, placed) {
   add(kit(buildContainer({ mat: MAT.camo })), -44, -22, Math.PI + 0.35, { clear: 7 });
   add(kit(buildContainer({ seed: 31 })), -44, -34, Math.PI - 0.25, { clear: 7 });
   add(kit(buildContainer({ seed: 37, mat: MAT.metal })), -34, -40, Math.PI / 2 + 0.05, { clear: 7 });
-  add(kit(buildRadioStation()), -20, -50, 0.4, { clear: 9 });
   // East: the gun pit covering the road, living and aid tents.
   add(kit(buildGunPit()), 13, -22, Math.PI, { clear: 6 });
   add(kit(buildCrateStack()), 15, 16, -0.2, { clear: 4 });
@@ -94,8 +93,8 @@ export async function placeCampLayout(app, placed) {
   add(buildMinesSign(), -22, -80, Math.PI + 0.1, { ...sign, clear: 1.5 });
 
   // Imported models: the container repainted out of its orange, tank traps
-  // staggered across the approach outside the wire. (The radio station GLB is
-  // the builder's Radio building, not dressing.)
+  // staggered across the approach outside the wire. (No radio station: that is
+  // the builder's Radio Station, rtsBuildables.js, not dressing.)
   const loader = getSharedGltfLoader();
   const glb = async (name) => (await loader.loadAsync(`/models/rts/${name}_compressed.glb`)).scene;
   try {
