@@ -52,6 +52,9 @@ Keep this file current: tick things off here, add new asks here.
       supplies strip on top, selection (one unit or building: portrait/monogram
       + health; several: tiles by type) + command card
 - [x] Locked minimap: a NO RADIO static screen in its own slot
+- [ ] **Thumbnails for everything selectable** (your ask): the HQ, every
+      building, the enemy nest — a real rendered portrait in the selection
+      panel like the vehicles have, not the stencilled monogram
 - [ ] **Your references** from other RTS games → next pass on the HUD's look
 - [ ] Edge scroll: the corner blocks cover the bottom edge under them (the
       camera only scrolls over the canvas) — middle of the edge still scrolls
@@ -87,9 +90,13 @@ Keep this file current: tick things off here, add new asks here.
       DONE helipad (PSP matting with punched holes, painted H, revetments,
       windsock, corner lamps), M60 gun pit (the gun turns, tracers leave its
       muzzle), radio post (the kit station + star + U.S. ARMY); pads, nav and
-      selection brackets from their real footprints. LEFT: supply relay (→
-      requisition points), enemy turrets still the old sci-fi turret, cover
-      re-bake when a building goes up. Was: what the builder
+      selection brackets from their real footprints. M60 drawn x2.4 so it
+      reads from the RTS camera. Enemy turrets → **DShK nest** (log-lined pit,
+      earth mound, leaf mats, the finned DShK with its ring sight), jungle
+      cleared off the pit; `turretKit.js` deleted. Cover re-bakes when a
+      building finishes (~4 ms, once). LEFT: supply relay → requisition points
+      (step 3); new buildables with a job (guard tower, medic tent, sandbag
+      wall, bunker). Was: what the builder
       raises (helipad, turret, radio, supply relay…) still looks like the old
       game — radio station = the old GLB; others procedural, at our standard;
       some kit pieces become buildable

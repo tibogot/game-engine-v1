@@ -122,10 +122,11 @@ export function buildHelipad({ seed = 51, half = 8 } = {}) {
 }
 
 // ── Gun pit (M60) ────────────────────────────────────────────────────────────
-/** The gun is drawn larger than life (x this over the kit's 1.3), so it reads. */
-const GUN = S * 1.4;
+/** The gun is drawn larger than life: at x1.4 it was a few dark pixels from
+ *  the RTS camera (judged in the game). x2.4 reads as a gun at the pit. */
+const GUN = S * 2.4;
 /** Pivot height above the pit's ground origin: on a post, over the bags. */
-export const GUN_PIT_HEAD_Y = 1.32 * S;
+export const GUN_PIT_HEAD_Y = 1.5 * S;
 /** Muzzle, in the gun's own frame (pivot at the origin, barrel along +Z). */
 export const GUN_PIT_MUZZLE = new THREE.Vector3(0, 0.0, 0.93 * GUN);
 
@@ -173,6 +174,86 @@ export function buildGunPitGun() {
   // The ammunition can hung on the left, the belt running up into the feed.
   P(buildBox(g(0.1), g(0.18), g(0.28)), [g(-0.12), g(-0.07), g(0.08)], MAT.paint, 0.5);
   P(buildBox(g(0.06), g(0.02), g(0.1)), [g(-0.07), g(0.04), g(0.1)], MAT.metal, 0.7, [0, 0, 0.6]);
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.05 * GUN, radius: 1, strength: 0.25, groundFade: 0, floor: 0.6 });
+  return geo;
+}
+
+// ── Enemy MG nest (DShK) ─────────────────────────────────────────────────────
+/**
+ * What the other side dug instead of a sandbag ring: a round pit lined with
+ * courses of logs, the spoil thrown up outside as a low earth mound, cut
+ * leaves laid over it. The gun is a DShK 12.7 mm — the long finned barrel,
+ * the big muzzle brake and the ring AA sight are what tell it from the M60
+ * from above. Same pivot/muzzle contract as the gun pit.
+ */
+export const NEST_HEAD_Y = 1.5 * S;
+export const NEST_MUZZLE = new THREE.Vector3(0, 0.0, 1.24 * GUN);
+
+export function buildNestBody({ seed = 61 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const rIn = 2.3 * S;
+  // The mound: a lathe from the ground outside in to the lip of the logs.
+  // Profile runs OUTSIDE-IN: run the other way, the faces point down into the
+  // earth and the whole mound is culled from above (measured: normal.y -0.83).
+  const prof = [[rIn + 2.6 * S, 0], [rIn + 2.3 * S, 0.12], [rIn + 1.4 * S, 0.7 * S], [rIn + 0.5 * S, 1.12 * S], [rIn, 1.0 * S], [rIn - 0.05, 0]]
+    .map(([r, y]) => new THREE.Vector2(r, y));
+  parts.push({ geo: new THREE.LatheGeometry(prof, 28), mat: MAT.earth, tone: 0.5 });
+  // Log revetment: courses of logs in a 10-gon just inside the mound, each
+  // course turned half a side so the joints do not line up.
+  const sides = 10, logR = 0.13 * S, courses = 4;
+  for (let c = 0; c < courses; c++) {
+    const rr = rIn - logR - 0.02;
+    for (let k = 0; k < sides; k++) {
+      const a0 = ((k + (c % 2) * 0.5) / sides) * Math.PI * 2, a1 = a0 + (Math.PI * 2) / sides;
+      const len = 2 * rr * Math.sin(Math.PI / sides) + 0.12;
+      const am = (a0 + a1) / 2;
+      const log = new THREE.CylinderGeometry(logR * (0.9 + R() * 0.2), logR, len, 7).rotateZ(Math.PI / 2);
+      parts.push({ geo: log, pos: [Math.cos(am) * rr, logR + c * logR * 1.85, Math.sin(am) * rr], rot: [0, -am + Math.PI / 2, 0], mat: MAT.timber, tone: 0.25 + R() * 0.3 });
+    }
+  }
+  parts.push({ geo: new THREE.CylinderGeometry(rIn - 0.2, rIn - 0.2, 0.05, 20), pos: [0, 0.025, 0], mat: MAT.earth, tone: 0.2 });
+  // Cut leaves over the mound: flat thatch mats lying on its slope.
+  for (let k = 0; k < 7; k++) {
+    const a = R() * Math.PI * 2, r = rIn + (0.5 + R()) * S;
+    parts.push({ geo: buildBox(1.4 * S, 0.06, 0.7 * S), pos: [Math.cos(a) * r, 0.95 * S, Math.sin(a) * r], rot: [0.35 * (R() - 0.5), -a, -0.35], mat: MAT.thatch, tone: 0.3 + R() * 0.4 });
+  }
+  // The gun's post: a log crib stake with an iron socket.
+  const postH = NEST_HEAD_Y - 0.1 * GUN;
+  parts.push({ geo: buildPost({ height: postH, width: 0.24 * S, depth: 0.24 * S, taper: 0.1, round: true }), mat: MAT.timber, tone: 0.3 });
+  parts.push({ geo: new THREE.CylinderGeometry(0.07 * S, 0.07 * S, 0.1 * GUN, 8), pos: [0, postH + 0.05 * GUN, 0], mat: MAT.metal, tone: 0.1 });
+  // An ammo box on the floor.
+  parts.push({ geo: buildBox(0.5 * S, 0.3 * S, 0.3 * S), pos: [-1.1 * S, 0.15 * S + 0.05, 0.6 * S], rot: [0, 0.4, 0], mat: MAT.paint, tone: 0.35 });
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.18 * S, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
+  const r = rIn + 2.6 * S;
+  geo.userData.footprint = { cx: 0, cz: 0, hx: r, hz: r };
+  geo.userData.height = 2.2;
+  return geo;
+}
+
+/** The DShK: pivot at the origin, barrel along +Z. */
+export function buildNestGun() {
+  const g = (x) => x * GUN;
+  const parts = [];
+  const P = (geo, pos, mat, tone, rot) => parts.push({ geo, pos, mat, tone, rot });
+  const dark = 0.05;
+  const alongZ = (r0, r1, len, seg = 10) => new THREE.CylinderGeometry(r0, r1, len, seg).rotateX(Math.PI / 2);
+  P(buildBox(g(0.08), g(0.09), g(0.16)), [0, g(-0.08), 0], MAT.metal, 0.2);                      // cradle
+  P(buildBox(g(0.12), g(0.14), g(0.5)), [0, 0, g(-0.04)], MAT.metal, dark);                      // receiver
+  P(alongZ(g(0.03), g(0.034), g(0.95)), [0, g(0.01), g(0.68)], MAT.metal, dark);                 // barrel
+  for (let k = 0; k < 7; k++) P(alongZ(g(0.052), g(0.052), g(0.025)), [0, g(0.01), g(0.26 + k * 0.055)], MAT.metal, dark + 0.04);  // cooling fins
+  P(alongZ(g(0.05), g(0.045), g(0.13)), [0, g(0.01), g(1.18)], MAT.metal, dark);                 // muzzle brake
+  // The ring anti-aircraft sight on its post: the DShK's silhouette.
+  P(buildBox(g(0.015), g(0.12), g(0.015)), [0, g(0.12), g(0.72)], MAT.metal, dark);
+  const ring = new THREE.TorusGeometry(g(0.12), g(0.008), 4, 18);
+  P(ring, [0, g(0.24), g(0.72)], MAT.metal, dark + 0.1);
+  // Spade grips and the butt plate.
+  P(buildBox(g(0.14), g(0.1), g(0.03)), [0, 0, g(-0.3)], MAT.metal, dark);
+  for (const sx of [-1, 1]) P(buildBox(g(0.025), g(0.1), g(0.025)), [sx * g(0.06), g(-0.02), g(-0.36)], MAT.timber, 0.3);
+  // The ammunition box on the right, feeding across.
+  P(buildBox(g(0.12), g(0.17), g(0.32)), [g(0.14), g(-0.06), g(0.02)], MAT.paint, 0.35);
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.05 * GUN, radius: 1, strength: 0.25, groundFade: 0, floor: 0.6 });
   return geo;

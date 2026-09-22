@@ -45,7 +45,7 @@ export const STRUCTURE_TYPES = {
   },
   turret: {
     typeKey: "turret",
-    name: "Turret",
+    name: "DShK Nest",
     team: "enemy",
     maxHp: 400,
     radius: 4,
@@ -54,7 +54,7 @@ export const STRUCTURE_TYPES = {
     fireRate: 1.1,   // shots per second
     canHitAir: true,
     barWidth: 6,
-    barY: 10,
+    barY: 4.5,
   },
   // Unarmed targets for close-range crater / combat tests — no need to cross the map.
   trainingDummy: {

@@ -23,7 +23,7 @@ import {
 import { buildCorrugatedPanel, buildTrapezoidPanel, MAT } from "../v3/render/objects/rtsParts.js";
 
 import { buildDoorLeaf, buildQuonsetShellGeometry } from "../v3/render/objects/rtsQuonset.js";
-import { buildGunPitBody, buildGunPitGun, buildHelipad } from "../v3/render/objects/rtsBuildables.js";
+import { buildGunPitBody, buildGunPitGun, buildHelipad, buildNestBody, buildNestGun } from "../v3/render/objects/rtsBuildables.js";
 
 let failed = 0;
 const ok = (name, cond, extra = "") => {
@@ -107,6 +107,8 @@ check("camp gate", buildGate());
 check("helipad", buildHelipad());
 check("gun pit body (M60 post)", buildGunPitBody());
 check("M60", buildGunPitGun());
+check("DShK nest", buildNestBody());
+check("DShK", buildNestGun());
 
 console.log("Quonset HQ");
 check("quonset shell", buildQuonsetShellGeometry().shellGeo);

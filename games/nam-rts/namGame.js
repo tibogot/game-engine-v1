@@ -391,6 +391,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // either side (blast walls included), from the blast walls' front 13 m before
   // the base point to the gable 12 m behind it, plus a metre of air.
   const clearHqGround = () => {
+    // The enemy's MG nests too: every one stands in jungle, and palms grew up
+    // through the pit. A dug position has its own ground — the jungle stays
+    // round it, which is what hides it.
+    for (const t of structures.turrets) app.clearVegetation?.(t.position.x, t.position.z, 8, { grass: 6 });
     const b = structures.base;
     if (b?.alive === false) return;
     app.clearVegetation?.(b.position.x, b.position.z + 2, 27, { grass: 23 });
@@ -438,6 +442,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // through app because the smoke field is built further down; by the time a
     // building can finish, the loop is running and it exists.
     onComplete: (b) => {
+      // A finished building gives cover at once (a gun pit's bags stop bullets).
+      // MEASURED: a bake is ~4 ms — a one-off, once per building.
+      app.cover?.bake?.();
       if (b.typeKey !== "captureNode") return;
       app.smoke?.spawn({ x: b.position.x, z: b.position.z, kind: "violet" });
     },

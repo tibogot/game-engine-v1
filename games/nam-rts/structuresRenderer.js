@@ -8,18 +8,17 @@
 // turret, or a sixtieth, costs nothing.
 //
 // Only pieces that genuinely differ stay apart:
-//   • turret HEADS are their own instanced kind — they yaw independently
-//   • beacons / eyes are their own kinds — emissive MRT material (they bloom)
+//   • enemy MG nests and their guns are instanced kinds (the kit's DShK nest)
+//   • beacons are their own meshes — emissive MRT material (they bloom)
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materialColor } from "three/tsl";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
 import { buildQuonsetHQ } from "../../v3/render/objects/rtsQuonset.js";
-import { GUN_PIT_HEAD_Y, GUN_PIT_MUZZLE } from "../../v3/render/objects/rtsBuildables.js";
 import {
-  turretBodyGeometry, turretHeadGeometry, turretEyeGeometry, turretHeadMatrix,
-  TURRET_PALETTE, HEAD_Y, MUZZLE_LOCAL, EYE_LOCAL,
-} from "./turretKit.js";
+  GUN_PIT_HEAD_Y, GUN_PIT_MUZZLE, NEST_HEAD_Y, NEST_MUZZLE, buildNestBody, buildNestGun,
+} from "../../v3/render/objects/rtsBuildables.js";
+import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 
 const MAX_PER_KIND = 64; // instance capacity per structure kind
 
@@ -166,9 +165,8 @@ function dummyGeometry() {
   ], "trainingDummy");
 }
 
-// Turret geometry now lives in turretKit.js — the player builds the same turret at
-// runtime through a completely different (instanced, animated) render path, so the
-// shape is shared and only the team palette differs.
+// Turret geometry lives in v3/render/objects/rtsBuildables.js: the enemy's DShK
+// nest here, the player's M60 gun pit in buildingRenderer.js.
 
 export const structureByMesh = new WeakMap(); // kept for API compatibility
 
@@ -192,11 +190,12 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
   // meshes got for free.
   // The base is NOT in the merged mesh — it animates (sliding door), so it gets
   // its own view below. Only the turrets and dummies merge.
+  // The enemy's turrets are NOT in it any more: they are the kit's DShK nest
+  // (rtsBuildables), on the kit's material, instanced below with their guns.
   const geos = {
-    turret: turretBodyGeometry("enemy"),
     dummy: dummyGeometry(),
   };
-  const bodyGeoOf = (s) => (s.typeKey === "trainingDummy" ? geos.dummy : geos.turret);
+  const bodyGeoOf = () => geos.dummy;
 
   const structureMat = makeStructureMaterial();
   let staticMesh = null;
@@ -217,7 +216,7 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     for (const s of structures.list) {
       if (!s.alive) continue;
       if (s.isBuilding) continue;      // runtime buildings have their own renderer
-      if (s.typeKey === "base" || s.typeKey === "enemyBase") continue;
+      if (s.typeKey === "base" || s.typeKey === "enemyBase" || s.typeKey === "turret") continue;
       const g = bodyGeoOf(s).clone();
       g.translate(s.position.x, s.position.y, s.position.z);
       parts.push(g);
@@ -250,11 +249,12 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     return { im, n: 0, at: [] };
   };
 
+  const kitMat = rtsObjectMaterial();
   const kinds = {
-    // Turret heads yaw independently, so they can't join the static merge.
-    head: makeKind(turretHeadGeometry("enemy"), structureMat, { shadow: true }),
-    // Turret eyes: emissive, no shadow (a light casting a shadow of itself is a bug).
-    eye: makeKind(turretEyeGeometry(), bloom(TURRET_PALETTE.enemy.eye)),
+    // The nest and its gun, instanced: two draws for every enemy MG on the map,
+    // and both hidden together under the fog of war.
+    nest: makeKind(buildNestBody(), kitMat, { shadow: true }),
+    head: makeKind(buildNestGun(), kitMat, { shadow: true }),
   };
 
   const kindOfMesh = new Map(Object.values(kinds).map((k) => [k.im, k]));
@@ -296,10 +296,15 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
   const _m = new THREE.Matrix4();
   const _head = new THREE.Matrix4();
   const _muzzle = new THREE.Vector3();
-  const _eye = new THREE.Matrix4();
-  const _eyeOffset = new THREE.Matrix4().makeTranslation(EYE_LOCAL.x, EYE_LOCAL.y, EYE_LOCAL.z);
-
-  const headMatrix = (s, out) => turretHeadMatrix(s, out);
+  const _q = new THREE.Quaternion();
+  const _one = new THREE.Vector3(1, 1, 1);
+  const _up = new THREE.Vector3(0, 1, 0);
+  const _pivot = new THREE.Vector3();
+  /** A gun's world matrix: on its post (pit or nest), yawed at its target. */
+  const headMatrix = (s, out) => out.compose(
+    _pivot.set(s.position.x, s.position.y + (s.isBuilding ? GUN_PIT_HEAD_Y : NEST_HEAD_Y), s.position.z),
+    _q.setFromAxisAngle(_up, s.turretYaw ?? 0), _one,
+  );
 
   const push = (kind, matrix, s) => {
     if (kind.n >= MAX_PER_KIND) return;
@@ -313,14 +318,10 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     if (s.typeKey !== "turret") {
       return _muzzle.set(s.position.x, s.position.y + 6, s.position.z).clone();
     }
-    // The player's built turret is the M60 gun pit (buildingRenderer.js).
-    if (s.isBuilding) {
-      _head.compose(_muzzle.set(s.position.x, s.position.y + GUN_PIT_HEAD_Y, s.position.z),
-        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.turretYaw ?? 0), new THREE.Vector3(1, 1, 1));
-      return GUN_PIT_MUZZLE.clone().applyMatrix4(_head);
-    }
+    // The player's built turret is the M60 gun pit (buildingRenderer.js), the
+    // enemy's the DShK nest.
     headMatrix(s, _head);
-    return _muzzle.copy(MUZZLE_LOCAL).applyMatrix4(_head).clone();
+    return (s.isBuilding ? GUN_PIT_MUZZLE : NEST_MUZZLE).clone().applyMatrix4(_head);
   }
 
   /** Resolve a raycast hit to its structure (base view, merged body, or a kind). */
@@ -406,9 +407,10 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
           const dz = s.target.position.z - s.position.z;
           s.turretYaw = Math.atan2(dx, dz);
         }
+        _m.makeTranslation(s.position.x, s.position.y, s.position.z);
+        push(kinds.nest, _m, s);
         headMatrix(s, _head);
         push(kinds.head, _head, s);
-        push(kinds.eye, _eye.multiplyMatrices(_head, _eyeOffset), s);
       }
 
       if (s.typeKey === "enemyBase" && !showEnemyHq) continue;

@@ -13,7 +13,7 @@
 //     unlimited, so a Group each would put us back to a draw call per building.
 //     Two instanced kinds cover any number, and the rise animation is just a Y
 //     offset baked into each instance matrix — instancing costs us no motion.
-// The enemy's turrets are still turretKit.js (structuresRenderer).
+// The enemy's MG nests (DShK) are rtsBuildables too, drawn by structuresRenderer.
 import * as THREE from "three";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
 import { buildRadioTower } from "./radioKit.js";
