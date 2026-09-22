@@ -94,5 +94,17 @@ console.log("income");
   ok("an empty zone keeps its owner", s.p.owner === "player");
 }
 
+console.log("base income");
+{
+  let stock = 0, standing = true;
+  const req = createRequisition({ app: {}, resources: { earn: (n) => { stock += n; } }, hqStanding: () => standing });
+  run(req, [], 10);
+  ok("the HQ pays baseIncome a second while it stands", Math.abs(stock - 10 * REQUISITION.baseIncome) < 0.05, `${stock.toFixed(2)} in 10 s`);
+  ok("the HUD figure includes it", req.incomePerMinute === Math.round(REQUISITION.baseIncome * 60));
+  standing = false; const before = stock;
+  run(req, [], 10);
+  ok("a fallen HQ pays nothing", stock === before);
+}
+
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

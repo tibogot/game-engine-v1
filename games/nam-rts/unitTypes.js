@@ -78,7 +78,8 @@ export const UNIT_TYPES = {
   },
   builder: {
     typeKey: "builder",
-    name: "Builder",
+    // The M35A2 engineer truck, built in code (rtsVehicles.js).
+    name: "M35 Engineer Truck",
     // logic — a mobile engineer. Slow, tough-ish, UNARMED: it constructs, it
     // doesn't fight. `builds` lists the building keys it can raise (buildings.js).
     isAir: false,
@@ -91,8 +92,7 @@ export const UNIT_TYPES = {
     vision: 34,
     builds: ["helipad", "turret", "radio", "captureNode", "watchTower", "medicTent", "sandbagWall", "bunker"],
     // render
-    url: "/models/rts/truckmilitary_compressed.glb",
-    targetLength: 6,
+    procedural: "m35",   // rtsVehicles.buildM35 — its own length sets the scale
     excludeRotorsFromBox: false,
     facingOffset: 0,
     ringRadius: 4.4,
@@ -160,7 +160,8 @@ export const UNIT_TYPES = {
   },
   lightTank: {
     typeKey: "lightTank",
-    name: "Light Tank",
+    // The M551 Sheridan, built in code (rtsVehicles.js).
+    name: "M551 Sheridan",
     // logic — agile armour: quicker than the battle tank, cheaper, lighter gun.
     isAir: false,
     hover: 0,
@@ -174,12 +175,10 @@ export const UNIT_TYPES = {
     fireRate: 0.85,
     canHitAir: false,
     vision: 36,
-    // render — low_poly_tank_compressed.glb normalised to ~7 m (APC scale).
-    url: "/models/rts/low_poly_tank_compressed.glb",
-    targetLength: 7,
+    // render
+    procedural: "m551",   // rtsVehicles.buildM551 — its own length sets the scale
     excludeRotorsFromBox: false,
-    // GLB hull faces +X; game heading uses +Z forward — quarter-turn correction.
-    facingOffset: Math.PI / 2,
+    facingOffset: 0,      // built facing +Z (the old GLB needed a quarter turn)
     ringRadius: 5.5,
     barWidth: 6.5,
     barY: 4.2,

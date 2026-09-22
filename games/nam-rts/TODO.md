@@ -14,8 +14,8 @@ Keep this file current: tick things off here, add new asks here.
    attack, retreat, use cover and terrain. Without it there is no game.
 2. **Requisition sites** — pick real ground (hills, crossroads, the bridge),
    not the old node fan. Small; do it with #1
-3. **Vehicles rebuilt** — M113, M151 jeep, M35 truck, M48; the Huey (maybe
-   your Blender). The current ones are rts-v3 GLBs, one of them a Soviet BTR
+3. ~~**Vehicles rebuilt**~~ DONE for the US side — M113, M48, M151, M551, M35,
+   UH-1 all procedural. Enemy vehicles come with #7
 4. **The jungle: big trees + palm variety + Vietnam plants** (areca, sago,
    pandanus, nipa, banana, flame tree) — the look you asked for
 5. **See-through for hidden units** — needed before the jungle gets denser
@@ -218,10 +218,21 @@ Everything else below is in its section.
       airfoil blades with droop, grips, stabiliser bar; tube skids; flight-
       helmeted door gunners; tail number. ~14k tris (instanced). NEXT on it: a faint
       rotor-blur disc (the blades strobe at speed), Dustoff medevac variant.
-      ROSTER (Vietnam only): US — (M151, UH-1 done), M35 gun truck, UH-1 Huey,
+      **M551 Sheridan** DONE (replaces the Light Tank GLB): flat aluminium
+      hull, rolled flotation screen, LOFTED low turret, short fat 152 mm,
+      searchlight, smoke dischargers, ACAV-shielded .50, bustle rack, 5 road
+      wheels + rear sprocket; 7.3k tris.
+      **M35A2 deuce-and-a-half** DONE (replaces the builder's truck GLB, as
+      the engineer truck): lofted hood, flat fenders, brush-guarded lamps,
+      winch, open cab with canvas top + driver, stack exhaust, spare wheel,
+      slat bed with canvas bows, engineer cargo (timbers, sandbags,
+      concertina, pickets, jerry cans), 6x6 with rear duals; wheels roll; 6.7k tris.
+      **The US roster in the HQ is now all procedural** — no rts-v3 GLB left
+      on a player vehicle. LEFT: delete the unused rts-v3 GLBs from the nam
+      build; dust behind tracks.
+      ROSTER still to build (Vietnam only): US — M35 gun truck variant,
       AH-1 Cobra, M132 Zippo, PBR boat · enemy — PT-76, Type 59/T-54, ZPU AA,
-      Molotova truck, sampans, supply bicycles. Then delete the rts-v3 GLBs;
-      dust behind tracks. Was: **Vehicles are too low poly** — rebuild them for this game: procedural
+      Molotova truck, sampans, supply bicycles. Was: **Vehicles are too low poly** — rebuild them for this game: procedural
       on the parts kit (like the buildings) or your Blender work; LODs; the
       silhouette readable from the RTS camera (M113, M151 jeep, M35 truck,
       M48 tank, Huey); instanced so 100 cost a handful of draws
@@ -280,7 +291,7 @@ Everything else below is in its section.
 
 ## Economy + Company of Heroes ideas (your question 2026-09-22 — not agreed yet)
 
-- [ ] **Base income** so you are never stuck (HQ trickle ~+60/min; points on
+- [x] **Base income** DONE (requisition.js baseIncome 1.0/s while the HQ stands; HUD shows it). Was: so you are never stuck (HQ trickle ~+60/min; points on
       top). TODAY: start 400, only points pay (+96/min each), the M48 costs 420
       — you cannot build it until you hold ground
 - [ ] **Two resources**: Supplies (men, buildings) and **Fuel** (vehicles) —

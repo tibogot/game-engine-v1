@@ -378,6 +378,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const HARVEST = new URLSearchParams(location.search).get("econ") === "harvest";
   const requisition = createRequisition({
     app, resources,
+    // The HQ's own trickle, while it stands (read late: structures come next).
+    hqStanding: () => app.structures?.base?.alive !== false && !!app.structures?.base,
     // Taking a point pops M18 VIOLET — the Apocalypse Now marker.
     onCapture: (p, team) => { if (team === "player") app.smoke?.spawn({ x: p.position.x, z: p.position.z, kind: "violet" }); },
   });
@@ -690,9 +692,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
             ...(HARVEST ? [{ key: "harvester", label: "Harvester", cost: UNIT_COST.harvester }] : []),
             { key: "soldier", label: "Soldier", cost: UNIT_COST.soldier },
             { key: "jeep", label: "M151 Jeep", cost: UNIT_COST.jeep },
-            { key: "builder", label: "Builder", cost: UNIT_COST.builder },
+            { key: "builder", label: "M35 Engineers", cost: UNIT_COST.builder },
             { key: "bigtank", label: "M113 ACAV", cost: UNIT_COST.bigtank },
-            { key: "lightTank", label: "Light Tank", cost: UNIT_COST.lightTank },
+            { key: "lightTank", label: "M551 Sheridan", cost: UNIT_COST.lightTank },
             { key: "tank", label: "M48 Patton", cost: UNIT_COST.tank },
           ]
         // Helipad units are free in this pass — only base production is costed.

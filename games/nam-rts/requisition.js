@@ -21,6 +21,10 @@ export const REQUISITION = {
   crowdBonus: 0.35,     // each extra man up to `crowdCap` adds this much speed
   crowdCap: 4,
   incomePerPoint: 1.6,  // supplies per second per held point (~96 a minute)
+  // The HQ pays a trickle of its own while it stands (~60 a minute), so the
+  // opening is never stuck: 400 to start and an M48 at 420 meant you could
+  // build nothing big until you had taken ground. Points pay on top.
+  baseIncome: 1.0,
   count: 7,
   firstDist: 95,        // the same fan the resource nodes used
   spacing: 80,
@@ -29,7 +33,7 @@ export const REQUISITION = {
 /** Can this unit capture? Infantry only. */
 const captures = (u) => u.alive && !u.isAir && u.typeKey === "soldier";
 
-export function createRequisition({ app, resources, params = REQUISITION, onCapture = null, onLost = null }) {
+export function createRequisition({ app, resources, params = REQUISITION, onCapture = null, onLost = null, hqStanding = null }) {
   const points = [];
 
   /** Fan the points out in front of the base, alternating sides, widening. */
@@ -87,7 +91,8 @@ export function createRequisition({ app, resources, params = REQUISITION, onCapt
     }
     // Income from what you hold.
     const held = points.reduce((n, p) => n + (p.owner === "player" ? 1 : 0), 0);
-    if (held) resources?.earn?.(held * params.incomePerPoint * dt);
+    const base = hqStanding?.() ? params.baseIncome : 0;
+    if (held || base) resources?.earn?.((held * params.incomePerPoint + base) * dt);
   }
 
   return {
@@ -98,7 +103,7 @@ export function createRequisition({ app, resources, params = REQUISITION, onCapt
     get held() { return points.filter((p) => p.owner === "player").length; },
     get heldByEnemy() { return points.filter((p) => p.owner === "enemy").length; },
     /** Supplies per minute from the points you hold, for the HUD. */
-    get incomePerMinute() { return Math.round(this.held * params.incomePerPoint * 60); },
+    get incomePerMinute() { return Math.round((this.held * params.incomePerPoint + (hqStanding?.() ? params.baseIncome : 0)) * 60); },
     /** The point whose zone contains (x, z), or null. */
     pointAt(x, z) {
       for (const p of points) if (Math.hypot(x - p.position.x, z - p.position.z) <= p.radius) return p;

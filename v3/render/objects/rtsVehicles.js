@@ -1072,3 +1072,339 @@ export function buildUH1() {
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   return geo;
 }
+
+// ── M551 Sheridan ────────────────────────────────────────────────────────────
+/**
+ * The armoured cavalry's light tank in Vietnam (11th ACR and others). What
+ * makes it a Sheridan: the flat aluminium hull with a long shallow glacis and
+ * the FLOTATION SCREEN rolled up as a canvas tube round its top edge; a low,
+ * rounded turret (lofted, like the Huey's body); the short, fat 152 mm
+ * gun-launcher under its heavy mantlet; a searchlight box on the turret's
+ * left, smoke dischargers on its cheeks; the commander's .50 behind an ACAV
+ * shield; the bustle rack piled with gear; five road wheels a side, no return
+ * rollers, the drive sprocket at the back. 6.3 m, 2.82 m wide (real).
+ *
+ * userData: stencil, turret { geo, stencil, pivot, muzzle }, gear, length.
+ */
+export function buildM551({ seed = 551 } = {}) {
+  const R = rng(seed);
+  const OD = 0.16;
+  const hull = [], turret = [], gear = [], spins = [];
+  const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
+  const T = (geo, pos, mat, tone = 0.5, rot) => turret.push({ geo, pos, mat, tone, rot });    // turret-local
+  const G = (geo, pos, mat, tone, rot, spin) => { gear.push({ geo, pos, mat, tone, rot }); spins.push({ spin, n: geo.attributes.position.count }); };
+  const HW = 0.97, DECK = 1.55;
+  const pivot = [0, DECK, 0.1];
+
+  // ── Hull: the side profile — flat belly, the lower nose plate, the long
+  //    shallow glacis, the deck, the rear plate — bevelled.
+  const shape = new THREE.Shape();
+  shape.moveTo(-3.0, 0.45);
+  shape.lineTo(2.45, 0.45);
+  shape.lineTo(3.15, 0.95);
+  shape.lineTo(1.45, DECK);
+  shape.lineTo(-3.05, DECK);
+  shape.lineTo(-3.1, 0.72);
+  shape.closePath();
+  const bev = 0.05;
+  const body = new THREE.ExtrudeGeometry(shape, { depth: 2 * HW - 2 * bev, bevelEnabled: true, bevelThickness: bev, bevelSize: bev, bevelSegments: 2 });
+  body.rotateY(-Math.PI / 2);
+  body.computeBoundingBox();
+  body.translate(-(body.boundingBox.min.x + body.boundingBox.max.x) / 2, 0, 0);
+  P(indexed(body), [0, 0, 0], MAT.paint, OD);
+  const deckY = DECK + bev;
+  const gl = new THREE.Vector2(3.15 - 1.45, 0.95 - DECK).normalize();
+  const glN = new THREE.Vector3(0, gl.x, -gl.y).normalize();
+  const glRot = [Math.atan2(DECK - 0.95, 3.15 - 1.45), 0, 0];
+  const glacisAt = (f, lift) => new THREE.Vector3(0, DECK + (0.95 - DECK) * f, 1.45 + (3.15 - 1.45) * f).addScaledVector(glN, lift + bev);
+
+  // The flotation screen, rolled up: a canvas tube along both deck edges and
+  // across the top of the glacis, on its stanchions.
+  for (const sx of [-1, 1]) {
+    P(tube([[sx * (HW + 0.02), deckY + 0.1, -2.9], [sx * (HW + 0.03), deckY + 0.1, 0], [sx * (HW + 0.02), deckY + 0.09, 1.3], [sx * 0.9, deckY + 0.05, 1.55]], 0.12, 24, 10), [0, 0, 0], MAT.canvas, 0.38);
+    for (const z of [-2.4, -1.2, 0, 1.1]) P(buildBox(0.05, 0.2, 0.05), [sx * (HW + 0.02), deckY, z], MAT.steel, 0.25);
+  }
+  const fr = glacisAt(0.08, 0.08);
+  P(axleX(0.12, 1.75, 10), [0, fr.y + 0.05, fr.z], MAT.canvas, 0.38);
+  // Glacis: driver's hatch and periscopes, spare track shoes hung across it,
+  // headlight clusters in their guards, tow hooks.
+  const dh = glacisAt(0.12, 0.02);
+  P(new THREE.CylinderGeometry(0.3, 0.32, 0.07, 14), [0, dh.y + 0.03, dh.z], MAT.paint, OD * 1.05, glRot);
+  for (let k = 0; k < 3; k++) { const q = glacisAt(0.04, 0.05); P(buildBox(0.12, 0.07, 0.06), [-0.2 + k * 0.2, q.y + 0.02, q.z - 0.05], MAT.steel, 0.02); }
+  for (let k = 0; k < 5; k++) { const q = glacisAt(0.55, 0.03); P(buildBox(0.36, 0.05, 0.14), [-0.9 + k * 0.45, q.y, q.z], MAT.steel, 0.1, glRot); }
+  for (const sx of [-1, 1]) {
+    const hl = glacisAt(0.8, 0.07);
+    P(buildBox(0.22, 0.16, 0.14), [sx * 0.75, hl.y, hl.z], MAT.steel, 0.12, glRot);
+    P(buildBox(0.3, 0.025, 0.025), [sx * 0.75, hl.y + 0.12, hl.z + 0.05], MAT.paint, OD);
+    P(buildBox(0.14, 0.14, 0.18), [sx * 0.55, 0.7, 3.12], MAT.steel, 0.3);
+  }
+  // Engine deck: louvres, the exhaust grille on the right, jerry cans and
+  // ammo boxes on the back deck, tail lights.
+  for (let k = 0; k < 6; k++) P(buildBox(1.3, 0.035, 0.06), [-0.1, deckY + 0.02, -1.6 - k * 0.18], MAT.steel, 0.1);
+  P(buildBox(0.55, 0.12, 0.9), [0.55, deckY + 0.06, -2.6], MAT.steel, 0.05);
+  for (let k = 0; k < 3; k++) P(buildBox(0.17, 0.47, 0.34), [-0.6 + k * 0.2, deckY + 0.24, -2.75], MAT.paint, 0.42);
+  P(buildBox(0.1, 0.18, 0.28), [0.15, deckY + 0.09, -2.2], MAT.paint, 0.4);
+  for (const sx of [-1, 1]) P(buildBox(0.12, 0.1, 0.05), [sx * 0.8, 1.35, -3.14], MAT.steel, 0.15);
+
+  // ── Turret, lofted (turret-local: pivot at the ring's centre on the deck).
+  const TS = [
+    { z: 1.42, cy: 0.3, w: 0.45, h: 0.08, hb: 0.25, n: 2.2 },
+    { z: 1.22, cy: 0.33, w: 0.98, h: 0.3, hb: 0.3, n: 2.6 },
+    { z: 0.7, cy: 0.36, w: 1.14, h: 0.4, hb: 0.36, n: 3.0 },
+    { z: -0.6, cy: 0.36, w: 1.12, h: 0.42, hb: 0.36, n: 3.2 },
+    { z: -1.15, cy: 0.35, w: 0.98, h: 0.38, hb: 0.34, n: 3.0 },
+    { z: -1.32, cy: 0.33, w: 0.6, h: 0.2, hb: 0.2, n: 2.4 },
+  ];
+  T(loftSkin(TS, { segs: 32, sub: 4 }), [0, 0, 0], MAT.paint, OD * 1.04);
+  // Mantlet and the fat 152 mm gun-launcher; the mantlet in its dust cover.
+  T(buildBox(0.9, 0.52, 0.36), [0, 0.34, 1.42], MAT.canvas, 0.3);
+  T(alongZ(0.19, 0.17, 0.5, 14), [0, 0.34, 1.7], MAT.paint, OD * 0.9);
+  T(alongZ(0.12, 0.115, 1.75, 14), [0, 0.34, 2.8], MAT.paint, OD * 0.9);
+  T(alongZ(0.13, 0.13, 0.1, 14), [0, 0.34, 3.66], MAT.steel, 0.05);                                  // muzzle ring
+  // The searchlight box on the turret's left.
+  T(buildBox(0.5, 0.42, 0.5), [-0.72, 0.9, 0.72], MAT.paint, OD * 1.05);
+  T(new THREE.CylinderGeometry(0.17, 0.17, 0.03, 16).rotateX(Math.PI / 2), [-0.72, 0.9, 0.985], MAT.white, 0.35);
+  T(buildBox(0.08, 0.2, 0.08), [-0.72, 0.64, 0.72], MAT.steel, 0.2);
+  // Smoke dischargers: four tubes each cheek, angled up and out.
+  for (const sx of [-1, 1]) for (let k = 0; k < 4; k++) {
+    T(new THREE.CylinderGeometry(0.045, 0.045, 0.28, 8), [sx * (0.8 + k * 0.06), 0.62, 1.0 - k * 0.1], MAT.steel, 0.1, [0.8, 0, -sx * 0.4]);
+  }
+  // Commander's cupola, right-rear, with the .50 behind its ACAV shield.
+  const cx = 0.48, cz = -0.35, cy = 0.78;
+  T(new THREE.CylinderGeometry(0.38, 0.4, 0.16, 16), [cx, cy, cz], MAT.paint, OD * 1.02);
+  T(buildBox(0.85, 0.46, 0.03), [cx, cy + 0.3, cz + 0.45], MAT.paint, OD * 0.92, [-0.12, 0, 0]);
+  for (const sx of [-1, 1]) T(buildBox(0.38, 0.46, 0.03), [cx + sx * 0.56, cy + 0.3, cz + 0.3], MAT.paint, OD * 0.92, [-0.1, sx * 0.72, 0]);
+  T(buildBox(0.15, 0.13, 0.5), [cx, cy + 0.38, cz + 0.08], MAT.steel, 0.06);
+  T(alongZ(0.042, 0.042, 0.34, 8), [cx, cy + 0.39, cz + 0.5], MAT.steel, 0.08);
+  T(alongZ(0.024, 0.024, 0.8, 8), [cx, cy + 0.39, cz + 0.88], MAT.steel, 0.06);
+  T(new THREE.CylinderGeometry(0.03, 0.04, 0.3, 6), [cx, cy + 0.16, cz + 0.08], MAT.steel, 0.2);
+  T(new THREE.CylinderGeometry(0.28, 0.28, 0.05, 12), [-0.4, 0.8, -0.4], MAT.paint, OD * 1.05);      // loader's hatch
+  // Bustle rack: a rail frame behind the turret, packs and a rolled tarp in it.
+  for (const y of [0.3, 0.6]) T(buildBox(1.9, 0.04, 0.04), [0, y, -1.72], MAT.steel, 0.25);
+  for (const x of [-0.94, -0.3, 0.3, 0.94]) T(buildBox(0.05, 0.4, 0.05), [x, 0.44, -1.72], MAT.steel, 0.25);
+  for (const sx of [-1, 1]) T(buildBox(0.04, 0.04, 0.4), [sx * 0.97, 0.6, -1.5], MAT.steel, 0.25);
+  T(axleX(0.14, 1.6, 10), [0, 0.46, -1.55], MAT.canvas, 0.35);
+  for (let k = 0; k < 3; k++) T(buildBox(0.32, 0.26, 0.26), [-0.55 + k * 0.55, 0.7, -1.45], MAT.canvas, 0.3 + R() * 0.35, [0, R() * 0.4 - 0.2, 0]);
+  // Antennas at the turret's rear corners.
+  for (const sx of [-1, 1]) {
+    T(new THREE.CylinderGeometry(0.045, 0.055, 0.12, 8), [sx * 0.8, 0.76, -1.0], MAT.steel, 0.25);
+    T(new THREE.CylinderGeometry(0.008, 0.015, 3.0, 4).translate(0, 1.5, 0), [sx * 0.8, 0.82, -1.0], MAT.steel, 0.3, [-0.12, 0, sx * 0.05]);
+  }
+
+  // ── Running gear: raised idler in front, five road wheels, no return
+  //    rollers (the top run rides the wheels), the sprocket at the back.
+  const wheelR = 0.33, t = 0.05;
+  const wheelsZ = [1.75, 0.9, 0.05, -0.8, -1.65];
+  const idler = { c: [2.45, 0.62], r: 0.28 }, sprocket = { c: [-2.55, 0.66], r: 0.3 };
+  const path = trackPath({ front: idler, rear: sprocket, wheelsZ, wheelR, t });
+  const wheel = (cy, cz, r) => [cy, cz, r, 1];
+  for (const sx of [-1, 1]) {
+    const xc = sx * (HW + 0.24), tw = 0.44;
+    G(indexed(trackBand(path, xc, tw, t)), [0, 0, 0], MAT.steel, 0.05, undefined, [0, 0, 0, 2]);
+    for (const z of wheelsZ) {
+      const w = wheel(wheelR + t, z, wheelR);
+      G(axleX(wheelR, 0.36, 18), [xc, wheelR + t, z], MAT.rubber, 0.5, undefined, w);
+      G(axleX(0.22, 0.38, 14), [xc, wheelR + t, z], MAT.paint, OD * 0.9, undefined, w);
+      G(axleX(0.08, 0.41, 8), [xc, wheelR + t, z], MAT.steel, 0.3, undefined, w);
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        G(buildBox(0.4, 0.035, 0.035), [xc, wheelR + t + Math.sin(a) * 0.14, z + Math.cos(a) * 0.14], MAT.steel, 0.35, undefined, w);
+      }
+    }
+    const iw = wheel(idler.c[1], idler.c[0], idler.r);
+    G(axleX(idler.r, 0.36, 16), [xc, idler.c[1], idler.c[0]], MAT.rubber, 0.45, undefined, iw);
+    G(axleX(0.17, 0.38, 12), [xc, idler.c[1], idler.c[0]], MAT.paint, OD * 0.9, undefined, iw);
+    const sw = wheel(sprocket.c[1], sprocket.c[0], sprocket.r);
+    G(axleX(sprocket.r - 0.03, 0.32, 16), [xc, sprocket.c[1], sprocket.c[0]], MAT.paint, OD * 0.85, undefined, sw);
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2;
+      G(buildBox(0.28, 0.07, 0.07), [xc, sprocket.c[1] + Math.sin(a) * (sprocket.r - 0.01), sprocket.c[0] + Math.cos(a) * (sprocket.r - 0.01)], MAT.steel, 0.25, [a, 0, 0], sw);
+    }
+  }
+
+  const geo = assemble(hull);
+  bakeContactAO(geo, { cell: 0.12, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
+  const turretGeo = assemble(turret);
+  bakeContactAO(turretGeo, { cell: 0.1, radius: 2, strength: 0.35, groundFade: 0, floor: 0.55 });
+  const gearGeo = assemble(gear);
+  bakeContactAO(gearGeo, { cell: 0.08, radius: 1, strength: 0.3, groundFade: 0.2, floor: 0.55 });
+
+  // Markings: the star on both turret sides (laid on the lofted skin, it
+  // turns with the turret), the bumper code on the rear plate.
+  const tst = [];
+  for (const sx of [-1, 1]) {
+    tst.push(stencilPatch("star", (s, tt) => {
+      const z = -0.25 - sx * (s - 0.5) * 0.62;
+      const a = (sx > 0 ? 0 : Math.PI) + sx * (tt - 0.5) * 0.9;
+      return skinAt(TS, z, a);
+    }, { segS: 8, segT: 6, lift: 0.012 }));
+  }
+  const turretStencil = mergeStencils(tst);
+  const stencil = mergeStencils([stencilPatch("bumperCode", flatSurface([0, 1.18, -3.1 - bev - 0.004], [0, 0, -1], [-1, 0, 0], 1.4, "bumperCode"), { lift: 0.004 })]);
+
+  for (const g of [geo, turretGeo, gearGeo, stencil, turretStencil]) g?.scale(S, S, S);
+  packGear(gearGeo, spins);
+  geo.computeBoundingBox();
+  geo.userData.stencil = stencil;
+  geo.userData.turret = {
+    geo: turretGeo, stencil: turretStencil,
+    pivot: pivot.map((c) => c * S),
+    muzzle: [0, 0.34 * S, 3.72 * S],
+  };
+  geo.userData.gear = gearGeo;
+  geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
+  return geo;
+}
+
+// ── M35A2 "deuce-and-a-half" (engineer truck) ────────────────────────────────
+/**
+ * The 2½-ton truck that carried the war. Built as the builder's truck: what
+ * makes it an M35 is the narrow hood between FLAT fenders with the headlights
+ * on top in their brush guards, the vertical grille, the exhaust stack
+ * standing beside the open cab under its canvas top, and six wheels on three
+ * axles, duals behind. The bed carries an engineer's stores — timbers,
+ * sandbags, coils of concertina, pickets, tools — under bare canvas bows.
+ * 6.7 m long, 2.4 m wide (real).
+ *
+ * userData: stencil, gear (the wheels, rolling), length. No turret: unarmed.
+ */
+export function buildM35({ seed = 35 } = {}) {
+  const R = rng(seed);
+  const OD = 0.16, FATIGUE = 0.25;
+  const hull = [], gear = [], spins = [];
+  const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
+  const G = (geo, pos, mat, tone, rot, spin) => { gear.push({ geo, pos, mat, tone, rot }); spins.push({ spin, n: geo.attributes.position.count }); };
+  const WR = 0.54;
+  const AXF = 2.3, AX1 = -0.95, AX2 = -2.25;
+
+  // ── Chassis: frame rails, cross members, the fuel tank under the cab.
+  for (const sx of [-1, 1]) P(buildBox(0.12, 0.26, 6.3), [sx * 0.46, 0.86, -0.05], MAT.paint, OD * 0.8);
+  for (const z of [2.9, 1.2, -0.3, -1.6, -2.95]) P(buildBox(0.8, 0.12, 0.12), [0, 0.86, z], MAT.paint, OD * 0.8);
+  P(alongZ(0.24, 0.24, 1.0, 14), [0.72, 0.95, 0.75], MAT.paint, OD * 0.9);                            // fuel tank
+  for (const z of [AXF, AX1, AX2]) P(axleX(0.09, 1.7, 8), [0, WR, z], MAT.steel, 0.2);               // axles
+  for (const z of [AX1, AX2]) P(new THREE.CylinderGeometry(0.28, 0.28, 0.3, 12).rotateX(Math.PI / 2), [0, WR, z], MAT.steel, 0.15);   // differentials
+
+  // ── Front: the narrow hood (a loft, nearly square in section), flat fenders
+  //    with their front edges turned down, the grille, bumper, winch.
+  const HOOD = [
+    { z: 3.18, cy: 1.42, w: 0.46, h: 0.3, hb: 0.42, n: 5 },
+    { z: 3.1, cy: 1.44, w: 0.47, h: 0.33, hb: 0.42, n: 5 },
+    { z: 1.45, cy: 1.47, w: 0.47, h: 0.36, hb: 0.42, n: 5 },
+    { z: 1.35, cy: 1.47, w: 0.4, h: 0.3, hb: 0.36, n: 5 },
+  ];
+  P(loftSkin(HOOD, { segs: 28, sub: 3 }), [0, 0, 0], MAT.paint, OD * 1.02);
+  for (const sx of [-1, 1]) {
+    P(buildBox(0.66, 0.05, 1.75), [sx * 0.86, 1.22, 2.28], MAT.paint, OD);                            // fender top
+    P(buildBox(0.64, 0.05, 0.4), [sx * 0.86, 1.08, 3.28], MAT.paint, OD, [0.65, 0, 0]);             // turned down in front (narrower: equal widths z-fought)
+    P(buildBox(0.05, 0.42, 1.2), [sx * 1.17, 1.02, 2.28], MAT.paint, OD * 0.95);                     // fender skirt
+    // Headlight on the fender, in its brush guard.
+    P(new THREE.CylinderGeometry(0.11, 0.12, 0.14, 12).rotateX(Math.PI / 2), [sx * 0.85, 1.36, 3.05], MAT.steel, 0.15);
+    P(new THREE.CylinderGeometry(0.095, 0.095, 0.02, 12).rotateX(Math.PI / 2), [sx * 0.85, 1.36, 3.13], MAT.white, 0.4);
+    for (const dx of [-0.13, 0.13]) P(buildBox(0.025, 0.3, 0.025), [sx * 0.85 + dx, 1.4, 3.22], MAT.steel, 0.25);
+    P(buildBox(0.3, 0.025, 0.025), [sx * 0.85, 1.56, 3.22], MAT.steel, 0.25);
+  }
+  for (let k = 0; k < 7; k++) P(buildBox(0.05, 0.72, 0.04), [-0.36 + k * 0.12, 1.37, 3.2], MAT.steel, 0.08);   // grille bars
+  P(buildBox(0.9, 0.06, 0.05), [0, 1.73, 3.2], MAT.paint, OD);
+  P(buildBox(2.3, 0.2, 0.14), [0, 0.8, 3.36], MAT.paint, OD * 0.9);                                  // bumper
+  P(axleX(0.14, 0.7, 12), [0, 0.92, 3.3], MAT.steel, 0.2);                                           // winch drum
+  for (const sx of [-1, 1]) P(buildBox(0.12, 0.14, 0.18), [sx * 0.8, 0.72, 3.45], MAT.steel, 0.3);  // tow shackles
+
+  // ── Cab: open, a canvas top on its bows, half doors, the windshield up.
+  // Cab parts all a little different in width: equal widths put their side
+  // faces in one plane wherever they meet.
+  P(buildBox(2.24, 0.06, 1.1), [0, 1.24, 0.72], MAT.paint, OD * 0.85);                              // cab floor
+  P(buildBox(2.2, 0.55, 0.1), [0, 1.52, 1.3], MAT.paint, OD);                                        // cowl / dash
+  P(buildBox(2.2, 0.08, 0.1), [0, 2.52, 1.28], MAT.paint, OD);                                       // windshield frame, top
+  for (const sx of [-1, 0, 1]) P(buildBox(0.07, 0.72, 0.07), [sx * 1.07, 2.16, 1.28], MAT.paint, OD);
+  for (const sx of [-1, 1]) P(buildBox(1.0, 0.68, 0.025), [sx * 0.54, 2.16, 1.27], MAT.steel, 0.12);   // glass
+  P(buildBox(2.3, 0.05, 1.18), [0, 2.62, 0.72], MAT.canvas, 0.4);                                    // canvas top
+  for (const sx of [-1, 1]) {
+    P(buildBox(0.05, 0.62, 0.05), [sx * 1.12, 2.3, 0.2], MAT.steel, 0.25);                           // rear bow posts
+    P(buildBox(0.05, 0.56, 0.95), [sx * 1.15, 1.54, 0.74], MAT.paint, OD * 1.02);                    // half door
+    P(buildBox(0.3, 0.03, 0.03), [sx * 1.3, 1.95, 1.18], MAT.steel, 0.25);                           // mirror arm
+    P(buildBox(0.03, 0.22, 0.14), [sx * 1.44, 1.95, 1.18], MAT.steel, 0.1);                          // mirror
+  }
+  P(buildBox(2.2, 0.9, 0.06), [0, 1.7, 0.16], MAT.paint, OD);                                        // cab back
+  P(buildBox(2.0, 0.12, 0.45), [0, 1.52, 0.42], MAT.canvas, 0.3);                                    // bench seat
+  P(buildBox(1.96, 0.45, 0.08), [0, 1.8, 0.22], MAT.canvas, 0.3);
+  P(new THREE.TorusGeometry(0.2, 0.02, 5, 16).rotateX(Math.PI / 2 - 0.9), [0.55, 1.95, 1.0], MAT.steel, 0.05);   // steering wheel
+  // The driver (left-hand drive: +X), helmet in its camouflage cover.
+  P(buildBox(0.4, 0.5, 0.24), [0.55, 1.83, 0.52], MAT.canvas, FATIGUE);
+  for (const dz of [-0.14, 0.14]) P(buildBox(0.09, 0.09, 0.36), [0.55 + dz, 1.95, 0.76], MAT.canvas, FATIGUE, [0.5, 0, 0]);
+  P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [0.55, 2.22, 0.52], MAT.camo, 0.4);
+  P(new THREE.CylinderGeometry(0.175, 0.175, 0.02, 14).scale(1, 1, 1.1), [0.55, 2.22, 0.52], MAT.camo, 0.35);
+  P(new THREE.SphereGeometry(0.1, 8, 6), [0.55, 2.16, 0.52], MAT.canvas, 0.15);
+  // The exhaust stack standing beside the cab, right side, with its guard.
+  P(new THREE.CylinderGeometry(0.06, 0.06, 1.6, 10), [-1.25, 2.0, 0.1], MAT.steel, 0.05);
+  P(new THREE.CylinderGeometry(0.09, 0.09, 0.9, 10), [-1.25, 1.95, 0.1], MAT.steel, 0.12);
+  // Spare wheel hung behind the cab.
+  G(axleX(WR * 0.95, 0.28, 18).rotateY(Math.PI / 2), [0.3, 1.7, 0.02], MAT.rubber, 0.5, undefined, [0, 0, 0, 0]);
+
+  // ── Cargo bed: floor, wooden slat sides on stakes, tailgate, canvas bows.
+  const BZ0 = -0.1, BZ1 = -3.35, BZ = (BZ0 + BZ1) / 2, BL = BZ0 - BZ1;
+  P(buildBox(2.36, 0.1, BL), [0, 1.22, BZ], MAT.paint, OD * 0.9);
+  for (const sx of [-1, 1]) {
+    for (let k = 0; k < 4; k++) P(buildBox(0.05, 0.12, BL - 0.1), [sx * 1.16, 1.4 + k * 0.17, BZ], MAT.timber, 0.3 + R() * 0.3);
+    for (let k = 0; k < 6; k++) P(buildBox(0.08, 0.72, 0.08), [sx * 1.2, 1.62, BZ0 - 0.15 - k * (BL - 0.3) / 5], MAT.paint, OD * 0.9);
+  }
+  P(buildBox(2.2, 0.62, 0.06), [0, 1.58, BZ1 + 0.03], MAT.paint, OD * 0.95);                         // tailgate
+  P(buildBox(2.2, 0.62, 0.06), [0, 1.58, BZ0 - 0.07], MAT.paint, OD * 0.95);                         // headboard
+  for (let k = 0; k < 4; k++) {
+    const z = BZ0 - 0.3 - k * (BL - 0.6) / 3;
+    P(tube([[-1.2, 1.95, z], [-1.1, 2.55, z], [-0.6, 2.8, z], [0, 2.85, z], [0.6, 2.8, z], [1.1, 2.55, z], [1.2, 1.95, z]], 0.025, 16, 6), [0, 0, 0], MAT.steel, 0.25);
+  }
+  // The engineer's stores: timbers, sandbags, concertina coils, pickets,
+  // a toolbox, jerry cans.
+  for (let k = 0; k < 6; k++) P(buildBox(0.2, 0.12, 2.0), [-0.75 + (k % 3) * 0.22, 1.33 + Math.floor(k / 3) * 0.12, -1.3], MAT.timber, 0.35 + R() * 0.3);
+  const bag = { length: 0.52, width: 0.30, height: 0.17, segU: 5, segV: 3 };
+  P(buildSandbagWall({ length: 1.1, courses: 3, seed, bag }), [0.45, 1.27, -0.6], null);
+  // Concertina coils, the second set off and tilted (identical rings at one x z-fought where they cross).
+  for (let k = 0; k < 2; k++) P(new THREE.TorusGeometry(0.34, 0.05, 6, 18).rotateY(Math.PI / 2), [0.55 + k * 0.07, 1.65, -2.1 - k * 0.3], MAT.steel, 0.25, [0, k * 0.2, 0]);
+  for (let k = 0; k < 5; k++) P(buildBox(0.05, 0.05, 1.6), [0.2 + k * 0.08, 1.3, -2.4], MAT.steel, 0.2);                                          // pickets
+  P(buildBox(0.6, 0.3, 0.35), [-0.6, 1.42, -2.8], MAT.paint, 0.35);                                                                                // toolbox
+  for (let k = 0; k < 2; k++) P(buildBox(0.17, 0.47, 0.34), [-0.95 + k * 0.2, 1.5, -2.2], MAT.paint, 0.42);
+
+  // ── Rear: mudflaps, tail lights, the pintle hook.
+  for (const sx of [-1, 1]) {
+    P(buildBox(0.5, 0.4, 0.02), [sx * 0.95, 0.72, -2.95], MAT.rubber, 0.4);
+    P(buildBox(0.12, 0.1, 0.05), [sx * 1.0, 1.1, -3.38], MAT.steel, 0.15);
+  }
+  P(buildBox(0.14, 0.14, 0.2), [0, 0.8, -3.38], MAT.steel, 0.3);
+
+  // ── Wheels: singles in front, duals on both rear axles; they roll.
+  const wheelAt = (x, z, w) => {
+    const s = [WR, z, WR, 1];
+    G(axleX(WR, w, 20), [x, WR, z], MAT.rubber, 0.5, undefined, s);
+    G(axleX(0.3, w + 0.02, 14), [x, WR, z], MAT.paint, OD * 0.9, undefined, s);
+    G(axleX(0.1, w + 0.05, 8), [x, WR, z], MAT.steel, 0.3, undefined, s);
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      G(buildBox(w + 0.04, 0.04, 0.04), [x, WR + Math.sin(a) * 0.2, z + Math.cos(a) * 0.2], MAT.steel, 0.35, undefined, s);
+    }
+  };
+  for (const sx of [-1, 1]) {
+    wheelAt(sx * 0.98, AXF, 0.3);
+    // Duals spaced so the two tyres' bolt rings do not share a plane.
+    for (const z of [AX1, AX2]) { wheelAt(sx * 0.78, z, 0.27); wheelAt(sx * 1.12, z, 0.27); }
+  }
+
+  const geo = assemble(hull);
+  bakeContactAO(geo, { cell: 0.12, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
+  const gearGeo = assemble(gear);
+  bakeContactAO(gearGeo, { cell: 0.08, radius: 1, strength: 0.3, groundFade: 0.2, floor: 0.55 });
+
+  // Markings: the star on both doors and on the hood, the bumper code.
+  const st = [];
+  for (const sx of [-1, 1]) st.push(stencilPatch("star", flatSurface([sx * 1.18, 1.55, 0.74], [sx, 0, 0], [0, 0, -sx], 0.46, "star"), { lift: 0.004 }));
+  st.push(stencilPatch("star", flatSurface([0, 1.83 + 0.004, 2.2], [0, 1, 0], [-1, 0, 0], 0.6, "star"), { lift: 0.004 }));
+  st.push(stencilPatch("bumperCode", flatSurface([0, 0.8, 3.43 + 0.004], [0, 0, 1], [1, 0, 0], 1.6, "bumperCode"), { lift: 0.004 }));
+  const stencil = mergeStencils(st);
+
+  for (const g of [geo, gearGeo, stencil]) g?.scale(S, S, S);
+  packGear(gearGeo, spins);
+  geo.computeBoundingBox();
+  geo.userData.stencil = stencil;
+  geo.userData.gear = gearGeo;
+  geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
+  return geo;
+}
