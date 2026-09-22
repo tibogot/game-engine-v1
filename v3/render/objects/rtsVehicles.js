@@ -14,7 +14,7 @@
  */
 import * as THREE from "three";
 import { MAT, assemble, bakeContactAO, buildBox, buildSandbagWall, rng } from "./rtsParts.js";
-import { flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
+import { STENCILS, flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
 import { rtsAtlasColor } from "./rtsObjectProps.js";
 import {
   attribute, cos, float, fract, instancedBufferAttribute, max, mix, positionLocal, sin, step, uv, vec2, vec3,
@@ -691,6 +691,384 @@ export function buildM151({ seed = 151 } = {}) {
     muzzle: [0, (gy + 0.01 - pivot[1]) * S, (gz + 0.92 * K - pivot[2]) * S],
   };
   geo.userData.gear = gearGeo;
+  geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
+  return geo;
+}
+
+// ── UH-1H Huey ───────────────────────────────────────────────────────────────
+/**
+ * A LOFTED body: one smooth skin from the nose, through the cabin, down the
+ * tapering tail boom — a rounded-box (superellipse) cross-section at each
+ * station, Catmull-Rom between them. Everything else is laid ONTO that skin
+ * with the same (z, angle) parametrisation — the glazing, the frames, the
+ * open cargo doorway, the slid-back door, the markings — so it follows the
+ * curve instead of being a box stuck on it.
+ */
+const HUEY_STATIONS = [
+  // z (+ forward), cy centre height, w half-width, h top, hb bottom, n exponent
+  { z: 4.36, cy: 1.58, w: 0.12, h: 0.1, hb: 0.1, n: 2.0 },
+  { z: 4.22, cy: 1.62, w: 0.55, h: 0.42, hb: 0.44, n: 2.1 },
+  { z: 3.95, cy: 1.7, w: 0.92, h: 0.68, hb: 0.62, n: 2.3 },
+  { z: 3.55, cy: 1.78, w: 1.1, h: 0.84, hb: 0.74, n: 2.6 },
+  { z: 3.0, cy: 1.84, w: 1.19, h: 0.92, hb: 0.82, n: 3.0 },
+  { z: 2.0, cy: 1.86, w: 1.22, h: 0.92, hb: 0.87, n: 3.4 },
+  { z: 0.0, cy: 1.86, w: 1.22, h: 0.92, hb: 0.89, n: 3.6 },
+  { z: -1.5, cy: 1.88, w: 1.2, h: 0.9, hb: 0.86, n: 3.4 },
+  { z: -2.3, cy: 1.99, w: 1.04, h: 0.8, hb: 0.62, n: 3.0 },
+  { z: -3.0, cy: 2.13, w: 0.74, h: 0.6, hb: 0.38, n: 2.6 },
+  { z: -3.6, cy: 2.21, w: 0.52, h: 0.45, hb: 0.3, n: 2.3 },
+  { z: -6.0, cy: 2.31, w: 0.38, h: 0.34, hb: 0.24, n: 2.2 },
+  { z: -8.0, cy: 2.41, w: 0.27, h: 0.26, hb: 0.18, n: 2.2 },
+  { z: -8.35, cy: 2.43, w: 0.2, h: 0.2, hb: 0.14, n: 2.2 },
+];
+
+/** Catmull-Rom through the stations, by station index t (0 .. n-1). */
+function stationAt(st, t) {
+  const n = st.length;
+  const i = Math.min(n - 2, Math.max(0, Math.floor(t)));
+  const f = t - i;
+  const p0 = st[Math.max(0, i - 1)], p1 = st[i], p2 = st[i + 1], p3 = st[Math.min(n - 1, i + 2)];
+  const cr = (a, b, c, d) => 0.5 * ((2 * b) + (-a + c) * f + (2 * a - 5 * b + 4 * c - d) * f * f + (-a + 3 * b - 3 * c + d) * f * f * f);
+  const o = {};
+  for (const k of ["z", "cy", "w", "h", "hb", "n"]) o[k] = cr(p0[k], p1[k], p2[k], p3[k]);
+  return o;
+}
+/** Station parameter t for a body z (the stations' z falls monotonically). */
+function stationT(st, z) {
+  let lo = 0, hi = st.length - 1;
+  if (z >= st[0].z) return 0;
+  if (z <= st[hi].z) return hi;
+  for (let k = 0; k < 40; k++) {
+    const mid = (lo + hi) / 2;
+    if (stationAt(st, mid).z > z) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+/** A point on a superellipse ring; angle 0 = +X (the right side), PI/2 = the top. */
+function ringPoint(s, a) {
+  const c = Math.cos(a), sn = Math.sin(a), e = 2 / s.n;
+  const x = s.w * Math.sign(c) * Math.abs(c) ** e;
+  const y = s.cy + (sn >= 0 ? s.h : s.hb) * Math.sign(sn) * Math.abs(sn) ** e;
+  return new THREE.Vector3(x, y, s.z);
+}
+
+/** The skin at body (z, angle), and its outward normal. */
+function skinAt(st, z, a) {
+  const t = stationT(st, z);
+  const p = ringPoint(stationAt(st, t), a);
+  const e = 0.004;
+  const pa = ringPoint(stationAt(st, t), a + e).sub(ringPoint(stationAt(st, t), a - e));
+  const tz = stationT(st, z - 0.02);
+  const pz = ringPoint(stationAt(st, t), a).sub(ringPoint(stationAt(st, tz), a));
+  const n = new THREE.Vector3().crossVectors(pa, pz).normalize();
+  // Outward: away from the section's centre line.
+  if (n.x * p.x + n.y * (p.y - stationAt(st, t).cy) < 0) n.negate();
+  return { p, n };
+}
+
+/** The lofted skin as one indexed mesh, nose and tail closed. */
+function loftSkin(st, { segs = 36, sub = 5 } = {}) {
+  const rings = [];
+  for (let i = 0; i < st.length - 1; i++) for (let k = 0; k < sub; k++) rings.push(stationAt(st, i + k / sub));
+  rings.push(st[st.length - 1]);
+  const pos = [], uvs = [], idx = [];
+  const row = segs + 1;
+  rings.forEach((s) => {
+    for (let j = 0; j <= segs; j++) {
+      const a = (j / segs) * Math.PI * 2;
+      const p = ringPoint(s, a);
+      pos.push(p.x, p.y, p.z);
+      uvs.push((j / segs) * 2 * (s.w + (s.h + s.hb) / 2), -s.z);
+    }
+  });
+  for (let r = 0; r < rings.length - 1; r++) {
+    for (let j = 0; j < segs; j++) {
+      const a = r * row + j, b = a + 1, c = a + row, d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+  // Caps: a centre point each end, fanned to its ring.
+  const cap = (ringIdx, flip) => {
+    const s = rings[ringIdx];
+    const ci = pos.length / 3;
+    pos.push(0, s.cy, s.z + (flip ? -0.02 : 0.03));
+    uvs.push(0, -s.z);
+    for (let j = 0; j < segs; j++) {
+      const a = ringIdx * row + j, b = a + 1;
+      if (flip) idx.push(ci, b, a); else idx.push(ci, a, b);
+    }
+  };
+  cap(0, false);
+  cap(rings.length - 1, true);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  g.setIndex(idx);
+  // The winding must face out: check one face against the outward normal.
+  g.computeVertexNormals();
+  const A = new THREE.Vector3().fromArray(pos, (2 * row + 3) * 3), B = new THREE.Vector3().fromArray(pos, (2 * row + 4) * 3), C = new THREE.Vector3().fromArray(pos, (3 * row + 3) * 3);
+  const f = new THREE.Vector3().subVectors(C, A).cross(new THREE.Vector3().subVectors(B, A));
+  const out = new THREE.Vector3(A.x, A.y - rings[2].cy, 0);
+  if (f.dot(out) < 0) {
+    for (let k = 0; k < idx.length; k += 3) { const tmp = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = tmp; }
+    g.setIndex(idx);
+    g.computeVertexNormals();
+  }
+  return g;
+}
+
+/**
+ * A patch laid on the skin over body z0..z1 and angles a0..a1, lifted `off`
+ * along the skin's normal — glass, frames, the doorway. Outward-wound.
+ */
+function skinPatch(st, z0, z1, a0, a1, off, { nz = 8, na = 8 } = {}) {
+  const pos = [], nrm = [], uvs = [], idx = [];
+  for (let i = 0; i <= nz; i++) {
+    const z = z0 + ((z1 - z0) * i) / nz;
+    for (let j = 0; j <= na; j++) {
+      const a = a0 + ((a1 - a0) * j) / na;
+      const { p, n } = skinAt(st, z, a);
+      p.addScaledVector(n, off);
+      pos.push(p.x, p.y, p.z); nrm.push(n.x, n.y, n.z); uvs.push(a, z);
+    }
+  }
+  const row = na + 1;
+  for (let i = 0; i < nz; i++) for (let j = 0; j < na; j++) {
+    const a = i * row + j;
+    idx.push(a, a + 1, a + row, a + 1, a + row + 1, a + row);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  g.setIndex(idx);
+  const A = new THREE.Vector3().fromArray(pos, 0), B = new THREE.Vector3().fromArray(pos, 3), C = new THREE.Vector3().fromArray(pos, row * 3);
+  const f = new THREE.Vector3().subVectors(B, A).cross(new THREE.Vector3().subVectors(C, A));
+  if (f.dot(new THREE.Vector3(nrm[0], nrm[1], nrm[2])) < 0) {
+    for (let k = 0; k < idx.length; k += 3) { const tmp = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = tmp; }
+    g.setIndex(idx);
+  }
+  return g;
+}
+
+/** A tube along a smooth path (skids, cross tubes, exhaust, tail skid). */
+const tube = (pts, r, seg = 20, radial = 8) => new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(...p))), seg, r, radial, false);
+
+/** An airfoil-section blade along +X, `len` long, drooping `droop` at its tip. */
+function blade(len, chord, thick, droop = 0) {
+  const sh = new THREE.Shape();
+  sh.absellipse(0, 0, chord / 2, thick / 2, 0, Math.PI * 2, false, 0);
+  const g = new THREE.ExtrudeGeometry(sh, { depth: len, steps: 8, bevelEnabled: false, curveSegments: 10 });
+  // Shape XY = (chord, thickness), extruded along Z. One turn about Y lays the
+  // length along +X, the chord along Z and the thickness along Y: FLAT. (A
+  // second turn about X stood the chord up on edge — the rotor looked vertical.)
+  g.rotateY(Math.PI / 2);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    p.setY(i, p.getY(i) - droop * (x / len) ** 2);
+  }
+  g.computeVertexNormals();
+  return indexed(g);
+}
+
+/**
+ * The UH-1H. 12.7 m fuselage, 14.6 m rotor (real). What makes it a Huey:
+ * the rounded cabin with its glazed nose and roof and chin windows; the cargo
+ * doors slid back, a door gunner with his M60 in each; the engine cowling and
+ * curved exhaust; the TWO-blade rotor with its stabiliser bar; the long
+ * tapering boom, the elevators, the fin and the tail rotor on its left; skids.
+ *
+ * userData: stencil, rotors { main: { geo, pivot }, tail: { geo, pivot } },
+ * length. The unit renderer spins meshes named MainRotor (about Y) and
+ * TailRotor (about X) round their own pivots.
+ */
+export function buildUH1() {
+  const st = HUEY_STATIONS;
+  const OD = 0.16, FATIGUE = 0.25;
+  const hull = [], main = [], tail = [];
+  const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
+  const at = (z, a, off = 0) => { const { p, n } = skinAt(st, z, a); return p.addScaledVector(n, off); };
+  const D = Math.PI / 180;
+  const ROOF = 2.78;
+
+  // ── The skin.
+  P(loftSkin(st), [0, 0, 0], MAT.paint, OD);
+
+  // ── Glazing: windscreen and cockpit roof (the upper nose), the chin
+  //    windows (the lower nose each side of the keel), the cockpit doors'
+  //    windows. Frames over them: the centre post, the windscreen's top edge.
+  const GL = 0.012, FR = 0.024;
+  P(skinPatch(st, 2.55, 4.12, 18 * D, 162 * D, GL, { nz: 14, na: 18 }), [0, 0, 0], MAT.steel, 0.12);
+  for (const [a0, a1] of [[-72 * D, -28 * D], [-152 * D, -108 * D]]) {
+    P(skinPatch(st, 3.3, 4.12, a0, a1, GL, { nz: 8, na: 6 }), [0, 0, 0], MAT.steel, 0.12);
+  }
+  for (const [a0, a1] of [[-12 * D, 30 * D], [150 * D, 192 * D]]) {
+    P(skinPatch(st, 1.3, 2.45, a0, a1, GL, { nz: 6, na: 6 }), [0, 0, 0], MAT.steel, 0.12);
+  }
+  P(skinPatch(st, 2.55, 4.15, 87 * D, 93 * D, FR, { nz: 12, na: 1 }), [0, 0, 0], MAT.paint, OD * 0.9);      // centre post
+  P(skinPatch(st, 2.5, 2.62, 12 * D, 168 * D, FR, { nz: 1, na: 18 }), [0, 0, 0], MAT.paint, OD * 0.9);     // top of the windscreen
+  for (const a of [52 * D, 128 * D]) P(skinPatch(st, 2.55, 3.9, a - 2 * D, a + 2 * D, FR, { nz: 10, na: 1 }), [0, 0, 0], MAT.paint, OD * 0.9);   // side posts
+  for (const a of [-50 * D, -130 * D]) P(skinPatch(st, 3.3, 4.12, a - 2 * D, a + 2 * D, FR, { nz: 6, na: 1 }), [0, 0, 0], MAT.paint, OD * 0.9);   // chin window frames
+  // Wipers on the windscreen.
+  for (const sx of [-1, 1]) { const w = at(3.85, (90 - sx * 28) * D, 0.03); P(buildBox(0.03, 0.02, 0.5), [w.x, w.y, w.z], MAT.steel, 0.1, [0.9, 0, 0]); }
+
+  // ── The cargo doorway, open (dark cabin) each side, and the door slid back
+  //    along the aft fuselage with its window.
+  for (const [a0, a1] of [[-40 * D, 44 * D], [136 * D, 220 * D]]) {
+    P(skinPatch(st, -0.95, 1.05, a0, a1, GL, { nz: 8, na: 10 }), [0, 0, 0], MAT.steel, 0.0);
+  }
+  for (const [a0, a1, aw0, aw1] of [[-38 * D, 42 * D, 5 * D, 35 * D], [138 * D, 218 * D, 145 * D, 175 * D]]) {
+    P(skinPatch(st, -2.15, -0.9, a0, a1, 0.05, { nz: 8, na: 10 }), [0, 0, 0], MAT.paint, OD * 1.08);
+    P(skinPatch(st, -1.85, -1.2, aw0, aw1, 0.062, { nz: 3, na: 4 }), [0, 0, 0], MAT.steel, 0.12);   // its window
+  }
+  // Door rails, above and below the doorway.
+  for (const sx of [-1, 1]) for (const y of [2.62, 1.12]) P(alongZ(0.022, 0.022, 3.4, 6), [sx * 1.22, y, -0.5], MAT.steel, 0.25);
+
+  // ── Engine cowling (a smooth hump), the transmission fairing in front of
+  //    the mast, the intake screens, the curved exhaust.
+  const cowl = [
+    { z: 1.0, cy: ROOF - 0.05, w: 0.1, h: 0.05, hb: 0.05, n: 2.2 },
+    { z: 0.85, cy: ROOF - 0.02, w: 0.5, h: 0.28, hb: 0.2, n: 2.6 },
+    { z: 0.2, cy: ROOF, w: 0.66, h: 0.42, hb: 0.2, n: 3.0 },
+    { z: -1.2, cy: ROOF, w: 0.68, h: 0.48, hb: 0.2, n: 3.2 },
+    { z: -2.4, cy: ROOF - 0.05, w: 0.6, h: 0.42, hb: 0.2, n: 3.0 },
+    { z: -2.9, cy: ROOF - 0.12, w: 0.42, h: 0.28, hb: 0.16, n: 2.6 },
+    { z: -3.05, cy: ROOF - 0.14, w: 0.3, h: 0.18, hb: 0.12, n: 2.4 },
+  ];
+  P(loftSkin(cowl, { segs: 24, sub: 3 }), [0, 0, 0], MAT.paint, OD * 0.95);
+  for (const sx of [-1, 1]) {
+    P(skinPatch(cowl, -0.2, 0.7, (sx > 0 ? 8 : 140) * D, (sx > 0 ? 40 : 172) * D, 0.012, { nz: 5, na: 4 }), [0, 0, 0], MAT.steel, 0.05);   // intake screens
+    P(skinPatch(cowl, -2.3, -1.3, (sx > 0 ? 10 : 150) * D, (sx > 0 ? 30 : 170) * D, 0.012, { nz: 5, na: 3 }), [0, 0, 0], MAT.steel, 0.1);   // louvres
+  }
+  P(tube([[0, ROOF + 0.3, -2.85], [0, ROOF + 0.4, -3.2], [0, ROOF + 0.72, -3.42]], 0.19, 12, 12), [0, 0, 0], MAT.steel, 0.02);   // exhaust, heat-blackened
+  // Mast, swashplate and the pitch-change links.
+  P(new THREE.CylinderGeometry(0.1, 0.13, 0.62, 12), [0, ROOF + 0.72, -0.3], MAT.steel, 0.25);
+  P(new THREE.CylinderGeometry(0.26, 0.26, 0.06, 16), [0, ROOF + 0.62, -0.3], MAT.steel, 0.3);
+  // Anti-collision beacon on the cowl, the VHF whip, the pitot tube and
+  // landing light on the nose, FM homing antennas on its cheeks.
+  P(new THREE.SphereGeometry(0.08, 10, 6), [0, ROOF + 0.5, -2.2], MAT.white, 0.3);
+  P(new THREE.CylinderGeometry(0.008, 0.014, 1.3, 4).translate(0, 0.65, 0), [0.35, ROOF + 0.18, -3.5], MAT.steel, 0.3, [-0.35, 0, 0]);
+  const pit = at(3.0, 90 * D, 0.02);
+  P(alongZ(0.018, 0.018, 0.9, 6), [0.18, pit.y + 0.02, pit.z + 0.9], MAT.steel, 0.35, [-0.3, 0, 0]);
+  const ll = at(3.7, -90 * D, 0.03);
+  P(new THREE.CylinderGeometry(0.09, 0.09, 0.08, 12), [ll.x, ll.y, ll.z], MAT.steel, 0.2);
+  P(new THREE.CylinderGeometry(0.075, 0.075, 0.02, 12), [ll.x, ll.y - 0.045, ll.z], MAT.white, 0.4);
+  for (const sx of [-1, 1]) { const q = at(3.6, (sx > 0 ? 8 : 172) * D, 0.03); P(buildBox(0.02, 0.28, 0.22), [q.x, q.y, q.z], MAT.steel, 0.2, [0, 0, sx * 0.2]); }
+  // Cargo hook under the belly.
+  P(buildBox(0.3, 0.1, 0.3), [0, 0.93, -0.3], MAT.steel, 0.2);
+
+  // ── Tail: elevators (rounded airfoils) halfway down the boom, the fin with
+  //    its tail-rotor gearbox, the tail skid, the "towel rack" antenna.
+  for (const sx of [-1, 1]) {
+    const e = blade(1.35, 0.5, 0.07);
+    P(e, [sx * 0.3 - (sx < 0 ? 1.35 : 0), 2.33, -5.4], MAT.paint, OD * 0.95);
+    P(buildBox(0.05, 0.24, 0.42), [sx * 1.66, 2.33, -5.4], MAT.paint, OD * 0.95);     // tip plates
+  }
+  const fin = new THREE.Shape();
+  fin.moveTo(-0.5, 0); fin.lineTo(0.42, 0); fin.quadraticCurveTo(0.1, 1.0, -0.12, 1.72); fin.lineTo(-0.72, 1.72); fin.quadraticCurveTo(-0.62, 0.8, -0.5, 0);
+  const finG = new THREE.ExtrudeGeometry(fin, { depth: 0.08, bevelEnabled: true, bevelThickness: 0.035, bevelSize: 0.03, bevelSegments: 2, curveSegments: 8 });
+  finG.rotateY(-Math.PI / 2);
+  finG.computeBoundingBox();
+  finG.translate(-(finG.boundingBox.min.x + finG.boundingBox.max.x) / 2, 0, 0);
+  P(indexed(finG), [0, 2.36, -8.05], MAT.paint, OD);
+  P(new THREE.CylinderGeometry(0.13, 0.15, 0.3, 12).rotateZ(Math.PI / 2), [-0.12, 3.62, -8.52], MAT.paint, OD * 0.9);   // gearbox
+  P(new THREE.SphereGeometry(0.12, 10, 6), [-0.27, 3.62, -8.52], MAT.steel, 0.2);
+  P(tube([[0, 2.22, -7.7], [0, 1.95, -8.1], [0, 1.9, -8.4]], 0.03, 10, 6), [0, 0, 0], MAT.steel, 0.25);   // tail skid
+  P(buildBox(0.035, 0.3, 0.035), [0, 2.78, -3.9], MAT.steel, 0.2);
+  P(buildBox(0.045, 0.035, 0.9), [0, 2.93, -4.1], MAT.steel, 0.2);
+
+  // ── Skids: tubes with turned-up toes on two bowed cross tubes, steps.
+  for (const sx of [-1, 1]) {
+    const x = sx * 1.32;
+    P(tube([[x, 0.08, -2.1], [x, 0.08, 0.0], [x, 0.08, 1.9], [x, 0.2, 2.45], [x, 0.45, 2.7]], 0.055, 24, 8), [0, 0, 0], MAT.steel, 0.28);
+    for (const z of [1.05, -1.3]) {
+      P(tube([[x, 0.08, z], [sx * 1.3, 0.5, z], [sx * 1.08, 0.86, z], [sx * 0.6, 0.97, z]], 0.06, 10, 8), [0, 0, 0], MAT.steel, 0.28);
+    }
+    P(buildBox(0.34, 0.03, 0.22), [sx * 1.28, 0.62, 0.4], MAT.steel, 0.3);    // step
+  }
+  for (const z of [1.05, -1.3]) P(axleX(0.06, 1.2, 8), [0, 0.97, z], MAT.steel, 0.28);
+
+  // ── Door gunners: in the doorway each side, seated facing out behind an
+  //    M60 on a post, flight helmet with its dark visor.
+  const K = 1.4;
+  for (const sx of [-1, 1]) {
+    const gx = sx * 1.1, gz = -0.05;
+    P(new THREE.CylinderGeometry(0.03, 0.03, 0.75, 6), [gx, 1.5, gz + 0.35], MAT.steel, 0.2);                   // mount post
+    P(buildBox(0.42 * K, 0.13 * K, 0.09 * K), [gx + sx * 0.14, 1.94, gz + 0.35], MAT.steel, 0.06);              // M60 receiver
+    P(axleX(0.022 * K, 0.56 * K, 8), [gx + sx * (0.14 + 0.48 * K), 1.95, gz + 0.35], MAT.steel, 0.06);          // barrel
+    P(buildBox(0.1 * K, 0.18 * K, 0.28 * K), [gx - sx * 0.06, 1.82, gz + 0.52], MAT.paint, 0.4);                // ammo can
+    const bx = sx * 0.68;
+    P(buildBox(0.3, 0.52, 0.42), [bx, 1.55, gz], MAT.canvas, FATIGUE);                                          // torso
+    P(buildBox(0.42, 0.18, 0.34), [bx + sx * 0.24, 1.18, gz], MAT.canvas, FATIGUE * 0.9);                       // thighs, out the door
+    P(buildBox(0.16, 0.42, 0.3), [bx + sx * 0.46, 0.94, gz], MAT.canvas, FATIGUE * 0.9);                        // shins, dangling
+    for (const dz of [-0.13, 0.13]) P(buildBox(0.44, 0.09, 0.09), [bx + sx * 0.26, 1.72, gz + 0.2 + dz], MAT.canvas, FATIGUE);   // arms to the gun
+    P(new THREE.SphereGeometry(0.16, 12, 8), [bx, 1.95, gz], MAT.paint, OD * 0.8);                               // flight helmet
+    P(new THREE.SphereGeometry(0.14, 10, 6, -Math.PI / 3, (2 * Math.PI) / 3, Math.PI * 0.32, Math.PI * 0.26), [bx + sx * 0.03, 1.94, gz], MAT.steel, 0.02, [0, sx > 0 ? Math.PI / 2 : -Math.PI / 2, 0]);   // visor
+  }
+
+  // ── Main rotor (about Y, pivot on the hub): airfoil blades drooping to
+  //    their tips, grips and pitch horns, the trunnion, the stabiliser bar.
+  const hubY = ROOF + 1.12, hubZ = -0.3;
+  const BL = 7.1;
+  for (const sx of [-1, 1]) {
+    const b = blade(BL, 0.53, 0.07, 0.22);
+    if (sx < 0) b.rotateY(Math.PI);
+    main.push({ geo: b, pos: [sx * 0.2, 0, 0], mat: MAT.steel, tone: 0.1 });
+    const tip = blade(0.45, 0.535, 0.072, 0);
+    if (sx < 0) tip.rotateY(Math.PI);
+    main.push({ geo: tip, pos: [sx * (0.2 + BL - 0.44), -0.215, 0], mat: MAT.white, tone: 0.4 });            // tip stripe
+    main.push({ geo: buildBox(0.5, 0.14, 0.2), pos: [sx * 0.42, 0, 0], mat: MAT.steel, tone: 0.25 });        // grip
+    main.push({ geo: buildBox(0.06, 0.28, 0.06), pos: [sx * 0.42, -0.14, 0.14], mat: MAT.steel, tone: 0.3 });   // pitch link
+  }
+  main.push({ geo: new THREE.CylinderGeometry(0.16, 0.18, 0.26, 14), pos: [0, 0, 0], mat: MAT.steel, tone: 0.2 });
+  main.push({ geo: alongZ(0.035, 0.035, 2.5, 8), pos: [0, 0.2, 0], mat: MAT.steel, tone: 0.2 });           // stabiliser bar
+  for (const sz of [-1, 1]) main.push({ geo: alongZ(0.07, 0.07, 0.4, 10), pos: [0, 0.2, sz * 1.25], mat: MAT.steel, tone: 0.15 });
+
+  // ── Tail rotor (about X): two airfoil blades on the gearbox's left.
+  for (const sy of [-1, 1]) {
+    const b = blade(0.62, 0.2, 0.04, 0);
+    b.rotateZ(Math.PI / 2);
+    if (sy < 0) b.rotateX(Math.PI);
+    tail.push({ geo: b, pos: [0, sy * 0.05, 0], mat: MAT.steel, tone: 0.1 });
+  }
+  tail.push({ geo: axleX(0.07, 0.12, 10), pos: [0, 0, 0], mat: MAT.steel, tone: 0.25 });
+  const tailPivot = [-0.36, 3.62, -8.52];
+
+  const geo = assemble(hull);
+  bakeContactAO(geo, { cell: 0.12, radius: 2, strength: 0.35, groundFade: 0.2, floor: 0.55 });
+  const mainGeo = assemble(main);
+  bakeContactAO(mainGeo, { cell: 0.1, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+  const tailGeo = assemble(tail);
+  bakeContactAO(tailGeo, { cell: 0.05, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+
+  // ── Markings, laid on the curving skin: U.S. ARMY down both sides of the
+  //    boom, the star on the aft fuselage, the tail number on the fin.
+  const mk = [];
+  const onSkin = (cell, zc, ac, width, sx) => {
+    const aspect = STENCILS[cell].aspect;
+    return stencilPatch(cell, (s, t) => {
+      // s along the body (the viewer's right is -Z on +X, +Z on -X), t up it.
+      const z = zc - sx * (s - 0.5) * width;
+      const { p, n } = skinAt(st, z, ac + sx * (t - 0.5) * (width / aspect) / Math.max(0.3, skinAt(st, z, ac).p.distanceTo(new THREE.Vector3(0, stationAt(st, stationT(st, z)).cy, z))));
+      return { p, n };
+    }, { segS: 12, segT: 4, lift: 0.014 });
+  };
+  for (const sx of [-1, 1]) {
+    const a = sx > 0 ? 0 : Math.PI;
+    mk.push(onSkin("armyBlack", -4.7, a, 1.6, sx));
+    mk.push(onSkin("star", -2.35, sx > 0 ? 5 * D : 175 * D, 0.72, sx));
+    mk.push(stencilPatch("tailNumber", flatSurface([sx * 0.085, 2.95, -8.15], [sx, 0, 0], [0, 0, -sx], 0.62, "tailNumber"), { lift: 0.004 }));
+  }
+  const stencil = mergeStencils(mk);
+
+  for (const g of [geo, mainGeo, tailGeo, stencil]) g?.scale(S, S, S);
+  geo.computeBoundingBox();
+  geo.userData.stencil = stencil;
+  geo.userData.rotors = {
+    main: { geo: mainGeo, pivot: [0, hubY * S, hubZ * S] },
+    tail: { geo: tailGeo, pivot: tailPivot.map((c) => c * S) },
+  };
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   return geo;
 }

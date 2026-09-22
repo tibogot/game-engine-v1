@@ -697,7 +697,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
           ]
         // Helipad units are free in this pass — only base production is costed.
         : s.typeKey === "helipad"
-          ? [{ key: "helicopter", label: "Build Heli" }]
+          ? [{ key: "helicopter", label: "UH-1 Huey" }]
           : []
     ),
     canAfford: (cost) => resources.canAfford(cost),

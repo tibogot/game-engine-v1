@@ -23,7 +23,7 @@ import {
 import { buildCorrugatedPanel, buildTrapezoidPanel, MAT } from "../v3/render/objects/rtsParts.js";
 
 import { buildDoorLeaf, buildQuonsetShellGeometry } from "../v3/render/objects/rtsQuonset.js";
-import { buildM113, buildM151, buildM48 } from "../v3/render/objects/rtsVehicles.js";
+import { buildM113, buildM151, buildM48, buildUH1 } from "../v3/render/objects/rtsVehicles.js";
 import { buildGunPitBody, buildGunPitGun, buildBunker, buildHelipad, buildNestBody, buildNestGun, buildRequisitionMast, buildSandbagWallPiece } from "../v3/render/objects/rtsBuildables.js";
 
 let failed = 0;
@@ -132,6 +132,12 @@ console.log("vehicles");
   check("M151 hull", m);
   check("M151 turret (M60 + gunner)", m.userData.turret.geo);
   check("M151 wheels", m.userData.gear);
+}
+{
+  const m = buildUH1();
+  check("UH-1H fuselage", m);
+  check("UH-1H main rotor", m.userData.rotors.main.geo);
+  check("UH-1H tail rotor", m.userData.rotors.tail.geo);
 }
 
 console.log("Quonset HQ");

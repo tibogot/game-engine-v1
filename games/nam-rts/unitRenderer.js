@@ -18,12 +18,12 @@ import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
-import { buildM113, buildM151, buildM48, rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
+import { buildM113, buildM151, buildM48, buildUH1, rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
 /** Vehicles built in code, by a unit type's `procedural` key. */
-const PROCEDURAL_VEHICLES = { m113: () => buildM113(), m48: () => buildM48(), m151: () => buildM151() };
+const PROCEDURAL_VEHICLES = { m113: () => buildM113(), m48: () => buildM48(), m151: () => buildM151(), uh1: () => buildUH1() };
 import { UNIT_TYPES, UNIT_TYPE_KEYS } from "./unitTypes.js";
 
 // Mesh → owning unit, for selection raycasts. A WeakMap (not mesh.userData)
@@ -438,6 +438,17 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       scene.add(m);
     }
     if (geo.userData.gear) scene.add(new THREE.Mesh(geo.userData.gear, rtsRunningGearMaterial()));
+    // Rotors: named so the instancer spins them round their own pivots
+    // (MainRotor about Y, TailRotor about X).
+    const rot = geo.userData.rotors;
+    if (rot) {
+      for (const [name, r] of [["MainRotor", rot.main], ["TailRotor", rot.tail]]) {
+        const m = new THREE.Mesh(r.geo, rtsObjectMaterial());
+        m.name = name;
+        m.position.set(r.pivot[0], r.pivot[1], r.pivot[2]);
+        scene.add(m);
+      }
+    }
     geo.computeBoundingBox();
     const b = geo.boundingBox;
     t.targetLength = Math.max(b.max.x - b.min.x, b.max.z - b.min.z);

@@ -23,7 +23,8 @@ const REAL = { soldierHeight: 1.8, jeepLength: 3.35 /* M151 MUTT */ };
 export const UNIT_TYPES = {
   helicopter: {
     typeKey: "helicopter",
-    name: "Helicopter",
+    // The UH-1H Huey, built in code (rtsVehicles.js).
+    name: "UH-1H Huey",
     // logic
     isAir: true,
     hover: 24,      // metres above ground/water
@@ -38,8 +39,7 @@ export const UNIT_TYPES = {
     canHitAir: true,
     vision: 72,
     // render
-    url: "/models/heli5.glb",
-    targetLength: 12,
+    procedural: "uh1",   // rtsVehicles.buildUH1 — its own size sets the scale
     excludeRotorsFromBox: true, // rotor span would shrink the fuselage
     facingOffset: 0,
     ringRadius: 9,

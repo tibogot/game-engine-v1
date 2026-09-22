@@ -209,7 +209,16 @@ Everything else below is in its section.
       canvas, wire-cutter bar, M60 on a pedestal with its gunner (they turn
       together to the target), driver, camo-covered helmets, spare wheel,
       jerry can, whip; wheels roll; 2.8k tris.
-      ROSTER (Vietnam only): US — (M151 done), M35 gun truck, UH-1 Huey,
+      **UH-1H Huey** DONE (replaces heli5.glb): cabin with glazed nose, doors
+      slid open with a door gunner + M60 each side, engine hump + exhaust,
+      two-blade rotor + stabiliser bar (spins), boom with elevator, fin, tail
+      rotor (spins), skids, U.S. ARMY + stars. REBUILT at your word ("too low
+      poly"): a LOFTED skin (14 superellipse stations, Catmull-Rom) nose to
+      tail; glazing, frames, doorway, slid door and markings laid ON the skin;
+      airfoil blades with droop, grips, stabiliser bar; tube skids; flight-
+      helmeted door gunners; tail number. ~14k tris (instanced). NEXT on it: a faint
+      rotor-blur disc (the blades strobe at speed), Dustoff medevac variant.
+      ROSTER (Vietnam only): US — (M151, UH-1 done), M35 gun truck, UH-1 Huey,
       AH-1 Cobra, M132 Zippo, PBR boat · enemy — PT-76, Type 59/T-54, ZPU AA,
       Molotova truck, sampans, supply bicycles. Then delete the rts-v3 GLBs;
       dust behind tracks. Was: **Vehicles are too low poly** — rebuild them for this game: procedural
