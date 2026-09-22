@@ -29,6 +29,9 @@
 //             dropping a round every `mortarReload` s on the thickest knot of
 //             your men ITS OWN MEN CAN SEE, inside 28–130 m and never on its
 //             own (the `fireMortar` hook → projectiles.spawnArc)
+//   supply    a Molotova shuttling HQ → the forward point it holds; every run
+//             that gets through pays `truckPay`, so the road between is worth
+//             cutting (`truckKey`, `truckCost`, `truckMax`)
 //   armour    a PT-76 bought at the HQ (not a tunnel — a tank does not climb
 //             out of a hole) and attached to the squad that most needs one:
 //             the one gathering for an attack, else the one nearest your HQ.
@@ -89,6 +92,13 @@ export const ENEMY_AI = {
   armourMax: 4,
   armourMinPoints: 2,   // it holds this much ground before it buys a tank
   armourEvery: 8,       // seconds between decisions
+  // Supply trucks: the Molotova's run pays when it gets through.
+  truckKey: "molotova",
+  truckCost: 120,
+  truckMax: 2,
+  truckPay: 170,        // per delivery — it repays itself on its second run
+  truckDwell: 8,        // seconds unloading at the point
+  truckEvery: 10,
 };
 
 export const DIFFICULTY = {
@@ -159,6 +169,10 @@ export function createEnemyAI({
     const men = squads.reduce((n, s) => n + menOf(s).length, 0);
     if (men < params.squadSize * 2) return null;                 // two squads before anything
     const held = requisition.points.filter((p) => p.owner === "enemy").length;
+    // A truck before a tank: it pays for itself and everything after it.
+    if (params.truckKey && trucks.length < params.truckMax && held >= 1) {
+      return { kind: "truck", cost: params.truckCost };
+    }
     if (params.armourKey && allArmour() < params.armourMax && held >= params.armourMinPoints) {
       return { kind: "armour", cost: params.armourCost };
     }
@@ -824,6 +838,68 @@ export function createEnemyAI({
     if (emplace("mortar", site.x, site.z)) say(`mortar dug in behind ${best.name}`);
   }
 
+  // ── Supply trucks ─────────────────────────────────────────────────────────
+  // A Molotova shuttles between the HQ and the forward point it holds. Each
+  // run that GETS THROUGH pays — so the road between their base and the front
+  // is worth watching, and a truck burning on it is supplies they never got.
+  const trucks = [];          // { unit, state: "out" | "unload" | "back", t, point }
+  let truckT = 0;
+  /** Send one unit somewhere on a queued path (the budget, not a search now). */
+  function sendUnit(u, x, z) {
+    if (!navGrid?.requestPath) { u.orderTo(x, z); return; }
+    navGrid.requestPath(u.position.x, u.position.z, x, z, (path) => {
+      if (u.alive) u.orderTo(x, z, path?.length ? path : null);
+    });
+  }
+  /** The point it is running to: the one it holds nearest YOUR HQ — the front. */
+  function forwardHeld() {
+    const front = structures.base?.position;
+    let best = null, bd = Infinity;
+    for (const p of requisition.points) {
+      if (p.owner !== "enemy") continue;
+      const d = front ? dist(p.position, front) : 0;
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
+  }
+  function buyTruck() {
+    const base = hq();
+    if (!base || !params.truckKey) return;
+    if (trucks.length >= params.truckMax || !forwardHeld()) return;
+    if (!canSpend(params.truckCost, "truck") || !purse.spend(params.truckCost)) return;
+    const u = spawnMan(doorOf(base), params.truckKey);
+    if (!u) return;
+    trucks.push({ unit: u, state: "out", t: 0, point: null });
+    say("a Molotova rolls out");
+  }
+  function runTrucks(dt) {
+    for (let i = trucks.length - 1; i >= 0; i--) {
+      const tr = trucks[i];
+      const u = tr.unit;
+      if (!u.alive) { trucks.splice(i, 1); say("supply truck destroyed"); continue; }
+      const base = hq();
+      if (tr.state === "out") {
+        const to = forwardHeld();
+        if (!to) { tr.state = "back"; continue; }
+        if (tr.point !== to) { tr.point = to; sendUnit(u, to.position.x, to.position.z); }
+        else if (dist(u.position, to.position) < 14) { tr.state = "unload"; tr.t = params.truckDwell; }
+        else if (!u.isMoving) sendUnit(u, to.position.x, to.position.z);
+      } else if (tr.state === "unload") {
+        tr.t -= dt;
+        if (tr.t > 0) continue;
+        purse.earn(params.truckPay);
+        say(`supplies delivered to ${tr.point?.name ?? "the front"}`);
+        tr.state = "back";
+        if (base) sendUnit(u, doorOf(base).x, doorOf(base).z);
+      } else {
+        if (!base) { tr.state = "out"; tr.point = null; continue; }
+        const home = doorOf(base);
+        if (dist(u.position, home) < 16) { tr.state = "out"; tr.point = null; }
+        else if (!u.isMoving) sendUnit(u, home.x, home.z);
+      }
+    }
+  }
+
   // ── Armour ────────────────────────────────────────────────────────────────
   let armourT = 0;
   const allArmour = () => squads.reduce((n, s) => n + armourOf(s).length, 0);
@@ -914,6 +990,9 @@ export function createEnemyAI({
     if (zpuT <= 0) { zpuT = params.zpuEvery; digInAA(); digInMortar(); }
     armourT -= dt;
     if (armourT <= 0) { armourT = params.armourEvery; buyArmour(); }
+    runTrucks(dt);
+    truckT -= dt;
+    if (truckT <= 0) { truckT = params.truckEvery; buyTruck(); }
     // Each squad thinks once a tick, but on ITS OWN step of it, not all on the
     // same one: a squad's orders cost a path search per man, and MEASURED with
     // nine squads that was 3.2 ms landing in one frame every second — a hitch.

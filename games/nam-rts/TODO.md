@@ -61,9 +61,25 @@ Keep this file current: tick things off here, add new asks here.
    **It SAVES for them** (`plan()`): recruits and digging wait rather than eat
    the fund — without that it never reached 300 (MEASURED: 5 min, 7 points, 0
    tanks; after: first tank at 2 min, four by 5).
-   NEXT enemy vehicles: Molotova supply truck, ZPU on a truck, sampans, bicycles
+   [x] **Molotova supply truck** (`rtsVehicles.buildMolotova`, 2.9k tris): the
+   ZIL-157 — round barrel bonnet, torus mudguards, small cab, canvas tilt over
+   hoops with cut branches laid on it for camouflage, spare wheel, jerry cans,
+   6x6 on singles. 150 hp, speed 23, UNARMED (range 0). Their logistics made
+   into a target: the AI buys one (120) once it holds a point, runs it from the
+   HQ to the most forward held point and back, and a completed round trip pays
+   **170**. Kill it on the road and the run pays nothing — their income is now
+   something you can interdict. `nativeTeam: "enemy"` (no red wash).
+   NEXT enemy vehicles: ZPU on a truck, sampans, bicycles
 4. **The jungle: big trees + palm variety + Vietnam plants** (areca, sago,
-   pandanus, nipa, banana, flame tree) — the look you asked for
+   pandanus, nipa, banana, flame tree) — the look you asked for.
+   **RE-ASKED 2026-09-22 (evening), along with the VILLAGE and RUINS** — after
+   the Molotova and the cheap nasty kit, these three are the next block:
+   · **a village** (the modular kit under Props, incl. the big banana-leaf
+     roof) placed as a real hamlet — paths, well, fences, a clearing
+   · **ruins** — a bombed hamlet and a wrecked colonial building to fight over
+     (the colonial HQ's parts can be broken up for it)
+   · **another vegetation pass** — the plants above, plus colour variety and
+     the readability thinning
 5. **See-through for hidden units** — needed before the jungle gets denser
 6. **THE HILLTOP GPU SPOT** — must be fixed; parked by your choice for now
    (everything known is written under Performance)

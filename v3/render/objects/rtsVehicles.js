@@ -1403,6 +1403,158 @@ export function buildPT76({ seed = 76 } = {}) {
   return geo;
 }
 
+/**
+ * ONE CUT BRANCH, grown from the origin along +Z: a thin midrib with leaflets
+ * alternating down it, shortening toward the tip.
+ *
+ * It has to be a BRANCH SHAPE. The first version of the trail truck's
+ * camouflage was flat slabs of the thatch surface, and they read as sawn
+ * planks laid on the roof — texture cannot rescue a plank silhouette. Most are
+ * freshly cut, so they wear the camo sheet's greens (the only green left in a
+ * full atlas); a few were cut days ago and are brown thatch.
+ */
+function leafyBranch(R) {
+  const len = 1.0 + R() * 0.8;
+  const fresh = R() < 0.72;
+  const mat = fresh ? MAT.camo : MAT.thatch;
+  const parts = [{
+    geo: new THREE.CylinderGeometry(0.018, 0.034, len, 5).rotateX(Math.PI / 2).translate(0, 0, len / 2),
+    mat: MAT.timber, tone: 0.18 + R() * 0.16,
+  }];
+  const n = 6 + Math.floor(R() * 4);
+  for (let k = 0; k < n; k++) {
+    const t = 0.18 + (k / n) * 0.78;
+    const ll = (0.3 + R() * 0.24) * (1 - t * 0.4);
+    parts.push({
+      geo: buildBox(0.11 + R() * 0.06, 0.016, ll).translate(0, 0, ll / 2),
+      mat, tone: (fresh ? 0.46 : 0.24) + R() * 0.3,
+      pos: [0, 0.012 + R() * 0.012, t * len],
+      // Spread sideways, then a little pitch: no two leaflets end up parallel
+      // in one plane, which is also what keeps the z-fight test quiet.
+      rot: [(R() - 0.5) * 0.45, (k % 2 ? 1 : -1) * (0.8 + R() * 0.5), 0],
+    });
+  }
+  return assemble(parts);
+}
+
+// ── "Molotova" (the trail truck) ─────────────────────────────────────────────
+/**
+ * What the Front ran the Ho Chi Minh trail with — a Soviet ZIL-157, called a
+ * Molotova by everyone who shot at one. Against the M35 it is ROUND where ours
+ * is square: a long barrel bonnet with a rounded nose and mudguards, a small
+ * upright cab, and a canvas tilt over the bed instead of open bows. Three
+ * axles on single tyres.
+ *
+ * The detail that says trail: CUT BRANCHES tied over the tilt and the bonnet,
+ * the camouflage every photograph of one shows, because the thing it was
+ * hiding from was above it. 6.9 m long (real).
+ *
+ * userData: gear (the wheels, rolling), length. No turret, no weapon.
+ */
+export function buildMolotova({ seed = 157 } = {}) {
+  const R = rng(seed);
+  const NVA = 0.32, CAB = 0.34;
+  const hull = [], gear = [], spins = [];
+  const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
+  const G = (geo, pos, mat, tone, rot, spin) => { gear.push({ geo, pos, mat, tone, rot }); spins.push({ spin, n: geo.attributes.position.count }); };
+  // A ZIL's tyres are a metre across and its bogie axles 1.12 m apart: at the
+  // kit's 1.3x that is 0.48 radius and 1.3 of spacing. Drawn any closer (they
+  // were 1.0 apart) the tandem wheels pass through each other.
+  const WR = 0.48, axleY = WR;
+  const frontZ = 2.45, midZ = -1.05, rearZ = -2.35;   // three axles, singles
+
+  // ── Chassis rails and the fuel tank slung under the bed.
+  for (const sx of [-1, 1]) P(buildBox(0.16, 0.2, 6.1), [sx * 0.42, 0.62, -0.1], MAT.steel, 0.2);
+  P(buildBox(0.55, 0.42, 1.1), [-0.85, 0.66, -0.3], MAT.steel, 0.25);
+
+  // ── Bonnet: a barrel, not a box. Rounded nose, round mudguards, the grille.
+  // rotateX(-90°), not +90°: a half-shell built on the +Z side lands UNDER the
+  // truck the other way round, leaving the bonnet flat and the tilt missing.
+  P(new THREE.CylinderGeometry(0.52, 0.5, 2.0, 16, 1, false, -Math.PI / 2, Math.PI).rotateX(-Math.PI / 2), [0, 1.42, 2.3], MAT.paint, NVA);
+  P(buildBox(1.04, 0.62, 1.94), [0, 1.11, 2.29], MAT.paint, NVA * 0.98);   // ends tucked inside the barrel's
+  P(new THREE.CylinderGeometry(0.5, 0.48, 0.14, 16, 1, false, -Math.PI / 2, Math.PI).rotateX(-Math.PI / 2), [0, 1.42, 3.32], MAT.steel, 0.18);
+  for (let k = 0; k < 6; k++) P(buildBox(0.78, 0.05, 0.05), [0, 1.08 + k * 0.13, 3.36], MAT.steel, 0.12);
+  P(buildBox(1.5, 0.12, 0.26), [0, 0.86, 3.42], MAT.steel, 0.22);                       // bumper
+  for (const sx of [-1, 1]) {
+    // Mudguard: a quarter-torus over the wheel, and the headlight on top of it.
+    P(new THREE.TorusGeometry(0.62, 0.11, 6, 12, Math.PI).rotateY(Math.PI / 2), [sx * 0.92, axleY + 0.06, frontZ], MAT.paint, NVA * 0.94);
+    P(new THREE.CylinderGeometry(0.15, 0.15, 0.12, 12).rotateX(Math.PI / 2), [sx * 0.78, 1.5, 3.1], MAT.white, 0.4);
+    P(new THREE.TorusGeometry(0.18, 0.02, 4, 10), [sx * 0.78, 1.5, 3.14], MAT.steel, 0.2);
+  }
+  // ── Cab: small, upright, split windscreen, doors with their handles.
+  P(buildBox(2.1, 1.25, 1.5), [0, 1.72, 1.05], MAT.paint, CAB);
+  P(buildBox(1.96, 0.72, 0.06), [0, 2.05, 1.78], MAT.steel, 0.02, [-0.12, 0, 0]);       // windscreen glass
+  P(buildBox(0.06, 0.72, 0.06), [0, 2.05, 1.8], MAT.paint, CAB * 0.9, [-0.12, 0, 0]);   // its centre bar
+  P(buildBox(2.16, 0.12, 1.42), [0, 2.36, 1.02], MAT.paint, CAB * 1.05);                // roof
+  for (const sx of [-1, 1]) {
+    P(buildBox(0.04, 0.5, 0.62), [sx * 1.07, 1.86, 1.0], MAT.steel, 0.05);              // door window
+    P(buildBox(0.1, 0.05, 0.16), [sx * 1.12, 1.62, 0.72], MAT.steel, 0.2);              // handle
+    P(buildBox(0.1, 0.24, 0.1), [sx * 1.15, 2.3, 1.72], MAT.steel, 0.15, [0, 0, sx * 0.3]);  // mirror arm
+  }
+  // ── Bed with its canvas tilt: hoops under a sheet, the tail flap tied back.
+  const bedZ = -1.35, bedL = 3.4;
+  // Floor, side rails and tailgate: each a different width and length, so no
+  // two of them end in one plane.
+  P(buildBox(2.1, 0.16, bedL), [0, 0.96, bedZ], MAT.timber, 0.3);
+  for (const sx of [-1, 1]) P(buildBox(0.1, 0.5, bedL - 0.08), [sx * 1.06, 1.26, bedZ], MAT.timber, 0.28);
+  P(buildBox(2.04, 0.48, 0.1), [0, 1.27, bedZ - bedL / 2 + 0.04], MAT.timber, 0.26);
+  // The tilt: a rounded canvas shell over the bed.
+  P(new THREE.CylinderGeometry(1.08, 1.08, bedL - 0.1, 14, 1, false, -Math.PI / 2, Math.PI).rotateX(-Math.PI / 2), [0, 1.5, bedZ], MAT.canvas, 0.42);
+  P(buildBox(2.12, 1.06, 0.08), [0, 1.55, bedZ + bedL / 2 - 0.07], MAT.canvas, 0.4);
+  P(buildBox(1.9, 0.9, 0.06), [0, 1.52, bedZ - bedL / 2 + 0.06], MAT.canvas, 0.36, [0.12, 0, 0]);
+  for (let k = 0; k < 4; k++) {
+    P(new THREE.TorusGeometry(1.06, 0.035, 4, 12, Math.PI).rotateY(Math.PI / 2), [0, 1.5, bedZ - bedL / 2 + 0.5 + k * 0.82], MAT.steel, 0.22);
+  }
+  // Spare wheel behind the cab, jerry cans on the running board.
+  P(axleX(0.5, 0.22, 14).rotateY(Math.PI / 2), [-1.02, 1.35, 0.15], MAT.rubber, 0.45);
+  for (let k = 0; k < 2; k++) P(buildBox(0.18, 0.44, 0.3), [1.13, 1.16, 0.35 - k * 0.36], MAT.paint, 0.36 + R() * 0.2);
+  // CUT BRANCHES over the tilt and the bonnet — what a trail truck wore,
+  // because the thing it was hiding from was above it. Each one is laid ON the
+  // round surface it sits on: the hug turn about Z comes AFTER its own spin
+  // (quaternions, not an Euler triple), so a branch on the shoulder of the
+  // tilt leans with the canvas instead of hovering flat above it.
+  const up = new THREE.Vector3(0, 0, 1), sc = new THREE.Vector3(1, 1, 1);
+  for (let k = 0; k < 9; k++) {
+    const onBonnet = k > 5;
+    const rad = onBonnet ? 0.52 : 1.08, cy = onBonnet ? 1.42 : 1.5;
+    const x = (R() - 0.5) * rad * 1.55;
+    const z = onBonnet ? 1.95 + R() * 1.15 : bedZ - bedL / 2 + 0.25 + R() * (bedL - 0.5);
+    const y = cy + Math.sqrt(Math.max(0, rad * rad - x * x)) - 0.02;
+    const q = new THREE.Quaternion().setFromAxisAngle(up, -Math.asin(Math.max(-1, Math.min(1, x / rad))) * 0.85);
+    q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler((R() - 0.5) * 0.3, R() * Math.PI * 2, 0)));
+    hull.push({ geo: leafyBranch(R), matrix: new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q, sc) });
+  }
+
+  // ── Wheels: six singles, rolling.
+  for (const sx of [-1, 1]) {
+    for (const z of [frontZ, midZ, rearZ]) {
+      const w = [axleY, z, WR, 1];
+      const xc = sx * 0.95;
+      G(axleX(WR, 0.34, 18), [xc, axleY, z], MAT.rubber, 0.45, undefined, w);
+      G(axleX(0.2, 0.36, 12), [xc, axleY, z], MAT.steel, 0.25, undefined, w);
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        G(buildBox(0.37, 0.05, 0.05), [xc, axleY + Math.sin(a) * 0.12, z + Math.cos(a) * 0.12], MAT.steel, 0.3, undefined, w);
+      }
+    }
+  }
+  // The axles themselves: one each, OUTSIDE the per-side loop (inside it they
+  // were built twice, one exactly inside the other).
+  for (const z of [frontZ, midZ, rearZ]) G(axleX(0.1, 1.86, 8), [0, axleY, z], MAT.steel, 0.2, undefined, [0, 0, 0, 0]);
+
+  const geo = assemble(hull);
+  bakeContactAO(geo, { cell: 0.14, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });
+  const gearGeo = assemble(gear);
+  bakeContactAO(gearGeo, { cell: 0.1, radius: 1, strength: 0.3, groundFade: 0.2, floor: 0.55 });
+  for (const g of [geo, gearGeo]) g.scale(S, S, S);
+  packGear(gearGeo, spins);
+  geo.computeBoundingBox();
+  geo.userData.stencil = null;
+  geo.userData.gear = gearGeo;
+  geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
+  return geo;
+}
+
 // ── M35A2 "deuce-and-a-half" (engineer truck) ────────────────────────────────
 /**
  * The 2½-ton truck that carried the war. Built as the builder's truck: what

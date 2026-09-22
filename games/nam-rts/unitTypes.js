@@ -216,6 +216,34 @@ export const UNIT_TYPES = {
     barY: 4.2,
     castShadow: true,
   },
+  // Their supply truck (enemyAI.js runs it; you cannot build one). Unarmed and
+  // quick: what it carries is the war — a run that gets through pays them.
+  molotova: {
+    typeKey: "molotova",
+    name: "Molotova",
+    // logic
+    isAir: false,
+    hover: 0,
+    speed: 23,
+    radius: 4.2,
+    turnRate: 2.6,
+    maxHp: 150,
+    // combat — none; combat.js skips anything with range 0
+    range: 0,
+    damage: 0,
+    fireRate: 1,
+    canHitAir: false,
+    vision: 30,
+    // render
+    procedural: "molotova",
+    nativeTeam: "enemy",     // already in their khaki: no red wash (teams.js)
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 5.2,
+    barWidth: 6,
+    barY: 4.2,
+    castShadow: true,
+  },
   harvester: {
     typeKey: "harvester",
     name: "Harvester",

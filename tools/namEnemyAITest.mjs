@@ -286,6 +286,34 @@ console.log("mortars");
   ok("never onto its own men", shots.length === before || shots.slice(before).every((s) => Math.abs(s.z - 40) > 4), `${shots.length - before} more`);
 }
 
+console.log("supply trucks");
+{
+  const setup = (stock = 2000) => {
+    const w = world({ points: [point(0, 0, 100, "enemy")] });
+    const ai = createEnemyAI({ ...w, params: { ...ENEMY_AI, startSquads: 1, startingStock: stock, zpuMax: 0, mortarMax: 0, armourMax: 0 } });
+    run(ai, ENEMY_AI.tick);
+    return { w, ai };
+  };
+  const { w, ai } = setup();
+  run(ai, ENEMY_AI.truckEvery + ENEMY_AI.tick);
+  const trucks = w.units.list.filter((u) => u.typeKey === "molotova" && u.alive);
+  ok("holding a point, it runs a Molotova", trucks.length >= 1, `${trucks.length}`);
+  ok("…out of the HQ", trucks[0] && trucks[0].position.z > 350, trucks[0] && `z ${trucks[0].position.z.toFixed(0)}`);
+  // Drive it to the point and let it unload: the delivery pays.
+  const truck = trucks[0];
+  const before = ai.purse.stock;
+  truck.position.x = 0; truck.position.z = 100;
+  run(ai, ENEMY_AI.truckDwell + ENEMY_AI.tick);
+  ok("a run that gets through pays", ai.purse.stock > before, `${(ai.purse.stock - before).toFixed(0)} supplies`);
+  ok("then it turns for home", truck.orders.at(-1)[2] > 300, JSON.stringify(truck.orders.at(-1)));
+  // One killed on the road pays nothing and is replaced.
+  const paid = ai.purse.stock;
+  truck.alive = false;
+  run(ai, ENEMY_AI.tick * 2);
+  ok("one killed on the road pays nothing", ai.purse.stock <= paid + 1, `${(ai.purse.stock - paid).toFixed(0)}`);
+  ok("and the loss is logged", ai.log.some((l) => l.includes("destroyed")));
+}
+
 console.log("armour (and saving up for it)");
 {
   const setup = ({ held = 2, stock = 2000 } = {}) => {
