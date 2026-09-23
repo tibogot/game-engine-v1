@@ -109,6 +109,7 @@ import { createGrassTrails } from "./grassTrails.js";
 import { createCover } from "./cover.js";
 import { createPlacedObjects } from "./placedObjects.js";
 import { placeCampPerimeter } from "./campPerimeter.js";
+import { installBuildingAprons } from "./buildingAprons.js";
 import { placeCampLayout } from "./campLayout.js";
 import { gradeBridgeLandings } from "./bridgeLandings.js";
 import { createAbilities } from "./abilities.js";
@@ -236,6 +237,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const worldState = { name: "procedural default" };
   const boot = await levels.loadBoot();
   worldState.name = boot.name;
+
+  // An apron under every building: from here on, every pad levelled through
+  // app.flattenRect (HQ, masts, gate, placed objects, player builds) gets one.
+  // AFTER the level load, which replaces the decal list wholesale.
+  installBuildingAprons(app);
 
   // Post-FX: the GAME owns its look. postFx.enabled defaults to false in the
   // engine and is NOT stored in the .v3proj, so without this the game gets no

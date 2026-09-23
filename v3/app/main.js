@@ -11597,6 +11597,15 @@ export async function startV3App(opts = {}) {
     },
 
     /**
+     * The projected-decal system, for games that stamp ground wear at runtime
+     * (an apron under each building as its pad is levelled, say). `add(params)`
+     * returns the decal; `remove(id)`; `textures.slots` names the art. Decals a
+     * game adds are not saved — the level's own come from the .v3proj — and,
+     * being ground-only here, each is glued to the live ground in its shader.
+     */
+    decals: decalSystem,
+
+    /**
      * Level a RECTANGLE (centre wx,wz, half-extents in metres, turned by rotY) to
      * targetY — a building pad the shape of the building. One flatten stamp only
      * levels fully out to ~60% of its radius (falloff^3 · strength · 20 ≥ 1 at

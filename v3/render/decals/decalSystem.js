@@ -57,7 +57,7 @@ import * as THREE from "three";
 import {
   Fn, Discard, abs, attribute, cameraFar, cameraNear, cameraWorldMatrix, cross, dFdx, dFdy,
   dot, float, max, normalize, perspectiveDepthToViewZ, positionLocal, positionView, screenUV,
-  select, smoothstep, texture, vec2, vec3, vec4, cameraViewMatrix, int,
+  select, smoothstep, texture, vec2, vec3, vec4, cameraViewMatrix, int, varying,
 } from "three/tsl";
 import { DecalTextures, DEFAULT_DECAL_SLOTS } from "./decalTextures.js";
 import { sceneDepthGrab } from "../water/lakeMaterial.js";
@@ -306,9 +306,28 @@ export class DecalSystem {
     mat.fog = true;
 
     const m0 = attribute("aM0", "vec4"), m1 = attribute("aM1", "vec4"), m2 = attribute("aM2", "vec4");
+
+    // GLUED TO THE LIVE GROUND. A box only paints where the ground passes
+    // through it, and its height was fixed when it was placed — so any later
+    // change to the terrain under it (a game levelling a camp at boot, a
+    // building pad dug mid-match, a sculpt in the editor) left it floating or
+    // buried, and it silently stopped drawing. nam-rts lost its whole base's
+    // wear that way: ruts at y 18.4 over ground levelled to 12.0.
+    //
+    // So, when decals are ground-only, each box is shifted vertically by the
+    // ground's height under its CENTRE minus its own: sampled in the vertex
+    // stage (8 taps a box), passed to the fragment stage, and applied to the
+    // surface point before it goes into box space, so both agree. A decal that
+    // was on the ground is unchanged (shift 0); one the ground moved under
+    // follows it. The saved `py` is never touched.
+    const groundShiftV = this._groundHeight
+      ? this._groundHeight(m0.w, m2.w).sub(m1.w)
+      : float(0);
+    const groundShift = this._groundHeight ? varying(groundShiftV, "decalGroundShift") : float(0);
+
     mat.positionNode = Fn(() => {
       const p = vec4(positionLocal, 1);
-      return vec3(dot(m0, p), dot(m1, p), dot(m2, p));
+      return vec3(dot(m0, p), dot(m1, p).add(groundShiftV), dot(m2, p));
     })();
 
     this._albedoNode = texture(this.textures.albedo);
@@ -325,7 +344,8 @@ export class DecalSystem {
     const i0 = attribute("aI0", "vec4"), i1 = attribute("aI1", "vec4"), i2 = attribute("aI2", "vec4");
     const P = attribute("aP", "vec4"), C = attribute("aC", "vec4"), E = attribute("aE", "vec4");
     const local = Fn(() => {
-      const w = vec4(surfaceWorld, 1);
+      // Into the box as it is DRAWN: shifted onto the ground (see above).
+      const w = vec4(surfaceWorld.sub(vec3(0, groundShift, 0)), 1);
       return vec3(dot(i0, w), dot(i1, w), dot(i2, w));
     })().toVar("decalLocal");
 
@@ -408,7 +428,9 @@ export class DecalSystem {
     const vis = [];
     for (const d of this.decals) {
       _sphere.center.set(d.px, d.py, d.pz);
-      _sphere.radius = 0.5 * Math.hypot(d.sx, d.sy, d.sz);
+      // + slack for the GPU's ground glue: the box is drawn where the ground
+      // is now, which can be metres off the saved py (see _buildMaterial).
+      _sphere.radius = 0.5 * Math.hypot(d.sx, d.sy, d.sz) + (this._groundHeight ? 8 : 0);
       if (_frustum.intersectsSphere(_sphere)) vis.push(d);
     }
     vis.sort((a, b) => a.priority - b.priority || a.id - b.id);

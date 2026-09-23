@@ -975,6 +975,53 @@ is not lost while Kurtz is being built.
       paths, not base64, so the sets leave the .v3proj instead of bloating it.
       Finer tiling can expose repetition — macro is already on (0.35 @ 80 m);
       the hex-tiling line below is the real fix if it bites.
+- [x] **PHOTOGRAPHIC DECALS + decals glued to the live ground** (your ask
+      2026-09-24: "check the decals, make better ones", toward CoH).
+      TWO problems, found in the game with fog off:
+      1. **Most decals at the base NEVER DREW.** Toggling all 510 off gave an
+         identical frame. The camp levels its ground at boot (flattenRect /
+         flattenArea / berms / ramps, and every building placed mid-match),
+         AFTER the decals were placed — a rut at y 18.4 over ground now at
+         12.0 floats outside its box and paints nothing. 136 of them missed.
+         FIX (engine, decalSystem.js): with `groundHeight`, each box is shifted
+         in the VERTEX stage onto the live ground under its centre, the shift
+         passed to the fragment stage. Follows any later edit; `py` untouched.
+      2. **The art was synthetic.** The shader REPLACES colour + normal, so a
+         smooth tinted patch deleted the photo ground and pasted a sticker,
+         with no normal map to catch light. NEW `decalPhotoArt.js`: every
+         decal cut from a Poly Haven photo sampled IN METRES (same scale as
+         the ground), with a height field in metres -> real normals: 5 cm
+         ruts with berms + tread, grousers at the true 16 cm pitch, clods,
+         wet mud, puddles. `tools/namPhotoDecals.mjs` writes them to
+         public/textures/decals/nam/ and re-lays the map: 25 m strips ->
+         10 m chaining segments (the square art had been stretched 4x),
+         mud/puddles squared, variants (ruts x3, tracks x2, mud x2).
+         510 -> 1085 decals, 10 -> 14 slots, level 10.7 -> 9.6 MB.
+      Tuned by eye: mud roughness 0.4 (0.3 glinted white like snow, 0.55
+      vanished); puddles/mud from the ROAD's red soil (grey mud photo made
+      blue-grey rings); water light ochre (dark read as tar holes); aprons
+      laterite, not grey gravel (pale foreign patches).
+      OPEN, **your look**: the mud's sun-side glint.
+      **RUTS THINNED (your call, same day):** a straight 10 m decal cannot
+      follow a curving path (median strip bend 30°, p75 45°) and ruts along
+      every metre read as a stencil. `tools/namThinRuts.mjs` keeps a short
+      10-20 m patch only on STRAIGHT stretches (bend < 8°), >= 70 m apart:
+      843 segments -> 24 in 16 patches. Curve-following ruts would need a
+      spline strip mesh — not worth it (agreed).
+- [x] **APRONS UNDER EVERY BUILDING** — DONE 2026-09-24.
+      `games/nam-rts/buildingAprons.js` wraps `app.flattenRect`, the one call
+      every pad goes through (HQ, masts, gate, placed objects, player builds
+      mid-match), and lays a laterite apron turned with the footprint, 2.2 m
+      past it; big footprints tiled with <= 16 m boxes so the grain does not
+      stretch; grass/ferns cleared from the apron's solid core only (the zone
+      round a mast keeps its grass). 133 at boot. Engine: `app.decals`
+      exposes the decal system to games. The 11 old grid aprons are gone.
+      Verified mid-match: flattenRect at a new spot -> apron + cleared pad.
+      NEXT, if wanted: swept-earth apron for the village huts (same hook,
+      different art).
+- [ ] **CPU 36 ms spike after a few minutes of a match** — seen 2026-09-24 in
+      the overlay (27 FPS, CPU 36 ms; 7-10 ms at boot) with the enemy AI
+      running. Not investigated.
 - [ ] Texture repetition (hex tiling discussed; stochastic rejected — it swam)
 - [ ] Napalm flame cores clip to white — per-fire intensity (taste)
 - [ ] Octahedral impostors for the RTS camera — asked, never answered properly
