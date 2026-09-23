@@ -57,7 +57,7 @@ const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a
 const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
 const UP = [0, 1, 0];
 
-const STEM = 1, TRUNK = 3, FROND = 5;
+const STEM = 1, HEAD = 2, TRUNK = 3, FROND = 5;
 
 /** A curve integrated from an angle-from-vertical function. */
 function integrate(samples, len, thetaAt) {
@@ -144,8 +144,18 @@ export function buildPalm(type, ctx) {
         const t = q / segs;
         const { p, fwd } = at(t);
         const axis = across ? side : norm(cross(fwd, side));
-        const n = norm(cross(fwd, axis));
-        for (const s of [-1, 1]) push(add(p, axis, s * radiusAt(t)), n, s * 0.5 + 0.5, t, [TRUNK, t, 0.15, 1]);
+        const n = norm(add(cross(fwd, axis), UP, 0.9));
+        // PART 2, not the trunk's part 3, and lifted toward UP.
+        //
+        // Part 3 shades with its normal multiplied by `faceDirection`, so on
+        // a DOUBLE-SIDED quad the back face gets its normal FLIPPED — and a
+        // crossed pair always shows one back face. The trunk then goes black
+        // at the coarse level while the round trunk it replaces is brown, and
+        // the switch between the two reads as the trunk turning off. Found on
+        // the fan palm, where it was obvious; it was latent here the whole
+        // time. Part 2 carries the same `colorHead` but is shaded like a soft
+        // body, with its normal turned toward the viewer instead of flipped.
+        for (const s of [-1, 1]) push(add(p, axis, s * radiusAt(t) * 1.5), n, s * 0.5 + 0.5, t, [HEAD, t, 0.15, 0.45]);
       }
       for (let q = 0; q < segs; q++) {
         const i0 = base + q * 2;

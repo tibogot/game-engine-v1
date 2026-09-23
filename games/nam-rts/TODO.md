@@ -295,6 +295,140 @@ Vietnam, like Apocalypse Now.
 - [ ] **Bamboo prisoner cages** (your ask): the tiger cages — low bamboo cages
       on the mud, one with a man in it, the POW pit with a grating over it.
       Could be a real objective: reach it and free the prisoners
+- [x] **KHMER GUARDIAN LIONS — DROPPED 2026-09-23, you are finding a GLB.**
+      A procedural first version exists in the tree but is NOT committed
+      (`buildGuardianLion` in rtsTemple.js, `LION_OBJECT` in the objects lab).
+      It stands, sits correctly and has the crest and scale bib; it is a lumpy
+      mound close up and two rebuilds moved it very little.
+      WHY, because it tells us where the line is: a singha is a FIGURATIVE
+      SCULPTURE, an organic body with a carved face. Everything this kit does
+      well is a repeated simple form whose RULE IS ITS SHAPE — mouldings swept
+      round a wall, leaf cards on a stalk, wheels and boxes. Those converge
+      fast. A sculpted animal has no such rule, so primitives get to
+      "recognisable lump" quickly and then crawl. The palms were not luck.
+      A GLB is the right answer for hero sculpture. Say the word if the
+      procedural one should be deleted rather than left sitting there. The *singha* that sit in
+      pairs at every Khmer stair foot and gate — seated on the haunches, front
+      legs straight, a snarling mask of a head, a flame-like mane carved in
+      rows, and a plinth of their own. They are what tells the player this is a
+      THRESHOLD, and Kurtz's approach is nothing but thresholds. Pair them at
+      the causeway head, at the gopura and at the courtyard stair.
+      Buildable: the body is a shaped solid like the Bayon heads, the mane a
+      ring of carved lobes, and both sit on the sandstone/laterite atlas rows
+      that already exist. Judge them the way the palms were judged — reference
+      photographs and a six-angle contact sheet.
+- [ ] **Reference you gave for the temple pack** (2026-09-23):
+      https://sketchfab.com/3d-models/ruin-ancient-temple-khmer-architecture-pack-3082fb3a9937454f89493f1c532b400e
+      INSPIRATION ONLY — it is someone else's asset and nothing from it can be
+      used. What it is good for is the KIT LIST: which pieces a ruin needs to
+      feel complete, and how broken each one should be.
+- [ ] **BLOOD** (your ask 2026-09-23), and it is two separate jobs:
+      1. **COMBAT BLOOD — units.** A hit sprays, a death leaves a pool, and the
+         pool stays for a while and dries. This is the decal system
+         (`decals.js`, projected boxes, 1 draw) plus a hook in combat.js where
+         damage and death already fire. Cheap and it does a lot: an RTS fight
+         with no mark left on the ground reads as bloodless in both senses.
+         Watch the cap — pools need a budget and a fade, or a long fight
+         carpets the map (the same lesson as fires and smoke).
+      2. **KURTZ'S PLACE — blood as DRESSING, not as an event.** Old, dark,
+         dried, and in the places that tell you what happens here: down the
+         ghat steps, over the altar stone, round the pike feet, handprints on
+         the gopura jambs, a stain at the foot of the tower. It is not the
+         bright red of a fresh hit — it is near-black brown, and it belongs in
+         the STONE texture and in static decals rather than in the combat
+         system, so it costs nothing per frame.
+- [ ] **WHAT ELSE WOULD MAKE KURTZ'S PLACE** (my suggestions, 2026-09-23, none
+      agreed yet — all chosen to read at RTS zoom and to cost almost nothing):
+      · **THE CROWD.** The strongest single image in the film is the people
+        standing motionless, watching the boat come in. Static figures lining
+        the causeway and standing on the ghat steps — the soldier mesh already
+        exists; these are passive, unarmed, and they do not move. Nothing else
+        on the list would do half as much.
+      · **BIRDS OVERHEAD.** The bird system is already built. A permanent slow
+        circle of them over the compound, and only there, is free dread.
+      · **SMOKE.** Not one column — a dozen thin ones from small fires, so the
+        whole place smokes. The smoke system is measured at 0.18 ms a column,
+        so keep the count honest.
+      · **A SKULL MIDDEN** at the tower foot: one merged pile, not individual
+        props. Reads as a mass of pale shapes, which is the right register.
+      · **WHITE MARKINGS on the stone** — handprints, ash bars, painted eyes.
+        A tribe's marks over eight-hundred-year-old carving is the whole idea
+        of the place in one detail, and it is a texture job.
+      · **TORCHES / FIRELIGHT at dusk**, tied to the time of day: the compound
+        is the only place on the map with light in it at night.
+      · **ASH AND SCORCH** on the ground between the fires, so the bare worn
+        courtyard is not just dirt.
+- [x] **SITING DECIDED (you, 2026-09-23): the temple STAYS at (340, 214)** and
+      the river comes to it when you do the river branches. What makes it
+      Apocalypse Now is the STAIRS GOING DOWN INTO THE WATER, so those are
+      built now and simply go DOWN — a flight built to meet a river that is
+      already there has to be rebuilt every time the river moves.
+- [x] **`buildStairFlight` — a KIT primitive** (rtsParts.js), your point that a
+      stair unlocks other shapes. It is the most reusable form there is: a
+      temple landing, a terrace, the steps up to the résidence, a bunker
+      entrance, a stilt house, a well. Riser and going set the character (a
+      0.32 x 0.66 temple flight and a 0.18 x 0.28 domestic one are
+      recognisably different animals), `jitter` and `wear` set how long it has
+      stood, `matOf` decides what it is made of. It descends along +Z from its
+      top tread at y = 0, because you always know where the doorway is and the
+      bottom lands wherever the ground happens to be.
+- [~] **THE DRESSING — STARTED, NOT RIGHT YET.** `buildRiverStair` and
+      `buildHeadPikes` are in rtsTemple.js and placed in temple.js. What is
+      wrong, from looking at it in the game:
+      · THE STEPS STILL READ FLAT. A descending stair cannot take a levelling
+        `pad` — a pad flattens the ground to ONE height and buries every step,
+        which is exactly how the first attempt came out. It is now `pad: false`
+        with the bank cut by `app.gradeRamp` from the stair head down a full
+        flight — but the cut is not landing on the flight's axis, so the fall
+        is beside the steps rather than under them. Check the local -> world
+        transform on the ramp ends.
+      · THE PIKES READ AS BARE POLES. They are in two tight rows flanking the
+        causeway now rather than scattered, which is better, but the skull is
+        too small to register at RTS zoom and the pole too clean. Either the
+        head grows and the pole shortens, or they are not worth having.
+      LEFT after that: the tribe's village built INTO the ruins (thatch
+      lean-tos against the stone, cooking fires), the worn bare courtyard,
+      saplings and leaf litter, standing stones on the paths in.
+- [x] **TEMPLE STONE PASS** (2026-09-23), after you put ours beside a
+      reference pack and asked how confident I was of beating it. Compared the
+      two directly instead of guessing, and the gap was four things:
+
+      1. **COURSING — the big one, and ours had NONE.** Every surface in the
+         reference is cut into courses by dark joint lines; ours was one
+         continuous streaky surface. Joints give a wall scale, direction and
+         somewhere for shadow to sit, and without them a temple reads as a
+         carved lump rather than as something BUILT.
+         Fixed for nothing: these textures are drawn in canvas and a box's UVs
+         in this kit are METRES / 2, so one atlas cell is exactly 2 m of wall.
+         `coursing()` in rtsTextures.js puts 5 courses (40 cm) and 3 blocks
+         (67 cm) in a cell — both INTEGERS so it still tiles — in running bond,
+         with a per-block tone shift and a lit arris on each block's top edge.
+         Applied to sandstone and laterite.
+      2. **COLOUR.** Ours rendered cold grey-green under this map's sky fill.
+         The sandstone is warmer now, and `stoneOf`'s laterite share went
+         0.05 -> 0.2: a Khmer temple is a laterite CORE with a sandstone
+         facing, and eight centuries takes most of the facing off. The red in
+         the reference is laterite, and now it is in ours.
+      3. **MOULDING DEPTH.** The reference's plinths and cornices carry five
+         to eight small steps each, every one throwing its own hard shadow
+         line. Ours had four shallow ones. PLINTH and CORNICE are rebuilt with
+         a projecting torus, a hollow above it and a deep overhang; `banded`'s
+         course step went 3.5 cm -> 5.5 cm so it reads at RTS distance. A ring
+         of triangles per step on a handful of pieces — cheap in a way that
+         texture detail on a 4K map is not.
+      4. **SURFACE MICRO-RELIEF — NOT CLOSED, and honestly cannot be with the
+         current material.** The reference is a 4K normal + roughness + AO map
+         per piece; our object material is flat colour per atlas id with vertex
+         tone and baked contact AO. Matching it at close range needs a NORMAL
+         MAP path on rtsObjectMaterial. That is a real, scoped engine job and
+         it is worth doing if the temple is ever a hero location — but at RTS
+         zoom it is the coursing and the value range that read, not the
+         micro-relief.
+
+      Worth keeping in mind on budget: that pack is 10-20k triangles PER TOWER
+      and 257k for its preview scene. Ours has to run with a full RTS on top,
+      so richness has to come from texture, not geometry — which is why 1 and
+      2 were the right first moves.
 - [~] **KURTZ COUNTRY — the temple** STARTED 2026-09-23
       (`v3/render/objects/rtsTemple.js` + `games/nam-rts/temple.js`, sited in
       `pointSites.TEMPLE_SITES` at (340, 214), `?temple=0` boots without it).
@@ -616,6 +750,56 @@ Vietnam, like Apocalypse Now.
       brown-tan and I was about to make it green. The plantation photographs
       show it IS brown — dried sheaths — over the lower half. Checked before
       changing it.
+## TREES AND VEGETATION — what is still open (rolled up 2026-09-23)
+
+Everything below is also filed in its own place; this is the short list so it
+is not lost while Kurtz is being built.
+
+- [ ] **The jungle tree is committed but NOT good.** Waiting on your reference
+      picture. The roots read as cardboard fins and the crown is a blob.
+- [x] **The faceDirection winding bug — FIXED in the coconut palm and the
+      areca** (2026-09-24). Same fault as the fan palm's black coarse trunk:
+      part 3 shades with its normal multiplied by `faceDirection`, so on a
+      DOUBLE-SIDED quad the back face flips, and a crossed pair always shows
+      one. Both far trunks are part 2 now (same `colorHead`, shaded like a soft
+      body with its normal turned toward the viewer) and a little wider, since
+      a crossed pair only shows its full width square on.
+- [ ] **Bamboo is 9 m** where real giant bamboo is 20-30, the same error the
+      palm had. Your call, as the palm was.
+- [ ] **Re-shoot the whole-map lineup** (`window.__sheet` in the lab) now that
+      the bush, ground cover and banana have changed, to see what the jungle
+      floor actually became.
+- [ ] Fan palm: the diamond leaf-base boot pattern on the trunk, and a
+      dry-season colour.
+- [ ] Areca: keep as a village plant or drop it — your call.
+- [ ] Colour variety across the foliage (flame tree, a few flowering trees).
+- [ ] Readability thinning where plants hide units and combat.
+- [x] **Plant sizes written into nam-valley.v3proj** (2026-09-24,
+      `tools/namPlantScale.mjs`): palm 11 -> 17 m with its proportions
+      (stemWidth 1 -> 0.7, fronds 50% -> 32% of trunk, 36 scar rings), banana
+      3.5 -> 5 m with leaves at 92% of the stem and 11 of them.
+      THE RULE THIS IS A REMINDER OF: the presets in foliageScatterState.js are
+      only DEFAULTS FOR A NEW PLANT. A saved project carries its own copy of
+      every number, so nothing tuned in the engine is visible in the game until
+      a tool writes it into the map. Everything done to the palm and the banana
+      on 2026-09-23 was invisible for a day because of this.
+- [x] **SUSUKI IS OFF THE MAP, FAN PALMS ARE ON IT** (your call 2026-09-24,
+      `tools/namFanPalms.mjs`). Susuki is *Miscanthus sinensis*, the silver
+      plume grass of Japanese autumn hillsides — it was here only because it
+      was the first plant the tall-plant field ever held, and it does not read
+      Vietnam. Dropping it freed the slot the fan palm needed.
+      TWO THINGS HAD TO CHANGE TOGETHER, which is why it is one script: the
+      SPECIES in slot 0 (the map carries its own copy of every number) and the
+      PAINT in channel 0. Susuki had been painted as a grass would be; left
+      alone, every one of those texels would have become a 16 m tree. The
+      channel is cleared and repainted for a big tree: open lowland floor only,
+      0.12 coverage, gathered into stands by a broad noise octave with the
+      lower half of the range rejected so there is open ground between them.
+      As it happens susuki was never painted here at all (0.0%), so nothing was
+      lost. Fan palms now cover 4.7% of the map.
+      **YOUR LOOK CHECK**: the first stand reads dense — closer to a plantation
+      than to scattered palms. `TARGET` in the script is the knob.
+
 - [ ] **TRAVELLER'S PALM / Ravenala** — your reference photos, 2026-09-23 (two
       of the three you sent are this plant). THE flat-fan silhouette, and
       nothing on the map has anything like it:
