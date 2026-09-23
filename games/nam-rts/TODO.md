@@ -506,9 +506,24 @@ Vietnam, like Apocalypse Now.
 ## Map & look
 
 - [x] **Birds** — transit + flushed by explosions (see Now)
-- [ ] **Grass coverage at zoom-out**: fade uses camera distance → zoom-driven
-      tile/fade/width at a constant blade count (proposal). Cheap knobs first:
-      Min width (px) ↑, Clumping ↑, Variation ↓, root shade
+- [x] **Grass coverage** — DONE 2026-09-23, and the old proposal turned out to
+      be aimed at the wrong thing. Marking the blades magenta showed the FAR
+      HAND-OFF already covers zoom-out: past the blade fade the terrain is
+      painted with the blades' own average colour, so there is no bald ring and
+      no zoom-driven tile/fade/width is needed. What WAS missing was paint.
+      MEASURED in the running game: density covered 60.3% of the map at mean
+      0.43, and 27% of the whole map was gentle, walkable, dry ground with no
+      grass at all — of which **54.5% was the Jungle floor layer** (the gap),
+      31.9% beach sand and 10.1% dirt road (both correctly bare).
+      `tools/namGrassPaint.mjs` paints the jungle/lowland floor only, with two
+      octaves of noise so it reads as undergrowth and not a lawn: coverage
+      **61% → 79%**. It needs no slope logic (the grass system rejects steep
+      ground at runtime) and no knowledge of the camp/hamlet/temple (they clear
+      their own ground at boot).
+      COST, measured with `__V3_DEBUG.gpuAB`, the whole grass system on vs off:
+      **0.67 vs 0.60 ms** at play zoom, **0.81 vs 0.76** zoomed out. The extra
+      coverage is free; grass is not what this frame is spent on.
+      LEFT: grass trails under units (`grassPush` exists, not wired)
 - [ ] **Foliage brightness** — **you**, taste call (knobs listed in the transcript)
 - [ ] Rice paddies (expensive: water over big screen areas)
 - [ ] A village as an *arrangement* (paths, well, fences, clearing)
