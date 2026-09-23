@@ -382,6 +382,29 @@
       frame("close");   // boot where you can SEE what you are tuning; 2 and 3 judge it
 
       let last = performance.now(), frames = 0;
+      // A console handle, as the vegetation lab has. Driving this lab through
+      // synthetic DOM events on lil-gui does not work, and every look at a new
+      // piece otherwise costs a reload.
+      window.__objlab = {
+        P, camera, controls, frame, rebuild, rebuildShapeGui, CATALOG,
+        get params() { return params; },
+        /** Switch object, reset its params, rebuild. */
+        pick(id, tweak) {
+          P.object = id;
+          params = structuredClone(CATALOG[id].defaults);
+          if (tweak) Object.assign(params, tweak);
+          rebuildShapeGui();
+          rebuild();
+        },
+        /** Look at the piece from a bearing and pitch, at a distance in metres. */
+        view(distM, bearingDeg = 25, pitchDeg = 16, targetY = 1) {
+          const a = (bearingDeg * Math.PI) / 180, e = (pitchDeg * Math.PI) / 180;
+          camera.position.set(Math.sin(a) * distM * Math.cos(e), distM * Math.sin(e) + targetY, Math.cos(a) * distM * Math.cos(e));
+          controls.target.set(0, targetY, 0);
+          controls.update();
+        },
+      };
+
       renderer.setAnimationLoop(() => {
         try {
           controls.update();

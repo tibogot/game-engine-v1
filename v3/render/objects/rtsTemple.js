@@ -29,7 +29,7 @@
  * material, origin at the ground centre on y = 0, `userData.footprint`.
  */
 import * as THREE from "three";
-import { MAT, assemble, bakeContactAO, buildBox, rng } from "./rtsParts.js";
+import { MAT, assemble, bakeContactAO, buildBox, buildStairFlight, rng } from "./rtsParts.js";
 
 /**
  * Temple stone is drawn at the kit's 1.3 like everything man-made, and the
@@ -39,7 +39,10 @@ import { MAT, assemble, bakeContactAO, buildBox, rng } from "./rtsParts.js";
 const B = 1.6;
 
 /** Sandstone unless told otherwise; moss and laterite are accents, not a mix. */
-function stoneOf(r, { moss = 0.09, laterite = 0.05 } = {}) {
+// Laterite 0.05 -> 0.2: a Khmer temple is a laterite CORE with a sandstone
+// facing, and eight hundred years takes most of the facing off. The red is
+// what the reference has and ours did not.
+function stoneOf(r, { moss = 0.09, laterite = 0.2 } = {}) {
   const k = r();
   if (k < moss) return { mat: MAT.moss, tone: 0.34 + r() * 0.3 };
   if (k < moss + laterite) return { mat: MAT.laterite, tone: 0.38 + r() * 0.24 };
@@ -269,16 +272,29 @@ function mouldedRun(profile, { length, thick, edge = 6 } = {}) {
  * separate blocks bought nothing but triangles), `cornice` the flared crown
  * that throws the deep shadow line under a tier.
  */
+// DEEPER AND WITH MORE STEPS, 2026-09-23. Beside a reference pack ours read
+// flat: its plinths and cornices carry five to eight small steps each and
+// every one of them throws its own hard shadow line, which is most of what
+// makes the stone look CARVED rather than cast. Ours had four shallow ones.
+// The steps cost a ring of triangles apiece on a handful of pieces — cheap in
+// a way that texture detail on a 4K map is not.
 const PLINTH = (h) => [
-  [0.00, 0], [0.30, 0.02], [0.30, h * 0.34], [0.20, h * 0.46], [0.22, h * 0.62],
-  [0.30, h * 0.74], [0.28, h * 0.88], [0.10, h], [0.10, h * 1.02],
+  [0.00, 0], [0.34, 0.015], [0.34, h * 0.16],
+  [0.40, h * 0.20], [0.40, h * 0.30],          // the projecting torus
+  [0.26, h * 0.40], [0.29, h * 0.47],          // the hollow above it
+  [0.24, h * 0.56], [0.33, h * 0.64],
+  [0.36, h * 0.72], [0.30, h * 0.80],
+  [0.32, h * 0.86], [0.12, h * 0.97], [0.12, h * 1.02],
 ];
 const CORNICE = (h) => [
-  [0.02, 0], [0.16, h * 0.22], [0.30, h * 0.5], [0.33, h * 0.66],
-  [0.24, h * 0.82], [0.06, h * 0.96], [0.0, h],
+  [0.02, 0], [0.10, h * 0.10], [0.10, h * 0.18],
+  [0.22, h * 0.30], [0.22, h * 0.38],
+  [0.36, h * 0.52], [0.40, h * 0.62],          // the big overhang
+  [0.36, h * 0.70], [0.24, h * 0.80],
+  [0.26, h * 0.86], [0.10, h * 0.95], [0.0, h],
 ];
 /** A banded wall: a shallow step every `course` metres, and a slight batter. */
-function banded(height, { course = 0.62, batter = 0.05, step = 0.035 } = {}) {
+function banded(height, { course = 0.62, batter = 0.05, step = 0.055 } = {}) {
   const out = [[0, 0]];
   const rows = Math.max(1, Math.round(height / course));
   const ch = height / rows;
@@ -843,5 +859,123 @@ export function buildTempleRubble({ seed = 13, blocks = 12 } = {}) {
   bakeContactAO(geo, { cell: 0.22, radius: 2, strength: 0.45, groundFade: 0.35, floor: 0.45 });
   geo.userData.footprint = { cx: 0, cz: 0, hx: 2 * B, hz: 2 * B };
   geo.userData.height = 1.2 * B;
+  return geo;
+}
+
+/**
+ * THE LANDING STAIRS — the *ghat* at the end of the causeway, and the shot
+ * this whole compound exists for.
+ *
+ * Apocalypse Now's temple is not a temple in a clearing; it is a temple you
+ * arrive at BY WATER, and what you see from the boat is a broad flight of
+ * stone steps coming straight down out of the jungle into the river. The
+ * stairs are the image. Everything else is behind them.
+ *
+ * Built before the river exists, and deliberately so: the flight simply goes
+ * DOWN, to a fixed depth below the compound's ground, so a river routed here
+ * later can sit anywhere in the last stretch of that drop and still lap real
+ * stone. A stair built to meet a river that is already there has to be rebuilt
+ * every time the river moves.
+ *
+ * The steps themselves are `buildStairFlight` from the parts kit — a stair is
+ * the most reusable shape there is, and this one is only a temple stair
+ * because of its riser, its going and what it is made of.
+ */
+export function buildRiverStair({
+  seed = 61, width = 11, steps = 14, rise = 0.32, tread = 0.66,
+} = {}) {
+  const r = rng(seed);
+  const parts = [];
+  const W = width * 0.5;
+
+  // Mossier the further down it goes: the bottom of a ghat is under water half
+  // the year, and that is where the green is.
+  parts.push({
+    geo: buildStairFlight({
+      width, steps, rise, tread, wear: 0.11, parapet: 0.62, jitter: 1, seed,
+      matOf: (i, rr) => stoneOf(rr, { moss: 0.1 + (i / steps) * 0.55, laterite: 0.14 }),
+    }),
+    pos: [0, 0, 0], rot: [0, 0, 0],
+  });
+
+  // A post at the head of each parapet, where the flight meets the causeway.
+  for (const s of [-1, 1]) {
+    const pst = stoneOf(r, { moss: 0.12, laterite: 0.1 });
+    parts.push({
+      geo: stoneBlock(0.8, 1.5, 0.8, seed + 300 + (s > 0 ? 1 : 0), { chip: 0.2, wear: 0.05 }),
+      pos: [s * (W + 0.3), 0.75, -0.5], rot: [0, (r() - 0.5) * 0.04, 0],
+      mat: pst.mat, tone: pst.tone,
+    });
+    parts.push({
+      geo: new THREE.SphereGeometry(0.3, 8, 6).scale(1, 0.8, 1),
+      pos: [s * (W + 0.3), 1.62, -0.5], rot: [0, 0, 0],
+      mat: MAT.sandstone, tone: 0.46 + r() * 0.16,
+    });
+  }
+
+  // The apron at the top: the causeway's last stone, tying the flight in.
+  const ap = stoneOf(r, { moss: 0.08, laterite: 0.14 });
+  parts.push({
+    geo: stoneBlock(width + 1.6, 0.42, 2.4, seed + 400, { chip: 0.14, wear: 0.05 }),
+    pos: [0, -0.21, -1.6], rot: [0, 0, 0], mat: ap.mat, tone: ap.tone,
+  });
+
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.3, radius: 2, strength: 0.4, groundFade: 0.4, floor: 0.5 });
+  const len = steps * tread;
+  geo.userData.footprint = { cx: 0, cz: len * 0.5, hx: W + 0.9, hz: len * 0.5 + 1.6 };
+  geo.userData.height = 1.6;
+  geo.userData.drop = steps * rise;
+  return geo;
+}
+
+/**
+ * HEADS ON PIKES along the approach. The dressing that tells you whose ground
+ * this is before you meet anyone on it.
+ *
+ * At the camera this game is played from these are SILHOUETTES — a line of
+ * uprights with something round on top, seen against the causeway. That is the
+ * right register for it: dread, not gore. So the skull is four shapes and no
+ * detail, and the work goes into the RHYTHM of the line instead — uneven
+ * spacing, uneven heights, every pike leaning its own way. A row at one height
+ * reads as a fence.
+ */
+export function buildHeadPikes({ seed = 71, count = 5, spacing = 2.4, height = 2.4 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  for (let i = 0; i < count; i++) {
+    const h = height * (0.78 + r() * 0.42);
+    const x = (i - (count - 1) / 2) * spacing * (0.8 + r() * 0.45);
+    const z = (r() - 0.5) * 0.7;
+    const lean = (r() - 0.5) * 0.16, leanZ = (r() - 0.5) * 0.14;
+    parts.push({
+      geo: new THREE.CylinderGeometry(0.035, 0.055, h, 5),
+      pos: [x + Math.sin(lean) * h * 0.5, h * 0.5, z + Math.sin(leanZ) * h * 0.5],
+      rot: [leanZ, r() * 3, lean], mat: MAT.bamboo, tone: 0.3 + r() * 0.34,
+    });
+    const hx = x + Math.sin(lean) * h, hz = z + Math.sin(leanZ) * h;
+    const tone = 0.62 + r() * 0.2;
+    parts.push({
+      geo: new THREE.SphereGeometry(0.115, 7, 6).scale(1, 1.1, 0.92),
+      pos: [hx, h + 0.08, hz], rot: [(r() - 0.5) * 0.5, r() * 3, (r() - 0.5) * 0.4],
+      mat: MAT.sandstone, tone,
+    });
+    parts.push({
+      geo: buildBox(0.13, 0.07, 0.1),
+      pos: [hx, h - 0.02, hz - 0.03], rot: [0.2, 0, 0], mat: MAT.sandstone, tone: tone - 0.06,
+    });
+    for (const s of [-1, 1]) {
+      parts.push({
+        geo: new THREE.SphereGeometry(0.03, 5, 4),
+        pos: [hx + s * 0.045, h + 0.1, hz - 0.085], rot: [0, 0, 0],
+        mat: MAT.moss, tone: 0.16,
+      });
+    }
+  }
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.25, radius: 2, strength: 0.3, groundFade: 0.5, floor: 0.6 });
+  const span = count * spacing * 0.6;
+  geo.userData.footprint = { cx: 0, cz: 0, hx: span, hz: 0.6 };
+  geo.userData.height = height;
   return geo;
 }

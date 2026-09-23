@@ -745,6 +745,50 @@ export function makeRoofTileTexture({ size = 512, seed = 109 } = {}) {
  * surface has spalled away. The lamination is what tells it from concrete —
  * stone remembers how it was laid down.
  */
+/**
+ * ASHLAR COURSING — the single biggest thing missing from our temple stone.
+ *
+ * Compared against a reference pack (2026-09-23), every surface there is cut
+ * into COURSES by dark joint lines, and ours was one continuous streaky
+ * surface. That difference does more work than any amount of mottling: joints
+ * give a wall scale, a direction and somewhere for shadow to sit, and without
+ * them a temple reads as a carved lump rather than as something BUILT.
+ *
+ * It costs nothing. These textures are drawn in canvas, and a box's UVs in
+ * this kit are METRES / 2, so one atlas cell covers exactly 2 m of wall. Five
+ * courses to a cell puts a joint every 40 cm, which is Khmer ashlar; three
+ * blocks to a course puts a vertical joint every 67 cm.
+ *
+ * Both counts are INTEGERS so the pattern still tiles, and alternate courses
+ * are offset by half a block — running bond, the way it was actually laid.
+ *
+ * @returns {{ joint: number, tone: number }} joint 0-1 (1 = in the joint),
+ *   tone a small per-block value shift.
+ */
+const COURSES = 5, BLOCKS = 3;
+function coursing(u, v, seed = 0) {
+  const cf = v * COURSES;
+  const ci = Math.floor(cf);
+  const cfrac = cf - ci;
+  // Running bond: every other course slides half a block along.
+  const bf = u * BLOCKS + (ci % 2) * 0.5;
+  const bi = Math.floor(bf);
+  const bfrac = bf - bi;
+  // Distance to the nearest joint, in course/block units.
+  const dv = Math.min(cfrac, 1 - cfrac);
+  const du = Math.min(bfrac, 1 - bfrac);
+  const jv = Math.max(0, 1 - dv / 0.045);
+  const ju = Math.max(0, 1 - du / 0.03);
+  const joint = Math.max(jv, ju);
+  // Per-block value, so a wall is not one flat sheet of stone.
+  const h = Math.sin((ci * 127.1 + bi * 311.7 + seed) * 0.017) * 43758.5453;
+  const tone = (h - Math.floor(h)) - 0.5;
+  // The weathered arris: the top edge of a block catches light where the
+  // course below it is in shadow. Cheap, and it is most of the relief.
+  const lip = Math.max(0, 1 - Math.abs(cfrac - 0.07) / 0.05) * (1 - jv);
+  return { joint, tone, lip };
+}
+
 export function makeSandstoneTexture({ size = 512, seed = 131 } = {}) {
   return makeTexture(size, (g, S) => {
     const img = g.createImageData(S, S);
@@ -761,15 +805,23 @@ export function makeSandstoneTexture({ size = 512, seed = 131 } = {}) {
         // Deeper and browner than a first guess at "sandstone": under this
         // map's midday sun and blue sky fill, a light warm grey renders as pale
         // CONCRETE. Old temple stone wants to sit darker than it looks on paper.
-        let r = lerp(126, 152, mott) + (band - 0.5) * 12;
-        let gg = r * 0.88, b = r * 0.68;
+        // Warmer than it was. Beside the reference our stone read cold and
+        // grey-green under this map's sky fill; Khmer sandstone is a warm
+        // buff that goes red where the laterite behind it bleeds through.
+        let r = lerp(138, 166, mott) + (band - 0.5) * 12;
+        let gg = r * 0.845, b = r * 0.615;
         // Weathering: black organic streaks running down, and pale spall scars.
         // Gentler than a first guess: at full strength the weathering streaks
         // read as HATCHING close up — a stone wall drawn with a fine-liner.
         const streak = clamp01((vnoise(u * P * 7 + 3, v * P * 1.1, P * 7) - 0.58) * 3.4);
         r -= streak * 30; gg -= streak * 27; b -= streak * 22;
         const spall = clamp01((fbm(u * P * 5 + 17, v * P * 5 + 9, P * 5, 3) - 0.62) * 7);
-        r = lerp(r, 168, spall * 0.55); gg = lerp(gg, 154, spall * 0.55); b = lerp(b, 124, spall * 0.55);
+        r = lerp(r, 178, spall * 0.55); gg = lerp(gg, 158, spall * 0.55); b = lerp(b, 122, spall * 0.55);
+        // Coursing, last so nothing else washes the joints out.
+        const c = coursing(u, v, seed);
+        r += c.tone * 13 + c.lip * 14 - c.joint * 46;
+        gg += c.tone * 12 + c.lip * 13 - c.joint * 41;
+        b += c.tone * 9 + c.lip * 10 - c.joint * 32;
         const i = (y * S + x) * 4;
         d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
       }
@@ -800,6 +852,12 @@ export function makeLateriteTexture({ size = 512, seed = 137 } = {}) {
         const pit = clamp01((fbm(u * P * 16 + 31, v * P * 16 + 3, P * 16, 2) - 0.62) * 10);
         const dark = Math.max(hole, pit * 0.7);
         r -= dark * 62; gg -= dark * 40; b -= dark * 28;
+        // Laterite is cut in blocks and laid in courses like the sandstone;
+        // it is the fabric a ruin shows once its facing has gone.
+        const c = coursing(u, v, seed + 7);
+        r += c.tone * 15 + c.lip * 13 - c.joint * 50;
+        gg += c.tone * 10 + c.lip * 9 - c.joint * 33;
+        b += c.tone * 7 + c.lip * 6 - c.joint * 24;
         const i = (y * S + x) * 4;
         d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
       }

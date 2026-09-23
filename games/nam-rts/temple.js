@@ -16,8 +16,8 @@
 import * as THREE from "three";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import {
-  buildFigRoots, buildNagaBalustrade, buildTempleGallery, buildTempleGopura,
-  buildTempleRubble, buildTempleTower,
+  buildFigRoots, buildHeadPikes, buildNagaBalustrade, buildRiverStair,
+  buildTempleGallery, buildTempleGopura, buildTempleRubble, buildTempleTower,
 } from "../../v3/render/objects/rtsTemple.js";
 
 /** The compound's pieces in LOCAL metres: the axis runs along -Z, the way in. */
@@ -39,6 +39,21 @@ export function templePlan() {
   add("fig", -12.5, 9, Math.PI / 2 + 0.03, { seed: 3, width: 7, height: 4.2 });
   add("fig", 13, 16, Math.PI / 2 - 0.03, { seed: 23, width: 6, height: 3.8 });
   add("fig", 2, 27.5, 0.02, { seed: 41, width: 5, height: 3.4 });
+  // THE LANDING STAIRS, at the far end of the causeway on the axis.
+  //
+  // The compound STAYS WHERE IT IS (your call, 2026-09-23) and the river comes
+  // to it when the river branches are done. The flight simply goes down, so
+  // wherever the water ends up in the last stretch of its drop, it laps stone.
+  // Until then it reads as a ghat on a dry bank, which is what a ruin on a
+  // shifted channel looks like anyway.
+  add("stair", 0, -26, Math.PI, { seed: 61, steps: 14, rise: 0.32, tread: 0.66 });
+  // Heads on pikes, in two groups along the approach: the first where the
+  // causeway starts, so you meet them before the gate, and the second at the
+  // stair head where anyone coming off the water walks into them.
+  add("pikes", -4.6, -17, Math.PI / 2 + 0.06, { seed: 71, count: 5, spacing: 1.5, height: 2.0 });
+  add("pikes", 4.6, -17, Math.PI / 2 - 0.05, { seed: 83, count: 5, spacing: 1.5, height: 2.0 });
+  add("pikes", -4.6, -25, Math.PI / 2 + 0.1, { seed: 97, count: 4, spacing: 1.5, height: 1.9 });
+  add("pikes", 4.6, -25, Math.PI / 2 - 0.08, { seed: 101, count: 4, spacing: 1.5, height: 1.9 });
   // Rubble: off the gate's flanks, in the courtyard, and out along the way in.
   add("rubble", -8.5, -4, 0.5, { seed: 13 });
   add("rubble", 9, -2, 1.2, { seed: 31 });
@@ -61,6 +76,8 @@ function geometryFor(p) {
     case "naga": return buildNagaBalustrade({ seed: p.seed, length: p.length });
     case "fig": return buildFigRoots({ seed: p.seed, width: p.width, height: p.height });
     case "rubble": return buildTempleRubble({ seed: p.seed });
+    case "stair": return buildRiverStair({ seed: p.seed, steps: p.steps, rise: p.rise, tread: p.tread });
+    case "pikes": return buildHeadPikes({ seed: p.seed, count: p.count, spacing: p.spacing, height: p.height });
     default: return null;
   }
 }
@@ -78,6 +95,12 @@ const PLACEMENT = {
   naga: { pad: false, nav: true, cover: true, clear: 4 },
   rubble: { pad: false, nav: true, cover: true, clear: 3.5 },
   fig: { pad: false, nav: false, cover: false, clear: 3 },
+  // NO PAD. A pad levels the ground to ONE height, which buries every step of
+  // a descending flight — the first version read as a flat paved ramp for
+  // exactly this reason. The bank is cut with `gradeRamp` instead, below.
+  stair: { pad: false, nav: false, cover: false, clear: 9 },
+  // Pikes are scenery: thin enough to walk between, no cover, no nav.
+  pikes: { pad: false, nav: false, cover: false, clear: 2 },
 };
 
 /** Place a temple compound centred on (x, z), through placedObjects. */
@@ -86,10 +109,27 @@ export async function placeTemple(app, placed, { x, z, rotY = 0 } = {}) {
   const items = [];
   // The clearing the jungle has NOT quite taken back: open over the courtyard
   // and the causeway, closing in round the galleries.
-  for (const [lx, lz, r] of [[0, 14, 22], [0, -8, 18], [0, 28, 14]]) {
+  for (const [lx, lz, r] of [[0, 14, 22], [0, -8, 18], [0, 28, 14], [0, -26, 16]]) {
     const p = toWorld({ x: lx, z: lz, rotY: 0 }, { x, z, rotY });
     app.clearVegetation?.(p.x, p.z, r, { grass: r * 0.8 });
   }
+  // CUT THE BANK the stair runs down, before placing anything on it: a ramp
+  // from the stair head at ground level to its foot one flight lower. The
+  // river is not here yet (it is coming to the temple rather than the temple
+  // going to it), so the ground has to provide the fall for now.
+  const flight = templePlan().find((q) => q.kind === "stair");
+  if (flight && app.gradeRamp) {
+    const drop = flight.steps * flight.rise;
+    const head = toWorld({ x: flight.x, z: flight.z, rotY: 0 }, { x, z, rotY });
+    const foot = toWorld({ x: flight.x, z: flight.z - flight.steps * flight.tread - 3, rotY: 0 }, { x, z, rotY });
+    const hy = app.getWorldHeight?.(head.x, head.z) ?? 0;
+    await app.gradeRamp(
+      { x: head.x, z: head.z, y: hy },
+      { x: foot.x, z: foot.z, y: hy - drop },
+      { halfWidth: 7.5, shoulder: 9 },
+    );
+  }
+
   for (const p of templePlan()) {
     const geo = geometryFor(p);
     if (!geo) continue;

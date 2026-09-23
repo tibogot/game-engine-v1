@@ -544,6 +544,99 @@ export function buildSheetRoof(opts = {}) {
 
 // ── 5. LADDER ────────────────────────────────────────────────────────────────
 
+export const STAIR_DEFAULTS = {
+  width: 3.2,
+  steps: 8,
+  /** Riser and going, in metres. 0.32 x 0.66 is a temple flight; 0.18 x 0.28 a house's. */
+  rise: 0.18,
+  tread: 0.28,
+  /** How far each tread is worn hollow in the middle, as a share of the rise. */
+  wear: 0,
+  /** A low wall down each side: 0 for none, else its width in metres. */
+  parapet: 0,
+  /** Slop in the laying. 0 = machined, 1 = eight centuries of settlement. */
+  jitter: 0,
+  seed: 1,
+};
+
+/**
+ * A FLIGHT OF STEPS — one block per tread, descending along +Z from the
+ * origin, with the top tread's surface at y = 0.
+ *
+ * This is a KIT primitive rather than a temple one because a stair is the most
+ * reusable shape there is: a temple landing on a river, a terrace, the steps
+ * up to the résidence, a bunker entrance, a stilt house's ladder-stair, a
+ * village well. Everything it needs to be any of those is in the parameters —
+ * riser and going set the character (a 0.32 x 0.66 temple flight and a
+ * 0.18 x 0.28 domestic one are recognisably different animals), `jitter` and
+ * `wear` set how long it has stood, and `matOf` decides what it is made of.
+ *
+ * Descending rather than ascending, and the TOP at the origin, because that is
+ * how a stair is placed: you know where the doorway or the terrace is, and the
+ * bottom lands wherever the ground or the water happens to be.
+ *
+ * @param {object} [o]
+ * @param {(i: number, r: () => number) => { mat: number, tone: number }} [o.matOf]
+ *   per-step material; defaults to plain timber.
+ */
+export function buildStairFlight(o = {}) {
+  const { width, steps, rise, tread, wear, parapet, jitter, seed } = { ...STAIR_DEFAULTS, ...o };
+  const matOf = o.matOf ?? (() => ({ mat: MAT.timber, tone: 0.45 }));
+  const r = rng(seed);
+  const parts = [];
+
+  for (let i = 0; i < steps; i++) {
+    const m = matOf(i, r);
+    // Treads overlap their neighbour by a tenth so no seam opens at the nosing
+    // when the flight is jittered.
+    const dip = wear * rise * (0.6 + r() * 0.8);
+    parts.push({
+      geo: buildBox(width, rise * 1.2, tread * 1.1),
+      pos: [
+        (r() - 0.5) * 0.02 * jitter,
+        -i * rise + rise * 0.5 - dip,
+        i * tread,
+      ],
+      rot: [
+        (r() - 0.5) * 0.02 * jitter,
+        (r() - 0.5) * 0.016 * jitter,
+        (r() - 0.5) * 0.014 * jitter,
+      ],
+      mat: m.mat, tone: m.tone,
+    });
+  }
+
+  if (parapet > 0) {
+    // Every other step carries a block, so the wall steps down in pairs the
+    // way a real rake does rather than following every riser.
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < steps; i += 2) {
+        const m = matOf(i, r);
+        parts.push({
+          geo: buildBox(parapet, rise * 2.7, tread * 2.05),
+          pos: [
+            s * (width * 0.5 + parapet * 0.5),
+            -i * rise + rise * 1.15,
+            i * tread + tread * 0.5,
+          ],
+          rot: [0, (r() - 0.5) * 0.02 * jitter, 0],
+          mat: m.mat, tone: m.tone,
+        });
+      }
+    }
+  }
+
+  const geo = assemble(parts);
+  const len = steps * tread;
+  geo.userData.footprint = {
+    cx: 0, cz: len * 0.5,
+    hx: width * 0.5 + parapet, hz: len * 0.5,
+  };
+  geo.userData.height = 0;
+  geo.userData.drop = steps * rise;
+  return geo;
+}
+
 export const LADDER_DEFAULTS = { height: 3.0, width: 0.52, rail: 0.06, rungs: 8, rung: 0.045 };
 
 export function buildLadder(opts = {}) {
