@@ -104,6 +104,7 @@ import { buildVegetationHeader, drawFlowerThumb } from "../ui/buildVegetationHea
 import { FlowerSystem } from "../render/grass/flowerSystem.js";
 import { FlowerDensity } from "../render/grass/flowerDensity.js";
 import { FoliageScatterSystem, bakeFoliageThumbnail } from "../render/foliage/foliageSystem.js";
+import { foliageLeafLift, foliageTopdownLift } from "../render/foliage/foliageLighting.js";
 import { ScatterDensity, stampScatterDensity } from "../render/scatter/scatterDensity.js";
 import { AmbientFxSystem } from "../render/ambient/ambientFxSystem.js";
 import { createAmbientFxState, AMBIENT_EFFECT_COUNT } from "./state/ambientFxState.js";
@@ -11317,6 +11318,12 @@ export async function startV3App(opts = {}) {
       foliageScatterBrush,
       ensureFoliageScatterBuilt,
       syncFoliageScatterUniforms,
+      /** The leaf normal's bend toward up, and what survives from overhead —
+       *  the two knobs behind the black faces; see foliageLighting.js. */
+      get foliageLeafLift() { return foliageLeafLift.value; },
+      set foliageLeafLift(v) { foliageLeafLift.value = v; },
+      get foliageTopdownLift() { return foliageTopdownLift.value; },
+      set foliageTopdownLift(v) { foliageTopdownLift.value = v; },
       // The tall-plant field's state and its sync, beside the ground foliage's.
       // Every sibling state is already here; leaving this one out just meant
       // bamboo and palms could not be tuned from the console like the rest.

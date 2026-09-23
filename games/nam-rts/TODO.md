@@ -105,6 +105,41 @@ Keep this file current: tick things off here, add new asks here.
    canopy and floor, and silhouettes that read from the RTS camera rather than
    from a third-person one. Colour first (it is cheap and it changes every
    screenshot), then the new types.
+   [~] **THE BLACK FACES** (your ask 2026-09-23, two screenshots, "we have had
+   it since the beginning… it reads like that even from far"). DIAGNOSED, and
+   YOUR guess was the right one — it is the NORMALS, not shadows and not
+   mainly the terminator. Measured on one bush at close range, its green
+   pixels split into darkest and brightest fifths:
+
+       lit 49.1 / 125.2 · ambient only 42.7 / 56.1 · sun only 20.7 / 91.9
+       → a dark leaf gets 4.4x less sun than a bright one
+
+   Shadows were ruled OUT: casting and receiving switched every way landed
+   within 2% (a wider earlier sample said otherwise — it was reading ground
+   and grass, not the plant). The colour ramp is a real but secondary
+   multiplier: flattening `colorBase` to `colorTip` lifts the dark fifth 28%.
+
+   THE CAUSE is in foliageSystem.js's own note: the leaf's canopy normal-lift
+   RELAXES as the camera climbs (FOLIAGE_TOPDOWN_LIFT), because a full lift
+   makes the field go flat from overhead. From the RTS camera the two multiply
+   out to ~0.25 of a bend, so a card keeps its true normal and a card turned
+   away from the sun goes black. The relax was added on purpose; the black
+   faces are the other end of that same trade.
+
+   THE LEVERS, all three now live uniforms (`__V3_DEBUG.foliageWrap`,
+   `.foliageLeafLift`, `.foliageTopdownLift`), measured on the bush
+   (dark / bright / contrast):
+
+       stock  wrap 0, lift 0.55, topdown 0.45   46.1 / 124.7 / 2.70x
+       wrap 0.6 only                            52.9 / 111.8 / 2.11x
+       topdown 1.0 (no relax)                   72.5 / 109.2 / 1.51x
+       topdown 1.0 + lift 0.85                  80.8 / 109.4 / 1.35x
+       wrap 0.4 + lift 0.75 + topdown 0.8       77.9 / 112.1 / 1.44x
+
+   New: `v3/render/foliage/foliageLighting.js` (wrapped diffuse as a custom
+   lighting model + the two lift uniforms). WAITING ON YOU: where to sit on
+   the trade — lower contrast and no black faces, or keep more per-leaf form.
+   A/B/C shots taken at play zoom 2026-09-23; say the word for a live cycle.
    [x] **THE COLOUR PASS** (`tools/namVegPalette.mjs`, written into
    nam-valley.v3proj — **your look check**): every vegetation system on the map
    repainted at once — the 8 foliage plants, the 3 tall plants, all 8 tree

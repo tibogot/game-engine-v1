@@ -28,6 +28,7 @@ import { drawBananaLeafTexture, drawTaroLeafTexture, BROADLEAF_TEX_W, BROADLEAF_
 import { bakeObjectThumbnails } from "../../../v2/tools/objectThumbnails.js";
 import { ScatterField } from "../scatter/scatterField.js";
 import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
+import { foliageLeafLift, foliageTopdownLift } from "./foliageLighting.js";
 import { FOLIAGE_TYPE_COUNT } from "../../app/state/foliageScatterState.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
@@ -40,8 +41,14 @@ const RULE_ROW = 2;
  * normal). See the long note beside `liftToUp`: the lift cures a ground
  * camera's two-tone and causes a top-down camera's flatness, so it is scaled
  * by the camera's elevation rather than chosen once.
+ *
+ * Both this and the base lift are uniforms rather than constants because they
+ * are the two ends of that trade, and it is judged by eye in the game at the
+ * camera it is for. It now defaults to 1 — no relax at all — because at 0.45
+ * the plants grew BLACK FACES from the RTS camera; foliageLighting.js has the
+ * measurements and what the flatter crowns cost.
  */
-const FOLIAGE_TOPDOWN_LIFT = 0.45;
+const FOLIAGE_TOPDOWN_LIFT = foliageTopdownLift;
 
 /**
  * THE CARD TEXTURES — one canvas-drawn alpha per `cardTextureOf` key. Geometry
@@ -340,7 +347,7 @@ export class FoliageScatterSystem {
     // leaves) under a walking camera have a high elevation too, and relaxing
     // those would read as the plant flinching away from you.
     const _overhead = smoothstep(float(0.17), float(0.64), _camUpW);
-    const _liftScale = mix(float(1), float(FOLIAGE_TOPDOWN_LIFT), _overhead);
+    const _liftScale = mix(float(1), FOLIAGE_TOPDOWN_LIFT, _overhead);
     const liftToUp = (n, amount) => normalize(mix(n, vec3(0, 1, 0), float(amount).mul(_liftScale)));
     // (Almost all the way: game ferns are lit as a flat canopy; what little
     // geometric normal remains keeps the fronds from looking like paper.)
@@ -348,7 +355,7 @@ export class FoliageScatterSystem {
     // (foliageGeometry roundLeafNormals — see its header for the low-sun
     // diagnosis), so the shader only has to soften it, not replace it. At
     // 0.95 no leaf ever faced a low sun and the whole field went black.
-    const nLeaf = liftToUp(nW, 0.55);
+    const nLeaf = liftToUp(nW, foliageLeafLift);
     const nLeafView = cameraViewMatrix.mul(vec4(nLeaf, 0)).xyz.normalize();
     // …and always toward the viewer: a frond hanging toward the camera shows
     // its underside, which must not go dark next to a lit neighbour.
