@@ -35,6 +35,9 @@
 import * as THREE from "three";
 import { buildBamboo } from "./bambooGeometry.js";
 import { buildPalm } from "./palmGeometry.js";
+import { buildJungleTree } from "./jungleTreeGeometry.js";
+import { buildAreca } from "./arecaGeometry.js";
+import { buildFanPalm } from "./fanPalmGeometry.js";
 import { buildCardFern } from "./fernCardGeometry.js";
 import { buildBanana } from "./bananaGeometry.js";
 
@@ -142,14 +145,18 @@ function archCurve(rows, len, tilt, arch) {
  * is solid geometry throughout. foliageSystem.js keeps one material per key.
  *   plume  part 2 heads — pampas, susuki (plumeTexture.js)
  *   spray  part 4 sprays — bamboo (bambooSprayTexture.js)
- *   frond  part 5 half-fronds — palm (palmFrondTexture.js)
+ *   frond  part 5 half-fronds — palm, areca (palmFrondTexture.js)
+ *   fan    part 5 leaf blades — the palmate palms (fanLeafTexture.js)
  *   fern   part 5 half-fronds — the card fern (fernFrondTexture.js)
  */
 export function cardTextureOf(kind) {
   switch (kind) {
     case "pampas": case "susuki": return "plume";
     case "bamboo": return "spray";
-    case "palm": return "frond";
+    case "palm": case "areca": return "frond";
+    case "fanPalm": return "fan";
+    case "bush": case "broadleaf": return "lance";
+    case "jungleTree": return "canopy";
     case "cardFern": return "fern";
     case "banana": return "banana";
     case "taro": return "taro";
@@ -186,6 +193,9 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
   // Plants that are not pinnate have their own builders.
   if (type.kind === "bamboo") return buildBamboo(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "palm") return buildPalm(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "jungleTree") return buildJungleTree(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "areca") return buildAreca(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "fanPalm") return buildFanPalm(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "cardFern") return buildCardFern(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "banana" || type.kind === "taro") return buildBanana(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
@@ -690,50 +700,126 @@ function buildStalked(type, ctx, head) {
  * leaves on short stalks. Ground cover lays them almost flat in a low patch; a
  * bush spreads them over a dome so the plant has volume from every side.
  */
+/**
+ * BUSH and GROUND COVER — the soft broadleaf mass of a jungle floor: wild
+ * ginger, heliconia, the stuff that fills the space between the ferns.
+ *
+ * REBUILT 2026-09-23 from photographs (Alpinia, Wikimedia Commons), because
+ * these two were the worst-looking plants on the map and both for the same
+ * reason: their leaves were GEOMETRY. Each was a three-segment polygon strip
+ * whose outline was the leaf's outline, so every leaf was an angular slab with
+ * five triangles in it and no taper, no curve and no point. They read as
+ * painted cardboard beside the ferns, and they cover more of the screen than
+ * anything else on the map.
+ *
+ * Now each leaf is ONE CARD with the shape in its alpha (lanceLeafTexture.js):
+ * two triangles instead of five, a real silhouette, and two variants in the
+ * texture so a clump is not fifty copies of one leaf.
+ *
+ * THE TWO PLANTS DIFFER IN ARCHITECTURE, not just in size:
+ *   · a BUSH is a ginger clump — upright canes, each carrying leaves
+ *     ALTERNATELY up two ranks, arching out and over. Its silhouette is
+ *     vertical and layered.
+ *   · GROUND COVER is a low rosette, leaves fanning out near the floor.
+ * Giving both the same rosette (which is what the old builder did) is why a
+ * jungle floor read as one repeated plant at two sizes.
+ */
 function buildLeafy(type, { near, far, rand, push, vcount, I, finish, bush }) {
-  const leaves = Math.max(3, Math.round((type.fronds ?? 9) * (far ? 0.5 : near ? 1 : 0.75)));
+  const leaves = Math.max(3, Math.round((type.fronds ?? 9) * (far ? 0.45 : near ? 1 : 0.7)));
   const size = (type.frondLength ?? 1) * (bush ? 0.45 : 0.6);
-  const wide = (type.leafletWidth ?? 1) * (bush ? 0.6 : 0.8);
+  // 1 = the texture's own proportions. The half-texture a card samples is
+  // 256x512, so an undistorted card is half as wide as it is long, and the
+  // blade drawn inside it does the rest.
+  const wide = (type.leafletWidth ?? 1) * (bush ? 0.95 : 1.15);
   const droop = type.droop ?? 0.3;
+  // 5 + the normal lift in the fraction. 0.85, the ground fern's value: these
+  // sit low and flat, and at the palm's 0.5 the ones facing away from the sun
+  // go black — which is what the whole map was just cleaned of.
+  const LEAF = 5.85;
+  const STALK = 1;
 
+  /** One leaf card, hung from `hinge`, pointing `dir`, `wide` across. */
+  const card = (hinge, dir, side, len, halfW, lr, t) => {
+    const n0 = norm(cross(dir, side));
+    const n = n0[1] < 0 ? [-n0[0], -n0[1], -n0[2]] : n0;
+    // Which of the two leaves in the texture: whole on the left half, torn on
+    // the right. Per leaf, so a clump carries both.
+    const u0 = lr < 0.5 ? 0 : 0.5;
+    const base = vcount();
+    for (const vv of [0, 1]) {
+      for (const uu of [0, 1]) {
+        const p = add(add(hinge, dir, len * vv), side, (uu - 0.5) * halfW * 2);
+        push(p, n, u0 + uu * 0.5, vv, [LEAF, t, lr, vv]);
+      }
+    }
+    I.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+  };
+
+  if (bush) {
+    // ── A ginger clump ──────────────────────────────────────────────────
+    // Canes of different ages leaning out of one root, each with leaves up
+    // two ranks. The leaves nearest the top are the youngest and stand up;
+    // the lower ones arch further over.
+    const canes = Math.max(2, Math.round(2 + (leaves / 14)));
+    const perCane = Math.max(2, Math.round(leaves / canes));
+    const clumpAz = rand() * Math.PI * 2;
+    for (let c = 0; c < canes; c++) {
+      const age = 1 - (c / canes) * 0.45 - rand() * 0.12;
+      const caneH = size * (1.5 * age);
+      const az = clumpAz + (c / canes) * Math.PI * 2 + (rand() - 0.5) * 0.8;
+      const lean = 0.12 + rand() * 0.22;
+      const outD = [Math.cos(az), 0, Math.sin(az)];
+      const top = [outD[0] * Math.sin(lean) * caneH, Math.cos(lean) * caneH, outD[2] * Math.sin(lean) * caneH];
+      // The cane itself: a thin strip, near only.
+      if (near) {
+        const w = size * 0.012 * (type.stemWidth ?? 1);
+        const sd = norm(cross(norm(top), [0, 1, 0.001]));
+        const b = vcount();
+        for (const [pt, v] of [[[0, 0, 0], 0], [top, 1]]) {
+          for (const s of [-1, 1]) push(add(pt, sd, s * w), [0, 1, 0], s * 0.5 + 0.5, v, [STALK, v, 0.3, 0]);
+        }
+        I.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+      }
+      for (let l = 0; l < perCane; l++) {
+        const f = perCane === 1 ? 1 : 0.28 + 0.72 * (l / (perCane - 1));
+        const lr = rand();
+        // Two ranks: alternate sides, as a ginger's leaves do.
+        const rank = (l % 2 === 0 ? 1 : -1);
+        const la = az + rank * (1.25 + (rand() - 0.5) * 0.5);
+        const at = [top[0] * f, top[1] * f, top[2] * f];
+        const outward = [Math.cos(la), 0, Math.sin(la)];
+        // Young leaves at the top stand up; older ones below arch right over.
+        const rise = 0.75 - f * 0.15 - droop * (1 - f) * 1.1;
+        const dir = norm([outward[0], rise, outward[2]]);
+        const side = norm(cross(dir, [0, 1, 0.001]));
+        const len = size * (0.72 + lr * 0.4) * (0.7 + 0.3 * f);
+        card(at, dir, side, len, len * 0.25 * wide, lr, f);
+      }
+    }
+    return finish();
+  }
+
+  // ── Ground cover: a low rosette ────────────────────────────────────────
   for (let l = 0; l < leaves; l++) {
     // Golden angle: leaves never line up, whatever the count.
     const a = l * 2.39996 + rand() * 0.5;
     const lr = rand();
-    // A bush fills a dome; ground cover stays near the floor.
-    const rise = bush ? 0.25 + (l / leaves) * 0.75 : 0.12 + lr * 0.25;
+    const rise = 0.12 + lr * 0.25;
     const out = norm([Math.cos(a) * (1 - rise * 0.55), rise, Math.sin(a) * (1 - rise * 0.55)]);
     const side = norm(cross(out, [0, 1, 0.001]));
-    const stalk = size * (bush ? 0.5 + lr * 0.5 : 0.35 + lr * 0.4);
-    const root = [0, bush ? size * 0.12 : 0.01, 0];
+    const stalk = size * (0.3 + lr * 0.3);
+    const root = [0, 0.01, 0];
     const hinge = add(root, out, stalk);
-    const leafLen = size * (0.55 + lr * 0.5);
-    // The leaf hangs a little from where its stalk ends.
-    const leafDir = norm([out[0], out[1] - droop * (0.5 + lr * 0.6), out[2]]);
-    const n0 = norm(cross(leafDir, side));
-    const n = n0[1] < 0 ? [-n0[0], -n0[1], -n0[2]] : n0;
-    const base = vcount();
-    // A rounded leaf: narrow at the stalk, widest in the middle, blunt tip.
-    const prof = near ? [[0, 0.3], [0.35, 1.0], [0.75, 0.86]] : [[0, 0.4], [0.6, 1.0]];
-    for (const [t, w] of prof) {
-      const c = add(hinge, leafDir, leafLen * t);
-      for (const s of [-1, 1]) push(add(c, side, s * leafLen * wide * 0.42 * w), n, s * 0.5 + 0.5, t, [0, rise, lr, t]);
-    }
-    push(add(hinge, leafDir, leafLen), n, 0.5, 1, [0, rise, lr, 1]);
-    for (let q = 0; q < prof.length - 1; q++) {
-      const i0 = base + q * 2;
-      I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3);
-    }
-    const last = base + (prof.length - 1) * 2;
-    I.push(last, last + 2, last + 1);
+    const leafLen = size * (0.6 + lr * 0.5);
+    const leafDir = norm([out[0], out[1] - droop * (0.4 + lr * 0.5), out[2]]);
+    card(hinge, leafDir, side, leafLen, leafLen * 0.25 * wide, lr, rise);
 
-    // The stalk holding it up (near only: at distance it is one pixel).
     if (near && stalk > 0.02) {
       const w = 0.008 * (type.stemWidth ?? 1);
       const sN = norm(cross(out, side));
       const sBase = vcount();
       for (const [pt, v] of [[root, 0], [hinge, 1]]) {
-        for (const s of [-1, 1]) push(add(pt, side, s * w), sN, s * 0.5 + 0.5, v, [1, v, lr, 0]);
+        for (const s of [-1, 1]) push(add(pt, side, s * w), sN, s * 0.5 + 0.5, v, [STALK, v, lr, 0]);
       }
       I.push(sBase, sBase + 2, sBase + 1, sBase + 1, sBase + 2, sBase + 3);
     }

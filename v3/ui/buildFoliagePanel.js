@@ -17,6 +17,10 @@ export function buildFoliagePanel(root, {
   // The same panel serves susuki's one-type field: its own section name, and a
   // tile that reaches 200 m instead of 96.
   fieldTitle = "Foliage Field", tileReach = 96, showSpecies = true,
+  // A ground fern tops out at a few metres; the tall-plant field holds a 9 m
+  // bamboo, an 11 m palm and a 26 m jungle tree, and a slider that stops at 5
+  // cannot show — let alone edit — any of them.
+  sizeMax = 5,
 }) {
   const widgets = [];
   const W = (w) => { widgets.push(w); return w; };
@@ -50,13 +54,17 @@ export function buildFoliagePanel(root, {
       },
       hint: "Loads that species' shape and colours into this plant. Tweak anything after.",
     }));
-    W(slider(ty, type, "size", { label: "Size (m)", min: 0.2, max: 5, step: 0.05, onChange: onStateChanged,
+    W(slider(ty, type, "size", { label: "Size (m)", min: 0.2, max: sizeMax, step: sizeMax > 12 ? 0.25 : 0.05, onChange: onStateChanged,
       hint: "Roughly how tall the plant stands. A forest fern is 2-3, ground cover under 1." }));
     W(color(ty, type, "colorBase", { label: "Colour (crown)", onChange: onStateChanged }));
     W(color(ty, type, "colorTip",  { label: "Colour (tips)", onChange: onStateChanged }));
     if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
       W(color(ty, type, "colorHead", { label: "Colour (head)", onChange: onStateChanged,
         hint: "The cattail's sausage or the reed's plume." }));
+    }
+    if (type.kind === "jungleTree") {
+      W(color(ty, type, "colorHead", { label: "Colour (bark)", onChange: onStateChanged,
+        hint: "Trunk, buttresses and branches." }));
     }
     W(slider(ty, type, "translucency", { label: "Translucency", min: 0, max: 1.5, step: 0.01, onChange: onStateChanged,
       hint: "How much light comes through the leaves with the sun behind them." }));
@@ -111,6 +119,14 @@ export function buildFoliagePanel(root, {
         hint: "The fan of plumes at the top of each stalk. 1 is pampas." }));
       W(slider(sh, type, "plumeSpread",   { label: "Plume spread °", min: 5, max: 70, step: 1, ...g,
         hint: "How far the plumes open away from the stalk." }));
+    }
+    // The tree re-reads the same two keys as its buttress roots, so it gets
+    // the sliders under the names they mean on a tree.
+    if (type.kind === "jungleTree") {
+      W(slider(sh, type, "plumesPerStem", { label: "Buttress roots", min: 0, max: 8, step: 1, ...g,
+        hint: "The planks flaring out of the foot. Tropical soil is shallow, so these trees brace instead of rooting deep." }));
+      W(slider(sh, type, "plumeSpread",   { label: "Buttress reach %", min: 3, max: 18, step: 0.5, ...g,
+        hint: "How far they reach out, as a share of the tree's height." }));
     }
 
     // ── The field ──

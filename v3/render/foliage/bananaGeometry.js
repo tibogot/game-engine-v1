@@ -53,105 +53,134 @@ export function buildBanana(type, ctx) {
   const leafLen = height * ((type.plumeSpread ?? 70) / 100);
   const sides = near ? 7 : 5;
 
-  // ── Stem ──────────────────────────────────────────────────────────────────
-  // A banana's pseudostem leans a little and tapers toward the top; a taro's
-  // "stem" is only a short crown the petioles rise from.
-  const az = rand() * Math.PI * 2;
-  const dir = [Math.cos(az), 0, Math.sin(az)];
-  const side = [-Math.sin(az), 0, Math.cos(az)];
-  const at = (t) => {
-    const th = lean * t;
-    return {
-      p: [dir[0] * Math.sin(th) * height * t * 0.5, height * t, dir[2] * Math.sin(th) * height * t * 0.5],
-      fwd: norm([Math.sin(th) * dir[0], Math.cos(th), Math.sin(th) * dir[2]]),
-    };
-  };
-  const radiusAt = (t) => stemR * (1 - (taro ? 0.3 : 0.32) * t) * (1 + 0.3 * Math.exp(-t * 18));
+  /**
+   * BANANA GROWS IN A CLUMP, and that is most of its silhouette.
+   *
+   * A mat throws suckers, so what you actually see is a tall bearing stem with
+   * two or three younger ones of stepped heights around its foot — the
+   * plantation photographs are a wall of them, never single plants. The first
+   * version built one stem, which reads as a specimen in a pot.
+   *
+   * Taro has no stem to clump; it stays one rosette.
+   */
+  const stemN = taro || far ? 1 : Math.max(1, Math.round(1 + (type.spread ?? 1) * 1.6));
+  const clumpAz = rand() * Math.PI * 2;
 
-  // A taro has no stem at all — its petioles ARE the bare base of each leaf
-  // card. Only the banana gets the pseudostem.
-  if (!far && !taro) {
-    const ring = (t, radius, alongVal) => {
-      const { p, fwd } = at(t);
-      const ax2 = norm(cross(fwd, side));
-      const base = vcount();
-      for (let s = 0; s < sides; s++) {
-        const ph = (s / sides) * Math.PI * 2;
-        const cs = Math.cos(ph), sn = Math.sin(ph);
-        const n = norm([side[0] * cs + ax2[0] * sn, side[1] * cs + ax2[1] * sn, side[2] * cs + ax2[2] * sn]);
-        push(add(p, n, radius), n, s / sides, t, [STEM, t, 0.1, alongVal]);
-      }
-      return base;
+  for (let stem = 0; stem < stemN; stem++) {
+    // The bearing stem is full height; the suckers step down hard.
+    const hf = stem === 0 ? 1 : 0.34 + rand() * 0.34;
+    const H = height * hf;
+    const LL = leafLen * hf;
+    const sa = clumpAz + (stem / Math.max(1, stemN)) * Math.PI * 2 + (rand() - 0.5) * 0.9;
+    const off = stem === 0 ? [0, 0, 0]
+      : [Math.cos(sa) * stemR * (5 + rand() * 4), 0, Math.sin(sa) * stemR * (5 + rand() * 4)];
+
+    const az = rand() * Math.PI * 2;
+    const dir = [Math.cos(az), 0, Math.sin(az)];
+    const side = [-Math.sin(az), 0, Math.cos(az)];
+    const at = (t) => {
+      const th = lean * t;
+      return {
+        p: [off[0] + dir[0] * Math.sin(th) * H * t * 0.5, H * t, off[2] + dir[2] * Math.sin(th) * H * t * 0.5],
+        fwd: norm([Math.sin(th) * dir[0], Math.cos(th), Math.sin(th) * dir[2]]),
+      };
     };
-    const stitch = (b0, b1) => {
-      for (let s = 0; s < sides; s++) {
-        const s2 = (s + 1) % sides;
-        I.push(b0 + s, b0 + s2, b1 + s, b0 + s2, b1 + s2, b1 + s);
-      }
-    };
-    let prev = null;
-    const join = (b) => { if (prev !== null) stitch(prev, b); prev = b; };
-    // Sheath bands: faint, from the culm shader's scar/bloom at `along` 0.
-    for (let k = 0; k <= bands; k++) {
-      const t = k / bands;
-      join(ring(t, radiusAt(t), 0));
-      if (k < bands) {
-        const mid = (k + 0.5) / bands;
-        join(ring(mid, radiusAt(mid), 1));
-        if (near) join(ring(mid, radiusAt(mid), -1));
-      }
-    }
-    // Close the top.
-    const { p } = at(1);
-    const tipI = vcount();
-    push(add(p, UP, radiusAt(1) * 0.3), UP, 0.5, 1, [STEM, 1, 0.1, 1]);
-    for (let s = 0; s < sides; s++) I.push(prev + s, prev + ((s + 1) % sides), tipI);
-  } else if (!taro) {
-    // FAR: a cross of two strips.
-    for (const across of [true, false]) {
-      const base = vcount();
-      for (let q = 0; q <= 3; q++) {
-        const t = q / 3;
+    const radiusAt = (t) => stemR * hf * (1 - (taro ? 0.3 : 0.32) * t) * (1 + 0.3 * Math.exp(-t * 18));
+
+    // A taro has no stem at all — its petioles ARE the bare base of each leaf
+    // card. Only the banana gets the pseudostem.
+    if (!far && !taro) {
+      const ring = (t, radius, alongVal) => {
         const { p, fwd } = at(t);
-        const axis = across ? side : norm(cross(fwd, side));
-        const n = norm(cross(fwd, axis));
-        for (const s of [-1, 1]) push(add(p, axis, s * radiusAt(t)), n, s * 0.5 + 0.5, t, [STEM, t, 0.1, 1]);
+        const ax2 = norm(cross(fwd, side));
+        const base = vcount();
+        for (let sd = 0; sd < sides; sd++) {
+          const ph = (sd / sides) * Math.PI * 2;
+          const cs = Math.cos(ph), sn = Math.sin(ph);
+          const n = norm([side[0] * cs + ax2[0] * sn, side[1] * cs + ax2[1] * sn, side[2] * cs + ax2[2] * sn]);
+          push(add(p, n, radius), n, sd / sides, t, [STEM, t, 0.1, alongVal]);
+        }
+        return base;
+      };
+      const stitch = (b0, b1) => {
+        for (let sd = 0; sd < sides; sd++) {
+          const s2 = (sd + 1) % sides;
+          I.push(b0 + sd, b0 + s2, b1 + sd, b0 + s2, b1 + s2, b1 + sd);
+        }
+      };
+      let prev = null;
+      const join = (b) => { if (prev !== null) stitch(prev, b); prev = b; };
+      // Sheath bands: faint, from the culm shader's scar/bloom at `along` 0.
+      for (let k = 0; k <= bands; k++) {
+        const t = k / bands;
+        join(ring(t, radiusAt(t), 0));
+        if (k < bands) {
+          const mid = (k + 0.5) / bands;
+          join(ring(mid, radiusAt(mid), 1));
+          if (near) join(ring(mid, radiusAt(mid), -1));
+        }
       }
-      for (let q = 0; q < 3; q++) {
-        const i0 = base + q * 2;
-        I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3);
+      const { p } = at(1);
+      const tipI = vcount();
+      push(add(p, UP, radiusAt(1) * 0.3), UP, 0.5, 1, [STEM, 1, 0.1, 1]);
+      for (let sd = 0; sd < sides; sd++) I.push(prev + sd, prev + ((sd + 1) % sides), tipI);
+    } else if (!taro) {
+      // FAR: a cross of two strips.
+      for (const across of [true, false]) {
+        const base = vcount();
+        for (let q = 0; q <= 3; q++) {
+          const t = q / 3;
+          const { p, fwd } = at(t);
+          const axis = across ? side : norm(cross(fwd, side));
+          const n = norm(cross(fwd, axis));
+          for (const sd of [-1, 1]) push(add(p, axis, sd * radiusAt(t)), n, sd * 0.5 + 0.5, t, [STEM, t, 0.1, 1]);
+        }
+        for (let q = 0; q < 3; q++) {
+          const i0 = base + q * 2;
+          I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3);
+        }
       }
     }
-  }
 
-  // ── Leaves, by age round the top ──────────────────────────────────────────
-  const top = at(1);
-  const crownO = taro ? [0, height * 0.04, 0] : add(top.p, top.fwd, -height * 0.03);
-  const halfW = leafLen * (taro ? 0.42 : 0.2) * widthScale;
-  for (let i = 0; i < leaves; i++) {
-    const age = leaves > 1 ? i / (leaves - 1) : 0.5;
-    const la = i * 2.39996 + rand() * 0.4;
-    const fr = rand();
-    // Banana: spear upright → spreading → hanging. Taro: every leaf on a
-    // petiole that stands fairly upright and leans out, bending over hard at
-    // the top so the heart blade hangs off its tip — no spear.
-    const tilt = taro
-      ? 0.3 + age * 0.55 * crownSpread + (fr - 0.5) * 0.2
-      : 0.1 + Math.pow(age, 0.8) * 2.1 * crownSpread + (fr - 0.5) * 0.15;
-    addFrondCards(ctx, {
-      origin: crownO, az: la,
-      len: leafLen * (taro ? 0.8 + fr * 0.35 : 0.6 + 0.4 * Math.min(1, age * 2.5)) * (0.92 + rand() * 0.16),
-      tilt, archAmt: arch * (taro ? 2.0 : 0.3 + age * 1.0),
-      halfW: halfW * (taro ? 0.85 + fr * 0.3 : 0.7 + 0.3 * Math.min(1, age * 2)),
-      vFold, droop, near, far, dead: false, plantT: taro ? 0.9 : 1, rnd: rand, lift: 0.85,
-    });
-  }
-  for (let d = 0; d < deadN; d++) {
-    addFrondCards(ctx, {
-      origin: add(crownO, UP, -height * 0.02), az: rand() * Math.PI * 2,
-      len: leafLen * 0.8, tilt: 2.3 + rand() * 0.4, archAmt: 0.3, halfW: halfW * 0.8,
-      vFold: vFold * 1.5, droop: droop * 0.5, near, far, dead: true, plantT: 0.95, rnd: rand, lift: 0.85,
-    });
+    // ── Leaves, by age round the top ────────────────────────────────────────
+    const top = at(1);
+    const crownO = taro ? [off[0], H * 0.04, off[2]] : add(top.p, top.fwd, -H * 0.03);
+    const halfW = LL * (taro ? 0.42 : 0.2) * widthScale;
+    const leafN = stem === 0 ? leaves : Math.max(3, Math.round(leaves * 0.6));
+    for (let i = 0; i < leafN; i++) {
+      const age = leafN > 1 ? i / (leafN - 1) : 0.5;
+      const la = i * 2.39996 + rand() * 0.4;
+      const fr = rand();
+      // Banana: spear upright -> spreading -> hanging. Taro: every leaf on a
+      // petiole that stands fairly upright and leans out, bending over hard at
+      // the top so the heart blade hangs off its tip — no spear.
+      //
+      // 1.55, not 2.1, for the oldest: in the plantation photographs the
+      // crown is a tall spray REACHING UP and arching over, and very little of
+      // it hangs below the stem's top. At 2.1 the old leaves lay flat and the
+      // plant read as a rosette on a post.
+      const tilt = taro
+        ? 0.3 + age * 0.55 * crownSpread + (fr - 0.5) * 0.2
+        : 0.08 + Math.pow(age, 0.8) * 1.55 * crownSpread + (fr - 0.5) * 0.15;
+      addFrondCards(ctx, {
+        origin: crownO, az: la,
+        len: LL * (taro ? 0.8 + fr * 0.35 : 0.6 + 0.4 * Math.min(1, age * 2.5)) * (0.92 + rand() * 0.16),
+        tilt, archAmt: arch * (taro ? 2.0 : 0.45 + age * 1.15),
+        halfW: halfW * (taro ? 0.85 + fr * 0.3 : 0.7 + 0.3 * Math.min(1, age * 2)),
+        vFold, droop, near, far, dead: false, plantT: taro ? 0.9 : 1, rnd: rand, lift: 0.85,
+      });
+    }
+    const dN = stem === 0 ? deadN : Math.min(1, deadN);
+    for (let d = 0; d < dN; d++) {
+      addFrondCards(ctx, {
+        origin: add(crownO, UP, -H * 0.02), az: rand() * Math.PI * 2,
+        // Short and narrow. A dead banana leaf has collapsed along its midrib
+        // and hangs as a dried strip against the stem; at full width the
+        // shader's brown reads as a cream SHEET stuck to the plant.
+        len: LL * 0.55, tilt: 2.45 + rand() * 0.35, archAmt: 0.25, halfW: halfW * 0.42,
+        vFold: vFold * 1.5, droop: droop * 0.5, near, far, dead: true, plantT: 0.95, rnd: rand, lift: 0.85,
+      });
+    }
   }
   return finish();
 }

@@ -307,12 +307,12 @@ export class GrassTerrainData {
       m.depthTest = m.depthWrite = false;
       m.fragmentNode = Fn(() => {
         const c = uv();
-        // ALL THREE CHANNELS, not just .x. The grass reads R only, but the
+        // ALL FOUR CHANNELS, not just .x. The grass reads R only, but the
         // tall-plant layer carries one plant per channel (see
         // stampSusukiDensity), and collapsing to vec4(v,v,v,1) here threw away
         // everything painted into G and B — the plants existed in the paint
         // texture and never appeared in the world.
-        const d = texture(srcTex, c).xyz;
+        const d = texture(srcTex, c);
         const s0 = texture(splatTex, c).depth(int(0));
         const s1 = texture(splatTex, c).depth(int(1));
         const blocked = dot(s0, uBlockA).add(dot(s1, uBlockB));
@@ -322,7 +322,11 @@ export class GrassTerrainData {
         const keep = float(1).sub(smoothstep(0.3, 0.6, blocked))
           .mul(float(1).sub(smoothstep(0.2, 0.35, s1.w)));
         const v = d.mul(keep);
-        return vec4(v.x, v.y, v.z, 1);
+        // ALPHA IS A PLANT TOO. It used to be written as a constant 1, which
+        // was harmless while three tall plants lived in RGB — and would have
+        // made the fourth (the jungle trees) grow over the entire map at full
+        // coverage the moment it was added.
+        return vec4(v.x, v.y, v.z, v.w);
       })();
       return new QuadMesh(m);
     };
@@ -473,7 +477,7 @@ export class GrassTerrainData {
 
   /**
    * Paint or erase tall-plant density at world position (cx, cz).
-   * @param {number} [o.channel=0] which of the four plant types to write
+   * @param {number} [o.channel=0] which of the four plant types to write (RGBA)
    */
   stampSusukiDensity({ cx, cz, radius, strength, falloff, worldSize, erase, channel = 0 }) {
     const res  = DENSITY_RES;
@@ -496,7 +500,7 @@ export class GrassTerrainData {
         const w = Math.pow(Math.max(0, 1 - t), falloff) * strength;
         // Only the picked type's channel: writing all three (which this did
         // while the field held one plant) would paint every tall plant at once.
-        const i = (z * res + x) * 4 + Math.min(2, Math.max(0, channel | 0));
+        const i = (z * res + x) * 4 + Math.min(3, Math.max(0, channel | 0));
         data[i] = erase
           ? Math.max(0,   data[i] - w * 255)
           : Math.min(255, data[i] + w * 255);
@@ -516,7 +520,7 @@ export class GrassTerrainData {
   fillSusukiDensity(channel = 0) {
     const d = this.susukiDensityTex.image.data;
     if (channel < 0) d.fill(255);
-    else for (let i = Math.min(2, channel | 0); i < d.length; i += 4) d[i] = 255;
+    else for (let i = Math.min(3, channel | 0); i < d.length; i += 4) d[i] = 255;
     this.susukiDensityTex.needsUpdate = true;
     this._hasSusukiData = true;
   }
@@ -530,7 +534,9 @@ export class GrassTerrainData {
    */
   collapseSusukiToChannel0() {
     const d = this.susukiDensityTex.image.data;
-    for (let i = 0; i < d.length; i += 4) { d[i + 1] = 0; d[i + 2] = 0; }
+    // Alpha too, now that it carries the fourth plant: a legacy file that
+    // happened to store 255 there would plant a jungle tree on every texel.
+    for (let i = 0; i < d.length; i += 4) { d[i + 1] = 0; d[i + 2] = 0; d[i + 3] = 0; }
     this.susukiDensityTex.needsUpdate = true;
   }
 

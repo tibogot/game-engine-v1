@@ -68,12 +68,15 @@ export function drawBananaLeafTexture(canvas, o = {}) {
   // the tip; a few reach almost to the midrib and split the leaf.
   ctx.globalCompositeOperation = "destination-out";
   ctx.fillStyle = "rgba(0,0,0,1)";
-  const tears = o.tears ?? 14;
+  // 26, not 14. The plantation photographs are a wall of leaves SHREDDED into
+  // ribbons — a banana leaf in the open lasts weeks before the wind has cut it
+  // to the midrib, and an untorn one reads as plastic from any distance.
+  const tears = o.tears ?? 26;
   for (let k = 0; k < tears; k++) {
     const v = bare + 0.1 + Math.pow(rand(), 0.7) * (0.9 - bare - 0.1);
     const w = widthAt(v);
     if (w < 0.2) continue;
-    const depth = w * (0.25 + Math.pow(rand(), 1.5) * 0.7);
+    const depth = w * (0.3 + Math.pow(rand(), 1.3) * 0.68);
     const gap = 2 + rand() * 7;                       // width of the split, px
     const y = H * (1 - v);
     const x1 = W * w + 4, x0 = W * (w - depth);

@@ -10292,7 +10292,8 @@ export async function startV3App(opts = {}) {
     onRenamed: () => vegUi?.refreshCards(),
     fieldTitle: "Tall Plant Field",
     tileReach: SUSUKI_FIELD.tileSize / 2,
-    showSpecies: true,   // three slots now: pick the species per slot
+    showSpecies: true,   // four slots now: pick the species per slot
+    sizeMax: 34,         // a jungle tree is 26 m
   });
 
   let _susukiPainting  = false;

@@ -101,10 +101,48 @@ export const FOLIAGE_PRESETS = {
   // `plumeSpread` frond length as % of trunk. `size` 11 m.
   palm: {
     kind: "palm",
-    fronds: 26, frondLength: 1.0, leaflets: 30, leafletWidth: 1.0, leafletAngle: 32,
-    spread: 1.0, arch: 0.9, droop: 0.5, stemWidth: 1, bareStalk: 0.12,
-    plumesPerStem: 3, plumeSpread: 50,
-    colorBase: "#2f6a2a", colorTip: "#8fb43c", colorHead: "#7d6b55", size: 11, translucency: 0.9,
+    fronds: 26, frondLength: 1.0, leaflets: 36, leafletWidth: 1.0, leafletAngle: 32,
+    spread: 1.0, arch: 0.9, droop: 0.5, stemWidth: 0.7, bareStalk: 0.12,
+    plumesPerStem: 3, plumeSpread: 32,
+    colorBase: "#2f6a2a", colorTip: "#8fb43c", colorHead: "#7d6b55", size: 17, translucency: 0.9,
+  },
+  // ARECA — the betel palm, *cau* (arecaGeometry.js). A CLUMP of very slender
+  // ringed canes, each with a small feathery crown and a green crownshaft;
+  // the opposite silhouette to the coconut, and the palm of village lanes
+  // rather than of beaches. `plumesPerStem` is the cane count, `bareStalk` the
+  // crownshaft. `size` 12 m.
+  areca: {
+    kind: "areca",
+    fronds: 8, frondLength: 1.0, leaflets: 20, leafletWidth: 1.0, leafletAngle: 26,
+    spread: 1.0, arch: 1.15, droop: 0.45, stemWidth: 1, bareStalk: 0.1,
+    plumesPerStem: 4, plumeSpread: 17,
+    colorBase: "#2d5c27", colorTip: "#77a340", colorHead: "#b2b6a4", size: 12, translucency: 1.0,
+  },
+  // JUNGLE TREE — the emergent over a rainforest (jungleTreeGeometry.js).
+  // Shared keys re-read: `fronds` is branches, `leaflets` plates per branch,
+  // `spread` the crown radius as a fraction of height, `bareStalk` the clean
+  // bole, `plumesPerStem` buttress roots, `plumeSpread` their reach in % of
+  // height. `size` 26 m — 2.4x the palm beside it, which is the point.
+  jungleTree: {
+    kind: "jungleTree",
+    fronds: 9, frondLength: 1.0, leaflets: 3, leafletWidth: 1.0, leafletAngle: 22,
+    spread: 0.34, arch: 0.85, droop: 0.35, stemWidth: 1, bareStalk: 0.62,
+    plumesPerStem: 5, plumeSpread: 9,
+    colorBase: "#27461f", colorTip: "#5c8235", colorHead: "#6b5a49", size: 26, translucency: 0.85,
+  },
+  // FAN PALM — the palmate palms (fanPalmGeometry.js): the northern *cọ* and
+  // the Mekong sugar palm, *thốt nốt*. The reason it exists is that the
+  // coconut and the betel palm are the same plant at different proportions —
+  // this one has a different LEAF (a pleated disc, not a feather), a crown
+  // that is a ball rather than a plume, and a skirt of dead leaves. `spread`
+  // opens the crown, `bareStalk` is the long bare petiole, `plumesPerStem`
+  // the skirt. `size` 16 m.
+  fanPalm: {
+    kind: "fanPalm",
+    fronds: 30, frondLength: 1.0, leaflets: 16, leafletWidth: 1.0, leafletAngle: 20,
+    spread: 1.0, arch: 0.45, droop: 0.55, stemWidth: 1, bareStalk: 0.32,
+    plumesPerStem: 6, plumeSpread: 30,
+    colorBase: "#33601f", colorTip: "#86a83a", colorHead: "#6f6553", size: 16, translucency: 0.8,
   },
   // CARD FERNS — the fern rosette drawn with the palm's half-frond cards and a
   // lace fern texture (fernCardGeometry.js). Beside the geometry ferns, not
@@ -124,12 +162,18 @@ export const FOLIAGE_PRESETS = {
   },
   // BANANA — pseudostem + torn paddle leaves by age (bananaGeometry.js).
   // `plumeSpread` = leaf length as % of stem, `plumesPerStem` = dead leaves.
+  // `size` 5 m, not 3.5, and `plumeSpread` 92% rather than 70: measured off
+  // plantation photographs, a mat's bearing stem is 3-4 m and its leaves reach
+  // 2-3 m BEYOND it, so the plant stands well over a man with its crown a good
+  // way above the stem's top. At 3.5 m with short leaves it was chest height
+  // and read as a houseplant. `spread` now also sets how many suckers stand
+  // round the bearing stem — a banana is a CLUMP.
   banana: {
     kind: "banana",
-    fronds: 10, frondLength: 1.0, leaflets: 6, leafletWidth: 1.0, leafletAngle: 18,
+    fronds: 11, frondLength: 1.0, leaflets: 6, leafletWidth: 1.0, leafletAngle: 18,
     spread: 1.0, arch: 0.7, droop: 0.4, stemWidth: 1, bareStalk: 0.08,
-    plumesPerStem: 2, plumeSpread: 70,
-    colorBase: "#2e6b2a", colorTip: "#7fb23a", colorHead: "#6f8a4a", size: 3.5, translucency: 1.2,
+    plumesPerStem: 2, plumeSpread: 92,
+    colorBase: "#2e6b2a", colorTip: "#7fb23a", colorHead: "#6f8a4a", size: 5, translucency: 1.2,
   },
   // TARO / elephant ear — knee-high heart leaves on thin petioles, wet ground.
   taro: {
@@ -246,7 +290,13 @@ const TYPE_DEFAULTS = [
 export const FOLIAGE_FIELD = { tileSize: 384, plantsPerSide: 288 };
 
 export const SUSUKI_FIELD = { tileSize: 400, plantsPerSide: 288 };
-export const TALL_PLANT_COUNT = 3;
+/**
+ * FOUR tall plants, one per RGBA channel of the paint layer. It was three for
+ * as long as alpha was spoken for; nothing ever wrote alpha, and the jungle
+ * trees needed a channel of their own rather than a whole new field with its
+ * own tile, its own save blob and its own distances.
+ */
+export const TALL_PLANT_COUNT = 4;
 
 export function createSusukiPlantState() {
   return {
@@ -288,6 +338,7 @@ export function createSusukiPlantState() {
       { name: "Susuki", preset: "susuki" },
       { name: "Bamboo", preset: "bamboo" },
       { name: "Palm",   preset: "palm" },
+      { name: "Jungle tree", preset: "jungleTree" },
     ].map((t) => ({
       name: t.name, preset: t.preset, castShadow: true,
       ...structuredClone(FOLIAGE_PRESETS[t.preset]),

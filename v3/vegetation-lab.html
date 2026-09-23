@@ -69,6 +69,10 @@
       import GUI from "./ui/labGui.js";
       import { createFoliageTypeGeometry, FOLIAGE_LODS } from "./render/foliage/foliageGeometry.js";
       import { drawPlumeTexture, PLUME_TEX_W, PLUME_TEX_H } from "./render/foliage/plumeTexture.js";
+      import { drawCanopyClusterTexture, CANOPY_TEX_W, CANOPY_TEX_H } from "./render/foliage/canopyClusterTexture.js";
+      import { coverageMippedTexture } from "./render/foliage/alphaCoverageMips.js";
+      import { drawFanLeafTexture, FAN_TEX_W, FAN_TEX_H } from "./render/foliage/fanLeafTexture.js";
+      import { drawLanceLeafTexture, LANCE_TEX_W, LANCE_TEX_H } from "./render/foliage/lanceLeafTexture.js";
       import { drawBambooSprayTexture, SPRAY_TEX_W, SPRAY_TEX_H } from "./render/foliage/bambooSprayTexture.js";
       import { drawPalmFrondTexture, FROND_TEX_W, FROND_TEX_H } from "./render/foliage/palmFrondTexture.js";
       import { drawFernFrondTexture, FERN_TEX_W, FERN_TEX_H } from "./render/foliage/fernFrondTexture.js";
@@ -78,15 +82,15 @@
 
       // The two card textures the engine draws (susuki plume, bamboo spray),
       // made the same way so the lab shows the same alpha the game will.
+      // Through the SAME coverage-preserving mip builder the engine uses, or
+      // the lab would flatter every card: a plain mip chain drops alpha-tested
+      // shapes below the threshold with distance, and judging a plant here
+      // that dissolves in the game is worse than not judging it at all.
       function canvasTexture(w, h, draw) {
         const canvas = document.createElement("canvas");
         canvas.width = w; canvas.height = h;
         draw(canvas);
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.NoColorSpace;
-        tex.anisotropy = 8;
-        tex.needsUpdate = true;
-        return tex;
+        return coverageMippedTexture(canvas, { threshold: 0.4, anisotropy: 8 });
       }
       const plumeTex = canvasTexture(PLUME_TEX_W, PLUME_TEX_H,
         (c) => drawPlumeTexture(c, { texSpread: 54, texStrands: 420, texStrandLen: 0.34, texDroop: 0.6 }));
@@ -97,14 +101,19 @@
       // engine gives each kind its own material, the lab swaps the texture.
       const bananaTex = canvasTexture(BROADLEAF_TEX_W, BROADLEAF_TEX_H, (c) => drawBananaLeafTexture(c));
       const taroTex = canvasTexture(BROADLEAF_TEX_W, BROADLEAF_TEX_H, (c) => drawTaroLeafTexture(c));
-      const frondSlot = { plume: plumeTex, spray: sprayTex, frond: frondTex, fern: fernTex, banana: bananaTex, taro: taroTex };
+      const canopyTex = canvasTexture(CANOPY_TEX_W, CANOPY_TEX_H, (c) => drawCanopyClusterTexture(c));
+      const fanTex = canvasTexture(FAN_TEX_W, FAN_TEX_H, (c) => drawFanLeafTexture(c));
+      const lanceTex = canvasTexture(LANCE_TEX_W, LANCE_TEX_H, (c) => drawLanceLeafTexture(c));
+      const frondSlot = { plume: plumeTex, spray: sprayTex, frond: frondTex, fern: fernTex, banana: bananaTex, taro: taroTex, fan: fanTex, lance: lanceTex };
+      // Part 4 is shared too: a bamboo spray and a jungle tree's leaf plate.
+      const spraySlot = { spray: sprayTex, canopy: canopyTex };
 
       const $ = (id) => document.getElementById(id);
       const err = (e) => { $("err").textContent = String(e?.stack || e?.message || e); console.error(e); };
 
       // ── Parameters ───────────────────────────────────────────────────────────
       const P = {
-        preset: "banana",
+        preset: "jungleTree",
         // grove
         count: 140,
         radius: 20,
@@ -387,8 +396,9 @@
         const isSpray = vPart.greaterThan(3.5).and(vPart.lessThan(4.5));
         const isFrond = vPart.greaterThan(4.5);
         frondTexNode = texture(frondTex, uv());
+        sprayTexNode = texture(sprayTex, uv());
         const cardAlpha = () => select(isPlume, texture(plumeTex, uv()).a,
-          select(isSpray, texture(sprayTex, uv()).a,
+          select(isSpray, sprayTexNode.a,
             select(isFrond, frondTexNode.a, float(1))));
         mat.opacityNode = Fn(() => {
           const a = cardAlpha();
@@ -401,11 +411,13 @@
       }
 
       let frondTexNode = null;
+      let sprayTexNode = null;
       const plantMat = makePlantMaterial();
-      /** Point the part-5 card slot at the texture this kind uses. */
+      /** Point the part-4 and part-5 card slots at the textures this kind uses. */
       function syncFrondTexture() {
         const key = cardTextureOf(T.kind);
-        if (frondTexNode && key && key !== "plume" && key !== "spray") frondTexNode.value = frondSlot[key];
+        if (frondTexNode && frondSlot[key] && key !== "plume" && key !== "spray") frondTexNode.value = frondSlot[key];
+        if (sprayTexNode && spraySlot[key]) sprayTexNode.value = spraySlot[key];
       }
       syncFrondTexture();
 
@@ -428,6 +440,11 @@
 
       /** Rebuild all three detail levels from the current plant numbers. */
       function rebuildGeometry() {
+        // The card slots are bound per KIND, so they have to be re-pointed
+        // whenever the shape is rebuilt — not only at boot. Without this a
+        // preset switch leaves the previous plant's texture on the new plant's
+        // cards, and you sit and judge a fan palm wearing a coconut frond.
+        syncFrondTexture();
         disposeLods();
         let localHeight = 1;
         for (let lod = 0; lod < FOLIAGE_LODS; lod++) {
@@ -664,6 +681,26 @@
       });
 
       let last = performance.now(), frames = 0, fps = 0;
+      // A console handle. This lab is where plant SHAPES get iterated on, and
+      // every iteration otherwise costs a reload to answer "what is actually
+      // bound to that card slot" or "show me LOD0 from over there".
+      window.__veg = {
+        P, camera, controls, frame, plantMat,
+        get T() { return T; },
+        tex: { plume: plumeTex, spray: sprayTex, frond: frondTex, fern: fernTex, banana: bananaTex, taro: taroTex, canopy: canopyTex, fan: fanTex, lance: lanceTex },
+        get sprayBound() { return sprayTexNode?.value?.uuid; },
+        rebuildGeometry, rebuildLayout, rebuildShapeGui, syncFrondTexture,
+        get frondBound() { return frondTexNode?.value?.uuid; },
+        /** Point the camera at the plant from a bearing, at a distance in metres. */
+        view(distM, bearingDeg = 25, pitchDeg = 18) {
+          const h = (T.size ?? 1) * (U.uPlantHeight.value || 1);
+          const a = (bearingDeg * Math.PI) / 180, e = (pitchDeg * Math.PI) / 180;
+          camera.position.set(Math.sin(a) * distM * Math.cos(e), distM * Math.sin(e) + h * 0.3, Math.cos(a) * distM * Math.cos(e));
+          controls.target.set(0, h * 0.45, 0);
+          controls.update();
+        },
+      };
+
       renderer.setAnimationLoop(() => {
         try {
           controls.update();

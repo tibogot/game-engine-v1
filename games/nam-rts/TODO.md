@@ -140,6 +140,57 @@ Keep this file current: tick things off here, add new asks here.
    lighting model + the two lift uniforms). WAITING ON YOU: where to sit on
    the trade — lower contrast and no black faces, or keep more per-leaf form.
    A/B/C shots taken at play zoom 2026-09-23; say the word for a live cycle.
+   [~] **BIG JUNGLE TREES — IN PROGRESS, stopped mid-iteration 2026-09-23.**
+   The headline from the inventory: **the map has NO trees at all.** 8 tree
+   slots, all empty, `trees.instances` = 0. Every "tree" on screen is a foliage
+   card; the tallest thing on the map was an 11 m palm. The canopy layer does
+   not exist, which is why the jungle reads as undergrowth.
+
+   WHERE IT LIVES (decided, built, working): a fourth TALL-PLANT type, not a
+   new field and not the v2 tree pipeline (that one needs preset JSONs, which
+   are yours to author — see the 2026-07-10 note). The tall-plant field already
+   does GPU culling, 3 LODs, fade, wind and shadows for the 9 m bamboo and the
+   11 m palm at 330-420 m, which is the optimisation asked for. Done:
+   · `TALL_PLANT_COUNT` 3 -> 4; the paint layer's ALPHA channel was free
+     (nothing ever wrote it) and the scatter field already reads 4 per page
+   · the density mask bake was writing `vec4(rgb, 1)` — a hard 1 in alpha,
+     which would have planted a tree on every texel of the map. Now carries it
+   · paint + fill channel clamps 2 -> 3, legacy collapse clears alpha too
+   · panel: 4th slot, `sizeMax` 34 (the slider stopped at 5 m — it could not
+     show the bamboo or the palm either), bark colour, buttress sliders
+   · `kind: "jungleTree"`, preset, `canopy` card texture key, lab wiring
+
+   THE TREE ITSELF IS NOT GOOD YET — your words: "your tree looks very ugly",
+   and you were right both times. Two failed versions, both for the same
+   reason, and the reason is the one the bamboo taught: DO THE SUM IN METRES.
+   · v1: 64 long leaves fanned from one point per card — read as a green COMB,
+     parallel bars, and 3 plates per branch left a skeleton with tags on it
+   · v2: 150 leaves over a disc — read as green SLABS, because each leaf was
+     60 cm long on a 6 m card. A wet-tropic broadleaf is 15-25 cm
+   · v3 (current): ~700 leaves at 0.045-0.08 of the card. The silhouette is
+     now right — clean bole, parasol crown, buttresses read at the foot.
+
+   THE OPEN LEAD, measured right before stopping: the cards still render as
+   solid RECTANGLES with hard corners, but the texture is fine — 41.6% opaque
+   and all four corners alpha 0. So the alpha is not reaching the material in
+   the LAB: the part-4 card texture swap (`spraySlot`, added to
+   v3/vegetation-lab.html) is not taking effect, or the plates are drawn
+   through another path. Check the lab's `syncFrondTexture` against the
+   ENGINE's `_cardMat("canopy")` path, and check it in the GAME too — the game
+   builds a separate material per card key and may well already be correct.
+
+   THEN: crown depth (two tiers of branches, not one), per-tree variation, the
+   LOD2 card count (the bamboo lesson: a coarse level must GROW its surviving
+   cards), and the wind — the field bends a plant by its HEIGHT fraction and
+   caps the lean at ~40 deg, which on a 26 m tree would be a catastrophe; it
+   has not been looked at yet.
+
+   NOT COMMITTED. Files: `v3/render/foliage/jungleTreeGeometry.js`,
+   `canopyClusterTexture.js` (both new), plus the wiring above.
+   Live test recipe: `__V3_DEBUG.grassTerrainData.stampSusukiDensity({cx, cz,
+   radius: 150, strength: 0.12, falloff: 0.6, worldSize: __NAM.worldSize,
+   channel: 3})` — strength IS the density for a 26 m tree; 1.0 gives a
+   thicket you cannot walk through. The lab boots on the tree.
    [x] **THE COLOUR PASS** (`tools/namVegPalette.mjs`, written into
    nam-valley.v3proj — **your look check**): every vegetation system on the map
    repainted at once — the 8 foliage plants, the 3 tall plants, all 8 tree
@@ -451,6 +502,140 @@ Vietnam, like Apocalypse Now.
       high above everything), banyan / strangler fig (aerial roots, huge wide
       crown), rubber trees in plantation ROWS (a French plantation is a great
       map feature), bamboo clumps already exist. Built in the **vegetation lab**
+- [x] **The coconut palm re-proportioned** (2026-09-23, your catch: "is my palm
+      tree not a tall tree?"). It was **11 m** — 4.7 soldiers high, where a real
+      coconut palm is 20-30 m and reads as about 14. It was a sapling standing
+      next to a 26 m tree. Now **17 m**, raised WITH its proportions rather than
+      by scaling: a coconut trunk stays ~35 cm thick however tall it grows
+      (stemWidth 1 -> 0.7) and its fronds stay 5-6 m (plumeSpread 50% -> 32%),
+      so scaling the plant would have given it a metre-thick trunk and
+      nine-metre fronds. Bamboo is still short at 9 m (real giant bamboo is
+      20-30); **your call** whether it goes up too.
+      NOTE: the MAP carries its own copy (susuki.plants), so nam-valley still
+      has the 11 m palm until a tools script writes the new numbers in.
+- [~] **ARECA / betel palm** (`arecaGeometry.js`, new kind `areca`): a clump of
+      4 very slender ringed canes (1:75), green crownshafts, small feathery
+      crowns, orange betel nuts. Built and it works — but YOUR VERDICT was that
+      it reads too much like the coconut, and you are right: both are PINNATE
+      palms, same feather leaf, same crown, different proportions. Kept in the
+      tree but not counted as the new palm. **Your call: keep it as a village
+      plant or drop it.**
+- [x] **FAN PALM — the actually different palm** (`fanPalmGeometry.js` +
+      `fanLeafTexture.js`, kind `fanPalm`), DONE 2026-09-23 after a proper
+      orbit-and-LOD pass. Palmate, not pinnate: the leaf is a pleated disc of
+      radiating forked segments, so at distance it reads as a hard spiked star
+      where a coconut reads as a soft plume. One generator covers the northern
+      *co* (Livistona) and the Mekong *thot not* (Borassus sugar palm).
+      **984 / 328 / 64 triangles**; a 140-tree grove is 8 draw calls.
+
+      WORKED FROM PHOTOGRAPHS, not from memory — that was the difference.
+      Wikimedia Commons: Borassus flabellifer (Asian Palmyra), Livistona
+      chinensis, Livistona decipiens. Three things the photos corrected:
+      · THE LEAF IS NEARLY A FULL CIRCLE, ~300 degrees — a disc with a notch
+        where the petiole enters. It had been drawn as a 157-degree HALF-disc,
+        which is a hand fan, and no arrangement of geometry could make a crown
+        out of it.
+      · THE SEGMENTS DROOP AND FORK. The spiky outline is the plant's
+        signature; a clean rim is a dinner plate.
+      · THE CROWN IS A DENSE BALL and the lowest live leaves hang BELOW the
+        horizontal. Stopping at level reads as a shuttlecock.
+
+      THE METHOD, worth keeping: a CONTACT SHEET. `window.__sheet(preset)` in
+      the lab renders six camera angles — eye level, the other side, RTS pitch,
+      high, straight down, inside the crown — into one image, and a second
+      sheet does LOD0/1/2 and the grove at three ranges. Every defect below was
+      found by looking at that sheet and none of them were visible from the one
+      angle the lab boots at.
+
+      THREE REAL BUGS IT CAUGHT:
+      · the lab bound card textures at BOOT only, so a preset switch left the
+        previous plant's texture on the new plant's cards — I spent a pass
+        judging a fan palm wearing a coconut frond. `rebuildGeometry` now
+        rebinds.
+      · the fan part was at normal-lift 0.5 (the coconut's value, right for a
+        folded V) and the leaves facing away from the sun went black. 0.8 now.
+      · **the coarse trunk was BLACK, and the cause is latent in the palm and
+        the areca too**: part 3 shades with its normal multiplied by
+        `faceDirection`, so on a DOUBLE-SIDED quad the back face flips — and a
+        crossed pair always shows one back face. Not the width, not the
+        colour: the winding. The far trunk now uses part 2, which carries the
+        same `colorHead` but turns its normal toward the viewer instead of
+        flipping it. **TODO: fix the same thing in palmGeometry and
+        arecaGeometry's far levels.**
+      LEFT on it: the trunk could carry the diamond leaf-base pattern a real
+      Borassus has, and a second colour for the dry-season look.
+- [x] **BUSH + GROUND COVER rebuilt on leaf CARDS** (2026-09-23,
+      `lanceLeafTexture.js` new, `buildLeafy` rewritten). These two were the
+      worst-looking plants on the map — the triage lineup made it obvious — and
+      both for one reason: **their leaves were geometry**. Each leaf was a
+      three-segment polygon strip whose outline WAS the leaf's outline, so
+      every leaf was an angular slab of five triangles with no taper, no curve
+      and no point. They read as painted cardboard beside the ferns, and they
+      cover more screen than anything else on the map.
+      Now each leaf is ONE CARD with the shape in its alpha: **90 triangles a
+      bush against 210**, a real silhouette, and two leaf variants (whole and
+      torn) in one texture so a clump is not fifty copies of one leaf.
+      AND THE ARCHITECTURE NOW DIFFERS: a bush is a GINGER CLUMP — upright
+      canes with leaves alternating up two ranks, arching over — while ground
+      cover stays a low rosette. Giving both the same rosette is why the jungle
+      floor read as one plant at two sizes.
+      Drawn from Alpinia photographs (Wikimedia Commons). Three sums that were
+      wrong and are worth remembering:
+      · the blade was 2.3:1 where a lance leaf is ~4.5:1 — the bush read as a
+        cabbage for exactly the reason everything else here has been wrong
+      · the "nibbled margin" ran at frequency 37 sampled over 42 steps, so it
+        ALIASED into big scallops: the outline looked chewed, not nibbled
+      · the card's aspect has to match the half-texture it samples (256x512, so
+        half as wide as long) or the leaf is stretched on the card
+      NEXT in your order: **banana** (same cardboard problem at a larger size).
+      Then re-shoot the whole-map lineup to confirm the floor really changed.
+- [x] **BANANA rebuilt as a CLUMP** (2026-09-23). Unlike the bush, its
+      architecture and its texture were already right — the problem was that it
+      was one plant at half scale. Corrected against PLANTATION photographs
+      (Wikimedia Commons), which is the lesson of this one:
+      **SEARCH FOR THE HABIT, NOT THE SPECIES.** Searching "banana" or
+      "Alpinia" returns macro shots of flowers and fruit, because that is what
+      botanical collections are full of, and you cannot see a silhouette in a
+      close-up. "plantation", "habit", "grove", "field" return whole plants.
+      Two passes were wasted on fruit close-ups before this was obvious.
+      What the whole-plant shots corrected:
+      · A BANANA IS A MAT. A tall bearing stem with two or three suckers of
+        stepped heights round its foot — a plantation is a wall of them. One
+        stem reads as a specimen in a pot. `spread` now sets the sucker count.
+      · SIZE 3.5 m -> 5, leaf length 70% -> 92% of the stem. The bearing stem
+        is 3-4 m and the leaves reach 2-3 m BEYOND it, so the crown stands well
+        above a man. At 3.5 m it was chest height — a houseplant.
+      · THE CROWN REACHES UP. Oldest leaf tilt 2.1 rad -> 1.55: in the photos
+        very little hangs below the stem's top. At 2.1 the old leaves lay flat
+        and it read as a rosette on a post.
+      · THE LEAVES ARE SHREDDED. Tears 14 -> 26; in the open the wind cuts a
+        banana leaf to the midrib within weeks, and an untorn one reads as
+        plastic at any distance.
+      1,589 / 563 / 96 triangles for the whole clump.
+      ONE THING I NEARLY "FIXED" THAT WAS RIGHT: the pseudostem renders
+      brown-tan and I was about to make it green. The plantation photographs
+      show it IS brown — dried sheaths — over the lower half. Checked before
+      changing it.
+- [ ] **TRAVELLER'S PALM / Ravenala** — your reference photos, 2026-09-23 (two
+      of the three you sent are this plant). THE flat-fan silhouette, and
+      nothing on the map has anything like it:
+      · long BARE petioles, all in ONE PLANE, radiating from a stacked base —
+        a peacock's tail, not a crown. From the side it is a huge flat fan; end
+        on it nearly disappears. That plane is the whole plant.
+      · each petiole ends in a torn BANANA paddle, wind-split along its veins
+      · the base is a fat stack of overlapping leaf bases, pale green
+      · 8-12 m, ornamental — planted at houses, temples and town gardens in
+        Vietnam rather than growing wild in the jungle, so it belongs at the
+        hamlet, the resid ence and the temple approach, not scattered in the
+        canopy. It is the right plant to make a PLACE look planted.
+      Cheap to build: the existing banana blade texture on long straight
+      petioles, all at one azimuth. Probably the best look-per-triangle on the
+      whole list.
+- [ ] **Fan palm trunk: the diamond boot pattern** — your third photo shows it
+      clearly. A fan palm keeps its old leaf BASES on the trunk in a
+      criss-cross diamond lattice for years before they shed. Currently the
+      trunk is smooth with plain rings. It is the detail that makes the trunk
+      read as a palm rather than a post, and it is a texture job, not geometry.
 - [ ] **Palm variety for free**: the palm is procedural, so every instance can
       differ at no draw cost — trunk curve/lean, height, crown size, frond
       count/droop, dead hanging fronds. Per-instance params, not new types

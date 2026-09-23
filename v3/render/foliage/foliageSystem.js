@@ -25,10 +25,14 @@ import { drawBambooSprayTexture, SPRAY_TEX_W, SPRAY_TEX_H } from "./bambooSprayT
 import { drawPalmFrondTexture, FROND_TEX_W, FROND_TEX_H } from "./palmFrondTexture.js";
 import { drawFernFrondTexture, FERN_TEX_W, FERN_TEX_H } from "./fernFrondTexture.js";
 import { drawBananaLeafTexture, drawTaroLeafTexture, BROADLEAF_TEX_W, BROADLEAF_TEX_H } from "./broadleafTextures.js";
+import { drawCanopyClusterTexture, CANOPY_TEX_W, CANOPY_TEX_H } from "./canopyClusterTexture.js";
+import { drawFanLeafTexture, FAN_TEX_W, FAN_TEX_H } from "./fanLeafTexture.js";
+import { drawLanceLeafTexture, LANCE_TEX_W, LANCE_TEX_H } from "./lanceLeafTexture.js";
 import { bakeObjectThumbnails } from "../../../v2/tools/objectThumbnails.js";
 import { ScatterField } from "../scatter/scatterField.js";
 import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
 import { foliageLeafLift, foliageTopdownLift } from "./foliageLighting.js";
+import { coverageMippedTexture } from "./alphaCoverageMips.js";
 import { FOLIAGE_TYPE_COUNT } from "../../app/state/foliageScatterState.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
@@ -65,19 +69,26 @@ const CARD_TEXTURES = {
   fern:  { w: FERN_TEX_W,  h: FERN_TEX_H,  draw: drawFernFrondTexture },
   banana: { w: BROADLEAF_TEX_W, h: BROADLEAF_TEX_H, draw: drawBananaLeafTexture },
   taro:   { w: BROADLEAF_TEX_W, h: BROADLEAF_TEX_H, draw: drawTaroLeafTexture },
+  canopy: { w: CANOPY_TEX_W, h: CANOPY_TEX_H, draw: drawCanopyClusterTexture },
+  fan:    { w: FAN_TEX_W, h: FAN_TEX_H, draw: drawFanLeafTexture },
+  lance:  { w: LANCE_TEX_W, h: LANCE_TEX_H, draw: drawLanceLeafTexture },
 };
 
-/** Draw one card texture. `anisotropy` for the live field; the thumbnails go without. */
+/**
+ * Draw one card texture. `anisotropy` for the live field; thumbnails go without.
+ *
+ * The mip chain is built on the CPU with COVERAGE PRESERVED (see
+ * alphaCoverageMips.js), not by the GPU: these are alpha-TESTED cards, and a
+ * plain averaged mip drops thin shapes under the threshold, so a spray, a
+ * frond or a leaf cluster thins out and finally dissolves as the camera pulls
+ * back. Every card plant on the map goes through here.
+ */
 function makeCardTexture(key, anisotropy = 0) {
   const spec = CARD_TEXTURES[key];
   const canvas = document.createElement("canvas");
   canvas.width = spec.w; canvas.height = spec.h;
   spec.draw(canvas);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.NoColorSpace;
-  if (anisotropy) tex.anisotropy = anisotropy;
-  tex.needsUpdate = true;
-  return tex;
+  return coverageMippedTexture(canvas, { threshold: 0.4, anisotropy });
 }
 
 /**
