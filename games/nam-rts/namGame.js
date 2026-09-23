@@ -85,8 +85,9 @@ import { createHarvesting } from "./harvesting.js";
 import { createRequisition } from "./requisition.js";
 import { createTraps } from "./traps.js";
 import { createRequisitionRenderer } from "./requisitionRenderer.js";
-import { hamletSitesFor, pointSitesFor, tunnelSitesFor } from "./pointSites.js";
+import { hamletSitesFor, pointSitesFor, templeSitesFor, tunnelSitesFor } from "./pointSites.js";
 import { placeHamlet } from "./village.js";
+import { placeTemple } from "./temple.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
 import { createWaves } from "./waves.js";
@@ -1092,6 +1093,21 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
         console.log(`[village] ${site.name}: ${n} pieces at (${site.x}, ${site.z})`);
       } catch (e) {
         console.warn(`[village] ${site.name} failed:`, e);
+      }
+    }
+  }
+
+  // The Khmer ruins (temple.js): the tower and its galleries round a courtyard,
+  // the gate, the causeway with its nāga rail, and the fig pulling the lot
+  // down. Far out east, away from the fighting. ?temple=0 boots without it.
+  if (new URLSearchParams(location.search).get("temple") !== "0") {
+    onStatus("Finding the temple…");
+    for (const site of templeSitesFor(boot.name)) {
+      try {
+        const n = await placeTemple(app, placed, site);
+        console.log(`[temple] ${site.name}: ${n} pieces at (${site.x}, ${site.z})`);
+      } catch (e) {
+        console.warn(`[temple] ${site.name} failed:`, e);
       }
     }
   }

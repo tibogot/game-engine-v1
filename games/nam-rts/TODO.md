@@ -180,7 +180,24 @@ Vietnam, like Apocalypse Now.
 - [ ] **Bamboo prisoner cages** (your ask): the tiger cages — low bamboo cages
       on the mud, one with a man in it, the POW pit with a grating over it.
       Could be a real objective: reach it and free the prisoners
-- [ ] **KURTZ COUNTRY — the Cambodian temple and its ruins** (your ask). The
+- [~] **KURTZ COUNTRY — the temple** STARTED 2026-09-23
+      (`v3/render/objects/rtsTemple.js` + `games/nam-rts/temple.js`, sited in
+      `pointSites.TEMPLE_SITES` at (340, 214), `?temple=0` boots without it).
+      Tower with four Bayon faces, gate with a real passage, galleries round a
+      courtyard, nāga causeway, strangler fig, rubble. 13 pieces, merged into
+      the existing placedObjects draws.
+      **The lesson**: the first build stacked it out of blocks, one box per
+      stone, and read as Lego. What this architecture is legible BY is its
+      MOULDINGS — so the forms are now swept profiles (`mouldedRing` /
+      `mouldedRun`: plinth, banded wall, cornice), the carved parts are lathes
+      and shaped solids (colonettes, lintels, pediments, the faces), and the
+      chipped `stoneBlock` is only used for fallen and loose stone. The atlas
+      grew a FIFTH ROW for sandstone, laterite and moss (it was full at 16).
+      LEFT on it — **your look check first** — then: the tribe's village built
+      into the ruins, heads on pikes along the approach, standing stones and
+      totems on the paths in, saplings and leaf litter in the courtyard, and
+      the ground inside it worn bare
+- [ ] **Its dressing** (the rest of your ask). The
       Apocalypse Now compound: a Khmer temple half taken by the jungle — laterite
       blocks, a corbelled doorway, a four-faced Bayon tower, nāga balustrade,
       apsara reliefs, a collapsed gallery, strangler-fig roots over the walls —

@@ -63,6 +63,17 @@ export const HAMLET_SITES = {
   ],
 };
 
+/**
+ * THE TEMPLE (temple.js) — Kurtz country. Far east, 185 m from the nearest
+ * point or HQ, on the flattest ground the map has outside the fighting: the
+ * place is supposed to be somewhere you go out of your way to reach.
+ */
+export const TEMPLE_SITES = {
+  "nam-valley": [
+    { name: "the temple", x: 340, z: 214, rotY: 2.9 },
+  ],
+};
+
 const mapKey = (worldName) => String(worldName ?? "").replace(/\.v3proj$/i, "").replace(/^.*[\\/]/, "");
 
 /** The authored sites for a level ("nam-valley.v3proj" → "nam-valley"), or null. */
@@ -73,6 +84,11 @@ export function pointSitesFor(worldName) {
 /** The level's tunnel entrances, or an empty list. */
 export function tunnelSitesFor(worldName) {
   return TUNNEL_SITES[mapKey(worldName)] ?? [];
+}
+
+/** The level's temple compounds, or an empty list. */
+export function templeSitesFor(worldName) {
+  return TEMPLE_SITES[mapKey(worldName)] ?? [];
 }
 
 /** The level's hamlets, or an empty list. */

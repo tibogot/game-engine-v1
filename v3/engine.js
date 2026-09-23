@@ -73,6 +73,7 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/objects/rtsColonial.js",
   "v3/render/objects/rtsEnemyKit.js",
   "v3/render/objects/rtsVillage.js",
+  "v3/render/objects/rtsTemple.js",
   "v3/render/objects/rtsVillageHut.js",
   "v3/render/objects/rtsHut.js",
   "v3/render/objects/rtsSigns.js",

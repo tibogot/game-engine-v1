@@ -736,13 +736,126 @@ export function makeRoofTileTexture({ size = 512, seed = 109 } = {}) {
   });
 }
 
+// ── The Khmer temple's stone ─────────────────────────────────────────────────
+
+/**
+ * SANDSTONE, the block a Khmer temple is faced and carved in: warm grey-buff,
+ * bedded in fine horizontal laminae, and after eight hundred monsoons its
+ * upward faces are streaked black where water runs and patched pale where the
+ * surface has spalled away. The lamination is what tells it from concrete —
+ * stone remembers how it was laid down.
+ */
+export function makeSandstoneTexture({ size = 512, seed = 131 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        // Bedding: fine bands across the block, warped so they are not a ruler.
+        const warp = (fbm(u * P * 2 + seed, v * P * 2, P * 2, 3) - 0.5) * 0.06;
+        const band = vnoise(u * P * 1.5, (v + warp) * P * 26, P * 26);
+        const mott = fbm(u * P * 3 + seed * 2, v * P * 3, P * 3, 4);
+        // Deeper and browner than a first guess at "sandstone": under this
+        // map's midday sun and blue sky fill, a light warm grey renders as pale
+        // CONCRETE. Old temple stone wants to sit darker than it looks on paper.
+        let r = lerp(126, 152, mott) + (band - 0.5) * 12;
+        let gg = r * 0.88, b = r * 0.68;
+        // Weathering: black organic streaks running down, and pale spall scars.
+        // Gentler than a first guess: at full strength the weathering streaks
+        // read as HATCHING close up — a stone wall drawn with a fine-liner.
+        const streak = clamp01((vnoise(u * P * 7 + 3, v * P * 1.1, P * 7) - 0.58) * 3.4);
+        r -= streak * 30; gg -= streak * 27; b -= streak * 22;
+        const spall = clamp01((fbm(u * P * 5 + 17, v * P * 5 + 9, P * 5, 3) - 0.62) * 7);
+        r = lerp(r, 168, spall * 0.55); gg = lerp(gg, 154, spall * 0.55); b = lerp(b, 124, spall * 0.55);
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
+/**
+ * LATERITE, what the same temple is BUILT of behind the facing: iron-rich
+ * tropical soil cut wet and hardened in the air, so it is rust-red and full of
+ * holes — a sponge turned to stone. The holes are the whole read; a smooth
+ * red surface is a brick, a pitted one is laterite.
+ */
+export function makeLateriteTexture({ size = 512, seed = 137 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const mott = fbm(u * P * 3 + seed, v * P * 3, P * 3, 4);
+        let r = lerp(126, 158, mott), gg = lerp(74, 96, mott), b = lerp(52, 66, mott);
+        // The vughs: irregular holes, dark inside, at two sizes.
+        const hole = clamp01((fbm(u * P * 7 + 5, v * P * 7 + 11, P * 7, 2) - 0.58) * 9);
+        const pit = clamp01((fbm(u * P * 16 + 31, v * P * 16 + 3, P * 16, 2) - 0.62) * 10);
+        const dark = Math.max(hole, pit * 0.7);
+        r -= dark * 62; gg -= dark * 40; b -= dark * 28;
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
+/**
+ * MOSS AND LICHEN — the green-black that grows on everything standing in a
+ * jungle. Its own surface rather than a tint, so a ruin can be part stone and
+ * part overgrown per PART, which is what makes stonework read as old instead
+ * of as new stone that happens to be broken.
+ */
+export function makeMossTexture({ size = 512, seed = 139 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const clump = fbm(u * P * 4 + seed, v * P * 4, P * 4, 4);
+        const fine = fbm(u * P * 14 + 7, v * P * 14, P * 14, 2);
+        // Dark. Moss in a jungle is nearly black-green in the shade, and at
+        // the brightness this started with the mossed blocks popped off the
+        // stone like painted panels.
+        let r = lerp(34, 56, clump) + (fine - 0.5) * 14;
+        let gg = lerp(46, 74, clump) + (fine - 0.5) * 18;
+        let b = lerp(28, 42, clump) + (fine - 0.5) * 10;
+        // Bare stone showing through where the moss is thin.
+        const bare = clamp01((0.42 - clump) * 5);
+        r = lerp(r, 118, bare * 0.8); gg = lerp(gg, 112, bare * 0.8); b = lerp(b, 96, bare * 0.8);
+        // Pale crustose lichen, in rings.
+        const lich = clamp01((vnoise(u * P * 9 + 23, v * P * 9 + 41, P * 9) - 0.68) * 8);
+        r = lerp(r, 138, lich); gg = lerp(gg, 140, lich); b = lerp(b, 118, lich);
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 export const ATLAS_COLS = 4;
-export const ATLAS_ROWS = 4;
+// FIVE rows, not four: the sixteen were full, and the Khmer ruins need stone
+// that is actually stone (sandstone, laterite, moss). The fifth row costs a
+// quarter more atlas — 2048x2560 instead of 2048x2048 — and the shader reads
+// its size from these two constants, so nothing else has to know.
+export const ATLAS_ROWS = 5;
 /** Fraction of a cell kept clear at its border, so mips cannot bleed across. */
 export const ATLAS_PAD = 0.004;
 
 /**
- * Every surface in ONE texture, 4x3 cells, indexed by MAT.
+ * Every surface in ONE texture, 4x5 cells, indexed by MAT.
  *
  * WHY. The shader picks a surface per vertex from `matId`. With seven separate
  * textures and a select() chain the GPU evaluates EVERY arm — select is not a
@@ -776,6 +889,9 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeRubberTexture({ size: cell }),
     makeStuccoTexture({ size: cell }),
     makeRoofTileTexture({ size: cell }),
+    makeSandstoneTexture({ size: cell }),
+    makeLateriteTexture({ size: cell }),
+    makeMossTexture({ size: cell }),
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;

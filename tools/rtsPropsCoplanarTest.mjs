@@ -34,6 +34,7 @@ import {
   buildFence, buildGranary, buildJarCluster, buildOxCart, buildPigPen, buildShrine,
   buildStrawRick, buildWashingLine, buildWell,
 } from "../v3/render/objects/rtsVillage.js";
+import { buildFigRoots, buildNagaBalustrade, buildTempleGallery, buildTempleGopura, buildTempleRubble, buildTempleTower } from "../v3/render/objects/rtsTemple.js";
 import { buildGunPitBody, buildGunPitGun, buildBunker, buildHelipad, buildNestBody, buildNestGun, buildRequisitionMast, buildSandbagWallPiece } from "../v3/render/objects/rtsBuildables.js";
 
 let failed = 0;
@@ -206,6 +207,14 @@ check("bamboo clump", buildBambooClump());
 check("banana clump", buildBananaClump());
 check("pig pen", buildPigPen());
 check("washing line", buildWashingLine());
+
+console.log("Khmer ruins");
+check("temple tower", buildTempleTower());
+check("temple gallery", buildTempleGallery());
+check("temple gopura", buildTempleGopura());
+check("temple rubble", buildTempleRubble());
+check("naga balustrade", buildNagaBalustrade());
+check("strangler fig", buildFigRoots());
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

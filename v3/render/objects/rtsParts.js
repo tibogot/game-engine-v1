@@ -45,8 +45,11 @@ export const MAT = {
   // and read as rust. Rubber for tyres, clean dark steel for tracks and guns.
   steel: 12, rubber: 13,
   // The enemy's French colonial HQ: ochre limewashed stucco, terracotta tile.
-  // The atlas is full at 16.
   stucco: 14, tile: 15,
+  // The Khmer ruins (rtsTemple.js): the sandstone a temple is faced and carved
+  // in, the pitted laterite it is built of behind that, and the moss that
+  // covers whatever has stood still long enough. Row five of the atlas.
+  sandstone: 16, laterite: 17, moss: 18,
 };
 
 /** Strip anything merge would choke on, and guarantee the attribute set. */
