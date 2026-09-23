@@ -236,6 +236,9 @@ export async function placeHamlet(app, placed, { x, z, rotY = 0 } = {}) {
     const w = toWorld(p, { x, z, rotY });
     items.push({
       obj: new THREE.Mesh(geo, mat), x: w.x, z: w.z, rotY: w.rotY,
+      // A hut stands on SWEPT EARTH — its yard, broomed daily — not on the
+      // laterite pad a firebase bulldozes (buildingAprons.js).
+      ground: "swept",
       ...(PLACEMENT[p.kind] ?? {}),
     });
   }

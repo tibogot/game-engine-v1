@@ -136,6 +136,9 @@ export async function placeTemple(app, placed, { x, z, rotY = 0 } = {}) {
     const w = toWorld(p, { x, z, rotY });
     items.push({
       obj: new THREE.Mesh(geo, mat), x: w.x, z: w.z, rotY: w.rotY,
+      // A temple courtyard is SWEPT earth, not a bulldozed laterite pad —
+      // the red firebase apron read as US-military under a pagoda.
+      ground: "swept",
       ...(PLACEMENT[p.kind] ?? {}),
     });
   }

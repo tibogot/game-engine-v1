@@ -51,6 +51,7 @@ const PH = (slug) => ({
 export const PHOTO_SOURCES = {
   road:     PH("red_dirt_mud_01"),        // the Dirt road layer's own set
   laterite: PH("red_laterite_soil_stones"),
+  lowland:  PH("dry_mud_field_001"),      // the Lowland floor layer's own set
   gravel:   PH("gravel_ground_01"),
   burned:   PH("burned_ground_01"),
   stones:   PH("red_mud_stones"),
@@ -341,6 +342,56 @@ function apron({ xm, vm, W, L, n }) {
 }
 
 /**
+ * SWEPT YARD — the ground round a village hut: packed earth, broomed every
+ * morning. Smooth (most of the photo's grain is gone — feet and brooms flatten
+ * it), a shade lighter and dustier than the field round it, and scored with
+ * faint BROOM ARCS: families of parallel curved strokes, each set swung from
+ * its own pivot where someone stood. The arcs are relief of a few millimetres
+ * — they vanish head-on and appear only where the low sun rakes them,
+ * which is exactly how swept earth looks. Rounder than the firebase apron (a
+ * yard is worn, not cut), but reaching the same extent, so buildingAprons
+ * sizes both the same way.
+ */
+function sweptYard({ xm, vm, W, L, n, seed }) {
+  const x = (xm - W / 2) / (W * 0.4), z = (vm - L / 2) / (L * 0.4);
+  const sq = Math.pow(Math.pow(Math.abs(x), 2.6) + Math.pow(Math.abs(z), 2.6), 1 / 2.6);
+  const edge = sq + (fbm(n, xm * 0.45, vm * 0.45, 3) - 0.5) * 0.3 + (n(xm * 3, vm * 3) - 0.5) * 0.08;
+  const inside = 1 - smoothstep(0.8, 1.04, edge);
+  // Broom arcs: five pivots, each a band of strokes over an arc of radius
+  // ~1.4 m (an arm and a broom), faded in and out along the swing.
+  let strokes = 0;
+  for (let k = 0; k < 5; k++) {
+    const hk = (j) => n(k * 13.7 + j * 3.1 + seed, 5.3 + j);
+    const cx = W * (0.2 + 0.6 * hk(1)), cz = L * (0.2 + 0.6 * hk(2));
+    const R = 1.1 + 0.8 * hk(3);
+    const dx = xm - cx, dz = vm - cz;
+    const r = Math.hypot(dx, dz);
+    const band = 1 - smoothstep(0.35, 0.7, Math.abs(r - R));
+    if (band <= 0) continue;
+    const ang = Math.atan2(dz, dx) - hk(4) * Math.PI * 2;
+    const swing = Math.sin(((ang % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) * 0.5) ** 2;
+    // 22 cm apart — a broom's own width, and ~9 texels at 512 over 12 m (a
+    // tighter pitch aliases into moiré at this resolution).
+    const s = 0.5 + 0.5 * Math.sin((r * 2 * Math.PI) / 0.22 + n(xm * 4, vm * 4) * 2);
+    strokes = Math.max(strokes, s * band * swing);
+  }
+  // A few darker trodden patches: the doorstep, the path to the well.
+  const trod = smoothstep(0.6, 0.75, fbm(n, xm * 0.4 + 7, vm * 0.4, 3));
+  return {
+    a: inside * (0.88 + 0.12 * fbm(n, xm * 2, vm * 2, 3)),
+    // Tuned on the lit preview: at nW 0.3 the field photo's clods still read
+    // as rough ground and drowned the arcs. Swept earth is SMOOTH and a dusty
+    // step LIGHTER — but only a step: at mul 1.18 / sat 0.9 the yards went
+    // chalky beige in the midday sun at play zoom, pale patches rather than
+    // earth. 1.1 / 1.0 keeps them lighter than the field and still soil.
+    h: 0.006 * strokes,
+    mul: 1.1 - 0.14 * trod + 0.04 * strokes,
+    sat: 1.0,
+    nW: 0.12,
+  };
+}
+
+/**
  * SCORCH — burned ground: a charred core fading through ash-grey to a ragged,
  * streaky edge. Colour mostly comes from the burned-ground photo itself.
  */
@@ -422,6 +473,7 @@ export const PHOTO_RECIPES = {
   // Compacted LATERITE, not grey gravel: grey read as a foreign pale patch on
   // the red soil at play zoom. A Vietnam firebase pad was red earth and stones.
   apron:      { fn: apron,      photo: "laterite", size: [12, 12],   tileM: 5 },
+  sweptYard:  { fn: sweptYard,  photo: "lowland",  size: [12, 12],   tileM: 7 },
   scorch:     { fn: scorch,     photo: "burned",   size: [10, 10],   tileM: 6 },
   debris:     { fn: debris,     photo: "stones",   size: [16, 16],   tileM: 6 },
 };

@@ -1017,8 +1017,17 @@ is not lost while Kurtz is being built.
       round a mast keeps its grass). 133 at boot. Engine: `app.decals`
       exposes the decal system to games. The 11 old grid aprons are gone.
       Verified mid-match: flattenRect at a new spot -> apron + cleared pad.
-      NEXT, if wanted: swept-earth apron for the village huts (same hook,
-      different art).
+      [x] **Swept-earth yards for the village** (same day): flattenRect takes
+      `ground: "laterite" | "swept" | "none"`, placedObjects passes an
+      item's `ground` through, village.js asks for "swept". New
+      `sweptYard` art (decalPhotoArt): the Lowland floor's own photo, grain
+      flattened (nW 0.12), a dusty step lighter, broom arcs 22 cm apart as
+      3-6 mm relief that only a raking sun picks out. 34 yards at Ap Bang;
+      the slot is added at runtime (the map does not carry it).
+      Your "do what looks best" (same day): yards toned from chalky beige
+      to warm tan (mul 1.18/sat 0.9 -> 1.1/1.0 — still a step lighter than
+      the field), and the TEMPLE swept too (12 yards; laterite under a
+      pagoda read US-military).
 - [ ] **CPU 36 ms spike after a few minutes of a match** — seen 2026-09-24 in
       the overlay (27 FPS, CPU 36 ms; 7-10 ms at boot) with the enemy AI
       running. Not investigated.

@@ -48,7 +48,9 @@ export function createPlacedObjects(app) {
   /**
    * Place a batch. Each item: { obj, x, z, rotY = 0, scale = 1, pad = true,
    * clear = 0 (m of vegetation), nav = pad, cover = pad, apron = 0.5,
-   * merge = true (static; false for anything that animates or is a GLB) }.
+   * merge = true (static; false for anything that animates or is a GLB),
+   * ground = the apron decal under the pad: "laterite" (default), "swept"
+   * (a village yard) or "none" — see buildingAprons.js }.
    */
   async function place(items) {
     const c0 = Math.cos, s0 = Math.sin;
@@ -72,7 +74,7 @@ export function createPlacedObjects(app) {
         const lx = sx * hx, lz = sz * hz;
         y += app.getWorldHeight(px + lx * c + lz * s, pz - lx * s + lz * c); n++;
       }
-      await app.flattenRect(px, pz, hx, hz, y / n, { rotY: it.rotY, rim: 3 });
+      await app.flattenRect(px, pz, hx, hz, y / n, { rotY: it.rotY, rim: 3, ground: it.ground });
       removeMapPropsIn(it.fp);
     }
 

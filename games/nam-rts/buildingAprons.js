@@ -5,8 +5,10 @@
 // HQ, the requisition masts, the camp gate, placed objects, and anything the
 // player builds mid-match (structures.js). That call already knows the
 // footprint (centre, half-extents, turn), so this wraps it: once the pad is
-// levelled, a compacted-laterite apron decal is laid under it, turned with the
-// building and reaching MARGIN metres past its footprint.
+// levelled, an apron decal is laid under it, turned with the building and
+// reaching MARGIN metres past its footprint — compacted laterite for the
+// firebase, a swept-earth yard for a village hut (`ground` on the call; see
+// GROUNDS).
 //
 // SIZE. The apron art (decalPhotoArt `apron`) is a rounded rectangle whose
 // solid part reaches HALF_FRACTION of the decal box from its centre, so the box
@@ -24,10 +26,25 @@ const MARGIN = 2.2;          // metres of apron beyond the footprint
 const HALF_FRACTION = 0.368; // art: solid edge at 0.4 · 0.92 of the box
 const CORE_FRACTION = 0.6;   // art: fully opaque across ~60 % of the box
 const MAX_BOX = 16;          // metres; bigger boxes stretch the grain
-const APRON_ART = {
-  name: "apron (photo)",
-  albedoUrl: "/textures/decals/nam/apron_1.webp",
-  normalUrl: "/textures/decals/nam/apron_1_n.webp",
+/**
+ * The ground a pad gets, by `opts.ground` on the flattenRect call:
+ *   laterite  (default) the bulldozed red pad of a firebase
+ *   swept     a village hut's yard: packed earth, broomed smooth
+ *   none      no apron
+ * `prefix` finds the art if the map already carries it as a slot; otherwise
+ * it is added at runtime from `art`.
+ */
+const GROUNDS = {
+  laterite: {
+    prefix: "apron",
+    art: { name: "apron (photo)", albedoUrl: "/textures/decals/nam/apron_1.webp", normalUrl: "/textures/decals/nam/apron_1_n.webp" },
+    roughness: 0.85,
+  },
+  swept: {
+    prefix: "sweptYard",
+    art: { name: "sweptYard (photo)", albedoUrl: "/textures/decals/nam/sweptYard_1.webp", normalUrl: "/textures/decals/nam/sweptYard_1_n.webp" },
+    roughness: 0.92,
+  },
 };
 
 /**
@@ -53,17 +70,22 @@ export function installBuildingAprons(app) {
   const flatten = app.flattenRect?.bind(app);
   if (!decals || !flatten) return { count: () => 0 };
 
-  let slotPromise = null;
-  const slot = () => (slotPromise ??= (async () => {
-    const i = decals.textures.slots.findIndex((s) => s.name.startsWith("apron"));
+  // One slot lookup per ground, shared by every pad that asks for it (and
+  // serialised, so two first pads cannot both add the same art).
+  const slotPromises = {};
+  let chain = Promise.resolve();
+  const slot = (g) => (slotPromises[g.prefix] ??= (chain = chain.then(async () => {
+    const i = decals.textures.slots.findIndex((s) => s.name.startsWith(g.prefix));
     if (i >= 0) return i;
-    await decals.addSlot(APRON_ART);           // a map without the art: bring it
+    await decals.addSlot(g.art);               // a map without the art: bring it
     return decals.textures.slots.length - 1;
-  })());
+  })));
 
   let placed = 0;
-  async function stamp(wx, wz, halfX, halfZ, y, rotY) {
-    const s = await slot();
+  async function stamp(wx, wz, halfX, halfZ, y, rotY, ground) {
+    const g = GROUNDS[ground ?? "laterite"];
+    if (!g) return;                            // "none", or a name we do not know
+    const s = await slot(g);
     const cr = Math.cos(rotY), sr = Math.sin(rotY);
     const qy = Math.sin(rotY / 2), qw = Math.cos(rotY / 2);
     const ax = tileAxis(2 * (halfX + MARGIN));
@@ -76,7 +98,7 @@ export function installBuildingAprons(app) {
           px, py: y, pz,
           qx: 0, qy, qz: 0, qw,
           slot: s, sx: ax.size, sy: 4, sz: az.size,
-          opacity: 1, roughness: 0.85, normalStrength: 1,
+          opacity: 1, roughness: g.roughness, normalStrength: 1,
           angleFade: 55, edgeFade: 0.02, priority: -1,
         });
         clearPad(px, pz, ax.size, az.size, cr, sr);
@@ -105,7 +127,7 @@ export function installBuildingAprons(app) {
 
   app.flattenRect = async (wx, wz, halfX, halfZ, targetY, opts = {}) => {
     const r = await flatten(wx, wz, halfX, halfZ, targetY, opts);
-    await stamp(wx, wz, halfX, halfZ, targetY, opts.rotY ?? 0);
+    await stamp(wx, wz, halfX, halfZ, targetY, opts.rotY ?? 0, opts.ground);
     return r;
   };
 
