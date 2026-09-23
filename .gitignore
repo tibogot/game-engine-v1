@@ -29,3 +29,8 @@ dist-ssr
 # committed by accident in 7c0a65b — a frozen fork of modularRoadScenery.js
 # that sat in the root for a month. The PID keeps parallel runs from colliding.
 .*.[0-9]*.mjs
+
+# Level backups. The .v3proj patch tools (patchNamValley, namGroundTextures)
+# copy the level next to itself before writing, so a bad patch is one "mv" away.
+# They are 10-25 MB binaries and must never reach a commit.
+*.v3proj.bak

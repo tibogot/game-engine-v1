@@ -949,6 +949,32 @@ is not lost while Kurtz is being built.
       it at all: the frame's timestamped pass count goes 17 → 18 when it stamps.
       OPEN, taste: at RTS zoom the bend is subtle — say the word and the footprint
       (1.1 m) and strength (0.85) become panel sliders.
+- [x] **GROUND TEXTURE SCALE + new Poly Haven sets** — DONE 2026-09-24, **your
+      verdict in the game: "the 7m look way better"** (fog off, grass off, same
+      frame A/B vs the old 34 m). Note for later: 34 m shows MORE visible
+      features (the photo magnified — metre-wide clumps); do not "restore
+      detail" by stretching again. Open: road at 15 m had nicer gravel
+      (`--tile 4=15`); beach set not yet looked at over the coast. (your ask 2026-09-24, after
+      the "why does CoH look more detailed than mine" comparison). Two findings,
+      both measured off the saved map, not guessed:
+      1. **`uUVScale` is repeats across the WORLD, so tile metres = worldSize /
+         uvScale.** nam-valley is 1024 m, and the ground layers sat at uvScale
+         28–42 = **one texture tile every 24–37 metres**. The Poly Haven sets in
+         those slots (forrest_ground_01, red_laterite_soil_stones,
+         dry_mud_field_001, red_dirt_mud_01) are close-range photos of ~1–2 m of
+         ground, so every pebble was rendered 15–35× oversized. That is the
+         "big soft wash instead of detail" look — NOT a resolution problem
+         (1024 texels / 34 m is already 3 cm a texel) and NOT the layer count.
+         Cliff Rock was the outlier at uvScale 110 (9.3 m) and reads better.
+      2. **Slot textures are resampled to SLOT_RES = 1024**, so fetching 2K/4K
+         from Poly Haven is wasted bytes — 1K jpg is exactly right.
+      Changing UV scale is **free** (a multiply on the UV, zero taps).
+      TOOL: `tools/namGroundTextures.mjs` — downloads Poly Haven 1K sets into
+      `public/textures/ground/<slug>/` (via api.polyhaven.com/files) and patches
+      nam-valley's paintLayers in place: texture refs + uvScale together. Server
+      paths, not base64, so the sets leave the .v3proj instead of bloating it.
+      Finer tiling can expose repetition — macro is already on (0.35 @ 80 m);
+      the hex-tiling line below is the real fix if it bites.
 - [ ] Texture repetition (hex tiling discussed; stochastic rejected — it swam)
 - [ ] Napalm flame cores clip to white — per-fire intensity (taste)
 - [ ] Octahedral impostors for the RTS camera — asked, never answered properly

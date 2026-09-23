@@ -5770,9 +5770,17 @@ export async function startV3App(opts = {}) {
     textureLib.slots[texlibActiveSlot].blocksTrees = tslBlockTrees.checked;
   });
 
+  /**
+   * "146" says nothing; "146 · 7.0 m" says everything. uUVScale is repeats
+   * across the WORLD, so the tile a layer draws is worldSize / uvScale — and
+   * that number, against the 1-2 m of ground a photographed texture actually
+   * depicts, is what decides whether the ground reads as detail or as a wash.
+   */
+  const uvLabel = (v) => `${v} · ${(WORLD_SIZE / Math.max(1, v)).toFixed(1)} m`;
+
   tslUVScale.addEventListener("input", () => {
     textureLib.setUVScale(texlibActiveSlot, Number(tslUVScale.value));
-    tlblUV.textContent = tslUVScale.value;
+    tlblUV.textContent = uvLabel(Number(tslUVScale.value));
   });
   tslNStr.addEventListener("input", () => {
     textureLib.setNormalStr(texlibActiveSlot, Number(tslNStr.value) / 10);
@@ -5963,7 +5971,7 @@ export async function startV3App(opts = {}) {
     const s = textureLib.slots[texlibActiveSlot];
     const u = textureLib.slotUniforms[texlibActiveSlot];
     tslUVScale.value = Math.round(u.uUVScale.value);
-    tlblUV.textContent = tslUVScale.value;
+    tlblUV.textContent = uvLabel(Number(tslUVScale.value));
     tslNStr.value = Math.round(u.uNormalStr.value * 10);
     tlblNStr.textContent = u.uNormalStr.value.toFixed(1);
     tslAOStr.value = Math.round(u.uAOStr.value * 10);
@@ -11407,6 +11415,46 @@ export async function startV3App(opts = {}) {
         };
       },
       /** Switch grass systems from the console: "hybrid" | "revo". */
+      /**
+       * Read or set a paint layer's tile size IN METRES OF GROUND — the number
+       * that decides whether the terrain reads as detail or as a soft wash.
+       *
+       * `uUVScale` is repeats across the WORLD, not a tile size, so the two are
+       * `tileM = WORLD_SIZE / uvScale`. A photographed ground texture depicts
+       * about 1-2 m, so a tile of 30 m draws every pebble ~20x oversized; too
+       * far the other way and the repeat reads as a grid. This exists so the
+       * call can be made by eye, in the GAME, at play zoom — the editor's own
+       * slider only reaches the active slot and only while the editor is up.
+       *
+       *   __V3_DEBUG.paintTile()          // every slot, as metres
+       *   __V3_DEBUG.paintTile(0)         // slot 0's tile in metres
+       *   __V3_DEBUG.paintTile(0, 5)      // set slot 0 to a 5 m tile
+       *   __V3_DEBUG.paintTile(null, 6)   // set every painted slot to 6 m
+       */
+      paintTile(slot = null, metres = null) {
+        const uni = textureLib.slotUniforms;
+        const toM = (i) => +(WORLD_SIZE / Math.max(1, uni[i].uUVScale.value)).toFixed(2);
+        if (metres == null) {
+          if (slot == null) {
+            return uni.map((_, i) => ({ slot: i, name: textureLib.slots[i].name, tileM: toM(i) }));
+          }
+          return toM(slot);
+        }
+        if (!(metres > 0)) throw new Error("paintTile: metres must be > 0");
+        const uv = Math.max(1, Math.round(WORLD_SIZE / metres));
+        const hit = slot == null ? uni.map((_, i) => i) : [slot];
+        for (const i of hit) textureLib.setUVScale(i, uv);
+        // Grass takes its far colour from a bake of the painted ground, so a
+        // scale change that is not re-baked leaves the distance reading the old
+        // tiling. Same three lines as forceGrassTintBake below — that one is an
+        // object method with no local binding, so it cannot be called from here.
+        const prevRT = renderer.getRenderTarget();
+        renderer.setRenderTarget(grassTintRT);
+        renderer.render(grassTintScene, grassTintCam);
+        renderer.setRenderTarget(prevRT);
+        return hit.map((i) => ({ slot: i, name: textureLib.slots[i].name, uvScale: uv, tileM: toM(i) }));
+      },
+
       grassSystemSet(which) {
         grassState.system = which === "revo" ? "revo" : "hybrid";
         syncGrassSystemUi();
