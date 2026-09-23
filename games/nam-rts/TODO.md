@@ -523,7 +523,7 @@ Vietnam, like Apocalypse Now.
       COST, measured with `__V3_DEBUG.gpuAB`, the whole grass system on vs off:
       **0.67 vs 0.60 ms** at play zoom, **0.81 vs 0.76** zoomed out. The extra
       coverage is free; grass is not what this frame is spent on.
-      LEFT: grass trails under units (`grassPush` exists, not wired)
+      LEFT: nothing — grass trails are wired too, see below.
 - [ ] **Foliage brightness** — **you**, taste call (knobs listed in the transcript)
 - [ ] Rice paddies (expensive: water over big screen areas)
 - [ ] A village as an *arrangement* (paths, well, fences, clearing)
@@ -532,7 +532,19 @@ Vietnam, like Apocalypse Now.
 - [ ] **Ocean** — off in the RTS; **you** are reworking Ocean v2 in another chat
 - [ ] **River** — **you** are finishing/optimising River v2 in another chat;
       then river branches → **water units**, lily pads on the flow field
-- [ ] Grass trails under units (`grassPush` exists)
+- [x] **Grass trails under units** — DONE 2026-09-23. `games/nam-rts/grassTrails.js`
+      stamps every ground unit into the engine's push field (`app.stampGrassPush`),
+      which nothing in this game was using, so the grass stood up through a tank's
+      tracks. Four guards keep it cheap: only units within 34 m of the camera
+      focus (the field only covers ~32 m), ground units only, at most 16 stamps a
+      frame nearest-first, and the field's own skip for a still crowd whose stamps
+      have stopped changing. Dev panel → GRASS → **Unit trails** turns it off.
+      COST, 30 men walking at RTS zoom, `__V3_DEBUG.gpuAB` with the settle long
+      enough for the recovery tail to end: **0.73 → 0.76 ms GPU (+0.03)**, noise
+      0.02; CPU **1.3 µs a frame** (500-call bursts). Verified the A/B could see
+      it at all: the frame's timestamped pass count goes 17 → 18 when it stamps.
+      OPEN, taste: at RTS zoom the bend is subtle — say the word and the footprint
+      (1.1 m) and strength (0.85) become panel sliders.
 - [ ] Texture repetition (hex tiling discussed; stochastic rejected — it swam)
 - [ ] Napalm flame cores clip to white — per-fire intensity (taste)
 - [ ] Octahedral impostors for the RTS camera — asked, never answered properly

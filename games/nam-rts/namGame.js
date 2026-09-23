@@ -105,6 +105,7 @@ import { createFireSystem } from "./fireSystem.js";
 import { createSmokeField } from "./smokeField.js";
 import { createNapalmStrike } from "./napalmStrike.js";
 import { createRtsBirds } from "./rtsBirds.js";
+import { createGrassTrails } from "./grassTrails.js";
 import { createCover } from "./cover.js";
 import { createPlacedObjects } from "./placedObjects.js";
 import { placeCampPerimeter } from "./campPerimeter.js";
@@ -623,6 +624,15 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // fighting you can read from across the map. See rtsBirds.js.
   const birds = createRtsBirds({ app });
   app.birds = birds;
+
+  // The grass remembers where your men walked (grassTrails.js). The engine's
+  // push field is built round the camera's focus, so that is what it is asked
+  // for; everything outside it is skipped before any work is done.
+  const grassTrails = createGrassTrails({
+    app, units,
+    focus: () => app.controls?.target ?? rtsCamera.getView?.()?.focus ?? null,
+  });
+  app.grassTrails = grassTrails;
   {
     const explosion = fx.explosion;
     fx.explosion = (x, y, z) => { explosion(x, y, z); birds.flush(x, z); };
@@ -1054,6 +1064,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     resourceHud.update(resources, units, HARVEST ? null : requisition); // supplies · points / harvesters
     waveHud.update(dt, waves, match);     // wave counter, match objective, win/lose
     minimap.draw();
+    grassTrails.step();                   // men and tracks bend the grass they cross
     stress.update(dt);                    // dev: continuous effect spawners, if running
     birds.update(dt);                     // transit flocks, flushes
     frameStats.tickMs = performance.now() - tickStart;

@@ -424,6 +424,13 @@ export function createDevPanel({
             </div>
           </div>
           <div class="prop-row">
+            <span class="prop-label">Unit trails</span>
+            <div class="prop-value">
+              <button class="action-btn checked" id="dv-gr-trails" type="button" title="Men and vehicles bend the grass they cross">On</button>
+              <span class="prop-num" id="dv-gr-trails-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
             <span class="prop-label"></span>
             <div class="prop-value">
               <button class="action-btn" id="dv-gr-keep" type="button" title="Keep these grass settings in this browser across reloads">Keep</button>
@@ -1241,6 +1248,31 @@ export function createDevPanel({
       console.info(text);
       try { await navigator.clipboard.writeText(text); } catch { /* logged above */ }
     });
+  }
+
+  // Trails: the grass push field, stamped by the units (grassTrails.js). Its
+  // own switch because it is the one part of the grass that costs per FRAME
+  // rather than per tile, and because it was asked for with one.
+  const TRAILS_KEY = "namrts.grassTrails";
+  const trailsBtn = $("#dv-gr-trails");
+  const trailsN = $("#dv-gr-trails-v");
+  if (trailsBtn && app?.grassTrails) {
+    const setTrails = (on) => {
+      app.grassTrails.setEnabled(on);
+      trailsBtn.classList.toggle("checked", on);
+      trailsBtn.textContent = on ? "On" : "Off";
+    };
+    let want = true;
+    try { want = localStorage.getItem(TRAILS_KEY) !== "0"; } catch { /* private mode */ }
+    setTrails(want);
+    trailsBtn.addEventListener("click", () => {
+      const on = !app.grassTrails.enabled;
+      setTrails(on);
+      try { localStorage.setItem(TRAILS_KEY, on ? "1" : "0"); } catch { /* private mode */ }
+    });
+    setInterval(() => {
+      if (trailsN) trailsN.textContent = app.grassTrails.enabled ? `${app.grassTrails.lastStamps ?? 0} stamped` : "";
+    }, 500);
   }
 
   // ── Birds ───────────────────────────────────────────────────────────────────
