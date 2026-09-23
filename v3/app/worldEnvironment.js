@@ -229,7 +229,15 @@ export async function createWorldEnvironment({
     shadowCam.near = 0.5;
     // Deep enough that a caster standing OUTSIDE the patch, up-light of it,
     // still reaches the map — a low sun throws long shadows in from off screen.
-    shadowCam.far = half * 4 + lightMargin + 50;
+    //
+    // MEASURED FROM THE LIGHT'S REAL DISTANCE, not from the patch radius.
+    // placeSun parks the sun a FIXED `sunDistance` from the target, so a small
+    // patch used to produce a frustum shorter than that: at the RTS camera's
+    // closest zoom the patch was ±64 m, far came out 506, and the sun sat 600
+    // away — the ground lay BEHIND the far plane, nothing rendered into the
+    // shadow map, and every shadow in the scene disappeared at once.
+    const lightDist = sun.position.distanceTo(shadowTarget.position);
+    shadowCam.far = lightDist + half * 2 + lightMargin + 50;
     shadowCam.updateProjectionMatrix();
     sun.shadow.needsUpdate = true;
   }
