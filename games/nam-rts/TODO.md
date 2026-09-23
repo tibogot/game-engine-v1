@@ -96,8 +96,37 @@ Keep this file current: tick things off here, add new asks here.
    **170**. Kill it on the road and the run pays nothing — their income is now
    something you can interdict. `nativeTeam: "enemy"` (no red wash).
    NEXT enemy vehicles: ZPU on a truck, sampans, bicycles
-4. **The jungle: big trees + palm variety + Vietnam plants** (areca, sago,
-   pandanus, nipa, banana, flame tree) — the look you asked for.
+4. **THE JUNGLE — IN PROGRESS 2026-09-23.** Big trees, palm variety, Vietnam
+   plants (areca, sago, pandanus, nipa, banana, flame tree).
+   **AND, your framing 2026-09-23: the plants we have were authored for a
+   GENSHIN-STYLE game.** So this is not only "add plants" — it is judging the
+   colour and the look of what is already there against what a Vietnam RTS
+   wants: a heavier, damper, less saturated green, more value range between
+   canopy and floor, and silhouettes that read from the RTS camera rather than
+   from a third-person one. Colour first (it is cheap and it changes every
+   screenshot), then the new types.
+   [x] **THE COLOUR PASS** (`tools/namVegPalette.mjs`, written into
+   nam-valley.v3proj — **your look check**): every vegetation system on the map
+   repainted at once — the 8 foliage plants, the 3 tall plants, all 8 tree
+   slots and both grass systems. What was there: every tip a bright lime
+   (#8cb84a, #9ccb4e), tree crowns #5aaa2a over a #c8e070 subsurface, and a
+   grass tip of **#00b30c — a pure saturated green that exists in no forest**.
+   What it is now: less chroma (saturation is what makes foliage read as
+   plastic), hue a few degrees off yellow toward blue, and the old dark-green→
+   lime HUE jump replaced by one hue at several VALUES, which is what depth in
+   a canopy actually is. The plants that are legitimately pale — reeds, dry
+   grass, bamboo culms, the plume heads — were left pale, and they are what
+   keeps the mass from going flat.
+   NEXT in the colour thread if wanted: the terrain's own green (the open
+   ground still reads pale and yellow next to the new jungle), and a little
+   per-instance hue variation so a stand is not one colour.
+   QUEUED BEHIND IT, in this order, all agreed:
+   · **finish KURTZ** — the temple stands but is bare: the tribe's village
+     built into the ruins, heads on pikes on the approach, totems at the
+     boundary, worn bare ground in the courtyard, saplings in the cracks
+   · **the crash site** — the shot-down Huey near the temple (see THE ENEMY SIDE)
+   · **the enemy side** — their empty base, the formula-sited nests, their own
+     bamboo guard tower, the tiger cages (see THE ENEMY SIDE)
    **RE-ASKED 2026-09-22 (evening), along with the VILLAGE and RUINS** — after
    the Molotova and the cheap nasty kit, these three are the next block:
    · [x] **A VILLAGE** — DONE (`v3/render/objects/rtsVillage.js` +

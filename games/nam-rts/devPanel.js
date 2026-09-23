@@ -372,6 +372,70 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Grass</div>
+        <div class="section-body">
+          <div class="prop-row">
+            <span class="prop-label">Base colour</span>
+            <div class="prop-value">
+              <input type="color" id="dv-gr-base" />
+              <span class="prop-num" id="dv-gr-base-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Tip colour</span>
+            <div class="prop-value">
+              <input type="color" id="dv-gr-tip" />
+              <span class="prop-num" id="dv-gr-tip-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Blade height</span>
+            <div class="prop-value">
+              <input type="range" id="dv-gr-h" min="0.3" max="2" step="0.05" />
+              <span class="prop-num" id="dv-gr-h-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Blade width</span>
+            <div class="prop-value">
+              <input type="range" id="dv-gr-w" min="0.03" max="0.22" step="0.005" />
+              <span class="prop-num" id="dv-gr-w-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Clumping</span>
+            <div class="prop-value">
+              <input type="range" id="dv-gr-clump" min="0" max="1" step="0.05" />
+              <span class="prop-num" id="dv-gr-clump-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Clump scale</span>
+            <div class="prop-value">
+              <input type="range" id="dv-gr-cscale" min="0.5" max="6" step="0.1" />
+              <span class="prop-num" id="dv-gr-cscale-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Fade end</span>
+            <div class="prop-value">
+              <input type="range" id="dv-gr-fade" min="20" max="110" step="2" />
+              <span class="prop-num" id="dv-gr-fade-v"></span>
+            </div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label"></span>
+            <div class="prop-value">
+              <button class="action-btn" id="dv-gr-keep" type="button" title="Keep these grass settings in this browser across reloads">Keep</button>
+              <button class="action-btn" id="dv-gr-reset" type="button" title="Back to the map's own grass">Reset</button>
+              <button class="action-btn" id="dv-gr-copy" type="button" title="Copy the values, to write them into the map">Copy</button>
+            </div>
+          </div>
+          <div class="dv-hint">The live <b>revo</b> grass. Colour applies as you drag; height, width and clump rebuild the tile, so they apply when you let go. <b>Copy</b> gives the lines for tools/namVegPalette.mjs.</div>
+        </div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Birds</div>
         <div class="section-body">
           <div class="prop-row">
@@ -1112,6 +1176,72 @@ export function createDevPanel({
     console.info(text);
     try { await navigator.clipboard.writeText(text); } catch { /* logged above */ }
   });
+
+  // ── Grass ───────────────────────────────────────────────────────────────────
+  // The live REVO grass (grassState.system is "revo" on this map), edited
+  // through __V3_DEBUG.revoGrassState + syncGrass — the same handle the A/B
+  // passes used, so what you tune here is exactly what the map ships.
+  //
+  // Colour is a uniform and applies as you drag. Height, width and clump are
+  // GEOMETRY keys: syncGrass rebuilds the tile for them, so they apply on
+  // release (`change`) rather than per pixel of slider travel, which would
+  // rebuild a few hundred times a drag.
+  const GRASS_LOOK_KEY = "namrts.grassLook";   // the on/off toggle owns "namrts.grass"
+  const revo = window.__V3_DEBUG?.revoGrassState ?? null;
+  const syncGrass = () => window.__V3_DEBUG?.syncGrass?.();
+  if (revo) {
+    const GK = ["baseColor", "tipColor", "bladeHeight", "bladeWidth", "clumpStrength", "clumpScale", "fadeEnd"];
+    const mapGrass = Object.fromEntries(GK.map((k) => [k, revo[k]]));
+    const grass = { ...mapGrass };
+    try { Object.assign(grass, JSON.parse(localStorage.getItem(GRASS_LOOK_KEY) || "null") || {}); } catch { /* private mode */ }
+    const applyGrass = () => { Object.assign(revo, grass); syncGrass(); };
+    const grassRows = [];
+    const bind = (id, key, { live = true, fmt = (v) => v } = {}) => {
+      const el = $(`#${id}`), out = $(`#${id}-v`);
+      if (!el) return;
+      const show = () => { el.value = grass[key]; if (out) out.textContent = fmt(grass[key]); };
+      show();
+      grassRows.push(show);
+      const commit = () => {
+        grass[key] = el.type === "color" ? el.value : +el.value;
+        if (out) out.textContent = fmt(grass[key]);
+        applyGrass();
+      };
+      el.addEventListener(live ? "input" : "change", commit);
+      // A geometry slider still shows its number while dragging; it just does
+      // not rebuild until release.
+      if (!live && out) el.addEventListener("input", () => { out.textContent = fmt(+el.value); });
+    };
+    const g2 = (v) => (+v).toFixed(2);
+    bind("dv-gr-base", "baseColor", { fmt: (v) => v });
+    bind("dv-gr-tip", "tipColor", { fmt: (v) => v });
+    bind("dv-gr-h", "bladeHeight", { live: false, fmt: g2 });
+    bind("dv-gr-w", "bladeWidth", { live: false, fmt: (v) => (+v).toFixed(3) });
+    bind("dv-gr-clump", "clumpStrength", { live: false, fmt: g2 });
+    bind("dv-gr-cscale", "clumpScale", { live: false, fmt: g2 });
+    bind("dv-gr-fade", "fadeEnd", { fmt: (v) => `${Math.round(v)} m` });
+    let grassKept = false;
+    try { grassKept = !!localStorage.getItem(GRASS_LOOK_KEY); } catch { /* private mode */ }
+    if (grassKept) applyGrass();
+    $("#dv-gr-keep")?.addEventListener("click", () => {
+      try { localStorage.setItem(GRASS_LOOK_KEY, JSON.stringify(grass)); } catch { /* private mode */ }
+    });
+    $("#dv-gr-reset")?.addEventListener("click", () => {
+      try { localStorage.removeItem(GRASS_LOOK_KEY); } catch { /* private mode */ }
+      Object.assign(grass, mapGrass);
+      applyGrass();
+      for (const show of grassRows) show();
+    });
+    $("#dv-gr-copy")?.addEventListener("click", async () => {
+      const text = `const REVO = { baseColor: "${grass.baseColor}", tipColor: "${grass.tipColor}" };\n`
+        + `const REVO_DENSITY = { bladeHeight: ${+(+grass.bladeHeight).toFixed(2)}, `
+        + `bladeWidth: ${+(+grass.bladeWidth).toFixed(3)}, `
+        + `clumpStrength: ${+(+grass.clumpStrength).toFixed(2)}, `
+        + `clumpScale: ${+(+grass.clumpScale).toFixed(2)}, fadeEnd: ${Math.round(grass.fadeEnd)} };`;
+      console.info(text);
+      try { await navigator.clipboard.writeText(text); } catch { /* logged above */ }
+    });
+  }
 
   // ── Birds ───────────────────────────────────────────────────────────────────
   const birdsBtn = $("#dv-birds");
