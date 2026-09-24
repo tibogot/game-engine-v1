@@ -106,6 +106,8 @@ import { createProjectiles } from "./projectiles.js";
 import { createFireSystem } from "./fireSystem.js";
 import { createSmokeField } from "./smokeField.js";
 import { createNapalmStrike } from "./napalmStrike.js";
+import { createFireballField } from "./fireballField.js";
+import { createFlameField } from "./flameField.js";
 import { createRtsBirds } from "./rtsBirds.js";
 import { createGrassTrails } from "./grassTrails.js";
 import { createCover } from "./cover.js";
@@ -637,9 +639,19 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // Combat: units fire VISIBLE rockets with exhaust trails; damage lands on
   // impact. Wrecks catch fire. All of it glows via the engine's emissive MRT.
   const fx = createCombatFx({ app });
+  app.fx = fx;
   app.combatFx = fx;
 
-  const fire = createFireSystem({ app });
+  // Fire: the flipbook flames (flameField.js — a real fire sim, coloured by
+  // heat in the shader) unless the URL asks for the old procedural blobs,
+  // kept for the A/B: ?fire=procedural. Same interface either way.
+  const fire = new URLSearchParams(location.search).get("fire") === "procedural"
+    ? createFireSystem({ app })
+    : createFlameField({ app });
+  // The rolling fireball at the moment napalm lands (fireballField.js — a
+  // flipbook of a real fire sim, one instanced draw).
+  const fireballs = createFireballField({ app });
+  app.fireballs = fireballs;
   app.fire = fire;
 
   // Smoke is the one effect that is also a RULE: a screening cloud really does
@@ -669,7 +681,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   app.grassTrails = grassTrails;
   {
     const explosion = fx.explosion;
-    fx.explosion = (x, y, z) => { explosion(x, y, z); birds.flush(x, z); };
+    fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); birds.flush(x, z); };
     const addCrater = craters.addCrater?.bind(craters);
     if (addCrater) craters.addCrater = (x, z, ...rest) => { const r = addCrater(x, z, ...rest); birds.flush(x, z); return r; };
   }
@@ -718,7 +730,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // Napalm is assembled from fire + smoke + craters + combat; it owns only the
   // SHAPE of a run and what it does to whoever is standing in it.
   const napalm = createNapalmStrike({
-    app, fire, smoke, craters, combat, units, structures,
+    app, fire, fireballs, smoke, craters, combat, units, structures,
   });
   app.napalm = napalm;
 
@@ -1083,6 +1095,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     selectionFrames.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
     smoke.render(renderTime, app.environment?.getLightDirection?.());
+    fireballs.render(renderTime);         // napalm fireballs: the flipbook clock
     updatePlantedPlants(app, app.camera, app.environment?.getLightDirection?.());
     // Point the overlay at the selection until the pointer has moved, so
     // holding V before touching the mouse reveals the ground under the men

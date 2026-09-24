@@ -283,6 +283,7 @@ export function createDevPanel({
           <button class="action-btn" id="dv-smoke-napalm" type="button">Napalm pall</button>
           <button class="action-btn primary" id="dv-napalm-run" type="button">NAPALM RUN</button>
           <button class="action-btn" id="dv-smoke-clear" type="button">Clear all</button>
+          <button class="action-btn" id="dv-smoke-look" type="button">Look: flipbook</button>
           <div class="prop-row">
             <span class="prop-label">Opacity</span>
             <div class="prop-value">
@@ -1073,6 +1074,13 @@ export function createDevPanel({
   for (const kind of ["violet", "screen", "wreck", "napalm"]) {
     $(`#dv-smoke-${kind}`).addEventListener("click", () => dropSmoke(kind));
   }
+  // A/B the puffs' look: the flipbook atlas or the old procedural disc.
+  const smokeLook = $("#dv-smoke-look");
+  smokeLook.addEventListener("click", () => {
+    if (!app?.smoke?.setLook) return;
+    app.smoke.setLook(app.smoke.look === "flipbook" ? "procedural" : "flipbook");
+    smokeLook.textContent = `Look: ${app.smoke.look}`;
+  });
   $("#dv-smoke-clear").addEventListener("click", () => {
     app?.smoke?.clear?.();
     app?.napalm?.clear?.();

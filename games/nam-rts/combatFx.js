@@ -5,12 +5,17 @@
 // of flashes costs 3 draw calls, not one per flash. Every field writes to the
 // emissive MRT buffer, so v3's existing selective-bloom pass makes them glow with
 // no pipeline work.
+//
+// EXPLOSIONS are flipbooks (explosionField.js): the fire-then-smoke cloud of a
+// real simulation, with a short additive flash under it so the bloom kicks on
+// the frame it goes off. A soldier does not explode: he raises a puff of dust.
 import { createSpriteField } from "./spriteField.js";
+import { createExplosionField } from "./explosionField.js";
 import { BLOOM } from "./bloom.js";
 
 const FLASH_LIFE = 0.07;
 const IMPACT_LIFE = 0.24;
-const EXPLOSION_LIFE = 0.6;
+const BLAST_FLASH_LIFE = 0.28;
 
 // Shared growth curve: expand as it fades (p is remaining life, 1 → 0).
 const grow = (p) => (1 + (1 - p) * 1.5) * (0.35 + p * 0.65);
@@ -24,19 +29,36 @@ export function createCombatFx({ app, pool = 40 }) {
   const impacts = createSpriteField({
     scene, max: pool, color: 0xff9a3c, size: 3.0, bloomScale: BLOOM.impact, scaleAt: grow,
   });
+  // The flash only: the cloud is the flipbook's. Unit size, scaled per blast
+  // isn't possible in a shared sprite field, so it is sized for a vehicle.
   const blasts = createSpriteField({
-    scene, max: 16, color: 0xff6a1e, size: 12, bloomScale: BLOOM.fire, scaleAt: grow,
+    scene, max: 16, color: 0xff8a3a, size: 9, bloomScale: BLOOM.fire, scaleAt: grow,
   });
+  const books = createExplosionField({ app });
+  let clock = 0;
 
   return {
+    books,
     muzzle:    (x, y, z) => flashes.spawn(x, y, z, FLASH_LIFE),
     impact:    (x, y, z) => impacts.spawn(x, y, z, IMPACT_LIFE),
-    explosion: (x, y, z) => blasts.spawn(x, y + 1.5, z, EXPLOSION_LIFE),
+    /**
+     * `size` is the cloud's width in metres (10 ≈ a vehicle); `dust` makes it
+     * a puff of earth with no fire and no flash.
+     */
+    explosion(x, y, z, { size = 10, dust = false } = {}) {
+      if (dust) { books.puff(x, y, z, { size, duration: 1.2 + size * 0.08 }); return; }
+      blasts.spawn(x, y + 1.5, z, BLAST_FLASH_LIFE);
+      // Bigger blasts linger longer: a mortar bomb is gone in two seconds,
+      // a fuel dump hangs over the camp.
+      books.explode(x, y, z, { size, duration: 1.9 + size * 0.07 });
+    },
 
     update(dt, camera) {
+      clock += dt;
       flashes.update(dt, camera);
       impacts.update(dt, camera);
       blasts.update(dt, camera);
+      books.render(clock);
     },
   };
 }

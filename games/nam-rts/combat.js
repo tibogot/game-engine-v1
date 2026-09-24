@@ -106,7 +106,13 @@ export function createCombat({
     }
 
     if (!target.alive) {
-      fx.explosion(target.position.x, target.position.y, target.position.z);
+      // A man goes down in a puff of dust; a machine goes up, and the bigger
+      // it is the bigger the cloud (explosionField.js).
+      const hq = target.typeKey === "base" || target.typeKey === "enemyBase";
+      fx.explosion(target.position.x, target.position.y, target.position.z,
+        target.typeKey === "soldier" ? { size: 2.6, dust: true }
+          : target.isStructure ? { size: hq ? 26 : 15 }
+            : { size: Math.max(8, (target.radius ?? target.type?.radius ?? 4) * 2.4) });
       // The wreck burns. Bigger things burn bigger and longer.
       const big = target.isStructure;
       fire?.addFire(
@@ -141,7 +147,7 @@ export function createCombat({
    */
   const _splashNear = [];
   function splashAt(at, damage, radius, owner = null, { vehicleMul = 1 } = {}) {
-    fx.explosion(at.x, at.y, at.z);
+    fx.explosion(at.x, at.y, at.z, { size: Math.max(6, radius * 1.1) });
     craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7));
     const hit = (o) => {
       if (!o.alive || o.isAir || o.passive) return;

@@ -1270,7 +1270,88 @@ is not lost while Kurtz is being built.
 - [ ] **Projectiles like Company of Heroes** (your ask 2026-09-24, after the
       CPU spike): tracers, shell arcs, impacts that read like CoH.
 - [ ] **Smoke and fire, more realistic** (your ask 2026-09-24, with the
-      projectiles).
+      projectiles). The nam versions are done DIFFERENTLY from your old RTS,
+      and the old RTS is NOT touched. Plan, pending your go:
+      · SMOKE = your modular-road FLIPBOOK (wispy 8x8 atlas) ON the existing
+        puff field. Keep the analytic columns that block sight, and the puffs'
+        3D arrangement. Only each puff's pixels change: lit by the RTS sun,
+        with soft ground contact. (smokeField.js's "why not a flipbook" note
+        argued against a few BIG cards, not against textured puffs.)
+      · NAPALM: a fireball flipbook for the first second, then fire, then
+        the smoke atlas tinted to thick oily black.
+      · FIRE: a flipbook ONLY if it comes from a real fire sim — FOUND: the
+        Unity Labs free VFX pack you took the smoke from is CC0 (commercial
+        OK, not Unity-only):
+        https://unity.com/blog/engine-platform/free-vfx-image-sequences-flipbooks
+        Picks: SmallFlame01-temperature + Flame02-temperature (fires; the
+        temperature maps get a colour ramp in the shader, which gives
+        per-fire intensity and fixes "napalm cores clip to white"),
+        FireBall01/02 (napalm), Explosion01-light / -nofire (shell impacts),
+        Explosion01 (vehicle deaths), WispySmoke02/03b (smoke). Budget: an
+        8x8 1024² atlas is ~4-5 MB of GPU memory; load only what is used.
+        DOWNLOADED + converted to PNG (scratchpad/vfx, not in the repo yet):
+        explosions 5x5 1024² RGBA; fireballs 8x8 1024² RGB (additive);
+        Flame02-temperature 16x4 2048x1024 grey; SmallFlame01 16x4 2048x1024
+        RGBA. The fire temperature maps other than Flame02 are EXR-only (no
+        EXR reader here without installing packages), so SmallFlame01's heat
+        comes from its coloured TGA's brightness.
+      · STEP 1 DONE (uncommitted): SMOKE ON THE FLIPBOOK. smokeField.js
+        samples wispy02 per puff: a looping frame from each puff's own start,
+        crossfaded, alpha x2.2, and the baked grey on the game's light.
+        Columns, sight, budget and the single draw call are unchanged.
+        `smoke.setLook()` + a dev-panel button (SMOKE -> "Look: …") for the
+        A/B. First look from the RTS camera: the wreck's black plume gains real
+        streaky structure where the procedural one was a faint haze. GPU for
+        the whole frame is unchanged (~1.6-2 ms). **YOUR LOOK CHECK**: flipbook vs
+        procedural; alpha x2.2 and 02 vs 03b are the knobs.
+      · STEP 2 DONE (uncommitted): NAPALM FIREBALLS. New fireballField.js:
+        instanced camera-facing cards playing FireBall01 (8x8, now in
+        public/textures/fx/) ONCE over ~1.6 s, growing and climbing, lifted
+        toward the camera so they never slice the ground, additive, with
+        45% written to the bloom buffer. Each napalm splash gets one big ball
+        and two smaller ones a beat later along the run. First try at 3.2x
+        with full bloom blew out to white discs; 1.0x + 0.45 bloom keeps the
+        flame shape. The whole strike now reads fireball -> burning ground ->
+        oily black pall (the flipbook smoke). GPU ~4.1 ms for the frame during a
+        strike, almost all of it smoke. **YOUR LOOK CHECK**: dev panel ->
+        NAPALM RUN; `__NAM.fireballs.params.uIntensity / uBloom` are the knobs.
+        NEXT: the burning ground is still the procedural fire blobs -> step 3.
+      · STEP 3 DONE (uncommitted): FIRE ON THE FLIPBOOK. New flameField.js,
+        the same interface as fireSystem (addFire/update/clear/activeCount),
+        which stays behind `?fire=procedural` for the A/B. Each fire is 2-7
+        vertical flame cards (turned to the camera about the vertical axis
+        only) looping Flame02-temperature (16x4, public/textures/fx/). The
+        shader colours the TEMPERATURE: dark red -> orange -> yellow -> white,
+        with a HEAT per fire (0.75 for a rifleman's wreck to ~1 for an HQ,
+        napalm 1.05 via addFire's new `{ heat }`). Card data is written only
+        when a fire starts or ends; the fades run on the GPU clock.
+        Two fixes from the first look: (1) far too white at heat 0.85-1.35 x
+        1.6 intensity -> heat lowered, intensity 1.1, bloom 0.3; (2) a hard
+        bright line at each card's base (the atlas's hottest texels ARE the
+        bottom of the cell), floating once lifted toward the camera -> no
+        lift, sunk a fifth of its height, bottom quarter faded (an eighth
+        still showed on steep banks). **YOUR LOOK CHECK**: wreck and napalm
+        fires at your zoom; `__NAM.fire.params.uIntensity / uBloom`.
+      · STEP 4 DONE (uncommitted): EXPLOSIONS. New explosionField.js, two
+        flipbooks played once per burst (public/textures/fx/*.webp, the 1024²
+        PNGs re-encoded: 735 -> 255 KB): BLAST = Explosion01 (fireball ->
+        black smoke with embers -> grey wisps) for shells, vehicles and
+        buildings; DUST = Explosion01-nofire tinted tan for a SOLDIER's death
+        (a man used to die in the same orange fireball as a tank).
+        combatFx.explosion(x, y, z, { size, dust }) sizes it: soldier 2.6 m
+        dust, vehicle radius x 2.4 (min 8), structure 15, HQ 26, mortar/trap
+        splash radius x 1.1 (min 6); duration 1.9 s + size x 0.07. The old
+        additive sprite stays as a short flash under the blast, for the bloom.
+        ALPHA-blended (smoke must darken); only the fire (red >> blue) goes to
+        the emissive/bloom buffer. First-try traps: (1) the baked smoke is
+        ~0.2 grey, a black mushroom once decoded -> smoke x2.6 (dust x2.2 +
+        a tan floor), fire untouched; (2) mirroring the card by its vertices
+        flipped its winding and front-face culling DROPPED every other blast
+        -> mirrored in the UV instead. COST: ten 15 m blasts at once, close
+        zoom, +0.40 ms GPU (gpuAB, noise 0.03); one draw per book.
+        NOT DONE: bullet/rocket IMPACTS are still the old spark sprite — they
+        belong to the CoH projectiles step (dirt kicks on misses, sparks on
+        armour). `__NAM.fx.books.blast.params.uShade / uBloom` to tune.
 - [ ] Texture repetition (hex tiling discussed; stochastic rejected — it swam)
 - [ ] Napalm flame cores clip to white — per-fire intensity (taste)
 - [ ] Octahedral impostors for the RTS camera — asked, never answered properly

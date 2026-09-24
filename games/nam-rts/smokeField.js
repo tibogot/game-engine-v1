@@ -51,10 +51,35 @@
  */
 import * as THREE from "three";
 import {
-  Fn, attribute, cameraPosition, cameraWorldMatrix, cos, dot, float, fract, int,
-  max, mix, normalize, positionLocal, pow, saturate, sin, smoothstep, step, uniform,
-  uniformArray, uv, varying, vec3, vec4,
+  Fn, attribute, cameraPosition, cameraWorldMatrix, cos, dot, float, floor, fract, int,
+  max, mix, normalize, positionLocal, pow, saturate, sin, smoothstep, step, texture, uniform,
+  uniformArray, uv, varying, vec2, vec3, vec4,
 } from "three/tsl";
+
+/**
+ * ── THE FLIPBOOK LOOK (2026-09-24) ──────────────────────────────────────────
+ *
+ * Each puff can wear a frame of your modular-road smoke atlas (Unity Labs'
+ * CC0 "WispySmoke", 8x8 frames, RGB = baked self-shadow grey, A = density)
+ * instead of the procedural soft disc. Only the PIXELS change: the columns,
+ * the sight rule, the budget and the one draw are exactly as before, and so
+ * is the 3D arrangement of the puffs that gives a column its silhouette from
+ * every Q/E angle. The note below ("why not a flipbook") argued against a FEW
+ * BIG cards; many small textured puffs is how Company of Heroes does it.
+ *
+ * Every puff loops the atlas from its own start frame and crossfades between
+ * adjacent frames, so nothing animates in step and there is no frame-step
+ * tell. `setLook("procedural")` brings the old disc back for an A/B.
+ */
+export const SMOKE_ATLAS = {
+  url: "/textures/smoke/wispy02_8x8.png",
+  cols: 8, rows: 8, size: 1024,
+  fps: 12,
+  /** The atlas's own alpha is thin (mean ~0.22 in 02); this sets the puff's. */
+  alphaMul: 2.2,
+  /** Brightness of the baked grey (linear mean ~0.13 in 02, so this is a lift). */
+  bakedGain: 3.2,
+};
 
 /** Columns the sim can hold at once. Sight tests are O(this) per query. */
 export const MAX_SOURCES = 24;
@@ -275,6 +300,15 @@ export function createSmokeField({
 
   const vAlpha = varying(float(0), "v_sm_a");
   const vCol = varying(vec3(0), "v_sm_c");
+  // The puff's own seed, for its flipbook start frame.
+  const vSeed = varying(float(0), "v_sm_s");
+
+  // The flipbook atlas, loaded once; until it arrives the look stays procedural.
+  const uFlip = uniform(0);          // 1 = flipbook look, 0 = procedural disc
+  let wantFlip = true;
+  const atlas = new THREE.TextureLoader().load(SMOKE_ATLAS.url, () => { uFlip.value = wantFlip ? 1 : 0; });
+  atlas.colorSpace = THREE.SRGBColorSpace;
+  atlas.anisotropy = 4;
 
   material.positionNode = Fn(() => {
     const seed = attribute("aSeed", "float");
@@ -363,6 +397,7 @@ export function createSmokeField({
     const keepGate = smoothstep(float(0), float(PUFF_FADE_BAND), uKeep.mul(1 + PUFF_FADE_BAND).sub(rank));
     const drawGate = liveGate.mul(keepGate);
     vAlpha.assign(fadeIn.mul(fadeOut).mul(srcFade).mul(r2.z).mul(uOpacity).mul(drawGate));
+    vSeed.assign(seed);
 
     // ── LIGHT ──
     // This is what stops smoke reading as grey paint. The top of a column sees
@@ -386,16 +421,40 @@ export function createSmokeField({
   // A soft round puff. Squaring the falloff gives a dense core with a long
   // thin edge, which is also what keeps a quad from showing a hard line where
   // it crosses the ground — no depth texture needed.
+  // The flipbook frame for this puff: a looping frame index from its own start,
+  // and the two neighbouring cells blended by the fraction between them.
+  const F = SMOKE_ATLAS;
+  const frames = F.cols * F.rows;
+  const inset = 0.5 / (F.size / F.cols);          // half a texel, in cell units
+  const cellUV = (idx) => {
+    const col = idx.mod(F.cols), row = floor(idx.div(F.cols));
+    // Rows run top to bottom in the atlas; three's v runs up.
+    const local = uv().clamp(inset, 1 - inset);
+    return vec2(col.add(local.x).div(F.cols), float(F.rows - 1).sub(row).add(local.y).div(F.rows));
+  };
+  const flipbook = Fn(() => {
+    const f = vSeed.mul(frames).add(uTime.mul(F.fps));
+    const f0 = floor(f).mod(frames), f1 = f0.add(1).mod(frames);
+    const a = texture(atlas, cellUV(f0)), b = texture(atlas, cellUV(f1));
+    return mix(a, b, fract(f));
+  });
+
   material.colorNode = Fn(() => {
     const d = uv().sub(0.5).length().mul(2);
     const soft = float(1).sub(smoothstep(float(0.2), float(1), d));
-    const a = vAlpha.mul(soft).mul(soft);
+    // The flipbook: the atlas's density, and its baked self-shadow on the
+    // game's light. The procedural disc stays as the other side of the mix.
+    const fb = flipbook();
+    const fbAlpha = fb.a.mul(F.alphaMul).min(1);
+    const shape = mix(soft.mul(soft), fbAlpha, uFlip);
+    const shade = mix(float(1), fb.rgb.x.mul(F.bakedGain).min(1.4), uFlip);
+    const a = vAlpha.mul(shape);
     // Fewer layers, same smoke: k layers of alpha a let through (1 - a)^k, so
     // a share `keep` of them must each let through (1 - a)^(1/keep) to leave
     // the column as opaque as before — the same Beer-Lambert the sight rule
     // uses. At keep = 1 this is a exactly.
     const keep = max(uKeep, float(0.05));
-    return vec4(vCol, float(1).sub(pow(float(1).sub(a.min(0.999)), float(1).div(keep))));
+    return vec4(vCol.mul(shade), float(1).sub(pow(float(1).sub(a.min(0.999)), float(1).div(keep))));
   })();
 
   const mesh = new THREE.Mesh(geo, material);
@@ -492,6 +551,13 @@ export function createSmokeField({
       if (Number.isFinite(viewKeep)) budget.viewKeep = Math.max(0.05, Math.min(1, viewKeep));
     },
     get budget() { return { ...budget, drawn: uKeep.value }; },
+
+    /** "flipbook" (default) or "procedural" — the A/B for the puffs' look. */
+    setLook(look) {
+      wantFlip = look !== "procedural";
+      if (atlas.image) uFlip.value = wantFlip ? 1 : 0;
+    },
+    get look() { return uFlip.value > 0.5 ? "flipbook" : "procedural"; },
 
     /** How much smoke sits between two points, 0..1. See occlusionAlong. */
     occlusionBetween(ax, az, bx, bz) { return occlusionAlong(sources, ax, az, bx, bz); },

@@ -1,7 +1,9 @@
 /**
  * NAPALM — a weapon assembled out of systems that already exist.
  *
- * Almost nothing here is new. The flames are fireSystem's emissive blobs, the
+ * Almost nothing here is new. The impact is fireballField's flipbook fireballs,
+ * the flames are flameField's flipbook cards (fireSystem's emissive blobs
+ * behind `?fire=procedural`), the
  * pall is smokeField's `napalm` columns, the scorch is craterSystem's draped
  * decals, and the killing is combat.onImpact so a unit that burns to death
  * leaves the same wreck, fire and crater as one that is shot. What this file
@@ -69,10 +71,10 @@ export const NAPALM = {
 
 /**
  * @param {object} o
- *   app, fire, smoke, craters, combat, units, structures
+ *   app, fire, fireballs (optional), smoke, craters, combat, units, structures
  */
 export function createNapalmStrike({
-  app, fire, smoke, craters, combat, units, structures, params = NAPALM,
+  app, fire, fireballs = null, smoke, craters, combat, units, structures, params = NAPALM,
 }) {
   const runs = [];
   /** Burn scars, oldest first. Read by burnedAt(); nothing else yet. */
@@ -115,7 +117,9 @@ export function createNapalmStrike({
       const a = (k / params.firesPerSplash) * Math.PI * 2 + i;
       const rr = r * 0.45;
       const fx = x + Math.cos(a) * rr, fz = z + Math.sin(a) * rr;
-      fire.addFire(fx, groundY(fx, fz) + 0.4, fz, params.fireRadius, params.burnTime);
+      // Napalm burns hotter than a wreck (flameField reads `heat`; the
+      // procedural fireSystem ignores the extra argument).
+      fire.addFire(fx, groundY(fx, fz) + 0.4, fz, params.fireRadius, params.burnTime, { heat: 1.05 });
     }
     // A column per splash. Every OTHER splash was tried first, on the theory
     // that two 26 m palls would cover a 70 m run; measured against the shot,
@@ -124,6 +128,21 @@ export function createNapalmStrike({
     // Four columns cost about 1.7 ms of the frame's GPU, which is affordable
     // where the strike is the whole point of the moment.
     smoke.spawn({ x, z, y: y + 1, kind: "napalm" });
+
+    // THE FIREBALL — the moment of impact, before the ground settles into
+    // burning (fireballField.js, a flipbook of a real fire sim). One big ball
+    // at the splash and two smaller ones a beat later, off to either side
+    // along the run, so each splash ROLLS rather than popping. Decoration:
+    // the damage is the splash's pulses below, as before.
+    if (fireballs) {
+      fireballs.spawn(x, y, z, { size: r * 2.3, duration: 1.8 });
+      const sx = -run.dz, sz = run.dx;   // across the run
+      for (const side of [-1, 1]) {
+        const ox = x + run.dx * r * 0.5 + sx * side * r * 0.55;
+        const oz = z + run.dz * r * 0.5 + sz * side * r * 0.55;
+        fireballs.spawn(ox, groundY(ox, oz), oz, { size: r * 1.4, duration: 1.5, delay: 0.18 + 0.1 * (side + 1) });
+      }
+    }
 
     const splash = { x, z, y, r, age: 0, life: params.burnTime, pulse: 0 };
     run.splashes.push(splash);
