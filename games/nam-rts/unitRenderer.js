@@ -20,6 +20,7 @@ import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliag
 import { bakeThumbnails } from "./thumbnails.js";
 import { buildM113, buildM151, buildM35, buildM48, buildM551, buildMolotova, buildPT76, buildUH1, rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
+import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
 /** Vehicles built in code, by a unit type's `procedural` key. */
@@ -617,6 +618,9 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   units.setOnSpawn(addUnit);
 
   // UI thumbnails (clones share template geometry — safe; never dispose them).
+  // The surface atlas is built in a worker (rtsTextures.rtsAtlas): a portrait
+  // baked before its pixels land would show the neutral placeholder for good.
+  await rtsAtlasReady();
   const thumbnails = await bakeThumbnails({
     renderer: app.renderer,
     items: UNIT_TYPE_KEYS.map((k) => ({ key: k, make: () => cloneTemplateRoot(k) })),

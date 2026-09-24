@@ -1,5 +1,5 @@
 // Thumbnail baker for RTS UI tiles — GAME code. Renders each unit model to a
-// RenderTarget with the engine's WebGPU renderer and returns a data-URL image.
+// RenderTarget with the engine's WebGPU renderer and returns an image URL.
 // Ported from the rts-chibs rtsThumbnails baker.
 import * as THREE from "three";
 
@@ -17,7 +17,7 @@ export function thumbKeyOf(e) {
  * @param {object} o
  * @param {THREE.WebGPURenderer} o.renderer
  * @param {{key:string, make:()=>THREE.Object3D}[]} o.items
- * @returns {Promise<Map<string,string>>}  key → PNG data URL
+ * @returns {Promise<Map<string,string>>}  key → PNG blob URL (img src / CSS url())
  */
 export async function bakeThumbnails({ renderer, items, size = 256, fill = 0.9 }) {
   const out = new Map();
@@ -105,7 +105,8 @@ export async function bakeThumbnails({ renderer, items, size = 256, fill = 0.9 }
     // renderer) never ran between a setRenderTarget and its render.
     renderer.setRenderTarget(prevTarget);
     const bufs = await Promise.all(pending.map((p) => p.read));
-    pending.forEach((p, i) => out.set(p.key, pixelsToDataURL(bufs[i], size)));
+    const urls = await Promise.all(bufs.map((b) => pixelsToImageURL(b, size)));
+    pending.forEach((p, i) => out.set(p.key, urls[i]));
   } catch (err) {
     console.warn("[rts-v3] thumbnail bake failed; tiles will show text.", err);
   } finally {
@@ -128,9 +129,17 @@ function prepareSkinnedBounds(root) {
   });
 }
 
-function pixelsToDataURL(buf, size) {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
+/**
+ * Pixels → an image URL the UI can use as `<img src>` or CSS `url()`.
+ *
+ * A BLOB URL, encoded by OffscreenCanvas.convertToBlob — asynchronous, off the
+ * main thread. It used to be canvas.toDataURL("image/png"): a synchronous PNG
+ * encode, 1.8 s of main thread for the 24 portraits at boot (the biggest item
+ * in the trace after three's node building). The blobs live for the page,
+ * like the data URLs did.
+ */
+async function pixelsToImageURL(buf, size) {
+  const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext("2d");
   const img = ctx.createImageData(size, size);
   const tightRow = size * 4;
@@ -150,5 +159,5 @@ function pixelsToDataURL(buf, size) {
     }
   }
   ctx.putImageData(img, 0, 0);
-  return canvas.toDataURL("image/png");
+  return URL.createObjectURL(await canvas.convertToBlob({ type: "image/png" }));
 }

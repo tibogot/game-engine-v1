@@ -1064,11 +1064,18 @@ is not lost while Kurtz is being built.
          mode "v2" with the ocean disabled, and every height sync rebaked the
          v2 shoreline field (~150 ms) — ~11 s of boot for water nobody sees.
          worldEnvironment now skips it while disabled, bakes on enable.
-      LEFT (from the trace): v3proj load 7.4 s (texture resize to slot res
-      ~2 s, prop thumbnails pixelsToDataURL ~1.9 s), unit visuals 5.2 s,
-      crater decals 2.2 s (one PNG), the camp 2.5 s, and the full scene
-      RENDERING behind the loading screen the whole boot (FireAnimationFrame
-      ~12 s of main thread in the trace).
+      Round 2 (23.8 -> 21.6 s): frame loop throttled to 4/s behind the
+      loading screen (app.setFrameThrottle), no editor default palette
+      (preloadPaintTextures: false), portrait readbacks in parallel.
+      Round 3 (21.6 -> 21.0 s): portraits PNG-encoded off-thread (blob URLs,
+      was 1.8 s), crater alpha in the shader (was a ~0.9 s pixel loop), the
+      19-surface RTS atlas built in a WORKER (rtsAtlasWorker.js, same
+      generator — was 2.6 s; rtsAtlasReady() before portraits). Unit visuals
+      4.8 -> 3.3 s. Portraits, camp textures and a stamped crater checked.
+      LEFT, from the main-thread trace: **three's node-material building
+      ~9 s** (TSL graphs -> shaders on the CPU, all through the boot) and
+      the **v3proj stage 8.2 s** (ground-texture resize through a canvas
+      ~1.35 s, decal slots ~0.6 s, rocks ~1.2 s, the rest spread out).
 - [ ] **CPU 36 ms spike after a few minutes of a match** — seen 2026-09-24 in
       the overlay (27 FPS, CPU 36 ms; 7-10 ms at boot) with the enemy AI
       running. Not investigated.

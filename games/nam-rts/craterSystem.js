@@ -11,10 +11,12 @@
 // the draping happens in the vertex shader against the live heightmap
 // (see terrainDrape.js). A stamp writes 4 floats; the whole field is 1 draw.
 //
-// crater-decal.png ships as RGB with a black surround; we derive alpha from
-// luminance on load so the soft feathered edges blend into grass.
+// crater-decal.png ships as RGB with a black surround; alpha comes from its
+// brightness so the soft feathered edges blend into grass — in the SHADER.
+// (It used to be derived on the CPU at load: a canvas readback and a loop over
+// every pixel of a ~1400² image, ~0.9 s of main thread at every boot.)
 import * as THREE from "three";
-import { Fn, attribute, texture, uv, positionLocal, sin, cos } from "three/tsl";
+import { Fn, attribute, texture, uv, positionLocal, sin, cos, max, pow, smoothstep, float } from "three/tsl";
 import { drapedPosition } from "./terrainDrape.js";
 
 const TEXTURE_URL = "/textures/crater-decal.png";
@@ -23,47 +25,26 @@ const SUBDIV = 28;
 const HEIGHT_OFFSET = 0.15;
 const DECAL_RENDER_ORDER = 42;
 
-/** Black surround → transparent; crater interior stays opaque (lum-as-alpha made dark soil invisible). */
-function alphaFromLum(lum) {
-  if (lum < 6) return 0;
-  if (lum > 40) return 255;
-  const t = (lum - 6) / 34;
-  return (t * t * (3 - 2 * t) * 255) | 0;
-}
-
-/** Black surround → transparent; coloured pixels keep their alpha for soft edges. */
-function textureWithLuminanceAlpha(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      for (let i = 0; i < data.data.length; i += 4) {
-        const lum = Math.max(data.data[i], data.data[i + 1], data.data[i + 2]);
-        data.data[i + 3] = alphaFromLum(lum);
-      }
-      ctx.putImageData(data, 0, 0);
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = 4;
-      tex.needsUpdate = true;
-      resolve(tex);
-    };
-    img.onerror = () => reject(new Error(`Failed to load crater texture: ${url}`));
-    img.src = url;
-  });
+async function loadCraterTexture(url) {
+  const tex = await new THREE.TextureLoader().loadAsync(url);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
 }
 
 export async function createCraterSystem({ app }) {
   const { scene, heightTexNode } = app;
 
-  const tex = await textureWithLuminanceAlpha(TEXTURE_URL);
+  const tex = await loadCraterTexture(TEXTURE_URL);
   const texNode = texture(tex, uv());
+  // Black surround → transparent, crater interior opaque (luminance-as-alpha
+  // made dark soil invisible): the brightest channel, back in sRGB 0..1 (the
+  // sampler hands us linear), smoothstepped 6/255 → 40/255 — the same rule
+  // the CPU loop applied to the 8-bit sRGB bytes.
+  const craterAlpha = smoothstep(
+    float(6 / 255), float(40 / 255),
+    pow(max(max(texNode.r, texNode.g), texNode.b), float(1 / 2.2)),
+  );
   // depthTest ON so units and structures standing on a crater properly occlude it.
   // (It used to be off — a decal painted over the wreck sitting in it. That was safe
   // only because a CPU-conformed mesh could drift off the surface and z-fight; the
@@ -82,7 +63,7 @@ export async function createCraterSystem({ app }) {
   // that pass buys nothing — and the old per-crater meshes each paid for it.
   mat.forceSinglePass = true;
   mat.colorNode = texNode.rgb;
-  mat.opacityNode = texNode.a;
+  mat.opacityNode = craterAlpha;
 
   // One subdivided plane, shared by every crater. Subdivision is what lets the
   // decal bend over slopes; the vertex shader does the bending.

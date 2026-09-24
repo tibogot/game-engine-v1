@@ -49,9 +49,21 @@ function fbm(x, y, period, octaves = 4) {
   return sum;
 }
 
+/**
+ * A 2D canvas on the main thread OR in a worker: the surface atlas is built in
+ * one (rtsAtlasWorker.js), where there is no `document`.
+ */
+function newCanvas(w, h) {
+  if (typeof document !== "undefined") {
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    return c;
+  }
+  return new OffscreenCanvas(w, h);
+}
+
 function makeTexture(size, draw) {
-  const c = document.createElement("canvas");
-  c.width = c.height = size;
+  const c = newCanvas(size, size);
   const g = c.getContext("2d");
   draw(g, size);
   const t = new THREE.CanvasTexture(c);
@@ -925,9 +937,7 @@ export const ATLAS_PAD = 0.004;
  * the seam. ATLAS_PAD is the inset that stops it.
  */
 export function makeSurfaceAtlas({ cell = 512 } = {}) {
-  const c = document.createElement("canvas");
-  c.width = ATLAS_COLS * cell;
-  c.height = ATLAS_ROWS * cell;
+  const c = newCanvas(ATLAS_COLS * cell, ATLAS_ROWS * cell);
   const g = c.getContext("2d");
   // Order MUST match MAT in rtsParts.js.
   const sources = [
@@ -963,10 +973,66 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
   return tex;
 }
 
+/*
+ * THE ATLAS IS BUILT IN A WORKER. Nineteen 512² surfaces, every pixel an fBm
+ * in JavaScript: ~2.6 s of nam-rts's main thread at every boot, in one block.
+ * rtsAtlas() still returns the texture at once — a neutral canvas — and a
+ * module worker runs THIS SAME generator (so an added surface can never leave
+ * a stale copy behind, as a baked file would) and hands back an ImageBitmap,
+ * drawn into that canvas. The texture stays a canvas texture, so its Y flip is
+ * exactly what the shader expects (see rtsAtlasColor). No Worker or
+ * OffscreenCanvas: built on the main thread, as before.
+ *
+ * rtsAtlasReady() resolves once the real pixels are in — await it before
+ * baking anything off the atlas (the UI portraits).
+ */
 let atlasCache = null;
+let atlasReady = null;
 export function rtsAtlas() {
-  if (!atlasCache) atlasCache = makeSurfaceAtlas({});
-  return atlasCache;
+  if (atlasCache) return atlasCache;
+  const cell = 512;
+  const canvas = newCanvas(ATLAS_COLS * cell, ATLAS_ROWS * cell);
+  const g = canvas.getContext("2d");
+  g.fillStyle = "#6b6a5c";                 // neutral olive-grey until the pixels land
+  g.fillRect(0, 0, canvas.width, canvas.height);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;   // the shader does the tiling
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  atlasCache = tex;
+
+  const fill = (src) => { g.drawImage(src, 0, 0); tex.needsUpdate = true; };
+  atlasReady = (async () => {
+    try {
+      if (typeof Worker === "undefined" || typeof OffscreenCanvas === "undefined") {
+        throw new Error("no Worker / OffscreenCanvas");
+      }
+      const worker = new Worker(new URL("./rtsAtlasWorker.js", import.meta.url), { type: "module" });
+      try {
+        const bitmap = await new Promise((resolve, reject) => {
+          worker.onmessage = (e) => (e.data?.error ? reject(new Error(e.data.error)) : resolve(e.data));
+          worker.onerror = (e) => reject(new Error(e.message || "worker failed to load"));
+          worker.postMessage({ cell });
+        });
+        fill(bitmap);
+        bitmap.close?.();
+      } finally {
+        worker.terminate();
+      }
+    } catch (err) {
+      console.warn("[rtsAtlas] worker bake failed, building on the main thread:", err?.message ?? err);
+      const t = makeSurfaceAtlas({ cell });
+      fill(t.image);
+      t.dispose();
+    }
+  })();
+  return tex;
+}
+
+/** Resolves when the atlas holds its real surfaces (see rtsAtlas). */
+export function rtsAtlasReady() {
+  rtsAtlas();
+  return atlasReady;
 }
 
 /** Built once, shared by every object in the lab and the engine. */
