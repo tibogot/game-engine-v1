@@ -194,6 +194,8 @@ export function createCrowdField({
 
   return {
     mesh,
+    /** Per-soldier (idle slice, run slice, blend, team) — the x-ray reads the team. */
+    animNode,
     capacity: max,
     /** Bytes of skinned-vertex storage — the one cost that scales with capacity. */
     bytes: max * vertexCount * 2 * 16,
@@ -206,13 +208,14 @@ export function createCrowdField({
      * @param {number} time           this soldier's own animation clock
      * @param {number} blend          0 = idle, 1 = run (crossfaded on the GPU)
      */
-    add(matrix, time, blend) {
+    add(matrix, time, blend, team = 0) {
       if (n >= max) return false;
       matrix.toArray(instMatrices.array, n * 16);
       const o = n * 4;
       anim.array[o + 0] = sliceOf("idle", time);
       anim.array[o + 1] = sliceOf("run", time);
       anim.array[o + 2] = blend;
+      anim.array[o + 3] = team;   // the spare lane: 0 ours, 1 theirs (the x-ray colour)
       n++;
       return true;
     },

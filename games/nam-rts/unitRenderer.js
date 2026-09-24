@@ -13,7 +13,8 @@
 import * as THREE from "three";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { materialColor, texture } from "three/tsl";
+import { attribute, instanceIndex, materialColor, texture } from "three/tsl";
+import { createXrayMaterial, xrayOn, xrayParams } from "./xraySilhouette.js";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
@@ -355,7 +356,30 @@ function buildInstancedType(tpl, scene) {
   // The template's own scale (buildTemplate normalises model size) is part of
   // every unit's transform, so instances carry it too.
   const odometer = parts.map((p) => p.im.material.userData?.odometer).find(Boolean) ?? null;
-  return { parts, scale: root.scale.x, n: 0, unitAt: [], turret: parts.some((p) => p.kind === "turret"), odometer };
+
+  // X-RAY (xraySilhouette.js): each part drawn a second time where the unit is
+  // hidden, sharing the part's geometry and instance matrices; a per-instance
+  // team flag picks blue or red. The depth lift is sized to the unit (its
+  // self-occlusion is at most about its own size).
+  const team = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PER_TYPE), 1);
+  team.setUsage(THREE.DynamicDrawUsage);
+  const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3());
+  const lift = THREE.MathUtils.clamp(Math.max(size.x, size.y, size.z) * 0.4, 1.0, 3.5);
+  const xrayMat = createXrayMaterial({ teamNode: attribute("iTeam", "float"), lift });
+  for (const part of parts) {
+    part.im.geometry.setAttribute("iTeam", team);
+    const x = new THREE.InstancedMesh(part.im.geometry, xrayMat, MAX_PER_TYPE);
+    x.instanceMatrix = part.im.instanceMatrix;   // the SAME buffer: nothing extra to upload
+    x.count = 0;
+    x.frustumCulled = false;
+    x.castShadow = x.receiveShadow = false;
+    x.renderOrder = 20;
+    x.visible = false;
+    x.name = "UnitXray";
+    scene.add(x);
+    part.xray = x;
+  }
+  return { parts, scale: root.scale.x, n: 0, unitAt: [], turret: parts.some((p) => p.kind === "turret"), odometer, team };
 }
 
 // ── Crowd (skinned types) ────────────────────────────────────────────────────
@@ -409,7 +433,23 @@ function buildCrowdType(tpl, type, app, scene) {
     .copy(root.matrixWorld).invert()
     .multiply(source.matrixWorld);
 
-  return { field, rel, scale: root.scale.x };
+  // X-ray for the crowd: the same compute-skinned vertices (the material's own
+  // positionNode and normal), the team from the anim record's spare lane.
+  const xray = new THREE.Mesh(field.mesh.geometry, createXrayMaterial({
+    teamNode: field.animNode.element(instanceIndex).w,
+    lift: xrayParams.uSoldierLift,
+    positionNode: field.mesh.material.positionNode,
+    normalNode: field.mesh.material.normalNode,
+  }));
+  xray.count = 0;
+  xray.frustumCulled = false;
+  xray.castShadow = xray.receiveShadow = false;
+  xray.renderOrder = 20;
+  xray.visible = false;
+  xray.name = "UnitXrayCrowd";
+  scene.add(xray);
+
+  return { field, rel, scale: root.scale.x, xray };
 }
 
 export async function createUnitRenderer({ app, units, healthBars, selectionRings, fogOfWar = null }) {
@@ -736,6 +776,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             part.im.setMatrixAt(i, _mat);
             part.im.setColorAt(i, tint); // same material, different side
           }
+          inst.team.setX(i, unit.team === "player" ? 0 : 1);
           if (inst.odometer) inst.odometer.setX(i, v.odo);
           inst.unitAt[i] = unit; // so a raycast on instanceId finds this unit
           inst.n = i + 1;
@@ -750,7 +791,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         v.blend += (want - v.blend) * Math.min(1, dt * 8); // ~0.15 s crossfade
         x.updateMatrix(); // off-scene: nothing else will do this for us
         _mat.multiplyMatrices(x.matrix, v.crowd.rel);
-        v.crowd.field.add(_mat, v.animTime, v.blend);
+        v.crowd.field.add(_mat, v.animTime, v.blend, unit.team === "player" ? 0 : 1);
         crowdUnits.push(unit); // instance order = pick order (see pickCrowdUnit)
       }
 
@@ -792,6 +833,13 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           part.im.visible = inst.n > 0;
           part.im.instanceMatrix.needsUpdate = true;
           part.im.instanceColor.needsUpdate = true;
+          part.xray.count = inst.n;
+          part.xray.visible = inst.n > 0 && xrayOn();
+        }
+        if (inst.n) {
+          inst.team.clearUpdateRanges();
+          inst.team.addUpdateRange(0, inst.n);
+          inst.team.needsUpdate = true;
         }
         if (inst.odometer && inst.n) {
           inst.odometer.needsUpdate = true;
@@ -801,6 +849,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       }
       // Uploads the per-soldier buffers and dispatches the skinning compute pass.
       crowd[k]?.field.commit();
+      if (crowd[k]?.xray) {
+        crowd[k].xray.count = crowd[k].field.mesh.count;
+        crowd[k].xray.visible = crowd[k].field.mesh.count > 0 && xrayOn();
+      }
     }
   }
 

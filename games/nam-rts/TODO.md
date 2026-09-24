@@ -553,6 +553,34 @@ Vietnam, like Apocalypse Now.
       in a V, crows), and flocks **flushed** from the jungle by any explosion or
       crater — mostly white so they read from above. One draw. Dev: BIRDS section
 
+## SEE UNITS THROUGH BUILDINGS & FOLIAGE — your question, 2026-09-25 (TALK FIRST)
+
+- [ ] Options discussed: (1) CoH X-RAY SILHOUETTE — units re-drawn once
+      with a flat team-colour + rim shader, depth test GREATER (paints only
+      where the unit is hidden), no screen grab; ~10 extra draws (instanced
+      types + the crowd), pixels only where hidden; shows through hills too
+      (rare at RTS pitch). (2) fade the occluder (buildings/trees see-through
+      near units): costly with the instanced foliage, fiddly. (3) a see-through
+      hole round the cursor: cheap, not an RTS look. MY PICK: (1), own units
+      always, enemies only while spotted (fog of war / concealment intact),
+      units only. Optional later: fade canopy crowns over selected units.
+      Measure before shipping.
+- [x] **BUILT (2026-09-25, uncommitted): xraySilhouette.js.** Every
+      instanced unit part gets a twin InstancedMesh (same geometry, SAME
+      instance-matrix buffer, a per-instance team flag) and the crowd a twin
+      mesh (its compute-skinned positions, the team in the anim record's spare
+      lane). Depth test GREATER, depth written LIFT metres nearer along the
+      view ray (1.1 soldiers, ~size x 0.4 vehicles) — so a unit's own parts
+      never light it up, only real occluders (buildings, trees, tall grass).
+      Blue ours, red spotted enemies (hidden enemies are not drawn at all),
+      a brighter rim. MEASURED: 198 units, x1.55 res: 25.09 vs 25.00 ms —
+      free. ?xray=0 = off; tune live via xraySilhouette.xrayParams.
+      YOUR CALL (2026-09-25): buildings and trees only, not grass -> the
+      soldiers' lift 1.1 -> 2.5 m (grass hides a man from within a metre or
+      two; a wall or a crown is further in front). Free. Trade-off: a man
+      pressed against a low wall may not show. The exact alternative (a
+      stencil bit written by buildings and trees) is an engine change.
+
 ## SELECTION & GROUPS — your asks, 2026-09-25
 
 - [x] **Right-click move DESELECTS the units** (your report) — you re-tested
