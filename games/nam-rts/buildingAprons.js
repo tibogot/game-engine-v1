@@ -1,14 +1,22 @@
-// An APRON UNDER EVERY BUILDING — the made ground a Company of Heroes base
-// sits on, instead of a building dropped onto untouched grass.
+// SWEPT YARDS UNDER THE VILLAGE HUTS — and, by default, nothing under anything
+// else.
 //
 // Every structure in this game levels its pad through `app.flattenRect` — the
 // HQ, the requisition masts, the camp gate, placed objects, and anything the
 // player builds mid-match (structures.js). That call already knows the
-// footprint (centre, half-extents, turn), so this wraps it: once the pad is
-// levelled, an apron decal is laid under it, turned with the building and
-// reaching MARGIN metres past its footprint — compacted laterite for the
-// firebase, a swept-earth yard for a village hut (`ground` on the call; see
-// GROUNDS).
+// footprint (centre, half-extents, turn), so this wraps it: a pad whose call
+// asks for a `ground` in GROUNDS gets that apron decal laid under it, turned
+// with the building and reaching MARGIN metres past its footprint, with the
+// vegetation cleared off its core.
+//
+// WHY ONLY THE VILLAGE (checkpoint 2026-09-24). This first put a laterite
+// apron under EVERY pad (133 at boot) and swept yards under the temple. Side
+// by side with the build before it, the camp came out barer — the clearing
+// stripped the ferns round every crate, and the pads merged into one flat red
+// patch — and the jungle growing right up to a building is exactly what looks
+// real here. Ruins in the jungle should be overgrown too. A swept yard round a
+// hut is the one that is true to the place, so it is the only one left; the
+// decals also cost ~0.6 ms at native, mostly those big apron boxes.
 //
 // SIZE. The apron art (decalPhotoArt `apron`) is a rounded rectangle whose
 // solid part reaches HALF_FRACTION of the decal box from its centre, so the box
@@ -28,18 +36,12 @@ const CORE_FRACTION = 0.6;   // art: fully opaque across ~60 % of the box
 const MAX_BOX = 16;          // metres; bigger boxes stretch the grain
 /**
  * The ground a pad gets, by `opts.ground` on the flattenRect call:
- *   laterite  (default) the bulldozed red pad of a firebase
  *   swept     a village hut's yard: packed earth, broomed smooth
- *   none      no apron
+ *   (absent)  nothing — the default
  * `prefix` finds the art if the map already carries it as a slot; otherwise
  * it is added at runtime from `art`.
  */
 const GROUNDS = {
-  laterite: {
-    prefix: "apron",
-    art: { name: "apron (photo)", albedoUrl: "/textures/decals/nam/apron_1.webp", normalUrl: "/textures/decals/nam/apron_1_n.webp" },
-    roughness: 0.85,
-  },
   swept: {
     prefix: "sweptYard",
     art: { name: "sweptYard (photo)", albedoUrl: "/textures/decals/nam/sweptYard_1.webp", normalUrl: "/textures/decals/nam/sweptYard_1_n.webp" },
@@ -83,8 +85,8 @@ export function installBuildingAprons(app) {
 
   let placed = 0;
   async function stamp(wx, wz, halfX, halfZ, y, rotY, ground) {
-    const g = GROUNDS[ground ?? "laterite"];
-    if (!g) return;                            // "none", or a name we do not know
+    const g = ground && GROUNDS[ground];
+    if (!g) return;                            // no ground asked for: leave the jungle be
     const s = await slot(g);
     const cr = Math.cos(rotY), sr = Math.sin(rotY);
     const qy = Math.sin(rotY / 2), qw = Math.cos(rotY / 2);

@@ -1028,6 +1028,31 @@ is not lost while Kurtz is being built.
       to warm tan (mul 1.18/sat 0.9 -> 1.1/1.0 — still a step lighter than
       the field), and the TEMPLE swept too (12 yards; laterite under a
       pagoda read US-military).
+      **REVERTED after the checkpoint (your call):** camp aprons and temple
+      yards removed — side by side with the build before, the camp was
+      barer (the apron clearing stripped the ferns) and the pads merged into
+      one flat red patch; jungle up to the walls is what looks real, and
+      ruins should be overgrown. ONLY the hamlet's swept yards stay (34).
+      flattenRect now stamps nothing unless the call asks for a `ground`.
+- [ ] **CHECKPOINT FINDINGS 2026-09-24** (fair A/B: worktree at a29c4eb vs
+      HEAD, settings aligned, fog off, ONE tab — two tabs rigged the first
+      perf numbers):
+      · ground tiles: at play zoom the old 34 m read MORE detailed than 7 m;
+        the first A/B that chose 7 m ran with stochastic tiling on + 85 %
+        render scale (stale MCP-profile localStorage). **Re-decide** — the
+        real answer is two-scale texturing, see the terrain plan.
+      · decals: +~0.6 ms native (36.2 vs 33.9 ms at 3840x1778; decals hidden
+        32.7) — measured WITH the camp aprons, mostly their big boxes; re-
+        measure now they are gone.
+      · old blue-grey puddles read as water better than the new red ones at
+        play zoom.
+- [ ] **LOAD TIME** (your ask 2026-09-24: every change means a reload, so
+      it taxes all the work). Boot stages recorded in localStorage sum to
+      ~100 s (Placing structures 20.9, v3proj 18.7, camp 17.7, unit visuals
+      16.9, village 6.8, resource nodes 6.7, crater decals 5.3) — rough, from
+      the MCP profile, re-measure in a focused tab. Suspect #1: every pad's
+      `flattenRect` awaits a full GPU->CPU heightmap readback (dozens at
+      boot) — batch the pads, read back once.
 - [ ] **CPU 36 ms spike after a few minutes of a match** — seen 2026-09-24 in
       the overlay (27 FPS, CPU 36 ms; 7-10 ms at boot) with the enemy AI
       running. Not investigated.

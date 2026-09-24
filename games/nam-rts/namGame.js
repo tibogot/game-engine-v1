@@ -238,9 +238,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const boot = await levels.loadBoot();
   worldState.name = boot.name;
 
-  // An apron under every building: from here on, every pad levelled through
-  // app.flattenRect (HQ, masts, gate, placed objects, player builds) gets one.
-  // AFTER the level load, which replaces the decal list wholesale.
+  // Swept yards under the village huts: from here on, a pad levelled through
+  // app.flattenRect that asks for `ground: "swept"` gets one (everything else,
+  // camp and temple, keeps its jungle). AFTER the level load, which replaces
+  // the decal list wholesale.
   installBuildingAprons(app);
 
   // Post-FX: the GAME owns its look. postFx.enabled defaults to false in the
