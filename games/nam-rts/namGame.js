@@ -88,6 +88,7 @@ import { createRequisitionRenderer } from "./requisitionRenderer.js";
 import { hamletSitesFor, pointSitesFor, templeSitesFor, tunnelSitesFor } from "./pointSites.js";
 import { placeHamlet } from "./village.js";
 import { placeTemple } from "./temple.js";
+import { plant, updatePlantedPlants } from "./placedPlants.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
 import { createWaves } from "./waves.js";
@@ -1079,6 +1080,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     selectionFrames.commit();
     fx.update(dt, app.camera);            // muzzle / impact / explosion
     smoke.render(renderTime, app.environment?.getLightDirection?.());
+    updatePlantedPlants(app, app.camera, app.environment?.getLightDirection?.());
     // Point the overlay at the selection until the pointer has moved, so
     // holding V before touching the mouse reveals the ground under the men
     // rather than a patch of the map's centre.
@@ -1111,6 +1113,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // ?camp=0 boots the bare map.
   const placed = createPlacedObjects(app);
   app.placed = placed;
+  // Plants a place puts down by hand (a hamlet's traveller's palms) — see
+  // placedPlants.js. Plans call this rather than importing the renderer, so
+  // they stay plain data that a Node test can load.
+  app.plant = (kind, x, z, o) => plant(app, kind, x, z, o);
   if (new URLSearchParams(location.search).get("camp") !== "0") {
     onStatus("Building the camp…");
     try {

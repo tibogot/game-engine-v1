@@ -51,6 +51,8 @@ export const HAMLET = {
     hearth: { hx: 1.5, hz: 0.8 }, cart: { hx: 1.5, hz: 4.4 }, fence: { hx: 0, hz: 0.35 },
     bamboo: { hx: 3.2, hz: 2.9 }, banana: { hx: 3.4, hz: 2.5 },
     pigPen: { hx: 2.4, hz: 1.9 }, washing: { hx: 2.8, hz: 0.4 },
+    // The TRUNK. The fan is six metres up and may spread over anything.
+    travellersPalm: { hx: 0.5, hz: 0.5 },
   },
   // A house's WALLS, inside the eaves. Jars, a rack or a fence may stand under
   // the overhang — that is where a real one keeps them, out of the rain — but
@@ -129,6 +131,14 @@ export function hamletPlan() {
   add("banana", 28, 11.5, 0.7, { seed: 81 });
   add("pigPen", -7, -22, 0.25, { seed: 43 });
   add("washing", -4.5, -9.6, 0.1, { seed: 47 });
+  // TRAVELLER'S PALMS, the ornamental: a pair framing the square behind the
+  // well and the shrine, and one in a back yard. Fans face the camera, not
+  // the lane (see placeHamlet).
+  // Planted, not grown — that is what a pair of them SAYS. Drawn by the
+  // engine's placed foliage (placedPlants.js), not the kit.
+  add("travellersPalm", -9.5, 10.5, 0.1, { seed: 0.21, scale: 0.95 });
+  add("travellersPalm", 8.5, 10.8, -0.08, { seed: 0.58, scale: 1.05 });
+  add("travellersPalm", 18.5, -24.5, 0.3, { seed: 0.83, scale: 0.85 });
 
   // ── Fences: the frontages, each with a gap in front of a door ──────────────
   // Runs along the lane at the yard line, and a return down one side of each
@@ -243,5 +253,15 @@ export async function placeHamlet(app, placed, { x, z, rotY = 0 } = {}) {
     });
   }
   await placed.place(items);
-  return items.length;
+  // Planted plants after the pads, so each stands on the final ground.
+  let plants = 0;
+  for (const p of hamletPlan()) {
+    if (p.kind !== "travellersPalm" || !app.plant) continue;
+    const w = toWorld(p, { x, z, rotY });
+    // The fan faces the DEFAULT camera (looking +Z), whatever way the site is
+    // turned: an ornamental is there to be seen, and edge-on it is a pole.
+    app.plant(p.kind, w.x, w.z, { rotY: p.rotY, scale: p.scale, seed: p.seed });
+    plants++;
+  }
+  return items.length + plants;
 }

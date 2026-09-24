@@ -175,6 +175,18 @@ export const FOLIAGE_PRESETS = {
     plumesPerStem: 2, plumeSpread: 92,
     colorBase: "#2e6b2a", colorTip: "#7fb23a", colorHead: "#6f8a4a", size: 5, translucency: 1.2,
   },
+  // TRAVELLER'S PALM — Ravenala, the flat fan (travellersPalmGeometry.js):
+  // a pale sheath fan, long bare petioles and banana blades, all in ONE plane
+  // on a slender trunk. An ornamental — hamlet, résidence, temple. `bareStalk`
+  // is the trunk's share of the height, `plumeSpread` the fan radius as % of
+  // it, `spread` how far round the fan opens. `size` 12 m.
+  travellersPalm: {
+    kind: "travellersPalm",
+    fronds: 24, frondLength: 1.0, leaflets: 14, leafletWidth: 1.0, leafletAngle: 16,
+    spread: 1.0, arch: 0.7, droop: 0.5, stemWidth: 1, bareStalk: 0.5,
+    plumesPerStem: 2, plumeSpread: 52,
+    colorBase: "#1b3f22", colorTip: "#8f9c48", colorHead: "#7c7a6c", size: 12, translucency: 0.8,
+  },
   // TARO / elephant ear — knee-high heart leaves on thin petioles, wet ground.
   taro: {
     kind: "taro",

@@ -46,6 +46,10 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/instancePipeline.js",
   "v3/render/gpuStatsPanel.js",
   "v3/render/clouds/dayNightCloudLayer.js",
+  // Plants a place puts down at exact points (a hamlet's traveller's palms),
+  // shaded like the painted fields, and the presets they are built from.
+  "v3/render/foliage/placedFoliage.js",
+  "v3/app/state/foliageScatterState.js",
   // Sky — the atmosphere dome and its Hillaire model (moved out of modular-road
   // 2026-09-18; the game still drives its own instance, the editor has a mode for it)
   "v3/render/sky/atmosphereSkyDome.js",

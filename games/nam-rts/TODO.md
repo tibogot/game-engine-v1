@@ -815,6 +815,45 @@ is not lost while Kurtz is being built.
       Cheap to build: the existing banana blade texture on long straight
       petioles, all at one azimuth. Probably the best look-per-triangle on the
       whole list.
+      **BUILT 2026-09-24** (`travellersPalmGeometry.js`, kind + preset
+      `travellersPalm`, 12 m, 1331 / 435 / 197 tris). Checked against your
+      photo in the vegetation lab. Three fixes came out of that comparison:
+      · the SHEATH is a narrow V (about ±35°) with the petioles opening out
+        from its top edge. My first build made it a half-disc, which read as
+        a paper fan.
+      · the blades lie IN the fan's plane (a custom card builder: the palm's
+        `addFrondCards` lays blades out horizontally), and they are dark.
+      · black blades: the shader flips any leaf normal that faces away from the
+        camera, so a normal lying in the fan's plane flipped at random.
+        Blade normals are now mostly UP. Fine from the RTS camera; at
+        eye level in the lab one half of the fan still goes dark. That is
+        the shader's flip rule and not the plant, so it doesn't matter in the game.
+      · the far trunk is a closed 4-sided tube, not crossed strips: part 2
+        is alpha-tested, and the mip blurred the trunk away.
+      **ON THE MAP 2026-09-24 as PLANTED plants** (your pick of option (a)):
+      three at the hamlet (a pair framing the square behind the well, one in
+      a back yard) and a pair flanking the temple gate. Plans list them like
+      any piece (`travellersPalm` in hamletPlan / templePlan; the village test
+      checks their trunks for collisions too). Plans call `app.plant(...)`
+      rather than importing the renderer, so they stay plain data.
+      · ENGINE: `v3/render/foliage/placedFoliage.js` — plants at exact
+        points, same geometry and the SAME material as the painted fields.
+        The material moved out of FoliageScatterSystem into
+        `createFoliageMaterial({ src, u, headTex })`; `src` says where a plant
+        is (the field's compute buffers, or two per-instance vec4s here).
+        One instanced draw per type × LOD, LOD chosen on the CPU. Any foliage
+        kind can be planted this way; add it to PLANTED in
+        games/nam-rts/placedPlants.js.
+      · Fans face the DEFAULT camera (+Z), not the site's rotation: the hamlet
+        is turned so its lane runs north–south, and facing the lane put every
+        fan edge-on to the player — a pole. Q/E rotation will still show them
+        edge-on at 90°, which is what the real tree does.
+      · Colours darkened for the game's light (#1b3f22 / #8f9c48): the lab
+        colours read pastel in the game.
+      · MEASURED: +0.06 ms GPU at hamlet zoom (1.34 vs 1.28 ms, ±0.12 noise).
+      **YOUR LOOK CHECK**: fan size against the houses (12 m; the hamlet ones
+      are 0.85–1.05×), the pale DEAD leaves hanging under each fan
+      (`plumesPerStem`, 2 now), and more of them — the résidence, a yard or two.
 - [ ] **Fan palm trunk: the diamond boot pattern** — your third photo shows it
       clearly. A fan palm keeps its old leaf BASES on the trunk in a
       criss-cross diamond lattice for years before they shed. Currently the

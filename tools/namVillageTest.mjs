@@ -35,7 +35,7 @@ const plan = hamletPlan();
  * round rectangles would call a hamlet's worth of honest spacing a collision.
  */
 /** Small stuff that may stand under a house's eaves, but not inside its walls. */
-const CLUTTER = new Set(["jars", "rack", "hearth", "shrine", "fence", "cart", "banana", "washing"]);
+const CLUTTER = new Set(["jars", "rack", "hearth", "shrine", "fence", "cart", "banana", "washing", "travellersPalm"]);
 function box(p, { walls = false } = {}) {
   const s = (walls && HAMLET.walls[p.kind]) || HAMLET.size[p.kind] || { hx: 1, hz: 1 };
   const c = Math.cos(p.rotY), sn = Math.sin(p.rotY);

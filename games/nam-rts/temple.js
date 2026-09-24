@@ -59,6 +59,11 @@ export function templePlan() {
   add("rubble", 9, -2, 1.2, { seed: 31 });
   add("rubble", -6, 20, 2.1, { seed: 47 });
   add("rubble", 5.5, -19, 0.3, { seed: 53 });
+  // A pair of TRAVELLER'S PALMS either side of the approach, framing the gate
+  // (fans face the camera — see placeTemple). Somebody planted
+  // these, long after the Khmer — Kurtz's people, or the French before them.
+  add("travellersPalm", -9.5, -9, 0.06, { seed: 0.33, scale: 1.05 });
+  add("travellersPalm", 9.5, -9.5, -0.05, { seed: 0.71, scale: 0.92 });
   return out;
 }
 
@@ -140,5 +145,15 @@ export async function placeTemple(app, placed, { x, z, rotY = 0 } = {}) {
     });
   }
   await placed.place(items);
-  return items.length;
+  // Planted plants after the pads, so each stands on the final ground.
+  let plants = 0;
+  for (const p of templePlan()) {
+    if (p.kind !== "travellersPalm" || !app.plant) continue;
+    const w = toWorld(p, { x, z, rotY });
+    // The fan faces the DEFAULT camera (looking +Z), whatever way the site is
+    // turned: an ornamental is there to be seen, and edge-on it is a pole.
+    app.plant(p.kind, w.x, w.z, { rotY: p.rotY, scale: p.scale, seed: p.seed });
+    plants++;
+  }
+  return items.length + plants;
 }
