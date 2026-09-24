@@ -30,7 +30,8 @@ export const STRUCTURE_TYPES = {
     navRadius: 24,   // pathfinding block — hangar apron (~17 m) + unit clearance
     // Walkable corridor on the −Z face (door / production exit). Carved after the
     // nav circle is stamped so units path around the HQ but still drive out.
-    doorApproach: { halfWidth: 7, length: 32, dirX: 0, dirZ: -1 },
+    // From the blast walls' front (13 m out) — never inside the hangar.
+    doorApproach: { halfWidth: 7, length: 32, start: 13, dirX: 0, dirZ: -1 },
     range: 0,        // unarmed
     barWidth: 14,
     barY: 20,

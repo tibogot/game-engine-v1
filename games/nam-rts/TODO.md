@@ -581,6 +581,14 @@ Vietnam, like Apocalypse Now.
       pressed against a low wall may not show. The exact alternative (a
       stencil bit written by buildings and trees) is an engine change.
 
+- [x] **SOLDIERS INSIDE THE HQ** (your x-ray screenshot, 2026-09-25) —
+      REAL, reproduced: 10 of 10 soldiers ordered at the base walked in. The
+      HQ's nav door lane (doorApproach) was carved from the building's CENTRE
+      outward, so it ran 10 m into the Quonset. It now starts at the blast
+      walls' front (start: 13, navGrid addStructureObstacle); produced units
+      still leave (they exit as ghosts). Re-test: 0 inside, a squad sent to
+      the far side went round, production fine. Uncommitted.
+
 ## SELECTION & GROUPS — your asks, 2026-09-25
 
 - [x] **Right-click move DESELECTS the units** (your report) — you re-tested

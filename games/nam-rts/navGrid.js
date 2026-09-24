@@ -128,8 +128,15 @@ export function createNavGrid({
     const dz = ap.dirZ ?? -1;
     const len = ap.length ?? 24;
     const hw = ap.halfWidth ?? 7;
+    // The lane starts at the building's FRONT (`start` metres out), not at its
+    // centre: carved from the centre it ran 10 m into the Quonset and units
+    // ordered near the HQ walked in and stood inside the hangar (your x-ray
+    // screenshot, 2026-09-25). Produced units do not need it inside — they
+    // leave as ghosts that ignore the footprint (units.js emerge).
+    const start = Math.min(ap.start ?? 0, len - 1);
+    const mid = start + (len - start) * 0.5;
     const ry = Math.atan2(dx, dz);
-    carveOrientedRect(wx + dx * len * 0.5, wz + dz * len * 0.5, hw, len * 0.5, ry);
+    carveOrientedRect(wx + dx * mid, wz + dz * mid, hw, (len - start) * 0.5, ry);
   }
 
   // Bridges (props named "bridge*") punch a walkable corridor through whatever
