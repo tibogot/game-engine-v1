@@ -33,7 +33,7 @@
  *
  * ── PARTS ────────────────────────────────────────────────────────────────────
  *   1  petiole   the leaf stalk (stem colour)
- *   3  trunk     colorHead, the culm path, with old leaf-base rings
+ *   3  trunk     colorHead, the culm path, with the BOOTS lattice (`along` 2)
  *   5  FAN       the leaf blade: one card, alpha from the fan texture, normal
  *                lifted 50% so a fan seen edge-on shades apart from one facing
  *                the sun. `rand` >= 2 flags the skirt's dead leaves brown.
@@ -41,7 +41,7 @@
  * ── SHARED KEYS, RE-READ ─────────────────────────────────────────────────────
  *   fronds        live leaves in the crown
  *   frondLength   trunk height, unit frame
- *   leaflets      old leaf-base rings up the trunk
+ *   leaflets      rings up the trunk (its barrel curve; the boots are shaded)
  *   leafletWidth  fan size
  *   leafletAngle  how far a fan cups out of its own plane, degrees
  *   spread        how far the crown opens (0 = a closed shuttlecock)
@@ -62,9 +62,7 @@ const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a
 const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
 const UP = [0, 1, 0];
 
-const STEM = 1, HEAD = 2, TRUNK = 3;
-/** Mid-internode: the culm shader draws neither a scar line nor a bloom. */
-const NO_SCAR = -1;
+const STEM = 1, TRUNK = 3;
 /**
  * Part 5 + the normal LIFT in its fraction (foliageSystem's normalNode).
  *
@@ -116,69 +114,57 @@ export function buildFanPalm(type, ctx) {
   // palm is grey-brown, not red.
   const barkTone = 0.05 + rand() * 0.22;
 
+  // THE BOOTS (your photograph of the sugar-palm stand): the old leaf bases
+  // stay on the trunk, split, and stack into a criss-cross lattice. The
+  // lattice is the culm shader's, switched on by `along` 2 (outside the ±1
+  // the rings use); here the geometry gives each ring a SEAM vertex so the
+  // lattice closes round the trunk, and a jagged radius so the broken ends of
+  // the boots break the outline — a booted trunk is never a clean cylinder.
+  const BOOTS = 2;
+  const tubeSides = far ? 4 : sides;
+  const jag = far ? 0 : near ? 0.2 : 0.14;
   const ring = (t, radius, alongVal) => {
     const { p, fwd } = at(t);
     const ax2 = norm(cross(fwd, side));
     const base = vcount();
-    for (let s = 0; s < sides; s++) {
-      const ph = (s / sides) * Math.PI * 2;
+    // Jagged per vertex, but the seam vertex repeats the first so it closes.
+    // Its own hash, NOT `rand`: drawing from the plant's sequence here would
+    // reshuffle every leaf of the crown that was tuned after it.
+    const jr = Array.from({ length: tubeSides }, (_, s) => {
+      const h = Math.sin(s * 12.9898 + t * 78.233 + barkTone * 311.7) * 43758.5453;
+      return 1 + jag * (h - Math.floor(h) - 0.35);
+    });
+    for (let s = 0; s <= tubeSides; s++) {
+      const ph = (s / tubeSides) * Math.PI * 2;
       const cs = Math.cos(ph), sn = Math.sin(ph);
       const n = norm([side[0] * cs + ax2[0] * sn, side[1] * cs + ax2[1] * sn, side[2] * cs + ax2[2] * sn]);
-      push(add(p, n, radius), n, s / sides, t, [TRUNK, t, barkTone, alongVal]);
+      push(add(p, n, radius * jr[s % tubeSides]), n, s / tubeSides, t, [TRUNK, t, barkTone, alongVal]);
     }
     return base;
   };
   // Outward winding — see ref: an inside-out tube renders black.
   const stitch = (b0, b1) => {
-    for (let s = 0; s < sides; s++) {
-      const s2 = (s + 1) % sides;
-      I.push(b0 + s, b0 + s2, b1 + s, b0 + s2, b1 + s2, b1 + s);
+    for (let s = 0; s < tubeSides; s++) {
+      I.push(b0 + s, b0 + s + 1, b1 + s, b0 + s + 1, b1 + s + 1, b1 + s);
     }
   };
+  let prev = null;
+  const join = (b) => { if (prev !== null) stitch(prev, b); prev = b; };
 
   if (far) {
-    for (const across of [true, false]) {
-      const base = vcount();
-      const segs = 3;
-      for (let q = 0; q <= segs; q++) {
-        const t = q / segs;
-        const { p, fwd } = at(t);
-        const axis = across ? side : norm(cross(fwd, side));
-        const n = norm(add(cross(fwd, axis), UP, 0.9));
-        // 1.9x the real radius. A crossed pair of quads only shows its full
-        // width when it faces you square on; at any other angle it foreshortens
-        // to nothing, and this trunk went to a dark wire under its own crown at
-        // the range this level exists for.
-        // PART 2, not the trunk's part 3.
-        //
-        // Part 3 shades with the culm normal multiplied by `faceDirection`, so
-        // on a DOUBLE-SIDED quad the back face gets its normal flipped — and a
-        // crossed pair always shows one back face. That is why this trunk came
-        // out BLACK at the coarse level while the round trunk it replaces was
-        // brown: not the width, not the colour, the winding. Part 2 carries
-        // the same `colorHead` but is shaded like a soft body, with a normal
-        // turned toward the viewer instead of flipped, so it can never go
-        // dark. The palm and the areca have the same latent bug.
-        for (const s of [-1, 1]) push(add(p, axis, s * radiusAt(t) * 1.9), n, s * 0.5 + 0.5, t, [HEAD, t, barkTone, 0.45]);
-      }
-      for (let q = 0; q < segs; q++) {
-        const i0 = base + q * 2;
-        I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3);
-      }
-    }
+    // A closed 4-sided tube, not a crossed pair of quads. The crossed pair had
+    // to be part 2 (part 3 flips its normal on a double-sided quad's back face
+    // and went BLACK), and part 2 is alpha-tested against the card texture —
+    // the traveller's palm lost its far trunk that way entirely. A closed tube
+    // shows no back face, so it stays part 3 and gets the boots' average
+    // colour. Fatter than the real radius: four sides lose a third of it.
+    for (const t of [0, 0.5, 1]) join(ring(t, radiusAt(t) * 1.45, BOOTS));
   } else {
-    // Old leaf bases: broader and further apart than a coconut's scars,
-    // drawn by the same culm scar/bloom shader from signed node distance.
-    let prev = null;
-    const join = (b) => { if (prev !== null) stitch(prev, b); prev = b; };
+    // Rings only for the barrel's curve now; the boots carry the surface.
     for (let k = 0; k <= rings; k++) {
       const t = k / rings;
-      join(ring(t, radiusAt(t) * (k === 0 ? 1 : 1.06), 0));
-      if (k < rings) {
-        const mid = (k + 0.5) / rings;
-        join(ring(mid, radiusAt(mid), 1));
-        if (near) join(ring(mid, radiusAt(mid), -1));
-      }
+      join(ring(t, radiusAt(t), BOOTS));
+      if (near && k < rings) join(ring((k + 0.5) / rings, radiusAt((k + 0.5) / rings), BOOTS));
     }
   }
 

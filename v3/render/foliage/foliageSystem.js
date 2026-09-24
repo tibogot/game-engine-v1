@@ -17,7 +17,7 @@
 import * as THREE from "three";
 import {
   Discard, Fn, attribute, cameraPosition, cameraViewMatrix, cos, dot, exp, faceDirection, float,
-  fract, hash, instanceIndex, length, max, min, mix, normalLocal, normalize, pow, positionLocal, saturate,
+  floor, fract, fwidth, hash, instanceIndex, length, max, min, mix, normalLocal, normalize, pow, positionLocal, saturate,
   select, sin, smoothstep, step, texture, time, uniform, uv, varying, vec2, vec3, vec4, PI2,
 } from "three/tsl";
 import { drawPlumeTexture, PLUME_TEX_W, PLUME_TEX_H } from "./plumeTexture.js";
@@ -416,9 +416,42 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     const striae = sin(uv().x.mul(PI2).mul(41)).mul(0.035);
     const culmRow = row(vType, 3).xyz;
     const culmTone = mix(culmRow, culmRow.mul(vec3(1.14, 1.04, 0.66)), vRand.mul(0.55));
-    const culm = culmTone
+    const culmRinged = culmTone
       .mul(mix(float(0.82), float(1.18), vHeight))
       .mul(float(1).sub(scar).add(bloom).add(striae));
+    // BOOTS — a fan palm's trunk (fanPalmGeometry.js flags it with `along` 2,
+    // outside the ±1 the rings use). The old leaf bases stay on the trunk for
+    // years, split down the middle, and stack into a criss-cross lattice: a
+    // diamond per boot, pale grey where the base is weathered flat, rust-brown
+    // where the fibre splits at its edges, a dark groove between. From your
+    // photograph of the sugar-palm stand. 6 boots round, 20 up the trunk. `uv.x`
+    // runs 0 -> 1 round the trunk with a seam vertex, so the lattice closes.
+    //
+    // A boot is a SCALE, not a cell: each one overlaps the one above it, so its
+    // lower half is the weathered pale face and its upper half is the dark
+    // hollow the next boot stands out of. A flat per-cell fill read as a woven
+    // basket (first try); the shadowed pocket at the top of every diamond is
+    // what turns the lattice into a trunk.
+    const bootA = uv().x.mul(6).add(vHeight.mul(20));
+    const bootB = uv().x.mul(6).sub(vHeight.mul(20));
+    const fa = fract(bootA), fb = fract(bootB);
+    const edge = min(min(fa, float(1).sub(fa)), min(fb, float(1).sub(fb)));
+    // Height inside the diamond: -1 at its bottom point, +1 at its top.
+    const inY = fa.sub(fb);
+    const cellTone = hash(floor(bootA).mul(31.7).add(floor(bootB)).add(vPlant.mul(97)));
+    const pale = culmTone.mul(vec3(1.36, 1.18, 0.92)).mul(float(0.8).add(cellTone.mul(0.4)));
+    const rust = culmTone.mul(vec3(1.1, 0.66, 0.42));
+    const face = mix(rust, pale, smoothstep(0.04, 0.3, edge));
+    const pocket = smoothstep(0.05, 0.75, inY);          // the hollow above the face
+    const bootCol = face
+      .mul(mix(float(1), float(0.38), pocket))
+      .mul(mix(float(0.3), float(1), smoothstep(0.0, 0.06, edge)));
+    // Where the lattice gets finer than a couple of pixels it would shimmer:
+    // fade it to its own average as the cells shrink.
+    const bootFine = smoothstep(0.25, 0.6, fwidth(bootA));
+    const bootMean = mix(rust, pale, float(0.5)).mul(0.72);
+    const boots = mix(bootCol, bootMean, bootFine);
+    const culm = select(vAlong.greaterThan(1.5), boots, culmRinged);
     const col = select(isLeafPart, leaf,
       select(vPart.lessThan(1.5), stem,
         select(vPart.lessThan(2.5), head, culm)));

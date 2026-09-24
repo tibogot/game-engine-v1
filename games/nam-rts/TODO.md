@@ -854,11 +854,21 @@ is not lost while Kurtz is being built.
       **YOUR LOOK CHECK**: fan size against the houses (12 m; the hamlet ones
       are 0.85–1.05×), the pale DEAD leaves hanging under each fan
       (`plumesPerStem`, 2 now), and more of them — the résidence, a yard or two.
-- [ ] **Fan palm trunk: the diamond boot pattern** — your third photo shows it
+- [x] **Fan palm trunk: the diamond boot pattern** — your third photo shows it
       clearly. A fan palm keeps its old leaf BASES on the trunk in a
       criss-cross diamond lattice for years before they shed. Currently the
       trunk is smooth with plain rings. It is the detail that makes the trunk
       read as a palm rather than a post, and it is a texture job, not geometry.
+      **DONE 2026-09-24**: a lattice in the culm shader, switched on by
+      `along` 2 (outside the rings' ±1), 6 boots round × 20 up. Each boot is a
+      SCALE, not a cell: pale weathered face below, a dark hollow above where
+      the next boot overlaps. The first try, with flat cells, read as a woven
+      basket. Rings got a seam vertex so the lattice closes, and a jagged
+      radius so boot ends break the outline. The lattice fades to its average
+      colour by `fwidth`, so it doesn't shimmer at RTS range. The far trunk is now a
+      closed 4-sided tube, the same fix as the traveller's palm. Judged in the
+      game: the vegetation lab keeps its own copy of the shader and does not
+      show it.
 - [ ] **Palm variety for free**: the palm is procedural, so every instance can
       differ at no draw cost — trunk curve/lean, height, crown size, frond
       count/droop, dead hanging fronds. Per-instance params, not new types
