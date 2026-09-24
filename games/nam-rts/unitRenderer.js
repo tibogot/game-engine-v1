@@ -21,7 +21,7 @@ import { bakeThumbnails } from "./thumbnails.js";
 import { buildM113, buildM151, buildM35, buildM48, buildM551, buildMolotova, buildPT76, buildUH1, rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
-import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+import { mayCastShadow, stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
 /** Vehicles built in code, by a unit type's `procedural` key. */
 const PROCEDURAL_VEHICLES = { m113: () => buildM113(), m48: () => buildM48(), m151: () => buildM151(), uh1: () => buildUH1(), m551: () => buildM551(), m35: () => buildM35(), pt76: () => buildPT76(), molotova: () => buildMolotova() };
@@ -319,7 +319,8 @@ function buildInstancedType(tpl, scene) {
     // (They were briefly excluded as "visual noise" — but that call was made while
     // the sun direction was skewed and every shadow landed 62 m from its object,
     // so the rotor shadow never actually got a fair look.)
-    im.castShadow = o.castShadow;
+    // …except an alpha-tested part (the stencils): see mayCastShadow.
+    im.castShadow = o.castShadow && mayCastShadow(o.material);
     im.receiveShadow = true;
     im.frustumCulled = false; // instances live anywhere; the shared bounds are meaningless
 

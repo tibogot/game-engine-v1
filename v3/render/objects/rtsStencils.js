@@ -181,6 +181,24 @@ export function stencilMaterial() {
 }
 
 /**
+ * Whether a mesh with this material may cast a shadow. A stencil must NOT,
+ * and not only because paint on a surface has no shadow of its own:
+ *
+ * THE SHADOW PASS IS SHARED STATE. three renders every caster through ONE
+ * shadow material and copies each caster's `alphaTest` onto it, and flipping
+ * `alphaTest` between zero and non-zero bumps that material's `version`. With
+ * the stencils (alphaTest 0.5) interleaved among ~110 alpha-0 casters, the
+ * version moved every frame, so EVERY shadow draw failed its render-object
+ * check and rebuilt its material cache key: 112 rebuilds a frame, ~1 ms of
+ * CPU in a fight (measured 2026-09-24). With them out it is under one.
+ * Any caster with `alphaTest` > 0 does this, the stencils were just the most.
+ */
+export function mayCastShadow(material) {
+  const m = Array.isArray(material) ? material[0] : material;
+  return !(m?.alphaTest > 0);
+}
+
+/**
  * A stencil laid on a surface. `surface(s, t)` maps the patch's own
  * coordinates (s across, t up, both 0..1) to `{ p: Vector3, n: Vector3 }` on
  * the object — a flat face, a corrugated wall, a sagging roof — and the patch

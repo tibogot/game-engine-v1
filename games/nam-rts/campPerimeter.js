@@ -14,6 +14,7 @@
 import * as THREE from "three";
 import { buildBarbWireMesh } from "../../v2/objects/barbWire.js";
 import { buildChainLinkFenceMesh } from "../../v2/objects/chainLinkFence.js";
+import { mayCastShadow } from "../../v3/render/objects/rtsStencils.js";
 import { buildFloodlightMesh } from "../../v2/objects/floodlight.js";
 import { buildPowerLineMesh } from "../../v2/objects/powerLine.js";
 import { buildGate, buildGuardTower } from "../../v3/render/objects/rtsFirebaseProps.js";
@@ -107,7 +108,14 @@ export async function placeCampPerimeter(app, placed) {
         armLength: 0.45 * S, armRadius: 0.03 * S, strandRadius: 0.012 * S, barbSize: 0.045 * S, armSide: "out",
         meshColor: "#9ea49a", postColor: "#6e7368", railColor: "#6a6f64" },
     });
-    if (m) group.add(m);
+    // The chain-link weave is alpha-tested: it must not cast (mayCastShadow —
+    // one alpha-tested caster makes every shadow draw rebuild its cache key
+    // every frame). Its shadow was a faint dot pattern nobody sees from the
+    // RTS camera; the posts and rails are their own material and still cast.
+    if (m) {
+      m.traverse((o) => { if (o.isMesh && !mayCastShadow(o.material)) o.castShadow = false; });
+      group.add(m);
+    }
   }
   for (const run of wire) {
     const m = buildBarbWireMesh({

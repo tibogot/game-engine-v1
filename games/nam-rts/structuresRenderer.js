@@ -24,7 +24,7 @@ import {
   buildBoobyTrap, buildMortarPit, buildMortarTube, buildPunjiPit, buildSpiderHole, buildSpiderMan,
   buildSupplyCache, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
 } from "../../v3/render/objects/rtsEnemyKit.js";
-import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+import { mayCastShadow, stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
 const MAX_PER_KIND = 64; // instance capacity per structure kind
 
@@ -56,7 +56,7 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
   const makeKind = (geometry, material, { shadow = false } = {}) => {
     const im = new THREE.InstancedMesh(geometry, material, MAX_PER_KIND);
     im.count = 0;
-    im.castShadow = shadow;
+    im.castShadow = shadow && mayCastShadow(material);   // never a stencil: see mayCastShadow
     im.receiveShadow = shadow;
     im.frustumCulled = false;
     scene.add(im);

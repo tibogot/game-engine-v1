@@ -18,7 +18,7 @@ import * as THREE from "three";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
 import { buildRadioTower } from "./radioKit.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
-import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+import { mayCastShadow, stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import {
   GUN_PIT_HEAD_Y, buildBunker, buildGunPitBody, buildGunPitGun, buildHelipad, buildMedicTent, buildRadioPost,
   buildSandbagWallPiece, buildWatchTower,
@@ -106,7 +106,7 @@ export function createBuildingRenderer({ app, buildings, healthBars = null }) {
   const makeKind = (geometry, material, { shadow = false } = {}) => {
     const im = new THREE.InstancedMesh(geometry, material, MAX_TURRETS);
     im.count = 0;
-    im.castShadow = shadow;
+    im.castShadow = shadow && mayCastShadow(material);   // never a stencil: see mayCastShadow
     im.receiveShadow = shadow;
     im.frustumCulled = false;
     scene.add(im);

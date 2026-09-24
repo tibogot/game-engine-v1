@@ -10,6 +10,7 @@ const TIMESTEP_SQ = 0.018 * 0.018;
 const _gravity = new THREE.Vector3(0, -981 * 1.4, 0).multiplyScalar(DRAG);
 const _windForce = new THREE.Vector3();
 const _tmpForce = new THREE.Vector3();
+const _normal = new THREE.Vector3();   // per-face scratch: update() runs every frame
 const _diff = new THREE.Vector3();
 
 class Particle {
@@ -193,7 +194,7 @@ export function createFlagProp(params = {}) {
     const normals = geometry.attributes.normal;
     const indices = geometry.index;
 
-    const normal = new THREE.Vector3();
+    const normal = _normal;
     for (let i = 0, il = indices.count; i < il; i += 3) {
       for (let j = 0; j < 3; j++) {
         const idx = indices.getX(i + j);

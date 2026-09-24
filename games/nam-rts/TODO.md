@@ -495,7 +495,8 @@ Vietnam, like Apocalypse Now.
 - [ ] **Night / dusk lighting pass**: the map is midday, so lamps only glow;
       searchlight beams (fake volumetric cones), light pools on the ground,
       lamps tied to sun elevation — needs a dusk/night time of day to matter
-- [ ] **String lights** — for the village / a club tent (v2 `stringLights.js`
+- [ ] **String lights = the HANGING LAMPS in the village** (your ask; you
+      reminded me 2026-09-24) — for the village / a club tent (v2 `stringLights.js`
       registered, not placed yet)
 - [ ] Berm reads faintly on sand: a bare-earth look (dirt decals along it, or
       a paint layer) would make it pop from above
@@ -636,6 +637,9 @@ Vietnam, like Apocalypse Now.
       high above everything), banyan / strangler fig (aerial roots, huge wide
       crown), rubber trees in plantation ROWS (a French plantation is a great
       map feature), bamboo clumps already exist. Built in the **vegetation lab**
+      · 2026-09-24: the BANYAN is done (placed landmarks, see below). Still
+        open: a big tree IN THE JUNGLE itself (dipterocarp emergents, rubber
+        rows). The jungle-tree slot is still the bad one.
 - [x] **The coconut palm re-proportioned** (2026-09-23, your catch: "is my palm
       tree not a tall tree?"). It was **11 m** — 4.7 soldiers high, where a real
       coconut palm is 20-30 m and reads as about 14. It was a sapling standing
@@ -807,7 +811,7 @@ is not lost while Kurtz is being built.
       one. Both far trunks are part 2 now (same `colorHead`, shaded like a soft
       body with its normal turned toward the viewer) and a little wider, since
       a crossed pair only shows its full width square on.
-- [ ] **Bamboo is 9 m** where real giant bamboo is 20-30, the same error the
+- [x] **Bamboo is 9 m** (DONE 2026-09-24: 16 m, see above) where real giant bamboo is 20-30, the same error the
       palm had. Your call, as the palm was.
 - [ ] **Re-shoot the whole-map lineup** (`window.__sheet` in the lab) now that
       the bush, ground cover and banana have changed, to see what the jungle
@@ -849,7 +853,7 @@ is not lost while Kurtz is being built.
       **YOUR LOOK CHECK**: the first stand reads dense — closer to a plantation
       than to scattered palms. `TARGET` in the script is the knob.
 
-- [ ] **TRAVELLER'S PALM / Ravenala** — your reference photos, 2026-09-23 (two
+- [x] **TRAVELLER'S PALM / Ravenala** — your reference photos, 2026-09-23 (two
       of the three you sent are this plant). THE flat-fan silhouette, and
       nothing on the map has anything like it:
       · long BARE petioles, all in ONE PLANE, radiating from a stacked base —
@@ -1207,7 +1211,66 @@ is not lost while Kurtz is being built.
       ~1.35 s, decal slots ~0.6 s, rocks ~1.2 s, the rest spread out).
 - [ ] **CPU 36 ms spike after a few minutes of a match** — seen 2026-09-24 in
       the overlay (27 FPS, CPU 36 ms; 7-10 ms at boot) with the enemy AI
-      running. Not investigated.
+      running. **IN PROGRESS 2026-09-24** (your pick: first, and "be sure
+      everything is as optimized as possible"). Method: fastForward(300), then
+      spawn 40 soldiers + 4 tanks at the enemy centroid, camera on the fight,
+      Chrome trace parsed with scratchpad parseTrace.mjs (self time per
+      function; the slowest frames). FINDINGS SO FAR:
+      · FIXED (uncommitted): ONE alpha-tested shadow caster makes EVERY shadow
+        draw rebuild its material cache key every frame. three copies each
+        caster's alphaTest onto the one shared shadow material, and flipping
+        0 <-> >0 bumps its version. 112 rebuilds/frame, ~1 ms CPU. The culprits
+        were the RtsStencil instanced parts and the camp's chain-link weave.
+        `mayCastShadow()` in rtsStencils.js; applied in unitRenderer,
+        structuresRenderer, buildingRenderer and campPerimeter. Measured: 112
+        -> 0.6 rebuilds/frame; main-thread mean per frame 7.3 -> 4.7 ms.
+      · NOT the sim/AI growing: after fastForward(300) the tick is 0.9 ms.
+        The game's tick in a fight is 1.5 ms; the rest of the ~9 ms is
+        rendering.
+      · GPU UPLOADS: 2 MB and 1558 writeBuffer calls PER FRAME. (a) ~600 KB is
+        three's per-object 3 KB uniform groups, re-sent for every drawn object
+        (structural: fewer objects or merging is the lever). (b) ~700 KB is
+        16 KB instance-matrix buffers: unitRenderer parts reserve 256 slots
+        and ship all of them every frame, for 62 live units across 32 meshes.
+        TODO: size capacity per type, or upload only live instances.
+      · HITCHES (20-45 ms, some 140-240 ms): GC (482 ms in 13 s, 24 ms major
+        collections: find the per-frame allocations) and PIPELINES BUILT
+        MID-FIGHT (26 of them, mostly small MeshBasic render-target draws —
+        likely portraits or icons for newly spawned units): warm them at boot.
+      · GPU timestamp queries (the stats overlay) cost ~2.5% CPU: make sure
+        they are off in a shipped build.
+      · FIXED (uncommitted): PIPELINE WARM-UP (pipelineWarmup.js). Before the
+        loading screen goes, every drawable the GAME added after the level
+        loaded (the engine's hidden ocean, waterfalls and gizmos are left
+        alone) is switched on for two frames, which builds its pipelines.
+        Measured: pipelines built mid-fight went from 26 to 1, and the fight's
+        frames over 25 ms from ~20 (up to 987 ms) to 2 (34, 32 ms). Cost: 71
+        drawables, +0.46 s of loading.
+      · Session 2 checks (2026-09-24), all CLEAN after the two fixes:
+        - 150 s of real-time fighting, snapshot every 15 s: 60 fps, tick
+          ~1 ms, scene size constant. NOTHING ACCUMULATES.
+        - PATHFINDING is cheap: in the open, 345 searches in 20 s = 9 ms
+          total; attacking the walled camp, every frame under 5 ms (the enemy
+          AI queues its searches). A camp assault's worst frame: 19 ms.
+        - HEAP 718 MB, but 531 MB of it is typed-array data (CPU copies of
+          textures, terrain, geometry) and 94 MB dev-server source text. The
+          collector does not walk array data, so this is a MEMORY item for
+          shipping, not a hitch.
+        - GC: ~33-47 MB/s of short-lived garbage (mostly three.js's own
+          per-frame work). Minor collections are cheap (<3 ms, ~2/s); FULL
+          collections are the remaining hitch: 19-24 ms every 5-13 s.
+        - The flag's cloth update allocated a vector every frame: hoisted.
+      · The SUSTAINED 27 FPS was NOT reproduced after the fixes. If it comes
+        back: note what was on screen, and remember the MSI laptop's GPU
+        throttling (memory) can look like this too.
+      · LEFT, measured and small: 1500 writeBuffer calls/frame (three's
+        per-object uniforms; the lever is fewer draw calls); unit separation
+        ~1 ms in an 80-man crowd (one tank widens every soldier's reach); the
+        stats overlay's GPU timers (~0.1-0.2 ms, always on).
+- [ ] **Projectiles like Company of Heroes** (your ask 2026-09-24, after the
+      CPU spike): tracers, shell arcs, impacts that read like CoH.
+- [ ] **Smoke and fire, more realistic** (your ask 2026-09-24, with the
+      projectiles).
 - [ ] Texture repetition (hex tiling discussed; stochastic rejected — it swam)
 - [ ] Napalm flame cores clip to white — per-fire intensity (taste)
 - [ ] Octahedral impostors for the RTS camera — asked, never answered properly

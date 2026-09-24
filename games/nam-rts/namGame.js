@@ -89,6 +89,7 @@ import { hamletSitesFor, pointSitesFor, templeSitesFor, tunnelSitesFor } from ".
 import { placeHamlet } from "./village.js";
 import { placeTemple } from "./temple.js";
 import { plant, updatePlantedPlants } from "./placedPlants.js";
+import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
 import { createWaves } from "./waves.js";
@@ -260,6 +261,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const levels = createLevelLoader(app, { defaultUrl: "/levels/nam-valley.v3proj", onStatus, onProgress });
   const worldState = { name: "procedural default" };
   const boot = await levels.loadBoot();
+  // What the ENGINE put in the scene: the warm-up at the end leaves it alone.
+  const engineObjects = snapshotEngineScene(app.scene);
   worldState.name = boot.name;
 
   // Swept yards under the village huts: from here on, a pad levelled through
@@ -1202,6 +1205,14 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   window.__NAM = app;
 
   app.setFrameThrottle?.(0);     // the loading screen is going: full rate
+  // Build every pipeline the game will need NOW, under the loading screen,
+  // not on the frame the first fire, rocket or tank appears mid-fight
+  // (pipelineWarmup.js). Only what the game added after the level loaded.
+  onStatus("Preparing effects…");
+  try {
+    const w = await warmGamePipelines(app, engineObjects);
+    console.log(`[warmup] ${w.warmed} hidden/empty drawables warmed in ${w.ms} ms`);
+  } catch (e) { console.warn("[warmup] failed:", e); }
   onStatus("ready");
   return app;
 }
