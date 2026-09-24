@@ -18,7 +18,7 @@ const FLAG_W = 3.0, FLAG_H = FLAG_W / 1.9 * 1.0;
 const TINT = { neutral: 0xd8cfae, player: 0x6ab0ff, enemy: 0xff6a5a };
 
 /** The National Liberation Front's flag: red over blue, a yellow star. */
-function drawNlfFlag(h = 256) {
+export function drawNlfFlag(h = 256) {
   const w = Math.round(h * 1.5);
   const c = document.createElement("canvas");
   c.width = w; c.height = h;

@@ -56,8 +56,14 @@ const MAX_UNDO = 64;
 const ARROW_SPACING = 14;
 /** Metres the ribbon overhangs each bank so the depth test finds the waterline. */
 const RIBBON_OVERHANG = 2.5;
-/** Ribbon rows per culling chunk: at the default 0.8 m step, ~50 m of river. */
-const RIVER_CULL_ROWS = 64;
+/**
+ * Ribbon rows per culling chunk: at the default 0.8 m step, ~13 m of river.
+ * Was 64 (~50 m): measured 2026-09-24 on nam-valley at RTS play zoom with NONE
+ * of the river on screen, a 50 m chunk's sphere still touched the frustum
+ * edge, the river drew, and its two full-screen water grabs cost 2.8 ms (x1.55
+ * res). Smaller chunks, and each tested by its BOX (below).
+ */
+const RIVER_CULL_ROWS = 16;
 /** Metres added to each chunk sphere: wave lift, plus a margin at the view edge. */
 const RIVER_CULL_SLACK = 4;
 const _cullMat = new THREE.Matrix4();
@@ -1029,7 +1035,11 @@ export class RiverV2System {
       }
       const sphere = box.getBoundingSphere(new THREE.Sphere());
       sphere.radius += RIVER_CULL_SLACK;
-      chunks.push({ sphere, start: r0 * cols * 6, end: r1 * cols * 6 });
+      // The BOX as well: a stretch of river is long and thin and a sphere round
+      // it is mostly empty air — the sphere is the cheap first test, the box
+      // the one that decides.
+      const aabb = box.clone().expandByScalar(RIVER_CULL_SLACK);
+      chunks.push({ sphere, box: aabb, start: r0 * cols * 6, end: r1 * cols * 6 });
     }
     return chunks;
   }
@@ -1057,6 +1067,7 @@ export class RiverV2System {
       let first = -1, last = -1;
       for (let i = 0; i < chunks.length; i++) {
         if (!_cullFrustum.intersectsSphere(chunks[i].sphere)) continue;
+        if (chunks[i].box && !_cullFrustum.intersectsBox(chunks[i].box)) continue;
         if (first < 0) first = i;
         last = i;
       }

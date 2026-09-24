@@ -283,6 +283,24 @@ Vietnam, like Apocalypse Now.
       tower — four raked poles, a split-bamboo platform, a thatch cap, a ladder
       of lashed rungs, a bell or a length of shell casing hung to beat as an
       alarm. Gives vision like ours (and a man in it, like the spider hole)
+- [x] **FIRST PASS DONE (2026-09-24, while you were out — uncommitted,
+      YOUR LOOK CHECK)**: v3/render/objects/rtsEnemyCamp.js (new kit:
+      lashed bamboo watchtower with thatch cap, ladder and shell-casing gong;
+      long house/barracks; cook house with the Hoàng Cầm smoke TRENCH running
+      out the back; weapons rack; map table under a tarp; camouflage net;
+      supply-bicycle row; propaganda board with the NLF banner + loudspeaker;
+      tiger cages, one occupied; foxholes; log-faced trench berms) laid out
+      by games/nam-rts/enemyCamp.js round the résidence (front: towers,
+      berms, foxholes, board; west: barracks, rack, cages; east: cook house,
+      granary under netting, well, jars, map table; behind: bicycles, wash
+      line; bamboo/banana clumps), forecourt and the ZPU/spider hole/punji/
+      cache kept clear. ?enemycamp=0 = before. THE FLAG is the engine's
+      Verlet CLOTH flag like ours (your call), NLF texture, its sim skipped
+      while off screen. Trap: IcosahedronGeometry is NON-indexed and breaks
+      assemble()'s merge — use SphereGeometry. rtsEnemyCamp.js added to
+      PUBLIC_ENGINE_MODULES. OPEN: the map's own dense coconut palms swallow
+      the east wing (cook house, granary) — thin them round the camp, or
+      keep it hidden "under the trees"? Your call.
 - [ ] **Fill their base** (the résidence is bare next to our camp). An NVA/VC
       base camp, not a firebase: cook house with a Dien Bien Phu smokeless
       stove (the trench that hides the smoke), rice store, a bamboo-and-thatch
@@ -793,6 +811,115 @@ is not lost while Kurtz is being built.
         turning shadows off instead removes the plant's self-shadowing.
         **YOUR LOOK CHECK**: the fan palms, bananas and sugar cane at your
         zoom. NEXT: the jungle as a whole (2), the enemy side (3).
+        COMMITTED 35f4f54.
+      · (2) THE JUNGLE — survey 2026-09-24: the map has NO canopy. Every
+        "tree" is a palm or bamboo; the ground is meadow, ferns and rock
+        slopes (savanna, not jungle). YOUR CALL: **"Frame the fight"** —
+        dense canopy on slopes, ridges and edges units cannot walk anyway,
+        thick bands between areas, single trees and groves on the playable
+        ground, fighting ground kept open. (Not: canopy everywhere with a
+        see-through fade near units — the alternative, not chosen.)
+        DONE (uncommitted):
+        [x] THE CANOPY TREE — v3/render/foliage/dipterocarpGeometry.js, kind
+            + preset `dipterocarp` (30 m): clean pale bole, plank buttresses,
+            an UMBRELLA OF CAULIFLOWERS (a middle head + 5 round it on thick
+            limbs), each head billboard leaf clusters (the banyan texture)
+            carrying ITS OWN head's rounded normal, so each shades as a ball
+            and the canopy reads as lumps with dark cracks. The banyan's tube
+            code is now a shared `woodKit`. In the map's 4th tall-plant slot
+            (tools/namJungle.mjs), bark #6c685b.
+        [x] PLACEMENT — games/nam-rts/jungleCanopy.js, painted at boot into
+            the alpha channel through a new engine call
+            `app.paintTallPlantChannel(ch, fn)`: dense on slopes >34° (the
+            nav limit) + 4 m spill, the map edge (wobbled), groves from
+            low-frequency noise; cleared round the camp (75 m), enemy HQ (60),
+            points (30), enemy positions (16), hamlets (55), temple (70),
+            feathered 18 m; dirt roads kept clear by the engine's paint mask.
+            First try spilled 12 m and put the open centre under canopy (a
+            crown overhangs ~10 m). ?canopy=0 = the old map. 125 ms at boot.
+        [x] MEASURED (x1.55 resolution, rAF frame time, hidden by layers):
+            canopy ON is FASTER — play zoom 29.0 vs 36.3 ms, max zoom-out
+            31.7 vs 34.2. The crowns hide the expensive ground foliage and
+            terrain under them (the banyan showed the same).
+        TRAPS FOUND ON THE WAY: `sampleTallPlantDensity` reads RGB only (it
+        predates the 4th slot) — so concealment ignores the canopy, and any
+        coverage stat from it counts palms, not trees. Hiding the tree meshes
+        with `.visible` STAYS hidden (the field never re-shows them): use
+        `layers.set(31)` for A/Bs — the first A/B measured nothing.
+        [ ] **YOUR CALL**: should standing under canopy CONCEAL units (make
+            cover.js read the tree channel)? Gameplay change — ask first.
+        [ ] the undergrowth under the canopy (ferns/bananas thicker there).
+        [ ] the long pale trunks at the screen edge (perspective) — judge.
+        [x] YOUR SCREENSHOT (2026-09-24): hard horizontal shadow STRIPES on
+            the crowns + "reads too low poly". (1) The banyan's bug again:
+            the scatter FIELD never passed `viewPos`, so in the shadow pass
+            the billboards turned to the SUN and cut across their
+            camera-facing twins — fixed in foliageSystem (viewPos =
+            the field's uCamPos). (2) A few big cards per head showed the
+            card outline: 140 clumps at 0.8 size instead of 70 at 1. Rounded
+            normals WERE on (each card carries its head's outward normal,
+            lifted 35% to up) — the stripes were hiding them.
+            Fallback if the billboards still read wrong: fixed cards lying
+            on each head (the banyan's `billboard: false` path).
+        [x] YOUR ASK (2026-09-24): "more palm trees in the jungle" + the
+            traveller's palm "only in the village". THE FRINGE
+            (jungleCanopy.js): coconut and fan palms painted along the
+            canopy's sunlit margin (9-28 m out from the slope forest, past
+            the map-edge forest, round grove rims), in separate patches,
+            ADDED on top of the map's own palm paint (new engine option
+            `paintTallPlantChannel(..., { blend: "max" })`); 61 traveller's
+            palms scattered on the same fringe (PlacedFoliage, 20 m apart).
+            Trap: the band alone put palms UNDER overlapping crowns — the
+            fringe now also requires no forest within 10 m (a crown's
+            overhang). Fan palm darkened again (#2a5020/#5c8034): seen from
+            straight above its fans face the noon sun full on and still read
+            lime. Boot: 393 ms for the whole jungle.
+        NEXT (your order, 2026-09-24): [x] the undergrowth under the canopy,
+            then [ ] the enemy base.
+        [x] THE UNDERGROWTH (done while you were out, uncommitted):
+            jungleCanopy.js paintUndergrowth — giant fern, card fern and bush
+            painted in drifts (two-octave noise) under the canopy, wild banana
+            on the sunlit fringe, ADDED on top of the map's paint through a
+            new engine call `app.paintFoliageChannel(ch, fn, { blend })`. The
+            field's own slope rule still thins it past ~44°, so the steepest
+            rock keeps saying "unwalkable". The cracks between crowns now
+            show fern, not bare slope.
+            SPEED TRAP: evaluated per paint texel (1 m for the ground paint)
+            the jungle took 2.9 s of the boot — the fringe's under-canopy
+            test is 7 forest samples. The rule is now BAKED once onto a 2 m
+            grid (canopyField) and every painter reads the grid: the whole
+            jungle (canopy, palms, undergrowth, 67 traveller's palms) is
+            484 ms.
+            MEASURED (x1.55 res): play zoom 26.9 ms (29.0 before the
+            undergrowth), max zoom-out 30.9 (31.7) — no cost.
+
+## FOG — your asks, 2026-09-24 (TALK FIRST, do not code yet)
+
+**DO NOT TOUCH THE EXISTING FOG** (the monsoon height fog + distance fog we
+tuned). Anything below is ADDED next to it.
+
+- [ ] **Fog at a PLACE** — local fog banks: a valley bottom at dawn, mist
+      over the river, a swamp, the paddies. The fog lab's GroundFog
+      (v3/fog/groundFogTsl.js) is already a LOCAL volume (a box over the
+      ground with its own density field), so a bank is one of those placed on
+      the map: position, size, height, density, colour. Authored per map
+      (editor, like lakes) or placed by the game.
+- [ ] **The fog lab's interactive dense fog in the game** (v3/fog-lab.html:
+      the gist port — one density texture, analytic wind/push/swirl,
+      semi-Lagrangian advection, raymarched slab, obstacles carve holes).
+      What it would give an RTS: units wading through a bank and leaving a
+      wake, a Huey's ROTOR WASH blowing a clearing, a shell blast punching a
+      hole that heals. Open questions: (1) SCALE — the lab sims 30 m at 256²;
+      an RTS view is 150-400 m, so banks of ~60-120 m each at lower res, only
+      where authored, not a global sim; (2) COST — the raymarch is per pixel
+      covered x 32 steps, and this game is pixel-bound (terrain), so it must
+      be measured at play zoom before it ships; (3) moving obstacles (units)
+      need the obstacle LOOP back (the lab bakes static ones into a mask) —
+      fine for tens of units near a bank, not hundreds; (4) GAMEPLAY — should
+      a bank block line of sight like smoke? It could feed the same
+      deterministic occlusionBetween the smoke columns use (the sim stays
+      decoration, the bank's footprint decides).
+        **YOUR LOOK CHECK**: the jungle at your zoom; ?canopy=0 for before.
 
 - [ ] **The jungle tree is committed but NOT good.** Waiting on your reference
       picture. The roots read as cardboard fins and the crown is a blob.
@@ -1523,7 +1650,38 @@ is not lost while Kurtz is being built.
 
 ## Performance
 
-- [ ] RTS camera render budget: sky dome (~0.5 ms), lens flare, underwater, far
+- [x] **THE PERF PASS WHILE YOU WERE OUT (2026-09-24, uncommitted)**. Method:
+      x1.55 resolution (vsync cannot clamp), rAF frame time, each system
+      hidden with `layers.set(31)`, ON/OFF alternated. Play zoom over our side
+      (-60,-230), frame 29.0 ms before. What each system costs there:
+        river 2.84 (NOT ON SCREEN) · ground foliage 2.28 · terrain 1.69 ·
+        sky 1.19 (not on screen) · grass 1.12 · canopy -1.9 (it HIDES work) ·
+        placed plants / objects / decals / smoke / craters / underwater ~0.
+      FIXED:
+      · **SKY** drawn FIRST with the depth test off (engine: renderOrder -2)
+        -> every pixel paid the sky shader, and the RTS camera almost never
+        sees sky. nam-rts now draws the dome AFTER the opaque world (9, before
+        the water grab at 10) with the depth test ON — 0.86 ms back, the
+        horizon identical (A/B screenshots). namGame.js, at boot.
+      · **RIVER CULLING** (engine, v3/tools/riverV2System.js): 50 m chunks
+        tested by SPHERE drew the river with 0 of its vertices on screen;
+        now 13 m chunks tested by BOX. Where it truly leaves the view it no
+        longer draws.
+      · **MY OWN REGRESSION**: the flames' soft fade read the scene-depth
+        grab, so any fire on screen bought the water's two full-screen
+        copies. Now it fades by height above the terrain (one heightmap tap):
+        six fires on screen +0.25 ms.
+      THE BIG ONE LEFT — **YOUR CALL (engine water)**: drawing ANY water, even
+      one river vertex at the screen edge, costs **2.7 ms at x1.55 res** (3.9
+      with more river) — the two full-screen framebuffer copies every water
+      shader shares (lakeMaterial sceneColorGrab / sceneDepthGrab), not the
+      water pixels. On nam-valley the river is in view from much of the map.
+      Option: the river's DEPTH from the heightmap (water Y - terrain Y, one
+      tap, like the flames now) instead of the depth grab, and its see-through
+      as alpha blending instead of the colour grab — at RTS zoom the
+      refraction wobble is invisible. That removes both copies for the river.
+      Touches the shared water shaders, so: ask first.
+- [ ] RTS camera render budget: sky dome (~0.5 ms, FIXED above), lens flare, underwater, far
       plane — off in RTS mode, back with C; measure each first
 - [ ] Staggered target acquisition — **your** call (changes reaction timing)
 - [ ] Terrain index blending (top-4 layers/texel), ~1 ms — engine, new chat

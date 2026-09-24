@@ -44,7 +44,7 @@ const S = 1.3;
 const B = 1.6;
 
 /** A bamboo pole of `h` metres standing at (x, z), leaning a little. */
-function pole(parts, x, z, h, r, { radius = 0.055, tone = null, lean = 0.02 } = {}) {
+export function pole(parts, x, z, h, r, { radius = 0.055, tone = null, lean = 0.02 } = {}) {
   parts.push({
     geo: buildBambooPole({ height: h, radius: radius * (0.95 + r() * 0.15), internodes: Math.max(2, Math.round(h * 2.2)), seg: 7 }),
     mat: MAT.bamboo, tone: tone ?? r(),
@@ -53,7 +53,7 @@ function pole(parts, x, z, h, r, { radius = 0.055, tone = null, lean = 0.02 } = 
 }
 
 /** A horizontal bamboo rail from (x0, z0) to (x1, z1) at height y. */
-function rail(parts, x0, z0, x1, z1, y, r, { radius = 0.04, tone = null } = {}) {
+export function rail(parts, x0, z0, x1, z1, y, r, { radius = 0.04, tone = null } = {}) {
   const dx = x1 - x0, dz = z1 - z0;
   const len = Math.hypot(dx, dz);
   const geo = new THREE.CylinderGeometry(radius, radius * 0.96, len, 6).rotateZ(Math.PI / 2);
@@ -73,7 +73,7 @@ function rail(parts, x0, z0, x1, z1, y, r, { radius = 0.04, tone = null } = {}) 
  * +Z the outward normal), Euler angles for that are order-dependent, and
  * getting the handedness wrong on one slope face-culls half the roof away.
  */
-function thatchAt(parts, { eave, ridge, along, width, topWidth = null, courses = 7, thickness = 0.14, ragged = 0.22, seed = 1, tone = 0.12, toneSpread = 0.36 }) {
+export function thatchAt(parts, { eave, ridge, along, width, topWidth = null, courses = 7, thickness = 0.14, ragged = 0.22, seed = 1, tone = 0.12, toneSpread = 0.36 }) {
   const Y = ridge.clone().sub(eave);
   const len = Y.length();
   Y.normalize();

@@ -88,6 +88,8 @@ import { createRequisitionRenderer } from "./requisitionRenderer.js";
 import { hamletSitesFor, pointSitesFor, templeSitesFor, tunnelSitesFor } from "./pointSites.js";
 import { placeHamlet } from "./village.js";
 import { placeTemple } from "./temple.js";
+import { placeEnemyCamp, createEnemyCampFlag } from "./enemyCamp.js";
+import { paintCanopy, paintPalmFringe, paintUndergrowth, travellerPalmSpots, canopyClearings } from "./jungleCanopy.js";
 import { plant, updatePlantedPlants } from "./placedPlants.js";
 import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
 import { createEnemyAI } from "./enemyAI.js";
@@ -1107,6 +1109,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     }
     coverOverlay.update(dt);              // hold V — decides nothing, only draws
     baseFlag?.update(dt);                 // HQ flag cloth sim
+    app.enemyCampFlag?.update(dt, app.camera); // the NLF flag (skipped off screen)
     commandCard.tick();                   // live production bar + affordability
     unitBar.tick();                       // a single selected unit's health
     resourceHud.update(resources, units, HARVEST ? null : requisition); // supplies · points / harvesters
@@ -1160,6 +1163,23 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     }
   }
 
+  // THE FRONT'S BASE CAMP round the résidence (enemyCamp.js): bamboo towers,
+  // long houses, the cook house and its smoke trench, the bicycles, the tiger
+  // cages, trenches and foxholes, and the NLF flag as real cloth. ?enemycamp=0
+  // boots without it.
+  let enemyCampFlag = null;
+  if (new URLSearchParams(location.search).get("enemycamp") !== "0") {
+    onStatus("Digging in the Front…");
+    try {
+      const n = await placeEnemyCamp(app, placed);
+      enemyCampFlag = createEnemyCampFlag({ app, structures });
+      console.log(`[enemy camp] ${n} pieces`);
+    } catch (e) {
+      console.warn("[enemy camp] failed to place:", e);
+    }
+  }
+  app.enemyCampFlag = enemyCampFlag;
+
   // The Khmer ruins (temple.js): the tower and its galleries round a courtyard,
   // the gate, the causeway with its nāga rail, and the fig pulling the lot
   // down. Far out east, away from the fighting. ?temple=0 boots without it.
@@ -1175,10 +1195,52 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     }
   }
 
+  // THE CANOPY (jungleCanopy.js): rainforest on the slopes nobody can climb,
+  // round the map's edge and in a few groves, cleared round every site —
+  // "frame the fight". Runtime paint, so it runs after every load.
+  // ?canopy=0 boots without it (the A/B).
+  if (new URLSearchParams(location.search).get("canopy") !== "0") {
+    onStatus("Growing the jungle…");
+    const t0 = performance.now();
+    const { field, texels } = paintCanopy(app, canopyClearings({
+      structures, requisition, hamlets: hamletSitesFor(boot.name), temples: templeSitesFor(boot.name),
+    }));
+    // The palms along its sunlit margin, on top of the map's own palm paint,
+    // and traveller's palms out in the wild, not only in the village.
+    let palms = 0, travellers = 0, floor = 0;
+    if (field) {
+      palms = paintPalmFringe(app, field);
+      floor = paintUndergrowth(app, field);
+      for (const t of travellerPalmSpots(app, field)) {
+        plant(app, "travellersPalm", t.x, t.z, { rotY: t.rotY, scale: t.scale });
+        travellers++;
+      }
+    }
+    console.log(`[canopy] ${texels} texels of forest, ${palms} of palm fringe, ${floor} of undergrowth, ${travellers} traveller's palms in ${Math.round(performance.now() - t0)} ms`);
+  }
+
   // Every bridge gets ground at both ends that meets its deck — without it
   // the river cut the map in two (bridgeLandings.js). The props are in now.
   onStatus("Grading bridge landings…");
   try { await gradeBridgeLandings(app); } catch (e) { console.warn("[bridges] landings failed:", e); }
+
+  // THE SKY LAST, DEPTH-TESTED (measured 2026-09-24). The engine draws its
+  // atmosphere dome FIRST with the depth test off (renderOrder -2), so every
+  // pixel of the screen pays the sky shader and the world then paints over it.
+  // The RTS camera looks steeply down and almost never sees sky, so that was
+  // ~1.2 ms of a 29 ms frame (x1.55 res) spent on pixels nobody sees. The dome
+  // (4000 m, following the camera, far plane 4096) is behind all terrain, so
+  // drawn after the opaque world (9: before the water's screen grab at 10)
+  // with the depth test ON it only shades the sky you can see — 0.86 ms back,
+  // identical picture at the horizon.
+  {
+    const skyDome = app.scene.getObjectByName("AtmosphereSkyDome");
+    if (skyDome) {
+      skyDome.renderOrder = 9;
+      skyDome.material.depthTest = true;
+      skyDome.material.needsUpdate = true;
+    }
+  }
 
   onStatus("Baking cover…");
   // The props are in by now, so the HQ can take its footprint back from them

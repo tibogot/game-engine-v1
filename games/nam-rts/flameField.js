@@ -15,7 +15,8 @@
 // overlapping it, each turned to the camera about the VERTICAL axis only, so a
 // flame always stands up however the camera turns. Each loops the book from
 // its own start frame and crossfades adjacent frames. A card fades where the
-// ground meets it (a soft-particle depth fade), so no slope cuts it.
+// ground meets it (height above the terrain, one heightmap tap — NOT the
+// scene-depth grab, which costs two full-screen copies), so no slope cuts it.
 //
 // ── COST ─────────────────────────────────────────────────────────────────────
 // One instanced draw. The cards' rows are written when a fire STARTS or is put
@@ -23,14 +24,10 @@
 // clock in the vertex stage (start and end times ride in the instance data).
 import * as THREE from "three";
 import {
-  Fn, attribute, cameraFar, cameraNear, cameraPosition, float, floor, fract, mix, normalize,
-  output, perspectiveDepthToViewZ, positionLocal, positionView, saturate, screenUV, smoothstep,
-  step, texture, uniform, uv, varying, vec2, vec3, vec4,
+  Fn, attribute, cameraPosition, float, floor, fract, mix, normalize, output, positionLocal,
+  positionWorld, saturate, smoothstep, step, texture, uniform, uv, varying, vec2, vec3, vec4,
 } from "three/tsl";
-// The engine's ONE scene-depth grab, shared with water and decals: a second
-// viewportDepthTexture would be another full-screen copy a frame (and one
-// bound the multisampled depth itself and broke the frame — decalSystem.js).
-import { sceneDepthGrab } from "../../v3/render/water/lakeMaterial.js";
+import { drapeY } from "./terrainDrape.js";
 
 export const FLAME_ATLAS = {
   url: "/textures/fx/flame02_temperature_16x5.png",
@@ -148,13 +145,17 @@ export function createFlameField({ app, intensity = 0.95, bloom = 0.3 } = {}) {
     const c2 = mix(c1, vec3(1.0, 0.62, 0.12), smoothstep(float(0.35), float(0.65), t));
     const c3 = mix(c2, vec3(1.0, 0.93, 0.7), smoothstep(float(0.62), float(0.95), t));
     // Where it is cool it is transparent: additive, so brightness IS coverage.
-    // SOFT PARTICLE: fade where the scene behind is less than uSoft metres
-    // away — the card fades into the ground it stands in instead of being
-    // cut by it. And the bottom fifth of the card fades too: the flame's
+    // SOFT PARTICLE, against the GROUND: fade within uSoft metres of the
+    // terrain under the fragment — the card fades into the ground it stands
+    // in instead of being cut by it. One heightmap tap. (The first version
+    // read the scene-depth grab, and ANY draw that reads it makes the frame
+    // pay two full-screen copies — measured 2.7 ms at x1.55 res for a river
+    // one vertex on screen — so every fire on screen cost that too.)
+    // And the bottom fifth of the card fades too: the flame's
     // white-hot base sits a tenth of the way up its cell, so where the card
     // hangs over LOWER ground (an apron's edge) its bottom edge showed flat.
-    const sceneDist = perspectiveDepthToViewZ(sceneDepthGrab.sample(screenUV).r, cameraNear, cameraFar).negate();
-    const soft = saturate(sceneDist.sub(positionView.z.negate()).div(uSoft));
+    const ground = drapeY(app.heightTexNode, positionWorld.x, positionWorld.z);
+    const soft = saturate(positionWorld.y.sub(ground).div(uSoft));
     const a = smoothstep(float(0.04), float(0.22), t).mul(smoothstep(float(0.02), float(0.22), uv().y)).mul(soft);
     return c3.mul(a).mul(uIntensity).mul(t.mul(0.8).add(0.25));
   })();
