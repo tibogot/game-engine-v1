@@ -46,8 +46,10 @@ const TALL = [
   // PRESET's lime, #33601f / #86a83a, never repainted: the brightest plant on
   // the map). Measured in the game against the coconut palm under the same
   // light: 0.186 mean luminance against 0.130. These bring it to ~0.132.
-  // Head = the trunk's boots, unchanged.
-  ["#2f5921", "#72943a", "#6f6553"],
+  // Head = the trunk's boots, unchanged. Then #2a5020/#5c8034 (2026-09-24):
+  // once palms lined the canopy's edge, seen from straight above their fans
+  // face the noon sun full on and #72943a still read as pale lime there.
+  ["#2a5020", "#5c8034", "#6f6553"],
   ["#2b4b24", "#4a7034", "#5c7a45"],
   ["#284923", "#4e7632", "#7d6b55"],
 ];

@@ -201,6 +201,19 @@ export const FOLIAGE_PRESETS = {
     plumesPerStem: 16, plumeSpread: 12,
     colorBase: "#1d3d1f", colorTip: "#6f9a3a", colorHead: "#5c4a3a", size: 18, translucency: 0.5,
   },
+  // DIPTEROCARP — the lowland rainforest canopy tree (dipterocarpGeometry.js):
+  // a clean pale bole, buttress roots, and an umbrella of cauliflower heads
+  // made of the banyan's billboard leaf clusters. 30 m, an emergent.
+  dipterocarp: {
+    kind: "dipterocarp",
+    // 140 clumps at 0.8 size, not 70 at 1: with a few big cards per head the
+    // card OUTLINE showed ("reads too low poly", 2026-09-24); many smaller
+    // overlapping lumps give the crown its broken edge.
+    fronds: 5, frondLength: 1.0, leaflets: 140, leafletWidth: 0.8, leafletAngle: 30,
+    spread: 0.36, arch: 0.35, droop: 0.2, stemWidth: 1, bareStalk: 0.56,
+    plumesPerStem: 5, plumeSpread: 0,
+    colorBase: "#1f3d20", colorTip: "#557a33", colorHead: "#6c685b", size: 30, translucency: 0.5,
+  },
   // TARO / elephant ear — knee-high heart leaves on thin petioles, wet ground.
   taro: {
     kind: "taro",

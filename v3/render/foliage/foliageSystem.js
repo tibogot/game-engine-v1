@@ -613,6 +613,11 @@ export class FoliageScatterSystem {
       colorVar: fu.uColorVar,
       anchorPos: fu.uAnchorPos,
       thinScale: (plant) => field.thinScale(plant),
+      // Billboard cards face the PLAYER's camera in every pass, the shadow
+      // pass included (see the billboard note in createFoliageMaterial). The
+      // placed banyan had this; the field did not, and the canopy trees'
+      // crowns were striped with hard horizontal shadow cuts (2026-09-24).
+      viewPos: fu.uCamPos,
     };
     const makeMaterial = (headTex) => createFoliageMaterial({ src, u, headTex });
 

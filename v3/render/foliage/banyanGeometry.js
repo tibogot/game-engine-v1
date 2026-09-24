@@ -71,8 +71,55 @@ const WOOD = 3, CARD = 4;
  * not the leaves' 0.55: the card carries the dome's ROUNDED normal (outward
  * from the crown, then rounded again by LEAF_ROUNDING), and lifting it most
  * of the way to up flattened the ball back out — your call, 2026-09-24. */
-const BILLBOARD = 6.35;
+export const BILLBOARD = 6.35;
 const NO_RINGS = -1;
+
+/**
+ * The wood kit, shared with the other trees (dipterocarpGeometry.js): tubes
+ * along a path and quadratic curves to lay them on.
+ */
+export function woodKit(ctx) {
+  const { push, vcount, I } = ctx;
+  /**
+   * A tube along `pts` (≥ 2 points) with a radius per point. `sides` round,
+   * a seam vertex so uv.x closes, outward winding. `t` (the culm ramp) runs
+   * from `t0` to `t1` along it.
+   */
+  const tube = (pts, radii, sides, { t0 = 0, t1 = 1, tone = 0.1, cap = false } = {}) => {
+    const n = pts.length;
+    let prev = null;
+    for (let j = 0; j < n; j++) {
+      const fwd = norm(sub(pts[Math.min(n - 1, j + 1)], pts[Math.max(0, j - 1)]));
+      // A frame that never flips: seed it from whichever axis is least parallel.
+      const ref = Math.abs(fwd[1]) < 0.9 ? UP : [1, 0, 0];
+      const ax1 = norm(cross(fwd, ref)), ax2 = cross(fwd, ax1);
+      const base = vcount();
+      const tt = t0 + (t1 - t0) * (j / (n - 1));
+      for (let s = 0; s <= sides; s++) {
+        const ph = (s / sides) * Math.PI * 2;
+        const nrm = add([ax1[0] * Math.cos(ph), ax1[1] * Math.cos(ph), ax1[2] * Math.cos(ph)], ax2, Math.sin(ph));
+        push(add(pts[j], nrm, radii[j]), nrm, s / sides, tt, [WOOD, tt, tone, NO_RINGS]);
+      }
+      if (prev !== null) {
+        for (let s = 0; s < sides; s++) I.push(prev + s, prev + s + 1, base + s, prev + s + 1, base + s + 1, base + s);
+      }
+      prev = base;
+    }
+    if (cap) {
+      // Close the far end with a point, for the roots that end in the air.
+      const last = pts[n - 1], fwd = norm(sub(last, pts[n - 2]));
+      const tip = vcount();
+      push(add(last, fwd, radii[n - 1] * 1.5), fwd, 0.5, t1, [WOOD, t1, tone, NO_RINGS]);
+      for (let s = 0; s < sides; s++) I.push(prev + s, prev + s + 1, tip);
+    }
+  };
+  /** A quadratic Bézier sampled at `k + 1` points. */
+  const bez = (a, q, b, k) => Array.from({ length: k + 1 }, (_, i) => {
+    const t = i / k;
+    return lerp3(lerp3(a, q, t), lerp3(q, b, t), t);
+  });
+  return { tube, bez };
+}
 
 export function buildBanyan(type, ctx) {
   const { near, far, rand, push, vcount, I, finish } = ctx;
@@ -114,45 +161,8 @@ export function buildBanyan(type, ctx) {
     return Cy - aDown * Math.sqrt(Math.max(0, 1 - q * q));
   };
 
-  // ── Tubes: the one primitive for trunk strands, limbs and roots ───────────
-  /**
-   * A tube along `pts` (≥ 2 points) with a radius per point. `sides` round,
-   * a seam vertex so uv.x closes, outward winding. `t` (the culm ramp) runs
-   * from `t0` to `t1` along it.
-   */
-  const tube = (pts, radii, sides, { t0 = 0, t1 = 1, tone = 0.1, cap = false } = {}) => {
-    const n = pts.length;
-    let prev = null;
-    for (let j = 0; j < n; j++) {
-      const fwd = norm(sub(pts[Math.min(n - 1, j + 1)], pts[Math.max(0, j - 1)]));
-      // A frame that never flips: seed it from whichever axis is least parallel.
-      const ref = Math.abs(fwd[1]) < 0.9 ? UP : [1, 0, 0];
-      const ax1 = norm(cross(fwd, ref)), ax2 = cross(fwd, ax1);
-      const base = vcount();
-      const tt = t0 + (t1 - t0) * (j / (n - 1));
-      for (let s = 0; s <= sides; s++) {
-        const ph = (s / sides) * Math.PI * 2;
-        const nrm = add([ax1[0] * Math.cos(ph), ax1[1] * Math.cos(ph), ax1[2] * Math.cos(ph)], ax2, Math.sin(ph));
-        push(add(pts[j], nrm, radii[j]), nrm, s / sides, tt, [WOOD, tt, tone, NO_RINGS]);
-      }
-      if (prev !== null) {
-        for (let s = 0; s < sides; s++) I.push(prev + s, prev + s + 1, base + s, prev + s + 1, base + s + 1, base + s);
-      }
-      prev = base;
-    }
-    if (cap) {
-      // Close the far end with a point, for the roots that end in the air.
-      const last = pts[n - 1], fwd = norm(sub(last, pts[n - 2]));
-      const tip = vcount();
-      push(add(last, fwd, radii[n - 1] * 1.5), fwd, 0.5, t1, [WOOD, t1, tone, NO_RINGS]);
-      for (let s = 0; s < sides; s++) I.push(prev + s, prev + s + 1, tip);
-    }
-  };
-  /** A quadratic Bézier sampled at `k + 1` points. */
-  const bez = (a, q, b, k) => Array.from({ length: k + 1 }, (_, i) => {
-    const t = i / k;
-    return lerp3(lerp3(a, q, t), lerp3(q, b, t), t);
-  });
+  // Tubes and curves: the one primitive for trunk strands, limbs and roots.
+  const { tube, bez } = woodKit(ctx);
 
   // ── 3. THE TRUNK: fused strands, flaring into spurs, splitting into limbs ──
   const strandN = far ? 6 : near ? 15 : 10;

@@ -12228,6 +12228,68 @@ export async function startV3App(opts = {}) {
       const d = tex.image.data;
       return Math.max(d[i], d[i + 1], d[i + 2]) / 255;
     },
+    /**
+     * PAINT one tall-plant channel from a function: `fn(x, z)` returns the
+     * density (0-1) at a world point, evaluated once per paint texel (2 m on
+     * a 1024 m world). For a GAME that derives vegetation from its own
+     * knowledge — nam-rts grows its canopy forest where units cannot walk and
+     * keeps it off its sites. RUNTIME ONLY, like clearVegetation: not saved,
+     * so call it after a level load. Returns the texels painted non-zero.
+     */
+    paintTallPlantChannel(channel, fn, { blend = "replace" } = {}) {
+      const tex = grassTerrainData?.susukiDensityTex;
+      if (!tex || channel < 0 || channel > 3) return 0;
+      const res = grassTerrainData.densityRes;
+      const d = tex.image.data;
+      const half = WORLD_SIZE * 0.5;
+      // "max" ADDS to what the map painted (keeps the higher of the two), so
+      // a game can grow more of a plant without erasing the authored paint.
+      const keep = blend === "max";
+      let n = 0;
+      for (let pz = 0; pz < res; pz++) {
+        const z = ((pz + 0.5) / res) * WORLD_SIZE - half;
+        for (let px = 0; px < res; px++) {
+          const x = ((px + 0.5) / res) * WORLD_SIZE - half;
+          const v = Math.max(0, Math.min(1, fn(x, z) || 0));
+          const i = (pz * res + px) * 4 + channel;
+          d[i] = keep ? Math.max(d[i], Math.round(v * 255)) : Math.round(v * 255);
+          if (d[i] > 0) n++;
+        }
+      }
+      tex.needsUpdate = true;
+      if (!susukiSystem && n > 0) void ensureSusukiBuilt();
+      return n;
+    },
+    /**
+     * The same for the GROUND-FOLIAGE paint (ferns, bushes, banana… — 8
+     * channels over two pages): `fn(x, z)` 0-1 per paint texel, "replace" or
+     * "max" (add to what the map painted). Runtime only. Returns the texels
+     * of that channel left non-zero.
+     */
+    paintFoliageChannel(channel, fn, { blend = "replace" } = {}) {
+      if (channel < 0 || channel >= foliageDensity.channels) return 0;
+      const res = foliageDensity.res;
+      const page = Math.floor(channel / 4), c = channel % 4;
+      const tex = foliageDensity.texes[page];
+      const d = tex.image.data;
+      const half = WORLD_SIZE * 0.5;
+      const keep = blend === "max";
+      let n = 0;
+      for (let pz = 0; pz < res; pz++) {
+        const z = ((pz + 0.5) / res) * WORLD_SIZE - half;
+        for (let px = 0; px < res; px++) {
+          const x = ((px + 0.5) / res) * WORLD_SIZE - half;
+          const v = Math.round(Math.max(0, Math.min(1, fn(x, z) || 0)) * 255);
+          const i = (pz * res + px) * 4 + c;
+          d[i] = keep ? Math.max(d[i], v) : v;
+          if (d[i] > 0) n++;
+        }
+      }
+      tex.needsUpdate = true;
+      if (n > 0) foliageDensity._hasData = true;
+      _foliageUsedDirty = true;
+      return n;
+    },
     // GPU-side counterpart of getWorldHeight: the live heightmap as a TSL texture
     // node, for shaders that must drape geometry over the terrain in the vertex
     // stage instead of paying a CPU sample per vertex (RTS selection rings).
