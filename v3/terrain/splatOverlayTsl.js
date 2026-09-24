@@ -32,6 +32,7 @@ import {
   Fn, If, float, int, struct, vec2, vec3, vec4,
   texture, mix, max, clamp, pow, sqrt, uniform, step, normalize,
   positionWorld, smoothstep, abs, length, mx_noise_float, floor, fract, hash, uint,
+  select, cameraPosition,
 } from "three/tsl";
 import { WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 import { cliffRockTint, createCliffRockUniforms } from "./cliffRockTsl.js";
@@ -95,6 +96,38 @@ export const SPLAT_FEATURES = {
    * Default NUM_LAYERS, i.e. bit-for-bit the previous shader.
    */
   layerBudget: NUM_LAYERS,
+  /**
+   * TOP-K LAYERS PER PIXEL. 0 = the classic path above: every compiled layer
+   * is sampled on every pixel (2 taps each) and the unpainted ones multiplied
+   * away. N > 0 = compute every layer's FINAL weight first (paint, auto rules,
+   * slope lock, layer hold-out — none of it needs a texture), pick the N
+   * strongest per pixel with a few compares, and sample ONLY those, through
+   * the texture arrays' per-pixel slice index. No branch anywhere (branches do
+   * not skip taps on this backend — see sampleLayer). The dropped layers'
+   * share goes to the chosen ones, so a pixel's total never changes.
+   *
+   * The texture cost becomes 2·N (+N with farBlend) plus the static layers,
+   * WHATEVER the number of layers — the Unreal/Terrain3D answer to "every
+   * layer costs everywhere". Layers that need their own generated code
+   * (triplanar, rock shading) stay STATIC: sampled as in the classic path.
+   *
+   * Per-layer settings (tile, rotation, tint, AO/rough/normal strength,
+   * contour alignment, height-from-alpha) are picked per pixel from the SAME
+   * slot uniforms, so the panel stays live. Where more than N layers overlap
+   * with similar weights the choice can flip between neighbouring pixels; 3 is
+   * enough for painted ground, which rarely stacks four.
+   */
+  topK: 0,
+  /**
+   * NEAR/FAR on the top-K layers (needs topK > 0): each chosen layer's albedo
+   * is also sampled at a tile `uFarRatio` times bigger and cross-faded in by
+   * camera distance (uFarStart → uFarEnd metres). One scale cannot serve both
+   * distances — the fine tile that reads up close is sub-pixel mush from the
+   * RTS camera, the coarse one that reads far is a smear up close — so the
+   * shader stops choosing. +1 tap per chosen layer (ORM stays near: normals
+   * and roughness are sub-pixel at distance anyway).
+   */
+  farBlend: false,
 };
 
 /**
@@ -171,6 +204,12 @@ export function createSplatOverlay(
   const uMacroStrength  = uniform(0.0);  // brightness swing, 0..0.5
   const uMacroWarmth    = uniform(0.0);  // warm/cool tint amount, 0..1
   const uMacroScale     = uniform(80.0); // metres per noise cell
+  // Near/far (SPLAT_FEATURES.farBlend): far tile = near tile × ratio, faded in
+  // between the two camera distances.
+  const uFarRatio       = uniform(5.0);
+  const uFarStart       = uniform(35.0);
+  const uFarEnd         = uniform(90.0);
+  const TOPK = Math.max(0, Math.min(NL, Math.round(F.topK ?? 0)));
 
   // ── Layer texture samples — 2 DataArrayTexture bindings for 7 layers ─────────
   // Node objects are built eagerly but only REFERENCED inside blend()'s branch,
@@ -442,7 +481,7 @@ export function createSplatOverlay(
         // taps — no extra taps. Triplanar side projections stay unturned: they
         // are walls, and turning a wall texture is not what the slider means.
         // uv' = (c·x − s·z, s·x + c·z)
-        const layerUV = layerSlots.map((slot) => {
+        const uvFor = (slot) => {
           let p = positionWorld.xz.mul(invWS).mul(slot.uUVScale);
 
           /*
@@ -489,12 +528,18 @@ export function createSplatOverlay(
             cs.x.mul(p.x).sub(cs.y.mul(p.y)),
             cs.y.mul(p.x).add(cs.x.mul(p.y)),
           ).toVar();
-        });
+        };
+        // Which layers are sampled the classic way (every one of them, or in
+        // top-K only the STATIC ones whose code is generated per layer).
+        const isStatic = (i) => compileState.triplanarSlots[i] || compileState.rockShadeSlots[i];
+        const classicIdx = [];
+        for (let i = 0; i < NL; i++) if (!TOPK || isStatic(i)) classicIdx.push(i);
         const layerAlbedos = [];
         const layerOrms    = [];
-        for (let i = 0; i < NL; i++) {
-          layerAlbedos.push(sampleLayer(i, albedoArrNode, triW, layerUV[i]));
-          layerOrms.push(sampleLayer(i, ormArrNode, triW, layerUV[i]));
+        for (const i of classicIdx) {
+          const uvI = uvFor(layerSlots[i]);
+          layerAlbedos[i] = sampleLayer(i, albedoArrNode, triW, uvI);
+          layerOrms[i]    = sampleLayer(i, ormArrNode, triW, uvI);
         }
 
         // Auto-material redistributes w0 to the rule layers (uAutoEnabled), or
@@ -547,6 +592,107 @@ export function createSplatOverlay(
           for (let i = 0; i < NL; i++) w[i + 1].assign(kept[i].mul(refill));
         }
 
+        // ── The layers this pixel blends: ENTRIES ─────────────────────────────
+        // One per layer in the classic path (in slot order, so the sums below
+        // are bit-identical to before); in top-K, the static layers plus the
+        // K chosen ones. Everything downstream reads entries, never slots.
+        const entries = classicIdx.map((i) => ({
+          w: w[i + 1],
+          albedo: layerAlbedos[i],
+          orm: layerOrms[i],
+          aoStr: layerSlots[i].uAOStr,
+          roughStr: layerSlots[i].uRoughStr,
+          normalStr: layerSlots[i].uNormalStr,
+          tint: layerSlots[i].uTint ?? null,
+          uvRot: layerSlots[i].uUVRot ?? null,
+          hFromA: layerSlots[i].uHeightFromAlpha ?? null,
+          rockShade: compileState.rockShadeSlots[i],
+          rockAmt: layerSlots[i].uRockShade ?? float(1),
+        }));
+
+        if (TOPK) {
+          const dyn = [];
+          for (let i = 0; i < NL; i++) if (!isStatic(i)) dyn.push(i);
+          if (dyn.length) {
+            // Running top-K insert over the dynamic layers — compares and
+            // selects only, unrolled at build time (K × |dyn| steps).
+            const K = Math.min(TOPK, dyn.length);
+            const topW = [], topI = [];
+            for (let k = 0; k < K; k++) { topW.push(float(-1).toVar()); topI.push(float(-1).toVar()); }
+            let sumDyn = float(0);
+            for (const d of dyn) {
+              let cw = w[d + 1], ci = float(d);
+              sumDyn = sumDyn.add(cw);
+              for (let k = 0; k < K; k++) {
+                const better = cw.greaterThan(topW[k]);
+                const nw = select(better, cw, topW[k]).toVar();
+                const ni = select(better, ci, topI[k]).toVar();
+                cw = select(better, topW[k], cw).toVar();
+                ci = select(better, topI[k], ci).toVar();
+                topW[k].assign(nw);
+                topI[k].assign(ni);
+              }
+            }
+            // The dropped layers' share goes to the chosen ones, pro rata.
+            let sumTop = float(0);
+            for (let k = 0; k < K; k++) sumTop = sumTop.add(max(topW[k], float(0)));
+            const renorm = sumDyn.div(max(sumTop, float(1e-5))).toVar();
+
+            // A slot's value for a per-pixel index: a short select chain over
+            // the dynamic slots (cheap ALU; the uniforms stay the panel's).
+            const pick = (id, of) => {
+              let acc = of(layerSlots[dyn[0]]);
+              for (let j = 1; j < dyn.length; j++) {
+                acc = select(id.equal(float(dyn[j])), of(layerSlots[dyn[j]]), acc);
+              }
+              return acc;
+            };
+            const one3 = vec3(1, 1, 1), noRot = vec2(1, 0), zero = float(0);
+            const fade = F.farBlend
+              ? smoothstep(uFarStart, uFarEnd, length(positionWorld.sub(cameraPosition))).toVar()
+              : null;
+            const hWorld = terrainNormals
+              ? terrainNormals.surfaceAt(splatUV).w.mul(float(MAX_HEIGHT)).toVar()
+              : null;
+
+            for (let k = 0; k < K; k++) {
+              const id = max(topI[k], float(0)).toVar();
+              const layer = int(id);
+              const scale = pick(id, (s) => s.uUVScale).toVar();
+              let p = positionWorld.xz.mul(invWS).mul(scale);
+              if (hWorld) {
+                const align = pick(id, (s) => s.uContourAlign ?? zero);
+                const along = p.x.add(p.y).mul(float(0.7071));
+                const across = hWorld.mul(invWS).mul(scale).mul(float(20.0));
+                p = mix(p, vec2(along, across), align);
+              }
+              const cs = pick(id, (s) => s.uUVRot ?? noRot).toVar();
+              const uvK = vec2(
+                cs.x.mul(p.x).sub(cs.y.mul(p.y)),
+                cs.y.mul(p.x).add(cs.x.mul(p.y)),
+              ).toVar();
+              let albedo = albedoArrNode.sample(uvK).depth(layer);
+              if (fade) {
+                const far = albedoArrNode.sample(uvK.div(max(uFarRatio, float(1)))).depth(layer);
+                albedo = mix(albedo, far, fade);
+              }
+              entries.push({
+                w: max(topW[k], float(0)).mul(renorm).toVar(),
+                albedo: vec4(albedo).toVar(),
+                orm: vec4(ormArrNode.sample(uvK).depth(layer)).toVar(),
+                aoStr: pick(id, (s) => s.uAOStr),
+                roughStr: pick(id, (s) => s.uRoughStr),
+                normalStr: pick(id, (s) => s.uNormalStr),
+                tint: pick(id, (s) => s.uTint ?? one3),
+                uvRot: cs,
+                hFromA: pick(id, (s) => s.uHeightFromAlpha ?? zero),
+                rockShade: false,
+                rockAmt: float(0),
+              });
+            }
+          }
+        }
+
         // Layer colors (albedo × AO × tint). The height blend below reads the
         // UNTINTED colour, so recolouring a layer does not move its edges.
         //
@@ -566,23 +712,23 @@ export function createSplatOverlay(
         }
         const layerShaded = [];
         const layerColors = [];
-        for (let i = 0; i < NL; i++) {
-          let shaded = layerAlbedos[i].rgb.mul(mix(float(1), layerOrms[i].g, layerSlots[i].uAOStr));
-          if (rockTint && compileState.rockShadeSlots[i]) {
+        for (const e of entries) {
+          let shaded = e.albedo.rgb.mul(mix(float(1), e.orm.g, e.aoStr));
+          if (rockTint && e.rockShade) {
             // REPLACES the texture rather than tinting it: the rock props have
             // no texture at all, and a cliff still carrying drawn cracks can
             // never match one. The layer keeps its ORM (roughness, normal) and
             // its own tint, so it can still be pushed warmer or darker.
-            const amt = layerSlots[i].uRockShade ?? float(1);
-            shaded = mix(shaded, vec3(cliffRock.uBase).mul(rockTint), amt);
+            shaded = mix(shaded, vec3(cliffRock.uBase).mul(rockTint), e.rockAmt);
           }
           layerShaded.push(shaded);
-          layerColors.push(layerSlots[i].uTint ? shaded.mul(layerSlots[i].uTint).toVar() : shaded);
+          layerColors.push(e.tint ? shaded.mul(e.tint).toVar() : shaded);
         }
+        const NE = entries.length;
 
         // Linear weight blend — the one path that is always needed.
         let linSum = baseC.mul(w[0]);
-        for (let i = 0; i < NL; i++) linSum = linSum.add(layerColors[i].mul(w[i + 1]));
+        for (let i = 0; i < NE; i++) linSum = linSum.add(layerColors[i].mul(entries[i].w));
         const linear = linSum.toVar();
         colV.assign(linear);
 
@@ -602,11 +748,11 @@ export function createSplatOverlay(
             const baseH  = baseC.dot(LUM);
             const layerH = layerShaded.map((c, i) => {
               const lum = c.dot(LUM);
-              const hA = layerSlots[i].uHeightFromAlpha;
-              return hA ? mix(lum, layerAlbedos[i].a, hA) : lum;
+              const hA = entries[i].hFromA;
+              return hA ? mix(lum, entries[i].albedo.a, hA) : lum;
             });
             let maxWH = w[0].mul(baseH);
-            for (let i = 0; i < NL; i++) maxWH = max(maxWH, w[i + 1].mul(layerH[i]));
+            for (let i = 0; i < NE; i++) maxWH = max(maxWH, entries[i].w.mul(layerH[i]));
             // CLAMPED AT ZERO, and it has to be. `maxWH` is a weight times a
             // texture's LUMINANCE, so on fully painted ground it is only ~0.3-0.4
             // — below `uHeightContrast` over most of that slider's range. A
@@ -618,13 +764,13 @@ export function createSplatOverlay(
             const thresh = max(float(0), maxWH.sub(uHeightContrast));
 
             const aw = [max(float(0), w[0].mul(baseH).sub(thresh))];
-            for (let i = 0; i < NL; i++) aw.push(max(float(0), w[i + 1].mul(layerH[i]).sub(thresh)));
+            for (let i = 0; i < NE; i++) aw.push(max(float(0), entries[i].w.mul(layerH[i]).sub(thresh)));
             let totalAW = aw[0];
-            for (let i = 1; i <= NL; i++) totalAW = totalAW.add(aw[i]);
+            for (let i = 1; i <= NE; i++) totalAW = totalAW.add(aw[i]);
             totalAW = max(float(1e-5), totalAW);
 
             let hBlended = baseC.mul(aw[0].div(totalAW));
-            for (let i = 0; i < NL; i++) hBlended = hBlended.add(layerColors[i].mul(aw[i + 1].div(totalAW)));
+            for (let i = 0; i < NE; i++) hBlended = hBlended.add(layerColors[i].mul(aw[i + 1].div(totalAW)));
 
             colV.assign(mix(linear, hBlended, uHeightBlend));
           });
@@ -662,9 +808,9 @@ export function createSplatOverlay(
 
         if (wantRough) {
           let rSum = roughV.mul(w[0]);
-          for (let i = 0; i < NL; i++) {
-            const lr = mix(float(0.88), layerOrms[i].r, layerSlots[i].uRoughStr);
-            rSum = rSum.add(lr.mul(w[i + 1]));
+          for (const e of entries) {
+            const lr = mix(float(0.88), e.orm.r, e.roughStr);
+            rSum = rSum.add(lr.mul(e.w));
           }
           roughV.assign(clamp(rSum, float(0.04), float(1)));
         }
@@ -675,19 +821,19 @@ export function createSplatOverlay(
         // (c, −s) and +v' along (s, c), so the bump still faces the right way.
         if (wantNrm) {
           let accumN = nrmV.mul(w[0]);
-          for (let i = 0; i < NL; i++) {
-            const orm = layerOrms[i];
+          for (const e of entries) {
+            const orm = e.orm;
             const nx  = orm.b.mul(float(2.0)).sub(float(1.0));
             const ny  = orm.a.mul(float(2.0)).sub(float(1.0));
             const nz  = sqrt(max(float(0.0), float(1.0).sub(nx.mul(nx)).sub(ny.mul(ny))));
-            const cs  = layerSlots[i].uUVRot;
+            const cs  = e.uvRot;
             const tx  = cs ? cs.x.mul(nx).add(cs.y.mul(ny)) : nx;
             const tz  = cs ? cs.x.mul(ny).sub(cs.y.mul(nx)) : ny;
             // TBN transform: T*nx + B*ny + N*nz  →  (nx, 0, ny) + geomN*nz
             const worldN = normalize(vec3(tx, float(0), tz).add(nrmV.mul(nz)));
             // Lerp between pure geometric normal and normal-mapped based on per-layer strength
-            const layerN = mix(nrmV, worldN, layerSlots[i].uNormalStr);
-            accumN = accumN.add(layerN.mul(w[i + 1]));
+            const layerN = mix(nrmV, worldN, e.normalStr);
+            accumN = accumN.add(layerN.mul(e.w));
           }
           nrmV.assign(normalize(accumN));
         }
@@ -720,6 +866,12 @@ export function createSplatOverlay(
     uMacroStrength,
     uMacroWarmth,
     uMacroScale,
+    // Near/far (SPLAT_FEATURES.farBlend); live, no recompile.
+    uFarRatio,
+    uFarStart,
+    uFarEnd,
+    /** What this build compiled: top-K count (0 = classic) and near/far. */
+    compiled: { topK: TOPK, farBlend: Boolean(TOPK && F.farBlend) },
     blend,
     registerMaterial,
     setTriplanarCompiled,

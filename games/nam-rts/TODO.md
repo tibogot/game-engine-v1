@@ -1046,6 +1046,22 @@ is not lost while Kurtz is being built.
         measure now they are gone.
       · old blue-grey puddles read as water better than the new red ones at
         play zoom.
+- [~] **TERRAIN: TOP-K LAYERS + NEAR/FAR** (the CoH / Unreal answer to "every
+      layer costs everywhere", 2026-09-24). splatOverlayTsl, compile-time,
+      DEFAULT OFF (classic path unchanged): `SPLAT_FEATURES.topK` computes
+      every layer's final weight first, picks the K strongest per pixel and
+      samples only those (per-pixel array slice, no branches); triplanar /
+      rock-shaded layers stay static. `farBlend` adds each chosen layer's
+      albedo at a tile uFarRatio (5x) bigger, faded in uFarStart->uFarEnd
+      (35->90 m) — ends the 7 m vs 34 m argument. A/B by URL on any page:
+      `?topk=3`, `?topk=3&far=1`, `?topk=0`.
+      MEASURED (3840x1778, one tab, in front, same view): classic 35.5 ms
+      (p90 50), top-3 33.7-34.0 (p90 33.5), top-3+far 34.9-35.1. LOOK: with
+      far on, the road reads clods and pebbles at play zoom where classic is
+      flat red; no top-3 seams seen at the clearing.
+      **GAME DEFAULT since 2026-09-24** (your call; `?topk=0` = classic). NEXT: a
+      separate FAR texture per layer (aerial sets like rocky_terrain_02) as
+      extra array slices (no new sampler bindings — the terrain sits at 16).
 - [~] **LOAD TIME** (your ask 2026-09-24: every change means a reload, so
       it taxes all the work). MEASURED clean loads (tab in front; one load's
       own stage times recovered from the smoothed store as 2·new − old):
@@ -1078,6 +1094,13 @@ is not lost while Kurtz is being built.
       CPU-backed canvas (willReadFrequently) — no GPU readback per map
       (v3proj stage 8.2 -> 6.7 s). Material compiling now lands on whichever
       stage the 1/s frame hits, so judge the TOTAL, not a stage.
+      SHADER BUILDS, diagnosed: 426 node builds at boot, only 124 distinct
+      shaders — three r184 puts every InstancedMesh's uuid in its cache key,
+      so instanced meshes sharing a material each rebuild it (+ shadow).
+      Worst: procedural ROCKS, 60 types x (main+shadow) = 120 builds of one
+      shader; foliage chunks 22x2; RTS parts 15x2. ~2 s recoverable at most,
+      by drawing rock types as ONE BatchedMesh (engine props renderer) —
+      not done, your call. Unit types not yet spawned build on first spawn.
       LEFT, from the main-thread trace: **three's node-material building
       ~3 s of first-time material builds** (the rest of the ~9 s was
       per-frame work, now mostly gone), procedural rocks ~1.25 s (memoised per

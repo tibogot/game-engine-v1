@@ -226,7 +226,16 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
      * editor panel — so the map keeps its seventh layer and opens unchanged in
      * the editor. `?fat=1` compiles all seven back for the A/B.
      */
-    splatFeatures:   leanTerrain ? { solo: false, layerBudget: 6 } : { solo: false },
+    //
+    // TOP-3 + NEAR/FAR (splatOverlayTsl SPLAT_FEATURES.topK / farBlend): only
+    // the three strongest layers are sampled per pixel, each at its fine tile
+    // up close and a 5x tile faded in from 35 to 90 m. MEASURED at 3840x1778:
+    // classic 35.5 ms, top-3 + far 35.0 — the same cost, and the road reads
+    // clods and pebbles at play zoom where classic is flat red. `?topk=0`
+    // brings the classic path back for an A/B.
+    splatFeatures: leanTerrain
+      ? { solo: false, layerBudget: 6, topK: 3, farBlend: true }
+      : { solo: false, topK: 3, farBlend: true },
   });
   window.__rts = app; // handy for console debugging
 
