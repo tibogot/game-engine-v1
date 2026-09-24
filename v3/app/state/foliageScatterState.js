@@ -187,6 +187,20 @@ export const FOLIAGE_PRESETS = {
     plumesPerStem: 2, plumeSpread: 52,
     colorBase: "#1b3f22", colorTip: "#8f9c48", colorHead: "#7c7a6c", size: 12, translucency: 0.8,
   },
+  // BANYAN — cây đa, the tree at the communal house and the temple gate
+  // (banyanGeometry.js): a lumpy dome of leaf-cluster cards twice as wide as
+  // the tree is tall, a trunk of fused strands splitting into limbs, aerial
+  // roots and pillars. `spread` is the crown radius in plant heights,
+  // `bareStalk` the underside's height, `leaflets` the leaf clumps,
+  // `plumesPerStem` the roots in tens, `plumeSpread` the % that are pillars.
+  // `size` 18 m — a landmark, placed by hand (placedFoliage.js).
+  banyan: {
+    kind: "banyan",
+    fronds: 7, frondLength: 1.0, leaflets: 60, leafletWidth: 1.0, leafletAngle: 38,
+    spread: 1.0, arch: 0.6, droop: 0.3, stemWidth: 1.4, bareStalk: 0.44,
+    plumesPerStem: 16, plumeSpread: 12,
+    colorBase: "#1d3d1f", colorTip: "#6f9a3a", colorHead: "#5c4a3a", size: 18, translucency: 0.5,
+  },
   // TARO / elephant ear — knee-high heart leaves on thin petioles, wet ground.
   taro: {
     kind: "taro",

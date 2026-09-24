@@ -23,6 +23,14 @@
  * one of their consumers takes colour from the shader, so the colour channels
  * only ever mattered as a way for bilinear filtering to drag black in from
  * outside a leaf edge.
+ *
+ * EXCEPT with `shade: true` (the banyan's leaf clusters): the red channel is
+ * then kept as a grey SHADE — each leaf its own brightness, darker toward the
+ * cluster's heart — which the foliage shader multiplies into the card's
+ * colour. White means "no change", which is why every other card texture,
+ * still white, is untouched by that multiply. The shade is averaged down the
+ * chain weighted by alpha, and empty texels carry the mask's mean shade, so
+ * filtering never drags a dark or white halo in from outside a leaf.
  */
 import * as THREE from "three";
 
@@ -53,8 +61,9 @@ function scaleForCoverage(alpha, target, cut) {
  * @param {object} [o]
  *   threshold   the shader's alpha test, 0-1 (foliageSystem discards under 0.4)
  *   anisotropy  for the live field; thumbnails go without
+ *   shade       keep the red channel as a grey shade (see the header)
  */
-export function coverageMippedTexture(canvas, { threshold = 0.4, anisotropy = 0 } = {}) {
+export function coverageMippedTexture(canvas, { threshold = 0.4, anisotropy = 0, shade = false } = {}) {
   const w0 = canvas.width, h0 = canvas.height;
   const src = canvas.getContext("2d").getImageData(0, 0, w0, h0).data;
   const cut = threshold * 255;
@@ -75,32 +84,65 @@ export function coverageMippedTexture(canvas, { threshold = 0.4, anisotropy = 0 
   }
   const target = coverage(alpha, 1, cut);
 
+  // The shade channel (only with `shade`): red where there is leaf, and the
+  // mean leaf shade where there is none.
+  let tone = null, meanTone = 255;
+  if (shade) {
+    tone = new Uint8Array(w * h);
+    let sum = 0, n = 0;
+    for (let y = 0; y < h; y++) {
+      const sy = h - 1 - y;
+      for (let x = 0; x < w; x++) {
+        const i = (sy * w + x) * 4;
+        if (src[i + 3] > 0) { sum += src[i]; n++; }
+      }
+    }
+    meanTone = n ? Math.round(sum / n) : 255;
+    for (let y = 0; y < h; y++) {
+      const sy = h - 1 - y;
+      for (let x = 0; x < w; x++) {
+        const i = (sy * w + x) * 4;
+        tone[y * w + x] = src[i + 3] > 0 ? src[i] : meanTone;
+      }
+    }
+  }
+
   const levels = [];
-  const pack = (a, ww, hh) => {
+  const pack = (a, ww, hh, t = null) => {
     const rgba = new Uint8Array(ww * hh * 4);
     for (let i = 0; i < a.length; i++) {
-      rgba[i * 4] = 255; rgba[i * 4 + 1] = 255; rgba[i * 4 + 2] = 255; rgba[i * 4 + 3] = a[i];
+      const g = t ? t[i] : 255;
+      rgba[i * 4] = g; rgba[i * 4 + 1] = g; rgba[i * 4 + 2] = g; rgba[i * 4 + 3] = a[i];
     }
     return { data: rgba, width: ww, height: hh };
   };
-  levels.push(pack(alpha, w, h));
+  levels.push(pack(alpha, w, h, tone));
 
   while (w > 1 || h > 1) {
     const nw = Math.max(1, w >> 1), nh = Math.max(1, h >> 1);
     const next = new Uint8Array(nw * nh);
+    const nextTone = tone ? new Uint8Array(nw * nh) : null;
     for (let y = 0; y < nh; y++) {
       for (let x = 0; x < nw; x++) {
         const x0 = Math.min(w - 1, x * 2), x1 = Math.min(w - 1, x * 2 + 1);
         const y0 = Math.min(h - 1, y * 2), y1 = Math.min(h - 1, y * 2 + 1);
-        next[y * nw + x] = (alpha[y0 * w + x0] + alpha[y0 * w + x1]
-          + alpha[y1 * w + x0] + alpha[y1 * w + x1] + 2) >> 2;
+        const i00 = y0 * w + x0, i01 = y0 * w + x1, i10 = y1 * w + x0, i11 = y1 * w + x1;
+        next[y * nw + x] = (alpha[i00] + alpha[i01] + alpha[i10] + alpha[i11] + 2) >> 2;
+        if (tone) {
+          // Weighted by alpha: an empty texel has no say in a leaf's shade.
+          const wa = alpha[i00] + alpha[i01] + alpha[i10] + alpha[i11];
+          nextTone[y * nw + x] = wa > 0
+            ? Math.round((tone[i00] * alpha[i00] + tone[i01] * alpha[i01] + tone[i10] * alpha[i10] + tone[i11] * alpha[i11]) / wa)
+            : meanTone;
+        }
       }
     }
     // Fatten this level until it covers what the base level covered.
     const s = scaleForCoverage(next, target, cut);
     if (s !== 1) for (let i = 0; i < next.length; i++) next[i] = Math.min(255, Math.round(next[i] * s));
     alpha = next; w = nw; h = nh;
-    levels.push(pack(alpha, w, h));
+    if (tone) tone = nextTone;
+    levels.push(pack(alpha, w, h, tone));
   }
 
   const tex = new THREE.DataTexture(levels[0].data, w0, h0, THREE.RGBAFormat);

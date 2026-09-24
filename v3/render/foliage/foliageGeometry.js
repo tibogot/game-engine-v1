@@ -41,6 +41,7 @@ import { buildFanPalm } from "./fanPalmGeometry.js";
 import { buildCardFern } from "./fernCardGeometry.js";
 import { buildBanana } from "./bananaGeometry.js";
 import { buildTravellersPalm } from "./travellersPalmGeometry.js";
+import { buildBanyan } from "./banyanGeometry.js";
 
 export const FOLIAGE_LODS = 3;
 
@@ -85,6 +86,9 @@ const LEAF_ROUNDING = {
   // The fan is a flat plane: round only a little, from low on the trunk so
   // even the drooping blades under the fan keep a normal that points up.
   travellersPalm: [0.3, 0.35],
+  // The banyan's dome shades as ONE rounded mass, from the crown's middle:
+  // the clumps on its shaded side fall off into the dark, as in every photo.
+  banyan:    [0.55, 0.8],
   taro:      [0.05, 0.6],
 };
 
@@ -163,6 +167,7 @@ export function cardTextureOf(kind) {
     case "jungleTree": return "canopy";
     case "cardFern": return "fern";
     case "banana": case "travellersPalm": return "banana";
+    case "banyan": return "banyan";
     case "taro": return "taro";
     default: return null;
   }
@@ -203,6 +208,7 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
   if (type.kind === "cardFern") return buildCardFern(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "banana" || type.kind === "taro") return buildBanana(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "travellersPalm") return buildTravellersPalm(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "banyan") return buildBanyan(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
     const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : type.kind === "susuki" ? "fan" : "plume";

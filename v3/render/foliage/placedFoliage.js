@@ -10,7 +10,8 @@
  * field reads a plant from its compute buffers; here each plant is one
  * instance of an InstancedBufferGeometry carrying two vec4s:
  *   iPos  (x, z, type, groundY)   the field's `p`, verbatim
- *   iRot  (yaw, scale, seed, 0)   heading and size, which the field hashes
+ *   iRot  (yaw, scale, seed, sway)  heading, size and sway, which the field
+ *                                  hashes or takes from the wind
  *
  * One mesh per (type, detail level). Detail is chosen on the CPU from camera
  * distance, a few times a second: a map holds tens of these, not tens of
@@ -66,11 +67,13 @@ export class PlacedFoliage {
         const seed = r.z;
         // Sway: two slow frequencies on the plant's own phase, a few degrees.
         const d = vec4(
-          sin(time.mul(0.61).add(seed.mul(7.3))).mul(0.035),
-          cos(time.mul(0.47).add(seed.mul(3.1))).mul(0.03),
+          sin(time.mul(0.61).add(seed.mul(7.3))).mul(r.w.mul(0.035)),
+          cos(time.mul(0.47).add(seed.mul(3.1))).mul(r.w.mul(0.03)),
           1, 0,
         );
-        return { plant: seed, p, d, yaw: r.x, scale: r.y };
+        // No resting lean: a planted tree stands straight (the field adds a
+        // random one, which on a 36 m banyan would tilt the whole crown).
+        return { plant: seed, p, d, yaw: r.x, scale: r.y, leanJitter: 0 };
       },
       rowOf: (t, rr) => uTypes.element(int(floor(t.add(0.5))).mul(ROWS).add(rr)),
       // Size is the placement's own; no hashed variation on top of it.
@@ -78,6 +81,8 @@ export class PlacedFoliage {
       colorVar: uniform(0.08),
       anchorPos: uniform(new THREE.Vector3()),
       thinScale: () => float(1),
+      // The main camera, for billboard cards in every pass (see update).
+      viewPos: uniform(new THREE.Vector3()),
     };
     this._plainMat = null;
     this._cardMats = {};
@@ -102,10 +107,16 @@ export class PlacedFoliage {
     let t = this.types.get(key);
     if (!t) {
       if (this.types.size >= MAX_TYPES) throw new Error(`PlacedFoliage: at most ${MAX_TYPES} types`);
-      t = { index: this.types.size, type, localH: 1, meshes: null };
+      t = { index: this.types.size, type, localH: 1, meshes: null, sway: 1, lodMul: 1 };
       this.types.set(key, t);
     }
     t.type = type;
+    const size = type.size ?? 1;
+    // A big tree sways less and keeps its detail further out: the sway is an
+    // angle, so a 36 m banyan at a palm's sway would swing its crown metres,
+    // and its detail bands follow its size the way the painted fields' do.
+    t.sway = Math.min(1, 10 / size);
+    t.lodMul = Math.max(1, size / 12);
     this._disposeMeshes(t);
     this._writeRows(t);
     this._dirty = true;
@@ -179,14 +190,20 @@ export class PlacedFoliage {
   update(camera) {
     if (!this.plants.length) return;
     const cp = camera.position;
+    // Every frame, before the early-out: billboard cards face this camera in
+    // the shadow pass too (foliageSystem `viewPos`).
+    this._src.viewPos.value.copy(cp);
     // Re-bin only once the camera has moved a couple of metres.
     if (!this._dirty && this._camPos.distanceToSquared(cp) < 4) return;
     this._camPos.copy(cp);
     const [d1, d2] = this.lodDistances;
+    const byIndex = [];
+    for (const t of this.types.values()) byIndex[t.index] = t;
     let changed = this._dirty;
     for (const p of this.plants) {
       const dist = Math.hypot(p.x - cp.x, p.y - cp.y, p.z - cp.z);
-      const lod = dist < d1 ? 0 : dist < d2 ? 1 : 2;
+      const m = byIndex[p.typeIndex].lodMul;
+      const lod = dist < d1 * m ? 0 : dist < d2 * m ? 1 : 2;
       if (lod !== p.lod) { p.lod = lod; changed = true; }
     }
     if (!changed) return;
@@ -211,7 +228,7 @@ export class PlacedFoliage {
         for (const p of list) {
           if (p.lod !== lod) continue;
           pos.array.set([p.x, p.z, t.index, p.y], n * 4);
-          rot.array.set([p.yaw, p.scale, p.seed, 0], n * 4);
+          rot.array.set([p.yaw, p.scale, p.seed, t.sway], n * 4);
           n++;
         }
         pos.needsUpdate = rot.needsUpdate = true;

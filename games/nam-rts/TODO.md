@@ -757,6 +757,49 @@ is not lost while Kurtz is being built.
 
 - [ ] **The jungle tree is committed but NOT good.** Waiting on your reference
       picture. The roots read as cardboard fins and the crown is a blob.
+- [x] **BANYAN — the big tree** (your ask 2026-09-24). BUILT
+      (`banyanGeometry.js`, `banyanLeafTexture.js`, kind + preset `banyan`,
+      18 m tall, ~40 m across; 7080 / 2564 / 480 tris, most of it wood).
+      Planted on the OUTSKIRTS, not inside anything (your rule, 2026-09-24:
+      it is so big it hides whatever it stands over; keep it clear of
+      villages and camps). One is past the hamlet's lane end, beside the road
+      (`HAMLET_OUTSKIRTS`), and one is off the temple's west gallery
+      (`TEMPLE_OUTSKIRTS`). Neither is in the plans, which are the places
+      themselves. Its 3 m trunk blocks nav.
+      **RULE for any future banyan**: crown ~40 m across, so the trunk stands
+      ≥ ~25 m from anything the player needs to see, and off roads.
+      · CROWN: ~60 BIG camera-facing leaf-cluster cards on a lumpy
+        half-ellipsoid, NO solid core (your calls: the arborist page's
+        billboards, fewer + bigger cards, no green blob). The cards carry
+        the dome's ROUNDED normal (outward, then rounded again from the
+        crown's centre) and are lifted only 35% to up, so the crown shades as
+        a ball. The texture keeps a per-leaf SHADE in its RGB
+        (alphaCoverageMips `shade`), lit from the card's top: top-lit
+        sub-lumps read as cauliflower; a radial dark heart read as lettuce.
+      · BILLBOARDS are a new shared card part (6 + lift) in the foliage
+        shader, with `billboard: false` on the type as the A/B switch. Two
+        lessons in the code: the cards are pushed toward the camera by 70% of
+        their size, and they face the PLAYER's camera in the shadow pass too
+        (`viewPos`). Without that they turned to the sun there, crossed their
+        own camera-facing twins, and striped the crown with straight cuts.
+      · TRUNK: fused strands with long low root spurs splitting into 7 limbs,
+        wrapped in CORDS (aerial roots grown down the trunk); hanging roots
+        and ground-reaching pillars under the crown.
+      · MEASURED: no cost. Hiding it made the frame 0.08 ms SLOWER, since
+        its crown covers ground and plants that are otherwise drawn.
+      **YOUR LOOK CHECK**: the crown from the RTS camera, the bark colour
+      (#5c4a3a), and whether the vegetation lab matters to you. Its copy of
+      the shader has no billboards, so the banyan's cards collapse there; judge
+      it in the game.
+      MAYBE LATER: a sparse banyan jungle field (needs a tall-plant slot).
+- [x] **Raise the bamboo** (your call 2026-09-24): 9 -> 16 m, written into
+      the map by `tools/namPlantScale.mjs` WITH its proportions. The culms
+      stay ~15 cm (stemWidth 0.75), the sprays grow (leafletWidth 0.9;
+      0.65 kept them the same size in metres and the stand went to grey
+      sticks at RTS range), and there are 26 internodes. 34 cost +0.57 M
+      scene triangles for rings nobody can see.
+      **YOUR LOOK CHECK**: the stand at normal zoom; it is still a little
+      see-through at the far detail level.
 - [x] **The faceDirection winding bug — FIXED in the coconut palm and the
       areca** (2026-09-24). Same fault as the fan palm's black coarse trunk:
       part 3 shades with its normal multiplied by `faceDirection`, so on a
@@ -769,8 +812,14 @@ is not lost while Kurtz is being built.
 - [ ] **Re-shoot the whole-map lineup** (`window.__sheet` in the lab) now that
       the bush, ground cover and banana have changed, to see what the jungle
       floor actually became.
-- [ ] Fan palm: the diamond leaf-base boot pattern on the trunk, and a
-      dry-season colour.
+- [x] Fan palm: the diamond leaf-base boot pattern on the trunk — done
+      2026-09-24 (d0f3970, see the entry above).
+- [ ] Fan palm: a dry-season colour.
+- [ ] **Coconut palm + areca far trunks** are still crossed part-2 quads,
+      alpha-tested against the frond texture. The traveller's palm LOST its
+      far trunk that way, because the mip blurred a thin solid strip into
+      transparency. Check them at range and move them to the closed-tube
+      trunk if they thin out.
 - [ ] Areca: keep as a village plant or drop it — your call.
 - [ ] Colour variety across the foliage (flame tree, a few flowering trees).
 - [ ] Readability thinning where plants hide units and combat.

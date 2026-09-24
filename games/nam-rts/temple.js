@@ -20,6 +20,9 @@ import {
   buildTempleGallery, buildTempleGopura, buildTempleRubble, buildTempleTower,
 } from "../../v3/render/objects/rtsTemple.js";
 
+/** Kinds drawn as planted foliage (placedPlants.js via `app.plant`), not kit. */
+const PLANTED_KINDS = new Set(["travellersPalm", "banyan"]);
+
 /** The compound's pieces in LOCAL metres: the axis runs along -Z, the way in. */
 export function templePlan() {
   const out = [];
@@ -66,6 +69,18 @@ export function templePlan() {
   add("travellersPalm", 9.5, -9.5, -0.05, { seed: 0.71, scale: 0.92 });
   return out;
 }
+
+/**
+ * A BANYAN on the temple's outskirts, off the west gallery — not over
+ * the landing stair, where its ~36 m crown hid the gate, the pikes and the
+ * ghat from the RTS camera (your call, 2026-09-24: keep it clear). The
+ * west gallery is ~15 m outside its crown, and it is off the approach path
+ * (at -42, -36 its trunk stood on it). Local metres, same frame as the
+ * plan; not in `templePlan`, which is the compound itself.
+ */
+export const TEMPLE_OUTSKIRTS = [
+  { kind: "banyan", x: -46, z: 10, rotY: 0, seed: 0.47, scale: 0.9 },
+];
 
 /** World position of a local plan point, for a compound centred at (cx, cz). */
 export function toWorld(p, { x: cx, z: cz, rotY = 0 }) {
@@ -147,8 +162,8 @@ export async function placeTemple(app, placed, { x, z, rotY = 0 } = {}) {
   await placed.place(items);
   // Planted plants after the pads, so each stands on the final ground.
   let plants = 0;
-  for (const p of templePlan()) {
-    if (p.kind !== "travellersPalm" || !app.plant) continue;
+  for (const p of [...templePlan(), ...TEMPLE_OUTSKIRTS]) {
+    if (!PLANTED_KINDS.has(p.kind) || !app.plant) continue;
     const w = toWorld(p, { x, z, rotY });
     // The fan faces the DEFAULT camera (looking +Z), whatever way the site is
     // turned: an ornamental is there to be seen, and edge-on it is a pole.

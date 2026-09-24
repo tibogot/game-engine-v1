@@ -24,6 +24,17 @@
  *   houseplant. `spread` also drives the sucker count now, so a banana on the
  *   map becomes a mat rather than a single stem.
  *
+ *   BAMBOO 9 m -> 16 (your call, 2026-09-24). Village bamboo in Vietnam
+ *   (tre, Bambusa) runs 15-24 m; at 9 m it was the palm's mistake again.
+ *   Everything in the bamboo builder is in units of its height, so it is
+ *   raised WITH its proportions: culms 0.0062 x height would be 20 cm through
+ *   at 16 m, so stemWidth 1 -> 0.75 (15 cm, an old lowland culm); the leaf
+ *   sprays would nearly double, so leafletWidth 1 -> 0.9 — NOT 0.65, which
+ *   kept their size in metres and turned the stand into grey sticks at RTS
+ *   range, where the sprays are what says "bamboo". Internodes only 22 -> 26
+ *   (~62 cm each): 34 kept a real culm's ~47 cm, but it cost +0.57 M scene
+ *   triangles across the field for rings the RTS camera cannot see.
+ *
  * Colours are NOT touched: those were set by namVegPalette.mjs against this
  * map's light and are the map's own, not the preset's.
  *
@@ -36,6 +47,7 @@ const FILE = "public/levels/nam-valley.v3proj";
 /** Tall plants, by slot name: only the keys that changed. */
 const TALL = {
   Palm: { size: 17, stemWidth: 0.7, plumeSpread: 32, leaflets: 36 },
+  Bamboo: { size: 16, stemWidth: 0.75, leafletWidth: 0.9, leaflets: 26 },
 };
 
 /** Ground foliage, by slot name. */

@@ -8,15 +8,18 @@
 // plants, one instanced draw per plant type and detail level. Made on the
 // first plant, so a map with none pays nothing.
 //
-// Plants are not obstacles: a trunk is thinner than a nav cell and a fan is
-// six metres up. They clear the grass and ground cover round their foot so
-// the trunk does not stand in a fern.
+// Most plants are not obstacles: a palm trunk is thinner than a nav cell and
+// its fan is six metres up. A kind with `block` (the banyan's three-metre
+// trunk) stamps its footprint into the nav grid. All of them clear the grass
+// and ground cover round their foot so the trunk does not stand in a fern.
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
 /** The kinds a plan may name, and the preset each is built from. */
 export const PLANTED = {
   travellersPalm: { preset: "travellersPalm", clear: 2.5 },
+  // A banyan's trunk is three metres of fused wood: it blocks the way.
+  banyan: { preset: "banyan", clear: 6, block: 2.6 },
 };
 
 export function isPlanted(kind) { return kind in PLANTED; }
@@ -41,6 +44,12 @@ export function plant(app, kind, x, z, { rotY = 0, scale = 1, seed } = {}) {
   if (def.clear) app.clearVegetation?.(x, z, def.clear + 1, { grass: def.clear });
   const y = (app.getWorldHeight?.(x, z) ?? 0) - 0.05;
   pf.add(kind, x, y, z, { rotY, scale, ...(seed !== undefined ? { seed } : {}) });
+  // A trunk you cannot walk through: its footprint in the nav grid (kept
+  // across rebuilds, like the placed objects').
+  if (def.block) {
+    const r = def.block * scale;
+    app.navGrid?.addFootprint?.(x, z, r, r, 0);
+  }
 }
 
 /** Per frame: detail levels for this camera, and the sun for the see-through light. */

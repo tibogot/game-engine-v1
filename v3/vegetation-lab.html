@@ -73,6 +73,7 @@
       import { coverageMippedTexture } from "./render/foliage/alphaCoverageMips.js";
       import { drawFanLeafTexture, FAN_TEX_W, FAN_TEX_H } from "./render/foliage/fanLeafTexture.js";
       import { drawLanceLeafTexture, LANCE_TEX_W, LANCE_TEX_H } from "./render/foliage/lanceLeafTexture.js";
+      import { drawBanyanLeafTexture, BANYAN_TEX_W, BANYAN_TEX_H } from "./render/foliage/banyanLeafTexture.js";
       import { drawBambooSprayTexture, SPRAY_TEX_W, SPRAY_TEX_H } from "./render/foliage/bambooSprayTexture.js";
       import { drawPalmFrondTexture, FROND_TEX_W, FROND_TEX_H } from "./render/foliage/palmFrondTexture.js";
       import { drawFernFrondTexture, FERN_TEX_W, FERN_TEX_H } from "./render/foliage/fernFrondTexture.js";
@@ -104,9 +105,14 @@
       const canopyTex = canvasTexture(CANOPY_TEX_W, CANOPY_TEX_H, (c) => drawCanopyClusterTexture(c));
       const fanTex = canvasTexture(FAN_TEX_W, FAN_TEX_H, (c) => drawFanLeafTexture(c));
       const lanceTex = canvasTexture(LANCE_TEX_W, LANCE_TEX_H, (c) => drawLanceLeafTexture(c));
+      // The banyan keeps a per-leaf shade in its RGB (see alphaCoverageMips).
+      const banyanCanvas = document.createElement("canvas");
+      banyanCanvas.width = BANYAN_TEX_W; banyanCanvas.height = BANYAN_TEX_H;
+      drawBanyanLeafTexture(banyanCanvas);
+      const banyanTex = coverageMippedTexture(banyanCanvas, { threshold: 0.4, anisotropy: 8, shade: true });
       const frondSlot = { plume: plumeTex, spray: sprayTex, frond: frondTex, fern: fernTex, banana: bananaTex, taro: taroTex, fan: fanTex, lance: lanceTex };
       // Part 4 is shared too: a bamboo spray and a jungle tree's leaf plate.
-      const spraySlot = { spray: sprayTex, canopy: canopyTex };
+      const spraySlot = { spray: sprayTex, canopy: canopyTex, banyan: banyanTex };
 
       const $ = (id) => document.getElementById(id);
       const err = (e) => { $("err").textContent = String(e?.stack || e?.message || e); console.error(e); };
@@ -376,7 +382,12 @@
           const j = vPlant.sub(0.5).mul(2).mul(U.uColorVar);
           return col.mul(vec3(float(1).add(j.mul(0.6)), float(1).add(j), float(1).sub(j.mul(0.5))));
         });
-        const col = baseColor();
+        // Made here, before the colour, because a part-4 card's RGB is a
+        // per-leaf SHADE (the banyan's clusters; white on every other card).
+        frondTexNode = texture(frondTex, uv());
+        sprayTexNode = texture(sprayTex, uv());
+        const isCard4 = vPart.greaterThan(3.5).and(vPart.lessThan(4.5));
+        const col = baseColor().mul(select(isCard4, sprayTexNode.rgb, vec3(1)));
         mat.colorNode = col;
 
         // Sunlight through the blades when the sun is behind them. Leaves let
@@ -395,8 +406,6 @@
         const isPlume = vPart.greaterThan(1.5).and(vPart.lessThan(2.5));
         const isSpray = vPart.greaterThan(3.5).and(vPart.lessThan(4.5));
         const isFrond = vPart.greaterThan(4.5);
-        frondTexNode = texture(frondTex, uv());
-        sprayTexNode = texture(sprayTex, uv());
         const cardAlpha = () => select(isPlume, texture(plumeTex, uv()).a,
           select(isSpray, sprayTexNode.a,
             select(isFrond, frondTexNode.a, float(1))));

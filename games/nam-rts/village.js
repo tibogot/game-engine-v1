@@ -33,6 +33,9 @@ import {
   buildStrawRick, buildWashingLine, buildWell,
 } from "../../v3/render/objects/rtsVillage.js";
 
+/** Kinds drawn as planted foliage (placedPlants.js via `app.plant`), not kit. */
+const PLANTED_KINDS = new Set(["travellersPalm", "banyan"]);
+
 /** The lane, and how much room each kind of piece needs around its centre. */
 export const HAMLET = {
   laneHalf: 5,        // metres either side of the lane's centre line, kept clear
@@ -139,7 +142,6 @@ export function hamletPlan() {
   add("travellersPalm", -9.5, 10.5, 0.1, { seed: 0.21, scale: 0.95 });
   add("travellersPalm", 8.5, 10.8, -0.08, { seed: 0.58, scale: 1.05 });
   add("travellersPalm", 18.5, -24.5, 0.3, { seed: 0.83, scale: 0.85 });
-
   // ── Fences: the frontages, each with a gap in front of a door ──────────────
   // Runs along the lane at the yard line, and a return down one side of each
   // yard so it reads as an enclosure rather than a hedge.
@@ -157,6 +159,20 @@ export function hamletPlan() {
   for (const [x, z, len, rotY] of sides) add("fence", x, z, rotY, { length: len, seed: 200 + x });
   return out;
 }
+
+/**
+ * THE BANYAN AT THE HEAD OF THE VILLAGE — "cây đa đầu làng", the phrase a
+ * Vietnamese village is remembered by — but OUTSIDE it, and not in the plan.
+ * Its crown is ~40 m across; standing at the lane's entrance it hid half the
+ * houses from the RTS camera (your call, 2026-09-24: keep it clear of villages
+ * and camps). Out past the lane's end and to one side of the road it runs
+ * into — at z 4 its trunk stood in the junction and blocked it: the
+ * landmark you pass on the way in, not a roof over the village. Local
+ * metres, same frame as the plan.
+ */
+export const HAMLET_OUTSKIRTS = [
+  { kind: "banyan", x: 76, z: 26, rotY: 0, seed: 0.61, scale: 1 },
+];
 
 /** World position of a local plan point, for a hamlet centred at (cx, cz). */
 export function toWorld(p, { x: cx, z: cz, rotY = 0 }) {
@@ -255,8 +271,8 @@ export async function placeHamlet(app, placed, { x, z, rotY = 0 } = {}) {
   await placed.place(items);
   // Planted plants after the pads, so each stands on the final ground.
   let plants = 0;
-  for (const p of hamletPlan()) {
-    if (p.kind !== "travellersPalm" || !app.plant) continue;
+  for (const p of [...hamletPlan(), ...HAMLET_OUTSKIRTS]) {
+    if (!PLANTED_KINDS.has(p.kind) || !app.plant) continue;
     const w = toWorld(p, { x, z, rotY });
     // The fan faces the DEFAULT camera (looking +Z), whatever way the site is
     // turned: an ornamental is there to be seen, and edge-on it is a pole.

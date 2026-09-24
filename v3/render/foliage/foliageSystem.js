@@ -16,7 +16,7 @@
  */
 import * as THREE from "three";
 import {
-  Discard, Fn, attribute, cameraPosition, cameraViewMatrix, cos, dot, exp, faceDirection, float,
+  Discard, Fn, abs, attribute, cameraPosition, cameraViewMatrix, cos, cross, dot, exp, faceDirection, float,
   floor, fract, fwidth, hash, instanceIndex, length, max, min, mix, normalLocal, normalize, pow, positionLocal, saturate,
   select, sin, smoothstep, step, texture, time, uniform, uv, varying, vec2, vec3, vec4, PI2,
 } from "three/tsl";
@@ -28,6 +28,7 @@ import { drawBananaLeafTexture, drawTaroLeafTexture, BROADLEAF_TEX_W, BROADLEAF_
 import { drawCanopyClusterTexture, CANOPY_TEX_W, CANOPY_TEX_H } from "./canopyClusterTexture.js";
 import { drawFanLeafTexture, FAN_TEX_W, FAN_TEX_H } from "./fanLeafTexture.js";
 import { drawLanceLeafTexture, LANCE_TEX_W, LANCE_TEX_H } from "./lanceLeafTexture.js";
+import { drawBanyanLeafTexture, BANYAN_TEX_W, BANYAN_TEX_H } from "./banyanLeafTexture.js";
 import { bakeObjectThumbnails } from "../../../v2/tools/objectThumbnails.js";
 import { ScatterField } from "../scatter/scatterField.js";
 import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
@@ -72,6 +73,9 @@ const CARD_TEXTURES = {
   canopy: { w: CANOPY_TEX_W, h: CANOPY_TEX_H, draw: drawCanopyClusterTexture },
   fan:    { w: FAN_TEX_W, h: FAN_TEX_H, draw: drawFanLeafTexture },
   lance:  { w: LANCE_TEX_W, h: LANCE_TEX_H, draw: drawLanceLeafTexture },
+  // The one card with a SHADE in its colour (see alphaCoverageMips): a leaf
+  // cluster is leaves, not a green disc.
+  banyan: { w: BANYAN_TEX_W, h: BANYAN_TEX_H, draw: drawBanyanLeafTexture, shade: true },
 };
 
 /**
@@ -88,7 +92,7 @@ export function makeCardTexture(key, anisotropy = 0) {
   const canvas = document.createElement("canvas");
   canvas.width = spec.w; canvas.height = spec.h;
   spec.draw(canvas);
-  return coverageMippedTexture(canvas, { threshold: 0.4, anisotropy });
+  return coverageMippedTexture(canvas, { threshold: 0.4, anisotropy, shade: spec.shade === true });
 }
 
 /**
@@ -115,6 +119,17 @@ export async function bakeFoliageThumbnail(type, { renderer, size = 128, runRend
   const { geometry } = createFoliageTypeGeometry(type, { lod: 0 });
   const aPlant = geometry.getAttribute("aPlant");
   const count = aPlant.count;
+  // Billboard cards (part 6) keep all four corners at their centre and are
+  // spread by the live vertex stage. Spread them here once, facing +Z (the
+  // thumbnail camera's side), or the picture would show a bare trunk.
+  {
+    const pos = geometry.getAttribute("position"), uvA = geometry.getAttribute("uv");
+    for (let i = 0; i < count; i++) {
+      if (aPlant.getX(i) <= 5.99) continue;
+      const s = aPlant.getW(i);
+      pos.setXY(i, pos.getX(i) + (uvA.getX(i) * 2 - 1) * s, pos.getY(i) + (uvA.getY(i) * 2 - 1) * s);
+    }
+  }
 
   const c = new THREE.Color();
   const base = new THREE.Color(type.colorBase ?? "#3f6f26");
@@ -193,9 +208,13 @@ export async function bakeFoliageThumbnail(type, { renderer, size = 128, runRend
  *                      d      vec4(bendX, bendZ, fade 0..1, grass lift)
  *                      yaw    optional heading (radians); else hashed
  *                      scale  optional size multiplier; else 1
+ *                      leanJitter  a random resting lean, radians (0.1; a
+ *                             planted tree wants 0 — see placedFoliage.js)
  *   rowOf(t, r)      the type's uniform row r (see ROWS in the header)
  *   sizeVar, colorVar, anchorPos   uniforms
  *   thinScale(plant) 0..1 size for zoom thinning
+ *   viewPos          optional uniform: the MAIN camera, for billboard cards
+ *                    (else `cameraPosition`, which in the shadow pass is the sun)
  *
  * `u` is the shading uniforms (uFlutter, uGlowLight, uTransMul, uSunDir) and
  * `headTex` the card texture, or null for a plant with no alpha cards.
@@ -227,7 +246,7 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
   const yawRot = (v, c, s) => vec3(v.x.mul(c).sub(v.z.mul(s)), v.y, v.x.mul(s).add(v.z.mul(c)));
 
   mat.positionNode = Fn(() => {
-    const { plant, p, d, yaw: srcYaw = null, scale: srcScale = null } = src.plantAt();
+    const { plant, p, d, yaw: srcYaw = null, scale: srcScale = null, leanJitter = 0.1 } = src.plantAt();
     const a = attribute("aPlant", "vec4");
     const part = a.x, t = a.y, along = a.w;
 
@@ -248,7 +267,7 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     // strength 1.2 that is 86 deg, which reads as the plant STRETCHING
     // across the view rather than bowing. A plant bows to 35 deg and no
     // further, however hard the wind blows or how close you stand.
-    const lean = min(mag.mul(1.25), float(0.6)).add(hash(plant.add(313)).mul(0.1));
+    const lean = min(mag.mul(1.25), float(0.6)).add(hash(plant.add(313)).mul(leanJitter));
 
     // A placed plant carries its own heading; a scattered one takes a hash.
     const yaw = srcYaw ?? hash(plant.add(131)).mul(PI2);
@@ -258,8 +277,13 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     // spray CARD (part 4) flutters as one thing — `along` runs up the card
     // and `a.z` is per card, so the whole fan moves on its own phase.
     const isLeaf = part.lessThan(0.5).or(part.greaterThan(3.5));
+    // A BILLBOARD CARD (part 6 + lift, the banyan's leaf clumps): all four
+    // corners sit at the card's CENTRE and are spread out below, facing the
+    // camera — `along` carries the card's half-size instead of a flutter
+    // weight, and `uv` says which corner. See billboardOffset.
+    const isBB = part.greaterThan(5.99);
     const flutter = sin(time.mul(5.2).add(a.z.mul(29)).add(hash(plant).mul(13)))
-      .mul(u.uFlutter).mul(0.06).mul(along).mul(select(isLeaf, float(1), float(0)));
+      .mul(u.uFlutter).mul(0.06).mul(along).mul(select(isLeaf.and(isBB.not()), float(1), float(0)));
 
     const local = yawRot(positionLocal.mul(size), cy, sy).add(vec3(0, flutter.mul(size), 0));
     const nLocal = yawRot(normalLocal, cy, sy);
@@ -278,14 +302,45 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     const nrm = tilt(nLocal, bendAngle, bx, bz);
 
     vPart.assign(part);
-    vAlong.assign(along);
+    // A billboard's `along` is its size, not a place on a frond: hand the
+    // colour ramp a neutral value instead.
+    vAlong.assign(select(isBB, float(0.3), along));
     vHeight.assign(t);
     vType.assign(p.z);
     vRand.assign(a.z);
     vPlant.assign(hash(plant.add(3197)));
     vNormal.assign(nrm);
     // Sits on the ground, lifted by the grass it grows in.
-    const out = vec3(pos.x.add(p.x), pos.y.add(p.w).add(d.w.mul(0.5)), pos.z.add(p.y));
+    const base = vec3(pos.x.add(p.x), pos.y.add(p.w).add(d.w.mul(0.5)), pos.z.add(p.y));
+    // BILLBOARD: spread the corner out from the centre in the plane facing the
+    // camera (your arborist page's leaf cards, 2026-09-24). The card turns;
+    // its LIGHTING does not — the normal stays the baked dome normal, so a
+    // crown shades as one rounded mass whichever way its cards face, and
+    // nothing swims as the camera moves. A roll per card (`rand`, 0.5 = none)
+    // breaks the "every card the same way up" tell. They face the PLAYER'S
+    // camera in every pass (`src.viewPos`), shadows included: in the shadow
+    // pass `cameraPosition` is the SUN, and cards turned to it crossed their
+    // camera-facing twins along a straight line — half of every card sat in
+    // its own shadow, and the crown was striped with hard horizontal cuts.
+    const centreW = base.add(vec3(src.anchorPos.x, 0, src.anchorPos.z));
+    const toCam = normalize((src.viewPos ?? cameraPosition).sub(centreW));
+    // NaN-safe basis: when the camera looks straight down, cross with X.
+    const cA = cross(vec3(0, 1, 0), toCam);
+    const cB = cross(vec3(-1, 0, 0), toCam);
+    const bbRight = normalize(mix(cA, cB, step(float(0.99), abs(toCam.y))));
+    const bbUp = normalize(cross(toCam, bbRight));
+    // `rand` 0.5 is upright; the banyan keeps its cards within a few tenths of
+    // a radian, because its texture is lit from the top.
+    const roll = a.z.sub(0.5).mul(PI2);
+    const rR = bbRight.mul(cos(roll)).add(bbUp.mul(sin(roll)));
+    const rU = bbUp.mul(cos(roll)).sub(bbRight.mul(sin(roll)));
+    const corner = uv().mul(2).sub(1);
+    // …and pushed TOWARD the camera by most of its half-size. A flat quad
+    // turned to face you slices into whatever is behind it — the crown's
+    // solid core, its neighbours — along a hard straight line; lifted
+    // forward it overlaps them instead, which is all a leaf clump should do.
+    const bbOffset = rR.mul(corner.x).add(rU.mul(corner.y)).add(toCam.mul(0.7)).mul(along.mul(size));
+    const out = base.add(select(isBB, bbOffset, vec3(0)));
     vWorld.assign(out.add(vec3(src.anchorPos.x, 0, src.anchorPos.z)));
     return out;
   })();
@@ -458,7 +513,12 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     const j = vPlant.sub(0.5).mul(2).mul(src.colorVar);
     return col.mul(vec3(float(1).add(j.mul(0.6)), float(1).add(j), float(1).sub(j.mul(0.5))));
   });
-  const col = baseColor();
+  // A card texture's RGB is a per-leaf SHADE (the banyan's clusters); every
+  // other card texture is white there, so this multiply leaves it untouched.
+  const cardPart = vPart.greaterThan(1.5).and(vPart.lessThan(2.5)).or(vPart.greaterThan(3.5));
+  const col = headTex
+    ? baseColor().mul(select(cardPart, texture(headTex, uv()).rgb, vec3(1)))
+    : baseColor();
   // Mountain shade (terrainSunShadow.js): shade the colour on the detail
   // levels that skip shadows, and take the sun out of the see-through light
   // everywhere — emissive never passes through any shadow.
