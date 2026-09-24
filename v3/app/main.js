@@ -4328,8 +4328,24 @@ export async function startV3App(opts = {}) {
   let _lastWidgetRefresh = 0;
   let _noEnvTimeSec = 0;
   const _preRenderHooks = [];
+  /*
+   * FRAME THROTTLE (app.setFrameThrottle). A game that boots behind a loading
+   * screen was rendering the full scene every animation frame the whole time —
+   * ~12 s of nam-rts's main thread for frames nobody saw. Skipping them
+   * entirely would move every pipeline compile of what the boot adds onto the
+   * first frame after it (one long freeze), so instead the loop runs at most
+   * once per `_frameThrottleMs` while it is set: compiles still happen as
+   * things appear, the scene is paid a few times a second instead of sixty.
+   * 0 = off, the normal loop.
+   */
+  let _frameThrottleMs = 0;
+  let _lastThrottledFrame = 0;
   renderer.setAnimationLoop(() => {
     const now = performance.now();
+    if (_frameThrottleMs > 0) {
+      if (now - _lastThrottledFrame < _frameThrottleMs) return;
+      _lastThrottledFrame = now;
+    }
     const dt  = Math.min((now - _lastFrameMs) / 1000, 0.05);
     _lastFrameMs = now;
 
@@ -11650,6 +11666,17 @@ export async function startV3App(opts = {}) {
      * being ground-only here, each is glued to the live ground in its shader.
      */
     decals: decalSystem,
+
+    /**
+     * Run the frame loop at most once per `ms` (0 = every frame, the default).
+     * For a loading screen: the scene keeps compiling what is added to it, a
+     * few frames a second, without paying for sixty full frames a second that
+     * nobody sees. The caller MUST set it back to 0 when it is done.
+     */
+    setFrameThrottle(ms = 0) {
+      _frameThrottleMs = Math.max(0, Number(ms) || 0);
+      _lastThrottledFrame = 0;
+    },
 
     /**
      * Level a RECTANGLE (centre wx,wz, half-extents in metres, turned by rotY) to

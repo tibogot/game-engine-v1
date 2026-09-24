@@ -25,13 +25,22 @@ export async function bakeThumbnails({ renderer, items, size = 256, fill = 0.9 }
 
   // No MSAA — readRenderTargetPixelsAsync on a multi-sample WebGPU target reads
   // the unresolved buffer and returns garbage (see v2/tools/objectThumbnails.js).
-  const rt = new THREE.RenderTarget(size, size, {
+  //
+  // ONE TARGET PER PORTRAIT, READ BACK TOGETHER. A readback is a GPU round
+  // trip (~115 ms here) almost regardless of size, and this used to render,
+  // AWAIT the readback, then render the next — ~30 portraits in series, most
+  // of the "Building unit visuals" boot stage spent waiting. Rendering every
+  // portrait into its own small target first and then awaiting all the
+  // readbacks at once lets those waits overlap. (256² RGBA × ~30 ≈ 8 MB, freed
+  // before this returns.)
+  const makeRT = () => new THREE.RenderTarget(size, size, {
     type: THREE.UnsignedByteType,
     format: THREE.RGBAFormat,
     colorSpace: THREE.SRGBColorSpace,
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
   });
+  const targets = [];
 
   const scene = new THREE.Scene();
   const hemi = new THREE.HemisphereLight(0xffffff, 0x444455, 1.1);
@@ -57,6 +66,7 @@ export async function bakeThumbnails({ renderer, items, size = 256, fill = 0.9 }
   // GPU buffers with live units; disposing would destroy them mid-frame.
   const clearGroup = () => { group.position.set(0, 0, 0); while (group.children.length) group.children.pop(); };
 
+  const pending = [];   // { key, read: Promise<pixels> }
   try {
     for (const item of items) {
       if (!item?.make) continue;
@@ -83,20 +93,26 @@ export async function bakeThumbnails({ renderer, items, size = 256, fill = 0.9 }
       camera.lookAt(center);
       camera.updateMatrixWorld(true);
 
+      const rt = makeRT();
+      targets.push(rt);
       renderer.setRenderTarget(rt);
       renderer.render(scene, camera);
-      const buf = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, size, size);
-      out.set(item.key, pixelsToDataURL(buf, size));
-      // Restore before the next await — the game loop shares this renderer.
-      renderer.setRenderTarget(prevTarget);
+      // Started, NOT awaited: the copy is queued behind this render, and the
+      // group can be refilled for the next portrait straight away.
+      pending.push({ key: item.key, read: renderer.readRenderTargetPixelsAsync(rt, 0, 0, size, size) });
     }
+    // No await inside the loop above, so the game loop (which shares this
+    // renderer) never ran between a setRenderTarget and its render.
+    renderer.setRenderTarget(prevTarget);
+    const bufs = await Promise.all(pending.map((p) => p.read));
+    pending.forEach((p, i) => out.set(p.key, pixelsToDataURL(bufs[i], size)));
   } catch (err) {
     console.warn("[rts-v3] thumbnail bake failed; tiles will show text.", err);
   } finally {
     clearGroup();
     renderer.setRenderTarget(prevTarget);
     renderer.setClearColor(0x000000, prevClearAlpha);
-    rt.dispose();
+    for (const rt of targets) rt.dispose();
   }
   return out;
 }

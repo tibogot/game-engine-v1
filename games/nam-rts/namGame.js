@@ -161,6 +161,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // createWorldEnvironment builds the sun).
   const app = await startV3App({
     container,
+    // The EDITOR's default paint palette (7 PBR sets, 28 images) was decoded
+    // on every boot and then overwritten slot by slot by the level's own
+    // paintLayers — nam-valley fills all seven. The engine says a game must
+    // not preload it (main.js, loadPaintDefaults); this game never did say so.
+    preloadPaintTextures: false,
     // `enabled` MUST be decided here, at boot, not by app.shadows.setEnabled
     // afterwards. The environment builds the CSM node into every lit material
     // the moment it is enabled, and switching it off later only nulls the
@@ -224,6 +229,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     splatFeatures:   leanTerrain ? { solo: false, layerBudget: 6 } : { solo: false },
   });
   window.__rts = app; // handy for console debugging
+
+  // Behind the loading screen the scene only needs to keep compiling what the
+  // boot adds to it, not to render at 60 Hz: ~12 s of main thread went on
+  // frames nobody saw. Four a second until "ready" (reset just before it).
+  app.setFrameThrottle?.(250);
 
   if (fov != null) {
     app.camera.fov = fov;
@@ -1172,6 +1182,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // covers all of them: __NAM.smoke.spawn({x, z, kind: "screen"}).
   window.__NAM = app;
 
+  app.setFrameThrottle?.(0);     // the loading screen is going: full rate
   onStatus("ready");
   return app;
 }
