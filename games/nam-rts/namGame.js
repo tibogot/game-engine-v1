@@ -90,6 +90,7 @@ import { hamletSitesFor, pointSitesFor, templeSitesFor, tunnelSitesFor } from ".
 import { placeHamlet } from "./village.js";
 import { placeTemple } from "./temple.js";
 import { placeEnemyCamp, createEnemyCampFlag } from "./enemyCamp.js";
+import { siteEnemyLine } from "./enemyLine.js";
 import { paintCanopy, paintPalmFringe, paintUndergrowth, travellerPalmSpots, canopyClearings } from "./jungleCanopy.js";
 import { plant, updatePlantedPlants } from "./placedPlants.js";
 import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
@@ -439,10 +440,14 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   app.resources = resources;
 
   onStatus("Placing structures…");
+  const OLD_LINE = new URLSearchParams(location.search).get("line") === "old";
   const structures = await createStructures({
     app, navGrid, resources,
     // The camp's firing range — targets to test craters and combat on.
     dummies: new URLSearchParams(location.search).get("dummies") !== "0",
+    // The Front's line is SITED by the ground now (enemyLine.js, below, once
+    // the nav grid exists). ?line=old brings the five formula nests back.
+    turretCount: OLD_LINE ? 5 : 0,
   });
   app.structures = structures;
 
@@ -481,6 +486,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // round it, which is what hides it.
     for (const t of structures.turrets) app.clearVegetation?.(t.position.x, t.position.z, 8, { grass: 6 });
     for (const z of structures.zpus) app.clearVegetation?.(z.position.x, z.position.z, 7, { grass: 5 });
+    for (const t of structures.list) if (t.alive && t.typeKey === "tower") app.clearVegetation?.(t.position.x, t.position.z, 12, { grass: 5 });
     for (const m of structures.mortars) app.clearVegetation?.(m.position.x, m.position.z, 5, { grass: 4 });
     // A tunnel mouth: the shaft and its spoil ring, trodden bare — the jungle
     // round it is the point. At 3.5 m the ferns (metres across) still closed
@@ -551,6 +557,33 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   navGrid.rebuild(); // the ground under every building AND node changed
   for (const s of structures.list) {
     navGrid.addStructureObstacle(s);
+  }
+
+  // THE FRONT'S LINE (enemyLine.js): nests, towers, a ZPU and spider holes
+  // sited where they cover the ways in — nav paths from our HQ to theirs and
+  // to the capture points — instead of five nests on a formula.
+  if (AI_ON && !OLD_LINE && structures.enemyBase?.alive) {
+    onStatus("Digging in the Front's line…");
+    const t0 = performance.now();
+    const line = siteEnemyLine(app, {
+      navGrid,
+      playerHQ: structures.base.position,
+      enemyHQ: structures.enemyBase.position,
+      points: (requisition?.points ?? []).map((p) => p.position),
+    });
+    const tSite = performance.now() - t0;
+    let n = 0;
+    for (const p of line.nests) if (await structures.placeEnemy("turret", p.x, p.z)) n++;
+    for (const [i, p] of line.towers.entries()) {
+      const s = await structures.placeEnemy("tower", p.x, p.z);
+      if (s) { s.facing = (i * 2.3 + 0.4) % (Math.PI * 2); n++; }
+    }
+    for (const p of line.zpus) if (await structures.placeEnemy("zpu", p.x, p.z)) n++;
+    // Spider holes are dug in as the ground stands: a levelled disc in the
+    // jungle is exactly the tell a hidden thing must not have.
+    for (const p of line.spiderHoles) { const s = structures.addNow("spiderHole", p.x, p.z); s.deploy = 1; n++; }
+    for (const s of structures.list) if (s.alive) navGrid.addStructureObstacle(s);
+    console.log(`[enemy line] ${n} positions over ${line.paths} ways in: sited in ${Math.round(tSite)} ms, levelled and placed in ${Math.round(performance.now() - t0 - tSite)} ms`, line);
   }
   // Resource nodes are deliberately NOT nav obstacles: a harvester has to be able
   // to park on one, and blocking the footprint just makes it stall at the edge.

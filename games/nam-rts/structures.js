@@ -67,6 +67,26 @@ export const STRUCTURE_TYPES = {
     barWidth: 6,
     barY: 4.5,
   },
+  // THE WATCHTOWER (enemyLine.js sites them): a 12.7 mm on a lashed bamboo
+  // tower (rtsEnemyCamp.buildBambooWatchtower). Built where a pit would see
+  // nothing — it looks OVER the jungle — so it sees far (vision), shoots a
+  // little further than the nest, and is flimsier: bamboo, not earth.
+  tower: {
+    typeKey: "tower",
+    weapon: "mg",
+    name: "Bamboo Watchtower",
+    team: "enemy",
+    maxHp: 280,
+    radius: 3.4,
+    footprint: { cx: 0, cz: 0, hx: 2.8, hz: 3.4 },
+    range: 64,
+    damage: 13,
+    fireRate: 1.2,
+    canHitAir: true,
+    vision: 100,
+    barWidth: 5,
+    barY: 14,
+  },
   // A Cu Chi trapdoor (rtsEnemyKit.js): where the Front's men come up. Unarmed,
   // low and in the jungle — concealment (cover.js) makes it hard to pick up —
   // and not very tough once found: a squad with rifles closes it.

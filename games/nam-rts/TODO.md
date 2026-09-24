@@ -271,7 +271,23 @@ Vietnam, like Apocalypse Now.
       848 tris, one instanced draw for the whole line. `?dummies=0` boots
       without them. (The merged-body renderer path went with them — the
       dummies were the only thing left in it.)
-- [ ] **Replace the default enemy turrets.** Five DShK nests stand in a line
+- [x] **DONE 2026-09-25 (uncommitted): THE LINE IS SITED BY THE GROUND**
+      (enemyLine.js). Ways in = nav paths from our HQ to theirs and to every
+      capture point on their half (+ the helicopters' straight line);
+      candidates on a 10 m grid scored by how much of those roads they see
+      (8-tap terrain LOS) within gun range, + height over them; greedy picks
+      with 62 m spacing and DIMINISHING returns on road already covered (the
+      first try stacked every gun on the east road). Mix: 3 DShK nests, a
+      BAMBOO WATCHTOWER (new structure "tower": 12.7 mm on the lashed tower,
+      range 64, vision 100, 280 hp — sited where a pit would be blind), a
+      second ZPU on the air line, 3 spider holes beside the roads in cover.
+      Siting 16-25 ms (4.2 s first try, before de-duplicating road points).
+      Canopy clears 28 m round guns (a tower stood under a crown at 16),
+      12 m round spider holes/tunnels (the jungle hides them). ?line=old =
+      the five formula nests. Only ONE tower placed on nam-valley (the second
+      had no spot left with the spacing) — fine or loosen, your look.
+      NOT DONE from the plan: WIRE between the positions.
+- [ ] (was) **Replace the default enemy turrets.** Five DShK nests stand in a line
       across the top of the map from boot (structures.js `turretCount`), sited
       by a formula, not by the ground. Replace with a MIXED, sited line: DShK
       nests where they cover open ground, ZPU-4s on the approaches your

@@ -62,6 +62,9 @@ function finish(parts, footprint, height, ao = {}) {
  * lashed rungs, and a length of shell casing hung under the cap to beat as the
  * alarm.
  */
+/** Where a gun mounted on the tower pivots, above the tower's foot (its platform + a tripod). */
+export const WATCHTOWER_GUN_Y = 6.2 * S + 1.0;
+
 export function buildBambooWatchtower({ seed = 101 } = {}) {
   const r = rng(seed);
   const parts = [];

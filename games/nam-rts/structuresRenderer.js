@@ -25,6 +25,7 @@ import {
   buildSupplyCache, buildTunnelEntrance, buildZpuBody, buildZpuGuns, buildZpuMount,
 } from "../../v3/render/objects/rtsEnemyKit.js";
 import { mayCastShadow, stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+import { WATCHTOWER_GUN_Y, buildBambooWatchtower } from "../../v3/render/objects/rtsEnemyCamp.js";
 
 const MAX_PER_KIND = 64; // instance capacity per structure kind
 
@@ -69,6 +70,9 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
     // and both hidden together under the fog of war.
     nest: makeKind(buildNestBody(), kitMat, { shadow: true }),
     head: makeKind(buildNestGun(), kitMat, { shadow: true }),
+    // The Front's watchtowers (enemyLine.js): the tower, and the nest's own gun
+    // on its platform (drawn in the `head` kind with the nests' guns).
+    tower: makeKind(buildBambooWatchtower(), kitMat, { shadow: true }),
     // The Front's tunnel entrances: one draw for all of them.
     tunnel: makeKind(buildTunnelEntrance(), kitMat, { shadow: true }),
     // ZPU-4s: the pit (still), the mount (turns), the guns (turn and elevate).
@@ -156,7 +160,7 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
   const _pivot = new THREE.Vector3();
   /** A gun's world matrix: on its post (pit or nest), yawed at its target. */
   const headMatrix = (s, out) => out.compose(
-    _pivot.set(s.position.x, s.position.y + (s.isBuilding ? GUN_PIT_HEAD_Y : NEST_HEAD_Y), s.position.z),
+    _pivot.set(s.position.x, s.position.y + (s.isBuilding ? GUN_PIT_HEAD_Y : s.typeKey === "tower" ? WATCHTOWER_GUN_Y : NEST_HEAD_Y), s.position.z),
     _q.setFromAxisAngle(_up, s.turretYaw ?? 0), _one,
   );
 
@@ -180,7 +184,7 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         .applyAxisAngle(_up, s.turretYaw ?? 0)
         .add(_muzzle.set(s.position.x, s.position.y, s.position.z));
     }
-    if (s.typeKey !== "turret") {
+    if (s.typeKey !== "turret" && s.typeKey !== "tower") {
       return _muzzle.set(s.position.x, s.position.y + 6, s.position.z).clone();
     }
     // The player's built turret is the M60 gun pit (buildingRenderer.js), the
@@ -258,6 +262,18 @@ export function createStructuresRenderer({ app, structures, healthBars, fogOfWar
         }
         _m.makeTranslation(s.position.x, s.position.y, s.position.z);
         push(kinds.nest, _m, s);
+        headMatrix(s, _head);
+        push(kinds.head, _head, s);
+      }
+
+      if (s.typeKey === "tower") {
+        if (s.team === "enemy" && fogOfWar?.enabled && !fogOfWar.canSeeEntity(s)) continue;
+        if (s.target?.alive) {
+          s.turretYaw = Math.atan2(s.target.position.x - s.position.x, s.target.position.z - s.position.z);
+        }
+        // The tower keeps the heading it was built with; the gun turns on top.
+        _m.compose(_pivot.set(s.position.x, s.position.y, s.position.z), _q.setFromAxisAngle(_up, s.facing ?? 0), _one);
+        push(kinds.tower, _m, s);
         headMatrix(s, _head);
         push(kinds.head, _head, s);
       }

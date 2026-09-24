@@ -61,7 +61,11 @@ export const CANOPY = {
   /** Traveller's palms: grid step, chance per cell on the fringe, min gap. */
   travellers: { step: 16, chance: 0.12, minGap: 20 },
   /** Clearing radii, metres, and how far they feather. */
-  clear: { base: 75, enemyBase: 60, point: 30, nest: 16, hamlet: 55, temple: 70, feather: 18 },
+  // gun: nests, towers, ZPUs — a crown overhangs ~10 m past its trunk, and a
+  // gun needs its field of fire (at 16 a watchtower stood under a crown).
+  // nest: everything else the Front digs (tunnels, spider holes, pits): kept
+  // small — the jungle is what hides them.
+  clear: { base: 75, enemyBase: 60, point: 30, gun: 28, nest: 12, hamlet: 55, temple: 70, feather: 18 },
 };
 
 const smooth = (e0, e1, x) => {
@@ -305,7 +309,9 @@ export function canopyClearings({ structures, requisition, hamlets = [], temples
   for (const p of requisition?.points ?? []) at(p.position, c.point);
   for (const s of structures.list ?? []) {
     if (s === structures.base || s === structures.enemyBase) continue;
-    if (s.team === "enemy" && s.typeKey !== "trainingDummy") at(s.position, c.nest);
+    if (s.team !== "enemy" || s.typeKey === "trainingDummy") continue;
+    const gun = s.typeKey === "turret" || s.typeKey === "tower" || s.typeKey === "zpu";
+    at(s.position, gun ? c.gun : c.nest);
   }
   for (const h of hamlets) at(h, c.hamlet);
   for (const t of temples) at(t, c.temple);
