@@ -81,6 +81,7 @@ import { createResources, UNIT_COST, BUILDING_COST } from "./resources.js";
 import { createResourceRenderer } from "./resourceRenderer.js";
 import { createResourceHud } from "./resourceHud.js";
 import { createHudBar } from "./hudBar.js";
+import { createControlGroups } from "./controlGroups.js";
 import { createHarvesting } from "./harvesting.js";
 import { createRequisition } from "./requisition.js";
 import { createTraps } from "./traps.js";
@@ -708,7 +709,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
 
   const combat = createCombat({
     units, structures, fx, structuresRenderer, projectiles, fire, craters, smoke, cover,
-    onDeath: (entity) => { app.selection?.remove?.(entity); },
+    onDeath: (entity) => { app.selection?.remove?.(entity); app.controlGroups?.render(); },
   });
   combatRef = combat;
   app.combat = combat;
@@ -921,9 +922,17 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       const mobile = sel.filter((e) => !e.isStructure);
       unitBar.render(mobile.length ? mobile : sel.slice(0, 1));
       commandCard.render(sel);
+      app.controlGroups?.render();
     },
   });
   app.selection = selection;
+
+  // CONTROL GROUPS (controlGroups.js): Ctrl+1..9 make, 1..9 recall (twice:
+  // centre the camera), Shift+1..9 add; chips above the command panel.
+  const controlGroups = createControlGroups({
+    app, selection, mount: hud.root.querySelector(".block-right"),
+  });
+  app.controlGroups = controlGroups;
 
   // Player-facing HUD: minimap (bottom-left). Baked terrain + unit blips +
   // camera viewport; click/drag to move the camera.

@@ -4,6 +4,8 @@
 //   • Shift + left-click        → add/remove that unit from the selection
 //   • Left-drag on empty ground → box-select every unit inside the rectangle
 //     (hold Shift to add to the current selection)
+//   • Double-click a unit, or Ctrl + click → every unit of that TYPE on screen
+//     (Shift as well: add them to the selection)
 //   • Left-click empty ground   → clear selection
 //   • Right-click ground        → move every selected unit there (spread out)
 //
@@ -82,10 +84,24 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     return null;
   };
 
+  const DOUBLE_CLICK_MS = 350;
+  let lastClick = { unit: null, t: 0 };
+  /** The player's living units of one type whose position is on screen. */
+  function onScreenOfType(typeKey) {
+    const out = [];
+    const v = new THREE.Vector3();
+    for (const u of units.list) {
+      if (!u.alive || u.team !== "player" || u.typeKey !== typeKey) continue;
+      v.copy(u.position).project(camera);
+      if (v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1) out.push(u);
+    }
+    return out;
+  }
+
   const onPointerDown = (e) => {
     if (e.button !== 0 || !rtsActive()) return;
     if (app.buildPlacement?.state.active) return; // placement owns the cursor
-    down = { x: e.clientX, y: e.clientY, shift: e.shiftKey };
+    down = { x: e.clientX, y: e.clientY, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
     dragging = false;
   };
 
@@ -127,7 +143,15 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     } else {
       // Plain click: select the unit under the cursor, else clear.
       const unit = meshPick(e.clientX, e.clientY);
-      if (unit) {
+      const now = performance.now();
+      const dbl = unit && lastClick.unit === unit && now - lastClick.t < DOUBLE_CLICK_MS;
+      lastClick = { unit, t: now };
+      if (unit && !unit.isStructure && (down.ctrl || dbl)) {
+        // Every unit of that type the player can SEE (on screen), as in every
+        // RTS; the unit bar's double-click takes the whole map.
+        if (!down.shift) clear();
+        for (const u of onScreenOfType(unit.typeKey)) setSelected(u, true);
+      } else if (unit) {
         if (down.shift) setSelected(unit, !selected.has(unit));
         else { clear(); setSelected(unit, true); }
       } else if (!down.shift) {

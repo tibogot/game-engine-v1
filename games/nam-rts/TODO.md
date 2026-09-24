@@ -537,6 +537,27 @@ Vietnam, like Apocalypse Now.
       in a V, crows), and flocks **flushed** from the jungle by any explosion or
       crater — mostly white so they read from above. One draw. Dev: BIRDS section
 
+## SELECTION & GROUPS — your asks, 2026-09-25
+
+- [x] **Right-click move DESELECTS the units** (your report) — you re-tested
+      on 2026-09-25 and it works; the trace caught no deselect. If it comes
+      back, the note below says how to catch it. NOT reproduced:
+      a scripted right-click keeps the selection and the units move, and the
+      only code that deselects is selection.js's own clear() — a plain LEFT
+      click on empty ground or a new box drag. A trace is installed in the
+      open game page (window.__deselectLog, every deselect + its call stack):
+      reproduce it once and the log names the cause.
+- [x] **Control groups** (controlGroups.js, uncommitted): Ctrl+1..9 make,
+      Shift+1..9 add, 1..9 recall, twice fast = centre the camera; by
+      PHYSICAL key (e.code), so the AZERTY row works; chips (number · count)
+      above the command panel, click = recall. Dead units drop out.
+      CHECK: Chrome may keep Ctrl+1..9 for switching tabs even with
+      preventDefault — if Ctrl+1 changes tab, say so and it moves to another
+      modifier.
+- [x] **Select all of a type**: double-click a unit or Ctrl+click it = every
+      unit of that type ON SCREEN (Shift adds). (Double-clicking its tile in
+      the unit bar already took every one on the map.)
+
 ## UI (your ask, 2026-09-22) — **you** are gathering references (YouTube)
 
 - [x] **Small radii only** (2 px), field-equipment look (`hudBar.js` tokens)
