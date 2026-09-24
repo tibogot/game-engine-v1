@@ -1860,7 +1860,11 @@ export async function createWorldEnvironment({
 
   /** Bake only when the field is actually stale. `immediate` skips the debounce. */
   function rebakeShoreIfStale({ immediate = false } = {}) {
-    if (!oceanV2 || !_oceanHeights || toolState.worldOcean.mode !== "v2") return;
+    // Not while the ocean is OFF: a map can keep mode "v2" with the ocean
+    // disabled (nam-valley does), and every terrain height sync then paid a
+    // ~150 ms bake for water nobody sees — ~11 s of nam-rts's boot, one per
+    // building pad. The stamp stays stale; applyOceanMode bakes on enable.
+    if (!oceanV2 || !_oceanHeights || toolState.worldOcean.mode !== "v2" || !toolState.worldOcean.enabled) return;
     if (_shoreBakedLevel === toolState.worldOcean.seaLevel) return;
     clearTimeout(_shoreBakeTimer);
     if (immediate) rebakeShoreNow();
@@ -1874,6 +1878,9 @@ export async function createWorldEnvironment({
     if (wantV2) ensureOceanV2();
     worldOcean.setEnabled(!wantV2 && !!o.enabled);
     oceanV2?.setEnabled(wantV2 && !!o.enabled);
+    // The shore field is skipped while the ocean is off (rebakeShoreIfStale);
+    // turning it on is when a stale one has to catch up.
+    if (wantV2 && o.enabled) rebakeShoreIfStale({ immediate: true });
   }
 
   /**

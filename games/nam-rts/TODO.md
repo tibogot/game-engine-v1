@@ -1046,13 +1046,29 @@ is not lost while Kurtz is being built.
         measure now they are gone.
       · old blue-grey puddles read as water better than the new red ones at
         play zoom.
-- [ ] **LOAD TIME** (your ask 2026-09-24: every change means a reload, so
-      it taxes all the work). Boot stages recorded in localStorage sum to
-      ~100 s (Placing structures 20.9, v3proj 18.7, camp 17.7, unit visuals
-      16.9, village 6.8, resource nodes 6.7, crater decals 5.3) — rough, from
-      the MCP profile, re-measure in a focused tab. Suspect #1: every pad's
-      `flattenRect` awaits a full GPU->CPU heightmap readback (dozens at
-      boot) — batch the pads, read back once.
+- [~] **LOAD TIME** (your ask 2026-09-24: every change means a reload, so
+      it taxes all the work). MEASURED clean loads (tab in front; one load's
+      own stage times recovered from the smoothed store as 2·new − old):
+      **46.2 s -> 23.8 s** (warm dev server; the first load after editing a
+      module is ~12 s slower — Vite re-transforming, not the game).
+      Two fixes, both in the engine:
+      1. **Heightmap readbacks only when they can return anything.** One
+         GPU->CPU readback is ~115 ms whatever it reads; flattenRect stamped
+         on the GPU then read back (230-370 ms a pad, ~100 pads at boot).
+         Now flattenRect writes the CPU mirror (0.2 ms), raiseBerm too, and
+         ONE upload per frame flushes every CPU edit (flushCpuHeightEdits);
+         ensureCpuHeightmapFromGpu skips when nothing on the GPU is dirty.
+         Verified: pad flat to 1 mm, smooth rim, raised pad visible on the
+         rendered terrain (the GPU got it).
+      2. **No shoreline bake while the ocean is OFF.** nam-valley keeps ocean
+         mode "v2" with the ocean disabled, and every height sync rebaked the
+         v2 shoreline field (~150 ms) — ~11 s of boot for water nobody sees.
+         worldEnvironment now skips it while disabled, bakes on enable.
+      LEFT (from the trace): v3proj load 7.4 s (texture resize to slot res
+      ~2 s, prop thumbnails pixelsToDataURL ~1.9 s), unit visuals 5.2 s,
+      crater decals 2.2 s (one PNG), the camp 2.5 s, and the full scene
+      RENDERING behind the loading screen the whole boot (FireAnimationFrame
+      ~12 s of main thread in the trace).
 - [ ] **CPU 36 ms spike after a few minutes of a match** — seen 2026-09-24 in
       the overlay (27 FPS, CPU 36 ms; 7-10 ms at boot) with the enemy AI
       running. Not investigated.

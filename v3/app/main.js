@@ -3759,6 +3759,22 @@ export async function startV3App(opts = {}) {
   let cpuHeightmapMinY  = 0;
   let readbackInFlight  = false;
   let readbackPending   = false;
+  /*
+   * WHO HOLDS THE NEWEST HEIGHTS. A GPU→CPU readback is ~115 ms whatever it
+   * reads (it is the round trip, not the bytes), and nam-rts used to pay it
+   * ~100 times at boot: every building pad went through flattenRect, which
+   * stamped on the GPU and then read the whole mirror back — ~28 s of a 47 s
+   * load. Two flags make the readback happen only when it can return anything:
+   *
+   *   cpuMirrorRead  the mirror has been filled from the GPU at least once, so
+   *                  "nothing dirty" really means "nothing to read"
+   *   cpuAhead       a CPU-side edit (flattenRect, raiseBerm) is newer than the
+   *                  GPU; ONE upload per frame flushes every such edit
+   *                  (flushCpuHeightEdits), and after it the GPU holds exactly
+   *                  the mirror, so there is nothing to read back either.
+   */
+  let cpuMirrorRead     = false;
+  let cpuAhead          = false;
 
   /**
    * Widen a texel rect to a 32-texel grid.
@@ -3861,6 +3877,7 @@ export async function startV3App(opts = {}) {
        * when it has been built and is the active mode.
        */
       worldEnv?.setOceanHeights(cpuHeightmap);
+      cpuMirrorRead = true;
     } finally {
       readbackInFlight = false;
       if (readbackPending) syncHeightmapToCPU();
@@ -3884,7 +3901,29 @@ export async function startV3App(opts = {}) {
     // caller asking for FRESH heights (tunnel re-cut, mode entry) got the old
     // mirror. Wait for it to land, then read again.
     for (let i = 0; readbackInFlight && i < 300; i++) await new Promise((r) => setTimeout(r, 10));
+    // The CPU is newest: put it on the GPU and there is nothing to read.
+    if (cpuAhead) { flushCpuHeightEdits(); return; }
+    // Nothing written on the GPU since the last read: the mirror is current.
+    if (cpuMirrorRead && !sculpt.getDirtyRect()) return;
     await syncHeightmapToCPU();
+  }
+
+  /**
+   * Upload the CPU-side height edits made since the last flush, in ONE
+   * replaceHeightData. Runs once per frame before rendering (and from
+   * ensureCpuHeightmapFromGpu / any GPU height write that must not land under a
+   * pending upload). Afterwards the GPU holds exactly the mirror, so the dirty
+   * rect that upload raised is cleared — unless a readback is in flight, whose
+   * stale data will land over the mirror: then it stays dirty and the next
+   * ensure re-reads it.
+   */
+  function flushCpuHeightEdits() {
+    if (!cpuAhead) return;
+    cpuAhead = false;
+    pushHeightmapEditsToGpu();          // also re-drapes the trees
+    // What the skipped readback used to refresh besides the mirror itself.
+    worldEnv?.setOceanHeights(cpuHeightmap);
+    if (!readbackInFlight) sculpt.clearDirtyRect();
   }
 
   /**
@@ -4348,6 +4387,10 @@ export async function startV3App(opts = {}) {
         // Sculpting under the marker must not bury it — re-drape every frame.
         spawnSystem.refreshHeight();
       }
+
+      // CPU height edits made since the last frame (flattenRect, raiseBerm…)
+      // go up in ONE upload, before anything renders the terrain.
+      flushCpuHeightEdits();
 
       // Branch gates: the terrain shader skips the splat and snow blocks
       // entirely while their maps are empty. The checks are cached CPU flags —
@@ -11567,6 +11610,9 @@ export async function startV3App(opts = {}) {
      * Async: it awaits the GPU→CPU readback. Rebuild any nav grid AFTER this.
      */
     async flattenArea(wx, wz, radius, targetY, { strength = 1, falloff = 3, passes = 8 } = {}) {
+      // GPU stamps below: a pending CPU upload must go first, or it would land
+      // on top of them and wipe them out.
+      flushCpuHeightEdits();
       const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
       const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
 
@@ -11607,52 +11653,44 @@ export async function startV3App(opts = {}) {
 
     /**
      * Level a RECTANGLE (centre wx,wz, half-extents in metres, turned by rotY) to
-     * targetY — a building pad the shape of the building. One flatten stamp only
-     * levels fully out to ~60% of its radius (falloff^3 · strength · 20 ≥ 1 at
-     * falloff 3), so a single disc under a long building leaves its corners on
-     * the blended rim. Here the rectangle is tiled with stamps whose FULLY-flat
-     * cores overlap, and the rim only lies outside it (`rim` metres wide).
-     * One GPU→CPU readback at the end, not one per stamp.
+     * targetY — a building pad the shape of the building: fully flat inside the
+     * rectangle, easing back to the natural ground over `rim` metres outside it
+     * (smoothstep on the distance from the rectangle).
+     *
+     * Written straight into the CPU mirror, like raiseBerm / gradeRamp, and
+     * flagged `cpuAhead`: the GPU gets it in the next frame's single upload
+     * (flushCpuHeightEdits), together with every other pad levelled meanwhile.
+     * It used to tile the rectangle with GPU flatten stamps and then read the
+     * mirror back — ~250-370 ms a call, ~100 calls at nam-rts boot, ~28 s of a
+     * 47 s load. getWorldHeight is correct the moment this returns (the mirror
+     * IS the new ground), which is all the callers read next.
      */
-    async flattenRect(wx, wz, halfX, halfZ, targetY, { rim = 5, passes = 8, rotY = 0 } = {}) {
+    async flattenRect(wx, wz, halfX, halfZ, targetY, { rim = 5, rotY = 0 } = {}) {
+      // Any GPU edit not yet read must be in the mirror before we write over it.
+      await ensureCpuHeightmapFromGpu();
       const cr = Math.cos(rotY), sr = Math.sin(rotY);
-      const radius = rim / 0.4;      // the outer 40% of a stamp is its rim
-      const core = radius * 0.6;
-      const step = core * 1.2;       // < core·√2: cores cover the gaps between stamps
-      const prev = {
-        r: sculpt.uRadius.value, s: sculpt.uStrength.value,
-        f: sculpt.uFalloff.value, t: sculpt.uFlattenTarget.value,
-      };
-      sculpt.uRadius.value        = radius / WORLD_SIZE;
-      sculpt.uStrength.value      = 1;
-      sculpt.uFalloff.value       = 3;
-      sculpt.uFlattenTarget.value = THREE.MathUtils.clamp(targetY / MAX_HEIGHT, 0, 1);
-      // Stamp centres inset by core/√2, so a corner of the rectangle is exactly
-      // a core's reach from the corner stamp and the flat ground stops close to
-      // the rectangle instead of a whole core radius past it.
-      const inset = core * Math.SQRT1_2;
-      const ex = Math.max(0, halfX - inset), ez = Math.max(0, halfZ - inset);
-      const nx = Math.max(1, Math.ceil((2 * ex) / step) + 1);
-      const nz = Math.max(1, Math.ceil((2 * ez) / step) + 1);
-      sculpt.beginStroke();
-      for (let iz = 0; iz < nz; iz++) {
-        for (let ix = 0; ix < nx; ix++) {
-          // Local offsets in the rectangle's frame, turned by rotY (three.js
-          // Y rotation: local +X → (cos, -sin), local +Z → (sin, cos)).
-          const lx = nx === 1 ? 0 : -ex + (2 * ex * ix) / (nx - 1);
-          const lz = nz === 1 ? 0 : -ez + (2 * ez * iz) / (nz - 1);
-          const x = wx + lx * cr + lz * sr, z = wz - lx * sr + lz * cr;
-          const u = (x + WORLD_SIZE / 2) / WORLD_SIZE, v = (z + WORLD_SIZE / 2) / WORLD_SIZE;
-          for (let i = 0; i < passes; i++) sculpt.flatten(u, v);
+      const reach = Math.hypot(halfX, halfZ) + rim;
+      const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * HEIGHTMAP_SIZE);
+      const tx0 = Math.max(0, toTexel(wx - reach)), tx1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(wx + reach));
+      const tz0 = Math.max(0, toTexel(wz - reach)), tz1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(wz + reach));
+      const target = THREE.MathUtils.clamp(targetY / MAX_HEIGHT, 0, 1);
+      for (let ty = tz0; ty <= tz1; ty++) {
+        const dz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2 - wz;
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const dx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2 - wx;
+          // Into the rectangle's frame — the inverse of three.js Y rotation
+          // (local +X → (cos, -sin), local +Z → (sin, cos)).
+          const lx = dx * cr - dz * sr, lz = dx * sr + dz * cr;
+          const ox = Math.max(0, Math.abs(lx) - halfX), oz = Math.max(0, Math.abs(lz) - halfZ);
+          const d = Math.hypot(ox, oz);
+          if (d >= rim) continue;
+          const s = rim > 0 ? d / rim : 0;
+          const w = 1 - s * s * (3 - 2 * s);
+          const i = ty * HEIGHTMAP_SIZE + tx;
+          cpuHeightmap[i] += (target - cpuHeightmap[i]) * w;
         }
       }
-      sculpt.endStroke();
-      sculpt.uRadius.value        = prev.r;
-      sculpt.uStrength.value      = prev.s;
-      sculpt.uFalloff.value       = prev.f;
-      sculpt.uFlattenTarget.value = prev.t;
-      markHeightmapDirty();
-      await ensureCpuHeightmapFromGpu();
+      cpuAhead = true;
     },
 
     /**
@@ -11700,8 +11738,9 @@ export async function startV3App(opts = {}) {
           if (prof > 0) cpuHeightmap[ty * HEIGHTMAP_SIZE + tx] += add * prof;
         }
       }
-      pushHeightmapEditsToGpu();
-      await ensureCpuHeightmapFromGpu();
+      // The mirror is the new ground; the GPU gets it in the next frame's one
+      // upload (flushCpuHeightEdits) — no readback of what we just wrote.
+      cpuAhead = true;
     },
 
     /**
