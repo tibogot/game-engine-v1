@@ -666,7 +666,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       } else {
         // Ground units tilt to the terrain: align local up to the surface
         // normal, then yaw around it. Slerp so it eases over bumps.
-        const gn = app.getWorldNormal(p.x, p.z);
+        // On a bridge deck: upright — the terrain under it is the river bank,
+        // and its slope would tip a jeep crossing a flat deck.
+        const onDeck = app.bridgeDecks?.heightAt(p.x, p.z) != null;
+        const gn = onDeck ? _UP : app.getWorldNormal(p.x, p.z);
         _n.set(gn.x, gn.y, gn.z);
         _alignQ.setFromUnitVectors(_UP, _n);
         _yawQ.setFromAxisAngle(_UP, yaw);

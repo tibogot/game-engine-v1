@@ -228,8 +228,22 @@ export function createRiverMaterial({
   inputs = null, basis = null, thicknessNode = null, verticalDepthNode = null,
   coverageNode = null, extraFoamNode = null, blendOutput = false,
   waves = true, waterlineDiscard = true,
+  grabFree = false, groundYNode = null,
 } = {}) {
   const p = { ...RIVER_MATERIAL_DEFAULTS, ...params };
+  /*
+   * GRAB-FREE (2026-09-24, nam-rts). Any draw that reads sceneColorGrab or
+   * sceneDepthGrab makes the frame pay two full-screen framebuffer copies,
+   * however few water pixels it covers: MEASURED 2.7 ms (x1.55 res, RTS play
+   * zoom) with ONE river vertex on screen. `grabFree` builds the shader with
+   * no grab at all: the water's depth is its surface minus the ground under it
+   * (`groundYNode(x, z)`, the heightmap — one tap), refraction and SSR are
+   * left out (invisible from an RTS camera), the wake taps too, and it blends
+   * over the riverbed with ordinary alpha. Off by default: every other river
+   * and every waterfall is built exactly as before.
+   */
+  if (grabFree && !groundYNode) throw new Error("createRiverMaterial: grabFree needs groundYNode");
+  if (grabFree) blendOutput = true;   // for the K / rest split below
 
   const u = {
     time: uniform(0),
@@ -386,7 +400,7 @@ export function createRiverMaterial({
    * `opacityNode` share a single evaluation — the refraction, the SSR march and
    * the foam are far too expensive to compute twice.
    */
-  const shaded = Fn(() => {
+  const buildShaded = (pass) => Fn(() => {
     // ── 0. Per-station flow, straight off the mesh (or from `inputs`) ───────
     const flowAttr = attribute("aFlow", "vec4");
     const waveAttr = attribute("aWave", "vec2");
@@ -473,7 +487,14 @@ export function createRiverMaterial({
 
     // ── 3. Water thickness from the depth buffer ───────────────────────────
     const fragDist = positionView.z.negate().toVar();
-    const thickness = (thicknessNode ?? sceneDistAt(screenUV).sub(fragDist)).toVar();
+    const rayDirT = normalize(positionWorld.sub(cameraPosition));
+    // Grab-free: the vertical depth over the ground, stretched along the view
+    // ray (a steep camera looks nearly straight down, so barely stretched).
+    const groundDepth = grabFree
+      ? positionWorld.y.sub(groundYNode(positionWorld.x, positionWorld.z)).toVar()
+      : null;
+    const thickness = (thicknessNode
+      ?? (grabFree ? groundDepth.div(rayDirT.y.abs().max(0.2)) : sceneDistAt(screenUV).sub(fragDist))).toVar();
 
     // The ribbon deliberately overhangs its banks so the waterline is found per
     // pixel rather than by the mesh edge. This is where that gets cut.
@@ -484,23 +505,30 @@ export function createRiverMaterial({
       mix(u.refractionStrength, u.refractionStrength.mul(1.5),
         thickness.div(u.depthDistance).clamp()),
     );
-    const refractedUv = screenUV.add(distortion);
-    const refractedDist = sceneDistAt(refractedUv).toVar();
-    // Reject an offset that lands on something in FRONT of the water, or a rock
-    // standing in the river bleeds its silhouette across the surface.
-    const isSafe = step(fragDist, refractedDist).toVar();
-    const safeUv = mix(screenUV, refractedUv, isSafe).clamp();
+    let screenColor, waterThickness;
+    if (grabFree) {
+      // No grab: what is behind the water is the blend's business, below.
+      screenColor = vec3(0);
+      waterThickness = thickness;
+    } else {
+      const refractedUv = screenUV.add(distortion);
+      const refractedDist = sceneDistAt(refractedUv).toVar();
+      // Reject an offset that lands on something in FRONT of the water, or a rock
+      // standing in the river bleeds its silhouette across the surface.
+      const isSafe = step(fragDist, refractedDist).toVar();
+      const safeUv = mix(screenUV, refractedUv, isSafe).clamp();
 
-    const screenColor = sceneColorGrab.sample(safeUv).rgb.toVar();
-    const refractedThick = refractedDist.sub(fragDist).max(0);
-    // A surface carrying its own thickness keeps it: the refracted depth says
-    // what is BEHIND the sheet, not how much water is in it.
-    const waterThickness = (thicknessNode ?? mix(thickness, refractedThick, isSafe)).toVar();
+      screenColor = sceneColorGrab.sample(safeUv).rgb.toVar();
+      const refractedThick = refractedDist.sub(fragDist).max(0);
+      // A surface carrying its own thickness keeps it: the refracted depth says
+      // what is BEHIND the sheet, not how much water is in it.
+      waterThickness = (thicknessNode ?? mix(thickness, refractedThick, isSafe)).toVar();
+    }
 
     // Thickness runs along the VIEW RAY and stretches at grazing angles, so
     // every band keyed to a depth in metres uses the vertical drop instead.
-    const rayDir = normalize(positionWorld.sub(cameraPosition));
-    const verticalDepth = (verticalDepthNode ?? waterThickness.mul(rayDir.y.abs())).toVar();
+    const rayDir = rayDirT;
+    const verticalDepth = (verticalDepthNode ?? (grabFree ? groundDepth : waterThickness.mul(rayDir.y.abs()))).toVar();
 
     // ── Which way is up, in the space the framebuffer grabs are indexed? ────
     // Projecting THIS fragment's own world position must reproduce its own
@@ -529,7 +557,7 @@ export function createRiverMaterial({
       .mul(u.skyReflectIntensity);
     const reflectedColor = skyColor.toVar();
 
-    If(waterSsrMasterNode.mul(u.ssrEnabled).greaterThan(0), () => {
+    if (!grabFree) If(waterSsrMasterNode.mul(u.ssrEnabled).greaterThan(0), () => {
       const vsNrm = cameraViewMatrix.mul(vec4(normal, 0)).xyz.normalize().toVar();
       const vsPos = positionView.add(vsNrm.mul(0.05)).toVar();
       const vsDir = reflect(normalize(vsPos), vsNrm).normalize().toVar();
@@ -631,7 +659,7 @@ export function createRiverMaterial({
       // lee. Each tap costs one depth sample; the taps stack into a tail that
       // fades with distance behind the obstruction.
       const wakeSrc = float(0).toVar();
-      If(u.wake.greaterThan(0), () => {
+      if (!grabFree) If(u.wake.greaterThan(0), () => {
         for (const [frac, weight] of WAKE_TAPS) {
           const wp = positionWorld.sub(flowDir.mul(u.wakeDistance.mul(frac)));
           const pr = projectNdc(wp).toVar();
@@ -732,12 +760,52 @@ export function createRiverMaterial({
     // out = C·α + fb·(1−α), and we want bg·K + rest. Where fb is the grab (most
     // of the screen) this is exact; where it is not, it degrades to the plain
     // alpha blend instead of erasing what is there.
+    // GRAB-FREE: the same `bg·K + rest`, EXACTLY, in two draws of the river
+    // and no copy at all — a MULTIPLY pass (dst·K, per channel, so the teal of
+    // the absorption survives) and an ADD pass (+rest). One alpha blend (the
+    // first try) could only darken all three channels alike, and the river
+    // went flat grey-brown.
+    if (grabFree) return pass === "multiply" ? vec4(K, float(1)) : vec4(rest, float(1));
     const corrected = rest.add(screenColor.mul(K.sub(float(1).sub(alpha)))).max(0);
     return vec4(corrected.div(alpha.max(1e-3)), alpha);
-  })().toVar("riverShaded");
+  })();
 
-  material.colorNode = shaded.rgb;
-  if (blendOutput) material.opacityNode = shaded.a.mul(coverageNode ?? float(1)).clamp();
+  let material2 = null;
+  if (grabFree) {
+    const mul = buildShaded("multiply").toVar("riverMul");
+    const add = buildShaded("add").toVar("riverAdd");
+    // Pass 1, this material: dst = dst * K.
+    material.colorNode = mul.rgb;
+    material.blending = THREE.CustomBlending;
+    material.blendEquation = THREE.AddEquation;
+    material.blendSrc = THREE.ZeroFactor;
+    material.blendDst = THREE.SrcColorFactor;
+    material.blendSrcAlpha = THREE.ZeroFactor;
+    material.blendDstAlpha = THREE.OneFactor;
+    material.fog = false;
+    // Pass 2, a second material on the same geometry: dst = dst + rest.
+    material2 = new MeshBasicNodeMaterial();
+    // Fog on the ADD pass only: `rest` fades toward the haze exactly as the
+    // single-pass water does. The multiply pass keeps K unfogged, so the
+    // riverbed behind is darkened a touch more than the grabbed version under
+    // thick haze (bg*K*f) — a dark riverbed times a small K, too small to see.
+    material2.fog = true;
+    material2.depthWrite = false;
+    material2.depthTest = true;
+    material2.side = THREE.DoubleSide;
+    material2.blending = THREE.CustomBlending;
+    material2.blendEquation = THREE.AddEquation;
+    material2.blendSrc = THREE.OneFactor;
+    material2.blendDst = THREE.OneFactor;
+    material2.blendSrcAlpha = THREE.ZeroFactor;
+    material2.blendDstAlpha = THREE.OneFactor;
+    material2.positionNode = material.positionNode;
+    material2.colorNode = add.rgb;
+  } else {
+    const shaded = buildShaded("single").toVar("riverShaded");
+    material.colorNode = shaded.rgb;
+    if (blendOutput) material.opacityNode = shaded.a.mul(coverageNode ?? float(1)).clamp();
+  }
 
   const _c = (hex, target) => target.set(hex);
 
@@ -812,5 +880,5 @@ export function createRiverMaterial({
     if (horizon) u.skyHorizonColor.value.copy(horizon);
   }
 
-  return { material, uniforms: u, syncParams, update, setSunDir, setSkyColors };
+  return { material, material2, uniforms: u, syncParams, update, setSunDir, setSkyColors };
 }

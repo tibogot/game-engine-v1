@@ -236,6 +236,7 @@ export class RiverV2System {
 
     // Two looks, one geometry: the realistic surface, and the stylized one
     // built on first use (params.water.style). `_water` is whichever is shown.
+    this._waterNormalMap = waterNormalMap;
     this._realistic = createRiverMaterial({ normalMap: waterNormalMap });
     this._stylized = null;
     this._water = this._realistic;
@@ -1007,6 +1008,34 @@ export class RiverV2System {
     river.cullChunks = this._ribbonChunks(pos, rows, cols);
     mesh.userData.viewCulled = true;   // waterSurfaceMap restores the full range
     this.group.add(mesh);
+    this._syncAddPass(river);
+  }
+
+  /**
+   * The grab-free water's second draw (riverV2Material `material2`, the ADD
+   * pass): a child on the same geometry, so the culling draw range and the
+   * visibility follow the river's own mesh. Drawn right after it.
+   */
+  _syncAddPass(river) {
+    const m = river.mesh;
+    if (!m) return;
+    const want = this._water === this._realistic ? this._realistic.material2 : null;
+    let add = m.userData.addPass ?? null;
+    if (!want) {
+      if (add) { m.remove(add); m.userData.addPass = null; }
+      return;
+    }
+    if (!add) {
+      add = new THREE.Mesh(m.geometry, want);
+      add.name = m.name + ":add";
+      add.renderOrder = m.renderOrder + 0.5;
+      add.frustumCulled = false;
+      add.userData.isAddPass = true;
+      m.add(add);
+      m.userData.addPass = add;
+    }
+    add.geometry = m.geometry;
+    add.material = want;
   }
 
   /**
@@ -1794,6 +1823,7 @@ export class RiverV2System {
     if (next !== this._water) {
       this._water = next;
       for (const r of this.rivers) if (r.mesh) r.mesh.material = next.material;
+      for (const r of this.rivers) this._syncAddPass(r);
     }
   }
 
@@ -1815,8 +1845,36 @@ export class RiverV2System {
   }
 
   /** worldEnvironment water-surface contract (sun/sky only — see update()). */
-  setSunDir(v) { this._realistic.setSunDir(v); }
-  setSkyColors(z, h) { this._realistic.setSkyColors(z, h); }
+  setSunDir(v) { this._lastSun = v?.clone?.() ?? v; this._realistic.setSunDir(v); }
+  setSkyColors(z, h) { this._lastSky = [z, h]; this._realistic.setSkyColors(z, h); }
+
+  /**
+   * GRAB-FREE water (riverV2Material `grabFree`): the river reads its depth
+   * from the heightmap (`groundYNode(x, z)` → terrain Y node) instead of the
+   * depth buffer, without refraction or SSR, so drawing it no longer makes the
+   * frame pay the two full-screen framebuffer copies. For a camera that looks
+   * down from high up (an RTS), where those effects cannot be seen. Rebuilds
+   * the realistic material; the stylized one is untouched.
+   */
+  setGrabFree(on, groundYNode = null) {
+    on = !!on;
+    if (on === !!this._grabFree) return;
+    this._grabFree = on;
+    const old = this._realistic;
+    this._realistic = createRiverMaterial({
+      normalMap: this._waterNormalMap, grabFree: on, groundYNode: on ? groundYNode : null,
+    });
+    this._realistic.syncParams(riverWaterParams(this.params.water));
+    if (this._lastSun) this._realistic.setSunDir(this._lastSun);
+    if (this._lastSky) this._realistic.setSkyColors(...this._lastSky);
+    if (this._water === old) {
+      this._water = this._realistic;
+      for (const r of this.rivers) if (r.mesh) r.mesh.material = this._realistic.material;
+    }
+    for (const r of this.rivers) this._syncAddPass(r);
+    old.material?.dispose?.();
+    old.material2?.dispose?.();
+  }
 
   setEditActive(on) {
     this.editActive = !!on;

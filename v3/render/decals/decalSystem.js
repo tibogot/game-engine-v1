@@ -58,6 +58,7 @@ import {
   Fn, Discard, abs, attribute, cameraFar, cameraNear, cameraWorldMatrix, cross, dFdx, dFdy,
   dot, float, max, normalize, perspectiveDepthToViewZ, positionLocal, positionView, screenUV,
   select, smoothstep, texture, vec2, vec3, vec4, cameraViewMatrix, int, varying,
+  cameraPosition, positionWorld, viewZToPerspectiveDepth,
 } from "three/tsl";
 import { DecalTextures, DEFAULT_DECAL_SLOTS } from "./decalTextures.js";
 import { sceneDepthGrab } from "../water/lakeMaterial.js";
@@ -283,6 +284,27 @@ export class DecalSystem {
     this._dirty = true;
   }
 
+  /**
+   * GRAB-FREE decals (ground-only systems only): find the ground on each
+   * pixel's view ray by marching the heightmap inside the box instead of
+   * reading the scene-depth grab, and write that point's depth so a unit
+   * standing on the decal still hides it (normal depth test, not the box's
+   * GreaterEqual back-face trick). Measured 2026-09-24 (nam-rts, x1.55 res):
+   * with the river grab-free, ONE decal on screen still cost 1.1 ms — the
+   * full-screen depth copy — and the camp's 24 cost 1.9. ~5 heightmap taps
+   * per decal pixel instead (see the solve below).
+   */
+  setGrabFree(on) {
+    on = !!on && !!this._groundHeight;
+    if (on === !!this._grabFree) return;
+    this._grabFree = on;
+    const old = this.material;
+    this.material = this._buildMaterial();
+    if (this.mesh) this.mesh.material = this.material;
+    this._onTexturesRebuilt?.();
+    old?.dispose?.();
+  }
+
   _buildMaterial() {
     const mat = new THREE.MeshStandardNodeMaterial();
     // NOT in the transparent queue: on a multisampled canvas, three's transparent
@@ -332,14 +354,48 @@ export class DecalSystem {
 
     this._albedoNode = texture(this.textures.albedo);
     this._normalNode = texture(this.textures.normal);
-    const depthTex = sceneDepthGrab;
-
-    // The real surface point on this pixel's view ray, in view and world space.
-    const surfaceView = Fn(() => {
-      const sceneZ = perspectiveDepthToViewZ(depthTex.sample(screenUV).r, cameraNear, cameraFar);
-      return positionView.mul(sceneZ.div(positionView.z));
-    })().toVar("decalSurfaceView");
-    const surfaceWorld = cameraWorldMatrix.mul(vec4(surfaceView, 1)).xyz.toVar("decalSurfaceWorld");
+    const grabFree = !!this._grabFree;
+    let surfaceWorld;
+    if (grabFree) {
+      // The ground on this pixel's view ray.
+      const gh = this._groundHeight;
+      surfaceWorld = Fn(() => {
+        // Solve ray.y = ground(ray.xz) by fixed-point steps from where the
+        // ray crosses the box's own middle height: t += (ground - y) / dir.y.
+        // Inside a decal box the ground is nearly flat and the RTS ray steep,
+        // so 4 steps (4 taps) land within centimetres. A 12-step march with 4
+        // halvings (16 taps a pixel — the first grab-free version) cost as
+        // much as the depth copy it replaced (1.84 ms at the camp).
+        const dir = normalize(positionWorld.sub(cameraPosition)).toVar();
+        const dy = select(abs(dir.y).lessThan(0.05), float(-0.05), dir.y).toVar();
+        const midY = m1.w.add(groundShift);
+        const t = midY.sub(cameraPosition.y).div(dy).toVar();
+        for (let k = 0; k < 4; k++) {
+          const q = cameraPosition.add(dir.mul(t));   // the LIVE ground: no box shift
+          t.addAssign(gh(q.x, q.z).sub(q.y).div(dy));
+        }
+        const hit = cameraPosition.add(dir.mul(t)).toVar();
+        // Not converged (a cliff inside the box): leave the pixel alone.
+        Discard(abs(hit.y.sub(gh(hit.x, hit.z))).greaterThan(0.4));
+        return hit;
+      })().toVar("decalSurfaceWorld");
+      // Depth at the ground point, pulled 0.3 m toward the camera: the clipmap
+      // mesh sits a little off the heightmap it is built from.
+      mat.depthFunc = THREE.LessEqualDepth;
+      mat.depthNode = Fn(() => {
+        const toCam = normalize(cameraPosition.sub(surfaceWorld));
+        const vz = cameraViewMatrix.mul(vec4(surfaceWorld.add(toCam.mul(0.3)), 1)).z;
+        return viewZToPerspectiveDepth(vz, cameraNear, cameraFar);
+      })();
+    } else {
+      const depthTex = sceneDepthGrab;
+      // The real surface point on this pixel's view ray, in view and world space.
+      const surfaceView = Fn(() => {
+        const sceneZ = perspectiveDepthToViewZ(depthTex.sample(screenUV).r, cameraNear, cameraFar);
+        return positionView.mul(sceneZ.div(positionView.z));
+      })().toVar("decalSurfaceView");
+      surfaceWorld = cameraWorldMatrix.mul(vec4(surfaceView, 1)).xyz.toVar("decalSurfaceWorld");
+    }
 
     const i0 = attribute("aI0", "vec4"), i1 = attribute("aI1", "vec4"), i2 = attribute("aI2", "vec4");
     const P = attribute("aP", "vec4"), C = attribute("aC", "vec4"), E = attribute("aE", "vec4");
@@ -355,7 +411,14 @@ export class DecalSystem {
 
     // Geometric normal of the receiving surface, from the depth's derivatives,
     // turned to face the camera.
-    const surfN = Fn(() => {
+    const surfN = grabFree ? Fn(() => {
+      // From the heightmap's own slope: the marched point is too coarse to
+      // differentiate cleanly.
+      const gh = this._groundHeight, e = float(0.6);
+      const hx = gh(surfaceWorld.x.add(e), surfaceWorld.z).sub(gh(surfaceWorld.x.sub(e), surfaceWorld.z));
+      const hz = gh(surfaceWorld.x, surfaceWorld.z.add(e)).sub(gh(surfaceWorld.x, surfaceWorld.z.sub(e)));
+      return normalize(vec3(hx.negate(), e.mul(2), hz.negate()));
+    })().toVar("decalSurfN") : Fn(() => {
       const n = normalize(cross(dFdx(surfaceWorld), dFdy(surfaceWorld))).toVar();
       const toCam = cameraWorldMatrix.mul(vec4(0, 0, 0, 1)).xyz.sub(surfaceWorld);
       return select(dot(n, toCam).lessThan(0), n.negate(), n);

@@ -12290,6 +12290,26 @@ export async function startV3App(opts = {}) {
       _foliageUsedDirty = true;
       return n;
     },
+    /**
+     * GRAB-FREE RIVERS for a camera that looks down from high up (an RTS):
+     * the river takes its depth from the heightmap instead of the depth
+     * buffer and leaves out refraction and SSR, so drawing it no longer costs
+     * the two full-screen framebuffer copies (riverV2Material `grabFree`).
+     * Measured 2026-09-24: 2.7 ms at x1.55 res for one river vertex on screen.
+     */
+    setRiverGrabFree(on = true) {
+      const groundYNode = (wx, wz) => texture(heightTexNode, vec2(
+        wx.add(WORLD_SIZE * 0.5).div(WORLD_SIZE), wz.add(WORLD_SIZE * 0.5).div(WORLD_SIZE),
+      )).r.mul(MAX_HEIGHT);
+      riverV2System?.setGrabFree(on, groundYNode);
+    },
+    /**
+     * The same for the projected decals (decalSystem `setGrabFree`): the ground
+     * is found by marching the heightmap, not by reading the depth grab. With
+     * both on and no lake or waterfall in view, nothing draws a full-screen
+     * copy at all.
+     */
+    setDecalsGrabFree(on = true) { decalSystem?.setGrabFree(on); },
     // GPU-side counterpart of getWorldHeight: the live heightmap as a TSL texture
     // node, for shaders that must drape geometry over the terrain in the vertex
     // stage instead of paying a CPU sample per vertex (RTS selection rings).
@@ -12326,6 +12346,8 @@ export async function startV3App(opts = {}) {
      * @param {number} instIdx index into propStore.instances
      */
     getLivePropLocalBox: (instIdx) => livePropManager?.localBoxFor?.(instIdx) ?? null,
+    /** A live prop's built object (its group, placed in the world), or null — for a game that measures it (a bridge's deck). */
+    getLivePropObject: (instIdx) => livePropManager?.getLiveEntry?.(instIdx)?.obj?.group ?? null,
     // Screen pixel → { point: Vector3 } on the terrain (mouse move-orders,
     // box-select, building ghost). Returns null when the ray misses the ground.
     pickWorldAtClient,

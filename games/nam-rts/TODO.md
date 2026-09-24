@@ -1671,7 +1671,42 @@ tuned). Anything below is ADDED next to it.
         grab, so any fire on screen bought the water's two full-screen
         copies. Now it fades by height above the terrain (one heightmap tap):
         six fires on screen +0.25 ms.
-      THE BIG ONE LEFT — **YOUR CALL (engine water)**: drawing ANY water, even
+      COMMITTED 59aeab0. Then (your go, 2026-09-24) THE COPIES, uncommitted:
+      · **GRAB-FREE RIVER** (riverV2Material `grabFree`, riverV2System
+        `setGrabFree`, app.setRiverGrabFree): depth from the heightmap, no
+        refraction/SSR/wake taps, and the per-channel absorption kept EXACT in
+        two draws of the river (a MULTIPLY pass dst·K, an ADD pass +rest) —
+        one alpha blend (first try) turned the teal river flat grey-brown.
+        Fog on the add pass only. Looks the same as before from the RTS
+        camera (A/B screenshots). River partly on screen: 3.86 -> 0.03 ms;
+        river filling the view: 0.95 ms.
+      · **GRAB-FREE DECALS** (decalSystem `setGrabFree`): the ground on the
+        view ray solved against the heightmap in 4 fixed-point steps (a
+        16-tap march, first try, cost as much as the copy), its depth
+        written so units on a decal still hide it. Camp: 1.91 -> 0.81 ms.
+      · `?water=grab` brings the old river and decals back.
+      RESULT (x1.55 res): play zoom 29.0 -> **22.1 ms**, max zoom-out 31.7 ->
+      25.6, camp 22.9. The hilltop mystery's "empty scene 4.5 ms sky
+      background" was the sky dome drawn first with depth test off — fixed.
+      LEFT, and a LOOK trade-off, so YOUR CALL: open ground (the enemy base,
+      27.9 ms) is terrain 8.7 + grass 5.9 there. `?topk=2` saves ~1.3 ms there
+      (2 splat layers a pixel, not 3), `?far=0` ~0.8 (no near/far tiling);
+      ~0.1 each at play zoom. Grass density in open meadows is the other lever.
+      · **BRIDGES** (your report 2026-09-24: units went THROUGH the bridge):
+        units took the terrain height, which under a bridge is the riverbed.
+        bridgeDecks.js MEASURES each deck at boot (rays down its centre line,
+        one a metre, against the bridge's own meshes — the decks are arched)
+        and app.getStandHeight gives units the deck inside its rectangle
+        (units.js groundAt); they stand upright there (unitRenderer), not
+        tilted to the bank below. Checked: a jeep mid-span at 24.6 m over a
+        riverbed at 18.4. Engine: app.getLivePropObject(i).
+        STILL DRAPED ON THE RIVERBED (GPU heightmap): selection rings and
+        craters under a unit on a deck — cosmetic, not done.
+      · STRESS PRICE LIST re-run (full zoom-out): combat FX all in the noise
+        (fires 50 ~1.3 ms native, explosions 20/s ~1.6, gunfire 120/s ~1.2,
+        rockets 20/s ~0.7); the baseline itself drifted 4 ms at 2x res during
+        the run (the laptop throttles) — nothing new to chase.
+      (DONE ABOVE, grab-free — the note it answered:) drawing ANY water, even
       one river vertex at the screen edge, costs **2.7 ms at x1.55 res** (3.9
       with more river) — the two full-screen framebuffer copies every water
       shader shares (lakeMaterial sceneColorGrab / sceneDepthGrab), not the

@@ -70,7 +70,11 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
   const goal = new THREE.Vector3(x, 0, z);
   let hasGoal = false;
 
-  const groundAt = (gx, gz) => (app.getWorldHeight ? app.getWorldHeight(gx, gz) : 0);
+  // What a unit stands on: the terrain, or a bridge deck over it
+  // (bridgeDecks.js sets app.getStandHeight at boot — without it units walked
+  // the riverbed under the bridge).
+  const groundAt = (gx, gz) => (app.getStandHeight ? app.getStandHeight(gx, gz)
+    : app.getWorldHeight ? app.getWorldHeight(gx, gz) : 0);
   const blocked = (bx, bz) => !type.isAir && !!navGrid?.isBlockedAtWorld(bx, bz);
   const inBlocked = () => blocked(pos.x, pos.z);
 

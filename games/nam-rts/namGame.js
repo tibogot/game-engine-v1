@@ -118,6 +118,7 @@ import { placeCampPerimeter } from "./campPerimeter.js";
 import { installBuildingAprons } from "./buildingAprons.js";
 import { placeCampLayout } from "./campLayout.js";
 import { gradeBridgeLandings } from "./bridgeLandings.js";
+import { measureBridgeDecks } from "./bridgeDecks.js";
 import { createAbilities } from "./abilities.js";
 import { createAbilityTargeting } from "./abilityTargeting.js";
 import { createCoverOverlay } from "./coverOverlay.js";
@@ -1223,6 +1224,18 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // the river cut the map in two (bridgeLandings.js). The props are in now.
   onStatus("Grading bridge landings…");
   try { await gradeBridgeLandings(app); } catch (e) { console.warn("[bridges] landings failed:", e); }
+  // …and the decks themselves get a height, so units cross ON the bridge
+  // instead of walking the riverbed under it (bridgeDecks.js).
+  try {
+    const bridgeDecks = measureBridgeDecks(app);
+    app.bridgeDecks = bridgeDecks;
+    app.getStandHeight = (x, z) => {
+      const g = app.getWorldHeight(x, z);
+      const d = bridgeDecks.heightAt(x, z);
+      return d != null && d > g ? d : g;
+    };
+    console.log(`[bridges] ${bridgeDecks.decks.length} decks measured`);
+  } catch (e) { console.warn("[bridges] deck measure failed:", e); }
 
   // THE SKY LAST, DEPTH-TESTED (measured 2026-09-24). The engine draws its
   // atmosphere dome FIRST with the depth test off (renderOrder -2), so every
@@ -1240,6 +1253,18 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       skyDome.material.depthTest = true;
       skyDome.material.needsUpdate = true;
     }
+  }
+
+  // GRAB-FREE RIVER (measured 2026-09-24): drawing any water made the frame
+  // pay two full-screen framebuffer copies — 2.7 ms at x1.55 res with one
+  // river vertex on screen. From the RTS camera the refraction and SSR those
+  // copies feed are invisible, so the river reads its depth from the
+  // heightmap instead. ?water=grab brings the old water back (the A/B).
+  // The decals too: they read the depth grab, and with the river grab-free
+  // one decal on screen still paid its full-screen copy (1.1 ms).
+  if (new URLSearchParams(location.search).get("water") !== "grab") {
+    app.setRiverGrabFree?.(true);
+    app.setDecalsGrabFree?.(true);
   }
 
   onStatus("Baking cover…");
