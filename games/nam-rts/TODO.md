@@ -1072,8 +1072,16 @@ is not lost while Kurtz is being built.
       19-surface RTS atlas built in a WORKER (rtsAtlasWorker.js, same
       generator — was 2.6 s; rtsAtlasReady() before portraits). Unit visuals
       4.8 -> 3.3 s. Portraits, camp textures and a stamped crater checked.
+      Round 4 (21.0 -> 19.4 s): loading-screen frame loop 1/s not 4/s (the
+      trace put ~2.8 s of per-frame render work in the boot; nothing in the
+      boot waits on an engine frame), and slot maps read through ONE
+      CPU-backed canvas (willReadFrequently) — no GPU readback per map
+      (v3proj stage 8.2 -> 6.7 s). Material compiling now lands on whichever
+      stage the 1/s frame hits, so judge the TOTAL, not a stage.
       LEFT, from the main-thread trace: **three's node-material building
-      ~9 s** (TSL graphs -> shaders on the CPU, all through the boot) and
+      ~3 s of first-time material builds** (the rest of the ~9 s was
+      per-frame work, now mostly gone), procedural rocks ~1.25 s (memoised per
+      session only — cache across reloads?), and (TSL graphs -> shaders on the CPU, all through the boot) and
       the **v3proj stage 8.2 s** (ground-texture resize through a canvas
       ~1.35 s, decal slots ~0.6 s, rocks ~1.2 s, the rest spread out).
 - [ ] **CPU 36 ms spike after a few minutes of a match** — seen 2026-09-24 in

@@ -61,10 +61,19 @@ function _makeArrayTex(data, colorSpace = THREE.NoColorSpace) {
   return tex;
 }
 
+/*
+ * One CPU-backed canvas for every slot map. A default 2D canvas is GPU-backed,
+ * so each getImageData was a GPU→CPU readback — ~1.35 s of main thread for
+ * the ~24 maps a level loads (decalTextures already asks for the same
+ * `willReadFrequently` for the same reason). Same pixels either way.
+ */
+let _slotCtx = null;
 function _resizeImageToSlotRes(bitmap) {
-  const canvas = new OffscreenCanvas(SLOT_RES, SLOT_RES);
-  canvas.getContext("2d").drawImage(bitmap, 0, 0, SLOT_RES, SLOT_RES);
-  return canvas.getContext("2d").getImageData(0, 0, SLOT_RES, SLOT_RES).data;
+  _slotCtx ??= new OffscreenCanvas(SLOT_RES, SLOT_RES).getContext("2d", { willReadFrequently: true });
+  _slotCtx.clearRect(0, 0, SLOT_RES, SLOT_RES);
+  _slotCtx.drawImage(bitmap, 0, 0, SLOT_RES, SLOT_RES);
+  // getImageData returns a copy, so reusing the canvas cannot alias a result.
+  return _slotCtx.getImageData(0, 0, SLOT_RES, SLOT_RES).data;
 }
 
 /** Display name for a map reference: the stored asset's filename, or the URL's last segment. */

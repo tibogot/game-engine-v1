@@ -232,8 +232,12 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
 
   // Behind the loading screen the scene only needs to keep compiling what the
   // boot adds to it, not to render at 60 Hz: ~12 s of main thread went on
-  // frames nobody saw. Four a second until "ready" (reset just before it).
-  app.setFrameThrottle?.(250);
+  // frames nobody saw. ONE a second until "ready" (reset just before it).
+  // Even at four a second the trace put ~2.8 s of per-frame render work
+  // (bindings, cache keys, draws — not material building) into the boot, and
+  // nothing in the boot waits on an engine frame (checked), so a slower loop
+  // cannot hold a stage up. The loading bar animates on its own rAF.
+  app.setFrameThrottle?.(1000);
 
   if (fov != null) {
     app.camera.fov = fov;
