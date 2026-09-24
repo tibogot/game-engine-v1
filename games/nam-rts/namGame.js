@@ -689,8 +689,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combatRef = null;
   const projectiles = createProjectiles({
-    app,
-    onImpact: (target, dmg, at, owner) => combatRef?.onImpact(target, dmg, at, owner),
+    app, fx,
+    onImpact: (target, dmg, at, owner, opts) => combatRef?.onImpact(target, dmg, at, owner, opts),
     // A mortar shell lands on GROUND, not on a unit (projectiles.spawnArc).
     onArcImpact: (at, dmg, splash, owner) => combatRef?.splashAt(at, dmg, splash, owner),
   });

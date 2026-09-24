@@ -1352,6 +1352,41 @@ is not lost while Kurtz is being built.
         NOT DONE: bullet/rocket IMPACTS are still the old spark sprite — they
         belong to the CoH projectiles step (dirt kicks on misses, sparks on
         armour). `__NAM.fx.books.blast.params.uShade / uBloom` to tune.
+      · FIRE FIX (your screenshot, 2026-09-24: "clipping, plenty of small
+        flames separately, ugly"). Three causes: (1) the Flame02 atlas is
+        16x**5**, not 16x4 — sliced as 4 rows every frame was a strip cut
+        through a flame: the flat tops and bottoms. File renamed
+        flame02_temperature_16x5.png, aspect 0.625. (2) 2-7 cards scattered
+        over the radius read as a crowd of little flames -> ONE BLAZE: a main
+        card (radius x 2.1 tall) + 1-2 shorter tongues overlapping it.
+        (3) the white-hot base met sloped ground in a hard line -> a
+        SOFT-PARTICLE depth fade (1.6 m, the engine's shared sceneDepthGrab,
+        no extra copy) + the bottom fifth of the card fades. Intensity 1.1 ->
+        0.95. `__NAM.fire.params.uSoft` tunes the fade.
+      · STEP 5 DONE (uncommitted): COMPANY OF HEROES SHOTS. The glowing orange
+        rocket every gun fired (the old RTS's look) is gone. Each armed type
+        has a `weapon` (unitTypes.js / structures.js) and projectiles.js
+        WEAPONS says how its rounds look: rifle = one tracer; mg (jeep, M113,
+        DShK, ZPU) = a 3-round BURST, the first carries the shot's damage,
+        the others spray 1-4 m round the target and kick up tan dirt;
+        cannon (M48, Sheridan, PT-76) = a heavy shell streak from the barrel
+        end, flash + grey gun smoke, a small blast on the hit; gunship
+        (Huey) = door-gun bursts and every 4th shot a real rocket (carries
+        that shot's damage; dark body, motor flare, GREY smoke trail).
+        TRACER COLOUR BY SIDE: US red, the Front green (Soviet-supplied) —
+        who is shooting whom at a glance. tracerField.js: one draw, GPU
+        places the streak from (A, t0) -> (B, t1); one row written per round,
+        one merged buffer upload per frame. Visual speed 150-200 m/s (a real
+        round would cross the screen in a frame). Damage per second is
+        UNCHANGED: bursts are decoration, damage lands on arrival (~0.2 s).
+        A bullet hitting a MAN shows no flare any more (you read it from the
+        man); metal/stone still sparks; napalm/splash keep the old flare.
+        GPU ~1.2 ms in a 25-unit fight. **YOUR LOOK CHECK**: tracer width /
+        brightness (`__NAM.projectiles.tracers.params.uIntensity`, 2.2),
+        dirt kick size, the black shell-hit cloud (maybe the -light book).
+        NEXT candidates: a vehicle's gun RECOIL + turret facing the target,
+        misses that hit cover (sandbags spark), infantry suppression pinned
+        by MG fire (a CoH mechanic, gameplay — ask first).
 - [ ] Texture repetition (hex tiling discussed; stochastic rejected — it swam)
 - [ ] Napalm flame cores clip to white — per-fire intensity (taste)
 - [ ] Octahedral impostors for the RTS camera — asked, never answered properly

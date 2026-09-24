@@ -1,45 +1,71 @@
-// Rockets — GAME code. Visible, travelling projectiles with glowing exhaust
-// trails, replacing the instant hitscan. Damage lands ON IMPACT, so you can see
-// the shot cross the battlefield (and it can miss a dead target).
+// Shots — GAME code. What a round looks like between the muzzle and the thing
+// it hits. Damage lands ON ARRIVAL, as it always has: a shot is decided by
+// combat.js when it is fired and delivered here a moment later.
 //
-// Everything here is INSTANCED, not pooled-as-meshes: all rockets in flight are
-// one draw call and the entire trail is one more, however heavy the battle gets.
-// (This used to be 48 rocket Meshes + 220 puff Meshes, each drawn separately —
-// a busy firefight was hundreds of draw calls on its own.)
+// ── WEAPONS (Company of Heroes, not a laser show) ────────────────────────────
+// Every gun used to fire the same glowing orange rocket with a trail, which
+// is the old RTS's look and reads as science fiction. Now a unit's `weapon`
+// (unitTypes.js / structures.js) picks how its shots look:
+//
+//   rifle    one tracer per shot — thin, fast, in the side's colour
+//   mg       a BURST: the first round carries the shot's damage and hits; the
+//            rest spray round the target and kick up dirt where they land.
+//            Pure decoration — the damage per second is exactly what it was —
+//            but it is the difference between a stat and a machine gun.
+//   cannon   one heavy shell streak, a flash and a puff of gun smoke at the
+//            muzzle, a small blast where it lands
+//   gunship  the Huey: door-gun bursts, and every fourth shot a real rocket
+//            (it carries that shot's damage) with a smoke trail
+//
+// Tracers are tracerField.js (one draw, GPU-placed, one row written per round).
+// Rockets and mortar shells are the only projectiles simulated on the CPU.
 import * as THREE from "three";
-import { makeBloomMaterial, BLOOM } from "./bloom.js";
+import { BLOOM } from "./bloom.js";
 import { createSpriteField } from "./spriteField.js";
+import { createTracerField, TRACER_COLOURS } from "./tracerField.js";
 
-// Sizes are tuned for RTS zoom (camera ~150 m up). A "realistic" 0.2 m rocket is
-// literally invisible from there — these are deliberately oversized so shots read.
-const MAX_ROCKETS = 48;
-const MAX_PUFFS = 220;
-const PUFF_EVERY = 0.018; // seconds between trail puffs
-const PUFF_LIFE = 0.5;
-const ROCKET_R = 0.55;    // rocket radius
-const ROCKET_L = 3.2;     // rocket length
-const PUFF_SIZE = 2.6;    // trail puff quad
+/**
+ * How each weapon's rounds look. `speed` is VISUAL (m/s): slow enough to see
+ * cross the screen, fast enough that a 40 m shot still lands in ~0.2 s.
+ */
+export const WEAPONS = {
+  rifle:   { speed: 170, width: 0.32, length: 5,  burst: 1 },
+  mg:      { speed: 200, width: 0.4,  length: 7,  burst: 3, gap: 0.07, spread: 3.2 },
+  cannon:  { speed: 150, width: 0.9,  length: 11, burst: 1, shell: true },
+  gunship: { speed: 200, width: 0.4,  length: 7,  burst: 3, gap: 0.06, spread: 3.8, rocketEvery: 4 },
+};
+
+// Rockets (the gunship's). Sizes are tuned for RTS zoom (camera ~150 m up).
+const MAX_ROCKETS = 24;
+const ROCKET_R = 0.28;
+const ROCKET_L = 1.7;
+const ROCKET_SPEED = 75;
+const SMOKE_EVERY = 0.03;
 
 /** Shells in the air at once, and how hard their arc is thrown. */
 const MAX_SHELLS = 24;
 const SHELL_G = 34;       // metres/s² — a game arc, not ballistics: it has to read in ~3 s
 const SHELL_R = 0.42;
 
-export function createProjectiles({ app, onImpact = () => {}, onArcImpact = () => {} }) {
+export function createProjectiles({ app, fx = null, onImpact = () => {}, onArcImpact = () => {} }) {
   const { scene } = app;
+  const groundY = (x, z) => app.getWorldHeight?.(x, z) ?? 0;
 
-  // ── Rocket bodies — one InstancedMesh for every rocket in flight ────────────
-  // FrontSide: the capsule is closed geometry, its inside is never visible —
-  // and DoubleSide transparent costs two draws per pass in the WebGPU renderer.
-  const bodyMat = makeBloomMaterial(
-    { color: 0xffe9a8, blending: THREE.AdditiveBlending, side: THREE.FrontSide }, BLOOM.muzzle,
-  );
+  /** The sim-side clock the tracers are placed on. */
+  let clock = 0;
+  const tracers = createTracerField({ app });
+
+  // ── Rockets — one InstancedMesh for every rocket in flight ──────────────────
+  // A dark body; the light is the motor's flare behind it and the smoke is
+  // grey, not a glowing orange trail.
+  const bodyMat = new THREE.MeshStandardNodeMaterial({ color: 0x3a3b36, roughness: 0.6, metalness: 0.4 });
   // Capsule is built along Y; bake a rotation into the GEOMETRY so its long axis
   // is +Z — which is where a lookAt() quaternion points an object.
-  const bodyGeo = new THREE.CapsuleGeometry(ROCKET_R, ROCKET_L, 4, 8).rotateX(Math.PI / 2);
+  const bodyGeo = new THREE.CapsuleGeometry(ROCKET_R, ROCKET_L, 3, 7).rotateX(Math.PI / 2);
   const bodyMesh = new THREE.InstancedMesh(bodyGeo, bodyMat, MAX_ROCKETS);
   bodyMesh.count = 0;
   bodyMesh.frustumCulled = false;
+  bodyMesh.castShadow = false;
   scene.add(bodyMesh);
 
   const rockets = [];
@@ -51,12 +77,16 @@ export function createProjectiles({ app, onImpact = () => {}, onArcImpact = () =
     });
   }
 
-  // ── Exhaust trail — one instanced sprite field for the whole trail ──────────
-  // Each puff now fades on its OWN (per-instance life), which the shared-material
-  // mesh pool couldn't do — it had to fake dissipation by shrinking alone.
-  const puffs = createSpriteField({
-    scene, max: MAX_PUFFS, color: 0xff9a3c, size: PUFF_SIZE, bloomScale: BLOOM.tracer,
-    scaleAt: (p) => 0.35 + p * 1.05,
+  // The motor's flare (additive, blooms) and its smoke (alpha, grey).
+  const flares = createSpriteField({
+    scene, max: 48, color: 0xffc070, size: 1.8, bloomScale: BLOOM.muzzle,
+    scaleAt: (p) => 0.5 + p * 0.5,
+  });
+  const smokeTrail = createSpriteField({
+    scene, max: 320, color: 0x8f8d88, size: 2.2, bloomScale: 0,
+    blending: THREE.NormalBlending,
+    scaleAt: (p) => 0.45 + (1 - p) * 1.4,
+    fadeAt: (p) => p * 0.55,
   });
 
   // ── Mortar shells — the other kind of shot: an ARC, at a PLACE ─────────────
@@ -114,17 +144,90 @@ export function createProjectiles({ app, onImpact = () => {}, onArcImpact = () =
     }
   }
 
-  const freeRocket = () => rockets.find((r) => !r.alive) ?? null;
-
   const _dir = new THREE.Vector3();
   const _aim = new THREE.Vector3();
   const _obj = new THREE.Object3D();
   const _look = new THREE.Vector3();
 
-  /** Fire a rocket from `from` at `target` (a combatant). */
-  function spawn(from, target, damage, owner, speed = 70) {
-    const r = freeRocket();
-    if (!r) return;
+  function targetPoint(t, out = _aim) {
+    return out.set(
+      t.position.x,
+      t.position.y + (t.isStructure ? (t.typeKey === "base" ? 8 : 5) : t.isAir ? 0 : 1.3),
+      t.position.z,
+    );
+  }
+
+  // ── Rounds in the air: what happens when each one ARRIVES ─────────────────
+  // { at: time, kind: "hit" | "dirt" | "fire", ... } — sorted by nothing; a
+  // handful live at once and each is looked at once per step.
+  const pending = [];
+
+  /** Put one round in the air from `from` to `to`, arriving after its flight. */
+  function round(w, from, to, colour, t0 = clock) {
+    const t1 = t0 + Math.max(0.03, from.distanceTo(to) / w.speed);
+    tracers.fire(from.x, from.y, from.z, to.x, to.y, to.z, t0, t1,
+      { width: w.width, length: w.length, colour });
+    return t1;
+  }
+
+  /** Where a round that is NOT the hit goes: into the ground round the target. */
+  function missPoint(target, spread) {
+    const a = Math.random() * Math.PI * 2;
+    const r = 1.2 + Math.random() * spread;
+    const x = target.position.x + Math.cos(a) * r;
+    const z = target.position.z + Math.sin(a) * r;
+    if (target.isAir) {
+      // Past an aircraft, not into it: the round carries on and falls out of sight.
+      return new THREE.Vector3(x, target.position.y + (Math.random() - 0.5) * 4, z);
+    }
+    return new THREE.Vector3(x, groundY(x, z), z);
+  }
+
+  /**
+   * Fire at `target` (a combatant) from `from`. `owner.weapon` picks the look
+   * (rifle when there is no owner — the stress test's shots).
+   */
+  function spawn(from, target, damage, owner, _speed = null) {
+    const w = WEAPONS[owner?.weapon] ?? WEAPONS.rifle;
+    const colour = w.shell ? TRACER_COLOURS.shell
+      : owner?.team === "enemy" ? TRACER_COLOURS.green : TRACER_COLOURS.red;
+    const src = from.clone();
+
+    if (w.shell) {
+      // A tank gun: the shell leaves the end of the barrel, not the hull's
+      // middle, and the muzzle blast is the loudest thing in the fight.
+      if (owner && !owner.isStructure) {
+        _dir.set(target.position.x - owner.position.x, 0, target.position.z - owner.position.z).normalize();
+        src.set(owner.position.x, owner.position.y + 2.2, owner.position.z)
+          .addScaledVector(_dir, (owner.radius ?? 3) * 0.9);
+      }
+      fx?.cannon(src.x, src.y, src.z);
+    } else {
+      fx?.muzzle(src.x, src.y, src.z);
+    }
+
+    // The gunship's rocket: every `rocketEvery`th shot, carrying the damage.
+    if (w.rocketEvery && owner) {
+      owner.shotN = (owner.shotN ?? 0) + 1;
+      if (owner.shotN % w.rocketEvery === 0 && launchRocket(src, target, damage, owner)) return;
+    }
+
+    const to = targetPoint(target).clone();
+    const t1 = round(w, src, to, colour);
+    pending.push({ at: t1, kind: "hit", target, damage, owner, to, shell: !!w.shell });
+
+    // The rest of an MG burst: later rounds, scattered, into the dirt.
+    for (let k = 1; k < (w.burst ?? 1); k++) {
+      pending.push({
+        at: clock + k * w.gap, kind: "fire", w, colour, target,
+        from: src.clone(),
+      });
+    }
+  }
+
+  function launchRocket(from, target, damage, owner) {
+    const r = rockets.find((x) => !x.alive);
+    if (!r) return false;
     r.alive = true;
     r.pos.copy(from);
     r.target = target;
@@ -132,27 +235,38 @@ export function createProjectiles({ app, onImpact = () => {}, onArcImpact = () =
     r.owner = owner;
     r.puffT = 0;
     r.ttl = 5; // safety: never live forever
-    aimAt(r, target);
-    r.speed = speed;
+    r.vel.subVectors(targetPoint(target), r.pos).normalize();
+    r.speed = ROCKET_SPEED;
+    return true;
   }
 
-  function targetPoint(t) {
-    return _aim.set(
-      t.position.x,
-      t.position.y + (t.isStructure ? (t.typeKey === "base" ? 8 : 5) : 1.6),
-      t.position.z,
-    );
-  }
-
-  function aimAt(r, target) {
-    const to = targetPoint(target);
-    _dir.subVectors(to, r.pos).normalize();
-    r.vel.copy(_dir);
+  function settle() {
+    for (let i = pending.length - 1; i >= 0; i--) {
+      const p = pending[i];
+      if (clock < p.at) continue;
+      pending.splice(i, 1);
+      if (p.kind === "hit") {
+        // The target may have died while the round was in the air: combat's
+        // onImpact ignores the dead, and the round simply lands where it was.
+        if (p.target?.alive) onImpact(p.target, p.damage, p.to, p.owner, { shell: p.shell, bullet: !p.shell });
+        else if (!p.shell) fx?.dirt(p.to.x, groundY(p.to.x, p.to.z), p.to.z);
+      } else if (p.kind === "fire") {
+        if (!p.target?.alive) continue;          // the burst stops when he does
+        fx?.muzzle(p.from.x, p.from.y, p.from.z);
+        const to = missPoint(p.target, p.w.spread);
+        const t1 = round(p.w, p.from, to, p.colour);
+        if (!p.target.isAir) pending.push({ at: t1, kind: "dirt", to });
+      } else if (p.kind === "dirt") {
+        fx?.dirt(p.to.x, p.to.y, p.to.z);
+      }
+    }
   }
 
   function update(dt, camera) {
-    let n = 0;
+    clock += dt;
+    settle();
 
+    let n = 0;
     for (const r of rockets) {
       if (!r.alive) continue;
       r.ttl -= dt;
@@ -167,32 +281,23 @@ export function createProjectiles({ app, onImpact = () => {}, onArcImpact = () =
       const step = r.speed * dt;
       r.pos.addScaledVector(r.vel, step);
 
-      // Trail.
+      // Motor flare every step, smoke puffs on a timer.
+      flares.spawn(r.pos.x - r.vel.x * 1.2, r.pos.y - r.vel.y * 1.2, r.pos.z - r.vel.z * 1.2, 0.06);
       r.puffT -= dt;
       if (r.puffT <= 0) {
-        r.puffT = PUFF_EVERY;
-        puffs.spawn(r.pos.x, r.pos.y, r.pos.z, PUFF_LIFE);
+        r.puffT = SMOKE_EVERY;
+        smokeTrail.spawn(r.pos.x, r.pos.y, r.pos.z, 1.3);
       }
 
-      // Impact?
       let hit = false;
-      if (r.target?.alive) {
-        const to = targetPoint(r.target);
-        if (r.pos.distanceTo(to) <= Math.max(2.2, step)) hit = true;
-      }
-
+      if (r.target?.alive && r.pos.distanceTo(targetPoint(r.target)) <= Math.max(2.2, step)) hit = true;
       if (hit) {
-        onImpact(r.target, r.damage, r.pos.clone(), r.owner);
+        onImpact(r.target, r.damage, r.pos.clone(), r.owner, { shell: true });
         r.alive = false;
         continue;
       }
-      if (r.ttl <= 0) {
-        // Target died mid-flight (or we never connected) — fizzle out.
-        r.alive = false;
-        continue;
-      }
+      if (r.ttl <= 0) { r.alive = false; continue; }   // target died mid-flight: fizzle
 
-      // Still flying: write its instance.
       _obj.position.copy(r.pos);
       _obj.lookAt(_look.copy(r.pos).add(r.vel));
       _obj.scale.setScalar(1);
@@ -200,11 +305,10 @@ export function createProjectiles({ app, onImpact = () => {}, onArcImpact = () =
       bodyMesh.setMatrixAt(n, _obj.matrix);
       n++;
     }
-
     bodyMesh.count = n;
     // count 0 still issues a draw per pass — drop out of the render list.
     bodyMesh.visible = n > 0;
-    bodyMesh.instanceMatrix.needsUpdate = true;
+    if (n > 0) bodyMesh.instanceMatrix.needsUpdate = true;
 
     // Shells: ballistic, and they land on the POINT, whatever has moved.
     let m = 0;
@@ -227,10 +331,15 @@ export function createProjectiles({ app, onImpact = () => {}, onArcImpact = () =
     }
     shellMesh.count = m;
     shellMesh.visible = m > 0;
-    shellMesh.instanceMatrix.needsUpdate = true;
+    if (m > 0) shellMesh.instanceMatrix.needsUpdate = true;
 
-    puffs.update(dt, camera);
+    flares.update(dt, camera);
+    smokeTrail.update(dt, camera);
+    tracers.render(clock);
   }
 
-  return { spawn, spawnArc, drawWarnings, update, get shellsInAir() { return shells.filter((s) => s.alive).length; } };
+  return {
+    spawn, spawnArc, drawWarnings, update, tracers,
+    get shellsInAir() { return shells.filter((s) => s.alive).length; },
+  };
 }

@@ -182,6 +182,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     range: type.range ?? 0,
     damage: type.damage ?? 0,
     fireRate: type.fireRate ?? 1,
+    weapon: type.weapon ?? null,
     canHitAir: !!type.canHitAir,
     cooldown: 0,
     chaseCd: 0,

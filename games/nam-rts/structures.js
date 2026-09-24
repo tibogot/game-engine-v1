@@ -55,6 +55,7 @@ export const STRUCTURE_TYPES = {
   },
   turret: {
     typeKey: "turret",
+    weapon: "mg",   // how its shots LOOK (projectiles.js WEAPONS)
     name: "DShK Nest",
     team: "enemy",
     maxHp: 400,
@@ -88,6 +89,7 @@ export const STRUCTURE_TYPES = {
   // tank taking its time (M48 wins 1v1, ~15 s) or riflemen in the grass.
   zpu: {
     typeKey: "zpu",
+    weapon: "mg",   // how its shots LOOK (projectiles.js WEAPONS)
     name: "ZPU-4 AA Gun",
     team: "enemy",
     maxHp: 350,
@@ -178,6 +180,7 @@ export const STRUCTURE_TYPES = {
   },
   spiderHole: {
     typeKey: "spiderHole",
+    weapon: "rifle",   // how its shots LOOK (projectiles.js WEAPONS)
     name: "Spider Hole",
     team: "enemy",
     maxHp: 130,
@@ -231,6 +234,7 @@ function makeStructure(app, type, x, z) {
     range: type.range ?? 0,
     damage: type.damage ?? 0,
     fireRate: type.fireRate ?? 0,
+    weapon: type.weapon ?? null,
     canHitAir: !!type.canHitAir,
     // An AA gun picks aircraft first and hits them harder (combat.js).
     prefersAir: !!type.prefersAir,

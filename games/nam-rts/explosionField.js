@@ -62,7 +62,7 @@ function createBook({ app, url, max: MAX, tint, shade, lift = 0, bloom, name }) 
   geo.setAttribute("position", quad.attributes.position);
   geo.setAttribute("uv", quad.attributes.uv);
   //   iPos   x, y, z, size (metres: the card, at the end of the book)
-  //   iLife  start, duration, seed, 0
+  //   iLife  start, duration, seed, grey (0 = the book's tint, 1 = neutral grey)
   const posArr = new Float32Array(MAX * 4);
   const lifeArr = new Float32Array(MAX * 4);
   const iPos = new THREE.InstancedBufferAttribute(posArr, 4);
@@ -75,6 +75,7 @@ function createBook({ app, url, max: MAX, tint, shade, lift = 0, bloom, name }) 
 
   const vAge = varying(float(0), `v_${name}_age`);
   const vMirror = varying(float(0), `v_${name}_mirror`);
+  const vGrey = varying(float(0), `v_${name}_grey`);
 
   const material = new THREE.MeshBasicNodeMaterial({
     transparent: true, depthWrite: false, depthTest: true,
@@ -104,6 +105,7 @@ function createBook({ app, url, max: MAX, tint, shade, lift = 0, bloom, name }) 
     const ly = positionLocal.x.mul(sr).add(positionLocal.y.mul(cr));
     vAge.assign(a);
     vMirror.assign(step(float(0.5), fract(l.z.mul(7.31))));
+    vGrey.assign(l.w);
     const right = cameraWorldMatrix[0].xyz, up = cameraWorldMatrix[1].xyz;
     return lifted.add(right.mul(lx.mul(size))).add(up.mul(ly.mul(size)));
   })();
@@ -132,7 +134,9 @@ function createBook({ app, url, max: MAX, tint, shade, lift = 0, bloom, name }) 
   // try). The smoke is lifted by uShade; the fire keeps its own colour.
   // `lift` is a floor under the smoke's colour: the no-fire book's first
   // frames are near black, and dust is never darker than the earth it is made of.
-  const smokeCol = sample.rgb.mul(vec3(...tint)).mul(uShade).add(vec3(...tint).mul(lift));
+  // `grey` swaps the tint for neutral: a gun's smoke is burnt propellant, not earth.
+  const hue = mix(vec3(...tint), vec3(1, 1, 1.02), vGrey);
+  const smokeCol = sample.rgb.mul(hue).mul(uShade).add(hue.mul(lift));
   const rgb = mix(smokeCol, sample.rgb, fireMask);
   material.colorNode = rgb;
   material.opacityNode = alpha;
@@ -154,7 +158,7 @@ function createBook({ app, url, max: MAX, tint, shade, lift = 0, bloom, name }) 
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       posArr.set([s.x, s.y, s.z, s.size], i * 4);
-      lifeArr.set([s.start, s.dur, s.seed, 0], i * 4);
+      lifeArr.set([s.start, s.dur, s.seed, s.grey], i * 4);
     }
     iPos.clearUpdateRanges(); iLife.clearUpdateRanges();
     iPos.addUpdateRange(0, slots.length * 4); iLife.addUpdateRange(0, slots.length * 4);
@@ -166,10 +170,10 @@ function createBook({ app, url, max: MAX, tint, shade, lift = 0, bloom, name }) 
   return {
     mesh,
     params: { uShade, uBloom },
-    spawn(x, y, z, size, duration, delay = 0) {
+    spawn(x, y, z, size, duration, delay = 0, grey = 0) {
       if (slots.length >= MAX) slots.shift();   // oldest goes first
       seedN = (seedN + 0.6180339887) % 1;
-      slots.push({ start: uTime.value + delay, dur: duration, x, y, z, size, seed: seedN });
+      slots.push({ start: uTime.value + delay, dur: duration, x, y, z, size, seed: seedN, grey });
       writeAll();
     },
     render(elapsed) {
@@ -198,7 +202,7 @@ export function createExplosionField({ app } = {}) {
   // Earth, not soot: the valley's dust is a warm tan, and a soldier going down
   // should raise a puff of it, not a black mushroom.
   const dust = createBook({
-    app, url: EXPLOSION_ATLAS.dust, max: 48, name: "NamDust",
+    app, url: EXPLOSION_ATLAS.dust, max: 96, name: "NamDust",
     tint: [1.25, 1.08, 0.86], shade: 2.2, lift: 0.16, bloom: 0,
   });
 
@@ -209,8 +213,8 @@ export function createExplosionField({ app } = {}) {
       blast.spawn(x, y, z, size / EXPLOSION_ATLAS.fill, duration, delay);
     },
     /** A puff of dust, no fire. */
-    puff(x, y, z, { size = 3, duration = 1.4, delay = 0 } = {}) {
-      dust.spawn(x, y, z, size / EXPLOSION_ATLAS.fill, duration, delay);
+    puff(x, y, z, { size = 3, duration = 1.4, delay = 0, grey = 0 } = {}) {
+      dust.spawn(x, y, z, size / EXPLOSION_ATLAS.fill, duration, delay, grey);
     },
     /** PER FRAME — the render clock. */
     render(elapsed) { blast.render(elapsed); dust.render(elapsed); },

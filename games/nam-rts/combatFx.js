@@ -1,5 +1,5 @@
 // Combat FX — GAME code. Muzzle flashes, impact sparks and explosions.
-// (Tracers are gone: shots are now visible rockets — see projectiles.js.)
+// (The rounds themselves — tracers, shells, rockets — are projectiles.js.)
 //
 // Each KIND is one instanced sprite field (spriteField.js), so a battlefield full
 // of flashes costs 3 draw calls, not one per flash. Every field writes to the
@@ -51,6 +51,21 @@ export function createCombatFx({ app, pool = 40 }) {
       // Bigger blasts linger longer: a mortar bomb is gone in two seconds,
       // a fuel dump hangs over the camp.
       books.explode(x, y, z, { size, duration: 1.9 + size * 0.07 });
+    },
+
+    /** A tank gun: a flash big enough to bloom, and a puff of grey gun smoke. */
+    cannon(x, y, z) {
+      blasts.spawn(x, y, z, 0.12);
+      books.puff(x, y, z, { size: 4.2, duration: 1.9, grey: 1 });
+    },
+    /** A round into the ground: a kick of dirt, no fire. */
+    dirt(x, y, z, size = 1.3) {
+      books.puff(x, y, z, { size, duration: 0.7 + size * 0.25 });
+    },
+    /** A shell hitting something: a small blast (not the death one). */
+    shellHit(x, y, z) {
+      blasts.spawn(x, y, z, 0.16);
+      books.explode(x, y - 1, z, { size: 4.5, duration: 1.3 });
     },
 
     update(dt, camera) {

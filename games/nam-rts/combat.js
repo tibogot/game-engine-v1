@@ -5,8 +5,8 @@
 // helicopters and turrets, so adding a new fighting thing needs no new code
 // here — just the stats.
 //
-// Shots are HITSCAN (instant): fire → damage → tracer FX. That's what most RTS
-// small-arms do; it avoids per-projectile physics and reads clearly at RTS zoom.
+// A shot is decided here and DELIVERED by projectiles.js a moment later (a
+// tracer's flight time): damage lands on arrival, through onImpact.
 import * as THREE from "three";
 
 const ACQUIRE_MULT = 1.15; // auto-acquire slightly beyond weapon range
@@ -83,9 +83,14 @@ export function createCombat({
   }
 
   /** Called when a rocket connects (damage lands on IMPACT, not on fire). */
-  function onImpact(target, amount, at, owner = null) {
+  function onImpact(target, amount, at, owner = null, { shell = false, bullet = false } = {}) {
     if (!target?.alive) return;
-    fx.impact(at.x, at.y, at.z);
+    // What the hit LOOKS like (projectiles.js says what hit it): a shell or a
+    // rocket bursts; a bullet sparks off metal and stone but not off a man —
+    // in Company of Heroes you read a rifle hit from the man, not a flare on
+    // him. Anything else (napalm pulses, a splash) keeps the old flare.
+    if (shell) fx.shellHit?.(at.x, at.y, at.z);
+    else if (!bullet || target.typeKey !== "soldier") fx.impact(at.x, at.y, at.z);
 
     // HARD COVER takes a bite out of the damage. Applied here, at the moment of
     // impact, and measured from where the shot CAME from — so the same sandbag
@@ -229,10 +234,12 @@ export function createCombat({
     if (d <= e.range && e.cooldown <= 0) {
       e.cooldown = 1 / (e.fireRate || 1);
       e.target = tgt;
-      // Fire a VISIBLE rocket. Damage lands when it connects (see onImpact),
-      // not instantly — so shots read on screen and can chase a moving target.
+      // Fire a VISIBLE round (projectiles.js: a tracer, a burst, a shell or a
+      // rocket, by the shooter's `weapon`). Damage lands when it arrives (see
+      // onImpact), not instantly.
+      // The muzzle flash is projectiles.js's: a rifle, an MG burst and a tank
+      // gun each flash differently.
       const from = muzzleOf(e);
-      fx.muzzle(from.x, from.y, from.z);
       // An AA gun hits aircraft harder than ground (airMul / groundMul, 1 for
       // everything else).
       const dmg = e.damage * (tgt.isAir ? (e.airMul ?? 1) : (e.groundMul ?? 1));

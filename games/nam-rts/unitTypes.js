@@ -23,6 +23,7 @@ const REAL = { soldierHeight: 1.8, jeepLength: 3.35 /* M151 MUTT */ };
 export const UNIT_TYPES = {
   helicopter: {
     typeKey: "helicopter",
+    weapon: "gunship",   // how its shots LOOK (projectiles.js WEAPONS)
     // The UH-1H Huey, built in code (rtsVehicles.js).
     name: "UH-1H Huey",
     // logic
@@ -49,6 +50,7 @@ export const UNIT_TYPES = {
   },
   jeep: {
     typeKey: "jeep",
+    weapon: "mg",   // how its shots LOOK (projectiles.js WEAPONS)
     // The M151A1 MUTT gun jeep, built in code (rtsVehicles.js).
     name: "M151 Jeep",
     // logic
@@ -106,6 +108,7 @@ export const UNIT_TYPES = {
   // toward what it's shooting, so it reads fine at RTS zoom.
   tank: {
     typeKey: "tank",
+    weapon: "cannon",   // how its shots LOOK (projectiles.js WEAPONS)
     // The M48A3 Patton, built in code (rtsVehicles.js).
     name: "M48A3 Patton",
     // logic — the heavy. Slow and turns slowly, but out-ranges and out-hits
@@ -133,6 +136,7 @@ export const UNIT_TYPES = {
   },
   bigtank: {
     typeKey: "bigtank",
+    weapon: "mg",   // how its shots LOOK (projectiles.js WEAPONS)
     // The M113 ACAV, built in code (rtsVehicles.js) — it replaced a BTR GLB,
     // the wrong side and the wrong war. Tuned as the APC it is: faster and
     // cheaper than the Battle Tank, and its .50 cal CAN reach aircraft.
@@ -160,6 +164,7 @@ export const UNIT_TYPES = {
   },
   lightTank: {
     typeKey: "lightTank",
+    weapon: "cannon",   // how its shots LOOK (projectiles.js WEAPONS)
     // The M551 Sheridan, built in code (rtsVehicles.js).
     name: "M551 Sheridan",
     // logic — agile armour: quicker than the battle tank, cheaper, lighter gun.
@@ -190,6 +195,7 @@ export const UNIT_TYPES = {
   // outruns anything it does not want to fight.
   pt76: {
     typeKey: "pt76",
+    weapon: "cannon",   // how its shots LOOK (projectiles.js WEAPONS)
     name: "PT-76",
     // logic
     isAir: false,
@@ -278,6 +284,7 @@ export const UNIT_TYPES = {
 
 UNIT_TYPES.soldier = {
   typeKey: "soldier",
+  weapon: "rifle",   // how its shots LOOK (projectiles.js WEAPONS)
   name: "Soldier",
   // logic
   isAir: false,

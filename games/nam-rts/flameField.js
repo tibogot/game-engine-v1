@@ -3,7 +3,7 @@
 // update, clear, activeCount), which stays as the procedural A/B
 // (`?fire=procedural`).
 //
-// THE ATLAS is Unity Labs' CC0 "Flame02-temperature": 16x4 frames of a
+// THE ATLAS is Unity Labs' CC0 "Flame02-temperature": 16x5 frames of a
 // simulated flame, stored as TEMPERATURE (grey) rather than colour. The shader
 // turns heat into colour — near-black red at the cool edge, orange, then
 // yellow-white in the core — so every fire can have its own HEAT: a soldier's
@@ -11,11 +11,11 @@
 // because the ramp, not the bloom, decides how hot the core looks.
 //
 // ── SHAPE ────────────────────────────────────────────────────────────────────
-// A fire is a few vertical flame CARDS scattered over its radius, each turned
-// to the camera about the VERTICAL axis only, so a flame always stands up
-// however the camera turns. Each loops the book from its own start frame and
-// crossfades adjacent frames. Taller, fewer cards for a big fire; the heights
-// vary per card so a fire never reads as a row of identical tongues.
+// A fire is ONE BLAZE: a tall main card with one or two shorter tongues
+// overlapping it, each turned to the camera about the VERTICAL axis only, so a
+// flame always stands up however the camera turns. Each loops the book from
+// its own start frame and crossfades adjacent frames. A card fades where the
+// ground meets it (a soft-particle depth fade), so no slope cuts it.
 //
 // ── COST ─────────────────────────────────────────────────────────────────────
 // One instanced draw. The cards' rows are written when a fire STARTS or is put
@@ -23,15 +23,22 @@
 // clock in the vertex stage (start and end times ride in the instance data).
 import * as THREE from "three";
 import {
-  Fn, attribute, cameraPosition, float, floor, fract, max, mix, normalize, output,
-  positionLocal, saturate, smoothstep, step, texture, uniform, uv, varying, vec2, vec3, vec4,
+  Fn, attribute, cameraFar, cameraNear, cameraPosition, float, floor, fract, mix, normalize,
+  output, perspectiveDepthToViewZ, positionLocal, positionView, saturate, screenUV, smoothstep,
+  step, texture, uniform, uv, varying, vec2, vec3, vec4,
 } from "three/tsl";
+// The engine's ONE scene-depth grab, shared with water and decals: a second
+// viewportDepthTexture would be another full-screen copy a frame (and one
+// bound the multisampled depth itself and broke the frame — decalSystem.js).
+import { sceneDepthGrab } from "../../v3/render/water/lakeMaterial.js";
 
 export const FLAME_ATLAS = {
-  url: "/textures/fx/flame02_temperature_16x4.png",
-  cols: 16, rows: 4, width: 2048, height: 1024,
-  /** Cell aspect, width / height: 128 x 256 px. */
-  aspect: 0.5,
+  url: "/textures/fx/flame02_temperature_16x5.png",
+  // FIVE rows of 16, not four: sliced as 16x4 (the first try) every frame was
+  // a strip cut through the middle of a flame — flat tops, flat bottoms.
+  cols: 16, rows: 5, width: 2048, height: 1024,
+  /** Cell aspect, width / height: 128 x 204.8 px. */
+  aspect: 0.625,
   fps: 24,
 };
 
@@ -54,10 +61,12 @@ class FlameMRTNode extends THREE.MRTNode {
  *   intensity  overall brightness of the colour ramp
  *   bloom      share of it written to the emissive (bloom) buffer
  */
-export function createFlameField({ app, intensity = 1.1, bloom = 0.3 } = {}) {
+export function createFlameField({ app, intensity = 0.95, bloom = 0.3 } = {}) {
   const uTime = uniform(0);
   const uIntensity = uniform(intensity);
   const uBloom = uniform(bloom);
+  /** Soft-particle fade distance, metres. */
+  const uSoft = uniform(1.6);
 
   const atlas = new THREE.TextureLoader().load(FLAME_ATLAS.url);
   // Temperature is DATA, not colour: no sRGB decode.
@@ -101,15 +110,13 @@ export function createFlameField({ app, intensity = 1.1, bloom = 0.3 } = {}) {
     const alive = step(l.x, uTime).mul(step(uTime, l.y));
     const k = grow.mul(die).mul(alive);
     const h = p.w.mul(mix(float(0.35), float(1), k)).mul(step(float(1e-3), k));
-    // SUNK into the ground by a fifth of its height, and NOT lifted toward
-    // the camera: the atlas's hottest texels are the flame's base, at the very
-    // bottom of each cell, so a card standing on the ground showed a hard
-    // bright line there — floating, once it was lifted. Sunk, the terrain's
-    // depth hides the cut. A fifth, not an eighth: on a steep bank the
-    // downhill side of a vertical card stands proud of the ground, and an
-    // eighth still showed its flat bottom there. The bottom of the card also
-    // fades (colour stage).
-    const base = vec3(p.x, p.y.sub(p.w.mul(0.2)), p.z);
+    // Sunk a tenth of its height and NOT lifted toward the camera, so the
+    // flame stands IN the ground. Where the terrain cuts the card it is
+    // softened in the colour stage (a soft-particle depth fade): the base of
+    // the flame is its hottest part, and on a slope a vertical card met the
+    // ground in a hard slanted line of white (the second try sank it a fifth
+    // and faded its bottom quarter; neither fixed a slope).
+    const base = vec3(p.x, p.y.sub(p.w.mul(0.1)), p.z);
     // Turned to the camera about the vertical axis only: a flame stands up.
     const toCam = cameraPosition.sub(base);
     const flat = normalize(vec3(toCam.x, 0, toCam.z).add(vec3(1e-4, 0, 0)));
@@ -141,8 +148,14 @@ export function createFlameField({ app, intensity = 1.1, bloom = 0.3 } = {}) {
     const c2 = mix(c1, vec3(1.0, 0.62, 0.12), smoothstep(float(0.35), float(0.65), t));
     const c3 = mix(c2, vec3(1.0, 0.93, 0.7), smoothstep(float(0.62), float(0.95), t));
     // Where it is cool it is transparent: additive, so brightness IS coverage.
-    // And the bottom quarter of the card fades out: see the sink above.
-    const a = smoothstep(float(0.04), float(0.22), t).mul(smoothstep(float(0.0), float(0.24), uv().y));
+    // SOFT PARTICLE: fade where the scene behind is less than uSoft metres
+    // away — the card fades into the ground it stands in instead of being
+    // cut by it. And the bottom fifth of the card fades too: the flame's
+    // white-hot base sits a tenth of the way up its cell, so where the card
+    // hangs over LOWER ground (an apron's edge) its bottom edge showed flat.
+    const sceneDist = perspectiveDepthToViewZ(sceneDepthGrab.sample(screenUV).r, cameraNear, cameraFar).negate();
+    const soft = saturate(sceneDist.sub(positionView.z.negate()).div(uSoft));
+    const a = smoothstep(float(0.04), float(0.22), t).mul(smoothstep(float(0.02), float(0.22), uv().y)).mul(soft);
     return c3.mul(a).mul(uIntensity).mul(t.mul(0.8).add(0.25));
   })();
   material.colorNode = colour;
@@ -190,15 +203,19 @@ export function createFlameField({ app, intensity = 1.1, bloom = 0.3 } = {}) {
     // white only in the core of the hottest. (At 0.85-1.35 every fire went
     // white-hot — the first try.)
     const h0 = heat ?? Math.min(1.0, 0.7 + radius * 0.035);
-    const n = Math.max(2, Math.min(7, Math.round(radius * 0.9 + 1)));
+    // ONE BLAZE, not a scatter: a main card at the centre and one or two
+    // smaller tongues overlapping it, close enough that they merge into a
+    // single fire. Cards spread over the whole radius (the first try, 2-7 of
+    // them) read as a crowd of little separate flames.
+    const n = radius < 3 ? 2 : 3;
     for (let k = 0; k < n; k++) {
       seedN = (seedN + 0.6180339887) % 1;
-      const a = seedN * Math.PI * 2, r = Math.sqrt((k + 0.5) / n) * radius * 0.55;
+      const a = seedN * Math.PI * 2, r = k === 0 ? 0 : radius * (0.18 + 0.1 * k);
       const card = {
         x: x + Math.cos(a) * r, y, z: z + Math.sin(a) * r,
-        // Tall tongues at the centre, shorter at the rim, and varied.
-        h: radius * (1.1 + 0.9 * (1 - r / Math.max(radius * 0.55, 1e-3))) * (0.75 + ((seedN * 7.13) % 1) * 0.5),
-        start: now + k * 0.07, seed: seedN, heat: h0 * (0.85 + ((seedN * 3.7) % 1) * 0.3), fire,
+        // The main blaze tall, the side tongues shorter, each a little varied.
+        h: radius * (k === 0 ? 2.1 : 1.35 - 0.15 * k) * (0.9 + ((seedN * 7.13) % 1) * 0.2),
+        start: now + k * 0.07, seed: seedN, heat: h0 * (k === 0 ? 1 : 0.85), fire,
       };
       fire.cards.push(card);
       cards.push(card);
@@ -232,5 +249,5 @@ export function createFlameField({ app, intensity = 1.1, bloom = 0.3 } = {}) {
 
   function activeCount() { return fires.length; }
 
-  return { addFire, update, clear, activeCount, params: { uIntensity, uBloom }, mesh };
+  return { addFire, update, clear, activeCount, params: { uIntensity, uBloom, uSoft }, mesh };
 }
