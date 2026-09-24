@@ -117,4 +117,41 @@ export function drawLanceLeafTexture(canvas, o = {}) {
   // Left half: whole. Right half: torn.
   drawBlade(ctx, W * 0.25, W, H, { seed: o.seed ?? 913, torn: false, bend: 1 });
   drawBlade(ctx, W * 0.75, W, H, { seed: (o.seed ?? 913) + 37, torn: true, bend: -0.7 });
+  shadeBlades(ctx, W, H);
+}
+
+/**
+ * SHADE (alphaCoverageMips `shade`: the grey is multiplied into the leaf's
+ * colour). A flat white blade made every bush one flat pale green (your
+ * screenshot, 2026-09-24). An Alpinia leaf is creased down its midrib — one
+ * half tilted to the light, one away — with a pale rib, side veins running
+ * out at a slant, edges and stalk end darker.
+ */
+function shadeBlades(ctx, W, H) {
+  const halfW = W * 0.5 * 0.22;
+  const bottom = H * 0.985, top = H * 0.03, len = bottom - top;
+  const blades = [{ cx: W * 0.25, bend: 1 }, { cx: W * 0.75, bend: -0.7 }];
+  const img = ctx.getImageData(0, 0, W, H);
+  const d = img.data;
+  for (let y = 0; y < H; y++) {
+    const v = Math.max(0, Math.min(1, (bottom - y) / len));
+    const wv = Math.max(1, widthAt(v) * halfW);
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      if (d[i + 3] === 0) continue;
+      const b = x < W * 0.5 ? blades[0] : blades[1];
+      const mid = b.cx + Math.sin(v * 2.2) * W * 0.035 * b.bend;
+      const s = (x - mid) / wv;                         // -1 edge .. 0 rib .. 1 edge
+      let g = s < 0 ? 0.96 : 0.76;                        // the crease: lit half, shaded half
+      g *= 1 - 0.22 * Math.min(1, s * s);                 // darker toward the edges
+      g *= 0.7 + 0.3 * Math.min(1, v / 0.25);             // darker at the stalk
+      // Side veins: out from the rib at a slant toward the tip.
+      const vein = Math.sin((y + Math.abs(x - mid) * 1.3) * 0.55);
+      g *= 1 - 0.06 * Math.pow(Math.max(0, vein), 10);
+      if (Math.abs(x - mid) < 1.6) g = 0.98;              // the pale midrib
+      const c = Math.round(Math.max(0, Math.min(1, g)) * 255);
+      d[i] = d[i + 1] = d[i + 2] = c;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
 }

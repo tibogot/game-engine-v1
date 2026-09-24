@@ -65,16 +65,17 @@ const CARD_TEXTURES = {
     w: PLUME_TEX_W, h: PLUME_TEX_H,
     draw: (c) => drawPlumeTexture(c, { texSpread: 54, texStrands: 420, texStrandLen: 0.34, texDroop: 0.6 }),
   },
-  spray: { w: SPRAY_TEX_W, h: SPRAY_TEX_H, draw: drawBambooSprayTexture },
-  frond: { w: FROND_TEX_W, h: FROND_TEX_H, draw: drawPalmFrondTexture },
-  fern:  { w: FERN_TEX_W,  h: FERN_TEX_H,  draw: drawFernFrondTexture },
-  banana: { w: BROADLEAF_TEX_W, h: BROADLEAF_TEX_H, draw: drawBananaLeafTexture },
+  spray: { w: SPRAY_TEX_W, h: SPRAY_TEX_H, draw: drawBambooSprayTexture, shade: true },
+  frond: { w: FROND_TEX_W, h: FROND_TEX_H, draw: drawPalmFrondTexture, shade: true },
+  fern:  { w: FERN_TEX_W,  h: FERN_TEX_H,  draw: drawFernFrondTexture, shade: true },
+  banana: { w: BROADLEAF_TEX_W, h: BROADLEAF_TEX_H, draw: drawBananaLeafTexture, shade: true },
   taro:   { w: BROADLEAF_TEX_W, h: BROADLEAF_TEX_H, draw: drawTaroLeafTexture },
   canopy: { w: CANOPY_TEX_W, h: CANOPY_TEX_H, draw: drawCanopyClusterTexture },
-  fan:    { w: FAN_TEX_W, h: FAN_TEX_H, draw: drawFanLeafTexture },
-  lance:  { w: LANCE_TEX_W, h: LANCE_TEX_H, draw: drawLanceLeafTexture },
-  // The one card with a SHADE in its colour (see alphaCoverageMips): a leaf
-  // cluster is leaves, not a green disc.
+  fan:    { w: FAN_TEX_W, h: FAN_TEX_H, draw: drawFanLeafTexture, shade: true },
+  lance:  { w: LANCE_TEX_W, h: LANCE_TEX_H, draw: drawLanceLeafTexture, shade: true },
+  // `shade: true`: the card's grey is a per-leaf SHADE multiplied into its
+  // colour (see alphaCoverageMips) — a leaf cluster is leaves, a fan is
+  // pleated, a frond is a thousand blades, not one flat green (2026-09-24).
   banyan: { w: BANYAN_TEX_W, h: BANYAN_TEX_H, draw: drawBanyanLeafTexture, shade: true },
 };
 

@@ -46,7 +46,12 @@ export function drawPalmFrondTexture(canvas, o = {}) {
 
   // The rachis: a tapering stroke up the left edge, thick at the petiole.
   ctx.lineCap = "round";
-  ctx.strokeStyle = "rgba(255,255,255,1)";
+  // SHADE (alphaCoverageMips `shade`: the grey is multiplied into the frond's
+  // colour). One flat white frond made every crown one flat green (your
+  // screenshot, 2026-09-24). Now the rachis is pale, each leaflet runs from
+  // darker at the rachis to lit toward its tip, and no two leaflets share a
+  // tone — a coconut crown is a thousand blades catching the light apart.
+  ctx.strokeStyle = "rgb(236,236,236)";
   for (let i = 0; i < 12; i++) {
     const v0 = i / 12, v1 = (i + 1) / 12;
     ctx.lineWidth = 11 * (1 - v0 * 0.72);
@@ -57,7 +62,7 @@ export function drawPalmFrondTexture(canvas, o = {}) {
   }
 
   /** One leaflet: a filled lanceolate polygon along a gently drooping axis. */
-  const leaflet = (v, len, alpha) => {
+  const leaflet = (v, len, alpha, dull = 0) => {
     const steps = 10;
     const left = [], right = [];
     let x = 7, y = H * (1 - v);
@@ -73,7 +78,15 @@ export function drawPalmFrondTexture(canvas, o = {}) {
       y += Math.sin(th) * (len / steps);
       th += curl;
     }
-    ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+    // Darker where it leaves the rachis, lit along its body, a touch darker
+    // at the tip; its own tone; the frond's stalk end darker than its tip.
+    const tone = (0.84 + rand() * 0.2 - dull) * (0.8 + 0.2 * Math.min(1, (v - bare) / 0.3));
+    const g = ctx.createLinearGradient(7, H * (1 - v), x, y);
+    const grey = (k) => { const c = Math.round(Math.max(0, Math.min(1, k * tone)) * 255); return `rgba(${c},${c},${c},${alpha.toFixed(3)})`; };
+    g.addColorStop(0, grey(0.6));
+    g.addColorStop(0.45, grey(1.0));
+    g.addColorStop(1, grey(0.88));
+    ctx.fillStyle = g;
     ctx.beginPath();
     ctx.moveTo(left[0][0], left[0][1]);
     for (const p of left) ctx.lineTo(p[0], p[1]);
@@ -90,7 +103,7 @@ export function drawPalmFrondTexture(canvas, o = {}) {
     leaflet(v, len, 0.9 + rand() * 0.1);
     // A few leaflets are split at the tip, the way wind shreds a coconut
     // frond: a second, thinner blade from the same root.
-    if (rand() < 0.28) leaflet(v + 0.004, len * 0.7, 0.8);
+    if (rand() < 0.28) leaflet(v + 0.004, len * 0.7, 0.8, 0.1);
   }
   // The terminal leaflet, straight on along the rachis.
   leaflet(0.985, W * 0.22, 1);

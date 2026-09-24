@@ -47,10 +47,10 @@ export function drawFernFrondTexture(canvas, o = {}) {
   };
 
   ctx.lineCap = "round";
-  ctx.strokeStyle = "rgba(255,255,255,1)";
-  ctx.fillStyle = "rgba(255,255,255,1)";
+  ctx.strokeStyle = "rgb(232,232,232)";
+  ctx.fillStyle = "rgb(232,232,232)";
 
-  // The rachis.
+  // The rachis (pale).
   for (let i = 0; i < 10; i++) {
     const v0 = i / 10, v1 = (i + 1) / 10;
     ctx.lineWidth = 8 * (1 - v0 * 0.7);
@@ -86,13 +86,23 @@ export function drawFernFrondTexture(canvas, o = {}) {
       y += Math.sin(th) * (len / steps);
       th += curl / 9;
     }
+    // SHADE (alphaCoverageMips `shade`): darker where the pinna leaves the
+    // rachis, lit along its body, each pinna its own tone, and the frond's
+    // base darker than its tip — the flat white card made every fern one flat
+    // green (your screenshot, 2026-09-24).
+    const tone = (0.84 + rand() * 0.2) * (0.78 + 0.22 * Math.min(1, (v - bare) / 0.35));
+    const grey = (k) => { const c = Math.round(Math.max(0, Math.min(1, k * tone)) * 255); return `rgb(${c},${c},${c})`; };
+    const g = ctx.createLinearGradient(8, H * (1 - v), x, y);
+    g.addColorStop(0, grey(0.6)); g.addColorStop(0.5, grey(1.0)); g.addColorStop(1, grey(0.86));
+    ctx.fillStyle = g;
     ctx.beginPath();
     ctx.moveTo(left[0][0], left[0][1]);
     for (const p of left) ctx.lineTo(p[0], p[1]);
     for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
     ctx.closePath();
     ctx.fill();
-    // Its midrib, so the pinna reads as a pinna and not a feather.
+    // Its midrib, so the pinna reads as a pinna and not a feather: pale.
+    ctx.strokeStyle = grey(1.12);
     ctx.lineWidth = 1.3;
     ctx.beginPath();
     ctx.moveTo(8, H * (1 - v));
@@ -107,6 +117,7 @@ export function drawFernFrondTexture(canvas, o = {}) {
     pinna(v, W * 0.95 * reach * (0.94 + rand() * 0.12));
   }
   // Terminal pinna, straight up the rachis.
+  ctx.fillStyle = "rgb(220,220,220)";
   ctx.beginPath();
   ctx.moveTo(6, H * 0.06);
   ctx.lineTo(6 + W * 0.05, H * 0.03);

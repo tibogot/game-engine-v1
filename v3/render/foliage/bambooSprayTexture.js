@@ -38,16 +38,17 @@ export function drawBambooSprayTexture(canvas, o = {}) {
 
   // The twig itself: a short stroke up into the fan, so the leaves hang off
   // something instead of floating.
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.strokeStyle = "rgba(170,170,170,0.9)";
   ctx.lineCap = "round";
   ctx.lineWidth = 2.2;
   ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox, oy - H * 0.16); ctx.stroke();
 
   /** One blade: a filled lanceolate polygon along a gently curving axis. */
-  const blade = (angle, len, curl, alpha) => {
+  const blade = (angle, len, curl, alpha, back = false) => {
     const steps = 14;
     const left = [], right = [];
     let x = ox, y = oy - H * 0.05 - rand() * H * 0.08;
+    const x0 = x, y0 = y;
     let th = angle;
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
@@ -60,7 +61,16 @@ export function drawBambooSprayTexture(canvas, o = {}) {
       y += Math.sin(th) * (len / steps);
       th += curl;
     }
-    ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+    // SHADE (alphaCoverageMips `shade`, multiplied into the leaf colour):
+    // darker at the twig, lit along the blade, a touch darker at the tip,
+    // each blade its own tone and the back ones in the spray's shadow. A flat
+    // white spray made the sugar cane a pale lime blob and the bamboo a grey
+    // smudge (your screenshots, 2026-09-24).
+    const tone = (0.84 + rand() * 0.2) * (back ? 0.7 : 1);
+    const grey = (k) => { const c = Math.round(Math.max(0, Math.min(1, k * tone)) * 255); return `rgba(${c},${c},${c},${alpha.toFixed(3)})`; };
+    const g = ctx.createLinearGradient(x0, y0, x, y);
+    g.addColorStop(0, grey(0.62)); g.addColorStop(0.45, grey(1.0)); g.addColorStop(1, grey(0.85));
+    ctx.fillStyle = g;
     ctx.beginPath();
     ctx.moveTo(left[0][0], left[0][1]);
     for (const p of left) ctx.lineTo(p[0], p[1]);
@@ -85,6 +95,6 @@ export function drawBambooSprayTexture(canvas, o = {}) {
   // Two small back leaves peeking through the fan, dimmer.
   for (let b = 0; b < 2; b++) {
     const side = b ? 1 : -1;
-    blade(-Math.PI / 2 + side * fan * 0.25, H * 0.5, side * 0.03, 0.55);
+    blade(-Math.PI / 2 + side * fan * 0.25, H * 0.5, side * 0.03, 0.55, true);
   }
 }

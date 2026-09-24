@@ -34,13 +34,20 @@ const PLANTS = [
   ["#234a29", "#5d8739", null],            // Banana — the brightest leaf here
   ["#27452a", "#517437", null],            // Ground cover
   ["#445c33", "#7f8f52", "#bdb178"],       // Reeds — legitimately pale, kept so
-  ["#2f5a2c", "#6d9440", "#8a7a4a"],       // Sugar cane (head = the culm)
+  // Sugar cane (head = the culm). Tip #6d9440 -> #5e8339 (2026-09-24): with
+  // the flat spray it was the pale lime clumps all over the valley floor.
+  ["#2f5a2c", "#5e8339", "#8a7a4a"],
   ["#1d3a22", "#46682f", null],            // Giant fern — the darkest of them
 ];
 
 /** susuki / tall plants: the same, per type. */
 const TALL = [
-  ["#3c6330", "#5c8a3e", "#e8e0cc"],       // plume head stays pale straw
+  // FAN PALM (slot 0 was the susuki; the palm replaced it and came in with its
+  // PRESET's lime, #33601f / #86a83a, never repainted: the brightest plant on
+  // the map). Measured in the game against the coconut palm under the same
+  // light: 0.186 mean luminance against 0.130. These bring it to ~0.132.
+  // Head = the trunk's boots, unchanged.
+  ["#2f5921", "#72943a", "#6f6553"],
   ["#2b4b24", "#4a7034", "#5c7a45"],
   ["#284923", "#4e7632", "#7d6b55"],
 ];

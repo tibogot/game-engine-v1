@@ -759,6 +759,41 @@ Vietnam, like Apocalypse Now.
 Everything below is also filed in its own place; this is the short list so it
 is not lost while Kurtz is being built.
 
+- [ ] **YOUR ASKS 2026-09-24 (after the FX work)**:
+      1. Some trees look WAY TOO BRIGHT, others too DULL — the species don't
+         sit together. Match them (one light/colour budget across every
+         vegetation system).
+      2. "I'm sure we can do a better jungle now" — the jungle as a whole.
+      3. The ENEMY SIDE looks empty compared with ours (see THE ENEMY SIDE
+         below: "Fill their base" is still open).
+      · DONE (uncommitted), 1 + your "the colours are flat" call:
+        - THE FAN PALM was the bright one: tall slot 0 used to be the susuki
+          (repainted by tools/namVegPalette.mjs); the fan palm replaced it
+          with its PRESET's lime (#33601f/#86a83a) and nothing repainted it.
+          Measured in the game against the coconut palm: 0.186 vs 0.130 mean
+          luminance -> #2f5921/#72943a (~0.132). In the palette tool now.
+        - FLAT: every leaf card was drawn WHITE, so a leaf was one colour and
+          the only gradient was plant base -> top. Now the leaf textures carry
+          a per-leaf SHADE (the banyan's `shade: true` path, multiplied into
+          the colour): fan = PLEATS (each segment a lit and a shaded half,
+          dark hub); banana (+ traveller's palm) = pale rib, lit by the rib
+          rolling darker to the edge, veins, torn strips each a tone;
+          coconut/nipa/areca frond, fern and bamboo/sugar-cane spray =
+          each leaflet darker at the rachis, lit along its body, its own
+          tone; lance (bush, ground cover) = creased down the rib, one half
+          lit. Cost: none (texture only; GPU 1.10 ms as before).
+        - SUGAR CANE was the pale lime clumps all over the valley floor
+          (found by tinting types magenta): shaded spray + tip #6d9440 ->
+          #5e8339.
+        - Tried and NOT kept: lowering the top-down normal lift (0.7/0.5 gave
+          depth but not the fix; the flat CARD was the cause), turning the
+          sky light off the leaves (no change).
+        MEASUREMENT TRAP (for next time): a lineup A/B that hides the plants
+        also hides their SHADOWS on the grass, which get counted as plant;
+        turning shadows off instead removes the plant's self-shadowing.
+        **YOUR LOOK CHECK**: the fan palms, bananas and sugar cane at your
+        zoom. NEXT: the jungle as a whole (2), the enemy side (3).
+
 - [ ] **The jungle tree is committed but NOT good.** Waiting on your reference
       picture. The roots read as cardboard fins and the crown is a blob.
 - [x] **BANYAN — the big tree** (your ask 2026-09-24). BUILT

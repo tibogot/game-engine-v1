@@ -24,6 +24,39 @@ function rng(seed) {
   };
 }
 
+/**
+ * SHADE a drawn half-leaf in place: keep every texel's alpha, write a grey
+ * `shadeAt(u, v)` (0..1, u = 0 at the midrib, v = 0 at the petiole) into its
+ * colour. The foliage shader multiplies that grey into the leaf's colour
+ * (alphaCoverageMips `shade`), so a leaf has a lit and a shaded side, a pale
+ * rib and veins, instead of one flat green (your screenshot, 2026-09-24).
+ */
+export function shadeHalfLeaf(ctx, W, H, shadeAt) {
+  const img = ctx.getImageData(0, 0, W, H);
+  const d = img.data;
+  for (let y = 0; y < H; y++) {
+    const v = 1 - y / H;
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      if (d[i + 3] === 0) continue;
+      const g = Math.round(Math.max(0, Math.min(1, shadeAt(x / W, v, x, y))) * 255);
+      d[i] = d[i + 1] = d[i + 2] = g;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/** A smooth 1-D value noise, deterministic: tone bands along a leaf. */
+function bandNoise(seed) {
+  const r = rng(seed);
+  const vals = Array.from({ length: 257 }, () => r());
+  return (t) => {
+    const f = ((t % 256) + 256) % 256, i = Math.floor(f), k = f - i;
+    const s = k * k * (3 - 2 * k);
+    return vals[i] * (1 - s) + vals[i + 1] * s;
+  };
+}
+
 /** The half-outline as a polygon: half-width (0..1 of W) at each v. */
 function fillHalfBlade(ctx, W, H, widthAt, { bare, midribW = 7, steps = 60 }) {
   ctx.fillStyle = "rgba(255,255,255,1)";
@@ -100,6 +133,20 @@ export function drawBananaLeafTexture(canvas, o = {}) {
     ctx.fill();
   }
   ctx.globalCompositeOperation = "source-over";
+
+  // SHADE. A banana blade from above: the pale midrib, the blade lit beside
+  // it and rolling down darker toward its edge, darker still at the stalk
+  // end, fine parallel veins running out from the rib, and the torn strips
+  // each a slightly different tone — the wind lifts them at different angles.
+  const strips = bandNoise(8123);
+  shadeHalfLeaf(ctx, W, H, (u, v, x, y) => {
+    if (x < 7) return 0.98;                                   // the midrib
+    const across = 0.9 - 0.26 * Math.pow(u, 1.4);            // lit by the rib, rolling off at the edge
+    const along = 0.72 + 0.28 * Math.min(1, (v - bare) / 0.35);  // darker at the stalk
+    const vein = 1 - 0.07 * Math.pow(Math.max(0, Math.sin(y * 0.9)), 8);
+    const strip = 0.9 + 0.2 * strips(y / 14);
+    return across * along * vein * strip;
+  });
 }
 
 export function drawTaroLeafTexture(canvas, o = {}) {
