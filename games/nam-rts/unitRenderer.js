@@ -263,6 +263,8 @@ const _mat = new THREE.Matrix4();
 const _local = new THREE.Matrix4();
 const _euler = new THREE.Euler();
 const _quat = new THREE.Quaternion();
+const _rock = new THREE.Matrix4();
+const _kickPos = new THREE.Vector3();
 
 /**
  * A plain three material carries no node, and three's NodeMaterialObserver only
@@ -688,6 +690,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         let d = want - v.turretAngle;
         d = Math.atan2(Math.sin(d), Math.cos(d));
         v.turretAngle += d * Math.min(1, dt * 5);
+        // RECOIL: a gun shot (projectiles.js counts them) throws the turret
+        // back and rocks the hull nose-up; both ease home over half a second.
+        // Visual only — the sim never sees it.
+        if ((unit.gunShots ?? 0) !== (v.gunShots ?? 0)) { v.gunShots = unit.gunShots; v.recoil = 1; }
+        v.recoil = Math.max(0, (v.recoil ?? 0) - dt * 2);
       }
       if (v.inst?.odometer) {
         // Distance travelled along the hull's own forward: reversing rolls back.
@@ -702,6 +709,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         const i = inst.n;
         if (i < MAX_PER_TYPE) {
           x.updateMatrix(); // off-scene: nothing else will do this for us
+          const kick = (v.recoil ?? 0) ** 2;   // snaps back at once, returns slowly
+          if (kick > 0) x.matrix.multiply(_rock.makeRotationX(-0.035 * kick));
           const tint = teamTint(unit.team, unit.type);
           for (const part of inst.parts) {
             if (part.kind) {
@@ -709,7 +718,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
               if (part.kind === "main") _euler.y = v.mainAngle;
               else if (part.kind === "turret") _euler.y = part.baseEuler.y + v.turretAngle;
               else _euler.x = v.tailAngle;
-              _local.compose(part.basePos, _quat.setFromEuler(_euler), part.baseScale);
+              _kickPos.copy(part.basePos);
+              if (part.kind === "turret" && kick > 0) {
+                // Back along the gun's line, 0.45 m in the world (the template is scaled).
+                const back = 0.45 * kick / inst.scale;
+                _kickPos.x -= Math.sin(v.turretAngle) * back;
+                _kickPos.z -= Math.cos(v.turretAngle) * back;
+              }
+              _local.compose(_kickPos, _quat.setFromEuler(_euler), part.baseScale);
               _mat.multiplyMatrices(part.parentRel, _local).premultiply(x.matrix);
             } else {
               _mat.multiplyMatrices(x.matrix, part.rel);

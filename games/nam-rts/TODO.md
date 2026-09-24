@@ -1384,7 +1384,13 @@ is not lost while Kurtz is being built.
         GPU ~1.2 ms in a 25-unit fight. **YOUR LOOK CHECK**: tracer width /
         brightness (`__NAM.projectiles.tracers.params.uIntensity`, 2.2),
         dirt kick size, the black shell-hit cloud (maybe the -light book).
-        NEXT candidates: a vehicle's gun RECOIL + turret facing the target,
+        COMMITTED 746c950. Then RECOIL (uncommitted): projectiles.js counts a
+        tank's gun shots (`gunShots`); unitRenderer.js throws the turret 0.45 m
+        back along the gun and rocks the hull nose-up 2°, easing home over
+        0.5 s — visual only. (Turrets already tracked their target.) The
+        shell and its grey gun smoke now leave the BARREL TIP (1.1 radii, the
+        puff started 1.6 m low): they hung ~4 m short of it.
+        NEXT candidates: 
         misses that hit cover (sandbags spark), infantry suppression pinned
         by MG fire (a CoH mechanic, gameplay — ask first).
 - [ ] Texture repetition (hex tiling discussed; stochastic rejected — it swam)

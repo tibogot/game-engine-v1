@@ -56,7 +56,9 @@ export function createCombatFx({ app, pool = 40 }) {
     /** A tank gun: a flash big enough to bloom, and a puff of grey gun smoke. */
     cannon(x, y, z) {
       blasts.spawn(x, y, z, 0.12);
-      books.puff(x, y, z, { size: 4.2, duration: 1.9, grey: 1 });
+      // A puff's card centres ~0.4 of its size above the point: start it low
+      // so the smoke comes OUT of the muzzle rather than hanging over it.
+      books.puff(x, y - 1.6, z, { size: 4.2, duration: 1.9, grey: 1 });
     },
     /** A round into the ground: a kick of dirt, no fire. */
     dirt(x, y, z, size = 1.3) {

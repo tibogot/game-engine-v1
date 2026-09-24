@@ -198,10 +198,15 @@ export function createProjectiles({ app, fx = null, onImpact = () => {}, onArcIm
       // middle, and the muzzle blast is the loudest thing in the fight.
       if (owner && !owner.isStructure) {
         _dir.set(target.position.x - owner.position.x, 0, target.position.z - owner.position.z).normalize();
-        src.set(owner.position.x, owner.position.y + 2.2, owner.position.z)
-          .addScaledVector(_dir, (owner.radius ?? 3) * 0.9);
+        // The barrel reaches past the hull (1.1 radii puts the M48 muzzle at
+        // its 5.5 m barrel tip): 0.9 of the radius left the gun
+        // smoke floating a few metres short of the muzzle.
+        src.set(owner.position.x, owner.position.y + 2.0, owner.position.z)
+          .addScaledVector(_dir, (owner.radius ?? 3) * 1.1);
       }
       fx?.cannon(src.x, src.y, src.z);
+      // The renderer throws the turret back when this changes (unitRenderer.js).
+      if (owner) owner.gunShots = (owner.gunShots ?? 0) + 1;
     } else {
       fx?.muzzle(src.x, src.y, src.z);
     }
