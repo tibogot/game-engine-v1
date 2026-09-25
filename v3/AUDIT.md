@@ -2318,6 +2318,20 @@ together save only 0.1–0.4 ms unpainted and 0.3–0.6 ms painted at 4.76 Mpx
 (two runs each, ~0.03–0.15 ms native). Their gates work; no change made.
 Large-scale variation was already measured free.
 
+- [ ] **DRAW THE TERRAIN LAST — engine default** (found in nam-rts 2026-09-25;
+      you asked to keep it on the list). The terrain clipmap draws at
+      renderOrder 0, FIRST among the opaque objects, so its splat shader (the
+      dearest on screen) runs on every pixel that trees, buildings, grass and
+      props then paint over. nam-rts sets it to 8 through
+      `app.getTerrainMeshes()` (games/nam-rts/namGame.js): hilltop under the
+      jungle canopy 25.1 -> 17.2 ms, base 20.4 -> 17.3, zoom-out 22.1 -> 19.0
+      at x1.55 res, same image. Likely a win for **Apex Rush's city** (buildings
+      over ground) and any game with dense cover. BEFORE making it the default
+      (terrainLOD's mesh.renderOrder): per game, list opaque meshes with
+      depthWrite off or a depthFunc other than LessEqual drawn at renderOrder
+      < the terrain's — they would be painted over (nam-rts had none: decals
+      9, sky 9, river 10.5). Then measure each game A/B at the same clock.
+
 ## Suggested order (updated 2026-09-17)
 
 1. ~~Viewport selection + prop foundation~~ — DONE 2026-09-14 (28-30, 35-37,

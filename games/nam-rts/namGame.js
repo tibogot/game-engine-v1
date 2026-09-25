@@ -279,6 +279,17 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // the decal list wholesale.
   installBuildingAprons(app);
 
+  // THE TERRAIN DRAWS LAST among the opaque things (renderOrder 8: after
+  // everything at 0, before the sky, decals and river at 9+). It is the
+  // dearest shader on screen and it was drawn FIRST, so every terrain pixel
+  // was fully shaded and then painted over by the canopy, trees, grass,
+  // buildings and units. Last, the depth test throws the hidden ones away
+  // before the shader runs. MEASURED at x1.55 res: the "hilltop GPU spot"
+  // (120, -40) 27.3 -> 18.8 ms, the base 20.8 -> 17.4, Point B 22.5 -> 20.6;
+  // screenshot diff: same image. Safe while nothing opaque with depthWrite
+  // off draws below 8 (checked: only decals 9, sky 9, river 10.5).
+  for (const m of app.getTerrainMeshes?.() ?? []) m.renderOrder = 8;
+
   // Post-FX: the GAME owns its look. postFx.enabled defaults to false in the
   // engine and is NOT stored in the .v3proj, so without this the game gets no
   // bloom no matter what its materials do. Bloom is SELECTIVE (emissive MRT),

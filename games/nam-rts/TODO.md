@@ -1738,7 +1738,45 @@ tuned). Anything below is ADDED next to it.
 
 ## Presentation
 
-- [ ] **Audio** (`howler` installed, unused — you said "not now")
+- [~] **Audio** — STARTED 2026-09-25 ("are you confident to find sound?
+      they should sound nice — if so go ahead"). Plan: CC0 sounds only
+      (Freesound, filtered to Creative Commons 0 — commercial/Steam-safe, no
+      credit needed), picked by downloads + rating, then measured (length,
+      loudness, clipping, noise floor) since I cannot LISTEN. Several
+      candidates per slot; a Dev → SOUND panel swaps them live IN THE GAME,
+      so your ears pick. Slots: rifle, M60/MG, cannon, gunship minigun +
+      rockets, explosions (near/far), napalm, fire loop, Huey rotor, jeep /
+      tank engines, jungle ambience, river, bird flush, smoke pop, UI clicks,
+      radio acknowledgements. Pooled, voice-capped, distance-attenuated from
+      the camera focus; no frame cost.
+      LATER: the other options (suppression, birds settling + flush,
+      hilltop GPU spot, the open decisions) — you said keep them for later.
+- [x] **BUILT (2026-09-25, uncommitted)**: namAudio.js (mixer), namSounds.js
+      (which event makes which sound), soundPanel.js (Dev → Sound),
+      public/sounds/nam/ (76 CC0 candidates, 26 MB, + manifest.json with each
+      file's source, measured gain and silence trim). Hooks: projectiles
+      `sfx` (shots, rockets, impacts, mortar whistle), fx.explosion /
+      shellHit, napalm fireballs, smoke grenades, bird flushes, selection
+      `onOrder` (radio), a finished building (radio), loops for Hueys,
+      moving vehicles, fire, construction and the jungle. MEASURED (output
+      meter, since I cannot listen): base at rest -28 dB, scripted firefight
+      -20.6 median / -15.3 loud / peak -0.4 (no clipping); main thread
+      0.09 ms/frame under heavy gunfire. Clipped recordings (the most
+      downloaded MG: 9011 clipped samples) are never the default.
+- [x] **"one of the bird sounds is too loud and repeating way too much"**
+      (your report) — the jungle bed: the first recording had a bird calling
+      12-16 dB over it every 5-6 s in a 2-minute loop. Now the 288 s one (a
+      call every ~19 s), under its own compressor (loudest call 7.9 dB over
+      the bed, was 15.5); bird-flush sound quieter, max one per 10 s.
+- [x] **Sound OFF by default** (your call, 2026-09-25: "we will tweak it
+      later") — Dev → Sound → "Sound: on" to hear it. Off = the audio
+      context suspended: no audio-thread work at all.
+- [ ] **LATER — YOU: pick the sounds by ear** — Dev → Sound: ▶ the file alone, ◎ at
+      the camera, "Firefight here" for all of them at once, then "Copy
+      picks" (or just tell me). THEN: bake picks into the manifest and
+      DELETE the unpicked candidates (26 MB → a few MB before shipping).
+- [ ] Not yet: river sound (needs the river's line), unit voice lines
+      (no good CC0 ones found — radio squelch instead), bullet whizz-bys.
 - [ ] Better **UI**
 - [ ] Better **FX** pass (still rts-v3's look; never touch games/rts-v3)
 - [ ] **Smoke look** fine-tune — **you**, later
@@ -1816,7 +1854,23 @@ tuned). Anything below is ADDED next to it.
       plane — off in RTS mode, back with C; measure each first
 - [ ] Staggered target acquisition — **your** call (changes reaction timing)
 - [ ] Terrain index blending (top-4 layers/texel), ~1 ms — engine, new chat
-- [ ] **THE HILLTOP GPU SPOT — must be fixed** (your call 2026-09-22: important,
+- [x] **THE HILLTOP GPU SPOT — FIXED 2026-09-25 (uncommitted).** The TERRAIN
+      was drawn FIRST among the opaque things, so every terrain pixel was
+      fully shaded and then painted over (canopy, trees, grass, buildings).
+      namGame now sets the terrain clipmap's renderOrder to 8 (after
+      everything at 0, before sky/decals 9 and river 10.5); the depth test
+      rejects the hidden pixels before the shader runs. Same image
+      (screenshot diff at the base: only wind and a live explosion).
+      MEASURED x1.55 res, old -> new: hilltop 25.1 -> 17.2 ms, base 20.4 ->
+      17.3, Point B 21.6 -> 19.4, Point C 19.2 -> 18.5, base at full zoom-out
+      22.1 -> 19.0. (Also priced on the hill, NOT changed — look trade-offs,
+      YOUR call: layer 5's triplanar ~1.9 ms, terrain anisotropy 8 -> 4
+      ~0.9 / 8 -> 1 ~1.9.) The old "draw order: ruled out" below was tested
+      before the jungle canopy existed.
+      ENGINE CANDIDATE: the same default in v3 terrainLOD would help every
+      game (Apex Rush's city), but first check each for an opaque
+      depthWrite-off mesh drawn below the terrain (it would be painted over).
+- [ ] ~~**THE HILLTOP GPU SPOT — must be fixed**~~ (history) (your call 2026-09-22: important,
       but parked after a long session on it). WHAT IS KNOWN, so nobody starts
       over: at (120, −40) the GPU takes **10.6 ms** where the bridge and the
       grass flats take **0.8** at the same camera height; seen again at
