@@ -78,6 +78,8 @@ export function createNamSounds({ app, rtsCamera, units, buildings = null, fx, f
       if (r) audio.play("birdFlush", x, app.getWorldHeight?.(x, z) ?? 0, z, { delay: 0.15 });
       return r;
     };
+    // A stand of egrets lifting off the river bank.
+    app.onBirdsLift = (x, z) => audio.play("birdFlush", x, app.getWorldHeight?.(x, z) ?? 0, z, { gain: 0.7 });
   }
 
   // ── Loops ─────────────────────────────────────────────────────────────────

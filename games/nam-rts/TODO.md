@@ -565,7 +565,32 @@ Vietnam, like Apocalypse Now.
 - [x] Ground shadows: a flattened copy of each bird down the sun ray, 30%
       dark, laid at the grass TIPS (0.8 m) — on the soil the blades hid it.
       Birds + shadows at x1.55, play zoom: 29.22 vs 29.22 ms (2 draws).
-- [ ] Not done yet: egrets SETTLING on paddies/rivers, a more violent flush.
+- [x] **BIRDS PART 2 (2026-09-25, uncommitted)** — your pick.
+      · **Settled egrets**: a 4th shape in birdShapes.js (standing: upright
+        body, S-neck, bill, legs; the neck and head PECK in the vertex stage),
+        stands of 4-9 that walk about, and transit egret flocks that glide in
+        and LAND one by one. They go up — and the flock that was still coming
+        in gives up and flies on — when a man comes within 26 m, a vehicle 40,
+        a helicopter 85, or a shot/blast 90 (every shot now tells the birds).
+      · WHERE: open ground only — nothing over 0.2 foliage / 0.1 tall plants
+        within 3 m, no prop (nav grid), not under the canopy's crowns (the
+        game's jungle field is now `app.jungleField`), 60 m from structures,
+        nearer water preferred. nam-valley's river runs through jungle from
+        end to end, so its 9 sites are meadows and tracks, not banks. Three
+        honest mistakes on the way, all measured: a stand under banana leaves
+        (a 0-density texel inside 0.7-density plants), a stand inside the
+        temple's galleries, a scan run at 1 Hz under the loading screen before
+        the canopy existed (now `birds.worldReady()`).
+      · Standing egrets drawn 1.5x: in 0.8 m grass a true-size one was a head.
+      · **Violent flush**: the blast's SIZE sets it — a grenade lifts a dozen,
+        napalm ~40, in two or three flocks (egrets, crows, hornbills for big
+        ones) bursting in different directions from the TOP of what grows
+        there (26 m canopy, not 5 m inside the crowns), in a wave over ~1 s,
+        wings beating fast in PANIC (phase advanced on the CPU so the speed-up
+        does not jump) and calming over 4 s; birds already in the air nearby
+        shy away. A big blast can re-flush a spot after 6 s, not 22.
+      · COST: 118 birds in the air 0.22 ms CPU a frame; still 2 draws.
+      · Sound: a stand lifting plays the flush sound (when sound is on).
 
 ## SEE UNITS THROUGH BUILDINGS & FOLIAGE — your question, 2026-09-25 (TALK FIRST)
 

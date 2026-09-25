@@ -1,6 +1,7 @@
-// Bird silhouettes for rtsBirds.js — three species in ONE geometry, so every
-// bird on the map stays one draw. Each vertex carries its species (aSpecies)
-// and the instance's species (iSpecies) collapses the other two to a point.
+// Bird silhouettes for rtsBirds.js — three species in flight and a standing
+// egret, in ONE geometry, so every bird on the map stays one draw. Each vertex
+// carries its shape in `aBird.x`; the instance's shape (`iBird.x`) collapses
+// the other three to a point.
 //
 // Seen from an RTS camera a bird is a few pixels: what reads is the
 // SILHOUETTE and the colour against the ground, not detail. So each species is
@@ -27,11 +28,12 @@ const C = {
 };
 
 export function birdShapes() {
-  const P = [], COL = [], SP = [], HAND = [];
+  const P = [], COL = [], SP = [], HAND = [], HEAD = [];
   let species = 0;
+  let head = 0;   // 1 while building a standing bird's neck and head (it pecks)
   const tri = (a, b, c, col, hand = [0, 0, 0]) => {
     P.push(...a, ...b, ...c);
-    for (let i = 0; i < 3; i++) { COL.push(...col); SP.push(species); HAND.push(hand[i]); }
+    for (let i = 0; i < 3; i++) { COL.push(...col); SP.push(species); HAND.push(hand[i]); HEAD.push(head); }
   };
   const quad = (a, b, c, d, col, hand) => {
     tri(a, b, c, col, hand ? [hand[0], hand[1], hand[2]] : undefined);
@@ -121,11 +123,57 @@ export function birdShapes() {
       [[0.6, 0, -0.02], [0.54, 0, -0.2]], C.black, C.white);
   }
 
+  // ── 3 EGRET, STANDING ────────────────────────────────────────────────────
+  // On a river bank or in the shallows: the body tilted up at the chest, the
+  // S-neck raised, the dagger bill level, black legs to the ground. About
+  // 0.9 m tall; the feet are at y = 0. Seen from the RTS camera it is a white
+  // spindle with a neck — which is exactly how a stand of egrets reads on a
+  // paddy. The neck and head carry `aHead`: the vertex stage dips them to peck.
+  species = 3;
+  {
+    // Body: a spindle from the chest (up and forward) to the tail (down, back).
+    const ring = (cy, cz, w, h) => [[0, cy + h, cz], [w, cy, cz], [0, cy - h, cz], [-w, cy, cz]];
+    const chest = [0, 0.64, 0.16], tail = [0, 0.5, -0.24];
+    const R = ring(0.58, -0.03, 0.075, 0.07);
+    for (let k = 0; k < 4; k++) {
+      const a = R[k], b = R[(k + 1) % 4];
+      const col = k >= 1 && k <= 2 ? C.whiteShade : C.white;   // the underside a shade darker
+      // Wound to face OUT: the bird's normals are all "up", and a back face
+      // gets it flipped — the first winding lit the whole body as an
+      // underside, a blue-grey diamond.
+      tri(chest, b, a, col);
+      tri(tail, a, b, col);
+    }
+    // Legs: two thin black blades to the ground (crossed, so they show from above).
+    for (const s of [1, -1]) {
+      const top = [0.03 * s, 0.52, -0.02], foot = [0.035 * s, 0, 0.0];
+      tri(top, [top[0] + 0.012, top[1], top[2]], foot, C.black);
+      tri(top, [top[0], top[1], top[2] + 0.012], foot, C.black);
+    }
+    // Neck (S, raised) and head, with the bill: these peck.
+    head = 1;
+    const n0 = [0, 0.66, 0.13], n1 = [0, 0.8, 0.09], n2 = [0, 0.9, 0.14];
+    const wN = 0.022;
+    for (const [p, q] of [[n0, n1], [n1, n2]]) {
+      tri([p[0] - wN, p[1], p[2]], [p[0] + wN, p[1], p[2]], [q[0] + wN, q[1], q[2]], C.white);
+      tri([p[0] - wN, p[1], p[2]], [q[0] + wN, q[1], q[2]], [q[0] - wN, q[1], q[2]], C.white);
+      tri([p[0], p[1], p[2] - wN], [p[0], p[1], p[2] + wN], [q[0], q[1], q[2] + wN], C.whiteShade);
+      tri([p[0], p[1], p[2] - wN], [q[0], q[1], q[2] + wN], [q[0], q[1], q[2] - wN], C.whiteShade);
+    }
+    tri([0.028, 0.9, 0.12], [0, 0.93, 0.19], [-0.028, 0.9, 0.12], C.white);          // head
+    tri([0.012, 0.905, 0.18], [0, 0.9, 0.34], [-0.012, 0.905, 0.18], C.yellow);       // bill
+    tri([0.012, 0.905, 0.18], [-0.012, 0.905, 0.18], [0, 0.89, 0.3], C.yellow);
+    head = 0;
+  }
+
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
   g.setAttribute("color", new THREE.Float32BufferAttribute(COL, 3));
-  g.setAttribute("aSpecies", new THREE.Float32BufferAttribute(SP, 1));
-  g.setAttribute("aHand", new THREE.Float32BufferAttribute(HAND, 1));
+  // One vec3 per vertex (species, wing-hand weight, head): three separate
+  // attributes would take the mesh to WebGPU's 8 vertex buffers.
+  const BIRD = new Float32Array(SP.length * 3);
+  for (let i = 0; i < SP.length; i++) { BIRD[i * 3] = SP[i]; BIRD[i * 3 + 1] = HAND[i]; BIRD[i * 3 + 2] = HEAD[i]; }
+  g.setAttribute("aBird", new THREE.BufferAttribute(BIRD, 3));
   // Flat, UP normals: the whole bird is lit as the sky sees it — the back by the
   // sun, the underside (DoubleSide flips it) in shade.
   const N = new Float32Array(P.length);
@@ -139,4 +187,8 @@ export const SPECIES = [
   { key: "egret", rate: 2.4, glide: 0.45, size: 1.1 },
   { key: "crow", rate: 4.6, glide: 0.1, size: 0.85 },
   { key: "hornbill", rate: 3.0, glide: 0.55, size: 1.4 },
+  // A standing egret: no wingbeat (the vertex stage holds its wings still).
+  // 1.5x a real great egret: in 0.8 m meadow grass a true-size one showed
+  // only its head, and from the RTS camera that is nothing.
+  { key: "egretStanding", rate: 0, glide: 1, size: 1.5 },
 ];

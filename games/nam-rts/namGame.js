@@ -718,7 +718,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // any blast — every explosion and every crater (shells, napalm bombs) asks;
   // the birds decide (jungle there? this spot flushed recently?). A sign of
   // fighting you can read from across the map. See rtsBirds.js.
-  const birds = createRtsBirds({ app });
+  // `units`: a stand of egrets on the river goes up when men, a vehicle or a
+  // helicopter come near it.
+  const birds = createRtsBirds({ app, units });
   app.birds = birds;
 
   // The grass remembers where your men walked (grassTrails.js). The engine's
@@ -731,9 +733,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   app.grassTrails = grassTrails;
   {
     const explosion = fx.explosion;
-    fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); birds.flush(x, z); };
+    // The blast's size decides how many birds the canopy loses (rtsBirds.flush);
+    // a man going down (the dust puff) flushes nothing.
+    fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) birds.flush(x, z, { size: opts?.size ?? 10 }); };
     const addCrater = craters.addCrater?.bind(craters);
-    if (addCrater) craters.addCrater = (x, z, ...rest) => { const r = addCrater(x, z, ...rest); birds.flush(x, z); return r; };
+    if (addCrater) craters.addCrater = (x, z, ...rest) => { const r = addCrater(x, z, ...rest); birds.flush(x, z, { size: (rest[0] ?? 4) * 2.2 }); return r; };
   }
 
   // SOUND (namSounds.js → namAudio.js): wraps the effects above so each is
@@ -744,7 +748,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combatRef = null;
   const projectiles = createProjectiles({
-    app, fx, sfx: sounds.sfx,
+    app, fx,
+    // Every shot is heard (namSounds) and puts up any egrets standing near it.
+    sfx: { ...sounds.sfx, shot: (owner, w, at) => { sounds.sfx.shot(owner, w, at); birds.disturb(at.x, at.z); } },
     onImpact: (target, dmg, at, owner, opts) => combatRef?.onImpact(target, dmg, at, owner, opts),
     // A mortar shell lands on GROUND, not on a unit (projectiles.spawnArc).
     onArcImpact: (at, dmg, splash, owner) => combatRef?.splashAt(at, dmg, splash, owner),
@@ -1056,6 +1062,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     if (!result?.loaded) return;
     worldState.name = result.name;
     await reseatWorld();
+    birds.worldReady();                  // a new river: new banks
     devPanel.setWorldName(worldState.name);
   };
 
@@ -1271,6 +1278,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // The palms along its sunlit margin, on top of the map's own palm paint,
     // and traveller's palms out in the wild, not only in the village.
     let palms = 0, travellers = 0, floor = 0;
+    // Where the forest and the palm fringe are, for whoever needs to stay out
+    // from under them (the egrets pick open banks — rtsBirds.js).
+    app.jungleField = field;
     if (field) {
       palms = paintPalmFringe(app, field);
       floor = paintUndergrowth(app, field);
@@ -1366,6 +1376,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // covers all of them: __NAM.smoke.spawn({x, z, kind: "screen"}).
   window.__NAM = app;
 
+  // The world is built (river, canopy, props): the egrets may look for their
+  // banks now. The loop has been running at 1 Hz under the loading screen,
+  // and a scan then found banks under a canopy that was not painted yet.
+  birds.worldReady();
   app.setFrameThrottle?.(0);     // the loading screen is going: full rate
   // Build every pipeline the game will need NOW, under the loading screen,
   // not on the frame the first fire, rocket or tank appears mid-fight
