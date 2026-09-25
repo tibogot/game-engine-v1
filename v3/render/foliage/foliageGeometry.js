@@ -43,6 +43,7 @@ import { buildBanana } from "./bananaGeometry.js";
 import { buildTravellersPalm } from "./travellersPalmGeometry.js";
 import { buildBanyan } from "./banyanGeometry.js";
 import { buildDipterocarp } from "./dipterocarpGeometry.js";
+import { buildPandanus } from "./pandanusGeometry.js";
 
 export const FOLIAGE_LODS = 3;
 
@@ -95,6 +96,9 @@ const LEAF_ROUNDING = {
   // middle, high up, so the heads still read as one umbrella.
   dipterocarp: [0.85, 0.3],
   taro:      [0.05, 0.6],
+  // Each pandanus tuft is a star of swords high on the plant: round a little,
+  // from about its tufts' height, so the lit tops and hanging undersides read.
+  pandanus:  [0.75, 0.35],
 };
 
 function roundLeafNormals(type, P, N, A) {
@@ -217,6 +221,7 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
   if (type.kind === "travellersPalm") return buildTravellersPalm(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "banyan") return buildBanyan(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "dipterocarp") return buildDipterocarp(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "pandanus") return buildPandanus(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
     const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : type.kind === "susuki" ? "fan" : "plume";

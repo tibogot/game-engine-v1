@@ -93,6 +93,7 @@ import { placeEnemyCamp, createEnemyCampFlag } from "./enemyCamp.js";
 import { siteEnemyLine } from "./enemyLine.js";
 import { paintCanopy, paintPalmFringe, paintUndergrowth, travellerPalmSpots, canopyClearings } from "./jungleCanopy.js";
 import { plant, updatePlantedPlants } from "./placedPlants.js";
+import { plantSpecimens } from "./specimenPlants.js";
 import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
@@ -1290,6 +1291,20 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       }
     }
     console.log(`[canopy] ${texels} texels of forest, ${palms} of palm fringe, ${floor} of undergrowth, ${travellers} traveller's palms in ${Math.round(performance.now() - t0)} ms`);
+  }
+
+  // The plants that make it Vietnam and Cambodia: pandanus on the river's
+  // edge, sugar palms round the village and the temple and out in the open,
+  // flame trees in the village (specimenPlants.js). ?specimens=0 = without.
+  if (new URLSearchParams(location.search).get("specimens") !== "0") {
+    const t0 = performance.now();
+    try {
+      const n = plantSpecimens(app, {
+        field: app.jungleField ?? null, structures,
+        hamlets: hamletSitesFor(boot.name), temples: templeSitesFor(boot.name),
+      });
+      console.log(`[specimens] ${n.pandanus} pandanus, ${n.sugarPalm} sugar palms, ${n.flameTree} flame trees in ${Math.round(performance.now() - t0)} ms`);
+    } catch (e) { console.warn("[specimens] failed:", e); }
   }
 
   // Every bridge gets ground at both ends that meets its deck — without it

@@ -254,6 +254,63 @@ Keep this file current: tick things off here, add new asks here.
 
 Everything else below is in its section.
 
+## THE CANOPY TREE'S LEAVES — your note, 2026-09-25 — DONE ("look way better")
+
+- [x] WIRED IN (uncommitted): the dipterocarp's card key is now `leafSpray`
+      (foliageGeometry.cardTextureOf); foliageSystem draws the banyan card as
+      a stand-in and redraws the SAME texture from your masks once they load.
+      Same image as the live A/B after a reload.
+- [x] Same treatment for the BANYAN (your go 2026-09-25): cardTextureOf
+      banyan → leafSpray too. A big fine-leaved dome by the village.
+- [x] **NEW PLANTS (your go 2026-09-25: "anything you think will look very
+      nice in that Vietnam Cambodian jungle")** — uncommitted:
+      · PANDANUS, the screw pine (new kind, v3/render/foliage/
+        pandanusGeometry.js): thin leaning trunk on STILT ROOTS, forking into
+        branches that each end in a spiral tuft of V-folded swords. Plain
+        geometry, no card, no alpha test. First pass too thin to read (true
+        8 cm leaves are hair from the RTS camera) → 36 leaves a tuft, 1.7x
+        width, pale olive.
+      · SUGAR PALM, tall (preset `sugarPalm` on the fan palm): the 24 m
+        thốt nốt column with a ball of 3 m fans.
+      · FLAME TREE (preset `flameTree` on the dipterocarp builder): a low
+        wide umbrella, green under, flame red on top (#b84a26 — the first
+        red read as a cartoon ball).
+      · games/nam-rts/specimenPlants.js plants them at boot, seeded: 53
+        pandanus in clumps on the river's edge (1-3 cells from open water,
+        not in it), 28 sugar palms (round the village and the temple, and
+        alone/pairs on open ground), 3 flame trees (2 village, 1 temple).
+        71 ms of boot. `?specimens=0` = without.
+      · COST: all 53 pandanus in view 0.1 ms at x2 res. The hitches on
+        jumping the camera to them (166 / 102 ms) happen the SAME without
+        them (?specimens=0) — see the camera-jump hitch below.
+- [ ] **Camera-jump hitch** (found 2026-09-25): the first close-up after a
+      jump across the map costs 100-170 ms once (with or without the new
+      plants). Likely first-time terrain/grass/foliage tile work at a new
+      place; a player's minimap click does exactly this. Measure what.
+- [ ] Still open from the plant list: sago palm, nipa placement (the preset
+      exists), a strangler fig on the temple ruins (Ta Prohm) — a big one.
+- [x] **"Those exotic trees with spiky shapes"** (your ask 2026-09-25) —
+      built as the PANDANUS above (my best guess of what you meant); say if
+      you meant another (kapok, dragon tree).
+- [x] "Only the big tree canopy looks wrong compared to the rest of the forest
+      — its foliage is flat images without any empty space; the arborist's
+      leaf images have transparency INSIDE, which looks way more realistic."
+      CONFIRMED: the dipterocarp's crown uses the banyan card
+      (banyanLeafTexture.js), whose alpha is a solid blob with a ragged rim.
+      BUILT: v3/render/foliage/leafSprayCard.js — a card made from YOUR
+      arborist masks (Leaf-Billboard-Texture-1 and -5, the elliptic pinnate
+      sprays; -2 is a maple, wrong for Vietnam), 4 sprays a card so a
+      leaflet is ~30-40 cm on a 5 m card (one spray made them 65 cm), with a
+      per-leaf shade (dark rim, bright middle — a distance transform) and a
+      clump shade (lit top, shaded under). Same cost (27.95 vs 27.38 ms at
+      x1.55). Close up: real leaves with leaves behind leaves. At play zoom:
+      a finer, leafier mass that matches the palms around it, but SOFTER
+      clumps than the old card's hard-shaded cauliflowers. NOT WIRED IN YET —
+      live-swapped for the A/B; wiring = a card key for the dipterocarp that
+      loads the masks (with the old card as the fallback until they load).
+      OPTIONS if the lumps should come back: darker cracks (stronger clump
+      shading), or fewer bigger sub-crowns in dipterocarpGeometry.
+
 ## THE ENEMY SIDE — your asks, 2026-09-23 (next block after ruins/vegetation)
 
 Your words: their base is still empty next to ours, the default turrets are the

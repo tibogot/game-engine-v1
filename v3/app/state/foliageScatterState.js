@@ -201,6 +201,45 @@ export const FOLIAGE_PRESETS = {
     plumesPerStem: 16, plumeSpread: 12,
     colorBase: "#1d3d1f", colorTip: "#6f9a3a", colorHead: "#5c4a3a", size: 18, translucency: 0.5,
   },
+  // PANDANUS — the screw pine, dứa dại (pandanusGeometry.js): a thin leaning
+  // trunk on STILT ROOTS, forking into branches that each end in a spiral
+  // tuft of long keeled swords. River banks, canal edges. `fronds` = tufts,
+  // `leaflets` = leaves a tuft, `plumeSpread` = leaf length % of height,
+  // `plumesPerStem` = stilt roots. `size` 7 m. Plain geometry, no card.
+  pandanus: {
+    kind: "pandanus",
+    // 36 leaves at 1.7 width, not 26 at 1: true-width (8 cm) swords read as
+    // hair from the RTS camera and the tufts vanished into the grass. The
+    // pale olive is the real leaf's; the dark green of the rest sank it too.
+    fronds: 4, frondLength: 1.0, leaflets: 36, leafletWidth: 1.7, leafletAngle: 35,
+    spread: 0.28, arch: 0.55, droop: 0.5, stemWidth: 1, bareStalk: 0.42,
+    plumesPerStem: 6, plumeSpread: 22,
+    colorBase: "#3d6a2c", colorTip: "#a3b35a", colorHead: "#7a6e5c", size: 7, translucency: 0.7,
+  },
+  // SUGAR PALM, TALL — thốt nốt as it stands over a Cambodian paddy or an
+  // Angkor causeway: the fan palm's ball of fans on a 24 m column. The same
+  // builder as `fanPalm`; the leaves kept to ~3 m (plumeSpread 13% of 24 m),
+  // a thinner trunk and a smaller skirt, as a tall old tree has.
+  sugarPalm: {
+    kind: "fanPalm",
+    fronds: 26, frondLength: 1.0, leaflets: 30, leafletWidth: 0.9, leafletAngle: 18,
+    spread: 1.0, arch: 0.4, droop: 0.5, stemWidth: 0.75, bareStalk: 0.34,
+    plumesPerStem: 4, plumeSpread: 13,
+    colorBase: "#2f5a22", colorTip: "#7f9c3a", colorHead: "#5d574d", size: 24, translucency: 0.8,
+  },
+  // FLAME TREE — phượng vĩ, Delonix regia: a low, very WIDE flat umbrella that
+  // flowers flame red over green, in every village and schoolyard. The
+  // dipterocarp's umbrella builder at a third of the height, twice the
+  // relative spread, a low fork, a flat crown; its colour runs from green
+  // leaves under to red flowers on top.
+  flameTree: {
+    kind: "dipterocarp",
+    fronds: 6, frondLength: 1.0, leaflets: 110, leafletWidth: 0.85, leafletAngle: 30,
+    spread: 0.72, arch: 0.1, droop: 0.2, stemWidth: 1.5, bareStalk: 0.36,
+    plumesPerStem: 0, plumeSpread: 0,
+    // #b84a26, not #c9391d: the first read as a cartoon red ball.
+    colorBase: "#34552a", colorTip: "#b84a26", colorHead: "#6a6258", size: 11, translucency: 0.6,
+  },
   // DIPTEROCARP — the lowland rainforest canopy tree (dipterocarpGeometry.js):
   // a clean pale bole, buttress roots, and an umbrella of cauliflower heads
   // made of the banyan's billboard leaf clusters. 30 m, an emergent.

@@ -20,6 +20,11 @@ export const PLANTED = {
   travellersPalm: { preset: "travellersPalm", clear: 2.5 },
   // A banyan's trunk is three metres of fused wood: it blocks the way.
   banyan: { preset: "banyan", clear: 6, block: 2.6 },
+  // The screw pine: thin trunk, stilt roots a man walks between.
+  pandanus: { preset: "pandanus", clear: 2 },
+  // A 24 m sugar palm's column is thinner than a nav cell.
+  sugarPalm: { preset: "sugarPalm", clear: 2 },
+  flameTree: { preset: "flameTree", clear: 3, block: 0.8 },
 };
 
 export function isPlanted(kind) { return kind in PLANTED; }
