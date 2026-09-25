@@ -29,6 +29,7 @@ import { drawCanopyClusterTexture, CANOPY_TEX_W, CANOPY_TEX_H } from "./canopyCl
 import { drawFanLeafTexture, FAN_TEX_W, FAN_TEX_H } from "./fanLeafTexture.js";
 import { drawLanceLeafTexture, LANCE_TEX_W, LANCE_TEX_H } from "./lanceLeafTexture.js";
 import { drawBanyanLeafTexture, BANYAN_TEX_W, BANYAN_TEX_H } from "./banyanLeafTexture.js";
+import { drawLeafSprayCard, loadLeafSprayMasks, LEAF_SPRAY_MASKS, LEAF_SPRAY_TEX } from "./leafSprayCard.js";
 import { bakeObjectThumbnails } from "../../../v2/tools/objectThumbnails.js";
 import { ScatterField } from "../scatter/scatterField.js";
 import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
@@ -77,7 +78,19 @@ const CARD_TEXTURES = {
   // colour (see alphaCoverageMips) — a leaf cluster is leaves, a fan is
   // pleated, a frond is a thousand blades, not one flat green (2026-09-24).
   banyan: { w: BANYAN_TEX_W, h: BANYAN_TEX_H, draw: drawBanyanLeafTexture, shade: true },
+  // The canopy tree's crown: sprays of REAL leaves from the arborist's masks,
+  // sky between the leaves (leafSprayCard.js; your call 2026-09-25, "look way
+  // better"). The masks are PNGs, so the banyan card stands in until they
+  // load and the texture is redrawn in place.
+  leafSpray: {
+    w: LEAF_SPRAY_TEX, h: LEAF_SPRAY_TEX, draw: drawBanyanLeafTexture, shade: true,
+    masks: LEAF_SPRAY_MASKS,
+    drawMasks: (c, masks) => drawLeafSprayCard(c, masks, { sprays: 4, scale: 0.52 }),
+  },
 };
+
+/** Mask images, loaded once per set and shared by every card that uses them. */
+const _maskLoads = new Map();
 
 /**
  * Draw one card texture. `anisotropy` for the live field; thumbnails go without.
@@ -93,7 +106,23 @@ export function makeCardTexture(key, anisotropy = 0) {
   const canvas = document.createElement("canvas");
   canvas.width = spec.w; canvas.height = spec.h;
   spec.draw(canvas);
-  return coverageMippedTexture(canvas, { threshold: 0.4, anisotropy, shade: spec.shade === true });
+  const opts = { threshold: 0.4, anisotropy, shade: spec.shade === true };
+  const tex = coverageMippedTexture(canvas, opts);
+  if (spec.masks) {
+    // Redraw from the masks once they are in, into the SAME texture — every
+    // material built on it picks the new pixels up with no rebuild.
+    const key = spec.masks.join("|");
+    if (!_maskLoads.has(key)) _maskLoads.set(key, loadLeafSprayMasks(spec.masks));
+    _maskLoads.get(key).then((masks) => {
+      if (!masks.length) return;                     // keep the stand-in
+      spec.drawMasks(canvas, masks);
+      const next = coverageMippedTexture(canvas, opts);
+      tex.image = next.image;
+      tex.mipmaps = next.mipmaps;
+      tex.needsUpdate = true;
+    });
+  }
+  return tex;
 }
 
 /**

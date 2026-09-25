@@ -172,7 +172,9 @@ export function cardTextureOf(kind) {
     case "jungleTree": return "canopy";
     case "cardFern": return "fern";
     case "banana": case "travellersPalm": return "banana";
-    case "banyan": case "dipterocarp": return "banyan";
+    // Sprays of real leaves with sky between them (leafSprayCard.js) — the
+    // banyan card's solid blob made both crowns read as green sheets.
+    case "banyan": case "dipterocarp": return "leafSpray";
     case "taro": return "taro";
     default: return null;
   }
