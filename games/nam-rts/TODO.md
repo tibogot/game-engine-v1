@@ -553,6 +553,20 @@ Vietnam, like Apocalypse Now.
       in a V, crows), and flocks **flushed** from the jungle by any explosion or
       crater — mostly white so they read from above. One draw. Dev: BIRDS section
 
+## BETTER BIRDS — your question, 2026-09-25 (built, awaiting your look)
+
+- [x] birdShapes.js: three species in ONE geometry (egret: S-neck throat,
+      yellow bill, trailing legs; crow: fan tail, fingered primaries; NEW
+      Oriental pied hornbill: white belly/trailing edge/tail corners, ivory
+      bill + casque), vertex colours, two-segment wings. rtsBirds.js: the
+      wing ROTATES about the body with the hand turning further (a plain
+      lift stretched it into a needle), per-species flap rate + glide share
+      + size; hornbills 20% of transits, 3-5 in a line, +8 m over canopy.
+- [x] Ground shadows: a flattened copy of each bird down the sun ray, 30%
+      dark, laid at the grass TIPS (0.8 m) — on the soil the blades hid it.
+      Birds + shadows at x1.55, play zoom: 29.22 vs 29.22 ms (2 draws).
+- [ ] Not done yet: egrets SETTLING on paddies/rivers, a more violent flush.
+
 ## SEE UNITS THROUGH BUILDINGS & FOLIAGE — your question, 2026-09-25 (TALK FIRST)
 
 - [ ] Options discussed: (1) CoH X-RAY SILHOUETTE — units re-drawn once
@@ -580,6 +594,15 @@ Vietnam, like Apocalypse Now.
       two; a wall or a crown is further in front). Free. Trade-off: a man
       pressed against a low wall may not show. The exact alternative (a
       stencil bit written by buildings and trees) is an engine change.
+- [x] **HUEY LIT UP BLUE ON ITSELF** (your screenshot, 2026-09-25) — door
+      frames, skid struts and door guns showed blue under the Huey's own roof
+      and rotor blade: the vehicle lift was capped at 3.5 m, less than the
+      helicopter's own height. Now: the body's width (rotors left out, or the
+      15 m disc would blind it) plus the FULL height as `liftUp`, which the
+      shader divides by the view ray's slope (a part a mast below the blade
+      is ~2x that far along a 30° ray). Checked with the silhouettes tinted
+      magenta: 0 px on the Hueys over 8 frames at two zooms; a jeep under
+      palm fronds still shows.
 
 - [x] **SOLDIERS INSIDE THE HQ** (your x-ray screenshot, 2026-09-25) —
       REAL, reproduced: 10 of 10 soldiers ordered at the base walked in. The

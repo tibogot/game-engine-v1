@@ -21,7 +21,10 @@
 // Like modular-road's birds they never draw smaller than `minPixels`: a
 // sub-pixel triangle does not fade, it crawls.
 import * as THREE from "three";
-import { Fn, attribute, float, hash, instanceIndex, positionLocal, sin, smoothstep, uniform, vec3 } from "three/tsl";
+import {
+  Fn, abs, attribute, cos, float, hash, instanceIndex, mix, positionLocal, select, sin, smoothstep, step, uniform, vec3,
+} from "three/tsl";
+import { SPECIES, birdShapes } from "./birdShapes.js";
 
 export const RTS_BIRD_PARAMS = {
   enabled: true,
@@ -40,51 +43,83 @@ export const RTS_BIRD_PARAMS = {
   minPixels: 2.6,
   flapRate: 4.2,                   // beats per second
   flapAmp: 0.6,
+  // Ground shadows (a flattened copy of each bird, down the sun ray).
+  shadows: true,
+  shadowOpacity: 0.3,
+  // Laid over the grass TIPS, not the soil: on the ground the blades hid all
+  // but a few pixels of it, and most of the map is grass.
+  shadowLift: 0.8,
 };
 
-const EGRET = new THREE.Color(0.9, 0.89, 0.84);
-const CROW = new THREE.Color(0.11, 0.11, 0.12);
-
-/** Three triangles, local +Z forward; aFlap tags the two wing tips. */
-function birdGeometry() {
-  const V = [
-    0, 0, -0.55, 0, 0.13, -0.55, 0, 0, 0.95,
-    0, 0, -0.42, -0.62, 0, 0.10, 0, 0, 0.42,
-    0, 0, 0.42, 0.62, 0, 0.10, 0, 0, -0.42,
-  ];
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(V, 3));
-  g.setAttribute("aFlap", new THREE.Float32BufferAttribute([0, 0, 0, 0, 1, 0, 0, 1, 0], 1));
-  g.computeVertexNormals();
-  return g;
-}
+const KIND_INDEX = { egret: 0, crow: 1, hornbill: 2 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
 
 export function createRtsBirds({ app, params = {} }) {
   const P = { ...RTS_BIRD_PARAMS, ...params };
-  const geo = birdGeometry();
+  // Three species in one geometry (birdShapes.js); iSpecies picks one per bird.
+  const geo = birdShapes();
+  const iSpecies = new THREE.InstancedBufferAttribute(new Float32Array(P.maxBirds), 1);
+  iSpecies.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute("iSpecies", iSpecies);
   const uTime = uniform(0);
-  const mat = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide, roughness: 0.9, metalness: 0 });
-  mat.name = "RtsBirds";
-  // Wing beat: the tips swing, the roots stay on the body. Each bird has its
-  // own rate and phase, and a slow gate lets it glide now and then.
-  mat.positionNode = Fn(() => {
+  const bySpecies = (sp, vals) => select(sp.lessThan(0.5), float(vals[0]), select(sp.lessThan(1.5), float(vals[1]), float(vals[2])));
+
+  /** The bird in its own frame: other species collapsed, the wings beating. */
+  const birdLocal = Fn(() => {
+    const sp = attribute("iSpecies", "float");
+    const mine = step(abs(attribute("aSpecies", "float").sub(sp)), float(0.5));
     const h = hash(instanceIndex.add(7));
-    const rate = float(P.flapRate).mul(h.mul(0.5).add(0.75));
+    const rate = bySpecies(sp, SPECIES.map((q) => q.rate)).mul(h.mul(0.3).add(0.85));
     const beat = sin(uTime.mul(rate).mul(6.2832).add(h.mul(40)));
-    const glide = smoothstep(-0.3, 0.4, sin(uTime.mul(0.35).add(h.mul(13))));
-    const lift = beat.mul(P.flapAmp).mul(glide).mul(attribute("aFlap", "float"));
-    return positionLocal.add(vec3(0, lift, 0));
-  })();
+    // Flap-and-glide: each species glides its own share of the time.
+    const glideShare = bySpecies(sp, SPECIES.map((q) => q.glide));
+    const flapping = smoothstep(glideShare.sub(0.25), glideShare.add(0.25), sin(uTime.mul(0.4).add(h.mul(13))).mul(0.5).add(0.5));
+    // The wing ROTATES about the body (a lift alone stretched it into a needle
+    // at the top of the beat), and the hand turns further than the arm, so the
+    // wing CURLS through the beat. Gliding: held in a shallow dihedral.
+    const x = abs(positionLocal.x);
+    const side = select(positionLocal.x.lessThan(0), float(-1), float(1));
+    const hand = attribute("aHand", "float");
+    const angle = beat.mul(P.flapAmp).mul(mix(float(0.75), float(1.35), hand)).mul(flapping)
+      .add(float(0.12).mul(float(1).sub(flapping)));
+    const nx = x.mul(cos(angle)).mul(side);
+    const ny = positionLocal.y.add(x.mul(sin(angle)));
+    return vec3(nx, ny, positionLocal.z).mul(mine);
+  });
+
+  const mat = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide, roughness: 0.85, metalness: 0 });
+  mat.name = "RtsBirds";
+  mat.positionNode = birdLocal();
+  mat.colorNode = attribute("color", "vec3");
   const mesh = new THREE.InstancedMesh(geo, mat, P.maxBirds);
   mesh.name = "RtsBirds";
   mesh.frustumCulled = false;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.count = 0;
-  for (let i = 0; i < P.maxBirds; i++) mesh.setColorAt(i, CROW);
   app.scene.add(mesh);
+
+  // SHADOWS: the same bird, flattened onto the ground where the sun throws it.
+  // A dark shape sweeping over the terrain under a flock is how a player
+  // looking down notices birds at all. One more draw; no shadow-map pass.
+  const shadowMat = new THREE.MeshBasicNodeMaterial({
+    transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide,
+  });
+  shadowMat.name = "RtsBirdShadows";
+  shadowMat.positionNode = birdLocal();
+  shadowMat.colorNode = vec3(0.02, 0.03, 0.02);
+  shadowMat.opacityNode = float(P.shadowOpacity);
+  shadowMat.polygonOffset = true;
+  shadowMat.polygonOffsetFactor = -2;
+  shadowMat.polygonOffsetUnits = -2;
+  const shadows = new THREE.InstancedMesh(geo, shadowMat, P.maxBirds);
+  shadows.name = "RtsBirdShadows";
+  shadows.frustumCulled = false;
+  shadows.castShadow = shadows.receiveShadow = false;
+  shadows.count = 0;
+  shadows.renderOrder = 3;
+  app.scene.add(shadows);
 
   const flocks = [];
   const recentFlush = [];
@@ -98,7 +133,10 @@ export function createRtsBirds({ app, params = {} }) {
   function slots(n, kind) {
     const out = [];
     for (let i = 0; i < n; i++) {
-      if (kind === "egret") {
+      if (kind === "hornbill") {
+        // A loose follow-my-leader line, well spaced (they fly in ones and twos).
+        out.push(new THREE.Vector3(rand(-2, 2), rand(-1, 1), -i * rand(5, 8)));
+      } else if (kind === "egret") {
         const k = Math.ceil(i / 2), side = i % 2 ? 1 : -1;
         out.push(new THREE.Vector3(side * k * rand(1.8, 2.4), rand(-0.6, 0.6), -k * rand(1.6, 2.2)));
       } else {
@@ -123,7 +161,7 @@ export function createRtsBirds({ app, params = {} }) {
         slot: sl[i],
         pos: new THREE.Vector3(x, y, z),
         vel: f.dir.clone().multiplyScalar(speed),
-        size: P.span * rand(0.85, 1.15),
+        size: P.span * SPECIES[KIND_INDEX[kind]].size * rand(0.88, 1.12),
         bank: 0,
       };
       if (burst) {
@@ -140,7 +178,7 @@ export function createRtsBirds({ app, params = {} }) {
     return f;
   }
 
-  function spawnTransit() {
+  function spawnTransit(force = null) {
     const c = viewCentre();
     const a = rand(0, Math.PI * 2);
     const x = c.x + Math.cos(a) * P.spawnRadius, z = c.z + Math.sin(a) * P.spawnRadius;
@@ -148,10 +186,11 @@ export function createRtsBirds({ app, params = {} }) {
     const side = rand(-70, 70);
     const tx = c.x + Math.cos(a + Math.PI / 2) * side, tz = c.z + Math.sin(a + Math.PI / 2) * side;
     const dir = new THREE.Vector3(tx - x, 0, tz - z);
-    const egret = Math.random() < 0.6;
-    const alt = rand(...P.cruiseAlt);
-    addFlock({ kind: egret ? "egret" : "crow", n: egret ? Math.round(rand(7, 15)) : Math.round(rand(6, 13)),
-      x, y: ground(x, z) + alt, z, dir, speed: rand(...P.speed), alt });
+    const r = Math.random();
+    const kind = force ?? (r < 0.5 ? "egret" : r < 0.8 ? "crow" : "hornbill");
+    const n = kind === "egret" ? Math.round(rand(7, 15)) : kind === "crow" ? Math.round(rand(6, 13)) : Math.round(rand(3, 5));
+    const alt = rand(...P.cruiseAlt) + (kind === "hornbill" ? 8 : 0);   // hornbills fly over the canopy
+    addFlock({ kind, n, x, y: ground(x, z) + alt, z, dir, speed: rand(...P.speed) * (kind === "hornbill" ? 0.8 : 1), alt });
   }
 
   /**
@@ -177,6 +216,7 @@ export function createRtsBirds({ app, params = {} }) {
   const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, "YXZ"), _m = new THREE.Matrix4();
   const _s = new THREE.Vector3(), _want = new THREE.Vector3(), _off = new THREE.Vector3();
   const _cam = new THREE.Vector3();
+  const _sp = new THREE.Vector3(), sun = new THREE.Vector3();
 
   function update(dt) {
     if (!P.enabled) { mesh.count = 0; return; }
@@ -193,6 +233,10 @@ export function createRtsBirds({ app, params = {} }) {
 
     const cam = app.camera;
     _cam.copy(cam.position);
+    // Toward the sun (unit); a low sun is clamped so the shadows stay under
+    // the flock instead of streaking across the map.
+    const L = app.environment?.getLightDirection?.();
+    sun.set(L?.x ?? 0.4, Math.max(0.35, L?.y ?? 0.8), L?.z ?? 0.3).normalize();
     const vh = app.renderer?.domElement?.clientHeight || 1080;
     const pxPerRad = vh / (2 * Math.tan(((cam.fov ?? 50) * Math.PI) / 360));
 
@@ -232,13 +276,27 @@ export function createRtsBirds({ app, params = {} }) {
         _m.compose(b.pos, _q, _s.set(s, s, s));
         if (n >= P.maxBirds) break;
         mesh.setMatrixAt(n, _m);
-        mesh.setColorAt(n, f.kind === "egret" ? EGRET : CROW);
+        iSpecies.setX(n, KIND_INDEX[f.kind]);
+        // Its shadow: down the sun ray to the ground, flattened, same heading.
+        const gy = ground(b.pos.x, b.pos.z);
+        const k = (b.pos.y - gy) / Math.max(0.25, sun.y);
+        _sp.set(b.pos.x - sun.x * k, 0, b.pos.z - sun.z * k);
+        _sp.y = ground(_sp.x, _sp.z) + P.shadowLift;
+        _e.set(0, vYaw, 0);
+        _m.compose(_sp, _q.setFromEuler(_e), _s.set(s, 0.02, s));
+        shadows.setMatrixAt(n, _m);
         n++;
       }
     }
     mesh.count = n;
+    mesh.visible = n > 0;
     mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    shadows.count = P.shadows ? n : 0;
+    shadows.visible = P.shadows && n > 0;
+    shadows.instanceMatrix.needsUpdate = true;
+    iSpecies.clearUpdateRanges();
+    iSpecies.addUpdateRange(0, Math.max(1, n));
+    iSpecies.needsUpdate = true;
   }
 
   return {
@@ -248,8 +306,10 @@ export function createRtsBirds({ app, params = {} }) {
     flush,
     /** Send a transit flock across the view now (dev). */
     spawnTransit,
-    setEnabled(on) { P.enabled = !!on; if (!on) { flocks.length = 0; mesh.count = 0; } },
+    setEnabled(on) { P.enabled = !!on; if (!on) { flocks.length = 0; mesh.count = 0; shadows.count = 0; } },
     get count() { return mesh.count; },
-    dispose() { app.scene.remove(mesh); geo.dispose(); mat.dispose(); },
+    /** Dev: the live flocks (look tests move them into view). */
+    get flocks() { return flocks; },
+    dispose() { app.scene.remove(mesh); app.scene.remove(shadows); geo.dispose(); mat.dispose(); shadowMat.dispose(); },
   };
 }
