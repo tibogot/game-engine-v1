@@ -19,7 +19,8 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {} }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {} }) {
+  // onOrder(kind, units): "attack" | "harvest" | "move" — the radio answers (namSounds.js).
   // Rigid unit types render as shared InstancedMeshes, so a hit identifies its
   // unit by instanceId, not by the mesh — unitRenderer owns that resolution.
   // Crowd soldiers have no mesh AT ALL (they live in a compute buffer), so they
@@ -247,6 +248,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     if (enemy) {
       for (const u of selected) u.attack?.(enemy);
       pingMarker(enemy.position.x, enemy.position.y, enemy.position.z);
+      onOrder("attack", [...selected]);
       return;
     }
 
@@ -259,13 +261,14 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       for (const u of selected) if (harvesting.assignNode(u, node)) assigned++;
       if (assigned) {
         pingMarker(node.position.x, node.position.y, node.position.z);
-        if (assigned === selected.size) return; // pure harvester selection — done
+        if (assigned === selected.size) { onOrder("harvest", [...selected]); return; } // pure harvester selection — done
       }
     }
 
     const hit = app.pickWorldAtClient?.(e.clientX, e.clientY);
     if (!hit?.point) return;
     pingMarker(hit.point.x, hit.point.y, hit.point.z);
+    onOrder("move", [...selected]);
 
     // A selected building can't move — right-click sets its RALLY POINT instead.
     for (const s of selected) {

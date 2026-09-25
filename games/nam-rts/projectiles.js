@@ -47,7 +47,9 @@ const MAX_SHELLS = 24;
 const SHELL_G = 34;       // metres/s² — a game arc, not ballistics: it has to read in ~3 s
 const SHELL_R = 0.42;
 
-export function createProjectiles({ app, fx = null, onImpact = () => {}, onArcImpact = () => {} }) {
+export function createProjectiles({ app, fx = null, sfx = null, onImpact = () => {}, onArcImpact = () => {} }) {
+  // `sfx` (namSounds.js) is told about every shot, rocket, landing round and
+  // shell coming down; it decides what, if anything, is heard.
   const { scene } = app;
   const groundY = (x, z) => app.getWorldHeight?.(x, z) ?? 0;
 
@@ -116,6 +118,7 @@ export function createProjectiles({ app, fx = null, onImpact = () => {}, onArcIm
     const s = shells.find((r) => !r.alive);
     if (!s) return null;
     s.alive = true;
+    s.whistled = false;
     s.pos.copy(from);
     s.to.copy(to);
     s.damage = damage;
@@ -192,6 +195,7 @@ export function createProjectiles({ app, fx = null, onImpact = () => {}, onArcIm
     const colour = w.shell ? TRACER_COLOURS.shell
       : owner?.team === "enemy" ? TRACER_COLOURS.green : TRACER_COLOURS.red;
     const src = from.clone();
+    sfx?.shot(owner, w, src);
 
     if (w.shell) {
       // A tank gun: the shell leaves the end of the barrel, not the hull's
@@ -242,6 +246,7 @@ export function createProjectiles({ app, fx = null, onImpact = () => {}, onArcIm
     r.ttl = 5; // safety: never live forever
     r.vel.subVectors(targetPoint(target), r.pos).normalize();
     r.speed = ROCKET_SPEED;
+    sfx?.rocket(from);
     return true;
   }
 
@@ -255,6 +260,7 @@ export function createProjectiles({ app, fx = null, onImpact = () => {}, onArcIm
         // onImpact ignores the dead, and the round simply lands where it was.
         if (p.target?.alive) onImpact(p.target, p.damage, p.to, p.owner, { shell: p.shell, bullet: !p.shell });
         else if (!p.shell) fx?.dirt(p.to.x, groundY(p.to.x, p.to.z), p.to.z);
+        if (!p.shell) sfx?.impact(p.to);
       } else if (p.kind === "fire") {
         if (!p.target?.alive) continue;          // the burst stops when he does
         fx?.muzzle(p.from.x, p.from.y, p.from.z);
@@ -263,6 +269,7 @@ export function createProjectiles({ app, fx = null, onImpact = () => {}, onArcIm
         if (!p.target.isAir) pending.push({ at: t1, kind: "dirt", to });
       } else if (p.kind === "dirt") {
         fx?.dirt(p.to.x, p.to.y, p.to.z);
+        sfx?.impact(p.to);
       }
     }
   }
@@ -322,6 +329,8 @@ export function createProjectiles({ app, fx = null, onImpact = () => {}, onArcIm
       s.t += dt;
       s.vel.y -= SHELL_G * dt;
       s.pos.addScaledVector(s.vel, dt);
+      // The whistle on the way down, timed to end as it lands.
+      if (!s.whistled && s.flight - s.t < 1.6) { s.whistled = true; sfx?.incoming(s.to, s.flight - s.t); }
       if (s.t >= s.flight) {
         s.alive = false;
         onArcImpact(s.to.clone(), s.damage, s.splash, s.owner);

@@ -8,6 +8,8 @@
 //
 // This is the single home for every dev utility — camera, units, navigation.
 // Player-facing HUD lives in minimap.js / unitBar.js / commandCard.js.
+import { buildSoundPanel } from "./soundPanel.js";
+
 const CHECK_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
@@ -24,7 +26,7 @@ const ARROW_SVG =
   + '<polyline points="6 9 12 15 18 9"></polyline></svg>';
 
 export function createDevPanel({
-  app, navGrid, rtsCamera, units, minimap, foliageZoom = null, stress = null,
+  app, navGrid, rtsCamera, units, minimap, foliageZoom = null, stress = null, sounds = null,
   worldName = "procedural default",
   onLoadWorldFile,
   onLoadDefaultWorld,
@@ -272,6 +274,11 @@ export function createDevPanel({
             do not touch the mouse or keys</b> — it aborts if the page loses focus.</div>
           <div id="dv-st-results"></div>
         </div>
+      </div>
+
+      <div class="inspector-section">
+        <div class="section-header">Sound</div>
+        <div class="section-body" id="dv-sound"></div>
       </div>
 
       <div class="inspector-section">
@@ -764,6 +771,9 @@ export function createDevPanel({
   $(".dv-collapse-all")?.addEventListener("click", () => setAllFolds(false));
 
   if (typeof lucide !== "undefined") lucide.createIcons();
+
+  // ── Sound (soundPanel.js fills the section once the manifest is in) ─────────
+  if (sounds) buildSoundPanel(root.querySelector("#dv-sound"), sounds);
 
   // ── Collapse panel ──────────────────────────────────────────────────────────
   const collapseBtn = $(".dv-collapse");

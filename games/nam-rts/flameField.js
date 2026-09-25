@@ -250,5 +250,10 @@ export function createFlameField({ app, intensity = 0.95, bloom = 0.3 } = {}) {
 
   function activeCount() { return fires.length; }
 
-  return { addFire, update, clear, activeCount, params: { uIntensity, uBloom, uSoft }, mesh };
+  return {
+    addFire, update, clear, activeCount, params: { uIntensity, uBloom, uSoft }, mesh,
+    /** Read-only: what is burning ({ x, y, z, radius, end }) — the sound of fire asks. */
+    get fires() { return fires; },
+    get now() { return uTime.value; },
+  };
 }

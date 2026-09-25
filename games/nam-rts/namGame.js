@@ -125,6 +125,7 @@ import { createAbilities } from "./abilities.js";
 import { createAbilityTargeting } from "./abilityTargeting.js";
 import { createCoverOverlay } from "./coverOverlay.js";
 import { createCraterSystem } from "./craterSystem.js";
+import { createNamSounds } from "./namSounds.js";
 import { createFogOfWar } from "./fogOfWar.js";
 import { createSimClock } from "./simClock.js";
 import { createStressTest } from "./stressTest.js";
@@ -612,6 +613,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       // A finished building gives cover at once (a gun pit's bags stop bullets).
       // MEASURED: a bake is ~4 ms — a one-off, once per building.
       app.cover?.bake?.();
+      if (b.team !== "enemy") app.sounds?.done(b);
       if (b.typeKey !== "captureNode") return;
       app.smoke?.spawn({ x: b.position.x, z: b.position.z, kind: "violet" });
     },
@@ -723,10 +725,15 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     if (addCrater) craters.addCrater = (x, z, ...rest) => { const r = addCrater(x, z, ...rest); birds.flush(x, z); return r; };
   }
 
+  // SOUND (namSounds.js → namAudio.js): wraps the effects above so each is
+  // heard, and hands projectiles its `sfx`. Recordings: public/sounds/nam.
+  const sounds = createNamSounds({ app, rtsCamera, units, buildings, fx, fire, fireballs, smoke, birds });
+  app.sounds = sounds;
+
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combatRef = null;
   const projectiles = createProjectiles({
-    app, fx,
+    app, fx, sfx: sounds.sfx,
     onImpact: (target, dmg, at, owner, opts) => combatRef?.onImpact(target, dmg, at, owner, opts),
     // A mortar shell lands on GROUND, not on a unit (projectiles.spawnArc).
     onArcImpact: (at, dmg, splash, owner) => combatRef?.splashAt(at, dmg, splash, owner),
@@ -948,6 +955,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const selection = createSelection({
     app, units, unitRenderer, structuresRenderer, buildingRenderer,
     resourceRenderer, harvesting, // right-click a node → send harvesters to it
+    onOrder: (kind, list) => sounds.order(kind, list),
     // The unit bar shows units only; buildings live in the command card.
     onChange: (sel) => {
       // Units if any; otherwise the selected building, so the centre is never
@@ -1041,7 +1049,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   };
 
   const devPanel = createDevPanel({
-    app, navGrid, rtsCamera, units, minimap, foliageZoom, stress,
+    app, navGrid, rtsCamera, units, minimap, foliageZoom, stress, sounds,
     worldName: worldState.name,
     onLoadWorldFile: async (file) => afterWorldLoad(await levels.loadFile(file)),
     onLoadDefaultWorld: async () => afterWorldLoad(await levels.loadDefault()),
@@ -1161,6 +1169,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     grassTrails.step();                   // men and tracks bend the grass they cross
     stress.update(dt);                    // dev: continuous effect spawners, if running
     birds.update(dt);                     // transit flocks, flushes
+    sounds.update();                      // loops re-aimed at the camera
     frameStats.tickMs = performance.now() - tickStart;
   };
   app.addPreRenderHook(tick);
