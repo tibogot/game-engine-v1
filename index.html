@@ -4,90 +4,314 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Game Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="preload" as="image" href="/textures/nam-cover.webp" />
+    <!--
+      CARD IMAGES. Each card shows its picture from /public/cards/ when there
+      is one — drop in editor.webp or apex.webp (any 16:9-ish image, ~1600 px
+      wide) and it replaces the drawn placeholder. NAM uses the loader's art.
+    -->
     <style>
-      *,
-      *::before,
-      *::after {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
+      :root {
+        --bg: #07090c;
+        --ink: #eef0f2;
+        --dim: #9aa3ad;
+        --line: rgba(255, 255, 255, 0.08);
+        --nam: #c8b27a;
+        --editor: #5fb0ff;
+        --apex: #ff5a3c;
+        --radius: 6px;
       }
-      html,
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { min-height: 100%; }
       body {
-        height: 100%;
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(1200px 700px at 15% -10%, rgba(200, 178, 122, 0.10), transparent 60%),
+          radial-gradient(1000px 700px at 110% 110%, rgba(95, 176, 255, 0.08), transparent 60%),
+          var(--bg);
+        overflow-x: hidden;
       }
-      body {
+      /* A faint film grain over everything. */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: -50%;
+        pointer-events: none;
+        opacity: 0.05;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+        z-index: 0;
+      }
+      .wrap {
+        position: relative;
+        z-index: 1;
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 56px 32px 48px;
+      }
+      header {
         display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 28px;
-        font-family: system-ui, -apple-system, sans-serif;
-        color: #e8e8e8;
-        background: radial-gradient(circle at 50% 30%, #1c2230, #0a0a0c);
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 36px;
       }
-      h1 {
-        font-size: 30px;
+      .brand .kicker {
+        font-size: 12px;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+      .brand h1 {
+        font-family: "Oswald", sans-serif;
         font-weight: 700;
-        letter-spacing: 0.01em;
+        font-size: clamp(36px, 5vw, 56px);
+        letter-spacing: 0.02em;
+        line-height: 1.05;
+        margin-top: 8px;
       }
-      .links {
-        display: flex;
-        gap: 18px;
-        flex-wrap: wrap;
-        justify-content: center;
+      .brand h1 span { color: var(--dim); font-weight: 500; }
+      header .meta {
+        font-size: 13px;
+        color: var(--dim);
+        text-align: right;
+        line-height: 1.6;
       }
-      a.card {
+      header .meta b { color: var(--ink); font-weight: 600; }
+
+      /* ── The grid: NAM featured on the left, the other two stacked ─────── */
+      .grid {
+        display: grid;
+        grid-template-columns: 1.55fr 1fr;
+        grid-template-rows: 1fr 1fr;
+        gap: 22px;
+        min-height: min(72vh, 720px);
+      }
+      .card {
+        position: relative;
+        display: block;
+        overflow: hidden;
+        border-radius: var(--radius);
+        background: #11151b;
+        border: 1px solid var(--line);
+        color: var(--ink);
+        text-decoration: none;
+        isolation: isolate;
+        min-height: 260px;
+        box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.8);
+        transition: transform 0.35s cubic-bezier(.2,.8,.2,1), border-color 0.35s, box-shadow 0.35s;
+      }
+      .card.featured { grid-row: span 2; }
+      .card:hover, .card:focus-visible {
+        transform: translateY(-4px);
+        border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+        box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.9), 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+        outline: none;
+      }
+      /* The picture: a real image when there is one, else the drawn art. */
+      .card .art, .card .ph {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        z-index: -2;
+        transition: transform 0.9s cubic-bezier(.2,.8,.2,1), filter 0.6s;
+      }
+      .card:hover .art, .card:hover .ph { transform: scale(1.05); }
+      .card .art { filter: saturate(0.95) contrast(1.05); }
+      /* Legibility: dark from the bottom up. */
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background:
+          linear-gradient(to top, rgba(5, 7, 10, 0.95) 0%, rgba(5, 7, 10, 0.55) 38%, rgba(5, 7, 10, 0) 70%),
+          linear-gradient(to right, rgba(5, 7, 10, 0.45), transparent 55%);
+      }
+      .card .body {
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        padding: 28px 30px 30px;
         display: flex;
         flex-direction: column;
-        gap: 6px;
-        width: 220px;
-        padding: 22px 24px;
-        text-decoration: none;
-        color: #eee;
-        background: #161b26;
-        border: 1px solid #2c3445;
-        border-radius: 12px;
-        transition:
-          transform 0.12s ease,
-          border-color 0.12s ease;
+        gap: 10px;
       }
-      a.card:hover {
-        transform: translateY(-3px);
-        border-color: #6ab0ff;
-      }
-      a.card .t {
-        font-size: 18px;
+      .tag {
+        align-self: flex-start;
+        font-size: 11px;
         font-weight: 600;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        padding: 6px 10px;
+        border-radius: 3px;
+        color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 14%, rgba(0, 0, 0, 0.4));
+        border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+        backdrop-filter: blur(6px);
       }
-      a.card .d {
-        font-size: 13px;
-        color: #9aa3b2;
-        line-height: 1.4;
+      .card h2 {
+        font-family: "Oswald", sans-serif;
+        font-weight: 700;
+        font-size: 30px;
+        letter-spacing: 0.03em;
+        line-height: 1.05;
+        text-transform: uppercase;
+      }
+      .card.featured h2 { font-size: clamp(40px, 5vw, 64px); }
+      .card p {
+        color: #c9ced4;
+        font-size: 14.5px;
+        line-height: 1.55;
+        max-width: 46ch;
+      }
+      .cta {
+        margin-top: 6px;
+        align-self: flex-start;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        font-size: 14px;
+        padding: 11px 18px;
+        border-radius: 4px;
+        color: #0b0d10;
+        background: var(--accent);
+        transition: gap 0.25s, filter 0.25s;
+      }
+      .card:hover .cta { gap: 16px; filter: brightness(1.08); }
+      .cta svg { width: 16px; height: 16px; }
+
+      /* ── Drawn placeholders (until real pictures are dropped in) ───────── */
+      .ph-editor {
+        background:
+          linear-gradient(transparent 0 calc(100% - 1px), rgba(95, 176, 255, 0.18) 0) 0 0 / 38px 38px,
+          linear-gradient(90deg, transparent 0 calc(100% - 1px), rgba(95, 176, 255, 0.18) 0) 0 0 / 38px 38px,
+          radial-gradient(600px 300px at 70% 30%, rgba(95, 176, 255, 0.35), transparent 70%),
+          linear-gradient(160deg, #0d1a2a, #0a0f16 70%);
+      }
+      .ph-editor .hills {
+        position: absolute;
+        inset: auto 0 0 0;
+        height: 70%;
+      }
+      .ph-apex {
+        background:
+          repeating-linear-gradient(115deg, rgba(255, 90, 60, 0.0) 0 22px, rgba(255, 90, 60, 0.10) 22px 24px),
+          radial-gradient(700px 320px at 85% 20%, rgba(255, 90, 60, 0.45), transparent 70%),
+          linear-gradient(200deg, #2a0f0a, #0c0a0a 70%);
+      }
+      .ph-apex .road {
+        position: absolute;
+        inset: 0;
+      }
+
+      footer {
+        margin-top: 34px;
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        color: #6f7782;
+        font-size: 12.5px;
+        border-top: 1px solid var(--line);
+        padding-top: 18px;
+      }
+      footer a { color: var(--dim); text-decoration: none; }
+      footer a:hover { color: var(--ink); }
+
+      @media (max-width: 900px) {
+        .wrap { padding: 32px 16px 32px; }
+        header { flex-direction: column; align-items: flex-start; }
+        header .meta { text-align: left; }
+        .grid { grid-template-columns: 1fr; grid-template-rows: none; min-height: 0; }
+        .card.featured { grid-row: auto; min-height: 420px; }
+        .card { min-height: 280px; }
+        .card .body { padding: 22px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .card, .card .art, .card .ph { transition: none; }
       }
     </style>
   </head>
   <body>
-    <h1>Game Engine</h1>
-    <div class="links">
-      <a class="card" href="/v3/editor.html">
-        <span class="t">✎ Editor (v3)</span>
-        <span class="d">The main editor — GPU clipmap terrain engine.</span>
-      </a>
-      <a class="card" href="/games/nam-rts/nam.html">
-        <span class="t">▶ NAM</span>
-        <span class="d">Vietnam RTS — hold the ground, hold the valley.</span>
-      </a>
-      <a class="card" href="/games/modular-road-v3/road.html">
-        <span class="t">▶ Apex Rush</span>
-        <span class="d">Modular road racer — build a track, then drive it.</span>
-      </a>
+    <div class="wrap">
+      <header>
+        <div class="brand">
+          <div class="kicker">WebGPU · Three.js · v3 engine</div>
+          <h1>Game Engine <span>/ Launcher</span></h1>
+        </div>
+        <div class="meta">
+          <b>2 games</b> and the editor that builds their worlds<br />
+          Chrome or Edge with WebGPU
+        </div>
+      </header>
+
+      <main class="grid">
+        <a class="card featured" href="/games/nam-rts/nam.html" style="--accent: var(--nam)">
+          <img class="art" src="/textures/nam-cover.webp" alt="" />
+          <div class="body">
+            <!-- The cover art carries the NAM logo itself. -->
+            <span class="tag">Real-time strategy · Vietnam, 1968</span>
+            <p>Hold the valley. Hueys, M48s and riflemen against the Front's tunnels,
+              traps and mortars — jungle, mist and the river in between.</p>
+            <span class="cta">Play NAM
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </span>
+          </div>
+        </a>
+
+        <a class="card" href="/v3/editor.html" style="--accent: var(--editor)">
+          <div class="ph ph-editor">
+            <svg class="hills" viewBox="0 0 600 300" preserveAspectRatio="none">
+              <path d="M0 220 C80 150 140 190 210 140 C280 90 330 160 400 120 C470 80 530 130 600 100 L600 300 L0 300Z" fill="rgba(95,176,255,0.16)" stroke="rgba(95,176,255,0.6)" stroke-width="1.5"/>
+              <path d="M0 260 C100 210 170 240 260 200 C350 160 420 220 600 180 L600 300 L0 300Z" fill="rgba(95,176,255,0.10)" stroke="rgba(95,176,255,0.35)" stroke-width="1"/>
+            </svg>
+          </div>
+          <img class="art" src="/cards/editor.webp" alt="" onerror="this.remove()" />
+          <div class="body">
+            <span class="tag">World editor</span>
+            <h2>Editor</h2>
+            <p>Sculpt, paint and grow worlds on the GPU clipmap terrain — rivers,
+              lakes, jungle, props and roads.</p>
+            <span class="cta">Open editor
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </span>
+          </div>
+        </a>
+
+        <a class="card" href="/games/modular-road-v3/road.html" style="--accent: var(--apex)">
+          <div class="ph ph-apex">
+            <svg class="road" viewBox="0 0 600 300" preserveAspectRatio="none">
+              <path d="M-20 300 C120 230 200 120 360 110 C480 102 560 60 640 20" fill="none" stroke="rgba(255,90,60,0.55)" stroke-width="46" stroke-linecap="round"/>
+              <path d="M-20 300 C120 230 200 120 360 110 C480 102 560 60 640 20" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="2" stroke-dasharray="14 12"/>
+            </svg>
+          </div>
+          <img class="art" src="/cards/apex.webp" alt="" onerror="this.remove()" />
+          <div class="body">
+            <span class="tag">Arcade racer</span>
+            <h2>Apex Rush</h2>
+            <p>Build a stunt track piece by piece — loops, banks, jumps — then
+              drive it flat out.</p>
+            <span class="cta">Play Apex Rush
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </span>
+          </div>
+        </a>
+      </main>
+
+      <footer>
+        <span>Card pictures: drop <code>editor.webp</code> / <code>apex.webp</code> into <code>public/cards/</code>.</span>
+        <span>Old v2: <a href="/v2/play.html">play</a> · <a href="/v2/editor.html">editor</a></span>
+      </footer>
     </div>
     <!--
-      v2 is on its way out, so it is off this page — but the pages still work
-      and are still built, at /v2/play.html and /v2/editor.html. When v2 goes
-      for good, delete those files; there is nothing to remove here.
+      v2 is on its way out; its pages still build at /v2/play.html and
+      /v2/editor.html (linked small in the footer). When v2 goes for good,
+      delete those files and the footer links.
     -->
-
   </body>
 </html>
