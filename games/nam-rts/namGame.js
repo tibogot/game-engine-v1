@@ -94,6 +94,7 @@ import { siteEnemyLine } from "./enemyLine.js";
 import { paintCanopy, paintPalmFringe, paintUndergrowth, travellerPalmSpots, canopyClearings } from "./jungleCanopy.js";
 import { plant, updatePlantedPlants } from "./placedPlants.js";
 import { plantSpecimens } from "./specimenPlants.js";
+import { createFogBanks, siteFogBanks } from "./fogBanks.js";
 import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
@@ -1189,6 +1190,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     stress.update(dt);                    // dev: continuous effect spawners, if running
     birds.update(dt);                     // transit flocks, flushes
     sounds.update();                      // loops re-aimed at the camera
+    app.fogBanks?.update();               // the mist's warm side follows the sun
     frameStats.tickMs = performance.now() - tickStart;
   };
   app.addPreRenderHook(tick);
@@ -1305,6 +1307,18 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       });
       console.log(`[specimens] ${n.pandanus} pandanus, ${n.sugarPalm} sugar palms, ${n.flameTree} flame trees in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { console.warn("[specimens] failed:", e); }
+  }
+
+  // FOG BANKS (fogBanks.js): mist at PLACES — along the river, the temple's
+  // valley floor, a hollow in the jungle — over the map's own fog, which is
+  // not touched. ?fogbanks=0 = without.
+  if (new URLSearchParams(location.search).get("fogbanks") !== "0" && app.heightTexNode) {
+    try {
+      const fogBanks = createFogBanks({ app });
+      const placedBanks = siteFogBanks(app, fogBanks, { temples: templeSitesFor(boot.name), field: app.jungleField ?? null });
+      app.fogBanks = fogBanks;
+      console.log(`[fog banks] ${placedBanks.map((b) => b.name).join(", ")}`);
+    } catch (e) { console.warn("[fog banks] failed:", e); }
   }
 
   // Every bridge gets ground at both ends that meets its deck — without it

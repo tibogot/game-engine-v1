@@ -311,6 +311,42 @@ Everything else below is in its section.
       OPTIONS if the lumps should come back: darker cracks (stronger clump
       shading), or fewer bigger sub-crowns in dipterocarpGeometry.
 
+## RICE PADDIES — your ask 2026-09-25 (TALK FIRST — plan in my answer)
+
+- [ ] "We need rice fields, that would look Vietnam — are you confident, how
+      would it read the most Vietnam / Apocalypse Now?" My plan (answer of
+      2026-09-25): a PATCHWORK of flat, levelled paddies stepped down the
+      valley floor round Ap Bang, cut by thin raised DIKES; each paddy in
+      its own state (sky-mirror flooded, young bright-green rows, ripe
+      gold, brown ploughed mud); sugar palms and a path along the dikes,
+      egrets in the water, a buffalo. Cheap water (opaque, sky reflection,
+      no screen grab), rice as a grass preset in rows. Gameplay: open, no
+      cover, men slowed in the mud — the killing ground. Waiting on your go
+      and WHERE (nam-valley's valley floor is jungle; the paddies take
+      space from it).
+- [x] **FOG BANKS BUILT (2026-09-25, uncommitted)** — games/nam-rts/fogBanks.js,
+      placed where I suggested (your "go"): a chain of 3 along the river's
+      middle stretch, the temple standing in mist (towers and the banyan out
+      of it), one hollow in the jungle. Soft ellipsoids integrated in closed
+      form, ground from 4 bilinear heightmap samples (no screen copy),
+      drifting two-octave wisps, warmed toward the sun. The map's own fog is
+      not touched. Mist over most of the screen: 1.0 ms at x2 res (~0.5
+      native). `app.fogBanks.set("density"|"wisps"|"drift"|"color", v)` to
+      tune live; ?fogbanks=0 = without. Decoration only (no line-of-sight
+      rule yet — your call).
+- [ ] Gorge wall's dark stair-step CHECKER is the TERRAIN's own shading
+      (found while checking the mist; there with the mist off) — look later.
+- [ ] (was) **Placeable fog banks** — YOUR DECISION 2026-09-25: NOT interactive
+      ("especially if it can hurt the perf"); "realistic fog in SOME places in
+      the map, not everywhere based on distance or height". So: local fog
+      VOLUMES placed on the map (river, valley bottoms, the temple hollow,
+      paddies later), soft-edged, hugging the ground, lit like the existing
+      fog, a slow drift in them — and the existing fog NOT touched. My pick of
+      technique (answer of 2026-09-25): ANALYTIC volumes (Unreal 5's "Local
+      Fog Volumes" idea — the fog along the view ray is integrated in closed
+      form, no raymarch) + a low-frequency drift texture; each drawn as its
+      own box, so only the pixels it covers pay. Waiting on your go + places.
+
 ## THE ENEMY SIDE — your asks, 2026-09-23 (next block after ruins/vegetation)
 
 Your words: their base is still empty next to ours, the default turrets are the
