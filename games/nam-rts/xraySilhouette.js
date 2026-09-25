@@ -25,8 +25,8 @@
 // early-z for these draws — only on unit pixels.
 import * as THREE from "three";
 import {
-  Fn, abs, cameraFar, cameraNear, dot, float, max, mix, normalView, pow, positionView,
-  saturate, uniform, vec3, viewZToPerspectiveDepth,
+  Fn, abs, cameraFar, cameraNear, cameraPosition, dot, float, max, mix, normalView, normalize, pow,
+  positionView, positionWorld, saturate, uniform, vec3, viewZToPerspectiveDepth,
 } from "three/tsl";
 
 export const XRAY = {
@@ -63,7 +63,7 @@ export const xrayOn = () => xrayParams.enabled;
  *   positionNode optional: a material's own positionNode (the compute-skinned crowd)
  *   normalNode   optional: its view-space normal node (the crowd), else normalView
  */
-export function createXrayMaterial({ teamNode, lift = 1.5, positionNode = null, normalNode = null }) {
+export function createXrayMaterial({ teamNode, lift = 1.5, liftUp = 0, positionNode = null, normalNode = null }) {
   const mat = new THREE.MeshBasicNodeMaterial({
     transparent: true, depthWrite: false, depthTest: true, side: THREE.FrontSide,
   });
@@ -73,9 +73,17 @@ export function createXrayMaterial({ teamNode, lift = 1.5, positionNode = null, 
   mat.toneMapped = false;
   if (positionNode) mat.positionNode = positionNode;
   // The fragment's depth, `lift` metres nearer along its view ray, never past
-  // the near plane.
+  // the near plane. `liftUp` is the unit's HEIGHT: a part that far below its
+  // own rotor blade or roof sits height / |ray.y| behind it along a sloping
+  // ray — twice the height at the 30° zoomed-in pitch — so that half of the
+  // lift grows as the camera looks flatter.
   mat.depthNode = Fn(() => {
-    const z = positionView.z.add(lift).min(cameraNear.negate().mul(1.01));
+    let d = float(lift);
+    if (liftUp > 0) {
+      const rayY = abs(normalize(positionWorld.sub(cameraPosition)).y);
+      d = max(d, float(liftUp).div(max(rayY, float(0.35))));
+    }
+    const z = positionView.z.add(d).min(cameraNear.negate().mul(1.01));
     return viewZToPerspectiveDepth(z, cameraNear, cameraFar);
   })();
   const n = normalNode ?? normalView;

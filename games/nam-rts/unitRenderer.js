@@ -359,13 +359,28 @@ function buildInstancedType(tpl, scene) {
 
   // X-RAY (xraySilhouette.js): each part drawn a second time where the unit is
   // hidden, sharing the part's geometry and instance matrices; a per-instance
-  // team flag picks blue or red. The depth lift is sized to the unit (its
-  // self-occlusion is at most about its own size).
+  // team flag picks blue or red. The depth lift is sized to the unit: it must
+  // cover how deep the unit's OWN skin can hide its own parts — looking down
+  // through a Huey's roof onto its door frames, skid struts and door guns is
+  // its whole height, and a 3.5 m cap lit them up blue. So: the BODY's width
+  // (the 15 m rotor disc hides nothing beside the hull; counting it would
+  // blind the silhouette), and the FULL height — a rotor blade hides the
+  // door frames a whole mast below it — as `liftUp`, which the shader
+  // stretches by the view ray's slope.
   const team = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PER_TYPE), 1);
   team.setUsage(THREE.DynamicDrawUsage);
-  const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3());
-  const lift = THREE.MathUtils.clamp(Math.max(size.x, size.y, size.z) * 0.4, 1.0, 3.5);
-  const xrayMat = createXrayMaterial({ teamNode: attribute("iTeam", "float"), lift });
+  const bodyBox = new THREE.Box3(), meshBox = new THREE.Box3();
+  root.traverse((o) => {
+    // Mesh by mesh (expandByObject would pull in a rotor parented to the hull).
+    if (!o.isMesh || o.name === "MainRotor" || o.name === "TailRotor") return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    bodyBox.union(meshBox.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld));
+  });
+  const body = bodyBox.getSize(new THREE.Vector3());
+  const height = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3()).y;
+  const lift = THREE.MathUtils.clamp(Math.max(Math.max(body.x, body.y, body.z) * 0.4, body.x * 1.15), 1.0, 8);
+  const liftUp = height * 1.1;
+  const xrayMat = createXrayMaterial({ teamNode: attribute("iTeam", "float"), lift, liftUp });
   for (const part of parts) {
     part.im.geometry.setAttribute("iTeam", team);
     const x = new THREE.InstancedMesh(part.im.geometry, xrayMat, MAX_PER_TYPE);
@@ -376,6 +391,7 @@ function buildInstancedType(tpl, scene) {
     x.renderOrder = 20;
     x.visible = false;
     x.name = "UnitXray";
+    x.userData.lift = [lift, liftUp];   // for a console check
     scene.add(x);
     part.xray = x;
   }
