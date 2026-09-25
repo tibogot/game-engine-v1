@@ -3831,6 +3831,12 @@ export async function startV3App(opts = {}) {
       readbackPending = true;
       return;
     }
+    // CPU edits not yet uploaded (flattenRect, remapHeights…) go up FIRST:
+    // reading the GPU before that fetched the old ground and wrote it over the
+    // edits in the mirror — which the next flush then uploaded as if it were
+    // the edit. Every building pad placed while a readback was due was lost
+    // that way (found 2026-09-25: most of nam-rts's pads were bare slopes).
+    if (cpuAhead) flushCpuHeightEdits();
     readbackInFlight = true;
     readbackPending  = false;
     try {
@@ -3848,6 +3854,13 @@ export async function startV3App(opts = {}) {
       if (raw.length !== rect.w * rect.h * 4) {
         rect = { x: 0, y: 0, w: HEIGHTMAP_SIZE, h: HEIGHTMAP_SIZE };
         raw = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE);
+      }
+      // An edit landed in the mirror WHILE this read was in flight: the data
+      // read is older than the mirror. Drop it and read again after that edit
+      // has gone up (the finally below re-runs, and the re-run flushes first).
+      if (cpuAhead) {
+        readbackPending = true;
+        return;
       }
       const isHalf = raw instanceof Uint16Array;
       const isFull = rect.w === HEIGHTMAP_SIZE && rect.h === HEIGHTMAP_SIZE;
@@ -7205,7 +7218,14 @@ export async function startV3App(opts = {}) {
     sculpt.endStroke = (...a) => { const r = _endStroke(...a); terrainEdited(); return r; };
     sculpt.undo = (...a) => { const r = _undo(...a); if (r) terrainEdited(); return r; };
     sculpt.redo = (...a) => { const r = _redo(...a); if (r) terrainEdited(); return r; };
-    sculpt.replaceHeightData = (...a) => { const r = _replace(...a); terrainEdited(); return r; };
+    sculpt.replaceHeightData = (...a) => {
+      const r = _replace(...a);
+      // Uploaded FROM the mirror (flushCpuHeightEdits): the mirror is the
+      // truth, so the river takes it into its base before any resolve.
+      if (a[0] === cpuHeightmap) riverV2System.markExternalEdit?.();
+      terrainEdited();
+      return r;
+    };
   }
 
   // ── Smart Road (v2 Smart Road 2 lab system + heightmap terrain conform) ─────
@@ -11709,23 +11729,35 @@ export async function startV3App(opts = {}) {
       const tx0 = Math.max(0, toTexel(wx - reach)), tx1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(wx + reach));
       const tz0 = Math.max(0, toTexel(wz - reach)), tz1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(wz + reach));
       const target = THREE.MathUtils.clamp(targetY / MAX_HEIGHT, 0, 1);
-      for (let ty = tz0; ty <= tz1; ty++) {
-        const dz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2 - wz;
-        for (let tx = tx0; tx <= tx1; tx++) {
-          const dx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2 - wx;
-          // Into the rectangle's frame — the inverse of three.js Y rotation
-          // (local +X → (cos, -sin), local +Z → (sin, cos)).
-          const lx = dx * cr - dz * sr, lz = dx * sr + dz * cr;
-          const ox = Math.max(0, Math.abs(lx) - halfX), oz = Math.max(0, Math.abs(lz) - halfZ);
-          const d = Math.hypot(ox, oz);
-          if (d >= rim) continue;
-          const s = rim > 0 ? d / rim : 0;
-          const w = 1 - s * s * (3 - 2 * s);
-          const i = ty * HEIGHTMAP_SIZE + tx;
-          cpuHeightmap[i] += (target - cpuHeightmap[i]) * w;
+      const stamp = (map) => {
+        for (let ty = tz0; ty <= tz1; ty++) {
+          const dz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2 - wz;
+          for (let tx = tx0; tx <= tx1; tx++) {
+            const dx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2 - wx;
+            // Into the rectangle's frame — the inverse of three.js Y rotation
+            // (local +X → (cos, -sin), local +Z → (sin, cos)).
+            const lx = dx * cr - dz * sr, lz = dx * sr + dz * cr;
+            const ox = Math.max(0, Math.abs(lx) - halfX), oz = Math.max(0, Math.abs(lz) - halfZ);
+            const d = Math.hypot(ox, oz);
+            if (d >= rim) continue;
+            const s = rim > 0 ? d / rim : 0;
+            const w = 1 - s * s * (3 - 2 * s);
+            const i = ty * HEIGHTMAP_SIZE + tx;
+            map[i] += (target - map[i]) * w;
+          }
         }
-      }
+      };
+      stamp(cpuHeightmap);
       cpuAhead = true;
+      // Inside a River v2 footprint the river keeps its own pre-river ground
+      // and re-conforms from it, so a pad there came back sloped on the next
+      // re-conform (nam-rts's camp by the river, 2026-09-26). Such a pad goes
+      // into the river's base as well, as a bridge landing does (gradeRamp).
+      // Only when it touches the footprint: editBase re-conforms the river.
+      if (riverV2System?.coversRect?.(tx0, tz0, tx1, tz1)) {
+        flushCpuHeightEdits();
+        riverV2System.editBase(stamp);
+      }
     },
 
     /**

@@ -95,6 +95,8 @@ import { paintCanopy, paintPalmFringe, paintUndergrowth, travellerPalmSpots, can
 import { plant, updatePlantedPlants } from "./placedPlants.js";
 import { plantSpecimens } from "./specimenPlants.js";
 import { sitePaddies, buildRicePaddies } from "./ricePaddies.js";
+import { placeBuffalo } from "./buffalo.js";
+import { createChickenFlock } from "./chickenFlock.js";
 import { createFogBanks, siteFogBanks } from "./fogBanks.js";
 import { buildFogBanksPanel } from "./fogBanksPanel.js";
 import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
@@ -1174,6 +1176,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     updatePlantedPlants(app, app.camera, app.environment?.getLightDirection?.());
     app.ricePaddies?.crop?.update(app.camera);   // the rice plants round the camera
     app.ricePaddies?.reflections?.update();       // their water's reflections (post)
+    app.buffalo?.update(dt);                      // the water buffalo's clips
+    app.chickens?.update(dt);                     // the hamlet's hens
     // Point the overlay at the selection until the pointer has moved, so
     // holding V before touching the mouse reveals the ground under the men
     // rather than a patch of the map's centre.
@@ -1232,8 +1236,38 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     onStatus("Raising the village…");
     for (const site of hamletSitesFor(boot.name)) {
       try {
+        const first = placed.pieces.length;
         const n = await placeHamlet(app, placed, site);
         console.log(`[village] ${site.name}: ${n} pieces at (${site.x}, ${site.z})`);
+        // HENS round the houses (chickens.js), each homed a couple of metres
+        // off a piece of the village, kept out of its buildings and the water.
+        // ?chickens=0 = without.
+        if (new URLSearchParams(location.search).get("chickens") !== "0") {
+          const pieces = placed.pieces.slice(first);
+          const inPiece = (x, z) => pieces.some(({ fp }) => {
+            const dx = x - fp.px, dz = z - fp.pz;
+            const lx = dx * fp.c - dz * fp.s, lz = dx * fp.s + dz * fp.c;
+            return Math.abs(lx) < fp.hx + 0.3 && Math.abs(lz) < fp.hz + 0.3;
+          });
+          const blocked = (x, z) => inPiece(x, z)
+            || (app.getWaterLevelAt?.(x, z) ?? -Infinity) > app.getWorldHeight(x, z) - 0.2
+            || app.getWorldNormal(x, z).y < 0.85;
+          let seed = 31337;
+          const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+          const homes = [];
+          for (let k = 0; k < 400 && homes.length < 12 && pieces.length; k++) {
+            const { fp } = pieces[Math.floor(rnd() * pieces.length)];
+            const a = rnd() * Math.PI * 2, r = Math.max(fp.hx, fp.hz) + 1.5 + rnd() * 3;
+            const x = fp.px + Math.cos(a) * r, z = fp.pz + Math.sin(a) * r;
+            if (!blocked(x, z)) homes.push({ x, z });
+          }
+          const hens = await createChickenFlock(app, homes, { blocked });
+          if (hens) {
+            if (app.chickens) console.warn("[chickens] one hamlet's hens only");
+            else app.chickens = hens;
+          }
+          console.log(`[chickens] ${homes.length} at ${site.name}`);
+        }
       } catch (e) {
         console.warn(`[village] ${site.name} failed:`, e);
       }
@@ -1332,6 +1366,31 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     } catch (e) { console.warn("[paddies] failed:", e); }
   }
 
+  // WATER BUFFALO (buffalo.js): two wading in flooded paddies, one grazing on
+  // the grassed rim. ?buffalo=0 = without.
+  if (app.ricePaddies && new URLSearchParams(location.search).get("buffalo") !== "0") {
+    try {
+      const pd = app.ricePaddies, s0 = pd.site, spots = [];
+      let seed = 9001;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      for (let i = 0; i < 4000 && spots.length < 3; i++) {
+        const x = s0.x + (rnd() - 0.5) * 150, z = s0.z + (rnd() - 0.5) * 120;
+        if (spots.some((q) => Math.hypot(q.x - x, q.z - z) < 18)) continue;
+        const wading = spots.length < 2;
+        const y = wading ? pd.waterAt(x, z, 2.5) : pd.grassAt(x, z);
+        if (y == null) continue;
+        // Where it may go: its own flooded paddy (wading, legs in the water),
+        // or the grassed rim — heightAt is null anywhere else.
+        const heightAt = wading
+          ? (qx, qz) => { const w = pd.waterAt(qx, qz, 1.2); return w == null || Math.abs(w - y) > 0.05 ? null : w - 0.32; }
+          : (qx, qz) => pd.grassAt(qx, qz);
+        spots.push({ x, z, heightAt });
+      }
+      app.buffalo = await placeBuffalo(app, spots);
+      console.log(`[buffalo] ${spots.length} at ${spots.map((q) => `(${q.x | 0}, ${q.z | 0})`).join(" ")}`);
+    } catch (e) { console.warn("[buffalo] failed:", e); }
+  }
+
   // The plants that make it Vietnam and Cambodia: pandanus on the river's
   // edge, sugar palms round the village and the temple and out in the open,
   // flame trees in the village (specimenPlants.js). ?specimens=0 = without.
@@ -1370,6 +1429,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // the river cut the map in two (bridgeLandings.js). The props are in now.
   onStatus("Grading bridge landings…");
   try { await gradeBridgeLandings(app); } catch (e) { console.warn("[bridges] landings failed:", e); }
+  // Every building back on its level pad, after all the ground work above.
+  try { await placed.reassertPads(); } catch (e) { console.warn("[placed] pad re-level failed:", e); }
   // …and the decks themselves get a height, so units cross ON the bridge
   // instead of walking the riverbed under it (bridgeDecks.js).
   try {
@@ -1463,6 +1524,12 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     const w = await warmGamePipelines(app, engineObjects);
     console.log(`[warmup] ${w.warmed} hidden/empty drawables warmed in ${w.ms} ms`);
   } catch (e) { console.warn("[warmup] failed:", e); }
+  // THE PADS AGAIN, at the very end: something late in the boot (the river's
+  // re-conform settling, measured 2026-09-26) still rewrote a few after the
+  // pass above; a pass here, and one more once the game has run a moment,
+  // leave every building on level ground. 54 small rects each — nothing.
+  try { await placed.reassertPads(); } catch (e) { console.warn("[placed] pad re-level failed:", e); }
+  setTimeout(() => placed.reassertPads().catch(() => {}), 3000);
   onStatus("ready");
   return app;
 }

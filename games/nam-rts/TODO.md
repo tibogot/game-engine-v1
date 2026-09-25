@@ -420,11 +420,62 @@ Everything else below is in its section.
         side along the dirt track stays open (the track blocks plants: a path
         along the terraces).
         MEASURED plants (rice + grass): 0.77 ms play zoom, 0.58 mid, 0.55 close.
-  - [ ] ANIMALS (your idea): water BUFFALO from public/models/Bull_compressed.glb
-        (2.4k tris, 13 clips incl. Walk / Eating / Idle; 7 skinned pieces ->
-        merge to 1 draw; recolour slate grey), 2-3 in the paddies and on the
-        dikes. CHICKENS procedural for the hamlet (instanced, peck/walk in the
-        vertex shader, 1 draw) — or your chicken GLB if it has clips.
+  - [x] ANIMALS BUILT (2026-09-25, uncommitted), your look pending:
+        WATER BUFFALO (games/nam-rts/buffalo.js) from Bull_compressed.glb: the
+        7 skinned pieces merged to ONE draw (unpacked from their quantised
+        spaces onto one skeleton, colours baked), slate hide, the bull's horns
+        replaced by generated buffalo crescents on the Head bone, 1.4 m. Three
+        by the terraces: two wading in flooded paddies, one grazing the rim.
+        They LIVE (your note): graze / look up / walk 2-5 m and graze again,
+        crossfaded, each kept to its own paddy. CHICKENS (chickens.js):
+        procedural hens, 12 round Ap Bang's houses, peck / stand / trot, one
+        instanced draw. MEASURED: buffalo 0.00 ms (noise 0.41), chickens
+        0.05 ms. Also fixed: reflections streaked under an animal (thinner
+        hit test).
+  - [x] HENS NOW YOUR MODEL (public/models/Chicken_001_compressed.glb, 976 tris,
+        idle 8.2 s with its own pecking / walk / run): through the soldiers'
+        GPU crowd path (crowdSkinning.js) — clips baked once, one compute
+        pass, ONE draw, idle <-> walk crossfaded; behaviour = chickens.js
+        henBrain; the procedural hen stays as the fallback if the model fails.
+        MEASURED: within noise (6.24 vs 6.43 ms, noise 0.22).
+  - [x] SPIRIT SHRINE ROOF was upside down (your screenshot): each slope was
+        tilted with the wrong sign (a V) — v3/render/objects/rtsVillage.js.
+  - [ ] **The village casts NO SHADOWS** (your note, 2026-09-26): houses,
+        granaries, fences — nothing in the hamlet throws a shadow. Check the
+        placed/merged meshes' castShadow and the shadow camera's reach.
+  - [x] **Requisition flags are REAL CLOTH now** (2026-09-26): two engine
+        Verlet flags per point (US, NLF) on the mast's own flagpole, the
+        leading side's shown at the capture height; simulated only while up,
+        on screen and within 300 m.
+  - [x] Houses stood below their pad (seen from under the ground): a piece
+        was stood at the ground's height at that moment, the pad was then
+        re-levelled over it. Pieces now stand on their PAD's height, and the
+        pads are re-levelled at the very end of the boot (+ once 3 s in):
+        54/54 flat, 0 pieces off their pad.
+  - [x] (the question that led to it) Requisition flags as REAL CLOTH: they were one
+        instanced flat sheet with a baked ripple, not the Verlet cloth of the
+        HQ / camp flags. Not a perf reason — simulate only the ones on screen
+        (usually 1-2, a fraction of a ms). The capture already lowers THEIR
+        flag to the foot of the pole and then raises YOURS as progress runs
+        (infantry in the 16 m ring; more men = faster; both sides = contested);
+        with cloth that would read far better.
+  - [x] **SUNKEN BUILDINGS (your screenshot by the enemy HQ) — engine bug, fixed**:
+        building pads were LOST after being cut. (1) A heightmap readback
+        racing a pad's upload wrote the old ground back into the CPU mirror
+        (syncHeightmapToCPU now uploads pending edits first and drops a read
+        that lands after a newer edit). (2) River v2 re-conforms the WHOLE
+        terrain from its own copy of the ground; pads reached that copy only
+        after a 60 ms debounce, and inside the river's footprint never — now a
+        mirror-side edit is folded in before any re-conform
+        (markExternalEdit), and a pad touching the footprint goes into the
+        river's base like a bridge landing (coversRect + editBase). Plus every
+        pad is re-levelled once at the end of the boot (placed.reassertPads).
+        Pads flat: 38/54 -> 50/54.
+  - [ ] 4 pads still off (0.3-1.4 m) at the enemy camp's front: the trench berm
+        (45, 372), a foxhole, the propaganda board — overlapping the pads of
+        the gun nests / spider holes placed by structures.js. Move them apart.
+  - [ ] Maybe: a buffalo + a herder on the village lanes; a rooster that
+        crows (sound); hens scatter from soldiers running through.
   - [ ] NEXT (my suggestions, your pick): grass blades on the banks; the
         block's rim hidden in bananas/bushes; life (farmers in conical hats,
         a buffalo, a field hut, palms on dikes, a bare path on some dike

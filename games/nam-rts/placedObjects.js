@@ -74,6 +74,7 @@ export function createPlacedObjects(app) {
         const lx = sx * hx, lz = sz * hz;
         y += app.getWorldHeight(px + lx * c + lz * s, pz - lx * s + lz * c); n++;
       }
+      it.fp.y = y / n;                       // kept: reassertPads() levels it again
       await app.flattenRect(px, pz, hx, hz, y / n, { rotY: it.rotY, rim: 3, ground: it.ground });
       removeMapPropsIn(it.fp);
     }
@@ -82,7 +83,13 @@ export function createPlacedObjects(app) {
     const buckets = new Map();   // material → layout → [geometry in world space]
     const sources = new Set();   // the pieces' own geometries, freed once merged
     for (const it of items) {
-      it.obj.position.set(it.x, app.getWorldHeight(it.x, it.z) - (it.pad ? 0.02 : 0.05), it.z);
+      // A padded piece stands on its PAD's height, not on whatever the ground
+      // reads at that moment: a pad lost to a terrain rewrite left the centre
+      // on the old slope, the house was stood there, and reassertPads then
+      // raised the ground back over its floor (seen from under the ground,
+      // 2026-09-26).
+      const base = it.pad && it.fp?.y != null ? it.fp.y : app.getWorldHeight(it.x, it.z);
+      it.obj.position.set(it.x, base - (it.pad ? 0.02 : 0.05), it.z);
       it.obj.updateMatrixWorld(true);
       if (it.clear) app.clearVegetation?.(it.x, it.z, it.clear + 2, { grass: it.clear });
       if (it.merge === false) {
@@ -105,7 +112,7 @@ export function createPlacedObjects(app) {
           byLayout.list.get(key).push(g);
         });
       }
-      pieces.push({ x: it.x, z: it.z, rotY: it.rotY, fp: it.fp, nav: it.nav, cover: it.cover, navHandle: null });
+      pieces.push({ x: it.x, y: it.obj.position.y, z: it.z, rotY: it.rotY, fp: it.fp, nav: it.nav, cover: it.cover, pad: it.pad, navHandle: null });
     }
     for (const [material, { list, shadow }] of buckets) {
       for (const geos of list.values()) {
@@ -166,8 +173,26 @@ export function createPlacedObjects(app) {
     }
   }
 
+  /**
+   * LEVEL EVERY PAD AGAIN, footprint only (no rim, so no neighbour is
+   * touched), at the height it was cut to. Run once at the end of the boot:
+   * a pad could still be lost to a terrain rewrite racing its upload (the
+   * river re-conform — see riverV2System.markExternalEdit), and one sunken
+   * house is one too many. Idempotent; a pad that held changes nothing.
+   */
+  async function reassertPads() {
+    let n = 0;
+    for (const p of pieces) {
+      if (!p.pad || p.fp?.y == null || !app.flattenRect) continue;
+      const { px, pz, hx, hz, y } = p.fp;
+      await app.flattenRect(px, pz, hx, hz, y, { rotY: p.rotY, rim: 0.01 });
+      n++;
+    }
+    return n;
+  }
+
   return {
-    group, pieces, place, coverCircles,
+    group, pieces, place, coverCircles, reassertPads,
     dispose() {
       for (const p of pieces) if (p.navHandle) app.navGrid?.removeFootprint?.(p.navHandle);
       pieces.length = 0;

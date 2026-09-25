@@ -360,7 +360,9 @@ export function buildShrine({ seed = 11 } = {}) {
   for (const sx of [-1, 1]) {
     parts.push({
       geo: buildBox(w * 0.62, 0.05, d * 1.3), pos: [sx * w * 0.28, postH + 0.07 + h + 0.1, 0],
-      rot: [0, 0, sx * 0.55], mat: MAT.tile, tone: 0.35 + r() * 0.35,
+      // Each slope falls AWAY from the ridge (−sx): with +sx they rose to the
+      // eaves and the roof was a V, upside down (seen 2026-09-25).
+      rot: [0, 0, -sx * 0.55], mat: MAT.tile, tone: 0.35 + r() * 0.35,
     });
   }
   parts.push({ geo: new THREE.CylinderGeometry(0.05, 0.05, w * 0.7, 6).rotateZ(Math.PI / 2), pos: [0, postH + 0.07 + h + 0.24, 0], mat: MAT.tile, tone: 0.3 });

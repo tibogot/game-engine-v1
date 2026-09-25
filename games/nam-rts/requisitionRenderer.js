@@ -2,14 +2,18 @@
 //
 //   · masts: the kit's relay mast (rtsBuildables), one InstancedMesh — every
 //     point on the map is one draw, and one more for the red lights at the heads
-//   · flags: the US flag and the NLF's (red over blue, the yellow star), one
-//     InstancedMesh each. A flag CLIMBS its pole as a side captures — the
-//     capture bar is on the map, where you are looking, not in a panel
+//   · flags: the US flag and the NLF's (red over blue, the yellow star) as
+//     REAL CLOTH — the engine's Verlet flag, like the HQ's (your ask,
+//     2026-09-26). A flag CLIMBS its pole as a side captures — theirs slides
+//     down to the foot first, then yours goes up: the capture bar is on the
+//     map, where you are looking, not in a panel. Only a flag that is up, on
+//     screen and within 300 m is simulated.
 //   · zones: a thin draped ring round each point, neutral khaki, yours blue,
 //     theirs red; it pulses while the point is being taken or is contested
 import * as THREE from "three";
 import { makeBloomMaterial, BLOOM } from "./bloom.js";
 import { drawUsFlagDataUrl } from "./baseFlag.js";
+import { createFlag } from "../../v3/props/liveProps.js";
 import { createSelectionRingField } from "./selectionRingField.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
@@ -36,22 +40,19 @@ export function drawNlfFlag(h = 256) {
   return c;
 }
 
-/** A flag's cloth: hoist at x = 0, flying along +X, a gentle ripple baked in. */
-function flagGeometry() {
-  const g = new THREE.PlaneGeometry(FLAG_W, FLAG_H, 12, 1).translate(FLAG_W / 2, 0, 0);
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i);
-    p.setZ(i, Math.sin((x / FLAG_W) * Math.PI * 2.2) * 0.18 * (x / FLAG_W));
-  }
-  g.computeVertexNormals();
-  return g;
-}
-
-function flagMaterial(tex) {
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return new THREE.MeshStandardNodeMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.85, metalness: 0 });
+/** One cloth flag, no pole of its own (it flies from the mast's): its group's
+ *  origin is the foot of the hoist, the cloth's top edge FLAG_H above it. */
+function clothFlag(scene, textureUrl) {
+  const f = createFlag({
+    poleHeight: FLAG_H, poleRadius: 0.05, clothWidth: FLAG_W, clothHeight: FLAG_H,
+    xSegs: 10, ySegs: 6, flagColor: "#ffffff",
+    windIntensity: 260, windSpeed: 1000, windDirection: 0, showPole: false,
+  });
+  f.setParam("textureUrl", textureUrl);
+  f.group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  f.group.visible = false;
+  scene.add(f.group);
+  return f;
 }
 
 export function createRequisitionRenderer({ app, requisition, fogOfWar = null }) {
@@ -65,13 +66,11 @@ export function createRequisitionRenderer({ app, requisition, fogOfWar = null })
   masts.castShadow = masts.receiveShadow = true;
   const lights = new THREE.InstancedMesh(new THREE.SphereGeometry(0.28, 10, 6),
     makeBloomMaterial({ color: 0xff3a2a, blending: THREE.NormalBlending, depthWrite: true, transparent: false }, BLOOM.beacon), max);
-  const usTex = new THREE.TextureLoader().load(drawUsFlagDataUrl(256));
-  const flags = {
-    player: new THREE.InstancedMesh(flagGeometry(), flagMaterial(usTex), max),
-    enemy: new THREE.InstancedMesh(flagGeometry(), flagMaterial(new THREE.CanvasTexture(drawNlfFlag())), max),
-  };
-  for (const m of [masts, lights, flags.player, flags.enemy]) { m.frustumCulled = false; m.count = 0; scene.add(m); }
-  flags.player.castShadow = flags.enemy.castShadow = true;
+  for (const m of [masts, lights]) { m.frustumCulled = false; m.count = 0; scene.add(m); }
+  // Two cloths per point, ours and theirs; only the one the capture leans to flies.
+  const usUrl = drawUsFlagDataUrl(256), nlfUrl = drawNlfFlag(256).toDataURL("image/png");
+  const cloths = requisition.points.map(() => ({ player: clothFlag(scene, usUrl), enemy: clothFlag(scene, nlfUrl) }));
+  const frustum = new THREE.Frustum(), _pv = new THREE.Matrix4(), _sph = new THREE.Sphere(new THREE.Vector3(), 4);
 
   const zones = createSelectionRingField({ app, max: 32, inner: 0.965, segments: 96, opacity: 0.75 });
 
@@ -94,31 +93,37 @@ export function createRequisitionRenderer({ app, requisition, fogOfWar = null })
 
   function sync(dt) {
     t += dt;
-    let nP = 0, nE = 0;
+    const cam = app.camera;
+    _pv.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(_pv);
     zones.begin();
-    for (const p of requisition.points) {
+    requisition.points.forEach((p, i) => {
       // The flag: whichever side the capture leans to, at the height it has got to.
       const a = Math.abs(p.progress);
-      if (a > 0.001) {
-        const side = p.progress > 0 ? "player" : "enemy";
-        const y = p.position.y + pole.bottom + (pole.top - pole.bottom - FLAG_H) * a + FLAG_H / 2;
-        _m.makeTranslation(p.position.x + pole.x, y, p.position.z + pole.z);
-        const im = flags[side];
-        im.setMatrixAt(side === "player" ? nP++ : nE++, _m);
+      const side = p.progress > 0 ? "player" : "enemy";
+      for (const k of ["player", "enemy"]) {
+        const f = cloths[i]?.[k];
+        if (!f) continue;
+        const up = a > 0.001 && k === side;
+        f.group.visible = up;
+        if (!up) continue;
+        const y = p.position.y + pole.bottom + (pole.top - pole.bottom - FLAG_H) * a;
+        f.group.position.set(p.position.x + pole.x, y, p.position.z + pole.z);
+        // The cloth only moves where somebody can see it move.
+        _sph.center.set(f.group.position.x + FLAG_W / 2, y + FLAG_H / 2, f.group.position.z);
+        if (frustum.intersectsSphere(_sph) && cam.position.distanceTo(_sph.center) < 300) f.update(Math.min(dt, 1 / 30));
       }
       // The zone: the owner's colour, pulsing while it is being fought over.
       const seen = !fogOfWar?.enabled || fogOfWar.isExplored?.(p.position.x, p.position.z);
-      if (!seen) continue;
+      if (!seen) return;
       _c.set(TINT[p.owner ?? "neutral"]);
       if (p.contested || p.capturing) {
         const k = 0.6 + 0.4 * Math.sin(t * (p.contested ? 9 : 5));
         _c.lerp(new THREE.Color(p.contested ? 0xffffff : TINT[p.capturing > 0 ? "player" : "enemy"]), 1 - k);
       }
       zones.add(p.position.x, p.position.z, p.radius, _c.getHex());
-    }
+    });
     zones.commit();
-    flags.player.count = nP; flags.enemy.count = nE;
-    flags.player.instanceMatrix.needsUpdate = flags.enemy.instanceMatrix.needsUpdate = true;
     // The head lights blink slowly, as aviation lights do.
     lights.visible = Math.sin(t * 2.2) > -0.3;
   }

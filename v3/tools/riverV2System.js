@@ -253,6 +253,7 @@ export class RiverV2System {
     this._baseTexData = null;
     this._baseTex = null;
     this._rebaseTimer = 0;
+    this._externalPending = false;
 
     this._initPasses();
     // The field starts as whatever was in VRAM; clear it before anything can
@@ -455,10 +456,23 @@ export class RiverV2System {
    */
   editBase(apply) {
     if (!this._cpuBase) return false;
+    this._foldExternal();
     apply(this._cpuBase);
     this._uploadBase();
     this.applyConform({ commit: true });
     return true;
+  }
+
+  /** Does the river's footprint touch this texel rect (inclusive)? */
+  coversRect(tx0, ty0, tx1, ty1) {
+    const cov = this._coverage;
+    if (!this._cpuBase || !cov) return false;
+    for (let y = Math.max(0, ty0); y <= Math.min(HEIGHTMAP_SIZE - 1, ty1); y++) {
+      for (let x = Math.max(0, tx0); x <= Math.min(HEIGHTMAP_SIZE - 1, tx1); x++) {
+        if (cov[y * HEIGHTMAP_SIZE + x] !== 0) return true;
+      }
+    }
+    return false;
   }
 
   /** Snapshot the CURRENT terrain as the unconformed base. The caller must have
@@ -523,6 +537,7 @@ export class RiverV2System {
   }
 
   _dropBase() {
+    this._externalPending = false;
     this._cpuBase = null;
     this._coverage = null;
   }
@@ -530,6 +545,31 @@ export class RiverV2System {
   /** Drop the flow lookup when the last river goes, so a query cannot answer
    *  from a river that no longer exists. */
   _dropFlowIndex() { this._flowIndex = null; }
+
+  /**
+   * An edit the CPU mirror ALREADY holds (a game's flattenRect / remapHeights,
+   * uploaded from the mirror): fold it into the base before the NEXT resolve,
+   * whatever triggers that. Waiting for the debounced rebase lost it: a resolve
+   * in between (a bridge landing's editBase, a mouth opening) rewrote the whole
+   * terrain from a base without it — most of nam-rts's building pads were bare
+   * slopes that way (2026-09-25). Not for GPU-side edits (sculpt strokes): the
+   * mirror lags those until a readback, so they keep notifyTerrainEdited.
+   */
+  markExternalEdit() {
+    if (this._cpuBase) this._externalPending = true;
+  }
+
+  /** Fold a pending mirror-side edit into the base (outside the footprint). */
+  _foldExternal() {
+    if (!this._externalPending || !this._cpuBase) return;
+    this._externalPending = false;
+    const cov = this._coverage;
+    const n = this._cpuBase.length;
+    for (let i = 0; i < n; i++) {
+      if (!cov || cov[i] === 0) this._cpuBase[i] = this.cpuHeightmap[i];
+    }
+    this._uploadBase();
+  }
 
   /** Terrain was edited by something else (sculpt, procedural gen, load). */
   notifyTerrainEdited() {
@@ -804,6 +844,7 @@ export class RiverV2System {
    *   frame of a drag.
    */
   applyConform({ rebuild = true, commit = true } = {}) {
+    this._foldExternal();
     if (!this._solvable()) {
       if (this._cpuBase) {
         this._restoreBase();

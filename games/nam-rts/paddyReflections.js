@@ -103,7 +103,9 @@ export function createPaddyReflections(app, level, params = {}) {
             // Behind what is on screen there, but not far behind (a thin
             // thing, not the ground a long way past it).
             const behind = sz.sub(qv.z);
-            If(behind.greaterThan(0).and(behind.lessThan(stepLen.mul(2).add(0.6))), () => {
+            // Thin: a thick test took the legs IN FRONT of a ray passing under a
+            // belly for hits, and streaked the water under every animal.
+            If(behind.greaterThan(0).and(behind.lessThan(stepLen.mul(1.2).add(0.15))), () => {
               hit.assign(1); hitUV.assign(uvq); tHit.assign(tt);
               Break();
             });

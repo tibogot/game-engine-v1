@@ -402,6 +402,22 @@ export async function buildRicePaddies(app, site, params = PADDY_PARAMS) {
     triangles: idx.length / 3,
     /** On a field (not a bank or dike) of the terraces? */
     contains(x, z) { return mask(x, z) > 0.8 && terrace(x, z, P.bank).eT > 0; },
+    /** The water's height where (x, z) is well inside a FLOODED paddy (`margin` m from its edges), else null. */
+    waterAt(x, z, margin = 1.5) {
+      if (mask(x, z) < 0.9) return null;
+      const t = terrace(x, z, P.bank);
+      if (t.st > 0.3 || t.eT < margin) return null;
+      const y0 = sample(nat, x, z);
+      return y0 + (t.y - y0) * mask(x, z) + 0.03;
+    },
+    /** On the grassed bank or rim (for an animal grazing), else null: the ground height. */
+    grassAt(x, z) {
+      const m = mask(x, z);
+      if (m < 0.3 || m > 0.8) return null;
+      const t = terrace(x, z, P.bank);
+      const y0 = sample(nat, x, z);
+      return y0 + (t.y - y0) * m + 0.03;
+    },
     /** Inside the terraced block at all. */
     inBlock(x, z) { return x >= x0 && x <= x1 && z >= z0 && z <= z1 && mask(x, z) > 0.15; },
   };
