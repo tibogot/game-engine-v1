@@ -12,8 +12,9 @@
 // HOW. Everything the ENGINE put in the scene is recorded when the level has
 // loaded (`snapshotEngineScene`); the ocean, the waterfalls, the editor's
 // gizmos are hidden there too and must NOT be warmed — they are never drawn
-// in the game, and warming them would only lengthen the boot. What the GAME
-// added after that and is hidden or empty is switched on for two frames under
+// in the game, and warming them would only lengthen the boot. Everything else
+// — what the GAME added, and the level's shown content — is switched on for
+// two frames under
 // the loading screen: visible, one instance, never frustum-culled. Those two
 // frames draw the beauty pass and the shadow cascades, which is what builds
 // the pipelines; then everything is put back exactly as it was. Instances
@@ -21,10 +22,22 @@
 // off-screen triangle behind the loading screen, which is all a pipeline
 // needs.
 
-/** Everything in the scene right now: call once the level has loaded. */
+/**
+ * Everything in the scene right now: call once the level has loaded. The set
+ * also remembers which of them were SHOWN then (`shownAtLoad`): those are the
+ * level's real content (the river, the props), which the game draws — they
+ * get warmed; what the engine had hidden (ocean, gizmos) does not.
+ */
 export function snapshotEngineScene(scene) {
   const seen = new Set();
-  scene.traverse((o) => seen.add(o));
+  const shown = new Set();
+  scene.traverse((o) => {
+    seen.add(o);
+    let vis = o.visible;
+    for (let p = o.parent; p && vis; p = p.parent) vis = p.visible;
+    if (vis) shown.add(o);
+  });
+  seen.shownAtLoad = shown;
   return seen;
 }
 
@@ -38,14 +51,21 @@ const drawable = (o) => o.isMesh || o.isPoints || o.isSprite;
  */
 export async function warmGamePipelines(app, engineObjects, { frames = 2 } = {}) {
   const t0 = performance.now();
+  // EVERY drawable the game will draw, not only the hidden or empty ones:
+  // something visible but OFF-SCREEN is frustum-culled at boot and never
+  // drawn, so its pipeline was built on the frame the camera first reached
+  // it — the "camera-jump freeze", measured 2026-09-25: 158-234 ms once per
+  // new place (the river close up, the enemy HQ's props). The level's own
+  // objects count when they were shown at load (the river, whose chunk
+  // culling had it hidden from the base); what the engine hid stays out.
+  const shownAtLoad = engineObjects.shownAtLoad ?? new Set();
   const targets = [];
   app.scene.traverse((o) => {
-    if (!drawable(o) || engineObjects.has(o)) return;
-    let hidden = !o.visible;
-    for (let p = o.parent; p; p = p.parent) if (!p.visible) hidden = true;
+    if (!drawable(o)) return;
+    if (engineObjects.has(o) && !shownAtLoad.has(o)) return;
     const emptyInstanced = o.isInstancedMesh && o.count === 0;
     const emptyGeo = o.geometry?.isInstancedBufferGeometry && o.geometry.instanceCount === 0;
-    if (hidden || emptyInstanced || emptyGeo) targets.push({ o, emptyInstanced, emptyGeo });
+    targets.push({ o, emptyInstanced, emptyGeo });
   });
 
   // First value seen for every (object, key) touched, to put back at the end.

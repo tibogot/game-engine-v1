@@ -283,10 +283,25 @@ Everything else below is in its section.
       · COST: all 53 pandanus in view 0.1 ms at x2 res. The hitches on
         jumping the camera to them (166 / 102 ms) happen the SAME without
         them (?specimens=0) — see the camera-jump hitch below.
-- [ ] **Camera-jump hitch** (found 2026-09-25): the first close-up after a
-      jump across the map costs 100-170 ms once (with or without the new
-      plants). Likely first-time terrain/grass/foliage tile work at a new
-      place; a player's minimap click does exactly this. Measure what.
+- [x] **Camera-jump hitch — FIXED 2026-09-25 (uncommitted).** Not tile work:
+      a trace put the 173 ms in the GPU PROCESS (no long main-thread task),
+      and hooking backend.createRenderPipeline showed each hitching jump
+      building NEW pipelines — the river's two grab-free passes (river close
+      up), a Mesh + container_001 prop (enemy HQ). Built at first draw, the
+      driver compiled them mid-play. pipelineWarmup only warmed HIDDEN/EMPTY
+      game objects: anything visible but OFF-SCREEN (frustum-culled at boot)
+      and the level's own content (the river, hidden by its chunk culling
+      from the base) slipped through. Now it warms every drawable the game
+      will draw — the game's, and the level's that were SHOWN at load
+      (snapshotEngineScene records them; the ocean / gizmos stay out) — with
+      frustum culling off for the two warm frames. RESULT: 12 first-time
+      jumps (6 places, close + zoomed out): worst frame 18-20 ms, 0
+      pipelines built in play (was 158-234 ms). Warm-up 254 drawables in
+      448 ms under the loading screen.
+- [ ] **The river reads near-BLACK at the base** (seen 2026-09-25 in a fresh
+      browser profile; the same with the old warm-up code, so not that fix).
+      Earlier today it was teal there. Check the grab-free two-pass state
+      (RiverV2:1 hidden, only :add shown) and any per-origin localStorage.
 - [ ] Still open from the plant list: sago palm, nipa placement (the preset
       exists), a strangler fig on the temple ruins (Ta Prohm) — a big one.
 - [x] **"Those exotic trees with spiky shapes"** (your ask 2026-09-25) —
