@@ -884,7 +884,10 @@ export class PostFxPipeline {
         : this._scenePassColor;
 
     if (this._sceneColorModifier) {
-      sceneInput = this._sceneColorModifier(sceneInput);
+      // The scene pass rides along (ADDITIVE — one-argument modifiers ignore
+      // it): a modifier that needs the scene DEPTH (nam-rts's fog banks) reads
+      // it from the pass that already wrote it, instead of a screen copy.
+      sceneInput = this._sceneColorModifier(sceneInput, { scenePass: this._scenePass });
     }
 
     if (this._dofEnabled && this._dofUniforms) {

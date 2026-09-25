@@ -334,6 +334,32 @@ Everything else below is in its section.
       native). `app.fogBanks.set("density"|"wisps"|"drift"|"color", v)` to
       tune live; ?fogbanks=0 = without. Decoration only (no line-of-sight
       rule yet — your call).
+- [x] **FOG BANKS v2 (your screenshot + "go", 2026-09-25, uncommitted)** —
+      the crown cut by a hard line is FIXED and the mist is a VOLUME now:
+      · a SCREEN PASS in the post chain's colour hook with the scene pass's
+        own DEPTH (engine, additive: postFxPipeline hands `{ scenePass }` to
+        the modifier; no screen copy), chained BEFORE the fog of war
+        (fogOfWar.setPreModifier). Mist stops at whatever each pixel sees.
+      · `mode: "volume"` (default): 12 jittered steps at HALF resolution
+        through 3D-billowing drifting noise, lit (tops bright, depths
+        darker, warm toward the sun), then a DEPTH-AWARE upscale (a plain
+        bilinear one speckled every leaf gap white). `mode: "analytic"` =
+        the closed-form veil, cheaper.
+      · COST, mist over most of the screen, x2 res: volume +1.2-1.9 ms,
+        analytic +0.55 (native ~a quarter of that).
+      · Trap found: `cameraFar` in a post pass is the screen QUAD's camera
+        (far = 1) — it clamped every distance to a metre.
+      · CONTROLS (your ask "do we have some controls for this new fog?"):
+        Dev → Fog banks (fogBanksPanel.js) — on/off, look (volume / veil),
+        density, wisps, drift, mist / shade / sun-warmth colours, steps,
+        resolution, each bank's own thickness + a ◎ jump to it, and
+        "Defaults". Kept across reloads (localStorage `namrts.fogBanks`).
+      · HEIGHT + SIZE (your ask: "I can't get the fog to that height", the
+        debug depth view you liked): every bank x height / x size, and
+        presets "Morning mist" and "Thick (Apocalypse Now)" (height 2.6,
+        size 1.6, density 1.3, wisps 0.3, shade #b9c2c1) — the canopy sinks
+        in, only the tallest crowns and the temple tower stand out. Thick
+        at the temple, 22 steps, x2 res: within the noise (28.6 vs 29.2).
 - [ ] Gorge wall's dark stair-step CHECKER is the TERRAIN's own shading
       (found while checking the mist; there with the mist off) — look later.
 - [ ] (was) **Placeable fog banks** — YOUR DECISION 2026-09-25: NOT interactive

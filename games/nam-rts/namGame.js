@@ -95,6 +95,7 @@ import { paintCanopy, paintPalmFringe, paintUndergrowth, travellerPalmSpots, can
 import { plant, updatePlantedPlants } from "./placedPlants.js";
 import { plantSpecimens } from "./specimenPlants.js";
 import { createFogBanks, siteFogBanks } from "./fogBanks.js";
+import { buildFogBanksPanel } from "./fogBanksPanel.js";
 import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
@@ -1317,6 +1318,14 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       const fogBanks = createFogBanks({ app });
       const placedBanks = siteFogBanks(app, fogBanks, { temples: templeSitesFor(boot.name), field: app.jungleField ?? null });
       app.fogBanks = fogBanks;
+      fogBanks.restoreBanks();          // your per-bank densities from Dev → Fog banks
+      // Drawn in the post chain with the scene's depth, BEFORE the fog of war
+      // (unexplored ground darkens its mist with it). Mode / steps changes
+      // rebuild the same hook.
+      const hookFog = () => fogOfWar.setPreModifier((color, ctx) => fogBanks.node(color, ctx));
+      fogBanks.onRebuild = hookFog;
+      hookFog();
+      buildFogBanksPanel(document.getElementById("dv-fogbanks"), fogBanks, { rtsCamera });
       console.log(`[fog banks] ${placedBanks.map((b) => b.name).join(", ")}`);
     } catch (e) { console.warn("[fog banks] failed:", e); }
   }

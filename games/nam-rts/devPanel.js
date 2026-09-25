@@ -282,6 +282,11 @@ export function createDevPanel({
       </div>
 
       <div class="inspector-section">
+        <div class="section-header">Fog banks</div>
+        <div class="section-body" id="dv-fogbanks"><div class="dv-hint">Built once the world is.</div></div>
+      </div>
+
+      <div class="inspector-section">
         <div class="section-header">Smoke</div>
         <div class="section-body">
           <button class="action-btn" id="dv-smoke-violet" type="button">Violet marker (M18)</button>

@@ -314,9 +314,17 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     post?.syncCamera?.(app.camera);
   }
 
+  // A modifier that runs BEFORE the fog of war in the same post hook (the
+  // fog banks: mist over unexplored ground is darkened with it). Set later,
+  // by whatever is built after the fog of war.
+  let pre = null;
+  let postApp = null;
+  const hook = (color, ctx) => post.node(pre ? pre(color, ctx) : color);
+
   function installPostFx(appRef) {
+    postApp = appRef;
     post = createPostModifier(appRef.camera);
-    appRef.postFx?.setSceneColorModifier?.((color) => post.node(color));
+    appRef.postFx?.setSceneColorModifier?.(hook);
     post.syncCamera(appRef.camera);
     // The modifier is created enabled; it has to learn the state it missed,
     // because setEnabled may well have run before there was a `post` to tell.
@@ -333,6 +341,11 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     },
     update,
     installPostFx,
+    /** `(color, { scenePass }) => color`, run before the fog of war; null to drop it. */
+    setPreModifier(fn) {
+      pre = typeof fn === "function" ? fn : null;
+      if (post) postApp?.postFx?.setSceneColorModifier?.(hook);   // rebuild the chain
+    },
     isExplored,
     isVisible,
     canSeeEntity,

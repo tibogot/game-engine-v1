@@ -11856,7 +11856,11 @@ export async function startV3App(opts = {}) {
       setBloomSelective(on) {
         worldEnv?.postFxPipeline?.setBloomSelective(!!on);
       },
-      /** `(colorNode) => colorNode` — applied to scene beauty before bloom (FoW). */
+      /**
+       * `(colorNode, { scenePass }) => colorNode` — applied to scene beauty
+       * before bloom (FoW). `scenePass` is the pass that rendered the scene:
+       * `scenePass.getViewZNode()` is the depth, with no copy.
+       */
       setSceneColorModifier(fn) {
         worldEnv?.postFxPipeline?.setSceneColorModifier(fn);
       },
