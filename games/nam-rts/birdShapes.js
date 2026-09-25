@@ -64,6 +64,7 @@ export function birdShapes() {
     tri(a, b, c, col, hand ? [hand[0], hand[1], hand[2]] : undefined);
     tri(a, c, d, col, hand ? [hand[0], hand[2], hand[3]] : undefined);
   };
+  const triRaw = tri;   // the wing builder shadows `tri` with a winding-aware one
   /** A spindle body: nose, tail, and a ring of four at `mid`. */
   const body = (nose, tail, mid, w, h, top, under = top) => {
     const U = [0, h, mid], D = [0, -h, mid], L = [-w, 0, mid], R = [w, 0, mid];
@@ -76,6 +77,12 @@ export function birdShapes() {
    */
   const wing = (s, root, elbow, tip, col, colEdge = col, fingers = 0) => {
     const m = (p) => [p[0] * s, p[1], p[2]];
+    // Mirroring a triangle (x → −x) REVERSES its winding: the left wing's
+    // faces pointed down, and under DoubleSide a face seen from its back is
+    // lit as an underside — one wing white, the other in shade, dark
+    // (your note, 2026-09-26). The left wing's corners go in the other order.
+    const tri = (a, b, c, col2, h = [0, 0, 0]) => (s > 0 ? triRaw(a, b, c, col2, h) : triRaw(a, c, b, col2, [h[0], h[2], h[1]]));
+    const quad = (a, b, c, d, col2, h) => { tri(a, b, c, col2, [h[0], h[1], h[2]]); tri(a, c, d, col2, [h[0], h[2], h[3]]); };
     const [rf, rb] = root, [ef, eb] = elbow;
     // Arm (hand 0 at the root, a touch at the elbow so the bend is smooth).
     quad(m(rf), m(ef), m(eb), m(rb), col, [0, 0.35, 0.35, 0]);
