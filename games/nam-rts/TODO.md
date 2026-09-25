@@ -311,6 +311,16 @@ Everything else below is in its section.
       OPTIONS if the lumps should come back: darker cracks (stronger clump
       shading), or fewer bigger sub-crowns in dipterocarpGeometry.
 
+## WILDLIFE — your ask 2026-09-25 (LOW PRIORITY: "not so important now")
+
+- [ ] Small life in the air and on the ground: BUTTERFLIES (bright, over
+      clearings and flowers, the village), INSECTS (dragonflies over the
+      river and paddies), MOSQUITO swarms (dusk, water, the jungle hollow —
+      a faint drifting cloud, not individuals). One instanced field each,
+      like the birds; fade out by camera height (they only read up close).
+      Maybe later: monkeys in the canopy, a water buffalo, chickens in the
+      village (already listed under Map & look).
+
 ## RICE PADDIES — your ask 2026-09-25 (TALK FIRST — plan in my answer)
 
 - [ ] "We need rice fields, that would look Vietnam — are you confident, how
@@ -360,6 +370,22 @@ Everything else below is in its section.
         size 1.6, density 1.3, wisps 0.3, shade #b9c2c1) — the canopy sinks
         in, only the tallest crowns and the temple tower stand out. Thick
         at the temple, 22 steps, x2 res: within the noise (28.6 vs 29.2).
+- [x] **BIG TREES: NO MORE CAMERA-FACING LEAVES** (your report 2026-09-25:
+      "the foliage following the camera when moving looks weird") —
+      uncommitted. The dipterocarp (canopy tree, and the flame tree built on
+      it) gets FIXED cards: one lying on each head's surface and two tilted
+      off it, fixed in the world (dipterocarpGeometry, `billboard: true`
+      brings the old ones back); the banyan preset sets `billboard: false`
+      (its fixed-card path existed). Checked in the built meshes: 0
+      billboard vertices at every LOD and in the shadow mesh. Dense canopy
+      view at x1.55: 21.5-22.4 ms (was 27.4 on the earlier run; not worse).
+      · + ROUNDED NORMALS (your call: "the typical technique in video
+        games"): every fixed-card vertex carries the normal of its HEAD's
+        shape (dipterocarp: the flattened ball's gradient; banyan: the
+        dome's shellN), not the card plane, so crossed cards shade as one
+        ball. And tagged part 5.35, not 4: part 4 lifts the normal 55% to
+        up (flattening the ball); 5.x lifts by its fraction, 35% — the
+        billboards' own. Checked: 0 billboard verts, all cards 5.35.
 - [ ] Gorge wall's dark stair-step CHECKER is the TERRAIN's own shading
       (found while checking the mist; there with the mist off) — look later.
 - [ ] (was) **Placeable fog banks** — YOUR DECISION 2026-09-25: NOT interactive

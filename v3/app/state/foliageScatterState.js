@@ -196,6 +196,9 @@ export const FOLIAGE_PRESETS = {
   // `size` 18 m — a landmark, placed by hand (placedFoliage.js).
   banyan: {
     kind: "banyan",
+    // Fixed cards on the dome, not camera-facing billboards (your call
+    // 2026-09-25: crowns turning with the camera "look weird" when it moves).
+    billboard: false,
     fronds: 7, frondLength: 1.0, leaflets: 60, leafletWidth: 1.0, leafletAngle: 38,
     spread: 1.0, arch: 0.6, droop: 0.3, stemWidth: 1.4, bareStalk: 0.44,
     plumesPerStem: 16, plumeSpread: 12,

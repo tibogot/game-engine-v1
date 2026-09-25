@@ -65,7 +65,7 @@ const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const UP = [0, 1, 0];
 
-const WOOD = 3, CARD = 4;
+const WOOD = 3, CARD = 4, ROUND_CARD = 5.35;
 /** Part 6 + the normal lift in its fraction: a card the
  * vertex stage turns to face the camera (foliageSystem positionNode). 0.35,
  * not the leaves' 0.55: the card carries the dome's ROUNDED normal (outward
@@ -348,14 +348,16 @@ export function buildBanyan(type, ctx) {
       const tilt = k === 0 ? 0 : (k % 2 ? 1 : -1) * tiltOff * (0.7 + rand() * 0.6);
       const ct = Math.cos(tilt), st = Math.sin(tilt);
       const bb = add([B[0] * ct, B[1] * ct, B[2] * ct], n, st);
-      const nn = add([n[0] * ct, n[1] * ct, n[2] * ct], B, -st);
       const o = add(c, n, k === 0 ? 0 : rho * 0.12);
       const s = rho * (k === 0 ? 1 : 0.8);
       const base = vcount();
       for (const [du, dv] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
         const p = add(add(o, T, du * s), bb, dv * s);
         // `along` small: a crown this size barely flutters.
-        push(p, nn, (du + 1) / 2, (dv + 1) / 2, [CARD, 0.35 + 0.65 * hFrac, cardRand, 0.15]);
+        // ROUNDED NORMAL: the dome's at this vertex, not the card's own plane
+        // (your call, 2026-09-25) — tilted cards shade as one mass with it.
+        // Part 5.35, not 4: the 35% lift the billboards had (4 lifts 55%).
+        push(p, shellN(p), (du + 1) / 2, (dv + 1) / 2, [ROUND_CARD, 0.35 + 0.65 * hFrac, cardRand, 0.15]);
       }
       I.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }

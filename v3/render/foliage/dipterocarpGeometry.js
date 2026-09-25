@@ -17,13 +17,15 @@
  *      column. It is what you see under the canopy edge.
  *   3. BUTTRESSES. Thin plank roots flaring out round the foot.
  *
- * The crown reuses the banyan's machinery (banyanGeometry.js): camera-facing
- * leaf-cluster BILLBOARDS with the per-leaf shade texture, each carrying the
- * rounded normal of ITS OWN sub-crown, so every cauliflower shades as a ball.
+ * The crown reuses the banyan's machinery (banyanGeometry.js): leaf-spray
+ * cards FIXED in the world (one on each head's surface, two tilted off it),
+ * every vertex carrying the ROUNDED normal of ITS OWN sub-crown, so every
+ * cauliflower shades as a ball. `billboard: true` = the old camera-facing
+ * cards.
  *
  * ── PARTS ────────────────────────────────────────────────────────────────────
  *   3     bole, buttresses, limbs — the culm path with no rings
- *   6.35  leaf-cluster billboards (the "banyan" card texture)
+ *   4     fixed leaf cards (the "leafSpray" card; 6.35 = billboards if asked)
  *
  * ── SHARED KEYS, RE-READ ─────────────────────────────────────────────────────
  *   fronds        sub-crowns round the top (one more sits in the middle)
@@ -44,6 +46,10 @@ const norm = (v) => {
   return [v[0] / l, v[1] / l, v[2] / l];
 };
 const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+// A fixed leaf card, 5 + its normal lift (0.35, the billboards' own): part
+// 4 would lift the rounded normal 55% to up and flatten the ball back out.
+const CARD = 5.35;
 const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 export function buildDipterocarp(type, ctx) {
@@ -58,6 +64,9 @@ export function buildDipterocarp(type, ctx) {
   const subN = Math.max(3, Math.round(type.fronds ?? 5));
   const clumpTotal = Math.max(20, Math.round((type.leaflets ?? 70) * (far ? 0.45 : near ? 1 : 0.7)));
   const cardsPer = far ? 1 : 2;
+  // Camera-facing cards only when the type asks (`billboard: true`).
+  const billboard = type.billboard === true;
+  const tiltOff = ((type.leafletAngle ?? 30) * Math.PI) / 180;
   const sides = far ? 5 : near ? 9 : 7;
 
   // ── 2. THE BOLE: straight, a slight lean, tapering to the fork ────────────
@@ -154,6 +163,38 @@ export function buildDipterocarp(type, ctx) {
       // Colour ramp: the underside of each head darker, its top lit.
       const hFrac = 0.35 + 0.65 * Math.max(0, Math.min(1, 0.5 + 0.5 * c0));
       const rho = clumpR0 * (0.75 + rand() * 0.5) * (th > Math.PI * 0.5 ? 0.7 : 1);
+      if (!billboard) {
+        // FIXED CARDS (the default, your call 2026-09-25: billboards turning
+        // with the camera "look weird" when it moves). One card lying on the
+        // head's surface and the rest tilted off it either way, fixed in the
+        // world — the leaf-spray card has sky between its leaves, so crossed
+        // cards read as a leafy volume, not as sheets.
+        const ref = Math.abs(nrm[1]) < 0.95 ? [0, 1, 0] : [1, 0, 0];
+        const t0 = norm(cross(ref, nrm)), b0 = cross(nrm, t0);
+        const rot = rand() * Math.PI * 2;
+        const T = add([t0[0] * Math.cos(rot), t0[1] * Math.cos(rot), t0[2] * Math.cos(rot)], b0, Math.sin(rot));
+        const B = cross(nrm, T);
+        const cardRand = rand();
+        for (let k = 0; k < cardsPer + 1; k++) {
+          const tilt = k === 0 ? 0 : (k % 2 ? 1 : -1) * tiltOff * (0.7 + rand() * 0.6);
+          const ct = Math.cos(tilt), st = Math.sin(tilt);
+          const bb = add([B[0] * ct, B[1] * ct, B[2] * ct], nrm, st);
+          const o = add(c, nrm, k === 0 ? 0 : rho * 0.12);
+          const s = rho * (k === 0 ? 1 : 0.8);
+          const base = vcount();
+          for (const [du, dv] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+            const p = add(add(o, T, du * s), bb, dv * s);
+            // ROUNDED NORMAL (your call, 2026-09-25 — the standard tree trick):
+            // not the card's own plane but the HEAD's shape at this vertex,
+            // outward from its centre (the flattened ball's gradient). Every
+            // card of a head, whatever its tilt, then shades as one ball.
+            const rn = norm([(p[0] - h.c[0]) / (h.r * h.r), (p[1] - h.c[1]) / (ry * ry), (p[2] - h.c[2]) / (h.r * h.r)]);
+            push(p, rn, (du + 1) / 2, (dv + 1) / 2, [CARD, hFrac, cardRand, 0.15]);
+          }
+          I.push(base, base + 1, base + 2, base, base + 2, base + 3);
+        }
+        continue;
+      }
       for (let k = 0; k < cardsPer; k++) {
         const o = add(c, nrm, (k - 0.5) * rho * 0.3);
         const s = rho * (k === 0 ? 1 : 0.8);
