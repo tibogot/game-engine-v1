@@ -10,12 +10,12 @@
 //
 // COST. The GLB is 7 skinned pieces (7 draws each). They are merged into ONE
 // geometry — each piece unpacked from its own quantised space into the shared
-// rest pose, its material's colour baked into the vertices — on one skeleton:
-// one draw per buffalo (+ its shadow). A handful of AnimationMixers.
+// rest pose, its material's colour baked into the vertices — on one skeleton,
+// and the whole herd goes through the soldiers' GPU crowd path: ONE draw.
 import * as THREE from "three";
-import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { createCrowdField } from "./crowdSkinning.js";
 
 const URL = "/models/Bull_compressed.glb";
 
@@ -150,96 +150,97 @@ export async function loadBuffaloTemplate() {
 }
 
 /**
- * A few buffalo, each LIVING a little (your note: not one clip on a loop):
- * graze (Eating) for a while, lift the head and look round (Idle / Idle_2),
- * now and then walk a few metres to fresh grazing, turning as it goes — every
- * change a half-second crossfade. `spots`: [{ x, z, heightAt(x, z) }] —
- * heightAt gives where it stands (the water it wades in, the grass it grazes)
- * or null where it may not go, so a buffalo keeps to its own paddy.
- * Returns { update(dt), group, count }.
+ * The herd, each LIVING a little (your note: not one clip on a loop): graze
+ * (Eating) for a while, lift the head and look round (Idle / Idle_2), now and
+ * then walk a few metres to fresh grazing, turning as it goes — every change
+ * a half-second crossfade. `spots`: [{ x, z, heightAt(x, z) }] — heightAt
+ * gives where it stands (the water it wades in, the grass it grazes) or null
+ * where it may not go, so a buffalo keeps to its own paddy or pasture.
+ *
+ * COST: the soldiers' GPU crowd path (crowdSkinning.js) — every clip baked
+ * once, the whole herd skinned in one compute pass and drawn in ONE call,
+ * however many there are; the CPU writes a matrix and two clip frames each.
+ * Returns { update(dt), mesh, count, herd }.
  */
 export async function placeBuffalo(app, spots, { height = 1.4 } = {}) {
   if (!spots.length) return null;
   const tpl = await loadBuffaloTemplate();
   const box = new THREE.Box3().setFromObject(tpl.root);
   const scale = height / Math.max(0.01, box.max.y - box.min.y) * 1.08;
+  let source = null;
+  tpl.root.traverse((o) => { if (o.isSkinnedMesh && !source) source = o; });
   const clipBy = (name) => tpl.clips.find((c) => c.name === name);
-  const group = new THREE.Group();
-  group.name = "Buffalo";
-  const herd = [];
+  const CLIPS = { eat: "Eating", idle: "Idle", look: "Idle_2", low: "Idle_Headlow", walk: "Walk" };
+  const clips = {};
+  for (const [k, n] of Object.entries(CLIPS)) { const c = clipBy(n); if (c) clips[k] = c; }
+  const field = createCrowdField({
+    scene: app.scene, renderer: app.renderer, source, animRoot: tpl.root, clips, max: spots.length, castShadow: true,
+  });
+  field.mesh.name = "BuffaloHerd";
   let seed = 4242;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (const s of spots) {
-    const b = SkeletonUtils.clone(tpl.root);
-    b.scale.setScalar(scale);
-    b.position.set(s.x, s.heightAt(s.x, s.z) ?? 0, s.z);
-    b.rotation.y = rnd() * Math.PI * 2;
-    b.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
-    group.add(b);
-    const mixer = new THREE.AnimationMixer(b);
-    const act = {};
-    for (const [k, n] of [["eat", "Eating"], ["idle", "Idle"], ["look", "Idle_2"], ["low", "Idle_Headlow"], ["walk", "Walk"]]) {
-      const c = clipBy(n);
-      if (c) act[k] = mixer.clipAction(c);
-    }
-    const a0 = act.eat ?? Object.values(act)[0];
-    a0.time = rnd() * a0.getClip().duration;
-    a0.play();
-    herd.push({ b, s, mixer, act, cur: a0, state: "eat", timer: 4 + rnd() * 12, target: null });
-  }
+  const herd = spots.map((s) => ({
+    s, x: s.x, z: s.z, y: s.heightAt(s.x, s.z) ?? 0, yaw: rnd() * Math.PI * 2,
+    cur: "eat", tCur: rnd() * 10, prev: "eat", tPrev: 0, fade: 1, rate: 0.85 + rnd() * 0.3,
+    state: "eat", timer: 4 + rnd() * 12, target: null,
+  }));
   const WALK_SPEED = 0.75;   // m/s, matched by eye to the Walk clip's stride at this size
   const go = (h, state, key, timer) => {
-    const next = h.act[key] ?? h.act.eat;
+    const next = clips[key] ? key : "eat";
     if (next !== h.cur) {
-      next.reset().setEffectiveWeight(1).fadeIn(0.5).play();
-      h.cur.fadeOut(0.5);
-      h.cur = next;
+      h.prev = h.cur; h.tPrev = h.tCur;
+      h.cur = next; h.tCur = 0; h.fade = 0;
     }
     h.state = state;
     h.timer = timer;
   };
   /** Fresh grazing 2-5 m off, reachable in a straight line on allowed ground. */
   const pickTarget = (h) => {
-    const p = h.b.position;
     for (let k = 0; k < 24; k++) {
       const a = rnd() * Math.PI * 2, d = 2 + rnd() * 3;
-      const x = p.x + Math.sin(a) * d, z = p.z + Math.cos(a) * d;
+      const x = h.x + Math.sin(a) * d, z = h.z + Math.cos(a) * d;
       let ok = true;
-      for (let f = 0.25; f <= 1 && ok; f += 0.25) ok = h.s.heightAt(p.x + (x - p.x) * f, p.z + (z - p.z) * f) != null;
+      for (let f = 0.25; f <= 1 && ok; f += 0.25) ok = h.s.heightAt(h.x + (x - h.x) * f, h.z + (z - h.z) * f) != null;
       if (ok) return { x, z };
     }
     return null;
   };
-  app.scene.add(group);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(scale, scale, scale);
+  const up = new THREE.Vector3(0, 1, 0);
   return {
-    group, count: spots.length,
-    /** For a look from the console: each buffalo's state and seconds left. */
-    get herd() { return herd.map((h) => ({ state: h.state, timer: +h.timer.toFixed(1), at: [h.b.position.x, h.b.position.z].map((v) => +v.toFixed(1)) })); },
+    mesh: field.mesh, count: spots.length,
+    /** For a look from the console: each buffalo's state, seconds left and where. */
+    get herd() { return herd.map((h) => ({ state: h.state, timer: +h.timer.toFixed(1), at: [h.x, h.z].map((v) => +v.toFixed(1)) })); },
     update(dt) {
+      dt = Math.min(dt, 0.1);
+      field.begin();
       for (const h of herd) {
-        h.mixer.update(dt);
+        h.tCur += dt * h.rate; h.tPrev += dt * h.rate;
+        h.fade = Math.min(1, h.fade + dt / 0.5);
         h.timer -= dt;
         if (h.state === "walk") {
-          const p = h.b.position, t = h.target;
-          const dx = t.x - p.x, dz = t.z - p.z, dist = Math.hypot(dx, dz);
+          const t = h.target;
+          const dx = t.x - h.x, dz = t.z - h.z, dist = Math.hypot(dx, dz);
           // Turn toward the target as it walks (at most ~50°/s).
-          const want = Math.atan2(dx, dz);
-          let dA = want - h.b.rotation.y;
-          dA = Math.atan2(Math.sin(dA), Math.cos(dA));
-          h.b.rotation.y += Math.max(-0.9 * dt, Math.min(0.9 * dt, dA));
+          const dA = Math.atan2(Math.sin(Math.atan2(dx, dz) - h.yaw), Math.cos(Math.atan2(dx, dz) - h.yaw));
+          h.yaw += Math.max(-0.9 * dt, Math.min(0.9 * dt, dA));
           const step = Math.min(dist, WALK_SPEED * dt * Math.max(0, Math.cos(dA)));
-          const nx = p.x + Math.sin(h.b.rotation.y) * step, nz = p.z + Math.cos(h.b.rotation.y) * step;
+          const nx = h.x + Math.sin(h.yaw) * step, nz = h.z + Math.cos(h.yaw) * step;
           const y = h.s.heightAt(nx, nz);
-          if (y != null) { p.x = nx; p.z = nz; p.y += (y - p.y) * Math.min(1, dt * 4); }
+          if (y != null) { h.x = nx; h.z = nz; h.y += (y - h.y) * Math.min(1, dt * 4); }
           if (dist < 0.4 || y == null || h.timer < 0) go(h, "eat", "eat", 8 + rnd() * 14);
-          continue;
+        } else if (h.timer <= 0) {
+          const r = rnd();
+          if (h.state === "eat" && r < 0.4) go(h, "look", r < 0.2 ? "idle" : "look", 3 + rnd() * 4);
+          else if (r < 0.85 && (h.target = pickTarget(h))) go(h, "walk", "walk", 12);
+          else go(h, "eat", rnd() < 0.2 ? "low" : "eat", 6 + rnd() * 12);
         }
-        if (h.timer > 0) continue;
-        const r = rnd();
-        if (h.state === "eat" && r < 0.4) go(h, "look", r < 0.2 ? "idle" : "look", 3 + rnd() * 4);
-        else if (r < 0.85 && (h.target = pickTarget(h))) go(h, "walk", "walk", 12);
-        else go(h, "eat", rnd() < 0.2 ? "low" : "eat", 6 + rnd() * 12);
+        p.set(h.x, h.y, h.z);
+        q.setFromAxisAngle(up, h.yaw);
+        m.compose(p, q, sc);
+        field.addPose(m, h.prev, h.tPrev, h.cur, h.tCur, h.fade);
       }
+      field.commit();
     },
   };
 }

@@ -117,7 +117,8 @@ export function createRtsBirds({ app, units = null, params = {} }) {
     const nx = x.mul(cos(angle)).mul(side);
     const ny0 = positionLocal.y.add(x.mul(sin(angle)));
     // A standing egret pecks: now and then the neck and head dip forward and
-    // down about the shoulder, and come back up.
+    // down about the shoulder, and come back up. aBird.z is a smooth 0-1
+    // weight up the neck, so the neck curls into the dip rather than hinging.
     const pulse = smoothstep(0.8, 1.0, sin(uTime.mul(0.7).add(h.mul(37))).mul(0.5).add(0.5));
     const pa = pulse.mul(1.2).mul(vtx.z).mul(stand);
     const dy = ny0.sub(0.64), dz = positionLocal.z.sub(0.13);
@@ -296,7 +297,9 @@ export function createRtsBirds({ app, units = null, params = {} }) {
   }
 
   function standingBird(x, z, yaw = rand(0, TAU)) {
-    return { x, z, yaw, tx: x, tz: z, walkT: rand(1, 6), size: P.span * SPECIES[3].size * rand(0.9, 1.1) };
+    // Mostly egrets; now and then a grey heron among them (shape 4).
+    const shape = Math.random() < 0.18 ? 4 : 3;
+    return { x, z, yaw, tx: x, tz: z, walkT: rand(1, 6), shape, size: P.span * SPECIES[shape].size * rand(0.9, 1.1) };
   }
 
   /** Put a stand straight onto a bank (boot: there are egrets on the river already). */
@@ -593,7 +596,7 @@ export function createRtsBirds({ app, units = null, params = {} }) {
         _p.set(b.x, ground(b.x, b.z), b.z);
         _e.set(0, b.yaw, 0);
         _q.setFromEuler(_e);
-        put(_p, _q, b.size, 3, 0, 0, _p.y + 0.05, b.yaw);
+        put(_p, _q, b.size, b.shape ?? 3, 0, 0, _p.y + 0.05, b.yaw);
       }
     }
 

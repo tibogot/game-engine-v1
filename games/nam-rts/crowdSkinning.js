@@ -220,6 +220,27 @@ export function createCrowdField({
       return true;
     },
 
+    /**
+     * Queue one instance between ANY two baked clips (the kernel only ever
+     * sees two slices and a blend): `clipA` at its own time `tA`, crossfaded
+     * by `blend` (0 → 1) into `clipB` at `tB`. For animals with more than
+     * the soldiers' idle/run — graze, look round, walk (buffalo.js).
+     */
+    addPose(matrix, clipA, tA, clipB, tB, blend, lane = 0) {
+      if (n >= max) return false;
+      matrix.toArray(instMatrices.array, n * 16);
+      const o = n * 4;
+      anim.array[o + 0] = sliceOf(clipA, tA);
+      anim.array[o + 1] = sliceOf(clipB, tB);
+      anim.array[o + 2] = blend;
+      anim.array[o + 3] = lane;
+      n++;
+      return true;
+    },
+
+    /** Seconds in a baked clip (to keep an instance's clock on its loop). */
+    duration: (clipName) => info[clipName]?.duration ?? 1,
+
     commit() {
       mesh.count = n;
       instMatrices.needsUpdate = true;

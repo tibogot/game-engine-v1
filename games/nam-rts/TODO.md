@@ -440,6 +440,35 @@ Everything else below is in its section.
         MEASURED: within noise (6.24 vs 6.43 ms, noise 0.22).
   - [x] SPIRIT SHRINE ROOF was upside down (your screenshot): each slope was
         tilted with the wrong sign (a V) — v3/render/objects/rtsVillage.js.
+  - [x] **MORE ANIMALS, all on the soldiers' GPU crowd path** (2026-09-26):
+        crowdSkinning gained addPose (any two baked clips + a blend), so the
+        BUFFALO herd is ONE draw too (5 clips: graze / idle / look / head-low
+        / walk). Now 8 buffalo (3 wading, 2 on the paddy rim, 3 on a grazed
+        pasture by the hamlet — its bushes cleared) and 36 hens (26 round the
+        hamlet, 10 in the Front's camp), one flock, one draw. MEASURED: GPU
+        within noise (9.52 vs 9.56 ms, noise 0.05); CPU 0.33 ms/frame for
+        both (0.2 hens, 0.12 herd). If ever needed: skip a group off screen.
+  - [x] **STANDING BIRDS REBUILT** (your heron reference, 2026-09-26): they read
+        as paper (a 4-sided spindle, blade legs, every normal UP). Now a real
+        low-poly model in birdShapes.js: one body-neck-head lofted through
+        8-sided rings, FACETED normals, a dagger bill, folded wing tips over
+        the tail, legs bent back at the ankle, toes. Two species: the great
+        egret (white) and the GREY HERON of your picture (blue-grey back,
+        white neck, black crest and eye-stripe, orange bill) — about 1 in 6
+        of a stand. Still one instanced draw. Flying birds unchanged.
+        The peck TORE a hollow where the neck meets the breast (your note):
+        the neck was tagged per triangle, so the ring they share was half in,
+        half out. Now a smooth 0-1 weight per vertex from its height: the
+        neck curls into the dip, no seam can open.
+  - [ ] **DEER + STAG** (your idea, 2026-09-26; GLBs from the bull's pack, not in
+        public/models yet): Vietnam has sambar (big, dark grey-brown stag),
+        muntjac / barking deer (small, red-brown) and hog deer. Same pipeline
+        as the buffalo (merge pieces, recolour, crowd path: one draw per
+        species). Small shy groups at jungle edges and clearings, grazing;
+        they BOLT from soldiers like the egrets flush — a tell of movement.
+  - [ ] Maybe: the flying birds rebuilt the same way (they are seen from
+        above and small, so it matters less); a heron that flushes currently
+        flies off as a white egret shape.
   - [ ] **The village casts NO SHADOWS** (your note, 2026-09-26): houses,
         granaries, fences — nothing in the hamlet throws a shadow. Check the
         placed/merged meshes' castShadow and the shadow camera's reach.

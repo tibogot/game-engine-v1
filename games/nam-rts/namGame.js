@@ -1227,6 +1227,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     }
   }
 
+  // Where the hens live: the hamlets, and the Front's camp (it kept chickens
+  // like any farm). Collected as the places go up; ONE flock is made after.
+  const henSites = [];
+
   // The hamlets (village.js): houses, granaries, fences and the clutter of
   // people living there, laid out round a lane. Through the same placedObjects
   // path as the camp — pads, nav on the real footprints, cover, merged draws —
@@ -1239,35 +1243,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
         const first = placed.pieces.length;
         const n = await placeHamlet(app, placed, site);
         console.log(`[village] ${site.name}: ${n} pieces at (${site.x}, ${site.z})`);
-        // HENS round the houses (chickens.js), each homed a couple of metres
-        // off a piece of the village, kept out of its buildings and the water.
-        // ?chickens=0 = without.
-        if (new URLSearchParams(location.search).get("chickens") !== "0") {
-          const pieces = placed.pieces.slice(first);
-          const inPiece = (x, z) => pieces.some(({ fp }) => {
-            const dx = x - fp.px, dz = z - fp.pz;
-            const lx = dx * fp.c - dz * fp.s, lz = dx * fp.s + dz * fp.c;
-            return Math.abs(lx) < fp.hx + 0.3 && Math.abs(lz) < fp.hz + 0.3;
-          });
-          const blocked = (x, z) => inPiece(x, z)
-            || (app.getWaterLevelAt?.(x, z) ?? -Infinity) > app.getWorldHeight(x, z) - 0.2
-            || app.getWorldNormal(x, z).y < 0.85;
-          let seed = 31337;
-          const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-          const homes = [];
-          for (let k = 0; k < 400 && homes.length < 12 && pieces.length; k++) {
-            const { fp } = pieces[Math.floor(rnd() * pieces.length)];
-            const a = rnd() * Math.PI * 2, r = Math.max(fp.hx, fp.hz) + 1.5 + rnd() * 3;
-            const x = fp.px + Math.cos(a) * r, z = fp.pz + Math.sin(a) * r;
-            if (!blocked(x, z)) homes.push({ x, z });
-          }
-          const hens = await createChickenFlock(app, homes, { blocked });
-          if (hens) {
-            if (app.chickens) console.warn("[chickens] one hamlet's hens only");
-            else app.chickens = hens;
-          }
-          console.log(`[chickens] ${homes.length} at ${site.name}`);
-        }
+        // Its hens are homed round its houses (the flock is made once, below).
+        henSites.push({ pieces: placed.pieces.slice(first), count: 26 });
       } catch (e) {
         console.warn(`[village] ${site.name} failed:`, e);
       }
@@ -1282,7 +1259,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   if (new URLSearchParams(location.search).get("enemycamp") !== "0") {
     onStatus("Digging in the Front…");
     try {
+      const first = placed.pieces.length;
       const n = await placeEnemyCamp(app, placed);
+      henSites.push({ pieces: placed.pieces.slice(first), count: 10 });
       enemyCampFlag = createEnemyCampFlag({ app, structures });
       console.log(`[enemy camp] ${n} pieces`);
     } catch (e) {
@@ -1290,6 +1269,38 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     }
   }
   app.enemyCampFlag = enemyCampFlag;
+
+  // THE HENS (chickenFlock.js): every one of them — hamlet and camp — in ONE
+  // GPU crowd draw, each homed a couple of metres off a piece of her place,
+  // kept out of its buildings, the water and the steep. ?chickens=0 = without.
+  if (henSites.length && new URLSearchParams(location.search).get("chickens") !== "0") {
+    try {
+      const all = henSites.flatMap((h) => h.pieces);
+      const inPiece = (x, z) => all.some(({ fp }) => {
+        const dx = x - fp.px, dz = z - fp.pz;
+        if (Math.abs(dx) > fp.hx + fp.hz + 1 || Math.abs(dz) > fp.hx + fp.hz + 1) return false;
+        const lx = dx * fp.c - dz * fp.s, lz = dx * fp.s + dz * fp.c;
+        return Math.abs(lx) < fp.hx + 0.3 && Math.abs(lz) < fp.hz + 0.3;
+      });
+      const blocked = (x, z) => inPiece(x, z)
+        || (app.getWaterLevelAt?.(x, z) ?? -Infinity) > app.getWorldHeight(x, z) - 0.2
+        || app.getWorldNormal(x, z).y < 0.85;
+      let seed = 31337;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const homes = [];
+      for (const { pieces, count } of henSites) {
+        let got = 0;
+        for (let k = 0; k < 600 && got < count && pieces.length; k++) {
+          const { fp } = pieces[Math.floor(rnd() * pieces.length)];
+          const a = rnd() * Math.PI * 2, r = Math.max(fp.hx, fp.hz) + 1.5 + rnd() * 3;
+          const x = fp.px + Math.cos(a) * r, z = fp.pz + Math.sin(a) * r;
+          if (!blocked(x, z)) { homes.push({ x, z }); got++; }
+        }
+      }
+      app.chickens = await createChickenFlock(app, homes, { blocked });
+      console.log(`[chickens] ${homes.length} (${henSites.map((h) => h.count).join(" + ")} wanted)`);
+    } catch (e) { console.warn("[chickens] failed:", e); }
+  }
 
   // The Khmer ruins (temple.js): the tower and its galleries round a courtyard,
   // the gate, the causeway with its nāga rail, and the fig pulling the lot
@@ -1366,17 +1377,18 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     } catch (e) { console.warn("[paddies] failed:", e); }
   }
 
-  // WATER BUFFALO (buffalo.js): two wading in flooded paddies, one grazing on
-  // the grassed rim. ?buffalo=0 = without.
+  // WATER BUFFALO (buffalo.js), one GPU crowd draw for the herd: three wading
+  // in flooded paddies, two grazing the grassed rim, three on the pasture by
+  // the hamlet. ?buffalo=0 = without.
   if (app.ricePaddies && new URLSearchParams(location.search).get("buffalo") !== "0") {
     try {
       const pd = app.ricePaddies, s0 = pd.site, spots = [];
       let seed = 9001;
       const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-      for (let i = 0; i < 4000 && spots.length < 3; i++) {
+      for (let i = 0; i < 6000 && spots.length < 5; i++) {
         const x = s0.x + (rnd() - 0.5) * 150, z = s0.z + (rnd() - 0.5) * 120;
-        if (spots.some((q) => Math.hypot(q.x - x, q.z - z) < 18)) continue;
-        const wading = spots.length < 2;
+        if (spots.some((q) => Math.hypot(q.x - x, q.z - z) < 14)) continue;
+        const wading = spots.length < 3;
         const y = wading ? pd.waterAt(x, z, 2.5) : pd.grassAt(x, z);
         if (y == null) continue;
         // Where it may go: its own flooded paddy (wading, legs in the water),
@@ -1385,6 +1397,30 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
           ? (qx, qz) => { const w = pd.waterAt(qx, qz, 1.2); return w == null || Math.abs(w - y) > 0.05 ? null : w - 0.32; }
           : (qx, qz) => pd.grassAt(qx, qz);
         spots.push({ x, z, heightAt });
+      }
+      // The PASTURE: open, dry, gentle ground 25-70 m off the hamlet, clear of
+      // its pieces; each buffalo keeps within 12 m of where it started.
+      const hamlet = hamletSitesFor(boot.name)[0];
+      const village = henSites[0]?.pieces ?? [];
+      const pasture = (x, z) => {
+        if ((app.getWaterLevelAt?.(x, z) ?? -Infinity) > app.getWorldHeight(x, z) - 0.3) return false;
+        if (app.getWorldNormal(x, z).y < 0.96) return false;
+        const f = app.jungleField;
+        if (f && f.open(x, z) * f.forest(x, z) > 0.2) return false;
+        if (app.navGrid?.isBlockedAtWorld?.(x, z)) return false;
+        return !village.some(({ fp }) => Math.hypot(x - fp.px, z - fp.pz) < Math.hypot(fp.hx, fp.hz) + 3);
+      };
+      for (let i = 0; hamlet && i < 4000 && spots.length < 8; i++) {
+        const a = rnd() * Math.PI * 2, r = 25 + rnd() * 45;
+        const x = hamlet.x + Math.cos(a) * r, z = hamlet.z + Math.sin(a) * r;
+        if (!pasture(x, z) || spots.some((q) => Math.hypot(q.x - x, q.z - z) < 7)) continue;
+        // The herd grazes together: after the first, within 20 m of it.
+        const lead = spots[5];
+        if (lead && Math.hypot(lead.x - x, lead.z - z) > 20) continue;
+        const cx = x, cz = z;
+        spots.push({ x, z, heightAt: (qx, qz) => (Math.hypot(qx - cx, qz - cz) < 12 && pasture(qx, qz) ? app.getWorldHeight(qx, qz) : null) });
+        // Grazed: the bushes, ferns and tall plants go, the grass stays.
+        app.clearVegetation?.(cx, cz, 13, { edge: 4 });
       }
       app.buffalo = await placeBuffalo(app, spots);
       console.log(`[buffalo] ${spots.length} at ${spots.map((q) => `(${q.x | 0}, ${q.z | 0})`).join(" ")}`);
