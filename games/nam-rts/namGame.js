@@ -44,6 +44,7 @@ import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "./namCamera.js";
 import { createUnits } from "./units.js";
 import { createUnitRenderer } from "./unitRenderer.js";
+import { xrayParams } from "./xraySilhouette.js";
 import { createSelection } from "./selection.js";
 import { createNavGrid, NAV_MAX_SLOPE_DEG } from "./navGrid.js";
 
@@ -96,6 +97,7 @@ import { plant, updatePlantedPlants } from "./placedPlants.js";
 import { plantSpecimens } from "./specimenPlants.js";
 import { sitePaddies, buildRicePaddies } from "./ricePaddies.js";
 import { placeBuffalo } from "./buffalo.js";
+import { createWildHerd, loadAnimal } from "./wildAnimals.js";
 import { createChickenFlock } from "./chickenFlock.js";
 import { createFogBanks, siteFogBanks } from "./fogBanks.js";
 import { buildFogBanksPanel } from "./fogBanksPanel.js";
@@ -284,6 +286,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // camp and temple, keeps its jungle). AFTER the level load, which replaces
   // the decal list wholesale.
   installBuildingAprons(app);
+  // The x-ray silhouettes test the ground between a unit and the camera.
+  xrayParams.heightTexNode = app.heightTexNode ?? null;
 
   // THE TERRAIN DRAWS LAST among the opaque things (renderOrder 8: after
   // everything at 0, before the sky, decals and river at 9+). It is the
@@ -423,7 +427,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // Every health bar in the game — units AND structures — is one instance of a
   // single quad, so the whole HUD costs 1 draw call (it used to be 2 meshes per
   // entity). The renderers below push into it; the loop begins/commits it.
-  const healthBars = createHealthBarField({ scene: app.scene });
+  const healthBars = createHealthBarField({ scene: app.scene, groundAt: (x, z) => app.getWorldHeight(x, z) });
   app.healthBars = healthBars;
 
   // Every selection ring in the game is likewise ONE instanced draw, and it
@@ -1177,6 +1181,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     app.ricePaddies?.crop?.update(app.camera);   // the rice plants round the camera
     app.ricePaddies?.reflections?.update();       // their water's reflections (post)
     app.buffalo?.update(dt);                      // the water buffalo's clips
+    for (const h of app.wildHerds ?? []) h.update(dt);   // sambar, muntjac
     app.chickens?.update(dt);                     // the hamlet's hens
     // Point the overlay at the selection until the pointer has moved, so
     // holding V before touching the mouse reveals the ground under the men
@@ -1425,6 +1430,78 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       app.buffalo = await placeBuffalo(app, spots);
       console.log(`[buffalo] ${spots.length} at ${spots.map((q) => `(${q.x | 0}, ${q.z | 0})`).join(" ")}`);
     } catch (e) { console.warn("[buffalo] failed:", e); }
+  }
+
+  // WILD DEER (wildAnimals.js), your models: SAMBAR (a stag with his hinds)
+  // and MUNTJAC, in small groups on the sunny fringe of the jungle, well away
+  // from every camp; they graze, and BOLT from any soldier within 35 m.
+  // One GPU crowd draw per kind. ?deer=0 = without.
+  if (app.jungleField && new URLSearchParams(location.search).get("deer") !== "0") {
+    try {
+      const f = app.jungleField;
+      const built = (structures?.list ?? []).map((q) => q.position);
+      const hamlets = hamletSitesFor(boot.name);
+      const canStand = (x, z) => {
+        if (Math.abs(x) > 500 || Math.abs(z) > 500) return null;
+        const y = app.getWorldHeight(x, z);
+        if ((app.getWaterLevelAt?.(x, z) ?? -Infinity) > y - 0.3) return null;
+        if (app.getWorldNormal(x, z).y < 0.88) return null;
+        if (app.navGrid?.isBlockedAtWorld?.(x, z)) return null;
+        if (app.ricePaddies?.inBlock?.(x, z)) return null;
+        return y;
+      };
+      // A quiet edge: jungle fringe, open enough to see them, 110 m from any
+      // structure and 90 m from a hamlet.
+      const quiet = (x, z) => canStand(x, z) != null && f.fringe(x, z) > 0.15 && f.open(x, z) > 0.5
+        && (app.sampleFoliageDensity?.(x, z) ?? 0) < 0.15 && (app.sampleTallPlantDensity?.(x, z) ?? 0) < 0.1
+        && !built.some((q) => (q.x - x) ** 2 + (q.z - z) ** 2 < 110 * 110)
+        && !hamlets.some((q) => (q.x - x) ** 2 + (q.z - z) ** 2 < 90 * 90);
+      let seed = 2718;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      const centres = [];
+      for (let i = 0; i < 8000 && centres.length < 5; i++) {
+        const x = (rnd() - 0.5) * 900, z = (rnd() - 0.5) * 900;
+        if (!quiet(x, z) || centres.some((c) => Math.hypot(c.x - x, c.z - z) < 140)) continue;
+        centres.push({ x, z });
+        // A glade: grazed, the ferns and bananas thinned round them.
+        app.clearVegetation?.(x, z, 10, { edge: 4 });
+      }
+      const around = (c, n, r) => {
+        const out = [];
+        for (let k = 0; k < 60 && out.length < n; k++) {
+          const a = rnd() * Math.PI * 2, d = 2 + rnd() * r;
+          const x = c.x + Math.cos(a) * d, z = c.z + Math.sin(a) * d;
+          if (canStand(x, z) != null) out.push({ x, z });
+        }
+        return out;
+      };
+      // Three sambar groups (a stag, three or four hinds), two muntjac pairs.
+      const stagSpots = [], hindSpots = [], muntjacSpots = [];
+      centres.forEach((c, i) => {
+        if (i < 3) {
+          stagSpots.push(...around(c, 1, 4).map((q) => ({ ...q, height: 2.3 + rnd() * 0.2 })));
+          hindSpots.push(...around(c, 3 + (i % 2), 9).map((q) => ({ ...q, height: 1.55 + rnd() * 0.15 })));
+        } else {
+          muntjacSpots.push(...around(c, 2, 5).map((q) => ({ ...q, height: 0.8 + rnd() * 0.08 })));
+        }
+      });
+      const threats = () => units.list.filter((u) => u.alive && !u.isAir).map((u) => u.position);
+      // Sambar: dark grey-brown, a paler belly and rump. Muntjac: red-brown.
+      const SAMBAR = { Main: "#4a3b2e", Main_Light: "#8a7a64", Main_Dark: "#2c2219", Eye_Lighter: "#4a3b2e" };
+      const STAG = { Material: "#463628", "Material.003": "#86765f", "Material.010": "#2a2018", "Material.001": "#2c241c" };
+      const MUNTJAC = { Main: "#8a4b26", Main_Light: "#b89370", Main_Dark: "#4d2a16", Eye_Lighter: "#8a4b26" };
+      const herds = [];
+      const add = async (url, colors, spots, name, speeds) => {
+        if (!spots.length) return;
+        const tpl = await loadAnimal(url, colors);
+        herds.push(createWildHerd(app, tpl, spots, { canStand, threats, name, ...speeds }));
+      };
+      await add("/models/Stag_compressed.glb", STAG, stagSpots, "SambarStags", {});
+      await add("/models/Deer_compressed.glb", SAMBAR, hindSpots, "SambarHinds", {});
+      await add("/models/Deer_compressed.glb", MUNTJAC, muntjacSpots, "Muntjac", { walkSpeed: 0.6, runSpeed: 5.5 });
+      app.wildHerds = herds.filter(Boolean);
+      console.log(`[deer] ${stagSpots.length} stags, ${hindSpots.length} hinds, ${muntjacSpots.length} muntjac in ${centres.length} groups`);
+    } catch (e) { console.warn("[deer] failed:", e); }
   }
 
   // The plants that make it Vietnam and Cambodia: pandanus on the river's

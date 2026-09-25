@@ -20,14 +20,22 @@
 // Enemies only ever get one while they are SPOTTED: the unit renderer does not
 // draw a unit the fog of war hides, so there is nothing to silhouette.
 //
+// NOT THROUGH THE GROUND (your note, 2026-09-26: with the free camera every
+// unit showed through the hills). The depth buffer cannot tell a hill from a
+// hut, so each silhouette pixel also walks its line of sight back toward the
+// camera over the heightmap (12 samples, dense near the unit): if the ray
+// passes UNDER the terrain, a hill hides the unit and there is no silhouette.
+// Buildings, trees and smoke still get one.
+//
 // Cost: one extra draw per instanced unit part and one for the soldier crowd;
-// fragment work only where a unit is actually hidden. Writing depth disables
-// early-z for these draws — only on unit pixels.
+// fragment work only where a unit is actually hidden (+ 12 height taps there).
+// Writing depth disables early-z for these draws — only on unit pixels.
 import * as THREE from "three";
 import {
-  Fn, abs, cameraFar, cameraNear, cameraPosition, dot, float, max, mix, normalView, normalize, pow,
-  positionView, positionWorld, saturate, uniform, vec3, viewZToPerspectiveDepth,
+  Fn, abs, cameraFar, cameraNear, cameraPosition, dot, float, max, min, mix, normalView, normalize, pow,
+  positionView, positionWorld, saturate, step, uniform, vec3, viewZToPerspectiveDepth,
 } from "three/tsl";
+import { drapeY } from "./terrainDrape.js";
 
 export const XRAY = {
   player: new THREE.Color(0.32, 0.62, 1.0),
@@ -51,6 +59,8 @@ const uSoldierLift = uniform(2.5);
 /** `enabled` switches every silhouette (?xray=0 boots with them off: the A/B). */
 export const xrayParams = {
   uPlayer, uEnemy, uOpacity, uRim, uSoldierLift,
+  /** The live heightmap (app.heightTexNode), set by the game before any unit is built. */
+  heightTexNode: null,
   enabled: typeof location === "undefined" || new URLSearchParams(location.search).get("xray") !== "0",
 };
 export const xrayOn = () => xrayParams.enabled;
@@ -91,6 +101,24 @@ export function createXrayMaterial({ teamNode, lift = 1.5, liftUp = 0, positionN
   const team = mix(vec3(uPlayer), vec3(uEnemy), teamNode);
   // Not over 1: unlit and not tone mapped, a brighter blue clips to white.
   mat.colorNode = team.mul(mix(float(0.7), float(1.0), rim.mul(uRim.mul(2)).min(1)));
-  mat.opacityNode = max(uOpacity, float(0)).add(rim.mul(uRim)).min(0.9);
+  let alpha = max(uOpacity, float(0)).add(rim.mul(uRim)).min(0.9);
+  const htex = xrayParams.heightTexNode;
+  if (htex) {
+    // A hill between the unit and the camera: walk the line of sight from 2 m
+    // off the unit (its own feet on a slope are not a hill) out to 200 m,
+    // samples bunched near the unit where a crest usually is.
+    const P = positionWorld, D = cameraPosition.sub(positionWorld);
+    const len = D.length().max(1e-3);
+    const reach = min(len, float(200)).sub(2).max(0);
+    let occ = float(0);
+    const N = 12;
+    for (let k = 1; k <= N; k++) {
+      const f = float(2).add(reach.mul((k / N) ** 2)).div(len);
+      const Q = P.add(D.mul(f));
+      occ = max(occ, step(Q.y.add(0.4), drapeY(htex, Q.x, Q.z)));
+    }
+    alpha = alpha.mul(float(1).sub(occ));
+  }
+  mat.opacityNode = alpha;
   return mat;
 }

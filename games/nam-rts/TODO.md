@@ -460,7 +460,19 @@ Everything else below is in its section.
         the neck was tagged per triangle, so the ring they share was half in,
         half out. Now a smooth 0-1 weight per vertex from its height: the
         neck curls into the dip, no seam can open.
-  - [ ] **DEER + STAG** (your idea, 2026-09-26; GLBs from the bull's pack, not in
+  - [x] **DEER BUILT** (games/nam-rts/wildAnimals.js, your Deer/Stag GLBs): SAMBAR
+        (3 stags with their antlers — a rigid mesh on the Head bone, now bound
+        in the merge — and 10 hinds, dark grey-brown) and MUNTJAC (4, the deer
+        model at 0.8 m, red-brown), in 5 groups in glades on the jungle
+        fringe, 110 m from any structure; graze / look / wander, and a GROUP
+        BOLTS (gallop 40-70 m) from any ground unit within 35 m. One crowd
+        draw per kind; CPU 0.17 ms/frame for all three. GPU not measured
+        (tab in the background) — same path as the buffalo: within noise.
+  - [x] **UNITS NO LONGER SHOW THROUGH HILLS** (your note, 2026-09-26): the x-ray
+        silhouettes walk the line of sight over the heightmap (12 taps, only on
+        hidden-unit pixels) and skip a hill; the health bars do the same on the
+        CPU. Buildings, trees and smoke still get the silhouette.
+  - [x] (the idea that led to it) DEER + STAG (your idea, 2026-09-26; GLBs from the bull's pack, not in
         public/models yet): Vietnam has sambar (big, dark grey-brown stag),
         muntjac / barking deer (small, red-brown) and hog deer. Same pipeline
         as the buffalo (merge pieces, recolour, crowd path: one draw per

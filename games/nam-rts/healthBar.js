@@ -28,7 +28,25 @@ const _col = new THREE.Color();
  * Per frame: `begin()`, one `add()` per live entity, then `commit()`. Bars that
  * aren't re-added simply fall out of the instance count — nothing to hide.
  */
-export function createHealthBarField({ scene, max = 512, height = 0.55 }) {
+export function createHealthBarField({ scene, max = 512, height = 0.55, groundAt = null }) {
+  /**
+   * A HILL between the bar and the camera? The bars draw over everything (a
+   * HUD), so with the free camera every unit behind a ridge still showed its
+   * bar (your note, 2026-09-26). 12 height samples along the line of sight,
+   * bunched near the unit, from 2 m off it out to 200 m.
+   */
+  const hiddenByGround = (x, y, z, cam) => {
+    if (!groundAt || !cam) return false;
+    const dx = cam.position.x - x, dy = cam.position.y - y, dz = cam.position.z - z;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 3) return false;
+    const reach = Math.max(0, Math.min(len, 200) - 2);
+    for (let k = 1; k <= 12; k++) {
+      const f = (2 + reach * (k / 12) ** 2) / len;
+      if (groundAt(x + dx * f, z + dz * f) > y + dy * f + 0.4) return true;
+    }
+    return false;
+  };
   const geo = new THREE.PlaneGeometry(1, 1); // unit quad; instance matrix sizes it
 
   const fracAttr = new THREE.InstancedBufferAttribute(new Float32Array(max), 1);
@@ -77,6 +95,7 @@ export function createHealthBarField({ scene, max = 512, height = 0.55 }) {
     /** Queue one bar. `width` is the bar's world width; `frac` is hp/maxHp. */
     add(x, y, z, width, frac, hostile, camera) {
       if (n >= max) return;
+      if (hiddenByGround(x, y, z, camera)) return;
 
       const w = width + BORDER * 2;
       const h = height + BORDER * 2;
