@@ -94,6 +94,7 @@ import { siteEnemyLine } from "./enemyLine.js";
 import { paintCanopy, paintPalmFringe, paintUndergrowth, travellerPalmSpots, canopyClearings } from "./jungleCanopy.js";
 import { plant, updatePlantedPlants } from "./placedPlants.js";
 import { plantSpecimens } from "./specimenPlants.js";
+import { sitePaddies, buildRicePaddies } from "./ricePaddies.js";
 import { createFogBanks, siteFogBanks } from "./fogBanks.js";
 import { buildFogBanksPanel } from "./fogBanksPanel.js";
 import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
@@ -1171,6 +1172,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     smoke.render(renderTime, app.environment?.getLightDirection?.());
     fireballs.render(renderTime);         // napalm fireballs: the flipbook clock
     updatePlantedPlants(app, app.camera, app.environment?.getLightDirection?.());
+    app.ricePaddies?.crop?.update(app.camera);   // the rice plants round the camera
+    app.ricePaddies?.reflections?.update();       // their water's reflections (post)
     // Point the overlay at the selection until the pointer has moved, so
     // holding V before touching the mouse reveals the ground under the men
     // rather than a patch of the map's centre.
@@ -1296,6 +1299,39 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     console.log(`[canopy] ${texels} texels of forest, ${palms} of palm fringe, ${floor} of undergrowth, ${travellers} traveller's palms in ${Math.round(performance.now() - t0)} ms`);
   }
 
+  // The post chain BEFORE the fog banks and the fog of war: the paddies'
+  // water reflections (paddyReflections.js), which read the scene before any
+  // mist lies over it. Identity until the paddies exist.
+  const preFog = (color, ctx) => (app.ricePaddies?.reflections ? app.ricePaddies.reflections.node(color, ctx) : color);
+
+  // RICE PADDIES (ricePaddies.js): terraces cut into the best open hillside
+  // near the hamlet, a patchwork of flooded / young / ripe / ploughed paddies.
+  // Before the specimen plants (they keep off the fields) and before the nav
+  // grid is rebuilt (the terraces change the ground). ?paddies=0 = without.
+  if (new URLSearchParams(location.search).get("paddies") !== "0") {
+    onStatus("Cutting the rice terraces…");
+    const t0 = performance.now();
+    try {
+      const hamlet = hamletSitesFor(boot.name)[0];
+      // Near the player's base (the first thing seen), on a hill rising along
+      // the camera's view so the banks face the player; off the dirt track
+      // (nam-valley's paint layer 5).
+      const base = (structures?.list ?? []).find((s) => s.alive && s.team === "player" && /command/i.test(s.type?.name ?? ""));
+      const view = app.camera.getWorldDirection(app.camera.position.clone());
+      const site = sitePaddies(app, {
+        near: base?.position ?? hamlet, facing: { x: view.x, z: view.z },
+        keepOff: (x, z) => (app.samplePaintWeights?.(x, z)?.[4] ?? 0) > 0.3,
+        structures, pieces: placed.pieces, field: app.jungleField ?? null,
+      });
+      const paddies = site ? await buildRicePaddies(app, site) : null;
+      app.ricePaddies = paddies;
+      if (paddies?.reflections) fogOfWar.setPreModifier((color, ctx) => preFog(color, ctx));
+      console.log(paddies
+        ? `[paddies] at (${Math.round(site.x)}, ${Math.round(site.z)}), ${Math.round(site.share * 100)}% usable: ${Math.round(site.up * 100)}% facing hillside, ${paddies.triangles} tris, ${paddies.crop.count} rice hills in ${Math.round(performance.now() - t0)} ms`
+        : "[paddies] no site near the hamlet");
+    } catch (e) { console.warn("[paddies] failed:", e); }
+  }
+
   // The plants that make it Vietnam and Cambodia: pandanus on the river's
   // edge, sugar palms round the village and the temple and out in the open,
   // flame trees in the village (specimenPlants.js). ?specimens=0 = without.
@@ -1322,7 +1358,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       // Drawn in the post chain with the scene's depth, BEFORE the fog of war
       // (unexplored ground darkens its mist with it). Mode / steps changes
       // rebuild the same hook.
-      const hookFog = () => fogOfWar.setPreModifier((color, ctx) => fogBanks.node(color, ctx));
+      const hookFog = () => fogOfWar.setPreModifier((color, ctx) => fogBanks.node(preFog(color, ctx), ctx));
       fogBanks.onRebuild = hookFog;
       hookFog();
       buildFogBanksPanel(document.getElementById("dv-fogbanks"), fogBanks, { rtsCamera });

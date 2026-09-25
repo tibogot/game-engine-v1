@@ -11729,6 +11729,52 @@ export async function startV3App(opts = {}) {
     },
 
     /**
+     * RESHAPE the ground inside a box by a function: `fn(wx, wz, y)` returns
+     * the new height in metres (or null to leave the texel alone). For shapes
+     * no stamp makes — terraced rice paddies following the contours. Written
+     * straight into the CPU mirror and pushed in the next frame's single
+     * upload, like flattenRect; getWorldHeight is the new ground on return.
+     * Returns the number of texels changed.
+     */
+    async remapHeights(x0, z0, x1, z1, fn) {
+      await ensureCpuHeightmapFromGpu();
+      const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * HEIGHTMAP_SIZE);
+      const tx0 = Math.max(0, toTexel(Math.min(x0, x1))), tx1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(Math.max(x0, x1)));
+      const tz0 = Math.max(0, toTexel(Math.min(z0, z1))), tz1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(Math.max(z0, z1)));
+      let n = 0;
+      for (let ty = tz0; ty <= tz1; ty++) {
+        const wz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const wx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+          const i = ty * HEIGHTMAP_SIZE + tx;
+          const y = fn(wx, wz, cpuHeightmap[i] * MAX_HEIGHT);
+          if (y == null || !Number.isFinite(y)) continue;
+          cpuHeightmap[i] = THREE.MathUtils.clamp(y / MAX_HEIGHT, 0, 1);
+          n++;
+        }
+      }
+      if (n) cpuAhead = true;
+      return n;
+    },
+
+    /**
+     * OPEN THE TERRAIN over a world rect where a game draws its own ground
+     * (rice terraces: a mesh with steps finer than the clipmap can hold).
+     * `fn(wx, wz)` returns 0..1 per splat texel; the terrain is cut where it
+     * is over 0.5, smooth between texels. The heightmap is untouched — units
+     * and placement still stand on it. Vegetation is kept out of the opening.
+     * RUNTIME ONLY, never saved. Costs the terrain its early depth test while
+     * any hole exists (see terrainLOD's setHolesEnabled).
+     */
+    setGameHoles(x0, z0, x1, z1, fn) {
+      const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * SPLAT_RES);
+      const tx0 = toTexel(Math.min(x0, x1)), tx1 = toTexel(Math.max(x0, x1));
+      const tz0 = toTexel(Math.min(z0, z1)), tz1 = toTexel(Math.max(z0, z1));
+      const w = (t) => ((t + 0.5) / SPLAT_RES) * WORLD_SIZE - WORLD_SIZE / 2;
+      splatMap.setGameHolesRect(tx0, tz0, tx1, tz1, (tx, tz) => fn(w(tx), w(tz)));
+    },
+
+    /**
      * Raise an earth BERM along a path of world points: the bulldozed wall a
      * firebase was ringed with. Adds a profile on top of the ground under it —
      * `height` metres at the crest, `top` metres of rounded crest, falling to
@@ -12220,6 +12266,19 @@ export async function startV3App(opts = {}) {
      * live in R/G/B of one 512 map, so the strongest channel is the answer for
      * the same reason it is above.
      */
+    /**
+     * The terrain PAINT at (x, z): the 8 layer weights 0..1 (slice 0 RGBA =
+     * layers 1-4, slice 1 RGB = layers 5-7; the base layer is what is left),
+     * nearest splat texel. For a game that must keep off a painted track.
+     */
+    samplePaintWeights: (x, z) => {
+      const half = WORLD_SIZE * 0.5;
+      const px = Math.floor(((x + half) / WORLD_SIZE) * SPLAT_RES);
+      const pz = Math.floor(((z + half) / WORLD_SIZE) * SPLAT_RES);
+      if (px < 0 || pz < 0 || px >= SPLAT_RES || pz >= SPLAT_RES) return null;
+      const i = (pz * SPLAT_RES + px) * 4, d0 = splatMap.data0, d1 = splatMap.data1;
+      return [d0[i], d0[i + 1], d0[i + 2], d0[i + 3], d1[i], d1[i + 1], d1[i + 2]].map((v) => v / 255);
+    },
     sampleTallPlantDensity: (x, z) => {
       const tex = grassTerrainData?.susukiDensityTex;
       if (!tex) return 0;

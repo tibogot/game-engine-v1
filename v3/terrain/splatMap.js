@@ -95,15 +95,19 @@ export class SplatMap {
     // Hole sources, one byte per texel (see the header). slice1.A = max of both.
     this.holeUser       = new Uint8Array(SPLAT_RES * SPLAT_RES);
     this.holeProc       = new Uint8Array(SPLAT_RES * SPLAT_RES);
+    // A GAME's own openings, where it draws its own ground. Runtime only,
+    // never saved (exportCombined writes the user source alone).
+    this.holeGame       = new Uint8Array(SPLAT_RES * SPLAT_RES);
   }
 
   /** slice1.A = max(user, proc) over a texel rect (inclusive), marks the flag stale. */
   _composeHoles(x0 = 0, y0 = 0, x1 = SPLAT_RES - 1, y1 = SPLAT_RES - 1) {
-    const d1 = this.data1, u = this.holeUser, p = this.holeProc;
+    const d1 = this.data1, u = this.holeUser, p = this.holeProc, g = this.holeGame;
     for (let y = y0; y <= y1; y++) {
       let i = y * SPLAT_RES + x0;
       for (let x = x0; x <= x1; x++, i++) {
-        d1[(i << 2) + 3] = u[i] > p[i] ? u[i] : p[i];
+        const up = u[i] > p[i] ? u[i] : p[i];
+        d1[(i << 2) + 3] = up > g[i] ? up : g[i];
       }
     }
     this._holesDirty = true;
@@ -122,6 +126,25 @@ export class SplatMap {
   setProcHoles(bytes) {
     if (bytes) this.holeProc.set(bytes); else this.holeProc.fill(0);
     this._composeHoles();
+    this.tex.addLayerUpdate(1);
+    this.tex.needsUpdate = true;
+  }
+
+  /**
+   * Write the GAME hole source over a texel rect (inclusive): `fn(tx, ty)`
+   * returns 0..1 per texel. Recomposes that rect and uploads slice 1.
+   */
+  setGameHolesRect(x0, y0, x1, y1, fn) {
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0);
+    x1 = Math.min(SPLAT_RES - 1, x1); y1 = Math.min(SPLAT_RES - 1, y1);
+    if (x1 < x0 || y1 < y0) return;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const v = fn(x, y);
+        this.holeGame[y * SPLAT_RES + x] = Math.max(0, Math.min(255, Math.round((v || 0) * 255)));
+      }
+    }
+    this._composeHoles(x0, y0, x1, y1);
     this.tex.addLayerUpdate(1);
     this.tex.needsUpdate = true;
   }

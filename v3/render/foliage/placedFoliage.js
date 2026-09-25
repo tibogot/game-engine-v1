@@ -133,6 +133,16 @@ export class PlacedFoliage {
     this._dirty = true;
   }
 
+  /** Take out every plant `fn({ x, z })` says to (a site cut after they were planted). */
+  removeWhere(fn) {
+    const before = this.plants.length;
+    this.plants = this.plants.filter((p) => !fn(p));
+    if (this.plants.length !== before) this._dirty = true;
+    // update() returns early on none left: hide what was drawn.
+    if (!this.plants.length) for (const t of this.types.values()) if (t.meshes) for (const m of t.meshes) m.visible = false;
+    return before - this.plants.length;
+  }
+
   get count() { return this.plants.length; }
 
   /** Toward the sun, for the see-through light. */

@@ -298,10 +298,10 @@ Everything else below is in its section.
       jumps (6 places, close + zoomed out): worst frame 18-20 ms, 0
       pipelines built in play (was 158-234 ms). Warm-up 254 drawables in
       448 ms under the loading screen.
-- [ ] **The river reads near-BLACK at the base** (seen 2026-09-25 in a fresh
-      browser profile; the same with the old warm-up code, so not that fix).
-      Earlier today it was teal there. Check the grab-free two-pass state
-      (RiverV2:1 hidden, only :add shown) and any per-origin localStorage.
+- [ ] **"The river reads near-BLACK at the base" — NOT a river** (checked
+      2026-09-25): the dark band is the terrace CLIFF FACES (HQ at 12 m, an
+      11 m cliff up to 24 m); there is no water there. Soften their look
+      (lighter rock / grass on the slope) or keep — your call.
 - [ ] Still open from the plant list: sago palm, nipa placement (the preset
       exists), a strangler fig on the temple ruins (Ta Prohm) — a big one.
 - [x] **"Those exotic trees with spiky shapes"** (your ask 2026-09-25) —
@@ -326,6 +326,24 @@ Everything else below is in its section.
       OPTIONS if the lumps should come back: darker cracks (stronger clump
       shading), or fewer bigger sub-crowns in dipterocarpGeometry.
 
+## SOLDIERS — decided 2026-09-25: YOU find a better model; I do the rest
+
+- [ ] **YOU (later):** a rigged or Mixamo-riggable soldier (Sketchfab /
+      CGTrader / Fab): 3-10k tris, few materials, gear separate if possible
+      (helmet, pack, rifle), a license allowing commercial use (CC0 / CC-BY
+      fine, NO "NonCommercial"). Ideally ONE body + skeleton for both sides.
+      Mixamo clips on that rig ("With Skin" once, the rest "Without Skin",
+      30 fps): idle, walk, run, crouch idle/walk, prone idle, crawl, fire
+      standing/crouched/prone, reload, grenade throw, hit, 2-3 deaths
+      (optional: point/wave, carry wounded).
+- [ ] **ME, once it's in:** scale/orientation, rifle on the hand bone, team
+      variants (US steel pot / NVA pith helmet / VC conical hat + black
+      pyjamas), bake all clips into the crowd table, a state machine
+      (crouch in cover, prone under fire, fire/reload) — which is what makes
+      SUPPRESSION visible, so suppression waits for this.
+- Why not procedural: a shape-built figure is doable, convincing human
+  MOTION is not; at RTS zoom silhouette + colour + animation are what read.
+
 ## WILDLIFE — your ask 2026-09-25 (LOW PRIORITY: "not so important now")
 
 - [ ] Small life in the air and on the ground: BUTTERFLIES (bright, over
@@ -338,17 +356,89 @@ Everything else below is in its section.
 
 ## RICE PADDIES — your ask 2026-09-25 (TALK FIRST — plan in my answer)
 
-- [ ] "We need rice fields, that would look Vietnam — are you confident, how
-      would it read the most Vietnam / Apocalypse Now?" My plan (answer of
-      2026-09-25): a PATCHWORK of flat, levelled paddies stepped down the
-      valley floor round Ap Bang, cut by thin raised DIKES; each paddy in
-      its own state (sky-mirror flooded, young bright-green rows, ripe
-      gold, brown ploughed mud); sugar palms and a path along the dikes,
-      egrets in the water, a buffalo. Cheap water (opaque, sky reflection,
-      no screen grab), rice as a grass preset in rows. Gameplay: open, no
-      cover, men slowed in the mud — the killing ground. Waiting on your go
-      and WHERE (nam-valley's valley floor is jungle; the paddies take
-      space from it).
+- [x] **RICE TERRACES — REBUILT (2026-09-25, uncommitted)** — games/nam-rts/ricePaddies.js.
+      v1 (flat colour on a 0.5 m grid over barely-stepped gentle ground) was
+      rejected: "worse than Minecraft", blocky, flat, no plateau. v2, built
+      the way the photos are:
+      - a HILLSIDE (slope 5-17°) by Ap Bang, not a plain; 1.1 m steps, a
+        grassed 1.5 m bank between terraces, a rounded dike on each lip,
+        cross-dikes that wander;
+      - everything worked out PER PIXEL from one terrace function (JS = the
+        shader, line for line), so every edge is a smooth curve at any zoom;
+      - the terrain is OPENED over the block (new engine call
+        `app.setGameHoles`, a third hole source in splatMap) and one mesh is
+        the ground there; the heightmap gets the same steps with 3.4 m banks
+        so men walk them (0% nav-blocked, max 32°);
+      - water = sky mirror faked in the albedo (+ env), the bank reflected
+        along the inner edge; young rice in rows along the contour with the
+        water between; dense green, ripe gold, mud;
+      - decals and hand-planted palms inside the block are removed
+        (PlacedFoliage.removeWhere, new engine method).
+      MEASURED (gpuAB, play zoom): 8.31 ms with vs 8.41 without, noise 0.4 —
+      free. `?paddies=0` turns it off.
+      v3 (your "still looks cheap, add the rice leaves"): PHOTO textures
+      (Grass005 + Ground037 on the banks, dry mud under the water, the grass
+      leaf texture laid along the rows), water = Fresnel METAL mirror of the
+      real environment + normal-mapped ripples (not emissive: bloom), and
+      REAL RICE PLANTS (games/nam-rts/riceCrop.js): 24.9k clumps of 6
+      curving leaves in rows along each terrace, young / growing / ripe with
+      bent gold heads, swaying; thinned with distance (all within 30 m, 22%
+      far) with the shader painting the canopy by the same share, and only
+      the drawn share uploaded per 12 m chunk. MEASURED plants alone: 0.55-
+      0.6 ms at play zoom (7.2k clumps drawn), 0.97 ms close up (17.8k).
+      Shadows on the leaves cost nothing measurable.
+  - [ ] **Your review of v3 (2026-09-25): "better but still looks cheap".** To do next:
+    - [x] BLACK EDGES — two causes, both fixed: my fake "bank reflected in
+          the water" band + a dark wet line along every inner edge (removed /
+          softened), and a crack along the block's rim from sinking the mesh
+          border under the terrain (now the mesh cuts its own edge per pixel,
+          maskNode at mask 0.3, and the terrain opening sits inside it).
+    - [x] TURNED ROUND: the site picker now wants a hill that RISES along the
+          camera's view (the RTS camera never turns), anywhere on the map,
+          near the player's base, off the dirt track (paint layer 5, new
+          engine call app.samplePaintWeights). Now at (192, -384), east of
+          the Command Base: every bank faces the player.
+    - [x] FEWER COLOURS: water 30%, young rice 38%, growing 26%, ripe 6%, no
+          mud; one green family.
+    - [x] SSR BUILT (games/nam-rts/paddyReflections.js): in the post chain
+          (the scene pass's own colour + depth: NO screen copy), only on paddy
+          water (a 0.5 m water-level map), 28 steps + 5 binary refinements.
+          MEASURED: 0.17 ms close up, 0.36 ms at play zoom (noise 0.2).
+    - [x] Banks: one grass (no pale moss), narrower and steeper (1.1 m, a
+          lower 0.18 m lip), broader curves (the hill smoothed more).
+    - [x] SAW TEETH in the reflections (your screenshot) — three layers: coarse
+          march steps (binary refinement), the 0.5 m water-level grid (levels
+          spread 1 m, per-pixel gate by the scene's own NORMAL buffer), and
+          the mesh's 0.5 m facets at each bank foot painted as water (a wet
+          grass margin on the inner edge only). Debug: reflections.uDebug = 1.
+  - [x] GRASS ON THE BANKS (your pick 1, 2026-09-25): riceCrop kind 3 — short
+        shaggy clumps on every bank, dike and the grassed rim, in the same one
+        draw; thinned FIRST with distance (random in the upper range).
+  - [x] RIM HIDDEN (your pick 2): a drifting ring of banana / bush / fern
+        (foliage 3, 1, 7, 0) and coconut palms (tall 2) just outside the
+        edge; the paddies' vegetation clearing now stops at mask 0.55. The
+        side along the dirt track stays open (the track blocks plants: a path
+        along the terraces).
+        MEASURED plants (rice + grass): 0.77 ms play zoom, 0.58 mid, 0.55 close.
+  - [ ] ANIMALS (your idea): water BUFFALO from public/models/Bull_compressed.glb
+        (2.4k tris, 13 clips incl. Walk / Eating / Idle; 7 skinned pieces ->
+        merge to 1 draw; recolour slate grey), 2-3 in the paddies and on the
+        dikes. CHICKENS procedural for the hamlet (instanced, peck/walk in the
+        vertex shader, 1 draw) — or your chicken GLB if it has clips.
+  - [ ] NEXT (my suggestions, your pick): grass blades on the banks; the
+        block's rim hidden in bananas/bushes; life (farmers in conical hats,
+        a buffalo, a field hut, palms on dikes, a bare path on some dike
+        tops); wind rolling over the rice; irregular plots and an eroded
+        bank; duckweed / bamboo inflow pipes in the water; morning mist.
+    - [x] Found on the way: the pipeline warm-up put the crop's instance count
+          back to 0 (what it saw at load) — riceCrop now rebuilds when its
+          count was changed from outside.
+    - [ ] Overall: still "cheap" — keep going until it reads like the photos.
+  - [ ] REAL reflections (banks, trees, units in the water): only screen-
+        space is possible (every terrace is its own water height, so no
+        mirror render). Costs the screen copy (~1.1-2.7 ms measured on the
+        river/decals). Your call after seeing the cheap version.
+  - [ ] Next, if wanted: a buffalo, men slowed in the mud, a second block.
 - [x] **FOG BANKS BUILT (2026-09-25, uncommitted)** — games/nam-rts/fogBanks.js,
       placed where I suggested (your "go"): a chain of 3 along the river's
       middle stretch, the temple standing in mist (towers and the banyan out
@@ -1474,7 +1564,7 @@ tuned). Anything below is ADDED next to it.
       coverage is free; grass is not what this frame is spent on.
       LEFT: nothing — grass trails are wired too, see below.
 - [ ] **Foliage brightness** — **you**, taste call (knobs listed in the transcript)
-- [ ] Rice paddies (expensive: water over big screen areas)
+- [x] Rice paddies — built, see the RICE PADDIES entry (cheap opaque water)
 - [ ] A village as an *arrangement* (paths, well, fences, clearing)
 - [ ] Pre-placed craters and wrecks (craterSystem exists)
 - [ ] Telegraph poles along roads

@@ -91,7 +91,7 @@ export function plantSpecimens(app, { field = null, structures = null, hamlets =
   }
 
   // ── SUGAR PALMS and FLAME TREES: the village, the temple, the open ground ──
-  const open = (x, z) => !blocked(x, z) && slope(x, z) < 0.35 && forest(x, z) < 0.05
+  const open = (x, z) => !blocked(x, z) && !app.ricePaddies?.inBlock?.(x, z) && slope(x, z) < 0.35 && forest(x, z) < 0.05
     && (app.getWaterLevelAt?.(x, z) ?? -Infinity) < ground(x, z)
     && (app.sampleFoliageDensity?.(x, z) ?? 0) < 0.35;
   /** Up to `n` of `kind` in a ring round (cx, cz), spaced `gap`. */
