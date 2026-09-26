@@ -188,6 +188,34 @@ Asset follow-ups:
       apart.
       Rejected on the way: the first rock was one smooth dome (a loaf of
       bread) — now a cluster of flat-faced blocks.
+- [x] **Z-fighting in the committed assets fixed** (post, mechta, ALN camp,
+      all French vehicles): both kit tests now cover this game
+      (rtsPropsCoplanarTest, rtsGroundBandTest). New tool:
+      `node tools/rtsCoplanarWhy.mjs <module> <builder>` names the PART
+      pairs behind an overlap (rtsParts ASSEMBLE_TRACE). Wire/masts/braces
+      use `wirePart` (round, per-strand twist — same-roll boxes coplanar).
+- [x] **Buildables, first four** (v3/render/objects/rtsAlgeria.js):
+      sandbag wall (5 courses + firing step), barbed wire (double apron +
+      ONE continuous concertina coil — separate rings read as a toy), mirador
+      (9 m, braced legs, plank cabin, searchlight, MG), MG nest (berm, bag
+      ring, half-roof; gun its own mesh on a pivot to traverse). Shown in
+      the showroom round the post.
+- [x] **Floating pieces fixed** (you saw them): every pad's rim reshaped
+      the ground under the pieces seated before it (bags 1.1 m up, the
+      post's wire 0.3 m). Now all pads first, then seat; pads get +1.5 m
+      margin; bags, wire and vehicles lie ON the slope (plane fit, lowest
+      corner decides), no pad. Measured: nothing floats > 7 cm.
+      **Build-system rule:** a pad + rim must not reach another pad.
+- [ ] Vehicles on bumpy ground sink one wheel up to ~0.5 m (rigid body on
+      a plane fit) — per-wheel seating when units move.
+- [x] **Dev panel** (your ask): games/alg-rts/devPanel.js on a SHARED shell
+      (games/shared-rts/devPanelShell.js — frame, folding sections, row
+      helpers; nam's panel untouched). Sections: Camera, Light (live, Copy →
+      AURES_LIGHT), Haze & bloom, Showroom (go to / hide), Performance
+      (render scale, GPU pass timings). `?dev=0` hides it.
+- [ ] **Next buildables**: helipad, motor pool, mortar pit, searchlight
+      tower, SAS post; ALN cave entrance, arms cache, sangar, ambush screen,
+      mine/trap markers.
 - [ ] Very high orbit views show a black band under the horizon (the env
       bake's black lower hemisphere, ref_v3_env_bake_black_floor); not seen at
       play zoom.
@@ -198,6 +226,49 @@ Asset follow-ups:
       dust sheets, the light going orange and flat; gameplay: sight ranges
       shrink, helicopters grounded. Candidates: the engine's fog + smoke
       flipbooks + a dust-particle layer.
+
+## PROPOSAL — economy and base-building (2026-09-26, waiting for **you**)
+
+Shared core (nam's, moved to games/shared-rts): capture points held by
+INFANTRY pay income every second; a builder unit places structures; the
+HQ pays a small trickle. On top, the two sides play differently:
+
+**French — "Ravitaillement" (supplies), one currency.**
+- Income: held points + HQ trickle; the valley points (hamlets, oases)
+  lean French.
+- Builder: the Génie sapper. Tiers unlock by building:
+  1. Post (start): infantry (appelés, then paras/légion)
+  2. Motor pool: jeep, GMC, half-track, EBR
+  3. Helipad: Alouette II (medevac, recon), H-34 (troops, gunship)
+  4. Armour (after both): AMX-13
+- Defences: sandbag wall, barbed wire, mirador watchtower (sight),
+  MG nest, mortar pit, searchlight (night).
+- **SAS post**: a forward base on a hamlet: reinforce there, sight
+  radius, raises French support in that hamlet.
+
+**ALN — "Soutien" (support), one currency, earned differently.**
+- Income: held points (the mountain ones lean ALN) + hamlet SUPPORT:
+  each hamlet has a support meter; the side with more presence there
+  gets its income. Abstract, never atrocity mechanics.
+- No heavy vehicles, no air. Instead:
+  - **Hidden**: ALN buildings are invisible to the French until a French
+    unit comes close (nam's tunnel rule, 35 m).
+  - **Cave entrance**: spawn and reinforce point, only in rough ground.
+  - **Arms cache**: stores smuggled weapons: unlocks MG / mortar / bazooka
+    teams.
+  - **Sangar**: stone MG position.
+  - **Mines / booby traps**: nam's trap kit (a per-man roll to find).
+  - **Ambush position**: brush screen; units inside are hidden until they
+    fire.
+  - Hamlet **recruits** militia (moussebilines) where support is high.
+- Build rule: ALN may build only on rough or high ground (near cover), the
+  French anywhere they can level a pad.
+
+**Assets this needs** (buildable, kit style, 3/4 facing):
+French: sandbag wall, barbed wire, mirador, MG nest, mortar pit, helipad,
+motor pool (hangar), searchlight tower, SAS post.
+ALN: cave entrance, arms cache, sangar (from the camp), ambush screen,
+mine / trap markers.
 
 ## Open decisions — **you**
 

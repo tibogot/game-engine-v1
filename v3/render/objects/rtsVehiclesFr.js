@@ -250,14 +250,14 @@ export function buildWillys({ seed = 44 } = {}) {
 
   // ── The tub: floor, sides, the rear panel, the seats.
   const TZ0 = 0.3, TZ1 = -1.62, TL = TZ0 - TZ1, TZ = (TZ0 + TZ1) / 2;
-  P(buildBox(1.26, 0.05, TL), [0, 0.62, TZ], MAT.paint, VA * 0.9);
+  P(buildBox(1.26, 0.05, TL - 0.04), [0, 0.62, TZ], MAT.paint, VA * 0.9);   // short of the sides' ends
   for (const sx of [-1, 1]) {
     P(buildBox(0.05, 0.44, TL), [sx * 0.64, 0.84, TZ], MAT.paint, VA);
     P(buildBox(0.26, 0.3, 0.86), [sx * 0.49, 0.8, AXR], MAT.paint, VA * 0.92);          // rear wheel arch
-    P(buildBox(0.08, 0.04, TL), [sx * 0.64, 1.07, TZ], MAT.paint, VA * 0.85);           // rolled lip
+    P(buildBox(0.08, 0.04, TL - 0.06), [sx * 0.64, 1.07, TZ], MAT.paint, VA * 0.85);   // rolled lip (short of the side's ends)
   }
-  P(buildBox(1.28, 0.44, 0.05), [0, 0.84, TZ1], MAT.paint, VA);
-  P(buildBox(1.34, 0.04, 0.08), [0, 1.07, TZ1], MAT.paint, VA * 0.85);
+  P(buildBox(1.28, 0.41, 0.05), [0, 0.835, TZ1], MAT.paint, VA);   // 2 cm under the sides' top
+  P(buildBox(1.34, 0.04, 0.08), [0, 1.075, TZ1], MAT.paint, VA * 0.85);   // 5 mm over the side lips
   for (const sx of [-1, 1]) {
     P(buildBox(0.44, 0.1, 0.44), [sx * 0.3, 0.84, -0.3], MAT.canvas, 0.3);
     P(buildBox(0.42, 0.44, 0.08), [sx * 0.3, 1.08, -0.54], MAT.canvas, 0.3);
@@ -268,7 +268,7 @@ export function buildWillys({ seed = 44 } = {}) {
 
   // ── Bonnet, the slotted grille with the lamps in it, flat fenders, bumper.
   P(buildBox(0.78, 0.06, 1.2), [0, 1.03, 0.92], MAT.paint, VA * 1.05);
-  for (const sx of [-1, 1]) P(buildBox(0.05, 0.4, 1.2), [sx * 0.39, 0.82, 0.92], MAT.paint, VA);
+  for (const sx of [-1, 1]) P(buildBox(0.05, 0.4, 1.16), [sx * 0.39, 0.82, 0.92], MAT.paint, VA);   // short of the bonnet top's ends
   P(buildBox(0.84, 0.62, 0.05), [0, 0.75, 1.54], MAT.paint, VA);
   for (let k = 0; k < 9; k++) P(buildBox(0.045, 0.4, 0.02), [-0.28 + k * 0.07, 0.77, 1.57], MAT.steel, 0.02);
   for (const sx of [-1, 1]) {
@@ -279,7 +279,7 @@ export function buildWillys({ seed = 44 } = {}) {
     P(buildBox(0.04, 0.24, 0.8), [sx * 0.46, 0.73, 1.0], MAT.paint, VA * 0.9);
   }
   P(buildBox(1.5, 0.12, 0.1), [0, 0.46, 1.66], MAT.paint, VA * 0.9);
-  for (const sx of [-1, 1]) P(buildBox(0.08, 0.12, 0.1), [sx * 0.42, 0.46, 1.74], MAT.steel, 0.3);
+  for (const sx of [-1, 1]) P(buildBox(0.08, 0.15, 0.1), [sx * 0.42, 0.46, 1.74], MAT.steel, 0.3);   // taller than the bumper
 
   // ── Windscreen folded down onto the bonnet (the djebel way).
   P(buildBox(1.2, 0.05, 0.42), [0, 1.09, 0.56], MAT.paint, VA * 0.95);
@@ -288,7 +288,7 @@ export function buildWillys({ seed = 44 } = {}) {
   // ── Tail: spare wheel and a jerrycan.
   G(axleX(WR * 0.95, 0.18, 18).rotateY(Math.PI / 2), [0.28, 0.86, TZ1 - 0.12], MAT.rubber, 0.5, undefined, [0, 0, 0, 0]);
   G(axleX(0.18, 0.2, 12).rotateY(Math.PI / 2), [0.28, 0.86, TZ1 - 0.12], MAT.paint, VA, undefined, [0, 0, 0, 0]);
-  P(buildBox(0.16, 0.46, 0.32), [-0.34, 0.86, TZ1 - 0.13], MAT.paint, 0.4);
+  P(buildBox(0.16, 0.46, 0.32), [-0.34, 0.875, TZ1 - 0.13], MAT.paint, 0.4);
 
   // ── The .30 on its pedestal behind the seats, its ammo box; the whip aerial
   //    bent over and tied down.
@@ -367,8 +367,8 @@ export function buildGMC({ seed = 353 } = {}) {
   // ── Bonnet: narrow, flat-topped, louvred sides; the grille and its brush guard.
   P(buildBox(0.86, 0.06, 1.55), [0, 1.62, 2.18], MAT.paint, VA * 1.05);
   for (const sx of [-1, 1]) {
-    P(buildBox(0.05, 0.56, 1.55), [sx * 0.43, 1.34, 2.18], MAT.paint, VA);
-    for (let k = 0; k < 6; k++) P(buildBox(0.02, 0.05, 0.3), [sx * 0.46, 1.44, 1.7 + k * 0.17], MAT.steel, 0.05);
+    P(buildBox(0.05, 0.56, 1.51), [sx * 0.43, 1.34, 2.18], MAT.paint, VA);   // short of the bonnet top's ends
+    for (let k = 0; k < 6; k++) P(buildBox(0.02, 0.05, 0.13), [sx * 0.46, 1.44, 1.7 + k * 0.17], MAT.steel, 0.05);   // louvres, not overlapping
   }
   P(buildBox(0.9, 0.78, 0.06), [0, 1.3, 2.98], MAT.paint, VA * 0.95);
   for (let k = 0; k < 8; k++) P(buildBox(0.05, 0.64, 0.03), [-0.33 + k * 0.094, 1.3, 3.02], MAT.steel, 0.05);
@@ -377,7 +377,7 @@ export function buildGMC({ seed = 353 } = {}) {
     P(new THREE.CylinderGeometry(0.11, 0.12, 0.14, 12).rotateX(Math.PI / 2), [sx * 0.72, 1.46, 2.95], MAT.steel, 0.15);
     P(new THREE.CylinderGeometry(0.09, 0.09, 0.02, 12).rotateX(Math.PI / 2), [sx * 0.72, 1.46, 3.03], MAT.white, 0.4);
   }
-  for (const y of [1.0, 1.72]) P(buildBox(1.04, 0.05, 0.05), [0, y, 3.16], MAT.steel, 0.25);
+  for (const y of [1.0, 1.72]) P(buildBox(1.04, 0.05, 0.05), [0, y, 3.19], MAT.steel, 0.25);   // in front of the uprights
   P(buildBox(2.2, 0.18, 0.14), [0, 0.8, 3.24], MAT.paint, VA * 0.9);                       // bumper
   P(axleX(0.14, 0.7, 12), [0, 0.95, 3.2], MAT.steel, 0.2);                                  // winch drum
   for (const sx of [-1, 1]) P(buildBox(0.12, 0.14, 0.18), [sx * 0.8, 0.72, 3.33], MAT.steel, 0.3);
@@ -392,7 +392,7 @@ export function buildGMC({ seed = 353 } = {}) {
   // ── The closed cab: body, rounded roof, split windscreen, doors with windows.
   const CZ = 0.72, CW = 1.92, CD = 1.28;
   P(buildBox(CW, 0.95, CD), [0, 1.52, CZ], MAT.paint, VA);
-  P(buildBox(CW - 0.04, 0.5, 0.06), [0, 2.24, CZ + CD / 2 - 0.03], MAT.paint, VA * 0.98);   // windscreen frame
+  P(buildBox(CW - 0.04, 0.52, 0.06), [0, 2.24, CZ + CD / 2 - 0.02], MAT.paint, VA * 0.98);   // proud of the door frames top and bottom   // windscreen frame
   for (const sx of [-1, 1]) P(buildBox(0.82, 0.4, 0.03), [sx * 0.44, 2.24, CZ + CD / 2 + 0.01], MAT.steel, 0.08);
   for (const sx of [-1, 1]) {
     P(buildBox(0.06, 0.5, CD - 0.04), [sx * (CW / 2 - 0.03), 2.24, CZ], MAT.paint, VA);
@@ -401,7 +401,7 @@ export function buildGMC({ seed = 353 } = {}) {
     P(buildBox(0.32, 0.03, 0.03), [sx * (CW / 2 + 0.16), 2.3, CZ + 0.6], MAT.steel, 0.25);    // mirror arm
     P(buildBox(0.03, 0.24, 0.16), [sx * (CW / 2 + 0.32), 2.3, CZ + 0.6], MAT.steel, 0.1);
   }
-  P(buildBox(CW, 0.5, 0.06), [0, 2.24, CZ - CD / 2 + 0.03], MAT.paint, VA);
+  P(buildBox(CW - 0.1, 0.5, 0.06), [0, 2.24, CZ - CD / 2 + 0.03], MAT.paint, VA);   // between the door frames
   {
     const roof = new THREE.CylinderGeometry(1, 1, CD + 0.06, 18, 1, false, -Math.PI / 2, Math.PI);
     roof.rotateX(-Math.PI / 2).scale(CW / 2 + 0.02, 0.22, 1);   // -90: the arc on TOP (+90 hangs it below the axis)
@@ -436,7 +436,7 @@ export function buildGMC({ seed = 353 } = {}) {
     P(tilt, [0, SIDE0 + 0.25, BZ], MAT.canvas, 0.38);
     for (const sx of [-1, 1]) P(buildBox(0.03, 0.62, BL - 0.1), [sx * TW, SIDE0 - 0.05, BZ], MAT.canvas, 0.34);
     // The front of the tilt closed against the cab, the rear flap rolled up.
-    P(buildBox(TW * 2, 0.9, 0.04), [0, SIDE0 + 0.2, BZ0 - 0.07], MAT.canvas, 0.36);
+    P(buildBox(TW * 2, 0.9, 0.04), [0, SIDE0 + 0.2, BZ0 - 0.1], MAT.canvas, 0.36);   // clear of the slats' ends
     P(axleX(0.12, TW * 2 - 0.1, 10), [0, TOP - 0.1, BZ1 + 0.05], MAT.canvas, 0.3);
     // Tie-down ropes down the sides.
     for (let k = 0; k < 6; k++) for (const sx of [-1, 1]) P(buildBox(0.02, 0.5, 0.02), [sx * (TW + 0.02), SIDE0 - 0.1, BZ0 - 0.3 - k * (BL - 0.6) / 5], MAT.hessian, 0.4);
@@ -554,7 +554,7 @@ export function buildAlouette() {
   P(buildBox(1.2, 0.05, 1.9), [0, 0.66, 1.35], MAT.paint, DK * 0.8);
   for (const sx of [-1, 1]) {
     P(buildBox(0.42, 0.1, 0.44), [sx * 0.3, 0.9, 0.85], MAT.canvas, 0.25);
-    P(buildBox(0.42, 0.55, 0.08), [sx * 0.3, 1.2, 0.62], MAT.canvas, 0.25);
+    P(buildBox(0.38, 0.55, 0.08), [sx * 0.3, 1.2, 0.6], MAT.canvas, 0.25);
     P(buildBox(0.38, 0.5, 0.26), [sx * 0.3, 1.2, 0.8], MAT.canvas, 0.45);
     P(new THREE.SphereGeometry(0.13, 12, 9), [sx * 0.3, 1.62, 0.84], MAT.white, 0.55);
     P(buildBox(0.1, 0.1, 0.4), [sx * 0.3 + 0.12, 1.3, 1.02], MAT.canvas, 0.45, [0.6, 0, 0]);
@@ -570,7 +570,7 @@ export function buildAlouette() {
     // Panel seams and a hatch on each side.
     for (const z of [0.0, -0.55]) P(buildBox(0.012, BY1 - BY0 - 0.1, 0.025), [sx * (BW + 0.006), (BY0 + BY1) / 2, z], MAT.steel, 0.1);
     P(buildBox(0.02, 0.5, 0.42), [sx * (BW + 0.01), 1.05, -0.8], MAT.paint, DK * 1.15);
-    P(buildBox(0.05, 0.04, 0.3), [sx * (BW + 0.03), 0.62, 0.1], MAT.steel, 0.3);                // step
+    P(buildBox(0.05, 0.04, 0.3), [sx * (BW + 0.03), 0.64, 0.1], MAT.steel, 0.3);                // step
   }
   // The top of the body: the gearbox fairing, the mast.
   P(buildBox(0.7, 0.28, 0.9), [0, BY1 + 0.14, 0.05], MAT.paint, DK * 1.05);
@@ -589,7 +589,7 @@ export function buildAlouette() {
   for (const sx of [-1, 1]) for (const z of [EZ0, EZ1 + 0.1]) P(strut([sx * 0.4, BY1, z], [sx * 0.2, EY - 0.1, z], 0.03), [0, 0, 0], MAT.steel, 0.3);
   P(alongZ(0.24, 0.22, EZ0 - EZ1, 18), [0, EY, (EZ0 + EZ1) / 2], MAT.steel, 0.62);
   for (let k = 0; k < 5; k++) P(alongZ(0.255, 0.255, 0.035, 18), [0, EY, EZ0 - 0.08 - k * 0.2], MAT.steel, 0.35);
-  P(new THREE.TorusGeometry(0.2, 0.05, 6, 16), [0, EY, EZ0 + 0.02], MAT.steel, 0.4);          // intake lip
+  P(new THREE.TorusGeometry(0.2, 0.05, 6, 16), [0, EY, EZ0 + 0.05], MAT.steel, 0.4);          // intake lip
   P(buildBox(0.26, 0.24, 0.36), [0.3, EY + 0.08, -0.6], MAT.steel, 0.25);                        // accessories
   P(new THREE.CylinderGeometry(0.06, 0.06, 0.4, 8), [-0.3, EY - 0.05, -0.8], MAT.steel, 0.3, [Math.PI / 2, 0, 0]);
   {
@@ -636,7 +636,7 @@ export function buildAlouette() {
     const g = indexed(new THREE.ExtrudeGeometry(fin, { depth: 0.035, bevelEnabled: false }));
     g.rotateY(-Math.PI / 2);
     const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 2, uv.getY(i) / 2);
-    P(g, [0.018, tEnd.B[1], TZ1 + 0.45], MAT.paint, DK);
+    P(g, [0.06, tEnd.B[1], TZ1 + 0.45], MAT.paint, DK);   // clear of the lattice tubes
   }
   const stabZ = TZ1 + 0.95, stabY = (sec(stabZ).L[1] + sec(stabZ).B[1]) / 2;
   P(buildBox(1.4, 0.035, 0.34), [0, stabY, stabZ], MAT.paint, DK);
@@ -656,14 +656,18 @@ export function buildAlouette() {
   const BL = 4.9;
   for (let k = 0; k < 3; k++) {
     const a = (k / 3) * Math.PI * 2 + 0.3;
-    const b = blade(BL, 0.3, 0.045, 0.18);
+    // The blade stops where its white tip begins (the tip laid OVER the
+    // blade's end z-fought): same droop curve, carried on by the tip.
+    const bl = BL - 0.28, droop = 0.18 * (bl / BL) ** 2;
+    const b = blade(bl, 0.3, 0.045, droop);
     b.translate(0.28, 0, 0).rotateY(a);
     main.push({ geo: b, mat: MAT.steel, tone: 0.1 });
     const tip = blade(0.28, 0.305, 0.047, 0);
-    tip.translate(0.28 + BL - 0.28, -0.17, 0).rotateY(a);
+    tip.translate(0.28 + bl, -droop, 0).rotateY(a);
     main.push({ geo: tip, mat: MAT.white, tone: 0.5 });
-    main.push({ geo: buildBox(0.4, 0.1, 0.14), pos: [Math.cos(a) * 0.22, 0, -Math.sin(a) * 0.22], rot: [0, a, 0], mat: MAT.steel, tone: 0.28 });
-    main.push({ geo: new THREE.CylinderGeometry(0.035, 0.035, 0.3, 6), pos: [Math.cos(a + 0.5) * 0.2, 0.04, -Math.sin(a + 0.5) * 0.2], rot: [0, a, Math.PI / 2], mat: MAT.steel, tone: 0.35 });
+    // Each grip 1 cm higher than the last: they overlap by the hub.
+    main.push({ geo: buildBox(0.4, 0.1, 0.14), pos: [Math.cos(a) * 0.22, k * 0.01, -Math.sin(a) * 0.22], rot: [0, a, 0], mat: MAT.steel, tone: 0.28 });
+    main.push({ geo: new THREE.CylinderGeometry(0.035, 0.035, 0.3, 6), pos: [Math.cos(a + 0.5) * 0.2, 0.085, -Math.sin(a + 0.5) * 0.2], rot: [0, a, Math.PI / 2], mat: MAT.steel, tone: 0.35 });
   }
   main.push({ geo: new THREE.CylinderGeometry(0.15, 0.17, 0.2, 14), mat: MAT.steel, tone: 0.2 });
   main.push({ geo: new THREE.SphereGeometry(0.09, 10, 6), pos: [0, 0.13, 0], mat: MAT.steel, tone: 0.3 });
@@ -864,8 +868,8 @@ export function buildHalfTrack({ seed = 3 } = {}) {
   //    vision slits), the rear door, all open on top.
   const BZ0 = 1.2, BZ1 = -2.85, BL = BZ0 - BZ1, BZ = (BZ0 + BZ1) / 2, BW = 1.0, TOPY = 2.05;
   P(buildBox(BW * 2, 0.08, BL), [0, 1.05, BZ], MAT.paint, VA * 0.85);                             // floor
-  for (const sx of [-1, 1]) P(buildBox(0.06, TOPY - 1.05, BL), [sx * BW, (TOPY + 1.05) / 2, BZ], MAT.paint, VA);
-  P(buildBox(BW * 2, TOPY - 1.05, 0.06), [0, (TOPY + 1.05) / 2, BZ1], MAT.paint, VA);
+  for (const sx of [-1, 1]) P(buildBox(0.06, TOPY - 1.05, BL + 0.04), [sx * BW, (TOPY + 1.05) / 2, BZ], MAT.paint, VA);   // past the floor's ends
+  P(buildBox(BW * 2, TOPY - 1.11, 0.06), [0, (TOPY + 1.05) / 2, BZ1], MAT.paint, VA);   // 3 cm under the sides' top
   P(buildBox(0.6, 0.72, 0.03), [0, 1.5, BZ1 - 0.035], MAT.paint, VA * 1.08);                     // rear door
   P(buildBox(BW * 2, 0.5, 0.06), [0, 1.5, BZ0], MAT.paint, VA);                                  // dash
   P(buildBox(BW * 2, 0.55, 0.06), [0, 2.02, BZ0 - 0.05], MAT.paint, VA * 1.02, [-0.25, 0, 0]);   // windscreen armour, raised
@@ -898,7 +902,7 @@ export function buildHalfTrack({ seed = 3 } = {}) {
   for (const sx of [-1, 1]) wheelAt(sx * 0.84, AXF);
   for (const sx of [-1, 1]) {
     trackSide(G, {
-      xc: sx * 0.82, tw: 0.3, t: 0.04, wheelR: 0.23, wheelsZ: [-0.55, -1.0, -1.45, -1.9],
+      xc: sx * 0.82, tw: 0.3, t: 0.04, wheelR: 0.2, wheelsZ: [-0.55, -1.0, -1.45, -1.9],   // 0.23 overlapped its neighbours side to side
       sprocket: { c: [0.05, 0.56], r: 0.26 }, idler: { c: [-2.5, 0.52], r: 0.24 }, paintTone: VA * 0.9,
     });
   }

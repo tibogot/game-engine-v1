@@ -115,7 +115,7 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
     parts.push({ geo: buildBox(4.2, 0.35, 0.4), pos: [5, 3.2, 7.0], rot: [0, 0, 0.05], mat: MAT.timber, tone: 0.2 });
     for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.35, 3.2, 0.35), pos: [5 + sx * 1.85, 1.6, 7.0], mat: MAT.timber, tone: 0.25 });
     parts.push({ geo: buildBox(3.6, 0.3, 1.0), pos: [5, 0.15, 6.4], mat: MAT.rubble, tone: 0.55 });
-    for (let k = 0; k < 4; k++) parts.push({ geo: buildBox(0.7, 0.45, 0.5), pos: [4 + k * 0.6, 0.55, 6.7], rot: [0, R() * 0.4, 0], mat: MAT.hessian, tone: 0.4 + R() * 0.2 });
+    for (let k = 0; k < 4; k++) parts.push({ geo: buildBox(0.7, 0.45 + k * 0.04, 0.5), pos: [4 + k * 0.6, 0.55 + k * 0.035, 6.7], rot: [0, R() * 0.4, 0], mat: MAT.hessian, tone: 0.4 + R() * 0.2 });
   }
 
   // ── The stone house they took over: the PC ───────────────────────────────
@@ -139,7 +139,7 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
     parts.push({ geo: buildBox(0.5, 1.0 + R() * 0.2, len + 0.3), pos: [(a[0] + b[0]) / 2, 0.52, (a[1] + b[1]) / 2], rot: [0, Math.atan2(dx, dz), 0], mat: MAT.rubble, tone: 0.45 + R() * 0.15 });
   }
   // A whip aerial off the roof, the wire strung to a pole: the wilaya's radio.
-  parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.05, 6, 6), pos: [HX + 3.5, HH + 3, HZ + 2], mat: MAT.timber, tone: 0.3 });
+  parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.05, 6, 6), pos: [HX + 3.5, HH + 3.2, HZ + 2], mat: MAT.timber, tone: 0.3 });
   parts.push({ geo: new THREE.CylinderGeometry(0.01, 0.01, 9, 4), pos: [HX + 7.6, HH + 3.2, HZ + 2], rot: [0, 0, Math.PI / 2 - 0.12], mat: MAT.steel, tone: 0.3 });
 
   // ── The dugout: half into the ground, roofed with logs and earth ─────────
@@ -147,7 +147,7 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
     const DX = 8, DZ = -1, DW = 6, DD = 4;
     // Low stone walls above the pit, the log roof over them, earth on top.
     for (const sz of [-1, 1]) parts.push({ geo: buildBox(DW, 0.8, 0.5), pos: [DX, 0.4, DZ + sz * DD / 2], mat: MAT.rubble, tone: 0.5 });
-    parts.push({ geo: buildBox(0.5, 0.8, DD), pos: [DX + DW / 2, 0.4, DZ], mat: MAT.rubble, tone: 0.5 });
+    parts.push({ geo: buildBox(0.5, 0.76, DD - 0.06), pos: [DX + DW / 2, 0.38, DZ], mat: MAT.rubble, tone: 0.5 });   // lower and inside the long walls: flush corners z-fought
     for (let k = 0; k < 9; k++) {
       parts.push({ geo: new THREE.CylinderGeometry(0.14, 0.16, DD + 1.2, 7), pos: [DX - DW / 2 + 0.4 + k * (DW - 0.8) / 8, 0.95, DZ], rot: [Math.PI / 2, 0, 0], mat: MAT.timber, tone: 0.2 + R() * 0.2 });
     }
@@ -180,7 +180,7 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
 
   // ── The flagpole's foot, in the forecourt: a heap of stones ──────────────
   const poleH = 7;
-  for (let k = 0; k < 6; k++) parts.push({ geo: buildBox(0.5, 0.35, 0.4), pos: [-9 + (R() - 0.5) * 0.6, 0.18 + (k > 3 ? 0.3 : 0), -3.5 + (R() - 0.5) * 0.6], rot: [0, R() * 3, 0], mat: MAT.rubble, tone: 0.5 });
+  for (let k = 0; k < 6; k++) parts.push({ geo: buildBox(0.5, 0.35 + k * 0.03, 0.4), pos: [-9 + (R() - 0.5) * 0.6, 0.18 + k * 0.015 + (k > 3 ? 0.3 : 0), -3.5 + (R() - 0.5) * 0.6], rot: [0, R() * 3, 0], mat: MAT.rubble, tone: 0.5 });
 
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.4, radius: 2, strength: 0.5, groundFade: 0.3, floor: 0.45 });

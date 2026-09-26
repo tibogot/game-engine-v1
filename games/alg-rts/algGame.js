@@ -12,6 +12,7 @@
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom } from "./showroom.js";
+import { createAlgDevPanel } from "./devPanel.js";
 import { LAYOUT, VIEW_YAW } from "./layout.js";
 import "../../v3/styles/editor.css";
 
@@ -103,12 +104,15 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
   }
   app.rtsCamera = rtsCamera;
   app.addPreRenderHook((dt) => rtsCamera.update(dt));
-  // C: RTS camera ⇄ free orbit. nam binds this in its dev panel; this game
-  // has none yet. Matched on the printed key (AZERTY keyboards).
+  // C: RTS camera ⇄ free orbit. Matched on the printed key (AZERTY keyboards).
   window.addEventListener("keydown", (e) => {
-    if (e.repeat || e.target.matches?.("input, textarea")) return;
+    if (e.repeat || e.target.matches?.("input, textarea, select")) return;
     if (e.key?.toLowerCase() === "c") rtsCamera.toggle();
   });
+  // Dev controls (?dev=0 hides them).
+  if (params.get("dev") !== "0") {
+    app.devPanel = createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLight: applyAuresLight });
+  }
 
   app.setFrameThrottle?.(0);
   const hud = document.getElementById("hud");

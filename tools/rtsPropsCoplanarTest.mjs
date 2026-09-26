@@ -40,6 +40,11 @@ import {
 } from "../v3/render/objects/rtsTemple.js";
 import * as campKit from "../v3/render/objects/rtsEnemyCamp.js";
 import { buildBaileyBridge, buildMonkeyBridge, buildTrestleBridge } from "../v3/render/objects/rtsBridges.js";
+import * as algeria from "../v3/render/objects/rtsAlgeria.js";
+import { buildFrenchPost } from "../v3/render/objects/rtsFrenchPost.js";
+import { buildMechta } from "../v3/render/objects/rtsMechta.js";
+import { buildAlnCamp } from "../v3/render/objects/rtsAlnCamp.js";
+import { buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../v3/render/objects/rtsVehiclesFr.js";
 import { buildGunPitBody, buildGunPitGun, buildBunker, buildHelipad, buildNestBody, buildNestGun, buildRequisitionMast, buildSandbagWallPiece } from "../v3/render/objects/rtsBuildables.js";
 
 let failed = 0;
@@ -257,6 +262,24 @@ check("Bailey bridge", buildBaileyBridge({ span: 32 }));
 check("trestle bridge", buildTrestleBridge({ span: 38 }));
 check("monkey bridge", buildMonkeyBridge({ span: 24 }));
 check("Huey wreck", buildHueyWreck());
+
+console.log("the Algeria game");
+check("French post", buildFrenchPost());
+check("mechta", buildMechta());
+check("ALN camp", buildAlnCamp());
+for (const [name, fn] of [["EBR", buildEBR], ["Willys", buildWillys], ["GMC", buildGMC], ["AMX-13", buildAMX13], ["half-track", buildHalfTrack], ["Alouette", buildAlouette]]) {
+  const m = fn();
+  check(`${name} hull`, m);
+  if (m.userData.gear) check(`${name} running gear`, m.userData.gear);
+  if (m.userData.turret) check(`${name} turret`, m.userData.turret.geo);
+  if (m.userData.rotors) { check(`${name} main rotor`, m.userData.rotors.main.geo); check(`${name} tail rotor`, m.userData.rotors.tail.geo); }
+}
+for (const [name, fn] of Object.entries(algeria)) {
+  if (!name.startsWith("build") || typeof fn !== "function") continue;
+  const g = fn();
+  if (g?.isBufferGeometry) check(name, g);
+  for (const sub of Object.values(g?.userData?.parts ?? {})) if (sub?.isBufferGeometry) check(`${name} part`, sub);
+}
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

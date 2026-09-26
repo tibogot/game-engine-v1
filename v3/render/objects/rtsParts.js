@@ -115,11 +115,44 @@ export function assemble(parts) {
     out.push(g);
   }
   if (!out.length) return new THREE.BufferGeometry();
+  // Which part each triangle came from — for tools (rtsCoplanarWhy.mjs names
+  // the PARTS behind a z-fight instead of printing coordinates). Only when
+  // asked: ASSEMBLE_TRACE.on.
+  const trace = ASSEMBLE_TRACE.on
+    ? out.map((g, i) => ({ tris: (g.index ? g.index.count : g.attributes.position.count) / 3, part: parts.filter((p) => p?.geo)[i] }))
+    : null;
   const merged = mergeGeometries(out, false);
   for (const g of out) g.dispose();
   if (!merged) throw new Error("rtsParts.assemble: mergeGeometries returned null (attribute mismatch)");
+  if (trace) merged.userData.partTrace = trace.map((t) => ({ tris: t.tris, pos: t.part.pos, rot: t.part.rot, mat: t.part.mat, matrix: !!t.part.matrix }));
   return merged;
 }
+
+/**
+ * A WIRE, strand or guy rope from `a` to `b` (points), radius `r`: a thin
+ * FIVE-sided tube, as an assemble() part. Not a box: parallel and crossing
+ * box strands share side planes along their whole length and z-fight
+ * (1300 pairs on one wire fence, 2026-09-26); odd-sided tubes do not.
+ */
+let _wireTwist = 0;
+export function wirePart(a, b, r = 0.02, { mat = MAT.steel, tone = 0.45 } = {}) {
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), d = B.clone().sub(A);
+  const matrix = new THREE.Matrix4().compose(
+    A.clone().add(B).multiplyScalar(0.5),
+    new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize()),
+    new THREE.Vector3(1, 1, 1),
+  );
+  // Each strand TWISTED about its own length by a different angle: strands in
+  // one plane all get the same orientation from setFromUnitVectors, so their
+  // tubes shared a flat side along the whole fence (the golden angle never
+  // repeats a phase).
+  _wireTwist = (_wireTwist + 2.39996) % (Math.PI * 2);
+  const geo = new THREE.CylinderGeometry(r, r, d.length(), 5, 1, true).rotateY(_wireTwist);
+  return { geo, matrix, mat, tone };
+}
+
+/** Tools set `ASSEMBLE_TRACE.on = true` to get `userData.partTrace` on every assembly. */
+export const ASSEMBLE_TRACE = { on: false };
 
 export function triCount(geo) {
   if (!geo) return 0;

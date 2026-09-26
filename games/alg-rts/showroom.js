@@ -13,6 +13,7 @@ import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
 import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
+import { buildBarbedWire, buildFrSandbagWall, buildMgNest, buildMirador } from "../../v3/render/objects/rtsAlgeria.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -40,6 +41,26 @@ export const BASE_PARK = [
   { key: "alouette", build: buildAlouette, lx: 46, lz: 6, yaw: 0.6 },
 ];
 
+/**
+ * Buildables the player would place round the post (rtsAlgeria.js), shown
+ * here until the build system places them. Post frame, like BASE_PARK.
+ * `yaw` relative to the post, kept small: fronts stay three-quarters to
+ * the camera like everything else.
+ */
+export const BASE_BUILDABLES = [
+  // Clear of the vehicle park (which is on the post's right, lx < -30).
+  // `follow`: a run of bags or wire lies ON the slope (tilted to it), the way
+  // real ones are laid — no pad. Pads are for things with a floor.
+  // A pad (+1.5 m margin, +4 m rim) must stay clear of the post's pad
+  // (half-size 22 × 24 + 1.5): a rim cut into it left the post's wire floating.
+  { key: "mirador", build: buildMirador, lx: 34, lz: 22, yaw: 0.25 },
+  { key: "mgNest", build: buildMgNest, lx: -14, lz: 40, yaw: -0.2 },
+  { key: "sandbags1", build: buildFrSandbagWall, lx: 8, lz: 30, yaw: 0.1, follow: true },
+  { key: "sandbags2", build: () => buildFrSandbagWall({ seed: 7 }), lx: 2, lz: 31, yaw: -0.15, follow: true },
+  { key: "wire1", build: buildBarbedWire, lx: -2, lz: 38, yaw: 0, follow: true },
+  { key: "wire2", build: () => buildBarbedWire({ seed: 21 }), lx: 10, lz: 37.5, yaw: 0.12, follow: true },
+];
+
 /** Post-local → world (the post's local -Z is its gate). */
 function fromBase(lx, lz) {
   const c = Math.cos(BASE.yaw), s = Math.sin(BASE.yaw);
@@ -50,6 +71,7 @@ function fromBase(lx, lz) {
 /** What to show, and where (world x/z, yaw). */
 export const SHOWROOM = [
   { key: "frenchPost", build: buildFrenchPost, x: BASE.x, z: BASE.z, yaw: BASE.yaw },
+  ...BASE_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true }; }),
   // The two hamlets (layout.js), each its own houses.
   { key: "mechta", build: buildMechta, x: HAMLETS[0].x, z: HAMLETS[0].z, yaw: siteYaw(HAMLETS[0]) },
@@ -98,6 +120,14 @@ function kitView(geo) {
     m.add(gm);
   }
   // A turret: its own mesh on the ring (the unit renderer turns it about Y).
+  // An emplacement's gun (MG nest): its own mesh on its pivot, to traverse.
+  if (geo.userData.gun) {
+    const gm = new THREE.Mesh(geo.userData.gun.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+    gm.name = "Gun";
+    gm.position.set(...geo.userData.gun.pivot);
+    gm.castShadow = true;
+    m.add(gm);
+  }
   const tur = geo.userData.turret;
   if (tur) {
     const tm = new THREE.Mesh(tur.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
@@ -145,24 +175,75 @@ function placePlants(app) {
 
 export async function placeShowroom(app, list = SHOWROOM) {
   const placed = {};
-  for (const e of list) {
-    const geo = e.build();
+  // Footprint-local → world, for an entry turned by its yaw.
+  const toWorld = (e, lx, lz) => {
+    const c = Math.cos(e.yaw), s = Math.sin(e.yaw);
+    return [e.x + lx * c + lz * s, e.z - lx * s + lz * c];
+  };
+  // Ground under a footprint, a 5×5 grid of [lx, lz, h].
+  const sampleGround = (e, f) => {
+    const out = [];
+    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+      const lx = f.cx + (i / 2) * f.hx, lz = f.cz + (j / 2) * f.hz;
+      out.push([lx, lz, app.getWorldHeight(...toWorld(e, lx, lz))]);
+    }
+    return out;
+  };
+
+  // 1) EVERY PAD FIRST. A pad's rim reshapes the ground round it, so a pad
+  // cut after a piece was seated left that piece floating (measured: bags
+  // 1.1 m, the post's front 0.7 m). Pads in list order — the post first — and
+  // the small buildables' rims short so they don't reach into its pad.
+  const built = list.map((e) => ({ e, geo: e.build() }));
+  for (const b of built) {
+    const { e, geo } = b;
+    if (e.vehicle || e.follow) continue;
     const f = geo.userData.footprint ?? { cx: 0, cz: 0, hx: 5, hz: 5 };
     // Pad height: the mean ground under the footprint, so the cut and the
     // fill balance instead of burying one side.
-    let sum = 0, n = 0;
-    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
-      sum += app.getWorldHeight(e.x + (i / 2) * f.hx, e.z + (j / 2) * f.hz); n++;
-    }
-    const y = sum / n;
-    const c = Math.cos(e.yaw), s = Math.sin(e.yaw);
-    const px = e.x + f.cx * c + f.cz * s, pz = e.z - f.cx * s + f.cz * c;
-    // Buildings get a pad; a vehicle just sits on the ground where it is.
-    if (!e.vehicle) await app.flattenRect(px, pz, f.hx, f.hz, y, { rim: 10, rotY: e.yaw });
+    const g = sampleGround(e, f);
+    b.y = g.reduce((a, p) => a + p[2], 0) / g.length;
+    const [px, pz] = toWorld(e, f.cx, f.cz);
+    // +1.5 m: the terrain grid cell that straddles the pad's edge already
+    // slopes, and a post's perimeter wire sits 0.7 m inside it (measured
+    // floating 0.1-0.25 m without the margin).
+    await app.flattenRect(px, pz, f.hx + 1.5, f.hz + 1.5, b.y, { rim: e.rim ?? 10, rotY: e.yaw });
+  }
+
+  // 2) THEN SEAT, on the ground as it ended up. Pads sit at their pad height.
+  // Vehicles and `follow` pieces lie on the slope: a plane fitted to the
+  // ground under them gives the tilt, and the lowest corner decides the
+  // height so nothing floats (the uphill side sinks a few cm instead).
+  const up = new THREE.Vector3(0, 1, 0), n = new THREE.Vector3(), qYaw = new THREE.Quaternion();
+  for (const { e, geo, y } of built) {
     const mesh = kitView(geo);
-    mesh.position.set(e.x, y, e.z);
-    mesh.rotation.y = e.yaw;
     mesh.name = `showroom:${e.key}`;
+    if (y !== undefined) {
+      mesh.position.set(e.x, y, e.z);
+      mesh.rotation.y = e.yaw;
+    } else {
+      const f = geo.userData.footprint ?? { cx: 0, cz: 0, hx: 2, hz: 2 };
+      const g = sampleGround(e, f);
+      // Least-squares plane h = a + b·lx + c·lz (the grid is symmetric about
+      // the footprint centre, so the terms separate).
+      let sh = 0, sx = 0, sz = 0, sxx = 0, szz = 0;
+      for (const [lx, lz, h] of g) {
+        const dx = lx - f.cx, dz = lz - f.cz;
+        sh += h; sx += dx * h; sz += dz * h; sxx += dx * dx; szz += dz * dz;
+      }
+      const a = sh / g.length, bx = sx / sxx, bz = sz / szz;
+      // How far the ground dips below the plane anywhere under the footprint.
+      let dip = 0;
+      for (const [lx, lz, h] of g) dip = Math.max(dip, a + bx * (lx - f.cx) + bz * (lz - f.cz) - h);
+      // Plane height at the mesh origin (local 0,0), dropped by the dip.
+      const y0 = a - bx * f.cx - bz * f.cz - dip;
+      // Local-frame normal of the plane, turned into the world by the yaw.
+      n.set(-bx, 1, -bz).normalize();
+      qYaw.setFromAxisAngle(up, e.yaw);
+      n.applyQuaternion(qYaw);
+      mesh.quaternion.setFromUnitVectors(up, n).multiply(qYaw);
+      mesh.position.set(e.x, y0, e.z);
+    }
     app.scene.add(mesh);
     placed[e.key] = mesh;
   }

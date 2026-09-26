@@ -46,8 +46,10 @@ function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace = -1 })
   put(buildBox(w + 0.3, 0.26, d + 0.3), [0, h + 0.13, 0], MAT.earth, 0.45 + R() * 0.15);
   put(buildBox(w + 0.32, 0.2, 0.22), [0, h + 0.36, d / 2 + 0.05], MAT.rubble, 0.4);
   put(buildBox(w + 0.32, 0.2, 0.22), [0, h + 0.36, -d / 2 - 0.05], MAT.rubble, 0.4);
-  put(buildBox(0.22, 0.2, d + 0.1), [w / 2 + 0.05, h + 0.36, 0], MAT.rubble, 0.4);
-  put(buildBox(0.22, 0.2, d + 0.1), [-w / 2 - 0.05, h + 0.36, 0], MAT.rubble, 0.4);
+  // The end pieces 3 cm lower and 3 cm inside the long ones' ends: flush
+  // corners z-fought on every roof.
+  put(buildBox(0.22, 0.17, d + 0.1), [w / 2 + 0.02, h + 0.36, 0], MAT.rubble, 0.4);
+  put(buildBox(0.22, 0.17, d + 0.1), [-w / 2 - 0.02, h + 0.36, 0], MAT.rubble, 0.4);
   put(buildBox(0.12, 0.12, 0.7), [w / 2 + 0.4, h + 0.1, (R() - 0.5) * d * 0.6], MAT.timber, 0.3, [0, Math.PI / 2, 0.15]);
   // Beam ends under the eaves, along the long walls: the Chaouia house's tell.
   const nb = Math.max(3, Math.round(w / 0.7));
@@ -61,9 +63,10 @@ function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace = -1 })
   if (R() < 0.45) {
     const lw = 2.2 + R(), ex = (R() < 0.5 ? -1 : 1) * (w / 2 + lw / 2);
     put(buildBox(lw, 1.2, 0.4), [ex, 0.6, -doorFace * (d / 2 - 0.2)], MAT.rubble, 0.45);
-    put(buildBox(0.4, 1.2, d - 0.4), [ex + Math.sign(ex) * (lw / 2 - 0.2), 0.6, 0], MAT.rubble, 0.45);
+    // 5 cm lower and 3 cm inside the front wall's end: equal tops and ends z-fought.
+    put(buildBox(0.4, 1.15, d - 0.46), [ex + Math.sign(ex) * (lw / 2 - 0.23), 0.575, 0.03 * doorFace], MAT.rubble, 0.45);
     for (const pz of [-1, 1]) put(buildBox(0.12, 1.9, 0.12), [ex + Math.sign(ex) * (lw / 2 - 0.2), 0.95, pz * (d / 2 - 0.3)], MAT.timber, 0.3);
-    put(buildBox(lw + 0.3, 0.22, d), [ex, 1.95, 0], MAT.thatch, 0.3 + R() * 0.2, [0, 0, Math.sign(ex) * -0.12]);
+    put(buildBox(lw + 0.22, 0.22, d - 0.06), [ex + Math.sign(ex) * 0.04, 1.95, 0], MAT.thatch, 0.3 + R() * 0.2, [0, 0, Math.sign(ex) * -0.12]);
   }
   // Door: low, dark timber, in a limewashed surround; a sill stone.
   const fz = doorFace * (d / 2 + 0.03);

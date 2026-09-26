@@ -25,6 +25,10 @@ import * as enemyKit from "../v3/render/objects/rtsEnemyKit.js";
 import * as buildables from "../v3/render/objects/rtsBuildables.js";
 import { buildColonialHQ } from "../v3/render/objects/rtsColonial.js";
 import { buildHueyWreck } from "../v3/render/objects/rtsVehicles.js";
+import * as algeria from "../v3/render/objects/rtsAlgeria.js";
+import { buildFrenchPost } from "../v3/render/objects/rtsFrenchPost.js";
+import { buildMechta } from "../v3/render/objects/rtsMechta.js";
+import { buildAlnCamp } from "../v3/render/objects/rtsAlnCamp.js";
 
 export const BAND_LO = -0.02, BAND_HI = 0.06;
 
@@ -83,7 +87,12 @@ all("the firebase", firebase, ["buildFirebasePreviewSet"]);
 // Parts mounted ON something (a carriage, a pit, a man in a hole) — their y = 0 is not the ground.
 all("the enemy kit", enemyKit, ["buildZpuGuns", "buildMortarTube", "buildSpiderMan"]);
 all("buildables", buildables, ["buildGunPitGun", "buildNestGun"]);
+// The Algeria game (alg-rts).
+all("algeria buildables", algeria, algeria.GROUND_BAND_SKIP ?? []);
 console.log("singles");
+check("French post", buildFrenchPost());
+check("mechta", buildMechta());
+check("ALN camp", buildAlnCamp());
 check("colonial HQ", buildColonialHQ());
 check("Huey wreck", buildHueyWreck());
 

@@ -17,7 +17,7 @@
  * The gate faces -Z.
  */
 import * as THREE from "three";
-import { MAT, assemble, bakeContactAO, buildBox, buildOilDrum, buildSandbagRing, buildSandbagWall, rng } from "./rtsParts.js";
+import { MAT, assemble, bakeContactAO, buildBox, buildOilDrum, buildSandbagRing, buildSandbagWall, rng, wirePart } from "./rtsParts.js";
 import { flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
 
 const S = 1.3;
@@ -58,9 +58,12 @@ function archWall(width, height, t, openings) {
  * merlons, loopholes, and the wall-walk inside. Pushes into `parts`.
  * `skip`: [x0, x1] ranges with no wall (the gate).
  */
-function wallRun(parts, R, { len, H, T, rot, place, skip = [] }) {
+function wallRun(parts, R, { len, H, T, rot, place, skip = [], walkDrop = 0 }) {
   const foot = 1.0;                   // rubble course height
-  const walkY = H - 1.25;             // wall-walk surface, inside
+  // Wall-walk surface, inside. `walkDrop`: the side runs sit 3 cm lower, so
+  // their walks never share a top face with the front and back runs' at the
+  // corners.
+  const walkY = H - 1.25 - walkDrop;
   const segs = [];
   let at = -len / 2;
   for (const [a, b] of [...skip].sort((p, q) => p[0] - q[0])) { segs.push([at, a]); at = b; }
@@ -74,7 +77,7 @@ function wallRun(parts, R, { len, H, T, rot, place, skip = [] }) {
     // Whitewashed wall above it. Its foot sits 2 cm INTO the footing (no shared face).
     parts.push(place({ geo: buildBox(w, H - foot + 0.02, T), pos: [cx, foot - 0.02 + (H - foot + 0.02) / 2, 0], mat: MAT.white, tone: 0.38 + R() * 0.1 }, rot));
     // Wall-walk: a stone banquette along the inside face.
-    parts.push(place({ geo: buildBox(w, walkY, 1.0), pos: [cx, walkY / 2, T / 2 + 0.5], mat: MAT.rubble, tone: 0.35 }, rot));
+    parts.push(place({ geo: buildBox(w - 0.06, walkY, 1.0), pos: [cx, walkY / 2, T / 2 + 0.5], mat: MAT.rubble, tone: 0.35 }, rot));   // ends 3 cm in: flush with the footing's ends they z-fought
     // Merlons along the top, square, with the cope a shade darker.
     const n = Math.max(1, Math.round(w / 1.25));
     const pitch = w / n;
@@ -104,8 +107,12 @@ function tower(parts, R, { x, z, W, H, seed }) {
   for (const [dx, dz, ry] of [[0, -1, 0], [0, 1, 0], [-1, 0, Math.PI / 2], [1, 0, Math.PI / 2]]) {
     for (let k = 0; k < n; k++) {
       const off = -W / 2 + pitch * (k + 0.5);
-      const px = x + (dx ? dx * (W / 2 - 0.2) : off), pz = z + (dz ? dz * (W / 2 - 0.2) : off);
-      parts.push({ geo: buildBox(pitch * 0.55, 0.7, 0.4), pos: [px, H + 0.35, pz], rot: [0, ry, 0], mat: MAT.white, tone: 0.6 + R() * 0.08 });
+      // The side rows (±X) sit 4 cm lower and 3 cm further in than the front
+      // and back rows, so the corner merlons never share a face; all start
+      // 1 cm above the roof slab (equal bottoms z-fought).
+      const side = dx !== 0, mh = side ? 0.66 : 0.7, inset = side ? 0.23 : 0.2;
+      const px = x + (dx ? dx * (W / 2 - inset) : off), pz = z + (dz ? dz * (W / 2 - inset) : off);
+      parts.push({ geo: buildBox(pitch * 0.55, mh, 0.4), pos: [px, H + (side ? 0.03 : 0.01) + mh / 2, pz], rot: [0, ry, 0], mat: MAT.white, tone: 0.6 + R() * 0.08 });
     }
   }
   // Roof slab, and a ring of sandbags round a gun on it.
@@ -133,7 +140,7 @@ function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4 }
   parts.push({ geo: buildBox(w + 0.3, 0.2, d + 0.3), pos: [x, h + 0.1, z], mat: MAT.concrete, tone: 0.42 });
   for (const s of [-1, 1]) {
     parts.push({ geo: buildBox(w + 0.3, 0.4, 0.2), pos: [x, h + 0.4, z + s * (d / 2 + 0.05)], mat: MAT.white, tone: 0.58 });
-    parts.push({ geo: buildBox(0.2, 0.4, d + 0.1), pos: [x + s * (w / 2 + 0.05), h + 0.4, z], mat: MAT.white, tone: 0.58 });
+    parts.push({ geo: buildBox(0.2, 0.37, d + 0.1), pos: [x + s * (w / 2 + 0.02), h + 0.405, z], mat: MAT.white, tone: 0.58 });   // inside the long pieces' ends: flush corners z-fought
   }
   // The face with the doors, toward the courtyard (+/-Z by doorSide).
   const fz = z + doorSide * (d / 2 + 0.01);
@@ -150,7 +157,8 @@ function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4 }
       // Shutters folded back, painted (the kit's paint is the army's olive).
       for (const s of [-1, 1]) {
         if (R() < 0.12) continue;
-        parts.push({ geo: buildBox(0.45, 1.1, 0.04), pos: [sx + s * 0.7, 1.75, fz + doorSide * 0.03], mat: MAT.paint, tone: 0.45 + R() * 0.2 });
+        // Narrow enough that neighbouring windows' shutters never meet.
+        parts.push({ geo: buildBox(0.36, 1.1, 0.04), pos: [sx + s * 0.66, 1.75, fz + doorSide * 0.03], mat: MAT.paint, tone: 0.45 + R() * 0.2 });
       }
     }
   }
@@ -177,12 +185,15 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   const runs = [
     { angle: 0, off: [0, 0, -hl + T / 2], skip: [[-gateW / 2 - 0.5, gateW / 2 + 0.5]] },
     { angle: Math.PI, off: [0, 0, hl - T / 2] },
-    { angle: -Math.PI / 2, off: [-hl + T / 2, 0, 0] },
-    { angle: Math.PI / 2, off: [hl - T / 2, 0, 0] },
+    // Left run turned +90 deg so its local +Z (the wall-walk side) points
+    // INTO the courtyard (+X); right run -90. They were swapped: both side
+    // walls had their wall-walk outside.
+    { angle: Math.PI / 2, off: [-hl + T / 2, 0, 0], walkDrop: 0.03 },
+    { angle: -Math.PI / 2, off: [hl - T / 2, 0, 0], walkDrop: 0.03 },
   ];
   for (const r of runs) {
     const place = side(r.angle, r.off);
-    wallRun(parts, R, { len: L - T * 2 + 0.02, H, T, place: (p) => place(p), skip: r.skip });
+    wallRun(parts, R, { len: L - T * 2 + 0.02, H, T, place: (p) => place(p), skip: r.skip, walkDrop: r.walkDrop ?? 0 });
   }
   // Corner piers where the runs meet (the runs stop short of the corners).
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
@@ -199,14 +210,14 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   const gH = 5.4, gW = gateW + 3.2, gD = 1.4;
   const gz = -hl - 0.1;
   parts.push({ geo: archWall(gW, gH, gD, [{ cx: 0, w: gateW, spring: 2.7 }]), pos: [0, 0, gz - 0.4], mat: MAT.white, tone: 0.62 });
-  parts.push({ geo: buildBox(gW + 0.1, 1.0, gD + 0.1), pos: [0, 0.5, gz - 0.4 + gD / 2], mat: MAT.rubble, tone: 0.5 });
+  parts.push({ geo: buildBox(gW + 0.1, 1.04, gD + 0.1), pos: [0, 0.52, gz - 0.4 + gD / 2], mat: MAT.rubble, tone: 0.5 });   // 4 cm over the wall footing: equal tops z-fought
   // Stepped top: the bordj's gate is the one tall thing on the front.
   parts.push({ geo: buildBox(gW * 0.62, 0.9, gD - 0.1), pos: [0, gH + 0.45, gz - 0.4 + gD / 2], mat: MAT.white, tone: 0.64 });
   parts.push({ geo: buildBox(gW * 0.3, 0.6, gD - 0.2), pos: [0, gH + 1.2, gz - 0.4 + gD / 2], mat: MAT.white, tone: 0.66 });
   parts.push({ geo: buildBox(gW + 0.3, 0.16, gD + 0.3), pos: [0, gH, gz - 0.4 + gD / 2], mat: MAT.concrete, tone: 0.55 });
   // Pilasters either side of the arch.
   for (const sx of [-1, 1]) {
-    parts.push({ geo: buildBox(0.5, gH - 1.0, 0.2), pos: [sx * (gateW / 2 + 0.55), 1.0 + (gH - 1.0) / 2, gz - 0.48], mat: MAT.white, tone: 0.7 });
+    parts.push({ geo: buildBox(0.5, gH - 1.08, 0.2), pos: [sx * (gateW / 2 + 0.55), 1.02 + (gH - 1.08) / 2, gz - 0.48], mat: MAT.white, tone: 0.7 });
   }
   // Timber doors, folded open against the passage walls.
   for (const sx of [-1, 1]) {
@@ -219,24 +230,22 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
 
   // ── Inside: the barracks along the back wall, the command post on the left ─
   block(parts, R, { x: 1.5, z: hl - T - 3.4, w: 14, d: 6, h: 3.3, doorSide: -1, doors: 2, windows: 6 });
-  block(parts, R, { x: -hl + T + 3.3, z: 1.0, w: 6, d: 8, h: 3.6, doorSide: 1, doors: 1, windows: 2 });
+  block(parts, R, { x: -hl + T + 3.3, z: -0.4, w: 6, d: 8, h: 3.6, doorSide: 1, doors: 1, windows: 2 });   // clear of the barracks (they overlapped by 0.5 m)
 
   // The radio mast beside the command post: a tapering lattice, guyed.
   {
     const mx = -hl + T + 2.0, mz = 5.8, mH = 14;
+    // Round tubes (wirePart): box legs and bars met end-on and z-fought.
     const legs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
-    for (const [lx, lz] of legs) {
-      const a = new THREE.Vector3(mx + lx * 0.5, 0, mz + lz * 0.5), b = new THREE.Vector3(mx + lx * 0.08, mH, mz + lz * 0.08);
-      const dir = b.clone().sub(a), len = dir.length();
-      const m = new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(0.5), new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize()), new THREE.Vector3(1, 1, 1));
-      parts.push({ geo: buildBox(0.07, len, 0.07), matrix: m, mat: MAT.steel, tone: 0.3 });
-    }
+    const legAt = (lx, lz, y) => { const f = y / mH, h = 0.5 - 0.42 * f; return [mx + lx * h, y, mz + lz * h]; };
+    for (const [lx, lz] of legs) parts.push(wirePart(legAt(lx, lz, 0), legAt(lx, lz, mH), 0.045, { tone: 0.3 }));
     for (let k = 1; k < 7; k++) {
-      const y = (mH * k) / 7, hw = 0.5 - (0.42 * k) / 7;
-      parts.push({ geo: buildBox(hw * 2, 0.05, 0.05), pos: [mx, y, mz - hw], mat: MAT.steel, tone: 0.3 });
-      parts.push({ geo: buildBox(hw * 2, 0.05, 0.05), pos: [mx, y, mz + hw], mat: MAT.steel, tone: 0.3 });
-      parts.push({ geo: buildBox(0.05, 0.05, hw * 2), pos: [mx - hw, y, mz], mat: MAT.steel, tone: 0.3 });
-      parts.push({ geo: buildBox(0.05, 0.05, hw * 2), pos: [mx + hw, y, mz], mat: MAT.steel, tone: 0.3 });
+      const y = (mH * k) / 7, y0 = (mH * (k - 1)) / 7;
+      for (let i = 0; i < 4; i++) {
+        const [ax, az] = legs[i], [bx, bz] = legs[(i + 1) % 4];
+        parts.push(wirePart(legAt(ax, az, y), legAt(bx, bz, y), 0.028, { tone: 0.3 }));                   // girt
+        parts.push(wirePart(legAt(ax, az, y0), legAt(bx, bz, y), 0.022, { tone: 0.35 }));                 // brace
+      }
     }
     parts.push({ geo: buildBox(0.04, 4, 0.04), pos: [mx, mH + 2, mz], mat: MAT.steel, tone: 0.5 });
   }
@@ -268,25 +277,19 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   for (const [[x0, z0], [x1, z1]] of wireRuns) {
     const len = Math.hypot(x1 - x0, z1 - z0);
     const n = Math.max(1, Math.round(len / 3));
-    const ang = Math.atan2(x1 - x0, z1 - z0);
     for (let k = 0; k <= n; k++) {
       const t = k / n;
       parts.push({ geo: buildBox(0.08, 1.3, 0.08), pos: [x0 + (x1 - x0) * t, 0.65, z0 + (z1 - z0) * t], rot: [(R() - 0.5) * 0.08, 0, (R() - 0.5) * 0.08], mat: MAT.steel, tone: 0.35 });
     }
-    for (const y of [0.35, 0.75, 1.15]) {
-      parts.push({ geo: buildBox(0.025, 0.025, len), pos: [(x0 + x1) / 2, y, (z0 + z1) / 2], rot: [0, ang, 0], mat: MAT.steel, tone: 0.45 });
-    }
+    // Strands as round wire (wirePart): box strands z-fought along their length.
+    for (const y of [0.35, 0.75, 1.15]) parts.push(wirePart([x0, y, z0], [x1, y, z1], 0.022));
     // Crossed strands between each pair of pickets: straight wires alone read
     // as a farm fence, the diagonals make it an entanglement.
     for (let k = 0; k < n; k++) {
-      const a = new THREE.Vector3(x0 + ((x1 - x0) * k) / n, 0, z0 + ((z1 - z0) * k) / n);
-      const b = new THREE.Vector3(x0 + ((x1 - x0) * (k + 1)) / n, 0, z0 + ((z1 - z0) * (k + 1)) / n);
-      for (const [ya, yb] of [[0.12, 1.25], [1.25, 0.12]]) {
-        const p = a.clone().setY(ya), q = b.clone().setY(yb);
-        const dir = q.clone().sub(p), l = dir.length();
-        const m = new THREE.Matrix4().compose(p.clone().add(q).multiplyScalar(0.5), new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.normalize()), new THREE.Vector3(1, 1, 1));
-        parts.push({ geo: buildBox(0.022, 0.022, l), matrix: m, mat: MAT.steel, tone: 0.45 });
-      }
+      const ax = x0 + ((x1 - x0) * k) / n, az = z0 + ((z1 - z0) * k) / n;
+      const bx = x0 + ((x1 - x0) * (k + 1)) / n, bz = z0 + ((z1 - z0) * (k + 1)) / n;
+      parts.push(wirePart([ax, 0.12, az], [bx, 1.25, bz], 0.02));
+      parts.push(wirePart([ax, 1.25, az], [bx, 0.12, bz], 0.02));
     }
   }
 
@@ -298,7 +301,7 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   const faceZ = gz - 0.4 - 0.01;
   st.push(stencilPatch("frPosteSign", flatSurface([0, 3.35, faceZ], [0, 0, -1], [-1, 0, 0], 3.4, "frPosteSign"), { lift: 0.01 }));
   st.push(stencilPatch("frTricolore", flatSurface([0, gH + 0.45, faceZ], [0, 0, -1], [-1, 0, 0], 1.25, "frTricolore"), { lift: 0.012 }));
-  st.push(stencilPatch("frSasSign", flatSurface([-hl + T + 3.3, 2.7, 1.0 + 4.02], [0, 0, 1], [1, 0, 0], 1.3, "frSasSign"), { lift: 0.01 }));
+  st.push(stencilPatch("frSasSign", flatSurface([-hl + T + 3.3, 2.7, -0.4 + 4.02], [0, 0, 1], [1, 0, 0], 1.3, "frSasSign"), { lift: 0.01 }));
   // Whitewash fallen off the outer walls and the towers, low down, where damp
   // and knocks take it first: the stone behind shows through.
   {
