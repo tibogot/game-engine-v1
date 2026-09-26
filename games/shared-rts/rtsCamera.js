@@ -245,6 +245,12 @@ export function createRtsCamera({ app } = {}) {
     },
     getFocusY: () => focusY,
     /**
+     * Face the view: `y` radians about Y, 0 = looking +Z (nam's default: its
+     * player starts in the north). A game whose player starts elsewhere turns
+     * the view toward the enemy, away from its own map edge.
+     */
+    setYaw(y) { yaw = y; },
+    /**
      * WHAT THE CAMERA CAN SEE, in metres of ground — the thing every distance
      * in the vegetation actually wants.
      *

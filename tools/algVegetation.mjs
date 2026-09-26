@@ -35,11 +35,10 @@ const dry = args.includes("--dry");
  * by the gate, the hamlet (games/alg-rts/showroom.js). Circles, metres.
  */
 const SITES = [
-  // Every layout site except the oases (their palms ARE the site)…
-  ...LAYOUT.sites.filter((s) => s.kind !== "oasis").map((s) => ({ x: s.x, z: s.z, r: s.r })),
-  // …and the post's vehicle park and helipad (games/alg-rts/showroom.js).
-  { x: 22, z: 102, r: 28 },
-  { x: 72, z: 118, r: 14 },
+  // Every layout site except the oases (their palms ARE the site). The
+  // French base clears a wider ring: its vehicle park and helipad reach
+  // ~60 m out of the gate (games/alg-rts/showroom.js BASE_PARK).
+  ...LAYOUT.sites.filter((s) => s.kind !== "oasis").map((s) => ({ x: s.x, z: s.z, r: s.kind === "french" ? 72 : s.r })),
 ];
 
 const project = await readProject(FILE);

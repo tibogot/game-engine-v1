@@ -8,6 +8,16 @@
 // the Tighanimine massif fills the north-west, its gullies draining south-
 // east into a wide open valley; a long low ridge closes the south-east.
 //
+// THE STARTS ARE ON THE LONG DIAGONAL (your call, 2026-09-26): ALN in the
+// NW corner of the playable area, French in the SE, ~930 m apart, so the
+// whole map is between them. (The first layout had the post near the
+// centre: ~600 m, half the map behind the French unused.)
+//
+// OBJECTIVES are balanced by distance, not mirrored (the terrain is not
+// symmetric, on purpose): one home point each, near points each side, and
+// the rest in a belt across the middle. ALN-leaning ones are in the
+// mountains, French-leaning ones in the valley — the war's own asymmetry.
+//
 // THE SHAPE OF THE FIGHT (asymmetric, French playable):
 //   · the FRENCH hold the valley — the post, the road, the open ground where
 //     their armour and helicopters count;
@@ -21,7 +31,8 @@
 export const LAYOUT = {
   sites: [
     // ── Starts ───────────────────────────────────────────────────────────────
-    { kind: "french", name: "Poste de Tighanimine", x: 40, z: 150, r: 34 },
+    // On the SE ridge bench, 25 m up; the gate faces NW, toward the ALN.
+    { kind: "french", name: "Poste de Tighanimine", x: 305, z: 345, r: 34, yaw: 0.75 },
     { kind: "aln", name: "Katiba camp", x: -350, z: -315, r: 26 },
 
     // ── Objectives (capture points) ─────────────────────────────────────────
@@ -30,7 +41,8 @@ export const LAYOUT = {
     { kind: "pass", name: "Gully mouth west", x: -276, z: -2, r: 16 },
     { kind: "pass", name: "Gully mouth east", x: -78, z: -82, r: 16 },
     { kind: "point", name: "Cedar spring", x: -150, z: -300, r: 16 },
-    { kind: "point", name: "Ridge watch", x: 330, z: 330, r: 16 },
+    { kind: "point", name: "Kef lookout", x: 237, z: -354, r: 16 },
+    { kind: "pass", name: "Col de l'Ouest", x: -275, z: 326, r: 16 },
     { kind: "oasis", name: "Ain el Oued", x: -120, z: 330, r: 22 },
     { kind: "hamlet", name: "Mechta el Oued", x: 270, z: -70, r: 36 },
   ],

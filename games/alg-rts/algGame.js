@@ -12,6 +12,7 @@
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom } from "./showroom.js";
+import { LAYOUT } from "./layout.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -93,6 +94,14 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
   onStatus("Setting up camera…");
   const rtsCamera = createRtsCamera({ app });
   rtsCamera.setMode("rts");
+  // Start over the playable side's base (layout.js).
+  const base = LAYOUT.sites.find((s) => s.kind === "french");
+  if (base) {
+    rtsCamera.focusOn(base.x, base.z);
+    // Look toward the ALN (forward = (sin yaw, cos yaw)), not at our own edge.
+    const aln = LAYOUT.sites.find((s) => s.kind === "aln");
+    if (aln) rtsCamera.setYaw(Math.atan2(aln.x - base.x, aln.z - base.z));
+  }
   app.rtsCamera = rtsCamera;
   app.addPreRenderHook((dt) => rtsCamera.update(dt));
   // C: RTS camera ⇄ free orbit. nam binds this in its dev panel; this game

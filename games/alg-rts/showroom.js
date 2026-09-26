@@ -15,20 +15,39 @@ import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { plantPostFlag } from "./algFlag.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
+import { LAYOUT } from "./layout.js";
 
-/** What to show, and where (world x/z, yaw). Vehicles park by the post's gate. */
+const BASE = LAYOUT.sites.find((s) => s.kind === "french");
+const HAMLETS = LAYOUT.sites.filter((s) => s.kind === "hamlet");
+
+/**
+ * The post's vehicle park and helipad, in the POST'S frame: `lx` to its
+ * right, `lz` forward (out of the gate, which faces the post's local -Z),
+ * `yaw` relative to the post. They follow the post wherever the layout puts it.
+ */
+export const BASE_PARK = [
+  { key: "ebr", build: buildEBR, lx: -8, lz: 44, yaw: 0.5 },
+  { key: "willys", build: buildWillys, lx: 3, lz: 48, yaw: -0.3 },
+  { key: "gmc", build: buildGMC, lx: -24, lz: 34, yaw: 1.2 },
+  { key: "amx13", build: buildAMX13, lx: -24, lz: 54, yaw: 0.4 },
+  { key: "halftrack", build: buildHalfTrack, lx: 16, lz: 58, yaw: -0.2 },
+  { key: "alouette", build: buildAlouette, lx: 36, lz: 26, yaw: 2.0 },
+];
+
+/** Post-local → world (the post's local -Z is its gate). */
+function fromBase(lx, lz) {
+  const c = Math.cos(BASE.yaw), s = Math.sin(BASE.yaw);
+  // Local +X → world (cos, -sin); local -Z (forward) → world (-sin, -cos).
+  return [BASE.x + lx * c - lz * s, BASE.z - lx * s - lz * c];
+}
+
+/** What to show, and where (world x/z, yaw). */
 export const SHOWROOM = [
-  { key: "frenchPost", build: buildFrenchPost, x: 40, z: 150, yaw: 0.35 },
-  { key: "ebr", build: buildEBR, x: 22, z: 108, yaw: 0.35 + 0.5, vehicle: true },
-  { key: "willys", build: buildWillys, x: 30, z: 103, yaw: 0.35 - 0.3, vehicle: true },
-  { key: "gmc", build: buildGMC, x: 12, z: 118, yaw: 0.35 + 1.2, vehicle: true },
-  { key: "alouette", build: buildAlouette, x: 72, z: 118, yaw: 2.4, vehicle: true },
-  { key: "amx13", build: buildAMX13, x: 4, z: 100, yaw: 0.35 + 0.4, vehicle: true },
-  { key: "halftrack", build: buildHalfTrack, x: 38, z: 92, yaw: 0.35 - 0.2, vehicle: true },
-  // The hamlet up the valley from the post.
-  { key: "mechta", build: buildMechta, x: 150, z: 60, yaw: 0.9 },
-  // The second hamlet (layout.js "Mechta el Oued"), smaller, its own houses.
-  { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: 270, z: -70, yaw: -0.4 },
+  { key: "frenchPost", build: buildFrenchPost, x: BASE.x, z: BASE.z, yaw: BASE.yaw },
+  ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true }; }),
+  // The two hamlets (layout.js), each its own houses.
+  { key: "mechta", build: buildMechta, x: HAMLETS[0].x, z: HAMLETS[0].z, yaw: 0.9 },
+  { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: HAMLETS[1].x, z: HAMLETS[1].z, yaw: -0.4 },
 ];
 
 let _glass = null;
@@ -103,7 +122,9 @@ function kitView(geo) {
 function placePlants(app) {
   const pf = new PlacedFoliage({ scene: app.scene });
   pf.setType("canaryPalm", structuredClone(FOLIAGE_PRESETS.canaryPalm));
-  for (const [x, z, scale, seed] of [[26, 126, 1, 17], [40, 130, 0.95, 29]]) {
+  // Either side of the gate, a few metres out (post-local).
+  for (const [lx, lz, scale, seed] of [[-7, 22, 1, 17], [7, 22, 0.95, 29]]) {
+    const [x, z] = fromBase(lx, lz);
     pf.add("canaryPalm", x, app.getWorldHeight(x, z) - 0.05, z, { rotY: seed, scale, seed });
   }
   app.addPreRenderHook(() => {

@@ -166,9 +166,17 @@ Asset follow-ups:
       bed (a guelta). Second hamlet placed. Vegetation re-run: clearings now
       from the layout, nothing on the wadi beds, palms at both oases.
       Map backed up before the carve (scratchpad alg-aures.pre-wadi.v3proj).
-- [ ] **you**: the layout is a proposal — check layout-plan.png. Open
-      questions: is the ALN camp too far (≈ 560 m from the post)? One more
-      French outpost (a SAS post) on the north side of the wadi?
+- [x] **Starts on the long diagonal** (your question, 2026-09-26: "shouldn't
+      they be opposite?"): French post moved to the SE ridge bench (305, 345),
+      25 m up, gate facing NW; ALN stays in the NW massif; ~930 m apart (was
+      ~600 m with the post near the centre). Objectives rebalanced by
+      distance: 4 lean ALN (cedar spring, both gully mouths, new Kef lookout),
+      4 lean French (both oases, both hamlets), 1 middle (new Col de l'Ouest).
+      The post's vehicle park / helipad / gate palms now follow the post
+      (showroom.js BASE_PARK, post-local). The camera starts on the base
+      facing the enemy: new `rtsCamera.setYaw` (shared camera; nam unchanged).
+- [ ] **you**: a second French outpost (SAS post) north of Oued
+      Tighanimine, as a forward base?
 - [ ] **LATER — sandstorm** (your ask, 2026-09-26): a weather event —
       wall of dust rolling in, haze thickening to a brown-out, wind-driven
       dust sheets, the light going orange and flat; gameplay: sight ranges
