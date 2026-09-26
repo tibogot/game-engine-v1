@@ -319,7 +319,7 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
   async function place(type, x, z, opts = {}) {
     const site = findBuildSite(app, x, z, type.radius, opts);
     if (!site) {
-      console.warn(`[rts-v3] no buildable ground for ${type.typeKey} near (${x | 0}, ${z | 0}) — skipped.`);
+      if (!opts.quiet) console.warn(`[rts-v3] no buildable ground for ${type.typeKey} near (${x | 0}, ${z | 0}) — skipped.`);
       return null;
     }
     await prepareSite(app, site.x, site.z, type.radius, site.y);
@@ -459,8 +459,8 @@ export async function createStructures({ app, navGrid, turretCount = 5, resource
       return out;
     },
     /** Boot-time: one enemy structure on a levelled site near (x, z). */
-    async placeEnemy(typeKey, x, z) {
-      return place(STRUCTURE_TYPES[typeKey], x, z, { searchRadius: 30, maxSpread: 4 });
+    async placeEnemy(typeKey, x, z, { quiet = false } = {}) {
+      return place(STRUCTURE_TYPES[typeKey], x, z, { searchRadius: 30, maxSpread: 4, quiet });
     },
     /**
      * IN PLAY: an enemy structure dug in at (x, z) as it stands — no terrain

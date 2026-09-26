@@ -684,6 +684,29 @@ Vietnam, like Apocalypse Now.
       PUBLIC_ENGINE_MODULES. OPEN: the map's own dense coconut palms swallow
       the east wing (cook house, granary) — thin them round the camp, or
       keep it hidden "under the trees"? Your call.
+- [x] **CLIFFS DONE** (your pick): Rock058 (your L3) on the cliff layer for this game
+      (app.setTerrainLayerTextures, not saved to the map; ?cliffs=old = before)
+      + WATER STREAKS and bedding down steep faces (new engine module
+      v3/terrain/cliffStreaks.js, app.setCliffStreaks, off unless a game turns it
+      on). A first version drew hairlines; now wide soft bands. Cost 0.2 ms.
+- [ ] **THE RENDER ERROR** "Cannot read properties of null (reading 'x')" (you saw it
+      more than once, idle): NOT reproduced in 3 loads. The log named only the
+      catch. Now (a) the engine logs the full stack, (b) every pre-render hook runs
+      in its own try (a throwing hook no longer kills the frame), (c) every system
+      in nam's tick is guarded by NAME ("[nam] <system> threw"). When it happens
+      again, the console names the culprit — send me that line.
+- [x] (the question) CLIFFS LOOK FLAT (your question, 2026-09-26). Checked: layer 5 "Cliff Rock"
+      = cliff_rocks_07 WITH normal (1.0), roughness (1.0) and AO (0.8), triplanar,
+      a 6 m tile. Flat because (1) at 120-150 m a 6 m tile's detail is below a
+      pixel: it mips to a flat grey, the normal map with it; (2) the walls are
+      smooth geometry (1 m heightmap); (3) cliff_rocks_07 is a uniform photo;
+      (4) since the afternoon sun, walls facing away from it go near-black.
+      Your "L3" = the editor library's Rock Alt (Rock058), darker blue-grey with
+      rust cracks — keeps more crack contrast (quick live test), but a texture
+      swap alone will not fix (1)-(2). Proposed (waiting on your pick): a big
+      second sample of the rock (~40 m) so relief survives the distance,
+      limestone strata + vertical water streaks on steep ground, Rock058 or
+      Rock028 (matches the new rocks), a little fill on shaded walls.
 - [x] **FAR GRASS COLOUR FIXED** (your note, 2026-09-26; engine,
       v3/render/grass/grassFarTsl.js): past the blades (revo grass draws them
       only 16-44 m out, so at the RTS camera MOST of the grass on screen is this

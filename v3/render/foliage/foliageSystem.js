@@ -105,6 +105,10 @@ export function makeCardTexture(key, anisotropy = 0) {
   const spec = CARD_TEXTURES[key];
   const canvas = document.createElement("canvas");
   canvas.width = spec.w; canvas.height = spec.h;
+  // Its pixels are read back once to build the coverage mips: say so BEFORE
+  // the painter takes a context (a canvas keeps the first one it gives out),
+  // or Chrome warns "Multiple readback operations… willReadFrequently".
+  canvas.getContext("2d", { willReadFrequently: true });
   spec.draw(canvas);
   const opts = { threshold: 0.4, anisotropy, shade: spec.shade === true };
   const tex = coverageMippedTexture(canvas, opts);

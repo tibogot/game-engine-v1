@@ -423,6 +423,18 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     startDeg: NAV_MAX_SLOPE_DEG - 4,
     endDeg: NAV_MAX_SLOPE_DEG,
   });
+  // THE CLIFFS (your pick, 2026-09-26): Rock058 — the editor library's
+  // "Rock Alt", your L3 — on the cliff layer for this game: its big fractured
+  // blocks survive the RTS distance, where cliff_rocks_07 mipped to a smooth
+  // wall. And water streaks + bedding down the steep faces (engine
+  // cliffStreaks.js), the look of wet tropical limestone. ?cliffs=old = before.
+  if (new URLSearchParams(location.search).get("cliffs") !== "old") {
+    const R = "/textures/pbr_materials/Rock058/Rock058_2K-JPG_";
+    app.setTerrainLayerTextures?.(5, { albedo: `${R}Color.jpg`, normal: `${R}NormalGL.jpg`, rough: `${R}Roughness.jpg`, ao: `${R}AmbientOcclusion.jpg` })
+      .catch((e) => console.warn("[cliffs] texture swap failed:", e));
+    app.setCliffStreaks?.({ strength: 0.6 });
+  }
+
   // The grass stops where the rock starts: none on ground units cannot walk,
   // thinning over the same band the cliff paint fades in. nam-valley saved the
   // grass slope rule OFF, and blades stood up the terrace walls.
@@ -611,12 +623,22 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     });
     const tSite = performance.now() - t0;
     let n = 0;
-    for (const p of line.nests) if (await structures.placeEnemy("turret", p.x, p.z)) n++;
+    // A picked spot the builder cannot level falls back to the planner's next
+    // best, quietly (it used to warn and drop the position).
+    const placeFirst = async (key, p) => {
+      for (const q of [p, ...(p.alts ?? [])]) {
+        const s = await structures.placeEnemy(key, q.x, q.z, { quiet: true });
+        if (s) return s;
+      }
+      console.warn(`[enemy line] no buildable ground for a ${key} near (${p.x | 0}, ${p.z | 0}) or its alternatives`);
+      return null;
+    };
+    for (const p of line.nests) if (await placeFirst("turret", p)) n++;
     for (const [i, p] of line.towers.entries()) {
-      const s = await structures.placeEnemy("tower", p.x, p.z);
+      const s = await placeFirst("tower", p);
       if (s) { s.facing = (i * 2.3 + 0.4) % (Math.PI * 2); n++; }
     }
-    for (const p of line.zpus) if (await structures.placeEnemy("zpu", p.x, p.z)) n++;
+    for (const p of line.zpus) if (await placeFirst("zpu", p)) n++;
     // Spider holes are dug in as the ground stands: a levelled disc in the
     // jungle is exactly the tell a hidden thing must not have.
     for (const p of line.spiderHoles) { const s = structures.addNow("spiderHole", p.x, p.z); s.deploy = 1; n++; }
@@ -1171,55 +1193,64 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const frameStats = { tickMs: 0 };
   app.frameStats = frameStats;
 
+  // Every system in its own guard: one that throws (a "Cannot read
+  // properties of null (reading 'x')" killed the WHOLE frame's work, with no
+  // name) is logged once with its name and stack, and the rest still runs.
+  const _tickErred = new Set();
+  const guard = (name, fn) => {
+    try { fn(); } catch (err) {
+      if (!_tickErred.has(name)) { _tickErred.add(name); console.error(`[nam] ${name} threw:`, err, "\n", err?.stack ?? ""); }
+    }
+  };
   const tick = (dt) => {
     const tickStart = performance.now();
     renderTime += dt;
-    rtsCamera.update(dt);                 // input, at the real frame rate
-    app.setFoliageThin?.(foliageKeepAt(rtsCamera.getView().zoomT));
-    sim.advance(dt, simStep);
-    fogOfWar.update(dt);                  // vision grid → GPU shroud texture
-    resourceRenderer.sync();              // only rewrites when a node visibly drains
-    healthBars.begin();                   // both renderers push their bars into it
-    selectionRings.begin();               // unitRenderer pushes a ring per selected unit
-    projectiles.drawWarnings(selectionRings); // where a shell in the air is going to land
-    selectionFrames.begin();              // square buildings push corner brackets
-    unitRenderer.sync(dt, app.camera);
-    structuresRenderer.sync(dt, app.camera);
-    buildingRenderer.sync(dt, app.camera);
-    requisitionRenderer.sync(dt);
-    healthBars.commit();
-    selectionRings.commit();
-    selectionFrames.commit();
-    fx.update(dt, app.camera);            // muzzle / impact / explosion
-    smoke.render(renderTime, app.environment?.getLightDirection?.());
-    fireballs.render(renderTime);         // napalm fireballs: the flipbook clock
-    updatePlantedPlants(app, app.camera, app.environment?.getLightDirection?.());
-    app.ricePaddies?.crop?.update(app.camera);   // the rice plants round the camera
-    app.ricePaddies?.reflections?.update();       // their water's reflections (post)
-    app.buffalo?.update(dt);                      // the water buffalo's clips
-    for (const h of app.wildHerds ?? []) h.update(dt);   // sambar, muntjac
-    app.chickens?.update(dt);                     // the hamlet's hens
+    guard("rtsCamera", () => { rtsCamera.update(dt); });                 // input, at the real frame rate
+    guard("setFoliageThin", () => { app.setFoliageThin?.(foliageKeepAt(rtsCamera.getView().zoomT)); });
+    guard("sim", () => { sim.advance(dt, simStep); });
+    guard("fogOfWar", () => { fogOfWar.update(dt); });                  // vision grid → GPU shroud texture
+    guard("resourceRenderer", () => { resourceRenderer.sync(); });              // only rewrites when a node visibly drains
+    guard("healthBars", () => { healthBars.begin(); });                   // both renderers push their bars into it
+    guard("selectionRings", () => { selectionRings.begin(); });               // unitRenderer pushes a ring per selected unit
+    guard("projectiles", () => { projectiles.drawWarnings(selectionRings); }); // where a shell in the air is going to land
+    guard("selectionFrames", () => { selectionFrames.begin(); });              // square buildings push corner brackets
+    guard("unitRenderer", () => { unitRenderer.sync(dt, app.camera); });
+    guard("structuresRenderer", () => { structuresRenderer.sync(dt, app.camera); });
+    guard("buildingRenderer", () => { buildingRenderer.sync(dt, app.camera); });
+    guard("requisitionRenderer", () => { requisitionRenderer.sync(dt); });
+    guard("healthBars", () => { healthBars.commit(); });
+    guard("selectionRings", () => { selectionRings.commit(); });
+    guard("selectionFrames", () => { selectionFrames.commit(); });
+    guard("fx", () => { fx.update(dt, app.camera); });            // muzzle / impact / explosion
+    guard("smoke", () => { smoke.render(renderTime, app.environment?.getLightDirection?.()); });
+    guard("fireballs", () => { fireballs.render(renderTime); });         // napalm fireballs: the flipbook clock
+    guard("updatePlantedPlants", () => { updatePlantedPlants(app, app.camera, app.environment?.getLightDirection?.()); });
+    guard("ricePaddies", () => { app.ricePaddies?.crop?.update(app.camera); });   // the rice plants round the camera
+    guard("ricePaddies", () => { app.ricePaddies?.reflections?.update(); });       // their water's reflections (post)
+    guard("buffalo", () => { app.buffalo?.update(dt); });                      // the water buffalo's clips
+    guard("wildHerds", () => { for (const h of app.wildHerds ?? []) h.update(dt); });   // sambar, muntjac
+    guard("chickens", () => { app.chickens?.update(dt); });                     // the hamlet's hens
     // Point the overlay at the selection until the pointer has moved, so
     // holding V before touching the mouse reveals the ground under the men
     // rather than a patch of the map's centre.
-    {
+    guard("cover fallback", () => {
       const sel = app.selection?.selected ?? [];
       const u = sel.find((e) => !e.isStructure) ?? sel[0];
       if (u?.position) coverOverlay.setFallback(u.position.x, u.position.z);
-    }
-    coverOverlay.update(dt);              // hold V — decides nothing, only draws
-    baseFlag?.update(dt);                 // HQ flag cloth sim
-    app.enemyCampFlag?.update(dt, app.camera); // the NLF flag (skipped off screen)
-    commandCard.tick();                   // live production bar + affordability
-    unitBar.tick();                       // a single selected unit's health
-    resourceHud.update(resources, units, HARVEST ? null : requisition); // supplies · points / harvesters
-    waveHud.update(dt, waves, match);     // wave counter, match objective, win/lose
-    minimap.draw();
-    grassTrails.step();                   // men and tracks bend the grass they cross
-    stress.update(dt);                    // dev: continuous effect spawners, if running
-    birds.update(dt);                     // transit flocks, flushes
-    sounds.update();                      // loops re-aimed at the camera
-    app.fogBanks?.update();               // the mist's warm side follows the sun
+    });
+    guard("coverOverlay", () => { coverOverlay.update(dt); });              // hold V — decides nothing, only draws
+    guard("baseFlag", () => { baseFlag?.update(dt); });                 // HQ flag cloth sim
+    guard("enemyCampFlag", () => { app.enemyCampFlag?.update(dt, app.camera); }); // the NLF flag (skipped off screen)
+    guard("commandCard", () => { commandCard.tick(); });                   // live production bar + affordability
+    guard("unitBar", () => { unitBar.tick(); });                       // a single selected unit's health
+    guard("resourceHud", () => { resourceHud.update(resources, units, HARVEST ? null : requisition); }); // supplies · points / harvesters
+    guard("waveHud", () => { waveHud.update(dt, waves, match); });     // wave counter, match objective, win/lose
+    guard("minimap", () => { minimap.draw(); });
+    guard("grassTrails", () => { grassTrails.step(); });                   // men and tracks bend the grass they cross
+    guard("stress", () => { stress.update(dt); });                    // dev: continuous effect spawners, if running
+    guard("birds", () => { birds.update(dt); });                     // transit flocks, flushes
+    guard("sounds", () => { sounds.update(); });                      // loops re-aimed at the camera
+    guard("fogBanks", () => { app.fogBanks?.update(); });               // the mist's warm side follows the sun
     frameStats.tickMs = performance.now() - tickStart;
   };
   app.addPreRenderHook(tick);

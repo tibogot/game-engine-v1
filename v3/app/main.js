@@ -55,6 +55,7 @@ import {
   pickSplatmapFile,
 } from "../io/splatmapIO.js";
 import { SPLAT_RES } from "../terrain/splatMap.js";
+import { cliffStreakUniforms } from "../terrain/cliffStreaks.js";
 import { createSnowSystem } from "../terrain/snowSystem.js";
 import { SnowMap, SNOW_MAP_RES } from "../terrain/snowMap.js";
 import { encodeProjectFile, decodeProjectFile, isProjectFile, pickProjectFile } from "../io/projectIO.js";
@@ -4750,7 +4751,17 @@ export async function startV3App(opts = {}) {
 
     try {
       renderer.setRenderTarget(null);
-      for (const hook of _preRenderHooks) hook(dt);
+      // Each hook on its own: one that throws must not skip the render (the
+      // whole frame used to stop, with an error that named no culprit), and it
+      // says which hook it was — once per hook, with the stack.
+      for (const hook of _preRenderHooks) {
+        try { hook(dt); } catch (err) {
+          if (!hook._erred) {
+            hook._erred = true;
+            console.error(`[V3] Pre-render hook "${hook.name || "(anonymous)"}" threw:`, err, "\n", err?.stack ?? "");
+          }
+        }
+      }
       // After the hooks, which is where a game moves its camera: culling
       // against last frame's view pops the river in a frame late at the edge.
       riverV2System?.cullForCamera(camera);
@@ -4769,7 +4780,9 @@ export async function startV3App(opts = {}) {
       }
     } catch (err) {
       if (++_loopErrors === 1) {
-        console.error("[V3] Render error:", err);
+        // The stack, spelled out: the console showed only this catch's line,
+        // which says nothing about what threw.
+        console.error("[V3] Render error:", err, "\n", err?.stack ?? "(no stack)");
         const vp = viewport;
         if (vp && !vp.querySelector("[data-v3-loop-error]")) {
           const msg = document.createElement("div");
@@ -12334,6 +12347,16 @@ export async function startV3App(opts = {}) {
      * @param o.mossScale  size of a moss patch, 1/m
      * @param o.bottomTint what the base of a rock fades toward
      */
+    /**
+     * A terrain paint layer's textures for THIS session (a game's look; the
+     * project keeps its own): { albedo, normal, rough, ao } URLs, any subset.
+     */
+    async setTerrainLayerTextures(slot, { albedo, normal, rough, ao } = {}) {
+      if (albedo) await textureLib.loadAlbedoFromUrl(slot, albedo);
+      if (normal) await textureLib.loadNormalFromUrl(slot, normal);
+      if (rough) await textureLib.loadRoughnessFromUrl(slot, rough);
+      if (ao) await textureLib.loadAOFromUrl(slot, ao);
+    },
     setRockPalette({ tint, moss, mossColor, mossScale, bottomTint } = {}) {
       const u = rockShadeUniforms;
       if (tint != null) u.uTint.value.set(tint);
@@ -12445,6 +12468,14 @@ export async function startV3App(opts = {}) {
      * layers 1-4, slice 1 RGB = layers 5-7; the base layer is what is left),
      * nearest splat texel. For a game that must keep off a painted track.
      */
+    /**
+     * Dark water streaks and faint bedding down steep terrain faces
+     * (v3/terrain/cliffStreaks.js): { strength 0-1 (0 = off), steepStart,
+     * steepEnd (normal.y), width, bedding }. Runtime, not saved.
+     */
+    setCliffStreaks(p = {}) {
+      for (const [k, v] of Object.entries(p)) if (Number.isFinite(v) && cliffStreakUniforms[k]) cliffStreakUniforms[k].value = v;
+    },
     samplePaintWeights: (x, z) => {
       const half = WORLD_SIZE * 0.5;
       const px = Math.floor(((x + half) / WORLD_SIZE) * SPLAT_RES);

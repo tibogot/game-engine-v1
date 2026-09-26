@@ -1335,7 +1335,11 @@ export function createDevPanel({
     app?.fog?.setHeight?.({ enabled: !!on, mode: fogMode.value });
     showFogRows();
   };
-  applyFog(fogState.enabled !== false);
+  // OFF at boot (your call, 2026-09-26): the height fog changes the look a
+  // lot, so the light and textures are judged without it. Its settings are
+  // untouched; tick the box to bring it back. ?heightfog=1 boots with it on.
+  applyFog(typeof location !== "undefined" && new URLSearchParams(location.search).get("heightfog") === "1"
+    ? fogState.enabled !== false : false);
   fogBtn.addEventListener("click", () => applyFog(!fogBtn.classList.contains("checked")));
   fogMode.addEventListener("change", () => applyFog(fogBtn.classList.contains("checked")));
 

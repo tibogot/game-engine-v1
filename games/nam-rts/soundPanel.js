@@ -27,7 +27,7 @@ export function buildSoundPanel(el, sounds) {
     const row = document.createElement("div");
     row.className = "prop-row";
     row.innerHTML = `<span class="prop-label">${label}</span><div class="prop-value">
-      <input type="range" min="0" max="${max * 100}" step="5" value="${Math.round((audio.settings[key] ?? 1) * 100)}" />
+      <input type="range" name="snd-${key}" id="dv-snd-${key}" aria-label="${label}" min="0" max="${max * 100}" step="5" value="${Math.round((audio.settings[key] ?? 1) * 100)}" />
       <span class="prop-num">${Math.round((audio.settings[key] ?? 1) * 100)}</span></div>`;
     const inp = row.querySelector("input"), num = row.querySelector(".prop-num");
     inp.addEventListener("input", () => { audio.set(key, inp.value / 100); num.textContent = inp.value; });
@@ -78,7 +78,7 @@ export function buildSoundPanel(el, sounds) {
         `<option value="${i}" ${(S.use ?? [0]).includes(i) ? "selected" : ""}>${i + 1}. ${esc(f.t).slice(0, 34)} — ${esc(f.by)}${f.clip > 100 ? " !" : ""}</option>`).join("");
       row.innerHTML = `<span class="prop-label" title="${name}">${LABELS[name] ?? name}</span>
         <div class="prop-value" style="gap:4px">
-          <select class="prop-select" style="flex:1;min-width:0">${opts}</select>
+          <select class="prop-select" name="snd-slot-${name}" id="dv-snd-slot-${name}" aria-label="${LABELS[name] ?? name}" style="flex:1;min-width:0">${opts}</select>
           <button class="action-btn" type="button" title="The recording alone" style="width:auto;padding:2px 7px">▶</button>
           <button class="action-btn" type="button" title="At the camera focus, through the mix" style="width:auto;padding:2px 7px">◎</button>
         </div>`;

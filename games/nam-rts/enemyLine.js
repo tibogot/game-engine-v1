@@ -163,7 +163,11 @@ export function siteEnemyLine(app, { navGrid, playerHQ, enemyHQ, points = [], pa
         if (sc > bestS) { bestS = sc; best = c; }
       }
       if (!best) break;
-      out.push({ x: best.x, z: best.z }); picked.push(best);
+      // The next-best spots too, for when the builder cannot level this one
+      // (a tower was silently dropped: "no buildable ground near (258, 261)").
+      const alts = cands.filter((c) => c !== best && filter(c) && free(c, gap))
+        .sort((p, q) => scoreOf[key](q) - scoreOf[key](p)).slice(0, 6).map((c) => ({ x: c.x, z: c.z }));
+      out.push({ x: best.x, z: best.z, alts }); picked.push(best);
       for (const [i] of best.pit) covered[i] += 1;
       if (key === "tower") for (const [i] of best.tower) covered[i] += 1;
     }

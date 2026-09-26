@@ -97,4 +97,12 @@ export function buildFogBanksPanel(el, fog, { rtsCamera = null } = {}) {
   reset.textContent = "Defaults (forget my settings)";
   reset.addEventListener("click", () => { fog.reset(); buildFogBanksPanel(el, fog, { rtsCamera }); });
   el.append(reset);
+  // Every field named after its row's label (Chrome flags form fields with
+  // neither an id nor a name — accessibility and autofill).
+  el.querySelectorAll("input, select").forEach((f, i) => {
+    if (f.id || f.name) return;
+    const label = f.closest(".prop-row")?.querySelector(".prop-label")?.textContent?.trim() || "field";
+    f.name = `fogbank-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${i}`;
+    f.setAttribute("aria-label", label);
+  });
 }

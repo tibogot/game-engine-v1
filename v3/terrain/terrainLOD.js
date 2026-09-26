@@ -36,6 +36,7 @@ import {
 } from "../../v2/core/legacy/tileMaterial.js";
 import { gridSurface, flatSurface } from "../render/materials/gridMaterial.js";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
+import { applyCliffStreaks } from "./cliffStreaks.js";
 
 setGridTextureUrl("/textures/grid.png");
 
@@ -577,6 +578,10 @@ function createLODMaterial({
     // because it is the ground's own material, not something the water does to
     // it — and it applies whether or not that stretch is submerged.
     if (riverSand && F.riverSand) col.assign(riverSand.apply(col));
+
+    // Water streaks and bedding down steep faces (cliffStreaks.js) — off
+    // unless a game switches them on; one If on a uniform.
+    col.assign(applyCliffStreaks(col, wxzV, displacedY, nrmGeom));
 
     // Distant grass fields: past the last blade ring the ground takes the
     // blades' average colour (grassFarTsl.js). Under the flower tint, so
