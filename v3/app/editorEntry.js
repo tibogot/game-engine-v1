@@ -5,7 +5,15 @@ import { startV3App } from "./main.js";
 
 // The editor restores a project's sky and light on load; games opt in.
 // editor: editor input, camera, panels and chrome. A game boots without it.
-startV3App({ projectWorldLook: true, editor: true }).then((app) => {
+// splatFeatures: paint with the ground the game draws — nam-rts compiles
+// top-3 layers per pixel + near/far tiling (splatOverlayTsl SPLAT_FEATURES),
+// and painting under the classic blend judged a slightly different ground.
+// `?topk=0` on the editor URL brings the classic path back for an A/B.
+startV3App({
+  projectWorldLook: true,
+  editor: true,
+  splatFeatures: { topK: 3, farBlend: true },
+}).then((app) => {
   // Console/debug access to the engine handle (same object games receive).
   window.__v3app = app;
 }).catch((err) => {

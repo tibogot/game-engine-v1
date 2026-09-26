@@ -1981,7 +1981,9 @@ tuned). Anything below is ADDED next to it.
       (p90 50), top-3 33.7-34.0 (p90 33.5), top-3+far 34.9-35.1. LOOK: with
       far on, the road reads clods and pebbles at play zoom where classic is
       flat red; no top-3 seams seen at the clearing.
-      **GAME DEFAULT since 2026-09-24** (your call; `?topk=0` = classic). NEXT: a
+      **GAME DEFAULT since 2026-09-24** (your call; `?topk=0` = classic), and the
+      EDITOR too since 2026-09-26 (editorEntry.js) — paint what the game draws.
+      NEXT (parked by you 2026-09-26, "another day"): a
       separate FAR texture per layer (aerial sets like rocky_terrain_02) as
       extra array slices (no new sampler bindings — the terrain sits at 16).
 - [~] **LOAD TIME** (your ask 2026-09-24: every change means a reload, so
