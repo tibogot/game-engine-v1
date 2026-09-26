@@ -256,15 +256,23 @@ Everything else below is in its section.
 
 ## BRIDGES — your note 2026-09-26 (LATER — "don't code anything now")
 
-- [ ] **Too narrow for vehicles**: the decks don't take a jeep / M113 / truck.
-      Rebuild wide enough for two-way vehicle traffic (and check the nav
-      carve — bridges carve nav by type name `/bridge/i`, and a span is measured
-      at DECK height, see bridgeLandings.js).
-- [ ] **They don't read Vietnam at all**: it's the old bridge from another game.
-      Replace with period bridges — e.g. a timber trestle / plank bridge, a
-      French-era steel truss or concrete span on the main road, a bamboo/rope
-      footbridge on side streams, maybe a pontoon (US engineers, M4T6) —
-      TALK FIRST about which, where.
+- [x] **REBUILT as Vietnam bridges, 8 m vehicle decks** (your pick 2026-09-26):
+      a DOUBLE-DOUBLE BAILEY on the northern crossing (olive lattice panels two
+      high, overhead bracing — one storey beside an 8 m deck read as a hand
+      rail), a TIMBER TRESTLE on the southern one (log pile bents down to the
+      real riverbed, plank deck, wheel tracks, rails), and a NEW third crossing
+      half way between: a bamboo CAU KHI (monkey bridge) on crossed X-legs,
+      INFANTRY ONLY (navGrid foot-only cells; paths say {foot}; vehicles and
+      mixed groups route round it). Engine kit: v3/render/objects/rtsBridges.js;
+      game: namBridges.js (plan → nav/landings/decks; old props hidden).
+      Placed plants keep off bridges (a pandanus grew up through the Bailey).
+      Deck rules: on/off a deck's side only where deck and ground are level
+      (0.65 m), nobody walks beside a deck where the ground falls away (0.5 m).
+      TEST: 48 cases (3 bridges x 2 ways x 4 approaches x infantry + jeeps):
+      0 failed, 0 samples under/beside a deck, worst step 0.66 m, no jeep on
+      the footbridge. Cost: within noise (-0.33 ms, noise 1.2). Your look next.
+- [ ] Later (your idea list): blowable bridges an engineer can rebuild (CoH),
+      a pontoon (M4T6) as a buildable crossing.
 - [x] **Units cross it WRONG** — FIXED 2026-09-26. MEASURED: a squad sent at
       an angle walked the bank BESIDE the deck (3-4 m off its line, up to 2.6 m
       below it, under the arch), then stepped in sideways and jumped +2-7 m in

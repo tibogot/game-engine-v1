@@ -29,6 +29,15 @@ export const PLANTED = {
 
 export function isPlanted(kind) { return kind in PLANTED; }
 
+/** Is (x, z) on a planned bridge (namBridges.js), its ends, or just beside it? */
+function onBridge(app, x, z) {
+  for (const b of app.namBridges ?? []) {
+    const rx = x - b.x, rz = z - b.z;
+    if (Math.abs(rx * b.ax + rz * b.az) <= b.half + 6 && Math.abs(-rx * b.az + rz * b.ax) <= b.halfWidth + 3) return true;
+  }
+  return false;
+}
+
 function ensure(app) {
   if (app.placedFoliage) return app.placedFoliage;
   const pf = new PlacedFoliage({ scene: app.scene });
@@ -45,6 +54,9 @@ function ensure(app) {
 export function plant(app, kind, x, z, { rotY = 0, scale = 1, seed } = {}) {
   const def = PLANTED[kind];
   if (!def) throw new Error(`placedPlants: unknown kind "${kind}"`);
+  // Never on a bridge or its approach: a pandanus "on the river's edge" came
+  // up through the Bailey's deck, and a trunk's nav footprint would shut it.
+  if (onBridge(app, x, z)) return false;
   const pf = ensure(app);
   if (def.clear) app.clearVegetation?.(x, z, def.clear + 1, { grass: def.clear });
   const y = (app.getWorldHeight?.(x, z) ?? 0) - 0.05;

@@ -301,10 +301,12 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     const nav = app.navGrid;
     const shared = [];
     const pathFor = (u, slot) => {
-      if (u.isAir || !nav?.findPath || nav.isBlockedAtWorld(slot.x, slot.z)) return null;
-      let c = shared.find((s) => Math.hypot(s.x - u.position.x, s.z - u.position.z) < 15);
+      // Infantry and vehicles never share a path: a footbridge is open to one only.
+      const foot = !!u.type?.foot;
+      if (u.isAir || !nav?.findPath || nav.isBlockedAtWorld(slot.x, slot.z, foot)) return null;
+      let c = shared.find((s) => s.foot === foot && Math.hypot(s.x - u.position.x, s.z - u.position.z) < 15);
       if (!c) {
-        c = { x: u.position.x, z: u.position.z, path: nav.findPath(u.position.x, u.position.z, hit.point.x, hit.point.z) };
+        c = { x: u.position.x, z: u.position.z, foot, path: nav.findPath(u.position.x, u.position.z, hit.point.x, hit.point.z, { foot }) };
         shared.push(c);
       }
       return c.path?.length ? [...c.path.slice(0, -1), { x: slot.x, z: slot.z }] : null;

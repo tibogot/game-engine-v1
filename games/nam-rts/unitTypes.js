@@ -288,6 +288,7 @@ UNIT_TYPES.soldier = {
   name: "Soldier",
   // logic
   isAir: false,
+  foot: true,        // infantry: may cross a FOOTBRIDGE (navGrid foot-only cells)
   hover: 0,
   speed: 11,
   // Personal space, not the body: a 2.3 m man is ~0.8 m wide, and a metre of

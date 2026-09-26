@@ -427,20 +427,23 @@ export function createEnemyAI({
       return;
     }
     const near = m.filter((u) => dist(u.position, c) < 15);
+    // One shared path for the squad: infantry rules only if EVERY man is on
+    // foot (a squad with a vehicle takes the road it can use).
+    const allFoot = m.every((u) => !!u.type?.foot);
     s.pathJobs.push(navGrid.requestPath(c.x, c.z, x, z, (shared) => {
       m.forEach((u, i) => {
         if (!u.alive || !near.includes(u)) return;
         const d = dests[i];
         if (shared?.length) u.orderTo(d.x, d.z, [...shared.slice(0, -1), { x: d.x, z: d.z }]);
       });
-    }));
+    }, { foot: allFoot }));
     // Stragglers: a search of their own each, queued too.
     m.forEach((u, i) => {
       if (near.includes(u)) return;
       const d = dests[i];
       s.pathJobs.push(navGrid.requestPath(u.position.x, u.position.z, d.x, d.z, (path) => {
         if (u.alive && path?.length) u.orderTo(d.x, d.z, path);
-      }));
+      }, { foot: !!u.type?.foot }));
     });
   }
   function sendTo(s, x, z, spread = 5) {
@@ -918,7 +921,7 @@ export function createEnemyAI({
     if (!navGrid?.requestPath) { u.orderTo(x, z); return; }
     navGrid.requestPath(u.position.x, u.position.z, x, z, (path) => {
       if (u.alive) u.orderTo(x, z, path?.length ? path : null);
-    });
+    }, { foot: !!u.type?.foot });
   }
   /** The point it is running to: the one it holds nearest YOUR HQ — the front. */
   function forwardHeld() {

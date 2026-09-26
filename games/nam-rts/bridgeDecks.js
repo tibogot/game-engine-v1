@@ -31,6 +31,13 @@ import { listBridges } from "./bridgeLandings.js";
 const HALF_WIDTH = 2.9;
 /** The last metres at each end where stepping on/off from the side is allowed. */
 const END_ZONE = 1.5;
+/**
+ * Beside a deck a unit may stand at most STEP below it, and it may step on or
+ * off from the side at most STEP_ON. STEP_ON > STEP, with room: equal, a man
+ * standing exactly STEP below it (the boundary) could go neither on nor on
+ * forward — stuck for good (measured, every run, same spot).
+ */
+const STEP = 0.5, STEP_ON = 0.65;
 /** The anchors stand this far out past each end, on the landing. */
 const END_OUT = 2.5;
 /** Path cells this near a deck (past its ends / to its sides) are routed through it. */
@@ -46,7 +53,7 @@ export function measureBridgeDecks(app) {
   const down = new THREE.Vector3(0, -1, 0);
   const bridges = listBridges(app);
   let bi = 0;
-  for (let i = 0; i < (ps?.instances?.length ?? 0); i++) {
+  for (let i = 0; !app.namBridges && i < (ps?.instances?.length ?? 0); i++) {
     const type = ps.types?.[ps.instances[i].typeIdx];
     if (!type || !/bridge/i.test(type.name || "")) continue;
     const b = bridges[bi++];
@@ -79,7 +86,17 @@ export function measureBridgeDecks(app) {
         if (!Number.isNaN(v)) { ys[k] = v; break; }
       }
     }
-    decks.push({ ...b, n, ys });
+    decks.push({ ...b, n, ys, hw: HALF_WIDTH });
+  }
+  // The PLANNED bridges (namBridges.js) know their own deck: no raycasts.
+  if (app.namBridges) {
+    decks.length = 0;
+    for (const b of app.namBridges) {
+      const n = Math.max(2, Math.ceil(b.half * 2));
+      const ys = new Float32Array(n + 1);
+      for (let k = 0; k <= n; k++) ys[k] = b.deckAt(-b.half + (2 * b.half * k) / n);
+      decks.push({ ...b, n, ys, hw: b.halfWidth });
+    }
   }
 
   /** Deck Y under (x, z), or null when (x, z) is not on a deck. */
@@ -89,7 +106,7 @@ export function measureBridgeDecks(app) {
       const along = rx * d.ax + rz * d.az;
       if (Math.abs(along) > d.half) continue;
       const across = -rx * d.az + rz * d.ax;
-      if (Math.abs(across) > HALF_WIDTH) continue;
+      if (Math.abs(across) > d.hw) continue;
       const f = ((along + d.half) / (2 * d.half)) * d.n;
       const k = Math.min(d.n - 1, Math.floor(f));
       return d.ys[k] + (d.ys[k + 1] - d.ys[k]) * (f - k);
@@ -101,21 +118,77 @@ export function measureBridgeDecks(app) {
     const rx = x - d.x, rz = z - d.z;
     return { along: rx * d.ax + rz * d.az, across: -rx * d.az + rz * d.ax };
   };
-  const onBand = (d, l) => Math.abs(l.along) <= d.half && Math.abs(l.across) <= HALF_WIDTH;
+  const onBand = (d, l) => Math.abs(l.along) <= d.half && Math.abs(l.across) <= d.hw;
 
   /**
-   * True when a move from (ox, oz) to (nx, nz) goes through a deck's SIDE:
-   * onto it or off it anywhere but its ends (the last END_ZONE m each end).
+   * True when a move from (ox, oz) to (nx, nz) goes through a deck's SIDE
+   * where deck and ground are not level (onto it from below, off it into a
+   * drop), or walks in beside it where the ground falls away under it.
    */
   function sideWall(ox, oz, nx, nz) {
     for (const d of decks) {
       const o = local(d, ox, oz), n = local(d, nx, nz);
       const onO = onBand(d, o), onN = onBand(d, n);
-      if (onO === onN) continue;
-      const at = onN ? n : o;                        // where it crosses the edge
-      if (Math.abs(at.along) < d.half - END_ZONE) return true;
+      if (onO !== onN) {
+        // On or off over the edge: only where the deck and the ground beside
+        // it are level — a step up from under it is the pop, a step off it
+        // mid-span is a fall. (At the ends they meet, so that is where.)
+        if (!app.getWorldHeight) { if (Math.abs((onN ? n : o).along) < d.half - END_ZONE) return true; continue; }
+        // …except climbing BACK ON from beside it: nobody walks in there (below),
+        // but the crowd's overlap push (forceNudge, which must always succeed)
+        // can shove a man off a 1.6 m walkway, and he must not be stranded.
+        if (onN && low(d, o, ox, oz)) continue;
+        const from = onO ? deckY(d, o.along) : app.getWorldHeight(ox, oz);
+        const to = onN ? deckY(d, n.along) : app.getWorldHeight(nx, nz);
+        if (Math.abs(to - from) > STEP_ON) return true;
+        continue;
+      }
+      // BESIDE the deck, where the ground falls away under it (the water, the
+      // bank under the arch): nobody walks in. The nav corridor is whole 4 m
+      // cells — far wider than a 1.6 m footbridge — and a man jostled off the
+      // walkway at its end waded the river alongside it (measured 2026-09-26).
+      // Walking OUT of there is allowed, so no one is ever trapped in it.
+      // (By HEIGHT at both ends, not by place: men entered the strip at the
+      // end, where the bank is level with the walkway, and walked on beside it
+      // as the bank fell away under the arch.)
+      if (!onN && app.getWorldHeight && low(d, n, nx, nz) && !low(d, o, ox, oz)) return true;
     }
     return false;
+  }
+  /**
+   * The overlap push, kept ON a deck: a unit on a deck pushed toward its side
+   * stops at the edge (the push along the deck is kept). The crowd's
+   * forceNudge must always succeed, and on a 1.6 m walkway it was shoving men
+   * into the river — who then climbed back on in a 2-4 m pop. Returns the
+   * clamped point, or null when (ox, oz) is not on a deck's span.
+   */
+  function keepOnDeck(ox, oz, nx, nz) {
+    for (const d of decks) {
+      const o = local(d, ox, oz);
+      if (!onBand(d, o) || Math.abs(o.along) >= d.half - END_ZONE) continue;
+      const n = local(d, nx, nz);
+      if (Math.abs(n.across) <= d.hw) return null;
+      const c = Math.sign(n.across) * d.hw * 0.98;
+      return { x: d.x + d.ax * n.along - d.az * c, z: d.z + d.az * n.along + d.ax * c };
+    }
+    return null;
+  }
+  const BESIDE = 3;
+  /**
+   * Beside the deck and more than a STEP under it. The SAME step as getting on:
+   * with 0.7 here and 0.5 there, men stood beside the walkway 0.6 m below it —
+   * allowed to be there, not allowed up, stuck for good (measured).
+   */
+  function low(d, l, x, z) {
+    return inBeside(d, l) && app.getWorldHeight(x, z) < deckY(d, l.along) - STEP;
+  }
+  function inBeside(d, l) {
+    return Math.abs(l.along) < d.half - END_ZONE && Math.abs(l.across) > d.hw && Math.abs(l.across) < d.hw + BESIDE;
+  }
+  function deckY(d, along) {
+    const f = Math.max(0, Math.min(d.n, ((along + d.half) / (2 * d.half)) * d.n));
+    const k = Math.min(d.n - 1, Math.floor(f));
+    return d.ys[k] + (d.ys[k + 1] - d.ys[k]) * (f - k);
   }
 
   /**
@@ -152,12 +225,12 @@ export function measureBridgeDecks(app) {
   function lanePull(x, z) {
     for (const d of decks) {
       const l = local(d, x, z);
-      if (Math.abs(l.along) > d.half + END_OUT + 2 || Math.abs(l.across) > HALF_WIDTH + 3) continue;
-      const k = -Math.max(-1, Math.min(1, l.across / HALF_WIDTH)) * 0.8;
+      if (Math.abs(l.along) > d.half + END_OUT + 2 || Math.abs(l.across) > d.hw + 3) continue;
+      const k = -Math.max(-1, Math.min(1, l.across / d.hw)) * 0.8;
       return { x: -d.az * k, z: d.ax * k };
     }
     return null;
   }
 
-  return { decks, heightAt, sideWall, anchorPath, lanePull };
+  return { decks, heightAt, sideWall, anchorPath, lanePull, keepOnDeck };
 }

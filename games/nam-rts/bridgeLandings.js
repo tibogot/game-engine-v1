@@ -15,11 +15,19 @@
 // every boot, like the camp berm — the map keeps its saved ground.
 
 const RAMP_MAX = Math.tan((16 * Math.PI) / 180);  // well inside the 34° nav limit
-const HALF_WIDTH = 4;     // the deck is 5.5 m wide
+const HALF_WIDTH = 4;     // the old deck was 5.5 m wide (the planned bridges carry their own)
 const SHOULDER = 9;       // eased back into the ground over this much
 
-/** Every bridge prop: its centre, span axis, half-length and deck height. */
+/**
+ * Every bridge: the planned ones (namBridges.js, app.namBridges) once there is
+ * a plan, else the map's bridge props. { x, z, y, ax, az, half, halfWidth? }.
+ */
 export function listBridges(app) {
+  return app.namBridges ?? listBridgeProps(app);
+}
+
+/** The map's bridge props: centre, span axis, half-length, deck height, prop index. */
+export function listBridgeProps(app) {
   const ps = app.propStore;
   const out = [];
   if (!ps?.instances) return out;
@@ -34,6 +42,7 @@ export function listBridges(app) {
       x: inst.px, z: inst.pz, y: inst.py,
       ax: Math.cos(r), az: -Math.sin(r),               // local +X (the span) in world
       half: Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) * (inst.sx ?? 1),
+      propIdx: i,
     });
   }
   return out;
@@ -58,12 +67,13 @@ export async function gradeBridgeLandings(app) {
       // Start a metre under the deck's end so the ramp meets the abutment.
       const from = { x: ex - b.ax * side, z: ez - b.az * side, y: b.y };
       const to = { x: ex + b.ax * side * L, z: ez + b.az * side * L, y: gy };
-      await app.gradeRamp(from, to, { halfWidth: HALF_WIDTH, shoulder: SHOULDER });
+      await app.gradeRamp(from, to, { halfWidth: (b.halfWidth ?? HALF_WIDTH - 1) + 1, shoulder: SHOULDER });
       ramps.push({ from, to });
     }
   }
   // Nothing may stand on a ramp: rocks from the map, and the jungle.
   for (const { from, to } of ramps) {
+    // (the jungle and rocks go off a ramp as wide as the widest deck, plus room)
     const dx = to.x - from.x, dz = to.z - from.z, L2 = dx * dx + dz * dz || 1;
     for (let i = (ps?.instances?.length ?? 0) - 1; i >= 0; i--) {
       const inst = ps.instances[i];

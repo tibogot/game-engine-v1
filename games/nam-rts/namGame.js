@@ -132,6 +132,7 @@ import { installBuildingAprons } from "./buildingAprons.js";
 import { placeCampLayout } from "./campLayout.js";
 import { gradeBridgeLandings } from "./bridgeLandings.js";
 import { measureBridgeDecks } from "./bridgeDecks.js";
+import { planNamBridges, buildNamBridges } from "./namBridges.js";
 import { createAbilities } from "./abilities.js";
 import { createAbilityTargeting } from "./abilityTargeting.js";
 import { createCoverOverlay } from "./coverOverlay.js";
@@ -371,6 +372,11 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // Nav grid — built once the world is loaded from terrain slope + lakes +
   // props + trees, so ground units path around steep terrain, water, and
   // obstacles. Toggle the debug overlay (N) to see blocked cells.
+  // THE BRIDGES (namBridges.js): a Bailey, a trestle and a bamboo footbridge,
+  // PLANNED before the nav grid carves them (their widths, the foot-only
+  // crossing); built further down, once the landings have graded the ground.
+  try { app.namBridges = planNamBridges(app); } catch (e) { console.warn("[bridges] plan failed:", e); app.namBridges = null; }
+
   onStatus("Building navigation…");
   const navGrid = createNavGrid({ app });
   app.navGrid = navGrid;
@@ -1639,6 +1645,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   try { await placed.reassertPads(); } catch (e) { console.warn("[placed] pad re-level failed:", e); }
   // …and the decks themselves get a height, so units cross ON the bridge
   // instead of walking the riverbed under it (bridgeDecks.js).
+  try { if (app.namBridges) app.bridgeMeshes = buildNamBridges(app, app.namBridges); }
+  catch (e) { console.warn("[bridges] build failed:", e); }
   try {
     const bridgeDecks = measureBridgeDecks(app);
     app.bridgeDecks = bridgeDecks;

@@ -41,7 +41,14 @@ export function createNavGrid({
 
   const idx = (cx, cz) => cz * cols + cx;
   const inBounds = (cx, cz) => cx >= 0 && cz >= 0 && cx < cols && cz < rows;
-  const isBlocked = (cx, cz) => !inBounds(cx, cz) || blocked[idx(cx, cz)] === 1;
+  // A cell is 0 open, 1 blocked, or 2 FOOT-ONLY (a footbridge over water:
+  // infantry cross, vehicles don't). Every query runs under a rule set —
+  // footRules true for infantry — and anything that doesn't say gets VEHICLE
+  // rules, the safe default. (Code that tests `=== 1` directly reads 2 as open:
+  // the cells only exist on a footbridge, and every path query goes through wall().)
+  let footRules = false;
+  const wall = (i) => blocked[i] === 1 || (!footRules && blocked[i] === 2);
+  const isBlocked = (cx, cz) => !inBounds(cx, cz) || wall(idx(cx, cz));
 
   const worldToCell = (wx, wz) => ({
     cx: THREE.MathUtils.clamp(Math.floor((wx + half) / cell), 0, cols - 1),
@@ -87,7 +94,7 @@ export function createNavGrid({
 
   // Clear an oriented rectangle (bridge deck) back to walkable. World→local uses
   // the transpose of three.js's Y-rotation so a long/narrow deck maps correctly.
-  function carveOrientedRect(wx, wz, halfX, halfZ, ry) {
+  function carveOrientedRect(wx, wz, halfX, halfZ, ry, footOnly = false) {
     const cos = Math.cos(ry), sin = Math.sin(ry);
     const rad = Math.hypot(halfX, halfZ);
     const min = worldToCell(wx - rad, wz - rad);
@@ -98,7 +105,11 @@ export function createNavGrid({
         const dx = c.x - wx, dz = c.z - wz;
         const lx = cos * dx - sin * dz;
         const lz = sin * dx + cos * dz;
-        if (Math.abs(lx) <= halfX && Math.abs(lz) <= halfZ) blocked[idx(cx, cz)] = 0;
+        // A footbridge opens only what was shut (the water) and opens it to feet.
+        if (Math.abs(lx) <= halfX && Math.abs(lz) <= halfZ) {
+          const i = idx(cx, cz);
+          blocked[i] = footOnly ? (blocked[i] === 1 ? 2 : blocked[i]) : 0;
+        }
       }
     }
   }
@@ -149,6 +160,17 @@ export function createNavGrid({
   // the manager instead. Imported bridge models are static and keep theirs.
   const _boxSize = new THREE.Vector3();
   function carveBridges() {
+    // The PLANNED bridges (namBridges.js) carry their own width; a footbridge
+    // opens its water to infantry only. A narrow deck still opens a corridor
+    // of whole cells: at least three quarters of a cell each side of its line,
+    // or a diagonal deck leaves a chain of cells touching only at corners —
+    // which the pathfinder (no corner-cutting) cannot use.
+    if (app.namBridges) {
+      for (const b of app.namBridges) {
+        carveOrientedRect(b.x, b.z, b.half + 1, Math.max(b.halfWidth, cell * 0.75), Math.atan2(-b.az, b.ax), b.footOnly);
+      }
+      return;
+    }
     const ps = app.propStore;
     if (!ps?.instances) return;
     for (let i = 0; i < ps.instances.length; i++) {
@@ -355,7 +377,7 @@ export function createNavGrid({
     const stamp = new Uint32Array(N);
     const closed = new Uint32Array(N);
     const open = new MinHeap(4096);
-    let gen = 0, goalI = -1, gx = 0, gz = 0, tx = 0, tz = 0, sx0 = 0, sz0 = 0;
+    let gen = 0, goalI = -1, gx = 0, gz = 0, tx = 0, tz = 0, sx0 = 0, sz0 = 0, foot = false;
     // OCTILE distance — the true free-ground cost on an 8-way grid, tighter
     // than the straight line — with a 0.1% nudge toward the goal to break the
     // wide plateaus of equal cost it makes (octile ALONE was measured slower:
@@ -368,7 +390,9 @@ export function createNavGrid({
       /** Cells expanded by the last run(). */
       pops: 0,
       /** Set up a search. Returns {path} when it is already answered (no ground, same cell), else null. */
-      begin(sx, sz, x1, z1) {
+      begin(sx, sz, x1, z1, onFoot = false) {
+        foot = onFoot;
+        footRules = foot;
         const start = nearestOpen(sx, sz);
         const goal = nearestOpen(x1, z1);
         if (!start || !goal) return { path: null };
@@ -384,6 +408,7 @@ export function createNavGrid({
       },
       /** Expand up to `maxPops` cells: undefined = not finished yet; else the path, or null when there is none. */
       run(maxPops = Infinity) {
+        footRules = foot;                   // a queued search resumes under its own rules
         let n = 0;
         while (open.size) {
           if (n >= maxPops) { search.pops = n; return undefined; }
@@ -399,9 +424,9 @@ export function createNavGrid({
             const nx = ccx + dx, nz = ccz + dz;
             if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) continue;
             const ni = nz * cols + nx;
-            if (blocked[ni] === 1) continue;
+            if (wall(ni)) continue;
             // No corner-cutting: both orthogonal neighbours of a diagonal step open.
-            if (cost > 1 && (blocked[ccz * cols + nx] === 1 || blocked[nz * cols + ccx] === 1)) continue;
+            if (cost > 1 && (wall(ccz * cols + nx) || wall(nz * cols + ccx))) continue;
             if (closed[ni] === gen) continue;
             const tentative = gCur + cost;
             if (stamp[ni] !== gen || tentative < gScore[ni]) {
@@ -421,8 +446,9 @@ export function createNavGrid({
 
   const now = createSearch();
   /** A path, found now. The player's orders use this: a click is answered at once. */
-  function findPath(sx, sz, tx, tz) {
-    const b = now.begin(sx, sz, tx, tz);
+  /** `{ foot }`: an infantry path (may use footbridges). Default: vehicle rules. */
+  function findPath(sx, sz, tx, tz, { foot = false } = {}) {
+    const b = now.begin(sx, sz, tx, tz, foot);
     return b ? b.path : now.run();
   }
 
@@ -436,8 +462,8 @@ export function createNavGrid({
   let queued = null;     // the search under way
   let slow = null;       // its scratch, made on first use
   /** Ask for a path; `cb(path | null)` is called from pumpPaths. Returns a job with cancel(). */
-  function requestPath(sx, sz, tx, tz, cb) {
-    const job = { sx, sz, tx, tz, cb, cancelled: false, cancel() { job.cancelled = true; } };
+  function requestPath(sx, sz, tx, tz, cb, { foot = false } = {}) {
+    const job = { sx, sz, tx, tz, cb, foot, cancelled: false, cancel() { job.cancelled = true; } };
     queue.push(job);
     return job;
   }
@@ -450,7 +476,7 @@ export function createNavGrid({
         const job = queue.shift();
         if (!job) return;
         if (job.cancelled) continue;
-        const b = slow.begin(job.sx, job.sz, job.tx, job.tz);
+        const b = slow.begin(job.sx, job.sz, job.tx, job.tz, job.foot);
         budget -= 16;                        // nearestOpen's own work, roughly
         if (b) { job.cb(b.path); continue; }
         queued = job;
@@ -589,6 +615,7 @@ export function createNavGrid({
   /** Can a ground unit at (ax, az) walk to (bx, bz)? Both snapped to open ground first, as findPath does. */
   function sameRegion(ax, az, bx, bz) {
     if (regionsDirty) labelRegions();
+    footRules = false;
     const a = nearestOpen(ax, az), b = nearestOpen(bx, bz);
     if (!a || !b) return false;
     return region[idx(a.cx, a.cz)] === region[idx(b.cx, b.cz)];
@@ -607,13 +634,15 @@ export function createNavGrid({
     /** Searches waiting or under way (dev readout). */
     get queuedPaths() { return queue.length + (queued ? 1 : 0); },
     sameRegion,
-    isBlockedAtWorld: (wx, wz) => { const c = worldToCell(wx, wz); return isBlocked(c.cx, c.cz); },
+    /** `foot`: under infantry rules (a footbridge is open). Default: vehicle rules. */
+    isBlockedAtWorld: (wx, wz, foot = false) => { footRules = foot; const c = worldToCell(wx, wz); return isBlocked(c.cx, c.cz); },
     /**
      * Nearest walkable world point. Returns the point UNCHANGED when it's
      * already open — snapping to the cell centre would collapse several
      * distinct spawn points onto one spot (cells are metres wide).
      */
-    nearestOpenWorld: (wx, wz) => {
+    nearestOpenWorld: (wx, wz, foot = false) => {
+      footRules = foot;
       const c0 = worldToCell(wx, wz);
       if (!isBlocked(c0.cx, c0.cz)) return { x: wx, z: wz };
       const c = nearestOpen(wx, wz);
@@ -647,7 +676,7 @@ export function createNavGrid({
     }),
     removeFootprint: (f) => { const i = footprints.indexOf(f); if (i >= 0) footprints.splice(i, 1); },
     /** Straight-line walkability between two world points (waypoint lookahead). */
-    hasLOS: (ax, az, bx, bz) => hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }),
+    hasLOS: (ax, az, bx, bz, { foot = false } = {}) => { footRules = foot; return hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }); },
     setDebug,
     toggleDebug,
   };

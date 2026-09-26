@@ -77,7 +77,8 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     : app.getWorldHeight ? app.getWorldHeight(gx, gz) : 0);
   // …and a bridge deck has side walls: on and off only at its ends
   // (bridgeDecks.sideWall; `pos` is where the move starts from).
-  const blocked = (bx, bz) => !type.isAir && (!!navGrid?.isBlockedAtWorld(bx, bz)
+  const foot = !!type.foot;   // infantry: footbridges are open to it (navGrid)
+  const blocked = (bx, bz) => !type.isAir && (!!navGrid?.isBlockedAtWorld(bx, bz, foot)
     || !!app.bridgeDecks?.sideWall(pos.x, pos.z, bx, bz));
   const inBlocked = () => blocked(pos.x, pos.z);
 
@@ -274,7 +275,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     orderTo(tx, tz, shared = null) {
       if (type.isAir || !navGrid) { unit.moveTo(tx, tz); return; }
       goal.set(tx, 0, tz); hasGoal = true;
-      const path = shared ?? navGrid.findPath(pos.x, pos.z, tx, tz);
+      const path = shared ?? navGrid.findPath(pos.x, pos.z, tx, tz, { foot });
       if (path?.length) {
         waypoints.length = 0; waypoints.push(...path);
         arrived = false; stuckT = 0; repathCd = 0; bestTgtDist = Infinity; escalation = 0;
@@ -309,6 +310,9 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
      * inside another unit forever.
      */
     forceNudge(dx, dz) {
+      // Never off a bridge deck mid-span (bridgeDecks.keepOnDeck): along it only.
+      const k = !type.isAir ? app.bridgeDecks?.keepOnDeck?.(pos.x, pos.z, pos.x + dx, pos.z + dz) : null;
+      if (k) { dx = k.x - pos.x; dz = k.z - pos.z; }
       pos.x += dx; pos.z += dz;
       if (arrived) target.copy(pos);
     },
@@ -362,7 +366,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       // wants to make is into blocked ground, so it never moves and never
       // re-plans.
       if (!type.isAir && navGrid && inBlocked()) {
-        const open = navGrid.nearestOpenWorld(pos.x, pos.z);
+        const open = navGrid.nearestOpenWorld(pos.x, pos.z, foot);
         const ex = open.x - pos.x, ez = open.z - pos.z;
         const el = Math.hypot(ex, ez);
         if (el > 1e-3) {
@@ -373,7 +377,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
         }
         // Re-plan from the open ground we're heading to.
         if (hasGoal && repathCd <= 0) {
-          const path = navGrid.findPath(pos.x, pos.z, goal.x, goal.z);
+          const path = navGrid.findPath(pos.x, pos.z, goal.x, goal.z, { foot });
           if (path?.length) { waypoints.length = 0; waypoints.push(...path); arrived = false; }
           repathCd = 0.5;
         }
@@ -402,7 +406,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       // that bank, under the arch — the very thing the anchor is there to stop.
       let skips = 2; // capped — LOS marches the grid, keep it cheap per frame
       while (skips-- > 0 && waypoints.length > 1 && !waypoints[0].anchor && navGrid?.hasLOS?.(
-        pos.x, pos.z, waypoints[1].x, waypoints[1].z,
+        pos.x, pos.z, waypoints[1].x, waypoints[1].z, { foot },
       )) {
         waypoints.shift();
         target.set(waypoints[0].x, 0, waypoints[0].z);
@@ -515,7 +519,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
           switch (escalation) {
             case 0:
               if (canRepath) {
-                const path = navGrid.findPath(pos.x, pos.z, goal.x, goal.z);
+                const path = navGrid.findPath(pos.x, pos.z, goal.x, goal.z, { foot });
                 if (path?.length) { waypoints.length = 0; waypoints.push(...path); }
                 else unit.stop();          // genuinely unreachable — don't grind
                 repathCd = 0.8;
@@ -597,7 +601,7 @@ export function createUnits({
       let x = o.x + gx * gap;
       let z = o.z + gz * gap;
       // Ground units must not spawn in a lake or on a cliff.
-      if (!type.isAir && navGrid) ({ x, z } = navGrid.nearestOpenWorld(x, z));
+      if (!type.isAir && navGrid) ({ x, z } = navGrid.nearestOpenWorld(x, z, !!type.foot));
       units.push(makeUnit(app, type, navGrid, x, z, near));
     }
   }
@@ -696,7 +700,7 @@ export function createUnits({
       const type = UNIT_TYPES[typeKey];
       if (!type) return null;
       let px = x, pz = z;
-      if (snap && !type.isAir && navGrid) ({ x: px, z: pz } = navGrid.nearestOpenWorld(x, z));
+      if (snap && !type.isAir && navGrid) ({ x: px, z: pz } = navGrid.nearestOpenWorld(x, z, !!type.foot));
       const u = makeUnit(app, type, navGrid, px, pz, near, team);
       units.push(u);
       onSpawn(u);
