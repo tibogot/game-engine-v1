@@ -684,6 +684,20 @@ Vietnam, like Apocalypse Now.
       PUBLIC_ENGINE_MODULES. OPEN: the map's own dense coconut palms swallow
       the east wing (cook house, granary) — thin them round the camp, or
       keep it hidden "under the trees"? Your call.
+- [ ] **A FLAKY TEST SUITE**: twice on 2026-09-26 npm test said 195/196, then 7
+      reruns were all green; the failing suite's name was not captured. Next
+      time: npm test | grep -A8 '^FAIL' to name it.
+- [x] **CAMP LIVED IN** (2026-09-26, games/nam-rts/enemyCampDressing.js,
+      ?campdress=0 = before): trampled compound (swept-earth decals, grass
+      cleared) under every shed and the forecourt; paths worn from the
+      forecourt's EDGE, wandering, to each building (a first starburst from
+      one point read as drawn); trees thinned inside ~40 m (the palms had
+      swallowed the east wing); CONCERTINA wire on pickets in an arc across
+      the front, broken on the track, water, steep ground and round every
+      position; a captured M35 stripped on its blocks with crates, ammunition
+      along the résidence's arcade. MEASURED: all decals + wire on the camp
+      view 0.56 ms. STILL OPEN from the list: arms-cleaning bench, bomb-crater
+      latrine, POW pit with grating, buried-jar cache.
 - [ ] **Fill their base** (the résidence is bare next to our camp). An NVA/VC
       base camp, not a firebase: cook house with a Dien Bien Phu smokeless
       stove (the trench that hides the smoke), rice store, a bamboo-and-thatch

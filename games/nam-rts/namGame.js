@@ -99,6 +99,7 @@ import { sitePaddies, buildRicePaddies } from "./ricePaddies.js";
 import { placeBuffalo } from "./buffalo.js";
 import { createWildHerd, loadAnimal } from "./wildAnimals.js";
 import { applyNamRocks, clearKarstGround } from "./namRocks.js";
+import { dressEnemyCamp } from "./enemyCampDressing.js";
 import { createChickenFlock } from "./chickenFlock.js";
 import { createFogBanks, siteFogBanks } from "./fogBanks.js";
 import { buildFogBanksPanel } from "./fogBanksPanel.js";
@@ -1268,6 +1269,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       const first = placed.pieces.length;
       const n = await placeEnemyCamp(app, placed);
       henSites.push({ pieces: placed.pieces.slice(first), count: 10 });
+      app.enemyCampSlice = { first, last: placed.pieces.length };
       enemyCampFlag = createEnemyCampFlag({ app, structures });
       console.log(`[enemy camp] ${n} pieces`);
     } catch (e) {
@@ -1363,6 +1365,16 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // water reflections (paddyReflections.js), which read the scene before any
   // mist lies over it. Identity until the paddies exist.
   const preFog = (color, ctx) => (app.ricePaddies?.reflections ? app.ricePaddies.reflections.node(color, ctx) : color);
+
+  // The Front's camp LIVED IN (enemyCampDressing.js): trampled compound and
+  // paths, the trees thinned, concertina wire, a stripped captured truck,
+  // ammunition. After the canopy and palms are painted. ?campdress=0 = without.
+  if (app.enemyCampSlice && new URLSearchParams(location.search).get("campdress") !== "0") {
+    try {
+      const d = await dressEnemyCamp(app, placed, app.enemyCampSlice);
+      console.log(`[enemy camp] dressed: ${d?.yards} ground patches, ${d?.wire} wire runs`);
+    } catch (e) { console.warn("[enemy camp] dressing failed:", e); }
+  }
 
   // RICE PADDIES (ricePaddies.js): terraces cut into the best open hillside
   // near the hamlet, a patchwork of flooded / young / ripe / ploughed paddies.
