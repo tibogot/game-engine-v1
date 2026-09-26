@@ -684,6 +684,12 @@ Vietnam, like Apocalypse Now.
       PUBLIC_ENGINE_MODULES. OPEN: the map's own dense coconut palms swallow
       the east wing (cook house, granary) — thin them round the camp, or
       keep it hidden "under the trees"? Your call.
+- [x] **ANIMALS ACROSS THE MAP** (your ask 2026-09-26: only saw the paddy buffalo):
+      30 BUFFALO (5 at the paddies, 7 in two groups by the hamlet, 6 in two
+      groups below Kurtz's temple, 6 pairs on open meadows; each group's patch
+      grazed clear) and 44 DEER (7 sambar stags, 21 hinds, 16 muntjac in 14
+      places; the old 110 m-from-anything rule left only 5 on the whole map).
+      MEASURED all animals: GPU 0.36 ms (noise 0.11), CPU 0.11 ms.
 - [ ] **A FLAKY TEST SUITE**: twice on 2026-09-26 npm test said 195/196, then 7
       reruns were all green; the failing suite's name was not captured. Next
       time: npm test | grep -A8 '^FAIL' to name it.

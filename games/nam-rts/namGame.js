@@ -1405,8 +1405,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   }
 
   // WATER BUFFALO (buffalo.js), one GPU crowd draw for the herd: three wading
-  // in flooded paddies, two grazing the grassed rim, three on the pasture by
-  // the hamlet. ?buffalo=0 = without.
+  // in flooded paddies, two grazing the grassed rim, groups at the hamlet and
+  // at Kurtz's temple, pairs on open meadows. ?buffalo=0 = without.
   if (app.ricePaddies && new URLSearchParams(location.search).get("buffalo") !== "0") {
     try {
       const pd = app.ricePaddies, s0 = pd.site, spots = [];
@@ -1425,30 +1425,46 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
           : (qx, qz) => pd.grassAt(qx, qz);
         spots.push({ x, z, heightAt });
       }
-      // The PASTURE: open, dry, gentle ground 25-70 m off the hamlet, clear of
-      // its pieces; each buffalo keeps within 12 m of where it started.
-      const hamlet = hamletSitesFor(boot.name)[0];
-      const village = henSites[0]?.pieces ?? [];
+      // GRAZING GROUPS elsewhere (your ask, 2026-09-26: "more buffalo — at
+      // Kurtz's place, in the village"): open, dry, gentle ground clear of
+      // every placed piece and structure; each buffalo keeps within 12 m of
+      // where it started; the group's patch is grazed (bushes and tall plants
+      // gone, the grass stays).
+      const blockers = [
+        ...placed.pieces.map(({ fp }) => ({ x: fp.px, z: fp.pz, r: Math.hypot(fp.hx, fp.hz) + 3 })),
+        ...(structures?.list ?? []).filter((q) => q.alive).map((q) => ({ x: q.position.x, z: q.position.z, r: 14 })),
+      ];
       const pasture = (x, z) => {
+        if (Math.abs(x) > 495 || Math.abs(z) > 495) return false;
         if ((app.getWaterLevelAt?.(x, z) ?? -Infinity) > app.getWorldHeight(x, z) - 0.3) return false;
-        if (app.getWorldNormal(x, z).y < 0.96) return false;
+        if (app.getWorldNormal(x, z).y < 0.95) return false;
         const f = app.jungleField;
-        if (f && f.open(x, z) * f.forest(x, z) > 0.2) return false;
+        if (f && f.open(x, z) * f.forest(x, z) > 0.25) return false;
         if (app.navGrid?.isBlockedAtWorld?.(x, z)) return false;
-        return !village.some(({ fp }) => Math.hypot(x - fp.px, z - fp.pz) < Math.hypot(fp.hx, fp.hz) + 3);
+        if (pd.inBlock?.(x, z)) return false;
+        return !blockers.some((q) => (q.x - x) ** 2 + (q.z - z) ** 2 < q.r * q.r);
       };
-      for (let i = 0; hamlet && i < 4000 && spots.length < 8; i++) {
-        const a = rnd() * Math.PI * 2, r = 25 + rnd() * 45;
-        const x = hamlet.x + Math.cos(a) * r, z = hamlet.z + Math.sin(a) * r;
-        if (!pasture(x, z) || spots.some((q) => Math.hypot(q.x - x, q.z - z) < 7)) continue;
-        // The herd grazes together: after the first, within 20 m of it.
-        const lead = spots[5];
-        if (lead && Math.hypot(lead.x - x, lead.z - z) > 20) continue;
-        const cx = x, cz = z;
-        spots.push({ x, z, heightAt: (qx, qz) => (Math.hypot(qx - cx, qz - cz) < 12 && pasture(qx, qz) ? app.getWorldHeight(qx, qz) : null) });
-        // Grazed: the bushes, ferns and tall plants go, the grass stays.
-        app.clearVegetation?.(cx, cz, 13, { edge: 4 });
-      }
+      const group = (cx0, cz0, rMin, rMax, n) => {
+        let lead = null, got = 0;
+        for (let i = 0; i < 3000 && got < n; i++) {
+          const a = rnd() * Math.PI * 2, r = lead ? 3 + rnd() * 14 : rMin + rnd() * (rMax - rMin);
+          const c = lead ?? { x: cx0, z: cz0 };
+          const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
+          if (!pasture(x, z) || spots.some((q) => Math.hypot(q.x - x, q.z - z) < 6)) continue;
+          if (!lead) lead = { x, z };
+          const hx = x, hz = z;
+          spots.push({ x, z, heightAt: (qx, qz) => (Math.hypot(qx - hx, qz - hz) < 12 && pasture(qx, qz) ? app.getWorldHeight(qx, qz) : null) });
+          app.clearVegetation?.(x, z, 9, { edge: 4 });
+          got++;
+        }
+        return got;
+      };
+      const hamlet = hamletSitesFor(boot.name)[0];
+      const temple = templeSitesFor(boot.name)[0];
+      if (hamlet) { group(hamlet.x, hamlet.z, 20, 55, 4); group(hamlet.x, hamlet.z, 30, 80, 3); }
+      if (temple) { group(temple.x, temple.z, 30, 80, 4); group(temple.x, temple.z, 40, 100, 2); }
+      // And pairs out on open meadows across the map, a lone herder's beasts.
+      for (let k = 0; k < 6; k++) group((rnd() - 0.5) * 800, (rnd() - 0.5) * 800, 0, 60, 2);
       app.buffalo = await placeBuffalo(app, spots);
       console.log(`[buffalo] ${spots.length} at ${spots.map((q) => `(${q.x | 0}, ${q.z | 0})`).join(" ")}`);
     } catch (e) { console.warn("[buffalo] failed:", e); }
@@ -1472,18 +1488,19 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
         if (app.ricePaddies?.inBlock?.(x, z)) return null;
         return y;
       };
-      // A quiet edge: jungle fringe, open enough to see them, 110 m from any
-      // structure and 90 m from a hamlet.
-      const quiet = (x, z) => canStand(x, z) != null && f.fringe(x, z) > 0.15 && f.open(x, z) > 0.5
-        && (app.sampleFoliageDensity?.(x, z) ?? 0) < 0.15 && (app.sampleTallPlantDensity?.(x, z) ?? 0) < 0.1
-        && !built.some((q) => (q.x - x) ** 2 + (q.z - z) ** 2 < 110 * 110)
-        && !hamlets.some((q) => (q.x - x) ** 2 + (q.z - z) ** 2 < 90 * 90);
+      // A quiet edge: jungle fringe, open enough to see them, 60 m from any
+      // structure and 70 m from a hamlet (110 / 90 left only 5 places on the
+      // whole map — you never met one).
+      const quiet = (x, z) => canStand(x, z) != null && f.fringe(x, z) > 0.1 && f.open(x, z) > 0.5
+        && (app.sampleTallPlantDensity?.(x, z) ?? 0) < 0.2
+        && !built.some((q) => (q.x - x) ** 2 + (q.z - z) ** 2 < 60 * 60)
+        && !hamlets.some((q) => (q.x - x) ** 2 + (q.z - z) ** 2 < 70 * 70);
       let seed = 2718;
       const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
       const centres = [];
-      for (let i = 0; i < 8000 && centres.length < 5; i++) {
-        const x = (rnd() - 0.5) * 900, z = (rnd() - 0.5) * 900;
-        if (!quiet(x, z) || centres.some((c) => Math.hypot(c.x - x, c.z - z) < 140)) continue;
+      for (let i = 0; i < 20000 && centres.length < 14; i++) {
+        const x = (rnd() - 0.5) * 920, z = (rnd() - 0.5) * 920;
+        if (!quiet(x, z) || centres.some((c) => Math.hypot(c.x - x, c.z - z) < 90)) continue;
         centres.push({ x, z });
         // A glade: grazed, the ferns and bananas thinned round them.
         app.clearVegetation?.(x, z, 10, { edge: 4 });
@@ -1497,14 +1514,15 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
         }
         return out;
       };
-      // Three sambar groups (a stag, three or four hinds), two muntjac pairs.
+      // Sambar groups (a stag, three or four hinds) at every other place,
+      // muntjac pairs and threes at the rest.
       const stagSpots = [], hindSpots = [], muntjacSpots = [];
       centres.forEach((c, i) => {
-        if (i < 3) {
+        if (i % 2 === 0) {
           stagSpots.push(...around(c, 1, 4).map((q) => ({ ...q, height: 2.3 + rnd() * 0.2 })));
           hindSpots.push(...around(c, 3 + (i % 2), 9).map((q) => ({ ...q, height: 1.55 + rnd() * 0.15 })));
         } else {
-          muntjacSpots.push(...around(c, 2, 5).map((q) => ({ ...q, height: 0.8 + rnd() * 0.08 })));
+          muntjacSpots.push(...around(c, 2 + (i % 3 === 0 ? 1 : 0), 5).map((q) => ({ ...q, height: 0.8 + rnd() * 0.08 })));
         }
       });
       const threats = () => units.list.filter((u) => u.alive && !u.isAir).map((u) => u.position);
