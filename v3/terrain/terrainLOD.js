@@ -581,7 +581,7 @@ function createLODMaterial({
     // Distant grass fields: past the last blade ring the ground takes the
     // blades' average colour (grassFarTsl.js). Under the flower tint, so
     // distant flowers still read on top of distant grass.
-    if (grassFar && F.grassFar) col.assign(grassFar.apply(col));
+    if (grassFar && F.grassFar) col.assign(grassFar.apply(col, nrmGeom));
 
     // Distant flower fields: the ground takes the flowers' colour past the
     // distance where the 3D flowers fade out (flowerTintTsl.js).

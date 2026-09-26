@@ -684,6 +684,15 @@ Vietnam, like Apocalypse Now.
       PUBLIC_ENGINE_MODULES. OPEN: the map's own dense coconut palms swallow
       the east wing (cook house, granary) — thin them round the camp, or
       keep it hidden "under the trees"? Your call.
+- [x] **FAR GRASS COLOUR FIXED** (your note, 2026-09-26; engine,
+      v3/render/grass/grassFarTsl.js): past the blades (revo grass draws them
+      only 16-44 m out, so at the RTS camera MOST of the grass on screen is this
+      colour) the terrain was painted one flat lime, 1.3x brighter than the
+      blades, and over CLIFFS where no blade grows (no slope rule). Now: the
+      blades' slope rule, the ground's own light/dark pattern kept, a gain to
+      the blades' brightness (measured), world-space tuft/patch mottling.
+      Affects every project using the far grass (editor too) — for the better,
+      but say if another game looks off.
 - [x] **LIGHTING PASS: HOT AFTERNOON SUN** (2026-09-26, ?light=old = before):
       the noon light was lit by the SKY (sun and shade nearly equal, top 1% of
       pixels 127/255, the sunlit fifth green). Now 15:24 (sun 44° not 68°,
