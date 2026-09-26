@@ -2029,7 +2029,12 @@ tuned). Anything below is ADDED next to it.
       session only — cache across reloads?), and (TSL graphs -> shaders on the CPU, all through the boot) and
       the **v3proj stage 8.2 s** (ground-texture resize through a canvas
       ~1.35 s, decal slots ~0.6 s, rocks ~1.2 s, the rest spread out).
-- [ ] **CPU 36 ms spike after a few minutes of a match** — seen 2026-09-24 in
+- [x] **CPU 36 ms spike after a few minutes of a match** — CLOSED 2026-09-26:
+      re-measured over a 15-minute match with `__NAM.profile.start()/.stop()`
+      (per-system profiler on the tick guards + sim systems; one tab, page in
+      front): start 38 units 1.23 ms game CPU · 5 min 94 units 1.45 ms ·
+      15 min 126 units 1.37 ms · 60 fps throughout. Nothing grows. The fixes
+      below (shadow-material rebuilds, pipeline warm-up) stand. Seen 2026-09-24 in
       the overlay (27 FPS, CPU 36 ms; 7-10 ms at boot) with the enemy AI
       running. **IN PROGRESS 2026-09-24** (your pick: first, and "be sure
       everything is as optimized as possible"). Method: fastForward(300), then

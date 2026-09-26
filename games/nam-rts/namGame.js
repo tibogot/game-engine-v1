@@ -1171,24 +1171,36 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   const sim = createSimClock({ hz: 60 });
   app.simClock = sim;
 
+  // Dev profiler (app.profile): null = off, and then T() is a plain call.
+  let prof = null;
+  const T = (name, fn) => {
+    if (!prof) { fn(); return; }
+    const t0 = performance.now();
+    fn();
+    const d = performance.now() - t0;
+    const r = prof.sys.get(name) ?? { sum: 0, max: 0, n: 0 };
+    r.sum += d; r.n++; if (d > r.max) r.max = d;
+    prof.sys.set(name, r);
+  };
+
   const simStep = (dt) => {
-    waves.update(dt);                     // spawn the next wave, keep them marching
-    enemyAI.step(dt);                     // the enemy commander: recruit, choose, order
-    structures.updateProduction(dt, (key, x, z, opts) => units.spawn(key, x, z, opts));
-    buildings.update(dt);                 // construction ramp + helipad production
-    resources.tickCaptureIncome(dt, buildings);
-    requisition.step(dt, units.list);      // who stands on which point; income
-    harvesting.update(dt);                // node → fill → base → unload → repeat
-    units.update(dt);
-    combat.update(dt);                    // acquire → chase → launch rockets
-    traps.step(dt);                       // who found what; who stepped on what
-    match.update(dt);                     // win/lose when enemy HQ match is on
-    projectiles.update(dt, app.camera);   // rockets fly, trail, and land damage
-    fire.update(dt, sim.simTime);         // burning wrecks
-    smoke.step(dt);                       // columns age here; the puffs do not
-    napalm.step(dt);                      // the run lands, burns, kills, scars
-    abilities.step(dt, units.list);       // cooldowns
-    cover.step(dt, units.list);           // "I just fired" reveal timers
+    T("sim:waves", () => waves.update(dt));                     // spawn the next wave, keep them marching
+    T("sim:enemyAI", () => enemyAI.step(dt));                   // the enemy commander: recruit, choose, order
+    T("sim:production", () => structures.updateProduction(dt, (key, x, z, opts) => units.spawn(key, x, z, opts)));
+    T("sim:buildings", () => buildings.update(dt));             // construction ramp + helipad production
+    T("sim:income", () => resources.tickCaptureIncome(dt, buildings));
+    T("sim:requisition", () => requisition.step(dt, units.list)); // who stands on which point; income
+    T("sim:harvesting", () => harvesting.update(dt));           // node → fill → base → unload → repeat
+    T("sim:units", () => units.update(dt));
+    T("sim:combat", () => combat.update(dt));                   // acquire → chase → launch rockets
+    T("sim:traps", () => traps.step(dt));                       // who found what; who stepped on what
+    T("sim:match", () => match.update(dt));                     // win/lose when enemy HQ match is on
+    T("sim:projectiles", () => projectiles.update(dt, app.camera)); // rockets fly, trail, and land damage
+    T("sim:fire", () => fire.update(dt, sim.simTime));          // burning wrecks
+    T("sim:smoke", () => smoke.step(dt));                       // columns age here; the puffs do not
+    T("sim:napalm", () => napalm.step(dt));                     // the run lands, burns, kills, scars
+    T("sim:abilities", () => abilities.step(dt, units.list));   // cooldowns
+    T("sim:cover", () => cover.step(dt, units.list));           // "I just fired" reveal timers
   };
 
   // Dev: run the SIM ahead without drawing — to watch the enemy commander
@@ -1214,7 +1226,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // name) is logged once with its name and stack, and the rest still runs.
   const _tickErred = new Set();
   const guard = (name, fn) => {
-    try { fn(); } catch (err) {
+    try { T(name, fn); } catch (err) {
       if (!_tickErred.has(name)) { _tickErred.add(name); console.error(`[nam] ${name} threw:`, err, "\n", err?.stack ?? ""); }
     }
   };
@@ -1268,8 +1280,38 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     guard("sounds", () => { sounds.update(); });                      // loops re-aimed at the camera
     guard("fogBanks", () => { app.fogBanks?.update(); });               // the mist's warm side follows the sun
     frameStats.tickMs = performance.now() - tickStart;
+    if (prof) {
+      prof.frames++;
+      prof.tickSum += frameStats.tickMs;
+      if (prof.lastFrame) prof.intervalSum += tickStart - prof.lastFrame;
+      prof.lastFrame = tickStart;
+    }
   };
   app.addPreRenderHook(tick);
+
+  /**
+   * Dev: where the game's CPU goes, per system, over a stretch of play.
+   *   __NAM.profile.start(); …play… __NAM.profile.stop()
+   * → { frames, frameMs (rAF interval), tickMs (all game JS), systems: [
+   *     { name, msPerFrame, maxMs } … ] } — sim systems as "sim:<name>" (their
+   * time is also inside "sim"). Off costs one null check per system.
+   */
+  app.profile = {
+    start() { prof = { sys: new Map(), frames: 0, tickSum: 0, intervalSum: 0, lastFrame: 0 }; },
+    stop() {
+      if (!prof) return null;
+      const p = prof; prof = null;
+      const f = Math.max(1, p.frames);
+      return {
+        frames: p.frames,
+        frameMs: +(p.intervalSum / Math.max(1, p.frames - 1)).toFixed(2),
+        tickMs: +(p.tickSum / f).toFixed(2),
+        units: units.list.length,
+        systems: [...p.sys].map(([name, r]) => ({ name, msPerFrame: +(r.sum / f).toFixed(3), maxMs: +r.max.toFixed(2) }))
+          .sort((a, b) => b.msPerFrame - a.msPerFrame),
+      };
+    },
+  };
 
   // Bake cover once the world is fully up. It cannot go next to createCover:
   // on nam-valley the 1,312 rocks arrive with the level, which loads after the
