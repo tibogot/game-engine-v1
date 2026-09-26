@@ -11,7 +11,7 @@ export const FOLIAGE_TYPE_COUNT = 8;
 /** Shape keys — changing one of these rebuilds that type's meshes. */
 export const FOLIAGE_GEOMETRY_KEYS = [
   "kind", "fronds", "frondLength", "leaflets", "leafletWidth", "leafletAngle", "spread", "arch", "droop", "stemWidth", "bareStalk",
-  "plumesPerStem", "plumeSpread",
+  "plumesPerStem", "plumeSpread", "crownDepth",
 ];
 
 /** Height band that means "no limit" (the full slider range). */
@@ -255,6 +255,84 @@ export const FOLIAGE_PRESETS = {
     spread: 0.36, arch: 0.35, droop: 0.2, stemWidth: 1, bareStalk: 0.56,
     plumesPerStem: 5, plumeSpread: 0,
     colorBase: "#1f3d20", colorTip: "#557a33", colorHead: "#6c685b", size: 30, translucency: 0.5,
+  },
+  // ── THE AURÈS (the Algeria game, 2026-09-26) ─────────────────────────────
+  // ATLAS CEDAR — tiers of level needle plates on long branches, a massive
+  // forked trunk, the old tree's flat "table" top (cedarGeometry.js). The
+  // heights of the Aurès; dark blue-green.
+  atlasCedar: {
+    kind: "atlasCedar",
+    // Many small sprays, not a few big ones: 130 cards at 0.85 read as green
+    // coins from the RTS camera (2026-09-26). And 5 tiers of flat cards
+    // (8 deg): 7 tiers of tilted cards merged into one
+    // bush; the shelves need space and flatness to read as shelves.
+    fronds: 5, frondLength: 1.0, leaflets: 420, leafletWidth: 0.78, leafletAngle: 8,
+    spread: 0.44, arch: 0.3, droop: 0.25, stemWidth: 1.5, bareStalk: 0.2,
+    plumesPerStem: 6, plumeSpread: 0,
+    colorBase: "#1f3128", colorTip: "#4f6b56", colorHead: "#5b4a3a", size: 22, translucency: 0.35,
+  },
+  // HOLM OAK (chêne vert) — the evergreen oak of the Aurès slopes: a short
+  // stout bole and a dense, dark, rounded crown down to head height. The
+  // dipterocarp's builder, domed and cut down: no buttresses, a low fork.
+  // First try (fork 0.28, #56663c tips) read as a bright savanna tree on a
+  // pole: the holm oak's crown comes down nearly to the ground and is DARK.
+  holmOak: {
+    kind: "dipterocarp",
+    fronds: 5, frondLength: 1.0, leaflets: 170, leafletWidth: 0.85, leafletAngle: 34,
+    spread: 0.6, arch: 0.95, droop: 0.2, stemWidth: 2.2, bareStalk: 0.16,
+    plumesPerStem: 0, plumeSpread: 0, crownDepth: 1.25,   // a round crown down to head height
+    colorBase: "#1b2517", colorTip: "#3f4c30", colorHead: "#5c5446", size: 8, translucency: 0.3,
+  },
+  // JUNIPER / LENTISK SCRUB — the dark knee-to-chest-high shrubs dotting
+  // every dry slope: a dense dark ball, the cauliflower builder cut down to a
+  // shrub (the bush builder is 90 triangles and vanished at 1.6 m).
+  juniperScrub: {
+    kind: "dipterocarp",
+    fronds: 3, frondLength: 1.0, leaflets: 90, leafletWidth: 1.0, leafletAngle: 36,
+    spread: 0.62, arch: 0.9, droop: 0.2, stemWidth: 0.8, bareStalk: 0.04,
+    plumesPerStem: 0, plumeSpread: 0, crownDepth: 1.1,
+    colorBase: "#1f2a1c", colorTip: "#4d5a3a", colorHead: "#5c5446", size: 2.4, translucency: 0.3,
+  },
+  // DATE PALM (Phoenix dactylifera) — THE oasis tree: a tall slender trunk,
+  // often leaning, rough with old leaf bases; a crown of STIFF, straight,
+  // grey-green feather fronds (not the coconut's soft drooping ones), a few
+  // dead ones hanging below. The palm builder, stiffened and greyed.
+  datePalm: {
+    kind: "palm",
+    // First try (27% fronds, 34 of them) was a spiky pompom on a pole: a date
+    // palm's fronds are 4-6 m on a 12-15 m trunk, many, arching out.
+    fronds: 46, frondLength: 1.0, leaflets: 44, leafletWidth: 0.85, leafletAngle: 38,
+    spread: 1.0, arch: 0.8, droop: 0.32, stemWidth: 1.15, bareStalk: 0.08,
+    plumesPerStem: 9, plumeSpread: 40,
+    colorBase: "#3a4d33", colorTip: "#71845a", colorHead: "#7b6a55", size: 13, translucency: 0.45,
+  },
+  // CANARY PALM (Phoenix canariensis) — the colonial avenue palm: a massive
+  // straight trunk and a huge dense ball of arching dark-green fronds.
+  canaryPalm: {
+    kind: "palm",
+    fronds: 52, frondLength: 1.0, leaflets: 30, leafletWidth: 0.7, leafletAngle: 36,
+    spread: 1.0, arch: 0.85, droop: 0.45, stemWidth: 1.9, bareStalk: 0.02,
+    plumesPerStem: 4, plumeSpread: 42,
+    colorBase: "#2f4a24", colorTip: "#6f8a3c", colorHead: "#6e5b44", size: 12, translucency: 0.7,
+  },
+  // DWARF FAN PALM (Chamaerops humilis, the "doum") — the knee-to-chest-high
+  // clump of stiff grey-green fans that covers the Maghreb's dry hillsides.
+  doumPalm: {
+    kind: "fanPalm",
+    // No trunk to speak of: the fans rise straight from the clump (a 0.4
+    // petiole stood them up like little trees on sticks).
+    fronds: 28, frondLength: 1.0, leaflets: 20, leafletWidth: 0.9, leafletAngle: 24,
+    spread: 1.5, arch: 0.7, droop: 0.25, stemWidth: 1.6, bareStalk: 0.12,
+    plumesPerStem: 1, plumeSpread: 110,
+    colorBase: "#2a3423", colorTip: "#57633f", colorHead: "#6b5e4a", size: 1.8, translucency: 0.3,
+  },
+  // ALFA (esparto) — the tussock grass of the high plains and dry slopes:
+  // wiry, rolled, grey-green going straw, in dense round tufts.
+  alfa: {
+    kind: "blades",
+    fronds: 26, frondLength: 1.0, leaflets: 6, leafletWidth: 0.7, leafletAngle: 50,
+    spread: 0.45, arch: 0.85, droop: 0.35, stemWidth: 0.8, bareStalk: 0,
+    colorBase: "#6b6a44", colorTip: "#c6b784", colorHead: "#d9c894", size: 1.0, translucency: 0.9,
   },
   // TARO / elephant ear — knee-high heart leaves on thin petioles, wet ground.
   taro: {

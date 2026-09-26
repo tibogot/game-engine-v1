@@ -12,8 +12,13 @@
  */
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { makeRubbleTexture } from "./rtsTextures.js";
 
-const SHEET = 1024;
+// 1024 wide, 2048 tall. The top 1024 rows are the original sheet (Vietnam,
+// every cell where it always was); the bottom half is the French army's
+// markings for the Algeria game. UVs divide by these, so a cell only ever
+// states its pixels.
+const SHEET_W = 1024, SHEET_H = 2048;
 
 /** Cells on the stencil sheet, in pixels. `aspect` = width / height. */
 export const STENCILS = {
@@ -46,6 +51,32 @@ export const STENCILS = {
   nlfStar:      { x: 832, y: 896, w: 128, h: 128 },
   // A hull number in white, for the other side's armour (PT-76 turret cheeks).
   hullNumber:   { x: 704, y: 928, w: 128, h: 96 },
+
+  // ── FRANCE, 1954-62 (the Algeria game) — the sheet's bottom half ─────────
+  // The tricolour, 3:2, opaque: a painted board over a gate, a flag on a mast.
+  frTricolore:  { x: 0,   y: 1024, w: 384, h: 256 },
+  // The cockade — blue ring, white, red centre: aircraft, helicopters, some armour.
+  frCocarde:    { x: 384, y: 1024, w: 256, h: 256 },
+  // A post's name board: black capitals on whitewash.
+  frPosteSign:  { x: 640, y: 1024, w: 384, h: 128 },
+  // A vehicle's registration: the little tricolour, then the number, white on
+  // olive-black — the French army plate.
+  frPlate:      { x: 640, y: 1152, w: 384, h: 96 },
+  frArmeeWhite: { x: 0,   y: 1280, w: 512, h: 96 },
+  frArmeeBlack: { x: 512, y: 1280, w: 512, h: 96 },
+  // A unit's code, white (parachutists' jeeps, trucks' tailboards).
+  frUnitCode:   { x: 0,   y: 1376, w: 384, h: 96 },
+  // A helicopter's serial on the tail boom, black.
+  frTailSerial: { x: 384, y: 1376, w: 384, h: 96 },
+  // An SAS post's board: "S.A.S." — the civil-military section's sign.
+  frSasSign:    { x: 768, y: 1376, w: 256, h: 96 },
+  // Whitewash fallen off a rubble wall: a ragged patch of the stones behind,
+  // with the broken lip of plaster round it. Two shapes, so a wall of them
+  // is not one stamp repeated.
+  plasterFallA: { x: 0,   y: 1472, w: 256, h: 160 },
+  plasterFallB: { x: 256, y: 1472, w: 256, h: 160 },
+  // A helicopter's serial in white, for the ALAT's dark olive.
+  frSerialWhite: { x: 512, y: 1472, w: 384, h: 96 },
 };
 for (const s of Object.values(STENCILS)) s.aspect = s.w / s.h;
 
@@ -53,9 +84,9 @@ const FONT = "'Stencil', 'Stencil Std', Impact, 'Arial Black', sans-serif";
 
 function drawSheet() {
   const cv = document.createElement("canvas");
-  cv.width = cv.height = SHEET;
+  cv.width = SHEET_W; cv.height = SHEET_H;
   const g = cv.getContext("2d");
-  g.clearRect(0, 0, SHEET, SHEET);
+  g.clearRect(0, 0, SHEET_W, SHEET_H);
   const cross = (cx, cy, arm, w, col) => {
     g.fillStyle = col;
     g.fillRect(cx - w / 2, cy - arm, w, arm * 2);
@@ -160,7 +191,102 @@ function drawSheet() {
       g.beginPath(); g.ellipse(cx, cy, 10, 9, 0, 0, Math.PI * 2); g.fill();
     }
   }
+  drawFrench(g, text, wear);
   return cv;
+}
+
+// The French army's colours, as painted (not the modern screen values): a
+// dark ultramarine and a vermilion that sun and dust have both taken down.
+const FR_BLUE = "#1f3f8f", FR_WHITE = "#ece8dc", FR_RED = "#c1272d";
+
+/** The bottom half of the sheet: France, 1954-62. */
+function drawFrench(g, text, wear) {
+  let c = STENCILS.frTricolore;
+  // Opaque, edge to edge: a flag or a painted board is solid under the alpha test.
+  [FR_BLUE, FR_WHITE, FR_RED].forEach((col, k) => {
+    g.fillStyle = col;
+    g.fillRect(c.x + (k * c.w) / 3, c.y, c.w / 3 + 1, c.h);
+  });
+  c = STENCILS.frCocarde;
+  {
+    const cx = c.x + c.w / 2, cy = c.y + c.h / 2, R = c.w / 2 - 4;
+    for (const [r, col] of [[R, FR_BLUE], [R * 0.66, FR_WHITE], [R * 0.33, FR_RED]]) {
+      g.fillStyle = col; g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
+    }
+    wear(c.x, c.y, c.w, c.h, 90);
+  }
+  c = STENCILS.frPosteSign;
+  g.fillStyle = "#e6e0d0"; g.fillRect(c.x + 4, c.y + 4, c.w - 8, c.h - 8);
+  g.strokeStyle = "#2a2622"; g.lineWidth = 6; g.strokeRect(c.x + 12, c.y + 12, c.w - 24, c.h - 24);
+  text("POSTE DE TIGHANIMINE", c.x + 16, c.y + 16, c.w - 32, c.h - 32, "#1d1b18", 58);
+  wear(c.x, c.y, c.w, c.h, 160);
+  c = STENCILS.frPlate;
+  g.fillStyle = "#26281f"; g.fillRect(c.x + 2, c.y + 8, c.w - 4, c.h - 16);
+  [FR_BLUE, FR_WHITE, FR_RED].forEach((col, k) => {
+    g.fillStyle = col; g.fillRect(c.x + 14 + k * 16, c.y + 22, 16, c.h - 44);
+  });
+  text("6 124 578", c.x + 72, c.y, c.w - 80, c.h, FR_WHITE, 62);
+  wear(c.x, c.y, c.w, c.h, 120);
+  c = STENCILS.frArmeeWhite; text("ARMÉE DE TERRE", c.x, c.y, c.w, c.h, "#e9e6dc", 76); wear(c.x, c.y, c.w, c.h);
+  c = STENCILS.frArmeeBlack; text("ARMÉE DE TERRE", c.x, c.y, c.w, c.h, "#1d1d1a", 76); wear(c.x, c.y, c.w, c.h);
+  c = STENCILS.frUnitCode; text("9e R.C.P.   3", c.x, c.y, c.w, c.h, "#e9e6dc", 70); wear(c.x, c.y, c.w, c.h, 140);
+  c = STENCILS.frTailSerial; text("F-MBJK", c.x, c.y, c.w, c.h, "#1d1d1a", 74); wear(c.x, c.y, c.w, c.h, 60);
+  c = STENCILS.frSerialWhite; text("MBJ", c.x, c.y, c.w, c.h, "#ece8dc", 86); wear(c.x, c.y, c.w, c.h, 60);
+  c = STENCILS.frSasSign;
+  g.fillStyle = "#e6e0d0"; g.fillRect(c.x + 4, c.y + 4, c.w - 8, c.h - 8);
+  text("S.A.S.", c.x + 10, c.y + 8, c.w - 20, c.h - 16, "#1f3f8f", 70);
+  wear(c.x, c.y, c.w, c.h, 90);
+  plasterFall(g, STENCILS.plasterFallA, 5);
+  plasterFall(g, STENCILS.plasterFallB, 11);
+}
+
+/**
+ * A patch of fallen whitewash: a ragged outline (a noisy ellipse), inside it
+ * rough limestone blocks with earth joints — the wall under the plaster — and
+ * round the edge the broken lip of plaster, lighter where it catches the sun
+ * and a dark line where it stands off the stone. Transparent outside, so the
+ * alpha test cuts the outline.
+ */
+function plasterFall(g, c, seed) {
+  let s = seed * 2654435761 >>> 0;
+  const r = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
+  const cx = c.x + c.w / 2, cy = c.y + c.h / 2, rx = c.w * 0.46, ry = c.h * 0.44;
+  // Broken, not blobby: a slow wobble (the patch's shape) plus a fast jag
+  // (plaster breaks along short straight cracks).
+  const N = 72, rad = [];
+  for (let k = 0; k < N; k++) rad.push(0.6 + r() * 0.4);
+  for (let p = 0; p < 3; p++) for (let k = 0; k < N; k++) rad[k] = (rad[k] + rad[(k + 1) % N] + rad[(k + N - 1) % N]) / 3;
+  for (let k = 0; k < N; k++) rad[k] += (r() - 0.5) * 0.12;
+  const outline = (scale) => {
+    g.beginPath();
+    for (let k = 0; k < N; k++) {
+      const a = (k / N) * Math.PI * 2;
+      g.lineTo(cx + Math.cos(a) * rx * rad[k] * scale, cy + Math.sin(a) * ry * rad[k] * scale);
+    }
+    g.closePath();
+  };
+  // The lip of broken plaster: slightly larger, pale.
+  outline(1.0); g.fillStyle = "#d9d2c2"; g.fill();
+  outline(0.9); g.fillStyle = "#3a3026"; g.fill();       // the shadow line under the lip
+  // The stones, clipped to the inner outline: the SAME rubble surface the
+  // walls' footings are drawn in, so the stone behind the plaster is the
+  // stone below it. A patch is ~2-4 m wide over 256 px and the rubble tile is
+  // 2 m over 512 px: drawn at a third so its stones stay ~30 cm.
+  g.save(); outline(0.88); g.clip();
+  const rub = rubbleCanvas();
+  const tile = 180;
+  for (let y = c.y - (seed % 5) * 20; y < c.y + c.h; y += tile) {
+    for (let x = c.x - (seed % 7) * 20; x < c.x + c.w; x += tile) g.drawImage(rub, x, y, tile, tile);
+  }
+  // Shade the stone a little deeper than the footings: it is recessed.
+  g.fillStyle = "rgba(40, 30, 20, 0.22)"; g.fillRect(c.x, c.y, c.w, c.h);
+  g.restore();
+}
+
+let _rubble = null;
+function rubbleCanvas() {
+  if (!_rubble) _rubble = makeRubbleTexture({ size: 512 }).image;
+  return _rubble;
 }
 
 let _mat = null;
@@ -206,8 +332,8 @@ export function mayCastShadow(material) {
  */
 export function stencilPatch(cell, surface, { segS = 1, segT = 1, lift = 0.006, sList = null } = {}) {
   const c = STENCILS[cell];
-  const u0 = c.x / SHEET, u1 = (c.x + c.w) / SHEET;
-  const v0 = 1 - (c.y + c.h) / SHEET, v1 = 1 - c.y / SHEET;
+  const u0 = c.x / SHEET_W, u1 = (c.x + c.w) / SHEET_W;
+  const v0 = 1 - (c.y + c.h) / SHEET_H, v1 = 1 - c.y / SHEET_H;
   // `sList`: explicit s stations (sorted 0..1) — put a column on every corner
   // of a folded surface, so the paint does not cut across it.
   const ss = sList ?? Array.from({ length: segS + 1 }, (_, i) => i / segS);

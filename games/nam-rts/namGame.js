@@ -41,7 +41,7 @@
 // 404s on /v3/styles/editor.css.
 import "../../v3/styles/editor.css";
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
-import { createRtsCamera } from "./namCamera.js";
+import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { createUnits } from "./units.js";
 import { createUnitRenderer } from "./unitRenderer.js";
 import { xrayParams } from "./xraySilhouette.js";

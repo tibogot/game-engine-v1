@@ -29,6 +29,7 @@ import { drawCanopyClusterTexture, CANOPY_TEX_W, CANOPY_TEX_H } from "./canopyCl
 import { drawFanLeafTexture, FAN_TEX_W, FAN_TEX_H } from "./fanLeafTexture.js";
 import { drawLanceLeafTexture, LANCE_TEX_W, LANCE_TEX_H } from "./lanceLeafTexture.js";
 import { drawBanyanLeafTexture, BANYAN_TEX_W, BANYAN_TEX_H } from "./banyanLeafTexture.js";
+import { drawCedarNeedleTexture, NEEDLE_TEX_W, NEEDLE_TEX_H } from "./cedarNeedleTexture.js";
 import { drawLeafSprayCard, loadLeafSprayMasks, LEAF_SPRAY_MASKS, LEAF_SPRAY_TEX } from "./leafSprayCard.js";
 import { bakeObjectThumbnails } from "../../../v2/tools/objectThumbnails.js";
 import { ScatterField } from "../scatter/scatterField.js";
@@ -78,6 +79,8 @@ const CARD_TEXTURES = {
   // colour (see alphaCoverageMips) — a leaf cluster is leaves, a fan is
   // pleated, a frond is a thousand blades, not one flat green (2026-09-24).
   banyan: { w: BANYAN_TEX_W, h: BANYAN_TEX_H, draw: drawBanyanLeafTexture, shade: true },
+  // The Atlas cedar's flat mats of needle rosettes (Algeria, 2026-09-26).
+  needle: { w: NEEDLE_TEX_W, h: NEEDLE_TEX_H, draw: drawCedarNeedleTexture, shade: true },
   // The canopy tree's crown: sprays of REAL leaves from the arborist's masks,
   // sky between the leaves (leafSprayCard.js; your call 2026-09-25, "look way
   // better"). The masks are PNGs, so the banyan card stands in until they

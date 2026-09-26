@@ -75,6 +75,7 @@ export default defineConfig({
         play: "v2/play.html",
         rtsV3: "games/rts-v3/rts.html",
         namRts: "games/nam-rts/nam.html",
+        algRts: "games/alg-rts/alg.html",
         roadV3: "games/modular-road-v3/road.html",
         v3editor: "v3/editor.html",
       },

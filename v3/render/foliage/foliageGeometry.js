@@ -43,6 +43,7 @@ import { buildBanana } from "./bananaGeometry.js";
 import { buildTravellersPalm } from "./travellersPalmGeometry.js";
 import { buildBanyan } from "./banyanGeometry.js";
 import { buildDipterocarp } from "./dipterocarpGeometry.js";
+import { buildAtlasCedar } from "./cedarGeometry.js";
 import { buildPandanus } from "./pandanusGeometry.js";
 
 export const FOLIAGE_LODS = 3;
@@ -95,6 +96,9 @@ const LEAF_ROUNDING = {
   // (each head shades as a ball); round only a little toward the crown's
   // middle, high up, so the heads still read as one umbrella.
   dipterocarp: [0.85, 0.3],
+  // The cedar's cards carry their own PLATE's normal (a shelf shades as a
+  // slab); round only a touch, high up, so the tiers still read as one tree.
+  atlasCedar: [0.8, 0.2],
   taro:      [0.05, 0.6],
   // Each pandanus tuft is a star of swords high on the plant: round a little,
   // from about its tufts' height, so the lit tops and hanging undersides read.
@@ -179,6 +183,8 @@ export function cardTextureOf(kind) {
     // Sprays of real leaves with sky between them (leafSprayCard.js) — the
     // banyan card's solid blob made both crowns read as green sheets.
     case "banyan": case "dipterocarp": return "leafSpray";
+    // Rosettes of short needles in flat mats (cedarNeedleTexture.js).
+    case "atlasCedar": return "needle";
     case "taro": return "taro";
     default: return null;
   }
@@ -221,6 +227,7 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
   if (type.kind === "travellersPalm") return buildTravellersPalm(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "banyan") return buildBanyan(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "dipterocarp") return buildDipterocarp(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "atlasCedar") return buildAtlasCedar(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "pandanus") return buildPandanus(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {

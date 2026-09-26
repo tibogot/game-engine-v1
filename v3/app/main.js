@@ -12268,6 +12268,17 @@ export async function startV3App(opts = {}) {
         worldEnv?.driveFogSun();
       },
     },
+    /**
+     * BARE GROUND colours — the surface under the paint, which is also ALL of
+     * the plain outside the heightmap (it has no paint): with the editor's
+     * near-white grid colours a painted map sits on a white table. e.g.
+     * `{ baseColor: "#8a6c4c", lineColor: "#8a6c4c" }` (the "flat" style is
+     * their mix). Runtime, not saved; never written to the editor's storage.
+     */
+    setGroundBase(params = {}) {
+      Object.assign(worldToolState.groundBase, params);
+      applyGridConfig(params);
+    },
     // ── Terrain queries a game builds on ──────────────────────────────────────
     // Ground height at a world X/Z (RTS unit clamping, building placement).
     getWorldHeight,

@@ -1,4 +1,6 @@
-// RTS camera for the v3 engine — GAME code, lives with the game project.
+// RTS camera for the v3 engine — GAME code, shared by the RTS games
+// (games/nam-rts, games/alg-rts) in games/shared-rts/. First piece of the
+// shared RTS core (games/alg-rts/TODO.md): moved here from nam-rts as-is.
 //
 // Two modes, toggleable at runtime:
 //   • "orbit" — hands control back to the engine's editor OrbitControls (good

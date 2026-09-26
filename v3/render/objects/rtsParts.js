@@ -50,6 +50,9 @@ export const MAT = {
   // in, the pitted laterite it is built of behind that, and the moss that
   // covers whatever has stood still long enough. Row five of the atlas.
   sandstone: 16, laterite: 17, moss: 18,
+  // Algeria: dry-stone rubble — mechta walls, a post's breastworks, terraces.
+  // The atlas's twentieth and LAST cell (4 x 5): the next surface needs a row.
+  rubble: 19,
 };
 
 /** Strip anything merge would choke on, and guarantee the attribute set. */

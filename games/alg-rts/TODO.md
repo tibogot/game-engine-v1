@@ -21,15 +21,133 @@ Keep this file current: tick things off here, add new asks here.
 - Treat the history seriously: no atrocity as a game mechanic, civilians are
   people rather than resources, show consequences through the story.
 
+## Session 2026-09-26 (you away): what was done
+
+- [x] **Shared camera**: games/nam-rts/namCamera.js → games/shared-rts/rtsCamera.js
+      (git mv, unchanged). nam imports it from there; verified nam boots and
+      the camera works. First piece of the shared RTS core.
+- [x] **The game page**: games/alg-rts/alg.html + algGame.js (vite input
+      `algRts`). Boots in ~4.5 s: nam's settings (fitted shadow, lean terrain,
+      top-3 + far tiling, terrain drawn last), the Aurès map, the shared camera.
+      No gameplay. `?light=flat` `?fog=0` `?showroom=0`.
+- [x] **Light and sky**: Atmosphere sky (`skyMode: "atmosphere"` must be asked
+      for at boot, or setWorldLight does nothing), real latitude 35.2°, mid-July
+      15:12. Measured: mean luma 57-76 → 118-140, near-black 9-21% → 0-3%.
+      Dust haze matched to the horizon.
+- [x] **The plain outside the map**: new engine call `app.setGroundBase({
+      baseColor, lineColor, ao })` (runtime, not saved). Matched by eye to the
+      textured soil: #a39480.
+- [x] **Atlas cell 19 = dry-stone rubble** (`MAT.rubble`, the LAST free cell):
+      ragged limestone blocks, deep earth joints, chinking. For the post, the
+      mechtas, terraces.
+- [x] **Stencil sheet 1024 → 1024×2048**: the old half untouched; the new half
+      holds France: tricolour, cockade, "POSTE DE TIGHANIMINE" board, vehicle
+      plate, ARMÉE DE TERRE ×2, unit code, helicopter serial, S.A.S. board,
+      and two fallen-plaster patches (drawn with the rubble surface).
+- [x] **French post (HQ)** `v3/render/objects/rtsFrenchPost.js`: bordj-style
+      walled square (28.6 m ×1.3), rubble footing, whitewash, merlons,
+      loopholes, wall-walk, two towers with sandbagged MGs, arched gatehouse
+      with the name board and a painted tricolour, barracks, command post,
+      radio mast, flag, stores, water tank, sandbag chicane, double-apron
+      wire. 13.7k tris, one draw + markings.
+- [x] **Panhard EBR** `v3/render/objects/rtsVehiclesFr.js`: symmetric boat
+      hull, 4 tyred + 4 steel wheels (roll with the odometer), FL-11 turret
+      with the long 75 mm, stowage, both drivers' stations; plate, turret
+      tricolour, roof cockade.
+- [x] **French paint**: `rtsObjectMaterialTinted(FR_PAINT_TINT)` tints only the
+      painted surface — US olive drab went lime in the Aurès light.
+- [x] **Showroom** games/alg-rts/showroom.js: new assets placed on the map
+      under the real light (post at 40,150; vehicles by the gate; hamlet at
+      150,60; plants on the massif and round the post). Temporary.
+- [x] **Willys MB jeep** and **GMC CCKW 353** (rtsVehiclesFr.js): jeep with
+      folded windscreen, .30 on its pedestal, driver + gunner, plates; GMC
+      with banjo wings, closed cab, duals, canvas tilt on its bows.
+- [x] Rolling gear tinted too: `rtsRunningGearMaterial(paintTint)` (the US
+      default is unchanged).
+- [x] **The mechta** (v3/render/objects/rtsMechta.js): 10 Chaouia houses in
+      attached rows along a lane, rubble walls, earth roofs with parapets,
+      beam ends under the eaves, limewash/mud skins, some second storeys,
+      lean-tos, yards with dry-stone walls, a tabouna oven, jars, a threshing
+      floor. 4.4k tris, one draw.
+- [x] **Aurès vegetation** (FOLIAGE_PRESETS): `atlasCedar` (new builder
+      cedarGeometry.js: forked trunk, tiers of level plates; new card
+      cedarNeedleTexture.js: sprays of needle rosettes combed out along the
+      branch), `holmOak`, `juniperScrub` (the dipterocarp builder, domed /
+      shrub-sized), `alfa` (blades). Hand-placed via PlacedFoliage for now;
+      the map's paint slots are untouched.
+      Rejected on the way: round clump cards on the cedar (read as green
+      coins), the bush builder for scrub (90 tris, invisible at 1.6 m), the
+      first holm oak (a bright savanna tree on a pole).
+- [x] Verified after all engine changes: nam-rts boots, clean console, its
+      stencils (Quonset star) intact; alg page clean console; boundary test
+      and fast lane 196/196 green.
+
+- [x] You looked (2026-09-26): "look nice, continue".
+- [x] **Cedars tiered**: 5 tiers, flat cards (8°), each shelf lit on top and
+      dark to its rim. From the side: the Atlas cedar's stacked shelves.
+- [x] **Holm oak / scrub**: new `crownDepth` key on the dipterocarp builder
+      (default 0.6 = unchanged); oak 1.25 = round crown down to head height
+      (was an acacia on a pole), scrub 1.1 and twice the foliage.
+- [x] **Alouette II** (rtsVehiclesFr.js `buildAlouette`): glass bubble with its
+      frame, bare Artouste turbine, open triangular lattice boom with the
+      drive shaft, fin + stabiliser, 3-blade main and tail rotors (spinning in
+      the showroom, the Huey's rotor contract), skids, stretcher panniers.
+      `blade` added to VEHICLE_KIT.
+- [x] **AMX-13** `buildAMX13`: low hull, engine louvres + driver front, 5 road
+      wheels, front sprocket, rear idler, return rollers (shared `trackSide`
+      helper), FL-10 turret set back with the long 75 mm and its bustle;
+      turret contract as the M113 (turret geo + pivot + muzzle).
+- [x] **M3 half-track** `buildHalfTrack`: roller, armoured bonnet, wheels +
+      rear track unit, open armoured box, .50 on its ring, crew, mine racks.
+- [x] Checked: clean console, boundary test + fast lane green.
+
+- [x] **C key** = RTS camera ⇄ free orbit on this page (was only bound in
+      nam's dev panel), matched on `e.key` for AZERTY.
+- [x] **Alouette II rebuilt from ALAT photos** (your "looks really bad"): a
+      lofted teardrop cabin, solid lower nose + see-through glass (own
+      material, crew visible), frame bows and hoops, the box centre body,
+      the uncowled Artouste with its big exhaust on top, an N-truss lattice
+      boom, hoop tail skid, long low skids with arched cross tubes, dark
+      ALAT olive, white serial + cockade + ARMÉE DE TERRE.
+- [x] **Palms**: `datePalm` (oasis), `canaryPalm` (avenue/post gate),
+      `doumPalm` (dwarf fan palm on the slopes). First date palm was a spiky
+      pompom on a pole: now 46 long arching fronds. Doum was trees on sticks:
+      now low fan clumps.
+- [x] **Oasis** (tools/algOasis.mjs): a lobed basin carved in the valley floor
+      at (132, 128), a lake 1.5 m under the rim, grove ground (grass_ground,
+      Poly Haven) feathered round it; date-palm clumps, reed-mace at the
+      edge. Water tuned for a small pool: depthDistance 20 → 3.5 m (at 20 the
+      shallow pool read as SAND), a silt bed, faint caustics. Map backed up
+      before the carve (scratchpad alg-aures.pre-oasis.v3proj).
+- [x] Budget at play zoom with everything placed: 77-97 draws, ~680k tris,
+      CPU ~2 ms (nam-valley: ~176 draws). Clean console; tests green.
+
+Asset follow-ups:
+- [ ] Oasis: a second one, and paint the lake params per map in the editor
+      (all lakes in a map share one water setting).
+- [ ] Put the plants into the map's paint (4 tall slots: cedar, oak, scrub,
+      alfa) once the look is agreed.
+- [ ] Post walls could use more weathering (grime under the merlons).
+- [ ] Next assets: H-34 "Pirate" gunship helicopter, a French helipad,
+      buildables (mirador watchtower, MG post) in the post's style, SAS post,
+      olive grove + prickly pear for Kabylie, the ALN's side (cave mouths,
+      a mountain hideout).
+- [x] Soldiers: **you** make them (2026-09-26), as in nam-rts.
+- [x] **Cloth flag** (your ask): the post's painted flag and pole removed;
+      the post now reports `userData.flagMount` and the game plants the
+      engine's Verlet cloth flag there (games/alg-rts/algFlag.js, the same
+      createFlag as nam's baseFlag), with a drawn tricolour texture.
+- [ ] **LATER — sandstorm** (your ask, 2026-09-26): a weather event —
+      wall of dust rolling in, haze thickening to a brown-out, wind-driven
+      dust sheets, the light going orange and flat; gameplay: sight ranges
+      shrink, helicopters grounded. Candidates: the engine's fog + smoke
+      flipbooks + a dust-particle layer.
+
 ## Open decisions — **you**
 
-- [ ] **How the code starts.** (a) Copy nam-rts into games/alg-rts/ and
-      strip it: fastest, but every later fix is made twice (28k lines).
-      (b) First move the shared parts (sim clock, nav grid, units, selection,
-      combat, cover, smoke LOS, fog of war, enemy AI, camera, fire and napalm,
-      vehicles) into a shared RTS folder that both games import: slower to
-      start, one copy forever. Recommended: (b), done one system at a time.
-- [ ] Which side is playable at launch: French, ALN, or both (asymmetric).
+- [x] **How the code starts**: (b), a shared RTS core, one system at a time
+      (you, 2026-09-26). Camera moved first.
+- [x] Playable side: **French** first; choosing the side comes later (you).
 - [ ] Working title ("Djebel"?).
 
 ## Terrain — the first map

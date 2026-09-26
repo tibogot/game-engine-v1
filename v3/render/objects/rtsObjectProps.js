@@ -37,7 +37,7 @@
 import * as THREE from "three";
 import {
   Fn, attribute, clamp, float, floor, fract, hash, instanceIndex, mix,
-  step, texture, uniform, uv, vec2,
+  step, texture, uniform, uv, vec2, vec3,
 } from "three/tsl";
 import { rtsAtlas, ATLAS_COLS, ATLAS_ROWS, ATLAS_PAD } from "./rtsTextures.js";
 import { RTS_OBJECTS } from "./rtsEmplacement.js";
@@ -106,6 +106,27 @@ export function rtsObjectMaterial() {
   m.name = "RtsObject";
   m.colorNode = rtsAtlasColor(uv());
   _material = m;
+  return m;
+}
+
+const _tinted = new Map();
+/**
+ * The kit material with the PAINTED surface (MAT.paint, the army's olive)
+ * multiplied by `paintTint` [r, g, b] — every other surface untouched. For a
+ * game whose army wore a different green under a different sun: the Algeria
+ * game's "vert armée" is browner and darker than the US olive drab the atlas
+ * was drawn for, which went lime under the Aurès light. One material per
+ * tint, shared.
+ */
+export function rtsObjectMaterialTinted(paintTint) {
+  const key = paintTint.join(",");
+  if (_tinted.has(key)) return _tinted.get(key);
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.94, metalness: 0 });
+  m.name = `RtsObject:${key}`;
+  const id = attribute("matId", "float");
+  const isPaint = step(float(6.5), id).mul(step(id, float(7.5)));
+  m.colorNode = rtsAtlasColor(uv()).mul(mix(vec3(1, 1, 1), vec3(...paintTint), isPaint));
+  _tinted.set(key, m);
   return m;
 }
 

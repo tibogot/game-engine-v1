@@ -37,6 +37,8 @@
  *   stemWidth     bole thickness
  *   bareStalk     height of the fork (the clean bole), in plant heights
  *   plumesPerStem buttress roots
+ *   crownDepth    how deep each sub-crown is, in its radius (0.6 the
+ *                 dipterocarp's flattened heads; ~1.1 a round oak crown)
  *   `size` 30 m (an emergent over a 20-25 m canopy).
  */
 import { woodKit, BILLBOARD } from "./banyanGeometry.js";
@@ -110,7 +112,8 @@ export function buildDipterocarp(type, ctx) {
   // riding higher toward the middle when `arch` is up (a dome) and level when
   // it is down (an umbrella).
   const heads = [];
-  const topY = H * 0.86;
+  // A deep crown sits lower, so it still meets the top of the tree.
+  const topY = H * (0.86 - Math.max(0, (type.crownDepth ?? 0.6) - 0.6) * 0.18);
   heads.push({ c: [fork[0], topY + arch * 0.04 * H, fork[2]], r: Rc * 0.46 });
   for (let i = 0; i < subN; i++) {
     const a = (i / subN) * Math.PI * 2 + (rand() - 0.5) * 0.7;
@@ -149,7 +152,7 @@ export function buildDipterocarp(type, ctx) {
   const clumpR0 = Rc * 0.3 * (type.leafletWidth ?? 1) * (far ? 1.3 : near ? 1 : 1.12);
   for (const h of heads) {
     const n = Math.max(far ? 4 : 7, Math.round(clumpTotal * (h.r * h.r) / areaSum));
-    const ry = h.r * 0.6;                                 // a flattened ball
+    const ry = h.r * (type.crownDepth ?? 0.6);            // a flattened ball
     for (let i = 0; i <= n; i++) {
       // A cap point first (the top of the head is what the camera sees), then
       // a spiral over the upper two-thirds.

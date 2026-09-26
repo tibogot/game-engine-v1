@@ -26,7 +26,7 @@ const S = 1.3;
 export const MAX_VEHICLES = 256;
 const SHOE = 0.16;   // track shoe pitch, real metres
 
-let _gearMat = null;
+const _gearMats = new Map();
 /**
  * The running gear's material: the kit's atlas colour, and the gear ROLLS in
  * the vertex shader from a per-instance odometer (world metres travelled,
@@ -35,9 +35,14 @@ let _gearMat = null;
  * (kind 2) scrolls its shoes along the loop. One draw for every vehicle's
  * wheels and tracks, and no CPU per wheel.
  * material.userData.odometer is the InstancedBufferAttribute to write.
+ *
+ * `paintTint` [r, g, b]: the same painted-surface tint as
+ * rtsObjectMaterialTinted (a hub is painted like the hull). Each tint is its
+ * own material with its own odometer; no tint is the original, unchanged.
  */
-export function rtsRunningGearMaterial() {
-  if (_gearMat) return _gearMat;
+export function rtsRunningGearMaterial(paintTint = null) {
+  const key = paintTint ? paintTint.join(",") : "";
+  if (_gearMats.has(key)) return _gearMats.get(key);
   const odoAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_VEHICLES), 1);
   odoAttr.setUsage(THREE.DynamicDrawUsage);
   const odo = instancedBufferAttribute(odoAttr);
@@ -55,9 +60,16 @@ export function rtsRunningGearMaterial() {
   // after its UVs were laid), forward along the top run: the shoes move with it.
   const u = uv().x.sub(odo.div(S).mul(isTrack));
   const shoeGap = step(0.8, fract(u.div(SHOE))).mul(isTrack);
-  m.colorNode = rtsAtlasColor(vec2(u, uv().y)).mul(mix(float(1), float(0.45), shoeGap));
+  let col = rtsAtlasColor(vec2(u, uv().y)).mul(mix(float(1), float(0.45), shoeGap));
+  if (paintTint) {
+    const id = attribute("matId", "float");
+    const isPaint = step(float(6.5), id).mul(step(id, float(7.5)));
+    col = col.mul(mix(vec3(1, 1, 1), vec3(...paintTint), isPaint));
+    m.name = `RtsRunningGear:${key}`;
+  }
+  m.colorNode = col;
   m.userData.odometer = odoAttr;
-  _gearMat = m;
+  _gearMats.set(key, m);
   return m;
 }
 
@@ -1707,3 +1719,10 @@ export function buildM35({ seed = 35 } = {}) {
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   return geo;
 }
+
+/**
+ * The shared vehicle geometry kit, for the other vehicle modules (the French
+ * vehicles of the Algeria game, rtsVehiclesFr.js) — the same parts, so a
+ * French truck and an American one are made the same way.
+ */
+export const VEHICLE_KIT = { S, indexed, axleX, alongZ, trackBand, trackPath, packGear, loftSkin, skinAt, skinPatch, tube, blade };

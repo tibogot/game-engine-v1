@@ -915,6 +915,84 @@ export function makeMossTexture({ size = 512, seed = 139 } = {}) {
   });
 }
 
+/**
+ * DRY-STONE RUBBLE, the wall of the Maghreb: a mechta's walls, a hilltop
+ * post's breastworks, the terraces of the Aurès. Irregular limestone blocks
+ * laid in rough courses without mortar, packed with earth. What sells it is
+ * the same thing as the temple's coursing (see ASHLAR COURSING above): the
+ * JOINTS — dark, earth-filled, wider than an ashlar's — and each stone its own
+ * colour, lit along its top edge and dark along its foot.
+ *
+ * Stones are the cells of a jittered lattice, squashed into courses: 7 across
+ * and 10 up a 2 m cell (~29 x 20 cm, 73 x 51 px — clear of the crawl limit).
+ * The lattice wraps, so it tiles.
+ */
+export function makeRubbleTexture({ size = 512, seed = 149 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const NX = 7, NY = 10, P = 8;
+    // One feature point per lattice cell, jittered; courses offset alternately.
+    const pt = (ix, iy) => {
+      const wx = ((ix % NX) + NX) % NX, wy = ((iy % NY) + NY) % NY;
+      return [
+        ix + 0.5 + (hash2(wx + seed, wy * 7) - 0.5) * 0.55 + (wy % 2) * 0.35,
+        iy + 0.5 + (hash2(wx * 5, wy + seed) - 0.5) * 0.3,
+      ];
+    };
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        // Warp the lattice so the outlines are ragged, not polygons. The warp
+        // is on the wrapping lattice too, so the tile still tiles.
+        const wx = (fbm(u * P * 3 + seed, v * P * 3, P * 3, 3) - 0.5) * 0.5;
+        const wy = (fbm(u * P * 3 + 41, v * P * 3 + seed, P * 3, 3) - 0.5) * 0.35;
+        const fx = u * NX + wx, fy = v * NY + wy;
+        const cx = Math.floor(fx), cy = Math.floor(fy);
+        let d1 = 9, d2 = 9, id = 0, oy = 0;
+        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 2; i++) {
+          const [px, py] = pt(cx + i, cy + j);
+          // Stones are wider than tall: distances in y count more.
+          const dd = Math.hypot(fx - px, (fy - py) * 1.45);
+          if (dd < d1) { d2 = d1; d1 = dd; id = (((cx + i) % NX + NX) % NX) * 31 + (((cy + j) % NY + NY) % NY); oy = fy - py; }
+          else if (dd < d2) d2 = dd;
+        }
+        const edge = d2 - d1;                      // 0 on the joint
+        const tone = hash2(id + seed, id * 3 + 1);
+        const mott = fbm(u * P * 4 + seed, v * P * 4, P * 4, 3);
+        const grain = fbm(u * P * 22 + id, v * P * 22, P * 22, 2) - 0.5;
+        // Limestone: grey-buff, a few warmer, iron-stained stones.
+        const warm = hash2(id, seed + 9) > 0.8 ? 1 : 0;
+        let r = lerp(138, 188, tone) + (mott - 0.5) * 34 + grain * 30;
+        let gg = r * (warm ? 0.85 : 0.94), b = r * (warm ? 0.68 : 0.84);
+        // Pitting and dark weathering blotches on the stone's face.
+        const pit = clamp01((vnoise(u * P * 30 + id, v * P * 30, P * 30) - 0.8) * 6);
+        const blot = clamp01((fbm(u * P * 6 + id * 3, v * P * 6, P * 6, 3) - 0.62) * 4) * 0.5;
+        r *= 1 - pit * 0.35 - blot * 0.3; gg *= 1 - pit * 0.35 - blot * 0.3; b *= 1 - pit * 0.33 - blot * 0.28;
+        // Fake relief: the top of each stone catches the light, its foot is in
+        // its own shadow (and the shadow is deeper than the light is bright).
+        const lit = clamp01(oy * 1.6 + 0.5);
+        const k = lerp(0.68, 1.12, lit);
+        r *= k; gg *= k; b *= k;
+        // Joints: dark packed earth, of varying width; the gap UNDER a stone
+        // is the deepest, and the wide ones are chinked with small stones.
+        const width = lerp(0.07, 0.2, fbm(u * P * 5 + 13, v * P * 5, P * 5, 2));
+        const joint = clamp01(1 - edge / width);
+        const chink = joint > 0.35 && vnoise(u * P * 40 + 7, v * P * 40, P * 40) > 0.62;
+        const jr = chink ? 132 : 52, jg = chink ? 118 : 40, jb = chink ? 98 : 28;
+        r = lerp(r, jr, joint * 0.95); gg = lerp(gg, jg, joint * 0.95); b = lerp(b, jb, joint * 0.95);
+        // Dust settled on the stones' upper faces and at the wall's foot.
+        const dust = clamp01(1 - v * 3.5) * 0.4;
+        r = lerp(r, 160, dust); gg = lerp(gg, 128, dust); b = lerp(b, 96, dust);
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 export const ATLAS_COLS = 4;
 // FIVE rows, not four: the sixteen were full, and the Khmer ruins need stone
 // that is actually stone (sandstone, laterite, moss). The fifth row costs a
@@ -960,6 +1038,7 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeSandstoneTexture({ size: cell }),
     makeLateriteTexture({ size: cell }),
     makeMossTexture({ size: cell }),
+    makeRubbleTexture({ size: cell }),   // 19: the last free cell (Algeria)
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;
