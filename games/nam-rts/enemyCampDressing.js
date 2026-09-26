@@ -93,9 +93,11 @@ export async function dressEnemyCamp(app, placed, camp) {
     });
     // Trampled: the grass goes too, in the patch's solid core, stepped along
     // its long axis (a path is a strip, not a disc).
-    const r = Math.min(sx, sz) * 0.32, long = Math.max(sx, sz) * 0.36;
+    // (0.32 of the patch left metre-tall blades leaning over the POW pit and
+    // the cages at its rim: the cleared core now reaches the patch's edge.)
+    const r = Math.min(sx, sz) * 0.45, long = Math.max(sx, sz) * 0.45;
     const ux = sx >= sz ? Math.cos(rotY) : Math.sin(rotY), uz = sx >= sz ? -Math.sin(rotY) : Math.cos(rotY);
-    for (let d = -long + r; d <= long - r + 1e-6; d += Math.max(1, r)) {
+    for (let d = -long + r; d <= long - r + 1e-6; d += Math.max(1, r * 0.7)) {
       app.clearVegetation?.(x + ux * d, z + uz * d, r, { grass: r, edge: 0.6 });
     }
     out.yards++;
@@ -105,19 +107,35 @@ export async function dressEnemyCamp(app, placed, camp) {
   for (const p of pieces) {
     const { px, pz, hx, hz } = p.fp;
     if (hx < 1.2 && hz < 1.2) continue;            // a jar or a foxhole: no yard
+    if (p.pad === false) continue;                 // a bamboo clump, the net: nobody sweeps there
     yard(px, pz, Math.min(16, 2 * hx + 6), Math.min(16, 2 * hz + 6), p.rotY);
   }
-  // Paths: worn from the EDGE of the forecourt (not all from one point: a
-  // starburst reads as drawn), wandering a little, to each building.
+  // Paths: a TREE grown out from the forecourt — each building joined to the
+  // NEAREST place already joined (the forecourt's edge, or a building), the
+  // way feet wear a camp. Every building straight to the forecourt drew a fan
+  // of spokes (your "starburst", 2026-09-26). Pieces of the fighting line
+  // (noPath: trench segments, bunkers, foxholes) and the green get none.
   let pseed = 17;
   const prnd = () => ((pseed = (pseed * 16807) % 2147483647) / 2147483647);
-  for (const p of pieces) {
-    const { px, pz, hx, hz } = p.fp;
-    if (hx < 2 && hz < 2) continue;
-    // The forecourt is a 26 x 16 m ellipse round (hq.x, hq.z - 14).
-    const fx = hq.x, fz = hq.z - 14;
-    const ang = Math.atan2((pz - fz) / 8, (px - fx) / 13);
-    const ax = fx + Math.cos(ang) * 12, az = fz + Math.sin(ang) * 7.5;
+  const fx = hq.x, fz = hq.z - 14;            // the forecourt: a 26 x 16 m ellipse
+  const edge = (px, pz) => { const ang = Math.atan2((pz - fz) / 8, (px - fx) / 13); return { x: fx + Math.cos(ang) * 12, z: fz + Math.sin(ang) * 7.5 }; };
+  const todo = pieces.filter((p) => !p.noPath && (p.fp.hx >= 1.2 || p.fp.hz >= 1.2));
+  const joined = [];                           // { x, z } of buildings already on the tree
+  const links = [];
+  while (todo.length) {
+    let bi = 0, bd = Infinity, from = null;
+    for (let i = 0; i < todo.length; i++) {
+      const q = todo[i].fp;
+      const e = edge(q.px, q.pz);
+      let d = Math.hypot(q.px - e.x, q.pz - e.z), f = e;
+      for (const j of joined) { const dj = Math.hypot(q.px - j.x, q.pz - j.z); if (dj < d) { d = dj; f = j; } }
+      if (d < bd) { bd = d; bi = i; from = f; }
+    }
+    const q = todo.splice(bi, 1)[0].fp;
+    links.push({ ax: from.x, az: from.z, px: q.px, pz: q.pz });
+    joined.push({ x: q.px, z: q.pz });
+  }
+  for (const { ax, az, px, pz } of links) {
     const len = Math.hypot(px - ax, pz - az);
     if (len < 6) continue;
     const nx = -(pz - az) / len, nz = (px - ax) / len;          // across the path

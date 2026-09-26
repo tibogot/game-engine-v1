@@ -833,7 +833,28 @@ Vietnam, like Apocalypse Now.
       along the résidence's arcade. MEASURED: all decals + wire on the camp
       view 0.56 ms. STILL OPEN from the list: arms-cleaning bench, bomb-crater
       latrine, POW pit with grating, buried-jar cache.
-- [ ] **Fill their base** (the résidence is bare next to our camp). An NVA/VC
+- [x] **FILL THEIR BASE, SECOND PASS** (2026-09-26, your go). Why it still read
+      empty: ~25 small pieces over a 110 x 90 m square of open grass. Now DUG IN
+      and COMPACT, sited by the ground (a crest 5 m up 30 m in front, the camp
+      falling 6 m behind): a ZIG-ZAG TRENCH across the crest (open in the middle
+      for the recruits), 3 LOG BUNKERS (earth over logs, firing slit, branches),
+      foxholes, the towers behind the line; the life of the camp packed behind:
+      3 long houses, the POW compound (3 cages + the new POW PIT with its
+      grating, ladder pulled up, guard's stool), the new ARMS-CLEANING BENCH by
+      the rack, 2 SUPPLY STACKS (rice sacks, crates, firewood), the BURIED-JAR
+      CACHE, the BOMB-CRATER LATRINE out back. Paths now a TREE grown from the
+      forecourt (each building to its nearest joined neighbour), not a fan of
+      spokes; line pieces get none. Grass cleared to each yard's edge (tall
+      blades swallowed the pit and cages). Camo net: 9 cm poles and draped
+      edges (it floated like a carpet). New kit: rtsEnemyCamp.js buildLogBunker,
+      buildPowPit, buildArmsBench, buildCraterLatrine, buildJarCache,
+      buildSupplyStack. Enemy AI still produces and moves through it (90 s ff).
+      YOUR LOOK: still more open grass than a real camp? the net now reads as a
+      mound — keep or rethink?
+- [ ] Still open on their side: WIRE between the line's positions; soldiers
+      idling in the camp (cooking, cleaning rifles, on guard) to make it LIVE;
+      FREE THE PRISONERS as an objective (the pit and the occupied cage).
+- [x] (was) **Fill their base** (the résidence is bare next to our camp). An NVA/VC
       base camp, not a firebase: cook house with a Dien Bien Phu smokeless
       stove (the trench that hides the smoke), rice store, a bamboo-and-thatch
       barracks under the trees, a weapons rack, an arms-cleaning bench, bicycle

@@ -274,13 +274,17 @@ export function buildCamoNet({ seed = 151, w = 9, d = 7 } = {}) {
   const parts = [];
   const hx = (w * S) / 2, hz = (d * S) / 2, hy = 2.6 * S;
   const posts = [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1.05], [0, 1.05]];
-  for (const [x, z] of posts) pole(parts, x * hx, z * hz, hy + r() * 0.3, r, { radius: 0.05 });
+  // (Poles 9 cm, not 5: at 5 they vanished from the RTS camera and the net
+  // floated like a carpet in the air — 2026-09-26.)
+  for (const [x, z] of posts) pole(parts, x * hx, z * hz, hy + r() * 0.3, r, { radius: 0.09 });
   const net = new THREE.PlaneGeometry(hx * 2 + 1, hz * 2 + 1, 12, 10).rotateX(-Math.PI / 2);
   const p = net.attributes.position;
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i) / (hx + 0.5), z = p.getZ(i) / (hz + 0.5);
-    // Sags between posts, droops at the free edges.
-    const sag = 0.55 * (1 - x * x) * (1 - z * z) + 0.35 * Math.max(0, Math.abs(z) - 0.9) * 10;
+    // Sags between posts, and every free edge hangs well down off the poles
+    // (a net draped over a frame, not a tarp stretched flat in the air).
+    const e = Math.max(0, Math.max(Math.abs(x), Math.abs(z)) - 0.78) / 0.22;
+    const sag = 0.55 * (1 - x * x) * (1 - z * z) + 1.5 * e * e;
     p.setY(i, hy - sag + (r() - 0.5) * 0.12);
   }
   net.computeVertexNormals();
@@ -435,4 +439,157 @@ export function buildTrenchBerm({ seed = 211, length = 10 } = {}) {
     parts.push({ geo: new THREE.SphereGeometry(0.4 + r() * 0.3, 5, 4).scale(1.5, 0.35, 0.8), pos: [-L / 2 + r() * L, 0.45, -0.6 + (r() - 0.5) * 0.4], rot: [0, r() * 6, 0], mat: MAT.thatch, tone: 0.08 + r() * 0.2 });
   }
   return finish(parts, { cx: 0, cz: -0.2, hx: L / 2 + 0.2, hz: 1.4 }, 0.9, { cell: 0.2 });
+}
+
+// ── The dug-in pieces (2026-09-26: "fill their base") ────────────────────────
+/**
+ * A LOG BUNKER — the VC position that reads from the air: a low mound of earth
+ * over a roof of logs, a dark firing slit under the logs on the front (-Z, the
+ * way we come), branches cut and laid over the top, the way in at the back.
+ */
+export function buildLogBunker({ seed = 221 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  const hx = 2.2 * S, hz = 1.7 * S, h = 1.15 * S;
+  // The mound: overlapping flattened domes.
+  for (let k = 0; k < 7; k++) {
+    const x = (k / 6 - 0.5) * hx * 1.5;
+    parts.push({ geo: new THREE.SphereGeometry(1, 10, 6).scale(hx * 0.55, h * (0.9 + r() * 0.15), hz * (0.95 + r() * 0.1)), pos: [x, 0, (r() - 0.5) * 0.2], mat: MAT.earth, tone: 0.3 + r() * 0.3 });
+  }
+  // The slit: dark, under a lintel of logs, across most of the front.
+  parts.push({ geo: buildBox(hx * 1.1, 0.32, 0.5), pos: [0, h * 0.42, -hz * 0.78], mat: MAT.steel, tone: 0.02 });
+  for (let k = 0; k < 3; k++) strut(parts, V(-hx * 0.7, h * 0.62 + k * 0.17, -hz * 0.8 - 0.04 * k), V(hx * 0.7, h * 0.64 + k * 0.17, -hz * 0.8 - 0.04 * k), 0.11, MAT.timber, 0.25 + r() * 0.2, 7);
+  // Log ends showing out of the mound's sides.
+  for (const sx of [-1, 1]) for (let k = 0; k < 3; k++) {
+    parts.push({ geo: new THREE.CylinderGeometry(0.12, 0.12, 0.5, 7).rotateX(Math.PI / 2), pos: [sx * hx * 0.95, h * 0.7 - k * 0.05, -hz * 0.4 + k * 0.55], mat: MAT.timber, tone: 0.45 });
+  }
+  // The way in at the back: a dark mouth.
+  parts.push({ geo: buildBox(0.8, 0.9, 0.6), pos: [hx * 0.35, 0.3, hz * 0.85], mat: MAT.steel, tone: 0.02 });
+  // Cut branches over it.
+  for (let k = 0; k < 9; k++) {
+    parts.push({ geo: new THREE.SphereGeometry(0.5 + r() * 0.35, 5, 4).scale(1.6, 0.3, 0.8), pos: [(r() - 0.5) * hx * 1.6, h * 0.95 + r() * 0.1, (r() - 0.5) * hz * 1.2], rot: [0, r() * 6, 0], mat: MAT.thatch, tone: 0.06 + r() * 0.18 });
+  }
+  return finish(parts, { cx: 0, cz: 0, hx: hx + 0.2, hz: hz + 0.2 }, h + 0.2, { cell: 0.25 });
+}
+
+/**
+ * THE POW PIT: a square hole, a bamboo GRATING across it weighed down with
+ * stones, the ladder pulled up and laid beside it, the guard's stool and his
+ * water jar. The hole is dark (the ground is not dug — a sunk dark box).
+ */
+export function buildPowPit({ seed = 231 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  const h = 1.3 * S;                                 // half the hole
+  parts.push({ geo: buildBox(h * 2, 0.5, h * 2), pos: [0, -0.22, 0], mat: MAT.steel, tone: 0.01 });
+  // A lip of trodden mud round it.
+  for (const [sx, sz, w, d] of [[0, -1, h * 2 + 0.8, 0.4], [0, 1, h * 2 + 0.8, 0.4], [-1, 0, 0.4, h * 2], [1, 0, 0.4, h * 2]]) {
+    parts.push({ geo: buildBox(w, 0.08, d), pos: [sx * (h + 0.2), 0.04, sz * (h + 0.2)], mat: MAT.earth, tone: 0.2 + r() * 0.15 });
+  }
+  // The grating: poles one way, two cross rails lashed on top.
+  for (let x = -h + 0.1; x <= h - 0.05; x += 0.2) strut(parts, V(x, 0.1, -h - 0.35), V(x + (r() - 0.5) * 0.05, 0.1, h + 0.35), 0.045, MAT.bamboo, 0.35 + r() * 0.35);
+  for (const z of [-h * 0.55, h * 0.55]) strut(parts, V(-h - 0.3, 0.19, z), V(h + 0.3, 0.19, z + (r() - 0.5) * 0.1), 0.05, MAT.bamboo, 0.5);
+  // Stones on the corners.
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    parts.push({ geo: new THREE.SphereGeometry(0.22 + r() * 0.08, 6, 5).scale(1.2, 0.7, 1), pos: [sx * (h + 0.1), 0.24, sz * (h + 0.1)], mat: MAT.laterite, tone: 0.4 + r() * 0.2 });
+  }
+  // The ladder, pulled up: two rails and rungs, lying on the ground.
+  const lx = h + 1.0;
+  for (const sz of [-0.25, 0.25]) strut(parts, V(lx + sz, 0.06, -h * 1.1), V(lx + sz + 0.1, 0.06, h * 1.1), 0.04, MAT.bamboo, 0.5);
+  for (let z = -h; z <= h; z += 0.4) strut(parts, V(lx - 0.26, 0.08, z), V(lx + 0.34, 0.08, z + 0.05), 0.025, MAT.bamboo, 0.55);
+  // The guard's stool and jar.
+  parts.push({ geo: buildBox(0.4, 0.05, 0.3), pos: [-h - 1.0, 0.42, -0.4], mat: MAT.timber, tone: 0.4 });
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push({ geo: buildBox(0.05, 0.4, 0.05), pos: [-h - 1.0 + sx * 0.16, 0.2, -0.4 + sz * 0.11], mat: MAT.timber, tone: 0.4 });
+  parts.push({ geo: new THREE.CylinderGeometry(0.2, 0.15, 0.42, 10), pos: [-h - 1.0, 0.21, 0.3], mat: MAT.earth, tone: 0.6 });
+  return finish(parts, { cx: 0.3, cz: 0, hx: h + 1.5, hz: h + 0.6 }, 0.6, { cell: 0.14, radius: 1 });
+}
+
+/** The ARMS-CLEANING bench: trestles and planks, rifles stripped on it, a can, a rag, a stool each side. */
+export function buildArmsBench({ seed = 241 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  const w = 2.2 * S, d = 0.7 * S, y = 0.75 * S;
+  parts.push({ geo: buildBox(w, 0.05, d), pos: [0, y, 0], mat: MAT.timber, tone: 0.45 });
+  for (const sx of [-1, 1]) {
+    strut(parts, V(sx * w * 0.4, 0, -d * 0.45), V(sx * w * 0.4, y - 0.03, 0), 0.04, MAT.timber, 0.35);
+    strut(parts, V(sx * w * 0.4, 0, d * 0.45), V(sx * w * 0.4, y - 0.03, 0), 0.04, MAT.timber, 0.35);
+  }
+  // Rifles laid flat, the middle one stripped: stock and receiver apart.
+  for (let k = 0; k < 3; k++) {
+    const z = -d * 0.3 + k * d * 0.3, x0 = -w * 0.35 + r() * 0.2, len = 0.9 * S;
+    parts.push({ geo: buildBox(len * 0.38, 0.05, 0.08), pos: [x0, y + 0.05, z], rot: [0, (r() - 0.5) * 0.15, 0], mat: MAT.timber, tone: 0.3 + r() * 0.2 });
+    parts.push({ geo: buildBox(len * 0.6, 0.04, 0.05), pos: [x0 + len * (k === 1 ? 0.62 : 0.48), y + 0.05, z], rot: [0, (r() - 0.5) * 0.15, 0], mat: MAT.steel, tone: 0.2 });
+  }
+  parts.push({ geo: new THREE.CylinderGeometry(0.07, 0.07, 0.16, 10), pos: [w * 0.35, y + 0.1, -d * 0.2], mat: MAT.paint, tone: 0.3 });
+  parts.push({ geo: buildBox(0.3, 0.03, 0.22), pos: [w * 0.3, y + 0.04, d * 0.2], rot: [0, 0.4, 0], mat: MAT.canvas, tone: 0.7 });
+  for (const sz of [-1, 1]) {
+    const sx = (r() - 0.5) * 0.6, szz = sz * (d / 2 + 0.4);
+    parts.push({ geo: buildBox(0.36, 0.05, 0.3), pos: [sx, 0.45, szz], mat: MAT.timber, tone: 0.4 });
+    for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push({ geo: buildBox(0.04, 0.44, 0.04), pos: [sx + a * 0.14, 0.22, szz + b * 0.1], mat: MAT.timber, tone: 0.4 });
+  }
+  return finish(parts, { cx: 0, cz: 0, hx: w / 2 + 0.2, hz: d / 2 + 0.7 }, y + 0.2, { cell: 0.12, radius: 1 });
+}
+
+/**
+ * A BOMB-CRATER LATRINE: a crater's rim of thrown-up earth round a dark, wet
+ * bottom, a plank laid across it, a screen of woven bamboo on three sides.
+ */
+export function buildCraterLatrine({ seed = 251 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  const R = 2.0 * S;
+  parts.push({ geo: new THREE.CylinderGeometry(R * 0.8, R * 0.55, 0.35, 16), pos: [0, -0.1, 0], mat: MAT.steel, tone: 0.03 });
+  for (let k = 0; k < 14; k++) {
+    const a = (k / 14) * Math.PI * 2 + r() * 0.2;
+    parts.push({ geo: new THREE.SphereGeometry(0.7 + r() * 0.25, 7, 5).scale(1.3, 0.4, 0.8), pos: [Math.sin(a) * R, 0.05, Math.cos(a) * R], rot: [0, -a, 0], mat: MAT.earth, tone: 0.25 + r() * 0.3 });
+  }
+  parts.push({ geo: buildBox(R * 2.1, 0.06, 0.32), pos: [0, 0.3, 0], rot: [0, 0.15, 0.02], mat: MAT.timber, tone: 0.45 });
+  // The screen: three panels of woven bamboo, open toward the camp (-Z).
+  for (const [a, w] of [[0, R * 1.6], [Math.PI / 2, R * 1.3], [-Math.PI / 2, R * 1.3]]) {
+    const cx = Math.sin(a) * (R + 0.6), cz = Math.cos(a) * (R + 0.6);
+    parts.push({ geo: buildBox(w, 1.5, 0.05), pos: [cx, 0.85, cz], rot: [0, a, (r() - 0.5) * 0.05], mat: MAT.woven, tone: 0.4 + r() * 0.2 });
+  }
+  return finish(parts, { cx: 0, cz: 0, hx: R + 0.8, hz: R + 0.8 }, 1.6, { cell: 0.2 });
+}
+
+/** A BURIED-JAR CACHE: jar mouths in a patch of turned earth, lids on two, a shovel left in the spoil. */
+export function buildJarCache({ seed = 261 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  parts.push({ geo: new THREE.CylinderGeometry(1.6 * S, 1.8 * S, 0.06, 14).scale(1.2, 1, 0.9), pos: [0, 0.02, 0], mat: MAT.earth, tone: 0.12 });
+  for (let k = 0; k < 4; k++) {
+    const x = (k % 2 - 0.5) * 1.1 * S + (r() - 0.5) * 0.3, z = (Math.floor(k / 2) - 0.5) * 0.9 * S;
+    parts.push({ geo: new THREE.TorusGeometry(0.2, 0.06, 6, 12).rotateX(Math.PI / 2), pos: [x, 0.07, z], mat: MAT.earth, tone: 0.55 });
+    parts.push({ geo: new THREE.CylinderGeometry(0.17, 0.17, 0.05, 10), pos: [x, 0.02, z], mat: MAT.steel, tone: 0.02 });
+    if (k < 2) parts.push({ geo: new THREE.CylinderGeometry(0.26, 0.26, 0.05, 10), pos: [x + 0.03, 0.1, z], rot: [0.08, 0, 0.05], mat: MAT.timber, tone: 0.4 });
+  }
+  // Spoil and the shovel stuck in it.
+  parts.push({ geo: new THREE.SphereGeometry(0.6, 7, 5).scale(1.4, 0.45, 1), pos: [1.7 * S, 0.1, 0.3], mat: MAT.earth, tone: 0.35 });
+  strut(parts, V(1.7 * S, 0.1, 0.3), V(1.9 * S, 1.2, 0.5), 0.025, MAT.timber, 0.4);
+  parts.push({ geo: buildBox(0.22, 0.28, 0.03), pos: [1.7 * S - 0.02, 0.18, 0.28], rot: [0.2, 0, 0.18], mat: MAT.steel, tone: 0.3 });
+  return finish(parts, { cx: 0, cz: 0, hx: 2.4 * S, hz: 1.6 * S }, 1.2, { cell: 0.14, radius: 1 });
+}
+
+/**
+ * SUPPLIES in the open: rice in sacks, crates of Chinese ammunition, a stack
+ * of split firewood between stakes. The weight of what came down the trail.
+ */
+export function buildSupplyStack({ seed = 271 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  // Sacks: three courses, staggered.
+  for (let c = 0; c < 3; c++) for (let k = 0; k < 4 - c; k++) {
+    parts.push({ geo: new THREE.SphereGeometry(0.42, 8, 6).scale(1.2, 0.55, 0.8), pos: [-1.4 + k * 0.9 + c * 0.45, 0.2 + c * 0.4, -0.6], rot: [0, (r() - 0.5) * 0.3, 0], mat: MAT.hessian, tone: 0.5 + r() * 0.3 });
+  }
+  // Crates.
+  for (let k = 0; k < 5; k++) {
+    const c = k < 3 ? 0 : 1;
+    parts.push({ geo: buildBox(0.8, 0.42, 0.5), pos: [-1.2 + (k % 3) * 0.86 + c * 0.4, 0.21 + c * 0.42, 0.5], rot: [0, (r() - 0.5) * 0.1, 0], mat: MAT.timber, tone: 0.5 + r() * 0.2 });
+  }
+  // Firewood: split logs stacked between two stakes.
+  for (let c = 0; c < 4; c++) for (let k = 0; k < 5; k++) {
+    parts.push({ geo: new THREE.CylinderGeometry(0.08, 0.08, 1.0, 6).rotateX(Math.PI / 2), pos: [1.6 + k * 0.17, 0.08 + c * 0.15, 0], mat: MAT.timber, tone: 0.3 + r() * 0.3 });
+  }
+  for (const sx of [1.5, 2.45]) strut(parts, V(sx, 0, 0), V(sx, 0.8, 0), 0.03, MAT.timber, 0.4);
+  return finish(parts, { cx: 0.3, cz: 0, hx: 2.4, hz: 1.1 }, 1.4, { cell: 0.14, radius: 1 });
 }
