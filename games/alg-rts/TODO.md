@@ -8,6 +8,91 @@ Keep this file current: tick things off here, add new asks here.
 
 ---
 
+## YOUR ASKS — 2026-09-27
+
+- [x] **Searchlight tower** (steel lattice, railed platform, caged ladder,
+      generator shed; the lamp its own mesh, `userData.lamp` with a `beam`
+      origin, to sweep at night; 2.2k tris) and **SAS post** (2.8k tris).
+- [x] **SAS post = the French lever on a HAMLET, not a forward base**
+      (decided 2026-09-27 — you weren't sure; history says the SAS were
+      civil-military posts IN villages: school, free clinic, the officer
+      who ran the douar). Built beside a hamlet; raises French support
+      there, reveals ALN buildings nearby; reinforcing there is a small
+      extra. Whitewashed house + veranda, "S.A.S." over the school door,
+      a medical cross over the clinic's, walled yard, well, water tank,
+      cloth tricolour, sandbagged corner, radio mast.
+- [ ] **Buildings must clear the map's vegetation under them** (seen: the
+      oasis palms grow through the SAS post in the showroom). A build-
+      system job: clear foliage/plants in the footprint when placing.
+- [ ] **The rock texture is too SHINY — reads as metal** (you). It is the
+      map's **"Limestone ridge"** paint layer (Poly Haven
+      `rock_boulder_cracked`): its roughness map lets every stone catch a
+      hard highlight under the Aurès sun, like metal nuggets. Fix: raise
+      that layer's roughness (a floor ~0.85, or roughStr down), soften its
+      normal; judge side by side in the game. (Not the orange cliff at the
+      map edge.)
+- [ ] **Windsock that moves with the wind, like the flags** (you). Cheap: one
+      small mesh. Better as a VERTEX-animated cone than a cloth sim — it
+      swings to the wind direction, fills and droops with wind speed,
+      flutters at the tail — and shares ONE wind (direction + strength)
+      with the flags, smoke and, later, the sandstorm.
+- [ ] **FILL THE MAP** once buildings and vehicles are done (you): see
+      "SUGGESTIONS — look & world" below, the first block.
+
+## SUGGESTIONS — look & world (not gameplay) — ranked, 2026-09-27
+
+**1. Fill the map (the biggest visual gap: it is bare ground now)**
+- Palms, several trunk SHAPES (you): straight, leaning, CURVED (the trunk
+  bending up out of a lean, as date palms do by water), clumps of 2-4 from
+  one root, young ones with the old frond skirt still on. Date palms in the
+  oases and wadi floors, Canary palms planted at the post and the SAS post,
+  doum palms as scrub on dry slopes (the doum's far LOD is still owed).
+- Atlas cedar on the heights (the Aurès's signature: the Belezma and
+  Chélia cedar forests), Aleppo pine and holm oak lower down.
+- Oleander along every wadi — pink in flower, the most recognisable line
+  in a dry Algerian valley. Tamarisk in the wadi beds.
+- Prickly pear hedges round the villages and gardens; fig and olive trees
+  in walled gardens; almond on terraces.
+- Alfa (esparto) grass steppe on the open slopes; juniper and lentisk scrub.
+- Villages: more mechtas and a DECHRA (a stone village climbing a ridge,
+  flat roofs stepping down), terraced gardens, a KOUBBA (a marabout's white
+  domed tomb) on a hilltop — the one white thing that isn't French — a
+  cemetery of upright stones, threshing floors, a well with a trough,
+  zeribas (thorn-brush animal pens).
+- Animals: goat and sheep herds with a shepherd (they move, graze, flee
+  shooting), donkeys and mules (packed), dogs at the villages, a few camels
+  on the plain edge.
+- Birds: storks nesting on the koubba and the SAS roof, kites and vultures
+  circling high (their shadows cross the ground), ravens on the cliffs, a
+  flock of sparrows flushing from the gardens. nam's bird system carries
+  over.
+
+**2. The ground itself**
+- The shiny rock layer (above).
+- Tracks: the French piste between the post and the hamlets (dust, ruts,
+  telegraph poles along it), footpaths up to the ALN's side.
+- Dry-stone terrace walls on the gardened slopes.
+- Decals: wheel ruts, animal tracks, spent-case scatter and scorch at
+  positions, dark stains under drums.
+
+**3. Air and light**
+- One shared WIND for flags, windsock, smoke, dust (above).
+- Dust devils crossing the plain now and then; heat shimmer over the far
+  ground at midday; dust kicked up behind every moving vehicle.
+- Smoke from the mechtas' cooking fires in the morning and evening.
+- Cloud shadows crossing the ground (the engine has them, opt-in).
+- The sandstorm (already on the list).
+- Night: stars, searchlight beams sweeping from the post, the villages'
+  lamp-lit doorways, flares.
+
+**4. Sound (ambience, not gameplay)**
+- Wind over the ridges, cicadas in the heat, goat bells, dogs in the
+  villages, the searchlight generator's hum at the post.
+
+**5. Finish**
+- The black band under the horizon at very high orbit (on the list).
+- A far LOD for every placed asset, and the impostor for the doum.
+
 ## Decisions so far
 
 - Same style as nam-rts for now (may change later). Same engine, same editor.

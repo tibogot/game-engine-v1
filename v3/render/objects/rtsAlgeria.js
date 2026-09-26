@@ -868,3 +868,176 @@ export function buildMineMarker({ seed = 1960 } = {}) {
   parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.28, 0.22, 0.24), pos: [cx - 0.02, 0.52, cz], rot: [0.2, R() * 3, 0.1], mat: MAT.limestone, tone: 0.6 });
   return finish(parts, { hx: 1.2, hz: 0.9, cx: 0.35, cz: 0.15, height: 0.7 });
 }
+
+// ── FRENCH, continued ───────────────────────────────────────────────────────
+
+/**
+ * SEARCHLIGHT TOWER — steel, not the mirador's timber: four angle-iron legs
+ * braced in three bays, a grated platform with its rail, a caged ladder, and
+ * on top the 60 cm searchlight that sweeps the wire at night. The generator
+ * shed at its foot, the cable run up a leg. The lamp is its own geometry
+ * (`userData.lamp`, pivot at its yoke) so the game can sweep it; its beam
+ * leaves along the lamp's local -Z.
+ */
+export function buildSearchlightTower({ seed = 37 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const B = 1.7, T = 0.75, H = 9;                // leg spread at the foot, at the top; platform height
+  const legs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  const at = (sx, sz, f) => [sx * (B + (T - B) * f), H * f, sz * (B + (T - B) * f)];
+  for (const [sx, sz] of legs) {
+    parts.push({ geo: buildBox(0.5, 0.3, 0.5), pos: [sx * B, 0.1, sz * B], mat: MAT.concrete, tone: 0.5 });
+    parts.push(wirePart([sx * B, 0.2, sz * B], at(sx, sz, 1.0), 0.07, { tone: 0.32 }));
+  }
+  const bays = [0.03, 0.36, 0.68, 1.0];
+  for (let i = 0; i < 4; i++) {
+    const [ax, az] = legs[i], [bx, bz] = legs[(i + 1) % 4];
+    for (let b = 0; b < 3; b++) {
+      parts.push(wirePart(at(ax, az, bays[b]), at(bx, bz, bays[b + 1]), 0.028, { tone: 0.35 }));
+      if (b) parts.push(wirePart(at(ax, az, bays[b]), at(bx, bz, bays[b]), 0.034, { tone: 0.33 }));
+    }
+  }
+  // The platform: grating on bearers, the rail with a mid-rail and kick plate.
+  const P = T + 0.55;
+  parts.push({ geo: buildBox(2 * P, 0.08, 2 * P), pos: [0, H + 0.04, 0], mat: MAT.steel, tone: 0.3 });
+  for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.1, 0.14, 2 * P + 0.2), pos: [sx * T, H - 0.07, 0], mat: MAT.steel, tone: 0.25 });
+  const rail = [[-P, -P], [P, -P], [P, P], [-P, P]];
+  for (const [x, z] of rail) parts.push(wirePart([x, H + 0.08, z], [x, H + 1.1, z], 0.025, { tone: 0.35 }));
+  for (let i = 0; i < 4; i++) {
+    const [ax, az] = rail[i], [bx, bz] = rail[(i + 1) % 4];
+    if (i === 2) continue;                                   // the back: the ladder comes up here
+    parts.push(wirePart([ax, H + 1.08, az], [bx, H + 1.08, bz], 0.022, { tone: 0.35 }));
+    parts.push(wirePart([ax, H + 0.6, az], [bx, H + 0.6, bz], 0.016, { tone: 0.35 }));
+  }
+  // The ladder up the back (+Z), its safety cage from 2.5 m.
+  const lz = T + 0.6;
+  for (const sx of [-0.22, 0.22]) parts.push(wirePart([sx, 0, lz + 0.35], [sx, H + 1.0, lz - 0.05], 0.022, { tone: 0.3 }));
+  for (let k = 1; k < 30; k++) {
+    const f = k / 30;
+    parts.push(wirePart([-0.22, H * f, lz + 0.35 - 0.4 * f], [0.22, H * f, lz + 0.35 - 0.4 * f], 0.012, { tone: 0.35 }));
+  }
+  for (let k = 0; k < 8; k++) {
+    const y = 2.5 + k * 0.9, z = lz + 0.35 - 0.4 * (y / H);
+    parts.push({ geo: new THREE.TorusGeometry(0.38, 0.014, 4, 10, Math.PI), pos: [0, y, z], rot: [Math.PI / 2, 0, 0], mat: MAT.steel, tone: 0.35 });
+  }
+  // The generator shed at the foot, its exhaust, the cable up the right-front leg.
+  const gx = B + 1.8, gz = -0.6;
+  parts.push({ geo: buildBox(1.9, 1.5, 1.3), pos: [gx, 0.73, gz], mat: MAT.metal, tone: 0.45 });
+  parts.push({ geo: buildBox(2.2, 0.08, 1.6), pos: [gx, 1.53, gz], rot: [0.1, 0, 0], mat: MAT.metal, tone: 0.35 });
+  parts.push({ geo: buildBox(0.8, 1.2, 0.05), pos: [gx - 0.3, 0.62, gz - 0.68], mat: MAT.paint, tone: 0.35 });
+  parts.push(wirePart([gx + 0.6, 1.4, gz + 0.3], [gx + 0.6, 2.6, gz + 0.3], 0.045, { tone: 0.12 }));
+  parts.push({ geo: new THREE.ConeGeometry(0.1, 0.12, 8), pos: [gx + 0.6, 2.66, gz + 0.3], mat: MAT.steel, tone: 0.15 });
+  parts.push(wirePart([gx - 0.95, 0.5, gz + 0.2], [B + 0.08, 0.5, -B + 0.1], 0.02, { mat: MAT.rubber, tone: 0.3 }));
+  parts.push(wirePart([B + 0.08, 0.5, -B + 0.1], [T + 0.08, H - 0.1, -T + 0.1], 0.02, { mat: MAT.rubber, tone: 0.3 }));
+  for (let k = 0; k < 3; k++) parts.push({ geo: buildOilDrum(), pos: [gx + 0.3 + k * 0.62, 0, gz + 1.3], rot: [0, R() * 3, 0], mat: MAT.metal, tone: 0.3 + R() * 0.25 });
+  const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
+  parts.push({ geo: buildSandbagWall({ length: 2.6, courses: 3, seed: seed + 1, bag }), pos: [gx, 0, gz - 1.25], mat: null });
+  const geo = finish(parts, { hx: 3.6, hz: 2.6, cx: 1.1, cz: 0.2, height: H + 2, ao: { cell: 0.25, strength: 0.4 } });
+
+  // The lamp: yoke on a turntable, the drum, lens, rear cap, cooling rings.
+  const lamp = [];
+  lamp.push({ geo: new THREE.CylinderGeometry(0.22, 0.26, 0.12, 12), pos: [0, 0.06, 0], mat: MAT.steel, tone: 0.2 });
+  for (const sx of [-1, 1]) lamp.push({ geo: buildBox(0.06, 0.55, 0.12), pos: [sx * 0.41, 0.38, 0], mat: MAT.steel, tone: 0.2 });
+  lamp.push({ geo: buildBox(0.84, 0.07, 0.14), pos: [0, 0.135, 0], mat: MAT.steel, tone: 0.22 });
+  lamp.push({ geo: new THREE.CylinderGeometry(0.34, 0.34, 0.62, 16).rotateX(Math.PI / 2), pos: [0, 0.6, 0], mat: MAT.paint, tone: 0.4 });
+  lamp.push({ geo: new THREE.CylinderGeometry(0.3, 0.3, 0.05, 16).rotateX(Math.PI / 2), pos: [0, 0.6, -0.32], mat: MAT.white, tone: 0.95 });
+  lamp.push({ geo: new THREE.CylinderGeometry(0.37, 0.37, 0.04, 16, 1, true).rotateX(Math.PI / 2), pos: [0, 0.6, -0.3], mat: MAT.steel, tone: 0.15 });
+  lamp.push({ geo: new THREE.CylinderGeometry(0.2, 0.33, 0.16, 16).rotateX(-Math.PI / 2), pos: [0, 0.6, 0.39], mat: MAT.paint, tone: 0.35 });
+  for (let k = 0; k < 3; k++) lamp.push({ geo: new THREE.TorusGeometry(0.35, 0.012, 4, 16), pos: [0, 0.6, -0.12 + k * 0.14], mat: MAT.steel, tone: 0.2 });
+  const lampGeo = assemble(lamp);
+  bakeContactAO(lampGeo, { cell: 0.06, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+  lampGeo.scale(S, S, S);
+  geo.userData.lamp = { geo: lampGeo, pivot: [0, (H + 0.08) * S, -0.35 * S], beam: [0, 0.6 * S, -0.35 * S] };
+  geo.userData.parts = { lamp: lampGeo };
+  return geo;
+}
+
+/**
+ * SAS POST — a Section Administrative Spécialisée: the French army's
+ * civil-military post IN a village — a school, a free clinic, the officer
+ * who ran the douar, a few harkis on guard. Not a forward base: the French
+ * side's lever on a hamlet's support (TODO.md PROPOSAL). A whitewashed
+ * building with a tiled roof and a veranda, "S.A.S." over the school door
+ * and a medical cross over the clinic's; a walled yard with its gate, a
+ * well, a water tank on its stand, the flagpole (`userData.flagMount`), a
+ * sandbagged corner, the radio mast. Front (the gate) at local -Z.
+ */
+export function buildSasPost({ seed = 41 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const WX = 11, WZ = 8, WT = 0.35, WH = 1.6;    // yard half-sizes, wall thickness, height
+  // The yard wall: front and back full width, the sides between (lower and
+  // thinner, so no face of one is flush with a face of the other).
+  const wall = (x0, x1, z, h, t) => parts.push({ geo: buildBox(x1 - x0, h, t), pos: [(x0 + x1) / 2, h / 2 - 0.05, z], mat: MAT.white, tone: 0.55 + R() * 0.08 });
+  const G = 1.75;                                              // half the gate
+  wall(-WX - WT / 2, -G, -WZ, WH, WT);
+  wall(G, WX + WT / 2, -WZ, WH, WT);
+  wall(-WX - WT / 2, WX + WT / 2, WZ, WH, WT);
+  for (const sx of [-1, 1]) parts.push({ geo: buildBox(WT - 0.02, WH - 0.04, 2 * WZ - WT - 0.02), pos: [sx * WX, (WH - 0.04) / 2 - 0.05, 0], mat: MAT.white, tone: 0.56 });
+  // Gate pillars with caps, a timber gate standing open.
+  for (const sx of [-1, 1]) {
+    parts.push({ geo: buildBox(0.6, 2.3, 0.6), pos: [sx * (G + 0.2), 1.1, -WZ], mat: MAT.white, tone: 0.62 });
+    parts.push({ geo: buildBox(0.74, 0.12, 0.74), pos: [sx * (G + 0.2), 2.29, -WZ], mat: MAT.concrete, tone: 0.55 });
+  }
+  parts.push({ geo: buildBox(1.6, 1.5, 0.07).translate(0.8, 0, 0), pos: [-G + 0.1, 0.85, -WZ + 0.35], rot: [0, -1.25, 0], mat: MAT.timber, tone: 0.35 });
+
+  // The building: 12 × 6, walls 3.6, a tiled gable roof.
+  const BZ = 2.2, BD = 6, BW = 12, BH = 3.6;
+  parts.push({ geo: buildBox(BW, BH + 0.05, BD), pos: [0, (BH + 0.05) / 2 - 0.05, BZ], mat: MAT.white, tone: 0.62 });
+  const rise = 1.35, half = BD / 2 + 0.45, slope = Math.hypot(half, rise), pitch = Math.atan2(rise, half);
+  for (const sz of [-1, 1]) {
+    parts.push({ geo: buildBox(BW + 0.7 + (sz > 0 ? 0.04 : 0), 0.14, slope), pos: [0, BH + rise / 2 - 0.02, BZ + sz * half / 2], rot: [sz * pitch, 0, 0], mat: MAT.tile, tone: 0.5 });
+  }
+  parts.push({ geo: buildBox(BW + 0.8, 0.14, 0.3), pos: [0, BH + rise + 0.06, BZ], mat: MAT.tile, tone: 0.4 });
+  const gable = new THREE.Shape([new THREE.Vector2(-BD / 2, 0), new THREE.Vector2(BD / 2, 0), new THREE.Vector2(0, rise - 0.05)]);
+  for (const sx of [-1, 1]) {
+    const g = faceted(new THREE.ExtrudeGeometry(gable, { depth: 0.3, bevelEnabled: false }).rotateY(Math.PI / 2), { boxUV: true });
+    parts.push({ geo: g, pos: [sx * (BW / 2 - 0.02) - (sx > 0 ? 0.3 : 0), BH - 0.02, BZ], mat: MAT.white, tone: 0.6 });
+  }
+  // The veranda along the front: its floor, four columns, a tiled lean-to roof.
+  const VZ = BZ - BD / 2 - 1.3;
+  parts.push({ geo: buildBox(BW + 0.6, 0.28, 2.7), pos: [0, 0.09, VZ + 0.05], mat: MAT.concrete, tone: 0.55 });
+  for (const x of [-5.9, -2, 2, 5.9]) parts.push({ geo: buildBox(0.32, 2.85, 0.32), pos: [x, 0.23 + 1.425, VZ - 1.05], mat: MAT.white, tone: 0.66 });
+  parts.push({ geo: buildBox(BW + 0.9, 0.12, 3.0), pos: [0, 3.12, VZ + 0.15], rot: [-0.12, 0, 0], mat: MAT.tile, tone: 0.45 });
+  // Doors (school left, clinic right), windows with open shutters.
+  const fz = BZ - BD / 2 - 0.04;
+  for (const x of [-3, 3]) parts.push({ geo: buildBox(1.15, 2.2, 0.08), pos: [x, 0.23 + 1.1, fz], mat: MAT.timber, tone: 0.3 });
+  for (const x of [-5, -0.95, 0.95, 5]) {
+    parts.push({ geo: buildBox(0.85, 1.15, 0.06), pos: [x, 1.9, fz + 0.01], mat: MAT.steel, tone: 0.05 });
+    for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.42, 1.17, 0.04).translate(sx * 0.21, 0, 0), pos: [x + sx * 0.45, 1.9, fz - 0.04], rot: [0, sx * -1.95, 0], mat: MAT.timber, tone: 0.5 });
+  }
+  // The yard: the well, the water tank on its stand, the flag's plinth,
+  // a sandbagged corner, benches.
+  const wx = -6.5, wz = -4.5;
+  const well = new THREE.LatheGeometry([[0.72, -0.05], [0.72, 0.8], [0.56, 0.8], [0.56, 0.45]].map(([r, y]) => new THREE.Vector2(r, y)), 14);
+  parts.push({ geo: well, pos: [wx, 0, wz], mat: MAT.white, tone: 0.6 });
+  parts.push({ geo: new THREE.CylinderGeometry(0.57, 0.57, 0.06, 14), pos: [wx, 0.47, wz], mat: MAT.steel, tone: 0 });
+  for (const sx of [-1, 1]) parts.push(wirePart([wx + sx * 0.66, 0.78, wz], [wx + sx * 0.6, 2.0, wz], 0.05, { mat: MAT.timber, tone: 0.3 }));
+  parts.push(wirePart([wx - 0.7, 1.95, wz], [wx + 0.7, 1.95, wz], 0.045, { mat: MAT.timber, tone: 0.28 }));
+  parts.push(wirePart([wx, 1.93, wz], [wx, 1.3, wz], 0.006, { tone: 0.3 }));
+  parts.push({ geo: new THREE.CylinderGeometry(0.13, 0.1, 0.22, 8), pos: [wx, 1.2, wz], mat: MAT.metal, tone: 0.3 });
+  const tx = 8.3, tz = 5.3, tH = 4.1;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push(wirePart([tx + sx * 0.85, 0, tz + sz * 0.85], [tx + sx * 0.7, tH, tz + sz * 0.7], 0.05, { tone: 0.3 }));
+  parts.push({ geo: buildBox(1.9, 0.1, 1.9), pos: [tx, tH + 0.03, tz], mat: MAT.steel, tone: 0.3 });
+  parts.push({ geo: new THREE.CylinderGeometry(1.05, 1.05, 1.55, 16), pos: [tx, tH + 0.84, tz], mat: MAT.metal, tone: 0.45 });
+  parts.push({ geo: new THREE.ConeGeometry(1.1, 0.3, 16), pos: [tx, tH + 1.76, tz], mat: MAT.metal, tone: 0.35 });
+  parts.push({ geo: buildBox(0.8, 0.5, 0.8), pos: [0, 0.2, -4.2], mat: MAT.white, tone: 0.6 });
+  const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
+  parts.push({ geo: buildSandbagWall({ length: 3.2, courses: 5, seed: seed + 1, bag }), pos: [WX - 2.3, 0, -WZ + 1.3], mat: null });
+  parts.push({ geo: buildSandbagWall({ length: 2.6, courses: 5, seed: seed + 2, bag }), pos: [WX - 3.85, 0, -WZ + 2.55], rot: [0, Math.PI / 2, 0], mat: null });
+  for (const x of [-4.2, 4.2]) parts.push({ geo: buildBox(1.8, 0.1, 0.4), pos: [x, 0.66, VZ + 0.4], mat: MAT.timber, tone: 0.4 }, { geo: buildBox(1.6, 0.4, 0.3), pos: [x, 0.43, VZ + 0.4], mat: MAT.timber, tone: 0.3 });
+  // The radio mast off the roof, guyed.
+  const mx = 4.5, mz = BZ + 1.8, mBase = BH + 0.5;
+  parts.push(wirePart([mx, mBase, mz], [mx, mBase + 7, mz], 0.04, { tone: 0.35 }));
+  for (const [dx, dz] of [[-2.5, 1], [2.2, 0.8], [0.3, -2.4]]) parts.push(wirePart([mx, mBase + 5.5, mz], [mx + dx, BH + 0.4, mz + dz], 0.006, { tone: 0.4 }));
+
+  // Markings: the S.A.S. board over the school, the cross over the clinic,
+  // a little tricolour board over the gate.
+  const st = [
+    stencilPatch("frSasSign", flatSurface([-3, 2.95, fz - 0.005], [0, 0, -1], [-1, 0, 0], 1.7, "frSasSign"), { lift: 0.01 }),
+    stencilPatch("medicCross", flatSurface([3, 2.9, fz - 0.005], [0, 0, -1], [-1, 0, 0], 0.55, "medicCross"), { lift: 0.01 }),
+  ];
+  const geo = finishWithStencils(parts, st, { hx: WX + 0.6, hz: WZ + 0.6, height: BH + rise + 2 });
+  geo.userData.flagMount = { pos: [0, 0.45 * S, -4.2 * S], poleHeight: 8 * S };
+  return geo;
+}

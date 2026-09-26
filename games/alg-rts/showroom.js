@@ -13,7 +13,7 @@ import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
 import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildCaveEntrance, buildFrSandbagWall, buildHelipad, buildMgNest, buildMineMarker, buildMirador, buildMortarPit, buildMotorPool, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildCaveEntrance, buildFrSandbagWall, buildHelipad, buildMgNest, buildMineMarker, buildMirador, buildMortarPit, buildMotorPool, buildSangar, buildSasPost, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -56,6 +56,8 @@ export const BASE_BUILDABLES = [
   // (half-size 22 × 24 + 1.5): a rim cut into it left the post's wire floating.
   { key: "mirador", build: buildMirador, lx: 34, lz: 22, yaw: 0.25 },
   { key: "mgNest", build: buildMgNest, lx: -14, lz: 40, yaw: -0.2 },
+  // Out in front, over the wire: the searchlight sweeps the approach.
+  { key: "searchlight", build: buildSearchlightTower, lx: 26, lz: 46, yaw: 0.2 },
   // The post's left flank: the pad, the mortars behind the mirador.
   { key: "helipad", build: buildHelipad, lx: 56, lz: 2, yaw: 0 },
   { key: "mortarPit", build: buildMortarPit, lx: 36, lz: -24, yaw: 0.1 },
@@ -75,6 +77,15 @@ function fromBase(lx, lz, site = BASE) {
 }
 
 const ALN_SITE = { ...ALN, yaw: siteYaw(ALN) };
+
+/**
+ * The SAS post goes BESIDE a hamlet, not at the French base: it is the
+ * French side's lever on that hamlet's support. Hamlet frame; the spot
+ * MEASURED gentle (height spread ~1 m over its yard) and clear of the
+ * hamlet's pad and rim.
+ */
+const HAMLET_SITE = { ...HAMLETS[0], yaw: siteYaw(HAMLETS[0]) };
+export const SAS_POST = { key: "sasPost", build: buildSasPost, lx: 66, lz: 25, yaw: -0.15 };
 
 /**
  * The ALN's buildables round its camp, in the CAMP'S frame (like BASE_PARK).
@@ -99,6 +110,7 @@ export const SHOWROOM = [
   // The two hamlets (layout.js), each its own houses.
   { key: "mechta", build: buildMechta, x: HAMLETS[0].x, z: HAMLETS[0].z, yaw: siteYaw(HAMLETS[0]) },
   { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: HAMLETS[1].x, z: HAMLETS[1].z, yaw: siteYaw(HAMLETS[1]) },
+  (() => { const [x, z] = fromBase(SAS_POST.lx, SAS_POST.lz, HAMLET_SITE); return { key: SAS_POST.key, build: SAS_POST.build, x, z, yaw: HAMLET_SITE.yaw + SAS_POST.yaw, rim: 6 }; })(),
   // The ALN command post in the massif.
   { key: "alnCamp", build: buildAlnCamp, x: ALN.x, z: ALN.z, yaw: siteYaw(ALN), flag: "fln" },
   ...ALN_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz, ALN_SITE); return { key: v.key, build: v.build, x, z, yaw: ALN_SITE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
@@ -151,6 +163,14 @@ function kitView(geo) {
     gm.position.set(...geo.userData.gun.pivot);
     gm.castShadow = true;
     m.add(gm);
+  }
+  // A searchlight's lamp: its own mesh on the yoke, to sweep.
+  if (geo.userData.lamp) {
+    const lm = new THREE.Mesh(geo.userData.lamp.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+    lm.name = "Lamp";
+    lm.position.set(...geo.userData.lamp.pivot);
+    lm.castShadow = true;
+    m.add(lm);
   }
   const tur = geo.userData.turret;
   if (tur) {
