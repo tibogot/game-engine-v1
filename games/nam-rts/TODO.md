@@ -2,13 +2,86 @@
 
 Everything asked for or agreed in the build conversation (2026-09-18 → 22),
 rebuilt from the full transcript. `[x]` done · `[ ]` open · `[~]` started or
-partly done · **you** = your call or your work.
+partly done · `[→#n]` still open, tracked as MASTER LIST item n · **you** = your
+call or your work. Since 2026-09-26 ONLY the master list holds open items.
 
 Keep this file current: tick things off here, add new asks here.
 
 ---
 
-## PRIORITY — what to do next, most important first (2026-09-22)
+## MASTER LIST — everything still open (rebuilt 2026-09-26)
+
+THE ONE LIST. Every open item in this file is here, ranked inside its group;
+the detail and history below point back as `[→#n]`. Add new asks HERE (and a
+detail note below if it needs one). Tick here when done.
+
+### Done 2026-09-26 (latest)
+- [x] Z-FIGHTING, for good (your note: the lean-to mat): new test
+      tools/rtsGroundBandTest (no flat face in the ground band) + the coplanar
+      test extended to every new piece and made exact. Fixed 29 ground-band
+      pieces and ~1,700 coplanar pairs (Bailey 1,516; camp pieces; the Huey's
+      windscreen; a crewman bug — legs beside his torso when turned).
+
+### A. Quick wins — reuse what now exists
+1. [ ] Cooking-fire smoke over the HAMLET (the "hearth" smoke kind)
+2. [ ] The Front's camp LIVED IN: idle men cooking, cleaning rifles, on guard (unitRenderer.addStaticFigures, like the temple watchers)
+3. [ ] SUN GLINTS on water: the ripple-crest version back for your look (paddies after) — detail: WILDLIFE › SUN GLINTS
+4. [ ] Distant HUEYS crossing the map with rotor shadows ("the war is elsewhere")
+5. [ ] Kurtz's place, the rest: white markings on the stone (handprints, ash bars, painted eyes); saplings and leaf litter in the courtyard; bodies hung in the trees / a hanging man in a doorway (silhouettes, dread not gore); the crash site's clearing wider if you want
+
+### B. Gameplay
+6. [ ] FREE THE PRISONERS: an objective at the POW pit and the occupied cage
+7. [ ] Combat BLOOD: hit sprays, death pools that dry (decals, capped); Kurtz's old dark stains as dressing
+8. [ ] WIRE between the Front's line positions
+9. [ ] Bridges an engineer can BLOW and REBUILD; a pontoon (M4T6) as a buildable crossing
+10. [ ] The Company of Heroes systems: FUEL as a second resource · supply lines · upkeep · victory points (ticket bleed) · squads of 4-6 · suppression / pinning (waits for the soldier model's poses) · retreat · directional armour · weapon teams with arcs · veterancy · garrisoning huts and bunkers · engineers laying mines/wire/sandbags · doctrines and call-ins · craters as cover · high-ground bonus
+11. [ ] Enemy AI next: vehicles and mortars, ambushes on your routes, flanking, booby traps; difficulty tuning after you play it
+12. [ ] Artillery, the rest: US 81 mm pit / M109, the 107 mm Type 63 and 122 mm Grad, a real launch signature
+13. [ ] Fire from the GUN: tracers and flashes from each vehicle's real muzzle, turned with its turret
+14. [ ] Napalm aftermath (burnt vegetation = no concealment, stumps, haze) · nav from vegetation (bamboo blocks) · river FORDS
+15. [ ] Supply drops: a C-123 over, crates on parachutes (event or ability)
+16. [ ] Vehicle roster, the rest: Cobra, Zippo, PBR, gun truck · enemy T-54/Type 59, sampans · Huey rotor-blur disc + Dustoff variant · dust behind tracks · delete the unused rts-v3 GLBs from the build
+17. [ ] Water units and lily pads on the flow, once the river branches exist (river = your other chat)
+
+### C. Look and atmosphere
+18. [ ] AMBIENT LIFE + PARTICLES, one GPU field: flies, embers off fires, butterflies, dragonflies, mosquito swarms at dusk, dust motes in sunbeams, pollen, falling leaves, napalm ash, fireflies · village life: a buffalo + herder on the lanes, a rooster (sound), hens scattering from running soldiers
+19. [ ] NIGHT / DUSK pass: lamps tied to the sun, searchlight cones, light pools, torches and fires at Kurtz's place, the village's hanging string lights
+20. [ ] Light shafts through the canopy inside the fog banks
+21. [ ] Monsoon rain showers passing over (world rain exists in modular-road)
+22. [ ] Horizon artillery flashes / smoke columns off-map; tracers at night
+23. [ ] Combat FX: projectiles like CoH · smoke and fire more realistic (the flipbook plan) · better FX pass · smoke look + napalm white cores (your taste)
+24. [ ] RICE PADDIES still "cheap": grass on the banks, the rim hidden in bushes, farmers in conical hats + a field hut, palms on dikes, wind over the rice, irregular plots, duckweed and bamboo pipes, morning mist · men slowed in the mud · a second block
+25. [ ] VEGETATION: per-instance palm variety · sago + nipa · colour variety / flowering trees · readability thinning where plants hide units · fan palm dry colour · check coconut/areca far trunks at range · the jungle tree (waiting on your reference) · re-shoot the lineup
+26. [ ] MAP FEATURES (say which): sampan village · Do Lung bridge · French rubber plantation in ROWS · bombed pagoda · B-52 crater line · burned-out hamlet · battle debris (burnt jeep/tank/hut, casings) · fallen logs, stumps, termite mounds · telegraph poles · sign faces · camouflaged buildings · US camp extras (bunkers on the berm, claymores + trip flares, helipad PSP + windsock, generator, water trailer, shower tower, burn barrels, whitewashed stones) · the berm's bare-earth look · US star on billboards, unit patches
+27. [ ] TERRAIN: the gorge wall's stair-step checker · re-decide the ground tile scale (two-scale texturing) · texture repetition
+28. [ ] Flying birds rebuilt like the standing ones; a flushed heron flies off as an egret
+
+### D. UI and audio
+29. [ ] UI pass (your references; rts-chibs for ideas) · edge-scroll corner bug · sharper cover art (2560 px) · unit responses · minimap pings / attack alerts
+30. [ ] AUDIO: you pick the sounds by ear (Dev → Sound), then bake the picks and delete the candidates · river sound · bullet whizz-bys · radio squelch for voices
+
+### E. Performance and debt
+31. [ ] Frame budget re-measured after this week's additions; the pond properly (gpuAB cannot time water toggles)
+32. [ ] Load time further (23.8 s)
+33. [ ] Long path searches 5-15 ms (hierarchical/cached) · staggered target acquisition (your call) · RTS-mode render budget (lens flare, underwater, far plane) · octahedral impostors (the question)
+34. [ ] The flaky test suite · cityKitTest flaky · the 4 overlapping enemy-camp pads · prop nav stamps use the bounding box · dead auto paint rules · passability overlay in the editor · buildSheetRoof bug · props as editor placeable types · the perimeter as editor splines
+35. [ ] The fog lab's interactive dense fog in the game (rotor wash, blast holes) — open question
+
+### F. Shipping
+36. [ ] preloadPaintTextures false (47 MB) · shrink the 12 MB cliff normal + gzip the .v3proj · RTS-only build + its own Vercel project/domain · "needs WebGPU" screen · confirm ASSETS.md · later Electron + Steam
+
+### G. Waiting on you / your calls
+37. [ ] The SOLDIER MODEL (then: team variants, rifle on the hand, all clips, the cover/prone state machine — suppression waits for it)
+38. [ ] HUD references
+39. [ ] Taste calls: foliage brightness · areca keep or drop · the terrace cliffs' dark band (after the new cliffs) · Ocean and River (your other chats)
+40. [ ] Two factions' units — you build the units
+
+# DETAIL AND HISTORY
+
+Everything below is the reasoning, the measurements and the done work. NOTHING below is open:
+every open item is in the MASTER LIST above, and items below point to it as `[→#n]`.
+
+## (history) PRIORITY — what to do next, most important first (2026-09-22)
 
 1. ~~**Enemy AI**~~ DONE (first version, infantry only) — see Gameplay. NEXT on
    it: play it and tune (your call); it cannot yet use vehicles, mortars or
@@ -281,7 +354,7 @@ Everything else below is in its section.
       inside the ends). A rock left 0.6 m proud of the planks by that cut is
       removed (any rock reaching a deck goes). Re-tested: 48/48 crossings,
       worst step 0.62 m.
-- [ ] Later (your idea list): blowable bridges an engineer can rebuild (CoH),
+- [→#9] Later (your idea list): blowable bridges an engineer can rebuild (CoH),
       a pontoon (M4T6) as a buildable crossing.
 - [x] **Units cross it WRONG** — FIXED 2026-09-26. MEASURED: a squad sent at
       an angle walked the bank BESIDE the deck (3-4 m off its line, up to 2.6 m
@@ -341,11 +414,11 @@ Everything else below is in its section.
       jumps (6 places, close + zoomed out): worst frame 18-20 ms, 0
       pipelines built in play (was 158-234 ms). Warm-up 254 drawables in
       448 ms under the loading screen.
-- [ ] **"The river reads near-BLACK at the base" — NOT a river** (checked
+- [x] (superseded 2026-09-26 by the cliffs pass (Rock058 + water streaks) — say if still too dark) **"The river reads near-BLACK at the base" — NOT a river** (checked
       2026-09-25): the dark band is the terrace CLIFF FACES (HQ at 12 m, an
       11 m cliff up to 24 m); there is no water there. Soften their look
       (lighter rock / grass on the slope) or keep — your call.
-- [ ] Still open from the plant list: sago palm, nipa placement (the preset
+- [→#25] Still open from the plant list: sago palm, nipa placement (the preset
       exists), a strangler fig on the temple ruins (Ta Prohm) — a big one.
 - [x] **"Those exotic trees with spiky shapes"** (your ask 2026-09-25) —
       built as the PANDANUS above (my best guess of what you meant); say if
@@ -371,7 +444,7 @@ Everything else below is in its section.
 
 ## SOLDIERS — decided 2026-09-25: YOU find a better model; I do the rest
 
-- [ ] **YOU (later):** a rigged or Mixamo-riggable soldier (Sketchfab /
+- [→#37] **YOU (later):** a rigged or Mixamo-riggable soldier (Sketchfab /
       CGTrader / Fab): 3-10k tris, few materials, gear separate if possible
       (helmet, pack, rifle), a license allowing commercial use (CC0 / CC-BY
       fine, NO "NonCommercial"). Ideally ONE body + skeleton for both sides.
@@ -379,7 +452,7 @@ Everything else below is in its section.
       30 fps): idle, walk, run, crouch idle/walk, prone idle, crawl, fire
       standing/crouched/prone, reload, grenade throw, hit, 2-3 deaths
       (optional: point/wave, carry wounded).
-- [ ] **ME, once it's in:** scale/orientation, rifle on the hand bone, team
+- [→#37] **ME, once it's in:** scale/orientation, rifle on the hand bone, team
       variants (US steel pot / NVA pith helmet / VC conical hat + black
       pyjamas), bake all clips into the crowd table, a state machine
       (crouch in cover, prone under fire, fire/reload) — which is what makes
@@ -389,14 +462,14 @@ Everything else below is in its section.
 
 ## WILDLIFE — your ask 2026-09-25 (LOW PRIORITY: "not so important now")
 
-- [ ] Small life in the air and on the ground: BUTTERFLIES (bright, over
+- [→#18] Small life in the air and on the ground: BUTTERFLIES (bright, over
       clearings and flowers, the village), INSECTS (dragonflies over the
       river and paddies), MOSQUITO swarms (dusk, water, the jungle hollow —
       a faint drifting cloud, not individuals). One instanced field each,
       like the birds; fade out by camera height (they only read up close).
       Maybe later: monkeys in the canopy, a water buffalo, chickens in the
       village (already listed under Map & look).
-- [ ] **SUN GLINTS ON WATER** (your pick 2026-09-26). WHY THERE WERE NONE: the
+- [→#3] **SUN GLINTS ON WATER** (your pick 2026-09-26). WHY THERE WERE NONE: the
       camera looks north, the afternoon sun is 80° off to the west — a mirror
       highlight needs a ripple tilted ~36°, and the river's glint ripples were
       ~5° (normalStrength 0.22 × glintSpread 0.4). TRY 1, REJECTED ("squared
@@ -406,7 +479,7 @@ Everything else below is in its section.
       the highlight only (glintSpread 6, shininess 60, strength 2): bright flecks
       shaped by the wave crests, drifting with the flow. If yes: make it a game
       setting, then the same idea on the paddies.
-- [ ] **AMBIENT LIFE + PARTICLES, one cheap GPU field** (your ask 2026-09-26,
+- [→#18] **AMBIENT LIFE + PARTICLES, one cheap GPU field** (your ask 2026-09-26,
       "for later"): FLIES buzzing round the buffalo, the latrine and bodies;
       EMBERS rising off every fire (napalm, burning wrecks, cooking fires) and
       drifting on the wind; BUTTERFLIES over clearings and the village;
@@ -452,7 +525,7 @@ Everything else below is in its section.
       the drawn share uploaded per 12 m chunk. MEASURED plants alone: 0.55-
       0.6 ms at play zoom (7.2k clumps drawn), 0.97 ms close up (17.8k).
       Shadows on the leaves cost nothing measurable.
-  - [ ] **Your review of v3 (2026-09-25): "better but still looks cheap".** To do next:
+  - [→#24] **Your review of v3 (2026-09-25): "better but still looks cheap".** To do next:
     - [x] BLACK EDGES — two causes, both fixed: my fake "bank reflected in
           the water" band + a dark wet line along every inner edge (removed /
           softened), and a crack along the block's rim from sinking the mesh
@@ -543,7 +616,7 @@ Everything else below is in its section.
         as the buffalo (merge pieces, recolour, crowd path: one draw per
         species). Small shy groups at jungle edges and clearings, grazing;
         they BOLT from soldiers like the egrets flush — a tell of movement.
-  - [ ] Maybe: the flying birds rebuilt the same way (they are seen from
+  - [→#28] Maybe: the flying birds rebuilt the same way (they are seen from
         above and small, so it matters less); a heron that flushes currently
         flies off as a white egret shape.
   - [x] **ROCKS DONE** (games/nam-rts/namRocks.js, nam-rts only; ?rocks=kit = the
@@ -602,12 +675,12 @@ Everything else below is in its section.
         river's base like a bridge landing (coversRect + editBase). Plus every
         pad is re-levelled once at the end of the boot (placed.reassertPads).
         Pads flat: 38/54 -> 50/54.
-  - [ ] 4 pads still off (0.3-1.4 m) at the enemy camp's front: the trench berm
+  - [→#34] 4 pads still off (0.3-1.4 m) at the enemy camp's front: the trench berm
         (45, 372), a foxhole, the propaganda board — overlapping the pads of
         the gun nests / spider holes placed by structures.js. Move them apart.
-  - [ ] Maybe: a buffalo + a herder on the village lanes; a rooster that
+  - [→#18] Maybe: a buffalo + a herder on the village lanes; a rooster that
         crows (sound); hens scatter from soldiers running through.
-  - [ ] NEXT (my suggestions, your pick): grass blades on the banks; the
+  - [→#24] NEXT (my suggestions, your pick): grass blades on the banks; the
         block's rim hidden in bananas/bushes; life (farmers in conical hats,
         a buffalo, a field hut, palms on dikes, a bare path on some dike
         tops); wind rolling over the rice; irregular plots and an eroded
@@ -615,12 +688,12 @@ Everything else below is in its section.
     - [x] Found on the way: the pipeline warm-up put the crop's instance count
           back to 0 (what it saw at load) — riceCrop now rebuilds when its
           count was changed from outside.
-    - [ ] Overall: still "cheap" — keep going until it reads like the photos.
-  - [ ] REAL reflections (banks, trees, units in the water): only screen-
+    - [→#24] Overall: still "cheap" — keep going until it reads like the photos.
+  - [x] (done 2026-09-25: SSR on the paddy water (paddyReflections.js)) REAL reflections (banks, trees, units in the water): only screen-
         space is possible (every terrace is its own water height, so no
         mirror render). Costs the screen copy (~1.1-2.7 ms measured on the
         river/decals). Your call after seeing the cheap version.
-  - [ ] Next, if wanted: a buffalo, men slowed in the mud, a second block.
+  - [→#24] Next, if wanted: a buffalo, men slowed in the mud, a second block.
 - [x] **FOG BANKS BUILT (2026-09-25, uncommitted)** — games/nam-rts/fogBanks.js,
       placed where I suggested (your "go"): a chain of 3 along the river's
       middle stretch, the temple standing in mist (towers and the banyan out
@@ -673,9 +746,9 @@ Everything else below is in its section.
         ball. And tagged part 5.35, not 4: part 4 lifts the normal 55% to
         up (flattening the ball); 5.x lifts by its fraction, 35% — the
         billboards' own. Checked: 0 billboard verts, all cards 5.35.
-- [ ] Gorge wall's dark stair-step CHECKER is the TERRAIN's own shading
+- [→#27] Gorge wall's dark stair-step CHECKER is the TERRAIN's own shading
       (found while checking the mist; there with the mist off) — look later.
-- [ ] (was) **Placeable fog banks** — YOUR DECISION 2026-09-25: NOT interactive
+- [x] (done 2026-09-25: fogBanks.js, mist at places) (was) **Placeable fog banks** — YOUR DECISION 2026-09-25: NOT interactive
       ("especially if it can hurt the perf"); "realistic fog in SOME places in
       the map, not everywhere based on distance or height". So: local fog
       VOLUMES placed on the map (river, valley bottoms, the temple hollow,
@@ -719,7 +792,7 @@ Vietnam, like Apocalypse Now.
       the five formula nests. Only ONE tower placed on nam-valley (the second
       had no spot left with the spacing) — fine or loosen, your look.
       NOT DONE from the plan: WIRE between the positions.
-- [ ] (was) **Replace the default enemy turrets.** Five DShK nests stand in a line
+- [x] (done 2026-09-25: enemyLine.js, the line sited by the ground) (was) **Replace the default enemy turrets.** Five DShK nests stand in a line
       across the top of the map from boot (structures.js `turretCount`), sited
       by a formula, not by the ground. Replace with a MIXED, sited line: DShK
       nests where they cover open ground, ZPU-4s on the approaches your
@@ -727,7 +800,7 @@ Vietnam, like Apocalypse Now.
       spider holes and wire between them (the cheap nasty kit is already built).
       Site them the way the requisition points were sited — by path and by what
       they actually overlook, not on a line
-- [ ] **Their guard tower**: NOT our steel-and-timber one. A lashed BAMBOO
+- [x] (done: the bamboo watchtower (rtsEnemyCamp) + the 'tower' structure) **Their guard tower**: NOT our steel-and-timber one. A lashed BAMBOO
       tower — four raked poles, a split-bamboo platform, a thatch cap, a ladder
       of lashed rungs, a bell or a length of shell casing hung to beat as an
       alarm. Gives vision like ours (and a man in it, like the spider hole)
@@ -811,7 +884,7 @@ Vietnam, like Apocalypse Now.
       temperature 0.12; new engine call app.postFx.setPolish). Measured with
       fog off: mean 82 -> 85, top 1% 127 -> 154, sunlit fifth warm. Cost 0.
       Fog untouched (judged with it off, as you said, then back on).
-  - [ ] Next if wanted: cloud shadows drifting over; sun glints on paddies and
+  - [→#3] Next if wanted: cloud shadows drifting over; sun glints on paddies and
         the river; light shafts through the canopy inside the fog banks.
 - [x] **ANIMALS ACROSS THE MAP** (your ask 2026-09-26: only saw the paddy buffalo):
       30 BUFFALO (5 at the paddies, 7 in two groups by the hamlet, 6 in two
@@ -819,7 +892,7 @@ Vietnam, like Apocalypse Now.
       grazed clear) and 44 DEER (7 sambar stags, 21 hinds, 16 muntjac in 14
       places; the old 110 m-from-anything rule left only 5 on the whole map).
       MEASURED all animals: GPU 0.36 ms (noise 0.11), CPU 0.11 ms.
-- [ ] **A FLAKY TEST SUITE**: twice on 2026-09-26 npm test said 195/196, then 7
+- [→#34] **A FLAKY TEST SUITE**: twice on 2026-09-26 npm test said 195/196, then 7
       reruns were all green; the failing suite's name was not captured. Next
       time: npm test | grep -A8 '^FAIL' to name it.
 - [x] **CAMP LIVED IN** (2026-09-26, games/nam-rts/enemyCampDressing.js,
@@ -851,7 +924,7 @@ Vietnam, like Apocalypse Now.
       buildSupplyStack. Enemy AI still produces and moves through it (90 s ff).
       YOUR LOOK: still more open grass than a real camp? the net now reads as a
       mound — keep or rethink?
-- [ ] Still open on their side: WIRE between the line's positions; soldiers
+- [→#2] Still open on their side: WIRE between the line's positions; soldiers
       idling in the camp (cooking, cleaning rifles, on guard) to make it LIVE;
       FREE THE PRISONERS as an objective (the pit and the occupied cage).
 - [x] (was) **Fill their base** (the résidence is bare next to our camp). An NVA/VC
@@ -863,7 +936,7 @@ Vietnam, like Apocalypse Now.
       camouflage netting slung between trees, trench and one-man fighting holes
       round the perimeter, a captured US truck being stripped, propaganda
       board with a loudspeaker, NLF flag on a bamboo pole, buried-jar cache
-- [ ] **Bamboo prisoner cages** (your ask): the tiger cages — low bamboo cages
+- [x] (done 2026-09-26: 3 tiger cages + the POW pit; the objective is MASTER #6) **Bamboo prisoner cages** (your ask): the tiger cages — low bamboo cages
       on the mud, one with a man in it, the POW pit with a grating over it.
       Could be a real objective: reach it and free the prisoners
 - [x] **KHMER GUARDIAN LIONS — DROPPED 2026-09-23, you are finding a GLB.**
@@ -888,12 +961,12 @@ Vietnam, like Apocalypse Now.
       ring of carved lobes, and both sit on the sandstone/laterite atlas rows
       that already exist. Judge them the way the palms were judged — reference
       photographs and a six-angle contact sheet.
-- [ ] **Reference you gave for the temple pack** (2026-09-23):
+- (reference, not a task) **Reference you gave for the temple pack** (2026-09-23):
       https://sketchfab.com/3d-models/ruin-ancient-temple-khmer-architecture-pack-3082fb3a9937454f89493f1c532b400e
       INSPIRATION ONLY — it is someone else's asset and nothing from it can be
       used. What it is good for is the KIT LIST: which pieces a ruin needs to
       feel complete, and how broken each one should be.
-- [ ] **BLOOD** (your ask 2026-09-23), and it is two separate jobs:
+- [→#7] **BLOOD** (your ask 2026-09-23), and it is two separate jobs:
       1. **COMBAT BLOOD — units.** A hit sprays, a death leaves a pool, and the
          pool stays for a while and dries. This is the decal system
          (`decals.js`, projected boxes, 1 draw) plus a hook in combat.js where
@@ -908,7 +981,7 @@ Vietnam, like Apocalypse Now.
          bright red of a fresh hit — it is near-black brown, and it belongs in
          the STONE texture and in static decals rather than in the combat
          system, so it costs nothing per frame.
-- [ ] **WHAT ELSE WOULD MAKE KURTZ'S PLACE** (my suggestions, 2026-09-23, none
+- [x] (done 2026-09-26: the crowd (watchers), crows, hearth smoke, midden; the rest is MASTER #5 / #19) **WHAT ELSE WOULD MAKE KURTZ'S PLACE** (my suggestions, 2026-09-23, none
       agreed yet — all chosen to read at RTS zoom and to cost almost nothing):
       · **THE CROWD.** The strongest single image in the film is the people
         standing motionless, watching the boat come in. Static figures lining
@@ -943,7 +1016,7 @@ Vietnam, like Apocalypse Now.
       stood, `matOf` decides what it is made of. It descends along +Z from its
       top tread at y = 0, because you always know where the doorway is and the
       bottom lands wherever the ground happens to be.
-- [~] **THE DRESSING — STARTED, NOT RIGHT YET.** `buildRiverStair` and
+- [x] (done 2026-09-26: the ghat cut, the pond, readable pikes) **THE DRESSING — STARTED, NOT RIGHT YET.** `buildRiverStair` and
       `buildHeadPikes` are in rtsTemple.js and placed in temple.js. What is
       wrong, from looking at it in the game:
       · THE STEPS STILL READ FLAT. A descending stair cannot take a levelling
@@ -1000,7 +1073,7 @@ Vietnam, like Apocalypse Now.
       and 257k for its preview scene. Ours has to run with a full RTS on top,
       so richness has to come from texture, not geometry — which is why 1 and
       2 were the right first moves.
-- [~] **KURTZ COUNTRY — the temple** STARTED 2026-09-23
+- [x] (done 2026-09-26: temple built and dressed) **KURTZ COUNTRY — the temple** STARTED 2026-09-23
       (`v3/render/objects/rtsTemple.js` + `games/nam-rts/temple.js`, sited in
       `pointSites.TEMPLE_SITES` at (340, 214), `?temple=0` boots without it).
       Tower with four Bayon faces, gate with a real passage, galleries round a
@@ -1051,7 +1124,7 @@ Vietnam, like Apocalypse Now.
         two framebuffer copies while on screen. Open: measure it properly.
       YOUR LOOK: the watchers (too many? too few?), the crash site's clearing
       (bananas still close), the pond.
-- [ ] (was) **Its dressing** (the rest of your ask). The
+- [x] (done 2026-09-26: lean-tos, hearths, midden, totems, watchers; the rest is MASTER #5) (was) **Its dressing** (the rest of your ask). The
       Apocalypse Now compound: a Khmer temple half taken by the jungle — laterite
       blocks, a corbelled doorway, a four-faced Bayon tower, nāga balustrade,
       apsara reliefs, a collapsed gallery, strangler-fig roots over the walls —
@@ -1074,7 +1147,7 @@ Vietnam, like Apocalypse Now.
       you want a second: an A-1 Skyraider nose-in with its tail up, or a C-123
       broken-backed in a clearing. Both want the crater/burn ground under them
       (craterSystem + the burnt-ground work) to sell it
-- [ ] **My other suggestions for that stretch of map** (say which you want):
+- [→#26] **My other suggestions for that stretch of map** (say which you want):
       · the **sampan village on the water** — stilt houses over a backwater,
         fish traps, nets on frames, a floating market boat
       · the **Do Lung bridge**: a bridge lit by flares and rebuilt every night,
@@ -1097,17 +1170,17 @@ Vietnam, like Apocalypse Now.
       pathfinder from S, W and E) — gate with guard booth and raised striped boom,
       guard towers on the south corners, floodlight masts, a power line up the
       road. Wire/fence/lights/power line are the v2 spline objects at 1.3x
-- [ ] **Night / dusk lighting pass**: the map is midday, so lamps only glow;
+- [→#19] **Night / dusk lighting pass**: the map is midday, so lamps only glow;
       searchlight beams (fake volumetric cones), light pools on the ground,
       lamps tied to sun elevation — needs a dusk/night time of day to matter
-- [ ] **String lights = the HANGING LAMPS in the village** (your ask; you
+- [→#19] **String lights = the HANGING LAMPS in the village** (your ask; you
       reminded me 2026-09-24) — for the village / a club tent (v2 `stringLights.js`
       registered, not placed yet)
-- [ ] Berm reads faintly on sand: a bare-earth look (dirt decals along it, or
+- [→#26] Berm reads faintly on sand: a bare-earth look (dirt decals along it, or
       a paint layer) would make it pop from above
-- [ ] Perimeter authored **in the editor** as splines instead of code (the
+- [→#34] Perimeter authored **in the editor** as splines instead of code (the
       objects already are editor spline types; needs a berm spline + barrier flag)
-- [ ] Other camp dressing (suggestions): perimeter bunkers and fighting
+- [→#26] Other camp dressing (suggestions): perimeter bunkers and fighting
       positions on the berm, claymores and trip flares with signs, helipad with
       PSP matting + windsock, generator shed, water trailer, shower tower,
       burn-barrel pit, jerry cans, ammo bunker, white-painted stones along roads
@@ -1118,7 +1191,7 @@ Vietnam, like Apocalypse Now.
 - [x] **Light section in the dev panel**: time of day, sun, sky light, sky
       fill, reflections, exposure, warmth — live; Keep (this browser), Reset,
       Copy (values to write into the map)
-- [ ] Write the look you settle on into nam-valley / namGame.js (send me the
+- [x] (done 2026-09-26: the lighting pass is written into namGame.js) Write the look you settle on into nam-valley / namGame.js (send me the
       Copy output)
 - [x] **Birds** (`rtsBirds.js`): transit flocks crossing the view (white egrets
       in a V, crows), and flocks **flushed** from the jungle by any explosion or
@@ -1165,7 +1238,7 @@ Vietnam, like Apocalypse Now.
 
 ## SEE UNITS THROUGH BUILDINGS & FOLIAGE — your question, 2026-09-25 (TALK FIRST)
 
-- [ ] Options discussed: (1) CoH X-RAY SILHOUETTE — units re-drawn once
+- [x] (done: option 1 built (xraySilhouette.js)) Options discussed: (1) CoH X-RAY SILHOUETTE — units re-drawn once
       with a flat team-colour + rim shader, depth test GREATER (paints only
       where the unit is hidden), no screen grab; ~10 extra draws (instanced
       types + the crowd), pixels only where hidden; shows through hills too
@@ -1242,28 +1315,28 @@ Vietnam, like Apocalypse Now.
 - [x] **Thumbnails for everything selectable** (`structureThumbnails.js`): the HQ, every
       building, the enemy nest — a real rendered portrait in the selection
       panel like the vehicles have, not the stencilled monogram
-- [ ] **Your references** from other RTS games → next pass on the HUD's look
-- [ ] Edge scroll: the corner blocks cover the bottom edge under them (the
+- [→#38] **Your references** from other RTS games → next pass on the HUD's look
+- [→#29] Edge scroll: the corner blocks cover the bottom edge under them (the
       camera only scrolls over the canvas) — middle of the edge still scrolls
 - [x] **Loading screen**: `nam-cover.webp` full screen (100svh, object-fit: cover), the
       `namlogowebp.webp` logo over the lit sky, a real progress bar (level download in bytes via the level loader's
       new `onProgress`; other stages scaled by this machine's timings from the
       previous boot), rotating gameplay tips
-- [ ] Sharper cover art: nam-cover.webp is 1536×1024 and is upscaled to fill
+- [→#29] Sharper cover art: nam-cover.webp is 1536×1024 and is upscaled to fill
       a 1080p+ screen; ~2560×1707 (same 3:2) would be crisp on 1440p
-- [ ] rts-chibs has a better UI — ideas only, don't copy
+- [→#29] rts-chibs has a better UI — ideas only, don't copy
 
 ## Ambient life — suggestions (not agreed yet)
 
 - [x] **Cloud shadows** sweeping the map (engine has `cloudShadowMap`) — reads  (DONE 2026-09-26: cloudShadowsLite, see above)
       beautifully from top-down, near-free
-- [ ] **Distant Hueys** crossing the map like the transit birds, with rotor
+- [→#4] **Distant Hueys** crossing the map like the transit birds, with rotor
       shadows — "the war is elsewhere", very Apocalypse Now
 - [x] Water buffalo in the paddies, chickens/pigs in the village (once those exist)  (DONE: buffalo, hens, deer via crowd skinning)
-- [ ] Thin cooking-fire smoke over villages (smoke system, tiny budget)
-- [ ] Horizon artillery flashes / smoke columns off-map; tracers at night
-- [ ] Monsoon rain showers passing over (world rain exists in modular-road)
-- [ ] Fireflies at dusk/night (editor Ambient FX mode has them — check they
+- [→#1] Thin cooking-fire smoke over villages (smoke system, tiny budget)
+- [→#22] Horizon artillery flashes / smoke columns off-map; tracers at night
+- [→#21] Monsoon rain showers passing over (world rain exists in modular-road)
+- [→#18] Fireflies at dusk/night (editor Ambient FX mode has them — check they
       read at RTS distance first; butterflies/pollen won't)
 
 ## Your asks, 2026-09-22 (evening)
@@ -1291,7 +1364,7 @@ Vietnam, like Apocalypse Now.
       raises (helipad, turret, radio, supply relay…) still looks like the old
       game — radio station = the old GLB; others procedural, at our standard;
       some kit pieces become buildable
-- [ ] Then **fill the jungle** (village, debris, paddies… — Map & look below)
+- [x] (done: village, paddies, canopy, animals, camps) Then **fill the jungle** (village, debris, paddies… — Map & look below)
 - [x] **Placed-building system** (`placedObjects.js`, the foundation for the three above): one path
       for decoration AND builder buildings — kit geometry + footprint → flat pad,
       nav collision on the real footprint, cover, grass cleared, selection
@@ -1306,7 +1379,7 @@ Vietnam, like Apocalypse Now.
 
 ## Your asks, 2026-09-22 (night)
 
-- [~] **US Army star in a circle** — DONE on the Quonset HQ (both flanks,
+- [→#26] **US Army star in a circle** — DONE on the Quonset HQ (both flanks,
       painted over the ribs), the GP tents' roofs, the radio post's roof;
       LEFT: billboards. Was: as a marking on buildings and billboards
       (the stencil sheet already has the `star` cell — place it). Other
@@ -1314,7 +1387,7 @@ Vietnam, like Apocalypse Now.
       Tropic Lightning, 173rd), hazard stripes on barriers/generators, "DANGER
       HIGH VOLTAGE" on the generator, vehicle/tent numbers ("HQ-7", "A-12"),
       "NO SMOKING WITHIN 50 FT" on fuel dumps, sandbagged "LZ" letters on a pad
-- [ ] **A small lake** somewhere on nam-valley: sculpt a hollow + the lake mode's
+- [x] (done 2026-09-26: the temple pond) **A small lake** somewhere on nam-valley: sculpt a hollow + the lake mode's
       water at the right height (your lake mode; I can also do it from code)
 - [x] **Requisition points** (`requisition.js`, `requisitionRenderer.js`, test `namRequisitionTest`): DONE —
       7 relay masts (26 m lattice towers, guys, hut, flagpole); INFANTRY in the
@@ -1336,13 +1409,13 @@ Vietnam, like Apocalypse Now.
       Verlet flag (baseFlag.js, 130 particles) on every mast instead of the stiff
       instanced cloth — climbs the pole with the capture, US / NLF image by owner,
       sim skipped off-screen. Cheap: ~0.02 ms CPU for 7, one small draw each, culled
-- [ ] **Supply drops (later)**: a plane (C-130 / C-123 Provider) flies over and
+- [→#15] **Supply drops (later)**: a plane (C-130 / C-123 Provider) flies over and
       drops crates on parachutes to your units — resupply as an event or an
       ability, like the real war
 
 ## Your asks, 2026-09-22 (late) — trees, palms, vehicles
 
-- [ ] **Big trees — the jungle has none but the palms.** A canopy layer: tall
+- [x] (done: banyan + dipterocarp canopy (jungleCanopy.js); rubber ROWS are MASTER #26) **Big trees — the jungle has none but the palms.** A canopy layer: tall
       emergent trees (dipterocarp: straight pale trunk, buttress roots, a crown
       high above everything), banyan / strangler fig (aerial roots, huge wide
       crown), rubber trees in plantation ROWS (a French plantation is a great
@@ -1361,7 +1434,7 @@ Vietnam, like Apocalypse Now.
       20-30); **your call** whether it goes up too.
       NOTE: the MAP carries its own copy (susuki.plants), so nam-valley still
       has the 11 m palm until a tools script writes the new numbers in.
-- [~] **ARECA / betel palm** (`arecaGeometry.js`, new kind `areca`): a clump of
+- [→#39] **ARECA / betel palm** (`arecaGeometry.js`, new kind `areca`): a clump of
       4 very slender ringed canes (1:75), green crownshafts, small feathery
       crowns, orange betel nuts. Built and it works — but YOUR VERDICT was that
       it reads too much like the coconut, and you are right: both are PINNATE
@@ -1469,7 +1542,7 @@ Vietnam, like Apocalypse Now.
 Everything below is also filed in its own place; this is the short list so it
 is not lost while Kurtz is being built.
 
-- [ ] **YOUR ASKS 2026-09-24 (after the FX work)**:
+- [x] (done 2026-09-24/26: palette matched, jungle canopy, their base filled) **YOUR ASKS 2026-09-24 (after the FX work)**:
       1. Some trees look WAY TOO BRIGHT, others too DULL — the species don't
          sit together. Match them (one light/colour budget across every
          vegetation system).
@@ -1590,13 +1663,13 @@ is not lost while Kurtz is being built.
 **DO NOT TOUCH THE EXISTING FOG** (the monsoon height fog + distance fog we
 tuned). Anything below is ADDED next to it.
 
-- [ ] **Fog at a PLACE** — local fog banks: a valley bottom at dawn, mist
+- [x] (done 2026-09-25: fogBanks.js) **Fog at a PLACE** — local fog banks: a valley bottom at dawn, mist
       over the river, a swamp, the paddies. The fog lab's GroundFog
       (v3/fog/groundFogTsl.js) is already a LOCAL volume (a box over the
       ground with its own density field), so a bank is one of those placed on
       the map: position, size, height, density, colour. Authored per map
       (editor, like lakes) or placed by the game.
-- [ ] **The fog lab's interactive dense fog in the game** (v3/fog-lab.html:
+- [→#35] **The fog lab's interactive dense fog in the game** (v3/fog-lab.html:
       the gist port — one density texture, analytic wind/push/swirl,
       semi-Lagrangian advection, raymarched slab, obstacles carve holes).
       What it would give an RTS: units wading through a bank and leaving a
@@ -1613,7 +1686,7 @@ tuned). Anything below is ADDED next to it.
       decoration, the bank's footprint decides).
         **YOUR LOOK CHECK**: the jungle at your zoom; ?canopy=0 for before.
 
-- [ ] **The jungle tree is committed but NOT good.** Waiting on your reference
+- [→#25] **The jungle tree is committed but NOT good.** Waiting on your reference
       picture. The roots read as cardboard fins and the crown is a blob.
 - [x] **BANYAN — the big tree** (your ask 2026-09-24). BUILT
       (`banyanGeometry.js`, `banyanLeafTexture.js`, kind + preset `banyan`,
@@ -1667,20 +1740,20 @@ tuned). Anything below is ADDED next to it.
       a crossed pair only shows its full width square on.
 - [x] **Bamboo is 9 m** (DONE 2026-09-24: 16 m, see above) where real giant bamboo is 20-30, the same error the
       palm had. Your call, as the palm was.
-- [ ] **Re-shoot the whole-map lineup** (`window.__sheet` in the lab) now that
+- [→#25] **Re-shoot the whole-map lineup** (`window.__sheet` in the lab) now that
       the bush, ground cover and banana have changed, to see what the jungle
       floor actually became.
 - [x] Fan palm: the diamond leaf-base boot pattern on the trunk — done
       2026-09-24 (d0f3970, see the entry above).
-- [ ] Fan palm: a dry-season colour.
-- [ ] **Coconut palm + areca far trunks** are still crossed part-2 quads,
+- [→#25] Fan palm: a dry-season colour.
+- [→#25] **Coconut palm + areca far trunks** are still crossed part-2 quads,
       alpha-tested against the frond texture. The traveller's palm LOST its
       far trunk that way, because the mip blurred a thin solid strip into
       transparency. Check them at range and move them to the closed-tube
       trunk if they thin out.
-- [ ] Areca: keep as a village plant or drop it — your call.
-- [ ] Colour variety across the foliage (flame tree, a few flowering trees).
-- [ ] Readability thinning where plants hide units and combat.
+- [→#39] Areca: keep as a village plant or drop it — your call.
+- [→#25] Colour variety across the foliage (flame tree, a few flowering trees).
+- [→#25] Readability thinning where plants hide units and combat.
 - [x] **Plant sizes written into nam-valley.v3proj** (2026-09-24,
       `tools/namPlantScale.mjs`): palm 11 -> 17 m with its proportions
       (stemWidth 1 -> 0.7, fronds 50% -> 32% of trunk, 36 scar rings), banana
@@ -1776,20 +1849,20 @@ tuned). Anything below is ADDED next to it.
       closed 4-sided tube, the same fix as the traveller's palm. Judged in the
       game: the vegetation lab keeps its own copy of the shader and does not
       show it.
-- [ ] **Palm variety for free**: the palm is procedural, so every instance can
+- [→#25] **Palm variety for free**: the palm is procedural, so every instance can
       differ at no draw cost — trunk curve/lean, height, crown size, frond
       count/droop, dead hanging fronds. Per-instance params, not new types
-- [ ] **New palm-like types** (your photos): **areca palm** (clumps of thin
+- [→#25] **New palm-like types** (your photos): **areca palm** (clumps of thin
       ringed canes, feathery arching fronds), **sago / cycad** (short fat trunk,
       stiff dark rosette), **spike-leaf** yucca/dracaena/pandanus look (stiff
       sword leaves in a ball on a trunk; pandanus has stilt roots — riverbanks),
       nipa palm (no trunk, fronds straight out of the mud — river/delta edges),
       banana (big torn paddle leaves, around villages)
-- [ ] **Colour variety** in the foliage (reds, yellows, flowering trees —
+- [→#25] **Colour variety** in the foliage (reds, yellows, flowering trees —
       flame tree / poinciana orange, a few)
-- [ ] **Readability pass after**: thin the small foliage where it hides units
+- [→#25] **Readability pass after**: thin the small foliage where it hides units
       and combat (ties in with see-through, below)
-- [~] **Vehicles rebuilt** — FIRST DONE: **M113 ACAV** (`rtsVehicles.js`, 5.1k tris, 2 draws for
+- [→#16] **Vehicles rebuilt** — FIRST DONE: **M113 ACAV** (`rtsVehicles.js`, 5.1k tris, 2 draws for
       every one on the map): sloped hull + trim vane, 5 road wheels, sprocket,
       idler, a track of shoes, ACAV shields round the .50 cal and both M60s,
       stowage, stars + bumper code; replaces the BTR as the HQ's APC.
@@ -1837,24 +1910,24 @@ tuned). Anything below is ADDED next to it.
 
 ## Props → a real part of the game
 
-- [ ] Props into the **editor as placeable types**, each with: a declared
+- [→#34] Props into the **editor as placeable types**, each with: a declared
       footprint → flattened pad, **collision** (nav stamp from the real footprint,
       not the bounding box), **cover** bake, grass cleared under it, markings
-- [ ] **See-through**: silhouettes for your hidden units (and spotted enemies
+- [x] (done: x-ray silhouettes; canopy dither / roof fade only if ever needed) **See-through**: silhouettes for your hidden units (and spotted enemies
       only — concealment must still work), canopy dither around selected units /
       cursor, roof fade. Discussed, not built
-- [ ] Camouflaged HQ-style buildings (the camo surface exists)
-- [ ] **Enemy HQ** — still the old box. French colonial building taken over was
+- [→#26] Camouflaged HQ-style buildings (the camo surface exists)
+- [x] (done: the French colonial résidence) **Enemy HQ** — still the old box. French colonial building taken over was
       liked
-- [ ] **Village kit, built in the lab** as a modular kit, looking really good —
+- [x] (done: rtsVillage + the hamlet (village.js)) **Village kit, built in the lab** as a modular kit, looking really good —
       incl. a small hut with a **big banana-leaf roof**; bamboo stilt house,
       granary, fences, jars, baskets, shrine, well, footbridge, sampan, fish
       traps, market stalls
-- [ ] Battle debris: burnt jeep / truck / tank / Huey hulks, burnt hut, shell
+- [→#26] Battle debris: burnt jeep / truck / tank / Huey hulks, burnt hut, shell
       casings (hero pieces may be **your** Blender work)
-- [ ] Nature/road extras: fallen logs, stumps, termite mounds
-- [ ] More sign faces (propaganda boards, shop signs, tin ads, arrows)
-- [ ] Kit bug: `rtsParts.buildSheetRoof` stands its sheets on edge (only the lab
+- [→#26] Nature/road extras: fallen logs, stumps, termite mounds
+- [→#26] More sign faces (propaganda boards, shop signs, tin ads, arrows)
+- [→#34] Kit bug: `rtsParts.buildSheetRoof` stands its sheets on edge (only the lab
       uses it)
 - [x] Quonset HQ with opening doors · US flag · guard tower · billboards (2/4
       posts) + sign sheet · MINES sign · gun pit, fuel dump, crate stack · GP tent
@@ -1884,13 +1957,13 @@ tuned). Anything below is ADDED next to it.
       **0.67 vs 0.60 ms** at play zoom, **0.81 vs 0.76** zoomed out. The extra
       coverage is free; grass is not what this frame is spent on.
       LEFT: nothing — grass trails are wired too, see below.
-- [ ] **Foliage brightness** — **you**, taste call (knobs listed in the transcript)
+- [→#39] **Foliage brightness** — **you**, taste call (knobs listed in the transcript)
 - [x] Rice paddies — built, see the RICE PADDIES entry (cheap opaque water)
-- [ ] A village as an *arrangement* (paths, well, fences, clearing)
-- [ ] Pre-placed craters and wrecks (craterSystem exists)
-- [ ] Telegraph poles along roads
-- [ ] **Ocean** — off in the RTS; **you** are reworking Ocean v2 in another chat
-- [ ] **River** — **you** are finishing/optimising River v2 in another chat;
+- [x] (done: village.js (lane, yards, well, shrine)) A village as an *arrangement* (paths, well, fences, clearing)
+- [→#26] Pre-placed craters and wrecks (craterSystem exists)
+- [→#26] Telegraph poles along roads
+- [→#39] **Ocean** — off in the RTS; **you** are reworking Ocean v2 in another chat
+- [→#17] **River** — **you** are finishing/optimising River v2 in another chat;
       then river branches → **water units**, lily pads on the flow field
 - [x] **Grass trails under units** — DONE 2026-09-23. `games/nam-rts/grassTrails.js`
       stamps every ground unit into the engine's push field (`app.stampGrassPush`),
@@ -1990,7 +2063,7 @@ tuned). Anything below is ADDED next to it.
       one flat red patch; jungle up to the walls is what looks real, and
       ruins should be overgrown. ONLY the hamlet's swept yards stay (34).
       flattenRect now stamps nothing unless the call asks for a `ground`.
-- [ ] **CHECKPOINT FINDINGS 2026-09-24** (fair A/B: worktree at a29c4eb vs
+- [→#27] **CHECKPOINT FINDINGS 2026-09-24** (fair A/B: worktree at a29c4eb vs
       HEAD, settings aligned, fog off, ONE tab — two tabs rigged the first
       perf numbers):
       · ground tiles: at play zoom the old 34 m read MORE detailed than 7 m;
@@ -2002,7 +2075,7 @@ tuned). Anything below is ADDED next to it.
         measure now they are gone.
       · old blue-grey puddles read as water better than the new red ones at
         play zoom.
-- [~] **TERRAIN: TOP-K LAYERS + NEAR/FAR** (the CoH / Unreal answer to "every
+- [x] (done: top-3 + near/far is the nam default (10acc28)) **TERRAIN: TOP-K LAYERS + NEAR/FAR** (the CoH / Unreal answer to "every
       layer costs everywhere", 2026-09-24). splatOverlayTsl, compile-time,
       DEFAULT OFF (classic path unchanged): `SPLAT_FEATURES.topK` computes
       every layer's final weight first, picks the K strongest per pixel and
@@ -2020,7 +2093,7 @@ tuned). Anything below is ADDED next to it.
       NEXT (parked by you 2026-09-26, "another day"): a
       separate FAR texture per layer (aerial sets like rocky_terrain_02) as
       extra array slices (no new sampler bindings — the terrain sits at 16).
-- [~] **LOAD TIME** (your ask 2026-09-24: every change means a reload, so
+- [→#32] **LOAD TIME** (your ask 2026-09-24: every change means a reload, so
       it taxes all the work). MEASURED clean loads (tab in front; one load's
       own stage times recovered from the smoothed store as 2·new − old):
       **46.2 s -> 23.8 s** (warm dev server; the first load after editing a
@@ -2128,9 +2201,9 @@ tuned). Anything below is ADDED next to it.
         per-object uniforms; the lever is fewer draw calls); unit separation
         ~1 ms in an 80-man crowd (one tank widens every soldier's reach); the
         stats overlay's GPU timers (~0.1-0.2 ms, always on).
-- [ ] **Projectiles like Company of Heroes** (your ask 2026-09-24, after the
+- [→#23] **Projectiles like Company of Heroes** (your ask 2026-09-24, after the
       CPU spike): tracers, shell arcs, impacts that read like CoH.
-- [ ] **Smoke and fire, more realistic** (your ask 2026-09-24, with the
+- [→#23] **Smoke and fire, more realistic** (your ask 2026-09-24, with the
       projectiles). The nam versions are done DIFFERENTLY from your old RTS,
       and the old RTS is NOT touched. Plan, pending your go:
       · SMOKE = your modular-road FLIPBOOK (wispy 8x8 atlas) ON the existing
@@ -2254,9 +2327,9 @@ tuned). Anything below is ADDED next to it.
         NEXT candidates: 
         misses that hit cover (sandbags spark), infantry suppression pinned
         by MG fire (a CoH mechanic, gameplay — ask first).
-- [ ] Texture repetition (hex tiling discussed; stochastic rejected — it swam)
-- [ ] Napalm flame cores clip to white — per-fire intensity (taste)
-- [ ] Octahedral impostors for the RTS camera — asked, never answered properly
+- [→#27] Texture repetition (hex tiling discussed; stochastic rejected — it swam)
+- [→#23] Napalm flame cores clip to white — per-fire intensity (taste)
+- [→#33] Octahedral impostors for the RTS camera — asked, never answered properly
 - [x] New map, nav fix, flatter playable ground, terracing, bridges, beach
       (contour bands), rocks (palette, weathering, slabs, split boulders,
       megaliths, re-grounded), decal pass, monsoon fog, midday light + sky fill,
@@ -2268,19 +2341,19 @@ tuned). Anything below is ADDED next to it.
 - [x] **Base income** DONE (requisition.js baseIncome 1.0/s while the HQ stands; HUD shows it). Was: so you are never stuck (HQ trickle ~+60/min; points on
       top). TODAY: start 400, only points pay (+96/min each), the M48 costs 420
       — you cannot build it until you hold ground
-- [ ] **Two resources**: Supplies (men, buildings) and **Fuel** (vehicles) —
+- [→#10] **Two resources**: Supplies (men, buildings) and **Fuel** (vehicles) —
       most points give supplies, a few special ones (fuel depot, truck park)
       give fuel, so armour depends on ground you fight for
-- [ ] **Supply lines**: a point only pays if connected through your points to
+- [→#10] **Supply lines**: a point only pays if connected through your points to
       the HQ; cut the chain and everything behind goes dead
-- [ ] **Upkeep**: a bigger army lowers income (stops snowballing)
-- [ ] **Victory points** as the main win condition (ticket bleed), not "destroy the HQ"
-- [ ] **Squads** of 4–6 men (shared job, reinforce near the HQ / a point)
-- [ ] **Suppression / pinning** from MGs (makes the pits and nests matter)
-- [ ] **Retreat** button (keep veterans alive)
-- [ ] **Directional armour** (tanks weak at the sides and rear; turrets already turn)
-- [ ] **Weapon teams with firing arcs** (MG team, mortar)
-- [ ] **Veterancy** · **garrisoning** bunkers and huts · engineers laying
+- [→#10] **Upkeep**: a bigger army lowers income (stops snowballing)
+- [→#10] **Victory points** as the main win condition (ticket bleed), not "destroy the HQ"
+- [→#10] **Squads** of 4–6 men (shared job, reinforce near the HQ / a point)
+- [→#10] **Suppression / pinning** from MGs (makes the pits and nests matter)
+- [→#10] **Retreat** button (keep veterans alive)
+- [→#10] **Directional armour** (tanks weak at the sides and rear; turrets already turn)
+- [→#10] **Weapon teams with firing arcs** (MG team, mortar)
+- [→#10] **Veterancy** · **garrisoning** bunkers and huts · engineers laying
       mines/wire/sandbags/tank traps · call-ins and **doctrines** (airmobile vs
       armour; artillery, air strikes, napalm) · **craters as cover**
 
@@ -2299,7 +2372,7 @@ tuned). Anything below is ADDED next to it.
       once it holds half the map. Deterministic (seeded). MEASURED 15 min of
       battle: 0.015 ms a step, p99.9 0.7 ms (path searches go through a
       budgeted QUEUE — navGrid.requestPath/pumpPaths)
-- [ ] Enemy AI, next: use vehicles/mortars when they exist, ambush from
+- [→#11] Enemy AI, next: use vehicles/mortars when they exist, ambush from
       concealment on your approach routes, flank (stage on the side you are
       not facing), booby traps; difficulty tuning after you play it
 - [x] **Bridges crossable again** (`bridgeLandings.js`, engine `app.gradeRamp`):
@@ -2308,9 +2381,9 @@ tuned). Anything below is ADDED next to it.
 - [x] **Pathfinding 5–10x faster** (navGrid: typed heap — the old swap made two
       arrays per swap — reused scratch, octile heuristic): 31 → 3 ms across the
       river; a group order shares ONE search per cluster (selection.js)
-- [ ] Long path searches into the walled camp are still 5–15 ms for YOUR
+- [→#33] Long path searches into the walled camp are still 5–15 ms for YOUR
       orders (one per group now); hierarchical/cached paths if it shows
-- [~] **Rocket / indirect-fire artillery** (your ask 2026-09-22): the ARC and the
+- [→#12] **Rocket / indirect-fire artillery** (your ask 2026-09-22): the ARC and the
       SPLASH now exist (projectiles.spawnArc + combat.splashAt + the warning
       ring), carrying the enemy's 82 mm mortar. Left: the US side (81 mm pit,
       M109), the 107 mm Type 63 and 122 mm Grad, and a real launch signature.
@@ -2320,28 +2393,28 @@ tuned). Anything below is ADDED next to it.
       rockets fired into firebases — firing gives the launch site away. US:
       the M109 self-propelled howitzer, and 81 mm mortar pits/teams in the camp.
       Needs: a ballistic arc projectile, a landing marker/warning, splash damage
-- [ ] **Fire from the gun** (your ask 2026-09-22): every unit's tracers and
+- [→#13] **Fire from the gun** (your ask 2026-09-22): every unit's tracers and
       muzzle flashes leave its real muzzle — the tank's cannon tip, the M113's
       .50 cal, the Huey's door guns — turned with its turret. The procedural
       vehicles can carry a `muzzle` point in their turret frame (the buildings'
       gun pits and nests already do, structuresRenderer.muzzleOf)
-- [ ] Suppression / pinning · squads · armour matchups · high-ground bonus ·
+- [→#10] Suppression / pinning · squads · armour matchups · high-ground bonus ·
       retreat · garrisoning · veterancy · win conditions beyond "destroy HQ"
-- [ ] **Napalm aftermath** — `burnedAt` → vegetation/grass density, burnt
+- [→#14] **Napalm aftermath** — `burnedAt` → vegetation/grass density, burnt
       ground, stumps, haze (burned ground = no concealment)
-- [ ] Nav from vegetation (bamboo blocks, ferns don't) + river **fords**
+- [→#14] Nav from vegetation (bamboo blocks, ferns don't) + river **fords**
 - [x] Pink/violet smoke on **capture points** — the M18 violet kind exists;
       capture points to trigger it
-- [ ] Two factions in `unitTypes` · Vietnam units (Huey, M113, PBR) — **you**
+- [→#40] Two factions in `unitTypes` · Vietnam units (Huey, M113, PBR) — **you**
       build the units
-- [ ] Waves stay an optional mode only
+- (a rule, not a task) Waves stay an optional mode only
 - [x] Fixed 60 Hz sim · smoke that blocks sight · fire · napalm · abilities ·
       cover (directional) & concealment · spatial grid (300 units linear) ·
       stress price list
 
 ## Presentation
 
-- [~] **Audio** — STARTED 2026-09-25 ("are you confident to find sound?
+- [→#30] **Audio** — STARTED 2026-09-25 ("are you confident to find sound?
       they should sound nice — if so go ahead"). Plan: CC0 sounds only
       (Freesound, filtered to Creative Commons 0 — commercial/Steam-safe, no
       credit needed), picked by downloads + rating, then measured (length,
@@ -2374,16 +2447,16 @@ tuned). Anything below is ADDED next to it.
 - [x] **Sound OFF by default** (your call, 2026-09-25: "we will tweak it
       later") — Dev → Sound → "Sound: on" to hear it. Off = the audio
       context suspended: no audio-thread work at all.
-- [ ] **LATER — YOU: pick the sounds by ear** — Dev → Sound: ▶ the file alone, ◎ at
+- [→#30] **LATER — YOU: pick the sounds by ear** — Dev → Sound: ▶ the file alone, ◎ at
       the camera, "Firefight here" for all of them at once, then "Copy
       picks" (or just tell me). THEN: bake picks into the manifest and
       DELETE the unpicked candidates (26 MB → a few MB before shipping).
-- [ ] Not yet: river sound (needs the river's line), unit voice lines
+- [→#30] Not yet: river sound (needs the river's line), unit voice lines
       (no good CC0 ones found — radio squelch instead), bullet whizz-bys.
-- [ ] Better **UI**
-- [ ] Better **FX** pass (still rts-v3's look; never touch games/rts-v3)
-- [ ] **Smoke look** fine-tune — **you**, later
-- [ ] Unit responses · minimap pings / attack alerts
+- [→#29] Better **UI**
+- [→#23] Better **FX** pass (still rts-v3's look; never touch games/rts-v3)
+- [→#23] **Smoke look** fine-tune — **you**, later
+- [→#29] Unit responses · minimap pings / attack alerts
 
 ## Performance
 
@@ -2453,10 +2526,10 @@ tuned). Anything below is ADDED next to it.
       as alpha blending instead of the colour grab — at RTS zoom the
       refraction wobble is invisible. That removes both copies for the river.
       Touches the shared water shaders, so: ask first.
-- [ ] RTS camera render budget: sky dome (~0.5 ms, FIXED above), lens flare, underwater, far
+- [→#33] RTS camera render budget: sky dome (~0.5 ms, FIXED above), lens flare, underwater, far
       plane — off in RTS mode, back with C; measure each first
-- [ ] Staggered target acquisition — **your** call (changes reaction timing)
-- [ ] Terrain index blending (top-4 layers/texel), ~1 ms — engine, new chat
+- [→#33] Staggered target acquisition — **your** call (changes reaction timing)
+- [x] (done: same as the top-K terrain) Terrain index blending (top-4 layers/texel), ~1 ms — engine, new chat
 - [x] **THE HILLTOP GPU SPOT — FIXED 2026-09-25 (uncommitted).** The TERRAIN
       was drawn FIRST among the opaque things, so every terrain pixel was
       fully shaded and then painted over (canopy, trees, grass, buildings).
@@ -2473,7 +2546,7 @@ tuned). Anything below is ADDED next to it.
       ENGINE CANDIDATE: the same default in v3 terrainLOD would help every
       game (Apex Rush's city), but first check each for an opaque
       depthWrite-off mesh drawn below the terrain (it would be painted over).
-- [ ] ~~**THE HILLTOP GPU SPOT — must be fixed**~~ (history) (your call 2026-09-22: important,
+- [x] (done: renderOrder 8, 25.1 -> 17.2 ms (see memory)) ~~**THE HILLTOP GPU SPOT — must be fixed**~~ (history) (your call 2026-09-22: important,
       but parked after a long session on it). WHAT IS KNOWN, so nobody starts
       over: at (120, −40) the GPU takes **10.6 ms** where the bridge and the
       grass flats take **0.8** at the same camera height; seen again at
@@ -2494,17 +2567,17 @@ tuned). Anything below is ADDED next to it.
 
 ## Debt
 
-- [ ] Prop nav stamps use the bounding box (units stop short of rocks)
-- [ ] `cityKitTest` flaky under load
-- [ ] Per-layer `auto` paint rules are dead state
-- [ ] Passability overlay in the editor (see the nav map while sculpting)
+- [→#34] Prop nav stamps use the bounding box (units stop short of rocks)
+- [→#34] `cityKitTest` flaky under load
+- [→#34] Per-layer `auto` paint rules are dead state
+- [→#34] Passability overlay in the editor (see the nav map while sculpting)
 
 ## Shipping — RTS alone on Vercel (own domain) and Steam (your question 2026-09-22)
 
 What the game loads is listed in [ASSETS.md](ASSETS.md) (~100 MB of the 715 MB `public/`).
-- [ ] Pass `preloadPaintTextures: false`: boot downloads 47 MB of ground textures the map then replaces
-- [ ] Shrink cliff_rocks_07 (12 MB normal PNG) and check `.v3proj` gets gzipped
-- [ ] RTS-only Vite config + RTS-only public folder → second Vercel project + domain
-- [ ] "Needs WebGPU" screen instead of a black canvas
-- [ ] Later: Electron wrapper → Steamworks (steamworks.js), saves to files, Steam page early for wishlists
-- [ ] Confirm ASSETS.md once with a DevTools Network capture
+- [→#36] Pass `preloadPaintTextures: false`: boot downloads 47 MB of ground textures the map then replaces
+- [→#36] Shrink cliff_rocks_07 (12 MB normal PNG) and check `.v3proj` gets gzipped
+- [→#36] RTS-only Vite config + RTS-only public folder → second Vercel project + domain
+- [→#36] "Needs WebGPU" screen instead of a black canvas
+- [→#36] Later: Electron wrapper → Steamworks (steamworks.js), saves to files, Steam page early for wishlists
+- [→#36] Confirm ASSETS.md once with a DevTools Network capture
