@@ -188,6 +188,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // paintLayers — nam-valley fills all seven. The engine says a game must
     // not preload it (main.js, loadPaintDefaults); this game never did say so.
     preloadPaintTextures: false,
+    // Drifting cloud shade (engine cloudShadowsLite.js) is opt-in at boot:
+    // it adds a texture to every lit material. Driven by cloudShadowsPanel.js.
+    cloudShadows: true,
     // `enabled` MUST be decided here, at boot, not by app.shadows.setEnabled
     // afterwards. The environment builds the CSM node into every lit material
     // the moment it is enabled, and switching it off later only nulls the

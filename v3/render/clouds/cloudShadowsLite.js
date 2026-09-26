@@ -69,8 +69,12 @@ function bakeField() {
   return tex;
 }
 
-/** One per sun. `sun` is the DirectionalLight, before it has ever rendered. */
-export function createCloudShadowsLite(sun, params = {}) {
+/**
+ * One per sun. `sun` is the DirectionalLight, before it has ever rendered.
+ * `attach: false` leaves the sun's colorNode alone (no texture in any lit
+ * material); set() and update() still work and do nothing visible.
+ */
+export function createCloudShadowsLite(sun, params = {}, { attach = true } = {}) {
   const P = { ...CLOUD_SHADOW_LITE_DEFAULTS, ...params };
   const u = {
     sunCol: uniform(new THREE.Color().copy(sun.color).multiplyScalar(sun.intensity)),
@@ -82,20 +86,22 @@ export function createCloudShadowsLite(sun, params = {}) {
     offset: uniform(new THREE.Vector2()),
     toSun: uniform(new THREE.Vector3(0, 1, 0)),
   };
-  const field = bakeField();
+  if (attach) {
+    const field = bakeField();
 
-  // Slide up the sun ray to the cloud layer, drift, one texel.
-  const s = u.toSun;
-  const k = u.height.sub(positionWorld.y).div(max(s.y, 0.2));
-  const q = positionWorld.xz.add(vec2(s.x, s.z).mul(k)).add(u.offset).div(u.scale);
-  const n = texture(field, q).r;
-  const thr = float(1).sub(u.cover);
-  const cloud = smoothstep(thr.sub(u.soft), thr.add(u.soft), n);
-  const visibility = float(1).sub(cloud.mul(u.darkness));
+    // Slide up the sun ray to the cloud layer, drift, one texel.
+    const s = u.toSun;
+    const k = u.height.sub(positionWorld.y).div(max(s.y, 0.2));
+    const q = positionWorld.xz.add(vec2(s.x, s.z).mul(k)).add(u.offset).div(u.scale);
+    const n = texture(field, q).r;
+    const thr = float(1).sub(u.cover);
+    const cloud = smoothstep(thr.sub(u.soft), thr.add(u.soft), n);
+    const visibility = float(1).sub(cloud.mul(u.darkness));
 
-  // ?cloudshadows=0: the sun's plain colour (the A/B for what the field costs).
-  const off = typeof location !== "undefined" && new URLSearchParams(location.search).get("cloudshadows") === "0";
-  sun.colorNode = off ? vec3(u.sunCol) : vec3(u.sunCol).mul(visibility);
+    // ?cloudshadows=0: the sun's plain colour (the A/B for what the field costs).
+    const off = typeof location !== "undefined" && new URLSearchParams(location.search).get("cloudshadows") === "0";
+    sun.colorNode = off ? vec3(u.sunCol) : vec3(u.sunCol).mul(visibility);
+  }
 
   const _dir = new THREE.Vector3();
   return {

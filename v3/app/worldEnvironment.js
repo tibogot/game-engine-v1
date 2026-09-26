@@ -70,6 +70,7 @@ export async function createWorldEnvironment({
   terrainSize,
   getSplineSystem = () => null,
   getTerrainMeshes = () => [],
+  cloudShadows = false,
 }) {
   const sunDir = new THREE.Vector3();
   const _effectiveLightDir = new THREE.Vector3();
@@ -254,8 +255,11 @@ export async function createWorldEnvironment({
   const sun = new THREE.DirectionalLight(L.dirColor, L.dirIntensity);
   // Drifting cloud shade on the sun's light (cloudShadowsLite.js). Attached
   // HERE, before the sun first renders — three reads colorNode only then.
-  // Off (darkness 0) until a game turns it on via app.setCloudShadows.
-  const cloudShadowsLite = createCloudShadowsLite(sun);
+  // Off (darkness 0) until a game turns it on via app.setCloudShadows. Only
+  // hooked when the game booted with `cloudShadows: true`: hooked, it is one
+  // more sampler in every lit material, and that pushed the editor's terrain
+  // to 17 of WebGPU's 16 — the terrain pipeline failed and nothing drew.
+  const cloudShadowsLite = createCloudShadowsLite(sun, {}, { attach: cloudShadows });
   sun.castShadow = true;
   const shadowTarget = new THREE.Object3D();
   scene.add(shadowTarget);

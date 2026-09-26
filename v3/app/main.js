@@ -1051,6 +1051,9 @@ export async function startV3App(opts = {}) {
     terrainSize: WORLD_SIZE,
     getSplineSystem: () => splineSys,
     getTerrainMeshes: getTerrainMeshesForWorld,
+    // Opt-in: the cloud field is one more texture in EVERY lit material, and
+    // the editor's terrain is already at WebGPU's 16-sampler limit.
+    cloudShadows: opts.cloudShadows === true,
   });
 
   /*
