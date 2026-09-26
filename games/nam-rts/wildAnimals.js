@@ -179,8 +179,10 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
       for (const h of herd) {
         // One of them spooked: its group bolts (whoever is within 60 m of the
         // threat — not every deer of the kind on the map), each its own way.
-        if (near && h.state !== "run" && (near.x - h.x) ** 2 + (near.z - h.z) ** 2 < 60 * 60
-          && (h.target = pickFlight(h, near))) { h.speed = runSpeed * (0.9 + rnd() * 0.2); go(h, "run", "run", 14); }
+        // (A WALKING deer with no clear flight kept its walk target: assigning
+        // the null left it walking at nothing — "reading 'x'", 2026-09-26.)
+        const flee = near && h.state !== "run" && (near.x - h.x) ** 2 + (near.z - h.z) ** 2 < 60 * 60 ? pickFlight(h, near) : null;
+        if (flee) { h.target = flee; h.speed = runSpeed * (0.9 + rnd() * 0.2); go(h, "run", "run", 14); }
         h.tCur += dt * h.rate * (h.state === "run" ? h.speed / runSpeed : 1);
         h.tPrev += dt * h.rate;
         h.fade = Math.min(1, h.fade + dt / (h.state === "run" ? 0.2 : 0.5));
@@ -203,7 +205,7 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
         } else if (h.timer <= 0) {
           const r = rnd();
           if (h.state === "eat" && r < 0.4) go(h, "look", r < 0.2 ? "idle" : "look", 2 + rnd() * 4);
-          else if (r < 0.75 && (h.target = pickGraze(h))) { h.speed = walkSpeed; go(h, "walk", "walk", 10); }
+          else if (r < 0.75 && (h.target = pickGraze(h))) { h.speed = walkSpeed; go(h, "walk", "walk", 10); }   // (not walking here: a null is harmless)
           else go(h, "eat", rnd() < 0.25 ? "low" : "eat", 5 + rnd() * 10);
         }
         p.set(h.x, h.y, h.z);

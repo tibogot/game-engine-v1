@@ -24,6 +24,7 @@ import {
   vec3,
 } from "three/tsl";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
+import { createCloudShadowsLite } from "../render/clouds/cloudShadowsLite.js";
 import { groundPatch } from "../render/viewGroundBand.js";
 import { SkyMesh } from "three/addons/objects/SkyMesh.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
@@ -251,6 +252,10 @@ export async function createWorldEnvironment({
   scene.add(hemi);
 
   const sun = new THREE.DirectionalLight(L.dirColor, L.dirIntensity);
+  // Drifting cloud shade on the sun's light (cloudShadowsLite.js). Attached
+  // HERE, before the sun first renders — three reads colorNode only then.
+  // Off (darkness 0) until a game turns it on via app.setCloudShadows.
+  const cloudShadowsLite = createCloudShadowsLite(sun);
   sun.castShadow = true;
   const shadowTarget = new THREE.Object3D();
   scene.add(shadowTarget);
@@ -1994,6 +1999,7 @@ export async function createWorldEnvironment({
 
   function updateFrame(dtSec, { streamQueueDepth = 0 } = {}) {
     _appTimeSec += dtSec;
+    cloudShadowsLite.update(dtSec);
     uValleyTime.value = _appTimeSec;
 
     const focusPos = playMode?.active ? playMode.playerPosition : camera.position;
@@ -2325,6 +2331,7 @@ export async function createWorldEnvironment({
     addWaterSurface,
     updateFrame,
     renderFrame,
+    cloudShadowsLite,
     setSize,
   };
 }

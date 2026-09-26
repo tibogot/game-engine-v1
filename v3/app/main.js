@@ -12473,6 +12473,13 @@ export async function startV3App(opts = {}) {
      * (v3/terrain/cliffStreaks.js): { strength 0-1 (0 = off), steepStart,
      * steepEnd (normal.y), width, bedding }. Runtime, not saved.
      */
+    /**
+     * Drifting cloud shade over the land (v3/render/clouds/cloudShadowsLite.js),
+     * no clouds drawn: { enabled, cover 0-1, darkness 0-1, scale m, softness,
+     * height m, windX, windZ m/s }. Runtime, not saved.
+     */
+    setCloudShadows(p = {}) { worldEnv?.cloudShadowsLite?.set(p); },
+    get cloudShadows() { return worldEnv?.cloudShadowsLite ?? null; },
     setCliffStreaks(p = {}) {
       for (const [k, v] of Object.entries(p)) if (Number.isFinite(v) && cliffStreakUniforms[k]) cliffStreakUniforms[k].value = v;
     },

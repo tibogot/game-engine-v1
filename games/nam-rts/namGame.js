@@ -103,6 +103,7 @@ import { dressEnemyCamp } from "./enemyCampDressing.js";
 import { createChickenFlock } from "./chickenFlock.js";
 import { createFogBanks, siteFogBanks } from "./fogBanks.js";
 import { buildFogBanksPanel } from "./fogBanksPanel.js";
+import { applyCloudShadows, buildCloudShadowsPanel } from "./cloudShadowsPanel.js";
 import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
@@ -417,6 +418,12 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     app.sky?.setWorldLight?.({ dir: 4.4, skyFill: 0.4, hemi: 1.0, exposure: 1.5 });
     app.postFx?.setPolish?.({ enabled: true, contrast: 1.1, saturation: 0.92, temperature: 0.12 });
   }
+
+  // CLOUD SHADOWS (engine cloudShadowsLite.js): big soft patches of shade
+  // drifting over the map with the wind — the sun dimmed where a cloud would
+  // be, the sky light untouched. No clouds are drawn (the camera looks down).
+  // ?clouds=0 = without.
+  applyCloudShadows(app);   // drifting cloud shade — Dev → Cloud shadows; ?clouds=0 = off
 
   app.setSlopeCliffRule?.({
     layer: 5,                            // "Cliff Rock" in nam-valley
@@ -1622,6 +1629,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       console.log(`[fog banks] ${placedBanks.map((b) => b.name).join(", ")}`);
     } catch (e) { console.warn("[fog banks] failed:", e); }
   }
+  buildCloudShadowsPanel(document.getElementById("dv-cloudshadows"), app);
 
   // Every bridge gets ground at both ends that meets its deck — without it
   // the river cut the map in two (bridgeLandings.js). The props are in now.

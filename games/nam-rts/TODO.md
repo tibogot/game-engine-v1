@@ -684,12 +684,34 @@ Vietnam, like Apocalypse Now.
       PUBLIC_ENGINE_MODULES. OPEN: the map's own dense coconut palms swallow
       the east wing (cook house, granary) — thin them round the camp, or
       keep it hidden "under the trees"? Your call.
+- [x] **CLOUD SHADOWS** (2026-09-26; new engine module
+      v3/render/clouds/cloudShadowsLite.js, app.setCloudShadows, off by default;
+      ?clouds=0 in nam = without): big soft patches of shade drifting with the
+      wind (6, 3 m/s), no clouds drawn. A 256² tiling cloud field baked once; each
+      lit pixel slides up the sun ray to 900 m and reads one texel; it dims the
+      SUN only, so shade is shade. Hooked as the sun's colorNode WHEN THE SUN IS
+      MADE (three reads it only then; patching the live light node freed the
+      shadow map and broke the frame — reverted). First version (3 noise octaves
+      per pixel) cost ~0.9 ms; the baked texture measures as free.
+      YOU SAW NOTHING at first (you were right): the fbm field bunched round
+      0.5 and the clouds were 520 m wide — a ~200 m view sat wholly in a gap
+      (4/255 of change). Now the field is EQUALISED (cover = the share of ground
+      in shade) and scale 220 m, darkness 0.7, softness 0.1: same frame off/on,
+      46% of the view shaded, luma 84 -> 68, a soft cloud edge across the meadow.
+      Cost re-measured: within noise (-0.67 ms, noise 0.66).
+      CONTROLS (you asked): Dev → Cloud shadows — on/off, cover, darkness, cloud
+      size, edge softness, cloud height, wind X/Z; kept across reloads
+      (cloudShadowsPanel.js), "Defaults" forgets them.
 - [x] **CLIFFS DONE** (your pick): Rock058 (your L3) on the cliff layer for this game
       (app.setTerrainLayerTextures, not saved to the map; ?cliffs=old = before)
       + WATER STREAKS and bedding down steep faces (new engine module
       v3/terrain/cliffStreaks.js, app.setCliffStreaks, off unless a game turns it
       on). A first version drew hairlines; now wide soft bands. Cost 0.2 ms.
-- [ ] **THE RENDER ERROR** "Cannot read properties of null (reading 'x')" (you saw it
+- [x] **THE RENDER ERROR** — FOUND by the guard: "[nam] wildHerds threw"
+      (wildAnimals.js). A deer already WALKING got spooked with no clear flight
+      path: pickFlight's null overwrote its walk target, and the next line read
+      target.x. Fixed: the target changes only when a flight was found.
+      (the old note:) "Cannot read properties of null (reading 'x')" (you saw it
       more than once, idle): NOT reproduced in 3 loads. The log named only the
       catch. Now (a) the engine logs the full stack, (b) every pre-render hook runs
       in its own try (a throwing hook no longer kills the frame), (c) every system
