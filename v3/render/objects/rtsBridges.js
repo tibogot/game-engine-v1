@@ -83,6 +83,7 @@ export function buildBaileyBridge({ span, width = 8, depthAt = () => 1, seed = 7
   const yb = -0.36, yt = yb + BAILEY_HEIGHT * storeys; // bottom / top chord centres
   const zIn = W / 2 + 0.28, zOut = zIn + 0.34;        // double-single: two panel planes a side
   const OD = MAT.paint;
+  const PH = BAILEY_HEIGHT - 0.1;                     // a post's height: its ends sit inside the chords
 
   for (const s of [-1, 1]) {
     for (const zp of [zIn, zOut]) {
@@ -98,12 +99,15 @@ export function buildBaileyBridge({ span, width = 8, depthAt = () => 1, seed = 7
           const x0 = -hl + k * bay, xm = x0 + bay / 2, x1 = x0 + bay;
           // The panel: end posts, a centre post, and the two diagonals down to
           // the bottom centre — the lattice that says "Bailey" from the air.
-          parts.push(box(0.22, BAILEY_HEIGHT, 0.2, x0 + 0.11, (y0 + y1) / 2, z, OD, tone));
-          parts.push(box(0.16, BAILEY_HEIGHT, 0.16, xm, (y0 + y1) / 2, z, OD, tone));
+          // (No face shared with a chord — tools/rtsPropsCoplanarTest: posts
+          // 17 cm deep inside 20 cm chords, ending 5 cm inside them, the end
+          // posts 2 cm in from the chord ends. Flush, 1,516 face pairs z-fought.)
+          parts.push(box(0.22, PH, 0.17, x0 + (k === 0 ? 0.13 : 0.11), (y0 + y1) / 2, z, OD, tone));
+          parts.push(box(0.16, PH, 0.14, xm, (y0 + y1) / 2, z, OD, tone));
           parts.push(beam(V(x0 + 0.18, y1 - 0.1, z), V(xm, y0 + 0.1, z), 0.16, 0.16, OD, tone));
-          parts.push(beam(V(x1 - 0.18, y1 - 0.1, z), V(xm, y0 + 0.1, z), 0.16, 0.16, OD, tone));
+          parts.push(beam(V(x1 - 0.18, y1 - 0.1, z), V(xm, y0 + 0.1, z), 0.16, 0.12, OD, tone));   // thinner: the two meet at the foot
         }
-        parts.push(box(0.22, BAILEY_HEIGHT, 0.2, hl - 0.11, (y0 + y1) / 2, z, OD, tone));
+        parts.push(box(0.22, PH, 0.17, hl - 0.13, (y0 + y1) / 2, z, OD, tone));
       }
     }
     // Tie plates across each side's pair of panels, every bay, at the top chord.
@@ -119,7 +123,7 @@ export function buildBaileyBridge({ span, width = 8, depthAt = () => 1, seed = 7
   let prevX = null;
   for (let k = 0; k <= bays; k += 2) {
     const x = Math.max(-hl + 0.2, Math.min(hl - 0.2, -hl + k * bay));
-    parts.push(box(0.2, 0.24, 2 * zOut + 0.2, x, yt + 0.02, 0, MAT.steel, 0.32));
+    parts.push(box(0.2, 0.24, 2 * zOut + 0.3, x, yt + 0.02, 0, MAT.steel, 0.32));   // past the chords' outer face, not flush with it
     if (prevX != null) {
       parts.push(beam(V(prevX, yt + 0.02, -zIn), V(x, yt + 0.02, zIn), 0.1, 0.1, MAT.steel, 0.3));
       parts.push(beam(V(prevX, yt + 0.06, zIn), V(x, yt + 0.06, -zIn), 0.1, 0.1, MAT.steel, 0.3));

@@ -95,7 +95,7 @@ export function buildBambooWatchtower({ seed = 101 } = {}) {
     strut(parts, a, b, 0.035, MAT.bamboo, 0.5);
   }
   parts.push({ geo: buildBox(pw, 0.9, 0.05), pos: [0, H + 0.5, -top - 0.02], mat: MAT.woven, tone: 0.4 });
-  parts.push({ geo: buildBox(0.05, 0.9, pw), pos: [-top - 0.02, H + 0.5, 0], mat: MAT.woven, tone: 0.5 });
+  parts.push({ geo: buildBox(0.05, 0.9, pw - 0.06), pos: [-top - 0.02, H + 0.48, 0], mat: MAT.woven, tone: 0.5 }); /* coplanar (rtsPropsCoplanarTest): lower, shorter than the deck */
   // The thatch cap, a four-way pyramid.
   const capY = H + 1.6, eave = top + 0.9, peak = capY + 1.3;
   for (let k = 0; k < 4; k++) {
@@ -144,10 +144,10 @@ export function buildLongHouse({ seed = 111, bays = 5 } = {}) {
   const door = Math.floor(bays / 2);
   for (let i = 0; i < bays; i++) {
     const x = -hx + (i + 0.5) * bay;
-    parts.push({ geo: buildBox(bay - 0.12, wallH, 0.06), pos: [x, wallH / 2 + 0.1, -hz], mat: MAT.woven, tone: 0.3 + r() * 0.4 });
-    if (i !== door) parts.push({ geo: buildBox(bay - 0.12, wallH, 0.06), pos: [x, wallH / 2 + 0.1, hz], mat: MAT.woven, tone: 0.3 + r() * 0.4 });
+    parts.push({ geo: buildBox(bay - 0.12, wallH - 0.03, 0.06), pos: [x, (wallH - 0.03) / 2 + 0.1, -hz], mat: MAT.woven, tone: 0.3 + r() * 0.4 }); /* coplanar (rtsPropsCoplanarTest) */
+    if (i !== door) parts.push({ geo: buildBox(bay - 0.12, wallH - 0.03, 0.06), pos: [x, (wallH - 0.03) / 2 + 0.1, hz], mat: MAT.woven, tone: 0.3 + r() * 0.4 });
   }
-  for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.06, wallH, hz * 2 - 0.1), pos: [sx * hx, wallH / 2 + 0.1, 0], mat: MAT.woven, tone: 0.45 });
+  for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.06, wallH - 0.03, hz * 2 - 0.1), pos: [sx * hx, (wallH - 0.03) / 2 + 0.1, 0], mat: MAT.woven, tone: 0.45 });
   // Wall plates and the roof, overhanging a metre all round.
   for (const sz of [-1, 1]) rail(parts, -hx - 0.3, sz * hz, hx + 0.3, sz * hz, eaveY, r, { radius: 0.06 });
   gableRoof(parts, hx + 1.0, hz + 1.2, eaveY - 0.35, ridgeY, seed, { courses: 7 });
@@ -193,14 +193,16 @@ export function buildCookHouse({ seed = 121 } = {}) {
   parts.push({ geo: buildBox(0.55, 0.65, 0.4), pos: [-hx + 0.8, 0.33, 0.7], rot: [0, 0.4, 0.05], mat: MAT.hessian, tone: 0.65 });
   // THE SMOKE TRENCH: out the back (-Z), a low ridge of earth with branches
   // laid over it, 7 m long, forking twice.
+  let seg = 0;
   const trench = (x0, z0, x1, z1, w) => {
     const len = Math.hypot(x1 - x0, z1 - z0);
     const a = Math.atan2(x1 - x0, z1 - z0);
-    parts.push({ geo: buildBox(w, 0.28, len), pos: [(x0 + x1) / 2, 0.12, (z0 + z1) / 2], rot: [0, a, 0], mat: MAT.earth, tone: 0.35 });
+    const hh = 0.28 + (seg++ % 3) * 0.015;   // own height: the segments overlap at the forks (rtsPropsCoplanarTest)
+    parts.push({ geo: buildBox(w, hh, len), pos: [(x0 + x1) / 2, hh / 2 - 0.02, (z0 + z1) / 2], rot: [0, a, 0], mat: MAT.earth, tone: 0.35 });
     for (let k = 0; k < Math.round(len / 0.7); k++) {
       const t = (k + 0.5) / Math.round(len / 0.7);
       parts.push({
-        geo: buildBox(w * 1.3, 0.05, 0.12), pos: [x0 + (x1 - x0) * t, 0.28, z0 + (z1 - z0) * t],
+        geo: buildBox(w * 1.3, 0.05, 0.12), pos: [x0 + (x1 - x0) * t, hh + 0.005 + (k % 3) * 0.01, z0 + (z1 - z0) * t],   // on its own segment, each its own height
         rot: [0, a + (r() - 0.5) * 0.9, 0], mat: MAT.timber, tone: 0.2 + r() * 0.3,
       });
     }
@@ -219,7 +221,7 @@ export function buildWeaponsRack({ seed = 131, rifles = 7 } = {}) {
   const w = 2.4 * S, h = 1.2 * S;
   for (const sx of [-1, 1]) {
     strut(parts, V(sx * w / 2, 0, -0.4), V(sx * w / 2, h, 0), 0.04, MAT.bamboo, 0.4);
-    strut(parts, V(sx * w / 2, 0, 0.4), V(sx * w / 2, h, 0), 0.04, MAT.bamboo, 0.45);
+    strut(parts, V(sx * w / 2 + 0.03, 0, 0.4), V(sx * w / 2 + 0.03, h, 0), 0.04, MAT.bamboo, 0.45); /* coplanar (rtsPropsCoplanarTest) */
   }
   strut(parts, V(-w / 2, h, 0), V(w / 2, h, 0), 0.04, MAT.bamboo, 0.5);
   strut(parts, V(-w / 2, h * 0.45, 0.2), V(w / 2, h * 0.45, 0.2), 0.03, MAT.bamboo, 0.5);
@@ -316,10 +318,13 @@ export function buildBicycleRow({ seed = 161, bikes = 4 } = {}) {
     const lean = 0.18 + (r() - 0.5) * 0.06;
     const bp = [];
     // Two wheels (in the Y-Z plane, the bike runs along Z) and the frame.
-    for (const z of [-0.55 * S, 0.55 * S]) bp.push({ geo: new THREE.TorusGeometry(R, 0.03, 5, 16).rotateY(Math.PI / 2), pos: [0, R, z], mat: MAT.rubber, tone: 0.2 });
+    for (const z of [-0.55 * S, 0.55 * S]) bp.push({ geo: new THREE.TorusGeometry(R, 0.03, 5, 16).rotateY(Math.PI / 2), pos: [0, R + 0.035, z], /* ground band (rtsGroundBandTest) */ mat: MAT.rubber, tone: 0.2 });
     const a = V(0, R, -0.55 * S), b = V(0, R, 0.55 * S), seat = V(0, R + 0.55, -0.15), bar = V(0, R + 0.62, 0.42 * S);
-    strut(bp, a, seat, 0.025, MAT.steel, 0.1); strut(bp, seat, bar, 0.025, MAT.steel, 0.1);
-    strut(bp, V(0, R + 0.05, 0), seat, 0.025, MAT.steel, 0.1); strut(bp, V(0, R + 0.05, 0), bar, 0.025, MAT.steel, 0.1);
+    // Tubes that meet have DIFFERENT radii: all lie in one plane, and equal
+    // hexagonal tubes put their side faces in one plane at every joint
+    // (88 coplanar pairs — rtsPropsCoplanarTest).
+    strut(bp, a, seat, 0.025, MAT.steel, 0.1); strut(bp, seat, bar, 0.021, MAT.steel, 0.1);
+    strut(bp, V(0, R + 0.05, 0), seat, 0.017, MAT.steel, 0.1); strut(bp, V(0, R + 0.05, 0), bar, 0.013, MAT.steel, 0.1);
     strut(bp, bar, b, 0.025, MAT.steel, 0.1);
     // The load: two rice sacks either side of the frame, and the steering pole.
     for (const sx of [-1, 1]) bp.push({ geo: buildBox(0.28, 0.5, 0.55), pos: [sx * 0.2, R + 0.35, -0.05], rot: [0, 0, sx * 0.12], mat: MAT.hessian, tone: 0.5 + r() * 0.3 });
@@ -372,7 +377,7 @@ export function buildTigerCage({ seed = 191, prisoner = false } = {}) {
   const r = rng(seed);
   const parts = [];
   const hx = 1.1 * S, hz = 0.8 * S, hy = 1.0 * S;
-  parts.push({ geo: buildBox(hx * 2 + 0.6, 0.05, hz * 2 + 0.6), pos: [0, 0.025, 0], mat: MAT.earth, tone: 0.2 });
+  parts.push({ geo: buildBox(hx * 2 + 0.6, 0.05, hz * 2 + 0.6), pos: [0, 0.04, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.2 });
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) pole(parts, sx * hx, sz * hz, hy + 0.1, r, { radius: 0.05, lean: 0 });
   for (const y of [0.1, hy]) {
     for (const sz of [-1, 1]) rail(parts, -hx, sz * hz, hx, sz * hz, y, r, { radius: 0.035 });
@@ -403,7 +408,7 @@ export function buildFoxhole({ seed = 201 } = {}) {
   const r = rng(seed);
   const parts = [];
   const R = 0.75 * S;
-  parts.push({ geo: new THREE.CylinderGeometry(R, R * 0.9, 0.3, 14), pos: [0, -0.12, 0], mat: MAT.steel, tone: 0.02 });
+  parts.push({ geo: new THREE.CylinderGeometry(R, R, 0.3, 14), pos: [0, -0.085, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.steel, tone: 0.02 });
   // The parapet: a crescent of spoil on the -Z side (toward the enemy, i.e.
   // the player coming from the south).
   for (let k = 0; k < 9; k++) {
@@ -424,7 +429,7 @@ export function buildTrenchBerm({ seed = 211, length = 10 } = {}) {
   const parts = [];
   const L = length * S;
   // The slot.
-  parts.push({ geo: buildBox(L, 0.3, 0.9), pos: [0, -0.1, 0.35], mat: MAT.steel, tone: 0.02 });
+  parts.push({ geo: buildBox(L - 0.12, 0.3, 0.9), pos: [0, -0.085, 0.35], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.steel, tone: 0.02 });
   // The bank: overlapping mounds.
   const n = Math.max(3, Math.round(L / 1.4));
   for (let k = 0; k < n; k++) {
@@ -458,7 +463,7 @@ export function buildLogBunker({ seed = 221 } = {}) {
   }
   // The slit: dark, under a lintel of logs, across most of the front.
   parts.push({ geo: buildBox(hx * 1.1, 0.32, 0.5), pos: [0, h * 0.42, -hz * 0.78], mat: MAT.steel, tone: 0.02 });
-  for (let k = 0; k < 3; k++) strut(parts, V(-hx * 0.7, h * 0.62 + k * 0.17, -hz * 0.8 - 0.04 * k), V(hx * 0.7, h * 0.64 + k * 0.17, -hz * 0.8 - 0.04 * k), 0.11, MAT.timber, 0.25 + r() * 0.2, 7);
+  for (let k = 0; k < 3; k++) strut(parts, V(-hx * 0.7 - k * 0.07, h * 0.62 + k * 0.17, -hz * 0.8 - 0.04 * k), V(hx * 0.7 + k * 0.07, h * 0.64 + k * 0.17, -hz * 0.8 - 0.04 * k), 0.11, MAT.timber, 0.25 + r() * 0.2, 7); /* coplanar (rtsPropsCoplanarTest) */
   // Log ends showing out of the mound's sides.
   for (const sx of [-1, 1]) for (let k = 0; k < 3; k++) {
     parts.push({ geo: new THREE.CylinderGeometry(0.12, 0.12, 0.5, 7).rotateX(Math.PI / 2), pos: [sx * hx * 0.95, h * 0.7 - k * 0.05, -hz * 0.4 + k * 0.55], mat: MAT.timber, tone: 0.45 });
@@ -481,7 +486,7 @@ export function buildPowPit({ seed = 231 } = {}) {
   const r = rng(seed);
   const parts = [];
   const h = 1.3 * S;                                 // half the hole
-  parts.push({ geo: buildBox(h * 2, 0.5, h * 2), pos: [0, -0.22, 0], mat: MAT.steel, tone: 0.01 });
+  parts.push({ geo: buildBox(h * 2, 0.5, h * 2), pos: [0, -0.185, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.steel, tone: 0.01 });
   // A lip of trodden mud round it.
   for (const [sx, sz, w, d] of [[0, -1, h * 2 + 0.8, 0.4], [0, 1, h * 2 + 0.8, 0.4], [-1, 0, 0.4, h * 2], [1, 0, 0.4, h * 2]]) {
     parts.push({ geo: buildBox(w, 0.08, d), pos: [sx * (h + 0.2), 0.04, sz * (h + 0.2)], mat: MAT.earth, tone: 0.2 + r() * 0.15 });
@@ -512,7 +517,7 @@ export function buildArmsBench({ seed = 241 } = {}) {
   parts.push({ geo: buildBox(w, 0.05, d), pos: [0, y, 0], mat: MAT.timber, tone: 0.45 });
   for (const sx of [-1, 1]) {
     strut(parts, V(sx * w * 0.4, 0, -d * 0.45), V(sx * w * 0.4, y - 0.03, 0), 0.04, MAT.timber, 0.35);
-    strut(parts, V(sx * w * 0.4, 0, d * 0.45), V(sx * w * 0.4, y - 0.03, 0), 0.04, MAT.timber, 0.35);
+    strut(parts, V(sx * w * 0.4 + 0.03, 0, d * 0.45), V(sx * w * 0.4 + 0.03, y - 0.03, 0), 0.04, MAT.timber, 0.35); /* coplanar (rtsPropsCoplanarTest) */
   }
   // Rifles laid flat, the middle one stripped: stock and receiver apart.
   for (let k = 0; k < 3; k++) {
@@ -556,7 +561,7 @@ export function buildCraterLatrine({ seed = 251 } = {}) {
 export function buildJarCache({ seed = 261 } = {}) {
   const r = rng(seed);
   const parts = [];
-  parts.push({ geo: new THREE.CylinderGeometry(1.6 * S, 1.8 * S, 0.06, 14).scale(1.2, 1, 0.9), pos: [0, 0.02, 0], mat: MAT.earth, tone: 0.12 });
+  parts.push({ geo: new THREE.CylinderGeometry(1.7 * S, 1.7 * S, 0.06, 14).scale(1.2, 1, 0.9), pos: [0, 0.02, 0], /* ground band (rtsGroundBandTest) */ mat: MAT.earth, tone: 0.12 });
   for (let k = 0; k < 4; k++) {
     const x = (k % 2 - 0.5) * 1.1 * S + (r() - 0.5) * 0.3, z = (Math.floor(k / 2) - 0.5) * 0.9 * S;
     parts.push({ geo: new THREE.TorusGeometry(0.2, 0.06, 6, 12).rotateX(Math.PI / 2), pos: [x, 0.07, z], mat: MAT.earth, tone: 0.55 });
@@ -567,6 +572,8 @@ export function buildJarCache({ seed = 261 } = {}) {
   parts.push({ geo: new THREE.SphereGeometry(0.6, 7, 5).scale(1.4, 0.45, 1), pos: [1.7 * S, 0.1, 0.3], mat: MAT.earth, tone: 0.35 });
   strut(parts, V(1.7 * S, 0.1, 0.3), V(1.9 * S, 1.2, 0.5), 0.025, MAT.timber, 0.4);
   parts.push({ geo: buildBox(0.22, 0.28, 0.03), pos: [1.7 * S - 0.02, 0.18, 0.28], rot: [0.2, 0, 0.18], mat: MAT.steel, tone: 0.3 });
+  for (const q of parts) q.pos && (q.pos[1] += 0.05);   // ground band: all of it 5 cm up (rtsGroundBandTest)
+  for (const q of parts) if (q.matrix) q.matrix.elements[13] += 0.05;
   return finish(parts, { cx: 0, cz: 0, hx: 2.4 * S, hz: 1.6 * S }, 1.2, { cell: 0.14, radius: 1 });
 }
 
@@ -588,7 +595,7 @@ export function buildSupplyStack({ seed = 271 } = {}) {
   }
   // Firewood: split logs stacked between two stakes.
   for (let c = 0; c < 4; c++) for (let k = 0; k < 5; k++) {
-    parts.push({ geo: new THREE.CylinderGeometry(0.08, 0.08, 1.0, 6).rotateX(Math.PI / 2), pos: [1.6 + k * 0.17, 0.08 + c * 0.15, 0], mat: MAT.timber, tone: 0.3 + r() * 0.3 });
+    parts.push({ geo: new THREE.CylinderGeometry(0.08, 0.08, 0.9 + ((k * 3 + c) % 5) * 0.05, 6).rotateX(Math.PI / 2), pos: [1.6 + k * 0.17, 0.08 + c * 0.15, ((k + c) % 3 - 1) * 0.03], mat: MAT.timber, tone: 0.3 + r() * 0.3 }); /* coplanar (rtsPropsCoplanarTest) */
   }
   for (const sx of [1.5, 2.45]) strut(parts, V(sx, 0, 0), V(sx, 0.8, 0), 0.03, MAT.timber, 0.4);
   return finish(parts, { cx: 0.3, cz: 0, hx: 2.4, hz: 1.1 }, 1.4, { cell: 0.14, radius: 1 });

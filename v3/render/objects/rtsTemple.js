@@ -279,7 +279,9 @@ function mouldedRun(profile, { length, thick, edge = 6 } = {}) {
 // The steps cost a ring of triangles apiece on a handful of pieces — cheap in
 // a way that texture detail on a 4K map is not.
 const PLINTH = (h) => [
-  [0.00, 0], [0.34, 0.015], [0.34, h * 0.16],
+  // (It began [0, 0] -> [0.34, 0.015]: a nearly flat face ON the ground, which
+  // z-fought with the pad. Now the footing goes straight down into it.)
+  [0.34, -0.08], [0.34, h * 0.16],
   [0.40, h * 0.20], [0.40, h * 0.30],          // the projecting torus
   [0.26, h * 0.40], [0.29, h * 0.47],          // the hollow above it
   [0.24, h * 0.56], [0.33, h * 0.64],
@@ -1025,7 +1027,7 @@ export function buildTempleLeanTo({ seed = 301, width = 4.2 } = {}) {
   for (const sx of [-1, 1]) rod(parts, Vt(sx * (hw - 0.3), 0, depth - 0.1), Vt(sx * (hw - 0.3), front, depth - 0.1), 0.06, MAT.timber, 0.35);
   rod(parts, Vt(-hw, front - 0.02, depth - 0.1), Vt(hw, front - 0.02, depth - 0.1), 0.055, MAT.bamboo, 0.45);
   // A mat, a bedroll, pots.
-  parts.push({ geo: buildBox(1.9, 0.02, 1.0), pos: [-hw * 0.3, 0.01, depth * 0.45], rot: [0, 0.08, 0], mat: MAT.woven, tone: 0.55 });
+  parts.push({ geo: buildBox(1.9, 0.03, 1.0), pos: [-hw * 0.3, 0.07, depth * 0.45], rot: [0, 0.08, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.woven, tone: 0.55 });
   parts.push({ geo: new THREE.CylinderGeometry(0.16, 0.16, 0.8, 8).rotateZ(Math.PI / 2), pos: [-hw * 0.3, 0.16, depth * 0.25], mat: MAT.canvas, tone: 0.3 });
   for (let k = 0; k < 3; k++) parts.push({ geo: new THREE.CylinderGeometry(0.18, 0.13, 0.36, 10), pos: [hw * 0.45 + k * 0.4, 0.18, depth * (0.3 + r() * 0.3)], mat: MAT.earth, tone: 0.45 + r() * 0.25 });
   const geo = assemble(parts);
@@ -1039,7 +1041,8 @@ export function buildTempleLeanTo({ seed = 301, width = 4.2 } = {}) {
 export function buildTempleHearth({ seed = 311 } = {}) {
   const r = rng(seed);
   const parts = [];
-  parts.push({ geo: new THREE.CylinderGeometry(0.75, 0.8, 0.04, 14), pos: [0, 0.02, 0], mat: MAT.steel, tone: 0.03 });
+  // (No ash DISC: a hearth stands on uneven ground, where a flat disc z-fights;
+  // the ash is the scorch decal the game lays under it.)
   for (let k = 0; k < 11; k++) {
     const a = (k / 11) * Math.PI * 2;
     parts.push({ geo: new THREE.SphereGeometry(0.17 + r() * 0.06, 6, 5).scale(1.2, 0.75, 1), pos: [Math.cos(a) * 0.85, 0.08, Math.sin(a) * 0.85], rot: [0, r() * 3, 0], mat: k % 3 ? MAT.laterite : MAT.sandstone, tone: 0.25 + r() * 0.3 });

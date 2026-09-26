@@ -197,7 +197,7 @@ export function buildNestBody({ seed = 61 } = {}) {
   // The mound: a lathe from the ground outside in to the lip of the logs.
   // Profile runs OUTSIDE-IN: run the other way, the faces point down into the
   // earth and the whole mound is culled from above (measured: normal.y -0.83).
-  const prof = [[rIn + 2.6 * S, 0], [rIn + 2.3 * S, 0.12], [rIn + 1.4 * S, 0.7 * S], [rIn + 0.5 * S, 1.12 * S], [rIn, 1.0 * S], [rIn - 0.05, 0]]
+  const prof = [[rIn + 2.6 * S, -0.1], [rIn + 2.55 * S, 0.08], /* steep out of the ground (rtsGroundBandTest) */ [rIn + 2.3 * S, 0.12], [rIn + 1.4 * S, 0.7 * S], [rIn + 0.5 * S, 1.12 * S], [rIn, 1.0 * S], [rIn - 0.05, 0]]
     .map(([r, y]) => new THREE.Vector2(r, y));
   parts.push({ geo: new THREE.LatheGeometry(prof, 28), mat: MAT.earth, tone: 0.5 });
   // Log revetment: courses of logs in a 10-gon just inside the mound, each
@@ -213,7 +213,7 @@ export function buildNestBody({ seed = 61 } = {}) {
       parts.push({ geo: log, pos: [Math.cos(am) * rr, logR + c * logR * 1.85, Math.sin(am) * rr], rot: [0, -am + Math.PI / 2, 0], mat: MAT.timber, tone: 0.25 + R() * 0.3 });
     }
   }
-  parts.push({ geo: new THREE.CylinderGeometry(rIn - 0.2, rIn - 0.2, 0.05, 20), pos: [0, 0.025, 0], mat: MAT.earth, tone: 0.2 });
+  parts.push({ geo: new THREE.CylinderGeometry(rIn - 0.2, rIn - 0.2, 0.05, 20), pos: [0, 0.04, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.2 });
   // Cut leaves over the mound: flat thatch mats lying on its slope.
   for (let k = 0; k < 7; k++) {
     const a = R() * Math.PI * 2, r = rIn + (0.5 + R()) * S;

@@ -219,7 +219,9 @@ export function buildQuonsetShellGeometry(opts = {}) {
   parts.push(...gablePlanks({ radius: Rr - 0.05, z: F - 0.2, door, R }).map((p) => ({ ...p, pos: [p.pos[0], p.pos[1] + 0.3, p.pos[2]] })));
   parts.push(...gablePlanks({ radius: Rr - 0.05, z: F - L + 0.2, R }).map((p) => ({ ...p, pos: [p.pos[0], p.pos[1] + 0.3, p.pos[2]] })));
   // Door frame: posts and a lintel, proud of the planks.
-  for (const x of [-door.w / 2 - 0.2, door.w / 2 + 0.2]) {
+  // (0.22 out, not 0.2: at 0.2 a post's outer face lay 5 mm from a gable
+  // plank's cut end, one plane — rtsPropsCoplanarTest.)
+  for (const x of [-door.w / 2 - 0.22, door.w / 2 + 0.22]) {
     parts.push({ geo: new THREE.BoxGeometry(0.45, door.h + 0.6, 0.45), pos: [x, 0.3 + (door.h + 0.6) / 2, F - 0.05], mat: MAT.timber, tone: 0.3 });
   }
   // Lintel top 3 cm clear of the gable planks' row: 1 mm apart, the two tops shimmered.

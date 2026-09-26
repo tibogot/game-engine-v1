@@ -35,7 +35,7 @@ export function buildTunnelEntrance({ seed = 7 } = {}) {
   // (the side the lid falls to). Lathe profile runs OUTSIDE-IN so the faces
   // point up (the DShK nest's lesson: the other way round is culled from above).
   const rOut = 2.6 * S, rIn = hole * 0.75;
-  const prof = [[rOut, 0], [rOut - 0.5 * S, 0.12 * S], [rIn + 0.5 * S, 0.34 * S], [rIn + 0.1, 0.3 * S], [rIn, 0.02]]
+  const prof = [[rOut, -0.1], [rOut - 0.06, 0.07], /* steep out of the ground: a shallow skirt z-fights along its seam (rtsGroundBandTest) */ [rOut - 0.5 * S, 0.12 * S], [rIn + 0.5 * S, 0.34 * S], [rIn + 0.1, 0.3 * S], [rIn, 0.02]]
     .map(([r, y]) => new THREE.Vector2(r, y));
   parts.push({ geo: new THREE.LatheGeometry(prof, 18), mat: MAT.earth, tone: 0.35 });
   // The shaft: a dark box sunk into the ground, its mouth just above the
@@ -93,7 +93,12 @@ export const MORTAR_MUZZLE = new THREE.Vector3(0, MORTAR_TUBE_Y + TUBE_LEN * Mat
 /** A seated or kneeling figure of the Front, in his pith helmet. `s` scales him. */
 function crewman(parts, x, z, face, { kneeling = true, scale = 1, tone = 0.35 } = {}) {
   const g = (v) => v * MG * scale;
-  const q = (geo, px, py, pz, mat, t, rot) => parts.push({ geo, pos: [x + px, py, z + pz], mat, tone: t, rot: rot ?? [0, face, 0] });
+  // Offsets turn WITH the man: each part used to turn about its own centre
+  // while its offset stayed on the world axes, so a crewman facing anything
+  // but +Z had his legs beside his torso — and at 2.6 rad a leg's face lay in
+  // the torso's plane (rtsPropsCoplanarTest).
+  const c = Math.cos(face), s = Math.sin(face);
+  const q = (geo, px, py, pz, mat, t, rot) => parts.push({ geo, pos: [x + px * c + pz * s, py, z - px * s + pz * c], mat, tone: t, rot: rot ?? [0, face, 0] });
   // Sized against the game's own soldiers (2.34 m at RTS scale), not life:
   // at real proportions the crew came out half the height of the men round them.
   const h = kneeling ? 0.72 : 1.05;
@@ -110,11 +115,11 @@ export function buildMortarPit({ seed = 82 } = {}) {
   const R = rng(seed);
   const parts = [];
   const rIn = 2.3 * S, rOut = 3.5 * S, crest = 0.5 * S;
-  const prof = [[rOut, 0], [rOut - 0.5 * S, 0.18 * S], [rIn + 0.4 * S, crest], [rIn + 0.1, crest * 0.85], [rIn - 0.05, 0.02]]
+  const prof = [[rOut, -0.1], [rOut - 0.06, 0.07], /* steep out of the ground: a shallow skirt z-fights along its seam (rtsGroundBandTest) */ [rOut - 0.5 * S, 0.18 * S], [rIn + 0.4 * S, crest], [rIn + 0.1, crest * 0.85], [rIn - 0.05, 0.02]]
     .map(([r, y]) => new THREE.Vector2(r, y));
   const gap = 1.0;
   parts.push({ geo: new THREE.LatheGeometry(prof, 24, Math.PI + gap / 2, Math.PI * 2 - gap), mat: MAT.earth, tone: 0.38 });
-  parts.push({ geo: new THREE.CylinderGeometry(rIn, rIn, 0.04, 20), pos: [0, 0.02, 0], mat: MAT.earth, tone: 0.24 });
+  parts.push({ geo: new THREE.CylinderGeometry(rIn, rIn, 0.04, 20), pos: [0, 0.045, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.24 });
   // Bags round the lip, open at the back where the crew works.
   parts.push({
     geo: buildSandbagRing({ radius: rIn + 0.45 * S, courses: 2, seed, gapDeg: 84, batter: 0.05, bag: { length: 0.52 * S, width: 0.3 * S, height: 0.19 * S, segU: 6, segV: 4 } }),
@@ -193,12 +198,12 @@ export function buildZpuBody({ seed = 145 } = {}) {
   // The pit: a ring of spoil round a flat floor, open at the back (-Z) for the
   // crew and the ammunition. Profile OUTSIDE-IN so the faces point up.
   const rIn = 3.3 * S, rOut = 5.6 * S, crest = 0.95 * S;
-  const prof = [[rOut, 0], [rOut - 0.8 * S, 0.3 * S], [rIn + 0.7 * S, crest], [rIn + 0.15 * S, crest * 0.9], [rIn - 0.05, 0.02]]
+  const prof = [[rOut, -0.1], [rOut - 0.06, 0.07], /* steep out of the ground: a shallow skirt z-fights along its seam (rtsGroundBandTest) */ [rOut - 0.8 * S, 0.3 * S], [rIn + 0.7 * S, crest], [rIn + 0.15 * S, crest * 0.9], [rIn - 0.05, 0.02]]
     .map(([r, y]) => new THREE.Vector2(r, y));
   // Lathe angles run from +Z (x = sin φ, z = cos φ): the back (-Z) is φ = π.
   const gap = 0.9;                                          // radians of opening at the back
   parts.push({ geo: new THREE.LatheGeometry(prof, 30, Math.PI + gap / 2, Math.PI * 2 - gap), mat: MAT.earth, tone: 0.42 });
-  parts.push({ geo: new THREE.CylinderGeometry(rIn, rIn, 0.04, 24), pos: [0, 0.02, 0], mat: MAT.earth, tone: 0.25 });
+  parts.push({ geo: new THREE.CylinderGeometry(rIn, rIn, 0.04, 24), pos: [0, 0.045, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.25 });
   // The carriage: two side rails and the cross members, on four jacks, the
   // wheels lifted off the ground either side as they are in firing position.
   const cw = 0.85 * S, cl = 2.1 * S, railY = 0.3 * S;
@@ -206,7 +211,7 @@ export function buildZpuBody({ seed = 145 } = {}) {
     parts.push({ geo: buildBox(0.14 * S, 0.16 * S, cl * 2), pos: [sx * cw, railY, 0], mat: MAT.steel, tone: 0.3 });
     for (const sz of [-1, 1]) {
       parts.push({ geo: buildBox(0.1 * S, railY - 0.08, 0.1 * S), pos: [sx * (cw + 0.02), (railY - 0.08) / 2, sz * (cl - 0.15)], mat: MAT.steel, tone: 0.25 });
-      parts.push({ geo: buildBox(0.34 * S, 0.05, 0.34 * S), pos: [sx * (cw + 0.02), 0.025, sz * (cl - 0.15)], mat: MAT.steel, tone: 0.2 });
+      parts.push({ geo: buildBox(0.34 * S, 0.05, 0.34 * S), pos: [sx * (cw + 0.02), 0.045, sz * (cl - 0.15)], /* ground band (rtsGroundBandTest) */ mat: MAT.steel, tone: 0.2 });
       // A wheel, lifted: turned flat-side out beside the rail.
       const wheel = new THREE.CylinderGeometry(0.42 * S, 0.42 * S, 0.24 * S, 14).rotateZ(Math.PI / 2);
       parts.push({ geo: wheel, pos: [sx * (cw + 0.3 * S), 0.5 * S, sz * (cl - 0.75 * S)], mat: MAT.rubber, tone: 0.4 });
@@ -327,7 +332,7 @@ export function buildPunjiPit({ seed = 11 } = {}) {
   const mouth = 2.0 * S, lip = 0.32 * S;
   // Spoil thrown up round the edge (lathe profile OUTSIDE-IN: faces point up).
   const rOut = 2.3 * S, rIn = mouth * 0.62;
-  const prof = [[rOut, 0], [rOut - 0.45 * S, 0.1 * S], [rIn + 0.4 * S, lip], [rIn + 0.08, lip * 0.9], [rIn, 0.02]]
+  const prof = [[rOut, -0.1], [rOut - 0.06, 0.07], /* steep out of the ground: a shallow skirt z-fights along its seam (rtsGroundBandTest) */ [rOut - 0.45 * S, 0.1 * S], [rIn + 0.4 * S, lip], [rIn + 0.08, lip * 0.9], [rIn, 0.02]]
     .map(([r, y]) => new THREE.Vector2(r, y));
   parts.push({ geo: new THREE.LatheGeometry(prof, 16), mat: MAT.earth, tone: 0.33 });
   // The hole. A pit cannot be dug DOWN — the terrain is not really excavated,
@@ -381,11 +386,11 @@ export function buildPunjiPit({ seed = 11 } = {}) {
     { geo: buildBox(matS - 0.14, 0.05 * S, 0.09 * S), pos: [0, 0.08 * S, -0.3 * S], mat: MAT.bamboo, tone: 0.5 },
     { geo: buildBox(0.08 * S, 0.045 * S, matS - 0.2), pos: [0.35 * S, 0.085 * S, 0], mat: MAT.bamboo, tone: 0.45 },
   ]);
-  parts.push({ geo: cover, pos: [0.3 * S, 0.02, -(rIn + 1.5 * S)], rot: [0, 0.3, 0.06], mat: null });
+  parts.push({ geo: cover, pos: [0.3 * S, 0.06, -(rIn + 1.5 * S)], rot: [0, 0.3, 0.06], /* ground band (rtsGroundBandTest) */ mat: null });
   // Fronds off the mat, scattered where it was pulled clear.
   for (let k = 0; k < 5; k++) {
     const a = Math.PI + (R() - 0.5) * 1.6, r = rIn + (0.9 + R() * 1.2) * S;
-    frondOnGround(parts, Math.sin(a) * r, 0.06 + R() * 0.04, Math.cos(a) * r, R() * 3, (0.9 + R() * 0.5) * S, R);
+    frondOnGround(parts, Math.sin(a) * r, 0.075 + R() * 0.03, Math.cos(a) * r, R() * 3, (0.9 + R() * 0.5) * S, R);
   }
   const geo = assemble(parts);
   // A gentler bake than the rest of the kit: the stakes stand in a hole, so
@@ -423,7 +428,7 @@ export function buildBoobyTrap({ seed = 13 } = {}) {
   // The leaves it was under, pushed aside.
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * Math.PI * 2 + R();
-    frondOnGround(parts, Math.sin(a) * (0.7 + R() * 0.5) * S, 0.05 + R() * 0.03, Math.cos(a) * (0.7 + R() * 0.5) * S, R() * 3, (0.7 + R() * 0.4) * S, R, 0.22);
+    frondOnGround(parts, Math.sin(a) * (0.7 + R() * 0.5) * S, 0.075 + R() * 0.03, Math.cos(a) * (0.7 + R() * 0.5) * S, R() * 3, (0.7 + R() * 0.4) * S, R, 0.22);
   }
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.08 * S, radius: 1, strength: 0.3, groundFade: 0.25, floor: 0.55 });
@@ -443,11 +448,11 @@ export function buildSupplyCache({ seed = 19 } = {}) {
   const parts = [];
   // The scrape: a low bank round it, open at the front (-Z) where they work.
   const rIn = 1.9 * S, rOut = 3.0 * S, crest = 0.36 * S;
-  const prof = [[rOut, 0], [rOut - 0.5 * S, 0.12 * S], [rIn + 0.4 * S, crest], [rIn + 0.1, crest * 0.88], [rIn - 0.05, 0.02]]
+  const prof = [[rOut, -0.1], [rOut - 0.06, 0.07], /* steep out of the ground: a shallow skirt z-fights along its seam (rtsGroundBandTest) */ [rOut - 0.5 * S, 0.12 * S], [rIn + 0.4 * S, crest], [rIn + 0.1, crest * 0.88], [rIn - 0.05, 0.02]]
     .map(([r, y]) => new THREE.Vector2(r, y));
   const gap = 1.1;
   parts.push({ geo: new THREE.LatheGeometry(prof, 20, Math.PI + gap / 2, Math.PI * 2 - gap), mat: MAT.earth, tone: 0.34 });
-  parts.push({ geo: new THREE.CylinderGeometry(rIn, rIn, 0.04, 18), pos: [0, 0.02, 0], mat: MAT.earth, tone: 0.22 });
+  parts.push({ geo: new THREE.CylinderGeometry(rIn, rIn, 0.04, 18), pos: [0, 0.045, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.22 });
   // Rice sacks: two courses, each one squashed and turned its own way, so the
   // stack reads as full bags and not a wall of boxes.
   for (let k = 0; k < 9; k++) {
@@ -506,7 +511,7 @@ export function buildSpiderHole({ seed = 23 } = {}) {
   const parts = [];
   const rHole = 0.62 * S, lip = 0.28 * S;
   const rOut = 1.75 * S;
-  const prof = [[rOut, 0], [rOut - 0.4 * S, 0.09 * S], [rHole + 0.34 * S, lip], [rHole + 0.06, lip * 0.92], [rHole, 0.02]]
+  const prof = [[rOut, -0.1], [rOut - 0.06, 0.07], /* steep out of the ground: a shallow skirt z-fights along its seam (rtsGroundBandTest) */ [rOut - 0.4 * S, 0.09 * S], [rHole + 0.34 * S, lip], [rHole + 0.06, lip * 0.92], [rHole, 0.02]]
     .map(([r, y]) => new THREE.Vector2(r, y));
   parts.push({ geo: new THREE.LatheGeometry(prof, 18), mat: MAT.earth, tone: 0.36 });
   // The shaft, dark, its mouth at the lip.
@@ -531,7 +536,7 @@ export function buildSpiderHole({ seed = 23 } = {}) {
   parts.push({ geo: lid, pos: [0, lip * 0.6, -(rHole + 0.85 * S)], rot: [1.15, 0.2, 0], mat: null });
   for (let k = 0; k < 4; k++) {
     const a = Math.PI + (R() - 0.5) * 2.2, r = rHole + (0.8 + R() * 0.9) * S;
-    frondOnGround(parts, Math.sin(a) * r, 0.05 + R() * 0.03, Math.cos(a) * r, R() * 3, (0.8 + R() * 0.5) * S, R, 0.24);
+    frondOnGround(parts, Math.sin(a) * r, 0.075 + R() * 0.03, Math.cos(a) * r, R() * 3, (0.8 + R() * 0.5) * S, R, 0.24);
   }
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.1 * S, radius: 2, strength: 0.4, groundFade: 0.3, floor: 0.5 });

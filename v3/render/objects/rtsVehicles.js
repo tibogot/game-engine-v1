@@ -918,9 +918,11 @@ export function buildUH1() {
   for (const [a0, a1] of [[-12 * D, 30 * D], [150 * D, 192 * D]]) {
     P(skinPatch(st, 1.3, 2.45, a0, a1, GL, { nz: 6, na: 6 }), [0, 0, 0], MAT.steel, 0.12);
   }
-  P(skinPatch(st, 2.55, 4.15, 87 * D, 93 * D, FR, { nz: 12, na: 1 }), [0, 0, 0], MAT.paint, OD * 0.9);      // centre post
+  // Posts stand 5 mm prouder than the top rail they cross: at the same offset
+  // their faces were one plane where they meet (rtsPropsCoplanarTest).
+  P(skinPatch(st, 2.55, 4.15, 87 * D, 93 * D, FR + 0.005, { nz: 12, na: 1 }), [0, 0, 0], MAT.paint, OD * 0.9);      // centre post
   P(skinPatch(st, 2.5, 2.62, 12 * D, 168 * D, FR, { nz: 1, na: 18 }), [0, 0, 0], MAT.paint, OD * 0.9);     // top of the windscreen
-  for (const a of [52 * D, 128 * D]) P(skinPatch(st, 2.55, 3.9, a - 2 * D, a + 2 * D, FR, { nz: 10, na: 1 }), [0, 0, 0], MAT.paint, OD * 0.9);   // side posts
+  for (const a of [52 * D, 128 * D]) P(skinPatch(st, 2.55, 3.9, a - 2 * D, a + 2 * D, FR + 0.005, { nz: 10, na: 1 }), [0, 0, 0], MAT.paint, OD * 0.9);   // side posts
   for (const a of [-50 * D, -130 * D]) P(skinPatch(st, 3.3, 4.12, a - 2 * D, a + 2 * D, FR, { nz: 6, na: 1 }), [0, 0, 0], MAT.paint, OD * 0.9);   // chin window frames
   // Wipers on the windscreen.
   for (const sx of [-1, 1]) { const w = at(3.85, (90 - sx * 28) * D, 0.03); P(buildBox(0.03, 0.02, 0.5), [w.x, w.y, w.z], MAT.steel, 0.1, [0.9, 0, 0]); }
@@ -1162,9 +1164,9 @@ export function buildHueyWreck({ seed = 5 } = {}) {
     g.computeVertexNormals();
   };
   bend(bladeA, 0.045);
-  bend(bladeB, 0.012);
+  bend(bladeB, 0.0012);                                 // (0.012 dug its tip under the ground: z-fight — rtsGroundBandTest)
   place(bladeA, [0.1, -0.35, 0.05], [0.4 * S, 2.2 * S, 0.3 * S]);
-  place(bladeB, [0, 0.9 + R() * 0.4, 0.03], [9 * S, 0.12, 12 * S]);
+  place(bladeB, [0, 0.9 + R() * 0.4, 0.0], [9 * S, 0.44, 12 * S]);   // resting on its grip and tip (the blade droops 22 cm by design)
   // Tail rotor, by the end of the boom.
   place(subset(src.userData.rotors.tail.geo, () => true), [1.3, 0.4, 0], [-9.8 * S, 0.25, -3.6 * S]);
 
@@ -1172,16 +1174,16 @@ export function buildHueyWreck({ seed = 5 } = {}) {
   for (let k = 0; k < 12; k++) {
     const a = R() * Math.PI * 2, d = 3 + R() * 9;
     const w = 0.4 + R() * 0.9, l = 0.4 + R() * 1.1;
-    parts.push({ geo: buildBox(w, 0.03, l), pos: [Math.cos(a) * d - 1, 0.04, Math.sin(a) * d], rot: [(R() - 0.5) * 0.4, R() * 6, (R() - 0.5) * 0.4], mat: k % 4 === 0 ? MAT.steel : MAT.paint, tone: k % 4 === 0 ? 0.55 : 0.05 + R() * 0.12 });
+    parts.push({ geo: buildBox(w, 0.03, l), pos: [Math.cos(a) * d - 1, 0.13, Math.sin(a) * d], /* ground band (rtsGroundBandTest): lifted, tilted less */ rot: [(R() - 0.5) * 0.16, R() * 6, (R() - 0.5) * 0.16], mat: k % 4 === 0 ? MAT.steel : MAT.paint, tone: k % 4 === 0 ? 0.55 : 0.05 + R() * 0.12 });
   }
-  parts.push({ geo: buildBox(1.25 * S, 0.05, 1.3 * S), pos: [3.5 * S, 0.1, 2.6 * S], rot: [0.12, 0.7, 0.05], mat: MAT.paint, tone: 0.14 });
+  parts.push({ geo: buildBox(1.25 * S, 0.05, 1.3 * S), pos: [3.5 * S, 0.16, 2.6 * S], rot: [0.12, 0.7, 0.05], /* ground band (rtsGroundBandTest) */ mat: MAT.paint, tone: 0.14 });
   parts.push({ geo: buildBox(0.3, 0.2, 0.12), pos: [2.4 * S, 0.1, -2.2 * S], rot: [0, 0.4, 0], mat: MAT.paint, tone: 0.2 });
   // (The scorch under it is a projected ground DECAL, the game's: a flat disc
   // here sat 1.5 cm over uneven ground — z-fighting waiting to happen.)
   // Vines already over the boom: a few green strands draped across it.
   for (let k = 0; k < 6; k++) {
     const x = -4.5 * S - k * 0.9 * S + R() * 0.6, z = -1.6 * S - (k * 0.12 + 0.3) * S;
-    parts.push({ geo: new THREE.TorusGeometry(0.65 * S, 0.035, 5, 10, Math.PI), pos: [x, 0.12, z], rot: [0, 0.55 + (R() - 0.5) * 0.5, 0], mat: MAT.moss, tone: 0.3 + R() * 0.3 });
+    parts.push({ geo: new THREE.TorusGeometry(0.65 * S, 0.035, 5, 10, Math.PI), pos: [x, 0.2, z], /* ground band (rtsGroundBandTest) */  rot: [0, 0.55 + (R() - 0.5) * 0.5, 0], mat: MAT.moss, tone: 0.3 + R() * 0.3 });
   }
 
   const geo = assemble(parts);

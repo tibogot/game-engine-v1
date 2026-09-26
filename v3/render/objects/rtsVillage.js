@@ -298,7 +298,7 @@ export function buildWell({ seed = 7 } = {}) {
   const parts = [];
   const rIn = 0.62 * B, kerbH = 0.52 * B;
   // The trodden apron, a hair proud of the ground so it never z-fights.
-  parts.push({ geo: new THREE.CylinderGeometry(rIn + 1.5, rIn + 1.7, 0.05, 18), pos: [0, 0.025, 0], mat: MAT.earth, tone: 0.22 });
+  parts.push({ geo: new THREE.CylinderGeometry(rIn + 1.6, rIn + 1.6, 0.05, 18), pos: [0, 0.04, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.22 });
   // Kerb blocks, each its own brick with its own lean.
   const n = 16;
   for (let k = 0; k < n; k++) {
@@ -506,7 +506,7 @@ export function buildStrawRick({ seed = 23 } = {}) {
   for (let k = 0; k < 5; k++) {
     const a = r() * 6.28, rr = rad * (1.05 + r() * 0.45);
     parts.push({
-      geo: buildBox(0.5 + r() * 0.4, 0.04, 0.2), pos: [Math.sin(a) * rr, 0.03 + r() * 0.02, Math.cos(a) * rr],
+      geo: buildBox(0.5 + r() * 0.4, 0.04, 0.2), pos: [Math.sin(a) * rr, 0.07 + r() * 0.02, Math.cos(a) * rr], /* ground band (rtsGroundBandTest) */ 
       rot: [0, a + (r() - 0.5), (r() - 0.5) * 0.1], mat: MAT.thatch, tone: 0.55 + r() * 0.35,
     });
   }
@@ -525,7 +525,7 @@ export function buildStrawRick({ seed = 23 } = {}) {
 export function buildCookHearth({ seed = 29 } = {}) {
   const r = rng(seed);
   const parts = [];
-  parts.push({ geo: new THREE.CylinderGeometry(0.62, 0.7, 0.05, 14), pos: [0, 0.025, 0], mat: MAT.earth, tone: 0.16 });
+  parts.push({ geo: new THREE.CylinderGeometry(0.66, 0.66, 0.05, 14), pos: [0, 0.04, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.16 });
   for (let k = 0; k < 3; k++) {
     const a = (k / 3) * Math.PI * 2 + 0.4;
     parts.push({
@@ -717,7 +717,7 @@ export function buildPigPen({ seed = 43 } = {}) {
   const r = rng(seed);
   const parts = [];
   const w = 3.2 * B * 0.7, d = 2.4 * B * 0.7, h = 0.62 * B;
-  parts.push({ geo: new THREE.CylinderGeometry(w * 0.62, w * 0.66, 0.05, 14).scale(1, 1, d / w), pos: [0, 0.025, 0], mat: MAT.earth, tone: 0.14 });
+  parts.push({ geo: new THREE.CylinderGeometry(w * 0.64, w * 0.64, 0.05, 14).scale(1, 1, d / w), pos: [0, 0.04, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.14 });
   // The hurdles: uprights and two rails a side, with the gate side left low.
   for (const [dx, dz, len, rot] of [[0, -d / 2, w, 0], [0, d / 2, w, 0], [-w / 2, 0, d, Math.PI / 2], [w / 2, 0, d, Math.PI / 2]]) {
     const n = Math.max(2, Math.round(len / 0.9));
@@ -743,7 +743,7 @@ export function buildPigPen({ seed = 43 } = {}) {
   });
   // The trough, and the mud wallow.
   parts.push({ geo: buildBox(0.9 * B, 0.18, 0.3 * B), pos: [w * 0.22, 0.09, d * 0.2], rot: [0, 0.2, 0], mat: MAT.timber, tone: 0.22 });
-  parts.push({ geo: new THREE.SphereGeometry(0.5, 10, 6).scale(1.3, 0.06, 1), pos: [w * 0.05, 0.03, d * 0.1], mat: MAT.earth, tone: 0.06 });
+  parts.push({ geo: new THREE.SphereGeometry(0.5, 10, 6).scale(1.3, 0.06, 1), pos: [w * 0.05, 0.07, d * 0.1], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.06 });
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.12, radius: 1, strength: 0.32, groundFade: 0.3, floor: 0.54 });
   geo.userData.footprint = { cx: 0, cz: 0, hx: w / 2 + 0.2, hz: d / 2 + 0.2 };

@@ -148,7 +148,7 @@ export function buildCrateStack({ seed = 5 } = {}) {
   // One crate down on the ground, lid off beside it.
   const lone = crateParts(pw * 0.85, 0, pd * 0.35, 0.5, R);
   parts.push(...lone.parts.filter((_, k) => k !== 1));
-  parts.push({ geo: new THREE.BoxGeometry(L, 0.04 * S, W), pos: [pw * 0.95, 0.02 * S, pd * 0.9], rot: [0, 0.9, 0], mat: MAT.paint, tone: 0.5 });
+  parts.push({ geo: new THREE.BoxGeometry(L, 0.04 * S, W), pos: [pw * 0.95, 0.045 * S, pd * 0.9], rot: [0, 0.9, 0], /* ground band (rtsGroundBandTest) */ mat: MAT.paint, tone: 0.5 });
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.14 * S, radius: 2, strength: 0.45, groundFade: 0.3, floor: 0.5 });
   return geo;
@@ -162,7 +162,7 @@ export function buildGunPit({ seed = 7 } = {}) {
   const parts = [];
   parts.push({ geo: buildSandbagRing({ radius, courses: 4, seed, bag, gapDeg: 44 }), mat: null });
   // The ring's floor is scraped earth, a little below the grass.
-  parts.push({ geo: new THREE.CylinderGeometry(radius - 0.25, radius - 0.25, 0.06, 20), pos: [0, 0.03, 0], mat: MAT.earth, tone: 0.35 });
+  parts.push({ geo: new THREE.CylinderGeometry(radius - 0.25, radius - 0.25, 0.06, 20), pos: [0, 0.035, 0], /* ground band: top at 6.5 cm (tools/rtsGroundBandTest) */ mat: MAT.earth, tone: 0.35 });
   // Inside: ammo crates against the back wall and a drum of water.
   const c1 = crateParts(-0.6 * S, 0.06, radius * 0.45, 0.2, R);
   const c2 = crateParts(0.35 * S, 0.06, radius * 0.5, -0.15, R);
@@ -949,7 +949,7 @@ export function buildTrainingTarget({ seed = 61 } = {}) {
   const sil = [];
   const t = 0.05;
   for (const sx of [-1, 1]) {
-    sil.push({ geo: buildBox(0.17 * S, H * 0.42, t - 0.004 * sx), pos: [sx * 0.13 * S, H * 0.25, 0] }); // legs
+    sil.push({ geo: buildBox(0.17 * S, H * 0.42, t + 0.01), pos: [sx * 0.13 * S, H * 0.25, 0] }); // legs: 1 cm THICKER than the torso (±4 mm left their faces 2 mm from its own)
   }
   sil.push({ geo: buildBox(0.5 * S, H * 0.34, t), pos: [0, H * 0.62, 0] });                  // torso
   sil.push({ geo: buildBox(0.66 * S, H * 0.1, t - 0.008), pos: [0, H * 0.76, 0] });          // shoulders
@@ -975,7 +975,7 @@ export function buildTrainingTarget({ seed = 61 } = {}) {
   for (let k = 0; k < 5; k++) {
     parts.push({
       geo: new THREE.CylinderGeometry(0.02, 0.018, 0.09, 5).rotateZ(Math.PI / 2),
-      pos: [(R() - 0.5) * 1.6 * S, 0.02, 0.6 * S + R() * 0.8 * S],
+      pos: [(R() - 0.5) * 1.6 * S, 0.075, 0.6 * S + R() * 0.8 * S], /* ground band (rtsGroundBandTest) */ 
       rot: [0, R() * 3, 0], mat: MAT.metal, tone: 0.75 + R() * 0.2,
     });
   }
