@@ -274,6 +274,12 @@ export class DecalSystem {
       this.mesh = new THREE.Mesh(geo, this.material);
       this.mesh.frustumCulled = false;
       this.mesh.name = "DecalBoxes";
+      // RECEIVES shadows (at the painted ground: receivedShadowPositionNode
+      // below). Left at three's default false, every decal painted OVER the
+      // shadow the terrain under it had received — nam-rts's swept village
+      // yards made a whole hamlet look shadowless (2026-09-26). Never casts.
+      this.mesh.receiveShadow = true;
+      this.mesh.castShadow = false;
       // After the opaque surfaces it reads, before the water (renderOrder 10).
       this.mesh.renderOrder = 9;
       // Hidden until update() has decals to draw: a render before that (the boot

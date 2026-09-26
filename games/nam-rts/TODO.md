@@ -501,7 +501,12 @@ Everything else below is in its section.
         + some red laterite, moss on top, damp base, no bevel highlight;
         sink 15-30% + tilt; far fewer lone stones, clustered boulders, more
         KARST pillars. Before/after toggle; measure ms.
-  - [ ] **The village casts NO SHADOWS** (your note, 2026-09-26): houses,
+  - [x] **VILLAGE SHADOWS FIXED** (2026-09-26): everything cast shadows; the swept
+        YARD DECALS painted over them — the engine's DecalBoxes mesh never had
+        receiveShadow on (its shader already looked the shadow up at the
+        ground). One line in v3/render/decals/decalSystem.js; every decal on
+        every map now shows shadows. Cost within noise (0.16 ms, noise 0.28).
+  - [x] (the note) The village casts NO SHADOWS (your note, 2026-09-26): houses,
         granaries, fences — nothing in the hamlet throws a shadow. Check the
         placed/merged meshes' castShadow and the shadow camera's reach.
   - [x] **Requisition flags are REAL CLOTH now** (2026-09-26): two engine
