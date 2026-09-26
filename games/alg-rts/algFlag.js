@@ -22,11 +22,49 @@ export function drawTricoloreDataUrl(hoistPx = 400) {
 }
 
 /**
- * Plant a cloth tricolour on a kit building's `userData.flagMount`
+ * The FLN / ALN flag, 2:3: green at the hoist, white at the fly, and across
+ * the join a red crescent opening toward the fly with a red five-pointed star
+ * inside it. Returns a PNG data: URL.
+ */
+export function drawFlnDataUrl(hoistPx = 400) {
+  const H = hoistPx, W = Math.round(H * 1.5);
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  g.fillStyle = "#1f6b3a"; g.fillRect(0, 0, W / 2 + 1, H);
+  g.fillStyle = "#ece8dc"; g.fillRect(W / 2, 0, W / 2, H);
+  // Crescent: a red disc with an off-centre disc cut out of it (toward the fly).
+  const cx = W / 2, cy = H / 2, R = H * 0.25;
+  g.fillStyle = "#c8202a";
+  g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+  g.globalCompositeOperation = "destination-out";
+  g.beginPath(); g.arc(cx + R * 0.26, cy, R * 0.8, 0, Math.PI * 2); g.fill();
+  g.globalCompositeOperation = "source-over";
+  // Re-paint the cut with the field behind it (green left of the join, white right).
+  g.save();
+  g.beginPath(); g.arc(cx + R * 0.26, cy, R * 0.8, 0, Math.PI * 2); g.clip();
+  g.fillStyle = "#1f6b3a"; g.fillRect(0, 0, W / 2 + 1, H);
+  g.fillStyle = "#ece8dc"; g.fillRect(W / 2, 0, W / 2, H);
+  g.restore();
+  // Star, inside the crescent's opening.
+  const sx = cx + R * 0.42, r = R * 0.34;
+  g.fillStyle = "#c8202a";
+  g.beginPath();
+  for (let k = 0; k < 10; k++) {
+    const a = -Math.PI / 2 + (k * Math.PI) / 5 + Math.PI / 10;
+    const rr = k % 2 === 0 ? r : r * 0.4;
+    g.lineTo(sx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+  }
+  g.closePath(); g.fill();
+  return c.toDataURL("image/png");
+}
+
+/**
+ * Plant a cloth flag on a kit building's `userData.flagMount`
  * ({ pos, poleHeight } in its local frame). `mesh` is the placed building.
  * Returns { group, update(dt) } — update is the cloth's Verlet step.
  */
-export function plantPostFlag(app, mesh, mount) {
+export function plantPostFlag(app, mesh, mount, textureUrl = drawTricoloreDataUrl()) {
   const flag = createFlag({
     poleHeight: mount.poleHeight,
     poleRadius: 0.12,
@@ -43,7 +81,7 @@ export function plantPostFlag(app, mesh, mount) {
   mesh.updateMatrixWorld(true);
   const p = mesh.localToWorld(flag.group.position.set(...mount.pos).clone());
   flag.group.position.copy(p);
-  flag.setParam("textureUrl", drawTricoloreDataUrl());
+  flag.setParam("textureUrl", textureUrl);
   app.scene.add(flag.group);
   return { group: flag.group, update: (dt) => flag.update(dt), dispose: () => { app.scene.remove(flag.group); flag.dispose(); } };
 }

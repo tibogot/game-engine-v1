@@ -175,6 +175,22 @@ Asset follow-ups:
       The post's vehicle park / helipad / gate palms now follow the post
       (showroom.js BASE_PARK, post-local). The camera starts on the base
       facing the enemy: new `rtsCamera.setYaw` (shared camera; nam unchanged).
+- [x] **Facing rule** (your correction, twice): buildings turn their fronts
+      toward the player's camera at THREE-QUARTERS — ~25-45° off, never
+      square-on, never away (Company of Heroes). layout.js: `VIEW_YAW` + a
+      per-site `turn`, `siteYaw(site)`. The post's park moved to its flanks.
+- [x] **ALN command post** (v3/render/objects/rtsAlnCamp.js, 3.3k tris, one
+      draw): the stone house they took over (rubble, earth roof heaped with
+      brushwood), a cave in angular limestone blocks behind it (timber
+      lintel, sacks), a log-roofed dugout, three stone sangars with guns, a
+      stores lean-to, cooking fire, radio aerial; the FLN flag as live cloth
+      (algFlag.js drawFlnDataUrl). Placed at the layout's ALN site; HQs 930 m
+      apart.
+      Rejected on the way: the first rock was one smooth dome (a loaf of
+      bread) — now a cluster of flat-faced blocks.
+- [ ] Very high orbit views show a black band under the horizon (the env
+      bake's black lower hemisphere, ref_v3_env_bake_black_floor); not seen at
+      play zoom.
 - [ ] **you**: a second French outpost (SAS post) north of Oued
       Tighanimine, as a forward base?
 - [ ] **LATER — sandstorm** (your ask, 2026-09-26): a weather event —

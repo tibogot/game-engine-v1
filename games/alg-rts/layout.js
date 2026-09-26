@@ -31,12 +31,12 @@
 export const LAYOUT = {
   sites: [
     // ── Starts ───────────────────────────────────────────────────────────────
-    // On the SE ridge bench, 25 m up; the gate faces NW, toward the ALN.
-    { kind: "french", name: "Poste de Tighanimine", x: 305, z: 345, r: 34, yaw: 0.75 },
-    { kind: "aln", name: "Katiba camp", x: -350, z: -315, r: 26 },
+    // On the SE ridge bench, 25 m up.
+    { kind: "french", name: "Poste de Tighanimine", x: 305, z: 345, r: 34, turn: 35 },
+    { kind: "aln", name: "Katiba camp", x: -350, z: -315, r: 26, turn: -30 },
 
     // ── Objectives (capture points) ─────────────────────────────────────────
-    { kind: "hamlet", name: "Mechta Ouled Ali", x: 150, z: 60, r: 40 },
+    { kind: "hamlet", name: "Mechta Ouled Ali", x: 150, z: 60, r: 40, turn: 40 },
     { kind: "oasis", name: "Ain Tighanimine", x: 132, z: 128, r: 24 },
     { kind: "pass", name: "Gully mouth west", x: -276, z: -2, r: 16 },
     { kind: "pass", name: "Gully mouth east", x: -78, z: -82, r: 16 },
@@ -44,7 +44,7 @@ export const LAYOUT = {
     { kind: "point", name: "Kef lookout", x: 237, z: -354, r: 16 },
     { kind: "pass", name: "Col de l'Ouest", x: -275, z: 326, r: 16 },
     { kind: "oasis", name: "Ain el Oued", x: -120, z: 330, r: 22 },
-    { kind: "hamlet", name: "Mechta el Oued", x: 270, z: -70, r: 36 },
+    { kind: "hamlet", name: "Mechta el Oued", x: 270, z: -70, r: 36, turn: -25 },
   ],
 
   // ── Wadis: dry riverbeds, polyline in world metres, bed width, depth ──────
@@ -64,3 +64,22 @@ export const LAYOUT = {
     },
   ],
 };
+
+const _fr = LAYOUT.sites.find((s) => s.kind === "french");
+const _aln = LAYOUT.sites.find((s) => s.kind === "aln");
+/**
+ * THE VIEW: the player's camera looks from the French base toward the ALN
+ * (forward = (sin VIEW_YAW, cos VIEW_YAW)). A kit building's front is its
+ * local -Z, which at yaw = VIEW_YAW points straight back at the camera.
+ *
+ * BUILDINGS TURN THEIR FRONTS TOWARD THE CAMERA, AT THREE-QUARTERS (your
+ * rule, 2026-09-26, the Company of Heroes way): a front that matters (a gate,
+ * a door, the good-looking side) is turned more toward the camera than away,
+ * but ~25-45 deg off it — front and one side visible at once. Square-on
+ * looks flat and staged; facing away shows back walls. Each site says its
+ * own `turn` (degrees off the camera), so they do not all match.
+ */
+export const VIEW_YAW = Math.atan2(_aln.x - _fr.x, _aln.z - _fr.z);
+
+/** A site's building yaw: the camera-facing yaw turned by its `turn` degrees. */
+export const siteYaw = (site) => VIEW_YAW + ((site.turn ?? 30) * Math.PI) / 180;

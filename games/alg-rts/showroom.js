@@ -12,26 +12,32 @@ import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
+import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
-import { plantPostFlag } from "./algFlag.js";
+import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
-import { LAYOUT } from "./layout.js";
+import { LAYOUT, siteYaw } from "./layout.js";
 
-const BASE = LAYOUT.sites.find((s) => s.kind === "french");
+// Fronts toward the player's camera at three-quarters (layout.js siteYaw).
+const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
+BASE.yaw = siteYaw(BASE);
+const ALN = LAYOUT.sites.find((s) => s.kind === "aln");
 const HAMLETS = LAYOUT.sites.filter((s) => s.kind === "hamlet");
 
 /**
  * The post's vehicle park and helipad, in the POST'S frame: `lx` to its
- * right, `lz` forward (out of the gate, which faces the post's local -Z),
- * `yaw` relative to the post. They follow the post wherever the layout puts it.
+ * right, `lz` forward (out of the gate — the post's local -Z, which faces
+ * the CAMERA), `yaw` relative to the post. On the post's FLANKS: straight
+ * out of the gate is toward the camera, and on this map that is the edge.
+ * They follow the post wherever the layout puts it.
  */
 export const BASE_PARK = [
-  { key: "ebr", build: buildEBR, lx: -8, lz: 44, yaw: 0.5 },
-  { key: "willys", build: buildWillys, lx: 3, lz: 48, yaw: -0.3 },
-  { key: "gmc", build: buildGMC, lx: -24, lz: 34, yaw: 1.2 },
-  { key: "amx13", build: buildAMX13, lx: -24, lz: 54, yaw: 0.4 },
-  { key: "halftrack", build: buildHalfTrack, lx: 16, lz: 58, yaw: -0.2 },
-  { key: "alouette", build: buildAlouette, lx: 36, lz: 26, yaw: 2.0 },
+  { key: "ebr", build: buildEBR, lx: -42, lz: 10, yaw: 0.3 },
+  { key: "amx13", build: buildAMX13, lx: -48, lz: -8, yaw: 0.2 },
+  { key: "halftrack", build: buildHalfTrack, lx: -54, lz: 22, yaw: -0.2 },
+  { key: "gmc", build: buildGMC, lx: -32, lz: 30, yaw: 1.4 },
+  { key: "willys", build: buildWillys, lx: -14, lz: 28, yaw: -0.4 },
+  { key: "alouette", build: buildAlouette, lx: 46, lz: 6, yaw: 0.6 },
 ];
 
 /** Post-local → world (the post's local -Z is its gate). */
@@ -46,8 +52,10 @@ export const SHOWROOM = [
   { key: "frenchPost", build: buildFrenchPost, x: BASE.x, z: BASE.z, yaw: BASE.yaw },
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true }; }),
   // The two hamlets (layout.js), each its own houses.
-  { key: "mechta", build: buildMechta, x: HAMLETS[0].x, z: HAMLETS[0].z, yaw: 0.9 },
-  { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: HAMLETS[1].x, z: HAMLETS[1].z, yaw: -0.4 },
+  { key: "mechta", build: buildMechta, x: HAMLETS[0].x, z: HAMLETS[0].z, yaw: siteYaw(HAMLETS[0]) },
+  { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: HAMLETS[1].x, z: HAMLETS[1].z, yaw: siteYaw(HAMLETS[1]) },
+  // The ALN command post in the massif.
+  { key: "alnCamp", build: buildAlnCamp, x: ALN.x, z: ALN.z, yaw: siteYaw(ALN), flag: "fln" },
 ];
 
 let _glass = null;
@@ -161,9 +169,10 @@ export async function placeShowroom(app, list = SHOWROOM) {
   placed.plants = placePlants(app);
   // The post's tricolour: live cloth on its flag mount.
   const flags = [];
-  for (const o of Object.values(placed)) {
-    const mount = o.geometry?.userData?.flagMount;
-    if (mount) flags.push(plantPostFlag(app, o, mount));
+  for (const e of list) {
+    const o = placed[e.key];
+    const mount = o?.geometry?.userData?.flagMount;
+    if (mount) flags.push(e.flag === "fln" ? plantPostFlag(app, o, mount, drawFlnDataUrl()) : plantPostFlag(app, o, mount));
   }
   app.addPreRenderHook((dt) => { for (const f of flags) f.update(dt); });
   placed.flags = flags;

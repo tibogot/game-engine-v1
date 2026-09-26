@@ -12,7 +12,7 @@
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom } from "./showroom.js";
-import { LAYOUT } from "./layout.js";
+import { LAYOUT, VIEW_YAW } from "./layout.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -98,9 +98,8 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
   const base = LAYOUT.sites.find((s) => s.kind === "french");
   if (base) {
     rtsCamera.focusOn(base.x, base.z);
-    // Look toward the ALN (forward = (sin yaw, cos yaw)), not at our own edge.
-    const aln = LAYOUT.sites.find((s) => s.kind === "aln");
-    if (aln) rtsCamera.setYaw(Math.atan2(aln.x - base.x, aln.z - base.z));
+    // Look toward the ALN, not at our own edge; the buildings face this view.
+    rtsCamera.setYaw(VIEW_YAW);
   }
   app.rtsCamera = rtsCamera;
   app.addPreRenderHook((dt) => rtsCamera.update(dt));
