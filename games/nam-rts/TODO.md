@@ -271,6 +271,16 @@ Everything else below is in its section.
       TEST: 48 cases (3 bridges x 2 ways x 4 approaches x infantry + jeeps):
       0 failed, 0 samples under/beside a deck, worst step 0.66 m, no jeep on
       the footbridge. Cost: within noise (-0.33 ms, noise 1.2). Your look next.
+- [x] **Z-FIGHTING at the Bailey's end** (your screenshot, 2026-09-26) — FIXED.
+      The landing ramp started 1 m UNDER the deck and gradeRamp flattens a
+      capsule (its full half-width round the start), so the ground under the
+      first ~5 m of deck sat at the road's own height: terrain and planks in one
+      plane. Now the ramp starts a half-width OUT from the end, 0.2 m under the
+      road, and a cut-only stamp (remapHeights) keeps all ground under a deck
+      at least 0.33 m below it (the bank had stood up to 1.8 m ABOVE the road
+      inside the ends). A rock left 0.6 m proud of the planks by that cut is
+      removed (any rock reaching a deck goes). Re-tested: 48/48 crossings,
+      worst step 0.62 m.
 - [ ] Later (your idea list): blowable bridges an engineer can rebuild (CoH),
       a pontoon (M4T6) as a buildable crossing.
 - [x] **Units cross it WRONG** — FIXED 2026-09-26. MEASURED: a squad sent at

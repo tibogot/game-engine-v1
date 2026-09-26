@@ -64,11 +64,67 @@ export async function gradeBridgeLandings(app) {
         const g = app.getWorldHeight(ex + b.ax * side * l, ez + b.az * side * l);
         if (Math.abs(g - b.y) / l <= RAMP_MAX) { L = l; gy = g; break; }
       }
-      // Start a metre under the deck's end so the ramp meets the abutment.
-      const from = { x: ex - b.ax * side, z: ez - b.az * side, y: b.y };
-      const to = { x: ex + b.ax * side * L, z: ez + b.az * side * L, y: gy };
-      await app.gradeRamp(from, to, { halfWidth: (b.halfWidth ?? HALF_WIDTH - 1) + 1, shoulder: SHOULDER });
+      const rhw = (b.halfWidth ?? HALF_WIDTH - 1) + 1;
+      let from;
+      if (b.halfWidth != null) {
+        // A PLANNED bridge (namBridges.js): its deck is flat at b.y out to its
+        // end. gradeRamp flattens a CAPSULE — the full half-width round its
+        // start too — so a ramp started under the deck laid the ground at the
+        // road's own height under its first 5 m: terrain and planks in one
+        // plane, z-fighting (your screenshot, 2026-09-26). Start a half-width
+        // OUT from the end and 0.2 m under the road: the ground stays under the
+        // planks, with a sill's step up onto the deck, as on a real bridge.
+        L = Math.max(L, rhw + 4);
+        from = { x: ex + b.ax * side * rhw, z: ez + b.az * side * rhw, y: b.y - 0.2 };
+      } else {
+        // Start a metre under the deck's end so the ramp meets the abutment.
+        from = { x: ex - b.ax * side, z: ez - b.az * side, y: b.y };
+      }
+      const to = { x: ex + b.ax * side * L, z: ez + b.az * side * L, y: b.halfWidth != null ? app.getWorldHeight(ex + b.ax * side * L, ez + b.az * side * L) : gy };
+      await app.gradeRamp(from, to, { halfWidth: rhw, shoulder: SHOULDER });
       ramps.push({ from, to });
+    }
+  }
+  // UNDER a planned deck the ground is cut to CLEAR it: the bank rose inside
+  // the ends up to 1.8 m ABOVE the road (the old landing flattened that as a
+  // side effect of starting under the deck). Cut only — min(ground, deck −
+  // 0.35) — so the river under the bridge is untouched; the cut eases out
+  // beside the deck (1 m of depth per metre) instead of leaving a trench wall.
+  if (app.remapHeights) {
+    for (const b of listBridges(app)) {
+      if (b.halfWidth == null || !b.deckAt) continue;
+      const side = b.halfWidth + 0.8, reach = side + 4;
+      const xs = [], zs = [];
+      for (const s of [-1, 1]) for (const c of [-1, 1]) {
+        xs.push(b.x + b.ax * s * (b.half + 1) - b.az * c * reach);
+        zs.push(b.z + b.az * s * (b.half + 1) + b.ax * c * reach);
+      }
+      await app.remapHeights(Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), (wx, wz, y) => {
+        const rx = wx - b.x, rz = wz - b.z;
+        const along = rx * b.ax + rz * b.az, across = Math.abs(-rx * b.az + rz * b.ax);
+        // (a metre past each end too: the ramp's shoulder rose over the deck's corners)
+        if (Math.abs(along) > b.half + 1 || across > reach) return null;
+        const clear = b.deckAt(Math.max(-b.half, Math.min(b.half, along))) - 0.35 + Math.max(0, across - side);
+        return y > clear ? clear : null;
+      });
+    }
+  }
+  // …and no rock may reach up into a deck: a "Rock: Lump" stood 0.6 m proud of
+  // the Bailey's planks, left on the bank the cut above took away. Rocks that
+  // stay under a deck (in the water) are kept.
+  for (const b of listBridges(app)) {
+    if (b.halfWidth == null || !b.deckAt) continue;
+    for (let i = (ps?.instances?.length ?? 0) - 1; i >= 0; i--) {
+      const inst = ps.instances[i];
+      const type = ps.types?.[inst.typeIdx];
+      if (!type || /bridge/i.test(type.name || "")) continue;
+      const rx = inst.px - b.x, rz = inst.pz - b.z;
+      const along = rx * b.ax + rz * b.az, across = -rx * b.az + rz * b.ax;
+      const box = type.mergedBox;
+      const reach = box ? Math.max(box.max.x - box.min.x, box.max.z - box.min.z) * 0.5 * Math.max(Math.abs(inst.sx ?? 1), Math.abs(inst.sz ?? 1)) : 1;
+      if (Math.abs(along) > b.half + 1 + reach || Math.abs(across) > b.halfWidth + 1 + reach) continue;
+      const top = inst.py + (box ? box.max.y * Math.abs(inst.sy ?? 1) : 1);
+      if (top > b.deckAt(Math.max(-b.half, Math.min(b.half, along))) - 0.15) ps.removeInstance(i);
     }
   }
   // Nothing may stand on a ramp: rocks from the map, and the jungle.
