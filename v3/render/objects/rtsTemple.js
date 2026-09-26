@@ -948,34 +948,170 @@ export function buildHeadPikes({ seed = 71, count = 5, spacing = 2.4, height = 2
     const x = (i - (count - 1) / 2) * spacing * (0.8 + r() * 0.45);
     const z = (r() - 0.5) * 0.7;
     const lean = (r() - 0.5) * 0.16, leanZ = (r() - 0.5) * 0.14;
+    // (Readable from the RTS camera, 2026-09-26: a real-size 23 cm skull on a
+    // 2 m pole read as a bare stick. The skull is ~1.75x, the pole shorter and
+    // thicker, and a dark rag hangs under each head — the silhouette.)
     parts.push({
-      geo: new THREE.CylinderGeometry(0.035, 0.055, h, 5),
+      geo: new THREE.CylinderGeometry(0.05, 0.075, h, 5),
       pos: [x + Math.sin(lean) * h * 0.5, h * 0.5, z + Math.sin(leanZ) * h * 0.5],
       rot: [leanZ, r() * 3, lean], mat: MAT.bamboo, tone: 0.3 + r() * 0.34,
     });
     const hx = x + Math.sin(lean) * h, hz = z + Math.sin(leanZ) * h;
     const tone = 0.62 + r() * 0.2;
+    const K = 1.75;
     parts.push({
-      geo: new THREE.SphereGeometry(0.115, 7, 6).scale(1, 1.1, 0.92),
-      pos: [hx, h + 0.08, hz], rot: [(r() - 0.5) * 0.5, r() * 3, (r() - 0.5) * 0.4],
-      mat: MAT.sandstone, tone,
+      geo: new THREE.SphereGeometry(0.115 * K, 8, 7).scale(1, 1.1, 0.92),
+      pos: [hx, h + 0.08 * K, hz], rot: [(r() - 0.5) * 0.5, r() * 3, (r() - 0.5) * 0.4],
+      mat: MAT.white, tone,
     });
     parts.push({
-      geo: buildBox(0.13, 0.07, 0.1),
-      pos: [hx, h - 0.02, hz - 0.03], rot: [0.2, 0, 0], mat: MAT.sandstone, tone: tone - 0.06,
+      geo: buildBox(0.13 * K, 0.07 * K, 0.1 * K),
+      pos: [hx, h - 0.03 * K, hz - 0.03 * K], rot: [0.2, 0, 0], mat: MAT.white, tone: tone - 0.12,
     });
     for (const s of [-1, 1]) {
       parts.push({
-        geo: new THREE.SphereGeometry(0.03, 5, 4),
-        pos: [hx + s * 0.045, h + 0.1, hz - 0.085], rot: [0, 0, 0],
-        mat: MAT.moss, tone: 0.16,
+        geo: new THREE.SphereGeometry(0.036 * K, 5, 4),
+        pos: [hx + s * 0.045 * K, h + 0.1 * K, hz - 0.082 * K], rot: [0, 0, 0],
+        mat: MAT.steel, tone: 0.02,
       });
     }
+    // The rag: hair and cloth hanging off the pole under the head, ragged.
+    parts.push({
+      geo: new THREE.CylinderGeometry(0.16, 0.24, 0.55, 6, 1, true),
+      pos: [hx, h - 0.3, hz], rot: [(r() - 0.5) * 0.2, r() * 3, (r() - 0.5) * 0.2],
+      mat: MAT.steel, tone: 0.04 + r() * 0.05,
+    });
   }
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.25, radius: 2, strength: 0.3, groundFade: 0.5, floor: 0.6 });
   const span = count * spacing * 0.6;
   geo.userData.footprint = { cx: 0, cz: 0, hx: span, hz: 0.6 };
   geo.userData.height = height;
+  return geo;
+}
+
+// ── The people who live in it (2026-09-26) ───────────────────────────────────
+// Kurtz's tribe built INTO the ruins: lean-tos against the galleries, hearths,
+// and the marks of what the place is for. Real sizes x 1.3 (the man-made
+// scale); read at RTS zoom as silhouettes, which is the register.
+const P = 1.3;
+const Vt = (x, y, z) => new THREE.Vector3(x, y, z);
+function rod(parts, a, b, radius, mat, tone, sides = 6) {
+  const d = new THREE.Vector3().subVectors(b, a);
+  const geo = new THREE.CylinderGeometry(radius, radius, d.length(), sides);
+  const q = new THREE.Quaternion().setFromUnitVectors(Vt(0, 1, 0), d.clone().normalize());
+  parts.push({ geo, matrix: new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(0.5), q, Vt(1, 1, 1)), mat, tone });
+}
+
+/**
+ * A LEAN-TO against a wall: its back edge on the wall at z = 0 (high), the
+ * thatch sloping down to two forked poles at the front (+Z); a sleeping mat
+ * and pots under it. `width` along X.
+ */
+export function buildTempleLeanTo({ seed = 301, width = 4.2 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  const hw = (width * P) / 2, depth = 2.3 * P, back = 2.5 * P, front = 1.45 * P;
+  // The roof: overlapping thatch slabs, ragged, sagging a little.
+  const n = Math.max(3, Math.round(hw * 2 / 0.9));
+  for (let k = 0; k < n; k++) {
+    const x = -hw + (k + 0.5) * (2 * hw / n);
+    const len = Math.hypot(depth, back - front) + 0.3;
+    const g = buildBox(2 * hw / n + 0.18, 0.16, len);
+    const tilt = Math.atan2(back - front, depth);
+    parts.push({ geo: g, pos: [x, (back + front) / 2 + 0.08, depth / 2], rot: [tilt, (r() - 0.5) * 0.06, (r() - 0.5) * 0.05], mat: MAT.thatch, tone: 0.12 + r() * 0.25 });
+  }
+  // Front poles and a ridge pole under the front edge.
+  for (const sx of [-1, 1]) rod(parts, Vt(sx * (hw - 0.3), 0, depth - 0.1), Vt(sx * (hw - 0.3), front, depth - 0.1), 0.06, MAT.timber, 0.35);
+  rod(parts, Vt(-hw, front - 0.02, depth - 0.1), Vt(hw, front - 0.02, depth - 0.1), 0.055, MAT.bamboo, 0.45);
+  // A mat, a bedroll, pots.
+  parts.push({ geo: buildBox(1.9, 0.02, 1.0), pos: [-hw * 0.3, 0.01, depth * 0.45], rot: [0, 0.08, 0], mat: MAT.woven, tone: 0.55 });
+  parts.push({ geo: new THREE.CylinderGeometry(0.16, 0.16, 0.8, 8).rotateZ(Math.PI / 2), pos: [-hw * 0.3, 0.16, depth * 0.25], mat: MAT.canvas, tone: 0.3 });
+  for (let k = 0; k < 3; k++) parts.push({ geo: new THREE.CylinderGeometry(0.18, 0.13, 0.36, 10), pos: [hw * 0.45 + k * 0.4, 0.18, depth * (0.3 + r() * 0.3)], mat: MAT.earth, tone: 0.45 + r() * 0.25 });
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.2, radius: 2, strength: 0.45, groundFade: 0.3, floor: 0.45 });
+  geo.userData.footprint = { cx: 0, cz: depth / 2, hx: hw + 0.2, hz: depth / 2 + 0.2 };
+  geo.userData.height = back;
+  return geo;
+}
+
+/** A HEARTH: a ring of stones round ash, a blackened pot on three stones, wood. (The smoke is the game's.) */
+export function buildTempleHearth({ seed = 311 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  parts.push({ geo: new THREE.CylinderGeometry(0.75, 0.8, 0.04, 14), pos: [0, 0.02, 0], mat: MAT.steel, tone: 0.03 });
+  for (let k = 0; k < 11; k++) {
+    const a = (k / 11) * Math.PI * 2;
+    parts.push({ geo: new THREE.SphereGeometry(0.17 + r() * 0.06, 6, 5).scale(1.2, 0.75, 1), pos: [Math.cos(a) * 0.85, 0.08, Math.sin(a) * 0.85], rot: [0, r() * 3, 0], mat: k % 3 ? MAT.laterite : MAT.sandstone, tone: 0.25 + r() * 0.3 });
+  }
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + 0.3;
+    parts.push({ geo: new THREE.SphereGeometry(0.13, 6, 5), pos: [Math.cos(a) * 0.3, 0.1, Math.sin(a) * 0.3], mat: MAT.laterite, tone: 0.2 });
+  }
+  parts.push({ geo: new THREE.SphereGeometry(0.34, 10, 7).scale(1, 0.8, 1), pos: [0, 0.4, 0], mat: MAT.steel, tone: 0.04 });
+  for (let k = 0; k < 5; k++) {
+    const a = r() * Math.PI * 2;
+    rod(parts, Vt(Math.cos(a) * 0.15, 0.05, Math.sin(a) * 0.15), Vt(Math.cos(a) * 1.2, 0.08, Math.sin(a) * 1.2), 0.05, MAT.timber, 0.15 + r() * 0.2);
+  }
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.12, radius: 1, strength: 0.3, groundFade: 0.3, floor: 0.6 });
+  geo.userData.footprint = { cx: 0, cz: 0, hx: 1.1, hz: 1.1 };
+  geo.userData.height = 0.7;
+  return geo;
+}
+
+/**
+ * THE MIDDEN at the tower foot: a heap of pale skulls and long bones, one
+ * merged pile — at RTS zoom a mass of pale shapes, which is the register.
+ */
+export function buildSkullMidden({ seed = 321, count = 70 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  const R = 1.5 * P, H = 1.1 * P;
+  for (let k = 0; k < count; k++) {
+    // Sample the heap: a cone, denser low.
+    const u = r(), a = r() * Math.PI * 2, rr = R * Math.sqrt(r()) * (1 - u * 0.2);
+    const y = Math.max(0, (1 - rr / R) * H * (0.6 + r() * 0.4));
+    const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+    if (k % 3) {
+      parts.push({ geo: new THREE.SphereGeometry(0.2, 7, 6).scale(1, 1.1, 0.92), pos: [x, y + 0.14, z], rot: [r() * 3, r() * 6, r() * 3], mat: MAT.white, tone: 0.45 + r() * 0.35 });
+    } else {
+      const b = r() * Math.PI * 2;
+      rod(parts, Vt(x - Math.cos(b) * 0.3, y + 0.06, z - Math.sin(b) * 0.3), Vt(x + Math.cos(b) * 0.3, y + 0.1 + r() * 0.1, z + Math.sin(b) * 0.3), 0.045, MAT.white, 0.4 + r() * 0.3);
+    }
+  }
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.14, radius: 2, strength: 0.5, groundFade: 0.3, floor: 0.4 });
+  geo.userData.footprint = { cx: 0, cz: 0, hx: R + 0.2, hz: R + 0.2 };
+  geo.userData.height = H + 0.3;
+  return geo;
+}
+
+/**
+ * A TOTEM on the paths in: a carved post banded in white clay, a crossbar,
+ * a skull on top, rags hung off the bar. You feel the boundary before you see
+ * the temple.
+ */
+export function buildTempleTotem({ seed = 331, height = 3.2 } = {}) {
+  const r = rng(seed);
+  const parts = [];
+  const h = height * P;
+  rod(parts, Vt(0, -0.3, 0), Vt((r() - 0.5) * 0.15, h, (r() - 0.5) * 0.15), 0.14, MAT.timber, 0.2, 8);
+  // White clay bands, and carved notches between them.
+  for (let k = 0; k < 4; k++) {
+    const y = h * (0.25 + k * 0.17);
+    parts.push({ geo: new THREE.CylinderGeometry(0.155, 0.155, 0.16, 8), pos: [0, y, 0], mat: MAT.white, tone: 0.55 });
+  }
+  rod(parts, Vt(-0.75, h * 0.8, 0.05), Vt(0.75, h * 0.82, 0.05), 0.06, MAT.timber, 0.25);
+  parts.push({ geo: new THREE.SphereGeometry(0.21, 8, 7).scale(1, 1.1, 0.92), pos: [0, h + 0.2, 0], rot: [0.2, 0, 0], mat: MAT.white, tone: 0.65 });
+  parts.push({ geo: buildBox(0.24, 0.12, 0.18), pos: [0, h + 0.03, -0.05], mat: MAT.white, tone: 0.55 });
+  for (const s of [-1, 1]) parts.push({ geo: new THREE.SphereGeometry(0.06, 5, 4), pos: [s * 0.075, h + 0.22, -0.16], mat: MAT.steel, tone: 0.02 });
+  for (const s of [-1, 1]) {
+    parts.push({ geo: buildBox(0.16, 0.9 + r() * 0.4, 0.03), pos: [s * (0.55 + r() * 0.15), h * 0.8 - 0.5, 0.08], rot: [0, 0, (r() - 0.5) * 0.2], mat: s > 0 ? MAT.canvas : MAT.steel, tone: s > 0 ? 0.25 : 0.05 });
+  }
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.14, radius: 1, strength: 0.25, groundFade: 0.3, floor: 0.6 });
+  geo.userData.footprint = { cx: 0, cz: 0, hx: 0.8, hz: 0.3 };
+  geo.userData.height = h + 0.4;
   return geo;
 }

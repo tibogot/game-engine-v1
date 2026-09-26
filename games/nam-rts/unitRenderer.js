@@ -404,7 +404,7 @@ function buildInstancedType(tpl, scene) {
 // every soldier into a storage buffer, and ONE Mesh draws the lot. Adding
 // soldiers costs no draw calls and (measured in the lab) no CPU either.
 
-const MAX_CROWD = 128; // soldiers renderable at once; sizes the skin buffer
+const MAX_CROWD = 160; // soldiers renderable at once; sizes the skin buffer (+ the temple's static watchers)
 
 /** Wire a skinned template up to a crowd field. */
 function buildCrowdType(tpl, type, app, scene) {
@@ -554,6 +554,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   const views = new Map(); // unit → view
   const roots = [];        // raycast targets for selection
   const crowdUnits = [];   // crowd soldiers written this frame (they have no mesh)
+  // STATIC FIGURES (addStaticFigures): people who are not units — Kurtz's
+  // watchers on the temple steps. Written into a type's crowd AFTER its units,
+  // so they cost no draw of their own, and they are not in crowdUnits, so
+  // nothing can pick them. Each idles on its own clock, facing its own way.
+  const statics = [];
+  const _st = new THREE.Object3D();
 
   // Instanced units have no mesh of their own, so a raycast hit lands on the
   // shared InstancedMesh and identifies the unit by instanceId. This maps the
@@ -863,16 +869,40 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           inst.odometer.addUpdateRange?.(0, inst.n);   // only the live units' slots
         }
       }
+      const crd = crowd[k];
+      // Real soldiers of this type written this frame: the x-ray shows only
+      // them — the static figures come after them in the instance order, and
+      // their pink silhouettes showed through the temple's stone.
+      const nReal = crd ? crowdUnits.reduce((n, u) => n + (u.type?.typeKey === k ? 1 : 0), 0) : 0;
+      if (crd && statics.length) {
+        for (const s of statics) {
+          if (s.typeKey !== k) continue;
+          // Skinned every frame they are drawn: only when the camera is near.
+          if (camera && (s.x - camera.position.x) ** 2 + (s.z - camera.position.z) ** 2 > 350 * 350) continue;
+          s.t += dt;
+          _st.position.set(s.x, s.y, s.z);
+          _st.rotation.set(0, s.yaw + (UNIT_TYPES[k].facingOffset ?? 0), 0);
+          _st.scale.setScalar(crd.scale);
+          _st.updateMatrix();
+          _mat.multiplyMatrices(_st.matrix, crd.rel);
+          crd.field.add(_mat, s.t, 0, 1);
+        }
+      }
       // Uploads the per-soldier buffers and dispatches the skinning compute pass.
       crowd[k]?.field.commit();
       if (crowd[k]?.xray) {
-        crowd[k].xray.count = crowd[k].field.mesh.count;
-        crowd[k].xray.visible = crowd[k].field.mesh.count > 0 && xrayOn();
+        crowd[k].xray.count = Math.min(nReal, crowd[k].field.mesh.count);
+        crowd[k].xray.visible = crowd[k].xray.count > 0 && xrayOn();
       }
     }
   }
 
   return {
+    /** People who are not units: [{ x, y, z, yaw }] drawn idle in `typeKey`'s crowd, every frame. */
+    addStaticFigures(typeKey, list) {
+      for (const f of list) statics.push({ typeKey, x: f.x, y: f.y, z: f.z, yaw: f.yaw, t: Math.random() * 10 });
+      return statics.length;
+    },
     thumbnails,
     roots,          // raycast targets for selection (instanced meshes + skinned groups)
     unitByMesh,

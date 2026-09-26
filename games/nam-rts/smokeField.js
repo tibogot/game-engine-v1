@@ -144,6 +144,16 @@ export const SMOKE_KINDS = {
     puffLife: 5.0, spread: 0.32, radius: 2.2, growth: 1.2, height: 38, bloom: 4.0,
     puffSize: 2.2, puffGrow: 3.2, density: 0.22, losOpacity: 0.25, life: 30,
   },
+  /**
+   * A cooking fire (Kurtz's people, 2026-09-26): pale wood smoke, a thin tall
+   * lazy thread, faint. Decoration — it hides nothing (losOpacity 0) — and
+   * spawned with `keep` so the oldest-first reuse never takes it.
+   */
+  hearth: {
+    colorLow: 0x8a8580, colorHigh: 0xc9c4bc,
+    puffLife: 9.0, spread: 0.22, radius: 1.2, growth: 1.6, height: 26, bloom: 1.0,
+    puffSize: 1.6, puffGrow: 3.0, density: 0.14, losOpacity: 0.0, life: 1e7,
+  },
   /** Napalm: a broad low pall that hangs over the burn. */
   napalm: {
     colorLow: 0x140f0c, colorHigh: 0x574839,
@@ -493,15 +503,21 @@ export function createSmokeField({
      * surprise, and it is the one already fading.
      * @returns {number} slot index
      */
-    spawn({ x, z, y = null, kind = "screen", life = null, strength = 1 } = {}) {
+    spawn({ x, z, y = null, kind = "screen", life = null, strength = 1, keep = false } = {}) {
       let slot = sources.findIndex((s) => !s.alive);
       if (slot < 0) {
-        slot = 0;
-        for (let i = 1; i < maxSources; i++) if (sources[i].age > sources[slot].age) slot = i;
+        // Oldest first — but never a `keep` column (a permanent hearth would
+        // always be the oldest, and the first firefight would put it out).
+        slot = -1;
+        for (let i = 0; i < maxSources; i++) {
+          if (sources[i].keep) continue;
+          if (slot < 0 || sources[i].age > sources[slot].age) slot = i;
+        }
+        if (slot < 0) return -1;
       }
       const k = SMOKE_KINDS[kind] ?? SMOKE_KINDS.screen;
       const s = sources[slot];
-      s.alive = true; s.kind = kind; s.age = 0;
+      s.alive = true; s.kind = kind; s.age = 0; s.keep = keep;
       s.life = life ?? k.life; s.strength = strength;
       s.x = x; s.z = z;
       s.y = (y ?? app.getWorldHeight?.(x, z) ?? 0) + 0.3;

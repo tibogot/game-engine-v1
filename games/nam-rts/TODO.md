@@ -1017,7 +1017,41 @@ Vietnam, like Apocalypse Now.
       into the ruins, heads on pikes along the approach, standing stones and
       totems on the paths in, saplings and leaf litter in the courtyard, and
       the ground inside it worn bare
-- [ ] **Its dressing** (the rest of your ask). The
+- [x] **KURTZ'S PLACE DRESSED + THE CRASH SITE** (2026-09-26, your go):
+      · THE GHAT: its cut reached only 3.3 of the flight's 4.5 m (the lower
+        steps were buried) — now one ramp on the flight's slope; and a stair
+        into NOTHING read as a hole, so the steps go down into a TEMPLE POND
+        (a srah — Khmer temples stand on their reservoirs): an engine lake fitted
+        to the measured basin, level 1.2 m over the foot. Wide shoulders (the
+        first cut had rock-painted quarry walls). ?templepond=0 = without.
+      · PIKES readable: skull ~1.75x, a dark rag under each head, shorter
+        thicker poles (were bare sticks from the RTS camera).
+      · THE PEOPLE: thatch LEAN-TOS against the galleries (2 facing the camera,
+        1 west), HEARTHS with a permanent thread of wood smoke each (new smoke
+        kind "hearth", spawned with `keep` so combat smoke never recycles it)
+        and a scorch decal, the SKULL MIDDEN at the tower foot, 4 TOTEMS on
+        the paths in, CROWS wheeling over it for good (rtsBirds.circleOver),
+        and THE WATCHERS — 24 motionless figures on the steps and lining the
+        causeway (unitRenderer.addStaticFigures: drawn in the soldier crowd,
+        not units, not pickable, no x-ray — their pink silhouettes showed
+        through the stone at first; skinned only within 350 m of the camera;
+        MAX_CROWD 128 -> 160). ?watchers=0 = without.
+      · THE CRASH SITE (crashSite.js, ?crash=0): the UH-1 TAKEN APART
+        (rtsVehicles.buildHueyWreck): cabin on its side, nose dug in, engine end
+        burnt, boom snapped off lying on its side (first it floated on its fin
+        tip), one blade bent over it, one thrown into the grass, tail rotor,
+        panels, perspex, a door, vines on the boom; scorch decals; the gash
+        cleared AFTER the jungle paint (bananas had grown back over it), kept
+        out of the canopy, and plants keep off it (app.plantKeepOut — new: any
+        system can register a strip plants must not stand in).
+      · COST: the static pieces are the kit's material, a few draws. THE POND
+        COULD NOT BE MEASURED: gpuAB said the frame got 7 ms FASTER with it on —
+        a visible water surface grabs the frame mid-way (it splits it into
+        passes) and the timer then covers only part. Engine note: a lake costs
+        two framebuffer copies while on screen. Open: measure it properly.
+      YOUR LOOK: the watchers (too many? too few?), the crash site's clearing
+      (bananas still close), the pond.
+- [ ] (was) **Its dressing** (the rest of your ask). The
       Apocalypse Now compound: a Khmer temple half taken by the jungle — laterite
       blocks, a corbelled doorway, a four-faced Bayon tower, nāga balustrade,
       apsara reliefs, a collapsed gallery, strangler-fig roots over the walls —
@@ -1027,7 +1061,7 @@ Vietnam, like Apocalypse Now.
       hung in the trees, a hanging man in a doorway, smoke drifting across it,
       hundreds of small fires at dusk. At RTS zoom these read as SILHOUETTES,
       which is the right register — dread, not gore
-- [ ] **A CRASH SITE near Kurtz's place** (your ask 2026-09-23 — agreed, after
+- [x] (done above) **A CRASH SITE near Kurtz's place** (your ask 2026-09-23 — agreed, after
       the ruins). A wreck in the jungle on the way in, so the approach tells
       the story before the temple does. YES, this is cheap and good: the UH-1
       is already built part by part (`rtsVehicles.buildUH1` — lofted skin,

@@ -301,7 +301,7 @@ export function travellerPalmSpots(app, field, params = CANOPY) {
  * The clearings nam-rts needs: the camp, the enemy HQ, the points, the
  * enemy's nests, the hamlets and the temple.
  */
-export function canopyClearings({ structures, requisition, hamlets = [], temples = [] }, params = CANOPY) {
+export function canopyClearings({ structures, requisition, hamlets = [], temples = [], extra = [] }, params = CANOPY) {
   const c = params.clear, out = [];
   const at = (p, r) => p && out.push({ x: p.x, z: p.z, r });
   at(structures.base?.position, c.base);
@@ -315,5 +315,6 @@ export function canopyClearings({ structures, requisition, hamlets = [], temples
   }
   for (const h of hamlets) at(h, c.hamlet);
   for (const t of temples) at(t, c.temple);
+  for (const e of extra) at(e, e.r);         // anything else the camera must see (a crash site)
   return out;
 }

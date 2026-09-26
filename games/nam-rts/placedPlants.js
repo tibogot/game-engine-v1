@@ -29,11 +29,21 @@ export const PLANTED = {
 
 export function isPlanted(kind) { return kind in PLANTED; }
 
-/** Is (x, z) on a planned bridge (namBridges.js), its ends, or just beside it? */
+/**
+ * Is (x, z) on a planned bridge (namBridges.js), its ends, or just beside it —
+ * or inside a KEEP-OUT strip another system registered (app.plantKeepOut:
+ * [{ x0, z0, x1, z1, r }], e.g. the temple's landing stair, where a pandanus
+ * "on the water's edge" stood on the steps)?
+ */
 function onBridge(app, x, z) {
   for (const b of app.namBridges ?? []) {
     const rx = x - b.x, rz = z - b.z;
     if (Math.abs(rx * b.ax + rz * b.az) <= b.half + 6 && Math.abs(-rx * b.az + rz * b.ax) <= b.halfWidth + 3) return true;
+  }
+  for (const k of app.plantKeepOut ?? []) {
+    const dx = k.x1 - k.x0, dz = k.z1 - k.z0, L2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - k.x0) * dx + (z - k.z0) * dz) / L2));
+    if (Math.hypot(x - (k.x0 + dx * t), z - (k.z0 + dz * t)) < k.r) return true;
   }
   return false;
 }

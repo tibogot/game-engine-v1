@@ -1085,6 +1085,112 @@ export function buildUH1() {
   return geo;
 }
 
+// ── The Huey wreck ───────────────────────────────────────────────────────────
+/**
+ * A UH-1H that came down in the jungle — the model above TAKEN APART, not a
+ * new one: the cabin rolled onto its side with its nose dug in and the engine
+ * end burnt black, the tail boom snapped off behind the cabin and lying clear,
+ * one main blade bent down over the wreck and the other thrown far into the
+ * trees, the tail rotor by the boom, panels, perspex and a cargo door strewn
+ * round, vines already over the boom. One merged geometry, origin on the
+ * ground at the cabin; the wreck lies along local X. `footprint` covers the
+ * cabin and the boom (the thrown blade lies outside it, as a blade would).
+ */
+export function buildHueyWreck({ seed = 5 } = {}) {
+  const R = rng(seed);
+  const src = buildUH1();
+  const ATTRS = ["position", "normal", "uv", "matId", "tone"];
+  // A copy of the triangles `keep` selects, with its own attributes (tone is
+  // changed below; the source keeps its own), without the baked `ao` — the
+  // parts added here have none, and mergeGeometries needs the same set.
+  const subset = (geo, keep) => {
+    const pos = geo.attributes.position, idx = geo.index.array, out = [];
+    const c = new THREE.Vector3();
+    for (let t = 0; t < idx.length; t += 3) {
+      c.set(0, 0, 0);
+      for (let k = 0; k < 3; k++) c.x += pos.getX(idx[t + k]) / 3, c.y += pos.getY(idx[t + k]) / 3, c.z += pos.getZ(idx[t + k]) / 3;
+      if (keep(c)) out.push(idx[t], idx[t + 1], idx[t + 2]);
+    }
+    const g = new THREE.BufferGeometry();
+    for (const n of ATTRS) if (geo.attributes[n]) g.setAttribute(n, geo.attributes[n].clone());
+    g.setIndex(out);
+    return g;
+  };
+  // Burnt: paint goes black round the engine and where the boom tore off.
+  const burn = (g, from, to) => {
+    const pos = g.attributes.position, tone = g.attributes.tone, id = g.attributes.matId;
+    for (let i = 0; i < pos.count; i++) {
+      const z = pos.getZ(i);
+      const t = Math.max(0, Math.min(1, (z - from) / (to - from)));
+      if (id.getX(i) === MAT.paint || id.getX(i) === MAT.steel) tone.setX(i, tone.getX(i) * (1 - 0.85 * t * t * (3 - 2 * t)));
+    }
+  };
+  const zCut = -3.35 * S;                                // the boom's root
+  const cabin = subset(src, (c) => c.z > zCut);
+  const boom = subset(src, (c) => c.z <= zCut);
+  burn(cabin, 1.5 * S, -2.8 * S);                        // engine bay and the tear
+  burn(boom, -5.0 * S, -3.4 * S);
+
+  const parts = [];
+  const place = (geo, rot, pos) => {
+    const m = new THREE.Matrix4().compose(new THREE.Vector3(...pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rot, "YXZ")), new THREE.Vector3(1, 1, 1));
+    parts.push({ geo, matrix: m, mat: null });
+    return m;
+  };
+  // The cabin on its left side (roll about its long axis), nose down into the
+  // ground, lying along +X. Settled so its lowest point is a little under.
+  const rest = (geo, rot) => {
+    const g = geo.clone().applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...rot, "YXZ")));
+    g.computeBoundingBox();
+    return -g.boundingBox.min.y;
+  };
+  const cabRot = [0.14, Math.PI / 2, 1.38];              // pitch nose-down, turn to +X, roll onto its side
+  place(cabin, cabRot, [0, rest(cabin, cabRot) - 0.35, 0]);
+  // The boom: snapped off behind the cabin, lying at an angle ON ITS SIDE.
+  // Half-rolled it rested on the tip of its fin with the boom 1.5 m in the
+  // air; on its side the fin and one stabiliser dig in, the boom lies down.
+  const boomRot = [0.03, Math.PI / 2 + 0.55, Math.PI / 2];
+  place(boom, boomRot, [-3.2 * S, rest(boom, boomRot) - 1.05 * S, -1.6 * S]);
+
+  // Main rotor: its two blades apart. One bent down over the cabin, one thrown.
+  const main = src.userData.rotors.main.geo;
+  const bladeA = subset(main, (c) => c.x > 0.25);
+  const bladeB = subset(main, (c) => c.x < -0.25);
+  const bend = (g, k) => {
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) { const x = Math.abs(p.getX(i)); p.setY(i, p.getY(i) - k * x * x); }
+    g.computeVertexNormals();
+  };
+  bend(bladeA, 0.045);
+  bend(bladeB, 0.012);
+  place(bladeA, [0.1, -0.35, 0.05], [0.4 * S, 2.2 * S, 0.3 * S]);
+  place(bladeB, [0, 0.9 + R() * 0.4, 0.03], [9 * S, 0.12, 12 * S]);
+  // Tail rotor, by the end of the boom.
+  place(subset(src.userData.rotors.tail.geo, () => true), [1.3, 0.4, 0], [-9.8 * S, 0.25, -3.6 * S]);
+
+  // Debris: skin panels, perspex, a cargo door, an ammunition can.
+  for (let k = 0; k < 12; k++) {
+    const a = R() * Math.PI * 2, d = 3 + R() * 9;
+    const w = 0.4 + R() * 0.9, l = 0.4 + R() * 1.1;
+    parts.push({ geo: buildBox(w, 0.03, l), pos: [Math.cos(a) * d - 1, 0.04, Math.sin(a) * d], rot: [(R() - 0.5) * 0.4, R() * 6, (R() - 0.5) * 0.4], mat: k % 4 === 0 ? MAT.steel : MAT.paint, tone: k % 4 === 0 ? 0.55 : 0.05 + R() * 0.12 });
+  }
+  parts.push({ geo: buildBox(1.25 * S, 0.05, 1.3 * S), pos: [3.5 * S, 0.1, 2.6 * S], rot: [0.12, 0.7, 0.05], mat: MAT.paint, tone: 0.14 });
+  parts.push({ geo: buildBox(0.3, 0.2, 0.12), pos: [2.4 * S, 0.1, -2.2 * S], rot: [0, 0.4, 0], mat: MAT.paint, tone: 0.2 });
+  // (The scorch under it is a projected ground DECAL, the game's: a flat disc
+  // here sat 1.5 cm over uneven ground — z-fighting waiting to happen.)
+  // Vines already over the boom: a few green strands draped across it.
+  for (let k = 0; k < 6; k++) {
+    const x = -4.5 * S - k * 0.9 * S + R() * 0.6, z = -1.6 * S - (k * 0.12 + 0.3) * S;
+    parts.push({ geo: new THREE.TorusGeometry(0.65 * S, 0.035, 5, 10, Math.PI), pos: [x, 0.12, z], rot: [0, 0.55 + (R() - 0.5) * 0.5, 0], mat: MAT.moss, tone: 0.3 + R() * 0.3 });
+  }
+
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.2, radius: 2, strength: 0.45, groundFade: 0.3, floor: 0.4 });
+  geo.userData.footprint = { cx: -2.5 * S, cz: -0.6 * S, hx: 7 * S, hz: 2.4 * S };
+  geo.userData.height = 2.6 * S;
+  return geo;
+}
+
 // ── M551 Sheridan ────────────────────────────────────────────────────────────
 /**
  * The armoured cavalry's light tank in Vietnam (11th ACR and others). What

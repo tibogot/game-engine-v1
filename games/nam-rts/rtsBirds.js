@@ -337,12 +337,12 @@ export function createRtsBirds({ app, units = null, params = {} }) {
     };
   }
 
-  function addFlock({ kind, n, x, y, z, dir, speed, alt }) {
+  function addFlock({ kind, n, x, y, z, dir, speed, alt, circle = null }) {
     n = Math.min(n, P.maxBirds - liveBirds());
     if (n < 3) return null;
     const f = {
       kind, dir: dir.clone().setY(0).normalize(), speed, alt, age: 0, travelled: 0, isFlush: false,
-      centre: new THREE.Vector3(x, y, z), birds: [], land: null,
+      centre: new THREE.Vector3(x, y, z), birds: [], land: null, circle,
     };
     const sl = slots(n, kind);
     for (let i = 0; i < n; i++) {
@@ -544,7 +544,7 @@ export function createRtsBirds({ app, units = null, params = {} }) {
     // Egrets on the river from the start — once the world is built.
     if (ready && !seeded) { seeded = true; seedStand(); seedStand(); }
 
-    const transits = flocks.filter((f) => !f.isFlush).length;
+    const transits = flocks.filter((f) => !f.isFlush && !f.circle).length;
     nextTransit -= dt;
     if (nextTransit <= 0 && transits < P.maxTransit) {
       const settled = ready && stands.length < P.maxStands && Math.random() < P.landChance && spawnLanding();
@@ -616,13 +616,20 @@ export function createRtsBirds({ app, units = null, params = {} }) {
         f.speed = d < 6 ? 0 : THREE.MathUtils.lerp(5, land.cruise, k);
         f.alt = THREE.MathUtils.lerp(1.5, land.cruiseAlt, k);
       }
-      // The centre flies its line, holding its height over the ground.
-      f.centre.addScaledVector(f.dir, f.speed * dt);
+      // The centre flies its line, holding its height over the ground — or,
+      // for a CIRCLING flock (circleOver), its slow ring round a point.
+      if (f.circle) {
+        const c = f.circle;
+        c.ang += (f.speed / c.r) * dt;
+        f.centre.x = c.x + Math.sin(c.ang) * c.r;
+        f.centre.z = c.z + Math.cos(c.ang) * c.r;
+        f.dir.set(Math.cos(c.ang), 0, -Math.sin(c.ang));
+      } else f.centre.addScaledVector(f.dir, f.speed * dt);
       f.travelled += f.speed * dt;
       const gy = ground(f.centre.x, f.centre.z) + f.alt;
       f.centre.y += (gy - f.centre.y) * Math.min(1, dt * 0.6);
       const yaw = Math.atan2(f.dir.x, f.dir.z);
-      if (!land && f.travelled > P.spawnRadius * 2 + 120) { flocks.splice(fi, 1); continue; }
+      if (!land && !f.circle && f.travelled > P.spawnRadius * 2 + 120) { flocks.splice(fi, 1); continue; }
       const gather = Math.min(1, f.age / 3.5);          // flushed birds scatter first
       for (let bi = f.birds.length - 1; bi >= 0; bi--) {
         const b = f.birds[bi];
@@ -687,6 +694,15 @@ export function createRtsBirds({ app, units = null, params = {} }) {
     update,
     flush,
     disturb,
+    /**
+     * A flock that CIRCLES a place for good — slow, high, never leaving (Kurtz's
+     * temple: dread for free). Crows by default: black shapes wheeling.
+     */
+    circleOver(x, z, { n = 9, r = 42, alt = 48, kind = "crow", speed = 7 } = {}) {
+      const ang = Math.random() * TAU;
+      const y = ground(x, z) + alt;
+      return addFlock({ kind, n, x: x + Math.sin(ang) * r, y, z: z + Math.cos(ang) * r, dir: new THREE.Vector3(Math.cos(ang), 0, -Math.sin(ang)), speed, alt, circle: { x, z, r, ang } });
+    },
     /** Send a transit flock across the view now (dev). */
     spawnTransit,
     /** Send an egret flock to land on a bank near the view now (dev). */

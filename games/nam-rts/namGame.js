@@ -89,7 +89,8 @@ import { createTraps } from "./traps.js";
 import { createRequisitionRenderer } from "./requisitionRenderer.js";
 import { hamletSitesFor, pointSitesFor, templeSitesFor, tunnelSitesFor } from "./pointSites.js";
 import { placeHamlet } from "./village.js";
-import { placeTemple } from "./temple.js";
+import { placeTemple, templeWatchers } from "./temple.js";
+import { clearCrashSites, crashSitesFor, placeCrashSites } from "./crashSite.js";
 import { placeEnemyCamp, createEnemyCampFlag } from "./enemyCamp.js";
 import { siteEnemyLine } from "./enemyLine.js";
 import { paintCanopy, paintPalmFringe, paintUndergrowth, travellerPalmSpots, canopyClearings } from "./jungleCanopy.js";
@@ -1429,12 +1430,23 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     for (const site of templeSitesFor(boot.name)) {
       try {
         const n = await placeTemple(app, placed, site);
+        // Kurtz's watchers: motionless figures on the steps and the causeway.
+        if (new URLSearchParams(location.search).get("watchers") !== "0") unitRenderer.addStaticFigures?.("soldier", templeWatchers(app, site));
+        // Crows wheeling over it, for good (rtsBirds.circleOver).
+        // (30 m up: at 46 they wheeled above most of the RTS frame.)
+        birds.circleOver?.(site.x, site.z, { n: 9, r: 38, alt: 30 });
         console.log(`[temple] ${site.name}: ${n} pieces at (${site.x}, ${site.z})`);
       } catch (e) {
         console.warn(`[temple] ${site.name} failed:`, e);
       }
     }
   }
+
+  // THE CRASH SITE (crashSite.js): a Huey down beside the road to the temple.
+  try {
+    const n = await placeCrashSites(app, placed, crashSitesFor(boot.name));
+    if (n) console.log(`[crash] ${n} wreck(s)`);
+  } catch (e) { console.warn("[crash] failed:", e); }
 
   // THE CANOPY (jungleCanopy.js): rainforest on the slopes nobody can climb,
   // round the map's edge and in a few groves, cleared round every site —
@@ -1445,6 +1457,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     const t0 = performance.now();
     const { field, texels } = paintCanopy(app, canopyClearings({
       structures, requisition, hamlets: hamletSitesFor(boot.name), temples: templeSitesFor(boot.name),
+      extra: crashSitesFor(boot.name).map((s) => ({ x: s.x, z: s.z, r: s.clear + 8 })),
     }));
     // The palms along its sunlit margin, on top of the map's own palm paint,
     // and traveller's palms out in the wild, not only in the village.
@@ -1461,6 +1474,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       }
     }
     clearKarstGround(app);             // the karst pillars stand out of the forest
+    clearCrashSites(app, crashSitesFor(boot.name));   // the gash the Huey tore
     console.log(`[canopy] ${texels} texels of forest, ${palms} of palm fringe, ${floor} of undergrowth, ${travellers} traveller's palms in ${Math.round(performance.now() - t0)} ms`);
   }
 

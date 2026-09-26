@@ -16,8 +16,9 @@
 import * as THREE from "three";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import {
-  buildFigRoots, buildHeadPikes, buildNagaBalustrade, buildRiverStair,
-  buildTempleGallery, buildTempleGopura, buildTempleRubble, buildTempleTower,
+  buildFigRoots, buildHeadPikes, buildNagaBalustrade, buildRiverStair, buildSkullMidden,
+  buildTempleGallery, buildTempleGopura, buildTempleHearth, buildTempleLeanTo, buildTempleRubble,
+  buildTempleTotem, buildTempleTower,
 } from "../../v3/render/objects/rtsTemple.js";
 
 /** Kinds drawn as planted foliage (placedPlants.js via `app.plant`), not kit. */
@@ -53,10 +54,10 @@ export function templePlan() {
   // Heads on pikes, in two groups along the approach: the first where the
   // causeway starts, so you meet them before the gate, and the second at the
   // stair head where anyone coming off the water walks into them.
-  add("pikes", -4.6, -17, Math.PI / 2 + 0.06, { seed: 71, count: 5, spacing: 1.5, height: 2.0 });
-  add("pikes", 4.6, -17, Math.PI / 2 - 0.05, { seed: 83, count: 5, spacing: 1.5, height: 2.0 });
-  add("pikes", -4.6, -25, Math.PI / 2 + 0.1, { seed: 97, count: 4, spacing: 1.5, height: 1.9 });
-  add("pikes", 4.6, -25, Math.PI / 2 - 0.08, { seed: 101, count: 4, spacing: 1.5, height: 1.9 });
+  add("pikes", -4.6, -17, Math.PI / 2 + 0.06, { seed: 71, count: 5, spacing: 1.5, height: 1.7 });
+  add("pikes", 4.6, -17, Math.PI / 2 - 0.05, { seed: 83, count: 5, spacing: 1.5, height: 1.7 });
+  add("pikes", -4.6, -25, Math.PI / 2 + 0.1, { seed: 97, count: 4, spacing: 1.5, height: 1.6 });
+  add("pikes", 4.6, -25, Math.PI / 2 - 0.08, { seed: 101, count: 4, spacing: 1.5, height: 1.6 });
   // Rubble: off the gate's flanks, in the courtyard, and out along the way in.
   add("rubble", -8.5, -4, 0.5, { seed: 13 });
   add("rubble", 9, -2, 1.2, { seed: 31 });
@@ -67,6 +68,23 @@ export function templePlan() {
   // these, long after the Khmer — Kurtz's people, or the French before them.
   add("travellersPalm", -9.5, -9, 0.06, { seed: 0.33, scale: 1.05 });
   add("travellersPalm", 9.5, -9.5, -0.05, { seed: 0.71, scale: 0.92 });
+
+  // THE PEOPLE WHO LIVE IN IT (2026-09-26): lean-tos built against the
+  // galleries' outer walls — two on the back gallery, which faces the camera,
+  // one on the west — each with its hearth; the skull midden at the tower's
+  // foot; totems on the paths in, so the boundary is felt before the temple
+  // is seen. Hearths also light a thread of smoke and scorch the ground.
+  add("leanTo", -8, 28.8, 0.04, { seed: 301, width: 4.4 });
+  add("leanTo", 9, 28.9, -0.05, { seed: 303, width: 3.8 });
+  add("leanTo", -15.8, 5.5, -Math.PI / 2 + 0.05, { seed: 307, width: 4.0 });
+  add("hearth", -8.5, 33.2, 0, { seed: 311 });
+  add("hearth", 9.5, 33.4, 0, { seed: 313 });
+  add("hearth", -20.2, 6, 0, { seed: 317 });
+  add("midden", -5.2, 6.2, 0.4, { seed: 321 });
+  add("totem", -18.5, -4.5, 0.2, { seed: 331, height: 3.2 });
+  add("totem", 18.5, -4, -0.3, { seed: 333, height: 2.9 });
+  add("totem", -19.5, 31, 0.5, { seed: 337, height: 3.4 });
+  add("totem", 19.5, 31.5, -0.4, { seed: 339, height: 3.0 });
   return out;
 }
 
@@ -98,6 +116,10 @@ function geometryFor(p) {
     case "rubble": return buildTempleRubble({ seed: p.seed });
     case "stair": return buildRiverStair({ seed: p.seed, steps: p.steps, rise: p.rise, tread: p.tread });
     case "pikes": return buildHeadPikes({ seed: p.seed, count: p.count, spacing: p.spacing, height: p.height });
+    case "leanTo": return buildTempleLeanTo({ seed: p.seed, width: p.width });
+    case "hearth": return buildTempleHearth({ seed: p.seed });
+    case "midden": return buildSkullMidden({ seed: p.seed });
+    case "totem": return buildTempleTotem({ seed: p.seed, height: p.height });
     default: return null;
   }
 }
@@ -121,7 +143,60 @@ const PLACEMENT = {
   stair: { pad: false, nav: false, cover: false, clear: 9 },
   // Pikes are scenery: thin enough to walk between, no cover, no nav.
   pikes: { pad: false, nav: false, cover: false, clear: 2 },
+  leanTo: { pad: true, nav: true, cover: false, clear: 3.5 },
+  hearth: { pad: false, nav: false, cover: false, clear: 2.5 },
+  midden: { pad: false, nav: true, cover: false, clear: 2.5 },
+  totem: { pad: false, nav: false, cover: false, clear: 1.5 },
 };
+
+/**
+ * THE WATCHERS — the strongest image in the film: people standing motionless,
+ * watching the boat come in. World { x, y, z, yaw } for the unit renderer's
+ * static figures: on the ghat steps facing the water, lining the causeway
+ * between the pikes facing it, a few by the midden and the lean-tos.
+ */
+export function templeWatchers(app, { x, z, rotY = 0 }) {
+  const out = [];
+  const flight = templePlan().find((q) => q.kind === "stair");
+  const put = (lx, lz, faceX, faceZ, lift = 0) => {
+    const w = toWorld({ x: lx, z: lz, rotY: 0 }, { x, z, rotY });
+    const f = toWorld({ x: lx + faceX, z: lz + faceZ, rotY: 0 }, { x, z, rotY });
+    out.push({ x: w.x, y: app.getWorldHeight(w.x, w.z) + lift, z: w.z, yaw: Math.atan2(f.x - w.x, f.z - w.z) });
+  };
+  let s = 7;
+  const jit = () => ((s = (s * 16807) % 2147483647) / 2147483647 - 0.5);
+  // On the steps, looking down at the water (local -Z), a few each side.
+  if (flight) for (const k of [2, 4, 6, 8, 10]) for (const sx of [-1, 1]) {
+    if ((k + sx) % 3 === 0) continue;
+    put(sx * (2.2 + jit() * 1.6), flight.z - k * flight.tread - 0.3, jit() * 0.3, -1, 0.15);
+  }
+  // Lining the causeway, facing it.
+  for (const lz of [-7, -10, -13, -20, -23]) for (const sx of [-1, 1]) put(sx * (6.6 + jit() * 0.8), lz + jit(), -sx, jit() * 0.4);
+  // By the midden, and by the lean-tos on the back gallery.
+  put(-6.8, 4.2, 0.6, 1); put(-3.4, 4.0, -0.4, 1);
+  put(-9.5, 32, 0.2, 1); put(8, 32.4, 0.3, 1);
+  return out;
+}
+
+/** Scorch decals (the photo scorch art) at each { x, z, size }. Exported for the crash site. */
+export async function scorchDecals(app, spots) {
+  const decals = app.decals;
+  if (!decals || !spots.length) return 0;
+  let slot = decals.textures?.slots?.findIndex((s) => s.name.startsWith("scorch")) ?? -1;
+  if (slot < 0) {
+    await decals.addSlot({ name: "scorch (photo)", albedoUrl: "/textures/decals/nam/scorch_1.webp", normalUrl: "/textures/decals/nam/scorch_1_n.webp" });
+    slot = decals.textures.slots.length - 1;
+  }
+  for (const s of spots) {
+    const a = (s.x * 12.9898 + s.z * 78.233) % 6.283;
+    decals.add({
+      px: s.x, py: app.getWorldHeight(s.x, s.z), pz: s.z,
+      qx: 0, qy: Math.sin(a / 2), qz: 0, qw: Math.cos(a / 2),
+      slot, sx: s.size, sy: 3, sz: s.size, opacity: 0.9, roughness: 0.95, normalStrength: 1, angleFade: 55, edgeFade: 0.05, priority: 0,
+    });
+  }
+  return spots.length;
+}
 
 /** Place a temple compound centred on (x, z), through placedObjects. */
 export async function placeTemple(app, placed, { x, z, rotY = 0 } = {}) {
@@ -139,15 +214,56 @@ export async function placeTemple(app, placed, { x, z, rotY = 0 } = {}) {
   // going to it), so the ground has to provide the fall for now.
   const flight = templePlan().find((q) => q.kind === "stair");
   if (flight && app.gradeRamp) {
-    const drop = flight.steps * flight.rise;
+    // The ramp must reach the flight's FOOT at the flight's full drop. It was
+    // aimed 3 m past the foot, so at the last step the ground had fallen only
+    // 3.3 of the flight's 4.5 m: the lower steps were buried and the stair read
+    // as a flat stone band (measured 2026-09-26). Now ONE ramp on the flight's
+    // own slope (a little under the treads), carried 6 m on past the foot into
+    // the bank where the water will come. (Not a second ramp from the foot:
+    // gradeRamp flattens a round cap at each end, and a cap at the foot
+    // would lay the lower flight's ground flat under its steps.)
+    const drop = flight.steps * flight.rise + 0.15, run = flight.steps * flight.tread;
     const head = toWorld({ x: flight.x, z: flight.z, rotY: 0 }, { x, z, rotY });
-    const foot = toWorld({ x: flight.x, z: flight.z - flight.steps * flight.tread - 3, rotY: 0 }, { x, z, rotY });
+    const end = toWorld({ x: flight.x, z: flight.z - run - 3, rotY: 0 }, { x, z, rotY });
     const hy = app.getWorldHeight?.(head.x, head.z) ?? 0;
-    await app.gradeRamp(
-      { x: head.x, z: head.z, y: hy },
-      { x: foot.x, z: foot.z, y: hy - drop },
-      { halfWidth: 7.5, shoulder: 9 },
-    );
+    // Wide shoulders: the cut is a pond's basin with banks, not a pit with
+    // rock walls (at 9 m the sides went steep enough to paint as cliff).
+    // (3 m past the foot, not 6, and 22 m shoulders: the deeper, shorter cut
+    // left a back wall steep enough to paint as a rock quarry face.)
+    await app.gradeRamp({ x: head.x, z: head.z, y: hy }, { x: end.x, z: end.z, y: hy - drop * (run + 3) / run }, { halfWidth: 9, shoulder: 22 });
+    // THE TEMPLE POND (2026-09-26). A ghat going down into nothing read as a
+    // hole in the ground; the stairs have to go down into WATER — that is the
+    // image. Khmer temples stand on their reservoirs (the srah), so a pond at
+    // the foot of the landing is the place's own, not a stand-in for the river.
+    // Level: 1.2 m over the foot, so the lowest steps are under. The lake is
+    // depth-buffer water (shows only where the ground is below it): the
+    // rectangle is fitted to the MEASURED basin, which nothing outside of
+    // reaches down to. ?templepond=0 = without.
+    const foot = toWorld({ x: flight.x, z: flight.z - run, rotY: 0 }, { x, z, rotY });
+    // No plant on the flight or the approach to it (placedPlants keep-out).
+    (app.plantKeepOut ??= []).push({ x0: head.x, z0: head.z, x1: end.x, z1: end.z, r: 9 });
+    const level = app.getWorldHeight(foot.x, foot.z) + 1.2;
+    if (app.lakeSystem?.addLake && new URLSearchParams(location.search).get("templepond") !== "0") {
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (let dz = -40; dz <= 40; dz += 2) for (let dx = -40; dx <= 40; dx += 2) {
+        const wx = foot.x + dx, wz = foot.z + dz;
+        if (app.getWorldHeight(wx, wz) >= level) continue;
+        x0 = Math.min(x0, wx); x1 = Math.max(x1, wx); z0 = Math.min(z0, wz); z1 = Math.max(z1, wz);
+      }
+      if (x1 > x0) {
+        app.templePond = app.lakeSystem.addLake({ cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, sizeX: x1 - x0 + 6, sizeZ: z1 - z0 + 6, level });
+        app.lakeSystem.setEditActive?.(false);
+        // MURKY jungle water (your note: "a bit too transparent"): the lake's
+        // defaults are a clear lake — full absorption over 20 m, and this pond is
+        // ~1.5 m deep, so you saw its bed. Opaque within 2.5 m, olive-brown.
+        // (One material serves every lake; nam-valley has no other.)
+        const w = app.lakeSystem.toolState?.lake?.water;
+        if (w) {
+          Object.assign(w, { depthDistance: 2.5, absorptionScale: 24, absorptionR: 0.42, absorptionG: 0.2, absorptionB: 0.3, inscatterTint: "#2c2f14", inscatterStrength: 0.95 });
+          app.lakeSystem.syncMaterial?.();
+        }
+      }
+    }
   }
 
   for (const p of templePlan()) {
@@ -160,6 +276,17 @@ export async function placeTemple(app, placed, { x, z, rotY = 0 } = {}) {
     });
   }
   await placed.place(items);
+  // The hearths burn: a thread of smoke each (kept — never recycled by the
+  // combat smoke) and a scorch on the ground round it.
+  // No planted palm on the tribe's things (a sugar palm stood on a lean-to).
+  for (const q of templePlan()) {
+    if (!["leanTo", "hearth", "midden", "totem"].includes(q.kind)) continue;
+    const w = toWorld(q, { x, z, rotY });
+    (app.plantKeepOut ??= []).push({ x0: w.x, z0: w.z, x1: w.x, z1: w.z, r: q.kind === "leanTo" ? 7 : 4 });
+  }
+  const hearths = templePlan().filter((q) => q.kind === "hearth").map((q) => toWorld(q, { x, z, rotY }));
+  for (const h of hearths) app.smoke?.spawn({ x: h.x, z: h.z, kind: "hearth", keep: true, strength: 0.8 });
+  await scorchDecals(app, hearths.map((h) => ({ ...h, size: 3.6 })));
   // Planted plants after the pads, so each stands on the final ground.
   let plants = 0;
   for (const p of [...templePlan(), ...TEMPLE_OUTSKIRTS]) {
