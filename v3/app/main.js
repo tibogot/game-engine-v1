@@ -12062,6 +12062,17 @@ export async function startV3App(opts = {}) {
        * so set it once; drive `{ amount }` per frame.
        */
       setPurkinje(o) { worldEnv?.setPurkinje?.(o); },
+      /**
+       * The colour grade ("polish": brightness, contrast, saturation,
+       * temperature, tint, vignette, grain) for a game that owns its look.
+       * Partial updates; `enabled` switches it. Not saved to the project.
+       */
+      setPolish(p = {}) {
+        const cur = worldToolState.postFx.polish;
+        Object.assign(cur, p);
+        worldEnv?.postFxPipeline?.setPolishParams(cur);
+        worldEnv?.postFxPipeline?.setPolishEnabled(!!cur.enabled);
+      },
       setBloomSelective(on) {
         worldEnv?.postFxPipeline?.setBloomSelective(!!on);
       },

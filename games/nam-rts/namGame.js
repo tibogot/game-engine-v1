@@ -404,6 +404,20 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // the editor and the other games keep their light.
   app.sky?.setWorldLight?.({ skyFill: 0.6, hemi: 1.25, exposure: 1.08 });
 
+  // HOT AFTERNOON SUN (your ask, 2026-09-26: "a lack of contrast… something
+  // that shows real hot sun"). The noon light above was lit mostly by the
+  // SKY: shade and sun nearly the same brightness, the brightest pixels at
+  // 128/255, the sunlit fifth of the frame green, not warm. Now the sun does
+  // the work: lower (15:24, ~44° instead of 68° — longer shadows, depth), a
+  // stronger key, less sky fill, exposure to keep the frame's mean where it
+  // was; a light contrast grade. Measured (fog off): mean 82 -> 85, top 1%
+  // 127 -> 154, the sunlit fifth warm (138,132,75). ?light=old = before.
+  if (new URLSearchParams(location.search).get("light") !== "old") {
+    app.sky?.setTimeOfDay?.(15.4);
+    app.sky?.setWorldLight?.({ dir: 4.4, skyFill: 0.4, hemi: 1.0, exposure: 1.5 });
+    app.postFx?.setPolish?.({ enabled: true, contrast: 1.1, saturation: 0.92, temperature: 0.12 });
+  }
+
   app.setSlopeCliffRule?.({
     layer: 5,                            // "Cliff Rock" in nam-valley
     startDeg: NAV_MAX_SLOPE_DEG - 4,

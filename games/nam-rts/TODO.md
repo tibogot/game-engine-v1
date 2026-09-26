@@ -684,6 +684,16 @@ Vietnam, like Apocalypse Now.
       PUBLIC_ENGINE_MODULES. OPEN: the map's own dense coconut palms swallow
       the east wing (cook house, granary) — thin them round the camp, or
       keep it hidden "under the trees"? Your call.
+- [x] **LIGHTING PASS: HOT AFTERNOON SUN** (2026-09-26, ?light=old = before):
+      the noon light was lit by the SKY (sun and shade nearly equal, top 1% of
+      pixels 127/255, the sunlit fifth green). Now 15:24 (sun 44° not 68°,
+      longer shadows), key 2.6 -> 4.4, skyFill 0.6 -> 0.4, hemi 1.25 -> 1.0,
+      exposure 1.08 -> 1.5, a light grade (contrast 1.1, saturation 0.92,
+      temperature 0.12; new engine call app.postFx.setPolish). Measured with
+      fog off: mean 82 -> 85, top 1% 127 -> 154, sunlit fifth warm. Cost 0.
+      Fog untouched (judged with it off, as you said, then back on).
+  - [ ] Next if wanted: cloud shadows drifting over; sun glints on paddies and
+        the river; light shafts through the canopy inside the fog banks.
 - [x] **ANIMALS ACROSS THE MAP** (your ask 2026-09-26: only saw the paddy buffalo):
       30 BUFFALO (5 at the paddies, 7 in two groups by the hamlet, 6 in two
       groups below Kurtz's temple, 6 pairs on open meadows; each group's patch
