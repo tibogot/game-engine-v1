@@ -24,6 +24,7 @@
 import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { FOLIAGE_PRESETS } from "../v3/app/state/foliageScatterState.js";
 import { NAV_MAX_SLOPE_DEG } from "./lib/rtsMapMetrics.mjs";
+import { LAYOUT } from "../games/alg-rts/layout.js";
 
 const args = process.argv.slice(2);
 const FILE = args.includes("--file") ? args[args.indexOf("--file") + 1] : "public/levels/alg-aures.v3proj";
@@ -34,10 +35,11 @@ const dry = args.includes("--dry");
  * by the gate, the hamlet (games/alg-rts/showroom.js). Circles, metres.
  */
 const SITES = [
-  { x: 40, z: 150, r: 34 },
+  // Every layout site except the oases (their palms ARE the site)…
+  ...LAYOUT.sites.filter((s) => s.kind !== "oasis").map((s) => ({ x: s.x, z: s.z, r: s.r })),
+  // …and the post's vehicle park and helipad (games/alg-rts/showroom.js).
   { x: 22, z: 102, r: 28 },
   { x: 72, z: 118, r: 14 },
-  { x: 150, z: 60, r: 48 },
 ];
 
 const project = await readProject(FILE);
@@ -116,9 +118,17 @@ const GROUND = [
   { name: "Reed-mace", preset: "typha", fn: (x, z) => band(oasisD(x, z), 0.92, 1.22, 0.08) },
 ];
 
+// The wadi beds (paint slot 4, tools/algWadi.mjs): gravel, flash floods — bare.
+const splat = project.blobs.get("splat");
+const SRES = man.splatRes;
+const wadiBed = (x, z) => {
+  const px = Math.min(SRES - 1, Math.max(0, Math.floor(((x + W / 2) / W) * SRES)));
+  const pz = Math.min(SRES - 1, Math.max(0, Math.floor(((z + W / 2) / W) * SRES)));
+  return splat[SRES * SRES * 4 + (pz * SRES + px) * 4] / 255;
+};
 const common = (x, z) => {
   const h = H(x, z), s = slopeDeg(x, z);
-  if (s > NAV_MAX_SLOPE_DEG || wet(x, z)) return null;
+  if (s > NAV_MAX_SLOPE_DEG || wet(x, z) || wadiBed(x, z) > 0.25) return null;
   const k = siteFade(x, z) * borderFade(x, z);
   return k > 0 ? { h, s, k } : null;
 };

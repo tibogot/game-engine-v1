@@ -27,6 +27,8 @@ export const SHOWROOM = [
   { key: "halftrack", build: buildHalfTrack, x: 38, z: 92, yaw: 0.35 - 0.2, vehicle: true },
   // The hamlet up the valley from the post.
   { key: "mechta", build: buildMechta, x: 150, z: 60, yaw: 0.9 },
+  // The second hamlet (layout.js "Mechta el Oued"), smaller, its own houses.
+  { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: 270, z: -70, yaw: -0.4 },
 ];
 
 let _glass = null;

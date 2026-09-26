@@ -152,6 +152,23 @@ Asset follow-ups:
 - [ ] The stats overlay's triangle count reads ~2 billion since the tall
       field went in (a counter artefact of indirect draws? unverified; the
       frame holds 60 fps).
+- [x] **Step 3, the layout** (2026-09-26) — games/alg-rts/layout.js, plan
+      image games/alg-rts/layout-plan.png (`node tools/algPlanView.mjs
+      --layout games/alg-rts/layout.js --out ...`): French at the post (valley,
+      south-centre); ALN camp high in the NW massif (-350, -315); objectives:
+      2 hamlets, 2 oases, 2 gully mouths (the ALN's ways down), cedar spring,
+      ridge watch. Sites moved to the flattest ground nearby (relief ≤ 8.5 m).
+- [x] **Wadis** (tools/algWadi.mjs, from the layout): Oued Tighanimine 600 m
+      north of the hamlet, Oued el Abiod 634 m in the south-west; beds forced
+      downhill, 42° banks (past the 34° nav limit), 3 fords each at 16° —
+      the valley's chokepoints. Bed painted slot 4 (dry_river_pebbles).
+- [x] **Second oasis** "Ain el Oued" (-120, 330) r16, in the southern wadi's
+      bed (a guelta). Second hamlet placed. Vegetation re-run: clearings now
+      from the layout, nothing on the wadi beds, palms at both oases.
+      Map backed up before the carve (scratchpad alg-aures.pre-wadi.v3proj).
+- [ ] **you**: the layout is a proposal — check layout-plan.png. Open
+      questions: is the ALN camp too far (≈ 560 m from the post)? One more
+      French outpost (a SAS post) on the north side of the wadi?
 - [ ] **LATER — sandstorm** (your ask, 2026-09-26): a weather event —
       wall of dust rolling in, haze thickening to a brown-out, wind-driven
       dust sheets, the light going orange and flat; gameplay: sight ranges
