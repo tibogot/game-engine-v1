@@ -93,54 +93,17 @@ function kitView(geo) {
 }
 
 /**
- * The Aurès plants (FOLIAGE_PRESETS atlasCedar / holmOak / juniperScrub /
- * alfa), hand-placed through the engine's PlacedFoliage like nam-rts's
- * ornamentals — the map's paint slots stay untouched until the look is agreed.
- * Cedars up on the massif, where they grow; the rest round the post, to be
- * judged against the buildings.
+ * The vegetation lives IN THE MAP now (tools/algVegetation.mjs: species in its
+ * plant slots, density in its paint), so the editor shows and edits it. The
+ * only plants placed here are the ones a PLACE puts down by hand: the two
+ * Canary palms the army planted at the post's gate.
  */
-const PLANT_KINDS = ["atlasCedar", "holmOak", "juniperScrub", "alfa", "datePalm", "canaryPalm", "doumPalm", "typha"];
-/** The oasis the map carries (tools/algOasis.mjs). */
-const OASIS = { x: 132, z: 128, r: 20 };
-
 function placePlants(app) {
   const pf = new PlacedFoliage({ scene: app.scene });
-  for (const k of PLANT_KINDS) pf.setType(k, structuredClone(FOLIAGE_PRESETS[k]));
-  let s = 91;
-  const r = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
-  // Nothing grows inside the post's wire or on the vehicles' spot.
-  const wet = (x, z) => Math.hypot(x - OASIS.x, z - OASIS.z) < OASIS.r * 1.05;
-  const clear = (x, z) => Math.hypot(x - 40, z - 150) < 30 || Math.hypot(x - 22, z - 102) < 26 || Math.hypot(x - 72, z - 118) < 12 || Math.hypot(x - 150, z - 60) < 45 || wet(x, z);
-  const put = (kind, x, z, scale = 1) => {
-    if (clear(x, z)) return;
-    pf.add(kind, x, app.getWorldHeight(x, z) - 0.05, z, { rotY: r() * 6.28, scale, seed: Math.floor(r() * 1e6) });
-  };
-  // A cedar stand on the NW massif.
-  for (let i = 0; i < 14; i++) put("atlasCedar", -190 + (r() - 0.5) * 120, -150 + (r() - 0.5) * 110, 0.75 + r() * 0.5);
-  // Holm oaks on the slope behind the post, and a pair beside it.
-  for (let i = 0; i < 8; i++) put("holmOak", 70 + (r() - 0.5) * 70, 200 + (r() - 0.5) * 50, 0.8 + r() * 0.5);
-  put("holmOak", 68, 150, 1); put("holmOak", 72, 162, 0.85);
-  // Scrub and alfa scattered round the post and down the valley.
-  for (let i = 0; i < 70; i++) put("juniperScrub", 40 + (r() - 0.5) * 150, 130 + (r() - 0.5) * 140, 0.7 + r() * 0.7);
-  for (let i = 0; i < 160; i++) put("alfa", 40 + (r() - 0.5) * 160, 120 + (r() - 0.5) * 150, 0.7 + r() * 0.6);
-  // THE OASIS: a grove of date palms round the pool, in clumps (a date palm
-  // throws offshoots at its foot), tallest near the water; reed-mace in the
-  // shallows' edge.
-  for (let c = 0; c < 9; c++) {
-    const a = (c / 9) * Math.PI * 2 + r() * 0.5, d = OASIS.r * (1.2 + r() * 1.0);
-    const cx = OASIS.x + Math.cos(a) * d, cz = OASIS.z + Math.sin(a) * d;
-    const n = 2 + Math.floor(r() * 3);
-    for (let k = 0; k < n; k++) put("datePalm", cx + (r() - 0.5) * 6, cz + (r() - 0.5) * 6, (0.75 + r() * 0.45) * (d < OASIS.r * 1.6 ? 1.1 : 0.9));
+  pf.setType("canaryPalm", structuredClone(FOLIAGE_PRESETS.canaryPalm));
+  for (const [x, z, scale, seed] of [[26, 126, 1, 17], [40, 130, 0.95, 29]]) {
+    pf.add("canaryPalm", x, app.getWorldHeight(x, z) - 0.05, z, { rotY: seed, scale, seed });
   }
-  for (let k = 0; k < 40; k++) {
-    const a = r() * Math.PI * 2, d = OASIS.r * (1.05 + r() * 0.12);
-    const x = OASIS.x + Math.cos(a) * d, z = OASIS.z + Math.sin(a) * d;
-    pf.add("typha", x, app.getWorldHeight(x, z) - 0.05, z, { rotY: r() * 6.28, scale: 0.8 + r() * 0.5, seed: Math.floor(r() * 1e6) });
-  }
-  // Doum clumps on the slopes of the valley sides, and two Canary palms the
-  // army planted at the post's gate.
-  for (let i = 0; i < 45; i++) put("doumPalm", 110 + (r() - 0.5) * 220, 190 + (r() - 0.5) * 120, 0.7 + r() * 0.6);
-  put("canaryPalm", 26, 126, 1); put("canaryPalm", 40, 130, 0.95);
   app.addPreRenderHook(() => {
     const d = app.environment?.getLightDirection?.();
     if (d) pf.setSunDir(d);

@@ -137,6 +137,21 @@ Asset follow-ups:
       the post now reports `userData.flagMount` and the game plants the
       engine's Verlet cloth flag there (games/alg-rts/algFlag.js, the same
       createFlag as nam's baseFlag), with a drawn tricolour texture.
+- [x] **Vegetation moved INTO the map** (step 2, 2026-09-26):
+      tools/algVegetation.mjs writes the species into the map's plant slots
+      and the density into its paint (derived from height, slope, the oasis,
+      clear of the post / vehicle park / hamlet). Tall: cedar, holm oak, date
+      palm, juniper scrub. Ground: alfa, reed-mace. The showroom only places
+      the two Canary palms at the gate now. Verified in the editor: slots and
+      paint load from the file.
+      First pass was a forest (GPU counter ~12 ms in a close view): densities
+      cut to Aurès sparseness (~6 ms same view). Map backed up first
+      (scratchpad alg-aures.pre-veg.v3proj).
+- [ ] Doum palm: out of the painted field — the fan-palm builder's far LOD
+      draws it as flat green mats. Fix the far LOD (or a card) and repaint.
+- [ ] The stats overlay's triangle count reads ~2 billion since the tall
+      field went in (a counter artefact of indirect draws? unverified; the
+      frame holds 60 fps).
 - [ ] **LATER — sandstorm** (your ask, 2026-09-26): a weather event —
       wall of dust rolling in, haze thickening to a brown-out, wind-driven
       dust sheets, the light going orange and flat; gameplay: sight ranges
