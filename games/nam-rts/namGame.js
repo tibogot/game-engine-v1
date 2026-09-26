@@ -98,6 +98,7 @@ import { plantSpecimens } from "./specimenPlants.js";
 import { sitePaddies, buildRicePaddies } from "./ricePaddies.js";
 import { placeBuffalo } from "./buffalo.js";
 import { createWildHerd, loadAnimal } from "./wildAnimals.js";
+import { applyNamRocks, clearKarstGround } from "./namRocks.js";
 import { createChickenFlock } from "./chickenFlock.js";
 import { createFogBanks, siteFogBanks } from "./fogBanks.js";
 import { buildFogBanksPanel } from "./fogBanksPanel.js";
@@ -1275,6 +1276,14 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   }
   app.enemyCampFlag = enemyCampFlag;
 
+  // THE ROCKS in the nam look (namRocks.js): photo stone, buried and tilted,
+  // fewer lone stones — the kit's own look stays for the editor and other
+  // games. After every site has taken its ground. ?rocks=kit = the kit look.
+  try {
+    const r = applyNamRocks(app);
+    if (r) console.log(`[rocks] ${r.changed} buried, ${r.removed} lone stones removed, ${r.added} karst pillars`);
+  } catch (e) { console.warn("[rocks] failed:", e); }
+
   // THE HENS (chickenFlock.js): every one of them — hamlet and camp — in ONE
   // GPU crowd draw, each homed a couple of metres off a piece of her place,
   // kept out of its buildings, the water and the steep. ?chickens=0 = without.
@@ -1346,6 +1355,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
         travellers++;
       }
     }
+    clearKarstGround(app);             // the karst pillars stand out of the forest
     console.log(`[canopy] ${texels} texels of forest, ${palms} of palm fringe, ${floor} of undergrowth, ${travellers} traveller's palms in ${Math.round(performance.now() - t0)} ms`);
   }
 

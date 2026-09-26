@@ -481,6 +481,26 @@ Everything else below is in its section.
   - [ ] Maybe: the flying birds rebuilt the same way (they are seen from
         above and small, so it matters less); a heron that flushes currently
         flies off as a white egret shape.
+  - [x] **ROCKS DONE** (games/nam-rts/namRocks.js, nam-rts only; ?rocks=kit = the
+        old look): triplanar Rock028 photo stone + normals, limestone grey /
+        red laterite patches, moss on top, damp base; every rock sunk 15-30%
+        and tilted; lone small stones kept only on slopes, by cliffs and water
+        (~95 removed of ~1,490). MEASURED: within noise (12.11 vs 12.28 ms
+        with a plain material, noise 0.44). KARST PILLARS added (your go):
+        45 limestone pillars 17-30 m tall on steep hillsides (34-55°, nobody
+        walks there), in groups, 40 m from any structure; their feet cleared
+        of canopy after it is painted (clearKarstGround) so they rise out of
+        the forest.
+  - [x] (the note that led to it) ROCKS TOO STYLIZED FOR NAM (your note, 2026-09-26; keep the kit as it is
+        for your Zelda/Genshin game — a nam-rts-ONLY override): ~1,490 kit
+        rocks (Stone/Lump/Boulder/Megalith/Karst/Split/Slab). Why they read
+        stylized: painted pale bevel edges (rockShade), one clean pale
+        blue-grey, smooth chipped-egg facets, sitting ON the ground, sprayed
+        everywhere. Plan (proposed, waiting on your go): triplanar photo rock
+        (Rock028/Rock058/cliff_rocks_07 + normals) in dark weathered limestone
+        + some red laterite, moss on top, damp base, no bevel highlight;
+        sink 15-30% + tilt; far fewer lone stones, clustered boulders, more
+        KARST pillars. Before/after toggle; measure ms.
   - [ ] **The village casts NO SHADOWS** (your note, 2026-09-26): houses,
         granaries, fences — nothing in the hamlet throws a shadow. Check the
         placed/merged meshes' castShadow and the shadow camera's reach.
