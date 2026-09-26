@@ -13,7 +13,7 @@ import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
 import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
-import { buildBarbedWire, buildFrSandbagWall, buildHelipad, buildMgNest, buildMirador, buildMortarPit, buildMotorPool } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildCaveEntrance, buildFrSandbagWall, buildHelipad, buildMgNest, buildMineMarker, buildMirador, buildMortarPit, buildMotorPool, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -68,11 +68,28 @@ export const BASE_BUILDABLES = [
 ];
 
 /** Post-local → world (the post's local -Z is its gate). */
-function fromBase(lx, lz) {
-  const c = Math.cos(BASE.yaw), s = Math.sin(BASE.yaw);
+function fromBase(lx, lz, site = BASE) {
+  const c = Math.cos(site.yaw), s = Math.sin(site.yaw);
   // Local +X → world (cos, -sin); local -Z (forward) → world (-sin, -cos).
-  return [BASE.x + lx * c - lz * s, BASE.z - lx * s - lz * c];
+  return [site.x + lx * c - lz * s, site.z - lx * s - lz * c];
 }
+
+const ALN_SITE = { ...ALN, yaw: siteYaw(ALN) };
+
+/**
+ * The ALN's buildables round its camp, in the CAMP'S frame (like BASE_PARK).
+ * Pads clear of the camp's (half 28.6 × 26 m + 1.5 + a 10 m rim); the small
+ * pieces follow the slope — the ALN builds on rough ground, it never levels.
+ * Spots MEASURED (height spread over each footprint): the camp is a hilltop and
+ * its front falls away steeply; the right flank and the back-left are gentle.
+ */
+export const ALN_BUILDABLES = [
+  { key: "caveEntrance", build: buildCaveEntrance, lx: 58, lz: 4, yaw: -0.2 },
+  { key: "armsCache", build: buildArmsCache, lx: -66, lz: -22, yaw: 0.25 },
+  { key: "sangar", build: buildSangar, lx: 50, lz: 30, yaw: 0.15, follow: true },
+  { key: "ambushScreen", build: buildAmbushScreen, lx: 56, lz: 46, yaw: -0.1, follow: true },
+  { key: "mineMarker", build: buildMineMarker, lx: 60, lz: 60, yaw: 0.4, follow: true },
+];
 
 /** What to show, and where (world x/z, yaw). */
 export const SHOWROOM = [
@@ -84,6 +101,7 @@ export const SHOWROOM = [
   { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: HAMLETS[1].x, z: HAMLETS[1].z, yaw: siteYaw(HAMLETS[1]) },
   // The ALN command post in the massif.
   { key: "alnCamp", build: buildAlnCamp, x: ALN.x, z: ALN.z, yaw: siteYaw(ALN), flag: "fln" },
+  ...ALN_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz, ALN_SITE); return { key: v.key, build: v.build, x, z, yaw: ALN_SITE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
 ];
 
 let _glass = null;

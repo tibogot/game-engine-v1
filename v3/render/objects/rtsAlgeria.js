@@ -13,6 +13,7 @@
 import * as THREE from "three";
 import { MAT, assemble, bakeContactAO, buildBox, buildCorrugatedPanel, buildOilDrum, buildSandbagWall, rng, wirePart } from "./rtsParts.js";
 import { flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
+import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 
 const S = 1.3;
 
@@ -530,4 +531,340 @@ export function buildMortarPit({ seed = 31 } = {}) {
   geo.userData.gun = { geo: gunGeo, pivot: [0, (floorY - 0.02) * S, 0.1 * S] };
   geo.userData.parts = { gun: gunGeo };
   return geo;
+}
+
+// ── ALN ─────────────────────────────────────────────────────────────────────
+// The other side's language: low, the colour of the mountain, stone and
+// brush, half into the ground. Never a straight wall, never whitewash. (The
+// French pieces above are the opposite on purpose: the post is the one white
+// thing on the map.)
+
+/**
+ * Move every vertex by a jitter keyed on its POSITION, so vertices that
+ * share a corner (a polyhedron's, a cone's apex, a lathe's seam) move
+ * together and the solid stays closed.
+ */
+function jitterByPosition(g, amt, seed, { flatTop = null } = {}) {
+  const p = g.attributes.position;
+  const h = (x, y, z, k) => {
+    const s = Math.sin(Math.round(x * 1000) * 12.9898 + Math.round(y * 1000) * 39.346 + Math.round(z * 1000) * 78.233 + k * 17.1 + seed * 3.7) * 43758.5453;
+    return s - Math.floor(s) - 0.5;
+  };
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    let ny = y * (1 + h(x, y, z, 2) * amt * 2);
+    if (flatTop != null) ny = Math.min(ny, flatTop);
+    p.setXYZ(i, x * (1 + h(x, y, z, 1) * amt * 2), ny, z * (1 + h(x, y, z, 3) * amt * 2));
+  }
+  return g;
+}
+
+/** A field stone, w × h × d: a jittered icosahedron, faceted, its top a little flattened. */
+function fieldStone(seed, w, h, d, detail = 0) {
+  if (detail > 0) return crag(seed, w, h, d);
+  const g = jitterByPosition(new THREE.IcosahedronGeometry(0.5, detail), 0.22, seed, { flatTop: 0.36 });
+  g.scale(w, h / 0.86, d);
+  return faceted(g, { boxUV: true });
+}
+
+/**
+ * A big limestone rock, w × h × d. A detail-1 icosphere read as a polished
+ * low-poly gem (seen in the game); this one is finer, pushed in and out by
+ * smooth noise over its DIRECTION (lumps and hollows, not spikes), stepped by
+ * the stone's bedding planes, its top cut flat, and shaded faceted — the
+ * facets small enough to read as fractured rock. ~320 triangles.
+ */
+function crag(seed, w, h, d) {
+  const r = rng(seed);
+  let g = new THREE.IcosahedronGeometry(0.5, 2);
+  g.deleteAttribute("normal"); g.deleteAttribute("uv");
+  g = mergeVertices(g);
+  // Six random waves over the sphere's direction: a smooth 3D "noise".
+  const waves = Array.from({ length: 6 }, () => {
+    const k = new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize().multiplyScalar(2 + r() * 5);
+    return { k, ph: r() * 6.28, a: 0.05 + r() * 0.06 };
+  });
+  const p = g.attributes.position, v = new THREE.Vector3();
+  const bed = 0.12 + r() * 0.06, tilt = (r() - 0.5) * 0.3;          // bedding: spacing, dip
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const n = v.clone().normalize();
+    let s = 1;
+    for (const q of waves) s += Math.sin(n.dot(q.k) + q.ph) * q.a;
+    // Bedding planes: the rock steps in slightly at each bed.
+    const yb = (v.y + v.x * tilt) / bed;
+    s -= (yb - Math.floor(yb) < 0.25 ? 0.05 : 0);
+    v.multiplyScalar(s);
+    v.y = Math.min(v.y, 0.4 + v.x * tilt * 0.5);                        // weathered flat top
+    p.setXYZ(i, v.x * w, Math.max(-0.3, v.y) * h / 0.9, v.z * d);
+  }
+  return faceted(g, { boxUV: true });
+}
+
+/**
+ * DRY STONE along a path ([x, z] points): courses of field stones, each
+ * course offset half a stone, the stones overlapping so no daylight shows
+ * through, a slight batter. How every wall in the Aurès is built — sangars,
+ * terraces, gourbis.
+ */
+function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, len = 0.5, batter = 0.05, tone = 0.5, closed = false } = {}) {
+  const ch = h / courses;
+  const segs = [];
+  let total = 0;
+  const n = closed ? pts.length : pts.length - 1;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    segs.push({ a, b, L, s0: total }); total += L;
+  }
+  const at = (s) => {
+    const seg = segs.find((q) => s <= q.s0 + q.L) ?? segs[segs.length - 1];
+    const f = Math.min(1, (s - seg.s0) / seg.L);
+    return { x: seg.a[0] + (seg.b[0] - seg.a[0]) * f, z: seg.a[1] + (seg.b[1] - seg.a[1]) * f, yaw: Math.atan2(seg.b[0] - seg.a[0], seg.b[1] - seg.a[1]) };
+  };
+  for (let c = 0; c < courses; c++) {
+    let s = c % 2 ? len * 0.5 : 0;
+    const inset = c * batter;
+    while (s < total - 0.05) {
+      const l = len * (0.75 + R() * 0.55);
+      const mid = Math.min(total - 0.05, s + l / 2);
+      const { x, z, yaw } = at(mid);
+      // Inset for the batter: along the path's normal, toward its inside.
+      const nx = Math.cos(yaw), nz = -Math.sin(yaw);
+      const sh = ch * (1.15 + R() * 0.35);
+      parts.push({
+        geo: fieldStone(Math.floor(R() * 1e6), l + 0.12, sh, depth * (0.8 + R() * 0.35)),
+        pos: [x + nx * inset, c * ch + sh * 0.42 - 0.06, z + nz * inset],
+        rot: [(R() - 0.5) * 0.12, yaw + Math.PI / 2 + (R() - 0.5) * 0.25, (R() - 0.5) * 0.12],
+        mat: MAT.limestone, tone: tone - 0.12 + R() * 0.24,   // one stone's face: the rubble cell is a WALL (its joints read as black blotches on a stone)
+      });
+      s += l;
+    }
+  }
+}
+
+/** An arc of points round (cx, cz), from angle a0 to a1. */
+function arcPts(cx, cz, rad, a0, a1, n = 10) {
+  return Array.from({ length: n + 1 }, (_, k) => {
+    const a = a0 + ((a1 - a0) * k) / n;
+    return [cx + Math.cos(a) * rad, cz + Math.sin(a) * rad];
+  });
+}
+
+/**
+ * A clump of cut brush — juniper, alfa grass, broom: the ALN's camouflage
+ * against the spotter planes. Two or three jittered cones leaning apart,
+ * grey-green (moss) or dry (thatch).
+ */
+function brushClump(R, x, y, z, { h = 1.2, r = 0.45, dry = false } = {}) {
+  const out = [];
+  const n = 2 + Math.floor(R() * 2);
+  for (let k = 0; k < n; k++) {
+    const hh = h * (0.7 + R() * 0.45), rr = r * (0.7 + R() * 0.5);
+    // A lumpy ball, smooth-shaded (cones read as little pine trees): shared
+    // corners welded first so the jitter keeps it closed and the normals soft.
+    let g = new THREE.IcosahedronGeometry(1, 1);
+    g.deleteAttribute("normal"); g.deleteAttribute("uv");
+    g = mergeVertices(g);
+    jitterByPosition(g, 0.3, Math.floor(R() * 1e6));
+    g.scale(rr, hh / 2, rr).translate(0, hh * 0.4, 0);
+    g.computeVertexNormals();
+    const p = g.attributes.position, uvs = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) { uvs[i * 2] = (p.getX(i) + p.getZ(i)) / 2; uvs[i * 2 + 1] = p.getY(i) / 2; }
+    g.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    out.push({
+      geo: g,
+      pos: [x + (R() - 0.5) * r, y - 0.05, z + (R() - 0.5) * r],
+      rot: [(R() - 0.5) * 0.5, R() * 3, (R() - 0.5) * 0.5],
+      mat: dry || R() < 0.3 ? MAT.thatch : MAT.moss, tone: 0.3 + R() * 0.3,
+    });
+  }
+  // Bare twigs poking out of the leaves: what says CUT brush, not a bush
+  // (lumps alone read as sacks in a row).
+  for (let k = 0; k < 3; k++) {
+    const a = R() * Math.PI * 2, up = 0.4 + R() * 0.6, len = r * (1.3 + R() * 0.8);
+    const b = [x + Math.cos(a) * len, y + h * (0.35 + up * 0.55), z + Math.sin(a) * len];
+    out.push(wirePart([x, y + h * 0.3, z], b, 0.018, { mat: MAT.timber, tone: 0.2 + R() * 0.15 }));
+  }
+  return out;
+}
+
+/** A clay water jar (gargoulette): the one made thing at a refuge that isn't a weapon. */
+function clayJar(x, y, z, s = 1) {
+  const prof = [[0.001, 0], [0.14, 0.01], [0.2, 0.12], [0.21, 0.26], [0.15, 0.4], [0.07, 0.46], [0.08, 0.52], [0.001, 0.52]]
+    .map(([r, yy]) => new THREE.Vector2(r * s, yy * s));
+  const g = new THREE.LatheGeometry(prof, 10);
+  return { geo: g, pos: [x, y, z], mat: MAT.laterite, tone: 0.6 };
+}
+
+/** A rifle lying or leaning: stock (timber) and barrel (steel), from `a` (butt) to `b` (muzzle). */
+function rifle(parts, a, b) {
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+  const m = A.clone().lerp(B, 0.42);
+  parts.push(wirePart(a, m.toArray(), 0.035, { mat: MAT.timber, tone: 0.25 }));
+  parts.push(wirePart(m.toArray(), b, 0.014, { tone: 0.12 }));
+}
+
+/**
+ * CAVE ENTRANCE — the ALN's spawn and reinforcement point, only on rough
+ * ground (TODO.md PROPOSAL). A rock shelter: the mouth shored with timber,
+ * running back into the dark; big limestone blocks round it and a slab over
+ * it; brush heaped on top against the planes; a low stone breastwork across
+ * half the mouth; sacks, a crate, a water jar in the entrance.
+ */
+export function buildCaveEntrance({ seed = 1956 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const MW = 3.0, MH = 2.4, TD = 2.6;          // mouth width, height, tunnel depth
+  // The rock: flanks, the lintel slab, the mass behind.
+  const rock = (w, h, d, x, y, z, ry = 0, tone = 0.45) => parts.push({ geo: fieldStone(Math.floor(R() * 1e6), w, h, d, 1), pos: [x, y, z], rot: [(R() - 0.5) * 0.12, ry, (R() - 0.5) * 0.12], mat: MAT.limestone, tone });
+  rock(4.2, 3.6, 4.4, -(MW / 2 + 1.9), 1.5, 1.0, 0.3);
+  rock(2.6, 2.2, 2.8, -(MW / 2 + 3.9), 0.8, -0.2, 1.2, 0.5);
+  rock(3.8, 3.2, 4.2, MW / 2 + 1.8, 1.35, 1.2, -0.4, 0.4);
+  rock(2.2, 1.6, 2.4, MW / 2 + 3.7, 0.55, 0.1, 0.8, 0.5);
+  rock(6.2, 1.5, 3.6, 0.1, MH + 0.75, 1.3, 0.05, 0.42);                 // the lintel slab
+  rock(10, 5.2, 5.5, 0, 2.3, TD + 3.1, 0, 0.45);                       // the hill behind
+  // The tunnel: rubble cheeks and roof, the dark at its end.
+  for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.7, MH, TD), pos: [sx * (MW / 2 + 0.3), MH / 2, TD / 2 + 0.05], mat: MAT.rubble, tone: 0.3 });
+  parts.push({ geo: buildBox(MW + 1.3, 0.5, TD), pos: [0, MH + 0.24, TD / 2 + 0.05], mat: MAT.rubble, tone: 0.25 });
+  parts.push({ geo: buildBox(MW + 0.2, MH + 0.1, 0.1), pos: [0, MH / 2, TD - 0.02], mat: MAT.steel, tone: 0 });
+  // Timber shoring: three sets of posts and caps, into the dark.
+  for (let k = 0; k < 3; k++) {
+    const z = 0.05 + k * 0.95, w = MW - 0.25 - k * 0.1;
+    for (const sx of [-1, 1]) parts.push({ geo: new THREE.CylinderGeometry(0.1, 0.12, MH - 0.05, 7), pos: [sx * w / 2, (MH - 0.05) / 2, z], rot: [0, R(), (R() - 0.5) * 0.05], mat: MAT.timber, tone: 0.2 + k * 0.04 });
+    parts.push({ geo: new THREE.CylinderGeometry(0.12, 0.12, w + 0.5, 7), pos: [0, MH - 0.12 - k * 0.02, z], rot: [0, 0, Math.PI / 2 + (R() - 0.5) * 0.04], mat: MAT.timber, tone: 0.18 });
+  }
+  // A breastwork across half the mouth, the way in on the right.
+  dryStone(parts, R, arcPts(-0.9, -0.3, 1.6, Math.PI * 0.55, Math.PI * 1.2, 5), { courses: 3, h: 0.8, depth: 0.5, tone: 0.45 });
+  // In the entrance: sacks, a crate, the jar; a bedroll.
+  for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(0.66, 0.42 + k * 0.03, 0.46), pos: [0.75 + k * 0.1, 0.2 + k * 0.4, 1.7 - k * 0.05], rot: [0, (R() - 0.5) * 0.4, 0], mat: MAT.hessian, tone: 0.4 + R() * 0.2 });
+  parts.push({ geo: buildBox(0.8, 0.4, 0.5), pos: [-0.8, 0.18, 1.9], rot: [0, 0.2, 0], mat: MAT.timber, tone: 0.3 });
+  parts.push(clayJar(1.2, -0.02, 0.4));
+  parts.push({ geo: new THREE.CylinderGeometry(0.16, 0.16, 1.1, 8), pos: [-0.4, 0.14, 0.9], rot: [0, 0.4, Math.PI / 2], mat: MAT.canvas, tone: 0.35 });
+  // Brush on the lintel and the flanks, a juniper standing by the mouth.
+  for (const [x, y, z, h] of [[-1.5, MH + 1.3, 1.2, 1.1], [0.8, MH + 1.35, 1.0, 1.2], [2.3, MH + 1.1, 1.8, 0.9], [-3.6, 3.1, 1.5, 1.0], [3.3, 2.7, 1.6, 1.0], [-0.6, MH + 1.2, 2.2, 0.9]]) {
+    parts.push(...brushClump(R, x, y, z, { h, r: 0.55 }));
+  }
+  parts.push(...brushClump(R, 2.3, 0, -1.2, { h: 2.2, r: 0.7 }));
+  return finish(parts, { hx: 7.2, hz: 5.6, cz: 1.8, height: 5.2, ao: { cell: 0.3, strength: 0.55 } });
+}
+
+/**
+ * ARMS CACHE — a matmora: the Aurès's underground grain pit, stone-lined,
+ * a flat stone for a lid; the ALN hid its smuggled weapons in them. The lid
+ * slid aside, crates brought up, rifles stacked in a tripod; beside it the
+ * gourbi — a dry-stone hut roofed with poles, brush and earth — where the
+ * guard sleeps. Unlocks MG, mortar and bazooka teams (TODO.md PROPOSAL).
+ */
+export function buildArmsCache({ seed = 1957 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  // The gourbi, back left: a ring of dry stone, the door toward the camera.
+  const gx = -1.6, gz = 1.2, gw = 3.2, gd = 2.6;
+  const x0 = gx - gw / 2, x1 = gx + gw / 2, z0 = gz - gd / 2, z1 = gz + gd / 2;
+  dryStone(parts, R, [[gx + 0.45, z0], [x1, z0], [x1, z1], [x0, z1], [x0, z0], [gx - 0.45, z0]], { courses: 5, h: 1.6, depth: 0.55, len: 0.48, batter: 0.02, tone: 0.5 });
+  // Its roof: poles across, brush on them, earth over the middle.
+  for (let k = 0; k < 7; k++) parts.push({ geo: new THREE.CylinderGeometry(0.06, 0.07, gd + 0.7, 6), pos: [x0 + 0.1 + k * (gw - 0.2) / 6, 1.62, gz], rot: [Math.PI / 2, 0, (R() - 0.5) * 0.06], mat: MAT.timber, tone: 0.25 + R() * 0.1 });
+  parts.push({ geo: faceted(jitterByPosition(new THREE.CylinderGeometry(1.5, 1.9, 0.35, 8, 1).scale(1.05, 1, 0.85), 0.12, seed), { boxUV: true }), pos: [gx, 1.85, gz], mat: MAT.spoil, tone: 0.45 });
+  for (const [x, z] of [[-1.2, -0.8], [0.9, 0.6], [-0.3, 1.1], [1.2, -0.7]]) parts.push(...brushClump(R, gx + x, 1.9, gz + z, { h: 0.6, r: 0.6, dry: true }));
+  parts.push({ geo: buildBox(0.8, 1.3, 0.1), pos: [gx, 0.62, z0 + 0.18], mat: MAT.steel, tone: 0.02 });   // the dark doorway
+  // The matmora, front right: a ring of stones round the dark, its lid aside.
+  const mx = 1.9, mz = -0.9;
+  for (let k = 0; k < 11; k++) {
+    const a = (k / 11) * Math.PI * 2;
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.42, 0.24, 0.3), pos: [mx + Math.cos(a) * 0.62, 0.08, mz + Math.sin(a) * 0.62], rot: [0, -a + Math.PI / 2, 0], mat: MAT.limestone, tone: 0.5 });
+  }
+  parts.push({ geo: new THREE.CylinderGeometry(0.58, 0.58, 0.1, 14), pos: [mx, 0.04, mz], mat: MAT.steel, tone: 0 });
+  parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 1.35, 0.18, 1.2), pos: [mx + 1.05, 0.14, mz - 0.5], rot: [0.08, 0.5, 0.05], mat: MAT.limestone, tone: 0.45 });
+  // Crates up from the pit, one open; sacks.
+  for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(0.9, 0.36 + k * 0.03, 0.5), pos: [mx - 0.2 + (k === 2 ? 0.1 : 0), 0.17 + k * 0.015 + (k === 2 ? 0.35 : 0), mz + 1.0 + (k === 1 ? 0.55 : 0)], rot: [0, 0.3 + (R() - 0.5) * 0.2, 0], mat: MAT.timber, tone: 0.3 + R() * 0.15 });
+  for (let k = 0; k < 2; k++) parts.push({ geo: buildBox(0.66, 0.4 + k * 0.03, 0.46), pos: [mx + 1.1, 0.19, mz + 1.1 + k * 0.5], rot: [0, R(), 0], mat: MAT.hessian, tone: 0.45 });
+  // Three rifles stacked in a tripod, muzzles together.
+  const top = [mx - 1.1, 1.3, mz - 0.4];
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + 0.3;
+    rifle(parts, [top[0] + Math.cos(a) * 0.45, 0.02, top[2] + Math.sin(a) * 0.45], [top[0] + Math.cos(a) * 0.04, top[1], top[2] + Math.sin(a) * 0.04]);
+  }
+  parts.push(clayJar(x1 + 0.35, -0.02, z1 - 0.2, 0.9));
+  // A juniper grown over the back wall.
+  parts.push(...brushClump(R, x0 - 0.3, 0, z1 + 0.3, { h: 2.4, r: 0.8 }));
+  return finish(parts, { hx: 4.0, hz: 3.0, cx: 0.2, cz: 0.3, height: 2.4, ao: { cell: 0.2 } });
+}
+
+/**
+ * SANGAR — a dry-stone C on a hillside, a gun over its lip: the ALN's
+ * firing position. Open at the back; brush laid along the top so it is one
+ * more heap of stones from the air. The gun (a captured FM 24/29) is its own
+ * geometry (`userData.gun`) to traverse.
+ */
+export function buildSangar({ seed = 1958 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const rad = 1.8;
+  dryStone(parts, R, arcPts(0, 0, rad, Math.PI * 0.72, Math.PI * 2.28, 12), { courses: 4, h: 1.05, depth: 0.6, batter: 0.06, tone: 0.5 });
+  for (const a of [Math.PI * 0.95, Math.PI * 1.3, Math.PI * 1.72, Math.PI * 2.05]) parts.push(...brushClump(R, Math.cos(a) * rad, 0.95, Math.sin(a) * rad, { h: 0.55, r: 0.4, dry: R() < 0.5 }));
+  // Stones fallen outside; an ammo box and the jar inside.
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI * (0.9 + R() * 1.2);
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.45, 0.26, 0.35), pos: [Math.cos(a) * (rad + 0.7 + R() * 0.4), 0.06, Math.sin(a) * (rad + 0.7 + R() * 0.4)], rot: [0, R() * 3, 0], mat: MAT.limestone, tone: 0.5 });
+  }
+  parts.push({ geo: buildBox(0.5, 0.26, 0.28), pos: [0.6, 0.11, 0.4], rot: [0, 0.4, 0], mat: MAT.paint, tone: 0.25 });
+  parts.push(clayJar(-0.7, -0.02, 0.7, 0.85));
+  const geo = finish(parts, { hx: 2.8, hz: 2.8, height: 1.3 });
+  // The gun: receiver, barrel with its flash hider, the top magazine, bipod, butt.
+  const gun = [];
+  gun.push({ geo: buildBox(0.1, 0.13, 0.5), pos: [0, 0, 0.1], mat: MAT.steel, tone: 0.12 });
+  gun.push(wirePart([0, 0.02, -0.15], [0, 0.02, -0.85], 0.017, { tone: 0.08 }));
+  gun.push({ geo: new THREE.CylinderGeometry(0.03, 0.03, 0.08, 7).rotateX(Math.PI / 2), pos: [0, 0.02, -0.87], mat: MAT.steel, tone: 0.1 });
+  gun.push({ geo: buildBox(0.05, 0.2, 0.09), pos: [0, 0.15, 0.02], rot: [-0.25, 0, 0], mat: MAT.steel, tone: 0.18 });
+  gun.push({ geo: buildBox(0.07, 0.12, 0.38), pos: [0, -0.03, 0.52], rot: [0.12, 0, 0], mat: MAT.timber, tone: 0.3 });
+  for (const sx of [-1, 1]) gun.push(wirePart([0, 0, -0.55], [sx * 0.2, -0.28, -0.72], 0.012, { tone: 0.15 }));
+  const gunGeo = assemble(gun);
+  bakeContactAO(gunGeo, { cell: 0.06, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+  gunGeo.scale(S, S, S);
+  geo.userData.gun = { geo: gunGeo, pivot: [0, 1.28 * S, -(rad - 0.45) * S] };
+  geo.userData.parts = { gun: gunGeo };
+  return geo;
+}
+
+/**
+ * AMBUSH SCREEN — cut scrub stood up in a low stone footing between two
+ * rocks, along a slope above a track: the ALN's katiba waits behind it,
+ * hidden until it fires (TODO.md PROPOSAL). 7 m long, gaps to fire through.
+ */
+export function buildAmbushScreen({ seed = 1959, length = 7 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const L = length / 2;
+  const pts = Array.from({ length: 8 }, (_, k) => [-L + (k * length) / 7, Math.sin(k * 0.9 + seed) * 0.25]);
+  dryStone(parts, R, pts, { courses: 2, h: 0.5, depth: 0.5, len: 0.45, batter: 0.03, tone: 0.45 });
+  // The screen: clumps stood in the footing, a firing gap every ~2 m.
+  // Dense and mostly green: a hedge of cut scrub, not a row of lumps.
+  for (let s = -L + 0.3; s < L - 0.2; s += 0.4 + R() * 0.15) {
+    if (Math.abs(((s + L) % 2.1) - 1.05) < 0.22) continue;
+    parts.push(...brushClump(R, s, 0.35, Math.sin(((s + L) / length) * 7 * 0.9 + seed) * 0.25 + (R() - 0.5) * 0.15, { h: 1.0 + R() * 0.45, r: 0.55, dry: R() < 0.12 }));
+  }
+  // The rocks it runs between.
+  for (const [x, w, h] of [[-L - 1.0, 2.2, 1.7], [L + 0.9, 1.8, 1.3]]) parts.push({ geo: fieldStone(Math.floor(R() * 1e6), w, h, w * 0.9, 1), pos: [x, h * 0.36, 0.1], rot: [0, R() * 3, 0], mat: MAT.limestone, tone: 0.45 });
+  // Behind it: a flattened place in the brush, a water skin, spent cases' box.
+  parts.push({ geo: buildBox(0.4, 0.22, 0.26), pos: [0.8, 0.1, 0.9], rot: [0, 0.5, 0], mat: MAT.paint, tone: 0.25 });
+  parts.push(clayJar(-1.6, -0.02, 0.8, 0.8));
+  return finish(parts, { hx: L + 2.2, hz: 1.6, cz: 0.3, height: 1.8 });
+}
+
+/**
+ * MINE MARKER — where the ALN laid a mine: a low mound of turned earth and
+ * the three-stone cairn the fighters marked their own mines with. The owner
+ * sees it; the French must find it (nam's per-man roll, TODO.md).
+ */
+export function buildMineMarker({ seed = 1960 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  parts.push({ geo: earthBerm([[0.75, -0.1], [0.58, 0.08], [0.32, 0.14], [0.001, 0.15]], { seed, segs: 14, rJit: 0.08, yJit: 0.02 }), mat: MAT.spoil, tone: 0.45 });
+  const cx = 0.75, cz = 0.35;
+  // The cairn: three stones stacked knee-high, big enough to see from the
+  // camera (the first, ankle-high, vanished at play zoom).
+  parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.5, 0.3, 0.42), pos: [cx, 0.1, cz], rot: [0, R() * 3, 0], mat: MAT.limestone, tone: 0.55 });
+  parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.4, 0.26, 0.34), pos: [cx + 0.03, 0.33, cz + 0.02], rot: [0.1, R() * 3, 0.05], mat: MAT.limestone, tone: 0.5 });
+  parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.28, 0.22, 0.24), pos: [cx - 0.02, 0.52, cz], rot: [0.2, R() * 3, 0.1], mat: MAT.limestone, tone: 0.6 });
+  return finish(parts, { hx: 1.2, hz: 0.9, cx: 0.35, cz: 0.15, height: 0.7 });
 }

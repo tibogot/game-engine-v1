@@ -100,9 +100,9 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   // ── The rock the camp is set against, and the cave in it ─────────────────
   // A long outcrop behind the camp (+Z, away from the camera), two lesser
   // ones at its flanks: the mountain the camp hides in.
-  parts.push({ geo: outcrop(R, 14, 10.5, 7, seed), pos: [0, -0.3, 13.5], mat: MAT.sandstone, tone: 0.45 });
-  parts.push({ geo: outcrop(R, 6, 4.5, 5, seed + 1), pos: [-15, -0.3, 8], mat: MAT.sandstone, tone: 0.4 });
-  parts.push({ geo: outcrop(R, 5, 3.2, 4, seed + 2), pos: [15, -0.3, 10], mat: MAT.sandstone, tone: 0.5 });
+  parts.push({ geo: outcrop(R, 14, 10.5, 7, seed), pos: [0, -0.3, 13.5], mat: MAT.limestone, tone: 0.45 });
+  parts.push({ geo: outcrop(R, 6, 4.5, 5, seed + 1), pos: [-15, -0.3, 8], mat: MAT.limestone, tone: 0.4 });
+  parts.push({ geo: outcrop(R, 5, 3.2, 4, seed + 2), pos: [15, -0.3, 10], mat: MAT.limestone, tone: 0.5 });
   // The cave mouth: a dark arch in the big rock's face, a timber lintel, a
   // stone step, sacks and a crate just inside.
   {

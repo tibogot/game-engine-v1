@@ -229,8 +229,24 @@ Asset follow-ups:
       it read as a brown square on the Aurès). Cells 21-23 free. Berms are
       now irregular smooth heaps (earthBerm), not turned pots; the MG nest's
       too, and both bag rings closed (they had gaps).
-- [ ] **Next buildables**: ALN cave entrance, arms cache, sangar, ambush
-      screen, mine/trap markers; then searchlight tower, SAS post.
+- [x] **ALN buildables** (rtsAlgeria.js, 2026-09-27), the other side's
+      language — low, stone and brush, never white: cave entrance (rock
+      shelter, shored mouth into the dark, brush over it; 3.5k tris), arms
+      cache (a matmora grain pit, lid aside, crates, rifle tripod, the
+      guard's gourbi; 4.2k), sangar (dry-stone C, brush on the lip, FM 24/29
+      on its own pivot; 2.6k), ambush screen (cut scrub in a stone footing
+      between rocks; 3.3k), mine marker (turned earth + a three-stone cairn).
+      Shared helpers: dryStone (courses of field stones along a path),
+      crag (big rocks: noise + bedding, faceted), brushClump (lumps + bare
+      twigs). Shown round the ALN camp on its gentle flanks (MEASURED: the
+      camp is a hilltop, its front too steep).
+- [x] **Atlas cell 21: `MAT.limestone`** — one stone's face, warm buff-grey.
+      The rubble cell is a wall (its joints went black on single stones) and
+      the Khmer sandstone read olive. The ALN camp's rocks moved to it too.
+- [ ] **you, taste**: the brush — green lumps + dry bundles + twigs — and
+      the stone colour. Judge them at play zoom.
+- [ ] **Next buildables**: searchlight tower, SAS post (still **you**:
+      forward base or not?).
 - [ ] Very high orbit views show a black band under the horizon (the env
       bake's black lower hemisphere, ref_v3_env_bake_black_floor); not seen at
       play zoom.

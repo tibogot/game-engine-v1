@@ -52,8 +52,10 @@ export const MAT = {
   sandstone: 16, laterite: 17, moss: 18,
   // Algeria: dry-stone rubble — mechta walls, a post's breastworks, terraces.
   rubble: 19,
-  // Dry ochre spoil — berms, pits, graded pads (row six; 21-23 free).
+  // Dry ochre spoil — berms, pits, graded pads (row six).
   spoil: 20,
+  // Aurès limestone: ONE stone's face (rubble is a wall) — field stones, rocks.
+  limestone: 21,   // 22-23 free
 };
 
 /** Strip anything merge would choke on, and guarantee the attribute set. */

@@ -1050,13 +1050,57 @@ export function makeSpoilTexture({ size = 512, seed = 163 } = {}) {
   });
 }
 
+/**
+ * Aurès limestone — ONE stone's face, not a wall (the rubble cell has joints,
+ * and on a single field stone they read as black blotches): pale grey-buff,
+ * pitted, darker where rain has run down it, a few rust-orange lichen spots.
+ * The khaki sandstone cell is the Khmer temple's, and read olive on this
+ * ground. For the ALN's stones, sangars and rock shelters.
+ */
+export function makeLimestoneTexture({ size = 512, seed = 173 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const t = fbm(u * P * 1.5 + seed, v * P * 1.5, P * 2, 4);
+        const grain = fbm(u * P * 16 + 5, v * P * 16 + seed, P * 16, 2) - 0.5;
+        // Warm buff-grey with the desert's brown patina: a cool grey read as
+        // white rocks dropped on the ochre ground (seen in the game).
+        let r = lerp(146, 184, t) + grain * 22;
+        let gg = r * 0.89, b = r * 0.75;
+        // Rain streaks: darker, running down the face.
+        const streak = clamp01((fbm(u * P * 6 + 11, v * P * 0.8, P * 6, 3) - 0.55) * 3) * 0.2;
+        r *= 1 - streak; gg *= 1 - streak; b *= 1 - streak * 0.9;
+        // Pits: small dark holes with a lit lip.
+        const pv = vnoise(u * P * 26 + 3, v * P * 26, P * 26);
+        const pit = clamp01((pv - 0.78) * 6);
+        r *= 1 - pit * 0.4; gg *= 1 - pit * 0.4; b *= 1 - pit * 0.38;
+        // Lichen: rust-orange and grey-green spots, sparse.
+        const lich = clamp01((fbm(u * P * 9 + seed * 2, v * P * 9, P * 9, 3) - 0.7) * 5);
+        const orange = hash2(Math.floor(u * P * 9), Math.floor(v * P * 9) + seed) > 0.5;
+        if (lich > 0) {
+          const [lr, lg, lb] = orange ? [196, 120, 58] : [140, 146, 118];
+          r = lerp(r, lr, lich * 0.7); gg = lerp(gg, lg, lich * 0.7); b = lerp(b, lb, lich * 0.7);
+        }
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 export const ATLAS_COLS = 4;
 // FIVE rows, not four: the sixteen were full, and the Khmer ruins need stone
 // that is actually stone (sandstone, laterite, moss). The fifth row costs a
 // quarter more atlas — 2048x2560 instead of 2048x2048 — and the shader reads
 // its size from these two constants, so nothing else has to know.
 // SIX since 2026-09-27: the Algeria game needed dry desert spoil (cell 20);
-// 2048x3072, cells 21-23 free.
+// 2048x3072; 21 limestone; 22-23 free.
 export const ATLAS_ROWS = 6;
 /** Fraction of a cell kept clear at its border, so mips cannot bleed across. */
 export const ATLAS_PAD = 0.004;
@@ -1099,6 +1143,7 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeMossTexture({ size: cell }),
     makeRubbleTexture({ size: cell }),   // 19 (Algeria)
     makeSpoilTexture({ size: cell }),    // 20 (Algeria): row six
+    makeLimestoneTexture({ size: cell }), // 21 (Algeria)
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;
