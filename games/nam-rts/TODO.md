@@ -1135,11 +1135,11 @@ Vietnam, like Apocalypse Now.
 
 ## Ambient life — suggestions (not agreed yet)
 
-- [ ] **Cloud shadows** sweeping the map (engine has `cloudShadowMap`) — reads
+- [x] **Cloud shadows** sweeping the map (engine has `cloudShadowMap`) — reads  (DONE 2026-09-26: cloudShadowsLite, see above)
       beautifully from top-down, near-free
 - [ ] **Distant Hueys** crossing the map like the transit birds, with rotor
       shadows — "the war is elsewhere", very Apocalypse Now
-- [ ] Water buffalo in the paddies, chickens/pigs in the village (once those exist)
+- [x] Water buffalo in the paddies, chickens/pigs in the village (once those exist)  (DONE: buffalo, hens, deer via crowd skinning)
 - [ ] Thin cooking-fire smoke over villages (smoke system, tiny budget)
 - [ ] Horizon artillery flashes / smoke columns off-map; tracers at night
 - [ ] Monsoon rain showers passing over (world rain exists in modular-road)
@@ -1212,7 +1212,7 @@ Vietnam, like Apocalypse Now.
       harvester nodes + a buildable "Supply Relay"; capture points change that
       design — **DECIDED: replace harvesting with requisition points**
       (harvesting can survive as an optional mode)
-- [ ] **Real cloth flags on the requisition masts** (your ask 2026-09-22): the HQ's
+- [x] **Real cloth flags on the requisition masts** (your ask 2026-09-22): the HQ's
       Verlet flag (baseFlag.js, 130 particles) on every mast instead of the stiff
       instanced cloth — climbs the pole with the capture, US / NLF image by owner,
       sim skipped off-screen. Cheap: ~0.02 ms CPU for 7, one small draw each, culled
