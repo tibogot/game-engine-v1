@@ -1642,6 +1642,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   try {
     const bridgeDecks = measureBridgeDecks(app);
     app.bridgeDecks = bridgeDecks;
+    // Crossings go end to end along the deck, not up the bank beside it.
+    navGrid.setPathAnchors(bridgeDecks.anchorPath);
     app.getStandHeight = (x, z) => {
       const g = app.getWorldHeight(x, z);
       const d = bridgeDecks.heightAt(x, z);

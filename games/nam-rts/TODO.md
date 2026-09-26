@@ -254,6 +254,31 @@ Keep this file current: tick things off here, add new asks here.
 
 Everything else below is in its section.
 
+## BRIDGES — your note 2026-09-26 (LATER — "don't code anything now")
+
+- [ ] **Too narrow for vehicles**: the decks don't take a jeep / M113 / truck.
+      Rebuild wide enough for two-way vehicle traffic (and check the nav
+      carve — bridges carve nav by type name `/bridge/i`, and a span is measured
+      at DECK height, see bridgeLandings.js).
+- [ ] **They don't read Vietnam at all**: it's the old bridge from another game.
+      Replace with period bridges — e.g. a timber trestle / plank bridge, a
+      French-era steel truss or concrete span on the main road, a bamboo/rope
+      footbridge on side streams, maybe a pontoon (US engineers, M4T6) —
+      TALK FIRST about which, where.
+- [x] **Units cross it WRONG** — FIXED 2026-09-26. MEASURED: a squad sent at
+      an angle walked the bank BESIDE the deck (3-4 m off its line, up to 2.6 m
+      below it, under the arch), then stepped in sideways and jumped +2-7 m in
+      one step. The 4 m nav cells know nothing of decks, and the movement's
+      LOOKAHEAD skipped any waypoint it could see past. Now (bridgeDecks.js):
+      paths are ANCHORED end to end along the deck (navGrid.setPathAnchors,
+      string-pulled between anchors), anchors are never skipped, units keep to
+      the centre line near a deck (lanePull, avoidance damped), and the deck
+      has SIDE WALLS (on/off only at its ends). Test, 16 cases x 1 and 6 units,
+      both bridges, both ways, enemies cleared: before 52/56 crossed, 117
+      under-deck samples, 8 cases with a >1 m jump (worst 6.55 m); after 56/56,
+      0 under, no jump over 0.8 m on or near a deck. (First test runs lied: the
+      enemy was SHOOTING the test units near the bridges — clear them first.)
+
 ## THE CANOPY TREE'S LEAVES — your note, 2026-09-25 — DONE ("look way better")
 
 - [x] WIRED IN (uncommitted): the dipterocarp's card key is now `leafSpray`
@@ -353,6 +378,28 @@ Everything else below is in its section.
       like the birds; fade out by camera height (they only read up close).
       Maybe later: monkeys in the canopy, a water buffalo, chickens in the
       village (already listed under Map & look).
+- [ ] **SUN GLINTS ON WATER** (your pick 2026-09-26). WHY THERE WERE NONE: the
+      camera looks north, the afternoon sun is 80° off to the west — a mirror
+      highlight needs a ripple tilted ~36°, and the river's glint ripples were
+      ~5° (normalStrength 0.22 × glintSpread 0.4). TRY 1, REJECTED ("squared
+      pixels flickering… white dots, make no sense"): a made-up grid of flashing
+      facets — nothing tied it to the waves. Reverted. TRY 2 (live, waiting on
+      your look): the river's OWN glint with its ripple slopes exaggerated for
+      the highlight only (glintSpread 6, shininess 60, strength 2): bright flecks
+      shaped by the wave crests, drifting with the flow. If yes: make it a game
+      setting, then the same idea on the paddies.
+- [ ] **AMBIENT LIFE + PARTICLES, one cheap GPU field** (your ask 2026-09-26,
+      "for later"): FLIES buzzing round the buffalo, the latrine and bodies;
+      EMBERS rising off every fire (napalm, burning wrecks, cooking fires) and
+      drifting on the wind; BUTTERFLIES over clearings and the village;
+      DRAGONFLIES darting over paddies and the river. My extra ideas: DUST MOTES
+      in the sun under the canopy (catch the light, invisible in shade — pairs
+      with the cloud shadows), POLLEN/SEED FLUFF drifting over the meadows,
+      FALLING LEAVES from the big trees, ASH flakes downwind of napalm, WATER
+      STRIDER ripples in the paddies, and FIREFLIES at dusk. Plan: one instanced
+      particle system, an emitter per kind (point, area, follow-a-herd), all
+      simulated in a vertex shader from a seed + time (no CPU per particle),
+      faded out with zoom — they only read up close. Target: well under 0.2 ms.
 
 ## RICE PADDIES — your ask 2026-09-25 (TALK FIRST — plan in my answer)
 

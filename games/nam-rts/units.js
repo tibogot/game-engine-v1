@@ -75,7 +75,10 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
   // the riverbed under the bridge).
   const groundAt = (gx, gz) => (app.getStandHeight ? app.getStandHeight(gx, gz)
     : app.getWorldHeight ? app.getWorldHeight(gx, gz) : 0);
-  const blocked = (bx, bz) => !type.isAir && !!navGrid?.isBlockedAtWorld(bx, bz);
+  // …and a bridge deck has side walls: on and off only at its ends
+  // (bridgeDecks.sideWall; `pos` is where the move starts from).
+  const blocked = (bx, bz) => !type.isAir && (!!navGrid?.isBlockedAtWorld(bx, bz)
+    || !!app.bridgeDecks?.sideWall(pos.x, pos.z, bx, bz));
   const inBlocked = () => blocked(pos.x, pos.z);
 
   /** Move to (nx,nz), sliding along terrain obstacles rather than stopping dead. */
@@ -394,8 +397,11 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       //     few metres BEHIND the unit, so after every repath the unit briefly
       //     drove backward to touch it (the forward/back jitter on open ground);
       //   • cell-centre zig-zags on otherwise straight runs.
+      // Never past an ANCHOR (a bridge's end, bridgeDecks.anchorPath): the grid
+      // sees open bank beside a deck, and skipping the entry sent the unit up
+      // that bank, under the arch — the very thing the anchor is there to stop.
       let skips = 2; // capped — LOS marches the grid, keep it cheap per frame
-      while (skips-- > 0 && waypoints.length > 1 && navGrid?.hasLOS?.(
+      while (skips-- > 0 && waypoints.length > 1 && !waypoints[0].anchor && navGrid?.hasLOS?.(
         pos.x, pos.z, waypoints[1].x, waypoints[1].z,
       )) {
         waypoints.shift();
@@ -423,8 +429,12 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
           // clamped < 1, so adding it to the unit-length forward direction can
           // never point the unit backward.
           const av = avoidance(dirX, dirZ);
-          dirX += av.x;
-          dirZ += av.z;
+          // Heading for a bridge end or along a deck: single file on the centre
+          // line — neighbours barely push, and a pull brings it back on line.
+          const lane = waypoints[0]?.anchor ? app.bridgeDecks?.lanePull?.(pos.x, pos.z) : null;
+          const avK = lane ? 0.25 : 1;
+          dirX += av.x * avK + (lane?.x ?? 0);
+          dirZ += av.z * avK + (lane?.z ?? 0);
 
           // Still jammed? Sidestep hard for a beat to break the tangle.
           if (escapeT > 0) {

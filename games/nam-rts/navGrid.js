@@ -355,7 +355,7 @@ export function createNavGrid({
     const stamp = new Uint32Array(N);
     const closed = new Uint32Array(N);
     const open = new MinHeap(4096);
-    let gen = 0, goalI = -1, gx = 0, gz = 0, tx = 0, tz = 0;
+    let gen = 0, goalI = -1, gx = 0, gz = 0, tx = 0, tz = 0, sx0 = 0, sz0 = 0;
     // OCTILE distance — the true free-ground cost on an 8-way grid, tighter
     // than the straight line — with a 0.1% nudge toward the goal to break the
     // wide plateaus of equal cost it makes (octile ALONE was measured slower:
@@ -375,7 +375,7 @@ export function createNavGrid({
         const startI = idx(start.cx, start.cz);
         goalI = idx(goal.cx, goal.cz);
         if (startI === goalI) return { path: [{ x: x1, z: z1 }] };
-        gx = goal.cx; gz = goal.cz; tx = x1; tz = z1;
+        gx = goal.cx; gz = goal.cz; tx = x1; tz = z1; sx0 = sx; sz0 = sz;
         if (++gen === 0xffffffff) { stamp.fill(0); closed.fill(0); gen = 1; }
         open.clear();
         gScore[startI] = 0; came[startI] = -1; stamp[startI] = gen;
@@ -388,7 +388,7 @@ export function createNavGrid({
         while (open.size) {
           if (n >= maxPops) { search.pops = n; return undefined; }
           const cur = open.pop(); n++;
-          if (cur === goalI) { search.pops = n; open.clear(); return reconstruct(came, cur, tx, tz); }
+          if (cur === goalI) { search.pops = n; open.clear(); return reconstruct(came, cur, tx, tz, sx0, sz0); }
           if (closed[cur] === gen) continue;
           closed[cur] = gen;
           const ccx = cur % cols, ccz = (cur - ccx) / cols;
@@ -464,12 +464,25 @@ export function createNavGrid({
     }
   }
 
-  function reconstruct(came, endI, tx, tz) {
+  // Path ANCHORS (setPathAnchors): points a path must pass through, marked
+  // `anchor: true` — bridgeDecks.js rewrites a crossing to go end to end along
+  // the deck. The string-pull runs BETWEEN anchors, never across one (it would
+  // happily cut the corner past a bridge end, back onto the bank beside it).
+  let pathAnchors = null;
+  function reconstruct(came, endI, tx, tz, sx, sz) {
     const cells = [];
     for (let i = endI; i !== -1; i = came[i]) cells.push(i);   // the start's came is -1
     cells.reverse();
-    const pts = cells.map((ci) => { const cx = ci % cols; return cellToWorld(cx, (ci - cx) / cols); });
-    const pulled = stringPull(pts);
+    let pts = cells.map((ci) => { const cx = ci % cols; return cellToWorld(cx, (ci - cx) / cols); });
+    if (pathAnchors) pts = pathAnchors(pts, sx, sz, tx, tz) ?? pts;
+    const pulled = [];
+    for (let a = 0; a < pts.length;) {
+      let b = a + 1;
+      while (b < pts.length && !pts[b].anchor) b++;
+      const piece = stringPull(pts.slice(a, Math.min(b + 1, pts.length)));
+      for (const p of piece) if (pulled[pulled.length - 1] !== p) pulled.push(p);
+      a = b;
+    }
     // Finish exactly on the click ONLY if it's walkable. If you clicked into a
     // lake/obstacle, end on the last reachable cell (the shore) instead of
     // driving straight into the water to reach the raw click point.
@@ -587,6 +600,8 @@ export function createNavGrid({
   return {
     cell, cols, rows,
     findPath,
+    /** fn(cellPoints, sx, sz, tx, tz) -> points, some marked {anchor: true} (see reconstruct). */
+    setPathAnchors(fn) { pathAnchors = fn; },
     requestPath,
     pumpPaths,
     /** Searches waiting or under way (dev readout). */
