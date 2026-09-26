@@ -175,10 +175,11 @@ export function createPlacedObjects(app) {
 
   /**
    * LEVEL EVERY PAD AGAIN, footprint only (no rim, so no neighbour is
-   * touched), at the height it was cut to. Run once at the end of the boot:
-   * a pad could still be lost to a terrain rewrite racing its upload (the
-   * river re-conform — see riverV2System.markExternalEdit), and one sunken
-   * house is one too many. Idempotent; a pad that held changes nothing.
+   * touched), at the height it was cut to. Run once at the end of the boot.
+   * Since the engine's height stack (v3/terrain/heightLayers.js) a pad is a
+   * stamp above the river and cannot be lost to a re-conform any more, so this
+   * is a belt-and-braces pass: the same call replaces its own stamp.
+   * Idempotent; a pad that held changes nothing.
    */
   async function reassertPads() {
     let n = 0;

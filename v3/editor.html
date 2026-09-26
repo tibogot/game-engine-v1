@@ -49,6 +49,9 @@
           <button class="toolbar-btn" data-mode="riverv2" title="River v2 (H)">
             <i data-lucide="waypoints"></i>
           </button>
+          <button class="toolbar-btn" data-mode="riverv3" title="River v3 — network (beta)">
+            <i data-lucide="git-fork"></i>
+          </button>
           <button class="toolbar-btn" data-mode="tunnel" title="Tunnel (O)">
             <i data-lucide="rainbow"></i>
           </button>
@@ -155,6 +158,7 @@
               <option value="props">Props (I)</option>
               <option value="spline">Spline (K)</option>
               <option value="riverv2">River v2 (H)</option>
+              <option value="riverv3">River v3 — network (beta)</option>
               <option value="tunnel">Tunnel (O)</option>
               <option value="lake">Lake (L)</option>
               <option value="decals">Decals (C)</option>
@@ -2383,6 +2387,8 @@
         <!-- RIVER panels -->
         <!-- RIVER v2 panel — built dynamically by buildRiverV2Panel() -->
         <div id="riverv2-panel" style="display:none"></div>
+        <!-- RIVER v3 (network) panel — built by buildRiverV3Panel() -->
+        <div id="riverv3-panel" style="display:none"></div>
         <div id="tunnel-panel" style="display:none"></div>
 
         <!-- LAKE panel — built dynamically by buildLakePanel() -->

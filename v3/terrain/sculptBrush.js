@@ -1099,6 +1099,44 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     tex.dispose();
   }
 
+  /*
+   * Put ONE texel rect of a CPU height array on the GPU — no undo entry.
+   *
+   * For the height layer stack (heightLayers.js): the CPU composes GROUND,
+   * RIVER and STAMPS and owns the result, so the GPU only ever needs the rect
+   * that changed. replaceHeightData above uploads the whole map AND snapshots
+   * it for undo; per frame of a river drag that was a 16 MB render-target copy
+   * every frame. Edits that own their own history (the river's undo, a game's
+   * pads, which are regenerated) come through here instead.
+   *
+   * Its own texture node and quad, not copyQuad's: swapping one node between a
+   * render target and a nearest-filtered float texture would rebuild the
+   * pipeline on a hot path. The texture wraps the caller's array directly, so
+   * an upload is a needsUpdate and one scissored draw.
+   */
+  let _upTex = null, _upQuad = null;
+  function uploadHeightRect(heights, rect) {
+    if (!_upTex || _upTex.image.data !== heights) {
+      _upTex?.dispose();
+      _upTex = new THREE.DataTexture(heights, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE, THREE.RedFormat, THREE.FloatType);
+      _upTex.minFilter = _upTex.magFilter = THREE.NearestFilter;
+      _upTex.flipY = false;
+      if (!_upQuad) {
+        const upNode = texture(_upTex);
+        const m = new THREE.MeshBasicNodeMaterial();
+        m.fragmentNode = Fn(() => vec4(texture(upNode, uv()).r, float(0), float(0), float(1)))();
+        _upQuad = new QuadMesh(m);
+        _upQuad._node = upNode;
+      } else {
+        _upQuad._node.value = _upTex;
+      }
+    }
+    _upTex.needsUpdate = true;
+    const r = rect ? _clampRect(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h) : null;
+    if (rect && !r) return;
+    _render(_upQuad, rtMain, r);
+  }
+
   // ── Initial upload ────────────────────────────────────────────────────────
   {
     const initNode  = texture(initialDataTex);
@@ -1136,6 +1174,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     undo,
     redo,
     replaceHeightData,
+    uploadHeightRect,
     runGeneratorPass,
     maskNode,
     uMaskRotation,

@@ -21,15 +21,20 @@
  *  - The bed returns to exactly the water level at ±width/2, so the drawn
  *    waterline lands on the channel rim with no gap to tune.
  *
- * Non-destructive, like the road conform: the unconformed terrain is kept and
- * every re-conform restores from it before rewriting, so dragging a node moves
- * the channel instead of stacking a new one on top of the last.
+ * THE RIVER IS A LAYER (2026-09-26). It used to keep its own copy of the
+ * unconformed ground and rewrite the WHOLE heightmap from it on every conform,
+ * which meant every other height edit had to be folded into that copy to
+ * survive — and the ones that were not (building pads, paddies, berms) were
+ * erased. Now the terrain is a stack, FINAL = STAMPS(RIVER(GROUND))
+ * (v3/terrain/heightLayers.js), and the river is only the middle term: it
+ * reads GROUND, shapes its own footprint (riverV2Terrain.js, the CPU twin of
+ * the GPU conform below, checked texel for texel), and owns nothing else.
+ * Dragging a node still moves the channel rather than stacking a new one,
+ * because the operator is re-evaluated from GROUND every time.
  *
- * The base is held on the CPU (`_cpuBase`) and pushed to the GPU as a texture
- * only when it actually changes — mode entry, an external sculpt, a project
- * load. The alternative, reading the base back off a render target, costs a
- * 16 MB transfer every time and buys nothing: the same numbers are already in
- * the CPU heightmap mirror when the snapshot is taken.
+ * The GPU nearest-segment search is kept: its field feeds the bank sand, the
+ * flower tint and "grows near water" (nearTexture). It no longer writes the
+ * terrain.
  */
 
 import * as THREE from "three";
@@ -47,6 +52,7 @@ import {
   buildFlowIndex, sampleFlow, sampleFlowAt,
 } from "./riverV2Channel.js";
 import { shareInstancePipeline } from "../render/instancePipeline.js";
+import { buildRiverTerrainOp, riverDirtyRect, snapshotRiverPath } from "./riverV2Terrain.js";
 
 /** Path-texture width. Matches the solver's station ceiling, so no river is split. */
 const MAX_PATH_POINTS = 2048;
@@ -108,8 +114,11 @@ function sampleNormalized(map, wx, wz) {
  * already covers everything within `reach` of them, and any texel whose true
  * nearest segment lies elsewhere is inside THAT chunk's rect too.
  *
- * Stage two runs once, full screen, and turns the winning segment into a
- * height by evaluating the cross-section against the untouched base terrain.
+ * Stage two turns the winning segment into a height by evaluating the
+ * cross-section against the ground under it. It used to be a full-screen GPU
+ * pass; it is now riverV2Terrain.js on the CPU (the RIVER layer of the height
+ * stack), which runs the same search itself. This field remains for the
+ * shaders that want "how far to the nearest river" (bank sand, flowers).
  *
  * The obvious design — have each chunk write the terrain directly — is what
  * shipped twice and was visibly wrong twice: it makes a pass's answer depend on
@@ -161,45 +170,30 @@ function nearestSearch(uvC, pathTex, prev, uSegStart, uSegEnd) {
   return vec4(bestD2, bestIdx, bestT, float(1));
 }
 
-/** Channel parameters of the winning segment, from the shared path texture. */
-function channelAt(pathTex, idx, t) {
-  const W = float(MAX_PATH_POINTS);
-  const uA = idx.add(0.5).div(W);
-  const uB = idx.add(1.5).div(W);
-  const a0 = texture(pathTex, vec2(uA, 0.25));
-  const b0 = texture(pathTex, vec2(uB, 0.25));
-  const a1 = texture(pathTex, vec2(uA, 0.75));   // (depth, bank, -, -)
-  const b1 = texture(pathTex, vec2(uB, 0.75));
-  return {
-    level: mix(a0.z, b0.z, t),
-    halfW: mix(a0.w, b0.w, t),
-    depth: mix(a1.x, b1.x, t),
-    bank: mix(a1.y, b1.y, t),
-  };
-}
-
 export class RiverV2System {
   /**
    * @param {object} deps
    * @param {THREE.Scene}   deps.scene
    * @param {object}        deps.toolState        object carrying a `.riverV2` slice
    * @param {THREE.WebGPURenderer} deps.renderer
-   * @param {function}      deps.getRT            () => the live heightmap RenderTarget
-   * @param {Float32Array}  deps.cpuHeightmap     normalized CPU mirror of that RT
+   * @param {object}        deps.heightLayers     the terrain stack (heightLayers.js);
+   *   the river reads its GROUND and is its RIVER layer
+   * @param {Float32Array}  [deps.cpuHeightmap]   normalized height mirror, read
+   *   only when there is no layer stack (headless use)
    * @param {THREE.Texture} deps.waterNormalMap
    * @param {function}      [deps.getCamera]      for constant-size handles
    * @param {function}      [deps.onConformCommitted] terrain changed; push to dependents
    * @param {function}      [deps.onWaterMeshesChanged] ribbons rebuilt; rebake water map
    */
   constructor({
-    scene, toolState, renderer, getRT, cpuHeightmap, waterNormalMap,
+    scene, toolState, renderer, heightLayers = null, cpuHeightmap = null, waterNormalMap,
     getCamera = null, onConformCommitted = null, onWaterMeshesChanged = null,
     onRiverFieldChanged = null,
   }) {
     this.scene = scene;
     this.toolState = toolState;
     this.renderer = renderer;
-    this.getRT = getRT;
+    this.layers = heightLayers;
     this.cpuHeightmap = cpuHeightmap;
     this.getCamera = getCamera;
     this.onConformCommitted = onConformCommitted;
@@ -247,14 +241,6 @@ export class RiverV2System {
      */
     this._openMouths = new Map();
 
-    // ── Terrain base, held on the CPU ───────────────────────────────────────
-    this._cpuBase = null;                       // normalized, unconformed
-    this._coverage = null;                      // Uint8Array, 1 where a river wrote
-    this._baseTexData = null;
-    this._baseTex = null;
-    this._rebaseTimer = 0;
-    this._externalPending = false;
-
     this._initPasses();
     // The field starts as whatever was in VRAM; clear it before anything can
     // read it, or a distance of 0 would read as "river everywhere".
@@ -270,9 +256,8 @@ export class RiverV2System {
   _initPasses() {
     const size = HEIGHTMAP_SIZE;
 
-    // Read source for the conform pass. It holds a copy of the height RT, so it
-    // uses the SAME precision rule sculptBrush picked for that RT — anything
-    // else either loses height precision or claims some the source never had.
+    // The nearest field is float where the device can filter float, as every
+    // height surface in this engine is.
     const type = this.renderer?.backend?.device?.features?.has("float32-filterable")
       ? THREE.FloatType : THREE.HalfFloatType;
     const makeRT = () => {
@@ -284,25 +269,12 @@ export class RiverV2System {
       rt.texture.flipY = false;
       return rt;
     };
-    this._rtScratch = makeRT();
-
-    // The unconformed terrain, mirrored on the CPU and uploaded when it changes.
-    // Allocated up front because the resolve pass samples it, and that pass is
-    // built here. RGBA rather than Red even though only R is used: it is the
-    // format every other height surface in this engine uses.
-    this._baseTexData = new Float32Array(size * size * 4);
-    this._baseTex = new THREE.DataTexture(
-      this._baseTexData, size, size, THREE.RGBAFormat, THREE.FloatType,
-    );
-    this._baseTex.minFilter = THREE.NearestFilter;
-    this._baseTex.magFilter = THREE.NearestFilter;
-    this._baseTex.flipY = false;
-    this._baseSrc = texture(this._baseTex);
 
     // Path texture: two rows per river.
     //   row 0 — (u, v, level, halfWidth)     positions in UV, level normalized
     //   row 1 — (depth, bank, mouthU, mouthV) depth normalized, bank in UV; the
     //           open mouth's UV on every point, mouthU = -1 when closed
+    // The CPU terrain operator (riverV2Terrain.js) reads the same array.
     this._pathData = new Float32Array(MAX_PATH_POINTS * 2 * 4);
     this._pathTex = new THREE.DataTexture(
       this._pathData, MAX_PATH_POINTS, 2, THREE.RGBAFormat, THREE.FloatType,
@@ -310,17 +282,6 @@ export class RiverV2System {
     this._pathTex.minFilter = THREE.NearestFilter;
     this._pathTex.magFilter = THREE.NearestFilter;
     this._pathTex.needsUpdate = true;
-
-    // ── Copy pass ──────────────────────────────────────────────────────────
-    // Preserves G and B: the removed River+ carve tool tagged carved texels in G,
-    // and blitting zeroes over it would silently break its rebase.
-    this._copySrc = texture(this._pathTex);
-    const copyMat = new MeshBasicNodeMaterial();
-    copyMat.fragmentNode = Fn(() => {
-      const s = texture(this._copySrc, uv());
-      return vec4(s.r, s.g, s.b, float(1));
-    })();
-    this._copyQuad = new QuadMesh(copyMat);
 
     // The nearest-RT ping-pong gets its own node: swapping one texture node
     // between differently-filtered sources asks the backend to rebuild the
@@ -333,21 +294,14 @@ export class RiverV2System {
     })();
     this._nearCopyQuad = new QuadMesh(nearCopyMat);
 
-    // ── Nearest-segment search + resolve (see the note above the builders) ──
+    // ── Nearest-segment search (see the note above nearestSearch) ──────────
     this._uSegStart = uniform(0);
     this._uSegEnd = uniform(0);
-    this._uBedCurve = uniform(0.55);
-    this._uFreeboardN = uniform(0.001);   // normalized height
-    this._uLipFrac = uniform(0.28);
-    /** Converts a normalized height difference into the UV run it needs at
-     *  `maxBankSlope`. = MAX_HEIGHT / (slope * WORLD_SIZE). */
-    this._uSlopeToUv = uniform(1);
-    this._uFlareMax = uniform(4);
 
     const pathTex = this._pathTex;
 
-    // Per-texel winner so far: (distance2, path index, t). Ping-ponged through
-    // a scratch the same way the height passes used to be.
+    // Per-texel winner so far: (distance2, path index, t), ping-ponged through
+    // a scratch.
     this._rtNear = makeRT();
     this._rtNearScratch = makeRT();
 
@@ -362,52 +316,8 @@ export class RiverV2System {
       return nearestSearch(uvC, pathTex, prev, this._uSegStart, this._uSegEnd);
     })();
     this._nearQuad = new QuadMesh(nearMat);
-
-    const resolveMat = new MeshBasicNodeMaterial();
-    resolveMat.fragmentNode = Fn(() => {
-      const uvC = uv();
-      const near = texture(this._rtNear.texture, uvC);
-      // The cross-section is evaluated against the UNTOUCHED base, so a resolve
-      // is a restore and an apply in one — and is idempotent.
-      const natural = texture(this._baseSrc, uvC).r.toVar();
-      const keep = texture(this._rtScratch.texture, uvC);   // River+'s G/B flags
-
-      const dist = sqrt(near.r);
-      const ch = channelAt(pathTex, near.g, near.b);
-
-      // ── Channel: bed falls from the rim to `depth` at the centreline ──────
-      // Both shapes return to 0 at u = 1, i.e. the bed meets the water level
-      // exactly at ±width/2. That is what makes the waterline land on the mesh
-      // edge with nothing to tune.
-      const uCh = clamp(dist.div(max(ch.halfW, float(1e-6))), float(0), float(1));
-      const flat = float(1).sub(pow(uCh, float(8)));   // flat-bottomed canal
-      const para = float(1).sub(uCh.mul(uCh));         // parabolic natural channel
-      const bedShape = mix(flat, para, this._uBedCurve);
-      const tChannel = ch.level.sub(ch.depth.mul(bedShape));
-
-      // ── Bank: waterline → lip → natural ground ───────────────────────────
-      // The lip stands `freeboard` above the water and is what actually holds
-      // the river in when the surrounding ground is lower than the surface.
-      const rim = ch.level.add(this._uFreeboardN);
-      // Widen the shoulder until its slope is acceptable, so a tall embankment
-      // or a deep gorge wall ramps instead of standing vertical.
-      const need = abs(natural.sub(rim)).mul(this._uSlopeToUv);
-      const flare = clamp(need, ch.bank, ch.bank.mul(this._uFlareMax));
-      const uB = clamp(dist.sub(ch.halfW).div(max(flare, float(1e-6))), float(0), float(1));
-      const aRise = smoothstep(float(0), this._uLipFrac, uB);
-      const bEase = smoothstep(this._uLipFrac, float(1), uB);
-      const tBank = mix(mix(ch.level, rim, aRise), natural, bEase);
-
-      const inChannel = step(dist, ch.halfW);
-      const shaped = mix(tBank, tChannel, inChannel);
-      // Where no river was ever found the search left distance at 1e9, and the
-      // bank branch has already eased all the way back to natural — but pin it
-      // exactly so an empty world is bit-identical to its base.
-      const target = mix(shaped, natural, step(float(1e8), near.r));
-
-      return vec4(target, keep.g, keep.b, float(1));
-    })();
-    this._resolveQuad = new QuadMesh(resolveMat);
+    // The cross-section that turns the winner into terrain is on the CPU now —
+    // riverV2Terrain.js, the RIVER layer of heightLayers.js.
   }
 
   /** Scissored quad render into an RT (same contract as sculptBrush). */
@@ -426,11 +336,6 @@ export class RiverV2System {
     renderer.autoClear = prevAutoClear;
   }
 
-  _blit(srcTexture, dstRT, rect = null) {
-    this._copySrc.value = srcTexture;
-    this._render(this._copyQuad, dstRT, rect);
-  }
-
   _clampRect(x0, y0, x1, y1) {
     const S = HEIGHTMAP_SIZE;
     x0 = Math.max(0, Math.min(S, Math.floor(x0)));
@@ -441,163 +346,33 @@ export class RiverV2System {
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Terrain base
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  get hasBase() { return this._cpuBase !== null; }
-
-  /**
-   * An external edit that must hold INSIDE the river's footprint too — a bridge
-   * landing graded to its deck. Everything else folds into the base only
-   * outside the footprint (_rebaseNow), so inside it the next re-conform put the
-   * pre-river bank straight back. `apply(base)` edits the normalized base in
-   * place; the channel is then re-conformed against it. False with no river.
-   */
-  editBase(apply) {
-    if (!this._cpuBase) return false;
-    this._foldExternal();
-    apply(this._cpuBase);
-    this._uploadBase();
-    this.applyConform({ commit: true });
-    return true;
-  }
-
-  /** Does the river's footprint touch this texel rect (inclusive)? */
-  coversRect(tx0, ty0, tx1, ty1) {
-    const cov = this._coverage;
-    if (!this._cpuBase || !cov) return false;
-    for (let y = Math.max(0, ty0); y <= Math.min(HEIGHTMAP_SIZE - 1, ty1); y++) {
-      for (let x = Math.max(0, tx0); x <= Math.min(HEIGHTMAP_SIZE - 1, tx1); x++) {
-        if (cov[y * HEIGHTMAP_SIZE + x] !== 0) return true;
-      }
-    }
-    return false;
-  }
-
-  /** Snapshot the CURRENT terrain as the unconformed base. The caller must have
-   *  refreshed the CPU mirror first (main.js awaits ensureCpuHeightmapFromGpu). */
-  _ensureBase() {
-    if (this._cpuBase) return;
-    this._cpuBase = Float32Array.from(this.cpuHeightmap);
-    this._uploadBase();
-  }
-
-  /**
-   * Push `_cpuBase` to the GPU.
-   *
-   * The base gets its OWN texture node and quad rather than reusing the general
-   * copy pass. That pass's node is bound to the height RT, which is linearly
-   * filtered; this texture is float and nearest-filtered, and swapping one node
-   * between the two sampler types every restore is asking the backend to
-   * rebuild the pipeline on a hot path — or, without float32-filterable, to
-   * build an invalid one.
-   *
-   * RGBA rather than Red, even though only R is read: it is the format every
-   * other height surface in this engine uses, and the 12 MB saved is not worth
-   * being the one place that does something different.
-   */
-  /**
-   * Push `_cpuBase` to the GPU. The texture itself is allocated in _initPasses
-   * because the resolve pass samples it.
-   */
-  _uploadBase() {
-    const n = HEIGHTMAP_SIZE * HEIGHTMAP_SIZE;
-    const d = this._baseTexData;
-    const b = this._cpuBase;
-    for (let i = 0; i < n; i++) d[i * 4] = b[i];
-    this._baseTex.needsUpdate = true;
-  }
-
   /** Blit the nearest-search RT into its own ping-pong scratch. */
   _blitNear(rect = null) {
     this._nearCopySrc.value = this._rtNear.texture;
     this._render(this._nearCopyQuad, this._rtNearScratch, rect);
   }
 
-  /**
-   * Turn the current nearest-segment field into terrain. One full-screen pass,
-   * evaluated against the untouched base — so it is a restore and an apply at
-   * once, and running it twice changes nothing.
-   */
-  _resolve() {
-    const rtMain = this.getRT();
-    // The pass carries River+'s G/B flags through, and reads them from scratch,
-    // so scratch has to hold the current heightmap first.
-    this._blit(rtMain.texture, this._rtScratch);
-    this._render(this._resolveQuad, rtMain, null);
-  }
-
-  /** Restore the whole terrain to its unconformed state: resolve with nothing
-   *  found, which the cross-section defines as "leave the base alone". */
-  _restoreBase() {
-    if (!this._cpuBase) return;
-    this._render(this._clearNearQuad, this._rtNear, null);
-    this._resolve();
-  }
-
-  _dropBase() {
-    this._externalPending = false;
-    this._cpuBase = null;
-    this._coverage = null;
-  }
-
   /** Drop the flow lookup when the last river goes, so a query cannot answer
    *  from a river that no longer exists. */
   _dropFlowIndex() { this._flowIndex = null; }
 
-  /**
-   * An edit the CPU mirror ALREADY holds (a game's flattenRect / remapHeights,
-   * uploaded from the mirror): fold it into the base before the NEXT resolve,
-   * whatever triggers that. Waiting for the debounced rebase lost it: a resolve
-   * in between (a bridge landing's editBase, a mouth opening) rewrote the whole
-   * terrain from a base without it — most of nam-rts's building pads were bare
-   * slopes that way (2026-09-25). Not for GPU-side edits (sculpt strokes): the
-   * mirror lags those until a readback, so they keep notifyTerrainEdited.
-   */
-  markExternalEdit() {
-    if (this._cpuBase) this._externalPending = true;
-  }
-
-  /** Fold a pending mirror-side edit into the base (outside the footprint). */
-  _foldExternal() {
-    if (!this._externalPending || !this._cpuBase) return;
-    this._externalPending = false;
-    const cov = this._coverage;
-    const n = this._cpuBase.length;
-    for (let i = 0; i < n; i++) {
-      if (!cov || cov[i] === 0) this._cpuBase[i] = this.cpuHeightmap[i];
-    }
-    this._uploadBase();
-  }
-
-  /** Terrain was edited by something else (sculpt, procedural gen, load). */
-  notifyTerrainEdited() {
-    if (!this._cpuBase) return;
-    clearTimeout(this._rebaseTimer);
-    this._rebaseTimer = setTimeout(() => this._rebaseNow(), 60);
-  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Ground (the layer under the river)
+  // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Fold external edits into the base — but only OUTSIDE the river footprint.
-   * Inside it, the base must keep the pre-river ground or the channel would
-   * re-conform against its own output and dig itself deeper every stroke.
+   * Ground height in metres BEFORE the river shapes it — GROUND of the height
+   * stack, so pads and bridge landings (stamps, above the river) never move a
+   * river's AUTO level. The solver's view of the world, and the waterfall's
+   * brink march.
    */
-  _rebaseNow() {
-    if (!this._cpuBase) return;
-    const cov = this._coverage;
-    const n = this._cpuBase.length;
-    for (let i = 0; i < n; i++) {
-      if (!cov || cov[i] === 0) this._cpuBase[i] = this.cpuHeightmap[i];
-    }
-    this._uploadBase();
-    this.applyConform({ commit: true });
-  }
-
-  /** Unconformed ground height in metres. The solver's view of the world. */
   sampleBase(wx, wz) {
-    const map = this._cpuBase || this.cpuHeightmap;
-    return sampleNormalized(map, wx, wz);
+    if (this.layers) {
+      const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
+      const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
+      return this.layers.sampleGroundNormalized(u, v) * MAX_HEIGHT;
+    }
+    return this.cpuHeightmap ? sampleNormalized(this.cpuHeightmap, wx, wz) : 0;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -743,14 +518,18 @@ export class RiverV2System {
     return layout;
   }
 
-  _syncConformUniforms() {
+  /** The cross-section constants, as the CPU operator takes them. */
+  _conformParams() {
     const p = this.params;
-    this._uBedCurve.value = p.bedCurve ?? 0.55;
-    this._uFreeboardN.value = (p.freeboard ?? 0.6) / MAX_HEIGHT;
-    this._uLipFrac.value = Math.min(0.9, Math.max(0.02, p.lipFraction ?? 0.28));
     const slope = Math.max(0.02, p.maxBankSlope ?? 0.9);
-    this._uSlopeToUv.value = MAX_HEIGHT / (slope * WORLD_SIZE);
-    this._uFlareMax.value = Math.max(1, p.bankFlareMax ?? 4);
+    return {
+      bedCurve: p.bedCurve ?? 0.55,
+      freeboardN: (p.freeboard ?? 0.6) / MAX_HEIGHT,
+      lipFrac: Math.min(0.9, Math.max(0.02, p.lipFraction ?? 0.28)),
+      /** normalized height difference → the UV run it needs at maxBankSlope */
+      slopeToUv: MAX_HEIGHT / (slope * WORLD_SIZE),
+      flareMax: Math.max(1, p.bankFlareMax ?? 4),
+    };
   }
 
   /**
@@ -795,91 +574,54 @@ export class RiverV2System {
   }
 
   /**
-   * Conservative CPU footprint, for the rebase merge. Discs at each station of
-   * the maximum possible reach: stations are closer together than the smallest
-   * reach, so the discs overlap and cover the whole corridor. Over-covering by
-   * a texel or two only means slightly more ground is protected from external
-   * sculpting than strictly necessary.
-   */
-  _rebuildCoverage() {
-    const S = HEIGHTMAP_SIZE;
-    if (!this._coverage) this._coverage = new Uint8Array(S * S);
-    else this._coverage.fill(0);
-    const cov = this._coverage;
-    const half = WORLD_SIZE * 0.5;
-    const perTexel = WORLD_SIZE / (S - 1);
-
-    for (const r of this.rivers) {
-      const s = r.solved;
-      if (!s) continue;
-      for (let i = 0; i < s.count; i++) {
-        const reach = this._reachAt(s, i);
-        const rt = reach / perTexel;
-        const cx = ((s.x[i] + half) / WORLD_SIZE) * (S - 1);
-        const cz = ((s.z[i] + half) / WORLD_SIZE) * (S - 1);
-        const x0 = Math.max(0, Math.floor(cx - rt));
-        const x1 = Math.min(S - 1, Math.ceil(cx + rt));
-        const z0 = Math.max(0, Math.floor(cz - rt));
-        const z1 = Math.min(S - 1, Math.ceil(cz + rt));
-        const r2 = rt * rt;
-        for (let iz = z0; iz <= z1; iz++) {
-          const dz = iz - cz;
-          const row = iz * S;
-          for (let ix = x0; ix <= x1; ix++) {
-            const dx = ix - cx;
-            if (dx * dx + dz * dz <= r2) cov[row + ix] = 1;
-          }
-        }
-      }
-    }
-  }
-
-  /**
-   * Full re-conform: restore the base, then rewrite every river's cross-section.
+   * Re-conform: solve every river, refresh the GPU nearest field (bank sand,
+   * flowers), and hand the height stack a new RIVER operator. The stack
+   * recomposes the old and new footprints only; the rest of the terrain is
+   * never touched, so nothing outside the river can be lost by it.
    *
    * @param {object}  [opts]
    * @param {boolean} [opts.rebuild=true] also rebuild ribbons, handles, arrows
-   * @param {boolean} [opts.commit=true]  refresh the CPU mirror and dependent
-   *   systems (grass, trees, collision). Call with commit on mouse-up, not per
-   *   frame of a drag.
+   * @param {boolean} [opts.commit=true]  tell dependent systems (grass, trees,
+   *   collision, nav) the terrain settled. On mouse-up, not per frame of a drag.
    */
   applyConform({ rebuild = true, commit = true } = {}) {
-    this._foldExternal();
     if (!this._solvable()) {
-      if (this._cpuBase) {
-        this._restoreBase();
-        this._dropBase();
-        if (commit) this.onConformCommitted?.();
-      }
+      this._lastPath = null;
+      if (this.layers?.river) this.layers.setRiver(null);
       // Clear the field too, or the bank sand would outlive the last river.
       this._render(this._clearNearQuad, this._rtNear, null);
       this._dropFlowIndex();
       this.onRiverFieldChanged?.(false);
       if (rebuild) this._rebuildVisual();
+      if (commit) this.onConformCommitted?.();
       return;
     }
 
-    this._ensureBase();
     this._solveAll();
-    this._syncConformUniforms();
 
-    // Search every river into the shared nearest-segment field, then resolve it
-    // to terrain once. The resolve reads the untouched base, so there is no
-    // separate restore step and re-running it is a no-op.
+    // Every river into the shared path texture and nearest-segment field.
     const layout = this._uploadAllPaths();
     this._render(this._clearNearQuad, this._rtNear, null);
     for (const entry of layout) this._searchRiver(entry);
-    this._resolve();
+
+    // The terrain: the same path data, shaped on the CPU as the RIVER layer.
+    // Only where the new operator can differ from the last one is recomposed —
+    // a node drag reshapes the ground around that node, not the whole river.
+    if (this.layers) {
+      const src = { pathData: this._pathData, rowStride: MAX_PATH_POINTS * 4, layout };
+      const op = buildRiverTerrainOp({ ...src, size: HEIGHTMAP_SIZE, u: this._conformParams() });
+      const snap = op ? snapshotRiverPath(src, op.maxReach) : null;
+      const sameShape = this._lastPath && snap && this._lastPath.params === JSON.stringify(this._conformParams());
+      const dirty = sameShape && this.layers.river ? riverDirtyRect(this._lastPath, snap, HEIGHTMAP_SIZE) : null;
+      if (snap) snap.params = JSON.stringify(this._conformParams());
+      this._lastPath = snap;
+      this.layers.setRiver(op, dirty);
+    }
 
     this.onRiverFieldChanged?.(true);
 
     if (rebuild) this._rebuildVisual();
-    if (commit) {
-      // Only the rebase reads the footprint, and a rebase cannot happen while a
-      // handle is being dragged — so this stays out of the per-mousemove path.
-      this._rebuildCoverage();
-      this.onConformCommitted?.();
-    }
+    if (commit) this.onConformCommitted?.();
   }
 
   /** Panel hook — a conform-affecting parameter changed. */
@@ -1960,12 +1702,6 @@ export class RiverV2System {
     };
   }
 
-  /** The terrain as it was before any river touched it. Saved with the project
-   *  so a reload re-conforms rather than conforming an already-conformed world. */
-  exportBaseHeightmap() {
-    return this._cpuBase ? Float32Array.from(this._cpuBase) : null;
-  }
-
   importData(data) {
     for (const r of this.rivers) {
       if (r.mesh) { this.group.remove(r.mesh); r.mesh.geometry.dispose(); }
@@ -2007,13 +1743,6 @@ export class RiverV2System {
     this.syncMaterial();
     this.applyConform({ commit: true });
     this.syncSelectionToState();
-  }
-
-  /** Called before a project's heightmap is swapped in, so the loaded terrain is
-   *  never folded into the previous scene's base. */
-  resetForLoad() {
-    clearTimeout(this._rebaseTimer);
-    this._dropBase();
   }
 }
 

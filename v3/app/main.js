@@ -8,6 +8,7 @@ import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.j
 import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "../terrain/terrainLOD.js";
 import { GRID_DEFAULTS, applyGridConfig, createGridMaterial } from "../render/materials/gridMaterial.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
+import { createHeightLayers } from "../terrain/heightLayers.js";
 import {
   encodeHeightmapFile,
   decodeHeightmapFile,
@@ -153,6 +154,9 @@ import { buildFoliagePanel } from "../ui/buildFoliagePanel.js";
 import { buildAmbientFxPanel } from "../ui/buildAmbientFxPanel.js";
 import { buildRiverV2Panel } from "../ui/buildRiverV2Panel.js";
 import { RiverV2System } from "../tools/riverV2System.js";
+import { RiverV3System } from "../tools/riverV3/riverV3System.js";
+import { createRiverV3ToolState } from "./state/riverV3State.js";
+import { buildRiverV3Panel } from "../ui/buildRiverV3Panel.js";
 import { TunnelSystem, createTunnelToolState } from "../tools/tunnelSystem.js";
 import { createSnapshotHistory } from "../tools/snapshotHistory.js";
 import { TUNNEL_DEFAULTS, CAVE_DEFAULTS } from "../tools/tunnelPath.js";
@@ -772,6 +776,7 @@ export async function startV3App(opts = {}) {
   const propsPanel     = uiById("props-panel");
   const splinePanel    = uiById("spline-panel");
   const riverV2Panel   = uiById("riverv2-panel");
+  const riverV3Panel   = uiById("riverv3-panel");
   const tunnelPanel    = uiById("tunnel-panel");
   const lakePanel      = uiById("lake-panel");
   const roadPanel      = uiById("road-panel");
@@ -3106,6 +3111,12 @@ export async function startV3App(opts = {}) {
   const riverV2Slice = createRiverV2ToolState();
   let riverV2System = null;
   let riverV2Ui = null;
+  // River v3 — a river NETWORK (reaches + junctions), built beside v2. Its
+  // water LOOK is v2's own settings object, so the two always look the same.
+  const riverV3Slice = createRiverV3ToolState();
+  riverV3Slice.riverV3.water = riverV2Slice.riverV2.water;
+  let riverV3System = null;
+  let riverV3Ui = null;
   // Tunnels (O): walkable tubes that open the terrain where they pass through it.
   const tunnelToolSlice = createTunnelToolState();
   let tunnelSystem = null;
@@ -3226,6 +3237,7 @@ export async function startV3App(opts = {}) {
 
   function syncRiverV2PanelVisibility() {
     riverV2Panel.style.display = (editorMode === "riverv2" && !playMode.active) ? "" : "none";
+    if (riverV3Panel) riverV3Panel.style.display = (editorMode === "riverv3" && !playMode.active) ? "" : "none";
   }
 
   function syncTunnelPanelVisibility() {
@@ -3269,6 +3281,7 @@ export async function startV3App(opts = {}) {
 
   function applyRiverModeEffects() {
     riverV2System?.setEditActive(editorMode === "riverv2" && !playMode.active);
+    riverV3System?.setEditActive(editorMode === "riverv3" && !playMode.active);
     tunnelSystem?.setEditActive(editorMode === "tunnel" && !playMode.active);
   }
 
@@ -3289,6 +3302,7 @@ export async function startV3App(opts = {}) {
     if (editorMode === "spline" && m !== "spline") _onLeaveSplineMode();
     if (m !== "sculpt") { _regionHideSafe(); _cloneHideSafe(); }   // Sculpt-only overlays
     if (editorMode === "riverv2" && m !== "riverv2") riverV2System?.cancelDrag();
+    if (editorMode === "riverv3" && m !== "riverv3") riverV3System?.cancelDrag();
     if (editorMode === "lake" && m !== "lake") lakeSystem?.cancelDrag();
     if (editorMode === "road" && m !== "road") _onLeaveRoadMode();
     // Finish a pending lane-road grade before another tool edits the terrain.
@@ -3366,11 +3380,12 @@ export async function startV3App(opts = {}) {
       // Falls are solved against the CPU height mirror: freshen it, then re-solve.
       void ensureCpuHeightmapFromGpu().then(() => { waterfallSystem?.markDirty(); waterfallUi?.rebuild(); });
     } else if (m === "props" || m === "spline"
-      || m === "riverv2" || m === "road" || m === "lake" || m === "tunnel" || m === "laneRoad") {
+      || m === "riverv2" || m === "riverv3" || m === "road" || m === "lake" || m === "tunnel" || m === "laneRoad") {
       uCursorUV.value.set(-2, -2);
       // River v2 snapshots the unconformed terrain from the CPU mirror, so the
       // mirror has to be fresh before the first conform of the session.
       if (m === "riverv2") void ensureCpuHeightmapFromGpu().then(() => riverV2Ui?.refresh());
+      if (m === "riverv3") void ensureCpuHeightmapFromGpu().then(() => riverV3Ui?.refresh());
       // A tunnel's floor height comes from the ground under the click.
       if (m === "tunnel") void ensureCpuHeightmapFromGpu().then(() => tunnelUi?.refresh());
       // Lake creation reads terrain height at the click to pick a water level.
@@ -3453,6 +3468,7 @@ export async function startV3App(opts = {}) {
     propsPanel.style.display = "none";
     splinePanel.style.display = "none";
     riverV2Panel.style.display = "none";
+    if (riverV3Panel) riverV3Panel.style.display = "none";
     if (tunnelPanel) tunnelPanel.style.display = "none";
     lakePanel.style.display = "none";
     roadPanel.style.display = "none";
@@ -3784,6 +3800,23 @@ export async function startV3App(opts = {}) {
   let cpuMirrorRead     = false;
   let cpuAhead          = false;
 
+  /*
+   * THE HEIGHT STACK: FINAL = STAMPS(RIVER(GROUND)), and FINAL is this mirror
+   * (v3/terrain/heightLayers.js). River v2 is the RIVER layer; flattenRect,
+   * gradeRamp, raiseBerm and remapHeights are STAMPS; everything else that
+   * edits heights (sculpt strokes read back, erosion, roads, import...) is
+   * taken into GROUND by `absorb`. A layer change recomposes its own rect of
+   * the mirror at once and marks it for the next frame's upload — so nothing
+   * can erase anything, and no river "base" has to be kept in sync by hand.
+   */
+  const heightLayers = createHeightLayers({
+    final: cpuHeightmap,
+    size: HEIGHTMAP_SIZE,
+    onComposed: () => { cpuAhead = true; },
+  });
+  /** A half-float readback cannot reproduce a float mirror: compare like with like. */
+  const quantizeHalf = (v) => THREE.DataUtils.fromHalfFloat(THREE.DataUtils.toHalfFloat(v));
+
   /**
    * Widen a texel rect to a 32-texel grid.
    *
@@ -3882,6 +3915,13 @@ export async function startV3App(opts = {}) {
       cpuHeightmapMinY = isFull
         ? minH * MAX_HEIGHT
         : Math.min(cpuHeightmapMinY, minH * MAX_HEIGHT);
+      // What the GPU did (a sculpt stroke, undo, a generator pass) goes into
+      // GROUND; where a river or a stamp covers it, the mirror is recomposed
+      // over the new ground and the next flush puts that back on the GPU.
+      heightLayers.absorb(
+        { x0: rect.x, z0: rect.y, x1: rect.x + rect.w - 1, z1: rect.y + rect.h - 1 },
+        isHalf ? quantizeHalf : null,
+      );
       // Only the chunks under the edited rect need re-draping — see the note on
       // syncTreeHeights for why the full scan is expensive out of proportion to
       // its arithmetic.
@@ -3905,15 +3945,42 @@ export async function startV3App(opts = {}) {
     }
   }
 
-  /** Push CPU height edits (plateau, carve, procedural) to GPU + dependent systems. */
+  /**
+   * Push CPU height edits to the GPU + dependent systems.
+   *
+   * Two kinds reach here. Writers that predate the height stack (erosion, road
+   * conform, spline plateau, procedural) edit the mirror directly: `absorb`
+   * finds what they changed and takes it into GROUND, and the whole map goes
+   * up through replaceHeightData as before — which also makes it one sculpt
+   * undo step. Layer changes (river, stamps) have already recomposed the
+   * mirror and only need their own rect on the GPU, with no undo snapshot: the
+   * river has its own undo, and a game's pads are regenerated at every boot.
+   */
   function pushHeightmapEditsToGpu() {
-    sculpt.replaceHeightData(cpuHeightmap);
-    let minH = 0;
-    for (let i = 0; i < cpuHeightmap.length; i++) {
-      if (cpuHeightmap[i] < minH) minH = cpuHeightmap[i];
+    const legacy = heightLayers.absorb();
+    const rect = heightLayers.takePending();
+    if (legacy) {
+      sculpt.replaceHeightData(cpuHeightmap);
+      let minH = 0;
+      for (let i = 0; i < cpuHeightmap.length; i++) {
+        if (cpuHeightmap[i] < minH) minH = cpuHeightmap[i];
+      }
+      cpuHeightmapMinY = minH * MAX_HEIGHT;
+      treeEnv.syncTreeHeights();
+      return;
+    }
+    if (!rect) return;
+    const r = { x: rect.x0, y: rect.z0, w: rect.x1 - rect.x0 + 1, h: rect.z1 - rect.z0 + 1 };
+    sculpt.uploadHeightRect(cpuHeightmap, r);
+    let minH = cpuHeightmapMinY / MAX_HEIGHT;
+    for (let z = rect.z0; z <= rect.z1; z++) {
+      for (let x = rect.x0; x <= rect.x1; x++) {
+        const v = cpuHeightmap[z * HEIGHTMAP_SIZE + x];
+        if (v < minH) minH = v;
+      }
     }
     cpuHeightmapMinY = minH * MAX_HEIGHT;
-    treeEnv.syncTreeHeights();
+    treeEnv.syncTreeHeights(rectToWorldRegion(r));
   }
 
   async function ensureCpuHeightmapFromGpu() {
@@ -4332,7 +4399,7 @@ export async function startV3App(opts = {}) {
     // must not draw water or decals straight onto the multisampled canvas.
     worldEnv?.postFxPipeline?.setSceneDepthRequired(
       decalSystem.decals.length > 0 || (lakeSystem?.lakes.length ?? 0) > 0 || (riverV2System?.rivers.length ?? 0) > 0
-        || (waterfallSystem?.falls.length ?? 0) > 0,
+        || (riverV3System?.reaches.length ?? 0) > 0 || (waterfallSystem?.falls.length ?? 0) > 0,
     );
     await renderer.compileAsync(scene, camera);
     if (worldEnv) worldEnv.renderFrame(0);
@@ -4631,6 +4698,7 @@ export async function startV3App(opts = {}) {
       // added, edited, moved or deleted (string-compare on a signature).
       splineFeatureStore?.refresh();
       riverV2System?.update(dt);
+      riverV3System?.update(dt);
       if (waterfallSystem) {
         // Sun colour and strength follow the day/night cycle (the direction comes
         // through worldEnv's water-surface hook, or below without an environment).
@@ -4665,6 +4733,7 @@ export async function startV3App(opts = {}) {
         const ld = getLightDir();
         lakeSystem?.setSunDir(ld);
         riverV2System?.setSunDir(ld);
+        riverV3System?.setSunDir(ld);
         lakeSystem?.updateWater(dt, _noEnvTimeSec);
       }
       // worldEnv has no getSunDir: these were always handed `undefined`, so
@@ -4685,12 +4754,13 @@ export async function startV3App(opts = {}) {
       // After the hooks, which is where a game moves its camera: culling
       // against last frame's view pops the river in a frame late at the edge.
       riverV2System?.cullForCamera(camera);
+      riverV3System?.cullForCamera(camera);
       // Water and decals read a copy of the scene depth, which cannot come out
       // of the multisampled canvas: while any is in the scene, the frame goes
       // through a non-multisampled scene pass even with post FX off.
       worldEnv?.postFxPipeline?.setSceneDepthRequired(
         decalSystem.visibleCount > 0 || (lakeSystem?.lakes.length ?? 0) > 0 || (riverV2System?.rivers.length ?? 0) > 0
-          || (waterfallSystem?.visibleCount ?? 0) > 0,
+          || (riverV3System?.visibleCount ?? 0) > 0 || (waterfallSystem?.visibleCount ?? 0) > 0,
       );
       if (!_rendererSideWork && worldEnv) {
         worldEnv.renderFrame(dt);
@@ -5155,6 +5225,7 @@ export async function startV3App(opts = {}) {
           () => ambientDensity.getSnapshot(), (snap) => ambientDensity.restoreSnapshot(snap));
         break;
       case "riverv2": done = !!(undo ? riverV2System?.undo() : riverV2System?.redo()); if (done) riverV2Ui?.refresh(); break;
+      case "riverv3": done = !!(undo ? riverV3System?.undo() : riverV3System?.redo()); if (done) riverV3Ui?.refresh(); break;
       case "tunnel":  done = !!(undo ? tunnelSystem?.undo() : tunnelSystem?.redo()); if (done) tunnelUi?.refresh(); break;
       case "spline":  done = !!(undo ? splineSys?.undo() : splineSys?.redo()); break;
       case "road":    done = undo ? roadHistory.undo() : roadHistory.redo(); break;
@@ -5341,6 +5412,13 @@ export async function startV3App(opts = {}) {
       e.preventDefault();
       riverV2System.deleteSelected();
       riverV2Ui?.refresh();
+      return;
+    }
+    if (editorMode === "riverv3" && !playMode.active
+        && (e.code === "Delete" || e.code === "Backspace")) {
+      e.preventDefault();
+      riverV3System?.deleteSelected();
+      riverV3Ui?.refresh();
       return;
     }
     // Smart Road shortcuts (v2 Smart Road 2)
@@ -7085,13 +7163,13 @@ export async function startV3App(opts = {}) {
     scene,
     toolState: { riverV2: riverV2Slice.riverV2 },
     renderer,
-    getRT: () => sculpt.getCurrentRT(),
-    cpuHeightmap,
+    // The river is the RIVER layer of the height stack: it reads GROUND and
+    // recomposes its own footprint of the mirror, which the next frame's flush
+    // uploads. Nothing to read back.
+    heightLayers,
     waterNormalMap,
     getCamera: () => camera,
     onConformCommitted: () => {
-      markHeightmapDirty();
-      requestHeightmapReadback();
       bvhDebug?.update();
     },
     onWaterMeshesChanged: () => { waterSurfaceMap.markDirty(); waterfallSystem?.markDirty(); },
@@ -7105,6 +7183,19 @@ export async function startV3App(opts = {}) {
     },
   });
   worldEnv?.addWaterSurface(riverV2System);
+
+  // ── River v3 (network, beta) ───────────────────────────────────────────────
+  // The "riverV3" operator of the height stack, beside River v2's "river".
+  riverV3System = new RiverV3System({
+    scene,
+    toolState: { riverV3: riverV3Slice.riverV3 },
+    heightLayers,
+    waterNormalMap,
+    getCamera: () => camera,
+    onConformCommitted: () => { bvhDebug?.update(); },
+    onWaterMeshesChanged: () => { waterSurfaceMap.markDirty(); waterfallSystem?.markDirty(); },
+  });
+  worldEnv?.addWaterSurface(riverV3System);
   // The distance field and path texture are stable render targets, so this is a
   // one-time hookup; their CONTENTS change on every conform.
   riverSandShading.setSources(riverV2System.nearTexture, riverV2System.pathTexture);
@@ -7117,6 +7208,7 @@ export async function startV3App(opts = {}) {
   waterSurfaceMap.setSourceProvider(() => [
     lakeSystem.group,
     ...riverV2System.meshes,
+    ...riverV3System.meshes,
   ]);
 
   // ── Waterfalls ─────────────────────────────────────────────────────────────
@@ -7132,6 +7224,8 @@ export async function startV3App(opts = {}) {
     }
     const f = riverV2System?.sampleFlow(wx, wz);
     if (f?.inChannel && f.surfaceY > level) level = f.surfaceY;
+    const f3 = riverV3System?.sampleFlow(wx, wz);
+    if (f3?.inChannel && f3.surfaceY > level) level = f3.surfaceY;
     return level;
   }
   waterfallSystem = new WaterfallSystem({
@@ -7195,24 +7289,19 @@ export async function startV3App(opts = {}) {
     });
   }
 
-  // Keep the river system's uncarved-base RT in sync with every non-river
-  // terrain edit (sculpt strokes, sculpt undo/redo, procedural gen, spline
-  // plateau, heightmap load — the last three all route through
-  // replaceHeightData). Internal sculptBrush calls bypass these wrappers, so
-  // only user-facing edit boundaries trigger a rebase.
+  // A GPU-side terrain edit (sculpt stroke, sculpt undo/redo, a generator or
+  // import through replaceHeightData) has to reach the mirror, where the height
+  // stack takes it into GROUND and re-applies the river and stamps over it
+  // (syncHeightmapToCPU → heightLayers.absorb). An upload FROM the mirror needs
+  // no read: the mirror is already the truth. Internal sculptBrush calls bypass
+  // these wrappers, so only user-facing edit boundaries trigger a read.
   {
     const _endStroke = sculpt.endStroke;
     const _undo = sculpt.undo;
     const _redo = sculpt.redo;
     const _replace = sculpt.replaceHeightData;
-    // The rebase folds the CPU mirror into the river's base, so the mirror has
-    // to hold the edit first. It is refreshed by an async GPU readback, and the
-    // rebase's own 60 ms debounce does not wait for it: at a game's boot the
-    // readback is slower than that, the rebase took the PRE-edit heights as the
-    // base, and its resolve pass wrote them back over the whole terrain — every
-    // building site nam-rts flattened came back sloped.
-    const terrainEdited = () => {
-      ensureCpuHeightmapFromGpu().then(() => riverV2System.notifyTerrainEdited());
+    const terrainEdited = (fromMirror = false) => {
+      if (!fromMirror) ensureCpuHeightmapFromGpu();
       waterfallSystem?.markDirty();
     };
     sculpt.endStroke = (...a) => { const r = _endStroke(...a); terrainEdited(); return r; };
@@ -7220,10 +7309,7 @@ export async function startV3App(opts = {}) {
     sculpt.redo = (...a) => { const r = _redo(...a); if (r) terrainEdited(); return r; };
     sculpt.replaceHeightData = (...a) => {
       const r = _replace(...a);
-      // Uploaded FROM the mirror (flushCpuHeightEdits): the mirror is the
-      // truth, so the river takes it into its base before any resolve.
-      if (a[0] === cpuHeightmap) riverV2System.markExternalEdit?.();
-      terrainEdited();
+      terrainEdited(a[0] === cpuHeightmap);
       return r;
     };
   }
@@ -8366,11 +8452,11 @@ export async function startV3App(opts = {}) {
 
   async function saveProject() {
     await syncHeightmapToCPU();
-    // River v2 reshapes the terrain from the UNCONFORMED base ground, so the
-    // project stores that base plus the rivers, and the load re-conforms.
-    // Saving the conformed result instead would cut every channel twice.
+    // The project stores GROUND — the height stack's bottom layer — plus the
+    // rivers; the load re-applies the river over it. Saving the composed result
+    // instead would cut every channel twice. (This is the same data the old
+    // "river base" blob held, so older files load unchanged.)
     const riversV2 = riverV2System.exportData();
-    const baseHeightmap = riversV2 ? riverV2System.exportBaseHeightmap() : null;
     const treeInstances = [];
     for (const arr of treeEnv.treeStore.chunks.values()) {
       for (const t of arr) treeInstances.push([t.x, t.z, t.y, t.rotY, t.scale, t.slotIdx]);
@@ -8391,7 +8477,7 @@ export async function startV3App(opts = {}) {
     const buf = await encodeProjectFile({
       assets:    projectAssets.collectFor({ trees: trees.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers, environment, decalSlots: decals?.slots }),
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
-      heightmap: baseHeightmap ?? cpuHeightmap,
+      heightmap: heightLayers.ground,
       splat:     splatMap.exportCombined(), // painted holes only; tunnels rebuild theirs
       splatRes:  SPLAT_RES,
       splatHoles: true,
@@ -8405,6 +8491,7 @@ export async function startV3App(opts = {}) {
       decals,
       waterfalls,
       riversV2,
+      riverNetwork: riverV3System?.exportData() ?? null,
       tunnels:   tunnelSystem?.exportData() ?? null,
       paintLayers,
       paintBlend: {
@@ -8513,13 +8600,18 @@ export async function startV3App(opts = {}) {
     // Files the project carries (imported textures, GLBs...) before anything
     // that refers to them.
     projectAssets.load(d.assets);
-    // Drop River v2's captured base BEFORE the heightmap swap: the wrapped
-    // replaceHeightData would otherwise schedule a rebase that folds the
-    // freshly loaded terrain into the previous scene's base.
-    riverV2System.resetForLoad();
+    // The saved heightmap IS the new GROUND: reset the height stack to it (no
+    // stamps, no river until the rivers are imported below) BEFORE the GPU swap,
+    // so a flush that runs in between can only upload the new ground.
     if (d.heightmap?.length === HEIGHTMAP_SIZE * HEIGHTMAP_SIZE) {
+      heightLayers.reset(d.heightmap);
       sculpt.replaceHeightData(d.heightmap);
       markHeightmapDirty();
+    } else {
+      // No terrain in the file: keep the ground, drop the old scene's layers,
+      // and put the bare ground back on the GPU.
+      heightLayers.reset(Float32Array.from(heightLayers.ground));
+      heightLayers.compose({ x0: 0, z0: 0, x1: HEIGHTMAP_SIZE - 1, z1: HEIGHTMAP_SIZE - 1 });
     }
     await ensureCpuHeightmapFromGpu(); // fresh mirror before draping trees/roads
 
@@ -8795,6 +8887,8 @@ export async function startV3App(opts = {}) {
     // Rivers restore like lakes — always import so a river-less project clears
     // leftovers. River v2 re-conforms the saved (unconformed) base heightmap.
     riverV2System.importData(d.riversV2 ?? null);
+    riverV3System?.importData(d.riverNetwork ?? null);
+    riverV3Ui?.refresh();
     riverSandShading.syncParams(riverV2Slice.riverV2.sand);
     riverV2Ui?.refresh();
 
@@ -9051,10 +9145,23 @@ export async function startV3App(opts = {}) {
     riverV2System,
     maxHeight: MAX_HEIGHT,
     waterGlobals,
-    materialChanged: () => riverV2System.syncMaterial(),
+    materialChanged: () => { riverV2System.syncMaterial(); riverV3System?.syncMaterial(); },
     sandChanged: () => riverSandShading.syncParams(riverV2Slice.riverV2.sand),
     conformChanged: () => riverV2System.refreshConform(),
     visibilityChanged: () => riverV2System.refreshVisibility(),
+  });
+  if (isEditor) riverV3Ui = buildRiverV3Panel({
+    toolState: { riverV3: riverV3Slice.riverV3 },
+    riverV3System,
+    maxHeight: MAX_HEIGHT,
+    getV2Rivers: () => riverV2System.rivers.filter((r) => r.nodes.length),
+    // Move every River v2 river into the network, then clear River v2, so the
+    // two never shape the same ground.
+    convertFromV2: () => {
+      riverV3System.importFromV2(riverV2System.exportData()?.rivers ?? []);
+      riverV2System.clearAll();
+      riverV2Ui?.refresh();
+    },
   });
 
   applyRiverModeEffects();
@@ -9314,6 +9421,37 @@ export async function startV3App(opts = {}) {
     if (riverV2System.endDrag()) {
       syncEditorOrbitEnabled();
       riverV2Ui?.refresh();
+    }
+  });
+
+  // ── River v3 (network) mode mouse events ─────────────────────────────────
+  // Click draws (and joins, and branches — see riverV3System's header); node
+  // and junction handles drag.
+  renderer.domElement.addEventListener("mousemove", e => {
+    if (playMode.active || editorMode !== "riverv3" || !riverV3System?.dragging) return;
+    refreshMouse(e);
+    riverV3System.dragTo({ terrainHit: getTerrainHitWorld(e) });
+  });
+  renderer.domElement.addEventListener("mousedown", e => {
+    if (playMode.active || editorMode !== "riverv3" || e.button !== 0 || !riverV3System) return;
+    e.preventDefault();
+    refreshMouse(e);
+    raycaster.setFromCamera(mouse, camera);
+    const picked = riverV3System.pick(raycaster);
+    if (picked) {
+      riverV3System.beginDrag(picked);
+      controls.enabled = false;
+    } else {
+      const hit = getTerrainHitWorld(e);
+      if (hit) riverV3System.addNode(hit);
+    }
+    riverV3Ui?.refresh();
+  }, { capture: true });
+  renderer.domElement.addEventListener("mouseup", () => {
+    if (editorMode !== "riverv3" || !riverV3System) return;
+    if (riverV3System.endDrag()) {
+      syncEditorOrbitEnabled();
+      riverV3Ui?.refresh();
     }
   });
 
@@ -11386,6 +11524,7 @@ export async function startV3App(opts = {}) {
       waterSurfaceMap,
       get riverV2System() { return riverV2System; },
       riverSandShading,
+      riverV3System,
       /**
        * River flow at a world position, for physics, gameplay and audio:
        * `{ surfaceY, bedY, depth, speed, dirX, dirZ, inChannel, ... }` or null.
@@ -11709,30 +11848,28 @@ export async function startV3App(opts = {}) {
     /**
      * Level a RECTANGLE (centre wx,wz, half-extents in metres, turned by rotY) to
      * targetY — a building pad the shape of the building: fully flat inside the
-     * rectangle, easing back to the natural ground over `rim` metres outside it
+     * rectangle, easing back to the ground under it over `rim` metres outside
      * (smoothstep on the distance from the rectangle).
      *
-     * Written straight into the CPU mirror, like raiseBerm / gradeRamp, and
-     * flagged `cpuAhead`: the GPU gets it in the next frame's single upload
-     * (flushCpuHeightEdits), together with every other pad levelled meanwhile.
-     * It used to tile the rectangle with GPU flatten stamps and then read the
-     * mirror back — ~250-370 ms a call, ~100 calls at nam-rts boot, ~28 s of a
-     * 47 s load. getWorldHeight is correct the moment this returns (the mirror
-     * IS the new ground), which is all the callers read next.
+     * A STAMP on the height stack (heightLayers.js): it sits above the river and
+     * the natural ground, so no river re-conform and no sculpt underneath can
+     * erase it — nam-rts lost most of its pads to exactly that before the stack.
+     * The mirror is recomposed at once (getWorldHeight is the new ground on
+     * return) and the GPU gets the rect in the next frame's upload. The same
+     * call again (reassertPads) replaces the stamp instead of stacking a copy.
      */
     async flattenRect(wx, wz, halfX, halfZ, targetY, { rim = 5, rotY = 0 } = {}) {
-      // Any GPU edit not yet read must be in the mirror before we write over it.
+      // Any GPU edit not yet read must reach GROUND before the stamp lands.
       await ensureCpuHeightmapFromGpu();
       const cr = Math.cos(rotY), sr = Math.sin(rotY);
       const reach = Math.hypot(halfX, halfZ) + rim;
       const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * HEIGHTMAP_SIZE);
-      const tx0 = Math.max(0, toTexel(wx - reach)), tx1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(wx + reach));
-      const tz0 = Math.max(0, toTexel(wz - reach)), tz1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(wz + reach));
+      const rect = { x0: toTexel(wx - reach), z0: toTexel(wz - reach), x1: toTexel(wx + reach), z1: toTexel(wz + reach) };
       const target = THREE.MathUtils.clamp(targetY / MAX_HEIGHT, 0, 1);
-      const stamp = (map) => {
-        for (let ty = tz0; ty <= tz1; ty++) {
+      heightLayers.addStamp(`rect|${wx}|${wz}|${halfX}|${halfZ}|${targetY}|${rim}|${rotY}`, rect, (map, r) => {
+        for (let ty = r.z0; ty <= r.z1; ty++) {
           const dz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2 - wz;
-          for (let tx = tx0; tx <= tx1; tx++) {
+          for (let tx = r.x0; tx <= r.x1; tx++) {
             const dx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2 - wx;
             // Into the rectangle's frame — the inverse of three.js Y rotation
             // (local +X → (cos, -sin), local +Z → (sin, cos)).
@@ -11746,46 +11883,41 @@ export async function startV3App(opts = {}) {
             map[i] += (target - map[i]) * w;
           }
         }
-      };
-      stamp(cpuHeightmap);
-      cpuAhead = true;
-      // Inside a River v2 footprint the river keeps its own pre-river ground
-      // and re-conforms from it, so a pad there came back sloped on the next
-      // re-conform (nam-rts's camp by the river, 2026-09-26). Such a pad goes
-      // into the river's base as well, as a bridge landing does (gradeRamp).
-      // Only when it touches the footprint: editBase re-conforms the river.
-      if (riverV2System?.coversRect?.(tx0, tz0, tx1, tz1)) {
-        flushCpuHeightEdits();
-        riverV2System.editBase(stamp);
-      }
+      });
     },
 
     /**
      * RESHAPE the ground inside a box by a function: `fn(wx, wz, y)` returns
      * the new height in metres (or null to leave the texel alone). For shapes
-     * no stamp makes — terraced rice paddies following the contours. Written
-     * straight into the CPU mirror and pushed in the next frame's single
-     * upload, like flattenRect; getWorldHeight is the new ground on return.
-     * Returns the number of texels changed.
+     * no stamp makes — terraced rice paddies following the contours.
+     *
+     * A STAMP on the height stack, like flattenRect: `y` is the ground under it
+     * (river included), and `fn` runs AGAIN whenever what is under the box
+     * changes, so it must be a pure function of (wx, wz, y). getWorldHeight is
+     * the new ground on return. Returns the number of texels changed.
      */
     async remapHeights(x0, z0, x1, z1, fn) {
       await ensureCpuHeightmapFromGpu();
       const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * HEIGHTMAP_SIZE);
-      const tx0 = Math.max(0, toTexel(Math.min(x0, x1))), tx1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(Math.max(x0, x1)));
-      const tz0 = Math.max(0, toTexel(Math.min(z0, z1))), tz1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(Math.max(z0, z1)));
+      const rect = {
+        x0: toTexel(Math.min(x0, x1)), z0: toTexel(Math.min(z0, z1)),
+        x1: toTexel(Math.max(x0, x1)), z1: toTexel(Math.max(z0, z1)),
+      };
       let n = 0;
-      for (let ty = tz0; ty <= tz1; ty++) {
-        const wz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
-        for (let tx = tx0; tx <= tx1; tx++) {
-          const wx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
-          const i = ty * HEIGHTMAP_SIZE + tx;
-          const y = fn(wx, wz, cpuHeightmap[i] * MAX_HEIGHT);
-          if (y == null || !Number.isFinite(y)) continue;
-          cpuHeightmap[i] = THREE.MathUtils.clamp(y / MAX_HEIGHT, 0, 1);
-          n++;
+      heightLayers.addStamp(null, rect, (map, r) => {
+        n = 0;
+        for (let ty = r.z0; ty <= r.z1; ty++) {
+          const wz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+          for (let tx = r.x0; tx <= r.x1; tx++) {
+            const wx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+            const i = ty * HEIGHTMAP_SIZE + tx;
+            const y = fn(wx, wz, map[i] * MAX_HEIGHT);
+            if (y == null || !Number.isFinite(y)) continue;
+            map[i] = THREE.MathUtils.clamp(y / MAX_HEIGHT, 0, 1);
+            n++;
+          }
         }
-      }
-      if (n) cpuAhead = true;
+      });
       return n;
     },
 
@@ -11814,86 +11946,85 @@ export async function startV3App(opts = {}) {
      * ground softly; its steepest slope is π/2 · height / (base/2 - top/2), so
      * keep that under the map's cliff-paint angle or the sides turn to rock).
      * `gaps` [{x, z, r}] taper it to nothing between `r` and `r + taper` m —
-     * a gate. Written straight into the CPU heightmap and pushed in ONE upload
-     * (a path of flatten stamps cannot make a triangular section: each stamp
-     * is flat-topped). Returns once the CPU mirror holds the new ground.
+     * a gate. A STAMP on the height stack (see flattenRect); the mirror holds
+     * the new ground on return.
      */
     async raiseBerm(points, { height = 2.2, base = 10, top = 1.5, closed = false, gaps = [], taper = 3 } = {}) {
       if (!points || points.length < 2) return;
       await ensureCpuHeightmapFromGpu();
-      const pts = closed ? [...points, points[0]] : points;
+      const pts = (closed ? [...points, points[0]] : points).map((p) => ({ x: p.x, z: p.z }));
+      const gapList = gaps.map((g) => ({ x: g.x, z: g.z, r: g.r }));
       const halfB = base / 2, halfT = top / 2;
       let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
       for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
       const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * HEIGHTMAP_SIZE);
-      const tx0 = Math.max(0, toTexel(x0 - halfB)), tx1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(x1 + halfB));
-      const tz0 = Math.max(0, toTexel(z0 - halfB)), tz1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(z1 + halfB));
+      const rect = { x0: toTexel(x0 - halfB), z0: toTexel(z0 - halfB), x1: toTexel(x1 + halfB), z1: toTexel(z1 + halfB) };
       const add = height / MAX_HEIGHT;
-      for (let ty = tz0; ty <= tz1; ty++) {
-        const wz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
-        for (let tx = tx0; tx <= tx1; tx++) {
-          const wx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
-          // Distance to the path.
-          let d = Infinity;
-          for (let i = 0; i < pts.length - 1; i++) {
-            const a = pts[i], b = pts[i + 1];
-            const ex = b.x - a.x, ez = b.z - a.z, L2 = ex * ex + ez * ez || 1;
-            const t = Math.max(0, Math.min(1, ((wx - a.x) * ex + (wz - a.z) * ez) / L2));
-            d = Math.min(d, Math.hypot(wx - (a.x + ex * t), wz - (a.z + ez * t)));
+      const key = `berm|${JSON.stringify([pts, height, base, top, gapList, taper])}`;
+      heightLayers.addStamp(key, rect, (map, r) => {
+        for (let ty = r.z0; ty <= r.z1; ty++) {
+          const wz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+          for (let tx = r.x0; tx <= r.x1; tx++) {
+            const wx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
+            // Distance to the path.
+            let d = Infinity;
+            for (let i = 0; i < pts.length - 1; i++) {
+              const a = pts[i], b = pts[i + 1];
+              const ex = b.x - a.x, ez = b.z - a.z, L2 = ex * ex + ez * ez || 1;
+              const t = Math.max(0, Math.min(1, ((wx - a.x) * ex + (wz - a.z) * ez) / L2));
+              d = Math.min(d, Math.hypot(wx - (a.x + ex * t), wz - (a.z + ez * t)));
+            }
+            if (d >= halfB) continue;
+            const s = d <= halfT ? 0 : (d - halfT) / (halfB - halfT);
+            let prof = 0.5 + 0.5 * Math.cos(Math.PI * s);
+            for (const g of gapList) {
+              const gd = Math.hypot(wx - g.x, wz - g.z);
+              prof *= THREE.MathUtils.smoothstep(gd, g.r, g.r + taper);
+            }
+            if (prof > 0) map[ty * HEIGHTMAP_SIZE + tx] += add * prof;
           }
-          if (d >= halfB) continue;
-          const s = d <= halfT ? 0 : (d - halfT) / (halfB - halfT);
-          let prof = 0.5 + 0.5 * Math.cos(Math.PI * s);
-          for (const g of gaps) {
-            const gd = Math.hypot(wx - g.x, wz - g.z);
-            prof *= THREE.MathUtils.smoothstep(gd, g.r, g.r + taper);
-          }
-          if (prof > 0) cpuHeightmap[ty * HEIGHTMAP_SIZE + tx] += add * prof;
         }
-      }
-      // The mirror is the new ground; the GPU gets it in the next frame's one
-      // upload (flushCpuHeightEdits) — no readback of what we just wrote.
-      cpuAhead = true;
+      });
     },
 
     /**
      * Grade a straight RAMP from `a` to `b` ({x, z, y} world metres): the
      * ground along the line is set to the height interpolated between the two
-     * ends, `halfWidth` metres either side fully, easing back to the natural
-     * ground over `shoulder` metres further out (and round the far end). A
+     * ends, `halfWidth` metres either side fully, easing back to the ground
+     * under it over `shoulder` metres further out (and round the far end). A
      * bridge landing or a road cutting — a flatten stamp cannot do it, because
-     * a stamp levels to ONE height and a ramp needs a slope. Written straight
-     * into the CPU heightmap and pushed in one upload, like raiseBerm — and into
-     * River v2's unconformed base as well, because a landing sits in a river's
-     * footprint, where every re-conform rebuilds the ground from that base.
+     * a stamp levels to ONE height and a ramp needs a slope. A STAMP on the
+     * height stack, above the river, so a landing inside a river's footprint
+     * holds without any special case (it used to have to edit the river's
+     * private base).
      */
     async gradeRamp(a, b, { halfWidth = 4, shoulder = 6 } = {}) {
       await ensureCpuHeightmapFromGpu();
+      const A = { x: a.x, y: a.y, z: a.z }, B = { x: b.x, y: b.y, z: b.z };
       const reach = halfWidth + shoulder;
       const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * HEIGHTMAP_SIZE);
-      const tx0 = Math.max(0, toTexel(Math.min(a.x, b.x) - reach)), tx1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(Math.max(a.x, b.x) + reach));
-      const tz0 = Math.max(0, toTexel(Math.min(a.z, b.z) - reach)), tz1 = Math.min(HEIGHTMAP_SIZE - 1, toTexel(Math.max(a.z, b.z) + reach));
-      const ex = b.x - a.x, ez = b.z - a.z, L2 = ex * ex + ez * ez || 1;
-      const grade = (map) => {
-        for (let ty = tz0; ty <= tz1; ty++) {
+      const rect = {
+        x0: toTexel(Math.min(A.x, B.x) - reach), z0: toTexel(Math.min(A.z, B.z) - reach),
+        x1: toTexel(Math.max(A.x, B.x) + reach), z1: toTexel(Math.max(A.z, B.z) + reach),
+      };
+      const ex = B.x - A.x, ez = B.z - A.z, L2 = ex * ex + ez * ez || 1;
+      const key = `ramp|${JSON.stringify([A, B, halfWidth, shoulder])}`;
+      heightLayers.addStamp(key, rect, (map, r) => {
+        for (let ty = r.z0; ty <= r.z1; ty++) {
           const wz = ((ty + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
-          for (let tx = tx0; tx <= tx1; tx++) {
+          for (let tx = r.x0; tx <= r.x1; tx++) {
             const wx = ((tx + 0.5) / HEIGHTMAP_SIZE) * WORLD_SIZE - WORLD_SIZE / 2;
-            const t = Math.max(0, Math.min(1, ((wx - a.x) * ex + (wz - a.z) * ez) / L2));
-            const d = Math.hypot(wx - (a.x + ex * t), wz - (a.z + ez * t));
+            const t = Math.max(0, Math.min(1, ((wx - A.x) * ex + (wz - A.z) * ez) / L2));
+            const d = Math.hypot(wx - (A.x + ex * t), wz - (A.z + ez * t));
             if (d >= reach) continue;
             const s = d <= halfWidth ? 0 : (d - halfWidth) / shoulder;
             const w = 1 - s * s * (3 - 2 * s);
             const i = ty * HEIGHTMAP_SIZE + tx;
-            const target = (a.y + (b.y - a.y) * t) / MAX_HEIGHT;
+            const target = (A.y + (B.y - A.y) * t) / MAX_HEIGHT;
             map[i] += (target - map[i]) * w;
           }
         }
-      };
-      grade(cpuHeightmap);
-      pushHeightmapEditsToGpu();
-      riverV2System?.editBase?.(grade);
-      await ensureCpuHeightmapFromGpu();
+      });
     },
 
     // Resolves once the world stashed across a terrain-size reload has been
@@ -12397,6 +12528,7 @@ export async function startV3App(opts = {}) {
         wx.add(WORLD_SIZE * 0.5).div(WORLD_SIZE), wz.add(WORLD_SIZE * 0.5).div(WORLD_SIZE),
       )).r.mul(MAX_HEIGHT);
       riverV2System?.setGrabFree(on, groundYNode);
+      riverV3System?.setGrabFree(on, groundYNode);
     },
     /**
      * The same for the projected decals (decalSystem `setGrabFree`): the ground
