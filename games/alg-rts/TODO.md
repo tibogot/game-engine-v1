@@ -213,9 +213,24 @@ Asset follow-ups:
       helpers; nam's panel untouched). Sections: Camera, Light (live, Copy →
       AURES_LIGHT), Haze & bloom, Showroom (go to / hide), Performance
       (render scale, GPU pass timings). `?dev=0` hides it.
-- [ ] **Next buildables**: helipad, motor pool, mortar pit, searchlight
-      tower, SAS post; ALN cave entrance, arms cache, sangar, ambush screen,
-      mine/trap markers.
+- [x] **Grey-then-textured at load fixed** (you saw it): the kit atlas is
+      painted in a worker; the game now starts it first and holds the
+      loading screen until it lands (algGame.js, rtsAtlasReady).
+- [x] **Helipad, motor pool, mortar pit** (rtsAlgeria.js, 2026-09-27):
+      helipad = graded bed, cement square + painted H, whitewashed stone
+      border, windsock, fuel drums behind bags; the Alouette stands on it
+      (showroom `on`). Motor pool = open steel-truss shed, corrugated roof +
+      back wall, whitewashed workshop ("ARMÉE DE TERRE"), inspection ramps,
+      chain-hoist gantry over an engine, bench, tyres, drums, jerrycans.
+      Mortar pit = 81 mm Brandt (own mesh, traverses) in a lumpy spoil berm,
+      bag parapet, ammo, red/white aiming stakes. 3.4k / 8.8k / 3k tris.
+- [x] **Atlas row six: `MAT.spoil`** — dry ochre earth with pebbles, for
+      berms, pits and graded ground (the kit's earth is dark Vietnamese mud:
+      it read as a brown square on the Aurès). Cells 21-23 free. Berms are
+      now irregular smooth heaps (earthBerm), not turned pots; the MG nest's
+      too, and both bag rings closed (they had gaps).
+- [ ] **Next buildables**: ALN cave entrance, arms cache, sangar, ambush
+      screen, mine/trap markers; then searchlight tower, SAS post.
 - [ ] Very high orbit views show a black band under the horizon (the env
       bake's black lower hemisphere, ref_v3_env_bake_black_floor); not seen at
       play zoom.

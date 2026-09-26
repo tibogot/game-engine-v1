@@ -993,17 +993,76 @@ export function makeRubbleTexture({ size = 512, seed = 149 } = {}) {
   });
 }
 
+/**
+ * Dry spoil — the Aurès's ground thrown up by a shovel or graded flat: pale
+ * ochre dust over a buff clay, grit, and pebbles of limestone lying in it,
+ * each lit on top and shadowed at its foot. For the Algeria game's berms,
+ * pits and graded pads: the kit's earth (cell 3) is Vietnamese mud, a dark
+ * brown square on this ground (seen in the game, 2026-09-27).
+ *
+ * Pebbles sit on a wrapping lattice (24 × 24 cells per 2 m tile, one in three
+ * occupied), so the tile still tiles.
+ */
+export function makeSpoilTexture({ size = 512, seed = 163 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8, N = 24;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        // The clay under the dust: broad, soft variation, never a pattern.
+        const t = fbm(u * P * 1.6 + seed, v * P * 1.6, P * 2, 4);
+        const fine = fbm(u * P * 12 + 3, v * P * 12 + seed, P * 12, 2) - 0.5;
+        let r = lerp(150, 186, t) + fine * 18;
+        let gg = r * 0.83, b = r * 0.64;
+        // Darker damp-looking clods where the shovel turned it over.
+        const clod = clamp01((fbm(u * P * 5 + 29, v * P * 5, P * 5, 3) - 0.6) * 5) * 0.22;
+        r *= 1 - clod; gg *= 1 - clod; b *= 1 - clod * 0.9;
+        // Grit: single pixels a shade lighter or darker.
+        const grit = vnoise(u * P * 48, v * P * 48, P * 48) - 0.5;
+        r += grit * 22; gg += grit * 19; b += grit * 15;
+        // Pebbles: nearest occupied lattice cell.
+        const fx = u * N, fy = v * N, cx = Math.floor(fx), cy = Math.floor(fy);
+        let best = 0, lit = 0, stoneTone = 0;
+        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+          const wx = (((cx + i) % N) + N) % N, wy = (((cy + j) % N) + N) % N;
+          if (hash2(wx + seed, wy * 13) > 0.34) continue;
+          const px = cx + i + 0.5 + (hash2(wx * 3, wy + seed) - 0.5) * 0.6;
+          const py = cy + j + 0.5 + (hash2(wx + 7, wy * 5 + seed) - 0.5) * 0.6;
+          const rad = 0.16 + hash2(wx * 11, wy * 17) * 0.24;
+          const dd = Math.hypot(fx - px, (fy - py) * 1.25) / rad;
+          if (dd < 1 && 1 - dd > best) { best = 1 - dd; lit = (fy - py) / rad; stoneTone = hash2(wx * 29, wy * 31); }
+        }
+        if (best > 0) {
+          const edge = clamp01(best * 5);                 // soft rim into the dust
+          let sr = lerp(150, 206, stoneTone), sg = sr * 0.93, sb = sr * 0.82;
+          const k = lerp(0.72, 1.12, clamp01(lit * 0.8 + 0.5));
+          sr *= k; sg *= k; sb *= k;
+          r = lerp(r, sr, edge); gg = lerp(gg, sg, edge); b = lerp(b, sb, edge);
+        }
+        const i = (y * S + x) * 4;
+        d[i] = clamp01(r / 255) * 255; d[i + 1] = clamp01(gg / 255) * 255; d[i + 2] = clamp01(b / 255) * 255; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 export const ATLAS_COLS = 4;
 // FIVE rows, not four: the sixteen were full, and the Khmer ruins need stone
 // that is actually stone (sandstone, laterite, moss). The fifth row costs a
 // quarter more atlas — 2048x2560 instead of 2048x2048 — and the shader reads
 // its size from these two constants, so nothing else has to know.
-export const ATLAS_ROWS = 5;
+// SIX since 2026-09-27: the Algeria game needed dry desert spoil (cell 20);
+// 2048x3072, cells 21-23 free.
+export const ATLAS_ROWS = 6;
 /** Fraction of a cell kept clear at its border, so mips cannot bleed across. */
 export const ATLAS_PAD = 0.004;
 
 /**
- * Every surface in ONE texture, 4x5 cells, indexed by MAT.
+ * Every surface in ONE texture, 4x6 cells, indexed by MAT.
  *
  * WHY. The shader picks a surface per vertex from `matId`. With seven separate
  * textures and a select() chain the GPU evaluates EVERY arm — select is not a
@@ -1038,7 +1097,8 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeSandstoneTexture({ size: cell }),
     makeLateriteTexture({ size: cell }),
     makeMossTexture({ size: cell }),
-    makeRubbleTexture({ size: cell }),   // 19: the last free cell (Algeria)
+    makeRubbleTexture({ size: cell }),   // 19 (Algeria)
+    makeSpoilTexture({ size: cell }),    // 20 (Algeria): row six
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;

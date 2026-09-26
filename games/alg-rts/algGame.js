@@ -13,6 +13,7 @@ import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom } from "./showroom.js";
 import { createAlgDevPanel } from "./devPanel.js";
+import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, VIEW_YAW } from "./layout.js";
 import "../../v3/styles/editor.css";
 
@@ -56,6 +57,11 @@ const PLAIN_COLOR = "#a39480";
 
 export async function startAlgGame({ container, onStatus = () => {} } = {}) {
   onStatus("Starting engine…");
+  // The kit's surface atlas is painted in a worker; until it lands every
+  // building and vehicle wears a flat olive-grey placeholder. Started first
+  // so it paints while the engine and the level load, and awaited before the
+  // loading screen lifts (you saw the post go grey → textured after a second).
+  const atlasReady = rtsAtlasReady();
   const app = await startV3App({
     container,
     preloadPaintTextures: false,
@@ -114,7 +120,12 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
     app.devPanel = createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLight: applyAuresLight });
   }
 
+  onStatus("Painting surfaces…");
+  await atlasReady;
+  // needsUpdate uploads on the NEXT render: let two frames draw it under the
+  // loading screen before it lifts.
   app.setFrameThrottle?.(0);
+  for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;
   return app;

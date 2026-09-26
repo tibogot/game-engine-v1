@@ -13,7 +13,7 @@ import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
 import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
-import { buildBarbedWire, buildFrSandbagWall, buildMgNest, buildMirador } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildBarbedWire, buildFrSandbagWall, buildHelipad, buildMgNest, buildMirador, buildMortarPit, buildMotorPool } from "../../v3/render/objects/rtsAlgeria.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -38,7 +38,8 @@ export const BASE_PARK = [
   { key: "halftrack", build: buildHalfTrack, lx: -54, lz: 22, yaw: -0.2 },
   { key: "gmc", build: buildGMC, lx: -32, lz: 30, yaw: 1.4 },
   { key: "willys", build: buildWillys, lx: -14, lz: 28, yaw: -0.4 },
-  { key: "alouette", build: buildAlouette, lx: 46, lz: 6, yaw: 0.6 },
+  // On the helipad's deck (placeShowroom: `on`).
+  { key: "alouette", build: buildAlouette, lx: 56, lz: 2, yaw: 0.6, on: "helipad" },
 ];
 
 /**
@@ -55,6 +56,11 @@ export const BASE_BUILDABLES = [
   // (half-size 22 × 24 + 1.5): a rim cut into it left the post's wire floating.
   { key: "mirador", build: buildMirador, lx: 34, lz: 22, yaw: 0.25 },
   { key: "mgNest", build: buildMgNest, lx: -14, lz: 40, yaw: -0.2 },
+  // The post's left flank: the pad, the mortars behind the mirador.
+  { key: "helipad", build: buildHelipad, lx: 56, lz: 2, yaw: 0 },
+  { key: "mortarPit", build: buildMortarPit, lx: 36, lz: -24, yaw: 0.1 },
+  // Behind the vehicle park, toward the valley.
+  { key: "motorPool", build: buildMotorPool, lx: -48, lz: -30, yaw: 0 },
   { key: "sandbags1", build: buildFrSandbagWall, lx: 8, lz: 30, yaw: 0.1, follow: true },
   { key: "sandbags2", build: () => buildFrSandbagWall({ seed: 7 }), lx: 2, lz: 31, yaw: -0.15, follow: true },
   { key: "wire1", build: buildBarbedWire, lx: -2, lz: 38, yaw: 0, follow: true },
@@ -72,7 +78,7 @@ function fromBase(lx, lz) {
 export const SHOWROOM = [
   { key: "frenchPost", build: buildFrenchPost, x: BASE.x, z: BASE.z, yaw: BASE.yaw },
   ...BASE_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
-  ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true }; }),
+  ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true, on: v.on }; }),
   // The two hamlets (layout.js), each its own houses.
   { key: "mechta", build: buildMechta, x: HAMLETS[0].x, z: HAMLETS[0].z, yaw: siteYaw(HAMLETS[0]) },
   { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: HAMLETS[1].x, z: HAMLETS[1].z, yaw: siteYaw(HAMLETS[1]) },
@@ -218,7 +224,12 @@ export async function placeShowroom(app, list = SHOWROOM) {
   for (const { e, geo, y } of built) {
     const mesh = kitView(geo);
     mesh.name = `showroom:${e.key}`;
-    if (y !== undefined) {
+    const deck = e.on && placed[e.on];
+    if (deck) {
+      // Standing on another piece's deck (a helicopter on its pad).
+      mesh.position.set(e.x, deck.position.y + (deck.geometry.userData.deckY ?? 0), e.z);
+      mesh.rotation.y = e.yaw;
+    } else if (y !== undefined) {
       mesh.position.set(e.x, y, e.z);
       mesh.rotation.y = e.yaw;
     } else {
