@@ -331,11 +331,17 @@ export function buildHelipad({ seed = 23 } = {}) {
     parts.push(wirePart([wx, mH - 1.1, wz], [gx, 0.1, gz], 0.009, { tone: 0.4 }));
     parts.push({ geo: buildBox(0.07, 0.3, 0.07), pos: [gx, 0.08, gz], rot: [0.25, a, 0], mat: MAT.steel, tone: 0.3 });
   }
-  const mouthR = 0.3, tailR = 0.12, sockL = 1.7, droop = 0.35, yaw = 2.3;   // blowing out of the desert, to the west
-  const dir = new THREE.Vector3(Math.cos(droop) * Math.cos(yaw), -Math.sin(droop), Math.cos(droop) * Math.sin(yaw));
-  const mouth = new THREE.Vector3(wx, mH - 0.12, wz).addScaledVector(dir, 0.35);
-  parts.push({ geo: new THREE.TorusGeometry(mouthR, 0.018, 5, 16).applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir)), pos: [mouth.x, mouth.y, mouth.z], mat: MAT.steel, tone: 0.3 });
-  parts.push(wirePart([wx, mH - 0.12, wz], [mouth.x, mouth.y, mouth.z], 0.02, { tone: 0.3 }));
+  // The sock itself turns and fills with the wind, so it is the GAME's
+  // (userData.windsock, games/alg-rts/algWind.js): its swivel — arm and mouth
+  // ring — is a small kit geometry in the swivel's frame, downwind = +X.
+  const mouthR = 0.3, tailR = 0.12, sockL = 1.7, arm = 0.35;
+  const swivel = assemble([
+    { geo: new THREE.CylinderGeometry(0.05, 0.05, 0.14, 8), pos: [0, 0, 0], mat: MAT.steel, tone: 0.25 },
+    wirePart([0, 0, 0], [arm, 0, 0], 0.02, { tone: 0.3 }),
+    { geo: new THREE.TorusGeometry(mouthR, 0.018, 5, 16).rotateY(Math.PI / 2), pos: [arm, 0, 0], mat: MAT.steel, tone: 0.3 },
+  ]);
+  bakeContactAO(swivel, { cell: 0.06, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+  swivel.scale(S, S, S);
 
   // The fuel point, off the right side: drums in two rows behind an L of
   // bags, two more on chocks, a hand pump on one.
@@ -355,21 +361,16 @@ export function buildHelipad({ seed = 23 } = {}) {
   parts.push({ geo: buildSandbagWall({ length: 3.2, courses: 3, seed: seed + 3, bag }), pos: [fx + 0.1, 0, fz - 1.75], mat: null });
   parts.push({ geo: buildSandbagWall({ length: 3.4, courses: 3, seed: seed + 4, bag }), pos: [fx + 1.15, 0, fz + 0.1], rot: [0, Math.PI / 2, 0], mat: null });
 
-  // Markings: the H on the cement (its top away from the camera), the sock.
+  // Markings: the H on the cement (its top away from the camera).
   const st = [stencilPatch("helipadH", flatSurface([0, slabTop, 0], [0, 1, 0], [-1, 0, 0], 8, "helipadH"), { lift: 0.006 })];
-  const side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
-  const upv = new THREE.Vector3().crossVectors(side, dir).normalize();
-  for (const inward of [false, true]) {
-    st.push(stencilPatch("sockBands", (s, t) => {
-      const a = s * Math.PI * 2;
-      const r = (mouthR + (tailR - mouthR) * t) * (inward ? 0.97 : 1);
-      const c = mouth.clone().addScaledVector(dir, t * sockL).addScaledVector(upv, -0.12 * t * t);
-      const nrm = side.clone().multiplyScalar(Math.cos(a)).addScaledVector(upv, Math.sin(a));
-      return { p: c.clone().addScaledVector(nrm, r), n: inward ? nrm.negate() : nrm };
-    }, { segS: 12, segT: 6, lift: 0 }));
-  }
   const geo = finishWithStencils(parts, st, { hx: 9.9, hz: 8.9, cx: 1.6, cz: 0.4, height: mH, ao: { cell: 0.3, strength: 0.35 } });
   geo.userData.deckY = slabTop * S;
+  // The windsock: the swivel's pivot on the mast top, the cloth's size.
+  geo.userData.windsock = {
+    pivot: [wx * S, (mH - 0.12) * S, wz * S], swivel,
+    mouth: arm * S, mouthR: mouthR * S, tailR: tailR * S, length: sockL * S,
+  };
+  geo.userData.parts = { swivel };
   return geo;
 }
 

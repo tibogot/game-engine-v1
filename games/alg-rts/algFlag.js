@@ -83,5 +83,14 @@ export function plantPostFlag(app, mesh, mount, textureUrl = drawTricoloreDataUr
   flag.group.position.copy(p);
   flag.setParam("textureUrl", textureUrl);
   app.scene.add(flag.group);
-  return { group: flag.group, update: (dt) => flag.update(dt), dispose: () => { app.scene.remove(flag.group); flag.dispose(); } };
+  return {
+    group: flag.group,
+    update: (dt) => flag.update(dt),
+    /** Follow the game's wind (algWind.js): direction in degrees, strength 0..1. */
+    setWind: (dirDeg, strength) => {
+      flag.setParam("windDirection", dirDeg);
+      flag.setParam("windIntensity", 40 + 520 * strength);
+    },
+    dispose: () => { app.scene.remove(flag.group); flag.dispose(); },
+  };
 }

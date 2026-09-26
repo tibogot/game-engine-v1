@@ -24,13 +24,30 @@ Keep this file current: tick things off here, add new asks here.
 - [ ] **Buildings must clear the map's vegetation under them** (seen: the
       oasis palms grow through the SAS post in the showroom). A build-
       system job: clear foliage/plants in the footprint when placing.
-- [ ] **The rock texture is too SHINY — reads as metal** (you). It is the
-      map's **"Limestone ridge"** paint layer (Poly Haven
-      `rock_boulder_cracked`): its roughness map lets every stone catch a
-      hard highlight under the Aurès sun, like metal nuggets. Fix: raise
-      that layer's roughness (a floor ~0.85, or roughStr down), soften its
-      normal; judge side by side in the game. (Not the orange cliff at the
-      map edge.)
+- [x] **The shiny texture = "Valley soil"** (`brown_mud_dry`, the base
+      layer under most of the map; your screenshot). Its roughness map sits
+      ~0.5 — glossy for dirt — so the Aurès sun laid a silvery satin sheen
+      over whole slopes. Now roughStr 0 (a flat 0.88, matte), normalStr 0.5,
+      and its tile twice as big (uvScale 128 → 64: ~16 m, was ~8 m, the
+      "Y" marks repeated every few metres). Saved in alg-aures.v3proj.
+      Lesson: I looked at pebbles and cliffs; it was the GROUND everywhere.
+- [ ] Tiling still shows at full zoom-out: the far tile (farBlend, ×5)
+      blends albedo only. A proper anti-tiling (stochastic / rotated
+      second sample) for the base layer if it still reads as a pattern.
+- [x] **Windsock in the wind** (algWind.js): ONE shared wind (direction,
+      strength, gusts) drives the flags AND the sock. The sock turns into
+      the wind with a lag, fills and lifts with the speed, hangs limp at 0,
+      flutters toward the tail; ~450 verts on the CPU. Dev panel → Wind.
+      v2 after your look: it JITTERED in gusts — the flutter phase was
+      time × speed, so every speed change jumped the phase; now accumulated
+      phases on a low-passed speed (measured at full gusts: tail steps
+      ~8 mm/frame, step change ≤1.2 mm). Bands were blurry vertex colours
+      on 8 rings; now a crisp striped nylon texture (weave, stitched band
+      edges), 16 rings.
+- [ ] **Replace the "Wadi bed" texture** (you: `dry_river_pebbles` fakes
+      stones — big painted cobbles, and it looks wrong). Candidates fetched
+      from Poly Haven: `rocky_trail` (fine dry gravel in sand), 
+      `rocks_ground_02`. Judge in the game.
 - [ ] **Windsock that moves with the wind, like the flags** (you). Cheap: one
       small mesh. Better as a VERTEX-animated cone than a cloth sim — it
       swings to the wind direction, fills and droops with wind speed,

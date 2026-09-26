@@ -16,6 +16,7 @@ import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
 import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildCaveEntrance, buildFrSandbagWall, buildHelipad, buildMgNest, buildMineMarker, buildMirador, buildMortarPit, buildMotorPool, buildSangar, buildSasPost, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
+import { createWind, createWindsock } from "./algWind.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { LAYOUT, siteYaw } from "./layout.js";
 
@@ -306,6 +307,16 @@ export async function placeShowroom(app, list = SHOWROOM) {
   }
   app.addPreRenderHook((dt) => { for (const f of flags) f.update(dt); });
   placed.flags = flags;
+  // One wind for the flags and the windsock (algWind.js).
+  const wind = createWind();
+  wind.onChange((w) => { for (const f of flags) f.setWind(w.dirDeg, w.strength); });
+  const socks = [];
+  for (const e of list) {
+    const o = placed[e.key], spec = o?.geometry?.userData?.windsock;
+    if (spec) socks.push(createWindsock(app, o, spec, wind));
+  }
+  app.addPreRenderHook((dt) => { for (const s of socks) s.update(dt); });
+  placed.wind = wind;
   // Rotors turning: an idling helicopter on the pad (~5 rev/s main, 25 tail).
   // Found ONCE: a per-frame getObjectByName walks every hierarchy.
   const objs = Object.values(placed).filter((o) => o.isObject3D);

@@ -62,6 +62,16 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
   fx.slider("Bloom strength", { min: 0, max: 2, step: 0.05, get: () => bloom.strength, set: (v) => { bloom.strength = v; app.postFx?.setBloom?.(bloom); } });
   fx.hint("Dust haze: it eats the plain and the far ground. Bloom is selective (emissive only).");
 
+  // ── Wind (algWind.js: the flags and the windsock share it) ──────────────
+  const wind = app.showroom?.wind;
+  if (wind) {
+    const ws = panel.section("Wind");
+    ws.slider("Direction", { min: 0, max: 360, step: 5, get: () => wind.dirDeg, set: (v) => wind.set({ dirDeg: v }), fmt: (v) => `${v}°` });
+    ws.slider("Strength", { min: 0, max: 1, step: 0.05, get: () => wind.strength, set: (v) => wind.set({ strength: v }) });
+    ws.slider("Gusts", { min: 0, max: 1, step: 0.05, get: () => wind.gust, set: (v) => wind.set({ gust: v }) });
+    ws.hint("One wind for the flags and the windsock (later smoke, dust, the sandstorm). 0 = still: the sock hangs limp.");
+  }
+
   // ── Showroom (the new assets on the map, games/alg-rts/showroom.js) ─────
   const shown = app.showroom ?? {};
   const keys = Object.keys(shown).filter((k) => shown[k]?.isObject3D);
