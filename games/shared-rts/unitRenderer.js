@@ -20,7 +20,7 @@ import { createCrowdField } from "./crowdSkinning.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
-import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
+import { rtsObjectMaterial, rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { mayCastShadow, stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
@@ -468,8 +468,10 @@ function buildCrowdType(tpl, type, app, scene) {
 /**
  * `types` / `typeKeys`: the game's unit list. `procedural`: { key: () => geometry }
  * for the types built in code (a type's `procedural` field names its builder).
+ * `paint`: [r, g, b] painted-surface tint for those vehicles (a game's own
+ * army colour, rtsObjectMaterialTinted); null = the kit's colours.
  */
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, fogOfWar = null, types, typeKeys = null, procedural = {} }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null }) {
   const UNIT_TYPES = types;
   const UNIT_TYPE_KEYS = typeKeys ?? Object.keys(types);
   const PROCEDURAL_VEHICLES = procedural;
@@ -483,7 +485,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     const t = UNIT_TYPES[k];
     if (!t.procedural) return loadGltf(t.url);
     const geo = PROCEDURAL_VEHICLES[t.procedural]();
-    const body = new THREE.Mesh(geo, rtsObjectMaterial());
+    const kitMat = paint ? rtsObjectMaterialTinted(paint) : rtsObjectMaterial();
+    const body = new THREE.Mesh(geo, kitMat);
     const st = stencilMesh(geo.userData.stencil);
     if (st) body.add(st);
     const scene = new THREE.Group();
@@ -492,7 +495,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     // rotor), and running gear that rolls in its own shader.
     const tur = geo.userData.turret;
     if (tur) {
-      const m = new THREE.Mesh(tur.geo, rtsObjectMaterial());
+      const m = new THREE.Mesh(tur.geo, kitMat);
       m.name = "Turret";
       m.position.set(tur.pivot[0], tur.pivot[1], tur.pivot[2]);
       // The turret's own markings turn with it: named "Turret" too, so the
@@ -501,13 +504,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       if (tst) { tst.name = "Turret"; m.add(tst); }
       scene.add(m);
     }
-    if (geo.userData.gear) scene.add(new THREE.Mesh(geo.userData.gear, rtsRunningGearMaterial()));
+    // Its own odometer per type (the channel): see rtsRunningGearMaterial.
+    if (geo.userData.gear) scene.add(new THREE.Mesh(geo.userData.gear, rtsRunningGearMaterial(paint, t.typeKey ?? k)));
     // Rotors: named so the instancer spins them round their own pivots
     // (MainRotor about Y, TailRotor about X).
     const rot = geo.userData.rotors;
     if (rot) {
       for (const [name, r] of [["MainRotor", rot.main], ["TailRotor", rot.tail]]) {
-        const m = new THREE.Mesh(r.geo, rtsObjectMaterial());
+        const m = new THREE.Mesh(r.geo, kitMat);
         m.name = name;
         m.position.set(r.pivot[0], r.pivot[1], r.pivot[2]);
         scene.add(m);

@@ -219,10 +219,26 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   for (const sx of [-1, 1]) {
     parts.push({ geo: buildBox(0.5, gH - 1.08, 0.2), pos: [sx * (gateW / 2 + 0.55), 1.02 + (gH - 1.08) / 2, gz - 0.48], mat: MAT.white, tone: 0.7 });
   }
-  // Timber doors, folded open against the passage walls.
-  for (const sx of [-1, 1]) {
-    parts.push({ geo: buildBox(0.1, 2.6, gateW / 2 - 0.1), pos: [sx * (gateW / 2 - 0.08), 1.3, gz - 0.4 + gD + gateW / 4 + 0.05], mat: MAT.timber, tone: 0.25 + R() * 0.1 });
-  }
+  // The GATE: two timber leaves, their own geometry (userData.gate), so a game
+  // can swing them — open as a section marches out, shut behind it. Hinged at
+  // the inner end of the passage; each leaf authored CLOSED, running from its
+  // hinge (the origin) toward the centre. Open = turned 90° into the
+  // courtyard, lying against the passage wall as the old baked doors did.
+  const hingeZ = gz - 0.4 + gD + 0.05;
+  const leafW = gateW / 2 - 0.06;
+  const gateLeaves = [-1, 1].map((sx) => {
+    const lp = [];
+    lp.push({ geo: buildBox(leafW, 2.6, 0.1), pos: [-sx * leafW / 2, 1.3, 0], mat: MAT.timber, tone: 0.25 + R() * 0.1 });
+    // Battens and a brace on the courtyard side; iron strap hinges outside.
+    for (const y of [0.45, 2.15]) lp.push({ geo: buildBox(leafW - 0.1, 0.16, 0.06), pos: [-sx * leafW / 2, y, 0.085], mat: MAT.timber, tone: 0.2 });
+    lp.push({ geo: buildBox(0.14, 1.95, 0.05), pos: [-sx * leafW / 2, 1.3, 0.1], rot: [0, 0, sx * 0.7], mat: MAT.timber, tone: 0.22 });   // proud of the battens: equal faces z-fight
+    for (const y of [0.6, 2.0]) lp.push({ geo: buildBox(0.5, 0.07, 0.03), pos: [-sx * 0.3, y, -0.07], mat: MAT.steel, tone: 0.2 });
+    const g = assemble(lp);
+    bakeContactAO(g, { cell: 0.1, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+    g.scale(S, S, S);
+    // rotation.y that swings the leaf open, into the courtyard (+Z).
+    return { geo: g, pivot: [sx * (gateW / 2) * S, 0, hingeZ * S], openYaw: sx * (Math.PI / 2) };
+  });
   // A sandbag chicane in front of the gate, two staggered walls.
   const bag = { length: 0.52, width: 0.3, height: 0.19, segU: 6, segV: 4 };
   parts.push({ geo: buildSandbagWall({ length: 3.6, courses: 5, seed: seed + 7, bag, batter: 0.04 }), pos: [-1.6, 0, gz - 4.2], mat: null });
@@ -340,6 +356,8 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   const half = (wr + 0.5) * S;
   geo.userData.footprint = { cx: 0, cz: -1.5 * S, hx: half, hz: half + 1.5 * S };
   geo.userData.flagMount = { pos: [0, 0.3 * S, -2.5 * S], poleHeight: poleH * S };
+  geo.userData.gate = { leaves: gateLeaves, width: gateW * S, z: (gz - 0.4) * S };
+  geo.userData.parts = { ...(geo.userData.parts ?? {}), gateLeft: gateLeaves[0].geo, gateRight: gateLeaves[1].geo };
   geo.userData.height = (poleH + 0.3) * S;
   geo.userData.size = { L: L * S, wall: H * S, tower: TH * S };
   return geo;

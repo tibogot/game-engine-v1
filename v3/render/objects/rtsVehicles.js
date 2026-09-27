@@ -39,9 +39,14 @@ const _gearMats = new Map();
  * `paintTint` [r, g, b]: the same painted-surface tint as
  * rtsObjectMaterialTinted (a hub is painted like the hull). Each tint is its
  * own material with its own odometer; no tint is the original, unchanged.
+ *
+ * `channel`: one odometer PER INSTANCED MESH. The odometer is indexed by
+ * instance, so two unit types sharing one material write each other's slots
+ * (jeep #0 and tank #0 = slot 0: one rolls with the other's distance). The
+ * unit renderer passes its type key; "" is the shared one (showroom pieces).
  */
-export function rtsRunningGearMaterial(paintTint = null) {
-  const key = paintTint ? paintTint.join(",") : "";
+export function rtsRunningGearMaterial(paintTint = null, channel = "") {
+  const key = (paintTint ? paintTint.join(",") : "") + (channel ? `|${channel}` : "");
   if (_gearMats.has(key)) return _gearMats.get(key);
   const odoAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_VEHICLES), 1);
   odoAttr.setUsage(THREE.DynamicDrawUsage);
@@ -65,8 +70,8 @@ export function rtsRunningGearMaterial(paintTint = null) {
     const id = attribute("matId", "float");
     const isPaint = step(float(6.5), id).mul(step(id, float(7.5)));
     col = col.mul(mix(vec3(1, 1, 1), vec3(...paintTint), isPaint));
-    m.name = `RtsRunningGear:${key}`;
   }
+  if (key) m.name = `RtsRunningGear:${key}`;
   m.colorNode = col;
   m.userData.odometer = odoAttr;
   _gearMats.set(key, m);

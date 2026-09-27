@@ -87,7 +87,37 @@ lift off the pad; the ALN comes out of the cave mouth.
        nam checked after the move: loads, 34 units, HUD, no errors.
        Still nam's in the copies: the command card's structure labels
        (radio/relay/enemy base), the HUD's olive/brass styling.
-4. [ ] Production: gate opens/closes as units march out
+4. [x] Production: gate opens/closes as units march out (algPost.js).
+       The post is a selectable structure (an invisible pick box over its
+       footprint, so a click in the open courtyard counts); command card
+       "Appelé", 6 s each, queue of 8. The gate leaves (real hinged parts
+       of rtsFrenchPost.js now, both z-fight tests) swing open at 80% of a
+       man's build, he walks out as a ghost to the rally point, and they
+       shut 3.5 s after the last one. Tested: 3 queued → 3 out, 6 s apart.
+       Selected, the post gets nam's CORNER BRACKETS round its footprint
+       (square buildings brackets, round ones and units rings — you,
+       2026-09-27); selectionFrameField.js moved to shared-rts.
+4b. [x] Vehicles are units (behaviour = nam's for now, you 2026-09-27):
+       the six parked showroom pieces (Willys, GMC, half-track, AMX-13, EBR,
+       Alouette) spawn as units where they stood, in French paint. Each
+       plays like its nam counterpart (numbers copied, named in
+       algUnitTypes.js). Tested: click-select, box-select, right-click move
+       (half-track 39 m), unit bar thumbnails, no console errors.
+       Fixed on the way, nam too: every vehicle type shared ONE running-gear
+       odometer (indexed per instance → jeep #0 and tank #0 wrote one slot);
+       now one per type (rtsRunningGearMaterial `channel`).
+   - [ ] The post has no health bar yet; the motor pool / helipad / other
+         buildings are not selectable yet (next: motor pool produces
+         vehicles through its doors, helipad the Alouette).
+       Minimap turned the CoH way: up = the start camera's forward (VIEW_YAW,
+       toward the ALN), our post at the bottom. The world square is diagonal
+       to that view, so it reads as a diamond; the view is a trapezoid
+       (far edge capped at 2.5x the near one), not a wedge to the horizon.
+   - [ ] Next: vehicles as units (motor pool rolls them out through its
+         own doors, helipad helicopters), set-rally-point by right-click,
+         and the HQ/post card's own labels (still nam's).
+   - [ ] Minimap diamond uses 71% of the square — if it reads too small,
+         a rotated square map crop (cut the far corners) is the other way.
 5. [ ] Animals alongside: donkeys (Donkey_compressed.glb) at wells and on
        tracks, chickens (Chicken_001_compressed.glb) in the mechta yards
 - [ ] **REMINDER: camel** — skipped for now (you, 2026-09-27). Needs a free

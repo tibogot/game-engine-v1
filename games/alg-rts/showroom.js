@@ -183,6 +183,17 @@ function kitView(geo) {
     gm.renderOrder = 2;
     m.add(gm);
   }
+  // A gate (the post): each leaf its own mesh on its hinge, shut; the game
+  // swings it (algPost.js).
+  for (const [i, leaf] of (geo.userData.gate?.leaves ?? []).entries()) {
+    const lm = new THREE.Mesh(leaf.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+    lm.name = i ? "GateRight" : "GateLeft";
+    lm.position.set(...leaf.pivot);
+    lm.userData.gateLeaf = true;
+    lm.userData.openYaw = leaf.openYaw;
+    lm.castShadow = lm.receiveShadow = true;
+    m.add(lm);
+  }
   // A turret: its own mesh on the ring (the unit renderer turns it about Y).
   // An emplacement's gun (MG nest): its own mesh on its pivot, to traverse.
   if (geo.userData.gun) {

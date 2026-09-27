@@ -8,6 +8,10 @@
 //   • FoW shroud overlay when fog of war is active.
 //   • Each frame draws unit blips and the camera's ground footprint rectangle.
 //   • Click / drag to move the RTS camera there.
+//   • ORIENTED LIKE COMPANY OF HEROES: up on the minimap = the start camera's
+//     forward (`upYaw`, layout.js VIEW_YAW), so our post sits at the BOTTOM and
+//     the enemy at the top. The world square is diagonal to that view here, so
+//     the map shows as a turned square with dark corners (never cropped).
 import * as THREE from "three";
 
 const BAKE_RES = 160;
@@ -23,26 +27,47 @@ function lerpRgb(a, b, t) {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 }
 
-function bakeTerrain(app) {
+/**
+ * World ↔ minimap for a map turned so world direction (sin upYaw, cos upYaw)
+ * points up. Right on the minimap = the camera's screen-right, (-cos, sin).
+ * Scaled so the whole turned square fits the canvas.
+ */
+function makeFrame(map, upYaw, px) {
+  const fx = Math.sin(upYaw), fz = Math.cos(upYaw), rx = -fz, rz = fx;
+  const k = px / (map * (Math.abs(fx) + Math.abs(fz)));   // world m → minimap px
+  const c = px / 2;
+  return {
+    toMini: (x, z) => ({ x: c + (x * rx + z * rz) * k, y: c - (x * fx + z * fz) * k }),
+    toWorld: (mx, my) => {
+      const u = (mx - c) / k, v = (c - my) / k;
+      return { x: rx * u + fx * v, z: rz * u + fz * v };
+    },
+    upYaw,
+  };
+}
+
+function bakeTerrain(app, frame) {
   const res = BAKE_RES;
   const map = app.worldSize ?? 1000;
   const half = map * 0.5;
+  const scale = VIEW_PX / res;
+  const OFF = [22, 20, 16];      // beyond the map's edge
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = res;
   const ctx = canvas.getContext("2d");
   const img = ctx.createImageData(res, res);
   const data = img.data;
 
-  const wzOf = (py) => (0.5 - py / (res - 1)) * map;
-  const wxOf = (px) => half - (px / (res - 1)) * map;
+  const worldOf = (px, py) => frame.toWorld((px + 0.5) * scale, (py + 0.5) * scale);
+  const inside = (w) => Math.abs(w.x) <= half && Math.abs(w.z) <= half;
 
   const heights = new Float32Array(res * res);
   let minH = Infinity, maxH = -Infinity;
   for (let py = 0; py < res; py++) {
-    const wz = wzOf(py);
     for (let px = 0; px < res; px++) {
-      const wx = wxOf(px);
-      const h = app.getWorldHeight(wx, wz);
+      const w = worldOf(px, py);
+      if (!inside(w)) continue;
+      const h = app.getWorldHeight(w.x, w.z);
       heights[py * res + px] = h;
       if (h < minH) minH = h;
       if (h > maxH) maxH = h;
@@ -56,14 +81,14 @@ function bakeTerrain(app) {
   const water = [52, 110, 104];   // oasis green-blue
 
   for (let py = 0; py < res; py++) {
-    const wz = wzOf(py);
     for (let px = 0; px < res; px++) {
       const i = py * res + px;
-      const wx = wxOf(px);
+      const w = worldOf(px, py), wx = w.x, wz = w.z;
       const h = heights[i];
       let rgb;
       const wl = app.getWaterLevelAt ? app.getWaterLevelAt(wx, wz) : -Infinity;
-      if (wl > h) rgb = water;
+      if (!inside(w)) rgb = OFF;
+      else if (wl > h) rgb = water;
       else {
         const n = app.getWorldNormal(wx, wz);
         const slope = 1 - n.y;
@@ -80,9 +105,11 @@ function bakeTerrain(app) {
   return canvas;
 }
 
-export function createMinimap({ app, units, buildings = null, structures = null, fogOfWar = null, requisition = null, mount = document.body, intel = null }) {
+export function createMinimap({ app, units, buildings = null, structures = null, fogOfWar = null, requisition = null, mount = document.body, intel = null, upYaw = 0 }) {
   const map = app.worldSize ?? 1000;
-  let terrain = bakeTerrain(app);
+  // upYaw = 0 is nam's old fixed layout (+z up, +x left).
+  const frame = makeFrame(map, upYaw, VIEW_PX);
+  let terrain = bakeTerrain(app, frame);
 
   const root = document.createElement("div");
   root.id = "rts-minimap";
@@ -104,14 +131,14 @@ export function createMinimap({ app, units, buildings = null, structures = null,
   `;
   document.head.appendChild(style);
 
-  const worldToMini = (x, z) => ({ x: (0.5 - x / map) * VIEW_PX, y: (0.5 - z / map) * VIEW_PX });
+  const worldToMini = frame.toMini;
 
   let dragging = false;
   const jump = (ev) => {
     const rect = canvas.getBoundingClientRect();
-    const wx = (0.5 - (ev.clientX - rect.left) / rect.width) * map;
-    const wz = (0.5 - (ev.clientY - rect.top) / rect.height) * map;
-    app.rtsCamera?.focusOn?.(wx, wz);
+    const w = frame.toWorld((ev.clientX - rect.left) / rect.width * VIEW_PX, (ev.clientY - rect.top) / rect.height * VIEW_PX);
+    const half = map / 2;
+    app.rtsCamera?.focusOn?.(Math.max(-half, Math.min(half, w.x)), Math.max(-half, Math.min(half, w.z)));
   };
   const onDown = (e) => { if (!hasRadioIntel()) return; dragging = true; jump(e); e.preventDefault(); };
   const onMove = (e) => { if (dragging) jump(e); };
@@ -140,6 +167,16 @@ export function createMinimap({ app, units, buildings = null, structures = null,
       if (!_ray.ray.intersectPlane(_plane, _hit)) return null;
       pts.push({ x: _hit.x, z: _hit.z });
     }
+    // The top corners of a low camera meet the ground near the horizon: cap
+    // the far edge at 2.5x the near edge's reach, so the view reads as a
+    // trapezoid (CoH), not a wedge across the whole map.
+    const t = app.controls?.target ?? { x: 0, z: 0 };
+    const near = Math.max(Math.hypot(pts[0].x - t.x, pts[0].z - t.z), Math.hypot(pts[1].x - t.x, pts[1].z - t.z));
+    const cap = near * 2.5;
+    for (const p of pts) {
+      const d = Math.hypot(p.x - t.x, p.z - t.z);
+      if (d > cap) { p.x = t.x + (p.x - t.x) * cap / d; p.z = t.z + (p.z - t.z) * cap / d; }
+    }
     return pts;
   }
 
@@ -147,7 +184,7 @@ export function createMinimap({ app, units, buildings = null, structures = null,
     const s = u.isAir ? 4 : 3.4;
     ctx.save();
     ctx.translate(x, y);
-    ctx.rotate(u.heading ?? 0);
+    ctx.rotate(frame.upYaw - (u.heading ?? 0));   // world heading → turned map
     ctx.fillStyle = u.selected ? "#ffffff" : (u.isAir ? "#63e0d0" : "#58a8ff");
     ctx.strokeStyle = "rgba(10,20,40,0.7)";
     ctx.lineWidth = 0.8;
@@ -300,7 +337,7 @@ export function createMinimap({ app, units, buildings = null, structures = null,
     root,
     draw,
     hasRadioIntel,
-    rebuildTerrain() { terrain = bakeTerrain(app); },
+    rebuildTerrain() { terrain = bakeTerrain(app, frame); },
     dispose() {
       canvas.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);
