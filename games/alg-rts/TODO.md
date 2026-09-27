@@ -56,6 +56,39 @@ Keep this file current: tick things off here, add new asks here.
 - [ ] **FILL THE MAP** once buildings and vehicles are done (you): see
       "SUGGESTIONS — look & world" below, the first block.
 
+## UNITS & UI — started 2026-09-27 (your go)
+
+Decisions (you): nam's soldiers as STAND-INS (you will replace them);
+share only the machinery (selection, orders, nav, sim, combat) in
+games/shared-rts; this game's UI is its OWN files from day one (starts as
+a copy of nam's layout, redesigned later). Production buildings open:
+the post's gate swings, vehicles roll out of the motor pool, helicopters
+lift off the pad; the ALN comes out of the cave mouth.
+
+0. [x] **Machinery moved to games/shared-rts** (2026-09-27): navGrid,
+       spatialGrid, units, unitRenderer, crowdSkinning, xraySilhouette,
+       terrainDrape, teams, thumbnails, healthBar, selectionRingField,
+       selection, simClock. units + unitRenderer now take the game's unit
+       list (`types`, `typeKeys`, `procedural`); nam keeps thin wrappers that
+       pass its own, so nam is unchanged (checked in its page: 34 units, paths,
+       selection, HUD, no errors; fast lane green).
+1. [x] Nav grid for alg-aures: shared createNavGrid + every showroom
+       building's footprint stamped (28; vehicles excluded). **TODO**: the
+       dechra is stamped whole — its lanes should be walkable; the post's
+       courtyard too (gate open → walk in).
+2. [x] Select + move: a section of 12 appelés (algUnitTypes.js, nam's
+       soldier as STAND-IN model) musters out of the post's gate; drag-select
+       + right-click move tested with real pointer events: 12 selected, all
+       moved 50 m and formed up, around the post not through it.
+3. [ ] HUD + command card (Algeria's own files)
+4. [ ] Production: gate opens/closes as units march out
+5. [ ] Animals alongside: donkeys (Donkey_compressed.glb) at wells and on
+       tracks, chickens (Chicken_001_compressed.glb) in the mechta yards
+- [ ] **REMINDER: camel** — skipped for now (you, 2026-09-27). Needs a free
+      model (not procedural); Saharan edge more than the Aurès.
+- [ ] Goat and sheep herds with a shepherd (need models), dogs, storks on
+      the minaret/koubba, vultures (nam's bird system).
+
 ## FILLING THE MAP — foliage first, then villages (started 2026-09-27)
 
 Order: foliage → villages → animals & birds → ground detail.

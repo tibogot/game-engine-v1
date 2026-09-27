@@ -15,7 +15,8 @@ import { placeShowroom } from "./showroom.js";
 import { createAlgDevPanel } from "./devPanel.js";
 import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
-import { LAYOUT, VIEW_YAW } from "./layout.js";
+import { LAYOUT, VIEW_YAW, siteYaw } from "./layout.js";
+import { createAlgUnits } from "./algUnits.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -141,6 +142,16 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
   // presets over every fog layer (algFog.js). ?fog=0 = without.
   if (params.get("fog") !== "0") {
     try { app.algFog = createAlgFog(app); } catch (e) { console.warn("[alg fog] failed:", e); }
+  }
+  // UNITS (algUnits.js, the shared machinery): a section of appelés formed up
+  // outside the post's gate, selectable, orderable. ?units=0 = without.
+  if (params.get("units") !== "0" && app.showroom) {
+    const b = LAYOUT.sites.find((s) => s.kind === "french"), yaw = siteYaw(b);
+    onStatus("Mustering…");
+    app.algUnits = await createAlgUnits(app, {
+      showroom: app.showroom,
+      muster: { x: b.x - Math.sin(yaw) * 42, z: b.z - Math.cos(yaw) * 42, yaw },
+    });
   }
   // Dev controls (?dev=0 hides them).
   if (params.get("dev") !== "0") {
