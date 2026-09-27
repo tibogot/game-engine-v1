@@ -106,9 +106,35 @@ lift off the pad; the ALN comes out of the cave mouth.
        Fixed on the way, nam too: every vehicle type shared ONE running-gear
        odometer (indexed per instance → jeep #0 and tank #0 wrote one slot);
        now one per type (rtsRunningGearMaterial `channel`).
-   - [ ] The post has no health bar yet; the motor pool / helipad / other
-         buildings are not selectable yet (next: motor pool produces
-         vehicles through its doors, helipad the Alouette).
+4c. [x] The MOTOR POOL produces vehicles through its own doors (2026-09-27).
+       Its right bay is now the GARAGE BAY: two corrugated leaves on steel
+       frames, hinged on the columns, swinging OUT (userData.gate, as the
+       post; both z-fight tests), a lintel over them. The bay was cleared:
+       bench to bay 2's back wall, tyres and drums out on the apron by the
+       left end. Bays 1-2 stay open (the ramps and the hoist are the look).
+       The post's code became algProducer.js, one producer for both (and any
+       later); what each builds is PRODUCTION in algUnits.js: the post
+       appelés (6 s), the motor pool Willys 10 s, GMC 12, half-track 16,
+       EBR 20, AMX-13 24 — no costs yet. Tested: selected, 5 buttons, Willys
+       + GMC queued → doors open at 80%, both out, doors shut; post still
+       fine; console clean.
+       Then (you: "doors on a building open to the side look weird"): the
+       garage bay is now CLOSED — a corrugated partition against the open
+       shed and the same cladding outside the end columns, sheets to the tie
+       and a flat gable to the roof. A closed garage with doors, built onto
+       the open maintenance shed.
+4d. [x] BUILDING PORTRAITS, as nam's (structureThumbnails.js): the post and the
+       motor pool baked into the units' thumbnail map ("struct:<typeKey>"),
+       built by the showroom's kitView (French paint, markings, doors shut),
+       turned so their FRONT meets the portrait camera at 3/4. The post frames
+       only its walls (shared baker: optional per-item `frame(box)`), or the
+       23 m mast and the wire made it a speck. Every new building gets a line
+       in ITEMS.
+   - [ ] The post and the motor pool have no health bar yet; the helipad
+         (the Alouette lands and takes off) and the other buildings are not
+         selectable yet. Set rally by right-click with a building selected.
+   - [ ] A vehicle appears INSIDE the open bay (as the man in the
+         courtyard): a fade-in, or the doors hiding it, if it reads wrong.
        Minimap turned the CoH way: up = the start camera's forward (VIEW_YAW,
        toward the ALN), our post at the bottom. The world square is diagonal
        to that view, so it reads as a diamond; the view is a trapezoid

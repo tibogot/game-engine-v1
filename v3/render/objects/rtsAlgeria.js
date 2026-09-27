@@ -379,8 +379,15 @@ export function buildHelipad({ seed = 23 } = {}) {
  * kept running. An open-fronted shed on a concrete apron — steel columns and
  * trusses, a corrugated roof, a corrugated back wall — with the whitewashed
  * workshop block on its right. Inside: inspection ramps, a chain-hoist
- * gantry over an engine on a stand, the bench, tyres, drums; jerrycans by
- * the workshop door. Unlocks the motor pool tier (TODO.md PROPOSAL).
+ * gantry over an engine on a stand, the bench; tyres and drums out on the
+ * apron, jerrycans by the workshop door. Unlocks the motor pool tier (TODO.md
+ * PROPOSAL).
+ *
+ * THE GARAGE BAY (the right one, x 7/3 → 7) has DOORS and is kept clear:
+ * it is where a new vehicle stands before it rolls out. Two corrugated
+ * leaves on steel frames, hinged on the columns, their own geometry
+ * (userData.gate, as the post's gate) so a game swings them open, outward.
+ * The other two bays stay open: the ramps and the hoist are the look.
  */
 export function buildMotorPool({ seed = 29 } = {}) {
   const R = rng(seed);
@@ -460,21 +467,66 @@ export function buildMotorPool({ seed = 29 } = {}) {
   parts.push({ geo: new THREE.TorusGeometry(0.07, 0.015, 4, 8), pos: [gx, F + 1.48, 0.4], mat: MAT.steel, tone: 0.3 });
   parts.push({ geo: buildBox(0.75, 0.55, 0.95), pos: [gx, F + 0.95, 0.4], rot: [0, 0.2, 0], mat: MAT.steel, tone: 0.22 });
   for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push(wirePart([gx + sx * 0.3, F, 0.4 + sz * 0.38], [gx + sx * 0.22, F + 0.68, 0.4 + sz * 0.3], 0.03, { tone: 0.3 }));
-  // Bay 3: the bench against the back wall, its tool board; tyres, drums.
-  const bx = 4.6, bz = Z1 - 0.5;
+  // Bay 2: the bench against the back wall behind the gantry, its tool board.
+  const bx = 0, bz = Z1 - 0.5;
   parts.push({ geo: buildBox(2.6, 0.08, 0.8), pos: [bx, F + 0.9, bz], mat: MAT.timber, tone: 0.32 });
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) parts.push({ geo: buildBox(0.08, 0.86, 0.08), pos: [bx + sx * 1.2, F + 0.43, bz + sz * 0.33], mat: MAT.timber, tone: 0.3 });
   parts.push({ geo: buildBox(0.22, 0.18, 0.16), pos: [bx - 0.9, F + 1.03, bz - 0.2], mat: MAT.steel, tone: 0.2 });
   parts.push({ geo: buildBox(0.5, 0.2, 0.25), pos: [bx + 0.6, F + 1.04, bz], mat: MAT.paint, tone: 0.4 });
   parts.push({ geo: buildBox(2.3, 1.0, 0.04), pos: [bx, F + 1.75, Z1 + 0.02], mat: MAT.timber, tone: 0.45 });
-  for (let k = 0; k < 3; k++) parts.push({ geo: new THREE.TorusGeometry(0.42, 0.14, 6, 14).rotateX(Math.PI / 2), pos: [6.2, F + 0.14 + k * 0.27, -2.6], rot: [0, R(), 0], mat: MAT.rubber, tone: 0.3 });
-  parts.push({ geo: new THREE.TorusGeometry(0.42, 0.14, 6, 14), pos: [6.3, F + 0.55, -1.5], rot: [0.25, 1.3, 0], mat: MAT.rubber, tone: 0.3 });
-  for (let k = 0; k < 4; k++) parts.push({ geo: buildOilDrum(), pos: [6.25 - (k % 2) * 0.62, F, 3.1 - Math.floor(k / 2) * 0.62], rot: [0, R() * 3, 0], mat: MAT.metal, tone: 0.25 + R() * 0.3 });
+  // Out on the apron by the shed's open left end: a stack of tyres, one
+  // leant on it, and the drums (the garage bay stays clear).
+  for (let k = 0; k < 3; k++) parts.push({ geo: new THREE.TorusGeometry(0.42, 0.14, 6, 14).rotateX(Math.PI / 2), pos: [-8.05, F + 0.14 + k * 0.27, -2.2], rot: [0, R(), 0], mat: MAT.rubber, tone: 0.3 });
+  parts.push({ geo: new THREE.TorusGeometry(0.42, 0.14, 6, 14), pos: [-8.1, F + 0.55, -3.3], rot: [0.25, 1.3, 0], mat: MAT.rubber, tone: 0.3 });
+  for (let k = 0; k < 4; k++) parts.push({ geo: buildOilDrum(), pos: [-8.2 + (k % 2) * 0.62, F, 3.3 - Math.floor(k / 2) * 0.62], rot: [0, R() * 3, 0], mat: MAT.metal, tone: 0.25 + R() * 0.3 });
   // Jerrycans in a row by the workshop door.
   for (let k = 0; k < 6; k++) parts.push({ geo: buildBox(0.17, 0.46, 0.34), pos: [wcx - 2.1 + k * 0.2, F + 0.23, wz0 - 0.45], rot: [0, (R() - 0.5) * 0.15, 0], mat: MAT.paint, tone: 0.28 + R() * 0.1 });
 
+  // THE GARAGE BAY'S DOORS. A steel lintel across the bay under the tie
+  // beam; the leaves hang below it, hinged on the columns' fronts.
+  const gX0 = cols[2], gX1 = cols[3], gW = gX1 - gX0;            // column centres
+  const doorH = EH - 0.5, hingeZ = Z0 - 0.24;
+  parts.push({ geo: buildBox(gW + 0.22, 0.34, 0.16), pos: [(gX0 + gX1) / 2, F + doorH + 0.2, Z0 - 0.2], mat: MAT.steel, tone: 0.3 });   // proud of the columns, under the tie: no shared faces
+  // The garage is CLOSED on its other sides (doors on an open bay read as
+  // nonsense — you, 2026-09-27): a corrugated partition against the open
+  // shed, the same cladding outside the end columns, each from the apron up
+  // to the roof — sheets to the tie, a flat gable over the tie. Partition on
+  // the garage side of its columns, cladding outside hers: never in a column.
+  const gable = new THREE.Shape([
+    new THREE.Vector2(Z0, 0), new THREE.Vector2(Z1, 0),
+    new THREE.Vector2(Z1, underRoof(Z1) - (F + EH - 0.1)), new THREE.Vector2(0, underRoof(0) - (F + EH - 0.1)),
+    new THREE.Vector2(Z0, underRoof(Z0) - (F + EH - 0.1)),
+  ]);
+  const gableGeo = faceted(new THREE.ExtrudeGeometry(gable, { depth: 0.04, bevelEnabled: false }).rotateY(Math.PI / 2));
+  for (const [wx, tone] of [[gX0 + 0.14, 0.4], [gX1 + 0.14, 0.34]]) {
+    for (let k = 0; k < 4; k++) {
+      parts.push({ geo: buildCorrugatedPanel({ width: 2.06, height: EH - 0.1 - (k % 2) * 0.04, ribs: 12, ribDepth: 0.03, offset: (k % 2) * 0.03 }), pos: [wx + (k % 2) * 0.03, F + 0.03, Z0 + 1 + k * 2], rot: [0, Math.PI / 2, 0], mat: MAT.metal, tone: tone + R() * 0.2 });
+    }
+    parts.push({ geo: gableGeo.clone(), pos: [wx + 0.05, F + EH - 0.1, 0], mat: MAT.metal, tone: tone - 0.05 });
+  }
+  const leafW = (gW - 0.22) / 2 - 0.04;                          // clear of the columns and each other
+  const doorLeaves = [-1, 1].map((sx) => {
+    const lp = [];
+    // Corrugated face outside, a steel frame and brace behind it (inside).
+    lp.push({ geo: buildCorrugatedPanel({ width: leafW, height: doorH - 0.08, ribs: 14, ribDepth: 0.03, offset: 0 }), pos: [-sx * leafW / 2, 0.05, -0.02], mat: MAT.metal, tone: 0.42 + R() * 0.1 });
+    for (const y of [0.12, doorH / 2, doorH - 0.12]) lp.push({ geo: buildBox(leafW, 0.1, 0.06), pos: [-sx * leafW / 2, y, 0.07], mat: MAT.steel, tone: 0.28 });
+    for (const x of [0.06, leafW - 0.06]) lp.push({ geo: buildBox(0.1, doorH - 0.02, 0.07), pos: [-sx * x, doorH / 2, 0.08], mat: MAT.steel, tone: 0.3 });   // offset from the rails' faces
+    lp.push({ geo: buildBox(0.08, Math.hypot(leafW, doorH / 2) - 0.1, 0.05), pos: [-sx * leafW / 2, doorH * 0.28, 0.13], rot: [0, 0, sx * Math.atan2(leafW, doorH / 2)], mat: MAT.steel, tone: 0.26 });
+    // The handle and the drop bolt, outside.
+    lp.push({ geo: buildBox(0.06, 0.4, 0.05), pos: [-sx * (leafW - 0.2), 1.2, -0.09], mat: MAT.steel, tone: 0.15 });
+    const g = assemble(lp);
+    bakeContactAO(g, { cell: 0.1, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+    g.scale(S, S, S);
+    // rotation.y that swings the leaf open, OUT of the shed (−Z).
+    return { geo: g, pivot: [(sx < 0 ? gX0 + 0.11 : gX1 - 0.11) * S, F * S, hingeZ * S], openYaw: -sx * (Math.PI / 2) };
+  });
+
   const st = [stencilPatch("frArmeeBlack", flatSurface([wcx, F + 2.95, wz0], [0, 0, -1], [-1, 0, 0], 3.4, "frArmeeBlack"), { lift: 0.01 })];
-  return finishWithStencils(parts, st, { hx: 11, hz: 5.9, cx: 2.4, cz: 0.2, height: EH + 1.5, ao: { cell: 0.3 } });
+  const geo = finishWithStencils(parts, st, { hx: 11, hz: 5.9, cx: 2.4, cz: 0.2, height: EH + 1.5, ao: { cell: 0.3 } });
+  // The bay a vehicle stands in (x, z of its centre line) and the door line.
+  geo.userData.gate = { leaves: doorLeaves, width: (gW - 0.22) * S, x: ((gX0 + gX1) / 2) * S, z: Z0 * S, floorY: F * S };
+  geo.userData.parts = { doorLeft: doorLeaves[0].geo, doorRight: doorLeaves[1].geo };
+  return geo;
 }
 
 /**

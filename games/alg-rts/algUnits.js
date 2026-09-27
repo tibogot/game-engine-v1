@@ -13,13 +13,23 @@ import { createSimClock } from "../shared-rts/simClock.js";
 import { createControlGroups } from "../shared-rts/controlGroups.js";
 import { ALG_UNIT_TYPES, ALG_UNIT_TYPE_KEYS } from "./algUnitTypes.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
-import { createAlgPost } from "./algPost.js";
+import { createAlgProducer, createStructuresRenderer } from "./algProducer.js";
+import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { VIEW_YAW } from "./layout.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
 import { createHudBar } from "./ui/hudBar.js";
 import { createUnitBar } from "./ui/unitBar.js";
 import { createCommandCard } from "./ui/commandCard.js";
 import { createMinimap } from "./ui/minimap.js";
+
+/**
+ * WHAT EACH BUILDING PRODUCES, seconds per unit (no costs yet: this game's
+ * economy comes with its rules). The command card lists them in this order.
+ */
+const PRODUCTION = {
+  post: { appele: 6 },
+  motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
+};
 
 /** The French vehicles built in code, by a unit type's `procedural` key. */
 const FR_VEHICLES = {
@@ -102,9 +112,39 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   });
   // After the renderer, which builds a view for each unit spawned from now on.
   const vehicles = takeOverVehicles(app, units, showroom);
-  // The post: selectable, produces appelés, its gate swings (algPost.js).
-  const post = showroom?.frenchPost ? createAlgPost({ app, mesh: showroom.frenchPost, units, muster }) : null;
-  app.algPost = post;
+  // The buildings' portraits, into the same map as the units' (the unit bar
+  // and the command card look them up by thumbKeyOf: "struct:post", …).
+  if (unitRenderer.thumbnails) {
+    await bakeStructureThumbnails(app.renderer, unitRenderer.thumbnails).catch((e) => console.warn("[thumbs] structures:", e));
+  }
+  // The production buildings (algProducer.js): selectable, they produce, and
+  // their gate or doors swing open for each unit that comes out.
+  const producers = [];
+  const S = 1.3;
+  if (showroom?.frenchPost) {
+    const g = showroom.frenchPost.geometry.userData.gate;
+    producers.push(createAlgProducer({
+      mesh: showroom.frenchPost, units, typeKey: "post", name: "Poste de Tighanimine", maxHp: 2000,
+      builds: PRODUCTION.post,
+      // In the courtyard behind the gate; out through the arch; the muster.
+      inside: [0, g.z + 4.5 * S], outside: [0, g.z - 3.2 * S], rally: muster,
+    }));
+  }
+  if (showroom?.motorPool) {
+    const m = showroom.motorPool, g = m.geometry.userData.gate;
+    // In the garage bay; out past the open leaves; then a vehicle's length
+    // further on, on open ground (the park in front of the shed).
+    const out = [g.x, g.z - 9], park = [g.x, g.z - 22];
+    const c = Math.cos(m.rotation.y), s = Math.sin(m.rotation.y);
+    const rw = { x: m.position.x + park[0] * c + park[1] * s, z: m.position.z - park[0] * s + park[1] * c };
+    producers.push(createAlgProducer({
+      mesh: m, units, typeKey: "motorPool", name: "Parc auto", maxHp: 1400,
+      builds: PRODUCTION.motorPool,
+      inside: [g.x, 0], outside: out,
+      rally: navGrid.nearestOpenWorld(rw.x, rw.z, false) ?? rw,
+    }));
+  }
+  app.algProducers = producers;
 
   // ── The HUD (this game's files, ./ui/) ─────────────────────────────────
   const hud = createHudBar();
@@ -126,14 +166,14 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (!sel.length) return;
       app.rtsCamera?.focusOn(sel.reduce((s, u) => s + u.position.x, 0) / sel.length, sel.reduce((s, u) => s + u.position.z, 0) / sel.length);
     },
-    // What a selected structure produces: the post trains appelés.
-    productionFor: (s) => (s.typeKey === "post" ? [{ key: "appele", label: "Appelé" }] : []),
+    // What a selected structure produces (PRODUCTION), labelled by unit name.
+    productionFor: (s) => Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => ({ key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name })),
     onBuild: (s, key) => s.enqueue(key),
     mount: hud.right,
   });
   let controlGroups = null;   // made after the selection it listens to
   const selection = createSelection({
-    app, units, unitRenderer, structuresRenderer: post?.renderer ?? null,
+    app, units, unitRenderer, structuresRenderer: producers.length ? createStructuresRenderer(producers) : null,
     onChange: (sel) => {
       unitBar.render(sel);
       commandCard.render(sel);
@@ -148,12 +188,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
 
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
-    sim.advance(dt, (d) => { post?.update(d); units.update(d); });
+    sim.advance(dt, (d) => { for (const p of producers) p.update(d); units.update(d); });
     healthBars.begin();
     selectionRings.begin();
     selectionFrames.begin();
     unitRenderer.sync(dt, app.camera);
-    if (post?.post.selected) post.markSelected(selectionFrames);
+    for (const p of producers) if (p.structure.selected) p.markSelected(selectionFrames);
     healthBars.commit();
     selectionRings.commit();
     selectionFrames.commit();

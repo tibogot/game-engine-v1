@@ -15,6 +15,7 @@ export const ALG_UNIT_TYPES = {
   appele: {
     typeKey: "appele",
     name: "Appelés",
+    buildLabel: "Appelé",   // the command card trains ONE man a click
     weapon: "rifle",
     isAir: false,
     foot: true,

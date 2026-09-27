@@ -157,7 +157,8 @@ function glassMaterial() {
   return _glass;
 }
 
-function kitView(geo) {
+/** A kit piece as the game draws it (paint, markings, gear, leaves, rotors) — also the portraits (structureThumbnails.js). */
+export function kitView(geo) {
   // The French side's paint (FR_PAINT_TINT) on everything of this game's.
   const m = new THREE.Mesh(geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
   m.castShadow = m.receiveShadow = true;
@@ -184,7 +185,7 @@ function kitView(geo) {
     m.add(gm);
   }
   // A gate (the post): each leaf its own mesh on its hinge, shut; the game
-  // swings it (algPost.js).
+  // swings it (algProducer.js).
   for (const [i, leaf] of (geo.userData.gate?.leaves ?? []).entries()) {
     const lm = new THREE.Mesh(leaf.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
     lm.name = i ? "GateRight" : "GateLeft";

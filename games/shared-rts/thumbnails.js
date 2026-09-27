@@ -16,7 +16,7 @@ export function thumbKeyOf(e) {
 /**
  * @param {object} o
  * @param {THREE.WebGPURenderer} o.renderer
- * @param {{key:string, make:()=>THREE.Object3D}[]} o.items
+ * @param {{key:string, make:()=>THREE.Object3D, frame?:(box:THREE.Box3)=>void}[]} o.items
  * @returns {Promise<Map<string,string>>}  key → PNG blob URL (img src / CSS url())
  */
 export async function bakeThumbnails({ renderer, items, size = 256, fill = 0.9 }) {
@@ -84,6 +84,9 @@ export async function bakeThumbnails({ renderer, items, size = 256, fill = 0.9 }
       prepareSkinnedBounds(group);
       box.setFromObject(group);
       if (box.isEmpty()) continue;
+      // An item may frame less than all of itself (a post's 23 m radio mast
+      // would shrink the post to a speck): `frame(box)` trims the box.
+      item.frame?.(box);
 
       box.getBoundingSphere(sphere);
       center.copy(sphere.center);
