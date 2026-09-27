@@ -14,7 +14,10 @@
  *   0 Alfa          flats and gentle slopes, in drifts
  *   1 Doum palm     the valley sides
  *   2 Reed-mace     the oasis edge
- *   3-7             unused (zero paint), kept as they were
+ *   3 Oleander      the wadi banks, pink
+ *   4 Tamarisk      behind the oleander, round the oases
+ *   5 Prickly pear  hedges round the hamlets
+ *   6-7             unused (zero paint), kept as they were
  *
  * Density is DERIVED from the map: height (from the land's own histogram),
  * slope (nothing above the 34° nav limit), the lakes (tools/algOasis.mjs),
@@ -111,6 +114,23 @@ const TALL = [
   { name: "Date grove", preset: "dateGrove", fn: (x, z) => { const d = oasisD(x, z); return band(d, 1.08, 2.4, 0.25) * patches(x, z, 9, 0.55, 9) * 0.22; } },
   { name: "Juniper scrub", preset: "juniperScrub", fn: (x, z, h, s) => band(s, 5, 30, 4) * (0.25 + 0.75 * patches(x, z, 30, 0.45, 11)) * 0.32 },
 ];
+/** Metres from a wadi's centreline, over its half-width (1 = the bed's edge). */
+const wadiD = (x, z) => {
+  let best = 99;
+  for (const w of LAYOUT.wadis ?? []) {
+    const P = w.points, hw = (w.width ?? 12) / 2;
+    for (let i = 0; i < P.length - 1; i++) {
+      const [ax, az] = P[i], [bx, bz] = P[i + 1];
+      const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
+      best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t) / hw);
+    }
+  }
+  return best;
+};
+/** Metres outside a hamlet's cleared ring (negative = inside it). */
+const hamletOut = (x, z) => Math.min(...LAYOUT.sites.filter((s) => s.kind === "hamlet").map((s) => Math.hypot(x - s.x, z - s.z) - s.r));
+
 const GROUND = [
   { name: "Alfa", preset: "alfa", fn: (x, z, h, s) => (1 - smooth((s - 20) / 6)) * patches(x, z, 25, 0.45, 13) * 0.55 },
   // Doum: NOT painted for now — the fan-palm builder's far LOD draws it as
@@ -120,6 +140,12 @@ const GROUND = [
   // An oasis in summer: olive leaves going straw at the tips, dark brown
   // heads (you: "flat bright colour is really not good for our terrain").
   { name: "Reed-mace", preset: "typha", look: { colorBase: "#3b4a2a", colorTip: "#9a9460", colorHead: "#4a3020", translucency: 0.45 }, fn: (x, z) => band(oasisD(x, z), 0.92, 1.22, 0.08) },
+  // The wadi banks: oleander right on the lip of the bed, tamarisk behind
+  // it and round the oases' outer ring, in patches.
+  { name: "Oleander", preset: "oleander", fn: (x, z) => band(wadiD(x, z), 0.95, 1.9, 0.25) * patches(x, z, 14, 0.6, 21) * 0.5 },
+  { name: "Tamarisk", preset: "tamarisk", fn: (x, z) => Math.max(band(wadiD(x, z), 1.6, 3.2, 0.4) * patches(x, z, 22, 0.4, 23) * 0.18, band(oasisD(x, z), 2.2, 3.4, 0.3) * patches(x, z, 16, 0.5, 25) * 0.2) },
+  // Prickly-pear hedges round the hamlets: a broken ring just outside.
+  { name: "Prickly pear", preset: "pricklyPear", fn: (x, z) => band(hamletOut(x, z), 1, 9, 2) * patches(x, z, 9, 0.55, 27) * 0.45 },
 ];
 
 // The wadi beds (paint slot 4, tools/algWadi.mjs): gravel, flash floods — bare.

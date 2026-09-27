@@ -605,6 +605,7 @@ export class FoliageScatterSystem {
     riverNearTex = null, waterMapTex = null, windTex, worldSize, fs, gp, tileSize = 192, plantsPerSide = 256,
     name = "Foliage", typeCount = FOLIAGE_TYPE_COUNT, nearFade = 0.9,
     terrainSurface = null,
+    variants = 1,   // shape variants per type (ScatterField)
   }) {
     // Foliage runs 8 types on a 192 m tile; susuki runs this same system with
     // one type on a 400 m tile so its fields stay visible to ~195 m.
@@ -618,6 +619,7 @@ export class FoliageScatterSystem {
       cullRadius: 5,   // a jungle fern is metres across, not centimetres
       shadows: true,   // tall plants cast (per type, near cascades only)
       nearFade,        // plants right at the camera thin out
+      variants,
     }));
     this.group = field.group;
     this.renderer = renderer;
@@ -685,9 +687,9 @@ export class FoliageScatterSystem {
 
   /** Rebuild one type's meshes after a shape setting changed. */
   rebuildType(i, type) {
-    this.field.rebuildType(i, (lod) => {
-      const made = createFoliageTypeGeometry(type, { lod });
-      if (lod === 0) {
+    this.field.rebuildType(i, (lod, _part, { variant = 0 } = {}) => {
+      const made = createFoliageTypeGeometry(type, { lod, variant });
+      if (lod === 0 && variant === 0) {
         made.geometry.computeBoundingBox();
         this._localH[i] = Math.max(0.05, made.geometry.boundingBox.max.y);
         this.field.typeRows[i * ROWS + 3].w = this._localH[i];
@@ -697,9 +699,11 @@ export class FoliageScatterSystem {
     // Only the card-carrying plants pay for the alpha test.
     const cardKey = cardTextureOf(type.kind);
     const mat = cardKey ? this._cardMat(cardKey) : this._mat;
-    for (let lod = 0; lod < FOLIAGE_LODS; lod++) this.field.meshes[i * FOLIAGE_LODS + lod].material = mat;
-    const sh = this.field.shadowMeshes[this.field.shadowMeshIndex(i)];
-    if (sh) sh.material = mat;
+    for (let v = 0; v < this.field.variants; v++) {
+      for (let lod = 0; lod < FOLIAGE_LODS; lod++) this.field.meshes[this.field.meshIndex(i, lod, 0, v)].material = mat;
+      const sh = this.field.shadowMeshes[this.field.shadowMeshIndex(i, 0, v)];
+      if (sh) sh.material = mat;
+    }
   }
 
   /**

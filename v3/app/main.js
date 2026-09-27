@@ -601,6 +601,10 @@ export async function startV3App(opts = {}) {
   // A game's explicit terrainFeatures wins over the editor's saved style.
   const terrainFeatureOverrides = { baseStyle: groundBase.style, ...(opts.terrainFeatures ?? {}) };
   const splatFeatureOverrides   = { ...(opts.splatFeatures ?? {}) };
+  // Shape variants per tall-plant type (ScatterField `variants`): a game asks
+  // for 3-4 so a grove or a forest is not one tree repeated. Default 1 = the
+  // field as it always was. Costs a draw per variant per detail level.
+  const tallPlantVariants = Math.max(1, Math.min(4, Math.round(opts.tallPlantVariants ?? 1)));
   // A/B switches for the terrain layer path, per page load (editor or game):
   // ?topk=3 (0 = classic, every layer on every pixel) and ?far=1 (near/far
   // blend on the top-K layers). See SPLAT_FEATURES in splatOverlayTsl.js.
@@ -1863,6 +1867,7 @@ export async function startV3App(opts = {}) {
         windTex:          grassWindTex,
         worldSize:        WORLD_SIZE,
         terrainSurface:   terrainSurfaceDesc(),
+        variants:         tallPlantVariants,
         fs:               susukiState,
         gp:               grassState,
       });

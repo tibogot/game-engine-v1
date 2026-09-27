@@ -142,8 +142,14 @@ export function buildPalm(type, ctx) {
   // foot: a tall trunk, older ones leaning out and curving up, a young
   // offshoot at the base with its crown near the ground. Every trunk its own
   // SHAPE, so with the field's random turn and scale no two groves match.
-  const trunkN = Math.max(1, Math.round(type.trunks ?? 1));
-  const stems = trunkN === 1 ? [{}] : clumpStems(trunkN, rand, lean);
+  // `trunksByVariant`: a shape variant may be a different KIND of plant —
+  // a grove of 3, a pair, a lone palm — so one slot mixes clumps and
+  // singles (ScatterField variants).
+  const tv = type.trunksByVariant;
+  const trunkN = Math.max(1, Math.round(tv ? tv[(ctx.variant ?? 0) % tv.length] : type.trunks ?? 1));
+  // A lone palm in a mixed slot leans harder: out in the open, it grew
+  // toward the light with nothing to hold it up.
+  const stems = trunkN === 1 ? [tv ? { theta: (v) => lean * 3 * Math.max(0.2, 1.5 - 1.3 * v) } : {}] : clumpStems(trunkN, rand, lean);
   for (const st of stems) stem(st);
   return finish();
 

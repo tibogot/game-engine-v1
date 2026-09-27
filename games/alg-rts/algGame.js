@@ -69,6 +69,9 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
     // The Atmosphere sky (3-LUT scattering). A game gets the old procedural
     // sky unless it asks, and setWorldLight below only drives this one.
     skyMode: "atmosphere",
+    // Three shapes of every tree (palm clumps, cedars, oaks): one shape
+    // repeated across a grove read as a stamp.
+    tallPlantVariants: Number(params.get("variants") ?? 3),
     csm: { cascades: 2, maxFar: 300, enabled: false },
     light: { shadowNormalBias: 0.12 },
     terrainFeatures: { cursor: false, snow: false, baseStyle: "flat" },

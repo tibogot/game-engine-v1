@@ -315,7 +315,8 @@ export const FOLIAGE_PRESETS = {
   // every trunk its own shape. Fewer fronds per crown than the single tree:
   // three crowns share the plant's triangle budget.
   dateGrove: {
-    kind: "palm", trunks: 3, fruit: "dates",
+    // Variants (a game asks for 3): a clump of 3, a pair, a lone leaning palm.
+    kind: "palm", trunks: 3, trunksByVariant: [3, 2, 1], fruit: "dates",
     fronds: 34, frondLength: 1.0, leaflets: 36, leafletWidth: 0.85, leafletAngle: 50,
     spread: 1.0, arch: 0.8, droop: 0.32, stemWidth: 1.15, bareStalk: 0.08,
     plumesPerStem: 7, plumeSpread: 40,
@@ -332,6 +333,35 @@ export const FOLIAGE_PRESETS = {
     spread: 1.0, arch: 0.85, droop: 0.45, stemWidth: 1.9, bareStalk: 0.02,
     plumesPerStem: 4, plumeSpread: 42,
     colorBase: "#2f4a24", colorTip: "#6f8a3c", colorHead: "#6e5b44", size: 12, translucency: 0.7,
+  },
+  // OLEANDER (Nerium oleander) — THE line of a dry North-African valley:
+  // a dense clump of canes along every wadi, narrow dark leathery leaves,
+  // pink flowers at the tips all summer. The cane-clump builder with narrow
+  // leaves and flower clusters (foliageGeometry.js buildLeafy, `flowers`).
+  oleander: {
+    // First pass (5 big flowers a cane, 64 thin leaves at 3 m) read as pink
+    // flowers on sticks: a real oleander is a dense dark bush, pink dots on it.
+    kind: "bush", flowers: 3,
+    fronds: 120, frondLength: 1.2, leaflets: 6, leafletWidth: 0.8, leafletAngle: 60,
+    spread: 0.6, arch: 0.6, droop: 0.2, stemWidth: 1, bareStalk: 0,
+    colorBase: "#223a1b", colorTip: "#4d6a33", colorHead: "#d9758f", size: 3.6, translucency: 0.4,
+  },
+  // TAMARISK (Tamarix) — the feathery grey-green small tree of wadi banks
+  // and salty hollows. The cauliflower builder, loose and pale.
+  tamarisk: {
+    kind: "dipterocarp",
+    fronds: 4, frondLength: 1.0, leaflets: 110, leafletWidth: 0.9, leafletAngle: 34,
+    spread: 0.7, arch: 0.9, droop: 0.35, stemWidth: 1.2, bareStalk: 0.12,
+    plumesPerStem: 0, plumeSpread: 0, crownDepth: 1.0,
+    colorBase: "#3b4735", colorTip: "#8b957a", colorHead: "#5e5244", size: 5, translucency: 0.45,
+  },
+  // PRICKLY PEAR (Opuntia ficus-indica) — the hedge round every village and
+  // garden in the Maghreb: tiers of flat grey-green pads (buildOpuntia).
+  pricklyPear: {
+    kind: "opuntia",
+    fronds: 4, frondLength: 1.0, leaflets: 4, leafletWidth: 1, leafletAngle: 0,
+    spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
+    colorBase: "#61744a", colorTip: "#7d8e58", colorHead: "#6c8050", size: 2.2, translucency: 0.15,
   },
   // DWARF FAN PALM (Chamaerops humilis, the "doum") — the knee-to-chest-high
   // clump of stiff grey-green fans that covers the Maghreb's dry hillsides.

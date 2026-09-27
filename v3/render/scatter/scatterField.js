@@ -101,6 +101,10 @@ export class ScatterField {
    */
   constructor({
     scene, renderer, name = "Scatter", typeCount, lods = 2, parts = 1, rows, ruleRow = null,
+    // SHAPE VARIANTS per type (2026-09-27): each plant picks one by its own
+    // hash, and every variant is its own mesh — so a grove is not one clump
+    // turned round. 1 = exactly the old field (no extra draws, same compute).
+    variants = 1,
     worldSize, tileSize = 192, plantsPerSide = 384,
     heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex = null, windTex,
     waterMapTex = null,
@@ -119,14 +123,16 @@ export class ScatterField {
     this.parts = parts;
     this.rows = rows;
     this.tileSize = tileSize;
-    const draws = (this.draws = typeCount * lods);
+    const V = (this.variants = Math.max(1, Math.round(variants)));
+    const subTypes = typeCount * V;
+    const draws = (this.draws = subTypes * lods);
     // One mesh (and one indirect entry) per draw × part.
     const meshCount = (this.meshCount = draws * parts);
     // Shadow lists: one slice per type after the draws' slices, and one mesh
     // (and indirect entry) per type × part after the draws' meshes.
     this.shadows = !!shadows;
-    const shadowCount = (this.shadowMeshCount = shadows ? typeCount * parts : 0);
-    const slices = draws + (shadows ? typeCount : 0);
+    const shadowCount = (this.shadowMeshCount = shadows ? subTypes * parts : 0);
+    const slices = draws + (shadows ? subTypes : 0);
     const count = (this.count = plantsPerSide * plantsPerSide);
 
     this.group = new THREE.Group();
@@ -267,6 +273,10 @@ export class ScatterField {
         idx = idx.add(step(running, pick));
       }
       const typeIdx = idx.toVar();
+      // Which shape variant (a mesh of its own): its own hash, fixed per plant.
+      const subIdx = V > 1
+        ? typeIdx.mul(V).add(min(floor(hash(instanceIndex.add(4441)).mul(V)), float(V - 1))).toVar()
+        : typeIdx;
 
       const mapHalf = u.uTerrainSize.mul(0.5);
       const mapStay = float(1).sub(smoothstep(mapHalf.sub(2), mapHalf.add(0.35), max(abs(worldX), abs(worldZ))));
@@ -345,7 +355,7 @@ export class ScatterField {
             const lodR2 = u.uLodDist2.add(dither.mul(2));
             lod = lod.add(step(lodR2.mul(lodR2), distSq));
           }
-          const drawK = int(typeIdx.mul(lods).add(lod));
+          const drawK = int(subIdx.mul(lods).add(lod));
           for (let k = 0; k < draws; k++) {
             If(drawK.equal(k), () => {
               const slot = atomicAdd(indirectStorage.element(k * parts * 5 + 1), uint(1));
@@ -357,8 +367,8 @@ export class ScatterField {
         });
         if (shadows) {
           If(castsShadow.greaterThan(0.5), () => {
-            const typeK = int(floor(typeIdx.add(0.5)));
-            for (let t = 0; t < typeCount; t++) {
+            const typeK = int(floor(subIdx.add(0.5)));
+            for (let t = 0; t < subTypes; t++) {
               If(typeK.equal(t), () => {
                 const slot = atomicAdd(indirectStorage.element((meshCount + t * parts) * 5 + 1), uint(1));
                 compactBuf.element(slot.add(uint((draws + t) * count))).assign(instanceIndex);
@@ -425,7 +435,7 @@ export class ScatterField {
   }
 
   /** Mesh index of (type, detail level, part). */
-  meshIndex(type, lod = 0, part = 0) { return (type * this.lods + lod) * this.parts + part; }
+  meshIndex(type, lod = 0, part = 0, variant = 0) { return ((type * this.variants + variant) * this.lods + lod) * this.parts + part; }
 
   /**
    * Create the meshes once the plant module's material exists.
@@ -442,7 +452,8 @@ export class ScatterField {
       mesh.frustumCulled = false;   // the compute culls, per plant
       mesh.castShadow = false;
       mesh.receiveShadow = false;
-      mesh.name = `${this.name}:type${Math.floor(k / this.lods)}:lod${k % this.lods}` +
+      const sub = Math.floor(k / this.lods);
+      mesh.name = `${this.name}:type${Math.floor(sub / this.variants)}${this.variants > 1 ? `:v${sub % this.variants}` : ""}:lod${k % this.lods}` +
         (this.parts > 1 ? `:part${part}` : "");
       this.meshes.push(mesh);
       this.group.add(mesh);
@@ -456,14 +467,14 @@ export class ScatterField {
       mesh.receiveShadow = false;   // never seen, only rendered into the shadow map
       mesh.layers.set(LAYERS.SCATTER_SHADOW);
       mesh.visible = false;         // until its type casts (setShadowCasters)
-      mesh.name = `${this.name}:type${Math.floor(m / this.parts)}:shadow` + (this.parts > 1 ? `:part${part}` : "");
+      mesh.name = `${this.name}:type${Math.floor(m / this.parts / this.variants)}:shadow` + (this.parts > 1 ? `:part${part}` : "");
       this.shadowMeshes.push(mesh);
       this.group.add(mesh);
     }
   }
 
   /** Shadow mesh index of (type, part). */
-  shadowMeshIndex(type, part = 0) { return type * this.parts + part; }
+  shadowMeshIndex(type, part = 0, variant = 0) { return (type * this.variants + variant) * this.parts + part; }
 
   /**
    * Rebuild one type's meshes after a shape setting changed.
@@ -474,11 +485,16 @@ export class ScatterField {
    * @param {number[]} [onlyParts] rebuild just these parts (default: all)
    */
   rebuildType(i, makeGeometry, onlyParts = null) {
+    for (let variant = 0; variant < this.variants; variant++) this._rebuildVariant(i, variant, makeGeometry, onlyParts);
+    this._indirect.needsUpdate = true;
+  }
+
+  _rebuildVariant(i, variant, makeGeometry, onlyParts) {
     for (let lod = 0; lod < this.lods; lod++) {
       for (let part = 0; part < this.parts; part++) {
         if (onlyParts && !onlyParts.includes(part)) continue;
-        const m = this.meshIndex(i, lod, part);
-        const { geometry, triangles } = makeGeometry(lod, part, { shadow: false });
+        const m = this.meshIndex(i, lod, part, variant);
+        const { geometry, triangles } = makeGeometry(lod, part, { shadow: false, variant });
         this._indirect.array[m * 5] = geometry.index.count;
         geometry.setIndirect(this._indirect, m * 5 * 4);
         const mesh = this.meshes[m];
@@ -491,8 +507,8 @@ export class ScatterField {
     // The shadow list draws the cheapest detail level: a shadow shows no leaflet.
     for (let part = 0; part < this.parts && this.shadows; part++) {
       if (onlyParts && !onlyParts.includes(part)) continue;
-      const s = this.shadowMeshIndex(i, part);
-      const { geometry } = makeGeometry(this.lods - 1, part, { shadow: true });
+      const s = this.shadowMeshIndex(i, part, variant);
+      const { geometry } = makeGeometry(this.lods - 1, part, { shadow: true, variant });
       this._indirect.array[(this.meshCount + s) * 5] = geometry.index.count;
       geometry.setIndirect(this._indirect, (this.meshCount + s) * 5 * 4);
       const mesh = this.shadowMeshes[s];
@@ -500,7 +516,6 @@ export class ScatterField {
       mesh.geometry = geometry;
       old?.dispose();
     }
-    this._indirect.needsUpdate = true;
   }
 
   /**
@@ -516,7 +531,7 @@ export class ScatterField {
 
   _syncShadowVisibility() {
     for (let m = 0; m < this.shadowMeshCount; m++) {
-      const t = Math.floor(m / this.parts);
+      const t = Math.floor(m / this.parts / this.variants);
       this.shadowMeshes[m].visible = this._shadowCastValues[t] > 0.5 && !!this._usedTypes[t];
     }
   }
@@ -556,7 +571,7 @@ export class ScatterField {
     if (key === this._usedKey) return;
     this._usedKey = key;
     this._usedTypes = used.slice();
-    for (let m = 0; m < this.meshCount; m++) this.meshes[m].visible = !!used[Math.floor(m / (this.parts * this.lods))];
+    for (let m = 0; m < this.meshCount; m++) this.meshes[m].visible = !!used[Math.floor(m / (this.parts * this.lods * this.variants))];
     this._syncShadowVisibility();
   }
 

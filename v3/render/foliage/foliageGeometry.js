@@ -195,10 +195,12 @@ export function usesPlumeTexture(kind) {
   return cardTextureOf(kind) === "plume";
 }
 
-export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
+export function createFoliageTypeGeometry(type, { lod = 0, variant = 0 } = {}) {
   const near = lod === 0, far = lod === 2;
   const P = [], N = [], UV = [], A = [], I = [];
-  const rand = rng(131 + Math.round((type.fronds ?? 7) * 37 + (type.arch ?? 1) * 500 + (type.leaflets ?? 10) * 11));
+  // A shape variant is the same plant grown from another seed (variant 0 =
+  // the seed every plant always had).
+  const rand = rng(131 + Math.round((type.fronds ?? 7) * 37 + (type.arch ?? 1) * 500 + (type.leaflets ?? 10) * 11) + variant * 7919);
 
   const push = (p, n, u, v, a) => {
     P.push(p[0], p[1], p[2]); N.push(n[0], n[1], n[2]); UV.push(u, v); A.push(a[0], a[1], a[2], a[3]);
@@ -218,7 +220,7 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
 
   // Plants that are not pinnate have their own builders.
   if (type.kind === "bamboo") return buildBamboo(type, { near, far, rand, push, vcount, I, finish });
-  if (type.kind === "palm") return buildPalm(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "palm") return buildPalm(type, { near, far, rand, push, vcount, I, finish, variant });
   if (type.kind === "jungleTree") return buildJungleTree(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "areca") return buildAreca(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "fanPalm") return buildFanPalm(type, { near, far, rand, push, vcount, I, finish });
@@ -229,6 +231,7 @@ export function createFoliageTypeGeometry(type, { lod = 0 } = {}) {
   if (type.kind === "dipterocarp") return buildDipterocarp(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "atlasCedar") return buildAtlasCedar(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "pandanus") return buildPandanus(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "opuntia") return buildOpuntia(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
     const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : type.kind === "susuki" ? "fan" : "plume";
@@ -755,6 +758,79 @@ function buildStalked(type, ctx, head) {
  * Giving both the same rosette (which is what the old builder did) is why a
  * jungle floor read as one repeated plant at two sizes.
  */
+/**
+ * PRICKLY PEAR (Opuntia) — the hedge round every Maghreb village and garden:
+ * flat oval PADS growing out of the rims of older pads, three or four tiers,
+ * on a short grey woody base. Unit frame (height ~1, the preset's `size`
+ * scales it). Pads are closed flattened ellipsoids in colorHead (part 2 —
+ * solid colour, soft-body shading); the base is the stalk part.
+ *   fronds   pads on the ground tier
+ *   leaflets tiers
+ */
+function buildOpuntia(type, { near, far, rand, push, vcount, I, finish }) {
+  const tiers = Math.max(2, Math.round(type.leaflets ?? 4) - (far ? 1 : 0));
+  const seg = far ? 5 : near ? 9 : 7, rings = far ? 3 : 5;
+  const PAD = 2;
+  /** One pad: centre `c`, its long axis `up`, its flat face's normal `n`. */
+  const pad = (c, up, n, len, wid, thick, tone) => {
+    const side = norm(cross(up, n));
+    const base = vcount();
+    for (let r = 0; r <= rings; r++) {
+      const th = (r / rings) * Math.PI;                       // along the pad
+      for (let s = 0; s < seg; s++) {
+        const ph = (s / seg) * Math.PI * 2;                   // round its section
+        const ex = Math.cos(th), ey = Math.sin(th) * Math.cos(ph), ez = Math.sin(th) * Math.sin(ph);
+        const p = add(add(add(c, up, ex * len), side, ey * wid), n, ez * thick);
+        // The ellipsoid's normal: each axis's coordinate over its radius.
+        const nn = norm([0, 1, 2].map((i) => up[i] * ex / len + side[i] * ey / wid + n[i] * ez / thick));
+        push(p, nn, 0.25, 0.5, [PAD, 0.4 + tone * 0.6, 0.5, 0.5]);
+      }
+    }
+    for (let r = 0; r < rings; r++) for (let s = 0; s < seg; s++) {
+      const a = base + r * seg + s, b = base + r * seg + ((s + 1) % seg), c2 = a + seg, d = b + seg;
+      I.push(a, c2, b, b, c2, d);
+    }
+  };
+  // The woody base: a stub, near only.
+  if (!far) {
+    const w = 0.035, b = vcount();
+    for (const [y, v] of [[0, 0], [0.16, 1]]) for (const s of [-1, 1]) push([s * w, y, 0], [0, 0, -1], s * 0.5 + 0.5, v, [1, v, 0.3, 0]);
+    I.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+  }
+  // Tiers: each pad sprouts 1-2 pads from its upper rim, tilted apart.
+  let front = [];
+  const n0 = Math.max(2, Math.round((type.fronds ?? 4) * (far ? 0.6 : 1)));
+  for (let k = 0; k < n0; k++) {
+    const az = (k / n0) * Math.PI * 2 + rand() * 0.8;
+    const lean = 0.15 + rand() * 0.3;
+    const up = norm([Math.cos(az) * Math.sin(lean), Math.cos(lean), Math.sin(az) * Math.sin(lean)]);
+    const face = norm(cross(up, [-Math.sin(az), 0, Math.cos(az)]));
+    front.push({ tip: [Math.cos(az) * 0.05, 0.1, Math.sin(az) * 0.05], up, face, len: 0.11, depth: 0 });
+  }
+  const all = [];
+  for (let t = 0; t < tiers; t++) {
+    const next = [];
+    for (const f of front) {
+      const len = f.len * (0.9 + rand() * 0.25), wid = len * 0.72, thick = len * 0.12;
+      const c = add(f.tip, f.up, len);
+      all.push({ c, up: f.up, face: f.face, len, wid, thick, tone: t / tiers });
+      if (t === tiers - 1) continue;
+      const kids = rand() < 0.55 ? 2 : 1;
+      for (let q = 0; q < kids; q++) {
+        const tilt = (q === 0 ? -1 : 1) * (0.35 + rand() * 0.45) * (kids === 1 ? (rand() - 0.5) * 2 : 1);
+        const side = norm(cross(f.up, f.face));
+        const up = norm(add(add(f.up, side, Math.sin(tilt)), [0, 1, 0], 0.25));
+        const spin = (rand() - 0.5) * 1.2;
+        const face = norm(add(f.face, side, spin));
+        next.push({ tip: add(add(c, f.up, len * 0.8), side, Math.sin(tilt) * wid * 0.6), up, face, len: len * 0.95, depth: t + 1 });
+      }
+    }
+    front = next;
+  }
+  for (const p of all) pad(p.c, p.up, p.face, p.len, p.wid, p.thick, p.tone);
+  return finish();
+}
+
 function buildLeafy(type, { near, far, rand, push, vcount, I, finish, bush }) {
   const leaves = Math.max(3, Math.round((type.fronds ?? 9) * (far ? 0.45 : near ? 1 : 0.7)));
   const size = (type.frondLength ?? 1) * (bush ? 0.45 : 0.6);
@@ -825,6 +901,26 @@ function buildLeafy(type, { near, far, rand, push, vcount, I, finish, bush }) {
         const side = norm(cross(dir, [0, 1, 0.001]));
         const len = size * (0.72 + lr * 0.4) * (0.7 + 0.3 * f);
         card(at, dir, side, len, len * 0.25 * wide, lr, f);
+      }
+      // FLOWERS (type.flowers, e.g. oleander): a cluster of small blossom
+      // cards at the cane's top, in colorHead (part 2; uv in the leaf
+      // texture's solid middle, so they draw as solid colour, not a leaf
+      // outline). Kept on the far level too — from the RTS camera the pink
+      // is the whole point of an oleander line.
+      const fl = Math.round((type.flowers ?? 0) * (far ? 0.5 : 1));
+      for (let k = 0; k < fl; k++) {
+        const r = size * 0.1;
+        const c = add(top, [(rand() - 0.5) * r * 2, (rand() - 0.3) * r, (rand() - 0.5) * r * 2]);
+        const a = rand() * Math.PI;
+        const s = r * (0.4 + rand() * 0.25);
+        for (const q of [0, Math.PI / 2]) {
+          const d = [Math.cos(a + q), 0, Math.sin(a + q)];
+          const b = vcount();
+          for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+            push(add(add(c, d, dx * s), [0, 1, 0], dy * s), [0, 1, 0], 0.25, 0.5, [2, 1, 0.5, 0.5]);
+          }
+          I.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        }
       }
     }
     return finish();

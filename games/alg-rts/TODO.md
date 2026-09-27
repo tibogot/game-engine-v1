@@ -90,13 +90,24 @@ Order: foliage → villages → animals & birds → ground detail.
 - [ ] Weather next: the SANDSTORM as a fourth preset (dust wall rolling in
       on the shared wind); fog banks drift WITH the shared wind.
 - [ ] Light panel's time slider doesn't follow a weather change.
-- [ ] **Every clump is the same clump**, turned: the tall-plant field
-      builds ONE geometry per slot. Fix: 3-4 shape variants per slot (a
-      seed per variant, instances pick by hash) — engine work in
-      foliageSystem/scatterField, worth it for palms and cedars.
-- [ ] Single tall date palms too, leaning, between the groves.
-- [ ] Oleander along the wadis (pink flowers) — the dry valley's line.
-- [ ] Tamarisk in the wadi beds; prickly pear hedges round villages.
+- [x] **Shape variants** (engine, 2026-09-27): ScatterField `variants` —
+      each plant picks a variant by its own hash, each variant its own mesh
+      grown from another seed. `startV3App({ tallPlantVariants: 3 })`; this
+      game asks for 3 (`?variants=1` to A/B). Default 1 = unchanged (nam,
+      editor). MEASURED over the oasis: 1.08 ms → 1.10 ms.
+- [x] **Single date palms**: `trunksByVariant: [3, 2, 1]` — the date-grove
+      slot's variants are a clump of 3, a pair and a lone palm leaning hard.
+- [x] **Oleander** on the wadi banks (the cane-clump builder + new
+      `flowers`: pink clusters at the cane tops, kept on the far level).
+      First pass read as pink flowers on sticks; now denser, darker, smaller
+      flowers. **you**: judge the size/density at play zoom.
+- [x] **Tamarisk** behind the oleander and round the oases (grey-green).
+- [x] **Prickly pear** hedges round the hamlets — a new builder
+      (buildOpuntia: tiers of flat oval pads from pad rims).
+- [ ] **PERF: the terrain costs ~4 ms over the hills** (5.9 of 6.2 ms in
+      the scene pass at the map's centre; 0.66 ms whole frame at the oasis).
+      Not new (same on the map before today). Not the triplanar cliff layer.
+      Next suspect: the top-3 layer blend on steep mixed paint.
 - [ ] Olive and fig in walled gardens; almond on terraces.
 - [ ] Doum: fix its far LOD (flat green mats) and paint it back.
 - [ ] Then villages: dechra on a ridge, koubba, cemetery, wells, zeribas.
