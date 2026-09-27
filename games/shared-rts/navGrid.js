@@ -679,6 +679,8 @@ export function createNavGrid({
     hasLOS: (ax, az, bx, bz, { foot = false } = {}) => { footRules = foot; return hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }); },
     setDebug,
     toggleDebug,
+    /** Is the debug overlay showing (the dev panel's checkbox reads it). */
+    get debugOn() { return !!debugMesh?.visible; },
   };
 }
 

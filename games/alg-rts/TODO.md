@@ -159,8 +159,28 @@ lift off the pad; the ALN comes out of the cave mouth.
          before any fighter, 122 with both crowds live).
    - [ ] Measure one crowd's GPU ms with the tab FOCUSED (the numbers taken
          here were poisoned: an empty queue took 46 ms in a background tab).
-   - [ ] The ALN AI that queues at the cave and moves the bands (combat is
-         nam's combat.js, not shared yet — the next big step).
+   - [ ] The ALN AI that queues at the cave and moves the bands — NEXT
+         (combat is in, 4g). Hit and run, not nam's AI.
+4g. [x] COMBAT (2026-09-27, algCombat.js). nam's fighting machinery moved to
+       games/shared-rts (nam keeps re-export shims): combat.js (acquire,
+       chase, fire, damage, death; "a man on foot" now reads `type.foot`,
+       was nam's "soldier"), projectiles.js (visible rounds by `weapon`:
+       rifle, mg, cannon, gunship), tracerField, spriteField, bloom,
+       combatFx (muzzle flashes, impacts, blasts), explosionField,
+       flameField (burning wrecks), craterSystem (scorch marks). Blasts
+       flush the birds; every shot puts up standing storks.
+       Tested: 12 appelés vs 5 moudjahidine → all 5 dead in ~200 steps, the
+       French scratched; a second band met by the vehicles' guns (fires,
+       craters). nam after the move: loads, its soldiers kill 4 test
+       enemies, no errors.
+   - [ ] Buildings as targets and fighters: damage, a wreck state, the
+         post's towers firing (they are not in `structures` yet).
+   - [ ] Line of sight: guns fire over/through buildings (as in nam).
+   - [ ] Cover and concealment, THIS game's rules (nam's cover.js is
+         jungle): the djebel's rocks and walls as cover, scrub as
+         concealment, the ALN's ambush.
+   - [ ] Sound (nam's recordings are there: rifle, MG, cannon, Huey…).
+4h. [x] N shows the NAV GRID (as nam), and Dev → Navigation → "Nav grid (N)".
    - [ ] The post and the motor pool have no health bar yet; the helipad
          (the Alouette lands and takes off) and the other buildings are not
          selectable yet. Set rally by right-click with a building selected.

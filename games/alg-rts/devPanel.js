@@ -151,6 +151,13 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     aln.hint("The enemy's cave mouth: a fighter every 4 s walks out of the dark. Here until the ALN's AI does the queueing.");
   }
 
+  // ── Navigation (the shared nav grid; N toggles it too, as in nam) ───────
+  if (app.navGrid) {
+    const nv = panel.section("Navigation");
+    nv.toggle("Nav grid (N)", { get: () => !!app.navGrid.debugOn, set: (v) => app.navGrid.setDebug?.(v) });
+    nv.hint("Where men and vehicles can go: blocked cells (buildings, cliffs, water) over the terrain. <b>N</b> toggles it anywhere.");
+  }
+
   // ── Birds (algBirds.js on the shared engine) ────────────────────────────
   const birds = app.algBirds;
   if (birds) {

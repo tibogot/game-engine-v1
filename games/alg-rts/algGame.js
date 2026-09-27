@@ -138,6 +138,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   window.addEventListener("keydown", (e) => {
     if (e.repeat || e.target.matches?.("input, textarea, select")) return;
     if (e.key?.toLowerCase() === "c") rtsCamera.toggle();
+    // N: the nav grid over the terrain (as nam) — where men and vehicles can go.
+    else if (e.key?.toLowerCase() === "n") app.navGrid?.toggleDebug?.();
   });
   // Fog: the shared fog banks, sited in the oases and wadis, and weather
   // presets over every fog layer (algFog.js). ?fog=0 = without.

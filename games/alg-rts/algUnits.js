@@ -15,6 +15,7 @@ import { ALG_UNIT_TYPES, ALG_UNIT_TYPE_KEYS } from "./algUnitTypes.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { createAlgProducer, createStructuresRenderer } from "./algProducer.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
+import { createAlgCombat } from "./algCombat.js";
 import { VIEW_YAW } from "./layout.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
 import { createHudBar } from "./ui/hudBar.js";
@@ -225,9 +226,19 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // The tactical map from the start: the post has its own radio mast.
   const minimap = createMinimap({ app, units, mount: hud.left, intel: () => true, upYaw: VIEW_YAW });
 
+  // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up
+  // enemies in range, close, fire visible rounds; the dead drop out of the
+  // selection.
+  const combat = await createAlgCombat(app, {
+    units,
+    onDeath: (e) => { selection.remove?.(e); controlGroups?.render(); },
+  });
+  app.algCombat = combat;
+
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
-    sim.advance(dt, (d) => { for (const p of producers) p.update(d); units.update(d); });
+    sim.advance(dt, (d) => { for (const p of producers) p.update(d); units.update(d); combat.step(d, sim.simTime); });
+    combat.frame(dt);
     healthBars.begin();
     selectionRings.begin();
     selectionFrames.begin();
@@ -241,5 +252,5 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     minimap.draw();
   });
 
-  return { navGrid, units, unitRenderer, selection, sim, stamped, vehicles, hud, unitBar, commandCard, minimap, controlGroups };
+  return { navGrid, units, unitRenderer, selection, sim, stamped, vehicles, hud, unitBar, commandCard, minimap, controlGroups, combat };
 }
