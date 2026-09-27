@@ -56,6 +56,51 @@ Keep this file current: tick things off here, add new asks here.
 - [ ] **FILL THE MAP** once buildings and vehicles are done (you): see
       "SUGGESTIONS — look & world" below, the first block.
 
+## FILLING THE MAP — foliage first, then villages (started 2026-09-27)
+
+Order: foliage → villages → animals & birds → ground detail.
+
+- [x] **Date palms as GROVES** (you: "different trunk shapes, some curved").
+      palmGeometry.js grew `trunks` (a clump from one root, clumpStems):
+      a tall upright/leaning trunk, others curving out of the ground and
+      rising, sweeping over, S-bent; often a young offshoot with its crown
+      on the ground. `fruit: "dates"` hangs bunches instead of coconuts.
+      New preset `dateGrove` (3 trunks); the oasis slot uses it
+      (tools/algVegetation.mjs). Single palms (nam) unchanged — same code
+      path and random stream when `trunks` is unset.
+      First pass curved too hard from one point: a grove read as a vase of
+      spider legs; now gentler and spread apart.
+- [x] **Palm leaves greener** (you: grey-green, flat): date palms now
+      #2c4c22 → #6f9a3c, deeper V-fold (38 → 50°), more sun through.
+      **you**: judge the green — close up it may now be a touch lime.
+- [x] **Oasis reeds** in desert colours (olive, straw tips, dark brown
+      heads) — overridden in algVegetation.mjs only; nam's typha unchanged.
+- [x] **No tree inside a building**: the showroom clears the painted
+      plants under every piece (`app.clearVegetation`, tiled over its
+      footprint or its own `userData.clearRects`). The SAS post clears only
+      the house + veranda, so its garden palm stays. The build system must
+      do the same when it places.
+- [x] **Fog** (you: nam's fogs here?): the FOG BANKS (raymarched volume
+      mist at places) moved to games/shared-rts/fogBanks.js + its panel;
+      nam keeps its own siting and is unchanged (checked in its page). Here
+      (algFog.js): 8 banks — both oases, three stretches of each wadi — and
+      WEATHER presets that set time, banks, ground fog and far haze at once:
+      Clear afternoon · Dawn mist (07:30, white in the hollows) · Dust haze
+      (ochre). Dev → Weather & fog, Dev → Fog banks. +0.4 ms GPU with banks.
+- [ ] Weather next: the SANDSTORM as a fourth preset (dust wall rolling in
+      on the shared wind); fog banks drift WITH the shared wind.
+- [ ] Light panel's time slider doesn't follow a weather change.
+- [ ] **Every clump is the same clump**, turned: the tall-plant field
+      builds ONE geometry per slot. Fix: 3-4 shape variants per slot (a
+      seed per variant, instances pick by hash) — engine work in
+      foliageSystem/scatterField, worth it for palms and cedars.
+- [ ] Single tall date palms too, leaning, between the groves.
+- [ ] Oleander along the wadis (pink flowers) — the dry valley's line.
+- [ ] Tamarisk in the wadi beds; prickly pear hedges round villages.
+- [ ] Olive and fig in walled gardens; almond on terraces.
+- [ ] Doum: fix its far LOD (flat green mats) and paint it back.
+- [ ] Then villages: dechra on a ridge, koubba, cemetery, wells, zeribas.
+
 ## SUGGESTIONS — look & world (not gameplay) — ranked, 2026-09-27
 
 **1. Fill the map (the biggest visual gap: it is bare ground now)**

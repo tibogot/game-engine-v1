@@ -13,6 +13,7 @@ import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom } from "./showroom.js";
 import { createAlgDevPanel } from "./devPanel.js";
+import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, VIEW_YAW } from "./layout.js";
 import "../../v3/styles/editor.css";
@@ -115,6 +116,11 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
     if (e.repeat || e.target.matches?.("input, textarea, select")) return;
     if (e.key?.toLowerCase() === "c") rtsCamera.toggle();
   });
+  // Fog: the shared fog banks, sited in the oases and wadis, and weather
+  // presets over every fog layer (algFog.js). ?fog=0 = without.
+  if (params.get("fog") !== "0") {
+    try { app.algFog = createAlgFog(app); } catch (e) { console.warn("[alg fog] failed:", e); }
+  }
   // Dev controls (?dev=0 hides them).
   if (params.get("dev") !== "0") {
     app.devPanel = createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLight: applyAuresLight });

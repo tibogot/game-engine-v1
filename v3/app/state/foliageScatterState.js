@@ -301,10 +301,28 @@ export const FOLIAGE_PRESETS = {
     kind: "palm",
     // First try (27% fronds, 34 of them) was a spiky pompom on a pole: a date
     // palm's fronds are 4-6 m on a 12-15 m trunk, many, arching out.
-    fronds: 46, frondLength: 1.0, leaflets: 44, leafletWidth: 0.85, leafletAngle: 38,
+    fronds: 46, frondLength: 1.0, leaflets: 44, leafletWidth: 0.85, leafletAngle: 50,
     spread: 1.0, arch: 0.8, droop: 0.32, stemWidth: 1.15, bareStalk: 0.08,
-    plumesPerStem: 9, plumeSpread: 40,
-    colorBase: "#3a4d33", colorTip: "#71845a", colorHead: "#7b6a55", size: 13, translucency: 0.45,
+    plumesPerStem: 9, plumeSpread: 40, fruit: "dates",
+    // Green, not grey (you, 2026-09-27: the grey-green read dusty and flat
+    // next to the oasis water). Deeper V-fold and more sun through the
+    // leaflets so the crown has a lit and a shaded side.
+    colorBase: "#2c4c22", colorTip: "#6f9a3c", colorHead: "#7b6a55", size: 13, translucency: 0.62,
+  },
+  // DATE GROVE — how date palms actually stand at an oasis: a CLUMP from
+  // one root (palmGeometry.js clumpStems) — a tall trunk, others leaning out
+  // and curving up, often a young offshoot with its crown on the ground —
+  // every trunk its own shape. Fewer fronds per crown than the single tree:
+  // three crowns share the plant's triangle budget.
+  dateGrove: {
+    kind: "palm", trunks: 3, fruit: "dates",
+    fronds: 34, frondLength: 1.0, leaflets: 36, leafletWidth: 0.85, leafletAngle: 50,
+    spread: 1.0, arch: 0.8, droop: 0.32, stemWidth: 1.15, bareStalk: 0.08,
+    plumesPerStem: 7, plumeSpread: 40,
+    // Green, not grey (you, 2026-09-27: the grey-green read dusty and flat
+    // next to the oasis water). Deeper V-fold and more sun through the
+    // leaflets so the crown has a lit and a shaded side.
+    colorBase: "#2c4c22", colorTip: "#6f9a3c", colorHead: "#7b6a55", size: 13, translucency: 0.62,
   },
   // CANARY PALM (Phoenix canariensis) — the colonial avenue palm: a massive
   // straight trunk and a huge dense ball of arching dark-green fronds.

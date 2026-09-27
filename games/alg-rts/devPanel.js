@@ -5,6 +5,8 @@
 // yet, and its light is a desert sun, not a jungle's mist. Sections join as
 // the systems do.
 import { createDevPanelShell } from "../shared-rts/devPanelShell.js";
+import { buildFogBanksPanel } from "../shared-rts/fogBanksPanel.js";
+import { WEATHER } from "./algFog.js";
 
 const DEG = Math.PI / 180;
 
@@ -61,6 +63,21 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
   fx.toggle("Bloom", { get: () => bloom.enabled, set: (v) => { bloom.enabled = v; app.postFx?.setBloom?.(bloom); } });
   fx.slider("Bloom strength", { min: 0, max: 2, step: 0.05, get: () => bloom.strength, set: (v) => { bloom.strength = v; app.postFx?.setBloom?.(bloom); } });
   fx.hint("Dust haze: it eats the plain and the far ground. Bloom is selective (emissive only).");
+
+  // ── Weather & fog (algFog.js; the banks are shared-rts/fogBanks.js) ────
+  const af = app.algFog;
+  if (af) {
+    const wx = panel.section("Weather & fog", { open: true });
+    wx.select("Weather", {
+      options: Object.entries(WEATHER).map(([k, w]) => [k, w.label]),
+      get: () => af.weather,
+      set: (k) => { af.setWeather(k); panel.refresh(); buildFogBanksPanel(banksEl, af.fog, { rtsCamera }); },
+    });
+    wx.hint("One choice sets the time of day, the fog banks, the ground fog and the far haze together. <b>Dawn mist</b>: white in the oases and wadi beds. <b>Dust haze</b>: ochre, the far ground gone.");
+    const banks = panel.section("Fog banks");
+    const banksEl = banks.el;
+    buildFogBanksPanel(banksEl, af.fog, { rtsCamera });
+  }
 
   // ── Wind (algWind.js: the flags and the windsock share it) ──────────────
   const wind = app.showroom?.wind;

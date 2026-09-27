@@ -8,7 +8,7 @@
  * Tall-plant field (4 slots, the RGBA of `susukiDensity`, 512² over the map):
  *   0 Atlas cedar   the heights, in stands
  *   1 Holm oak      mid slopes, scattered and in groves
- *   2 Date palm     round the oasis, in clumps
+ *   2 Date grove    round the oasis: clumps of 3 trunks, every one its own shape
  *   3 Juniper scrub every dry slope, sparse
  * Ground-foliage field (8 slots, `foliagePaint`, 2 RGBA pages of 1024²):
  *   0 Alfa          flats and gentle slopes, in drifts
@@ -106,7 +106,9 @@ const band = (v, a, b, soft) => smooth((v - a) / soft) * (1 - smooth((v - b) / s
 const TALL = [
   { name: "Atlas cedar", preset: "atlasCedar", fn: (x, z, h, s) => band(h, P70, 999, 12) * (1 - smooth((s - 26) / 6)) * patches(x, z, 70, 0.45, 3) * 0.7 },
   { name: "Holm oak", preset: "holmOak", fn: (x, z, h, s) => band(h, P30, P90, 10) * band(s, 6, 28, 5) * patches(x, z, 45, 0.3, 5) * 0.3 },
-  { name: "Date palm", preset: "datePalm", fn: (x, z) => { const d = oasisD(x, z); return band(d, 1.08, 2.4, 0.25) * patches(x, z, 9, 0.55, 9) * 0.3; } },
+  // Groves, not single trees: each plant is a clump of 3 (dateGrove), so a
+  // little thinner than the single palm was.
+  { name: "Date grove", preset: "dateGrove", fn: (x, z) => { const d = oasisD(x, z); return band(d, 1.08, 2.4, 0.25) * patches(x, z, 9, 0.55, 9) * 0.22; } },
   { name: "Juniper scrub", preset: "juniperScrub", fn: (x, z, h, s) => band(s, 5, 30, 4) * (0.25 + 0.75 * patches(x, z, 30, 0.45, 11)) * 0.32 },
 ];
 const GROUND = [
@@ -114,7 +116,10 @@ const GROUND = [
   // Doum: NOT painted for now — the fan-palm builder's far LOD draws it as
   // flat green mats across the hillside (2026-09-26). Slot kept, zero paint.
   { name: "Doum palm", preset: "doumPalm", fn: () => 0 },
-  { name: "Reed-mace", preset: "typha", fn: (x, z) => band(oasisD(x, z), 0.92, 1.22, 0.08) },
+  // Nam's typha is lime green with orange heads — a paddy in the monsoon.
+  // An oasis in summer: olive leaves going straw at the tips, dark brown
+  // heads (you: "flat bright colour is really not good for our terrain").
+  { name: "Reed-mace", preset: "typha", look: { colorBase: "#3b4a2a", colorTip: "#9a9460", colorHead: "#4a3020", translucency: 0.45 }, fn: (x, z) => band(oasisD(x, z), 0.92, 1.22, 0.08) },
 ];
 
 // The wadi beds (paint slot 4, tools/algWadi.mjs): gravel, flash floods — bare.
@@ -164,7 +169,7 @@ man.susuki.plants = TALL.map((sp) => slot(sp));
 // must reach as far as the RTS camera sees: 60/140 m LODs were a grass's).
 // translucencyMul 0.6: at the field default (1.1) the date palms read pale lime.
 Object.assign(man.susuki.field, { translucencyMul: 0.6, density: 0.1, clumping: 0.35, clumpSize: 12, lodDistance: 90, lodDistance2: 200, fadeStart: 330, fadeEnd: 420, shadowDistance: 35 });
-GROUND.forEach((sp, i) => { man.foliagePlants[i] = slot(sp); });
+GROUND.forEach((sp, i) => { man.foliagePlants[i] = slot(sp, sp.look ?? {}); });
 Object.assign(man.foliageField, { density: 0.45, lodDistance: 70, lodDistance2: 170, fadeStart: 300, fadeEnd: 380 });
 
 const tall = paintMap(512, 1, TALL);

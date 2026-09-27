@@ -297,6 +297,26 @@ export async function placeShowroom(app, list = SHOWROOM) {
     app.scene.add(mesh);
     placed[e.key] = mesh;
   }
+  // 3) NO TREE INSIDE A BUILDING. The map's plants are painted density;
+  // clear it under every piece (its footprint, or its own userData.clearRects
+  // when part of it — a yard, a garden — may keep its plants). Circles tiled
+  // over each rect: clearVegetation is round.
+  for (const e of list) {
+    const o = placed[e.key];
+    const ud = o?.geometry?.userData;
+    if (!ud) continue;
+    const rects = ud.clearRects ?? (ud.footprint ? [ud.footprint] : []);
+    const c = Math.cos(o.rotation.y), s = Math.sin(o.rotation.y);
+    for (const r of rects) {
+      const step = 3;
+      for (let lx = -r.hx; lx <= r.hx + 0.01; lx += Math.min(step, r.hx * 2 || step)) {
+        for (let lz = -r.hz; lz <= r.hz + 0.01; lz += Math.min(step, r.hz * 2 || step)) {
+          const x = r.cx + lx, z = r.cz + lz;
+          app.clearVegetation?.(o.position.x + x * c + z * s, o.position.z - x * s + z * c, step * 0.75 + 0.6, { grass: step * 0.75, edge: 0.5 });
+        }
+      }
+    }
+  }
   placed.plants = placePlants(app);
   // The post's tricolour: live cloth on its flag mount.
   const flags = [];

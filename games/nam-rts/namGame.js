@@ -103,7 +103,7 @@ import { applyNamRocks, clearKarstGround } from "./namRocks.js";
 import { dressEnemyCamp } from "./enemyCampDressing.js";
 import { createChickenFlock } from "./chickenFlock.js";
 import { createFogBanks, siteFogBanks } from "./fogBanks.js";
-import { buildFogBanksPanel } from "./fogBanksPanel.js";
+import { buildFogBanksPanel } from "../shared-rts/fogBanksPanel.js";
 import { applyCloudShadows, buildCloudShadowsPanel } from "./cloudShadowsPanel.js";
 import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
 import { createEnemyAI } from "./enemyAI.js";
