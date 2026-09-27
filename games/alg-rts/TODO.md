@@ -80,7 +80,13 @@ lift off the pad; the ALN comes out of the cave mouth.
        soldier as STAND-IN model) musters out of the post's gate; drag-select
        + right-click move tested with real pointer events: 12 selected, all
        moved 50 m and formed up, around the post not through it.
-3. [ ] HUD + command card (Algeria's own files)
+3. [x] HUD + command card — Algeria's OWN files in games/alg-rts/ui/
+       (hudBar, unitBar, commandCard, minimap), day-one copies of nam's to
+       redesign later. Minimap on from the start (the post's radio mast),
+       in Aurès colours. Control groups (Ctrl+1–9) moved to shared-rts.
+       nam checked after the move: loads, 34 units, HUD, no errors.
+       Still nam's in the copies: the command card's structure labels
+       (radio/relay/enemy base), the HUD's olive/brass styling.
 4. [ ] Production: gate opens/closes as units march out
 5. [ ] Animals alongside: donkeys (Donkey_compressed.glb) at wells and on
        tracks, chickens (Chicken_001_compressed.glb) in the mechta yards

@@ -9,7 +9,13 @@ import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { createSelection } from "../shared-rts/selection.js";
 import { createSimClock } from "../shared-rts/simClock.js";
+import { createControlGroups } from "../shared-rts/controlGroups.js";
 import { ALG_UNIT_TYPES, ALG_UNIT_TYPE_KEYS } from "./algUnitTypes.js";
+// This game's own UI (copies of nam's on day one, to be redesigned).
+import { createHudBar } from "./ui/hudBar.js";
+import { createUnitBar } from "./ui/unitBar.js";
+import { createCommandCard } from "./ui/commandCard.js";
+import { createMinimap } from "./ui/minimap.js";
 
 /**
  * The placed buildings are plain meshes, not engine props, so the nav grid
@@ -60,8 +66,42 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const unitRenderer = await createUnitRenderer({
     app, units, healthBars, selectionRings, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS, procedural: {},
   });
-  const selection = createSelection({ app, units, unitRenderer, onChange: (sel) => onSelect(sel) });
+  // ── The HUD (this game's files, ./ui/) ─────────────────────────────────
+  const hud = createHudBar();
+  // The boot page's key-hint label sits where the bar goes.
+  const hint = document.getElementById("hud");
+  if (hint) hint.style.display = "none";
+  const mine = (key) => units.list.filter((u) => u.alive && u.team === "player" && u.typeKey === key);
+  const unitBar = createUnitBar({
+    thumbnails: unitRenderer.thumbnails,
+    onPickGroup: (arr) => app.selection?.select(arr),
+    onSelectAllType: (key) => app.selection?.select(mine(key)),
+    mount: hud.centre,
+  });
+  const commandCard = createCommandCard({
+    thumbnails: unitRenderer.thumbnails,
+    onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
+    onFocus: () => {
+      const sel = app.selection?.selected ?? [];
+      if (!sel.length) return;
+      app.rtsCamera?.focusOn(sel.reduce((s, u) => s + u.position.x, 0) / sel.length, sel.reduce((s, u) => s + u.position.z, 0) / sel.length);
+    },
+    mount: hud.right,
+  });
+  let controlGroups = null;   // made after the selection it listens to
+  const selection = createSelection({
+    app, units, unitRenderer,
+    onChange: (sel) => {
+      unitBar.render(sel);
+      commandCard.render(sel);
+      controlGroups?.render();
+      onSelect(sel);
+    },
+  });
   app.selection = selection;
+  controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
+  // The tactical map from the start: the post has its own radio mast.
+  const minimap = createMinimap({ app, units, mount: hud.left, intel: () => true });
 
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
@@ -71,7 +111,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     unitRenderer.sync(dt, app.camera);
     healthBars.commit();
     selectionRings.commit();
+    commandCard.tick();
+    unitBar.tick();
+    minimap.draw();
   });
 
-  return { navGrid, units, unitRenderer, selection, sim, stamped };
+  return { navGrid, units, unitRenderer, selection, sim, stamped, hud, unitBar, commandCard, minimap, controlGroups };
 }
