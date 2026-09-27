@@ -4,8 +4,8 @@
 // impacts and blasts; flameField.js the burning wrecks; craterSystem.js the
 // scorch marks), wired to this game's units.
 //
-// The buildings fight and are fought (algStructures.js). Not yet (TODO.md):
-// cover and concealment (nam's cover.js — this game's own rules), smoke, sound.
+// The buildings fight and are fought (algStructures.js); cover and
+// concealment are this map's (algCover.js). Not yet (TODO.md): smoke, sound.
 import { createCombatFx } from "../shared-rts/combatFx.js";
 import { createFlameField } from "../shared-rts/flameField.js";
 import { createCraterSystem } from "../shared-rts/craterSystem.js";
@@ -18,7 +18,7 @@ import { createCombat } from "../shared-rts/combat.js";
  * @param {object} o.units     the shared units
  * @param {(e: object) => void} [o.onDeath]
  */
-export async function createAlgCombat(app, { units, structures: built = null, onDeath = () => {} }) {
+export async function createAlgCombat(app, { units, structures: built = null, cover = null, onDeath = () => {} }) {
   const fx = createCombatFx({ app });
   const fire = createFlameField({ app });
   const craters = await createCraterSystem({ app });
@@ -43,7 +43,7 @@ export async function createAlgCombat(app, { units, structures: built = null, on
   const structures = { list: built?.list ?? [] };
   const structuresRenderer = { muzzleOf: (s) => built?.muzzleOf(s) ?? s.position.clone() };
   combat = createCombat({
-    units, structures, fx, structuresRenderer, projectiles, fire, craters,
+    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover,
     onDeath: (e) => { if (e.isStructure) built?.wreck(e); onDeath(e); },
   });
 
@@ -53,6 +53,7 @@ export async function createAlgCombat(app, { units, structures: built = null, on
     step(dt, simTime) {
       combat.update(dt);
       built?.step(dt, projectiles);      // the mortar pit's bombs
+      cover?.step(dt, units.list);       // "I just fired" reveal timers
       projectiles.update(dt, app.camera);
       fire.update(dt, simTime);
     },

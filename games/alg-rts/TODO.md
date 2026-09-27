@@ -218,9 +218,24 @@ lift off the pad; the ALN comes out of the cave mouth.
          searchlight, cache, sangar) in structureThumbnails.js.
    - [ ] A real wreck shape (roof fallen, walls broken) instead of charring.
    - [ ] Line of sight: guns fire over/through buildings (as in nam).
-   - [ ] Cover and concealment, THIS game's rules (nam's cover.js is
-         jungle): the djebel's rocks and walls as cover, scrub as
-         concealment, the ALN's ambush.
+   - [x] COVER AND CONCEALMENT (2026-09-28, algCover.js). nam's rule moved
+         to games/shared-rts (cover.js + coverOverlay.js; nam keeps shims):
+         concealment stops you being SEEN (acquire range), cover stops you
+         being HURT (from its side), firing reveals a hidden man for 4 s.
+         Per game: `params` and `extra` obstacles; new `concealCeil` (nam 1).
+         The Aurès: MEASURED 82.5% of walkable ground has no vegetation,
+         scrub 0.5-0.6 → concealment from 0.2, full at 0.65 (the thickest
+         scrub: seen at 40% range); 14.2% of the ground conceals. Cover from
+         the placed pieces (no rock props on this map): HARD for stone and
+         sandbags, none for wire, brush screens, thorn pens, pads. Big
+         buildings stamp cover along their WALLS only (tiled over the
+         footprint, a man 35 m in front of the gate had cover 0.94 in the
+         open). The ALN AI now scores ambush spots with the same rule.
+         V = the overlay (green cover, cyan concealment; Dev → Navigation →
+         pin). Tested: a band in the scrub vs 4 appelés lost 1, in the open 2.
+   - [ ] Terrain cover: wadi banks, ridge crests, gully floors — the Aurès'
+         real cover is the ground itself (no rock props yet either).
+   - [ ] Cedars and palms: their trunks as cover in the groves.
    - [ ] Sound (nam's recordings are there: rifle, MG, cannon, Huey…).
 4h. [x] N shows the NAV GRID (as nam), and Dev → Navigation → "Nav grid (N)".
    - [ ] The post and the motor pool have no health bar yet; the helipad

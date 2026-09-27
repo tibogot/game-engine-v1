@@ -163,6 +163,10 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     const nv = panel.section("Navigation");
     nv.toggle("Nav grid (N)", { get: () => !!app.navGrid.debugOn, set: (v) => app.navGrid.setDebug?.(v) });
     nv.hint("Where men and vehicles can go: blocked cells (buildings, cliffs, water) over the terrain. <b>N</b> toggles it anywhere.");
+    if (app.algCoverOverlay) {
+      nv.toggle("Cover overlay (pin)", { get: () => app.algCoverOverlay.pinned, set: (v) => app.algCoverOverlay.setPinned(v) });
+      nv.hint("Players hold <b>V</b> with men selected: <b>green</b> = cover (stone, sandbags — takes damage off, from its side), <b>cyan</b> = concealment (scrub — you are seen closer). Firing gives a hidden man away for 4 s.");
+    }
   }
 
   // ── Birds (algBirds.js on the shared engine) ────────────────────────────

@@ -68,13 +68,17 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   const french = () => units.list.filter((u) => u.alive && u.team === "player");
   const liveFighters = () => units.list.filter((u) => u.alive && u.team === "enemy").length;
 
-  /** Concealment round a spot: scrub (ground foliage) and tall plants, 0-2. */
+  /**
+   * How good a spot is to lie up in: CONCEALMENT round it (the game's own
+   * rule, algCover.js — the scrub that really hides you) and COVER there
+   * (stone, walls). 0-2.
+   */
   function cover(x, z) {
+    const c = app.algCover;
+    if (!c) return (app.sampleFoliageDensity?.(x, z) ?? 0) + (app.sampleTallPlantDensity?.(x, z) ?? 0);
     let s = 0;
-    for (const [dx, dz] of [[0, 0], [5, 0], [-5, 0], [0, 5], [0, -5]]) {
-      s += (app.sampleFoliageDensity?.(x + dx, z + dz) ?? 0) + (app.sampleTallPlantDensity?.(x + dx, z + dz) ?? 0);
-    }
-    return s / 5;
+    for (const [dx, dz] of [[0, 0], [5, 0], [-5, 0], [0, 5], [0, -5]]) s += c.concealmentAt(x + dx, z + dz) / c.params.maxConcealment;
+    return s / 5 + c.coverAt(x, z);
   }
 
   /** The French to hit: a group out in the open, away from the post first. */

@@ -18,6 +18,7 @@ import { createAlgStructures } from "./algStructures.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { createAlgCombat } from "./algCombat.js";
 import { createAlgAI } from "./algAI.js";
+import { createAlgCover } from "./algCover.js";
 import { VIEW_YAW } from "./layout.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
 import { createHudBar } from "./ui/hudBar.js";
@@ -235,8 +236,13 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up
   // enemies in range, close, fire visible rounds; the dead drop out of the
   // selection.
+  // COVER AND CONCEALMENT (algCover.js): scrub hides, stone and sandbags
+  // shelter; hold V to see it (armed when something is selected, as nam).
+  const coverSys = createAlgCover(app, { showroom, isArmed: () => (selection.selected?.length ?? 0) > 0 });
+  app.algCover = coverSys.cover;
+  app.algCoverOverlay = coverSys.overlay;
   const combat = await createAlgCombat(app, {
-    units, structures,
+    units, structures, cover: coverSys.cover,
     onDeath: (e) => { selection.remove?.(e); controlGroups?.render(); },
   });
   app.algCombat = combat;
@@ -254,6 +260,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.addPreRenderHook((dt) => {
     sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); units.update(d); combat.step(d, sim.simTime); });
     combat.frame(dt);
+    // The V overlay: centred on the selection until the pointer has moved.
+    const lead = selection.selected?.find((e) => !e.isStructure) ?? selection.selected?.[0];
+    if (lead?.position) coverSys.overlay.setFallback(lead.position.x, lead.position.z);
+    coverSys.overlay.update(dt);
     healthBars.begin();
     selectionRings.begin();
     selectionFrames.begin();
