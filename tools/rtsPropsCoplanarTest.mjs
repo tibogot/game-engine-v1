@@ -41,6 +41,7 @@ import {
 import * as campKit from "../v3/render/objects/rtsEnemyCamp.js";
 import { buildBaileyBridge, buildMonkeyBridge, buildTrestleBridge } from "../v3/render/objects/rtsBridges.js";
 import * as algeria from "../v3/render/objects/rtsAlgeria.js";
+import * as algVillage from "../v3/render/objects/rtsAlgVillage.js";
 import { buildFrenchPost } from "../v3/render/objects/rtsFrenchPost.js";
 import { buildMechta } from "../v3/render/objects/rtsMechta.js";
 import { buildAlnCamp } from "../v3/render/objects/rtsAlnCamp.js";
@@ -274,7 +275,7 @@ for (const [name, fn] of [["EBR", buildEBR], ["Willys", buildWillys], ["GMC", bu
   if (m.userData.turret) check(`${name} turret`, m.userData.turret.geo);
   if (m.userData.rotors) { check(`${name} main rotor`, m.userData.rotors.main.geo); check(`${name} tail rotor`, m.userData.rotors.tail.geo); }
 }
-for (const [name, fn] of Object.entries(algeria)) {
+for (const [name, fn] of [...Object.entries(algeria), ...Object.entries(algVillage)]) {
   if (!name.startsWith("build") || typeof fn !== "function") continue;
   const g = fn();
   if (g?.isBufferGeometry) check(name, g);

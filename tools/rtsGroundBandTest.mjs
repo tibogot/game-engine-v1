@@ -26,6 +26,7 @@ import * as buildables from "../v3/render/objects/rtsBuildables.js";
 import { buildColonialHQ } from "../v3/render/objects/rtsColonial.js";
 import { buildHueyWreck } from "../v3/render/objects/rtsVehicles.js";
 import * as algeria from "../v3/render/objects/rtsAlgeria.js";
+import * as algVillage from "../v3/render/objects/rtsAlgVillage.js";
 import { buildFrenchPost } from "../v3/render/objects/rtsFrenchPost.js";
 import { buildMechta } from "../v3/render/objects/rtsMechta.js";
 import { buildAlnCamp } from "../v3/render/objects/rtsAlnCamp.js";
@@ -89,6 +90,7 @@ all("the enemy kit", enemyKit, ["buildZpuGuns", "buildMortarTube", "buildSpiderM
 all("buildables", buildables, ["buildGunPitGun", "buildNestGun"]);
 // The Algeria game (alg-rts).
 all("algeria buildables", algeria, algeria.GROUND_BAND_SKIP ?? []);
+all("algeria village", algVillage);
 console.log("singles");
 check("French post", buildFrenchPost());
 check("mechta", buildMechta());

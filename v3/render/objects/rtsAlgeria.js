@@ -18,7 +18,7 @@ import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 const S = 1.3;
 
 /** Finish a kit piece: AO, scale, footprint, height. */
-function finish(parts, { hx, hz, cx = 0, cz = 0, height, ao = {} }) {
+export function finish(parts, { hx, hz, cx = 0, cz = 0, height, ao = {} }) {
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.2, radius: 2, strength: 0.45, groundFade: 0.3, floor: 0.5, ...ao });
   geo.scale(S, S, S);
@@ -217,7 +217,7 @@ function beamPart(a, b, w, h, mat, tone) {
  * Faceted, and indexed: a shape shaded smooth (a 4-sided cylinder, a rock)
  * reads as a blob; mergeGeometries refuses a mix of indexed and not.
  */
-function faceted(geo, { boxUV = false } = {}) {
+export function faceted(geo, { boxUV = false } = {}) {
   const g = geo.index ? geo.toNonIndexed() : geo;
   g.computeVertexNormals();
   if (boxUV) {
@@ -243,7 +243,7 @@ function faceted(geo, { boxUV = false } = {}) {
  * radius and height wobbling round the ring, so a berm is a heap and not a
  * turned pot. Points inside `rFlat` (a floor) are left flat.
  */
-function earthBerm(prof, { seed = 1, segs = 44, rJit = 0.35, yJit = 0.12, rFlat = 0 } = {}) {
+export function earthBerm(prof, { seed = 1, segs = 44, rJit = 0.35, yJit = 0.12, rFlat = 0 } = {}) {
   const g = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), segs);
   const p = g.attributes.position;
   const ph = [seed * 1.7, seed * 2.9, seed * 4.3, seed * 5.1];
@@ -561,7 +561,7 @@ function jitterByPosition(g, amt, seed, { flatTop = null } = {}) {
 }
 
 /** A field stone, w × h × d: a jittered icosahedron, faceted, its top a little flattened. */
-function fieldStone(seed, w, h, d, detail = 0) {
+export function fieldStone(seed, w, h, d, detail = 0) {
   if (detail > 0) return crag(seed, w, h, d);
   const g = jitterByPosition(new THREE.IcosahedronGeometry(0.5, detail), 0.22, seed, { flatTop: 0.36 });
   g.scale(w, h / 0.86, d);
@@ -608,7 +608,7 @@ function crag(seed, w, h, d) {
  * through, a slight batter. How every wall in the Aurès is built — sangars,
  * terraces, gourbis.
  */
-function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, len = 0.5, batter = 0.05, tone = 0.5, closed = false } = {}) {
+export function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, len = 0.5, batter = 0.05, tone = 0.5, closed = false } = {}) {
   const ch = h / courses;
   const segs = [];
   let total = 0;
@@ -644,7 +644,7 @@ function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, len = 0.5
 }
 
 /** An arc of points round (cx, cz), from angle a0 to a1. */
-function arcPts(cx, cz, rad, a0, a1, n = 10) {
+export function arcPts(cx, cz, rad, a0, a1, n = 10) {
   return Array.from({ length: n + 1 }, (_, k) => {
     const a = a0 + ((a1 - a0) * k) / n;
     return [cx + Math.cos(a) * rad, cz + Math.sin(a) * rad];
@@ -656,7 +656,7 @@ function arcPts(cx, cz, rad, a0, a1, n = 10) {
  * against the spotter planes. Two or three jittered cones leaning apart,
  * grey-green (moss) or dry (thatch).
  */
-function brushClump(R, x, y, z, { h = 1.2, r = 0.45, dry = false } = {}) {
+export function brushClump(R, x, y, z, { h = 1.2, r = 0.45, dry = false } = {}) {
   const out = [];
   const n = 2 + Math.floor(R() * 2);
   for (let k = 0; k < n; k++) {
@@ -690,7 +690,7 @@ function brushClump(R, x, y, z, { h = 1.2, r = 0.45, dry = false } = {}) {
 }
 
 /** A clay water jar (gargoulette): the one made thing at a refuge that isn't a weapon. */
-function clayJar(x, y, z, s = 1) {
+export function clayJar(x, y, z, s = 1) {
   const prof = [[0.001, 0], [0.14, 0.01], [0.2, 0.12], [0.21, 0.26], [0.15, 0.4], [0.07, 0.46], [0.08, 0.52], [0.001, 0.52]]
     .map(([r, yy]) => new THREE.Vector2(r * s, yy * s));
   const g = new THREE.LatheGeometry(prof, 10);

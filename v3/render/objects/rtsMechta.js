@@ -23,7 +23,7 @@ const S = 1.3;
  * One house, centred at (x, z), turned by `yaw`, pushing into `parts`.
  * Returns its door point (world, pre-scale) and its outline for yards.
  */
-function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace = -1 }) {
+export function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace = -1, leanTo = true }) {
   const c = Math.cos(yaw), s = Math.sin(yaw);
   // Local → world for a part authored in the house's frame.
   const put = (geo, lp, mat, tone, rot = [0, 0, 0]) => {
@@ -60,7 +60,7 @@ function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace = -1 })
     }
   }
   // A lean-to against one end: rubble half-walls under a roof of brush on poles.
-  if (R() < 0.45) {
+  if (leanTo && R() < 0.45) {   // none in an attached row (a dechra): it hit the neighbour
     const lw = 2.2 + R(), ex = (R() < 0.5 ? -1 : 1) * (w / 2 + lw / 2);
     put(buildBox(lw, 1.2, 0.4), [ex, 0.6, -doorFace * (d / 2 - 0.2)], MAT.rubble, 0.45);
     // 5 cm lower and 3 cm inside the front wall's end: equal tops and ends z-fought.
@@ -99,7 +99,7 @@ function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace = -1 })
 }
 
 /** A dry-stone yard wall from a to b (world x/z), ~1.5 m, uneven. */
-function yardWall(parts, R, a, b, hgt = 1.5) {
+export function yardWall(parts, R, a, b, hgt = 1.5) {
   const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz);
   const yaw = Math.atan2(dx, dz);
   const n = Math.max(1, Math.round(len / 2.2));
@@ -111,7 +111,7 @@ function yardWall(parts, R, a, b, hgt = 1.5) {
 }
 
 /** The tabouna: a domed clay oven, a dark mouth, a flat stone in front. */
-function oven(parts, R, x, z, yaw) {
+export function oven(parts, R, x, z, yaw) {
   const dome = new THREE.SphereGeometry(0.75, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2);
   parts.push({ geo: dome, pos: [x, 0, z], rot: [0, yaw, 0], mat: MAT.earth, tone: 0.62 });
   parts.push({ geo: buildBox(0.36, 0.32, 0.1), pos: [x + Math.sin(yaw) * 0.72, 0.2, z + Math.cos(yaw) * 0.72], rot: [0, yaw, 0], mat: MAT.steel, tone: 0 });

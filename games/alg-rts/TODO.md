@@ -142,7 +142,33 @@ Order: foliage → villages → animals & birds → ground detail.
 - [ ] Re-measure the earlier perf-pass changes with the correct method.
 - [ ] Olive and fig in walled gardens; almond on terraces.
 - [ ] Doum: fix its far LOD (flat green mats) and paint it back.
-- [ ] Then villages: dechra on a ridge, koubba, cemetery, wells, zeribas.
+- [x] **Villages** (v3/render/objects/rtsAlgVillage.js, 2026-09-27):
+      DECHRA (4 terraced rows of Chaouia houses — the mechta's own `house()`
+      — each on a stone socle down to the real ground; a whitewashed mosque
+      with a square minaret mid-village; a stone lane up the side), KOUBBA
+      (white cube, octagonal drum, dome, iron finial, green door, jars;
+      a whitewashed court wall that steps with the ground), CEMETERY (low
+      mounds with stone borders, upright head- and footstones, all graves
+      turned toward Mecca — qibla ~108° from the Aurès), WELL (curb, forked
+      posts, pulley, bucket, troughs, jars), ZERIBA (a tangle of grey thorn
+      branches, the gap, trough, fodder). All pass both z-fight tests.
+      Builders take `groundAt(x, z)`: the showroom's new `ground` mode seats
+      each house/grave/branch on the real slope, no pad, no tilt.
+      SITES MEASURED: dechra (-224, 136) on a 17° slope rising straight away
+      from the player's camera; koubba on the crest 28 m above (-273, 86);
+      cemetery beside it; pens clear of every piece and off the wadi bed.
+      First siting was wrong: I had the camera direction reversed (the slope
+      faced away from the player).
+- [ ] **you, look**: the dechra, the koubba and its cemetery (Dev →
+      Showroom → Go to). Taste: house density, the minaret's height.
+- [ ] Well troughs are plain blocks — make them rough stone.
+- [ ] Dechra: stepped lanes between the rows, a few courtyards, laundry.
+- [ ] **Intermittent: the kit atlas stayed GREY once** (2026-09-27, after a
+      reload): texture version 2 (the fill ran) but the canvas still held the
+      grey placeholder; drawing a fresh worker bitmap into it by hand fixed
+      it. Not reproduced on the next reload (atlas landed at 24 s, loading
+      screen waited). The worker takes 23 s at full size while the game
+      boots. If it recurs: log the bitmap size/pixel inside fill().
 
 ## SUGGESTIONS — look & world (not gameplay) — ranked, 2026-09-27
 

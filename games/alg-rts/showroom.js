@@ -19,6 +19,7 @@ import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
 import { createWind, createWindsock } from "./algWind.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { LAYOUT, siteYaw } from "./layout.js";
+import { buildCemetery, buildDechra, buildKoubba, buildVillageWell, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -104,6 +105,29 @@ export const ALN_BUILDABLES = [
 ];
 
 /** What to show, and where (world x/z, yaw). */
+const site = (kind) => { const s = LAYOUT.sites.find((q) => q.kind === kind); return { ...s, yaw: siteYaw(s) }; };
+const DECHRA = site("dechra"), KOUBBA = site("koubba"), CEMETERY = site("cemetery");
+/**
+ * Graves lie with the body on its right side facing Mecca: from the Aurès the
+ * qibla bears ~108°, so the grave's long axis runs at 18° (NNE–SSW). World
+ * -Z is north, +X east (heightmap row 0 = north). In the cemetery's frame.
+ */
+const QIBLA_AXIS = (() => { const b = (18 * Math.PI) / 180; return Math.atan2(Math.sin(b), -Math.cos(b)) - CEMETERY.yaw; })();
+const H2 = { ...HAMLETS[1], yaw: siteYaw(HAMLETS[1]) };
+const VILLAGE = [
+  { key: "dechra", build: (o) => buildDechra(o), x: DECHRA.x, z: DECHRA.z, yaw: DECHRA.yaw, ground: true },
+  { key: "koubba", build: (o) => buildKoubba(o), x: KOUBBA.x, z: KOUBBA.z, yaw: KOUBBA.yaw, ground: true },
+  { key: "cemetery", build: (o) => buildCemetery({ ...o, align: QIBLA_AXIS }), x: CEMETERY.x, z: CEMETERY.z, yaw: CEMETERY.yaw, ground: true },
+  // A well at the dechra's foot and at each hamlet; a zeriba beside each hamlet.
+  // Pen spots MEASURED: clear of every piece (full footprint), off the wadi
+  // bed, the flattest ground within ~70 m.
+  (() => { const [x, z] = fromBase(0, 40, DECHRA); return { key: "wellDechra", build: buildVillageWell, x, z, yaw: DECHRA.yaw, rim: 4 }; })(),
+  (() => { const [x, z] = fromBase(40, -10, HAMLET_SITE); return { key: "wellHamlet1", build: () => buildVillageWell({ seed: 71 }), x, z, yaw: HAMLET_SITE.yaw, rim: 4 }; })(),
+  (() => { const [x, z] = fromBase(34, 0, H2); return { key: "wellHamlet2", build: () => buildVillageWell({ seed: 73 }), x, z, yaw: H2.yaw, rim: 4 }; })(),
+  (() => { const [x, z] = fromBase(24, 58, HAMLET_SITE); return { key: "zeriba1", build: (o) => buildZeriba({ ...o, seed: 81 }), x, z, yaw: HAMLET_SITE.yaw, ground: true }; })(),
+  (() => { const [x, z] = fromBase(48, 26, H2); return { key: "zeriba2", build: (o) => buildZeriba({ ...o, seed: 83, r: 5.5 }), x, z, yaw: H2.yaw, ground: true }; })(),
+];
+
 export const SHOWROOM = [
   { key: "frenchPost", build: buildFrenchPost, x: BASE.x, z: BASE.z, yaw: BASE.yaw },
   ...BASE_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
@@ -112,6 +136,9 @@ export const SHOWROOM = [
   { key: "mechta", build: buildMechta, x: HAMLETS[0].x, z: HAMLETS[0].z, yaw: siteYaw(HAMLETS[0]) },
   { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: HAMLETS[1].x, z: HAMLETS[1].z, yaw: siteYaw(HAMLETS[1]) },
   (() => { const [x, z] = fromBase(SAS_POST.lx, SAS_POST.lz, HAMLET_SITE); return { key: SAS_POST.key, build: SAS_POST.build, x, z, yaw: HAMLET_SITE.yaw + SAS_POST.yaw, rim: 6 }; })(),
+  // THE DECHRA, its koubba and cemetery on the crest, wells and zeribas at
+  // the villages (rtsAlgVillage.js). `ground`: built on the real slope.
+  ...VILLAGE,
   // The ALN command post in the massif.
   { key: "alnCamp", build: buildAlnCamp, x: ALN.x, z: ALN.z, yaw: siteYaw(ALN), flag: "fln" },
   ...ALN_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz, ALN_SITE); return { key: v.key, build: v.build, x, z, yaw: ALN_SITE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
@@ -239,10 +266,12 @@ export async function placeShowroom(app, list = SHOWROOM) {
   // cut after a piece was seated left that piece floating (measured: bags
   // 1.1 m, the post's front 0.7 m). Pads in list order — the post first — and
   // the small buildables' rims short so they don't reach into its pad.
-  const built = list.map((e) => ({ e, geo: e.build() }));
+  // `ground` pieces (a dechra up a slope, a koubba on a crest) are built
+  // AFTER the pads, from the ground as it then is (below).
+  const built = list.map((e) => ({ e, geo: e.ground ? null : e.build() }));
   for (const b of built) {
     const { e, geo } = b;
-    if (e.vehicle || e.follow) continue;
+    if (e.vehicle || e.follow || e.ground) continue;
     const f = geo.userData.footprint ?? { cx: 0, cz: 0, hx: 5, hz: 5 };
     // Pad height: the mean ground under the footprint, so the cut and the
     // fill balance instead of burying one side.
@@ -259,6 +288,18 @@ export async function placeShowroom(app, list = SHOWROOM) {
   // Vehicles and `follow` pieces lie on the slope: a plane fitted to the
   // ground under them gives the tilt, and the lowest corner decides the
   // height so nothing floats (the uphill side sinks a few cm instead).
+  // GROUND pieces: no pad, no tilt. The builder is handed the ground in its
+  // own frame (real metres, relative to its origin) and seats each house,
+  // grave or bush on it (rtsAlgVillage.js).
+  const KIT_SCALE = 1.3;
+  for (const b of built) {
+    const { e } = b;
+    if (!e.ground) continue;
+    const y0 = app.getWorldHeight(e.x, e.z);
+    const groundAt = (lx, lz) => app.getWorldHeight(...toWorld(e, lx * KIT_SCALE, lz * KIT_SCALE)) / KIT_SCALE - y0 / KIT_SCALE;
+    b.geo = e.build({ groundAt });
+    b.y = y0;
+  }
   const up = new THREE.Vector3(0, 1, 0), n = new THREE.Vector3(), qYaw = new THREE.Quaternion();
   for (const { e, geo, y } of built) {
     const mesh = kitView(geo);
