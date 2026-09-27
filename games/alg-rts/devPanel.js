@@ -142,6 +142,15 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     sr.hint("Where the new assets are judged: on the real map, in the game's own light. Temporary until gameplay places them.");
   }
 
+  // ── The ALN (until its AI queues for itself) ────────────────────────────
+  const cave = app.algProducers?.find((p) => p.structure.typeKey === "caveEntrance");
+  if (cave) {
+    const aln = panel.section("ALN");
+    aln.button("Send out a band (5)", () => { for (let i = 0; i < 5; i++) cave.structure.enqueue("moudjahid"); });
+    aln.button("Go to the cave", () => { rtsCamera.focusOn(cave.centre.x, cave.centre.z); rtsCamera.setZoom?.(0.12); });
+    aln.hint("The enemy's cave mouth: a fighter every 4 s walks out of the dark. Here until the ALN's AI does the queueing.");
+  }
+
   // ── Performance ─────────────────────────────────────────────────────────
   const perf = panel.section("Performance");
   perf.toggle("Stats overlay", { get: () => app.statsOverlay, set: (v) => app.setStatsOverlay?.(v) });

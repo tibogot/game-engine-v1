@@ -436,6 +436,10 @@ function buildCrowdType(tpl, type, app, scene) {
     // Costs 3 draws (one per CSM cascade) for the ENTIRE crowd, 6 soldiers or 106.
     castShadow: type.castShadow !== false,
   });
+  // `crowdTint` [r, g, b]: a whole TYPE's clothing colour (it multiplies the
+  // model's). One crowd mesh per type, so it costs nothing per soldier — how a
+  // second side on the same stand-in model reads as another army at a glance.
+  if (type.crowdTint && field?.mesh?.material?.color) field.mesh.material.color.multiply(new THREE.Color(...type.crowdTint));
 
   // The compute pass emits vertices in the TEMPLATE MESH's local space, which
   // knows nothing about buildTemplate's normalisation (the centring offset and
@@ -454,6 +458,9 @@ function buildCrowdType(tpl, type, app, scene) {
     positionNode: field.mesh.material.positionNode,
     normalNode: field.mesh.material.normalNode,
   }));
+  // Its own program, as the crowd's (crowdSkinning.js): it reads that crowd's buffer.
+  const xrayKey = `crowdXray:${xray.material.uuid}`;
+  xray.material.customProgramCacheKey = () => xrayKey;
   xray.count = 0;
   xray.frustumCulled = false;
   xray.castShadow = xray.receiveShadow = false;

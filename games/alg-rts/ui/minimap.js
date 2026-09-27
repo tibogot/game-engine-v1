@@ -185,7 +185,7 @@ export function createMinimap({ app, units, buildings = null, structures = null,
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(frame.upYaw - (u.heading ?? 0));   // world heading → turned map
-    ctx.fillStyle = u.selected ? "#ffffff" : (u.isAir ? "#63e0d0" : "#58a8ff");
+    ctx.fillStyle = u.selected ? "#ffffff" : u.team === "enemy" ? "#ff6a5a" : (u.isAir ? "#63e0d0" : "#58a8ff");
     ctx.strokeStyle = "rgba(10,20,40,0.7)";
     ctx.lineWidth = 0.8;
     ctx.beginPath();

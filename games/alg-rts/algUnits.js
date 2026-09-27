@@ -30,6 +30,7 @@ const PRODUCTION = {
   post: { appele: 6 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
   helipad: { alouette: 30 },
+  caveEntrance: { moudjahid: 4 },   // the ALN's: its AI will queue (Dev panel until then)
 };
 
 /** The French vehicles built in code, by a unit type's `procedural` key. */
@@ -161,6 +162,26 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // The Alouette parked on the pad at the start (a unit now, hovering) moves
     // to that holding point, off the pad.
     for (const u of units.list) if (u.typeKey === "alouette") u.orderTo(rally.x, rally.z);
+  }
+  if (showroom?.caveEntrance) {
+    // THE ALN'S CAVE MOUTH: a fighter appears deep in the tunnel, in the dark
+    // at its end, and walks out through the gap the breastwork leaves (its
+    // right side), past the sacks and the bedroll, to the ground in front.
+    // The tunnel is the gate: nothing to swing.
+    const m = showroom.caveEntrance;
+    producers.push(createAlgProducer({
+      mesh: m, units, typeKey: "caveEntrance", name: "Grotte", maxHp: 1600, team: "enemy",
+      builds: PRODUCTION.caveEntrance,
+      inside: [0.15 * S, 2.2 * S], outside: [0.4 * S, -6 * S],
+      // They gather 22 m out TOWARD THE VALLEY (the French post), not
+      // straight out of the mouth: the camp is in a corner of the map, and
+      // straight out ran them to the plateau's edge, behind the crest.
+      rally: (() => {
+        const dx = muster.x - m.position.x, dz = muster.z - m.position.z, d = Math.hypot(dx, dz) || 1;
+        const w = { x: m.position.x + (dx / d) * 22, z: m.position.z + (dz / d) * 22 };
+        return navGrid.nearestOpenWorld(w.x, w.z, true) ?? w;
+      })(),
+    }));
   }
   app.algProducers = producers;
 

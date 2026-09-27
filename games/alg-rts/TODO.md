@@ -137,6 +137,30 @@ lift off the pad; the ALN comes out of the cave mouth.
        m, 4.5 s at hover 35 m away). Shared units.launch(dur, {hold, fromY})
        + the renderer reading rotorSpin; nam's call is unchanged. The
        Alouette parked at the start moves off the pad too. Portrait baked.
+4f. [x] THE ALN'S CAVE MOUTH produces moudjahidine (4 s each, team enemy).
+       A fighter appears deep in the tunnel, in the dark, and walks out
+       through the gap the breastwork leaves; the band gathers 22 m out
+       TOWARD THE VALLEY (straight out of the mouth ran them to the plateau's
+       edge — the camp is in a corner of the map). The tunnel is the gate.
+       No AI yet: Dev panel → ALN → "Send out a band (5)".
+       The moudjahid: same stand-in model as the appelé, DYED dun-brown
+       (`crowdTint`, one per type — no cost per man); minimap blips of the
+       enemy now red (were blue).
+       Two shared fixes it needed (nam benefits too):
+       · TWO CROWDS DREW ONE BUFFER: a second crowd built from the same
+         model had a node graph identical but for its storage buffer; three
+         keyed them as ONE program, so the moudjahid mesh drew the appelés'
+         first 3 skinned soldiers (on top of them — invisible). Each crowd
+         material (and its x-ray) now has its own customProgramCacheKey.
+         nam has 6 crowds; checked after: soldiers render, 34 units.
+       · AN EMPTY CROWD COSTS NOTHING: the skinning dispatch is sized to
+         capacity (160 soldiers) and ran every frame even with no one in it;
+         now no upload, no dispatch, no draw at 0 (measured: 61 dispatches/s
+         before any fighter, 122 with both crowds live).
+   - [ ] Measure one crowd's GPU ms with the tab FOCUSED (the numbers taken
+         here were poisoned: an empty queue took 46 ms in a background tab).
+   - [ ] The ALN AI that queues at the cave and moves the bands (combat is
+         nam's combat.js, not shared yet — the next big step).
    - [ ] The post and the motor pool have no health bar yet; the helipad
          (the Alouette lands and takes off) and the other buildings are not
          selectable yet. Set rally by right-click with a building selected.
@@ -153,8 +177,15 @@ lift off the pad; the ALN comes out of the cave mouth.
          a rotated square map crop (cut the far corners) is the other way.
 5. [ ] Animals alongside: donkeys (Donkey_compressed.glb) at wells and on
        tracks, chickens (Chicken_001_compressed.glb) in the mechta yards
-- [ ] **REMINDER: camel** — skipped for now (you, 2026-09-27). Needs a free
-      model (not procedural); Saharan edge more than the Aurès.
+- [~] **Camel** — being built in v3/sheep-lab.html ("camel-morph", 2026-09-27):
+      the pack's DONKEY mesh reshaped into an Arabian camel (hump, S-neck,
+      pads), same quad look, plays the donkey's 13 clips. Saharan edge more
+      than the Aurès. Not in the game yet.
+- [ ] **LATER — dressed animals: camels AND donkeys carrying things** (you,
+      2026-09-27; your reference: a caravan camel with a striped saddle
+      blanket, a wooden saddle, woven baskets and jars hung on the flanks,
+      a bridle with tassels and a lead rope). Rigid pieces on the back /
+      neck bones, one draw per animal; variants: caravan, pack, ridden.
 - [ ] Goat and sheep herds with a shepherd (need models), dogs, storks on
       the minaret/koubba, vultures (nam's bird system).
 

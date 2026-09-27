@@ -175,6 +175,13 @@ export function createCrowdField({
   const meshVertex = instanceIndex.mul(uint(vertexCount)).add(vertexIndex).mul(uint(2));
   material.positionNode = out.element(meshVertex).xyz;
   material.normalNode = transformNormalToView(out.element(meshVertex.add(uint(1))).xyz).toVarying();
+  // ONE PROGRAM PER CROWD. Two crowds (a second soldier type on the same model)
+  // build node graphs identical but for WHICH storage buffer they read, and
+  // three keyed them as one program — the second mesh then drew the FIRST
+  // crowd's skinned vertices (its soldiers appeared on top of the other
+  // side's, invisible). A key of its own gives each crowd its own bindings.
+  const programKey = `crowd:${material.uuid}`;
+  material.customProgramCacheKey = () => programKey;
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.count = 0;
@@ -243,6 +250,12 @@ export function createCrowdField({
 
     commit() {
       mesh.count = n;
+      // AN EMPTY CROWD COSTS NOTHING: no upload, no dispatch, no draw. The
+      // kernel is sized to capacity, so an idle type (no fighters out of the
+      // cave yet, a second army on the same model) would otherwise skin 160
+      // soldiers' worth every frame for no one.
+      mesh.visible = n > 0;
+      if (n === 0) return;
       instMatrices.needsUpdate = true;
       anim.needsUpdate = true;
       // Dispatch is sized to CAPACITY, not the live count (the kernel's size is

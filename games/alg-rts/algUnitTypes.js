@@ -41,6 +41,40 @@ export const ALG_UNIT_TYPES = {
     castShadow: true,
   },
 
+  // The moudjahid: an ALN fighter of the katiba, out of the cave mouth. The
+  // enemy side (the red wash, teams.js) on the SAME stand-in model as the
+  // appelé until you make the ALN one; the numbers are nam's infantry's too.
+  moudjahid: {
+    typeKey: "moudjahid",
+    name: "Moudjahidine",
+    buildLabel: "Moudjahid",
+    weapon: "rifle",
+    isAir: false,
+    foot: true,
+    hover: 0,
+    speed: 11,
+    radius: 1.0,
+    turnRate: 6,
+    maxHp: 60,
+    range: 30,
+    damage: 6,
+    fireRate: 2.4,
+    canHitAir: true,
+    vision: 42,
+    url: "/models/testsolanim.glb",
+    skinned: true,
+    // The same model, dyed: dun and earth browns, the katiba's mixed khaki
+    // and civilian cloth, against the appelés' olive (one tint per type).
+    crowdTint: [1.05, 0.82, 0.62],
+    targetHeight: REAL.soldierHeight * RTS_SCALE,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 1.7,
+    barWidth: 2.2,
+    barY: 3.4,
+    castShadow: true,
+  },
+
   // ── THE VEHICLES (rtsVehiclesFr.js, built in code, French paint) ────────
   // BEHAVIOUR IS NAM'S FOR NOW (you, 2026-09-27): each copies the numbers of
   // the nam vehicle it plays like (named on each). This game's own balance

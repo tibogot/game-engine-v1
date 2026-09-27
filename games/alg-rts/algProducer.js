@@ -18,6 +18,7 @@ const OPEN_AHEAD = 0.8;               // start opening at 80% of a unit's build
  * @param {THREE.Mesh} o.mesh       the placed building (its leaves are children)
  * @param {object} o.units          the shared units
  * @param {string} o.typeKey        "post", "motorPool" — what the command card offers
+ * @param {string} [o.team]         "player" (default) or "enemy" (the ALN's cave)
  * @param {string} o.name
  * @param {number} o.maxHp
  * @param {Record<string, number>} o.builds   unit key → seconds to build
@@ -29,7 +30,7 @@ const OPEN_AHEAD = 0.8;               // start opening at 80% of a unit's build
  *   spools up for `hold` s, it rises over `rise` s, then flies to the rally.
  *   No `outside` then: nothing walks out.
  */
-export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, inside: inL, outside: outL = inL, rally, launch = null }) {
+export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, inside: inL, outside: outL = inL, rally, launch = null, team = "player" }) {
   const leaves = mesh.children.filter((c) => c.userData.gateLeaf);
   const yaw = mesh.rotation.y, c = Math.cos(yaw), s = Math.sin(yaw);
   /** Building-local (scaled metres) → world. */
@@ -41,7 +42,7 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
     isStructure: true,
     typeKey,
     name,
-    team: "player",
+    team,
     alive: true,
     selected: false,
     hp: maxHp, maxHp,
@@ -73,7 +74,7 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
       if (structure.progress >= 1) {
         structure.progress = 0;
         structure.queue.shift();
-        const u = units.spawn(key, inside.x, inside.z, { snap: false });
+        const u = units.spawn(key, inside.x, inside.z, { snap: false, team });
         if (u && launch) {
           // On the deck, nose to where it will go; ghosted so the machines
           // hovering above do not shove it off the pad while it spools up.
