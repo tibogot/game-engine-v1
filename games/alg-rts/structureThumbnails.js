@@ -6,7 +6,7 @@
 import * as THREE from "three";
 import { bakeThumbnails } from "../shared-rts/thumbnails.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
-import { buildMotorPool } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildHelipad, buildMotorPool } from "../../v3/render/objects/rtsAlgeria.js";
 import { kitView } from "./showroom.js";
 
 /**
@@ -31,6 +31,7 @@ const walls = (box) => {
 const ITEMS = [
   ["struct:post", () => facing(kitView(buildFrenchPost())), walls],
   ["struct:motorPool", () => facing(kitView(buildMotorPool()))],
+  ["struct:helipad", () => facing(kitView(buildHelipad()))],
 ];
 
 /** Bake every structure portrait into `into` (the units' thumbnail map). */

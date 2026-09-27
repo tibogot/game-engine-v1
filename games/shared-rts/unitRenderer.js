@@ -752,8 +752,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         else { x.quaternion.copy(_targetQ); v.oriented = true; }
       }
 
-      v.mainAngle += dt * 28;
-      v.tailAngle += dt * 28 * 2.4;
+      // rotorSpin: a helicopter spooling up on its pad turns slower (units.js launch).
+      const spin = unit.rotorSpin ?? 1;
+      v.mainAngle += dt * 28 * spin;
+      v.tailAngle += dt * 28 * 2.4 * spin;
       if (v.inst?.turret) {
         // The cupola turns to its target, in the hull's frame, eased; with no
         // target it comes back to the front.

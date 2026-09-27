@@ -202,8 +202,20 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     // scales hover by that fraction. Default launchDur 0 = already at altitude.
     launchT: 0,
     launchDur: 0,
-    /** Take off from the ground over `dur` seconds (helipad rise animation). */
-    launch(dur = 1.6) { unit.launchDur = dur; unit.launchT = 0; },
+    launchHold: 0,
+    launchFromY: null,
+    /** 0..1: how fast the rotors turn (the renderer reads it). Spools up on a pad. */
+    rotorSpin: 1,
+    /**
+     * Take off over `dur` seconds (helipad rise animation). Optional: `hold`
+     * seconds sat on the pad first while the rotor spools up (rotorSpin 0→1),
+     * and `fromY`, the deck it stands on (a pad above the ground), which the
+     * rise starts from. Both default off: nam's call is unchanged.
+     */
+    launch(dur = 1.6, { hold = 0, fromY = null } = {}) {
+      unit.launchDur = dur + hold; unit.launchHold = hold; unit.launchT = 0; unit.launchFromY = fromY;
+      unit.rotorSpin = hold > 0 ? 0 : 1;
+    },
 
     /** Explicit attack order (right-click an enemy). */
     attack(enemy) { unit.attackTarget = enemy; unit.chaseCd = 0; },
@@ -543,14 +555,17 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       }
       // Launch ramp: rise from the pad to hover over launchDur (smoothstep so it
       // eases off the ground and settles into the hover, not a linear slide).
-      let hoverScale = 1;
+      let hoverScale = 1, base = surf;
       if (unit.launchDur > 0) {
         unit.launchT = Math.min(unit.launchDur, unit.launchT + dt);
-        const p = unit.launchT / unit.launchDur;
+        const hold = unit.launchHold;
+        const p = Math.max(0, unit.launchT - hold) / Math.max(1e-3, unit.launchDur - hold);
         hoverScale = p * p * (3 - 2 * p);           // smoothstep
-        if (unit.launchT >= unit.launchDur) unit.launchDur = 0; // done — full hover
+        if (hold > 0) unit.rotorSpin = Math.min(1, unit.launchT / hold);
+        if (unit.launchFromY != null) base = Math.max(surf, unit.launchFromY);
+        if (unit.launchT >= unit.launchDur) { unit.launchDur = 0; unit.launchFromY = null; unit.rotorSpin = 1; } // done — full hover
       }
-      pos.y = surf + (type.hover ?? 0) * hoverScale;
+      pos.y = base + (surf + (type.hover ?? 0) - base) * hoverScale;
     },
   };
   return unit;

@@ -29,6 +29,7 @@ import { createMinimap } from "./ui/minimap.js";
 const PRODUCTION = {
   post: { appele: 6 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
+  helipad: { alouette: 30 },
 };
 
 /** The French vehicles built in code, by a unit type's `procedural` key. */
@@ -143,6 +144,23 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       inside: [g.x, 0], outside: out,
       rally: navGrid.nearestOpenWorld(rw.x, rw.z, false) ?? rw,
     }));
+  }
+  if (showroom?.helipad) {
+    // The pad: an Alouette appears on the H, spools up, lifts off (units.js
+    // launch), and holds off to the side of the pad — not over it, where the
+    // next one takes off.
+    const m = showroom.helipad, c = Math.cos(m.rotation.y), s = Math.sin(m.rotation.y);
+    const [px, pz] = [-24, -26];
+    const rally = { x: m.position.x + px * c + pz * s, z: m.position.z - px * s + pz * c };
+    producers.push(createAlgProducer({
+      mesh: m, units, typeKey: "helipad", name: "Hélisurface", maxHp: 900,
+      builds: PRODUCTION.helipad,
+      inside: [0, 0], rally,
+      launch: { hold: 2.2, rise: 2.4, deckY: m.geometry.userData.deckY ?? 0 },
+    }));
+    // The Alouette parked on the pad at the start (a unit now, hovering) moves
+    // to that holding point, off the pad.
+    for (const u of units.list) if (u.typeKey === "alouette") u.orderTo(rally.x, rally.z);
   }
   app.algProducers = producers;
 

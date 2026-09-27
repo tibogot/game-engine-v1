@@ -48,7 +48,7 @@ Keep this file current: tick things off here, add new asks here.
       stones — big painted cobbles, and it looks wrong). Candidates fetched
       from Poly Haven: `rocky_trail` (fine dry gravel in sand), 
       `rocks_ground_02`. Judge in the game.
-- [ ] **Windsock that moves with the wind, like the flags** (you). Cheap: one
+- [x] (Done above, algWind.js.) **Windsock that moves with the wind, like the flags** (you). Cheap: one
       small mesh. Better as a VERTEX-animated cone than a cloth sim — it
       swings to the wind direction, fills and droops with wind speed,
       flutters at the tail — and shares ONE wind (direction + strength)
@@ -130,6 +130,13 @@ lift off the pad; the ALN comes out of the cave mouth.
        only its walls (shared baker: optional per-item `frame(box)`), or the
        23 m mast and the wire made it a speck. Every new building gets a line
        in ITEMS.
+4e. [x] The HELIPAD produces the Alouette (30 s): it appears on the H, sits
+       while its rotor SPOOLS UP (2.2 s, rotorSpin 0→1), rises off the DECK
+       (not the ground under it), then flies to a holding point off the pad,
+       where the next one takes off (measured: 0-2 s on the deck, 2.5 s +1.4
+       m, 4.5 s at hover 35 m away). Shared units.launch(dur, {hold, fromY})
+       + the renderer reading rotorSpin; nam's call is unchanged. The
+       Alouette parked at the start moves off the pad too. Portrait baked.
    - [ ] The post and the motor pool have no health bar yet; the helipad
          (the Alouette lands and takes off) and the other buildings are not
          selectable yet. Set rally by right-click with a building selected.

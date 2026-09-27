@@ -24,8 +24,12 @@ const OPEN_AHEAD = 0.8;               // start opening at 80% of a unit's build
  * @param {[number, number]} o.inside   post-local (scaled m): where a unit appears
  * @param {[number, number]} o.outside  post-local: where it is out of the gate
  * @param {{x:number,z:number}} o.rally  where it goes then (world)
+ * @param {{hold:number, rise:number, deckY:number}} [o.launch]  a HELIPAD: the
+ *   aircraft appears on the deck (`deckY` above the pad's origin), its rotor
+ *   spools up for `hold` s, it rises over `rise` s, then flies to the rally.
+ *   No `outside` then: nothing walks out.
  */
-export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, inside: inL, outside: outL, rally }) {
+export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, inside: inL, outside: outL = inL, rally, launch = null }) {
   const leaves = mesh.children.filter((c) => c.userData.gateLeaf);
   const yaw = mesh.rotation.y, c = Math.cos(yaw), s = Math.sin(yaw);
   /** Building-local (scaled metres) → world. */
@@ -57,6 +61,7 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
 
   let t = 0, openUntil = -1;
   const inside = toWorld(...inL), outside = toWorld(...outL);
+  const lifting = [];   // helipad: { u, at } — sent to the rally once clear of the pad
 
   function update(dt) {
     t += dt;
@@ -69,10 +74,25 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
         structure.progress = 0;
         structure.queue.shift();
         const u = units.spawn(key, inside.x, inside.z, { snap: false });
-        u?.emerge(outside.x, outside.z, structure.rally.x, structure.rally.z);
+        if (u && launch) {
+          // On the deck, nose to where it will go; ghosted so the machines
+          // hovering above do not shove it off the pad while it spools up.
+          u.faceToward(structure.rally.x, structure.rally.z);
+          u.launch(launch.rise, { hold: launch.hold, fromY: mesh.position.y + launch.deckY });
+          u.ghost = true;
+          lifting.push({ u, at: t + launch.hold + launch.rise * 0.35 });
+        } else u?.emerge(outside.x, outside.z, structure.rally.x, structure.rally.z);
         openUntil = t + HOLD_OPEN;
       }
     } else structure.progress = 0;
+    // Aircraft off the pad: once they are climbing, on to the rally.
+    for (let i = lifting.length - 1; i >= 0; i--) {
+      const { u, at } = lifting[i];
+      if (t < at) continue;
+      u.ghost = false;
+      if (u.alive) u.orderTo(structure.rally.x, structure.rally.z);
+      lifting.splice(i, 1);
+    }
     // The leaves follow: open while a unit is due or on its way out.
     const open = t < openUntil;
     for (const leaf of leaves) {
