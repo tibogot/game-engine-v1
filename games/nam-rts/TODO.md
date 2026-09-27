@@ -15,6 +15,11 @@ THE ONE LIST. Every open item in this file is here, ranked inside its group;
 the detail and history below point back as `[→#n]`. Add new asks HERE (and a
 detail note below if it needs one). Tick here when done.
 
+### Done 2026-09-27
+- [x] MINIMAP: every unit was drawn BLUE, the enemy's too (your catch) —
+      drawBlip never looked at the team. Now the side's colour, like the
+      points and the HQs: yours blue (air teal), theirs red (air orange-red).
+
 ### Done 2026-09-26 (latest)
 - [x] Z-FIGHTING, for good (your note: the lean-to mat): new test
       tools/rtsGroundBandTest (no flat face in the ground band) + the coplanar
@@ -37,6 +42,9 @@ detail note below if it needs one). Tick here when done.
 5. [ ] Kurtz's place, the rest: white markings on the stone (handprints, ash bars, painted eyes); saplings and leaf litter in the courtyard; bodies hung in the trees / a hanging man in a doorway (silhouettes, dread not gore); the crash site's clearing wider if you want
 
 ### B. Gameplay
+41. [ ] BUG (your catch 2026-09-27): the HELIPAD builds helicopters for FREE. Cause found: buildings.js
+    `enqueue` only pushes to the queue — no cost check, no spend — and the helicopter has no cost
+    in unitTypes. Give it a price (and the queue a refund on cancel), charged like the HQ's units
 6. [ ] FREE THE PRISONERS: an objective at the POW pit and the occupied cage
 7. [ ] Combat BLOOD: hit sprays, death pools that dry (decals, capped); Kurtz's old dark stains as dressing
 8. [ ] WIRE between the Front's line positions

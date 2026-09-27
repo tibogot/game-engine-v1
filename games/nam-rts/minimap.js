@@ -142,7 +142,12 @@ export function createMinimap({ app, units, buildings = null, structures = null,
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(u.heading ?? 0);
-    ctx.fillStyle = u.selected ? "#ffffff" : (u.isAir ? "#63e0d0" : "#58a8ff");
+    // The side's colour, like the points and the HQs (it was blue for every
+    // unit — the enemy's included — whatever its team).
+    const enemy = u.team !== "player";
+    ctx.fillStyle = u.selected ? "#ffffff"
+      : enemy ? (u.isAir ? "#ff9a6a" : "#ff6a5a")
+      : (u.isAir ? "#63e0d0" : "#58a8ff");
     ctx.strokeStyle = "rgba(10,20,40,0.7)";
     ctx.lineWidth = 0.8;
     ctx.beginPath();
