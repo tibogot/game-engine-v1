@@ -232,12 +232,13 @@ Order: foliage → villages → animals & birds → ground detail.
       Showroom → Go to). Taste: house density, the minaret's height.
 - [ ] Well troughs are plain blocks — make them rough stone.
 - [ ] Dechra: stepped lanes between the rows, a few courtyards, laundry.
-- [ ] **Intermittent: the kit atlas stayed GREY once** (2026-09-27, after a
-      reload): texture version 2 (the fill ran) but the canvas still held the
-      grey placeholder; drawing a fresh worker bitmap into it by hand fixed
-      it. Not reproduced on the next reload (atlas landed at 24 s, loading
-      screen waited). The worker takes 23 s at full size while the game
-      boots. If it recurs: log the bitmap size/pixel inside fill().
+- [x] **The kit atlas stayed GREY — caught and fixed** (2026-09-27). Seen
+      again live: the whole atlas canvas was still the placeholder, yet the
+      worker's promise had resolved with no error, so the worker handed back a
+      BLANK bitmap (its canvas under the boot's GPU load, most likely).
+      rtsAtlas() now checks the pixels that landed (one read of a 4x6
+      downscale, a pixel per cell) and, if blank, builds the atlas on the
+      main thread instead. Fixes nam too (same atlas).
 
 ## SUGGESTIONS — look & world (not gameplay) — ranked, 2026-09-27
 
@@ -591,7 +592,8 @@ mine / trap markers.
 - [x] **How the code starts**: (b), a shared RTS core, one system at a time
       (you, 2026-09-26). Camera moved first.
 - [x] Playable side: **French** first; choosing the side comes later (you).
-- [ ] Working title ("Djebel"?).
+- [x] Title: **SAND & BLOOD** (your cover art, 2026-09-27): launcher card
+      beside NAM, loading screen on the art (alg.html, as nam.html).
 
 ## Terrain — the first map
 

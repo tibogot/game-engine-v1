@@ -10,17 +10,65 @@
       The engine loads assets by paths relative to /v3/, so that's the base.
     -->
     <base href="/v3/" />
-    <title>Djebel — Algeria RTS</title>
+    <title>Sand &amp; Blood — Algeria RTS</title>
+    <!-- The cover art first, so the loading screen is never a black screen. -->
+    <link rel="preload" as="image" href="/textures/sand&amp;blood.webp" />
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
       #game { position: fixed; inset: 0; }
       #perf-stats { top: 8px !important; bottom: auto !important; left: 8px !important; }
+
+      /* ── Loading screen (nam.html's, in this game's colours) ──────────────
+         Full-screen cover art. The SAND & BLOOD title is painted INTO the art
+         (top left), so there is no logo image over it; object-position keeps
+         that corner in frame on narrow and tall windows. */
       #boot {
-        position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center;
-        background: #16110c; color: #e8dcc4; font: 14px "Segoe UI", system-ui, sans-serif; letter-spacing: 0.04em;
-        transition: opacity 0.5s;
+        position: fixed; inset: 0; z-index: 2147483000; overflow: hidden;
+        height: 100svh;
+        background: #16110c; color: #eadfc8;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        transition: opacity 0.6s ease;
       }
       #boot.hidden { opacity: 0; pointer-events: none; }
+      #boot .art {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        object-fit: cover; object-position: 20% 20%;
+      }
+      /* Darken the foot of the art so the bar and tips read over the dust. */
+      #boot .shade {
+        position: absolute; inset: 0;
+        background: linear-gradient(to top, rgba(14, 10, 6, 0.82) 0%, rgba(14, 10, 6, 0) 34%);
+      }
+      #boot .load {
+        position: absolute; left: 50%; bottom: 6.5%; transform: translateX(-50%);
+        width: min(560px, 72vw);
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+      }
+      #boot .tip {
+        min-height: 1.4em; margin-bottom: 14px; text-align: center;
+        font-size: 12px; letter-spacing: 0.12em; color: #d8c9a8;
+        transition: opacity 0.5s ease;
+      }
+      #boot .row {
+        display: flex; justify-content: space-between; align-items: baseline;
+        margin-bottom: 7px; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase;
+      }
+      #boot .pct { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0.1em; }
+      #boot .bar { height: 3px; background: rgba(234, 223, 200, 0.16); }
+      /* The tricolour of the title's underline, as the bar fills. */
+      #boot .fill {
+        height: 100%; width: 0%;
+        background: linear-gradient(to right, #2f4fa8, #eadfc8 50%, #c8322a);
+        background-size: min(560px, 72vw) 100%;
+        box-shadow: 0 0 8px rgba(234, 223, 200, 0.45);
+      }
+      #boot .err {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        max-width: 640px; padding: 12px 16px;
+        font-size: 13px; line-height: 1.5; color: #ff9a8c;
+        background: rgba(20, 10, 10, 0.92); border: 1px solid #5a3328; border-radius: 2px;
+        white-space: pre-wrap; display: none;
+      }
       #hud {
         position: fixed; right: calc(var(--alg-dev-w, 0px) + 10px); bottom: 10px; z-index: 50; padding: 6px 10px; border-radius: 4px;
         background: rgba(20, 14, 8, 0.6); color: #e8dcc4; font: 12px "Segoe UI", system-ui, sans-serif; pointer-events: none;
@@ -29,23 +77,120 @@
   </head>
   <body>
     <div id="game"></div>
-    <div id="boot">Loading…</div>
+    <div id="boot">
+      <img class="art" src="/textures/sand&amp;blood.webp" alt="Sand &amp; Blood" />
+      <div class="shade"></div>
+      <div class="load">
+        <div class="tip" id="tip"></div>
+        <div class="row"><span id="msg">Loading</span><span class="pct" id="pct">0%</span></div>
+        <div class="bar"><div class="fill" id="fill"></div></div>
+      </div>
+      <div class="err" id="err"></div>
+    </div>
     <div id="hud"></div>
 
     <script type="module">
       const boot = document.getElementById("boot");
+      const msg = document.getElementById("msg");
+      const pctEl = document.getElementById("pct");
+      const fill = document.getElementById("fill");
+      const tipEl = document.getElementById("tip");
+      const err = document.getElementById("err");
+
+      // ── Tips: things that are true about this game as it stands ──────────
+      const TIPS = [
+        "Aurès, November 1954. The massif is theirs; the valleys are yours.",
+        "The post trains appelés: its gate opens for every man it sends out.",
+        "Up on the minimap is toward the enemy — your post is at the bottom.",
+        "Q / E turn the camera, the wheel zooms, C frees it.",
+        "Ctrl + a number makes a control group; the number calls it back.",
+      ];
+      let tipI = Math.floor(Math.random() * TIPS.length);
+      const showTip = () => {
+        tipEl.style.opacity = 0;
+        setTimeout(() => { tipEl.textContent = TIPS[tipI++ % TIPS.length]; tipEl.style.opacity = 1; }, 450);
+      };
+      tipEl.textContent = TIPS[tipI++ % TIPS.length];
+      const tipTimer = setInterval(showTip, 6500);
+
+      // ── A progress bar that knows how long each stage takes (as nam.html) ─
+      // Every boot records how long each status stage lasted and the next boot
+      // uses those as the bar's scale. Within a stage the bar creeps toward
+      // that stage's share; the level download reports real bytes. The first
+      // boot on a machine uses these rough weights.
+      const KEY = "algrts.bootStages";
+      const DEFAULT = {
+        order: ["Starting engine…", "Loading level…", "Loading alg-aures.v3proj…", "Placing assets…",
+          "Setting up camera…", "Mustering…", "Painting surfaces…"],
+        ms: { "Starting engine…": 2500, "Loading level…": 4000, "Loading alg-aures.v3proj…": 3000,
+          "Placing assets…": 3000, "Mustering…": 2000, "Painting surfaces…": 800 },
+      };
+      let learned = DEFAULT;
+      try { learned = JSON.parse(localStorage.getItem(KEY) || "null") || DEFAULT; } catch { /* private mode */ }
+      const expectMs = (s) => learned.ms[s] ?? 600;
+      const total = Math.max(1, learned.order.reduce((a, s) => a + expectMs(s), 0));
+
+      const seen = [];          // [{ s, t0 }]
+      let dl = -1;              // download fraction of the current stage, if any
+      let shown = 0;
+      const pretty = (s) => s.replace(/…$/, "").replace(/\.v3proj$/, "");
+      const onStatus = (s) => {
+        seen.push({ s, t0: performance.now() });
+        dl = -1;
+        if (s !== "ready") msg.textContent = pretty(s);
+      };
+      const onProgress = (f) => { dl = f; };
+      const progress = () => {
+        if (!seen.length) return 0;
+        let done = 0;
+        for (let i = 0; i < seen.length - 1; i++) done += expectMs(seen[i].s);
+        const cur = seen[seen.length - 1];
+        const e = expectMs(cur.s);
+        const within = dl >= 0 ? dl : 1 - Math.exp(-(performance.now() - cur.t0) / e);
+        return Math.min(0.99, (done + e * Math.min(0.97, within)) / Math.max(total, done + e));
+      };
+      let raf = 0;
+      const tick = () => {
+        shown = Math.max(shown, progress());            // never goes backwards
+        fill.style.width = `${(shown * 100).toFixed(1)}%`;
+        pctEl.textContent = `${Math.floor(shown * 100)}%`;
+        raf = requestAnimationFrame(tick);
+      };
+      tick();
+
       try {
         // Relative to THIS file (Vite resolves imports from the file, not <base>).
         const { startAlgGame } = await import("./algGame.js");
         window.__ALG = await startAlgGame({
           container: document.getElementById("game"),
-          onStatus: (s) => (boot.textContent = s),
+          onStatus,
+          onProgress,
         });
-        boot.classList.add("hidden");
-        setTimeout(() => boot.remove(), 600);
+
+        // Learn this machine's stage times for the next boot (smoothed).
+        const end = performance.now();
+        const ms = { ...learned.ms };
+        for (let i = 0; i < seen.length; i++) {
+          const next = i + 1 < seen.length ? seen[i + 1].t0 : end;
+          const d = next - seen[i].t0;
+          ms[seen[i].s] = learned.ms[seen[i].s] ? 0.5 * learned.ms[seen[i].s] + 0.5 * d : d;
+        }
+        try { localStorage.setItem(KEY, JSON.stringify({ order: seen.map((x) => x.s), ms })); } catch { /* private mode */ }
+
+        cancelAnimationFrame(raf);
+        clearInterval(tipTimer);
+        fill.style.width = "100%";
+        pctEl.textContent = "100%";
+        msg.textContent = "Ready";
+        setTimeout(() => boot.classList.add("hidden"), 250);
+        setTimeout(() => boot.remove(), 900);
       } catch (e) {
         console.error("[alg-rts] failed to start", e);
-        boot.textContent = `Failed to start: ${e?.message ?? e}`;
+        cancelAnimationFrame(raf);
+        clearInterval(tipTimer);
+        msg.textContent = "Failed to start";
+        err.style.display = "block";
+        err.textContent = e?.stack || e?.message || String(e);
       }
     </script>
   </body>

@@ -57,7 +57,7 @@ export const AURES_LIGHT = {
  */
 const PLAIN_COLOR = "#a39480";
 
-export async function startAlgGame({ container, onStatus = () => {} } = {}) {
+export async function startAlgGame({ container, onStatus = () => {}, onProgress = null } = {}) {
   onStatus("Starting engine…");
   // The kit's surface atlas is painted in a worker; until it lands every
   // building and vehicle wears a flat olive-grey placeholder. Started first
@@ -92,7 +92,7 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
   // game, on from Dev → Performance or with ?stats=1.
   app.setStatsOverlay?.(params.get("stats") === "1");
 
-  const levels = createLevelLoader(app, { defaultUrl: "/levels/alg-aures.v3proj", onStatus });
+  const levels = createLevelLoader(app, { defaultUrl: "/levels/alg-aures.v3proj", onStatus, onProgress });
   const boot = await levels.loadBoot();
 
   // Terrain last among the opaque things (nam-rts: the dearest shader, drawn

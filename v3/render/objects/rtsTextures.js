@@ -1186,6 +1186,22 @@ export function rtsAtlas() {
   atlasCache = tex;
 
   const fill = (src) => { g.drawImage(src, 0, 0); tex.needsUpdate = true; };
+  // THE GREY ATLAS (caught live in alg-rts, 2026-09-27): now and then the
+  // worker's bitmap comes back BLANK — no error, the promise resolves, and
+  // every building stays the placeholder grey for good. So check the pixels
+  // that landed: a real atlas has no cell that is still the placeholder.
+  // One pixel per cell, in ONE read (a read per cell makes Chrome warn).
+  const landed = () => {
+    const small = newCanvas(ATLAS_COLS, ATLAS_ROWS);
+    const sg = small.getContext("2d");
+    sg.drawImage(canvas, 0, 0, ATLAS_COLS, ATLAS_ROWS);
+    const d = sg.getImageData(0, 0, ATLAS_COLS, ATLAS_ROWS).data;
+    let fresh = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] > 0 && !(d[i] === 107 && d[i + 1] === 106 && d[i + 2] === 92)) fresh++;
+    }
+    return fresh > (ATLAS_ROWS * ATLAS_COLS) / 2;
+  };
   atlasReady = (async () => {
     try {
       if (typeof Worker === "undefined" || typeof OffscreenCanvas === "undefined") {
@@ -1200,6 +1216,7 @@ export function rtsAtlas() {
         });
         fill(bitmap);
         bitmap.close?.();
+        if (!landed()) throw new Error("worker returned a blank atlas");
       } finally {
         worker.terminate();
       }

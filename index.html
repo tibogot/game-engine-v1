@@ -8,10 +8,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="preload" as="image" href="/textures/nam-cover.webp" />
+    <link rel="preload" as="image" href="/textures/sand&amp;blood.webp" />
     <!--
       CARD IMAGES. Each card shows its picture from /public/cards/ when there
       is one — drop in editor.webp or apex.webp (any 16:9-ish image, ~1600 px
-      wide) and it replaces the drawn placeholder. NAM uses the loader's art.
+      wide) and it replaces the drawn placeholder. NAM and Sand & Blood use
+      their loaders' art.
     -->
     <style>
       :root {
@@ -20,6 +22,7 @@
         --dim: #9aa3ad;
         --line: rgba(255, 255, 255, 0.08);
         --nam: #c8b27a;
+        --alg: #e0493d;   /* the red of the SAND & BLOOD title */
         --editor: #5fb0ff;
         --apex: #ff5a3c;
         --radius: 6px;
@@ -82,13 +85,14 @@
       }
       header .meta b { color: var(--ink); font-weight: 600; }
 
-      /* ── The grid: NAM featured on the left, the other two stacked ─────── */
+      /* ── The grid: the two RTS games side by side on top, the editor and
+         Apex Rush under them ──────────────────────────────────────────── */
       .grid {
         display: grid;
-        grid-template-columns: 1.55fr 1fr;
-        grid-template-rows: 1fr 1fr;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: minmax(420px, 1.5fr) minmax(260px, 1fr);
         gap: 22px;
-        min-height: min(72vh, 720px);
+        min-height: min(80vh, 820px);
       }
       .card {
         position: relative;
@@ -104,7 +108,6 @@
         box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.8);
         transition: transform 0.35s cubic-bezier(.2,.8,.2,1), border-color 0.35s, box-shadow 0.35s;
       }
-      .card.featured { grid-row: span 2; }
       .card:hover, .card:focus-visible {
         transform: translateY(-4px);
         border-color: color-mix(in srgb, var(--accent) 60%, transparent);
@@ -228,7 +231,7 @@
         header { flex-direction: column; align-items: flex-start; }
         header .meta { text-align: left; }
         .grid { grid-template-columns: 1fr; grid-template-rows: none; min-height: 0; }
-        .card.featured { grid-row: auto; min-height: 420px; }
+        .card.featured { min-height: 420px; }
         .card { min-height: 280px; }
         .card .body { padding: 22px; }
       }
@@ -245,7 +248,7 @@
           <h1>Game Engine <span>/ Launcher</span></h1>
         </div>
         <div class="meta">
-          <b>2 games</b> and the editor that builds their worlds<br />
+          <b>3 games</b> and the editor that builds their worlds<br />
           Chrome or Edge with WebGPU
         </div>
       </header>
@@ -259,6 +262,19 @@
             <p>Hold the valley. Hueys, M48s and riflemen against the Front's tunnels,
               traps and mortars — jungle, mist and the river in between.</p>
             <span class="cta">Play NAM
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </span>
+          </div>
+        </a>
+
+        <a class="card featured" href="/games/alg-rts/alg.html" style="--accent: var(--alg)">
+          <img class="art" src="/textures/sand&amp;blood.webp" alt="" style="object-position: 20% 30%" />
+          <div class="body">
+            <!-- The cover art carries the SAND & BLOOD title itself. -->
+            <span class="tag">Real-time strategy · Algeria, 1954</span>
+            <p>The Aurès. A French post of appelés, jeeps and Alouettes against the
+              ALN in the djebel — mechtas, cedars and wadis in between.</p>
+            <span class="cta">Play Sand &amp; Blood
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
             </span>
           </div>
