@@ -9,6 +9,7 @@
 // production queue that launches HELICOPTERS off the pad.
 import * as THREE from "three";
 import { findBuildSite, prepareSite } from "./sitePlanner.js";
+import { UNIT_COST } from "./resources.js";
 import {
   buildBunker, buildGunPitBody, buildHelipad, buildMedicTent, buildRadioPost, buildSandbagWallPiece, buildWatchTower,
 } from "../../v3/render/objects/rtsBuildables.js";
@@ -124,7 +125,7 @@ export const BUILDING_TYPES = {
 };
 
 /** A structure-shaped building. Same contract as structures.js makeStructure. */
-function makeBuilding(app, type, x, z) {
+function makeBuilding(app, type, x, z, resources = null) {
   const pos = new THREE.Vector3(x, app.getWorldHeight?.(x, z) ?? 0, z);
   return {
     kind: "structure",
@@ -162,11 +163,15 @@ function makeBuilding(app, type, x, z) {
     // presence to decide whether to show a production face at all, so a turret
     // must not carry a no-op one.
     ...(type.produces ? {
+      // Only the thing this building makes, only once it's finished — and
+      // PAID FOR, at queue time like the HQ (structures.js base.enqueue): it
+      // used to push to the queue for nothing, so helicopters were free.
       enqueue(key) {
-        // Only the thing this building makes, and only once it's finished.
-        if (this.alive && !this.constructing && key === type.produces && this.queue.length < 8) {
-          this.queue.push(key);
-        }
+        if (!this.alive || this.constructing || key !== type.produces || this.queue.length >= 8) return false;
+        const cost = UNIT_COST[key] ?? 0;
+        if (cost && resources && !resources.spend(cost)) return false;   // can't afford it
+        this.queue.push(key);
+        return true;
       },
     } : {}),
     get position() { return pos; },
@@ -232,7 +237,7 @@ function footprintOf(typeKey) {
   return _footprints.get(typeKey);
 }
 
-export function createBuildings({ app, structures, units, navGrid = null, onComplete = null }) {
+export function createBuildings({ app, structures, units, navGrid = null, onComplete = null, resources = null }) {
   const list = [];
 
   /** Grass and foliage off the site, and the map's rocks out of it. */
@@ -275,7 +280,7 @@ export function createBuildings({ app, structures, units, navGrid = null, onComp
     if (fp && app.flattenRect) await app.flattenRect(site.x + fp.cx, site.z + fp.cz, fp.hx + 0.5, fp.hz + 0.5, site.y, { rim: 3, rotY });
     else await prepareSite(app, site.x, site.z, type.radius, site.y);
 
-    const b = makeBuilding(app, type, site.x, site.z);
+    const b = makeBuilding(app, type, site.x, site.z, resources);
     b.rotY = rotY;
     if (fp) b.footprint = fp;
     b.coverCircles = coverCirclesFor(b);

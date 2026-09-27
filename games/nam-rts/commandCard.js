@@ -197,6 +197,12 @@ export function createCommandCard({
       const cost = Number(btn.dataset.cost) || 0;
       btn.classList.toggle("poor", cost > 0 && !canAfford(cost));
     }
+    // The builder's structure buttons too — they were only coloured when the
+    // card opened, so a Helipad stayed "affordable" after the stock fell.
+    for (const btn of root.querySelectorAll("[data-struct]")) {
+      const cost = buildingCosts[btn.dataset.struct] ?? 0;
+      btn.classList.toggle("poor", cost > 0 && !canAfford(cost));
+    }
   }
 
   /**
@@ -280,8 +286,10 @@ export function createCommandCard({
   function tick() {
     refreshAbilities();
     refreshStance();
-    if (!baseRef) return;
+    // Before the production early-out: an engineer's build buttons need it too
+    // (with a unit selected, `baseRef` is null and this never ran).
     refreshAffordability();
+    if (!baseRef) return;
     const prog = root.querySelector("#cc-prog");
     const queue = root.querySelector("#cc-queue");
     if (prog) prog.style.width = `${Math.round((baseRef.progress ?? 0) * 100)}%`;

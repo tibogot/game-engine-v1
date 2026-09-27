@@ -42,7 +42,8 @@ detail note below if it needs one). Tick here when done.
 5. [ ] Kurtz's place, the rest: white markings on the stone (handprints, ash bars, painted eyes); saplings and leaf litter in the courtyard; bodies hung in the trees / a hanging man in a doorway (silhouettes, dread not gore); the crash site's clearing wider if you want
 
 ### B. Gameplay
-41. [ ] BUG (your catch 2026-09-27): the HELIPAD builds helicopters for FREE. Cause found: buildings.js
+42. [x] FIXED 2026-09-28: the HELIPAD costs 250 to build and the M60 GUN PIT 120 (both were 0). And the engineer's build buttons now grey out live when you can't afford them (they were coloured only when the card opened — the per-frame refresh skipped unit cards).
+41. [x] FIXED 2026-09-27: a Huey costs 380 supplies (UNIT_COST.helicopter), charged at queue time like the HQ's units; refused when short; the button shows the price. (was: BUG (your catch 2026-09-27): the HELIPAD builds helicopters for FREE.) Cause found: buildings.js
     `enqueue` only pushes to the queue — no cost check, no spend — and the helicopter has no cost
     in unitTypes. Give it a price (and the queue a refund on cancel), charged like the HQ's units
 6. [ ] FREE THE PRISONERS: an objective at the POW pit and the occupied cage

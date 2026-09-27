@@ -681,7 +681,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   app.units = units;
 
   const buildings = createBuildings({
-    app, structures, units, navGrid,
+    app, structures, units, navGrid, resources,
     // A relay coming online pops M18 VIOLET — the Apocalypse Now marker. Read
     // through app because the smoke field is built further down; by the time a
     // building can finish, the loop is running and it exists.
@@ -972,9 +972,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
             { key: "lightTank", label: "M551 Sheridan", cost: UNIT_COST.lightTank },
             { key: "tank", label: "M48 Patton", cost: UNIT_COST.tank },
           ]
-        // Helipad units are free in this pass — only base production is costed.
         : s.typeKey === "helipad"
-          ? [{ key: "helicopter", label: "UH-1 Huey" }]
+          ? [{ key: "helicopter", label: "UH-1 Huey", cost: UNIT_COST.helicopter }]
           : []
     ),
     canAfford: (cost) => resources.canAfford(cost),

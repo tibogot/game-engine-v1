@@ -20,12 +20,20 @@ export const UNIT_COST = {
   bigtank: 260,
   lightTank: 340,
   tank: 420,   // the heavy: a real investment, and it shows on the field
+  // The Huey, from a helipad (it was FREE — a placeholder never finished,
+  // your catch 2026-09-27). Between the Sheridan and the Patton: fast, flies
+  // over everything, but thin-skinned.
+  helicopter: 380,
 };
 
 /** Builder-raised structures — charged when the builder commits the site. */
 export const BUILDING_COST = {
-  helipad: 0,
-  turret: 0,
+  // (Both were 0 — placeholders, your call 2026-09-28: "of course they should
+  // have a price".) The helipad unlocks air power, so it is a decision, not a
+  // reflex: out of the 400 you start with it leaves little for anything else.
+  // The M60 gun pit is armed but open-topped — a little under the bunker.
+  helipad: 250,
+  turret: 120,
   radio: 120,
   captureNode: 180,
   watchTower: 60,
