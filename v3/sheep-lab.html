@@ -1,0 +1,2801 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Procedural Animals on the Donkey Rig (sheep, camel)</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #9fb8cc; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10;
+             background: rgba(12,16,12,0.88); border: 1px solid #2a342a;
+             border-radius: 8px; padding: 10px 12px; min-width: 230px; max-width: 300px; }
+      #hud h1 { margin: 0 0 6px; font-size: 12px; letter-spacing: .05em;
+                text-transform: uppercase; color: #cfd8b8; }
+      .row { display: flex; justify-content: space-between; gap: 14px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .note { margin-top: 7px; padding-top: 6px; border-top: 1px solid #2a342a;
+              color: #8b998b; font-size: 11px; }
+      #err { color: #ff8c8c; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Animal Lab — sheep · camel</h1>
+      <div class="row"><span>Build</span><b id="s-build">—</b></div>
+      <div class="row"><span>Triangles</span><b id="s-tris">—</b></div>
+      <div class="row"><span>Height (top)</span><b id="s-height">—</b></div>
+      <div class="row"><span>Walk / gallop speed</span><b id="s-speed">—</b></div>
+      <div class="row"><span>Draw calls</span><b id="s-draws">—</b></div>
+      <div class="row"><span>Frame</span><b id="s-ms">—</b></div>
+      <div class="note">Animals generated in code (a sheep; an Arabian camel) —
+        skinned onto the DONKEY's skeleton and driven by the donkey's
+        own 13 clips. Legs and neck are shortened by rescaling the bone
+        offsets (and the clips' translation tracks), so no new animation.</div>
+      <div class="note" id="err"></div>
+    </div>
+
+    <script type="module">
+      // ── Sheep lab ────────────────────────────────────────────────────────────
+      // Question: can we reuse the animal pack's skeleton (Donkey / Bull / Stag
+      // share one Quaternius rig) to make an animal the pack does not have?
+      //
+      // How it works:
+      //   1. Load the donkey. Measure it in its rest pose: where the hoof tips
+      //      are in each lower-leg bone, which way the muzzle points, how big
+      //      the barrel is (from the verts each bone owns).
+      //   2. Clone its skeleton, drop its meshes. Shorten legs and neck by
+      //      scaling the child bones' rest offsets — and the matching
+      //      translation tracks of every clip (all 50 bones carry T/R/S tracks,
+      //      FK baked, so rotations transfer untouched). Lower the Body bone by
+      //      exactly what the legs lost so the hooves still meet the ground.
+      //   3. Build the sheep in that new rest pose:
+      //        · wool body + neck + thighs + tail stub: one SDF (round cones,
+      //          smooth-unioned) with cauliflower worley lumps, meshed with
+      //          surface nets, projected onto the surface, SDF normals + AO;
+      //        · head: skull, muzzle, jaw, eyes, ears, wool cap — second SDF;
+      //        · legs: tapered tubes along the leg bones, hooves at the tips;
+      //        · ram horns: a spiral tube.
+      //      Every vertex gets skin weights from the bone chain it belongs to.
+      //   4. One SkinnedMesh, one material (wool vs skin is a vertex flag),
+      //      so ONE draw per sheep. Curls, bump, sheen, rim fuzz in the shader.
+      //
+      // The ground speed that matches each gait is MEASURED from the clip (a
+      // planted hoof slides back at exactly the ground speed), so the
+      // treadmill and the flock walk without foot sliding.
+      import * as THREE from "three";
+      import {
+        Fn, abs, attribute, clamp, faceDirection, float, max, mix, mx_noise_float,
+        mx_worley_noise_float, normalView, positionGeometry, positionView, fwidth, min,
+        positionWorld, smoothstep, uniform, vec2, vec3,
+      } from "three/tsl";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
+      import { getSharedGltfLoader } from "../v2/core/foliage/glbLoader.js";
+      import GUI from "./ui/labGui.js";
+      import { MeshoptSimplifier } from "meshoptimizer";
+      await MeshoptSimplifier.ready;
+
+      const $ = (id) => document.getElementById(id);
+      const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+      const UP = V(0, 1, 0);
+      const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
+      addEventListener("error", (e) => showErr(e.error ?? e.message));
+      addEventListener("unhandledrejection", (e) => showErr(e.reason));
+
+      // ── Parameters ───────────────────────────────────────────────────────────
+      const PRESETS = {
+        "Suffolk":      { woolColor: "#e9e2d0", faceColor: "#1b1715", legColor: "#1b1715", headWool: 0.55, horns: false, wool: 1.05, lumps: 0.9, earDroop: 0.55, earSize: 1.0,  head: 0.78 },
+        "Texel":        { woolColor: "#efebe2", faceColor: "#ebe5da", legColor: "#e4ddd0", headWool: 0.25, horns: false, wool: 1.02, lumps: 0.7, earDroop: 0.1,  earSize: 0.8,  head: 0.76 },
+        "Merino ram":   { woolColor: "#e8dcc2", faceColor: "#eadfcd", legColor: "#dfd3bf", headWool: 1.0,  horns: true,  wool: 1.18, lumps: 1.2, earDroop: 0.35, earSize: 0.85, head: 0.78 },
+        "Blackface":    { woolColor: "#dcd4c3", faceColor: "#231f1c", legColor: "#2a2522", headWool: 0.0,  horns: true,  wool: 1.02, lumps: 1.4, earDroop: 0.3,  earSize: 0.9,  head: 0.8 },
+        "Black sheep":  { woolColor: "#2e2622", faceColor: "#181412", legColor: "#181412", headWool: 0.6,  horns: false, wool: 1.05, lumps: 0.9, earDroop: 0.55, earSize: 1.0,  head: 0.78 },
+      };
+      const P = {
+        preset: "Suffolk",
+        legs: 0.8, neck: 0.9, body: 0.72, head: 0.78, wool: 1.05, lumps: 0.9, headWool: 0.55,
+        earDroop: 0.55, earSize: 1.0, legThick: 1.0, horns: false, size: 0.85,
+        woolColor: "#e9e2d0", faceColor: "#1b1715", legColor: "#1b1715",
+        clip: "Walk", speed: 1.0, treadmill: true, donkey: true, skeleton: false, turntable: false,
+        flock: false, flockCount: 30,
+        curl: 1.0, bump: 1.0, sheen: 0.6,
+      };
+
+      // Arabian camel (dromedary): one hump, long legs, S-neck, level head.
+      const PC = {
+        legs: 1.3, neck: 1.35, body: 0.88, head: 0.92, girth: 0.9, hump: 1.0, humpLen: 1.0,
+        neckThick: 1.0, neckDip: 55, neckRise: 80, headPitch: -4, legThick: 1.0, size: 2.05,
+        legSlim: 0.72, neckSlim: 0.8,        // donkey-morph only: pull legs / neck toward the bones
+        color: "#c39a6b", dark: "#8c6843", light: "#e2cca6",
+      };
+      const SPECIES = { value: "goat-morph" };
+      // North African goat (Arbia type): black-brown, leggy, long drooping ears,
+      // scimitar horns, beard, upturned tail.
+      const PG = {
+        legs: 0.95, neck: 0.95, body: 0.78, size: 0.86, girth: 0.86, horn: 0.62, beard: 1.0,
+        coat: "#4a3a31", hornColor: "#7a6d60",
+      };
+      // LOW-POLY = the pack's own look (donkey, bull, stag): coarse facets,
+      // flat shading, one colour per face. Smooth = the SDF at full res.
+      const STYLE = { lowPoly: true, active: true };
+
+      // ── Renderer / scene ─────────────────────────────────────────────────────
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+      renderer.info.autoReset = false;
+      document.body.appendChild(renderer.domElement);
+      await renderer.init();
+
+      const scene = new THREE.Scene();
+      const SKY = new THREE.Color(0xa9c3d8);
+      scene.background = SKY;
+      scene.fog = new THREE.Fog(SKY, 40, 170);
+
+      const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.05, 400);
+      camera.position.set(1.2, 0.95, 2.9);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(-0.5, 0.45, 0);
+      controls.enableDamping = true;
+
+      scene.add(new THREE.HemisphereLight(0xcfe2ff, 0x4a5a32, 1.25));
+      const sun = new THREE.DirectionalLight(0xfff0dc, 3.0);
+      sun.position.set(4, 7, 3.5);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.bias = -0.0004;
+      sun.shadow.normalBias = 0.02;
+      scene.add(sun, sun.target);
+      function setShadowBox(h) {
+        const c = sun.shadow.camera;
+        c.left = -h; c.right = h; c.top = h; c.bottom = -h; c.near = 0.1; c.far = 60;
+        c.updateProjectionMatrix();
+      }
+      setShadowBox(4);
+
+      // Ground: mottled grass, optional 1 m grid that scrolls under a walking
+      // sheep (the treadmill) — if the hooves match the grid, no sliding.
+      const uScroll = uniform(0), uGrid = uniform(1);
+      const groundMat = new THREE.MeshStandardNodeMaterial({ roughness: 1 });
+      {
+        const gp = positionWorld.xz.add(vec2(0, uScroll));
+        const n1 = mx_noise_float(vec3(gp.mul(0.35), 0.0)).mul(0.5).add(0.5);
+        const n2 = mx_noise_float(vec3(gp.mul(3.1), 1.7));
+        const grass = mix(vec3(0.10, 0.17, 0.045), vec3(0.2, 0.27, 0.07), n1).mul(n2.mul(0.14).add(0.95));
+        const g = gp.fract().sub(0.5).abs();
+        const line = smoothstep(0.475, 0.5, max(g.x, g.y)).mul(uGrid);
+        groundMat.colorNode = mix(grass, vec3(0.55, 0.6, 0.45), line.mul(0.55));
+      }
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), groundMat);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      // ── Sheep material ───────────────────────────────────────────────────────
+      // Vertex attributes: aCol (base colour), aWool (1 wool / 0 skin),
+      // aRough, aAO. Curls come from worley noise on the REST position
+      // (positionGeometry), so the pattern rides on the animated body.
+      const uCurl = uniform(1), uBump = uniform(0.006), uSheen = uniform(0.6), uLP = uniform(1), uWire = uniform(0);
+      function makeSheepMaterial(tint) {
+        const uTint = uniform(new THREE.Color(tint));
+        const m = new THREE.MeshPhysicalNodeMaterial({ roughness: 1, metalness: 0 });
+        const col = attribute("aCol", "vec3"), mat = attribute("aMat", "vec4");   // wool, rough, ao, fur
+        const wool = mat.x, rgh = mat.y, ao = mat.z, fur = mat.w;
+        const p = positionGeometry.mul(uCurl);
+        const w1 = mx_worley_noise_float(p);
+        const w2 = mx_worley_noise_float(p.mul(2.35).add(vec3(5.2, 1.3, 7.7)));
+        const curl = clamp(float(1).sub(w1.mul(w1).mul(1.4)), 0, 1).mul(0.68)
+          .add(clamp(float(1).sub(w2.mul(1.25)), 0, 1).mul(0.32));
+        const woolBase = col.mul(uTint);
+        const woolCol = woolBase.mul(mix(mix(float(0.8), float(1.04), curl), float(1), uLP));
+        const skinCol = col.mul(uTint)
+          .mul(mx_noise_float(positionGeometry.mul(uCurl).mul(0.6)).mul(float(0.08).mul(float(1).sub(uLP))).add(1))
+          .mul(mx_noise_float(positionGeometry.mul(uCurl).mul(4.0)).mul(fur.mul(0.07).mul(float(1).sub(uLP))).add(1));
+        const base = mix(skinCol, woolCol, wool).mul(ao.pow(mix(float(0.8), float(0.4), uLP)));
+        // "show quads": dark lines on every edge except a quad's diagonal.
+        const eb = attribute("aEdge", "vec3");
+        const ew = fwidth(eb).mul(1.4);
+        const ef = min(min(smoothstep(float(0), ew.x, eb.x), smoothstep(float(0), ew.y, eb.y)), smoothstep(float(0), ew.z, eb.z));
+        m.colorNode = mix(base, vec3(0.06, 0.05, 0.04), float(1).sub(ef).mul(uWire));
+        m.roughnessNode = rgh;
+        // Procedural bump (Mikkelsen surface-gradient, like BumpMapNode, but
+        // differentiating a procedural height instead of re-sampling a texture).
+        const H = curl.mul(uBump).mul(wool).mul(float(1).sub(uLP));
+        m.normalNode = Fn(() => {
+          const N = normalView;
+          const sx = positionView.dFdx(), sy = positionView.dFdy();
+          const dHx = H.dFdx(), dHy = H.dFdy();
+          const R1 = sy.cross(N), R2 = N.cross(sx);
+          const det = sx.dot(R1).mul(faceDirection);
+          const grad = det.sign().mul(R1.mul(dHx).add(R2.mul(dHy)));
+          return det.abs().mul(N).sub(grad).normalize();
+        })();
+        m.sheen = 1;
+        m.sheenNode = woolBase.mul(uSheen).mul(max(wool, fur.mul(0.55))).mul(float(1).sub(uLP.mul(0.75)));
+        m.sheenRoughnessNode = float(0.5);
+        // Fibre fuzz at the silhouette.
+        const Vd = positionView.negate().normalize();
+        const rim = float(1).sub(abs(normalView.dot(Vd))).pow(3);
+        m.emissiveNode = woolBase.mul(rim).mul(max(wool, fur.mul(0.45))).mul(ao).mul(0.22).mul(float(1).sub(uLP));
+        return { material: m, uTint };
+      }
+      const MATS = {
+        hero: makeSheepMaterial("#ffffff"),
+        v1: makeSheepMaterial("#f6f0e3"),
+        v2: makeSheepMaterial("#ece4d3"),
+        black: makeSheepMaterial("#3b322b"),
+        dark: makeSheepMaterial("#a48a74"),
+      };
+
+      // ── Load + measure the donkey ────────────────────────────────────────────
+      $("s-build").textContent = "loading donkey…";
+      const gltf = await getSharedGltfLoader().loadAsync("/models/Donkey_compressed.glb");
+      const CLIP_NAMES = gltf.animations.map((c) => c.name);
+      const A = analyzeDonkey(gltf);
+      console.log("[sheep-lab] donkey analysis", A);
+
+      function analyzeDonkey(g) {
+        const src = g.scene;
+        src.updateMatrixWorld(true);
+        const skinned = [];
+        src.traverse((o) => o.isSkinnedMesh && skinned.push(o));
+        const bones = skinned[0].skeleton.bones;
+        const byName = Object.fromEntries(bones.map((b) => [b.name, b]));
+        const W0 = (n) => byName[n].getWorldPosition(V());
+        const owned = new Map();                 // bone name → rest world verts it dominates
+        let ground0 = Infinity;
+        const v = V();
+        const mesh = { pos: [], nrm: [], skin: [], mat: [], idx: [] };
+        for (const p of skinned) {
+          const D = new THREE.Matrix4().multiplyMatrices(p.skeleton.bones[0].matrixWorld, p.skeleton.boneInverses[0]).multiply(p.bindMatrix);
+          const Pa = p.geometry.attributes.position, SI = p.geometry.attributes.skinIndex, SW = p.geometry.attributes.skinWeight;
+          const Na = p.geometry.attributes.normal, NM = new THREE.Matrix3().getNormalMatrix(D), nv = V();
+          const base = mesh.pos.length / 3, gi = p.geometry.index;
+          for (let i = 0; i < (gi ? gi.count : Pa.count); i++) mesh.idx.push(base + (gi ? gi.getX(i) : i));
+          for (let i = 0; i < Pa.count; i++) {
+            v.fromBufferAttribute(Pa, i).applyMatrix4(D);
+            mesh.pos.push(v.x, v.y, v.z);
+            nv.fromBufferAttribute(Na, i).applyMatrix3(NM).normalize();
+            mesh.nrm.push(nv.x, nv.y, nv.z);
+            mesh.mat.push(p.material.name);
+            const sk = [];
+            for (let c = 0; c < 4; c++) { const w = SW.getComponent(i, c); if (w > 0) sk.push([p.skeleton.bones[SI.getComponent(i, c)].name, w]); }
+            mesh.skin.push(sk);
+            ground0 = Math.min(ground0, v.y);
+            let bw = -1, bj = 0;
+            for (let c = 0; c < 4; c++) { const w = SW.getComponent(i, c); if (w > bw) { bw = w; bj = SI.getComponent(i, c); } }
+            const n = p.skeleton.bones[bj].name;
+            if (!owned.has(n)) owned.set(n, []);
+            owned.get(n).push(v.clone());
+          }
+        }
+        const vs = (...names) => names.flatMap((n) => owned.get(n) ?? []);
+        // Hoof tip in each lower-leg bone's own frame (bone +Y runs down the leg).
+        const ext = {};
+        for (const n of ["FrontLowerLegL", "FrontLowerLegR", "BackLowerLegL", "BackLowerLegR"]) {
+          const inv = byName[n].matrixWorld.clone().invert();
+          ext[n] = Math.max(...vs(n).map((q) => q.clone().applyMatrix4(inv).y));
+        }
+        // Muzzle: the Head vert farthest from the Head joint.
+        const h0 = W0("Head");
+        let tip = h0, far = 0;
+        for (const q of vs("Head")) { const d = q.distanceTo(h0); if (d > far) { far = d; tip = q; } }
+        const muzzleDir = tip.clone().sub(h0).normalize();
+        const muzzleLocal = muzzleDir.clone().applyQuaternion(byName.Head.getWorldQuaternion(new THREE.Quaternion()).invert());
+        // Barrel from the mid-torso verts.
+        const fwd = W0("Neck1").sub(W0("Back")); fwd.y = 0; fwd.normalize();
+        const right = V().crossVectors(fwd, UP).normalize();
+        const mid = vs("Torso", "Torso2");
+        const t2 = W0("Torso2");
+        let minY = Infinity, maxY = -Infinity, side = 0;
+        for (const q of mid) { minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y); side = Math.max(side, Math.abs(q.clone().sub(t2).dot(right))); }
+        return {
+          ground0, ext, muzzleDir, muzzleLocal, Lh: far,
+          Rv: (maxY - minY) / 2, Rside: side, cyOff: (minY + maxY) / 2 - t2.y,
+          backTop: maxY, boneNames: bones.map((b) => b.name),
+          mesh: { ...mesh, pos: new Float32Array(mesh.pos) },
+          restInv: Object.fromEntries(bones.map((b) => [b.name, b.matrixWorld.clone().invert()])),
+        };
+      }
+
+      // ── Geometry helpers ─────────────────────────────────────────────────────
+      function smin(a, b, k) { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }
+
+      // Inigo Quilez's exact round cone.
+      function roundCone(a, b, r1, r2) {
+        const bax = b.x - a.x, bay = b.y - a.y, baz = b.z - a.z;
+        const l2 = bax * bax + bay * bay + baz * baz, rr = r1 - r2, a2 = l2 - rr * rr, il2 = 1 / l2;
+        const ax = a.x, ay = a.y, az = a.z;
+        return (px, py, pz) => {
+          const pax = px - ax, pay = py - ay, paz = pz - az;
+          const y = pax * bax + pay * bay + paz * baz, z = y - l2;
+          const xx = pax * l2 - bax * y, xy = pay * l2 - bay * y, xz = paz * l2 - baz * y;
+          const x2 = xx * xx + xy * xy + xz * xz, y2 = y * y * l2, z2 = z * z * l2;
+          const k = Math.sign(rr) * rr * rr * x2;
+          if (Math.sign(z) * a2 * z2 > k) return Math.sqrt(x2 + z2) * il2 - r2;
+          if (Math.sign(y) * a2 * y2 < k) return Math.sqrt(x2 + y2) * il2 - r1;
+          return (Math.sqrt(x2 * a2 * il2) + y * rr) * il2 - r1;
+        };
+      }
+      function sphere(c, r) { return (x, y, z) => Math.hypot(x - c.x, y - c.y, z - c.z) - r; }
+      // Oriented ellipsoid (iq's bound).
+      function ellipsoid(c, e1, e2, e3, r1, r2, r3) {
+        return (x, y, z) => {
+          const dx = x - c.x, dy = y - c.y, dz = z - c.z;
+          const u = (dx * e1.x + dy * e1.y + dz * e1.z) / r1;
+          const v = (dx * e2.x + dy * e2.y + dz * e2.z) / r2;
+          const w = (dx * e3.x + dy * e3.y + dz * e3.z) / r3;
+          const k0 = Math.hypot(u, v, w), k1 = Math.hypot(u / r1, v / r2, w / r3);
+          return k1 > 1e-9 ? k0 * (k0 - 1) / k1 : -Math.min(r1, r2, r3);
+        };
+      }
+
+      function hash3(i, j, k) {
+        let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(k, 1274126177)) | 0;
+        h = Math.imul(h ^ (h >>> 13), 1103515245);
+        h ^= h >>> 16;
+        return h >>> 0;
+      }
+      function worley(x, y, z) {
+        const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+        let best = 9;
+        for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const h = hash3(xi + dx, yi + dy, zi + dz);
+          const fx = xi + dx + (h & 1023) / 1023 - x;
+          const fy = yi + dy + ((h >>> 10) & 1023) / 1023 - y;
+          const fz = zi + dz + ((h >>> 20) & 1023) / 1023 - z;
+          const d = fx * fx + fy * fy + fz * fz;
+          if (d < best) best = d;
+        }
+        return Math.sqrt(best);
+      }
+      const dome = (f) => Math.sqrt(Math.max(0, 1 - (f / 0.8) ** 2));
+
+      class Box {
+        constructor() { this.min = V(Infinity, Infinity, Infinity); this.max = V(-Infinity, -Infinity, -Infinity); }
+        add(p, r) { this.min.min(V(p.x - r, p.y - r, p.z - r)); this.max.max(V(p.x + r, p.y + r, p.z + r)); }
+      }
+
+      // Naive surface nets: one vertex per sign-changing cell, a quad per
+      // sign-changing edge. Then Newton-project every vertex onto the surface.
+      function surfaceNets(sdf, box, cell, margin) {
+        const ox = box.min.x - margin, oy = box.min.y - margin, oz = box.min.z - margin;
+        const nx = Math.ceil((box.max.x - box.min.x + 2 * margin) / cell) + 1;
+        const ny = Math.ceil((box.max.y - box.min.y + 2 * margin) / cell) + 1;
+        const nz = Math.ceil((box.max.z - box.min.z + 2 * margin) / cell) + 1;
+        const F = new Float32Array(nx * ny * nz);
+        let q = 0;
+        for (let k = 0; k < nz; k++) { const z = oz + k * cell;
+          for (let j = 0; j < ny; j++) { const y = oy + j * cell;
+            for (let i = 0; i < nx; i++) F[q++] = sdf(ox + i * cell, y, z); } }
+        const sy = nx, sz = nx * ny, cx = nx - 1, cy = ny - 1, cz = nz - 1;
+        const cellV = new Int32Array(cx * cy * cz).fill(-1);
+        const co = [0, 1, sy, 1 + sy, sz, sz + 1, sz + sy, sz + 1 + sy];
+        const cxyz = [[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1],[1,0,1],[0,1,1],[1,1,1]];
+        const E = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+        const val = new Float32Array(8);
+        const pos = [];
+        for (let k = 0; k < cz; k++) for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) {
+          const base = i + j * sy + k * sz;
+          let neg = 0;
+          for (let c = 0; c < 8; c++) { val[c] = F[base + co[c]]; if (val[c] < 0) neg++; }
+          if (neg === 0 || neg === 8) continue;
+          let px = 0, py = 0, pz = 0, n = 0;
+          for (const [e0, e1] of E) {
+            const a = val[e0], b = val[e1];
+            if ((a < 0) !== (b < 0)) {
+              const t = a / (a - b), c0 = cxyz[e0], c1 = cxyz[e1];
+              px += c0[0] + (c1[0] - c0[0]) * t; py += c0[1] + (c1[1] - c0[1]) * t; pz += c0[2] + (c1[2] - c0[2]) * t; n++;
+            }
+          }
+          cellV[i + j * cx + k * cx * cy] = pos.length / 3;
+          pos.push(ox + (i + px / n) * cell, oy + (j + py / n) * cell, oz + (k + pz / n) * cell);
+        }
+        const C = (i, j, k) => cellV[i + j * cx + k * cx * cy];
+        const idx = [];
+        const quad = (a, b, c, d) => { if (a < 0 || b < 0 || c < 0 || d < 0) return; idx.push(a, b, c, a, c, d); };
+        for (let k = 1; k < cz; k++) for (let j = 1; j < cy; j++) for (let i = 1; i < cx; i++) {
+          const g = i + j * sy + k * sz, v0 = F[g] < 0;
+          if (v0 !== (F[g + 1] < 0)) quad(C(i, j - 1, k - 1), C(i, j, k - 1), C(i, j, k), C(i, j - 1, k));
+          if (v0 !== (F[g + sy] < 0)) quad(C(i - 1, j, k - 1), C(i - 1, j, k), C(i, j, k), C(i, j, k - 1));
+          if (v0 !== (F[g + sz] < 0)) quad(C(i - 1, j - 1, k), C(i, j - 1, k), C(i, j, k), C(i - 1, j, k));
+        }
+        // Project + gradient normals.
+        const h = cell * 0.35;
+        const nrm = new Float32Array(pos.length);
+        const grad = (x, y, z) => {
+          const gx = sdf(x + h, y, z) - sdf(x - h, y, z);
+          const gy = sdf(x, y + h, z) - sdf(x, y - h, z);
+          const gz = sdf(x, y, z + h) - sdf(x, y, z - h);
+          const l = Math.hypot(gx, gy, gz) || 1;
+          return [gx / l, gy / l, gz / l];
+        };
+        for (let i = 0; i < pos.length; i += 3) {
+          let x = pos[i], y = pos[i + 1], z = pos[i + 2];
+          for (let it = 0; it < 2; it++) {
+            const d = sdf(x, y, z), g = grad(x, y, z);
+            const s = Math.max(-cell, Math.min(cell, d));
+            x -= g[0] * s; y -= g[1] * s; z -= g[2] * s;
+          }
+          const g = grad(x, y, z);
+          pos[i] = x; pos[i + 1] = y; pos[i + 2] = z;
+          nrm[i] = g[0]; nrm[i + 1] = g[1]; nrm[i + 2] = g[2];
+        }
+        // Consistent winding now (outward, by the SDF normal) — the decimator
+        // treats mismatched neighbours as borders and refuses to collapse.
+        for (let t = 0; t < idx.length; t += 3) {
+          const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+          const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+          const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+          const gx = uy * vz - uz * vy, gy = uz * vx - ux * vz, gz = ux * vy - uy * vx;
+          if (gx * (nrm[a] + nrm[b] + nrm[c]) + gy * (nrm[a + 1] + nrm[b + 1] + nrm[c + 1]) + gz * (nrm[a + 2] + nrm[b + 2] + nrm[c + 2]) < 0) {
+            const s = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = s;
+          }
+        }
+        return { pos, nrm, idx };
+      }
+
+      // LOW-POLY: collapse a surface-nets mesh to `targetTris` big faces with
+      // meshoptimizer (simplifyWithUpdate also slides the survivors to the
+      // best-fitting spot), then re-take normals from the SDF.
+      function decimate(m, targetTris, sdf, h) {
+        if (m.idx.length / 3 <= targetTris) return m;
+        const idx = new Uint32Array(m.idx), pos = new Float32Array(m.pos), nrm = new Float32Array(m.nrm);
+        const [count] = MeshoptSimplifier.simplifyWithUpdate(idx, pos, 3, nrm, 3, [0.2, 0.2, 0.2], null, targetTris * 3, 1.0, []);
+        const remap = new Map(), P = [], N = [], I = [];
+        for (let i = 0; i < count; i++) {
+          const v = idx[i];
+          let r = remap.get(v);
+          if (r === undefined) {
+            r = P.length / 3; remap.set(v, r);
+            const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+            const gx = sdf(x + h, y, z) - sdf(x - h, y, z), gy = sdf(x, y + h, z) - sdf(x, y - h, z), gz = sdf(x, y, z + h) - sdf(x, y, z - h);
+            const l = Math.hypot(gx, gy, gz) || 1;
+            P.push(x, y, z); N.push(gx / l, gy / l, gz / l);
+          }
+          I.push(r);
+        }
+        return { pos: P, nrm: N, idx: I };
+      }
+
+      // SDF ambient occlusion along the normal.
+      function sdfAO(sdf, x, y, z, nx, ny, nz, step) {
+        let occ = 0, w = 1;
+        for (let i = 1; i <= 5; i++) {
+          const t = step * i;
+          occ += (t - sdf(x + nx * t, y + ny * t, z + nz * t)) * w;
+          w *= 0.6;
+        }
+        return Math.min(1, Math.max(0.35, 1 - 0.22 * occ / step));
+      }
+
+      // Nearest segment of a joint chain → that bone, blended with its
+      // neighbour within `bw` (fraction of the segment) of each joint.
+      const _ab = V(), _ap = V();
+      function chainWeights(p, J, bones, bw) {
+        let best = Infinity, bi = 0, bt = 0;
+        for (let i = 0; i < bones.length; i++) {
+          _ab.subVectors(J[i + 1], J[i]); _ap.subVectors(p, J[i]);
+          const t = Math.min(1, Math.max(0, _ap.dot(_ab) / _ab.lengthSq()));
+          const d = _ap.addScaledVector(_ab, -t).lengthSq();
+          if (d < best) { best = d; bi = i; bt = t; }
+        }
+        if (bt < bw && bi > 0) { const w = 0.5 * (1 - bt / bw); return [[bones[bi], 1 - w], [bones[bi - 1], w]]; }
+        if (bt > 1 - bw && bi < bones.length - 1) { const w = 0.5 * (1 - (1 - bt) / bw); return [[bones[bi], 1 - w], [bones[bi + 1], w]]; }
+        return [[bones[bi], 1]];
+      }
+      const segParam = (p, a, b) => { _ab.subVectors(b, a); return _ap.subVectors(p, a).dot(_ab) / _ab.lengthSq(); };
+
+      class GeoBuilder {
+        constructor(boneIndex) { this.bi = boneIndex; this.pos = []; this.nrm = []; this.col = []; this.wool = []; this.rough = []; this.ao = []; this.fur = []; this.edge = []; this.si = []; this.sw = []; this.idx = []; }
+        get count() { return this.pos.length / 3; }
+        add(p, n, c, wool, rough, ao, weights, fur = 0, edge = null) {
+          const acc = new Map();
+          for (const [b, w] of weights) acc.set(b, (acc.get(b) ?? 0) + w);
+          const top = [...acc].sort((a, b) => b[1] - a[1]).slice(0, 4);
+          const sum = top.reduce((s, e) => s + e[1], 0) || 1;
+          for (let i = 0; i < 4; i++) {
+            this.si.push(top[i] ? this.bi[top[i][0]] : 0);
+            this.sw.push(top[i] ? top[i][1] / sum : 0);
+          }
+          this.pos.push(p.x, p.y, p.z); this.nrm.push(n.x, n.y, n.z);
+          this.col.push(c.r, c.g, c.b); this.wool.push(wool); this.rough.push(rough); this.ao.push(ao); this.fur.push(fur);
+          if (edge) this.edge.push(edge[0], edge[1], edge[2]); else this.edge.push(1, 1, 1);   // (1,1,1) = no wire
+          return this.count - 1;
+        }
+        build() {
+          // Wind every triangle to agree with its vertex normals.
+          const P = this.pos, N = this.nrm, I = this.idx;
+          if (!I.length) return null;
+          for (let t = 0; t < I.length; t += 3) {
+            const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
+            const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+            const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+            const gx = uy * vz - uz * vy, gy = uz * vx - ux * vz, gz = ux * vy - uy * vx;
+            const nx = N[a] + N[b] + N[c], ny = N[a + 1] + N[b + 1] + N[c + 1], nz = N[a + 2] + N[b + 2] + N[c + 2];
+            if (gx * nx + gy * ny + gz * nz < 0) { const s = I[t + 1]; I[t + 1] = I[t + 2]; I[t + 2] = s; }
+          }
+          if (STYLE.active) this.facet();
+          const g = new THREE.BufferGeometry();
+          g.setAttribute("position", new THREE.Float32BufferAttribute(this.pos, 3));
+          g.setAttribute("normal", new THREE.Float32BufferAttribute(this.nrm, 3));
+          g.setAttribute("aCol", new THREE.Float32BufferAttribute(this.col, 3));
+          // One vec4 (wool, rough, ao, fur): WebGPU caps a pipeline at 8 vertex buffers.
+          const mat = new Float32Array(this.wool.length * 4);
+          for (let i = 0; i < this.wool.length; i++) {
+            mat[i * 4] = this.wool[i]; mat[i * 4 + 1] = this.rough[i]; mat[i * 4 + 2] = this.ao[i]; mat[i * 4 + 3] = this.fur[i];
+          }
+          g.setAttribute("aMat", new THREE.Float32BufferAttribute(mat, 4));
+          // Per-corner barycentrics (+1 on a quad's hidden diagonal) for the wireframe.
+          g.setAttribute("aEdge", new THREE.Float32BufferAttribute(this.edge, 3));
+          g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(this.si, 4));
+          g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(this.sw, 4));
+          g.setIndex(this.idx);
+          g.computeBoundingSphere();
+          return g;
+        }
+        // Split every triangle off and give it ONE colour and material (the
+        // mean of its corners) — the flat colour zones of the pack's models.
+        facet() {
+          const I = this.idx, o = new GeoBuilder(this.bi);
+          const keys = ["pos", "nrm", "col", "wool", "rough", "ao", "fur", "edge", "si", "sw"];
+          const width = { pos: 3, nrm: 3, col: 3, wool: 1, rough: 1, ao: 1, fur: 1, edge: 3, si: 4, sw: 4 };
+          for (let t = 0; t < I.length; t += 3) {
+            const tri = [I[t], I[t + 1], I[t + 2]];
+            for (const v of tri) for (const k of keys) for (let c = 0; c < width[k]; c++) o[k].push(this[k][v * width[k] + c]);
+            const base = o.count - 3;
+            for (const k of ["col", "wool", "rough", "ao", "fur"]) {
+              const w = width[k];
+              for (let c = 0; c < w; c++) {
+                const m = (o[k][(base) * w + c] + o[k][(base + 1) * w + c] + o[k][(base + 2) * w + c]) / 3;
+                for (let j = 0; j < 3; j++) o[k][(base + j) * w + c] = m;
+              }
+            }
+            o.idx.push(base, base + 1, base + 2);
+          }
+          for (const k of [...keys, "idx"]) this[k] = o[k];
+        }
+        // A small faceted sphere, rigid on one bone (eyes).
+        gem(c, r, col, bone, detail = 0, rough = 0.3) {
+          const ico = new THREE.IcosahedronGeometry(r, detail);
+          const pa = ico.attributes.position, base = this.count, q = V(), n = V();
+          for (let i = 0; i < pa.count; i++) {
+            q.fromBufferAttribute(pa, i); n.copy(q).normalize();
+            this.add(q.add(c), n, col, 0, rough, 1, [[bone, 1]], 0);
+          }
+          for (let i = 0; i < pa.count; i++) this.idx.push(base + i);
+        }
+      }
+
+      // Tube through rings {p, r, col, rough}; `weightsAt(p)` per ring.
+      function addTube(G, rings, radial, side, weightsAt, capEnd) {
+        const base = G.count;
+        const T = V(), Nn = V(), Bn = V(), dir = V(), q = V();
+        for (let r = 0; r < rings.length; r++) {
+          const a = rings[Math.max(0, r - 1)].p, b = rings[Math.min(rings.length - 1, r + 1)].p;
+          T.subVectors(b, a).normalize();
+          Nn.crossVectors(T, side); if (Nn.lengthSq() < 1e-6) Nn.set(1, 0, 0); Nn.normalize();
+          Bn.crossVectors(T, Nn).normalize();
+          const w = weightsAt(rings[r].p, r);
+          for (let i = 0; i < radial; i++) {
+            const ang = (i / radial) * Math.PI * 2;
+            dir.copy(Nn).multiplyScalar(Math.cos(ang)).addScaledVector(Bn, Math.sin(ang));
+            q.copy(rings[r].p).addScaledVector(dir, rings[r].r);
+            G.add(q, dir, rings[r].col, 0, rings[r].rough, rings[r].ao ?? 1, w, rings[r].fur ?? 0);
+          }
+        }
+        for (let r = 0; r < rings.length - 1; r++) for (let i = 0; i < radial; i++) {
+          const a0 = base + r * radial + i, a1 = base + r * radial + (i + 1) % radial;
+          G.idx.push(a0, a0 + radial, a1, a1, a0 + radial, a1 + radial);
+        }
+        if (capEnd) {
+          const last = rings[rings.length - 1];
+          const Tn = V().subVectors(last.p, rings[rings.length - 2].p).normalize();
+          const c = G.add(last.p, Tn, last.col, 0, last.rough, 1, weightsAt(last.p, rings.length - 1), last.fur ?? 0);
+          const s = base + (rings.length - 1) * radial;
+          for (let i = 0; i < radial; i++) G.idx.push(s + i, c, s + (i + 1) % radial);
+        }
+      }
+
+      // ── Build an animal template ─────────────────────────────────────────────
+      function buildAnimal() {
+        const t0 = performance.now();
+        const isCamel = SPECIES.value.startsWith("camel"), isMorph = SPECIES.value === "camel-morph";
+        const isSheepMorph = SPECIES.value === "sheep-morph", isGoatMorph = SPECIES.value === "goat-morph";
+        const Q = isCamel ? PC : isGoatMorph ? PG : P;
+        const root = cloneSkinned(gltf.scene);
+        const kill = [];
+        root.traverse((o) => { if (o.isMesh) kill.push(o); });
+        kill.forEach((o) => o.removeFromParent());
+        const B = {};
+        root.traverse((o) => { if (o.isBone) B[o.name] = o; });
+
+        // 1. Proportions: scale child-bone rest offsets.
+        const F = {};
+        for (const s of ["L", "R"]) {
+          F["FrontLowerLeg" + s] = Q.legs;            // = upper front leg length
+          F["BackUpperLeg" + s] = Q.legs;             // = thigh length
+          F["BackLowerLeg" + s] = Q.legs;             // = shank length
+          F["Ear2" + s] = F["Ear3" + s] = F["Ear4" + s] = 0.5;
+        }
+        F.Neck2 = F.Neck3 = F.Head = Q.neck;
+        F.Torso = F.Torso2 = F.Torso3 = Q.body;       // the donkey is long in the back
+        // A very short sheep tail. Not Tail2 (= Tail1's length): Tail1 also carries the
+        // RUMP (measured: 350 verts), and shrinking it squashed the rump.
+        if (isSheepMorph || isGoatMorph) for (let i = 3; i <= 7; i++) F["Tail" + i] = 0.1;
+        for (const [n, f] of Object.entries(F)) B[n].position.multiplyScalar(f);
+        root.updateMatrixWorld(true);
+
+        const FEET = ["FrontLowerLegL", "FrontLowerLegR", "BackLowerLegL", "BackLowerLegR"];
+        const tipLocal = (n) => V(0, A.ext[n] * Q.legs, 0);
+        const tipOf = (n) => B[n].localToWorld(tipLocal(n));
+        // 2. Drop the body by what the legs lost.
+        const delta = Math.min(...FEET.map((n) => tipOf(n).y)) - A.ground0;
+        const bodyRest = B.Body.position.clone();
+        const bw = B.Body.getWorldPosition(V());
+        const la = B.Body.parent.worldToLocal(bw.clone());
+        const lb = B.Body.parent.worldToLocal(bw.clone().add(V(0, -delta, 0)));
+        const dLocal = lb.sub(la);
+        B.Body.position.add(dLocal);
+        root.updateMatrixWorld(true);
+
+        // 2b. Camel: bend the straight donkey neck into an S and level the
+        // head. A fixed bone-local rotation d per bone, right-multiplied onto
+        // the rest AND onto every key of that bone's rotation track, so the
+        // donkey's motion plays on top of the new shape.
+        const RD = {};
+        if (isCamel) {
+          const fwd0 = B.Neck1.getWorldPosition(V()).sub(B.Back.getWorldPosition(V())).setY(0).normalize();
+          const tq = new THREE.Quaternion();
+          const headY = () => { root.updateMatrixWorld(true); return B.Head.getWorldPosition(V()).y; };
+          const muzzle = () => { root.updateMatrixWorld(true); return A.muzzleLocal.clone().applyQuaternion(B.Head.getWorldQuaternion(new THREE.Quaternion())); };
+          const bestAxis = (bone, measure) => {
+            const q0 = bone.quaternion.clone(), m0 = measure();
+            let best = null;
+            for (const ax of [V(1, 0, 0), V(0, 1, 0), V(0, 0, 1)]) {
+              bone.quaternion.copy(q0).multiply(tq.setFromAxisAngle(ax, 0.05));
+              const g = (measure() - m0) / 0.05;
+              if (!best || Math.abs(g) > Math.abs(best.g)) best = { ax, g };
+            }
+            bone.quaternion.copy(q0);
+            return best;
+          };
+          const bend = (name, deg) => {
+            const bone = B[name], { ax, g } = bestAxis(bone, headY);
+            const d = new THREE.Quaternion().setFromAxisAngle(ax, THREE.MathUtils.degToRad(deg) * Math.sign(g));
+            bone.quaternion.multiply(d);
+            RD[name] = d;
+          };
+          // the dip is shared by Neck1 and Neck2 (all on Neck1 folded the chest)
+          bend("Neck1", -Q.neckDip * (window.__dipSplit ?? 0.6));
+          bend("Neck2", -Q.neckDip * (1 - (window.__dipSplit ?? 0.6)) + Q.neckRise * 0.35);
+          bend("Neck3", Q.neckRise * 0.65);
+          // Head: scan for the pitch that puts the muzzle at headPitch, still pointing forward.
+          const hb = B.Head, q0 = hb.quaternion.clone();
+          const { ax } = bestAxis(hb, () => muzzle().y);
+          const target = Math.sin(THREE.MathUtils.degToRad(Q.headPitch));
+          let bestA = 0, bestE = Infinity;
+          for (let an = -1.6; an <= 1.6; an += 0.01) {
+            hb.quaternion.copy(q0).multiply(tq.setFromAxisAngle(ax, an));
+            const m = muzzle();
+            if (m.dot(fwd0) <= 0) continue;
+            const e = Math.abs(m.y - target);
+            if (e < bestE) { bestE = e; bestA = an; }
+          }
+          RD.Head = new THREE.Quaternion().setFromAxisAngle(ax, bestA);
+          hb.quaternion.copy(q0).multiply(RD.Head);
+          root.updateMatrixWorld(true);
+        }
+        if (isSheepMorph || isGoatMorph) {
+          // Ears out (sheep) / hanging (goat) by turning the Ear1 BONE, so the
+          // rig's own weights do the bending — bending the geometry folded the
+          // ear roots inside-out (measured: 5 → 15 flipped faces).
+          const fwd0 = B.Neck1.getWorldPosition(V()).sub(B.Back.getWorldPosition(V())).setY(0).normalize();
+          const right0 = V().crossVectors(fwd0, UP).normalize();
+          const hw = B.Head.getWorldPosition(V());
+          for (const sd of ["L", "R"]) {
+            const e1 = B["Ear1" + sd];
+            const p1 = e1.getWorldPosition(V()), p4 = B["Ear4" + sd].getWorldPosition(V());
+            const axis0 = p4.sub(p1).normalize();
+            const out = Math.sign(p1.clone().sub(hw).dot(right0)) || 1;
+            const target = isGoatMorph
+              ? right0.clone().multiplyScalar(out * 0.5).addScaledVector(UP, -0.85).addScaledVector(fwd0, 0.18).normalize()
+              : right0.clone().multiplyScalar(out).addScaledVector(UP, -0.3).addScaledVector(fwd0, 0.15).normalize();
+            const Rw = new THREE.Quaternion().setFromUnitVectors(axis0, target);
+            const Qb = e1.getWorldQuaternion(new THREE.Quaternion());
+            const d = Qb.clone().invert().multiply(Rw).multiply(Qb);          // world turn → bone-local
+            e1.quaternion.multiply(d);
+            RD["Ear1" + sd] = d;
+          }
+          root.updateMatrixWorld(true);
+        }
+
+        // Foot bones follow the NEW legs. The donkey's hooves are skinned to its
+        // IK foot bones (IKFrontLegL + FFL …), which carry the hoof FLEX but sit
+        // at donkey-leg positions. Put each at the same spot relative to its
+        // lower-leg bone as on the donkey (the tip moved by the leg change); the
+        // hooves then keep their own weights — attached AND flexing.
+        const FOOTPAIRS = [["FrontLowerLegL", "IKFrontLegL"], ["FrontLowerLegR", "IKFrontLegR"], ["BackLowerLegL", "IKBackLegL"], ["BackLowerLegR", "IKBackLegR"]];
+        {
+          const src = gltf.scene; src.updateMatrixWorld(true);
+          const SB = {}; src.traverse((o) => { if (o.isBone) SB[o.name] = o; });
+          for (const [leg, ik] of FOOTPAIRS) {
+            const dl = SB[leg].worldToLocal(SB[ik].getWorldPosition(V()));
+            dl.y += (Q.legs - 1) * A.ext[leg];
+            const w = B[leg].localToWorld(dl);
+            B[ik].position.copy(B[ik].parent.worldToLocal(w));
+          }
+          root.updateMatrixWorld(true);
+        }
+        // Clips: same rotations; scaled translations; Body bob scaled with the legs.
+        const clips = gltf.animations.map((c) => {
+          const cc = c.clone();
+          for (const tr of cc.tracks) {
+            const dot = tr.name.lastIndexOf(".");
+            const node = tr.name.slice(0, dot), prop = tr.name.slice(dot + 1);
+            if (prop === "quaternion" && (isSheepMorph || isGoatMorph) && node.startsWith("Ear")) {
+              // The sheep's ears are turned out sideways in its rest; the
+              // donkey's big ear swings (laid back, pricked up) would stand them
+              // up. Keep a quarter of the motion — a flick — around the rest.
+              const rest = B[node].quaternion, vals = tr.values.slice(), q = new THREE.Quaternion(), key = new THREE.Quaternion();
+              for (let i = 0; i < vals.length; i += 4) {
+                key.fromArray(vals, i);
+                if (RD[node]) key.multiply(RD[node]);                          // the rest turn rides on every key
+                q.copy(rest).slerp(key, 0.25).toArray(vals, i);
+              }
+              tr.values = vals;
+              continue;
+            }
+            if (prop === "quaternion" && RD[node]) {
+              const vals = tr.values.slice(), q = new THREE.Quaternion();
+              for (let i = 0; i < vals.length; i += 4) {
+                q.fromArray(vals, i).multiply(RD[node]).normalize().toArray(vals, i);
+              }
+              tr.values = vals;
+              continue;
+            }
+            if (prop !== "position") continue;
+            const vals = tr.values.slice();
+            if (F[node]) for (let i = 0; i < vals.length; i++) vals[i] *= F[node];
+            else if (node === "Body") {
+              for (let i = 0; i < vals.length; i += 3) {
+                vals[i]     = bodyRest.x + dLocal.x + (vals[i]     - bodyRest.x) * Q.legs;
+                vals[i + 1] = bodyRest.y + dLocal.y + (vals[i + 1] - bodyRest.y) * Q.legs;
+                vals[i + 2] = bodyRest.z + dLocal.z + (vals[i + 2] - bodyRest.z) * Q.legs;
+              }
+            } else continue;
+            tr.values = vals;
+          }
+          return cc;
+        });
+
+        // 3. Geometry in the new rest pose.
+        const W = (n) => B[n].getWorldPosition(V());
+        const fwd = W("Neck1").sub(W("Back")); fwd.y = 0; fwd.normalize();
+        const right = V().crossVectors(fwd, UP).normalize();
+        const boneIndex = Object.fromEntries(A.boneNames.map((n, i) => [n, i]));
+        const G = new GeoBuilder(boneIndex);
+        let topY = -Infinity, curlR = 1;
+        const headFrame = (Lh) => {
+          const H = W("Head");
+          const a = A.muzzleLocal.clone().applyQuaternion(B.Head.getWorldQuaternion(new THREE.Quaternion())).normalize();
+          const hu = UP.clone().addScaledVector(a, -UP.dot(a)).normalize();
+          const hs = V().crossVectors(hu, a).normalize();
+          const Hp = (x, y, z) => H.clone().addScaledVector(hs, x * Lh).addScaledVector(hu, y * Lh).addScaledVector(a, z * Lh);
+          return { H, a, hu, hs, Hp };
+        };
+        if (!isCamel && !isSheepMorph && !isGoatMorph) {
+        const woolC = new THREE.Color(P.woolColor), faceC = new THREE.Color(P.faceColor), legC = new THREE.Color(P.legColor);
+        const dirtC = woolC.clone().multiply(new THREE.Color(0.72, 0.64, 0.5));
+        const hoofC = new THREE.Color("#161310"), eyeC = new THREE.Color("#0c0907"), hornC = new THREE.Color("#c9b894");
+
+        // ── Wool body ──
+        const R = A.Rv * P.wool;
+        const off = V(0, A.cyOff, 0);
+        const Lb = W("Torso3").sub(W("Back")).setY(0).length();
+        const c0 = W("Back").add(off).addScaledVector(fwd, -0.06 * Lb);
+        const c1 = W("Torso").add(off), c2 = W("Torso2").add(off);
+        const c3 = W("Torso3").add(off).addScaledVector(fwd, 0.04 * Lb);
+        const c4 = W("Torso3").add(off).addScaledVector(fwd, 0.14 * Lb).addScaledVector(UP, -0.08 * R);
+        const bJ = [c0, c1, c2, c3, c4], bR = [0.9, 1.0, 1.04, 0.97, 0.74].map((r) => r * R);
+        const bBones = ["Back", "Torso", "Torso2", "Torso3"];
+        const nJ = [c3.clone().lerp(W("Neck1"), 0.5), W("Neck1"), W("Neck2"), W("Neck3"), W("Neck3").lerp(W("Head"), 0.45)];
+        const nR = [0.74, 0.6, 0.48, 0.38, 0.3].map((r) => r * R);
+        const nBones = ["Torso3", "Neck1", "Neck2", "Neck3"];
+        const prims = [];            // { d, k, weights(p) }
+        const box = new Box();
+        const chainPrims = (J, Rr, bones, k) => {
+          for (let i = 0; i < J.length - 1; i++) {
+            prims.push({ d: roundCone(J[i], J[i + 1], Rr[i], Rr[i + 1]), k, weights: (p) => chainWeights(p, J, bones, 0.5) });
+            box.add(J[i], Rr[i]); box.add(J[i + 1], Rr[i + 1]);
+          }
+        };
+        chainPrims(bJ, bR, bBones, 0.35 * R);
+        chainPrims(nJ, nR, nBones, 0.3 * R);
+        for (const s of ["L", "R"]) {
+          const ta = W("BackLeg" + s), tb = W("BackLeg" + s).lerp(W("BackUpperLeg" + s), 0.85);
+          prims.push({ d: roundCone(ta, tb, 0.46 * R, 0.3 * R), k: 0.3 * R,
+            weights: (p) => { const t = smoothstep01(-0.2, 0.8, segParam(p, ta, tb)); return [["Back", 1 - t], ["BackLeg" + s, t]]; } });
+          box.add(ta, 0.46 * R); box.add(tb, 0.3 * R);
+          const fa = W("FrontUpperLeg" + s), fb = W("FrontUpperLeg" + s).lerp(W("FrontLowerLeg" + s), 0.5);
+          prims.push({ d: roundCone(fa, fb, 0.36 * R, 0.24 * R), k: 0.3 * R,
+            weights: (p) => { const t = smoothstep01(-0.2, 0.8, segParam(p, fa, fb)); return [["Torso3", 1 - t], ["FrontUpperLeg" + s, t]]; } });
+          box.add(fa, 0.36 * R); box.add(fb, 0.24 * R);
+        }
+        // Tail stub on the rump, on whichever tail bone sits nearest its root.
+        const tBase = c0.clone().addScaledVector(fwd, -0.72 * R).addScaledVector(UP, 0.28 * R);
+        const tEnd = tBase.clone().addScaledVector(fwd, -0.22 * R).addScaledVector(UP, -0.42 * R);
+        let tailBone = "Tail1", tbd = Infinity;
+        for (let i = 1; i <= 7; i++) { const d = W("Tail" + i).distanceTo(tBase); if (d < tbd) { tbd = d; tailBone = "Tail" + i; } }
+        prims.push({ d: roundCone(tBase, tEnd, 0.2 * R, 0.13 * R), k: 0.12 * R,
+          weights: (p) => { const t = smoothstep01(0, 0.4, segParam(p, tBase, tEnd)); return [["Back", 1 - t], [tailBone, t]]; } });
+        box.add(tBase, 0.2 * R); box.add(tEnd, 0.2 * R);
+
+        const L1 = 1 / (0.5 * R), L2 = 1 / (0.22 * R), A1 = 0.1 * R * P.lumps, A2 = 0.035 * R * P.lumps;
+        const baseBody = (x, y, z) => { let d = 1e9; for (const pr of prims) d = smin(d, pr.d(x, y, z), pr.k); return d; };
+        const bodySDF = (x, y, z) => {
+          const d = baseBody(x, y, z);
+          if (d > 0.45 * R || d < -0.45 * R) return d;
+          return d - A1 * dome(worley(x * L1 + 0.31, y * L1 + 0.17, z * L1)) - A2 * dome(worley(x * L2 + 7.1, y * L2 + 3.3, z * L2 + 1.9));
+        };
+        const bodyMesh = surfaceNets(bodySDF, box, R / 16, 0.3 * R);
+        for (let i = 1; i < bodyMesh.pos.length; i += 3) topY = Math.max(topY, bodyMesh.pos[i]);
+        curlR = R;
+        const bodyBottom = c2.y - R;
+        {
+          const base = G.count, p = V(), n = V(), c = new THREE.Color();
+          const sig = 0.14 * R, pd = new Float64Array(prims.length);
+          for (let i = 0; i < bodyMesh.pos.length; i += 3) {
+            p.fromArray(bodyMesh.pos, i); n.fromArray(bodyMesh.nrm, i);
+            let dmin = Infinity;
+            for (let k = 0; k < prims.length; k++) { pd[k] = prims[k].d(p.x, p.y, p.z); dmin = Math.min(dmin, pd[k]); }
+            const ws = [];
+            for (let k = 0; k < prims.length; k++) {
+              const s = Math.exp(-(pd[k] - dmin) / sig);
+              if (s < 0.02) continue;
+              for (const [b, w] of prims[k].weights(p)) ws.push([b, w * s]);
+            }
+            const belly = smoothstep01(bodyBottom - 0.1 * R, bodyBottom + 0.9 * R, p.y);
+            c.copy(dirtC).lerp(woolC, belly);
+            const ao = sdfAO(bodySDF, p.x, p.y, p.z, n.x, n.y, n.z, 0.07 * R);
+            G.add(p, n, c, 1, 0.95, ao, ws);
+          }
+          for (const i of bodyMesh.idx) G.idx.push(base + i);
+        }
+
+        // ── Head ──
+        const Lh = A.Lh * P.head;
+        const { H, a, hu, hs, Hp } = headFrame(Lh);
+        const hprims = [];             // { d, k, tag, bones }
+        const hbox = new Box();
+        const addH = (d, k, tag, bones, bc, br) => { hprims.push({ d, k, tag, bones }); hbox.add(bc, br); };
+        const skullC = Hp(0, 0.02, 0.27);
+        addH(ellipsoid(skullC, hs, hu, a, 0.23 * Lh, 0.26 * Lh, 0.31 * Lh), 0.12 * Lh, "skin", null, skullC, 0.33 * Lh);
+        const m0 = Hp(0, 0.0, 0.42), m1 = Hp(0, -0.08, 0.8);
+        addH(roundCone(m0, m1, 0.2 * Lh, 0.15 * Lh), 0.12 * Lh, "skin", null, m1, 0.22 * Lh);
+        const jawC = Hp(0, -0.12, 0.47);
+        addH(ellipsoid(jawC, hs, hu, a, 0.17 * Lh, 0.13 * Lh, 0.28 * Lh), 0.1 * Lh, "skin", null, jawC, 0.3 * Lh);
+        if (P.headWool > 0.05) {
+          const pc = Hp(0, 0.2, 0.1);
+          addH(sphere(pc, 0.2 * Lh * P.headWool), 0.06 * Lh, "wool", null, pc, 0.22 * Lh);
+        }
+        for (const sx of [-1, 1]) {
+          // Eye on the skull surface.
+          const d = V(0.78 * sx, 0.3, 0.55);
+          const e = 1 / Math.hypot(d.x / 0.21, d.y / 0.25, d.z / 0.3);
+          const eyeLocal = V(d.x * e, 0.02 + d.y * e, 0.27 + d.z * e);
+          const ec = Hp(eyeLocal.x * 0.99, eyeLocal.y, eyeLocal.z);
+          addH(sphere(ec, 0.042 * Lh), 0.008 * Lh, "eye", null, ec, 0.05 * Lh);
+          // Ear: a flat leaf pointing out sideways, drooping.
+          const s = sx < 0 ? "L" : "R";
+          const earSide = (W("Ear1" + s).sub(H).dot(hs) < 0) === (sx < 0) ? s : (s === "L" ? "R" : "L");
+          const eb = Hp(0.2 * sx, 0.12, 0.18);
+          const e1 = hs.clone().multiplyScalar(sx).addScaledVector(hu, 0.15 - 0.6 * P.earDroop).addScaledVector(a, 0.02).normalize();
+          const len = 0.44 * Lh * P.earSize;
+          const e2 = V().crossVectors(e1, hu).normalize(), e3 = V().crossVectors(e1, e2).normalize();
+          const ecn = eb.clone().addScaledVector(e1, len * 0.5);
+          addH(ellipsoid(ecn, e1, e2, e3, len * 0.5, 0.11 * Lh * P.earSize, 0.03 * Lh), 0.04 * Lh, "ear", { bone: "Ear1" + earSide, base: eb, dir: e1, len }, ecn, len * 0.6);
+        }
+        const headSDF = (x, y, z) => { let d = 1e9; for (const pr of hprims) d = smin(d, pr.d(x, y, z), pr.k); return d; };
+        const headMesh = surfaceNets(headSDF, hbox, Lh / 56, 0.08 * Lh);
+        {
+          const base = G.count, p = V(), n = V(), c = new THREE.Color(), rel = V();
+          for (let i = 0; i < headMesh.pos.length; i += 3) {
+            p.fromArray(headMesh.pos, i); n.fromArray(headMesh.nrm, i);
+            let best = null, bd = Infinity;
+            for (const pr of hprims) { const d = pr.d(p.x, p.y, p.z); if (d < bd) { bd = d; best = pr; } }
+            rel.subVectors(p, H);
+            const lz = rel.dot(a) / Lh, ly = rel.dot(hu) / Lh;
+            let wool = 0, rough = 0.7, ws = [["Head", 1]];
+            if (best.tag === "wool") { c.copy(woolC); wool = 1; rough = 0.95; }
+            else if (best.tag === "eye") { c.copy(eyeC); rough = 0.12; }
+            else {
+              c.copy(faceC);
+              if (lz > 0.84) c.multiplyScalar(0.55);                                  // nose
+              if (lz > 0.62 && Math.abs(ly + 0.16) < 0.018) c.multiplyScalar(0.45);  // mouth line
+              if (best.tag === "ear") {
+                const t = segParam(p, best.bones.base, best.bones.base.clone().addScaledVector(best.bones.dir, best.bones.len));
+                const ew = smoothstep01(0.02, 0.25, t);
+                ws = [["Head", 1 - ew], [best.bones.bone, ew]];
+              }
+            }
+            const ao = sdfAO(headSDF, p.x, p.y, p.z, n.x, n.y, n.z, 0.03 * Lh);
+            G.add(p, n, c, wool, rough, ao, ws);
+          }
+          for (const i of headMesh.idx) G.idx.push(base + i);
+        }
+
+        // ── Legs ──
+        const R0 = A.Rv * P.legThick;
+        const legRings = (J, prof, bones) => {
+          // prof: [segmentIndex, t, radius, colour, rough]
+          const rings = [];
+          const P0 = (si, t) => J[si].clone().lerp(J[si + 1], t);
+          for (let k = 0; k < prof.length - 1; k++) {
+            const [sa, ta, ra, ca, ga] = prof[k], [sb, tb, rb] = prof[k + 1];
+            const pa = P0(sa, ta), pb = P0(sb, tb);
+            const steps = Math.max(1, Math.round(pa.distanceTo(pb) / (0.05 * R0 * 6)));
+            for (let s = 0; s < steps; s++) { const u = s / steps; rings.push({ p: pa.clone().lerp(pb, u), r: ra + (rb - ra) * u, col: ca, rough: ga }); }
+          }
+          const lp = prof[prof.length - 1];
+          rings.push({ p: P0(lp[0], lp[1]), r: lp[2], col: lp[3], rough: lp[4] });
+          addTube(G, rings, 12, fwd, (p) => chainWeights(p, J, bones, 0.12), true);
+        };
+        for (const s of ["L", "R"]) {
+          const Jf = [W("FrontUpperLeg" + s), W("FrontLowerLeg" + s), tipOf("FrontLowerLeg" + s)];
+          legRings(Jf, [
+            [0, 0.22, 0.13 * R0, woolC, 0.9], [0, 0.45, 0.13 * R0, legC, 0.8], [0, 1, 0.105 * R0, legC, 0.8],
+            [1, 0.25, 0.075 * R0, legC, 0.8], [1, 0.76, 0.07 * R0, legC, 0.8], [1, 0.84, 0.085 * R0, legC, 0.8],
+            [1, 0.9, 0.08 * R0, hoofC, 0.45], [1, 1, 0.095 * R0, hoofC, 0.45],
+          ], ["FrontUpperLeg" + s, "FrontLowerLeg" + s]);
+          const Jb = [W("BackLeg" + s), W("BackUpperLeg" + s), W("BackLowerLeg" + s), tipOf("BackLowerLeg" + s)];
+          legRings(Jb, [
+            [0, 0.45, 0.17 * R0, woolC, 0.9], [0, 0.9, 0.14 * R0, legC, 0.8], [1, 0.1, 0.12 * R0, legC, 0.8],
+            [1, 0.9, 0.085 * R0, legC, 0.8], [2, 0.05, 0.1 * R0, legC, 0.8],
+            [2, 0.25, 0.075 * R0, legC, 0.8], [2, 0.76, 0.07 * R0, legC, 0.8], [2, 0.84, 0.085 * R0, legC, 0.8],
+            [2, 0.9, 0.08 * R0, hoofC, 0.45], [2, 1, 0.095 * R0, hoofC, 0.45],
+          ], ["BackLeg" + s, "BackUpperLeg" + s, "BackLowerLeg" + s]);
+        }
+
+        // ── Horns: a ram's curl round each ear ──
+        if (P.horns) {
+          for (const sx of [-1, 1]) {
+            const rings = [], N = 44;
+            const c = new THREE.Color();
+            for (let i = 0; i <= N; i++) {
+              const u = i / N, th = u * Math.PI * 1.75, r = 0.34 * (1 - 0.55 * u);
+              const loc = V(sx * (0.12 + 0.3 * u), 0.2 + r * Math.sin(th), 0.18 - r * (1 - Math.cos(th)) + 0.1 * u);
+              const stripe = 0.82 + 0.18 * Math.abs(Math.sin(u * 70));
+              c.copy(hornC).multiplyScalar(stripe * (0.75 + 0.25 * u));
+              rings.push({ p: Hp(loc.x, loc.y, loc.z), r: (0.11 - 0.085 * u) * Lh, col: c.clone(), rough: 0.55 });
+            }
+            addTube(G, rings, 10, hs, () => [["Head", 1]], true);
+          }
+        }
+        } else {
+          ({ topY, curlR } = isMorph || isSheepMorph || isGoatMorph
+            ? buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, isSheepMorph ? "sheep" : isGoatMorph ? "goat" : "camel")
+            : buildCamelParts({ B, W, fwd, right, G, tipOf, headFrame }));
+        }
+
+        const geo = G.build();
+        const mesh = new THREE.SkinnedMesh(geo, MATS.hero.material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+        root.add(mesh);
+        root.updateMatrixWorld(true);
+        const skeleton = new THREE.Skeleton(A.boneNames.map((n) => B[n]));
+        mesh.bind(skeleton);
+
+        // Real-world size: the top of the body (wool / hump) at Q.size metres.
+        const scale = Q.size / (topY - A.ground0);
+        root.scale.setScalar(scale);
+        root.position.y = -A.ground0 * scale;
+        root.updateMatrixWorld(true);
+
+        uCurl.value = 1 / (0.11 * curlR) * P.curl;
+        uBump.value = 0.004 * P.bump;
+
+        const tpl = { root, mesh, clips, scale, fwd, curlR, isCamel, k: Q.size / 0.85, yaw0: Math.atan2(fwd.x, fwd.z), tris: geo.index.count / 3, feet: FEET.map((n) => ({ bone: n, local: tipLocal(n) })) };
+        if (isCamel && !window.__noPace) tpl.pace = paceWalk(tpl);
+        tpl.feetFollow = feetFollow(tpl, Q.legs);
+        // Measured, not eyeballed: how far each hoof bends against its lower leg
+        // over the Walk — the animal vs the donkey (same clip).
+        {
+          const flex = (src, clip) => {
+            const r = cloneSkinned(src), b = {};
+            r.traverse((o) => { if (o.isBone) b[o.name] = o; });
+            const m = new THREE.AnimationMixer(r);
+            m.clipAction(clip).play();
+            const out = {}, q = new THREE.Quaternion();
+            for (const [leg, ff] of [["BackLowerLegL", "FFBL"], ["FrontLowerLegL", "FFL"]]) {
+              let lo = 1e9, hi = -1e9;
+              for (let k = 0; k <= 60; k++) {
+                m.setTime((clip.duration * k) / 60); r.updateMatrixWorld(true);
+                const yl = V(0, 1, 0).applyQuaternion(b[leg].getWorldQuaternion(q)), yf = V(0, 1, 0).applyQuaternion(b[ff].getWorldQuaternion(q));
+                const ang = (Math.acos(Math.max(-1, Math.min(1, yl.dot(yf)))) * 180) / Math.PI;
+                lo = Math.min(lo, ang); hi = Math.max(hi, ang);
+              }
+              out[ff] = Math.round(hi - lo) + " deg";
+            }
+            m.stopAllAction();
+            return out;
+          };
+          const wA = tpl.clips.find((c) => c.name === "Walk"), wD = gltf.animations.find((c) => c.name === "Walk");
+          if (wA && wD) { tpl.hoofFlex = { animal: flex(tpl.root, wA), donkey: flex(gltf.scene, wD) }; console.log("[hoof flex over Walk]", JSON.stringify(tpl.hoofFlex)); }
+        }
+        tpl.ground = groundClamp(tpl);
+        tpl.speed = {
+          Walk: measureGroundSpeed(tpl, "Walk"),
+          Gallop: measureGroundSpeed(tpl, "Gallop"),
+        };
+        tpl.buildMs = performance.now() - t0;
+        return tpl;
+      }
+      // ── Camel (Arabian / dromedary) parts ────────────────────────────────────
+      // Same rig, no wool: smooth-skinned SDF body (barrel squashed sideways,
+      // ONE hump, sternal callus), an S-neck over the bent neck bones, SDF
+      // thighs/forearms, tube legs with knee calluses, broad two-toed pads,
+      // a tufted tail on the donkey's tail chain, and a level head with the
+      // droopy split upper lip and hanging lower lip.
+      function smax(a, b, k) { return -smin(-a, -b, k); }
+      function buildCamelParts({ W, fwd, right, G, tipOf, headFrame }) {
+        const Q = PC;
+        const baseC = new THREE.Color(Q.color), darkC = new THREE.Color(Q.dark), lightC = new THREE.Color(Q.light);
+        const legC = baseC.clone().lerp(lightC, 0.3);
+        const callusC = new THREE.Color("#4e3c2b"), padC = new THREE.Color("#51463c"), nailC = new THREE.Color("#1f1812");
+        const eyeC = new THREE.Color("#0a0705"), tuftC = darkC.clone().multiplyScalar(0.55);
+        const muzzleC = lightC.clone().lerp(new THREE.Color("#a89a88"), 0.35);
+        const R = A.Rv * Q.girth, R0 = A.Rv * Q.legThick;
+        const LP = STYLE.active;
+
+        const unionSDF = (prims) => (x, y, z) => {
+          let d = 1e9;
+          for (const pr of prims) { const v = pr.d(x, y, z); d = pr.sub ? smax(d, -v, pr.k) : smin(d, v, pr.k); }
+          return d;
+        };
+        // Mesh one SDF part; per vertex: soft skin weights over the prims,
+        // nearest prim's tag → shade(p, n, tag, colour) → { rough, fur }.
+        const emit = (prims, box, cell, margin, sig, aoStep, shade, target = 0) => {
+          const sdf = unionSDF(prims);
+          let m = surfaceNets(sdf, box, cell, margin);
+          if (LP && target) m = decimate(m, target, sdf, cell * 0.5);
+          const base = G.count, p = V(), n = V(), c = new THREE.Color(), pd = new Float64Array(prims.length);
+          let top = -Infinity;
+          for (let i = 0; i < m.pos.length; i += 3) {
+            p.fromArray(m.pos, i); n.fromArray(m.nrm, i);
+            top = Math.max(top, p.y);
+            let dmin = Infinity, best = 0;
+            for (let k = 0; k < prims.length; k++) {
+              if (prims[k].sub) { pd[k] = Infinity; continue; }
+              pd[k] = prims[k].d(p.x, p.y, p.z);
+              if (pd[k] < dmin) { dmin = pd[k]; best = k; }
+            }
+            const ws = [];
+            for (let k = 0; k < prims.length; k++) {
+              if (prims[k].sub) continue;
+              const s = Math.exp(-(pd[k] - dmin) / sig);
+              if (s < 0.02) continue;
+              for (const [b, w] of prims[k].weights(p)) ws.push([b, w * s]);
+            }
+            const sh = shade(p, n, prims[best].tag, c);
+            const ao = sdfAO(sdf, p.x, p.y, p.z, n.x, n.y, n.z, aoStep);
+            G.add(p, n, c, 0, sh.rough, ao, ws, sh.fur);
+          }
+          for (const i of m.idx) G.idx.push(base + i);
+          return top;
+        };
+
+        // ── Body ──
+        const off = V(0, A.cyOff, 0);
+        const Lb = W("Torso3").sub(W("Back")).setY(0).length();
+        const c0 = W("Back").add(off).addScaledVector(fwd, -0.1 * Lb).addScaledVector(UP, -0.06 * R);
+        const c1 = W("Torso").add(off);
+        const c2 = W("Torso2").add(off);
+        const c3 = W("Torso3").add(off).addScaledVector(fwd, 0.02 * Lb).addScaledVector(UP, -0.06 * R);
+        const c4 = W("Torso3").add(off).addScaledVector(fwd, 0.17 * Lb).addScaledVector(UP, -0.14 * R);
+        const bJ = [c0, c1, c2, c3, c4], bR = [0.7, 0.8, 0.92, 1.0, 0.76].map((r) => r * R);
+        const bBones = ["Back", "Torso", "Torso2", "Torso3"];
+        const bodyW = (p) => chainWeights(p, bJ, bBones, 0.5);
+        const narrow = 0.82;                         // a camel is deep, not wide
+        const squash = (fn, o) => (x, y, z) => {
+          const s = ((x - o.x) * right.x + (y - o.y) * right.y + (z - o.z) * right.z) * (1 / narrow - 1);
+          return fn(x + right.x * s, y + right.y * s, z + right.z * s) * narrow;
+        };
+        const prims = [], box = new Box();
+        for (let i = 0; i < 4; i++) {
+          prims.push({ d: squash(roundCone(bJ[i], bJ[i + 1], bR[i], bR[i + 1]), c2), k: 0.35 * R, tag: "body", weights: bodyW });
+          box.add(bJ[i], bR[i]); box.add(bJ[i + 1], bR[i + 1]);
+        }
+        // The hump: one, a little behind the middle of the back.
+        const hc = c2.clone().lerp(c3, 0.12).addScaledVector(UP, 0.92 * R);
+        const hr = [0.36 * Lb * Q.humpLen, 0.78 * R * Q.hump, 0.52 * R];
+        prims.push({ d: ellipsoid(hc, fwd, UP, right, hr[0], hr[1], hr[2]), k: 0.45 * R, tag: "hump", weights: bodyW });
+        box.add(hc, Math.max(...hr));
+        // Sternal callus — the pad the camel kneels on.
+        const pc = c3.clone().addScaledVector(UP, -0.9 * R).addScaledVector(fwd, -0.02 * Lb);
+        prims.push({ d: ellipsoid(pc, fwd, UP, right, 0.26 * R, 0.13 * R, 0.2 * R), k: 0.18 * R, tag: "callus", weights: bodyW });
+        box.add(pc, 0.3 * R);
+        // Neck along the bent neck chain.
+        const n0 = c3.clone().addScaledVector(UP, 0.2 * R).addScaledVector(fwd, 0.12 * Lb);
+        const nJ = [n0, W("Neck1"), W("Neck2"), W("Neck3"), W("Head")];
+        const nR = [0.6, 0.4, 0.31, 0.26, 0.22].map((r) => r * R * Q.neckThick);
+        const nBones = ["Torso3", "Neck1", "Neck2", "Neck3"];
+        for (let i = 0; i < 4; i++) {
+          prims.push({ d: roundCone(nJ[i], nJ[i + 1], nR[i], nR[i + 1]), k: 0.25 * R, tag: "neck", weights: (p) => chainWeights(p, nJ, nBones, 0.5) });
+          box.add(nJ[i], nR[i]); box.add(nJ[i + 1], nR[i + 1]);
+        }
+        // Thighs and forearms.
+        for (const s of ["L", "R"]) {
+          const ta = W("BackLeg" + s), tb = W("BackUpperLeg" + s);
+          prims.push({ d: roundCone(ta, tb, 0.32 * R, 0.18 * R), k: 0.3 * R, tag: "leg",
+            weights: (p) => { const t = smoothstep01(0.15, 0.95, segParam(p, ta, tb)); return [["Back", 1 - t], ["BackLeg" + s, t]]; } });
+          box.add(ta, 0.32 * R); box.add(tb, 0.18 * R);
+          const fa = W("FrontUpperLeg" + s).addScaledVector(UP, 0.12 * R), fb = W("FrontUpperLeg" + s).lerp(W("FrontLowerLeg" + s), 0.62);
+          prims.push({ d: roundCone(fa, fb, 0.32 * R, 0.15 * R), k: 0.25 * R, tag: "leg",
+            weights: (p) => { const t = smoothstep01(0.0, 0.45, segParam(p, fa, fb)); return [["Torso3", 1 - t], ["FrontUpperLeg" + s, t]]; } });
+          box.add(fa, 0.32 * R); box.add(fb, 0.15 * R);
+        }
+        const mottle = (p) => 0.94 + 0.12 * dome(worley(p.x / (0.7 * R) + 3.1, p.y / (0.7 * R), p.z / (0.7 * R) + 1.7));
+        const topY = emit(prims, box, R / (LP ? 14 : 22), 0.15 * R, 0.22 * R, 0.07 * R, (p, n, tag, c) => {
+          if (tag === "callus") { c.copy(callusC); return { rough: 0.95, fur: 0.15 }; }
+          const top = smoothstep01(0.25, 0.95, n.y), under = smoothstep01(0.15, 0.8, -n.y);
+          c.copy(baseC).lerp(darkC, top * (tag === "hump" ? 0.55 : 0.3)).lerp(lightC, under * 0.55);
+          if (tag === "neck" && n.y < -0.1) c.lerp(darkC, 0.3 * smoothstep01(0.1, 0.6, -n.y));   // shaggy throat
+          c.multiplyScalar(mottle(p));
+          return { rough: 0.85, fur: 1 };
+        }, 1000);
+
+        // ── Legs (tubes) ──
+        const legRings = (J, prof, bones) => {
+          const rings = [];
+          const at = (si, t) => J[si].clone().lerp(J[si + 1], t);
+          for (let k = 0; k < prof.length - 1; k++) {
+            const [sa, ta, ra, ca] = prof[k], [sb, tb, rb] = prof[k + 1];
+            const pa = at(sa, ta), pb = at(sb, tb);
+            const steps = Math.max(1, Math.round(pa.distanceTo(pb) / ((LP ? 0.75 : 0.3) * R0)));
+            for (let s = 0; s < steps; s++) { const u = s / steps; rings.push({ p: pa.clone().lerp(pb, u), r: ra + (rb - ra) * u, col: ca, rough: 0.85, fur: ca === callusC ? 0.1 : 0.8 }); }
+          }
+          const lp = prof[prof.length - 1];
+          rings.push({ p: at(lp[0], lp[1]), r: lp[2], col: lp[3], rough: 0.85, fur: 0.8 });
+          addTube(G, rings, LP ? 6 : 14, fwd, (p) => chainWeights(p, J, bones, 0.12), false);
+        };
+        const hockC = legC.clone().multiplyScalar(0.85);
+        for (const s of ["L", "R"]) {
+          const Jf = [W("FrontUpperLeg" + s), W("FrontLowerLeg" + s), tipOf("FrontLowerLeg" + s)];
+          legRings(Jf, [
+            [0, 0.5, 0.16 * R0, legC], [0, 0.8, 0.12 * R0, legC], [0, 0.94, 0.11 * R0, legC],
+            [1, 0.0, 0.13 * R0, callusC], [1, 0.07, 0.12 * R0, callusC], [1, 0.15, 0.08 * R0, legC],
+            [1, 0.7, 0.064 * R0, legC], [1, 0.8, 0.076 * R0, legC], [1, 0.9, 0.07 * R0, legC], [1, 0.97, 0.08 * R0, legC],
+          ], ["FrontUpperLeg" + s, "FrontLowerLeg" + s]);
+          const Jb = [W("BackLeg" + s), W("BackUpperLeg" + s), W("BackLowerLeg" + s), tipOf("BackLowerLeg" + s)];
+          legRings(Jb, [
+            [0, 0.6, 0.19 * R0, legC], [0, 1, 0.15 * R0, legC], [1, 0.35, 0.115 * R0, legC], [1, 0.85, 0.088 * R0, legC],
+            [1, 1.0, 0.1 * R0, hockC], [2, 0.1, 0.085 * R0, hockC], [2, 0.2, 0.064 * R0, legC],
+            [2, 0.72, 0.062 * R0, legC], [2, 0.82, 0.075 * R0, legC], [2, 0.9, 0.07 * R0, legC], [2, 0.97, 0.08 * R0, legC],
+          ], ["BackLeg" + s, "BackUpperLeg" + s, "BackLowerLeg" + s]);
+        }
+
+        // ── Feet: broad soft pads, two toes with small nails ──
+        for (const foot of ["FrontLowerLegL", "FrontLowerLegR", "BackLowerLegL", "BackLowerLegR"]) {
+          const T = tipOf(foot), FW = () => [[foot, 1]];
+          const pp = [], pb = new Box();
+          const P1 = (f, sd, u) => T.clone().addScaledVector(fwd, f * R0).addScaledVector(right, sd * R0).addScaledVector(UP, u * R0);
+          pp.push({ d: ellipsoid(P1(0.04, 0, 0.075), fwd, UP, right, 0.21 * R0, 0.075 * R0, 0.165 * R0), k: 0.04 * R0, tag: "sole", weights: FW });
+          pp.push({ d: roundCone(P1(0, 0, 0.32), P1(0, 0, 0.1), 0.068 * R0, 0.1 * R0), k: 0.06 * R0, tag: "skin", weights: FW });
+          for (const sx of [-1, 1]) {
+            pp.push({ d: sphere(P1(0.17, 0.075 * sx, 0.065), 0.07 * R0), k: 0.04 * R0, tag: "toe", weights: FW });
+            pp.push({ d: sphere(P1(0.235, 0.075 * sx, 0.09), 0.028 * R0), k: 0.01 * R0, tag: "nail", weights: FW });
+          }
+          pp.push({ d: ellipsoid(P1(0.22, 0, 0.07), fwd, UP, right, 0.1 * R0, 0.1 * R0, 0.012 * R0), k: 0.015 * R0, tag: "cut", weights: FW, sub: true });
+          pb.add(P1(0.04, 0, 0.12), 0.3 * R0); pb.add(P1(0, 0, 0.3), 0.12 * R0);
+          emit(pp, pb, (LP ? 0.03 : 0.016) * R0, 0.06 * R0, 0.02 * R0, 0.02 * R0, (p, n, tag, c) => {
+            if (tag === "nail") { c.copy(nailC); return { rough: 0.4, fur: 0 }; }
+            if (tag === "skin") { c.copy(legC); return { rough: 0.85, fur: 0.7 }; }
+            c.copy(padC).lerp(legC, tag === "toe" ? 0.25 : 0.1);
+            if (n.y < -0.5) c.multiplyScalar(0.7);
+            return { rough: 0.9, fur: 0.1 };
+          }, 40);
+        }
+
+        // ── Tail: thin, on the donkey's tail chain, dark tuft at the end ──
+        {
+          const tj = [1, 2, 3, 4, 5, 6, 7].map((i) => W("Tail" + i));
+          tj.push(tj[6].clone().multiplyScalar(2).sub(tj[5]));
+          const tb = [1, 2, 3, 4, 5, 6, 7].map((i) => "Tail" + i);
+          const pts = [tj[0].clone().lerp(tj[1], 0.5)];
+          for (let i = 1; i < tj.length; i++) { pts.push(tj[i - 1].clone().lerp(tj[i], i === 1 ? 0.75 : 0.5)); pts.push(tj[i]); }
+          let total = 0; const acc = [0];
+          for (let i = 1; i < pts.length; i++) { total += pts[i].distanceTo(pts[i - 1]); acc.push(total); }
+          const rings = pts.map((p, i) => {
+            const u = acc[i] / total, tuft = u > 0.72;
+            const r = tuft ? 0.055 * R * (1 - 0.8 * ((u - 0.72) / 0.28) ** 2) : (0.05 - 0.022 * u) * R;
+            return { p, r, col: tuft ? tuftC : baseC.clone().lerp(darkC, 0.25), rough: 0.9, fur: 1 };
+          });
+          addTube(G, rings, LP ? 5 : 10, right, (p) => chainWeights(p, tj, tb, 0.3), true);
+        }
+
+        // ── Head ──
+        const Lh = A.Lh * Q.head;
+        const { H, a, hu, hs, Hp } = headFrame(Lh);
+        const hp = [], hbx = new Box();
+        const HW = () => [["Head", 1]];
+        const addP = (d, k, tag, c, r, extra = {}) => { hp.push({ d, k, tag, weights: extra.weights ?? HW, sub: extra.sub }); hbx.add(c, r); };
+        const E = (x, y, z, rx, ry, rz) => ellipsoid(Hp(x, y, z), hs, hu, a, rx * Lh, ry * Lh, rz * Lh);
+        addP(E(0, 0.06, 0.2, 0.19, 0.19, 0.24), 0.1 * Lh, "skin", Hp(0, 0.06, 0.2), 0.26 * Lh);
+        addP(sphere(Hp(0, 0.02, 0.04), 0.17 * Lh), 0.1 * Lh, "skin", Hp(0, 0.02, 0.04), 0.18 * Lh);
+        addP(roundCone(Hp(0, 0.03, 0.36), Hp(0, -0.01, 0.8), 0.155 * Lh, 0.1 * Lh), 0.1 * Lh, "skin", Hp(0, 0, 0.6), 0.4 * Lh);
+        addP(E(0, -0.1, 0.42, 0.15, 0.13, 0.3), 0.1 * Lh, "skin", Hp(0, -0.1, 0.42), 0.32 * Lh);
+        addP(E(0, -0.05, 0.88, 0.115, 0.1, 0.105), 0.06 * Lh, "muzzle", Hp(0, -0.05, 0.88), 0.13 * Lh);
+        addP(E(0, -0.165, 0.82, 0.085, 0.055, 0.13), 0.05 * Lh, "muzzle", Hp(0, -0.165, 0.82), 0.15 * Lh);
+        addP(E(0, -0.08, 0.975, 0.018, 0.075, 0.05), 0.02 * Lh, "cut", Hp(0, -0.08, 0.975), 0.08 * Lh, { sub: true });
+        for (const sx of [-1, 1]) addP(E(0.06 * sx, 0.0, 0.955, 0.014, 0.034, 0.03), 0.012 * Lh, "cut", Hp(0.06 * sx, 0, 0.955), 0.05 * Lh, { sub: true });
+        const eyes = [];
+        for (const sx of [-1, 1]) {
+          addP(sphere(Hp(0.12 * sx, 0.15, 0.34), 0.07 * Lh), 0.06 * Lh, "brow", Hp(0.12 * sx, 0.15, 0.34), 0.08 * Lh);
+          const d = V(0.82 * sx, 0.3, 0.5);
+          const e = 1 / Math.hypot(d.x / 0.19, d.y / 0.19, d.z / 0.24);
+          const el = V(d.x * e * 0.97, 0.06 + d.y * e, 0.2 + d.z * e);
+          if (!LP) addP(sphere(Hp(el.x, el.y, el.z), 0.04 * Lh), 0.008 * Lh, "eye", Hp(el.x, el.y, el.z), 0.05 * Lh);
+          eyes.push(Hp(el.x, el.y, el.z));
+          addP(sphere(Hp(el.x * 0.98, el.y + 0.035, el.z - 0.005), 0.04 * Lh), 0.02 * Lh, "lid", Hp(el.x, el.y + 0.035, el.z), 0.05 * Lh);
+          // Small rounded ears, up and back.
+          const s = sx < 0 ? "L" : "R";
+          const earSide = (W("Ear1" + s).sub(H).dot(hs) < 0) === (sx < 0) ? s : (s === "L" ? "R" : "L");
+          const eb = Hp(0.11 * sx, 0.19, 0.07);
+          const e1 = hs.clone().multiplyScalar(0.55 * sx).addScaledVector(hu, 0.75).addScaledVector(a, -0.35).normalize();
+          const len = (LP ? 0.13 : 0.15) * Lh;
+          const e2 = V().crossVectors(e1, a).normalize(), e3 = V().crossVectors(e1, e2).normalize();
+          const ec = eb.clone().addScaledVector(e1, len * 0.5);
+          addP(ellipsoid(ec, e1, e2, e3, len * 0.5, (LP ? 0.05 : 0.06) * Lh, (LP ? 0.035 : 0.028) * Lh), 0.03 * Lh, "ear", ec, len * 0.6, {
+            weights: (p) => { const t = smoothstep01(0.05, 0.4, segParam(p, eb, eb.clone().addScaledVector(e1, len))); return [["Head", 1 - t], ["Ear1" + earSide, t]]; },
+          });
+        }
+        const rel = V();
+        emit(hp, hbx, Lh / (LP ? 32 : 84), 0.06 * Lh, 0.02 * Lh, 0.03 * Lh, (p, n, tag, c) => {
+          if (!LP && eyes.some((e) => e.distanceTo(p) < 0.043 * Lh)) { c.copy(eyeC); return { rough: 0.1, fur: 0 }; }
+          rel.subVectors(p, H);
+          const lz = rel.dot(a) / Lh;
+          c.copy(baseC).lerp(lightC, 0.2).lerp(darkC, 0.25 * smoothstep01(0.3, 0.95, n.y));
+          c.lerp(muzzleC, smoothstep01(0.62, 0.86, lz));
+          if (tag === "brow") c.multiplyScalar(0.92);
+          if (tag === "lid") c.multiplyScalar(0.8);
+          if (tag === "ear") c.lerp(darkC, 0.3);
+          return { rough: 0.8, fur: 0.8 };
+        }, 380);
+
+        if (LP) {
+          const skull = Hp(0, 0.06, 0.2);
+          for (const e of eyes) {
+            const out = e.clone().sub(skull).normalize();
+            G.gem(e.clone().addScaledVector(out, 0.01 * Lh), 0.05 * Lh, new THREE.Color("#e9e1d2"), "Head", 0, 0.4);
+            G.gem(e.clone().addScaledVector(out, 0.036 * Lh), 0.032 * Lh, eyeC, "Head", 0, 0.15);
+          }
+        }
+        return { topY, curlR: R };
+      }
+
+      // ── Camel by MORPHING THE DONKEY ─────────────────────────────────────────
+      // The pack's own mesh, so the pack's own look: its quad-modelled faces,
+      // its colour zones, its skin weights.
+      //   1. Pose the donkey's rest mesh with the camel's rest skeleton (long
+      //      legs, S-neck, short ears) through its own weights — linear blend
+      //      skinning does the big reshaping — and bake that as the new rest.
+      //   2. Weld by position, cut extra loops into the back (red-green
+      //      refinement: split edges are shared, so no cracks), raise the hump.
+      //   3. Hooves spread into pads, mane flattened, head resized, camel
+      //      palette on the donkey's material zones.
+      // kind "camel" | "sheep": the same donkey → quads pipeline; the camel adds
+      // face / slimming / pads / hump, the sheep adds wool, sideways ears, a
+      // stub tail and a Suffolk palette (your low-poly reference).
+      function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
+        const SHEEP = kind === "sheep", GOAT = kind === "goat", CAMEL = kind === "camel";
+        const SMALL = SHEEP || GOAT;           // the sheep-like head / ear handling
+        const Q = SHEEP ? P : GOAT ? PG : PC, src = A.mesh;
+        const legSlim = SHEEP ? 0.72 : GOAT ? 0.66 : PC.legSlim, neckSlim = SHEEP ? 1 : GOAT ? 0.85 : PC.neckSlim;
+        const hash = (i) => { let h = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+        const capSet = new Set();               // sheep: head vertices under the wool cap
+        // 1. Donkey rest → camel rest through the skin.
+        // Each bone's LENGTH change = the scale given to its child's offset (the
+        // lower legs: the leg factor). A vertex is taken into its bone's frame,
+        // its position ALONG the bone (+Y) scaled by that, and carried out by
+        // the new bone — so a shortened thigh's own geometry shortens with it
+        // instead of poking past the knee (measured: knee rings 0.43 → 0.9).
+        const lenScale = {};
+        for (const n of A.boneNames) {
+          const kid = B[n].children.find((c) => c.isBone && F[c.name] !== undefined);
+          lenScale[n] = kid ? F[kid.name] : /LowerLeg/.test(n) ? Q.legs : 1;
+        }
+        const M = {}, Minv0 = A.restInv;
+        for (const n of A.boneNames) M[n] = B[n].matrixWorld.clone();
+        const nV = src.pos.length / 3, v = V(), t = V(), acc = V();
+        const along = (b, w) => {
+          t.copy(v).applyMatrix4(Minv0[b]);           // donkey bone space
+          t.y *= lenScale[b];
+          return t.applyMatrix4(M[b]).multiplyScalar(w);
+        };
+        // The donkey's hooves and pasterns are skinned to its IK FOOT bones,
+        // which the clips keep planted at DONKEY stride positions. With longer
+        // legs the leg bones and the foot bones disagree and the foot bends
+        // between them — so the foot goes to its own lower-leg bone.
+        const FOOT = {
+          FFL: "FrontLowerLegL", IKFrontLegL: "FrontLowerLegL", FFR: "FrontLowerLegR", IKFrontLegR: "FrontLowerLegR",
+          FFBL: "BackLowerLegL", IKBackLegL: "BackLowerLegL", FFBR: "BackLowerLegR", IKBackLegR: "BackLowerLegR",
+        };
+        const footToLeg = (sk) => {
+          const m = new Map();
+          for (const [b, w] of sk) { const n = FOOT[b] ?? b; m.set(n, (m.get(n) ?? 0) + w); }
+          return [...m];
+        };
+        // 2a. Weld (the pack's faces are split per face / material). By DISTANCE,
+        // not by rounding: Draco quantisation leaves coincident vertices a hair
+        // apart, and a rounding key left ~330 open seams that every later edit
+        // could tear. At this tolerance the donkey is a closed mesh.
+        const TOL = 5e-3, grid = new Map(), SRC = [];
+        const cellKey = (x, y, z) => `${x},${y},${z}`;
+        const weldId = (x, y, z) => {
+          const cx = Math.floor(x / TOL), cy = Math.floor(y / TOL), cz = Math.floor(z / TOL);
+          for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+            const list = grid.get(cellKey(cx + dx, cy + dy, cz + dz));
+            if (list) for (const id of list) { const q = SRC[id]; if (Math.hypot(q[0] - x, q[1] - y, q[2] - z) < TOL) return id; }
+          }
+          const id = SRC.length;
+          SRC.push([x, y, z]);
+          const k = cellKey(cx, cy, cz);
+          if (!grid.has(k)) grid.set(k, []);
+          grid.get(k).push(id);
+          return id;
+        };
+        const WP = [], WS = [], WM = [], WIK = [], remap = new Int32Array(nV);
+        for (let i = 0; i < nV; i++) {
+          v.fromArray(src.pos, i * 3);
+          acc.set(0, 0, 0);
+          // Pose with the SAME remapped weights the animal will be skinned with:
+          // the donkey's IK foot bones stay at donkey-leg positions, so posing
+          // through them sheared every hoof into shards (measured: spike 0.14 → 0.88).
+          const sk = src.skin[i];   // the IK foot bones now follow the legs (see "Foot bones follow")
+          for (const [b, w] of sk) acc.add(along(b, w));
+          const id = weldId(src.pos[i * 3], src.pos[i * 3 + 1], src.pos[i * 3 + 2]);
+          if (id === WP.length) {
+            WP.push(acc.clone()); WS.push(src.skin[i]); WM.push(new Set());
+            WIK.push(src.skin[i].reduce((sum, [b, w]) => sum + (FOOT[b] ? w : 0), 0));   // how much the DONKEY foot bones owned it
+          }
+          WM[id].add(src.mat[i]);
+          remap[i] = id;
+        }
+        // Back to QUADS. The donkey was modelled in quads and triangulated on
+        // export: each quad is two triangles sharing their LONGEST edge,
+        // coplanar in the donkey's rest pose (SRC). Pair them up again — the
+        // camel is then cut and shaded by quads, like the donkey. A face is
+        // [v0, v1, v2, (v3), material].
+        let faces = [];
+        {
+          const tris = [];
+          for (let i = 0; i < src.idx.length; i += 3) {
+            const a = remap[src.idx[i]], b = remap[src.idx[i + 1]], c = remap[src.idx[i + 2]];
+            if (a !== b && b !== c && a !== c) tris.push([a, b, c, src.mat[src.idx[i]]]);
+          }
+          // The donkey is flat-shaded: every corner of an authored POLYGON carries
+          // that polygon's normal. Triangles sharing an edge AND that normal were
+          // one polygon — group them (union-find) and walk each group's outline.
+          const tn = [];
+          for (let i = 0; i < src.idx.length; i += 3) {
+            const a = remap[src.idx[i]], b = remap[src.idx[i + 1]], c = remap[src.idx[i + 2]];
+            if (a !== b && b !== c && a !== c) tn.push(V().fromArray(src.nrm, src.idx[i] * 3));
+          }
+          const ek = (x, y) => (x < y ? `${x}_${y}` : `${y}_${x}`);
+          const parent = tris.map((_, i) => i);
+          const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+          const byEdge = new Map();
+          tris.forEach((t, ti) => {
+            for (const [x, y] of [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]]) {
+              const k = ek(x, y);
+              if (!byEdge.has(k)) byEdge.set(k, []);
+              byEdge.get(k).push(ti);
+            }
+          });
+          for (const list of byEdge.values()) {
+            if (list.length !== 2) continue;
+            const [ti, tj] = list;
+            if (tris[ti][3] !== tris[tj][3] || tn[ti].dot(tn[tj]) < 0.9999) continue;
+            parent[find(ti)] = find(tj);
+          }
+          const groups = new Map();
+          tris.forEach((t, ti) => { const r = find(ti); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(ti); });
+          let ngons = 0;
+          for (const g of groups.values()) {
+            const t0 = tris[g[0]];
+            if (g.length === 1) { faces.push([t0[0], t0[1], t0[2], t0[3]]); continue; }
+            // outline = directed edges not cancelled by their reverse
+            const dir = new Map();
+            for (const ti of g) { const t = tris[ti]; for (const [x, y] of [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]]) dir.set(`${x}>${y}`, [x, y]); }
+            const next = new Map();
+            let ok = true;
+            for (const [k, [x, y]] of dir) if (!dir.has(`${y}>${x}`)) { if (next.has(x)) ok = false; next.set(x, y); }
+            const loop = [];
+            if (ok && next.size) {
+              let v0 = next.keys().next().value, v1 = v0;
+              do { loop.push(v1); v1 = next.get(v1); } while (v1 !== undefined && v1 !== v0 && loop.length <= next.size);
+              ok = v1 === v0 && loop.length === next.size;
+            }
+            if (!ok || loop.length < 3) { for (const ti of g) { const t = tris[ti]; faces.push([t[0], t[1], t[2], t[3]]); } continue; }
+            if (loop.length > 4) ngons++;
+            faces.push([...loop, t0[3]]);
+          }
+          const nq = faces.filter((f) => f.length === 5).length, nt = faces.filter((f) => f.length === 4).length;
+          console.log(`[camel-morph] donkey: ${tris.length} tris → ${nq} quads + ${nt} tris + ${ngons} n-gons (from its authored normals)`);
+        }
+        const fv = (f) => f.slice(0, -1), fm = (f) => f[f.length - 1];
+        const wOf = (i, pred) => WS[i].reduce((s, [b, w]) => s + (pred(b) ? w : 0), 0);
+
+        const flipReport = {};
+        const countFlips = (label) => {
+          const nrm = (f) => {
+            const vs = fv(f), L = vs.length, n = V();
+            for (let k = 0; k < L; k++) { const p0 = WP[vs[k]], p1 = WP[vs[(k + 1) % L]]; n.x += (p0.y - p1.y) * (p0.z + p1.z); n.y += (p0.z - p1.z) * (p0.x + p1.x); n.z += (p0.x - p1.x) * (p0.y + p1.y); }
+            return n.normalize();
+          };
+          const N = faces.map(nrm), byE = new Map();
+          faces.forEach((f, fi) => { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length], key = x < y ? `${x}_${y}` : `${y}_${x}`; (byE.get(key) ?? byE.set(key, []).get(key)).push(fi); } });
+          const nb = faces.map(() => V());
+          for (const l of byE.values()) if (l.length === 2) { nb[l[0]].add(N[l[1]]); nb[l[1]].add(N[l[0]]); }
+          let flips = 0; const where = {};
+          faces.forEach((f, fi) => {
+            if (nb[fi].lengthSq() < 1e-12 || N[fi].dot(nb[fi].normalize()) > -0.2) return;
+            flips++;
+            const b = WS[fv(f)[0]].reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0])[0];
+            where[b] = (where[b] ?? 0) + 1;
+          });
+          flipReport[label] = { flips, where };
+        };
+        countFlips("posed");
+        // 2b. Head: resize about the Head joint, a little longer along the muzzle.
+        const H = W("Head");
+        const a = A.muzzleLocal.clone().applyQuaternion(B.Head.getWorldQuaternion(new THREE.Quaternion())).normalize();
+        const hu = UP.clone().addScaledVector(a, -UP.dot(a)).normalize();
+        const hs = V().crossVectors(hu, a).normalize();
+        const headW = (i) => wOf(i, (b) => b === "Head" || b.startsWith("Ear"));
+        let LmH = 0;
+        for (let i = 0; i < WP.length; i++) if (headW(i) > 0.5) LmH = Math.max(LmH, WP[i].clone().sub(H).dot(a));
+        for (let i = 0; i < WP.length; i++) {
+          const w = headW(i);
+          if (w <= 0) continue;
+          const d = WP[i].clone().sub(H);
+          const along = d.dot(a);
+          // sheep: a shorter muzzle, but only IN FRONT of the eyes — shortening
+          // the whole head squashed the eye into a slit
+          const muz = SMALL ? smoothstep01(0.4, 0.75, along / LmH) : 1;
+          d.multiplyScalar(1 + ((SHEEP ? 0.92 : GOAT ? 0.86 : Q.head * 0.92) - 1) * w)
+            .addScaledVector(a, (along - (SMALL ? 0.4 * LmH : 0)) * (SHEEP ? -0.35 * muz : GOAT ? -0.18 * muz : 0.14) * w);
+          WP[i].copy(H).add(d);
+        }
+        // (camel only) Camel face, in head space (z along the muzzle 0..1, y up, x across):
+        //   · a shallower jaw — the donkey's deep cheek lifted;
+        //   · a longer, slimmer snout, less bulbous at the end;
+        //   · the end droops, the upper lip overhangs, the lower lip hangs;
+        //   · heavy brows over the eyes.
+        if (CAMEL) {
+          let Lm = 0;
+          for (let i = 0; i < WP.length; i++) if (headW(i) > 0.5) Lm = Math.max(Lm, WP[i].clone().sub(H).dot(a));
+          const bump = (x, a0, a1, b0, b1) => smoothstep01(a0, a1, x) * (1 - smoothstep01(b0, b1, x));
+          for (let i = 0; i < WP.length; i++) {
+            const w = Math.min(1, headW(i));
+            if (w <= 0 || wOf(i, (b) => b.startsWith("Ear")) > 0.2) continue;
+            const d = WP[i].clone().sub(H);
+            const z0 = d.dot(a) / Lm;
+            let z = z0, y = d.dot(hu) / Lm, x = d.dot(hs) / Lm;
+            if (y < -0.02) y += (-0.02 - y) * 0.4 * bump(z0, 0.1, 0.3, 0.7, 0.95);      // shallower jaw
+            const t = smoothstep01(0.4, 1.0, z0);
+            z += 0.14 * t * (z0 - 0.4);                                                // longer snout
+            x *= 1 - 0.28 * t;                                                         // slimmer
+            const yc = -0.06; y = yc + (y - yc) * (1 - 0.18 * t);                      // less bulbous
+            y -= 0.08 * t * t;                                                         // droops
+            if (z0 > 0.78 && y < -0.1) y -= 0.07 * smoothstep01(0.78, 1, z0);          // lower lip hangs
+            if (z0 > 0.88 && y > -0.06) z += 0.04 * smoothstep01(0.88, 1, z0);         // upper lip overhangs
+            const brow = bump(z0, 0.15, 0.28, 0.42, 0.55) * smoothstep01(0.02, 0.12, y) * smoothstep01(0.08, 0.16, Math.abs(x));
+            x *= 1 + 0.1 * brow; y += 0.03 * brow;                                     // heavy brows
+            const q = H.clone().addScaledVector(a, z * Lm).addScaledVector(hu, y * Lm).addScaledVector(hs, x * Lm);
+            WP[i].lerp(q, w);
+          }
+        }
+
+        countFlips("head+face");
+        // Thinner than a donkey: pull leg and neck vertices toward their bone
+        // axis, weighted by how much each vertex belongs to that chain.
+        const nearest = (J, p) => {
+          let best = null, bd = Infinity, bs = 0, run = 0, bt = null;
+          for (let j = 0; j < J.length - 1; j++) {
+            const ab = J[j + 1].clone().sub(J[j]), L = ab.length();
+            const u = Math.min(1, Math.max(0, p.clone().sub(J[j]).dot(ab) / (L * L)));
+            const q = J[j].clone().addScaledVector(ab, u), d = q.distanceTo(p);
+            if (d < bd) { bd = d; best = q; bs = run + u * L; bt = ab.clone().normalize(); }
+            run += L;
+          }
+          return { c: best, s: bs, t: bt };
+        };
+        const towardChain = (J, bonesOf, k) => {
+          for (let i = 0; i < WP.length; i++) {
+            const w = wOf(i, bonesOf);
+            if (w <= 0.05) continue;
+            const { c } = nearest(J, WP[i]);
+            WP[i].sub(c).multiplyScalar(1 + (k - 1) * Math.min(1, w)).add(c);
+          }
+        };
+        for (const sd of ["L", "R"]) {
+          towardChain([W("FrontUpperLeg" + sd), W("FrontLowerLeg" + sd), tipOf("FrontLowerLeg" + sd)],
+            (b) => b === "FrontLowerLeg" + sd, legSlim);
+          towardChain([W("FrontUpperLeg" + sd), W("FrontLowerLeg" + sd)], (b) => b === "FrontUpperLeg" + sd, 0.5 + 0.5 * legSlim);
+          towardChain([W("BackUpperLeg" + sd), W("BackLowerLeg" + sd), tipOf("BackLowerLeg" + sd)],
+            (b) => b === "BackLowerLeg" + sd || b === "BackUpperLeg" + sd, legSlim);
+          // Ears: small and rounded, shrunk onto their base.
+          const e0 = W("Ear1" + sd);
+          for (let i = 0; i < WP.length; i++) {
+            const w = wOf(i, (b) => b.startsWith("Ear") && b.endsWith(sd));
+            if (w > 0.05) WP[i].sub(e0).multiplyScalar(1 - (SHEEP ? 0 : GOAT ? 0.1 : 0.45) * Math.min(1, w)).add(e0);   // sheep ears keep their size: they must clear the wool
+          }
+          if (SMALL) {
+            // A sheep's ears stick out sideways and droop: turn them about the
+            // body axis from the donkey's upright, out to their own side.
+            const out = Math.sign(e0.clone().sub(H).dot(right)) || 1;
+            const tipC = V(); let nw = 0;
+            for (let i = 0; i < WP.length; i++) {
+              const w = wOf(i, (b) => /^Ear[34]/.test(b) && b.endsWith(sd));
+              if (w > 0.5) { tipC.add(WP[i]); nw++; }
+            }
+            const axis0 = nw ? tipC.multiplyScalar(1 / nw).sub(e0).normalize() : UP.clone();
+            // sheep: out and a little down; goat (Arbia): long ears hanging DOWN beside the face
+            const target = GOAT
+              ? right.clone().multiplyScalar(out * 0.5).addScaledVector(UP, -0.85).addScaledVector(fwd, 0.18).normalize()
+              : right.clone().multiplyScalar(out).addScaledVector(UP, -0.3).addScaledVector(fwd, 0.15).normalize();
+            const qEar = new THREE.Quaternion().setFromUnitVectors(axis0, target);
+            const qi = new THREE.Quaternion();
+            // Bend by DISTANCE along the ear (root still, then a smooth hinge),
+            // not by skin weight: partly-head / partly-ear root vertices turned
+            // part-way folded faces inside-out = see-through slits (measured).
+            let earLen = 0;
+            for (let i = 0; i < WP.length; i++) if (wOf(i, (b) => b.startsWith("Ear") && b.endsWith(sd)) > 0.5) earLen = Math.max(earLen, WP[i].clone().sub(e0).dot(axis0));
+            for (let i = 0; i < WP.length; i++) {
+              const ew = wOf(i, (b) => b.startsWith("Ear") && b.endsWith(sd));
+              const w = ew > 0.05 ? smoothstep01(0.08, 0.35, WP[i].clone().sub(e0).dot(axis0) / earLen) : 0;
+              if (w > 0.001) {
+                WP[i].addScaledVector(GOAT ? right.clone().multiplyScalar(out) : target, (GOAT ? 0.07 : 0.38 * P.wool) * A.Rv * Math.min(1, w));   // clear the wool collar / the cheek
+              }
+            }
+          }
+        }
+        const neckJ = [W("Torso3"), W("Neck1"), W("Neck2"), W("Neck3"), W("Head"), W("Head").addScaledVector(a, 0.3 * A.Lh)];
+        towardChain(neckJ.slice(0, 5), (b) => b.startsWith("Neck"), neckSlim);
+
+        countFlips("slim+ears");
+        // No mohawk. The donkey's mane is PART of the neck surface (dropping its
+        // faces opens a hole), and the neck under it is a trough. So: keep the
+        // mane faces, coat-coloured, and make every neck cross-section convex
+        // on top — the upper half lies ON an ellipse through the neck's own
+        // sides: trough vertices pushed out, mane-fin vertices pulled in.
+        {
+          const isMane = (i) => WM[i].has("Main_Dark")
+            && wOf(i, (b) => b.startsWith("Neck") || b === "Head" || b === "Torso3") > 0.5
+            && wOf(i, (b) => b.startsWith("Ear")) < 0.2;
+          // The forelock is rigged to Ear1 / Head (never Ear2-4, which carry the
+          // dark ear tips), so the ear test above misses it: its own classifier.
+          const isForelock = (i) => WM[i].has("Main_Dark") && wOf(i, (b) => /^Ear[234]/.test(b)) < 0.5
+            && wOf(i, (b) => b.startsWith("Neck")) < 0.5 && headW(i) > 0.5;
+          for (const f of faces) if (fm(f) === "Main_Dark" && fv(f).every((i) => isMane(i) || isForelock(i))) f[f.length - 1] = "Main";
+          const used = new Set();
+          for (const f of faces) for (const i of fv(f)) used.add(i);
+          const neckIds = [...used].filter((i) => wOf(i, (b) => b.startsWith("Neck") || b === "Torso3") > 0.4 && wOf(i, (b) => b === "Head" || b.startsWith("Ear")) < 0.3);
+          const info = neckIds.map((i) => {
+            const { c, s: sp, t } = nearest(neckJ, WP[i]);
+            const up = UP.clone().addScaledVector(t, -UP.dot(t)).normalize(), sd = V().crossVectors(t, up);
+            const d = WP[i].clone().sub(c);
+            return { i, c, sp, r: d.length(), th: Math.atan2(d.dot(sd), d.dot(up)), mane: isMane(i) };
+          });
+          const span = 0.06 * A.Lh;
+          const moves = [];
+          for (const v of info) {
+            if (v.mane || Math.abs(v.th) > 1.1) continue;              // upper half of the NECK (the fin is relaxed below)
+            let rs = 0, n = 0;
+            for (let sp = span; !n && sp < 4 * span; sp *= 2) {
+              for (const o of info) if (!o.mane && Math.abs(o.sp - v.sp) < sp && Math.abs(Math.abs(o.th) - 1.5) < 0.35) { rs += o.r; n++; }
+            }
+            if (!n) continue;
+            rs /= n;
+            const rt = rs * 1.08;
+            const th = v.mane ? Math.max(-1.1, Math.min(1.1, v.th)) : v.th;
+            const want = 1 / Math.sqrt((Math.cos(th) / rt) ** 2 + (Math.sin(th) / rs) ** 2);
+            if (v.mane || v.r < want) {
+              // direction at the clamped angle, in the plane of this cross-section
+              const d = WP[v.i].clone().sub(v.c);
+              const { t } = nearest(neckJ, WP[v.i]);
+              const up = UP.clone().addScaledVector(t, -UP.dot(t)).normalize(), sd = V().crossVectors(t, up);
+              const along = d.dot(t);
+              moves.push([v.i, v.c.clone().addScaledVector(t, along).addScaledVector(up, Math.cos(th) * want).addScaledVector(sd, Math.sin(th) * want)]);
+            }
+          }
+          for (const [i, q] of moves) WP[i].copy(q);
+
+          // The mane + forelock form a thin FIN (two sheets joined at a ridge).
+          // Pressing single vertices left a pit and a blade. Instead: hold every
+          // other vertex still and relax the fin's vertices to the mean of their
+          // neighbours until they settle — the fin becomes a smooth bridge over
+          // its own base, no folds.
+          if (SMALL) {
+            // The forelock relaxed into a triangular peak between the ears. Cut
+            // its faces and close the opening with a fan whose centre sits ON
+            // the skull (the loop's mean, pulled toward the head joint).
+            faces = faces.filter((f) => !fv(f).every(isForelock));
+            const dir = new Map();
+            for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) dir.set(`${vs[k]}>${vs[(k + 1) % vs.length]}`, [vs[k], vs[(k + 1) % vs.length]]); }
+            const nxt = new Map();
+            for (const [, [x, y]] of dir) if (!dir.has(`${y}>${x}`)) nxt.set(y, x);
+            const seen = new Set();
+            for (const st of nxt.keys()) {
+              if (seen.has(st)) continue;
+              const loop = [];
+              for (let v = st; v !== undefined && !seen.has(v); v = nxt.get(v)) { seen.add(v); loop.push(v); }
+              if (loop.length < 3 || loop.every((i) => headW(i) < 0.3)) continue;
+              for (const i of loop) if (isForelock(i)) WP[i].lerp(H, 0.12);          // no rim ridge left standing
+              const cen = V();
+              for (const i of loop) cen.add(WP[i]);
+              cen.multiplyScalar(1 / loop.length).lerp(H, 0.1);
+              const ci = WP.length;
+              WP.push(cen); WS.push([["Head", 1]]); WM.push(new Set(["Main"]));
+              for (let k = 0; k < loop.length; k++) faces.push([loop[k], loop[(k + 1) % loop.length], ci, "Main"]);
+            }
+          }
+          const fin = [...used].filter((i) => isMane(i) || (!SMALL && isForelock(i)));
+          const finSet = new Set(fin), nb = new Map();
+          for (const f of faces) {
+            const vs = fv(f);
+            for (let k = 0; k < vs.length; k++) {
+              const x = vs[k], y = vs[(k + 1) % vs.length];
+              if (finSet.has(x)) { if (!nb.has(x)) nb.set(x, new Set()); nb.get(x).add(y); }
+              if (finSet.has(y)) { if (!nb.has(y)) nb.set(y, new Set()); nb.get(y).add(x); }
+            }
+          }
+          const tmp = new Map();
+          for (let it = 0; it < 200; it++) {
+            for (const i of fin) {
+              const ns = nb.get(i);
+              if (!ns || !ns.size) continue;
+              const m = V();
+              for (const n of ns) m.add(WP[n]);
+              tmp.set(i, m.multiplyScalar(1 / ns.size));
+            }
+            for (const [i, q] of tmp) WP[i].copy(q);
+          }
+          console.log(`[camel-morph] fin relaxed: ${fin.length} verts`);
+        }
+
+        countFlips("mane");
+        // Chest fold (camel): the neck base is bent ~55° down; the band of
+        // vertices blended between Torso3 and Neck1 collapses into a crease.
+        // Relax just that band toward its neighbours' mean (others hold).
+        const creaseAt = (pred) => {
+          const nrm = (f) => { const vs = fv(f), L = vs.length, n = V(); for (let k = 0; k < L; k++) { const p0 = WP[vs[k]], p1 = WP[vs[(k + 1) % L]]; n.x += (p0.y - p1.y) * (p0.z + p1.z); n.y += (p0.z - p1.z) * (p0.x + p1.x); n.z += (p0.x - p1.x) * (p0.y + p1.y); } return n.normalize(); };
+          const byE = new Map();
+          faces.forEach((f, fi) => { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length], key = x < y ? `${x}_${y}` : `${y}_${x}`; (byE.get(key) ?? byE.set(key, []).get(key)).push(fi); } });
+          let worst = 0, sharp = 0;
+          for (const [key, l] of byE) {
+            if (l.length !== 2) continue;
+            const [x, y] = key.split("_").map(Number);
+            if (!pred(x) || !pred(y)) continue;
+            const ang = (Math.acos(Math.max(-1, Math.min(1, nrm(faces[l[0]]).dot(nrm(faces[l[1]]))))) * 180) / Math.PI;
+            worst = Math.max(worst, ang);
+            if (ang > 60) sharp++;
+          }
+          return { worstDeg: Math.round(worst), edgesOver60: sharp };
+        };
+        const chestPred = (i) => wOf(i, (b) => b === "Torso3" || b === "Neck1") > 0.5;
+        if (CAMEL) console.log("[camel-morph] chest crease before relax", JSON.stringify(creaseAt(chestPred)));
+        if (CAMEL) {
+          const band = new Set();
+          for (let i = 0; i < WP.length; i++) {
+            const t3 = wOf(i, (b) => b === "Torso3"), n1 = wOf(i, (b) => b === "Neck1" || b === "Neck2");
+            if (t3 > 0.12 && n1 > 0.12) band.add(i);
+          }
+          const nb = new Map();
+          for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; if (band.has(x)) (nb.get(x) ?? nb.set(x, []).get(x)).push(y); if (band.has(y)) (nb.get(y) ?? nb.set(y, []).get(y)).push(x); } }
+          for (let it = 0; it < 8; it++) {
+            const upd = [];
+            for (const i of band) { const ns = nb.get(i); if (!ns) continue; const m = V(); for (const j of ns) m.add(WP[j]); upd.push([i, m.multiplyScalar(1 / ns.length)]); }
+            for (const [i, m] of upd) WP[i].lerp(m, 0.6);
+          }
+          console.log(`[camel-morph] chest band relaxed: ${band.size} verts`);
+          const cr = creaseAt(chestPred);
+          console.log("[camel-morph] chest crease after relax", JSON.stringify(cr));
+          window.__chest = cr;
+        }
+
+        // Camel feet instead of hooves, GROWN FROM THE LEG: drop the hoof faces,
+        // find the open rim each leaves (a loop of the leg's own vertices), and
+        // extrude that loop down and out — ring by ring — into a broad two-toed
+        // cushion, closed by a sole fan. Connected to the leg, so no pinch and no
+        // open edges (the old separate pad left 64).
+        if (CAMEL) {
+          // where each hoof's BOTTOM was (the pad reaches down to there)
+          const hoofLo = {};
+          for (const f of faces) if (fm(f) === "Hooves") for (const i of fv(f)) {
+            const leg = footToLeg(WS[i]).reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0])[0];
+            hoofLo[leg] = Math.min(hoofLo[leg] ?? Infinity, WP[i].y);
+          }
+          faces = faces.filter((f) => fm(f) !== "Hooves");
+          const dir = new Map();
+          for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) dir.set(`${vs[k]}>${vs[(k + 1) % vs.length]}`, [vs[k], vs[(k + 1) % vs.length]]); }
+          const next = new Map();
+          for (const [, [x, y]] of dir) if (!dir.has(`${y}>${x}`)) next.set(y, x);   // walked so a new face (rim[k], rim[k+1], ...) closes it
+          const seen = new Set();
+          let pads = 0;
+          for (const start of next.keys()) {
+            if (seen.has(start)) continue;
+            const rim = [];
+            for (let v = start; v !== undefined && !seen.has(v); v = next.get(v)) { seen.add(v); rim.push(v); }
+            if (rim.length < 3) continue;
+            // the leg, counting its foot bones as part of it (the hooves ride on IK/FF bones)
+            const legOf = (i, b) => footToLeg(WS[i]).reduce((s0, [x, w]) => s0 + (x === b ? w : 0), 0);
+            const foot = ["FrontLowerLegL", "FrontLowerLegR", "BackLowerLegL", "BackLowerLegR"]
+              .find((b) => rim.reduce((s0, i) => s0 + legOf(i, b), 0) / rim.length > 0.5);
+            if (!foot) continue;
+            const c = V();
+            for (const i of rim) c.add(WP[i]);
+            c.multiplyScalar(1 / rim.length);
+            const rimLo = Math.min(...rim.map((i) => WP[i].y));
+            // a THICK cushion: down past where the hoof bottom was (the ground clamp lifts the camel onto it)
+            const lo = Math.min(hoofLo[foot] ?? rimLo - 0.05 * A.Rv, rimLo - 0.05 * A.Rv) - 0.07 * A.Rv;
+            // skinned like the rim it grows from, so the pad FLEXES with the hoof
+            const acc = new Map();
+            for (const i of rim) for (const [b, w] of WS[i]) acc.set(b, (acc.get(b) ?? 0) + w / rim.length);
+            const skin = [...acc];
+            // profile: [height above sole (× Rv), radius (× Rv) fore, sideways, toe notch]
+            const Hp2 = (rimLo - lo) / A.Rv;                         // pad height, in Rv
+            const prof = [
+              [0.85 * Hp2, 0.15, 0.13, 1],   // the leg starts to widen
+              [0.6 * Hp2, 0.24, 0.2, 0.92],  // swelling
+              [0.32 * Hp2, 0.29, 0.245, 0.86], // widest
+              [0.1 * Hp2, 0.28, 0.235, 0.82],  // rounding under
+              [0.0, 0.22, 0.18, 0.8],          // sole, bevelled in: a cushion, not a plate
+            ];
+            const at = (i) => {           // rim vertex's direction round the leg (horizontal)
+              const d = WP[i].clone().sub(c); d.y = 0;
+              return d.lengthSq() > 1e-12 ? d.normalize() : fwd.clone();
+            };
+            const ctr = V(c.x, lo, c.z).addScaledVector(fwd, 0.03 * A.Rv);
+            let prev = rim;
+            const padStart = faces.length;
+            prof.forEach(([h, rf, rs, toe], ri) => {
+              const ring = rim.map((i) => {
+                const d = at(i), cf = d.dot(fwd), cs = d.dot(right);
+                const notch = cf > 0.92 ? toe : 1;                  // the cleft between the toes, at the front
+                const q = V(ctr.x, lo + h * A.Rv, ctr.z)
+                  .addScaledVector(fwd, cf * rf * A.Rv * notch)
+                  .addScaledVector(right, cs * rs * A.Rv);
+                const id = WP.length;
+                WP.push(q); WS.push(skin); WM.push(new Set(["Pad"]));
+                return id;
+              });
+              const mt = ri === prof.length - 1 ? "Sole" : "Main";
+              for (let k = 0; k < rim.length; k++) {
+                const k1 = (k + 1) % rim.length;
+                faces.push([prev[k], prev[k1], ring[k1], ring[k], mt]);
+              }
+              prev = ring;
+            });
+            const sc = WP.length;
+            WP.push(ctr.clone()); WS.push(skin); WM.push(new Set(["Pad"]));
+            for (let k = 0; k < rim.length; k++) faces.push([prev[k], prev[(k + 1) % rim.length], sc, "Sole"]);
+            // The rim loop can run either way round: the sole must face DOWN,
+            // else the whole pad is inside-out (culled → the leg ends in a stump).
+            {
+              const f = faces[faces.length - 1], a0 = WP[f[0]], a1 = WP[f[1]], a2 = WP[f[2]];
+              const ny = a1.clone().sub(a0).cross(a2.clone().sub(a0)).y;
+              if (ny > 0) for (let k = padStart; k < faces.length; k++) { const vs = fv(faces[k]).reverse(); faces[k] = [...vs, fm(faces[k])]; }
+            }
+            pads++;
+          }
+          console.log(`[camel-morph] pads grown from ${pads} leg rims`);
+        }
+
+        // 2c. The hump — mid-back, rump low. Loops first, then the lift.
+        const Lb = W("Torso3").sub(W("Back")).setY(0).length();
+        const hc = W("Torso2").lerp(W("Torso3"), 0.12);
+        const cy = W("Torso2").y + A.cyOff;
+        const halfLen = 0.46 * Lb * Q.humpLen, Hh = 0.72 * A.Rv * Q.hump, halfW = 1.7 * A.Rside;
+        const humpU = (p) => (p.clone().sub(hc).dot(fwd)) / halfLen;
+        const humpV = (p) => (p.clone().sub(hc).dot(right)) / halfW;
+        const topW = (p) => smoothstep01(cy - 0.35 * A.Rv, cy + 0.75 * A.Rv, p.y);
+        const humpAt = (p) => {
+          const u = humpU(p), s = humpV(p);
+          if (Math.abs(u) >= 1 || Math.abs(s) >= 1) return 0;
+          // dome: rounded crown lengthwise, broad across
+          return Hh * (1 - u * u) ** 0.75 * (1 - s * s) ** 0.9 * topW(p);
+        };
+        // Loop cuts, the modeller's way: a new ring of quads round the body,
+        // on a plane across the spine. Start at the lengthwise edge on top of
+        // the back that crosses the plane, walk the edge ring both ways
+        // (quad → its opposite edge → the next quad), split every quad it
+        // crosses in two. The ring stops where the plane no longer crosses
+        // (or at a triangle); only there does a triangle appear.
+        const ek = (x, y) => (x < y ? `${x}_${y}` : `${y}_${x}`);
+        const mixSkinT = (s1, s2, t) => {
+          const m = new Map();
+          for (const [b, w] of s1) m.set(b, (m.get(b) ?? 0) + w * (1 - t));
+          for (const [b, w] of s2) m.set(b, (m.get(b) ?? 0) + w * t);
+          return [...m];
+        };
+        const loopCut = (sPlane) => {
+          const side = (i) => WP[i].dot(fwd) - sPlane;
+          const EF = new Map();
+          faces.forEach((f, fi) => {
+            const vs = fv(f);
+            for (let k = 0; k < vs.length; k++) {
+              const e = ek(vs[k], vs[(k + 1) % vs.length]);
+              if (!EF.has(e)) EF.set(e, []);
+              EF.get(e).push(fi);
+            }
+          });
+          let seed = null, best = -Infinity;
+          for (const [e, fl] of EF) {
+            if (fl.length !== 2 || !fl.every((fi) => faces[fi].length === 5)) continue;
+            const [x, y] = e.split("_").map(Number);
+            if (side(x) * side(y) >= 0) continue;
+            const mid = WP[x].clone().lerp(WP[y], 0.5);
+            const score = mid.y - 3 * Math.abs(mid.clone().sub(hc).dot(right));
+            if (score > best) { best = score; seed = [x, y]; }
+          }
+          if (!seed) return 0;
+          const split = new Map();                        // face → split edge keys
+          const walk = (x, y, enterNot) => {
+            let prev = enterNot;
+            for (let step = 0; step < 400; step++) {
+              const fi = (EF.get(ek(x, y)) ?? []).find((f) => f !== prev);
+              if (fi === undefined || split.has(fi)) return;
+              const vs = fv(faces[fi]);
+              if (vs.length !== 4) { split.set(fi, [ek(x, y)]); return; }
+              const [ox, oy] = vs.filter((v) => v !== x && v !== y);
+              // the opposite edge, oriented like (x, y): ox is x's neighbour
+              const xi = vs.indexOf(x), nx = vs[(xi + 1) % 4] === y ? vs[(xi + 3) % 4] : vs[(xi + 1) % 4];
+              const nyv = nx === ox ? oy : ox;
+              if (side(nx) * side(nyv) >= 0) { split.set(fi, [ek(x, y)]); return; }
+              split.set(fi, [ek(x, y), ek(nx, nyv)]);
+              prev = fi; x = nx; y = nyv;
+            }
+          };
+          const f0 = EF.get(ek(...seed));
+          walk(seed[0], seed[1], f0[1]);
+          walk(seed[0], seed[1], f0[0]);
+          const made = new Map();
+          const cutV = (x, y) => {
+            const k = ek(x, y);
+            if (made.has(k)) return made.get(k);
+            const sx = side(x), sy = side(y);
+            let t = Math.abs(sx - sy) > 1e-9 ? sx / (sx - sy) : 0.5;
+            t = Math.min(0.85, Math.max(0.15, t));
+            const id = WP.length;
+            WP.push(WP[x].clone().lerp(WP[y], t)); WS.push(mixSkinT(WS[x], WS[y], t));
+            WM.push(new Set([...WM[x]].filter((q) => WM[y].has(q))));
+            made.set(k, id);
+            return id;
+          };
+          const out = [];
+          faces.forEach((f, fi) => {
+            const sp = split.get(fi);
+            if (!sp) { out.push(f); return; }
+            let q = fv(f);
+            const mt = fm(f), L = q.length;
+            // rotate so the (first) split edge is q0-q1
+            for (let r = 0; r < L && !sp.includes(ek(q[0], q[1])); r++) q = [...q.slice(1), q[0]];
+            const m1 = cutV(q[0], q[1]);
+            if (L === 4 && sp.length === 2 && sp.includes(ek(q[2], q[3]))) {
+              const m2 = cutV(q[2], q[3]);
+              out.push([q[0], m1, m2, q[3], mt], [m1, q[1], q[2], m2, mt]);
+            } else if (L === 4) {
+              out.push([q[0], m1, q[3], mt], [m1, q[1], q[2], q[3], mt]);   // ring ends here
+            } else {
+              out.push([q[0], m1, q[2], mt], [m1, q[1], q[2], mt]);
+            }
+          });
+          faces = out;
+          return split.size;
+        };
+        const s0 = hc.dot(fwd);
+        // Sheep wool: which vertices it covers (body, neck, thighs, tail — not
+        // the head, not below the knees).
+        let LmS = 0;
+        for (let i = 0; i < WP.length; i++) if (headW(i) > 0.5) LmS = Math.max(LmS, WP[i].clone().sub(H).dot(a));
+        const headZ = (i) => WP[i].clone().sub(H).dot(a) / LmS;           // 0 at the poll, 1 at the nose
+        const woolW = (i) => Math.min(1,
+          wOf(i, (b) => b === "Body" || b === "Back" || b.startsWith("Torso"))
+          + 0.95 * wOf(i, (b) => b.startsWith("Neck"))
+          + 0.85 * wOf(i, (b) => /^(BackShoulder|BackLeg[LR]|FrontShoulder)/.test(b))
+          + 0.2 * wOf(i, (b) => /^FrontUpperLeg/.test(b))
+          + 1.0 * wOf(i, (b) => b.startsWith("Tail"))   // the tail rides out with the rump wool
+          // the back of the head, and the forelock (rigged to Ear1 only) — not the ears (Ear2-4)
+          + (SHEEP ? (wOf(i, (b) => b === "Head") + (wOf(i, (b) => /^Ear[234]/.test(b)) < 0.1 ? wOf(i, (b) => /^Ear1/.test(b)) : 0))
+            * (1 - smoothstep01(0.02, 0.2, headZ(i))) : 0));
+        let lift;
+        if (SHEEP) {
+          // Loop cuts along the torso for square wool facets, a stub tail, then
+          // the wool: every covered vertex pushed out from the spine / neck
+          // chain, with a per-vertex jitter so the facets vary like the
+          // reference's patchwork of whites.
+          const sB = W("Back").dot(fwd), sF = W("Torso3").dot(fwd);
+          const rings = [0.1, 0.35, 0.6, 0.85].map((u) => loopCut(sB + (sF - sB) * u));
+          console.log(`[sheep-morph] wool loop cuts: ${rings.join(", ")} quads per ring`);
+          // Tail: the donkey's long tail + tuft (Tail2-7, ~320 verts) sat BEHIND
+          // the wool surface once the rump was woolled (measured). A sheep's
+          // tail is a short woolly nub: drop those faces, close each opening
+          // with a fan to a centre pushed out and down a little — the nub. It
+          // is skinned to Tail1, so it still twitches.
+          {
+            const tailW = (i) => wOf(i, (b) => /^Tail[2-7]$/.test(b));
+            const drop = (f) => fv(f).reduce((sum, i) => sum + tailW(i), 0) / fv(f).length > 0.5;
+            faces = faces.filter((f) => !drop(f));
+            const dir = new Map();                           // directed edges of what remains
+            for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) dir.set(`${vs[k]}>${vs[(k + 1) % vs.length]}`, [vs[k], vs[(k + 1) % vs.length]]); }
+            const next = new Map();
+            for (const [, [x, y]] of dir) if (!dir.has(`${y}>${x}`)) next.set(y, x);   // boundary, walked backwards = the cap's winding
+            const seen = new Set();
+            let caps = 0;
+            for (const start of next.keys()) {
+              if (seen.has(start)) continue;
+              const loop = [];
+              let v = start;
+              while (v !== undefined && !seen.has(v)) { seen.add(v); loop.push(v); v = next.get(v); }
+              if (loop.length < 3) continue;
+              const cen = V();
+              for (const i of loop) cen.add(WP[i]);
+              cen.multiplyScalar(1 / loop.length).addScaledVector(fwd, -0.18 * A.Rv).addScaledVector(UP, -0.06 * A.Rv);
+              const ci = WP.length;
+              WP.push(cen); WS.push([["Tail1", 1]]); WM.push(new Set(["Main"]));
+              for (let k = 0; k < loop.length; k++) faces.push([loop[k], loop[(k + 1) % loop.length], ci, "Main"]);
+              caps++;
+            }
+            console.log(`[sheep-morph] tail: donkey tail removed, ${caps} cap(s)`);
+          }
+          const Lbs = W("Torso3").sub(W("Back")).setY(0).length();
+          const bodyJ = [W("Back").addScaledVector(fwd, -0.2 * Lbs), W("Torso"), W("Torso2"), W("Torso3"), W("Neck1"), W("Neck2"), W("Neck3")];
+          const T = 0.42 * A.Rv * P.wool;
+          const used = new Set();
+          for (const f of faces) for (const i of fv(f)) used.add(i);
+          const moves = [];
+          for (const i of used) {
+            const w = woolW(i);
+            if (w < 0.05) continue;
+            const { c } = nearest(bodyJ, WP[i]);
+            const d = WP[i].clone().sub(c), r = d.length();
+            if (r < 1e-6) continue;
+            const jit = 1 + (hash(i) - 0.5) * 0.3 * P.lumps;
+            moves.push([i, d.multiplyScalar(T * w * jit / r)]);                // displacement, not position
+          }
+          // Neighbours that picked different spine segments push in different
+          // directions and fold the surface: relax the displacement field over
+          // the mesh first (unwooled vertices hold 0, so the wool edge tapers).
+          const disp = new Map(moves);
+          const adj = new Map();
+          for (const f of faces) {
+            const vs = fv(f);
+            for (let k = 0; k < vs.length; k++) {
+              const x = vs[k], y = vs[(k + 1) % vs.length];
+              if (!adj.has(x)) adj.set(x, []);
+              if (!adj.has(y)) adj.set(y, []);
+              adj.get(x).push(y); adj.get(y).push(x);
+            }
+          }
+          for (let it = 0; it < 6; it++) {
+            const next = new Map();
+            for (const [i, dv] of disp) {
+              const m = dv.clone();
+              let n = 1;
+              for (const j of adj.get(i) ?? []) { const dj = disp.get(j); if (dj) m.add(dj); n++; }
+              next.set(i, m.multiplyScalar(1 / n));
+            }
+            for (const [i, dv] of next) disp.set(i, dv);
+          }
+          for (const [i, dv] of disp) WP[i].add(dv);
+          // Wool cap: the top and back of the skull, behind the eyes.
+          let Lm = 0;
+          for (let i = 0; i < WP.length; i++) if (headW(i) > 0.5) Lm = Math.max(Lm, WP[i].clone().sub(H).dot(a));
+          const skullC = H.clone().addScaledVector(a, 0.22 * Lm);
+          for (const i of used) {
+            if (headW(i) < 0.5 || wOf(i, (b) => b.startsWith("Ear")) > 0.2) continue;
+            const d = WP[i].clone().sub(H);
+            const z = d.dot(a) / Lm, y = d.dot(hu) / Lm;
+            const k = smoothstep01(0.08, 0.18, y) * (1 - smoothstep01(0.12, 0.24, z));
+            if (k <= 0.05) continue;
+            const dir = WP[i].clone().sub(skullC).normalize();
+            WP[i].addScaledVector(dir, T * 0.35 * k * (1 + (hash(i) - 0.5) * 0.3));
+            if (k > 0.5) capSet.add(i);
+          }
+          lift = WP.map(() => 0);
+        } else if (GOAT) {
+          // GOAT (North African / Arbia type): slim body, the donkey's tail
+          // swapped for a short upturned one, scimitar horns swept back, a beard.
+          // Horns and beard are new quads/tris on the Head bone; the mesh stays closed.
+          const replaceTail = (back, up) => {
+            const tailW = (i) => wOf(i, (b) => /^Tail[2-7]$/.test(b));
+            const drop = (f) => fv(f).reduce((sum, i) => sum + tailW(i), 0) / fv(f).length > 0.5;
+            faces = faces.filter((f) => !drop(f));
+            const dir = new Map();
+            for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) dir.set(`${vs[k]}>${vs[(k + 1) % vs.length]}`, [vs[k], vs[(k + 1) % vs.length]]); }
+            const next = new Map();
+            for (const [, [x, y]] of dir) if (!dir.has(`${y}>${x}`)) next.set(y, x);
+            const seen = new Set();
+            for (const start of next.keys()) {
+              if (seen.has(start)) continue;
+              const loop = [];
+              for (let v = start; v !== undefined && !seen.has(v); v = next.get(v)) { seen.add(v); loop.push(v); }
+              if (loop.length < 3) continue;
+              const cen = V();
+              for (const i of loop) cen.add(WP[i]);
+              cen.multiplyScalar(1 / loop.length).addScaledVector(fwd, -back * A.Rv).addScaledVector(UP, up * A.Rv);
+              const ci = WP.length;
+              WP.push(cen); WS.push([["Tail1", 1]]); WM.push(new Set(["Main_Dark"]));
+              for (let k = 0; k < loop.length; k++) faces.push([loop[k], loop[(k + 1) % loop.length], ci, "Main_Dark"]);
+            }
+          };
+          replaceTail(0.3, 0.22);                 // a goat's tail flicks UP
+          // Slimmer barrel than the donkey (goats are narrow and bony).
+          const Lbg = W("Torso3").sub(W("Back")).setY(0).length();
+          const spineJ = [W("Back").addScaledVector(fwd, -0.2 * Lbg), W("Torso"), W("Torso2"), W("Torso3")];
+          towardChain(spineJ, (b) => b === "Back" || b.startsWith("Torso") || b === "Body", PG.girth);
+
+          // Head frame measurements: the skull top and width behind the eyes.
+          let topY = -Infinity, maxX = 0;
+          for (let i = 0; i < WP.length; i++) {
+            if (headW(i) < 0.5 || wOf(i, (b) => b.startsWith("Ear")) > 0.2) continue;
+            const z = headZ(i);
+            if (z < 0.08 || z > 0.4) continue;
+            const d = WP[i].clone().sub(H);
+            topY = Math.max(topY, d.dot(hu) / LmS);
+            maxX = Math.max(maxX, Math.abs(d.dot(hs)) / LmS);
+          }
+          const Hp = (x, y, z) => H.clone().addScaledVector(hs, x * LmS).addScaledVector(hu, y * LmS).addScaledVector(a, z * LmS);
+          const headSkin = [["Head", 1]];
+          const addV = (p, mt) => { WP.push(p); WS.push(headSkin); WM.push(new Set([mt])); return WP.length - 1; };
+          // Horns: a tube along a curve that rises from the poll and sweeps back
+          // over the neck, diverging a little, tapering to a point.
+          const SIDES = 6, RINGS = 8, L = PG.horn;
+          for (const sx of [-1, 1]) {
+            // skull surface right under this horn's base
+            const bx = sx * 0.34 * maxX, bz = 0.2;
+            let surf = -Infinity;
+            for (let rad = 0.06; surf === -Infinity && rad < 0.5; rad *= 1.5) {
+              for (let i = 0; i < WP.length; i++) {
+                if (headW(i) < 0.5 || wOf(i, (b) => b.startsWith("Ear")) > 0.2) continue;
+                const d = WP[i].clone().sub(H), x = d.dot(hs) / LmS, z = d.dot(a) / LmS;
+                if (Math.hypot(x - bx, z - bz) < rad) surf = Math.max(surf, d.dot(hu) / LmS);
+              }
+            }
+            const baseY = (surf === -Infinity ? topY : surf) - 0.035;       // a little INTO the skull
+            const pts = [];
+            for (let r = 0; r <= RINGS; r++) {
+              const u = r / RINGS, th = u * Math.PI * 0.62;
+              pts.push(Hp(bx + sx * 0.14 * L * u, baseY + 0.52 * L * Math.sin(th), bz - 0.95 * L * (1 - Math.cos(th)) - 0.2 * L * u));
+            }
+            const rings = [];
+            for (let r = 0; r < RINGS; r++) {
+              const u = r / RINGS, rad = (0.075 - 0.058 * u) * LmS;
+              const T = pts[r + 1].clone().sub(pts[Math.max(0, r - 1)]).normalize();
+              const N1 = V().crossVectors(T, hs).normalize(), N2 = V().crossVectors(T, N1).normalize();
+              const ring = [];
+              for (let k = 0; k < SIDES; k++) {
+                const an = (k / SIDES) * Math.PI * 2;
+                ring.push(addV(pts[r].clone().addScaledVector(N1, Math.cos(an) * rad).addScaledVector(N2, Math.sin(an) * rad), r % 2 ? "Horn" : "Horn2"));
+              }
+              rings.push(ring);
+            }
+            const tip = addV(pts[RINGS].clone(), "Horn");
+            // base: sink it into the skull and close it underneath
+            const base = addV(pts[0].clone().addScaledVector(hu, -0.06 * LmS), "Horn");
+            for (let k = 0; k < SIDES; k++) faces.push([rings[0][(k + 1) % SIDES], rings[0][k], base, "Horn"]);
+            for (let r = 0; r < RINGS - 1; r++) for (let k = 0; k < SIDES; k++) {
+              const k1 = (k + 1) % SIDES;
+              faces.push([rings[r][k], rings[r][k1], rings[r + 1][k1], rings[r + 1][k], r % 2 ? "Horn" : "Horn2"]);
+            }
+            for (let k = 0; k < SIDES; k++) faces.push([rings[RINGS - 1][k], rings[RINGS - 1][(k + 1) % SIDES], tip, "Horn"]);
+          }
+          // Beard: a small closed pyramid hanging from the chin.
+          {
+            let chin = null, best = Infinity;
+            for (let i = 0; i < WP.length; i++) {
+              if (headW(i) < 0.5) continue;
+              const z = headZ(i);
+              if (z < 0.6 || z > 0.85) continue;
+              const y = WP[i].clone().sub(H).dot(hu);
+              if (y < best) { best = y; chin = WP[i].clone(); }
+            }
+            if (chin) {
+              const c0 = chin.addScaledVector(hu, 0.02 * LmS);
+              const w = 0.06 * LmS, len = 0.32 * LmS * PG.beard;
+              const q = [addV(c0.clone().addScaledVector(hs, w).addScaledVector(a, w), "Beard"), addV(c0.clone().addScaledVector(hs, -w).addScaledVector(a, w), "Beard"),
+                addV(c0.clone().addScaledVector(hs, -w).addScaledVector(a, -w), "Beard"), addV(c0.clone().addScaledVector(hs, w).addScaledVector(a, -w), "Beard")];
+              const tip = addV(c0.clone().addScaledVector(UP, -len).addScaledVector(a, 0.04 * LmS), "Beard");
+              faces.push([q[3], q[2], q[1], q[0], "Beard"]);
+              for (let k = 0; k < 4; k++) faces.push([q[k], q[(k + 1) % 4], tip, "Beard"]);
+            }
+          }
+          console.log("[goat-morph] tail, horns, beard added");
+          lift = WP.map(() => 0);
+        } else {
+        const ringSizes = [-0.7, -0.25, 0.25, 0.7].map((u) => loopCut(s0 + u * halfLen));
+        console.log(`[camel-morph] hump loop cuts: ${ringSizes.join(", ")} quads per ring`);
+        lift = WP.map((p) => humpAt(p));
+        for (let i = 0; i < WP.length; i++) {
+          if (!lift[i]) continue;
+          // up, and the hump's flanks swell outward a little — volume, not a ridge
+          const sd = humpV(WP[i]);
+          WP[i].y += lift[i];
+          WP[i].addScaledVector(right, Math.sign(sd) * Math.min(1, Math.abs(sd) * 1.6) * lift[i] * 0.22);
+        }
+        }
+
+        countFlips("final");
+        console.log(`[${kind}-morph] inside-out faces per step:`, JSON.stringify(flipReport));
+        window.__flips = flipReport;
+        // Proof, not eyeballing: the donkey welds to a mesh with a handful of
+        // open edges (eyes); anything more means an edit tore something.
+        {
+          const E = new Map();
+          for (const f of faces) {
+            const vs = fv(f);
+            for (let k = 0; k < vs.length; k++) {
+              const e = ek(vs[k], vs[(k + 1) % vs.length]);
+              E.set(e, (E.get(e) ?? 0) + 1);
+            }
+          }
+          let open = 0, feet = 0;
+          const footY = A.ground0 + 0.5 * A.Rv;
+          for (const [k, n] of E) if (n === 1) {
+            open++;
+            const [x, y] = k.split("_").map(Number);
+            if (WP[x].y < footY && WP[y].y < footY) feet++;
+          }
+          const nq = faces.filter((f) => f.length === 5).length;
+          console.log(`[${kind}-morph] ${nq} quads + ${faces.length - nq} tris, open edges ${open} (${feet} of them near the ground)`);
+          window.__morphFaces = { quads: nq, tris: faces.length - nq };
+          window.__morphOpenEdges = { open, feet };
+        }
+
+        if (SHEEP) {   // measurement: where do the ear tips point, finally?
+          const out = {};
+          for (const sd of ["L", "R"]) {
+            const e0 = W("Ear1" + sd), tipC = V(); let nw = 0;
+            for (let i = 0; i < WP.length; i++) if (wOf(i, (b) => /^Ear[34]/.test(b) && b.endsWith(sd)) > 0.5) { tipC.add(WP[i]); nw++; }
+            const d = tipC.multiplyScalar(1 / Math.max(1, nw)).sub(e0);
+            const len = d.length(); d.normalize();
+            out[sd] = { n: nw, len: +(len / A.Rv).toFixed(2), right: +d.dot(right).toFixed(2), up: +d.dot(UP).toFixed(2), fwd: +d.dot(fwd).toFixed(2) };
+          }
+          console.log("[sheep-morph] ear tips", JSON.stringify(out));
+          window.__ears = out;
+        }
+        // 3. Colours on the pack's zones, camel palette.
+        const baseC = new THREE.Color(Q.color), darkC = new THREE.Color(Q.dark), lightC = new THREE.Color(Q.light);
+        const PAL = {
+          Main: baseC, Main_Light: lightC, Main_Dark: baseC.clone().lerp(darkC, 0.6),
+          Hooves: new THREE.Color("#51463c"), Sole: new THREE.Color("#4a3a2c"),
+          Muzzle: lightC.clone().lerp(baseC, 0.2),
+          Eye_Dark: new THREE.Color("#0b0806"), Eye_White: new THREE.Color("#e9e1d2"),
+        };
+        const callusC = new THREE.Color("#4e3c2b");
+        // Sheep: white patchwork wool, dark face / ears / legs, darker hooves.
+        const sWool = new THREE.Color(P.woolColor);
+        const sFace = new THREE.Color(P.faceColor).lerp(new THREE.Color("#5e5956"), 0.7);
+        const sRing = sFace.clone().lerp(new THREE.Color("#b9b3ad"), 0.45);   // the lid ring round the eye, like the donkey's
+        const eyeV = new Set();
+        for (const f of faces) if (fm(f) === "Eye_Dark") for (const i of fv(f)) eyeV.add(i);
+        const sLeg = new THREE.Color(P.legColor).lerp(new THREE.Color("#625d59"), 0.45);
+        const sHoof = new THREE.Color("#262220");
+        const sheepPaint = (vs, mt, nn, cc) => {
+          const L = vs.length, avg = (fn) => vs.reduce((sum, i) => sum + fn(i), 0) / L;
+          // Eye_Dark = the black eye, Eye_White = the donkey's small catchlight in it.
+          if (mt === "Eye_Dark" || mt === "Eye_White") { cc.set(mt === "Eye_Dark" ? "#0b0908" : "#f2efe9"); return; }
+          if (mt === "Hooves") { cc.copy(sHoof); return; }
+          if (avg((i) => wOf(i, (b) => /^Ear[234]/.test(b))) > 0.15) { cc.copy(sFace); return; }   // the ears (Ear2-4) stay dark
+          if (vs.every((i) => capSet.has(i)) || avg(woolW) > 0.45) {
+            cc.copy(sWool).multiplyScalar(0.84 + 0.16 * hash(vs[0] * 31 + vs[1] * 7 + vs[2]));
+            if (nn.y < -0.4) cc.multiplyScalar(0.9);
+            return;
+          }
+          if (avg((i) => headW(i)) > 0.4) {
+            cc.copy(vs.some((i) => eyeV.has(i)) ? sRing : sFace);
+            return;
+          }
+          cc.copy(sLeg);
+        };
+        const knees = ["L", "R"].map((s) => W("FrontLowerLeg" + s));
+        // Goat: one black-brown coat on the donkey's zones (lighter muzzle and
+        // belly hair, darker mane line / tail), grey-brown ridged horns.
+        const gCoat = new THREE.Color(PG.coat), gHorn = new THREE.Color(PG.hornColor);
+        const goatPaint = (vs, mt, nn, cc) => {
+          const L = vs.length;
+          if (mt === "Eye_Dark") { cc.set("#070605"); return; }
+          if (mt === "Eye_White") { cc.set("#f2efe9"); return; }
+          if (mt === "Horn") { cc.copy(gHorn); return; }
+          if (mt === "Horn2") { cc.copy(gHorn).multiplyScalar(0.8); return; }
+          if (mt === "Beard") { cc.copy(gCoat).multiplyScalar(0.7); return; }
+          if (mt === "Hooves") { cc.set("#15110e"); return; }
+          cc.copy(gCoat);
+          if (mt === "Main_Light") cc.lerp(new THREE.Color("#8a7361"), 0.45);
+          if (mt === "Muzzle") cc.lerp(new THREE.Color("#8a7b6d"), 0.45);
+          if (mt === "Main_Dark") cc.multiplyScalar(0.7);
+          if (vs.some((i) => eyeVg.has(i))) cc.lerp(new THREE.Color("#9a8c7f"), 0.3);   // lid ring round the eye
+          cc.multiplyScalar(0.94 + 0.12 * hash(vs[0] * 31 + vs[1] * 7 + vs[L - 1]));      // the pack's faint per-face variation
+        };
+        const eyeVg = new Set();
+        for (const f of faces) if (fm(f) === "Eye_Dark") for (const i of fv(f)) eyeVg.add(i);
+        const c = new THREE.Color(), n = V(), e1 = V(), e2 = V();
+        let topY = -Infinity;
+        for (const p of WP) topY = Math.max(topY, p.y);
+        for (const f of faces) {
+          const vs = fv(f), mt = fm(f), L = vs.length;
+          // Newell normal: the face's own plane, shared by both of a quad's triangles.
+          n.set(0, 0, 0);
+          for (let k = 0; k < L; k++) {
+            const p0 = WP[vs[k]], p1 = WP[vs[(k + 1) % L]];
+            n.x += (p0.y - p1.y) * (p0.z + p1.z); n.y += (p0.z - p1.z) * (p0.x + p1.x); n.z += (p0.x - p1.x) * (p0.y + p1.y);
+          }
+          n.normalize();
+          const cen = V();
+          for (const i of vs) cen.add(WP[i]);
+          cen.multiplyScalar(1 / L);
+          c.copy(PAL[mt] ?? baseC);
+          if (SHEEP) sheepPaint(vs, mt, n, c); else if (GOAT) goatPaint(vs, mt, n, c); else {
+          // The donkey's pale throat / chest zone, stretched by the long neck,
+          // reads as a white collar: coat colour there, pale only on belly + legs.
+          if (mt === "Main_Light") {
+            const tt = Math.max(...vs.map((i) => wOf(i, (b) => b.startsWith("Neck") || b === "Head" || b === "Torso3")));
+            c.lerp(baseC, smoothstep01(0.2, 0.6, tt));
+          }
+          const hl = vs.reduce((sum, i) => sum + lift[i], 0) / L;
+          const avgW = (pred) => vs.reduce((sum, i) => sum + wOf(i, pred), 0) / L;
+          if (mt === "Main" || mt === "Main_Light") {
+            // Throat band: one clean pale stripe down the underside of the neck,
+            // chin to chest (both references have it), cut along the quads.
+            if (avgW((b) => b.startsWith("Neck") || b === "Torso3" || b === "Head") > 0.45) {
+              const { c: cc, t: tt2 } = nearest(neckJ, cen);
+              const upN = UP.clone().addScaledVector(tt2, -UP.dot(tt2)).normalize();
+              const dN = cen.clone().sub(cc);
+              if (dN.dot(upN) < -0.45 * dN.length()) c.copy(lightC);
+            }
+            // Hair: the hump crown and the top of the shoulders darker, shaggier.
+            if (hl > 0.35 * Hh) c.lerp(darkC, 0.38);
+            else if (n.y > 0.55 && avgW((b) => b === "Torso3" || b === "Torso2") > 0.5) c.lerp(darkC, 0.18);
+            // Paler lower legs.
+            if (avgW((b) => /LowerLeg/.test(b)) > 0.5) c.lerp(lightC, 0.35);
+          }
+          if (mt !== "Sole" && knees.some((k) => k.distanceTo(cen) < 0.13 * A.Rv)) c.copy(callusC);
+          }
+          const rough = mt.startsWith("Eye") ? 0.2 : 0.9;
+          // fan; a quad's diagonal (v0-v2) is hidden in the wireframe
+          for (let k = 1; k < L - 1; k++) {
+            const tri = [vs[0], vs[k], vs[k + 1]];
+            const hide = [0, 0, 0];
+            if (L === 4) { if (k === 1) hide[1] = 1; else hide[2] = 1; }
+            tri.forEach((i, ci) => {
+              const e = [ci === 0 ? 1 : 0, ci === 1 ? 1 : 0, ci === 2 ? 1 : 0].map((b, j) => b + hide[j]);
+              G.add(WP[i], n, c, 0, rough, 1, WS[i], 0, e);
+            });
+            G.idx.push(G.count - 3, G.count - 2, G.count - 1);
+          }
+        }
+        return { topY, curlR: A.Rv };
+      }
+
+      function smoothstep01(e0, e1, x) { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
+
+      // Camels PACE: both legs on one side swing together — the rolling sway —
+      // where the donkey walks with diagonal pairs. Re-time the donkey's Walk:
+      // find each hoof's swing phase (first harmonic of its height over the
+      // cycle), time-shift the FRONT legs' tracks so each front leg swings with
+      // the hind leg on its own side, and roll the body gently toward the side
+      // that stands. Logs the phases before/after — a measurement, not a guess.
+      function footHeights(tpl, clip, N) {
+        const r = cloneSkinned(tpl.root);
+        const Bs = {};
+        r.traverse((o) => { if (o.isBone) Bs[o.name] = o; });
+        const mixer = new THREE.AnimationMixer(r);
+        mixer.clipAction(clip).play();
+        const ys = tpl.feet.map(() => []);
+        for (let k = 0; k < N; k++) {
+          mixer.setTime((clip.duration * k) / N);
+          r.updateMatrixWorld(true);
+          tpl.feet.forEach((f, i) => ys[i].push(Bs[f.bone].localToWorld(f.local.clone()).y));
+        }
+        mixer.stopAllAction();
+        return ys;
+      }
+      const swingPhase = (ys) => {
+        let sx = 0, sy = 0;
+        ys.forEach((y, i) => { const an = (2 * Math.PI * i) / ys.length; sx += y * Math.cos(an); sy += y * Math.sin(an); });
+        return ((Math.atan2(sy, sx) / (2 * Math.PI)) % 1 + 1) % 1;
+      };
+      function paceWalk(tpl, rollDeg = 3) {
+        const clip = tpl.clips.find((c) => c.name === "Walk");
+        if (!clip) return null;
+        const N = 120, T = clip.duration;
+        const wrap = (x) => ((x % 1) + 1.5) % 1 - 0.5;                    // → [-0.5, 0.5)
+        const ph0 = footHeights(tpl, clip, N).map(swingPhase);            // FL, FR, BL, BR
+        const shift = { L: wrap(ph0[2] - ph0[0]), R: wrap(ph0[3] - ph0[1]) };
+        for (const tr of clip.tracks) {
+          const node = tr.name.slice(0, tr.name.lastIndexOf("."));
+          const m = /^Front(Shoulder|UpperLeg|LowerLeg)([LR])$/.exec(node);
+          if (!m) continue;
+          const dt = shift[m[2]] * T;                                     // new(t) = old(t − dt)
+          const it = tr.createInterpolant(), w = tr.getValueSize();
+          const vals = new tr.values.constructor(tr.values.length);
+          for (let k = 0; k < tr.times.length; k++) {
+            const out = it.evaluate((((tr.times[k] - dt) % T) + T) % T);
+            for (let c = 0; c < w; c++) vals[k * w + c] = out[c];
+          }
+          tr.values = vals;
+        }
+        const ph1 = footHeights(tpl, clip, N).map(swingPhase);
+        // Roll toward the standing side: the left pair stands half a cycle
+        // after it swings. +angle about fwd tilts the top toward +right, and
+        // the L legs sit on −right, so leaning left is a negative angle.
+        let body = null;
+        tpl.root.traverse((o) => { if (o.isBone && o.name === "Body") body = o; });
+        const bodyTr = clip.tracks.find((tr) => tr.name === "Body.quaternion");
+        if (body && bodyTr && rollDeg) {
+          const axis = tpl.fwd.clone().applyQuaternion(body.parent.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
+          const standL = (ph1[2] + 0.5) % 1, amp = THREE.MathUtils.degToRad(rollDeg);
+          const q = new THREE.Quaternion(), r = new THREE.Quaternion();
+          const vals = bodyTr.values.slice();
+          for (let k = 0; k < bodyTr.times.length; k++) {
+            const roll = -amp * Math.cos(2 * Math.PI * (bodyTr.times[k] / T - standL));
+            r.setFromAxisAngle(axis, roll);
+            q.fromArray(vals, k * 4).premultiply(r).normalize().toArray(vals, k * 4);
+          }
+          bodyTr.values = vals;
+        }
+        const f2 = (x) => x.toFixed(2);
+        const res = {
+          before: { FLvsBL: f2(wrap(ph0[0] - ph0[2])), FRvsBR: f2(wrap(ph0[1] - ph0[3])), LvsR: f2(wrap(ph0[2] - ph0[3])) },
+          after: { FLvsBL: f2(wrap(ph1[0] - ph1[2])), FRvsBR: f2(wrap(ph1[1] - ph1[3])), LvsR: f2(wrap(ph1[2] - ph1[3])) },
+        };
+        console.log("[pace] phase gaps (cycles; 0 = together, ±0.5 = opposite)", JSON.stringify(res));
+        window.__pace = res;
+        return res;
+      }
+
+      // A planted hoof slides backwards at exactly the ground speed of the
+      // in-place clip. Sample the clip, keep frames where a hoof is at its
+      // lowest, take the median backward speed.
+      // Keep the animal OUT of the ground. The clips were made for the donkey's
+      // body; a wider animal (wool) lying down (Death) or kneeling sinks where
+      // the donkey just touches. For every key of every clip: skin the mesh,
+      // find its lowest point, and if it is under the ground raise the Body
+      // bone by that much at that key. Only lifts, only past a tolerance.
+      // Per clip key: where is each donkey IK foot bone relative to its own
+      // lower-leg bone (donkey clip, donkey rig)? Put the animal's IK bone at
+      // that spot on the animal's lower leg (same clip time) — its rotation
+      // track (the hoof flex) is kept as it is.
+      const DONKEY_REF = (() => {
+        const r = cloneSkinned(gltf.scene); r.traverse((o) => { if (o.isMesh) o.visible = false; });
+        const b = {}; r.traverse((o) => { if (o.isBone) b[o.name] = o; });
+        return { r, b, mixer: new THREE.AnimationMixer(r) };
+      })();
+      function feetFollow(tpl, legs) {
+        const PAIRS = [["FrontLowerLegL", "IKFrontLegL"], ["FrontLowerLegR", "IKFrontLegR"], ["BackLowerLegL", "IKBackLegL"], ["BackLowerLegR", "IKBackLegR"]];
+        const r = cloneSkinned(tpl.root), Bn = {};
+        r.traverse((o) => { if (o.isBone) Bn[o.name] = o; });
+        const mixer = new THREE.AnimationMixer(r), D = DONKEY_REF;
+        let n = 0;
+        for (const clip of tpl.clips) {
+          const dclip = gltf.animations.find((c) => c.name === clip.name);
+          if (!dclip) continue;
+          const a = mixer.clipAction(clip).reset().play(), da = D.mixer.clipAction(dclip).reset().play();
+          for (const [leg, ik] of PAIRS) {
+            const tr = clip.tracks.find((t) => t.name === ik + ".position");
+            if (!tr) continue;
+            const vals = tr.values.slice();
+            for (let k = 0; k < tr.times.length; k++) {
+              const t = tr.times[k];
+              D.mixer.setTime(Math.min(t, dclip.duration)); D.r.updateMatrixWorld(true);
+              const dl = D.b[leg].worldToLocal(D.b[ik].getWorldPosition(V()));
+              dl.y += (legs - 1) * A.ext[leg];
+              mixer.setTime(t); r.updateMatrixWorld(true);
+              const w = Bn[leg].localToWorld(dl);
+              Bn[ik].parent.worldToLocal(w).toArray(vals, k * 3);
+              n++;
+            }
+            tr.values = vals;
+          }
+          a.stop(); da.stop();
+        }
+        mixer.stopAllAction(); D.mixer.stopAllAction();
+        return n;
+      }
+
+      function groundClamp(tpl, tolM = 0.015) {
+        const r = cloneSkinned(tpl.root);
+        let mesh = null, body = null;
+        r.traverse((o) => { if (o.isSkinnedMesh) mesh = o; if (o.isBone && o.name === "Body") body = o; });
+        r.updateMatrixWorld(true);
+        const mixer = new THREE.AnimationMixer(r);
+        const pos = mesh.geometry.attributes.position, stride = 5, q = V();
+        const lowest = () => {
+          r.updateMatrixWorld(true);
+          mesh.skeleton.update();
+          let lo = Infinity;
+          for (let i = 0; i < pos.count; i += stride) {
+            mesh.getVertexPosition(i, q);
+            q.applyMatrix4(mesh.matrixWorld);
+            if (q.y < lo) lo = q.y;
+          }
+          return lo;
+        };
+        const report = {};
+        for (const clip of tpl.clips) {
+          const tr = clip.tracks.find((t) => t.name === "Body.position");
+          if (!tr) continue;
+          // the IK foot bones hang from the rig ROOT, not from Body: lift them by
+          // the same amount or the hooves/pads stay behind while the legs rise
+          const ikTr = clip.tracks.filter((t) => /^IK(Front|Back)Leg[LR]\.position$/.test(t.name));
+          const ikVals = ikTr.map((t) => t.values.slice());
+          const act = mixer.clipAction(clip);
+          act.reset().play();
+          const vals = tr.values.slice();
+          let worst = 0, fixed = 0;
+          for (let k = 0; k < tr.times.length; k++) {
+            mixer.setTime(tr.times[k]);
+            const lo = lowest();
+            if (lo < -tolM) {
+              // world lift → Body's parent space (includes the root's scale)
+              const bw = body.getWorldPosition(V());
+              const la = body.parent.worldToLocal(bw.clone()), lb = body.parent.worldToLocal(bw.clone().add(V(0, -lo, 0)));
+              const d = lb.sub(la);
+              vals[k * 3] += d.x; vals[k * 3 + 1] += d.y; vals[k * 3 + 2] += d.z;
+              ikTr.forEach((t, j) => {
+                let kk = k;
+                if (t.times[kk] !== tr.times[k]) { kk = t.times.findIndex((x) => Math.abs(x - tr.times[k]) < 1e-5); if (kk < 0) return; }
+                const pw = new THREE.Vector3(); const ikb = r.getObjectByName(t.name.split(".")[0]);
+                const la2 = ikb.parent.worldToLocal(pw.set(0, 0, 0)), lb2 = ikb.parent.worldToLocal(new THREE.Vector3(0, -lo, 0)).sub(la2);
+                ikVals[j][kk * 3] += lb2.x; ikVals[j][kk * 3 + 1] += lb2.y; ikVals[j][kk * 3 + 2] += lb2.z;
+              });
+              worst = Math.min(worst, lo); fixed++;
+            }
+          }
+          act.stop();
+          tr.values = vals;
+          ikTr.forEach((t, j) => { t.values = ikVals[j]; });
+          if (fixed) report[clip.name] = { keys: fixed, deepest_m: +(-worst).toFixed(3) };
+        }
+        mixer.stopAllAction();
+        console.log("[ground] lifted out of the ground:", JSON.stringify(report));
+        window.__groundFix = report;
+        return report;
+      }
+
+      function measureGroundSpeed(tpl, clipName) {
+        const clip = tpl.clips.find((c) => c.name === clipName);
+        if (!clip) return 0;
+        const r = cloneSkinned(tpl.root);
+        const Bs = {};
+        r.traverse((o) => { if (o.isBone) Bs[o.name] = o; });
+        const mixer = new THREE.AnimationMixer(r);
+        mixer.clipAction(clip).play();
+        const N = Math.max(40, Math.round(clip.duration * 120)), dt = clip.duration / N;
+        const tracks = tpl.feet.map(() => []);
+        for (let s = 0; s <= N; s++) {
+          mixer.setTime(s * dt);
+          r.updateMatrixWorld(true);
+          tpl.feet.forEach((f, i) => tracks[i].push(Bs[f.bone].localToWorld(f.local.clone())));
+        }
+        const speeds = [], perFoot = [];
+        for (const arr of tracks) {
+          const before = speeds.length;
+          const ys = arr.map((p) => p.y), lo = Math.min(...ys), hi = Math.max(...ys);
+          const thr = lo + (hi - lo) * 0.1 + 1e-5;
+          for (let s = 0; s < N; s++) {
+            if (arr[s].y < thr && arr[s + 1].y < thr) speeds.push(-arr[s + 1].clone().sub(arr[s]).dot(tpl.fwd) / dt);
+          }
+          const mine = speeds.slice(before).sort((x, y) => x - y);
+          perFoot.push(mine.length ? +mine[mine.length >> 1].toFixed(2) : 0);
+        }
+        mixer.stopAllAction();
+        (window.__speedPerFoot ??= {})[clipName] = perFoot;   // FL, FR, BL, BR — should agree, else feet slide
+        speeds.sort((x, y) => x - y);
+        return speeds.length ? Math.max(0, speeds[speeds.length >> 1]) : 0;
+      }
+
+      // ── Hero sheep + donkey ──────────────────────────────────────────────────
+      let tpl = null, hero = null, heroMixer = null, heroAction = null, skelHelper = null;
+      const donkey = cloneSkinned(gltf.scene);
+      donkey.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
+      {
+        const s = 1.25 / (A.backTop - A.ground0);           // ~1.25 m at the withers
+        donkey.scale.setScalar(s);
+        donkey.position.set(-2.0, -A.ground0 * s, -0.9);
+      }
+      scene.add(donkey);
+      const donkeyMixer = new THREE.AnimationMixer(donkey);
+      function resetHeroCamera() {
+        if (SPECIES.value.startsWith("camel")) {
+          camera.position.set(4.6, 2.1, 5.6); controls.target.set(-0.8, 1.1, 0);
+          donkey.position.x = -3.4; donkey.position.z = -3.2;
+        } else {
+          camera.position.set(1.2, 0.95, 2.9); controls.target.set(-0.5, 0.45, 0);
+          donkey.position.x = -2.0; donkey.position.z = -0.9;
+        }
+      }
+      let donkeyAction = null;
+      let heading = 0;
+
+      function playHero(name) {
+        const clip = tpl.clips.find((c) => c.name === name);
+        const next = heroMixer.clipAction(clip);
+        next.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).play();
+        if (heroAction && heroAction !== next) heroAction.crossFadeTo(next, 0.25, false);
+        heroAction = next;
+        const dclip = gltf.animations.find((c) => c.name === name);
+        const dn = donkeyMixer.clipAction(dclip);
+        dn.reset().play();
+        if (donkeyAction && donkeyAction !== dn) donkeyAction.crossFadeTo(dn, 0.25, false);
+        donkeyAction = dn;
+      }
+
+      function rebuild() {
+        $("s-build").textContent = "building…";
+        requestAnimationFrame(() => setTimeout(() => {
+          try {
+            const old = hero;
+            STYLE.active = (STYLE.lowPoly && SPECIES.value === "camel") || SPECIES.value.endsWith("-morph");   // camel first; the sheep stays smooth for now
+            uLP.value = STYLE.active ? 1 : 0;
+            // The morph brings its own per-QUAD normals (like the donkey's); the
+            // other low-poly builds use per-triangle flat shading.
+            const flat = STYLE.active && !SPECIES.value.endsWith("-morph");
+            for (const k in MATS) { MATS[k].material.flatShading = flat; MATS[k].material.needsUpdate = true; }
+            tpl = buildAnimal();
+            if (old) { scene.remove(old); old.traverse((o) => o.isMesh && o.geometry.dispose()); }
+            hero = tpl.root;
+            scene.add(hero);
+            heroMixer = new THREE.AnimationMixer(hero);
+            heroAction = null;
+            playHero(P.clip);
+            setSkeleton();
+            applyVisibility();
+            if (P.flock) buildFlock();
+            $("s-build").textContent = `${tpl.buildMs.toFixed(0)} ms`;
+            $("s-tris").textContent = tpl.tris.toLocaleString();
+            $("s-height").textContent = `${(tpl.isCamel ? PC.size : P.size).toFixed(2)} m`;
+            $("s-speed").textContent = `${tpl.speed.Walk.toFixed(2)} / ${tpl.speed.Gallop.toFixed(2)} m/s`;
+          } catch (e) { showErr(e); }
+        }, 0));
+      }
+
+      function setSkeleton() {
+        if (skelHelper) { scene.remove(skelHelper); skelHelper.dispose?.(); skelHelper = null; }
+        if (P.skeleton && hero && !P.flock) { skelHelper = new THREE.SkeletonHelper(hero); scene.add(skelHelper); }
+      }
+      function applyVisibility() {
+        if (hero) hero.visible = !P.flock;
+        donkey.visible = P.donkey && !P.flock;
+        uGrid.value = P.treadmill && !P.flock ? 1 : 0;
+        if (!P.treadmill || P.flock) uScroll.value = 0;
+        setShadowBox((P.flock ? 26 : 4) * Math.min(tpl?.k ?? 1, 2));
+      }
+
+      // ── Flock ────────────────────────────────────────────────────────────────
+      let flock = [];
+      const FIELD = 22;
+      function clearFlock() { for (const s of flock) scene.remove(s.root); flock = []; }
+      function buildFlock() {
+        clearFlock();
+        const rnd = mulberry(7);
+        const adults = [];
+        for (let i = 0; i < P.flockCount; i++) {
+          const lamb = i > 3 && rnd() < 0.14;
+          const root = cloneSkinned(tpl.root);
+          const mesh = root.children.find((o) => o.isSkinnedMesh) ?? (() => { let m; root.traverse((o) => { if (o.isSkinnedMesh) m = o; }); return m; })();
+          const roll = rnd();
+          mesh.material = (tpl.isCamel
+            ? (roll < 0.15 ? MATS.dark : roll < 0.45 ? MATS.v1 : roll < 0.7 ? MATS.v2 : MATS.hero)
+            : (roll < 0.08 ? MATS.black : roll < 0.4 ? MATS.v1 : roll < 0.7 ? MATS.v2 : MATS.hero)).material;
+          const s = lamb ? 0.52 + rnd() * 0.08 : 0.88 + rnd() * 0.22;
+          root.scale.setScalar(tpl.scale * s);
+          const ang = rnd() * Math.PI * 2, rad = Math.sqrt(rnd()) * (FIELD * tpl.k) * 0.55;
+          const sh = {
+            root, s, lamb, mixer: new THREE.AnimationMixer(root), action: null, cur: "",
+            x: Math.cos(ang) * rad, z: Math.sin(ang) * rad, heading: rnd() * Math.PI * 2,
+            state: "graze", timer: rnd() * 6, tx: 0, tz: 0, ts: 0.92 + rnd() * 0.16, mother: null,
+          };
+          sh.mixer.timeScale = sh.ts;
+          if (lamb && adults.length) { sh.mother = adults[Math.floor(rnd() * adults.length)]; sh.x = sh.mother.x + 0.8 * tpl.k; sh.z = sh.mother.z + 0.5 * tpl.k; }
+          if (!lamb) adults.push(sh);
+          scene.add(root);
+          flockPlay(sh, rnd() < 0.7 ? "Eating" : "Idle_Headlow", rnd());
+          flock.push(sh);
+        }
+        const kk = Math.min(tpl.k, 1.8);
+        camera.position.set(14 * kk, 9 * kk, 16 * kk);
+        controls.target.set(0, 0.4, 0);
+      }
+      function flockPlay(sh, name, phase = 0) {
+        if (sh.cur === name) return;
+        const clip = tpl.clips.find((c) => c.name === name);
+        const a = sh.mixer.clipAction(clip);
+        a.reset().play();
+        if (phase) a.time = phase * clip.duration;
+        if (sh.action) sh.action.crossFadeTo(a, 0.3, false);
+        sh.action = a; sh.cur = name;
+      }
+      function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+      let scareAt = null;
+      function scare() {
+        if (!P.flock) return;
+        scareAt = { x: controls.target.x, z: controls.target.z };
+        for (const sh of flock) { sh.state = "flee"; sh.timer = 2.2 + Math.random() * 1.8; }
+      }
+      function updateFlock(dt) {
+        for (const sh of flock) {
+          sh.timer -= dt;
+          let moveSpeed = 0;
+          if (sh.state === "graze" || sh.state === "idle") {
+            if (sh.timer <= 0) {
+              const r = Math.random();
+              if (r < 0.55 || (sh.mother && Math.hypot(sh.x - sh.mother.x, sh.z - sh.mother.z) > 2 * tpl.k)) {
+                const cx = sh.mother ? sh.mother.x : sh.x, cz = sh.mother ? sh.mother.z : sh.z;
+                const ang = Math.random() * Math.PI * 2, d = (sh.mother ? 0.6 + Math.random() : 2 + Math.random() * 4) * tpl.k;
+                sh.tx = cx + Math.cos(ang) * d; sh.tz = cz + Math.sin(ang) * d;
+                const rr = Math.hypot(sh.tx, sh.tz);
+                if (rr > (FIELD * tpl.k)) { sh.tx *= (FIELD * tpl.k) / rr; sh.tz *= (FIELD * tpl.k) / rr; }
+                sh.state = "walk";
+              } else if (r < 0.75) { sh.state = "idle"; sh.timer = 2 + Math.random() * 3; flockPlay(sh, ["Idle", "Idle_2", "Idle_Headlow"][Math.floor(Math.random() * 3)]); }
+              else { sh.state = "graze"; sh.timer = 4 + Math.random() * 8; flockPlay(sh, "Eating"); }
+            }
+          }
+          if (sh.state === "walk") {
+            flockPlay(sh, "Walk");
+            const dx = sh.tx - sh.x, dz = sh.tz - sh.z, dist = Math.hypot(dx, dz);
+            turnTo(sh, Math.atan2(dx, dz), dt, 2.2);
+            const err = Math.abs(angDiff(Math.atan2(dx, dz), sh.heading));
+            moveSpeed = err < 0.7 ? tpl.speed.Walk * sh.s * sh.ts : 0;
+            if (dist < 0.25 * tpl.k) { sh.state = "graze"; sh.timer = 4 + Math.random() * 9; flockPlay(sh, "Eating"); }
+          } else if (sh.state === "flee") {
+            flockPlay(sh, "Gallop");
+            const away = Math.atan2(sh.x - scareAt.x, sh.z - scareAt.z);
+            turnTo(sh, away, dt, 4);
+            moveSpeed = tpl.speed.Gallop * sh.s * sh.ts;
+            if (sh.timer <= 0) { sh.state = "idle"; sh.timer = 1.5 + Math.random() * 2; flockPlay(sh, "Idle"); }
+          }
+          sh.x += Math.sin(sh.heading) * moveSpeed * dt;
+          sh.z += Math.cos(sh.heading) * moveSpeed * dt;
+        }
+        // Separation.
+        for (let i = 0; i < flock.length; i++) for (let j = i + 1; j < flock.length; j++) {
+          const a = flock[i], b = flock[j];
+          const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz), min = 0.55 * (a.s + b.s) * tpl.k;
+          if (d > 1e-4 && d < min) { const push = (min - d) * 0.5 / d; a.x -= dx * push; a.z -= dz * push; b.x += dx * push; b.z += dz * push; }
+        }
+        for (const sh of flock) {
+          const r = Math.hypot(sh.x, sh.z);
+          if (r > (FIELD * tpl.k) * 1.6) { sh.x *= (FIELD * tpl.k) * 1.6 / r; sh.z *= (FIELD * tpl.k) * 1.6 / r; }
+          sh.root.position.set(sh.x, -A.ground0 * tpl.scale * sh.s, sh.z);
+          sh.root.rotation.y = sh.heading - tpl.yaw0;
+          sh.mixer.update(dt);
+        }
+      }
+      const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+      function turnTo(sh, target, dt, rate) { const d = angDiff(target, sh.heading); sh.heading += Math.sign(d) * Math.min(Math.abs(d), rate * dt); }
+
+      // ── GUI ──────────────────────────────────────────────────────────────────
+      const gui = new GUI({ title: "Animal" });
+      const ctrls = [];
+      const reg = (c) => { ctrls.push(c); return c; };
+      gui.add(SPECIES, "value", ["goat-morph", "sheep-morph", "camel-morph", "camel", "sheep"]).name("species").onChange(() => {
+        syncSpeciesGui();
+        if (P.flock) clearFlock();
+        resetHeroCamera();
+        rebuild();
+      });
+      gui.add(STYLE, "lowPoly").name("low-poly (camel)").onChange(rebuild);
+      gui.add({ wire: false }, "wire").name("show quads (wire)").onChange((v) => (uWire.value = v ? 1 : 0));
+      const camelF = gui.addFolder("Camel shape (rebuilds)");
+      for (const [k, lo, hi, st, name] of [
+        ["legs", 0.8, 1.5, 0.01, "leg length ×"], ["neck", 0.8, 1.8, 0.01, "neck length ×"],
+        ["body", 0.6, 1.1, 0.01, "body length ×"], ["head", 0.6, 1.2, 0.01, "head size ×"],
+        ["girth", 0.7, 1.2, 0.01, "girth"], ["hump", 0, 1.8, 0.01, "hump height"],
+        ["humpLen", 0.5, 1.5, 0.01, "hump length"], ["neckThick", 0.7, 1.4, 0.01, "neck thickness"],
+        ["neckDip", 0, 70, 1, "neck dip (°)"], ["neckRise", 0, 100, 1, "neck rise (°)"],
+        ["headPitch", -40, 30, 1, "head pitch (°)"], ["legThick", 0.6, 1.6, 0.01, "leg thickness"],
+        ["legSlim", 0.4, 1.0, 0.01, "leg slim (morph)"], ["neckSlim", 0.5, 1.0, 0.01, "neck slim (morph)"],
+        ["size", 1.4, 2.5, 0.01, "height (m)"],
+      ]) reg(camelF.add(PC, k, lo, hi, st).name(name).onFinishChange(rebuild));
+      reg(camelF.addColor(PC, "color").name("coat").onFinishChange(rebuild));
+      reg(camelF.addColor(PC, "dark").name("coat dark").onFinishChange(rebuild));
+      reg(camelF.addColor(PC, "light").name("coat light").onFinishChange(rebuild));
+      const shapeF = gui.addFolder("Sheep shape (rebuilds)");
+      reg(shapeF.add(P, "preset", Object.keys(PRESETS)).onChange((v) => {
+        Object.assign(P, PRESETS[v]);
+        for (const c of ctrls) c.updateDisplay();
+        rebuild();
+      }));
+      reg(shapeF.add(P, "legs", 0.35, 1.0, 0.01).name("leg length ×").onFinishChange(rebuild));
+      reg(shapeF.add(P, "neck", 0.3, 1.2, 0.01).name("neck length ×").onFinishChange(rebuild));
+      reg(shapeF.add(P, "body", 0.6, 1.0, 0.01).name("body length ×").onFinishChange(rebuild));
+      reg(shapeF.add(P, "head", 0.45, 1.0, 0.01).name("head size ×").onFinishChange(rebuild));
+      reg(shapeF.add(P, "wool", 0.9, 1.8, 0.01).name("wool bulk").onFinishChange(rebuild));
+      reg(shapeF.add(P, "lumps", 0, 2.5, 0.01).name("wool lumps").onFinishChange(rebuild));
+      reg(shapeF.add(P, "headWool", 0, 1.3, 0.01).name("wool cap").onFinishChange(rebuild));
+      reg(shapeF.add(P, "earDroop", 0, 1, 0.01).name("ear droop").onFinishChange(rebuild));
+      reg(shapeF.add(P, "earSize", 0.5, 1.5, 0.01).name("ear size").onFinishChange(rebuild));
+      reg(shapeF.add(P, "legThick", 0.6, 1.6, 0.01).name("leg thickness").onFinishChange(rebuild));
+      reg(shapeF.add(P, "horns").name("ram horns").onChange(rebuild));
+      reg(shapeF.add(P, "size", 0.4, 1.2, 0.01).name("height (m)").onFinishChange(rebuild));
+      const colF = gui.addFolder("Sheep colours (rebuilds)");
+      reg(colF.addColor(P, "woolColor").name("wool").onFinishChange(rebuild));
+      reg(colF.addColor(P, "faceColor").name("face").onFinishChange(rebuild));
+      reg(colF.addColor(P, "legColor").name("legs").onFinishChange(rebuild));
+      function syncSpeciesGui() {
+        const camel = SPECIES.value.startsWith("camel");
+        camelF.domElement.style.display = camel ? "" : "none";
+        shapeF.domElement.style.display = colF.domElement.style.display = camel ? "none" : "";
+      }
+      syncSpeciesGui();
+      const matF = gui.addFolder("Wool / fur shader");
+      reg(matF.add(P, "curl", 0.4, 2.5, 0.01).name("curl scale").onChange(() => { if (tpl) rebuildUniforms(); }));
+      reg(matF.add(P, "bump", 0, 3, 0.01).name("curl bump").onChange(() => rebuildUniforms()));
+      reg(matF.add(P, "sheen", 0, 1.5, 0.01).name("sheen").onChange((v) => (uSheen.value = v)));
+      function rebuildUniforms() {
+        uCurl.value = 1 / (0.11 * (tpl?.curlR ?? A.Rv)) * P.curl;
+        uBump.value = 0.004 * P.bump;
+      }
+      const animF = gui.addFolder("Animation (donkey clips)");
+      reg(animF.add(P, "clip", CLIP_NAMES).onChange((v) => tpl && playHero(v)));
+      reg(animF.add(P, "speed", 0, 2, 0.01).name("playback ×"));
+      reg(animF.add(P, "treadmill").name("treadmill (grid)").onChange(applyVisibility));
+      reg(animF.add(P, "donkey").name("show donkey").onChange(applyVisibility));
+      reg(animF.add(P, "skeleton").name("show skeleton").onChange(setSkeleton));
+      reg(animF.add(P, "turntable").name("turntable"));
+      const flockF = gui.addFolder("Flock");
+      reg(flockF.add(P, "flock").name("flock mode").onChange((v) => {
+        if (v) buildFlock(); else { clearFlock(); resetHeroCamera(); }
+        applyVisibility(); setSkeleton();
+      }));
+      reg(flockF.add(P, "flockCount", 5, 80, 1).name("count").onFinishChange(() => P.flock && buildFlock()));
+      flockF.add({ scare }, "scare").name("scare them! (gallop)");
+
+      // ── Loop ─────────────────────────────────────────────────────────────────
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+      const timer = new THREE.Timer();
+      let msAvg = 16, hudT = 0;
+      renderer.setAnimationLoop((now) => {
+        timer.update(now);
+        const rawDt = Math.min(timer.getDelta(), 0.1);
+        msAvg += (rawDt * 1000 - msAvg) * 0.05;
+        const dt = rawDt * P.speed;
+        if (tpl && hero) {
+          if (P.turntable) heading += rawDt * 0.35;
+          hero.rotation.y = heading - tpl.yaw0;
+          heroMixer.update(dt);
+          donkeyMixer.update(dt);
+          const gait = P.clip === "Walk" || P.clip === "Gallop" ? tpl.speed[P.clip] : 0;
+          if (P.treadmill && !P.flock && !P.turntable) uScroll.value += gait * dt;
+          if (P.flock) updateFlock(dt);
+        }
+        renderer.info.reset();
+        controls.update();
+        renderer.render(scene, camera);
+        hudT += rawDt;
+        if (hudT > 0.25) {
+          hudT = 0;
+          $("s-draws").textContent = renderer.info.render.drawCalls;
+          $("s-ms").textContent = `${msAvg.toFixed(1)} ms`;
+        }
+      });
+
+      window.__SHEEP = { renderer, scene, camera, controls, P, PC, PG, SPECIES, A, resetHeroCamera, uWire, get tpl() { return tpl; }, rebuild, playHero: (n) => { P.clip = n; playHero(n); }, scare, buildFlock };
+      resetHeroCamera();
+      rebuild();
+    </script>
+  </body>
+</html>
