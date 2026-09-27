@@ -30,9 +30,9 @@
 import * as THREE from "three";
 import {
   Fn, If, float, int, struct, vec2, vec3, vec4,
-  texture, mix, max, clamp, pow, sqrt, uniform, step, normalize,
+  texture, mix, max, min, clamp, pow, sqrt, uniform, step, normalize,
   positionWorld, smoothstep, abs, length, mx_noise_float, floor, fract, hash, uint,
-  select, cameraPosition,
+  select, cameraPosition, dFdx, dFdy,
 } from "three/tsl";
 import { WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 import { cliffRockTint, createCliffRockUniforms } from "./cliffRockTsl.js";
@@ -68,6 +68,15 @@ export const SPLAT_FEATURES = {
   normalMap: true,
   /** Per-layer world-triplanar projection (uTriplanar). */
   triplanar: true,
+  /**
+   * BIPLANAR instead of triplanar for those layers: the top projection plus
+   * only the DOMINANT side one per pixel (explicit gradients, so the switch
+   * between the two sides has no mip seam). 4 taps per layer instead of 6.
+   * MEASURED alg-rts 2026-09-27 at 2x zoom-out: triplanar 83 ms, biplanar
+   * 83 ms, no side projection 73.5 ms — the explicit-gradient samples cost
+   * what the dropped tap saved, on this GPU. Kept, OFF, for other hardware.
+   */
+  biplanar: false,
   /** Large-scale world colour variation (uMacroStrength / uMacroWarmth). */
   macroVariation: true,
   /**
@@ -310,6 +319,27 @@ export function createSplatOverlay(
   function sampleLayer(i, arrNode, triWeights, topUV) {
     const p   = positionWorld.mul(invWS).mul(layerSlots[i].uUVScale);
     const top = arrNode.sample(topUV).depth(int(i));
+    if (compileState.triplanarSlots[i] && triWeights && F.biplanar) {
+      // BIPLANAR (Inigo Quilez): of the three projections, sample only the
+      // two with the largest weights. What is dropped is the smallest weight,
+      // which after the pow-4 sharpening is ~0 wherever the pick switches, so
+      // no seam; explicit gradients from every candidate UV keep the mip
+      // choice continuous across the switch. 2 taps per texture instead of 3.
+      const wx = triWeights.x, wy = triWeights.y, wz = triWeights.z;
+      const uv = [p.zy, vec2(topUV), p.xy];
+      const gdx = uv.map((u) => dFdx(u)), gdy = uv.map((u) => dFdy(u));
+      const w = [wx, wy, wz];
+      // Largest and smallest axis (0 X, 1 Y, 2 Z); the middle one is the rest.
+      const ma = select(wx.greaterThanEqual(max(wy, wz)), float(0), select(wz.greaterThanEqual(wy), float(2), float(1)));
+      const miRaw = select(wx.lessThan(min(wy, wz)), float(0), select(wz.lessThan(wy), float(2), float(1)));
+      const mi = select(miRaw.equal(ma), ma.add(1).mod(3), miRaw);
+      const me = float(3).sub(ma).sub(mi);
+      const pick = (arr, k) => select(k.equal(0), arr[0], select(k.equal(1), arr[1], arr[2]));
+      const s1 = arrNode.sample(pick(uv, ma)).grad(pick(gdx, ma), pick(gdy, ma)).depth(int(i));
+      const s2 = arrNode.sample(pick(uv, me)).grad(pick(gdx, me), pick(gdy, me)).depth(int(i));
+      const w1 = pick(w, ma), w2 = pick(w, me);
+      return s1.mul(w1).add(s2.mul(w2)).div(max(w1.add(w2), float(1e-5))).toVar();
+    }
     if (compileState.triplanarSlots[i] && triWeights) {
       const side  = arrNode.sample(p.zy).depth(int(i)); // X-facing wall
       const front = arrNode.sample(p.xy).depth(int(i)); // Z-facing wall

@@ -104,10 +104,42 @@ Order: foliage → villages → animals & birds → ground detail.
 - [x] **Tamarisk** behind the oleander and round the oases (grey-green).
 - [x] **Prickly pear** hedges round the hamlets — a new builder
       (buildOpuntia: tiers of flat oval pads from pad rims).
-- [ ] **PERF: the terrain costs ~4 ms over the hills** (5.9 of 6.2 ms in
-      the scene pass at the map's centre; 0.66 ms whole frame at the oasis).
-      Not new (same on the map before today). Not the triplanar cliff layer.
-      Next suspect: the top-3 layer blend on steep mixed paint.
+- [x] **Dev → Fog = nam's** (you): Model (Analytic / Valley band / Monsoon)
+      with each model's own rows, Height fog, Color, Dist. fog, Dist.
+      density; Post-FX section as nam's. Weather presets and Fog banks stay.
+- [x] **Wind on the ground plants** (you: reeds and oleander were frozen):
+      the engine ships foliage wind OFF ("judged at rest"); the map now turns
+      it on (algVegetation.mjs), and the game's one wind (algWind.js) now
+      drives the grass/plant wind too (new `app.setWind`). Flags, windsock and
+      plants agree.
+- [x] **PERF PASS 2026-09-27** (you: "optimize until 5 iterations < 5%"):
+      report in the session; bench = games/alg-rts/perfBench.js (7 views,
+      frame time at 2x). 368.1 → 342.2 ms summed (−7.0%), CPU 28.5 → 23.6 ms
+      (−17%). Kept: bloom OFF (it drew nothing — nothing emissive yet;
+      re-enable with the first tracer), fog-bank pass unhooked while the banks
+      are off, unused terrain features compiled out (riverSand, grassFar,
+      flowerTint), stats-gl overlay off in the game (was ~20% of the main
+      thread; Dev → Performance to show it), clipmap drawn nearest-first.
+      Tried, no gain, reverted/kept off: biplanar cliff (engine opt-in, off),
+      plant shadows off, far-tile fade. FOUND: the terrain paint shader is
+      ~70% of every view (hiding it → vsync); all 6 layers are painted. The
+      real next step is structural (index-blended splat, TODO below).
+- [ ] **Terrain: index-blended splat** — store the top-3 layer ids + weights
+      per texel so the shader does 3 layer taps whatever the count (see memory
+      proj_v3_terrain_only_static_taps). The one lever left that is big.
+- [x] ~~Heading-dependent cost~~ — a MEASURING error (vsync-quantised rAF,
+      a second tab open, the GPU timer). Measured properly (30 renders back
+      to back, one tab): the spike was the ATLAS CEDARS, 10–14 ms at the
+      massif; terrain a steady 3–4 ms everywhere.
+- [x] **Cedar fix: depth pre-pass for cut-out leaf cards** (engine,
+      FoliageScatterSystem `depthPrepass`, `startV3App({ foliageDepthPrepass })`,
+      default off; this game on, `?prepass=0` to A/B). Cause: the cut-out
+      (discard) turned off early depth, so every hidden card was fully lit.
+      Now an unlit depth pass, then colour depth-EQUAL. MEASURED 1919x888,
+      scene only: cedar massif 20.7 → 6.6 ms; base 6.6→6.3, oasis 7.4→6.3,
+      hills 7.8→6.5, wadi/aln 5.7→5.0, zoom-out 7.2→6.3. Image identical
+      (0.001% px, frozen plants). Offer it to nam (palms, jungle).
+- [ ] Re-measure the earlier perf-pass changes with the correct method.
 - [ ] Olive and fig in walled gardens; almond on terraces.
 - [ ] Doum: fix its far LOD (flat green mats) and paint it back.
 - [ ] Then villages: dechra on a ridge, koubba, cemetery, wells, zeribas.

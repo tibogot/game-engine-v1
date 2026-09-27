@@ -290,6 +290,11 @@ export async function startV3App(opts = {}) {
   if (container) renderer.domElement.style.cssText = "display:block;width:100%;height:100%;outline:none";
   viewport.appendChild(renderer.domElement);
 
+  // stats-gl WRAPS renderer.render and renderer.info.reset (its begin/end
+  // around every render call — 18 a frame here). Keep the originals so
+  // app.setStatsOverlay(false) can take the wrappers off again.
+  const _rawRender = renderer.render;
+  const _rawInfoReset = renderer.info.reset;
   const stats = new Stats({ trackGPU: hasTimestamps, trackCPT: true });
   try {
     await Promise.race([
@@ -605,6 +610,9 @@ export async function startV3App(opts = {}) {
   // for 3-4 so a grove or a forest is not one tree repeated. Default 1 = the
   // field as it always was. Costs a draw per variant per detail level.
   const tallPlantVariants = Math.max(1, Math.min(4, Math.round(opts.tallPlantVariants ?? 1)));
+  // Depth pre-pass for the plant fields' cut-out cards (FoliageScatterSystem
+  // depthPrepass): a game opts in; default off = the fields as they were.
+  const foliageDepthPrepass = opts.foliageDepthPrepass === true;
   // A/B switches for the terrain layer path, per page load (editor or game):
   // ?topk=3 (0 = classic, every layer on every pixel) and ?far=1 (near/far
   // blend on the top-K layers). See SPLAT_FEATURES in splatOverlayTsl.js.
@@ -1868,6 +1876,7 @@ export async function startV3App(opts = {}) {
         worldSize:        WORLD_SIZE,
         terrainSurface:   terrainSurfaceDesc(),
         variants:         tallPlantVariants,
+        depthPrepass:     foliageDepthPrepass,
         fs:               susukiState,
         gp:               grassState,
       });
@@ -1975,6 +1984,7 @@ export async function startV3App(opts = {}) {
         terrainSurface:   terrainSurfaceDesc(),
         tileSize:         FOLIAGE_FIELD.tileSize,
         plantsPerSide:    FOLIAGE_FIELD.plantsPerSide,
+        depthPrepass:     foliageDepthPrepass,
         fs:               foliageScatterState,
         gp:               grassState,
       });
@@ -4437,6 +4447,10 @@ export async function startV3App(opts = {}) {
    */
   let _frameThrottleMs = 0;
   let _lastThrottledFrame = 0;
+  /** The stats-gl overlay on (default) or hidden and not updated. */
+  let _statsOn = true;
+  let _statsWrapped = null;
+  let _tsDrain = 0;
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     if (_frameThrottleMs > 0) {
@@ -4802,7 +4816,18 @@ export async function startV3App(opts = {}) {
       }
     }
 
-    try {
+    // The overlay hidden (app.setStatsOverlay(false)): skip ALL of it — the
+    // canvas panels, stats-gl's own update and the timestamp resolves.
+    // MEASURED 2026-09-27 (alg-rts, CPU profile): stats-gl's update alone was
+    // ~20% of the main thread. (The on-demand GPU panel resolves its own.)
+    // The renderer records timestamp queries whatever the overlay does (the
+    // device has the feature): with the overlay off, still drain the pool —
+    // every 30th frame is enough — or it overflows and warns every frame.
+    if (!_statsOn && hasTimestamps && (++_tsDrain % 30) === 0) {
+      renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+      renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);
+    }
+    if (_statsOn) try {
       if (hasTimestamps) {
         renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
         renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);
@@ -12498,6 +12523,46 @@ export async function startV3App(opts = {}) {
      * height m, windX, windZ m/s }. Runtime, not saved.
      */
     setCloudShadows(p = {}) { worldEnv?.cloudShadowsLite?.set(p); },
+    /**
+     * The stats-gl overlay (FPS / CPU / GPU / draws / tris, top left). Off =
+     * hidden AND not updated: its per-frame canvas drawing and timestamp
+     * resolves were ~20% of a game's main thread (measured). A dev panel can
+     * turn it back on. The on-demand GPU pass panel (__V3_DEBUG.gpu) is
+     * separate and unaffected.
+     */
+    setStatsOverlay(on) {
+      on = !!on;
+      if (on === _statsOn) return;
+      // Swap stats-gl's wrappers of render / info.reset out and back in.
+      if (!on) {
+        _statsWrapped ??= { render: renderer.render, reset: renderer.info.reset };
+        renderer.render = _rawRender;
+        renderer.info.reset = _rawInfoReset;
+      } else if (_statsWrapped) {
+        renderer.render = _statsWrapped.render;
+        renderer.info.reset = _statsWrapped.reset;
+      }
+      _statsOn = on;
+      stats.dom.style.display = _statsOn ? "" : "none";
+    },
+    get statsOverlay() { return _statsOn; },
+    /**
+     * THE WORLD'S WIND for every plant field — grass, tall plants, ground
+     * foliage, flowers all read the shared grass wind. For a game with its
+     * own wind (flags, smoke) to keep them in agreement. { angleDeg (world
+     * XZ = cos, sin — the flag's convention), strength (the grass's
+     * windStrength), gust, speed }. Runtime, not saved.
+     */
+    setWind({ angleDeg, strength, gust, speed } = {}) {
+      if (Number.isFinite(angleDeg)) grassState.windAngle = angleDeg;
+      if (Number.isFinite(strength)) grassState.windStrength = strength;
+      if (Number.isFinite(gust)) grassState.windGust = gust;
+      if (Number.isFinite(speed)) grassState.windSpeed = speed;
+      syncGrassUniforms();
+      syncSusukiUniforms();
+      syncFlowerUniforms();
+      syncFoliageScatterUniforms();
+    },
     get cloudShadows() { return worldEnv?.cloudShadowsLite ?? null; },
     setCliffStreaks(p = {}) {
       for (const [k, v] of Object.entries(p)) if (Number.isFinite(v) && cliffStreakUniforms[k]) cliffStreakUniforms[k].value = v;

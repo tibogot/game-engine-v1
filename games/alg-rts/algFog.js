@@ -78,8 +78,11 @@ export function createAlgFog(app, { light, applyLight } = {}) {
   fog.restoreBanks();
   // No fog of war yet: the banks are the whole scene-colour hook. (With one,
   // they go BEFORE it, as in nam.)
-  const hook = () => app.postFx.setSceneColorModifier((color, ctx) => fog.node(color, ctx));
+  // Hooked ONLY while the banks are on: off, the volume pass still rendered
+  // a half-res target every frame (3.6% of the frame, measured).
+  const hook = () => app.postFx.setSceneColorModifier(fog.params.enabled ? (color, ctx) => fog.node(color, ctx) : null);
   fog.onRebuild = hook;
+  fog.onToggle = hook;
   hook();
   app.addPreRenderHook(() => fog.update());
 

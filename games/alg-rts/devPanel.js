@@ -53,16 +53,50 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
   light.button("Copy values", () => navigator.clipboard?.writeText(JSON.stringify(L, null, 2)));
   light.hint("Live, not saved. <b>Copy</b> gives the values for <code>AURES_LIGHT</code> in algGame.js.");
 
-  // ── Haze + bloom ────────────────────────────────────────────────────────
-  const fx = panel.section("Haze & bloom");
-  const dist = () => app.fog?.state?.distance ?? {};
-  fx.toggle("Haze", { get: () => dist().enabled, set: (v) => app.fog?.setDistance?.({ enabled: v }) });
-  fx.slider("Density", { min: 0, max: 20, step: 0.1, get: () => (dist().density ?? 0) * 1e4, set: (v) => app.fog?.setDistance?.({ density: v * 1e-4 }), fmt: (v) => `${v.toFixed(1)}e-4` });
-  fx.color("Colour", { get: () => dist().color ?? L.haze.color, set: (v) => app.fog?.setDistance?.({ color: v }) });
-  let bloom = { enabled: true, strength: 0.85 };
+  // ── Fog — the SAME controls as nam-rts's Dev → Fog (your ask, 2026-09-27:
+  // one panel for both games while they are tuned): the height fog's model
+  // and its rows, then the distance fog. Only the live model's rows show.
+  const fogS = panel.section("Fog");
+  const hs = () => app.fog?.state?.height ?? {};
+  const ds = () => app.fog?.state?.distance ?? {};
+  const setH = (p) => app.fog?.setHeight?.(p);
+  const rowsOf = { valley: [], monsoon: [] };
+  const tag = (model) => rowsOf[model].push(fogS.el.lastElementChild);
+  const showRows = () => {
+    const m = hs().mode ?? "analytic";
+    for (const [k, list] of Object.entries(rowsOf)) for (const el of list) el.style.display = m === k ? "" : "none";
+  };
+  fogS.select("Model", {
+    options: [["analytic", "Analytic (Crytek)"], ["valley", "Valley band"], ["monsoon", "Monsoon (top-down)"]],
+    get: () => hs().mode ?? "analytic",
+    set: (v) => { setH({ mode: v }); showRows(); },
+  });
+  fogS.toggle("Height fog", { get: () => hs().enabled, set: (v) => setH({ enabled: v, mode: hs().mode }) });
+  fogS.color("Color", { get: () => hs().color ?? "#c8d8e4", set: (v) => setH({ color: v }) });
+  const mon = (label, key, min, max, step) => { fogS.slider(label, { min, max, step, get: () => hs()[key], set: (v) => setH({ [key]: v }) }); tag("monsoon"); };
+  mon("Density", "monDensity", 0.002, 0.06, 0.001);
+  mon("Falloff", "monFalloff", 0.01, 0.16, 0.005);
+  mon("Layer (Y)", "monHeight", -20, 120, 1);
+  mon("Sheets", "monStrata", 0, 1.2, 0.05);
+  mon("Sun glow", "monSunStrength", 0, 1.5, 0.05);
+  fogS.color("Sun tint", { get: () => hs().monSunTint ?? "#ffcf9a", set: (v) => setH({ monSunTint: v }) }); tag("monsoon");
+  fogS.hint("Layer Y near the valley floors (the plain plays at y 5-25; the ALN's heights at 80). Falloff sets thickness ≈ 1/value metres. Keep density LOW — you have to read the battlefield through it. Sun glow only shows looking toward a LOW sun."); tag("monsoon");
+  const val = (label, key, min, max, step) => { fogS.slider(label, { min, max, step, get: () => hs()[key], set: (v) => setH({ [key]: v }) }); tag("valley"); };
+  val("Base (Y)", "base", -40, 80, 1);
+  val("Top (Y)", "top", 10, 200, 1);
+  val("Haze", "haze", 0, 0.005, 0.0001);
+  val("Wobble", "noiseWobble", 0, 40, 1);
+  fogS.toggle("Dist. fog", { get: () => ds().enabled !== false, set: (v) => app.fog?.setDistance?.({ enabled: v, matchSky: true }) });
+  fogS.slider("Dist. density", { min: 0, max: 0.003, step: 0.0001, get: () => ds().density ?? 0.0004, set: (v) => app.fog?.setDistance?.({ density: v }) });
+  fogS.hint("Valley band fog — mist below Top, clear above. Haze fades distant terrain into the sky.");
+  showRows();
+
+  // ── Post-FX (as nam's) ──────────────────────────────────────────────────
+  const fx = panel.section("Post-FX");
+  let bloom = { enabled: false, strength: 0.85 };   // off at boot (algGame.js)
   fx.toggle("Bloom", { get: () => bloom.enabled, set: (v) => { bloom.enabled = v; app.postFx?.setBloom?.(bloom); } });
   fx.slider("Bloom strength", { min: 0, max: 2, step: 0.05, get: () => bloom.strength, set: (v) => { bloom.strength = v; app.postFx?.setBloom?.(bloom); } });
-  fx.hint("Dust haze: it eats the plain and the far ground. Bloom is selective (emissive only).");
+  fx.hint("Selective bloom — only emissive materials (tracers, beacons) glow.");
 
   // ── Weather & fog (algFog.js; the banks are shared-rts/fogBanks.js) ────
   const af = app.algFog;
@@ -110,6 +144,7 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
 
   // ── Performance ─────────────────────────────────────────────────────────
   const perf = panel.section("Performance");
+  perf.toggle("Stats overlay", { get: () => app.statsOverlay, set: (v) => app.setStatsOverlay?.(v) });
   perf.slider("Render scale", { min: 0.5, max: 1, step: 0.05, get: () => app.renderScale ?? 1, set: (v) => app.setRenderScale?.(v, { persist: false }) });
   perf.button("GPU pass timings", async (b) => {
     const g = await window.__V3_DEBUG?.gpu?.();

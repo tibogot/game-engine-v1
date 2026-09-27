@@ -72,12 +72,24 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
     // Three shapes of every tree (palm clumps, cedars, oaks): one shape
     // repeated across a grove read as a stamp.
     tallPlantVariants: Number(params.get("variants") ?? 3),
+    // Cut-out leaf cards drawn depth-first (cedar massif: ~12 ms → near 0).
+    // ?prepass=0 to A/B.
+    foliageDepthPrepass: params.get("prepass") !== "0",
     csm: { cascades: 2, maxFar: 300, enabled: false },
     light: { shadowNormalBias: 0.12 },
-    terrainFeatures: { cursor: false, snow: false, baseStyle: "flat" },
-    splatFeatures: { solo: false, layerBudget: 6, topK: 3, farBlend: true },
+    // Compiled out: what this map never uses — no River v2 river (the wadis
+    // are dry paint), no painted grass blades, no flower field — so their
+    // terrain tints only multiplied zeros. MEASURED 2026-09-27 at 2x
+    // zoom-out, A/B/A/B same clock: 82.3/79.2 → 77.7/77.8 ms. Lakebed STAYS
+    // (the oases are lakes). Turn one back on the day the map uses it.
+    terrainFeatures: { cursor: false, snow: false, baseStyle: "flat", riverSand: false, grassFar: false, flowerTint: false },
+    // ?topk= ?farblend= for A/B (perf investigation, 2026-09-27).
+    splatFeatures: { solo: false, layerBudget: 6, topK: Number(params.get("topk") ?? 3), farBlend: params.get("farblend") !== "0" },
   });
   app.setFrameThrottle?.(1000);
+  // The stats-gl overlay costs ~20% of the main thread (measured): off in the
+  // game, on from Dev → Performance or with ?stats=1.
+  app.setStatsOverlay?.(params.get("stats") === "1");
 
   const levels = createLevelLoader(app, { defaultUrl: "/levels/alg-aures.v3proj", onStatus });
   const boot = await levels.loadBoot();
@@ -88,7 +100,13 @@ export async function startAlgGame({ container, onStatus = () => {} } = {}) {
 
   app.postFx?.setEnabled(true);
   app.postFx?.setBloomSelective(true);
-  app.postFx?.setBloom({ enabled: true, strength: 0.85, threshold: 0.0, radius: 0.5 });
+  // Bloom OFF until something emits light (tracers, muzzle flash, fires,
+  // the searchlight at night). It is selective — only emissive materials
+  // glow — and nothing in this game is emissive yet, so it drew nothing:
+  // pixel diff on/off = motion only. It cost 5 full-resolution blur levels
+  // every frame: MEASURED ~8 ms at 1.55x resolution (2026-09-27 perf pass).
+  // Turn it on (Dev → Post-FX) the day the first emissive arrives.
+  app.postFx?.setBloom({ enabled: false, strength: 0.85, threshold: 0.0, radius: 0.5 });
   app.shadows?.setEnabled?.(false);   // the fitted frustum, not cascades (nam-rts measured)
 
   // The plain outside the heightmap is bare ground: soil, not the editor's white.

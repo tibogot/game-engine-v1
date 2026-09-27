@@ -196,6 +196,9 @@ man.susuki.plants = TALL.map((sp) => slot(sp));
 // translucencyMul 0.6: at the field default (1.1) the date palms read pale lime.
 Object.assign(man.susuki.field, { translucencyMul: 0.6, density: 0.1, clumping: 0.35, clumpSize: 12, lodDistance: 90, lodDistance2: 200, fadeStart: 330, fadeEnd: 420, shadowDistance: 35 });
 GROUND.forEach((sp, i) => { man.foliagePlants[i] = slot(sp, sp.look ?? {}); });
+// Wind ON for the ground plants (the engine ships it off, "judged at rest"):
+// reeds, oleander and tamarisk stood frozen while the flags flew (you saw it).
+man.foliageField = { ...(man.foliageField ?? {}), windMul: 1, flutter: 0.5 };
 Object.assign(man.foliageField, { density: 0.45, lodDistance: 70, lodDistance2: 170, fadeStart: 300, fadeEnd: 380 });
 
 const tall = paintMap(512, 1, TALL);

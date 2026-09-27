@@ -663,6 +663,43 @@ function _mergeClipmapGeometries(geos) {
   return geo;
 }
 
+/**
+ * DRAW THE CLIPMAP NEAREST-FIRST. The rings were emitted row by row (+Z, then
+ * +X within a row), so looking toward -Z or -X the ground went down BACK TO
+ * FRONT: every nearer ridge re-shaded pixels already shaded behind it, and the
+ * paint shader is the dearest thing on screen. MEASURED 2026-09-27 on
+ * alg-aures' hills, same spot, four headings: 7.6 / 6.8 ms facing -Z / -X,
+ * 1.05 ms facing +X / +Z.
+ *
+ * The clipmap is centred on the camera, and along any view ray over a
+ * heightfield the ground that hides something is horizontally NEARER the
+ * camera than what it hides — so sorting triangles by distance from the
+ * centre is front-to-back for every heading at once. One order, built once
+ * (bucket sort, O(n)), nothing per frame.
+ */
+function _sortNearFirst(indices, positions) {
+  const tris = indices.length / 3;
+  const key = new Float32Array(tris);
+  let maxK = 0;
+  for (let t = 0; t < tris; t++) {
+    let x = 0, z = 0;
+    for (let k = 0; k < 3; k++) { const v = indices[t * 3 + k] * 3; x += positions[v]; z += positions[v + 2]; }
+    const d = Math.hypot(x / 3, z / 3);
+    key[t] = d;
+    if (d > maxK) maxK = d;
+  }
+  const B = 8192, scale = (B - 1) / Math.max(maxK, 1e-6);
+  const start = new Uint32Array(B + 1);
+  for (let t = 0; t < tris; t++) start[((key[t] * scale) | 0) + 1]++;
+  for (let b = 0; b < B; b++) start[b + 1] += start[b];
+  const out = new Uint32Array(indices.length);
+  for (let t = 0; t < tris; t++) {
+    const dst = start[(key[t] * scale) | 0]++ * 3;
+    out[dst] = indices[t * 3]; out[dst + 1] = indices[t * 3 + 1]; out[dst + 2] = indices[t * 3 + 2];
+  }
+  return out;
+}
+
 export function createTerrainLOD(
   heightTexNode, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
   // The 9th positional argument used to be `groundProc` (Procedural Ground,
@@ -682,6 +719,8 @@ export function createTerrainLOD(
   }
   const geometry = _mergeClipmapGeometries(parts);
   for (const g of parts) g.dispose();
+  geometry.setIndex(new THREE.BufferAttribute(
+    _sortNearFirst(geometry.index.array, geometry.attributes.position.array), 1));
 
   // ONE uniform and ONE material for the whole clipmap. update() always wrote
   // the same centre into all five, and every level was built from identical

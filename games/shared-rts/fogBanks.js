@@ -318,6 +318,11 @@ export function createFogBanks({ app, params = {}, storeKey = DEFAULT_STORE }) {
 
   /** Mode and steps are baked into the shader: the game rebuilds the post hook. */
   let onRebuild = null;
+  // Called when the banks are switched on or off, so a game can drop the
+  // whole post hook while they are off: the volume pass is a half-res RTT that
+  // otherwise renders every frame for nothing (MEASURED ~3.6% of the frame in
+  // alg-rts, 2026-09-27).
+  let onToggle = null;
   const rebuild = () => onRebuild?.();
   const save = () => {
     try {
@@ -333,6 +338,7 @@ export function createFogBanks({ app, params = {}, storeKey = DEFAULT_STORE }) {
     get banks() { return banks; },
     /** The game hands in how to rebuild its post hook (mode / steps changes). */
     set onRebuild(fn) { onRebuild = fn; },
+    set onToggle(fn) { onToggle = fn; },
     /** One bank's own density (per metre at its heart). */
     setBankDensity(i, v) {
       const b = banks[i];
@@ -374,7 +380,7 @@ export function createFogBanks({ app, params = {}, storeKey = DEFAULT_STORE }) {
       if (key === "density") uDensity.value = value;
       if (key === "drift") uDrift.value = value;
       if (key === "wisps") uWisps.value = value;
-      if (key === "enabled") uEnabled.value = value ? 1 : 0;
+      if (key === "enabled") { uEnabled.value = value ? 1 : 0; onToggle?.(!!value); }
       if (key === "scale") sizeVolume();
       if (key === "height" || key === "size") sync();
       if (!quiet && (key === "mode" || key === "steps")) rebuild();

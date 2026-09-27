@@ -329,7 +329,11 @@ export async function placeShowroom(app, list = SHOWROOM) {
   placed.flags = flags;
   // One wind for the flags and the windsock (algWind.js).
   const wind = createWind();
-  wind.onChange((w) => { for (const f of flags) f.setWind(w.dirDeg, w.strength); });
+  wind.onChange((w) => {
+    for (const f of flags) f.setWind(w.dirDeg, w.strength);
+    // The plants too (grass, trees, reeds, oleander): one wind on screen.
+    app.setWind?.({ angleDeg: w.dirDeg, strength: 0.3 + 2.2 * w.strength, gust: 0.15 + 0.6 * w.gust });
+  });
   const socks = [];
   for (const e of list) {
     const o = placed[e.key], spec = o?.geometry?.userData?.windsock;

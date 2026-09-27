@@ -606,7 +606,9 @@ export class FoliageScatterSystem {
     name = "Foliage", typeCount = FOLIAGE_TYPE_COUNT, nearFade = 0.9,
     terrainSurface = null,
     variants = 1,   // shape variants per type (ScatterField)
+    depthPrepass = false,   // cut-out cards: depth first, shade each pixel once (see _prepass)
   }) {
+    this._depthPrepass = !!depthPrepass;
     // Foliage runs 8 types on a 192 m tile; susuki runs this same system with
     // one type on a 400 m tile so its fields stay visible to ~195 m.
     this.typeCount = typeCount;
@@ -673,6 +675,42 @@ export class FoliageScatterSystem {
       }
       return this._cardMats[key];
     };
+    /**
+     * DEPTH PRE-PASS FOR CUT-OUT CARDS. A card's shape is cut from its
+     * texture with a discard, and a shader that can discard switches off the
+     * GPU's early depth test for its whole draw: every card hidden behind the
+     * front ones was still fully lit before being covered. MEASURED
+     * 2026-09-27, alg-rts cedar massif, 1919x888: cedars ~12 ms of a 19 ms
+     * scene.
+     *
+     * So a card mesh draws twice: a depth-only copy that keeps the discard
+     * (cheap: no lighting runs for it), then the colour pass WITHOUT the
+     * discard, depth-tested EQUAL — each visible pixel shaded exactly once,
+     * and the cut-out edges come from the depth the first pass left. The
+     * depth pass is UNLIT and shares the colour pass's position node, so the
+     * depths match. MEASURED after: cedar view 19.1 → 6.4 ms, image identical.
+     */
+    this._prepassMats = {};
+    this._prepassFor = (key) => {
+      if (!this._prepassMats[key]) {
+        const base = this._cardMat(key);
+        // UNLIT: a clone of the lit material still ran all its lighting with
+        // colour writes off (measured 17.8 ms vs 6.4 ms). Same position and
+        // cut-out nodes, so the depth matches the colour pass exactly
+        // (pixel diff against the original 0.002%, frozen plants).
+        const depth = new THREE.MeshBasicNodeMaterial({ side: base.side });
+        depth.positionNode = base.positionNode;
+        depth.opacityNode = base.opacityNode;
+        depth.colorWrite = false;
+        depth.name = `${base.name || "Foliage"}:depth`;
+        const colour = base.clone();
+        colour.opacityNode = null;
+        colour.depthFunc = THREE.EqualDepth;
+        colour.depthWrite = false;
+        this._prepassMats[key] = { depth, colour };
+      }
+      return this._prepassMats[key];
+    };
 
     field.attachMaterial(mat);
     for (let i = 0; i < typeCount; i++) this.rebuildType(i, fs.types[i]);
@@ -698,11 +736,33 @@ export class FoliageScatterSystem {
     });
     // Only the card-carrying plants pay for the alpha test.
     const cardKey = cardTextureOf(type.kind);
-    const mat = cardKey ? this._cardMat(cardKey) : this._mat;
+    const pre = cardKey && this._depthPrepass ? this._prepassFor(cardKey) : null;
+    const mat = cardKey ? (pre ? pre.colour : this._cardMat(cardKey)) : this._mat;
     for (let v = 0; v < this.field.variants; v++) {
-      for (let lod = 0; lod < FOLIAGE_LODS; lod++) this.field.meshes[this.field.meshIndex(i, lod, 0, v)].material = mat;
+      for (let lod = 0; lod < FOLIAGE_LODS; lod++) {
+        const m = this.field.meshes[this.field.meshIndex(i, lod, 0, v)];
+        m.material = mat;
+        // The depth copy: a CHILD, so it follows the mesh's position (moved
+        // with the field every frame) and visibility (unused types hide).
+        let d = m.children.find((c) => c.userData.depthPrepass);
+        if (pre) {
+          if (!d) {
+            d = new THREE.Mesh(m.geometry, pre.depth);
+            d.userData.depthPrepass = true;
+            d.name = m.name + ":depth";
+            d.frustumCulled = false;
+            d.castShadow = d.receiveShadow = false;
+            d.renderOrder = -1;   // before every colour draw
+            m.add(d);
+          }
+          d.geometry = m.geometry;
+          d.material = pre.depth;
+          d.count = m.count;
+        } else if (d) m.remove(d);
+      }
+      // The shadow pass keeps the cut-out material (its own depth test).
       const sh = this.field.shadowMeshes[this.field.shadowMeshIndex(i, 0, v)];
-      if (sh) sh.material = mat;
+      if (sh) sh.material = cardKey ? this._cardMat(cardKey) : mat;
     }
   }
 

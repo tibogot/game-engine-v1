@@ -23,6 +23,13 @@ detail note below if it needs one). Tick here when done.
       windscreen; a crewman bug — legs beside his torso when turned).
 
 ### A. Quick wins — reuse what now exists
+0. [ ] **REMINDER (you, 2026-09-27): try the FOLIAGE DEPTH PRE-PASS here.**
+       Built for alg-rts: cut-out leaf cards (palms, jungle, ferns) turn off
+       the GPU's early depth test, so every hidden card is fully lit. The fix
+       is one boot option: `startV3App({ foliageDepthPrepass: true })` in
+       namGame.js. In alg-rts it took the cedar massif 20.7 → 6.6 ms with an
+       identical image. Measure nam's jungle views before/after (30 renders
+       back to back, ONE tab), check the image, then keep it.
 1. [ ] Cooking-fire smoke over the HAMLET (the "hearth" smoke kind)
 2. [ ] The Front's camp LIVED IN: idle men cooking, cleaning rifles, on guard (unitRenderer.addStaticFigures, like the temple watchers)
 3. [ ] SUN GLINTS on water: the ripple-crest version back for your look (paddies after) — detail: WILDLIFE › SUN GLINTS
