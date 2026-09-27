@@ -16,6 +16,7 @@ import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalf
 import { createAlgProducer, createStructuresRenderer } from "./algProducer.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { createAlgCombat } from "./algCombat.js";
+import { createAlgAI } from "./algAI.js";
 import { VIEW_YAW } from "./layout.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
 import { createHudBar } from "./ui/hudBar.js";
@@ -235,9 +236,18 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   });
   app.algCombat = combat;
 
+  // THE ALN (algAI.js): bands out of the cave, ambushes where the French are
+  // thin, back into the cave before the armour comes. ?ai=0 = without.
+  const cave = producers.find((p) => p.structure.typeKey === "caveEntrance");
+  const postP = producers.find((p) => p.structure.typeKey === "post");
+  const ai = cave && new URLSearchParams(location.search).get("ai") !== "0"
+    ? createAlgAI(app, { units, cave, post: postP?.centre ?? muster, caveMouth: cave.outside })
+    : null;
+  app.algAI = ai;
+
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
-    sim.advance(dt, (d) => { for (const p of producers) p.update(d); units.update(d); combat.step(d, sim.simTime); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); units.update(d); combat.step(d, sim.simTime); });
     combat.frame(dt);
     healthBars.begin();
     selectionRings.begin();
@@ -252,5 +262,5 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     minimap.draw();
   });
 
-  return { navGrid, units, unitRenderer, selection, sim, stamped, vehicles, hud, unitBar, commandCard, minimap, controlGroups, combat };
+  return { navGrid, units, unitRenderer, selection, sim, stamped, vehicles, hud, unitBar, commandCard, minimap, controlGroups, combat, ai };
 }

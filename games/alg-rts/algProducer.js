@@ -120,6 +120,8 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
 
   return {
     structure, update, centre, markSelected, mesh,
+    /** World points: where a unit appears, and where it is out (the AI sends the ALN back to the cave's). */
+    inside, outside,
     get gateOpen() { return leaves.some((l) => Math.abs(l.rotation.y) > 0.05); },
   };
 }

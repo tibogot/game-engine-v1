@@ -148,7 +148,14 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     const aln = panel.section("ALN");
     aln.button("Send out a band (5)", () => { for (let i = 0; i < 5; i++) cave.structure.enqueue("moudjahid"); });
     aln.button("Go to the cave", () => { rtsCamera.focusOn(cave.centre.x, cave.centre.z); rtsCamera.setZoom?.(0.12); });
-    aln.hint("The enemy's cave mouth: a fighter every 4 s walks out of the dark. Here until the ALN's AI does the queueing.");
+    const ai = app.algAI;
+    if (ai) {
+      aln.toggle("AI on", { get: () => ai.enabled, set: (v) => ai.setEnabled(v) });
+      aln.button("A band now (AI)", () => ai.bandNow());
+      // The bands and what they are doing; the label is the readout.
+      aln.button("Bands: (click to read)", (b) => { b.textContent = `Bands: ${ai.describe()}`; });
+    }
+    aln.hint("The katiba (algAI.js): a band gathers at the cave, finds French troops out in the open, hides 40-65 m from them in scrub or on high ground holding its fire, opens up when they come within 32 m, and runs back into the cave after 12-22 s — sooner if it loses 40% or armour comes near.");
   }
 
   // ── Navigation (the shared nav grid; N toggles it too, as in nam) ───────

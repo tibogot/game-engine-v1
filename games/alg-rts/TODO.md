@@ -159,8 +159,34 @@ lift off the pad; the ALN comes out of the cave mouth.
          before any fighter, 122 with both crowds live).
    - [ ] Measure one crowd's GPU ms with the tab FOCUSED (the numbers taken
          here were poisoned: an empty queue took 46 ms in a background tab).
-   - [ ] The ALN AI that queues at the cave and moves the bands — NEXT
-         (combat is in, 4g). Hit and run, not nam's AI.
+   - [x] THE ALN AI (2026-09-28, algAI.js) — hit and run, this game's own.
+         A band GATHERS at the cave (4-7, the cave's queue), picks French
+         troops out in the OPEN (away from the post first), finds an AMBUSH
+         spot 40-65 m from them on its own side (scrub, tall plants, high
+         ground), APPROACHES holding fire, WAITS until they come within 32 m
+         (or goes in after a minute if they are near), STRIKES 12-22 s,
+         breaks off at 40% losses or French armour within 55 m, WITHDRAWS
+         holding fire into the cave mouth and goes to ground (they vanish;
+         they count toward the next band). First band ~45 s, then every
+         80-140 s, max 18 fighters out. Dev → ALN: AI on, a band now, bands
+         readout. ?ai=0 = without.
+         Measured (headless, 240 s sim): a 6-man band gathered in 27 s,
+         lay up 40-65 m from a 4-man patrol, went in after its minute,
+         killed the patrol in ~6 s losing one, withdrew; a second band
+         was lying in wait, a third gathering.
+         Fixed on the way: a man stuck without a route dragged the band's
+         CENTRE 100 m back and it never "arrived" — arrival is now 60% of
+         the band at the spot; a straggler is re-ordered once, then sent
+         home.
+   - [ ] **you, look / taste**: the ambush in real time (Dev → ALN → "A band
+         now", send a few appelés out toward the cave). Balance: a 4-man
+         patrol lasted ~6 s — the numbers are still nam's.
+   - [ ] They vanish at the mouth's threshold, not inside it: walk in (a
+         ghost walk into the tunnel, as `emerge` backwards).
+   - [ ] With no French out in the open they harass the post (ambush spots
+         60 m+ from it): mines on the track and hamlets (SAS) instead.
+   - [ ] Routes: bands go straight at their spot; hug the gullies and scrub
+         (a path cost for exposure) — the approach IS the ambush.
 4g. [x] COMBAT (2026-09-27, algCombat.js). nam's fighting machinery moved to
        games/shared-rts (nam keeps re-export shims): combat.js (acquire,
        chase, fire, damage, death; "a man on foot" now reads `type.foot`,

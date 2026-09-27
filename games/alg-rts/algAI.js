@@ -1,0 +1,266 @@
+// THE ALN — this game's enemy commander. NOT nam's AI: the katiba does not
+// hold ground or trade blows with the post. It strikes where the French are
+// thin and is gone before they can answer:
+//
+//   GATHER    the cave sends men out (its producer's queue) until a band of
+//             4-7 stands at the rally;
+//   APPROACH  it picks French troops out in the OPEN — away from the post
+//             first — and an AMBUSH SPOT 40-65 m from them on its own side:
+//             scrub and tall plants to hide in, higher ground better. It
+//             moves there HOLDING FIRE (a muzzle flash would give it away);
+//   AMBUSH    it waits, still, until the French walk within 32 m — or, after
+//             a minute of nothing, goes in anyway if they are near, or
+//             re-plans;
+//   STRIKE    fire, for 12-22 s. It breaks off early when it has lost 40% of
+//             its men or when French ARMOUR comes within 55 m;
+//   WITHDRAW  holding fire (it runs, it does not stop to shoot), back into
+//             the cave mouth, where the survivors go to ground: they vanish,
+//             and count toward the next band.
+//
+// The pace: the first band after ~45 s, then one every 80-140 s, never more
+// than 18 fighters out at once. Orders, paths and the fighting are the shared
+// machinery (units.orderTo, navGrid, combat.js's holdFire).
+
+const P = {
+  firstBandAt: 45,
+  bandEvery: [80, 140],
+  bandSize: [4, 7],
+  maxLive: 18,
+  ambushRing: [40, 65],       // metres from the target group
+  trigger: 32,                // French this close to the band: open fire
+  waitMax: 60,                // seconds in ambush before going in or re-planning
+  strikeTime: [12, 22],
+  breakLoss: 0.4,             // share of the band lost: break off
+  armourNear: 55,             // French armour this close: break off
+  postKeepOff: 60,            // French within this of the post count as "at home"
+  replanEvery: 10,
+};
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+
+/**
+ * @param {object} app
+ * @param {object} o
+ * @param {object} o.units      the shared units
+ * @param {object} o.cave       the cave's producer (algProducer.js)
+ * @param {{x:number,z:number}} o.post   the French post's centre
+ * @param {{x:number,z:number}} o.caveMouth  where fighters go to ground (world)
+ */
+export function createAlgAI(app, { units, cave, post, caveMouth }) {
+  const bands = [];
+  let t = 0, nextBand = P.firstBandAt, enabled = true, pool = 0;
+  const inBand = new Set();
+  const homebound = new Set();   // men sent back to the cave on their own (stragglers)
+
+  /** Into the cave mouth: gone to ground. He counts toward the next band. */
+  function goToGround(u) {
+    u.alive = false; u.vanished = true; inBand.delete(u); homebound.delete(u); pool++;
+    app.selection?.remove?.(u);
+  }
+
+  const alive = (b) => b.members.filter((u) => u.alive);
+  const centre = (list) => {
+    let x = 0, z = 0;
+    for (const u of list) { x += u.position.x; z += u.position.z; }
+    return { x: x / Math.max(1, list.length), z: z / Math.max(1, list.length) };
+  };
+  const french = () => units.list.filter((u) => u.alive && u.team === "player");
+  const liveFighters = () => units.list.filter((u) => u.alive && u.team === "enemy").length;
+
+  /** Concealment round a spot: scrub (ground foliage) and tall plants, 0-2. */
+  function cover(x, z) {
+    let s = 0;
+    for (const [dx, dz] of [[0, 0], [5, 0], [-5, 0], [0, 5], [0, -5]]) {
+      s += (app.sampleFoliageDensity?.(x + dx, z + dz) ?? 0) + (app.sampleTallPlantDensity?.(x + dx, z + dz) ?? 0);
+    }
+    return s / 5;
+  }
+
+  /** The French to hit: a group out in the open, away from the post first. */
+  function pickTarget(from) {
+    const fr = french().filter((u) => !u.isAir);
+    if (!fr.length) return null;
+    const outside = fr.filter((u) => dist(u.position, post) > P.postKeepOff);
+    const pool2 = outside.length ? outside : fr;
+    let best = null, bestD = Infinity;
+    for (const u of pool2) { const d = dist(u.position, from); if (d < bestD) { bestD = d; best = u; } }
+    // The group round that man.
+    const group = pool2.filter((u) => dist(u.position, best.position) < 25);
+    return { lead: best, at: centre(group), size: group.length };
+  }
+
+  /**
+   * An ambush spot for a band at `from` on a target at `tgt`: a ring round the
+   * target, on the band's side (±70°), open for men on foot, scored for cover
+   * and height. Never inside the post's reach.
+   */
+  function ambushSpot(from, tgt) {
+    const base = Math.atan2(from.z - tgt.z, from.x - tgt.x);
+    const gy = app.getWorldHeight(tgt.x, tgt.z);
+    let best = null, bestS = -Infinity;
+    for (let i = 0; i < 28; i++) {
+      const a = base + rand(-1.2, 1.2), r = rand(...P.ambushRing);
+      const x = tgt.x + Math.cos(a) * r, z = tgt.z + Math.sin(a) * r;
+      if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
+      if (dist({ x, z }, post) < P.postKeepOff) continue;
+      const s = cover(x, z) * 2 + Math.max(-1, Math.min(1, (app.getWorldHeight(x, z) - gy) / 15)) - r / 200;
+      if (s > bestS) { bestS = s; best = { x, z }; }
+    }
+    return best;
+  }
+
+  /** Orders the band to `to`, spread out a little (a loose file, not a knot). */
+  function moveBand(b, to) {
+    const m = alive(b);
+    m.forEach((u, i) => {
+      const a = (i / Math.max(1, m.length)) * Math.PI * 2;
+      const r = i === 0 ? 0 : 2.5 + (i % 2) * 1.5;
+      u.orderTo(to.x + Math.cos(a) * r, to.z + Math.sin(a) * r);
+    });
+  }
+
+  const holdFire = (b, on) => { for (const u of b.members) u.holdFire = on; };
+
+  function newBand() {
+    const size = Math.round(rand(...P.bandSize));
+    const room = P.maxLive - liveFighters();
+    const n = Math.min(size, room);
+    if (n < 3) return;
+    for (let i = 0; i < n; i++) cave.structure.enqueue("moudjahid");
+    bands.push({ state: "gather", size: n, members: [], t: 0, start: 0 });
+  }
+
+  function setState(b, s) { b.state = s; b.t = 0; }
+
+  function stepBand(b, dt) {
+    b.t += dt;
+    const m = alive(b);
+    switch (b.state) {
+      case "gather": {
+        // Men out of the cave, standing (not still walking out), in no band.
+        for (const u of units.list) {
+          if (b.members.length >= b.size) break;
+          if (!u.alive || u.team !== "enemy" || inBand.has(u) || u.ghost || u.isMoving) continue;
+          if (u.typeKey !== "moudjahid") continue;
+          b.members.push(u); inBand.add(u);
+        }
+        if (b.members.length >= b.size || (b.t > 40 && b.members.length >= 3)) {
+          b.start = b.members.length;
+          holdFire(b, true);
+          plan(b);
+        }
+        break;
+      }
+      case "approach": {
+        if (!m.length) return setState(b, "done");
+        // Arrived when most of the band is there — not the average: one man
+        // stuck on the way (no route) dragged the band's centre 100 m back
+        // and it never arrived (measured).
+        const there = m.filter((u) => dist(u.position, b.spot) < 12);
+        if (there.length >= Math.ceil(m.length * 0.6)) {
+          for (const u of m) {
+            if (there.includes(u)) { u.haltMovement(); continue; }
+            // A straggler: once more toward the band; stuck again, he leaves it
+            // for the cave (he is no use to an ambush 500 m away).
+            if (u.isMoving) continue;
+            if (!u.retried) { u.retried = true; u.orderTo(b.spot.x, b.spot.z); }
+            else { b.members.splice(b.members.indexOf(u), 1); inBand.delete(u); u.holdFire = true; homebound.add(u); u.orderTo(caveMouth.x, caveMouth.z); }
+          }
+          setState(b, "ambush");
+          break;
+        }
+        // Everyone stopped short (no route for anyone): try another spot.
+        if (b.t > 20 && m.every((u) => !u.isMoving)) { plan(b); break; }
+        // The French moved on: a new spot every few seconds.
+        if (b.t > P.replanEvery && b.target && dist(b.target.lead.position, b.target.at) > 35) plan(b);
+        break;
+      }
+      case "ambush": {
+        if (!m.length) return setState(b, "done");
+        // The centre of the men AT the spot (a late straggler still walking in
+        // is not where the ambush is).
+        const near = m.filter((u) => dist(u.position, b.spot) < 15);
+        const c = centre(near.length ? near : m);
+        const close = french().some((u) => !u.isAir && dist(u.position, c) < P.trigger);
+        if (close) { strike(b); break; }
+        if (b.t > P.waitMax) {
+          const tg = pickTarget(c);
+          if (tg && dist(tg.at, c) < 80) { strike(b); for (const u of m) u.orderTo(tg.at.x, tg.at.z); }
+          else plan(b);
+        }
+        break;
+      }
+      case "strike": {
+        const lost = 1 - m.length / Math.max(1, b.start);
+        const c = centre(m);
+        const armour = french().some((u) => !u.type?.foot && !u.isAir && dist(u.position, c) < P.armourNear);
+        if (!m.length) return setState(b, "done");
+        if (b.t > b.strikeFor || lost >= P.breakLoss || armour) withdraw(b);
+        break;
+      }
+      case "withdraw": {
+        if (!m.length) return setState(b, "done");
+        // Into the mouth: gone to ground. They count toward the next band.
+        for (const u of m) if (dist(u.position, caveMouth) < 5) goToGround(u);
+        if (!alive(b).length) setState(b, "done");
+        else if (b.t > 90) for (const u of alive(b)) u.orderTo(caveMouth.x, caveMouth.z);   // stragglers
+        break;
+      }
+    }
+  }
+
+  function plan(b) {
+    const m = alive(b);
+    const c = centre(m);
+    const tg = pickTarget(c);
+    if (!tg) { setState(b, "gather"); b.t = 0; return; }   // nobody to hit: wait at the rally
+    const spot = ambushSpot(c, tg.at);
+    if (!spot) { withdraw(b); return; }
+    b.target = tg; b.spot = spot;
+    holdFire(b, true);
+    moveBand(b, spot);
+    setState(b, "approach");
+  }
+
+  function strike(b) {
+    holdFire(b, false);
+    b.strikeFor = rand(...P.strikeTime);
+    setState(b, "strike");
+  }
+
+  function withdraw(b) {
+    holdFire(b, true);
+    for (const u of alive(b)) { u.attackTarget = null; u.target = null; u.orderTo(caveMouth.x, caveMouth.z); }
+    setState(b, "withdraw");
+  }
+
+  return {
+    params: P,
+    get bands() { return bands; },
+    get enabled() { return enabled; },
+    setEnabled(v) { enabled = !!v; },
+    /** On the fixed sim clock. */
+    step(dt) {
+      t += dt;
+      for (const u of homebound) { if (!u.alive) homebound.delete(u); else if (dist(u.position, caveMouth) < 5) goToGround(u); }
+      for (let i = bands.length - 1; i >= 0; i--) {
+        stepBand(bands[i], dt);
+        if (bands[i].state === "done") { for (const u of bands[i].members) inBand.delete(u); bands.splice(i, 1); }
+      }
+      if (!enabled) return;
+      nextBand -= dt;
+      if (nextBand <= 0) {
+        nextBand = rand(...P.bandEvery) * (pool > 6 ? 0.7 : 1);
+        if (pool > 0) pool = Math.max(0, pool - 4);
+        newBand();
+      }
+    },
+    /** Dev: a band now. */
+    bandNow() { newBand(); },
+    /** Dev: what each band is doing. */
+    describe() {
+      return bands.map((b) => `${b.state} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
+    },
+  };
+}
