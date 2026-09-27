@@ -76,6 +76,7 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
   const z0 = -((rows - 1) * rowStep) / 2;
   const mosqueRow = Math.floor(rows / 2);
   let mosqueDone = false;
+  let nest = null;       // the stork's nest on the minaret: where its bird stands
   const houses = [];
   for (let r = 0; r < rows; r++) {
     const zr = z0 + r * rowStep + (R() - 0.5) * 0.8;
@@ -105,6 +106,18 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
         parts.push({ geo: buildBox(1.2, 1.4, 1.2), pos: [mx, my + MH + 0.95, mz], mat: MAT.white, tone: 0.66 });
         parts.push({ geo: buildBox(1.45, 0.14, 1.45), pos: [mx, my + MH + 1.72, mz], mat: MAT.white, tone: 0.55 });
         parts.push(wirePart([mx, my + MH + 1.79, mz], [mx, my + MH + 2.6, mz], 0.03, { tone: 0.3 }));
+        // A STORK'S NEST on the lantern roof, round the finial (they build on
+        // minarets all over the Maghreb): a bowl of sticks, sunk a little into
+        // the slab (no shared face), more sticks radiating out of its rim. The
+        // stork itself is the game's bird (userData.nest → rtsBirds perch).
+        const ny = my + MH + 1.76, RN = rng(seed + 77);   // its own stream: the village after it unchanged
+        parts.push({ geo: new THREE.CylinderGeometry(0.6, 0.46, 0.22, 10), pos: [mx, ny + 0.11, mz], mat: MAT.timber, tone: 0.16 });
+        for (let k = 0; k < 14; k++) {
+          const a = (k / 14) * Math.PI * 2 + RN() * 0.3, a2 = a + 0.9 + RN() * 0.5;
+          const r0 = 0.3 + RN() * 0.15, r1 = 0.62 + RN() * 0.22, y0 = ny + 0.14 + RN() * 0.08;
+          parts.push(wirePart([mx + Math.cos(a) * r0, y0, mz + Math.sin(a) * r0], [mx + Math.cos(a2) * r1, y0 + (RN() - 0.3) * 0.12, mz + Math.sin(a2) * r1], 0.022, { mat: MAT.timber, tone: 0.2 + RN() * 0.12 }));
+        }
+        nest = [mx + 0.22, ny + 0.22, mz];
         for (const [ox, oz] of [[0, -1.12], [-1.12, 0]]) parts.push({ geo: buildBox(ox ? 0.05 : 0.35, 0.9, oz ? 0.05 : 0.35), pos: [mx + ox, my + MH - 1.6, mz + oz], mat: MAT.steel, tone: 0.02 });
         houses.push({ x: cx, z: cz, mosque: true });
         x += w + 3.5;
@@ -138,6 +151,8 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
   for (const hs of houses) bb.expandByPoint(new THREE.Vector3(hs.x, 0, hs.z));
   const geo = finish(parts, { hx: width / 2 + 4, hz: (rows * rowStep) / 2 + 3, cx: 0, cz: 0, height: 14 });
   geo.userData.houses = houses.map((h) => ({ x: h.x * 1.3, z: h.z * 1.3, mosque: !!h.mosque }));
+  // The nest's floor, in the piece's frame (scaled): a game stands its stork there.
+  geo.userData.nest = nest ? { x: nest[0] * 1.3, y: nest[1] * 1.3, z: nest[2] * 1.3 } : null;
   return geo;
 }
 

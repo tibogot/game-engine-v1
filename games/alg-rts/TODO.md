@@ -186,8 +186,30 @@ lift off the pad; the ALN comes out of the cave mouth.
       blanket, a wooden saddle, woven baskets and jars hung on the flanks,
       a bridle with tassels and a lead rope). Rigid pieces on the back /
       neck bones, one draw per animal; variants: caravan, pack, ridden.
-- [ ] Goat and sheep herds with a shepherd (need models), dogs, storks on
-      the minaret/koubba, vultures (nam's bird system).
+- [ ] Goat and sheep herds with a shepherd (need models), dogs.
+- [x] **BIRDS** (2026-09-27, algBirds.js). nam's bird system moved to
+      games/shared-rts: rtsBirds.js (flocks, stands, flushes, circling,
+      one draw + one for the shadows) and birdKit.js (the shape pieces);
+      each game passes its own species. nam's wrapper keeps nam identical
+      (its bird geometry fingerprint unchanged; 21 birds live after).
+      Sand & Blood's: WHITE STORKS (white, black flight feathers, the neck
+      held out, red bill and legs) crossing in loose Vs and landing in the
+      open fields and at the oasis (382 open spots found — this map is
+      open); CROWS; GRIFFON VULTURES (2.6 m, tawny, six fingers, gliding
+      9/10) circling for good 42-52 m up (the camera is 9-110 m: at 80-100
+      they were above it, never seen) over the katiba, the Kef and
+      the cedar spring; a STORK'S NEST on the dechra's minaret (a twig bowl
+      round the finial, part of the dechra: no extra draw) with the pair on
+      it, one standing, one brooding. Birds lift off for men on foot, jeeps,
+      helicopters (the shared threat test now reads `type.foot`).
+   - [ ] **you, look**: storks crossing (Dev: `__ALG.algBirds.spawnTransit("stork")`),
+         the minaret nest, the vultures over the katiba.
+   - [ ] Sparrow flocks bursting out of the gardens and palms (a small
+         species; flushed by shots once combat exists — `birds.flush`).
+   - [ ] At close zoom a flock can fly at the camera's height and a bird
+         pass the lens (cruise 20-32 m): cap the cruise under the camera.
+   - [ ] Storks on the koubba and the SAS post roof too, and a mate that
+         circles the nest now and then.
 
 ## FILLING THE MAP — foliage first, then villages (started 2026-09-27)
 

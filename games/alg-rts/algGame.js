@@ -17,6 +17,7 @@ import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
+import { createAlgBirds } from "./algBirds.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -152,6 +153,20 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       showroom: app.showroom,
       muster: { x: b.x - Math.sin(yaw) * 42, z: b.z - Math.cos(yaw) * 42, yaw },
     });
+  }
+  // BIRDS (algBirds.js, the shared engine): storks crossing and landing in
+  // the open, crows, a stork on the minaret's nest, griffon vultures on the
+  // thermals over the djebel — over the katiba's heights and the Kef. ?birds=0 = without.
+  if (params.get("birds") !== "0") {
+    const at = (kind, name) => LAYOUT.sites.find((s) => s.kind === kind && (!name || s.name === name));
+    const soar = [at("aln"), at("point", "Kef lookout"), at("point", "Cedar spring")].filter(Boolean)
+      // 42-52 m up: the RTS camera sits 9-110 m above the ground (zoom 0-1);
+      // at 80-100 they circled ABOVE it and were never seen. From a play
+      // zoom (0.5+) they read as high, wheeling shapes.
+      .map((s, i) => ({ x: s.x, z: s.z, n: 3 + (i % 2), r: 55 + i * 12, alt: 42 + i * 5 }));   // a flock needs 3 (rtsBirds)
+    try {
+      app.algBirds = createAlgBirds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom, soarOver: soar });
+    } catch (e) { console.warn("[alg birds] failed:", e); }
   }
   // Dev controls (?dev=0 hides them).
   if (params.get("dev") !== "0") {

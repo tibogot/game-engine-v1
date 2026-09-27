@@ -151,6 +151,24 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     aln.hint("The enemy's cave mouth: a fighter every 4 s walks out of the dark. Here until the ALN's AI does the queueing.");
   }
 
+  // ── Birds (algBirds.js on the shared engine) ────────────────────────────
+  const birds = app.algBirds;
+  if (birds) {
+    const bs = panel.section("Birds");
+    bs.button("Storks cross the view", () => birds.spawnTransit("stork"));
+    bs.button("Crows cross the view", () => birds.spawnTransit("crow"));
+    bs.button("Storks land nearby", () => birds.spawnLanding());
+    const dechra = app.showroom?.dechra, nest = dechra?.geometry?.userData?.nest;
+    if (nest) bs.button("Go to the minaret nest", () => {
+      const p = dechra.localToWorld(dechra.position.clone().set(nest.x, nest.y, nest.z));
+      rtsCamera.focusOn(p.x, p.z); rtsCamera.setZoom?.(0.3);
+    });
+    const soar = birds.flocks.find((f) => f.circle);
+    if (soar) bs.button("Go to the vultures", () => { rtsCamera.focusOn(soar.circle.x, soar.circle.z); rtsCamera.setZoom?.(0.6); });
+    bs.toggle("Birds on", { get: () => birds.params.enabled, set: (v) => birds.setEnabled(v) });
+    bs.hint("Storks cross and land in the open, crows straggle, vultures circle the heights for good; a pair on the minaret's nest. Men, jeeps and helicopters put a stand up.");
+  }
+
   // ── Performance ─────────────────────────────────────────────────────────
   const perf = panel.section("Performance");
   perf.toggle("Stats overlay", { get: () => app.statsOverlay, set: (v) => app.setStatsOverlay?.(v) });
