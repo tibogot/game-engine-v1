@@ -18,6 +18,7 @@ import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
 import { createAlgBirds } from "./algBirds.js";
+import { createAlgHerds } from "./algHerds.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -169,6 +170,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       app.algBirds = createAlgBirds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom, soarOver: soar });
     } catch (e) { console.warn("[alg birds] failed:", e); }
+  }
+  // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,
+  // the dechra and the springs; they bolt from soldiers. ?herds=0 = without.
+  if (params.get("herds") !== "0") {
+    onStatus("Herding the flocks…");
+    try {
+      app.algHerds = await createAlgHerds(app, { units: app.algUnits?.units ?? null });
+    } catch (e) { console.warn("[alg herds] failed:", e); }
   }
   // Dev controls (?dev=0 hides them).
   if (params.get("dev") !== "0") {

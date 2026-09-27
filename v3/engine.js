@@ -69,6 +69,9 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/water/worldOceanV2.js",
   "v3/render/roads/wetRoad.js",
   "v3/props/liveProps.js",
+  // Animals reshaped from the pack's donkey (goat, sheep, camel) — the builder
+  // v3/sheep-lab.html tunes and the RTS herds place (a game places them)
+  "v3/props/animalMorph.js",
   // RTS object kit: structures built from the shared parts (a game places them)
   "v3/render/objects/rtsQuonset.js",
   "v3/render/objects/rtsFirebaseProps.js",

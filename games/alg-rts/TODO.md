@@ -232,7 +232,22 @@ lift off the pad; the ALN comes out of the cave mouth.
       blanket, a wooden saddle, woven baskets and jars hung on the flanks,
       a bridle with tassels and a lead rope). Rigid pieces on the back /
       neck bones, one draw per animal; variants: caravan, pack, ridden.
-- [ ] Goat and sheep herds with a shepherd (need models), dogs.
+- [x] **SHEEP AND GOAT FLOCKS** (2026-09-27, algHerds.js): mixed flocks
+      (~12 sheep + ~6 goats, lambs and kids among them) on 5 pastures —
+      both mechtas, the dechra's slope, both springs; outside the walls, the
+      water and 90 m from the post and the katiba; goats take steeper ground.
+      They graze, wander and BOLT from soldiers (the shared herd, as nam's
+      deer). The animals are the pack's donkey reshaped
+      (v3/props/animalMorph.js — the SAME builder the lab uses, so tuning in
+      v3/sheep-lab.html is what the game gets). 59 sheep + 28 goats, one GPU
+      crowd draw per kind; builds in ~4.5 s at boot. `?herds=0` = without.
+   - [ ] **you, look** at them in the game (colours under the Aurès sun: the
+         sheep is a Hamra-like white fleece with a red-brown face).
+   - [ ] Boot cost ~4.5 s: cache the built templates (or build them in a
+         worker) if load time matters.
+   - [ ] A shepherd with each flock (a man or a boy walking with it), dogs.
+   - [ ] The flock keeps together when it bolts (now each animal runs its
+         own way, like deer).
 - [x] **BIRDS** (2026-09-27, algBirds.js). nam's bird system moved to
       games/shared-rts: rtsBirds.js (flocks, stands, flushes, circling,
       one draw + one for the shadows) and birdKit.js (the shape pieces);
