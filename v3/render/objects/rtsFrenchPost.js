@@ -205,6 +205,9 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   const TW = 5, TH = 6.8;
   tower(parts, R, { x: -hl + TW / 2 - 1.0, z: -hl + TW / 2 - 1.0, W: TW, H: TH, seed: seed + 1 });
   tower(parts, R, { x: hl - TW / 2 + 1.0, z: hl - TW / 2 + 1.0, W: TW, H: TH, seed: seed + 2 });
+  // Where each tower's MG is (its breech, a metre over the roof): a game fires
+  // the post's guns from there (userData.towerGuns, scaled below).
+  const towerGuns = [-1, 1].map((sg) => [sg * (hl - TW / 2 + 1.0), TH + 1.0, sg * (hl - TW / 2 + 1.0)]);
 
   // ── The gatehouse ──────────────────────────────────────────────────────────
   const gH = 5.4, gW = gateW + 3.2, gD = 1.4;
@@ -360,5 +363,6 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   geo.userData.parts = { ...(geo.userData.parts ?? {}), gateLeft: gateLeaves[0].geo, gateRight: gateLeaves[1].geo };
   geo.userData.height = (poleH + 0.3) * S;
   geo.userData.size = { L: L * S, wall: H * S, tower: TH * S };
+  geo.userData.towerGuns = towerGuns.map((p) => p.map((v) => v * S));
   return geo;
 }

@@ -13,7 +13,8 @@ import { createSimClock } from "../shared-rts/simClock.js";
 import { createControlGroups } from "../shared-rts/controlGroups.js";
 import { ALG_UNIT_TYPES, ALG_UNIT_TYPE_KEYS } from "./algUnitTypes.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
-import { createAlgProducer, createStructuresRenderer } from "./algProducer.js";
+import { createAlgProducer } from "./algProducer.js";
+import { createAlgStructures } from "./algStructures.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { createAlgCombat } from "./algCombat.js";
 import { createAlgAI } from "./algAI.js";
@@ -186,6 +187,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     }));
   }
   app.algProducers = producers;
+  // Every building as a combat structure (algStructures.js): the producers
+  // and the placed emplacements — targets, and the armed ones fighters.
+  const structures = createAlgStructures({ app, showroom, producers, units });
+  app.algStructures = structures;
 
   // ── The HUD (this game's files, ./ui/) ─────────────────────────────────
   const hud = createHudBar();
@@ -214,7 +219,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   });
   let controlGroups = null;   // made after the selection it listens to
   const selection = createSelection({
-    app, units, unitRenderer, structuresRenderer: producers.length ? createStructuresRenderer(producers) : null,
+    app, units, unitRenderer, structuresRenderer: structures.renderer,
     onChange: (sel) => {
       unitBar.render(sel);
       commandCard.render(sel);
@@ -231,7 +236,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // enemies in range, close, fire visible rounds; the dead drop out of the
   // selection.
   const combat = await createAlgCombat(app, {
-    units,
+    units, structures,
     onDeath: (e) => { selection.remove?.(e); controlGroups?.render(); },
   });
   app.algCombat = combat;
@@ -253,7 +258,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     selectionRings.begin();
     selectionFrames.begin();
     unitRenderer.sync(dt, app.camera);
-    for (const p of producers) if (p.structure.selected) p.markSelected(selectionFrames);
+    structures.frame(dt, app.camera, healthBars, selectionFrames);
     healthBars.commit();
     selectionRings.commit();
     selectionFrames.commit();

@@ -54,7 +54,7 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
     progress: 0,
     setSelected(v) { structure.selected = !!v; },
     enqueue(key) {
-      if (structure.queue.length >= 8 || !builds[key]) return false;
+      if (!structure.alive || structure.queue.length >= 8 || !builds[key]) return false;
       structure.queue.push(key);
       return true;
     },
@@ -66,6 +66,8 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
 
   function update(dt) {
     t += dt;
+    // A wreck produces nothing (algStructures.js): its queue is lost.
+    if (!structure.alive) { structure.queue.length = 0; structure.progress = 0; return; }
     // Production: one unit at a time.
     if (structure.queue.length) {
       const key = structure.queue[0];

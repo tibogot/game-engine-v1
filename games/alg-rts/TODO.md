@@ -199,8 +199,24 @@ lift off the pad; the ALN comes out of the cave mouth.
        French scratched; a second band met by the vehicles' guns (fires,
        craters). nam after the move: loads, its soldiers kill 4 test
        enemies, no errors.
-   - [ ] Buildings as targets and fighters: damage, a wreck state, the
-         post's towers firing (they are not in `structures` yet).
+   - [x] BUILDINGS AT WAR (2026-09-28, algStructures.js): all ten placed
+         buildings are combat structures. French: the post (its two tower
+         MGs — rtsFrenchPost `userData.towerGuns` — each fires from the
+         tower nearer its target), motor pool, helipad, mirador (MG), MG
+         nest (the gun traverses), the 81 mm MORTAR PIT (arcs 25-120 m,
+         splash; cover does not help), searchlight. ALN: the cave, the arms
+         cache, the sangar (MG, traverses). A hit building shows its bar;
+         at 0 it goes up (blast, fire, crater) and stays a WRECK — charred
+         (its own darkened material), gun drooped, burning 30-60 s. A
+         wrecked producer stops and refuses orders (a dead cave = no bands).
+         Yours are selectable (brackets); the ALN's right-click to attack.
+         Tested: 6 ALN 34 m from the MG nest → the nest (11 bursts), the
+         mortar and the appelés killed them in 10 s; 8 ALN ordered at the
+         post → its towers fired 21 bursts (+ the Alouette, the armour),
+         the post took 24 damage; the arms cache wrecked (charred, burning).
+   - [ ] Portraits for the new structures (mirador, MG nest, mortar,
+         searchlight, cache, sangar) in structureThumbnails.js.
+   - [ ] A real wreck shape (roof fallen, walls broken) instead of charring.
    - [ ] Line of sight: guns fire over/through buildings (as in nam).
    - [ ] Cover and concealment, THIS game's rules (nam's cover.js is
          jungle): the djebel's rocks and walls as cover, scrub as
