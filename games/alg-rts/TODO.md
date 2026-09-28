@@ -737,6 +737,34 @@ Asset follow-ups:
       shrink, helicopters grounded. Candidates: the engine's fog + smoke
       flipbooks + a dust-particle layer.
 
+## ECONOMY — first cut in (2026-09-28, algEconomy.js), per the proposal below
+
+- [x] Two purses: the French **Ravitaillement** (start 400) and the ALN's
+      (start 240). Income: the French 40/min from Algiers + each village
+      they hold (mechta 25, dechra 40); the ALN 15/min + each village it
+      holds + 15/min per standing ARMS CACHE (burn them, the katiba starves).
+- [x] The VILLAGES (both mechtas, the dechra) are the points: an influence
+      meter −1…+1 that MEN ON FOOT within 40 m push their way (up to 3
+      count; both there, the stronger pushes), drifting to neutral when
+      nobody is there; held past ±0.6, lost back through 0. Tested: 4
+      appelés at Mechta Ouled Ali — 0.30 at 5 s, held at 10 s, income
+      40 → 65/min.
+- [x] Every unit COSTS, charged when queued, refused if the purse can't pay
+      (appelé 60, Willys 90, GMC 110, half-track 160, EBR 220, AMX-13 260,
+      Alouette 320; moudjahid 40 from the ALN purse — the AI's bands are
+      only as big as it can pay for, refunded if under 3).
+- [x] Shown: the supply strip (Ravitaillement · +/min · villages n/3 · ALN
+      n), prices on the production buttons (greyed when short), a ring
+      round each village in its holder's colour, the minimap's diamonds.
+- [ ] Not yet from the proposal: the Génie sapper and building placement,
+      tiers (motor pool → helipad → armour), the SAS post raising support,
+      the arms cache UNLOCKING MG / mortar / bazooka teams (it pays income
+      for now), militia (moussebilines) recruited in ALN villages, the
+      ALN purse named "Soutien" on screen.
+- [ ] The ALN AI does not fight for the villages yet (it only ambushes):
+      send bands to flip French-held villages back.
+- [ ] Balance: all numbers are first guesses.
+
 ## PROPOSAL — economy and base-building (2026-09-26, waiting for **you**)
 
 Shared core (nam's, moved to games/shared-rts): capture points held by

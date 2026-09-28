@@ -131,8 +131,17 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     const room = P.maxLive - liveFighters();
     const n = Math.min(size, room);
     if (n < 3) return;
-    for (let i = 0; i < n; i++) cave.structure.enqueue("moudjahid");
-    bands.push({ state: "gather", size: n, members: [], t: 0, start: 0 });
+    // Only the men the katiba can PAY for (algEconomy.js: the cave's queue
+    // charges the ALN purse): a band of however many that is, or none.
+    let paid = 0;
+    for (let i = 0; i < n; i++) if (cave.structure.enqueue("moudjahid")) paid++;
+    if (paid < 3) {
+      // Too few to be a band: take them off the queue and give the money back.
+      cave.structure.queue.length = Math.max(0, cave.structure.queue.length - paid);
+      app.algEconomy?.aln.earn(paid * (app.algEconomy.costs?.moudjahid ?? 40));
+      return;
+    }
+    bands.push({ state: "gather", size: paid, members: [], t: 0, start: 0 });
   }
 
   function setState(b, s) { b.state = s; b.t = 0; }

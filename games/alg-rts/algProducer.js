@@ -53,8 +53,11 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
     queue: [],
     progress: 0,
     setSelected(v) { structure.selected = !!v; },
+    /** Set by the economy (algEconomy.js): (key) → paid? Charged at QUEUE time. */
+    pay: null,
     enqueue(key) {
       if (!structure.alive || structure.queue.length >= 8 || !builds[key]) return false;
+      if (structure.pay && !structure.pay(key)) return false;       // can't afford it
       structure.queue.push(key);
       return true;
     },

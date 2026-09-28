@@ -20,7 +20,9 @@ import { createAlgCombat } from "./algCombat.js";
 import { createAlgAI } from "./algAI.js";
 import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
-import { VIEW_YAW } from "./layout.js";
+import { LAYOUT, VIEW_YAW } from "./layout.js";
+import { COSTS, createAlgEconomy } from "./algEconomy.js";
+import { createResourceHud } from "./ui/resourceHud.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
 import { createHudBar } from "./ui/hudBar.js";
 import { createUnitBar } from "./ui/unitBar.js";
@@ -209,6 +211,18 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const structures = createAlgStructures({ app, showroom, producers, units });
   app.algStructures = structures;
 
+  // THE ECONOMY (algEconomy.js): the villages are what both sides fight for;
+  // holding one pays; every unit is paid for when it is queued.
+  const economy = createAlgEconomy({
+    app, units, structures,
+    sites: LAYOUT.sites.filter((s) => s.kind === "hamlet" || s.kind === "dechra"),
+  });
+  app.algEconomy = economy;
+  for (const p of producers) p.structure.pay = (key) => economy.purses[p.structure.team].spend(COSTS[key] ?? 0);
+  // A faint ring round each village in its holder's colour (the shared ring
+  // field: a thin band on a big circle).
+  const villageRings = createSelectionRingField({ app, max: 8, inner: 0.975, segments: 96, opacity: 0.55 });
+
   // ── The HUD (this game's files, ./ui/) ─────────────────────────────────
   const hud = createHudBar();
   // The boot page's key-hint label sits where the bar goes.
@@ -230,7 +244,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       app.rtsCamera?.focusOn(sel.reduce((s, u) => s + u.position.x, 0) / sel.length, sel.reduce((s, u) => s + u.position.z, 0) / sel.length);
     },
     // What a selected structure produces (PRODUCTION), labelled by unit name.
-    productionFor: (s) => Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => ({ key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name })),
+    productionFor: (s) => Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => ({ key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: COSTS[key] ?? 0 })),
+    canAfford: (cost) => economy.french.canAfford(cost),
     onBuild: (s, key) => s.enqueue(key),
     mount: hud.right,
   });
@@ -247,7 +262,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.selection = selection;
   controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
   // The tactical map from the start: the post has its own radio mast.
-  const minimap = createMinimap({ app, units, fogOfWar, mount: hud.left, intel: () => true, upYaw: VIEW_YAW });
+  const minimap = createMinimap({ app, units, fogOfWar, requisition: economy, mount: hud.left, intel: () => true, upYaw: VIEW_YAW });
+  const resourceHud = createResourceHud({ mount: hud.strip });
 
   // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up
   // enemies in range, close, fire visible rounds; the dead drop out of the
@@ -274,7 +290,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
 
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); units.update(d); combat.step(d, sim.simTime); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); units.update(d); combat.step(d, sim.simTime); economy.step(d); });
     combat.frame(dt);
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.
@@ -286,6 +302,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     selectionFrames.begin();
     unitRenderer.sync(dt, app.camera);
     structures.frame(dt, app.camera, healthBars, selectionFrames);
+    villageRings.begin();
+    for (const v of economy.points) villageRings.add(v.position.x, v.position.z, economy.params.radius, v.owner === "player" ? 0x58a8ff : v.owner === "enemy" ? 0xff6a5a : 0xd8cfae);
+    villageRings.commit();
+    resourceHud.update(economy);
     healthBars.commit();
     selectionRings.commit();
     selectionFrames.commit();
