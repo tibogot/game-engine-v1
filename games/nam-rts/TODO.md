@@ -28,7 +28,11 @@ detail note below if it needs one). Tick here when done.
       windscreen; a crewman bug — legs beside his torso when turned).
 
 ### A. Quick wins — reuse what now exists
-0. [ ] **REMINDER (you, 2026-09-27): try the FOLIAGE DEPTH PRE-PASS here.**
+0. [x] DONE 2026-09-28: `foliageDepthPrepass` ON in namGame.js (`?prepass=0` to A/B).
+       Densest jungle (focusOn 160,320), reloads interleaved on/off/on/off, gpuAB:
+       16.9-17.8 → 11.3 ms, 45 fps → 60 fps; the boot view unchanged (7.0). Same image
+       (cloud shadows off: mean RGB within 1/255; the rest is wind sway). 33 depth meshes.
+       **REMINDER (you, 2026-09-27): try the FOLIAGE DEPTH PRE-PASS here.**
        Built for alg-rts: cut-out leaf cards (palms, jungle, ferns) turn off
        the GPU's early depth test, so every hidden card is fully lit. The fix
        is one boot option: `startV3App({ foliageDepthPrepass: true })` in
@@ -92,7 +96,11 @@ detail note below if it needs one). Tick here when done.
        file is the other session's — agree the fix with it. Separately the
        GPU reads ~2× slower than earlier this session at the same view
        (4.46 → 8.7 ms on the OLD build): heat or throttling, not code.
-31. [ ] Frame budget re-measured after this week's additions; the pond properly (gpuAB cannot time water toggles)
+31. [ ] Frame budget re-measured after this week's additions. BISECTED 2026-09-28 (boot camera
+       7,44,-416, gpuAB, same saved settings): Vercel build 782149d 5.2-5.4 ms → main 7.1-7.8 ms.
+       No single culprit: #2 rice terraces +0.8 (NOT the SSR: 0.06; not the terrace mesh; the
+       50k rice clumps ~0.3), then +0.2 / +0.25 / +0.4 / +0.5 spread over the next 60 commits.
+       Still 60 fps flat there (p95 16.8 ms). Price the rest per feature with toggles; the pond properly (gpuAB cannot time water toggles)
 32. [ ] Load time further (23.8 s)
 33. [ ] Long path searches 5-15 ms (hierarchical/cached) · staggered target acquisition (your call) · RTS-mode render budget (lens flare, underwater, far plane) · octahedral impostors (the question)
 34. [ ] The flaky test suite · cityKitTest flaky · the 4 overlapping enemy-camp pads · prop nav stamps use the bounding box · dead auto paint rules · passability overlay in the editor · buildSheetRoof bug · props as editor placeable types · the perimeter as editor splines

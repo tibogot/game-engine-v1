@@ -192,6 +192,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // Drifting cloud shade (engine cloudShadowsLite.js) is opt-in at boot:
     // it adds a texture to every lit material. Driven by cloudShadowsPanel.js.
     cloudShadows: true,
+    // Cut-out leaf cards (ferns, palm fronds, bamboo sprays) drawn depth-first,
+    // so each visible pixel is shaded once (engine foliageSystem.js _prepass;
+    // alg-rts's cedars 20.7 → 6.6 ms). Boot-only. `?prepass=0` to A/B.
+    foliageDepthPrepass: new URLSearchParams(location.search).get("prepass") !== "0",
     // `enabled` MUST be decided here, at boot, not by app.shadows.setEnabled
     // afterwards. The environment builds the CSM node into every lit material
     // the moment it is enabled, and switching it off later only nulls the
