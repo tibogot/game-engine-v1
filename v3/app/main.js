@@ -4526,8 +4526,9 @@ export async function startV3App(opts = {}) {
       // a scan only runs on the first frame after an edit invalidates one.
       syncCursorFalloff();
       splatOverlay.uHasPaint.value = splatMap.hasAnyPaint() ? 1 : 0;
-      // Terrain holes: attaches/detaches the discard mask (one recompile per flip).
-      lod.setHolesEnabled(splatMap.hasAnyHoles());
+      // Terrain holes: the discard mask for painted/tool holes, a vertex sink
+      // when every hole is a game's own ground (one recompile per flip).
+      lod.setHolesEnabled(splatMap.hasAnyHoles(), { cut: splatMap.hasCutHoles() });
       snowSystem.shared.u.uHasSnow.value = snowMap.hasAnySnow() ? 1 : 0;
 
       // Re-bake the terrain normal map only when the heightmap actually
@@ -11975,8 +11976,9 @@ export async function startV3App(opts = {}) {
      * `fn(wx, wz)` returns 0..1 per splat texel; the terrain is cut where it
      * is over 0.5, smooth between texels. The heightmap is untouched — units
      * and placement still stand on it. Vegetation is kept out of the opening.
-     * RUNTIME ONLY, never saved. Costs the terrain its early depth test while
-     * any hole exists (see terrainLOD's setHolesEnabled).
+     * RUNTIME ONLY, never saved. The terrain SINKS under the opening rather
+     * than cutting it (no discard, early depth test kept) unless a painted or
+     * tool hole also exists (see terrainLOD's setHolesEnabled).
      */
     setGameHoles(x0, z0, x1, z1, fn) {
       const toTexel = (w) => Math.floor(((w + WORLD_SIZE / 2) / WORLD_SIZE) * SPLAT_RES);

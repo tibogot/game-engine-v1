@@ -887,8 +887,19 @@ export function createSplatOverlay(
    */
   const holeKeepMask = splatSlice1.a.mul(inBounds).lessThan(float(0.5));
 
+  /**
+   * The hole value 0..1 at a splat UV, readable in the VERTEX stage (level 0,
+   * no derivatives): the terrain SINKS under a game's own ground instead of
+   * cutting it (terrainLOD's setHolesEnabled). Out of bounds reads 0.
+   */
+  const holeAtUV = (uv) => {
+    const ib = step(float(0), uv.x).mul(step(uv.x, float(1))).mul(step(float(0), uv.y)).mul(step(uv.y, float(1)));
+    return texture(splatTex, uv).depth(int(1)).level(float(0)).a.mul(ib);
+  };
+
   return {
     holeKeepMask,
+    holeAtUV,
     uHasPaint,
     uSoloLayer,
     uHeightBlend,

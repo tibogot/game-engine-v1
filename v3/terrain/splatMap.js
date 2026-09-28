@@ -91,6 +91,7 @@ export class SplatMap {
     this._combinedU32   = new Uint32Array(this._combined.buffer);
     // hasAnyHoles() cache — decides whether the terrain compiles its hole mask.
     this._hasHoles      = false;
+    this._hasCut        = false;   // any hole NOT from the game source (hasCutHoles)
     this._holesDirty    = false;
     // Hole sources, one byte per texel (see the header). slice1.A = max of both.
     this.holeUser       = new Uint8Array(SPLAT_RES * SPLAT_RES);
@@ -177,15 +178,32 @@ export class SplatMap {
 
   /** True if any texel of the hole channel (slice1.A) is non-zero. Cached. */
   hasAnyHoles() {
-    if (this._holesDirty) {
-      this._holesDirty = false;
-      this._hasHoles = false;
-      const d1 = this.data1;
-      for (let i = 3; i < d1.length; i += 4) {
-        if (d1[i] !== 0) { this._hasHoles = true; break; }
-      }
-    }
+    if (this._holesDirty) this._scanHoles();
     return this._hasHoles;
+  }
+
+  /**
+   * True if any hole is a real CUT — painted or a tool's (tunnels): a texel
+   * whose hole value is more than the GAME source alone gives. A game's own
+   * openings (it draws its own ground there) need no cut: the terrain can
+   * simply sink under that ground (terrainLOD's setHolesEnabled). Cached.
+   */
+  hasCutHoles() {
+    if (this._holesDirty) this._scanHoles();
+    return this._hasCut;
+  }
+
+  _scanHoles() {
+    this._holesDirty = false;
+    this._hasHoles = false;
+    this._hasCut = false;
+    const d1 = this.data1, g = this.holeGame;
+    for (let i = 3, k = 0; i < d1.length; i += 4, k++) {
+      const a = d1[i];
+      if (a === 0) continue;
+      this._hasHoles = true;
+      if (a > g[k]) { this._hasCut = true; break; }   // both known: stop
+    }
   }
 
   /**

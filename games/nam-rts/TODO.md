@@ -96,7 +96,16 @@ detail note below if it needs one). Tick here when done.
        file is the other session's — agree the fix with it. Separately the
        GPU reads ~2× slower than earlier this session at the same view
        (4.46 → 8.7 ms on the OLD build): heat or throttling, not code.
-31. [ ] Frame budget re-measured after this week's additions. BISECTED 2026-09-28 (boot camera
+31. [~] PRICED 2026-09-28 (boot view, every scene group hidden in turn, interleaved): only the
+       TERRAIN is above noise (3.1 ms); animals, rice, bridges, birds, units, camp, props all
+       within ±0.66. The terrain's share of the regression was the rice terraces' HOLE: one
+       game hole put the discard into the whole terrain shader (lost early-z) = 1.0 ms at the
+       base, 1.3 in the jungle. FIXED in the engine: a game's own openings now SINK the
+       terrain 1.2 m (vertex) instead of cutting (terrainLOD setHolesEnabled "sink";
+       painted/tunnel holes still cut). Sink = no-hole cost (jungle 15.29 vs 15.27). A depth
+       pre-pass was tried first: drawing the 427k-tri clipmap twice cost 1.4 ms — rejected.
+       Rims checked close (W, S) and far: clean. Left: ~1 ms spread thin, nothing to cut.
+       BISECTED 2026-09-28 (boot camera
        7,44,-416, gpuAB, same saved settings): Vercel build 782149d 5.2-5.4 ms → main 7.1-7.8 ms.
        No single culprit: #2 rice terraces +0.8 (NOT the SSR: 0.06; not the terrace mesh; the
        50k rice clumps ~0.3), then +0.2 / +0.25 / +0.4 / +0.5 spread over the next 60 commits.

@@ -28,6 +28,13 @@ import {
   varying,
 } from "three/tsl";
 import { terrainSunVisibility } from "../render/lighting/terrainSunShadow.js";
+
+/**
+ * Metres the terrain sinks under a game's own ground (setHolesEnabled
+ * "sink"). nam's rice terraces: the heightmap's walkable banks stand at most a
+ * few tens of cm over the drawn ones, so 1.2 m hides it with room to spare.
+ */
+const HOLE_SINK = 1.2;
 import {
   createTileMaterial,
   setGridTextureUrl,
@@ -391,6 +398,17 @@ function createLODMaterial({
   const vertexY = h.mul(MAX_HEIGHT);
   const displacedY = snowShared ? vertexY.add(snowShared.groundDepth(wxz)) : vertexY;
   mat.positionNode = vec3(positionLocal.x, displacedY, positionLocal.z);
+  // Under a GAME's own ground (setHolesEnabled "sink"): the same vertex, pushed
+  // HOLE_SINK m down where the hole value passes the cut's 0.5. Built lazily.
+  const basePosition = mat.positionNode;
+  let sinkPosition = null;
+  mat.userData.terrainPosition = (sink) => {
+    if (!sink || !splatOverlay?.holeAtUV) return basePosition;
+    sinkPosition ??= vec3(positionLocal.x,
+      displacedY.sub(float(HOLE_SINK).mul(smoothstep(float(0.5), float(0.8), splatOverlay.holeAtUV(hmUV)))),
+      positionLocal.z);
+    return sinkPosition;
+  };
 
   // Mountain shade, read in the VERTEX stage and interpolated — this fragment
   // shader has no sampler left (see terrainSunShadow.js). The world's sun shadow
@@ -822,19 +840,34 @@ export function createTerrainLOD(
    * early, which would tax every terrain pixel in every project that never
    * uses a hole. Toggling recompiles the material once (first hole painted,
    * last hole removed).
+   *
+   * A GAME'S OWN OPENINGS DON'T CUT — THEY SINK (2026-09-28). nam's rice
+   * terraces open ~130 m of terrain where a mesh is the ground, and that one
+   * opening put the discard into the WHOLE terrain's shader: every terrain
+   * pixel under a prop, a plant or a hill was fully lit before being covered.
+   * MEASURED, same camera, interleaved: 1.0 ms at nam's base, 1.3 ms in the
+   * jungle. Nothing needs to be SEEN through such an opening — the game's
+   * ground covers it — so when every hole is a game hole ("sink"), the
+   * terrain's vertices drop HOLE_SINK m under it instead, with no discard and
+   * the early depth test intact. (A depth pre-pass was tried first: drawing
+   * the 427k-triangle clipmap twice cost 1.4 ms, more than it saved.) Painted
+   * holes and tunnels are looked THROUGH, so any of them keeps the real cut.
    */
-  let holesEnabled = false;
+  let holeMode = "none";   // "none" | "cut" | "sink"
   function applyHoles(mat) {
     if (!mat) return;
-    const want = holesEnabled && splatOverlay?.holeKeepMask ? splatOverlay.holeKeepMask : null;
-    if (mat.maskNode === want) return;
-    mat.maskNode = want;
+    const cut = holeMode === "cut" && splatOverlay?.holeKeepMask ? splatOverlay.holeKeepMask : null;
+    const pos = mat.userData.terrainPosition?.(holeMode === "sink") ?? mat.positionNode;
+    if (mat.maskNode === cut && mat.positionNode === pos) return;
+    mat.maskNode = cut;
+    mat.positionNode = pos;
     mat.needsUpdate = true;
   }
-  function setHolesEnabled(on) {
-    const next = Boolean(on);
-    if (next === holesEnabled) return false;
-    holesEnabled = next;
+  /** `on`: any hole exists; `cut`: one of them must be cut (painted, a tunnel). */
+  function setHolesEnabled(on, { cut = true } = {}) {
+    const next = !on ? "none" : cut ? "cut" : "sink";
+    if (next === holeMode) return false;
+    holeMode = next;
     applyHoles(mesh.material);
     return true;
   }
@@ -851,6 +884,8 @@ export function createTerrainLOD(
   return {
     group, mesh, uCenter, update, levels, buildVariant, setVariant,
     setHolesEnabled,
-    get holesEnabled() { return holesEnabled; },
+    get holesEnabled() { return holeMode !== "none"; },
+    /** "none" | "cut" | "sink" (see setHolesEnabled). */
+    get holeMode() { return holeMode; },
   };
 }
