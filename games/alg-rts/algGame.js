@@ -93,7 +93,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // Cut-out leaf cards drawn depth-first (cedar massif: ~12 ms → near 0).
     // ?prepass=0 to A/B.
     foliageDepthPrepass: params.get("prepass") !== "0",
-    csm: { cascades: 2, maxFar: 300, enabled: false },
+    // shadowRadius 2 (engine default 4): the PCF disc is radius × texel, and at
+    // 4 the palm fronds and soldiers smeared to grey smudges; 1 was crisp but
+    // grainy. Chosen by eye in-game, 2026-09-29.
+    csm: { cascades: 2, maxFar: 300, enabled: false, shadowRadius: 2 },
     light: { shadowNormalBias: 0.12 },
     // Compiled out: what this map never uses — no River v2 river (the wadis
     // are dry paint), no painted grass blades, no flower field — so their

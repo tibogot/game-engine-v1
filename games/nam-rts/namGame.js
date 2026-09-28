@@ -205,7 +205,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // at all. MEASURED: two orthographic passes of 18 and 24 objects at
     // 2048², the sun's own camera absent, on a build that believed it was
     // running one fitted shadow.
-    csm: { cascades, maxFar: 300, enabled: !fittedShadows },
+    // shadowRadius 2 (engine default 4): the PCF disc is radius × texel, and at
+    // 4 fronds and soldiers smeared to grey smudges; 1 was crisp but grainy.
+    // Chosen by eye in alg-rts, 2026-09-29 — same machinery here.
+    csm: { cascades, maxFar: 300, enabled: !fittedShadows, shadowRadius: 2 },
     light: { shadowNormalBias: 0.12 },
     /*
      * THE TERRAIN SHADER IS 40% OF THE FRAME, so what it compiles matters more
