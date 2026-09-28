@@ -21,7 +21,7 @@
 
 import * as THREE from "three/webgpu";
 import {
-  Fn, attribute, positionGeometry, positionWorld, uniform, vec4, float, texture, sampler, select,
+  Fn, attribute, positionGeometry, uniform, min, max, length, vec4, float, texture, sampler, select,
   frontFacing, screenUV, varyingProperty, cameraViewMatrix, cameraProjectionMatrix,
   cameraProjectionMatrixInverse, cameraWorldMatrix, cameraPosition, cameraFar,
   viewportSharedTexture, viewportDepthTexture, nodeObject,
@@ -121,13 +121,24 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
       const out = vertexFn(gate(loadFn), attribute("nodeData", "vec4"), positionGeometry.xz, dispNode, sampler(dispNode), heightTexNode).toVar();
       vAux0.assign(out.element(0));
       vAux1.assign(out.element(1));
-      return out.element(0).xyz;
+      /*
+       * TO THE HORIZON. The mesh reaches ~40 km (Tidewater draws to a 60 km far plane); the
+       * engine's camera stops at `far` (4 km in the editor). A vertex beyond it is pulled along
+       * its own view ray to just inside the far plane: the same pixel, only a nearer depth, so the
+       * sea is drawn out to the horizon. The shading uses the TRUE position (vAux0.xyz), so the
+       * reflection, the waves and the water depth are those of the real distance.
+       */
+      const p = out.element(0).xyz;
+      const d = p.sub(cameraPosition);
+      const s = min(float(1), cameraFar.mul(0.97).div(max(length(d), 1e-3)));
+      return cameraPosition.add(d.mul(s));
     })();
     // the sun's shadow at this fragment: the engine's shadow node (cascades), else lit
     const sunShadow = shadowNode ? nodeObject(shadowNode).r : float(1);
     // (the scene colour is sampled with the sky image's linear-clamp sampler: three binds no sampler
     // of its own for a viewport texture handed to a function)
-    m.colorNode = fragmentFn(gate(loadFn), positionWorld, screenUV, select(frontFacing, float(1), float(0)), vAux0, vAux1, sunShadow,
+    // (the true world position, not positionWorld: far vertices are drawn pulled in, see above)
+    m.colorNode = fragmentFn(gate(loadFn), vAux0.xyz, screenUV, select(frontFacing, float(1), float(0)), vAux0, vAux1, sunShadow,
       derivNode, sampler(derivNode), foamNode, sampler(foamNode), detailNode, sampler(detailNode),
       heightTexNode, cloudNode, sceneColor, sampler(skyNode), sceneDepth, skyNode, sampler(skyNode));
     return m;

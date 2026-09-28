@@ -97,7 +97,10 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
   const material = new THREE.MeshBasicNodeMaterial();
   material.colorNode = Fn(() => {
     const dir = normalize(positionWorld.sub(cameraPosition)).toVar();
-    const base = atmosphere.skyBackground(dir).add(atmosphere.moon(dir));
+    // the sky half is read at or above the horizon: in the blend band just below it, the sky-view
+    // LUT's near-black lower half drew a dark blue strip under the horizon
+    const skyDir = normalize(vec3(dir.x, max(dir.y, 0.0), dir.z)).toVar();
+    const base = atmosphere.skyBackground(skyDir).add(atmosphere.moon(skyDir));
     const sun = atmosphere.sunDisk(dir);
     const c = clouds.viewSample(dir).toVar();
     const all = clOver(c, cirrus.sample(dir, uPxAngle)).toVar();
@@ -226,7 +229,8 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
   /**
    * @param {THREE.RenderTarget} rt  the linear HDR frame (read, then overwritten)
    * @param {object} o  depthTex (the scene depth), light + shadowDepth (optional: a directional
-   *                    light whose shadow camera matches that depth map), size (Vector2)
+   *                    light whose shadow camera matches that depth map), size (Vector2),
+   *                    seaLevel (m: where the marine haze layer sits; 0 without a sea)
    */
   function postProcess(rt, o) {
     if (!(P.haze > 0)) return;
@@ -241,7 +245,7 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     if (o.size) bufferSize.copy(o.size);
     const hazed = haze.render({
       colorTex: rt.texture, depthTex: o.depthTex, camera, light: o.light, shadowDepth: o.shadowDepth,
-      sunDir: lightDir, sunColor: keyVec, size: bufferSize, viewDir,
+      sunDir: lightDir, sunColor: keyVec, size: bufferSize, viewDir, seaLevel: o.seaLevel ?? 0,
     });
     if (hazed === rt.texture) return;
     copySrc.value = hazed;

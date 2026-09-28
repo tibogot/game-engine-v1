@@ -113,6 +113,11 @@ fn hazeRay( uv: vec2f, depthT: DEPTH_T ) -> HazeRay {
 	if ( r.sky && r.dir.y < -1e-4 ) {
 		r.dist = min( r.dist, max( hzU[ 2 ].y - hzU[ 2 ].w, 0.0 ) / - r.dir.y );
 	}
+	// PORT: the far sea (Ocean Pro) draws what lies beyond the far plane pulled in to just inside it:
+	// a surface there, below the horizon, is sea at sea level, as far away as the ray meets it
+	if ( ! r.sky && r.dir.y < -1e-4 && viewDist > fa * 0.96 ) {
+		r.dist = min( max( r.dist, max( hzU[ 2 ].y - hzU[ 2 ].w, 0.0 ) / - r.dir.y ), HZ_FAR_CLAMP );
+	}
 	return r;
 }
 
@@ -464,7 +469,7 @@ export function createAirHaze({ renderer, atmosphere, clouds }) {
 
     U[0].value.set(params.density, params.shafts, params.enabled ? 1 : 0, frameNo);
     U[1].value.set(su, sv, fade, histValid && on ? 1 : 0);
-    U[2].value.set(cam.position.x, cam.position.y, cam.position.z, 0);
+    U[2].value.set(cam.position.x, cam.position.y, cam.position.z, o.seaLevel ?? 0);
     U[3].value.set(tanX, tanY, cam.near, cam.far);
     U[4].value.set(L.x, L.y, L.z, 0);
     U[5].value.set(o.sunColor.x, o.sunColor.y, o.sunColor.z, 0);

@@ -149,7 +149,10 @@ fn cdlodMorph( node: vec4f, grid: vec2f, viewPos: vec3f, y0: f32 ) -> CdlodVerte
     const rootSize = this.leafSize * Math.pow(2, top);
     const cx = Math.floor(this._cam.x / rootSize);
     const cz = Math.floor(this._cam.z / rootSize);
-    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+    // PORT: 5 x 5 roots, not Tidewater's 3 x 3: the top LOD range is 2.5 root sizes, and 3 x 3
+    // ended the sea 16-24 km out, short of the horizon (the far sea is drawn pulled in, see
+    // oceanproOcean.js). The extra roots are the coarsest level, a handful of nodes.
+    for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) {
       this._select((cx + i) * rootSize, (cz + j) * rootSize, rootSize, top);
     }
 

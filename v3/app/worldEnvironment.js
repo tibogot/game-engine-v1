@@ -2318,6 +2318,8 @@ export async function createWorldEnvironment({
       renderer.getDrawingBufferSize(_skyProSize);
       skyPro.postProcess(rt, {
         depthTex: postFxPipeline.getSceneDepthTexture(), light, shadowDepth, size: _skyProSize,
+        // the marine haze layer sits on the sea (and the far sea is measured to it)
+        seaLevel: toolState.worldOcean.enabled ? toolState.worldOcean.seaLevel : 0,
       });
     },
   };
