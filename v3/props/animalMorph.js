@@ -55,6 +55,76 @@ export const PC = {
 export const SPECIES = { value: "goat-morph" };
 // North African goat (Arbia type): black-brown, leggy, long drooping ears,
 // scimitar horns, beard, upturned tail.
+// Vietnamese village pig (Móng Cái type): short legs, swayback, pot belly, small
+// upright ears, short flat snout; black back, white-pink belly and legs.
+export const PPIG = {
+  legs: 0.52, neck: 0.45, body: 0.82, head: 0.8, size: 0.6, girth: 1.18, belly: 1.0, legThick: 1.12,
+  neckDown: 22, ears: 0.55,
+  coat: "#4a403c", pale: "#e6c9bc", pattern: "mongcai",
+  // (knobs pig2 turns; these are the values this pig was built with)
+  muzzle: -0.3, sway: 0.06, earOut: 0.45, earUp: 0.45, earFwd: 0.75, rim: 0.14, neckSlim: 1.15,
+  jowl: 0.18, taper: 0.22, taperY: 0.18, headWide: 1, earWide: 1, jawLift: 0.3, rimY: 0.1,
+};
+// PIG 2 — after your low-poly pig family (2026-09-28), as a black Vietnamese
+// village pig: a long LEVEL barrel (no withers hump, rounded rump), a long head
+// held nearly level ending in a big round snout disc, BIG triangular ears
+// standing up and out, medium straight legs.
+export const PPIG2 = {
+  // no neck (the crown continues the back), thick legs to the hoof, big ears
+  legs: 0.64, neck: 0.3, body: 1.12, head: 0.94, size: 0.68, girth: 1.18, belly: 0.45, legThick: 1.35,
+  neckDown: 24, ears: -0.1,
+  coat: "#5a5756", pale: "#3f3c3b", pattern: "black",
+  muzzle: -0.42, sway: 0, earOut: 0.9, earUp: 0.35, earFwd: 0.4, rim: 0.02, rimY: 0.45, neckSlim: 1.5,
+  flatBack: true, snout: "#e0776b",
+  // the pig's head: WIDE (no donkey taper), heavy jowls; broad triangular ears
+  jowl: 0.32, taper: 0.02, taperY: 0.0, headWide: 1.4, upperWide: 1.02, earWide: 2.3, jawLift: 0.5, eyeRing: "#efebe5",
+  brow: 0.035, cheek: 0.1, dome: 0.09, snoutOut: 0.08, earIn: "#9d968d", bridge: 0.06,
+  poll: 1.6, fillGroove: true,
+  hoofSlim: 0.72,
+};
+// ALGERIAN DONKEY: the pack's donkey as it is (shape, clips), in the colours of
+// a North African village donkey — ash grey-brown, pale muzzle, eye rings and
+// belly, a dark stripe along the spine crossed over the shoulders, dark mane,
+// ear tips and tail tuft. (The base for the donkeys that carry loads.)
+export const DONKEY_PRESETS = {
+  "Aurès grey":  { coat: "#8d8378", pale: "#d9d1c4", dark: "#3a322c", hoof: "#2b2521", nose: "#4a4038" },
+  "Brown":       { coat: "#6e5747", pale: "#cdbfae", dark: "#2d231d", hoof: "#241d18", nose: "#3b2f27" },
+  "Pale dun":    { coat: "#b3a28a", pale: "#e3dbcd", dark: "#4a3d31", hoof: "#2e2621", nose: "#5a4c40" },
+};
+export const PDK = {
+  preset: "Aurès grey",
+  legs: 1, neck: 1, body: 1, head: 1, size: 1.1,        // a small village donkey, ~1.1 m at the back
+  hump: 0, humpLen: 1,
+  cross: true,                                           // the shoulder cross
+  stripeW: 0.07, crossW: 0.06,                           // half-widths (x body radius)
+  load: "panniers",                                      // "panniers" (blanket + two baskets) | "none"
+  blanket: "#8e2a1e", blanketBand: "#c98a2e", blanketDark: "#211a16", blanketCream: "#e6d3a3",
+  basket: "#b58d55", basketDark: "#83633b", rope: "#5e4630",
+  ...DONKEY_PRESETS["Aurès grey"], color: "#8d8378", light: "#d9d1c4",
+};
+// STRIPED HYENA (Hyaena hyaena — the one that lives in Algeria) from the pack's
+// HUSKY: the same rig as the donkey (same bones, same clips), so the same
+// morph pipeline — but real PAWS, a dog's head and a carnivore's gait.
+export const PHY = {
+  // legsBack: the hind legs shorter → the SLOPE (high shoulders, low hips)
+  // (from photos of Hyaena hyaena: high shoulders, low narrow hindquarters,
+  // HUGE upright ears, a thick erect mane on the neck and along the back, a
+  // long bushy hanging tail, pale buff-grey with ~10 thin black stripes)
+  legs: 1.15, legsBack: 0.7, neck: 0.95, body: 0.95, head: 0.9, ears: -1.0, size: 0.8, legSlim: 0.85, neckSlim: 1.3,
+  muzzle: 0.12,        // a LONGER, pointed muzzle (in front of the eyes)
+  headNarrow: 0.8,     // the head narrower across (the husky's is broad)
+  tailDown: 0.9,       // the tail hangs (the husky's curls up over the back)
+  tailFluff: 1.9,      // bushy: the tail's girth x this
+  crest: 0.55,         // the mane: long hair along the neck and back (x the body radius)
+  stripes: 10,         // thin black stripes across the flank (plane-sliced bands)
+  stripeW: 0.3,        // a stripe's share of its period
+  stripeJit: 0.35,     // each stripe a little different (spacing, width, lean)
+  earWide: 1.3,        // broad ears (across their own axis)
+  hump: 0, humpLen: 1,
+  neckDown: 30,        // head carried low, at the shoulders
+  // warm sandy-buff (the photos), near-black stripes
+  coat: "#c8b28a", dark: "#1d1712", light: "#dccdae", color: "#c8b28a", face: "#b09c7c",
+};
 export const PG = {
   legs: 0.95, neck: 0.95, body: 0.78, size: 0.86, girth: 0.86, horn: 0.62, beard: 1.0,
   coat: "#4a3a31", hornColor: "#7a6d60",
@@ -72,15 +142,31 @@ function defaultMaterial() {
 
 // ── The donkey this all starts from ──────────────────────────────────────────
 let gltf = null, A = null;
-/** Measure the donkey once; returns the analysis (`A`). */
-export async function initAnimalMorph(donkeyGltf) {
+// Other pack animals on the SAME rig (bone names, clips) that some kinds are
+// reshaped from; the donkey stays the default. While such a kind builds, `gltf`
+// and `A` point at its source (buildAnimal), so the whole pipeline follows.
+const SOURCES = {};
+const SOURCE_OF = { "hyena-morph": "husky" };
+// their colour zones under the donkey's zone names (the builder paints by them)
+const MAT_MAP = {
+  husky: { "Material": "Main", "Material.001": "Main_Light", "Material.006": "Muzzle", "Material.002": "Eye_Dark", "Material.003": "Eye_White" },
+};
+/** Measure the donkey once; returns the analysis (`A`). `more`: { husky: gltf } */
+export async function initAnimalMorph(donkeyGltf, more = {}) {
   await MeshoptSimplifier.ready;
   gltf = donkeyGltf;
   A = analyzeDonkey(gltf);
+  SOURCES.donkey = { gltf, A };
+  for (const [name, g] of Object.entries(more)) addMorphSource(name, g);
   return A;
 }
+/** Another pack animal on the donkey's rig (e.g. "husky") for the kinds built from it. */
+export function addMorphSource(name, g) {
+  SOURCES[name] = { gltf: g, A: analyzeDonkey(g, MAT_MAP[name]) };
+  return SOURCES[name].A;
+}
 
-function analyzeDonkey(g) {
+function analyzeDonkey(g, matMap = null) {
   const src = g.scene;
   src.updateMatrixWorld(true);
   const skinned = [];
@@ -103,7 +189,7 @@ function analyzeDonkey(g) {
       mesh.pos.push(v.x, v.y, v.z);
       nv.fromBufferAttribute(Na, i).applyMatrix3(NM).normalize();
       mesh.nrm.push(nv.x, nv.y, nv.z);
-      mesh.mat.push(p.material.name);
+      mesh.mat.push(matMap?.[p.material.name] ?? p.material.name);
       const sk = [];
       for (let c = 0; c < 4; c++) { const w = SW.getComponent(i, c); if (w > 0) sk.push([p.skeleton.bones[SI.getComponent(i, c)].name, w]); }
       mesh.skin.push(sk);
@@ -445,10 +531,24 @@ function addTube(G, rings, radial, side, weightsAt, capEnd) {
 
 // ── Build an animal template ─────────────────────────────────────────────
 function buildAnimal() {
+  const src = SOURCE_OF[SPECIES.value];
+  if (!src) return buildAnimalFrom();                 // the donkey: unchanged path
+  if (!SOURCES[src]) throw new Error(`animalMorph: ${SPECIES.value} is built from the ${src} — initAnimalMorph(donkey, { ${src}: gltf })`);
+  const keep = [gltf, A];
+  ({ gltf, A } = SOURCES[src]);
+  try { return buildAnimalFrom(); } finally { [gltf, A] = keep; }
+}
+function buildAnimalFrom() {
   const t0 = performance.now();
   const isCamel = SPECIES.value.startsWith("camel"), isMorph = SPECIES.value === "camel-morph";
   const isSheepMorph = SPECIES.value === "sheep-morph", isGoatMorph = SPECIES.value === "goat-morph";
-  const Q = isCamel ? PC : isGoatMorph ? PG : P;
+  const isPig2Morph = SPECIES.value === "pig2-morph";
+  const isPigMorph = SPECIES.value === "pig-morph" || isPig2Morph;   // pig2 = the pig's code, its own params
+  const isHyena = SPECIES.value === "hyena-morph", isDonkey = SPECIES.value === "donkey-morph";
+  const PQ = isPig2Morph ? PPIG2 : PPIG;
+  const Q = isCamel ? PC : isGoatMorph ? PG : isPigMorph ? PQ : isHyena ? PHY : isDonkey ? PDK : P;
+  const legF = (n) => (Q.legsBack && /^(Back|IKBack|FFB)/.test(n) ? Q.legsBack : Q.legs);
+  const LEGS = Q.legsBack ? legF : Q.legs;           // feetFollow: one length, or per leg
   const root = cloneSkinned(gltf.scene);
   const kill = [];
   root.traverse((o) => { if (o.isMesh) kill.push(o); });
@@ -460,8 +560,8 @@ function buildAnimal() {
   const F = {};
   for (const s of ["L", "R"]) {
     F["FrontLowerLeg" + s] = Q.legs;            // = upper front leg length
-    F["BackUpperLeg" + s] = Q.legs;             // = thigh length
-    F["BackLowerLeg" + s] = Q.legs;             // = shank length
+    F["BackUpperLeg" + s] = legF("BackUpperLeg");   // = thigh length
+    F["BackLowerLeg" + s] = legF("BackLowerLeg");   // = shank length
     F["Ear2" + s] = F["Ear3" + s] = F["Ear4" + s] = 0.5;
   }
   F.Neck2 = F.Neck3 = F.Head = Q.neck;
@@ -469,12 +569,45 @@ function buildAnimal() {
   // A very short sheep tail. Not Tail2 (= Tail1's length): Tail1 also carries the
   // RUMP (measured: 350 verts), and shrinking it squashed the rump.
   if (isSheepMorph || isGoatMorph) for (let i = 3; i <= 7; i++) F["Tail" + i] = 0.1;
+  if (isPigMorph) for (let i = 2; i <= 7; i++) F["Tail" + i] = 0.3;          // a pig's thin short tail
   for (const [n, f] of Object.entries(F)) B[n].position.multiplyScalar(f);
   root.updateMatrixWorld(true);
 
   const FEET = ["FrontLowerLegL", "FrontLowerLegR", "BackLowerLegL", "BackLowerLegR"];
-  const tipLocal = (n) => V(0, A.ext[n] * Q.legs, 0);
+  const tipLocal = (n) => V(0, A.ext[n] * legF(n), 0);
   const tipOf = (n) => B[n].localToWorld(tipLocal(n));
+
+  // 1b. THE SLOPE (hyena): with the hind legs shorter the back feet hang in
+  // the air. Pitch the whole spine (Body) about the side axis until the front
+  // and back feet stand on one ground, and turn each leg's root back by the
+  // same angle so the legs stay upright. Rest AND every clip key (RD, like the
+  // camel's neck); solved, not guessed.
+  const RDtilt = {};
+  if (Q.legsBack && Q.legsBack !== Q.legs) {
+    const fwd0 = B.Neck1.getWorldPosition(V()).sub(B.Back.getWorldPosition(V())).setY(0).normalize();
+    const right0 = V().crossVectors(fwd0, UP).normalize();
+    const roots = ["FrontShoulderL", "FrontShoulderR", "BackShoulderL", "BackShoulderR"].filter((n) => B[n]);
+    const q0 = new Map([B.Body, ...roots.map((n) => B[n])].map((b) => [b, b.quaternion.clone()]));
+    const turnW = (bone, ang) => {
+      const Qb = bone.getWorldQuaternion(new THREE.Quaternion());
+      const d = Qb.clone().invert().multiply(new THREE.Quaternion().setFromAxisAngle(right0, ang)).multiply(Qb);
+      bone.quaternion.multiply(d); root.updateMatrixWorld(true);
+      return d;
+    };
+    const tilt = (ang) => {
+      for (const [b, q] of q0) b.quaternion.copy(q);
+      root.updateMatrixWorld(true);
+      const out = { Body: turnW(B.Body, ang) };
+      for (const n of roots) out[n] = turnW(B[n], -ang);
+      const f = (tipOf("FrontLowerLegL").y + tipOf("FrontLowerLegR").y) / 2, b = (tipOf("BackLowerLegL").y + tipOf("BackLowerLegR").y) / 2;
+      return { gap: b - f, out };
+    };
+    let a0 = 0, g0 = tilt(0).gap, a1 = 0.05, g1 = tilt(a1).gap;
+    for (let it = 0; it < 12 && Math.abs(g1) > 1e-6 && g1 !== g0; it++) { const a2 = a1 - (g1 * (a1 - a0)) / (g1 - g0); a0 = a1; g0 = g1; a1 = a2; g1 = tilt(a1).gap; }
+    Object.assign(RDtilt, tilt(a1).out);
+    console.log(`[slope] spine pitched ${THREE.MathUtils.radToDeg(a1).toFixed(1)} deg, feet gap ${(g1 / A.Rv).toExponential(1)} Rv`);
+  }
+
   // 2. Drop the body by what the legs lost.
   const delta = Math.min(...FEET.map((n) => tipOf(n).y)) - A.ground0;
   const bodyRest = B.Body.position.clone();
@@ -489,7 +622,7 @@ function buildAnimal() {
   // head. A fixed bone-local rotation d per bone, right-multiplied onto
   // the rest AND onto every key of that bone's rotation track, so the
   // donkey's motion plays on top of the new shape.
-  const RD = {};
+  const RD = { ...RDtilt };
   if (isCamel) {
     const fwd0 = B.Neck1.getWorldPosition(V()).sub(B.Back.getWorldPosition(V())).setY(0).normalize();
     const tq = new THREE.Quaternion();
@@ -532,8 +665,32 @@ function buildAnimal() {
     hb.quaternion.copy(q0).multiply(RD.Head);
     root.updateMatrixWorld(true);
   }
-  if (isGoatMorph) {
-    // The goat's ears hang far DOWN: turn the Ear1 BONE, so the
+  if (isPigMorph || (isHyena && Q.neckDown)) {
+    // (the hyena too: it carries its head at shoulder level, the neck reaching
+    // forward — the husky holds it high like a wolf)
+    // A pig carries its head LOW, nearly without a neck: bend Neck1 down about
+    // the body's side axis (the sign that lowers the head), rest AND keys.
+    const fwd0 = B.Neck1.getWorldPosition(V()).sub(B.Back.getWorldPosition(V())).setY(0).normalize();
+    const right0 = V().crossVectors(fwd0, UP).normalize();
+    const n1 = B.Neck1, q0 = n1.quaternion.clone();
+    const headY = (ang) => {
+      const Rw = new THREE.Quaternion().setFromAxisAngle(right0, ang);
+      const Qb = n1.getWorldQuaternion(new THREE.Quaternion());
+      n1.quaternion.copy(q0).multiply(Qb.clone().invert().multiply(Rw).multiply(Qb));
+      root.updateMatrixWorld(true);
+      const y = B.Head.getWorldPosition(V()).y;
+      n1.quaternion.copy(q0); root.updateMatrixWorld(true);
+      return y;
+    };
+    const ang = THREE.MathUtils.degToRad(isPigMorph ? PQ.neckDown : Q.neckDown) * (headY(0.2) < headY(-0.2) ? 1 : -1);
+    const Rw = new THREE.Quaternion().setFromAxisAngle(right0, ang);
+    const Qb = n1.getWorldQuaternion(new THREE.Quaternion());
+    RD.Neck1 = Qb.clone().invert().multiply(Rw).multiply(Qb);
+    n1.quaternion.multiply(RD.Neck1);
+    root.updateMatrixWorld(true);
+  }
+  if (isGoatMorph || isPigMorph) {
+    // The goat's ears hang far DOWN; the pig's point FORWARD. Turn the Ear1 BONE, so the
     // rig's own weights do the bending — bending the geometry folded the
     // ear roots inside-out (measured: 5 → 15 flipped faces).
     const fwd0 = B.Neck1.getWorldPosition(V()).sub(B.Back.getWorldPosition(V())).setY(0).normalize();
@@ -546,13 +703,31 @@ function buildAnimal() {
       const out = Math.sign(p1.clone().sub(hw).dot(right0)) || 1;
       const target = isGoatMorph
         ? right0.clone().multiplyScalar(out * 0.5).addScaledVector(UP, -0.85).addScaledVector(fwd0, 0.18).normalize()
-        : right0.clone().multiplyScalar(out).addScaledVector(UP, -0.3).addScaledVector(fwd0, 0.15).normalize();
+        : isPigMorph
+          ? right0.clone().multiplyScalar(out * PQ.earOut).addScaledVector(UP, PQ.earUp).addScaledVector(fwd0, PQ.earFwd).normalize()
+          : right0.clone().multiplyScalar(out).addScaledVector(UP, -0.3).addScaledVector(fwd0, 0.15).normalize();
       const Rw = new THREE.Quaternion().setFromUnitVectors(axis0, target);
       const Qb = e1.getWorldQuaternion(new THREE.Quaternion());
       const d = Qb.clone().invert().multiply(Rw).multiply(Qb);          // world turn → bone-local
       e1.quaternion.multiply(d);
       RD["Ear1" + sd] = d;
     }
+    root.updateMatrixWorld(true);
+  }
+
+  if (isHyena && Q.tailDown && B.Tail1) {
+    // A hyena's bushy tail HANGS; the husky's curls up over its back. Turn the
+    // Tail1 bone so the tail points down and back (rest AND every key: the
+    // swish still plays round the new rest).
+    const fwd0 = B.Neck1.getWorldPosition(V()).sub(B.Back.getWorldPosition(V())).setY(0).normalize();
+    let end = "Tail1"; for (let i = 2; B["Tail" + i]; i++) end = "Tail" + i;
+    // Tail2, not Tail1: Tail1 also carries the rump (turning it folded 2 faces)
+    const t1 = B.Tail2 ?? B.Tail1, axis0 = B[end].getWorldPosition(V()).sub(t1.getWorldPosition(V())).normalize();
+    const target = UP.clone().multiplyScalar(-Q.tailDown).addScaledVector(fwd0, -(1 - Q.tailDown * 0.6)).normalize();
+    const Rw = new THREE.Quaternion().setFromUnitVectors(axis0, target);
+    const Qb = t1.getWorldQuaternion(new THREE.Quaternion());
+    RD[t1.name] = Qb.clone().invert().multiply(Rw).multiply(Qb);
+    t1.quaternion.multiply(RD[t1.name]);
     root.updateMatrixWorld(true);
   }
 
@@ -567,7 +742,7 @@ function buildAnimal() {
     const SB = {}; src.traverse((o) => { if (o.isBone) SB[o.name] = o; });
     for (const [leg, ik] of FOOTPAIRS) {
       const dl = SB[leg].worldToLocal(SB[ik].getWorldPosition(V()));
-      dl.y += (Q.legs - 1) * A.ext[leg];
+      dl.y += (legF(leg) - 1) * A.ext[leg];
       const w = B[leg].localToWorld(dl);
       B[ik].position.copy(B[ik].parent.worldToLocal(w));
     }
@@ -579,7 +754,7 @@ function buildAnimal() {
     for (const tr of cc.tracks) {
       const dot = tr.name.lastIndexOf(".");
       const node = tr.name.slice(0, dot), prop = tr.name.slice(dot + 1);
-      if (prop === "quaternion" && (isSheepMorph || isGoatMorph) && node.startsWith("Ear")) {
+      if (prop === "quaternion" && (isSheepMorph || isGoatMorph || isPigMorph) && node.startsWith("Ear")) {
         // The sheep's ears are turned out sideways in its rest; the
         // donkey's big ear swings (laid back, pricked up) would stand them
         // up. Keep a quarter of the motion — a flick — around the rest.
@@ -630,7 +805,7 @@ function buildAnimal() {
     const Hp = (x, y, z) => H.clone().addScaledVector(hs, x * Lh).addScaledVector(hu, y * Lh).addScaledVector(a, z * Lh);
     return { H, a, hu, hs, Hp };
   };
-  if (!isCamel && !isSheepMorph && !isGoatMorph) {
+  if (!isCamel && !isSheepMorph && !isGoatMorph && !isPigMorph && !isHyena && !isDonkey) {
   const woolC = new THREE.Color(P.woolColor), faceC = new THREE.Color(P.faceColor), legC = new THREE.Color(P.legColor);
   const dirtC = woolC.clone().multiply(new THREE.Color(0.72, 0.64, 0.5));
   const hoofC = new THREE.Color("#161310"), eyeC = new THREE.Color("#0c0907"), hornC = new THREE.Color("#c9b894");
@@ -819,8 +994,8 @@ function buildAnimal() {
     }
   }
   } else {
-    ({ topY, curlR } = isMorph || isSheepMorph || isGoatMorph
-      ? buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, isSheepMorph ? "sheep" : isGoatMorph ? "goat" : "camel")
+    ({ topY, curlR } = isMorph || isSheepMorph || isGoatMorph || isPigMorph || isHyena || isDonkey
+      ? buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, isSheepMorph ? "sheep" : isGoatMorph ? "goat" : isPig2Morph ? "pig2" : isPigMorph ? "pig" : isHyena ? "hyena" : isDonkey ? "donkey" : "camel")
       : buildCamelParts({ B, W, fwd, right, G, tipOf, headFrame }));
   }
 
@@ -843,9 +1018,24 @@ function buildAnimal() {
   hooks.uCurl.value = 1 / (0.11 * curlR) * P.curl;
   hooks.uBump.value = 0.004 * P.bump;
 
-  const tpl = { root, mesh, clips, scale, fwd, curlR, isCamel, k: Q.size / 0.85, yaw0: Math.atan2(fwd.x, fwd.z), tris: geo.index.count / 3, feet: FEET.map((n) => ({ bone: n, local: tipLocal(n) })) };
+  const tpl = { root, mesh, clips, scale, fwd, curlR, isCamel, height0: Q.size, k: Q.size / 0.85, yaw0: Math.atan2(fwd.x, fwd.z), tris: geo.index.count / 3, feet: FEET.map((n) => ({ bone: n, local: tipLocal(n) })) };
   if (isCamel && !window.__noPace) tpl.pace = paceWalk(tpl);
-  tpl.feetFollow = feetFollow(tpl, Q.legs);
+  tpl.feetFollow = feetFollow(tpl, LEGS);
+  if (isPigMorph || isMorph || isHyena) {
+    // Front and back HOOVES must reach the same lowest point over the walk:
+    // the ground clamp lifts the body by the deepest one, so a pair that sits
+    // shallower floated by the difference (measured: pig2 back 3.8 cm deeper
+    // than front → front feet planted 0-3% of the walk; the donkey plants all
+    // four ~57%). Shift the deeper pair's foot bones up by the gap and re-run.
+    const lo = hoofLows(tpl);
+    const f = Math.min(lo.FL, lo.FR), bk = Math.min(lo.BL, lo.BR);
+    const gap = (f - bk) / tpl.scale;                     // world → donkey units
+    const off = gap > 0 ? { F: 0, B: -gap } : { F: gap, B: 0 };
+    tpl.feetFollow = feetFollow(tpl, LEGS, off);
+    tpl.footOff = off;
+    const lo2 = hoofLows(tpl);
+    console.log(`[feet] hooves front/back gap ${(100 * (f - bk)).toFixed(1)} cm → ${(100 * (Math.min(lo2.FL, lo2.FR) - Math.min(lo2.BL, lo2.BR))).toFixed(1)} cm`);
+  }
   // Measured, not eyeballed: how far each hoof bends against its lower leg
   // over the Walk — the animal vs the donkey (same clip).
   {
@@ -871,7 +1061,96 @@ function buildAnimal() {
     const wA = tpl.clips.find((c) => c.name === "Walk"), wD = gltf.animations.find((c) => c.name === "Walk");
     if (wA && wD) { tpl.hoofFlex = { animal: flex(tpl.root, wA), donkey: flex(gltf.scene, wD) }; console.log("[hoof flex over Walk]", JSON.stringify(tpl.hoofFlex)); }
   }
-  tpl.ground = groundClamp(tpl);
+  tpl.ground = window.__noClamp ? {} : groundClamp(tpl);
+  if (isMorph && !window.__noPlant) {
+    tpl.planted = plantFrontFeet(tpl, Q.legs);
+    // the foot bones follow the corrected legs (after the clamp's lift: they
+    // follow the lifted legs too)
+    tpl.feetFollow = feetFollow(tpl, Q.legs, tpl.footOff ?? { F: 0, B: 0 });
+  }
+  // Measured contact (read-only): over the Walk, how close does each foot's
+  // lowest point come to the ground? A planted foot reaches ~0; a foot whose
+  // minimum stays above it FLOATS for the whole cycle.
+  {
+    const r = cloneSkinned(tpl.root);
+    let mesh = null; r.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
+    const clip = tpl.clips.find((c) => c.name === "Walk");
+    if (mesh && clip) {
+      const names = mesh.skeleton.bones.map((b) => b.name);
+      const G2 = mesh.geometry, SI = G2.attributes.skinIndex, SW = G2.attributes.skinWeight, n = G2.attributes.position.count;
+      const footOf = (i) => { let best = -1, bw = 0; for (let c = 0; c < 4; c++) { const w = SW.getComponent(i, c); if (w > bw) { bw = w; best = SI.getComponent(i, c); } } const nm = names[best] ?? "";
+        const m = /(Front|Back)(LowerLeg|Leg)?([LR])$/.exec(nm) || /^IK(Front|Back)Leg([LR])$/.exec(nm) || /^FF(B?)([LR])$/.exec(nm);
+        if (/^FFB[LR]$/.test(nm)) return "B" + nm.slice(-1); if (/^FF[LR]$/.test(nm)) return "F" + nm.slice(-1);
+        if (/^IKFrontLeg/.test(nm)) return "F" + nm.slice(-1); if (/^IKBackLeg/.test(nm)) return "B" + nm.slice(-1);
+        if (/^FrontLowerLeg/.test(nm)) return "F" + nm.slice(-1); if (/^BackLowerLeg/.test(nm)) return "B" + nm.slice(-1); return null; };
+      const grp = Array.from({ length: n }, (_, i) => footOf(i));
+      const mix = new THREE.AnimationMixer(r); mix.clipAction(clip).play();
+      const lo = { FL: Infinity, FR: Infinity, BL: Infinity, BR: Infinity }, q = V();
+      const down = { FL: 0, FR: 0, BL: 0, BR: 0 };
+      for (let k = 0; k < 60; k++) {
+        mix.setTime((clip.duration * k) / 60); r.updateMatrixWorld(true); mesh.skeleton.update();
+        const f = { FL: Infinity, FR: Infinity, BL: Infinity, BR: Infinity };
+        for (let i = 0; i < n; i += 2) { const g = grp[i]; if (!g) continue; mesh.getVertexPosition(i, q); q.applyMatrix4(mesh.matrixWorld); if (q.y < f[g]) f[g] = q.y; }
+        for (const g in f) { lo[g] = Math.min(lo[g], f[g]); if (f[g] < 0.015) down[g]++; }
+      }
+      tpl.footPlanted = Object.fromEntries(Object.entries(down).map(([k, v]) => [k, Math.round((100 * v) / 60) + "%"]));
+      mix.stopAllAction();
+      tpl.footMinCm = Object.fromEntries(Object.entries(lo).map(([k, v]) => [k, +(v * 100).toFixed(1)]));
+      console.log("[walk contact: each foot's lowest point, cm above ground]", JSON.stringify(tpl.footMinCm));
+      window.__footMin = { lowestCm: tpl.footMinCm, planted: tpl.footPlanted };
+      // the donkey itself, same measure (the yardstick)
+      if (!window.__donkeyFoot) {
+        const dr = cloneSkinned(gltf.scene), dm = [];
+        dr.traverse((o) => { if (o.isSkinnedMesh) dm.push(o); });
+        const dclip = gltf.animations.find((c) => c.name === "Walk");
+        const cls = (m, i) => { const si = m.geometry.attributes.skinIndex, sw = m.geometry.attributes.skinWeight; let best = -1, bw = 0; for (let c = 0; c < 4; c++) { const w = sw.getComponent(i, c); if (w > bw) { bw = w; best = si.getComponent(i, c); } } const nm = m.skeleton.bones[best]?.name ?? "";
+          if (/^FFB[LR]$/.test(nm) || /^IKBackLeg/.test(nm) || /^BackLowerLeg/.test(nm)) return "B" + nm.slice(-1); if (/^FF[LR]$/.test(nm) || /^IKFrontLeg/.test(nm) || /^FrontLowerLeg/.test(nm)) return "F" + nm.slice(-1); return null; };
+        const groups = dm.map((m) => Array.from({ length: m.geometry.attributes.position.count }, (_, i) => cls(m, i)));
+        const dmx = new THREE.AnimationMixer(dr); dmx.clipAction(dclip).play();
+        const dlo = { FL: Infinity, FR: Infinity, BL: Infinity, BR: Infinity }, dd = { FL: 0, FR: 0, BL: 0, BR: 0 }, q2 = V();
+        let g0 = Infinity; const frames = [];
+        for (let k = 0; k < 60; k++) {
+          dmx.setTime((dclip.duration * k) / 60); dr.updateMatrixWorld(true);
+          const f = { FL: Infinity, FR: Infinity, BL: Infinity, BR: Infinity };
+          dm.forEach((m, mi) => { m.skeleton.update(); const n2 = m.geometry.attributes.position.count; for (let i = 0; i < n2; i += 2) { const g = groups[mi][i]; if (!g) continue; m.getVertexPosition(i, q2); q2.applyMatrix4(m.matrixWorld); if (q2.y < f[g]) f[g] = q2.y; } });
+          frames.push(f); for (const g in f) g0 = Math.min(g0, f[g]);
+        }
+        const H0 = A.Rv * 3;   // donkey units → a relative 1.5 cm on a 0.85 m animal ≈ 0.018 of its height
+        for (const f of frames) for (const g in f) { dlo[g] = Math.min(dlo[g], f[g] - g0); if (f[g] - g0 < 0.018 * (A.backTop - A.ground0)) dd[g]++; }
+        window.__donkeyFoot = { planted: Object.fromEntries(Object.entries(dd).map(([k, v]) => [k, Math.round((100 * v) / 60) + "%"])) };
+        dmx.stopAllAction();
+      }
+    }
+  }
+  // Measured smoothness (read-only): sample the Walk finely and find the
+  // sharpest kink in the hind hoof's path and in the Body's height — the
+  // biggest acceleration against the typical one. The donkey is the yardstick.
+  {
+    const kinks = (src, clip, legs) => {
+      const r = cloneSkinned(src), b = {};
+      r.traverse((o) => { if (o.isBone) b[o.name] = o; });
+      const m = new THREE.AnimationMixer(r);
+      m.clipAction(clip).play();
+      const N = 240, hoof = [], body = [];
+      const tip = V(0, A.ext.BackLowerLegL * legs, 0);
+      for (let k = 0; k < N; k++) {
+        m.setTime((clip.duration * k) / N); r.updateMatrixWorld(true);
+        hoof.push(b.BackLowerLegL.localToWorld(tip.clone()));
+        body.push(b.Body.getWorldPosition(V()).y);
+      }
+      m.stopAllAction();
+      const ratio = (acc) => { const s2 = [...acc].sort((x, y) => x - y); const med = s2[s2.length >> 1] || 1e-9; return +(Math.max(...acc) / med).toFixed(1); };
+      const aH = [], aB = [];
+      for (let k = 0; k < N; k++) {
+        const p0 = hoof[(k + N - 1) % N], p1 = hoof[k], p2 = hoof[(k + 1) % N];
+        aH.push(p2.clone().add(p0).sub(p1.clone().multiplyScalar(2)).length());
+        aB.push(Math.abs(body[(k + 1) % N] + body[(k + N - 1) % N] - 2 * body[k]));
+      }
+      return { hindHoofKink: ratio(aH), bodyKink: ratio(aB) };
+    };
+    const wA = tpl.clips.find((c) => c.name === "Walk"), wD = gltf.animations.find((c) => c.name === "Walk");
+    if (wA && wD) { tpl.smooth = { animal: kinks(tpl.root, wA, Q.legs), donkey: kinks(gltf.scene, wD, 1) }; console.log("[walk smoothness: max/typical acceleration]", JSON.stringify(tpl.smooth)); window.__smooth = tpl.smooth; }
+  }
   tpl.speed = {
     Walk: measureGroundSpeed(tpl, "Walk"),
     Gallop: measureGroundSpeed(tpl, "Gallop"),
@@ -1137,9 +1416,13 @@ function buildCamelParts({ W, fwd, right, G, tipOf, headFrame }) {
 // stub tail and a Suffolk palette (your low-poly reference).
 function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
   const SHEEP = kind === "sheep", GOAT = kind === "goat", CAMEL = kind === "camel";
+  const PIG2 = kind === "pig2", PIG = kind === "pig" || PIG2;   // pig2 = the pig's code, its own params
+  const PQ = PIG2 ? PPIG2 : PPIG;
   const SMALL = SHEEP || GOAT;           // the sheep-like head / ear handling
-  const Q = SHEEP ? P : GOAT ? PG : PC, src = A.mesh;
-  const legSlim = SHEEP ? 0.72 : GOAT ? 0.66 : PC.legSlim, neckSlim = SHEEP ? 1 : GOAT ? 0.85 : PC.neckSlim;
+  const HYENA = kind === "hyena";        // from the HUSKY (A / gltf = the husky's)
+  const DONKEY = kind === "donkey";      // the donkey itself: shape untouched, its own colours
+  const Q = SHEEP ? P : GOAT ? PG : PIG ? PQ : HYENA ? PHY : DONKEY ? PDK : PC, src = A.mesh;
+  const legSlim = SHEEP ? 0.72 : GOAT ? 0.66 : PIG ? PQ.legThick : HYENA ? PHY.legSlim : DONKEY ? 1 : PC.legSlim, neckSlim = SHEEP ? 1 : GOAT ? 0.85 : PIG ? PQ.neckSlim : HYENA ? PHY.neckSlim : DONKEY ? 1 : PC.neckSlim;
   const hash = (i) => { let h = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
   const capSet = new Set();               // sheep: head vertices under the wool cap
   // 1. Donkey rest → camel rest through the skin.
@@ -1151,7 +1434,7 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
   const lenScale = {};
   for (const n of A.boneNames) {
     const kid = B[n].children.find((c) => c.isBone && F[c.name] !== undefined);
-    lenScale[n] = kid ? F[kid.name] : /LowerLeg/.test(n) ? Q.legs : 1;
+    lenScale[n] = kid ? F[kid.name] : /LowerLeg/.test(n) ? (Q.legsBack && n.startsWith("Back") ? Q.legsBack : Q.legs) : 1;
   }
   const M = {}, Minv0 = A.restInv;
   for (const n of A.boneNames) M[n] = B[n].matrixWorld.clone();
@@ -1292,6 +1575,10 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
       flips++;
       const b = WS[fv(f)[0]].reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0])[0];
       where[b] = (where[b] ?? 0) + 1;
+      if (b === "Head") {   // where on the head (for tracing see-through slits)
+        const c = V(); for (const i of fv(f)) c.add(WP[i]); c.multiplyScalar(1 / fv(f).length).sub(W("Head"));
+        (where.headAt ??= []).push({ mat: fm(f), fwd: +c.dot(fwd).toFixed(3), up: +c.y.toFixed(3), side: +c.dot(right).toFixed(3) });
+      }
     });
     flipReport[label] = { flips, where };
   };
@@ -1311,9 +1598,12 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     const along = d.dot(a);
     // sheep: a shorter muzzle, but only IN FRONT of the eyes — shortening
     // the whole head squashed the eye into a slit
-    const muz = SMALL ? smoothstep01(0.4, 0.75, along / LmH) : 1;
-    d.multiplyScalar(1 + ((SHEEP ? 0.92 : GOAT ? 0.86 : Q.head * 0.92) - 1) * w)
-      .addScaledVector(a, (along - (SMALL ? 0.4 * LmH : 0)) * (SHEEP ? -0.35 * muz : GOAT ? -0.18 * muz : 0.14) * w);
+    const muz = SMALL || PIG || HYENA ? smoothstep01(0.4, 0.75, along / LmH) : 1;
+    d.multiplyScalar(1 + ((SHEEP ? 0.92 : GOAT ? 0.86 : PIG ? PQ.head : HYENA ? PHY.head : DONKEY ? 1 : Q.head * 0.92) - 1) * w)
+      .addScaledVector(a, (along - (SMALL || PIG || HYENA ? 0.4 * LmH : 0)) * (SHEEP ? -0.35 * muz : GOAT ? -0.18 * muz : PIG ? PQ.muzzle * muz : HYENA ? PHY.muzzle * muz : DONKEY ? 0 : 0.14) * w);
+    // hyena: a NARROW head (the husky's is broad and round — "the face looks
+    // way too large"), the ears keep their spread
+    if (HYENA && PHY.headNarrow) d.addScaledVector(hs, d.dot(hs) * (PHY.headNarrow - 1) * Math.min(1, wOf(i, (b) => b === "Head")));
     WP[i].copy(H).add(d);
   }
   // (camel only) Camel face, in head space (z along the muzzle 0..1, y up, x across):
@@ -1378,7 +1668,27 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     const e0 = W("Ear1" + sd);
     for (let i = 0; i < WP.length; i++) {
       const w = wOf(i, (b) => b.startsWith("Ear") && b.endsWith(sd));
-      if (w > 0.05) WP[i].sub(e0).multiplyScalar(1 - (SHEEP ? 0 : GOAT ? 0.1 : 0.45) * Math.min(1, w)).add(e0);   // sheep ears keep their size: they must clear the wool
+      if (w > 0.05) WP[i].sub(e0).multiplyScalar(1 - (SHEEP ? 0 : GOAT ? 0.1 : PIG ? PQ.ears : HYENA ? PHY.ears : DONKEY ? 0 : 0.45) * Math.min(1, w)).add(e0);   // sheep ears keep their size: they must clear the wool
+    }
+    const earWideK = PIG2 ? PQ.earWide : HYENA ? (PHY.earWide ?? 1) : 1;
+    if ((PIG2 || HYENA) && earWideK !== 1) {
+      // A pig's ear is a BROAD triangle: widen it across its own axis, most at
+      // the base, back to the point at the tip.
+      const tipC = V(); let nw = 0;
+      for (let i = 0; i < WP.length; i++) if (wOf(i, (b) => /^Ear[34]/.test(b) && b.endsWith(sd)) > 0.5) { tipC.add(WP[i]); nw++; }
+      if (nw) {
+        const ax = tipC.multiplyScalar(1 / nw).sub(e0), len = ax.length(); ax.normalize();
+        for (let i = 0; i < WP.length; i++) {
+          const w = wOf(i, (b) => /^Ear[1-4]/.test(b) && b.endsWith(sd));
+          // by a SMOOTH weight: a hard cut at 0.3 left the ear root's
+          // half-weighted vertices behind and tore a see-through slit under it
+          if (w < 0.05) continue;
+          const d = WP[i].clone().sub(e0), t = Math.min(1, Math.max(0, d.dot(ax) / len));
+          const perp = d.clone().addScaledVector(ax, -d.dot(ax));
+          const k = 1 + (earWideK - 1) * (1 - t) * smoothstep01(0.05, 0.7, w) * smoothstep01(0.02, 0.2, t);
+          WP[i].copy(e0).addScaledVector(ax, d.dot(ax)).addScaledVector(perp, k);
+        }
+      }
     }
     if (SMALL) {
       // A sheep's ears stick out sideways and droop: turn them about the
@@ -1427,7 +1737,7 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
   // mane faces, coat-coloured, and make every neck cross-section convex
   // on top — the upper half lies ON an ellipse through the neck's own
   // sides: trough vertices pushed out, mane-fin vertices pulled in.
-  {
+  if (!HYENA && !DONKEY) {               // (the husky has no mane; the donkey keeps its own)
     const isMane = (i) => WM[i].has("Main_Dark")
       && wOf(i, (b) => b.startsWith("Neck") || b === "Head" || b === "Torso3") > 0.5
       && wOf(i, (b) => b.startsWith("Ear")) < 0.2;
@@ -1753,6 +2063,43 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     faces = out;
     return split.size;
   };
+  // PLANE SLICE: split every face the plane (normal nP, offset d) crosses,
+  // one shared new vertex per crossed edge (the mesh stays closed); a bent
+  // polygon is cut as triangles. Markings then follow straight clean edges.
+  const planeSlice = (nP, d) => {
+    const side = (i) => WP[i].dot(nP) - d;
+    const made = new Map();
+    const cutV = (x, y) => {
+      const k = ek(x, y);
+      if (made.has(k)) return made.get(k);
+      const sx = side(x), sy = side(y);
+      const t = Math.min(0.95, Math.max(0.05, sx / (sx - sy)));
+      const id = WP.length;
+      WP.push(WP[x].clone().lerp(WP[y], t)); WS.push(mixSkinT(WS[x], WS[y], t));
+      WM.push(new Set([...WM[x]].filter((q) => WM[y].has(q))));
+      made.set(k, id);
+      return id;
+    };
+    const cutPoly = (vs, mt, out) => {
+      const L = vs.length, sg = vs.map((i) => side(i) >= 0);
+      let nx = 0; for (let k = 0; k < L; k++) if (sg[k] !== sg[(k + 1) % L]) nx++;
+      if (nx === 0) { out.push([...vs, mt]); return; }
+      if (nx > 2) { for (let k = 1; k < L - 1; k++) cutPoly([vs[0], vs[k], vs[k + 1]], mt, out); return; }   // bent: as triangles
+      const A0 = [], A1 = [];
+      for (let k = 0; k < L; k++) {
+        const x = vs[k], y = vs[(k + 1) % L];
+        (sg[k] ? A0 : A1).push(x);
+        if (sg[k] !== sg[(k + 1) % L]) { const m = cutV(x, y); A0.push(m); A1.push(m); }
+      }
+      if (A0.length >= 3) out.push([...A0, mt]);
+      if (A1.length >= 3) out.push([...A1, mt]);
+    };
+    const out = [];
+    let n = 0;
+    for (const f of faces) { const before = out.length; cutPoly(fv(f), fm(f), out); if (out.length - before > 1) n++; }
+    faces = out;
+    return n;
+  };
   const s0 = hc.dot(fwd);
   // Sheep wool: which vertices it covers (body, neck, thighs, tail — not
   // the head, not below the knees).
@@ -1769,6 +2116,9 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     + (SHEEP ? (wOf(i, (b) => b === "Head") + (wOf(i, (b) => /^Ear[234]/.test(b)) < 0.1 ? wOf(i, (b) => /^Ear1/.test(b)) : 0))
       * (1 - smoothstep01(0.02, 0.2, headZ(i))) : 0));
   let lift;
+  const hyBands = [];                    // hyena: the stripe bands [plane normal, d0, d1]
+  const dkStripe = {};                   // donkey: where its stripe / cross were sliced
+  const dkLoad = {};                     // donkey: the blanket's cuts
   if (SHEEP) {
     // Loop cuts along the torso for square wool facets, a stub tail, then
     // the wool: every covered vertex pushed out from the spine / neck
@@ -1972,6 +2322,516 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     }
     console.log("[goat-morph] tail, horns, beard added");
     lift = WP.map(() => 0);
+  } else if (PIG) {
+    // PIG: a fat barrel (out from the spine), a POT BELLY sagging between the
+    // legs, a slight swayback — one displacement field, smoothed over the mesh
+    // before it is applied (as the wool: neighbours on different spine segments
+    // must not pull apart). Then the snout: its end flattened into a disc.
+    const sB = W("Back").dot(fwd), sF = W("Torso3").dot(fwd);
+    const rings = [0.25, 0.5, 0.75].map((u) => loopCut(sB + (sF - sB) * u));
+    const Lbp = W("Torso3").sub(W("Back")).setY(0).length();
+    const spine = [W("Back").addScaledVector(fwd, -0.15 * Lbp), W("Torso"), W("Torso2"), W("Torso3")];
+    const bodyW = (i) => Math.min(1, wOf(i, (b) => b === "Body" || b === "Back" || b.startsWith("Torso"))
+      + 0.6 * wOf(i, (b) => /^(BackShoulder|BackLeg[LR]|FrontShoulder)/.test(b)) + 0.35 * wOf(i, (b) => b === "Neck1"));
+    const used = new Set();
+    for (const f of faces) for (const i of fv(f)) used.add(i);
+    const disp = new Map();
+    for (const i of used) {
+      const w = bodyW(i);
+      if (w < 0.05) continue;
+      const { c, s: sp } = nearest(spine, WP[i]);
+      const d = WP[i].clone().sub(c), r = d.length();
+      if (r < 1e-6) continue;
+      const dir = d.clone().multiplyScalar(1 / r);
+      const mid = Math.sin(Math.PI * Math.min(1, Math.max(0, sp / (Lbp * 1.15))));   // 0 at the ends, 1 mid-body
+      const v = dir.multiplyScalar((PQ.girth - 1) * r * w);
+      if (dir.y < 0) v.y -= 0.2 * A.Rv * PQ.belly * w * mid * Math.min(1, -dir.y * 1.6);   // the belly sags
+      if (dir.y > 0.3) v.y -= PQ.sway * A.Rv * w * mid;                                           // swayback
+      disp.set(i, v);
+    }
+    const adj = new Map();
+    for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; (adj.get(x) ?? adj.set(x, []).get(x)).push(y); (adj.get(y) ?? adj.set(y, []).get(y)).push(x); } }
+    for (let it = 0; it < 6; it++) {
+      const next = new Map();
+      for (const [i, dv] of disp) { const m = dv.clone(); let n = 1; for (const j of adj.get(i) ?? []) { const dj = disp.get(j); if (dj) m.add(dj); n++; } next.set(i, m.multiplyScalar(1 / n)); }
+      for (const [i, dv] of next) disp.set(i, dv);
+    }
+    for (const [i, dv] of disp) WP[i].add(dv);
+    if (PIG2 && PQ.flatBack) {
+      // pig2: a LEVEL back — the donkey's withers stand above the line from the
+      // rump to the neck; nothing on the back may rise above the mid-back height
+      // (measured per vertex), so the back is one long straight line.
+      let midTop = -Infinity;
+      const s2 = W("Torso2").dot(fwd);
+      for (const i of used) if (bodyW(i) > 0.5 && Math.abs(WP[i].dot(fwd) - s2) < 0.25 * Lbp) midTop = Math.max(midTop, WP[i].y);
+      for (const i of used) {
+        const w = Math.min(1, bodyW(i) + wOf(i, (b) => b === "Neck1"));
+        if (w < 0.2 || WP[i].y <= midTop) continue;
+        WP[i].y = midTop + (WP[i].y - midTop) * (1 - w);
+      }
+    }
+    // The head as a pig's WEDGE (head space: z along the muzzle 0..1, y up,
+    // x across): heavy jowls low at the back, a shallow jaw, the muzzle
+    // tapering straight down to the snout; the snout's end cut flat into a
+    // disc with a slight rim.
+    const headIds = [...used].filter((i) => headW(i) > 0.5 && wOf(i, (b) => b.startsWith("Ear")) < 0.2);
+    const yAxis = (() => { let lo = Infinity, hi = -Infinity; for (const i of headIds) { const y = WP[i].clone().sub(H).dot(hu) / LmS; lo = Math.min(lo, y); hi = Math.max(hi, y); } return (lo + hi) / 2; })();
+    const wedge = (p0, w) => {
+      const d = p0.clone().sub(H);
+      let z = d.dot(a) / LmS, y = d.dot(hu) / LmS, x = d.dot(hs) / LmS;
+      if (y < yAxis) y += (yAxis - y) * PQ.jawLift * smoothstep01(0.25, 0.6, z) * w;   // shallower jaw
+      const jowl = (1 - smoothstep01(0.2, 0.45, z)) * smoothstep01(0.0, 0.08, yAxis - y);
+      x *= 1 + PQ.jowl * jowl * w;                                                     // jowls, low at the back
+      // pig2: wide LOW (cheeks, jowls), narrower up at the eyes — a uniformly
+      // wide head set the eyes too far apart. (pig: upperWide = headWide = 1.)
+      const low = smoothstep01(-0.02, 0.12, yAxis - y);
+      x *= 1 + ((PQ.upperWide ?? PQ.headWide) + (PQ.headWide - (PQ.upperWide ?? PQ.headWide)) * low - 1) * w;
+      const taper = smoothstep01(0.4, 0.85, z);
+      x *= 1 - PQ.taper * taper * w;                                                   // the wedge narrows to the snout
+      y = yAxis + (y - yAxis) * (1 - PQ.taperY * taper * w);
+      if (z > 0.78) {                                                                  // the disc
+        const t = smoothstep01(0.78, 0.9, z);
+        const rim = 1 + PQ.rim * t;
+        x *= rim; y = yAxis + (y - yAxis) * (1 + (PQ.rimY ?? 0.1) * t);
+        z = Math.min(z, 0.9);
+      }
+      return H.clone().addScaledVector(a, z * LmS).addScaledVector(hu, y * LmS).addScaledVector(hs, x * LmS);
+    };
+    // pig2: each eye and the ring of faces round it move as ONE piece (the
+    // eye centre's own shift) — the jowl's steep ramp crossed the eye and
+    // folded its small faces into see-through slits (measured at both eyes).
+    const eyeOf = new Map(), eyeC = [];
+    if (PIG2) {
+      const eyeV = new Set();
+      for (const f of faces) if (fm(f) === "Eye_Dark" || fm(f) === "Eye_White") for (const i of fv(f)) eyeV.add(i);
+      for (const sgn of [-1, 1]) {
+        const ids = [...eyeV].filter((i) => Math.sign(WP[i].clone().sub(H).dot(hs)) === sgn);
+        if (!ids.length) continue;
+        const c = V(); for (const i of ids) c.add(WP[i]); c.multiplyScalar(1 / ids.length);
+        let r = 0; for (const i of ids) r = Math.max(r, WP[i].distanceTo(c));
+        eyeC.push({ sgn, c0: c.clone(), c1: wedge(c, 1), r });
+      }
+      // how much each vertex moves WITH its eye: 1 on the eye and just round
+      // it, fading to 0 over a band (a hard edge tore a slit above the eye)
+      for (const i of headIds) {
+        const sgn = Math.sign(WP[i].clone().sub(H).dot(hs));
+        const e = eyeC.find((q) => q.sgn === sgn);
+        if (!e) continue;
+        const k = 1 - smoothstep01(e.r * 1.6, e.r * 3.4, WP[i].distanceTo(e.c0));
+        if (k > 0) eyeOf.set(i, { e, k });
+      }
+    }
+    const newPos = new Map();
+    for (const i of headIds) {
+      const face = wedge(WP[i], Math.min(1, headW(i)));
+      const q = eyeOf.get(i);
+      newPos.set(i, q ? WP[i].clone().add(q.e.c1.clone().sub(q.e.c0)).lerp(face, 1 - q.k) : face);
+    }
+    for (const [i, q] of newPos) WP[i].copy(q);
+    if (PIG2) {
+      // FACE VOLUME (your black-pig references): a domed forehead, a brow
+      // bulge over each eye, full cheeks under it, the snout pushed out into a
+      // short cylinder. Smooth bumps in head space; the eyes ride with them.
+      const bump = (p, c, r) => { const d = p.distanceTo(c) / r; return d >= 1 ? 0 : (1 - d * d) ** 2; };
+      const upIn = (v) => v.clone().normalize();
+      const moves = new Map();
+      for (const i of headIds) {
+        const p = WP[i], m = V();
+        for (const e of eyeC) {
+          const out = hs.clone().multiplyScalar(e.sgn);
+          const brow = e.c1.clone().addScaledVector(hu, 0.09 * LmS).addScaledVector(a, -0.02 * LmS);
+          m.addScaledVector(upIn(out.clone().multiplyScalar(0.5).addScaledVector(hu, 0.6).addScaledVector(a, 0.25)), PQ.brow * LmS * bump(p, brow, 0.13 * LmS));
+          const cheek = e.c1.clone().addScaledVector(hu, -0.12 * LmS).addScaledVector(a, 0.02 * LmS).addScaledVector(out, -0.02 * LmS);
+          m.addScaledVector(upIn(out.clone().addScaledVector(hu, -0.2)), PQ.cheek * LmS * bump(p, cheek, 0.17 * LmS));
+        }
+        const dome = H.clone().addScaledVector(hu, 0.2 * LmS).addScaledVector(a, 0.3 * LmS);
+        m.addScaledVector(hu, PQ.dome * LmS * bump(p, dome, 0.28 * LmS));
+        // a CURVED nose bridge: the forehead rounds down into the snout (a
+        // straight bridge read long and flat — your references are round)
+        if (PQ.bridge) {
+          const br = H.clone().addScaledVector(hu, 0.12 * LmS).addScaledVector(a, 0.55 * LmS);
+          m.addScaledVector(hu.clone().addScaledVector(a, 0.35).normalize(), PQ.bridge * LmS * bump(p, br, 0.26 * LmS));
+        }
+        const z = p.clone().sub(H).dot(a) / LmS;
+        m.addScaledVector(a, PQ.snoutOut * LmS * smoothstep01(0.7, 0.88, z));             // the snout sticks out
+        if (m.lengthSq() > 0) moves.set(i, m);
+      }
+      for (const [i, m] of moves) WP[i].add(m);
+      // The eyeball out of its socket: the donkey's eye is set deep (it read as
+      // a hole); your pigs' eyes sit flush and bulge a little under the lid.
+      if (PQ.eyeOut) {
+        const ev = new Set();
+        for (const f of faces) if (fm(f) === "Eye_Dark" || fm(f) === "Eye_White") for (const i of fv(f)) ev.add(i);
+        for (const e of eyeC) {
+          const out = hs.clone().multiplyScalar(e.sgn).addScaledVector(a, 0.35).normalize();
+          for (const i of ev) if (Math.sign(WP[i].clone().sub(H).dot(hs)) === e.sgn) WP[i].addScaledVector(out, PQ.eyeOut * LmS);
+        }
+      }
+      if (PQ.fillGroove) {
+        // THE GROOVE under the ears: the thick neck met a head narrower just in
+        // front of it, and from behind you looked PAST the head's side under the
+        // ear (magenta-background test: slits both sides). A pig's head flows
+        // out of its neck: per height band and side, the side width from the
+        // neck to the eye plane may not dip below the straight line between the
+        // two — side-surface vertices are pushed out to it.
+        const hf = (p) => { const d = p.clone().sub(H); return { z: d.dot(a) / LmS, y: d.dot(hu) / LmS, x: d.dot(hs) / LmS }; };
+        const za = hf(W("Neck2")).z, zb = eyeC.length ? eyeC.reduce((m, e) => m + hf(e.c0).z, 0) / eyeC.length : 0.35;
+        const isEar = (i) => wOf(i, (b) => /^Ear[234]/.test(b)) >= 0.2;
+        const ids = [...used].filter((i) => wOf(i, (b) => b.startsWith("Neck") || b === "Head" || b.startsWith("Ear")) > 0.5 && !isEar(i));
+        const zb2 = 0.04, yb2 = 0.05;
+        const mx = new Map();
+        const key = (z, y, sg) => `${Math.round(z / zb2)}|${Math.round(y / yb2)}|${sg}`;
+        const P0 = new Map();
+        for (const i of ids) { const q = hf(WP[i]); P0.set(i, q); const sg = q.x >= 0 ? 1 : -1, k = key(q.z, q.y, sg); mx.set(k, Math.max(mx.get(k) ?? 0, Math.abs(q.x))); }
+        const widthAt = (z, y, sg) => { let m = 0; for (let dz = -1; dz <= 1; dz++) m = Math.max(m, mx.get(key(z + dz * zb2, y, sg)) ?? 0); return m; };
+        const deltas = new Map();
+        let pushed = 0, most = 0;
+        for (const i of ids) {
+          const q = P0.get(i);
+          if (q.z <= za || q.z >= zb) continue;
+          const sg = q.x >= 0 ? 1 : -1;
+          const wa = widthAt(za, q.y, sg), wb = widthAt(zb, q.y, sg), here = mx.get(key(q.z, q.y, sg)) ?? 0;
+          if (!wa || !wb || !here) continue;
+          const u = (q.z - za) / (zb - za), env = wa + (wb - wa) * u;
+          if (env <= here) continue;
+          const k = smoothstep01(0.55, 1, Math.abs(q.x) / here);            // the side surface, not the inside
+          const dx = (env - here) * k * Math.sin(Math.PI * u) ** 0.5;        // nothing at either end
+          if (dx <= 1e-5) continue;
+          deltas.set(i, hs.clone().multiplyScalar(sg * dx * LmS));
+          pushed++; most = Math.max(most, dx);
+        }
+        // relax the pushes over the surface so no single vertex stands out
+        const nb = new Map();
+        for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; (nb.get(x) ?? nb.set(x, []).get(x)).push(y); (nb.get(y) ?? nb.set(y, []).get(y)).push(x); } }
+        let D = deltas;
+        for (let it = 0; it < 2; it++) {
+          const N2 = new Map();
+          for (const [i, d] of D) { const m = d.clone(); let n = 1; for (const j of nb.get(i) ?? []) { const dj = D.get(j); if (dj) { m.add(dj); n++; } } N2.set(i, m.multiplyScalar(1 / n)); }
+          D = N2;
+        }
+        for (const [i, d] of D) WP[i].add(d);
+        // the ear sheets ride with their root
+        for (const e of eyeC) {
+          const root = [...D].filter(([i]) => wOf(i, (b) => b.startsWith("Ear1")) > 0.2 && Math.sign(WP[i].clone().sub(H).dot(hs)) === e.sgn);
+          if (!root.length) continue;
+          const m = V(); for (const [, d] of root) m.add(d); m.multiplyScalar(1 / root.length);
+          for (const i of used) if (isEar(i) && Math.sign(WP[i].clone().sub(H).dot(hs)) === e.sgn) WP[i].add(m);
+        }
+        window.__groove = { pushed, most: +most.toFixed(3) };
+        console.log(`[pig2-morph] groove under the ears filled: ${pushed} verts, most ${most.toFixed(3)} head lengths`);
+      }
+      // Repair: any head face still inside-out is relaxed toward its neighbours
+      // until it is not (measured, not assumed — logged).
+      const nrmF = (f) => { const vs = fv(f), L = vs.length, n = V(); for (let k = 0; k < L; k++) { const p0 = WP[vs[k]], p1 = WP[vs[(k + 1) % L]]; n.x += (p0.y - p1.y) * (p0.z + p1.z); n.y += (p0.z - p1.z) * (p0.x + p1.x); n.z += (p0.x - p1.x) * (p0.y + p1.y); } return n.normalize(); };
+      const headF = faces.filter((f) => fv(f).every((i) => headW(i) > 0.5));
+      const nbr = new Map();
+      for (const f of headF) { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; (nbr.get(x) ?? nbr.set(x, new Set()).get(x)).add(y); (nbr.get(y) ?? nbr.set(y, new Set()).get(y)).add(x); } }
+      let fixedRounds = 0;
+      for (let it = 0; it < 30; it++) {
+        const byE = new Map(), N = headF.map(nrmF);
+        headF.forEach((f, fi) => { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; const key = x < y ? `${x}_${y}` : `${y}_${x}`; (byE.get(key) ?? byE.set(key, []).get(key)).push(fi); } });
+        const nb = headF.map(() => V());
+        for (const l of byE.values()) if (l.length === 2) { nb[l[0]].add(N[l[1]]); nb[l[1]].add(N[l[0]]); }
+        // folded against its neighbours, OR turned to face into the head (a
+        // half-fold the neighbour test misses — the slit above the eye)
+        const hcR = H.clone().addScaledVector(a, 0.4 * LmS);
+        const inwardF = (f, fi) => { if (fv(f).some((i) => wOf(i, (b) => b.startsWith("Ear")) > 0.2)) return false; const c = V(); for (const i of fv(f)) c.add(WP[i]); c.multiplyScalar(1 / fv(f).length); return N[fi].dot(c.sub(hcR).normalize()) < -0.05; };
+        const bad = headF.filter((f, fi) => (nb[fi].lengthSq() > 1e-12 && N[fi].dot(nb[fi].normalize()) < -0.2) || inwardF(f, fi));
+        if (!bad.length) break;
+        fixedRounds++;
+        for (const f of bad) for (const i of fv(f)) { const ns = nbr.get(i); if (!ns) continue; const c = V(); for (const j of ns) c.add(WP[j]); WP[i].lerp(c.multiplyScalar(1 / ns.size), 0.5); }
+      }
+      {
+        const hc = H.clone().addScaledVector(a, 0.4 * LmS);
+        let inward = 0;
+        for (const f of headF) {
+          if (fv(f).some((i) => wOf(i, (b) => b.startsWith("Ear")) > 0.2)) continue;   // ears are thin sheets
+          const c = V(); for (const i of fv(f)) c.add(WP[i]); c.multiplyScalar(1 / fv(f).length);
+          if (nrmF(f).dot(c.clone().sub(hc).normalize()) < -0.05) inward++;
+        }
+        window.__pig2Inward = inward;
+        console.log(`[pig2-morph] face volume: brow, cheeks, dome, snout; fold repair rounds ${fixedRounds}; head faces turned inward: ${inward}`);
+      }
+      if (PQ.poll) {
+        // THE POLL: behind the ears the neck's top rose into a bump (measured on
+        // the walking pig's midline: back 0.73 m, a dip to 0.68, up again to
+        // 0.73 at Neck3, then down into the forehead) — the donkey's poll and
+        // forelock. A pig has no neck line: the back runs on into the brow.
+        // Measured in the NECK'S OWN FRAME (height of the top above the bone
+        // chain, per arc length — the rest neck is not yet bent down, the clips
+        // bend it): the top height is made one smooth ramp from Torso3 to the
+        // ear roots; each section's upper part shifts, its shape kept.
+        // the NECK's own vertices only (the body round the shoulders is not
+        // touched: taking it in raised a spike over the withers — measured)
+        const cand = [...used].filter((i) => wOf(i, (b) => /^Ear[234]/.test(b)) < 0.2
+          && wOf(i, (b) => b.startsWith("Torso") || b === "Back") < 0.2 && wOf(i, (b) => b.startsWith("Neck") || b === "Head" || b.startsWith("Ear1")) > 0.6);
+        const info = new Map();
+        for (const i of cand) {
+          const { c, s: sp, t } = nearest(neckJ, WP[i]);
+          const up = UP.clone().addScaledVector(t, -UP.dot(t)).normalize(), sd = V().crossVectors(t, up);
+          const d = WP[i].clone().sub(c);
+          info.set(i, { sp, up, h: d.dot(up), lat: d.dot(sd) });
+        }
+        const earS = nearest(neckJ, W("Ear1L").add(W("Ear1R")).multiplyScalar(0.5)).s;
+        const s1 = nearest(neckJ, W("Neck1")).s, se = earS, bin = 0.06 * (se - s1);
+        const topAt = new Map();
+        for (const [, v] of info) if (v.h > 0 && Math.abs(v.lat) < 0.35 * v.h) { const k = Math.round(v.sp / bin); topAt.set(k, Math.max(topAt.get(k) ?? -Infinity, v.h)); }
+        const top = (sv) => { const k = Math.round(sv / bin); for (let d = 0; d < 4; d++) { const t = topAt.get(k + d) ?? topAt.get(k - d); if (t !== undefined) return t; } return null; };
+        // the ramp starts at the first section that has neck vertices on top
+        let sb = s1;
+        { let k0 = Infinity; for (const k of topAt.keys()) if (k * bin >= s1 - bin && k < k0) k0 = k; if (k0 < Infinity) sb = k0 * bin; }
+        const hb = top(sb), he = top(se);
+        const prof = [];
+        for (let k = Math.round(s1 / bin); k * bin <= se; k += 1) prof.push((top(k * bin) ?? 0).toFixed(3));
+        let moved = 0, most = 0;
+        if (hb !== null && he !== null) {
+          const want = (sv) => { const u = Math.min(1, Math.max(0, (sv - sb) / (se - sb))); return hb + (he - hb) * smoothstep01(0, 1, u); };
+          // pressed DOWN only (the poll bump); a low spot is left alone
+          const shift = (sv) => { let m = 0, n = 0; for (let d = -2; d <= 2; d++) { const x = sv + d * bin, t = top(x); if (t === null || x < sb || x > se) continue; m += Math.min(0, want(x) - t); n++; } return n ? m / n : 0; };
+          for (const i of cand) {
+            const v = info.get(i);
+            if (v.sp <= sb || v.sp >= se) continue;
+            const u = (v.sp - sb) / (se - sb), edge = smoothstep01(0, 0.15, u);
+            const t = top(v.sp);
+            if (t === null || t <= 0 || v.h <= 0) continue;
+            const dh = shift(v.sp) * smoothstep01(0.25, 0.9, v.h / t) * edge;          // the upper part of the section
+            if (Math.abs(dh) > 1e-6) { WP[i].addScaledVector(v.up, dh); moved++; most = Math.max(most, Math.abs(dh)); }
+          }
+        }
+        const prof2 = [];
+        // (re-measure for the log)
+        const topAt2 = new Map();
+        for (const i of cand) { const { c, s: sp, t } = nearest(neckJ, WP[i]); const up = UP.clone().addScaledVector(t, -UP.dot(t)).normalize(), sd = V().crossVectors(t, up), d = WP[i].clone().sub(c), h = d.dot(up); if (h > 0 && Math.abs(d.dot(sd)) < 0.35 * h) { const k = Math.round(sp / bin); topAt2.set(k, Math.max(topAt2.get(k) ?? -Infinity, h)); } }
+        for (let k = Math.round(s1 / bin); k * bin <= se; k += 1) prof2.push((topAt2.get(k) ?? 0).toFixed(3));
+        window.__poll = { before: prof, after: prof2, moved };
+        console.log(`[pig2-morph] poll: neck-top height along the neck ${prof.join(" ")} → ${prof2.join(" ")}; ${moved} verts, most ${(most / A.Rv).toFixed(3)} Rv`);
+      }
+      {
+        // NECK / THROAT: the neck bent down and the back flattened can pinch the
+        // throat into half-folded faces (a see-through hollow). Same test as the
+        // head, measured from the neck's own axis; relaxed until none face in.
+        const chain = [W("Torso2"), W("Torso3"), W("Neck1"), W("Neck2"), W("Neck3"), W("Head")];
+        const neckF = faces.filter((f) => fv(f).reduce((sum, i) => sum + wOf(i, (b) => b.startsWith("Neck") || b === "Torso3"), 0) / fv(f).length > 0.4
+          && fv(f).every((i) => wOf(i, (b) => b.startsWith("Ear")) < 0.2));
+        const nbN = new Map();
+        for (const f of neckF) { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; (nbN.get(x) ?? nbN.set(x, new Set()).get(x)).add(y); (nbN.get(y) ?? nbN.set(y, new Set()).get(y)).add(x); } }
+        const inwardN = () => neckF.filter((f) => { const c = V(); for (const i of fv(f)) c.add(WP[i]); c.multiplyScalar(1 / fv(f).length); const { c: q } = nearest(chain, c); return nrmF(f).dot(c.sub(q).normalize()) < -0.05; });
+        const before = inwardN().length;
+        let rounds = 0;
+        for (let it = 0; it < 30; it++) {
+          const bad = inwardN();
+          if (!bad.length) break;
+          rounds++;
+          for (const f of bad) for (const i of fv(f)) { const ns = nbN.get(i); if (!ns) continue; const c = V(); for (const j of ns) c.add(WP[j]); WP[i].lerp(c.multiplyScalar(1 / ns.size), 0.5); }
+        }
+        window.__pig2Neck = { before, after: inwardN().length, rounds };
+        // THE EAR COLLAR: faces joining an ear's root to the neck/head. Both
+        // passes above skip anything touching an ear, and one such face per side
+        // folded inside-out (the see-through slit behind the ear: found by a
+        // ray through the slit — a back face, Ear1 root + two Neck3 vertices).
+        // Tested from the neck/head axis; only the NON-ear corners move (the
+        // ear keeps its shape).
+        {
+          const chainH = [...chain, W("Head").addScaledVector(a, 0.5 * LmS)];
+          const ear1 = (i) => wOf(i, (b) => b.startsWith("Ear1")) > 0.2, earT = (i) => wOf(i, (b) => /^Ear[234]/.test(b)) > 0.2;
+          const collar = faces.filter((f) => fv(f).some(ear1) && !fv(f).some(earT) && !fv(f).every(ear1));
+          const nbC = new Map();
+          for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; (nbC.get(x) ?? nbC.set(x, new Set()).get(x)).add(y); (nbC.get(y) ?? nbC.set(y, new Set()).get(y)).add(x); } }
+          const inwardC = () => collar.filter((f) => { const c = V(); for (const i of fv(f)) c.add(WP[i]); c.multiplyScalar(1 / fv(f).length); const { c: q } = nearest(chainH, c); return nrmF(f).dot(c.sub(q).normalize()) < -0.05; });
+          const c0 = inwardC().length;
+          let rc = 0;
+          for (let it = 0; it < 30; it++) {
+            const bad = inwardC();
+            if (!bad.length) break;
+            rc++;
+            for (const f of bad) for (const i of fv(f)) { if (ear1(i)) continue; const ns = nbC.get(i); if (!ns) continue; const c = V(); for (const j of ns) c.add(WP[j]); WP[i].lerp(c.multiplyScalar(1 / ns.size), 0.5); }
+          }
+          window.__pig2Collar = { faces: collar.length, before: c0, after: inwardC().length, rounds: rc };
+          console.log(`[pig2-morph] ear collar faces turned inward: ${c0} → ${window.__pig2Collar.after} (${rc} rounds, of ${collar.length})`);
+        }
+        console.log(`[pig2-morph] neck/throat faces turned inward: ${before} → ${window.__pig2Neck.after} (${rounds} rounds)`);
+      }
+    }
+    console.log(`[pig-morph] body loop cuts: ${rings.join(", ")} quads per ring; fat, belly, swayback, snout`);
+    lift = WP.map(() => 0);
+  } else if (DONKEY) {
+    // the dorsal stripe (two planes along the spine) and the shoulder cross
+    // (two planes across the withers), sliced so they paint as clean bands
+    const mid = W("Torso2").dot(right), s3 = W("Torso3").dot(fwd);
+    dkStripe.half = PDK.stripeW * A.Rside; dkStripe.mid = mid;
+    planeSlice(right, mid - dkStripe.half); planeSlice(right, mid + dkStripe.half);
+    if (PDK.cross) { dkStripe.s3 = s3; dkStripe.crossHalf = PDK.crossW * A.Rv; planeSlice(fwd, s3 - dkStripe.crossHalf); planeSlice(fwd, s3 + dkStripe.crossHalf); }
+    if (PDK.load === "panniers") {
+      // THE LOAD: a woven blanket over the back and two baskets on the flanks,
+      // part of the donkey's own mesh (one draw), skinned to the back bones so
+      // it rides through every clip.
+      const Lb = W("Torso3").dot(fwd) - W("Back").dot(fwd);
+      const sA = W("Back").dot(fwd) + 0.22 * Lb, sB = W("Torso3").dot(fwd) - 0.02 * Lb, sM = (sA + sB) / 2;
+      let bodyTop = -Infinity;
+      for (let i = 0; i < WP.length; i++) { const sv = WP[i].dot(fwd); if (sv > sA && sv < sB && wOf(i, (b) => b === "Back" || b === "Body" || b.startsWith("Torso")) > 0.5) bodyTop = Math.max(bodyTop, WP[i].y); }
+      const yLow = bodyTop - 0.95 * A.Rv;                     // the blanket's lower edge, mid-flank
+      // 1. the blanket's outline and bands, sliced into the body first
+      const bw = 0.045 * (sB - sA) * 2;                        // a border band's width
+      const cuts = [sA, sA + bw, sA + 2 * bw, sM - 0.04 * Lb, sM + 0.04 * Lb, sB - 2 * bw, sB - bw, sB];
+      for (const c of cuts) planeSlice(fwd, c);
+      planeSlice(UP, yLow); planeSlice(UP, yLow + 0.12 * A.Rv);
+      dkLoad.sA = sA; dkLoad.sB = sB; dkLoad.bw = bw; dkLoad.sM = sM; dkLoad.rope = 0.04 * Lb; dkLoad.yLow = yLow; dkLoad.border = 0.12 * A.Rv;
+      // 2. the shell: the back faces between the cuts, lifted along their normal
+      const isBody = (f) => fv(f).every((i) => wOf(i, (b) => b === "Back" || b === "Body" || b.startsWith("Torso") || /Shoulder|BackLeg[LR]/.test(b)) > 0.5);
+      const region = faces.filter((f) => {
+        if (!/^Main/.test(fm(f)) || !isBody(f)) return false;
+        const c = V(); for (const i of fv(f)) c.add(WP[i]); c.multiplyScalar(1 / fv(f).length);
+        const sv = c.dot(fwd); return sv > sA && sv < sB && c.y > yLow;
+      });
+      const nrmOf = (f) => { const vs = fv(f), L = vs.length, n = V(); for (let k = 0; k < L; k++) { const p0 = WP[vs[k]], p1 = WP[vs[(k + 1) % L]]; n.x += (p0.y - p1.y) * (p0.z + p1.z); n.y += (p0.z - p1.z) * (p0.x + p1.x); n.z += (p0.x - p1.x) * (p0.y + p1.y); } return n.normalize(); };
+      const vn = new Map();
+      for (const f of region) { const n = nrmOf(f); for (const i of fv(f)) (vn.get(i) ?? vn.set(i, V()).get(i)).add(n); }
+      const thick = 0.045 * A.Rv, shell = new Map();
+      for (const [i, n] of vn) {
+        const id = WP.length;
+        WP.push(WP[i].clone().addScaledVector(n.normalize(), thick)); WS.push(WS[i].map((e) => [...e])); WM.push(new Set(["Blanket"]));
+        shell.set(i, id);
+      }
+      const edgeUse = new Map();
+      for (const f of region) { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; const key = ek(x, y); edgeUse.set(key, (edgeUse.get(key) ?? 0) + 1); } }
+      for (const f of region) {
+        const vs = fv(f);
+        faces.push([...vs.map((i) => shell.get(i)), "Blanket"]);
+        for (let k = 0; k < vs.length; k++) {                  // the rim: a wall down to the body
+          const x = vs[k], y = vs[(k + 1) % vs.length];
+          if (edgeUse.get(ek(x, y)) === 1) faces.push([x, y, shell.get(y), shell.get(x), "BlanketRim"]);
+        }
+      }
+      // 3. the baskets: flared, woven, open-rimmed, hanging on each flank
+      const len = 0.5 * Lb, hgt = 1.05 * A.Rv, dep = 0.3 * A.Rv;
+      const yT = bodyTop - 0.5 * A.Rv, yB = yT - hgt;
+      // the body's half-width at a height, where they hang (the TORSO only:
+      // the legs' tops stood out and pushed the baskets off the body)
+      const hwAt = (y, band) => {
+        let m = 0;
+        for (let i = 0; i < WP.length; i++) {
+          if (Math.abs(WP[i].dot(fwd) - sM) > len / 2 || Math.abs(WP[i].y - y) > band) continue;
+          if (wOf(i, (b) => b === "Back" || b === "Body" || b.startsWith("Torso")) > 0.6) m = Math.max(m, Math.abs(WP[i].dot(right) - mid));
+        }
+        return m;
+      };
+      // the basket LEANS on the flank: its inner wall from the width at its top
+      // to the width at its bottom (the barrel narrows below — a gap showed)
+      const hwTop = hwAt(yT, 0.2 * A.Rv), hwBot = Math.max(0.5 * hwTop, hwAt(yB + 0.15 * A.Rv, 0.2 * A.Rv));
+      const hw = hwTop;
+      const bone = [["Torso2", 1]];
+      const N = 10, RINGS = 7;
+      for (const sd of [-1, 1]) {
+        const C = W("Torso2").addScaledVector(fwd, sM - W("Torso2").dot(fwd)).addScaledVector(right, mid - W("Torso2").dot(right) + sd * (hw + thick + dep + 0.02 * A.Rv));
+        const ring = (y, k) => {
+          const out = [];
+          const lean = sd * (hwBot - hwTop) * Math.min(1, Math.max(0, (yT - y) / hgt));   // in toward the body, lower down
+          for (let j = 0; j < N; j++) {
+            const th = (j / N) * Math.PI * 2, id = WP.length;
+            WP.push(C.clone().setY(y).addScaledVector(right, lean).addScaledVector(fwd, Math.cos(th) * (len / 2) * k).addScaledVector(right, Math.sin(th) * dep * k));
+            WS.push(bone.map((e) => [...e])); WM.push(new Set(["Basket"]));
+            out.push(id);
+          }
+          return out;
+        };
+        const rings = [];
+        for (let r = 0; r <= RINGS; r++) { const u = r / RINGS; rings.push(ring(yB + u * hgt, 0.82 + 0.18 * u)); }
+        const rimIn = ring(yT - 0.02 * A.Rv, 0.88);             // the rim turns in…
+        const fill = ring(yT - 0.12 * A.Rv, 0.86);              // …down to the load inside
+        const quad = (r0, r1, j, mt) => [r0[j], r0[(j + 1) % N], r1[(j + 1) % N], r1[j], mt];
+        const bands = [];
+        for (let r = 0; r < RINGS; r++) for (let j = 0; j < N; j++) bands.push(quad(rings[r], rings[r + 1], j, r % 2 ? "BasketDark" : "Basket"));
+        for (let j = 0; j < N; j++) bands.push(quad(rings[RINGS], rimIn, j, "BasketRim"), quad(rimIn, fill, j, "BasketRim"));
+        // outward winding: test one wall quad against its radial direction
+        const t = bands[0], nq = nrmOf(t), cq = V(); for (const i of fv(t)) cq.add(WP[i]); cq.multiplyScalar(0.25);
+        const flip = nq.dot(cq.sub(C).setY(0)) < 0;
+        for (const q of bands) faces.push(flip ? [...fv(q).reverse(), fm(q)] : q);
+        // bottom and the load's top, as fans
+        for (const [r, mt, up] of [[rings[0], "BasketDark", false], [fill, "BasketLoad", true]]) {
+          const c = V(); for (const i of r) c.add(WP[i]); c.multiplyScalar(1 / N);
+          const ci = WP.length; WP.push(c); WS.push(bone.map((e) => [...e])); WM.push(new Set([mt]));
+          for (let j = 0; j < N; j++) {
+            const tri = [r[j], r[(j + 1) % N], ci];
+            const nt = nrmOf([...tri, mt]);
+            faces.push((nt.y > 0) === up ? [...tri, mt] : [...tri.reverse(), mt]);
+          }
+        }
+      }
+      console.log(`[donkey-morph] load: blanket ${region.length} faces, two baskets leaning on the flanks (half-width ${(hwTop / A.Rv).toFixed(2)} → ${(hwBot / A.Rv).toFixed(2)} Rv)`);
+    }
+    lift = WP.map(() => 0);
+  } else if (HYENA) {
+    // BUSHY TAIL: the tail's vertices pushed out from the tail bones (not the
+    // root, which carries the rump), most at the middle of the tail.
+    {
+      const tj = []; for (let i = 1; B["Tail" + i]; i++) tj.push(W("Tail" + i));
+      let n = 0;
+      if (tj.length > 2) for (let i = 0; i < WP.length; i++) {
+        const w = wOf(i, (b) => /^Tail[2-9]/.test(b));
+        if (w < 0.3) continue;
+        const { c, s: sp } = nearest(tj, WP[i]);
+        const L = nearest(tj, tj[tj.length - 1]).s || 1, u = sp / L;
+        const k = 1 + (PHY.tailFluff - 1) * Math.min(1, w) * Math.sin(Math.PI * Math.min(1, 0.15 + 0.85 * u)) ** 0.6;
+        WP[i].sub(c).multiplyScalar(k).add(c); n++;
+      }
+      console.log(`[hyena-morph] bushy tail: ${n} verts`);
+    }
+    // THE CREST: a striped hyena's mane of long hair stands along the whole
+    // spine, highest over the shoulders and the neck. The top-line vertices
+    // (above the spine chain, near the midline) are pushed UP, the push
+    // smoothed over the surface so it reads as a ridge of hair, not spikes.
+    const spine = [W("Back"), W("Torso"), W("Torso2"), W("Torso3"), W("Neck1"), W("Neck2"), W("Neck3")];
+    const sT = nearest(spine, W("Torso3")).s, sEnd = nearest(spine, W("Neck3")).s;
+    const disp = new Map();
+    for (let i = 0; i < WP.length; i++) {
+      if (wOf(i, (b) => b === "Back" || b.startsWith("Torso") || b.startsWith("Neck")) < 0.5) continue;
+      const { c, s: sp, t } = nearest(spine, WP[i]);
+      const up = UP.clone().addScaledVector(t, -UP.dot(t)).normalize(), sd = V().crossVectors(t, up);
+      const d = WP[i].clone().sub(c), h = d.dot(up), lat = Math.abs(d.dot(sd));
+      if (h <= 0 || lat > 0.5 * h) continue;
+      // along the spine: rising from the rump to the shoulders, carried up the neck
+      const along = sp < sT ? 0.35 + 0.55 * smoothstep01(0, sT, sp) : 0.9 - 0.45 * smoothstep01(sT, sEnd, sp);
+      disp.set(i, up.multiplyScalar(Q.crest * A.Rv * along * (1 - lat / (0.5 * h))));
+    }
+    const adj = new Map();
+    for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; (adj.get(x) ?? adj.set(x, []).get(x)).push(y); (adj.get(y) ?? adj.set(y, []).get(y)).push(x); } }
+    let D = disp;
+    {
+      // one pass, among the crest's own vertices only (averaging with the
+      // unmoved neighbours thinned it to nothing — measured, not visible)
+      const N2 = new Map();
+      for (const [i, dv] of D) { const m = dv.clone(); let n = 1; for (const j of adj.get(i) ?? []) { const dj = D.get(j); if (dj) { m.add(dj); n++; } } N2.set(i, m.multiplyScalar(1 / n)); }
+      D = N2;
+    }
+    let most = 0; for (const [i, dv] of D) { WP[i].add(dv); most = Math.max(most, dv.length()); }
+    window.__crest = +(most / A.Rv).toFixed(2);
+    console.log(`[hyena-morph] crest up to ${(most / A.Rv).toFixed(2)} Rv, ${D.size} top-line verts raised`);
+    // STRIPES that follow the facets: each stripe is the strip between two
+    // PLANES, and every face a plane crosses is split along it (one shared new
+    // vertex per crossed edge, so the mesh stays closed). A face then lies
+    // wholly inside or outside a stripe — clean straight-edged bands across the
+    // facets, painted dark below. (The quad-walking loop cut stopped short on
+    // the husky's irregular torso: half-split faces, 16 open edges, blocks.)
+    {
+      const sB = W("Back").dot(fwd), sF = W("Torso3").dot(fwd), u0 = -0.1, u1 = 1.15;
+      const per = (u1 - u0) / PHY.stripes, th = THREE.MathUtils.degToRad(PHY.stripeTilt ?? 8);
+      const slice = planeSlice;
+      let split = 0;
+      for (let k = 0; k < PHY.stripes; k++) {
+        const j = (q) => (hash(k * 7 + q) - 0.5) * PHY.stripeJit;              // fixed per stripe
+        const wk = PHY.stripeW * (1 + j(1)), a0 = u0 + (k + 0.5 + j(2) * 0.6 - wk / 2) * per, a1 = a0 + wk * per;
+        const tk = th + j(3) * 0.5;
+        const nK = fwd.clone().multiplyScalar(Math.cos(tk)).addScaledVector(UP, Math.sin(tk)).normalize();
+        // the plane through the stripe edge's point on the body axis (at Torso2's height)
+        const P0 = W("Torso2").addScaledVector(fwd, sB + a0 * (sF - sB) - W("Torso2").dot(fwd));
+        const P1 = W("Torso2").addScaledVector(fwd, sB + a1 * (sF - sB) - W("Torso2").dot(fwd));
+        const d0 = P0.dot(nK), d1 = P1.dot(nK);
+        split += slice(nK, d0) + slice(nK, d1);
+        hyBands.push([nK, d0, d1]);
+      }
+      console.log(`[hyena-morph] stripe planes: ${2 * PHY.stripes}, ${split} faces split`);
+    }
+    lift = WP.map(() => 0);
   } else {
   const ringSizes = [-0.7, -0.25, 0.25, 0.7].map((u) => loopCut(s0 + u * halfLen));
   console.log(`[camel-morph] hump loop cuts: ${ringSizes.join(", ")} quads per ring`);
@@ -1983,6 +2843,112 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     WP[i].y += lift[i];
     WP[i].addScaledVector(right, Math.sign(sd) * Math.min(1, Math.abs(sd) * 1.6) * lift[i] * 0.22);
   }
+  }
+
+  if (PIG2 && PQ.hoofSlim) {
+    // PIG2 FEET (your references): a pig's leg runs STRAIGHT down into a
+    // small hoof. The donkey's pastern angles forward below the fetlock into
+    // a broad hoof — on the pig it read as a horse's boot with a knuckle
+    // (A/B measured: narrowing the hoof alone changed nothing visible). Per
+    // leg: every height slice below the fetlock slides back under the shin
+    // (the pastern stands straight), then the radius tapers smoothly from the
+    // shin to a small hoof. Slices, not single vertices: each slice keeps its
+    // own shape.
+    const allV = new Set(); for (const f of faces) for (const i of fv(f)) allV.add(i);
+    const hoofV = new Set(); for (const f of faces) if (fm(f) === "Hooves") for (const i of fv(f)) hoofV.add(i);
+    const legOfV = (i) => footToLeg(WS[i]).reduce((m, e) => (e[1] > m[1] ? e : m), ["", 0]);
+    const rep = [];
+    for (const leg of ["FrontLowerLegL", "FrontLowerLegR", "BackLowerLegL", "BackLowerLegR"]) {
+      const ids = [...allV].filter((i) => { const [b, w] = legOfV(i); return b === leg && w > 0.5; });
+      if (!ids.some((i) => hoofV.has(i))) continue;
+      const knee = W(leg), tip = tipOf(leg);
+      let y0 = Infinity; for (const i of ids) y0 = Math.min(y0, WP[i].y);
+      const yTop = tip.y + 0.3 * (knee.y - tip.y);                       // above: untouched
+      if (!(yTop > y0)) continue;
+      const axisAt = (y) => (y >= tip.y ? tip.clone().lerp(knee, (y - tip.y) / (knee.y - tip.y)) : tip.clone());
+      const nb = 12, sl = (y) => Math.min(nb, Math.max(0, ((y - y0) / (yTop - y0)) * nb));
+      // 1. straighten: each slice's centre onto the axis (fading out above the fetlock)
+      const cen = Array.from({ length: nb + 1 }, () => [0, 0, 0]);
+      for (const i of ids) { if (WP[i].y > yTop) continue; const k = Math.round(sl(WP[i].y)); cen[k][0] += WP[i].x; cen[k][1] += WP[i].z; cen[k][2]++; }
+      const sh = cen.map((c, k) => {
+        if (!c[2]) return null;
+        const y = y0 + (k / nb) * (yTop - y0), ax = axisAt(y);
+        const blend = 1 - smoothstep01(tip.y, yTop, y);
+        return [(ax.x - c[0] / c[2]) * blend, (ax.z - c[1] / c[2]) * blend];
+      });
+      for (let k = 0; k <= nb; k++) if (!sh[k]) { let lo = k - 1, hi = k + 1; while (lo >= 0 && !sh[lo]) lo--; while (hi <= nb && !sh[hi]) hi++; sh[k] = lo >= 0 && hi <= nb ? [(sh[lo][0] + sh[hi][0]) / 2, (sh[lo][1] + sh[hi][1]) / 2] : (sh[lo] ?? sh[hi] ?? [0, 0]); }
+      sh[nb] = [0, 0];
+      let moved = 0;
+      for (const i of ids) {
+        if (WP[i].y > yTop) continue;
+        const f = sl(WP[i].y), k = Math.floor(f), u = f - k, a0 = sh[k], a1 = sh[Math.min(nb, k + 1)];
+        const dx = a0[0] + (a1[0] - a0[0]) * u, dz = a0[1] + (a1[1] - a0[1]) * u;
+        WP[i].x += dx; WP[i].z += dz; moved = Math.max(moved, Math.hypot(dx, dz));
+      }
+      // 2. taper: radius per slice about the axis → one smooth line, shin → small hoof
+      const r = new Array(nb + 1).fill(0);
+      const off = (i) => { const c = axisAt(WP[i].y); return [WP[i].x - c.x, WP[i].z - c.z]; };
+      for (const i of ids) { if (WP[i].y > yTop) continue; const k = Math.round(sl(WP[i].y)), o = off(i); r[k] = Math.max(r[k], Math.hypot(o[0], o[1])); }
+      // below the fetlock only; its width from the fullest slices there (a
+      // near-empty top slice pinched the back legs to spikes — measured 91%)
+      const kTip = Math.round(sl(tip.y));
+      const rTop = Math.max(...r.slice(Math.max(0, kTip - 1), kTip + 2)), rHoof = Math.max(...r.slice(0, 3)) * PQ.hoofSlim;
+      let slim = 0;
+      for (const i of ids) {
+        if (WP[i].y > tip.y) continue;
+        const k = Math.round(sl(WP[i].y)); if (!r[k]) continue;
+        const want = rHoof + (rTop - rHoof) * smoothstep01(0, 1, (WP[i].y - y0) / (tip.y - y0));
+        const f = Math.max(0.55, Math.min(1, want / r[k])), o = off(i);
+        WP[i].x -= o[0] * (1 - f); WP[i].z -= o[1] * (1 - f);
+        slim = Math.max(slim, 1 - f);
+      }
+      // 2b. spurs: the donkey's fetlock tuft stuck out behind the straight
+      // pastern — no vertex in a slice below the fetlock may stand further out
+      // than 1.2x that slice's median radius
+      {
+        const rs = Array.from({ length: nb + 1 }, () => []);
+        for (const i of ids) { if (WP[i].y > tip.y) continue; const o = off(i); rs[Math.round(sl(WP[i].y))].push(Math.hypot(o[0], o[1])); }
+        const med = rs.map((l) => { if (l.length < 3) return 0; const q = l.slice().sort((x, y) => x - y); return q[q.length >> 1]; });
+        for (const i of ids) {
+          if (WP[i].y > tip.y || hoofV.has(i)) continue;
+          const k = Math.round(sl(WP[i].y)), o = off(i), ri = Math.hypot(o[0], o[1]);
+          if (!med[k] || ri <= 1.2 * med[k]) continue;
+          const f = (1.2 * med[k]) / ri;
+          WP[i].x -= o[0] * (1 - f); WP[i].z -= o[1] * (1 - f);
+        }
+      }
+      // 3. folds: a lower-leg face folded against its neighbours, or a side
+      // face turned in toward the leg's axis (the heel flaps), is relaxed
+      // toward its neighbours until none is left (counted, not assumed)
+      const idS = new Set(ids.filter((i) => WP[i].y <= yTop));
+      const legF = faces.filter((f) => fv(f).every((i) => idS.has(i)));
+      const nbL = new Map();
+      for (const f of faces) { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length]; (nbL.get(x) ?? nbL.set(x, new Set()).get(x)).add(y); (nbL.get(y) ?? nbL.set(y, new Set()).get(y)).add(x); } }
+      const nrmL = (f) => { const vs = fv(f), L = vs.length, n = V(); for (let k = 0; k < L; k++) { const p0 = WP[vs[k]], p1 = WP[vs[(k + 1) % L]]; n.x += (p0.y - p1.y) * (p0.z + p1.z); n.y += (p0.z - p1.z) * (p0.x + p1.x); n.z += (p0.x - p1.x) * (p0.y + p1.y); } return n.normalize(); };
+      const badL = () => {
+        const N = legF.map(nrmL), byE = new Map();
+        legF.forEach((f, fi) => { const vs = fv(f); for (let k = 0; k < vs.length; k++) { const x = vs[k], y = vs[(k + 1) % vs.length], key = x < y ? `${x}_${y}` : `${y}_${x}`; (byE.get(key) ?? byE.set(key, []).get(key)).push(fi); } });
+        const nbn = legF.map(() => V());
+        for (const l of byE.values()) if (l.length === 2) { nbn[l[0]].add(N[l[1]]); nbn[l[1]].add(N[l[0]]); }
+        return legF.filter((f, fi) => {
+          if (nbn[fi].lengthSq() > 1e-12 && N[fi].dot(nbn[fi].clone().normalize()) < -0.2) return true;
+          if (Math.abs(N[fi].y) > 0.7) return false;                    // soles / tops: no side test
+          const c = V(); for (const i of fv(f)) c.add(WP[i]); c.multiplyScalar(1 / fv(f).length);
+          const ax = axisAt(c.y), d = V(c.x - ax.x, 0, c.z - ax.z);
+          return d.lengthSq() > 1e-12 && V(N[fi].x, 0, N[fi].z).dot(d.normalize()) < -0.1;
+        });
+      };
+      const b0 = badL().length;
+      let lr = 0;
+      for (let it = 0; it < 30; it++) {
+        const bad = badL(); if (!bad.length) break; lr++;
+        for (const f of bad) for (const i of fv(f)) { const ns = nbL.get(i); if (!ns) continue; const c = V(); for (const j of ns) c.add(WP[j]); WP[i].lerp(c.multiplyScalar(1 / ns.size), 0.5); }
+      }
+      const b1 = badL().length;
+      rep.push(`${leg.replace("LowerLeg", "")} straightened ${(moved / A.Rv).toFixed(2)} Rv, slimmed up to ${(100 * slim).toFixed(0)}%, folds ${b0} → ${b1}`);
+    }
+    console.log(`[pig2-morph] feet: ${rep.join("; ")}`);
+    window.__pig2Feet = rep;
   }
 
   countFlips("final");
@@ -2077,10 +3043,140 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     if (vs.some((i) => eyeVg.has(i))) cc.lerp(new THREE.Color("#9a8c7f"), 0.3);   // lid ring round the eye
     cc.multiplyScalar(0.94 + 0.12 * hash(vs[0] * 31 + vs[1] * 7 + vs[L - 1]));      // the pack's faint per-face variation
   };
+  // Pig (Móng Cái): black back and head; the belly, the lower legs and a band
+  // round the middle pale pink-white; a pinkish-grey snout disc.
+  const pCoat = new THREE.Color(PQ.coat), pPale = new THREE.Color(PQ.pale);
+  const pigPaint = (vs, mt, nn, cc) => {
+    const L = vs.length, avg = (fn) => vs.reduce((sum, i) => sum + fn(i), 0) / L;
+    if (mt === "Eye_Dark") {
+      // pig2: the eye in bands, as your references — a white eye, a brown
+      // iris, a black pupil (measured from each eye's own centre)
+      if (PQ.sclera && pigEyes.length) {
+        const c = V(); for (const i of vs) c.add(WP[i]); c.multiplyScalar(1 / L);
+        const e = pigEyes.reduce((m, q) => (q.c.distanceTo(c) < m.c.distanceTo(c) ? q : m));
+        const d = e.c.distanceTo(c) / e.r;
+        cc.set(d > 0.62 ? PQ.sclera : d > 0.3 ? PQ.eyeColor : "#0b0706");
+        return;
+      }
+      cc.set(PQ.eyeColor ?? "#070605"); return;
+    }
+    if (mt === "Eye_White") { cc.set("#f2efe9"); return; }
+    if (mt === "Hooves") { cc.set("#2a2320"); return; }
+    cc.copy(pCoat);
+    if (PQ.pattern === "black") {
+      if (PQ.eyeRing && mt !== "Eye_Dark" && vs.some((i) => eyeVg.has(i))) { cc.set(PQ.eyeRing); return; }   // lid ring
+      if (nn.y < -0.35) cc.lerp(pPale, 0.6);                                           // paler underside
+      if (avg((i) => wOf(i, (b) => /^Ear[234]/.test(b))) > 0.4 && nn.dot(fwd) > 0.2) cc.set(PQ.earIn ?? PQ.snout);   // inner ear
+    }
+    if (PQ.pattern === "mongcai") {
+      const legs = avg((i) => wOf(i, (b) => /LowerLeg|FF|IK/.test(b)));
+      const torso = avg((i) => wOf(i, (b) => b === "Back" || b.startsWith("Torso")));
+      // the saddle: the middle third of the body, all the way round
+      const along = avg((i) => (WP[i].dot(fwd) - pigSB) / (pigSF - pigSB));
+      const saddle = torso > 0.4 && along > 0.28 && along < 0.62;
+      if (legs > 0.5 || saddle || (torso > 0.4 && nn.y < -0.3)) cc.copy(pPale);
+    }
+    if (avg((i) => headW(i)) > 0.5 && avg((i) => { const d = WP[i].clone().sub(H); return d.dot(a); }) > 0.86 * LmP) cc.set(PQ.snout ?? "#6e5550");   // snout disc
+    cc.multiplyScalar(0.95 + 0.1 * hash(vs[0] * 31 + vs[1] * 7 + vs[L - 1]));
+  };
+  const pigSB = W("Back").dot(fwd), pigSF = W("Torso3").dot(fwd);
+  // Hyena (striped): sandy-grey coat, pale belly and legs, dark muzzle.
+  const hCoat = new THREE.Color(PHY.coat), hDark = new THREE.Color(PHY.dark), hLight = new THREE.Color(PHY.light), hFace = new THREE.Color(PHY.face);
+  // Algerian donkey: coat, pale muzzle / eye rings / belly, the dark stripe
+  // along the spine and its cross over the shoulders, dark mane and tuft.
+  const dCoat = new THREE.Color(PDK.coat), dPale = new THREE.Color(PDK.pale), dDark = new THREE.Color(PDK.dark);
+  const donkeyPaint = (vs, mt, nn, cc) => {
+    const L = vs.length, avg = (fn) => vs.reduce((sum, i) => sum + fn(i), 0) / L;
+    if (mt === "Eye_Dark") { cc.set("#120e0b"); return; }
+    if (mt === "Eye_White") { cc.set("#e9e3da"); return; }
+    if (mt === "Hooves") { cc.set(PDK.hoof); return; }
+    if (mt === "Muzzle") { cc.set(PDK.nose); return; }
+    if (mt === "Main_Dark") { cc.copy(dDark); return; }                               // mane, ear tips, tail tuft
+    if (mt.startsWith("Basket")) {
+      cc.set(mt === "Basket" ? PDK.basket : mt === "BasketLoad" ? "#6f5a3e" : PDK.basketDark);
+      cc.multiplyScalar(0.92 + 0.16 * hash(vs[0] * 13 + vs[1] * 5));                   // the weave's unevenness
+      return;
+    }
+    if (mt === "Blanket" || mt === "BlanketRim") {
+      const cen = V(); for (const i of vs) cen.add(WP[i]); cen.multiplyScalar(1 / L);
+      const sv = cen.dot(fwd), { sA, sB, bw, sM, rope, yLow, border } = dkLoad;
+      cc.set(PDK.blanket);
+      if (sv < sA + bw || sv > sB - bw) cc.set(PDK.blanketDark);                          // the end borders
+      else if (sv < sA + 2 * bw || sv > sB - 2 * bw) cc.set(PDK.blanketBand);
+      if (cen.y < yLow + border) cc.set(PDK.blanketCream);                               // the lower border
+      if (Math.abs(sv - sM) < rope) cc.set(PDK.rope);                                    // the rope over it
+      if (mt === "BlanketRim") cc.multiplyScalar(0.7);
+      return;
+    }
+    cc.copy(mt === "Main_Light" ? dPale : dCoat);
+    if (mt === "Main") {
+      const cen = V(); for (const i of vs) cen.add(WP[i]); cen.multiplyScalar(1 / L);
+      const torso = avg((i) => wOf(i, (b) => b === "Back" || b === "Body" || b.startsWith("Torso")));
+      // the dorsal stripe: between its two planes, on top, rump to withers
+      const lat = cen.dot(right) - dkStripe.mid, spine = torso + avg((i) => wOf(i, (b) => b.startsWith("Tail1") || b === "Neck1"));
+      if (dkStripe.half && Math.abs(lat) < dkStripe.half && nn.y > 0.2 && spine > 0.5) cc.copy(dDark);
+      // the shoulder cross: between its planes, down the upper shoulders
+      if (dkStripe.crossHalf && torso > 0.3 && Math.abs(cen.dot(fwd) - dkStripe.s3) < dkStripe.crossHalf
+        && (cen.y - W("Torso3").y) / A.Rv > -0.45 && nn.y > -0.2) cc.lerp(dDark, 0.85);
+    }
+    cc.multiplyScalar(0.95 + 0.1 * hash(vs[0] * 31 + vs[1] * 7 + vs[L - 1]));
+  };
+  // Striped: the flanks carry dark VERTICAL stripes, the legs horizontal
+  // bands, the throat a black patch, the muzzle is dark, the crest darker.
+  // One colour per face (from its centre), so the stripes follow the facets.
+  const hSB = W("Back").dot(fwd), hSF = W("Torso3").dot(fwd);
+  const hyenaPaint = (vs, mt, nn, cc) => {
+    const L = vs.length, avg = (fn) => vs.reduce((sum, i) => sum + fn(i), 0) / L;
+    if (mt === "Eye_Dark") { cc.set("#0b0806"); return; }
+    if (mt === "Eye_White") { cc.set("#f2efe9"); return; }
+    const cen = V(); for (const i of vs) cen.add(WP[i]); cen.multiplyScalar(1 / L);
+    // the husky's dark zone is its nose AND its eyebrow / ear markings: only
+    // the nose stays dark, the rest is face
+    if (mt === "Muzzle") { const z = cen.clone().sub(H).dot(a) / Math.max(1e-6, LmP); cc.copy(z > 0.8 ? hDark : hFace); return; }
+    cc.copy(hCoat).lerp(hLight, mt === "Main_Light" && avg((i) => headW(i)) <= 0.5 ? 0.5 : 0);
+    const head = avg((i) => headW(i)), legs = avg((i) => wOf(i, (b) => /LowerLeg|UpperLeg|FF|IK|BackLeg/.test(b)));
+    const torso = avg((i) => wOf(i, (b) => b === "Back" || b.startsWith("Torso")));
+    const neck = avg((i) => wOf(i, (b) => b.startsWith("Neck")));
+    if (head > 0.5) {
+      const z = cen.clone().sub(H).dot(a) / Math.max(1e-6, LmP);
+      cc.copy(hFace);                                                                   // grey-brown face (no husky mask)
+      if (z > 0.55) cc.lerp(hDark, smoothstep01(0.55, 0.85, z) * 0.8);               // the dark muzzle
+    } else if (neck > 0.4) {
+      const { c, t } = nearest(neckJ, cen);
+      const upN = UP.clone().addScaledVector(t, -UP.dot(t)).normalize(), dN = cen.clone().sub(c);
+      const toHead = (nearest(neckJ, cen).s) / Math.max(1e-6, nearest(neckJ, W("Head")).s);
+      if (dN.dot(upN) < -0.45 * dN.length() && toHead > 0.7) cc.copy(hDark);          // the black throat (under the jaw)
+      else if (dN.dot(upN) > 0.6 * dN.length()) cc.lerp(hDark, 0.45);                // the crest
+    } else if (avg((i) => wOf(i, (b) => /LowerLeg|FF|IK/.test(b))) > 0.5) {
+      // thin horizontal bands down the legs (not the paws)
+      const band = Math.sin((cen.y - A.ground0) / (0.075 * A.Rv) * Math.PI);
+      if (band > 0.55 && cen.y > A.ground0 + 0.15 * A.Rv) cc.copy(hDark);
+    } else {
+      // the body: the stripe bands (every face between one stripe's two cuts)
+      const inBand = hyBands.some(([nb, d0b, d1b]) => { const q = cen.dot(nb); return q > d0b && q < d1b; });
+      if (nn.y > 0.8 && torso > 0.3) cc.lerp(hDark, 0.55);                              // the mane along the back
+      else if (inBand && torso > 0.45 && nn.y > -0.7) cc.copy(hDark);
+    }
+    cc.multiplyScalar(0.95 + 0.1 * hash(vs[0] * 31 + vs[1] * 7 + vs[L - 1]));
+  };
+  // each eye's centre and radius (Eye_Dark vertices, split by side)
+  const pigEyes = [];
+  if (PIG) {
+    const ev = new Set(); for (const f of faces) if (fm(f) === "Eye_Dark") for (const i of fv(f)) ev.add(i);
+    for (const sgn of [-1, 1]) {
+      const ids = [...ev].filter((i) => Math.sign(WP[i].clone().sub(W("Head")).dot(right)) === sgn);
+      if (!ids.length) continue;
+      const c = V(); for (const i of ids) c.add(WP[i]); c.multiplyScalar(1 / ids.length);
+      let r = 0; for (const i of ids) r = Math.max(r, WP[i].distanceTo(c));
+      pigEyes.push({ c, r });
+    }
+  }
+  let LmP = 0;
+  for (let i = 0; i < WP.length; i++) if (headW(i) > 0.5) LmP = Math.max(LmP, WP[i].clone().sub(H).dot(a));
   const eyeVg = new Set();
   for (const f of faces) if (fm(f) === "Eye_Dark") for (const i of fv(f)) eyeVg.add(i);
   const c = new THREE.Color(), n = V(), e1 = V(), e2 = V();
-  let topY = -Infinity;
+  let topY = -Infinity, swapped = 0;
   for (const p of WP) topY = Math.max(topY, p.y);
   for (const f of faces) {
     const vs = fv(f), mt = fm(f), L = vs.length;
@@ -2095,7 +3191,7 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     for (const i of vs) cen.add(WP[i]);
     cen.multiplyScalar(1 / L);
     c.copy(PAL[mt] ?? baseC);
-    if (SHEEP) sheepPaint(vs, mt, n, c); else if (GOAT) goatPaint(vs, mt, n, c); else {
+    if (SHEEP) sheepPaint(vs, mt, n, c); else if (GOAT) goatPaint(vs, mt, n, c); else if (PIG) pigPaint(vs, mt, n, c); else if (HYENA) hyenaPaint(vs, mt, n, c); else if (DONKEY) donkeyPaint(vs, mt, n, c); else {
     // The donkey's pale throat / chest zone, stretched by the long neck,
     // reads as a white collar: coat colour there, pale only on belly + legs.
     if (mt === "Main_Light") {
@@ -2122,9 +3218,19 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     if (mt !== "Sole" && knees.some((k) => k.distanceTo(cen) < 0.13 * A.Rv)) c.copy(callusC);
     }
     const rough = mt.startsWith("Eye") ? 0.2 : 0.9;
+    // pig2: a BENT quad split on v0-v2 can leave one triangle wound
+    // backwards — culled, a see-through slit — while the quad's own normal
+    // (every check above) looks fine: found by a ray through the slit behind
+    // the ear. Split such a quad on the other diagonal (v1-v3) instead.
+    let vq = vs;
+    if (PIG2 && L === 4) {
+      const tn = (x, y, z) => WP[y].clone().sub(WP[x]).cross(WP[z].clone().sub(WP[x])).normalize().dot(n);
+      const a02 = Math.min(tn(vs[0], vs[1], vs[2]), tn(vs[0], vs[2], vs[3])), a13 = Math.min(tn(vs[1], vs[2], vs[3]), tn(vs[1], vs[3], vs[0]));
+      if (a02 < 0 && a13 > a02) { vq = [vs[1], vs[2], vs[3], vs[0]]; swapped++; }
+    }
     // fan; a quad's diagonal (v0-v2) is hidden in the wireframe
     for (let k = 1; k < L - 1; k++) {
-      const tri = [vs[0], vs[k], vs[k + 1]];
+      const tri = [vq[0], vq[k], vq[k + 1]];
       const hide = [0, 0, 0];
       if (L === 4) { if (k === 1) hide[1] = 1; else hide[2] = 1; }
       tri.forEach((i, ci) => {
@@ -2134,6 +3240,7 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
       G.idx.push(G.count - 3, G.count - 2, G.count - 1);
     }
   }
+  if (PIG2) { window.__pig2Swapped = swapped; console.log(`[pig2-morph] bent quads split on their other diagonal: ${swapped}`); }
   return { topY, curlR: A.Rv };
 }
 
@@ -2174,9 +3281,11 @@ function paceWalk(tpl, rollDeg = 3) {
   const shift = { L: wrap(ph0[2] - ph0[0]), R: wrap(ph0[3] - ph0[1]) };
   for (const tr of clip.tracks) {
     const node = tr.name.slice(0, tr.name.lastIndexOf("."));
-    const m = /^Front(Shoulder|UpperLeg|LowerLeg)([LR])$/.exec(node);
+    // the front legs AND their feet (IK + FF bones: the hoof flex) — the feet
+    // left on the donkey's beat flexed at the wrong time and floated
+    const m = /^(?:Front(?:Shoulder|UpperLeg|LowerLeg)|IKFrontLeg|FF)([LR])$/.exec(node);
     if (!m) continue;
-    const dt = shift[m[2]] * T;                                     // new(t) = old(t − dt)
+    const dt = shift[m[1]] * T;                                     // new(t) = old(t − dt)
     const it = tr.createInterpolant(), w = tr.getValueSize();
     const vals = new tr.values.constructor(tr.values.length);
     for (let k = 0; k < tr.times.length; k++) {
@@ -2205,6 +3314,7 @@ function paceWalk(tpl, rollDeg = 3) {
     bodyTr.values = vals;
   }
   const f2 = (x) => x.toFixed(2);
+  tpl.paceShift = shift;                                           // feetFollow reads the paced timing
   const res = {
     before: { FLvsBL: f2(wrap(ph0[0] - ph0[2])), FRvsBR: f2(wrap(ph0[1] - ph0[3])), LvsR: f2(wrap(ph0[2] - ph0[3])) },
     after: { FLvsBL: f2(wrap(ph1[0] - ph1[2])), FRvsBR: f2(wrap(ph1[1] - ph1[3])), LvsR: f2(wrap(ph1[2] - ph1[3])) },
@@ -2226,14 +3336,16 @@ function paceWalk(tpl, rollDeg = 3) {
 // lower-leg bone (donkey clip, donkey rig)? Put the animal's IK bone at
 // that spot on the animal's lower leg (same clip time) — its rotation
 // track (the hoof flex) is kept as it is.
-let DONKEY_REF_ = null;
+const DONKEY_REFS = new Map();                         // per source rig
 function donkeyRef() {
-  if (DONKEY_REF_) return DONKEY_REF_;
+  if (DONKEY_REFS.has(gltf)) return DONKEY_REFS.get(gltf);
   const r = cloneSkinned(gltf.scene); r.traverse((o) => { if (o.isMesh) o.visible = false; });
   const b = {}; r.traverse((o) => { if (o.isBone) b[o.name] = o; });
-  return (DONKEY_REF_ = { r, b, mixer: new THREE.AnimationMixer(r) });
+  const ref = { r, b, mixer: new THREE.AnimationMixer(r) };
+  DONKEY_REFS.set(gltf, ref);
+  return ref;
 }
-function feetFollow(tpl, legs) {
+function feetFollow(tpl, legs, off = { F: 0, B: 0 }) {
   const PAIRS = [["FrontLowerLegL", "IKFrontLegL"], ["FrontLowerLegR", "IKFrontLegR"], ["BackLowerLegL", "IKBackLegL"], ["BackLowerLegR", "IKBackLegR"]];
   const r = cloneSkinned(tpl.root), Bn = {};
   r.traverse((o) => { if (o.isBone) Bn[o.name] = o; });
@@ -2249,9 +3361,12 @@ function feetFollow(tpl, legs) {
       const vals = tr.values.slice();
       for (let k = 0; k < tr.times.length; k++) {
         const t = tr.times[k];
-        D.mixer.setTime(Math.min(t, dclip.duration)); D.r.updateMatrixWorld(true);
+        // a paced clip: the front feet follow the donkey foot of the SHIFTED time
+        const dtS = clip.name === "Walk" && tpl.paceShift && leg.startsWith("Front") ? tpl.paceShift[leg.slice(-1)] * dclip.duration : 0;
+        const td = dtS ? (((t - dtS) % dclip.duration) + dclip.duration) % dclip.duration : t;
+        D.mixer.setTime(Math.min(td, dclip.duration)); D.r.updateMatrixWorld(true);
         const dl = D.b[leg].worldToLocal(D.b[ik].getWorldPosition(V()));
-        dl.y += (legs - 1) * A.ext[leg];
+        dl.y += ((typeof legs === "function" ? legs(leg) : legs) - 1) * A.ext[leg] + (leg.startsWith("Front") ? off.F : off.B);
         mixer.setTime(t); r.updateMatrixWorld(true);
         const w = Bn[leg].localToWorld(dl);
         Bn[ik].parent.worldToLocal(w).toArray(vals, k * 3);
@@ -2263,6 +3378,106 @@ function feetFollow(tpl, legs) {
   }
   mixer.stopAllAction(); D.mixer.stopAllAction();
   return n;
+}
+
+// THE CAMEL'S FRONT FEET, PLANTED — by leg IK. With FK clips a planted foot
+// swings on an arc round the shoulder; the camel's legs are 1.3x the donkey's,
+// so the arc is bigger than the donkey's body motion cancels, and during its
+// stance the front foot rose 5-10 cm (measured per key; the front feet were
+// planted 7-13% of the walk against 43% behind — the donkey ~57%). Body bob and
+// chest re-timing were tried and measured: they only traded front for back.
+// At every Walk key where a front foot is near the ground, a two-bone IK bends
+// the shoulder (upper leg) and knee (lower leg) so the foot lands exactly on
+// the ground; the weight fades out as the foot lifts into its swing.
+function plantFrontFeet(tpl, legs) {
+  const clip = tpl.clips.find((c) => c.name === "Walk");
+  if (!clip) return null;
+  const r = cloneSkinned(tpl.root);
+  let mesh = null; r.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
+  const Bn = {}; r.traverse((o) => { if (o.isBone) Bn[o.name] = o; });
+  const names = mesh.skeleton.bones.map((b) => b.name);
+  const G2 = mesh.geometry, SI = G2.attributes.skinIndex, SW = G2.attributes.skinWeight, n = G2.attributes.position.count;
+  const grp = Array.from({ length: n }, (_, i) => {
+    let best = -1, bw = 0; for (let c = 0; c < 4; c++) { const w = SW.getComponent(i, c); if (w > bw) { bw = w; best = SI.getComponent(i, c); } }
+    const nm = names[best] ?? "";
+    if (/^FF[LR]$/.test(nm) || /^IKFrontLeg/.test(nm) || /^FrontLowerLeg/.test(nm)) return nm.slice(-1);
+    return null;
+  });
+  const mix = new THREE.AnimationMixer(r); mix.clipAction(clip).play();
+  const b0 = 0.055 * tpl.height0, b1 = 0.085 * tpl.height0, q = V();   // full plant below ~11 cm on a 2 m camel (its measured stance), fading to ~17
+  const wq = new THREE.Quaternion(), pq = new THREE.Quaternion(), dq = new THREE.Quaternion();
+  const turn = (bone, from, to) => {          // rotate a bone (world) so direction `from` becomes `to`
+    dq.setFromUnitVectors(from.clone().normalize(), to.clone().normalize());
+    bone.getWorldQuaternion(wq); bone.parent.getWorldQuaternion(pq);
+    bone.quaternion.copy(pq.invert().multiply(dq.multiply(wq)));
+    bone.updateMatrixWorld(true);
+  };
+  let keys = 0, most = 0;
+  for (const sd of ["L", "R"]) {
+    const up = Bn["FrontUpperLeg" + sd], lo = Bn["FrontLowerLeg" + sd];
+    const tu = clip.tracks.find((t) => t.name === "FrontUpperLeg" + sd + ".quaternion");
+    const tl = clip.tracks.find((t) => t.name === "FrontLowerLeg" + sd + ".quaternion");
+    if (!tu || !tl) continue;
+    const vu = tu.values.slice(), vl = tl.values.slice();
+    const tipL = V(0, A.ext["FrontLowerLeg" + sd] * legs, 0);
+    for (let k = 0; k < tu.times.length; k++) {
+      const t = tu.times[k];
+      const kl = tl.times.findIndex((x) => Math.abs(x - t) < 1e-5);
+      if (kl < 0) continue;
+      mix.setTime(t); r.updateMatrixWorld(true); mesh.skeleton.update();
+      let h = Infinity;
+      for (let i = 0; i < n; i += 2) { if (grp[i] !== sd) continue; mesh.getVertexPosition(i, q); q.applyMatrix4(mesh.matrixWorld); if (q.y < h) h = q.y; }
+      const w = 1 - smoothstep01(b0, b1, h);
+      if (!(h > 1e-4) || w <= 0) continue;
+      const hip = up.getWorldPosition(V()), knee = lo.getWorldPosition(V()), tip = lo.localToWorld(tipL.clone());
+      const target = tip.clone(); target.y -= h * w;
+      const L1 = hip.distanceTo(knee), L2 = knee.distanceTo(tip);
+      const nrm = knee.clone().sub(hip).cross(tip.clone().sub(hip));
+      if (nrm.lengthSq() < 1e-12) continue;
+      nrm.normalize();
+      const d = Math.min(L1 + L2 - 1e-4, Math.max(Math.abs(L1 - L2) + 1e-4, hip.distanceTo(target)));
+      const dir = target.clone().sub(hip).normalize();
+      const ang = Math.acos(Math.min(1, Math.max(-1, (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d))));
+      const kA = hip.clone().addScaledVector(dir.clone().applyAxisAngle(nrm, ang), L1);
+      const kB = hip.clone().addScaledVector(dir.clone().applyAxisAngle(nrm, -ang), L1);
+      const newKnee = kA.distanceTo(knee) < kB.distanceTo(knee) ? kA : kB;    // keep the knee bending its own way
+      turn(up, knee.clone().sub(hip), newKnee.clone().sub(hip));
+      const k2 = lo.getWorldPosition(V()), tip2 = lo.localToWorld(tipL.clone());
+      turn(lo, tip2.clone().sub(k2), target.clone().sub(k2));
+      up.quaternion.toArray(vu, k * 4); lo.quaternion.toArray(vl, kl * 4);
+      keys++; most = Math.max(most, h * w);
+    }
+    tu.values = vu; tl.values = vl;
+  }
+  mix.stopAllAction();
+  console.log(`[camel] front legs IK-planted: ${keys} keys, feet lowered up to ${(100 * most).toFixed(1)} cm`);
+  return { keys, mostCm: +(100 * most).toFixed(1) };
+}
+
+function hoofLows(tpl) {
+  const r = cloneSkinned(tpl.root);
+  let mesh = null; r.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
+  const clip = tpl.clips.find((c) => c.name === "Walk");
+  const out = { FL: 0, FR: 0, BL: 0, BR: 0 };
+  if (!mesh || !clip) return out;
+  const names = mesh.skeleton.bones.map((b) => b.name);
+  const G2 = mesh.geometry, SI = G2.attributes.skinIndex, SW = G2.attributes.skinWeight, n = G2.attributes.position.count;
+  const grp = Array.from({ length: n }, (_, i) => {
+    let best = -1, bw = 0; for (let c = 0; c < 4; c++) { const w = SW.getComponent(i, c); if (w > bw) { bw = w; best = SI.getComponent(i, c); } }
+    const nm = names[best] ?? "";
+    if (/^FFB[LR]$/.test(nm) || /^IKBackLeg/.test(nm) || /^BackLowerLeg/.test(nm)) return "B" + nm.slice(-1);
+    if (/^FF[LR]$/.test(nm) || /^IKFrontLeg/.test(nm) || /^FrontLowerLeg/.test(nm)) return "F" + nm.slice(-1);
+    return null;
+  });
+  for (const k in out) out[k] = Infinity;
+  const mix = new THREE.AnimationMixer(r); mix.clipAction(clip).play();
+  const q = V();
+  for (let k = 0; k < 60; k++) {
+    mix.setTime((clip.duration * k) / 60); r.updateMatrixWorld(true); mesh.skeleton.update();
+    for (let i = 0; i < n; i += 2) { const g = grp[i]; if (!g) continue; mesh.getVertexPosition(i, q); q.applyMatrix4(mesh.matrixWorld); if (q.y < out[g]) out[g] = q.y; }
+  }
+  mix.stopAllAction();
+  return out;
 }
 
 function groundClamp(tpl, tolM = 0.015) {
@@ -2295,10 +3510,29 @@ function groundClamp(tpl, tolM = 0.015) {
     act.reset().play();
     const vals = tr.values.slice();
     let worst = 0, fixed = 0;
-    for (let k = 0; k < tr.times.length; k++) {
+    // Pass 1: how deep is the lowest point at each key?
+    const K = tr.times.length, need = new Float64Array(K);
+    for (let k = 0; k < K; k++) { mixer.setTime(tr.times[k]); need[k] = Math.max(0, -lowest()); }
+    // Pass 2: a SMOOTH lift that is never less than the need. Lifting each key
+    // by exactly its own depth made corners (the lowest point jumps from hoof
+    // to hoof, or to the belly) — the legs visibly stepped (measured: the pig's
+    // hind-hoof kink 15 → 28). Widen (max over ±w keys), then box-blur ±w:
+    // every blurred value averages windows that all contain the key → ≥ need.
+    // Only the SLOW LOOPING clips (walk, idles, eating — where a step shows,
+    // and the hover this costs measured <= 1 cm, 3.5 cm on the camel). Every
+    // other clip (gallop, death, attacks, jumps) keeps the exact per-key lift:
+    // smoothing them made a dying sheep hover 27 cm before it landed.
+    const loop = /^(Walk|Idle|Idle_2|Idle_Headlow|Eating)$/.test(clip.name);
+    const w = loop ? Math.max(1, Math.round(K * 0.06)) : 0;
+    if (!loop) for (let k = 0; k < K; k++) if (need[k] <= tolM) need[k] = 0;   // the old rule, exactly
+    const at = (arr, j) => (loop ? arr[((j % K) + K) % K] : arr[Math.min(K - 1, Math.max(0, j))]);
+    const wide = Float64Array.from({ length: K }, (_, k) => { let m = 0; for (let j = k - w; j <= k + w; j++) m = Math.max(m, at(need, j)); return m; });
+    const lift = Float64Array.from({ length: K }, (_, k) => { let sum = 0; for (let j = k - w; j <= k + w; j++) sum += at(wide, j); return sum / (2 * w + 1); });
+    for (let k = 0; k < K; k++) {
       mixer.setTime(tr.times[k]);
-      const lo = lowest();
-      if (lo < -tolM) {
+      r.updateMatrixWorld(true);
+      const lo = -lift[k];
+      if (lift[k] > 1e-5) {
         // world lift → Body's parent space (includes the root's scale)
         const bw = body.getWorldPosition(V());
         const la = body.parent.worldToLocal(bw.clone()), lb = body.parent.worldToLocal(bw.clone().add(V(0, -lo, 0)));
@@ -2311,13 +3545,15 @@ function groundClamp(tpl, tolM = 0.015) {
           const la2 = ikb.parent.worldToLocal(pw.set(0, 0, 0)), lb2 = ikb.parent.worldToLocal(new THREE.Vector3(0, -lo, 0)).sub(la2);
           ikVals[j][kk * 3] += lb2.x; ikVals[j][kk * 3 + 1] += lb2.y; ikVals[j][kk * 3 + 2] += lb2.z;
         });
-        worst = Math.min(worst, lo); fixed++;
+        worst = Math.min(worst, -need[k]); if (need[k] > tolM) fixed++;
       }
     }
     act.stop();
     tr.values = vals;
     ikTr.forEach((t, j) => { t.values = ikVals[j]; });
-    if (fixed) report[clip.name] = { keys: fixed, deepest_m: +(-worst).toFixed(3) };
+    // how much the smoothing lifts ABOVE the need somewhere (a hoof could hover by this)
+    let hover = 0; for (let k = 0; k < K; k++) hover = Math.max(hover, lift[k] - need[k]);
+    if (fixed) report[clip.name] = { keys: fixed, deepest_m: +(-worst).toFixed(3), hover_m: +hover.toFixed(3) };
   }
   mixer.stopAllAction();
   console.log("[ground] lifted out of the ground:", JSON.stringify(report));
@@ -2358,7 +3594,7 @@ function measureGroundSpeed(tpl, clipName) {
 }
 
 // ── For the games ────────────────────────────────────────────────────────────
-const KIND_PARAMS = { goat: () => PG, sheep: () => P, camel: () => PC };
+const KIND_PARAMS = { goat: () => PG, sheep: () => P, camel: () => PC, pig: () => PPIG, pig2: () => PPIG2, hyena: () => PHY, donkey: () => PDK };
 /**
  * A species as a crowd template: { root, source, clips, walkSpeed, runSpeed,
  * height }. `source` is a SkinnedMesh with position / normal / skin / colour

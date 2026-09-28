@@ -75,7 +75,7 @@
       // The parameters and the builder live in the shared module, so what is
       // tuned here is what the games build.
       import {
-        PRESETS, P, PC, PG, SPECIES, STYLE, hooks, initAnimalMorph, buildAnimal,
+        PRESETS, P, PC, PG, PPIG, SPECIES, STYLE, hooks, initAnimalMorph, buildAnimal,
       } from "./props/animalMorph.js";
 
       const $ = (id) => document.getElementById(id);
@@ -201,7 +201,9 @@
       $("s-build").textContent = "loading donkey…";
       const gltf = await getSharedGltfLoader().loadAsync("/models/Donkey_compressed.glb");
       const CLIP_NAMES = gltf.animations.map((c) => c.name);
-      const A = await initAnimalMorph(gltf);
+      // the husky: same rig, the source of the hyena
+      const huskyGltf = await getSharedGltfLoader().loadAsync("/models/Husky_compressed.glb");
+      const A = await initAnimalMorph(gltf, { husky: huskyGltf });
       hooks.material = MATS.hero.material;
       hooks.uCurl = uCurl;
       hooks.uBump = uBump;
@@ -232,11 +234,13 @@
 
       function playHero(name) {
         const clip = tpl.clips.find((c) => c.name === name);
+        if (!clip) return;                                   // (the husky's clips: no Attack_Kick…)
         const next = heroMixer.clipAction(clip);
         next.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).play();
         if (heroAction && heroAction !== next) heroAction.crossFadeTo(next, 0.25, false);
         heroAction = next;
         const dclip = gltf.animations.find((c) => c.name === name);
+        if (!dclip) return;
         const dn = donkeyMixer.clipAction(dclip);
         dn.reset().play();
         if (donkeyAction && donkeyAction !== dn) donkeyAction.crossFadeTo(dn, 0.25, false);
@@ -391,7 +395,7 @@
       const gui = new GUI({ title: "Animal" });
       const ctrls = [];
       const reg = (c) => { ctrls.push(c); return c; };
-      gui.add(SPECIES, "value", ["goat-morph", "sheep-morph", "camel-morph", "camel", "sheep"]).name("species").onChange(() => {
+      gui.add(SPECIES, "value", ["goat-morph", "sheep-morph", "pig-morph", "pig2-morph", "hyena-morph", "donkey-morph", "camel-morph", "camel", "sheep"]).name("species").onChange(() => {
         syncSpeciesGui();
         if (P.flock) clearFlock();
         resetHeroCamera();

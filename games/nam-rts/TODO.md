@@ -1349,6 +1349,14 @@ Vietnam, like Apocalypse Now.
 - [→#4] **Distant Hueys** crossing the map like the transit birds, with rotor
       shadows — "the war is elsewhere", very Apocalypse Now
 - [x] Water buffalo in the paddies, chickens/pigs in the village (once those exist)  (DONE: buffalo, hens, deer via crowd skinning)
+- [~] **PIGS** for the hamlets (v3/sheep-lab.html "pig-morph" Móng Cái, "pig2-morph"
+      black village pig; the donkey reshaped). Not in the game yet.
+   - [ ] pig2 LOWER LEGS: the real cause of the "boot" look is legThick 1.35
+         widening only the shin — the pastern/hoof are skinned to the FOOT
+         bones (FF/IK) and stay donkey-size. Widen those by the same factor
+         and drop the hoofSlim taper/straighten hack.
+   - [ ] pig2 FACE (later, you): split the head quads (more vertices) to
+         model a round snout with nostrils and eye folds like your refs.
 - [→#1] Thin cooking-fire smoke over villages (smoke system, tiny budget)
 - [→#22] Horizon artillery flashes / smoke columns off-map; tracers at night
 - [→#21] Monsoon rain showers passing over (world rain exists in modular-road)

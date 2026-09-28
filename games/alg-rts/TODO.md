@@ -273,6 +273,39 @@ lift off the pad; the ALN comes out of the cave mouth.
       the pack's DONKEY mesh reshaped into an Arabian camel (hump, S-neck,
       pads), same quad look, plays the donkey's 13 clips. Saharan edge more
       than the Aurès. Not in the game yet.
+- [~] **STRIPED HYENA** (you, 2026-09-28; "hyena-morph" in v3/sheep-lab.html):
+      built from the pack's HUSKY (same rig as the donkey: paws, dog head,
+      carnivore gait) through the same morph builder. Round 2 after photos of
+      Hyaena hyaena (you: "stripes don't look right at all, doesn't look like
+      a hyena"): head carried LOW (neck bent 30 deg), sloping back (hind legs
+      0.7, spine pitched 14.5 deg, all four paws on the ground in the walk),
+      smaller narrow head with a longer muzzle, big ears, mane along neck and
+      back, bushy hanging tail, warm buff coat, 10 thin leaning stripes
+      PLANE-SLICED into the mesh (clean bands, still closed), banded lower
+      legs, dark muzzle, black throat. 0 open edges, 0 flips. Not in the game.
+   - [ ] **you, look** at it in the lab (face, ears, stripes, mane).
+   - [ ] Where it lives in the game (night scavenger near the mechtas?
+         flees soldiers like the herds).
+- [~] **ALGERIAN DONKEY** ("donkey-morph" in the lab, 2026-09-28): the pack's
+      donkey untouched in shape and clips, recoloured as a North African
+      village donkey — ash grey-brown, pale muzzle / eye rings / belly, dark
+      mane, ear tips and tail tuft, a dark DORSAL STRIPE and SHOULDER CROSS
+      plane-sliced into the mesh (clean bands). Presets: Aurès grey, Brown,
+      Pale dun (DONKEY_PRESETS).
+   - [x] LOAD (PDK.load "panniers", default): a kilim blanket (deep red,
+         ochre / black end borders, cream lower border, a rope over it) as a
+         shell over the back — sliced edges, closed rim — and two woven
+         baskets (straw bands, rim, load inside) LEANING on the flanks
+         (measured body width top → bottom). Part of the donkey's mesh (one
+         draw), skinned to the back: rides through every clip. 0 open edges.
+   - [ ] **you, look** (lab: donkey-morph); then more loads (jars, firewood,
+         sacks), a lab toggle for load / preset, and the donkeys in the game
+         (wells, tracks — item 5 above).
+- [ ] **GOAT: a thin see-through slit low on the body while walking** (you,
+      2026-09-28). Likely the same as pig2's neck: a BENT quad whose
+      v0-v2 triangle winds backwards in the pose (culled). Fix: the other
+      diagonal for such quads (pig2 only today) — for the goat too, then
+      re-check the goat against its approved shots.
 - [ ] **LATER — dressed animals: camels AND donkeys carrying things** (you,
       2026-09-27; your reference: a caravan camel with a striped saddle
       blanket, a wooden saddle, woven baskets and jars hung on the flanks,
