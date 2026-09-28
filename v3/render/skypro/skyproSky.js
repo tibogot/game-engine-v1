@@ -14,7 +14,8 @@
 //   s.update( dt, { sunDir, moonDir, night, drawingBufferSize } )   the per-frame work (bakes, cloud
 //                                    trace, environment); sunDir = the REAL sun, from the engine's clock
 //   s.light()                        what the world should be lit by, in Tidewater's units:
-//                                    { sunColor [lin rgb], skyIrradiance, horizon, keyIsMoon, moonColor }
+//                                    { sunColor [lin rgb], skyIrradiance, horizon, keyIsMoon, moonColor,
+//                                      keyDir (Vector3 toward the key light: the sun, or the moon at night) }
 //   s.environment                    the texture for scene.environment (three runs its PMREM)
 //   s.params                         the live settings (SKYPRO_DEFAULTS' shape; the editor binds it)
 //   s.dispose()
@@ -144,7 +145,7 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
   const sunColor = [0, 0, 0], T = [0, 0, 0];
   const moonColor = new THREE.Vector3();
   let time = 0;
-  const out = { sunColor: [0, 0, 0], skyIrradiance: [0, 0, 0], horizon: [0, 0, 0], keyIsMoon: false, moonColor };
+  const out = { sunColor: [0, 0, 0], skyIrradiance: [0, 0, 0], horizon: [0, 0, 0], keyIsMoon: false, moonColor, keyDir: lightDir };
 
   /**
    * @param {number} dt

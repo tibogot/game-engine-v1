@@ -4,6 +4,7 @@ import { SKY_DEFAULTS as ATMOSPHERE_SKY_DEFAULTS } from "../../render/sky/atmosp
 import { CLOUD_DEFAULTS } from "../../render/clouds/volumetricCloudDeck.js";
 import { PAINTED_CLOUD_DEFAULTS } from "../../render/clouds/paintedCloudDeck.js";
 import { SKYPRO_DEFAULTS } from "../../render/skypro/skyproSky.js";
+import { OCEANPRO_DEFAULTS } from "../../render/oceanpro/oceanproOcean.js";
 import { GRID_DEFAULTS } from "../../render/materials/gridMaterial.js";
 
 /**
@@ -251,6 +252,8 @@ export function createWorldToolState({ editor = false, skyMode } = {}) {
       ...ts.worldOcean,
       mode: "classic",
       v2: structuredClone(OCEAN2_DEFAULTS),
+      // The third ocean (mode "pro", v3/render/oceanpro/): Tidewater's sea, its own bag, as v2's.
+      pro: structuredClone(OCEANPRO_DEFAULTS),
     },
     /*
      * BARE GROUND — the greybox surface under the painted layers, and the

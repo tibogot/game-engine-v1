@@ -49,6 +49,7 @@ import { createSkyWorldLight, WORLD_LIGHT_REFERENCE } from "../render/sky/skyWor
 import { SKY_LENS_FLARE_LOOK } from "../render/sky/skyLensFlareLook.js";
 import { createModularRoadClouds } from "../render/clouds/volumetricCloudDeck.js";
 import { createSkyProSky } from "../render/skypro/skyproSky.js";
+import { createOceanPro } from "../render/oceanpro/oceanproOcean.js";
 import { createPaintedClouds } from "../render/clouds/paintedCloudDeck.js";
 import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
 import { createWorldOcean } from "../render/water/worldOcean.js";
@@ -2004,13 +2005,34 @@ export async function createWorldEnvironment({
     else _shoreBakeTimer = setTimeout(rebakeShoreNow, 150);
   }
 
-  /** Only one ocean visible, and the inactive one fully off (its FFT idles). */
+  /*
+   * ── THE THIRD OCEAN ───────────────────────────────────────────────────────
+   *
+   * `worldOcean.mode === "pro"`: Tidewater's sea (v3/render/oceanpro/), its own
+   * FFT, mesh and shading, sharing nothing with the two above but the sea level.
+   * Lit by the Sky Pro sky when that is the sky (it is tuned for it). Lazy, like
+   * V2: built the first time the mode is chosen.
+   */
+  let oceanPro = null;
+  function ensureOceanPro() {
+    if (oceanPro) return oceanPro;
+    oceanPro = createOceanPro({
+      renderer, scene, camera, heightTexNode, terrainSize, maxHeight: MAX_HEIGHT,
+      params: toolState.worldOcean.pro,
+    });
+    return oceanPro;
+  }
+
+  /** Only one ocean visible, and the inactive ones fully off (their FFT idles). */
   function applyOceanMode() {
     const o = toolState.worldOcean;
     const wantV2 = o.mode === "v2";
+    const wantPro = o.mode === "pro";
     if (wantV2) ensureOceanV2();
-    worldOcean.setEnabled(!wantV2 && !!o.enabled);
+    if (wantPro) ensureOceanPro();
+    worldOcean.setEnabled(!wantV2 && !wantPro && !!o.enabled);
     oceanV2?.setEnabled(wantV2 && !!o.enabled);
+    oceanPro?.setEnabled(wantPro && !!o.enabled);
     // The shore field is skipped while the ocean is off (rebakeShoreIfStale);
     // turning it on is when a stale one has to catch up.
     if (wantV2 && o.enabled) rebakeShoreIfStale({ immediate: true });
@@ -2245,6 +2267,18 @@ export async function createWorldEnvironment({
       oceanV2.setShadowNode(oceanShadowNode());
       oceanV2.update(dtSec, _appTimeSec, camera);
     }
+    if (oceanPro?.visible) {
+      oceanPro.update(dtSec, {
+        seaLevel: toolState.worldOcean.seaLevel,
+        // lit by Sky Pro when it is the sky (its units, its environment image); else the world's sun
+        skyPro: toolState.skyMode === "skypro" && _skyProReady ? skyPro : null,
+        sun,
+        shadowNode: oceanShadowNode(),
+        fogColor: _oceanHorizon,
+        // the full post chain's scene pass is multisampled; the minimal chain's is not
+        depthMultisampled: postFxPipeline._fullActive?.() === true && (renderer.samples ?? 0) > 1,
+      });
+    }
 
     for (const s of waterSurfaces) {
       s.setSkyColors?.(_oceanZenith, _oceanHorizon);
@@ -2294,6 +2328,9 @@ export async function createWorldEnvironment({
 
   function renderFrame(dtSec) {
     const cloudFollowAnchor = playMode?.active ? playMode.playerPosition : controls.target;
+    // Ocean Pro reads a copy of the scene's depth, which cannot come out of the multisampled
+    // canvas: while it shows, the frame goes through a scene pass (main.js does the same for lakes).
+    if (oceanPro?.visible) postFxPipeline.setSceneDepthRequired(true);
 
     /*
      * The Atmosphere sky's own marched deck. It goes through exactly the same composite
@@ -2450,6 +2487,8 @@ export async function createWorldEnvironment({
     get skyPro() { return skyPro; },
     worldOcean,
     getOceanV2: () => oceanV2,
+    /** Ocean Pro (worldOcean.mode "pro"), or null until the mode is first chosen. */
+    get oceanPro() { return oceanPro; },
     setOceanHeights,
     get lensFlare() { return lensFlare; },
     lensFlareLegacy,

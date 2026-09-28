@@ -8727,12 +8727,14 @@ export async function startV3App(opts = {}) {
       const src = d.environment.worldOcean;
       const dst = worldToolState.worldOcean;
       for (const k of Object.keys(dst)) {
-        if (k === "v2") continue;
+        if (k === "v2" || k === "pro") continue;
         if (src[k] !== undefined) dst[k] = src[k];
       }
-      if (src.v2 && dst.v2) {
-        for (const k of Object.keys(dst.v2)) {
-          if (src.v2[k] !== undefined) dst.v2[k] = src.v2[k];
+      // each ocean's own bag, key by key (Ocean Pro's is v3/render/oceanpro/)
+      for (const bag of ["v2", "pro"]) {
+        if (!src[bag] || !dst[bag]) continue;
+        for (const k of Object.keys(dst[bag])) {
+          if (src[bag][k] !== undefined) dst[bag][k] = src[bag][k];
         }
       }
       /*

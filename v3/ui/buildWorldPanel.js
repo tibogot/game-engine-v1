@@ -719,6 +719,55 @@ function _buildProceduralSkyControls(parent, ts, app) {
  * rather than replaced by the physical model.
  */
 /**
+ * OCEAN PRO (worldOcean.mode "pro", v3/render/oceanpro/): its own bag, `worldOcean.pro`. The engine
+ * holds that very object, so every control is live with no callback (the wave spectrum re-bakes
+ * itself when the wind or swell changes).
+ */
+function _buildOceanProControls(parent, P) {
+  const sea = _section(parent, "Ocean Pro · sea state", true);
+  _slider(sea, P, "windSpeed", {
+    label: "Wind (m/s)", min: 1, max: 25, step: 0.5,
+    hint: "The local wind sea (Tidewater's two-system Horvath/JONSWAP spectrum; 7 is its default). Also drives the roughness and the gusts, slicks and windrows.",
+  });
+  _slider(sea, P, "windDeg", { label: "Wind direction", min: -180, max: 180, step: 1 });
+  _slider(sea, P, "fetchKm", {
+    label: "Fetch (km)", min: 5, max: 1000, step: 5,
+    hint: "How far the wind has blown over open water: longer fetch, longer and higher waves.",
+  });
+  _slider(sea, P, "swellScale", {
+    label: "Swell", min: 0, max: 2, step: 0.01,
+    hint: "The long swell from a distant storm (1200 km fetch). 0.48 is Tidewater's.",
+  });
+  _slider(sea, P, "swellDeg", { label: "Swell direction", min: -180, max: 180, step: 1 });
+  _slider(sea, P, "choppiness", { label: "Choppiness", min: 0, max: 1.5, step: 0.01 });
+
+  const foam = _section(parent, "Ocean Pro · foam & surface", true);
+  _slider(foam, P, "foamBias", {
+    label: "Whitecap threshold", min: 0.3, max: 1.2, step: 0.01,
+    hint: "Foam starts where the waves compress the surface below this. Higher = more whitecaps (0.58 is Tidewater's).",
+  });
+  _slider(foam, P, "foamCoverage", { label: "Foam amount", min: 0, max: 3, step: 0.01 });
+  _slider(foam, P, "gusts", { label: "Gusts", min: 0, max: 2, step: 0.01, hint: "Darker patches of rougher water drifting downwind (cat's paws)." });
+  _slider(foam, P, "slicks", { label: "Slicks", min: 0, max: 2, step: 0.01, hint: "Long calm mirror bands along the wind, in light wind." });
+  _slider(foam, P, "windrows", { label: "Windrows", min: 0, max: 2, step: 0.01, hint: "Thin foam lanes along the wind, in fresh wind." });
+
+  const look = _section(parent, "Ocean Pro · water", false);
+  _slider(look, P, "roughness", { label: "Roughness", min: 0.005, max: 0.3, step: 0.005 });
+  _slider(look, P, "reflection", { label: "Reflection", min: 0, max: 2, step: 0.01 });
+  _toggle(look, P, "ssr", { label: "Screen reflections", hint: "Hills and objects reflected in the water near the horizon." });
+  _slider(look, P, "sss", { label: "Crest glow", min: 0, max: 3, step: 0.01, hint: "Sun shining through thin wave crests." });
+  _slider(look, P, "backscatter", { label: "Backscatter", min: 0, max: 0.2, step: 0.005 });
+  _dropdown(look, P, "debug", {
+    label: "Debug view",
+    options: { Off: 0, "Back faces": 1, Normals: 2, Foam: 3, "Water path": 6, "Seabed seen": 7, Depth: 8 },
+  });
+  const note = document.createElement("div");
+  note.className = "hint";
+  note.textContent = "Tidewater's water, tuned for the Sky Pro sky (its light and reflections). With another sky it runs on the world's sun and a flat sky.";
+  parent.appendChild(note);
+}
+
+/**
  * SKY PRO (skyMode "skypro", v3/render/skypro/): its own settings slice, `ts.skyProSky`. The
  * engine holds that very object (not a copy), so every control here is live with no callback.
  */
@@ -1502,7 +1551,7 @@ export function buildWorldPanel(app) {
         });
         _dropdown(oceanBody, wo, "mode", {
           label: "Shader",
-          options: { Classic: "classic", "V2 (shore field)": "v2" },
+          options: { Classic: "classic", "V2 (shore field)": "v2", "Pro (Tidewater)": "pro" },
           onChange: () => { woc(); syncOceanMode(); },
           hint: "Classic is the original, unchanged. V2 measures distance to the "
             + "WATERLINE rather than water depth, so a foam band is the same width "
@@ -1527,13 +1576,16 @@ export function buildWorldPanel(app) {
          */
         const classicWrap = document.createElement("div");
         const v2Wrap = document.createElement("div");
-        container.append(classicWrap, v2Wrap);
+        const proWrap = document.createElement("div");
+        container.append(classicWrap, v2Wrap, proWrap);
         let shownOceanMode = null;
         const syncOceanMode = () => {
           shownOceanMode = wo.mode;
           const isV2 = wo.mode === "v2";
-          classicWrap.style.display = isV2 ? "none" : "";
+          const isPro = wo.mode === "pro";
+          classicWrap.style.display = isV2 || isPro ? "none" : "";
           v2Wrap.style.display = isV2 ? "" : "none";
+          proWrap.style.display = isPro ? "" : "none";
         };
         // The mode also changes outside this dropdown (app.environment.ocean.set,
         // a game, undo), so follow it — one string compare every half second.
@@ -1745,6 +1797,7 @@ export function buildWorldPanel(app) {
           onChange: woc,
           getStats: () => app.getOceanV2Stats?.() ?? null,
         });
+        if (wo.pro) _buildOceanProControls(proWrap, wo.pro);
         syncOceanMode();
       }
 
