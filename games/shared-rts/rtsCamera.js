@@ -68,8 +68,14 @@ export function createRtsCamera({ app } = {}) {
   const keys = Object.create(null);
 
   // ── Input ─────────────────────────────────────────────────────────────────
-  const onKeyDown = (e) => { keys[e.code] = true; };
+  // Typing into a panel field must not pan the world (a key-up still clears).
+  const onKeyDown = (e) => { if (!e.target?.matches?.("input, textarea, select")) keys[e.code] = true; };
   const onKeyUp   = (e) => { keys[e.code] = false; };
+  // A key held while the window loses focus never gets its keyup here: hold W,
+  // alt-tab, come back, and the camera kept panning. Forget everything held
+  // (as Tidewater's core/Input.js does on blur).
+  const releaseKeys = () => { for (const k in keys) keys[k] = false; };
+  const onVisibility = () => { if (document.hidden) releaseKeys(); };
   // Claim the wheel at capture so the engine's editor camera never zooms while RTS-active.
   const onWheel = (e) => {
     if (mode !== "rts") return;
@@ -88,6 +94,8 @@ export function createRtsCamera({ app } = {}) {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    window.addEventListener("blur", releaseKeys);
+    document.addEventListener("visibilitychange", onVisibility);
     const el = dom();
     el?.addEventListener("pointermove", onPointerMove);
     el?.addEventListener("pointerleave", onPointerLeave);
@@ -96,6 +104,9 @@ export function createRtsCamera({ app } = {}) {
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("wheel", onWheel, { capture: true });
+    window.removeEventListener("blur", releaseKeys);
+    document.removeEventListener("visibilitychange", onVisibility);
+    releaseKeys();
     const el = dom();
     el?.removeEventListener("pointermove", onPointerMove);
     el?.removeEventListener("pointerleave", onPointerLeave);
