@@ -25,7 +25,6 @@ import {
 } from "three/tsl";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { createCloudShadowsLite } from "../render/clouds/cloudShadowsLite.js";
-import { groundPatch } from "../render/viewGroundBand.js";
 import { SkyMesh } from "three/addons/objects/SkyMesh.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { projectAssets } from "../io/projectAssets.js";
@@ -72,6 +71,9 @@ export async function createWorldEnvironment({
   terrainSize,
   getSplineSystem = () => null,
   getTerrainMeshes = () => [],
+  // CPU ground height, (x, z) → y. The fitted sun shadow samples it to learn
+  // how high and low the ground in view really goes (fitDirectionalShadowToView).
+  getWorldHeight = null,
   cloudShadows = false,
   editor = false,
 }) {
@@ -177,7 +179,7 @@ export async function createWorldEnvironment({
    * (`half = dist * 0.55`), which is not the same question and under-covered
    * badly: at a 52 m orbit it gave +/-28 m while the visible ground ran from
    * 23 m to 97 m out and 130 m wide, so most of the screen simply had no
-   * shadows in it. groundPatch answers the real question.
+   * shadows in it. The box has to answer "what ground can the camera see".
    *
    * TEXEL SNAPPING is the part a naive fit leaves out, and it is not optional.
    * A frustum that follows the camera slides by a fraction of a texel every
@@ -185,9 +187,28 @@ export async function createWorldEnvironment({
    * Quantising the centre to whole texels IN LIGHT SPACE makes the map move in
    * discrete jumps that land on the same texels, so edges sit still.
    *
-   * The radius is also quantised, for the same reason applied to size rather
+   * The size is also quantised, for the same reason applied to size rather
    * than position: a frustum that grows smoothly re-scales the texel grid every
    * frame, which no amount of position snapping can hide.
+   *
+   * WHAT IS FITTED (2026-09-29): the ground the camera actually sees, out to
+   * `maxFar` — found by marching a grid of screen rays onto the heightmap
+   * (visibleGroundPoints) — plus FIT_RECEIVER_TOP above it, boxed in LIGHT
+   * space. Every lit pixel on screen within the shadow distance lies in that
+   * box, at any pitch, zoom or yaw. MEASURED in alg-rts: 24×24 screen rays
+   * onto the terrain, 100% inside at every zoom and heading tried.
+   * Without a height function it falls back to the view frustum clipped to a
+   * slab of height around the focus.
+   *
+   * It replaced a circle around a flat-ground trapezoid (viewGroundBand's
+   * groundPatch), which failed two ways, MEASURED in alg-rts at 2048²:
+   *   - the circle, clamped to maxFar, came out ±304 m at EVERY zoom above the
+   *     closest (the wide screen puts the far edge's corners ~290 m apart), so
+   *     the whole game was shaded at 0.30 m/texel; the fitted box is ~0.07-0.17;
+   *   - near the closest zoom the top of the view grazes the horizon, the far
+   *     edge ran out to 1-2 km, and the circle's CENTRE went with it: at zoom
+   *     0.01-0.02 the box sat 530-990 m in front of the camera and not a single
+   *     shadow was drawn on screen; at zoom 0 the fallback shrank it to ±38 m.
    */
   const _fitEye = new THREE.Vector3();
   const _fitCentre = new THREE.Vector3();
@@ -196,55 +217,231 @@ export async function createWorldEnvironment({
   const _fitSide = new THREE.Vector3(1, 0, 0);
   const _fitAxisX = new THREE.Vector3();
   const _fitAxisY = new THREE.Vector3();
+  const _fitCorners = Array.from({ length: 8 }, () => new THREE.Vector3());
+  const _fitPts = Array.from({ length: 32 }, () => new THREE.Vector3());
+  const _FIT_EDGES = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
+  // Receivers stand ON the ground: walls, trunks and hulls take shadows up to
+  // this far above it (the tallest building/tree faces the player looks at).
+  const FIT_RECEIVER_TOP = 18;
+  // Quantised extents, kept while the view's need sits within one step below
+  // them — without that, a size hovering on a step boundary flips every frame.
+  let _fitW = 0, _fitH = 0;
+  const _fitStat = { halfW: 0, halfH: 0, texel: 0, groundLo: 0, groundHi: 0, points: 0, depth: 0 };
+  let _fitHelper = null;             // setShadowFrustumHelper's wire box
+  let _fitFrozen = false;            // ...and its freeze (the box stays put)
+
+  /** Frustum corners (near 0-3, far 4-7) of `cam` cut at view depth `far`. */
+  function viewCorners(cam, far) {
+    const tv = Math.tan(THREE.MathUtils.degToRad(cam.fov ?? 60) * 0.5);
+    const th = tv * (cam.aspect || 1);
+    const n = cam.near ?? 0.1;
+    const sx = [-1, 1, 1, -1], sy = [-1, -1, 1, 1];
+    for (let i = 0; i < 4; i++) {
+      _fitCorners[i].set(sx[i] * th * n, sy[i] * tv * n, -n).applyMatrix4(cam.matrixWorld);
+      _fitCorners[i + 4].set(sx[i] * th * far, sy[i] * tv * far, -far).applyMatrix4(cam.matrixWorld);
+    }
+  }
+
+  /**
+   * The vertices of (view frustum ∩ lo ≤ y ≤ hi) into _fitPts; returns the
+   * count. Exact for a convex volume cut by two parallel planes: its corners
+   * are the frustum's own corners inside the slab plus where the frustum's
+   * edges cross either plane.
+   */
+  function clipCornersToSlab(lo, hi) {
+    let k = 0;
+    for (const p of _fitCorners) if (p.y >= lo && p.y <= hi) _fitPts[k++].copy(p);
+    for (const [a, b] of _FIT_EDGES) {
+      const A = _fitCorners[a], B = _fitCorners[b];
+      const dy = B.y - A.y;
+      if (Math.abs(dy) < 1e-6) continue;
+      for (const y of [lo, hi]) {
+        const t = (y - A.y) / dy;
+        if (t > 0 && t < 1) _fitPts[k++].lerpVectors(A, B, t);
+      }
+    }
+    return k;
+  }
+
+  /**
+   * THE GROUND THE CAMERA SEES, as points: a grid of screen rays marched onto
+   * the heightmap, each hit stored twice — on the ground and FIT_RECEIVER_TOP
+   * above it. The grid includes the screen's edges, so the extremes of the
+   * visible ground are sampled exactly; the box is padded for what lies between
+   * rays. A ray that meets no ground within `range` (sky, or ground past the
+   * shadow distance) contributes the ground under its end point instead: the
+   * nearest ground the view reaches past the last hit.
+   *
+   * Why rays and not the slab alone: the slab has to span the lowest and
+   * highest ground ANYWHERE in the view's box, and on a mountain map that is
+   * a wall of height the camera never looks at. MEASURED in alg-rts (2048²):
+   * over the cedar massif the slab gave 0.27-0.33 m/texel, the rays 0.07-0.17.
+   *
+   * ~80 rays × ~45 height reads ≈ 0.3 ms of main thread, and only on a frame
+   * where the camera or the sun moved (see fitDirectionalShadowToView).
+   */
+  const FIT_RAYS_X = 10, FIT_RAYS_Y = 6;
+  const _fitRayPts = Array.from({ length: (FIT_RAYS_X + 1) * (FIT_RAYS_Y + 1) * 2 }, () => new THREE.Vector3());
+  const _fitRay = new THREE.Vector3();
+  const _fitRayP = new THREE.Vector3();
+  function visibleGroundPoints(cam, range) {
+    const org = cam.position;
+    const t0 = Math.max(cam.near ?? 0.1, 0.1);
+    const steps = 44;
+    const grow = Math.pow(range / t0, 1 / steps);
+    let k = 0;
+    for (let j = 0; j <= FIT_RAYS_Y; j++) {
+      for (let i = 0; i <= FIT_RAYS_X; i++) {
+        _fitRay.set((2 * i) / FIT_RAYS_X - 1, (2 * j) / FIT_RAYS_Y - 1, 0.5).unproject(cam).sub(org).normalize();
+        // Geometric march: fine near the camera, coarse far, then bisect.
+        let prev = 0, t = t0, hit = -1;
+        for (let s = 0; s <= steps; s++, prev = t, t *= grow) {
+          _fitRayP.copy(org).addScaledVector(_fitRay, t);
+          if (_fitRayP.y <= getWorldHeight(_fitRayP.x, _fitRayP.z)) { hit = t; break; }
+        }
+        if (hit > 0) {
+          let a = prev, b = hit;
+          for (let s = 0; s < 5; s++) {
+            const m = (a + b) * 0.5;
+            _fitRayP.copy(org).addScaledVector(_fitRay, m);
+            if (_fitRayP.y <= getWorldHeight(_fitRayP.x, _fitRayP.z)) b = m; else a = m;
+          }
+          _fitRayP.copy(org).addScaledVector(_fitRay, b);
+        } else {
+          _fitRayP.copy(org).addScaledVector(_fitRay, range);
+        }
+        const g = getWorldHeight(_fitRayP.x, _fitRayP.z);
+        if (!Number.isFinite(g)) continue;
+        _fitRayPts[k++].set(_fitRayP.x, g, _fitRayP.z);
+        _fitRayPts[k++].set(_fitRayP.x, g + FIT_RECEIVER_TOP, _fitRayP.z);
+      }
+    }
+    return k;
+  }
+  // The last fit's inputs: a still camera under a still sun keeps its box.
+  const _fitKey = new Float64Array(20);
+  let _fitAge = 0;
+
+  /** Round `need` up to 1/12-octave steps, holding `prev` while it still fits. */
+  function quantiseExtent(need, prev) {
+    const step = Math.pow(2, 1 / 12);
+    if (prev > 0 && need <= prev && need > prev / (step * step)) return prev;
+    return Math.pow(2, Math.ceil(Math.log2(Math.max(need, 1)) * 12) / 12);
+  }
+
   function fitDirectionalShadowToView(cam, focus, maxFar, lightMargin) {
     const shadowCam = sun.shadow.camera;
-    const patch = groundPatch(cam, focus?.y ?? 0);
+    cam.updateMatrixWorld();
+    // Same camera, same sun, same settings: the box is still right. Refitted
+    // anyway every 30 frames so a sculpted hill under a still camera is seen.
+    const me = cam.matrixWorld.elements, L = _effectiveLightDir;
+    const key = [me[0], me[1], me[2], me[4], me[5], me[6], me[8], me[9], me[10], me[12], me[13], me[14],
+      cam.fov, cam.aspect, L.x, L.y, L.z, maxFar, lightMargin, sun.shadow.mapSize.x];
+    let same = ++_fitAge < 30;
+    for (let i = 0; i < 20 && same; i++) same = _fitKey[i] === key[i];
+    if (_fitFrozen || same) {
+      // Hold the box; put the sun back on its target — the caller moved the
+      // target to the focus before asking for a fit.
+      shadowTarget.position.copy(_fitCentre);
+      placeSun();
+      return;
+    }
+    _fitKey.set(key);
+    _fitAge = 0;
 
-    // Quantise the size so the texel grid only changes when the view really
-    // does — 8% steps are invisible and stop the per-frame re-scale.
-    const raw = THREE.MathUtils.clamp(patch.radius, 12, Math.max(24, maxFar));
-    const half = Math.pow(2, Math.ceil(Math.log2(raw) * 12) / 12);
-    const mapSize = sun.shadow.mapSize.x || 2048;
-    const texel = (2 * half) / mapSize;
+    const focusY = focus?.y ?? 0;
+    const range = Math.min(Math.max(24, maxFar), cam.far ?? Infinity);
+    let pts = _fitRayPts;
+    let k = getWorldHeight ? visibleGroundPoints(cam, range) : 0;
+    let groundLo = Infinity, groundHi = -Infinity;
+    for (let i = 0; i < k; i += 2) {
+      groundLo = Math.min(groundLo, pts[i].y);
+      groundHi = Math.max(groundHi, pts[i].y);
+    }
+    if (k === 0) {
+      // No height function (or nothing hit): the view frustum clipped to a
+      // slab around the focus — exact for flat ground, generous for relief.
+      pts = _fitPts;
+      groundLo = focusY - 30;
+      groundHi = focusY + 30;
+      viewCorners(cam, range);
+      k = clipCornersToSlab(groundLo, groundHi + FIT_RECEIVER_TOP);
+    }
+    if (k === 0) {
+      // Looking straight up or out over nothing: keep a small box at the focus.
+      _fitPts[0].set(focus?.x ?? 0, focusY - 12, focus?.z ?? 0);
+      _fitPts[1].set(focus?.x ?? 0, focusY + 12, focus?.z ?? 0).addScalar(12);
+      pts = _fitPts;
+      k = 2;
+    }
 
-    _fitCentre.set(patch.cx, focus?.y ?? 0, patch.cz);
-    // Snap in LIGHT space: build the light's view basis, quantise the centre's
-    // x/y in it, and put it back. Snapping in world space does nothing, because
-    // the grid that matters is the shadow map's, not the world's.
-    _fitEye.copy(_fitCentre).addScaledVector(_effectiveLightDir, lightMargin + half * 2);
+    // The light's view basis — the same one three builds for the shadow
+    // camera (lookAt from the sun to its target with +Y up), so an extent
+    // measured on these axes IS the camera's left/right/top/bottom.
+    _fitEye.copy(_effectiveLightDir);
     const upish = Math.abs(_effectiveLightDir.y) > 0.99 ? _fitSide : _fitUp;
-    _fitView.lookAt(_fitEye, _fitCentre, upish);
-    _fitView.setPosition(0, 0, 0);
-    _fitView.invert();                                  // world -> light basis
+    _fitView.lookAt(_fitEye, _fitCentre.set(0, 0, 0), upish);
     _fitAxisX.setFromMatrixColumn(_fitView, 0);
     _fitAxisY.setFromMatrixColumn(_fitView, 1);
-    const lx = _fitCentre.dot(_fitAxisX);
-    const ly = _fitCentre.dot(_fitAxisY);
-    _fitCentre
-      .addScaledVector(_fitAxisX, Math.round(lx / texel) * texel - lx)
-      .addScaledVector(_fitAxisY, Math.round(ly / texel) * texel - ly);
+
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let i = 0; i < k; i++) {
+      const p = pts[i];
+      const x = p.dot(_fitAxisX), y = p.dot(_fitAxisY), z = p.dot(_effectiveLightDir);
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
+    // Ground between the rays can stand proud of both neighbours: pad.
+    const padX = 2 + (x1 - x0) * 0.04, padY = 2 + (y1 - y0) * 0.04;
+    x0 -= padX; x1 += padX; y0 -= padY; y1 += padY;
+
+    const mapSize = sun.shadow.mapSize.x || 2048;
+    _fitW = quantiseExtent(Math.max(24, x1 - x0), _fitW);
+    _fitH = quantiseExtent(Math.max(24, y1 - y0), _fitH);
+    const texX = _fitW / mapSize, texY = _fitH / mapSize;
+    // Snap in LIGHT space: the grid that matters is the shadow map's.
+    const cx = Math.round((x0 + x1) / 2 / texX) * texX;
+    const cy = Math.round((y0 + y1) / 2 / texY) * texY;
+    const cz = (z0 + z1) / 2;
+    _fitCentre.set(0, 0, 0)
+      .addScaledVector(_fitAxisX, cx)
+      .addScaledVector(_fitAxisY, cy)
+      .addScaledVector(_effectiveLightDir, cz);
 
     shadowTarget.position.copy(_fitCentre);
     placeSun();
 
-    shadowCam.left = -half;
-    shadowCam.right = half;
-    shadowCam.top = half;
-    shadowCam.bottom = -half;
-    shadowCam.near = 0.5;
-    // Deep enough that a caster standing OUTSIDE the patch, up-light of it,
-    // still reaches the map — a low sun throws long shadows in from off screen.
-    //
-    // MEASURED FROM THE LIGHT'S REAL DISTANCE, not from the patch radius.
-    // placeSun parks the sun a FIXED `sunDistance` from the target, so a small
-    // patch used to produce a frustum shorter than that: at the RTS camera's
-    // closest zoom the patch was ±64 m, far came out 506, and the sun sat 600
-    // away — the ground lay BEHIND the far plane, nothing rendered into the
-    // shadow map, and every shadow in the scene disappeared at once.
+    shadowCam.left = -_fitW / 2;
+    shadowCam.right = _fitW / 2;
+    shadowCam.top = _fitH / 2;
+    shadowCam.bottom = -_fitH / 2;
+    // Depth: from `lightMargin` up-light of the highest receiver — casters
+    // standing OUTSIDE the view, up-sun of it, still reach the map (a low sun
+    // throws long shadows in from off screen) — to just past the lowest one.
+    // Measured from the light's real distance: placeSun parks the sun a fixed
+    // `sunDistance` from the target, and a far plane shorter than that once put
+    // the ground behind it and every shadow in the scene went at once.
     const lightDist = sun.position.distanceTo(shadowTarget.position);
-    shadowCam.far = lightDist + half * 2 + lightMargin + 50;
+    shadowCam.near = Math.max(0.5, lightDist - (z1 - cz) - lightMargin);
+    shadowCam.far = lightDist + (cz - z0) + 10;
     shadowCam.updateProjectionMatrix();
     sun.shadow.needsUpdate = true;
+
+    _fitStat.halfW = _fitW / 2;
+    _fitStat.halfH = _fitH / 2;
+    _fitStat.texel = Math.max(texX, texY);
+    _fitStat.groundLo = groundLo;
+    _fitStat.groundHi = groundHi;
+    _fitStat.points = k;
+    _fitStat.depth = shadowCam.far - shadowCam.near;
+    if (_fitHelper) {
+      // three positions the shadow camera itself only at render time.
+      shadowCam.position.copy(sun.position);
+      shadowCam.lookAt(shadowTarget.position);
+      shadowCam.updateMatrixWorld();
+      _fitHelper.update();
+    }
   }
 
   const L = toolState.light;
@@ -403,6 +600,16 @@ export async function createWorldEnvironment({
       csm = null;
     }
   }
+
+  /*
+   * The FITTED sun shadow (cascades off) is three's plain shadow — WITHOUT the
+   * terrain wrapper the cascades wear, so the mountains' own shadow
+   * (terrainSunShadow.js) reaches only the far plant levels (terrainShade), not
+   * the shadow receivers. Deliberate, MEASURED 2026-09-29 in alg-rts at 2x
+   * (render 30x + onSubmittedWorkDone, min of 5, four views): wrapped 20.1 ms,
+   * plain 14.0 — the terrain read in every receiving fragment is ~1.5 ms a
+   * view, and at the RTS's sun the frame with it was all but identical.
+   */
 
   function syncCsmFromToolState() {
     const cfg = csmCfgNum(toolState.csm);
@@ -1665,8 +1872,16 @@ export async function createWorldEnvironment({
     // switch below passes the same mode as prev, so applySkyMode would not see the exit).
     const wasSkyPro = toolState.skyMode === "skypro";
     if (wasSkyPro && look.skyMode !== "skypro") restoreLightFromSkyPro();
+    // The shadow biases ride in the `light` slice, but they are SHADOW QUALITY
+    // (the panel shows them under Shadows), which a look does not carry: they
+    // depend on the game's geometry and shadow frustum, not on the level. A
+    // level saved from the editor carried 0.02 and silently replaced the 0.12
+    // both RTS games boot with — their flat decks were back to acne stripes.
+    const lookLight = look.light ? { ...look.light } : null;
+    if (lookLight) { delete lookLight.shadowBias; delete lookLight.shadowNormalBias; }
     for (const key of LOOK_SLICES) {
-      if (look[key] && toolState[key]) mergeKnownKeys(toolState[key], look[key]);
+      const src = key === "light" ? lookLight : look[key];
+      if (src && toolState[key]) mergeKnownKeys(toolState[key], src);
     }
     let mode = SKY_MODES.includes(look.skyMode) ? look.skyMode : toolState.skyMode;
     if (mode === "hdr") {
@@ -2486,6 +2701,25 @@ export async function createWorldEnvironment({
      * looks flatter" rather than as a missing render pass.
      */
     getSunShadowCamera: () => sun.shadow?.camera ?? null,
+    /** What the last fitted-frustum pass chose (cascades off): half extents, m/texel, ground slab. */
+    getFittedShadowInfo: () => ({ ..._fitStat }),
+    /**
+     * Draw the fitted shadow frustum as a wire box (a debug aid; off by default).
+     * `freeze` keeps the box where it is, so the camera can back off and look
+     * at it — otherwise it refits to wherever the camera goes.
+     */
+    setShadowFrustumHelper(on, { freeze = false } = {}) {
+      _fitFrozen = !!on && !!freeze;
+      if (on && !_fitHelper) {
+        _fitHelper = new THREE.CameraHelper(sun.shadow.camera);
+        _fitHelper.name = "Sun shadow frustum (debug)";
+        scene.add(_fitHelper);
+      } else if (!on && _fitHelper) {
+        scene.remove(_fitHelper);
+        _fitHelper.dispose();
+        _fitHelper = null;
+      }
+    },
     describeCsm,
     setSkyVisible,
     get skyVisible() { return _skyShown; },

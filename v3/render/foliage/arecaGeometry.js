@@ -118,22 +118,24 @@ export function buildAreca(type, ctx) {
     // Barely tapers, with the slightest swell at the foot.
     const radiusAt = (t) => caneR * age * (1 - 0.16 * t) * (1 + 0.5 * Math.exp(-t * 26));
 
+    // Four sides at the far level (see below), the full count otherwise.
+    const tubeSides = far ? 4 : sides;
     const ring = (t, radius, alongVal, part) => {
       const { p, fwd } = at(t);
       const ax2 = norm(cross(fwd, side));
       const base = vcount();
-      for (let s = 0; s < sides; s++) {
-        const ph = (s / sides) * Math.PI * 2;
+      for (let s = 0; s < tubeSides; s++) {
+        const ph = (s / tubeSides) * Math.PI * 2;
         const cs = Math.cos(ph), sn = Math.sin(ph);
         const n = norm([side[0] * cs + ax2[0] * sn, side[1] * cs + ax2[1] * sn, side[2] * cs + ax2[2] * sn]);
-        push(add(p, n, radius), n, s / sides, t, [part, t, 0.1, alongVal]);
+        push(add(p, n, radius), n, s / tubeSides, t, [part, t, 0.1, alongVal]);
       }
       return base;
     };
     // Outward winding — see ref: an inside-out tube renders black.
     const stitch = (b0, b1) => {
-      for (let s = 0; s < sides; s++) {
-        const s2 = (s + 1) % sides;
+      for (let s = 0; s < tubeSides; s++) {
+        const s2 = (s + 1) % tubeSides;
         I.push(b0 + s, b0 + s2, b1 + s, b0 + s2, b1 + s2, b1 + s);
       }
     };
@@ -142,33 +144,16 @@ export function buildAreca(type, ctx) {
     const shaftBase = 1 - shaft;
 
     if (far) {
-      // Two crossed quads: at this range a cane is a pixel wide and all that
-      // matters is that something vertical holds the crown up.
-      for (const across of [true, false]) {
-        const base = vcount();
-        const segs = 2;
-        for (let q = 0; q <= segs; q++) {
-          const t = q / segs;
-          const { p, fwd } = at(t);
-          const axis = across ? side : norm(cross(fwd, side));
-          const n = norm(add(cross(fwd, axis), UP, 0.9));
-          // PART 2, not the trunk's part 3, and lifted toward UP.
-          //
-          // Part 3 shades with its normal multiplied by `faceDirection`, so on
-          // a DOUBLE-SIDED quad the back face gets its normal FLIPPED — and a
-          // crossed pair always shows one back face. The trunk then goes black
-          // at the coarse level while the round trunk it replaces is brown, and
-          // the switch between the two reads as the trunk turning off. Found on
-          // the fan palm, where it was obvious; it was latent here the whole
-          // time. Part 2 carries the same `colorHead` but is shaded like a soft
-          // body, with its normal turned toward the viewer instead of flipped.
-          for (const s of [-1, 1]) push(add(p, axis, s * radiusAt(t) * 1.8), n, s * 0.5 + 0.5, t, [HEAD, t, 0.1, 0.45]);
-        }
-        for (let q = 0; q < segs; q++) {
-          const i0 = base + q * 2;
-          I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3);
-        }
-      }
+      // A CLOSED 4-sided tube, as the fan palm's far trunk — not the crossed
+      // pair of quads this used to be. The pair had to be part 2 (part 3 flips
+      // its normal on a double-sided quad's back face and went black), and
+      // part 2 is alpha-tested against the FROND texture, which is almost all
+      // transparent across a cane quad: the far cane was cut away, and the
+      // SHADOW pass draws only this level, so no areca ever cast its cane.
+      // A closed tube shows no back face: part 3, never alpha-tested.
+      let prev = null;
+      const join = (b) => { if (prev !== null) stitch(prev, b); prev = b; };
+      for (const t of [0, 0.5, 1]) join(ring(t, radiusAt(t) * 1.45, 0.5, CANE));
     } else {
       // The ringed cane, up to the crownshaft. A ring ON the scar (`along` 0)
       // and one BETWEEN scars (±1) lets the culm shader draw its dark scar

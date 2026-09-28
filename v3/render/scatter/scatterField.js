@@ -186,6 +186,8 @@ export class ScatterField {
       uCullPadNdcYFar: uniform(0.35),
       uTypes: uniformArray(this.typeRows, "vec4"),
       uShadowDist: uniform(35),
+      // World XZ the shadow radius is measured from — see setShadowCentre.
+      uShadowCentre: uniform(new THREE.Vector2()),
       // Plants closer than this to the CAMERA thin out (see the compute).
       uNearFade: uniform(nearFade),
       // Fraction of the plants that survive, on top of density — see setThin.
@@ -329,12 +331,14 @@ export class ScatterField {
         u.uCullPadNdcX, u.uCullPadNdcYNear, u.uCullPadNdcYFar,
       );
 
-      // Casts a shadow: its type casts and it is within the shadow distance —
-      // on screen or not. The distance is spread ±3 m per plant so the last
-      // shadows fade out instead of ending on a circle.
+      // Casts a shadow: its type casts and it is within the shadow distance of
+      // the shadow centre — on screen or not. The distance is spread ±3 m per
+      // plant so the last shadows fade out instead of ending on a circle.
       const shadowR = u.uShadowDist.add(hash(instanceIndex.add(777)).mul(6).sub(3));
+      const dxS = worldX.sub(u.uShadowCentre.x);
+      const dzS = worldZ.sub(u.uShadowCentre.y);
       const castsShadow = shadows
-        ? u.uShadowCast.element(int(floor(typeIdx.add(0.5)))).mul(step(distSq, shadowR.mul(shadowR)))
+        ? u.uShadowCast.element(int(floor(typeIdx.add(0.5)))).mul(step(dxS.mul(dxS).add(dzS.mul(dzS)), shadowR.mul(shadowR)))
         : float(0);
       const inView = frustumVis.greaterThan(0.5);
       // A runtime thinning, independent of the painted density: its own hash,
@@ -529,6 +533,22 @@ export class ScatterField {
     this._syncShadowVisibility();
   }
 
+  /**
+   * Where the shadow radius is measured from, world XZ; `null` = the anchor.
+   *
+   * THE ANCHOR IS THE WRONG CENTRE FOR A CAMERA THAT LOOKS DOWN AND AHEAD. It
+   * is the camera's own XZ, and an RTS camera never sees the ground under
+   * itself: at alg-rts's play zoom the nearest visible ground is 12 m out and
+   * the screen centre 41 m, so a 35 m circle around the camera spent a third of
+   * its casters behind the bottom of the screen and none past its middle —
+   * plants in the upper half of the view cast nothing. The caller centres the
+   * circle on the ground the camera actually sees (main.js, scatterShadowCentre).
+   */
+  setShadowCentre(x, z) {
+    this._shadowCentreSet = x != null && Number.isFinite(x) && Number.isFinite(z);
+    if (this._shadowCentreSet) this.u.uShadowCentre.value.set(x, z);
+  }
+
   _syncShadowVisibility() {
     for (let m = 0; m < this.shadowMeshCount; m++) {
       const t = Math.floor(m / this.parts / this.variants);
@@ -688,6 +708,7 @@ export class ScatterField {
     u.uAnchorDeltaXZ.value.set(anchorPos.x - this._lastAnchor.x, anchorPos.z - this._lastAnchor.z);
     u.uAnchorPos.value.copy(anchorPos);
     u.uPlayerPos.value.copy(anchorPos);
+    if (!this._shadowCentreSet) u.uShadowCentre.value.set(anchorPos.x, anchorPos.z);
     for (const m of this.meshes) m.position.set(anchorPos.x, 0, anchorPos.z);
     for (const m of this.shadowMeshes) m.position.set(anchorPos.x, 0, anchorPos.z);
     this._lastAnchor.copy(anchorPos);

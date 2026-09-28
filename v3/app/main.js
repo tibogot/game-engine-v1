@@ -1063,6 +1063,7 @@ export async function startV3App(opts = {}) {
     terrainSize: WORLD_SIZE,
     getSplineSystem: () => splineSys,
     getTerrainMeshes: getTerrainMeshesForWorld,
+    getWorldHeight: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
     // Opt-in for games: the cloud field is one more texture in EVERY lit
     // material (no sampler — the editor's terrain is at WebGPU's 16). The
     // editor always has it: Sky Pro casts its clouds' shadows through it.
@@ -1942,6 +1943,32 @@ export async function startV3App(opts = {}) {
    * cascade whose near edge is closer than that. Empty with CSM off — the
    * shadow lists are a CSM feature, like the per-cascade prop lists.
    */
+  /**
+   * Centre a scatter field's shadow circle (radius `distance`) on the ground
+   * the camera sees: its near edge sits on the nearest visible ground, so the
+   * circle covers the band from the bottom of the screen up to 2 × distance
+   * past it. In play mode the anchor is the player, standing on the ground in
+   * view, and stays the centre. See ScatterField.setShadowCentre for why.
+   */
+  const _shadowFwd = new THREE.Vector3();
+  function scatterShadowCentre(field) {
+    if (!field?.setShadowCentre) return;
+    // The radius the compute USES — the state's number only reaches the
+    // uniform on a sync, and a centre offset by the other one slides the
+    // circle off the near plants.
+    const distance = field.u.uShadowDist.value;
+    if (playMode.active) { field.setShadowCentre(null); return; }
+    const band = viewGroundBand();
+    _shadowFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    const len = Math.hypot(_shadowFwd.x, _shadowFwd.z);
+    if (!(len > 1e-3) || !Number.isFinite(band.near)) { field.setShadowCentre(null); return; }
+    const ahead = band.near + distance;
+    field.setShadowCentre(
+      camera.position.x + (_shadowFwd.x / len) * ahead,
+      camera.position.z + (_shadowFwd.z / len) * ahead,
+    );
+  }
+
   const _scatterShadowCams = [];
   function scatterShadowCameras(distance) {
     _scatterShadowCams.length = 0;
@@ -4649,6 +4676,7 @@ export async function startV3App(opts = {}) {
             susukiSystem.field.setViewDistances(band.near * 1.2, band.far * 1.25);
           }
           susukiSystem.setShadowCameras(scatterShadowCameras(susukiState.shadowDistance ?? 35));
+          scatterShadowCentre(susukiSystem.field);
           susukiSystem.update(_susukiAnchor, camera);
         }
       }
@@ -4680,6 +4708,7 @@ export async function startV3App(opts = {}) {
             foliageScatter.field.setViewDistances(band.near, band.far);
           }
           foliageScatter.setShadowCameras(scatterShadowCameras(foliageScatterState.shadowDistance));
+          scatterShadowCentre(foliageScatter.field);
           foliageScatter.update(playMode.active ? playMode.playerPosition : camera.position, camera);
         }
       }
@@ -12242,6 +12271,13 @@ export async function startV3App(opts = {}) {
       setEnabled(on) { worldEnv?.setCsmEnabled(!!on); },
       /** The cascaded shadow node (null without an environment). Rebuilt when cascades change — read it live, don't keep it. */
       get csm() { return worldEnv?.getCsm?.() ?? null; },
+      /** Cascades off: the fitted frustum's half extents (m), m/texel and ground slab this frame. */
+      fitInfo() { return worldEnv?.getFittedShadowInfo?.() ?? null; },
+      /**
+       * Draw the sun's shadow frustum as a wire box — `app.shadows.showFrustum(true)`.
+       * `{ freeze: true }` holds the box so the camera can back off and look at it.
+       */
+      showFrustum(on, opts) { worldEnv?.setShadowFrustumHelper?.(!!on, opts); },
     },
     // ── WORLD LIGHTING ────────────────────────────────────────────────────────
     // NOT stored in the .v3proj. Check encodeProjectFile's manifest: it carries
