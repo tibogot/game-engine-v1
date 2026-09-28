@@ -757,6 +757,17 @@ function _buildSkyProControls(parent, ts, app) {
     hint: "Tidewater's is 0.55 for its units. This sky sets the world's lights while it is shown and gives them back when you leave it.",
   });
   _color(li, S, "groundAlbedo", { label: "Ground (sky light)" });
+
+  const hz = _section(wrap, "Haze & shafts", true);
+  _slider(hz, S, "haze", {
+    label: "Haze density", min: 0, max: 4, step: 0.05,
+    hint: "Tidewater's air: a thin marine layer at the ground and an aerosol layer above, taking the horizon sky's colour. 1.6 is Tidewater's. 0 = the pass is skipped.",
+  });
+  _slider(hz, S, "shafts", {
+    label: "Sun shafts", min: 0, max: 1, step: 0.01,
+    hint: "Light through the air, shadowed by the terrain, objects (the widest shadow cascade) and the clouds.",
+  });
+  _toggle(hz, S, "godRays", { label: "God rays", hint: "Rays round a low sun in view, blocked by the clouds." });
   return wrap;
 }
 

@@ -71,7 +71,7 @@ function siteBanks(app, fog) {
   }
 }
 
-export function createAlgFog(app, { light, applyLight } = {}) {
+export function createAlgFog(app, { light, applyLight, skyPro = false } = {}) {
   if (!app.heightTexNode || !app.postFx?.setSceneColorModifier) return null;
   const fog = createFogBanks({ app, storeKey: "algrts.fogBanks" });
   siteBanks(app, fog);
@@ -99,6 +99,8 @@ export function createAlgFog(app, { light, applyLight } = {}) {
     app.sky?.setTimeOfDay?.(W.time);
     for (const [k, v] of Object.entries(W.banks)) fog.set(k, v, { quiet: true });
     fog.sync();
+    // Under Sky Pro its own air haze is the distance fog (algGame.js SKY_PRO): the banks stay.
+    if (skyPro) return;
     app.fog?.setHeight?.(W.height);
     app.fog?.setDistance?.({ enabled: true, matchSky: true, ...W.distance });
   }

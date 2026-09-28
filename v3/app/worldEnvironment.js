@@ -72,6 +72,7 @@ export async function createWorldEnvironment({
   getSplineSystem = () => null,
   getTerrainMeshes = () => [],
   cloudShadows = false,
+  editor = false,
 }) {
   const sunDir = new THREE.Vector3();
   const _effectiveLightDir = new THREE.Vector3();
@@ -256,11 +257,12 @@ export async function createWorldEnvironment({
   const sun = new THREE.DirectionalLight(L.dirColor, L.dirIntensity);
   // Drifting cloud shade on the sun's light (cloudShadowsLite.js). Attached
   // HERE, before the sun first renders — three reads colorNode only then.
-  // Off (darkness 0) until a game turns it on via app.setCloudShadows. Only
-  // hooked when the game booted with `cloudShadows: true`: hooked, it is one
-  // more sampler in every lit material, and that pushed the editor's terrain
-  // to 17 of WebGPU's 16 — the terrain pipeline failed and nothing drew.
-  const cloudShadowsLite = createCloudShadowsLite(sun, {}, { attach: cloudShadows });
+  // Off (darkness 0) until a game turns it on via app.setCloudShadows, or a
+  // sky with its own clouds hands it their shadow map (Sky Pro, setMap).
+  // Hooked in the editor and in games that boot with `cloudShadows: true`: it
+  // is one more TEXTURE in every lit material, but no sampler (the old sampled
+  // read pushed the editor's terrain to 17 of WebGPU's 16 samplers and nothing drew).
+  const cloudShadowsLite = createCloudShadowsLite(sun, {}, { attach: cloudShadows || editor });
   sun.castShadow = true;
   const shadowTarget = new THREE.Object3D();
   scene.add(shadowTarget);
@@ -856,6 +858,8 @@ export async function createWorldEnvironment({
     // The REAL sun, from the engine's clock and the light's angles (the key light may be the moon).
     skyPro.update(dtSec, { sunDir, drawingBufferSize: _skyProBuffer });
     if (scene.environment !== skyPro.environment) scene.environment = skyPro.environment;
+    // Its cumulus shade the world: the sun's cloud-shadow slot reads their shadow map.
+    cloudShadowsLite.setMap(skyPro.cloudShadow);
 
     // The world in the sky's light (Tidewater's lighting.js: direct = sunColor N.L albedo / PI, which
     // is three's Lambert with intensity = sunColor; ambient = the environment alone).
@@ -893,6 +897,7 @@ export async function createWorldEnvironment({
   }
 
   function restoreLightFromSkyPro() {
+    cloudShadowsLite.setMap(null);
     const saved = toolState.skyProSky.savedLight;
     if (!saved) return;
     Object.assign(toolState.light, saved);
@@ -1649,6 +1654,10 @@ export async function createWorldEnvironment({
 
   async function importLook(look) {
     if (!look) return;
+    // Leaving Sky Pro hands back the lights it took, BEFORE the look's own light lands (the
+    // switch below passes the same mode as prev, so applySkyMode would not see the exit).
+    const wasSkyPro = toolState.skyMode === "skypro";
+    if (wasSkyPro && look.skyMode !== "skypro") restoreLightFromSkyPro();
     for (const key of LOOK_SLICES) {
       if (look[key] && toolState[key]) mergeKnownKeys(toolState[key], look[key]);
     }
@@ -1665,6 +1674,8 @@ export async function createWorldEnvironment({
       }
     }
     // Same mode as prev: no exposure swap, the saved exposure stays as saved.
+    // (Entering Sky Pro from a look: snapshot the look's lights first, so leaving gives them back.)
+    if (mode === "skypro" && !wasSkyPro) snapshotLightForSkyPro();
     applySkyMode(mode, mode);
     if (isDomeMode(mode)) setTimeOfDay(toolState.proceduralSky.timeOfDay);
     syncFog();
@@ -2251,6 +2262,26 @@ export async function createWorldEnvironment({
    *              compositeOntoLinearHDR(renderer, rt), setDepthSource(tex) }`.
    */
   let customCloudSystem = null;
+
+  /*
+   * Sky Pro through the cloud-path contract (prepareFrame / compositeOntoLinearHDR): its
+   * clouds are already in the dome, so all it composites is the haze. The shafts march the
+   * WIDEST cascade — the one that covers most of their 2.5 km — or none without cascades.
+   */
+  const _skyProSize = new THREE.Vector2();
+  const skyProPost = {
+    prepareFrame: () => true,
+    compositeOntoLinearHDR(_renderer, rt) {
+      const n = csm && toolState.csm.enabled ? csm.lights.length : 0;
+      const light = n ? csm.lights[n - 1] : null;
+      const shadowDepth = n ? csm._shadowNodes?.[n - 1]?.shadowMap?.depthTexture ?? null : null;
+      renderer.getDrawingBufferSize(_skyProSize);
+      skyPro.postProcess(rt, {
+        depthTex: postFxPipeline.getSceneDepthTexture(), light, shadowDepth, size: _skyProSize,
+      });
+    },
+  };
+
   function setCustomCloudSystem(system) {
     customCloudSystem = system ?? null;
   }
@@ -2270,6 +2301,19 @@ export async function createWorldEnvironment({
      * registers only to cast its ground shadows and god rays — which is why routing it
      * matters even though you can already see it.
      */
+    /*
+     * Sky Pro's air haze and sun shafts. They need the scene's depth, so the frame goes through
+     * the post chain's cloud path: solids into the linear HDR target, then the haze on it
+     * (skyproSky.postProcess), then the display chain. The scene-depth request makes the
+     * minimal chain carry it when post FX is off. A game's own cloud system still wins.
+     */
+    if (!customCloudSystem?.enabled && toolState.skyMode === "skypro" && skyPro && _skyProReady
+      && toolState.skyProSky.haze > 0) {
+      postFxPipeline.setSceneDepthRequired(true);
+      postFxPipeline.renderWithClouds(skyProPost, cloudFollowAnchor, dtSec);
+      return;
+    }
+
     const deck = atmoClouds ?? atmoPainted;
     if (!customCloudSystem?.enabled && toolState.skyMode === "atmosphere" && deck?.enabled) {
       if (postFxPipeline.isActive()) {

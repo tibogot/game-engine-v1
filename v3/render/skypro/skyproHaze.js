@@ -92,8 +92,10 @@ fn hazePhase( cosT: f32 ) -> f32 {
 }
 
 struct HazeRay { dist: f32, dir: vec3f, sky: bool, rayLen: f32 };
-// PORT: three's WebGPU depth (0 near .. 1 far, cleared to 1 = sky); the view ray from the frustum tangents
-fn hazeRay( uv: vec2f, depthT: texture_depth_2d ) -> HazeRay {
+// PORT: three's WebGPU depth (0 near .. 1 far, cleared to 1 = sky); the view ray from the frustum tangents.
+// DEPTH_T is the scene depth's type, set when the passes are built: the engine's scene pass is
+// multisampled (texture_depth_multisampled_2d), the lab's is not; textureLoad reads sample 0 of either.
+fn hazeRay( uv: vec2f, depthT: DEPTH_T ) -> HazeRay {
 	let size = vec2f( textureDimensions( depthT ) );
 	let d = textureLoad( depthT, vec2i( clamp( uv, vec2f( 0.0 ), vec2f( 0.9999 ) ) * size ), 0 );
 	let ndc = vec2f( uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0 );
@@ -105,6 +107,12 @@ fn hazeRay( uv: vec2f, depthT: texture_depth_2d ) -> HazeRay {
 	let viewDist = n * fa / max( fa - ( fa - n ) * d, 1e-6 ); // -viewZ
 	r.dist = select( min( viewDist * r.rayLen, HZ_FAR_CLAMP ), HZ_FAR_CLAMP, r.sky );
 	r.dir = normalize( ( hzCamWorld * vec4f( ray, 0.0 ) ).xyz );
+	// PORT: a sky pixel BELOW the horizon is the sky dome's ground at sea level (Tidewater's sea always
+	// covered these): the air ends there. Marched on, the ray went underground, every sample read as
+	// shadowed, and the shaft deficit took the pixel to black.
+	if ( r.sky && r.dir.y < -1e-4 ) {
+		r.dist = min( r.dist, max( hzU[ 2 ].y - hzU[ 2 ].w, 0.0 ) / - r.dir.y );
+	}
 	return r;
 }
 
@@ -138,7 +146,7 @@ fn hazeVisibilityRest( P: vec3f, v0: f32, cloudT: texture_2d<f32> ) -> f32 {
 
 // ------------------------------------------------------------------ the march (half resolution)
 const MARCH_FN = /* wgsl */`
-fn hzMarch( gate: f32, uv: vec2f, px: vec2f, depthT: texture_depth_2d, shadowT: texture_depth_2d, cloudT: texture_2d<f32> ) -> vec4f {
+fn hzMarch( gate: f32, uv: vec2f, px: vec2f, depthT: DEPTH_T, shadowT: texture_depth_2d, cloudT: texture_2d<f32> ) -> vec4f {
 	let R = hazeRay( uv, depthT );
 	var out = vec4f( 0.0, 0.0, R.dist, 1.0 );
 	if ( hzU[ 0 ].z > 0.5 && hzU[ 0 ].y > 0.0 ) {
@@ -183,7 +191,7 @@ fn hzMarch( gate: f32, uv: vec2f, px: vec2f, depthT: texture_depth_2d, shadowT: 
 
 // ------------------------------------------------------------------ temporal accumulation of the march
 const TEMPORAL_FN = /* wgsl */`
-fn hzTemporal( gate: f32, uv: vec2f, px: vec2f, depthT: texture_depth_2d, curT: texture_2d<f32>, prevT: texture_2d<f32>, smp: sampler ) -> vec4f {
+fn hzTemporal( gate: f32, uv: vec2f, px: vec2f, depthT: DEPTH_T, curT: texture_2d<f32>, prevT: texture_2d<f32>, smp: sampler ) -> vec4f {
 	let size = vec2i( textureDimensions( curT ) );
 	let p = vec2i( px );
 	let cur = textureLoad( curT, p, 0 );
@@ -237,7 +245,7 @@ ${taps}
 
 // ------------------------------------------------------------------ the composite (hazeApply)
 const APPLY_FN = /* wgsl */`
-fn hzApply( gate: f32, uv: vec2f, c: vec4f, depthT: texture_depth_2d, lowT: texture_2d<f32>, ssT: texture_2d<f32>, smp: sampler,
+fn hzApply( gate: f32, uv: vec2f, c: vec4f, depthT: DEPTH_T, lowT: texture_2d<f32>, ssT: texture_2d<f32>, smp: sampler,
 	irrT: texture_2d<f32>, skT: texture_2d<f32>, skS: sampler ) -> vec4f {
 	var out = c.rgb;
 	if ( hzU[ 0 ].z > 0.5 ) {
@@ -296,15 +304,39 @@ fn hzApply( gate: f32, uv: vec2f, c: vec4f, depthT: texture_depth_2d, lowT: text
 	return vec4f( out, c.a );
 }`;
 
+// the sky test of the god-ray mask, in WGSL so it reads a multisampled depth as well
+const SKY_AT_FN = /* wgsl */`
+fn hzSkyAt( uv: vec2f, depthT: DEPTH_T ) -> f32 {
+	let size = vec2f( textureDimensions( depthT ) );
+	let d = textureLoad( depthT, vec2i( clamp( uv, vec2f( 0.0 ), vec2f( 0.9999 ) ) * size ), 0 );
+	return select( 0.0, 1.0, d >= 0.9999999 );
+}`;
+
 export function createAirHaze({ renderer, atmosphere, clouds }) {
-  const common = wgsl(COMMON, [atmosphere.code]);
-  const loadFn = wgslFn(/* wgsl */`fn hzLoadCall( u0: vec4f, u1: vec4f, u2: vec4f, u3: vec4f, u4: vec4f, u5: vec4f, u6: vec4f, u7: vec4f, u8: vec4f,
-	u9: vec4f, u10: vec4f, camWorld: mat4x4f, shadowM: mat4x4f, prevVP: mat4x4f ) -> f32 { return hzLoad( u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, camWorld, shadowM, prevVP ); }`, [common]);
+  // The WGSL, per scene-depth type (plain or multisampled): built on first use of each.
   const U = Array.from({ length: 11 }, () => uniform(new THREE.Vector4()));
   const uCamWorld = uniform(new THREE.Matrix4());
   const uShadowM = uniform(new THREE.Matrix4());
   const uPrevVP = uniform(new THREE.Matrix4());
-  const gate = () => loadFn(...U, uCamWorld, uShadowM, uPrevVP);
+  const codeByType = new Map();
+  function codeFor(ms) {
+    if (codeByType.has(ms)) return codeByType.get(ms);
+    const T = (s) => s.replaceAll("DEPTH_T", ms ? "texture_depth_multisampled_2d" : "texture_depth_2d");
+    const common = wgsl(T(COMMON), [atmosphere.code]);
+    const loadFn = wgslFn(/* wgsl */`fn hzLoadCall( u0: vec4f, u1: vec4f, u2: vec4f, u3: vec4f, u4: vec4f, u5: vec4f, u6: vec4f, u7: vec4f, u8: vec4f,
+	u9: vec4f, u10: vec4f, camWorld: mat4x4f, shadowM: mat4x4f, prevVP: mat4x4f ) -> f32 { return hzLoad( u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, camWorld, shadowM, prevVP ); }`, [common]);
+    const c = {
+      gate: () => loadFn(...U, uCamWorld, uShadowM, uPrevVP),
+      marchFn: wgslFn(T(MARCH_FN), [common]),
+      temporalFn: wgslFn(T(TEMPORAL_FN), [common]),
+      blurFns: [0, 1, 2].map((p) => wgslFn(blurFn(p), [common])),
+      applyFn: wgslFn(T(APPLY_FN), [common]),
+      skyAtFn: wgslFn(T(SKY_AT_FN)),
+    };
+    codeByType.set(ms, c);
+    return c;
+  }
+  const isMultisampled = (tex) => (renderer.backend?.utils?.getTextureSampleData?.(tex)?.primarySamples ?? 1) > 1;
 
   const params = { density: 1.6, shafts: 1.0, enabled: true, godRays: true };
 
@@ -315,11 +347,6 @@ export function createAirHaze({ renderer, atmosphere, clouds }) {
   const ss = [0, 1, 2, 3].map(() => rtOf());
   const out = rtOf();
   let hc = 0, histValid = false;
-
-  const marchFn = wgslFn(MARCH_FN, [common]);
-  const temporalFn = wgslFn(TEMPORAL_FN, [common]);
-  const blurFns = [0, 1, 2].map((p) => wgslFn(blurFn(p), [common]));
-  const applyFn = wgslFn(APPLY_FN, [common]);
 
   const skyNode = texture(atmosphere.textures.skyView);
   const irrNode = texture(atmosphere.textures.irradiance);
@@ -335,6 +362,11 @@ export function createAirHaze({ renderer, atmosphere, clouds }) {
   };
   const colorNode = texture(new THREE.Texture()); // .value = the scene colour (set per frame)
   function build(depthTex, shadowTex, viewDir) {
+    if (passes) {
+      for (const q of [passes.march, ...passes.temporal, passes.mask, ...passes.blur, passes.apply]) q.material.dispose();
+    }
+    const ms = isMultisampled(depthTex);
+    const { gate, marchFn, temporalFn, blurFns, applyFn, skyAtFn } = codeFor(ms);
     const depthNode = texture(depthTex);
     const shadowNode = texture(shadowTex);
     const px = screenCoordinate.xy;
@@ -350,8 +382,8 @@ export function createAirHaze({ renderer, atmosphere, clouds }) {
       const cloudT = clouds.sunTransmittance(clouds.viewSample(dir).a);
       const c = dot(dir, U[4].xyz);
       const glow = exp(c.sub(1.0).mul(600.0)).add(exp(c.sub(1.0).mul(50.0)).mul(0.25));
-      // (TSL flips render-target reads; with the quad's own uv that lands on this pixel)
-      const isSky = depthNode.sample(uv()).level(0).x.greaterThanEqual(0.9999999);
+      // (raw WGSL reads of render targets need no flip, as in the passes above)
+      const isSky = skyAtFn(screenUV, depthNode).greaterThan(0.5);
       return vec4(select(U[1].z.greaterThan(0.001).and(isSky), glow.mul(cloudT), float(0.0)), 0, 0, 1);
     })());
     const blur = [0, 1, 2].map((p) => {
@@ -361,7 +393,8 @@ export function createAirHaze({ renderer, atmosphere, clouds }) {
     const lowNode = texture(hist[0].texture); // .value = the newest history
     const ssNode = texture(ss[3].texture);
     const apply = quadOf(applyFn(gate(), screenUV, colorNode.sample(uv()).level(0), depthNode, lowNode, ssNode, sampler(ssNode), irrNode, skyNode, sampler(skyNode)));
-    passes = { march, temporal, mask, blur, apply, lowNode, depthNode };
+    passes = { march, temporal, mask, blur, apply, lowNode, depthNode, shadowNode, ms };
+    histValid = false;
   }
 
   let frameNo = 0;
@@ -376,12 +409,29 @@ export function createAirHaze({ renderer, atmosphere, clouds }) {
    *   drawing buffer), viewDir (TSL Fn: world view direction at screenUV)
    * @returns the hazed HDR texture
    */
+  // stands in for the shadow map when there is none (a cleared 1x1 depth; the march then skips it)
+  let noShadow = null;
+  function placeholderShadow() {
+    if (!noShadow) {
+      noShadow = new THREE.RenderTarget(1, 1, { depthBuffer: true });
+      noShadow.depthTexture = new THREE.DepthTexture(1, 1);
+      const prev = renderer.getRenderTarget();
+      renderer.setRenderTarget(noShadow);
+      renderer.clear();
+      renderer.setRenderTarget(prev);
+    }
+    return noShadow.depthTexture;
+  }
+
   function render(o) {
     const shadowTex = o.shadowDepth || null;
-    if (!passes) {
-      if (!shadowTex) return o.colorTex; // one frame without haze until the shadow map exists
-      build(o.depthTex, shadowTex, o.viewDir);
-    }
+    if (!o.depthTex) return o.colorTex;
+    // (a switch between a multisampled scene pass and a plain one changes the WGSL types: rebuild)
+    if (!passes || passes.ms !== isMultisampled(o.depthTex)) build(o.depthTex, shadowTex || placeholderShadow(), o.viewDir);
+    // The engine's depth and shadow textures are replaced on a resize or a cascade rebuild:
+    // rebind them (a texture swap, no recompile) rather than read the old ones.
+    if (passes.depthNode.value !== o.depthTex) passes.depthNode.value = o.depthTex;
+    if (shadowTex && passes.shadowNode.value !== shadowTex) passes.shadowNode.value = shadowTex;
     const { x: W, y: H } = o.size;
     if (W !== w0.x || H !== w0.y) {
       w0.set(W, H);
@@ -425,7 +475,7 @@ export function createAirHaze({ renderer, atmosphere, clouds }) {
     U[9].value.copy(atmosphere.uniforms.sp0.value);
     U[10].value.copy(atmosphere.uniforms.sp1.value);
     uCamWorld.value.copy(cam.matrixWorld);
-    if (o.light) {
+    if (o.light && shadowTex) {
       const sc = o.light.shadow.camera;
       uShadowM.value.multiplyMatrices(sc.projectionMatrix, sc.matrixWorldInverse);
     }

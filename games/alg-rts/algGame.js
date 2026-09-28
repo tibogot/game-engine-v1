@@ -8,7 +8,9 @@
 // shader, top-3 layers + near/far tiling, the terrain drawn last.
 //
 // URL options: ?world=/levels/other.v3proj · ?light=flat (the engine's default
-// light, to A/B) · ?fog=0 · ?warmup=0 (no pipeline warm-up, to A/B it)
+// light, to A/B) · ?fog=0 · ?warmup=0 (no pipeline warm-up, to A/B it) ·
+// ?sky=pro (the Sky Pro sky: Tidewater's atmosphere, real cumulus and their
+// shadows, its air haze and sun shafts — the test bed, see SKY_PRO below)
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom } from "./showroom.js";
@@ -60,6 +62,15 @@ export const AURES_LIGHT = {
  */
 const PLAIN_COLOR = "#a39480";
 
+/**
+ * SKY PRO (?sky=pro): the engine's "skypro" sky mode on this map, to judge it
+ * in the game's own camera. It brings its own light (the sun through its air, in
+ * Tidewater's units, the sky as the ambient), its own haze and its clouds'
+ * shadows, so the Aurès light above (tuned for the Atmosphere sky) steps aside:
+ * no setWorldLight, no distance fog. The clock, latitude and grade stay.
+ */
+const SKY_PRO = params.get("sky") === "pro";
+
 export async function startAlgGame({ container, onStatus = () => {}, onProgress = null } = {}) {
   onStatus("Starting engine…");
   // The kit's surface atlas is painted in a worker; until it lands every
@@ -72,7 +83,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     preloadPaintTextures: false,
     // The Atmosphere sky (3-LUT scattering). A game gets the old procedural
     // sky unless it asks, and setWorldLight below only drives this one.
-    skyMode: "atmosphere",
+    // ?sky=pro: Sky Pro, with its clouds' shadows on the land (the sun's
+    // cloud-shadow slot: one more texture per lit material, no sampler).
+    skyMode: SKY_PRO ? "skypro" : "atmosphere",
+    cloudShadows: SKY_PRO,
     // Three shapes of every tree (palm clumps, cedars, oaks): one shape
     // repeated across a grove read as a stamp.
     tallPlantVariants: Number(params.get("variants") ?? 3),
@@ -148,7 +162,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // Fog: the shared fog banks, sited in the oases and wadis, and weather
   // presets over every fog layer (algFog.js). ?fog=0 = without.
   if (params.get("fog") !== "0") {
-    try { app.algFog = createAlgFog(app); } catch (e) { console.warn("[alg fog] failed:", e); }
+    try { app.algFog = createAlgFog(app, { skyPro: SKY_PRO }); } catch (e) { console.warn("[alg fog] failed:", e); }
   }
   // UNITS (algUnits.js, the shared machinery): a section of appelés formed up
   // outside the post's gate, selectable, orderable. ?units=0 = without.
@@ -210,10 +224,18 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
 }
 
 export function applyAuresLight(app, L = AURES_LIGHT) {
+  // The level's saved look (Atmosphere) is applied by the loader, over the boot mode.
+  if (SKY_PRO) app.sky?.setMode?.("skypro");
   app.sky?.set?.({ latitude: L.latitude, dayOfYear: L.dayOfYear });
   app.sky?.setTimeOfDay?.(L.timeOfDay);
-  app.sky?.setWorldLight?.(L.world);
   app.postFx?.setPolish?.(L.polish);
+  if (SKY_PRO) {
+    // Its own light and air (see SKY_PRO): the engine's distance fog would haze twice.
+    app.fog?.setHeight?.({ enabled: false });
+    app.fog?.setDistance?.({ enabled: false });
+    return;
+  }
+  app.sky?.setWorldLight?.(L.world);
   if (params.get("fog") === "0") return;
   app.fog?.setHeight?.({ enabled: false });
   // matchSky: the haze takes the horizon's colour, so the plain beyond the map

@@ -19,16 +19,20 @@
 //   s.params                         the live settings (SKYPRO_DEFAULTS' shape; the editor binds it)
 //   s.dispose()
 //
-// NOT here yet (step 3b): the haze and sun shafts (skyproHaze.js needs the engine's post chain and
-// its depth) and cloud shadows on objects (the sun light's colorNode, which three reads only when the
-// light is created).
+//   s.postProcess( rt, { depthTex, light, shadowDepth } )   the air haze and sun shafts
+//                                    (skyproHaze.js) on the linear HDR frame in rt, written back
+//                                    into it; depthTex = the scene depth, light + shadowDepth =
+//                                    a directional light and its shadow map (optional)
+//   s.cloudShadow                    { texture, center, size, strength }: the cumulus shadow
+//                                    map over the ground, for the sun's colorNode
 
 import * as THREE from "three/webgpu";
-import { Fn, uniform, vec2, vec3, vec4, float, normalize, positionWorld, cameraPosition, max, min, exp, mix, smoothstep } from "three/tsl";
+import { Fn, uniform, vec2, vec3, vec4, float, normalize, positionWorld, cameraPosition, max, min, exp, mix, smoothstep, screenUV, texture, uv } from "three/tsl";
 import { createSkyProAtmosphere } from "./skyproAtmosphere.js";
 import { createSkyProClouds } from "./skyproClouds.js";
 import { createCirrus, clOver } from "./skyproCirrus.js";
 import { createSkyEnvironment } from "./skyproEnv.js";
+import { createAirHaze } from "./skyproHaze.js";
 
 /** The settings the mode saves with a project (toolState.skyProSky). */
 export const SKYPRO_DEFAULTS = {
@@ -47,6 +51,12 @@ export const SKYPRO_DEFAULTS = {
   exposure: 0.55,
   /** the lower hemisphere of the sky light (a flat ground of this albedo) */
   groundAlbedo: "#54493a",
+  /** air haze density (Tidewater AirHaze: marine + aerosol layers); 0 = no haze pass at all */
+  haze: 1.6,
+  /** sun shafts through the shadow map and the cloud shadow, 0..1 (Tidewater 1) */
+  shafts: 1.0,
+  /** screen-space god rays round a low sun in view */
+  godRays: true,
   /**
    * INTERNAL (no control): the world's lights from before this sky took them over, restored
    * when the mode is left. Kept HERE, in the saved slice, not in memory: the editor persists
@@ -82,6 +92,7 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
   const uKeyDir = uniform(new THREE.Vector3(0, 1, 0));
   const uFloor = uniform(new THREE.Vector3(0.33, 0.29, 0.22));
   const uCloudMean = uniform(1);
+  const uHaze = uniform(1.6);
   const material = new THREE.MeshBasicNodeMaterial();
   material.colorNode = Fn(() => {
     const dir = normalize(positionWorld.sub(cameraPosition)).toVar();
@@ -102,7 +113,17 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     const E = uKey.mul(max(uKeyDir.y, 0.0)).mul(uCloudMean).div(Math.PI).add(atmosphere.irradianceNode);
     const floor = vec3(uFloor).mul(E);
     const hz = atmosphere.skyLuminance(normalize(vec3(dir.x, 0.02, dir.z)));
-    const far = float(1.0).sub(exp(min(t, 1e6).div(-12000.0)));
+    // The air between: the haze pass's own two layers (skyproHaze.js hazeLayerDepth, marine +
+    // aerosol) at its density, so the floor fades into the horizon exactly as the terrain does;
+    // a 12 km fade underneath for when the haze is off.
+    const d = min(t, 1e6);
+    const dy = min(dir.y, -1e-4);   // (looking down; kept off 0 so the sky half stays finite)
+    const layer = (sigma, H) => {
+      const k = dy.mul(d).div(H);
+      return exp(camY.div(-H)).mul(sigma).mul(float(H).mul(float(1.0).sub(exp(k.negate()))).div(dy));
+    };
+    const tau = layer(1.5e-4, 110).add(layer(3.2e-5, 1400)).mul(uHaze);
+    const far = max(float(1.0).sub(exp(tau.negate())), float(1.0).sub(exp(d.div(-12000.0))));
     const groundView = mix(floor, hz, far).mul(c.a).add(c.rgb);
     return vec4(mix(groundView, sky, smoothstep(-0.02, 0.0, dir.y)), 1.0);
   })();
@@ -174,12 +195,59 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     uKeyDir.value.copy(lightDir);
     uFloor.value.set(ground.r, ground.g, ground.b);
     uCloudMean.value = 1 - 0.6 * P.coverage;
+    uHaze.value = Math.max(0, P.haze);
     env.update({ lightDir, sunColor: keyLight, cloudMean: 1 - 0.6 * P.coverage, groundAlbedo: [ground.r, ground.g, ground.b] });
 
     out.sunColor[0] = sunColor[0]; out.sunColor[1] = sunColor[1]; out.sunColor[2] = sunColor[2];
     out.skyIrradiance = skyIrr;
     out.horizon = atmosphere.horizon || [0, 0, 0];
     out.keyIsMoon = keyIsMoon;
+  }
+
+  // ---- the air haze and sun shafts, on the engine's linear HDR frame
+  const haze = createAirHaze({ renderer, atmosphere, clouds });
+  const uInvVP = uniform(new THREE.Matrix4());
+  const uCamPos = uniform(new THREE.Vector3());
+  // the world view direction at this pixel (the haze's god-ray mask reads the cloud view with it)
+  const viewDir = Fn(() => {
+    const ndc = vec2(screenUV.x.mul(2.0).sub(1.0), float(1.0).sub(screenUV.y.mul(2.0)));
+    const p = uInvVP.mul(vec4(ndc, 0.5, 1.0));
+    return normalize(p.xyz.div(p.w).sub(uCamPos));
+  });
+  // the hazed frame is copied back into the engine's target (a pass cannot read what it writes)
+  const copySrc = texture(new THREE.Texture());
+  const copyMat = new THREE.MeshBasicNodeMaterial();
+  copyMat.fragmentNode = copySrc.sample(uv()).level(0);   // render-target to render-target: uv(), see the haze
+  copyMat.depthTest = false; copyMat.depthWrite = false;
+  const copyQuad = new THREE.QuadMesh(copyMat);
+  const keyVec = new THREE.Vector3();
+
+  /**
+   * @param {THREE.RenderTarget} rt  the linear HDR frame (read, then overwritten)
+   * @param {object} o  depthTex (the scene depth), light + shadowDepth (optional: a directional
+   *                    light whose shadow camera matches that depth map), size (Vector2)
+   */
+  function postProcess(rt, o) {
+    if (!(P.haze > 0)) return;
+    haze.params.enabled = true;
+    haze.params.density = P.haze;
+    haze.params.shafts = P.shafts;
+    haze.params.godRays = !!P.godRays;
+    camera.updateMatrixWorld();
+    uInvVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
+    uCamPos.value.copy(camera.position);
+    keyVec.copy(uKey.value);
+    if (o.size) bufferSize.copy(o.size);
+    const hazed = haze.render({
+      colorTex: rt.texture, depthTex: o.depthTex, camera, light: o.light, shadowDepth: o.shadowDepth,
+      sunDir: lightDir, sunColor: keyVec, size: bufferSize, viewDir,
+    });
+    if (hazed === rt.texture) return;
+    copySrc.value = hazed;
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    copyQuad.render(renderer);
+    renderer.setRenderTarget(prev);
   }
 
   const ready = clouds.ready;
@@ -191,8 +259,14 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
   }
 
   return {
-    mesh, params: P, ready, update, dispose,
+    mesh, params: P, ready, update, dispose, postProcess, haze,
     light: () => out,
+    cloudShadow: {
+      texture: clouds.textures.shadowMap,
+      center: clouds.shadowUniforms.center,
+      size: clouds.shadowUniforms.size,
+      strength: clouds.shadowUniforms.strength,
+    },
     get environment() { return env.texture; },
     atmosphere, clouds, cirrus, env,
   };

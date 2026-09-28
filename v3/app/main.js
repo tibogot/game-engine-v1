@@ -1063,9 +1063,11 @@ export async function startV3App(opts = {}) {
     terrainSize: WORLD_SIZE,
     getSplineSystem: () => splineSys,
     getTerrainMeshes: getTerrainMeshesForWorld,
-    // Opt-in: the cloud field is one more texture in EVERY lit material, and
-    // the editor's terrain is already at WebGPU's 16-sampler limit.
+    // Opt-in for games: the cloud field is one more texture in EVERY lit
+    // material (no sampler — the editor's terrain is at WebGPU's 16). The
+    // editor always has it: Sky Pro casts its clouds' shadows through it.
     cloudShadows: opts.cloudShadows === true,
+    editor: isEditor,
   });
 
   /*
@@ -12278,6 +12280,19 @@ export async function startV3App(opts = {}) {
       setWorldLight(p) { worldEnv?.setWorldLight?.(p); },
       /** The world-light settings in force (for a game's own light controls). */
       getWorldLight() { return worldEnv?.getWorldLight?.() ?? null; },
+      /** The sky mode in force ("physical" | "hdr" | "procedural" | "atmosphere" | "skypro"). */
+      get mode() { return worldToolState.skyMode; },
+      /**
+       * Switch the sky mode, as the World panel does (lights handed over and back). For a game
+       * whose level carries a look in another mode: the level loader applies that look, so the
+       * boot `skyMode` alone does not survive it — call this after the level is in.
+       */
+      setMode(mode) {
+        if (!worldEnv || mode === worldToolState.skyMode) return;
+        worldEnv.applySkyMode(mode, worldToolState.skyMode);
+      },
+      /** Sky Pro's live settings (SKYPRO_DEFAULTS' shape: coverage, haze, exposure, …). */
+      get skyPro() { return worldToolState.skyProSky; },
     },
     // ── Fog override ──────────────────────────────────────────────────────────
     // Height + distance fog live in worldToolState.fog and sync to scene.fogNode.

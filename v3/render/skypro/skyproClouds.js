@@ -509,6 +509,10 @@ export function createSkyProClouds({ renderer, atmosphere }) {
   const panorama = storage2D(PANO_W, PANO_H, THREE.HalfFloatType, "cloud panorama");
   panorama.wrapS = THREE.RepeatWrapping;
   const shadowMap = storage2D(SHADOW_RES, SHADOW_RES, THREE.HalfFloatType, "cloud shadow");
+  // Every reader loads it and filters by hand (textureLoad): NEAREST makes three bind it with no
+  // sampler, which is what lets the engine's sun read it in every lit material (cloudShadowsLite.js
+  // setMap) without passing WebGPU's 16 samplers in the terrain.
+  shadowMap.minFilter = shadowMap.magFilter = THREE.NearestFilter;
   // trace + history are (re)allocated with the view size
   let source, sourceMeta, colors, metas;
 

@@ -21,9 +21,59 @@
  * 2026-09-26) freed the shadow map under the renderer. "Off" is darkness 0.
  * The colour uniform is kept in step with the light every frame (update()),
  * so the engine's per-frame sun colour keeps working.
+ *
+ * A SKY'S OWN CLOUD SHADOW MAP (setMap): a sky that marches real clouds (Sky Pro)
+ * has a shadow map of them over the ground. setMap({ texture, center, size,
+ * strength }) points the SAME texture slot at it — no new texture, no recompile —
+ * and the visibility becomes that map's (Tidewater's cloudsShadow: the ground
+ * point slid down the sun ray to sea level, bilinear, faded out at the map's
+ * edge). setMap(null) goes back to the baked field.
+ *
+ * NO SAMPLER (2026-09-28): the field is read with four textureLoads and
+ * filtered by hand, and both it and any map are NEAREST-filtered, so three binds
+ * the slot with no sampler. The editor's terrain sits at WebGPU's 16 samplers but
+ * only 18 of its 48 textures (measured), so this fits where the old one-sample
+ * read broke it — which is why the editor can have it too. Off (no darkness, no
+ * map) it branches out before any load.
  */
 import * as THREE from "three";
-import { float, max, positionWorld, smoothstep, texture, uniform, vec2, vec3 } from "three/tsl";
+import { float, positionWorld, select, texture, uniform, vec3, vec4, wgslFn } from "three/tsl";
+
+// The "load" read: no sampler. mode 0 = off, 1 = the baked field (tiling), 2 = a sky's map (clamped).
+const LOAD_FN = /* wgsl */`
+fn csVisibility( mode: f32, P: vec3f, toSun: vec3f, fieldT: texture_2d<f32>, lite0: vec4f, lite1: vec4f, map0: vec4f ) -> f32 {
+	var vis = 1.0;
+	if ( mode > 0.5 ) {
+		let res = vec2i( textureDimensions( fieldT ) );
+		var q: vec2f;
+		if ( mode < 1.5 ) {
+			let k = ( lite1.x - P.y ) / max( toSun.y, 0.2 );
+			q = ( P.xz + toSun.xz * k + lite1.yz ) / lite0.z;
+		} else {
+			let g = P.xz - toSun.xz * ( max( P.y, 0.0 ) / max( toSun.y, 0.08 ) );
+			q = ( g - map0.xy ) / map0.z + 0.5;
+		}
+		let st = q * vec2f( res ) - 0.5;
+		let fl = floor( st );
+		let fr = st - fl;
+		let i0 = vec2i( fl );
+		var t: array<f32, 4>;
+		for ( var j = 0; j < 4; j++ ) {
+			var c = i0 + vec2i( j & 1, j >> 1u );
+			if ( mode < 1.5 ) { c = ( ( c % res ) + res ) % res; } else { c = clamp( c, vec2i( 0 ), res - 1 ); }
+			t[ j ] = textureLoad( fieldT, c, 0 ).x;
+		}
+		let n = mix( mix( t[ 0 ], t[ 1 ], fr.x ), mix( t[ 2 ], t[ 3 ], fr.x ), fr.y );
+		if ( mode < 1.5 ) {
+			let thr = 1.0 - lite0.x;
+			vis = 1.0 - smoothstep( thr - lite0.w, thr + lite0.w, n ) * lite0.y;
+		} else {
+			let e = abs( q - 0.5 );
+			vis = mix( 1.0, n, map0.w * smoothstep( 0.5, 0.42, max( e.x, e.y ) ) );
+		}
+	}
+	return vis;
+}`;
 
 export const CLOUD_SHADOW_LITE_DEFAULTS = {
   enabled: false,
@@ -64,7 +114,8 @@ function bakeField() {
   order.forEach((idx, r) => { data[idx] = Math.round((r / (order.length - 1)) * 255); });
   const tex = new THREE.DataTexture(data, RES, RES, THREE.RedFormat, THREE.UnsignedByteType);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.magFilter = tex.minFilter = THREE.LinearFilter;
+  // NEAREST = no sampler bound (the shader filters by hand; see the header)
+  tex.magFilter = tex.minFilter = THREE.NearestFilter;
   tex.needsUpdate = true;
   return tex;
 }
@@ -85,18 +136,19 @@ export function createCloudShadowsLite(sun, params = {}, { attach = true } = {})
     height: uniform(P.height),
     offset: uniform(new THREE.Vector2()),
     toSun: uniform(new THREE.Vector3(0, 1, 0)),
+    // a sky's own map (setMap): 0 = the baked field; its centre (xz), size and strength
+    useMap: uniform(0),
+    map: uniform(new THREE.Vector4(0, 0, 1, 0)),
   };
+  let fieldNode = null, field = null;
   if (attach) {
-    const field = bakeField();
-
-    // Slide up the sun ray to the cloud layer, drift, one texel.
-    const s = u.toSun;
-    const k = u.height.sub(positionWorld.y).div(max(s.y, 0.2));
-    const q = positionWorld.xz.add(vec2(s.x, s.z).mul(k)).add(u.offset).div(u.scale);
-    const n = texture(field, q).r;
-    const thr = float(1).sub(u.cover);
-    const cloud = smoothstep(thr.sub(u.soft), thr.add(u.soft), n);
-    const visibility = float(1).sub(cloud.mul(u.darkness));
+    field = bakeField();
+    fieldNode = texture(field);
+    // Slide up the sun ray to the cloud layer, drift, filter four texels (csVisibility). A map wins;
+    // else the field while it darkens anything; else nothing is read.
+    const m = select(u.useMap.greaterThan(0.5), float(2), select(u.darkness.greaterThan(0), float(1), float(0)));
+    const visibility = wgslFn(LOAD_FN)(m, positionWorld, u.toSun, fieldNode,
+      vec4(u.cover, u.darkness, u.scale, u.soft), vec4(u.height, u.offset.x, u.offset.y, 0), u.map);
 
     // ?cloudshadows=0: the sun's plain colour (the A/B for what the field costs).
     const off = typeof location !== "undefined" && new URLSearchParams(location.search).get("cloudshadows") === "0";
@@ -104,16 +156,20 @@ export function createCloudShadowsLite(sun, params = {}, { attach = true } = {})
   }
 
   const _dir = new THREE.Vector3();
+  let mapSrc = null;
   return {
     params: P,
     uniforms: u,
-    /** Per frame: the drift, the sun's direction and live colour. */
+    /** True when a colorNode is on the sun (a map or the field can show). */
+    get attached() { return !!fieldNode; },
+    /** Per frame: the drift, the sun's direction and live colour, the map's placement. */
     update(dt) {
       u.offset.value.x += P.windX * dt;
       u.offset.value.y += P.windZ * dt;
       u.sunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
       _dir.copy(sun.position).sub(sun.target.position).normalize();
       u.toSun.value.copy(_dir);
+      if (mapSrc) u.map.value.set(mapSrc.center.value.x, mapSrc.center.value.y, mapSrc.size.value, mapSrc.strength.value);
     },
     set(p = {}) {
       Object.assign(P, p);
@@ -122,6 +178,18 @@ export function createCloudShadowsLite(sun, params = {}, { attach = true } = {})
       u.scale.value = P.scale * 4;
       u.soft.value = P.softness;
       u.height.value = P.height;
+    },
+    /**
+     * A sky's own cloud shadow map, or null for the baked field. `src` = { texture (2D, .x =
+     * sun visibility), center (uniform Vector2, world xz), size (uniform, m), strength
+     * (uniform 0..1) }. A texture swap in the same slot: nothing recompiles.
+     */
+    setMap(src) {
+      if (!fieldNode || src === mapSrc) return;
+      mapSrc = src ?? null;
+      fieldNode.value = mapSrc ? mapSrc.texture : field;
+      u.useMap.value = mapSrc ? 1 : 0;
+      if (!mapSrc) u.map.value.w = 0;
     },
   };
 }
