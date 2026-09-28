@@ -2,19 +2,23 @@
 //
 // Everything in it is its own (the user's decision, 2026-09-28, as for Sky Pro): Tidewater's FFT sea
 // (oceanproFFT.js), its CDLOD mesh (oceanproCDLOD.js), its foam pattern and sea-detail noise
-// (oceanproTextures.js) and its water surface + shading (oceanproShader.js). The classic ocean and
-// Ocean V2 are untouched and share nothing with it. MIT, Copyright (c) 2026 DRG Software Solutions
-// LLC — see v3/skypro-real/tidewater/LICENSE.
+// (oceanproTextures.js), its shore waves (oceanproShoreField.js + oceanproShore.js) and its water
+// surface + shading (oceanproShader.js). The classic ocean and Ocean V2 are untouched and share
+// nothing with it. MIT, Copyright (c) 2026 DRG Software Solutions LLC — see
+// v3/skypro-real/tidewater/LICENSE.
 //
 // It is lit the way Tidewater's water is: by the Sky Pro sky (its sun colour, sky irradiance and
 // horizon, in Tidewater's units, and its environment image for the reflections). Without Sky Pro it
 // falls back to the world's sun and a two-colour sky gradient — it works, but it is tuned for Sky Pro.
 //
 // Stage 1 = the open sea (FFT waves, whitecaps, gusts / slicks / windrows, reflection with SSR,
-// refraction and the water volume, crest translucency). The shore (breakers, swash, surf foam) and
-// the extras (caustics, underwater, wakes) come after.
+// refraction and the water volume, crest translucency). Stage 2a = the shore: the swell's travel-time
+// field (CPU, from the heightmap), breaking waves (shoaling, plunging face, bore, whitewater roller),
+// the swash sheet running up the sand with its foam line, light through thin crests, the milky surf
+// zone. Still to come: the thrown lip, the surf foam's look and transport, caustics, underwater, wakes.
 //
 //   const o = createOceanPro( { renderer, scene, camera, heightTexNode, terrainSize, maxHeight } );
+//   o.setHeights( heights, size )                             the CPU heightmap (for the shore field)
 //   o.update( dt, { seaLevel, skyPro, sun, shadowNode } )    per frame
 //   o.params                                                  the live settings (OCEANPRO_DEFAULTS)
 //   o.setEnabled( on ), o.dispose()
@@ -30,6 +34,8 @@ import { OceanProFFT } from "./oceanproFFT.js";
 import { OceanProCDLOD } from "./oceanproCDLOD.js";
 import { createFoamTexture, createSeaDetailTexture } from "./oceanproTextures.js";
 import { buildOceanProShader } from "./oceanproShader.js";
+import { computeShoreField, makeHeightAt, SHELF } from "./oceanproShoreField.js";
+import { SHORE_DEFAULTS } from "./oceanproShore.js";
 
 /** The settings the mode saves with a project (toolState.worldOcean.pro). */
 export const OCEANPRO_DEFAULTS = {
@@ -37,7 +43,8 @@ export const OCEANPRO_DEFAULTS = {
   windSpeed: 7,
   windDeg: 25,
   fetchKm: 120,
-  /** the swell from far away (Tidewater: scale 0.48, 6 m/s, from 5°, 1200 km) */
+  /** the swell from far away (Tidewater: scale 0.48, 6 m/s, from 5°, 1200 km); also the direction
+   * the surf arrives from at the shore */
   swellScale: 0.48,
   swellDeg: 5,
   choppiness: 0.9,
@@ -56,11 +63,21 @@ export const OCEANPRO_DEFAULTS = {
   roughness: 0.035,
   reflection: 1,
   ssr: true,
+  /** the shore: breaking waves and swash (Tidewater's ShoreParams) */
+  surf: true,
+  surfHeight: SHORE_DEFAULTS.amplitude, // offshore amplitude (H/2, m)
+  surfPeriod: SHORE_DEFAULTS.period, // s
+  surfVariation: SHORE_DEFAULTS.variation,
+  surfBreak: SHORE_DEFAULTS.gamma, // breaks when H > this x depth
+  surfCurl: SHORE_DEFAULTS.curl,
+  surfRunup: SHORE_DEFAULTS.runup,
+  surfTurbidity: SHORE_DEFAULTS.turbidity,
   /** 0 = shaded; 1 back faces, 2 normals, 3 foam, 6 water path, 7 seabed seen, 8 depth */
   debug: 0,
 };
 
 const _v = new THREE.Vector3();
+const FIELD_RES = 512;
 
 export function createOceanPro({ renderer, scene, camera, heightTexNode, terrainSize, maxHeight = 500, heightBase = 0, params = {} }) {
   for (const [k, v] of Object.entries(OCEANPRO_DEFAULTS)) if (params[k] === undefined) params[k] = Array.isArray(v) ? [...v] : v;
@@ -81,21 +98,32 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   };
   let depthMs = (renderer.samples ?? 0) > 1;
 
-  // stand-ins until a sky / clouds exist (1x1, nearest: no sampler for the cloud map)
+  // stand-ins until a sky / clouds / shore field exist (1x1, nearest or float: no sampler)
   const white = new THREE.DataTexture(new Float32Array([1, 1, 1, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
   white.magFilter = white.minFilter = THREE.NearestFilter;
   white.needsUpdate = true;
   const skyStandIn = new THREE.DataTexture(new Uint16Array([0, 0, 0, 15360]), 1, 1, THREE.RGBAFormat, THREE.HalfFloatType);
   skyStandIn.needsUpdate = true;
+  const fieldStandIn = new THREE.DataTexture(new Float32Array([1e4, 0, 0, 1e4]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+  fieldStandIn.magFilter = fieldStandIn.minFilter = THREE.NearestFilter;
+  fieldStandIn.needsUpdate = true;
+  // The linear-clamp sampler the scene colour and the sky image are read with. It comes from this
+  // fixed 1x1 texture: three declares no sampler of its own for a viewport texture, nor for the
+  // sky slot once it holds Sky Pro's render-target image (both seen: "unresolved nodeUniformN_sampler").
+  const clampSrc = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
+  clampSrc.magFilter = clampSrc.minFilter = THREE.LinearFilter;
+  clampSrc.wrapS = clampSrc.wrapT = THREE.ClampToEdgeWrapping;
+  clampSrc.generateMipmaps = false;
+  clampSrc.needsUpdate = true;
 
   // ---- uniforms (the opLoad layout, see oceanproShader.js)
-  const U = Array.from({ length: 16 }, () => uniform(new THREE.Vector4()));
+  const U = Array.from({ length: 19 }, () => uniform(new THREE.Vector4()));
   const uSea = uniform(0);
   // u0 = ( camera position, sea level ) and u3.w = far come from the camera being drawn
   const u0 = vec4(cameraPosition, uSea);
   const u3 = vec4(U[3].xyz, cameraFar);
   const gate = (loadFn) => loadFn(cameraViewMatrix, cameraProjectionMatrix, cameraProjectionMatrixInverse, cameraWorldMatrix,
-    u0, U[1], U[2], u3, U[4], U[5], U[6], U[7], U[8], U[9], U[10], U[11], U[12], U[13], U[14], U[15]);
+    u0, U[1], U[2], u3, U[4], U[5], U[6], U[7], U[8], U[9], U[10], U[11], U[12], U[13], U[14], U[15], U[16], U[17], U[18]);
 
   const dispNode = texture(fft.displacementTexture);
   const derivNode = texture(fft.derivativeTexture);
@@ -103,12 +131,16 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   const detailNode = texture(detailTex);
   const cloudNode = texture(white);
   const skyNode = texture(skyStandIn);
+  const fieldNode = texture(fieldStandIn);
+  const clampNode = texture(clampSrc);
   const sceneColor = viewportSharedTexture();
   const sceneDepth = viewportDepthTexture();
 
   // ---- the material
   const vAux0 = varyingProperty("vec4", "vOpAux0");
   const vAux1 = varyingProperty("vec4", "vOpAux1");
+  const vAux2 = varyingProperty("vec4", "vOpAux2");
+  const vAux3 = varyingProperty("vec4", "vOpAux3");
   let shadowNode = null;
 
   function buildMaterial() {
@@ -118,9 +150,11 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     m.side = THREE.DoubleSide;
     m.fog = true;
     m.positionNode = Fn(() => {
-      const out = vertexFn(gate(loadFn), attribute("nodeData", "vec4"), positionGeometry.xz, dispNode, sampler(dispNode), heightTexNode).toVar();
+      const out = vertexFn(gate(loadFn), attribute("nodeData", "vec4"), positionGeometry.xz, dispNode, sampler(dispNode), heightTexNode, fieldNode).toVar();
       vAux0.assign(out.element(0));
       vAux1.assign(out.element(1));
+      vAux2.assign(out.element(2));
+      vAux3.assign(out.element(3));
       /*
        * TO THE HORIZON. The mesh reaches ~40 km (Tidewater draws to a 60 km far plane); the
        * engine's camera stops at `far` (4 km in the editor). A vertex beyond it is pulled along
@@ -135,12 +169,11 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     })();
     // the sun's shadow at this fragment: the engine's shadow node (cascades), else lit
     const sunShadow = shadowNode ? nodeObject(shadowNode).r : float(1);
-    // (the scene colour is sampled with the sky image's linear-clamp sampler: three binds no sampler
-    // of its own for a viewport texture handed to a function)
+    // (the scene colour and the sky image are sampled with clampNode's sampler, see clampSrc)
     // (the true world position, not positionWorld: far vertices are drawn pulled in, see above)
-    m.colorNode = fragmentFn(gate(loadFn), vAux0.xyz, screenUV, select(frontFacing, float(1), float(0)), vAux0, vAux1, sunShadow,
+    m.colorNode = fragmentFn(gate(loadFn), vAux0.xyz, screenUV, select(frontFacing, float(1), float(0)), vAux0, vAux1, vAux2, vAux3, sunShadow,
       derivNode, sampler(derivNode), foamNode, sampler(foamNode), detailNode, sampler(detailNode),
-      heightTexNode, cloudNode, sceneColor, sampler(skyNode), sceneDepth, skyNode, sampler(skyNode));
+      heightTexNode, fieldNode, cloudNode, sceneColor, sampler(clampNode), sceneDepth, skyNode, sampler(clampNode));
     return m;
   }
 
@@ -153,6 +186,43 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   // after the opaque world: the water reads the scene's colour and depth under it
   mesh.renderOrder = 50;
   scene.add(mesh);
+
+  // ---- the shore field (CPU, from the heightmap; rebuilt when the land, the sea level or the swell
+  // direction change — debounced, it is a few hundred ms)
+  const field = { heights: null, size: 0, key: "", timer: 0, tex: null, origin: 0, span: 1, res: 1, ms: 0 };
+  function fieldKey(seaLevel) {
+    return `${seaLevel}|${P.swellDeg}|${field.size}`;
+  }
+  function buildField(seaLevel) {
+    if (!field.heights) return;
+    const t0 = performance.now();
+    const span = terrainSize + 2 * SHELF;
+    const heightAt = makeHeightAt({ heights: field.heights, size: field.size, terrainSize, maxHeight, heightBase });
+    const sd = THREE.MathUtils.degToRad(P.swellDeg);
+    const f = computeShoreField({ heightAt, origin: -span / 2, size: span }, {
+      res: FIELD_RES, swellDir: [Math.cos(sd), Math.sin(sd)], seaLevel,
+    });
+    if (!field.tex || field.tex.image.width !== f.res) {
+      field.tex?.dispose();
+      field.tex = new THREE.DataTexture(f.data, f.res, f.res, THREE.RGBAFormat, THREE.FloatType);
+      field.tex.name = "oceanpro shore field";
+      field.tex.magFilter = field.tex.minFilter = THREE.NearestFilter;
+      field.tex.generateMipmaps = false;
+    } else {
+      field.tex.image.data.set(f.data);
+    }
+    field.tex.needsUpdate = true;
+    fieldNode.value = field.tex;
+    field.origin = f.origin; field.span = f.size; field.res = f.res;
+    field.ms = performance.now() - t0;
+  }
+  /** The CPU heightmap (normalised, size x size, row = +z) the shore field is solved over. */
+  function setHeights(heights, size) {
+    field.heights = heights;
+    field.size = size;
+    field.key = ""; // stale whatever the sea level
+    field.heightAt = makeHeightAt({ heights, size, terrainSize, maxHeight, heightBase });
+  }
 
   // ---- per frame
   let time = 0;
@@ -185,6 +255,18 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     uSea.value = o.seaLevel ?? 0;
     cdlod.baseY = uSea.value;
     cdlod.update(camera);
+
+    // the shore field: rebuilt on the trailing edge of a change (a sea-level or swell drag)
+    if (P.surf && field.heights) {
+      const fk = fieldKey(uSea.value);
+      if (fk !== field.key) {
+        const first = !field.tex;
+        field.key = fk;
+        clearTimeout(field.timer);
+        if (first) buildField(uSea.value);
+        else field.timer = setTimeout(() => buildField(uSea.value), 250);
+      }
+    }
 
     // the scene depth it reads is multisampled when the frame renders into an MSAA target: its
     // WGSL type follows (three picks the type when the material compiles)
@@ -235,6 +317,11 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     U[13].value.set(P.gusts, P.slicks, P.windrows, 0);
     U[14].value.set(P.backscatter, P.sss, 0.06, 1);
     U[15].value.set(P.roughness, P.reflection, P.ssr ? 1 : 0, P.debug);
+    // the shore (oceanproShore.js shoreLoad): off until its field exists
+    const surfOn = P.surf && fieldNode.value === field.tex && !!field.tex;
+    U[16].value.set(P.surfPeriod, P.surfHeight, P.surfVariation, P.surfBreak);
+    U[17].value.set(SHORE_DEFAULTS.breakSpan, P.surfCurl, P.surfRunup, surfOn ? 1 : 0);
+    U[18].value.set(P.surfTurbidity, field.origin, field.span, field.res);
   }
 
   /** A new material (one compile): the shadow node and the depth type are part of the shader. */
@@ -255,6 +342,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   }
 
   function dispose() {
+    clearTimeout(field.timer);
     scene.remove(mesh);
     material.dispose();
     cdlod.geometry.dispose();
@@ -263,10 +351,19 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     detailTex.dispose();
     white.dispose();
     skyStandIn.dispose();
+    fieldStandIn.dispose();
+    clampSrc.dispose();
+    field.tex?.dispose();
   }
 
   return {
-    mesh, params: P, update, setEnabled, setShadowNode, dispose, fft, cdlod,
+    mesh, params: P, update, setEnabled, setShadowNode, setHeights, dispose, fft, cdlod,
     get visible() { return mesh.visible; },
+    /** ms the last shore field took to solve (CPU) */
+    get shoreFieldMs() { return field.ms; },
+    /** For debugging: the live uniform vectors (the opLoad layout) and the shore field's data. */
+    get debug() { return { U: U.map((u) => u.value.toArray()), field: field.tex?.image ?? null, fieldOrigin: field.origin, fieldSpan: field.span }; },
+    /** The sea floor under world (x, z) as the water sees it (m; the shelf beyond the map), or null. */
+    heightAt: (x, z) => (field.heightAt ? field.heightAt(x, z) : null),
   };
 }

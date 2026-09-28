@@ -19,6 +19,7 @@
 //    inverse projection, so it is unchanged.
 
 import { wgsl, wgslFn } from "three/tsl";
+import { shoreCode } from "./oceanproShore.js";
 
 const IOR = 1.333;
 const f6 = (x) => Number(x).toFixed(6);
@@ -74,9 +75,12 @@ var<private> mat: OpMat;
 // u10 ( ocean.sizes[0..3].x )  u11 ( foamBias, amplitude, slopeScale, foamCoverage )
 // u12 ( foamSharpness, foamScale, seaDetail.offset )  u13 ( gust, slick, streak, - )
 // u14 ( backscatter, sss, refraction, foamIntensity )  u15 ( waterRoughness, reflectionStrength, ssr, debugMode )
+// u16..u18: the shore waves (oceanproShore.js shoreLoad)
 fn opLoad( view: mat4x4f, proj: mat4x4f, invProj: mat4x4f, invView: mat4x4f,
 	u0: vec4f, u1: vec4f, u2: vec4f, u3: vec4f, u4: vec4f, u5: vec4f, u6: vec4f, u7: vec4f,
-	u8: vec4f, u9: vec4f, u10: vec4f, u11: vec4f, u12: vec4f, u13: vec4f, u14: vec4f, u15: vec4f ) -> f32 {
+	u8: vec4f, u9: vec4f, u10: vec4f, u11: vec4f, u12: vec4f, u13: vec4f, u14: vec4f, u15: vec4f,
+	u16: vec4f, u17: vec4f, u18: vec4f ) -> f32 {
+	shoreLoad( u16, u17, u18 );
 	frame.view = view; frame.proj = proj; frame.invProj = invProj; frame.invView = invView;
 	frame.cameraPos = u0.xyz; frame.seaLevel = u0.w;
 	frame.sunDir = u1.xyz; frame.windSpeed = u1.w;
@@ -288,12 +292,18 @@ fn waterSurfaceCascadeAttenuation( c: i32, depth: f32 ) -> f32 {
   }
 
   const VERTEX = /* wgsl */`
+const WATER_SHORE_DEEP: f32 = 26.0; // m: ShoreWaves' envelope smoothstep( 26, 13, depth ) is 0 beyond
+
 struct WaterSurfaceVertex {
 	position: vec3f,
 	lagXZ: vec2f,
 	height: f32,
 	depth: f32,
 	foam: f32,
+	shoreN: vec3f,
+	shoreFoam: f32,
+	swash: f32,
+	surfMask: vec2f, // clear plunging face, whitewater roller relief (m)
 };
 
 // depth of the sea floor below mean sea level at xz (m)
@@ -301,8 +311,8 @@ fn waterSurfaceSeaDepth( xz: vec2f, terrainHeight: texture_2d<f32> ) -> f32 {
 	return frame.seaLevel - terrainHeightAt( xz, terrainHeight );
 }
 
-// PORT: the textures as parameters (see the header); no shore / wake yet
-fn waterSurfaceVertex( node: vec4f, grid: vec2f, oceanDisplacement: texture_2d_array<f32>, smpLinearRepeat: sampler, terrainHeight: texture_2d<f32> ) -> WaterSurfaceVertex {
+// PORT: the textures as parameters (see the header); no wake
+fn waterSurfaceVertex( node: vec4f, grid: vec2f, oceanDisplacement: texture_2d_array<f32>, smpLinearRepeat: sampler, terrainHeight: texture_2d<f32>, shoreTex: texture_2d<f32> ) -> WaterSurfaceVertex {
 	// PORT: the CDLOD morph runs in the mesh's plane at sea level (Tidewater: y0 = 0 = its sea level)
 	let lod: CdlodVertex = cdlodMorph( node, grid, frame.cameraPos, frame.seaLevel );
 	let worldXZ = lod.worldXZ;
@@ -316,8 +326,46 @@ ${cascadesV}
 
 	disp *= waterSurface.amplitude;
 
-	var total = disp;
+	var extra = vec3f( 0.0 );
+	var shoreN = vec3f( 0.0, 1.0, 0.0 );
+	var shoreFoam = 0.0;
+	var swash = 0.0;
+	var surfMask = vec2f( 0.0 ); // clear plunging face, whitewater roller relief (m)
+	// Offshore of WATER_SHORE_DEEP the shore waves have faded out completely (their envelope is 0 from 26 m
+	// of depth, see ShoreWaves) and there is no swash: most of the sea skips their evaluation.
+	// PORT: and none at all while the shore is off (no field yet)
+	let nearShore = depth < WATER_SHORE_DEEP && shoreP.enabled > 0.0;
+	var swashLevel = -1e4;
+	if ( nearShore ) {
+		let sw = shoreEvaluate( worldXZ, depth, ground, terrainHeight, shoreTex );
+		extra += sw.disp;
+		shoreN = clamp( sw.nShore, vec3f( -1.0 ), vec3f( 1.0 ) );
+		// (the foam line on the swash front is added per pixel in the water shader: on this coarse mesh
+		// it would end short of the front and follow the triangles)
+		shoreFoam = sw.foam;
+		surfMask = vec2f( sw.face, sw.roller );
+		swashLevel = sw.swashLevel;
+	}
+
+	var total = disp + extra;
 	var y = frame.seaLevel + total.y;
+	if ( nearShore ) {
+		// thin run-up sheet on the sand: take whichever surface is higher (smooth max)
+		let k = 0.04;
+		// no run-up sheet on steep rock (cliffs, sea stacks): waves break against it instead
+		let nr = terrainNormalRock( worldXZ, terrainHeight );
+		let gentle = smoothstep( 0.45, 0.25, length( nr.xy ) );
+		let hmx = sat( ( swashLevel - y ) / k * 0.5 + 0.5 ) * gentle;
+		let smax = mix( y, swashLevel, hmx ) + hmx * ( 1.0 - hmx ) * k;
+		swash = smoothstep( -0.02, 0.03, swashLevel - y );
+		y = smax;
+		// Where the sheet is the surface it is the sheet that is seen, not the wave below it: the sheet
+		// lies on the sand (the sand's slope, no horizontal wave motion, no plunging face / roller).
+		shoreN = normalize( mix( shoreN, vec3f( nr.x, 1.0, nr.y ), hmx ) );
+		let still = 1.0 - hmx;
+		total = vec3f( total.x * still, total.y, total.z * still );
+		surfMask *= still;
+	}
 	// hide the water sheet below dry land (beyond the swash zone)
 	let below = select( ground - 0.06, min( ground - 2.0, frame.seaLevel - 1.0 ), depth < -3.0 );
 	y = select( y, min( y, below ), y < ground );
@@ -328,6 +376,10 @@ ${cascadesV}
 	o.height = total.y;
 	o.depth = depth;
 	o.foam = foam;
+	o.shoreN = shoreN;
+	o.shoreFoam = shoreFoam;
+	o.swash = swash;
+	o.surfMask = surfMask;
 	return o;
 }
 `;
@@ -364,11 +416,14 @@ struct WaterSurfaceFrag {
 // PORT: Tidewater compiles every shader with diagnostic( off, derivative_uniformity ) (its Shader.js);
 // three owns the module header here, so the attribute form sits on the functions that need it.
 @diagnostic( off, derivative_uniformity )
-fn waterSurfaceFragment( lagXZ: vec2f, footprint: f32, depth: f32, vertexFoam: f32, P: vec3f,
+fn waterSurfaceFragment( lagXZ: vec2f, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3f, shoreFoam: f32, surfMask: vec2f, P: vec3f,
 	oceanDerivatives: texture_2d_array<f32>, smpAniso4Repeat: sampler, smpLinearRepeat: sampler,
 	waterFoamTex: texture_2d<f32>, foamSmp: sampler, seaDetailNoise: texture_2d<f32>, detailSmp: sampler ) -> WaterSurfaceFrag {
 	var d = vec4f( 0.0 );
 	var foamSum = 0.0;
+	// the clear concave face of a plunging wave overhangs the trough (PORT: no shore simulation yet,
+	// so no foam carried under it to keep off)
+	let face = sat( surfMask.x );
 	// bubbles mixed into the water (milky, turquoise, hides the bottom): surf and wake
 	var aeration = 0.0;
 
@@ -395,10 +450,29 @@ ${cascadesF}
 	}
 	let jac = ( d.z + 1.0 ) * ( d.w + 1.0 );
 
-	// base normal: FFT detail
+	// base normal: large shoreline waves (per-vertex, can overhang) perturbed by FFT detail
 	var normal: vec3f;
 	var baseNormal = vec3f( 0.0, 1.0, 0.0 );
-	normal = normalize( vec3f( - slopes.x, 1.0, - slopes.y ) );
+	{
+		// On a coarse mesh the shore normal can flip between the vertices of a folding crest: the
+		// interpolated vector then cancels out (or is NaN). Keep it finite and facing up; NaN
+		// would otherwise surface as a white-hot cell after the output clamp.
+		let sn = clamp( shoreN, vec3f( -1.0 ), vec3f( 1.0 ) ) + vec3f( 0.0, 1e-3, 0.0 );
+		let Ns0 = sn / max( length( sn ), 1e-4 );
+		let Ns = normalize( vec3f( Ns0.x, max( Ns0.y, 0.12 ), Ns0.z ) );
+		baseNormal = Ns;
+		// the ripples and chop ride on the wave: the detail normal is rotated onto the tilted face
+		// (reoriented normal mapping) instead of being flattened by it, so a steep face keeps the
+		// full texture of the sea surface rather than turning into smooth plastic
+		let nd = normalize( vec3f( - slopes.x, 1.0, - slopes.y ) );
+		let tq = Ns + vec3f( 0.0, 1.0, 0.0 );
+		let uq = vec3f( slopes.x, 1.0, slopes.y ) * nd.y;
+		normal = normalize( tq * ( dot( tq, uq ) / tq.y ) - uq );
+		foamSum += shoreFoam;
+		// the roller and the water behind the plunge point are full of bubbles, decaying behind the
+		// bore with the foam it sheds; the clear face of a plunging wave is not
+		aeration += sat( shoreFoam * 1.2 ) * ( 1.0 - face ) * smoothstep( -0.1, 0.3, depth );
+	}
 
 	// whitecaps: persistent (per vertex) + fresh where the surface is compressed right now;
 	// more of them inside gusts, plus windrow lines in fresh wind
@@ -555,9 +629,10 @@ fn _waterSSR( posV: vec3f, Rv: vec3f, y0: f32, ry: f32, waterSceneDepth: DEPTH_T
   const SHADE = /* wgsl */`
 @diagnostic( off, derivative_uniformity )
 fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f32, vDepth: f32, vFoam: f32, sunShadow: f32,
+	vShoreN: vec3f, vShoreFoam: f32, vSurfMask: vec2f,
 	oceanDerivatives: texture_2d_array<f32>, derivSmp: sampler,
 	waterFoamTex: texture_2d<f32>, foamSmp: sampler, seaDetailNoise: texture_2d<f32>, detailSmp: sampler,
-	terrainHeight: texture_2d<f32>, cloudShadow: texture_2d<f32>,
+	terrainHeight: texture_2d<f32>, shoreTex: texture_2d<f32>, cloudShadow: texture_2d<f32>,
 	waterSceneColor: texture_2d<f32>, smpLinearClamp: sampler, waterSceneDepth: DEPTH_T,
 	skyEnv: texture_2d<f32>, skyEnvS: sampler ) -> vec4f {
 	let posV = ( frame.view * vec4f( pos, 1.0 ) ).xyz;
@@ -573,16 +648,43 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 	var sunLight = frame.sunColor * sunShadow;
 	sunLight *= cloudsShadow( pos.xz, cloudShadow );
 
-	// water film thickness at this pixel (PORT: no swash edge yet — stage 2)
+	// water film thickness at this pixel and the distance to the swash front (ShoreWaves.swashEdge):
+	// the sheet ends exactly on its analytic leading edge, not on the mesh triangles
 	let groundH = terrainHeightAt( pos.xz, terrainHeight );
 	var thickness = pos.y - groundH;
 	var frontD = 1e3;
 	var swTau = 0.0;
 	var swRt = 0.0;
+	if ( vDepth < 1.0 ) {
+		let tRaw = thickness;
+		let se = shoreSwashEdge( pos.xz, thickness, terrainHeight, shoreTex );
+		thickness = se.x; frontD = se.y; swTau = se.z; swRt = se.w;
+		// The draining sheet has no rounded front: it thins out over decimetres and breaks up where the
+		// sand drains faster. The analytic front runs parallel to the shoreline; kept as a hard, smooth
+		// edge (with the uprush's meniscus, rim and contact shadow) it read as a dark line ruled along
+		// the beach between the foam and the wet sand.
+		let backwash = smoothstep( 0.32, 0.46, swTau );
+		if ( backwash > 0.0 && swRt > 0.0 && frontD < 3.0 ) {
+			frontD += ( perlin2( pos.xz * 1.1 ) * 0.35 + perlin2( pos.xz * 3.7 + vec2f( 5.3, 1.9 ) ) * 0.15 ) * backwash;
+			thickness = min( tRaw, frontD * mix( 0.08, 0.025, backwash ) );
+		}
+	}
+	// the foam line riding the swash front, per pixel: a dense bubbly bead right at the edge while
+	// the sheet runs up, a thinning lace behind it; weaker in the backwash (it sinks into the sand)
 	let uprush = smoothstep( 0.46, 0.32, swTau );
+	let bead = smoothstep( -0.01, 0.05, frontD ) * smoothstep( 0.6, 0.12, frontD );
+	let trail = smoothstep( -0.01, 0.25, frontD ) * smoothstep( 2.2, 0.3, frontD );
+	// patchy along the front (dense bunches and thin stretches), not an even white rope (only where
+	// the edge foam below can be non-zero: it is weighted by the run-up and the shallow depth)
+	var edgePatch = 1.0;
+	if ( swRt > 0.0 && vDepth < 0.4 ) {
+		edgePatch = smoothstep( -0.45, 0.55, perlin2( pos.xz * 0.42 ) ) * 0.7 + smoothstep( -0.3, 0.6, perlin2( pos.xz * 1.7 + vec2f( 3.1, 7.7 ) ) ) * 0.3;
+	}
+	let edgeFoam = ( bead * mix( 0.45, 1.1, uprush ) * mix( 0.35, 1.0, edgePatch ) + trail * mix( 0.12, 0.4, uprush ) * edgePatch ) * smoothstep( 0.0, 1.0, swRt ) * smoothstep( 0.4, -0.2, vDepth );
+	// the meniscus: the last decimetre of the advancing sheet bends down to the sand
 	let lipW = ( 1.0 - smoothstep( 0.0, 0.14, frontD ) ) * uprush;
 
-	let surf = waterSurfaceFragment( lagXZ, footprint, vDepth, vFoam, pos,
+	let surf = waterSurfaceFragment( lagXZ, footprint, vDepth, vFoam, vShoreN, vShoreFoam + edgeFoam, vSurfMask, pos,
 		oceanDerivatives, derivSmp, derivSmp, waterFoamTex, foamSmp, seaDetailNoise, detailSmp );
 	var foam = surf.foam;
 
@@ -591,7 +693,7 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 	// the water. The winding can't be trusted in folds of the choppy surface: there, and well above
 	// or below the surface, the camera's own medium decides.
 	let camH = frame.cameraPos.y - frame.cameraWaterHeight;
-	let folded = surf.jacobian < 0.1;
+	let folded = surf.jacobian < 0.1 || normalize( vShoreN ).y < 0.35;
 	let nearSurface = abs( camH ) < 1.5;
 	let viewFromBelow = select( camH < 0.0, front < 0.5, nearSurface && ! folded );
 	// shading normal on the viewer's side of the interface. Triangle winding can't be trusted
@@ -683,7 +785,9 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 			Lt = max( pos.y - terrainHeightAt( pos.xz + Tv.xz * min( L1 * 0.5 + L0 * 0.5, 200.0 ), terrainHeight ), 0.0 ) / tDown;
 		}
 		let Lter = clamp( Lt, 0.0, 400.0 );
-		let crestT = 1e4;
+		// thin breaking crests: the refracted ray leaves through the back of the wave into the sky
+		let crestT = shoreCrestPath( lagXZ, vDepth, Tv, terrainHeight, shoreTex );
+		let thruCrest = crestT < Lter;
 
 		// project the refracted end point to the screen
 		let pEnd = pos + Tv * min( Lter, 80.0 );
@@ -703,6 +807,8 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 			dR = select( _waterSceneDepthAt( screenUV, waterSceneDepth ), dO, valid );
 			sceneCol = textureSampleLevel( waterSceneColor, smpLinearClamp, uvF, 0.0 ).rgb;
 		}
+		// (a branch: select() would evaluate the sky for every pixel)
+		if ( thruCrest ) { sceneCol = skyReflectionRadiance( normalize( vec3f( Tv.x, max( abs( Tv.y ), 0.03 ), Tv.z ) ), skyEnv, skyEnvS ); }
 
 		// objects in front of the sea floor (pylons, rocks, reef) shorten the path
 		let qView = viewPositionFromViewZ( uvF, - viewDepth( dR ) );
@@ -714,8 +820,12 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 
 		// bubbles mixed into the water (the surf behind breakers, wakes): a strong scatterer
 		let aer = surf.aeration;
-		let sigA = frame.waterAbsorption;
-		let sigS = frame.waterScattering + aer * 1.6;
+		// surf zone: sand and bubbles stirred up by the breakers (see ShoreWaves.surfMedium)
+		// (PORT: no shore simulation yet, so no extra sediment behind the bores: sandK = 1)
+		let surfMed = shoreSurfMedium( pos.xz, vDepth, shoreTex );
+		let sigA = frame.waterAbsorption + surfMed.absorb;
+		// (bubble plumes are shallow and patchy: a moderate scatterer, milky turquoise rather than a glow)
+		let sigS = frame.waterScattering + surfMed.scatter + aer * 1.6;
 		let sigT = sigA + sigS;
 
 		// refracted sun direction
@@ -827,39 +937,52 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 		res = dbgScene;
 	} else if ( dbg == 5 ) {
 		res = vec3f( fract( lagXZ.x * 0.1 ), fract( vHeight ), fract( lagXZ.y * 0.1 ) );
+	} else if ( dbg == 11 ) {
+		// surf foam sources: whitewater of the breaking wave (r), clear plunging face (b)
+		res = vec3f( vShoreFoam, 0.0, vSurfMask.x );
+	} else if ( dbg == 12 ) {
+		// PORT: the surface height (m, grey = mean, 1 m per half range)
+		res = vec3f( sat( vHeight * 0.5 + 0.5 ) );
+	} else if ( dbg == 13 ) {
+		// PORT: the shore wave phase (r) and exposure (g) straight from the field
+		let ph = shorePhaseAt( pos.xz, shoreTex );
+		res = vec3f( fract( ph.s ), ph.exposure, 0.0 );
 	}
 	return vec4f( res, 1.0 );
 }
 `;
 
-  const all = wgsl(T(COMMON + SEA_DETAIL + ATTENUATION + VERTEX + FRAGMENT + HELPERS + SHADE), [cdlod.code]);
+  const all = wgsl(T(COMMON + SEA_DETAIL + ATTENUATION + shoreCode() + VERTEX + FRAGMENT + HELPERS + SHADE), [cdlod.code]);
 
   // ------------------------------------------------------------------ entry points (wgslFn)
   const LOAD_ARGS = `view: mat4x4f, proj: mat4x4f, invProj: mat4x4f, invView: mat4x4f,
 	u0: vec4f, u1: vec4f, u2: vec4f, u3: vec4f, u4: vec4f, u5: vec4f, u6: vec4f, u7: vec4f,
-	u8: vec4f, u9: vec4f, u10: vec4f, u11: vec4f, u12: vec4f, u13: vec4f, u14: vec4f, u15: vec4f`;
-  const LOAD_CALL = "view, proj, invProj, invView, u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15";
+	u8: vec4f, u9: vec4f, u10: vec4f, u11: vec4f, u12: vec4f, u13: vec4f, u14: vec4f, u15: vec4f,
+	u16: vec4f, u17: vec4f, u18: vec4f`;
+  const LOAD_CALL = "view, proj, invProj, invView, u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16, u17, u18";
   const loadFn = wgslFn(`fn opLoadCall( ${LOAD_ARGS} ) -> f32 { return opLoad( ${LOAD_CALL} ); }`, [all]);
 
   // the vertex: every per-vertex output packed into one mat4 (columns: position + foam, lagXZ +
-  // height + depth, spare, spare) — TSL reads the columns, the stage computes it once
+  // height + depth, shore normal + shore foam, surf mask + swash) — TSL reads the columns, the stage
+  // computes it once
   const vertexFn = wgslFn(/* wgsl */`
-fn opVertex( gate: f32, node: vec4f, grid: vec2f, oceanDisplacement: texture_2d_array<f32>, smpLinearRepeat: sampler, terrainHeight: texture_2d<f32> ) -> mat4x4f {
-	let r = waterSurfaceVertex( node, grid, oceanDisplacement, smpLinearRepeat, terrainHeight );
-	return mat4x4f( vec4f( r.position, r.foam ), vec4f( r.lagXZ, r.height, r.depth ), vec4f( 0.0 ), vec4f( 0.0 ) );
+fn opVertex( gate: f32, node: vec4f, grid: vec2f, oceanDisplacement: texture_2d_array<f32>, smpLinearRepeat: sampler, terrainHeight: texture_2d<f32>, shoreTex: texture_2d<f32> ) -> mat4x4f {
+	let r = waterSurfaceVertex( node, grid, oceanDisplacement, smpLinearRepeat, terrainHeight, shoreTex );
+	return mat4x4f( vec4f( r.position, r.foam ), vec4f( r.lagXZ, r.height, r.depth ), vec4f( r.shoreN, r.shoreFoam ), vec4f( r.surfMask, r.swash, 0.0 ) );
 }`, [all]);
 
   const fragmentFn = wgslFn(T(/* wgsl */`
-fn opFragment( gate: f32, pos: vec3f, screenUV: vec2f, front: f32, aux0: vec4f, aux1: vec4f, sunShadow: f32,
+fn opFragment( gate: f32, pos: vec3f, screenUV: vec2f, front: f32, aux0: vec4f, aux1: vec4f, aux2: vec4f, aux3: vec4f, sunShadow: f32,
 	oceanDerivatives: texture_2d_array<f32>, derivSmp: sampler,
 	waterFoamTex: texture_2d<f32>, foamSmp: sampler, seaDetailNoise: texture_2d<f32>, detailSmp: sampler,
-	terrainHeight: texture_2d<f32>, cloudShadow: texture_2d<f32>,
+	terrainHeight: texture_2d<f32>, shoreTex: texture_2d<f32>, cloudShadow: texture_2d<f32>,
 	waterSceneColor: texture_2d<f32>, smpLinearClamp: sampler, waterSceneDepth: DEPTH_T,
 	skyEnv: texture_2d<f32>, skyEnvS: sampler ) -> vec4f {
 	return waterShade( pos, screenUV, front, aux1.xy, aux1.z, aux1.w, aux0.w, sunShadow,
+		aux2.xyz, aux2.w, aux3.xy,
 		oceanDerivatives, derivSmp, waterFoamTex, foamSmp, seaDetailNoise, detailSmp,
-		terrainHeight, cloudShadow, waterSceneColor, smpLinearClamp, waterSceneDepth, skyEnv, skyEnvS );
+		terrainHeight, shoreTex, cloudShadow, waterSceneColor, smpLinearClamp, waterSceneDepth, skyEnv, skyEnvS );
 }`), [all]);
 
-  return { loadFn, vertexFn, fragmentFn, U_COUNT: 16 };
+  return { loadFn, vertexFn, fragmentFn, U_COUNT: 19 };
 }

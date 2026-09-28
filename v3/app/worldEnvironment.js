@@ -2020,6 +2020,8 @@ export async function createWorldEnvironment({
       renderer, scene, camera, heightTexNode, terrainSize, maxHeight: MAX_HEIGHT,
       params: toolState.worldOcean.pro,
     });
+    // its shore field is solved over the CPU heightmap (the same one V2's shore field uses)
+    if (_oceanHeights) oceanPro.setHeights(_oceanHeights, oceanV2FieldRes);
     return oceanPro;
   }
 
@@ -2044,6 +2046,8 @@ export async function createWorldEnvironment({
    */
   function setOceanHeights(heights) {
     _oceanHeights = heights;
+    // Ocean Pro re-solves its shore field from these (on its own debounce, only while shown)
+    oceanPro?.setHeights(heights, oceanV2FieldRes);
     // New terrain at the SAME sea level is still stale, so drop the stamp
     // rather than letting the level comparison decide there is nothing to do.
     _shoreBakedLevel = null;

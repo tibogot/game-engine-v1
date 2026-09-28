@@ -751,6 +751,19 @@ function _buildOceanProControls(parent, P) {
   _slider(foam, P, "slicks", { label: "Slicks", min: 0, max: 2, step: 0.01, hint: "Long calm mirror bands along the wind, in light wind." });
   _slider(foam, P, "windrows", { label: "Windrows", min: 0, max: 2, step: 0.01, hint: "Thin foam lanes along the wind, in fresh wind." });
 
+  const surf = _section(parent, "Ocean Pro · surf", true);
+  _toggle(surf, P, "surf", {
+    label: "Surf",
+    hint: "Breaking waves at the shore and the swash running up the sand (Tidewater's ShoreWaves). The waves' path is solved from the terrain around the coast; they bend round headlands and arrive along the depth contours. Comes from the Swell direction above.",
+  });
+  _slider(surf, P, "surfHeight", { label: "Wave size (m)", min: 0.05, max: 1.5, step: 0.01, hint: "Offshore half-height of the surf; sets of ~7 with bigger ones in the middle." });
+  _slider(surf, P, "surfPeriod", { label: "Period (s)", min: 4, max: 16, step: 0.1 });
+  _slider(surf, P, "surfVariation", { label: "Variation", min: 0, max: 1, step: 0.01, hint: "Wave to wave and along the beach: peaks that break first and peel outward." });
+  _slider(surf, P, "surfBreak", { label: "Breaks at H/depth", min: 0.4, max: 1.2, step: 0.01, hint: "0.78 is the classic breaking index: lower breaks farther out." });
+  _slider(surf, P, "surfCurl", { label: "Curl", min: 0, max: 1, step: 0.01, hint: "How much the face stands up and plunges before the bore." });
+  _slider(surf, P, "surfRunup", { label: "Run-up", min: 0, max: 2, step: 0.01, hint: "How far the swash sheet runs up the sand." });
+  _slider(surf, P, "surfTurbidity", { label: "Surf milkiness", min: 0, max: 0.5, step: 0.01, hint: "Sand and bubbles stirred into the surf zone: turquoise, not ocean-clear." });
+
   const look = _section(parent, "Ocean Pro · water", false);
   _slider(look, P, "roughness", { label: "Roughness", min: 0.005, max: 0.3, step: 0.005 });
   _slider(look, P, "reflection", { label: "Reflection", min: 0, max: 2, step: 0.01 });
@@ -759,7 +772,7 @@ function _buildOceanProControls(parent, P) {
   _slider(look, P, "backscatter", { label: "Backscatter", min: 0, max: 0.2, step: 0.005 });
   _dropdown(look, P, "debug", {
     label: "Debug view",
-    options: { Off: 0, "Back faces": 1, Normals: 2, Foam: 3, "Water path": 6, "Seabed seen": 7, Depth: 8 },
+    options: { Off: 0, "Back faces": 1, Normals: 2, Foam: 3, "Water path": 6, "Seabed seen": 7, Depth: 8, "Surf foam": 11, "Wave height": 12, "Surf phase": 13 },
   });
   const note = document.createElement("div");
   note.className = "hint";
