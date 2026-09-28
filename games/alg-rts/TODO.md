@@ -761,8 +761,17 @@ Asset follow-ups:
       the arms cache UNLOCKING MG / mortar / bazooka teams (it pays income
       for now), militia (moussebilines) recruited in ALN villages, the
       ALN purse named "Soutien" on screen.
-- [ ] The ALN AI does not fight for the villages yet (it only ambushes):
-      send bands to flip French-held villages back.
+- [x] The ALN FIGHTS FOR THE VILLAGES (2026-09-28, algAI.js): about half
+      its bands (when one is worth it) do POLITICAL WORK — into a village
+      the ALN does not hold (French-held first, then neutral; near, few
+      French round it), holding fire, which swings it their way; French
+      within 35 m → strike, then melt back to the cave. Tested (headless):
+      a band of 5 took the dechra (held at 73 s, ALN income 30 → 70/min);
+      6 appelés sent, the band struck when they arrived, withdrew with all
+      5 and went to ground; the dechra stays theirs until the French work
+      it back through 0.
+- [ ] The ALN leaving a few men as a village cell (moussebilines), and
+      the French answer: cordon-and-search (a mission, not just walking in).
 - [ ] Balance: all numbers are first guesses.
 
 ## PROPOSAL — economy and base-building (2026-09-26, waiting for **you**)

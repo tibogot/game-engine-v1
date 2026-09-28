@@ -17,6 +17,13 @@
 //             the cave mouth, where the survivors go to ground: they vanish,
 //             and count toward the next band.
 //
+// Or, about half the time when there is one worth taking, POLITICAL WORK:
+// the band goes into a VILLAGE it does not hold (algEconomy.js) — French-held
+// first, then neutral; near the cave and far from French troops — and stays,
+// holding fire, which swings the village its way. French coming within 35 m
+// of it: it STRIKES, then melts away as ever. The player has to garrison or
+// patrol the villages, and every patrol can walk into an ambush.
+//
 // The pace: the first band after ~45 s, then one every 80-140 s, never more
 // than 18 fighters out at once. Orders, paths and the fighting are the shared
 // machinery (units.orderTo, navGrid, combat.js's holdFire).
@@ -34,6 +41,8 @@ const P = {
   armourNear: 55,             // French armour this close: break off
   postKeepOff: 60,            // French within this of the post count as "at home"
   replanEvery: 10,
+  villageShare: 0.55,         // of the bands, when a village is worth taking
+  villageTrigger: 35,         // French this close to an occupying band: open fire
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -180,7 +189,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
             if (!u.retried) { u.retried = true; u.orderTo(b.spot.x, b.spot.z); }
             else { b.members.splice(b.members.indexOf(u), 1); inBand.delete(u); u.holdFire = true; homebound.add(u); u.orderTo(caveMouth.x, caveMouth.z); }
           }
-          setState(b, "ambush");
+          setState(b, b.mission === "village" ? "occupy" : "ambush");
           break;
         }
         // Everyone stopped short (no route for anyone): try another spot.
@@ -204,6 +213,14 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         }
         break;
       }
+      case "occupy": {
+        // Among the houses, holding fire: the village swings their way while
+        // they stay. The French coming: open up, then go as ever.
+        if (!m.length) return setState(b, "done");
+        const c = centre(m);
+        if (french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger)) { strike(b); break; }
+        break;
+      }
       case "strike": {
         const lost = 1 - m.length / Math.max(1, b.start);
         const c = centre(m);
@@ -223,9 +240,54 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     }
   }
 
+  /**
+   * A village to work: one the ALN does not hold. French-held counts most,
+   * then neutral; nearer the band better; French troops round it worse.
+   */
+  function pickVillage(from) {
+    const pts = app.algEconomy?.points ?? [];
+    let best = null, bestS = -Infinity;
+    for (const v of pts) {
+      if (v.owner === "enemy") continue;
+      const guards = french().filter((u) => !u.isAir && dist(u.position, v.position) < 60).length;
+      const s = (v.owner === "player" ? 2 : 1) - dist(from, v.position) / 600 - guards * 0.6;
+      if (s > bestS) { bestS = s; best = v; }
+    }
+    return best;
+  }
+
+  function planVillage(b, v) {
+    const c = centre(alive(b));
+    // In among the houses, on the band's side, somewhere a man can stand.
+    const a = Math.atan2(c.z - v.position.z, c.x - v.position.x);
+    let spot = null;
+    for (let i = 0; i < 16 && !spot; i++) {
+      const r = 12 + i * 1.5, aa = a + (i % 2 ? 1 : -1) * i * 0.25;
+      const x = v.position.x + Math.cos(aa) * r, z = v.position.z + Math.sin(aa) * r;
+      if (!app.navGrid?.isBlockedAtWorld?.(x, z, true)) spot = { x, z };
+    }
+    if (!spot) return false;
+    b.mission = "village"; b.village = v; b.spot = spot; b.target = null;
+    holdFire(b, true);
+    moveBand(b, spot);
+    setState(b, "approach");
+    return true;
+  }
+
   function plan(b) {
     const m = alive(b);
     const c = centre(m);
+    // Political work, about half the time a village is worth it.
+    if (!b.mission) {
+      const v = pickVillage(c);
+      if (v && Math.random() < P.villageShare && planVillage(b, v)) return;
+      b.mission = "ambush";
+    }
+    if (b.mission === "village") {
+      const v = b.village && b.village.owner !== "enemy" ? b.village : pickVillage(c);
+      if (v && planVillage(b, v)) return;
+      b.mission = "ambush";
+    }
     const tg = pickTarget(c);
     if (!tg) { setState(b, "gather"); b.t = 0; return; }   // nobody to hit: wait at the rally
     const spot = ambushSpot(c, tg.at);
@@ -273,7 +335,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     bandNow() { newBand(); },
     /** Dev: what each band is doing. */
     describe() {
-      return bands.map((b) => `${b.state} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
+      return bands.map((b) => `${b.state}${b.mission === "village" && b.village ? ` (${b.village.name})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
     },
   };
 }
