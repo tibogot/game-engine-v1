@@ -963,7 +963,8 @@ export function createDevPanel({
       : "";
   };
   {
-    const saved = parseFloat(localStorage.getItem(RSCALE_KEY));
+    let saved = NaN;
+    try { saved = parseFloat(localStorage.getItem(RSCALE_KEY)); } catch { /* private mode */ }
     const start = Number.isFinite(saved) ? saved : (app?.renderScale ?? 1);
     app?.setRenderScale?.(start, { persist: false });
     rScale.value = String(Math.round(start * 100));
@@ -973,7 +974,7 @@ export function createDevPanel({
   rScale.addEventListener("input", () => {
     const pct = Number(rScale.value);
     app?.setRenderScale?.(pct / 100, { persist: false });
-    localStorage.setItem(RSCALE_KEY, String(pct / 100));
+    try { localStorage.setItem(RSCALE_KEY, String(pct / 100)); } catch { /* private mode */ }
     requestAnimationFrame(() => showScale(pct));
   });
 
@@ -981,14 +982,15 @@ export function createDevPanel({
   const FOLIAGE_FAR_KEY = "namrts.foliageFar";
   const folFar = $("#dv-foliage-far"), folFarV = $("#dv-foliage-far-v"), folNow = $("#dv-foliage-now");
   if (foliageZoom) {
-    const saved = parseFloat(localStorage.getItem(FOLIAGE_FAR_KEY));
+    let saved = NaN;
+    try { saved = parseFloat(localStorage.getItem(FOLIAGE_FAR_KEY)); } catch { /* private mode */ }
     if (Number.isFinite(saved)) foliageZoom.far = Math.max(0.2, Math.min(1, saved));
     folFar.value = String(Math.round(foliageZoom.far * 100));
     folFarV.textContent = `${folFar.value}%`;
     folFar.addEventListener("input", () => {
       foliageZoom.far = Number(folFar.value) / 100;
       folFarV.textContent = `${folFar.value}%`;
-      localStorage.setItem(FOLIAGE_FAR_KEY, String(foliageZoom.far));
+      try { localStorage.setItem(FOLIAGE_FAR_KEY, String(foliageZoom.far)); } catch { /* private mode */ }
     });
     // What the camera is using right now — the value changes as you zoom.
     setInterval(() => {
@@ -1007,11 +1009,13 @@ export function createDevPanel({
     grassBtn.classList.toggle("checked", !!on);
     app?.setGrassEnabled?.(!!on);
   };
-  setGrass(localStorage.getItem(GRASS_KEY) !== "0");
+  let grassOn = true;
+  try { grassOn = localStorage.getItem(GRASS_KEY) !== "0"; } catch { /* private mode */ }
+  setGrass(grassOn);
   grassBtn.addEventListener("click", () => {
     const on = !grassBtn.classList.contains("checked");
     setGrass(on);
-    localStorage.setItem(GRASS_KEY, on ? "1" : "0");
+    try { localStorage.setItem(GRASS_KEY, on ? "1" : "0"); } catch { /* private mode */ }
   });
 
   // ── Stress ──────────────────────────────────────────────────────────────────
@@ -1135,7 +1139,8 @@ export function createDevPanel({
   const SMOKE_BUDGET_KEY = "namrts.smokeBudget";
   const smokeBud = $("#dv-smoke-budget"), smokeBudV = $("#dv-smoke-budget-v");
   {
-    const saved = parseInt(localStorage.getItem(SMOKE_BUDGET_KEY), 10);
+    let saved = NaN;
+    try { saved = parseInt(localStorage.getItem(SMOKE_BUDGET_KEY), 10); } catch { /* private mode */ }
     const start = Number.isFinite(saved) ? saved : (app?.smoke?.budget?.fullColumns ?? 8);
     app?.smoke?.setBudget?.({ fullColumns: start });
     smokeBud.value = String(start);
@@ -1145,7 +1150,7 @@ export function createDevPanel({
     const n = Number(smokeBud.value);
     smokeBudV.textContent = String(n);
     app?.smoke?.setBudget?.({ fullColumns: n });
-    localStorage.setItem(SMOKE_BUDGET_KEY, String(n));
+    try { localStorage.setItem(SMOKE_BUDGET_KEY, String(n)); } catch { /* private mode */ }
   });
 
   const smokeN = $("#dv-smoke-n");
