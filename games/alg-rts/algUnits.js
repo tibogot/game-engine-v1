@@ -19,6 +19,7 @@ import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { createAlgCombat } from "./algCombat.js";
 import { createAlgAI } from "./algAI.js";
 import { createAlgCover } from "./algCover.js";
+import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { VIEW_YAW } from "./layout.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
 import { createHudBar } from "./ui/hudBar.js";
@@ -112,8 +113,23 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     units.spawn("appele", p.x, p.z);
   }
 
+  // FOG OF WAR (the shared vision grid, as nam): what the French see — every
+  // unit's `vision`, the buildings' (the mirador furthest). The ALN is not
+  // drawn outside it; their buildings stay hidden until first seen. OFF by
+  // default while the map is being built, as nam (Dev → Navigation, ?fow=1).
+  // The fog banks go before it in the post chain (algFog.js rehook).
+  const fogOfWar = createFogOfWar({
+    app, units,
+    structures: { get list() { return app.algStructures?.list ?? []; } },
+    buildings: { list: [] },
+    enabled: new URLSearchParams(location.search).get("fow") === "1",
+  });
+  app.fogOfWar = fogOfWar;
+  fogOfWar.installPostFx(app);
+  app.algFog?.rehook?.();
+
   const unitRenderer = await createUnitRenderer({
-    app, units, healthBars, selectionRings, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS,
+    app, units, healthBars, selectionRings, fogOfWar, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS,
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
   });
   // After the renderer, which builds a view for each unit spawned from now on.
@@ -231,7 +247,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.selection = selection;
   controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
   // The tactical map from the start: the post has its own radio mast.
-  const minimap = createMinimap({ app, units, mount: hud.left, intel: () => true, upYaw: VIEW_YAW });
+  const minimap = createMinimap({ app, units, fogOfWar, mount: hud.left, intel: () => true, upYaw: VIEW_YAW });
 
   // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up
   // enemies in range, close, fire visible rounds; the dead drop out of the
@@ -260,6 +276,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.addPreRenderHook((dt) => {
     sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); units.update(d); combat.step(d, sim.simTime); });
     combat.frame(dt);
+    fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.
     const lead = selection.selected?.find((e) => !e.isStructure) ?? selection.selected?.[0];
     if (lead?.position) coverSys.overlay.setFallback(lead.position.x, lead.position.z);

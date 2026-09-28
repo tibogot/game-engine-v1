@@ -21,16 +21,18 @@ const S = 1.3;
 
 /** Per building: who owns it and how it fights. Producers keep their own hp. */
 const STATS = {
-  post: { weapon: "mg", range: 44, damage: 9, fireRate: 3.0, canHitAir: true, muzzles: "towerGuns" },
-  motorPool: {},
-  helipad: {},
-  caveEntrance: {},
-  mirador: { team: "player", name: "Mirador", hp: 500, weapon: "mg", range: 48, damage: 8, fireRate: 2.4, canHitAir: true, muzzleAt: [0, 6.2 * S + 1.4, 0] },
-  mgNest: { team: "player", name: "Nid de mitrailleuse", hp: 700, weapon: "mg", range: 40, damage: 10, fireRate: 3.0, canHitAir: true },
-  mortarPit: { team: "player", name: "Mortier de 81", hp: 600, mortar: { min: 25, max: 120, every: 7, damage: 45, splash: 7 } },
-  searchlight: { team: "player", name: "Projecteur", hp: 400 },
-  armsCache: { team: "enemy", name: "Cache d'armes", hp: 500 },
-  sangar: { team: "enemy", name: "Sangar", hp: 500, weapon: "mg", range: 38, damage: 9, fireRate: 2.6, canHitAir: true },
+  // `vision`: how far it sees for the fog of war (the towers and the
+  // watchtower furthest, over the valley).
+  post: { weapon: "mg", range: 44, damage: 9, fireRate: 3.0, canHitAir: true, muzzles: "towerGuns", vision: 90 },
+  motorPool: { vision: 45 },
+  helipad: { vision: 50 },
+  caveEntrance: { vision: 60 },
+  mirador: { team: "player", name: "Mirador", hp: 500, weapon: "mg", range: 48, damage: 8, fireRate: 2.4, canHitAir: true, muzzleAt: [0, 6.2 * S + 1.4, 0], vision: 110 },
+  mgNest: { team: "player", name: "Nid de mitrailleuse", hp: 700, weapon: "mg", range: 40, damage: 10, fireRate: 3.0, canHitAir: true, vision: 55 },
+  mortarPit: { team: "player", name: "Mortier de 81", hp: 600, mortar: { min: 25, max: 120, every: 7, damage: 45, splash: 7 }, vision: 45 },
+  searchlight: { team: "player", name: "Projecteur", hp: 400, vision: 100 },
+  armsCache: { team: "enemy", name: "Cache d'armes", hp: 500, vision: 30 },
+  sangar: { team: "enemy", name: "Sangar", hp: 500, weapon: "mg", range: 38, damage: 9, fireRate: 2.6, canHitAir: true, vision: 45 },
 };
 
 const _v = new THREE.Vector3();
@@ -61,7 +63,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     Object.assign(s, {
       position: centre, radius: Math.hypot(fp.hx, fp.hz),
       range: st.weapon ? st.range : 0, damage: st.damage ?? 0, fireRate: st.fireRate ?? 1,
-      weapon: st.weapon ?? null, canHitAir: !!st.canHitAir, cooldown: 0,
+      weapon: st.weapon ?? null, canHitAir: !!st.canHitAir, cooldown: 0, vision: st.vision ?? 50,
     });
     const gun = mesh.children.find((c) => c.name === "Gun") ?? null;
     const muzzles = st.muzzles ? (mesh.geometry.userData[st.muzzles] ?? []).map((p) => toW(...p))
@@ -154,8 +156,16 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     step(dt, projectiles) { for (const r of list) if (r.mortar) stepMortar(r, dt, projectiles); },
     /** Every frame: guns follow their targets; bars when hurt or selected; brackets. */
     frame(dt, camera, healthBars, frames) {
+      const fow = app.fogOfWar;
       for (const r of list) {
         const s = r.s;
+        // The ALN's buildings: hidden under the fog until first seen (then
+        // they stay, as a last-known position does).
+        if (s.team === "enemy") {
+          const seen = !fow?.enabled || fow.isExplored(s.position.x, s.position.z);
+          r.mesh.visible = seen;
+          if (!seen) continue;
+        }
         if (s.alive && r.gun && s.target?.alive) {
           const dx = s.target.position.x - s.position.x, dz = s.target.position.z - s.position.z;
           // The gun's barrel is its local −Z; the building's yaw taken off.

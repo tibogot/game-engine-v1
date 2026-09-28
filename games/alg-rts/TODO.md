@@ -236,6 +236,21 @@ lift off the pad; the ALN comes out of the cave mouth.
    - [ ] Terrain cover: wadi banks, ridge crests, gully floors — the Aurès'
          real cover is the ground itself (no rock props yet either).
    - [ ] Cedars and palms: their trunks as cover in the groves.
+   - [x] FOG OF WAR (2026-09-28): nam's vision grid moved to games/shared-rts
+         (fogOfWar.js; nam keeps a shim), an entity may carry its own
+         `vision`. What the French see: units by type (appelé 42 m,
+         Alouette 72 m), buildings by kind (mirador 110 m, searchlight 100,
+         post 90, MG nest 55…). Outside it the ALN is not drawn; their
+         buildings stay hidden until first seen. The minimap's shroud is
+         turned with the map (the canvas transform of the CoH frame). The
+         fog banks go BEFORE it in the post chain (algFog rehook), as nam.
+         OFF by default while the map is being built, as nam: Dev →
+         Navigation → Fog of war, or `?fow=1`.
+         Tested: ?fow=1 → the post's ground clear, the rest shrouded, the
+         cave hidden; an ALN man out of sight not drawn, one next to the
+         appelés drawn (and shot). nam: loads, its fog of war works.
+   - [ ] **you**: fog of war ON by default once the map is built?
+   - [ ] Line of sight for vision (ridges hide the far side), as for fire.
    - [ ] Sound (nam's recordings are there: rifle, MG, cannon, Huey…).
 4h. [x] N shows the NAV GRID (as nam), and Dev → Navigation → "Nav grid (N)".
    - [ ] The post and the motor pool have no health bar yet; the helipad

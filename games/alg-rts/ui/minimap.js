@@ -43,6 +43,15 @@ function makeFrame(map, upYaw, px) {
       return { x: rx * u + fx * v, z: rz * u + fz * v };
     },
     upYaw,
+    /**
+     * The canvas transform that draws a WORLD-ALIGNED image of the whole map
+     * (the fog of war's miniCanvas: pixel (u, v) = world x = map/2 − u·m,
+     * z = map/2 − v·m, m = map / its width) onto this turned minimap.
+     */
+    worldImageTransform(imgPx) {
+      const m = map / imgPx, h = map / 2;
+      return [-k * m * rx, k * m * fx, -k * m * rz, k * m * fz, c + k * h * (rx + rz), c - k * h * (fx + fz)];
+    },
   };
 }
 
@@ -280,7 +289,11 @@ export function createMinimap({ app, units, buildings = null, structures = null,
     ctx.drawImage(terrain, 0, 0, VIEW_PX, VIEW_PX);
 
     if (fogOfWar?.enabled && fogOfWar.miniCanvas) {
-      ctx.drawImage(fogOfWar.miniCanvas, 0, 0, VIEW_PX, VIEW_PX);
+      // The shroud is world-aligned; turn it with the map.
+      ctx.save();
+      ctx.setTransform(...frame.worldImageTransform(fogOfWar.miniCanvas.width));
+      ctx.drawImage(fogOfWar.miniCanvas, 0, 0);
+      ctx.restore();
     }
 
     const pb = structures?.base;

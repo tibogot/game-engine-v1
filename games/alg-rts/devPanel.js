@@ -163,6 +163,10 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     const nv = panel.section("Navigation");
     nv.toggle("Nav grid (N)", { get: () => !!app.navGrid.debugOn, set: (v) => app.navGrid.setDebug?.(v) });
     nv.hint("Where men and vehicles can go: blocked cells (buildings, cliffs, water) over the terrain. <b>N</b> toggles it anywhere.");
+    if (app.fogOfWar) {
+      nv.toggle("Fog of war", { get: () => app.fogOfWar.enabled, set: (v) => app.fogOfWar.setEnabled(v) });
+      nv.hint("What the French see (vision per unit and building — the mirador 110 m, the post 90 m). Outside it the ALN is not drawn; their buildings appear once seen. Off by default while the map is being built (<code>?fow=1</code> on).");
+    }
     if (app.algCoverOverlay) {
       nv.toggle("Cover overlay (pin)", { get: () => app.algCoverOverlay.pinned, set: (v) => app.algCoverOverlay.setPinned(v) });
       nv.hint("Players hold <b>V</b> with men selected: <b>green</b> = cover (stone, sandbags — takes damage off, from its side), <b>cyan</b> = concealment (scrub — you are seen closer). Firing gives a hidden man away for 4 s.");

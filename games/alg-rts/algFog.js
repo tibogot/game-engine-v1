@@ -76,11 +76,16 @@ export function createAlgFog(app, { light, applyLight } = {}) {
   const fog = createFogBanks({ app, storeKey: "algrts.fogBanks" });
   siteBanks(app, fog);
   fog.restoreBanks();
-  // No fog of war yet: the banks are the whole scene-colour hook. (With one,
-  // they go BEFORE it, as in nam.)
+  // With a fog of war (algUnits.js, app.fogOfWar) the banks go BEFORE it, as
+  // in nam — unexplored ground darkens its mist too; without one they are the
+  // whole scene-colour hook. `rehook` is called when the fog of war arrives.
   // Hooked ONLY while the banks are on: off, the volume pass still rendered
   // a half-res target every frame (3.6% of the frame, measured).
-  const hook = () => app.postFx.setSceneColorModifier(fog.params.enabled ? (color, ctx) => fog.node(color, ctx) : null);
+  const hook = () => {
+    const node = fog.params.enabled ? (color, ctx) => fog.node(color, ctx) : null;
+    if (app.fogOfWar) app.fogOfWar.setPreModifier(node);
+    else app.postFx.setSceneColorModifier(node);
+  };
   fog.onRebuild = hook;
   fog.onToggle = hook;
   hook();
@@ -98,5 +103,5 @@ export function createAlgFog(app, { light, applyLight } = {}) {
     app.fog?.setDistance?.({ enabled: true, matchSky: true, ...W.distance });
   }
   setWeather("clear");
-  return { fog, setWeather, get weather() { return current; } };
+  return { fog, setWeather, rehook: hook, get weather() { return current; } };
 }
