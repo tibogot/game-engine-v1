@@ -20,7 +20,7 @@ import { createAlgCombat } from "./algCombat.js";
 import { createAlgAI } from "./algAI.js";
 import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
-import { LAYOUT, VIEW_YAW } from "./layout.js";
+import { LAYOUT, PLAY, VIEW_YAW } from "./layout.js";
 import { COSTS, createAlgEconomy } from "./algEconomy.js";
 import { createResourceHud } from "./ui/resourceHud.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
@@ -95,6 +95,14 @@ function stampShowroom(navGrid, showroom) {
 export async function createAlgUnits(app, { showroom, muster, onSelect = () => {} }) {
   const navGrid = createNavGrid({ app });
   app.navGrid = navGrid;
+  // Nobody walks out of the playable area (layout.js PLAY): four blocked
+  // strips round it, kept through every nav rebuild like any footprint.
+  {
+    const H = (app.worldSize ?? 1024) / 2 + 8;
+    const strip = (x0, x1, z0, z1) => navGrid.addFootprint((x0 + x1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (z1 - z0) / 2, 0);
+    strip(-H, PLAY.x0, -H, H); strip(PLAY.x1, H, -H, H);
+    strip(PLAY.x0, PLAY.x1, -H, PLAY.z0); strip(PLAY.x0, PLAY.x1, PLAY.z1, H);
+  }
   const stamped = stampShowroom(navGrid, showroom);
 
   const healthBars = createHealthBarField({ scene: app.scene, groundAt: (x, z) => app.getWorldHeight(x, z) });
@@ -262,7 +270,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.selection = selection;
   controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
   // The tactical map from the start: the post has its own radio mast.
-  const minimap = createMinimap({ app, units, fogOfWar, requisition: economy, mount: hud.left, intel: () => true, upYaw: VIEW_YAW });
+  const minimap = createMinimap({ app, units, fogOfWar, requisition: economy, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY });
   const resourceHud = createResourceHud({ mount: hud.strip });
 
   // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up

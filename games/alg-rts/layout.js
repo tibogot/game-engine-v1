@@ -8,10 +8,18 @@
 // the Tighanimine massif fills the north-west, its gullies draining south-
 // east into a wide open valley; a long low ridge closes the south-east.
 //
-// THE STARTS ARE ON THE LONG DIAGONAL (your call, 2026-09-26): ALN in the
-// NW corner of the playable area, French in the SE, ~930 m apart, so the
-// whole map is between them. (The first layout had the post near the
-// centre: ~600 m, half the map behind the French unused.)
+// A COMPANY OF HEROES-SIZED BATTLE (your call, 2026-09-28): the starts are
+// still on the diagonal, ALN north-west, French south-east, but ~470 m
+// apart, not ~930 — at a credible infantry pace (~5.5 m/s) the old corners
+// were a three-minute walk over empty slopes. The play happens in PLAY, a
+// 610 m box over the valley, the dechra and the gully mouths; the terrain
+// outside it is scenery (the massif on the skyline), not ground you walk.
+// Sites were MEASURED: the post on the valley floor 95 m from the oasis
+// (1.2 m of height over its pad, bare), the katiba high in the broken ground
+// (51 m up, 14 m of relief round it). The line between them turned 7° from
+// the old one, so the buildings still stand at three-quarters to the camera.
+// (The first layout had the post near the centre, ~600 m; then the long
+// diagonal, ~930 m, 2026-09-26.)
 //
 // OBJECTIVES are balanced by distance, not mirrored (the terrain is not
 // symmetric, on purpose): one home point each, near points each side, and
@@ -28,12 +36,19 @@
 //   · two WADIS cut the valley: dry riverbeds with steep banks, crossable at
 //     a few fords — the chokepoints an open valley does not have.
 
+/**
+ * THE PLAYABLE AREA: the camera, the units' paths and the minimap stay in
+ * it. 610 m square — both starts with room behind them, the three villages,
+ * the koubba, the near oasis, both gully mouths. Outside: scenery.
+ */
+export const PLAY = { x0: -320, x1: 290, z0: -285, z1: 325 };
+
 export const LAYOUT = {
   sites: [
     // ── Starts ───────────────────────────────────────────────────────────────
-    // On the SE ridge bench, 25 m up.
-    { kind: "french", name: "Poste de Tighanimine", x: 305, z: 345, r: 34, turn: 35 },
-    { kind: "aln", name: "Katiba camp", x: -350, z: -315, r: 26, turn: -30 },
+    // The valley floor near the oasis; the katiba high in the massif.
+    { kind: "french", name: "Poste de Tighanimine", x: 90, z: 213, r: 34, turn: 35 },
+    { kind: "aln", name: "Katiba camp", x: -199, z: -162, r: 26, turn: -30 },
 
     // ── Objectives (capture points) ─────────────────────────────────────────
     { kind: "hamlet", name: "Mechta Ouled Ali", x: 150, z: 60, r: 40, turn: 40 },

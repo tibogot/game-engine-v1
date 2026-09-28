@@ -50,6 +50,9 @@ export function createRtsCamera({ app } = {}) {
   const DIST_CEILING = 200;
   const DIST_DEFAULT = 52; // starting zoom — close like Company of Heroes
   const HALF       = (worldSize ?? 1000) * 0.5;
+  // Where the camera's focus may go: the whole world unless the game bounds
+  // it to its playable area (setBounds — Sand & Blood's 610 m box).
+  const bounds = { x0: -HALF, x1: HALF, z0: -HALF, z1: HALF };
   const clampDist = (d) => THREE.MathUtils.clamp(d, DIST_MIN, Math.min(params.distMax, DIST_CEILING));
 
   // ── State ───────────────────────────────────────────────────────────────────
@@ -181,8 +184,8 @@ export function createRtsCamera({ app } = {}) {
     if (keys.KeyQ) yaw -= params.rotSpeed * dt;
     if (keys.KeyE) yaw += params.rotSpeed * dt;
 
-    focus.x = THREE.MathUtils.clamp(focus.x + (fx * mf + rx * mr) * pan, -HALF, HALF);
-    focus.z = THREE.MathUtils.clamp(focus.z + (fz * mf + rz * mr) * pan, -HALF, HALF);
+    focus.x = THREE.MathUtils.clamp(focus.x + (fx * mf + rx * mr) * pan, bounds.x0, bounds.x1);
+    focus.z = THREE.MathUtils.clamp(focus.z + (fz * mf + rz * mr) * pan, bounds.z0, bounds.z1);
     focusY = easeHeight(focusY, terrainY(focus.x, focus.z), dt);
     focus.y = focusY;
 
@@ -250,6 +253,8 @@ export function createRtsCamera({ app } = {}) {
     getMode,
     /** Recentre the view on a world point (e.g. jump to a selected unit). */
     focusOn(x, z) {
+      x = THREE.MathUtils.clamp(x, bounds.x0, bounds.x1);
+      z = THREE.MathUtils.clamp(z, bounds.z0, bounds.z1);
       focus.set(x, 0, z);
       focusY = terrainY(x, z);
       focus.y = focusY;
@@ -261,6 +266,12 @@ export function createRtsCamera({ app } = {}) {
      * the view toward the enemy, away from its own map edge.
      */
     setYaw(y) { yaw = y; },
+    /** Keep the focus inside {x0, x1, z0, z1} (world metres); null = the whole world. */
+    setBounds(b) {
+      Object.assign(bounds, b ?? { x0: -HALF, x1: HALF, z0: -HALF, z1: HALF });
+      focus.x = THREE.MathUtils.clamp(focus.x, bounds.x0, bounds.x1);
+      focus.z = THREE.MathUtils.clamp(focus.z, bounds.z0, bounds.z1);
+    },
     /**
      * WHAT THE CAMERA CAN SEE, in metres of ground — the thing every distance
      * in the vegetation actually wants.

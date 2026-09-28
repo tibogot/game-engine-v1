@@ -20,7 +20,7 @@ export const ALG_UNIT_TYPES = {
     isAir: false,
     foot: true,
     hover: 0,
-    speed: 11,
+    speed: 5.5,     // m/s: a credible RTS pace (CoH scale, 2026-09-28; nam runs 11)
     radius: 1.0,
     turnRate: 6,
     maxHp: 60,
@@ -52,7 +52,7 @@ export const ALG_UNIT_TYPES = {
     isAir: false,
     foot: true,
     hover: 0,
-    speed: 11,
+    speed: 6,       // lighter kit than the appelé
     radius: 1.0,
     turnRate: 6,
     maxHp: 60,
@@ -82,7 +82,7 @@ export const ALG_UNIT_TYPES = {
   // Hotchkiss/Willys MB jeep, the patrol's car. Plays like nam's M151.
   willys: {
     typeKey: "willys", name: "Jeep Willys", weapon: "mg",
-    isAir: false, hover: 0, speed: 20, radius: 2.9, turnRate: 3.4, maxHp: 120,
+    isAir: false, hover: 0, speed: 12, radius: 2.9, turnRate: 3.4, maxHp: 120,
     range: 34, damage: 14, fireRate: 1.8, canHitAir: false, vision: 38,
     procedural: "willys", excludeRotorsFromBox: false, facingOffset: 0,
     ringRadius: 3.4, barWidth: 4, barY: 3.4, castShadow: true,
@@ -91,7 +91,7 @@ export const ALG_UNIT_TYPES = {
   // building yet).
   gmc: {
     typeKey: "gmc", name: "Camion GMC",
-    isAir: false, hover: 0, speed: 16, radius: 3.6, turnRate: 3.0, maxHp: 160,
+    isAir: false, hover: 0, speed: 9, radius: 3.6, turnRate: 3.0, maxHp: 160,
     range: 0, damage: 0, fireRate: 1, canHitAir: false, vision: 34,
     procedural: "gmc", excludeRotorsFromBox: false, facingOffset: 0,
     ringRadius: 5.4, barWidth: 5, barY: 4.4, castShadow: true,
@@ -99,7 +99,7 @@ export const ALG_UNIT_TYPES = {
   // M3 half-track, the APC. Plays like nam's M113 (its .50 reaches aircraft).
   halftrack: {
     typeKey: "halftrack", name: "Half-track M3", weapon: "mg",
-    isAir: false, hover: 0, speed: 22, radius: 4.3, turnRate: 2.5, maxHp: 240,
+    isAir: false, hover: 0, speed: 10, radius: 4.3, turnRate: 2.5, maxHp: 240,
     range: 38, damage: 16, fireRate: 1.6, canHitAir: true, vision: 38,
     procedural: "halftrack", excludeRotorsFromBox: false, facingOffset: 0,
     ringRadius: 5.0, barWidth: 6, barY: 4.2, castShadow: true,
@@ -108,7 +108,7 @@ export const ALG_UNIT_TYPES = {
   // M551 Sheridan.
   amx13: {
     typeKey: "amx13", name: "AMX-13", weapon: "cannon",
-    isAir: false, hover: 0, speed: 17, radius: 4.6, turnRate: 2.1, maxHp: 260,
+    isAir: false, hover: 0, speed: 8.5, radius: 4.6, turnRate: 2.1, maxHp: 260,
     range: 42, damage: 26, fireRate: 0.85, canHitAir: false, vision: 36,
     procedural: "amx13", excludeRotorsFromBox: false, facingOffset: 0,
     ringRadius: 4.6, barWidth: 6, barY: 4.0, castShadow: true,
@@ -117,7 +117,7 @@ export const ALG_UNIT_TYPES = {
   // now (its real edge, speed on tracks, comes with this game's balance).
   ebr: {
     typeKey: "ebr", name: "Panhard EBR", weapon: "cannon",
-    isAir: false, hover: 0, speed: 17, radius: 4.6, turnRate: 2.1, maxHp: 260,
+    isAir: false, hover: 0, speed: 13, radius: 4.6, turnRate: 2.1, maxHp: 260,
     range: 42, damage: 26, fireRate: 0.85, canHitAir: false, vision: 36,
     procedural: "ebr", excludeRotorsFromBox: false, facingOffset: 0,
     ringRadius: 5.4, barWidth: 6.5, barY: 4.2, castShadow: true,
@@ -125,7 +125,7 @@ export const ALG_UNIT_TYPES = {
   // Alouette II. Plays like nam's Huey gunship for now.
   alouette: {
     typeKey: "alouette", name: "Alouette II", weapon: "gunship",
-    isAir: true, hover: 24, speed: 40, radius: 6, turnRate: 2.6, maxHp: 80,
+    isAir: true, hover: 24, speed: 24, radius: 6, turnRate: 2.6, maxHp: 80,
     range: 44, damage: 11, fireRate: 3.2, canHitAir: true, vision: 72,
     procedural: "alouette", excludeRotorsFromBox: true, facingOffset: 0,
     ringRadius: 7.5, barWidth: 7, barY: 6, castShadow: true,

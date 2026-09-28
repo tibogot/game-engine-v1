@@ -30,17 +30,22 @@ function lerpRgb(a, b, t) {
 /**
  * World ↔ minimap for a map turned so world direction (sin upYaw, cos upYaw)
  * points up. Right on the minimap = the camera's screen-right, (-cos, sin).
- * Scaled so the whole turned square fits the canvas.
+ * It frames `area` (the PLAYABLE box, {x0, x1, z0, z1}; the world by default)
+ * scaled so the whole turned square fits the canvas. `world`: the terrain's
+ * edge (the fog of war's image covers all of it).
  */
-function makeFrame(map, upYaw, px) {
+function makeFrame(area, upYaw, px, world) {
   const fx = Math.sin(upYaw), fz = Math.cos(upYaw), rx = -fz, rz = fx;
-  const k = px / (map * (Math.abs(fx) + Math.abs(fz)));   // world m → minimap px
+  const cx = (area.x0 + area.x1) / 2, cz = (area.z0 + area.z1) / 2;
+  const size = Math.max(area.x1 - area.x0, area.z1 - area.z0);
+  const k = px / (size * (Math.abs(fx) + Math.abs(fz)));   // world m → minimap px
   const c = px / 2;
   return {
-    toMini: (x, z) => ({ x: c + (x * rx + z * rz) * k, y: c - (x * fx + z * fz) * k }),
+    area,
+    toMini: (x, z) => ({ x: c + ((x - cx) * rx + (z - cz) * rz) * k, y: c - ((x - cx) * fx + (z - cz) * fz) * k }),
     toWorld: (mx, my) => {
       const u = (mx - c) / k, v = (c - my) / k;
-      return { x: rx * u + fx * v, z: rz * u + fz * v };
+      return { x: cx + rx * u + fx * v, z: cz + rz * u + fz * v };
     },
     upYaw,
     /**
@@ -49,8 +54,9 @@ function makeFrame(map, upYaw, px) {
      * z = map/2 − v·m, m = map / its width) onto this turned minimap.
      */
     worldImageTransform(imgPx) {
-      const m = map / imgPx, h = map / 2;
-      return [-k * m * rx, k * m * fx, -k * m * rz, k * m * fz, c + k * h * (rx + rz), c - k * h * (fx + fz)];
+      const m = world / imgPx, h = world / 2;
+      return [-k * m * rx, k * m * fx, -k * m * rz, k * m * fz,
+        c + k * ((h - cx) * rx + (h - cz) * rz), c - k * ((h - cx) * fx + (h - cz) * fz)];
     },
   };
 }
@@ -68,7 +74,9 @@ function bakeTerrain(app, frame) {
   const data = img.data;
 
   const worldOf = (px, py) => frame.toWorld((px + 0.5) * scale, (py + 0.5) * scale);
-  const inside = (w) => Math.abs(w.x) <= half && Math.abs(w.z) <= half;
+  // Inside the map AND the framed (playable) area; the rest reads as off-map.
+  const A = frame.area;
+  const inside = (w) => Math.abs(w.x) <= half && Math.abs(w.z) <= half && w.x >= A.x0 && w.x <= A.x1 && w.z >= A.z0 && w.z <= A.z1;
 
   const heights = new Float32Array(res * res);
   let minH = Infinity, maxH = -Infinity;
@@ -114,10 +122,12 @@ function bakeTerrain(app, frame) {
   return canvas;
 }
 
-export function createMinimap({ app, units, buildings = null, structures = null, fogOfWar = null, requisition = null, mount = document.body, intel = null, upYaw = 0 }) {
+export function createMinimap({ app, units, buildings = null, structures = null, fogOfWar = null, requisition = null, mount = document.body, intel = null, upYaw = 0, area = null }) {
   const map = app.worldSize ?? 1000;
-  // upYaw = 0 is nam's old fixed layout (+z up, +x left).
-  const frame = makeFrame(map, upYaw, VIEW_PX);
+  // upYaw = 0 is nam's old fixed layout (+z up, +x left). `area`: the
+  // playable box the map frames (Sand & Blood's PLAY); the world by default.
+  const box = area ?? { x0: -map / 2, x1: map / 2, z0: -map / 2, z1: map / 2 };
+  const frame = makeFrame(box, upYaw, VIEW_PX, map);
   let terrain = bakeTerrain(app, frame);
 
   const root = document.createElement("div");
@@ -146,8 +156,7 @@ export function createMinimap({ app, units, buildings = null, structures = null,
   const jump = (ev) => {
     const rect = canvas.getBoundingClientRect();
     const w = frame.toWorld((ev.clientX - rect.left) / rect.width * VIEW_PX, (ev.clientY - rect.top) / rect.height * VIEW_PX);
-    const half = map / 2;
-    app.rtsCamera?.focusOn?.(Math.max(-half, Math.min(half, w.x)), Math.max(-half, Math.min(half, w.z)));
+    app.rtsCamera?.focusOn?.(Math.max(box.x0, Math.min(box.x1, w.x)), Math.max(box.z0, Math.min(box.z1, w.z)));
   };
   const onDown = (e) => { if (!hasRadioIntel()) return; dragging = true; jump(e); e.preventDefault(); };
   const onMove = (e) => { if (dragging) jump(e); };

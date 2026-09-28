@@ -17,7 +17,7 @@ import { placeShowroom } from "./showroom.js";
 import { createAlgDevPanel } from "./devPanel.js";
 import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
-import { LAYOUT, VIEW_YAW, siteYaw } from "./layout.js";
+import { LAYOUT, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgHerds } from "./algHerds.js";
@@ -143,6 +143,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   onStatus("Setting up camera…");
   const rtsCamera = createRtsCamera({ app });
   rtsCamera.setMode("rts");
+  // The camera stays over the playable area (layout.js PLAY): the rest is scenery.
+  rtsCamera.setBounds(PLAY);
   // Start over the playable side's base (layout.js).
   const base = LAYOUT.sites.find((s) => s.kind === "french");
   if (base) {

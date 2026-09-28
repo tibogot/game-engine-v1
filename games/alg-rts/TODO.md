@@ -781,6 +781,34 @@ Asset follow-ups:
       shrink, helicopters grounded. Candidates: the engine's fog + smoke
       flipbooks + a dust-particle layer.
 
+## MAP SCALE — a Company of Heroes-sized battle (your call, 2026-09-28)
+
+- [x] The terrain was fine; the BATTLE was too big: the starts ~930 m apart
+      on the diagonal, units at 11 m/s (a sprinter), 82.5% of the ground
+      bare. Now:
+      · the starts moved IN along the same diagonal, ~470 m apart
+        (layout.js), sites MEASURED: the post on the valley floor 95 m from
+        the oasis (1.2 m relief over its pad), the katiba high in the broken
+        ground (51 m up); the line turned 7°, buildings still 3/4 on;
+      · a PLAYABLE AREA, 610 m (layout.js PLAY): the camera (shared
+        rtsCamera.setBounds), the paths (four blocked strips in the nav
+        grid) and the minimap (it frames the box) stay in it; the terrain
+        outside is scenery — the Kef, the Col, the far corners;
+      · CoH speeds: appelé 5.5 m/s, moudjahid 6, Willys 12, EBR 13,
+        half-track 10, GMC 9, AMX-13 8.5, Alouette 24;
+      · the vegetation re-baked (tools/algVegetation.mjs) so nothing grows
+        on the new sites; every piece round both starts checked: pads
+        level, dry, no trees.
+      Measured: a band from the cave to an ambush on a patrol 120 m out of
+      the post in ~52 s (was ~72 s at a sprint over twice the ground).
+- [ ] Mark the out-of-bounds ground (CoH darkens it) — now it only stops
+      the camera and the men.
+- [ ] A move order outside the box: go to the nearest point inside (now the
+      man holds, the path having no route).
+- [ ] Fill the box densely (scrub along the wadis, terraces and orchards
+      round the villages); thin the vegetation OUTSIDE it (frame time).
+- [ ] tools/algPlanView.mjs: redraw the plan image with the new layout.
+
 ## ECONOMY — first cut in (2026-09-28, algEconomy.js), per the proposal below
 
 - [x] Two purses: the French **Ravitaillement** (start 400) and the ALN's
