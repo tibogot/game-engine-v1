@@ -18,6 +18,8 @@ import { createAlgStructures } from "./algStructures.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { createAlgCombat } from "./algCombat.js";
 import { createAlgAI } from "./algAI.js";
+import { createAlgMines } from "./algMines.js";
+import { createAlgPatrols } from "./algPatrols.js";
 import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, PLAY, VIEW_YAW } from "./layout.js";
@@ -258,8 +260,22 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     productionFor: (s) => Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => ({ key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: COSTS[key] ?? 0 })),
     canAfford: (cost) => economy.french.canAfford(cost),
     onBuild: (s, key) => s.enqueue(key),
+    // PATROUILLE (algPatrols.js): the selection walks the nearest track in
+    // file, back and forth, until given another order.
+    abilitiesFor: (sel) => (sel.some((u) => !u.isStructure && !u.isAir && u.team === "player")
+      ? [{ key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrol the nearest track in file, back and forth (vehicles: the piste). A GMC on patrol delivers supplies to the villages you hold.", ready: true }]
+      : []),
+    onAbility: (key, sel) => { if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); } },
+    // The cover and concealment chips, read at the first man (algCover.js).
+    stanceFor: (sel) => {
+      const u = sel.find((e) => !e.isStructure && !e.isAir);
+      const c = app.algCover;
+      if (!u || !c) return null;
+      return { concealment: c.concealmentAt(u.position.x, u.position.z), cover: c.coverAt(u.position.x, u.position.z) };
+    },
     mount: hud.right,
   });
+  let patrols = null;   // made after combat (algPatrols.js)
   let controlGroups = null;   // made after the selection it listens to
   const selection = createSelection({
     app, units, unitRenderer, structuresRenderer: structures.renderer,
@@ -299,9 +315,16 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     : null;
   app.algAI = ai;
 
+  // THE TRACKS AT WAR: the ALN's mines on the piste (algMines.js; the AI lays
+  // them), the French patrols and convoys along the tracks (algPatrols.js).
+  const mines = createAlgMines(app, { units, combat: combat.combat });
+  app.algMines = mines;
+  patrols = createAlgPatrols(app, { units, economy, onDelivery: (n, v) => resourceHud.flash(`+${n} · convoi ${v.name}`) });
+  app.algPatrols = patrols;
+
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); units.update(d); combat.step(d, sim.simTime); economy.step(d); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); mines.step(d); economy.step(d); });
     combat.frame(dt);
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.

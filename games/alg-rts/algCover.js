@@ -21,7 +21,15 @@
 import { COVER, createCover } from "../shared-rts/cover.js";
 import { createCoverOverlay } from "../shared-rts/coverOverlay.js";
 
-export const ALG_COVER = { ...COVER, concealFloor: 0.2, concealCeil: 0.65, maxConcealment: 0.6 };
+//   TERRAIN      a wadi's bank, a crest, a terrace riser (shared cover.js
+//                terrainCover): the ground toward the shooter rising into
+//                the line of fire. A man in a wadi bed is covered from the
+//                plain, not from a man on the bank above him.
+//   WALLS        a piece can list its own wall lines (userData.coverLines,
+//                rtsAlgVillage.js): a garden's dry-stone walls, the terrace
+//                walls, the dechra's courtyards — hard cover along the wall,
+//                not over the plot it encloses.
+export const ALG_COVER = { ...COVER, concealFloor: 0.2, concealCeil: 0.65, maxConcealment: 0.6, terrainCover: 0.5 };
 
 /** Stone and sandbags: hard cover. */
 const HARD = new Set(["frenchPost", "sangar", "mgNest", "mortarPit", "sandbags1", "sandbags2", "dechra", "mechta", "mechta2", "koubba", "caveEntrance", "sasPost", "armsCache", "alnCamp", "wellHamlet1", "wellHamlet2"]);
@@ -30,14 +38,26 @@ const NONE = new Set(["wire1", "wire2", "ambushScreen", "mineMarker", "zeriba1",
 
 /** A placed piece's footprint as circles (world), turned with it. */
 function circlesOf(mesh, hard) {
-  const fp = mesh.geometry?.userData?.footprint;
+  const ud = mesh.geometry?.userData;
+  const fp = ud?.footprint;
   if (!fp) return [];
   const c = Math.cos(mesh.rotation.y), s = Math.sin(mesh.rotation.y);
   const out = [];
-  const put = (lx, lz, r) => {
-    const x = fp.cx + lx, z = fp.cz + lz;
-    out.push({ x: mesh.position.x + x * c + z * s, z: mesh.position.z - x * s + z * c, radius: r, size: 1, hard });
+  const put = (lx, lz, r, h = hard, ox = fp.cx, oz = fp.cz) => {
+    const x = ox + lx, z = oz + lz;
+    out.push({ x: mesh.position.x + x * c + z * s, z: mesh.position.z - x * s + z * c, radius: r, size: 1, hard: h });
   };
+  // WALL LINES (piece frame, scaled): circles 1.2 m every 1.6 m along each.
+  for (const w of ud.coverLines ?? []) {
+    for (let i = 0; i < w.pts.length - 1; i++) {
+      const [ax, az] = w.pts[i], [bx, bz] = w.pts[i + 1];
+      const k = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / 1.6));
+      for (let j = 0; j <= k; j++) put(ax + ((bx - ax) * j) / k, az + ((bz - az) * j) / k, 1.2, w.hard ?? true, 0, 0);
+    }
+  }
+  // `coverPerimeter: false`: the lines are all the cover it gives (a garden,
+  // terraces), or none at all (a threshing floor: flat).
+  if (ud.coverPerimeter === false) return out;
   const along = (h, r) => {
     const span = Math.max(0, h - r), n = Math.max(1, Math.round((2 * span) / (r * 1.4)) + 1);
     return Array.from({ length: n }, (_, i) => (n === 1 ? 0 : -span + (2 * span * i) / (n - 1)));

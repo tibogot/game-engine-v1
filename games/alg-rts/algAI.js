@@ -30,7 +30,11 @@
 //
 // French on a TRACK (the piste, a mule path — algTracks.js) get the road
 // ambush: the band lies up along that track, 15-45 m off it.
-import { nearestTrack } from "./algTracks.js";
+//
+// Or, about a third of the time, a MINE (algMines.js): the band walks to a
+// stretch of PISTE far from any French, works there a few seconds, holding
+// fire, and goes home. The French find out when a truck goes up.
+import { TRACK_LINES, nearestTrack } from "./algTracks.js";
 
 const P = {
   firstBandAt: 45,
@@ -49,6 +53,10 @@ const P = {
   replanEvery: 10,
   villageShare: 0.55,         // of the bands, when a village is worth taking
   villageTrigger: 35,         // French this close to an occupying band: open fire
+  mineShare: 0.3,             // of the bands (while the map has room for a mine)
+  mineWork: 8,                // seconds at the spot to lay it
+  mineKeepOff: 90,            // no French within this of the spot
+  mineApart: 45,              // from the other mines
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -204,7 +212,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
             if (!u.retried) { u.retried = true; u.orderTo(b.spot.x, b.spot.z); }
             else { b.members.splice(b.members.indexOf(u), 1); inBand.delete(u); u.holdFire = true; homebound.add(u); u.orderTo(caveMouth.x, caveMouth.z); }
           }
-          setState(b, b.mission === "village" ? "occupy" : "ambush");
+          setState(b, b.mission === "village" ? "occupy" : b.mission === "mine" ? "lay" : "ambush");
           break;
         }
         // Everyone stopped short (no route for anyone): try another spot.
@@ -234,6 +242,15 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         if (!m.length) return setState(b, "done");
         const c = centre(m);
         if (french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger)) { strike(b); break; }
+        break;
+      }
+      case "lay": {
+        // At the piste, holding fire: the mine goes in, and they go. French
+        // turning up first: fight, then go as ever (no mine).
+        if (!m.length) return setState(b, "done");
+        const c = centre(m);
+        if (french().some((u) => !u.isAir && dist(u.position, c) < P.trigger)) { strike(b); break; }
+        if (b.t > P.mineWork) { app.algMines?.lay(b.minePt.x, b.minePt.z); withdraw(b); }
         break;
       }
       case "strike": {
@@ -289,9 +306,46 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     return true;
   }
 
+  /**
+   * A stretch of piste to mine: no French within mineKeepOff, clear of the
+   * post and of the other mines; nearer the band better. False if none.
+   */
+  function planMine(b) {
+    const mines = app.algMines;
+    if (!mines || mines.count >= mines.params.max) return false;
+    const c = centre(alive(b));
+    const fr = french().filter((u) => !u.isAir);
+    let best = null, bestS = -Infinity;
+    for (const t of TRACK_LINES) {
+      if (t.kind !== "piste") continue;
+      for (let i = 2; i < t.line.length - 2; i += 3) {
+        const p = t.line[i];
+        if (dist(p, post) < P.mineKeepOff) continue;
+        if (fr.some((u) => dist(u.position, p) < P.mineKeepOff)) continue;
+        if (mines.list.some((q) => dist(q, p) < P.mineApart)) continue;
+        const s = -dist(p, c) / 400 + Math.random() * 0.4;
+        if (s > bestS) { bestS = s; best = p; }
+      }
+    }
+    if (!best) return false;
+    b.mission = "mine"; b.minePt = { x: best.x, z: best.z }; b.target = null;
+    // The band stands beside the road, the mine goes in the wheel track.
+    b.spot = { x: best.x, z: best.z };
+    holdFire(b, true);
+    moveBand(b, b.spot);
+    setState(b, "approach");
+    return true;
+  }
+
   function plan(b) {
     const m = alive(b);
     const c = centre(m);
+    // A mine on the piste, about a third of the time there is room for one.
+    if (!b.mission && Math.random() < P.mineShare && planMine(b)) return;
+    if (b.mission === "mine") {
+      if (planMine(b)) return;
+      b.mission = "ambush";
+    }
     // Political work, about half the time a village is worth it.
     if (!b.mission) {
       const v = pickVillage(c);
@@ -352,7 +406,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     ambushSpotFor: (from, tgt) => ambushSpot(from, tgt),
     /** Dev: what each band is doing. */
     describe() {
-      return bands.map((b) => `${b.state}${b.mission === "village" && b.village ? ` (${b.village.name})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
+      return bands.map((b) => `${b.state}${b.mission === "village" && b.village ? ` (${b.village.name})` : b.mission === "mine" ? " (mine)" : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
     },
   };
 }

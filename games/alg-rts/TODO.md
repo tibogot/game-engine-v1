@@ -496,8 +496,33 @@ Order: foliage → villages → animals & birds → ground detail.
          slabs); the straw heap (reads a bit like a beehive hut?).
    - [ ] Terraces are walls on the untouched slope: grade each tread flat
          (a terrain edit) if they read wrong close up.
-   - [ ] Cover: garden walls and terrace walls as COVER (algCover) — the
-         obvious place for an ambush or a French firing line.
+   - [x] **Cover from walls and ground** (2026-09-29): pieces list their
+         walls (`userData.coverLines`, algCover.js) — gardens, terraces, the
+         dechra's yards: HARD cover along the wall, not over the plot; the
+         threshing floor none (was a false outline). TERRAIN cover (shared
+         cover.js `terrainCover`, alg 0.5, nam off): the ground toward the
+         shooter rising into the line of fire, sampled to 10 m — a man in a
+         wadi bed 0.5 from the plain, 0 from a man on the bank above him, 0
+         along the wadi (measured). Random 50 m shots over the play box:
+         31% find cover (12% walls/buildings, the rest the massif's banks
+         and gullies). The overlay (V) and the ALN's spot scoring see banks.
+         Command card: the HARD / LIGHT COVER and CONCEALED chips.
+   - [x] **Tracks at war** (2026-09-29): PATROUILLE (algPatrols.js, a
+         command-card button): the nearest track in file (vehicles the
+         piste), to the end and back, fights and resumes, any order ends it —
+         measured 4 men within 4 m of the line, 2-5 m apart. CONVOI: a GMC
+         on patrol through a French-held village delivers +30 (flash on the
+         supply strip). MINES (algMines.js): the ALN's "mine" mission (~30%
+         of bands) lays one on the piste far from the French (measured on the
+         dechra piste, 284 m out); a vehicle over it sets it off (a GMC dies,
+         a half-track limps); infantry spot it (a red stake) and clear it in
+         5 s — measured spotted in 2 s, cleared by 8 s, nobody hurt.
+   - [ ] **you, play it**: patrol + convoy + a mine; is 30 a delivery and
+         30% of bands mining the right pace?
+   - [ ] A mine's minimap mark once spotted; the sapper (clears faster,
+         finds from further); the ALN laying mines on the mule paths too.
+   - [ ] Attack orders don't end a patrol (it resumes after the kill) —
+         right for CoH, say if not.
    - [ ] GPU cost of the dressing: A/B said −0.07 ms, but the frame read
          0.58 ms total (this view is normally 5-7) — re-measure in a focused tab.
 - [ ] Doum: fix its far LOD (flat green mats) and paint it back.

@@ -156,6 +156,7 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
   // village as approved, and stay put whatever the lanes and yards do.
   const RL = rng(seed + 91);
   const trees = [];
+  const coverLines = [];   // the yard walls (the houses' outline covers the rest)
   // THE LANES up through the village, one at each end: a STAIR climbing the
   // real ground, the lane wandering a little — every 1.3 m a riser of
   // stones on edge, and the step behind it PAVED to the next riser (two
@@ -181,8 +182,11 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
     if (h.row !== 0 || h.mosque || RL() < 0.35) continue;
     const zf = h.z - h.d / 2 - 0.25, deep = 3.2 + RL() * 1.2, x0 = h.x - h.w / 2 + 0.3, x1 = h.x + h.w / 2 - 0.3;
     const gap = 0.75;
-    dryStone(parts, RL, [[h.x - gap, zf - deep], [x0, zf - deep], [x0, zf]], { courses: 3, h: 1.05, depth: 0.45, len: 0.5, groundAt, tone: 0.48 });
-    dryStone(parts, RL, [[h.x + gap, zf - deep], [x1, zf - deep], [x1, zf]], { courses: 3, h: 1.05, depth: 0.45, len: 0.5, groundAt, tone: 0.48 });
+    const yard = [[[h.x - gap, zf - deep], [x0, zf - deep], [x0, zf]], [[h.x + gap, zf - deep], [x1, zf - deep], [x1, zf]]];
+    for (const w of yard) {
+      dryStone(parts, RL, w, { courses: 3, h: 1.05, depth: 0.45, len: 0.5, groundAt, tone: 0.48 });
+      coverLines.push({ pts: w, hard: true });
+    }
     const ix = h.x + (RL() < 0.5 ? -1 : 1) * (h.w / 2 - 1.3), iz = zf - deep + 1.2;
     const what = RL();
     if (what < 0.4) trees.push({ kind: "fig", x: ix, z: iz, scale: 0.6 + RL() * 0.2, seed: Math.floor(RL() * 1000) });
@@ -194,6 +198,7 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
   const geo = finish(parts, { hx: Math.max(width / 2 + 4, xEnd + 3), hz: (rows * rowStep) / 2 + 3, cx: 0, cz: 0, height: 14 });
   geo.userData.houses = houses.map((h) => ({ x: h.x * 1.3, z: h.z * 1.3, mosque: !!h.mosque }));
   geo.userData.trees = scaled(trees);
+  geo.userData.coverLines = scaledLines(coverLines);
   // The nest's floor, in the piece's frame (scaled): a game stands its stork there.
   geo.userData.nest = nest ? { x: nest[0] * 1.3, y: nest[1] * 1.3, z: nest[2] * 1.3 } : null;
   return geo;
@@ -399,6 +404,12 @@ export function buildZeriba({ seed = 1960, r = 6.5, groundAt = FLAT } = {}) {
 
 const KIT = 1.3;   // finish() scales the geometry; lists of points follow it
 const scaled = (list) => list.map((t) => ({ ...t, x: t.x * KIT, z: t.z * KIT }));
+/**
+ * `userData.coverLines`: the walls a man can crouch behind, [{ pts: [[x, z]],
+ * hard }] in the piece's frame (scaled). With `coverPerimeter: false` they
+ * are all the cover the piece gives (the game's cover map: algCover.js).
+ */
+const scaledLines = (lines) => lines.map((w) => ({ hard: w.hard, pts: w.pts.map(([x, z]) => [x * KIT, z * KIT]) }));
 
 /**
  * GARDEN — a walled plot of olives (or figs): dry-stone walls chest high all
@@ -414,7 +425,8 @@ export function buildGarden({ seed = 1961, w = 18, d = 13, kind = "olive", groun
   const parts = [];
   const hx = w / 2, hz = d / 2, gx = -hx * 0.3, gate = 1.6;
   // One run round from one gatepost to the other: the corners bond.
-  dryStone(parts, R, [[gx - gate, -hz], [-hx, -hz], [-hx, hz], [hx, hz], [hx, -hz], [gx + gate, -hz]], { courses: 3, h: 1.1, depth: 0.55, len: 0.55, groundAt, tone: 0.5 });
+  const wall = [[gx - gate, -hz], [-hx, -hz], [-hx, hz], [hx, hz], [hx, -hz], [gx + gate, -hz]];
+  dryStone(parts, R, wall, { courses: 3, h: 1.1, depth: 0.55, len: 0.55, groundAt, tone: 0.5 });
   for (const sx of [-1, 1]) {
     const x = gx + sx * (gate + 0.1), g = groundAt(x, -hz);
     parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.55, 1.45, 0.6), pos: [x, g + 0.55, -hz], rot: [0, R() * 0.4, 0], mat: MAT.limestone, tone: 0.5 });
@@ -444,6 +456,9 @@ export function buildGarden({ seed = 1961, w = 18, d = 13, kind = "olive", groun
   const geo = finish(parts, { hx: hx + 0.6, hz: hz + 0.6, height: 1.6 });
   geo.userData.trees = scaled(trees);
   geo.userData.hedge = hedge.map(([x, z]) => [x * KIT, z * KIT]);
+  // Cover along the wall, both faces (a man outside it or in the orchard).
+  geo.userData.coverLines = scaledLines([{ pts: wall, hard: true }]);
+  geo.userData.coverPerimeter = false;
   // The walls block; the gate (1.6 x 2, a nav cell wide at 1.3) stays open.
   // Each rect at least half a 4 m nav cell thick, or it stamps no cell.
   const t = 2 / KIT;
@@ -469,12 +484,15 @@ export function buildTerraces({ seed = 1962, w = 22, rows = 4, step = 5, kind = 
   const R = rng(seed);
   const parts = [];
   const trees = [];
+  const coverLines = [];
   const z0 = -((rows - 1) * step) / 2;
   for (let r = 0; r < rows; r++) {
     // A wall a little bowed and a little shorter or longer each step, the
     // way hand-built terraces follow the hill.
     const z = z0 + r * step + (R() - 0.5) * 0.6, bow = (R() - 0.5) * 1.8;
     const a = -w / 2 + R() * 1.5, b = w / 2 - R() * 1.5;
+    // The wall as a line for the cover map (no R(): the stones stay put).
+    coverLines.push({ hard: true, pts: Array.from({ length: 7 }, (_, k) => { const x = a + ((b - a) * k) / 6; return [x, z + bow * Math.sin((Math.PI * k) / 6)]; }) });
     let s = a;
     while (s < b) {
       const l = 0.5 + R() * 0.3, x = s + l / 2;
@@ -503,6 +521,8 @@ export function buildTerraces({ seed = 1962, w = 22, rows = 4, step = 5, kind = 
   const geo = finish(parts, { hx: w / 2 + 0.5, hz: (rows * step) / 2 + 0.5, height: 1.8 });
   geo.userData.trees = scaled(trees);
   geo.userData.navRects = [];    // men climb terraces
+  geo.userData.coverLines = scaledLines(coverLines);   // each wall, not the plot's outline
+  geo.userData.coverPerimeter = false;
   return geo;
 }
 
@@ -544,5 +564,6 @@ export function buildThreshingFloor({ seed = 1963, r = 4.5 } = {}) {
   for (const o of [-0.12, 0, 0.12]) parts.push(wirePart(f1, [f1[0] + 0.21 - 0.27 * o, f1[1] + 0.32, f1[2] + 0.11 + 0.53 * o], 0.014, { mat: MAT.timber, tone: 0.45 }));
   const geo = finish(parts, { hx: r + 0.5, hz: r + 0.5, height: 1 });
   geo.userData.navRects = [];    // walked over
+  geo.userData.coverPerimeter = false;   // flat: no cover (a kerb 0.4 m high)
   return geo;
 }

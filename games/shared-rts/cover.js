@@ -90,6 +90,13 @@ export const COVER = {
   coverReach: 4.0,
   /** Props smaller than this are debris, not cover. */
   minPropRadius: 0.9,
+  /**
+   * TERRAIN COVER (0 = off, nam's): the damage a bank of earth takes off when
+   * the ground a few metres toward the shooter rises into the line of fire —
+   * a wadi's bank, a crest, a terrace's riser. Directional like the rest: the
+   * bank protects you from the men beyond it, not from the ones beside you.
+   */
+  terrainCover: 0,
 };
 
 /**
@@ -105,6 +112,8 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
   const coverGrid = new Uint8Array(n * n);
   /** 0..255 per cell — the part of that cover that is HARD (bunkers). */
   const hardGrid = new Uint8Array(n * n);
+  /** 0..255 per cell — terrain cover (a bank beside it), params.terrainCover only. */
+  const bankGrid = new Uint8Array(n * n);
 
   /**
    * The same two numbers as a texture, for the ground overlay to read.
@@ -219,12 +228,35 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
       stamped++;
     }
 
+    // Terrain cover, for the overlay and coverAt() (the per-shot rule is
+    // terrainBetween): a cell with a BANK beside it — ground 1.2 m or more
+    // above it within 4 m that then STOPS rising (8 m out no higher than half
+    // as much again): a wadi's bank, a crest, a riser. A plain hillside rises
+    // on and on and is not a bank. Not directional here (a snapshot); the
+    // shot decides which side it covers.
+    bankGrid.fill(0);
+    if (params.terrainCover > 0 && app.getWorldHeight) {
+      const H = app.getWorldHeight;
+      for (let cz = 0; cz < n; cz++) {
+        for (let cx = 0; cx < n; cx++) {
+          const wx = (cx * CELL) - half + CELL * 0.5, wz = (cz * CELL) - half + CELL * 0.5;
+          const h = H(wx, wz);
+          let rise = 0;
+          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]) {
+            const r4 = H(wx + dx * 4, wz + dz * 4) - h, r8 = H(wx + dx * 8, wz + dz * 8) - h - r4;
+            if (r8 < 0.5 * r4) rise = Math.max(rise, r4);
+          }
+          const t = Math.min(1, Math.max(0, (rise - 1.2) / 1.0));
+          bankGrid[cz * n + cx] = Math.round(255 * t * (params.terrainCover / params.maxCover));
+        }
+      }
+    }
     for (let cz = 0; cz < n; cz++) {
       for (let cx = 0; cx < n; cx++) {
         const i = cz * n + cx;
         const wx = (cx * CELL) - half + CELL * 0.5;
         const wz = (cz * CELL) - half + CELL * 0.5;
-        overlayData[i * 4] = coverGrid[i];
+        overlayData[i * 4] = Math.max(coverGrid[i], bankGrid[i]);
         overlayData[i * 4 + 1] = Math.round(255 * concealmentAt(wx, wz) / params.maxConcealment);
         overlayData[i * 4 + 3] = 255;
       }
@@ -233,9 +265,10 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
     return stamped;
   }
 
-  /** Hard cover standing at a world point, 0..1. */
+  /** Cover standing at a world point, 0..1 (a bank counts, when terrain cover is on). */
   function coverAt(x, z) {
-    return coverGrid[toCell(z) * n + toCell(x)] / 255;
+    const i = toCell(z) * n + toCell(x);
+    return Math.max(coverGrid[i], bankGrid[i]) / 255;
   }
 
   /**
@@ -271,7 +304,33 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
       const v = Math.max((coverGrid[i] / 255) * params.maxCover, (hardGrid[i] / 255) * params.maxHardCover);
       if (v > best) best = v;
     }
+    if (params.terrainCover > 0) best = Math.max(best, terrainBetween(fromX, fromZ, tx, tz, ux, uz, m));
     return best;
+  }
+  /**
+   * The bank between: the line from the shooter's eye (1.6 m) to the target's
+   * chest (1.0 m), and the ground under it at strides out to 10 m toward
+   * the shooter. Ground reaching the line is in the way: full terrain cover
+   * at 0.25 m above it, fading to none 0.25 m below. A shooter up on the
+   * crest looks DOWN over the bank, and the line clears it — height is what
+   * beats a bank, as it should. (First: fading from 0.4 m below the line —
+   * every hummock counted.)
+   */
+  function terrainBetween(fromX, fromZ, tx, tz, ux, uz, m) {
+    const H = app.getWorldHeight;
+    if (!H) return 0;
+    const ht = H(tx, tz) + 1.0, hs = H(fromX, fromZ) + 1.6;
+    let best = 0;
+    // Out to 10 m, not the walls' 4.4: a man in the middle of a 12 m wadi
+    // bed has the bank 6 m away, and it covers him (measured 0 at 4.4).
+    for (const s of [1.2, 2.8, 4.4, 6.5, 8.5, 10.5]) {
+      if (s >= m - 2) break;
+      const g = H(tx + ux * s, tz + uz * s);
+      const line = ht + (hs - ht) * (s / m);
+      const t = Math.min(1, Math.max(0, (g - line + 0.25) / 0.5));
+      if (t > best) best = t;
+    }
+    return best * params.terrainCover;
   }
 
   /**

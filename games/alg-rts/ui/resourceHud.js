@@ -8,6 +8,8 @@ const CSS = `
 #alg-res .dim { color: var(--hud-dim); letter-spacing: 0.06em; }
 #alg-res b { color: var(--hud-text); font-weight: 600; }
 #alg-res .enemy b { color: var(--hud-red); }
+#alg-res .flash { color: var(--hud-brass); font-weight: 600; opacity: 0; transition: opacity 0.4s; }
+#alg-res .flash.on { opacity: 1; transition: none; }
 `;
 
 export function createResourceHud({ mount = document.body } = {}) {
@@ -23,12 +25,14 @@ export function createResourceHud({ mount = document.body } = {}) {
     <span class="dim" id="alg-res-income"></span>
     <span class="sep"></span>
     <span class="dim" id="alg-res-villages"></span>
+    <span class="flash" id="alg-res-flash"></span>
   `;
   mount.appendChild(root);
   const elAmount = root.querySelector("#alg-res-amount");
   const elIncome = root.querySelector("#alg-res-income");
   const elVillages = root.querySelector("#alg-res-villages");
-  let last = "";
+  const elFlash = root.querySelector("#alg-res-flash");
+  let last = "", flashT = 0;
 
   /** Each frame; touches the DOM only when something shown has changed. */
   function update(economy) {
@@ -44,5 +48,13 @@ export function createResourceHud({ mount = document.body } = {}) {
       + (theirs ? ` <span class="enemy">· ALN <b class="hud-num">${theirs}</b></span>` : "");
   }
 
-  return { root, update, dispose() { root.remove(); style.remove(); } };
+  /** A moment's notice beside the numbers (a convoy's delivery: "+30 · convoi"). */
+  function flash(text) {
+    elFlash.textContent = text;
+    elFlash.classList.add("on");
+    clearTimeout(flashT);
+    flashT = setTimeout(() => elFlash.classList.remove("on"), 2600);
+  }
+
+  return { root, update, flash, dispose() { clearTimeout(flashT); root.remove(); style.remove(); } };
 }
