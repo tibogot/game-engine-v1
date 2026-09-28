@@ -77,6 +77,21 @@ detail note below if it needs one). Tick here when done.
 30. [ ] AUDIO: you pick the sounds by ear (Dev → Sound), then bake the picks and delete the candidates · river sound · bullet whizz-bys · radio squelch for voices
 
 ### E. Performance and debt
+43. [x] FIXED 2026-09-28: games that don't boot into Sky Pro read the cloud field
+       ONCE through a sampler again (`sampled` in cloudShadowsLite, chosen in
+       worldEnvironment); the editor and a Sky Pro boot keep the load path.
+       Same camera: 11.31 → 9.04 ms; shadows cost 0.13 ms again. Editor draws.
+       **REGRESSION (your catch 2026-09-28: "bad perf as soon as the game opens").**
+       Cause MEASURED: the engine's cloud-shadow rewrite (1866340, Sky Pro, for
+       the editor's sampler limit) — every lit pixel now does 4 textureLoads +
+       a hand bilinear inside a wgslFn instead of ONE hardware-filtered read.
+       Same camera (7, 44, -416), gpuAB 4×120: old build 8.71 ms · current
+       11.31 ms · old build + ONLY the new cloudShadowsLite.js 11.06 ms. The
+       shadows cost 0.14 ms before, 1.2-1.6 ms now, and ~1 ms remains even at
+       darkness 0. Fix: games (not the editor) keep the one-sample read. The
+       file is the other session's — agree the fix with it. Separately the
+       GPU reads ~2× slower than earlier this session at the same view
+       (4.46 → 8.7 ms on the OLD build): heat or throttling, not code.
 31. [ ] Frame budget re-measured after this week's additions; the pond properly (gpuAB cannot time water toggles)
 32. [ ] Load time further (23.8 s)
 33. [ ] Long path searches 5-15 ms (hierarchical/cached) · staggered target acquisition (your call) · RTS-mode render budget (lens flare, underwater, far plane) · octahedral impostors (the question)

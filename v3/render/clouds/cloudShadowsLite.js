@@ -37,7 +37,7 @@
  * map) it branches out before any load.
  */
 import * as THREE from "three";
-import { float, positionWorld, select, texture, uniform, vec3, vec4, wgslFn } from "three/tsl";
+import { float, max, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, wgslFn } from "three/tsl";
 
 // The "load" read: no sampler. mode 0 = off, 1 = the baked field (tiling), 2 = a sky's map (clamped).
 const LOAD_FN = /* wgsl */`
@@ -124,8 +124,13 @@ function bakeField() {
  * One per sun. `sun` is the DirectionalLight, before it has ever rendered.
  * `attach: false` leaves the sun's colorNode alone (no texture in any lit
  * material); set() and update() still work and do nothing visible.
+ * `sampled: true` (games, 2026-09-28) reads the field ONCE through a linear
+ * sampler instead of four textureLoads filtered by hand: in nam the load path
+ * cost 1.2-1.6 ms against 0.14 (same camera, gpuAB), ~1 ms of it even at
+ * darkness 0. A game has samplers to spare; the editor's terrain does not. The
+ * sampled slot cannot take a sky's map (setMap warns and keeps the field).
  */
-export function createCloudShadowsLite(sun, params = {}, { attach = true } = {}) {
+export function createCloudShadowsLite(sun, params = {}, { attach = true, sampled = false } = {}) {
   const P = { ...CLOUD_SHADOW_LITE_DEFAULTS, ...params };
   const u = {
     sunCol: uniform(new THREE.Color().copy(sun.color).multiplyScalar(sun.intensity)),
@@ -141,7 +146,20 @@ export function createCloudShadowsLite(sun, params = {}, { attach = true } = {})
     map: uniform(new THREE.Vector4(0, 0, 1, 0)),
   };
   let fieldNode = null, field = null;
-  if (attach) {
+  if (attach && sampled) {
+    field = bakeField();
+    field.magFilter = field.minFilter = THREE.LinearFilter;
+    fieldNode = texture(field);
+    // Slide up the sun ray to the cloud layer, drift, ONE hardware-filtered read.
+    const s = u.toSun;
+    const k = u.height.sub(positionWorld.y).div(max(s.y, 0.2));
+    const q = positionWorld.xz.add(vec2(s.x, s.z).mul(k)).add(u.offset).div(u.scale);
+    const n = fieldNode.sample(q).r;
+    const thr = float(1).sub(u.cover);
+    const visibility = float(1).sub(smoothstep(thr.sub(u.soft), thr.add(u.soft), n).mul(u.darkness));
+    const off = typeof location !== "undefined" && new URLSearchParams(location.search).get("cloudshadows") === "0";
+    sun.colorNode = off ? vec3(u.sunCol) : vec3(u.sunCol).mul(visibility);
+  } else if (attach) {
     field = bakeField();
     fieldNode = texture(field);
     // Slide up the sun ray to the cloud layer, drift, filter four texels (csVisibility). A map wins;
@@ -156,7 +174,7 @@ export function createCloudShadowsLite(sun, params = {}, { attach = true } = {})
   }
 
   const _dir = new THREE.Vector3();
-  let mapSrc = null;
+  let mapSrc = null, _warnedMap = false;
   return {
     params: P,
     uniforms: u,
@@ -186,6 +204,14 @@ export function createCloudShadowsLite(sun, params = {}, { attach = true } = {})
      */
     setMap(src) {
       if (!fieldNode || src === mapSrc) return;
+      if (sampled) {
+        // The sampled slot cannot take a sky's map (NEAREST, half-float): boot into Sky Pro to have it.
+        if (src && !_warnedMap) {
+          _warnedMap = true;
+          console.warn("[V3] cloud shadows: booted in the sampled (game) mode — a sky's cloud shadow map needs the boot skyMode \"skypro\"; the baked field stays.");
+        }
+        return;
+      }
       mapSrc = src ?? null;
       fieldNode.value = mapSrc ? mapSrc.texture : field;
       u.useMap.value = mapSrc ? 1 : 0;

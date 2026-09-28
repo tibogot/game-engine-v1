@@ -262,7 +262,13 @@ export async function createWorldEnvironment({
   // Hooked in the editor and in games that boot with `cloudShadows: true`: it
   // is one more TEXTURE in every lit material, but no sampler (the old sampled
   // read pushed the editor's terrain to 17 of WebGPU's 16 samplers and nothing drew).
-  const cloudShadowsLite = createCloudShadowsLite(sun, {}, { attach: cloudShadows || editor });
+  // A GAME that does not boot into Sky Pro reads it through one sampler (1.2-1.6 ms
+  // cheaper in nam); the editor and a Sky Pro game keep the sampler-free read,
+  // which is also the one a sky's shadow map can plug into.
+  const cloudShadowsLite = createCloudShadowsLite(sun, {}, {
+    attach: cloudShadows || editor,
+    sampled: cloudShadows && !editor && toolState.skyMode !== "skypro",
+  });
   sun.castShadow = true;
   const shadowTarget = new THREE.Object3D();
   scene.add(shadowTarget);

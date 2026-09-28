@@ -8,6 +8,17 @@ Keep this file current: tick things off here, add new asks here.
 
 ---
 
+## NOTE FROM THE NAM SESSION — 2026-09-28: cloud shadows in games
+- [ ] Read this before the next Sky Pro commit. cloudShadowsLite's sampler-free
+      4-textureLoad read cost nam 1.2-1.6 ms (0.14 before, same camera, gpuAB);
+      about 1 ms of that stayed even at darkness 0. It now has a `sampled` path
+      (one linear-filtered read). worldEnvironment picks it for a GAME whose
+      BOOT skyMode is not "skypro". The editor and alg-rts `?sky=pro` (boot
+      skyMode "skypro") keep your load path and setMap, unchanged. A sampled
+      game that switches into Sky Pro later gets a console warning and keeps
+      the baked field (its map is NEAREST half-float and can't use the linear
+      sampler slot).
+
 ## YOUR ASKS — 2026-09-27
 
 - [x] **Searchlight tower** (steel lattice, railed platform, caged ladder,
