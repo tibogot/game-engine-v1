@@ -559,6 +559,7 @@ fn shoreSwashEdge( p: vec2f, t: f32, ${TP} ) -> vec4f {
 
 ${evaluateCode("shoreEvaluate", "normal")}
 ${evaluateCode("shoreEvaluateNoNormal", "plain")}
+${evaluateCode("shoreEvaluateWorld", "world")}
 `;
 }
 

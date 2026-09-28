@@ -36,6 +36,8 @@ import { createFoamTexture, createSeaDetailTexture } from "./oceanproTextures.js
 import { buildOceanProShader } from "./oceanproShader.js";
 import { computeShoreField, makeHeightAt, SHELF } from "./oceanproShoreField.js";
 import { SHORE_DEFAULTS } from "./oceanproShore.js";
+import { OceanProShoreSim } from "./oceanproShoreSim.js";
+import { surfFoamCode } from "./oceanproSurfFoam.js";
 
 /** The settings the mode saves with a project (toolState.worldOcean.pro). */
 export const OCEANPRO_DEFAULTS = {
@@ -77,6 +79,7 @@ export const OCEANPRO_DEFAULTS = {
 };
 
 const _v = new THREE.Vector3();
+const _c = new THREE.Vector2();
 const FIELD_RES = 512;
 
 export function createOceanPro({ renderer, scene, camera, heightTexNode, terrainSize, maxHeight = 500, heightBase = 0, params = {} }) {
@@ -90,10 +93,13 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   const cdlod = new OceanProCDLOD({ gridSize: 32, leafSize: 8, levels: 12, minY: -25, maxY: 25 });
   const foamTex = createFoamTexture(renderer);
   const detailTex = createSeaDetailTexture();
+  // the shore simulation (foam carried by the water, wet sand) in a window that follows the camera
+  const sim = new OceanProShoreSim(renderer);
+  const surfFoam = surfFoamCode();
   // one shader per scene-depth type (multisampled or not; see oceanproShader.js DEPTH_T), built on need
   const shaders = new Map();
   const shaderFor = (ms) => {
-    if (!shaders.has(ms)) shaders.set(ms, buildOceanProShader({ fft, cdlod, depthMultisampled: ms }));
+    if (!shaders.has(ms)) shaders.set(ms, buildOceanProShader({ fft, cdlod, depthMultisampled: ms, simCode: sim.material, surfFoam }));
     return shaders.get(ms);
   };
   let depthMs = (renderer.samples ?? 0) > 1;
@@ -117,13 +123,13 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   clampSrc.needsUpdate = true;
 
   // ---- uniforms (the opLoad layout, see oceanproShader.js)
-  const U = Array.from({ length: 19 }, () => uniform(new THREE.Vector4()));
+  const U = Array.from({ length: 20 }, () => uniform(new THREE.Vector4()));
   const uSea = uniform(0);
   // u0 = ( camera position, sea level ) and u3.w = far come from the camera being drawn
   const u0 = vec4(cameraPosition, uSea);
   const u3 = vec4(U[3].xyz, cameraFar);
   const gate = (loadFn) => loadFn(cameraViewMatrix, cameraProjectionMatrix, cameraProjectionMatrixInverse, cameraWorldMatrix,
-    u0, U[1], U[2], u3, U[4], U[5], U[6], U[7], U[8], U[9], U[10], U[11], U[12], U[13], U[14], U[15], U[16], U[17], U[18]);
+    u0, U[1], U[2], u3, U[4], U[5], U[6], U[7], U[8], U[9], U[10], U[11], U[12], U[13], U[14], U[15], U[16], U[17], U[18], U[19]);
 
   const dispNode = texture(fft.displacementTexture);
   const derivNode = texture(fft.derivativeTexture);
@@ -133,6 +139,9 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   const skyNode = texture(skyStandIn);
   const fieldNode = texture(fieldStandIn);
   const clampNode = texture(clampSrc);
+  // the shore simulation's state (nearest, loads: no sampler) and the surf lace (linear, mipmapped)
+  const simNode = texture(sim.stateA);
+  const laceNode = texture(sim.lace.tex);
   const sceneColor = viewportSharedTexture();
   const sceneDepth = viewportDepthTexture();
 
@@ -173,7 +182,8 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     // (the true world position, not positionWorld: far vertices are drawn pulled in, see above)
     m.colorNode = fragmentFn(gate(loadFn), vAux0.xyz, screenUV, select(frontFacing, float(1), float(0)), vAux0, vAux1, vAux2, vAux3, sunShadow,
       derivNode, sampler(derivNode), foamNode, sampler(foamNode), detailNode, sampler(detailNode),
-      heightTexNode, fieldNode, cloudNode, sceneColor, sampler(clampNode), sceneDepth, skyNode, sampler(clampNode));
+      heightTexNode, fieldNode, cloudNode, sceneColor, sampler(clampNode), sceneDepth, skyNode, sampler(clampNode),
+      simNode, laceNode, sampler(laceNode));
     return m;
   }
 
@@ -226,6 +236,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
 
   // ---- per frame
   let time = 0;
+  let lastSimArgs = null;
   const detailOffset = new THREE.Vector2();
   const windDir = new THREE.Vector2();
   const spectrumKey = { v: "" };
@@ -267,6 +278,25 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
         else field.timer = setTimeout(() => buildField(uSea.value), 250);
       }
     }
+
+    // the shore simulation: its window where the camera looks at the sea, then one step
+    const simOn = P.surf && !!field.tex && fieldNode.value === field.tex;
+    if (simOn) {
+      camera.getWorldDirection(_v);
+      const cp = camera.position;
+      let t = _v.y < -0.02 ? (uSea.value - cp.y) / _v.y : 150;
+      t = Math.min(Math.max(t, 0), 150);
+      _c.set(cp.x + _v.x * t, cp.z + _v.z * t);
+      sim.follow(_c);
+      lastSimArgs = {
+        dt, time, seaLevel: uSea.value, terrainSize, maxHeight, heightBase,
+        flip: !!heightTexNode.value?.isRenderTargetTexture,
+        shore: [U[16].value.toArray(), U[17].value.toArray(), U[18].value.toArray()],
+        heightTexture: heightTexNode.value, fieldTexture: field.tex,
+      };
+      sim.update(lastSimArgs);
+    }
+    U[19].value.set(sim.min.x, sim.min.y, sim.size, simOn ? 1 : 0);
 
     // the scene depth it reads is multisampled when the frame renders into an MSAA target: its
     // WGSL type follows (three picks the type when the material compiles)
@@ -353,6 +383,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     skyStandIn.dispose();
     fieldStandIn.dispose();
     clampSrc.dispose();
+    sim.dispose();
     field.tex?.dispose();
   }
 
@@ -361,6 +392,24 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     get visible() { return mesh.visible; },
     /** ms the last shore field took to solve (CPU) */
     get shoreFieldMs() { return field.ms; },
+    sim,
+    /**
+     * GPU ms of the raw compute (three's GPU timer does not see it): n FFT steps and n shore
+     * simulation steps, each timed alone by waiting for the queue to drain around them.
+     */
+    async measureCompute(n = 20) {
+      const q = renderer.backend.device.queue;
+      const run = async (fn) => {
+        await q.onSubmittedWorkDone();
+        const t0 = performance.now();
+        for (let i = 0; i < n; i++) fn();
+        await q.onSubmittedWorkDone();
+        return (performance.now() - t0) / n;
+      };
+      const fftMs = await run(() => fft.update(1 / 60));
+      const simMs = lastSimArgs ? await run(() => sim.update(lastSimArgs)) : null;
+      return { fftMs, simMs };
+    },
     /** For debugging: the live uniform vectors (the opLoad layout) and the shore field's data. */
     get debug() { return { U: U.map((u) => u.value.toArray()), field: field.tex?.image ?? null, fieldOrigin: field.origin, fieldSpan: field.span }; },
     /** The sea floor under world (x, z) as the water sees it (m; the shelf beyond the map), or null. */

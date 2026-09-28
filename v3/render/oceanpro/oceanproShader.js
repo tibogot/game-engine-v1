@@ -21,94 +21,12 @@
 import { wgsl, wgslFn } from "three/tsl";
 import { shoreCode } from "./oceanproShore.js";
 
-const IOR = 1.333;
-const f6 = (x) => Number(x).toFixed(6);
-
 /**
- * @param {object} o
- * @param {import('./oceanproFFT.js').OceanProFFT} o.fft
- * @param {import('./oceanproCDLOD.js').OceanProCDLOD} o.cdlod
- * @param {number[]} [o.foamWeights]  per-cascade contribution to the foam coverage
- * @returns {{ vertexFn, fragmentFn, U_COUNT }}  wgslFn nodes (see the entry points at the end)
+ * WGSL shared by the water shader and the shore simulation's compute kernel (oceanproShoreSim.js):
+ * Tidewater's perlin2 and our terrain height lookup. It reads `frame` fields (terrainSize, maxHeight,
+ * heightBase, zenith = the heightmap-is-a-render-target flag); each includer defines that struct.
  */
-export function buildOceanProShader({ fft, cdlod, foamWeights = [0.35, 0.45, 0.5, 0.25], depthMultisampled = false }) {
-  // PORT: DEPTH_T = the scene depth copy's type: the engine's post chain renders with MSAA, its
-  // minimal chain without; textureLoad( t, p, 0 ) reads sample 0 of either
-  const T = (s) => s.replaceAll("DEPTH_T", depthMultisampled ? "texture_depth_multisampled_2d" : "texture_depth_2d");
-  const C = fft.cascades;
-  const FFT_SIZE = 256;
-
-  // ------------------------------------------------------------------ globals + common
-  // PORT: the uniform blocks as private copies (opLoad fills them), Tidewater's field names.
-  const COMMON = /* wgsl */`
-const PI: f32 = 3.141592653589793;
-const TWO_PI: f32 = 6.283185307179586;
-const INV_PI: f32 = 0.3183098861837907;
-fn sat( x: f32 ) -> f32 { return clamp( x, 0.0, 1.0 ); }
-
-struct OpFrame {
-	view: mat4x4f, proj: mat4x4f, invProj: mat4x4f, invView: mat4x4f,
-	cameraPos: vec3f, seaLevel: f32,
-	sunDir: vec3f, windSpeed: f32,
-	sunColor: vec3f, time: f32,
-	skyIrradiance: vec3f, far: f32,
-	horizonColor: vec3f, cameraWaterHeight: f32,
-	waterAbsorption: vec3f, skyMode: f32,
-	waterScattering: vec3f, zenith: f32,
-	windDir: vec2f, terrainSize: f32, maxHeight: f32,
-	cloud: vec4f, // PORT: Sky Pro cloud shadow map ( centre xz, size, strength )
-	zenithColor: vec3f, heightBase: f32,
-};
-struct OpOcean { sizes: array<vec4f, 4>, foamBias: f32 };
-struct OpWaterSurface { amplitude: f32, slopeScale: f32, foamCoverage: f32, foamSharpness: f32, foamScale: f32 };
-struct OpSeaDetail { offset: vec2f, gustAmount: f32, slickAmount: f32, streakAmount: f32 };
-struct OpMat { backscatter: f32, sss: f32, refraction: f32, foamIntensity: f32, waterRoughness: f32, reflectionStrength: f32, ssr: f32, debugMode: i32 };
-var<private> frame: OpFrame;
-var<private> ocean: OpOcean;
-var<private> waterSurface: OpWaterSurface;
-var<private> seaDetailParams: OpSeaDetail;
-var<private> mat: OpMat;
-
-// u0 ( cameraPos, seaLevel )  u1 ( sunDir, windSpeed )  u2 ( sunColor, time )  u3 ( skyIrradiance, far )
-// u4 ( horizonColor, cameraWaterHeight )  u5 ( waterAbsorption, skyMode )  u6 ( waterScattering, zenith - )
-// u7 ( windDir, terrainSize, maxHeight )  u8 cloud  u9 ( zenithColor, heightBase )
-// u10 ( ocean.sizes[0..3].x )  u11 ( foamBias, amplitude, slopeScale, foamCoverage )
-// u12 ( foamSharpness, foamScale, seaDetail.offset )  u13 ( gust, slick, streak, - )
-// u14 ( backscatter, sss, refraction, foamIntensity )  u15 ( waterRoughness, reflectionStrength, ssr, debugMode )
-// u16..u18: the shore waves (oceanproShore.js shoreLoad)
-fn opLoad( view: mat4x4f, proj: mat4x4f, invProj: mat4x4f, invView: mat4x4f,
-	u0: vec4f, u1: vec4f, u2: vec4f, u3: vec4f, u4: vec4f, u5: vec4f, u6: vec4f, u7: vec4f,
-	u8: vec4f, u9: vec4f, u10: vec4f, u11: vec4f, u12: vec4f, u13: vec4f, u14: vec4f, u15: vec4f,
-	u16: vec4f, u17: vec4f, u18: vec4f ) -> f32 {
-	shoreLoad( u16, u17, u18 );
-	frame.view = view; frame.proj = proj; frame.invProj = invProj; frame.invView = invView;
-	frame.cameraPos = u0.xyz; frame.seaLevel = u0.w;
-	frame.sunDir = u1.xyz; frame.windSpeed = u1.w;
-	frame.sunColor = u2.xyz; frame.time = u2.w;
-	frame.skyIrradiance = u3.xyz; frame.far = u3.w;
-	frame.horizonColor = u4.xyz; frame.cameraWaterHeight = u4.w;
-	frame.waterAbsorption = u5.xyz; frame.skyMode = u5.w;
-	frame.waterScattering = u6.xyz; frame.zenith = u6.w;
-	frame.windDir = u7.xy; frame.terrainSize = u7.z; frame.maxHeight = u7.w;
-	frame.cloud = u8;
-	frame.zenithColor = u9.xyz; frame.heightBase = u9.w;
-	ocean.sizes[ 0 ] = vec4f( u10.x ); ocean.sizes[ 1 ] = vec4f( u10.y ); ocean.sizes[ 2 ] = vec4f( u10.z ); ocean.sizes[ 3 ] = vec4f( u10.w );
-	ocean.foamBias = u11.x;
-	waterSurface.amplitude = u11.y; waterSurface.slopeScale = u11.z; waterSurface.foamCoverage = u11.w;
-	waterSurface.foamSharpness = u12.x; waterSurface.foamScale = u12.y;
-	seaDetailParams.offset = u12.zw;
-	seaDetailParams.gustAmount = u13.x; seaDetailParams.slickAmount = u13.y; seaDetailParams.streakAmount = u13.z;
-	mat.backscatter = u14.x; mat.sss = u14.y; mat.refraction = u14.z; mat.foamIntensity = u14.w;
-	mat.waterRoughness = u15.x; mat.reflectionStrength = u15.y; mat.ssr = u15.z; mat.debugMode = i32( u15.w );
-	return 1.0;
-}
-
-// positive view-space distance along the view axis from a depth-buffer value (Tidewater common)
-fn viewDepth( d: f32 ) -> f32 {
-	let v = frame.invProj * vec4f( 0.0, 0.0, d, 1.0 );
-	return - v.z / v.w;
-}
-
+export const SHARED_WGSL = /* wgsl */`
 // ---- MaterialX gradient noise (Tidewater common: perlin2 and what it needs)
 fn _mxRotl( x: u32, k: u32 ) -> u32 { return ( x << k ) | ( x >> ( 32u - k ) ); }
 fn _mxFinal( a0: u32, b0: u32, c0: u32 ) -> u32 {
@@ -181,6 +99,98 @@ fn terrainNormalRock( xz: vec2f, terrainHeight: texture_2d<f32> ) -> vec4f {
 	let n = normalize( vec3f( - hx / ( 2.0 * e ), 1.0, - hz / ( 2.0 * e ) ) );
 	return vec4f( n.x, n.z, 0.0, 0.0 );
 }
+`;
+
+const IOR = 1.333;
+const f6 = (x) => Number(x).toFixed(6);
+
+/**
+ * @param {object} o
+ * @param {import('./oceanproFFT.js').OceanProFFT} o.fft
+ * @param {import('./oceanproCDLOD.js').OceanProCDLOD} o.cdlod
+ * @param {number[]} [o.foamWeights]  per-cascade contribution to the foam coverage
+ * @returns {{ vertexFn, fragmentFn, U_COUNT }}  wgslFn nodes (see the entry points at the end)
+ */
+export function buildOceanProShader({ fft, cdlod, foamWeights = [0.35, 0.45, 0.5, 0.25], depthMultisampled = false, simCode = "", surfFoam = "" }) {
+  // PORT: DEPTH_T = the scene depth copy's type: the engine's post chain renders with MSAA, its
+  // minimal chain without; textureLoad( t, p, 0 ) reads sample 0 of either
+  const T = (s) => s.replaceAll("DEPTH_T", depthMultisampled ? "texture_depth_multisampled_2d" : "texture_depth_2d");
+  const C = fft.cascades;
+  const FFT_SIZE = 256;
+
+  // ------------------------------------------------------------------ globals + common
+  // PORT: the uniform blocks as private copies (opLoad fills them), Tidewater's field names.
+  const COMMON = /* wgsl */`
+const PI: f32 = 3.141592653589793;
+const TWO_PI: f32 = 6.283185307179586;
+const INV_PI: f32 = 0.3183098861837907;
+fn sat( x: f32 ) -> f32 { return clamp( x, 0.0, 1.0 ); }
+
+struct OpFrame {
+	view: mat4x4f, proj: mat4x4f, invProj: mat4x4f, invView: mat4x4f,
+	cameraPos: vec3f, seaLevel: f32,
+	sunDir: vec3f, windSpeed: f32,
+	sunColor: vec3f, time: f32,
+	skyIrradiance: vec3f, far: f32,
+	horizonColor: vec3f, cameraWaterHeight: f32,
+	waterAbsorption: vec3f, skyMode: f32,
+	waterScattering: vec3f, zenith: f32,
+	windDir: vec2f, terrainSize: f32, maxHeight: f32,
+	cloud: vec4f, // PORT: Sky Pro cloud shadow map ( centre xz, size, strength )
+	zenithColor: vec3f, heightBase: f32,
+};
+struct OpOcean { sizes: array<vec4f, 4>, foamBias: f32 };
+struct OpWaterSurface { amplitude: f32, slopeScale: f32, foamCoverage: f32, foamSharpness: f32, foamScale: f32 };
+struct OpSeaDetail { offset: vec2f, gustAmount: f32, slickAmount: f32, streakAmount: f32 };
+struct OpMat { backscatter: f32, sss: f32, refraction: f32, foamIntensity: f32, waterRoughness: f32, reflectionStrength: f32, ssr: f32, debugMode: i32 };
+var<private> frame: OpFrame;
+var<private> ocean: OpOcean;
+var<private> waterSurface: OpWaterSurface;
+var<private> seaDetailParams: OpSeaDetail;
+var<private> mat: OpMat;
+
+// u0 ( cameraPos, seaLevel )  u1 ( sunDir, windSpeed )  u2 ( sunColor, time )  u3 ( skyIrradiance, far )
+// u4 ( horizonColor, cameraWaterHeight )  u5 ( waterAbsorption, skyMode )  u6 ( waterScattering, zenith - )
+// u7 ( windDir, terrainSize, maxHeight )  u8 cloud  u9 ( zenithColor, heightBase )
+// u10 ( ocean.sizes[0..3].x )  u11 ( foamBias, amplitude, slopeScale, foamCoverage )
+// u12 ( foamSharpness, foamScale, seaDetail.offset )  u13 ( gust, slick, streak, - )
+// u14 ( backscatter, sss, refraction, foamIntensity )  u15 ( waterRoughness, reflectionStrength, ssr, debugMode )
+// u16..u18: the shore waves (oceanproShore.js shoreLoad)
+fn opLoad( view: mat4x4f, proj: mat4x4f, invProj: mat4x4f, invView: mat4x4f,
+	u0: vec4f, u1: vec4f, u2: vec4f, u3: vec4f, u4: vec4f, u5: vec4f, u6: vec4f, u7: vec4f,
+	u8: vec4f, u9: vec4f, u10: vec4f, u11: vec4f, u12: vec4f, u13: vec4f, u14: vec4f, u15: vec4f,
+	u16: vec4f, u17: vec4f, u18: vec4f, u19: vec4f ) -> f32 {
+	shoreLoad( u16, u17, u18 );
+	shoreSimLoad( u19 );
+	frame.view = view; frame.proj = proj; frame.invProj = invProj; frame.invView = invView;
+	frame.cameraPos = u0.xyz; frame.seaLevel = u0.w;
+	frame.sunDir = u1.xyz; frame.windSpeed = u1.w;
+	frame.sunColor = u2.xyz; frame.time = u2.w;
+	frame.skyIrradiance = u3.xyz; frame.far = u3.w;
+	frame.horizonColor = u4.xyz; frame.cameraWaterHeight = u4.w;
+	frame.waterAbsorption = u5.xyz; frame.skyMode = u5.w;
+	frame.waterScattering = u6.xyz; frame.zenith = u6.w;
+	frame.windDir = u7.xy; frame.terrainSize = u7.z; frame.maxHeight = u7.w;
+	frame.cloud = u8;
+	frame.zenithColor = u9.xyz; frame.heightBase = u9.w;
+	ocean.sizes[ 0 ] = vec4f( u10.x ); ocean.sizes[ 1 ] = vec4f( u10.y ); ocean.sizes[ 2 ] = vec4f( u10.z ); ocean.sizes[ 3 ] = vec4f( u10.w );
+	ocean.foamBias = u11.x;
+	waterSurface.amplitude = u11.y; waterSurface.slopeScale = u11.z; waterSurface.foamCoverage = u11.w;
+	waterSurface.foamSharpness = u12.x; waterSurface.foamScale = u12.y;
+	seaDetailParams.offset = u12.zw;
+	seaDetailParams.gustAmount = u13.x; seaDetailParams.slickAmount = u13.y; seaDetailParams.streakAmount = u13.z;
+	mat.backscatter = u14.x; mat.sss = u14.y; mat.refraction = u14.z; mat.foamIntensity = u14.w;
+	mat.waterRoughness = u15.x; mat.reflectionStrength = u15.y; mat.ssr = u15.z; mat.debugMode = i32( u15.w );
+	return 1.0;
+}
+
+// positive view-space distance along the view axis from a depth-buffer value (Tidewater common)
+fn viewDepth( d: f32 ) -> f32 {
+	let v = frame.invProj * vec4f( 0.0, 0.0, d, 1.0 );
+	return - v.z / v.w;
+}
+
+${SHARED_WGSL}
 // Sky Pro's cloud shadow on the ground (skyproHaze hzCloudsShadow): 1 = clear
 fn cloudsShadow( xz: vec2f, cloudShadow: texture_2d<f32> ) -> f32 {
 	if ( frame.cloud.w <= 0.0 ) { return 1.0; }
@@ -410,20 +420,26 @@ struct WaterSurfaceFrag {
 	aeration: f32,
 	gust: f32,
 	slick: f32,
+	foamInfo: SurfFoamInfo,
 };
 
-// PORT: textures as parameters; no shore / wake / shore simulation / surf foam yet (their inputs gone).
+// PORT: textures as parameters (the shore simulation's state, the lace, the shore field too); no wake.
 // PORT: Tidewater compiles every shader with diagnostic( off, derivative_uniformity ) (its Shader.js);
 // three owns the module header here, so the attribute form sits on the functions that need it.
 @diagnostic( off, derivative_uniformity )
-fn waterSurfaceFragment( lagXZ: vec2f, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3f, shoreFoam: f32, surfMask: vec2f, P: vec3f,
+// extraFoam: foam carried by the water (the shore simulation); simState: its sample here
+fn waterSurfaceFragment( lagXZ: vec2f, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3f, shoreFoam: f32, extraFoam: f32, simState: vec4f, surfMask: vec2f, P: vec3f,
 	oceanDerivatives: texture_2d_array<f32>, smpAniso4Repeat: sampler, smpLinearRepeat: sampler,
-	waterFoamTex: texture_2d<f32>, foamSmp: sampler, seaDetailNoise: texture_2d<f32>, detailSmp: sampler ) -> WaterSurfaceFrag {
+	waterFoamTex: texture_2d<f32>, foamSmp: sampler, seaDetailNoise: texture_2d<f32>, detailSmp: sampler,
+	surfFoamLaceTex: texture_2d<f32>, laceSmp: sampler, shoreTex: texture_2d<f32> ) -> WaterSurfaceFrag {
 	var d = vec4f( 0.0 );
 	var foamSum = 0.0;
-	// the clear concave face of a plunging wave overhangs the trough (PORT: no shore simulation yet,
-	// so no foam carried under it to keep off)
+	// the clear concave face of a plunging wave overhangs the trough: the foam carried by the
+	// (depth-averaged, world-space) shore simulation below it is not on the face
 	let face = sat( surfMask.x );
+	// (some of it stays: the lace of the previous wave is drawn up the face)
+	let simFoam = extraFoam * ( 1.0 - face * 0.72 );
+	foamSum += simFoam;
 	// bubbles mixed into the water (milky, turquoise, hides the bottom): surf and wake
 	var aeration = 0.0;
 
@@ -468,10 +484,10 @@ ${cascadesF}
 		let tq = Ns + vec3f( 0.0, 1.0, 0.0 );
 		let uq = vec3f( slopes.x, 1.0, slopes.y ) * nd.y;
 		normal = normalize( tq * ( dot( tq, uq ) / tq.y ) - uq );
-		foamSum += shoreFoam;
+		foamSum += shoreFoam * 0.55;
 		// the roller and the water behind the plunge point are full of bubbles, decaying behind the
 		// bore with the foam it sheds; the clear face of a plunging wave is not
-		aeration += sat( shoreFoam * 1.2 ) * ( 1.0 - face ) * smoothstep( -0.1, 0.3, depth );
+		aeration += sat( shoreFoam * 1.2 + simFoam * 0.7 ) * ( 1.0 - face ) * smoothstep( -0.1, 0.3, depth );
 	}
 
 	// whitecaps: persistent (per vertex) + fresh where the surface is compressed right now;
@@ -497,6 +513,13 @@ ${cascadesF}
 	var foam = mix( detail, coverage * 0.85, far );
 
 	var o: WaterSurfaceFrag;
+	// foam look (surf zone whitewater / lace, see SurfFoam)
+	var fa: SurfFoamArgs;
+	fa.coverage = coverage; fa.foam = foam; fa.footprint = footprint; fa.depth = depth; fa.bubbles = p1.y;
+	fa.lagXZ = lagXZ; fa.normal = normal; fa.baseNormal = baseNormal;
+	fa.fresh = shoreFoam; fa.sim = simFoam; fa.simState = simState; fa.roller = surfMask.y; fa.P = P;
+	o.foamInfo = surfFoamShading( fa, surfFoamLaceTex, laceSmp, shoreTex );
+	foam = o.foamInfo.foam;
 	o.normal = normal;
 	o.foam = foam;
 	o.coverage = coverage;
@@ -634,7 +657,8 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 	waterFoamTex: texture_2d<f32>, foamSmp: sampler, seaDetailNoise: texture_2d<f32>, detailSmp: sampler,
 	terrainHeight: texture_2d<f32>, shoreTex: texture_2d<f32>, cloudShadow: texture_2d<f32>,
 	waterSceneColor: texture_2d<f32>, smpLinearClamp: sampler, waterSceneDepth: DEPTH_T,
-	skyEnv: texture_2d<f32>, skyEnvS: sampler ) -> vec4f {
+	skyEnv: texture_2d<f32>, skyEnvS: sampler,
+	shoreSimStateTex: texture_2d<f32>, surfFoamLaceTex: texture_2d<f32>, laceSmp: sampler ) -> vec4f {
 	let posV = ( frame.view * vec4f( pos, 1.0 ) ).xyz;
 	// footprint of this pixel on the surface (m) — for filtering / roughness (uniform control flow)
 	let footprint = max( length( fwidth( lagXZ ) ), 1e-4 );
@@ -684,8 +708,10 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 	// the meniscus: the last decimetre of the advancing sheet bends down to the sand
 	let lipW = ( 1.0 - smoothstep( 0.0, 0.14, frontD ) ) * uprush;
 
-	let surf = waterSurfaceFragment( lagXZ, footprint, vDepth, vFoam, vShoreN, vShoreFoam + edgeFoam, vSurfMask, pos,
-		oceanDerivatives, derivSmp, derivSmp, waterFoamTex, foamSmp, seaDetailNoise, detailSmp );
+	let simState = shoreSimSample( pos.xz, shoreSimStateTex );
+	let surf = waterSurfaceFragment( lagXZ, footprint, vDepth, vFoam, vShoreN, vShoreFoam + edgeFoam, simState.x, simState, vSurfMask, pos,
+		oceanDerivatives, derivSmp, derivSmp, waterFoamTex, foamSmp, seaDetailNoise, detailSmp,
+		surfFoamLaceTex, laceSmp, shoreTex );
 	var foam = surf.foam;
 
 	// Which medium is the view ray in before it reaches this fragment? The water surface is a closed
@@ -820,12 +846,14 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 
 		// bubbles mixed into the water (the surf behind breakers, wakes): a strong scatterer
 		let aer = surf.aeration;
+		// sand stirred up where the bores have just passed (the foam they left marks that water):
+		// clouds of sediment, not a uniform tint
+		let sandK = sat( simState.x * 2.5 ) * 1.8 + 0.45;
 		// surf zone: sand and bubbles stirred up by the breakers (see ShoreWaves.surfMedium)
-		// (PORT: no shore simulation yet, so no extra sediment behind the bores: sandK = 1)
 		let surfMed = shoreSurfMedium( pos.xz, vDepth, shoreTex );
-		let sigA = frame.waterAbsorption + surfMed.absorb;
+		let sigA = frame.waterAbsorption + surfMed.absorb * sandK;
 		// (bubble plumes are shallow and patchy: a moderate scatterer, milky turquoise rather than a glow)
-		let sigS = frame.waterScattering + surfMed.scatter + aer * 1.6;
+		let sigS = frame.waterScattering + surfMed.scatter * sandK + aer * 1.6;
 		let sigT = sigA + sigS;
 
 		// refracted sun direction
@@ -862,7 +890,7 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 
 		// ---- foam
 		// foam: bright diffuse scatterer (albedo ~0.85), wrapped sun + sky irradiance (skyIrradiance = E/PI)
-		let foamLit = ( sunLight * ( max( dot( N, L ), 0.0 ) * 0.75 + 0.25 ) * INV_PI + frame.skyIrradiance * 0.95 ) * 0.85;
+		let foamLit = surfFoamLight( surf.foamInfo, N, L, V, sunLight, pos );
 		let foamCol = foamLit * mat.foamIntensity;
 
 		// a thin bright rim just behind the edge: the rounded bead catches the sky
@@ -952,14 +980,14 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 }
 `;
 
-  const all = wgsl(T(COMMON + SEA_DETAIL + ATTENUATION + shoreCode() + VERTEX + FRAGMENT + HELPERS + SHADE), [cdlod.code]);
+  const all = wgsl(T(COMMON + SEA_DETAIL + ATTENUATION + shoreCode() + simCode + surfFoam + VERTEX + FRAGMENT + HELPERS + SHADE), [cdlod.code]);
 
   // ------------------------------------------------------------------ entry points (wgslFn)
   const LOAD_ARGS = `view: mat4x4f, proj: mat4x4f, invProj: mat4x4f, invView: mat4x4f,
 	u0: vec4f, u1: vec4f, u2: vec4f, u3: vec4f, u4: vec4f, u5: vec4f, u6: vec4f, u7: vec4f,
 	u8: vec4f, u9: vec4f, u10: vec4f, u11: vec4f, u12: vec4f, u13: vec4f, u14: vec4f, u15: vec4f,
-	u16: vec4f, u17: vec4f, u18: vec4f`;
-  const LOAD_CALL = "view, proj, invProj, invView, u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16, u17, u18";
+	u16: vec4f, u17: vec4f, u18: vec4f, u19: vec4f`;
+  const LOAD_CALL = "view, proj, invProj, invView, u0, u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16, u17, u18, u19";
   const loadFn = wgslFn(`fn opLoadCall( ${LOAD_ARGS} ) -> f32 { return opLoad( ${LOAD_CALL} ); }`, [all]);
 
   // the vertex: every per-vertex output packed into one mat4 (columns: position + foam, lagXZ +
@@ -977,12 +1005,14 @@ fn opFragment( gate: f32, pos: vec3f, screenUV: vec2f, front: f32, aux0: vec4f, 
 	waterFoamTex: texture_2d<f32>, foamSmp: sampler, seaDetailNoise: texture_2d<f32>, detailSmp: sampler,
 	terrainHeight: texture_2d<f32>, shoreTex: texture_2d<f32>, cloudShadow: texture_2d<f32>,
 	waterSceneColor: texture_2d<f32>, smpLinearClamp: sampler, waterSceneDepth: DEPTH_T,
-	skyEnv: texture_2d<f32>, skyEnvS: sampler ) -> vec4f {
+	skyEnv: texture_2d<f32>, skyEnvS: sampler,
+	shoreSimStateTex: texture_2d<f32>, surfFoamLaceTex: texture_2d<f32>, laceSmp: sampler ) -> vec4f {
 	return waterShade( pos, screenUV, front, aux1.xy, aux1.z, aux1.w, aux0.w, sunShadow,
 		aux2.xyz, aux2.w, aux3.xy,
 		oceanDerivatives, derivSmp, waterFoamTex, foamSmp, seaDetailNoise, detailSmp,
-		terrainHeight, shoreTex, cloudShadow, waterSceneColor, smpLinearClamp, waterSceneDepth, skyEnv, skyEnvS );
+		terrainHeight, shoreTex, cloudShadow, waterSceneColor, smpLinearClamp, waterSceneDepth, skyEnv, skyEnvS,
+		shoreSimStateTex, surfFoamLaceTex, laceSmp );
 }`), [all]);
 
-  return { loadFn, vertexFn, fragmentFn, U_COUNT: 19 };
+  return { loadFn, vertexFn, fragmentFn, U_COUNT: 20 };
 }
