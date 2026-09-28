@@ -101,8 +101,28 @@ export function computeShoreField(terrain, { res = 512, swellDir = [0, -1], seaL
       const x = origin + (i + 0.5) * h;
       const d = seaLevel - terrain.heightAt(x, z);
       depth[j * res + i] = d;
-      speed[j * res + i] = d > 0 ? Math.sqrt(GRAVITY * Math.min(Math.max(d, minDepth), maxDepth)) : 0;
     }
+  }
+  // PORT: the wave speed comes from a blurred depth (land stays land). Tidewater's seabed is smooth
+  // sand; a game heightmap point-sampled every few metres gives a speed with cell-scale noise, and
+  // the arrival time inherits kinks that tear a plunging crest into a sawtooth (the face's sideways
+  // throw swings over a few cm of phase).
+  let db = depth;
+  for (let it = 0; it < 6; it++) {
+    const out = new Float32Array(N);
+    for (let j = 0; j < res; j++) for (let i = 0; i < res; i++) {
+      const k = j * res + i;
+      let s = db[k] * 2, w = 2;
+      if (i > 0) { s += db[k - 1]; w++; }
+      if (i < res - 1) { s += db[k + 1]; w++; }
+      if (j > 0) { s += db[k - res]; w++; }
+      if (j < res - 1) { s += db[k + res]; w++; }
+      out[k] = s / w;
+    }
+    db = out;
+  }
+  for (let k = 0; k < N; k++) {
+    speed[k] = depth[k] > 0 ? Math.sqrt(GRAVITY * Math.min(Math.max(db[k], minDepth), maxDepth)) : 0;
   }
 
   const T = new Float32Array(N).fill(Infinity);

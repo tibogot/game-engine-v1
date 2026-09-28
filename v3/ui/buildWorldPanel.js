@@ -756,6 +756,7 @@ function _buildOceanProControls(parent, P) {
     label: "Surf",
     hint: "Breaking waves at the shore and the swash running up the sand (Tidewater's ShoreWaves). The waves' path is solved from the terrain around the coast; they bend round headlands and arrive along the depth contours. Comes from the Swell direction above.",
   });
+  _toggle(surf, P, "lips", { label: "Breaking lip", hint: "The sheet of water a plunging wave throws forward before it lands (Tidewater's Breakers), along the coast near the camera." });
   _slider(surf, P, "surfHeight", { label: "Wave size (m)", min: 0.05, max: 1.5, step: 0.01, hint: "Offshore half-height of the surf; sets of ~7 with bigger ones in the middle." });
   _slider(surf, P, "surfPeriod", { label: "Period (s)", min: 4, max: 16, step: 0.1 });
   _slider(surf, P, "surfVariation", { label: "Variation", min: 0, max: 1, step: 0.01, hint: "Wave to wave and along the beach: peaks that break first and peel outward." });

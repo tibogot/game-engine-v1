@@ -79,8 +79,22 @@ fn ${name}( xz: vec2f, depth: f32, groundH: f32, ${TP} ) -> ShoreSample {
 	var roller = 0.0;
 ${mode === "world" ? `	let r = shoreWorld( u, A, dB, lam, env );
 	let s0 = vec4f( r.z, r.y, r.x, r.w );` : mode === "normal" ? `	let pair = shoreShapePair( u, - e / lam, A, dB, lam );
-	let s0 = pair.s0;
-	let s1 = pair.s1;
+	var s0 = pair.s0;
+	var s1 = pair.s1;
+	// PORT: the cross-section low-passed over the vertex footprint (± half the mesh spacing, set by
+	// the water vertex in shoreFootprint). A plunging face is narrower than the grid: sampled bare,
+	// neighbouring vertices land on either side of it and the crest tears into fins.
+	if ( shoreFootprint > 0.0 ) {
+		let P = shoreBreakParams( A, dB );
+		let du = shoreFootprint / lam;
+		let ue = u - e / lam;
+		let a0 = shoreProfile( u - du, lam, P, false );
+		let b0 = shoreProfile( u + du, lam, P, false );
+		let a1 = shoreProfile( ue - du, lam, P, false );
+		let b1 = shoreProfile( ue + du, lam, P, false );
+		s0 = vec4f( ( s0.xy * 2.0 + vec2f( a0.x, a0.y ) + vec2f( b0.x, b0.y ) ) * 0.25, s0.z, s0.w );
+		s1 = vec4f( ( s1.xy * 2.0 + vec2f( a1.x, a1.y ) + vec2f( b1.x, b1.y ) ) * 0.25, s1.z, s1.w );
+	}
 	face = s1.z * env;
 	roller = s1.w * env;` : `	let s0 = shoreShape( u, A, dB, lam );`}
 
@@ -179,13 +193,15 @@ const SHORE_SWASH_OVERSHOOT: f32 = ${f(SWASH_OVERSHOOT)};
 struct OpShoreParams {
 	period: f32, amplitude: f32, variation: f32, gamma: f32,
 	breakSpan: f32, curl: f32, runup: f32, enabled: f32,
-	turbidity: f32, fieldOrigin: f32, fieldSize: f32, fieldRes: f32,
+	turbidity: f32, fieldOrigin: f32, fieldSize: f32, fieldRes: f32, swellAcross: vec2f,
 };
 var<private> shoreP: OpShoreParams;
 fn shoreLoad( a: vec4f, b: vec4f, c: vec4f ) {
 	shoreP.period = a.x; shoreP.amplitude = a.y; shoreP.variation = a.z; shoreP.gamma = a.w;
 	shoreP.breakSpan = b.x; shoreP.curl = b.y; shoreP.runup = b.z; shoreP.enabled = b.w;
-	shoreP.turbidity = c.x; shoreP.fieldOrigin = c.y; shoreP.fieldSize = c.z; shoreP.fieldRes = c.w;
+	// PORT: the field is centred (origin = - size / 2); c.y is the swell's travel angle (radians)
+	shoreP.turbidity = c.x; shoreP.fieldOrigin = - c.z * 0.5; shoreP.fieldSize = c.z; shoreP.fieldRes = c.w;
+	shoreP.swellAcross = vec2f( - sin( c.y ), cos( c.y ) );
 }
 
 // shore field: (T, dirX, dirZ, exposure / shoreline time), bilinear via loads (float32 data)
@@ -454,7 +470,12 @@ fn shorePhaseAt( xz: vec2f, shoreTex: texture_2d<f32> ) -> ShorePhase {
 	let dirE = vec2f( sh.y, sh.z );
 	let exposure = length( dirE );
 	let dir = dirE / max( exposure, 1e-4 );
-	let along = dot( xz, vec2f( - dir.y, dir.x ) );
+	// PORT: measured across the SWELL, not across the local direction: that one wobbles by a fraction
+	// of a degree from cell to cell of the field over a game heightmap's bumpy seabed, and at 400 m from
+	// the origin that moved the along-shore coordinate by metres, tearing every crest into a sawtooth
+	// (the wobble and the wave height are functions of it). Smooth everywhere; where the coast is
+	// oblique to the swell the along-shore patterns just stretch a little.
+	let along = dot( xz, shoreP.swellAcross );
 	let s = ( frame.time - T ) / shoreP.period + shoreWobble( along );
 	return ShorePhase( sh, T, dir, exposure, along, s );
 }
@@ -556,6 +577,9 @@ fn shoreSwashEdge( p: vec2f, t: f32, ${TP} ) -> vec4f {
 	}
 	return out;
 }
+
+// half the water mesh spacing at the vertex being evaluated (0 = no low-pass; set by the water vertex)
+var<private> shoreFootprint: f32 = 0.0;
 
 ${evaluateCode("shoreEvaluate", "normal")}
 ${evaluateCode("shoreEvaluateNoNormal", "plain")}

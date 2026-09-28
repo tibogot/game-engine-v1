@@ -38,6 +38,7 @@ import { computeShoreField, makeHeightAt, SHELF } from "./oceanproShoreField.js"
 import { SHORE_DEFAULTS } from "./oceanproShore.js";
 import { OceanProShoreSim } from "./oceanproShoreSim.js";
 import { surfFoamCode } from "./oceanproSurfFoam.js";
+import { OceanProBreakers, buildCoastStations } from "./oceanproBreakers.js";
 
 /** The settings the mode saves with a project (toolState.worldOcean.pro). */
 export const OCEANPRO_DEFAULTS = {
@@ -74,6 +75,8 @@ export const OCEANPRO_DEFAULTS = {
   surfCurl: SHORE_DEFAULTS.curl,
   surfRunup: SHORE_DEFAULTS.runup,
   surfTurbidity: SHORE_DEFAULTS.turbidity,
+  /** the thrown lip of plunging breakers (Tidewater's Breakers) */
+  lips: true,
   /** 0 = shaded; 1 back faces, 2 normals, 3 foam, 6 water path, 7 seabed seen, 8 depth */
   debug: 0,
 };
@@ -95,6 +98,8 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   const detailTex = createSeaDetailTexture();
   // the shore simulation (foam carried by the water, wet sand) in a window that follows the camera
   const sim = new OceanProShoreSim(renderer);
+  // the plunging breakers' thrown lip, along the coast near the camera
+  const breakers = new OceanProBreakers({ renderer, scene, fft });
   const surfFoam = surfFoamCode();
   // one shader per scene-depth type (multisampled or not; see oceanproShader.js DEPTH_T), built on need
   const shaders = new Map();
@@ -188,6 +193,11 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   }
 
   let material = buildMaterial();
+  // the lip is shaded with the ocean's own frame (its shared WGSL and uniform gate)
+  {
+    const sh = shaderFor(depthMs);
+    breakers.buildMesh({ all: sh.all, loadFn: sh.loadFn, gate, cloudNode, skyNode, clampNode });
+  }
   const mesh = new THREE.Mesh(cdlod.geometry, material);
   mesh.name = "OceanPro";
   mesh.frustumCulled = false;
@@ -209,6 +219,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     const span = terrainSize + 2 * SHELF;
     const heightAt = makeHeightAt({ heights: field.heights, size: field.size, terrainSize, maxHeight, heightBase });
     const sd = THREE.MathUtils.degToRad(P.swellDeg);
+    field.swellAng = sd;
     const f = computeShoreField({ heightAt, origin: -span / 2, size: span }, {
       res: FIELD_RES, swellDir: [Math.cos(sd), Math.sin(sd)], seaLevel,
     });
@@ -224,6 +235,16 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     field.tex.needsUpdate = true;
     fieldNode.value = field.tex;
     field.origin = f.origin; field.span = f.size; field.res = f.res;
+    // the coastline the breakers stand on: where the swell reaches it (exposure from the field)
+    const expo = (x, z) => {
+      const i = Math.min(f.res - 1, Math.max(0, Math.floor((x - f.origin) / f.size * f.res)));
+      const j = Math.min(f.res - 1, Math.max(0, Math.floor((z - f.origin) / f.size * f.res)));
+      const k = (j * f.res + i) * 4;
+      return Math.hypot(f.data[k + 1], f.data[k + 2]);
+    };
+    const tc = performance.now();
+    breakers.setCoast(buildCoastStations({ heightAt, seaLevel, half: terrainSize / 2, keep: (x, z) => expo(x, z) > 0.15 }));
+    field.coastMs = performance.now() - tc;
     field.ms = performance.now() - t0;
   }
   /** The CPU heightmap (normalised, size x size, row = +z) the shore field is solved over. */
@@ -249,7 +270,8 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   function update(dt, o) {
     if (!mesh.visible) return;
     dt = Math.min(Math.max(dt, 0), 0.1);
-    time += dt;
+    // (debug: `paused` holds the waves still, to inspect one moment)
+    if (!P.paused) time += dt;
 
     // the spectrum follows the wind / swell settings (re-initialised only when they change)
     const key = [P.windSpeed, P.windDeg, P.fetchKm, P.swellScale, P.swellDeg].join(",");
@@ -295,7 +317,9 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
         heightTexture: heightTexNode.value, fieldTexture: field.tex,
       };
       sim.update(lastSimArgs);
+      breakers.update({ ...lastSimArgs, focus: _c });
     }
+    breakers.setVisible(simOn && P.lips !== false);
     U[19].value.set(sim.min.x, sim.min.y, sim.size, simOn ? 1 : 0);
 
     // the scene depth it reads is multisampled when the frame renders into an MSAA target: its
@@ -351,7 +375,8 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     const surfOn = P.surf && fieldNode.value === field.tex && !!field.tex;
     U[16].value.set(P.surfPeriod, P.surfHeight, P.surfVariation, P.surfBreak);
     U[17].value.set(SHORE_DEFAULTS.breakSpan, P.surfCurl, P.surfRunup, surfOn ? 1 : 0);
-    U[18].value.set(P.surfTurbidity, field.origin, field.span, field.res);
+    // (the field is centred: its origin is - span / 2; the slot carries the swell angle it was built for)
+    U[18].value.set(P.surfTurbidity, field.swellAng ?? 0, field.span, field.res);
   }
 
   /** A new material (one compile): the shadow node and the depth type are part of the shader. */
@@ -384,6 +409,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     fieldStandIn.dispose();
     clampSrc.dispose();
     sim.dispose();
+    breakers.dispose();
     field.tex?.dispose();
   }
 
@@ -392,7 +418,9 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     get visible() { return mesh.visible; },
     /** ms the last shore field took to solve (CPU) */
     get shoreFieldMs() { return field.ms; },
-    sim,
+    sim, breakers,
+    /** ms the coastline extraction took (CPU, with the shore field) */
+    get coastMs() { return field.coastMs ?? 0; },
     /**
      * GPU ms of the raw compute (three's GPU timer does not see it): n FFT steps and n shore
      * simulation steps, each timed alone by waiting for the queue to drain around them.
@@ -408,7 +436,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
       };
       const fftMs = await run(() => fft.update(1 / 60));
       const simMs = lastSimArgs ? await run(() => sim.update(lastSimArgs)) : null;
-      return { fftMs, simMs };
+      return { fftMs, simMs, stations: breakers.count };
     },
     /** For debugging: the live uniform vectors (the opLoad layout) and the shore field's data. */
     get debug() { return { U: U.map((u) => u.value.toArray()), field: field.tex?.image ?? null, fieldOrigin: field.origin, fieldSpan: field.span }; },

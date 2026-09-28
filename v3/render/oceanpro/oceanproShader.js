@@ -347,6 +347,8 @@ ${cascadesV}
 	let nearShore = depth < WATER_SHORE_DEEP && shoreP.enabled > 0.0;
 	var swashLevel = -1e4;
 	if ( nearShore ) {
+		// (the cross-section is low-passed over this vertex's share of the grid)
+		shoreFootprint = spacing * 0.5;
 		let sw = shoreEvaluate( worldXZ, depth, ground, terrainHeight, shoreTex );
 		extra += sw.disp;
 		shoreN = clamp( sw.nShore, vec3f( -1.0 ), vec3f( 1.0 ) );
@@ -1014,5 +1016,6 @@ fn opFragment( gate: f32, pos: vec3f, screenUV: vec2f, front: f32, aux0: vec4f, 
 		shoreSimStateTex, surfFoamLaceTex, laceSmp );
 }`), [all]);
 
-  return { loadFn, vertexFn, fragmentFn, U_COUNT: 20 };
+  // (all: the shared WGSL, for other meshes shaded with the ocean's frame — the breakers' lip)
+  return { loadFn, vertexFn, fragmentFn, all, U_COUNT: 20 };
 }
