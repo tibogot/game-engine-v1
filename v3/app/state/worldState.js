@@ -3,6 +3,7 @@ import { OCEAN2_DEFAULTS } from "../../render/water/oceanSurface.js";
 import { SKY_DEFAULTS as ATMOSPHERE_SKY_DEFAULTS } from "../../render/sky/atmosphereSkyDome.js";
 import { CLOUD_DEFAULTS } from "../../render/clouds/volumetricCloudDeck.js";
 import { PAINTED_CLOUD_DEFAULTS } from "../../render/clouds/paintedCloudDeck.js";
+import { SKYPRO_DEFAULTS } from "../../render/skypro/skyproSky.js";
 import { GRID_DEFAULTS } from "../../render/materials/gridMaterial.js";
 
 /**
@@ -153,6 +154,12 @@ export function createWorldToolState({ editor = false, skyMode } = {}) {
       sunIntensity: 3.8,
       emptyStepMul: 5,
     },
+    /*
+     * The Sky Pro sky mode's own settings (skyMode "skypro", v3/render/skypro/). The engine
+     * holds THIS object, so the panel's controls are live; it rides in the project's look.
+     * Time of day is not here: the one clock is proceduralSky.timeOfDay, as for the domes.
+     */
+    skyProSky: { ...SKYPRO_DEFAULTS },
     atmospherePaintedClouds: {
       ...PAINTED_CLOUD_DEFAULTS,
       /*

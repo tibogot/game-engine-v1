@@ -48,6 +48,7 @@ import { createCloudSkyLight } from "../render/sky/cloudSkyLight.js";
 import { createSkyWorldLight, WORLD_LIGHT_REFERENCE } from "../render/sky/skyWorldLight.js";
 import { SKY_LENS_FLARE_LOOK } from "../render/sky/skyLensFlareLook.js";
 import { createModularRoadClouds } from "../render/clouds/volumetricCloudDeck.js";
+import { createSkyProSky } from "../render/skypro/skyproSky.js";
 import { createPaintedClouds } from "../render/clouds/paintedCloudDeck.js";
 import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
 import { createWorldOcean } from "../render/water/worldOcean.js";
@@ -813,13 +814,99 @@ export async function createWorldEnvironment({
   const atmoLightRef = { ...WORLD_LIGHT_REFERENCE };
   /** toolState.light values from before this mode took the lights over. */
   let _atmoLightSaved = null;
+
+  /*
+   * ── SKY PRO (skyMode "skypro") ────────────────────────────────────────────
+   *
+   * A SEPARATE sky, sharing nothing with the two domes above: its own atmosphere
+   * (Tidewater's), the Sky Pro cumulus, the cirrus and a sky environment baked from them
+   * (v3/render/skypro/). Built lazily on the first switch into the mode, like the
+   * atmosphere dome. It is a "dome mode" for the clock and the sun (isDomeMode): one time
+   * of day, the moon as the key light at night. It lights the world in Tidewater's units
+   * — the sun through its air, the sky as the environment, no hemisphere fill — and hands
+   * the lights back exactly as they were when the mode is left.
+   */
+  let skyPro = null;
+  let _skyProReady = false;
+  // (the lights from before this mode are kept in toolState.skyProSky.savedLight — see SKYPRO_DEFAULTS)
+  let _skyProLightKey = "";
+  const _skyProBuffer = new THREE.Vector2();
+  const _skyProColor = new THREE.Color();
+
+  function ensureSkyProSky() {
+    if (skyPro) return skyPro;
+    try {
+      skyPro = createSkyProSky({ renderer, camera, params: toolState.skyProSky });
+      skyPro.mesh.visible = false;
+      scene.add(skyPro.mesh);
+      // The cloud noise volume is fetched: nothing marches until it has landed.
+      skyPro.ready.then(() => { _skyProReady = true; }).catch((err) => {
+        console.warn("[V3] Sky Pro clouds failed to load their noise; the sky draws without them.", err);
+      });
+    } catch (err) {
+      console.warn("[V3] Sky Pro sky failed to init; staying on the current sky.", err);
+      skyPro = null;
+    }
+    return skyPro;
+  }
+
+  function driveSkyProSky(dtSec) {
+    if (!skyPro || !_skyProReady) return;
+    renderer.getDrawingBufferSize(_skyProBuffer);
+    // The REAL sun, from the engine's clock and the light's angles (the key light may be the moon).
+    skyPro.update(dtSec, { sunDir, drawingBufferSize: _skyProBuffer });
+    if (scene.environment !== skyPro.environment) scene.environment = skyPro.environment;
+
+    // The world in the sky's light (Tidewater's lighting.js: direct = sunColor N.L albedo / PI, which
+    // is three's Lambert with intensity = sunColor; ambient = the environment alone).
+    const L = skyPro.light();
+    const Li = toolState.light;
+    const r = L.sunColor[0], g = L.sunColor[1], b = L.sunColor[2];
+    const m = Math.max(r, g, b, 1e-6);
+    _skyProColor.setRGB(r / m, g / m, b / m, THREE.LinearSRGBColorSpace);
+    const key = _skyProColor.getHexString() + "," + m.toFixed(3) + "," + skyPro.params.exposure;
+    if (key === _skyProLightKey) return;
+    _skyProLightKey = key;
+    snapshotLightForSkyPro();
+    // Encoded as the sRGB hex the engine consumes (sun.color.set decodes it back to linear).
+    Li.dirColor = "#" + _skyProColor.getHexString();
+    Li.dirIntensity = m;
+    Li.hemiIntensity = 0;
+    Li.envIntensity = 1;
+    Li.moonIntensity = 0.12;
+    Li.exposure = skyPro.params.exposure;
+    updateSunSky();
+  }
+
+  /**
+   * Snapshot the world's lights once, so leaving the mode gives them back exactly as they were —
+   * even after the project is saved and reopened, because the snapshot is saved with the mode's
+   * settings. Taken on ENTRY (applySkyMode), before the mode's exposure replaces the old one.
+   */
+  function snapshotLightForSkyPro() {
+    if (toolState.skyProSky.savedLight) return;
+    const Li = toolState.light;
+    toolState.skyProSky.savedLight = {
+      dirColor: Li.dirColor, dirIntensity: Li.dirIntensity, hemiIntensity: Li.hemiIntensity,
+      exposure: Li.exposure, moonIntensity: Li.moonIntensity, envIntensity: Li.envIntensity,
+    };
+  }
+
+  function restoreLightFromSkyPro() {
+    const saved = toolState.skyProSky.savedLight;
+    if (!saved) return;
+    Object.assign(toolState.light, saved);
+    toolState.skyProSky.savedLight = null;
+    _skyProLightKey = "";
+  }
   /** The tuned flare look is applied once, the first time this mode is entered. */
   let _atmoFlareApplied = false;
   /** The tier the current dome+deck pair was BUILT for; a change means a rebuild. */
   let _atmoBuiltTier = null;
 
   function isDomeMode(mode) {
-    return mode === "procedural" || mode === "atmosphere";
+    // Sky Pro runs on the same clock and sun as the two domes, with its own sky and IBL.
+    return mode === "procedural" || mode === "atmosphere" || mode === "skypro";
   }
 
   function ensureAtmosphereSky() {
@@ -1332,6 +1419,11 @@ export async function createWorldEnvironment({
   }
 
   function rebuildProceduralSkyEnv() {
+    // Sky Pro bakes its own environment (skyproEnv.js); the dome rig must not replace it.
+    if (toolState.skyMode === "skypro") {
+      if (skyPro) scene.environment = skyPro.environment;
+      return;
+    }
     try {
       updateSunSky();
       // Drive the dome the rig is about to clone. Driving the other one would bake the
@@ -1362,6 +1454,7 @@ export async function createWorldEnvironment({
     sky.visible = _skyShown && mode === "physical";
     dayNightSky.mesh.visible = _skyShown && mode === "procedural";
     if (atmoSky) atmoSky.mesh.visible = _skyShown && mode === "atmosphere";
+    if (skyPro) skyPro.mesh.visible = _skyShown && mode === "skypro";
     /*
      * Belt and braces. The deck sits on LAYERS.GAME_CLOUDS (19) and the main camera only
      * renders layer 0, so it cannot draw in another mode anyway — but its `update()` is
@@ -1392,6 +1485,8 @@ export async function createWorldEnvironment({
   function applySkyMode(mode, prevMode) {
     const prev = prevMode !== undefined ? prevMode : toolState.skyMode;
     if (prev === "atmosphere" && mode !== "atmosphere") restoreLightFromAtmosphere();
+    if (prev === "skypro" && mode !== "skypro") restoreLightFromSkyPro();
+    if (mode === "skypro" && prev !== "skypro") snapshotLightForSkyPro();
     if (prev !== mode) {
       toolState.skyExposureByMode[prev] = toolState.light.exposure;
       /*
@@ -1402,7 +1497,9 @@ export async function createWorldEnvironment({
        */
       const nextExposure = mode === "atmosphere"
         ? atmoLightRef.exposure
-        : toolState.skyExposureByMode[mode] ?? (isDomeMode(mode) ? 0.7 : 0.5);
+        : mode === "skypro"
+          ? toolState.skyProSky.exposure
+          : toolState.skyExposureByMode[mode] ?? (isDomeMode(mode) ? 0.7 : 0.5);
       if (toolState.light.exposure !== nextExposure) {
         toolState.light.exposure = nextExposure;
       }
@@ -1410,6 +1507,7 @@ export async function createWorldEnvironment({
     toolState.skyMode = mode;
     dayNightSky.mesh.visible = mode === "procedural";
     if (atmoSky) atmoSky.mesh.visible = mode === "atmosphere";
+    if (skyPro) skyPro.mesh.visible = mode === "skypro";
     // Moving between the two domes changes which mesh the IBL rig holds a clone of.
     if (isDomeMode(mode) && isDomeMode(prev) && mode !== prev) resetProcEnvRig();
     if (mode === "physical") {
@@ -1480,6 +1578,15 @@ export async function createWorldEnvironment({
           driveAtmosphereSky(0);
         }
       }
+      if (mode === "skypro") {
+        // Its first frames need the cloud noise (fetched): the sky and its light follow as
+        // soon as it lands; rebuildProceduralSkyEnv below then leaves its environment alone.
+        ensureSkyProSky();
+        if (skyPro) {
+          skyPro.mesh.visible = _skyShown;
+          driveSkyProSky(0);
+        }
+      }
       rebuildProceduralSkyEnv();
     }
     syncSkyVisibility();
@@ -1528,11 +1635,11 @@ export async function createWorldEnvironment({
    */
   const LOOK_SLICES = [
     "light", "skyExposureByMode", "physicalSky", "proceduralSky", "atmosphereSky",
-    "atmosphereClouds", "atmospherePaintedClouds",
+    "atmosphereClouds", "atmospherePaintedClouds", "skyProSky",
     "volumetricCloudDayNight", "cloudShadows", "cloudGodRays", "cloudBloom",
     "lensFlare", "postFx", "fog", "interior",
   ];
-  const SKY_MODES = ["physical", "hdr", "procedural", "atmosphere"];
+  const SKY_MODES = ["physical", "hdr", "procedural", "atmosphere", "skypro"];
 
   function exportLook() {
     const look = { skyMode: toolState.skyMode, hdr: hdrRef };
@@ -2037,7 +2144,11 @@ export async function createWorldEnvironment({
         setTimeOfDay((ps.timeOfDay + ps.daySpeed * procDt) % 24);
       }
       let procSnap;
-      if (toolState.skyMode === "atmosphere") {
+      if (toolState.skyMode === "skypro") {
+        // Its own bakes, clouds and environment; nothing for the dome IBL rig to do.
+        driveSkyProSky(procDt);
+        procSnap = null;
+      } else if (toolState.skyMode === "atmosphere") {
         driveAtmosphereSky(procDt);
         /*
          * The IBL re-bake key. It has to name everything that moves this dome's look or
@@ -2050,12 +2161,12 @@ export async function createWorldEnvironment({
         driveProceduralSky();
         procSnap = `${Li.sunAzimuth},${Li.sunElevation},${ps.scatter},${ps.rayleigh},${ps.mie},${ps.mieG},${ps.sunIntensity},${ps.msAmount},${ps.zenithDay},${ps.horizonDay},${ps.zenithNight},${ps.horizonNight},${ps.sunsetColor},${ps.groundColor},${ps.sunColor},${ps.moonColor},${ps.cloudEnabled},${ps.cloudCoverage},${ps.cloudColor}`;
       }
-      if (procSnap !== _lastProcSkySnap) {
+      if (procSnap !== null && procSnap !== _lastProcSkySnap) {
         _lastProcSkySnap = procSnap;
         _procEnvNeeds = true;
         if (!ps.autoAdvance) _procEnvIdle = 0.3;
       }
-      if (streamQueueDepth < STREAM_QUEUE_PRESSURE) {
+      if (procSnap !== null && streamQueueDepth < STREAM_QUEUE_PRESSURE) {
         updateProcEnvBake(procDt);
       }
     }
@@ -2285,6 +2396,8 @@ export async function createWorldEnvironment({
     describeCsm,
     setSkyVisible,
     get skyVisible() { return _skyShown; },
+    /** The Sky Pro sky (skyMode "skypro"), or null until the mode is first entered. */
+    get skyPro() { return skyPro; },
     worldOcean,
     getOceanV2: () => oceanV2,
     setOceanHeights,

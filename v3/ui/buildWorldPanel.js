@@ -718,6 +718,48 @@ function _buildProceduralSkyControls(parent, ts, app) {
  * the module, and putting 27 colours on a panel would suggest they are meant to be dialled
  * rather than replaced by the physical model.
  */
+/**
+ * SKY PRO (skyMode "skypro", v3/render/skypro/): its own settings slice, `ts.skyProSky`. The
+ * engine holds that very object (not a copy), so every control here is live with no callback.
+ */
+function _buildSkyProControls(parent, ts, app) {
+  const S = ts.skyProSky;
+  const wrap = document.createElement("div");
+  parent.appendChild(wrap);
+
+  _buildTimeOfDayControls(wrap, ts, app);
+
+  const cu = _section(wrap, "Clouds (Sky Pro)", true);
+  _slider(cu, S, "coverage", {
+    label: "Coverage", min: 0, max: 1, step: 0.01,
+    hint: "The Sky Pro cumulus deck, 4-9 km up. 0.49 is its 'Partly cloudy' preset.",
+  });
+  _slider(cu, S, "windSpeed", {
+    label: "Wind (m/s)", min: 0, max: 100, step: 1,
+    hint: "The drift at the deck. Tidewater's 12 looks still from the ground, as real clouds do; 89 is Sky Pro's own time-lapse.",
+  });
+  _slider(cu, S, "windDeg", { label: "Wind direction", min: -180, max: 180, step: 1 });
+  _toggle(cu, S, "horizonMask", {
+    label: "Hide below horizon",
+    hint: "Tidewater's choice for a camera that never looks down on clouds. Off = clouds seen from above and inside the deck.",
+  });
+
+  const ci = _section(wrap, "Cirrus", true);
+  _slider(ci, S, "cirrus", {
+    label: "Amount", min: 0, max: 3, step: 0.01,
+    hint: "The high ice veil (Tidewater's Clouds.js). Tidewater's range is 0-1; faint by design, brightest round the sun.",
+  });
+  _slider(ci, S, "cirrusAlt", { label: "Altitude (m)", min: 6000, max: 13000, step: 100 });
+
+  const li = _section(wrap, "Light", true);
+  _slider(li, S, "exposure", {
+    label: "Exposure", min: 0.1, max: 2, step: 0.01,
+    hint: "Tidewater's is 0.55 for its units. This sky sets the world's lights while it is shown and gives them back when you leave it.",
+  });
+  _color(li, S, "groundAlbedo", { label: "Ground (sky light)" });
+  return wrap;
+}
+
 function _buildAtmosphereSkyControls(parent, ts, app) {
   const A = ts.atmosphereSky;
   const wrap = document.createElement("div");
@@ -1712,6 +1754,7 @@ export function buildWorldPanel(app) {
           "Import HDR": "hdr",
           "Procedural (day/night)": "procedural",
           "Atmosphere (scattering)": "atmosphere",
+          "Sky Pro (Tidewater)": "skypro",
         },
         onChange: () => {
           const newMode = ts.skyMode;
@@ -1837,6 +1880,10 @@ export function buildWorldPanel(app) {
       // built lazily by the engine on the first switch into the mode.
       const atmoWrap = _buildAtmosphereSkyControls(skyBody, ts, app);
       skyModeWidgets.push({ el: atmoWrap, mode: "atmosphere" });
+
+      // Sky Pro: its own sky, clouds and cirrus (built by the engine on the first switch in).
+      const skyProWrap = _buildSkyProControls(skyBody, ts, app);
+      skyModeWidgets.push({ el: skyProWrap, mode: "skypro" });
 
       function syncSkyWidgets() {
         for (const { el, mode } of skyModeWidgets) {

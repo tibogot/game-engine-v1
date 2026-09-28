@@ -73,7 +73,7 @@ export function createInspector({ container, deps }) {
       _title("Sun & light", "World");
       const b = section(container, "Sun", true);
       const skyMode = deps.env.skyMode();
-      if (skyMode === "procedural" || skyMode === "atmosphere") {
+      if (skyMode === "procedural" || skyMode === "atmosphere" || skyMode === "skypro") {
         hint(b, "This sky's time of day places the sun, so Azimuth and Elevation follow it (see Sky).");
       }
       // The renderer reads these every frame, and the World tab's controls
@@ -104,6 +104,7 @@ export function createInspector({ container, deps }) {
         hdr: "HDR image",
         procedural: "Procedural (day/night)",
         atmosphere: "Atmosphere (scattering)",
+        skypro: "Sky Pro (Tidewater)",
       }[mode] ?? mode, { layout: "prop" });
       const hs = [];
       // Both domes run off the same clock (proceduralSky's time of day), so this block is
