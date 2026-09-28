@@ -8,7 +8,7 @@
 // shader, top-3 layers + near/far tiling, the terrain drawn last.
 //
 // URL options: ?world=/levels/other.v3proj · ?light=flat (the engine's default
-// light, to A/B) · ?fog=0
+// light, to A/B) · ?fog=0 · ?warmup=0 (no pipeline warm-up, to A/B it)
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom } from "./showroom.js";
@@ -19,6 +19,7 @@ import { LAYOUT, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgHerds } from "./algHerds.js";
+import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -96,6 +97,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
 
   const levels = createLevelLoader(app, { defaultUrl: "/levels/alg-aures.v3proj", onStatus, onProgress });
   const boot = await levels.loadBoot();
+  // What the ENGINE put in the scene: the warm-up at the end leaves it alone.
+  const engineObjects = snapshotEngineScene(app.scene);
 
   // Terrain last among the opaque things (nam-rts: the dearest shader, drawn
   // first, was shaded under everything and then covered).
@@ -189,6 +192,17 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // needsUpdate uploads on the NEXT render: let two frames draw it under the
   // loading screen before it lifts.
   app.setFrameThrottle?.(0);
+  // Build every pipeline the game will need NOW, under the loading screen, not
+  // on the frame a unit type, effect or place is first drawn — nam-rts measured
+  // 26 pipelines built mid-fight and a 987 ms frame before it had this
+  // (shared-rts/pipelineWarmup.js). ?warmup=0 to A/B.
+  if (params.get("warmup") !== "0") {
+    onStatus("Preparing effects…");
+    try {
+      const w = await warmGamePipelines(app, engineObjects);
+      console.log(`[warmup] ${w.warmed} drawables warmed in ${w.ms} ms`);
+    } catch (e) { console.warn("[warmup] failed:", e); }
+  }
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;

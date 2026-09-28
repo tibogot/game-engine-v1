@@ -105,7 +105,7 @@ import { createChickenFlock } from "./chickenFlock.js";
 import { createFogBanks, siteFogBanks } from "./fogBanks.js";
 import { buildFogBanksPanel } from "../shared-rts/fogBanksPanel.js";
 import { applyCloudShadows, buildCloudShadowsPanel } from "./cloudShadowsPanel.js";
-import { snapshotEngineScene, warmGamePipelines } from "./pipelineWarmup.js";
+import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
 import { createWaves } from "./waves.js";
@@ -1792,7 +1792,7 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   app.setFrameThrottle?.(0);     // the loading screen is going: full rate
   // Build every pipeline the game will need NOW, under the loading screen,
   // not on the frame the first fire, rocket or tank appears mid-fight
-  // (pipelineWarmup.js). Only what the game added after the level loaded.
+  // (shared-rts/pipelineWarmup.js). Only what the game added after the level loaded.
   onStatus("Preparing effects…");
   try {
     const w = await warmGamePipelines(app, engineObjects);

@@ -1,5 +1,7 @@
 // PIPELINE WARM-UP — build every GPU pipeline the game will need BEFORE the
 // loading screen goes, instead of in the middle of the first fight.
+// Shared by nam-rts and alg-rts (identical machinery; each game calls it at
+// the end of its own boot). Moved here from games/nam-rts on 2026-09-28.
 //
 // WHY. WebGPU builds a render pipeline the first time a (material, geometry
 // layout, pass) combination is drawn, and three builds the shader for it on
