@@ -27,6 +27,10 @@
 // The pace: the first band after ~45 s, then one every 80-140 s, never more
 // than 18 fighters out at once. Orders, paths and the fighting are the shared
 // machinery (units.orderTo, navGrid, combat.js's holdFire).
+//
+// French on a TRACK (the piste, a mule path — algTracks.js) get the road
+// ambush: the band lies up along that track, 15-45 m off it.
+import { nearestTrack } from "./algTracks.js";
 
 const P = {
   firstBandAt: 45,
@@ -34,6 +38,8 @@ const P = {
   bandSize: [4, 7],
   maxLive: 18,
   ambushRing: [40, 65],       // metres from the target group
+  onTrack: 12,                // French this near a track are "on" it (algTracks.js)
+  roadBonus: 0.8,             // a spot lining that track, 15-45 m off it
   trigger: 32,                // French this close to the band: open fire
   waitMax: 60,                // seconds in ambush before going in or re-planning
   strikeTime: [12, 22],
@@ -111,13 +117,22 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   function ambushSpot(from, tgt) {
     const base = Math.atan2(from.z - tgt.z, from.x - tgt.x);
     const gy = app.getWorldHeight(tgt.x, tgt.z);
+    // French ON a track (the piste, a mule path): the band lines THAT track,
+    // 15-45 m off it — the road ambush, where the patrol has to come.
+    const onTrack = nearestTrack(tgt.x, tgt.z);
+    const road = onTrack && onTrack.d < P.onTrack ? onTrack.track : null;
     let best = null, bestS = -Infinity;
     for (let i = 0; i < 28; i++) {
       const a = base + rand(-1.2, 1.2), r = rand(...P.ambushRing);
       const x = tgt.x + Math.cos(a) * r, z = tgt.z + Math.sin(a) * r;
       if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
       if (dist({ x, z }, post) < P.postKeepOff) continue;
-      const s = cover(x, z) * 2 + Math.max(-1, Math.min(1, (app.getWorldHeight(x, z) - gy) / 15)) - r / 200;
+      let s = cover(x, z) * 2 + Math.max(-1, Math.min(1, (app.getWorldHeight(x, z) - gy) / 15)) - r / 200;
+      if (road) {
+        const d = road.line.reduce((m, p) => Math.min(m, Math.hypot(p.x - x, p.z - z)), Infinity);
+        if (d >= 15 && d <= 45) s += P.roadBonus;
+        else if (d < 8) s -= 2;   // never lie up ON the track
+      }
       if (s > bestS) { bestS = s; best = { x, z }; }
     }
     return best;
@@ -333,6 +348,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     },
     /** Dev: a band now. */
     bandNow() { newBand(); },
+    /** Dev: the ambush spot a band at `from` would take on French at `tgt`. */
+    ambushSpotFor: (from, tgt) => ambushSpot(from, tgt),
     /** Dev: what each band is doing. */
     describe() {
       return bands.map((b) => `${b.state}${b.mission === "village" && b.village ? ` (${b.village.name})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";

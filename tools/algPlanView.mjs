@@ -3,7 +3,10 @@
  * hillshade, ground past the 34° nav limit in red, water in blue, a 100 m
  * grid (labels in world metres, north up = -Z), and the layout's sites.
  *
- *   node tools/algPlanView.mjs --file public/levels/alg-aures.v3proj --out plan.png [--layout games/alg-rts/layout.js]
+ *   node tools/algPlanView.mjs --file public/levels/alg-aures.v3proj --out plan.png [--layout games/alg-rts/layout.js] [--view play]
+ *
+ * With a layout, its tracks.js (tools/algTracks.mjs) is drawn too: the piste
+ * white, mule paths dark.
  *
  * Also prints per-quadrant walkable % and the heights of the named sites, so
  * a layout can be argued with numbers, not only by eye.
@@ -38,10 +41,15 @@ const H = (x, z) => {
 };
 
 // ── Image ───────────────────────────────────────────────────────────────────
+// `--view play`: only the layout's PLAY box (square, its larger side), for
+// judging the play area at 3-4x the scale.
+const PB = args.view === "play" ? layout?.PLAY : null;
+const VX0 = PB ? PB.x0 : -W / 2, VZ0 = PB ? PB.z0 : -W / 2;
+const SPAN = PB ? Math.max(PB.x1 - PB.x0, PB.z1 - PB.z0) : W;
 const rgb = new Uint8Array(P * P * 3);
-const m = W / P;
+const m = SPAN / P;
 for (let py = 0; py < P; py++) for (let px = 0; px < P; px++) {
-  const x = (px + 0.5) * m - W / 2, z = (py + 0.5) * m - W / 2;
+  const x = VX0 + (px + 0.5) * m, z = VZ0 + (py + 0.5) * m;
   const e = m;
   const dx = (H(x + e, z) - H(x - e, z)) / (2 * e), dz = (H(x, z + e) - H(x, z - e)) / (2 * e);
   const slope = (Math.atan(Math.hypot(dx, dz)) * 180) / Math.PI;
@@ -61,11 +69,12 @@ const put = (px, py, c) => {
   if (px < 0 || py < 0 || px >= P || py >= P) return;
   const o = (py * P + px) * 3; rgb[o] = c[0]; rgb[o + 1] = c[1]; rgb[o + 2] = c[2];
 };
-const toPx = (x) => Math.round(((x + W / 2) / W) * P);
+const toPx = (x) => Math.round(((x - VX0) / SPAN) * P);
+const toPy = (z) => Math.round(((z - VZ0) / SPAN) * P);
 // Grid every 100 m, the axes stronger.
 for (let v = -500; v <= 500; v += 100) {
-  const k = toPx(v);
-  for (let i = 0; i < P; i++) { put(k, i, v === 0 ? [30, 30, 30] : [70, 60, 50]); put(i, k, v === 0 ? [30, 30, 30] : [70, 60, 50]); }
+  const kx = toPx(v), kz = toPy(v);
+  for (let i = 0; i < P; i++) { put(kx, i, v === 0 ? [30, 30, 30] : [70, 60, 50]); put(i, kz, v === 0 ? [30, 30, 30] : [70, 60, 50]); }
 }
 // Tiny 3x5 digit font for the grid labels.
 const DIG = { "0": "111101101101111", "1": "010110010010111", "2": "111001111100111", "3": "111001111001111", "4": "101101111001001", "5": "111100111001111", "6": "111100111101111", "7": "111001001001001", "8": "111101111101111", "9": "111101111001111", "-": "000000111000000" };
@@ -75,7 +84,7 @@ const text = (s, px, py, c = [20, 20, 20], sc = 2) => {
     for (let k = 0; k < 15; k++) if (f[k] === "1") for (let a = 0; a < sc; a++) for (let b2 = 0; b2 < sc; b2++) put(px + i * 4 * sc + (k % 3) * sc + a, py + ((k / 3) | 0) * sc + b2, c);
   });
 };
-for (let v = -400; v <= 400; v += 100) { text(String(v), toPx(v) + 3, 3); text(String(v), 3, toPx(v) + 3); }
+for (let v = -400; v <= 400; v += 100) { text(String(v), toPx(v) + 3, 3); text(String(v), 3, toPy(v) + 3); }
 // Wadis: the route dotted, each ford a bright square.
 for (const w of layout?.LAYOUT?.wadis ?? []) {
   const pts = w.points;
@@ -90,10 +99,27 @@ for (const w of layout?.LAYOUT?.wadis ?? []) {
     }
     return pts[pts.length - 1];
   };
-  for (let k = 0; k <= 400; k += 2) { const [x, z] = at(k / 400); put(toPx(x), toPx(z), [60, 40, 20]); put(toPx(x) + 1, toPx(z), [60, 40, 20]); }
+  for (let k = 0; k <= 400; k += 2) { const [x, z] = at(k / 400); put(toPx(x), toPy(z), [60, 40, 20]); put(toPx(x) + 1, toPy(z), [60, 40, 20]); }
   for (const f of w.fords) {
     const [x, z] = at(f);
-    for (let a = -4; a <= 4; a++) for (let b2 = -4; b2 <= 4; b2++) put(toPx(x) + a, toPx(z) + b2, [120, 255, 120]);
+    for (let a = -4; a <= 4; a++) for (let b2 = -4; b2 <= 4; b2++) put(toPx(x) + a, toPy(z) + b2, [120, 255, 120]);
+  }
+}
+// Tracks (tracks.js beside the layout, tools/algTracks.mjs): the piste
+// white and thick, mule paths dark and thin, along their Catmull-Rom line.
+const tracksMod = args.layout ? await import(pathToFileURL(path.resolve(path.dirname(args.layout), "tracks.js")).href).catch(() => null) : null;
+for (const t of tracksMod?.TRACKS ?? []) {
+  const c = t.kind === "piste" ? [250, 245, 225] : [50, 30, 20];
+  const w = t.kind === "piste" ? Math.max(1, Math.round(2.5 / m)) : Math.max(0, Math.round(0.8 / m));
+  const P2 = t.points;
+  for (let i = 0; i < P2.length - 1; i++) {
+    const p0 = P2[Math.max(0, i - 1)], p1 = P2[i], p2 = P2[i + 1], p3 = P2[Math.min(P2.length - 1, i + 2)];
+    for (let k = 0; k < 40; k++) {
+      const u = k / 40;
+      const cr = (a, b, c2, d) => 0.5 * (2 * b + (-a + c2) * u + (2 * a - 5 * b + 4 * c2 - d) * u * u + (-a + 3 * b - 3 * c2 + d) * u * u * u);
+      const X = toPx(cr(p0[0], p1[0], p2[0], p3[0])), Y = toPy(cr(p0[1], p1[1], p2[1], p3[1]));
+      for (let a = -w; a <= w; a++) for (let b2 = -w; b2 <= w; b2++) put(X + a, Y + b2, c);
+    }
   }
 }
 // Sites: filled discs of their radius, a colour per kind.
@@ -102,7 +128,7 @@ const sites = layout?.LAYOUT?.sites ?? [];
 for (const s of sites) {
   const c = KIND[s.kind] ?? [255, 0, 255];
   const R = Math.max(3, Math.round((s.r ?? 12) / m));
-  const cx = toPx(s.x), cy = toPx(s.z);
+  const cx = toPx(s.x), cy = toPy(s.z);
   for (let a = 0; a < 360; a += 1) {
     const rad = (a * Math.PI) / 180;
     for (let w = 0; w < 3; w++) put(Math.round(cx + Math.cos(rad) * (R - w)), Math.round(cy + Math.sin(rad) * (R - w)), c);

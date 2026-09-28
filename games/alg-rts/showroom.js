@@ -19,7 +19,7 @@ import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
 import { createWind, createWindsock } from "./algWind.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { LAYOUT, siteYaw } from "./layout.js";
-import { buildCemetery, buildDechra, buildKoubba, buildVillageWell, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildCemetery, buildDechra, buildGarden, buildKoubba, buildTerraces, buildThreshingFloor, buildVillageWell, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -114,6 +114,24 @@ const DECHRA = site("dechra"), KOUBBA = site("koubba"), CEMETERY = site("cemeter
  */
 const QIBLA_AXIS = (() => { const b = (18 * Math.PI) / 180; return Math.atan2(Math.sin(b), -Math.cos(b)) - CEMETERY.yaw; })();
 const H2 = { ...HAMLETS[1], yaw: siteYaw(HAMLETS[1]) };
+const GARDENS = [
+  // Mechta Ouled Ali.
+  { key: "gardenOA1", build: (o) => buildGarden({ ...o, seed: 101, kind: "olive" }), x: 180, z: 87, yaw: HAMLET_SITE.yaw, ground: true },
+  { key: "gardenOA2", build: (o) => buildGarden({ ...o, seed: 102, kind: "mixed", w: 16 }), x: 113, z: 76, yaw: HAMLET_SITE.yaw + 0.15, ground: true },
+  { key: "threshOA", build: () => buildThreshingFloor({ seed: 103 }), x: 167, z: 31, yaw: 0, rim: 3 },
+  // Mechta el Oued.
+  { key: "gardenEO1", build: (o) => buildGarden({ ...o, seed: 111, kind: "fig", w: 15, d: 12 }), x: 266, z: -30, yaw: H2.yaw, ground: true },
+  { key: "gardenEO2", build: (o) => buildGarden({ ...o, seed: 112, kind: "olive" }), x: 213, z: -51, yaw: H2.yaw - 0.1, ground: true },
+  { key: "threshEO", build: () => buildThreshingFloor({ seed: 113, r: 4 }), x: 270, z: -104, yaw: 0, rim: 3 },
+  { key: "terracesEO", build: (o) => buildTerraces({ ...o, seed: 114, rows: 3 }), x: 256, z: -136, yaw: -2.939, ground: true },
+  // The dechra: terraces on the slopes round it (one below it, toward the
+  // camera), a garden and the threshing floor on the flat to the east.
+  { key: "terracesD1", build: (o) => buildTerraces({ ...o, seed: 121 }), x: -198, z: 92, yaw: -2.349, ground: true },
+  { key: "terracesD2", build: (o) => buildTerraces({ ...o, seed: 122 }), x: -155, z: 105, yaw: -2.718, ground: true },
+  { key: "terracesD3", build: (o) => buildTerraces({ ...o, seed: 123 }), x: -224, z: 187, yaw: -2.727, ground: true },
+  { key: "gardenD", build: (o) => buildGarden({ ...o, seed: 124, kind: "olive" }), x: -177, z: 201, yaw: DECHRA.yaw, ground: true },
+  { key: "threshD", build: () => buildThreshingFloor({ seed: 125 }), x: -150, z: 160, yaw: 0, rim: 3 },
+];
 const VILLAGE = [
   { key: "dechra", build: (o) => buildDechra(o), x: DECHRA.x, z: DECHRA.z, yaw: DECHRA.yaw, ground: true },
   { key: "koubba", build: (o) => buildKoubba(o), x: KOUBBA.x, z: KOUBBA.z, yaw: KOUBBA.yaw, ground: true },
@@ -126,6 +144,13 @@ const VILLAGE = [
   (() => { const [x, z] = fromBase(34, 0, H2); return { key: "wellHamlet2", build: () => buildVillageWell({ seed: 73 }), x, z, yaw: H2.yaw, rim: 4 }; })(),
   (() => { const [x, z] = fromBase(24, 58, HAMLET_SITE); return { key: "zeriba1", build: (o) => buildZeriba({ ...o, seed: 81 }), x, z, yaw: HAMLET_SITE.yaw, ground: true }; })(),
   (() => { const [x, z] = fromBase(48, 26, H2); return { key: "zeriba2", build: (o) => buildZeriba({ ...o, seed: 83, r: 5.5 }), x, z, yaw: H2.yaw, ground: true }; })(),
+  // THE LAND THEY WORK (2026-09-29): walled olive/fig gardens, almond
+  // terraces up the slopes, a threshing floor each. Spots MEASURED (a search
+  // round each village): clear of every piece, the tracks, the wadi beds and
+  // the oases; gardens on < 3 m of relief, threshing floors < 1.6 m (they
+  // stand on a pad), terraces on 9-15 deg with < 4 deg of side tilt, turned
+  // so they climb straight uphill (their yaw is the ground's, not the view's).
+  ...GARDENS,
 ];
 
 export const SHOWROOM = [
@@ -239,16 +264,40 @@ export function kitView(geo) {
  * The vegetation lives IN THE MAP now (tools/algVegetation.mjs: species in its
  * plant slots, density in its paint), so the editor shows and edits it. The
  * only plants placed here are the ones a PLACE puts down by hand: the two
- * Canary palms the army planted at the post's gate.
+ * Canary palms the army planted at the post's gate, and what the village
+ * pieces list (rtsAlgVillage.js userData.trees / hedge): the olives, figs
+ * and almonds of the gardens and terraces, a fig in a dechra yard, the
+ * prickly-pear hedges outside the garden walls.
  */
-function placePlants(app) {
-  const pf = new PlacedFoliage({ scene: app.scene });
+function placePlants(app, placed) {
+  // Far LOD out to 260 m: an orchard is a place, it must not pop in late.
+  const pf = new PlacedFoliage({ scene: app.scene, lodDistances: [60, 140] });
   pf.setType("canaryPalm", structuredClone(FOLIAGE_PRESETS.canaryPalm));
   // Either side of the gate, a few metres out (post-local).
   for (const [lx, lz, scale, seed] of [[-7, 22, 1, 17], [7, 22, 0.95, 29]]) {
     const [x, z] = fromBase(lx, lz);
     pf.add("canaryPalm", x, app.getWorldHeight(x, z) - 0.05, z, { rotY: seed, scale, seed });
   }
+  let trees = 0, hedge = 0;
+  for (const o of Object.values(placed)) {
+    const ud = o?.isObject3D ? o.geometry?.userData : null;
+    if (!ud?.trees?.length && !ud?.hedge?.length) continue;
+    const c = Math.cos(o.rotation.y), s = Math.sin(o.rotation.y);
+    const at = (lx, lz) => [o.position.x + lx * c + lz * s, o.position.z - lx * s + lz * c];
+    for (const t of ud.trees ?? []) {
+      if (!pf.types.has(t.kind)) pf.setType(t.kind, structuredClone(FOLIAGE_PRESETS[t.kind]));
+      const [x, z] = at(t.x, t.z);
+      pf.add(t.kind, x, app.getWorldHeight(x, z) - 0.05, z, { rotY: t.seed * 2.39, scale: t.scale, seed: (t.seed * 0.618 + 0.13) % 1 });
+      trees++;
+    }
+    for (const [lx, lz] of ud.hedge ?? []) {
+      if (!pf.types.has("pricklyPear")) pf.setType("pricklyPear", structuredClone(FOLIAGE_PRESETS.pricklyPear));
+      const [x, z] = at(lx, lz), k = hedge * 0.618;
+      pf.add("pricklyPear", x, app.getWorldHeight(x, z) - 0.05, z, { rotY: k * 7, scale: 0.8 + (k % 1) * 0.5, seed: (k + 0.29) % 1 });
+      hedge++;
+    }
+  }
+  pf.counts = { trees, hedge };
   app.addPreRenderHook(() => {
     const d = app.environment?.getLightDirection?.();
     if (d) pf.setSunDir(d);
@@ -370,7 +419,7 @@ export async function placeShowroom(app, list = SHOWROOM) {
       }
     }
   }
-  placed.plants = placePlants(app);
+  placed.plants = placePlants(app, placed);
   // The post's tricolour: live cloth on its flag mount.
   const flags = [];
   for (const e of list) {

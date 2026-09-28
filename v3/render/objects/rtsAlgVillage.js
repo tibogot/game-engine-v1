@@ -3,7 +3,18 @@
  * the DECHRA (a stone village stepping up a slope), the KOUBBA (a marabout's
  * white domed tomb, on the skyline above its village), the CEMETERY beside
  * it, the village WELL with its troughs, and the ZERIBA (a thorn-brush pen
- * for the flock).
+ * for the flock). Round them, the land they work: walled olive and fig
+ * GARDENS, almond TERRACES up the slopes, the round THRESHING FLOOR.
+ *
+ * TREES AND HEDGES are not geometry here: a piece lists them in
+ * `userData.trees` ({ kind, x, z, scale, seed }, kind a foliage preset —
+ * olive, fig, almond) and `userData.hedge` ([x, z] prickly pears), in its
+ * own frame (scaled), and the game plants them with the painted fields'
+ * own plants (placedFoliage.js) — same shading, wind and LODs.
+ *
+ * NAV: `userData.navRects` (optional, scaled, piece frame) replaces the
+ * footprint as what blocks units: [] for ground men walk over (terraces, a
+ * threshing floor), the walls alone for a garden (in through its gate).
  *
  * Built from the same parts as the mechta (rtsMechta.js `house`) and the
  * Algeria kit (rtsAlgeria.js: dry stone, field stones, brush), so a dechra
@@ -22,7 +33,7 @@
 import * as THREE from "three";
 import { MAT, buildBox, rng, wirePart } from "./rtsParts.js";
 import { house } from "./rtsMechta.js";
-import { brushClump, clayJar, earthBerm, fieldStone, finish } from "./rtsAlgeria.js";
+import { brushClump, clayJar, dryStone, earthBerm, fieldStone, finish } from "./rtsAlgeria.js";
 
 const FLAT = () => 0;
 
@@ -137,20 +148,52 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
       const lip = 0.2 + (houses.length % 2) * 0.05;
       const sh = y - low + 0.7 + lip;
       parts.push({ geo: buildBox(w + 0.36, sh, d + 0.36), pos: [cx, y + lip - sh / 2, cz], mat: MAT.rubble, tone: 0.32 + R() * 0.15 });
-      houses.push({ x: cx, z: cz, door: hh.door });
+      houses.push({ x: cx, z: cz, door: hh.door, w, d, row: r });
       x += w + (R() < 0.2 ? 1.8 + R() : 0.08);
     }
   }
-  // The lane up through the village: a stepped path of flat stones on the
-  // ground, one side of the mosque.
-  for (let k = 0; k < rows * 5; k++) {
-    const z = z0 - 5 + k * (rowStep / 5), x = -width / 2 - 2 + Math.sin(k * 0.6) * 0.6;
-    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 1.1, 0.24, 0.7), pos: [x, groundAt(x, z) + 0.06, z], rot: [0, R() * 0.4, 0], mat: MAT.limestone, tone: 0.5 + R() * 0.15 });
+  // Everything below has its OWN random stream: the houses above are the
+  // village as approved, and stay put whatever the lanes and yards do.
+  const RL = rng(seed + 91);
+  const trees = [];
+  // THE LANES up through the village, one at each end: a STAIR climbing the
+  // real ground, the lane wandering a little — every 1.3 m a riser of
+  // stones on edge, and the step behind it PAVED to the next riser (two
+  // flagstones side by side, a third across the joint). Risers alone every
+  // metre with the ground between read as a ladder (seen in the game).
+  const xEnd = Math.max(...houses.map((h) => h.x + (h.mosque ? 6.4 : h.w / 2)));
+  for (const lx of [-width / 2 - 2, xEnd + 1.8]) {
+    for (let z = z0 - 5.5; z < z0 + (rows - 1) * rowStep + 5; z += 1.3) {
+      const x = lx + Math.sin(z * 0.23) * 0.5, g = groundAt(x, z);
+      for (const o of [-0.62, 0, 0.62]) {
+        parts.push({ geo: fieldStone(Math.floor(RL() * 1e6), 0.62, 0.24, 0.24), pos: [x + o, g + 0.06, z], rot: [(RL() - 0.5) * 0.1, (RL() - 0.5) * 0.15, (RL() - 0.5) * 0.1], mat: MAT.limestone, tone: 0.44 + RL() * 0.14 });
+      }
+      const zt = z + 0.66, gt = groundAt(x, zt);
+      for (const [o, w, dz] of [[-0.42, 0.88, 0], [0.44, 0.84, 0.05], [0.02, 0.6, 0.38]]) {
+        parts.push({ geo: fieldStone(Math.floor(RL() * 1e6), w, 0.14, 0.62), pos: [x + o, gt + 0.07 + dz * 0.1, zt + dz - 0.12], rot: [0, (RL() - 0.5) * 0.25, 0], mat: MAT.limestone, tone: 0.5 + RL() * 0.12 });
+      }
+    }
   }
-  const bb = new THREE.Box3();
-  for (const hs of houses) bb.expandByPoint(new THREE.Vector3(hs.x, 0, hs.z));
-  const geo = finish(parts, { hx: width / 2 + 4, hz: (rows * rowStep) / 2 + 3, cx: 0, cz: 0, height: 14 });
+  // COURTYARDS in front of the lowest row (the side the camera sees): a
+  // dry-stone yard wall round the door, open in the middle; in it a tabouna
+  // (the clay bread oven), jars, or a fig tree.
+  for (const h of houses) {
+    if (h.row !== 0 || h.mosque || RL() < 0.35) continue;
+    const zf = h.z - h.d / 2 - 0.25, deep = 3.2 + RL() * 1.2, x0 = h.x - h.w / 2 + 0.3, x1 = h.x + h.w / 2 - 0.3;
+    const gap = 0.75;
+    dryStone(parts, RL, [[h.x - gap, zf - deep], [x0, zf - deep], [x0, zf]], { courses: 3, h: 1.05, depth: 0.45, len: 0.5, groundAt, tone: 0.48 });
+    dryStone(parts, RL, [[h.x + gap, zf - deep], [x1, zf - deep], [x1, zf]], { courses: 3, h: 1.05, depth: 0.45, len: 0.5, groundAt, tone: 0.48 });
+    const ix = h.x + (RL() < 0.5 ? -1 : 1) * (h.w / 2 - 1.3), iz = zf - deep + 1.2;
+    const what = RL();
+    if (what < 0.4) trees.push({ kind: "fig", x: ix, z: iz, scale: 0.6 + RL() * 0.2, seed: Math.floor(RL() * 1000) });
+    else if (what < 0.75) parts.push({ geo: earthBerm([[0.7, -0.1], [0.62, 0.35], [0.4, 0.62], [0.001, 0.7]], { seed: Math.floor(RL() * 1e6), segs: 12, rJit: 0.05, yJit: 0.03 }), pos: [ix, groundAt(ix, iz), iz], mat: MAT.spoil, tone: 0.55 });
+    else for (let k = 0; k < 3; k++) parts.push(clayJar(ix + k * 0.42, groundAt(ix + k * 0.42, iz) - 0.02, iz, 0.8 + RL() * 0.3));
+  }
+  // The footprint reaches the far lane (the last house of a row can run past
+  // width / 2).
+  const geo = finish(parts, { hx: Math.max(width / 2 + 4, xEnd + 3), hz: (rows * rowStep) / 2 + 3, cx: 0, cz: 0, height: 14 });
   geo.userData.houses = houses.map((h) => ({ x: h.x * 1.3, z: h.z * 1.3, mosque: !!h.mosque }));
+  geo.userData.trees = scaled(trees);
   // The nest's floor, in the piece's frame (scaled): a game stands its stork there.
   geo.userData.nest = nest ? { x: nest[0] * 1.3, y: nest[1] * 1.3, z: nest[2] * 1.3 } : null;
   return geo;
@@ -253,6 +296,26 @@ export function buildCemetery({ seed = 1958, rows = 5, cols = 7, align = 0, grou
 // ── WELL ────────────────────────────────────────────────────────────────────
 
 /**
+ * A ROUGH STONE TROUGH at (x, y, z), turned `yaw` (length along local X):
+ * the water's edge well inside the rim, so the rim stones show all round.
+ */
+function stoneTrough(R, x, y, z, yaw, { len = 2.4 } = {}) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const at = (lx, lz) => [x + lx * c + lz * s, z - lx * s + lz * c];
+  const out = [];
+  const stone = (lx, lz, w, h, d, py, tone) => {
+    const [px, pz] = at(lx, lz);
+    out.push({ geo: fieldStone(Math.floor(R() * 1e6), w, h, d), pos: [px, y + py, pz], rot: [(R() - 0.5) * 0.08, yaw + (R() - 0.5) * 0.06, (R() - 0.5) * 0.08], mat: MAT.limestone, tone });
+  };
+  stone(0, 0, len, 0.28, 0.72, 0.08, 0.42 + R() * 0.1);                        // the bed
+  for (const side of [-1, 1]) stone((R() - 0.5) * 0.1, side * 0.31, len + 0.1, 0.56, 0.22, 0.24, 0.45 + R() * 0.15);
+  for (const end of [-1, 1]) stone(end * (len / 2 - 0.05), 0, 0.24, 0.52, 0.72, 0.23, 0.45 + R() * 0.15);
+  const [wx, wz] = at(0, 0);
+  out.push({ geo: buildBox(len - 0.34, 0.05, 0.36), pos: [wx, y + 0.38, wz], rot: [0, yaw, 0], mat: MAT.steel, tone: 0.05 });
+  return out;
+}
+
+/**
  * WELL — where the village's women and the flocks come: a round curb of
  * stone, two forked posts and a beam with a pulley, a rope and a leather
  * bucket; long stone troughs for the animals in front; jars waiting.
@@ -274,11 +337,10 @@ export function buildVillageWell({ seed = 1959 } = {}) {
   parts.push({ geo: new THREE.TorusGeometry(0.17, 0.04, 5, 12), pos: [0, 2.3, 0], mat: MAT.timber, tone: 0.3 });
   parts.push(wirePart([0.17, 2.3, 0], [0.17, 0.95, 0], 0.012, { mat: MAT.canvas, tone: 0.4 }));
   parts.push({ geo: new THREE.CylinderGeometry(0.2, 0.16, 0.34, 10), pos: [0.17, 0.95, 0], mat: MAT.hessian, tone: 0.3 });
-  // Troughs: long hollowed stones, water in them.
-  for (const [x, z, yaw] of [[-1.6, -2.0, 0.1], [1.4, -2.2, -0.15]]) {
-    parts.push({ geo: buildBox(2.4, 0.5, 0.62), pos: [x, 0.2, z], rot: [0, yaw, 0], mat: MAT.limestone, tone: 0.45 });
-    parts.push({ geo: buildBox(2.1, 0.06, 0.36), pos: [x, 0.39, z], rot: [0, yaw, 0], mat: MAT.steel, tone: 0.05 });
-  }
+  // Troughs: rough stone, not cut blocks — two long slabs set on edge, a
+  // stone at each end, a flat one under, water between. Their own stream:
+  // the rest of the well unchanged.
+  for (const [x, z, yaw] of [[-1.6, -2.0, 0.1], [1.4, -2.2, -0.15]]) parts.push(...stoneTrough(rng(seed + Math.round(x * 10)), x, 0, z, yaw));
   // Flat stones worn round the curb; jars waiting.
   for (let k = 0; k < 9; k++) {
     const a = (k / 9) * Math.PI * 2;
@@ -327,9 +389,160 @@ export function buildZeriba({ seed = 1960, r = 6.5, groundAt = FLAT } = {}) {
   parts.push(...brushClump(R, 1.4, groundAt(1.4, -r - 0.9), -r - 0.9, { h: 0.8, r: 0.7, dry: true }));
   // Inside: a trough, a heap of fodder, a few stones.
   const tg = groundAt(-1.5, 1.5);
-  parts.push({ geo: buildBox(2.0, 0.42, 0.55), pos: [-1.5, tg + 0.15, 1.5], rot: [0, 0.4, 0], mat: MAT.limestone, tone: 0.45 });
-  parts.push({ geo: buildBox(1.7, 0.06, 0.32), pos: [-1.5, tg + 0.34, 1.5], rot: [0, 0.4, 0], mat: MAT.steel, tone: 0.05 });
+  parts.push(...stoneTrough(rng(seed + 3), -1.5, tg, 1.5, 0.4, { len: 2.0 }));
   const fg = groundAt(2, 2.2);
   parts.push({ geo: earthBerm([[1.2, -0.15], [0.9, 0.35], [0.4, 0.6], [0.001, 0.65]], { seed, segs: 12, rJit: 0.15, yJit: 0.08 }), pos: [2, fg, 2.2], mat: MAT.thatch, tone: 0.45 });
   return finish(parts, { hx: r + 1.2, hz: r + 1.6, height: 1.8 });
+}
+
+// ── THE LAND ROUND THE VILLAGE ──────────────────────────────────────────────
+
+const KIT = 1.3;   // finish() scales the geometry; lists of points follow it
+const scaled = (list) => list.map((t) => ({ ...t, x: t.x * KIT, z: t.z * KIT }));
+
+/**
+ * GARDEN — a walled plot of olives (or figs): dry-stone walls chest high all
+ * round, a gap for the gate at the front (-Z) with two big stones for posts
+ * and a bundle of thorn brush to close it, the trees in loose rows inside,
+ * the stones cleared off the soil piled in a corner. A prickly-pear hedge
+ * along the back and one side, outside the wall (userData.hedge).
+ *
+ * `kind`: "olive" (a fig or two by the wall), "fig", or "mixed".
+ */
+export function buildGarden({ seed = 1961, w = 18, d = 13, kind = "olive", groundAt = FLAT } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const hx = w / 2, hz = d / 2, gx = -hx * 0.3, gate = 1.6;
+  // One run round from one gatepost to the other: the corners bond.
+  dryStone(parts, R, [[gx - gate, -hz], [-hx, -hz], [-hx, hz], [hx, hz], [hx, -hz], [gx + gate, -hz]], { courses: 3, h: 1.1, depth: 0.55, len: 0.55, groundAt, tone: 0.5 });
+  for (const sx of [-1, 1]) {
+    const x = gx + sx * (gate + 0.1), g = groundAt(x, -hz);
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.55, 1.45, 0.6), pos: [x, g + 0.55, -hz], rot: [0, R() * 0.4, 0], mat: MAT.limestone, tone: 0.5 });
+  }
+  parts.push(...brushClump(R, gx + gate * 0.6, groundAt(gx + gate * 0.6, -hz + 0.3), -hz + 0.3, { h: 0.9, r: 0.6, dry: true }));
+  // The cleared stones, heaped in the back corner.
+  const cx = hx - 1.6, cz = hz - 1.6, cg = groundAt(cx, cz);
+  for (let k = 0; k < 9; k++) {
+    const a = R() * Math.PI * 2, rr = R() * 0.8;
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.45 + R() * 0.3, 0.35 + R() * 0.2, 0.4 + R() * 0.3), pos: [cx + Math.cos(a) * rr, cg + 0.12 + (k > 5 ? 0.25 : 0), cz + Math.sin(a) * rr], rot: [R(), R() * 3, R()], mat: MAT.limestone, tone: 0.4 + R() * 0.2 });
+  }
+  // The trees, in loose rows (olives ~7 m apart in kit metres: 9 m on the ground).
+  const trees = [];
+  const sp = kind === "fig" ? 5.5 : 7;
+  for (let z = -hz + 2.6; z <= hz - 2.4; z += sp * (0.9 + R() * 0.2)) {
+    for (let x = -hx + 2.6 + R() * 0.8; x <= hx - 2.4; x += sp * (0.9 + R() * 0.2)) {
+      if (Math.hypot(x - cx, z - cz) < 2.6) continue;                // the stone heap
+      const edge = Math.min(hx - Math.abs(x), hz - Math.abs(z)) < 3.2;
+      const k = kind === "mixed" ? (R() < 0.45 ? "fig" : "olive") : kind === "olive" && edge && R() < 0.2 ? "fig" : kind;
+      trees.push({ kind: k, x: x + (R() - 0.5) * 1.2, z: z + (R() - 0.5) * 1.2, scale: 0.8 + R() * 0.35, seed: Math.floor(R() * 1000) });
+    }
+  }
+  // The hedge: back and left side, a metre outside the wall, with gaps.
+  const hedge = [];
+  for (let x = -hx - 1; x <= hx + 1; x += 1.6) if (R() > 0.15) hedge.push([x + (R() - 0.5) * 0.5, hz + 1.1 + (R() - 0.5) * 0.4]);
+  for (let z = -hz + 1; z < hz; z += 1.6) if (R() > 0.2) hedge.push([-hx - 1.1 + (R() - 0.5) * 0.4, z + (R() - 0.5) * 0.5]);
+  const geo = finish(parts, { hx: hx + 0.6, hz: hz + 0.6, height: 1.6 });
+  geo.userData.trees = scaled(trees);
+  geo.userData.hedge = hedge.map(([x, z]) => [x * KIT, z * KIT]);
+  // The walls block; the gate (1.6 x 2, a nav cell wide at 1.3) stays open.
+  // Each rect at least half a 4 m nav cell thick, or it stamps no cell.
+  const t = 2 / KIT;
+  geo.userData.navRects = [
+    { cx: 0, cz: hz, hx: hx + 0.3, hz: t },
+    { cx: -hx, cz: 0, hx: t, hz: hz + 0.3 },
+    { cx: hx, cz: 0, hx: t, hz: hz + 0.3 },
+    { cx: (-hx + gx - gate) / 2, cz: -hz, hx: (gx - gate + hx) / 2, hz: t },
+    { cx: (hx + gx + gate) / 2, cz: -hz, hx: (hx - gx - gate) / 2, hz: t },
+  ].map((r) => ({ cx: r.cx * KIT, cz: r.cz * KIT, hx: r.hx * KIT, hz: r.hz * KIT }));
+  return geo;
+}
+
+/**
+ * TERRACES — almonds on a slope: dry-stone retaining walls along the
+ * contour, each holding the ground up behind it (its height is what the
+ * slope gives: a low kerb on the flat, a metre and more on a hillside), a
+ * row of trees on each step. The slope rises along +Z (turn the piece so it
+ * climbs away from the camera, as the dechra does). The ground itself is
+ * not graded: the walls read as the terraces from an RTS camera.
+ */
+export function buildTerraces({ seed = 1962, w = 22, rows = 4, step = 5, kind = "almond", groundAt = FLAT } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const trees = [];
+  const z0 = -((rows - 1) * step) / 2;
+  for (let r = 0; r < rows; r++) {
+    // A wall a little bowed and a little shorter or longer each step, the
+    // way hand-built terraces follow the hill.
+    const z = z0 + r * step + (R() - 0.5) * 0.6, bow = (R() - 0.5) * 1.8;
+    const a = -w / 2 + R() * 1.5, b = w / 2 - R() * 1.5;
+    let s = a;
+    while (s < b) {
+      const l = 0.5 + R() * 0.3, x = s + l / 2;
+      const zz = z + bow * Math.sin(Math.PI * (x - a) / (b - a));
+      // Foot on the downhill ground, top at the uphill ground behind it.
+      const foot = groundAt(x, zz - 0.4), top = Math.max(foot + 0.45, groundAt(x, zz + 1.2) + 0.12);
+      const n = Math.min(7, Math.ceil((top - foot + 0.12) / 0.3));
+      for (let c = 0; c < n; c++) {
+        const sh = 0.3 * (1.1 + R() * 0.3);
+        parts.push({
+          geo: fieldStone(Math.floor(R() * 1e6), l + 0.1, sh, 0.5 * (0.85 + R() * 0.3)),
+          pos: [x + (c % 2) * 0.12, foot - 0.12 + c * 0.3 + sh * 0.42, zz + c * 0.04],
+          rot: [(R() - 0.5) * 0.1, (R() - 0.5) * 0.2, (R() - 0.5) * 0.1],
+          mat: MAT.limestone, tone: 0.38 + R() * 0.24,
+        });
+      }
+      s += l;
+    }
+    // The step's trees, 5-6 m apart, on the tread above this wall.
+    if (r < rows - 1 || R() < 0.5) {
+      for (let x = a + 2 + R() * 2; x < b - 1.5; x += 5 + R() * 1.5) {
+        trees.push({ kind, x, z: z + step * 0.5 + bow * Math.sin(Math.PI * (x - a) / (b - a)) * 0.6 + (R() - 0.5) * 0.8, scale: 0.8 + R() * 0.35, seed: Math.floor(R() * 1000) });
+      }
+    }
+  }
+  const geo = finish(parts, { hx: w / 2 + 0.5, hz: (rows * step) / 2 + 0.5, height: 1.8 });
+  geo.userData.trees = scaled(trees);
+  geo.userData.navRects = [];    // men climb terraces
+  return geo;
+}
+
+/**
+ * THRESHING FLOOR (aire à battre) — a round floor of beaten earth paved
+ * with flat stones, a ring of stones set on edge round it, on the windy
+ * shoulder where the chaff blows off: the mules walk the sheaves round it
+ * in summer. A heap of straw at its side, a wooden fork. Stands on a pad.
+ */
+export function buildThreshingFloor({ seed = 1963, r = 4.5 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  // The floor: a very flat dome of earth, well clear of the ground band.
+  parts.push({ geo: earthBerm([[r + 0.25, -0.14], [r, 0.1], [r * 0.5, 0.13], [0.001, 0.14]], { seed, segs: 28, rJit: 0.03, yJit: 0.005 }), pos: [0, 0, 0], mat: MAT.spoil, tone: 0.5 });
+  // Paving: flat stones on a jittered hex grid, smaller than their spacing
+  // (they never overlap: no two faces share a plane).
+  const pitch = 0.82;
+  for (let j = -Math.ceil(r / pitch); j <= Math.ceil(r / pitch); j++) {
+    for (let i = -Math.ceil(r / pitch); i <= Math.ceil(r / pitch); i++) {
+      const x = (i + (j % 2) * 0.5) * pitch + (R() - 0.5) * 0.08, z = j * pitch * 0.87 + (R() - 0.5) * 0.08;
+      if (Math.hypot(x, z) > r - 0.45 || R() < 0.08) continue;
+      // Near the pitch, turned only a little: tight paving (0.5 m slabs with
+      // earth between read as a biscuit's dots, seen in the game).
+      parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.72 + R() * 0.06, 0.1, 0.64 + R() * 0.06), pos: [x, 0.13 + R() * 0.012, z], rot: [0, (j % 2) * 0.5 + (R() - 0.5) * 0.3, 0], mat: MAT.limestone, tone: 0.5 + R() * 0.2 });
+    }
+  }
+  // The kerb: stones on edge round the rim.
+  const n = Math.round((2 * Math.PI * r) / 0.52);
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * Math.PI * 2 + (R() - 0.5) * 0.03, x = Math.cos(a) * (r - 0.12), z = Math.sin(a) * (r - 0.12);
+    const h = 0.36 + R() * 0.14;
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.5, h, 0.2), pos: [x, h * 0.3, z], rot: [(R() - 0.5) * 0.15, -a + Math.PI / 2, (R() - 0.5) * 0.1], mat: MAT.limestone, tone: 0.42 + R() * 0.2 });
+  }
+  // A heap of straw beside it, and a wooden fork leaning on the heap.
+  parts.push({ geo: earthBerm([[1.5, -0.1], [1.1, 0.5], [0.5, 0.85], [0.001, 0.92]], { seed: seed + 1, segs: 14, rJit: 0.18, yJit: 0.1 }), pos: [r + 1.6, 0, 0.8], mat: MAT.thatch, tone: 0.6 });
+  // Handle on the ground, tines up in the straw (a fork is left that way).
+  const f0 = [r + 0.4, 0.05, 0.4], f1 = [r + 1.3, 1.4, 0.85];
+  parts.push(wirePart(f0, f1, 0.03, { mat: MAT.timber, tone: 0.45 }));
+  for (const o of [-0.12, 0, 0.12]) parts.push(wirePart(f1, [f1[0] + 0.21 - 0.27 * o, f1[1] + 0.32, f1[2] + 0.11 + 0.53 * o], 0.014, { mat: MAT.timber, tone: 0.45 }));
+  const geo = finish(parts, { hx: r + 0.5, hz: r + 0.5, height: 1 });
+  geo.userData.navRects = [];    // walked over
+  return geo;
 }

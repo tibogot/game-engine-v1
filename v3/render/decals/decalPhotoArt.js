@@ -55,6 +55,12 @@ export const PHOTO_SOURCES = {
   gravel:   PH("gravel_ground_01"),
   burned:   PH("burned_ground_01"),
   stones:   PH("red_mud_stones"),
+  // Pale compacted dust: a dry-country track (alg-rts, tools/algTracks.mjs).
+  // Served by the game itself (public/textures/ground), same origin.
+  dust: {
+    diff: "/textures/ground/dry_mud_field_001/dry_mud_field_001_diff_1k.jpg",
+    nor: "/textures/ground/dry_mud_field_001/dry_mud_field_001_nor_gl_1k.jpg",
+  },
 };
 
 /** How far each strip end fades, in metres. Placement overlaps segments by this. */
@@ -483,10 +489,14 @@ export const PHOTO_RECIPES = {
  * albedo is sRGB colour + alpha, normal is tangent-space in the decal shader's
  * convention (x along the box's width = image right, y along its length = image
  * DOWN, since image row 0 is the box's +z end; see decalSystem uvD).
+ *
+ * `photo` / `tileM` override the recipe's: the same rut on another map's
+ * ground (a PHOTO_SOURCES key, at that map's layer tile in metres).
  */
-export async function bakePhotoDecal(kind, { seed = 1, size = DECAL_LAYER_SIZE } = {}) {
-  const R = PHOTO_RECIPES[kind];
-  if (!R) throw new Error(`no photo decal recipe "${kind}"`);
+export async function bakePhotoDecal(kind, { seed = 1, size = DECAL_LAYER_SIZE, photo, tileM } = {}) {
+  const base = PHOTO_RECIPES[kind];
+  if (!base) throw new Error(`no photo decal recipe "${kind}"`);
+  const R = { ...base, photo: photo ?? base.photo, tileM: tileM ?? base.tileM };
   const { diff, nor, lean } = await loadPhoto(R.photo);
   const [W, L] = R.size;
   const S = size;

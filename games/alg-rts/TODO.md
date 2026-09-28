@@ -446,7 +446,60 @@ Order: foliage → villages → animals & birds → ground detail.
       hills 7.8→6.5, wadi/aln 5.7→5.0, zoom-out 7.2→6.3. Image identical
       (0.001% px, frozen plants). Offer it to nam (palms, jungle).
 - [ ] Re-measure the earlier perf-pass changes with the correct method.
-- [ ] Olive and fig in walled gardens; almond on terraces.
+- [x] **Tracks** (2026-09-29, tools/algTracks.mjs → games/alg-rts/tracks.js):
+      the PISTE out of the post's gate (beside the sandbag chicane), past the
+      oasis to Mechta Ouled Ali, over the Oued Tighanimine at a ford to
+      Mechta el Oued, and west along the valley floor to the dechra (~600 m);
+      MULE PATHS dechra → koubba, dechra → west gully mouth → katiba, Ouled
+      Ali → east gully mouth → katiba (~800 m). ROUTED by A* over the real
+      ground (a truck holds ≤ ~12% on the flat, fords at the fords; a mule
+      climbs), round every placed piece, branches riding the trunk; a guarded
+      simplify (a straight run only where it is itself a legal move — the
+      unguarded one cut down a wadi bank at 235%). PAINT: slot 6 (was the
+      unused Snow, same textures bound → no sampler added) = "Dirt track",
+      dry_mud_field_001 tinted pale; DECALS: 104 photographic ruts / foot-worn
+      paths baked on the same dust photo (decalPhotoArt `photo`/`tileM`
+      overrides), laid along each 10 m chord, none on tight bends, uneven
+      strength and gaps (full-strength ruts read as rails). Vegetation keeps
+      slot 6 bare (algVegetation.mjs). Minimap draws them (piste pale, mule
+      paths dashed). The ALN's ROAD AMBUSH: French on a track → the band lies
+      up 15-45 m off THAT track (measured 19/20 and 15/20 spots in the band).
+      Plan: `node tools/algPlanView.mjs --layout games/alg-rts/layout.js --view play`.
+   - [ ] **you, look**: the piste's colour (a smooth tan band — paler?),
+         the ruts' strength, the mule paths (faint by design).
+   - [ ] Telegraph poles along the piste (a kit piece; the post's radio
+         mast is the only wire today).
+   - [ ] Patrol order ALONG a track; convoys (GMC) on the piste; ALN mines
+         on it (the sapper); donkeys on the mule paths.
+   - [ ] Tracks are paint + decals only: no grading. A cut bench where the
+         piste crosses a slope, if vehicles look wrong on the tilt.
+- [x] **Village dressing** (2026-09-29, rtsAlgVillage.js, placed in
+      showroom.js GARDENS): walled GARDENS (dry stone chest high, a gate with
+      two post stones and a thorn bundle, cleared stones heaped in a corner,
+      olives in loose rows / figs / mixed, a prickly-pear hedge outside the
+      back and one side) ×5; almond TERRACES (dry-stone retaining walls along
+      the contour, as high as the slope makes them, a row of trees per step,
+      turned to climb straight uphill) ×4 — three round the dechra, one
+      above Mechta el Oued; THRESHING FLOORS (a paved earth dome, a kerb of
+      stones on edge, a straw heap and a fork) ×3; the wells' troughs ROUGH
+      stone now (and the zeriba's); the dechra's two end lanes are STAIRS
+      (risers + paving, the first try read as a ladder) and some lower-row
+      houses have walled COURTYARDS (a tabouna, jars, or a fig). Spots
+      MEASURED (clear of pieces, tracks, wadi beds, oases; relief / slope).
+      Trees are PLANTED, not painted: a piece lists `userData.trees` / `hedge`
+      and the game puts them down with placedFoliage.js (new presets olive,
+      fig, almond; 60 trees, 87 prickly pears). NAV: `userData.navRects` —
+      terraces and floors walkable, a garden's walls block and its gate lets
+      men in. Both z-fight tests pass; 197/197 suites green.
+   - [ ] **you, look**: olives (second pass: smaller, airier, trunk showing),
+         figs, almonds; the threshing floor's paving (second pass: bigger
+         slabs); the straw heap (reads a bit like a beehive hut?).
+   - [ ] Terraces are walls on the untouched slope: grade each tread flat
+         (a terrain edit) if they read wrong close up.
+   - [ ] Cover: garden walls and terrace walls as COVER (algCover) — the
+         obvious place for an ambush or a French firing line.
+   - [ ] GPU cost of the dressing: A/B said −0.07 ms, but the frame read
+         0.58 ms total (this view is normally 5-7) — re-measure in a focused tab.
 - [ ] Doum: fix its far LOD (flat green mats) and paint it back.
 - [x] **Villages** (v3/render/objects/rtsAlgVillage.js, 2026-09-27):
       DECHRA (4 terraced rows of Chaouia houses — the mechta's own `house()`

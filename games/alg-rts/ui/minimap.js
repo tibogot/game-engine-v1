@@ -13,6 +13,7 @@
 //     the enemy at the top. The world square is diagonal to that view here, so
 //     the map shows as a turned square with dark corners (never cropped).
 import * as THREE from "three";
+import { TRACK_LINES } from "../algTracks.js";
 
 const BAKE_RES = 160;
 const VIEW_PX  = 160;   // fills the HUD bar's left slot
@@ -119,6 +120,22 @@ function bakeTerrain(app, frame) {
     }
   }
   ctx.putImageData(img, 0, 0);
+  // The tracks (algTracks.js), as a Company of Heroes minimap shows its
+  // roads: the piste a pale line, the mule paths a thin dashed one.
+  ctx.lineJoin = ctx.lineCap = "round";
+  for (const t of TRACK_LINES) {
+    const piste = t.kind === "piste";
+    ctx.strokeStyle = piste ? "rgba(236, 222, 192, 0.9)" : "rgba(92, 64, 40, 0.8)";
+    ctx.lineWidth = (piste ? 1.8 : 1) * (res / VIEW_PX);
+    ctx.setLineDash(piste ? [] : [3 * (res / VIEW_PX), 2 * (res / VIEW_PX)]);
+    ctx.beginPath();
+    t.line.forEach((p, i) => {
+      const m = frame.toMini(p.x, p.z);
+      ctx[i ? "lineTo" : "moveTo"](m.x / scale, m.y / scale);
+    });
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
   return canvas;
 }
 

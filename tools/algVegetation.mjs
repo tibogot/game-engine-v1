@@ -21,6 +21,7 @@
  *
  * Density is DERIVED from the map: height (from the land's own histogram),
  * slope (nothing above the 34° nav limit), the lakes (tools/algOasis.mjs),
+ * the wadi beds and the tracks (paint slots 4 and 6: bare),
  * and the game's SITES, kept clear. Idempotent: every run rewrites the
  * channels it owns from scratch.
  */
@@ -156,9 +157,21 @@ const wadiBed = (x, z) => {
   const pz = Math.min(SRES - 1, Math.max(0, Math.floor(((z + W / 2) / W) * SRES)));
   return splat[SRES * SRES * 4 + (pz * SRES + px) * 4] / 255;
 };
+// The tracks (paint slot 6, tools/algTracks.mjs): beaten earth — bare. Read
+// with a margin (the widest weight within ~1.5 m), so a shrub's crown does
+// not overhang the piste.
+const trackAt = (x, z) => {
+  let best = 0;
+  for (const [ox, oz] of [[0, 0], [1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) {
+    const px = Math.min(SRES - 1, Math.max(0, Math.floor(((x + ox + W / 2) / W) * SRES)));
+    const pz = Math.min(SRES - 1, Math.max(0, Math.floor(((z + oz + W / 2) / W) * SRES)));
+    best = Math.max(best, splat[SRES * SRES * 4 + (pz * SRES + px) * 4 + 2] / 255);
+  }
+  return best;
+};
 const common = (x, z) => {
   const h = H(x, z), s = slopeDeg(x, z);
-  if (s > NAV_MAX_SLOPE_DEG || wet(x, z) || wadiBed(x, z) > 0.25) return null;
+  if (s > NAV_MAX_SLOPE_DEG || wet(x, z) || wadiBed(x, z) > 0.25 || trackAt(x, z) > 0.2) return null;
   const k = siteFade(x, z) * borderFade(x, z);
   return k > 0 ? { h, s, k } : null;
 };

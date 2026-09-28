@@ -283,6 +283,40 @@ export const FOLIAGE_PRESETS = {
     plumesPerStem: 0, plumeSpread: 0, crownDepth: 1.25,   // a round crown down to head height
     colorBase: "#1b2517", colorTip: "#3f4c30", colorHead: "#5c5446", size: 8, translucency: 0.3,
   },
+  // ── THE AURÈS GARDENS (planted by hand: rtsAlgVillage.js lists them, the
+  // game places them, placedFoliage.js) — the holm oak's builder again. ────
+  // OLIVE — a short, twisted, often split trunk and an open, irregular,
+  // SILVER-grey-green crown (the leaves' pale undersides): lighter and
+  // airier than the holm oak beside it, the tree that says "cultivated".
+  olive: {
+    kind: "dipterocarp",
+    // First pass (5.5 m, 120 cards, crown 0.95 deep) read as fluffy clouds
+    // down to the wall, no trunk: smaller, fewer cards, crown up off the trunk.
+    fronds: 4, frondLength: 1.0, leaflets: 80, leafletWidth: 0.75, leafletAngle: 30,
+    spread: 0.62, arch: 0.7, droop: 0.22, stemWidth: 2.0, bareStalk: 0.42,
+    plumesPerStem: 0, plumeSpread: 0, crownDepth: 0.75,
+    colorBase: "#3e4a3a", colorTip: "#8e9a80", colorHead: "#6a6258", size: 4.4, translucency: 0.35,
+  },
+  // FIG — low and spreading, wider than tall, pale grey limbs forking near
+  // the ground, big leaves in a dense bright mid-green: the greenest thing
+  // in a village yard.
+  fig: {
+    kind: "dipterocarp",
+    fronds: 5, frondLength: 1.0, leaflets: 110, leafletWidth: 1.05, leafletAngle: 26,
+    spread: 0.85, arch: 0.9, droop: 0.28, stemWidth: 1.5, bareStalk: 0.14,
+    plumesPerStem: 0, plumeSpread: 0, crownDepth: 1.1,
+    colorBase: "#2b421f", colorTip: "#6f8a3c", colorHead: "#8a8478", size: 4.5, translucency: 0.5,
+  },
+  // ALMOND — the terraces' tree: an upright vase of thin dark limbs and a
+  // light, open crown of narrow grey-green leaves (in summer; the white
+  // blossom is February's).
+  almond: {
+    kind: "dipterocarp",
+    fronds: 4, frondLength: 1.0, leaflets: 90, leafletWidth: 0.72, leafletAngle: 36,
+    spread: 0.55, arch: 0.6, droop: 0.15, stemWidth: 1.2, bareStalk: 0.36,
+    plumesPerStem: 0, plumeSpread: 0, crownDepth: 0.9,
+    colorBase: "#34432c", colorTip: "#7a8c5a", colorHead: "#4a3e34", size: 5, translucency: 0.4,
+  },
   // JUNIPER / LENTISK SCRUB — the dark knee-to-chest-high shrubs dotting
   // every dry slope: a dense dark ball, the cauliflower builder cut down to a
   // shrub (the bush builder is 90 triangles and vanished at 1.6 m).

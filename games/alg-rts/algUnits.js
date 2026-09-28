@@ -76,10 +76,13 @@ function stampShowroom(navGrid, showroom) {
   for (const o of Object.values(showroom ?? {})) {
     const ud = o?.isObject3D ? o.geometry?.userData : null;
     if (!ud?.footprint || ud.gear || ud.rotors) continue;
-    const f = ud.footprint;
     o.updateMatrixWorld(true);
-    const c = o.localToWorld(o.position.clone().set(f.cx, 0, f.cz));
-    navGrid.addFootprint(c.x, c.z, f.hx, f.hz, o.rotation.y);
+    // `navRects` (rtsAlgVillage.js) replaces the footprint: [] for ground men
+    // walk over (terraces, threshing floors), a garden's walls alone.
+    for (const f of ud.navRects ?? [ud.footprint]) {
+      const c = o.localToWorld(o.position.clone().set(f.cx, 0, f.cz));
+      navGrid.addFootprint(c.x, c.z, f.hx, f.hz, o.rotation.y);
+    }
     n++;
   }
   return n;

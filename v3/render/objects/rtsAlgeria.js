@@ -659,8 +659,11 @@ function crag(seed, w, h, d) {
  * course offset half a stone, the stones overlapping so no daylight shows
  * through, a slight batter. How every wall in the Aurès is built — sangars,
  * terraces, gourbis.
+ *
+ * `groundAt(x, z)` (optional): the wall stands on that ground, each stone
+ * on the ground under it — a garden wall down a slope (rtsAlgVillage.js).
  */
-export function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, len = 0.5, batter = 0.05, tone = 0.5, closed = false } = {}) {
+export function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, len = 0.5, batter = 0.05, tone = 0.5, closed = false, groundAt = null } = {}) {
   const ch = h / courses;
   const segs = [];
   let total = 0;
@@ -686,7 +689,7 @@ export function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, le
       const sh = ch * (1.15 + R() * 0.35);
       parts.push({
         geo: fieldStone(Math.floor(R() * 1e6), l + 0.12, sh, depth * (0.8 + R() * 0.35)),
-        pos: [x + nx * inset, c * ch + sh * 0.42 - 0.06, z + nz * inset],
+        pos: [x + nx * inset, (groundAt ? groundAt(x, z) : 0) + c * ch + sh * 0.42 - 0.06, z + nz * inset],
         rot: [(R() - 0.5) * 0.12, yaw + Math.PI / 2 + (R() - 0.5) * 0.25, (R() - 0.5) * 0.12],
         mat: MAT.limestone, tone: tone - 0.12 + R() * 0.24,   // one stone's face: the rubble cell is a WALL (its joints read as black blotches on a stone)
       });
