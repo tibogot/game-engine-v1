@@ -38,7 +38,8 @@ import { computeShoreField, makeHeightAt, SHELF } from "./oceanproShoreField.js"
 import { SHORE_DEFAULTS } from "./oceanproShore.js";
 import { OceanProShoreSim } from "./oceanproShoreSim.js";
 import { surfFoamCode } from "./oceanproSurfFoam.js";
-import { OceanProBreakers, buildCoastStations } from "./oceanproBreakers.js";
+import { OceanProBreakers, buildCoastStations, fftDispCode } from "./oceanproBreakers.js";
+import { OceanProSpray } from "./oceanproSpray.js";
 
 /** The settings the mode saves with a project (toolState.worldOcean.pro). */
 export const OCEANPRO_DEFAULTS = {
@@ -77,6 +78,10 @@ export const OCEANPRO_DEFAULTS = {
   surfTurbidity: SHORE_DEFAULTS.turbidity,
   /** the thrown lip of plunging breakers (Tidewater's Breakers) */
   lips: true,
+  /** the spray the breakers throw: drops, torn sheets, mist (Tidewater's Spray) */
+  spray: true,
+  /** emission multiplier of the spray */
+  sprayAmount: 1,
   /** 0 = shaded; 1 back faces, 2 normals, 3 foam, 6 water path, 7 seabed seen, 8 depth */
   debug: 0,
 };
@@ -98,8 +103,10 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   const detailTex = createSeaDetailTexture();
   // the shore simulation (foam carried by the water, wet sand) in a window that follows the camera
   const sim = new OceanProShoreSim(renderer);
-  // the plunging breakers' thrown lip, along the coast near the camera
-  const breakers = new OceanProBreakers({ renderer, scene, fft });
+  // the spray the breakers throw (a GPU particle ring), and the plunging breakers' thrown lip along
+  // the coast near the camera (their crest finder is the spray's emitter)
+  const spray = new OceanProSpray({ renderer, scene, fftDisp: fftDispCode(fft) });
+  const breakers = new OceanProBreakers({ renderer, scene, fft, spray });
   const surfFoam = surfFoamCode();
   // one shader per scene-depth type (multisampled or not; see oceanproShader.js DEPTH_T), built on need
   const shaders = new Map();
@@ -197,6 +204,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
   {
     const sh = shaderFor(depthMs);
     breakers.buildMesh({ all: sh.all, loadFn: sh.loadFn, gate, cloudNode, skyNode, clampNode });
+    spray.buildMesh({ all: sh.all, loadFn: sh.loadFn, gate, cloudNode, crestTexture: breakers.crest, heightTexNode });
   }
   const mesh = new THREE.Mesh(cdlod.geometry, material);
   mesh.name = "OceanPro";
@@ -253,6 +261,53 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     field.size = size;
     field.key = ""; // stale whatever the sea level
     field.heightAt = makeHeightAt({ heights, size, terrainSize, maxHeight, heightBase });
+    rowOrder.stale = true;
+  }
+
+  /*
+   * The ROW ORDER in which raw WGSL sees the heightmap. The terrain samples it through three (which
+   * flips a render target's rows back); the ocean's raw textureLoad sees the rows as they sit on the
+   * GPU, and that depends on how the map got there (a sculpt pass, a load's blit, a plain upload),
+   * not only on whether it is a render target: a rule on isRenderTargetTexture read a loaded map
+   * mirrored in z (every depth wrong: the waves broke 70 m out instead of 25). So it is MEASURED:
+   * one column of the GPU texture read back and compared with the CPU copy, both ways, whenever
+   * the heights or the texture change. Until a measurement lands: the render-target rule.
+   */
+  const rowOrder = { flip: null, stale: true, pending: false, tex: null };
+  function heightFlip() {
+    return rowOrder.flip ?? !!heightTexNode.value?.isRenderTargetTexture;
+  }
+  function measureRowOrder() {
+    const tex = heightTexNode.value;
+    if (tex !== rowOrder.tex) { rowOrder.tex = tex; rowOrder.stale = true; }
+    if (!rowOrder.stale || rowOrder.pending || !tex || !field.heights) return;
+    const g = renderer.backend.get(tex)?.texture;
+    const N = field.size;
+    const texel = g?.format === "rgba32float" ? 16 : g?.format === "r32float" ? 4 : 0;
+    if (!g || !texel || g.height !== N || !(g.usage & GPUTextureUsage.COPY_SRC)) return;
+    rowOrder.stale = false;
+    rowOrder.pending = true;
+    const dev = renderer.backend.device;
+    const col = Math.floor(N * 0.53);
+    const buf = dev.createBuffer({ size: 256 * N, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const enc = dev.createCommandEncoder({ label: "oceanpro height row order" });
+    enc.copyTextureToBuffer({ texture: g, origin: { x: col, y: 0 } }, { buffer: buf, bytesPerRow: 256 }, [1, N, 1]);
+    dev.queue.submit([enc.finish()]);
+    const heights = field.heights;
+    buf.mapAsync(GPUMapMode.READ).then(() => {
+      const f = new Float32Array(buf.getMappedRange());
+      let direct = 0, flipped = 0;
+      for (let j = 0; j < N; j++) {
+        const v = f[j * 64];
+        direct += Math.abs(v - heights[j * N + col]);
+        flipped += Math.abs(v - heights[(N - 1 - j) * N + col]);
+      }
+      buf.unmap();
+      buf.destroy();
+      rowOrder.pending = false;
+      // (a map symmetric in z can't tell: keep what we had)
+      if (Math.abs(direct - flipped) > 1e-3 * N) rowOrder.flip = flipped < direct;
+    }).catch(() => { rowOrder.pending = false; buf.destroy(); });
   }
 
   // ---- per frame
@@ -286,6 +341,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     fft.update(dt);
 
     uSea.value = o.seaLevel ?? 0;
+    measureRowOrder();
     cdlod.baseY = uSea.value;
     cdlod.update(camera);
 
@@ -312,14 +368,22 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
       sim.follow(_c);
       lastSimArgs = {
         dt, time, seaLevel: uSea.value, terrainSize, maxHeight, heightBase,
-        flip: !!heightTexNode.value?.isRenderTargetTexture,
+        flip: heightFlip(),
         shore: [U[16].value.toArray(), U[17].value.toArray(), U[18].value.toArray()],
         heightTexture: heightTexNode.value, fieldTexture: field.tex,
       };
       sim.update(lastSimArgs);
-      breakers.update({ ...lastSimArgs, focus: _c });
+      // the crests (and the spray they throw), then the spray moves
+      const sprayOn = P.spray !== false;
+      const sprayArgs = {
+        ...lastSimArgs, cameraPos: camera.position, windDir, windSpeed: P.windSpeed,
+        sprayGain: sprayOn ? P.sprayAmount ?? 1 : 0, dispTexture: fft.displacementTexture,
+      };
+      breakers.update({ ...sprayArgs, focus: _c });
+      if (sprayOn) spray.update(sprayArgs);
     }
     breakers.setVisible(simOn && P.lips !== false);
+    spray.setVisible(simOn && P.spray !== false);
     U[19].value.set(sim.min.x, sim.min.y, sim.size, simOn ? 1 : 0);
 
     // the scene depth it reads is multisampled when the frame renders into an MSAA target: its
@@ -361,8 +425,8 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     }
     const hz = U[4].value;
     U[5].value.set(P.absorption[0], P.absorption[1], P.absorption[2], sp ? 1 : 0);
-    // .w: the heightmap is a render target (after a sculpt): its rows read flipped in raw WGSL
-    U[6].value.set(P.scattering[0], P.scattering[1], P.scattering[2], heightTexNode.value?.isRenderTargetTexture ? 1 : 0);
+    // .w: the heightmap's rows read flipped in raw WGSL (measured, see measureRowOrder)
+    U[6].value.set(P.scattering[0], P.scattering[1], P.scattering[2], heightFlip() ? 1 : 0);
     U[7].value.set(windDir.x, windDir.y, terrainSize, maxHeight);
     U[9].value.set(hz.x * 0.45, hz.y * 0.6, hz.z * 0.95, heightBase);
     U[10].value.set(fft.sizes[0], fft.sizes[1], fft.sizes[2], fft.sizes[3]);
@@ -410,6 +474,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     clampSrc.dispose();
     sim.dispose();
     breakers.dispose();
+    spray.dispose();
     field.tex?.dispose();
   }
 
@@ -418,7 +483,7 @@ export function createOceanPro({ renderer, scene, camera, heightTexNode, terrain
     get visible() { return mesh.visible; },
     /** ms the last shore field took to solve (CPU) */
     get shoreFieldMs() { return field.ms; },
-    sim, breakers,
+    sim, breakers, spray,
     /** ms the coastline extraction took (CPU, with the shore field) */
     get coastMs() { return field.coastMs ?? 0; },
     /**
