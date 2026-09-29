@@ -26,6 +26,9 @@ const SMOKE_BLIND = 0.6;
 export function createCombat({
   units, structures, fx, structuresRenderer, projectiles, fire, craters,
   smoke = null, cover = null, onDeath = () => {},
+  // (a, b) → true when the ground or a building stands between them (a game's
+  // own line of sight: alg-rts algSight.js). nam passes none: smoke only.
+  blocksSight = null,
 }) {
   const _muzzle = new THREE.Vector3();
   /** Scratch for acquire's grid query — acquisition runs one combatant at a time. */
@@ -46,8 +49,8 @@ export function createCombat({
    * to be the same on every machine and at every frame rate. Cheap enough to
    * ask per candidate: about half a microsecond with all 24 columns live.
    */
-  const canSee = (a, b) => !smoke || smoke.occlusionBetween(
-    a.position.x, a.position.z, b.position.x, b.position.z) < SMOKE_BLIND;
+  const canSee = (a, b) => (!smoke || smoke.occlusionBetween(
+    a.position.x, a.position.z, b.position.x, b.position.z) < SMOKE_BLIND) && !blocksSight?.(a, b);
 
   /**
    * Nearest valid enemy that can actually be PICKED UP — within range, not
@@ -222,7 +225,9 @@ export function createCombat({
       }
       // In range — hold position and shoot. haltMovement (not stop) so the
       // attack order survives; stop() would forget the target we're shooting.
-      if (e.isMoving) e.haltMovement();
+      // (Only once it can SEE him: a unit moving round a house for a line
+      // would otherwise stop again every tick, in range and blind.)
+      if (e.isMoving && (!blocksSight || canSee(e, tgt))) e.haltMovement();
     }
 
     // Smoke rolling in between breaks the shot. An AUTO-acquired target is
@@ -232,6 +237,13 @@ export function createCombat({
     // holds fire, which is what makes a screening grenade worth throwing.
     if (!canSee(e, tgt)) {
       if (!e.attackTarget) e.target = null;
+      // A HOUSE OR A RIDGE in the way of an explicit attack order (not smoke,
+      // which you wait out): go and get a line — close on him as a chase
+      // does. Standing behind the wall forever was the game ignoring the order.
+      else if (!e.isStructure && blocksSight?.(e, tgt)) {
+        e.chaseCd = (e.chaseCd ?? 0) - dt;
+        if (e.chaseCd <= 0) { e.orderTo(tgt.position.x, tgt.position.z); e.chaseCd = 0.5; }
+      }
       return;
     }
 

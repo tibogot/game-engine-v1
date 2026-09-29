@@ -228,7 +228,33 @@ lift off the pad; the ALN comes out of the cave mouth.
    - [ ] Portraits for the new structures (mirador, MG nest, mortar,
          searchlight, cache, sangar) in structureThumbnails.js.
    - [ ] A real wreck shape (roof fallen, walls broken) instead of charring.
-   - [ ] Line of sight: guns fire over/through buildings (as in nam).
+   - [x] **Line of sight for FIRE** (2026-09-29, algSight.js; shared
+         combat.js `blocksSight`, nam passes none): the GROUND (heightmap,
+         every 2 m, eye 1.6 m / 2.2 m vehicles → chest) and TALL buildings
+         (> 2 m above the ground, baked at load: a BVH per placed piece and a
+         vertical ray every 2 m — 29 pieces, 934 cells, 79 ms) stop a shot.
+         Low walls, sandbags, terraces stay COVER, not blockers (you shoot
+         over them). An auto target out of sight is dropped; an explicit
+         attack order MOVES to get a line (measured: round the mechta, a
+         line in 7.5 s). Measured: every dechra row blocks, the mechta
+         blocks, a garden wall doesn't; ground blocks 12% of 20-60 m lines
+         in the valley, 28% round the dechra, 40% in the massif. 2 µs a
+         query. `?los=0` to A/B.
+   - [ ] **you, play it**: does the massif (40% blocked) feel like the
+         ALN's country, or too cluttered to fight in?
+   - [x] **SKY PRO is the default** (you, 2026-09-29): algGame.js SKY_PRO
+         unless `?sky=atmosphere` (the old sky + its tuned Aurès light, to
+         A/B). Boots clean, cloud shadows on.
+   - [ ] Dev panel: a SKY PRO section (you asked — proposal in chat,
+         2026-09-29): presets, clock, clouds, wind tied to the game's one
+         wind, haze / shafts / exposure; hide the Atmosphere-only controls.
+   - [ ] Re-judge the Aurès look under Sky Pro (it brings its own sun and
+         haze); GPU ms A/B against `?sky=atmosphere` in a focused tab.
+   - [ ] **FAR TERRAIN** (you, 2026-09-29): beyond the map the ground is
+         a flat plain — right for an ocean, wrong here. Proposal in chat:
+         raise the map's own outer ring (outside PLAY) into mountains, and a
+         backdrop ring of mountains beyond the 1 km edge, fading in Sky Pro's
+         haze.
    - [x] COVER AND CONCEALMENT (2026-09-28, algCover.js). nam's rule moved
          to games/shared-rts (cover.js + coverOverlay.js; nam keeps shims):
          concealment stops you being SEEN (acquire range), cover stops you
@@ -753,6 +779,14 @@ Order: foliage → villages → animals & birds → ground detail.
       CPU ~2 ms (nam-valley: ~176 draws). Clean console; tests green.
 
 Asset follow-ups:
+- [ ] **A better-looking OASIS** (you, 2026-09-29): the water is nice, but
+      the ground round it doesn't read as an oasis — "Oasis ground" (slot 3,
+      grass_ground tinted #b8b890, tools/algOasis.mjs) comes out a
+      brown-green that is neither desert nor garden. Wanted: a dark, damp
+      ring of earth at the water, lush green under the palms (irrigated
+      gardens, reeds), then a sharp edge to the pale desert — the contrast
+      is what says oasis. Check the texture, the tint, the ring widths,
+      maybe small walled palm gardens (the new garden kit) and seguias.
 - [ ] Oasis: a second one, and paint the lake params per map in the editor
       (all lakes in a map share one water setting).
 - [ ] Put the plants into the map's paint (4 tall slots: cedar, oak, scrub,

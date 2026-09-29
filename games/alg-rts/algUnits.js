@@ -20,6 +20,7 @@ import { createAlgCombat } from "./algCombat.js";
 import { createAlgAI } from "./algAI.js";
 import { createAlgMines } from "./algMines.js";
 import { createAlgPatrols } from "./algPatrols.js";
+import { createAlgSight } from "./algSight.js";
 import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, PLAY, VIEW_YAW } from "./layout.js";
@@ -300,8 +301,13 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const coverSys = createAlgCover(app, { showroom, isArmed: () => (selection.selected?.length ?? 0) > 0 });
   app.algCover = coverSys.cover;
   app.algCoverOverlay = coverSys.overlay;
+  // LINE OF SIGHT (algSight.js): ridges and tall buildings stop a shot; low
+  // walls are cover, not blockers. ?los=0 = without (A/B).
+  const sight = new URLSearchParams(location.search).get("los") !== "0" ? createAlgSight(app, { showroom, worldSize: app.worldSize ?? 1024 }) : null;
+  app.algSight = sight;
+  if (sight) console.log(`[sight] ${sight.stats.pieces} pieces baked, ${sight.stats.cells} tall cells, ${sight.stats.bakeMs} ms`);
   const combat = await createAlgCombat(app, {
-    units, structures, cover: coverSys.cover,
+    units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
     onDeath: (e) => { selection.remove?.(e); controlGroups?.render(); },
   });
   app.algCombat = combat;

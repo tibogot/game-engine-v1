@@ -9,8 +9,8 @@
 //
 // URL options: ?world=/levels/other.v3proj · ?light=flat (the engine's default
 // light, to A/B) · ?fog=0 · ?warmup=0 (no pipeline warm-up, to A/B it) ·
-// ?sky=pro (the Sky Pro sky: Tidewater's atmosphere, real cumulus and their
-// shadows, its air haze and sun shafts — the test bed, see SKY_PRO below)
+// ?sky=atmosphere (the old Atmosphere sky and its tuned Aurès light, to A/B;
+// the default is SKY PRO since 2026-09-29, see SKY_PRO below)
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom } from "./showroom.js";
@@ -63,13 +63,13 @@ export const AURES_LIGHT = {
 const PLAIN_COLOR = "#a39480";
 
 /**
- * SKY PRO (?sky=pro): the engine's "skypro" sky mode on this map, to judge it
- * in the game's own camera. It brings its own light (the sun through its air, in
+ * SKY PRO — THE DEFAULT (you, 2026-09-29; `?sky=atmosphere` for the old sky):
+ * the engine's "skypro" sky mode. It brings its own light (the sun through its air, in
  * Tidewater's units, the sky as the ambient), its own haze and its clouds'
  * shadows, so the Aurès light above (tuned for the Atmosphere sky) steps aside:
  * no setWorldLight, no distance fog. The clock, latitude and grade stay.
  */
-const SKY_PRO = params.get("sky") === "pro";
+const SKY_PRO = params.get("sky") !== "atmosphere";
 
 export async function startAlgGame({ container, onStatus = () => {}, onProgress = null } = {}) {
   onStatus("Starting engine…");
