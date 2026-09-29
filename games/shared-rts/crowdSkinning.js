@@ -73,7 +73,7 @@ function bakeClips(animRoot, skeleton, clips) {
  * @param {number}  o.max     instance capacity (sizes the storage buffers)
  */
 export function createCrowdField({
-  scene, renderer, source, animRoot, clips, max = 128, castShadow = true,
+  scene, renderer, source, animRoot, clips, max = 128, castShadow = true, aliases = {},
 }) {
   const skeleton = source.skeleton;
   const geometry = source.geometry.clone();
@@ -118,6 +118,11 @@ export function createCrowdField({
 
   const instMatricesNode = storage(instMatrices, "mat4", max).toReadOnly();
   const animNode = storage(anim, "vec4", max).toReadOnly();
+  // Per-soldier values for the MATERIAL (not the kernel, whose storage
+  // bindings are at the cap): a stable random look variation, etc. Written by
+  // addPose's `extra`; read in the vertex stage (soldierLooks' variation).
+  const extra = new THREE.StorageBufferAttribute(max, 4);
+  const extraNode = storage(extra, "vec4", max).toReadOnly();
 
   // Output: skinned position + normal, per soldier per vertex.
   const out = attributeArray(max * vertexCount * 2, "vec4");
@@ -192,10 +197,14 @@ export function createCrowdField({
 
   let n = 0;
 
-  /** Which baked slice a clip is on at time `t`. */
-  const sliceOf = (clipName, t) => {
-    const c = info[clipName];
-    const f = Math.floor((((t % c.duration) + c.duration) % c.duration) / c.duration * c.frames);
+  /**
+   * Which baked slice a clip is on at time `t`. `hold`: a one-shot (a death)
+   * stops on its last frame instead of looping.
+   */
+  const sliceOf = (clipName, t, hold = false) => {
+    const c = info[aliases[clipName] ?? clipName];
+    const u = hold ? Math.min(Math.max(t, 0), c.duration * 0.999) : (((t % c.duration) + c.duration) % c.duration);
+    const f = Math.floor((u / c.duration) * c.frames);
     return c.offset + Math.min(f, c.frames - 1);
   };
 
@@ -203,6 +212,10 @@ export function createCrowdField({
     mesh,
     /** Per-soldier (idle slice, run slice, blend, team) — the x-ray reads the team. */
     animNode,
+    /** Per-soldier vec4 for the material (addPose's `extra`), e.g. the look variation. */
+    extraNode,
+    /** The baked clips' names (plus the aliases). */
+    has: (clipName) => !!info[aliases[clipName] ?? clipName],
     capacity: max,
     /** Bytes of skinned-vertex storage — the one cost that scales with capacity. */
     bytes: max * vertexCount * 2 * 16,
@@ -233,20 +246,21 @@ export function createCrowdField({
      * by `blend` (0 → 1) into `clipB` at `tB`. For animals with more than
      * the soldiers' idle/run — graze, look round, walk (buffalo.js).
      */
-    addPose(matrix, clipA, tA, clipB, tB, blend, lane = 0) {
+    addPose(matrix, clipA, tA, clipB, tB, blend, lane = 0, { holdA = false, holdB = false, extra: ex = null } = {}) {
       if (n >= max) return false;
       matrix.toArray(instMatrices.array, n * 16);
       const o = n * 4;
-      anim.array[o + 0] = sliceOf(clipA, tA);
-      anim.array[o + 1] = sliceOf(clipB, tB);
+      anim.array[o + 0] = sliceOf(clipA, tA, holdA);
+      anim.array[o + 1] = sliceOf(clipB, tB, holdB);
       anim.array[o + 2] = blend;
       anim.array[o + 3] = lane;
+      if (ex) { extra.array[o] = ex[0]; extra.array[o + 1] = ex[1]; extra.array[o + 2] = ex[2]; extra.array[o + 3] = ex[3] ?? 0; }
       n++;
       return true;
     },
 
     /** Seconds in a baked clip (to keep an instance's clock on its loop). */
-    duration: (clipName) => info[clipName]?.duration ?? 1,
+    duration: (clipName) => info[aliases[clipName] ?? clipName]?.duration ?? 1,
 
     commit() {
       mesh.count = n;
@@ -258,10 +272,12 @@ export function createCrowdField({
       if (n === 0) return;
       instMatrices.needsUpdate = true;
       anim.needsUpdate = true;
-      // Dispatch is sized to CAPACITY, not the live count (the kernel's size is
-      // fixed at build). Instances past `count` write into the buffer but are
-      // never drawn — bounded, cheap waste in exchange for a stable kernel.
-      renderer.compute(kernel);
+      extra.needsUpdate = true;
+      // Dispatch sized to the LIVE soldiers: renderer.compute takes the thread
+      // count per call (WebGPUBackend: workgroups = ceil(count / 64)). It used
+      // to be the capacity — 160 soldiers skinned with 5 alive. (One dimension
+      // caps at 65 535 workgroups: ~1 700 soldiers of ~2 400 vertices a crowd.)
+      renderer.compute(kernel, n * vertexCount);
     },
 
     dispose() {

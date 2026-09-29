@@ -97,6 +97,33 @@ Not wired into either game yet.
       tearing. Look "ALN, kachabia"; 20 % of an ALN section wears one.
       The lab moved to games/shared-rts/soldier-lab.html (the engine must not
       import games/ — gameImportBoundaryTest).
+- [x] Clips (2026-09-30, 8f7c090): 14 rifle-era clips — idle, aim idle,
+      walk, run, crouch walk, kneel idle, kneel fire, fire, prone idle,
+      reload, grenade throw, dig, death forward, death backward. SLING +
+      TOOL bones: the rifle goes to the back and a shovel to the hands for
+      digging / the throw, by per-clip bone scale.
+- [ ] Clips later (when the game uses them): crawling + prone firing
+      (pinned), flying back death (mortar), hit reaction, sprint (retreat), a
+      2nd idle, stand/crouch/prone transitions. Trim the two 8 s idles to 2–4 s.
+- [ ] **Into the game** (the rules for hundreds of soldiers):
+   - [x] crowd renderer (2026-09-30): every clip baked; per-soldier state —
+         run (paced to the unit's measured speed, no skating), aim with a
+         target in range, the firing clip on each shot (the cooldown reset),
+         idle; 0.2 s crossfades; deaths play once, hold, the body stays 14 s.
+         Checked in the game (Chrome) + nam unchanged (idle/run fallback).
+   - [ ] …still: cover (kneel idle / kneel fire), prone, dig for building
+         sapeurs, the grenade throw; ONE clip table shared across types
+   - [x] skinning work sized to the LIVE soldiers (renderer.compute count)
+   - [x] alg-rts types on the pack: appelé + sapeur = soldier1 / "appele",
+         moudjahid = aln1 / "alnSection" (crowd shader looks, per-man seed)
+   - [ ] hats, kit, weapons, flag as RIGID pieces drawn per TYPE for the whole
+         army, placed by their bone (not merged into the body: that would
+         double the skinned vertices); the kachabia skinned with the body
+   - [ ] looks in the crowd shader; per-soldier variation from the instance
+   - [ ] a ~1.5k-tri distance LOD of each body (meshoptimizer), judged from
+         the RTS camera; soldier1's colour map → KTX2; no shadows on tiny kit
+   - [ ] alg-rts swaps its stand-in (testsolanim.glb) for soldier1 + aln1/aln2
+   - [ ] measure GPU ms at 100 / 300 / 1000 soldiers (one tab, focused)
 - [ ] Faces: the pack's faces stay cartoon-American — for close-ups a North
       African head (AI-generated or reworked in Blender) is the real fix. Not
       stars (generals only) or medals (parade dress); rank goes in the UI plus

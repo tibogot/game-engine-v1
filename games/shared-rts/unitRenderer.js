@@ -13,10 +13,11 @@
 import * as THREE from "three";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { attribute, instanceIndex, materialColor, texture } from "three/tsl";
+import { attribute, instanceIndex, materialColor, texture, varying } from "three/tsl";
 import { createXrayMaterial, xrayOn, xrayParams } from "./xraySilhouette.js";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
+import { LOOKS, lookColorNode, markHelmet, neckPlane } from "./soldierLooks.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
@@ -416,19 +417,43 @@ function buildCrowdType(tpl, type, app, scene) {
   }
 
   const byName = (re) => tpl.animations.find((a) => re.test(a.name));
-  const idle = byName(/idle/i) ?? tpl.animations[0];
-  const run = byName(/run|walk/i) ?? idle;
+  const exact = (name) => tpl.animations.find((a) => a.name === name) ?? null;
+  // The soldier pack's ROLE names (tools/packMixamo.mjs) first, else the old
+  // stand-in's idle / run.
+  const idle = exact("rifle_idle") ?? byName(/idle/i) ?? tpl.animations[0];
+  const run = exact("rifle_run") ?? byName(/run|walk/i) ?? idle;
   if (!idle) {
     console.warn("[rts-v3] skinned template has no clips — crowd disabled.");
     return null;
   }
+  // Bake EVERY clip but the pack's first unarmed test downloads (they would
+  // only cost table memory); the per-soldier state picks among them.
+  const clips = {};
+  for (const a of tpl.animations) if (!/^unarmed_/.test(a.name)) clips[a.name] = a;
+  clips[idle.name] = idle;
+  clips[run.name] = run;
+  const roles = {
+    idle: idle.name,
+    run: run.name,
+    aim: exact("rifle_aim_idle")?.name ?? null,
+    fire: exact("rifle_firing")?.name ?? null,
+    deaths: ["death_forward", "death_backward"].filter((n) => exact(n)),
+  };
+
+  // The faction LOOK in the crowd shader (soldierLooks.js): the body's colour
+  // map repainted by hue, per-soldier variation from the crowd's extra buffer.
+  // The helmet recolour reads a per-vertex helmet mark — set it before the
+  // crowd clones the geometry.
+  const look = type.look ? LOOKS[type.look] : null;
+  if (look) markHelmet(source);
 
   const field = createCrowdField({
     scene,
     renderer: app.renderer,
     source,
     animRoot: root,
-    clips: { idle, run },
+    clips,
+    aliases: { idle: idle.name, run: run.name },
     max: MAX_CROWD,
     // The shadow pass picks up the compute-skinned positions for free: it renders
     // the object with an override material but keeps the material's `positionNode`
@@ -440,6 +465,17 @@ function buildCrowdType(tpl, type, app, scene) {
   // model's). One crowd mesh per type, so it costs nothing per soldier — how a
   // second side on the same stand-in model reads as another army at a glance.
   if (type.crowdTint && field?.mesh?.material?.color) field.mesh.material.color.multiply(new THREE.Color(...type.crowdTint));
+  if (look && source.material.map) {
+    field.mesh.material.colorNode = lookColorNode(
+      source.material.map, look, neckPlane(source), varying(field.extraNode.element(instanceIndex).xyz),
+    );
+    field.mesh.material.needsUpdate = true;
+  }
+
+  // Ground speed of the run clip (the planted foot slides back at exactly that
+  // speed), in the WORLD — the template is scaled to the type's height — so
+  // the run plays at the unit's own pace and the feet don't skate.
+  const runSpeed = measureGroundSpeed(root, run) || 0;
 
   // The compute pass emits vertices in the TEMPLATE MESH's local space, which
   // knows nothing about buildTemplate's normalisation (the centring offset and
@@ -469,8 +505,58 @@ function buildCrowdType(tpl, type, app, scene) {
   xray.name = "UnitXrayCrowd";
   scene.add(xray);
 
-  return { field, rel, scale: root.scale.x, xray };
+  return { field, rel, scale: root.scale.x, xray, roles, runSpeed };
 }
+
+/**
+ * Ground speed (world m/s) a walk/run clip is animated for: sample the clip,
+ * and at each step the LOWER foot is the planted one — its horizontal speed is
+ * the ground speed. Median over the cycle. 0 when the rig has no toe bones.
+ */
+function measureGroundSpeed(root, clip) {
+  const probe = SkeletonUtils.clone(root);
+  const feet = ["LeftToeBase", "RightToeBase"].map((n) => {
+    let b = null;
+    probe.traverse((o) => { if (o.isBone && o.name.endsWith(n)) b = o; });
+    return b;
+  });
+  if (!feet[0] || !feet[1]) return 0;
+  const mixer = new THREE.AnimationMixer(probe);
+  mixer.clipAction(clip).play();
+  const N = 40, dt = clip.duration / N, speeds = [], d = new THREE.Vector3();
+  let last = null;
+  for (let i = 0; i <= N; i++) {
+    mixer.setTime(i * dt);
+    probe.updateMatrixWorld(true);
+    const p = feet.map((f) => f.getWorldPosition(new THREE.Vector3()));
+    const low = p[0].y < p[1].y ? 0 : 1;
+    if (last && last.low === low) speeds.push(Math.hypot(d.subVectors(p[low], last.p[low]).x, d.z) / dt);
+    last = { p, low };
+  }
+  mixer.stopAllAction();
+  speeds.sort((a, b) => a - b);
+  return speeds[speeds.length >> 1] ?? 0;
+}
+
+/**
+ * Pick a crowd soldier's clip for this frame from the unit's state:
+ * moving → run; a live target in range → aim (the firing clip for a moment
+ * after each shot); otherwise idle. Types without those clips (the old
+ * stand-in: idle + run only) fall back to idle.
+ */
+function soldierClip(unit, v, roles) {
+  if (unit.isMoving) return roles.run;
+  const tg = unit.target;
+  if (tg?.alive && roles.aim) {
+    const range = unit.range ?? unit.type?.range ?? 0;
+    const dx = tg.position.x - unit.position.x, dz = tg.position.z - unit.position.z;
+    if (dx * dx + dz * dz <= (range * 1.05) ** 2) return v.firing > 0 && roles.fire ? roles.fire : roles.aim;
+  }
+  return roles.idle;
+}
+
+const CROSSFADE = 0.2;      // s between two clips
+const CORPSE_SECONDS = 14;  // a body stays this long after its death clip, then goes
 
 /**
  * `types` / `typeKeys`: the game's unit list. `procedural`: { key: () => geometry }
@@ -532,6 +618,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   const templates = {};
   UNIT_TYPE_KEYS.forEach((k, i) => {
     const t = UNIT_TYPES[k];
+    // `body`: a pack of soldiers on one skeleton (public/models/soldiers/
+    // soldiers.glb holds several bodies) — this type keeps its own, the others
+    // are dropped before the template is measured and scaled.
+    if (t.body) {
+      const drop = [];
+      loaded[i].scene.traverse((o) => { if (o.isSkinnedMesh && o.name !== t.body) drop.push(o); });
+      for (const o of drop) o.removeFromParent();
+    }
     templates[k] = {
       ...buildTemplate(loaded[i].scene, {
         targetLength: t.targetLength,
@@ -615,9 +709,15 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     if (crd) {
       const xform = new THREE.Object3D();
       xform.scale.setScalar(crd.scale);
+      const t0 = Math.random() * 8;
       views.set(unit, {
-        crowd: crd, xform,
-        animTime: Math.random() * 3, blend: 0, bob: 0,
+        crowd: crd, xform, bob: 0,
+        // the clip it's on, the one it's fading from, and how far the fade is
+        cur: { clip: crd.roles.idle, t: t0 }, prev: { clip: crd.roles.idle, t: t0 }, fade: 1,
+        firing: 0, lastCd: 0, lastX: unit.position.x, lastZ: unit.position.z, speed: 0,
+        // its own stable look variation (soldierLooks: cloth, sun-fade, skin)
+        seed: [Math.random(), Math.random(), Math.random(), 0],
+        deadT: -1,
       });
       return;
     }
@@ -706,8 +806,30 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     items: UNIT_TYPE_KEYS.map((k) => ({ key: k, make: () => cloneTemplateRoot(k) })),
   });
 
+  // Soldiers falling or lying dead this frame: written into their crowd AFTER
+  // the living (the x-ray draws the first `nReal` instances as the living).
+  const corpses = [];
+
+  /** A crowd soldier just killed plays a death clip, then lies there a while. */
+  function drawCorpse(unit, v, dt) {
+    const r = v.crowd.roles;
+    if (v.deadT < 0) {
+      v.deadT = 0;
+      v.prev = v.cur;
+      v.cur = { clip: r.deaths[Math.floor(v.seed[0] * 97) % r.deaths.length], t: 0 };
+      v.fade = 0;
+    }
+    v.deadT += dt;
+    if (v.deadT > v.crowd.field.duration(v.cur.clip) + CORPSE_SECONDS) return;
+    v.cur.t += dt;
+    v.prev.t += dt;
+    v.fade = Math.min(1, v.fade + dt / CROSSFADE);
+    corpses.push(unit);
+  }
+
   /** Push unit data into the meshes. Called once per frame by the game loop. */
   function sync(dt, camera) {
+    corpses.length = 0;
     // Instanced and crowd types are rebuilt from scratch each frame, so spawns and
     // deaths need no bookkeeping — a dead unit simply isn't written.
     for (const k of UNIT_TYPE_KEYS) {
@@ -722,6 +844,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
 
       if (!unit.alive) {
         if (v.root) v.root.visible = false;
+        // A crowd soldier with death clips falls, then lies there a while.
+        if (v.crowd?.roles.deaths.length && !(fogOfWar?.enabled && unit.team !== "player" && !fogOfWar.canSeeEntity(unit))) {
+          drawCorpse(unit, v, dt);
+        }
         continue;
       }
 
@@ -837,15 +963,40 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         }
       }
 
-      // Crowd soldier: no mesh and no mixer — just a transform, an animation
-      // clock, and a blend weight the compute shader crossfades idle⇄run with.
+      // Crowd soldier: no mesh and no mixer — a transform, and two clips (the
+      // one it's on, the one it's fading from) the compute shader crossfades.
       if (v.crowd) {
-        v.animTime += dt;
-        const want = unit.isMoving ? 1 : 0;
-        v.blend += (want - v.blend) * Math.min(1, dt * 8); // ~0.15 s crossfade
+        const r = v.crowd.roles;
+        // A shot: the sim resets the cooldown upward (combat.js) — play the
+        // firing clip for its length, from its start.
+        const cd = unit.cooldown ?? 0;
+        if (r.fire && cd > v.lastCd + 1e-6) {
+          v.firing = v.crowd.field.duration(r.fire);
+          if (v.cur.clip === r.fire) v.cur.t = 0;
+        }
+        v.lastCd = cd;
+        v.firing = Math.max(0, v.firing - dt);
+        // measured ground speed (smoothed) → the run plays at the unit's pace
+        const moved = Math.hypot(p.x - v.lastX, p.z - v.lastZ) / Math.max(dt, 1e-4);
+        v.lastX = p.x; v.lastZ = p.z;
+        v.speed += (moved - v.speed) * Math.min(1, dt * 6);
+
+        const want = soldierClip(unit, v, r);
+        if (want !== v.cur.clip) {
+          v.prev = v.cur;
+          v.cur = { clip: want, t: want === r.fire ? 0 : Math.random() * v.crowd.field.duration(want) };
+          v.fade = 0;
+        }
+        const rate = v.cur.clip === r.run && v.crowd.runSpeed > 0
+          ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6) : 1;
+        v.cur.t += dt * rate;
+        v.prev.t += dt;
+        v.fade = Math.min(1, v.fade + dt / CROSSFADE);
+
         x.updateMatrix(); // off-scene: nothing else will do this for us
         _mat.multiplyMatrices(x.matrix, v.crowd.rel);
-        v.crowd.field.add(_mat, v.animTime, v.blend, unit.team === "player" ? 0 : 1);
+        v.crowd.field.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
+          unit.team === "player" ? 0 : 1, { extra: v.seed });
         crowdUnits.push(unit); // instance order = pick order (see pickCrowdUnit)
       }
 
@@ -906,6 +1057,16 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       // them — the static figures come after them in the instance order, and
       // their pink silhouettes showed through the temple's stone.
       const nReal = crd ? crowdUnits.reduce((n, u) => n + (u.type?.typeKey === k ? 1 : 0), 0) : 0;
+      if (crd) {
+        for (const unit of corpses) {
+          if (unit.type?.typeKey !== k) continue;
+          const v = views.get(unit);
+          _mat.multiplyMatrices(v.xform.matrix, crd.rel);
+          const dying = (c) => crd.roles.deaths.includes(c);
+          crd.field.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
+            unit.team === "player" ? 0 : 1, { holdA: dying(v.prev.clip), holdB: true, extra: v.seed });
+        }
+      }
       if (crd && statics.length) {
         for (const s of statics) {
           if (s.typeKey !== k) continue;

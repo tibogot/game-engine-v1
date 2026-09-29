@@ -4,9 +4,10 @@
 // Same scale rule as nam: real size × RTS_SCALE (1.3) for units and
 // everything man-made, nature real.
 //
-// STAND-INS (you, 2026-09-27): the soldiers use nam's soldier model until
-// you make the French and ALN ones. Only the model is borrowed; the numbers
-// are this game's to tune.
+// SOLDIERS (2026-09-30): the soldier pack (public/models/soldiers/, packed by
+// tools/packMixamo.mjs, judged in games/shared-rts/soldier-lab.html) — a
+// `body` per type and its faction `look` (soldierLooks.js), replacing nam's
+// stand-in. The numbers are this game's to tune.
 export const RTS_SCALE = 1.3;
 const REAL = { soldierHeight: 1.8 };
 
@@ -29,8 +30,12 @@ export const ALG_UNIT_TYPES = {
     fireRate: 2.4,
     canHitAir: true,
     vision: 42,
-    // STAND-IN model: nam's soldier (Mixamo, compute-skinned crowd).
-    url: "/models/testsolanim.glb",
+    // The soldier pack (public/models/soldiers/, tools/packMixamo.mjs): body
+    // soldier1, the appelé look (faded M47 olive, painted helmet) in the crowd
+    // shader. Hats / kit / weapons come with the rigid-piece step.
+    url: "/models/soldiers/soldiers.glb",
+    body: "soldier1",
+    look: "appele",
     skinned: true,
     targetHeight: REAL.soldierHeight * RTS_SCALE,
     excludeRotorsFromBox: false,
@@ -62,8 +67,10 @@ export const ALG_UNIT_TYPES = {
     canHitAir: false,
     vision: 38,
     builds: ["sandbags", "wire", "mgNest", "mortarPit", "mirador", "searchlight"],
-    // STAND-IN model: the appelé's (nam's soldier) until the Génie gets its own.
-    url: "/models/testsolanim.glb",
+    // The appelé's body and look until the Génie gets its own.
+    url: "/models/soldiers/soldiers.glb",
+    body: "soldier1",
+    look: "appele",
     skinned: true,
     targetHeight: REAL.soldierHeight * RTS_SCALE,
     excludeRotorsFromBox: false,
@@ -94,11 +101,12 @@ export const ALG_UNIT_TYPES = {
     fireRate: 2.4,
     canHitAir: true,
     vision: 42,
-    url: "/models/testsolanim.glb",
+    // The ALN body aln1 (headband, vest) with the ALN look: khaki drill to
+    // civilian brown per man, a North African skin range (soldierLooks.js).
+    url: "/models/soldiers/soldiers.glb",
+    body: "aln1",
+    look: "alnSection",
     skinned: true,
-    // The same model, dyed: dun and earth browns, the katiba's mixed khaki
-    // and civilian cloth, against the appelés' olive (one tint per type).
-    crowdTint: [1.05, 0.82, 0.62],
     targetHeight: REAL.soldierHeight * RTS_SCALE,
     excludeRotorsFromBox: false,
     facingOffset: 0,
