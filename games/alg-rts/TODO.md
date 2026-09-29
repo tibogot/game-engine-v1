@@ -1143,6 +1143,11 @@ Asset follow-ups:
       whole world black (not the searchlight — measured without it). The
       night item needs real dusk/night light (moon, ambient) before the
       searchlight can be judged at night — you, look then.
+      DECIDED (2026-09-29): night lives in SKY PRO (you are building it in
+      another session: moon light, ambient/exposure floor, twilight). When it
+      lands: read its night amount (0-1) in algSearchlight.js instead of the
+      sun's height, then lit windows / lanterns / mirador lamp off the same
+      value.
 - [ ] **DETAILS THAT COST ~NOTHING** (you asked for more like the projecteur,
       2026-09-29 — only if they stay near free: no dynamic lights with
       shadows, shared particle/decal fields, instanced):
