@@ -525,6 +525,22 @@ lift off the pad; the ALN comes out of the cave mouth.
    - [ ] **you, look** at it in the lab (face, ears, stripes, mane).
    - [ ] Where it lives in the game (night scavenger near the mechtas?
          flees soldiers like the herds).
+- [~] **DORCAS GAZELLE** (you, 2026-09-29; "gazelle-morph" in the lab, not
+      in the game yet): from the pack's DEER (same rig), compared against
+      Wikipedia photos. Slim, long legs, long slender neck, narrow muzzle,
+      big pale-lined ears, ringed black LYRE horns, warm fawn with a rufous
+      flank band (plane-sliced), white belly + rump, black tail tip, face
+      stripes (white above / dark below the eye line), rufous forehead.
+      0 open edges. See-through scan: Idle 0, Walk 1, Eating 1, Gallop 21 px
+      — the gallop's are where a leg crosses the body (armpit fold): the
+      magenta view at the gallop shows no hole. Face (2026-09-30): white
+      stripe over the dark one, eye to nose (only SIDEWAYS faces: the deer's
+      coarse bridge otherwise made a white bar across the face). Real size
+      ~0.6 m at the shoulder (x1.3 in the game, like every animal).
+   - [ ] **you, look** in the lab; then in the game: small groups on the
+         open, dry ground toward the south edge (the Saharan side), bolting
+         like the herds — needs the deer loaded (initAnimalMorph(donkey,
+         { deer })) in algHerds.js.
 - [~] **ALGERIAN DONKEY** ("donkey-morph" in the lab, 2026-09-28): the pack's
       donkey untouched in shape and clips, recoloured as a North African
       village donkey — ash grey-brown, pale muzzle / eye rings / belly, dark

@@ -102,6 +102,22 @@ export const PDK = {
   basket: "#b58d55", basketDark: "#83633b", rope: "#5e4630",
   ...DONKEY_PRESETS["Aurès grey"], color: "#8d8378", light: "#d9d1c4",
 };
+// DORCAS GAZELLE (Gazella dorcas — the Saharan edge of Algeria) from the pack's
+// DEER (same rig as the donkey): smaller and finer, long thin legs, ringed
+// LYRE horns, sandy fawn above a white belly with a dark band along the flank,
+// dark cheek stripe, black tail tip.
+export const PGZ = {
+  legs: 1.08, neck: 1.1, body: 0.9, head: 0.88, ears: -0.3, size: 0.66, legSlim: 0.78, neckSlim: 0.72,
+  muzzleNarrow: 0.72,  // the deer's broad muzzle narrowed in front of the eyes
+  hump: 0, humpLen: 1,
+  horn: 0.75,          // horn length (x head length)
+  // pale sand (not the deer's red-brown), a strong dark band on the lower flank
+  // (photos, Wikipedia: warm fawn, a rufous-brown flank band, white belly and
+  // rump; the face: a WHITE stripe from above the eye to the nose, a DARK one
+  // below it, white chin; long densely-ringed lyre horns)
+  coat: "#cc9f68", pale: "#f3eee5", band: "#6b3f22", face: "#c99a63", forehead: "#a8683a", hornColor: "#2b231d", hornRing: "#6a5c50", nose: "#2a2320",
+  color: "#cc9f68", dark: "#6b3f22", light: "#f3eee5",
+};
 // STRIPED HYENA (Hyaena hyaena — the one that lives in Algeria) from the pack's
 // HUSKY: the same rig as the donkey (same bones, same clips), so the same
 // morph pipeline — but real PAWS, a dog's head and a carnivore's gait.
@@ -146,10 +162,11 @@ let gltf = null, A = null;
 // reshaped from; the donkey stays the default. While such a kind builds, `gltf`
 // and `A` point at its source (buildAnimal), so the whole pipeline follows.
 const SOURCES = {};
-const SOURCE_OF = { "hyena-morph": "husky" };
+const SOURCE_OF = { "hyena-morph": "husky", "gazelle-morph": "deer" };
 // their colour zones under the donkey's zone names (the builder paints by them)
 const MAT_MAP = {
   husky: { "Material": "Main", "Material.001": "Main_Light", "Material.006": "Muzzle", "Material.002": "Eye_Dark", "Material.003": "Eye_White" },
+  deer: { "Eye_Black": "Eye_Dark", "Eye_Lighter": "Eye_Ring" },
 };
 /** Measure the donkey once; returns the analysis (`A`). `more`: { husky: gltf } */
 export async function initAnimalMorph(donkeyGltf, more = {}) {
@@ -544,9 +561,9 @@ function buildAnimalFrom() {
   const isSheepMorph = SPECIES.value === "sheep-morph", isGoatMorph = SPECIES.value === "goat-morph";
   const isPig2Morph = SPECIES.value === "pig2-morph";
   const isPigMorph = SPECIES.value === "pig-morph" || isPig2Morph;   // pig2 = the pig's code, its own params
-  const isHyena = SPECIES.value === "hyena-morph", isDonkey = SPECIES.value === "donkey-morph";
+  const isHyena = SPECIES.value === "hyena-morph", isDonkey = SPECIES.value === "donkey-morph", isGazelle = SPECIES.value === "gazelle-morph";
   const PQ = isPig2Morph ? PPIG2 : PPIG;
-  const Q = isCamel ? PC : isGoatMorph ? PG : isPigMorph ? PQ : isHyena ? PHY : isDonkey ? PDK : P;
+  const Q = isCamel ? PC : isGoatMorph ? PG : isPigMorph ? PQ : isHyena ? PHY : isDonkey ? PDK : isGazelle ? PGZ : P;
   const legF = (n) => (Q.legsBack && /^(Back|IKBack|FFB)/.test(n) ? Q.legsBack : Q.legs);
   const LEGS = Q.legsBack ? legF : Q.legs;           // feetFollow: one length, or per leg
   const root = cloneSkinned(gltf.scene);
@@ -805,7 +822,7 @@ function buildAnimalFrom() {
     const Hp = (x, y, z) => H.clone().addScaledVector(hs, x * Lh).addScaledVector(hu, y * Lh).addScaledVector(a, z * Lh);
     return { H, a, hu, hs, Hp };
   };
-  if (!isCamel && !isSheepMorph && !isGoatMorph && !isPigMorph && !isHyena && !isDonkey) {
+  if (!isCamel && !isSheepMorph && !isGoatMorph && !isPigMorph && !isHyena && !isDonkey && !isGazelle) {
   const woolC = new THREE.Color(P.woolColor), faceC = new THREE.Color(P.faceColor), legC = new THREE.Color(P.legColor);
   const dirtC = woolC.clone().multiply(new THREE.Color(0.72, 0.64, 0.5));
   const hoofC = new THREE.Color("#161310"), eyeC = new THREE.Color("#0c0907"), hornC = new THREE.Color("#c9b894");
@@ -994,8 +1011,8 @@ function buildAnimalFrom() {
     }
   }
   } else {
-    ({ topY, curlR } = isMorph || isSheepMorph || isGoatMorph || isPigMorph || isHyena || isDonkey
-      ? buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, isSheepMorph ? "sheep" : isGoatMorph ? "goat" : isPig2Morph ? "pig2" : isPigMorph ? "pig" : isHyena ? "hyena" : isDonkey ? "donkey" : "camel")
+    ({ topY, curlR } = isMorph || isSheepMorph || isGoatMorph || isPigMorph || isHyena || isDonkey || isGazelle
+      ? buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, isSheepMorph ? "sheep" : isGoatMorph ? "goat" : isPig2Morph ? "pig2" : isPigMorph ? "pig" : isHyena ? "hyena" : isDonkey ? "donkey" : isGazelle ? "gazelle" : "camel")
       : buildCamelParts({ B, W, fwd, right, G, tipOf, headFrame }));
   }
 
@@ -1421,8 +1438,9 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
   const SMALL = SHEEP || GOAT;           // the sheep-like head / ear handling
   const HYENA = kind === "hyena";        // from the HUSKY (A / gltf = the husky's)
   const DONKEY = kind === "donkey";      // the donkey itself: shape untouched, its own colours
-  const Q = SHEEP ? P : GOAT ? PG : PIG ? PQ : HYENA ? PHY : DONKEY ? PDK : PC, src = A.mesh;
-  const legSlim = SHEEP ? 0.72 : GOAT ? 0.66 : PIG ? PQ.legThick : HYENA ? PHY.legSlim : DONKEY ? 1 : PC.legSlim, neckSlim = SHEEP ? 1 : GOAT ? 0.85 : PIG ? PQ.neckSlim : HYENA ? PHY.neckSlim : DONKEY ? 1 : PC.neckSlim;
+  const GAZELLE = kind === "gazelle";    // from the DEER (A / gltf = the deer's)
+  const Q = SHEEP ? P : GOAT ? PG : PIG ? PQ : HYENA ? PHY : DONKEY ? PDK : GAZELLE ? PGZ : PC, src = A.mesh;
+  const legSlim = SHEEP ? 0.72 : GOAT ? 0.66 : PIG ? PQ.legThick : HYENA ? PHY.legSlim : DONKEY ? 1 : GAZELLE ? PGZ.legSlim : PC.legSlim, neckSlim = SHEEP ? 1 : GOAT ? 0.85 : PIG ? PQ.neckSlim : HYENA ? PHY.neckSlim : DONKEY ? 1 : GAZELLE ? PGZ.neckSlim : PC.neckSlim;
   const hash = (i) => { let h = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
   const capSet = new Set();               // sheep: head vertices under the wool cap
   // 1. Donkey rest → camel rest through the skin.
@@ -1599,11 +1617,12 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     // sheep: a shorter muzzle, but only IN FRONT of the eyes — shortening
     // the whole head squashed the eye into a slit
     const muz = SMALL || PIG || HYENA ? smoothstep01(0.4, 0.75, along / LmH) : 1;
-    d.multiplyScalar(1 + ((SHEEP ? 0.92 : GOAT ? 0.86 : PIG ? PQ.head : HYENA ? PHY.head : DONKEY ? 1 : Q.head * 0.92) - 1) * w)
-      .addScaledVector(a, (along - (SMALL || PIG || HYENA ? 0.4 * LmH : 0)) * (SHEEP ? -0.35 * muz : GOAT ? -0.18 * muz : PIG ? PQ.muzzle * muz : HYENA ? PHY.muzzle * muz : DONKEY ? 0 : 0.14) * w);
+    d.multiplyScalar(1 + ((SHEEP ? 0.92 : GOAT ? 0.86 : PIG ? PQ.head : HYENA ? PHY.head : DONKEY ? 1 : GAZELLE ? PGZ.head : Q.head * 0.92) - 1) * w)
+      .addScaledVector(a, (along - (SMALL || PIG || HYENA ? 0.4 * LmH : 0)) * (SHEEP ? -0.35 * muz : GOAT ? -0.18 * muz : PIG ? PQ.muzzle * muz : HYENA ? PHY.muzzle * muz : DONKEY || GAZELLE ? 0 : 0.14) * w);
     // hyena: a NARROW head (the husky's is broad and round — "the face looks
     // way too large"), the ears keep their spread
     if (HYENA && PHY.headNarrow) d.addScaledVector(hs, d.dot(hs) * (PHY.headNarrow - 1) * Math.min(1, wOf(i, (b) => b === "Head")));
+    if (GAZELLE && PGZ.muzzleNarrow) d.addScaledVector(hs, d.dot(hs) * (PGZ.muzzleNarrow - 1) * smoothstep01(0.45, 0.8, along / LmH) * Math.min(1, wOf(i, (b) => b === "Head")));
     WP[i].copy(H).add(d);
   }
   // (camel only) Camel face, in head space (z along the muzzle 0..1, y up, x across):
@@ -1668,7 +1687,7 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     const e0 = W("Ear1" + sd);
     for (let i = 0; i < WP.length; i++) {
       const w = wOf(i, (b) => b.startsWith("Ear") && b.endsWith(sd));
-      if (w > 0.05) WP[i].sub(e0).multiplyScalar(1 - (SHEEP ? 0 : GOAT ? 0.1 : PIG ? PQ.ears : HYENA ? PHY.ears : DONKEY ? 0 : 0.45) * Math.min(1, w)).add(e0);   // sheep ears keep their size: they must clear the wool
+      if (w > 0.05) WP[i].sub(e0).multiplyScalar(1 - (SHEEP ? 0 : GOAT ? 0.1 : PIG ? PQ.ears : HYENA ? PHY.ears : DONKEY ? 0 : GAZELLE ? PGZ.ears : 0.45) * Math.min(1, w)).add(e0);   // sheep ears keep their size: they must clear the wool
     }
     const earWideK = PIG2 ? PQ.earWide : HYENA ? (PHY.earWide ?? 1) : 1;
     if ((PIG2 || HYENA) && earWideK !== 1) {
@@ -1737,7 +1756,7 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
   // mane faces, coat-coloured, and make every neck cross-section convex
   // on top — the upper half lies ON an ellipse through the neck's own
   // sides: trough vertices pushed out, mane-fin vertices pulled in.
-  if (!HYENA && !DONKEY) {               // (the husky has no mane; the donkey keeps its own)
+  if (!HYENA && !DONKEY && !GAZELLE) {   // (the husky has no mane; the donkey keeps its own; the deer has none)
     const isMane = (i) => WM[i].has("Main_Dark")
       && wOf(i, (b) => b.startsWith("Neck") || b === "Head" || b === "Torso3") > 0.5
       && wOf(i, (b) => b.startsWith("Ear")) < 0.2;
@@ -2119,6 +2138,7 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
   const hyBands = [];                    // hyena: the stripe bands [plane normal, d0, d1]
   const dkStripe = {};                   // donkey: where its stripe / cross were sliced
   const dkLoad = {};                     // donkey: the blanket's cuts
+  const gzBand = {};                     // gazelle: the flank band's two heights
   if (SHEEP) {
     // Loop cuts along the torso for square wool facets, a stub tail, then
     // the wool: every covered vertex pushed out from the spine / neck
@@ -2654,6 +2674,62 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     }
     console.log(`[pig-morph] body loop cuts: ${rings.join(", ")} quads per ring; fat, belly, swayback, snout`);
     lift = WP.map(() => 0);
+  } else if (GAZELLE) {
+    // THE FLANK BAND: the dark band between the fawn back and the white belly,
+    // two horizontal planes sliced through the body so it paints as one clean
+    // band of faces (the shared plane slicer).
+    const yMid = W("Torso2").y + A.cyOff;
+    gzBand.lo = yMid - 0.46 * A.Rv; gzBand.hi = yMid - 0.14 * A.Rv;
+    planeSlice(UP, gzBand.lo); planeSlice(UP, gzBand.hi);
+    // THE HORNS: ringed lyres rising from the poll — back, out, and the tips
+    // turning forward and in (the goat's horn tube, a gazelle's curve).
+    let LmS = 0;
+    for (let i = 0; i < WP.length; i++) if (headW(i) > 0.5) LmS = Math.max(LmS, WP[i].clone().sub(H).dot(a));
+    let topY = -Infinity, maxX = 0;
+    for (let i = 0; i < WP.length; i++) {
+      if (headW(i) < 0.5 || wOf(i, (b) => b.startsWith("Ear")) > 0.2) continue;
+      const d = WP[i].clone().sub(H);
+      topY = Math.max(topY, d.dot(hu) / LmS); maxX = Math.max(maxX, Math.abs(d.dot(hs)) / LmS);
+    }
+    const Hp = (x, y, z) => H.clone().addScaledVector(hs, x * LmS).addScaledVector(hu, y * LmS).addScaledVector(a, z * LmS);
+    const headSkin = [["Head", 1]];
+    const addV = (q, mt) => { WP.push(q); WS.push(headSkin); WM.push(new Set([mt])); return WP.length - 1; };
+    const SIDES = 6, RINGS = 18, L = PGZ.horn;
+    for (const sx of [-1, 1]) {
+      const bx = sx * 0.26 * maxX, bz = 0.24;
+      let surf = -Infinity;
+      for (let rad = 0.06; surf === -Infinity && rad < 0.5; rad *= 1.5) {
+        for (let i = 0; i < WP.length; i++) {
+          if (headW(i) < 0.5 || wOf(i, (b) => b.startsWith("Ear")) > 0.2) continue;
+          const d = WP[i].clone().sub(H), x = d.dot(hs) / LmS, z = d.dot(a) / LmS;
+          if (Math.hypot(x - bx, z - bz) < rad) surf = Math.max(surf, d.dot(hu) / LmS);
+        }
+      }
+      const baseY = (surf === -Infinity ? topY : surf) - 0.03;
+      const pts = [];
+      for (let r = 0; r <= RINGS; r++) {
+        const u = r / RINGS;
+        pts.push(Hp(bx + sx * L * (0.2 * Math.sin(Math.PI * u) + 0.03 * u),     // out, then in: the lyre
+          baseY + L * 0.95 * u,                                                  // up
+          bz - L * 0.45 * Math.sin(Math.PI * 0.8 * u) + L * 0.1 * u ** 3));       // back, then the tips a little forward
+      }
+      const rings = [];
+      for (let r = 0; r < RINGS; r++) {
+        const u = r / RINGS, rad = (0.07 - 0.058 * u) * LmS;
+        const T = pts[r + 1].clone().sub(pts[Math.max(0, r - 1)]).normalize();
+        const N1 = V().crossVectors(T, hs).normalize(), N2 = V().crossVectors(T, N1).normalize();
+        const ring = [];
+        for (let k = 0; k < SIDES; k++) { const an = (k / SIDES) * Math.PI * 2; ring.push(addV(pts[r].clone().addScaledVector(N1, Math.cos(an) * rad).addScaledVector(N2, Math.sin(an) * rad), r % 2 ? "Horn" : "Horn2")); }
+        rings.push(ring);
+      }
+      const tip = addV(pts[RINGS].clone(), "Horn");
+      const base = addV(pts[0].clone().addScaledVector(hu, -0.05 * LmS), "Horn");
+      for (let k = 0; k < SIDES; k++) faces.push([rings[0][(k + 1) % SIDES], rings[0][k], base, "Horn"]);
+      for (let r = 0; r < RINGS - 1; r++) for (let k = 0; k < SIDES; k++) { const k1 = (k + 1) % SIDES; faces.push([rings[r][k], rings[r][k1], rings[r + 1][k1], rings[r + 1][k], r % 2 ? "Horn" : "Horn2"]); }
+      for (let k = 0; k < SIDES; k++) faces.push([rings[RINGS - 1][k], rings[RINGS - 1][(k + 1) % SIDES], tip, "Horn"]);
+    }
+    console.log(`[gazelle-morph] flank band sliced, two lyre horns`);
+    lift = WP.map(() => 0);
   } else if (DONKEY) {
     // the dorsal stripe (two planes along the spine) and the shoulder cross
     // (two planes across the withers), sliced so they paint as clean bands
@@ -3127,6 +3203,64 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
   const pigSB = W("Back").dot(fwd), pigSF = W("Torso3").dot(fwd);
   // Hyena (striped): sandy-grey coat, pale belly and legs, dark muzzle.
   const hCoat = new THREE.Color(PHY.coat), hDark = new THREE.Color(PHY.dark), hLight = new THREE.Color(PHY.light), hFace = new THREE.Color(PHY.face);
+  // Dorcas gazelle: sandy fawn back, the dark flank band, white belly and
+  // rump, a fawn face with the deer's dark markings, dark nose, black horns,
+  // a black tail tip.
+  const zCoat = new THREE.Color(PGZ.coat), zPale = new THREE.Color(PGZ.pale), zBand = new THREE.Color(PGZ.band), zFace = new THREE.Color(PGZ.face), zFore = new THREE.Color(PGZ.forehead);
+  // each eye's centre (Eye_Dark vertices, by side): the face stripes start there
+  const gzEyes = [];
+  if (GAZELLE) {
+    const ev = new Set(); for (const f of faces) if (fm(f) === "Eye_Dark") for (const i of fv(f)) ev.add(i);
+    for (const sgn of [-1, 1]) {
+      const ids = [...ev].filter((i) => Math.sign(WP[i].clone().sub(H).dot(hs)) === sgn);
+      if (!ids.length) continue;
+      const c = V(); for (const i of ids) c.add(WP[i]); gzEyes.push({ c: c.multiplyScalar(1 / ids.length) });
+    }
+  }
+  const gazellePaint = (vs, mt, nn, cc) => {
+    const L = vs.length, avg = (fn) => vs.reduce((sum, i) => sum + fn(i), 0) / L;
+    const cen = V(); for (const i of vs) cen.add(WP[i]); cen.multiplyScalar(1 / L);
+    if (mt === "Eye_Dark") { cc.set("#0d0a08"); return; }
+    if (mt === "Eye_White") { cc.set("#ece6dc"); return; }
+    if (mt === "Eye_Ring") { cc.copy(zFace).lerp(zPale, 0.45); return; }                 // a lighter ring round the eye (the deer's white one read as a cartoon)
+    if (mt === "Horn") { cc.set(PGZ.hornColor); return; }
+    if (mt === "Horn2") { cc.set(PGZ.hornRing); return; }                                // the rings, lighter: they must read
+    const head = avg((i) => headW(i));
+    if (mt === "Hooves") { cc.set(head > 0.5 ? PGZ.nose : "#1f1a17"); return; }
+    if (avg((i) => wOf(i, (b) => /^Tail[23]/.test(b))) > 0.5) { cc.set("#1d1815"); return; }   // the black tail tip
+    if (head > 0.5) {
+      // fawn like the body, the deer's dark face zone only a rufous forehead
+      cc.copy(mt === "Main_Dark" ? zFore : mt === "Main_Light" ? zPale : zFace);
+      // the face stripes, measured from each eye (head frame, head lengths)
+      const e = gzEyes.reduce((m2, q) => (!m2 || q.c.distanceTo(cen) < m2.c.distanceTo(cen) ? q : m2), null);
+      if (e && (mt === "Main" || mt === "Main_Dark" || mt === "Main_Light")) {
+        const d = cen.clone().sub(e.c), z = d.dot(a) / LmP, y = d.dot(hu) / LmP;
+        const zAbs = cen.clone().sub(H).dot(a) / LmP;
+        // how far out to its own side the face is (0 = the midline, 1 = the eye):
+        // the stripes run down each SIDE of the face — across it they read as bars
+        const side = cen.clone().sub(H).dot(hs) / (e.c.clone().sub(H).dot(hs) || 1);
+        // they converge toward the nose: the band follows the eye's line inwards
+        const lane = side - (1 - 0.55 * smoothstep01(0, 0.5, z));
+        // The deer's facets are coarse: the white stripe takes the top row of
+        // what was the dark band (a thinner band caught 2-3 faces and read as
+        // nothing), and stays off the middle of the face (a bar across the
+        // bridge from the front: only faces turned SIDEWAYS take it — tried live).
+        if (z > -0.06 && y > -0.03 && y < 0.15 && lane > -0.45 && lane < 0.25 && side > 0.2 && Math.abs(nn.dot(hs)) > 0.12) cc.copy(zPale);   // white stripe above the eye line, to the nose
+        else if (z > -0.02 && y <= 0.0 && y > -0.1 && lane > -0.1 && zAbs < 0.88) cc.copy(zBand); // dark stripe from the eye down the muzzle
+        else if (zAbs > 0.8 && y < -0.1) cc.copy(zPale);                                           // white lips and chin
+      }
+    } else {
+      // the neck is fawn all round (the deer's white throat strip read as a bib)
+      const neck = avg((i) => wOf(i, (b) => b.startsWith("Neck")));
+      cc.copy(mt === "Main_Light" && neck < 0.5 ? zPale : zCoat);
+      const torso = avg((i) => wOf(i, (b) => b === "Back" || b === "Body" || b.startsWith("Torso")));
+      if (torso > 0.4 && gzBand.lo !== undefined) {
+        if (cen.y > gzBand.lo && cen.y < gzBand.hi && Math.abs(nn.dot(right)) > 0.25) cc.copy(zBand);   // the flank band
+        else if (cen.y <= gzBand.lo) cc.copy(zPale);                                                   // the white belly
+      }
+    }
+    cc.multiplyScalar(0.95 + 0.1 * hash(vs[0] * 31 + vs[1] * 7 + vs[L - 1]));
+  };
   // Algerian donkey: coat, pale muzzle / eye rings / belly, the dark stripe
   // along the spine and its cross over the shoulders, dark mane and tuft.
   const dCoat = new THREE.Color(PDK.coat), dPale = new THREE.Color(PDK.pale), dDark = new THREE.Color(PDK.dark);
@@ -3236,7 +3370,7 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     for (const i of vs) cen.add(WP[i]);
     cen.multiplyScalar(1 / L);
     c.copy(PAL[mt] ?? baseC);
-    if (SHEEP) sheepPaint(vs, mt, n, c); else if (GOAT) goatPaint(vs, mt, n, c); else if (PIG) pigPaint(vs, mt, n, c); else if (HYENA) hyenaPaint(vs, mt, n, c); else if (DONKEY) donkeyPaint(vs, mt, n, c); else {
+    if (SHEEP) sheepPaint(vs, mt, n, c); else if (GOAT) goatPaint(vs, mt, n, c); else if (PIG) pigPaint(vs, mt, n, c); else if (HYENA) hyenaPaint(vs, mt, n, c); else if (DONKEY) donkeyPaint(vs, mt, n, c); else if (GAZELLE) gazellePaint(vs, mt, n, c); else {
     // The donkey's pale throat / chest zone, stretched by the long neck,
     // reads as a white collar: coat colour there, pale only on belly + legs.
     if (mt === "Main_Light") {
@@ -3639,7 +3773,7 @@ function measureGroundSpeed(tpl, clipName) {
 }
 
 // ── For the games ────────────────────────────────────────────────────────────
-const KIND_PARAMS = { goat: () => PG, sheep: () => P, camel: () => PC, pig: () => PPIG, pig2: () => PPIG2, hyena: () => PHY, donkey: () => PDK };
+const KIND_PARAMS = { goat: () => PG, sheep: () => P, camel: () => PC, pig: () => PPIG, pig2: () => PPIG2, hyena: () => PHY, donkey: () => PDK, gazelle: () => PGZ };
 /**
  * A species as a crowd template: { root, source, clips, walkSpeed, runSpeed,
  * height }. `source` is a SkinnedMesh with position / normal / skin / colour
