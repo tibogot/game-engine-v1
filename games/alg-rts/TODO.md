@@ -278,8 +278,9 @@ lift off the pad; the ALN comes out of the cave mouth.
          and the HQ/post card's own labels (still nam's).
    - [ ] Minimap diamond uses 71% of the square — if it reads too small,
          a rotated square map crop (cut the far corners) is the other way.
-5. [ ] Animals alongside: donkeys (Donkey_compressed.glb) at wells and on
-       tracks, chickens (Chicken_001_compressed.glb) in the mechta yards
+5. [~] Animals alongside: donkeys — DONE 2026-09-29 (see ALGERIAN DONKEY
+       below); on the tracks (walking between villages) still to do;
+       chickens (Chicken_001_compressed.glb) in the mechta yards
 - [~] **Camel** — being built in v3/sheep-lab.html ("camel-morph", 2026-09-27):
       the pack's DONKEY mesh reshaped into an Arabian camel (hump, S-neck,
       pads), same quad look, plays the donkey's 13 clips. Saharan edge more
@@ -309,9 +310,18 @@ lift off the pad; the ALN comes out of the cave mouth.
          baskets (straw bands, rim, load inside) LEANING on the flanks
          (measured body width top → bottom). Part of the donkey's mesh (one
          draw), skinned to the back: rides through every clip. 0 open edges.
-   - [ ] **you, look** (lab: donkey-morph); then more loads (jars, firewood,
-         sacks), a lab toggle for load / preset, and the donkeys in the game
-         (wells, tracks — item 5 above).
+   - [x] IN THE GAME (2026-09-29, algHerds.js): 3-4 tied just outside each
+         village's walls and 2 at each spring — 13 donkeys, ~1/3 loaded
+         (you: "only few of them carry"); two crowd draws (bare / loaded).
+         Working animals: they graze on a 3 m rope and never bolt from
+         soldiers (shared herd: new `bolt` / `roam` options, defaults keep
+         nam, sheep and goats unchanged).
+   - [ ] **you, look** in the game; then more loads (jars, firewood, sacks),
+         the other coats (Brown / Pale dun) as extra templates, donkeys
+         walking the tracks between villages, a lab toggle for load / preset.
+- [x] **GOAT: gap on top of the head while EATING** (you, 2026-09-29) — FIXED
+      268553d: the poll was skinned to the ear bone; now Head + a smoothed
+      head/neck seam (Eating 371 → ~0 see-through px, Gallop 342 → 28).
 - [ ] **GOAT: a thin see-through slit low on the body while walking** (you,
       2026-09-28). Likely the same as pig2's neck: a BENT quad whose
       v0-v2 triangle winds backwards in the pose (culled). Fix: the other

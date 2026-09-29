@@ -15,8 +15,10 @@ const CLIP_NAMES = { eat: "Eating", idle: "Idle", look: "Idle_2", low: "Idle_Hea
  * One kind of animal as a crowd: `spots` [{ x, z, height }] (height in metres,
  * per animal), `canStand(x, z)` → ground y or null, `threats()` → positions of
  * whoever makes them bolt. Returns { update(dt), mesh, count, herd }.
+ * `bolt: false` — working animals (a tethered donkey) never run from soldiers;
+ * `roam` — how far one grazes from its spot (m). Defaults: the wild behaviour.
  */
-export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], walkSpeed = 0.9, runSpeed = 7, name = "Wild" } = {}) {
+export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], walkSpeed = 0.9, runSpeed = 7, name = "Wild", bolt = true, roam = 20 } = {}) {
   if (!spots.length) return null;
   const box = new THREE.Box3().setFromObject(tpl.root);
   const baseH = Math.max(0.01, box.max.y - box.min.y);
@@ -47,9 +49,9 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
   /** Fresh grazing 2-6 m off, not straying far from home. */
   const pickGraze = (h) => {
     for (let k = 0; k < 16; k++) {
-      const a = rnd() * Math.PI * 2, d = 2 + rnd() * 4;
+      const a = rnd() * Math.PI * 2, d = Math.min(2, roam * 0.5) + rnd() * Math.min(4, roam * 0.5);
       const x = h.x + Math.sin(a) * d, z = h.z + Math.cos(a) * d;
-      if (Math.hypot(x - h.home.x, z - h.home.z) > 20) continue;
+      if (Math.hypot(x - h.home.x, z - h.home.z) > roam) continue;
       if (pathClear(h, x, z)) return { x, z };
     }
     return null;
@@ -75,7 +77,7 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
       // Who is near? Checked a few times a second, not every frame.
       alarmT -= dt;
       let near = null;
-      if (alarmT <= 0) {
+      if (bolt && alarmT <= 0) {
         alarmT = 0.3;
         const T = threats();
         for (const h of herd) {
