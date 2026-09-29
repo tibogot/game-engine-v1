@@ -105,7 +105,7 @@
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
       import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
       import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
-      import { WEAPONS, weaponMaterial } from "./procWeapons.js";
+      import { TOOLS, WEAPONS, weaponMaterial } from "./procWeapons.js";
       import {
         HEADGEAR, KIT, LOOKS, headgearMaterial, loadout, lookMaterial, markHelmet, measureCrown, neckPlane,
         stripHelmet, variationNode,
@@ -361,6 +361,17 @@
         m.castShadow = true;
         applyTrim(m);
         root.getObjectByName(WEAPON_BONE).add(m);
+        // The same rifle slung on the back, and the shovel: each clip shows the
+        // one it needs by its bone's scale (tools/packMixamo.mjs).
+        const sling = root.getObjectByName("mixamorigSling");
+        if (sling) { const s = new THREE.Mesh(weaponGeo.get(key), weaponMat); s.castShadow = true; sling.add(s); }
+        const tool = root.getObjectByName("mixamorigTool");
+        if (tool) {
+          if (!weaponGeo.has("shovel")) weaponGeo.set("shovel", TOOLS.shovel.build());
+          const t = new THREE.Mesh(weaponGeo.get("shovel"), weaponMat);
+          t.castShadow = true;
+          tool.add(t);
+        }
         return m;
       }
       // A soldier name, or "all". soldier1 is the alg-rts body (soldier3 stays

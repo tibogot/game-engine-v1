@@ -117,8 +117,10 @@ const ROLES = {
   "rifle crouch idle": "rifle_crouch_idle",
   "crouching idle": "rifle_crouch_idle",
   "kneeling idle": "rifle_crouch_idle",
+  "rifle kneel idle": "rifle_crouch_idle",
   "kneeling firing": "rifle_crouch_firing",
   "crouch firing": "rifle_crouch_firing",
+  "crouch rapid fire": "rifle_crouch_firing",
   "reloading": "rifle_reload",
   "reload": "rifle_reload",
   "prone idle": "rifle_prone_idle",
@@ -375,8 +377,17 @@ for (const c of clips) {
     ? `SHOULDERED, aims ${grip.yaw.toFixed(0)}° off forward`
     : grip.held ? `both hands (left ±${grip.spread.toFixed(1)} cm)` : "average grip (left hand lets go)";
   const src = clipSource.get(c);
-  const lying = hips && hips.values[1] * s + root.position.y < 0.4 ? " · lying" : "";
-  console.log(`  clip     ${c.name.padEnd(20)} ${c.duration.toFixed(2).padStart(5)} s  ${String(keys).padStart(5)} keys  ${hold}${lying}${travel}`
+  // posture from the hips' mean height (standing ~0.84 m, running 0.75, prone 0.14)
+  let posture = "";
+  if (hips && !/^death/.test(c.name)) { // a death averages standing and fallen
+    let sum = 0;
+    for (let k = 1; k < hips.values.length; k += 3) sum += hips.values[k] * s + root.position.y;
+    const hy = sum / (hips.values.length / 3);
+    posture = hy < 0.3 ? " · lying" : hy < 0.62 ? " · kneeling" : "";
+  }
+  if (/^death/.test(c.name)) travel = travel.replace(/ ! hips travel ([\d.]+) m.*$/, " · falls $1 m (a death travels — expected)");
+  const stow = weapon?.stowed.has(c) ? " · rifle slung" + (weapon.tool.has(c) ? ", shovel in hand" : "") : "";
+  console.log(`  clip     ${c.name.padEnd(20)} ${c.duration.toFixed(2).padStart(5)} s  ${String(keys).padStart(5)} keys  ${hold}${posture}${stow}${travel}`
     + `   ← ${src.file}${src.mapped ? "" : "  (title not in the role table)"}`);
 }
 if (!weapon) console.log("  no weapon bone: only unarmed clips in the folder");
@@ -479,15 +490,61 @@ function addWeaponBone() {
   rh.add(bone);
   bone.updateMatrix();
 
-  // Append it to the shared skeleton. Its bind inverse follows the hand's:
-  // world(weapon) = world(hand) · local, so inverse = local⁻¹ · inverse(hand).
+  // SLING: the rifle slung diagonally across the back (muzzle up over the
+  // right shoulder), for clips whose hands are busy — digging, a grenade
+  // throw. TOOL: a shovel in both hands for digging, aimed per frame below.
+  // Each clip shows or hides the three by SCALE (1 or ~0), which the crowd
+  // renderer bakes with the rest — no extra draw, no mesh swap.
+  const sp2 = byName("Spine2");
+  const inFrameOf = (parent, pos, quat) => {
+    const m = parent.matrixWorld.clone().invert().multiply(new THREE.Matrix4().compose(pos, quat, new THREE.Vector3(1, 1, 1)));
+    const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    m.decompose(p, q, sc);
+    return { p, q, sc };
+  };
+  const sling = new THREE.Bone();
+  sling.name = "mixamorigSling";
+  {
+    const d = new THREE.Vector3(-0.4, 0.92, 0).normalize();           // up and to his right
+    const q = frame(d, new THREE.Vector3(0, 0, -1));                    // sights facing away from the back
+    const t = inFrameOf(sp2, new THREE.Vector3(0.05, 1.05, -0.225), q);
+    sling.position.copy(t.p); sling.quaternion.copy(t.q); sling.scale.copy(t.sc);
+  }
+  sp2.add(sling);
+  sling.updateMatrix();
+  const tool = new THREE.Bone();
+  tool.name = "mixamorigTool";
+  tool.position.copy(bone.position); tool.quaternion.copy(bone.quaternion); tool.scale.copy(bone.scale);
+  rh.add(tool);
+  tool.updateMatrix();
+  // Sampling clips animates these too (their scale tracks): restore them with the rest.
+  for (const b of [bone, sling, tool]) rest.push([b, b.position.clone(), b.quaternion.clone(), b.scale.clone()]);
+
+  // Append them to the shared skeleton. A child's bind inverse follows its
+  // parent's: world(child) = world(parent) · local, so inverse = local⁻¹ · inverse(parent).
   const old = rigMesh.skeleton;
-  const handInv = old.boneInverses[old.bones.indexOf(rh)];
+  const invOf = (child, parent) => child.matrix.clone().invert().multiply(old.boneInverses[old.bones.indexOf(parent)]);
   const skeleton = new THREE.Skeleton(
-    [...old.bones, bone],
-    [...old.boneInverses, bone.matrix.clone().invert().multiply(handInv)],
+    [...old.bones, bone, sling, tool],
+    [...old.boneInverses, invOf(bone, rh), invOf(sling, sp2), invOf(tool, rh)],
   );
   for (const sd of soldiers) sd.mesh.bind(skeleton, sd.mesh.bindMatrix);
+
+  const isStowed = (c) => /^(dig|hammer|grenade_throw|unarmed)/.test(c.name);
+  const usesShovel = (c) => /^dig/.test(c.name);
+  const shown = (b, on) => b.scale.clone().multiplyScalar(on ? 1 : 1e-4).toArray();
+  const stowed = new Set(), withTool = new Set();
+  for (const clip of clips) {
+    const st = isStowed(clip), sh = usesShovel(clip);
+    if (st) stowed.add(clip);
+    if (sh) withTool.add(clip);
+    clip.tracks.push(
+      new THREE.VectorKeyframeTrack(`${bone.name}.scale`, [0], shown(bone, !st)),
+      new THREE.VectorKeyframeTrack(`${sling.name}.scale`, [0], shown(sling, st)),
+      new THREE.VectorKeyframeTrack(`${tool.name}.scale`, [0], shown(tool, sh)),
+    );
+    if (sh) aimTool(clip, tool);
+  }
 
   const perClip = new Map();
   for (const clip of clips) {
@@ -506,7 +563,42 @@ function addWeaponBone() {
   }
   for (const [o, p, q, sc] of rest) { o.position.copy(p); o.quaternion.copy(q); o.scale.copy(sc); }
   root.updateMatrixWorld(true);
-  return { bone, perClip };
+  return { bone, perClip, stowed, tool: withTool };
+
+  /**
+   * The shovel, per frame at 30 Hz: from the right palm toward the left palm
+   * (both hands are on the handle while digging, and they slide), up = the
+   * world's up squared against it. Same frame as a weapon: origin at the right
+   * grip, +Z toward the left hand.
+   */
+  function aimTool(clip, toolBone) {
+    const mixer3 = new THREE.AnimationMixer(root);
+    const action = mixer3.clipAction(clip).play();
+    const frames = Math.max(2, Math.round(clip.duration * 30));
+    const times = [], pos = [], quat = [];
+    for (let i = 0; i <= frames; i++) {
+      const t = (i / frames) * clip.duration;
+      mixer3.setTime(t);
+      root.updateMatrixWorld(true);
+      const palmR = wp(rh).add(wp(ri)).multiplyScalar(0.5);
+      const palmL = wp(lh).add(wp(li)).multiplyScalar(0.5);
+      const d = palmL.clone().sub(palmR).normalize();
+      const q = frame(d, UP.clone().addScaledVector(d, -d.y));
+      const local = rh.matrixWorld.clone().invert().multiply(new THREE.Matrix4().compose(palmR, q, new THREE.Vector3(1, 1, 1)));
+      const lp = new THREE.Vector3(), lq = new THREE.Quaternion();
+      local.decompose(lp, lq, new THREE.Vector3());
+      times.push(t);
+      pos.push(...lp.toArray());
+      quat.push(...lq.toArray());
+    }
+    action.stop();
+    mixer3.stopAllAction();
+    mixer3.uncacheRoot(root);
+    clip.tracks.push(
+      new THREE.VectorKeyframeTrack(`${toolBone.name}.position`, times, pos),
+      new THREE.QuaternionKeyframeTrack(`${toolBone.name}.quaternion`, times, quat),
+    );
+  }
 
   /**
    * FIRING / AIMING clips: the rifle goes where a shouldered rifle is — butt

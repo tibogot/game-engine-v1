@@ -250,6 +250,24 @@ export const WEAPONS = {
   enfield: { label: "Lee-Enfield", faction: "ALN — bolt rifle", build: enfield },
 };
 
+/**
+ * A long-handled shovel for the digging clip, in the weapon frame: origin at
+ * the right hand, +Z toward the left hand, the blade beyond it (the lower hand
+ * in a dig is nearer the blade). ~1 m, a D-grip at the top.
+ */
+function shovel() {
+  const wood = 0x8a6440, steel = 0x4a4c4a;
+  return toGeometry([
+    cyl(wood, 0, 0, -0.2, 0.62, 0.016),                                  // handle
+    box(wood, [0, 0, -0.235], [0.1, 0.02, 0.02]),                       // D-grip crossbar
+    block(steel, { z: 0.6, top: 0.012, bot: -0.012, w: 0.05 }, { z: 0.66, top: 0.006, bot: -0.006, w: 0.19 }), // socket
+    block(steel, { z: 0.66, top: 0.006, bot: -0.006, w: 0.2 }, { z: 0.9, top: 0.003, bot: -0.003, w: 0.17 }),  // blade
+  ]);
+}
+
+/** Tools the soldier bones can carry (the TOOL bone shows one per clip). */
+export const TOOLS = { shovel: { label: "Shovel", build: shovel } };
+
 /** The shape helpers, for other low-poly kit (soldierLooks.js headgear). */
 export const prim = { part, tri, quad, block, box, cyl, tiltX, toGeometry };
 
