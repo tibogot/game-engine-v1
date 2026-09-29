@@ -31,11 +31,12 @@ export const ALG_UNIT_TYPES = {
     canHitAir: true,
     vision: 42,
     // The soldier pack (public/models/soldiers/, tools/packMixamo.mjs): body
-    // soldier1, the appelé look (faded M47 olive, painted helmet) in the crowd
-    // shader. Hats / kit / weapons come with the rigid-piece step.
+    // soldier1 in the APPELÉ SECTION look (soldierLooks.js) — helmets and bush
+    // hats, packs and belts, per-man extras; by spawn order a leader (MAT 49,
+    // binoculars), a radioman and an FM 24/29 gunner in every twelve.
     url: "/models/soldiers/soldiers.glb",
     body: "soldier1",
-    look: "appele",
+    look: "appeleSection",
     skinned: true,
     targetHeight: REAL.soldierHeight * RTS_SCALE,
     excludeRotorsFromBox: false,
@@ -67,10 +68,11 @@ export const ALG_UNIT_TYPES = {
     canHitAir: false,
     vision: 38,
     builds: ["sandbags", "wire", "mgNest", "mortarPit", "mirador", "searchlight"],
-    // The appelé's body and look until the Génie gets its own.
+    // The appelé's body in the SAPEUR look: pack, belt, work extras — his
+    // shovel shows when he digs.
     url: "/models/soldiers/soldiers.glb",
     body: "soldier1",
-    look: "appele",
+    look: "sapeur",
     skinned: true,
     targetHeight: REAL.soldierHeight * RTS_SCALE,
     excludeRotorsFromBox: false,
@@ -101,10 +103,11 @@ export const ALG_UNIT_TYPES = {
     fireRate: 2.4,
     canHitAir: true,
     vision: 42,
-    // The ALN body aln1 (headband, vest) with the ALN look: khaki drill to
-    // civilian brown per man, a North African skin range (soldierLooks.js).
+    // Both ALN bodies (aln1: headband and vest, aln2: boonie and open vest),
+    // shared out between the fighters, in the ALN SECTION look: chèches, caps,
+    // beards, bandoliers, MAS 36 / Mauser / Enfield, the FLN flag.
     url: "/models/soldiers/soldiers.glb",
-    body: "aln1",
+    bodies: ["aln1", "aln2"],
     look: "alnSection",
     skinned: true,
     targetHeight: REAL.soldierHeight * RTS_SCALE,

@@ -64,6 +64,15 @@ export const LOOKS = {
     green: 0x6f6d4b, khaki: 0x838059, helmet: false, headgear: "bushHat", hatColor: 0x77744f, weapon: "mas49_56",
     kit: ["pack", "belt"],
   },
+  // The Génie's sapeur (alg-rts): the appelé's fatigues and helmet, a pack and
+  // belt, sleeves-up extras; his shovel appears when he digs (the TOOL bone).
+  sapeur: {
+    label: "Sapeur du Génie", note: "the appelé's kit, dressed for work",
+    green: 0x6f6d4b, khaki: 0x838059, helmet: true, helmetColor: 0x5a5a40, hatColor: 0x77744f, weapon: "mas49_56",
+    variants: [{ w: 0.7 }, { w: 0.3, helmet: false, headgear: "bushHat" }],
+    kit: ["pack", "belt"],
+    extras: { scarf: 0.45, mustache: 0.3, cigarette: 0.2 },
+  },
   appeleRadio: {
     label: "Appelé, radio", note: "the section's radio operator",
     green: 0x6f6d4b, khaki: 0x838059, helmet: true, helmetColor: 0x5a5a40, headgear: null, weapon: "mas49_56",
@@ -401,6 +410,19 @@ export function markHelmet(mesh) {
   const flag = new Float32Array(count);
   for (let k = 0; k < idx.length; k++) if (islands.get(find(idx[k])).helmet) flag[idx[k]] = 1;
   mesh.geometry.setAttribute("helmet", new THREE.BufferAttribute(flag, 1));
+}
+
+/**
+ * Give the geometry a per-vertex `headwear` attribute (1 on every headwear
+ * piece — helmet, straps, goggles, a hat: what stripHelmet removes). The game's
+ * crowd hides it PER SOLDIER (one shared geometry, a per-instance flag) where
+ * the lab swaps in the stripped geometry.
+ */
+export function markHeadwear(mesh) {
+  const { idx, find, islands, count } = headPieces(mesh);
+  const flag = new Float32Array(count);
+  for (let k = 0; k < idx.length; k++) if (islands.get(find(idx[k])).headwear) flag[idx[k]] = 1;
+  mesh.geometry.setAttribute("headwear", new THREE.BufferAttribute(flag, 1));
 }
 
 /**

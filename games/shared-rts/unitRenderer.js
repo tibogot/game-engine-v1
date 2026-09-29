@@ -13,11 +13,13 @@
 import * as THREE from "three";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { attribute, instanceIndex, materialColor, texture, varying } from "three/tsl";
+import { attribute, instanceIndex, materialColor, mix, step, texture, varying, vec3 } from "three/tsl";
 import { createXrayMaterial, xrayOn, xrayParams } from "./xraySilhouette.js";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
-import { LOOKS, lookColorNode, markHelmet, neckPlane } from "./soldierLooks.js";
+import {
+  HEADGEAR, KIT, LOOKS, headgearMaterial, loadout, lookColorNode, markHeadwear, markHelmet, measureCrown, neckPlane,
+} from "./soldierLooks.js";
 import { TOOLS, WEAPONS, weaponMaterial } from "./procWeapons.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
@@ -446,7 +448,7 @@ function buildCrowdType(tpl, type, app, scene) {
   // The helmet recolour reads a per-vertex helmet mark — set it before the
   // crowd clones the geometry.
   const look = type.look ? LOOKS[type.look] : null;
-  if (look) markHelmet(source);
+  if (look) { markHelmet(source); markHeadwear(source); }
 
   const field = createCrowdField({
     scene,
@@ -471,6 +473,14 @@ function buildCrowdType(tpl, type, app, scene) {
       source.material.map, look, neckPlane(source), varying(field.extraNode.element(instanceIndex).xyz),
     );
     field.mesh.material.needsUpdate = true;
+  }
+  if (look) {
+    // HEADWEAR OFF PER SOLDIER: one geometry for the whole crowd, so a man in a
+    // beret or a chèche collapses the body's own headwear (helmet, straps, a
+    // hat — markHeadwear) to a point: zero-area triangles, nothing drawn. The
+    // flag is his `extra.w`. The shadow pass and the x-ray use the same node.
+    const bare = step(0.5, attribute("headwear", "float").mul(field.extraNode.element(instanceIndex).w));
+    field.mesh.material.positionNode = mix(field.mesh.material.positionNode, vec3(0, 0, 0), bare);
   }
 
   // Ground speed of the run clip (the planted foot slides back at exactly that
@@ -506,7 +516,7 @@ function buildCrowdType(tpl, type, app, scene) {
   xray.name = "UnitXrayCrowd";
   scene.add(xray);
 
-  const pieces = look ? buildPieces(field, source, rel, look, scene) : null;
+  const pieces = look ? buildPieces(field, source, rel, look, scene, root) : null;
 
   return { field, rel, scale: root.scale.x, xray, roles, runSpeed, look, pieces };
 }
@@ -528,57 +538,124 @@ const USES_TOOL = /^dig/;
  * inverse) · the piece's own offset on the bone — the chain a vertex skinned
  * 100 % to that bone goes through, so the piece sits exactly in the hands.
  */
-function buildPieces(field, source, rel, look, scene) {
+// soldier1's crown at rest in the pack's frame (the lab measured it): the
+// kit's face and neck pieces were modelled on that face, so another body
+// shifts them by its own crown's offset (aln1's head sits ~4 cm higher).
+const SOLDIER1_CROWN = new THREE.Vector3(0, 1.754, 0.032);
+
+function buildPieces(field, source, rel, look, scene, root) {
   const skel = source.skeleton;
   const pre = new THREE.Matrix4().multiplyMatrices(rel, source.bindMatrixInverse);
-  const onBone = (name) => {
-    const i = field.boneIndex(name);
-    return i < 0 ? null : { bone: i, K: skel.boneInverses[i].clone().invert() };
-  };
-  const hand = onBone("mixamorigWeapon"), sling = onBone("mixamorigSling"), tool = onBone("mixamorigTool");
-  if (!hand) return null;
-  const mat = weaponMaterial();
-  const make = (geo, at) => {
+  const boneOf = (name) => field.boneIndex(`mixamorig${name}`);
+  const restOf = (i) => skel.boneInverses[i].clone().invert();
+  if (boneOf("Weapon") < 0) return null;
+  // THREE FRAMES. The skin works in the soldier MESH's own space (bind =
+  // identity: the pack's mesh is ~8 units a metre, upside down). The kit and
+  // hats were modelled in the PACK's world (the lab: metres, feet at 0). So a
+  // piece goes pack world → mesh space through `toMesh` = inverse of the mesh's
+  // transform inside the GLB (the first try skipped it: hats and packs came out
+  // 1/8 size). The weapons ride bones whose rest already carries it.
+  root.updateMatrixWorld(true);
+  const glbScene = root.children[0].children[0]; // buildTemplate: root → holder → the GLB's scene
+  const meshInPack = new THREE.Matrix4().copy(glbScene.matrixWorld).invert().multiply(source.matrixWorld);
+  const toMesh = meshInPack.clone().invert();
+  // This body's crown in the pack's world (measureCrown reads the template's world).
+  const crown = measureCrown(source).applyMatrix4(source.matrixWorld.clone().invert()).applyMatrix4(meshInPack);
+  const faceShift = crown.clone().sub(SOLDIER1_CROWN);
+
+  const registry = new Map(); // key → { im, n, bone, K }
+  const add = (key, geo, mat, bone, K) => {
+    if (registry.has(key) || bone < 0) return;
     const im = new THREE.InstancedMesh(geo, mat, MAX_CROWD);
     im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     im.frustumCulled = false;
-    im.castShadow = false; // a thin rifle's shadow: 3 more draws for next to nothing
+    im.castShadow = false; // small kit: 3 more draws per piece type for next to nothing
     im.receiveShadow = true;
     im.count = 0;
     im.visible = false;
     scene.add(im);
-    return { im, n: 0, ...at };
+    registry.set(key, { im, n: 0, bone, K });
   };
-  const weapons = {};
-  for (const key of look.weaponMix ? Object.keys(look.weaponMix) : [look.weapon]) {
+
+  // WEAPONS in the hand and slung, the SHOVEL: modelled in their bone's frame.
+  const weaponMat = weaponMaterial();
+  const roleWeapons = Object.values(look.roles ?? {}).map((r) => r.weapon).filter(Boolean);
+  for (const key of new Set([...(look.weaponMix ? Object.keys(look.weaponMix) : [look.weapon]), ...roleWeapons])) {
     if (!WEAPONS[key]) continue;
     const geo = WEAPONS[key].build();
-    weapons[key] = { hand: make(geo, hand), sling: sling ? make(geo, sling) : null };
+    add(`w:${key}`, geo, weaponMat, boneOf("Weapon"), restOf(boneOf("Weapon")));
+    if (boneOf("Sling") >= 0) add(`s:${key}`, geo, weaponMat, boneOf("Sling"), restOf(boneOf("Sling")));
   }
-  const shovel = tool ? make(TOOLS.shovel.build(), tool) : null;
-  const all = [...Object.values(weapons).flatMap((w) => [w.hand, w.sling]), shovel].filter(Boolean);
-  return { pre, weapons, shovel, all };
+  if (boneOf("Tool") >= 0) add("shovel", TOOLS.shovel.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
+
+  // HATS: every headgear the look's variants can roll, modelled from the crown.
+  const hatK = toMesh.clone().multiply(new THREE.Matrix4().makeTranslation(crown));
+  for (const v of [look, ...(look.variants ?? []).map((x) => ({ ...look, ...x }))]) {
+    if (!v.headgear || !HEADGEAR[v.headgear]) continue;
+    add(`h:${hatKey(v)}`, HEADGEAR[v.headgear](v), headgearMaterial(v), boneOf("Head"), hatK);
+  }
+
+  // KIT and EXTRAS: modelled in the pack's world around soldier1 at rest, so
+  // their bone's rest cancels out and only the pack → mesh step is left
+  // (K = toMesh) — after the face shift for the head and neck pieces. The
+  // skinned kachabia isn't a rigid piece.
+  const kitMat = headgearMaterial();
+  const kitNames = new Set([
+    ...(look.kit ?? []), ...Object.values(look.roles ?? {}).flatMap((r) => r.kit ?? []), ...Object.keys(look.extras ?? {}),
+  ]);
+  for (const name of kitNames) {
+    const def = KIT[name];
+    if (!def || def.skinned) continue;
+    const K = (def.bone === "Head" || def.bone === "Neck")
+      ? toMesh.clone().multiply(new THREE.Matrix4().makeTranslation(faceShift)) : toMesh;
+    add(`k:${name}`, def.build(), kitMat, boneOf(def.bone), K);
+  }
+  return { pre, registry, all: [...registry.values()] };
 }
+
+/** The key of a headgear piece: its builder and its colour. */
+const hatKey = (look) => `${look.headgear}|${look.hatColor ?? ""}`;
 
 const _B = new THREE.Matrix4();
 const _P = new THREE.Matrix4();
 
-/** Write one soldier's rigid pieces (his weapon in hand or slung, the shovel) for this frame. */
+// One soldier's bone matrices, computed once per bone his pieces ride —
+// preallocated and stamped (no garbage per soldier per frame).
+const _bonePool = Array.from({ length: 64 }, () => new THREE.Matrix4());
+const _boneStamp = new Int32Array(64);
+let _stamp = 0;
+const _base = new THREE.Matrix4();
+
+/**
+ * Write one soldier's rigid pieces for this frame: his weapon (in the hand, or
+ * slung while a clip needs his hands), the shovel while digging, his hat, his
+ * kit and extras. Pieces on the same bone share one bone-matrix lookup.
+ */
 function writePieces(crd, v, unitMatrix, holdA = false, holdB = false) {
   const P = crd.pieces;
-  const w = P?.weapons[v.weapon];
-  if (!w) return;
+  if (!P) return;
   const a = v.prev.clip, b = v.cur.clip;
-  const put = (piece) => {
+  _stamp++;
+  _base.multiplyMatrices(unitMatrix, P.pre);
+  const put = (key) => {
+    const piece = P.registry.get(key);
     if (!piece || piece.n >= MAX_CROWD) return;
-    crd.field.boneMatrix(a, v.prev.t, b, v.cur.t, v.fade, piece.bone, _B, { holdA, holdB });
-    _P.multiplyMatrices(unitMatrix, P.pre).multiply(_B).multiply(piece.K);
-    piece.im.setMatrixAt(piece.n++, _P);
+    const B = _bonePool[piece.bone];
+    if (_boneStamp[piece.bone] !== _stamp) {
+      crd.field.boneMatrix(a, v.prev.t, b, v.cur.t, v.fade, piece.bone, B, { holdA, holdB });
+      _boneStamp[piece.bone] = _stamp;
+    }
+    _B.multiplyMatrices(_base, B).multiply(piece.K);
+    piece.im.setMatrixAt(piece.n++, _B);
   };
   // Only while a clip that uses it plays (it is scaled to ~0 in the others).
-  if (!(STOWED.test(a) && STOWED.test(b))) put(w.hand);
-  if (STOWED.test(a) || STOWED.test(b)) put(w.sling);
-  if (USES_TOOL.test(a) || USES_TOOL.test(b)) put(P.shovel);
+  if (v.weapon) {
+    if (!(STOWED.test(a) && STOWED.test(b))) put(`w:${v.weapon}`);
+    if (STOWED.test(a) || STOWED.test(b)) put(`s:${v.weapon}`);
+  }
+  if (USES_TOOL.test(a) || USES_TOOL.test(b)) put("shovel");
+  if (v.hat) put(`h:${v.hat}`);
+  for (const k of v.kit) put(`k:${k}`);
 }
 
 /**
@@ -626,16 +703,6 @@ function soldierClip(unit, v, roles) {
     if (dx * dx + dz * dz <= (range * 1.05) ** 2) return v.firing > 0 && roles.fire ? roles.fire : roles.aim;
   }
   return roles.idle;
-}
-
-/** A soldier's weapon key from his type's look: its weapon, or one drawn from its weaponMix. */
-function pickWeapon(look) {
-  if (!look) return null;
-  if (!look.weaponMix) return look.weapon ?? null;
-  const mix = Object.entries(look.weaponMix);
-  let t = Math.random() * mix.reduce((s, [, w]) => s + w, 0);
-  for (const [key, w] of mix) { t -= w; if (t < 0) return key; }
-  return mix[0][0];
 }
 
 const CROSSFADE = 0.2;      // s between two clips
@@ -698,28 +765,43 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     t.targetLength = Math.max(b.max.x - b.min.x, b.max.z - b.min.z);
     return { scene, animations: [] };
   }));
+  // `body` / `bodies`: a pack of soldiers on one skeleton (public/models/
+  // soldiers/soldiers.glb holds several bodies). A template keeps ONE body —
+  // the others are dropped before it is measured and scaled. A type with
+  // several `bodies` (the ALN: aln1 + aln2) gets a template and a crowd per
+  // body, its soldiers shared out between them.
+  const keepBody = (sceneRoot, body) => {
+    const drop = [];
+    sceneRoot.traverse((o) => { if (o.isSkinnedMesh && o.name !== body) drop.push(o); });
+    for (const o of drop) o.removeFromParent();
+  };
+  const templateOf = (t, gltf) => ({
+    ...buildTemplate(gltf.scene, {
+      targetLength: t.targetLength,
+      targetHeight: t.targetHeight,
+      excludeRotorsFromBox: t.excludeRotorsFromBox,
+      castShadow: t.castShadow !== false,
+    }),
+    animations: gltf.animations,
+    skinned: !!t.skinned,
+  });
+  const bodiesOf = (t) => t.bodies ?? (t.body ? [t.body] : [null]);
   const templates = {};
   UNIT_TYPE_KEYS.forEach((k, i) => {
     const t = UNIT_TYPES[k];
-    // `body`: a pack of soldiers on one skeleton (public/models/soldiers/
-    // soldiers.glb holds several bodies) — this type keeps its own, the others
-    // are dropped before the template is measured and scaled.
-    if (t.body) {
-      const drop = [];
-      loaded[i].scene.traverse((o) => { if (o.isSkinnedMesh && o.name !== t.body) drop.push(o); });
-      for (const o of drop) o.removeFromParent();
-    }
-    templates[k] = {
-      ...buildTemplate(loaded[i].scene, {
-        targetLength: t.targetLength,
-        targetHeight: t.targetHeight,
-        excludeRotorsFromBox: t.excludeRotorsFromBox,
-        castShadow: t.castShadow !== false,
-      }),
-      animations: loaded[i].animations,
-      skinned: !!t.skinned,
-    };
+    const body = bodiesOf(t)[0];
+    if (body) keepBody(loaded[i].scene, body);
+    templates[k] = { ...templateOf(t, loaded[i]), body };
   });
+  const altTemplates = {}; // k → [template of each further body]
+  await Promise.all(UNIT_TYPE_KEYS.filter((k) => bodiesOf(UNIT_TYPES[k]).length > 1).map(async (k) => {
+    const t = UNIT_TYPES[k];
+    altTemplates[k] = await Promise.all(bodiesOf(t).slice(1).map(async (body) => {
+      const gltf = await loadGltf(t.url);
+      keepBody(gltf.scene, body);
+      return { ...templateOf(t, gltf), body };
+    }));
+  }));
   if (!templates.helicopter?.rotors) {
     console.info("[rts-v3] no rotor node found in heli5.glb — rotors won't spin.");
   }
@@ -740,7 +822,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   for (const k of UNIT_TYPE_KEYS) {
     instanced[k] = templates[k].skinned ? null : buildInstancedType(templates[k], scene);
     crowd[k] = templates[k].skinned ? buildCrowdType(templates[k], UNIT_TYPES[k], app, scene) : null;
+    // a crowd per further body of the type (same clips, same look, own mesh)
+    if (crowd[k]) crowd[k].alts = (altTemplates[k] ?? []).map((tpl) => buildCrowdType(tpl, UNIT_TYPES[k], app, scene)).filter(Boolean);
   }
+  /** Every crowd of a type: its first body's, then the others'. */
+  const crowdsOf = (k) => (crowd[k] ? [crowd[k], ...crowd[k].alts] : []);
+  // The nth soldier of each type (spawn order): its ROLE in the look's section
+  // (leader, radio, LMG, flag — soldierLooks.js) comes from n mod 12.
+  const spawned = {};
 
   // Per-unit visuals.
   const views = new Map(); // unit → view
@@ -771,7 +860,9 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     const t = unit.type;
     const tpl = templates[t.typeKey];
     const inst = instanced[t.typeKey];
-    const crd = crowd[t.typeKey];
+    // a type with several bodies shares its soldiers out between their crowds
+    const crds = crowdsOf(t.typeKey);
+    const crd = crds.length ? crds[Math.floor(Math.random() * crds.length)] : null;
 
     // An instanced unit owns NO scene objects — just an off-scene Object3D we use
     // to compose its transform (and to hold the slerped terrain tilt between frames).
@@ -793,16 +884,23 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       const xform = new THREE.Object3D();
       xform.scale.setScalar(crd.scale);
       const t0 = Math.random() * 8;
+      // His place in the look's section (spawn order, mod 12) and what he
+      // wears and carries: soldierLooks.loadout — a headgear variant, his
+      // role's weapon (or one from the look's mix), kit, rolled extras.
+      const n = (spawned[t.typeKey] = (spawned[t.typeKey] ?? -1) + 1);
+      const load = crd.look ? loadout(crd.look, n % 12, () => Math.random()) : null;
       views.set(unit, {
         crowd: crd, xform, bob: 0,
         // the clip it's on, the one it's fading from, and how far the fade is
         cur: { clip: crd.roles.idle, t: t0 }, prev: { clip: crd.roles.idle, t: t0 }, fade: 1,
         firing: 0, lastCd: 0, lastX: unit.position.x, lastZ: unit.position.z, speed: 0,
-        // its own stable look variation (soldierLooks: cloth, sun-fade, skin)
-        seed: [Math.random(), Math.random(), Math.random(), 0],
+        // his stable look variation (soldierLooks: cloth, sun-fade, skin) and,
+        // in .w, "bare head": his body's own headwear hidden (a hat instead)
+        seed: [Math.random(), Math.random(), Math.random(), load && !load.look.helmet ? 1 : 0],
         deadT: -1,
-        // his rifle: the look's, or drawn from its mix (the ALN's armoury)
-        weapon: pickWeapon(crd.look),
+        weapon: load?.weapon ?? null,
+        hat: load?.look.headgear ? hatKey(load.look) : null,
+        kit: (load?.kit ?? []).filter((k) => KIT[k] && !KIT[k].skinned),
       });
       return;
     }
@@ -919,9 +1017,9 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     // deaths need no bookkeeping — a dead unit simply isn't written.
     for (const k of UNIT_TYPE_KEYS) {
       if (instanced[k]) instanced[k].n = 0;
-      if (crowd[k]) {
-        crowd[k].field.begin();
-        for (const piece of crowd[k].pieces?.all ?? []) piece.n = 0;
+      for (const c of crowdsOf(k)) {
+        c.field.begin();
+        for (const piece of c.pieces?.all ?? []) piece.n = 0;
       }
     }
     crowdUnits.length = 0;
@@ -1141,27 +1239,37 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           inst.odometer.addUpdateRange?.(0, inst.n);   // only the live units' slots
         }
       }
-      const crd = crowd[k];
-      // Real soldiers of this type written this frame: the x-ray shows only
-      // them — the static figures come after them in the instance order, and
-      // their pink silhouettes showed through the temple's stone.
-      const nReal = crd ? crowdUnits.reduce((n, u) => n + (u.type?.typeKey === k ? 1 : 0), 0) : 0;
-      if (crd) {
+      // Every crowd of the type (one per body): its corpses after its living,
+      // its pieces uploaded, the skinning dispatched, its x-ray sized.
+      for (const c of crowdsOf(k)) {
+        // Real soldiers in this crowd written this frame: the x-ray shows only
+        // them — the static figures and corpses come after them in the
+        // instance order (the watchers' pink silhouettes showed through the
+        // temple's stone).
+        const nReal = crowdUnits.reduce((n, u) => n + (views.get(u)?.crowd === c ? 1 : 0), 0);
         for (const unit of corpses) {
-          if (unit.type?.typeKey !== k) continue;
           const v = views.get(unit);
-          _mat.multiplyMatrices(v.xform.matrix, crd.rel);
-          const dying = (c) => crd.roles.deaths.includes(c);
-          crd.field.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
+          if (v.crowd !== c) continue;
+          _mat.multiplyMatrices(v.xform.matrix, c.rel);
+          const dying = (clip) => c.roles.deaths.includes(clip);
+          c.field.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
             unit.team === "player" ? 0 : 1, { holdA: dying(v.prev.clip), holdB: true, extra: v.seed });
-          writePieces(crd, v, v.xform.matrix, dying(v.prev.clip), true);
+          writePieces(c, v, v.xform.matrix, dying(v.prev.clip), true);
         }
-        for (const piece of crd.pieces?.all ?? []) {
+        for (const piece of c.pieces?.all ?? []) {
           piece.im.count = piece.n;
           piece.im.visible = piece.n > 0;
           if (piece.n) piece.im.instanceMatrix.needsUpdate = true;
         }
+        if (c !== crowd[k]) {
+          c.field.commit();
+          if (c.xray) { c.xray.count = Math.min(nReal, c.field.mesh.count); c.xray.visible = c.xray.count > 0 && xrayOn(); }
+        } else {
+          c.nReal = nReal;
+        }
       }
+      const crd = crowd[k];
+      const nReal = crd?.nReal ?? 0;
       if (crd && statics.length) {
         for (const s of statics) {
           if (s.typeKey !== k) continue;

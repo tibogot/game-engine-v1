@@ -126,10 +126,19 @@ Not wired into either game yet.
          copy, + the shovel) per soldier type, placed by the baked bone matrix
          (crowdSkinning boneMatrix, the same table the GPU skins with); no
          shadow; ALN draw MAS 36 / Mauser / Enfield per man.
-   - [ ] hats, kit, flag as RIGID pieces drawn per TYPE for the whole
-         army, placed by their bone (not merged into the body: that would
-         double the skinned vertices); the kachabia skinned with the body
-   - [ ] looks in the crowd shader; per-soldier variation from the instance
+   - [x] HATS + KIT + EXTRAS in the game (2026-09-30, checked in Chrome):
+         every piece a look can roll is an InstancedMesh per soldier type,
+         made at load (warmed with the rest); per-soldier loadout at spawn
+         (variant, role by spawn order mod 12, kit, extras, weapon); the body's
+         own headwear hidden PER SOLDIER (markHeadwear + a flag in extra.w →
+         collapsed triangles). Types: appelé = "appeleSection", sapeur =
+         "sapeur" (new look), moudjahid = "alnSection" on BOTH ALN bodies (a
+         crowd per body). Trap on the way: the skin's bind space is the
+         MESH's (8 units/m, flipped), not the pack world — hats came out 1/8.
+   - [ ] the kachabia in the game (the one SKINNED kit piece: needs to join
+         the body's crowd, or its own crowd per body)
+   - [ ] PARAS and the LÉGION as unit types? (you: cost, stats, where trained)
+   - [x] looks in the crowd shader; per-soldier variation from the instance
    - [ ] a ~1.5k-tri distance LOD of each body (meshoptimizer), judged from
          the RTS camera; soldier1's colour map → KTX2; no shadows on tiny kit
    - [ ] alg-rts swaps its stand-in (testsolanim.glb) for soldier1 + aln1/aln2
