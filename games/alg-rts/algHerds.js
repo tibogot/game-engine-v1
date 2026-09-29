@@ -24,6 +24,18 @@ import { initAnimalMorph, createMorphTemplate } from "../../v3/props/animalMorph
 import { createWildHerd } from "../shared-rts/wildHerd.js";
 import { LAYOUT } from "./layout.js";
 import { TRACK_LINES } from "./algTracks.js";
+import { RTS_SCALE } from "./algUnitTypes.js";
+
+/**
+ * THE ANIMALS AT UNIT SCALE (you, 2026-09-29): men are drawn 1.3x real so they
+ * read from the RTS camera; at real size a sheep beside them was a lamb, a
+ * donkey a pony, and most of the flock hard to see at all. The rule is now
+ * "units, animals and everything man-made 1.3x; terrain and plants real".
+ * Everything that is a LENGTH scales with them — the clip's stride (so the
+ * walk and run speeds, or the feet slide), the flock's spread, the rope, the
+ * gap between two donkeys on a lead. nam-rts's animals are its own call.
+ */
+const S = RTS_SCALE;
 
 // Algeria's breeds, as far as the low-poly style carries them: a HAMRA-like
 // sheep (white fleece, red-brown face and legs) and a black-brown Arbia goat.
@@ -53,7 +65,7 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
   const keepOut = sites.filter((s) => ["french", "aln"].includes(s.kind)).map((s) => ({ x: s.x, z: s.z, r: 90 }));
   // The villages' cores (80% of their radius — their buildings block the nav
   // grid anyway): at r + 6 the wells at the village edge were out of reach.
-  const walls = sites.filter((s) => ["dechra", "hamlet", "koubba", "cemetery"].includes(s.kind)).map((s) => ({ x: s.x, z: s.z, r: s.r * 0.8 }));
+  const walls = sites.filter((s) => ["dechra", "hamlet", "ksar", "koubba", "cemetery"].includes(s.kind)).map((s) => ({ x: s.x, z: s.z, r: s.r * 0.8 }));
   const inAny = (list, x, z) => list.some((c) => (c.x - x) ** 2 + (c.z - z) ** 2 < c.r * c.r);
   /** Ground a sheep (or, with `minUp` lower, a goat) can stand on → its y, or null. */
   const standable = (minUp) => (x, z) => {
@@ -70,7 +82,7 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
   let seed = 4242;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   // Pastures: just outside each mechta and the dechra, and near the springs.
-  const homes = sites.filter((s) => ["hamlet", "dechra", "oasis"].includes(s.kind));
+  const homes = sites.filter((s) => ["hamlet", "dechra", "ksar", "oasis"].includes(s.kind));
   const pastures = [];
   for (const s of homes) {
     for (let k = 0; k < 40; k++) {
@@ -100,11 +112,11 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
     flocks.push({ anchor, site: sites.find((s) => s.name === p.site) });
     const place = (q, fwd = 0) => ({ ...q, anchor, follow: "loose", off: { x: (q.x - p.x), z: (q.z - p.z) * 0.8 + fwd } });
     // a dozen sheep, a few of them lambs; five or six goats, one or two kids
-    for (const q of around(p, 10 + Math.floor(rnd() * 5), 8, sheepStand)) {
-      sheepSpots.push({ ...place(q), height: sheepTpl.height * (rnd() < 0.2 ? 0.62 : 0.9 + rnd() * 0.2) });
+    for (const q of around(p, 10 + Math.floor(rnd() * 5), 8 * S, sheepStand)) {
+      sheepSpots.push({ ...place(q), height: S * sheepTpl.height * (rnd() < 0.2 ? 0.62 : 0.9 + rnd() * 0.2) });
     }
-    for (const q of around(p, 5 + Math.floor(rnd() * 2), 7, goatStand)) {
-      goatSpots.push({ ...place(q, 8), height: goatTpl.height * (rnd() < 0.2 ? 0.62 : 0.9 + rnd() * 0.18) });
+    for (const q of around(p, 5 + Math.floor(rnd() * 2), 7 * S, goatStand)) {
+      goatSpots.push({ ...place(q, 8 * S), height: S * goatTpl.height * (rnd() < 0.2 ? 0.62 : 0.9 + rnd() * 0.18) });
     }
   }
   // Donkeys: 3-4 tied just outside each village's walls, 2 at each spring.
@@ -116,10 +128,10 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
       const a = rnd() * Math.PI * 2, d = s.kind === "oasis" ? s.r * 0.6 + rnd() * 10 : s.r + 8 + rnd() * 8;
       const x = s.x + Math.sin(a) * d, z = s.z + Math.cos(a) * d;
       if (sheepStand(x, z) == null) continue;
-      if ([...donkeySpots, ...loadedSpots].some((q) => Math.hypot(q.x - x, q.z - z) < 4)) continue;
+      if ([...donkeySpots, ...loadedSpots].some((q) => Math.hypot(q.x - x, q.z - z) < 4 * S)) continue;
       const loaded = rnd() < LOADED_SHARE;
       const tpl = loaded ? loadedTpl : donkeyTpl;
-      (loaded ? loadedSpots : donkeySpots).push({ x, z, height: tpl.height * (0.92 + rnd() * 0.12) });
+      (loaded ? loadedSpots : donkeySpots).push({ x, z, height: S * tpl.height * (0.92 + rnd() * 0.12) });
       placed++;
     }
   }
@@ -171,7 +183,7 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
     f.leg = 0;
     f.wait = 20 + rnd() * 60;
   }
-  const FLOCK_PACE = 0.45;   // m/s: a flock grazing its way along
+  const FLOCK_PACE = 0.45 * S;   // m/s: a flock grazing its way along (its strides are 1.3x)
 
   // ── DONKEY TRAINS on the mule paths (algTracks.js): a loaded donkey on the
   // lead, a bare one behind, from the village up to the gully mouth and back,
@@ -192,10 +204,10 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
     placeTrain(tr, 0);
     trains.push(tr);
     const at = (off) => { const c = Math.cos(tr.anchor.yaw), s = Math.sin(tr.anchor.yaw); return { x: tr.anchor.x + off.x * c + off.z * s, z: tr.anchor.z - off.x * s + off.z * c }; };
-    trainLoaded.push({ ...at({ x: 0, z: 0 }), anchor: tr.anchor, off: { x: 0, z: 0 }, follow: "tight", height: loadedTpl.height * (0.95 + rnd() * 0.08) });
-    trainBare.push({ ...at({ x: 0.3, z: -3.4 }), anchor: tr.anchor, off: { x: 0.3, z: -3.4 }, follow: "tight", height: donkeyTpl.height * (0.92 + rnd() * 0.1) });
+    trainLoaded.push({ ...at({ x: 0, z: 0 }), anchor: tr.anchor, off: { x: 0, z: 0 }, follow: "tight", height: S * loadedTpl.height * (0.95 + rnd() * 0.08) });
+    trainBare.push({ ...at({ x: 0.3 * S, z: -3.4 * S }), anchor: tr.anchor, off: { x: 0.3 * S, z: -3.4 * S }, follow: "tight", height: S * donkeyTpl.height * (0.92 + rnd() * 0.1) });
   }
-  const TRAIN_PACE = Math.min(loadedTpl.walkSpeed ?? 1, donkeyTpl.walkSpeed ?? 1) * 0.8;
+  const TRAIN_PACE = Math.min(loadedTpl.walkSpeed ?? 1, donkeyTpl.walkSpeed ?? 1) * S * 0.8;
   /** A train's anchor at arc position s, facing its way of travel. */
   function placeTrain(tr, dt) {
     tr.s = Math.max(0, Math.min(tr.total, tr.s));
@@ -214,14 +226,14 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
   const herds = [
     // roam 7: bunched round their places in the flock (a lone sheep 20 m out
     // read as strays, not a flock).
-    createWildHerd(app, sheepTpl, sheepSpots, { canStand: sheepStand, threats, name: "Sheep", walkSpeed: sheepTpl.walkSpeed, runSpeed: sheepTpl.runSpeed, roam: 7 }),
-    createWildHerd(app, goatTpl, goatSpots, { canStand: goatStand, threats, name: "Goats", walkSpeed: goatTpl.walkSpeed, runSpeed: goatTpl.runSpeed, roam: 7 }),
+    createWildHerd(app, sheepTpl, sheepSpots, { canStand: sheepStand, threats, name: "Sheep", walkSpeed: sheepTpl.walkSpeed * S, runSpeed: sheepTpl.runSpeed * S, roam: 7 * S }),
+    createWildHerd(app, goatTpl, goatSpots, { canStand: goatStand, threats, name: "Goats", walkSpeed: goatTpl.walkSpeed * S, runSpeed: goatTpl.runSpeed * S, roam: 7 * S }),
     // the trains: on the lead, on the mule paths' steeper ground
-    createWildHerd(app, loadedTpl, trainLoaded, { canStand: trailStand, name: "Donkeys (train, loaded)", walkSpeed: loadedTpl.walkSpeed, runSpeed: loadedTpl.runSpeed, bolt: false, roam: 1.5 }),
-    createWildHerd(app, donkeyTpl, trainBare, { canStand: trailStand, name: "Donkeys (train)", walkSpeed: donkeyTpl.walkSpeed, runSpeed: donkeyTpl.runSpeed, bolt: false, roam: 1.5 }),
+    createWildHerd(app, loadedTpl, trainLoaded, { canStand: trailStand, name: "Donkeys (train, loaded)", walkSpeed: loadedTpl.walkSpeed * S, runSpeed: loadedTpl.runSpeed * S, bolt: false, roam: 1.5 * S }),
+    createWildHerd(app, donkeyTpl, trainBare, { canStand: trailStand, name: "Donkeys (train)", walkSpeed: donkeyTpl.walkSpeed * S, runSpeed: donkeyTpl.runSpeed * S, bolt: false, roam: 1.5 * S }),
     // working animals: tied up (a few metres of rope), never bolting
-    createWildHerd(app, donkeyTpl, donkeySpots, { canStand: sheepStand, name: "Donkeys", walkSpeed: donkeyTpl.walkSpeed, runSpeed: donkeyTpl.runSpeed, bolt: false, roam: 3 }),
-    createWildHerd(app, loadedTpl, loadedSpots, { canStand: sheepStand, name: "Donkeys (loaded)", walkSpeed: loadedTpl.walkSpeed, runSpeed: loadedTpl.runSpeed, bolt: false, roam: 3 }),
+    createWildHerd(app, donkeyTpl, donkeySpots, { canStand: sheepStand, name: "Donkeys", walkSpeed: donkeyTpl.walkSpeed * S, runSpeed: donkeyTpl.runSpeed * S, bolt: false, roam: 3 * S }),
+    createWildHerd(app, loadedTpl, loadedSpots, { canStand: sheepStand, name: "Donkeys (loaded)", walkSpeed: loadedTpl.walkSpeed * S, runSpeed: loadedTpl.runSpeed * S, bolt: false, roam: 3 * S }),
   ].filter(Boolean);
   /** Move the homes (flocks, trains), then the animals. */
   function step(dt) {

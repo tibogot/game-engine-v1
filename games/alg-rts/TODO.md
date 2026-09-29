@@ -815,6 +815,53 @@ Asset follow-ups:
       limestone, the valley soil's pebbles), so they sit IN the ground instead
       of on it — placed where those layers are painted (scree slopes, ridges,
       wadi banks). The kit's fieldStone is limestone-grey and reads foreign.
+      Also: a broken gravel SHOULDER along the pistes (the stones a wheel
+      pushes aside) — as stones, not paint (algTracks only owns slot 6).
+- [x] **Animals at unit scale** (you, 2026-09-29: "most of them are barely
+      visible"): sheep, goats and donkeys 1.3x like the men (algHerds.js
+      `S = RTS_SCALE`), and every length with them — walk/run speeds (the
+      clip stride), flock spread, roam, the goats' lead, tied donkeys' gap,
+      the train's spacing, the flock's pace. Seen: a donkey's back at a
+      soldier's chest; the flocks read at play zoom. shared wildHerd.js and
+      nam-rts untouched. Next if still hard to see: contrast (fleece/coat).
+- [x] **KSAR EL HAMRA** (you, 2026-09-29, a photo of Ghardaïa): a M'zab-
+      style plastered town up the one clear knoll in the play box (-10,-120),
+      ALN-leaning, the 4th village (50/min; held from its SOUK, layout.js
+      sitePoint — the town itself blocks the nav). rtsAlgVillage.js
+      buildKsar: 56 houses in rings, walls running down the slope (the
+      stacking), parapets with horns, roof rooms, palm shades; the mosque and
+      a 25 m tapering minaret on top; an arcaded souk (extruded arches, dark
+      galleries, merlons, lanterns), square, fountain, 3 palms, stair lane.
+      Two new atlas plasters (MAT.plaster 22 ochre, plasterPale 23 cream —
+      THE ATLAS IS NOW FULL). The souk stands on a `pad` (new showroom option
+      for ground pieces). 12.7k tris, builds in ~160 ms; coplanar + ground-
+      band tests pass (flat and knoll).
+- [ ] Ksar, next: YOU LOOK (colours, minaret height, density); a piste to
+      it (algTracks ROUTES + --route); a stork on the minaret; donkeys and
+      people in the souk; the square's facing (the right wing hides part of
+      it from the play camera — turn, or open that wing).
+- [ ] **What next — environment / buildings / vehicles** (proposed
+      2026-09-29, your pick): stones matching the ground (above); a road
+      network that reads (pistes to every village, a French tarmac road with
+      milestones and a bridge); palm groves + seguias round the oases;
+      the French side's colonial buildings (a farm/"ferme coloniale", a
+      school, a gendarmerie in stucco and tile — rtsColonial.js is Indochina's);
+      villages that LIVE (people at wells, laundry, smoke from ovens); damage
+      states (burnt, collapsed houses after shelling); more vehicles (Dodge
+      6x6, Jeep with recoilless, Piper Cub, H-21 "banane"); weather
+      (sandstorm, night with the searchlight); sound for the ksar (muezzin, souk).
+- [x] **The pistes looked flat and ruled** (you, 2026-09-29):
+      1. The Dirt track is slot 6, and alg compiled `layerBudget: 6` (slots
+         0-5): the tracks drew the flat base colour, NO texture at all. Now 7
+         (`?layers=6` to A/B). MEASURED +0.11 ms GPU (1.235 → 1.348, one
+         round each, same view).
+      2. The straight band was the rut DECALS' halo on the exact centreline:
+         opacity 0.7 → 0.45, each 10 m segment ±0.4 m sideways.
+      3. The paint edge: two octaves of wobble (9 m, 2.2 m) and a fade
+         thresholded by a 1.1 m noise, so stone bites in and dust spills out.
+      4. Valley soil normal 0.5 → 1.0 (you: "bump normals a bit"); the
+         pebbles now catch the sun. Set in the map only (it came from the
+         editor, no tool owns it).
 - [x] **A better-looking OASIS** (you, 2026-09-29): the ground round the
       water read as neither desert nor garden. tools/algOasisLook.mjs, per
       lake: slot 3 is now "Oasis grove" (forrest_ground_01, tint #f2f5e6)

@@ -23,7 +23,7 @@ import { createAlgPatrols } from "./algPatrols.js";
 import { createAlgSight } from "./algSight.js";
 import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
-import { LAYOUT, PLAY, VIEW_YAW } from "./layout.js";
+import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { COSTS, createAlgEconomy } from "./algEconomy.js";
 import { createResourceHud } from "./ui/resourceHud.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
@@ -229,7 +229,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // holding one pays; every unit is paid for when it is queued.
   const economy = createAlgEconomy({
     app, units, structures,
-    sites: LAYOUT.sites.filter((s) => s.kind === "hamlet" || s.kind === "dechra"),
+    // A ksar is held from its souk (layout.js sitePoint), not its summit.
+    sites: LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind)).map((s) => ({ ...s, ...sitePoint(s) })),
   });
   app.algEconomy = economy;
   for (const p of producers) p.structure.pay = (key) => economy.purses[p.structure.team].spend(COSTS[key] ?? 0);

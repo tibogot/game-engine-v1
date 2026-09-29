@@ -32,7 +32,7 @@ import { createCoverOverlay } from "../shared-rts/coverOverlay.js";
 export const ALG_COVER = { ...COVER, concealFloor: 0.2, concealCeil: 0.65, maxConcealment: 0.6, terrainCover: 0.5 };
 
 /** Stone and sandbags: hard cover. */
-const HARD = new Set(["frenchPost", "sangar", "mgNest", "mortarPit", "sandbags1", "sandbags2", "dechra", "mechta", "mechta2", "koubba", "caveEntrance", "sasPost", "armsCache", "alnCamp", "wellHamlet1", "wellHamlet2"]);
+const HARD = new Set(["frenchPost", "sangar", "mgNest", "mortarPit", "sandbags1", "sandbags2", "dechra", "ksar", "mechta", "mechta2", "koubba", "caveEntrance", "sasPost", "armsCache", "alnCamp", "wellHamlet1", "wellHamlet2"]);
 /** No cover at all: wire, brush, thorn, flat ground, a lattice. */
 const NONE = new Set(["wire1", "wire2", "ambushScreen", "mineMarker", "zeriba1", "zeriba2", "helipad", "searchlight", "cemetery"]);
 

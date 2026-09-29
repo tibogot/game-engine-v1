@@ -26,7 +26,7 @@ export const COSTS = {
 const P = {
   start: { player: 400, enemy: 240 },
   base: { player: 40, enemy: 15 },        // per minute
-  village: { hamlet: 25, dechra: 40 },    // per minute to its holder
+  village: { hamlet: 25, dechra: 40, ksar: 50 },    // per minute to its holder (a ksar: a market town)
   cache: 15,                              // per minute per standing arms cache (ALN)
   radius: 40,
   push: 0.02,                             // influence per second per man (up to 3)

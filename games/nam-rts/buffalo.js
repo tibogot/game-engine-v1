@@ -16,6 +16,10 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
 import { createCrowdField } from "./crowdSkinning.js";
+import { RTS_SCALE } from "./unitTypes.js";
+
+/** A water buffalo's real height at the shoulder-hump (m); drawn × RTS_SCALE. */
+const REAL_HEIGHT = 1.4;
 
 const URL = "/models/Bull_compressed.glb";
 
@@ -162,7 +166,12 @@ export async function loadBuffaloTemplate() {
  * however many there are; the CPU writes a matrix and two clip frames each.
  * Returns { update(dt), mesh, count, herd }.
  */
-export async function placeBuffalo(app, spots, { height = 1.4 } = {}) {
+// AT UNIT SCALE (you, 2026-09-29): animals are drawn like the men, real ×
+// RTS_SCALE — at real size a buffalo by a 2.3 m soldier read as a calf. The
+// walk speed and the grazing steps follow the size (the stride grows with it,
+// or the feet slide).
+export async function placeBuffalo(app, spots, { height = REAL_HEIGHT * RTS_SCALE } = {}) {
+  const k = height / REAL_HEIGHT;
   if (!spots.length) return null;
   const tpl = await loadBuffaloTemplate();
   const box = new THREE.Box3().setFromObject(tpl.root);
@@ -184,7 +193,7 @@ export async function placeBuffalo(app, spots, { height = 1.4 } = {}) {
     cur: "eat", tCur: rnd() * 10, prev: "eat", tPrev: 0, fade: 1, rate: 0.85 + rnd() * 0.3,
     state: "eat", timer: 4 + rnd() * 12, target: null,
   }));
-  const WALK_SPEED = 0.75;   // m/s, matched by eye to the Walk clip's stride at this size
+  const WALK_SPEED = 0.75 * k;   // m/s, matched by eye to the Walk clip's stride at real size, × the size
   const go = (h, state, key, timer) => {
     const next = clips[key] ? key : "eat";
     if (next !== h.cur) {
@@ -197,7 +206,7 @@ export async function placeBuffalo(app, spots, { height = 1.4 } = {}) {
   /** Fresh grazing 2-5 m off, reachable in a straight line on allowed ground. */
   const pickTarget = (h) => {
     for (let k = 0; k < 24; k++) {
-      const a = rnd() * Math.PI * 2, d = 2 + rnd() * 3;
+      const a = rnd() * Math.PI * 2, d = (2 + rnd() * 3) * k;
       const x = h.x + Math.sin(a) * d, z = h.z + Math.cos(a) * d;
       let ok = true;
       for (let f = 0.25; f <= 1 && ok; f += 0.25) ok = h.s.heightAt(h.x + (x - h.x) * f, h.z + (z - h.z) * f) != null;

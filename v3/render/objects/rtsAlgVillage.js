@@ -31,6 +31,7 @@
  * `height`. Real metres, scaled by 1.3 at the end.
  */
 import * as THREE from "three";
+import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { MAT, buildBox, rng, wirePart } from "./rtsParts.js";
 import { house } from "./rtsMechta.js";
 import { brushClump, clayJar, dryStone, earthBerm, fieldStone, finish } from "./rtsAlgeria.js";
@@ -565,5 +566,310 @@ export function buildThreshingFloor({ seed = 1963, r = 4.5 } = {}) {
   const geo = finish(parts, { hx: r + 0.5, hz: r + 0.5, height: 1 });
   geo.userData.navRects = [];    // walked over
   geo.userData.coverPerimeter = false;   // flat: no cover (a kerb 0.4 m high)
+  return geo;
+}
+
+// ── KSAR ────────────────────────────────────────────────────────────────────
+
+/** Highest and lowest ground under a TURNED rectangle (local half sizes). */
+function groundSpanRot(groundAt, cx, cz, yaw, hx, hz) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  let top = -Infinity, low = Infinity;
+  for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0], [0, -1], [0, 1], [-1, 0], [1, 0]]) {
+    const lx = a * hx, lz = b * hz, g = groundAt(cx + lx * c + lz * s, cz - lx * s + lz * c);
+    top = Math.max(top, g); low = Math.min(low, g);
+  }
+  return { top, low };
+}
+
+/** Local → world placement for the parts of a building turned `yaw` at (x, y, z). */
+function placer(parts, x, y, z, yaw) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  return (geo, lp, mat, tone, rot = [0, 0, 0]) => {
+    parts.push({ geo, pos: [x + lp[0] * c + lp[2] * s, y + lp[1], z - lp[0] * s + lp[2] * c], rot: [rot[0], rot[1] + yaw, rot[2]], mat, tone });
+  };
+}
+
+/** A square prism tapering from `wb` to `wt` over `h`, flat-shaded, kit UVs. */
+function taperBox(wb, wt, h) {
+  let g = new THREE.CylinderGeometry(wt / Math.SQRT2, wb / Math.SQRT2, h, 4, 1);
+  g.rotateY(Math.PI / 4);
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (wb + wt), uv.getY(i) * (h / 2));
+  g = g.toNonIndexed();
+  g.computeVertexNormals();
+  return mergeVertices(g);   // indexed again (the kit merges indexed parts); flat normals keep the faces apart
+}
+
+/**
+ * A parapet round a flat roof whose top is at `top`: the long sides (local
+ * ±Z) full width and 4 cm proud, the ends 3 cm lower and 2 cm inside them
+ * (flush corners z-fight), and — the M'zab's tell — little pointed horns at
+ * the corners.
+ */
+function parapet(put, R, { ox = 0, oz = 0, w, d, top, mat, tone, ph = 0.5 + R() * 0.3, horns = R() < 0.75 }) {
+  const t = 0.24;
+  for (const sz of [-1, 1]) put(buildBox(w + 0.08, ph, t), [ox, top + ph / 2, oz + sz * (d / 2 - t / 2 + 0.04)], mat, tone * 0.96);
+  for (const sx of [-1, 1]) put(buildBox(t, ph - 0.03, d - 2 * t + 0.1), [ox + sx * (w / 2 - t / 2 + 0.02), top + (ph - 0.03) / 2, oz], mat, tone * 0.96);
+  if (!horns) return;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    put(new THREE.ConeGeometry(0.19, 0.6, 4), [ox + sx * (w / 2 - 0.08), top + ph + 0.28, oz + sz * (d / 2 - 0.08)], mat, tone, [0, Math.PI / 4, 0]);
+  }
+}
+
+/**
+ * ONE KSAR HOUSE: a plastered cube whose walls run down to the ground on the
+ * slope (so the town stacks, house over house, as the M'zab does), a parapet,
+ * small dark square windows, a door on the front (local -Z) at the ground,
+ * sometimes a roof room at the back, a palm-frond shade, a spout.
+ * `y` is its floor (the highest ground under it), `low` the lowest.
+ */
+function ksarHouse(parts, R, { x, z, yaw, w, d, h, y, low, frontGround, mat, tone }) {
+  const put = placer(parts, x, y, z, yaw);
+  const drop = y - low + 0.3;                      // wall below the floor, down the slope
+  put(buildBox(w, h + drop, d), [0, (h - drop) / 2, 0], mat, tone);
+  parapet(put, R, { w, d, top: h, mat, tone });
+  const win = (lx, ly, lz, ry = 0) => {
+    const shut = R() < 0.3;
+    put(buildBox(shut ? 0.62 : 0.5, shut ? 0.72 : 0.55, 0.05), [lx, ly, lz], shut ? MAT.timber : MAT.steel, shut ? 0.2 + R() * 0.15 : 0.02, [0, ry, 0]);
+  };
+  // Windows, a row per storey, few and small (the house looks inward).
+  const storeys = Math.max(1, Math.round(h / 3.1));
+  const fz = -d / 2 - 0.02;
+  for (let k = 0; k < storeys; k++) {
+    // The ground storey's windows sit above the door's surround (2.25 m).
+    const ly = (k * h) / storeys + (k === 0 ? Math.min(2.6, h / storeys - 0.5) : Math.min(2.1, (h / storeys) * 0.66));
+    const n = k === 0 ? (R() < 0.4 ? 1 : 0) : 1 + Math.floor(R() * Math.max(1, (w - 1.2) / 1.9));
+    for (let i = 0; i < n; i++) win(-w / 2 + 0.8 + ((i + 0.5) * (w - 1.6)) / n + (R() - 0.5) * 0.3, ly, fz);
+    if (k > 0 && R() < 0.5) win(w / 2 + 0.02, ly, (R() - 0.5) * (d - 1.6), Math.PI / 2);
+    if (k > 0 && R() < 0.35) win(-w / 2 - 0.02, ly, (R() - 0.5) * (d - 1.6), Math.PI / 2);
+  }
+  // Down the slope the wall is a storey taller: a row of slits in it.
+  const fg = frontGround - y;
+  if (fg < -2.4) for (let i = 0; i < 1 + Math.floor(R() * 2); i++) win(-w / 2 + 1 + R() * (w - 2), fg + 1.4, fz);
+  // The door, at the ground in front: timber in a lighter surround.
+  const dx = (R() - 0.5) * (w - 2);
+  if (fg > -2.6) {
+    put(buildBox(1.3, 2.25, 0.04), [dx, fg + 1.12, fz + 0.008], mat, Math.min(1, tone + 0.15));   // its own plane, not a window's
+    put(buildBox(0.92, 1.9, 0.05), [dx, fg + 0.95, fz - 0.02], MAT.timber, 0.12 + R() * 0.15);
+  }
+  // A room on the roof at the back (the summer room), its own parapet.
+  if (w > 4.6 && R() < 0.45) {
+    const w2 = w * (0.4 + R() * 0.15), d2 = d * (0.45 + R() * 0.1), h2 = 2.3 + R() * 0.4;
+    const ox = (R() - 0.5) * (w - w2 - 0.8), oz = d / 2 - d2 / 2 - 0.35;
+    const m2 = R() < 0.7 ? mat : MAT.plasterPale;
+    put(buildBox(w2, h2, d2), [ox, h + h2 / 2, oz], m2, tone * (0.9 + R() * 0.2));
+    parapet(put, R, { ox, oz, w: w2, d: d2, top: h + h2, mat: m2, tone, ph: 0.35, horns: R() < 0.5 });
+    put(buildBox(0.8, 1.7, 0.05), [ox + (R() - 0.5) * (w2 - 1.2), h + 0.85, oz - d2 / 2 - 0.02], MAT.steel, 0.02);
+  } else if (R() < 0.35) {
+    // A shade of palm fronds on two poles over the roof's front corner.
+    const sx = (R() < 0.5 ? -1 : 1) * (w / 2 - 1.2), sz = -d / 2 + 1.1;
+    put(buildBox(1.9, 0.1, 1.5), [sx, h + 1.95, sz], MAT.thatch, 0.3 + R() * 0.2, [0.06, R() * 0.3, 0]);
+    for (const px of [-0.8, 0.8]) put(buildBox(0.09, 1.95, 0.09), [sx + px, h + 0.97, sz - 0.6], MAT.timber, 0.3);
+  }
+  // A spout through the parapet (the roof drains to the lane).
+  if (R() < 0.5) put(buildBox(0.14, 0.12, 0.6), [(R() - 0.5) * (w - 1), h + 0.15, -d / 2 - 0.26], MAT.timber, 0.25);
+}
+
+/**
+ * AN ARCADE RANGE — the souk's side of the square: a row of round arches on
+ * square piers (one extruded face, so the arches are real openings), the
+ * gallery behind them dark with shop doors, a storey of small windows over
+ * it, a parapet of pointed merlons, a lantern or two on brackets. Local frame:
+ * the facade runs along X (`len`), its face at z = 0 looking -Z; the building
+ * goes back to z = +depth. `fy` is the floor (the square's), `low` the lowest
+ * ground under it.
+ */
+function arcadeRange(parts, R, { x, z, yaw, len, fy, low, mat = MAT.plaster, tone = 0.6, depth = 5.4 }) {
+  const put = placer(parts, x, fy, z, yaw);
+  const HA = 3.8, HT = 7.0, GAL = 3.0, T = 0.6;
+  const drop = fy - low + 0.3;
+  // Plinth + gallery floor (a step up from the square), the rear block, the storey over the gallery.
+  put(buildBox(len + 0.1, drop, GAL + 0.1), [0, 0.18 - drop / 2, GAL / 2], MAT.rubble, 0.5);
+  put(buildBox(len - 0.1, 0.2, GAL - 0.1), [0, 0.1, GAL / 2 + 0.02], MAT.earth, 0.3);
+  put(buildBox(len, HT + drop, depth - GAL), [0, (HT - drop) / 2, GAL + (depth - GAL) / 2], mat, tone * 0.92);
+  // The gallery's back wall in deep shade (the kit's dark cell): lit, the
+  // arches read as shallow niches; the arcade's depth IS its shadow.
+  put(buildBox(len - 0.2, HA - 0.05, 0.02), [0, 0.2 + (HA - 0.05) / 2, GAL - 0.012], MAT.steel, 0.12);
+  // 3 cm proud of the arch face (a string course): flush, their planes met over 20 cm.
+  put(buildBox(len + 0.04, HT - HA, GAL + 0.06), [0, HA + (HT - HA) / 2, GAL / 2 - 0.03], mat, tone);
+  // THE ARCADE: piers and arches as one face with notches, extruded.
+  const bays = Math.max(2, Math.round((len - 0.7) / 2.9));
+  const pier = 0.7, ow = (len - pier * (bays + 1)) / bays, spring = 2.3;
+  const sh = new THREE.Shape();
+  sh.moveTo(0, 0);
+  let px = 0;
+  for (let b = 0; b < bays; b++) {
+    px += pier;
+    sh.lineTo(px, 0); sh.lineTo(px, spring);
+    sh.absarc(px + ow / 2, spring, ow / 2, Math.PI, 0, true);
+    sh.lineTo(px + ow, 0);
+    px += ow;
+  }
+  sh.lineTo(len, 0); sh.lineTo(len, HA); sh.lineTo(0, HA); sh.lineTo(0, 0);
+  const face = new THREE.ExtrudeGeometry(sh, { depth: T, bevelEnabled: false, curveSegments: 10 });
+  const fuv = face.attributes.uv;
+  for (let i = 0; i < fuv.count; i++) fuv.setXY(i, fuv.getX(i) * 0.5, fuv.getY(i) * 0.5);
+  face.translate(-len / 2, 0.2, -0.03);
+  put(mergeVertices(face), [0, 0, 0], mat, tone);   // indexed, as every kit part
+  // In the gallery's shade: a shop door in each bay (dark, or timber shutters).
+  px = -len / 2;
+  for (let b = 0; b < bays; b++) {
+    px += pier;
+    const open = R() < 0.4;
+    put(buildBox(Math.min(1.6, ow - 0.4), 2.2, 0.05), [px + ow / 2, 0.2 + 1.1, GAL - 0.05], open ? MAT.steel : MAT.timber, open ? 0.02 : 0.15 + R() * 0.2);
+    px += ow;
+  }
+  // The storey over it: small windows, one per bay or so.
+  px = -len / 2;
+  for (let b = 0; b < bays; b++) {
+    px += pier;
+    if (R() < 0.8) put(buildBox(0.55, 0.62, 0.05), [px + ow / 2 + (R() - 0.5) * 0.4, HA + 1.5, -0.075], R() < 0.4 ? MAT.timber : MAT.steel, 0.05);
+    px += ow;
+  }
+  // Parapet: a plain band with pointed merlons along the front.
+  parapet(put, R, { oz: depth / 2 - 0.015, w: len, d: depth + 0.03, top: HT, mat, tone, ph: 0.45, horns: false });
+  for (let m = -len / 2 + 0.5; m < len / 2 - 0.3; m += 0.95) put(new THREE.ConeGeometry(0.2, 0.5, 4), [m, HT + 0.45 + 0.23, -0.05], mat, tone, [0, Math.PI / 4, 0]);
+  // Lanterns on iron brackets between the arches (as in the photo).
+  for (const b of [1, bays - 2]) {
+    if (b < 1 || b > bays - 1) continue;
+    const lx = -len / 2 + pier / 2 + b * (pier + ow);
+    put(buildBox(0.05, 0.05, 0.5), [lx, HA - 0.25, -0.28], MAT.steel, 0.2);
+    put(buildBox(0.26, 0.4, 0.26), [lx, HA - 0.52, -0.5], MAT.white, 0.8);
+  }
+}
+
+/**
+ * KSAR — a fortified town of the Saharan fringe, the M'zab way: plastered
+ * cubes in ochre and cream stacked up a knoll, house over house, wall to wall
+ * with only lanes between them; at the summit the mosque and its tapering
+ * minaret, the town's one vertical; at the foot, facing the camera (-Z), the
+ * SOUK: a paved square with arcades on three sides and a few date palms.
+ *
+ * The knoll's summit is the origin; `radius` the town's (pre-scale). Houses in
+ * rings round the mosque, fronts out and down the slope, lanes left open up
+ * the three ways in (one from the square). `groundAt` as the other villages.
+ */
+export function buildKsar({ seed = 1830, radius = 27.3, groundAt = FLAT } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const houses = [];
+  const trees = [];
+  // Whitewash rare: in the shade of the lanes it turned blue-grey (seen in the game).
+  const matPick = () => { const r = R(); return r < 0.6 ? MAT.plaster : r < 0.9 ? MAT.plasterPale : r < 0.93 ? MAT.white : MAT.earth; };
+  const toneOf = (m) => (m === MAT.white ? 0.28 + R() * 0.2 : m === MAT.earth ? 0.55 + R() * 0.2 : 0.35 + R() * 0.45);
+
+  // ── The souk at the foot (-Z): square, arcades, steps ─────────────────────
+  const SQ = { x0: -11, x1: 11, z0: -39.2, z1: -27 };
+  let fy = -Infinity, flow = Infinity;
+  for (let x = -16; x <= 16; x += 2) for (let z = -39; z <= -21.5; z += 2) { const g = groundAt(x, z); fy = Math.max(fy, g); flow = Math.min(flow, g); }
+  arcadeRange(parts, R, { x: 0, z: SQ.z1, yaw: 0, len: 31, fy, low: flow, tone: 0.62 });
+  for (const sx of [-1, 1]) {
+    arcadeRange(parts, R, { x: sx * 11, z: -33.2, yaw: -sx * Math.PI / 2, len: 11.6, fy, low: flow, mat: sx < 0 ? MAT.plasterPale : MAT.plaster, tone: 0.5 + R() * 0.2, depth: 4.6 });
+  }
+  // The square: a terrace of beaten earth on a stone retaining wall.
+  const sw = SQ.x1 - SQ.x0, sd = SQ.z1 - SQ.z0, scz = (SQ.z0 + SQ.z1) / 2;
+  // Its top 7 cm up inside the slab: at the floor, its rim lay in the ground band.
+  parts.push({ geo: buildBox(sw + 0.06, fy - flow + 0.37, sd + 0.06), pos: [0, fy + 0.07 - (fy - flow + 0.37) / 2, scz], mat: MAT.rubble, tone: 0.5 });
+  parts.push({ geo: buildBox(sw - 0.2, 0.12, sd - 0.2), pos: [0, fy + 0.06, scz], mat: MAT.earth, tone: 0.85 });
+  // Steps down from the square's front to the ground.
+  const gFront = groundAt(0, SQ.z0 - 1);
+  for (let k = 1; fy - k * 0.3 > gFront - 0.05 && k < 20; k++) {
+    const top = fy - k * 0.3, hgt = top - gFront + 0.4;
+    parts.push({ geo: buildBox(4 + (k % 2) * 0.06, hgt, 0.46), pos: [0, top - hgt / 2, SQ.z0 - 0.2 - k * 0.42], mat: MAT.limestone, tone: 0.5 + R() * 0.1 });
+  }
+  for (const [x, z] of [[-7.5, -30], [7, -29.5], [3.5, -36.5]]) trees.push({ kind: "datePalm", x, z, scale: 0.8 + R() * 0.25, seed: Math.floor(R() * 1000) });
+  // A fountain (a stone basin) in the square.
+  parts.push({ geo: new THREE.CylinderGeometry(1.3, 1.4, 0.6, 16), pos: [-2.5, fy + 0.3, -34], mat: MAT.limestone, tone: 0.55 });
+  parts.push({ geo: new THREE.CylinderGeometry(1.05, 1.05, 0.05, 16), pos: [-2.5, fy + 0.58, -34], mat: MAT.steel, tone: 0.1 });
+
+  // ── The mosque at the summit, the minaret on its front corner ─────────────
+  {
+    const w = 11, d = 8.5, h = 4.4, cx = 0, cz = 1.2;
+    const { top, low } = groundSpanRot(groundAt, cx, cz, 0, w / 2, d / 2);
+    const put = placer(parts, cx, top, cz, 0);
+    const drop = top - low + 0.3;
+    put(buildBox(w, h + drop, d), [0, (h - drop) / 2, 0], MAT.plasterPale, 0.62);
+    parapet(put, R, { w, d, top: h, mat: MAT.plasterPale, tone: 0.6, ph: 0.4, horns: false });
+    for (let m = -w / 2 + 0.45; m < w / 2 - 0.3; m += 0.9) put(new THREE.ConeGeometry(0.19, 0.5, 4), [m, h + 0.4 + 0.23, -d / 2 + 0.1], MAT.plasterPale, 0.6, [0, Math.PI / 4, 0]);
+    // A row of small arched windows (dark) and the door.
+    for (let k = 0; k < 7; k++) put(buildBox(0.42, 0.75, 0.05), [-w / 2 + 1.1 + k * 1.25, h - 1.2, -d / 2 - 0.02], MAT.steel, 0.02);
+    put(buildBox(1.4, 2.3, 0.05), [-2.8, 1.15, -d / 2 - 0.02], MAT.paint, 0.5);
+    // THE MINARET: a tapering square shaft (the M'zab's obelisk), slits up
+    // each face, a band, and four finger pinnacles at the corners.
+    // 19 m (25 scaled): at 15 the two-storey houses up the knoll reached its
+    // shoulders, and it has to own the skyline as in the photo.
+    const MH = 19, WB = 3.8, WT = 2.1, mx = w / 2 - 1.4, mz = -d / 2 + 1.4;
+    const m = groundSpanRot(groundAt, cx + mx, cz + mz, 0, WB / 2, WB / 2);
+    const my = m.top - top, mdrop = m.top - m.low + 0.3;
+    put(buildBox(WB + 0.1, mdrop, WB + 0.1), [mx, my - mdrop / 2 + 0.05, mz], MAT.plaster, 0.5);
+    put(taperBox(WB, WT, MH), [mx, my + MH / 2, mz], MAT.plaster, 0.55);
+    const alpha = Math.atan((WB - WT) / 2 / MH);
+    for (const yy of [4.5, 7.8, 11.1, 14.4, 17]) {
+      const hw = (WB + ((WT - WB) * yy) / MH) / 2 + 0.02;
+      put(buildBox(0.28, 0.7, 0.06), [mx, my + yy, mz - hw], MAT.steel, 0.02, [alpha, 0, 0]);
+      // Side faces: thin in X, leaned about Z to the taper (Euler XYZ: a Z
+      // turn of a Z-thin slab would only spin it in its own plane).
+      put(buildBox(0.06, 0.7, 0.28), [mx - hw, my + yy, mz], MAT.steel, 0.02, [0, 0, -alpha]);
+      put(buildBox(0.06, 0.7, 0.28), [mx + hw, my + yy, mz], MAT.steel, 0.02, [0, 0, alpha]);
+    }
+    put(buildBox(WT + 0.3, 0.3, WT + 0.3), [mx, my + MH + 0.15, mz], MAT.plaster, 0.5);
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      put(taperBox(0.4, 0.12, 1.6), [mx + sx * (WT / 2 - 0.05), my + MH + 0.3 + 0.8, mz + sz * (WT / 2 - 0.05)], MAT.plaster, 0.55);
+    }
+    houses.push({ x: cx, z: cz, mosque: true });
+  }
+
+  // ── The houses: rings round the summit, fronts out, lanes left open ───────
+  const LANES = [Math.PI, Math.PI * 0.32, -Math.PI * 0.36];     // π: down to the square
+  const angGap = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  // A house is up to 5.4 m deep: rings 5.5 m apart (tighter, and houses in
+  // neighbouring rings ran into each other's roofs).
+  const RINGS = [10.8, 16.3, 21.8, radius];
+  for (const [ri, rr] of RINGS.entries()) {
+    let phi = R() * 0.3;
+    const end = phi + Math.PI * 2 - 0.05;
+    while (phi < end) {
+      const w = 4 + R() * 3.4, d = 4.4 + R();
+      const a = phi + w / 2 / rr;
+      phi += (w + (R() < 0.18 ? 1.4 + R() : 0.06)) / rr;
+      if (phi > end) break;
+      if (LANES.some((l) => angGap(a, l) * rr < w / 2 + 1.3)) continue;
+      const x = rr * Math.sin(a) + (R() - 0.5) * 0.5, z = rr * Math.cos(a) + (R() - 0.5) * 0.5;
+      // Clear of the souk (its buildings and square) and the mosque.
+      if (z < -19.5 && Math.abs(x) < 18.5) continue;
+      if (Math.abs(x) < 8.5 && z > -5 && z < 7.5) continue;
+      const yaw = a + Math.PI + (R() - 0.5) * 0.12;             // front (local -Z) out, down the slope
+      const { top, low } = groundSpanRot(groundAt, x, z, yaw, w / 2, d / 2);
+      const fg = groundAt(x + Math.sin(a) * (d / 2 + 0.8), z + Math.cos(a) * (d / 2 + 0.8));
+      const two = R() < (ri < 2 ? 0.7 : 0.35);
+      const h = (two ? 6.1 : 3.2) + R() * 0.7;
+      const mat = matPick();
+      ksarHouse(parts, R, { x, z, yaw, w, d, h, y: top, low: Math.min(low, fg), frontGround: fg, mat, tone: toneOf(mat) });
+      houses.push({ x, z, ring: ri });
+    }
+  }
+
+  // ── The lane from the square up to the mosque: a stair of stone ───────────
+  for (let z = -21; z < -5.5; z += 1.15) {
+    const g = groundAt(0, z), k = Math.round(z / 1.15);
+    // Every other slab 3 cm higher and wider: on level ground their tops met.
+    parts.push({ geo: buildBox(2.2 + (k % 2) * 0.05, 0.8, 1.25), pos: [0, g - 0.2 + (k % 2) * 0.03, z], mat: MAT.limestone, tone: 0.45 + R() * 0.12 });
+  }
+
+  const zMin = -40.5, zMax = radius + 4;
+  const geo = finish(parts, { hx: radius + 4, hz: (zMax - zMin) / 2, cz: (zMax + zMin) / 2, height: 26, ao: { cell: 0.3 } });
+  geo.userData.houses = houses.map((h) => ({ x: h.x * KIT, z: h.z * KIT, mosque: !!h.mosque }));
+  geo.userData.trees = scaled(trees);
+  // The town is one mass (lanes too narrow to hold a line in); the souk's
+  // square and the steps are open ground: men gather there.
+  const K = (r) => ({ cx: r.cx * KIT, cz: r.cz * KIT, hx: r.hx * KIT, hz: r.hz * KIT });
+  geo.userData.navRects = [
+    K({ cx: 0, cz: 2, hx: (radius + 2) * 0.7, hz: radius + 1.5 }),
+    K({ cx: 0, cz: 0, hx: radius + 2, hz: (radius + 2) * 0.62 }),
+    K({ cx: 0, cz: -24.3, hx: 15.8, hz: 2.9 }),
+    K({ cx: -13.4, cz: -33.2, hx: 2.5, hz: 6 }),
+    K({ cx: 13.4, cz: -33.2, hx: 2.5, hz: 6 }),
+  ];
   return geo;
 }

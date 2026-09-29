@@ -378,8 +378,8 @@ for (let q = 0; q < RES * RES * 4; q += 4) {
 const texel = W / RES;
 const PROFILE = {
   // hw: half width to full weight; fade: metres out to zero; peak: max weight.
-  piste: { hw: 2.2, fade: 1.6, peak: 0.95, wobble: 0.5, breakup: 0 },
-  mule: { hw: 0.55, fade: 0.8, peak: 0.8, wobble: 0.25, breakup: 0.5 },
+  piste: { hw: 2.2, fade: 1.8, peak: 0.95, wobble: 0.9, breakup: 0 },
+  mule: { hw: 0.55, fade: 0.8, peak: 0.8, wobble: 0.3, breakup: 0.5 },
 };
 const weight = new Float32Array(RES * RES);
 const lines = [];
@@ -387,7 +387,7 @@ for (const t of TRACKS) {
   const P = PROFILE[t.kind];
   const fine = resample(t.points, 1);
   lines.push({ t, fine });
-  const reach = P.hw + P.wobble + P.fade + 0.5;
+  const reach = P.hw + 1.5 * P.wobble + P.fade + 0.5;
   for (let i = 0; i < fine.length - 1; i++) {
     const [ax, az] = fine[i], [bx, bz] = fine[i + 1];
     const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1e-6;
@@ -398,9 +398,14 @@ for (const t of TRACKS) {
       const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
       const d = Math.hypot(x - ax - dx * u, z - az - dz * u);
       if (d > reach) continue;
-      // The edge wanders (noise), and a mule path breaks up into bare patches.
-      const hw = P.hw + (vnoise(x / 3, z / 3, 41) - 0.5) * 2 * P.wobble;
-      let w = (1 - smooth((d - hw) / P.fade)) * P.peak;
+      // The edge wanders (two octaves: long bends, short bites), and the fade
+      // is NOT a gradient: a fine noise thresholds it, so stony ground bites
+      // into the track and dust spills out in patches (you, 2026-09-29: "too
+      // linear"). A mule path also breaks up into bare patches.
+      const hw = P.hw + (vnoise(x / 9, z / 9, 41) - 0.5) * 2 * P.wobble
+        + (vnoise(x / 2.2, z / 2.2, 42) - 0.5) * P.wobble;
+      const t = (d - hw) / P.fade + (vnoise(x / 1.1, z / 1.1, 44) - 0.5) * 1.1;
+      let w = (1 - smooth((t + 0.2) / 0.55)) * P.peak;
       if (P.breakup) w *= 1 - P.breakup * smooth((vnoise(x / 4, z / 4, 43) - 0.45) / 0.25);
       w *= 0.85 + 0.15 * vnoise(x / 1.5, z / 1.5, 47);
       const k = pz * RES + px;
@@ -424,7 +429,7 @@ for (let k = 0; k < RES * RES; k++) {
 // Art from the bake (--decals), one slot per variant; picked per decal by a
 // hash of its position (the same spot always gets the same variant).
 const ART = {
-  piste: { kind: "ruts", size: [3.2, 10], opacity: 0.7, roughness: 0.9 },
+  piste: { kind: "ruts", size: [3.2, 10], opacity: 0.45, roughness: 0.9 },
   mule: { kind: "footPath", size: [2.4, 10], opacity: 0.7, roughness: 0.95 },
 };
 const files = fs.existsSync(DECAL_DIR) ? fs.readdirSync(DECAL_DIR) : [];
@@ -481,6 +486,11 @@ for (const { t, fine } of lines) {
     // Where the paint was skipped (a wadi bed), no ruts either.
     const k = Math.floor((c[1] + W / 2) / texel) * RES + Math.floor((c[0] + W / 2) / texel);
     if (splat[ch(k * 4, 4)] > 150) continue;
+    // Drivers don't hold the centreline: each segment sideways up to ±0.4 m,
+    // or the ruts' halos ran like two ruled lines down the piste (you,
+    // 2026-09-29: "too linear").
+    const side = (vhash(c[0] - 3.1, c[1] + 7.3) - 0.5) * 0.8;
+    c[0] += Math.cos(yaw) * side; c[1] -= Math.sin(yaw) * side;
     decals.push({
       px: c[0], py: H(c[0], c[1]), pz: c[1],
       qx: 0, qy: Math.sin(yaw / 2), qz: 0, qw: Math.cos(yaw / 2),

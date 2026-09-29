@@ -66,6 +66,13 @@ export const LAYOUT = {
     { kind: "dechra", name: "Dechra Tighanimine", x: -224, z: 136, r: 34, turn: 25 },
     { kind: "koubba", name: "Sidi Ahmed", x: -273, z: 86, r: 12, turn: 30 },
     { kind: "cemetery", name: "Cemetery", x: -256, z: 70, r: 13, turn: 30 },
+    // THE KSAR (you, 2026-09-29, a photo of Ghardaïa): a plastered town up a
+    // knoll in the middle belt, ALN-leaning (1.8x nearer the katiba), the one
+    // knoll in the play box that stands clear (MEASURED: 6.5 m over the ground
+    // 38 m round, < 23 deg, 116 m from a wadi). x/z is the SUMMIT (its mosque);
+    // `souk`: the market square, that many metres down its front — the town is
+    // built solid, so it is held from the square (sitePoint).
+    { kind: "ksar", name: "Ksar el Hamra", x: -10, z: -120, r: 52, turn: -30, souk: 43 },
   ],
 
   // ── Wadis: dry riverbeds, polyline in world metres, bed width, depth ──────
@@ -104,3 +111,13 @@ export const VIEW_YAW = Math.atan2(_aln.x - _fr.x, _aln.z - _fr.z);
 
 /** A site's building yaw: the camera-facing yaw turned by its `turn` degrees. */
 export const siteYaw = (site) => VIEW_YAW + ((site.turn ?? 30) * Math.PI) / 180;
+
+/**
+ * Where a site is HELD from: its centre, or — a ksar — its souk, `souk`
+ * metres down the site's front (local -Z, toward the camera).
+ */
+export function sitePoint(site) {
+  if (!site.souk) return { x: site.x, z: site.z };
+  const y = siteYaw(site);
+  return { x: site.x - site.souk * Math.sin(y), z: site.z - site.souk * Math.cos(y) };
+}

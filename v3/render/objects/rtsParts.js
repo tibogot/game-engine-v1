@@ -55,7 +55,9 @@ export const MAT = {
   // Dry ochre spoil — berms, pits, graded pads (row six).
   spoil: 20,
   // Aurès limestone: ONE stone's face (rubble is a wall) — field stones, rocks.
-  limestone: 21,   // 22-23 free
+  limestone: 21,
+  // The Saharan ksar (rtsAlgVillage.js buildKsar): lime plaster, ochre and pale.
+  plaster: 22, plasterPale: 23,
 };
 
 /** Strip anything merge would choke on, and guarantee the attribute set. */

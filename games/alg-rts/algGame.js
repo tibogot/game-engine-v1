@@ -104,8 +104,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // zoom-out, A/B/A/B same clock: 82.3/79.2 → 77.7/77.8 ms. Lakebed STAYS
     // (the oases are lakes). Turn one back on the day the map uses it.
     terrainFeatures: { cursor: false, snow: false, baseStyle: "flat", riverSand: false, grassFar: false, flowerTint: false },
-    // ?topk= ?farblend= for A/B (perf investigation, 2026-09-27).
-    splatFeatures: { solo: false, layerBudget: 6, topK: Number(params.get("topk") ?? 3), farBlend: params.get("farblend") !== "0" },
+    // ?topk= ?farblend= ?layers= for A/B (perf investigation, 2026-09-27).
+    // layerBudget 7: slot 6 is the Dirt track (tools/algTracks.mjs). At 6 it
+    // was compiled OUT and the tracks drew the flat base colour, no texture
+    // (you, 2026-09-29: "see how it looks so flat").
+    splatFeatures: { solo: false, layerBudget: Number(params.get("layers") ?? 7), topK: Number(params.get("topk") ?? 3), farBlend: params.get("farblend") !== "0" },
   });
   app.setFrameThrottle?.(1000);
   // The stats-gl overlay costs ~20% of the main thread (measured): off in the

@@ -43,6 +43,7 @@ import "../../v3/styles/editor.css";
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { createUnits } from "./units.js";
+import { RTS_SCALE } from "./unitTypes.js";
 import { createUnitRenderer } from "./unitRenderer.js";
 import { xrayParams } from "./xraySilhouette.js";
 import { createSelection } from "./selection.js";
@@ -1573,10 +1574,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
           const a = rnd() * Math.PI * 2, r = lead ? 3 + rnd() * 14 : rMin + rnd() * (rMax - rMin);
           const c = lead ?? { x: cx0, z: cz0 };
           const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
-          if (!pasture(x, z) || spots.some((q) => Math.hypot(q.x - x, q.z - z) < 6)) continue;
+          if (!pasture(x, z) || spots.some((q) => Math.hypot(q.x - x, q.z - z) < 6 * RTS_SCALE)) continue;   // beasts at unit scale (buffalo.js)
           if (!lead) lead = { x, z };
           const hx = x, hz = z;
-          spots.push({ x, z, heightAt: (qx, qz) => (Math.hypot(qx - hx, qz - hz) < 12 && pasture(qx, qz) ? app.getWorldHeight(qx, qz) : null) });
+          spots.push({ x, z, heightAt: (qx, qz) => (Math.hypot(qx - hx, qz - hz) < 12 * RTS_SCALE && pasture(qx, qz) ? app.getWorldHeight(qx, qz) : null) });
           app.clearVegetation?.(x, z, 9, { edge: 4 });
           got++;
         }
@@ -1642,10 +1643,10 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       const stagSpots = [], hindSpots = [], muntjacSpots = [];
       centres.forEach((c, i) => {
         if (i % 2 === 0) {
-          stagSpots.push(...around(c, 1, 4).map((q) => ({ ...q, height: 2.3 + rnd() * 0.2 })));
-          hindSpots.push(...around(c, 3 + (i % 2), 9).map((q) => ({ ...q, height: 1.55 + rnd() * 0.15 })));
+          stagSpots.push(...around(c, 1, 4 * RTS_SCALE).map((q) => ({ ...q, height: RTS_SCALE * (2.3 + rnd() * 0.2) })));
+          hindSpots.push(...around(c, 3 + (i % 2), 9 * RTS_SCALE).map((q) => ({ ...q, height: RTS_SCALE * (1.55 + rnd() * 0.15) })));
         } else {
-          muntjacSpots.push(...around(c, 2 + (i % 3 === 0 ? 1 : 0), 5).map((q) => ({ ...q, height: 0.8 + rnd() * 0.08 })));
+          muntjacSpots.push(...around(c, 2 + (i % 3 === 0 ? 1 : 0), 5 * RTS_SCALE).map((q) => ({ ...q, height: RTS_SCALE * (0.8 + rnd() * 0.08) })));
         }
       });
       const threats = () => units.list.filter((u) => u.alive && !u.isAir).map((u) => u.position);
@@ -1653,15 +1654,21 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       const SAMBAR = { Main: "#4a3b2e", Main_Light: "#8a7a64", Main_Dark: "#2c2219", Eye_Lighter: "#4a3b2e" };
       const STAG = { Material: "#463628", "Material.003": "#86765f", "Material.010": "#2a2018", "Material.001": "#2c241c" };
       const MUNTJAC = { Main: "#8a4b26", Main_Light: "#b89370", Main_Dark: "#4d2a16", Eye_Lighter: "#8a4b26" };
+      // AT UNIT SCALE (you, 2026-09-29): the deer are drawn like the men, real
+      // × RTS_SCALE, and every length with them — their speeds (the clips'
+      // stride: wildHerd.js plays the walk at vel / walkSpeed, so a bigger
+      // deer at the old speed slides its feet), their spread, their roam.
+      // (wildHerd.js's defaults: walk 0.9, run 7, roam 20.)
+      const DEER_PACE = { walkSpeed: 0.9 * RTS_SCALE, runSpeed: 7 * RTS_SCALE, roam: 20 * RTS_SCALE };
       const herds = [];
       const add = async (url, colors, spots, name, speeds) => {
         if (!spots.length) return;
         const tpl = await loadAnimal(url, colors);
         herds.push(createWildHerd(app, tpl, spots, { canStand, threats, name, ...speeds }));
       };
-      await add("/models/Stag_compressed.glb", STAG, stagSpots, "SambarStags", {});
-      await add("/models/Deer_compressed.glb", SAMBAR, hindSpots, "SambarHinds", {});
-      await add("/models/Deer_compressed.glb", MUNTJAC, muntjacSpots, "Muntjac", { walkSpeed: 0.6, runSpeed: 5.5 });
+      await add("/models/Stag_compressed.glb", STAG, stagSpots, "SambarStags", DEER_PACE);
+      await add("/models/Deer_compressed.glb", SAMBAR, hindSpots, "SambarHinds", DEER_PACE);
+      await add("/models/Deer_compressed.glb", MUNTJAC, muntjacSpots, "Muntjac", { walkSpeed: 0.6 * RTS_SCALE, runSpeed: 5.5 * RTS_SCALE, roam: 20 * RTS_SCALE });
       app.wildHerds = herds.filter(Boolean);
       console.log(`[deer] ${stagSpots.length} stags, ${hindSpots.length} hinds, ${muntjacSpots.length} muntjac in ${centres.length} groups`);
     } catch (e) { console.warn("[deer] failed:", e); }

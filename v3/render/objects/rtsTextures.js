@@ -1094,13 +1094,62 @@ export function makeLimestoneTexture({ size = 512, seed = 173 } = {}) {
   });
 }
 
+/**
+ * LIME PLASTER of the Saharan ksour (the M'zab, 2026-09-29): a skin of lime
+ * and sand trowelled by hand over stone and mud — never flat, so a soft
+ * low mottle and the trowel's arcs; rain streaks down from the parapet, dust
+ * darkening the foot, and here and there a patch where the skin has fallen
+ * and the pinker render under it shows. No mould (it is the desert) and no
+ * bullet pocks (the colonial stucco has those). `pale` is the cream-sand
+ * variant: the photo's town is ochre houses among paler ones.
+ */
+export function makePlasterTexture({ size = 512, seed = 191, pale = false } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    // Pale is a warm cream, not white (a cooler one read as whitewash in the
+    // game); the ochre a little brighter than first tried (it read brown).
+    const [r0, g0, b0, r1, g1, b1] = pale ? [220, 188, 134, 240, 210, 156] : [214, 152, 86, 238, 180, 110];
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const mott = fbm(u * P * 1.5 + seed, v * P * 1.5, P * 2, 4);
+        // The trowel: short arcs, a faint light/dark ripple.
+        const arc = Math.sin((u * P * 12 + fbm(u * P * 3, v * P * 3 + seed, P * 3, 2) * 6) * 2.1 + v * P * 7) * 0.5 + 0.5;
+        const grain = fbm(u * P * 20 + 5, v * P * 20 + seed, P * 20, 2) - 0.5;
+        // The trowel ripple faint: stronger, it read as horizontal stripes.
+        let r = lerp(r0, r1, mott) + (arc - 0.5) * 3 + grain * 14;
+        let gg = lerp(g0, g1, mott) + (arc - 0.5) * 2.5 + grain * 12;
+        let b = lerp(b0, b1, mott) + (arc - 0.5) * 2 + grain * 9;
+        // Where the skin has fallen: the pink-brown render beneath, a lighter lip.
+        const fall = fbm(u * P * 2.5 + 17, v * P * 2.5 + seed, P * 3, 4);
+        const bare = clamp01((fall - 0.68) * 9);
+        const lip = clamp01(1 - Math.abs(fall - 0.66) * 40) * 0.5;
+        r = lerp(r, 196, bare); gg = lerp(gg, 128, bare); b = lerp(b, 98, bare);
+        r = lerp(r, r1 + 10, lip); gg = lerp(gg, g1 + 10, lip); b = lerp(b, b1 + 10, lip);
+        // Rain streaks from the top; dust up from the foot.
+        const streak = clamp01((vnoise(u * P * 14, v * P * 1.2, P * 14) - 0.55) * 3) * clamp01(v * 1.8 - 0.6) * 0.16;
+        const dust = clamp01(0.3 - v) * 0.5;
+        const k = 1 - streak - dust * 0.4;
+        r *= k; gg *= k; b *= k * 0.97;
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 export const ATLAS_COLS = 4;
 // FIVE rows, not four: the sixteen were full, and the Khmer ruins need stone
 // that is actually stone (sandstone, laterite, moss). The fifth row costs a
 // quarter more atlas — 2048x2560 instead of 2048x2048 — and the shader reads
 // its size from these two constants, so nothing else has to know.
 // SIX since 2026-09-27: the Algeria game needed dry desert spoil (cell 20);
-// 2048x3072; 21 limestone; 22-23 free.
+// 2048x3072; 21 limestone; 22-23 the ksar's plasters (FULL: a 25th surface
+// needs a seventh row).
 export const ATLAS_ROWS = 6;
 /** Fraction of a cell kept clear at its border, so mips cannot bleed across. */
 export const ATLAS_PAD = 0.004;
@@ -1144,6 +1193,8 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeRubbleTexture({ size: cell }),   // 19 (Algeria)
     makeSpoilTexture({ size: cell }),    // 20 (Algeria): row six
     makeLimestoneTexture({ size: cell }), // 21 (Algeria)
+    makePlasterTexture({ size: cell }),               // 22 (Algeria): the ksar's ochre
+    makePlasterTexture({ size: cell, pale: true, seed: 211 }), // 23: its paler houses
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;

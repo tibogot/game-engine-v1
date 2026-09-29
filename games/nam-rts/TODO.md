@@ -15,6 +15,15 @@ THE ONE LIST. Every open item in this file is here, ranked inside its group;
 the detail and history below point back as `[→#n]`. Add new asks HERE (and a
 detail note below if it needs one). Tick here when done.
 
+### Done 2026-09-29
+- [x] ANIMALS AT UNIT SCALE (you, after the same fix in alg-rts): buffalo,
+      sambar and muntjac drawn real × RTS_SCALE like the men (at real size a
+      buffalo by a 2.3 m soldier read as a calf, a muntjac as a speck). Every
+      length with them: walk/run speeds (the clips' stride — or the feet
+      slide), spread, roam, the buffalo's grazing steps and spacing
+      (namGame.js DEER_PACE, buffalo.js). Seen: a buffalo's hump at a
+      soldier's shoulder, still fits its paddy. Birds unchanged.
+
 ### Done 2026-09-27
 - [x] MINIMAP: every unit was drawn BLUE, the enemy's too (your catch) —
       drawBlip never looked at the team. Now the side's colour, like the

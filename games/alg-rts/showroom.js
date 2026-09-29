@@ -19,7 +19,7 @@ import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
 import { createWind, createWindsock } from "./algWind.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { LAYOUT, siteYaw } from "./layout.js";
-import { buildCemetery, buildDechra, buildGarden, buildKoubba, buildTerraces, buildThreshingFloor, buildVillageWell, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildCemetery, buildDechra, buildGarden, buildKoubba, buildKsar, buildTerraces, buildThreshingFloor, buildVillageWell, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -106,7 +106,7 @@ export const ALN_BUILDABLES = [
 
 /** What to show, and where (world x/z, yaw). */
 const site = (kind) => { const s = LAYOUT.sites.find((q) => q.kind === kind); return { ...s, yaw: siteYaw(s) }; };
-const DECHRA = site("dechra"), KOUBBA = site("koubba"), CEMETERY = site("cemetery");
+const DECHRA = site("dechra"), KOUBBA = site("koubba"), CEMETERY = site("cemetery"), KSAR = site("ksar");
 /**
  * Graves lie with the body on its right side facing Mecca: from the Aurès the
  * qibla bears ~108°, so the grave's long axis runs at 18° (NNE–SSW). World
@@ -136,6 +136,11 @@ const VILLAGE = [
   { key: "dechra", build: (o) => buildDechra(o), x: DECHRA.x, z: DECHRA.z, yaw: DECHRA.yaw, ground: true },
   { key: "koubba", build: (o) => buildKoubba(o), x: KOUBBA.x, z: KOUBBA.z, yaw: KOUBBA.yaw, ground: true },
   { key: "cemetery", build: (o) => buildCemetery({ ...o, align: QIBLA_AXIS }), x: CEMETERY.x, z: CEMETERY.z, yaw: CEMETERY.yaw, ground: true },
+  // THE KSAR on its knoll (you, 2026-09-29, after a photo of Ghardaïa): built
+  // up the real slope; only its souk is levelled — the knoll falls 8 m across
+  // the square, so the arcades back into a cut and the square stands on the fill.
+  // The pad is the souk's rect (buildKsar: x ±16, z -39.2..-21.5), scaled 1.3.
+  { key: "ksar", build: (o) => buildKsar(o), x: KSAR.x, z: KSAR.z, yaw: KSAR.yaw, ground: true, pad: { lx: 0, lz: -30.35 * 1.3, hx: 16 * 1.3, hz: 8.85 * 1.3, rim: 12 } },
   // A well at the dechra's foot and at each hamlet; a zeriba beside each hamlet.
   // Pen spots MEASURED: clear of every piece (full footprint), off the wadi
   // bed, the flattest ground within ~70 m.
@@ -332,6 +337,14 @@ export async function placeShowroom(app, list = SHOWROOM) {
   const built = list.map((e) => ({ e, geo: e.ground ? null : e.build() }));
   for (const b of built) {
     const { e, geo } = b;
+    // A GROUND piece may still want PART of it level (the ksar's souk: a
+    // square and arcades on a hillside): `pad` is that rect in its own frame
+    // (world metres), levelled to its mean before the piece reads the ground.
+    if (e.ground && e.pad) {
+      const P = e.pad, g = sampleGround(e, { cx: P.lx, cz: P.lz, hx: P.hx, hz: P.hz });
+      const [px, pz] = toWorld(e, P.lx, P.lz);
+      await app.flattenRect(px, pz, P.hx + 1.5, P.hz + 1.5, g.reduce((a, p) => a + p[2], 0) / g.length, { rim: P.rim ?? 10, rotY: e.yaw });
+    }
     if (e.vehicle || e.follow || e.ground) continue;
     const f = geo.userData.footprint ?? { cx: 0, cz: 0, hx: 5, hz: 5 };
     // Pad height: the mean ground under the footprint, so the cut and the
