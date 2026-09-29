@@ -836,6 +836,19 @@ Asset follow-ups:
       THE ATLAS IS NOW FULL). The souk stands on a `pad` (new showroom option
       for ground pieces). 12.7k tris, builds in ~160 ms; coplanar + ground-
       band tests pass (flat and knoll).
+- [x] **Ksar, second pass** (you, 2026-09-29: "a perfect circle looks
+      weird", palms inside the gate, the white circles not aligned):
+      real M'zab ksour follow their rock, dense and labyrinthine — the town
+      is now an irregular outline wide along the hillside (29 m each side,
+      15 behind the mosque, 26 down to the souk, lobed), 64 houses packed
+      at random wall to wall (oriented-rect test, a second pass of small
+      cubes), each facing down the slope; winding alleys (the stair to the
+      souk, two more out); no ring wall (it made a round fort). Overlapping
+      neighbours whose flat faces met are lifted 2.3 cm (checked pair by
+      pair). Palms in a grove OUTSIDE, never in the souk or over a roof.
+      CAPTURE RINGS: centred on each village's placed footprint (the
+      mechtas' sat off to one side), and shown only while men are selected
+      or someone stands in one (CoH), not always.
 - [ ] Ksar, next: YOU LOOK (colours, minaret height, density); a piste to
       it (algTracks ROUTES + --route); a stork on the minaret; donkeys and
       people in the souk; the square's facing (the right wing hides part of

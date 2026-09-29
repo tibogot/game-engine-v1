@@ -70,6 +70,23 @@ function takeOverVehicles(app, units, showroom) {
 }
 
 /**
+ * Where a village is held from: a ksar from its souk (layout.js sitePoint);
+ * any other, the centre of its placed piece's footprint (the showroom piece
+ * standing on the site), else the site's own point.
+ */
+function villageCentre(site, showroom) {
+  if (site.souk) return sitePoint(site);
+  for (const o of Object.values(showroom ?? {})) {
+    const f = o?.isObject3D ? o.geometry?.userData?.footprint : null;
+    if (!f || Math.hypot(o.position.x - site.x, o.position.z - site.z) > 1) continue;
+    // Village pieces are turned about Y only (no tilt).
+    const c = Math.cos(o.rotation.y), s = Math.sin(o.rotation.y);
+    return { x: o.position.x + f.cx * c + f.cz * s, z: o.position.z - f.cx * s + f.cz * c };
+  }
+  return { x: site.x, z: site.z };
+}
+
+/**
  * The placed buildings are plain meshes, not engine props, so the nav grid
  * cannot see them by itself: stamp each one's footprint (vehicles excluded —
  * they become units).
@@ -229,8 +246,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // holding one pays; every unit is paid for when it is queued.
   const economy = createAlgEconomy({
     app, units, structures,
-    // A ksar is held from its souk (layout.js sitePoint), not its summit.
-    sites: LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind)).map((s) => ({ ...s, ...sitePoint(s) })),
+    // Held from the VILLAGE ITSELF: the centre of its placed footprint (the
+    // houses are not built round the site's point — a ring there sat off to
+    // one side, you, 2026-09-29), and a ksar from its souk (layout.js sitePoint).
+    sites: LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind)).map((s) => ({ ...s, ...villageCentre(s, showroom) })),
   });
   app.algEconomy = economy;
   for (const p of producers) p.structure.pay = (key) => economy.purses[p.structure.team].spend(COSTS[key] ?? 0);
@@ -343,8 +362,16 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     selectionFrames.begin();
     unitRenderer.sync(dt, app.camera);
     structures.frame(dt, app.camera, healthBars, selectionFrames);
+    // The capture rings, the Company of Heroes way: all of them while you
+    // have men selected (you are giving orders), otherwise only where someone
+    // is standing in one — always-on, they cluttered the map (you, 2026-09-29).
     villageRings.begin();
-    for (const v of economy.points) villageRings.add(v.position.x, v.position.z, economy.params.radius, v.owner === "player" ? 0x58a8ff : v.owner === "enemy" ? 0xff6a5a : 0xd8cfae);
+    const giving = selection.selected?.some((e) => e.team === "player" && !e.isStructure);
+    const R = economy.params.radius;
+    for (const v of economy.points) {
+      const busy = giving || units.list.some((u) => u.alive && !u.isAir && Math.abs(u.position.x - v.position.x) < R && Math.abs(u.position.z - v.position.z) < R && Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < R);
+      if (busy) villageRings.add(v.position.x, v.position.z, R, v.owner === "player" ? 0x58a8ff : v.owner === "enemy" ? 0xff6a5a : 0xd8cfae);
+    }
     villageRings.commit();
     resourceHud.update(economy);
     healthBars.commit();

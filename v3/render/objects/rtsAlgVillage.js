@@ -744,13 +744,15 @@ function arcadeRange(parts, R, { x, z, yaw, len, fy, low, mat = MAT.plaster, ton
  * cubes in ochre and cream stacked up a knoll, house over house, wall to wall
  * with only lanes between them; at the summit the mosque and its tapering
  * minaret, the town's one vertical; at the foot, facing the camera (-Z), the
- * SOUK: a paved square with arcades on three sides and a few date palms.
+ * SOUK: a paved square with arcades on three sides; a palm grove below the
+ * walls.
  *
- * The knoll's summit is the origin; `radius` the town's (pre-scale). Houses in
- * rings round the mosque, fronts out and down the slope, lanes left open up
- * the three ways in (one from the square). `groundAt` as the other villages.
+ * The knoll's summit is the origin. The town fills an irregular outline that
+ * spills down toward the souk, houses packed wall to wall facing down the
+ * slope, winding alleys out from the mosque (a stair to the souk, two gates),
+ * closed by a wall. `groundAt` as the other villages.
  */
-export function buildKsar({ seed = 1830, radius = 27.3, groundAt = FLAT } = {}) {
+export function buildKsar({ seed = 1830, groundAt = FLAT } = {}) {
   const R = rng(seed);
   const parts = [];
   const houses = [];
@@ -778,7 +780,6 @@ export function buildKsar({ seed = 1830, radius = 27.3, groundAt = FLAT } = {}) 
     const top = fy - k * 0.3, hgt = top - gFront + 0.4;
     parts.push({ geo: buildBox(4 + (k % 2) * 0.06, hgt, 0.46), pos: [0, top - hgt / 2, SQ.z0 - 0.2 - k * 0.42], mat: MAT.limestone, tone: 0.5 + R() * 0.1 });
   }
-  for (const [x, z] of [[-7.5, -30], [7, -29.5], [3.5, -36.5]]) trees.push({ kind: "datePalm", x, z, scale: 0.8 + R() * 0.25, seed: Math.floor(R() * 1000) });
   // A fountain (a stone basin) in the square.
   parts.push({ geo: new THREE.CylinderGeometry(1.3, 1.4, 0.6, 16), pos: [-2.5, fy + 0.3, -34], mat: MAT.limestone, tone: 0.55 });
   parts.push({ geo: new THREE.CylinderGeometry(1.05, 1.05, 0.05, 16), pos: [-2.5, fy + 0.58, -34], mat: MAT.steel, tone: 0.1 });
@@ -820,56 +821,177 @@ export function buildKsar({ seed = 1830, radius = 27.3, groundAt = FLAT } = {}) 
     houses.push({ x: cx, z: cz, mosque: true });
   }
 
-  // ── The houses: rings round the summit, fronts out, lanes left open ───────
-  const LANES = [Math.PI, Math.PI * 0.32, -Math.PI * 0.36];     // π: down to the square
-  const angGap = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
-  // A house is up to 5.4 m deep: rings 5.5 m apart (tighter, and houses in
-  // neighbouring rings ran into each other's roofs).
-  const RINGS = [10.8, 16.3, 21.8, radius];
-  for (const [ri, rr] of RINGS.entries()) {
-    let phi = R() * 0.3;
-    const end = phi + Math.PI * 2 - 0.05;
-    while (phi < end) {
-      const w = 4 + R() * 3.4, d = 4.4 + R();
-      const a = phi + w / 2 / rr;
-      phi += (w + (R() < 0.18 ? 1.4 + R() : 0.06)) / rr;
-      if (phi > end) break;
-      if (LANES.some((l) => angGap(a, l) * rr < w / 2 + 1.3)) continue;
-      const x = rr * Math.sin(a) + (R() - 0.5) * 0.5, z = rr * Math.cos(a) + (R() - 0.5) * 0.5;
-      // Clear of the souk (its buildings and square) and the mosque.
-      if (z < -19.5 && Math.abs(x) < 18.5) continue;
-      if (Math.abs(x) < 8.5 && z > -5 && z < 7.5) continue;
-      const yaw = a + Math.PI + (R() - 0.5) * 0.12;             // front (local -Z) out, down the slope
-      const { top, low } = groundSpanRot(groundAt, x, z, yaw, w / 2, d / 2);
-      const fg = groundAt(x + Math.sin(a) * (d / 2 + 0.8), z + Math.cos(a) * (d / 2 + 0.8));
-      const two = R() < (ri < 2 ? 0.7 : 0.35);
-      const h = (two ? 6.1 : 3.2) + R() * 0.7;
-      const mat = matPick();
-      ksarHouse(parts, R, { x, z, yaw, w, d, h, y: top, low: Math.min(low, fg), frontGround: fg, mat, tone: toneOf(mat) });
-      houses.push({ x, z, ring: ri });
+  // ── THE OUTLINE: not a circle (you, 2026-09-29: a perfect circle of rings
+  // read wrong). A M'zab ksar follows its rock: here it spills down toward
+  // the souk (-Z) and wobbles with three low harmonics. ─────────────────────
+  const h1 = R() * 6.28, h2 = R() * 6.28, h3 = R() * 6.28;
+  const edge = (phi) => {
+    // WIDE along the hillside (29 m either side), short behind the mosque
+    // (15 m), deep down toward the souk (26 m), with lobes: a town spread
+    // across its slope, the photo's panorama. A teardrop pointing at the
+    // camera, walled all round, still read as a round fort from above.
+    const s = Math.sin(phi), c = Math.cos(phi), b = c > 0 ? 15 : 26;
+    const ell = 1 / Math.sqrt((s / 29) ** 2 + (c / b) ** 2);
+    const e = ell + 3.4 * Math.sin(3 * phi + h2) + 1.6 * Math.sin(5 * phi + h3) + 1.0 * Math.sin(2 * phi + h1);
+    // Down to the souk's back wall whatever the wobble does there.
+    return Math.max(11, Math.abs(Math.atan2(Math.sin(phi - Math.PI), Math.cos(phi - Math.PI))) < 0.7 ? Math.max(e, 23) : e);
+  };
+  const inTown = (x, z, m = 0) => Math.hypot(x, z) < edge(Math.atan2(x, z)) - m;
+  const inSouk = (x, z) => z < -19.5 && Math.abs(x) < 18.5;
+  const inMosque = (x, z) => Math.abs(x) < 7.4 && z > -6.4 && z < 7;
+
+  // ── THE ALLEYS: narrow and winding, from the mosque out — the stair down to
+  // the souk, two more out through gates in the wall. Points 1 m apart. ─────
+  const alleys = [];
+  const alley = (a, b, sway, ph) => {
+    const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]));
+    const dx = (b[0] - a[0]) / n, dz = (b[1] - a[1]) / n, L = Math.hypot(dx, dz);
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const s = Math.sin(i * 0.34 + ph) * sway * Math.sin((Math.PI * i) / n);   // ends on the line
+      pts.push([a[0] + dx * i - (dz / L) * s, a[1] + dz * i + (dx / L) * s]);
     }
+    alleys.push(pts);
+    return pts;
+  };
+  const stair = alley([0, -21.5], [-2.6, -6.6], 1.2, R() * 6);
+  const gates = [];   // where the two alleys leave the town
+  for (const phi of [Math.PI * (0.3 + R() * 0.1), -Math.PI * (0.42 + R() * 0.1)]) {
+    const e = edge(phi) + 1.3;
+    alley([Math.sin(phi) * 8.5, Math.cos(phi) * 8.5], [Math.sin(phi) * e, Math.cos(phi) * e], 1.5, R() * 6);
+    gates.push([Math.sin(phi) * e, Math.cos(phi) * e]);
+  }
+  const alleyDist = (x, z) => { let b = Infinity; for (const A of alleys) for (const [px, pz] of A) b = Math.min(b, (px - x) ** 2 + (pz - z) ** 2); return Math.sqrt(b); };
+
+  // ── THE HOUSES: packed at random into the outline, wall to wall, each
+  // facing down the slope (a slow swirl, so neighbours are near-parallel but
+  // no two rows line up); taller toward the mosque. ────────────────────────
+  const placed = [];
+  const probe = (x, z, yaw, w, d) => {
+    const c = Math.cos(yaw), s = Math.sin(yaw), out = [[x, z]];
+    for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) {
+      const lx = (a * w) / 2, lz = (b * d) / 2;
+      out.push([x + lx * c + lz * s, z - lx * s + lz * c]);
+    }
+    return out;
+  };
+  // Two houses may run into each other by up to 0.5 m a side (attached
+  // houses share their walls): an oriented-rectangle test on shrunk rects.
+  // As circles round each house the town jammed at ~20 houses.
+  const clash = (a, b) => {
+    const ax = [[Math.cos(a.yaw), -Math.sin(a.yaw)], [Math.sin(a.yaw), Math.cos(a.yaw)]];
+    const bx = [[Math.cos(b.yaw), -Math.sin(b.yaw)], [Math.sin(b.yaw), Math.cos(b.yaw)]];
+    const ha = [a.w / 2 - 0.5, a.d / 2 - 0.5], hb = [b.w / 2 - 0.5, b.d / 2 - 0.5];
+    const dx = b.x - a.x, dz = b.z - a.z;
+    for (const n of [...ax, ...bx]) {
+      const ra = ha[0] * Math.abs(ax[0][0] * n[0] + ax[0][1] * n[1]) + ha[1] * Math.abs(ax[1][0] * n[0] + ax[1][1] * n[1]);
+      const rb = hb[0] * Math.abs(bx[0][0] * n[0] + bx[0][1] * n[1]) + hb[1] * Math.abs(bx[1][0] * n[0] + bx[1][1] * n[1]);
+      if (Math.abs(dx * n[0] + dz * n[1]) > ra + rb) return false;
+    }
+    return true;
+  };
+  // Candidates drawn INSIDE the outline (drawn in a disc, 60% fell outside
+  // and the loop gave up at ~20 houses); stop after 3000 misses in a row.
+  // A second pass of small cubes fills the gaps the big ones left.
+  for (let pass = 0, fails = 0; pass < 2; pass++, fails = 0) for (; fails < 3000;) {
+    const ph = R() * Math.PI * 2, rr = Math.sqrt(R()) * (edge(ph) - 2);
+    const x = rr * Math.sin(ph), z = rr * Math.cos(ph);
+    const w = pass ? 2.8 + R() * 1.2 : 3.4 + R() * 3, d = pass ? 3.1 + R() * 0.9 : 3.8 + R() * 1.4;
+    const yaw = Math.atan2(x, z) + Math.PI + 0.3 * Math.sin(x * 0.13 + z * 0.09 + h1) + (R() - 0.5) * 0.1;
+    const pts = probe(x, z, yaw, w, d);
+    const cand = { x, z, yaw, w, d };
+    const ok = pts.every(([px, pz]) => inTown(px, pz, 0.4) && !inSouk(px, pz) && !inMosque(px, pz) && alleyDist(px, pz) > 1.15)
+      && !placed.some((q) => clash(q, cand));
+    if (!ok) { fails++; continue; }
+    fails = 0;
+    placed.push(cand);
+  }
+  for (const p of placed) {
+    const { x, z, yaw, w, d } = p;
+    const { top, low } = groundSpanRot(groundAt, x, z, yaw, w / 2, d / 2);
+    const fg = groundAt(x - Math.sin(yaw) * (d / 2 + 0.8), z - Math.cos(yaw) * (d / 2 + 0.8));
+    const rn = Math.hypot(x, z) / edge(Math.atan2(x, z));
+    const h = (R() < 0.8 - 0.5 * rn ? 6.1 : 3.2) + R() * 0.7;
+    const mat = matPick();
+    const n0 = parts.length;
+    ksarHouse(parts, R, { x, z, yaw, w, d, h, y: top, low: Math.min(low, fg), frontGround: fg, mat, tone: toneOf(mat) });
+    p.range = [n0, parts.length];
+    houses.push({ x, z });
+  }
+  // ATTACHED HOUSES OVERLAP by up to a metre, so a flat face of one (roof,
+  // parapet top, roof room, spout) can land on a neighbour's at the same
+  // height and z-fight. Compare every overlapping pair's horizontal faces;
+  // where two are within 6 mm, lift the second house 2.3 cm. Repeat.
+  const levels = (p) => {
+    const out = [];
+    for (let i = p.range[0]; i < p.range[1]; i++) {
+      const q = parts[i];
+      if (!q.pos || (q.rot && (Math.abs(q.rot[0]) > 1e-3 || Math.abs(q.rot[2]) > 1e-3))) continue;
+      if (!q.geo.boundingBox) q.geo.computeBoundingBox();
+      out.push(q.pos[1] + q.geo.boundingBox.max.y, q.pos[1] + q.geo.boundingBox.min.y);
+    }
+    return out;
+  };
+  const near = (a, b) => clash({ ...a, w: a.w + 2, d: a.d + 2 }, { ...b, w: b.w + 2, d: b.d + 2 });
+  for (let pass = 0; pass < 6; pass++) {
+    let moved = 0;
+    for (let j = 0; j < placed.length; j++) {
+      const B = placed[j], lb = levels(B);
+      for (let i = 0; i < j; i++) {
+        const A = placed[i];
+        if (!near(A, B)) continue;
+        const la = levels(A);
+        if (la.some((ya) => lb.some((yb) => Math.abs(ya - yb) < 0.006))) {
+          for (let k = B.range[0]; k < B.range[1]; k++) if (parts[k].pos) parts[k].pos = [parts[k].pos[0], parts[k].pos[1] + 0.023, parts[k].pos[2]];
+          moved++;
+          break;
+        }
+      }
+    }
+    if (!moved) break;
   }
 
-  // ── The lane from the square up to the mosque: a stair of stone ───────────
-  for (let z = -21; z < -5.5; z += 1.15) {
-    const g = groundAt(0, z), k = Math.round(z / 1.15);
+  // NO RING WALL: the outer houses' backs are the town's edge (a wall all
+  // round made it a round fort from above, 2026-09-29).
+
+  // ── The stair from the souk up to the mosque, along its alley ─────────────
+  for (let i = 0; i < stair.length; i++) {
+    const [x, z] = stair[i], g = groundAt(x, z);
+    const nx = stair[Math.min(i + 1, stair.length - 1)], px = stair[Math.max(i - 1, 0)];
+    const yaw = Math.atan2(nx[0] - px[0], nx[1] - px[1]);
     // Every other slab 3 cm higher and wider: on level ground their tops met.
-    parts.push({ geo: buildBox(2.2 + (k % 2) * 0.05, 0.8, 1.25), pos: [0, g - 0.2 + (k % 2) * 0.03, z], mat: MAT.limestone, tone: 0.45 + R() * 0.12 });
+    parts.push({ geo: buildBox(2.0 + (i % 2) * 0.05, 0.8, 1.1), pos: [x, g - 0.2 + (i % 2) * 0.03, z], rot: [0, yaw, 0], mat: MAT.limestone, tone: 0.45 + R() * 0.12 });
   }
 
-  const zMin = -40.5, zMax = radius + 4;
-  const geo = finish(parts, { hx: radius + 4, hz: (zMax - zMin) / 2, cz: (zMax + zMin) / 2, height: 26, ao: { cell: 0.3 } });
+  // ── THE PALM GROVE: outside the wall, below the town (the palmeraie), never
+  // in the souk or on its steps — palms stood in the square, their crowns
+  // over the arcades' roofs (you, 2026-09-29). A crown is ~4 m across.
+  for (let k = 0; k < 600 && trees.length < 16; k++) {
+    const phi = Math.PI * (0.5 + R()), rr = edge(phi) + 6 + R() * 14;
+    const x = Math.sin(phi) * rr, z = Math.cos(phi) * rr;
+    if (Math.abs(x) < 21.5 && z > -49) continue;                             // the souk and its steps
+    if (Math.abs(x) < 5 && z < -38) continue;                                // the way up to the steps
+    if (trees.some((t) => Math.hypot(t.x - x, t.z - z) < 4.5)) continue;
+    trees.push({ kind: "datePalm", x, z, scale: 0.8 + R() * 0.3, seed: Math.floor(R() * 1000) });
+  }
+
+  let E = 0;
+  for (let k = 0; k < 72; k++) E = Math.max(E, edge((k / 72) * Math.PI * 2) + 2.2);
+  const zMin = -46;
+  const geo = finish(parts, { hx: E, hz: (E - zMin) / 2, cz: (E + zMin) / 2, height: 26, ao: { cell: 0.3 } });
   geo.userData.houses = houses.map((h) => ({ x: h.x * KIT, z: h.z * KIT, mosque: !!h.mosque }));
   geo.userData.trees = scaled(trees);
-  // The town is one mass (lanes too narrow to hold a line in); the souk's
-  // square and the steps are open ground: men gather there.
+  // The town is one mass (alleys too narrow to hold a line in), blocked as
+  // 6 m strips across its outline; the souk's square and steps are open
+  // ground: men gather there.
   const K = (r) => ({ cx: r.cx * KIT, cz: r.cz * KIT, hx: r.hx * KIT, hz: r.hz * KIT });
-  geo.userData.navRects = [
-    K({ cx: 0, cz: 2, hx: (radius + 2) * 0.7, hz: radius + 1.5 }),
-    K({ cx: 0, cz: 0, hx: radius + 2, hz: (radius + 2) * 0.62 }),
-    K({ cx: 0, cz: -24.3, hx: 15.8, hz: 2.9 }),
-    K({ cx: -13.4, cz: -33.2, hx: 2.5, hz: 6 }),
-    K({ cx: 13.4, cz: -33.2, hx: 2.5, hz: 6 }),
-  ];
+  const nav = [];
+  for (let zc = -18; zc < E; zc += 6) {
+    let hx = 0, cx0 = Infinity, cx1 = -Infinity;
+    for (let x = -E; x <= E; x += 1) if ([zc - 2.5, zc, zc + 2.5].some((z) => inTown(x, z, -1.3))) { cx0 = Math.min(cx0, x); cx1 = Math.max(cx1, x); }
+    if (cx1 > cx0) { hx = (cx1 - cx0) / 2; nav.push(K({ cx: (cx0 + cx1) / 2, cz: zc, hx, hz: 3 })); }
+  }
+  nav.push(K({ cx: 0, cz: -24.3, hx: 15.8, hz: 2.9 }), K({ cx: -13.4, cz: -33.2, hx: 2.5, hz: 6 }), K({ cx: 13.4, cz: -33.2, hx: 2.5, hz: 6 }));
+  geo.userData.navRects = nav;
   return geo;
 }
