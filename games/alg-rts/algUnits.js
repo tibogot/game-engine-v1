@@ -26,6 +26,7 @@ import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { COSTS, createAlgEconomy } from "./algEconomy.js";
 import { BUILD_BUTTONS, BUILD_COSTS, createAlgBuild } from "./algBuild.js";
+import { createAlgSearchlights } from "./algSearchlight.js";
 import { createResourceHud } from "./ui/resourceHud.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
 import { createHudBar } from "./ui/hudBar.js";
@@ -155,7 +156,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const fogOfWar = createFogOfWar({
     app, units,
     structures: { get list() { return app.algStructures?.list ?? []; } },
-    buildings: { list: [] },
+    // The searchlights' pools of light see through the fog (algSearchlight.js).
+    buildings: { get list() { return app.algSearchlights?.pools ?? []; } },
     enabled: new URLSearchParams(location.search).get("fow") === "1",
   });
   app.fogOfWar = fogOfWar;
@@ -334,6 +336,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     onCover: () => coverSys.cover.bake(),
   });
   app.algBuild = build;
+  // THE SEARCHLIGHTS (algSearchlight.js): sweep, lock on, reveal who is lit.
+  const searchlights = createAlgSearchlights(app, { structures, units, cover: coverSys.cover });
+  app.algSearchlights = searchlights;
   // LINE OF SIGHT (algSight.js): ridges and tall buildings stop a shot; low
   // walls are cover, not blockers. ?los=0 = without (A/B).
   const sight = new URLSearchParams(location.search).get("los") !== "0" ? createAlgSight(app, { showroom, worldSize: app.worldSize ?? 1024 }) : null;
@@ -363,7 +368,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
 
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); mines.step(d); economy.step(d); build.step(d); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
+    searchlights.frame();
     combat.frame(dt);
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.

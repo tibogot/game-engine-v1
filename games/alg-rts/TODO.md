@@ -21,8 +21,14 @@ Not wired into either game yet.
 - [ ] **you**: judge soldier1 vs soldier3 in the lab (close + RTS camera,
       "Skin weights" view), then download the full RIFLE clip set (~14–20,
       "In Place", short idles 2–4 s) and drop the other soldiers in.
-- [ ] **Weapons in their hands** — a rifle mesh attached to the right-hand
-      bone; the rifle clips keep the grip the same across clips.
+- [~] **Weapons in their hands.** Built 2026-09-29: procedural MAS 49/56,
+      MAT 49, MAS 36 (games/shared-rts/procWeapons.js, 180–280 tris) on a
+      WEAPON bone the pack tool adds under the right hand, aimed per clip at the
+      left hand (Mixamo's rifle clips hold the rifle at different angles — one
+      fixed grip was ~15 cm off; per clip the left hand stays within 1 cm).
+      **you**: judge in the lab on the rifle clips, set the grip trim. Then:
+      merge the weapon into the crowd mesh (skinned to the weapon bone), and
+      if the procedural guns don't convince, you find models online.
 - [ ] **Soldiers that fit French Algeria** — the current ones are Vietnam-war
       US soldiers (stand-ins). Find/modify: French appelés (M1947 or
       Satin 300 fatigues, bush hat / beret / M51 helmet, MAS 49/56), paras
@@ -1123,14 +1129,20 @@ Asset follow-ups:
       ~15 s, the nest in the structures, cover 1.0 behind the bags.
 - [x] **The storks in the fields WALK** (2026-09-29, shared bird kit — see
       nam's TODO): legs stride, head bobs, feet don't skate; ~0 GPU.
-- [ ] **THE PROJECTEUR MUST WORK AS A SEARCHLIGHT** (you, 2026-09-29: "cool,
-      but it should work as a projecteur"). Cheap, no real light: an
-      additive (unlit) beam cone from the lamp + a soft pool on the ground
-      where it lands (one decal-like quad), the lamp sweeping its arc
-      (the Lamp mesh already turns) and LOCKING onto an enemy it finds.
-      Gameplay: what the pool touches is SPOTTED (fog of war reveal +
-      concealment 0 — hidden ALN in scrub lit up), mostly worth it at
-      dusk/night (weather/night item). Measure GPU ms: must be ~free.
+- [x] **THE PROJECTEUR WORKS AS A SEARCHLIGHT** (you, 2026-09-29;
+      algSearchlight.js): every searchlight tower (pre-placed or a sapper's)
+      sweeps ±63° in front, and when the beam passes near an ALN man
+      within 75 m it LOCKS on and follows him; whoever stands in its 6 m
+      pool is SPOTTED (cover.reveal: scrub hides nobody) and the pool sees
+      through the fog of war. No real light: an additive cone (soft edges)
+      + an additive disc on the slope; faint by day, full at dusk. The drum
+      tips and turns to its aim. Tested: locked 6.5 s after a man appeared
+      in front, pool 0 m off him, revealed the whole time. GPU: on 2.036 /
+      off 2.040 ms (noise).
+- [ ] **DUSK/NIGHT IS BLACK**: setTimeOfDay 19.3 (sun 0.05 up) renders the
+      whole world black (not the searchlight — measured without it). The
+      night item needs real dusk/night light (moon, ambient) before the
+      searchlight can be judged at night — you, look then.
 - [ ] **DETAILS THAT COST ~NOTHING** (you asked for more like the projecteur,
       2026-09-29 — only if they stay near free: no dynamic lights with
       shadows, shared particle/decal fields, instanced):
