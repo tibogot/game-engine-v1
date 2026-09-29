@@ -244,7 +244,7 @@ lift off the pad; the ALN comes out of the cave mouth.
          open). The ALN AI now scores ambush spots with the same rule.
          V = the overlay (green cover, cyan concealment; Dev → Navigation →
          pin). Tested: a band in the scrub vs 4 appelés lost 1, in the open 2.
-   - [ ] Terrain cover: wadi banks, ridge crests, gully floors — the Aurès'
+   - [x] (2026-09-29, shared cover.js terrainCover) Terrain cover: wadi banks, ridge crests, gully floors — the Aurès'
          real cover is the ground itself (no rock props yet either).
    - [ ] Cedars and palms: their trunks as cover in the groves.
    - [x] FOG OF WAR (2026-09-28): nam's vision grid moved to games/shared-rts
@@ -479,7 +479,7 @@ Order: foliage → villages → animals & birds → ground detail.
          the ruts' strength, the mule paths (faint by design).
    - [ ] Telegraph poles along the piste (a kit piece; the post's radio
          mast is the only wire today).
-   - [ ] Patrol order ALONG a track; convoys (GMC) on the piste; ALN mines
+   - [x] (2026-09-29, algPatrols.js + algMines.js; the sapper still open) Patrol order ALONG a track; convoys (GMC) on the piste; ALN mines
          on it (the sapper); donkeys on the mule paths.
    - [ ] Tracks are paint + decals only: no grading. A cut bench where the
          piste crosses a slope, if vehicles look wrong on the tilt.
@@ -574,8 +574,8 @@ Order: foliage → villages → animals & birds → ground detail.
       faced away from the player).
 - [ ] **you, look**: the dechra, the koubba and its cemetery (Dev →
       Showroom → Go to). Taste: house density, the minaret's height.
-- [ ] Well troughs are plain blocks — make them rough stone.
-- [ ] Dechra: stepped lanes between the rows, a few courtyards, laundry.
+- [x] (2026-09-29) Well troughs are plain blocks — make them rough stone.
+- [x] (2026-09-29) Dechra: stepped lanes, a few courtyards. [ ] Laundry still open.
 - [x] **The kit atlas stayed GREY — caught and fixed** (2026-09-27). Seen
       again live: the whole atlas canvas was still the placeholder, yet the
       worker's promise had resolved with no error, so the worker handed back a
@@ -914,7 +914,7 @@ Asset follow-ups:
       man holds, the path having no route).
 - [ ] Fill the box densely (scrub along the wadis, terraces and orchards
       round the villages); thin the vegetation OUTSIDE it (frame time).
-- [ ] tools/algPlanView.mjs: redraw the plan image with the new layout.
+- [x] (2026-09-29, `--view play`, tracks drawn) tools/algPlanView.mjs: redraw the plan image with the new layout.
 
 ## ECONOMY — first cut in (2026-09-28, algEconomy.js), per the proposal below
 
