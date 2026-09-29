@@ -218,11 +218,15 @@ export async function bakeFoliageThumbnail(type, { renderer, size = 128, runRend
       cardTex ? { ...opts, alphaMap: cardTex, alphaTest: 0.4, transparent: false } : opts,
     )
     : null;
-  if (headMat) {
+  // …and a plant that is ALL head (every triangle a card) gets no empty
+  // FIRST group either: that was the "Draw with an index count of 0"
+  // warning when the editor loaded a map (2026-09-29). One material then.
+  const both = headMat && bodyTris.length;
+  if (both) {
     geometry.addGroup(0, bodyTris.length, 0);
     geometry.addGroup(bodyTris.length, headTris.length, 1);
   }
-  const mesh = new THREE.Mesh(geometry, headMat ? [body, headMat] : body);
+  const mesh = new THREE.Mesh(geometry, both ? [body, headMat] : headMat ?? body);
   const run = () => bakeObjectThumbnails({ renderer, size, items: [{ key: "p", make: () => mesh }] });
   try {
     const out = await (runRendererSideWork ? runRendererSideWork(run) : run());

@@ -1094,10 +1094,9 @@ export function buildSasPost({ seed = 41 } = {}) {
     stencilPatch("medicCross", flatSurface([3, 2.9, fz - 0.005], [0, 0, -1], [-1, 0, 0], 0.55, "medicCross"), { lift: 0.01 }),
   ];
   const geo = finishWithStencils(parts, st, { hx: WX + 0.6, hz: WZ + 0.6, height: BH + rise + 2 });
-  // Vegetation clears under the HOUSE and its veranda only: the yard keeps
-  // its garden (a palm in an SAS yard is right). Scaled, local frame.
-  // House z -0.8..5.2, veranda out to -3.5, roof overhang: z -3.6..5.7.
-  geo.userData.clearRects = [{ cx: 0, cz: 1.05 * S, hx: (BW / 2 + 0.7) * S, hz: 4.65 * S }];
+  // Vegetation clears under the WHOLE walled compound (its footprint): with
+  // only the house cleared, the oasis's wild palms and grass grew inside
+  // the yard walls (you, 2026-09-29 — no plant inside a building).
   geo.userData.flagMount = { pos: [0, 0.45 * S, -4.2 * S], poleHeight: 8 * S };
   return geo;
 }

@@ -32,9 +32,12 @@ Keep this file current: tick things off here, add new asks here.
       extra. Whitewashed house + veranda, "S.A.S." over the school door,
       a medical cross over the clinic's, walled yard, well, water tank,
       cloth tricolour, sandbagged corner, radio mast.
-- [ ] **Buildings must clear the map's vegetation under them** (seen: the
-      oasis palms grow through the SAS post in the showroom). A build-
-      system job: clear foliage/plants in the footprint when placing.
+- [x] **Buildings must clear the map's vegetation under them** (seen: the
+      oasis palms grow through the SAS post in the showroom). The SAS post
+      cleared only its HOUSE (userData.clearRects) — the yard kept the
+      oasis's palms and grass. Now its whole walled compound (2026-09-29;
+      measured: no foliage density left inside). Still to do when the
+      player builds: the build system clears the footprint on placing.
 - [x] **The shiny texture = "Valley soil"** (`brown_mud_dry`, the base
       layer under most of the map; your screenshot). Its roughness map sits
       ~0.5 — glossy for dirt — so the Aurès sun laid a silvery satin sheen
@@ -378,11 +381,9 @@ lift off the pad; the ALN comes out of the cave mouth.
 - [x] **GOAT: gap on top of the head while EATING** (you, 2026-09-29) — FIXED
       268553d: the poll was skinned to the ear bone; now Head + a smoothed
       head/neck seam (Eating 371 → ~0 see-through px, Gallop 342 → 28).
-- [ ] **GOAT: a thin see-through slit low on the body while walking** (you,
-      2026-09-28). Likely the same as pig2's neck: a BENT quad whose
-      v0-v2 triangle winds backwards in the pose (culled). Fix: the other
-      diagonal for such quads (pig2 only today) — for the goat too, then
-      re-check the goat against its approved shots.
+- [x] **GOAT: a thin see-through slit low on the body while walking** (you,
+      2026-09-28) — SOLVED in the sheep lab (you, 2026-09-29: "we spent many
+      times on it"). This entry was stale; do not reopen the goat.
 - [ ] **LATER — dressed animals: camels AND donkeys carrying things** (you,
       2026-09-27; your reference: a caravan camel with a striped saddle
       blanket, a wooden saddle, woven baskets and jars hung on the flanks,
@@ -975,8 +976,12 @@ Asset follow-ups:
       margin; bags, wire and vehicles lie ON the slope (plane fit, lowest
       corner decides), no pad. Measured: nothing floats > 7 cm.
       **Build-system rule:** a pad + rim must not reach another pad.
-- [ ] Vehicles on bumpy ground sink one wheel up to ~0.5 m (rigid body on
-      a plane fit) — per-wheel seating when units move.
+- [x] Vehicles on bumpy ground sank a wheel (the tilt was the terrain normal
+      at the centre). shared-rts unitRenderer: the ground under the four
+      wheels (wheelbase from the unit radius), the body fitted to them and
+      lifted until no wheel is under ground. MEASURED at 1702 spots, a
+      4.6 m vehicle: worst sink 4.39 m → 0, mean 0.24 m → 0 (2026-09-29;
+      nam's vehicles too — same machinery).
 - [x] **Dev panel** (your ask): games/alg-rts/devPanel.js on a SHARED shell
       (games/shared-rts/devPanelShell.js — frame, folding sections, row
       helpers; nam's panel untouched). Sections: Camera, Light (live, Copy →
@@ -1199,7 +1204,9 @@ Steps:
       re-run with other numbers from it.
       Result: 0–96 m, walkable 93.4%, gentle 62.8%, biggest connected gentle
       patch **61.3 ha** (nam-valley 49), NW massif tiles 67/78%.
-- [ ] Console: one "Draw with an index count of 0" warning after loading
+- [x] (2026-09-29: the foliage picker's thumbnail bake — an all-card plant
+      left an empty FIRST material group; and the editor's favicon 404.)
+      Console: one "Draw with an index count of 0" warning after loading
       the map in the editor. Some empty mesh is being drawn; find which.
 - [ ] Later, maybe: far mountains beyond the map (a backdrop ring) if the
       flat plain round the map reads wrong from the game camera.

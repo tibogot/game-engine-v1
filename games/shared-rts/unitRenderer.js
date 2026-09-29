@@ -748,6 +748,21 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         const onDeck = app.bridgeDecks?.heightAt(p.x, p.z) != null;
         const gn = onDeck ? _UP : app.getWorldNormal(p.x, p.z);
         _n.set(gn.x, gn.y, gn.z);
+        // VEHICLES SIT ON THEIR WHEELS: the normal at one point (the centre)
+        // ignored a bump or dip under a wheel, which sank up to ~0.5 m. Sample
+        // the ground under the four wheels (the wheelbase from the unit's
+        // radius: ~2:1 long), fit the body to them, and lift it until no wheel
+        // is under the ground (on a twist one floats a little instead).
+        const R = t.radius ?? 1;
+        if (!onDeck && R > 1.5 && app.getWorldHeight) {
+          const hl = R * 0.8, hw = R * 0.42, s = Math.sin(yaw), c = Math.cos(yaw);
+          const H = (fx, rx) => app.getWorldHeight(p.x + s * fx + c * rx, p.z + c * fx - s * rx);
+          const fl = H(hl, -hw), fr = H(hl, hw), rl = H(-hl, -hw), rr = H(-hl, hw);
+          const sF = (fl + fr - rl - rr) / (4 * hl), sR = (fr + rr - fl - rl) / (4 * hw);
+          const h0 = (fl + fr + rl + rr) / 4, twist = Math.abs(fl + rr - fr - rl) / 4;
+          x.position.y = h0 + twist + bobY;
+          _n.set(-sF * s - sR * c, 1, -sF * c + sR * s).normalize();
+        }
         _alignQ.setFromUnitVectors(_UP, _n);
         _yawQ.setFromAxisAngle(_UP, yaw);
         _targetQ.copy(_alignQ).multiply(_yawQ);
