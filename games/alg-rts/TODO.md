@@ -89,8 +89,14 @@ Not wired into either game yet.
       blocks; the recolour now classifies and shades repainted cloth from a
       softer mip (bias 1.5) — lightened ALN cloth no longer doubles the blocks.
       Untouched texels keep the pack's look (your call: keep it).
-- [ ] ALN next: a kachabia/burnous cloak (test the leg stretch); a
-      Mauser/Lee-Enfield for the weapon mix; the FLN flag for a standard-bearer.
+- [x] ALN v3 (2026-09-30, checked in Chrome): Mauser 98k + Lee-Enfield (SMLE)
+      procedural; ALN `weaponMix` per man (MAS 36 / Mauser / Enfield); FLN
+      flag on a back pole for the standard-bearer (role 3); KACHABIA — an
+      open-front hooded wool cape, the first SKINNED kit piece (spine above
+      the hips, blended hips → each thigh below): follows a walk without
+      tearing. Look "ALN, kachabia"; 20 % of an ALN section wears one.
+      The lab moved to games/shared-rts/soldier-lab.html (the engine must not
+      import games/ — gameImportBoundaryTest).
 - [ ] Faces: the pack's faces stay cartoon-American — for close-ups a North
       African head (AI-generated or reworked in Blender) is the real fix. Not
       stars (generals only) or medals (parade dress); rank goes in the UI plus

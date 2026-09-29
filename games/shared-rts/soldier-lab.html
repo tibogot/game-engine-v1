@@ -274,6 +274,41 @@
       };
       // Stable per-soldier randoms (the same squad every respawn).
       const rand = (i) => { const x = Math.sin(i * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+      /**
+       * A SKINNED kit piece (the kachabia) on this soldier: built at rest in
+       * world metres, moved into the soldier mesh's own (bind-pose) space,
+       * weighted per vertex by the piece's `weights`, and bound to the same
+       * skeleton — so it deforms with the body. In the game it merges into
+       * the crowd mesh the same way.
+       */
+      const skinnedGeo = new Map(); // "kind|piece" → geometry with skin attributes
+      function skinnedPiece(root, name, k) {
+        const def = KIT[k], src = meshOf(root, name), key = `${name}|${k}`;
+        if (!skinnedGeo.has(key)) {
+          const g = def.build();
+          const bones = meshOf(template, name).skeleton.bones.map((b) => b.name.replace("mixamorig", ""));
+          const pos = g.attributes.position, n = pos.count;
+          const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4), p = new THREE.Vector3();
+          for (let i = 0; i < n; i++) {
+            p.fromBufferAttribute(pos, i);
+            def.weights(p).filter(([, w]) => w > 1e-4).slice(0, 4).forEach(([bone, w], j) => {
+              si[i * 4 + j] = bones.indexOf(bone); sw[i * 4 + j] = w;
+            });
+          }
+          g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(si, 4));
+          g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(sw, 4));
+          g.applyMatrix4(meshOf(template, name).matrixWorld.clone().invert()); // → the soldier mesh's space
+          skinnedGeo.set(key, g);
+        }
+        const piece = new THREE.SkinnedMesh(skinnedGeo.get(key), kitMat);
+        piece.castShadow = true;
+        piece.frustumCulled = false;
+        piece.position.copy(src.position); piece.quaternion.copy(src.quaternion); piece.scale.copy(src.scale);
+        src.parent.add(piece);
+        piece.bind(src.skeleton, src.bindMatrix);
+        return piece;
+      }
+
       /** Dress soldier i (look variant, helmet, kit, extras, headgear); returns his weapon key. */
       function dress(root, name, i) {
         const load = loadout(LOOKS[lookKey], i, (salt) => rand(i * 7 + salt), $("allExtras").checked);
@@ -289,6 +324,7 @@
         // Kit: modelled in world metres around the soldier at rest → into its bone's frame.
         for (const k of load.kit) {
           const def = KIT[k];
+          if (def.skinned) { root.userData.skinnedKit ??= []; root.userData.skinnedKit.push(skinnedPiece(root, name, k)); continue; }
           if (!kitGeo.has(k)) kitGeo.set(k, def.build());
           const piece = new THREE.Mesh(kitGeo.get(k), kitMat);
           piece.castShadow = true;
@@ -502,7 +538,8 @@
         }
         for (const s of soldiers) {
           s.root.traverse((o) => {
-            if (o.isSkinnedMesh) o.material = weights ? weightMats.get(o.name) : lookMat(o.name);
+            // soldier bodies only — a skinned kit piece (the kachabia) keeps the kit material
+            if (o.isSkinnedMesh && baseMats.has(o.name)) o.material = weights ? weightMats.get(o.name) : lookMat(o.name);
           });
           s.skel.visible = $("bones").checked;
         }

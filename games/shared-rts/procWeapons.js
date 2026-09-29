@@ -193,11 +193,61 @@ function fm2429() {
   ]);
 }
 
+/**
+ * Mauser Kar 98k — bolt action, 1.11 m; many reached the ALN (from memory:
+ * through Egypt, Tunisia, Morocco). Its tell: the barrel shows well past a
+ * short handguard, a turned-DOWN bolt handle, a flush floorplate.
+ */
+function mauser98() {
+  const W = 0x7a4a2a, M = COLORS.metal, bore = 0.045;
+  return toGeometry([
+    block(W, { z: -0.34, top: 0.028, bot: -0.105, w: 0.043 }, { z: -0.02, top: 0.034, bot: -0.022, w: 0.035 }),
+    box(M, [0, -0.038, -0.344], [0.044, 0.132, 0.008]),
+    box(M, [0, 0.048, 0.1], [0.03, 0.036, 0.2]),                        // receiver
+    box(M, [0.028, 0.03, 0.035], [0.028, 0.008, 0.01]),                 // bolt handle, turned down
+    box(M, [0.042, 0.012, 0.038], [0.016, 0.016, 0.016]),               // bolt knob
+    box(M, [0, -0.02, 0.11], [0.022, 0.008, 0.07]),                     // flush floorplate
+    box(M, [0, -0.026, 0.045], [0.008, 0.005, 0.05]),                   // trigger guard
+    block(W, { z: 0.02, top: 0.03, bot: -0.014, w: 0.039 }, { z: 0.5, top: 0.035, bot: 0.006, w: 0.03 }),
+    box(W, [0, 0.056, 0.3], [0.028, 0.022, 0.2]),                       // short upper handguard
+    box(M, [0, 0.036, 0.36], [0.041, 0.06, 0.012]),                     // barrel band
+    box(M, [0, 0.034, 0.49], [0.036, 0.055, 0.03]),                     // nose cap
+    cyl(M, 0, bore, 0.2, 0.74, 0.0095),                                  // barrel, long past the wood
+    box(M, [0, 0.064, 0.725], [0.012, 0.018, 0.012]),                   // hooded front sight
+  ]);
+}
+
+/**
+ * SMLE (Lee-Enfield No. 1 Mk III) — 1.13 m; the ALN had many (from memory).
+ * Its tells: wood to the muzzle with a snub nose cap, and a 10-round box
+ * magazine hanging under the receiver.
+ */
+function enfield() {
+  const W = 0x6b4125, M = COLORS.metal, bore = 0.045;
+  return toGeometry([
+    block(W, { z: -0.33, top: 0.026, bot: -0.1, w: 0.042 }, { z: -0.02, top: 0.032, bot: -0.03, w: 0.034 }),
+    box(M, [0, -0.035, -0.334], [0.043, 0.128, 0.008]),
+    box(M, [0, 0.046, 0.1], [0.03, 0.036, 0.2]),                        // receiver
+    box(M, [0.03, 0.05, 0.01], [0.03, 0.008, 0.01]),                    // bolt handle, straight out
+    box(M, [0.046, 0.05, 0.012], [0.016, 0.016, 0.016]),
+    tiltX(box(M, [0, -0.04, 0.12], [0.026, 0.07, 0.07]), 0.12, [0, 0.12]), // box magazine
+    box(M, [0, -0.028, 0.04], [0.008, 0.005, 0.05]),
+    block(W, { z: 0.02, top: 0.03, bot: -0.014, w: 0.039 }, { z: 0.66, top: 0.036, bot: 0.012, w: 0.03 }), // to the muzzle
+    box(W, [0, 0.057, 0.4], [0.028, 0.022, 0.5]),                       // full upper handguard
+    box(M, [0, 0.036, 0.66], [0.036, 0.05, 0.03]),                      // snub nose cap
+    box(M, [0, 0.036, 0.4], [0.041, 0.058, 0.012]),                     // band
+    cyl(M, 0, bore, 0.66, 0.69, 0.0095),
+    box(M, [0, 0.07, 0.668], [0.01, 0.022, 0.012]),                     // front sight ears
+  ]);
+}
+
 export const WEAPONS = {
   mas49_56: { label: "MAS 49/56", faction: "French — rifle", build: mas49_56 },
   mat49: { label: "MAT 49", faction: "French — SMG (NCO, paras)", build: mat49 },
   mas36: { label: "MAS 36", faction: "ALN — bolt rifle", build: mas36 },
   fm2429: { label: "FM 24/29", faction: "French — section LMG", build: fm2429 },
+  mauser98: { label: "Mauser 98k", faction: "ALN — bolt rifle", build: mauser98 },
+  enfield: { label: "Lee-Enfield", faction: "ALN — bolt rifle", build: enfield },
 };
 
 /** The shape helpers, for other low-poly kit (soldierLooks.js headgear). */

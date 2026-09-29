@@ -135,8 +135,15 @@ export const LOOKS = {
     roles: {
       0: { name: "leader", weapon: "mat49" },
       2: { name: "LMG", weapon: "fm2429" },
+      3: { name: "flag", kit: ["flag"] },
     },
-    extras: { beard: 0.45, mustache: 0.5, bandolier: 0.4, bandoliers: 0.25, cigarette: 0.1 },
+    weaponMix: { mas36: 0.45, mauser98: 0.3, enfield: 0.25 },
+    extras: { beard: 0.45, mustache: 0.5, bandolier: 0.4, bandoliers: 0.25, cigarette: 0.1, kachabia: 0.2 },
+  },
+  alnKachabia: {
+    label: "ALN, kachabia", note: "hooded wool cloak over the drill",
+    green: 0x86775a, greenAlt: 0x5e4b37, khaki: 0xa08f6d, helmet: false, headgear: "cheche", hatColor: 0xdcd5c3,
+    weapon: "enfield", kit: ["musette", "kachabia"], skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["aln1", "aln2"],
   },
 };
 
@@ -973,6 +980,104 @@ function musette() {
   ]);
 }
 
+/**
+ * The FLN flag on a pole strapped to the back (the standard-bearer): green at
+ * the hoist, white at the fly, the red crescent opening toward the fly with the
+ * star inside it. ~55 × 37 cm, a baked ripple, both faces. Pole ~1.6 m up
+ * from the pack, so it rides well above the squad.
+ */
+function flnFlag() {
+  const green = 0x0b6b3a, white = 0xeeeee6, red = 0xc81d2c, wood = 0x6a4a2c;
+  const pole = [-0.07, 0.98, -0.22], top = [-0.1, 2.62, -0.29];
+  const L = 0.55, H = 0.37, cols = 8, y0 = 2.2;
+  const at = (i, y) => { // i: 0 (at the pole) … cols (the fly end), −x away from the pole
+    const t = i / cols;
+    return [top[0] - t * L, y, top[2] + 0.035 * Math.sin(t * Math.PI * 2.2) * t];
+  };
+  const cloth = [];
+  for (let i = 0; i < cols; i++) {
+    const p = part(i < cols / 2 ? green : white);
+    const a = at(i, y0), b = at(i + 1, y0), c = at(i + 1, y0 + H), d = at(i, y0 + H);
+    tri(p, a, c, b); tri(p, a, d, c); // faces +z (x runs toward −x)
+    tri(p, a, b, c); tri(p, a, c, d); // and −z
+    cloth.push(p);
+  }
+  // crescent + star, on both faces, lifted 3 mm off the cloth at the middle
+  const mid = at(cols / 2, y0 + H / 2);
+  const emblem = (dz) => {
+    const p = part(red);
+    const c = [mid[0], mid[1], mid[2] + dz];
+    const arcPt = (cx, r, a) => [c[0] + cx + Math.cos(a) * r, c[1] + Math.sin(a) * r, c[2]];
+    const A0 = Math.PI + 0.9, A1 = Math.PI * 3 - 0.9, n = 12; // gap toward −x (the fly)
+    for (let k = 0; k < n; k++) {
+      const a = A0 + ((A1 - A0) * k) / n, b = A0 + ((A1 - A0) * (k + 1)) / n;
+      const o0 = arcPt(0, 0.085, a), o1 = arcPt(0, 0.085, b);
+      const i0 = arcPt(-0.026, 0.068, a), i1 = arcPt(-0.026, 0.068, b);
+      // both windings: each emblem sits in front of its own face of the
+      // cloth, so its back is hidden by the cloth anyway
+      tri(p, o0, i0, i1); tri(p, o0, i1, o1); tri(p, o0, i1, i0); tri(p, o0, o1, i1);
+    }
+    const s = [c[0] - 0.05, c[1], c[2]];
+    const star = Array.from({ length: 10 }, (_, k) => {
+      const a = Math.PI / 2 + (k * Math.PI) / 5, r = k % 2 ? 0.011 : 0.028;
+      return [s[0] + Math.cos(a) * r, s[1] + Math.sin(a) * r, s[2]];
+    });
+    for (let k = 0; k < 10; k++) {
+      const q0 = star[k], q1 = star[(k + 1) % 10];
+      tri(p, s, q1, q0); tri(p, s, q0, q1);
+    }
+    return p;
+  };
+  return toGeometry([
+    stick(wood, pole, top, 0.012, 6),
+    ...cloth,
+    emblem(0.003), emblem(-0.003),
+  ]);
+}
+
+/**
+ * Kachabia: the long hooded wool cloak of the Algerian countryside (from
+ * memory), here as an OPEN-FRONT cape from the shoulders to below the knees
+ * with the hood down on the back — open in front so the arms can hold a rifle
+ * without piercing it. The one SKINNED kit piece: above the hips it rides the
+ * spine; below, it blends from the hips into each thigh by side (x), so the
+ * back of the cape stretches between the legs instead of tearing.
+ */
+function kachabia() {
+  const c = 0x5d4633, inner = 0x3f2f22;
+  const rings = [
+    { y: 0.5, rx: 0.32, rz: 0.28, zo: -0.01 },
+    { y: 0.95, rx: 0.275, rz: 0.235, zo: 0.0 },
+    { y: 1.2, rx: 0.262, rz: 0.222, zo: 0.005 },
+    { y: 1.37, rx: 0.245, rz: 0.2, zo: 0.0 },
+    { y: 1.46, rx: 0.12, rz: 0.11, zo: 0.0 },
+  ];
+  const arc = { from: Math.PI / 2 + 0.6, to: Math.PI * 2.5 - 0.6, segs: 18 };
+  const hoodArc = { from: Math.PI * 1.5 - 0.7, to: Math.PI * 1.5 + 0.7, segs: 6 };
+  const hood = [
+    { y: 1.2, rx: 0.06, rz: 0.22, zo: -0.02 },
+    { y: 1.32, rx: 0.14, rz: 0.19, zo: -0.02 },
+    { y: 1.45, rx: 0.135, rz: 0.14, zo: -0.02 },
+  ];
+  return toGeometry([
+    ...band(c, rings, arc),
+    ...band(inner, [...rings].reverse().map((r) => ({ ...r, rx: r.rx - 0.004, rz: r.rz - 0.004 })), arc), // inside
+    ...band(shade(c, 0.92), hood, hoodArc),
+    ...band(inner, [...hood].reverse().map((r) => ({ ...r, rx: r.rx - 0.004, rz: r.rz - 0.004 })), hoodArc),
+  ]);
+}
+
+/** Skin weights for the kachabia at a rest-pose point (metres): [[bone, weight], …]. */
+function kachabiaWeights(p) {
+  const s = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  if (p.y >= 1.25) return [["Spine2", 1]];
+  if (p.y >= 1.05) { const t = s(1.05, 1.25, p.y); return [["Spine2", t], ["Spine1", 1 - t]]; }
+  if (p.y >= 0.92) { const t = s(0.92, 1.05, p.y); return [["Spine1", t], ["Hips", 1 - t]]; }
+  // below the hips: into the thighs, left (+x) / right by side, softly across the middle
+  const legs = s(0.92, 0.62, p.y), left = s(-0.1, 0.1, p.x);
+  return [["Hips", 1 - legs], ["LeftUpLeg", legs * left], ["RightUpLeg", legs * (1 - left)]];
+}
+
 /** Kit pieces and the bone each rides on. */
 export const KIT = {
   pack: { bone: "Spine2", build: pack },
@@ -988,10 +1093,13 @@ export const KIT = {
   bandolier: { bone: "Spine2", build: bandolier },
   bandoliers: { bone: "Spine2", build: bandoliers },
   musette: { bone: "Hips", build: musette },
+  flag: { bone: "Spine2", build: flnFlag },
+  // skinned: built at rest in metres, weighted per vertex by `weights`
+  kachabia: { skinned: true, build: kachabia, weights: kachabiaWeights },
 };
 
 /** The per-soldier extras a look can roll (look.extras = { name: chance }). */
-export const EXTRAS = ["sunglasses", "mustache", "cigarette", "scarf", "grenades", "beard", "bandolier", "bandoliers"];
+export const EXTRAS = ["sunglasses", "mustache", "cigarette", "scarf", "grenades", "beard", "bandolier", "bandoliers", "kachabia"];
 
 /**
  * What soldier `index` of a squad wears and carries.
@@ -1008,6 +1116,12 @@ export function loadout(base, index, rnd, showAll = false) {
   const kit = new Set(look.kit ?? []);
   let weapon = look.weapon;
   const role = base.roles?.[index];
+  // A mixed armoury (the ALN): each man draws his rifle from look.weaponMix.
+  if (base.weaponMix && !role?.weapon) {
+    const mix = Object.entries(base.weaponMix);
+    let t = rnd(30) * mix.reduce((s, [, w]) => s + w, 0);
+    for (const [key, w] of mix) { t -= w; if (t < 0) { weapon = key; break; } }
+  }
   if (role) {
     if (role.weapon) weapon = role.weapon;
     for (const k of role.drop ?? []) kit.delete(k);
