@@ -158,9 +158,17 @@ const VILLAGE = [
   ...GARDENS,
 ];
 
+/**
+ * What the SAPPERS build (algBuild.js) is no longer placed at the start (you,
+ * 2026-09-29: the Company of Heroes loop — the post starts bare and its
+ * defences are dug). `?defences=1` puts them back (to compare, or judge them).
+ */
+const SAPPER_BUILT = new Set(["mirador", "mgNest", "searchlight", "mortarPit", "sandbags1", "sandbags2", "wire1", "wire2"]);
+const START_DEFENCES = typeof location !== "undefined" && new URLSearchParams(location.search).get("defences") === "1";
+
 export const SHOWROOM = [
   { key: "frenchPost", build: buildFrenchPost, x: BASE.x, z: BASE.z, yaw: BASE.yaw },
-  ...BASE_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
+  ...BASE_BUILDABLES.filter((v) => START_DEFENCES || !SAPPER_BUILT.has(v.key)).map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true, on: v.on }; }),
   // The two hamlets (layout.js), each its own houses.
   { key: "mechta", build: buildMechta, x: HAMLETS[0].x, z: HAMLETS[0].z, yaw: siteYaw(HAMLETS[0]) },

@@ -25,6 +25,7 @@ import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { COSTS, createAlgEconomy } from "./algEconomy.js";
+import { BUILD_BUTTONS, BUILD_COSTS, createAlgBuild } from "./algBuild.js";
 import { createResourceHud } from "./ui/resourceHud.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
 import { createHudBar } from "./ui/hudBar.js";
@@ -37,7 +38,7 @@ import { createMinimap } from "./ui/minimap.js";
  * economy comes with its rules). The command card lists them in this order.
  */
 const PRODUCTION = {
-  post: { appele: 6 },
+  post: { appele: 6, sapeur: 8 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
   helipad: { alouette: 30 },
   caveEntrance: { moudjahid: 4 },   // the ALN's: its AI will queue (Dev panel until then)
@@ -281,6 +282,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     productionFor: (s) => Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => ({ key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: COSTS[key] ?? 0 })),
     canAfford: (cost) => economy.french.canAfford(cost),
     onBuild: (s, key) => s.enqueue(key),
+    // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
+    structureBuilds: BUILD_BUTTONS,
+    buildingCosts: BUILD_COSTS,
+    onBuildStructure: (key, sel) => build?.begin(key, sel),
     // PATROUILLE (algPatrols.js): the selection walks the nearest track in
     // file, back and forth, until given another order.
     abilitiesFor: (sel) => (sel.some((u) => !u.isStructure && !u.isAir && u.team === "player")
@@ -297,6 +302,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     mount: hud.right,
   });
   let patrols = null;   // made after combat (algPatrols.js)
+  let build = null;     // made after the cover (algBuild.js)
   let controlGroups = null;   // made after the selection it listens to
   const selection = createSelection({
     app, units, unitRenderer, structuresRenderer: structures.renderer,
@@ -321,6 +327,13 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const coverSys = createAlgCover(app, { showroom, isArmed: () => (selection.selected?.length ?? 0) > 0 });
   app.algCover = coverSys.cover;
   app.algCoverOverlay = coverSys.overlay;
+  // THE GÉNIE (algBuild.js): sappers place and raise the defences; a finished
+  // wall re-bakes the cover map.
+  build = createAlgBuild({
+    app, units, structures, navGrid, showroom, purse: economy.french,
+    onCover: () => coverSys.cover.bake(),
+  });
+  app.algBuild = build;
   // LINE OF SIGHT (algSight.js): ridges and tall buildings stop a shot; low
   // walls are cover, not blockers. ?los=0 = without (A/B).
   const sight = new URLSearchParams(location.search).get("los") !== "0" ? createAlgSight(app, { showroom, worldSize: app.worldSize ?? 1024 }) : null;
@@ -350,7 +363,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
 
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); mines.step(d); economy.step(d); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); mines.step(d); economy.step(d); build.step(d); });
     combat.frame(dt);
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.

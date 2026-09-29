@@ -32,9 +32,9 @@ import { createCoverOverlay } from "../shared-rts/coverOverlay.js";
 export const ALG_COVER = { ...COVER, concealFloor: 0.2, concealCeil: 0.65, maxConcealment: 0.6, terrainCover: 0.5 };
 
 /** Stone and sandbags: hard cover. */
-const HARD = new Set(["frenchPost", "sangar", "mgNest", "mortarPit", "sandbags1", "sandbags2", "dechra", "ksar", "mechta", "mechta2", "koubba", "caveEntrance", "sasPost", "armsCache", "alnCamp", "wellHamlet1", "wellHamlet2"]);
+const HARD = new Set(["frenchPost", "sangar", "mgNest", "mortarPit", "sandbags", "sandbags1", "sandbags2", "dechra", "ksar", "mechta", "mechta2", "koubba", "caveEntrance", "sasPost", "armsCache", "alnCamp", "wellHamlet1", "wellHamlet2"]);
 /** No cover at all: wire, brush, thorn, flat ground, a lattice. */
-const NONE = new Set(["wire1", "wire2", "ambushScreen", "mineMarker", "zeriba1", "zeriba2", "helipad", "searchlight", "cemetery"]);
+const NONE = new Set(["wire", "wire1", "wire2", "ambushScreen", "mineMarker", "zeriba1", "zeriba2", "helipad", "searchlight", "cemetery"]);
 
 /** A placed piece's footprint as circles (world), turned with it. */
 function circlesOf(mesh, hard) {
@@ -83,7 +83,9 @@ export function createAlgCover(app, { showroom = {}, isArmed = () => true } = {}
   const cover = createCover({
     app, worldSize: app.worldSize ?? 1024, params: ALG_COVER,
     *extra() {
-      for (const [key, mesh] of Object.entries(showroom)) {
+      for (const [name, mesh] of Object.entries(showroom)) {
+        // A sapper's piece is listed as "built:<kind>:<n>"; its kind decides.
+        const key = mesh?.userData?.kitKey ?? name;
         if (!mesh?.isObject3D || NONE.has(key) || !mesh.parent) continue;
         yield* circlesOf(mesh, HARD.has(key));
       }

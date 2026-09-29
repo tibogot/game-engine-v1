@@ -41,6 +41,39 @@ export const ALG_UNIT_TYPES = {
     castShadow: true,
   },
 
+  // The SAPEUR of the Génie: the French army's engineer, who digs the post's
+  // defences (algBuild.js). A rifleman too, a worse one. `builds`: what his
+  // command card offers (keys of algBuild.js BUILDS).
+  sapeur: {
+    typeKey: "sapeur",
+    name: "Sapeurs du Génie",
+    buildLabel: "Sapeur",
+    weapon: "rifle",
+    isAir: false,
+    foot: true,
+    hover: 0,
+    speed: 5.2,
+    radius: 1.0,
+    turnRate: 6,
+    maxHp: 55,
+    range: 26,
+    damage: 4,
+    fireRate: 2.0,
+    canHitAir: false,
+    vision: 38,
+    builds: ["sandbags", "wire", "mgNest", "mortarPit", "mirador", "searchlight"],
+    // STAND-IN model: the appelé's (nam's soldier) until the Génie gets its own.
+    url: "/models/testsolanim.glb",
+    skinned: true,
+    targetHeight: REAL.soldierHeight * RTS_SCALE,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 1.7,
+    barWidth: 2.2,
+    barY: 3.4,
+    castShadow: true,
+  },
+
   // The moudjahid: an ALN fighter of the katiba, out of the cave mouth. The
   // enemy side (the red wash, teams.js) on the SAME stand-in model as the
   // appelé until you make the ALN one; the numbers are nam's infantry's too.

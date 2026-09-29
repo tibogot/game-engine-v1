@@ -40,6 +40,9 @@ const _v = new THREE.Vector3();
 export function createAlgStructures({ app, showroom, producers, units }) {
   const list = [];
   const byMesh = new Map();
+  // LIVE arrays: combat, the fog and the selection keep these very arrays,
+  // and buildings the sappers raise mid-game are pushed into them (addBuilt).
+  const pub = [], roots = [];
 
   /** A building's frame: local (scaled m) → world. */
   const frameOf = (mesh) => {
@@ -70,7 +73,10 @@ export function createAlgStructures({ app, showroom, producers, units }) {
       : st.muzzleAt ? [toW(...st.muzzleAt)] : [];
     const rec = { s, mesh, gun, muzzles, fp, height: mesh.geometry.userData.height ?? 5, mortar: st.mortar ?? null, mortarT: Math.random() * 3 };
     list.push(rec);
+    pub.push(s);
+    roots.push(mesh);
     byMesh.set(mesh, rec);
+    return s;
   }
 
   // The producers are structures already (algProducer.js): they get their
@@ -137,13 +143,15 @@ export function createAlgStructures({ app, showroom, producers, units }) {
   }
 
   return {
-    list: list.map((r) => r.s),
+    list: pub,
     records: list,
     muzzleOf,
     wreck,
+    /** A building a sapper finished (algBuild.js): it fights, is seen, is picked. */
+    addBuilt: (key, mesh) => add(key, mesh),
     /** For the shared selection: every building (the dead can't be picked). */
     renderer: {
-      roots: list.map((r) => r.mesh),
+      roots,
       structureFromHit(h) {
         for (let o = h.object; o; o = o.parent) {
           const r = byMesh.get(o);

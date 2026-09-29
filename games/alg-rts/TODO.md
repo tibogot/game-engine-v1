@@ -1079,8 +1079,50 @@ Asset follow-ups:
 - [x] Shown: the supply strip (Ravitaillement · +/min · villages n/3 · ALN
       n), prices on the production buttons (greyed when short), a ring
       round each village in its holder's colour, the minimap's diamonds.
-- [ ] Not yet from the proposal: the Génie sapper and building placement,
-      tiers (motor pool → helipad → armour), the SAS post raising support,
+- [x] **THE GÉNIE SAPPER + BUILDING PLACEMENT** (2026-09-29, algBuild.js):
+      the post trains SAPEURS (80); a sapper's card offers sandbags 20,
+      wire 15, MG nest 90, mortar 130, mirador 110, searchlight 60. The
+      ghost is the piece itself, green/red (why: out of the play box, water,
+      blocked, too steep > 18°, no supplies — algBuild.why); R turns it 45°,
+      Shift-click keeps placing, right-click/Esc cancels. Placing pays,
+      levels a pad (pits, towers) or lays the piece ON the slope (bags,
+      wire), blocks the nav, clears the plants, lays a foundation; sappers
+      at the site raise it (two 1.4x as fast). Done: a structure like the
+      rest (algStructures.addBuilt: fights, sees, picked; live lists now),
+      cover re-baked (bags: hard). The post STARTS BARE (?defences=1 = the
+      old pre-placed set). Tested: nest + bags placed, paid 110, both up in
+      ~15 s, the nest in the structures, cover 1.0 behind the bags.
+- [ ] **THE PROJECTEUR MUST WORK AS A SEARCHLIGHT** (you, 2026-09-29: "cool,
+      but it should work as a projecteur"). Cheap, no real light: an
+      additive (unlit) beam cone from the lamp + a soft pool on the ground
+      where it lands (one decal-like quad), the lamp sweeping its arc
+      (the Lamp mesh already turns) and LOCKING onto an enemy it finds.
+      Gameplay: what the pool touches is SPOTTED (fog of war reveal +
+      concealment 0 — hidden ALN in scrub lit up), mostly worth it at
+      dusk/night (weather/night item). Measure GPU ms: must be ~free.
+- [ ] **DETAILS THAT COST ~NOTHING** (you asked for more like the projecteur,
+      2026-09-29 — only if they stay near free: no dynamic lights with
+      shadows, shared particle/decal fields, instanced):
+      · Sappers at work: a dust puff and a spade/hammer swing while a site
+        rises; a small tricolour on a finished mirador.
+      · Barbed wire that MATTERS: the ALN must cut it (a few seconds, a
+        sapper-like action) or go round; it snags a man for a moment.
+      · Dust trails behind vehicles on the pistes (one shared particle
+        field), tyre-track decals fading behind them.
+      · Oven smoke from a few village houses, laundry on a ksar roof,
+        a donkey tied at the souk (the herds already have donkeys).
+      · Night: lit windows (emissive, no lights) in the post, villages and
+        the ksar; a lantern at the souk arcades; the mirador lamp.
+      · Built pieces WEAR: sandbags slump and burst when shot (swap to a
+        damaged variant), a burnt MG nest keeps its wreck (as structures).
+      · Spent brass / a scorch decal at an MG nest after long firing.
+      · Ambience: cicadas by day, the muezzin from the ksar at set hours,
+        dogs barking in villages when soldiers come near.
+- [ ] Génie, next: a construction bar over the site; cancel/refund; the
+      AI's sappers?; ALN builds (sangar, ambush screen) the same way; the
+      mirador into the line-of-sight bake; pads read as a pale mound on a
+      slope (the flatten rim) — you, look.
+- [ ] Not yet from the proposal: tiers (motor pool → helipad → armour), the SAS post raising support,
       the arms cache UNLOCKING MG / mortar / bazooka teams (it pays income
       for now), militia (moussebilines) recruited in ALN villages, the
       ALN purse named "Soutien" on screen.

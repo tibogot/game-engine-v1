@@ -19,7 +19,7 @@
 import * as THREE from "three";
 
 export const COSTS = {
-  appele: 60, willys: 90, gmc: 110, halftrack: 160, ebr: 220, amx13: 260, alouette: 320,
+  appele: 60, sapeur: 80, willys: 90, gmc: 110, halftrack: 160, ebr: 220, amx13: 260, alouette: 320,
   moudjahid: 40,
 };
 
