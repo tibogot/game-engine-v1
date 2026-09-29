@@ -95,6 +95,9 @@ export const LOD_LEVELS = Math.max(
  */
 export const LOD_CENTRE_SNAP = BASE_STEP * Math.pow(2, LOD_LEVELS - 1);
 
+/** Clipmap levels added past LOD_LEVELS while far terrain is on (×4 the reach). */
+export const FAR_EXTRA_LEVELS = 2;
+
 /**
  * The whole clipmap is offset by half a heightmap texel, so a fine vertex sits
  * ON a texel instead of between four of them.
@@ -347,7 +350,7 @@ function createLODMaterial({
   heightTexNode, uCenterXZ, uCursorUV, uCursorRadius, uBrushMaskNode, uMaskRotation,
   splatOverlay, snowShared = null, lakebed = null,
   terrainNormals = null, riverSand = null, flowerTint = null, features = {},
-  terrainShadow = null, grassFar = null, uCursorFalloff = null,
+  terrainShadow = null, grassFar = null, uCursorFalloff = null, farTerrain = null,
 }) {
   const F = { ...TERRAIN_FEATURES, ...features };
   const baseStyle = F.baseStyle ?? (F.tileGrid === false ? "flat" : "grid");
@@ -395,7 +398,29 @@ function createLODMaterial({
   // the deform tile's footprint groundDepth hands the surface over to the
   // high-res tile so footprint grooves are never covered by coarse terrain.
   const wxz = vec2(worldX, worldZ);
-  const vertexY = h.mul(MAX_HEIGHT);
+  let vertexY = h.mul(MAX_HEIGHT);
+  // FAR TERRAIN (farTerrain.js): outside the heightmap, the far grid instead
+  // of flat 0 — blended from the heightmap's own edge, stood up with distance.
+  // Its normal comes from the same ground. Computed in a branch, so the
+  // vertices inside the map (most of the clipmap) pay nothing for it.
+  let farNormalV = null, farOutV = null;
+  if (farTerrain) {
+    const halfW = float(WORLD_SIZE * 0.5);
+    const edgeAt = (x, z) => texture(heightTexNode, clamp(vec2(x.add(halfW).div(WORLD_SIZE), z.add(halfW).div(WORLD_SIZE)), 0, 1)).r.mul(MAX_HEIGHT);
+    const out = float(1).sub(hmInBounds).mul(farTerrain.u.uEnabled);
+    const farY = float(0).toVar();
+    const farN = vec3(0, 1, 0).toVar();
+    const farV = Fn(() => {
+      If(out.greaterThan(0.0), () => {
+        farY.assign(farTerrain.outsideHeight(worldX, worldZ, halfW, edgeAt(worldX, worldZ)));
+        farN.assign(farTerrain.outsideNormal(worldX, worldZ, halfW, edgeAt));
+      });
+      return farY;
+    })();
+    vertexY = vertexY.add(farV.mul(out));
+    farNormalV = varying(farN, "vFarNormal");
+    farOutV = varying(out, "vFarOut");
+  }
   const displacedY = snowShared ? vertexY.add(snowShared.groundDepth(wxz)) : vertexY;
   mat.positionNode = vec3(positionLocal.x, displacedY, positionLocal.z);
   // Under a GAME's own ground (setHolesEnabled "sink"): the same vertex, pushed
@@ -414,14 +439,16 @@ function createLODMaterial({
   // shader has no sampler left (see terrainSunShadow.js). The world's sun shadow
   // node picks it up by name. With the baked map it is ONE read per vertex;
   // without it (a caller that passes none) each vertex marches itself.
+  const sunVis = terrainShadow
+    ? terrainShadow.visibilityAt(hmUV, displacedY)
+    : terrainSunVisibility({
+        heightTexNode,
+        worldX, worldZ, worldY: displacedY,
+        worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT, baseStep: BASE_STEP,
+      });
+  // Outside the map the shade maps would read their clamped edge: full sun.
   mat.terrainSunShadowNode = varying(
-    terrainShadow
-      ? terrainShadow.visibilityAt(hmUV, displacedY)
-      : terrainSunVisibility({
-          heightTexNode,
-          worldX, worldZ, worldY: displacedY,
-          worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT, baseStep: BASE_STEP,
-        }),
+    farTerrain ? mix(sunVis, float(1), float(1).sub(hmInBounds).mul(farTerrain.u.uEnabled)) : sunVis,
     "vTerrainSun",
   );
 
@@ -439,6 +466,9 @@ function createLODMaterial({
         texture(heightTexNode, vec2(hmU, hmV.sub(texel))).r
           .sub(texture(heightTexNode, vec2(hmU, hmV.add(texel))).r),
       ));
+  // Outside the map: the far ground's normal (the baked map would read its
+  // clamped edge texel and light the mountains as a flat plate).
+  const litNormal = farTerrain ? normalize(mix(worldNormal, farNormalV, farOutV)) : worldNormal;
   const useSnow = !!snowShared && F.snow;
 
   // Cursor ring (boundary) + mask projection (filled shape preview).
@@ -551,7 +581,7 @@ function createLODMaterial({
   const surface = Fn(() => {
     // Unconditional shared ingredients.
     const wxzV    = vec2(worldX, worldZ).toVar();
-    const nrmGeom = worldNormal.toVar();
+    const nrmGeom = litNormal.toVar();
 
     const col   = vec3(base.col).toVar();
     const rough = float(base.rough).toVar();
@@ -724,7 +754,7 @@ export function createTerrainLOD(
   // retired 2026-09-13). The slot is kept so existing call sites line up.
   splatOverlay, snowShared = null, lakebed = null, _retiredGroundProc = null,
   features = {}, terrainNormals = null, riverSand = null, flowerTint = null,
-  terrainShadow = null, grassFar = null, uCursorFalloff = null,
+  terrainShadow = null, grassFar = null, uCursorFalloff = null, farTerrain = null,
 ) {
   const group = new THREE.Group();
 
@@ -748,7 +778,7 @@ export function createTerrainLOD(
   const matArgs = {
     heightTexNode, uCenterXZ: uCenter, uCursorUV, uCursorRadius,
     uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed,
-    terrainNormals, riverSand, flowerTint, terrainShadow, grassFar, uCursorFalloff,
+    terrainNormals, riverSand, flowerTint, terrainShadow, grassFar, uCursorFalloff, farTerrain,
   };
 
   const mesh = new THREE.Mesh(geometry, createLODMaterial({ ...matArgs, features }));
@@ -756,6 +786,23 @@ export function createTerrainLOD(
   mesh.receiveShadow = true;
   mesh.name = "TerrainClipmap";
   group.add(mesh);
+
+  // FAR RINGS (farTerrain.js): two more clipmap levels (steps ×16, ×32 of the
+  // base), reaching ~4 km round the camera, for a project whose terrain goes
+  // on past its heightmap. Their own mesh, sharing the material and the
+  // centre, shown only while far terrain is on — every other project keeps
+  // exactly the clipmap it had. The centre snap follows them (see update()).
+  const farParts = [];
+  for (let lod = LOD_LEVELS; lod < LOD_LEVELS + FAR_EXTRA_LEVELS; lod++) farParts.push(buildRingGrid(GRID_N, BASE_STEP * Math.pow(2, lod)));
+  const farGeometry = _mergeClipmapGeometries(farParts);
+  for (const g of farParts) g.dispose();
+  const farMesh = new THREE.Mesh(farGeometry, mesh.material);
+  farMesh.frustumCulled = false;
+  farMesh.receiveShadow = true;
+  farMesh.name = "TerrainClipmapFar";
+  farMesh.visible = false;
+  group.add(farMesh);
+  let farOn = false;
 
   // Kept for callers that iterated levels; the clipmap is one mesh now.
   const levels = [{ mesh, uCenter }];
@@ -797,7 +844,8 @@ export function createTerrainLOD(
    * own rounding is now simply redundant.
    */
   function update(center) {
-    const q = LOD_CENTRE_SNAP;
+    // With the far rings on, their coarsest step (every finer one divides it).
+    const q = farOn ? BASE_STEP * Math.pow(2, LOD_LEVELS + FAR_EXTRA_LEVELS - 1) : LOD_CENTRE_SNAP;
     // Snap first (see the note above), then step half a texel across so every
     // vertex lands on a heightmap texel (GRID_OFFSET). The offset is constant,
     // so snapping still holds: a jump of one step still puts each vertex where
@@ -805,7 +853,14 @@ export function createTerrainLOD(
     const cx = Math.round(center.x / q) * q + GRID_OFFSET;
     const cz = Math.round(center.z / q) * q + GRID_OFFSET;
     mesh.position.set(cx, 0, cz);
+    farMesh.position.set(cx, 0, cz);
     uCenter.value.set(cx, cz);
+  }
+
+  /** Far rings on/off (farTerrain.js): shown, and the centre snap coarsened. */
+  function setFarLevels(on) {
+    farOn = !!on;
+    farMesh.visible = farOn;
   }
 
   /**
@@ -862,6 +917,7 @@ export function createTerrainLOD(
     mat.maskNode = cut;
     mat.positionNode = pos;
     mat.needsUpdate = true;
+    farMesh.material = mat;
   }
   /** `on`: any hole exists; `cut`: one of them must be cut (painted, a tunnel). */
   function setHolesEnabled(on, { cut = true } = {}) {
@@ -877,12 +933,13 @@ export function createTerrainLOD(
     const next = Array.isArray(mat) ? mat[0] : mat;
     if (!next?.isMaterial) return false;
     mesh.material = next;
+    farMesh.material = next;
     applyHoles(next);
     return true;
   }
 
   return {
-    group, mesh, uCenter, update, levels, buildVariant, setVariant,
+    group, mesh, farMesh, uCenter, update, levels, buildVariant, setVariant, setFarLevels,
     setHolesEnabled,
     get holesEnabled() { return holeMode !== "none"; },
     /** "none" | "cut" | "sink" (see setHolesEnabled). */

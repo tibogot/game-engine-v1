@@ -38,11 +38,13 @@ import { createPerfState, tickPerf } from "../../v2/app/state/toolState.js";
 import { createWorldToolState } from "./state/worldState.js";
 import { createWorldEnvironment } from "./worldEnvironment.js";
 import { buildWorldPanel } from "../ui/buildWorldPanel.js";
+import { buildFarTerrainPanel } from "../ui/buildFarTerrainPanel.js";
 import { createHumanCharacter } from "../play/humanCharacter.js";
 import { HuskyOnFoot } from "../../v2/play/huskyOnFoot.js";
 import { FoxOnFoot } from "../play/foxOnFoot.js";
 import { SplatMap } from "../terrain/splatMap.js";
 import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
+import { createFarTerrain } from "../terrain/farTerrain.js";
 import { createTerrainNormalMap } from "../terrain/terrainNormalMap.js";
 import { TextureLibrary } from "../terrain/textureLibrary.js";
 import { ProceduralLayerBaker, procParamsFromPreset } from "../terrain/proceduralLayer.js";
@@ -622,6 +624,9 @@ export async function startV3App(opts = {}) {
     if (q.has("far")) splatFeatureOverrides.farBlend = q.get("far") === "1";
   }
 
+  // The ground past the heightmap (farTerrain.js): off until a project brings
+  // a far grid. Built first: the paint blend and the clipmap both read it.
+  const farTerrain = createFarTerrain();
   const splatOverlay = createSplatOverlay(
     textureLib.getLayerUniforms(),
     textureLib.albedoArrayTex,
@@ -632,6 +637,7 @@ export async function startV3App(opts = {}) {
     // Live slope+height for auto-paint, from the baked surface texture: one tap
     // instead of five, and it keeps the heightmap out of the fragment stage.
     terrainNormals,
+    farTerrain,
   );
 
   // ── Procedural Ground / Meadow: retired 2026-09-13 ────────────────────────
@@ -694,8 +700,25 @@ export async function startV3App(opts = {}) {
   // The cursor's fill shows the ACTIVE brush's falloff (see terrainLOD), kept
   // in step by syncCursorFalloff() in the frame loop.
   const uCursorFalloff = uniform(2);
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap, grassFarShading, uCursorFalloff);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap, grassFarShading, uCursorFalloff, farTerrain);
   scene.add(lod.group);
+
+  /**
+   * A project's FAR TERRAIN (farTerrain.js: the ground past the heightmap), or
+   * null for none — then the plain outside the map is flat, as it always was,
+   * and the clipmap keeps its usual rings.
+   */
+  function applyFarTerrain(ft) {
+    if (ft?.grid && ft.n) {
+      const { grid, ...params } = ft;
+      farTerrain.setGrid(grid, ft.n, ft.extent);
+      farTerrain.set({ ...params, enabled: params.enabled !== false });
+    } else {
+      farTerrain.setGrid(null);
+    }
+    lod.setFarLevels(farTerrain.enabled);
+  }
+
   /**
    * Terrain visibility — see the `terrain` block on the returned handle.
    *
@@ -1221,6 +1244,15 @@ export async function startV3App(opts = {}) {
       },
       ui: { refreshLiveSliders: () => {} },
     });
+    // The ground past the heightmap (farTerrain.js), in the World tab.
+    const worldTab = uiById("tab-world");
+    if (worldTab) {
+      buildFarTerrainPanel({
+        container: worldTab, farTerrain,
+        apply: (p) => { farTerrain.set(p); lod.setFarLevels(farTerrain.enabled); },
+        layerNames: () => textureLib.slots.map((s) => s.name),
+      });
+    }
     if (typeof lucide !== "undefined") lucide.createIcons();
   }
   buildWorldPanelUi();
@@ -8572,6 +8604,7 @@ export async function startV3App(opts = {}) {
       riverNetwork: riverV3System?.exportData() ?? null,
       tunnels:   tunnelSystem?.exportData() ?? null,
       paintLayers,
+      farTerrain: farTerrain.exportData(),
       paintBlend: {
         heightBlend: splatOverlay.uHeightBlend.value,
         contrast:    splatOverlay.uHeightContrast.value,
@@ -8842,6 +8875,8 @@ export async function startV3App(opts = {}) {
     // auto-paint rules. Awaits the boot-time default preload internally, so a
     // project opened during startup is not overwritten by it.
     // Absent in older files: leave the current values alone, as before.
+    // The ground past the heightmap: the project's far grid, or none (flat, as ever).
+    applyFarTerrain(d.farTerrain ?? null);
     if (d.paintBlend) {
       const hb = d.paintBlend.heightBlend, hc = d.paintBlend.contrast;
       if (Number.isFinite(hb)) splatOverlay.uHeightBlend.value = Math.min(1, Math.max(0, hb));
@@ -12360,6 +12395,17 @@ export async function startV3App(opts = {}) {
      * `{ baseColor: "#8a6c4c", lineColor: "#8a6c4c" }` (the "flat" style is
      * their mix). Runtime, not saved; never written to the editor's storage.
      */
+    /** The ground past the heightmap (farTerrain.js): params, enabled, grid. */
+    get farTerrain() { return farTerrain; },
+    /**
+     * Change the far terrain live: any of { enabled, stand, standStart,
+     * standEnd, blend, rule: {…} }, or `grid` + `n` (+ `extent`) for a new grid.
+     * Saved with the project.
+     */
+    setFarTerrain(p = {}) {
+      if (p.grid) applyFarTerrain({ ...farTerrain.params, ...p });
+      else { farTerrain.set(p); lod.setFarLevels(farTerrain.enabled); }
+    },
     setGroundBase(params = {}) {
       Object.assign(worldToolState.groundBase, params);
       applyGridConfig(params);

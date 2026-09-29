@@ -28,7 +28,7 @@
 import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { FOLIAGE_PRESETS } from "../v3/app/state/foliageScatterState.js";
 import { NAV_MAX_SLOPE_DEG } from "./lib/rtsMapMetrics.mjs";
-import { LAYOUT } from "../games/alg-rts/layout.js";
+import { LAYOUT, PLAY } from "../games/alg-rts/layout.js";
 
 const args = process.argv.slice(2);
 const FILE = args.includes("--file") ? args[args.indexOf("--file") + 1] : "public/levels/alg-aures.v3proj";
@@ -68,7 +68,13 @@ const land = [];
 for (const v of hm) if (v * TOP > 2) land.push(v * TOP);
 land.sort((a, b) => a - b);
 const pct = (p) => land[Math.min(land.length - 1, Math.floor(p * land.length))];
-const P30 = pct(0.3), P55 = pct(0.55), P70 = pct(0.7), P90 = pct(0.9);
+// PINNED (2026-09-29): the bands as measured on the battlefield's own ground
+// before the far mountains (tools/algMountains.mjs) raised the map's outer
+// ring to 200 m — from the histogram they would have moved, and every cedar
+// and oak inside the play box with them. `--histogram` to measure afresh.
+const PINNED = { p30: 9.791198186576366, p55: 19.77616921067238, p70: 31.71105682849884, p90: 63.24579566717148 };
+const fresh = args.includes("--histogram");
+const P30 = fresh ? pct(0.3) : PINNED.p30, P55 = fresh ? pct(0.55) : PINNED.p55, P70 = fresh ? pct(0.7) : PINNED.p70, P90 = fresh ? pct(0.9) : PINNED.p90;
 
 const lakes = man.lakes?.lakes ?? [];
 /** Distance from a lake's centre in units of its pool radius (sizeX / 3.2). */
@@ -85,6 +91,10 @@ const siteFade = (x, z) => {
 };
 // The map's faded border (tools/algShapeMap.mjs) is the plain: bare.
 const borderFade = (x, z) => smooth((Math.min(W / 2 - Math.abs(x), W / 2 - Math.abs(z)) - 150) / 60);
+// Outside the PLAY box (scenery, the far mountains): thinner, 40% of the
+// density from 80 m out — seen from the play camera as texture on the
+// slopes, not paid for as a forest nobody walks in.
+const playFade = (x, z) => { const d = Math.hypot(Math.max(PLAY.x0 - x, 0, x - PLAY.x1), Math.max(PLAY.z0 - z, 0, z - PLAY.z1)); return 1 - 0.6 * smooth((d - 20) / 60); };
 
 // ── Noise ───────────────────────────────────────────────────────────────────
 const hash = (x, y, s) => {
@@ -172,7 +182,7 @@ const trackAt = (x, z) => {
 const common = (x, z) => {
   const h = H(x, z), s = slopeDeg(x, z);
   if (s > NAV_MAX_SLOPE_DEG || wet(x, z) || wadiBed(x, z) > 0.25 || trackAt(x, z) > 0.2) return null;
-  const k = siteFade(x, z) * borderFade(x, z);
+  const k = siteFade(x, z) * borderFade(x, z) * playFade(x, z);
   return k > 0 ? { h, s, k } : null;
 };
 

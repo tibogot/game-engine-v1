@@ -173,7 +173,7 @@ function macroValueNoise(p) {
  */
 export function createSplatOverlay(
   layerSlots, albedoArrayTex, ormArrayTex, splatTex, heightTexNode = null, features = {},
-  terrainNormals = null,
+  terrainNormals = null, farTerrain = null,
 ) {
   if (layerSlots.length !== NUM_LAYERS) {
     throw new Error(`createSplatOverlay: need ${NUM_LAYERS} layer slots, got ${layerSlots.length}`);
@@ -484,6 +484,7 @@ export function createSplatOverlay(
       // all 0 ⇒ w0 = 1 ⇒ every output collapses to its base value. Verified
       // path by path below (linear, heightBlend, rough clamp, normal).
       let gateSum = uHasPaint.add(uAutoEnabled).add(uAutoFull);
+      if (farTerrain) gateSum = gateSum.add(farTerrain.u.uEnabled);
       if (F.solo) gateSum = gateSum.add(step(float(0), uSoloLayer));
 
       If(gateSum.greaterThan(0.0), () => {
@@ -570,6 +571,29 @@ export function createSplatOverlay(
           const uvI = uvFor(layerSlots[i]);
           layerAlbedos[i] = sampleLayer(i, albedoArrNode, triW, uvI);
           layerOrms[i]    = sampleLayer(i, ormArrNode, triW, uvI);
+        }
+
+        // FAR TERRAIN (farTerrain.js): outside the map there is no splatmap
+        // (its weights are zeroed there), so the far ground takes its layers
+        // from the far rule — flat / high / scree / cliff by the pixel's slope
+        // (the caller's normal: the far ground's own outside the map) and its
+        // height — into the chosen slots. The same textures, height blend and
+        // macro variation as the painted map, so the map runs on unbroken.
+        if (farTerrain && geomNormal !== null) {
+          const outF = float(1).sub(inBounds).mul(farTerrain.u.uEnabled).toVar();
+          If(outF.greaterThan(0.0), () => {
+            const fu = farTerrain.u;
+            const rw = farTerrain.ruleWeights(normalize(vec3(geomNormal)).y, positionWorld.y);
+            const on = (slotU, i) => step(abs(slotU.sub(float(i))), float(0.5));
+            let assigned = float(0);
+            for (let i = 0; i < NL; i++) {
+              const target = rw.flat.mul(on(fu.uFlatSlot, i)).add(rw.high.mul(on(fu.uHighSlot, i)))
+                .add(rw.scree.mul(on(fu.uScreeSlot, i))).add(rw.cliff.mul(on(fu.uCliffSlot, i)));
+              w[i + 1].assign(mix(w[i + 1], target, outF));
+              assigned = assigned.add(target);
+            }
+            w[0].assign(mix(w[0], max(float(0), float(1).sub(assigned)), outF));
+          });
         }
 
         // Auto-material redistributes w0 to the rule layers (uAutoEnabled), or

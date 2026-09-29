@@ -134,6 +134,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
 
   // The plain outside the heightmap is bare ground: soil, not the editor's white.
   app.setGroundBase?.({ baseColor: PLAIN_COLOR, lineColor: PLAIN_COLOR, ao: 0 });
+  // The far mountains past the map's edge come with the MAP now (its far
+  // terrain, drawn by the engine's terrain — tools/algMountains.mjs). ?farterrain=0
+  // turns them off to compare.
+  if (params.get("farterrain") === "0") app.setFarTerrain?.({ enabled: false });
 
   if (params.get("light") !== "flat") applyAuresLight(app);
 

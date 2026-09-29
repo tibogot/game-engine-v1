@@ -49,6 +49,9 @@
  *             A map from /textures is a URL; one imported from disk is an
  *             "asset:<hash>" reference to the assets section.
  *   paintBlend { heightBlend, contrast, macroStrength, macroWarmth, macroScale }
+ *   farTerrain { enabled, n, extent, stand, standStart, standEnd, blend, rule }
+ *              + blob "farHeight" (Float32 n×n, map metres): the ground past
+ *              the heightmap (v3/terrain/farTerrain.js), or null
  *             how painted layers mix at their edges, plus large-scale variation.
  *             Was saved nowhere, so a game never got the edge the editor showed.
  *   spawn     { x, z, yaw }                 player start; null when unplaced
@@ -112,6 +115,7 @@ export async function encodeProjectFile({
   waterfalls,           // waterfallSystem.exportData(): { look, falls } or null
   paintLayers,         // textureLibrary.exportData() — slot metadata, no pixels
   paintBlend,           // { heightBlend, contrast } — layer edge blending
+  farTerrain,           // farTerrain.exportData(): { manifest, blob } or null
   splatHoles,           // true: slice-1 alpha is terrain holes (see manifest)
   tunnels,              // tunnelSystem.exportData() or null
   environment,          // { worldOcean } — the world LOOK; see the manifest note
@@ -148,6 +152,7 @@ export async function encodeProjectFile({
     pending.push({ name, bytes: new Uint8Array(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength) });
   };
   addBlob("heightmap", heightmap);
+  addBlob("farHeight", farTerrain?.blob ?? null);
   addBlob("splat", splat);
   addBlob("snow", snow);
   addBlob("grassDensity", grassDensity);
@@ -196,6 +201,7 @@ export async function encodeProjectFile({
     riverNetwork: riverNetwork ?? null,
     paintLayers: paintLayers ?? null,
     paintBlend: paintBlend ?? null,
+    farTerrain: farTerrain?.manifest ?? null,
     splatHoles: splatHoles ?? false,
     tunnels:  tunnels ?? null,
     environment: environment ?? null,
@@ -282,6 +288,10 @@ export async function decodeProjectFile(buffer) {
     riverNetwork: manifest.riverNetwork ?? null,
     paintLayers: manifest.paintLayers ?? null,
     paintBlend: manifest.paintBlend ?? null,
+    // The ground past the heightmap: its params and grid (Float32, copied for alignment).
+    farTerrain: manifest.farTerrain && blob("farHeight")
+      ? { ...manifest.farTerrain, grid: new Float32Array(blob("farHeight").slice().buffer) }
+      : null,
     splatHoles: manifest.splatHoles === true,
     tunnels:   manifest.tunnels ?? null,
     environment: manifest.environment ?? null,
