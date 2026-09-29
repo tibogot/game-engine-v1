@@ -12,7 +12,7 @@ Keep this file current: tick things off here, add new asks here.
 
 Pipeline: `public/models/soldiers/` (the Mixamo FBX rig + clips, and unrigged
 GLB soldiers) → `node tools/packMixamo.mjs` → `soldiers.glb` (one skeleton,
-clips once, every soldier skinned to it) → judged in `v3/soldier-lab.html`.
+clips once, every soldier skinned to it) → judged in `games/shared-rts/soldier-lab.html`.
 Not wired into either game yet.
 
 - [x] Pack tool + lab. soldier1 (the Mixamo rig) and soldier3 (your GLB, given
@@ -29,6 +29,72 @@ Not wired into either game yet.
       **you**: judge in the lab on the rifle clips, set the grip trim. Then:
       merge the weapon into the crowd mesh (skinned to the weapon bone), and
       if the procedural guns don't convince, you find models online.
+- [x] Clips by ROLE: the pack tool names Mixamo titles (rifle_idle,
+      rifle_aim_idle, rifle_prone_idle, …; table in tools/packMixamo.mjs) and
+      decides the rifle hold from the MOTION (left hand on the rifle or not),
+      so you drop files in with Mixamo's names. Firing/aiming clips are
+      shouldered (butt in the shoulder pocket, right arm IK'd onto the grip).
+- [~] **Faction looks v1** (games/shared-rts/soldierLooks.js, in the lab):
+      uniform recolour by hue in the shader (appelé olive, para léopard camo,
+      ALN khaki), helmet removed (its own UV region; a bare head with hair
+      under it), low-poly headgear on the Head bone (bush hat, casquette
+      Bigeard, red beret, chèche, ALN field cap). **you**: judge colours and
+      hats — the colours are a first pass from memory, check against photos.
+- [x] Looks v2 (2026-09-29, checked in Chrome): helmet found as mesh PIECES
+      (soldier1's nose, eyes and hands reach into the helmet's UV region — the
+      appelé's olive nose), chin straps + soldier3's goggles removed with the
+      helmet, hats refitted to the measured head, léopard camo in the shader
+      on the smock AND the Bigeard cap, silver winged-dagger badge on the
+      beret, per-soldier variation (cloth fade, skin tone, camo offset) and
+      SECTION looks that mix headgear (appelé: helmets + bush hats; para:
+      Bigeard caps + berets).
+- Decisions (you, 2026-09-29): alg-rts French = **soldier1 only** for now,
+  varied by looks; soldier3 stays for the Vietnam game. Of the pack's other
+  bodies: **medic** = the medic unit later (and a 2nd French silhouette if
+  squads look too uniform — its white armband is painted in, needs a mask);
+  **headband + boonie** = the two ALN bodies; **crew** = vehicle crews later.
+- [x] Kit + insignia (2026-09-29, in the lab, checked in Chrome): KIT pieces
+      on bones in soldierLooks.js — pack with blanket roll (Spine2), backpack
+      radio with a 1.3 m whip antenna (Spine2; one radioman per section, index
+      `radioman`), belt with ammo pouches + canteen (Hips). Looks: "Appelé,
+      radio", "Légion para" (green beret, gilt seven-flame grenade).
+      Modelled around soldier1's MEASURED torso — another body needs its own
+      numbers.
+- [x] French extras (2026-09-29, checked in Chrome): per-soldier EXTRAS
+      rolled per look (sunglasses — mostly paras —, mustache, cigarette, sand
+      neck scarf, chest grenades) and section ROLES by index: 0 leader (MAT 49
+      + binoculars), 1 radioman, 2 FM 24/29 gunner (new procedural LMG, top
+      magazine + bipod). soldierLooks.js loadout(); the lab's "All extras"
+      switch shows every piece on one man.
+- [x] Aviator sunglasses redone (2026-09-30): big teardrop lenses in a gold
+      wire rim, double bridge, lenses turned back to follow the face.
+- [x] **ALN v1** (2026-09-30, checked in Chrome) on aln1 (the headband body,
+      fits the rig: median 0.8 cm). "ALN section": chèches (white / sand /
+      pulled over the face), field caps, bare heads with the body's own
+      headband; beards (with mustache) and mustaches; one or two crossed
+      bandoliers with brass cartridges; musette bag; cloth per man from khaki
+      drill to civilian brown; North African skin range; leader MAT 49, LMG
+      FM 24/29, rest MAS 36. Fixes on the way: helmet detection needs a
+      helmet-sized piece (aln1's hair tufts share the helmet's UV area), face
+      pieces shift by each body's crown offset (aln1's head sits 4 cm higher),
+      clothRef per look (aln1's cloth is far darker).
+- [x] ALN v2 (2026-09-30, checked in Chrome): chèche wound in slanted turns
+      over a shaded under-layer, a long loose end over the shoulder; aln2 (the
+      boonie body, fits: median 0.8 cm) mixed into the section with aln1
+      (`bodies` per look); "own headwear" variant keeps aln1's headband / aln2's
+      boonie. HEADWEAR rule (soldierLooks.js): helmet pieces, thin straps and
+      cords, goggles, and anything sticking out of the bare head — removes
+      aln2's whole boonie (202 tris), leaves soldier1/3 unchanged.
+- [x] Blocky cloth (2026-09-30): the pack paints mud as pixel blocks + ETC1S
+      blocks; the recolour now classifies and shades repainted cloth from a
+      softer mip (bias 1.5) — lightened ALN cloth no longer doubles the blocks.
+      Untouched texels keep the pack's look (your call: keep it).
+- [ ] ALN next: a kachabia/burnous cloak (test the leg stretch); a
+      Mauser/Lee-Enfield for the weapon mix; the FLN flag for a standard-bearer.
+- [ ] Faces: the pack's faces stay cartoon-American — for close-ups a North
+      African head (AI-generated or reworked in Blender) is the real fix. Not
+      stars (generals only) or medals (parade dress); rank goes in the UI plus
+      leader kit (MAT 49, binoculars).
 - [ ] **Soldiers that fit French Algeria** — the current ones are Vietnam-war
       US soldiers (stand-ins). Find/modify: French appelés (M1947 or
       Satin 300 fatigues, bush hat / beret / M51 helmet, MAS 49/56), paras

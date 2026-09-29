@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Soldiers (Mixamo pack)</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #0d1013; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10; width: 290px;
+             max-height: calc(100vh - 20px); overflow-y: auto;
+             background: rgba(12,16,20,0.88); border: 1px solid #2a343c;
+             border-radius: 8px; padding: 12px 14px; }
+      #hud h1 { margin: 0 0 8px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: #8fb8d8; }
+      h2 { margin: 10px 0 5px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: #7f8e99; font-weight: 600; }
+      .row { display: flex; justify-content: space-between; gap: 14px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .btns { display: flex; flex-wrap: wrap; gap: 4px; }
+      .btns button { flex: 1 1 auto; padding: 5px 7px; font-size: 11px; cursor: pointer;
+             background: #1a222a; color: #cfd8de; border: 1px solid #2f3b45; border-radius: 5px; }
+      .btns button.on { background: #2b6cb0; border-color: #4a9ae0; color: #fff; }
+      .clip { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; width: 100%; text-align: left; }
+      .clip small { color: #9fb0bc; font-variant-numeric: tabular-nums; }
+      .btns button.on .clip small { color: #dbeafe; }
+      label { display: flex; align-items: center; gap: 8px; margin: 3px 0; cursor: pointer; }
+      input[type=range] { flex: 1; }
+      .note { margin-top: 9px; padding-top: 8px; border-top: 1px solid #2a343c; color: #8b99a4; font-size: 11px; }
+      #err { color: #ff8c8c; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Soldier Lab</h1>
+      <div class="row"><span>File</span><b id="s-file">—</b></div>
+      <div class="row"><span>Skeleton</span><b id="s-bones">—</b></div>
+
+      <h2>Soldier</h2>
+      <div class="btns" id="soldiers"></div>
+      <div class="row" style="margin-top:4px"><span>Triangles / verts</span><b id="s-geo">—</b></div>
+      <div class="row"><span>Colour map</span><b id="s-tex">—</b></div>
+
+      <h2>Look</h2>
+      <div class="btns" id="looks"></div>
+      <div class="row" style="margin-top:4px"><span id="look-note" style="color:#9fb0bc">—</span></div>
+      <label><input id="allExtras" type="checkbox" /> All extras (inspect: sunglasses, mustache, cigarette, scarf, grenades)</label>
+
+      <h2>Weapon</h2>
+      <div class="btns" id="weapons"></div>
+      <div class="row" style="margin-top:4px"><span id="w-name">—</span><b id="w-tris">—</b></div>
+      <label>Forward <input id="t-fwd" type="range" min="-10" max="10" step="0.5" value="0" /> <b id="t-fwd-v">0</b></label>
+      <label>Up <input id="t-up" type="range" min="-10" max="10" step="0.5" value="0" /> <b id="t-up-v">0</b></label>
+      <label>Side <input id="t-side" type="range" min="-10" max="10" step="0.5" value="0" /> <b id="t-side-v">0</b></label>
+      <label>Pitch <input id="t-pitch" type="range" min="-30" max="30" step="1" value="0" /> <b id="t-pitch-v">0</b></label>
+      <label>Roll <input id="t-roll" type="range" min="-45" max="45" step="1" value="0" /> <b id="t-roll-v">0</b></label>
+      <div class="row"><span>Grip trim (cm, °)</span><b id="t-out">0, 0, 0 / 0, 0</b></div>
+
+      <h2>Clips</h2>
+      <div class="btns" id="clips"></div>
+      <label>Speed <input id="speed" type="range" min="0" max="2" step="0.05" value="1" /> <b id="speed-v">1.00</b></label>
+      <label><input id="treadmill" type="checkbox" checked /> Treadmill (ground moves at the clip's measured speed)</label>
+
+      <h2>View</h2>
+      <div class="btns" id="views">
+        <button data-view="close" class="on">Close</button>
+        <button data-view="rts">RTS camera</button>
+      </div>
+      <div class="btns" id="counts" style="margin-top:4px">
+        <button data-count="1" class="on">1 each</button>
+        <button data-count="12">Squad of 12</button>
+      </div>
+
+      <h2>Debug</h2>
+      <label><input id="weights" type="checkbox" /> Skin weights (colour = strongest bone)</label>
+      <label><input id="wire" type="checkbox" /> Wireframe</label>
+      <label><input id="bones" type="checkbox" /> Skeleton</label>
+
+      <div class="note">
+        Built by <code>node tools/packMixamo.mjs</code> from
+        <code>public/models/soldiers/</code>: the FBX rig + clips, and every GLB soldier
+        given the rig's skeleton. Clip names are the FBX file names.
+        <b>Weapon</b>: hung on the pack's weapon bone. Firing / aiming clips are
+        SHOULDERED (butt in the shoulder pocket, forestock in the left palm, the
+        right arm bent onto the grip); carry clips hold it hand to hand. Judge it on
+        the RIFLE clips (the unarmed ones swing it). The trim sliders nudge the grip; tell me the numbers you like.
+        <b>Skin weights</b>: a patch of the wrong colour (a sleeve coloured like the
+        torso, a pouch like the thigh) is where a transferred soldier will stretch.
+        The treadmill speed is measured from the clip (the planted foot slides back at
+        exactly the ground speed), so it is the unit speed that walks without sliding.
+      </div>
+      <div class="note" id="err"></div>
+    </div>
+
+    <script type="module">
+      // ── Soldier lab ─────────────────────────────────────────────────────────
+      // Checks the packed soldiers (tools/packMixamo.mjs) before they go near a
+      // game: does every soldier play every clip on the ONE shared skeleton, do
+      // the textures sit right, did the skin-weight transfer put each patch of a
+      // GLB soldier on the right bone, and what ground speed does each moving
+      // clip need so the feet don't slide.
+      //
+      // Loads with the games' shared GLTF loader, so KTX2 textures decode here
+      // exactly as they will in the game. One AnimationMixer per soldier — the
+      // game draws soldiers through the compute-skinned crowd instead; this page
+      // judges the ASSET, not crowd performance (that's crowd-lab.html).
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
+      import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
+      import { WEAPONS, weaponMaterial } from "./procWeapons.js";
+      import {
+        HEADGEAR, KIT, LOOKS, headgearMaterial, loadout, lookMaterial, markHelmet, measureCrown, neckPlane,
+        stripHelmet, variationNode,
+      } from "./soldierLooks.js";
+
+      const URL_GLB = "/models/soldiers/soldiers.glb";
+      const FADE = 0.25; // s crossfade between clips
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
+      addEventListener("error", (e) => showErr(e.error ?? e.message));
+      addEventListener("unhandledrejection", (e) => showErr(e.reason));
+
+      // ── Renderer / scene ───────────────────────────────────────────────────
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      document.body.appendChild(renderer.domElement);
+      await renderer.init();
+      initGlbLoaderRenderer(renderer); // KTX2 transcoder, same as the games
+
+      const scene = new THREE.Scene();
+      const SKY = new THREE.Color(0xb7c6d2);
+      scene.background = SKY;
+      scene.fog = new THREE.Fog(SKY, 60, 200);
+
+      const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 500);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+
+      scene.add(new THREE.HemisphereLight(0xdde8f5, 0x6b5a40, 1.3));
+      const sun = new THREE.DirectionalLight(0xfff1dd, 3.0);
+      sun.position.set(5, 9, 4);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.bias = -0.0004;
+      sun.shadow.normalBias = 0.02;
+      Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 0.1, far: 40 });
+      scene.add(sun, sun.target);
+
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(400, 400),
+        new THREE.MeshStandardMaterial({ color: 0x9c8f76, roughness: 1 }),
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+      // 1 m grid: it scrolls under the soldiers for the treadmill.
+      const grid = new THREE.GridHelper(120, 120, 0x5d5446, 0x7d7260);
+      grid.position.y = 0.002;
+      scene.add(grid);
+
+      // ── Load ───────────────────────────────────────────────────────────────
+      const bytes = await fetch(URL_GLB).then((r) => {
+        if (!r.ok) throw new Error(`${URL_GLB}: ${r.status} — run node tools/packMixamo.mjs first`);
+        return r.arrayBuffer();
+      });
+      const gltf = await getSharedGltfLoader().parseAsync(bytes, "/models/soldiers/");
+      const template = gltf.scene;
+      const clips = gltf.animations;
+
+      const kinds = []; // the soldier meshes, by name, in file order
+      template.traverse((o) => {
+        if (o.isSkinnedMesh) kinds.push(o.name);
+        if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; }
+      });
+      const meshOf = (root, name) => {
+        let m = null;
+        root.traverse((o) => { if (o.isSkinnedMesh && o.name === name) m = o; });
+        return m;
+      };
+
+      $("s-file").textContent = `${(bytes.byteLength / 1e6).toFixed(2)} MB`;
+      $("s-bones").textContent = `${meshOf(template, kinds[0]).skeleton.bones.length} bones, shared`;
+
+      // Skin-weight view: colour every vertex by its STRONGEST bone, one hue per
+      // bone (golden-ratio spread so neighbours differ). The rig and the
+      // transferred soldiers use the same palette, so they can be compared.
+      const weightMats = new Map();
+      for (const name of kinds) {
+        const g = meshOf(template, name).geometry;
+        const si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
+        const col = new Float32Array(si.count * 3), c = new THREE.Color();
+        for (let i = 0; i < si.count; i++) {
+          let best = 0;
+          for (let j = 1; j < 4; j++) if (sw.getComponent(i, j) > sw.getComponent(i, best)) best = j;
+          c.setHSL((si.getComponent(i, best) * 0.618) % 1, 0.75, 0.55);
+          col.set([c.r, c.g, c.b], i * 3);
+        }
+        g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+        weightMats.set(name, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      }
+      const baseMats = new Map(kinds.map((n) => [n, meshOf(template, n).material]));
+
+      // ── Ground speed per clip ──────────────────────────────────────────────
+      // Sample the clip on a spare copy; at each step the LOWER foot is the
+      // planted one, and its horizontal speed is the ground speed. Median over
+      // the cycle, so the push-off/heel-strike frames don't skew it.
+      function measureGroundSpeed(clip) {
+        const probe = cloneSkinned(template);
+        const mixer = new THREE.AnimationMixer(probe);
+        mixer.clipAction(clip).play();
+        const feet = ["LeftToeBase", "RightToeBase"].map((n) => {
+          let b = null;
+          probe.traverse((o) => { if (o.isBone && o.name.endsWith(n)) b = o; });
+          return b;
+        });
+        if (!feet[0] || !feet[1]) return 0;
+        const N = 60, dt = clip.duration / N, v = new THREE.Vector3(), speeds = [];
+        let last = null;
+        for (let i = 0; i <= N; i++) {
+          mixer.setTime(i * dt);
+          probe.updateMatrixWorld(true);
+          const p = feet.map((f) => f.getWorldPosition(new THREE.Vector3()));
+          const low = p[0].y < p[1].y ? 0 : 1;
+          if (last && last.low === low) {
+            v.subVectors(p[low], last.p[low]);
+            speeds.push(Math.hypot(v.x, v.z) / dt);
+          }
+          last = { p, low };
+        }
+        speeds.sort((a, b) => a - b);
+        return speeds[speeds.length >> 1] ?? 0;
+      }
+      const groundSpeed = new Map(clips.map((c) => [c, measureGroundSpeed(c)]));
+
+      // ── Soldiers ───────────────────────────────────────────────────────────
+      let soldiers = []; // { root, mixer, action, skel, weapon }
+      let current = clips.find((c) => /firing/i.test(c.name)) ?? clips.find((c) => /rifle.?idle/i.test(c.name))
+        ?? clips.find((c) => /idle/i.test(c.name)) ?? clips[0];
+
+      // Weapons hang on the pack's weapon bone (metres, +Z to the muzzle).
+      const WEAPON_BONE = "mixamorigWeapon";
+      const hasWeaponBone = !!template.getObjectByName(WEAPON_BONE);
+      const weaponMat = weaponMaterial();
+      const weaponGeo = new Map(); // key → geometry, built once
+      let weaponKey = hasWeaponBone ? "mas49_56" : "none";
+      let weaponManual = false; // true once a weapon button was clicked: everyone carries it
+      const trim = { fwd: 0, up: 0, side: 0, pitch: 0, roll: 0 };
+      function applyTrim(m) {
+        m.position.set(trim.side / 100, trim.up / 100, trim.fwd / 100);
+        m.rotation.set(THREE.MathUtils.degToRad(-trim.pitch), 0, THREE.MathUtils.degToRad(trim.roll));
+      }
+      // Faction looks (soldierLooks.js): uniform recolour in the shader, helmet
+      // off (index-only geometry, same skeleton), headgear on the Head bone.
+      let lookKey = "us";
+      template.updateMatrixWorld(true);
+      const headRest = template.getObjectByName("mixamorigHead").matrixWorld.clone();
+      const crowns = new Map(kinds.map((n) => [n, measureCrown(meshOf(template, n))]));
+      const necks = new Map(kinds.map((n) => [n, neckPlane(meshOf(template, n))]));
+      for (const n of kinds) markHelmet(meshOf(template, n)); // the helmet recolour reads it
+      const lookMats = new Map();   // "kind|look" → material
+      const bareGeo = new Map();    // kind → geometry without the helmet
+      const hatGeo = new Map();     // look → headgear geometry
+      const hatMats = new Map();    // look|variant → headgear material (a camo look's caps wear the camo)
+      const vary = variationNode(); // per-soldier fade + skin tone, from each mesh's userData.vary
+      const kitGeo = new Map();     // kit piece → geometry
+      const kitMat = headgearMaterial();
+      const lookMat = (name) => {
+        const k = `${name}|${lookKey}`;
+        if (!lookMats.has(k)) lookMats.set(k, lookMaterial(baseMats.get(name), LOOKS[lookKey], lookKey, necks.get(name), vary));
+        return lookMats.get(k);
+      };
+      // Stable per-soldier randoms (the same squad every respawn).
+      const rand = (i) => { const x = Math.sin(i * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+      /** Dress soldier i (look variant, helmet, kit, extras, headgear); returns his weapon key. */
+      function dress(root, name, i) {
+        const load = loadout(LOOKS[lookKey], i, (salt) => rand(i * 7 + salt), $("allExtras").checked);
+        const look = load.look;
+        // A lone soldier shows the look as defined; a squad varies man to man.
+        const v = count > 1 ? new THREE.Vector3(rand(i * 7 + 2), rand(i * 7 + 3), rand(i * 7 + 4)) : null;
+        root.traverse((o) => { if (o.isSkinnedMesh) o.userData.vary = v; });
+        if (!look.helmet) {
+          const m = meshOf(root, name);
+          if (!bareGeo.has(name)) bareGeo.set(name, stripHelmet(meshOf(template, name)));
+          m.geometry = bareGeo.get(name);
+        }
+        // Kit: modelled in world metres around the soldier at rest → into its bone's frame.
+        for (const k of load.kit) {
+          const def = KIT[k];
+          if (!kitGeo.has(k)) kitGeo.set(k, def.build());
+          const piece = new THREE.Mesh(kitGeo.get(k), kitMat);
+          piece.castShadow = true;
+          const bone = `mixamorig${def.bone}`;
+          // Face/neck pieces were placed on soldier1's face; another body's head
+          // can sit higher (aln1's by ~4 cm), so shift them by its crown offset.
+          const shift = (def.bone === "Head" || def.bone === "Neck") && crowns.has("soldier1")
+            ? crowns.get(name).clone().sub(crowns.get("soldier1")) : new THREE.Vector3();
+          template.getObjectByName(bone).matrixWorld.clone().invert()
+            .multiply(new THREE.Matrix4().makeTranslation(shift))
+            .decompose(piece.position, piece.quaternion, piece.scale);
+          root.getObjectByName(bone).add(piece);
+        }
+        // Weapon: his role's / look's, unless one was picked by hand for everyone.
+        const weapon = weaponManual ? weaponKey : (load.weapon ?? weaponKey);
+        if (!look.headgear) return weapon;
+        const hk = `${lookKey}|${look.headgear}|${look.hatColor ?? ""}`;
+        if (!hatGeo.has(hk)) hatGeo.set(hk, HEADGEAR[look.headgear](look));
+        if (!hatMats.has(hk)) hatMats.set(hk, headgearMaterial(look));
+        const hat = new THREE.Mesh(hatGeo.get(hk), hatMats.get(hk));
+        hat.castShadow = true;
+        // Modelled from the crown in metres: place it there, in the head bone's frame.
+        new THREE.Matrix4().copy(headRest).invert()
+          .multiply(new THREE.Matrix4().makeTranslation(crowns.get(name)))
+          .decompose(hat.position, hat.quaternion, hat.scale);
+        root.getObjectByName("mixamorigHead").add(hat);
+        return weapon;
+      }
+
+      function arm(root, key) {
+        if (!key || key === "none" || !hasWeaponBone) return null;
+        if (!weaponGeo.has(key)) weaponGeo.set(key, WEAPONS[key].build());
+        const m = new THREE.Mesh(weaponGeo.get(key), weaponMat);
+        m.castShadow = true;
+        applyTrim(m);
+        root.getObjectByName(WEAPON_BONE).add(m);
+        return m;
+      }
+      // A soldier name, or "all". soldier1 is the alg-rts body (soldier3 stays
+      // for the Vietnam game).
+      let kind = kinds.includes("soldier1") ? "soldier1" : "all";
+      let count = 1;
+      let speed = 1;
+
+      function spawn() {
+        for (const s of soldiers) { scene.remove(s.root, s.skel); s.mixer.stopAllAction(); }
+        soldiers = [];
+        // "All" = the look's own bodies if it names them (the ALN mixes aln1 +
+        // aln2 in a squad), else every body in the pack.
+        const bodies = (LOOKS[lookKey].bodies ?? []).filter((b) => kinds.includes(b));
+        const shown = kind === "all" ? (bodies.length ? bodies : kinds) : [kind];
+        const n = count === 1 ? shown.length : 12;
+        for (let i = 0; i < n; i++) {
+          const root = cloneSkinned(template);
+          // Every clone carries every soldier mesh on the one skeleton; show one.
+          const name = shown[i % shown.length];
+          root.traverse((o) => { if (o.isSkinnedMesh) o.visible = o.name === name; });
+          const weapon = dress(root, name, i);
+          if (count === 1) {
+            root.position.set((i - (n - 1) / 2) * 1.3, 0, 0); // side by side
+          } else {
+            const col = i % 6, rank = Math.floor(i / 6); // loose two-rank file
+            root.position.set((col - 2.5) * 1.6 + (rank % 2) * 0.8, 0, -rank * 2.2);
+          }
+          scene.add(root);
+          const mixer = new THREE.AnimationMixer(root);
+          const action = mixer.clipAction(current).play();
+          action.time = count > 1 ? Math.random() * current.duration : 0; // no lockstep squad
+          const skel = new THREE.SkeletonHelper(root);
+          skel.visible = $("bones").checked;
+          scene.add(skel);
+          soldiers.push({ root, mixer, action, skel, weapon: arm(root, weapon) });
+        }
+        applyLook();
+        showStats();
+      }
+
+      function play(clip) {
+        if (clip === current) return;
+        for (const s of soldiers) {
+          const next = s.mixer.clipAction(clip);
+          next.reset().play();
+          next.time = count > 1 ? Math.random() * clip.duration : 0;
+          s.action.crossFadeTo(next, FADE, false);
+          s.action = next;
+        }
+        current = clip;
+        markClips();
+      }
+
+      function showStats() {
+        const names = kind === "all" ? kinds : [kind];
+        $("s-geo").textContent = names.map((n) => {
+          const g = meshOf(template, n).geometry;
+          return `${g.index.count / 3} / ${g.attributes.position.count}`;
+        }).join(" · ");
+        $("s-tex").textContent = names.map((n) => {
+          const t = baseMats.get(n).map;
+          if (!t) return "none";
+          return `${t.image?.width ?? "?"}² ${t.isCompressedTexture ? "KTX2" : "PNG"}`;
+        }).join(" · ");
+      }
+
+      // ── HUD ────────────────────────────────────────────────────────────────
+      for (const [key, look] of Object.entries(LOOKS)) {
+        const b = document.createElement("button");
+        b.textContent = look.label;
+        b.dataset.look = key;
+        b.onclick = () => pickLook(key);
+        $("looks").appendChild(b);
+      }
+      $("allExtras").onchange = () => spawn();
+      function pickLook(key) {
+        lookKey = key;
+        // A look made for other bodies (the ALN's) switches to them.
+        const bodies = LOOKS[key].bodies;
+        if (bodies && kind !== "all" && !bodies.includes(kind)) { kind = "all"; markKinds(); }
+        if (LOOKS[key].weapon && hasWeaponBone) weaponKey = LOOKS[key].weapon;
+        weaponManual = false;
+        markLooks(); markWeapons(); spawn();
+      }
+      function markLooks() {
+        for (const b of $("looks").children) b.classList.toggle("on", b.dataset.look === lookKey);
+        $("look-note").textContent = LOOKS[lookKey].note ?? "the soldiers as downloaded";
+      }
+      markLooks();
+
+      for (const key of ["none", ...Object.keys(WEAPONS)]) {
+        const b = document.createElement("button");
+        b.textContent = key === "none" ? "None" : WEAPONS[key].label;
+        b.dataset.weapon = key;
+        b.disabled = !hasWeaponBone && key !== "none";
+        b.onclick = () => { weaponKey = key; weaponManual = true; markWeapons(); spawn(); };
+        $("weapons").appendChild(b);
+      }
+      function markWeapons() {
+        for (const b of $("weapons").children) b.classList.toggle("on", b.dataset.weapon === weaponKey);
+        const w = WEAPONS[weaponKey];
+        $("w-name").textContent = !hasWeaponBone ? "no weapon bone — pack a rifle clip" : w ? w.faction : "—";
+        if (w && !weaponGeo.has(weaponKey)) weaponGeo.set(weaponKey, w.build());
+        $("w-tris").textContent = w ? `${weaponGeo.get(weaponKey).attributes.position.count / 3} tris` : "—";
+      }
+      markWeapons();
+      for (const k of Object.keys(trim)) {
+        $(`t-${k}`).oninput = (e) => {
+          trim[k] = +e.target.value;
+          $(`t-${k}-v`).textContent = trim[k];
+          $("t-out").textContent = `${trim.fwd}, ${trim.up}, ${trim.side} / ${trim.pitch}, ${trim.roll}`;
+          for (const s of soldiers) if (s.weapon) applyTrim(s.weapon);
+        };
+      }
+
+      for (const name of [...kinds, "all"]) {
+        const b = document.createElement("button");
+        b.textContent = name === "all" ? "All" : name;
+        b.dataset.kind = name;
+        b.onclick = () => { kind = name; markKinds(); spawn(); };
+        $("soldiers").appendChild(b);
+      }
+      function markKinds() {
+        for (const b of $("soldiers").children) b.classList.toggle("on", b.dataset.kind === kind);
+      }
+      markKinds();
+
+      for (const clip of clips) {
+        const b = document.createElement("button");
+        const gs = groundSpeed.get(clip);
+        b.innerHTML = `<span class="clip"><span>${clip.name}</span><small>${clip.duration.toFixed(2)} s</small>` +
+          `<small>${gs > 0.3 ? `${gs.toFixed(2)} m/s` : "in place"}</small><small></small></span>`;
+        b.onclick = () => play(clip);
+        b.dataset.clip = clip.name;
+        $("clips").appendChild(b);
+      }
+      function markClips() {
+        for (const b of $("clips").children) b.classList.toggle("on", b.dataset.clip === current.name);
+      }
+      markClips();
+
+      $("speed").oninput = (e) => { speed = +e.target.value; $("speed-v").textContent = speed.toFixed(2); };
+
+      const VIEWS = {
+        // Close: full body, a bit above the waist.
+        close: { pos: [2.6, 1.6, 4.4], target: [0, 0.95, 0], fov: 35 },
+        // RTS: roughly the games' default zoom — high, ~50° down, 35 m out.
+        rts: { pos: [14, 27, 22], target: [0, 0.5, -1], fov: 35 },
+      };
+      function setView(name) {
+        const v = VIEWS[name];
+        camera.position.set(...v.pos);
+        controls.target.set(...v.target);
+        camera.fov = v.fov;
+        camera.updateProjectionMatrix();
+        for (const b of $("views").children) b.classList.toggle("on", b.dataset.view === name);
+      }
+      $("views").onclick = (e) => { const v = e.target.closest("button")?.dataset.view; if (v) setView(v); };
+      $("counts").onclick = (e) => {
+        const n = +e.target.closest("button")?.dataset.count;
+        if (!n) return;
+        count = n;
+        for (const b of $("counts").children) b.classList.toggle("on", +b.dataset.count === n);
+        spawn();
+      };
+
+      // Clones share the template's materials (SkeletonUtils.clone keeps them),
+      // so flipping the shared ones hits every soldier.
+      function applyLook() {
+        const weights = $("weights").checked, wire = $("wire").checked;
+        const mats = [weaponMat, kitMat, ...hatMats.values(), ...kinds.flatMap((n) => [lookMat(n), weightMats.get(n)])];
+        for (const m of mats) {
+          if (m.wireframe !== wire) { m.wireframe = wire; m.needsUpdate = true; }
+        }
+        for (const s of soldiers) {
+          s.root.traverse((o) => {
+            if (o.isSkinnedMesh) o.material = weights ? weightMats.get(o.name) : lookMat(o.name);
+          });
+          s.skel.visible = $("bones").checked;
+        }
+      }
+      for (const id of ["weights", "wire", "bones"]) $(id).onchange = applyLook;
+
+      spawn();
+      setView("close");
+
+      // Console hooks for scripted checks (look, clip, camera).
+      window.__LAB = {
+        pickLook, play: (name) => play(clips.find((c) => c.name === name)), setView,
+        camera, controls, pause: (on) => { speed = on ? 0 : 1; },
+      };
+
+      // ── Loop ───────────────────────────────────────────────────────────────
+      const clock = new THREE.Clock();
+      renderer.setAnimationLoop(() => {
+        const dt = Math.min(clock.getDelta(), 0.1) * speed;
+        for (const s of soldiers) s.mixer.update(dt);
+        // Treadmill: the soldiers face +Z, so the ground runs toward -Z.
+        if ($("treadmill").checked) {
+          grid.position.z = (grid.position.z - groundSpeed.get(current) * dt) % 1;
+        }
+        controls.update();
+        renderer.render(scene, camera);
+      });
+
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>
