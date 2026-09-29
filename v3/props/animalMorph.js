@@ -2951,6 +2951,51 @@ function buildCamelMorph({ B, W, fwd, right, G, tipOf, F }, kind = "camel") {
     window.__pig2Feet = rep;
   }
 
+  if (GOAT) {
+    // THE HEAD/NECK SEAM (you, 2026-09-29: "a hollow gap at the top of its
+    // face" while EATING). The back of the skull (the poll) is skinned to the
+    // EAR bone — the donkey's ear root is huge — so when the goat bends its
+    // head down to graze, that patch swung with the ear and tore against the
+    // neck: see-through folds, found by ray-scanning every pose (the first hit
+    // a BACK face). Measured at exact clip times, 6 views (see-through px):
+    //   as built                    Eating 371 · Gallop 342
+    //   poll → Head + seam x2       Eating  93 · Gallop  28
+    //   + ear sheets kept out of it (this) — you: "looks nice" eating
+    //   (x4 passes worse; blending without the poll move folded Neck2; a
+    //   pose-aware quad diagonal choice gained nothing — all measured)
+    // 1. every Ear1 vertex that is not the ear sheet (no Ear2-4) → Head
+    const earT = (i) => wOf(i, (b) => /^Ear[234]/.test(b)) >= 0.05;
+    let polled = 0;
+    for (let i = 0; i < WP.length; i++) {
+      if (earT(i) || wOf(i, (b) => b.startsWith("Ear1")) < 0.05) continue;
+      const m = new Map();
+      for (const [b, w] of WS[i]) { const nb2 = b.startsWith("Ear1") ? "Head" : b; m.set(nb2, (m.get(nb2) ?? 0) + w); }
+      WS[i] = [...m]; polled++;
+    }
+    // 2. the head/neck seam and its neighbours (not the ears): 2 smoothing passes
+    // (neighbours = every corner of each face round a vertex, across the quad's
+    // diagonal too — the edge ring alone was too narrow: Eating 123, Gallop 128)
+    const nbS = new Map();
+    for (const f of faces) { const vs = fv(f); for (const x of vs) for (const y of vs) if (x !== y) (nbS.get(x) ?? nbS.set(x, new Set()).get(x)).add(y); }
+    const seam = new Set();
+    for (let i = 0; i < WP.length; i++) if (nbS.has(i) && !earT(i) && wOf(i, (b) => b === "Head") > 0.05 && wOf(i, (b) => b === "Neck3") > 0.05) seam.add(i);
+    for (const i of [...seam]) for (const j of nbS.get(i)) if (!earT(j)) seam.add(j);
+    for (let it = 0; it < 2; it++) {
+      const next = new Map();
+      for (const i of seam) {
+        const acc = new Map(); let k = 0;
+        // the ear sheets are not averaged in: their ear weight flowed back into
+        // the skull and the same two triangles still folded (measured)
+        for (const j of [i, ...nbS.get(i)]) { if (j !== i && earT(j)) continue; for (const [b, w] of WS[j]) acc.set(b, (acc.get(b) ?? 0) + w); k++; }
+        const top = [...acc].map(([b, w]) => [b, w / k]).sort((x, y) => y[1] - x[1]).slice(0, 4);
+        const sum = top.reduce((s0, e) => s0 + e[1], 0);
+        next.set(i, top.map(([b, w]) => [b, w / sum]));
+      }
+      for (const [i, sk] of next) WS[i] = sk;
+    }
+    console.log(`[goat-morph] head/neck seam: ${polled} poll verts ear → Head, ${seam.size} seam verts smoothed`);
+  }
+
   countFlips("final");
   console.log(`[${kind}-morph] inside-out faces per step:`, JSON.stringify(flipReport));
   window.__flips = flipReport;
