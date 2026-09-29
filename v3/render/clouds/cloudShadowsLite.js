@@ -187,8 +187,12 @@ export function createCloudShadowsLite(sun, params = {}, { attach = true, sample
       u.sunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
       _dir.copy(sun.position).sub(sun.target.position).normalize();
       u.toSun.value.copy(_dir);
-      if (mapSrc) u.map.value.set(mapSrc.center.value.x, mapSrc.center.value.y, mapSrc.size.value, mapSrc.strength.value);
+      // `mapOn: false` (set()) hides a sky's own shadow map without detaching it
+      // — the baked field's `enabled` never covered it (a game's Dev toggle).
+      if (mapSrc) u.map.value.set(mapSrc.center.value.x, mapSrc.center.value.y, mapSrc.size.value, P.mapOn === false ? 0 : mapSrc.strength.value);
     },
+    /** True while a sky's own shadow map is in the slot (Sky Pro). */
+    get hasMap() { return !!mapSrc; },
     set(p = {}) {
       Object.assign(P, p);
       u.cover.value = P.cover;

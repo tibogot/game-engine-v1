@@ -245,16 +245,46 @@ lift off the pad; the ALN comes out of the cave mouth.
    - [x] **SKY PRO is the default** (you, 2026-09-29): algGame.js SKY_PRO
          unless `?sky=atmosphere` (the old sky + its tuned Aurès light, to
          A/B). Boots clean, cloud shadows on.
-   - [ ] Dev panel: a SKY PRO section (you asked — proposal in chat,
-         2026-09-29): presets, clock, clouds, wind tied to the game's one
-         wind, haze / shafts / exposure; hide the Atmosphere-only controls.
+   - [x] Dev → **Sky** (2026-09-29, devPanel.js): presets (Clear, Partly
+         cloudy, Broken, Overcast, Dust: cover + cirrus + haze), time of day,
+         cloud cover, cirrus and its height, cloud shadows (Sky Pro's own map:
+         engine cloudShadowsLite `mapOn`, the baked field's `enabled` never
+         covered it), the clouds FOLLOW the game's one wind (Dev → Wind; drift
+         = 4 + 24 × strength m/s) unless you move the drift, haze, sun shafts,
+         god rays, exposure, ground light, Copy values. Light keeps only the
+         grade under Sky Pro (its sun sliders drive the Atmosphere sky).
+   - [ ] **you, look**: pick a preset / values, Copy, and I'll bake them in as
+         the game's look (today: Sky Pro's defaults, "Partly cloudy").
    - [ ] Re-judge the Aurès look under Sky Pro (it brings its own sun and
          haze); GPU ms A/B against `?sky=atmosphere` in a focused tab.
-   - [ ] **FAR TERRAIN** (you, 2026-09-29): beyond the map the ground is
-         a flat plain — right for an ocean, wrong here. Proposal in chat:
-         raise the map's own outer ring (outside PLAY) into mountains, and a
-         backdrop ring of mountains beyond the 1 km edge, fading in Sky Pro's
-         haze.
+   - [x] **FAR TERRAIN** (you, 2026-09-29: "the flat view is only good if
+         there is an ocean"; "should be coherent with the satellite terrain";
+         "for the editor too"). An ENGINE feature (v3/terrain/farTerrain.js):
+         a project can carry a far heightmap (manifest.farTerrain + blob
+         "farHeight"), and the TERRAIN ITSELF draws it past the heightmap —
+         same shader, layers, blend, lighting, haze: no seam (a separate
+         backdrop mesh was tried twice and never matched: "completely wrong
+         texture", "bad tiling"). Height blended from the map's own edge over
+         250 m and stood up ×2.5 with distance; normal from the far ground;
+         paint by a slope/height RULE into chosen slots (splatOverlayTsl);
+         two extra clipmap rings (±4 km) only while it's on; the far grid read
+         with textureLoad (no sampler: the terrain is at 16). Editor: World →
+         Far Terrain (on/off, blend, stand, the rule's slots and bands); saved
+         with the project; nam unchanged (none). Cost below noise (free cam
+         8.67 vs 8.93 ms off, noise 0.4).
+         tools/algMountains.mjs: the ring outside PLAY is YOUR ERODED SAVE again
+         (alg-aures.v3proj.bak × 0.6019, rms 0.64 m — the border fade undone,
+         the wadis leave through gaps); the far grid is the real DEM round the
+         site (30.5 km, the same transform, fitted), NOT eroded (Stream Power on
+         the coarse grid made staircases). tools/lib/terrarium.mjs shared with
+         algDem.mjs. Vegetation's height bands pinned; outside PLAY thinned.
+   - [ ] **you, look**: from the play camera and the free camera; the stand
+         (×2.5) and the rule's bands are the taste knobs (World → Far Terrain).
+   - [ ] The map grew 7.0 → 11.0 MB (the far grid is 4 MB of Float32): store
+         it as 16-bit or at 512² if the size matters.
+   - [ ] Far terrain has no vegetation, no cloud-shadow bake difference
+         checked, and getWorldHeight() still reads 0 out there (nothing walks
+         there; a free camera can dip into it).
    - [x] COVER AND CONCEALMENT (2026-09-28, algCover.js). nam's rule moved
          to games/shared-rts (cover.js + coverOverlay.js; nam keeps shims):
          concealment stops you being SEEN (acquire range), cover stops you

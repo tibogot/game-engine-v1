@@ -30,17 +30,75 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
   cam.toggle("Edge scroll", { get: () => p.edgeScroll, set: (v) => (p.edgeScroll = v) });
   cam.hint("Pitch runs from <b>in</b> to <b>out</b> across the zoom (CoH). Q/E rotate, C toggles orbit.");
 
+  // ── Sky (Sky Pro, the game's sky since 2026-09-29) ──────────────────────
+  // Its settings are read every frame (skyproSky.js), so these write them
+  // live. Presets set cover, cirrus and haze together; the clouds follow the
+  // game's ONE wind (algWind.js: flags, plants) unless you let them drift.
+  const L = structuredClone(AURES_LIGHT);
+  const hhmm = (v) => `${Math.floor(v)}:${String(Math.round((v % 1) * 60)).padStart(2, "0")}`;
+  const SP = app.sky?.mode === "skypro" ? app.sky.skyPro : null;
+  if (SP) {
+    const sky = panel.section("Sky", { open: true });
+    const PRESETS = {
+      clear:    { label: "Clear",         coverage: 0.08, cirrus: 0.15, haze: 1.2 },
+      partly:   { label: "Partly cloudy", coverage: 0.49, cirrus: 0.5,  haze: 1.6 },
+      broken:   { label: "Broken",        coverage: 0.68, cirrus: 0.6,  haze: 1.8 },
+      overcast: { label: "Overcast",      coverage: 0.9,  cirrus: 0.8,  haze: 2.4 },
+      dust:     { label: "Dust",          coverage: 0.18, cirrus: 0.1,  haze: 4.5 },
+    };
+    let preset = "partly";
+    sky.select("Preset", {
+      options: Object.entries(PRESETS).map(([k, p]) => [k, p.label]),
+      get: () => preset,
+      set: (k) => { preset = k; const { label, ...p } = PRESETS[k]; void label; Object.assign(SP, p); panel.refresh(); },
+    });
+    sky.slider("Time of day", { min: 5, max: 20, step: 0.1, get: () => L.timeOfDay, set: (v) => { L.timeOfDay = v; app.sky?.setTimeOfDay?.(v); }, fmt: hhmm });
+    sky.slider("Cloud cover", { min: 0, max: 1, step: 0.01, get: () => SP.coverage, set: (v) => (SP.coverage = v) });
+    sky.slider("Cirrus", { min: 0, max: 1.5, step: 0.05, get: () => SP.cirrus, set: (v) => (SP.cirrus = v) });
+    sky.slider("Cirrus height", { min: 3000, max: 12000, step: 100, get: () => SP.cirrusAlt, set: (v) => (SP.cirrusAlt = v), fmt: (v) => `${(v / 1000).toFixed(1)} km` });
+    // Sky Pro's shadows are its own map (cloudShadowsLite mapOn), not the baked field's `enabled`.
+    const cs = app.cloudShadows;
+    if (cs) sky.toggle("Cloud shadows", {
+      get: () => (cs.hasMap ? cs.params.mapOn !== false : !!cs.params.enabled),
+      set: (v) => app.setCloudShadows?.(cs.hasMap ? { mapOn: v } : { enabled: v }),
+    });
+    // THE WIND: the clouds drift with the game's wind (its direction; its
+    // strength as a speed at the deck), or on their own.
+    const gw = app.showroom?.wind;
+    let follow = !!gw;
+    const followWind = () => { if (follow && gw) { SP.windDeg = gw.dirDeg; SP.windSpeed = 4 + 24 * gw.strength; } };
+    gw?.onChange?.(() => { followWind(); panel.refresh(); });
+    followWind();
+    if (gw) sky.toggle("Clouds follow the wind", { get: () => follow, set: (v) => { follow = v; followWind(); } });
+    sky.slider("Cloud drift", { min: 0, max: 40, step: 0.5, get: () => SP.windSpeed, set: (v) => { follow = false; SP.windSpeed = v; panel.refresh(); }, fmt: (v) => `${v} m/s` });
+    sky.slider("Drift toward", { min: 0, max: 360, step: 5, get: () => SP.windDeg, set: (v) => { follow = false; SP.windDeg = v; panel.refresh(); }, fmt: (v) => `${v}°` });
+    sky.slider("Haze", { min: 0, max: 6, step: 0.05, get: () => SP.haze, set: (v) => (SP.haze = v) });
+    sky.slider("Sun shafts", { min: 0, max: 1, step: 0.05, get: () => SP.shafts, set: (v) => (SP.shafts = v) });
+    sky.toggle("God rays", { get: () => !!SP.godRays, set: (v) => (SP.godRays = v) });
+    sky.slider("Exposure", { min: 0.2, max: 1.5, step: 0.01, get: () => SP.exposure, set: (v) => (SP.exposure = v) });
+    sky.color("Ground light", { get: () => SP.groundAlbedo, set: (v) => (SP.groundAlbedo = v) });
+    sky.button("Copy values", () => navigator.clipboard?.writeText(JSON.stringify({
+      timeOfDay: L.timeOfDay, coverage: SP.coverage, cirrus: SP.cirrus, cirrusAlt: SP.cirrusAlt, haze: SP.haze,
+      shafts: SP.shafts, godRays: SP.godRays, exposure: SP.exposure, groundAlbedo: SP.groundAlbedo,
+    }, null, 2)));
+    sky.hint("Live, not saved: <b>Copy</b> the values to bake a look into the game. The clouds drift with the game's wind (Dev → Wind) unless you move <b>Cloud drift</b>. <b>Ground light</b> is the colour the land throws back up into the shadows.");
+  }
+
   // ── Light (the Aurès sun, algGame.js AURES_LIGHT) ───────────────────────
   // A working copy: the sliders edit it and re-apply; Copy gives the values
-  // to paste back into AURES_LIGHT for good.
-  const L = structuredClone(AURES_LIGHT);
+  // to paste back into AURES_LIGHT for good. Under Sky Pro the sun, fill and
+  // exposure are the SKY's (above): only the grade is left here.
   const light = panel.section("Light");
-  light.slider("Time of day", { min: 5, max: 20, step: 0.1, get: () => L.timeOfDay, set: (v) => { L.timeOfDay = v; app.sky?.setTimeOfDay?.(v); }, fmt: (v) => `${Math.floor(v)}:${String(Math.round((v % 1) * 60)).padStart(2, "0")}` });
+  if (!SP) light.slider("Time of day", { min: 5, max: 20, step: 0.1, get: () => L.timeOfDay, set: (v) => { L.timeOfDay = v; app.sky?.setTimeOfDay?.(v); }, fmt: hhmm });
   const world = (k, label, max) => light.slider(label, { min: 0, max, step: 0.05, get: () => L.world[k], set: (v) => { L.world[k] = v; app.sky?.setWorldLight?.(L.world); } });
-  world("dir", "Sun", 8);
-  world("skyFill", "Sky fill", 2);
-  world("hemi", "Hemi", 2);
-  world("exposure", "Exposure", 3);
+  if (!SP) {
+    world("dir", "Sun", 8);
+    world("skyFill", "Sky fill", 2);
+    world("hemi", "Hemi", 2);
+    world("exposure", "Exposure", 3);
+  } else {
+    light.hint("Sky Pro lights the world from its own sun: time of day and exposure are in <b>Sky</b>. The grade below still applies.");
+  }
   const polish = (k, label, min, max) => light.slider(label, { min, max, step: 0.01, get: () => L.polish[k], set: (v) => { L.polish[k] = v; app.postFx?.setPolish?.(L.polish); } });
   polish("contrast", "Contrast", 0.8, 1.5);
   polish("saturation", "Saturation", 0.5, 1.5);
