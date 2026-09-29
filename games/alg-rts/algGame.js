@@ -198,7 +198,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("herds") !== "0") {
     onStatus("Herding the flocks…");
     try {
-      app.algHerds = await createAlgHerds(app, { units: app.algUnits?.units ?? null });
+      app.algHerds = await createAlgHerds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom });
     } catch (e) { console.warn("[alg herds] failed:", e); }
   }
   // Dev controls (?dev=0 hides them).

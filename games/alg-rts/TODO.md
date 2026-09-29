@@ -529,6 +529,25 @@ Order: foliage → villages → animals & birds → ground detail.
          5 s — measured spotted in 2 s, cleared by 8 s, nobody hurt.
    - [ ] **you, play it**: patrol + convoy + a mine; is 30 a delivery and
          30% of bands mining the right pace?
+   - [x] **Flocks on the move + donkey trains** (2026-09-29, algHerds.js,
+         shared wildHerd.js "anchor"): each flock has a MOVING HOME that
+         walks a loop round its village on a sheep-legal foot path (the
+         pasture, other grazing, down to the well — 4 of 5 flocks drink;
+         Ain el Oued has no well in reach), resting 1-2 min at each; the
+         animals keep their places round it (goats in front), catch up in
+         bursts, trot when far, follow the home's breadcrumbs round houses,
+         sidestep what's in the way, regroup after a bolt. Measured over 8
+         minutes: median 6-7 m from their place, worst 32 m, none lost (the
+         first version lost whole flocks 100 m back — five separate causes,
+         each measured). A DONKEY TRAIN on each ravine mule path: a loaded
+         donkey on the lead, a bare one 3.4 m behind, up to the gully mouth
+         and back, resting at the ends. nam's wild herds unchanged (checked).
+   - [ ] **you, look**: the flock's pace (0.45 m/s home, rests 1-2 min),
+         goats leading; the trains (the west one walks under the cedars at
+         the koubba, hard to see).
+   - [ ] A shepherd with each flock (a civilian stand-in until yours);
+         scatter at gunfire / blasts, not only soldiers close; a goat on a
+         mine; bells.
    - [ ] A mine's minimap mark once spotted; the sapper (clears faster,
          finds from further); the ALN laying mines on the mule paths too.
    - [ ] Attack orders don't end a patrol (it resumes after the kill) —
