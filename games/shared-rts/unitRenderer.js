@@ -18,6 +18,7 @@ import { createXrayMaterial, xrayOn, xrayParams } from "./xraySilhouette.js";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
 import { LOOKS, lookColorNode, markHelmet, neckPlane } from "./soldierLooks.js";
+import { TOOLS, WEAPONS, weaponMaterial } from "./procWeapons.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
@@ -505,7 +506,79 @@ function buildCrowdType(tpl, type, app, scene) {
   xray.name = "UnitXrayCrowd";
   scene.add(xray);
 
-  return { field, rel, scale: root.scale.x, xray, roles, runSpeed };
+  const pieces = look ? buildPieces(field, source, rel, look, scene) : null;
+
+  return { field, rel, scale: root.scale.x, xray, roles, runSpeed, look, pieces };
+}
+
+// Clips whose hands are busy: the rifle is slung on the back (tools/packMixamo.mjs).
+const STOWED = /^(dig|hammer|grenade_throw|unarmed)/;
+const USES_TOOL = /^dig/;
+
+/**
+ * The RIGID pieces a soldier type carries — its look's weapons in the hand
+ * and slung on the back, the shovel — each ONE InstancedMesh for every
+ * soldier carrying it (not merged into the body: rigid parts need no skinning,
+ * and only the soldiers who carry a piece pay for it).
+ *
+ * A piece rides a bone. Its instance matrix per soldier is
+ *   unit · rel · bindInverse · B(bone, this soldier's pose) · K
+ * where B is the baked skinning matrix (crowdSkinning boneMatrix, the same
+ * table the GPU skins with) and K = the bone's rest world (inverse of its bind
+ * inverse) · the piece's own offset on the bone — the chain a vertex skinned
+ * 100 % to that bone goes through, so the piece sits exactly in the hands.
+ */
+function buildPieces(field, source, rel, look, scene) {
+  const skel = source.skeleton;
+  const pre = new THREE.Matrix4().multiplyMatrices(rel, source.bindMatrixInverse);
+  const onBone = (name) => {
+    const i = field.boneIndex(name);
+    return i < 0 ? null : { bone: i, K: skel.boneInverses[i].clone().invert() };
+  };
+  const hand = onBone("mixamorigWeapon"), sling = onBone("mixamorigSling"), tool = onBone("mixamorigTool");
+  if (!hand) return null;
+  const mat = weaponMaterial();
+  const make = (geo, at) => {
+    const im = new THREE.InstancedMesh(geo, mat, MAX_CROWD);
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.frustumCulled = false;
+    im.castShadow = false; // a thin rifle's shadow: 3 more draws for next to nothing
+    im.receiveShadow = true;
+    im.count = 0;
+    im.visible = false;
+    scene.add(im);
+    return { im, n: 0, ...at };
+  };
+  const weapons = {};
+  for (const key of look.weaponMix ? Object.keys(look.weaponMix) : [look.weapon]) {
+    if (!WEAPONS[key]) continue;
+    const geo = WEAPONS[key].build();
+    weapons[key] = { hand: make(geo, hand), sling: sling ? make(geo, sling) : null };
+  }
+  const shovel = tool ? make(TOOLS.shovel.build(), tool) : null;
+  const all = [...Object.values(weapons).flatMap((w) => [w.hand, w.sling]), shovel].filter(Boolean);
+  return { pre, weapons, shovel, all };
+}
+
+const _B = new THREE.Matrix4();
+const _P = new THREE.Matrix4();
+
+/** Write one soldier's rigid pieces (his weapon in hand or slung, the shovel) for this frame. */
+function writePieces(crd, v, unitMatrix, holdA = false, holdB = false) {
+  const P = crd.pieces;
+  const w = P?.weapons[v.weapon];
+  if (!w) return;
+  const a = v.prev.clip, b = v.cur.clip;
+  const put = (piece) => {
+    if (!piece || piece.n >= MAX_CROWD) return;
+    crd.field.boneMatrix(a, v.prev.t, b, v.cur.t, v.fade, piece.bone, _B, { holdA, holdB });
+    _P.multiplyMatrices(unitMatrix, P.pre).multiply(_B).multiply(piece.K);
+    piece.im.setMatrixAt(piece.n++, _P);
+  };
+  // Only while a clip that uses it plays (it is scaled to ~0 in the others).
+  if (!(STOWED.test(a) && STOWED.test(b))) put(w.hand);
+  if (STOWED.test(a) || STOWED.test(b)) put(w.sling);
+  if (USES_TOOL.test(a) || USES_TOOL.test(b)) put(P.shovel);
 }
 
 /**
@@ -553,6 +626,16 @@ function soldierClip(unit, v, roles) {
     if (dx * dx + dz * dz <= (range * 1.05) ** 2) return v.firing > 0 && roles.fire ? roles.fire : roles.aim;
   }
   return roles.idle;
+}
+
+/** A soldier's weapon key from his type's look: its weapon, or one drawn from its weaponMix. */
+function pickWeapon(look) {
+  if (!look) return null;
+  if (!look.weaponMix) return look.weapon ?? null;
+  const mix = Object.entries(look.weaponMix);
+  let t = Math.random() * mix.reduce((s, [, w]) => s + w, 0);
+  for (const [key, w] of mix) { t -= w; if (t < 0) return key; }
+  return mix[0][0];
 }
 
 const CROSSFADE = 0.2;      // s between two clips
@@ -718,6 +801,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         // its own stable look variation (soldierLooks: cloth, sun-fade, skin)
         seed: [Math.random(), Math.random(), Math.random(), 0],
         deadT: -1,
+        // his rifle: the look's, or drawn from its mix (the ALN's armoury)
+        weapon: pickWeapon(crd.look),
       });
       return;
     }
@@ -834,7 +919,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     // deaths need no bookkeeping — a dead unit simply isn't written.
     for (const k of UNIT_TYPE_KEYS) {
       if (instanced[k]) instanced[k].n = 0;
-      if (crowd[k]) crowd[k].field.begin();
+      if (crowd[k]) {
+        crowd[k].field.begin();
+        for (const piece of crowd[k].pieces?.all ?? []) piece.n = 0;
+      }
     }
     crowdUnits.length = 0;
 
@@ -997,6 +1085,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         _mat.multiplyMatrices(x.matrix, v.crowd.rel);
         v.crowd.field.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
           unit.team === "player" ? 0 : 1, { extra: v.seed });
+        writePieces(v.crowd, v, x.matrix);
         crowdUnits.push(unit); // instance order = pick order (see pickCrowdUnit)
       }
 
@@ -1065,6 +1154,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           const dying = (c) => crd.roles.deaths.includes(c);
           crd.field.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
             unit.team === "player" ? 0 : 1, { holdA: dying(v.prev.clip), holdB: true, extra: v.seed });
+          writePieces(crd, v, v.xform.matrix, dying(v.prev.clip), true);
+        }
+        for (const piece of crd.pieces?.all ?? []) {
+          piece.im.count = piece.n;
+          piece.im.visible = piece.n > 0;
+          if (piece.n) piece.im.instanceMatrix.needsUpdate = true;
         }
       }
       if (crd && statics.length) {

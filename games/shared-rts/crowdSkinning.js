@@ -262,6 +262,24 @@ export function createCrowdField({
     /** Seconds in a baked clip (to keep an instance's clock on its loop). */
     duration: (clipName) => info[aliases[clipName] ?? clipName]?.duration ?? 1,
 
+    /** A bone's index in the baked table (by name), or −1. */
+    boneIndex: (name) => skeleton.bones.findIndex((b) => b.name === name),
+
+    /**
+     * One bone's baked SKINNING matrix (bone world · bone inverse) for the pose
+     * an instance is drawn with — clipA at tA crossfaded by `blend` into clipB
+     * at tB — from the CPU copy of the table, blended like the GPU does. What
+     * a rigid piece on that bone (a rifle in the hand, a hat) is placed with,
+     * so it follows the skinned body exactly without being skinned itself.
+     */
+    boneMatrix(clipA, tA, clipB, tB, blend, bone, out, { holdA = false, holdB = false } = {}) {
+      const a = (sliceOf(clipA, tA, holdA) * boneCount + bone) * 16;
+      const b = (sliceOf(clipB, tB, holdB) * boneCount + bone) * 16;
+      const e = out.elements;
+      for (let k = 0; k < 16; k++) e[k] = table[a + k] + (table[b + k] - table[a + k]) * blend;
+      return out;
+    },
+
     commit() {
       mesh.count = n;
       // AN EMPTY CROWD COSTS NOTHING: no upload, no dispatch, no draw. The

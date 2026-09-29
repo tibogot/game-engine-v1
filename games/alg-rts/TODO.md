@@ -111,12 +111,22 @@ Not wired into either game yet.
          target in range, the firing clip on each shot (the cooldown reset),
          idle; 0.2 s crossfades; deaths play once, hold, the body stays 14 s.
          Checked in the game (Chrome) + nam unchanged (idle/run fallback).
+   - [ ] **X-RAY needs work** (you, 2026-09-30): units show through EACH
+         OTHER (light-blue patches inside a squad of appelés). The x-ray should
+         only reveal a unit hidden by terrain, buildings, trees — not by
+         another unit. Look at how it decides "hidden" (depth vs everything
+         drawn) and rework it; check both games.
    - [ ] …still: cover (kneel idle / kneel fire), prone, dig for building
          sapeurs, the grenade throw; ONE clip table shared across types
    - [x] skinning work sized to the LIVE soldiers (renderer.compute count)
    - [x] alg-rts types on the pack: appelé + sapeur = soldier1 / "appele",
          moudjahid = aln1 / "alnSection" (crowd shader looks, per-man seed)
-   - [ ] hats, kit, weapons, flag as RIGID pieces drawn per TYPE for the whole
+   - [x] WEAPONS in the game (2026-09-30, checked in Chrome: in the hands,
+         shouldered when firing): one InstancedMesh per weapon (+ its slung
+         copy, + the shovel) per soldier type, placed by the baked bone matrix
+         (crowdSkinning boneMatrix, the same table the GPU skins with); no
+         shadow; ALN draw MAS 36 / Mauser / Enfield per man.
+   - [ ] hats, kit, flag as RIGID pieces drawn per TYPE for the whole
          army, placed by their bone (not merged into the body: that would
          double the skinned vertices); the kachabia skinned with the body
    - [ ] looks in the crowd shader; per-soldier variation from the instance
