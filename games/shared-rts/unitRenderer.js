@@ -14,7 +14,7 @@ import * as THREE from "three";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { attribute, instanceIndex, materialColor, mix, step, texture, varying, vec3 } from "three/tsl";
-import { createXrayMaterial, xrayOn, xrayParams } from "./xraySilhouette.js";
+import { UNIT_ORDER, XRAY_ORDER, createXrayMaterial, xrayOn } from "./xraySilhouette.js";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
 import {
@@ -327,6 +327,7 @@ function buildInstancedType(tpl, scene) {
     im.castShadow = o.castShadow && mayCastShadow(o.material);
     im.receiveShadow = true;
     im.frustumCulled = false; // instances live anywhere; the shared bounds are meaningless
+    im.renderOrder = UNIT_ORDER; // after the silhouettes (xraySilhouette.js)
 
     // Team color (teams.js). Allocated UP FRONT, not lazily via setColorAt: three
     // decides whether to compile `vInstanceColor` into the shader by looking at
@@ -358,30 +359,12 @@ function buildInstancedType(tpl, scene) {
   // every unit's transform, so instances carry it too.
   const odometer = parts.map((p) => p.im.material.userData?.odometer).find(Boolean) ?? null;
 
-  // X-RAY (xraySilhouette.js): each part drawn a second time where the unit is
-  // hidden, sharing the part's geometry and instance matrices; a per-instance
-  // team flag picks blue or red. The depth lift is sized to the unit: it must
-  // cover how deep the unit's OWN skin can hide its own parts — looking down
-  // through a Huey's roof onto its door frames, skid struts and door guns is
-  // its whole height, and a 3.5 m cap lit them up blue. So: the BODY's width
-  // (the 15 m rotor disc hides nothing beside the hull; counting it would
-  // blind the silhouette), and the FULL height — a rotor blade hides the
-  // door frames a whole mast below it — as `liftUp`, which the shader
-  // stretches by the view ray's slope.
+  // X-RAY (xraySilhouette.js): each part drawn a second time where the world
+  // hides the unit, sharing the part's geometry and instance matrices; a
+  // per-instance team flag picks blue or red.
   const team = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PER_TYPE), 1);
   team.setUsage(THREE.DynamicDrawUsage);
-  const bodyBox = new THREE.Box3(), meshBox = new THREE.Box3();
-  root.traverse((o) => {
-    // Mesh by mesh (expandByObject would pull in a rotor parented to the hull).
-    if (!o.isMesh || o.name === "MainRotor" || o.name === "TailRotor") return;
-    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-    bodyBox.union(meshBox.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld));
-  });
-  const body = bodyBox.getSize(new THREE.Vector3());
-  const height = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3()).y;
-  const lift = THREE.MathUtils.clamp(Math.max(Math.max(body.x, body.y, body.z) * 0.4, body.x * 1.15), 1.0, 8);
-  const liftUp = height * 1.1;
-  const xrayMat = createXrayMaterial({ teamNode: attribute("iTeam", "float"), lift, liftUp });
+  const xrayMat = createXrayMaterial({ teamNode: attribute("iTeam", "float") });
   for (const part of parts) {
     part.im.geometry.setAttribute("iTeam", team);
     const x = new THREE.InstancedMesh(part.im.geometry, xrayMat, MAX_PER_TYPE);
@@ -389,10 +372,9 @@ function buildInstancedType(tpl, scene) {
     x.count = 0;
     x.frustumCulled = false;
     x.castShadow = x.receiveShadow = false;
-    x.renderOrder = 20;
+    x.renderOrder = XRAY_ORDER;
     x.visible = false;
     x.name = "UnitXray";
-    x.userData.lift = [lift, liftUp];   // for a console check
     scene.add(x);
     part.xray = x;
   }
@@ -501,7 +483,6 @@ function buildCrowdType(tpl, type, app, scene) {
   // positionNode and normal), the team from the anim record's spare lane.
   const xray = new THREE.Mesh(field.mesh.geometry, createXrayMaterial({
     teamNode: field.animNode.element(instanceIndex).w,
-    lift: xrayParams.uSoldierLift,
     positionNode: field.mesh.material.positionNode,
     normalNode: field.mesh.material.normalNode,
   }));
@@ -511,9 +492,10 @@ function buildCrowdType(tpl, type, app, scene) {
   xray.count = 0;
   xray.frustumCulled = false;
   xray.castShadow = xray.receiveShadow = false;
-  xray.renderOrder = 20;
+  xray.renderOrder = XRAY_ORDER;
   xray.visible = false;
   xray.name = "UnitXrayCrowd";
+  field.mesh.renderOrder = UNIT_ORDER;
   scene.add(xray);
 
   const pieces = look ? buildPieces(field, source, rel, look, scene, root) : null;
@@ -570,6 +552,7 @@ function buildPieces(field, source, rel, look, scene, root) {
     im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     im.frustumCulled = false;
     im.castShadow = false; // small kit: 3 more draws per piece type for next to nothing
+    im.renderOrder = UNIT_ORDER;
     im.receiveShadow = true;
     im.count = 0;
     im.visible = false;
@@ -614,7 +597,7 @@ function buildPieces(field, source, rel, look, scene, root) {
 }
 
 /** The key of a headgear piece: its builder and its colour. */
-const hatKey = (look) => `${look.headgear}|${look.hatColor ?? ""}`;
+const hatKey = (look) => `${look.headgear}|${look.hatColor ?? ""}|${look.badge ?? ""}`;
 
 const _B = new THREE.Matrix4();
 const _P = new THREE.Matrix4();
@@ -932,6 +915,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       root.traverse((o) => { if (o.isSkinnedMesh) o.frustumCulled = false; });
     }
 
+    root.traverse((o) => { if (o.isMesh) o.renderOrder = UNIT_ORDER; });
     scene.add(root);
     roots.push(root);
     views.set(unit, {

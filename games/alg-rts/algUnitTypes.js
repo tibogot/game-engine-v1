@@ -83,6 +83,72 @@ export const ALG_UNIT_TYPES = {
     castShadow: true,
   },
 
+  // The PARAS: colonial paratroopers, the heliborne reserve, trained at the
+  // helipad. Faster and harder than the appelé, closer range (MAT 49s): the
+  // unit you fly to where the katiba showed itself. Casquettes Bigeard and red
+  // berets, leopard smocks.
+  para: {
+    typeKey: "para",
+    name: "Paras coloniaux",
+    buildLabel: "Para",
+    weapon: "rifle",
+    isAir: false,
+    foot: true,
+    hover: 0,
+    speed: 6.3,
+    radius: 1.0,
+    turnRate: 7,
+    maxHp: 80,
+    range: 26,
+    damage: 7,
+    fireRate: 3.0,
+    canHitAir: true,
+    vision: 44,
+    url: "/models/soldiers/soldiers.glb",
+    body: "soldier1",
+    look: "paraSection",
+    skinned: true,
+    targetHeight: REAL.soldierHeight * RTS_SCALE,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 1.7,
+    barWidth: 2.2,
+    barY: 3.4,
+    castShadow: true,
+  },
+
+  // The LÉGION (1er REP): the elite, trained at the post, slow to raise and
+  // dear. Full range, the best shots, the toughest men. Green berets.
+  legion: {
+    typeKey: "legion",
+    name: "Légionnaires",
+    buildLabel: "Légionnaire",
+    weapon: "rifle",
+    isAir: false,
+    foot: true,
+    hover: 0,
+    speed: 5.8,
+    radius: 1.0,
+    turnRate: 6,
+    maxHp: 95,
+    range: 30,
+    damage: 8,
+    fireRate: 2.6,
+    canHitAir: true,
+    vision: 44,
+    url: "/models/soldiers/soldiers.glb",
+    body: "soldier1",
+    look: "legionSection",
+    skinned: true,
+    targetHeight: REAL.soldierHeight * RTS_SCALE,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 1.7,
+    barWidth: 2.2,
+    barY: 3.4,
+    castShadow: true,
+  },
+
   // The moudjahid: an ALN fighter of the katiba, out of the cave mouth. The
   // enemy side (the red wash, teams.js) on the SAME stand-in model as the
   // appelé until you make the ALN one; the numbers are nam's infantry's too.

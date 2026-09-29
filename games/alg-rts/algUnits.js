@@ -39,11 +39,18 @@ import { createMinimap } from "./ui/minimap.js";
  * economy comes with its rules). The command card lists them in this order.
  */
 const PRODUCTION = {
-  post: { appele: 6, sapeur: 8 },
+  post: { appele: 6, sapeur: 8, legion: 14 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
-  helipad: { alouette: 30 },
+  helipad: { para: 10, alouette: 30 },   // paras: the heliborne reserve
   caveEntrance: { moudjahid: 4 },   // the ALN's: its AI will queue (Dev panel until then)
 };
+
+/** Pad-local point just past the footprint's edge, heading to (px, pz). */
+function padEdge(m, px, pz) {
+  const fp = m.geometry.userData.footprint, d = Math.hypot(px, pz) || 1;
+  const r = Math.hypot(fp.hx, fp.hz) + 2;
+  return [fp.cx + (px / d) * r, fp.cz + (pz / d) * r];
+}
 
 /** The French vehicles built in code, by a unit type's `procedural` key. */
 const FR_VEHICLES = {
@@ -212,7 +219,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     producers.push(createAlgProducer({
       mesh: m, units, typeKey: "helipad", name: "Hélisurface", maxHp: 900,
       builds: PRODUCTION.helipad,
-      inside: [0, 0], rally,
+      // Paras trained here walk off the pad's edge, toward the holding point.
+      inside: [0, 0], outside: padEdge(m, px, pz), rally,
       launch: { hold: 2.2, rise: 2.4, deckY: m.geometry.userData.deckY ?? 0 },
     }));
     // The Alouette parked on the pad at the start (a unit now, hovering) moves

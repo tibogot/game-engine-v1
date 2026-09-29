@@ -22,6 +22,7 @@ import { createAlgUnits } from "./algUnits.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
+import { xrayParams } from "../shared-rts/xraySilhouette.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -114,6 +115,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // The stats-gl overlay costs ~20% of the main thread (measured): off in the
   // game, on from Dev → Performance or with ?stats=1.
   app.setStatsOverlay?.(params.get("stats") === "1");
+  // Cloud shadows start OFF (you, 2026-09-30: sweeping shadows get in the way
+  // while debugging). The shadow map stays attached — Dev → Sky → Cloud
+  // shadows turns them on, or ?cloudshadows=1 at boot.
+  app.setCloudShadows?.(SKY_PRO ? { mapOn: params.get("cloudshadows") === "1" } : { enabled: params.get("cloudshadows") === "1" });
 
   const levels = createLevelLoader(app, { defaultUrl: "/levels/alg-aures.v3proj", onStatus, onProgress });
   const boot = await levels.loadBoot();
@@ -123,6 +128,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // Terrain last among the opaque things (nam-rts: the dearest shader, drawn
   // first, was shaded under everything and then covered).
   for (const m of app.getTerrainMeshes?.() ?? []) m.renderOrder = 8;
+  // The x-ray silhouettes test the ground between a unit and the camera (a
+  // hill hides a unit, no silhouette); set before any unit's material is made.
+  xrayParams.heightTexNode = app.heightTexNode ?? null;
 
   app.postFx?.setEnabled(true);
   app.postFx?.setBloomSelective(true);

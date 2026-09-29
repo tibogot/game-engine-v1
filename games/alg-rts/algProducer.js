@@ -80,7 +80,9 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
         structure.progress = 0;
         structure.queue.shift();
         const u = units.spawn(key, inside.x, inside.z, { snap: false, team });
-        if (u && launch) {
+        // The pad launches AIRCRAFT; the paras it trains (off a helicopter)
+        // walk off it to the rally like any soldier out of a gate.
+        if (u && launch && u.isAir) {
           // On the deck, nose to where it will go; ghosted so the machines
           // hovering above do not shove it off the pad while it spools up.
           u.faceToward(structure.rally.x, structure.rally.z);

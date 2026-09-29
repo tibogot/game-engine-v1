@@ -1,19 +1,29 @@
 // X-RAY SILHOUETTES — units seen through what hides them, as in Company of
-// Heroes. GAME code, nam-rts only. Your ask (2026-09-25): "a way to see the
+// Heroes. GAME code, both RTS games. Your ask (2026-09-25): "a way to see the
 // units through buildings and foliage".
 //
 // Each unit is drawn a second time with this material, which paints ONLY
 // where the unit is hidden: depth test GREATER, no depth write — the pixel
 // passes where something already in the depth buffer is IN FRONT of the unit.
-// No screen copy, no stencil: the depth buffer already knows.
 //
-// THE SELF-OCCLUSION PROBLEM, and the trick. A plain GREATER pass also paints
-// a unit's rear parts where its own front hides them — a jeep would glow on
-// itself. So the fragment's depth is written `lift` metres CLOSER to the camera
-// (along its own view ray: its place on screen does not move) before the test:
-// it now passes only where the occluder is at least `lift` in front of the
-// unit — a wall, a hut, a canopy crown, not the unit's own turret. `lift` is
-// sized to the unit (a soldier ~1 m, a tank ~3 m).
+// ONLY THE WORLD HIDES A UNIT (your note, 2026-09-30: "units should not x-ray
+// each other" — as in CoH, a man behind a tank or behind his mate is simply
+// behind him). The trick is the DRAW ORDER, no stencil (the post chain samples
+// the scene depth, which a depth-stencil texture cannot give it):
+//   world opaque (terrain 8, decals 9, rivers 10 …)
+//   → the silhouettes, XRAY_ORDER: the depth buffer holds the world ONLY
+//   → the units themselves, UNIT_ORDER: a unit seen paints over any
+//     silhouette behind it, and the depth test hides the parts it covers.
+// So a unit never glows through another unit, nor through ITSELF (its own
+// front is not in the depth buffer yet when its silhouette is drawn — the old
+// per-unit depth "lift" sized to a Huey's height is gone). Silhouettes are
+// opaque-list draws with CustomBlending (a NormalBlending material that is
+// not `transparent` gets its alpha forced to 1).
+//
+// `lift`: the fragment's depth is still pulled a little toward the camera
+// (along its own view ray) before the test, so only an occluder at least that
+// far in front counts — a wall, a hut, a crown; not the grass at a man's
+// knees, nor the ground his boots sink into.
 //
 // Look: a flat team colour (blue ours, red theirs), see-through, with a
 // brighter rim so it reads as "behind something" rather than "on top".
@@ -32,10 +42,14 @@
 // Writing depth disables early-z for these draws — only on unit pixels.
 import * as THREE from "three";
 import {
-  Fn, abs, cameraFar, cameraNear, cameraPosition, dot, float, max, min, mix, normalView, normalize, pow,
+  Fn, abs, cameraFar, cameraNear, cameraPosition, dot, float, max, min, mix, normalView, pow,
   positionView, positionWorld, saturate, step, uniform, vec3, viewZToPerspectiveDepth,
 } from "three/tsl";
 import { drapeY } from "./terrainDrape.js";
+
+/** Opaque draw order: after the world, before the units (see the header). */
+export const XRAY_ORDER = 30;
+export const UNIT_ORDER = 31;
 
 export const XRAY = {
   player: new THREE.Color(0.32, 0.62, 1.0),
@@ -50,15 +64,15 @@ const uEnemy = uniform(XRAY.enemy.clone());
 const uOpacity = uniform(XRAY.opacity);
 const uRim = uniform(XRAY.rim);
 /**
- * The soldiers' depth lift, metres. 2.5, not 1.1: grass hiding a man stands
+ * The depth lift, metres, every unit's (soldiers and vehicles). 2.5, not 1.1: grass hiding a man stands
  * right against him, within a metre or two, and at 1.1 a squad in the tall
  * grass lit up blue (your call, 2026-09-25: buildings and trees only). A wall
  * or a crown that hides him is further in front than that.
  */
-const uSoldierLift = uniform(2.5);
+const uLift = uniform(2.5);
 /** `enabled` switches every silhouette (?xray=0 boots with them off: the A/B). */
 export const xrayParams = {
-  uPlayer, uEnemy, uOpacity, uRim, uSoldierLift,
+  uPlayer, uEnemy, uOpacity, uRim, uLift,
   /** The live heightmap (app.heightTexNode), set by the game before any unit is built. */
   heightTexNode: null,
   enabled: typeof location === "undefined" || new URLSearchParams(location.search).get("xray") !== "0",
@@ -69,13 +83,17 @@ export const xrayOn = () => xrayParams.enabled;
  * @param {object} o
  *   teamNode     float node: 0 = player, 1 = enemy (per instance)
  *   lift         metres the depth is pulled toward the camera (see the header):
- *                a number, or a node (the soldiers' live uniform)
+ *                a number, or a node; default the shared live uniform
  *   positionNode optional: a material's own positionNode (the compute-skinned crowd)
  *   normalNode   optional: its view-space normal node (the crowd), else normalView
  */
-export function createXrayMaterial({ teamNode, lift = 1.5, liftUp = 0, positionNode = null, normalNode = null }) {
+export function createXrayMaterial({ teamNode, lift = uLift, positionNode = null, normalNode = null }) {
+  // In the OPAQUE list (drawn before the units, see the header), blended.
   const mat = new THREE.MeshBasicNodeMaterial({
-    transparent: true, depthWrite: false, depthTest: true, side: THREE.FrontSide,
+    transparent: false, depthWrite: false, depthTest: true, side: THREE.FrontSide,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+    blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
   });
   mat.name = "UnitXray";
   mat.depthFunc = THREE.GreaterDepth;
@@ -83,17 +101,9 @@ export function createXrayMaterial({ teamNode, lift = 1.5, liftUp = 0, positionN
   mat.toneMapped = false;
   if (positionNode) mat.positionNode = positionNode;
   // The fragment's depth, `lift` metres nearer along its view ray, never past
-  // the near plane. `liftUp` is the unit's HEIGHT: a part that far below its
-  // own rotor blade or roof sits height / |ray.y| behind it along a sloping
-  // ray — twice the height at the 30° zoomed-in pitch — so that half of the
-  // lift grows as the camera looks flatter.
+  // the near plane.
   mat.depthNode = Fn(() => {
-    let d = float(lift);
-    if (liftUp > 0) {
-      const rayY = abs(normalize(positionWorld.sub(cameraPosition)).y);
-      d = max(d, float(liftUp).div(max(rayY, float(0.35))));
-    }
-    const z = positionView.z.add(d).min(cameraNear.negate().mul(1.01));
+    const z = positionView.z.add(lift).min(cameraNear.negate().mul(1.01));
     return viewZToPerspectiveDepth(z, cameraNear, cameraFar);
   })();
   const n = normalNode ?? normalView;

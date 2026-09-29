@@ -107,8 +107,19 @@ export const LOOKS = {
     label: "Para section", note: "mixed: casquettes Bigeard and red berets",
     camo: { base: 0xa59c72, green: 0x55603a, brown: 0x6a4b2f }, helmet: false, weapon: "mat49",
     variants: [{ w: 0.65, headgear: "bigeard" }, { w: 0.35, headgear: "beret", hatColor: 0x7a1c1c }],
+    weaponMix: { mat49: 0.55, mas49_56: 0.45 },   // paras carried more SMGs than the line
     kit: ["belt"], roles: SECTION_ROLES,
     extras: { sunglasses: 0.3, scarf: 0.25, mustache: 0.3, cigarette: 0.15, grenades: 0.45 },
+  },
+  // The 1er REP: Légion paras. Green beret, the seven-flame grenade, the
+  // leopard smock; older men — more mustaches, cigarettes, grenades.
+  legionSection: {
+    label: "Légion section", note: "green berets, grenade badge; the veterans",
+    camo: { base: 0xa59c72, green: 0x55603a, brown: 0x6a4b2f }, helmet: false, weapon: "mas49_56",
+    variants: [{ w: 1, headgear: "beret", hatColor: 0x2f4a2c, badge: "grenade" }],
+    weaponMix: { mas49_56: 0.6, mat49: 0.4 },
+    kit: ["belt"], roles: SECTION_ROLES,
+    extras: { mustache: 0.5, sunglasses: 0.25, cigarette: 0.3, grenades: 0.55, scarf: 0.15 },
   },
   // ALN (the headband body, aln1). From memory, to check against photos: khaki
   // drill (much of it captured French) mixed with civilian browns; the chèche —
@@ -144,7 +155,7 @@ export const LOOKS = {
     roles: {
       0: { name: "leader", weapon: "mat49" },
       2: { name: "LMG", weapon: "fm2429" },
-      3: { name: "flag", kit: ["flag"] },
+      // (no standard-bearer: you, 2026-09-30 — the flag kit stays in KIT)
     },
     weaponMix: { mas36: 0.45, mauser98: 0.3, enfield: 0.25 },
     extras: { beard: 0.45, mustache: 0.5, bandolier: 0.4, bandoliers: 0.25, cigarette: 0.1, kachabia: 0.2 },

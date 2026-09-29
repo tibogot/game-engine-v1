@@ -91,7 +91,8 @@ Not wired into either game yet.
       Untouched texels keep the pack's look (your call: keep it).
 - [x] ALN v3 (2026-09-30, checked in Chrome): Mauser 98k + Lee-Enfield (SMLE)
       procedural; ALN `weaponMix` per man (MAS 36 / Mauser / Enfield); FLN
-      flag on a back pole for the standard-bearer (role 3); KACHABIA — an
+      flag on a back pole for the standard-bearer (role 3, since removed);
+      KACHABIA — an
       open-front hooded wool cape, the first SKINNED kit piece (spine above
       the hips, blended hips → each thigh below): follows a walk without
       tearing. Look "ALN, kachabia"; 20 % of an ALN section wears one.
@@ -111,11 +112,17 @@ Not wired into either game yet.
          target in range, the firing clip on each shot (the cooldown reset),
          idle; 0.2 s crossfades; deaths play once, hold, the body stays 14 s.
          Checked in the game (Chrome) + nam unchanged (idle/run fallback).
-   - [ ] **X-RAY needs work** (you, 2026-09-30): units show through EACH
-         OTHER (light-blue patches inside a squad of appelés). The x-ray should
-         only reveal a unit hidden by terrain, buildings, trees — not by
-         another unit. Look at how it decides "hidden" (depth vs everything
-         drawn) and rework it; check both games.
+   - [x] **X-RAY, CoH rules** (2026-09-30, checked in Chrome, both games):
+         only the WORLD hides a unit. By draw order, no stencil (the post
+         chain samples scene depth; a depth-stencil texture can't be sampled):
+         world opaque → silhouettes (renderOrder 30, opaque list, blended —
+         the depth buffer holds the world only) → units (31) paint over any
+         silhouette behind them. No glow through another unit or through the
+         unit itself (the per-vehicle Huey-sized depth lift is gone: one 2.5 m
+         lift for all, against grass and the ground). alg-rts now passes its
+         heightmap too: no silhouettes through hills (only nam did).
+   - [ ] x-ray later: overlapping silhouettes still stack their alpha (a
+         squad behind one wall reads a bit patchy); CoH's is one flat layer.
    - [ ] …still: cover (kneel idle / kneel fire), prone, dig for building
          sapeurs, the grenade throw; ONE clip table shared across types
    - [x] skinning work sized to the LIVE soldiers (renderer.compute count)
@@ -137,7 +144,15 @@ Not wired into either game yet.
          MESH's (8 units/m, flipped), not the pack world — hats came out 1/8.
    - [ ] the kachabia in the game (the one SKINNED kit piece: needs to join
          the body's crowd, or its own crowd per body)
-   - [ ] PARAS and the LÉGION as unit types? (you: cost, stats, where trained)
+   - [x] PARAS and the LÉGION (2026-09-30, trained + checked in Chrome):
+         `para` "Paras coloniaux" at the HELIPAD (the heliborne reserve; they
+         walk off the pad's edge — only aircraft launch) 110, 10 s: hp 80,
+         6.3 m/s, range 26, dmg 7, 3.0/s, Bigeard caps + red berets, MAT 49 /
+         MAS 49/56 mix. `legion` "Légionnaires" (1er REP) at the POST 150,
+         14 s: hp 95, 5.8 m/s, range 30, dmg 8, 2.6/s, green beret + grenade
+         badge (new look legionSection). ALN standard-bearer role removed
+         (you); the flag kit stays in the lab.
+   - [ ] balance paras / légion against the ALN once the AI fights them
    - [x] looks in the crowd shader; per-soldier variation from the instance
    - [ ] a ~1.5k-tri distance LOD of each body (meshoptimizer), judged from
          the RTS camera; soldier1's colour map → KTX2; no shadows on tiny kit
