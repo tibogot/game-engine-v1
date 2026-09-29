@@ -47,7 +47,7 @@ import { createCloudSkyLight } from "../render/sky/cloudSkyLight.js";
 import { createSkyWorldLight, WORLD_LIGHT_REFERENCE } from "../render/sky/skyWorldLight.js";
 import { SKY_LENS_FLARE_LOOK } from "../render/sky/skyLensFlareLook.js";
 import { createModularRoadClouds } from "../render/clouds/volumetricCloudDeck.js";
-import { createSkyProSky } from "../render/skypro/skyproSky.js";
+import { createSkyProSky, skyProKeyDir, skyProSunFromTime } from "../render/skypro/skyproSky.js";
 import { createOceanPro } from "../render/oceanpro/oceanproOcean.js";
 import { createPaintedClouds } from "../render/clouds/paintedCloudDeck.js";
 import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
@@ -1079,7 +1079,9 @@ export async function createWorldEnvironment({
     // is three's Lambert with intensity = sunColor; ambient = the environment alone).
     const L = skyPro.light();
     const Li = toolState.light;
-    const r = L.sunColor[0], g = L.sunColor[1], b = L.sunColor[2];
+    // the key light: the sun, or the moon at night (Tidewater App.applyAtmosphereReadback)
+    const kc = L.keyIsMoon ? [L.moonColor.x, L.moonColor.y, L.moonColor.z] : L.sunColor;
+    const r = kc[0], g = kc[1], b = kc[2];
     const m = Math.max(r, g, b, 1e-6);
     _skyProColor.setRGB(r / m, g / m, b / m, THREE.LinearSRGBColorSpace);
     const key = _skyProColor.getHexString() + "," + m.toFixed(3) + "," + skyPro.params.exposure;
@@ -1513,7 +1515,15 @@ export async function createWorldEnvironment({
     const lamSun = ((360 * ((ps.dayOfYear ?? 172) - 80)) / 365.25) * DEG;
     const declSun = Math.asin(Math.sin(OB) * Math.sin(lamSun));
     const Hsun = (t - 12) * 15 * DEG; // hour angle: 15°/h, 0 at solar noon
-    equatorialToDir(Hsun, declSun, lat, _todSunDir);
+    if (toolState.skyMode === "skypro") {
+      // Sky Pro keeps Tidewater's own sun path too (sky/Sky.js sunDirectionFromTime: latitude 24°,
+      // declination 6°, +x east, -z north): its day, dusk and moonlit night are tuned for that arc
+      // (at 23 h the sun is ~57° down and the moon high; on this clock's 45°N solstice it was 20°
+      // down with the moon low, a much darker night)
+      skyProSunFromTime(t, _todSunDir);
+    } else {
+      equatorialToDir(Hsun, declSun, lat, _todSunDir);
+    }
     // Round-trip through angles so manual override + updateSunSky still apply.
     toolState.light.sunElevation = THREE.MathUtils.radToDeg(
       Math.asin(THREE.MathUtils.clamp(_todSunDir.y, -1, 1)),
@@ -1936,7 +1946,15 @@ export async function createWorldEnvironment({
     const Li = toolState.light;
     sunDirectionFromAngles(Li.sunAzimuth, Li.sunElevation, sunDir);
     const sunUp = sunDir.y;
-    if (isDomeMode(toolState.skyMode) && sunUp < 0) {
+    if (toolState.skyMode === "skypro") {
+      // Sky Pro lights the world entirely, night included (Tidewater App.updateSun): its key light's
+      // direction (the moon lifted above the horizon at night, not the dome skies' anti-sun), and
+      // the colour and intensity driveSkyProSky took from it (horizon fade and night already in).
+      skyProKeyDir(sunDir, _effectiveLightDir);
+      placeSun();
+      sun.color.set(Li.dirColor);
+      sun.intensity = Li.dirIntensity;
+    } else if (isDomeMode(toolState.skyMode) && sunUp < 0) {
       _effectiveLightDir.copy(sunDir).negate();
       placeSun();
       sun.color.set(toolState.proceduralSky.moonColor);

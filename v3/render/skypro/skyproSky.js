@@ -71,6 +71,32 @@ export const SKYPRO_DEFAULTS = {
 const SKY_RADIUS = 4000;
 
 /**
+ * Tidewater sky/Sky.js sunDirectionFromTime: the sun's direction at `hours` (latitude 24°, declination
+ * 6°; +x east, -z north, y up). Writes `out`.
+ */
+export function skyProSunFromTime(hours, out, latitudeDeg = 24, declinationDeg = 6) {
+  const phi = latitudeDeg * Math.PI / 180;
+  const dec = declinationDeg * Math.PI / 180;
+  const H = (hours - 12) * 15 * Math.PI / 180;
+  const east = -Math.cos(dec) * Math.sin(H);
+  const north = Math.cos(phi) * Math.sin(dec) - Math.sin(phi) * Math.cos(dec) * Math.cos(H);
+  const up = Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H);
+  return out.set(east, up, -north).normalize();
+}
+
+/**
+ * Tidewater App.updateSun: the key light's direction for a sun direction. The sun until it is well
+ * below the horizon (it gives no direct light in twilight anyway), then the moon — opposite the sun
+ * in azimuth, lifted so it always stands at least ~14 deg up. Writes `out`, returns whether it is the moon.
+ */
+export function skyProKeyDir(sunDir, out) {
+  const keyIsMoon = sunDir.y <= -0.07;
+  if (keyIsMoon) out.set(-sunDir.x, Math.abs(sunDir.y) * 0.8 + 0.25, -sunDir.z).normalize();
+  else out.copy(sunDir);
+  return keyIsMoon;
+}
+
+/**
  * @param {object} o
  * @param {THREE.WebGPURenderer} o.renderer
  * @param {THREE.PerspectiveCamera} o.camera
@@ -163,7 +189,7 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     if (o.moonDir) moonDir.copy(o.moonDir);
     else moonDir.set(-s.x, Math.abs(s.y) * 0.8 + 0.25, -s.z).normalize();
     const keyIsMoon = s.y <= -0.07;
-    lightDir.copy(keyIsMoon ? moonDir : s);
+    lightDir.copy(keyIsMoon ? moonDir : s);   // (skyProKeyDir, with a given moon)
     moonColor.set(0.6, 0.7, 1.0).multiplyScalar(0.12 * night);
 
     atmosphere.update({ dt, cameraY: camera.position.y, sunDir: s, moonDir, starIntensity: night, night, time, sunDiskIntensity: 1 });
