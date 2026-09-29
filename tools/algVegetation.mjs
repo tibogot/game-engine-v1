@@ -77,13 +77,21 @@ const fresh = args.includes("--histogram");
 const P30 = fresh ? pct(0.3) : PINNED.p30, P55 = fresh ? pct(0.55) : PINNED.p55, P70 = fresh ? pct(0.7) : PINNED.p70, P90 = fresh ? pct(0.9) : PINNED.p90;
 
 const lakes = man.lakes?.lakes ?? [];
-/** Distance from a lake's centre in units of its pool radius (sizeX / 3.2). */
+// Each pool's REAL radius, from its wet area: a lake's rectangle was 3.2
+// radii when algOasis.mjs made it, but a moved one (algOasisMove.mjs) is fitted
+// tight round its pool, and sizeX / 3.2 crowded its palms into the water.
+for (const l of lakes) {
+  let wetN = 0;
+  for (let x = l.cx - l.sizeX / 2; x <= l.cx + l.sizeX / 2; x += 1) for (let z = l.cz - l.sizeZ / 2; z <= l.cz + l.sizeZ / 2; z += 1) if (H(x, z) < l.level) wetN++;
+  l._poolR = Math.max(4, Math.sqrt(wetN / Math.PI));
+}
+/** Distance from a lake's centre in units of its pool's radius. */
 const oasisD = (x, z) => {
   let best = 99;
-  for (const l of lakes) best = Math.min(best, Math.hypot(x - l.cx, z - l.cz) / (l.sizeX / 3.2));
+  for (const l of lakes) best = Math.min(best, Math.hypot(x - l.cx, z - l.cz) / l._poolR);
   return best;
 };
-const wet = (x, z) => lakes.some((l) => H(x, z) < l.level + 0.15 && Math.hypot(x - l.cx, z - l.cz) < l.sizeX / 2);
+const wet = (x, z) => lakes.some((l) => H(x, z) < l.level + 0.15 && Math.abs(x - l.cx) < l.sizeX / 2 && Math.abs(z - l.cz) < l.sizeZ / 2);
 const siteFade = (x, z) => {
   let k = 1;
   for (const s of SITES) k = Math.min(k, smooth((Math.hypot(x - s.x, z - s.z) - s.r) / 8));
@@ -122,7 +130,8 @@ const TALL = [
   { name: "Holm oak", preset: "holmOak", fn: (x, z, h, s) => band(h, P30, P90, 10) * band(s, 6, 28, 5) * patches(x, z, 45, 0.3, 5) * 0.3 },
   // Groves, not single trees: each plant is a clump of 3 (dateGrove), so a
   // little thinner than the single palm was.
-  { name: "Date grove", preset: "dateGrove", fn: (x, z) => { const d = oasisD(x, z); return band(d, 1.08, 2.4, 0.25) * patches(x, z, 9, 0.55, 9) * 0.22; } },
+  // Denser and closer in (2026-09-29, the oasis look): a grove, not a scatter.
+  { name: "Date grove", preset: "dateGrove", fn: (x, z) => { const d = oasisD(x, z); return band(d, 1.05, 2.5, 0.2) * (0.45 + 0.55 * patches(x, z, 9, 0.55, 9)) * 0.3; } },
   { name: "Juniper scrub", preset: "juniperScrub", fn: (x, z, h, s) => band(s, 5, 30, 4) * (0.25 + 0.75 * patches(x, z, 30, 0.45, 11)) * 0.32 },
 ];
 /** Metres from a wadi's centreline, over its half-width (1 = the bed's edge). */
@@ -232,6 +241,7 @@ project.blobs.set("foliagePaint", Buffer.from(ground.out.buffer));
 console.log(`land height bands: p30 ${P30.toFixed(0)} · p55 ${P55.toFixed(0)} · p70 ${P70.toFixed(0)} · p90 ${P90.toFixed(0)} m; lakes ${lakes.length}`);
 TALL.forEach((sp, i) => console.log(`tall ${i} ${sp.name.padEnd(14)} ${tall.count[i]} texels`));
 GROUND.forEach((sp, i) => console.log(`ground ${i} ${sp.name.padEnd(12)} ${ground.count[i]} texels`));
+for (const l of lakes) delete l._poolR;   // a working value, not map data
 if (!dry) {
   await writeProject(FILE, project);
   console.log(`wrote ${FILE}`);

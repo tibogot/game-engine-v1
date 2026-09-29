@@ -61,6 +61,11 @@ export const PHOTO_SOURCES = {
     diff: "/textures/ground/dry_mud_field_001/dry_mud_field_001_diff_1k.jpg",
     nor: "/textures/ground/dry_mud_field_001/dry_mud_field_001_nor_gl_1k.jpg",
   },
+  // The Aurès valley soil (alg-aures slot 0): wet at an oasis's edge (tools/algOasisLook.mjs).
+  soil: {
+    diff: "/textures/ground/brown_mud_dry/brown_mud_dry_diff_1k.jpg",
+    nor: "/textures/ground/brown_mud_dry/brown_mud_dry_nor_gl_1k.jpg",
+  },
 };
 
 /** How far each strip end fades, in metres. Placement overlaps segments by this. */

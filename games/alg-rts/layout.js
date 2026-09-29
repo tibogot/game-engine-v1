@@ -58,7 +58,7 @@ export const LAYOUT = {
     { kind: "point", name: "Cedar spring", x: -150, z: -300, r: 16 },
     { kind: "point", name: "Kef lookout", x: 237, z: -354, r: 16 },
     { kind: "pass", name: "Col de l'Ouest", x: -275, z: 326, r: 16 },
-    { kind: "oasis", name: "Ain el Oued", x: -120, z: 330, r: 22 },
+    { kind: "oasis", name: "Ain el Oued", x: -136, z: 352, r: 22 },
     { kind: "hamlet", name: "Mechta el Oued", x: 270, z: -70, r: 36, turn: -25 },
     // The dechra up a 17° slope in the contested west (MEASURED: rises
     // straight away from the player's camera, ~0 side tilt), its koubba on the

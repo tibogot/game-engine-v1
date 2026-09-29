@@ -809,14 +809,29 @@ Order: foliage → villages → animals & birds → ground detail.
       CPU ~2 ms (nam-valley: ~176 draws). Clean console; tests green.
 
 Asset follow-ups:
-- [ ] **A better-looking OASIS** (you, 2026-09-29): the water is nice, but
-      the ground round it doesn't read as an oasis — "Oasis ground" (slot 3,
-      grass_ground tinted #b8b890, tools/algOasis.mjs) comes out a
-      brown-green that is neither desert nor garden. Wanted: a dark, damp
-      ring of earth at the water, lush green under the palms (irrigated
-      gardens, reeds), then a sharp edge to the pale desert — the contrast
-      is what says oasis. Check the texture, the tint, the ring widths,
-      maybe small walled palm gardens (the new garden kit) and seguias.
+- [ ] **STONES that match the stony ground** (you, 2026-09-29, after the
+      oasis): loose rocks and stone scatter on the map whose colour and grain
+      are the ground textures' own (gravelly_sand scree, rock_boulder_cracked
+      limestone, the valley soil's pebbles), so they sit IN the ground instead
+      of on it — placed where those layers are painted (scree slopes, ridges,
+      wadi banks). The kit's fieldStone is limestone-grey and reads foreign.
+- [x] **A better-looking OASIS** (you, 2026-09-29): the ground round the
+      water read as neither desert nor garden. tools/algOasisLook.mjs, per
+      lake: slot 3 is now "Oasis grove" (forrest_ground_01, tint #f2f5e6)
+      painted out to poolR×1.4+10 m with a noisy edge (never over wadi beds
+      or tracks); grass only in the damp ring 2.5 m → grove edge, and it is
+      nam-rts's grass ("far better", you): tools/algGrassFromNam.mjs copies
+      nam-valley's system (revo) and its look; 24 + 17
+      photo MUD decals (new `soil` source, textures/decals/alg/mud_*) along
+      the waterline; the date grove denser
+      and sized from the real pool radius (algVegetation `_poolR`).
+      **Ain el Oued sat on the Oued el Abiod's bank** and its 51 m lake
+      square flooded the dry bed: tools/algOasisMove.mjs refilled the old
+      basin to the eroded ground, moved it to (-136, 352), lake fitted tight
+      to the pool (31×35 m, level 3.92), 0 wadi texels wet.
+      Order: algOasisMove → algOasisLook → algVegetation.
+- [ ] Oasis extras: small walled palm gardens (the garden kit) and seguias;
+      the grove's edge is still quite round from above — you, look.
 - [ ] Oasis: a second one, and paint the lake params per map in the editor
       (all lakes in a map share one water setting).
 - [ ] Put the plants into the map's paint (4 tall slots: cedar, oak, scrub,
