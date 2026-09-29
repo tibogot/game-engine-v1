@@ -30,11 +30,16 @@ export function createBirdBuilder() {
   // From the position, a shared vertex always has one weight: no seam can
   // open, and the neck CURVES down instead of hinging like a lid.
   let headFn = null;
+  // Standing birds' LEGS: the hand channel carries the leg weight instead (a
+  // standing bird's wings never beat) — signed by side (+1 right, -1 left),
+  // 0 at the hip to 1 at the foot, from the position like the head's: the
+  // vertex stage swings each leg from its hip when the bird walks.
+  let legFn = null;
   const tri = (a, b, c, col, hand = [0, 0, 0], normal = [0, 1, 0]) => {
     P.push(...a, ...b, ...c);
     const vs = [a, b, c];
     for (let i = 0; i < 3; i++) {
-      COL.push(...col); SP.push(species); HAND.push(hand[i]); NRM.push(...normal);
+      COL.push(...col); SP.push(species); HAND.push(legFn ? legFn(vs[i]) : hand[i]); NRM.push(...normal);
       HEAD.push(headFn ? headFn(vs[i]) : head);
     }
   };
@@ -192,6 +197,7 @@ export function createBirdBuilder() {
     // the tarsus to the foot; four-sided, thin. Toes: three forward, one back.
     for (const sx of [1, -1]) {
       const hip = [sx * 0.045, 0.47, -0.1], ankle = [sx * 0.05, 0.25, -0.13], foot = [sx * 0.055, 0.012, -0.07];
+      legFn = (v) => sx * Math.max(0.001, Math.min(1, (hip[1] - v[1]) / (hip[1] - 0.004)));
       const tube = (p0, p1, r) => {
         const c = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, (p0[2] + p1[2]) / 2];
         const o = [[r, 0, 0], [0, 0, r], [-r, 0, 0], [0, 0, -r]];
@@ -210,6 +216,7 @@ export function createBirdBuilder() {
         facet([foot[0] - 0.005, 0.012, foot[2]], [foot[0] + 0.005, 0.012, foot[2]], t2, look.leg, [foot[0], 0.05, foot[2]]);
       }
     }
+    legFn = null;
     headFn = null;
   };
 

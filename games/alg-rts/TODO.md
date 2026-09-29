@@ -8,6 +8,35 @@ Keep this file current: tick things off here, add new asks here.
 
 ---
 
+## YOUR ASKS — 2026-09-29: soldiers from Mixamo
+
+Pipeline: `public/models/soldiers/` (the Mixamo FBX rig + clips, and unrigged
+GLB soldiers) → `node tools/packMixamo.mjs` → `soldiers.glb` (one skeleton,
+clips once, every soldier skinned to it) → judged in `v3/soldier-lab.html`.
+Not wired into either game yet.
+
+- [x] Pack tool + lab. soldier1 (the Mixamo rig) and soldier3 (your GLB, given
+      the rig's skeleton by nearest-surface weight transfer: median 0.4 cm off
+      the rig's skin, unchanged through every clip — no tearing).
+- [ ] **you**: judge soldier1 vs soldier3 in the lab (close + RTS camera,
+      "Skin weights" view), then download the full RIFLE clip set (~14–20,
+      "In Place", short idles 2–4 s) and drop the other soldiers in.
+- [ ] **Weapons in their hands** — a rifle mesh attached to the right-hand
+      bone; the rifle clips keep the grip the same across clips.
+- [ ] **Soldiers that fit French Algeria** — the current ones are Vietnam-war
+      US soldiers (stand-ins). Find/modify: French appelés (M1947 or
+      Satin 300 fatigues, bush hat / beret / M51 helmet, MAS 49/56), paras
+      (leopard camo "tenue léopard", casquette Bigeard), ALN moudjahidine
+      (mixed khaki, civilian clothes, keffiyeh/chèche). Same body + pose as
+      the rig so they get its skeleton for free.
+- [ ] Asset cuts before shipping: lower-poly crowd version (~1.5k tris; skin
+      cost = verts × soldiers), soldier1's PNG colour map → KTX2, colour maps
+      at 512 (judge in the lab).
+- [ ] Crowd cost per unit TYPE (games/shared-rts/crowdSkinning.js): one crowd
+      per type, each skinning its full 160 capacity once it has anyone. Share
+      one crowd between types that use the same mesh, size the dispatch to the
+      live count, and share the baked clip table.
+
 ## NOTE FROM THE NAM SESSION — 2026-09-28: cloud shadows in games
 - [ ] Read this before the next Sky Pro commit. cloudShadowsLite's sampler-free
       4-textureLoad read cost nam 1.2-1.6 ms (0.14 before, same camera, gpuAB);
@@ -1092,6 +1121,8 @@ Asset follow-ups:
       cover re-baked (bags: hard). The post STARTS BARE (?defences=1 = the
       old pre-placed set). Tested: nest + bags placed, paid 110, both up in
       ~15 s, the nest in the structures, cover 1.0 behind the bags.
+- [x] **The storks in the fields WALK** (2026-09-29, shared bird kit — see
+      nam's TODO): legs stride, head bobs, feet don't skate; ~0 GPU.
 - [ ] **THE PROJECTEUR MUST WORK AS A SEARCHLIGHT** (you, 2026-09-29: "cool,
       but it should work as a projecteur"). Cheap, no real light: an
       additive (unlit) beam cone from the lamp + a soft pool on the ground

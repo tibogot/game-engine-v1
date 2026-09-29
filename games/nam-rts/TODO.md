@@ -16,6 +16,13 @@ the detail and history below point back as `[→#n]`. Add new asks HERE (and a
 detail note below if it needs one). Tick here when done.
 
 ### Done 2026-09-29
+- [x] WADING BIRDS WALK (you: "they slide when they move"): egrets and
+      herons (and alg's storks — the shared bird kit) swing each leg from
+      the hip in turn, lift the foot going forward, bob the head twice a
+      stride and stop pecking while they walk. The step advances by the
+      ground covered (a stride ~0.55 of the bird's height) so feet don't
+      skate. All in the bird shader, still one draw: the whole bird mesh
+      on/off measured 9.93 vs 9.95 ms GPU (noise).
 - [x] ANIMALS AT UNIT SCALE (you, after the same fix in alg-rts): buffalo,
       sambar and muntjac drawn real × RTS_SCALE like the men (at real size a
       buffalo by a 2.3 m soldier read as a calf, a muntjac as a speck). Every

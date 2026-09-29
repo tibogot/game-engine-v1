@@ -138,13 +138,29 @@ export function createRtsBirds({ app, units = null, params = {}, birds: B }) {
       .add(float(0.12).mul(float(1).sub(flapping)))
       .mul(float(1).sub(stand));
     const nx = x.mul(cos(angle)).mul(side);
-    const ny0 = positionLocal.y.add(x.mul(sin(angle)));
+    let ny0 = positionLocal.y.add(x.mul(sin(angle)));
+    let z0 = positionLocal.z;
+    // A standing bird WALKS (it slid before, you, 2026-09-29): for a standing
+    // species the instance's wing phase is its STEP phase and its panic how
+    // much it is walking (0-1, eased on the CPU); the vertex's hand weight is
+    // its LEG weight, signed by side (birdKit.js). Each leg swings from its
+    // hip (y 0.47, z -0.1) half a cycle from the other, the foot lifted on
+    // the way forward.
+    const walk = inst.z.mul(stand), leg = vtx.y.mul(stand);
+    const legW = abs(leg), legOn = smoothstep(0.0005, 0.05, legW);
+    const ph = inst.y.add(select(leg.lessThan(0), float(Math.PI), float(0)));
+    const swing = sin(ph).mul(0.42).mul(walk).mul(legOn);
+    const ly = ny0.sub(0.47), lz = z0.add(0.1);
+    ny0 = ly.mul(cos(swing)).sub(lz.mul(sin(swing))).add(0.47)
+      .add(max(float(0), cos(ph).negate()).mul(0.06).mul(legW).mul(walk));
+    z0 = ly.mul(sin(swing)).add(lz.mul(cos(swing))).sub(0.1);
     // A standing egret pecks: now and then the neck and head dip forward and
     // down about the shoulder, and come back up. aBird.z is a smooth 0-1
     // weight up the neck, so the neck curls into the dip rather than hinging.
+    // Walking, it does not peck: its head bobs, twice a stride.
     const pulse = smoothstep(0.8, 1.0, sin(uTime.mul(0.7).add(h.mul(37))).mul(0.5).add(0.5));
-    const pa = pulse.mul(1.2).mul(vtx.z).mul(stand);
-    const dy = ny0.sub(0.64), dz = positionLocal.z.sub(0.13);
+    const pa = pulse.mul(1.2).mul(float(1).sub(walk)).add(sin(inst.y.mul(2)).mul(0.14).mul(walk)).mul(vtx.z).mul(stand);
+    const dy = ny0.sub(0.64), dz = z0.sub(0.13);
     const ny = dy.mul(cos(pa)).sub(dz.mul(sin(pa))).add(0.64);
     const nz = dz.mul(cos(pa)).add(dy.mul(sin(pa))).add(0.13);
     return vec3(nx, ny, nz).mul(mine);
@@ -626,17 +642,24 @@ export function createRtsBirds({ app, units = null, params = {}, birds: B }) {
           if (!blocked(tx, tz)) { b.tx = tx; b.tz = tz; }
         }
         const dx = b.tx - b.x, dz = b.tz - b.z, d = Math.hypot(dx, dz);
+        let moved = 0;
         if (d > 0.05) {
           const step = Math.min(d, 0.45 * dt);
           b.x += (dx / d) * step; b.z += (dz / d) * step;
+          moved = step;
           const want = Math.atan2(dx, dz);
           let dy = want - b.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
           b.yaw += dy * Math.min(1, dt * 5);
         }
+        // The legs (shader): the step phase advances by the ground covered —
+        // a stride (two steps) ~0.55 of the bird's height — so the feet
+        // don't skate; the walk eases in and out over a fifth of a second.
+        b.step = ((b.step ?? Math.random() * TAU) + (moved / (0.55 * b.size)) * TAU) % TAU;
+        b.walk = THREE.MathUtils.clamp((b.walk ?? 0) + (moved > 0 ? dt : -dt) * 5, 0, 1);
         _p.set(b.x, ground(b.x, b.z), b.z);
         _e.set(0, b.yaw, 0);
         _q.setFromEuler(_e);
-        put(_p, _q, b.size, b.shape ?? 3, 0, 0, _p.y + 0.05, b.yaw);
+        put(_p, _q, b.size, b.shape ?? 3, b.step, b.walk, _p.y + 0.05, b.yaw);
       }
     }
 
@@ -742,6 +765,8 @@ export function createRtsBirds({ app, units = null, params = {}, birds: B }) {
     update,
     flush,
     disturb,
+    /** The settled stands (dev, tests): [{ site, birds: [{ x, z, yaw, walk, step }] }]. */
+    get stands() { return stands; },
     /**
      * A flock that CIRCLES a place for good — slow, high, never leaving (Kurtz's
      * temple: dread for free). Crows by default: black shapes wheeling.
