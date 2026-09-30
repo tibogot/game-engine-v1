@@ -2332,6 +2332,42 @@ Large-scale variation was already measured free.
       < the terrain's — they would be painted over (nam-rts had none: decals
       9, sky 9, river 10.5). Then measure each game A/B at the same clock.
 
+### GPU culling and Hi-Z occlusion (started 2026-09-30)
+
+Lab: `v3/gpu-cull-lab.html` (470a8c5) — `v3/render/culling/hizPyramid.js`,
+`gpuInstanceField.js`. Measured there, GPU held at ~780 MHz by the light
+load (interleaved deltas only): at GROUND level occlusion drew 9,819 → 1,593
+instances, render −0.66 ms (three runs agree), but the pyramid costs +0.48 ms
+→ net −0.18 ms. At RTS / overview height it hides 1–8%, and auto mode turns
+the test and the pyramid off (+0.02 ms). The pyramid's cost is READING the
+full-res 4× MSAA depth, not its dispatch count (a one-texel read = no read).
+The lab props are cheap to shade; the real test is heavy content.
+
+- [ ] **1. Wire occlusion into the heavy fields, then measure on real content.**
+      One engine-owned HiZPyramid built from the post-FX scene pass depth
+      (`postFxPipeline` depthTexture) after the scene renders, invalidated on
+      any frame it is not built. Add the test to the CAMERA list only — never
+      the shadow lists — in `leafFieldRenderer.js` (tree leaves; move its own
+      frustum copy onto `gpuCull.js` at the same time) and `scatterField.js`
+      (foliage, flowers, susuki). Not revo grass yet (blades are cheaper than
+      the test). Measure in editor PLAY mode at ground level on a hilly map,
+      plus nam and alg to confirm auto stays off there.
+- [ ] **2. Only if 1 shows the pyramid eating the gain:** read fewer depth
+      pixels — first check whether the scene pass needs 4× MSAA at all (the
+      open `samples: 0` A/B from the Tidewater notes), then a low-res occluder
+      depth pre-pass (terrain, buildings, cliffs) as the pyramid's source.
+- [ ] **3. Fast-turn popping check** — lab key T (180°/s) and in play mode;
+      the user judges it. Occlusion uses LAST frame's depth, so things revealed
+      by motion can arrive one frame late. Fix only if seen: the two-phase
+      test (redraw last frame's visible set, rebuild, test the rest).
+- [ ] **4. Props onto the GPU** (`GpuInstanceField` → PropInstancer parity):
+      per-cascade shadow lists (Tidewater ReefBatch swaps indirect offsets for
+      shadow cameras instead of extra meshes), LOD hysteresis or a dithered
+      cross-fade (Tidewater `LODFade.js`), hide/show, per-edit dirty updates;
+      picking stays on the CPU. Mostly a CPU win (3.5 ms at 12k props) plus
+      occlusion for props, so it matters at open-world scale, less for the RTS
+      games (not CPU-bound). Behind a toggle, `perInstanceCull` the fallback.
+
 ## Suggested order (updated 2026-09-17)
 
 1. ~~Viewport selection + prop foundation~~ — DONE 2026-09-14 (28-30, 35-37,
