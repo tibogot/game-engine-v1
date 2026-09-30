@@ -11,7 +11,7 @@
  * The bed runs DOWNHILL all the way (water made it): the ground is sampled
  * along the route, the profile forced monotone, and the bed cut `depth` under
  * it. Only ever CUTS — the ground outside a wadi's banks is untouched. Paint:
- * slot 4 "Wadi bed" (dry_river_pebbles, Poly Haven CC0) on the bed, easing
+ * slot 4 "Wadi bed" (rocky_trail, Poly Haven CC0) on the bed, easing
  * out over the lower banks.
  *
  * Run it on a map that has NOT had these wadis carved (it cuts again each
@@ -124,8 +124,10 @@ const tex = (id) => {
   return { albedo: f("diff"), normal: f("nor_gl"), rough: f("rough"), ao: f("ao") };
 };
 man.paintLayers[SLOT] = {
-  name: "Wadi bed", ...tex("dry_river_pebbles"),
-  uvScale: 110, normalStr: 1, aoStr: 0.8, roughStr: 1, triplanar: false, tint: "#e8dcc4",
+  // rocky_trail (2026-09-30): fine gravel in sand. dry_river_pebbles was big
+  // painted cobbles, "fakes stones" (you). A ~4 m tile.
+  name: "Wadi bed", ...tex("rocky_trail"),
+  uvScale: 256, normalStr: 1, aoStr: 0.8, roughStr: 1, triplanar: false, tint: "#f4ece0",
   uvRotation: 0, contourAlign: 0, rockShade: 0, procedural: null, blocksGrass: false, blocksTrees: true,
   auto: { enabled: false, heightMin: 0, heightMax: 500, slopeMin: 0, slopeMax: 90, blend: 15, strength: 1 },
 };

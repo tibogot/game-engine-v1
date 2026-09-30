@@ -67,6 +67,21 @@ skinned to it) → judged in `games/shared-rts/soldier-lab.html`. In alg-rts
 - [ ] **you**: judge soldier1 vs soldier3 in the lab (close + RTS camera,
       "Skin weights" view), then download the full RIFLE clip set (~14–20,
       "In Place", short idles 2–4 s) and drop the other soldiers in.
+- [x] **THE SOLDIER LAB, reworked** (you, 2026-09-30: "no button for a whole
+      section; the selection is buggy, it changes"). The bug: picking a LOOK
+      silently switched Body to All and reset the Weapon to the look's (and
+      stayed there); a lone man was dressed as man #0 = the section leader.
+      Now: Body and Weapon have AUTO (the look's own bodies / each man's own
+      weapon as the game gives it) and a hand pick STAYS; "On show" and
+      "Carried: MAT 49 ×15, …" say what is really there. SQUAD: 1 of each
+      body / groupe 12 / section 30 (roles every 12th man, as in the game);
+      formation ranks / column / loose (CoH); BATTLE MIX (each man his own
+      idle/aim/fire/reload, standing, kneeling or lying). Clips grouped
+      (standing, kneeling, lying, posture moves, work, deaths); a TIME
+      scrubber + "in step"; the RTS view and the sun's shadow box fit the
+      group; HUD text no longer selects on a drag, a clicked button gives
+      its focus back (Space no longer re-presses it).
+   - [ ] **you, look**: a section of 30 in battle mix, from the RTS view
 - [~] **Weapons in their hands.** Built 2026-09-29: procedural MAS 49/56,
       MAT 49, MAS 36 (games/shared-rts/procWeapons.js, 180–280 tris) on a
       WEAPON bone the pack tool adds under the right hand, aimed per clip at the
@@ -473,10 +488,11 @@ skinned to it) → judged in `games/shared-rts/soldier-lab.html`. In alg-rts
       ~8 mm/frame, step change ≤1.2 mm). Bands were blurry vertex colours
       on 8 rings; now a crisp striped nylon texture (weave, stitched band
       edges), 16 rings.
-- [ ] **Replace the "Wadi bed" texture** (you: `dry_river_pebbles` fakes
-      stones — big painted cobbles, and it looks wrong). Candidates fetched
-      from Poly Haven: `rocky_trail` (fine dry gravel in sand), 
-      `rocks_ground_02`. Judge in the game.
+- [x] **Replace the "Wadi bed" texture** (you: `dry_river_pebbles` fakes
+      stones — big painted cobbles, and it looks wrong). 2026-09-30:
+      `rocky_trail` (Poly Haven CC0, fine gravel in sand), a ~4 m tile,
+      tint #f4ece0 — in the map and in algWadi.mjs; the wadi stones take the
+      same photo. (`rocks_ground_02` was browner, muddy: not used.)
 - [x] (Done above, algWind.js.) **Windsock that moves with the wind, like the flags** (you). Cheap: one
       small mesh. Better as a VERTEX-animated cone than a cloth sim — it
       swings to the wind direction, fills and droops with wind speed,

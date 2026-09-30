@@ -32,7 +32,7 @@ const GROUNDS = {
   scree:     { slot: 2, id: "gravelly_sand",        tint: "#ffffff", per100: 5.5, shapes: [["pebble", 0.55], ["rock", 0.4], ["lump", 0.05]] },
   limestone: { slot: 1, id: "rock_boulder_cracked", tint: "#ffffff", per100: 1.2, shapes: [["rock", 0.45], ["lump", 0.35], ["boulder", 0.2]] },
   soil:      { slot: 0, id: "brown_mud_dry",        tint: "#ffffff", per100: 0.35, shapes: [["pebble", 0.6], ["rock", 0.4]] },
-  wadi:      { slot: 4, id: "dry_river_pebbles",    tint: "#e8dcc4", per100: 4.0, shapes: [["cobble", 0.7], ["pebble", 0.3]] },
+  wadi:      { slot: 4, id: "rocky_trail",          tint: "#f4ece0", per100: 4.0, shapes: [["cobble", 0.7], ["pebble", 0.3]] },
   gravel:    { slot: 6, id: "dry_mud_field_001",    tint: "#eadcc4", per100: 9.0, shapes: [["pebble", 0.8], ["rock", 0.2]], edge: [0.08, 0.55] },
 };
 
