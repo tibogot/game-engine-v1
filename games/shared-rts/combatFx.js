@@ -53,6 +53,17 @@ export function createCombatFx({ app, pool = 40 }) {
       books.explode(x, y, z, { size, duration: 1.9 + size * 0.07 });
     },
 
+    /**
+     * A GRENADE going off: not a fireball — a sharp small flash, a short dark
+     * burst and the earth it throws up (alg-rts, 2026-09-30: the mortar
+     * blast it had read as a bomb).
+     */
+    grenade(x, y, z) {
+      impacts.spawn(x, y + 0.4, z, IMPACT_LIFE * 1.5);
+      books.explode(x, y - 0.3, z, { size: 2.6, duration: 0.8 });
+      books.puff(x, y, z, { size: 3.4, duration: 1.6 });
+    },
+
     /** A tank gun: a flash big enough to bloom, and a puff of grey gun smoke. */
     cannon(x, y, z) {
       blasts.spawn(x, y, z, 0.12);

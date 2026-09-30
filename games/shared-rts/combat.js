@@ -180,9 +180,13 @@ export function createCombat({
    * a tin, and a grenade in a tin does not hurt an M48.
    */
   const _splashNear = [];
-  function splashAt(at, damage, radius, owner = null, { vehicleMul = 1 } = {}) {
-    fx.explosion(at.x, at.y, at.z, { size: Math.max(6, radius * 1.1) });
-    craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7));
+  function splashAt(at, damage, radius, owner = null, { vehicleMul = 1, kind = null } = {}) {
+    // A grenade: its own small burst and a scorch, not a shell's crater.
+    if (kind === "grenade" && fx.grenade) { fx.grenade(at.x, at.y, at.z); craters?.addCrater(at.x, at.z, 0.75); }
+    else {
+      fx.explosion(at.x, at.y, at.z, { size: Math.max(6, radius * 1.1) });
+      craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7));
+    }
     onSplash?.(at, radius, owner);
     const hit = (o) => {
       if (!o.alive || o.isAir || o.passive) return;

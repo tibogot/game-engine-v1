@@ -29,6 +29,8 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // (algGame.js), so they are looked up at the moment of the blast.
   const explosion = fx.explosion;
   fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) app.algBirds?.flush(x, z, { size: opts?.size ?? 10 }); };
+  const grenade = fx.grenade;
+  fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); };
 
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combat = null;
@@ -37,7 +39,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     // Every shot puts up any storks standing near it (no sound yet).
     sfx: { shot: (owner, w, at) => app.algBirds?.disturb(at.x, at.z), rocket() {}, impact() {}, incoming() {} },
     onImpact: (target, dmg, at, owner, opts) => combat?.onImpact(target, dmg, at, owner, opts),
-    onArcImpact: (at, dmg, splash, owner) => combat?.splashAt(at, dmg, splash, owner),
+    onArcImpact: (at, dmg, splash, owner, o) => combat?.splashAt(at, dmg, splash, owner, o),
   });
 
   // BLOOD (bloodField.js): a man hit sprays from the wound, a man down lies

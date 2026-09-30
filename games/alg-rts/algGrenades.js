@@ -143,7 +143,7 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
         const h = app.getWorldHeight?.(job.x, job.z) ?? 0;
         const from = u.position.clone(); from.y += 1.9;
         const to = from.clone().set(job.x, h + 0.2, job.z);
-        projectiles.spawnArc(from, to, { damage: P.damage, splash: P.blast, owner: u, flight: 0.7 + from.distanceTo(to) / 30 });
+        projectiles.spawnArc(from, to, { damage: P.damage, splash: P.blast, owner: u, flight: 0.7 + from.distanceTo(to) / 30, kind: "grenade" });
       }
       if (job.t >= P.done) end(job, i);
     }

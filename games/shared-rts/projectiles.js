@@ -106,15 +106,22 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
 
   const shells = [];
   for (let i = 0; i < MAX_SHELLS; i++) {
-    shells.push({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), to: new THREE.Vector3(), t: 0, flight: 0, damage: 0, splash: 0, owner: null });
+    shells.push({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), to: new THREE.Vector3(), t: 0, flight: 0, damage: 0, splash: 0, owner: null, kind: null });
   }
+  // A thrown GRENADE (kind "grenade", alg-rts algGrenades.js) is the same
+  // mesh made hand-sized — ~0.24 m across, 0.3 m long (a real one is 6 × 11
+  // cm; x 1.3 unit scale and a little more to be seen at RTS distance) — and
+  // it TUMBLES; the mortar bomb flies nose first. Was the 1.8 m bomb (you,
+  // 2026-09-30: "it looks like a huge bomb").
+  const GRENADE_SCALE = new THREE.Vector3(0.28, 0.28, 0.16);
+  const _gq = new THREE.Quaternion(), _gAxis = new THREE.Vector3(1, 0.3, 0).normalize();
 
   /**
    * Lob a shell from `from` onto the point `to`, landing in `flight` seconds
    * (default: further is longer). `splash` metres of blast; the game decides
    * what that does (onArcImpact → combat.splashAt).
    */
-  function spawnArc(from, to, { damage = 30, splash = 9, owner = null, flight = null } = {}) {
+  function spawnArc(from, to, { damage = 30, splash = 9, owner = null, flight = null, kind = null } = {}) {
     const s = shells.find((r) => !r.alive);
     if (!s) return null;
     s.alive = true;
@@ -124,6 +131,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     s.damage = damage;
     s.splash = splash;
     s.owner = owner;
+    s.kind = kind;
     s.t = 0;
     s.flight = flight ?? Math.min(5.5, 1.9 + from.distanceTo(to) / 80);
     // The velocity that puts it on the point in exactly that time under SHELL_G.
@@ -142,7 +150,9 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     for (const s of shells) {
       if (!s.alive) continue;
       const left = Math.max(0, 1 - s.t / s.flight);            // 1 → 0
-      const r = s.splash * (1 + left * 0.9);
+      // A mortar's ring closes in from nearly twice its blast; a grenade's
+      // (a short lob, a small blast) barely — it read as a bomb coming.
+      const r = s.splash * (1 + left * (s.kind === "grenade" ? 0.25 : 0.9));
       rings.add(s.to.x, s.to.z, r, left < 0.35 ? 0xff3a2a : 0xffb020);
     }
   }
@@ -340,12 +350,15 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
       if (!s.whistled && s.flight - s.t < 1.6) { s.whistled = true; sfx?.incoming(s.to, s.flight - s.t); }
       if (s.t >= s.flight) {
         s.alive = false;
-        onArcImpact(s.to.clone(), s.damage, s.splash, s.owner);
+        onArcImpact(s.to.clone(), s.damage, s.splash, s.owner, { kind: s.kind });
         continue;
       }
       _obj.position.copy(s.pos);
       _obj.lookAt(_look.copy(s.pos).add(s.vel));
-      _obj.scale.setScalar(1);
+      if (s.kind === "grenade") {
+        _obj.quaternion.multiply(_gq.setFromAxisAngle(_gAxis, s.t * 14));   // end over end
+        _obj.scale.copy(GRENADE_SCALE);
+      } else _obj.scale.setScalar(1);
       _obj.updateMatrix();
       shellMesh.setMatrixAt(m, _obj.matrix);
       m++;
