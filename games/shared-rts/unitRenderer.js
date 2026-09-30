@@ -546,7 +546,7 @@ function buildCrowdGroup(tpl, members, app, scene) {
 
   const pieces = marked ? buildPieces(field, source, rel, looks.filter(Boolean), scene, root, cap) : null;
 
-  return { field, rel, scale: root.scale.x, xray, roles, runSpeed, pieces, views, cap, kitSkinned };
+  return { field, rel, scale: root.scale.x, xray, roles, runSpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
 }
 
 /**
@@ -785,14 +785,63 @@ function writePieces(crd, v, unitMatrix, holdA = false, holdB = false) {
   };
   if (v.weapon) {
     const sa = STOWED.test(a), sb = STOWED.test(b);
-    if (sa === sb) put(sa ? `s:${v.weapon}` : `w:${v.weapon}`);
-    else putDom(STOWED.test(dom) ? `s:${v.weapon}` : `w:${v.weapon}`);
+    const hand = `w:${v.weapon}`;
+    if (v.deadT >= 0 && !sb && !STOWED.test(a)) dropRifle(crd, v, hand, put);
+    else if (sa === sb) put(sa ? `s:${v.weapon}` : hand);
+    else putDom(STOWED.test(dom) ? `s:${v.weapon}` : hand);
   }
   const ta = USES_TOOL.test(a), tb = USES_TOOL.test(b);
   if (ta && tb) put("shovel");
   else if ((ta || tb) && USES_TOOL.test(dom)) putDom("shovel");
   if (v.hat) put(`h:${v.hat}`);
   for (const k of v.kit) put(`k:${k}`);
+}
+
+/**
+ * A DEAD MAN LETS GO OF HIS RIFLE (you, 2026-09-30: it stayed gripped and
+ * stood up out of the body). Part-way through his fall (at once when he was
+ * lying) it leaves the hand and drops — 0.3 s, a little fall and a turn — to
+ * lie flat on its side on the ground beside him, where it stays with the
+ * body. Placed in the same instanced rifle draw as every other: no draw of
+ * its own. `put` places it in the hand, as when alive, until the release.
+ */
+const DROP_AT = { death_prone: 0.1 };   // share of the death clip before it leaves the hand
+const DROP_AT_DEFAULT = 0.4;
+const DROP_S = 0.3;
+const _dp = new THREE.Vector3(), _dq = new THREE.Quaternion(), _ds = new THREE.Vector3();
+const _dz = new THREE.Vector3(), _dy = new THREE.Vector3(), _dx = new THREE.Vector3(), _UPV = new THREE.Vector3(0, 1, 0);
+function dropRifle(crd, v, key, put) {
+  const piece = crd.pieces.registry.get(key);
+  if (!piece || piece.n >= piece.cap) return;
+  const release = crd.field.duration(v.cur.clip) * (DROP_AT[v.cur.clip] ?? DROP_AT_DEFAULT);
+  if (!v.drop) {
+    if (v.deadT < release) { put(key); return; }
+    // The moment it leaves the hand: where the hand holds it now…
+    const n0 = piece.n;
+    put(key);
+    if (piece.n === n0) return;
+    const from = new THREE.Matrix4();
+    piece.im.getMatrixAt(n0, from);
+    from.decompose(_dp, _dq, _ds);
+    // …and where it comes to rest: on the ground under the hand, lying on its
+    // side along the way it pointed (its +Z, flattened), sights to the side.
+    _dz.set(0, 0, 1).applyQuaternion(_dq).setY(0);
+    if (_dz.lengthSq() < 1e-6) _dz.set(Math.sin(v.seed[1] * 6.28), 0, Math.cos(v.seed[1] * 6.28));
+    _dz.normalize().applyAxisAngle(_UPV, (v.seed[2] - 0.5) * 0.6);   // a little of its own turn
+    _dy.crossVectors(_UPV, _dz).normalize();
+    _dx.crossVectors(_dy, _dz);
+    const restQ = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(_dx, _dy, _dz));
+    const restP = _dp.clone();
+    restP.y = (crd.groundAt?.(restP.x, restP.z) ?? restP.y - 1) + 0.05 * _ds.x;
+    v.drop = { t: v.deadT, fromP: _dp.clone(), fromQ: _dq.clone(), toP: restP, toQ: restQ, scale: _ds.clone() };
+    return;
+  }
+  // Falling, then lying there.
+  const d = v.drop, k = Math.min(1, (v.deadT - d.t) / DROP_S);
+  _dp.lerpVectors(d.fromP, d.toP, k * k);            // gathers speed as it falls
+  _dq.slerpQuaternions(d.fromQ, d.toQ, k);
+  _B.compose(_dp, _dq, d.scale);
+  piece.im.setMatrixAt(piece.n++, _B);
 }
 
 /**

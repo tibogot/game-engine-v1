@@ -85,6 +85,7 @@ export function createInfantryPosture({ units, cover = null, params = POSTURE })
     /** A round fired at `target` (combat.js). */
     onShot(shooter, target) {
       if (!target?.alive) return;
+      target.firedOnBy = shooter;   // who: the AI takes cover FROM him (algAI.js)
       const w = shooter?.weapon, a = params.perRound[w] ?? params.perRoundDefault;
       if (onFoot(target)) add(target, a);
       const r = params.area[w];

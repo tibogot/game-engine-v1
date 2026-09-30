@@ -34,6 +34,21 @@
 // Or, about a third of the time, a MINE (algMines.js): the band walks to a
 // stretch of PISTE far from any French, works there a few seconds, holding
 // fire, and goes home. The French find out when a truck goes up.
+//
+// THE COMPANY OF HEROES MECHANICS (your ask, 2026-09-30) — the band fights
+// with what the French have:
+//   MGs     it knows where the French machine guns are (the post, miradors,
+//           nests, jeeps and half-tracks) and keeps out of their reach: no
+//           ambush spot inside one, and on the way there it goes ROUND —
+//           a detour through scrub and gullies, out of the arc;
+//   COVER   a man fired on who is not in cover crawls/runs to the best
+//           shelter a few metres off, the side AWAY from who shot at him;
+//           a band fired on while sneaking in is found — it opens up;
+//   PINNED  half the band pinned (infantryPosture.js): it pulls back, as it
+//           does when it loses men — a band does not die on its bellies;
+//   GRENADE a man with one ready throws it (algGrenades.js) at French men
+//           in cover or bunched up, or at an MG nest, within his throw — one
+//           grenade per band every few seconds, not a hail.
 import { TRACK_LINES, nearestTrack } from "./algTracks.js";
 
 const P = {
@@ -57,6 +72,11 @@ const P = {
   mineWork: 8,                // seconds at the spot to lay it
   mineKeepOff: 90,            // no French within this of the spot
   mineApart: 45,              // from the other mines
+  mgKeepOff: 8,               // metres past an MG's range an ambush spot must keep
+  pinnedBreak: 0.5,           // share of the band pinned: pull back
+  tactEvery: 0.5,             // seconds between a band's tactical looks (cover, grenades)
+  grenadeEvery: 6,            // seconds between one band's grenades
+  coverSeek: 12,              // metres a man fired on looks for shelter
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -104,6 +124,68 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     return s / 5 + c.coverAt(x, z);
   }
 
+  /**
+   * The French MACHINE GUNS: the post, miradors, nests, jeeps, half-tracks
+   * ({ x, z, r }: their reach). Looked up once per plan, not per sample.
+   */
+  function frenchMGs() {   // (the buildings are not in units.list: algStructures)
+    const out = [];
+    for (const u of [...units.list, ...(app.algStructures?.list ?? [])]) {
+      if (!u.alive || u.team !== "player" || u.isAir) continue;
+      const w = u.weapon ?? u.type?.weapon;
+      if (w !== "mg") continue;
+      out.push({ x: u.position.x, z: u.position.z, r: (u.range ?? u.type?.range ?? 40) });
+    }
+    return out;
+  }
+  /** How deep (0..1+) a point lies inside the MGs' reach (0: out of it). */
+  function mgExposure(x, z, mgs, pad = 0) {
+    let e = 0;
+    for (const g of mgs) {
+      const d = Math.hypot(g.x - x, g.z - z), r = g.r + pad;
+      if (d < r) e += 1 - d / r * 0.5;
+    }
+    return e;
+  }
+
+  /**
+   * The way from `from` to `to`: straight, unless the straight line crosses
+   * an MG's reach — then round it, via a point off to one side that is out
+   * of the guns and in cover (scrub, a gully's low ground). Null: straight.
+   */
+  function detour(from, to, mgs) {
+    if (!mgs.length) return null;
+    const L = dist(from, to);
+    if (L < 30) return null;
+    let straight = 0;
+    for (let k = 1; k < 8; k++) {
+      const f = k / 8;
+      straight += mgExposure(from.x + (to.x - from.x) * f, from.z + (to.z - from.z) * f, mgs);
+    }
+    if (straight <= 0) return null;
+    const nx = -(to.z - from.z) / L, nz = (to.x - from.x) / L;
+    const mx = (from.x + to.x) / 2, mz = (from.z + to.z) / 2;
+    let best = null, bestS = -Infinity;
+    for (const side of [-1, 1]) {
+      for (const off of [0.25, 0.4, 0.6, 0.8]) {
+        const x = mx + nx * side * off * L, z = mz + nz * side * off * L;
+        if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
+        // Both legs sampled for the guns; low ground and cover count.
+        let e = 0;
+        for (let k = 1; k < 5; k++) {
+          const f = k / 5;
+          e += mgExposure(from.x + (x - from.x) * f, from.z + (z - from.z) * f, mgs);
+          e += mgExposure(x + (to.x - x) * f, z + (to.z - z) * f, mgs);
+        }
+        const low = (app.getWorldHeight(mx, mz) - app.getWorldHeight(x, z)) / 10;
+        const s = -e * 3 + cover(x, z) + Math.max(-0.5, Math.min(0.5, low)) - off;
+        if (s > bestS) { bestS = s; best = { x, z, e }; }
+      }
+    }
+    // Only worth it when it really is out of the guns' way.
+    return best && best.e < straight * 0.8 ? { x: best.x, z: best.z } : null;
+  }
+
   /** The French to hit: a group out in the open, away from the post first. */
   function pickTarget(from) {
     const fr = french().filter((u) => !u.isAir);
@@ -129,12 +211,14 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     // 15-45 m off it — the road ambush, where the patrol has to come.
     const onTrack = nearestTrack(tgt.x, tgt.z);
     const road = onTrack && onTrack.d < P.onTrack ? onTrack.track : null;
+    const mgs = frenchMGs();
     let best = null, bestS = -Infinity;
     for (let i = 0; i < 28; i++) {
       const a = base + rand(-1.2, 1.2), r = rand(...P.ambushRing);
       const x = tgt.x + Math.cos(a) * r, z = tgt.z + Math.sin(a) * r;
       if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
       if (dist({ x, z }, post) < P.postKeepOff) continue;
+      if (mgExposure(x, z, mgs, P.mgKeepOff) > 0) continue;   // never lie up under an MG
       let s = cover(x, z) * 2 + Math.max(-1, Math.min(1, (app.getWorldHeight(x, z) - gy) / 15)) - r / 200;
       if (road) {
         const d = road.line.reduce((m, p) => Math.min(m, Math.hypot(p.x - x, p.z - z)), Infinity);
@@ -144,6 +228,15 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       if (s > bestS) { bestS = s; best = { x, z }; }
     }
     return best;
+  }
+
+  /**
+   * Sends the band to `to` — round the French MGs when the straight way
+   * crosses one (detour): first to the via point, then on (stepBand).
+   */
+  function sendBand(b, to) {
+    b.via = detour(centre(alive(b)), to, frenchMGs());
+    moveBand(b, b.via ?? to);
   }
 
   /** Orders the band to `to`, spread out a little (a loose file, not a knot). */
@@ -199,6 +292,14 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       }
       case "approach": {
         if (!m.length) return setState(b, "done");
+        // Found on the way in — fired on: it opens up (a mine band, too).
+        if (b.mission !== "village" && m.some((u) => (u.suppression ?? 0) > 0.3)) { strike(b); break; }
+        // Round the guns: at the via point (most of the band), on to the spot.
+        if (b.via) {
+          const past = m.filter((u) => dist(u.position, b.via) < 15 || !u.isMoving);
+          if (past.length >= Math.ceil(m.length * 0.6)) { b.via = null; moveBand(b, b.spot); }
+          break;
+        }
         // Arrived when most of the band is there — not the average: one man
         // stuck on the way (no route) dragged the band's centre 100 m back
         // and it never arrived (measured).
@@ -228,7 +329,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         const near = m.filter((u) => dist(u.position, b.spot) < 15);
         const c = centre(near.length ? near : m);
         const close = french().some((u) => !u.isAir && dist(u.position, c) < P.trigger);
-        if (close) { strike(b); break; }
+        if (close || m.some((u) => (u.suppression ?? 0) > 0.3)) { strike(b); break; }
         if (b.t > P.waitMax) {
           const tg = pickTarget(c);
           if (tg && dist(tg.at, c) < 80) { strike(b); for (const u of m) u.orderTo(tg.at.x, tg.at.z); }
@@ -258,7 +359,10 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         const c = centre(m);
         const armour = french().some((u) => !u.type?.foot && !u.isAir && dist(u.position, c) < P.armourNear);
         if (!m.length) return setState(b, "done");
-        if (b.t > b.strikeFor || lost >= P.breakLoss || armour) withdraw(b);
+        const pinned = m.filter((u) => u.pinned).length / m.length;
+        if (b.t > b.strikeFor || lost >= P.breakLoss || armour || pinned >= P.pinnedBreak) { withdraw(b); break; }
+        b.tact = (b.tact ?? 0) - dt;
+        if (b.tact <= 0) { b.tact = P.tactEvery; tactics(b, m, dt); }
         break;
       }
       case "withdraw": {
@@ -270,6 +374,69 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         break;
       }
     }
+  }
+
+  /**
+   * A striking band's looks, every tactEvery: a man fired on out in the open
+   * gets to cover; one man throws a grenade where it pays.
+   */
+  const _near = [];
+  function tactics(b, m) {
+    b.grenT = (b.grenT ?? rand(1, 3)) - P.tactEvery;
+    for (const u of m) {
+      if (u.throwing || u.isMoving || u.pinned) continue;
+      const s = u.firedOnBy;
+      if (!s?.alive || (u.suppression ?? 0) < 0.15 || u.inCover) continue;
+      if (u.coverSought > t - 6) continue;   // he looked just now
+      u.coverSought = t;
+      const spot = shelter(u, s);
+      if (spot) u.orderTo(spot.x, spot.z);
+    }
+    if (b.grenT > 0) return;
+    const g = app.algGrenades;
+    if (!g) return;
+    const R = g.params.range, blast = g.params.blast;
+    const fr = french().filter((f) => !f.isAir);
+    for (const st of app.algStructures?.list ?? []) if (st.alive && st.team === "player" && st.weapon === "mg") fr.push(st);
+    let best = null, bestS = 0;
+    for (const u of m) {
+      if (!u.type?.grenade || u.grenadeCd > 0 || u.throwing || u.pinned) continue;
+      for (const f of fr) {
+        if (!f.alive || f.team !== "player" || f.isAir) continue;
+        const d = dist(f.position, u.position);
+        if (d > R || d < blast + 1) continue;   // not on his own head
+        let s;
+        if (f.isStructure) s = (f.weapon ?? f.type?.weapon) === "mg" ? 2.5 : 0;
+        else if (!f.type?.foot) s = 0;
+        else {
+          // Men round him in the blast; worth it bunched or in cover.
+          let n = 0;
+          for (const o of units.near(f.position.x, f.position.z, blast, _near)) if (o.alive && o.team === "player" && o.type?.foot && dist(o.position, f.position) < blast) n++;
+          s = n + (f.inCover || f.posture === "kneel" ? 1.5 : 0) - 1.2;
+        }
+        if (s > bestS) { bestS = s; best = { u, x: f.position.x, z: f.position.z }; }
+      }
+    }
+    if (!best) return;
+    g.order(best.u, best.x + rand(-0.8, 0.8), best.z + rand(-0.8, 0.8));
+    b.grenT = P.grenadeEvery;
+  }
+
+  /** Shelter for `u` from `from`: the best cover within coverSeek, on the side away from him. */
+  function shelter(u, from) {
+    const c = app.algCover;
+    if (!c) return null;
+    const x0 = u.position.x, z0 = u.position.z;
+    const away = Math.atan2(z0 - from.position.z, x0 - from.position.x);
+    let best = null, bestS = c.coverBetween(from.position.x, from.position.z, x0, z0) + 0.1;
+    for (let i = 0; i < 10; i++) {
+      const a = away + rand(-1.6, 1.6), r = rand(3, P.coverSeek);
+      const x = x0 + Math.cos(a) * r, z = z0 + Math.sin(a) * r;
+      if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
+      const s = c.coverBetween(from.position.x, from.position.z, x, z) - r / 60;
+      if (s > bestS) { bestS = s; best = { x, z }; }
+    }
+    return best;
   }
 
   /**
@@ -301,7 +468,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     if (!spot) return false;
     b.mission = "village"; b.village = v; b.spot = spot; b.target = null;
     holdFire(b, true);
-    moveBand(b, spot);
+    sendBand(b, spot);
     setState(b, "approach");
     return true;
   }
@@ -332,7 +499,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     // The band stands beside the road, the mine goes in the wheel track.
     b.spot = { x: best.x, z: best.z };
     holdFire(b, true);
-    moveBand(b, b.spot);
+    sendBand(b, b.spot);
     setState(b, "approach");
     return true;
   }
@@ -363,7 +530,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     if (!spot) { withdraw(b); return; }
     b.target = tg; b.spot = spot;
     holdFire(b, true);
-    moveBand(b, spot);
+    sendBand(b, spot);
     setState(b, "approach");
   }
 
@@ -404,9 +571,11 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     bandNow() { newBand(); },
     /** Dev: the ambush spot a band at `from` would take on French at `tgt`. */
     ambushSpotFor: (from, tgt) => ambushSpot(from, tgt),
+    /** Dev: the via point a band at `from` would take round the French MGs to `to` (null: straight). */
+    routeFor: (from, to) => detour(from, to, frenchMGs()),
     /** Dev: what each band is doing. */
     describe() {
-      return bands.map((b) => `${b.state}${b.mission === "village" && b.village ? ` (${b.village.name})` : b.mission === "mine" ? " (mine)" : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
+      return bands.map((b) => `${b.state}${b.via ? " (round the guns)" : ""}${b.mission === "village" && b.village ? ` (${b.village.name})` : b.mission === "mine" ? " (mine)" : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
     },
   };
 }

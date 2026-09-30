@@ -10,10 +10,12 @@ Keep this file current: tick things off here, add new asks here.
 
 ## YOUR ASKS — 2026-09-29: soldiers from Mixamo
 
-Pipeline: `public/models/soldiers/` (the Mixamo FBX rig + clips, and unrigged
-GLB soldiers) → `node tools/packMixamo.mjs` → `soldiers.glb` (one skeleton,
-clips once, every soldier skinned to it) → judged in `games/shared-rts/soldier-lab.html`.
-Not wired into either game yet.
+Pipeline: `assets-src/soldiers/` (the SOURCES — the Mixamo FBX rig + clips,
+unrigged GLB soldiers, the rig's textures; outside public/, so they don't
+ship) → `node tools/packMixamo.mjs --skip soldier3 --rig-texture originalsoldier` →
+`public/models/soldiers/soldiers.glb` (one skeleton, clips once, every soldier
+skinned to it) → judged in `games/shared-rts/soldier-lab.html`. In alg-rts
+(appelé, sapeur, para, légion, moudjahid); soldier3 waits for nam's own pack.
 
 - [x] Pack tool + lab. soldier1 (the Mixamo rig) and soldier3 (your GLB, given
       the rig's skeleton by nearest-surface weight transfer: median 0.4 cm off
@@ -149,7 +151,21 @@ Not wired into either game yet.
          too (projectiles.drawWarnings was never called in this game).
    - [x] A MAN SHOT no longer leaves a fire and a crater (combat.onImpact,
          both games): men on foot go down in their dust puff only.
-   - [ ] the ALN AI throws grenades too (algAI: at a French squad in cover)
+   - [x] THE ALN FIGHTS WITH THE COH MECHANICS (2026-09-30, algAI.js,
+         checked in Chrome): it knows the French MGs (post, miradors, nests,
+         jeeps, half-tracks — the buildings from algStructures) — no ambush
+         spot inside one's reach + 8 m, and the way in goes ROUND one it would
+         cross (a via point off to the side, in cover / low ground; measured:
+         a line across the post detours 180 m south). Fired on while sneaking
+         in: it opens up. Striking: a man fired on out of cover runs to the
+         best shelter within 12 m away from the shooter (infantryPosture now
+         records `firedOnBy`); half the band PINNED: it pulls back; one
+         GRENADE per band every 6 s, at French bunched / in cover / an MG
+         nest (measured: thrown 0.5 s into a strike, from 22 m). A thrower's
+         rifle is quiet through combat's own `throwing` check (the grenade no
+         longer touches holdFire, which the AI owns).
+   - [ ] **you, look**: a raid on a patrol — the grenades, the dash to
+         cover, the pull-back when your MG pins them
    - [ ] a crawl clip (Mixamo "Crawling", In Place) for pinned men who move —
          they use the crouched walk now
 - [x] **BLOOD** (2026-09-30, shared-rts/bloodField.js, checked in Chrome
@@ -219,8 +235,10 @@ Not wired into either game yet.
          under each one's chest (DEATH_CHEST).
    - [ ] **you, look**: the moves in the game (the drop speed; the lab's
          "Moves" shows each)
-   - [ ] a dead man's rifle falls away (the deaths keep it gripped: it stands
-         up out of a prone corpse)
+   - [x] a dead man's rifle falls away (2026-09-30, unitRenderer dropRifle):
+         part-way through the fall (at once from prone) it leaves the hand,
+         drops in 0.3 s and lies on its side on the ground beside him; same
+         instanced rifle draw. Checked: standing, kneeling, prone deaths
    - [x] skinning work sized to the LIVE soldiers (renderer.compute count)
    - [x] alg-rts types on the pack: appelé + sapeur = soldier1 / "appele",
          moudjahid = aln1 / "alnSection" (crowd shader looks, per-man seed)

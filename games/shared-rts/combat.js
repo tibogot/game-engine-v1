@@ -204,7 +204,9 @@ export function createCombat({
     e.cooldown = Math.max(0, (e.cooldown ?? 0) - dt);
     // Holding fire (a squad falling back, enemyAI.js): no targets, or combat
     // would halt the man in range to shoot and the retreat would never happen.
-    if (e.holdFire) { e.target = null; return; }
+    // (and a man throwing a grenade: algGrenades.js — his own flag, so a throw
+    // ending never re-opens the fire of a band told to hold it meanwhile)
+    if (e.holdFire || e.throwing) { e.target = null; return; }
 
     // Forget dead targets.
     if (e.target && !e.target.alive) e.target = null;

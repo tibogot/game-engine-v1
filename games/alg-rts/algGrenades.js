@@ -16,8 +16,9 @@
 // combat.splashAt does the blast — the damage, and the SUPPRESSION round it
 // (infantryPosture.js onSplash): men near it go down.
 //
-// His rifle is quiet while he throws (holdFire), and a new order from you
-// cancels the throw. Then his grenade is on cooldown.
+// His rifle is quiet while he throws (combat skips a man `throwing`), and a
+// new order cancels the throw. Then his grenade is on cooldown. The ALN AI
+// throws too (algAI.js), through order().
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 
 export const GRENADE = {
@@ -112,7 +113,6 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
 
   function end(job, i) {
     job.u.throwing = null;
-    job.u.holdFire = false;
     throws.splice(i, 1);
     onChange();
   }
@@ -129,7 +129,6 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
         if (dist(u, job) > P.range * 0.95) continue;
         u.stop();
         u.faceToward(job.x, job.z);
-        u.holdFire = true;
         u.throwing = { start: P.clipStart };
         u.grenadeCd = P.cooldown;
         job.t = 0;
