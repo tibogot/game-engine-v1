@@ -179,13 +179,30 @@ Not wired into either game yet.
       like the buildings themselves — and the cover map re-baked (a breached
       wall stops covering).
    - [ ] **you, play it**: MG pinning speed, how often men kneel in cover
-   - [ ] **TRANSITIONS, reviewed in the lab** (you, 2026-09-30: "look at all
-         of them and see if everything is right and natural"): every clip
-         change is a 0.2 s crossfade — fine between near poses (idle ⇄ aim,
-         kneel ⇄ kneel-fire), NOT for stand → prone (a snap to the ground) or
-         run → kneel. A lab mode that plays A → B as the game does; then
-         transition clips from Mixamo where a fade can't carry it (stand to
-         prone, prone to stand, stand to kneel) and longer fades per pair.
+   - [~] **TRANSITIONS** (you, 2026-09-30: "look at all of them and see if
+         everything is right and natural"). games/shared-rts/transition-lab.html
+         plays every pair the game switches between through the game's OWN
+         crowd skinning (it mixes skinned POSITIONS, not bone rotations), with
+         a film strip of the fade at 0/25/50/75/100 %. Judged and fixed:
+         per-pair fades (soldierTransitions.js: shots 0.08 s — the recoil was
+         eaten; stand ⇄ kneel 0.35; into / out of prone 0.45-0.5; dig, throw);
+         a man PINNED or KNEELING who dies no longer stands up first (every
+         death clip starts standing: deathFrom); the rifle / shovel SWAP at
+         mid-fade instead of a shrinking rifle in the hands AND a growing one
+         on the back for the whole fade (the pack stows by bone scale).
+         The Rifle Crouch Walk in the pack is Mixamo's "Rifle Walking RIGHT
+         Crouched" (a strafe; matched by frame count, and it side-steps).
+   - [ ] **you**: the forward "Rifle Crouch Walk" ("Rifle Walking Crouched",
+         In Place) over the strafe. Downloaded 2026-09-30: Rifle Stand To
+         Kneel / Kneel To Stand / Kneel To Prone / Prone To Kneel, Prone
+         Forward, Prone Firing Rifle, Prone Death, Death Crouching Headshot
+         Front (in assets-src, not packed yet)
+   - [ ] pack them: role names; strip the transitions' hip drift (0.06-0.19 m,
+         no In Place for transitions); the game PLAYS a transition (stand →
+         kneel → prone, prone → kneel → stand) instead of fading; prone
+         firing, crawl, the two new deaths; judge each in the lab first
+   - [ ] a dead man's rifle falls away (the deaths keep it gripped: it stands
+         up out of a prone corpse)
    - [x] skinning work sized to the LIVE soldiers (renderer.compute count)
    - [x] alg-rts types on the pack: appelé + sapeur = soldier1 / "appele",
          moudjahid = aln1 / "alnSection" (crowd shader looks, per-man seed)

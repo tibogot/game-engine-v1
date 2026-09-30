@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transition Lab — soldiers</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #b7c6d2; font: 12px system-ui, sans-serif; color: #e8e4d8; }
+      #panel {
+        position: fixed; top: 10px; left: 10px; width: 300px; max-height: calc(100% - 20px); overflow: auto;
+        background: rgba(24, 26, 21, 0.92); border: 1px solid #454c3a; border-radius: 6px; padding: 10px 12px;
+      }
+      h1 { font-size: 13px; margin: 0 0 6px; letter-spacing: 0.08em; text-transform: uppercase; color: #cdb98a; }
+      .note { color: #a9a48f; line-height: 1.35; margin: 6px 0 8px; }
+      .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+      .row label { width: 64px; color: #a9a48f; }
+      .row input[type=range] { flex: 1; }
+      .row .v { width: 44px; text-align: right; font-family: ui-monospace, monospace; }
+      button { font: 11px system-ui; color: #e8e4d8; background: #252920; border: 1px solid #454c3a; border-radius: 4px; padding: 4px 6px; cursor: pointer; }
+      button.on { border-color: #cdb98a; background: #3a3526; }
+      #pairs { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; }
+      #pairs button { text-align: left; display: flex; justify-content: space-between; }
+      #pairs button span.f { font-family: ui-monospace, monospace; color: #cdb98a; }
+      select { background: #252920; color: #e8e4d8; border: 1px solid #454c3a; border-radius: 4px; }
+      #err { color: #ff8a7a; white-space: pre-wrap; }
+      #tag { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(24,26,21,0.85); padding: 6px 10px; border-radius: 4px; font-family: ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="panel">
+      <h1>Transition lab</h1>
+      <div class="note">
+        Every clip change the game makes, drawn by the <b>game's own crowd skinning</b>
+        (crowdSkinning.js — it mixes the two poses' skinned <i>positions</i>).
+        <b>Left</b>: A → B → A, looping. <b>The strip</b>: the fade frozen at 0, 25, 50,
+        75 and 100 % (a film strip of the in-between). Tune a pair's fade;
+        <b>Copy table</b> for soldierTransitions.js.
+      </div>
+      <div class="row"><label>Body</label><select id="body"></select></div>
+      <div class="row"><label>Speed</label>
+        <button data-speed="1" class="on">1×</button><button data-speed="0.5">½×</button><button data-speed="0.25">¼×</button><button data-speed="0.1">0.1×</button>
+      </div>
+      <div class="row"><label>Fade</label><input id="fade" type="range" min="0.05" max="1.2" step="0.05" value="0.2" /><span class="v" id="fadeV">0.20</span></div>
+      <div class="row"><label>Hold</label><input id="hold" type="range" min="0.6" max="4" step="0.1" value="1.6" /><span class="v" id="holdV">1.6</span></div>
+      <div class="row"><label>A</label><select id="clipA"></select></div>
+      <div class="row"><label>B</label><select id="clipB"></select></div>
+      <div id="pairs"></div>
+      <div class="row"><button id="copy">Copy table</button><span id="copied" class="note"></span></div>
+      <div id="err"></div>
+    </div>
+    <div id="tag"></div>
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
+      import { createCrowdField } from "./crowdSkinning.js";
+      import { WEAPONS, TOOLS, weaponMaterial } from "./procWeapons.js";
+      import { FADES, GAME_PAIRS, deathFrom, fadeFor, setFade } from "./soldierTransitions.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
+      addEventListener("error", (e) => showErr(e.error ?? e.message));
+      addEventListener("unhandledrejection", (e) => showErr(e.reason));
+
+      // ── Renderer / scene (the soldier lab's light) ─────────────────────────
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      document.body.appendChild(renderer.domElement);
+      await renderer.init();
+      initGlbLoaderRenderer(renderer);
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xb7c6d2);
+      const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 300);
+      camera.position.set(0.6, 2.1, 8.4);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0.8, 0);
+      controls.enableDamping = true;
+      scene.add(new THREE.HemisphereLight(0xdde8f5, 0x6b5a40, 1.3));
+      const sun = new THREE.DirectionalLight(0xfff1dd, 3.0);
+      sun.position.set(4, 9, 5);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 0.1, far: 30 });
+      scene.add(sun);
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x9c8f76, roughness: 1 }));
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground, new THREE.GridHelper(20, 20, 0x5d5446, 0x7d7260));
+      addEventListener("resize", () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+
+      // ── The pack ───────────────────────────────────────────────────────────
+      const gltf = await getSharedGltfLoader().loadAsync("/models/soldiers/soldiers.glb");
+      const root = gltf.scene;
+      root.updateMatrixWorld(true);
+      const bodies = [];
+      root.traverse((o) => { if (o.isSkinnedMesh) bodies.push(o); });
+      const clips = {};
+      for (const a of gltf.animations) if (!/^unarmed_/.test(a.name)) clips[a.name] = a;
+      const names = Object.keys(clips).sort();
+
+      // As the game (unitRenderer.js): the rifle in the hand, slung for the
+      // clips that need both hands, the shovel for digging.
+      const STOWED = /^(dig|hammer|grenade_throw|unarmed)/, USES_TOOL = /^dig/;
+      const rifleGeo = WEAPONS.mas49_56.build(), shovelGeo = TOOLS.shovel.build(), wMat = weaponMaterial();
+
+      let crowd = null;   // { field, source, pre, bones, pieces }
+      function build(body) {
+        if (crowd) { crowd.field.dispose(); for (const p of Object.values(crowd.pieces)) scene.remove(p.im); }
+        const source = bodies.find((b) => b.name === body);
+        const field = createCrowdField({ scene, renderer, source, animRoot: root, clips, max: 8, castShadow: true });
+        field.mesh.frustumCulled = false;
+        const rel = source.matrixWorld.clone();                                      // root at identity
+        const pre = rel.clone().multiply(source.bindMatrixInverse);
+        const bone = (n) => field.boneIndex(`mixamorig${n}`);
+        const rest = (i) => source.skeleton.boneInverses[i].clone().invert();
+        const piece = (geo, b) => {
+          const im = new THREE.InstancedMesh(geo, wMat, 8);
+          im.count = 0; im.frustumCulled = false; im.castShadow = true;
+          scene.add(im);
+          return { im, bone: b, K: rest(b), n: 0 };
+        };
+        const pieces = { hand: piece(rifleGeo, bone("Weapon")), sling: piece(rifleGeo, bone("Sling")), tool: piece(shovelGeo, bone("Tool")) };
+        crowd = { field, source, rel, pre, pieces };
+      }
+
+      // ── The two soldiers ───────────────────────────────────────────────────
+      const _m = new THREE.Matrix4(), _B = new THREE.Matrix4(), _M = new THREE.Matrix4();
+      const at = (x) => new THREE.Matrix4().makeTranslation(x, 0, 0).multiply(new THREE.Matrix4().makeRotationY(0.35));
+      const LEFT = at(-3.2);
+      const STRIP = [0, 0.25, 0.5, 0.75, 1].map((k, i) => ({ k, m: at(-1.4 + i * 1.15) }));
+      function pose(unitM, a, ta, b, tb, blend) {
+        const f = crowd.field;
+        _m.multiplyMatrices(unitM, crowd.rel);
+        const hold = { holdA: oneShot(a), holdB: oneShot(b) };   // a death stops on its last frame, as in the game
+        f.addPose(_m, a, ta, b, tb, blend, 0, hold);
+        const put = (p) => {
+          f.boneMatrix(a, ta, b, tb, blend, p.bone, _B, hold);
+          _M.multiplyMatrices(unitM, crowd.pre).multiply(_B).multiply(p.K);
+          p.im.setMatrixAt(p.n++, _M);
+        };
+        // As the game (unitRenderer writePieces): a piece that changes place
+        // swaps at mid-fade, posed by the dominant clip alone.
+        const dom = blend < 0.5 ? a : b, domT = blend < 0.5 ? ta : tb, dh = { holdA: oneShot(dom), holdB: oneShot(dom) };
+        const putDom = (p) => {
+          f.boneMatrix(dom, domT, dom, domT, 0, p.bone, _B, dh);
+          _M.multiplyMatrices(unitM, crowd.pre).multiply(_B).multiply(p.K);
+          p.im.setMatrixAt(p.n++, _M);
+        };
+        const sa = STOWED.test(a), sb = STOWED.test(b);
+        if (sa === sb) put(sa ? crowd.pieces.sling : crowd.pieces.hand);
+        else putDom(STOWED.test(dom) ? crowd.pieces.sling : crowd.pieces.hand);
+        const ua = USES_TOOL.test(a), ub = USES_TOOL.test(b);
+        if (ua && ub) put(crowd.pieces.tool);
+        else if ((ua || ub) && USES_TOOL.test(dom)) putDom(crowd.pieces.tool);
+      }
+      // A clip's start time when switched to, as the game: a shot from 0, a
+      // throw from 0.6 s (algGrenades.js), a death from 0, else anywhere.
+      const startOf = (c) => (c === "grenade_throw" ? 0.6 : /firing|death/.test(c) ? 0 : 0.37 * clips[c].duration);
+      // A death from A: the game's rule (soldierTransitions.deathFrom) — the
+      // clip, where it starts, and its fade.
+      const deaths = names.filter((n) => /^death/.test(n));
+      const deathOf = (a, b) => deathFrom(a, b, deaths, (c) => clips[c].duration);
+      /** What A → B really is in the game: { to, start, fade }. */
+      const into = (a, b) => {
+        if (!/^death/.test(b)) return { to: b, start: startOf(b), fade: fadeFor(a, b) };
+        const d = deathOf(a, b);
+        return { to: d.clip, start: d.t, fade: d.fade };
+      };
+      const oneShot = (c) => /^death/.test(c);
+
+      // ── UI ─────────────────────────────────────────────────────────────────
+      let A = "rifle_idle", B = "rifle_prone_idle", speed = 1;
+      let loopT = 0;   // where the left soldier is in his A → B → A cycle
+      for (const b of bodies) $("body").add(new Option(b.name, b.name));
+      for (const id of ["clipA", "clipB"]) for (const n of names) $(id).add(new Option(n, n));
+      const pairBtns = [];
+      function renderPairs() {
+        $("pairs").innerHTML = "";
+        pairBtns.length = 0;
+        for (const [a, b, why] of GAME_PAIRS) {
+          const btn = document.createElement("button");
+          btn.innerHTML = `<span>${a.replace("rifle_", "")} → ${b.replace("rifle_", "")}<br><small style="color:#a9a48f">${why}</small></span><span class="f">${fadeFor(a, b).toFixed(2)}</span>`;
+          btn.onclick = () => pick(a, b);
+          btn.classList.toggle("on", a === A && b === B);
+          $("pairs").appendChild(btn);
+        }
+      }
+      function pick(a, b) {
+        A = a; B = b;
+        $("clipA").value = a; $("clipB").value = b;
+        $("fade").value = fadeFor(a, b); $("fadeV").textContent = (+$("fade").value).toFixed(2);
+        loopT = 0;
+        renderPairs();
+      }
+      $("clipA").onchange = () => pick($("clipA").value, B);
+      $("clipB").onchange = () => pick(A, $("clipB").value);
+      $("body").onchange = () => build($("body").value);
+      $("fade").oninput = () => { setFade(A, B, +$("fade").value); $("fadeV").textContent = (+$("fade").value).toFixed(2); renderPairs(); };
+      $("hold").oninput = () => { $("holdV").textContent = (+$("hold").value).toFixed(1); };
+      for (const b of document.querySelectorAll("[data-speed]")) b.onclick = () => {
+        speed = +b.dataset.speed;
+        for (const x of document.querySelectorAll("[data-speed]")) x.classList.toggle("on", x === b);
+      };
+      $("copy").onclick = async () => {
+        const text = `export const FADES = ${JSON.stringify(FADES, null, 2)};`;
+        try { await navigator.clipboard.writeText(text); $("copied").textContent = "copied"; } catch { $("copied").textContent = text; }
+      };
+
+      build(bodies[0].name);
+      pick(A, B);
+
+      // ── The loop: hold A, fade to B, hold B, fade back ─────────────────────
+      // One cycle, in (slowed) seconds: [hold A][fade A→B][hold B][fade B→A].
+      const clock = new THREE.Clock();
+      renderer.setAnimationLoop(() => {
+        const dt = Math.min(clock.getDelta(), 0.05) * speed;
+        const hold = +$("hold").value, go = into(A, B), fade = go.fade;
+        const cycle = 2 * (hold + fade);
+        loopT = (loopT + dt) % cycle;
+        const f = crowd.field;
+        f.begin();
+        for (const p of Object.values(crowd.pieces)) p.n = 0;
+        // The left soldier: which half of the cycle, and how far into the fade.
+        let from = A, to = B, u = loopT;
+        if (u >= hold + fade) { from = B; to = A; u -= hold + fade; }
+        let tag;
+        if (oneShot(to) && from === B) { from = B; to = B; }   // a death is not undone: hold the body
+        if (u < hold) {
+          // before the switch: the clip we came from, alone
+          pose(LEFT, from, startOf(from) + u, from, startOf(from) + u, 0);
+          tag = `${from}`;
+        } else {
+          const k = Math.min(1, (u - hold) / fade), tIn = u - hold;
+          const tgt = from === A ? go : { to, start: startOf(to) };
+          pose(LEFT, from, startOf(from) + u, tgt.to, tgt.start + tIn, k);
+          tag = `${from} → ${tgt.to}  ${(k * 100).toFixed(0)} %`;
+        }
+        // The strip: A → B frozen at 0 … 100 % of the fade.
+        for (const { k, m } of STRIP) pose(m, A, startOf(A) + 0.5, go.to, go.start + k * fade, k);
+        f.commit();
+        for (const p of Object.values(crowd.pieces)) { p.im.count = p.n; p.im.instanceMatrix.needsUpdate = true; }
+        $("tag").textContent = `left: ${tag}    strip: ${A} → ${B} at 0 · 25 · 50 · 75 · 100 %   (fade ${fade.toFixed(2)} s)`;
+        controls.update();
+        renderer.render(scene, camera);
+      });
+      window.__TLAB = { pick, setSpeed: (v) => { speed = v; }, camera, controls, get loopT() { return loopT; }, set loopT(v) { loopT = v; } };
+    </script>
+  </body>
+</html>

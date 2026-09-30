@@ -17,6 +17,7 @@ import { abs, attribute, floor, float, instanceIndex, materialColor, max, mix, m
 import { UNIT_ORDER, XRAY_ORDER, createXrayMaterial, xrayOn } from "./xraySilhouette.js";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
+import { deathFrom, fadeFor } from "./soldierTransitions.js";
 import {
   HEADGEAR, KIT, LOOKS, headgearMaterial, loadout, lookColorNode, markHeadwear, markHelmet, measureCrown, neckPlane,
 } from "./soldierLooks.js";
@@ -765,12 +766,29 @@ function writePieces(crd, v, unitMatrix, holdA = false, holdB = false) {
     _B.multiplyMatrices(_base, B).multiply(piece.K);
     piece.im.setMatrixAt(piece.n++, _B);
   };
-  // Only while a clip that uses it plays (it is scaled to ~0 in the others).
+  // A piece that CHANGES PLACE between the two clips (the rifle from the hands
+  // to the back for a dig or a throw, the shovel out) swaps cleanly at the
+  // fade's midpoint, placed from the dominant clip's pose alone: the pack
+  // stows it by scaling its bone to ~0, and a blend of those scales showed a
+  // shrinking rifle in the hands AND a growing one on the back for the whole
+  // fade (the transition lab's strips, 2026-09-30).
+  const dom = v.fade < 0.5 ? a : b, domT = v.fade < 0.5 ? v.prev.t : v.cur.t;
+  const domHold = v.fade < 0.5 ? holdA : holdB;
+  const putDom = (key) => {
+    const piece = P.registry.get(key);
+    if (!piece || piece.n >= piece.cap) return;
+    crd.field.boneMatrix(dom, domT, dom, domT, 0, piece.bone, _P, { holdA: domHold, holdB: domHold });
+    _B.multiplyMatrices(_base, _P).multiply(piece.K);
+    piece.im.setMatrixAt(piece.n++, _B);
+  };
   if (v.weapon) {
-    if (!(STOWED.test(a) && STOWED.test(b))) put(`w:${v.weapon}`);
-    if (STOWED.test(a) || STOWED.test(b)) put(`s:${v.weapon}`);
+    const sa = STOWED.test(a), sb = STOWED.test(b);
+    if (sa === sb) put(sa ? `s:${v.weapon}` : `w:${v.weapon}`);
+    else putDom(STOWED.test(dom) ? `s:${v.weapon}` : `w:${v.weapon}`);
   }
-  if (USES_TOOL.test(a) || USES_TOOL.test(b)) put("shovel");
+  const ta = USES_TOOL.test(a), tb = USES_TOOL.test(b);
+  if (ta && tb) put("shovel");
+  else if ((ta || tb) && USES_TOOL.test(dom)) putDom("shovel");
   if (v.hat) put(`h:${v.hat}`);
   for (const k of v.kit) put(`k:${k}`);
 }
@@ -835,7 +853,8 @@ function soldierClip(unit, v, roles) {
   return kneel ? roles.crouchIdle : roles.idle;
 }
 
-const CROSSFADE = 0.2;      // s between two clips
+// The crossfade between two clips: per pair, soldierTransitions.js (judged in
+// transition-lab.html). Each switch stores its own (`fadeS`).
 // The view, once a frame: a soldier outside it skips his pieces (they cast no
 // shadow) and his health bar (12 terrain taps for the hill test).
 const _frustum = new THREE.Frustum();
@@ -1165,8 +1184,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     if (v.deadT < 0) {
       v.deadT = 0;
       v.prev = v.cur;
-      v.cur = { clip: r.deaths[Math.floor(v.seed[0] * 97) % r.deaths.length], t: 0 };
+      // From the posture he was in (soldierTransitions.js): a man lying or
+      // kneeling does not get up to fall.
+      const d = deathFrom(v.prev.clip, r.deaths[Math.floor(v.seed[0] * 97) % r.deaths.length], r.deaths, (c) => v.crowd.field.duration(c));
+      v.cur = { clip: d.clip, t: d.t };
       v.fade = 0;
+      v.fadeS = d.fade;
       // Where his TORSO will lie (a game lays blood there — alg-rts): the
       // pack's deaths travel (tools/packMixamo.mjs report: forward 0.30 m,
       // backward 0.83 m), the chest ~0.45 m on from the hips.
@@ -1180,7 +1203,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     if (v.deadT > v.crowd.field.duration(v.cur.clip) + CORPSE_SECONDS) return;
     v.cur.t += dt;
     v.prev.t += dt;
-    v.fade = Math.min(1, v.fade + dt / CROSSFADE);
+    v.fade = Math.min(1, v.fade + dt / (v.fadeS ?? 0.2));
     v.view.dead.push(unit);   // written after his view's living (sync)
   }
 
@@ -1358,12 +1381,13 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             : want === r.fire || want === r.crouchFire ? 0 : Math.random() * v.crowd.field.duration(want);
           v.cur = { clip: want, t: t0 };
           v.fade = 0;
+          v.fadeS = fadeFor(v.prev.clip, want);
         }
         const rate = v.cur.clip === r.run && v.crowd.runSpeed > 0
           ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6) : 1;
         v.cur.t += dt * rate;
         v.prev.t += dt;
-        v.fade = Math.min(1, v.fade + dt / CROSSFADE);
+        v.fade = Math.min(1, v.fade + dt / (v.fadeS ?? 0.2));
 
         x.updateMatrix(); // off-scene: nothing else will do this for us
         v.view.living.push(unit); // into the crowd after the loop, grouped by view
