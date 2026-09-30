@@ -33,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { NAV_MAX_SLOPE_DEG } from "./lib/rtsMapMetrics.mjs";
-import { LAYOUT, PLAY } from "../games/alg-rts/layout.js";
+import { LAYOUT, PLAY, siteYaw } from "../games/alg-rts/layout.js";
 
 const args = process.argv.slice(2);
 const FILE = args.includes("--file") ? args[args.indexOf("--file") + 1] : "public/levels/alg-aures.v3proj";
@@ -121,7 +121,7 @@ if (args.includes("--route")) {
   // Keep-outs: every placed piece, a circle (metres). Sites the route ENDS at
   // are an end ring, not a keep-out.
   const R_OF = { sandbags1: 3.5, sandbags2: 3.5, wire1: 4, wire2: 4, mgNest: 4, searchlight: 4, mirador: 5, frenchPost: 30, helipad: 12, motorPool: 14, mortarPit: 7, sasPost: 11, zeriba1: 9, zeriba2: 9, alnCamp: 30, caveEntrance: 10 };
-  const siteR = (key) => ({ mechta: site("Mechta Ouled Ali").r, mechta2: site("Mechta el Oued").r, dechra: site("Dechra Tighanimine").r, koubba: 12, cemetery: 13 })[key];
+  const siteR = (key) => ({ mechta: site("Mechta Ouled Ali").r, mechta2: site("Mechta el Oued").r, dechra: site("Dechra Tighanimine").r, ksar: site("Ksar el Hamra")?.r, koubba: 12, cemetery: 13 })[key];
   const pieces = SHOWROOM.filter((p) => !p.vehicle).map((p) => ({ key: p.key, x: p.x, z: p.z, r: siteR(p.key) ?? R_OF[p.key] ?? 6 }));
   void ALN_BUILDABLES;
   // The post is a BOX (22 x 24 m half-sizes + its wire), in its own frame: a
@@ -151,6 +151,11 @@ if (args.includes("--route")) {
     { name: "Sentier de la katiba ouest", kind: "mule", from: "Gully mouth west", to: "Katiba camp" },
     { name: "Sentier du ravin est", kind: "mule", from: "Mechta Ouled Ali", to: "Gully mouth east" },
     { name: "Sentier de la katiba est", kind: "mule", from: "Gully mouth east", to: "Katiba camp" },
+    // To the ksar's SOUK (2026-09-30): the foot of its steps, 60 m down the
+    // town's front from the summit (the town itself is a keep-out).
+    // (A 12 m ring: the saved map has no pad yet — the game levels the
+    // souk at load — and its knoll is too steep for a piste to the point.)
+    { name: "Piste du ksar", kind: "piste", from: "network", toName: "Ksar el Hamra", k: { maxSlope: 28, maxGrade: 0.32 }, to: (() => { const s = site("Ksar el Hamra"), y = siteYaw(s); return { at: [s.x - 60 * Math.sin(y), s.z - 60 * Math.cos(y)], r: 12 }; })() },
   ];
   const KIND = {
     // grade = rise over run along the move; slope = the ground's own.
@@ -175,7 +180,8 @@ if (args.includes("--route")) {
   const endOf = (ref) => {
     if (ref === "gate") return { p: gate(28, -5), r: 0, key: null };
     if (ref === "network") return { p: [0, 0], r: 0, key: null, network: true };
-    if (Array.isArray(ref)) return { p: ref, r: 0, key: null };
+    if (Array.isArray(ref)) return { p: ref, r: C, key: null };   // a point: one grid cell of room (r 0 never "arrived")
+    if (ref?.at) return { p: ref.at, r: ref.r ?? C, key: null };   // a point with a ring: arrive anywhere within r
     const s = site(ref);
     if (!s) throw new Error(`no site "${ref}"`);
     // The site's own piece (a village ends at its rim); a point site: its ring.
@@ -216,7 +222,11 @@ if (args.includes("--route")) {
       if ((!di && !dj) || (Math.abs(di) === 2 && Math.abs(dj) === 2) || (Math.abs(di) === 2 && !dj) || (Math.abs(dj) === 2 && !di)) continue;
       DIRS.push([di, dj, Math.hypot(di, dj) * C]);
     }
+    // A cap, so an unreachable end fails in seconds (a full crawl of the
+    // map with lazy heap entries ran for minutes, 2026-09-30).
+    let pops = 0;
     while (heap.length) {
+      if (++pops > 3e6) return null;
       const [, k] = pop();
       if (inEnd(k, to) && hEst(k) <= 0.5) {
         const out = [];
@@ -280,8 +290,25 @@ if (args.includes("--route")) {
   };
 
   const out = [];
-  for (const R of ROUTES) {
-    const K = KIND[R.kind];
+  // --add: the tracks already routed stay EXACTLY as they are (patrols,
+  // convoys and the paint follow them) and count as network; only routes
+  // not in tracks.js yet are routed. A full --route re-routes everything
+  // (the pieces may have moved since).
+  const ADD = args.includes("--add");
+  let routes = ROUTES;
+  if (ADD) {
+    const { TRACKS: OLD } = await import("../games/alg-rts/tracks.js");
+    for (const t of OLD) {
+      for (const [x, z] of resample(t.points, 1)) { const [i, j] = cellOf([x, z]); used[j * GW + i] = Math.max(used[j * GW + i], t.kind === "piste" ? 1 : 2); }
+      out.push(t);
+    }
+    routes = ROUTES.filter((R) => !OLD.some((t) => t.name === R.name));
+    const only = args.includes("--only") ? args[args.indexOf("--only") + 1] : null;
+    if (only) routes = routes.filter((R) => R.name === only);
+  }
+  for (const R of routes) {
+    console.log(`routing ${R.name}…`);
+    const K = { ...KIND[R.kind], ...(R.k ?? {}) };   // a route may ease its kind's limits (the ksar's steep last stretch)
     const from = endOf(R.from), to = endOf(R.to);
     const cells = astar(from, to, K);
     if (!cells) { console.error(`NO ROUTE: ${R.name}`); process.exit(1); }
@@ -315,7 +342,7 @@ if (args.includes("--route")) {
     }
     if (len < 6) { console.log(`${R.name.padEnd(28)} already on the network — none`); continue; }
     console.log(`${R.name.padEnd(28)} ${R.kind.padEnd(5)} ${len.toFixed(0).padStart(4)} m  ${pts.length} pts  worst grade ${(worstG * 100).toFixed(0)}%  worst slope ${worstS.toFixed(0)}°`);
-    out.push({ name: R.name, kind: R.kind, from: R.from, to: R.to, length: Math.round(len), points: pts });
+    out.push({ name: R.name, kind: R.kind, from: R.from, to: R.toName ?? R.to, length: Math.round(len), points: pts });
   }
 
   const js = `// THE AURÈS MAP'S TRACKS — GENERATED by tools/algTracks.mjs --route; do not

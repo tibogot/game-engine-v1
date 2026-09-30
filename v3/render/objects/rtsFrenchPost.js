@@ -213,7 +213,13 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   const gH = 5.4, gW = gateW + 3.2, gD = 1.4;
   const gz = -hl - 0.1;
   parts.push({ geo: archWall(gW, gH, gD, [{ cx: 0, w: gateW, spring: 2.7 }]), pos: [0, 0, gz - 0.4], mat: MAT.white, tone: 0.62 });
-  parts.push({ geo: buildBox(gW + 0.1, 1.04, gD + 0.1), pos: [0, 0.52, gz - 0.4 + gD / 2], mat: MAT.rubble, tone: 0.5 });   // 4 cm over the wall footing: equal tops z-fought
+  // The rubble footing either side of the ARCH only (4 cm over the wall
+  // footing: equal tops z-fought). One block across the whole gatehouse ran
+  // a knee-high wall through the gateway, and the men marched through it
+  // (you, 2026-09-30). In the passage, a worn threshold slab, 8 cm up.
+  const sideW = (gW + 0.1 - gateW) / 2 - 0.03;   // 3 cm back from the arch's jambs (flush, they z-fought)
+  for (const sx of [-1, 1]) parts.push({ geo: buildBox(sideW, 1.04, gD + 0.1), pos: [sx * (gateW / 2 + 0.03 + sideW / 2), 0.52, gz - 0.4 + gD / 2], mat: MAT.rubble, tone: 0.5 });
+  parts.push({ geo: buildBox(gateW - 0.04, 0.08, gD + 0.06), pos: [0, 0.04 + 0.02, gz - 0.4 + gD / 2], mat: MAT.limestone, tone: 0.45 });
   // Stepped top: the bordj's gate is the one tall thing on the front.
   parts.push({ geo: buildBox(gW * 0.62, 0.9, gD - 0.1), pos: [0, gH + 0.45, gz - 0.4 + gD / 2], mat: MAT.white, tone: 0.64 });
   parts.push({ geo: buildBox(gW * 0.3, 0.6, gD - 0.2), pos: [0, gH + 1.2, gz - 0.4 + gD / 2], mat: MAT.white, tone: 0.66 });

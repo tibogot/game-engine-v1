@@ -32,6 +32,15 @@ Keep this file current: tick things off here, add new asks here.
         28-80-190 m (was 18-52-130), tilt 35°→60° (start 43°, CoH's editor
         default 45). Dev → Camera → FOV to try others. Shared rtsCamera
         options; nam unchanged.
+      · PERF CHECK after the week's additions: perfBench 332.8 (27-09: 342.2),
+        GPU 1.1-1.4 ms per view (timer), ambience + birds ≈ 0 GPU; CPU
+        herds + birds + ambience ≈ 1 ms of ~6.6. Nothing to trim.
+      · PISTE DU KSAR (algTracks --route --add --only: the other tracks
+        untouched): 253 m from the Oued piste up to the souk's steps.
+        A* now capped (an unreachable end ran for minutes).
+      · THE POST'S GATE: its rubble footing ran a knee-high wall ACROSS the
+        gateway (men walked through it) — now either side of the arch, a
+        threshold slab in the passage.
 
 ---
 
