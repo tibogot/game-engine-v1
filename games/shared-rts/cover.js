@@ -104,8 +104,11 @@ export const COVER = {
  *   app       the engine handle (sampleFoliageDensity, props)
  *   worldSize terrain edge in metres
  *   params    COVER overrides
+ *   extra     a generator of the game's own hard/soft cover circles
+ *   concealExtra (x, z) → 0..1: concealment that is not painted vegetation
+ *             (alg-rts's ambush screens), read as a vegetation density
  */
-export function createCover({ app, worldSize = 2048, params = COVER, extra = null } = {}) {
+export function createCover({ app, worldSize = 2048, params = COVER, extra = null, concealExtra = null } = {}) {
   const n = Math.max(2, Math.round(worldSize / CELL));
   const half = worldSize * 0.5;
   /** 0..255 per cell — how much hard cover stands in it. */
@@ -345,6 +348,7 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
     const veg = Math.max(
       app.sampleFoliageDensity?.(x, z) ?? 0,
       app.sampleTallPlantDensity?.(x, z) ?? 0,
+      concealExtra?.(x, z) ?? 0,
     );
     if (veg <= params.concealFloor) return 0;
     const ceil = params.concealCeil ?? 1;

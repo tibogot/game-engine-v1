@@ -11,7 +11,7 @@ export const FOLIAGE_TYPE_COUNT = 8;
 /** Shape keys — changing one of these rebuilds that type's meshes. */
 export const FOLIAGE_GEOMETRY_KEYS = [
   "kind", "fronds", "frondLength", "leaflets", "leafletWidth", "leafletAngle", "spread", "arch", "droop", "stemWidth", "bareStalk",
-  "plumesPerStem", "plumeSpread", "crownDepth",
+  "plumesPerStem", "plumeSpread", "crownDepth", "crownShade",
 ];
 
 /** Height band that means "no limit" (the full slider range). */
@@ -406,6 +406,9 @@ export const FOLIAGE_PRESETS = {
     fronds: 28, frondLength: 1.0, leaflets: 20, leafletWidth: 0.9, leafletAngle: 24,
     spread: 1.5, arch: 0.7, droop: 0.25, stemWidth: 1.6, bareStalk: 0.12,
     plumesPerStem: 1, plumeSpread: 110,
+    // The lower fans go dark (fanPalmGeometry crownShade): past the shadow
+    // distance a clump read as a flat pale mat.
+    crownShade: 0.75,
     colorBase: "#2a3423", colorTip: "#57633f", colorHead: "#6b5e4a", size: 1.8, translucency: 0.3,
   },
   // ALFA (esparto) — the tussock grass of the high plains and dry slopes:

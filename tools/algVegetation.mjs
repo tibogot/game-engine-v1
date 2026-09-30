@@ -153,9 +153,9 @@ const hamletOut = (x, z) => Math.min(...LAYOUT.sites.filter((s) => s.kind === "h
 
 const GROUND = [
   { name: "Alfa", preset: "alfa", fn: (x, z, h, s) => (1 - smooth((s - 20) / 6)) * patches(x, z, 25, 0.45, 13) * 0.55 },
-  // Doum: NOT painted for now — the fan-palm builder's far LOD draws it as
-  // flat green mats across the hillside (2026-09-26). Slot kept, zero paint.
-  { name: "Doum palm", preset: "doumPalm", fn: () => 0 },
+  // Doum: the valley sides — moderate slopes (8-26°), in clumps, sparse. (Off
+  // from 2026-09-26: its far LOD drew flat green mats; fixed 2026-09-30.)
+  { name: "Doum palm", preset: "doumPalm", fn: (x, z, h, s) => smooth((s - 8) / 4) * (1 - smooth((s - 26) / 5)) * patches(x, z, 18, 0.6, 29) * 0.35 },
   // Nam's typha is lime green with orange heads — a paddy in the monsoon.
   // An oasis in summer: olive leaves going straw at the tips, dark brown
   // heads (you: "flat bright colour is really not good for our terrain").

@@ -80,12 +80,28 @@ function circlesOf(mesh, hard) {
 }
 
 export function createAlgCover(app, { showroom = {}, isArmed = () => true } = {}) {
+  // AMBUSH SCREENS conceal (no cover: brush stops no bullet): the strip just
+  // BEHIND the hedge (its +z, where the water skin lies) reads as full scrub.
+  // Collected at every bake, so one the ALN raises counts once it stands.
+  const screens = [];
+  const concealExtra = (x, z) => {
+    for (const q of screens) {
+      const dx = x - q.x, dz = z - q.z;
+      const lx = q.c * dx - q.s * dz, lz = q.s * dx + q.c * dz;
+      if (Math.abs(lx - q.fp.cx) <= q.fp.hx * 0.72 && lz >= q.fp.cz - 0.6 && lz <= q.fp.cz + q.fp.hz + 2.4) return 1;
+    }
+    return 0;
+  };
   const cover = createCover({
-    app, worldSize: app.worldSize ?? 1024, params: ALG_COVER,
+    app, worldSize: app.worldSize ?? 1024, params: ALG_COVER, concealExtra,
     *extra() {
+      screens.length = 0;
       for (const [name, mesh] of Object.entries(showroom)) {
         // A sapper's piece is listed as "built:<kind>:<n>"; its kind decides.
         const key = mesh?.userData?.kitKey ?? name;
+        if (key === "ambushScreen" && mesh?.parent && mesh.geometry?.userData?.footprint) {
+          screens.push({ x: mesh.position.x, z: mesh.position.z, c: Math.cos(mesh.rotation.y), s: Math.sin(mesh.rotation.y), fp: mesh.geometry.userData.footprint });
+        }
         if (!mesh?.isObject3D || NONE.has(key) || !mesh.parent) continue;
         yield* circlesOf(mesh, HARD.has(key));
       }

@@ -311,8 +311,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrol the nearest track in file, back and forth (vehicles: the piste). A GMC on patrol delivers supplies to the villages you hold.", ready: true },
         grenades?.ability(sel),
       ].filter(Boolean)
-      : []),
+      // A sappers' site (algBuild.js): cancel it, the price back.
+      : sel.length === 1 && sel[0].site && sel[0].alive
+        ? [{ key: "cancelSite", label: `Annuler (+${BUILD_COSTS[sel[0].key]})`, hint: `Cancel the site: ${BUILD_COSTS[sel[0].key]} supplies back.`, ready: true }]
+        : []),
     onAbility: (key, sel) => {
+      if (key === "cancelSite") build?.cancelSite(sel[0]);
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
     },
@@ -331,6 +335,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let controlGroups = null;   // made after the selection it listens to
   const selection = createSelection({
     app, units, unitRenderer, structuresRenderer: structures.renderer,
+    // The sappers' sites (algBuild.js, made later): a click picks one.
+    buildingRenderer: { get roots() { return build?.renderer.roots ?? []; }, buildingFromHit: (h) => build?.renderer.buildingFromHit(h) ?? null },
     // An order outside the playable box: the nearest point 8 m inside it
     // (the box's edge is blocked on the nav grid; room for the formation).
     clampOrder: (x, z) => ({
@@ -363,7 +369,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // THE GÉNIE (algBuild.js): sappers place and raise the defences; a finished
   // wall re-bakes the cover map.
   build = createAlgBuild({
-    app, units, structures, navGrid, showroom, purse: economy.french,
+    app, units, structures, navGrid, showroom, purse: economy.french, enemyPurse: economy.aln,
     onCover: () => coverSys.cover.bake(),
   });
   app.algBuild = build;

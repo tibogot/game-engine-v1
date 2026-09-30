@@ -11,6 +11,31 @@ Keep this file current: tick things off here, add new asks here.
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
+- [x] **2026-09-30, second batch**:
+      · DOUM back on the slopes (8-26°, in clumps; 204k texels). The "flat
+        green mats" were NOT the far LOD (pushed out, same look): a low clump
+        is past the foliage shadow distance (35 m) at every RTS zoom, so its
+        fans could not shade each other and every one sat at the pale tip
+        colour. Fix: `crownShade` (fanPalmGeometry.js, opt-in, doum 0.75)
+        takes the older, lower fans down the colour ramp. nam's fan and
+        sugar palms don't set it: unchanged. you, look: the pale dot at each
+        clump's heart (the short petioles meeting) — keep it or darken it.
+      · SAPPER SITES: an amber progress bar over each (algBuild's own bar
+        field; shared healthBar.add takes an optional colour, nam
+        unchanged). A site is PICKED like a structure (the selection's
+        buildingRenderer): the card says "Chantier · <piece>", Under
+        construction, **Annuler (+cost)** = the whole price back (CoH), the
+        foundation gone, the cells free again (a nav rebuild, ~70 ms, once).
+      · ALN BUILDS: BUILDS.sangar (60, 16 s: becomes the sangar structure,
+        MG and all) and BUILDS.ambushScreen (25, 8 s), paid from the ALN
+        purse, raised by moudjahidine (`by`). An ALN site is the fog's:
+        hidden until explored, its bar and its digging sound only while
+        seen. The SCREEN now CONCEALS: the strip behind its hedge reads as
+        full scrub (shared cover.js `concealExtra`, nam unchanged; the
+        showroom's screen too) — 0.6 behind, 0 in front. TESTED: a
+        moudjahid raised both. NOT DONE: the AI deciding to build — that is
+        algAI.js (you): `app.algBuild.place("sangar", x, z, yaw, [men])`
+        resolves to the site, or null (`survey(...).why` says why).
 - [x] **The GAZELLE in the game** (2026-09-30, algHerds.js): the deer loaded
       beside the donkey; 3 groups of 3-6 (a fawn in five) on open, bare,
       gentle ground in the south half, 70 m clear of every site; they graze,
@@ -1074,7 +1099,8 @@ Order: foliage → villages → animals & birds → ground detail.
          right for CoH, say if not.
    - [ ] GPU cost of the dressing: A/B said −0.07 ms, but the frame read
          0.58 ms total (this view is normally 5-7) — re-measure in a focused tab.
-- [ ] Doum: fix its far LOD (flat green mats) and paint it back.
+- [x] Doum: fix its far LOD (flat green mats) and paint it back (2026-09-30:
+      it was not the LOD — see PARKED / NEXT).
 - [x] **Villages** (v3/render/objects/rtsAlgVillage.js, 2026-09-27):
       DECHRA (4 terraced rows of Chaouia houses — the mechta's own `house()`
       — each on a stone socle down to the real ground; a whitewashed mosque
@@ -1380,8 +1406,9 @@ Asset follow-ups:
       First pass was a forest (GPU counter ~12 ms in a close view): densities
       cut to Aurès sparseness (~6 ms same view). Map backed up first
       (scratchpad alg-aures.pre-veg.v3proj).
-- [ ] Doum palm: out of the painted field — the fan-palm builder's far LOD
+- [x] Doum palm: out of the painted field — the fan-palm builder's far LOD
       draws it as flat green mats. Fix the far LOD (or a card) and repaint.
+      (2026-09-30: fixed by crownShade, repainted.)
 - [ ] The stats overlay's triangle count reads ~2 billion since the tall
       field went in (a counter artefact of indirect draws? unverified; the
       frame holds 60 fps).
@@ -1598,10 +1625,11 @@ Asset follow-ups:
       · Spent brass / a scorch decal at an MG nest after long firing.
       · Ambience: cicadas by day, the muezzin from the ksar at set hours,
         dogs barking in villages when soldiers come near.
-- [ ] Génie, next: a construction bar over the site; cancel/refund; the
-      AI's sappers?; ALN builds (sangar, ambush screen) the same way; the
-      mirador into the line-of-sight bake; pads read as a pale mound on a
-      slope (the flatten rim) — you, look.
+- [~] Génie, next: ~~a construction bar over the site; cancel/refund~~;
+      ~~ALN builds (sangar, ambush screen) the same way~~ (all 2026-09-30);
+      the AI's sappers?; the ALN AI CALLING place() (you — algAI.js is
+      yours); the mirador into the line-of-sight bake; pads read as a pale
+      mound on a slope (the flatten rim) — you, look.
 - [ ] Not yet from the proposal: tiers (motor pool → helipad → armour), the SAS post raising support,
       the arms cache UNLOCKING MG / mortar / bazooka teams (it pays income
       for now), militia (moussebilines) recruited in ALN villages, the

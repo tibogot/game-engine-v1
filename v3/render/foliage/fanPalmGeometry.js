@@ -91,6 +91,12 @@ export function buildFanPalm(type, ctx) {
   const bare = type.bareStalk ?? 0.45;
   const skirtN = far ? 0 : Math.round(type.plumesPerStem ?? 9);
   const leafLen = H * ((type.plumeSpread ?? 26) / 100);
+  // CROWN SHADE (0 = off, every fan one tone): the older, lower fans take the
+  // darker end of the colour ramp. A low clump seen from the RTS camera is
+  // past the foliage shadow distance (35 m), so its fans cannot shade each
+  // other, and a crown of equally lit fans read as a flat pale mat — the
+  // doum, 2026-09-30. This paints the depth the shadows would have given.
+  const crownShade = type.crownShade ?? 0;
   const sides = near ? 8 : 5;
 
   // ── Trunk ─────────────────────────────────────────────────────────────────
@@ -180,7 +186,7 @@ export function buildFanPalm(type, ctx) {
    * is drawn as a whole leaf, so each card takes half of it: u 0-0.5 and
    * 0.5-1.
    */
-  const leaf = (origin, azm, lift, len, size, dead, rnd) => {
+  const leaf = (origin, azm, lift, len, size, dead, rnd, shade = 0.94) => {
     const d = [Math.cos(azm), 0, Math.sin(azm)];
     const sd = [-Math.sin(azm), 0, Math.cos(azm)];
     // The petiole's direction, and where the blade starts.
@@ -231,7 +237,7 @@ export function buildFanPalm(type, ctx) {
         for (const uu of [0, 1]) {
           const p = add(add(mid, blade, (vv * 2 - 1) * size * 0.9),
             across, uu * size);
-          push(p, n, 0.5 + half * uu * 0.5, vv, [FAN, 0.94, dead ? DEAD : rnd, vv]);
+          push(p, n, 0.5 + half * uu * 0.5, vv, [FAN, shade, dead ? DEAD : rnd, vv]);
         }
       }
       I.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
@@ -254,7 +260,8 @@ export function buildFanPalm(type, ctx) {
     // — the bamboo lesson. Without it a distant grove thins into wisps.
     const lodGrow = far ? 1.5 : near ? 1 : 1.18;
     leaf(crownO, a, lift, leafLen * (0.82 + 0.18 * Math.min(1, age * 2)),
-      leafLen * 0.62 * fanScale * lodGrow * (0.85 + rand() * 0.3), false, rand());
+      leafLen * 0.62 * fanScale * lodGrow * (0.85 + rand() * 0.3), false, rand(),
+      0.94 - crownShade * Math.pow(age, 0.8));
   }
 
   // ── The skirt ─────────────────────────────────────────────────────────────

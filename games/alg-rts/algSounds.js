@@ -74,7 +74,7 @@ export function createAlgSounds({ app, rtsCamera, units }) {
     for (const f of fire.fires) { const left = f.end - now; if (left > 0) out.push({ slot: "fireLoop", key: f, x: f.x, y: f.y, z: f.z, level: Math.min(1.2, 0.35 + f.radius * 0.18) * Math.min(1, left / 2) }); }
     return out;
   });
-  audio.addLoopProvider(() => (app.algBuild?.sites ?? []).filter((s) => !s.done).map((s) => ({ slot: "build", key: s, x: s.x, y: app.getWorldHeight(s.x, s.z), z: s.z, level: 1 })));
+  audio.addLoopProvider(() => (app.algBuild?.sites ?? []).filter((s) => !s.done && (s.team !== "enemy" || !app.fogOfWar?.enabled || app.fogOfWar.isVisible(s.x, s.z))).map((s) => ({ slot: "build", key: s, x: s.x, y: app.getWorldHeight(s.x, s.z), z: s.z, level: 1 })));
   // The bed: wind always, cicadas by day, a little quieter from high up.
   audio.addLoopProvider(() => {
     const zoomT = rtsCamera.getView?.()?.zoomT ?? 0.5;

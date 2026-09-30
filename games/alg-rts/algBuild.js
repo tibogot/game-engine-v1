@@ -15,7 +15,8 @@
 // Game code: this game's buildings, prices and rules. The same flow in nam-rts
 // is nam's own (buildPlacement.js / buildings.js).
 import * as THREE from "three";
-import { buildBarbedWire, buildFrSandbagWall, buildMgNest, buildMirador, buildMortarPit, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildBarbedWire, buildFrSandbagWall, buildMgNest, buildMirador, buildMortarPit, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { kitView } from "./showroom.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 
@@ -31,12 +32,22 @@ export const BUILDS = {
   mortarPit: { label: "Mortier", tip: "81 mm mortar pit: bombs 25-120 m out, over cover.", cost: 130, time: 18, build: () => buildMortarPit(), pad: true, structure: "mortarPit" },
   mirador: { label: "Mirador", tip: "Watchtower: sees 110 m, an MG in the cabin.", cost: 110, time: 20, build: () => buildMirador(), pad: true, structure: "mirador" },
   searchlight: { label: "Projecteur", tip: "Searchlight tower: sees 100 m.", cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
+  // THE ALN BUILDS TOO (you, 2026-09-30): the same sites, paid from the ALN's
+  // purse, raised by moudjahidine (`by`: no command card of theirs to list
+  // them — the AI places them through place()). Both lie on the slope, as
+  // the showroom's do.
+  sangar: { label: "Sangar", tip: "Dry-stone firing position, an FM over its lip.", cost: 60, time: 16, build: () => buildSangar(), follow: true, structure: "sangar", team: "enemy", by: ["moudjahid"] },
+  ambushScreen: { label: "Écran d'embuscade", tip: "Cut scrub on a stone footing: men behind it are hidden until they fire.", cost: 25, time: 8, build: () => buildAmbushScreen(), follow: true, team: "enemy", by: ["moudjahid"] },
 };
-/** For the command card: [{ key, label, tip }] and { key: cost }. */
-export const BUILD_BUTTONS = Object.entries(BUILDS).map(([key, b]) => ({ key, label: b.label, tip: b.tip }));
+/** Who may raise `key`: his type lists it (the sappers), or the piece names his type. */
+export const canBuild = (u, key) => !!(u?.type?.builds?.includes(key) || BUILDS[key]?.by?.includes(u?.typeKey));
+/** For the command card (the French: the ALN's pieces are the AI's): [{ key, label, tip }] and { key: cost }. */
+export const BUILD_BUTTONS = Object.entries(BUILDS).filter(([, b]) => b.team !== "enemy").map(([key, b]) => ({ key, label: b.label, tip: b.tip }));
 export const BUILD_COSTS = Object.fromEntries(Object.entries(BUILDS).map(([k, b]) => [k, b.cost]));
 
 const OK = new THREE.Color(0x46e070), BAD = new THREE.Color(0xe4483a);
+/** A site's progress bar: the génie's amber, not a health colour. */
+const WORK = new THREE.Color(0xe0a93a);
 /**
  * How steep a site may be. A pad: the height spread across its footprint, as
  * a slope (0.32 ≈ 18°; the pad levels it — a fixed 2.2 m refused gentle
@@ -51,10 +62,14 @@ const PAD_SLOPE = 0.32, FOLLOW_NY = 0.88;
  * @param {object} o.structures  algStructures (addBuilt)
  * @param {object} o.navGrid
  * @param {object} o.purse       the player's purse ({ spend, canAfford })
+ * @param {object} [o.enemyPurse] the ALN's (its pieces: the sangar, the ambush screen)
+ * @param {object} [o.enemyPurse] the ALN's (its pieces: sangar, ambush screen)
  * @param {() => void} [o.onCover]  re-bake the cover map (a finished wall)
  * @param {Record<string, THREE.Object3D>} o.showroom  where built pieces are listed (cover, clearing)
  */
-export function createAlgBuild({ app, units, structures, navGrid, purse, onCover = () => {}, showroom }) {
+export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPurse = null, onCover = () => {}, showroom }) {
+  const teamOf = (key) => BUILDS[key]?.team ?? "player";
+  const purseOf = (key) => (teamOf(key) === "enemy" ? enemyPurse : purse);
   const dom = app.renderer.domElement;
   const geoCache = new Map();
   const geoOf = (key) => { if (!geoCache.has(key)) geoCache.set(key, BUILDS[key].build()); return geoCache.get(key); };
@@ -92,7 +107,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, onCover
       y = a - b * f.cx - c * f.cz - dip;
       tilt = n;
     } else if (hi - lo > Math.max(0.6, 2 * Math.max(f.hx, f.hz) * PAD_SLOPE)) { ok = false; why ??= "too steep"; }
-    if (ok && B.cost > 0 && !purse.canAfford(B.cost)) { ok = false; why = "not enough supplies"; }
+    if (ok && B.cost > 0 && !purseOf(key)?.canAfford(B.cost)) { ok = false; why = "not enough supplies"; }
     return { ok, why, y, tilt, f };
   }
 
@@ -111,7 +126,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, onCover
   const ghostMat = () => new THREE.MeshBasicMaterial({ color: OK, transparent: true, opacity: 0.45, depthWrite: false, fog: false });
   function begin(key, selected) {
     cancel();
-    const builders = selected.filter((u) => u?.alive && u.team === "player" && u.type?.builds?.includes(key));
+    const builders = selected.filter((u) => u?.alive && u.team === "player" && canBuild(u, key));
     if (!builders.length || !BUILDS[key]) return;
     const mat = ghostMat();
     const ghost = new THREE.Mesh(geoOf(key), mat);
@@ -174,11 +189,11 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, onCover
   async function commit(key, x, z, yaw, builders) {
     const B = BUILDS[key];
     const sv = survey(key, x, z, yaw);
-    if (!sv.ok || !purse.spend(B.cost)) return;
+    if (!sv.ok || !purseOf(key)?.spend(B.cost)) return null;
     const f = sv.f;
     const [cx, cz] = toWorld(x, z, yaw, f.cx, f.cz);
     // Block it at once (men route round the site) and clear the plants off it.
-    navGrid?.addFootprint?.(cx, cz, f.hx, f.hz, yaw);
+    const fp = navGrid?.addFootprint?.(cx, cz, f.hx, f.hz, yaw) ?? null;
     for (let lx = -f.hx; lx <= f.hx + 0.01; lx += 2.5) for (let lz = -f.hz; lz <= f.hz + 0.01; lz += 2.5) {
       const [wx, wz] = toWorld(x, z, yaw, f.cx + lx, f.cz + lz);
       app.clearVegetation?.(wx, wz, 2.4, { grass: 2, edge: 0.5 });
@@ -192,7 +207,17 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, onCover
     seat(mesh, x, y, z, yaw, sv.tilt);
     mesh.scale.y = 0.06;                              // the foundation, until work starts
     app.scene.add(mesh);
-    const site = { key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false };
+    const site = {
+      key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false, fp,
+      // Picked like a structure (the shared selection's buildingRenderer):
+      // the command card shows it under construction, with Annuler.
+      site: true, isStructure: true, alive: true, team: teamOf(key), constructing: true,
+      typeKey: `site:${key}`, name: `Chantier · ${B.label}`, position: mesh.position,
+      hp: 0, maxHp: 100, selected: false,
+      setSelected(on) { this.selected = on; },
+      barW: Math.min(8, 3 + Math.max(f.hx, f.hz) * 0.4),
+      barY: Math.min(14, (geoOf(key).boundingBox ?? (geoOf(key).computeBoundingBox(), geoOf(key).boundingBox)).max.y + 1.5),
+    };
     sites.push(site);
     // Each sapper to the nearest open ground at the site's edge, on his side.
     for (const u of builders) {
@@ -202,6 +227,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, onCover
       const p = navGrid?.nearestOpenWorld?.(ex, ez, true) ?? { x: ex, z: ez };
       u.moveOrder?.(p.x, p.z);
     }
+    return site;
   }
 
   /**
@@ -216,7 +242,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, onCover
       if (s.done) continue;
       let workers = 0;
       for (const u of units.list) {
-        if (!u.alive || u.team !== "player" || !u.type?.builds || u.isMoving) continue;
+        if (!u.alive || u.team !== s.team || u.isMoving || !canBuild(u, s.key)) continue;
         if (Math.hypot(u.position.x - s.x, u.position.z - s.z) < s.reach) {
           workers++;
           atWork.add(u);
@@ -227,26 +253,85 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, onCover
       // Two sappers 1.5x as fast, three 1.8x: they get in each other's way.
       s.progress = Math.min(1, s.progress + (dt / BUILDS[s.key].time) * (1 + 0.8 * (1 - 0.5 ** (workers - 1))));
       s.mesh.scale.y = 0.06 + 0.94 * s.progress;
-      if (s.progress >= 1) finish(s);
+      s.hp = s.progress * 100;
     }
+    for (let i = sites.length - 1; i >= 0; i--) if (sites[i].progress >= 1) finish(sites[i]);
     for (const u of units.list) if (u.working && !atWork.has(u)) u.working = null;
+  }
+  /** A site stops being a site (finished or cancelled): out of the list and the selection. */
+  function retire(s) {
+    s.alive = false;
+    s.constructing = false;
+    const i = sites.indexOf(s);
+    if (i >= 0) sites.splice(i, 1);
+    if (s.selected) app.selection?.remove?.(s);
+    for (const u of units.list) if (u.working === s) u.working = null;
   }
   function finish(s) {
     s.done = true;
     s.mesh.scale.y = 1;
+    retire(s);
     const B = BUILDS[s.key];
     if (B.structure) structures.addBuilt(B.structure, s.mesh);
     if (showroom) showroom[s.mesh.name] = s.mesh;    // cover lists the placed pieces
     onCover();
   }
+  /**
+   * Cancel a site: the whole price back (Company of Heroes refunds a cancelled
+   * site in full), the foundation gone, the ground open again. The pad's
+   * levelling stays — earth moved is earth moved. Freeing the cells rebuilds
+   * the nav grid (~70 ms, once, on a click; nam does the same on placing).
+   */
+  function cancelSite(s) {
+    if (!s?.site || !s.alive || s.done) return false;
+    retire(s);
+    purseOf(s.key)?.earn?.(BUILDS[s.key].cost);
+    app.scene.remove(s.mesh);
+    s.mesh.geometry?.dispose?.();
+    if (s.fp) { navGrid?.removeFootprint?.(s.fp); navGrid?.rebuild?.(); }
+    return true;
+  }
+
+  // ── Every frame: a progress bar over each site (its own bar field — one draw,
+  // none while nothing is being built) ─────────────────────────────────────
+  const bars = createHealthBarField({ scene: app.scene, max: 64, height: 0.45, groundAt: (x, z) => app.getWorldHeight(x, z) });
+  // An ALN site is the fog's, as the ALN's buildings are (algStructures):
+  // unseen until first explored, its bar only while you can see it.
+  const fogHides = (s, test) => s.team === "enemy" && app.fogOfWar?.enabled && !app.fogOfWar[test](s.x, s.z);
+  const frame = () => {
+    bars.begin();
+    for (const s of sites) {
+      s.mesh.visible = !fogHides(s, "isExplored");
+      if (!fogHides(s, "isVisible")) bars.add(s.x, s.position.y + s.barY, s.z, s.barW, s.progress, s.team === "enemy", app.camera, s.team === "enemy" ? null : WORK);
+    }
+    bars.commit();
+  };
+  app.addPreRenderHook?.(frame);
+
+  /** For the shared selection (its buildingRenderer): a click on a site's foundation picks it. */
+  const renderer = {
+    get roots() { return sites.map((s) => s.mesh); },
+    buildingFromHit(h) {
+      for (let o = h.object; o; o = o.parent) {
+        const s = sites.find((q) => q.mesh === o);
+        if (s) return s.alive ? s : null;
+      }
+      return null;
+    },
+  };
 
   return {
-    begin, cancel, step, sites,
+    begin, cancel, step, sites, cancelSite, renderer,
     get placing() { return !!placing; },
     /** Why the ghost is red (null when green). */
     get why() { return placing?.at?.why ?? null; },
     survey,
-    /** Place without the ghost (an AI, a test): the same checks, the same cost. */
+    /**
+     * Place without the ghost (an AI, a test): the same checks, the same cost
+     * (from the piece's own side's purse). The ALN's AI raises a sangar or an
+     * ambush screen with this: place("sangar", x, z, yaw, [moudjahidine]).
+     * Resolves to the site (null: refused — survey(key, x, z, yaw).why says why).
+     */
     place: (key, x, z, yaw, builders) => commit(key, x, z, yaw, builders),
   };
 }

@@ -93,8 +93,11 @@ export function createHealthBarField({ scene, max = 1536, height = 0.55, groundA
 
     begin() { n = 0; },
 
-    /** Queue one bar. `width` is the bar's world width; `frac` is hp/maxHp. */
-    add(x, y, z, width, frac, hostile, camera) {
+    /**
+     * Queue one bar. `width` is the bar's world width; `frac` is hp/maxHp.
+     * `color` (a THREE.Color) overrides the health ramp — a progress bar.
+     */
+    add(x, y, z, width, frac, hostile, camera, color = null) {
       if (n >= max) return;
       if (hiddenByGround(x, y, z, camera)) return;
 
@@ -120,7 +123,7 @@ export function createHealthBarField({ scene, max = 1536, height = 0.55, groundA
       const f = THREE.MathUtils.clamp(frac, 0, 1);
       fracAttr.setX(n, f);
 
-      _col.copy(hostile ? HOSTILE : f > 0.6 ? OK : f > 0.3 ? WARN : LOW);
+      _col.copy(color ?? (hostile ? HOSTILE : f > 0.6 ? OK : f > 0.3 ? WARN : LOW));
       colorAttr.setXYZ(n, _col.r, _col.g, _col.b);
 
       marginAttr.setXY(n, BORDER / w, BORDER / h);
