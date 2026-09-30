@@ -130,7 +130,12 @@ const ROLES = {
   "rifle sprint": "rifle_sprint",
   "sprint": "rifle_sprint",
   "firing rifle": "rifle_firing",
-  "rifle crouch walk": "rifle_crouch_walk",
+  // "Rifle Crouch Walk" came as Mixamo's "Rifle Walking RIGHT Crouched" — a
+  // strafe (matched by length, and it side-steps: the transition lab,
+  // 2026-09-30). The forward crouched walk is "Crouch Walking" ("Crouched
+  // Walking While Aiming Rifle"), lower too (hips 0.67 m against 0.79).
+  "rifle crouch walk": "rifle_crouch_strafe",
+  "crouch walking": "rifle_crouch_walk",
   "crouch walk": "rifle_crouch_walk",
   "rifle crouch idle": "rifle_crouch_idle",
   "crouching idle": "rifle_crouch_idle",
@@ -146,6 +151,14 @@ const ROLES = {
   "crawling": "rifle_crawl",
   "crawl": "rifle_crawl",
   "prone firing": "rifle_prone_firing",
+  "prone firing rifle": "rifle_prone_firing",
+  // Transitions (Mixamo's rifle set): see TRANSITIONS below.
+  "rifle stand to kneel": "rifle_stand_to_kneel",
+  "rifle kneel to stand": "rifle_kneel_to_stand",
+  "rifle kneel to prone": "rifle_kneel_to_prone",
+  "rifle prone to kneel": "rifle_prone_to_kneel",
+  "prone death": "death_prone",
+  "death crouching headshot front": "death_kneeling",
   "toss grenade": "grenade_throw",
   "throw grenade": "grenade_throw",
   "hit reaction": "hit",
@@ -353,6 +366,53 @@ for (const l of loaded) {
   });
 }
 if (!clips.length) fail("no animation clips found");
+
+// ── The hips: in place, and transitions that land where the next clip starts ──
+// "In Place" can't be ticked for a transition on Mixamo, and one download
+// forgot it. MEASURED 2026-09-30 (the hips at each clip's first and last key):
+// Kneel To Prone starts on the kneel idle's hips and ends on the prone idle's
+// to the millimetre (one family); Stand To Kneel / Kneel To Stand start right
+// and end ~21 cm off (the man steps); Prone To Kneel 9 cm; "Crouch Walking"
+// walks 1.29 m. A clip left like that SLIDES the man, then snaps him back when
+// the next clip starts. So:
+//   LOOPS that travel → the drift ramped out (what In Place does);
+//   TRANSITIONS → ramped so they start on the FROM clip's hips and end on the
+//   TO clip's (horizontal only — the height IS the move).
+const TRANSITIONS = {
+  rifle_stand_to_kneel: ["rifle_idle", "rifle_crouch_idle"],
+  rifle_kneel_to_stand: ["rifle_crouch_idle", "rifle_idle"],
+  rifle_kneel_to_prone: ["rifle_crouch_idle", "rifle_prone_idle"],
+  rifle_prone_to_kneel: ["rifle_prone_idle", "rifle_crouch_idle"],
+};
+const LOOPS_IN_PLACE = /^rifle_(walk|run|sprint|crouch_walk|crouch_strafe|crawl)$/;
+{
+  const hipsOf = (c) => c?.tracks.find((t) => /Hips\.position$/.test(t.name));
+  const firstXZ = (c) => { const h = hipsOf(c); return h ? [h.values[0], h.values[2]] : null; };
+  /** Shift the hips so the clip starts at `a` and ends at `b` (x, z), linearly in time. */
+  const ramp = (c, a, b) => {
+    const h = hipsOf(c);
+    if (!h || !a || !b) return false;
+    const v = h.values, t = h.times, n = t.length, T = t[n - 1] || 1;
+    const dsx = a[0] - v[0], dsz = a[1] - v[2];
+    const dex = b[0] - v[(n - 1) * 3], dez = b[1] - v[(n - 1) * 3 + 2];
+    for (let k = 0; k < n; k++) {
+      const u = t[k] / T;
+      v[k * 3] += dsx + (dex - dsx) * u;
+      v[k * 3 + 2] += dsz + (dez - dsz) * u;
+    }
+    return true;
+  };
+  const byName = (name) => clips.find((c) => c.name === name);
+  for (const c of clips) {
+    const tr = TRANSITIONS[c.name];
+    if (tr) {
+      if (!ramp(c, firstXZ(byName(tr[0])), firstXZ(byName(tr[1])))) warn(`  ! ${c.name}: ${tr.join(" / ")} not in the pack — its hips left as downloaded`);
+    } else if (LOOPS_IN_PLACE.test(c.name)) {
+      const s0 = firstXZ(c);
+      if (s0) ramp(c, s0, s0);
+    }
+  }
+}
 
 const weapon = addWeaponBone();
 

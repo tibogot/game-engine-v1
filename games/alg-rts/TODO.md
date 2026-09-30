@@ -192,15 +192,22 @@ Not wired into either game yet.
          on the back for the whole fade (the pack stows by bone scale).
          The Rifle Crouch Walk in the pack is Mixamo's "Rifle Walking RIGHT
          Crouched" (a strafe; matched by frame count, and it side-steps).
-   - [ ] **you**: the forward "Rifle Crouch Walk" ("Rifle Walking Crouched",
-         In Place) over the strafe. Downloaded 2026-09-30: Rifle Stand To
-         Kneel / Kneel To Stand / Kneel To Prone / Prone To Kneel, Prone
-         Forward, Prone Firing Rifle, Prone Death, Death Crouching Headshot
-         Front (in assets-src, not packed yet)
-   - [ ] pack them: role names; strip the transitions' hip drift (0.06-0.19 m,
-         no In Place for transitions); the game PLAYS a transition (stand →
-         kneel → prone, prone → kneel → stand) instead of fading; prone
-         firing, crawl, the two new deaths; judge each in the lab first
+   - [x] NEW CLIPS PACKED (2026-09-30, judged in the lab's MOVES): Rifle
+         Stand To Kneel / Kneel To Stand / Kneel To Prone / Prone To Kneel,
+         Prone Forward (crawl), Prone Firing Rifle, Prone Death, Death
+         Crouching Headshot Front, Crouch Walking (the forward one, lower —
+         the old "Rifle Crouch Walk" is Mixamo's strafe, kept as
+         rifle_crouch_strafe). The pack now pins the hips: loops that travel
+         ramped in place (Crouch Walking walked 1.29 m); transitions ramped to
+         START on the from-clip's hips and END on the to-clip's (Stand To Kneel
+         ended 21 cm off). soldierTransitions.js MOVES: which clips a posture
+         change plays; transition-lab "Moves" plays them as the game will.
+         Verdicts: the four transitions and stand ⇄ prone through the kneel
+         natural; crouch walk, prone fire, prone death good; the CRAWL's rifle
+         points into the ground; the headshot kneeling death stands him up
+         (you added "Crouch Death" to try instead).
+   - [ ] the game PLAYS the moves (pinned: the real drop; up: the real rise),
+         crawl / prone fire / prone death in the game; the crawl's rifle
    - [ ] a dead man's rifle falls away (the deaths keep it gripped: it stands
          up out of a prone corpse)
    - [x] skinning work sized to the LIVE soldiers (renderer.compute count)

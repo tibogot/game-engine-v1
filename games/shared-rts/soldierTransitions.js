@@ -94,3 +94,37 @@ export function deathFrom(prevClip, pick, deaths, durationOf) {
   if (/crouch/.test(prevClip)) return { clip: pick, t: durationOf(pick) * 0.33, fade: 0.3 };
   return { clip: pick, t: 0, fade: fadeFor(prevClip, pick) };
 }
+
+/**
+ * MOVES: the transition CLIPS a posture change plays (Mixamo's rifle set,
+ * packed 2026-09-30), from one holding clip to another — played once each,
+ * joined by short fades, instead of one long crossfade between the two poses
+ * (which the transition lab showed can't look like a man dropping to the
+ * ground, however long). `rate` speeds a move up (a man under fire drops
+ * faster than a drill). Judged in transition-lab.html (its "Moves").
+ */
+export const MOVES = {
+  "rifle_idle>rifle_crouch_idle": [{ clip: "rifle_stand_to_kneel" }],
+  "rifle_crouch_idle>rifle_idle": [{ clip: "rifle_kneel_to_stand" }],
+  "rifle_crouch_idle>rifle_prone_idle": [{ clip: "rifle_kneel_to_prone" }],
+  "rifle_prone_idle>rifle_crouch_idle": [{ clip: "rifle_prone_to_kneel" }],
+  "rifle_idle>rifle_prone_idle": [{ clip: "rifle_stand_to_kneel" }, { clip: "rifle_kneel_to_prone" }],
+  "rifle_prone_idle>rifle_idle": [{ clip: "rifle_prone_to_kneel" }, { clip: "rifle_kneel_to_stand" }],
+};
+/** The fade joining a move's clips (they start and end on each other's pose). */
+export const MOVE_JOIN = 0.12;
+
+/** What the lab lists under "Moves": [from, to, why] (a MOVES key, or a plain pair of the new clips). */
+export const LAB_MOVES = [
+  ["rifle_idle", "rifle_crouch_idle", "into cover (Stand To Kneel)"],
+  ["rifle_crouch_idle", "rifle_idle", "up from cover (Kneel To Stand)"],
+  ["rifle_crouch_idle", "rifle_prone_idle", "pinned, kneeling (Kneel To Prone)"],
+  ["rifle_prone_idle", "rifle_crouch_idle", "up from prone (Prone To Kneel)"],
+  ["rifle_idle", "rifle_prone_idle", "pinned, standing (stand → kneel → prone)"],
+  ["rifle_prone_idle", "rifle_idle", "up (prone → kneel → stand)"],
+  ["rifle_prone_idle", "rifle_crawl", "pinned, moving (Prone Forward)"],
+  ["rifle_prone_idle", "rifle_prone_firing", "pinned, shooting back"],
+  ["rifle_run", "rifle_crouch_walk", "suppressed on the move (Crouch Walking)"],
+  ["rifle_crouch_idle", "death_kneeling", "killed kneeling (Death Crouching)"],
+  ["rifle_prone_idle", "death_prone", "killed lying (Prone Death)"],
+];

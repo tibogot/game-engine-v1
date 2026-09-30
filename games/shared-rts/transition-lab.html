@@ -18,8 +18,8 @@
       .row .v { width: 44px; text-align: right; font-family: ui-monospace, monospace; }
       button { font: 11px system-ui; color: #e8e4d8; background: #252920; border: 1px solid #454c3a; border-radius: 4px; padding: 4px 6px; cursor: pointer; }
       button.on { border-color: #cdb98a; background: #3a3526; }
-      #pairs { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; }
-      #pairs button { text-align: left; display: flex; justify-content: space-between; }
+      #pairs, #moves { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; }
+      #pairs button, #moves button { text-align: left; display: flex; justify-content: space-between; }
       #pairs button span.f { font-family: ui-monospace, monospace; color: #cdb98a; }
       select { background: #252920; color: #e8e4d8; border: 1px solid #454c3a; border-radius: 4px; }
       #err { color: #ff8a7a; white-space: pre-wrap; }
@@ -44,6 +44,10 @@
       <div class="row"><label>Hold</label><input id="hold" type="range" min="0.6" max="4" step="0.1" value="1.6" /><span class="v" id="holdV">1.6</span></div>
       <div class="row"><label>A</label><select id="clipA"></select></div>
       <div class="row"><label>B</label><select id="clipB"></select></div>
+      <div class="note" style="margin-top:8px"><b>Moves</b> — the transition clips, played as the game will
+        (the start pose, each clip once, the end pose):</div>
+      <div id="moves"></div>
+      <div class="note" style="margin-top:8px"><b>Fades</b> — the pairs the game crossfades today:</div>
       <div id="pairs"></div>
       <div class="row"><button id="copy">Copy table</button><span id="copied" class="note"></span></div>
       <div id="err"></div>
@@ -55,7 +59,7 @@
       import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
       import { createCrowdField } from "./crowdSkinning.js";
       import { WEAPONS, TOOLS, weaponMaterial } from "./procWeapons.js";
-      import { FADES, GAME_PAIRS, deathFrom, fadeFor, setFade } from "./soldierTransitions.js";
+      import { FADES, GAME_PAIRS, LAB_MOVES, MOVES, MOVE_JOIN, deathFrom, fadeFor, setFade } from "./soldierTransitions.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
@@ -184,22 +188,61 @@
           const btn = document.createElement("button");
           btn.innerHTML = `<span>${a.replace("rifle_", "")} → ${b.replace("rifle_", "")}<br><small style="color:#a9a48f">${why}</small></span><span class="f">${fadeFor(a, b).toFixed(2)}</span>`;
           btn.onclick = () => pick(a, b);
-          btn.classList.toggle("on", a === A && b === B);
+          btn.classList.toggle("on", mode === "pair" && a === A && b === B);
           $("pairs").appendChild(btn);
         }
       }
+      // ── Moves: a chain of segments ────────────────────────────────────────
+      let mode = "pair", chain = null, moveKey = null;
+      function buildChain(from, to) {
+        const hold = +$("hold").value;
+        const steps = MOVES[`${from}>${to}`] ?? [];
+        const segs = [{ clip: from, loop: true, len: hold, fade: 0 }];
+        for (const st of steps) segs.push({ clip: st.clip, loop: false, rate: st.rate ?? 1, len: clips[st.clip].duration / (st.rate ?? 1), fade: MOVE_JOIN });
+        const death = /^death/.test(to);
+        segs.push({ clip: to, loop: !death, len: death ? clips[to].duration + 1.5 : hold, fade: steps.length ? MOVE_JOIN : fadeFor(from, to), death });
+        let t = 0;
+        for (const g of segs) { g.start = t; t += g.len; }
+        const moveFrom = segs[1].start, moveTo = segs[segs.length - 1].start + segs[segs.length - 1].fade + (steps.length ? 0 : Math.min(1.2, segs[segs.length - 1].len));
+        return { segs, total: t, moveFrom, moveTo, label: `${from} → ${steps.map((x) => x.clip).join(" → ")}${steps.length ? " → " : ""}${to}` };
+      }
+      /** The clip time of segment g, `local` s into it (once: clamped on its last frame). */
+      const segT = (g, local) => (g.loop ? startOf(g.clip) + local : Math.min(local * (g.rate ?? 1), clips[g.clip].duration * 0.999));
+      function chainPose(c, T) {
+        let i = c.segs.length - 1;
+        while (i > 0 && T < c.segs[i].start) i--;
+        const g = c.segs[i], local = T - g.start;
+        if (i > 0 && local < g.fade) {
+          const p = c.segs[i - 1];
+          return [p.clip, segT(p, p.len), g.clip, segT(g, local), local / g.fade];
+        }
+        return [g.clip, segT(g, local), g.clip, segT(g, local), 0];
+      }
+      function renderMoves() {
+        $("moves").innerHTML = "";
+        for (const [a, b, why] of LAB_MOVES) {
+          const btn = document.createElement("button");
+          const n = (MOVES[`${a}>${b}`] ?? []).length;
+          btn.innerHTML = `<span>${a.replace("rifle_", "")} → ${b.replace("rifle_", "")}<br><small style="color:#a9a48f">${why}</small></span><span class="f">${n ? n + " clip" + (n > 1 ? "s" : "") : "fade"}</span>`;
+          btn.onclick = () => { mode = "move"; moveKey = [a, b]; chain = buildChain(a, b); loopT = 0; renderMoves(); renderPairs(); };
+          btn.classList.toggle("on", mode === "move" && moveKey?.[0] === a && moveKey?.[1] === b);
+          $("moves").appendChild(btn);
+        }
+      }
       function pick(a, b) {
+        mode = "pair";
         A = a; B = b;
         $("clipA").value = a; $("clipB").value = b;
         $("fade").value = fadeFor(a, b); $("fadeV").textContent = (+$("fade").value).toFixed(2);
         loopT = 0;
         renderPairs();
+        renderMoves?.();
       }
       $("clipA").onchange = () => pick($("clipA").value, B);
       $("clipB").onchange = () => pick(A, $("clipB").value);
       $("body").onchange = () => build($("body").value);
       $("fade").oninput = () => { setFade(A, B, +$("fade").value); $("fadeV").textContent = (+$("fade").value).toFixed(2); renderPairs(); };
-      $("hold").oninput = () => { $("holdV").textContent = (+$("hold").value).toFixed(1); };
+      $("hold").oninput = () => { $("holdV").textContent = (+$("hold").value).toFixed(1); if (mode === "move") chain = buildChain(...moveKey); };
       for (const b of document.querySelectorAll("[data-speed]")) b.onclick = () => {
         speed = +b.dataset.speed;
         for (const x of document.querySelectorAll("[data-speed]")) x.classList.toggle("on", x === b);
@@ -217,12 +260,28 @@
       const clock = new THREE.Clock();
       renderer.setAnimationLoop(() => {
         const dt = Math.min(clock.getDelta(), 0.05) * speed;
-        const hold = +$("hold").value, go = into(A, B), fade = go.fade;
-        const cycle = 2 * (hold + fade);
-        loopT = (loopT + dt) % cycle;
         const f = crowd.field;
         f.begin();
         for (const p of Object.values(crowd.pieces)) p.n = 0;
+        if (mode === "move") {
+          loopT = (loopT + dt) % chain.total;
+          const [a, ta, b, tb, k] = chainPose(chain, loopT);
+          pose(LEFT, a, ta, b, tb, k);
+          // the strip: across the MOVE itself
+          STRIP.forEach(({ m }, i) => {
+            const T = chain.moveFrom + (chain.moveTo - chain.moveFrom) * (i / (STRIP.length - 1));
+            pose(m, ...chainPose(chain, T));
+          });
+          f.commit();
+          for (const p of Object.values(crowd.pieces)) { p.im.count = p.n; p.im.instanceMatrix.needsUpdate = true; }
+          $("tag").textContent = `move: ${chain.label}   now: ${b}${k > 0 && k < 1 ? ` (joining ${(k * 100).toFixed(0)} %)` : ""}   strip: across the move`;
+          controls.update();
+          renderer.render(scene, camera);
+          return;
+        }
+        const hold = +$("hold").value, go = into(A, B), fade = go.fade;
+        const cycle = 2 * (hold + fade);
+        loopT = (loopT + dt) % cycle;
         // The left soldier: which half of the cycle, and how far into the fade.
         let from = A, to = B, u = loopT;
         if (u >= hold + fade) { from = B; to = A; u -= hold + fade; }
@@ -246,7 +305,8 @@
         controls.update();
         renderer.render(scene, camera);
       });
-      window.__TLAB = { pick, setSpeed: (v) => { speed = v; }, camera, controls, get loopT() { return loopT; }, set loopT(v) { loopT = v; } };
+      renderMoves();
+      window.__TLAB = { pick, move: (a, b) => { mode = "move"; moveKey = [a, b]; chain = buildChain(a, b); loopT = 0; renderMoves(); renderPairs(); }, setSpeed: (v) => { speed = v; }, camera, controls, get loopT() { return loopT; }, set loopT(v) { loopT = v; } };
     </script>
   </body>
 </html>
