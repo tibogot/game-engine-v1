@@ -17,7 +17,7 @@ import { abs, attribute, floor, float, instanceIndex, materialColor, max, mix, m
 import { UNIT_ORDER, XRAY_ORDER, createXrayMaterial, xrayOn } from "./xraySilhouette.js";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
-import { deathFrom, fadeFor } from "./soldierTransitions.js";
+import { DEATH_CHEST, MOVES, MOVE_JOIN, deathFrom, fadeFor, postureOf } from "./soldierTransitions.js";
 import {
   HEADGEAR, KIT, LOOKS, headgearMaterial, loadout, lookColorNode, markHeadwear, markHelmet, measureCrown, neckPlane,
 } from "./soldierLooks.js";
@@ -439,6 +439,8 @@ function buildCrowdGroup(tpl, members, app, scene) {
     prone: exact("rifle_prone_idle")?.name ?? null,
     dig: exact("dig")?.name ?? null,
     grenade: exact("grenade_throw")?.name ?? null,
+    crawl: exact("rifle_crawl")?.name ?? null,
+    proneFire: exact("rifle_prone_firing")?.name ?? null,
   };
 
   // The faction LOOKS in the crowd shader (soldierLooks.js): the body's colour
@@ -838,17 +840,22 @@ function soldierClip(unit, v, roles) {
   if (unit.throwing && roles.grenade) return roles.grenade;   // algGrenades.js
   if (unit.working && roles.dig) return roles.dig;
   const low = unit.posture;   // "stand" | "kneel" | "prone"; undefined = stand
-  if (unit.isMoving) return low && low !== "stand" && roles.crouchWalk ? roles.crouchWalk : roles.run;
-  if (low === "prone" && roles.prone) return roles.prone;
-  const kneel = low === "kneel" && roles.crouchIdle;
+  if (unit.isMoving) {
+    if (low === "prone" && roles.crawl) return roles.crawl;       // pinned, ordered on: he crawls
+    return low && low !== "stand" && roles.crouchWalk ? roles.crouchWalk : roles.run;
+  }
   const tg = unit.target;
+  let inRange = false;
   if (tg?.alive && roles.aim) {
     const range = unit.range ?? unit.type?.range ?? 0;
     const dx = tg.position.x - unit.position.x, dz = tg.position.z - unit.position.z;
-    if (dx * dx + dz * dz <= (range * 1.05) ** 2) {
-      if (kneel) return v.firing > 0 && roles.crouchFire ? roles.crouchFire : roles.crouchIdle;
-      return v.firing > 0 && roles.fire ? roles.fire : roles.aim;
-    }
+    inRange = dx * dx + dz * dz <= (range * 1.05) ** 2;
+  }
+  if (low === "prone" && roles.prone) return inRange && v.firing > 0 && roles.proneFire ? roles.proneFire : roles.prone;
+  const kneel = low === "kneel" && roles.crouchIdle;
+  if (inRange) {
+    if (kneel) return v.firing > 0 && roles.crouchFire ? roles.crouchFire : roles.crouchIdle;
+    return v.firing > 0 && roles.fire ? roles.fire : roles.aim;
   }
   return kneel ? roles.crouchIdle : roles.idle;
 }
@@ -861,6 +868,8 @@ const _frustum = new THREE.Frustum();
 const _viewProj = new THREE.Matrix4();
 const _sphere = new THREE.Sphere();
 const STATIC_SEED = [0.5, 0.5, 0.5, 0]; // a static figure's look variation: the middle, own headwear
+/** Every clip a MOVE plays (the fade out of one into a pose is a join, not a crossfade). */
+const MOVES_CLIPS = new Set(Object.values(MOVES).flat().map((st) => st.clip));
 const CORPSE_SECONDS = 14;  // a body stays this long after its death clip, then goes
 
 /**
@@ -1186,7 +1195,9 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       v.prev = v.cur;
       // From the posture he was in (soldierTransitions.js): a man lying or
       // kneeling does not get up to fall.
-      const d = deathFrom(v.prev.clip, r.deaths[Math.floor(v.seed[0] * 97) % r.deaths.length], r.deaths, (c) => v.crowd.field.duration(c));
+      const f = v.crowd.field;
+      const d = deathFrom(v.prev.clip, r.deaths[Math.floor(v.seed[0] * 97) % r.deaths.length], r.deaths, (c) => f.duration(c), (c) => f.has(c));
+      v.move = null;
       v.cur = { clip: d.clip, t: d.t };
       v.fade = 0;
       v.fadeS = d.fade;
@@ -1195,7 +1206,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       // backward 0.83 m), the chest ~0.45 m on from the hips.
       if (onCorpse) {
         const h = unit.heading + (unit.type.facingOffset ?? 0);
-        const off = /backward/.test(v.cur.clip) ? -1.25 : 0.75;
+        const off = DEATH_CHEST[v.cur.clip] ?? 0.75;
         onCorpse(unit, unit.position.x + Math.sin(h) * off, unit.position.z + Math.cos(h) * off, h);
       }
     }
@@ -1364,7 +1375,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         const cd = unit.cooldown ?? 0;
         if (r.fire && cd > v.lastCd + 1e-6) {
           v.firing = v.crowd.field.duration(r.fire);
-          if (v.cur.clip === r.fire || v.cur.clip === r.crouchFire) v.cur.t = 0;
+          if (v.cur.clip === r.fire || v.cur.clip === r.crouchFire || v.cur.clip === r.proneFire) v.cur.t = 0;
         }
         v.lastCd = cd;
         v.firing = Math.max(0, v.firing - dt);
@@ -1373,18 +1384,34 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         v.lastX = p.x; v.lastZ = p.z;
         v.speed += (moved - v.speed) * Math.min(1, dt * 6);
 
-        const want = soldierClip(unit, v, r);
+        let want = soldierClip(unit, v, r);
+        // A MOVE between postures (soldierTransitions MOVES): the real drop to
+        // the ground or the rise, clip by clip, instead of one fade between two
+        // poses (which squats and slides — the transition lab). Only standing
+        // still: ordered off mid-move, he drops it and the usual fade takes over.
+        const f = v.crowd.field;
+        if (v.move) {
+          if (unit.isMoving) v.move = null;
+          else if (v.cur.t < f.duration(v.cur.clip) * 0.98) want = v.cur.clip;             // still playing
+          else if (++v.move.i < v.move.steps.length) want = v.move.steps[v.move.i].clip;    // the next clip
+          else v.move = null;                                                                // done: settle
+        } else if (want !== v.cur.clip && !unit.isMoving) {
+          const from = postureOf(v.cur.clip), to = postureOf(want);
+          const steps = from && to && from !== to ? MOVES[`${from}>${to}`] : null;
+          if (steps && steps.every((st) => f.has(st.clip))) { v.move = { steps, i: 0 }; want = steps[0].clip; }
+        }
         if (want !== v.cur.clip) {
+          const joining = !!v.move || !!postureOf(want) && MOVES_CLIPS.has(v.cur.clip);
           v.prev = v.cur;
-          // a shot / a throw from its start (a throw from its own offset: algGrenades.js)
+          // a shot / a throw / a move's clip from its start (a throw from its own offset: algGrenades.js)
           const t0 = want === r.grenade ? unit.throwing?.start ?? 0
-            : want === r.fire || want === r.crouchFire ? 0 : Math.random() * v.crowd.field.duration(want);
+            : v.move || want === r.fire || want === r.crouchFire || want === r.proneFire ? 0 : Math.random() * f.duration(want);
           v.cur = { clip: want, t: t0 };
           v.fade = 0;
-          v.fadeS = fadeFor(v.prev.clip, want);
+          v.fadeS = joining ? MOVE_JOIN : fadeFor(v.prev.clip, want);
         }
-        const rate = v.cur.clip === r.run && v.crowd.runSpeed > 0
-          ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6) : 1;
+        const rate = v.move ? v.move.steps[v.move.i].rate ?? 1
+          : v.cur.clip === r.run && v.crowd.runSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6) : 1;
         v.cur.t += dt * rate;
         v.prev.t += dt;
         v.fade = Math.min(1, v.fade + dt / (v.fadeS ?? 0.2));
@@ -1529,6 +1556,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     pickCrowdUnit,  // crowd soldiers have no mesh — pick them by screen proximity
     addUnit,
     sync,
+    /** A crowd soldier's clip this frame (and the one he fades from) — for tests and the dev panel. */
+    clipOf(unit) { const v = views.get(unit); return v?.cur ? { clip: v.cur.clip, from: v.prev.clip, fade: v.fade, move: !!v.move } : null; },
     /** The unit under the pointer (screen space, as of the last sync), or null. */
     get hovered() { return hovered; },
     dispose() {

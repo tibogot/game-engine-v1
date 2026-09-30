@@ -59,7 +59,7 @@
       import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
       import { createCrowdField } from "./crowdSkinning.js";
       import { WEAPONS, TOOLS, weaponMaterial } from "./procWeapons.js";
-      import { FADES, GAME_PAIRS, LAB_MOVES, MOVES, MOVE_JOIN, deathFrom, fadeFor, setFade } from "./soldierTransitions.js";
+      import { FADES, GAME_PAIRS, LAB_MOVES, MOVES, MOVE_JOIN, deathFrom, fadeFor, postureOf, setFade } from "./soldierTransitions.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
@@ -186,8 +186,10 @@
         pairBtns.length = 0;
         for (const [a, b, why] of GAME_PAIRS) {
           const btn = document.createElement("button");
-          btn.innerHTML = `<span>${a.replace("rifle_", "")} → ${b.replace("rifle_", "")}<br><small style="color:#a9a48f">${why}</small></span><span class="f">${fadeFor(a, b).toFixed(2)}</span>`;
-          btn.onclick = () => pick(a, b);
+          const pa = postureOf(a), pb = postureOf(b);
+          const move = pa && pb && MOVES[`${pa}>${pb}`];
+          btn.innerHTML = `<span>${a.replace("rifle_", "")} → ${b.replace("rifle_", "")}<br><small style="color:#a9a48f">${why}${move ? " — now a MOVE (the fade was the old way)" : ""}</small></span><span class="f">${move ? "→ move" : fadeFor(a, b).toFixed(2)}</span>`;
+          btn.onclick = () => (move ? window.__TLAB.move(pa, pb) : pick(a, b));
           btn.classList.toggle("on", mode === "pair" && a === A && b === B);
           $("pairs").appendChild(btn);
         }
@@ -201,9 +203,17 @@
         for (const st of steps) segs.push({ clip: st.clip, loop: false, rate: st.rate ?? 1, len: clips[st.clip].duration / (st.rate ?? 1), fade: MOVE_JOIN });
         const death = /^death/.test(to);
         segs.push({ clip: to, loop: !death, len: death ? clips[to].duration + 1.5 : hold, fade: steps.length ? MOVE_JOIN : fadeFor(from, to), death });
+        // …and back, so the loop never snaps: the reverse move if there is one,
+        // else a fade (a death: back to the start after a pause).
+        if (!death) {
+          const back = MOVES[`${to}>${from}`] ?? [];
+          for (const st of back) segs.push({ clip: st.clip, loop: false, rate: st.rate ?? 1, len: clips[st.clip].duration / (st.rate ?? 1), fade: MOVE_JOIN });
+          segs.push({ clip: from, loop: true, len: 0.6, fade: back.length ? MOVE_JOIN : fadeFor(to, from) });
+        }
         let t = 0;
         for (const g of segs) { g.start = t; t += g.len; }
-        const moveFrom = segs[1].start, moveTo = segs[segs.length - 1].start + segs[segs.length - 1].fade + (steps.length ? 0 : Math.min(1.2, segs[segs.length - 1].len));
+        const end = segs.find((g) => g.clip === to);
+        const moveFrom = segs[1].start, moveTo = end.start + end.fade + (steps.length ? 0 : Math.min(1.2, end.len));
         return { segs, total: t, moveFrom, moveTo, label: `${from} → ${steps.map((x) => x.clip).join(" → ")}${steps.length ? " → " : ""}${to}` };
       }
       /** The clip time of segment g, `local` s into it (once: clamped on its last frame). */

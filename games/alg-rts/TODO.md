@@ -206,8 +206,19 @@ Not wired into either game yet.
          natural; crouch walk, prone fire, prone death good; the CRAWL's rifle
          points into the ground; the headshot kneeling death stands him up
          (you added "Crouch Death" to try instead).
-   - [ ] the game PLAYS the moves (pinned: the real drop; up: the real rise),
-         crawl / prone fire / prone death in the game; the crawl's rifle
+   - [x] THE GAME PLAYS THE MOVES (2026-09-30, traced in Chrome with the new
+         unitRenderer.clipOf): pinned standing → Stand To Kneel → Kneel To
+         Prone → prone (1.98 s: the drop sped up — 1.25× / 1.6× — the sim has
+         him pinned at once; it was 2.9 s), released → Prone To Kneel → Kneel
+         To Stand. Only standing still: ordered off mid-move he drops it and
+         fades. Pinned + moving → the CRAWL (its rifle now along the forearm:
+         the pack aims it per frame — the average grip pointed it into the
+         ground); pinned + shooting → prone fire; deaths by posture: prone →
+         Prone Death, kneeling → Crouch Death (you added it; the headshot one
+         stood him up, kept aside), standing → the standing falls; the blood
+         under each one's chest (DEATH_CHEST).
+   - [ ] **you, look**: the moves in the game (the drop speed; the lab's
+         "Moves" shows each)
    - [ ] a dead man's rifle falls away (the deaths keep it gripped: it stands
          up out of a prone corpse)
    - [x] skinning work sized to the LIVE soldiers (renderer.compute count)

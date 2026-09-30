@@ -76,23 +76,47 @@ export const GAME_PAIRS = [
 ];
 
 /**
- * How a man DIES from the clip he was in: { clip, t, fade }. Every death clip
- * starts STANDING — faded into from prone, a pinned man stood back up to fall
- * (seen in the lab's strip, 2026-09-30). So:
- *   PRONE    → the END of the forward fall (face down, as he lay), held,
- *              faded into slowly: he goes limp where he lies;
- *   KNEELING → the chosen fall from a third of the way in, where he is
- *              already going down — not up to his feet first;
- *   else     → the chosen fall from its start.
- * `pick` is the death the game rolled (the man's seed); `durationOf(clip)`.
+ * How a man DIES from the clip he was in: { clip, t, fade }. The pack's first
+ * deaths start STANDING — faded into from prone, a pinned man stood back up to
+ * fall (the lab's strip, 2026-09-30). With the rifle set's own deaths packed:
+ *   PRONE (lying, crawling, going down) → death_prone ("Prone Death"): he
+ *     goes limp where he lies;
+ *   KNEELING / CROUCHED → death_kneeling ("Crouch Death"): he stays low and
+ *     falls back (the headshot one jerked him up to standing first);
+ *   else → the rolled standing fall (`pick`) from its start.
+ * Without those clips (an older pack): prone → the END of the forward fall,
+ * faded into slowly; kneeling → the fall from a third of the way in.
+ * `durationOf(clip)`, `has(clip)`.
  */
-export function deathFrom(prevClip, pick, deaths, durationOf) {
-  if (/prone/.test(prevClip)) {
+export function deathFrom(prevClip, pick, deaths, durationOf, has = () => false) {
+  if (/prone|crawl/.test(prevClip)) {
+    if (has("death_prone")) return { clip: "death_prone", t: 0, fade: 0.3 };
     const clip = deaths.find((d) => /forward/.test(d)) ?? pick;
     return { clip, t: durationOf(clip) * 0.999, fade: 0.6 };
   }
-  if (/crouch/.test(prevClip)) return { clip: pick, t: durationOf(pick) * 0.33, fade: 0.3 };
+  if (/crouch|kneel/.test(prevClip)) {
+    if (has("death_kneeling")) return { clip: "death_kneeling", t: 0, fade: 0.25 };
+    return { clip: pick, t: durationOf(pick) * 0.33, fade: 0.3 };
+  }
   return { clip: pick, t: 0, fade: fadeFor(prevClip, pick) };
+}
+
+/**
+ * Where a death leaves the man's CHEST, metres along the way he faced (the
+ * pack's report: each fall's hips travel; the chest ~0.45 m on toward the
+ * head) — a game lays his blood there.
+ */
+export const DEATH_CHEST = { death_forward: 0.75, death_backward: -1.25, death_kneeling: -1.3, death_prone: 0.45 };
+
+/**
+ * A holding clip's POSTURE, for MOVES: the clips a man stands, kneels or lies
+ * still in (null: moving, working, throwing — no move from those).
+ */
+export function postureOf(clip) {
+  if (/^rifle_(prone_idle|prone_firing)$/.test(clip)) return "rifle_prone_idle";
+  if (/^rifle_(crouch_idle|crouch_firing)$/.test(clip)) return "rifle_crouch_idle";
+  if (/^rifle_(idle|aim_idle|firing)$/.test(clip)) return "rifle_idle";
+  return null;
 }
 
 /**
@@ -106,9 +130,11 @@ export function deathFrom(prevClip, pick, deaths, durationOf) {
 export const MOVES = {
   "rifle_idle>rifle_crouch_idle": [{ clip: "rifle_stand_to_kneel" }],
   "rifle_crouch_idle>rifle_idle": [{ clip: "rifle_kneel_to_stand" }],
-  "rifle_crouch_idle>rifle_prone_idle": [{ clip: "rifle_kneel_to_prone" }],
+  // Going DOWN under fire is faster than a drill (the sim has him pinned from
+  // the first instant): ~2 s to the ground from standing, not 2.9.
+  "rifle_crouch_idle>rifle_prone_idle": [{ clip: "rifle_kneel_to_prone", rate: 1.4 }],
   "rifle_prone_idle>rifle_crouch_idle": [{ clip: "rifle_prone_to_kneel" }],
-  "rifle_idle>rifle_prone_idle": [{ clip: "rifle_stand_to_kneel" }, { clip: "rifle_kneel_to_prone" }],
+  "rifle_idle>rifle_prone_idle": [{ clip: "rifle_stand_to_kneel", rate: 1.25 }, { clip: "rifle_kneel_to_prone", rate: 1.6 }],
   "rifle_prone_idle>rifle_idle": [{ clip: "rifle_prone_to_kneel" }, { clip: "rifle_kneel_to_stand" }],
 };
 /** The fade joining a move's clips (they start and end on each other's pose). */

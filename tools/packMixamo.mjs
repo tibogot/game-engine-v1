@@ -158,7 +158,10 @@ const ROLES = {
   "rifle kneel to prone": "rifle_kneel_to_prone",
   "rifle prone to kneel": "rifle_prone_to_kneel",
   "prone death": "death_prone",
-  "death crouching headshot front": "death_kneeling",
+  // Killed kneeling: "Crouch Death" ("Dying From A Crouched Position"); the
+  // headshot one jerks him up to standing first (the lab, 2026-09-30).
+  "crouch death": "death_kneeling",
+  "death crouching headshot front": "death_kneeling_headshot",
   "toss grenade": "grenade_throw",
   "throw grenade": "grenade_throw",
   "hit reaction": "hit",
@@ -657,6 +660,14 @@ function addWeaponBone() {
       perClip.set(clip, { held: true, spread: f.spread, ...shoulderRifle(clip, bone) });
       continue;
     }
+    // The CRAWL drags the rifle in the right hand along the forearm: the
+    // average grip (from the standing clips) pointed it into the ground, a
+    // brown stub at the hand (the transition lab, 2026-09-30).
+    if (/^rifle_crawl/.test(clip.name)) {
+      alongForearm(clip, bone);
+      perClip.set(clip, { held: false, spread: f.spread });
+      continue;
+    }
     const use = f.held ? f : avg;
     const pos = use.p.clone().divideScalar(handScale), q = frame(use.b, use.u);
     clip.tracks.push(
@@ -668,6 +679,39 @@ function addWeaponBone() {
   for (const [o, p, q, sc] of rest) { o.position.copy(p); o.quaternion.copy(q); o.scale.copy(sc); }
   root.updateMatrixWorld(true);
   return { bone, perClip, stowed, tool: withTool };
+
+  /**
+   * The rifle ALONG THE RIGHT FOREARM, per frame at 30 Hz: the grip in the
+   * right palm, the barrel on the elbow → hand line (forward), sights up.
+   * For a clip that carries the rifle one-handed low — the crawl.
+   */
+  function alongForearm(clip, weaponBone) {
+    const mixer4 = new THREE.AnimationMixer(root);
+    const action = mixer4.clipAction(clip).play();
+    const frames = Math.max(2, Math.round(clip.duration * 30));
+    const times = [], pos = [], quat = [];
+    for (let i = 0; i <= frames; i++) {
+      const t = (i / frames) * clip.duration;
+      mixer4.setTime(t);
+      root.updateMatrixWorld(true);
+      const palm = wp(rh).add(wp(ri)).multiplyScalar(0.5);
+      const d = palm.clone().sub(wp(rf)).normalize();
+      const q = frame(d, UP.clone().addScaledVector(d, -d.y));
+      const local = rh.matrixWorld.clone().invert().multiply(new THREE.Matrix4().compose(palm, q, new THREE.Vector3(1, 1, 1)));
+      const lp = new THREE.Vector3(), lq = new THREE.Quaternion();
+      local.decompose(lp, lq, new THREE.Vector3());
+      times.push(t);
+      pos.push(...lp.toArray());
+      quat.push(...lq.toArray());
+    }
+    action.stop();
+    mixer4.stopAllAction();
+    mixer4.uncacheRoot(root);
+    clip.tracks.push(
+      new THREE.VectorKeyframeTrack(`${weaponBone.name}.position`, times, pos),
+      new THREE.QuaternionKeyframeTrack(`${weaponBone.name}.quaternion`, times, quat),
+    );
+  }
 
   /**
    * The shovel, per frame at 30 Hz: from the right palm toward the left palm
