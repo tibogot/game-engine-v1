@@ -7,6 +7,7 @@
 import { createDevPanelShell } from "../shared-rts/devPanelShell.js";
 import { buildFogBanksPanel } from "../shared-rts/fogBanksPanel.js";
 import { WEATHER } from "./algFog.js";
+import { buildAlgSoundPanel } from "./algSounds.js";
 
 const DEG = Math.PI / 180;
 
@@ -186,6 +187,9 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     me.color("Haze colour", { get: () => fowE.edge.color, set: (v) => fowE.setEdge({ color: v }) });
     me.hint("Outside the playable box: <b>Darken</b> as Company of Heroes, or <b>Haze</b> — the land fades into dust that thickens further out (reads from the free camera too). Live, not saved: tell me the one to keep.");
   }
+
+  // ── Sound (algSounds.js) ─────────────────────────────────────────────────
+  if (app.algSounds) buildAlgSoundPanel(panel.section("Sound").el, app.algSounds);
 
   // ── Wind (algWind.js: the flags and the windsock share it) ──────────────
   const wind = app.showroom?.wind;

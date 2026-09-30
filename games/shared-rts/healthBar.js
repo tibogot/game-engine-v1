@@ -18,6 +18,7 @@ const LOW = new THREE.Color(0xe4483a);
 const HOSTILE = new THREE.Color(0xe4483a);
 
 const BORDER = 0.09; // world units of backing visible around the fill (all sides)
+const NEAR_REF = 25;  // m: closer than this a bar keeps its on-screen size (see add)
 
 const _obj = new THREE.Object3D();
 const _col = new THREE.Color();
@@ -97,8 +98,18 @@ export function createHealthBarField({ scene, max = 1536, height = 0.55, groundA
       if (n >= max) return;
       if (hiddenByGround(x, y, z, camera)) return;
 
-      const w = width + BORDER * 2;
-      const h = height + BORDER * 2;
+      // A HUD, not an object: closer than NEAR_REF the bar shrinks with the
+      // distance, so it never grows past its on-screen size at NEAR_REF (a
+      // camera down among the men drew a bar over half the screen — a big
+      // dark box, 2026-09-30). Right at the lens: none.
+      let k = 1;
+      if (camera) {
+        const d = camera.position.distanceTo(_obj.position.set(x, y, z));
+        if (d < 2.5) return;
+        k = Math.min(1, d / NEAR_REF);
+      }
+      const w = (width + BORDER * 2) * k;
+      const h = (height + BORDER * 2) * k;
 
       _obj.position.set(x, y, z);
       if (camera) _obj.quaternion.copy(camera.quaternion); // billboard

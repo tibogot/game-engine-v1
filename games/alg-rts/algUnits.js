@@ -337,6 +337,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       x: Math.min(PLAY.x1 - 8, Math.max(PLAY.x0 + 8, x)),
       z: Math.min(PLAY.z1 - 8, Math.max(PLAY.z0 + 8, z)),
     }),
+    // The radio answers an order (algSounds.js).
+    onOrder: (kind, list) => app.algSounds?.order(kind, list),
     onChange: (sel) => {
       unitBar.render(sel);
       commandCard.render(sel);

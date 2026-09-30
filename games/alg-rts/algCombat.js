@@ -28,16 +28,21 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // man going down (the dust puff) does not. The birds come after combat
   // (algGame.js), so they are looked up at the moment of the blast.
   const explosion = fx.explosion;
-  fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) app.algBirds?.flush(x, z, { size: opts?.size ?? 10 }); };
+  fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) { app.algBirds?.flush(x, z, { size: opts?.size ?? 10 }); app.algSounds?.blast(x, y, z, opts?.size ?? 10); } };
   const grenade = fx.grenade;
-  fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); };
+  fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); app.algSounds?.blast(x, y, z, 6); };
 
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combat = null;
   const projectiles = createProjectiles({
     app, fx,
-    // Every shot puts up any storks standing near it (no sound yet).
-    sfx: { shot: (owner, w, at) => app.algBirds?.disturb(at.x, at.z), rocket() {}, impact() {}, incoming() {} },
+    // Every shot puts up any storks standing near it, and is HEARD (algSounds.js).
+    sfx: {
+      shot: (owner, w, at) => { app.algBirds?.disturb(at.x, at.z); app.algSounds?.sfx.shot(owner, w, at); },
+      rocket: (at) => app.algSounds?.sfx.rocket?.(at),
+      impact: (at) => app.algSounds?.sfx.impact(at),
+      incoming: (at, left) => app.algSounds?.sfx.incoming(at, left),
+    },
     onImpact: (target, dmg, at, owner, opts) => combat?.onImpact(target, dmg, at, owner, opts),
     onArcImpact: (at, dmg, splash, owner, o) => combat?.splashAt(at, dmg, splash, owner, o),
   });
@@ -55,6 +60,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
     onDeath: (e) => {
       if (e.isStructure) built?.wreck(e);
+      else if (onFootUnit(e)) app.algSounds?.death(e);
       onDeath(e);
     },
   });

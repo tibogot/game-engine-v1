@@ -1,0 +1,918 @@
+{
+ "note": "alg-rts sounds. All CC0 (Creative Commons 0) from freesound.org (HQ previews); url = the source page. gain = measured loudness normalised (browser, algSounds.measure()); start/end = trimmed silence. use = the chosen candidate(s); Dev -> Sound swaps them live. Fetched by tools/algFetchSounds.mjs.",
+ "slots": {
+  "rifle": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.55,
+   "voices": 8,
+   "ref": 45,
+   "pitch": 0.06,
+   "gap": 0.025,
+   "files": [
+    {
+     "f": "rifle/163460.mp3",
+     "id": 163460,
+     "by": "LeMudCrab",
+     "t": "Freesound - Sniper Shot",
+     "url": "https://freesound.org/people/LeMudCrab/sounds/163460/",
+     "gain": 0.533,
+     "dur": 0.67,
+     "start": 0.01,
+     "end": 0.27
+    },
+    {
+     "f": "rifle/46655.mp3",
+     "id": 46655,
+     "by": "cognito%20perceptu",
+     "t": "Freesound - carbine single.wav",
+     "url": "https://freesound.org/people/cognito%20perceptu/sounds/46655/",
+     "gain": 0.669,
+     "dur": 3.34,
+     "start": 0.39,
+     "end": 1.43
+    },
+    {
+     "f": "rifle/196400.mp3",
+     "id": 196400,
+     "by": "CS279",
+     "t": "Freesound - G36-E Fire",
+     "url": "https://freesound.org/people/CS279/sounds/196400/",
+     "gain": 0.287,
+     "dur": 3.39,
+     "start": 0,
+     "end": 1.01
+    }
+   ]
+  },
+  "mg": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.6,
+   "voices": 5,
+   "ref": 55,
+   "pitch": 0.04,
+   "gap": 0.04,
+   "files": [
+    {
+     "f": "mg/165394.mp3",
+     "id": 165394,
+     "by": "ShawnyBoy",
+     "t": "Freesound - Heavy Machine Gun",
+     "url": "https://freesound.org/people/ShawnyBoy/sounds/165394/",
+     "gain": 0.185,
+     "dur": 3.08,
+     "start": 0,
+     "end": 2.33
+    },
+    {
+     "f": "mg/39071.mp3",
+     "id": 39071,
+     "by": "alienbomb",
+     "t": "Freesound - heavy.burst.wav",
+     "url": "https://freesound.org/people/alienbomb/sounds/39071/",
+     "gain": 0.645,
+     "dur": 0.92,
+     "start": 0,
+     "end": 0.77
+    },
+    {
+     "f": "mg/342184.mp3",
+     "id": 342184,
+     "by": "Willary1",
+     "t": "Freesound - BigGun.wav",
+     "url": "https://freesound.org/people/Willary1/sounds/342184/",
+     "gain": 0.25,
+     "dur": 0.88,
+     "start": 0,
+     "end": 0.88
+    }
+   ]
+  },
+  "cannon": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.9,
+   "voices": 4,
+   "ref": 90,
+   "pitch": 0.05,
+   "gap": 0.05,
+   "files": [
+    {
+     "f": "cannon/448002.mp3",
+     "id": 448002,
+     "by": "Kneeling",
+     "t": "Freesound - cannon.mp3",
+     "url": "https://freesound.org/people/Kneeling/sounds/448002/",
+     "gain": 0.622,
+     "dur": 5.36,
+     "start": 0.09,
+     "end": 1.97
+    },
+    {
+     "f": "cannon/127845.mp3",
+     "id": 127845,
+     "by": "Cyberkineticfilms",
+     "t": "Freesound - Tank fire Mixed.wav",
+     "url": "https://freesound.org/people/Cyberkineticfilms/sounds/127845/",
+     "gain": 0.363,
+     "dur": 4.45,
+     "start": 0,
+     "end": 2.03
+    },
+    {
+     "f": "cannon/223967.mp3",
+     "id": 223967,
+     "by": "dav0r",
+     "t": "Freesound - d0 Meatslap on Glass  1",
+     "url": "https://freesound.org/people/dav0r/sounds/223967/",
+     "gain": 0.827,
+     "dur": 1.12,
+     "start": 0.09,
+     "end": 0.51
+    }
+   ]
+  },
+  "impact": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.25,
+   "voices": 6,
+   "ref": 20,
+   "pitch": 0.12,
+   "gap": 0.03,
+   "files": [
+    {
+     "f": "impact/319229.mp3",
+     "id": 319229,
+     "by": "worthahep88",
+     "t": "Freesound - Single Rock hit dirt 2.wav",
+     "url": "https://freesound.org/people/worthahep88/sounds/319229/",
+     "gain": 4,
+     "dur": 1.51,
+     "start": 0.31,
+     "end": 0.73
+    }
+   ]
+  },
+  "explosion": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 1,
+   "voices": 6,
+   "ref": 90,
+   "pitch": 0.08,
+   "gap": 0.04,
+   "far": "explFar",
+   "farAt": 260,
+   "files": [
+    {
+     "f": "explosion/235968.mp3",
+     "id": 235968,
+     "by": "tommccann",
+     "t": "Freesound - Explosion_01.wav",
+     "url": "https://freesound.org/people/tommccann/sounds/235968/",
+     "gain": 0.277,
+     "dur": 7.8,
+     "start": 0.37,
+     "end": 5.87
+    },
+    {
+     "f": "explosion/47252.mp3",
+     "id": 47252,
+     "by": "deleted_user_364925",
+     "t": "Freesound - bad explosion",
+     "url": "https://freesound.org/people/deleted_user_364925/sounds/47252/",
+     "gain": 0.22,
+     "dur": 1.49,
+     "start": 0,
+     "end": 1.33
+    },
+    {
+     "f": "explosion/166191.mp3",
+     "id": 166191,
+     "by": "ShawnyBoy",
+     "t": "Freesound - Gunshot 4.wav",
+     "url": "https://freesound.org/people/ShawnyBoy/sounds/166191/",
+     "gain": 0.333,
+     "dur": 2.67,
+     "start": 0,
+     "end": 0.97
+    }
+   ]
+  },
+  "explFar": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.8,
+   "voices": 4,
+   "ref": 200,
+   "pitch": 0.08,
+   "gap": 0.08,
+   "files": [
+    {
+     "f": "explFar/142598.mp3",
+     "id": 142598,
+     "by": "Henrythetrain",
+     "t": "Freesound - Distant Boom.wav",
+     "url": "https://freesound.org/people/Henrythetrain/sounds/142598/",
+     "gain": 0.548,
+     "dur": 10,
+     "start": 0.73,
+     "end": 9.99
+    },
+    {
+     "f": "explFar/149966.mp3",
+     "id": 149966,
+     "by": "NenadSimic",
+     "t": "Freesound - Muffled Distant Explosion",
+     "url": "https://freesound.org/people/NenadSimic/sounds/149966/",
+     "gain": 0.567,
+     "dur": 5.14,
+     "start": 0,
+     "end": 1.01
+    },
+    {
+     "f": "explFar/372086.mp3",
+     "id": 372086,
+     "by": "Mr_KeybOred",
+     "t": "Freesound - Distant Explosion",
+     "url": "https://freesound.org/people/Mr_KeybOred/sounds/372086/",
+     "gain": 0.432,
+     "dur": 4.38,
+     "start": 0,
+     "end": 3.05
+    }
+   ]
+  },
+  "incoming": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.6,
+   "voices": 3,
+   "ref": 60,
+   "pitch": 0.05,
+   "gap": 0.2,
+   "files": [
+    {
+     "f": "incoming/241840.mp3",
+     "id": 241840,
+     "by": "Zagge28",
+     "t": "Freesound - Incoming mortar 1",
+     "url": "https://freesound.org/people/Zagge28/sounds/241840/",
+     "gain": 0.317,
+     "dur": 1.68,
+     "start": 0,
+     "end": 1.59
+    },
+    {
+     "f": "incoming/241837.mp3",
+     "id": 241837,
+     "by": "Zagge28",
+     "t": "Freesound - Incoming mortar 4",
+     "url": "https://freesound.org/people/Zagge28/sounds/241837/",
+     "gain": 0.224,
+     "dur": 1.61,
+     "start": 0.01,
+     "end": 1.61
+    },
+    {
+     "f": "incoming/241838.mp3",
+     "id": 241838,
+     "by": "Zagge28",
+     "t": "Freesound - Incoming mortar 3",
+     "url": "https://freesound.org/people/Zagge28/sounds/241838/",
+     "gain": 0.417,
+     "dur": 2.15,
+     "start": 0.01,
+     "end": 2.15
+    }
+   ]
+  },
+  "cry": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.4,
+   "voices": 2,
+   "ref": 30,
+   "pitch": 0.08,
+   "gap": 1.2,
+   "files": [
+    {
+     "f": "cry/221544.mp3",
+     "id": 221544,
+     "by": "joseppujol",
+     "t": "Freesound - Wounded man scream",
+     "url": "https://freesound.org/people/joseppujol/sounds/221544/",
+     "gain": 0.946,
+     "dur": 1.99,
+     "start": 0.37,
+     "end": 1.57
+    },
+    {
+     "f": "cry/353086.mp3",
+     "id": 353086,
+     "by": "GreatNate98",
+     "t": "Freesound - Weirdo Scream.wav",
+     "url": "https://freesound.org/people/GreatNate98/sounds/353086/",
+     "gain": 0.509,
+     "dur": 2.8,
+     "start": 0.05,
+     "end": 2.75
+    },
+    {
+     "f": "cry/401210.mp3",
+     "id": 401210,
+     "by": "stuxer",
+     "t": "Freesound - Man screams in pain.mp3",
+     "url": "https://freesound.org/people/stuxer/sounds/401210/",
+     "gain": 0.864,
+     "dur": 2.94,
+     "start": 0.43,
+     "end": 2.29
+    }
+   ]
+  },
+  "truck": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.4,
+   "loops": 2,
+   "ref": 40,
+   "loop": true,
+   "files": [
+    {
+     "f": "truck/186935.mp3",
+     "id": 186935,
+     "by": "ReadeOnly",
+     "t": "Freesound - engine_idle_loop.wav",
+     "url": "https://freesound.org/people/ReadeOnly/sounds/186935/",
+     "gain": 1.315,
+     "dur": 6.07
+    },
+    {
+     "f": "truck/57939.mp3",
+     "id": 57939,
+     "by": "joanfelipsound",
+     "t": "Freesound - engine start BMW 320 VG91.wav",
+     "url": "https://freesound.org/people/joanfelipsound/sounds/57939/",
+     "gain": 1.021,
+     "dur": 23.08
+    },
+    {
+     "f": "truck/187564.mp3",
+     "id": 187564,
+     "by": "qubodup",
+     "t": "Freesound - Truck Engine Idle Loops.flac",
+     "url": "https://freesound.org/people/qubodup/sounds/187564/",
+     "gain": 0.672,
+     "dur": 38.02
+    }
+   ]
+  },
+  "heli": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.55,
+   "loops": 2,
+   "ref": 60,
+   "loop": true,
+   "files": [
+    {
+     "f": "heli/256909.mp3",
+     "id": 256909,
+     "by": "Kodack",
+     "t": "Freesound - Turret Fire",
+     "url": "https://freesound.org/people/Kodack/sounds/256909/",
+     "gain": 0.335,
+     "dur": 5.72
+    },
+    {
+     "f": "heli/187678.mp3",
+     "id": 187678,
+     "by": "qubodup",
+     "t": "Freesound - Helicopter Loop.flac",
+     "url": "https://freesound.org/people/qubodup/sounds/187678/",
+     "gain": 0.381,
+     "dur": 5.81
+    },
+    {
+     "f": "heli/202962.mp3",
+     "id": 202962,
+     "by": "bloke09",
+     "t": "Freesound - Generated Helicopter",
+     "url": "https://freesound.org/people/bloke09/sounds/202962/",
+     "gain": 2.676,
+     "dur": 34.99
+    }
+   ]
+  },
+  "fireLoop": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.5,
+   "loops": 2,
+   "ref": 35,
+   "loop": true,
+   "files": [
+    {
+     "f": "fireLoop/363092.mp3",
+     "id": 363092,
+     "by": "FractalStudios",
+     "t": "Freesound - Fire Crackle and Flames 002",
+     "url": "https://freesound.org/people/FractalStudios/sounds/363092/",
+     "gain": 1.814,
+     "dur": 21.03
+    },
+    {
+     "f": "fireLoop/564621.mp3",
+     "id": 564621,
+     "by": "Nox_Sound",
+     "t": "Freesound - Ambiance_Fire_Bushes_Loop_Stereo.wav",
+     "url": "https://freesound.org/people/Nox_Sound/sounds/564621/",
+     "gain": 1.728,
+     "dur": 11
+    },
+    {
+     "f": "fireLoop/650574.mp3",
+     "id": 650574,
+     "by": "soundofsong",
+     "t": "Freesound - fire crackling loop.wav",
+     "url": "https://freesound.org/people/soundofsong/sounds/650574/",
+     "gain": 4,
+     "dur": 5.03
+    }
+   ]
+  },
+  "build": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.4,
+   "voices": 2,
+   "ref": 30,
+   "pitch": 0.05,
+   "gap": 0.5,
+   "files": [
+    {
+     "f": "build/353907.mp3",
+     "id": 353907,
+     "by": "dr19",
+     "t": "Freesound - Shovel_dirt.wav",
+     "url": "https://freesound.org/people/dr19/sounds/353907/",
+     "gain": 0.715,
+     "dur": 9.05,
+     "start": 0.05,
+     "end": 8.93
+    },
+    {
+     "f": "build/503672.mp3",
+     "id": 503672,
+     "by": "RavenWolfProds",
+     "t": "Freesound - Shovel in dirt",
+     "url": "https://freesound.org/people/RavenWolfProds/sounds/503672/",
+     "gain": 0.99,
+     "dur": 10.78,
+     "start": 0.05,
+     "end": 9.59
+    },
+    {
+     "f": "build/651294.mp3",
+     "id": 651294,
+     "by": "f3bbbo",
+     "t": "Freesound - Digging in wet course sand (raw file)",
+     "url": "https://freesound.org/people/f3bbbo/sounds/651294/",
+     "gain": 3.134,
+     "dur": 12.28,
+     "start": 0.89,
+     "end": 11.47
+    }
+   ]
+  },
+  "wind": {
+   "use": [
+    0
+   ],
+   "bus": "ambience",
+   "vol": 0.08,
+   "loops": 1,
+   "loop": true,
+   "files": [
+    {
+     "f": "wind/697217.mp3",
+     "id": 697217,
+     "by": "dhallcomposer",
+     "t": "Freesound - Looping Gentle Wind Ambience on an Open Desert Plain.wav",
+     "url": "https://freesound.org/people/dhallcomposer/sounds/697217/",
+     "gain": 4,
+     "dur": 41.14
+    },
+    {
+     "f": "wind/645305.mp3",
+     "id": 645305,
+     "by": "DarkShroom",
+     "t": "Freesound - desert_wind.wav",
+     "url": "https://freesound.org/people/DarkShroom/sounds/645305/",
+     "gain": 0.855,
+     "dur": 59.65
+    },
+    {
+     "f": "wind/557552.mp3",
+     "id": 557552,
+     "by": "szegvari",
+     "t": "Freesound - Dark Sahara Egypt",
+     "url": "https://freesound.org/people/szegvari/sounds/557552/",
+     "gain": 0.887,
+     "dur": 78.93
+    }
+   ]
+  },
+  "cicadas": {
+   "use": [
+    0
+   ],
+   "bus": "ambience",
+   "vol": 0.05,
+   "loops": 1,
+   "loop": true,
+   "files": [
+    {
+     "f": "cicadas/272169.mp3",
+     "id": 272169,
+     "by": "dethrok",
+     "t": "Freesound - Cicadas",
+     "url": "https://freesound.org/people/dethrok/sounds/272169/",
+     "gain": 1.271,
+     "dur": 45.8
+    },
+    {
+     "f": "cicadas/458113.mp3",
+     "id": 458113,
+     "by": "brunoboselli",
+     "t": "Freesound - Countryside",
+     "url": "https://freesound.org/people/brunoboselli/sounds/458113/",
+     "gain": 4,
+     "dur": 58
+    },
+    {
+     "f": "cicadas/422048.mp3",
+     "id": 422048,
+     "by": "Nimlos",
+     "t": "Freesound - forest_cicada_loop.flac",
+     "url": "https://freesound.org/people/Nimlos/sounds/422048/",
+     "gain": 4,
+     "dur": 14.48
+    }
+   ]
+  },
+  "dog": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.35,
+   "voices": 2,
+   "ref": 60,
+   "pitch": 0.06,
+   "gap": 1.5,
+   "files": [
+    {
+     "f": "dog/581478.mp3",
+     "id": 581478,
+     "by": "rvandemark",
+     "t": "Freesound - Dogs Barking in Distance_Rural.wav",
+     "url": "https://freesound.org/people/rvandemark/sounds/581478/",
+     "gain": 4,
+     "dur": 2.5,
+     "start": 0,
+     "end": 2.45
+    }
+   ]
+  },
+  "goat": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.3,
+   "voices": 2,
+   "ref": 35,
+   "pitch": 0.1,
+   "gap": 1,
+   "files": [
+    {
+     "f": "goat/171149.mp3",
+     "id": 171149,
+     "by": "esperar",
+     "t": "Freesound - sheep 3.mp3",
+     "url": "https://freesound.org/people/esperar/sounds/171149/",
+     "gain": 0.545,
+     "dur": 0.78,
+     "start": 0.01,
+     "end": 0.71
+    },
+    {
+     "f": "goat/171151.mp3",
+     "id": 171151,
+     "by": "esperar",
+     "t": "Freesound - sheep 2.mp3",
+     "url": "https://freesound.org/people/esperar/sounds/171151/",
+     "gain": 0.561,
+     "dur": 1.14,
+     "start": 0.19,
+     "end": 0.99
+    },
+    {
+     "f": "goat/171152.mp3",
+     "id": 171152,
+     "by": "esperar",
+     "t": "Freesound - sheep 1",
+     "url": "https://freesound.org/people/esperar/sounds/171152/",
+     "gain": 0.686,
+     "dur": 0.65,
+     "start": 0.09,
+     "end": 0.57
+    }
+   ]
+  },
+  "donkey": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.35,
+   "voices": 1,
+   "ref": 60,
+   "pitch": 0.05,
+   "gap": 8,
+   "files": [
+    {
+     "f": "donkey/560692.mp3",
+     "id": 560692,
+     "by": "StarNinjas37",
+     "t": "Freesound - Donkey Bray",
+     "url": "https://freesound.org/people/StarNinjas37/sounds/560692/",
+     "gain": 1.296,
+     "dur": 1.81,
+     "start": 0.21,
+     "end": 1.35
+    },
+    {
+     "f": "donkey/763352.mp3",
+     "id": 763352,
+     "by": "Mastersoundboy2005",
+     "t": "Freesound - Idiotic Donkey Braying Sound Effect",
+     "url": "https://freesound.org/people/Mastersoundboy2005/sounds/763352/",
+     "gain": 1.358,
+     "dur": 6.15,
+     "start": 0.29,
+     "end": 6.13
+    }
+   ]
+  },
+  "uiClick": {
+   "use": [
+    0
+   ],
+   "bus": "ui",
+   "vol": 0.5,
+   "voices": 3,
+   "pitch": 0.03,
+   "gap": 0.03,
+   "files": [
+    {
+     "f": "uiClick/320181.mp3",
+     "id": 320181,
+     "by": "dland",
+     "t": "Freesound - hint.wav",
+     "url": "https://freesound.org/people/dland/sounds/320181/",
+     "gain": 0.419,
+     "dur": 0.27,
+     "start": 0,
+     "end": 0.19
+    },
+    {
+     "f": "uiClick/253168.mp3",
+     "id": 253168,
+     "by": "suntemple",
+     "t": "Freesound - SFX UI Button Click",
+     "url": "https://freesound.org/people/suntemple/sounds/253168/",
+     "gain": 4,
+     "dur": 0.16,
+     "start": 0,
+     "end": 0.16
+    },
+    {
+     "f": "uiClick/200469.mp3",
+     "id": 200469,
+     "by": "CS279",
+     "t": "Freesound - Menu Scroll/ Selection Sound",
+     "url": "https://freesound.org/people/CS279/sounds/200469/",
+     "gain": 0.423,
+     "dur": 0.22,
+     "start": 0,
+     "end": 0.21
+    }
+   ]
+  },
+  "radio": {
+   "use": [
+    0
+   ],
+   "bus": "ui",
+   "vol": 0.45,
+   "voices": 2,
+   "pitch": 0.04,
+   "gap": 0.25,
+   "files": [
+    {
+     "f": "radio/524205.mp3",
+     "id": 524205,
+     "by": "JovianSounds",
+     "t": "Freesound - Radio Sign Off / Squelch",
+     "url": "https://freesound.org/people/JovianSounds/sounds/524205/",
+     "gain": 0.889,
+     "dur": 1.21,
+     "start": 0,
+     "end": 0.21
+    },
+    {
+     "f": "radio/47646.mp3",
+     "id": 47646,
+     "by": "ReadeOnly",
+     "t": "Freesound - End radio transmission",
+     "url": "https://freesound.org/people/ReadeOnly/sounds/47646/",
+     "gain": 0.694,
+     "dur": 0.37,
+     "start": 0,
+     "end": 0.37
+    },
+    {
+     "f": "radio/760245.mp3",
+     "id": 760245,
+     "by": "LukaCafuka",
+     "t": "Freesound - Walkie-talkie end of transmission",
+     "url": "https://freesound.org/people/LukaCafuka/sounds/760245/",
+     "gain": 0.833,
+     "dur": 0.43,
+     "start": 0,
+     "end": 0.43
+    }
+   ]
+  },
+  "boltRifle": {
+   "use": [
+    1
+   ],
+   "bus": "sfx",
+   "vol": 0.55,
+   "voices": 8,
+   "ref": 45,
+   "pitch": 0.06,
+   "gap": 0.025,
+   "files": [
+    {
+     "f": "boltRifle/166191.mp3",
+     "id": 166191,
+     "by": "ShawnyBoy",
+     "t": "Freesound - Gunshot 4.wav",
+     "url": "https://freesound.org/people/ShawnyBoy/sounds/166191/",
+     "gain": 0.333,
+     "dur": 2.67,
+     "start": 0,
+     "end": 0.97
+    },
+    {
+     "f": "boltRifle/415912.mp3",
+     "id": 415912,
+     "by": "okieactor",
+     "t": "Freesound - Heathers Gunshot Effect2.wav",
+     "url": "https://freesound.org/people/okieactor/sounds/415912/",
+     "gain": 0.435,
+     "dur": 1.92,
+     "start": 0,
+     "end": 0.37
+    },
+    {
+     "f": "boltRifle/165394.mp3",
+     "id": 165394,
+     "by": "ShawnyBoy",
+     "t": "Freesound - Heavy Machine Gun",
+     "url": "https://freesound.org/people/ShawnyBoy/sounds/165394/",
+     "gain": 0.185,
+     "dur": 3.08,
+     "start": 0,
+     "end": 2.33
+    }
+   ]
+  },
+  "jeep": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.35,
+   "loops": 2,
+   "ref": 30,
+   "loop": true,
+   "files": [
+    {
+     "f": "jeep/237375.mp3",
+     "id": 237375,
+     "by": "squareal",
+     "t": "Freesound - Car Crash",
+     "url": "https://freesound.org/people/squareal/sounds/237375/",
+     "gain": 0.752,
+     "dur": 4.37
+    },
+    {
+     "f": "jeep/458461.mp3",
+     "id": 458461,
+     "by": "prometheus888",
+     "t": "Freesound - CarEngine.wav",
+     "url": "https://freesound.org/people/prometheus888/sounds/458461/",
+     "gain": 1.124,
+     "dur": 10.48
+    },
+    {
+     "f": "jeep/50910.mp3",
+     "id": 50910,
+     "by": "RutgerMuller",
+     "t": "Freesound - In Car Driving.aif",
+     "url": "https://freesound.org/people/RutgerMuller/sounds/50910/",
+     "gain": 0.864,
+     "dur": 52.34
+    }
+   ]
+  },
+  "adhan": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.5,
+   "voices": 1,
+   "ref": 140,
+   "pitch": 0,
+   "gap": 30,
+   "files": [
+    {
+     "f": "adhan/417865.mp3",
+     "id": 417865,
+     "by": "Agim",
+     "t": "Freesound - Muezzin in Al Ain, United Arab Emirates with birds.m4a",
+     "url": "https://freesound.org/people/Agim/sounds/417865/",
+     "gain": 1.03,
+     "dur": 182.95,
+     "start": 0.41,
+     "end": 168.95
+    },
+    {
+     "f": "adhan/159329.mp3",
+     "id": 159329,
+     "by": "felix.blume",
+     "t": "Freesound - Prayer calls in the city of Istanbul (Turkey)",
+     "url": "https://freesound.org/people/felix.blume/sounds/159329/",
+     "gain": 1.114,
+     "dur": 180.04,
+     "start": 0.07,
+     "end": 154.11
+    },
+    {
+     "f": "adhan/23243.mp3",
+     "id": 23243,
+     "by": "alchemical",
+     "t": "Freesound - Cars Pass _ Muezzin.mp3",
+     "url": "https://freesound.org/people/alchemical/sounds/23243/",
+     "gain": 0.978,
+     "dur": 123.43,
+     "start": 2.39,
+     "end": 119.37
+    }
+   ]
+  }
+ }
+}

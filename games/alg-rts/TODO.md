@@ -46,6 +46,22 @@ Keep this file current: tick things off here, add new asks here.
         boulders cast shadows. GPU on/off: +0.15 ms scree close-up, noise at
         the start view and zoomed out. you, look: density, colour (a shade
         lighter than the ground), the gravel along the pistes (sparse).
+      · HEALTH BARS at close range (shared healthBar.js): closer than 25 m a
+        bar keeps its on-screen size, none within 2.5 m — a camera down among
+        the men drew a bar as a big dark box. Play zooms unchanged.
+      · SOUND (algSounds.js on the shared mixer, games/shared-rts/rtsAudio.js
+        — moved from nam's namAudio.js unchanged; nam keeps its manifest,
+        OFF default): 22 slots, 3 CC0 candidates each where found
+        (tools/algFetchSounds.mjs → public/sounds/alg/, 13 MB), loudness and
+        trims measured in the browser (algSounds.measure()) and baked. French
+        rifle vs ALN rifle, MG, tank gun, impacts, blasts near/far, mortar
+        whistle, cries (55% of deaths), jeep/truck/Alouette/fire loops,
+        sappers digging; WIND bed + CICADAS by day; dogs when soldiers near a
+        village, flocks bleating, donkeys braying, the CALL TO PRAYER from the
+        ksar every 4-6 min; UI clicks, radio on orders. ON by default here.
+        Dev → Sound: mute, 4 buses, every slot's candidates (▶ to hear).
+        Measured in a 16-man fight: 15-18 voices, peak -6..-9 dB, no clipping.
+        you, LISTEN: pick the candidates (they were chosen blind, by search).
       · THE POST'S GATE: its rubble footing ran a knee-high wall ACROSS the
         gateway (men walked through it) — now either side of the arch, a
         threshold slab in the passage.

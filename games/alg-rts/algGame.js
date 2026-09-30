@@ -22,6 +22,7 @@ import { createAlgUnits } from "./algUnits.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
+import { createAlgSounds } from "./algSounds.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
@@ -220,6 +221,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // placed from the map's paint. ?stones=0 = without.
   if (params.get("stones") !== "0") {
     try { app.algStones = await createAlgStones(app); } catch (e) { console.warn("[alg stones] failed:", e); }
+  }
+  // SOUND (algSounds.js on the shared mixer): the battle, the engines, the
+  // land (wind, cicadas, dogs, flocks, the call to prayer). ?sound=0 = without.
+  if (params.get("sound") !== "0") {
+    try { app.algSounds = createAlgSounds({ app, rtsCamera, units: app.algUnits?.units ?? null }); } catch (e) { console.warn("[alg sound] failed:", e); }
   }
   // AMBIENCE (algAmbience.js): dust behind the vehicles, smoke from the
   // bread ovens. ?ambience=0 = without.
