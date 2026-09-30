@@ -7,7 +7,7 @@
       body { margin: 0; overflow: hidden; background: #0d1013; color: #dfe6ea;
              font: 13px/1.5 system-ui, sans-serif; }
       #hud { position: fixed; top: 10px; left: 10px; z-index: 10; width: 290px;
-             max-height: calc(100vh - 20px); overflow-y: auto;
+             max-height: calc(100vh - 20px); overflow-y: auto; user-select: none;
              background: rgba(12,16,20,0.88); border: 1px solid #2a343c;
              border-radius: 8px; padding: 12px 14px; }
       #hud h1 { margin: 0 0 8px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: #8fb8d8; }
@@ -25,6 +25,9 @@
       input[type=range] { flex: 1; }
       .note { margin-top: 9px; padding-top: 8px; border-top: 1px solid #2a343c; color: #8b99a4; font-size: 11px; }
       #err { color: #ff8c8c; white-space: pre-wrap; }
+      .sub { color: #9fb0bc; font-size: 11px; margin-top: 3px; }
+      .warn { color: #f0b860; }
+      .grp { width: 100%; margin: 5px 0 1px; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: #6f7e89; }
     </style>
   </head>
   <body>
@@ -33,8 +36,9 @@
       <div class="row"><span>File</span><b id="s-file">—</b></div>
       <div class="row"><span>Skeleton</span><b id="s-bones">—</b></div>
 
-      <h2>Soldier</h2>
+      <h2>Body</h2>
       <div class="btns" id="soldiers"></div>
+      <div class="sub" id="body-note">—</div>
       <div class="row" style="margin-top:4px"><span>Triangles / verts</span><b id="s-geo">—</b></div>
       <div class="row"><span>Colour map</span><b id="s-tex">—</b></div>
 
@@ -46,6 +50,7 @@
       <h2>Weapon</h2>
       <div class="btns" id="weapons"></div>
       <div class="row" style="margin-top:4px"><span id="w-name">—</span><b id="w-tris">—</b></div>
+      <div class="sub" id="w-carried">—</div>
       <label>Forward <input id="t-fwd" type="range" min="-10" max="10" step="0.5" value="0" /> <b id="t-fwd-v">0</b></label>
       <label>Up <input id="t-up" type="range" min="-10" max="10" step="0.5" value="0" /> <b id="t-up-v">0</b></label>
       <label>Side <input id="t-side" type="range" min="-10" max="10" step="0.5" value="0" /> <b id="t-side-v">0</b></label>
@@ -56,16 +61,31 @@
       <h2>Clips</h2>
       <div class="btns" id="clips"></div>
       <label>Speed <input id="speed" type="range" min="0" max="2" step="0.05" value="1" /> <b id="speed-v">1.00</b></label>
+      <label>Time <input id="scrub" type="range" min="0" max="1" step="0.001" value="0" /> <b id="scrub-v">0.00 s</b></label>
+      <label><input id="lockstep" type="checkbox" /> In step (every man on the same frame; the Time slider sets it)</label>
       <label><input id="treadmill" type="checkbox" checked /> Treadmill (ground moves at the clip's measured speed)</label>
+
+      <h2>Squad</h2>
+      <div class="btns" id="counts">
+        <button data-count="1" class="on">1 of each body</button>
+        <button data-count="12">Groupe (12)</button>
+        <button data-count="30">Section (30)</button>
+      </div>
+      <div class="btns" id="formations" style="margin-top:4px">
+        <button data-formation="ranks" class="on">Ranks</button>
+        <button data-formation="column">Column</button>
+        <button data-formation="scatter">Loose (CoH)</button>
+      </div>
+      <div class="btns" id="behaviours" style="margin-top:4px">
+        <button data-behaviour="same" class="on">Same clip</button>
+        <button data-behaviour="mix">Battle mix</button>
+      </div>
+      <div class="sub">Roles as in the game: every 12th man from the first is the leader, then the radio, then the LMG. Battle mix: each man his own idle / aim / fire / reload, standing, kneeling or lying.</div>
 
       <h2>View</h2>
       <div class="btns" id="views">
         <button data-view="close" class="on">Close</button>
         <button data-view="rts">RTS camera</button>
-      </div>
-      <div class="btns" id="counts" style="margin-top:4px">
-        <button data-count="1" class="on">1 each</button>
-        <button data-count="12">Squad of 12</button>
       </div>
 
       <h2>Debug</h2>
@@ -245,8 +265,11 @@
       const hasWeaponBone = !!template.getObjectByName(WEAPON_BONE);
       const weaponMat = weaponMaterial();
       const weaponGeo = new Map(); // key → geometry, built once
-      let weaponKey = hasWeaponBone ? "mas49_56" : "none";
-      let weaponManual = false; // true once a weapon button was clicked: everyone carries it
+      // "auto": each man carries what the game gives him (his look's rifle, a
+      // mixed armoury's draw, his role's weapon); a weapon key: everyone
+      // carries that one. Picking a look never changes it (it used to).
+      let weaponKey = hasWeaponBone ? "auto" : "none";
+      const DEFAULT_RIFLE = "mas49_56";
       const trim = { fwd: 0, up: 0, side: 0, pitch: 0, roll: 0 };
       function applyTrim(m) {
         m.position.set(trim.side / 100, trim.up / 100, trim.fwd / 100);
@@ -311,7 +334,11 @@
 
       /** Dress soldier i (look variant, helmet, kit, extras, headgear); returns his weapon key. */
       function dress(root, name, i) {
-        const load = loadout(LOOKS[lookKey], i, (salt) => rand(i * 7 + salt), $("allExtras").checked);
+        // Roles as in the game (unitRenderer: loadout(look, n % 12)); a lone
+        // man is a plain rifleman — as man #0 he used to come out as the
+        // section leader (MAT 49, binoculars).
+        const roleIndex = count > 1 ? i % 12 : -1;
+        const load = loadout(LOOKS[lookKey], roleIndex, (salt) => rand(i * 7 + salt), $("allExtras").checked);
         const look = load.look;
         // A lone soldier shows the look as defined; a squad varies man to man.
         const v = count > 1 ? new THREE.Vector3(rand(i * 7 + 2), rand(i * 7 + 3), rand(i * 7 + 4)) : null;
@@ -339,7 +366,7 @@
           root.getObjectByName(bone).add(piece);
         }
         // Weapon: his role's / look's, unless one was picked by hand for everyone.
-        const weapon = weaponManual ? weaponKey : (load.weapon ?? weaponKey);
+        const weapon = weaponKey === "auto" ? (load.weapon ?? DEFAULT_RIFLE) : weaponKey;
         if (!look.headgear) return weapon;
         const hk = `${lookKey}|${look.headgear}|${look.hatColor ?? ""}`;
         if (!hatGeo.has(hk)) hatGeo.set(hk, HEADGEAR[look.headgear](look));
@@ -374,20 +401,58 @@
         }
         return m;
       }
-      // A soldier name, or "all". soldier1 is the alg-rts body (soldier3 stays
-      // for the Vietnam game).
-      let kind = kinds.includes("soldier1") ? "soldier1" : "all";
+      // "auto" (the look's own bodies — the ALN's aln1 + aln2, the French
+      // soldier1), a body name, or "all" (every body in the pack, to compare).
+      // Picking a look never changes it (it used to switch to All).
+      let kind = "auto";
       let count = 1;
+      let formation = "ranks";
+      let behaviour = "same";
       let speed = 1;
+
+      /** The bodies on show for the current body choice and look. */
+      function shownBodies() {
+        if (kind === "all") return kinds;
+        if (kind !== "auto") return [kind];
+        const own = (LOOKS[lookKey].bodies ?? []).filter((b) => kinds.includes(b));
+        return own.length ? own : kinds.includes("soldier1") ? ["soldier1"] : [kinds[0]];
+      }
+
+      /** Man i of n in the formation, centred on the origin, facing +Z. */
+      function slot(i, n) {
+        if (formation === "column") {
+          const col = i % 2, rank = Math.floor(i / 2);
+          return [(col - 0.5) * 1.8, -rank * 2.0 + (Math.ceil(n / 2) - 1) * 1.0];
+        }
+        if (formation === "scatter") {
+          // A loose blob (CoH): a sunflower spread, each man jittered.
+          const a = i * 2.39996, r = 1.35 * Math.sqrt(i + 0.5);
+          return [Math.cos(a) * r + (rand(i * 7 + 50) - 0.5) * 0.8, Math.sin(a) * r + (rand(i * 7 + 51) - 0.5) * 0.8];
+        }
+        const cols = Math.min(6, n), col = i % cols, rank = Math.floor(i / cols), ranks = Math.ceil(n / cols);
+        return [(col - (cols - 1) / 2) * 1.6 + (rank % 2) * 0.8, -rank * 2.2 + (ranks - 1) * 1.1];
+      }
+
+      // BATTLE MIX: the clips a man in a fight holds, by weight — each man his
+      // own (stable per man), so a section reads the way it does in the game.
+      const MIX = [
+        ["rifle_idle", 2], ["rifle_aim_idle", 2], ["rifle_firing", 3], ["rifle_reload", 1],
+        ["rifle_crouch_idle", 2], ["rifle_crouch_firing", 3], ["rifle_prone_idle", 1], ["rifle_prone_firing", 2],
+      ].map(([n, w]) => [clips.find((c) => c.name === n), w]).filter(([c]) => c);
+      function mixClip(i) {
+        let t = rand(i * 7 + 60) * MIX.reduce((s, [, w]) => s + w, 0);
+        for (const [c, w] of MIX) { t -= w; if (t < 0) return c; }
+        return MIX[0][0];
+      }
+      const clipFor = (i) => (behaviour === "mix" && MIX.length ? mixClip(i) : current);
+      const startTime = (clip) => ($("lockstep").checked || count === 1 ? 0 : Math.random() * clip.duration);
 
       function spawn() {
         for (const s of soldiers) { scene.remove(s.root, s.skel); s.mixer.stopAllAction(); }
         soldiers = [];
-        // "All" = the look's own bodies if it names them (the ALN mixes aln1 +
-        // aln2 in a squad), else every body in the pack.
-        const bodies = (LOOKS[lookKey].bodies ?? []).filter((b) => kinds.includes(b));
-        const shown = kind === "all" ? (bodies.length ? bodies : kinds) : [kind];
-        const n = count === 1 ? shown.length : 12;
+        const shown = shownBodies();
+        const n = count === 1 ? shown.length : count;
+        let R = 1;
         for (let i = 0; i < n; i++) {
           const root = cloneSkinned(template);
           // Every clone carries every soldier mesh on the one skeleton; show one.
@@ -397,37 +462,59 @@
           if (count === 1) {
             root.position.set((i - (n - 1) / 2) * 1.3, 0, 0); // side by side
           } else {
-            const col = i % 6, rank = Math.floor(i / 6); // loose two-rank file
-            root.position.set((col - 2.5) * 1.6 + (rank % 2) * 0.8, 0, -rank * 2.2);
+            const [x, z] = slot(i, n);
+            root.position.set(x, 0, z);
           }
+          R = Math.max(R, Math.hypot(root.position.x, root.position.z));
           scene.add(root);
           const mixer = new THREE.AnimationMixer(root);
-          const action = mixer.clipAction(current).play();
-          action.time = count > 1 ? Math.random() * current.duration : 0; // no lockstep squad
+          const clip = clipFor(i);
+          const action = mixer.clipAction(clip).play();
+          action.time = startTime(clip);
           const skel = new THREE.SkeletonHelper(root);
           skel.visible = $("bones").checked;
           scene.add(skel);
-          soldiers.push({ root, mixer, action, skel, weapon: arm(root, weapon) });
+          soldiers.push({ root, mixer, action, skel, weapon: arm(root, weapon), weaponKey: weapon });
         }
+        // The sun's shadow box round the whole group (a section is ~20 m across).
+        groupR = R;
+        const b = R + 4;
+        Object.assign(sun.shadow.camera, { left: -b, right: b, top: b, bottom: -b });
+        sun.shadow.camera.updateProjectionMatrix();
         applyLook();
         showStats();
+        markWeapons();
+        markKinds();
       }
+      let groupR = 1;
 
+      /** Every man to `clip` (the Same-clip behaviour), crossfading. */
       function play(clip) {
-        if (clip === current) return;
-        for (const s of soldiers) {
-          const next = s.mixer.clipAction(clip);
-          next.reset().play();
-          next.time = count > 1 ? Math.random() * clip.duration : 0;
-          s.action.crossFadeTo(next, FADE, false);
-          s.action = next;
-        }
+        if (clip === current && behaviour === "same") return;
+        if (behaviour !== "same") { behaviour = "same"; markBehaviours(); }
+        for (const s of soldiers) crossTo(s, clip);
         current = clip;
         markClips();
       }
+      function crossTo(s, clip) {
+        const next = s.mixer.clipAction(clip);
+        if (next === s.action) return;
+        next.reset().play();
+        next.time = startTime(clip);
+        s.action.crossFadeTo(next, FADE, false);
+        s.action = next;
+      }
+      function setBehaviour(b) {
+        behaviour = b;
+        soldiers.forEach((s, i) => crossTo(s, clipFor(i)));
+        markBehaviours(); markClips();
+      }
+      function markBehaviours() {
+        for (const b of $("behaviours").children) b.classList.toggle("on", b.dataset.behaviour === behaviour);
+      }
 
       function showStats() {
-        const names = kind === "all" ? kinds : [kind];
+        const names = shownBodies();
         $("s-geo").textContent = names.map((n) => {
           const g = meshOf(template, n).geometry;
           return `${g.index.count / 3} / ${g.attributes.position.count}`;
@@ -449,13 +536,10 @@
       }
       $("allExtras").onchange = () => spawn();
       function pickLook(key) {
+        // Only the look changes: Body on Auto follows it to its own bodies, a
+        // body or weapon picked by hand stays picked.
         lookKey = key;
-        // A look made for other bodies (the ALN's) switches to them.
-        const bodies = LOOKS[key].bodies;
-        if (bodies && kind !== "all" && !bodies.includes(kind)) { kind = "all"; markKinds(); }
-        if (LOOKS[key].weapon && hasWeaponBone) weaponKey = LOOKS[key].weapon;
-        weaponManual = false;
-        markLooks(); markWeapons(); spawn();
+        markLooks(); spawn();
       }
       function markLooks() {
         for (const b of $("looks").children) b.classList.toggle("on", b.dataset.look === lookKey);
@@ -463,22 +547,26 @@
       }
       markLooks();
 
-      for (const key of ["none", ...Object.keys(WEAPONS)]) {
+      for (const key of ["auto", "none", ...Object.keys(WEAPONS)]) {
         const b = document.createElement("button");
-        b.textContent = key === "none" ? "None" : WEAPONS[key].label;
+        b.textContent = key === "auto" ? "Auto (as in the game)" : key === "none" ? "None" : WEAPONS[key].label;
         b.dataset.weapon = key;
         b.disabled = !hasWeaponBone && key !== "none";
-        b.onclick = () => { weaponKey = key; weaponManual = true; markWeapons(); spawn(); };
+        b.onclick = () => { weaponKey = key; spawn(); };
         $("weapons").appendChild(b);
       }
       function markWeapons() {
         for (const b of $("weapons").children) b.classList.toggle("on", b.dataset.weapon === weaponKey);
         const w = WEAPONS[weaponKey];
-        $("w-name").textContent = !hasWeaponBone ? "no weapon bone — pack a rifle clip" : w ? w.faction : "—";
+        $("w-name").textContent = !hasWeaponBone ? "no weapon bone — pack a rifle clip"
+          : weaponKey === "auto" ? "each man's own (look, armoury, role)" : w ? w.faction : "—";
         if (w && !weaponGeo.has(weaponKey)) weaponGeo.set(weaponKey, w.build());
-        $("w-tris").textContent = w ? `${weaponGeo.get(weaponKey).attributes.position.count / 3} tris` : "—";
+        $("w-tris").textContent = w ? `${weaponGeo.get(weaponKey).attributes.position.count / 3} tris` : "";
+        // What the men on show ACTUALLY carry.
+        const n = new Map();
+        for (const s of soldiers) { const k = s.weaponKey ?? "none"; n.set(k, (n.get(k) ?? 0) + 1); }
+        $("w-carried").textContent = "Carried: " + ([...n].map(([k, c]) => `${WEAPONS[k]?.label ?? "none"} ×${c}`).join(", ") || "—");
       }
-      markWeapons();
       for (const k of Object.keys(trim)) {
         $(`t-${k}`).oninput = (e) => {
           trim[k] = +e.target.value;
@@ -488,33 +576,72 @@
         };
       }
 
-      for (const name of [...kinds, "all"]) {
+      for (const name of ["auto", ...kinds, "all"]) {
         const b = document.createElement("button");
-        b.textContent = name === "all" ? "All" : name;
+        b.textContent = name === "auto" ? "Auto (the look's)" : name === "all" ? "All bodies" : name;
         b.dataset.kind = name;
-        b.onclick = () => { kind = name; markKinds(); spawn(); };
+        b.onclick = () => { kind = name; spawn(); };
         $("soldiers").appendChild(b);
       }
       function markKinds() {
         for (const b of $("soldiers").children) b.classList.toggle("on", b.dataset.kind === kind);
+        const own = LOOKS[lookKey].bodies;
+        const shown = shownBodies();
+        const off = kind !== "auto" && kind !== "all" && (own ? !own.includes(kind) : kind !== "soldier1");
+        $("body-note").innerHTML = `On show: ${shown.join(" + ")}` +
+          (off ? ` — <span class="warn">this look is made for ${(own ?? ["soldier1"]).join(" + ")}</span>` : "");
       }
-      markKinds();
 
-      for (const clip of clips) {
-        const b = document.createElement("button");
-        const gs = groundSpeed.get(clip);
-        b.innerHTML = `<span class="clip"><span>${clip.name}</span><small>${clip.duration.toFixed(2)} s</small>` +
-          `<small>${gs > 0.3 ? `${gs.toFixed(2)} m/s` : "in place"}</small><small></small></span>`;
-        b.onclick = () => play(clip);
-        b.dataset.clip = clip.name;
-        $("clips").appendChild(b);
+      // The clips, grouped the way a man uses them (the pack has 24 and more to come).
+      const GROUPS = [
+        ["Standing", /^rifle_(idle|aim_idle|firing|reload|walk|run)$|^grenade_throw$/],
+        ["Kneeling", /^rifle_crouch_/],
+        ["Lying", /^rifle_(prone_idle|prone_firing|crawl)$/],
+        ["Posture moves", /_to_/],
+        ["Work", /^dig$/],
+        ["Deaths", /^death_/],
+      ];
+      const groupOf = (c) => GROUPS.find(([, re]) => re.test(c.name))?.[0] ?? "Other";
+      for (const g of [...GROUPS.map(([n]) => n), "Other"]) {
+        const inG = clips.filter((c) => groupOf(c) === g).sort((a, b) => a.name.localeCompare(b.name));
+        if (!inG.length) continue;
+        const h = document.createElement("div");
+        h.className = "grp";
+        h.textContent = g;
+        $("clips").appendChild(h);
+        for (const clip of inG) {
+          const b = document.createElement("button");
+          const gs = groundSpeed.get(clip);
+          b.innerHTML = `<span class="clip"><span>${clip.name}</span><small>${clip.duration.toFixed(2)} s</small>` +
+            `<small>${gs > 0.3 ? `${gs.toFixed(2)} m/s` : "in place"}</small><small></small></span>`;
+          b.onclick = () => play(clip);
+          b.dataset.clip = clip.name;
+          $("clips").appendChild(b);
+        }
       }
       function markClips() {
-        for (const b of $("clips").children) b.classList.toggle("on", b.dataset.clip === current.name);
+        for (const b of $("clips").querySelectorAll("button")) b.classList.toggle("on", behaviour === "same" && b.dataset.clip === current.name);
       }
       markClips();
 
       $("speed").oninput = (e) => { speed = +e.target.value; $("speed-v").textContent = speed.toFixed(2); };
+      // Time: every man to the same point of HIS clip (share of its length),
+      // and in step from then on — drag it with Speed at 0 to study a frame.
+      let scrubbing = false;
+      $("scrub").oninput = (e) => {
+        scrubbing = true;
+        $("lockstep").checked = true;
+        for (const s of soldiers) { s.action.time = +e.target.value * s.action.getClip().duration; s.mixer.update(0); }
+      };
+      $("scrub").onchange = () => { scrubbing = false; };
+      $("lockstep").onchange = (e) => {
+        if (!e.target.checked) { for (const s of soldiers) s.action.time = Math.random() * s.action.getClip().duration; return; }
+        const f = soldiers[0] ? soldiers[0].action.time / soldiers[0].action.getClip().duration : 0;
+        for (const s of soldiers) s.action.time = f * s.action.getClip().duration;
+      };
+      // A clicked button gives its focus back: Space / Enter no longer re-press
+      // the last button (a squad respawned, a look re-picked) behind your back.
+      $("hud").addEventListener("click", (e) => { if (e.target.closest("button")) e.target.closest("button").blur(); });
 
       const VIEWS = {
         // Close: full body, a bit above the waist.
@@ -522,10 +649,15 @@
         // RTS: roughly the games' default zoom — high, ~50° down, 35 m out.
         rts: { pos: [14, 27, 22], target: [0, 0.5, -1], fov: 35 },
       };
+      let view = "close";
       function setView(name) {
+        view = name;
         const v = VIEWS[name];
-        camera.position.set(...v.pos);
-        controls.target.set(...v.target);
+        // The RTS view backs off to take in the whole group (a section of 30
+        // is ~20 m across); Close stays on the front man.
+        const k = name === "rts" ? Math.max(1, (groupR + 3) / 9) : 1;
+        camera.position.set(v.pos[0] * k, v.pos[1] * k, v.pos[2] * k + (name === "close" && count > 1 ? groupR * 0.6 : 0));
+        controls.target.set(v.target[0], v.target[1], v.target[2] + (name === "close" && count > 1 ? groupR * 0.6 : 0));
         camera.fov = v.fov;
         camera.updateProjectionMatrix();
         for (const b of $("views").children) b.classList.toggle("on", b.dataset.view === name);
@@ -537,7 +669,16 @@
         count = n;
         for (const b of $("counts").children) b.classList.toggle("on", +b.dataset.count === n);
         spawn();
+        setView(n >= 30 ? "rts" : view);   // a section is judged from the game's height
       };
+      $("formations").onclick = (e) => {
+        const f = e.target.closest("button")?.dataset.formation;
+        if (!f) return;
+        formation = f;
+        for (const b of $("formations").children) b.classList.toggle("on", b.dataset.formation === f);
+        if (count > 1) { spawn(); setView(view); }
+      };
+      $("behaviours").onclick = (e) => { const b = e.target.closest("button")?.dataset.behaviour; if (b) setBehaviour(b); };
 
       // Clones share the template's materials (SkeletonUtils.clone keeps them),
       // so flipping the shared ones hits every soldier.
@@ -564,15 +705,25 @@
       window.__LAB = {
         pickLook, play: (name) => play(clips.find((c) => c.name === name)), setView,
         camera, controls, pause: (on) => { speed = on ? 0 : 1; },
+        get soldiers() { return soldiers; }, setBehaviour,
       };
 
       // ── Loop ───────────────────────────────────────────────────────────────
       const clock = new THREE.Clock();
       renderer.setAnimationLoop(() => {
-        const dt = Math.min(clock.getDelta(), 0.1) * speed;
+        const dt = scrubbing ? 0 : Math.min(clock.getDelta(), 0.1) * speed;
+        if (scrubbing) clock.getDelta();
         for (const s of soldiers) s.mixer.update(dt);
-        // Treadmill: the soldiers face +Z, so the ground runs toward -Z.
-        if ($("treadmill").checked) {
+        // The Time slider follows the first man while it plays.
+        const a0 = soldiers[0]?.action;
+        if (a0 && !scrubbing) {
+          const d = a0.getClip().duration, t = ((a0.time % d) + d) % d;
+          $("scrub").value = t / d;
+          $("scrub-v").textContent = `${t.toFixed(2)} s`;
+        }
+        // Treadmill: the soldiers face +Z, so the ground runs toward -Z (a
+        // battle mix stands still: its clips are all in place).
+        if ($("treadmill").checked && behaviour === "same") {
           grid.position.z = (grid.position.z - groundSpeed.get(current) * dt) % 1;
         }
         controls.update();
