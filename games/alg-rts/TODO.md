@@ -136,9 +136,22 @@ Not wired into either game yet.
          onSplash. MEASURED: an 8-man band under the post's MG pinned in ~2 s;
          0.16 ms a sim step at 600 men. (A first version suppressed only the
          man an MG aimed at: the band only ever knelt.)
-   - [ ] the GRENADE: an ability (button, target click, arc, blast — the
-         throw clip is in the pack); a crawl clip (Mixamo "Crawling") for
-         pinned men who move — they use the crouched walk now
+   - [x] the GRENADE (2026-09-30, algGrenades.js, checked in Chrome): a
+         command-card ability + G; a blast ring follows the cursor (green in
+         the thrower's 24 m reach, amber: he walks up first), click throws,
+         right-click / Esc cancels. ONE man throws (the nearest ready), rifle
+         quiet, the pack's throw clip from 0.6 s, the grenade leaving his hand
+         1.25 s later (MEASURED on the clip: the throwing arm peaks at 1.85 s);
+         an arcing shell → combat.splashAt (70 at the centre, 5 m) → damage +
+         SUPPRESSION round it. 30 s cooldown per man. appelé, para, légion,
+         moudjahid carry them (`grenade: true`). Measured: 4 of 5 bunched ALN
+         killed, the fifth pinned. Mortar bombs now show their landing rings
+         too (projectiles.drawWarnings was never called in this game).
+   - [x] A MAN SHOT no longer leaves a fire and a crater (combat.onImpact,
+         both games): men on foot go down in their dust puff only.
+   - [ ] the ALN AI throws grenades too (algAI: at a French squad in cover)
+   - [ ] a crawl clip (Mixamo "Crawling", In Place) for pinned men who move —
+         they use the crouched walk now
    - [ ] **you, play it**: MG pinning speed, how often men kneel in cover
    - [ ] **TRANSITIONS, reviewed in the lab** (you, 2026-09-30: "look at all
          of them and see if everything is right and natural"): every clip

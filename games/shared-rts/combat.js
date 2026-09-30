@@ -137,6 +137,10 @@ export function createCombat({
         onFoot(target) ? { size: 2.6, dust: true }
           : target.isStructure ? { size: hq ? 26 : 15 }
             : { size: Math.max(8, (target.radius ?? target.type?.radius ?? 4) * 2.4) });
+      // A MAN goes down in his dust puff and that is all — no fire, no crater
+      // (every rifleman shot used to leave a burning scorch mark; a grenade or
+      // a shell makes its own crater, splashAt). Seen 2026-09-30.
+      if (onFoot(target)) { onDeath(target); return; }
       // The wreck burns. Bigger things burn bigger and longer.
       const big = target.isStructure;
       fire?.addFire(

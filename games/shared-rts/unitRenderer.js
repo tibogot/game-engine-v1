@@ -437,6 +437,7 @@ function buildCrowdGroup(tpl, members, app, scene) {
     crouchWalk: exact("rifle_crouch_walk")?.name ?? null,
     prone: exact("rifle_prone_idle")?.name ?? null,
     dig: exact("dig")?.name ?? null,
+    grenade: exact("grenade_throw")?.name ?? null,
   };
 
   // The faction LOOKS in the crowd shader (soldierLooks.js): the body's colour
@@ -816,6 +817,7 @@ function measureGroundSpeed(root, clip) {
  * idle + run only).
  */
 function soldierClip(unit, v, roles) {
+  if (unit.throwing && roles.grenade) return roles.grenade;   // algGrenades.js
   if (unit.working && roles.dig) return roles.dig;
   const low = unit.posture;   // "stand" | "kneel" | "prone"; undefined = stand
   if (unit.isMoving) return low && low !== "stand" && roles.crouchWalk ? roles.crouchWalk : roles.run;
@@ -1343,7 +1345,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         const want = soldierClip(unit, v, r);
         if (want !== v.cur.clip) {
           v.prev = v.cur;
-          v.cur = { clip: want, t: want === r.fire || want === r.crouchFire ? 0 : Math.random() * v.crowd.field.duration(want) };
+          // a shot / a throw from its start (a throw from its own offset: algGrenades.js)
+          const t0 = want === r.grenade ? unit.throwing?.start ?? 0
+            : want === r.fire || want === r.crouchFire ? 0 : Math.random() * v.crowd.field.duration(want);
+          v.cur = { clip: want, t: t0 };
           v.fade = 0;
         }
         const rate = v.cur.clip === r.run && v.crowd.runSpeed > 0

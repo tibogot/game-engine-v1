@@ -18,6 +18,7 @@ import { createAlgStructures } from "./algStructures.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { createAlgCombat } from "./algCombat.js";
 import { createInfantryPosture } from "../shared-rts/infantryPosture.js";
+import { createAlgGrenades } from "./algGrenades.js";
 import { createAlgAI } from "./algAI.js";
 import { createAlgMines } from "./algMines.js";
 import { createAlgPatrols } from "./algPatrols.js";
@@ -299,10 +300,17 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     onBuildStructure: (key, sel) => build?.begin(key, sel),
     // PATROUILLE (algPatrols.js): the selection walks the nearest track in
     // file, back and forth, until given another order.
+    // GRENADE (algGrenades.js): one man of the selection throws.
     abilitiesFor: (sel) => (sel.some((u) => !u.isStructure && !u.isAir && u.team === "player")
-      ? [{ key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrol the nearest track in file, back and forth (vehicles: the piste). A GMC on patrol delivers supplies to the villages you hold.", ready: true }]
+      ? [
+        { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrol the nearest track in file, back and forth (vehicles: the piste). A GMC on patrol delivers supplies to the villages you hold.", ready: true },
+        grenades?.ability(sel),
+      ].filter(Boolean)
       : []),
-    onAbility: (key, sel) => { if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); } },
+    onAbility: (key, sel) => {
+      if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
+      if (key === "grenade") grenades?.begin(sel);
+    },
     // The cover and concealment chips, read at the first man (algCover.js).
     stanceFor: (sel) => {
       const u = sel.find((e) => !e.isStructure && !e.isAir);
@@ -313,6 +321,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     mount: hud.right,
   });
   let patrols = null;   // made after combat (algPatrols.js)
+  let grenades = null;  // made after combat (algGrenades.js)
   let build = null;     // made after the cover (algBuild.js)
   let controlGroups = null;   // made after the selection it listens to
   const selection = createSelection({
@@ -364,6 +373,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     onShot: posture.onShot, onSplash: posture.onSplash,
   });
   app.algCombat = combat;
+  grenades = createAlgGrenades({ app, units, projectiles: combat.projectiles, selection });
+  app.algGrenades = grenades;
 
   // THE ALN (algAI.js): bands out of the cave, ambushes where the French are
   // thin, back into the cave before the armour comes. ?ai=0 = without.
@@ -383,9 +394,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
 
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); grenades.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
     searchlights.frame();
     combat.frame(dt);
+    grenades.frame();
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.
     const lead = selection.selected?.find((e) => !e.isStructure) ?? selection.selected?.[0];

@@ -16,6 +16,7 @@ export const ALG_UNIT_TYPES = {
   // The appelé: the conscript infantryman, the French army's mass in Algeria.
   appele: {
     typeKey: "appele",
+    grenade: true,   // algGrenades.js: the GRENADE ability
     name: "Appelés",
     buildLabel: "Appelé",   // the command card trains ONE man a click
     weapon: "rifle",
@@ -90,6 +91,7 @@ export const ALG_UNIT_TYPES = {
   // berets, leopard smocks.
   para: {
     typeKey: "para",
+    grenade: true,   // algGrenades.js: the GRENADE ability
     name: "Paras coloniaux",
     buildLabel: "Para",
     weapon: "rifle",
@@ -122,6 +124,7 @@ export const ALG_UNIT_TYPES = {
   // dear. Full range, the best shots, the toughest men. Green berets.
   legion: {
     typeKey: "legion",
+    grenade: true,   // algGrenades.js: the GRENADE ability
     name: "Légionnaires",
     buildLabel: "Légionnaire",
     weapon: "rifle",
@@ -155,6 +158,7 @@ export const ALG_UNIT_TYPES = {
   // appelé until you make the ALN one; the numbers are nam's infantry's too.
   moudjahid: {
     typeKey: "moudjahid",
+    grenade: true,   // algGrenades.js: the GRENADE ability
     name: "Moudjahidine",
     buildLabel: "Moudjahid",
     weapon: "rifle",
