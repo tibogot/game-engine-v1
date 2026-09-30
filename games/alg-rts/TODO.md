@@ -8,6 +8,42 @@ Keep this file current: tick things off here, add new asks here.
 
 ## PARKED / NEXT (2026-09-30)
 
+- [~] **THE COH GROUND** (2026-10-01; you: "that same CoH terrain texture,
+      whatever we need to do"). CoH uses ≤4 tiles + hundreds of SPLATS baked
+      into a terrain texture cache; we did the same:
+      · [x] GROUND CACHE (v3/terrain/groundCache.js, on in alg, `?gc=0` =
+        the live blend): 7 rings × 2048² (2 cm → 1.28 m texels, 235 MB),
+        paint + splats + decals baked in 256² tiles around the look point,
+        the terrain reads 4 taps. Decals no longer draw live (no depth copy).
+        Verified: same pixels as the live blend at the post (A/B in-page).
+      · [x] CAVITY baked in: hollows darker/warmer, crests lifted (uCavity).
+      · [x] SPLATS (algSplats.js, rules from paint/slope/hollows/villages):
+        ~4200 over PLAY+90 m from 18 Poly Haven materials (512² webp,
+        public/textures/splats/, tools/fetchSplatMaterials.mjs). Colour-
+        matched to the ground under them; lobed, holed outlines.
+        `?splats=0` = without.
+      · [x] Round 2 (you: "textures are tiling … look wrong", "moving the
+        camera drops perf"): every layer was 3-12× its photo's real size
+        and nothing broke the repeat. HEX TILING in the bake (every layer,
+        splatOverlayTsl hexSample) — no grid. Scree gravelly_sand (pure
+        orange sand) → rocks_ground_02; ridge + cliff → rock_boulder_dry
+        (grey-beige limestone; the orange cliff_side read as red paint)
+        — tools/algGroundLayers.mjs, level backup .orig/.bak (not to
+        commit). Perf: rings follow the camera FOCUS (turning/zooming
+        re-baked whole rings), tiles render straight into the cache (no
+        copies), 3 tiles/frame, coarse rings first. Stats overlay ON
+        (?stats=0 to hide).
+      · [ ] **GPU ms A/B cache vs live** — needs you: focus the page, one tab.
+        In-page: `__v3TerrainLOD.buildVariant(feats, { groundCache: null })`.
+      · [ ] **you, look**: default zoom over soil, scree, the wadis, the
+        hamlets (rubble at the walls, furrowed fields), close zoom.
+      · [ ] Next: bake STATIC SHADOWS (buildings, trees, rocks) into the
+        cache → the live shadow map only for units; contact blobs under
+        units/vehicles; craters + scorches written into the cache for good.
+      · [ ] Editor: the cache re-bakes EVERYTHING on any paint/height change
+        (fine for a game, too slow to paint with) — invalidate by region
+        before turning it on in the editor.
+
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".

@@ -114,6 +114,14 @@ export class DecalSystem {
     this._dirty = true;          // decal data or order changed
     this._camKey = "";
     this.visibleCount = 0;
+    /** Bumped on every data change — the ground cache re-bakes on it. */
+    this.version = 0;
+    /**
+     * False when something else draws the decals (the ground cache bakes them
+     * into the terrain): the boxes are not drawn and visibleCount stays 0, so
+     * the frame needs no scene-depth copy for them either.
+     */
+    this.liveDraw = true;
 
     this._buildMesh(256);
     this.ready = this.setSlots(DEFAULT_DECAL_SLOTS);
@@ -208,7 +216,7 @@ export class DecalSystem {
 
   clear() { this.decals.length = 0; this.markDirty(); }
 
-  markDirty() { this._dirty = true; }
+  markDirty() { this._dirty = true; this.version++; }
 
   /** The decal's world matrix (unit box → world). */
   matrixOf(d, target = new THREE.Matrix4()) {
@@ -480,6 +488,11 @@ export class DecalSystem {
 
   /** Per frame: re-cull and re-upload only when the camera or the decals changed. */
   update(camera) {
+    if (!this.liveDraw) {
+      if (this.mesh) this.mesh.visible = false;
+      this.visibleCount = 0;
+      return;
+    }
     const e = camera.matrixWorld.elements, pe = camera.projectionMatrix.elements;
     const camKey = `${e[12].toFixed(2)},${e[13].toFixed(2)},${e[14].toFixed(2)},${e[8].toFixed(3)},${e[9].toFixed(3)},${e[10].toFixed(3)},${pe[0].toFixed(3)},${pe[5].toFixed(3)}`;
     if (!this._dirty && camKey === this._camKey) return;

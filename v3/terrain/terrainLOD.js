@@ -351,6 +351,7 @@ function createLODMaterial({
   splatOverlay, snowShared = null, lakebed = null,
   terrainNormals = null, riverSand = null, flowerTint = null, features = {},
   terrainShadow = null, grassFar = null, uCursorFalloff = null, farTerrain = null,
+  groundCache = null,
 }) {
   const F = { ...TERRAIN_FEATURES, ...features };
   const baseStyle = F.baseStyle ?? (F.tileGrid === false ? "flat" : "grid");
@@ -589,7 +590,17 @@ function createLODMaterial({
 
     // Painted splat layers (branch-gated inside blend()).
     const nrmLit = vec3(nrmGeom).toVar();
-    if (splatOverlay) {
+    if (groundCache) {
+      // THE GROUND CACHE (groundCache.js): the same paint — and every decal —
+      // baked top-down around the camera, read with four taps whatever the
+      // number of layers. Where no ring holds the pixel (far past the camera)
+      // the bare base shows. The live blend is not compiled at all: this
+      // backend pays for every tap in the shader, taken or not.
+      const gc = groundCache.sample(wxzV, nrmGeom);
+      col.assign(mix(col, gc.col, gc.covered));
+      rough.assign(mix(rough, gc.rough, gc.covered));
+      nrmLit.assign(normalize(mix(nrmGeom, gc.nrm, gc.covered)));
+    } else if (splatOverlay) {
       const sb = splatOverlay.blend({
         baseColor:   col,
         baseRough:   rough,
@@ -755,6 +766,7 @@ export function createTerrainLOD(
   splatOverlay, snowShared = null, lakebed = null, _retiredGroundProc = null,
   features = {}, terrainNormals = null, riverSand = null, flowerTint = null,
   terrainShadow = null, grassFar = null, uCursorFalloff = null, farTerrain = null,
+  groundCache = null,
 ) {
   const group = new THREE.Group();
 
@@ -779,6 +791,7 @@ export function createTerrainLOD(
     heightTexNode, uCenterXZ: uCenter, uCursorUV, uCursorRadius,
     uBrushMaskNode, uMaskRotation, splatOverlay, snowShared, lakebed,
     terrainNormals, riverSand, flowerTint, terrainShadow, grassFar, uCursorFalloff, farTerrain,
+    groundCache,
   };
 
   const mesh = new THREE.Mesh(geometry, createLODMaterial({ ...matArgs, features }));
@@ -881,8 +894,10 @@ export function createTerrainLOD(
    * @param {object} features see TERRAIN_FEATURES
    * @returns {THREE.Material}
    */
-  function buildVariant(features) {
-    return createLODMaterial({ ...matArgs, features });
+  function buildVariant(features, overrides = {}) {
+    // overrides: material inputs to swap, e.g. { groundCache: null } for the
+    // live paint blend against the cache at the same clock.
+    return createLODMaterial({ ...matArgs, ...overrides, features });
   }
 
   /**

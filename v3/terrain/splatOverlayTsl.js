@@ -32,7 +32,7 @@ import {
   Fn, If, float, int, struct, vec2, vec3, vec4,
   texture, mix, max, min, clamp, pow, sqrt, uniform, step, normalize,
   positionWorld, smoothstep, abs, length, mx_noise_float, floor, fract, hash, uint,
-  select, cameraPosition, dFdx, dFdy,
+  select, cameraPosition, dFdx, dFdy, cos, sin,
 } from "three/tsl";
 import { WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 import { cliffRockTint, createCliffRockUniforms } from "./cliffRockTsl.js";
@@ -160,6 +160,69 @@ function macroValueNoise(p) {
 }
 
 /**
+ * HEX TILING — a layer texture sampled with no repeat grid (after Mikkelsen,
+ * "Practical Real-Time Hex-Tiling", JCGT 2022). The ground is cut into a
+ * triangle/hex lattice; each lattice vertex gets its own random offset (and
+ * turn) into the photo, and a pixel blends the three vertices around it with
+ * sharpened barycentric weights. The eye stops finding the tile because there
+ * is none: every cell is a different window of the photo.
+ *
+ * Three taps where there was one, with explicit gradients (the lattice
+ * switches vertices between neighbouring pixels, and implicit derivatives
+ * across that switch would pick the wrong mip). That is why only the GROUND
+ * CACHE's bake uses it (blend({ hex: true })): paid once per texel, never per
+ * frame.
+ *
+ * `rotate` turns each cell's window (ground seen from above has no up); the
+ * triplanar SIDE projections pass false — a cliff's strata must stay level.
+ * `orm`: the sample is the packed ORM, whose normal (b, a) is turned back by
+ * the cell's angle so the bumps still face the right way in the world.
+ */
+const HEX_CELLS = 1.3;     // cells per texture repeat
+const HEX_SHARP = 5.0;     // barycentric weight power (higher = narrower blends)
+function hexSample(arrNode, uv, layer, { rotate = true, orm = false } = {}) {
+  const gx = dFdx(uv), gy = dFdy(uv);
+  const st = uv.mul(HEX_CELLS);
+  const sk = vec2(st.x.sub(st.y.mul(0.57735027)), st.y.mul(1.15470054));
+  const base = floor(sk);
+  const f = fract(sk);
+  const z = float(1).sub(f.x).sub(f.y);
+  const up = z.greaterThan(0);
+  const w = select(up, vec3(z, f.y, f.x), vec3(z.negate(), float(1).sub(f.y), float(1).sub(f.x)));
+  const verts = [
+    select(up, base, base.add(vec2(1, 1))),
+    select(up, base.add(vec2(0, 1)), base.add(vec2(1, 0))),
+    select(up, base.add(vec2(1, 0)), base.add(vec2(0, 1))),
+  ];
+  const ws = [w.x, w.y, w.z].map((v) => pow(max(v, 0), HEX_SHARP));
+  const wsum = ws[0].add(ws[1]).add(ws[2]).max(1e-5);
+  let acc = vec4(0);
+  for (let i = 0; i < 3; i++) {
+    const v = verts[i];
+    const off = vec2(macroHash(v), macroHash(v.add(vec2(17, 31))));
+    let uvi = uv.add(off.mul(7.31));
+    let gxi = gx, gyi = gy;
+    let c = null, s = null;
+    if (rotate) {
+      const a = macroHash(v.add(vec2(-41, 73))).mul(6.2831853);
+      c = cos(a); s = sin(a);
+      const rot = (p) => vec2(c.mul(p.x).sub(s.mul(p.y)), s.mul(p.x).add(c.mul(p.y)));
+      uvi = rot(uv).add(off.mul(7.31));
+      gxi = rot(gx); gyi = rot(gy);
+    }
+    let t = arrNode.sample(uvi).grad(gxi, gyi).depth(layer);
+    if (orm && rotate) {
+      // uv' = R·uv, so a direction t in the photo is Rᵀ·t on the ground.
+      const nx = t.b.mul(2).sub(1), ny = t.a.mul(2).sub(1);
+      const wx = c.mul(nx).add(s.mul(ny)), wy = c.mul(ny).sub(s.mul(nx));
+      t = vec4(t.r, t.g, wx.mul(0.5).add(0.5), wy.mul(0.5).add(0.5));
+    }
+    acc = acc.add(vec4(t).mul(ws[i]));
+  }
+  return acc.div(wsum);
+}
+
+/**
  * @param {object[]} layerSlots  — 7 objects, each with TSL uniforms:
  *   { uUVScale, uNormalStr, uAOStr, uRoughStr, uTint?, uUVRot? }
  *   uTint (vec3 albedo multiplier) and uUVRot (vec2 cos/sin of the projection
@@ -192,18 +255,6 @@ export function createSplatOverlay(
   // 1 while the splatmap holds ANY paint. Driven per frame
   // from SplatMap.hasAnyPaint(); 0 skips the entire layer system per pixel.
   const uHasPaint = uniform(0.0);
-
-  // ── Splatmap (weight map) ────────────────────────────────────────────────────
-  // World UV: world[-1024..1024] → [0..1]
-  const splatUV        = positionWorld.xz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE));
-  const splatArrayNode = texture(splatTex, splatUV);
-  const splatSlice0    = splatArrayNode.depth(int(0)); // L1..L4
-  const splatSlice1    = splatArrayNode.depth(int(1)); // L5..L7 + A = terrain holes
-
-  // Zero out splat weights outside terrain bounds — prevents ClampToEdgeWrapping
-  // from bleeding edge-pixel paint onto out-of-bounds geometry on outer LOD rings.
-  const inBounds = step(float(0), splatUV.x).mul(step(splatUV.x, float(1)))
-                   .mul(step(float(0), splatUV.y)).mul(step(splatUV.y, float(1)));
 
   // ── Per-layer blend controls ──────────────────────────────────────────────────
   const uSoloLayer      = uniform(-1.0);
@@ -316,9 +367,10 @@ export function createSplatOverlay(
    * at shader BUILD time — TSL executes a Fn's body per build — so the flags
    * decide what is generated, not what runs.
    */
-  function sampleLayer(i, arrNode, triWeights, topUV) {
-    const p   = positionWorld.mul(invWS).mul(layerSlots[i].uUVScale);
-    const top = arrNode.sample(topUV).depth(int(i));
+  function sampleLayer(i, arrNode, triWeights, topUV, P = positionWorld, hex = false) {
+    const p   = P.mul(invWS).mul(layerSlots[i].uUVScale);
+    const orm = arrNode === ormArrNode;
+    const top = hex ? hexSample(arrNode, topUV, int(i), { orm }) : arrNode.sample(topUV).depth(int(i));
     if (compileState.triplanarSlots[i] && triWeights && F.biplanar) {
       // BIPLANAR (Inigo Quilez): of the three projections, sample only the
       // two with the largest weights. What is dropped is the smallest weight,
@@ -341,31 +393,14 @@ export function createSplatOverlay(
       return s1.mul(w1).add(s2.mul(w2)).div(max(w1.add(w2), float(1e-5))).toVar();
     }
     if (compileState.triplanarSlots[i] && triWeights) {
-      const side  = arrNode.sample(p.zy).depth(int(i)); // X-facing wall
-      const front = arrNode.sample(p.xy).depth(int(i)); // Z-facing wall
+      const side  = hex ? hexSample(arrNode, p.zy, int(i), { rotate: false }) : arrNode.sample(p.zy).depth(int(i)); // X-facing wall
+      const front = hex ? hexSample(arrNode, p.xy, int(i), { rotate: false }) : arrNode.sample(p.xy).depth(int(i)); // Z-facing wall
       return top.mul(triWeights.y)
         .add(side.mul(triWeights.x))
         .add(front.mul(triWeights.z)).toVar();
     }
     return vec4(top).toVar();
   }
-
-  // ── Weight extraction (pre-auto-paint) ────────────────────────────────────────
-  // Only the first NL are read. A dropped slot's channel is never fetched, so
-  // its share falls out of the sum and returns to the base colour — which is
-  // why the budget may only be lowered past slots a map leaves EMPTY. Slice 1
-  // is still sampled below NL=5 for the terrain holes in its alpha.
-  const rwAll = [
-    splatSlice0.r.mul(inBounds), splatSlice0.g.mul(inBounds),
-    splatSlice0.b.mul(inBounds), splatSlice0.a.mul(inBounds),
-    splatSlice1.r.mul(inBounds), splatSlice1.g.mul(inBounds), splatSlice1.b.mul(inBounds),
-  ].slice(0, NL);
-
-  const sumLayers = rwAll.reduce((a, b) => a.add(b));
-  const w0raw  = max(float(0), float(1).sub(sumLayers));
-  const totalW = max(float(1e-5), w0raw.add(sumLayers));
-
-  const nwExpr = [w0raw.div(totalW), ...rwAll.map((r) => r.div(totalW))];
 
   // ── Live auto-paint (Unreal-style auto-material) ─────────────────────────
   // Slope/height rules texture the UNPAINTED remainder (the implicit base
@@ -398,51 +433,101 @@ export function createSplatOverlay(
    */
   const uSlopeLock     = uniform(0.0);
 
-  // Auto-rule ingredient nodes — referenced only inside blend()'s auto sub-branch.
-  let autoIngredients = null;
-  if ((terrainNormals || heightTexNode) && F.autoPaint) {
-    // Slope and height for the rules. The baked surface texture carries BOTH
-    // (normal in .xyz, height in .w) so this is one tap where it used to be
-    // five — and, more importantly, it keeps the heightmap's sampler out of the
-    // fragment stage, which sits at WebGPU's 16-sampler ceiling.
-    let hC, ny;
-    if (terrainNormals) {
-      const surf = terrainNormals.surfaceAt(splatUV);
-      hC = surf.w;
-      ny = normalize(surf.xyz).y;
-    } else {
-      const texel = float(1.0 / HEIGHTMAP_SIZE);
-      hC = texture(heightTexNode, splatUV).r;
-      const hL = texture(heightTexNode, vec2(splatUV.x.sub(texel), splatUV.y)).r;
-      const hR = texture(heightTexNode, vec2(splatUV.x.add(texel), splatUV.y)).r;
-      const hD = texture(heightTexNode, vec2(splatUV.x, splatUV.y.sub(texel))).r;
-      const hU = texture(heightTexNode, vec2(splatUV.x, splatUV.y.add(texel))).r;
-      const flatScale = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
-      ny = flatScale.div(length(vec3(hL.sub(hR), flatScale, hD.sub(hU))));
+  /**
+   * EVERYTHING THAT DEPENDS ON WHERE THE PIXEL IS, for one position node.
+   *
+   * The terrain passes nothing and gets positionWorld. The ground cache
+   * (groundCache.js) runs this same blend on a flat bake quad and passes the
+   * world position it computes itself — so the cache is the terrain's own
+   * paint, not a second copy of the maths that could drift from it. Built once
+   * per position node.
+   */
+  const _positional = new Map();
+  function positional(P) {
+    let g = _positional.get(P);
+    if (g) return g;
+
+    // ── Splatmap (weight map) ─────────────────────────────────────────────────
+    // World UV: world[-1024..1024] → [0..1]
+    const splatUV        = P.xz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE));
+    const splatArrayNode = texture(splatTex, splatUV);
+    const splatSlice0    = splatArrayNode.depth(int(0)); // L1..L4
+    const splatSlice1    = splatArrayNode.depth(int(1)); // L5..L7 + A = terrain holes
+
+    // Zero out splat weights outside terrain bounds — prevents ClampToEdgeWrapping
+    // from bleeding edge-pixel paint onto out-of-bounds geometry on outer LOD rings.
+    const inBounds = step(float(0), splatUV.x).mul(step(splatUV.x, float(1)))
+                     .mul(step(float(0), splatUV.y)).mul(step(splatUV.y, float(1)));
+
+    // ── Weight extraction (pre-auto-paint) ─────────────────────────────────────
+    // Only the first NL are read. A dropped slot's channel is never fetched, so
+    // its share falls out of the sum and returns to the base colour — which is
+    // why the budget may only be lowered past slots a map leaves EMPTY. Slice 1
+    // is still sampled below NL=5 for the terrain holes in its alpha.
+    const rwAll = [
+      splatSlice0.r.mul(inBounds), splatSlice0.g.mul(inBounds),
+      splatSlice0.b.mul(inBounds), splatSlice0.a.mul(inBounds),
+      splatSlice1.r.mul(inBounds), splatSlice1.g.mul(inBounds), splatSlice1.b.mul(inBounds),
+    ].slice(0, NL);
+
+    const sumLayers = rwAll.reduce((a, b) => a.add(b));
+    const w0raw  = max(float(0), float(1).sub(sumLayers));
+    const totalW = max(float(1e-5), w0raw.add(sumLayers));
+
+    const nwExpr = [w0raw.div(totalW), ...rwAll.map((r) => r.div(totalW))];
+
+    // Auto-rule ingredient nodes — referenced only inside blend()'s auto sub-branch.
+    let autoIngredients = null;
+    if ((terrainNormals || heightTexNode) && F.autoPaint) {
+      // Slope and height for the rules. The baked surface texture carries BOTH
+      // (normal in .xyz, height in .w) so this is one tap where it used to be
+      // five — and, more importantly, it keeps the heightmap's sampler out of the
+      // fragment stage, which sits at WebGPU's 16-sampler ceiling.
+      let hC, ny;
+      if (terrainNormals) {
+        const surf = terrainNormals.surfaceAt(splatUV);
+        hC = surf.w;
+        ny = normalize(surf.xyz).y;
+      } else {
+        const texel = float(1.0 / HEIGHTMAP_SIZE);
+        hC = texture(heightTexNode, splatUV).r;
+        const hL = texture(heightTexNode, vec2(splatUV.x.sub(texel), splatUV.y)).r;
+        const hR = texture(heightTexNode, vec2(splatUV.x.add(texel), splatUV.y)).r;
+        const hD = texture(heightTexNode, vec2(splatUV.x, splatUV.y.sub(texel))).r;
+        const hU = texture(heightTexNode, vec2(splatUV.x, splatUV.y.add(texel))).r;
+        const flatScale = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
+        ny = flatScale.div(length(vec3(hL.sub(hR), flatScale, hD.sub(hU))));
+      }
+
+      // World-anchored FBM breakup so the slope/height thresholds meander
+      // organically instead of tracing clean contour lines.
+      const bp = P.xz.mul(float(0.02));
+      const breakup = mx_noise_float(vec3(bp.x, bp.y, float(7.7))).mul(uAutoNoise);
+
+      const cliffW = float(1).sub(
+        smoothstep(uAutoSlopeLoY, uAutoSlopeHiY, ny.add(breakup.mul(float(0.15)))),
+      );
+      const highOn = step(float(-0.5), uAutoHigh);
+      const hMet   = hC.mul(float(MAX_HEIGHT)).add(breakup.mul(float(40)));
+      const highW  = smoothstep(uAutoHighStart, uAutoHighEnd, hMet)
+        .mul(float(1).sub(cliffW)).mul(highOn);
+      const flatW  = float(1).sub(cliffW).sub(highW);
+
+      const eq = (u, i) => step(abs(u.sub(float(i))), float(0.5));
+      const hasFlat   = step(float(-0.5), uAutoFlat);
+      const hasCliff  = step(float(-0.5), uAutoCliff);
+      // highW is already gated by its own -1 check (highOn) where it's computed.
+      const assignedW = cliffW.mul(hasCliff).add(flatW.mul(hasFlat)).add(highW);
+
+      autoIngredients = { cliffW, highW, flatW, eq, assignedW };
     }
 
-    // World-anchored FBM breakup so the slope/height thresholds meander
-    // organically instead of tracing clean contour lines.
-    const bp = positionWorld.xz.mul(float(0.02));
-    const breakup = mx_noise_float(vec3(bp.x, bp.y, float(7.7))).mul(uAutoNoise);
-
-    const cliffW = float(1).sub(
-      smoothstep(uAutoSlopeLoY, uAutoSlopeHiY, ny.add(breakup.mul(float(0.15)))),
-    );
-    const highOn = step(float(-0.5), uAutoHigh);
-    const hMet   = hC.mul(float(MAX_HEIGHT)).add(breakup.mul(float(40)));
-    const highW  = smoothstep(uAutoHighStart, uAutoHighEnd, hMet)
-      .mul(float(1).sub(cliffW)).mul(highOn);
-    const flatW  = float(1).sub(cliffW).sub(highW);
-
-    const eq = (u, i) => step(abs(u.sub(float(i))), float(0.5));
-    const hasFlat   = step(float(-0.5), uAutoFlat);
-    const hasCliff  = step(float(-0.5), uAutoCliff);
-    // highW is already gated by its own -1 check (highOn) where it's computed.
-    const assignedW = cliffW.mul(hasCliff).add(flatW.mul(hasFlat)).add(highW);
-
-    autoIngredients = { cliffW, highW, flatW, eq, assignedW };
+    g = { splatUV, splatSlice1, inBounds, nwExpr, autoIngredients };
+    _positional.set(P, g);
+    return g;
   }
+  // The terrain's own (positionWorld) set, built now: the hole mask needs it.
+  const { splatSlice1, inBounds } = positional(positionWorld);
 
   // ── The blend (called once per material from terrainLOD / cliff / tint) ──────
 
@@ -471,9 +556,25 @@ export function createSplatOverlay(
    *   The grass tint bake uses it to drop layers flagged "Blocks grass": a
    *   blade must never take the colour of rock or a path it cannot grow on.
    */
-  function blend({ baseColor, baseRough = null, geomNormal = null, layerKeep = null }) {
+  /**
+   * For the ground cache's bake (groundCache.js), three more inputs:
+   * @param position  vec3 world position node instead of positionWorld
+   * @param topK      top-K count for THIS call (null = the build's)
+   * @param hex       HEX TILING on every layer tap (hexSample) — no repeat grid;
+   *   3× the taps, so the bake only
+   * @param farFade   0..1 node replacing the camera-distance near/far fade —
+   *   the bake has no camera; each cache ring passes the fade its texel size
+   *   corresponds to. Given, it turns the near/far blend on for this call.
+   */
+  function blend({
+    baseColor, baseRough = null, geomNormal = null, layerKeep = null,
+    position = null, topK = null, farFade = null, hex = false,
+  }) {
     const wantRough = baseRough !== null;
     const wantNrm   = geomNormal !== null && F.normalMap;
+    const P = position ?? positionWorld;
+    const { splatUV, inBounds, nwExpr, autoIngredients } = positional(P);
+    const TK = topK == null ? TOPK : Math.max(0, Math.min(NL, Math.round(topK)));
 
     const res = Fn(() => {
       const colV   = vec3(baseColor).toVar();
@@ -513,7 +614,7 @@ export function createSplatOverlay(
         // are walls, and turning a wall texture is not what the slider means.
         // uv' = (c·x − s·z, s·x + c·z)
         const uvFor = (slot) => {
-          let p = positionWorld.xz.mul(invWS).mul(slot.uUVScale);
+          let p = P.xz.mul(invWS).mul(slot.uUVScale);
 
           /*
            * CONTOUR ALIGNMENT — for sand, mainly.
@@ -564,13 +665,13 @@ export function createSplatOverlay(
         // top-K only the STATIC ones whose code is generated per layer).
         const isStatic = (i) => compileState.triplanarSlots[i] || compileState.rockShadeSlots[i];
         const classicIdx = [];
-        for (let i = 0; i < NL; i++) if (!TOPK || isStatic(i)) classicIdx.push(i);
+        for (let i = 0; i < NL; i++) if (!TK || isStatic(i)) classicIdx.push(i);
         const layerAlbedos = [];
         const layerOrms    = [];
         for (const i of classicIdx) {
           const uvI = uvFor(layerSlots[i]);
-          layerAlbedos[i] = sampleLayer(i, albedoArrNode, triW, uvI);
-          layerOrms[i]    = sampleLayer(i, ormArrNode, triW, uvI);
+          layerAlbedos[i] = sampleLayer(i, albedoArrNode, triW, uvI, P, hex);
+          layerOrms[i]    = sampleLayer(i, ormArrNode, triW, uvI, P, hex);
         }
 
         // FAR TERRAIN (farTerrain.js): outside the map there is no splatmap
@@ -583,7 +684,7 @@ export function createSplatOverlay(
           const outF = float(1).sub(inBounds).mul(farTerrain.u.uEnabled).toVar();
           If(outF.greaterThan(0.0), () => {
             const fu = farTerrain.u;
-            const rw = farTerrain.ruleWeights(normalize(vec3(geomNormal)).y, positionWorld.y);
+            const rw = farTerrain.ruleWeights(normalize(vec3(geomNormal)).y, P.y);
             const on = (slotU, i) => step(abs(slotU.sub(float(i))), float(0.5));
             let assigned = float(0);
             for (let i = 0; i < NL; i++) {
@@ -664,13 +765,13 @@ export function createSplatOverlay(
           rockAmt: layerSlots[i].uRockShade ?? float(1),
         }));
 
-        if (TOPK) {
+        if (TK) {
           const dyn = [];
           for (let i = 0; i < NL; i++) if (!isStatic(i)) dyn.push(i);
           if (dyn.length) {
             // Running top-K insert over the dynamic layers — compares and
             // selects only, unrolled at build time (K × |dyn| steps).
-            const K = Math.min(TOPK, dyn.length);
+            const K = Math.min(TK, dyn.length);
             const topW = [], topI = [];
             for (let k = 0; k < K; k++) { topW.push(float(-1).toVar()); topI.push(float(-1).toVar()); }
             let sumDyn = float(0);
@@ -702,9 +803,11 @@ export function createSplatOverlay(
               return acc;
             };
             const one3 = vec3(1, 1, 1), noRot = vec2(1, 0), zero = float(0);
-            const fade = F.farBlend
-              ? smoothstep(uFarStart, uFarEnd, length(positionWorld.sub(cameraPosition))).toVar()
-              : null;
+            const fade = farFade !== null
+              ? float(farFade).toVar()
+              : F.farBlend
+                ? smoothstep(uFarStart, uFarEnd, length(P.sub(cameraPosition))).toVar()
+                : null;
             const hWorld = terrainNormals
               ? terrainNormals.surfaceAt(splatUV).w.mul(float(MAX_HEIGHT)).toVar()
               : null;
@@ -713,7 +816,7 @@ export function createSplatOverlay(
               const id = max(topI[k], float(0)).toVar();
               const layer = int(id);
               const scale = pick(id, (s) => s.uUVScale).toVar();
-              let p = positionWorld.xz.mul(invWS).mul(scale);
+              let p = P.xz.mul(invWS).mul(scale);
               if (hWorld) {
                 const align = pick(id, (s) => s.uContourAlign ?? zero);
                 const along = p.x.add(p.y).mul(float(0.7071));
@@ -725,15 +828,16 @@ export function createSplatOverlay(
                 cs.x.mul(p.x).sub(cs.y.mul(p.y)),
                 cs.y.mul(p.x).add(cs.x.mul(p.y)),
               ).toVar();
-              let albedo = albedoArrNode.sample(uvK).depth(layer);
+              const tap = (arr, uv, o = {}) => (hex ? hexSample(arr, uv, layer, o) : arr.sample(uv).depth(layer));
+              let albedo = tap(albedoArrNode, uvK);
               if (fade) {
-                const far = albedoArrNode.sample(uvK.div(max(uFarRatio, float(1)))).depth(layer);
+                const far = tap(albedoArrNode, uvK.div(max(uFarRatio, float(1))));
                 albedo = mix(albedo, far, fade);
               }
               entries.push({
                 w: max(topW[k], float(0)).mul(renorm).toVar(),
                 albedo: vec4(albedo).toVar(),
-                orm: vec4(ormArrNode.sample(uvK).depth(layer)).toVar(),
+                orm: vec4(tap(ormArrNode, uvK, { orm: true })).toVar(),
                 aoStr: pick(id, (s) => s.uAOStr),
                 roughStr: pick(id, (s) => s.uRoughStr),
                 normalStr: pick(id, (s) => s.uNormalStr),
@@ -838,7 +942,7 @@ export function createSplatOverlay(
         // existing project exactly as it was.
         if (F.macroVariation) {
           If(uMacroStrength.add(uMacroWarmth).greaterThan(0.0), () => {
-            const mp = positionWorld.xz.div(max(uMacroScale, float(1)));
+            const mp = P.xz.div(max(uMacroScale, float(1)));
             // Second octave at a non-integer ratio so the two never line up.
             const n = macroValueNoise(mp).mul(0.65)
               .add(macroValueNoise(mp.mul(2.37).add(vec2(17.3, 41.9))).mul(0.35)).toVar();

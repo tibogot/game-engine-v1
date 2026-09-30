@@ -6,7 +6,7 @@ import { texture, uniform, float, mix, positionWorld, vec2, vec3, length, smooth
 import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, TERRAIN_SIZE_LIMITS, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
 import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "../terrain/terrainLOD.js";
-import { GRID_DEFAULTS, applyGridConfig, createGridMaterial } from "../render/materials/gridMaterial.js";
+import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } from "../render/materials/gridMaterial.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import { createHeightLayers } from "../terrain/heightLayers.js";
 import {
@@ -45,6 +45,7 @@ import { FoxOnFoot } from "../play/foxOnFoot.js";
 import { SplatMap } from "../terrain/splatMap.js";
 import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
 import { createFarTerrain } from "../terrain/farTerrain.js";
+import { createGroundCache } from "../terrain/groundCache.js";
 import { createTerrainNormalMap } from "../terrain/terrainNormalMap.js";
 import { TextureLibrary } from "../terrain/textureLibrary.js";
 import { ProceduralLayerBaker, procParamsFromPreset } from "../terrain/proceduralLayer.js";
@@ -697,10 +698,34 @@ export async function startV3App(opts = {}) {
     );
   }
 
+  /*
+   * THE GROUND CACHE (terrain/groundCache.js): the paint and the decals baked
+   * top-down into camera-following rings, read by the terrain with four taps.
+   * Opt-in at boot — startV3App({ groundCache: true | { …options } }) — and
+   * ?gc=1 / ?gc=0 on any page to A/B. Compile-time for the terrain material
+   * (the live blend is left out of the shader entirely when it is on).
+   */
+  const _gcParam = new URLSearchParams(location.search).get("gc");
+  const groundCacheOpt = _gcParam === "0" ? null : _gcParam === "1" ? (opts.groundCache || true) : (opts.groundCache || null);
+  const groundCache = groundCacheOpt ? createGroundCache({
+    renderer, splatOverlay, terrainNormals, heightTexNode, farTerrain,
+    splatTex: splatMap.tex, textureLib,
+    baseStyle: terrainFeatureOverrides.baseStyle,
+    options: typeof groundCacheOpt === "object" ? groundCacheOpt : {},
+  }) : null;
+  if (groundCache) {
+    groundCache.watch({
+      textures: [() => splatMap.tex, () => textureLib.albedoArrayTex, () => textureLib.ormArrayTex],
+      uniformObjects: [...textureLib.getLayerUniforms(), () => getGridUniforms()],
+    });
+    groundCache.setGroundHeightFn((x, z) => terrainStoreAdapter.getWorldHeight(x, z));
+    groundCache.setHeightVersionFn(() => sculpt.getHeightVersion());
+  }
+
   // The cursor's fill shows the ACTIVE brush's falloff (see terrainLOD), kept
   // in step by syncCursorFalloff() in the frame loop.
   const uCursorFalloff = uniform(2);
-  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap, grassFarShading, uCursorFalloff, farTerrain);
+  const lod = createTerrainLOD(heightTexNode, uCursorUV, sculpt.uRadius, sculpt.maskNode, sculpt.uMaskRotation, splatOverlay, snowSystem.shared, lakebedShading, null, terrainFeatureOverrides, terrainNormals, riverSandShading, flowerTintShading, terrainShadowMap, grassFarShading, uCursorFalloff, farTerrain, groundCache);
   scene.add(lod.group);
 
   /**
@@ -4392,6 +4417,12 @@ export async function startV3App(opts = {}) {
       wz.add(float(WORLD_SIZE * 0.5)).div(float(WORLD_SIZE)),
     )).r.mul(float(MAX_HEIGHT)),
   });
+  // With the ground cache on, the decals are baked into it — the screen-space
+  // draw (and the scene-depth copy it needs) goes away.
+  if (groundCache) {
+    groundCache.setDecalSystem(decalSystem);
+    decalSystem.liveDraw = false;
+  }
   if (isEditor) {
     decalEditor = createDecalEditor({
       system: decalSystem,
@@ -4852,6 +4883,8 @@ export async function startV3App(opts = {}) {
       // against last frame's view pops the river in a frame late at the edge.
       riverV2System?.cullForCamera(camera);
       riverV3System?.cullForCamera(camera);
+      // The ground cache follows the camera where the hooks left it.
+      if (groundCache && !_rendererSideWork) groundCache.update(camera);
       // Water and decals read a copy of the scene depth, which cannot come out
       // of the multisampled canvas: while any is in the scene, the frame goes
       // through a non-multisampled scene pass even with post FX off.
@@ -12412,6 +12445,8 @@ export async function startV3App(opts = {}) {
       Object.assign(worldToolState.groundBase, params);
       applyGridConfig(params);
     },
+    /** The ground cache (terrain/groundCache.js), or null when the terrain blends live. */
+    get groundCache() { return groundCache; },
     // ── Terrain queries a game builds on ──────────────────────────────────────
     // Ground height at a world X/Z (RTS unit clamping, building placement).
     getWorldHeight,

@@ -23,6 +23,7 @@ import { createAlgBattle } from "./algBattle.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
+import { createAlgSplats } from "./algSplats.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
@@ -114,11 +115,17 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // was compiled OUT and the tracks drew the flat base colour, no texture
     // (you, 2026-09-29: "see how it looks so flat").
     splatFeatures: { solo: false, layerBudget: Number(params.get("layers") ?? 7), topK: Number(params.get("topk") ?? 3), farBlend: params.get("farblend") !== "0" },
+    // THE GROUND CACHE (v3/terrain/groundCache.js, 2026-10-01): the paint and
+    // the decals baked around the camera, read with four taps — the CoH way
+    // (their terrain is a texture cache of tiles + splats). ?gc=0 = the live
+    // paint blend, to A/B.
+    groundCache: true,
   });
   app.setFrameThrottle?.(1000);
-  // The stats-gl overlay costs ~20% of the main thread (measured): off in the
-  // game, on from Dev → Performance or with ?stats=1.
-  app.setStatsOverlay?.(params.get("stats") === "1");
+  // The stats-gl overlay: ON (you, 2026-10-01: "keep the performance stats
+  // overlay enabled even if sometimes its numbers are not totally true").
+  // It costs ~20% of the main thread (measured) — ?stats=0 to judge without.
+  app.setStatsOverlay?.(params.get("stats") !== "0");
   // Cloud shadows start OFF (you, 2026-09-30: sweeping shadows get in the way
   // while debugging). The shadow map stays attached — Dev → Sky → Cloud
   // shadows turns them on, or ?cloudshadows=1 at boot.
@@ -181,6 +188,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     rtsCamera.setYaw(VIEW_YAW);
   }
   app.rtsCamera = rtsCamera;
+  // The ground cache centres on the camera's focus: turning or zooming the
+  // camera then re-bakes nothing.
+  app.groundCache?.setFocusFn(() => rtsCamera.getView().focus);
   app.addPreRenderHook((dt) => rtsCamera.update(dt));
   // C: RTS camera ⇄ free orbit. Matched on the printed key (AZERTY keyboards).
   window.addEventListener("keydown", (e) => {
@@ -229,6 +239,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.algBirds = createAlgBirds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom, soarOver: soar });
     } catch (e) { console.warn("[alg birds] failed:", e); }
   }
+  // GROUND SPLATS (algSplats.js): the CoH layer — patches of cracked mud,
+  // gravel, rubble, leaves, laid by rule into the ground cache. ?splats=0 =
+  // without (and nothing to lay without the cache, ?gc=0).
+  if (params.get("splats") !== "0" && app.groundCache) {
+    onStatus("Weathering the ground…");
+    try { app.algSplats = await createAlgSplats(app); } catch (e) { console.warn("[alg splats] failed:", e); }
+  }
   // STONES (algStones.js): loose stones textured with the ground they lie on,
   // placed from the map's paint. ?stones=0 = without.
   if (params.get("stones") !== "0") {
@@ -275,6 +292,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       console.log(`[warmup] ${w.warmed} drawables warmed in ${w.ms} ms`);
     } catch (e) { console.warn("[warmup] failed:", e); }
   }
+  // The ground cache around the starting view, all of it, before the screen
+  // lifts (the loop only bakes a few tiles a frame).
+  app.groundCache?.bakeAll(app.camera);
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;

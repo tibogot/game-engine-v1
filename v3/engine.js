@@ -71,6 +71,9 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/props/liveProps.js",
   // The rock generator (a game scatters its own stones: alg-rts algStones.js)
   "v3/props/proceduralRock.js",
+  // Ground splat materials (a game lays its own splats into app.groundCache:
+  // alg-rts algSplats.js)
+  "v3/terrain/splatMaterials.js",
   "v3/render/instancing/autoLod.js",
   // Animals reshaped from the pack's donkey (goat, sheep, camel) — the builder
   // v3/sheep-lab.html tunes and the RTS herds place (a game places them)
