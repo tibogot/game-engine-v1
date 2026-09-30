@@ -550,6 +550,34 @@ export async function createWorldEnvironment({
     }
   }
 
+  /*
+   * SHADOW-MAP COST PROBE (measurement only): bit i of the skip mask = cascade
+   * i is never redrawn and keeps its last map, so an A/B against mask 0 is
+   * exactly that map's cost. The skip is shadow.autoUpdate = needsUpdate =
+   * false (three r184 ShadowNode.updateBefore); the receiver matrix moves only
+   * when a map is drawn, so a frozen map stays aligned.
+   * syncCascadeShadowSettings sets needsUpdate every frame, so this runs after.
+   * MEASURED with it 2026-10-01: the whole sun shadow costs 0.2-0.8 ms in the
+   * RTS games (fitted) and <=0.6 ms in the editor (3 cascades) — too little for
+   * Tidewater-style staggered cascades or a static-caster cache to pay.
+   */
+  let _cascadeSkipMask = 0;
+  function applyCascadeSkip() {
+    if (!csm) return;
+    for (let i = 0; i < csm.lights.length; i++) {
+      const run = !(_cascadeSkipMask & (1 << i));
+      const sh = csm.lights[i].shadow;
+      sh.autoUpdate = run;
+      if (!run) sh.needsUpdate = false;
+    }
+  }
+  /** Cascades off: bit 0 of the debug skip mask freezes the fitted map instead. */
+  function applyFittedSkip() {
+    const skip = (_cascadeSkipMask & 1) !== 0;
+    sun.shadow.autoUpdate = !skip;
+    if (skip) sun.shadow.needsUpdate = false;
+  }
+
   function csmCfgNum(cfg) {
     return {
       cascades: Math.round(Number(cfg.cascades)),
@@ -629,6 +657,7 @@ export async function createWorldEnvironment({
     if (!csm) {
       if (!cfg.enabled) {
         fitDirectionalShadowToView(camera, _shadowFocus, cfg.maxFar, cfg.lightMargin);
+        applyFittedSkip();
       }
       return;
     }
@@ -646,6 +675,7 @@ export async function createWorldEnvironment({
     if (!cfg.enabled) {
       fitDirectionalShadowToView(camera, _shadowFocus, cfg.maxFar, cfg.lightMargin);
       syncCascadeShadowSettings();
+      applyFittedSkip();             // after: the sync above sets needsUpdate
       return;
     }
 
@@ -696,6 +726,7 @@ export async function createWorldEnvironment({
     if (csm.mainFrustum) {
       syncCascadeShadowSettings();
     }
+    applyCascadeSkip();
   }
 
   function setCsmEnabled(on) {
@@ -2708,6 +2739,14 @@ export async function createWorldEnvironment({
     },
     /** The shadow node, or null — it is REBUILT when cascades change, so read it live. */
     getCsm: () => csm,
+    /**
+     * MEASUREMENT ONLY: bit i set = cascade i is never redrawn (it keeps its
+     * last map), so an A/B against 0 is exactly that cascade's cost. With
+     * cascades off, bit 0 freezes the fitted map.
+     */
+    setShadowSkipMask(mask) {
+      _cascadeSkipMask = mask | 0;
+    },
     /**
      * The plain sun's own shadow camera — what renders the shadow map when the
      * cascades are OFF and fitDirectionalShadowToView is driving instead.

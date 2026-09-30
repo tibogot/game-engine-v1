@@ -1072,9 +1072,6 @@ export function buildWorldPanel(app) {
           refreshTp();
         },
       });
-      _toggle(csmBody, ts.csm, "updateEveryFrame", {
-        label: "Every frame",
-      });
       _toggle(csmBody, ts.csm, "fade", {
         label: "Cascade fade",
         hint: "Soft blend between shadow cascades to hide split seams.",

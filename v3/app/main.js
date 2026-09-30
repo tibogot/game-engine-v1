@@ -12308,6 +12308,8 @@ export async function startV3App(opts = {}) {
       get csm() { return worldEnv?.getCsm?.() ?? null; },
       /** Cascades off: the fitted frustum's half extents (m), m/texel and ground slab this frame. */
       fitInfo() { return worldEnv?.getFittedShadowInfo?.() ?? null; },
+      /** MEASUREMENT ONLY: bit i = cascade i is never redrawn (bit 0 = the fitted map with cascades off). */
+      debugSkipMask(mask) { worldEnv?.setShadowSkipMask?.(mask); },
       /**
        * Draw the sun's shadow frustum as a wire box — `app.shadows.showFrustum(true)`.
        * `{ freeze: true }` holds the box so the camera can back off and look at it.
