@@ -187,8 +187,12 @@ Not wired into either game yet.
          interpolation now buys only ~1.5 ms at 600 — not worth it yet.
          Minimap 0.8 ms at 600: NOT the blips (batching them changed nothing,
          reverted) — the canvas redraw itself; throttle it if it matters.
-   - [ ] **you, taste**: health bars over EVERY unit (a sea of green at 600).
-         CoH shows them on selected / hovered / damaged units — want that?
+   - [x] Health bars as in CoH (your yes, 2026-09-30): only on a SELECTED,
+         HOVERED or DAMAGED unit, both games. Hover found in screen space in
+         unitRenderer.sync (crowd soldiers have no mesh), `unitRenderer.hovered`.
+         Checked in Chrome: 0 bars → 5 (3 hurt + 2 selected) → 6 on hover.
+   - [ ] **A NEW MINIMAP** (your ask, 2026-09-30): better looking, cheaper —
+         see the proposal in the chat of that day; waiting on your go.
 - [ ] Faces: the pack's faces stay cartoon-American — for close-ups a North
       African head (AI-generated or reworked in Blender) is the real fix. Not
       stars (generals only) or medals (parade dress); rank goes in the UI plus

@@ -993,6 +993,18 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
 
   const _proj = new THREE.Vector3();
 
+  // HOVER: the unit under the pointer, found in SCREEN space while the units
+  // are written (sync) — crowd soldiers have no mesh to raycast, and a man at
+  // RTS zoom is a few pixels tall. Used by the health bars (CoH: a bar shows
+  // on a selected, hovered or damaged unit). One frame late; nobody can tell.
+  const dom = app.renderer.domElement;
+  let pointer = null;         // { x, y } client px, null off the canvas
+  let hovered = null;
+  const onPointerMove = (e) => { pointer = { x: e.clientX, y: e.clientY }; };
+  const onPointerLeave = () => { pointer = null; };
+  dom.addEventListener("pointermove", onPointerMove);
+  dom.addEventListener("pointerleave", onPointerLeave);
+
   /**
    * Pick a crowd soldier by SCREEN PROXIMITY, not by raycast.
    *
@@ -1058,6 +1070,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       for (const view of g.views.values()) { view.living.length = 0; view.dead.length = 0; }
     }
     if (camera) _frustum.setFromProjectionMatrix(_viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    const rect = pointer && camera ? dom.getBoundingClientRect() : null;
+    // px a metre at unit distance: a vehicle's pick circle grows with its size on screen
+    const pxPerM = rect ? rect.height / (2 * Math.tan(THREE.MathUtils.degToRad((camera.fov ?? 50) / 2))) : 0;
+    let nextHovered = null, hoverD = Infinity;
     crowdUnits.length = 0;
 
     for (const unit of units.list) {
@@ -1240,8 +1256,23 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         v.mixer.update(dt);
       }
 
-      // Health bar — one instance in the shared field (see healthBar.js).
-      if (v.onScreen) healthBars.add(
+      // Under the pointer? The nearest unit within its pick circle on screen.
+      if (rect && v.onScreen) {
+        _proj.set(p.x, p.y + 1, p.z).project(camera);
+        if (_proj.z < 1) {
+          const sx = rect.left + (_proj.x * 0.5 + 0.5) * rect.width;
+          const sy = rect.top + (-_proj.y * 0.5 + 0.5) * rect.height;
+          const d = Math.hypot(sx - pointer.x, sy - pointer.y);
+          const dist = Math.max(1, camera.position.distanceTo(p));
+          const reach = Math.max(22, (t.radius ?? 1) * pxPerM / dist);
+          if (d < reach && d < hoverD) { hoverD = d; nextHovered = unit; }
+        }
+      }
+
+      // Health bar — one instance in the shared field (see healthBar.js). As in
+      // Company of Heroes, only on a unit that is SELECTED, HOVERED or DAMAGED
+      // (your call, 2026-09-30): a bar over every man was a sea of green at 600.
+      if (v.onScreen && (unit.selected || unit === hovered || unit.hp < unit.maxHp)) healthBars.add(
         p.x, p.y + (t.barY ?? 6) + bobY, p.z,
         t.barWidth,
         unit.hp / unit.maxHp,
@@ -1280,6 +1311,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         }
       }
     }
+    hovered = nextHovered;
 
     // THE CROWDS: each view's soldiers in one contiguous range — its living,
     // then its corpses, then the static figures of its type — then the pieces
@@ -1345,7 +1377,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     pickCrowdUnit,  // crowd soldiers have no mesh — pick them by screen proximity
     addUnit,
     sync,
+    /** The unit under the pointer (screen space, as of the last sync), or null. */
+    get hovered() { return hovered; },
     dispose() {
+      dom.removeEventListener("pointermove", onPointerMove);
+      dom.removeEventListener("pointerleave", onPointerLeave);
       for (const v of views.values()) {
         if (v.root) scene.remove(v.root);
       }
