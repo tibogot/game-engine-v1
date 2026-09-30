@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — GPU Cull (Hi-Z occlusion)</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #0d1013; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10;
+             background: rgba(12,16,20,0.88); border: 1px solid #2a343c;
+             border-radius: 8px; padding: 12px 14px; min-width: 330px; }
+      #hud h1 { margin: 0 0 8px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: #8fb8d8; }
+      .row { display: flex; justify-content: space-between; gap: 14px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .btns { display: flex; gap: 4px; margin: 8px 0; }
+      .btns button { flex: 1; padding: 5px 4px; font-size: 11px; cursor: pointer;
+             background: #1a222a; color: #cfd8de; border: 1px solid #2f3b45; border-radius: 5px; }
+      .btns button.on { background: #2b6cb0; border-color: #4a9ae0; color: #fff; }
+      .note { margin-top: 9px; padding-top: 8px; border-top: 1px solid #2a343c; color: #8b99a4; font-size: 11px; max-width: 330px; }
+      #err { color: #ff8c8c; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>GPU Cull Lab — Hi-Z</h1>
+      <div class="btns">
+        <button data-preset="ground">1 · Ground</button>
+        <button data-preset="rts">2 · RTS</button>
+        <button data-preset="overview">3 · Overview</button>
+      </div>
+      <div class="btns">
+        <button data-toggle="occ">Occlusion</button>
+        <button data-toggle="red">Show occluded</button>
+        <button data-toggle="freeze">Freeze cull</button>
+      </div>
+      <div class="row"><span>GPU / frame</span><b id="s-gpu">—</b></div>
+      <div class="row"><span>render / compute</span><b id="s-split">—</b></div>
+      <div class="row"><span>Draw calls</span><b id="s-draws">—</b></div>
+      <div class="row"><span>Props</span><b id="s-props">—</b></div>
+      <div class="row"><span>Foliage</span><b id="s-foliage">—</b></div>
+      <div class="row"><span>Instanced tris</span><b id="s-tris">—</b></div>
+      <div class="row"><span>Occlusion</span><b id="s-occ">—</b></div>
+      <div class="row"><span>Camera</span><b id="s-pos">—</b></div>
+      <div class="note" id="s-note">Loading…</div>
+      <div class="note" id="err"></div>
+    </div>
+    <script type="module">
+      import { startGpuCullLab } from "./debug/gpuCullLab.js";
+      startGpuCullLab().catch((e) => {
+        console.error(e);
+        document.getElementById("err").textContent = String(e?.stack ?? e);
+      });
+    </script>
+  </body>
+</html>
