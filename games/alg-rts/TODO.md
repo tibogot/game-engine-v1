@@ -157,7 +157,38 @@ Not wired into either game yet.
    - [ ] a ~1.5k-tri distance LOD of each body (meshoptimizer), judged from
          the RTS camera; soldier1's colour map → KTX2; no shadows on tiny kit
    - [ ] alg-rts swaps its stand-in (testsolanim.glb) for soldier1 + aln1/aln2
-   - [ ] measure GPU ms at 100 / 300 / 1000 soldiers (one tab, focused)
+   - [x] MEASURED (2026-09-30, one tab focused, soldiers 4 m apart idle on
+         screen, split over the five soldier types; CPU = the frame callback):
+         | soldiers | CPU frame | fps | sim step | combat | unitRenderer.sync |
+         | 0   | 7.3 ms  | 60 | 0.1 | 0   | 0.2 |
+         | 100 | 9.8 ms  | 60 | 0.9 | 0.3 | 0.6 |
+         | 300 | 14.6 ms | 60 | 3.3 | 1.0 | 1.4 |
+         | 600 | 27.3 ms | 38 | 6.2 × 1.55 steps/frame | 2.2 | 2.2 |
+         GPU: the crowds stay cheap (under ~0.5 ms at 600, inside the timer's
+         noise). THE WALL IS THE SIM: units.update ≈ 10 µs a soldier a step
+         at 60 Hz; past ~450 men the frame passes 16.7 ms and the fixed step
+         starts owing extra steps (1.55/frame at 600). Packed 1.6 m apart it
+         was 23.6 ms a step (separation). A trace blamed the windsock's
+         computeVertexNormals (84 %): FALSE — an A/B with it off changed
+         nothing; it is a real 0.6 ms/frame to shave, no more.
+   - [x] **THE SIM for hundreds** (2026-09-30, measured, both games' shared
+         code): SEPARATION — each pair resolved by its larger unit, reach
+         3 × own radius (was own + 3 × the map's LARGEST, the Alouette's 6 m:
+         a 40 m square per soldier, twice a step). COMBAT — a unit with no
+         target searches every 0.2 s, staggered (was every step). Off-screen
+         units skip their pieces and health bar (frustum); bar pool 512 → 1536
+         (past 512 bars silently vanished). Same bench, CPU ms:
+         | soldiers | frame (was) | sim step (was) | combat (was) |
+         | 300 idle | 10.1 (14.6) | 0.6 (3.3) | 0.1 (1.0) |
+         | 600 idle | 14.4 (27.3), 57–59 fps (38) | 1.3 (6.2) | 0.3 (2.2) |
+         | 600 packed 1.6 m | 16.2 | 2.8 (23.6) | 0.5 |
+         | 600 MARCHING 60 m | 15.7 med / 19.5 p95, 55 fps | 3.0 | — |
+         unitRenderer.sync at 600: 1.3 ms on screen, 0.5 off. The 30 Hz sim +
+         interpolation now buys only ~1.5 ms at 600 — not worth it yet.
+         Minimap 0.8 ms at 600: NOT the blips (batching them changed nothing,
+         reverted) — the canvas redraw itself; throttle it if it matters.
+   - [ ] **you, taste**: health bars over EVERY unit (a sea of green at 600).
+         CoH shows them on selected / hovered / damaged units — want that?
 - [ ] Faces: the pack's faces stay cartoon-American — for close-ups a North
       African head (AI-generated or reworked in Blender) is the real fix. Not
       stars (generals only) or medals (parade dress); rank goes in the UI plus
@@ -171,10 +202,15 @@ Not wired into either game yet.
 - [ ] Asset cuts before shipping: lower-poly crowd version (~1.5k tris; skin
       cost = verts × soldiers), soldier1's PNG colour map → KTX2, colour maps
       at 512 (judge in the lab).
-- [ ] Crowd cost per unit TYPE (games/shared-rts/crowdSkinning.js): one crowd
-      per type, each skinning its full 160 capacity once it has anyone. Share
-      one crowd between types that use the same mesh, size the dispatch to the
-      live count, and share the baked clip table.
+- [x] ONE CROWD PER BODY (2026-09-30, checked in Chrome, both games):
+      appelé, sapeur, para, légion share soldier1's crowd — one GLB parse, one
+      clip bake, one skinning dispatch, one skin buffer, ONE set of pieces
+      (82 piece meshes, was 101), one x-ray; each type's LOOK is a view (a mesh
+      over its range of the crowd, own shader: crowdSkinning view()). Crowds
+      6 → 3 (soldier1, aln1, aln2). The 160 cap is now per type but POOLED:
+      312 appelés drawn (was 160). Corpses and static figures ride lane 2+ in
+      the anim record → no silhouette. Frame time unchanged (it was never the
+      renderer: see the MEASURED table above — the sim is the wall).
 
 ## NOTE FROM THE NAM SESSION — 2026-09-28: cloud shadows in games
 - [ ] Read this before the next Sky Pro commit. cloudShadowsLite's sampler-free

@@ -630,12 +630,10 @@ export function createUnits({
   //
   // Pairs come from the grid, not from every j > i: each pass re-files the
   // units (the previous pass moved them) and asks for the cells within reach of
-  // `a`. The candidates are then sorted back into index order, so the pairs are
-  // visited in the order the all-pairs loop used — pairs that are not
-  // overlapping were always skipped, and the pad covers what earlier pushes in
-  // the same pass can move a neighbour. So the same pushes happen; only the
-  // pairs that could never touch are no longer looked at. (A neighbour shoved
-  // further than the pad within ONE pass would be caught on the next pass.)
+  // `a`. Each pair is resolved once, by its larger unit (see the reach below);
+  // a unit's candidates are sorted into index order, so the order is fixed and
+  // the sim stays deterministic. (A neighbour shoved further than the reach
+  // within ONE pass is caught on the next pass.)
   const SEP_PASSES = 2;
   const _sepNear = [];
   const _sepIdx = [];
@@ -643,21 +641,27 @@ export function createUnits({
   function separate() {
     for (let pass = 0; pass < SEP_PASSES; pass++) {
       rebuildGrid();
-      // One largest radius for the overlap itself, two more for how far pushes
-      // earlier in this pass can have moved a neighbour since it was filed (a
-      // single push is at most one radius).
-      const reachPad = grid.maxRadius * 3 + GRID_PAD;
       for (let i = 0; i < units.length; i++) {
         const a = units[i];
         if (a.ghost || !a.alive) continue; // phasing through a tangle / dead
-        const reach = a.radius + reachPad;
+        // EACH PAIR IS RESOLVED BY ITS LARGER UNIT (equal radii: the lower
+        // index), so a unit looks only as far as ITS OWN size reaches: two
+        // radii for the overlap, one more for how far pushes earlier in this
+        // pass can have moved a neighbour. It used to look `own radius + 3 ×
+        // the LARGEST radius on the map` — the Alouette's 6 m, an aircraft that
+        // separation skips anyway — so every soldier sifted a 40 m square of
+        // soldiers, twice a step (MEASURED 2026-09-30: 600 men packed 1.6 m
+        // apart, 23.6 ms a sim step). A tank still meets the men round it:
+        // from its own, larger, reach.
+        const reach = a.radius * 3 + GRID_PAD;
         near(a.position.x, a.position.z, reach, _sepNear);
         _sepIdx.length = 0;
         const ax0 = a.position.x, az0 = a.position.z, reach2 = reach * reach;
         for (const b of _sepNear) {
-          if (b._gridIdx <= i) continue;
+          const j = b._gridIdx;
+          if (j === i || b.radius > a.radius || (b.radius === a.radius && j < i)) continue;
           const dx = b.position.x - ax0, dz = b.position.z - az0;
-          if (dx * dx + dz * dz <= reach2) _sepIdx.push(b._gridIdx);
+          if (dx * dx + dz * dz <= reach2) _sepIdx.push(j);
         }
         _sepIdx.sort(byIndex);
         for (const j of _sepIdx) {

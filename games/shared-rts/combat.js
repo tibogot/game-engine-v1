@@ -11,6 +11,14 @@
 import * as THREE from "three";
 
 const ACQUIRE_MULT = 1.15; // auto-acquire slightly beyond weapon range
+/**
+ * A unit with no target looks for one this often (s), not every sim step. A
+ * search sifts everyone within weapon reach — nearly all friends — and 600 men
+ * doing it 60 times a second was 2.4 ms a step (MEASURED 2026-09-30). A fifth
+ * of a second is a soldier's reaction time; the searches are spread over it
+ * (each unit's first wait is staggered) so they don't all land on one step.
+ */
+const ACQUIRE_EVERY = 0.2;
 
 /** A man on foot (nam's soldier, alg's appelé and moudjahid): the type says so. */
 const onFoot = (e) => !!(e?.type?.foot || e?.typeKey === "soldier");
@@ -33,6 +41,7 @@ export function createCombat({
   const _muzzle = new THREE.Vector3();
   /** Scratch for acquire's grid query — acquisition runs one combatant at a time. */
   const _nearUnits = [];
+  let _acqSeq = 0;   // staggers each combatant's first search (deterministic: spawn order)
 
   /** Where a shot leaves from. */
   function muzzleOf(e) {
@@ -193,6 +202,9 @@ export function createCombat({
     // An explicit attack order beats auto-acquire.
     let tgt = e.attackTarget ?? e.target;
     if (!tgt || !tgt.alive) {
+      e.acquireCd = (e.acquireCd ?? ((_acqSeq++ % 12) / 12) * ACQUIRE_EVERY) - dt;
+      if (e.acquireCd > 0) { e.target = null; return; }
+      e.acquireCd = ACQUIRE_EVERY;
       tgt = acquire(e);
       e.target = tgt;
     }

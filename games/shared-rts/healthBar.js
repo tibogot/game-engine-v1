@@ -28,7 +28,7 @@ const _col = new THREE.Color();
  * Per frame: `begin()`, one `add()` per live entity, then `commit()`. Bars that
  * aren't re-added simply fall out of the instance count — nothing to hide.
  */
-export function createHealthBarField({ scene, max = 512, height = 0.55, groundAt = null }) {
+export function createHealthBarField({ scene, max = 1536, height = 0.55, groundAt = null }) {
   /**
    * A HILL between the bar and the camera? The bars draw over everything (a
    * HUD), so with the free camera every unit behind a ridge still showed its

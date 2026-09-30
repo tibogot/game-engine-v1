@@ -71,9 +71,11 @@ function bakeClips(animRoot, skeleton, clips) {
  * @param {THREE.Object3D}    o.animRoot object holding the bones, for baking
  * @param {object}  o.clips   { idle: AnimationClip, run: AnimationClip }
  * @param {number}  o.max     instance capacity (sizes the storage buffers)
+ * @param {boolean} o.drawMesh false: no mesh of its own in the scene — the
+ *   caller draws RANGES of the crowd through view() (one per look)
  */
 export function createCrowdField({
-  scene, renderer, source, animRoot, clips, max = 128, castShadow = true, aliases = {},
+  scene, renderer, source, animRoot, clips, max = 128, castShadow = true, aliases = {}, drawMesh = true,
 }) {
   const skeleton = source.skeleton;
   const geometry = source.geometry.clone();
@@ -175,11 +177,21 @@ export function createCrowdField({
     out.element(dstOff.add(uint(1))).assign(vec4(transformNormal(nrm, m), 0));
   })().compute(max * vertexCount).setName("Crowd skinning");
 
-  // ── The one mesh that draws every soldier ──────────────────────────────────
+  // ── Drawing ────────────────────────────────────────────────────────────────
+  /** The skinned vertex of instance `inst` (a node): position + view normal. */
+  const skinnedAt = (inst) => {
+    const v = inst.mul(uint(vertexCount)).add(vertexIndex).mul(uint(2));
+    return {
+      positionNode: out.element(v).xyz,
+      normalNode: transformNormalToView(out.element(v.add(uint(1))).xyz).toVarying(),
+    };
+  };
+
+  // The one mesh that draws every soldier.
   const material = source.material.clone();
-  const meshVertex = instanceIndex.mul(uint(vertexCount)).add(vertexIndex).mul(uint(2));
-  material.positionNode = out.element(meshVertex).xyz;
-  material.normalNode = transformNormalToView(out.element(meshVertex.add(uint(1))).xyz).toVarying();
+  const own = skinnedAt(instanceIndex);
+  material.positionNode = own.positionNode;
+  material.normalNode = own.normalNode;
   // ONE PROGRAM PER CROWD. Two crowds (a second soldier type on the same model)
   // build node graphs identical but for WHICH storage buffer they read, and
   // three keyed them as one program — the second mesh then drew the FIRST
@@ -193,7 +205,7 @@ export function createCrowdField({
   mesh.frustumCulled = false; // soldiers live anywhere; the shared bounds mean nothing
   mesh.castShadow = castShadow;
   mesh.receiveShadow = true;
-  scene.add(mesh);
+  if (drawMesh) scene.add(mesh);
 
   let n = 0;
 
@@ -214,6 +226,40 @@ export function createCrowdField({
     animNode,
     /** Per-soldier vec4 for the material (addPose's `extra`), e.g. the look variation. */
     extraNode,
+    /** Instances queued so far this frame (the next one's index). */
+    get count() { return n; },
+    /** The skinned vertex of instance `inst` (a node): { positionNode, normalNode }. */
+    skinnedAt,
+    /**
+     * A mesh drawing a RANGE of this crowd — instances [start, start + count)
+     * — with its own material: one per LOOK, so several soldier types dressed
+     * on one body share the skinning, the clip table and the buffers, and each
+     * keeps its own shader (no per-pixel branching between looks). Write each
+     * view's soldiers contiguously, then setRange(). `index` is the instance's
+     * index in the crowd (for extraNode / animNode reads in the material).
+     */
+    view(viewMaterial, name = "CrowdView") {
+      const base = uniform(0, "uint");
+      const index = instanceIndex.add(base);
+      const nodes = skinnedAt(index);
+      viewMaterial.positionNode = nodes.positionNode;
+      viewMaterial.normalNode = nodes.normalNode;
+      // Its own program: it reads THIS crowd's buffers (see ONE PROGRAM PER CROWD).
+      const key = `crowd:${viewMaterial.uuid}`;
+      viewMaterial.customProgramCacheKey = () => key;
+      const m = new THREE.Mesh(geometry, viewMaterial);
+      m.count = 0;
+      m.visible = false;
+      m.frustumCulled = false;
+      m.castShadow = castShadow;
+      m.receiveShadow = true;
+      m.name = name;
+      scene.add(m);
+      return {
+        mesh: m, index,
+        setRange(start, count) { base.value = start; m.count = count; m.visible = count > 0; },
+      };
+    },
     /** The baked clips' names (plus the aliases). */
     has: (clipName) => !!info[aliases[clipName] ?? clipName],
     capacity: max,
@@ -282,11 +328,12 @@ export function createCrowdField({
 
     commit() {
       mesh.count = n;
+      if (!drawMesh) mesh.visible = false;
       // AN EMPTY CROWD COSTS NOTHING: no upload, no dispatch, no draw. The
       // kernel is sized to capacity, so an idle type (no fighters out of the
       // cave yet, a second army on the same model) would otherwise skin 160
       // soldiers' worth every frame for no one.
-      mesh.visible = n > 0;
+      if (drawMesh) mesh.visible = n > 0;
       if (n === 0) return;
       instMatrices.needsUpdate = true;
       anim.needsUpdate = true;
