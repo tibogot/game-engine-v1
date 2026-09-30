@@ -20,7 +20,15 @@ import * as THREE from "three";
 
 const DEG = Math.PI / 180;
 
-export function createRtsCamera({ app } = {}) {
+/**
+ * Options (a game's own lens; the defaults are nam's, unchanged):
+ *   fov        vertical field of view in RTS mode (degrees; null = leave the
+ *              app camera's). A narrower lens further back reads as Company
+ *              of Heroes: bigger units, less edge stretch (alg-rts, 2026-09-30).
+ *   distMin, distDefault, distMax   the zoom range (m)
+ *   pitchNear, pitchFar            tilt at the closest / furthest zoom (degrees)
+ */
+export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 52, distMax = 130, pitchNear = 30, pitchFar = 58 } = {}) {
   const { camera, controls, getWorldHeight, worldSize } = app;
 
   // ── Tunables (live-editable from the dev panel via the returned `params`) ────
@@ -30,25 +38,26 @@ export function createRtsCamera({ app } = {}) {
     // TOP-DOWN pulled out, where you want to read the map and not have the
     // near hillside in the way. A single fixed angle has to be wrong at one
     // end; it was 40 degrees at both.
-    pitchNear: 30 * DEG,  // at DIST_MIN
-    pitchFar:  58 * DEG,  // at distMax
+    pitchNear: pitchNear * DEG,  // at DIST_MIN
+    pitchFar:  pitchFar * DEG,   // at distMax
     panSpeed:  55,        // metres/SECOND at DIST_DEFAULT, scaled by zoom
     rotSpeed:  80 * DEG,  // radians/SECOND while Q or E held
     heightSmooth: 4,      // terrain-height follow rate (1/s); 0 = snap instantly
     zoomSmooth: 12,       // how fast the zoom eases to the wheel's target (1/s)
     edgeScroll: true,     // pan when the pointer rests near the viewport edge
+    fov,                  // RTS-mode lens (degrees); null = the app camera's
     edgeBand:   14,       // px from the edge that starts an edge-scroll pan
     minClearance: 6,      // metres the camera keeps above the ground beneath IT
-    distMax:   130,       // furthest zoom — see the note on DIST_CEILING
+    distMax,              // furthest zoom — see the note on DIST_CEILING
   };
-  const DIST_MIN   = 18;   // closest zoom — near ground-level tactics
+  const DIST_MIN   = distMin;   // closest zoom — near ground-level tactics
   // A hard ceiling the dev panel cannot exceed. At 280 the camera sat 180 m up
   // and saw 400 m of ground: no blade or leaf field can populate that, so the
   // whole view fell back to the terrain's grass TINT and the hand-off band
   // swept across as you panned. It is also not a view you can give orders
   // from. `params.distMax` is the live knob; this is the edge of sane.
   const DIST_CEILING = 200;
-  const DIST_DEFAULT = 52; // starting zoom — close like Company of Heroes
+  const DIST_DEFAULT = distDefault; // starting zoom — close like Company of Heroes
   const HALF       = (worldSize ?? 1000) * 0.5;
   // Where the camera's focus may go: the whole world unless the game bounds
   // it to its playable area (setBounds — Sand & Blood's 610 m box).
@@ -67,6 +76,7 @@ export function createRtsCamera({ app } = {}) {
   // from scrolling the world every time you reach for a slider: the panel
   // overlays the canvas, so moving onto it fires pointerleave here.
   let ptrX = 0, ptrY = 0, overCanvas = false;
+  let orbitFov = null;    // the app camera's own fov, restored in orbit mode
   let rtsEntered = false; // first RTS entry keeps DIST_DEFAULT; orbit→rts adopts zoom
   const keys = Object.create(null);
 
@@ -214,6 +224,8 @@ export function createRtsCamera({ app } = {}) {
     if (next === mode) return;
     mode = next;
     if (mode === "rts") {
+      // The RTS lens (the orbit/free camera keeps its own).
+      if (params.fov) { orbitFov ??= camera.fov; camera.fov = params.fov; camera.updateProjectionMatrix(); }
       // Seed the focus from wherever the orbit camera was looking.
       focus.copy(controls.target);
       focusY = terrainY(focus.x, focus.z);
@@ -231,6 +243,7 @@ export function createRtsCamera({ app } = {}) {
       controls.enableZoom = false;
       drive(0); // apply immediately so there's no one-frame jump
     } else {
+      if (orbitFov != null) { camera.fov = orbitFov; camera.updateProjectionMatrix(); }
       // Hand control back to the engine's OrbitControls.
       controls.target.copy(focus);
       controls.enabled = true;

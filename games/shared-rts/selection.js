@@ -19,7 +19,7 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {} }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null }) {
   // onOrder(kind, units): "attack" | "harvest" | "move" — the radio answers (namSounds.js).
   // Rigid unit types render as shared InstancedMeshes, so a hit identifies its
   // unit by instanceId, not by the mesh — unitRenderer owns that resolution.
@@ -276,8 +276,15 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
    * right-click and the minimap's (a game's) both come here. `y`: the marker's
    * height (the ground's, when not given).
    */
-  function orderMove(x, z, y = app.getWorldHeight?.(x, z) ?? 0) {
+  function orderMove(x, z, y) {
     if (!selected.size) return;
+    // A game's playable area: an order outside it goes to the nearest point
+    // inside (alg-rts's box; without it the path had no route and men held).
+    if (clampOrder) {
+      const c = clampOrder(x, z);
+      if (c.x !== x || c.z !== z) { x = c.x; z = c.z; y = undefined; }
+    }
+    y ??= app.getWorldHeight?.(x, z) ?? 0;
     const hit = { point: { x, y, z } };
     pingMarker(x, y, z);
     onOrder("move", [...selected]);

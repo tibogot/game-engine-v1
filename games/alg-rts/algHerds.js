@@ -22,7 +22,7 @@ import * as THREE from "three";
 import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
 import { initAnimalMorph, createMorphTemplate } from "../../v3/props/animalMorph.js";
 import { createWildHerd } from "../shared-rts/wildHerd.js";
-import { LAYOUT } from "./layout.js";
+import { LAYOUT, PLAY, sitePoint } from "./layout.js";
 import { TRACK_LINES } from "./algTracks.js";
 import { RTS_SCALE } from "./algUnitTypes.js";
 
@@ -54,8 +54,14 @@ const LOADED_SHARE = 0.35;
  */
 export async function createAlgHerds(app, { units = null, showroom = null } = {}) {
   const t0 = performance.now();
-  const gltf = await getSharedGltfLoader().loadAsync("/models/Donkey_compressed.glb");
-  await initAnimalMorph(gltf);
+  // The donkey is the source of the flocks; the pack's DEER (same rig) the
+  // source of the gazelle.
+  const [gltf, deerGltf] = await Promise.all([
+    getSharedGltfLoader().loadAsync("/models/Donkey_compressed.glb"),
+    getSharedGltfLoader().loadAsync("/models/Deer_compressed.glb"),
+  ]);
+  await initAnimalMorph(gltf, { deer: deerGltf });
+  const gazelleTpl = createMorphTemplate("gazelle");
   const sheepTpl = createMorphTemplate("sheep", SHEEP);
   const goatTpl = createMorphTemplate("goat", GOAT);
   const donkeyTpl = createMorphTemplate("donkey", DONKEY_BARE);
@@ -91,6 +97,37 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
       if (sheepStand(x, z) == null || pastures.some((p) => Math.hypot(p.x - x, p.z - z) < 50)) continue;
       pastures.push({ x, z, site: s.name });
       break;
+    }
+  }
+  // ── DORCAS GAZELLES (2026-09-30): a few small groups on the open, dry
+  // ground of the south half (toward the Sahara), well away from people:
+  // 70 m clear of every site, off the wadis' beds, on gentle ground with
+  // nothing growing (they graze the sparse steppe, and they are SEEN there).
+  const gazelleSpots = [];
+  const gazelleStand = standable(0.85);   // fleeing, they take rougher ground
+  {
+    const people = sites.map((s) => ({ x: s.x, z: s.z, r: s.r + 70 }));
+    const open = (x, z) => {
+      if (x < PLAY.x0 + 25 || x > PLAY.x1 - 25 || z < PLAY.z0 + 25 || z > PLAY.z1 - 25) return null;
+      if (inAny(people, x, z)) return null;
+      if ((app.sampleFoliageDensity?.(x, z) ?? 0) > 0.05) return null;
+      return standable(0.94)(x, z);
+    };
+    const groups = [];
+    for (let k = 0; k < 600 && groups.length < 3; k++) {
+      const x = PLAY.x0 + rnd() * (PLAY.x1 - PLAY.x0), z = 0 + rnd() * PLAY.z1;
+      if (open(x, z) == null || groups.some((g) => Math.hypot(g.x - x, g.z - z) < 120)) continue;
+      groups.push({ x, z });
+    }
+    for (const g of groups) {
+      const n = 3 + Math.floor(rnd() * 4);
+      for (let k = 0; k < 60 && gazelleSpots.filter((q) => q.g === g).length < n; k++) {
+        const a = rnd() * Math.PI * 2, d = 2 + rnd() * 9 * S;
+        const x = g.x + Math.cos(a) * d, z = g.z + Math.sin(a) * d;
+        if (open(x, z) == null) continue;
+        // One in five a fawn.
+        gazelleSpots.push({ x, z, g, height: S * gazelleTpl.height * (rnd() < 0.2 ? 0.7 : 0.92 + rnd() * 0.14) });
+      }
     }
   }
   const around = (c, n, r, stand) => {
@@ -132,6 +169,28 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
       const loaded = rnd() < LOADED_SHARE;
       const tpl = loaded ? loadedTpl : donkeyTpl;
       (loaded ? loadedSpots : donkeySpots).push({ x, z, height: S * tpl.height * (0.92 + rnd() * 0.12) });
+      placed++;
+    }
+  }
+  // THE SOUK'S DONKEYS (2026-09-30): one loaded, one bare, tied in the
+  // ksar's market square — which is inside the town's walls-radius, so they
+  // get their own ground rule (open nav ground within the square).
+  const souks = sites.filter((s) => s.souk).map((s) => sitePoint(s));
+  const soukStand = (x, z) => {
+    for (const q of souks) {
+      if (Math.hypot(x - q.x, z - q.z) > 9) continue;
+      return app.navGrid?.isBlockedAtWorld?.(x, z) ? null : app.getWorldHeight(x, z);
+    }
+    return sheepStand(x, z);
+  };
+  for (const q of souks) {
+    let placed = 0;
+    for (let k = 0; k < 40 && placed < 2; k++) {
+      const a = rnd() * Math.PI * 2, d = 2 + rnd() * 6;
+      const x = q.x + Math.sin(a) * d, z = q.z + Math.cos(a) * d;
+      if (soukStand(x, z) == null || [...donkeySpots, ...loadedSpots].some((p) => Math.hypot(p.x - x, p.z - z) < 3 * S)) continue;
+      const loaded = placed === 0, tpl = loaded ? loadedTpl : donkeyTpl;
+      (loaded ? loadedSpots : donkeySpots).push({ x, z, height: S * tpl.height * (0.92 + rnd() * 0.1), souk: true });
       placed++;
     }
   }
@@ -228,12 +287,14 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
     // read as strays, not a flock).
     createWildHerd(app, sheepTpl, sheepSpots, { canStand: sheepStand, threats, name: "Sheep", walkSpeed: sheepTpl.walkSpeed * S, runSpeed: sheepTpl.runSpeed * S, roam: 7 * S }),
     createWildHerd(app, goatTpl, goatSpots, { canStand: goatStand, threats, name: "Goats", walkSpeed: goatTpl.walkSpeed * S, runSpeed: goatTpl.runSpeed * S, roam: 7 * S }),
+    // The gazelles: wild, loosely grouped, wandering further; they bolt.
+    gazelleSpots.length ? createWildHerd(app, gazelleTpl, gazelleSpots, { canStand: gazelleStand, threats, name: "Gazelles", walkSpeed: gazelleTpl.walkSpeed * S, runSpeed: gazelleTpl.runSpeed * S, roam: 14 * S }) : null,
     // the trains: on the lead, on the mule paths' steeper ground
     createWildHerd(app, loadedTpl, trainLoaded, { canStand: trailStand, name: "Donkeys (train, loaded)", walkSpeed: loadedTpl.walkSpeed * S, runSpeed: loadedTpl.runSpeed * S, bolt: false, roam: 1.5 * S }),
     createWildHerd(app, donkeyTpl, trainBare, { canStand: trailStand, name: "Donkeys (train)", walkSpeed: donkeyTpl.walkSpeed * S, runSpeed: donkeyTpl.runSpeed * S, bolt: false, roam: 1.5 * S }),
     // working animals: tied up (a few metres of rope), never bolting
-    createWildHerd(app, donkeyTpl, donkeySpots, { canStand: sheepStand, name: "Donkeys", walkSpeed: donkeyTpl.walkSpeed * S, runSpeed: donkeyTpl.runSpeed * S, bolt: false, roam: 3 * S }),
-    createWildHerd(app, loadedTpl, loadedSpots, { canStand: sheepStand, name: "Donkeys (loaded)", walkSpeed: loadedTpl.walkSpeed * S, runSpeed: loadedTpl.runSpeed * S, bolt: false, roam: 3 * S }),
+    createWildHerd(app, donkeyTpl, donkeySpots, { canStand: soukStand, name: "Donkeys", walkSpeed: donkeyTpl.walkSpeed * S, runSpeed: donkeyTpl.runSpeed * S, bolt: false, roam: 3 * S }),
+    createWildHerd(app, loadedTpl, loadedSpots, { canStand: soukStand, name: "Donkeys (loaded)", walkSpeed: loadedTpl.walkSpeed * S, runSpeed: loadedTpl.runSpeed * S, bolt: false, roam: 3 * S }),
   ].filter(Boolean);
   /** Move the homes (flocks, trains), then the animals. */
   function step(dt) {
@@ -286,7 +347,7 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
     for (const h of herds) h.update(dt);
   }
   app.addPreRenderHook(step);
-  console.log(`[herds] ${sheepSpots.length} sheep + ${goatSpots.length} goats on ${pastures.length} pastures (${pastures.map((p) => p.site).join(", ")}), ${donkeySpots.length + loadedSpots.length} donkeys (${loadedSpots.length} loaded), ${trains.length} donkey trains, ${flocks.filter((f) => f.route.length > 1).length}/${flocks.length} flocks on the move (routes of ${flocks.map((f) => f.route.length).join("/")}, ${flocks.filter((f) => f.route.some((r) => r.well)).length} by a well) in ${Math.round(performance.now() - t0)} ms`,
+  console.log(`[herds] ${sheepSpots.length} sheep + ${goatSpots.length} goats + ${gazelleSpots.length} gazelles on ${pastures.length} pastures (${pastures.map((p) => p.site).join(", ")}), ${donkeySpots.length + loadedSpots.length} donkeys (${loadedSpots.length} loaded), ${trains.length} donkey trains, ${flocks.filter((f) => f.route.length > 1).length}/${flocks.length} flocks on the move (routes of ${flocks.map((f) => f.route.length).join("/")}, ${flocks.filter((f) => f.route.some((r) => r.well)).length} by a well) in ${Math.round(performance.now() - t0)} ms`,
     { sheep: sheepTpl.health, goat: goatTpl.health, donkey: donkeyTpl.health, loaded: loadedTpl.health });
-  return { herds, pastures, flocks, trains, step, sheep: sheepSpots.length, goats: goatSpots.length, donkeys: donkeySpots.length, loaded: loadedSpots.length };
+  return { herds, pastures, flocks, trains, step, sheep: sheepSpots.length, goats: goatSpots.length, gazelles: gazelleSpots.length, donkeys: donkeySpots.length, loaded: loadedSpots.length };
 }

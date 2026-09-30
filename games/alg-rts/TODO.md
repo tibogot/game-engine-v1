@@ -6,6 +6,33 @@ started · **you** = your call or your work.
 
 Keep this file current: tick things off here, add new asks here.
 
+## PARKED / NEXT (2026-09-30)
+
+- [ ] **PARKED until Sky Pro has its night** (you, in another session): the
+      searchlight at night (read Sky Pro's night amount, judge it lit), lit
+      windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
+- [x] **The GAZELLE in the game** (2026-09-30, algHerds.js): the deer loaded
+      beside the donkey; 3 groups of 3-6 (a fawn in five) on open, bare,
+      gentle ground in the south half, 70 m clear of every site; they graze,
+      wander 18 m, and BOLT (tested: a whole group 55-65 m off a soldier in
+      ~5 s). 14 on the map. you, look: whether they read at play zoom
+      (fawn on fawn ground — the white rump is what shows).
+- [x] **2026-09-30**:
+      · MAP EDGE: outside PLAY darkened (CoH) or a dust haze (Dev → Map
+        edge: on/off, style, strength, colour — you: pick the default);
+        orders outside go 8 m inside.
+      · AMBIENCE (algAmbience.js, one draw each): vehicle DUST (pale, blown
+        downwind, ~3 s), OVEN SMOKE from 3 roofs per village (ray-found
+        roof heights, burning on and off); LAUNDRY on ~half the ksar's
+        roofs (own random stream: the town unchanged); 2 DONKEYS in the souk.
+      · BIRDS in flight: smooth lofted bodies, smooth wings with separate
+        fingered primaries, fanned tails, sRGB colours (alg only). PAUSED —
+        fine-tune later (you).
+      · COH CAMERA: FOV 60 → 40 (was ~103° across on a 2:1 window), zoom
+        28-80-190 m (was 18-52-130), tilt 35°→60° (start 43°, CoH's editor
+        default 45). Dev → Camera → FOV to try others. Shared rtsCamera
+        options; nam unchanged.
+
 ---
 
 ## YOUR ASKS — 2026-09-29: soldiers from Mixamo
@@ -1431,10 +1458,14 @@ Asset follow-ups:
         level, dry, no trees.
       Measured: a band from the cave to an ambush on a patrol 120 m out of
       the post in ~52 s (was ~72 s at a sprint over twice the ground).
-- [ ] Mark the out-of-bounds ground (CoH darkens it) — now it only stops
-      the camera and the men.
-- [ ] A move order outside the box: go to the nearest point inside (now the
-      man holds, the path having no route).
+- [x] Mark the out-of-bounds ground (CoH darkens it) — 2026-09-30: the fog
+      of war's post pass (shared, `bounds` option; nam passes none) darkens
+      the ground and what stands on it outside PLAY by 45%, a third
+      desaturated, over a 14 m soft edge — fog of war on or off.
+- [x] A move order outside the box: go to the nearest point inside —
+      2026-09-30: shared selection `clampOrder` (ground and minimap orders),
+      alg clamps to 8 m inside PLAY. Tested: 3 men ordered to (360, 260)
+      walked to ~(282, 260) and stopped.
 - [ ] Fill the box densely (scrub along the wadis, terraces and orchards
       round the villages); thin the vegetation OUTSIDE it (frame time).
 - [x] (2026-09-29, `--view play`, tracks drawn) tools/algPlanView.mjs: redraw the plan image with the new layout.

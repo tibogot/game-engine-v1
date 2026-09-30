@@ -15,7 +15,7 @@
 //   • visible    — in a friendly vision disk this frame (clear)
 import * as THREE from "three";
 import {
-  Fn, float, max, mix, normalize, screenUV, step, texture, uniform, vec2, vec3, vec4,
+  Fn, float, max, mix, normalize, screenUV, smoothstep, step, texture, uniform, vec2, vec3, vec4,
 } from "three/tsl";
 import { drapeY } from "./terrainDrape.js";
 
@@ -58,7 +58,7 @@ function boxBlur(src, size, radius) {
   return dst;
 }
 
-export function createFogOfWar({ app, units, structures, buildings, getRadioIntel = () => false, enabled: startEnabled = false }) {
+export function createFogOfWar({ app, units, structures, buildings, getRadioIntel = () => false, enabled: startEnabled = false, bounds = null }) {
   const map = app.worldSize ?? 2048;
   const half = map * 0.5;
   const cell = map / TEX_RES;
@@ -250,6 +250,21 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     const fowTexNode = texture(tex);
 
     const worldUv = (xz) => xz.add(vec2(uHalf, uHalf)).div(uMap);
+    // THE PLAYABLE AREA (`bounds`, optional — alg-rts's box; nam has none):
+    // outside it the ground (and what stands on it) is darkened and a little
+    // desaturated, as in CoH — scenery, not ground you play on. Independent
+    // of the fog of war's own on/off. uOut.w = 0: no box.
+    const uOut = uniform(new THREE.Vector4(0, 0, 0, 0));      // x0, z0, x1, z1
+    const uOutOn = uniform(bounds ? 1 : 0);
+    // Style (setEdge): 0 = DARKEN (CoH), 1 = HAZE — the land fades into a dust
+    // haze that thickens with distance past the edge (a fog wall; reads from
+    // the free camera too). Strength 0-1; the haze's colour.
+    const uOutMode = uniform(0), uOutStrength = uniform(1);
+    const uOutColor = uniform(new THREE.Color(0xcdb58e));
+    if (bounds) uOut.value.set(bounds.x0, bounds.z0, bounds.x1, bounds.z1);
+    const outsideD = (xz) => max(max(uOut.x.sub(xz.x), xz.x.sub(uOut.z)), max(uOut.y.sub(xz.y), xz.y.sub(uOut.w)));
+    const outsideDim = (xz) => smoothstep(float(0), float(14), outsideD(xz)).mul(uOutOn);
+    edgeUniforms = { uOutOn, uOutMode, uOutStrength, uOutColor };
 
     const shadeRgb = Fn(([rgb, fowUv]) => {
       const sample = texture(fowTexNode, fowUv);
@@ -291,7 +306,15 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
         groundXZ = vec2(hit.x, hit.z);
       }
       const shaded = shadeRgb(color.rgb, worldUv(groundXZ));
-      return mix(color, vec4(shaded, color.a), hitsGround);
+      // Outside the playable box. DARKEN: 45% darker, a third of its colour
+      // gone. HAZE: toward the haze colour, 55% at the edge's end, ~90% 120 m out.
+      const dim = outsideDim(groundXZ).mul(hitsGround).mul(uOutStrength);
+      const lumO = shaded.dot(vec3(0.2126, 0.7152, 0.0722));
+      const darkened = mix(shaded, vec3(lumO), float(0.35)).mul(0.55);
+      const hazeK = mix(float(0.55), float(0.9), smoothstep(float(14), float(120), outsideD(groundXZ)));
+      const hazed = mix(shaded, uOutColor, hazeK);
+      const outside = mix(darkened, hazed, uOutMode);
+      return mix(color, vec4(mix(shaded, outside, dim), color.a), hitsGround);
     });
 
     function syncCamera(cam) {
@@ -310,8 +333,19 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
   }
 
   let post = null;
+  let edgeUniforms = null;          // the play-box edge's (set when the post pass is built)
+  const edge = { on: !!bounds, mode: "darken", strength: 1, color: "#cdb58e" };
+  const pushEdge = () => {
+    if (!edgeUniforms) return;
+    edgeUniforms.uOutOn.value = bounds && edge.on ? 1 : 0;
+    edgeUniforms.uOutMode.value = edge.mode === "haze" ? 1 : 0;
+    edgeUniforms.uOutStrength.value = edge.strength;
+    edgeUniforms.uOutColor.value.set(edge.color);
+  };
 
   function update(_dt) {
+    // The play-box dimming needs the camera even with the fog of war off.
+    if (bounds) post?.syncCamera?.(app.camera);
     if (!enabled) return;
     bakeTexture();
     post?.syncCamera?.(app.camera);
@@ -332,6 +366,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     // The modifier is created enabled; it has to learn the state it missed,
     // because setEnabled may well have run before there was a `post` to tell.
     post.setEnabled(enabled);
+    pushEdge();
   }
 
   return {
@@ -344,6 +379,9 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     },
     update,
     installPostFx,
+    /** The play-box edge (a game with `bounds`): { on, mode: "darken" | "haze", strength 0-1, color }. */
+    get edge() { return { ...edge, available: !!bounds }; },
+    setEdge(o = {}) { Object.assign(edge, o); pushEdge(); },
     /** `(color, { scenePass }) => color`, run before the fog of war; null to drop it. */
     setPreModifier(fn) {
       pre = typeof fn === "function" ? fn : null;

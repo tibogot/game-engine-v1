@@ -654,7 +654,9 @@ function ksarHouse(parts, R, { x, z, yaw, w, d, h, y, low, frontGround, mat, ton
     put(buildBox(0.92, 1.9, 0.05), [dx, fg + 0.95, fz - 0.02], MAT.timber, 0.12 + R() * 0.15);
   }
   // A room on the roof at the back (the summer room), its own parapet.
+  let room = false, shade = false;
   if (w > 4.6 && R() < 0.45) {
+    room = true;
     const w2 = w * (0.4 + R() * 0.15), d2 = d * (0.45 + R() * 0.1), h2 = 2.3 + R() * 0.4;
     const ox = (R() - 0.5) * (w - w2 - 0.8), oz = d / 2 - d2 / 2 - 0.35;
     const m2 = R() < 0.7 ? mat : MAT.plasterPale;
@@ -662,10 +664,34 @@ function ksarHouse(parts, R, { x, z, yaw, w, d, h, y, low, frontGround, mat, ton
     parapet(put, R, { ox, oz, w: w2, d: d2, top: h + h2, mat: m2, tone, ph: 0.35, horns: R() < 0.5 });
     put(buildBox(0.8, 1.7, 0.05), [ox + (R() - 0.5) * (w2 - 1.2), h + 0.85, oz - d2 / 2 - 0.02], MAT.steel, 0.02);
   } else if (R() < 0.35) {
+    shade = true;
     // A shade of palm fronds on two poles over the roof's front corner.
     const sx = (R() < 0.5 ? -1 : 1) * (w / 2 - 1.2), sz = -d / 2 + 1.1;
     put(buildBox(1.9, 0.1, 1.5), [sx, h + 1.95, sz], MAT.thatch, 0.3 + R() * 0.2, [0.06, R() * 0.3, 0]);
     for (const px of [-0.8, 0.8]) put(buildBox(0.09, 1.95, 0.09), [sx + px, h + 0.97, sz - 0.6], MAT.timber, 0.3);
+  }
+  // LAUNDRY (you, 2026-09-30) on any roof without a frond shade — across the
+  // open front when there is a roof room, else anywhere — now and then:
+  // a line on two poles, cloths pegged along it. Its own random stream (from
+  // the house's place), so the town as approved is unchanged.
+  const RL = rng(Math.floor(Math.abs(x * 73.1 + z * 19.7)) + 5);
+  if (!shade && RL() < 0.55) {
+    const lz = (room || RL() < 0.5 ? -d / 4 : d / 4) + (RL() - 0.5) * 0.4, lx = w / 2 - 0.55, top = h + 1.55;
+    for (const sx of [-1, 1]) put(buildBox(0.06, 1.55, 0.06), [sx * lx, h + 0.775, lz], MAT.timber, 0.3);
+    put(buildBox(2 * lx, 0.02, 0.02), [0, top, lz], MAT.steel, 0.3);
+    // Cloths: sheets and a haik (white), rugs in red, terracotta, olive and
+    // green (the kit's cells): each its own width, drop and gap, and
+    // alternate ones a few cm off the line's plane (no two faces share it).
+    const CLOTH = [[MAT.white, 0.62], [MAT.white, 0.5], [MAT.laterite, 0.5], [MAT.tile, 0.55], [MAT.canvas, 0.45], [MAT.hessian, 0.4], [MAT.paint, 0.55], [MAT.laterite, 0.35]];
+    let cx = -lx + 0.25 + RL() * 0.2, k = 0;
+    while (cx < lx - 0.45) {
+      const [cm, ct] = CLOTH[Math.floor(RL() * CLOTH.length)];
+      const cw = 0.45 + RL() * 0.6, ch = 0.5 + RL() * 0.6;
+      if (cx + cw > lx - 0.2) break;
+      put(buildBox(cw, ch, 0.015), [cx + cw / 2, top - 0.01 - ch / 2, lz + (k % 2 ? 0.025 : -0.025)], cm, ct + RL() * 0.2);
+      cx += cw + 0.08 + RL() * 0.25;
+      k++;
+    }
   }
   // A spout through the parapet (the roof drains to the lane).
   if (R() < 0.5) put(buildBox(0.14, 0.12, 0.6), [(R() - 0.5) * (w - 1), h + 0.15, -d / 2 - 0.26], MAT.timber, 0.25);

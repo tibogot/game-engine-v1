@@ -134,9 +134,12 @@ export function createRtsBirds({ app, units = null, params = {}, birds: B }) {
     const side = select(positionLocal.x.lessThan(0), float(-1), float(1));
     const hand = vtx.y;
     const amp = float(P.flapAmp).mul(panic.mul(0.35).add(1));
+    // A flying bird's lofted BODY carries hand -1 (birdKit flying()): rigid,
+    // the beat would otherwise lift its flanks with the wings.
     const angle = beat.mul(amp).mul(mix(float(0.75), float(1.35), hand)).mul(flapping)
       .add(float(0.12).mul(float(1).sub(flapping)))
-      .mul(float(1).sub(stand));
+      .mul(float(1).sub(stand))
+      .mul(step(float(-0.5), hand));
     const nx = x.mul(cos(angle)).mul(side);
     let ny0 = positionLocal.y.add(x.mul(sin(angle)));
     let z0 = positionLocal.z;

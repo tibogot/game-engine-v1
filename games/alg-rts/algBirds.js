@@ -28,51 +28,64 @@ const C = {
 };
 
 function algBirdShapes() {
-  const k = createBirdBuilder();
-  const { tri, body, wing, standing } = k;
+  const k = createBirdBuilder({ srgb: true });
+  const { standing, flying, smoothWing } = k;
 
   // ── 0 WHITE STORK, flying ────────────────────────────────────────────────
-  k.species(0);
-  body([0, 0.01, 0.24], [0, 0, -0.22], -0.01, 0.065, 0.055, C.white, C.whiteShade);
-  // The neck held straight out, the small head, the long red bill.
-  tri([0.03, 0.02, 0.2], [0, 0.02, 0.42], [-0.03, 0.02, 0.2], C.white);
-  tri([0.03, 0.02, 0.2], [-0.03, 0.02, 0.2], [0, 0.0, 0.4], C.whiteShade);
-  tri([0.012, 0.02, 0.41], [0, 0.015, 0.64], [-0.012, 0.02, 0.41], C.red);
-  tri([0.012, 0.02, 0.41], [-0.012, 0.02, 0.41], [0, 0.005, 0.6], C.redDark);
-  // A short white tail, and the red legs trailing past it.
-  tri([0, 0, -0.18], [0.05, 0, -0.3], [-0.05, 0, -0.3], C.white);
-  tri([0.014, -0.03, -0.2], [0.008, -0.03, -0.56], [-0.014, -0.03, -0.2], C.red);
-  tri([-0.014, -0.03, -0.2], [-0.008, -0.03, -0.56], [0.014, -0.03, -0.2], C.red);
+  // (the lofted bodies: birdKit flying(), 2026-09-30 — the spindles read flat)
+  flying(0, {
+    body: [0.19, 0.062, 0.058], neck: [0.2, 0.012], head: 0.03,
+    bill: [0.19, C.red, C.redDark],
+    tail: { len: 0.11, w: 0.06, shape: "fan", col: C.white },
+    legs: [0.3, C.red],
+    col: (part, s) => (s < -0.25 && part !== "head" ? C.whiteShade : C.white),
+  });
   for (const s of [1, -1]) {
-    // White coverts, a BLACK trailing edge, black fingered primaries.
-    wing(s, [[0.05, 0.01, 0.12], [0.05, 0.01, -0.12]], [[0.33, 0.02, 0.1], [0.33, 0.02, -0.19]],
-      [[0.62, 0, -0.03]], C.white, C.black, 5, C.black);
+    // Long and broad; white coverts, the whole BLACK trailing half (the
+    // flight feathers), six black primaries spread at the tip.
+    smoothWing(s, {
+      root: 0.05, span: 0.36, wrist: 0.55, camber: 0.014,
+      // A long, even-width board (straight edges), the wrist a touch forward, the hand narrowing: fingers from its end.
+      keys: [[0, 0.1, -0.12], [0.5, 0.105, -0.125], [0.6, 0.118, -0.12], [1, 0.08, -0.06]],
+      col: (t, u) => (u > 0.5 || t > 0.78 ? C.black : C.white),
+      fingers: { n: 6, len: 0.2, width: 0.034, col: C.black },
+    });
   }
 
   // ── 1 CROW ───────────────────────────────────────────────────────────────
-  k.species(1);
-  body([0, 0.01, 0.22], [0, 0, -0.18], 0, 0.06, 0.05, C.blackSheen, C.black);
-  tri([0.03, 0.02, 0.2], [0, 0.01, 0.34], [-0.03, 0.02, 0.2], C.black);
-  tri([0, 0, -0.14], [0.09, 0, -0.38], [-0.09, 0, -0.38], C.black);
-  tri([0.09, 0, -0.38], [0, 0, -0.42], [-0.09, 0, -0.38], C.black);
+  flying(1, {
+    body: [0.16, 0.058, 0.052], neck: [0.05, 0.004], head: 0.042,
+    bill: [0.085, C.blackSheen, C.black],
+    tail: { len: 0.2, w: 0.075, shape: "wedge", col: C.black },
+    legs: null,
+    col: (part, s) => (s > 0.3 ? C.blackSheen : C.black),
+  });
   for (const s of [1, -1]) {
-    wing(s, [[0.04, 0.01, 0.1], [0.04, 0.01, -0.1]], [[0.24, 0.02, 0.09], [0.24, 0.02, -0.13]],
-      [[0.47, 0, 0.0]], C.blackSheen, C.blackSheen, 4);
+    smoothWing(s, {
+      root: 0.045, span: 0.25, wrist: 0.55, camber: 0.012,
+      keys: [[0, 0.09, -0.09], [0.55, 0.1, -0.1], [1, 0.075, -0.04]],
+      col: (t, u) => (u < 0.35 ? C.blackSheen : C.black),
+      fingers: { n: 5, len: 0.15, width: 0.028, col: C.black },
+    });
   }
 
   // ── 2 GRIFFON VULTURE ────────────────────────────────────────────────────
-  k.species(2);
-  body([0, 0.01, 0.2], [0, 0, -0.2], -0.01, 0.085, 0.07, C.tawny, C.tawnyLight);
-  // The pale head on a short neck, the ruff, a dark hooked bill.
-  tri([0.035, 0.02, 0.18], [0, 0.03, 0.3], [-0.035, 0.02, 0.18], C.pale);
-  tri([0.012, 0.03, 0.29], [0, 0.02, 0.35], [-0.012, 0.03, 0.29], C.umber);
-  // The short, square dark tail.
-  tri([0.06, 0, -0.16], [0.07, 0, -0.33], [-0.07, 0, -0.33], C.umber);
-  tri([0.06, 0, -0.16], [-0.07, 0, -0.33], [-0.06, 0, -0.16], C.umber);
+  // The head sunk between the shoulders, the pale ruff, a hooked dark bill.
+  flying(2, {
+    body: [0.18, 0.085, 0.07], neck: [0.06, 0.02], head: 0.038,
+    bill: [0.05, C.umber, C.umber],
+    tail: { len: 0.14, w: 0.075, shape: "square", col: C.umber },
+    legs: null,
+    col: (part, s) => (part === "neck" || part === "head" ? C.pale : s < -0.2 ? C.tawnyLight : C.tawny),
+  });
   for (const s of [1, -1]) {
-    // Broad, long, plank-like: tawny coverts, dark secondaries, six fingers.
-    wing(s, [[0.07, 0.01, 0.15], [0.07, 0.01, -0.14]], [[0.36, 0.02, 0.15], [0.36, 0.02, -0.2]],
-      [[0.63, 0, 0.0]], C.tawny, C.umber, 6, C.umber);
+    // Broad, long, plank-like: tawny coverts, dark flight feathers, seven fingers.
+    smoothWing(s, {
+      root: 0.07, span: 0.38, wrist: 0.55, camber: 0.016,
+      keys: [[0, 0.14, -0.14], [0.5, 0.15, -0.15], [0.62, 0.165, -0.145], [1, 0.12, -0.06]],
+      col: (t, u) => (u > 0.55 ? C.umber : C.tawny),
+      fingers: { n: 7, len: 0.2, width: 0.036, col: C.umber },
+    });
   }
 
   // ── 3 WHITE STORK, standing (the kit's lofted standing bird) ─────────────

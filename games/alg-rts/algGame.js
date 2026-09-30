@@ -20,6 +20,7 @@ import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
 import { createAlgBirds } from "./algBirds.js";
+import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
@@ -159,7 +160,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   }
 
   onStatus("Setting up camera…");
-  const rtsCamera = createRtsCamera({ app });
+  // THE COMPANY OF HEROES LENS (you, 2026-09-30): a narrower field of view
+  // (40°, was the app's 60 — on a 2:1 window that was ~103° across: small,
+  // far units and stretched edges) from further back, so the same ground
+  // fills the screen with bigger units; the start tilted ~43° (CoH's
+  // editor default is 45). The zoom range grown by tan 30° / tan 20° ≈ 1.6
+  // so the closest and furthest views cover what they did.
+  const rtsCamera = createRtsCamera({ app, fov: 40, distMin: 28, distDefault: 80, distMax: 190, pitchNear: 35, pitchFar: 60 });
   rtsCamera.setMode("rts");
   // The camera stays over the playable area (layout.js PLAY): the rest is scenery.
   rtsCamera.setBounds(PLAY);
@@ -207,6 +214,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       app.algBirds = createAlgBirds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom, soarOver: soar });
     } catch (e) { console.warn("[alg birds] failed:", e); }
+  }
+  // AMBIENCE (algAmbience.js): dust behind the vehicles, smoke from the
+  // bread ovens. ?ambience=0 = without.
+  if (params.get("ambience") !== "0") {
+    try {
+      app.algAmbience = createAlgAmbience(app, { units: app.algUnits?.units ?? null, showroom: app.showroom, wind: app.showroom?.wind ?? null });
+    } catch (e) { console.warn("[alg ambience] failed:", e); }
   }
   // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,
   // the dechra and the springs; they bolt from soldiers. ?herds=0 = without.

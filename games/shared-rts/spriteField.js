@@ -68,19 +68,24 @@ export function createSpriteField({
 
   // Pool: `t` counts down, `life` is what it started at.
   const pool = [];
-  for (let i = 0; i < max; i++) pool.push({ t: 0, life: 1, x: 0, y: 0, z: 0 });
+  for (let i = 0; i < max; i++) pool.push({ t: 0, life: 1, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, s: 1 });
   let next = 0;
 
   return {
     mesh,
 
-    /** Light up one sprite for `life` seconds. Oldest is recycled when full. */
-    spawn(x, y, z, life) {
+    /**
+     * Light up one sprite for `life` seconds. Oldest is recycled when full.
+     * Optional: a drift (m/s — dust blown downwind, smoke rising) and a size
+     * multiplier; without them a sprite stays put, as before.
+     */
+    spawn(x, y, z, life, { vx = 0, vy = 0, vz = 0, scale = 1 } = {}) {
       let e = pool.find((s) => s.t <= 0);
       if (!e) { e = pool[next]; next = (next + 1) % max; } // all busy → steal one
       e.x = x; e.y = y; e.z = z;
       e.t = life;
       e.life = life;
+      e.vx = vx; e.vy = vy; e.vz = vz; e.s = scale;
     },
 
     /** Age every live sprite and rewrite the instance buffer. */
@@ -92,10 +97,11 @@ export function createSpriteField({
         if (e.t <= 0) continue;
 
         const p = e.t / e.life; // 1 → 0 over its life
+        e.x += e.vx * dt; e.y += e.vy * dt; e.z += e.vz * dt;
 
         _obj.position.set(e.x, e.y, e.z);
         if (camera) _obj.quaternion.copy(camera.quaternion); // billboard
-        _obj.scale.setScalar(scaleAt(p));
+        _obj.scale.setScalar(scaleAt(p) * e.s);
         _obj.updateMatrix();
         mesh.setMatrixAt(n, _obj.matrix);
         lifeAttr.setX(n, fadeAt(p));

@@ -169,6 +169,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // The searchlights' pools of light see through the fog (algSearchlight.js).
     buildings: { get list() { return app.algSearchlights?.pools ?? []; } },
     enabled: new URLSearchParams(location.search).get("fow") === "1",
+    // Outside the playable box the land is darkened (CoH): scenery.
+    bounds: PLAY,
   });
   app.fogOfWar = fogOfWar;
   fogOfWar.installPostFx(app);
@@ -329,6 +331,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let controlGroups = null;   // made after the selection it listens to
   const selection = createSelection({
     app, units, unitRenderer, structuresRenderer: structures.renderer,
+    // An order outside the playable box: the nearest point 8 m inside it
+    // (the box's edge is blocked on the nav grid; room for the formation).
+    clampOrder: (x, z) => ({
+      x: Math.min(PLAY.x1 - 8, Math.max(PLAY.x0 + 8, x)),
+      z: Math.min(PLAY.z1 - 8, Math.max(PLAY.z0 + 8, z)),
+    }),
     onChange: (sel) => {
       unitBar.render(sel);
       commandCard.render(sel);

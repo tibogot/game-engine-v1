@@ -22,13 +22,18 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     b.textContent = rtsCamera.getMode() === "rts" ? "RTS camera — C for orbit" : "Orbit — C for RTS";
   }, { primary: true });
   cam.slider("Pan speed", { min: 10, max: 160, step: 5, get: () => p.panSpeed, set: (v) => (p.panSpeed = v) });
+  // The lens (vertical FOV) in RTS mode: narrower = further back, bigger units, CoH.
+  cam.slider("FOV", {
+    min: 20, max: 70, step: 1, get: () => p.fov ?? app.camera.fov, fmt: (v) => `${v}°`,
+    set: (v) => { p.fov = v; if (rtsCamera.getMode() === "rts") { app.camera.fov = v; app.camera.updateProjectionMatrix(); } },
+  });
   cam.slider("Pitch in", { min: 18, max: 70, step: 1, get: () => p.pitchNear / DEG, set: (v) => (p.pitchNear = v * DEG), fmt: (v) => `${v}°` });
   cam.slider("Pitch out", { min: 25, max: 85, step: 1, get: () => p.pitchFar / DEG, set: (v) => (p.pitchFar = v * DEG), fmt: (v) => `${v}°` });
   cam.slider("Max zoom", { min: 40, max: 200, step: 5, get: () => p.distMax, set: (v) => (p.distMax = v), fmt: (v) => `${v} m` });
   cam.slider("Zoom ease", { min: 0, max: 30, step: 1, get: () => p.zoomSmooth, set: (v) => (p.zoomSmooth = v) });
   cam.slider("Height ease", { min: 0, max: 12, step: 0.5, get: () => p.heightSmooth, set: (v) => (p.heightSmooth = v) });
   cam.toggle("Edge scroll", { get: () => p.edgeScroll, set: (v) => (p.edgeScroll = v) });
-  cam.hint("Pitch runs from <b>in</b> to <b>out</b> across the zoom (CoH). Q/E rotate, C toggles orbit.");
+  cam.hint("<b>FOV</b>: the lens (40° = the CoH look: further back, bigger units). Pitch runs from <b>in</b> to <b>out</b> across the zoom (CoH). Q/E rotate, C toggles orbit.");
 
   // ── Sky (Sky Pro, the game's sky since 2026-09-29) ──────────────────────
   // Its settings are read every frame (skyproSky.js), so these write them
@@ -169,6 +174,17 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     const banks = panel.section("Fog banks");
     const banksEl = banks.el;
     buildFogBanksPanel(banksEl, af.fog, { rtsCamera });
+  }
+
+  // ── The map's edge (fog of war post pass: the playable box) ─────────────
+  const fowE = app.fogOfWar;
+  if (fowE?.edge?.available) {
+    const me = panel.section("Map edge");
+    me.toggle("Mark outside", { get: () => fowE.edge.on, set: (v) => fowE.setEdge({ on: v }) });
+    me.select("Style", { options: [["darken", "Darken (CoH)"], ["haze", "Haze (fog wall)"]], get: () => fowE.edge.mode, set: (v) => fowE.setEdge({ mode: v }) });
+    me.slider("Strength", { min: 0, max: 1, step: 0.05, get: () => fowE.edge.strength, set: (v) => fowE.setEdge({ strength: v }) });
+    me.color("Haze colour", { get: () => fowE.edge.color, set: (v) => fowE.setEdge({ color: v }) });
+    me.hint("Outside the playable box: <b>Darken</b> as Company of Heroes, or <b>Haze</b> — the land fades into dust that thickens further out (reads from the free camera too). Live, not saved: tell me the one to keep.");
   }
 
   // ── Wind (algWind.js: the flags and the windsock share it) ──────────────
