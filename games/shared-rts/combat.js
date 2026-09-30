@@ -42,6 +42,9 @@ export function createCombat({
   // (a, b) → true when the ground or a building stands between them (a game's
   // own line of sight: alg-rts algSight.js). nam passes none: smoke only.
   blocksSight = null,
+  // (shooter, target, distance) → 0..1: the chance a round HITS (alg-rts
+  // algAccuracy.js); a miss flies into the dirt. None: every round hits (nam).
+  hitChance = null,
 }) {
   const _muzzle = new THREE.Vector3();
   /** Scratch for acquire's grid query — acquisition runs one combatant at a time. */
@@ -285,8 +288,9 @@ export function createCombat({
       // An AA gun hits aircraft harder than ground (airMul / groundMul, 1 for
       // everything else).
       const dmg = e.damage * (tgt.isAir ? (e.airMul ?? 1) : (e.groundMul ?? 1));
-      projectiles.spawn(from, tgt, dmg, e);
-      onShot?.(e, tgt);
+      const miss = !!hitChance && Math.random() >= hitChance(e, tgt, d);
+      projectiles.spawn(from, tgt, dmg, e, null, { miss });
+      onShot?.(e, tgt);   // hit or miss: fire suppresses
       // A muzzle flash in a dark jungle is the loudest thing on the map.
       // This is what stops concealment being a free permanent buff: it buys
       // an AMBUSH, and spends itself the moment you take it.

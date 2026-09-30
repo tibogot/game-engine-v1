@@ -166,8 +166,20 @@ skinned to it) → judged in `games/shared-rts/soldier-lab.html`. In alg-rts
          longer touches holdFire, which the AI owns).
    - [ ] **you, look**: a raid on a patrol — the grenades, the dash to
          cover, the pull-back when your MG pins them
-   - [ ] a crawl clip (Mixamo "Crawling", In Place) for pinned men who move —
-         they use the crouched walk now
+   - [x] a crawl clip for pinned men who move — Mixamo's rifle "Prone
+         Forward" (rifle_crawl), in the game since c3808f7
+   - [x] **INFANTRY BALANCE: ACCURACY** (2026-09-30, algAccuracy.js via
+         combat.js `hitChance`; nam unchanged): every round hit before — 6 on
+         5 at 22 m lost 40 % in 2 s. Now a round rolls: by range (rifle 0.4 →
+         0.15, MG 0.55 → 0.3), × 0.8 kneeling, × 0.5 prone, × 0.75 moving,
+         × (1 − 0.3 cover). A miss flies into the dirt and still suppresses.
+         MEASURED in scripted duels (5 v 5 at 26 m): open ground decided in
+         12-21 s (~16, CoH's pace); a section behind a wall wins 5-0 (the
+         damage cut behind cover) — the grenade and the flank are the answer.
+         ?acc=0 = the old fights; `app.algAccuracy` = the live table.
+   - [ ] **you, look**: a firefight now — long enough? the misses kicking
+         dirt round the men; the post's MG (it hits half as often now; its
+         suppression is the same)
 - [x] **BLOOD** (2026-09-30, shared-rts/bloodField.js, checked in Chrome
       close up): (1) a man HIT sprays a few dark droplets out of the wound,
       away from the shooter, falling under gravity, and a faint mist — ~0.4 s,

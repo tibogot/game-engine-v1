@@ -20,6 +20,7 @@ import { createAlgCombat } from "./algCombat.js";
 import { createInfantryPosture } from "../shared-rts/infantryPosture.js";
 import { createAlgGrenades } from "./algGrenades.js";
 import { createAlgAI } from "./algAI.js";
+import { createAlgAccuracy, ACCURACY } from "./algAccuracy.js";
 import { createAlgMines } from "./algMines.js";
 import { createAlgPatrols } from "./algPatrols.js";
 import { createAlgSight } from "./algSight.js";
@@ -373,8 +374,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
     onDeath: (e) => { selection.remove?.(e); controlGroups?.render(); },
     onShot: posture.onShot, onSplash: posture.onSplash,
+    // ACCURACY (algAccuracy.js): a round rolls to hit — range, posture,
+    // cover. ?acc=0 = every round hits (the old fights, A/B).
+    hitChance: new URLSearchParams(location.search).get("acc") !== "0" ? createAlgAccuracy({ cover: coverSys.cover }) : null,
   });
   app.algCombat = combat;
+  app.algAccuracy = ACCURACY;   // dev: the table, live
   grenades = createAlgGrenades({ app, units, projectiles: combat.projectiles, selection });
   app.algGrenades = grenades;
 

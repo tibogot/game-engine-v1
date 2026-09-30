@@ -19,7 +19,7 @@ import { createBloodField } from "../shared-rts/bloodField.js";
  * @param {object} o.units     the shared units
  * @param {(e: object) => void} [o.onDeath]
  */
-export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {}, onShot = null, onSplash = null }) {
+export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {}, onShot = null, onSplash = null, hitChance = null }) {
   const fx = createCombatFx({ app });
   const fire = createFlameField({ app });
   const craters = await createCraterSystem({ app });
@@ -49,7 +49,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   const structures = { list: built?.list ?? [] };
   const structuresRenderer = { muzzleOf: (s) => built?.muzzleOf(s) ?? s.position.clone() };
   combat = createCombat({
-    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash,
+    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, hitChance,
     onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
     onDeath: (e) => {
       if (e.isStructure) built?.wreck(e);

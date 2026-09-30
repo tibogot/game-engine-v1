@@ -188,9 +188,10 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
 
   /**
    * Fire at `target` (a combatant) from `from`. `owner.weapon` picks the look
-   * (rifle when there is no owner — the stress test's shots).
+   * (rifle when there is no owner — the stress test's shots). `miss`: the
+   * round (not a shell, not a rocket) goes into the dirt round him instead.
    */
-  function spawn(from, target, damage, owner, _speed = null) {
+  function spawn(from, target, damage, owner, _speed = null, { miss = false } = {}) {
     const w = WEAPONS[owner?.weapon] ?? WEAPONS.rifle;
     const colour = w.shell ? TRACER_COLOURS.shell
       : owner?.team === "enemy" ? TRACER_COLOURS.green : TRACER_COLOURS.red;
@@ -221,9 +222,15 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
       if (owner.shotN % w.rocketEvery === 0 && launchRocket(src, target, damage, owner)) return;
     }
 
-    const to = targetPoint(target).clone();
-    const t1 = round(w, src, to, colour);
-    pending.push({ at: t1, kind: "hit", target, damage, owner, to, shell: !!w.shell });
+    if (miss && !w.shell) {
+      const to = missPoint(target, w.spread ?? 2);
+      const t1 = round(w, src, to, colour);
+      if (!target.isAir) pending.push({ at: t1, kind: "dirt", to });
+    } else {
+      const to = targetPoint(target).clone();
+      const t1 = round(w, src, to, colour);
+      pending.push({ at: t1, kind: "hit", target, damage, owner, to, shell: !!w.shell });
+    }
 
     // The rest of an MG burst: later rounds, scattered, into the dirt.
     for (let k = 1; k < (w.burst ?? 1); k++) {
