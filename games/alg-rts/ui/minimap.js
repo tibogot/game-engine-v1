@@ -373,6 +373,7 @@ export function createMinimap({
   // ── Combat pulses: a unit firing (its cooldown reset) or hit (hp down) ───
   const seen = new WeakMap();   // unit → { cd, hp }
   const pulses = [];            // { x, y, t }
+  const pings = [];             // { x, z, t } — alerts (world coords)
   const visible = (u) => u.team === "player" || !fogOfWar?.enabled || fogOfWar.isVisible(u.position.x, u.position.z);
   function watchCombat(now) {
     for (const u of units.list) {
@@ -422,6 +423,19 @@ export function createMinimap({
         const m = frame.toMini(b.position.x, b.position.z), r = 2.2 * s;
         c.fillStyle = b.team === "player" ? "#8fc8ff" : "#ff8f80";
         c.fillRect(m.x - r, m.y - r, r * 2, r * 2); c.strokeRect(m.x - r, m.y - r, r * 2, r * 2);
+      }
+    }
+
+    // Alert pings (algBattle.js): brass rings closing in on the place, 3 s.
+    for (let i = pings.length - 1; i >= 0; i--) {
+      const p = pings[i], a = (now - p.t) / 3000;
+      if (a >= 1) { pings.splice(i, 1); continue; }
+      const m = frame.toMini(p.x, p.z);
+      c.strokeStyle = `rgba(233, 196, 96, ${1 - a})`;
+      c.lineWidth = 1.6 * s;
+      for (const k of [0, 0.33]) {
+        const f = (a * 3 + k) % 1;
+        c.beginPath(); c.arc(m.x, m.y, (16 - 12 * f) * s, 0, Math.PI * 2); c.stroke();
       }
     }
 
@@ -530,6 +544,8 @@ export function createMinimap({
     root,
     draw,
     hasRadioIntel: hasIntel,
+    /** An alert's place (algBattle.js): brass rings over it for 3 s. */
+    ping(x, z) { pings.push({ x, z, t: performance.now() }); },
     /** Re-bake the terrain (after the ground or the buildings change). */
     rebuildTerrain() { base.ctx.clearRect(0, 0, px, px); base.ctx.drawImage(bakeBase(app, frame, px, world), 0, 0); },
     dispose() {

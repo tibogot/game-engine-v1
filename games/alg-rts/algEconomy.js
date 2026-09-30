@@ -29,7 +29,10 @@ const P = {
   village: { hamlet: 25, dechra: 40, ksar: 50 },    // per minute to its holder (a ksar: a market town)
   cache: 15,                              // per minute per standing arms cache (ALN)
   radius: 40,
-  push: 0.02,                             // influence per second per man (up to 3)
+  // Influence per second per man (up to 3). 0.02 turned a neutral village in
+  // 10 s — the "the FLN is working it" alert came too late to answer
+  // (2026-10-01). Now ~20 s from neutral with 3+, ~53 s to win one back.
+  push: 0.01,
   drift: 0.005,                           // back toward 0 per second, nobody there
   hold: 0.6,
 };

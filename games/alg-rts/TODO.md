@@ -11,6 +11,27 @@ Keep this file current: tick things off here, add new asks here.
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
+- [x] **THE BATTLE — a goal, and the game telling you what happens**
+      (2026-10-01, algBattle.js + ui/battleHud.js; you: "no enemies, what
+      do I do with the village? very confused"). CoH victory points:
+      · the 4 VILLAGES are the points. 500 each side; the side holding
+        fewer bleeds 0.35/s per village of difference (all 4 vs 0: ~6 min).
+        Cave destroyed = victory, post destroyed = defeat.
+      · SCORE bar top centre (both counts, villages held, who bleeds);
+        a MARKER over each village (name, owner colour, capture bar);
+        ALERTS left above the minimap (contact, a village worked / won /
+        lost, a band seen, mines spotted / cleared / gone up, buildings
+        lost, the post or the cave under fire) — click or SPACE goes there,
+        a brass ping on the minimap; a BRIEFING at the start, a VICTORY /
+        DEFEAT screen (keep watching / play again). ?battle=0, ?brief=0.
+      · Capture slowed (algEconomy push 0.02 → 0.01): 4 men turned the
+        ksar 10 s after the warning. Now ~20 s from neutral, ~53 s back.
+      · TESTED in a real game: the first FLN alert came at 4:33 (a band
+        out of the camp), the ksar worked at 5:07, turned at 5:17 (old rate).
+   - [ ] **you, play it**: is 0.35/s the right bleed? Is the first 4½ min
+         too quiet (the AI's pace — algAI.js, yours)?
+   - [ ] Sound for the alerts (a radio squelch per alert) — sound is off
+         by default now, so later.
 - [x] **2026-09-30, second batch**:
       · DOUM back on the slopes (8-26°, in clumps; 204k texels). The "flat
         green mats" were NOT the far LOD (pushed out, same look): a low clump

@@ -19,6 +19,7 @@ import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
+import { createAlgBattle } from "./algBattle.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
@@ -203,6 +204,17 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       muster: { x: b.x - Math.sin(yaw) * 42, z: b.z - Math.cos(yaw) * 42, yaw },
     });
   }
+  // THE BATTLE (algBattle.js): the villages as victory points (CoH), the cave
+  // and the post as sudden death, alerts, village markers, the briefing and
+  // the end screen. ?battle=0 = without; ?brief=0 skips the briefing.
+  if (params.get("battle") !== "0" && app.algUnits) {
+    try {
+      app.algBattle = createAlgBattle(app, {
+        units: app.algUnits.units, economy: app.algEconomy, structures: app.algStructures,
+        mines: app.algMines ?? null, minimap: app.algUnits.minimap ?? null, rtsCamera,
+      });
+    } catch (e) { console.warn("[alg battle] failed:", e); }
+  }
   // BIRDS (algBirds.js, the shared engine): storks crossing and landing in
   // the open, crows, a stork on the minaret's nest, griffon vultures on the
   // thermals over the djebel — over the katiba's heights and the Kef. ?birds=0 = without.
@@ -266,6 +278,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;
+  // The briefing, once the loading screen has faded (alg.html: 250 ms).
+  if (app.algBattle && params.get("brief") !== "0") setTimeout(() => app.algBattle.brief(), 450);
   return app;
 }
 
