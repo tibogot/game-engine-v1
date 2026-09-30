@@ -191,8 +191,20 @@ Not wired into either game yet.
          HOVERED or DAMAGED unit, both games. Hover found in screen space in
          unitRenderer.sync (crowd soldiers have no mesh), `unitRenderer.hovered`.
          Checked in Chrome: 0 bars → 5 (3 hurt + 2 selected) → 6 on hover.
-   - [ ] **A NEW MINIMAP** (your ask, 2026-09-30): better looking, cheaper —
-         see the proposal in the chat of that day; waiting on your go.
+   - [x] **A NEW MINIMAP** (your ask + go, 2026-09-30; ui/minimap.js,
+         checked in Chrome): CoH orientation kept (the katiba up); the corners
+         show the terrain BEYOND the play area, dimmed, so the square is all
+         map; baked at the slot's real pixel size (crisp); hill-shaded relief,
+         rust on steep ground, tracks, the BUILDINGS' PLAN rasterized from the
+         meshes' roofs and wall tops. Layers redrawn only when needed (fog 4/s,
+         units 12/s, camera outline when it moves). Infantry dots, vehicle
+         squares, aircraft arrows, a red pulse where a unit fires or is hit.
+         Left click = camera, RIGHT click = move the selection
+         (selection.orderMove, shared with the ground's right-click).
+         MEASURED at 600 units: 0.05 ms a frame (was 0.8); the bake 30 ms at
+         boot (a first version handed 190k triangles to the canvas path
+         filler: 3.3 s).
+   - [ ] **you, look**: the new minimap (colours, marker sizes, the pulse)
 - [ ] Faces: the pack's faces stay cartoon-American — for close-ups a North
       African head (AI-generated or reworked in Blender) is the real fix. Not
       stars (generals only) or medals (parade dress); rank goes in the UI plus

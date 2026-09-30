@@ -326,7 +326,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.selection = selection;
   controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
   // The tactical map from the start: the post has its own radio mast.
-  const minimap = createMinimap({ app, units, fogOfWar, requisition: economy, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY });
+  const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: economy, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY });
   const resourceHud = createResourceHud({ mount: hud.strip });
 
   // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up

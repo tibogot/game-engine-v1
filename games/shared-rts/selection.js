@@ -267,7 +267,19 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
 
     const hit = app.pickWorldAtClient?.(e.clientX, e.clientY);
     if (!hit?.point) return;
-    pingMarker(hit.point.x, hit.point.y, hit.point.z);
+    orderMove(hit.point.x, hit.point.z, hit.point.y);
+  };
+
+  /**
+   * MOVE the selection to world (x, z): a formation round the point, rally
+   * points for selected buildings, shared path searches. The ground's
+   * right-click and the minimap's (a game's) both come here. `y`: the marker's
+   * height (the ground's, when not given).
+   */
+  function orderMove(x, z, y = app.getWorldHeight?.(x, z) ?? 0) {
+    if (!selected.size) return;
+    const hit = { point: { x, y, z } };
+    pingMarker(x, y, z);
     onOrder("move", [...selected]);
 
     // A selected building can't move — right-click sets its RALLY POINT instead.
@@ -323,7 +335,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       const u = pool.splice(best, 1)[0];
       u.moveOrder(slot.x, slot.z, pathFor(u, slot));
     }
-  };
+  }
 
   dom.addEventListener("pointerdown", onPointerDown);
   window.addEventListener("pointermove", onPointerMove);
@@ -333,6 +345,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   return {
     get selected() { return [...selected]; },
     clear,
+    orderMove,
     /** Drop a unit from the selection when it dies. */
     remove(unit) {
       if (!selected.has(unit)) return;
