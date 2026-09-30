@@ -2,13 +2,29 @@
 // every soldier mesh skinned to that skeleton.
 //
 //   node tools/packMixamo.mjs [folder] [--out file.glb] [--tex 512] [--height 1.8]
+//                             [--skip soldier3,...] [--unarmed]
 //
-//   folder     default public/models/soldiers
-//   --out      default <folder>/soldiers.glb
+//   folder     default assets-src/soldiers — the SOURCES live outside public/
+//              (only the packed file ships; ~12 MB of FBX/PNG/GLB did, unread)
+//   --out      default public/models/soldiers/soldiers.glb
 //   --tex      longest side for PNG textures (default 512; 0 = keep). KTX2
 //              textures are copied as they are — resize those in the KTX tool.
 //   --height   the soldiers' height in metres (default 1.8). The games rescale
 //              to their own unit height anyway; this only makes the file sane.
+//   --skip     bodies to leave out (comma list of mesh names). The Algeria pack
+//              leaves out soldier3, the Vietnam game's body (see ALG below).
+//   --unarmed  keep the "unarmed_" test clips (idle / walk / run without a
+//              rifle): no game plays them — 150 KB of keys, dropped by default.
+//   --rig-texture NAME
+//              the RIG's colour map from the GLB soldier NAME — the same body
+//              Mixamo was given, exported and KTX2-compressed like the others
+//              (the FBX only brings a PNG). It must BE that body: laid over the
+//              rig, its shape must fit AND its UVs must match the rig's at every
+//              point, or the PNG stays (the report says why). It is not added
+//              as a soldier: the rig keeps Mixamo's own mesh and weights.
+//
+// THE ALGERIA PACK (alg-rts, 2026-09-30):
+//   node tools/packMixamo.mjs --skip soldier3 --rig-texture originalsoldier
 //
 // THE FOLDER
 //   *.fbx  Mixamo downloads. ONE "With Skin" (the RIG: its skeleton and skin
@@ -17,6 +33,8 @@
 //          is NAMED AFTER ITS FILE: crouch_walk.fbx → clip "crouch_walk" —
 //          Mixamo names every clip "mixamo.com". The rig's textures sit in the
 //          folder as PNGs; the FBX material names which one is the colour map.
+//          A .ktx2 of the SAME NAME beside that PNG is used instead (made with
+//          the KTX tool, like the GLB soldiers' own maps), as it is.
 //   *.glb  More soldiers, UNRIGGED, the same kind of body in the same pose as
 //          the rig (exported from Blender; Draco/quantised/KTX2 are fine).
 //          Name = file name without "_compressed": soldier3_compressed.glb →
@@ -160,8 +178,12 @@ const flag = (name, def) => {
   return i >= 0 ? argv[i + 1] : def;
 };
 const positional = argv.filter((a, i) => !a.startsWith("--") && !argv[i - 1]?.startsWith("--"));
-const folder = path.resolve(positional[0] ?? "public/models/soldiers");
-const outFile = path.resolve(flag("out", path.join(folder, "soldiers.glb")));
+const folder = path.resolve(positional[0] ?? "assets-src/soldiers");
+const outFile = path.resolve(flag("out", "public/models/soldiers/soldiers.glb"));
+const skipBodies = new Set(String(flag("skip", "")).split(",").map((x) => x.trim()).filter(Boolean));
+const keepUnarmed = argv.includes("--unarmed");
+const rigTextureFrom = flag("rig-texture", null);
+const UV_MEDIAN_MAX = 0.004, UV_P95_MAX = 0.02;   // UV units: the same UV layout, seams aside
 const texMax = Number(flag("tex", 512));
 const height = Number(flag("height", 1.8));
 
@@ -224,11 +246,13 @@ root.updateMatrixWorld(true);
 const pngs = listFiles(folder).filter((f) => /\.png$/i.test(f));
 const rigPng = findPng(rigColorSrc);
 if (!rigPng) warn(`  ! colour map ${rigColorSrc ? `"${path.basename(rigColorSrc)}" not found as a PNG` : "not referenced by the FBX"}`);
+// A KTX2 of the same name beside the PNG wins (see THE FOLDER).
+const rigKtx = rigPng && [".ktx2", ".KTX2"].map((e) => rigPng.replace(/\.png$/i, e)).find((f) => fs.existsSync(f));
 soldiers.push({
   name: rigMesh.name,
   mesh: rigMesh,
   source: skin.file,
-  texture: rigPng ? pngTexture(rigPng) : null,
+  texture: rigKtx ? ktx2Texture(rigKtx) : rigPng ? pngTexture(rigPng) : null,
 });
 
 // ── GLB soldiers: lay over the rig, copy its skin weights ───────────────────
@@ -248,6 +272,7 @@ if (glbFiles.length) {
 
   for (const file of glbFiles) {
     const name = path.basename(file, path.extname(file)).replace(/[_-]compressed$/i, "");
+    if (skipBodies.has(name)) { console.log(`  ${file}: left out (--skip)`); continue; }
     const src = readGlbSoldier(path.join(folder, file), draco);
     if (src.skip) { warn(`  ! ${file}: ${src.skip} — skipped`); continue; }
 
@@ -265,6 +290,24 @@ if (glbFiles.length) {
     const cm = dist.map((d) => d * cmPerLocal).sort((a, b) => a - b);
     const pct = (f) => cm[Math.min(cm.length - 1, Math.floor(cm.length * f))];
     const fitReport = { median: pct(0.5), p99: pct(0.99), max: cm[cm.length - 1] };
+
+    // --rig-texture: this GLB only lends the rig its colour map — IF it is the
+    // rig's own body (shape and UVs), checked here, and is not a soldier itself.
+    if (name === rigTextureFrom) {
+      const uv = uvMatch(src.geometry, rigGeo, bvh, 0.05 / cmPerLocal);   // within half a millimetre
+      const shapeOk = fitReport.median <= FIT_MEDIAN_MAX_CM && fitReport.p99 <= FIT_P99_MAX_CM;
+      const uvOk = uv && uv.median <= UV_MEDIAN_MAX && uv.p95 <= UV_P95_MAX;
+      const texOk = src.texture?.mimeType === "image/ktx2";
+      console.log(`  ${file}: the rig's colour map? shape median ${fitReport.median.toFixed(2)} cm, 99% ${fitReport.p99.toFixed(2)} cm; ` +
+        (uv ? `UV median ${uv.median.toFixed(4)}, 95% ${uv.p95.toFixed(4)}, worst ${uv.max.toFixed(4)}` : "no UVs") + `; texture ${src.texture?.mimeType ?? "none"}`);
+      if (shapeOk && uvOk && texOk) {
+        soldiers[0].texture = { ...src.texture, file };
+        console.log(`  → soldier1 takes ${file}'s KTX2 colour map (${kb(src.texture.bytes.length)})`);
+      } else {
+        warn(`  ! ${file}: NOT used for the rig's colour map (${!shapeOk ? "the shape doesn't fit" : !uvOk ? "the UVs don't match" : "no KTX2 colour map"}) — the PNG stays`);
+      }
+      continue;
+    }
     if (fitReport.median > FIT_MEDIAN_MAX_CM || fitReport.p99 > FIT_P99_MAX_CM) {
       warn(`  ! ${file}: doesn't line up with the rig (median ${fitReport.median.toFixed(1)} cm, 99% ${fitReport.p99.toFixed(1)} cm)` +
         " — another pose, facing or build? Skipped; it needs its own Mixamo rig.");
@@ -295,6 +338,7 @@ for (const l of loaded) {
   l.root.animations.forEach((clip, i) => {
     const title = l.clipName.replace(/\s*\(\d+\)$/, "").trim().toLowerCase(); // "Death (1)" → "death"
     const role = ROLES[title] ?? title.replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    if (role.startsWith("unarmed") && !keepUnarmed) { console.log(`  ${l.file}: unarmed clip left out (--unarmed keeps it)`); return; }
     const base = l.root.animations.length > 1 ? `${role}_${i + 1}` : role;
     clip.name = base;
     for (let k = 2; clips.some((c) => c.name === clip.name); k++) clip.name = `${base}_${k}`;
@@ -723,6 +767,12 @@ function findPng(src) {
   return pngs.find((f) => path.basename(f, path.extname(f)).toLowerCase() === want) ?? null;
 }
 
+/** A KTX2 colour map, as it is (resize it in the KTX tool). */
+function ktx2Texture(file) {
+  const bytes = fs.readFileSync(file);
+  return { bytes, mimeType: "image/ktx2", size: `${bytes.readUInt32LE(20)}²`, file };
+}
+
 /** The rig's PNG colour map, down-sampled to --tex and re-encoded. */
 function pngTexture(file) {
   let img = decodePng(fs.readFileSync(file));
@@ -771,6 +821,48 @@ function transferWeights(geo, rig, bvh) {
     top.forEach(([bone, w], j) => { skinIndex[i * 4 + j] = bone; skinWeight[i * 4 + j] = w / sum; });
   }
   return { skinIndex, skinWeight, dist };
+}
+
+/**
+ * How far `geo`'s UVs are from the rig's at the same place on the skin.
+ * { median, p95 } in UV units, or null without UVs.
+ *
+ * A vertex ON a rig vertex (the same body: within `tol`, rig-local units)
+ * takes the BEST of the UVs of every rig vertex there — on a UV seam the rig
+ * has two vertices in one spot, one per side, and the nearest face can be on
+ * the wrong one (the first check read 5 % of an identical body as 0.44 off).
+ * Anywhere else: the rig's UV at the nearest surface point (barycentric).
+ */
+function uvMatch(geo, rig, bvh, tol) {
+  const pos = geo.attributes.position, uv = geo.attributes.uv, rUv = rig.attributes.uv;
+  if (!uv || !rUv) return null;
+  const rIdx = rig.index.array, rPos = rig.attributes.position;
+  const p = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const bary = new THREE.Vector3(), hit = {};
+  const d = new Float32Array(pos.count);
+  const tol2 = tol * tol;
+  for (let i = 0; i < pos.count; i++) {
+    p.fromBufferAttribute(pos, i);
+    const gu = uv.getX(i), gv = uv.getY(i);
+    let best = Infinity;
+    for (let r = 0; r < rPos.count; r++) {
+      const dx = rPos.getX(r) - p.x, dy = rPos.getY(r) - p.y, dz = rPos.getZ(r) - p.z;
+      if (dx * dx + dy * dy + dz * dz > tol2) continue;
+      best = Math.min(best, Math.hypot(rUv.getX(r) - gu, rUv.getY(r) - gv));
+    }
+    if (best === Infinity) {
+      bvh.closestPointToPoint(p, hit);
+      const ia = rIdx[hit.faceIndex * 3], ib = rIdx[hit.faceIndex * 3 + 1], ic = rIdx[hit.faceIndex * 3 + 2];
+      a.fromBufferAttribute(rPos, ia); b.fromBufferAttribute(rPos, ib); c.fromBufferAttribute(rPos, ic);
+      THREE.Triangle.getBarycoord(hit.point, a, b, c, bary);
+      const u = rUv.getX(ia) * bary.x + rUv.getX(ib) * bary.y + rUv.getX(ic) * bary.z;
+      const v = rUv.getY(ia) * bary.x + rUv.getY(ib) * bary.y + rUv.getY(ic) * bary.z;
+      best = Math.hypot(u - gu, v - gv);
+    }
+    d[i] = best;
+  }
+  d.sort();
+  return { median: d[d.length >> 1], p95: d[Math.floor(d.length * 0.95)], max: d[d.length - 1] };
 }
 
 // ── GLB soldier reader (static meshes; Draco + KHR_mesh_quantization ok) ────

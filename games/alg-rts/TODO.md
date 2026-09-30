@@ -155,7 +155,7 @@ Not wired into either game yet.
    - [ ] balance paras / légion against the ALN once the AI fights them
    - [x] looks in the crowd shader; per-soldier variation from the instance
    - [ ] a ~1.5k-tri distance LOD of each body (meshoptimizer), judged from
-         the RTS camera; soldier1's colour map → KTX2; no shadows on tiny kit
+         the RTS camera; (soldier1's colour map → KTX2: see Asset cuts); no shadows on tiny kit
    - [ ] alg-rts swaps its stand-in (testsolanim.glb) for soldier1 + aln1/aln2
    - [x] MEASURED (2026-09-30, one tab focused, soldiers 4 m apart idle on
          screen, split over the five soldier types; CPU = the frame callback):
@@ -215,9 +215,18 @@ Not wired into either game yet.
       (leopard camo "tenue léopard", casquette Bigeard), ALN moudjahidine
       (mixed khaki, civilian clothes, keffiyeh/chèche). Same body + pose as
       the rig so they get its skeleton for free.
-- [ ] Asset cuts before shipping: lower-poly crowd version (~1.5k tris; skin
-      cost = verts × soldiers), soldier1's PNG colour map → KTX2, colour maps
-      at 512 (judge in the lab).
+- [x] Asset cuts, part 1 (2026-09-30): the sources moved to assets-src/
+      (~12 MB no longer shipped); the pack drops the unarmed test clips
+      (--unarmed keeps them) and soldier3 (--skip): soldiers.glb 2.63 → 2.12 MB.
+- [x] soldier1's colour map is KTX2 (2026-09-30): from YOUR
+      originalsoldier_compressed.glb (the body Mixamo was given, KTX2 like the
+      ALN ones) via `--rig-texture originalsoldier` — checked, not trusted:
+      shape identical (0.00 cm), UVs identical (worst 0.0000, seam-aware);
+      the rig keeps Mixamo's mesh and weights. 342 KB PNG (512²) → 141 KB
+      KTX2 (1024², sharper): soldiers.glb 2.12 → 1.92 MB. Every French look
+      checked in Chrome (the hue recolour reads the KTX2 colours fine).
+- [ ] Asset cuts, later: lower-poly crowd version (~1.5k tris; skin cost =
+      verts × soldiers) if the GPU ever asks; trim the two 8 s idles.
 - [x] ONE CROWD PER BODY (2026-09-30, checked in Chrome, both games):
       appelé, sapeur, para, légion share soldier1's crowd — one GLB parse, one
       clip bake, one skinning dispatch, one skin buffer, ONE set of pieces

@@ -4,8 +4,9 @@
 // Same scale rule as nam: real size × RTS_SCALE (1.3) for units and
 // everything man-made, nature real.
 //
-// SOLDIERS (2026-09-30): the soldier pack (public/models/soldiers/, packed by
-// tools/packMixamo.mjs, judged in games/shared-rts/soldier-lab.html) — a
+// SOLDIERS (2026-09-30): the soldier pack (public/models/soldiers/soldiers.glb,
+// packed from assets-src/soldiers/ by tools/packMixamo.mjs --skip soldier3
+// --rig-texture originalsoldier, judged in games/shared-rts/soldier-lab.html) — a
 // `body` per type and its faction `look` (soldierLooks.js), replacing nam's
 // stand-in. The numbers are this game's to tune.
 export const RTS_SCALE = 1.3;
@@ -30,7 +31,7 @@ export const ALG_UNIT_TYPES = {
     fireRate: 2.4,
     canHitAir: true,
     vision: 42,
-    // The soldier pack (public/models/soldiers/, tools/packMixamo.mjs): body
+    // The soldier pack (assets-src/soldiers/ → tools/packMixamo.mjs): body
     // soldier1 in the APPELÉ SECTION look (soldierLooks.js) — helmets and bush
     // hats, packs and belts, per-man extras; by spawn order a leader (MAT 49,
     // binoculars), a radioman and an FM 24/29 gunner in every twelve.
