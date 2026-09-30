@@ -176,6 +176,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const unitRenderer = await createUnitRenderer({
     app, units, healthBars, selectionRings, fogOfWar, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS,
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
+    // A man down: his pool under his torso (bloodField.js, made with combat).
+    onCorpse: (u, x, z, heading) => app.algCombat?.blood.pool(x, z, heading),
   });
   // After the renderer, which builds a view for each unit spawned from now on.
   const vehicles = takeOverVehicles(app, units, showroom);

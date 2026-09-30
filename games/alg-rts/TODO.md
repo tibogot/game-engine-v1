@@ -152,6 +152,32 @@ Not wired into either game yet.
    - [ ] the ALN AI throws grenades too (algAI: at a French squad in cover)
    - [ ] a crawl clip (Mixamo "Crawling", In Place) for pinned men who move —
          they use the crouched walk now
+- [x] **BLOOD** (2026-09-30, shared-rts/bloodField.js, checked in Chrome
+      close up): (1) a man HIT sprays a few dark droplets out of the wound,
+      away from the shooter, falling under gravity, and a faint mist — ~0.4 s,
+      combat.onHit; (2) a man DOWN lies in a POOL under his torso (the
+      renderer says where: the pack's deaths travel forward 0.30 m / backward
+      0.83 m) — a draped decal whose outline is grown in the shader (noise
+      lobes + a ragged rim, seeded per man: no texture), stretched along the
+      body, spreading ~3.5 s after the fall, wet dark red drying to brown from
+      the rim in, fading with the corpse (18 s). TWO draws for the whole
+      battle; the CPU writes floats only when something spawns (the flight and
+      the spread are GPU-side). ?blood=0 boots without. The flipbook dropped
+      (your call).
+- [ ] blood: a gore switch in an options menu (the game has none yet)
+- [ ] **ANIMALS DIE in the fighting** (you, later): shells, grenades, napalm
+      and fire kill the herds' animals near them (their death clips; the body
+      stays, like the soldiers'); the rest bolt (they do). Nobody aims at them.
+      Later: a village whose flock you killed turns against you.
+- [ ] **BATTLE DAMAGE on buildings** (you, later: "a city that just had an
+      explosion"). Proposal: (1) SCORCH — a world-space top-down scorch map
+      the blasts paint into, sampled by the buildings' shaders: walls go black
+      where the fire was, one small texture for the whole map (NOT the
+      terrain's: it is at its 16-sampler limit — the ground keeps its crater
+      decals); (2) rubble piles + lingering smoke; (3) DAMAGE STATES for the
+      procedural kit buildings — the roof caved, a wall breached, generated
+      like the buildings themselves — and the cover map re-baked (a breached
+      wall stops covering).
    - [ ] **you, play it**: MG pinning speed, how often men kneel in cover
    - [ ] **TRANSITIONS, reviewed in the lab** (you, 2026-09-30: "look at all
          of them and see if everything is right and natural"): every clip

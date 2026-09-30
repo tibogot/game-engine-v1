@@ -37,6 +37,8 @@ export function createCombat({
   // A round fired at a target, a shell landed: (shooter, target) / (at, radius)
   // — infantryPosture.js hangs suppression on them. None: nam as it was.
   onShot = null, onSplash = null,
+  // A unit hit: (target, amount, at, owner) — alg-rts sprays blood from a man.
+  onHit = null,
   // (a, b) → true when the ground or a building stands between them (a game's
   // own line of sight: alg-rts algSight.js). nam passes none: smoke only.
   blocksSight = null,
@@ -128,6 +130,7 @@ export function createCombat({
       target.hp -= amount;
       if (target.hp <= 0) { target.hp = 0; target.alive = false; }
     }
+    onHit?.(target, amount, at, owner);
 
     if (!target.alive) {
       // A man goes down in a puff of dust; a machine goes up, and the bigger

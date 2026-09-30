@@ -850,7 +850,7 @@ const CORPSE_SECONDS = 14;  // a body stays this long after its death clip, then
  * `paint`: [r, g, b] painted-surface tint for those vehicles (a game's own
  * army colour, rtsObjectMaterialTinted); null = the kit's colours.
  */
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null }) {
   const UNIT_TYPES = types;
   const UNIT_TYPE_KEYS = typeKeys ?? Object.keys(types);
   const PROCEDURAL_VEHICLES = procedural;
@@ -1167,6 +1167,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       v.prev = v.cur;
       v.cur = { clip: r.deaths[Math.floor(v.seed[0] * 97) % r.deaths.length], t: 0 };
       v.fade = 0;
+      // Where his TORSO will lie (a game lays blood there — alg-rts): the
+      // pack's deaths travel (tools/packMixamo.mjs report: forward 0.30 m,
+      // backward 0.83 m), the chest ~0.45 m on from the hips.
+      if (onCorpse) {
+        const h = unit.heading + (unit.type.facingOffset ?? 0);
+        const off = /backward/.test(v.cur.clip) ? -1.25 : 0.75;
+        onCorpse(unit, unit.position.x + Math.sin(h) * off, unit.position.z + Math.cos(h) * off, h);
+      }
     }
     v.deadT += dt;
     if (v.deadT > v.crowd.field.duration(v.cur.clip) + CORPSE_SECONDS) return;

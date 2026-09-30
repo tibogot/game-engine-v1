@@ -11,6 +11,7 @@ import { createFlameField } from "../shared-rts/flameField.js";
 import { createCraterSystem } from "../shared-rts/craterSystem.js";
 import { createProjectiles } from "../shared-rts/projectiles.js";
 import { createCombat } from "../shared-rts/combat.js";
+import { createBloodField } from "../shared-rts/bloodField.js";
 
 /**
  * @param {object} app
@@ -39,16 +40,25 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     onArcImpact: (at, dmg, splash, owner) => combat?.splashAt(at, dmg, splash, owner),
   });
 
+  // BLOOD (bloodField.js): a man hit sprays from the wound, a man down lies
+  // in his pool. Two draws for the whole battle; ?blood=0 = none.
+  const blood = createBloodField({ app });
+  const onFootUnit = (e) => !!e?.type?.foot;
+
   // The buildings (algStructures.js): targets, and the armed ones fighters.
   const structures = { list: built?.list ?? [] };
   const structuresRenderer = { muzzleOf: (s) => built?.muzzleOf(s) ?? s.position.clone() };
   combat = createCombat({
     units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash,
-    onDeath: (e) => { if (e.isStructure) built?.wreck(e); onDeath(e); },
+    onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
+    onDeath: (e) => {
+      if (e.isStructure) built?.wreck(e);
+      onDeath(e);
+    },
   });
 
   return {
-    fx, fire, craters, projectiles, combat,
+    fx, fire, craters, projectiles, combat, blood,
     /** On the fixed sim clock, after the units have moved. */
     step(dt, simTime) {
       combat.update(dt);
@@ -58,6 +68,6 @@ export async function createAlgCombat(app, { units, structures: built = null, co
       fire.update(dt, simTime);
     },
     /** Every rendered frame: the flashes, impacts and blasts face the camera. */
-    frame(dt) { fx.update(dt, app.camera); },
+    frame(dt) { fx.update(dt, app.camera); blood.update(dt, app.camera); },
   };
 }
