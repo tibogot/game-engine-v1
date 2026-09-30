@@ -385,6 +385,20 @@ the game.
 21. **Fold susuki into the grass panel** (optional, touches undo). Merging the
     five vegetation modes is NOT recommended: undo is routed by mode and 23
     handlers are mode-gated.
+21b. **Blue-noise (Poisson-disk) placement for scatter**, idea 2026-10-01 (user
+    asked after a three.js tutorial; the tutorial's own subject — Poisson points
+    + Delaunay triangulation to BUILD the terrain mesh — was rejected: v3's
+    heightmap is a regular grid and the clipmap samples it one quad per texel,
+    so an irregular mesh samples it worse, breaks the per-texel LOD rings, and
+    makes every sculpt stroke a re-triangulation. Only the point distribution is
+    worth taking). `render/scatter/scatterField.js:220` places plants on a
+    jittered grid where the jitter spans a FULL cell, so two neighbours can land
+    almost on top of each other — clumps and bald patches. Poisson-disk keeps a
+    minimum distance. It does not generate in parallel, so bake ONE tileable
+    blue-noise point set offline and read it in the compute instead of
+    `hash(instanceIndex)`; same per-frame cost, only the source of the offset
+    changes. Matters most where a plant is big: trees, megaliths/rocks, the tall
+    plant field. Judge in the game from above, not in the lab.
 
 ## Roads — lane-based engine (v3/roads/), the target
 
