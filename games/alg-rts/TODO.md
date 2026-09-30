@@ -142,8 +142,16 @@ Not wired into either game yet.
          "sapeur" (new look), moudjahid = "alnSection" on BOTH ALN bodies (a
          crowd per body). Trap on the way: the skin's bind space is the
          MESH's (8 units/m, flipped), not the pack world — hats came out 1/8.
-   - [ ] the kachabia in the game (the one SKINNED kit piece: needs to join
-         the body's crowd, or its own crowd per body)
+   - [x] the KACHABIA in the game (2026-09-30, checked in Chrome): the
+         skinned kit is MERGED into the body's crowd geometry (unitRenderer
+         withSkinnedKit: welded — 232 verts, +11 % skinning on the ALN bodies
+         only — weighted to the bones, in the mesh's space), skinned by the
+         same pass, no draw of its own; hidden per soldier by a bit in his
+         extra.w (soldierFlags / hiddenNode, as the headwear). ~20 % of an ALN
+         section wears it. Its wool lightened 0x5d4633 → 0x7d6147: under the
+         game's exposure and ACES the lab's brown read near-black.
+   - [ ] **you, look**: the kachabia's brown in the game (and the lab's now
+         lighter one)
    - [x] PARAS and the LÉGION (2026-09-30, trained + checked in Chrome):
          `para` "Paras coloniaux" at the HELIPAD (the heliborne reserve; they
          walk off the pad's edge — only aircraft launch) 110, 10 s: hp 80,

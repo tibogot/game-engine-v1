@@ -73,12 +73,15 @@ function bakeClips(animRoot, skeleton, clips) {
  * @param {number}  o.max     instance capacity (sizes the storage buffers)
  * @param {boolean} o.drawMesh false: no mesh of its own in the scene — the
  *   caller draws RANGES of the crowd through view() (one per look)
+ * @param {THREE.BufferGeometry} [o.geometry] the skinned geometry, if not the
+ *   source's own (a body with skinned kit merged in — unitRenderer.js)
  */
 export function createCrowdField({
   scene, renderer, source, animRoot, clips, max = 128, castShadow = true, aliases = {}, drawMesh = true,
+  geometry: geometryIn = null,
 }) {
   const skeleton = source.skeleton;
-  const geometry = source.geometry.clone();
+  const geometry = (geometryIn ?? source.geometry).clone();
   const vertexCount = geometry.getAttribute("position").count;
 
   const { table, slices, boneCount, info } = bakeClips(animRoot, skeleton, clips);

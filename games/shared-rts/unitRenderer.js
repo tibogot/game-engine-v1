@@ -12,8 +12,8 @@
 // clone(true) — userData refs would still point at the template's own nodes.
 import * as THREE from "three";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
-import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { attribute, instanceIndex, materialColor, max, mix, step, texture, varying, vec3 } from "three/tsl";
+import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
+import { abs, attribute, floor, float, instanceIndex, materialColor, max, mix, mod, step, texture, varying, vec3 } from "three/tsl";
 import { UNIT_ORDER, XRAY_ORDER, createXrayMaterial, xrayOn } from "./xraySilhouette.js";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
@@ -440,6 +440,13 @@ function buildCrowdGroup(tpl, members, app, scene) {
   const looks = members.map(({ type }) => (type.look ? LOOKS[type.look] : null));
   const marked = looks.some(Boolean);
   if (marked) { markHelmet(source); markHeadwear(source); }
+  // SKINNED KIT (soldierLooks KIT[k].skinned — the kachabia) any of the
+  // group's looks can roll: merged into the crowd's geometry (skinned by the
+  // same pass, no draw of its own), hidden per soldier (skinnedKitNodes).
+  const kitSkinned = [...new Set(looks.filter(Boolean).flatMap((l) => [
+    ...(l.kit ?? []), ...Object.keys(l.extras ?? {}), ...Object.values(l.roles ?? {}).flatMap((r) => r.kit ?? []),
+  ]))].filter((k) => KIT[k]?.skinned);
+  const crowdGeometry = kitSkinned.length ? withSkinnedKit(source, root, kitSkinned) : null;
 
   const cap = members.reduce((n, { type }) => n + (type.crowdMax ?? MAX_CROWD), 0);
   const field = createCrowdField({
@@ -456,6 +463,7 @@ function buildCrowdGroup(tpl, members, app, scene) {
     // Costs 3 draws (one per CSM cascade) per look on screen, 6 soldiers or 106.
     castShadow: members.some(({ type }) => type.castShadow !== false),
     drawMesh: false,
+    geometry: crowdGeometry,
   });
 
   // A VIEW per type: its range of the crowd, drawn in its look.
@@ -473,14 +481,16 @@ function buildCrowdGroup(tpl, members, app, scene) {
     const ex = field.extraNode.element(view.index);
     if (look && source.material.map) {
       material.colorNode = lookColorNode(source.material.map, look, neckPlane(source), varying(ex.xyz));
+      // the skinned kit in its own (vertex) colours
+      if (crowdGeometry) material.colorNode = mix(material.colorNode, attribute("kitColor", "vec3"), step(0.5, attribute("kitPiece", "float")));
     }
     if (look) {
       // HEADWEAR OFF PER SOLDIER: one geometry for the whole crowd, so a man in a
       // beret or a chèche collapses the body's own headwear (helmet, straps, a
-      // hat — markHeadwear) to a point: zero-area triangles, nothing drawn. The
-      // flag is his `extra.w`. The shadow pass uses the same node.
-      const bare = step(0.5, attribute("headwear", "float").mul(ex.w));
-      material.positionNode = mix(material.positionNode, vec3(0, 0, 0), bare);
+      // hat — markHeadwear) to a point: zero-area triangles, nothing drawn —
+      // and so does skinned kit he isn't wearing. The flags are his `extra.w`
+      // (see soldierFlags). The shadow pass uses the same node.
+      material.positionNode = mix(material.positionNode, vec3(0, 0, 0), hiddenNode(ex.w, kitSkinned.length));
     }
     views.set(key, { ...view, key, look, living: [], dead: [] });
   });
@@ -507,7 +517,7 @@ function buildCrowdGroup(tpl, members, app, scene) {
   const gone = step(1.5, lane);
   const own = field.skinnedAt(instanceIndex);
   let hidden = gone;
-  if (marked) hidden = max(gone, step(0.5, attribute("headwear", "float").mul(field.extraNode.element(instanceIndex).w)));
+  if (marked) hidden = max(gone, hiddenNode(field.extraNode.element(instanceIndex).w, kitSkinned.length));
   const xray = new THREE.Mesh(field.mesh.geometry, createXrayMaterial({
     teamNode: lane.sub(gone.mul(2)),
     positionNode: mix(own.positionNode, vec3(0, 0, 0), hidden),
@@ -526,7 +536,94 @@ function buildCrowdGroup(tpl, members, app, scene) {
 
   const pieces = marked ? buildPieces(field, source, rel, looks.filter(Boolean), scene, root, cap) : null;
 
-  return { field, rel, scale: root.scale.x, xray, roles, runSpeed, pieces, views, cap };
+  return { field, rel, scale: root.scale.x, xray, roles, runSpeed, pieces, views, cap, kitSkinned };
+}
+
+/**
+ * A soldier's `extra.w` FLAGS: 1 = bare head (his body's own headwear hidden),
+ * + 2^(i+1) for each skinned kit piece i (the group's `kitSkinned` order) he
+ * wears.
+ */
+function soldierFlags(bare, worn, kitSkinned) {
+  let w = bare ? 1 : 0;
+  kitSkinned.forEach((k, i) => { if (worn.includes(k)) w += 2 ** (i + 1); });
+  return w;
+}
+
+/** 1 where this vertex is hidden for a soldier with flags `w` (see soldierFlags). */
+function hiddenNode(w, kitCount) {
+  let hide = step(0.5, attribute("headwear", "float").mul(mod(w, 2)));
+  for (let i = 0; i < kitCount; i++) {
+    const mine = step(abs(attribute("kitPiece", "float").sub(i + 1)), float(0.5));
+    const worn = mod(floor(w.div(2 ** (i + 1))), 2);
+    hide = max(hide, mine.mul(float(1).sub(worn)));
+  }
+  return hide;
+}
+
+/**
+ * The body's crowd geometry with its SKINNED KIT merged in (the kachabia: an
+ * open wool cloak that must bend with the walk). Each piece is built at rest in
+ * the pack's world (soldierLooks), welded (smooth cloth, and the crowd skins
+ * every vertex of every soldier each frame — the flat-shaded build was four
+ * times the vertices), weighted per vertex by its `weights` onto the body's
+ * bones, and moved into the soldier mesh's own space (as the rigid kit is).
+ * Marks: `kitPiece` (0 body, i+1 piece i), `kitColor` (its vertex colour).
+ */
+function withSkinnedKit(source, root, names) {
+  root.updateMatrixWorld(true);
+  const glbScene = root.children[0].children[0]; // buildTemplate: root → holder → the GLB's scene
+  const toMesh = new THREE.Matrix4().copy(glbScene.matrixWorld).invert().multiply(source.matrixWorld).invert();
+  const bones = source.skeleton.bones.map((b) => b.name.replace("mixamorig", ""));
+  const body = source.geometry.clone();
+  const n0 = body.attributes.position.count;
+  // One type per attribute across the parts (mergeGeometries refuses any mismatch).
+  const asFloat = (g, name) => {
+    const a = g.getAttribute(name), out = new Float32Array(a.count * a.itemSize);
+    for (let i = 0; i < a.count; i++) for (let j = 0; j < a.itemSize; j++) out[i * a.itemSize + j] = a.getComponent(i, j);
+    g.setAttribute(name, new THREE.BufferAttribute(out, a.itemSize));
+  };
+  const si = body.getAttribute("skinIndex");
+  body.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(Uint16Array.from({ length: si.count * 4 }, (_, k) => si.getComponent(k >> 2, k & 3)), 4));
+  asFloat(body, "skinWeight");
+  body.setAttribute("kitPiece", new THREE.Float32BufferAttribute(new Float32Array(n0), 1));
+  body.setAttribute("kitColor", new THREE.Float32BufferAttribute(new Float32Array(n0 * 3), 3));
+  const parts = [body];
+  names.forEach((name, i) => {
+    const def = KIT[name];
+    let g = def.build();
+    g.deleteAttribute("normal");
+    g = mergeVertices(g);
+    g.computeVertexNormals();
+    const pos = g.attributes.position, n = pos.count;
+    const sIdx = new Uint16Array(n * 4), sW = new Float32Array(n * 4), p = new THREE.Vector3();
+    for (let v = 0; v < n; v++) {
+      p.fromBufferAttribute(pos, v);
+      def.weights(p).filter(([, w]) => w > 1e-4).slice(0, 4).forEach(([bone, w], j) => {
+        sIdx[v * 4 + j] = Math.max(0, bones.indexOf(bone)); sW[v * 4 + j] = w;
+      });
+    }
+    g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(sIdx, 4));
+    g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(sW, 4));
+    g.applyMatrix4(toMesh);
+    g.setAttribute("kitPiece", new THREE.Float32BufferAttribute(new Float32Array(n).fill(i + 1), 1));
+    g.setAttribute("kitColor", g.getAttribute("color"));
+    // every attribute the body has, zero where the piece has none; nothing else
+    for (const [key, a] of Object.entries(body.attributes)) {
+      if (!g.getAttribute(key)) g.setAttribute(key, new THREE.BufferAttribute(new a.array.constructor(n * a.itemSize), a.itemSize, a.normalized));
+    }
+    for (const key of Object.keys(g.attributes)) if (!body.getAttribute(key)) g.deleteAttribute(key);
+    for (const key of Object.keys(body.attributes)) {
+      const a = body.getAttribute(key), b = g.getAttribute(key);
+      if (b.array.constructor !== a.array.constructor) {
+        g.setAttribute(key, new THREE.BufferAttribute(new a.array.constructor(b.array), b.itemSize, a.normalized));
+      }
+    }
+    parts.push(g);
+  });
+  const merged = mergeGeometries(parts, false);
+  if (!merged) { console.warn("[rts] skinned kit: the merge failed — no kachabia"); return null; }
+  return merged;
 }
 
 // Clips whose hands are busy: the rifle is slung on the back (tools/packMixamo.mjs).
@@ -936,7 +1033,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         firing: 0, lastCd: 0, lastX: unit.position.x, lastZ: unit.position.z, speed: 0,
         // his stable look variation (soldierLooks: cloth, sun-fade, skin) and,
         // in .w, "bare head": his body's own headwear hidden (a hat instead)
-        seed: [Math.random(), Math.random(), Math.random(), load && !load.look.helmet ? 1 : 0],
+        seed: [Math.random(), Math.random(), Math.random(), soldierFlags(load && !load.look.helmet, load?.kit ?? [], crd.kitSkinned)],
         deadT: -1,
         weapon: load?.weapon ?? null,
         hat: load?.look.headgear ? hatKey(load.look) : null,

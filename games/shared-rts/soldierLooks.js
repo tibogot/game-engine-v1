@@ -1077,7 +1077,9 @@ function flnFlag() {
  * back of the cape stretches between the legs instead of tearing.
  */
 function kachabia() {
-  const c = 0x5d4633, inner = 0x3f2f22;
+  // Brown wool, lighter than it would be in the lab: under the game's
+  // exposure and ACES the lab's 0x5d4633 read near-black (2026-09-30).
+  const c = 0x7d6147, inner = 0x574330;
   const rings = [
     { y: 0.5, rx: 0.32, rz: 0.28, zo: -0.01 },
     { y: 0.95, rx: 0.275, rz: 0.235, zo: 0.0 },
