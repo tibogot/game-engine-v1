@@ -34,6 +34,9 @@ const SMOKE_BLIND = 0.6;
 export function createCombat({
   units, structures, fx, structuresRenderer, projectiles, fire, craters,
   smoke = null, cover = null, onDeath = () => {},
+  // A round fired at a target, a shell landed: (shooter, target) / (at, radius)
+  // — infantryPosture.js hangs suppression on them. None: nam as it was.
+  onShot = null, onSplash = null,
   // (a, b) → true when the ground or a building stands between them (a game's
   // own line of sight: alg-rts algSight.js). nam passes none: smoke only.
   blocksSight = null,
@@ -170,6 +173,7 @@ export function createCombat({
   function splashAt(at, damage, radius, owner = null, { vehicleMul = 1 } = {}) {
     fx.explosion(at.x, at.y, at.z, { size: Math.max(6, radius * 1.1) });
     craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7));
+    onSplash?.(at, radius, owner);
     const hit = (o) => {
       if (!o.alive || o.isAir || o.passive) return;
       if (owner && o.team === owner.team) return;
@@ -260,7 +264,8 @@ export function createCombat({
     }
 
     if (d <= e.range && e.cooldown <= 0) {
-      e.cooldown = 1 / (e.fireRate || 1);
+      // fireMul: a suppressed / pinned man shoots slower (infantryPosture.js)
+      e.cooldown = 1 / ((e.fireRate || 1) * (e.fireMul ?? 1));
       e.target = tgt;
       // Fire a VISIBLE round (projectiles.js: a tracer, a burst, a shell or a
       // rocket, by the shooter's `weapon`). Damage lands when it arrives (see
@@ -272,6 +277,7 @@ export function createCombat({
       // everything else).
       const dmg = e.damage * (tgt.isAir ? (e.airMul ?? 1) : (e.groundMul ?? 1));
       projectiles.spawn(from, tgt, dmg, e);
+      onShot?.(e, tgt);
       // A muzzle flash in a dark jungle is the loudest thing on the map.
       // This is what stops concealment being a free permanent buff: it buys
       // an AMBUSH, and spends itself the moment you take it.

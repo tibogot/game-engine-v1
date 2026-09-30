@@ -18,7 +18,7 @@ import { createCombat } from "../shared-rts/combat.js";
  * @param {object} o.units     the shared units
  * @param {(e: object) => void} [o.onDeath]
  */
-export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {} }) {
+export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {}, onShot = null, onSplash = null }) {
   const fx = createCombatFx({ app });
   const fire = createFlameField({ app });
   const craters = await createCraterSystem({ app });
@@ -43,7 +43,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   const structures = { list: built?.list ?? [] };
   const structuresRenderer = { muzzleOf: (s) => built?.muzzleOf(s) ?? s.position.clone() };
   combat = createCombat({
-    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight,
+    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash,
     onDeath: (e) => { if (e.isStructure) built?.wreck(e); onDeath(e); },
   });
 

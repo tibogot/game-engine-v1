@@ -184,6 +184,8 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     hp: type.maxHp,
     alive: true,
     speedScale: 1,
+    /** A posture's speed factor (infantryPosture.js: suppressed 0.7, pinned 0.3). */
+    moveMul: 1,
     selected: false,
     // ── combat (driven by combat.js) ──────────────────────────────────────────
     range: type.range ?? 0,
@@ -356,7 +358,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       if (emerging) {
         const ex = emerging.toX - pos.x, ez = emerging.toZ - pos.z;
         const el = Math.hypot(ex, ez);
-        const step = type.speed * unit.speedScale * dt;
+        const step = type.speed * unit.speedScale * (unit.moveMul ?? 1) * dt;
         if (el <= step + 0.5) {
           pos.x = emerging.toX; pos.z = emerging.toZ;
           const r = emerging; emerging = null; unit.ghost = false;
@@ -381,7 +383,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
         const ex = open.x - pos.x, ez = open.z - pos.z;
         const el = Math.hypot(ex, ez);
         if (el > 1e-3) {
-          const step = Math.min(type.speed * unit.speedScale * dt, el);
+          const step = Math.min(type.speed * unit.speedScale * (unit.moveMul ?? 1) * dt, el);
           pos.x += (ex / el) * step;
           pos.z += (ez / el) * step;
           heading = turnToward(heading, Math.atan2(ex, ez), (type.turnRate ?? 3) * dt);
@@ -462,7 +464,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
         const len = Math.hypot(dirX, dirZ) || 1;
         dirX /= len; dirZ /= len;
 
-        const step = Math.min(type.speed * unit.speedScale * dt, dh);
+        const step = Math.min(type.speed * unit.speedScale * (unit.moveMul ?? 1) * dt, dh);
         tryMove(pos.x + dirX * step, pos.z + dirZ * step);
         arrived = false;
       } else if (!waypoints.length) {

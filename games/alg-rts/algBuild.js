@@ -204,14 +204,24 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, onCover
     }
   }
 
-  /** Fixed clock: sappers at a site raise it. */
+  /**
+   * Fixed clock: sappers at a site raise it. A sapper at work is marked
+   * (`working`: the site) and faces it — the renderer plays the dig clip, the
+   * shovel in his hands (unitRenderer.js).
+   */
+  const atWork = new Set();
   function step(dt) {
+    atWork.clear();
     for (const s of sites) {
       if (s.done) continue;
       let workers = 0;
       for (const u of units.list) {
         if (!u.alive || u.team !== "player" || !u.type?.builds || u.isMoving) continue;
-        if (Math.hypot(u.position.x - s.x, u.position.z - s.z) < s.reach) workers++;
+        if (Math.hypot(u.position.x - s.x, u.position.z - s.z) < s.reach) {
+          workers++;
+          atWork.add(u);
+          if (u.working !== s) { u.working = s; u.faceToward?.(s.x, s.z); }
+        }
       }
       if (!workers) continue;
       // Two sappers 1.5x as fast, three 1.8x: they get in each other's way.
@@ -219,6 +229,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, onCover
       s.mesh.scale.y = 0.06 + 0.94 * s.progress;
       if (s.progress >= 1) finish(s);
     }
+    for (const u of units.list) if (u.working && !atWork.has(u)) u.working = null;
   }
   function finish(s) {
     s.done = true;

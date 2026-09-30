@@ -17,6 +17,7 @@ import { createAlgProducer } from "./algProducer.js";
 import { createAlgStructures } from "./algStructures.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { createAlgCombat } from "./algCombat.js";
+import { createInfantryPosture } from "../shared-rts/infantryPosture.js";
 import { createAlgAI } from "./algAI.js";
 import { createAlgMines } from "./algMines.js";
 import { createAlgPatrols } from "./algPatrols.js";
@@ -352,9 +353,15 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const sight = new URLSearchParams(location.search).get("los") !== "0" ? createAlgSight(app, { showroom, worldSize: app.worldSize ?? 1024 }) : null;
   app.algSight = sight;
   if (sight) console.log(`[sight] ${sight.stats.pieces} pieces baked, ${sight.stats.cells} tall cells, ${sight.stats.bakeMs} ms`);
+  // INFANTRY POSTURE (shared-rts/infantryPosture.js, the CoH way): fire
+  // SUPPRESSES men on foot (they kneel, slow), heavy fire PINS them (prone,
+  // crawling); a man sheltered from his target kneels behind his cover.
+  const posture = createInfantryPosture({ units, cover: coverSys.cover });
+  app.algPosture = posture;
   const combat = await createAlgCombat(app, {
     units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
     onDeath: (e) => { selection.remove?.(e); controlGroups?.render(); },
+    onShot: posture.onShot, onSplash: posture.onSplash,
   });
   app.algCombat = combat;
 
@@ -376,7 +383,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
 
   const sim = createSimClock({ hz: 60 });
   app.addPreRenderHook((dt) => {
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
     searchlights.frame();
     combat.frame(dt);
     fogOfWar.update(dt);

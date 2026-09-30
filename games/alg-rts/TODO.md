@@ -123,8 +123,30 @@ Not wired into either game yet.
          heightmap too: no silhouettes through hills (only nam did).
    - [ ] x-ray later: overlapping silhouettes still stack their alpha (a
          squad behind one wall reads a bit patchy); CoH's is one flat layer.
-   - [ ] …still: cover (kneel idle / kneel fire), prone, dig for building
-         sapeurs, the grenade throw; ONE clip table shared across types
+   - [x] CoH INFANTRY BEHAVIOUR (2026-09-30, your go; checked in Chrome):
+         shared-rts/infantryPosture.js — every round fired at a man on foot
+         SUPPRESSES him (rifle 0.07, MG 0.2 and its target's squad within 6 m
+         at 60 %, a shell's blast 0.9), draining 0.3/s. Suppressed (0.4):
+         KNEELS, 70 % speed, 80 % fire. PINNED (1.0, up again below 0.55):
+         PRONE, crawls at 30 %, half rate of fire. A man sheltered from his
+         target (the shared directional cover), or standing still behind
+         something, KNEELS and fires kneeling. Sapeurs raising a site are
+         marked `working`, face it and DIG (shovel out, rifle slung). Hooks
+         only in the sim: units.js moveMul, combat.js fireMul + onShot /
+         onSplash. MEASURED: an 8-man band under the post's MG pinned in ~2 s;
+         0.16 ms a sim step at 600 men. (A first version suppressed only the
+         man an MG aimed at: the band only ever knelt.)
+   - [ ] the GRENADE: an ability (button, target click, arc, blast — the
+         throw clip is in the pack); a crawl clip (Mixamo "Crawling") for
+         pinned men who move — they use the crouched walk now
+   - [ ] **you, play it**: MG pinning speed, how often men kneel in cover
+   - [ ] **TRANSITIONS, reviewed in the lab** (you, 2026-09-30: "look at all
+         of them and see if everything is right and natural"): every clip
+         change is a 0.2 s crossfade — fine between near poses (idle ⇄ aim,
+         kneel ⇄ kneel-fire), NOT for stand → prone (a snap to the ground) or
+         run → kneel. A lab mode that plays A → B as the game does; then
+         transition clips from Mixamo where a fade can't carry it (stand to
+         prone, prone to stand, stand to kneel) and longer fades per pair.
    - [x] skinning work sized to the LIVE soldiers (renderer.compute count)
    - [x] alg-rts types on the pack: appelé + sapeur = soldier1 / "appele",
          moudjahid = aln1 / "alnSection" (crowd shader looks, per-man seed)

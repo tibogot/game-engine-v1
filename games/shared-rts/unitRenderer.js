@@ -431,6 +431,12 @@ function buildCrowdGroup(tpl, members, app, scene) {
     aim: exact("rifle_aim_idle")?.name ?? null,
     fire: exact("rifle_firing")?.name ?? null,
     deaths: ["death_forward", "death_backward"].filter((n) => exact(n)),
+    // postures and work (infantryPosture.js, algBuild.js): null when the body lacks the clip
+    crouchIdle: exact("rifle_crouch_idle")?.name ?? null,
+    crouchFire: exact("rifle_crouch_firing")?.name ?? null,
+    crouchWalk: exact("rifle_crouch_walk")?.name ?? null,
+    prone: exact("rifle_prone_idle")?.name ?? null,
+    dig: exact("dig")?.name ?? null,
   };
 
   // The faction LOOKS in the crowd shader (soldierLooks.js): the body's colour
@@ -800,19 +806,31 @@ function measureGroundSpeed(root, clip) {
 
 /**
  * Pick a crowd soldier's clip for this frame from the unit's state:
- * moving → run; a live target in range → aim (the firing clip for a moment
- * after each shot); otherwise idle. Types without those clips (the old
- * stand-in: idle + run only) fall back to idle.
+ *   at work (a sapper raising a site, algBuild.js) → dig;
+ *   moving → run, or the crouched walk while suppressed / pinned;
+ *   PRONE (pinned, infantryPosture.js) → lying;
+ *   a live target in range → aim (the firing clip for a moment after each
+ *   shot), KNEELING when his posture says so (in cover, suppressed);
+ *   otherwise idle, kneeling in cover.
+ * A body without a clip falls back to the standing one (the old stand-in:
+ * idle + run only).
  */
 function soldierClip(unit, v, roles) {
-  if (unit.isMoving) return roles.run;
+  if (unit.working && roles.dig) return roles.dig;
+  const low = unit.posture;   // "stand" | "kneel" | "prone"; undefined = stand
+  if (unit.isMoving) return low && low !== "stand" && roles.crouchWalk ? roles.crouchWalk : roles.run;
+  if (low === "prone" && roles.prone) return roles.prone;
+  const kneel = low === "kneel" && roles.crouchIdle;
   const tg = unit.target;
   if (tg?.alive && roles.aim) {
     const range = unit.range ?? unit.type?.range ?? 0;
     const dx = tg.position.x - unit.position.x, dz = tg.position.z - unit.position.z;
-    if (dx * dx + dz * dz <= (range * 1.05) ** 2) return v.firing > 0 && roles.fire ? roles.fire : roles.aim;
+    if (dx * dx + dz * dz <= (range * 1.05) ** 2) {
+      if (kneel) return v.firing > 0 && roles.crouchFire ? roles.crouchFire : roles.crouchIdle;
+      return v.firing > 0 && roles.fire ? roles.fire : roles.aim;
+    }
   }
-  return roles.idle;
+  return kneel ? roles.crouchIdle : roles.idle;
 }
 
 const CROSSFADE = 0.2;      // s between two clips
@@ -1313,7 +1331,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         const cd = unit.cooldown ?? 0;
         if (r.fire && cd > v.lastCd + 1e-6) {
           v.firing = v.crowd.field.duration(r.fire);
-          if (v.cur.clip === r.fire) v.cur.t = 0;
+          if (v.cur.clip === r.fire || v.cur.clip === r.crouchFire) v.cur.t = 0;
         }
         v.lastCd = cd;
         v.firing = Math.max(0, v.firing - dt);
@@ -1325,7 +1343,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         const want = soldierClip(unit, v, r);
         if (want !== v.cur.clip) {
           v.prev = v.cur;
-          v.cur = { clip: want, t: want === r.fire ? 0 : Math.random() * v.crowd.field.duration(want) };
+          v.cur = { clip: want, t: want === r.fire || want === r.crouchFire ? 0 : Math.random() * v.crowd.field.duration(want) };
           v.fade = 0;
         }
         const rate = v.cur.clip === r.run && v.crowd.runSpeed > 0
