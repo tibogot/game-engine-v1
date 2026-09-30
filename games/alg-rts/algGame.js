@@ -21,6 +21,7 @@ import { LAYOUT, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
+import { createAlgStones } from "./algStones.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
@@ -214,6 +215,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       app.algBirds = createAlgBirds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom, soarOver: soar });
     } catch (e) { console.warn("[alg birds] failed:", e); }
+  }
+  // STONES (algStones.js): loose stones textured with the ground they lie on,
+  // placed from the map's paint. ?stones=0 = without.
+  if (params.get("stones") !== "0") {
+    try { app.algStones = await createAlgStones(app); } catch (e) { console.warn("[alg stones] failed:", e); }
   }
   // AMBIENCE (algAmbience.js): dust behind the vehicles, smoke from the
   // bread ovens. ?ambience=0 = without.

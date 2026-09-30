@@ -38,6 +38,14 @@ Keep this file current: tick things off here, add new asks here.
       · PISTE DU KSAR (algTracks --route --add --only: the other tracks
         untouched): 253 m from the Oued piste up to the souk's steps.
         A* now capped (an unreachable end ran for minutes).
+      · STONES THAT MATCH THE GROUND (algStones.js): 5,745 stones from the
+        map's paint — scree 4,345, soil 714, wadi 385, limestone 208, piste
+        shoulders 93 — each kind textured with its layer's own photo
+        (triplanar), shapes from the engine's rock generator (48-520 tris),
+        sunk 20-35 %, tilted to the slope; 23 draws, 554 k tris; lumps and
+        boulders cast shadows. GPU on/off: +0.15 ms scree close-up, noise at
+        the start view and zoomed out. you, look: density, colour (a shade
+        lighter than the ground), the gravel along the pistes (sparse).
       · THE POST'S GATE: its rubble footing ran a knee-high wall ACROSS the
         gateway (men walked through it) — now either side of the arch, a
         threshold slab in the passage.
