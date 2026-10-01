@@ -385,8 +385,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;
-  // The briefing, once the loading screen has faded (alg.html: 250 ms).
-  if (app.algBattle && params.get("brief") !== "0") setTimeout(() => app.algBattle.brief(), 450);
+  // The briefing (and the difficulty), once the loading screen has faded
+  // (alg.html: 250 ms); ?brief=0 starts at the remembered difficulty.
+  if (app.algBattle) { if (params.get("brief") !== "0") setTimeout(() => app.algBattle.brief(), 450); else app.algBattle.start(); }
   return app;
 }
 

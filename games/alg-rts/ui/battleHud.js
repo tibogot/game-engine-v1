@@ -53,6 +53,38 @@ const CSS = `
 #alg-alerts .al.good { border-left-color: #5aaeff; }
 #alg-alerts .al .t { color: var(--hud-dim); font: 10px var(--hud-mono); margin-right: 6px; }
 #alg-alerts .al.old { opacity: 0; }
+#alg-alerts .al.tip { border-left-color: var(--hud-brass); background: #2a2614; border-color: #5c5126; color: #f1e6c4; }
+#alg-alerts .al.tip::before { content: "ADVICE  "; font: 700 9px var(--hud-sans); letter-spacing: 0.18em; color: var(--hud-brass); }
+
+#alg-obj {
+  position: fixed; left: 8px; top: 72px; z-index: 56; width: 300px;   /* under the dev stats strip */
+  background: var(--hud-bg); border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius);
+  font: 12px var(--hud-sans); color: var(--hud-text); padding: 6px 10px 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+#alg-obj .hd { font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--hud-brass); margin-bottom: 4px; display: flex; justify-content: space-between; }
+#alg-obj .hd span { color: var(--hud-dim); letter-spacing: 0.12em; }
+#alg-obj .o { display: flex; gap: 7px; align-items: baseline; padding: 3px 0; line-height: 1.3; }
+#alg-obj .o.go { cursor: pointer; }
+#alg-obj .o.go:hover .t { color: #f1e6c4; }
+#alg-obj .m { flex: none; width: 10px; height: 10px; border: 1px solid var(--hud-edge-hi); transform: translateY(1px); }
+#alg-obj .o.done .m { background: var(--hud-olive); border-color: var(--hud-olive); }
+#alg-obj .o.bad .m { background: var(--hud-red); border-color: var(--hud-red); }
+#alg-obj .sub { color: var(--hud-dim); font-size: 11px; }
+
+.alg-vmark .flag, .alg-vmark .name { pointer-events: auto; cursor: help; }
+#alg-vtip {
+  position: fixed; z-index: 60; pointer-events: none; display: none; max-width: 260px;
+  background: var(--hud-bg); border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius);
+  padding: 7px 10px; font: 12px/1.4 var(--hud-sans); color: var(--hud-text); box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+}
+#alg-vtip b { color: #efe8d2; }
+#alg-vtip .dim { color: var(--hud-dim); }
+.alg-modal .levels { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.alg-modal .levels button { text-align: left; text-transform: none; letter-spacing: 0; padding: 9px 11px; }
+.alg-modal .levels button b { display: block; letter-spacing: 0.08em; text-transform: uppercase; font-size: 12px; margin-bottom: 2px; }
+.alg-modal .levels button span { font: 400 11px var(--hud-sans); color: var(--hud-dim); }
+.alg-modal .levels button.sel { border-color: var(--hud-brass); background: #3a3417; }
 
 .alg-vmark {
   position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none;
@@ -144,22 +176,57 @@ export function createBattleHud({ camera, canvas, onJump }) {
   document.body.appendChild(feed);
   const alerts = [];   // { node, x, z, t0 }
   let latest = null;
-  function alert(text, { x, z, kind = "", time = 0 } = {}) {
+  function alert(text, { x, z, kind = "", time = 0, life = 14 } = {}) {
     const node = document.createElement("div");
     node.className = `al ${kind}`;
-    node.innerHTML = `<span class="t">${fmtTime(time)}</span>${text}`;
-    const a = { node, x, z, t0: performance.now() };
+    node.innerHTML = kind === "tip" ? text : `<span class="t">${fmtTime(time)}</span>${text}`;
+    const a = { node, x, z, t0: performance.now(), life: life * 1000 };
     if (x != null) node.addEventListener("click", () => onJump(x, z));
+    // Click a tip away.
+    if (kind === "tip" && x == null) node.addEventListener("click", () => { a.life = 0; });
     feed.appendChild(node);
     alerts.push(a);
     if (x != null) latest = a;
-    while (alerts.length > 5) alerts.shift().node.remove();
+    while (alerts.length > 6) alerts.shift().node.remove();
   }
   function ageAlerts(now) {
     for (let i = alerts.length - 1; i >= 0; i--) {
       const a = alerts[i], age = now - a.t0;
-      if (age > 14000) { a.node.remove(); alerts.splice(i, 1); } else if (age > 13000) a.node.classList.add("old");
+      if (age > a.life) { a.node.remove(); alerts.splice(i, 1); } else if (age > a.life - 1000) a.node.classList.add("old");
     }
+  }
+
+  // ── Objectives (top left) ─────────────────────────────────────────────────
+  const obj = document.createElement("div");
+  obj.id = "alg-obj";
+  document.body.appendChild(obj);
+  let objKey = "";
+  /** [{ text, sub, state: ""|"done"|"bad", x, z }] — rewritten only when it changes. */
+  function setObjectives(list, headRight = "") {
+    const key = JSON.stringify([list, headRight]);
+    if (key === objKey) return;
+    objKey = key;
+    obj.innerHTML = `<div class="hd">Objectives<span>${headRight}</span></div>` + list.map((o, i) =>
+      `<div class="o ${o.state ?? ""}${o.x != null ? " go" : ""}" data-i="${i}"><div class="m"></div><div><div class="t">${o.text}</div>${o.sub ? `<div class="sub">${o.sub}</div>` : ""}</div></div>`).join("");
+    obj.querySelectorAll(".o.go").forEach((n) => {
+      const o = list[+n.dataset.i];
+      n.addEventListener("click", () => onJump(o.x, o.z));
+    });
+  }
+
+  // ── Village tooltip (hover a marker) ──────────────────────────────────────
+  const vtip = document.createElement("div");
+  vtip.id = "alg-vtip";
+  document.body.appendChild(vtip);
+  let hovered = null, tipFor = () => "", mouse = [0, 0];
+  const onMove = (e) => { mouse = [e.clientX, e.clientY]; };
+  window.addEventListener("pointermove", onMove);
+  function tooltipTick() {
+    if (!hovered) { vtip.style.display = "none"; return; }
+    vtip.innerHTML = tipFor(hovered);
+    vtip.style.display = "block";
+    vtip.style.left = `${Math.min(mouse[0] + 16, innerWidth - 280)}px`;
+    vtip.style.top = `${mouse[1] + 14}px`;
   }
   // Space: go to the latest alert (CoH). Not while typing in a field.
   const onKey = (e) => {
@@ -182,6 +249,10 @@ export function createBattleHud({ camera, canvas, onJump }) {
         node.className = "alg-vmark";
         node.innerHTML = `<div class="flag"></div><div class="name"></div><div class="cap"><i></i></div>`;
         node.querySelector(".name").textContent = p.name;
+        for (const el of node.querySelectorAll(".flag, .name")) {
+          el.addEventListener("pointerenter", () => { hovered = p; });
+          el.addEventListener("pointerleave", () => { if (hovered === p) hovered = null; });
+        }
         document.body.appendChild(node);
         m = { node, cap: node.querySelector(".cap i"), last: "" };
         marks.set(p, m);
@@ -226,16 +297,32 @@ export function createBattleHud({ camera, canvas, onJump }) {
   }
 
   return {
-    setScore, alert, markers,
+    setScore, alert, markers, setObjectives,
+    /** The village tooltip's content: fn(point) → html. */
+    setTooltip(fn) { tipFor = fn; },
     /** Every frame. */
-    tick(now = performance.now()) { ageAlerts(now); },
-    briefing(html, onStart) { return modal(html, [{ label: "To your posts", go: true, onClick: onStart }]); },
+    tick(now = performance.now()) { ageAlerts(now); tooltipTick(); },
+    /**
+     * The briefing, with the difficulty: `levels` [{ key, label, blurb }],
+     * `current` the remembered one; onStart(key) when the player goes.
+     */
+    briefing(html, onStart, { levels = [], current = "normal" } = {}) {
+      let pick = current;
+      const back = modal(`${html}${levels.length ? `<div class="kicker">Difficulty</div><div class="levels">${levels.map((l) => `<button data-lv="${l.key}" class="${l.key === current ? "sel" : ""}"><b>${l.label}</b><span>${l.blurb}</span></button>`).join("")}</div>` : ""}`,
+        [{ label: "To your posts", go: true, onClick: () => onStart(pick) }]);
+      back.querySelectorAll("[data-lv]").forEach((b) => b.addEventListener("click", () => {
+        pick = b.dataset.lv;
+        back.querySelectorAll("[data-lv]").forEach((o) => o.classList.toggle("sel", o === b));
+      }));
+      return back;
+    },
     end(html, { onReplay }) {
       return modal(html, [{ label: "Keep watching" }, { label: "Play again", go: true, onClick: onReplay }]);
     },
     dispose() {
       window.removeEventListener("keydown", onKey);
-      score.remove(); feed.remove(); style.remove();
+      window.removeEventListener("pointermove", onMove);
+      score.remove(); feed.remove(); style.remove(); obj.remove(); vtip.remove();
       for (const m of marks.values()) m.node.remove();
     },
   };

@@ -569,6 +569,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     },
     /** Dev: a band now. */
     bandNow() { newBand(); },
+    /** The next band in `s` seconds (algDifficulty.js, at the start). */
+    restartClock(s) { nextBand = s; },
     /** Dev: the ambush spot a band at `from` would take on French at `tgt`. */
     ambushSpotFor: (from, tgt) => ambushSpot(from, tgt),
     /** Dev: the via point a band at `from` would take round the French MGs to `to` (null: straight). */

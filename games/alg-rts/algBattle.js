@@ -23,6 +23,7 @@
 // frame): no hooks into combat, the AI or the units. ?battle=0 = without.
 import { LAYOUT } from "./layout.js";
 import { createBattleHud } from "./ui/battleHud.js";
+import { DIFFICULTIES, applyDifficulty, storedDifficulty } from "./algDifficulty.js";
 
 const P = {
   start: 500,
@@ -104,7 +105,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       if (u.team === "player") {
         if (u.hp < was - 1e-6 || (was > 0 && !u.alive)) {
           if (!u.alive) stats.lostFr++;
-          if (!throttled("contact", x, z, P.contactEvery)) say(`<b>Contact</b> ${placeName(x, z)}!`, x, z, "bad");
+          if (!throttled("contact", x, z, P.contactEvery)) { say(`<b>Contact</b> ${placeName(x, z)}!`, x, z, "bad"); told.add("contactSeen"); }
           else if (!u.alive && !u.type?.foot && !throttled(`lost:${u.typeKey}`, x, z, 10)) say(`${u.type?.name ?? "A vehicle"} destroyed ${placeName(x, z)}.`, x, z, "bad");
         }
       } else if (u.team === "enemy") {
@@ -115,7 +116,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
           for (const o of units.list) {
             if (o.alive && o.team === "enemy" && Math.hypot(o.position.x - x, o.position.z - z) < 35) { n++; reported.add(o); }
           }
-          if (!throttled("sight", x, z, P.sightEvery)) say(`FLN ${n > 1 ? `band (${n})` : "fighter"} seen ${placeName(x, z)}.`, x, z, "");
+          if (!throttled("sight", x, z, P.sightEvery)) { say(`FLN ${n > 1 ? `band (${n})` : "fighter"} seen ${placeName(x, z)}.`, x, z, ""); told.add("bandSeen"); }
         }
       }
     }
@@ -181,6 +182,69 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
   }
   const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
+  // ── OBJECTIVES (top left): what to do now, always in view ────────────────
+  const home = post?.position ?? { x: 0, z: 0 };
+  const ownerName = (o) => (o === "player" ? "yours" : o === "enemy" ? "FLN-held" : "neutral");
+  let objT = 0;
+  function objectives(dt) {
+    if ((objT -= dt) > 0) return;
+    objT = 0.5;
+    const fr = economy.held, al = economy.heldByEnemy;
+    const list = [{
+      text: "Hold more villages than the FLN",
+      sub: `You ${fr} · FLN ${al} of ${economy.points.length} — ${fr > al ? "the FLN is bleeding" : fr < al ? "<b style='color:var(--hud-red)'>you are bleeding</b>" : "even: nobody bleeds"}`,
+      state: fr > al ? "done" : fr < al ? "bad" : "",
+    }];
+    // The next village to take: the nearest one not yours (to the post).
+    const todo = economy.points.filter((v) => v.owner !== "player")
+      .sort((a, b) => Math.hypot(a.position.x - home.x, a.position.z - home.z) - Math.hypot(b.position.x - home.x, b.position.z - home.z))[0];
+    if (todo) {
+      const fln = units.list.filter((u) => u.alive && u.team === "enemy" && Math.hypot(u.position.x - todo.position.x, u.position.z - todo.position.z) < economy.params.radius).length;
+      list.push({
+        text: `Take ${todo.name}`,
+        sub: `${ownerName(todo.owner)}${fln ? ` · <b style='color:var(--hud-red)'>${fln} FLN inside</b>` : ""} · stand men on foot in its ring`,
+        x: todo.position.x, z: todo.position.z,
+      });
+    } else list.push({ text: "Hold your villages", sub: "leave a few men in each: the FLN works them back", state: "done" });
+    if (cave) list.push({ text: "Destroy the FLN cave (north-west)", sub: cave.alive ? (cave.hp < cave.maxHp ? `${Math.round((100 * cave.hp) / cave.maxHp)}% left` : "wins the war outright · bring armour and mortars") : "destroyed", state: cave.alive ? "" : "done", x: cave.position.x, z: cave.position.z });
+    if (post) list.push({ text: "Keep the post", sub: post.hp < post.maxHp ? `${Math.round((100 * post.hp) / post.maxHp)}% left` : "lose it and the war is lost", state: post.hp < post.maxHp * 0.5 ? "bad" : "", x: post.position.x, z: post.position.z });
+    const lv = { easy: "Easy", normal: "Normal", hard: "Hard" }[app.algDifficulty] ?? "";
+    hud.setObjectives(list, `${fmt(clock)}${lv ? ` · ${lv}` : ""}`);
+  }
+
+  // ── ADVICE: one tip per first time something happens ────────────────────
+  const told = new Set(), tips = [];
+  let tipGap = 0;
+  const advise = (key, text) => { if (told.has(key)) return; told.add(key); tips.push(text); };
+  function advice(dt) {
+    // Firsts, from what the watchers and the economy show.
+    if (started && clock > startAt + 3) advise("start", "Drag a box round your men, then <b>right-click</b> near a village to send them there. Click an objective to look at it.");
+    const footIn = units.list.some((u) => u.alive && u.team === "player" && u.type?.foot && economy.points.some((v) => Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < economy.params.radius));
+    if (footIn) advise("inRing", "Keep them in the ring: the bar under the village's name fills toward you. Only men on foot count; more men, faster (up to 3).");
+    if (economy.held > 0) advise("firstVillage", "A village of yours pays supplies and counts as a point. The FLN will try to turn it back — <b>leave a few men</b> in it.");
+    if (stats.lostFr > 0 || told.has("contactSeen")) advise("contact", "Under fire: hold <b>V</b> to see cover (green) and concealment (cyan). Men behind walls and rocks live; men in the open don't.");
+    if (economy.heldByEnemy > economy.held) advise("bleeding", "The FLN holds more villages than you: <b>your score is falling</b>. Take one back.");
+    if (economy.french.stock >= 260 && clock > 60) advise("build", "Supplies to spend: click the post to train a <b>Sapeur</b> — he builds MG nests, wire and miradors to hold what you take.");
+    if (told.has("bandSeen")) advise("band", "An FLN band won't fight fair: it waits in the scrub and strikes men who come close. Scout with the jeep, bring the MG, keep men together.");
+    if ((tipGap -= dt) > 0 || !tips.length) return;
+    tipGap = 14;
+    hud.alert(tips.shift(), { kind: "tip", life: 24 });
+  }
+  let started = false, startAt = 0;
+
+  // The village tooltip (hover its marker).
+  hud.setTooltip((v) => {
+    const r = economy.params.radius;
+    let fr = 0, al = 0;
+    for (const u of units.list) {
+      if (!u.alive || !u.type?.foot || Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) > r) continue;
+      if (u.team === "player") fr++; else if (u.team === "enemy") al++;
+    }
+    const pay = economy.params.village[v.kind] ?? economy.params.village.hamlet;
+    const lean = v.value > 0.02 ? `${Math.round(v.value * 100)}% toward France` : v.value < -0.02 ? `${Math.round(-v.value * 100)}% toward the FLN` : "undecided";
+    return `<b>${v.name}</b> <span class="dim">· ${v.kind}</span><br>Backs: <b>${v.owner === "player" ? "France" : v.owner === "enemy" ? "the FLN" : "nobody"}</b> (${lean}; held at 60%)<br>Pays its holder <b>+${pay}/min</b> and counts as a victory point<br>In its ring now: France ${fr} · FLN ${al}<br><span class="dim">Stand men on foot in the ring to win it over (more men, faster, up to 3).</span>`;
+  });
+
   // ── The clock ─────────────────────────────────────────────────────────────
   const frame = (dt) => {
     dt = Math.min(dt, 0.1);
@@ -192,6 +256,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     if (!over) stepScore(dt);
     hud.setScore({ fr: score.player, aln: score.enemy, max: P.start, heldFr: economy.held, heldAln: economy.heldByEnemy });
     hud.markers(economy.points);
+    objectives(dt);
+    advice(dt);
     hud.tick();
   };
   app.addPreRenderHook(frame);
@@ -200,9 +266,12 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     params: P, score, stats,
     get over() { return over; },
     get clock() { return clock; },
-    /** The briefing: what the fight is about. Shown once the loading screen lifts. */
+    /** Start without the briefing (?brief=0): the remembered difficulty. */
+    start(key = storedDifficulty()) { applyDifficulty(app, key); started = true; startAt = clock; },
+    /** The briefing: what the fight is about, and how hard. Shown once the loading screen lifts. */
     brief() {
       const n = economy.points.length;
+      const go = (key) => this.start(key);
       return hud.briefing(`
         <div class="kicker">Aurès, 1956 · Poste de Tighanimine</div>
         <h2>Hold the valley</h2>
@@ -212,7 +281,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
           <li>You both start at <b>500</b>. Whoever holds <b>fewer</b> villages bleeds points every second; at 0 they lose. <b>Destroy the FLN's cave</b> (north-west) to win outright. <b>Lose the post</b> and it is over.</li>
           <li>The <b>FLN</b> won't fight you in the open. It works the villages quietly, ambushes men who wander, mines the pistes, and slips back to its cave. Garrison, patrol, build.</li>
         </ul>
-        <div class="keys"><kbd>Space</kbd> go to the latest alert · click an alert to go there · hold <kbd>V</kbd> to see cover · <kbd>R</kbd> turns a building</div>`);
+        <div class="keys"><kbd>Space</kbd> go to the latest alert · click an alert to go there · hold <kbd>V</kbd> to see cover · <kbd>R</kbd> turns a building · hover a village for its details</div>`,
+      go, { levels: DIFFICULTIES, current: storedDifficulty() });
     },
     dispose() { app.removePreRenderHook?.(frame); hud.dispose(); },
   };

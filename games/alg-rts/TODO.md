@@ -203,6 +203,31 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
+- [x] **A REAL ENEMY + A GAME THAT EXPLAINS ITSELF** (2026-10-01; you: "way
+      too easy, almost no enemies … something should be written to explain").
+      · DIFFICULTY (algDifficulty.js; chosen on the briefing, remembered,
+        ?difficulty=): the ALN purse / income / fighter price, the AI's pace
+        (firstBandAt, bandEvery, maxLive — algAI params + restartClock), a
+        head start of fighters at the cave's rally, the French purse.
+        Normal: ALN 480 + 45/min, 30 a fighter, 8 out at the start, bands
+        every 50-85 s, up to 26 out (was 240 + 15/min, 40, 0, 80-140 s, 18).
+        MEASURED on Normal: 2 bands out by 1:36, 20 FLN on the map at 2:00,
+        the ksar taken at 2:22 (the old game: 9 FLN at 4:30, first village
+        at 5:17). Easy / Hard either side.
+      · OBJECTIVES (top left, always on): hold more villages (bleeding in
+        red), "Take <nearest village not yours>" (FLN men inside counted),
+        destroy the cave (its %), keep the post — each clickable.
+      · ADVICE (brass tips in the alert feed, each once, 14 s apart): how to
+        move men, the capture ring, holding a village, cover (V) under fire,
+        bleeding, train a sapper, how an FLN band fights.
+      · VILLAGE TOOLTIP (hover a marker): who it backs and how far, its
+        income, men of each side in its ring, how to win it.
+   - [ ] **3 — the AI (mine now, you: "of course you should work on it")**:
+         a militia cell left in a village the FLN turned; a band coming back
+         for a village you take; the FLN building sangars / ambush screens
+         and cutting wire (algBuild.place / algWire.cutNearest are ready);
+         an MG team (FM 24/29) so ambushes pin; caches unlocking it.
+   - [ ] you, play it: Normal hard enough? (Hard = 700 + 70/min, 12 out.)
 - [x] **FLOWERS + SMALL PLANTS, round 1** (2026-10-01; you: "the pink flowers
       are flat quads; still Algeria; the cactus"). Season kept: LATE SUMMER.
       · OLEANDER: real blossoms — 5-petal lobed stars (a fan round a darker
