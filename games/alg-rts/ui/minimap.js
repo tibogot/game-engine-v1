@@ -429,7 +429,11 @@ export function createMinimap({
     c.clearRect(0, 0, px, px);
     c.setTransform(...frame.worldImageTransform(fogOfWar.miniCanvas.width));
     c.imageSmoothingEnabled = true;
+    // Half-strength: unexplored ground stays READABLE (CoH) — the land is
+    // known, what is on it is not.
+    c.globalAlpha = 0.55;
     c.drawImage(fogOfWar.miniCanvas, 0, 0);
+    c.globalAlpha = 1;
     c.setTransform(1, 0, 0, 1, 0, 0);
   }
 
@@ -487,7 +491,8 @@ export function createMinimap({
     // glance (the old 4 px diamond read as a speck).
     const R = requisition?.params?.radius ?? 40;
     for (const p of requisition?.points ?? []) {
-      if (fogOfWar?.enabled && !fogOfWar.isExplored(p.position.x, p.position.z)) continue;
+      // Always shown: the French know their own valley's villages (who
+      // holds one is known from the economy, as in CoH).
       const m = frame.toMini(p.position.x, p.position.z), rr = R * frame.k;
       const col = p.owner === "player" ? COL.player : p.owner === "enemy" ? COL.enemy : "#e8dcbc";
       c.beginPath(); c.arc(m.x, m.y, rr, 0, Math.PI * 2);

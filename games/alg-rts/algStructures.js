@@ -67,6 +67,8 @@ export function createAlgStructures({ app, showroom, producers, units }) {
       position: centre, radius: Math.hypot(fp.hx, fp.hz),
       range: st.weapon ? st.range : 0, damage: st.damage ?? 0, fireRate: st.fireRate ?? 1,
       weapon: st.weapon ?? null, canHitAir: !!st.canHitAir, cooldown: 0, vision: st.vision ?? 50,
+      // Its eye over the ground for the fog's ridge sight (a mirador sees over a crest a man can't).
+      visionEye: Math.min(14, (mesh.geometry.userData.height ?? 5) * 0.9),
     });
     const gun = mesh.children.find((c) => c.name === "Gun") ?? null;
     const muzzles = st.muzzles ? (mesh.geometry.userData[st.muzzles] ?? []).map((p) => toW(...p))
@@ -83,6 +85,8 @@ export function createAlgStructures({ app, showroom, producers, units }) {
   // combat fields here. The rest are the showroom's placed pieces.
   for (const p of producers) add(p.structure.typeKey, p.mesh, p.structure);
   for (const key of ["mirador", "mgNest", "mortarPit", "searchlight", "armsCache", "sangar"]) add(key, showroom?.[key]);
+  // The hidden caches in the hills (algLandmarks.js: armsCache2, 3 …).
+  for (const [key, mesh] of Object.entries(showroom ?? {})) if (/^armsCache\d+$/.test(key)) add("armsCache", mesh);
 
   /** Where a building's shot leaves from: its gun, or the tower nearer the target. */
   function muzzleOf(s) {

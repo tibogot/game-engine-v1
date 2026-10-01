@@ -58,7 +58,10 @@ function boxBlur(src, size, radius) {
   return dst;
 }
 
-export function createFogOfWar({ app, units, structures, buildings, getRadioIntel = () => false, enabled: startEnabled = false, bounds = null }) {
+export function createFogOfWar({ app, units, structures, buildings, getRadioIntel = () => false, enabled: startEnabled = false, bounds = null, ridgeLOS = null, bakeHz = 0 }) {
+  /** { eye, target } metres, or null: plain disks (nam). */
+  const ridge = ridgeLOS;
+  let bakeAcc = 0, baked = false;
   const map = app.worldSize ?? 2048;
   const half = map * 0.5;
   const cell = map / TEX_RES;
@@ -103,11 +106,35 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     z: -half + (r + 0.5) * cell,
   });
 
+  // RIDGES BLOCK SIGHT (opt-in `ridgeLOS`, alg-rts 2026-10-01): a cell is seen
+  // only if the ground between the eye (`eye` m over the source) and the cell
+  // (`target` m over it — a man's head) never rises above the line. The
+  // ground is read from a height grid at the fog's own resolution, built once
+  // (rebuildHeights() after the terrain changes) — array lookups, not
+  // heightmap samples: ~20 sources × ~250 cells × ~8 steps a frame.
+  let hgrid = null;
+  function rebuildHeights() {
+    hgrid = new Float32Array(cols * rows);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { const w = cellToWorld(c, r); hgrid[idx(c, r)] = app.getWorldHeight(w.x, w.z); }
+  }
+  function lineClear(cc, cr, c, r, eyeY, tgtY) {
+    const dc = c - cc, dr = r - cr, n = Math.max(Math.abs(dc), Math.abs(dr));
+    for (let k = 1; k < n; k++) {
+      const f = k / n;
+      const h = hgrid[idx(Math.round(cc + dc * f), Math.round(cr + dr * f))];
+      if (h > eyeY + (tgtY - eyeY) * f) return false;
+    }
+    return true;
+  }
+
   /** Stamp a circular vision disk. Marks explored + visible. */
-  function stampVision(wx, wz, radius) {
+  function stampVision(wx, wz, radius, eye = ridge?.eye ?? 2) {
     const rCells = Math.ceil(radius / cell);
     const { c: cc, r: cr } = worldToCell(wx, wz);
     const r2 = radius * radius;
+    const los = ridge && inGrid(cc, cr);
+    if (los && !hgrid) rebuildHeights();
+    const eyeY = los ? hgrid[idx(cc, cr)] + eye : 0;
     for (let dr = -rCells; dr <= rCells; dr++) {
       for (let dc = -rCells; dc <= rCells; dc++) {
         const c = cc + dc;
@@ -117,6 +144,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
         const d2 = (w.x - wx) ** 2 + (w.z - wz) ** 2;
         if (d2 > r2) continue;
         const i = idx(c, r);
+        if (los && Math.abs(dc) + Math.abs(dr) > 1 && !lineClear(cc, cr, c, r, eyeY, hgrid[i] + ridge.target)) continue;
         explored[i] = 1;
         visible[i] = 1;
       }
@@ -137,12 +165,12 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     const out = [];
     for (const u of units.list) {
       if (!u.alive || u.team !== "player") continue;
-      out.push({ x: u.position.x, z: u.position.z, r: visionOfEntity(u) });
+      out.push({ x: u.position.x, z: u.position.z, r: visionOfEntity(u), eye: u.isAir ? 40 : (u.type?.foot ? 2.2 : 3) });
     }
     for (const s of structures.list) {
       if (!s.alive || s.team !== "player") continue;
       if (s.constructing) continue;
-      out.push({ x: s.position.x, z: s.position.z, r: visionOfEntity(s) });
+      out.push({ x: s.position.x, z: s.position.z, r: visionOfEntity(s), eye: s.visionEye ?? 6 });
     }
     for (const b of buildings.list) {
       if (!b.alive || b.team !== "player") continue;
@@ -154,7 +182,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
 
   function bakeTexture() {
     visible.fill(0);
-    for (const src of collectVisionSources()) stampVision(src.x, src.z, src.r);
+    for (const src of collectVisionSources()) stampVision(src.x, src.z, src.r, src.eye ?? 20);
 
     for (let i = 0; i < strengths.length; i++) {
       if (visible[i]) strengths[i] = 0;
@@ -347,7 +375,11 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     // The play-box dimming needs the camera even with the fog of war off.
     if (bounds) post?.syncCamera?.(app.camera);
     if (!enabled) return;
-    bakeTexture();
+    // The vision grid at `bakeHz` (alg-rts 15: with ridge sight a bake is
+    // ~1.2 ms of CPU, and a man walks under a metre in 1/15 s); 0 = every
+    // frame (nam as it was).
+    bakeAcc += _dt ?? 0;
+    if (!bakeHz || bakeAcc >= 1 / bakeHz || !baked) { bakeAcc = 0; baked = true; bakeTexture(); }
     post?.syncCamera?.(app.camera);
   }
 
@@ -373,6 +405,8 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     tex,
     miniCanvas,
     get enabled() { return enabled; },
+    /** Re-read the ground for ridge sight (after the terrain changes: pads, craters). */
+    rebuildHeights() { if (ridge) rebuildHeights(); },
     setEnabled(on) {
       enabled = !!on;
       post?.setEnabled(enabled);

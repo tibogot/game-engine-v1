@@ -168,7 +168,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     structures: { get list() { return app.algStructures?.list ?? []; } },
     // The searchlights' pools of light see through the fog (algSearchlight.js).
     buildings: { get list() { return app.algSearchlights?.pools ?? []; } },
-    enabled: new URLSearchParams(location.search).get("fow") === "1",
+    // ON (2026-10-01, you: hidden caches + guerrillas only work if you cannot
+    // see them): ?fow=0 to look at the whole map. Ridges block sight.
+    enabled: new URLSearchParams(location.search).get("fow") !== "0",
+    ridgeLOS: { eye: 2.2, target: 1.6 },
+    bakeHz: 15,
     // Outside the playable box the land is darkened (CoH): scenery.
     bounds: PLAY,
   });

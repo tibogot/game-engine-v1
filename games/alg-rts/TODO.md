@@ -268,8 +268,24 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          destroyed: no more FLN machine guns". Battle: an alert the first
          time an FLN MG is seen, an advice tip (cover, flank, the caches), a
          "Destroy the FLN arms caches" objective (count, click to go).
-   - [ ] The map has ONE cache (2 MGs at most): a second / third cache in
-         the hills, or the FLN building caches (algBuild piece).
+   - [x] **HIDDEN CACHES + FOG OF WAR ON (2026-10-01)**:
+         · 3 more caches (algLandmarks: in the FLN's half, ≥ 260 m from the
+           post, ≥ 70 m from villages, ≥ 28 m off tracks, 110 m apart, the
+           scrubbiest of 900 candidates; pads) = 4 → up to 8 FM gunners.
+           algStructures adds every showroom `armsCacheN`.
+         · FOG OF WAR ON by default (?fow=0 off) with RIDGE SIGHT (shared
+           fogOfWar `ridgeLOS` opt-in, nam unchanged): a cell is seen only if
+           the ground never rises above the line from the eye (men 2.2 m,
+           vehicles 3, buildings 0.9 × their height up to 14, aircraft 40) to
+           a man's head. Height grid at the fog's resolution, built once.
+           MEASURED: a man on broken ground saw 60% of his 40 m disk, 90-99%
+           on open ground. Bake throttled (`bakeHz` 15): fog CPU 1.2 → 0.31
+           ms a frame.
+         · Objective "Find and destroy the FLN arms caches": how many are
+           LEFT is known, WHERE only once seen (click goes to a found one);
+           an alert when one comes into sight. Minimap: the shroud at half
+           strength (the land readable), villages always shown.
+   - [ ] The FLN building new caches in villages it holds (algBuild piece).
    - [ ] A gunner formed after his band is gathered waits at the rally for
          the next band (bands take the first men standing).
    - [ ] AI round 2b: the mule train; the refuge (casemate); the lookout.

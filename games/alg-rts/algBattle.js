@@ -143,12 +143,18 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     }
   }
 
+  const foundCaches = new WeakSet();
   function watchBuildings() {
     for (const s of structures.list) {
       const was = aliveB.get(s);
       aliveB.set(s, s.alive);
       const { x, z } = s.position;
       if (was && !s.alive) say(`${s.name ?? "A building"} destroyed.`, x, z, s.team === "player" ? "bad" : "good");
+      // A hidden cache comes into sight.
+      if (s.typeKey === "armsCache" && s.alive && !foundCaches.has(s) && fog()?.enabled && fog().isVisible(x, z)) {   // seen, not the dev switch turning the fog off
+        foundCaches.add(s);
+        if (clock > 2) say("<b>FLN arms cache found</b>! Destroy it: no more machine guns from it.", x, z, "good");
+      }
       const hp = hpOf.get(s);
       hpOf.set(s, s.hp);
       if (hp != null && s.alive && s.hp < hp - 1e-6) {
@@ -211,12 +217,15 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
         x: todo.position.x, z: todo.position.z,
       });
     } else list.push({ text: "Hold your villages", sub: "leave a few men in each: the FLN works them back", state: "done" });
+    // The caches are HIDDEN in the hills: how many are left is known (the
+    // intelligence report), WHERE only once one has been seen.
     const caches = structures.list.filter((s) => s.typeKey === "armsCache"), live = caches.filter((s) => s.alive);
+    const found = live.filter((s) => !fog()?.enabled || fog().isExplored(s.position.x, s.position.z));
     if (caches.length) {
       list.push({
-        text: "Destroy the FLN arms caches",
-        sub: live.length ? `${live.length} standing · each arms two FLN machine guns` : "all destroyed: no more FLN machine guns",
-        state: live.length ? "" : "done", x: live[0]?.position.x, z: live[0]?.position.z,
+        text: "Find and destroy the FLN arms caches",
+        sub: live.length ? `${live.length} left · ${found.length ? `${found.length} found` : "none found yet — scout the hills"} · each arms two FLN machine guns` : "all destroyed: no more FLN machine guns",
+        state: live.length ? "" : "done", x: found[0]?.position.x, z: found[0]?.position.z,
       });
     }
     if (cave) list.push({ text: "Destroy the FLN cave (north-west)", sub: cave.alive ? (cave.hp < cave.maxHp ? `${Math.round((100 * cave.hp) / cave.maxHp)}% left` : "wins the war outright · bring armour and mortars") : "destroyed", state: cave.alive ? "" : "done", x: cave.position.x, z: cave.position.z });

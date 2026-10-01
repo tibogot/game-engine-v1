@@ -18,12 +18,13 @@ import { LAYOUT, PLAY, VIEW_YAW } from "./layout.js";
 import { TRACK_LINES } from "./algTracks.js";
 import * as THREE from "three";
 import { buildBurntFarm, buildFarmstead, buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
-import { buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildArmsCache, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { kitView } from "./showroom.js";
 
 const P = {
   farmsteads: 7, roman: 2, burnt: 1,
+  caches: 3,              // hidden arms caches (plus the camp's own)
   // 3 of 10 placed with 90 m from EVERY site (the passes, springs and
   // lookouts are sites too): villages and bases 70 m, the rest 25 m.
   siteClear: 70, minorClear: 25,
@@ -70,6 +71,34 @@ export function landmarkEntries(app, list) {
     ...Array.from({ length: P.farmsteads }, (_, i) => ({ key: `mechtaFarm${i + 1}`, build: (o) => buildFarmstead({ ...o, seed: 1970 + i * 7 }), track: true })),
   ];
   const out = [];
+  // HIDDEN ARMS CACHES (2026-10-01): the FLN's armouries in the hills — each
+  // arms two FM gunners (algAI.js). In its half of the map (nearer the cave
+  // than the post), OFF the tracks, on gentle ground in scrub (the best of
+  // many candidates: concealment first), apart from each other. A pad piece:
+  // the showroom levels its ground. Hidden under the fog until found.
+  const cave = LAYOUT.sites.find((s) => s.kind === "aln"), fr = LAYOUT.sites.find((s) => s.kind === "french");
+  for (let k = 0; k < P.caches; k++) {
+    let best = null, bestS = -Infinity;
+    for (let t = 0; t < 900; t++) {
+      const x = PLAY.x0 + 30 + R() * (PLAY.x1 - PLAY.x0 - 60), z = PLAY.z0 + 30 + R() * (PLAY.z1 - PLAY.z0 - 60);
+      if (Math.hypot(x - fr.x, z - fr.z) < 260 || Math.hypot(x - cave.x, z - cave.z) > Math.hypot(x - fr.x, z - fr.z) + 40) continue;
+      if (Math.hypot(x - cave.x, z - cave.z) < 70) continue;
+      if (LAYOUT.sites.some((s) => ["hamlet", "dechra", "ksar"].includes(s.kind) && Math.hypot(s.x - x, s.z - z) < (s.r ?? 30) + 70)) continue;
+      if (list.some((e) => Math.hypot(e.x - x, e.z - z) < 30) || [...out, ...placed].some((p) => Math.hypot(p.x - x, p.z - z) < 110)) continue;
+      if (trackDist(x, z) < 28) continue;
+      let lo = Infinity, hi = -Infinity, wet = false;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+        const h = H(x + i * 4, z + j * 4); lo = Math.min(lo, h); hi = Math.max(hi, h);
+        if ((app.getWaterLevelAt?.(x + i * 4, z + j * 4) ?? -Infinity) > h - 0.3) wet = true;
+      }
+      if (wet || hi - lo > 2.6) continue;
+      const s = (app.sampleFoliageDensity?.(x, z) ?? 0) + (app.sampleTallPlantDensity?.(x, z) ?? 0) + R() * 0.15;
+      if (s > bestS) { bestS = s; best = { x, z }; }
+    }
+    if (!best) continue;
+    const e = { key: `armsCache${k + 2}`, build: () => buildArmsCache({ seed: 1957 + k * 11 }), x: best.x, z: best.z, yaw: VIEW_YAW + 0.5 + (R() - 0.5) * 0.6, rim: 5 };
+    out.push(e);
+  }
   for (const w of want) {
     for (let t = 0; t < P.tries; t++) {
       const x = PLAY.x0 + R() * (PLAY.x1 - PLAY.x0), z = PLAY.z0 + R() * (PLAY.z1 - PLAY.z0);
