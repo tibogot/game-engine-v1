@@ -63,6 +63,8 @@ export function createSpriteField({
   mat.mrtNode = new BloomMRTNode({ emissive: mul(mul(materialColor.rgb, float(bloomScale)), alpha) });
 
   const mesh = new THREE.InstancedMesh(geo, mat, max);
+  // In the air: after the ground layers (≤ 44), just under the smoke (50) as before.
+  mesh.renderOrder = 49;
   mesh.count = 0;
   mesh.frustumCulled = false;
   scene.add(mesh);

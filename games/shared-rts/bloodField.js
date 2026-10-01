@@ -145,6 +145,7 @@ export function createBloodField({ app, params = BLOOD }) {
     dropMat.opacityNode = round.mul(alive).mul(mix(float(1).sub(k.mul(k)), float(0.35).mul(float(1).sub(k)), mist));
   }
   const dropMesh = new THREE.Mesh(dropGeo, dropMat);
+  dropMesh.renderOrder = 49;   // in the air: after the ground layers (≤ 44), the pools among them
   dropMesh.frustumCulled = false;
   dropMesh.visible = false;
   dropMesh.name = "BloodDrops";

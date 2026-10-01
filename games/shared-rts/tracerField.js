@@ -120,7 +120,7 @@ export function createTracerField({ app, intensity = 2.2, bloom = 0.7 } = {}) {
   const mesh = new THREE.Mesh(geo, material);
   mesh.name = "NamTracers";
   mesh.frustumCulled = false;
-  mesh.renderOrder = 14;
+  mesh.renderOrder = 52;   // over the flames (51), after every ground layer (≤ 44)
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.visible = false;

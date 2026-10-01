@@ -53,7 +53,10 @@ const ALG_TRACERS = { red: [0.95, 0.42, 0.18], green: [0.95, 0.42, 0.18] };
 
 export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {}, onShot = null, onSplash = null, hitChance = null }) {
   // The CoH look (2026-10-01, research in TODO.md): see ALG_FIRE above.
-  const fx = createCombatFx({ app, style: "coh" });
+  // LIT SMOKE (shared litSmoke.js, 2026-10-02): the dust and smoke lit by
+  // the sun (a six-way book) instead of the old painted-light book.
+  // ?litsmoke=0 boots with the old one (the battle lab switches it live).
+  const fx = createCombatFx({ app, style: "coh", litSmoke: new URLSearchParams(location.search).get("litsmoke") !== "0" });
   const fire = createFlameField({ app });
   const craters = await createCraterSystem({ app });
 

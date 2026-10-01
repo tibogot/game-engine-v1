@@ -402,6 +402,39 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       explosionField) — dust-coloured for this desert, black for vehicles
       burning, grey-white for buildings; fires that burn and smoke for a
       while. Measure the cost.
+   - [x] **Step 1 (2026-10-02): LIT SMOKE** — your "honestly, better than
+         the flipbook?": better FLIPBOOKS (CoH does the same), lit by our
+         sun. tools/bakeSixWaySmoke.mjs bakes a procedural billowing dust
+         puff (8x8 frames of 192 px, ~7 s, PIL → webp, 500 KB) lit from the
+         six axes + motion vectors; shared litSmoke.js mixes them by the
+         real sun (app.light) and sky (Sky Pro has no hemi light: a pale
+         blue a tenth of the sun), slides frames along the motion. One
+         instanced draw (ring buffer 384), rows written once. Every puff in
+         combatFx goes through it (blast columns, deaths, dirt kicks, tank
+         dust ring, muzzle smoke, shell trails); ?litsmoke=0 / the lab's
+         checkbox = the old book, live. MEASURED (lab, frozen scenes,
+         interleaved x3): 5 puffs = noise; 40 big puffs over half the
+         screen +0.18 ms vs the old book.
+      · FIXED on the way (you: "the fields go on top of the smoke"): every
+        effect in the air drew BEFORE the ground layers (fields 40, tyre
+        marks 41, craters + pools 42, cover overlay 44) — smoke 12, sprites
+        0. Now sprites + blood drops 49, smoke 50, flames 51, tracers 52
+        (shared: nam had the same bug). And each smoke card's border showed
+        as a pale line through a cloud (mips + motion slide): faded out.
+      - [ ] you, look in the lab (Smoke test, Lit smoke on/off, Sun/Sky
+            sliders): the dust colour, brightness, softness (the old book
+            had crisper curls; the bake can sharpen).
+   - [ ] Step 2: explosions from many small pieces (fireball puffs,
+         debris, a lingering column that drifts with the wind).
+   - [ ] Step 3: fire extras — embers, a black (soot) smoke column from
+         wrecks (SMOKE_TINTS.soot), a ground glow.
+- [ ] **PLOUGHED FIELDS LOOK FLAT** (you, 2026-10-02: "too flat, not
+      realistic enough; CoH looks way better — without hurting perf"):
+      algFields.js plots (one transparent ground layer, renderOrder 40) —
+      give them real furrow relief (a normal map / parallax-free height
+      shading along the rows), clods and stubble texture, soil colour
+      variation and a worn edge instead of the flat stripes; the same for
+      every field kind on the map. Judge against CoH; measure.
 - [x] **THE BATTLE LAB (2026-10-02, battle-lab.html + battleLab.js)** (you:
       "everything related to the fight in a lab"). The REAL game booted lean
       (URL defaults ai=0 battle=0 fow=0 herds/hens/birds=0, any game option

@@ -12,6 +12,7 @@
 import { createSpriteField } from "./spriteField.js";
 import { createExplosionField } from "./explosionField.js";
 import { BLOOM } from "./bloom.js";
+import { SMOKE_TINTS, createLitSmoke } from "./litSmoke.js";
 import * as THREE from "three";
 
 const FLASH_LIFE = 0.07;
@@ -29,7 +30,7 @@ const grow = (p) => (1 + (1 - p) * 1.5) * (0.35 + p * 0.65);
  * lingers — in the desert, dust dominates fire. And a gun smoke wisp after
  * every shot.
  */
-export function createCombatFx({ app, pool = 40, style = "flipbook" }) {
+export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = false }) {
   const { scene } = app;
   const coh = style === "coh";
   // Thrown dirt: dark clods, normal blending (dirt doesn't glow), gravity.
@@ -81,11 +82,26 @@ export function createCombatFx({ app, pool = 40, style = "flipbook" }) {
   const books = createExplosionField({ app });
   let clock = 0;
 
+  // LIT SMOKE (litSmoke.js, opt-in): every puff of dust and smoke — the
+  // blasts' columns, a man going down, dirt kicks, the gun smoke, the shell's
+  // trail — lit by the game's sun instead of the old book's painted light.
+  // setLitSmoke(false) puts the old look back, live (the battle lab's A/B).
+  const lit = litSmoke ? createLitSmoke({ app }) : null;
+  let litOn = !!lit;
+  const bookPuff = books.puff;
+  books.puff = (x, y, z, o = {}) => {
+    if (!litOn) return bookPuff(x, y, z, o);
+    const size = o.size ?? 3;
+    // The old card sat ~0.3 of its size up and climbed 0.3 more: the same here.
+    lit.puff(x, y + size * 0.3, z, { size, duration: o.duration ?? 1.4, delay: o.delay ?? 0, tint: o.grey ? SMOKE_TINTS.grey : SMOKE_TINTS.dust, vel: [0, (size * 0.3) / (o.duration ?? 1.4), 0] });
+  };
+
   return {
     books,
     muzzle: (x, y, z) => {
       flashes.spawn(x, y, z, coh ? 0.045 : FLASH_LIFE);
-      if (wisps) wisps.spawn(x, y, z, 0.6 + Math.random() * 0.4, { vy: 0.5, vx: (Math.random() - 0.5) * 0.4, vz: (Math.random() - 0.5) * 0.4, scale: 0.8 + Math.random() * 0.5 });
+      if (litOn) lit.puff(x, y, z, { size: 0.8, duration: 1.1 + Math.random() * 0.5, tint: SMOKE_TINTS.grey, opacity: 0.35, grow: 0.7, vel: [(Math.random() - 0.5) * 0.4, 0.45, (Math.random() - 0.5) * 0.4] });
+      else if (wisps) wisps.spawn(x, y, z, 0.6 + Math.random() * 0.4, { vy: 0.5, vx: (Math.random() - 0.5) * 0.4, vz: (Math.random() - 0.5) * 0.4, scale: 0.8 + Math.random() * 0.5 });
     },
     impact:    (x, y, z) => impacts.spawn(x, y, z, IMPACT_LIFE),
     /** (coh) A bullet off a vehicle (sparks) or a wall (stone chips + a dust kick). */
@@ -102,7 +118,13 @@ export function createCombatFx({ app, pool = 40, style = "flipbook" }) {
       }
     } : undefined,
     /** (coh) A tank shell's smoke at a point of its flight. */
-    trail: coh ? (x, y, z) => trail.spawn(x, y, z, 1.2 + Math.random() * 0.5, { vy: 0.3, scale: 0.7 + Math.random() * 0.4 }) : undefined,
+    trail: coh ? (x, y, z) => (litOn
+      ? lit.puff(x, y, z, { size: 1.2, duration: 1.4 + Math.random() * 0.5, tint: SMOKE_TINTS.grey, opacity: 0.5, grow: 0.6, vel: [0, 0.3, 0] })
+      : trail.spawn(x, y, z, 1.2 + Math.random() * 0.5, { vy: 0.3, scale: 0.7 + Math.random() * 0.4 })) : undefined,
+    /** The lit smoke on or off (live); null without it. */
+    get litSmoke() { return lit ? litOn : null; },
+    setLitSmoke(on) { if (lit) { litOn = !!on; if (!litOn) lit.clear(); } },
+    lit,
     /**
      * `size` is the cloud's width in metres (10 ≈ a vehicle); `dust` makes it
      * a puff of earth with no fire and no flash.
@@ -184,6 +206,7 @@ export function createCombatFx({ app, pool = 40, style = "flipbook" }) {
       sparks?.update(dt, camera);
       trail?.update(dt, camera);
       books.render(clock);
+      lit?.render(clock);
     },
   };
 }

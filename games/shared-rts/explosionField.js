@@ -145,7 +145,8 @@ function createBook({ app, url, max: MAX, tint, shade, lift = 0, bloom, name }) 
   const mesh = new THREE.Mesh(geo, material);
   mesh.name = name;
   mesh.frustumCulled = false;
-  mesh.renderOrder = 12;   // with the smoke; the additive flames draw after
+  // AFTER every ground layer (fields 40, tyre marks 41, craters + blood pools 42, cover overlay 44): smoke at 12 drew under them and a ploughed field showed THROUGH a dust cloud (you, 2026-10-02).
+  mesh.renderOrder = 50;   // with the smoke; the additive flames draw after (51)
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.visible = false;

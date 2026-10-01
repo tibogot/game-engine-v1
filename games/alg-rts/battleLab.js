@@ -204,6 +204,14 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
     e.stopImmediatePropagation(); e.preventDefault();
   }, true);
 
+  /** The smoke alone: five slow puffs across the middle (dust, then gun smoke). */
+  function puffTest() {
+    for (let i = 0; i < 5; i++) {
+      const p = at(arena, 0, (i - 2) * 7);
+      combat.fx.books.puff(p.x, H(p.x, p.z), p.z, { size: 6, duration: 9, delay: i * 0.25, grey: i === 4 ? 1 : 0 });
+    }
+  }
+
   // ── Time and camera ──────────────────────────────────────────────────────
   const setSpeed = (s) => { app.timeScale = s; render(); };
   const step = () => { if (app.timeScale === 0) app.timeStep = 1 / 60; };
@@ -299,6 +307,10 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
       ${TRACER.map(([w, f, l, lo, hi, st]) => `<div class="row"><span>${l}</span><input type="range" data-w="${w}" data-f="${f}" min="${lo}" max="${hi}" step="${st}" value="${W[w]?.[f] ?? lo}"><b>${W[w]?.[f] ?? "–"}</b></div>`).join("")}
       <h2>Effects</h2>
       <label><input type="checkbox" data-blood${bloodOn ? " checked" : ""}> Blood</label>
+      ${combat.fx.litSmoke !== null ? `<label><input type="checkbox" data-litsmoke${combat.fx.litSmoke ? " checked" : ""}> Lit smoke (off: the old book)</label>
+      <div class="row"><span>Sun on it</span><input type="range" data-lit="uSunK" min="0" max="1.5" step="0.02" value="${combat.fx.lit.params.uSunK.value}"><b>${combat.fx.lit.params.uSunK.value}</b></div>
+      <div class="row"><span>Sky on it</span><input type="range" data-lit="uSkyK" min="0" max="2" step="0.02" value="${combat.fx.lit.params.uSkyK.value}"><b>${combat.fx.lit.params.uSkyK.value}</b></div>` : ""}
+      <div class="btns"><button data-act="puffs" title="A row of slow dust and gun-smoke puffs between the squads, to judge the smoke alone">Smoke test</button></div>
       <div class="row"><span>Blown apart</span><select data-gibs>${[["coh", "CoH: close hits"], ["always", "Every blast kill"], ["off", "Off"]].map(([k, l]) => `<option value="${k}"${GIBS.mode === k ? " selected" : ""}>${l}</option>`).join("")}</select></div>
       <h2>Now</h2>
       <div id="blab-stats"></div>
@@ -325,10 +337,12 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
     else if (t.dataset.cover) S.cover[t.dataset.cover] = t.checked;
     else if ("blood" in t.dataset) setBlood(t.checked);
     else if ("gibs" in t.dataset) GIBS.mode = t.value;
+    else if ("litsmoke" in t.dataset) combat.fx.setLitSmoke(t.checked);
   });
   el.addEventListener("input", (e) => {
     const t = e.target;
     if ("dist" in t.dataset) { S.dist = Number(t.value); t.nextElementSibling.textContent = `${S.dist} m`; }
+    else if (t.dataset.lit) { combat.fx.lit.params[t.dataset.lit].value = Number(t.value); t.nextElementSibling.textContent = t.value; }
     else if (t.dataset.w && W[t.dataset.w]) { W[t.dataset.w][t.dataset.f] = Number(t.value); t.nextElementSibling.textContent = t.value; }
   });
   el.addEventListener("click", (e) => {
@@ -340,6 +354,7 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
     else if (d.act === "fire") { setHold(false); render(); }
     else if (d.act === "hold") { setHold(true); render(); }
     else if (d.act === "step") step();
+    else if (d.act === "puffs") puffTest();
     else if (d.act === "frame") frame();
     else if (d.act === "play") frame(0.5);
     else if (d.act === "closeFr") closeOn("fr");
@@ -358,5 +373,5 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
 
   render();
   frame();
-  return { arena, spawn, clear, drop, dropOn, setHold, setSpeed, squads: () => squads, S };
+  return { arena, spawn, clear, drop, dropOn, setHold, setSpeed, puffTest, squads: () => squads, S };
 }

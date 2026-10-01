@@ -165,7 +165,7 @@ export function createFlameField({ app, intensity = 0.95, bloom = 0.3 } = {}) {
   const mesh = new THREE.Mesh(geo, material);
   mesh.name = "NamFlames";
   mesh.frustumCulled = false;
-  mesh.renderOrder = 13;
+  mesh.renderOrder = 51;   // over the smoke (50), after every ground layer (≤ 44)
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.visible = false;
