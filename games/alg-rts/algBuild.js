@@ -186,7 +186,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   // ── The sites: paid, levelled, blocked, cleared; the sappers walk there ───
   const sites = [];
   let n = 0;
-  async function commit(key, x, z, yaw, builders) {
+  async function commit(key, x, z, yaw, builders, { stay = false } = {}) {
     const B = BUILDS[key];
     const sv = survey(key, x, z, yaw);
     if (!sv.ok || !purseOf(key)?.spend(B.cost)) return null;
@@ -222,7 +222,9 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     };
     sites.push(site);
     // Each sapper to the nearest open ground at the site's edge, on his side.
-    for (const u of builders) {
+    // `stay`: builders already within reach work where they stand (an ambush
+    // band raising its screen must not walk off its spot — algAI.js).
+    for (const u of stay ? [] : builders) {
       if (!u.alive) continue;
       const dx = u.position.x - cx, dz = u.position.z - cz, d = Math.hypot(dx, dz) || 1;
       const ex = cx + (dx / d) * (site.reach - 3.5), ez = cz + (dz / d) * (site.reach - 3.5);
@@ -335,6 +337,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
      * ambush screen with this: place("sangar", x, z, yaw, [moudjahidine]).
      * Resolves to the site (null: refused — survey(key, x, z, yaw).why says why).
      */
-    place: (key, x, z, yaw, builders) => commit(key, x, z, yaw, builders),
+    place: (key, x, z, yaw, builders, opts) => commit(key, x, z, yaw, builders, opts),
+    /** A piece's price (BUILDS). */
+    costOf: (key) => BUILDS[key]?.cost ?? 0,
   };
 }

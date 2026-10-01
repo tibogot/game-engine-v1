@@ -77,6 +77,16 @@ const P = {
   tactEvery: 0.5,             // seconds between a band's tactical looks (cover, grenades)
   grenadeEvery: 6,            // seconds between one band's grenades
   coverSeek: 12,              // metres a man fired on looks for shelter
+  // ── 2026-10-01: the FLN holds what it takes, comes back for what it loses,
+  // and builds (you: "of course you should work on [the AI]") ──
+  cellSize: [2, 3],           // men left as a village's GARRISON once it turns
+  cellMinBand: 4,             // a band this big or more leaves a cell
+  cellBreak: 0.7,             // share of the cell lost: the rest run for the cave
+  retakeWindow: 300,          // s a lost village stays the next band's mission
+  retakeSoon: 15,             // the next band comes within this after a loss
+  screenWait: 3,              // s in ambush before it puts up a screen (8: they struck first)
+  screenApart: 45,            // m between two ambush screens
+  stuckCut: 30,               // m: a band stuck this near wire cuts it
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -316,8 +326,13 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
           setState(b, b.mission === "village" ? "occupy" : b.mission === "mine" ? "lay" : "ambush");
           break;
         }
-        // Everyone stopped short (no route for anyone): try another spot.
-        if (b.t > 20 && m.every((u) => !u.isMoving)) { plan(b); break; }
+        // Everyone stopped short (no route for anyone): wire in the way? Cut
+        // it (algWire.js) and go on. Otherwise try another spot.
+        if (b.t > 20 && m.every((u) => !u.isMoving)) {
+          const c0 = centre(m), w = app.algWire?.nearest(c0.x, c0.z, P.stuckCut);
+          if (w && !b.cutTried) { b.cutTried = true; b.wire = w.m; app.algWire.cut(m, w); setState(b, "cut"); break; }
+          plan(b); break;
+        }
         // The French moved on: a new spot every few seconds.
         if (b.t > P.replanEvery && b.target && dist(b.target.lead.position, b.target.at) > 35) plan(b);
         break;
@@ -330,6 +345,10 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         const c = centre(near.length ? near : m);
         const close = french().some((u) => !u.isAir && dist(u.position, c) < P.trigger);
         if (close || m.some((u) => (u.suppression ?? 0) > 0.3)) { strike(b); break; }
+        // Waiting: cut scrub stood up in front of them — an AMBUSH SCREEN
+        // (algBuild.js, paid from the ALN purse): they are hidden behind it
+        // until they fire (algCover concealment).
+        if (b.t > P.screenWait && !b.screened && b.target) { b.screened = true; buildScreen(b, near.length ? near : m, c); }
         if (b.t > P.waitMax) {
           const tg = pickTarget(c);
           if (tg && dist(tg.at, c) < 80) { strike(b); for (const u of m) u.orderTo(tg.at.x, tg.at.z); }
@@ -343,6 +362,36 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         if (!m.length) return setState(b, "done");
         const c = centre(m);
         if (french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger)) { strike(b); break; }
+        // TURNED: leave a cell to hold it, the rest go on (a band that sat in
+        // a won village forever was a band the war no longer had). Already
+        // held (a second band arrived): on to something else. Too small to
+        // split: it becomes the cell itself.
+        if (b.village?.owner === "enemy") {
+          if (garrisonOf(b.village)) { b.mission = null; plan(b); }
+          else if (m.length >= P.cellMinBand) { leaveCell(b, b.village); b.mission = null; plan(b); }
+          else { b.mission = "garrison"; b.start = m.length; holdFire(b, true); cellSpots(b.village, m.length).forEach((p, i) => m[i]?.orderTo(p.x, p.z)); setState(b, "garrison"); }
+        }
+        break;
+      }
+      case "garrison": {
+        // A village's cell: in cover among the houses, holding fire until the
+        // French come; then it FIGHTS in place (it does not melt away like a
+        // band — the village is what it is for). Nearly wiped out: run.
+        if (!m.length) return setState(b, "done");
+        const c = centre(m);
+        const close = french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger + 10);
+        holdFire(b, !close);
+        if (close) {
+          b.tact = (b.tact ?? 0) - dt;
+          if (b.tact <= 0) { b.tact = P.tactEvery; tactics(b, m, dt); }
+        }
+        if (1 - m.length / Math.max(1, b.start) >= P.cellBreak || b.village.owner === "player") withdraw(b);
+        break;
+      }
+      case "cut": {
+        // Stuck at wire: the men cut it (algWire.js), then on to the spot.
+        if (!m.length) return setState(b, "done");
+        if (!b.wire?.parent || b.t > 25) { setState(b, "approach"); sendBand(b, b.spot); }
         break;
       }
       case "lay": {
@@ -504,9 +553,93 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     return true;
   }
 
+  // ── Garrisons, retakes, building (2026-10-01) ─────────────────────────────
+  const garrisonOf = (v) => bands.find((g) => g.state === "garrison" && g.village === v && alive(g).length);
+  /** Spots among a village's houses where a man has cover: the best few of a ring. */
+  function cellSpots(v, n) {
+    const c = app.algCover, out = [];
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2 + rand(-0.1, 0.1), r = rand(10, 26);
+      const x = v.position.x + Math.cos(a) * r, z = v.position.z + Math.sin(a) * r;
+      if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
+      out.push({ x, z, s: (c ? c.coverAt(x, z) : 0) + (c ? c.concealmentAt(x, z) : 0) + rand(0, 0.2) });
+    }
+    return out.sort((p, q) => q.s - p.s).slice(0, n);
+  }
+  function leaveCell(b, v) {
+    const m = alive(b);
+    const k = Math.min(m.length - 2, Math.round(rand(...P.cellSize)));
+    if (k < 1) return;
+    const cell = m.slice(0, k);
+    b.members = b.members.filter((u) => !cell.includes(u));
+    const g = { state: "garrison", village: v, members: cell, size: k, start: k, t: 0, mission: "garrison" };
+    bands.push(g);
+    holdFire(g, true);
+    cellSpots(v, k).forEach((p, i) => cell[i]?.orderTo(p.x, p.z));
+    // A sangar at the village's edge, facing the post: what the cell falls
+    // back behind (algBuild.js, paid from the ALN purse; the cell raises it).
+    const build = app.algBuild, aln = app.algEconomy?.aln;
+    // One per village: a village that changes hands again keeps its old one.
+    const hasOne = Object.entries(app.showroom ?? {}).some(([k, o]) => /sangar/i.test(o?.userData?.kitKey ?? k) && o.parent && Math.hypot(o.position.x - v.position.x, o.position.z - v.position.z) < 70)
+      || (build?.sites ?? []).some((s) => s.key === "sangar" && Math.hypot(s.x - v.position.x, s.z - v.position.z) < 70);
+    if (build && !hasOne && aln?.canAfford(build.costOf?.("sangar") ?? 60)) {
+      // Out past the houses (a ksar's own walls blocked every spot within
+      // 40 m straight toward the post — measured): further out, and either side.
+      const a0 = Math.atan2(post.z - v.position.z, post.x - v.position.x);
+      search: for (let r = 20; r <= 60; r += 4) {
+        for (const da of [0, 0.3, -0.3, 0.6, -0.6, 0.9, -0.9]) {
+          const x = v.position.x + Math.cos(a0 + da) * r, z = v.position.z + Math.sin(a0 + da) * r;
+          // The sangar's open back toward the village: its front (-Z) to the post.
+          const yaw = Math.atan2(-(post.x - x), -(post.z - z));
+          if (build.survey("sangar", x, z, yaw).ok) { build.place("sangar", x, z, yaw, cell); break search; }
+        }
+      }
+    }
+  }
+  /** An ambush screen a few metres in front of a band lying up, toward its target. */
+  function buildScreen(b, men, c) {
+    const build = app.algBuild, aln = app.algEconomy?.aln;
+    if (!build || !aln?.canAfford(build.costOf?.("ambushScreen") ?? 25)) return;
+    const shown = Object.entries(app.showroom ?? {}).some(([k, o]) => /ambushScreen/.test(o?.userData?.kitKey ?? k) && o.parent && Math.hypot(o.position.x - c.x, o.position.z - c.z) < P.screenApart);
+    if (shown) return;
+    const tg = b.target.at, a0 = Math.atan2(tg.z - c.z, tg.x - c.x);
+    // A few spots in front of the band (a hillside in scrub refuses many:
+    // too steep, a bush's footprint).
+    for (const r of [4, 6, 3, 8]) {
+      for (const da of [0, 0.35, -0.35, 0.7, -0.7]) {
+        const x = c.x + Math.cos(a0 + da) * r, z = c.z + Math.sin(a0 + da) * r;
+        // The screen's +Z (its men's side) toward the band: its front (-Z) faces the target.
+        const yaw = Math.atan2(-(tg.x - x), -(tg.z - z));
+        const sv = build.survey("ambushScreen", x, z, yaw);
+        if (sv.ok) { build.place("ambushScreen", x, z, yaw, men, { stay: true }); lastScreen = "placed"; return; }
+        lastScreen = sv.why;
+      }
+    }
+  }
+  let lastScreen = null;       // dev: the last screen attempt's result
+  // Villages the French took back: the next band's mission (newest first).
+  const lostVillages = [];
+  const lastOwner = new Map();
+  function watchVillages() {
+    for (const v of app.algEconomy?.points ?? []) {
+      const was = lastOwner.get(v);
+      if (was === "enemy" && v.owner !== "enemy") {
+        lostVillages.unshift({ v, at: t });
+        nextBand = Math.min(nextBand, P.retakeSoon);
+      }
+      lastOwner.set(v, v.owner);
+    }
+    while (lostVillages.length && t - lostVillages.at(-1).at > P.retakeWindow) lostVillages.pop();
+  }
+
   function plan(b) {
     const m = alive(b);
     const c = centre(m);
+    // A village the French just took from us comes first: go and take it back.
+    if (!b.mission || b.mission === "retake") {
+      const lost = lostVillages.find((l) => l.v.owner !== "enemy");
+      if (lost && planVillage(b, lost.v)) { b.mission = "village"; b.retake = true; return; }
+    }
     // A mine on the piste, about a third of the time there is room for one.
     if (!b.mission && Math.random() < P.mineShare && planMine(b)) return;
     if (b.mission === "mine") {
@@ -560,6 +693,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         if (bands[i].state === "done") { for (const u of bands[i].members) inBand.delete(u); bands.splice(i, 1); }
       }
       if (!enabled) return;
+      watchVillages();
       nextBand -= dt;
       if (nextBand <= 0) {
         nextBand = rand(...P.bandEvery) * (pool > 6 ? 0.7 : 1);
@@ -571,6 +705,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     bandNow() { newBand(); },
     /** The next band in `s` seconds (algDifficulty.js, at the start). */
     restartClock(s) { nextBand = s; },
+    /** Dev: the last ambush-screen attempt ("placed" or why not). */
+    get lastScreen() { return lastScreen; },
     /** Dev: the ambush spot a band at `from` would take on French at `tgt`. */
     ambushSpotFor: (from, tgt) => ambushSpot(from, tgt),
     /** Dev: the via point a band at `from` would take round the French MGs to `to` (null: straight). */

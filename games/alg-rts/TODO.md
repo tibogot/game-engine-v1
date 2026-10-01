@@ -203,6 +203,9 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
+- [ ] **A BETTER MINIMAP** (you, 2026-10-01: "reads small; a rotated square
+      inside a square doesn't look nice; we can do far better for the eyes
+      and for gameplay"). NEXT after the AI round.
 - [x] **A REAL ENEMY + A GAME THAT EXPLAINS ITSELF** (2026-10-01; you: "way
       too easy, almost no enemies … something should be written to explain").
       · DIFFICULTY (algDifficulty.js; chosen on the briefing, remembered,
@@ -222,11 +225,30 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
         bleeding, train a sapper, how an FLN band fights.
       · VILLAGE TOOLTIP (hover a marker): who it backs and how far, its
         income, men of each side in its ring, how to win it.
-   - [ ] **3 — the AI (mine now, you: "of course you should work on it")**:
-         a militia cell left in a village the FLN turned; a band coming back
-         for a village you take; the FLN building sangars / ambush screens
-         and cutting wire (algBuild.place / algWire.cutNearest are ready);
-         an MG team (FM 24/29) so ambushes pin; caches unlocking it.
+   - [x] **3 — the AI, round 1 (2026-10-01, algAI.js; mine now)** — TESTED
+         on Hard:
+         · GARRISON: a village turns → the band leaves a cell of 2-3 men in
+           cover among the houses (cellSpots: the best cover of a ring), the
+           rest re-plan; a second band arriving at a held village moves on; a
+           band too small to split becomes the cell. The cell holds fire,
+           FIGHTS IN PLACE when the French come (tactics: cover, grenades),
+           runs only at 70% lost or when the village is lost. Seen: the ksar
+           and the dechra each garrisoned (2 and 3 men).
+         · SANGAR: the cell raises one at the village's edge facing the post
+           (searched 20-60 m out, ±0.9 rad: the ksar's walls blocked every
+           spot within 40 m), one per village, paid by the ALN. Seen: built
+           in ~25 s.
+         · RETAKE: a village the FLN loses is the next band's mission for 5
+           min, and the next band comes within 15 s. Seen: a band of 5 for
+           the ksar ~20 s after it was lost.
+         · AMBUSH SCREEN: a band lying up puts one up in front of itself
+           after 3 s (algBuild.place `stay`: the builders don't leave their
+           spot). Seen: placed and built in 10 s.
+         · WIRE: a band stuck short of its spot with wire within 30 m cuts it
+           (state "cut", algWire.cut), then goes on. (Not seen in a test.)
+   - [ ] AI round 2: an MG team (FM 24/29 — a new unit type: model, weapon,
+         renderer) so ambushes PIN; the arms caches unlocking it; the mule
+         train; the refuge (casemate) and the lookout.
    - [ ] you, play it: Normal hard enough? (Hard = 700 + 70/min, 12 out.)
 - [x] **FLOWERS + SMALL PLANTS, round 1** (2026-10-01; you: "the pink flowers
       are flat quads; still Algeria; the cactus"). Season kept: LATE SUMMER.
