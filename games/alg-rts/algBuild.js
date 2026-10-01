@@ -27,7 +27,7 @@ import { PLAY, VIEW_YAW } from "./layout.js";
  */
 export const BUILDS = {
   sandbags: { label: "Sacs de sable", tip: "Sandbag wall: hard cover for men behind it.", cost: 20, time: 6, build: () => buildFrSandbagWall(), follow: true },
-  wire: { label: "Barbelés", tip: "Barbed wire: nobody walks through it.", cost: 15, time: 5, build: () => buildBarbedWire(), follow: true },
+  wire: { label: "Barbelés", tip: "Barbed wire: men must go round or cut it; a vehicle crushes it.", cost: 15, time: 5, build: () => buildBarbedWire(), follow: true, noFoot: true },
   mgNest: { label: "Nid de MG", tip: "MG nest: an AA-52 behind sandbags.", cost: 90, time: 14, build: () => buildMgNest(), pad: true, structure: "mgNest" },
   mortarPit: { label: "Mortier", tip: "81 mm mortar pit: bombs 25-120 m out, over cover.", cost: 130, time: 18, build: () => buildMortarPit(), pad: true, structure: "mortarPit" },
   mirador: { label: "Mirador", tip: "Watchtower: sees 110 m, an MG in the cabin.", cost: 110, time: 20, build: () => buildMirador(), pad: true, structure: "mirador" },
@@ -193,7 +193,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     const f = sv.f;
     const [cx, cz] = toWorld(x, z, yaw, f.cx, f.cz);
     // Block it at once (men route round the site) and clear the plants off it.
-    const fp = navGrid?.addFootprint?.(cx, cz, f.hx, f.hz, yaw) ?? null;
+    // Wire: NO FOOT (men go round, a vehicle drives over and crushes it — algWire.js).
+    const fp = navGrid?.addFootprint?.(cx, cz, f.hx, f.hz, yaw, { noFoot: !!B.noFoot }) ?? null;
     for (let lx = -f.hx; lx <= f.hx + 0.01; lx += 2.5) for (let lz = -f.hz; lz <= f.hz + 0.01; lz += 2.5) {
       const [wx, wz] = toWorld(x, z, yaw, f.cx + lx, f.cz + lz);
       app.clearVegetation?.(wx, wz, 2.4, { grass: 2, edge: 0.5 });
@@ -204,6 +205,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     const mesh = kitView(geoOf(key).clone());
     mesh.name = `built:${key}:${++n}`;
     mesh.userData.kitKey = key;
+    mesh.userData.navFootprint = fp;                  // algWire.js takes it off when the wire goes
     seat(mesh, x, y, z, yaw, sv.tilt);
     mesh.scale.y = 0.06;                              // the foundation, until work starts
     app.scene.add(mesh);
@@ -256,7 +258,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       s.hp = s.progress * 100;
     }
     for (let i = sites.length - 1; i >= 0; i--) if (sites[i].progress >= 1) finish(sites[i]);
-    for (const u of units.list) if (u.working && !atWork.has(u)) u.working = null;
+    for (const u of units.list) if (u.working && !atWork.has(u) && !u.cutting) u.working = null;   // a wire-cutter is algWire.js's
   }
   /** A site stops being a site (finished or cancelled): out of the list and the selection. */
   function retire(s) {
@@ -288,7 +290,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     purseOf(s.key)?.earn?.(BUILDS[s.key].cost);
     app.scene.remove(s.mesh);
     s.mesh.geometry?.dispose?.();
-    if (s.fp) { navGrid?.removeFootprint?.(s.fp); navGrid?.rebuild?.(); }
+    if (s.fp?.noFoot) navGrid?.clearNoFootFootprint?.(s.fp);
+    else if (s.fp) { navGrid?.removeFootprint?.(s.fp); navGrid?.rebuild?.(); }
     return true;
   }
 

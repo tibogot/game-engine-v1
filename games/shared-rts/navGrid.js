@@ -46,8 +46,10 @@ export function createNavGrid({
   // footRules true for infantry — and anything that doesn't say gets VEHICLE
   // rules, the safe default. (Code that tests `=== 1` directly reads 2 as open:
   // the cells only exist on a footbridge, and every path query goes through wall().)
+  // 3 is the reverse, NO FOOT: barbed wire — men go round, a vehicle drives
+  // over it (alg-rts algWire.js crushes it). Only foot-only footprints make it.
   let footRules = false;
-  const wall = (i) => blocked[i] === 1 || (!footRules && blocked[i] === 2);
+  const wall = (i) => blocked[i] === 1 || (!footRules && blocked[i] === 2) || (footRules && blocked[i] === 3);
   const isBlocked = (cx, cz) => !inBounds(cx, cz) || wall(idx(cx, cz));
 
   const worldToCell = (wx, wz) => ({
@@ -196,7 +198,24 @@ export function createNavGrid({
   // Footprints: placed buildings and props (placedObjects.js) — an oriented
   // rectangle each, blocked, kept across rebuilds like the barriers.
   const footprints = [];
+  /** The cells inside footprint `f` (centre, half extents, yaw): fn(cell index). */
+  function eachFootprintCell(f, fn) {
+    const cos = Math.cos(f.ry), sin = Math.sin(f.ry);
+    const rad = Math.hypot(f.hx, f.hz);
+    const min = worldToCell(f.x - rad, f.z - rad);
+    const max = worldToCell(f.x + rad, f.z + rad);
+    for (let cz = min.cz; cz <= max.cz; cz++) {
+      for (let cx = min.cx; cx <= max.cx; cx++) {
+        const c = cellToWorld(cx, cz);
+        const dx = c.x - f.x, dz = c.z - f.z;
+        const lx = cos * dx - sin * dz, lz = sin * dx + cos * dz;
+        if (Math.abs(lx) <= f.hx && Math.abs(lz) <= f.hz) fn(idx(cx, cz));
+      }
+    }
+  }
   function stampFootprint(f) {
+    // NO FOOT (barbed wire): only on open ground — it never opens a wall.
+    if (f.noFoot) { eachFootprintCell(f, (i) => { if (blocked[i] === 0) blocked[i] = 3; }); return; }
     const cos = Math.cos(f.ry), sin = Math.sin(f.ry);
     const rad = Math.hypot(f.hx, f.hz);
     const min = worldToCell(f.x - rad, f.z - rad);
@@ -668,13 +687,28 @@ export function createNavGrid({
      * An oriented rectangle units cannot enter — a placed building's footprint
      * (centre, half extents, yaw), kept across rebuilds. Returns a handle.
      */
-    addFootprint: dirty((x, z, hx, hz, ry = 0) => {
-      const f = { x, z, hx, hz, ry };
+    addFootprint: dirty((x, z, hx, hz, ry = 0, { noFoot = false } = {}) => {
+      const f = { x, z, hx, hz, ry, noFoot };
       footprints.push(f);
       stampFootprint(f);
       return f;
     }),
     removeFootprint: (f) => { const i = footprints.indexOf(f); if (i >= 0) footprints.splice(i, 1); },
+    /**
+     * Take a NO-FOOT footprint (barbed wire) off the grid AT ONCE, without a
+     * rebuild (~70 ms on alg-aures): its cells go back to open, then any
+     * other no-foot footprint overlapping them is stamped again. (A full
+     * footprint still needs rebuild(): what was under it is not known.)
+     */
+    clearNoFootFootprint: dirty((f) => {
+      const i = footprints.indexOf(f);
+      if (i < 0 || !f.noFoot) return false;
+      footprints.splice(i, 1);
+      eachFootprintCell(f, (c) => { if (blocked[c] === 3) blocked[c] = 0; });
+      const r = Math.hypot(f.hx, f.hz);
+      for (const o of footprints) if (o.noFoot && Math.hypot(o.x - f.x, o.z - f.z) < r + Math.hypot(o.hx, o.hz)) stampFootprint(o);
+      return true;
+    }),
     /** Straight-line walkability between two world points (waypoint lookahead). */
     hasLOS: (ax, az, bx, bz, { foot = false } = {}) => { footRules = foot; return hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }); },
     setDebug,

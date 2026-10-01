@@ -162,6 +162,44 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
+- [x] **FIELDS + HEDGES — filling the land** (2026-10-01, algFields.js; you:
+      "it still looks empty for an RTS", picked 1 + 2 of the fill list).
+      SEEN IN THE GAME: 45 plots, 1072 wall segments, 1064 hedge plants,
+      65 stones lifted out of the fields. GPU on vs off (surfaces + walls,
+      gpuAB): 3.46 vs 3.33 ms = +0.13 (noise 0.11). Cover at a wall 0.89,
+      concealment by a hedge 0.6 (the map's max), open ground 0.
+      · Plots round the 4 villages (10 / 12 / 15 by kind), 14-190 m out,
+        < 15° and < 5.5 m relief (11° / 3.5 m found only 18), off tracks /
+        wadi / cliffs / water / every placed piece (+4 m lanes), long side
+        along the contour; scrub, grass and loose stones cleared
+        (algStones.clearWhere). Surface = ONE draped draw, LIT soil of its
+        own (a 2× multiply over the ground photo kept its pebbles: the
+        field read as darker stony ground), furrows EXAGGERATED to 1.5 m
+        (0.7 m vanished at play zoom), stubble / barley rows 1.1 m.
+      · Low dry-stone walls on ~3 sides with a gate: rtsAlgVillage
+        buildFieldWallSegment (220 tris) INSTANCED, 3 variants = 3 draws;
+        hard cover (algCover reads coverCircles; re-baked after).
+      · Prickly-pear hedges outside open sides and along the pistes near the
+        villages (runs of 24-60 m, gaps): the showroom's PlacedFoliage, no
+        new draws; CONCEALMENT within 1.8 m (algCover concealExtra).
+   - [ ] **you, look**: the field colours (stubble may be too bright and
+         even), furrow strength, hedge density (1.05 m, half doubled), how
+         close the fields come to the villages. Close up the soil is clean:
+         a fine clod grain if it shows at play zoom.
+   - [ ] Unwalled field sides could get a cleared-stone line (cheaper wall).
+   - [ ] Orchards as a field kind (rows of olives / almonds — placed foliage).
+- [x] **BARBED WIRE THAT MATTERS** (2026-10-01, algWire.js; CoH's wire):
+      the sappers' wire is a NO-FOOT footprint (shared navGrid.js cell 3,
+      nam unchanged): infantry of both sides path ROUND it (tested: 22 m on
+      foot vs 14 m for a vehicle across one piece), vehicles drive over and
+      CRUSH it, a grenade or shell BLOWS it, men beside it CUT it (8 s one
+      man, ~5 s two; tested). Sappers: the "Couper" order (nearest wire,
+      40 m). Wire leaves the grid at once, no rebuild (clearNoFootFootprint).
+   - [ ] **you (algAI.js)**: the FLN cutting wire that stands between a band
+         and its goal — `app.algWire.cutNearest(men, x, z)`; today they
+         only go round. Same for building: `app.algBuild.place("sangar" |
+         "ambushScreen", x, z, yaw, men)`.
+   - [ ] A man caught in wire (pushed in by a blast): slowed / snagged.
 - [x] **THE LAND AT WAR** (2026-10-01, you: "poles, tyre tracks, damage
       states — always optimized"). MEASURED: all of it on vs hidden, same
       view, gpuAB 4 rounds: 3.15 vs 3.22 ms — inside the noise (0.22).
@@ -190,6 +228,14 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          array per village).
    - [ ] you, look: the poles' side and spacing; the rut strength (tint
          0x9a8a78); the burning-house smoke (the ovens' grey, thicker).
+   - [ ] **The wires read as ruled straight lines** (you, 2026-10-01). Why:
+         they are 1 px GL lines (always 1 px, any zoom, no shading), and the
+         sag is only 1.4% of the span (~0.6 m on 42 m) — nearly straight.
+         Fix: real wires as thin RIBBONS (the barbed wire's trick: drawn fat,
+         ~2.5 cm, so they keep a pixel or two and catch the light), one
+         merged mesh, still ONE draw; sag ~2.5-3% (1-1.3 m: a PTT line hangs
+         visibly); 16 segments a span so the curve is smooth; a faint
+         per-span sag variation. Judge at play zoom AND close.
    - [ ] Poles: the FLN cuts the line → the post loses its radio (minimap
          intel) — gameplay, later.
 - [x] **THE BATTLE — a goal, and the game telling you what happens**

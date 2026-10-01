@@ -90,12 +90,15 @@ export function createAlgCover(app, { showroom = {}, isArmed = () => true } = {}
       const lx = q.c * dx - q.s * dz, lz = q.s * dx + q.c * dz;
       if (Math.abs(lx - q.fp.cx) <= q.fp.hx * 0.72 && lz >= q.fp.cz - 0.6 && lz <= q.fp.cz + q.fp.hz + 2.4) return 1;
     }
-    return 0;
+    // Beside a prickly-pear hedge (algFields.js).
+    return app.algFields?.concealAt(x, z) ?? 0;
   };
   const cover = createCover({
     app, worldSize: app.worldSize ?? 1024, params: ALG_COVER, concealExtra,
     *extra() {
       screens.length = 0;
+      // The field walls (algFields.js; made after this — the game re-bakes).
+      if (app.algFields) yield* app.algFields.coverCircles();
       for (const [name, mesh] of Object.entries(showroom)) {
         // A sapper's piece is listed as "built:<kind>:<n>"; its kind decides.
         const key = mesh?.userData?.kitKey ?? name;

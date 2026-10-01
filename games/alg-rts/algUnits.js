@@ -28,7 +28,7 @@ import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { COSTS, createAlgEconomy } from "./algEconomy.js";
-import { BUILD_BUTTONS, BUILD_COSTS, createAlgBuild } from "./algBuild.js";
+import { BUILD_BUTTONS, BUILD_COSTS, canBuild, createAlgBuild } from "./algBuild.js";
 import { createAlgSearchlights } from "./algSearchlight.js";
 import { createResourceHud } from "./ui/resourceHud.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
@@ -310,6 +310,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       ? [
         { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrol the nearest track in file, back and forth (vehicles: the piste). A GMC on patrol delivers supplies to the villages you hold.", ready: true },
         grenades?.ability(sel),
+        // COUPER (algWire.js): sappers cut the nearest wire within 40 m.
+        sel.some((u) => u.alive && u.team === "player" && canBuild(u, "wire"))
+          && { key: "cutWire", label: "Couper", hint: "Cut the nearest barbed wire (40 m): ~8 s for one sapper, less for more.", ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
       ].filter(Boolean)
       // A sappers' site (algBuild.js): cancel it, the price back.
       : sel.length === 1 && sel[0].site && sel[0].alive
@@ -317,6 +320,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         : []),
     onAbility: (key, sel) => {
       if (key === "cancelSite") build?.cancelSite(sel[0]);
+      if (key === "cutWire") app.algWire?.orderCut(sel);
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
     },

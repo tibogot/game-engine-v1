@@ -146,5 +146,24 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
   const counts = {};
   for (const [key, list] of Object.entries(lists)) { const gk = key.split("|")[0]; counts[gk] = (counts[gk] ?? 0) + list.length; }
   console.log(`[stones] ${n} stones in ${group.children.length} draws (${Object.entries(counts).map(([k, c]) => `${k} ${c}`).join(", ")}) in ${Math.round(performance.now() - t0)} ms`);
-  return { group, counts, total: n };
+  /**
+   * Take out every stone `fn(x, z)` says to (worked land: algFields.js). Each
+   * goes by moving the mesh's last instance into its slot: once, at load.
+   */
+  function clearWhere(fn) {
+    let gone = 0;
+    const mm = new THREE.Matrix4();
+    for (const mesh of group.children) {
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, mm);
+        if (!fn(mm.elements[12], mm.elements[14])) continue;
+        mesh.getMatrixAt(mesh.count - 1, mm);
+        mesh.setMatrixAt(i, mm);
+        mesh.count--; i--; gone++;
+        mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    return gone;
+  }
+  return { group, counts, total: n, clearWhere };
 }

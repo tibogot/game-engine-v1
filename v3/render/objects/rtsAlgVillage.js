@@ -474,6 +474,23 @@ export function buildGarden({ seed = 1961, w = 18, d = 13, kind = "olive", groun
 }
 
 /**
+ * FIELD WALL SEGMENT — 2 m of the low dry-stone wall round a field: two
+ * courses of stones cleared off the soil, knee-high (0.7 m), along local X.
+ * The game INSTANCES it along every field edge (alg-rts algFields.js: a few
+ * seeds for variety, one draw each, however long the walls run), each
+ * segment seated on the ground under it — a hand-built wall steps down a
+ * slope the same way.
+ */
+export function buildFieldWallSegment({ seed = 1964 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  dryStone(parts, R, [[-1.05, 0], [1.05, 0]], { courses: 2, h: 0.7, depth: 0.5, len: 0.5, batter: 0.04, tone: 0.5 });
+  // A loose stone or two fallen at its foot.
+  for (let k = 0; k < 2; k++) parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.32, 0.22, 0.28), pos: [(R() - 0.5) * 1.6, 0.06, (R() < 0.5 ? -1 : 1) * 0.42], rot: [R(), R() * 3, R()], mat: MAT.limestone, tone: 0.45 });
+  return finish(parts, { hx: 1.1, hz: 0.45, height: 0.75, ao: { strength: 0.3 } });
+}
+
+/**
  * TERRACES — almonds on a slope: dry-stone retaining walls along the
  * contour, each holding the ground up behind it (its height is what the
  * slope gives: a low kerb on the flat, a metre and more on a hillside), a

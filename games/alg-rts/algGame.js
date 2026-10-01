@@ -22,6 +22,8 @@ import { createAlgUnits } from "./algUnits.js";
 import { createAlgBattle } from "./algBattle.js";
 import { createAlgPoles } from "./algPoles.js";
 import { createAlgDamage } from "./algDamage.js";
+import { createAlgWire } from "./algWire.js";
+import { createAlgFields } from "./algFields.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
@@ -299,6 +301,26 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         cover: app.algCover ?? null, fire: app.algCombat?.fire ?? null,
       });
     } catch (e) { console.warn("[alg damage] failed:", e); }
+  }
+  // BARBED WIRE (algWire.js): men go round it or cut it, vehicles crush it,
+  // blasts cut it. Always on (the nav rule lives with the wire).
+  if (app.algUnits) {
+    try {
+      app.algWire = createAlgWire(app, { units: app.algUnits.units, showroom: app.showroom ?? {}, navGrid: app.navGrid ?? null, ambience: app.algAmbience ?? null });
+    } catch (e) { console.warn("[alg wire] failed:", e); }
+  }
+  // FIELDS (algFields.js): ploughed, stubble and barley plots round the
+  // villages, low walls (cover), prickly-pear hedges (concealment) round
+  // them and along the pistes near the villages. Then the cover map again,
+  // with the walls in it. ?fields=0 = without.
+  if (params.get("fields") !== "0" && app.algEconomy) {
+    onStatus("Ploughing the fields…");
+    try {
+      const t0 = performance.now();
+      app.algFields = createAlgFields(app, { economy: app.algEconomy, navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, plants: app.showroom?.plants ?? null });
+      app.algCover?.bake();
+      console.log(`[fields] ${JSON.stringify(app.algFields.stats)} in ${Math.round(performance.now() - t0)} ms`);
+    } catch (e) { console.warn("[alg fields] failed:", e); }
   }
   // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,
   // the dechra and the springs; they bolt from soldiers. ?herds=0 = without.
