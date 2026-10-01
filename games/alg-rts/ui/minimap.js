@@ -51,7 +51,8 @@ function makeFrame(area, upYaw, px, world) {
   const fx = Math.sin(upYaw), fz = Math.cos(upYaw), rx = -fz, rz = fx;
   const cx = (area.x0 + area.x1) / 2, cz = (area.z0 + area.z1) / 2;
   const size = Math.max(area.x1 - area.x0, area.z1 - area.z0);
-  const k = px / (size * (Math.abs(fx) + Math.abs(fz)));   // world m → minimap px
+  // A 4% margin round the play area (the land beyond it, dimmed, frames it).
+  const k = px / (size * (Math.abs(fx) + Math.abs(fz)) * 1.03);   // world m → minimap px
   const c = px / 2;
   return {
     area, upYaw, k,
@@ -151,6 +152,17 @@ function bakeBase(app, frame, px, world) {
   }
   ctx.setLineDash([]);
 
+  // THE FIELDS (algFields.js): the worked land round the villages, in its
+  // own colours, walled — a CoH map's patchwork of plots.
+  const FIELD = { plough: "rgba(96, 70, 48, 0.62)", stubble: "rgba(196, 170, 112, 0.62)", green: "rgba(112, 128, 72, 0.62)" };
+  for (const b of app.algFields?.plots ?? []) {
+    const c = Math.cos(b.yaw), sn = Math.sin(b.yaw);
+    const pts = [[-b.hx, -b.hz], [b.hx, -b.hz], [b.hx, b.hz], [-b.hx, b.hz]].map(([lx, lz]) => frame.toMini(b.x + lx * c + lz * sn, b.z - lx * sn + lz * c));
+    ctx.beginPath(); pts.forEach((m, i) => ctx[i ? "lineTo" : "moveTo"](m.x, m.y)); ctx.closePath();
+    ctx.fillStyle = FIELD[b.kind] ?? FIELD.plough; ctx.fill();
+    ctx.strokeStyle = "rgba(70, 58, 44, 0.7)"; ctx.lineWidth = 0.6 * s; ctx.stroke();
+  }
+
   // THE BUILDINGS' PLAN: every face of a placed building that looks UP and
   // stands over a metre above the ground — roofs, wall tops, towers, not the
   // yards — RASTERIZED here into a 2×-supersampled mask, then blended in with
@@ -240,12 +252,31 @@ function bakeBase(app, frame, px, world) {
   edge(); ctx.strokeStyle = "rgba(0, 0, 0, 0.55)"; ctx.lineWidth = 2.2 * s; ctx.stroke();
   edge(); ctx.strokeStyle = "rgba(246, 232, 200, 0.7)"; ctx.lineWidth = 0.9 * s; ctx.stroke();
 
-  // A soft vignette, so the map sits IN its frame.
-  const g = ctx.createRadialGradient(px / 2, px / 2, px * 0.42, px / 2, px / 2, px * 0.72);
+  // A soft vignette, so the map sits IN its frame (lighter: the play area
+  // reaches the corners now).
+  const g = ctx.createRadialGradient(px / 2, px / 2, px * 0.5, px / 2, px / 2, px * 0.75);
   g.addColorStop(0, "rgba(0,0,0,0)");
-  g.addColorStop(1, "rgba(0,0,0,0.45)");
+  g.addColorStop(1, "rgba(0,0,0,0.3)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, px, px);
+
+  // NORTH: a small arrow in the top-right corner (the map is turned in 90°
+  // steps, so north may not be up).
+  const n0 = frame.toMini(0, 0), n1 = frame.toMini(0, -100);
+  const nl = Math.hypot(n1.x - n0.x, n1.y - n0.y) || 1, ux = (n1.x - n0.x) / nl, uy = (n1.y - n0.y) / nl;
+  // In the shape's topmost corner, pulled in (the corners outside it are cut away).
+  const top = corners.reduce((p, q) => (q.y < p.y ? q : p));
+  const ox = top.x + (px / 2 - top.x) * 0.17, oy = top.y + (px / 2 - top.y) * 0.17 + 6 * s, L = 6 * s;
+  ctx.fillStyle = "rgba(246, 232, 200, 0.9)"; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 1 * s;
+  ctx.beginPath();
+  ctx.moveTo(ox + ux * L, oy + uy * L);
+  ctx.lineTo(ox - ux * L * 0.6 - uy * L * 0.55, oy - uy * L * 0.6 + ux * L * 0.55);
+  ctx.lineTo(ox - ux * L * 0.6 + uy * L * 0.55, oy - uy * L * 0.6 - ux * L * 0.55);
+  ctx.closePath(); ctx.stroke(); ctx.fill();
+  ctx.font = `bold ${Math.round(6.5 * s)}px 'Segoe UI', system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.lineWidth = 2 * s; ctx.strokeText("N", ox - ux * L * 1.7, oy - uy * L * 1.7);
+  ctx.fillText("N", ox - ux * L * 1.7, oy - uy * L * 1.7);
   return canvas;
 }
 
@@ -265,7 +296,14 @@ export function createMinimap({
   const css = root.clientWidth || 160;
   const px = Math.max(96, Math.round(css * dpr));
   const s = px / 160;
+  // TURNED WITH THE CAMERA, and SHAPED LIKE THE PLAY AREA (you, 2026-10-01:
+  // the view outline must read as the game does — so the map turns with the
+  // start camera — but "a rotated map shouldn't sit inside a non-rotated
+  // parent"): the minimap IS the play area's shape, clipped to it, its own
+  // border round it. The land beyond the play area is cut away.
   const frame = makeFrame(box, upYaw, px, world);
+  const shape = [[box.x0, box.z0], [box.x1, box.z0], [box.x1, box.z1], [box.x0, box.z1]].map(([x, z]) => frame.toMini(x, z));
+  const fpx = Math.round(10.5 * dpr);   // label size, device px
 
   const layer = (name) => {
     const c = document.createElement("canvas");
@@ -277,15 +315,40 @@ export function createMinimap({
   const base = layer("base"), fog = layer("fog"), dyn = layer("units"), cam = layer("camera");
   base.ctx.drawImage(bakeBase(app, frame, px, world), 0, 0);
 
+  // The clip and the frame: the play area's outline, in % of the box.
+  const pct = (q) => `${((q.x / px) * 100).toFixed(2)}% ${((q.y / px) * 100).toFixed(2)}%`;
+  root.style.clipPath = `polygon(${shape.map(pct).join(", ")})`;
+  const svgNS = "http://www.w3.org/2000/svg";
+  const outline = document.createElementNS(svgNS, "svg");
+  outline.setAttribute("viewBox", `0 0 ${px} ${px}`);
+  outline.setAttribute("class", "frame");
+  const pts = shape.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ");
+  outline.innerHTML = `<polygon points="${pts}" fill="none" stroke="rgba(0,0,0,0.7)" stroke-width="${(5 * s).toFixed(1)}"/>`
+    + `<polygon points="${pts}" fill="none" stroke="#59623f" stroke-width="${(2.4 * s).toFixed(1)}"/>`;
+  root.appendChild(outline);
+
   const style = document.createElement("style");
   style.textContent = `
-    #rts-minimap { position: relative; width: 100%; height: 100%; cursor: crosshair;
-      border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius); overflow: hidden;
-      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.6); }
-    #rts-minimap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #rts-minimap { position: relative; width: 100%; height: 100%; cursor: crosshair; }
+    #rts-minimap canvas, #rts-minimap svg.frame { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #rts-minimap svg.frame { pointer-events: none; }
     #rts-minimap.locked { cursor: default; }
+    /* The HUD corner holds a SHAPED map: no square panel behind it, a shadow
+       that follows the shape instead. */
+    #alg-hud .block-left { background: transparent !important; border: 0 !important; box-shadow: none !important;
+      filter: drop-shadow(0 4px 10px rgba(0,0,0,0.55)); }
   `;
   document.head.appendChild(style);
+  // Inside the shape? (labels, the north arrow)
+  const inside = (x, y) => {
+    let s2 = 0;
+    for (let i = 0; i < 4; i++) {
+      const a = shape[i], b = shape[(i + 1) % 4];
+      const cr = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
+      if (cr !== 0) { if (s2 && Math.sign(cr) !== s2) return false; s2 = Math.sign(cr); }
+    }
+    return true;
+  };
 
   // ── Input: left = the camera, right = the selection ──────────────────────
   const worldAt = (ev) => {
@@ -393,24 +456,69 @@ export function createMinimap({
 
   // ── Units, villages, defences ────────────────────────────────────────────
   const COL = { enemy: "#ff5f4e", player: "#5aaeff", air: "#6fe6d6", sel: "#ffffff" };
+  /** A name on the map: light, with a dark halo so it reads on any ground. */
+  const _labels = [];
+  /** Queue a name; drawn last, on top of the units, kept inside the map. */
+  function label(c, text, x, y) { _labels.push(text, x, y); }
+  function flushLabels(c) {
+    c.font = `600 ${fpx}px 'Segoe UI', system-ui, sans-serif`;
+    c.textAlign = "center"; c.textBaseline = "middle";
+    c.lineJoin = "round"; c.lineWidth = 3 * dpr; c.strokeStyle = "rgba(10,12,8,0.85)"; c.fillStyle = "#f2ead6";
+    for (let i = 0; i < _labels.length; i += 3) {
+      const text = _labels[i], w = c.measureText(text).width / 2 + 3 * dpr;
+      // Inside the map's shape: slid toward its centre until all of it fits.
+      let x = _labels[i + 1], y = _labels[i + 2];
+      const h = fpx * 0.6;
+      for (let k = 0; k < 20 && !(inside(x - w, y - h) && inside(x + w, y - h) && inside(x - w, y + h) && inside(x + w, y + h)); k++) {
+        x += (px / 2 - x) * 0.12; y += (px / 2 - y) * 0.12;
+      }
+      c.strokeText(text, x, y); c.fillText(text, x, y);
+    }
+    _labels.length = 0;
+  }
   const _foot = { enemy: [], player: [], sel: [] }, _veh = { enemy: [], player: [], sel: [] }, _air = { enemy: [], player: [], sel: [] };
   function drawUnits(now) {
     const c = dyn.ctx;
     c.clearRect(0, 0, px, px);
 
-    // Villages / requisition points: a diamond in the owner's colour, the
-    // capture as an arc round it.
+    // VILLAGES (the victory points) as TERRITORY: the capture ring itself, its
+    // ground tinted in the holder's colour, the capture arc round its rim,
+    // a marker and the name — what the whole war is about, readable at a
+    // glance (the old 4 px diamond read as a speck).
+    const R = requisition?.params?.radius ?? 40;
     for (const p of requisition?.points ?? []) {
       if (fogOfWar?.enabled && !fogOfWar.isExplored(p.position.x, p.position.z)) continue;
-      const m = frame.toMini(p.position.x, p.position.z), r = 4.2 * s;
-      c.fillStyle = p.owner === "player" ? COL.player : p.owner === "enemy" ? COL.enemy : "#e2d7b8";
-      c.strokeStyle = "rgba(10,12,8,0.85)"; c.lineWidth = 1 * s;
+      const m = frame.toMini(p.position.x, p.position.z), rr = R * frame.k;
+      const col = p.owner === "player" ? COL.player : p.owner === "enemy" ? COL.enemy : "#e8dcbc";
+      c.beginPath(); c.arc(m.x, m.y, rr, 0, Math.PI * 2);
+      c.fillStyle = p.owner === "player" ? "rgba(90,174,255,0.2)" : p.owner === "enemy" ? "rgba(255,95,78,0.22)" : "rgba(232,220,188,0.12)";
+      c.fill();
+      c.strokeStyle = "rgba(10,12,8,0.6)"; c.lineWidth = 2.4 * s; c.stroke();
+      c.strokeStyle = col; c.lineWidth = 1 * s; c.globalAlpha = 0.75; c.stroke(); c.globalAlpha = 1;
+      const v = p.progress ?? 0;
+      if (Math.abs(v) > 0.01 && Math.abs(v) < 0.999) {
+        c.strokeStyle = v > 0 ? COL.player : COL.enemy; c.lineWidth = 2.6 * s;
+        c.beginPath(); c.arc(m.x, m.y, rr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.abs(v)); c.stroke();
+      }
+      // The marker: a flag-diamond, bigger than any unit.
+      const r = 4.6 * s;
+      c.fillStyle = col; c.strokeStyle = "rgba(10,12,8,0.9)"; c.lineWidth = 1.2 * s;
       c.beginPath(); c.moveTo(m.x, m.y - r); c.lineTo(m.x + r, m.y); c.lineTo(m.x, m.y + r); c.lineTo(m.x - r, m.y); c.closePath();
       c.fill(); c.stroke();
-      if (Math.abs(p.progress ?? 0) > 0.01 && Math.abs(p.progress) < 0.999) {
-        c.strokeStyle = p.progress > 0 ? COL.player : COL.enemy; c.lineWidth = 1.6 * s;
-        c.beginPath(); c.arc(m.x, m.y, 7 * s, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.abs(p.progress)); c.stroke();
-      }
+      label(c, p.name.replace(/^(Mechta|Dechra|Ksar)\s+/, ""), m.x, m.y + rr + fpx * 0.75);
+    }
+    // THE OBJECTIVES: our post (blue) and the FLN's cave (red, always shown —
+    // the briefing names it), each with its name.
+    const all = typeof structures === "function" ? structures() : structures?.list;
+    for (const b of all ?? []) {
+      if (!b.alive || (b.typeKey !== "post" && b.typeKey !== "caveEntrance")) continue;
+      const m = frame.toMini(b.position.x, b.position.z), r = 5.5 * s, fr = b.typeKey === "post";
+      c.fillStyle = fr ? COL.player : COL.enemy; c.strokeStyle = "rgba(10,12,8,0.9)"; c.lineWidth = 1.4 * s;
+      c.beginPath();
+      if (fr) c.rect(m.x - r, m.y - r, r * 2, r * 2);
+      else { c.moveTo(m.x, m.y - r * 1.2); c.lineTo(m.x + r * 1.1, m.y + r * 0.8); c.lineTo(m.x - r * 1.1, m.y + r * 0.8); c.closePath(); }
+      c.fill(); c.stroke();
+      label(c, fr ? "POSTE" : "GROTTE", m.x, m.y + r + fpx * 0.85);
     }
 
     // Built defences and buildings that are units of play (a mirador, a nest).
@@ -418,7 +526,7 @@ export function createMinimap({
     if (list) {
       c.lineWidth = 0.8 * s; c.strokeStyle = "rgba(10,12,8,0.8)";
       for (const b of list) {
-        if (!b.alive || !b.position) continue;
+        if (!b.alive || !b.position || b.typeKey === "post" || b.typeKey === "caveEntrance") continue;   // their own markers (above)
         if (b.team !== "player" && fogOfWar?.enabled && !fogOfWar.isExplored(b.position.x, b.position.z)) continue;
         const m = frame.toMini(b.position.x, b.position.z), r = 2.2 * s;
         c.fillStyle = b.team === "player" ? "#8fc8ff" : "#ff8f80";
@@ -468,7 +576,7 @@ export function createMinimap({
       const f = _foot[key];
       if (f.length) {
         c.beginPath();
-        const r = 1.55 * s;
+        const r = 1.9 * s;     // (1.55: a speck at play)
         for (let i = 0; i < f.length; i += 2) { c.moveTo(f[i] + r, f[i + 1]); c.arc(f[i], f[i + 1], r, 0, Math.PI * 2); }
         c.fillStyle = fill; c.stroke(); c.fill();
       }
@@ -495,6 +603,7 @@ export function createMinimap({
         c.fillStyle = key === "sel" ? COL.sel : key === "player" ? COL.air : COL.enemy; c.stroke(); c.fill();
       }
     }
+    flushLabels(c);   // names last: on top of the units
   }
 
   // ── No intel: a dead screen, a few times a second ────────────────────────

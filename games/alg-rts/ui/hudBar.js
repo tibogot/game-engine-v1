@@ -22,6 +22,9 @@
 // dev panel (0 when it is collapsed).
 
 export const HUD_H = 172;          // the blocks' height, px (strip excluded)
+// The minimap's block: bigger than the bar (you, 2026-10-01: "reads small"),
+// standing up out of it in its own corner, as CoH's does.
+export const MINI = 236;
 export const HUD_STRIP_H = 24;
 
 const CSS = `
@@ -46,7 +49,7 @@ const CSS = `
   box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.35);
 }
 #alg-hud .block-left {
-  left: 0; width: ${HUD_H}px; height: ${HUD_H}px; padding: 6px;
+  left: 0; width: ${MINI}px; height: ${MINI}px; padding: 6px;
   border-left: 0; border-radius: 0 var(--hud-radius) 0 0;
 }
 #alg-hud .block-right {

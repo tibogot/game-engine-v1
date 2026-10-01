@@ -350,6 +350,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     } catch (e) { console.warn("[alg landmarks] failed:", e); }
   }
   if (app.algFields || app.algLandmarks) app.algCover?.bake();
+  // The minimap was baked before the fields and farmsteads: again, with them.
+  if (app.algFields || app.algLandmarks) app.algUnits?.minimap?.rebuildTerrain?.();
   // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,
   // the dechra and the springs; they bolt from soldiers. ?herds=0 = without.
   if (params.get("herds") !== "0") {

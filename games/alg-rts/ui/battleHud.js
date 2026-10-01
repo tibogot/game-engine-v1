@@ -12,7 +12,7 @@
 //
 // Plain DOM in the HUD's own look (hudBar.js tokens); per frame it writes only
 // what changed. The top of the screen otherwise stays empty (hudBar.js).
-import { HUD_H, HUD_STRIP_H } from "./hudBar.js";
+import { MINI } from "./hudBar.js";
 
 const CSS = `
 #alg-score {
@@ -38,7 +38,7 @@ const CSS = `
 #alg-score .drain.bad { color: var(--hud-red); } #alg-score .drain.good { color: var(--hud-olive); }
 
 #alg-alerts {
-  position: fixed; left: 8px; bottom: ${HUD_H + HUD_STRIP_H + 14}px; z-index: 56;
+  position: fixed; left: 8px; bottom: ${MINI + 12}px; z-index: 56;
   display: flex; flex-direction: column-reverse; gap: 4px; width: 290px;
   font: 12px var(--hud-sans);
 }
