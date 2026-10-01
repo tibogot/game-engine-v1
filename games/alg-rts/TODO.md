@@ -219,9 +219,23 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
         painted (they're planted by people): a row before each farmstead's
         yard, short rows along the pistes near the villages; 28 agaves, 5
         masts (algLandmarks.js). PlacedFoliage MAX_TYPES 8 → 12 (alg hit 8).
-   - [ ] next (you picked 1-3 of 5): colour drifts on the open ground —
-         thistles (purple), asphodel (white / dry), yellow broom; then low
-         cushions (thyme, lavender, cistus). 2 painted slots are free.
+   - [x] **Round 2 (2026-10-01): colour drifts.** New kinds in
+         foliageGeometry: THISTLE (spiny-lobed silvery rosette, 3 stalks,
+         purple heads in green bract cups), ASPHODEL (blade tuft, branched
+         stalk lined with pale drying buds), BROOM (dome of ~110 grey-green
+         rods, yellow 6-point flowers on the upper half). Thistle + asphodel
+         take the last 2 PAINTED slots (algVegetation: thistles in patches on
+         open ground < 16° within ~220 m of a village; asphodel on 5-25°
+         grazed hillsides); broom PLACED in 14 clumps on 8-30° slopes (70
+         bushes, algLandmarks). Heads, buds and rods EXAGGERATED after the
+         first look (pinpricks / wisps at play zoom). Seen: an asphodel
+         hillside of pale spikes, a silver-and-purple thistle patch.
+         NOT A/B'd: the GPU timer read empty; the overlay showed ~4 ms at
+         close views as before.
+   - [ ] Low cushions (thyme, lavender, cistus) — the painted slots are
+         FULL (8/8): a second painted layer, or placed.
+   - [ ] you, look: the thistle purple (subtle at play zoom — more?), the
+         asphodel density, the broom size.
    - [ ] you, look: the oleander pink at play zoom, the fruit density, the
          agave colour and size, the mast (thin; taller?).
 - [x] **THE LAND BETWEEN THE VILLAGES** (2026-10-01, algLandmarks.js; you:

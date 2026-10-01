@@ -417,6 +417,30 @@ export const FOLIAGE_PRESETS = {
     spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
     colorBase: "#6b5a3e", colorTip: "#8a7550", colorHead: "#b8963e", size: 6.0, translucency: 0.05,
   },
+  // THISTLE (Silybum / Onopordum) — purple heads over a flat rosette of
+  // spiny silvery leaves, on the rough ground by the tracks and villages.
+  thistle: {
+    kind: "thistle",
+    fronds: 9, frondLength: 1.0, leaflets: 3, leafletWidth: 1, leafletAngle: 0,
+    spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
+    colorBase: "#66745f", colorTip: "#a5ae98", colorHead: "#8f4c93", size: 1.5, translucency: 0.3,
+  },
+  // ASPHODEL (Asphodelus ramosus) — the over-grazed hillside's flower: a
+  // tuft of narrow leaves, a branched stalk of pale buds (late summer: drying).
+  asphodel: {
+    kind: "asphodel",
+    fronds: 14, frondLength: 1.0, leaflets: 3, leafletWidth: 1, leafletAngle: 0,
+    spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
+    colorBase: "#56653f", colorTip: "#9b9563", colorHead: "#ddd1b4", size: 1.35, translucency: 0.35,
+  },
+  // BROOM (genêt) — the round bush of thin grey-green rods on the slopes,
+  // yellow flowers along its upper half. Placed in clumps (algLandmarks.js).
+  broom: {
+    kind: "broom", flowers: 5,
+    fronds: 110, frondLength: 1.0, leaflets: 1, leafletWidth: 1, leafletAngle: 0,
+    spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
+    colorBase: "#4c5b3a", colorTip: "#7e8c59", colorHead: "#e2b52a", size: 2.0, translucency: 0.3,
+  },
   // DWARF FAN PALM (Chamaerops humilis, the "doum") — the knee-to-chest-high
   // clump of stiff grey-green fans that covers the Maghreb's dry hillsides.
   doumPalm: {

@@ -88,6 +88,7 @@ const Q = {
   outcrops: 42, outcropSpacing: 34, outcropSlope: [9, 32],   // degrees
   trees: 24, treeSpacing: 55,
   mastShare: 0.13,        // agaves with their flower mast
+  broomClumps: 14,
   agaveRun: 0.35,         // chance of a row at a track point near a village
   clear: 8,               // m from tracks, fields, pieces
 };
@@ -223,10 +224,28 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     }
   }
 
+  // ── Broom: clumps of yellow-flowered bushes on the slopes ─────────────────
+  const brooms = [];
+  for (let t = 0; t < 4000 && brooms.length < Q.broomClumps * 5; t++) {
+    const cx = PLAY.x0 + R() * (PLAY.x1 - PLAY.x0), cz = PLAY.z0 + R() * (PLAY.z1 - PLAY.z0);
+    const s = slopeDeg(cx, cz);
+    if (s < 8 || s > 30 || !free(cx, cz, 4)) continue;
+    if (brooms.some((b) => Math.hypot(b.x - cx, b.z - cz) < 45)) continue;
+    const n = 3 + Math.floor(R() * 5);
+    for (let k = 0; k < n; k++) {
+      const a = R() * Math.PI * 2, r = 1.5 + R() * 6, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+      if (free(x, z, 0.8)) brooms.push({ x, z });
+    }
+  }
+  if (plants && brooms.length) {
+    if (!plants.types.has("broom")) plants.setType("broom", structuredClone(FOLIAGE_PRESETS.broom));
+    for (const b of brooms) plants.add("broom", b.x, H(b.x, b.z) - 0.05, b.z, { rotY: R() * 6.28, scale: 0.8 + R() * 0.5, seed: R() });
+  }
+
   return {
-    rocks, trees, meshes, agaves,
+    rocks, trees, meshes, agaves, brooms,
     /** Hard cover round the outcrops, for the cover bake (algCover.js). */
     *coverCircles() { for (const r of rocks) yield { x: r.x, z: r.z, radius: 2.4 * r.k, size: 1, hard: true }; },
-    stats: { outcrops: rocks.length, trees: trees.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length },
+    stats: { outcrops: rocks.length, trees: trees.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length, brooms: brooms.length },
   };
 }

@@ -239,6 +239,9 @@ export function createFoliageTypeGeometry(type, { lod = 0, variant = 0 } = {}) {
   if (type.kind === "opuntia") return buildOpuntia(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "agave") return buildAgave(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "agaveMast") return buildAgaveMast(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "thistle") return buildThistle(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "asphodel") return buildAsphodel(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "broom") return buildBroom(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
     const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : type.kind === "susuki" ? "fan" : "plume";
@@ -924,6 +927,163 @@ function buildAgave(type, { near, far, rand, push, vcount, I, finish }) {
       // top: L-C-R, bottom: L-K-R
       I.push(a, b, a + 1, a + 1, b, b + 1, a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
       I.push(a, a + 3, b, b, a + 3, b + 3, a + 3, a + 2, b + 3, b + 3, a + 2, b + 2);
+    }
+  }
+  return finish();
+}
+
+// ── Small shared pieces for the Aurès wildflowers ───────────────────────────
+
+/** A tapered tube from a to b (`sides` faces), one part, `t` 0→1 along it. */
+function tubeTo({ push, vcount, I }, a, b, r0, r1, part, sides) {
+  const d = norm([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+  const u = norm(cross(d, Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0])), v = norm(cross(d, u));
+  const base = vcount();
+  for (const [p, r, t] of [[a, r0, 0], [b, r1, 1]]) {
+    for (let s = 0; s < sides; s++) {
+      const ph = (s / sides) * Math.PI * 2, n = norm(add(add([0, 0, 0], u, Math.cos(ph)), v, Math.sin(ph)));
+      push(add(p, n, r), n, s / sides, t, [part, t, 0.3, 0]);
+    }
+  }
+  for (let s = 0; s < sides; s++) {
+    const s1 = (s + 1) % sides;
+    I.push(base + s, base + sides + s, base + s1, base + s1, base + sides + s, base + sides + s1);
+  }
+}
+
+/** A squashed ball at `c` (radii rx, ry): one part; `along` from its bottom (0) to its top (1). */
+function blob({ push, vcount, I }, c, rx, ry, part, segs, rings, alongLo = 0, alongHi = 1) {
+  const base = vcount();
+  for (let r = 0; r <= rings; r++) {
+    const th = (r / rings) * Math.PI;
+    for (let s = 0; s < segs; s++) {
+      const ph = (s / segs) * Math.PI * 2;
+      const n = [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)];
+      const al = alongHi - (alongHi - alongLo) * (r / rings);
+      push(add(c, [n[0] * rx, n[1] * ry, n[2] * rx]), n, 0.25, 0.5, [part, 1, 0.5, al]);
+    }
+  }
+  for (let r = 0; r < rings; r++) for (let s = 0; s < segs; s++) {
+    const a = base + r * segs + s, b = base + r * segs + ((s + 1) % segs);
+    I.push(a, a + segs, b, b, a + segs, b + segs);
+  }
+}
+
+/**
+ * THISTLE (Silybum / Onopordum) — the purple-headed thistles of the rough
+ * ground by every track and village of the Maghreb in summer: a low rosette
+ * of broad, spiny-lobed, silvery leaves flat on the ground, one to three stiff
+ * stalks, each topped by a purple head in a cup of green spiny bracts.
+ * Leaves part 0 (colorBase → colorTip), stalks + bract cups part 1, the
+ * flower tufts part 2 (colorHead). Unit frame (height ~1).
+ *   fronds  rosette leaves · leaflets  stalks
+ */
+function buildThistle(type, ctx) {
+  const { near, far, rand, push, vcount, I, finish } = ctx;
+  const leaves = Math.max(4, Math.round((type.fronds ?? 9) * (far ? 0.5 : 1)));
+  const rows = far ? 3 : near ? 7 : 5;
+  for (let l = 0; l < leaves; l++) {
+    const az = l * 2.39996 + rand() * 0.4;
+    const out = [Math.cos(az), 0, Math.sin(az)], side = [-Math.sin(az), 0, Math.cos(az)];
+    const len = 0.3 + rand() * 0.14, W = len * 0.3, rise = 0.18 + rand() * 0.2;
+    const base = vcount();
+    for (let r = 0; r <= rows; r++) {
+      const v = r / rows;
+      const p = add(add([0, 0.02, 0], out, len * v), [0, 1, 0], len * rise * Math.sin(v * Math.PI * 0.8));
+      // The lobes: every other row narrower — a spiny, toothed outline.
+      const w = W * Math.sin(Math.min(1, v * 1.2) * Math.PI * 0.95 + 0.1) * (r % 2 ? 1 : 0.55) * (1 - v * 0.3);
+      for (const s of [-1, 1]) push(add(p, side, s * w), [0, 1, 0], s * 0.5 + 0.5, v, [0, 0.3 + v * 0.6, rand(), v * 0.4]);
+    }
+    for (let r = 0; r < rows; r++) { const a = base + r * 2; I.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+  }
+  const stalks = Math.max(1, Math.round(type.leaflets ?? 2));
+  for (let k = 0; k < stalks; k++) {
+    const az = rand() * Math.PI * 2, lean = 0.05 + rand() * 0.15, h = 0.7 + rand() * 0.3;
+    const top = [Math.cos(az) * Math.sin(lean) * h, Math.cos(lean) * h, Math.sin(az) * Math.sin(lean) * h];
+    tubeTo(ctx, [0, 0, 0], top, 0.012, 0.008, 1, far ? 3 : 5);
+    const hr = 0.12 * (0.85 + rand() * 0.3);      // exaggerated: a 5 cm head is a pinprick at play zoom
+    blob(ctx, add(top, [0, hr * 0.2, 0]), hr * 0.9, hr * 0.7, 1, far ? 5 : 8, far ? 2 : 4);              // the bract cup
+    blob(ctx, add(top, [0, hr * 0.75, 0]), hr * 0.72, hr * 0.55, 2, far ? 5 : 8, far ? 2 : 3, 0.4, 1);   // the purple tuft
+  }
+  return finish();
+}
+
+/**
+ * ASPHODEL (Asphodelus ramosus) — the sign of an over-grazed Mediterranean
+ * hillside: a tuft of long narrow leaves and a branched stalk ~1 m tall,
+ * its upper branches lined with flowers — in late summer gone to pale,
+ * drying buds and seed capsules. Blades part 0, stalk part 1, buds part 2.
+ *   fronds  leaves · leaflets  branches
+ */
+function buildAsphodel(type, ctx) {
+  const { near, far, rand } = ctx;
+  addBladeFan(ctx, {
+    count: Math.max(4, Math.round((type.fronds ?? 14) * (far ? 0.5 : near ? 1 : 0.75))),
+    rows: near ? 4 : 2, len: 0.42, width: 0.022, spread: 0.55, arch: 0.8,
+  });
+  const H = 0.9 + rand() * 0.2;
+  const top = [(rand() - 0.5) * 0.06, H, (rand() - 0.5) * 0.06];
+  tubeTo(ctx, [0, 0, 0], top, 0.01, 0.006, 1, far ? 3 : 4);
+  const branches = [[[top[0] * 0.55, H * 0.55, top[2] * 0.55], top]];
+  const nb = Math.max(1, Math.round(type.leaflets ?? 3) - (far ? 1 : 0));
+  for (let k = 0; k < nb; k++) {
+    const f = 0.5 + rand() * 0.2, at = [top[0] * f, H * f, top[2] * f], az = rand() * Math.PI * 2;
+    const tip = add(at, norm([Math.cos(az) * 0.5, 1, Math.sin(az) * 0.5]), 0.25 + rand() * 0.12);
+    if (!far) tubeTo(ctx, at, tip, 0.005, 0.004, 1, 3);
+    branches.push([add(at, norm([Math.cos(az) * 0.5, 1, Math.sin(az) * 0.5]), 0.08), tip]);
+  }
+  // Buds along the upper part of each branch, thinning to the tip.
+  const per = far ? 3 : near ? 8 : 5;
+  for (const [a, b] of branches) {
+    for (let k = 0; k < per; k++) {
+      const t = 0.15 + (k / per) * 0.85;
+      const c = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+      const r = 0.034 * (1 - t * 0.4);           // exaggerated (pinpricks at play zoom)
+      blob(ctx, add(c, [(rand() - 0.5) * 0.02, 0, (rand() - 0.5) * 0.02]), r, r * 1.2, 2, far ? 4 : 5, 2, 0.3, 1);
+    }
+  }
+  return ctx.finish();
+}
+
+/**
+ * BROOM (Spartium / Retama — genêt) — the rounded bush of thin grey-green
+ * rods on the Aurès slopes, almost leafless, yellow pea-flowers along the
+ * upper half of its rods. Rods part 0 (thin solid strips, colorBase →
+ * colorTip), flowers part 2 (colorHead) as small 5-point stars.
+ *   fronds  rods · flowers  flowers per rod
+ */
+function buildBroom(type, ctx) {
+  const { near, far, rand, push, vcount, I, finish } = ctx;
+  const rods = Math.max(10, Math.round((type.fronds ?? 70) * (far ? 0.3 : near ? 1 : 0.6)));
+  const segs = far ? 2 : 3;
+  for (let k = 0; k < rods; k++) {
+    const az = rand() * Math.PI * 2, open = 0.2 + rand() * 0.75, L = 0.7 + rand() * 0.35;
+    const out = [Math.cos(az), 0, Math.sin(az)], side = [-Math.sin(az), 0, Math.cos(az)];
+    // Fat (2-4 cm on a 2 m bush), fatter far: thin rods read as a wisp, not a bush (seen 2026-10-01).
+    const w = 0.02 * (far ? 1.8 : 1.2);
+    let p = [out[0] * 0.03, 0, out[2] * 0.03];
+    const pts = [p];
+    for (let s = 1; s <= segs; s++) {
+      const t = s / segs, e = Math.PI / 2 - open * (0.4 + t * 0.7);
+      p = add(p, [out[0] * Math.cos(e), Math.sin(e), out[2] * Math.cos(e)], L / segs);
+      pts.push(p);
+    }
+    const base = vcount();
+    pts.forEach((q, s) => { for (const sg of [-1, 1]) push(add(q, side, sg * w), norm(add(out, [0, 1, 0], 0.6)), sg * 0.5 + 0.5, s / segs, [0, 0.3 + (s / segs) * 0.6, rand(), 0]); });
+    for (let s = 0; s < segs; s++) { const a = base + s * 2; I.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    // Flowers on the upper half.
+    const nf = Math.round((type.flowers ?? 3) * (far ? 0.6 : 1));
+    for (let f = 0; f < nf; f++) {
+      const t = 0.5 + rand() * 0.5, i = Math.min(segs - 1, Math.floor(t * segs)), ft = t * segs - i;
+      const c = add(pts[i], [pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1], pts[i + 1][2] - pts[i][2]], ft);
+      const n = norm(add(out, [0, 1, 0], 0.8)), u = norm(cross(n, side)), v = norm(cross(n, u));
+      const r = 0.03 * (0.8 + rand() * 0.4), b = vcount();
+      push(c, n, 0.25, 0.5, [2, 1, 0.5, 0.2]);
+      for (let q = 0; q < 6; q++) {
+        const a = (q / 6) * Math.PI * 2, rr = q % 2 ? r * 0.5 : r;
+        push(add(add(c, u, Math.cos(a) * rr), v, Math.sin(a) * rr), n, 0.25, 0.5, [2, 1, 0.5, 1]);
+      }
+      for (let q = 0; q < 6; q++) I.push(b, b + 1 + q, b + 1 + ((q + 1) % 6));
     }
   }
   return finish();

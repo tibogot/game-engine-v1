@@ -148,6 +148,8 @@ const wadiD = (x, z) => {
   }
   return best;
 };
+/** Metres to the nearest village's centre (hamlet, dechra, ksar). */
+const villageD = (x, z) => Math.min(...LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind)).map((s) => Math.hypot(x - s.x, z - s.z)));
 /** Metres outside a hamlet's cleared ring (negative = inside it). */
 const hamletOut = (x, z) => Math.min(...LAYOUT.sites.filter((s) => s.kind === "hamlet").map((s) => Math.hypot(x - s.x, z - s.z) - s.r));
 
@@ -166,6 +168,12 @@ const GROUND = [
   { name: "Tamarisk", preset: "tamarisk", fn: (x, z) => Math.max(band(wadiD(x, z), 1.6, 3.2, 0.4) * patches(x, z, 22, 0.4, 23) * 0.18, band(oasisD(x, z), 2.2, 3.4, 0.3) * patches(x, z, 16, 0.5, 25) * 0.2) },
   // Prickly-pear hedges round the hamlets: a broken ring just outside.
   { name: "Prickly pear", preset: "pricklyPear", fn: (x, z) => band(hamletOut(x, z), 1, 9, 2) * patches(x, z, 9, 0.55, 27) * 0.45 },
+  // THE WILDFLOWERS (2026-10-01, late summer), in DRIFTS — at the RTS camera
+  // a flower is a patch of colour, not a plant: thistles (purple) on the
+  // rough open ground round the villages, asphodel (pale, drying) on the
+  // grazed hillsides.
+  { name: "Thistle", preset: "thistle", fn: (x, z, h, s) => (1 - smooth((s - 16) / 5)) * (1 - smooth((villageD(x, z) - 220) / 60)) * patches(x, z, 11, 0.36, 31) * 0.8 },
+  { name: "Asphodel", preset: "asphodel", fn: (x, z, h, s) => band(s, 5, 25, 4) * patches(x, z, 20, 0.36, 33) * 0.7 },
 ];
 
 // The wadi beds (paint slot 4, tools/algWadi.mjs): gravel, flash floods — bare.
