@@ -1476,7 +1476,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         v.fade = Math.min(1, v.fade + dt / (v.fadeS ?? 0.2));
 
         x.updateMatrix(); // off-scene: nothing else will do this for us
-        v.view.living.push(unit); // into the crowd after the loop, grouped by view
+        // Into the crowd after the loop, grouped by view — only near the view
+        // (on screen, or its shadow could reach it): off it, a soldier costs no
+        // skinning, draw, shadow or x-ray (2026-10-01, as the vehicles). His
+        // clip state above still advances, so he walks back in mid-stride.
+        if (v.nearView) v.view.living.push(unit);
         if (v.onScreen) writePieces(v.crowd, v, x.matrix);
         crowdUnits.push(unit);
       }

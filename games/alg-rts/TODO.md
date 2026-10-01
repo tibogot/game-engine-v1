@@ -43,7 +43,9 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          water unchanged. ms: not clean (latched GPU) — 0 to −0.9 ms; lakes
          hidden at the base now ≈ 0 (the clean breakdown had 1.4).
          A/B: __V3_DEBUG.waterGrabPerSample = true.
-   - [ ] Haze: the full-res copy back into the frame (a ping-pong would drop it).
+   - [—] Haze: the full-res copy back into the frame: MEASURED 0.09-0.23 ms
+         (healthy GPU, skipped by a probe). Not worth changing the post /
+         Sky Pro hand-off shared with Apex Rush and nam for ~1% of a frame.
 - [x] POPPING (engine, both games): the plant fields' tile now centres on the
       GROUND ON SCREEN (main.js viewFootprint) and fades past the farthest
       corner (max zoom: fade at 186/194 m from the view's centre; before 173/
@@ -132,8 +134,11 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       aircraft 60 m) writes no instance — away from the vehicles 283 → 205.
    - [ ] Tall plants: 3 variants (your pick for variety) = 24 of the 84; the
          depth pre-pass doubles them but saved ~14 ms on the cedars. Keep.
-   - [ ] Crowd soldiers + herds still skinned/drawn/shadowed off screen
-         (few now; matters with a big army).
+   - [x] Crowd soldiers + herds off screen: no longer skinned, drawn,
+         shadowed or x-rayed unless near the view (on screen + 12 m shadow
+         reach); their clip / graze state still advances. Checked: soldiers
+         12 at the base → 0 away → 12 back; herds 23 of 142 animals drawn at
+         the flock, 0 away (before: all 142 every frame). Both games.
 - [x] PANNING costs +2.7-2.9 ms a frame at every zoom: ALL of it the ground
       cache's tile bakes (3 tiles × ~0.8-1 ms). Splats per tile now only those
       that overlap it, in list order (was all 4207 per tile): −0.1 ms a tile.

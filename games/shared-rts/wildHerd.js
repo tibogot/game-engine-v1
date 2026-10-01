@@ -99,6 +99,10 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
   };
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
+  // Near the view only (2026-10-01, as the soldiers and vehicles): an animal
+  // off screen — and too far for its shadow to reach it — is not skinned,
+  // drawn or shadowed. Its walk/graze state still advances.
+  const frustum = new THREE.Frustum(), viewProj = new THREE.Matrix4(), sphere = new THREE.Sphere();
   let alarmT = 0;
   return {
     mesh: field.mesh, count: spots.length,
@@ -123,6 +127,8 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
           if (near) break;
         }
       }
+      const cam = app.camera;
+      if (cam) frustum.setFromProjectionMatrix(viewProj.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
       field.begin();
       for (const h of herd) {
         // One of them spooked: its group bolts (whoever is within 60 m of the
@@ -224,6 +230,11 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
           if (h.state === "eat" && r < 0.4) go(h, "look", r < 0.2 ? "idle" : "look", 2 + rnd() * 4);
           else if (r < 0.75 && (h.target = pickGraze(h))) { h.speed = walkSpeed; go(h, "walk", "walk", 10); }   // (not walking here: a null is harmless)
           else go(h, "eat", rnd() < 0.25 ? "low" : "eat", 5 + rnd() * 10);
+        }
+        if (cam) {
+          sphere.center.set(h.x, h.y + baseH * h.scale * 0.5, h.z);
+          sphere.radius = baseH * h.scale + 12;
+          if (!frustum.intersectsSphere(sphere)) continue;
         }
         p.set(h.x, h.y, h.z);
         q.setFromAxisAngle(up, h.yaw);
