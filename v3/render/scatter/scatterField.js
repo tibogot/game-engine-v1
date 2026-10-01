@@ -354,10 +354,13 @@ export class ScatterField {
           // the change never forms a visible ring.
           const dither = hash(instanceIndex.add(555)).mul(4).sub(2);
           const lodR = u.uLodDist.add(dither);
-          let lod = lods > 1 ? step(lodR.mul(lodR), distSq) : float(0);
+          // From the CAMERA (detail is screen size): the same as the anchor
+          // wherever the anchor is the camera, and right when it leads the view.
+          const camDistSq = camDist.mul(camDist);
+          let lod = lods > 1 ? step(lodR.mul(lodR), camDistSq) : float(0);
           if (lods > 2) {
             const lodR2 = u.uLodDist2.add(dither.mul(2));
-            lod = lod.add(step(lodR2.mul(lodR2), distSq));
+            lod = lod.add(step(lodR2.mul(lodR2), camDistSq));
           }
           const drawK = int(subIdx.mul(lods).add(lod));
           for (let k = 0; k < draws; k++) {
@@ -672,13 +675,27 @@ export class ScatterField {
    * capped against the wrap tile: a plant fading at more than half the tile
    * width is a plant popping as it wraps.
    */
-  setViewDistances(near, far) {
+  setViewDistances(near, far, footprint = null) {
     if (!(far > 0)) return;
     const u = this.u;
     const n = Math.max(0, near);
     const span = Math.max(far - n, 1);
     // The tile wraps at half its width; keep everything clear of that edge.
     const cap = this.tileSize * 0.45;
+    if (footprint) {
+      // THE TILE FOLLOWS THE VIEW (main.js viewFootprint): the anchor is the
+      // centre of the ground on screen and `footprint.radius` holds every
+      // corner of it. The LOD steps are measured from the CAMERA (screen size)
+      // and need no cap — only the fade is measured from the anchor, and it
+      // starts past the last visible corner and ends inside the wrap.
+      u.uLodDist.value  = n + span * 0.55;
+      u.uLodDist2.value = n + span * 0.85 + 2;
+      const wrap = this.tileSize * 0.5 - 2;
+      const r1 = Math.min(Math.max(footprint.radius * 1.15, footprint.radius + 12), wrap);
+      u.uOuterR0.value = Math.min(footprint.radius, r1 - 4);
+      u.uOuterR1.value = r1;
+      return;
+    }
     u.uLodDist.value  = Math.min(n + span * 0.55, cap);
     u.uLodDist2.value = Math.min(n + span * 0.85, cap) + 2;
     u.uOuterR0.value  = Math.min(far * 1.05, cap);
@@ -702,12 +719,15 @@ export class ScatterField {
   }
 
   /** Per frame: move the tile with the anchor, then run the compute. */
-  update(anchorPos, camera) {
+  update(anchorPos, camera, pushPos = anchorPos) {
     if (!this._initDone || !this._enabled) return;
     const u = this.u;
     u.uAnchorDeltaXZ.value.set(anchorPos.x - this._lastAnchor.x, anchorPos.z - this._lastAnchor.z);
     u.uAnchorPos.value.copy(anchorPos);
-    u.uPlayerPos.value.copy(anchorPos);
+    // What the plants bend away from: the walker in play mode. The anchor is not
+    // a walker when it leads the camera over the view (main.js viewFootprint):
+    // null parks the push far away.
+    if (pushPos) u.uPlayerPos.value.copy(pushPos); else u.uPlayerPos.value.set(1e7, 0, 1e7);
     if (!this._shadowCentreSet) u.uShadowCentre.value.set(anchorPos.x, anchorPos.z);
     for (const m of this.meshes) m.position.set(anchorPos.x, 0, anchorPos.z);
     for (const m of this.shadowMeshes) m.position.set(anchorPos.x, 0, anchorPos.z);

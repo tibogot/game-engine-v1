@@ -191,7 +191,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // The ground cache centres on the camera's focus: turning or zooming the
   // camera then re-bakes nothing.
   app.groundCache?.setFocusFn(() => rtsCamera.getView().focus);
-  app.addPreRenderHook((dt) => rtsCamera.update(dt));
+  // At the START of the frame: the terrain, the plant fields and the shadow fit
+  // then see this frame's view, not the last one (things at the screen's edge
+  // appeared a frame late while panning).
+  (app.addPreUpdateHook ?? app.addPreRenderHook)((dt) => rtsCamera.update(dt));
   // C: RTS camera ⇄ free orbit. Matched on the printed key (AZERTY keyboards).
   window.addEventListener("keydown", (e) => {
     if (e.repeat || e.target.matches?.("input, textarea, select")) return;
@@ -294,7 +297,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   }
   // The ground cache around the starting view, all of it, before the screen
   // lifts (the loop only bakes a few tiles a frame).
-  app.groundCache?.bakeAll(app.camera);
+  await app.groundCache?.bakeAll(app.camera);
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;

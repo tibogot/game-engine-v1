@@ -50,7 +50,7 @@ const css = (id) => `
   #${id} input[type="color"] { width: 36px; height: 22px; padding: 0; border: 1px solid var(--border); background: transparent; cursor: pointer; }
   #${id} .dp-hint { margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--text-dim); }
   #${id} .dp-hint b { color: var(--text); font-weight: 600; }
-  #${id} .dp-readout { font: 11px ui-monospace, Consolas, monospace; color: var(--text); white-space: pre; margin-top: 4px; }
+  #${id} .dp-readout { font: 11px ui-monospace, Consolas, monospace; color: var(--text); white-space: pre-wrap; margin-top: 4px; }
   #${id} .action-btn + .action-btn { margin-top: 4px; }
   #${id}.collapsed {
     top: 10px; bottom: auto; width: auto; border-left: none; border-radius: 6px 0 0 6px;

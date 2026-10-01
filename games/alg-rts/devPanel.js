@@ -270,14 +270,38 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
   }
 
   // ── Performance ─────────────────────────────────────────────────────────
+  // The numbers to trust (gpuBench.js, 2026-10-01 audit): the frame timed by
+  // rendering it back to back with the loop paused, never the stats bar (its
+  // FPS sits on vsync, its GPU ms and the per-pass timer misattribute here).
   const perf = panel.section("Performance");
+  const out = perf.readout();
+  out.set("Check the GPU first: when this laptop's GPU is throttled every ms reads 2-3x high.");
+  let busy = false;
+  const run = async (label, fn) => {
+    if (busy) return;
+    busy = true;
+    out.set(`${label}… (the view freezes for a moment)`);
+    try { out.set(await fn()); } catch (e) { out.set(`${label} failed: ${e?.message ?? e}`); } finally { busy = false; }
+  };
+  const bench = () => import("./gpuBench.js");
+  perf.button("Check GPU health", () => run("Timing a fixed GPU kernel", async () => {
+    const h = await (await bench()).gpuHealth();
+    return `GPU ${h.tflops} TFLOPS — ${h.pct}% of the best seen (${h.bestSeen})\n→ ${h.verdict}`;
+  }), { primary: true });
+  perf.button("Measure this view", () => run("Measuring", async () => {
+    const m = await (await bench()).measureView();
+    return `Frame ${m.frameMin} ms (mean ${m.frameMean})\nCPU   ${m.cpu} ms · ${m.draws} draws\n→ ${m.limit} (60 fps = 16.7 ms)`;
+  }));
+  perf.button("Break it down (~40 s)", () => run("Hiding each system in turn", async () => {
+    const B = await bench();
+    const r = await B.breakdownHere({ onProgress: (p) => out.set(`Hiding each system in turn… ${Math.round(p * 100)}%`) });
+    const rows = r.rows.map((x) => `${x.name.padEnd(14)} ${x.ms >= 0 ? " " : ""}${x.ms.toFixed(2)} ms`).join("\n");
+    return `Frame ${r.frame} ms · noise ±${r.noise} ms\n${rows}\n(cost = frame − frame without it; under the noise = nothing)`;
+  }));
   perf.toggle("Stats overlay", { get: () => app.statsOverlay, set: (v) => app.setStatsOverlay?.(v) });
   perf.slider("Render scale", { min: 0.5, max: 1, step: 0.05, get: () => app.renderScale ?? 1, set: (v) => app.setRenderScale?.(v, { persist: false }) });
-  perf.button("GPU pass timings", async (b) => {
-    const g = await window.__V3_DEBUG?.gpu?.();
-    b.textContent = g ? "GPU pass timings — on" : "No timestamp support here";
-  });
-  perf.hint("Judge cost in <b>GPU ms</b>, not FPS (vsync holds 60). The stats-gl GPU number under-reports; the pass timings don't. A/B with <code>__V3_DEBUG.gpuAB</code>. Keep this tab <b>focused</b> while measuring.");
+  perf.hint("<b>GPU health</b>: a fixed kernel's TFLOPS against the best this browser has measured. Throttled (the latch) read 1.8-2.9 on 2026-10-01; healthy should be roughly double — run it once right after a fresh EC reset to set the best. " +
+    "Judge cost in <b>ms</b>, never FPS (vsync holds 60). The stats bar is a rough glance: its GPU ms and the pass timer misattribute on this machine. A cost under the <b>noise</b> is not a cost. Console: <code>(await import('/games/alg-rts/gpuBench.js'))</code> for zoom sweeps and panning.");
 
   return panel;
 }

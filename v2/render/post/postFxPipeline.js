@@ -19,7 +19,6 @@ import { chromaticAberration } from "three/addons/tsl/display/ChromaticAberratio
 import { dof } from "three/addons/tsl/display/DepthOfFieldNode.js";
 import {
   N8AONode,
-  createN8AOScenePass,
   applyQualityMode,
   resolveDisplayMode,
 } from "n8ao-webgpu";
@@ -355,7 +354,33 @@ export class PostFxPipeline {
   setBloomEnabled(enabled) {
     if (this._bloomEnabled === enabled) return;
     this._bloomEnabled = enabled;
-    if (this._renderPipeline) this._refreshOutputNode();
+    if (!this._renderPipeline) return;
+    // Selective bloom reads the emissive attachment: switched on, add it and
+    // rebuild the bloom on it; switched off, drop it (the engine boots with
+    // bloom on and a game turns it off — kept, it cost every frame).
+    if (this._bloomSelective) {
+      if (!enabled) this._dropSceneTexture("emissive");
+      this._applySceneMRT();
+      this._rebuildBloomPasses();
+    }
+    this._refreshOutputNode();
+  }
+
+  /** Take an attachment back out of the scene pass (PassNode has no API for it). */
+  _dropSceneTexture(name) {
+    const sp = this._scenePass;
+    if (!sp || !this._sceneExtra?.has(name)) return;
+    this._sceneExtra.delete(name);
+    const t = sp._textures?.[name];
+    if (t) {
+      const i = sp.renderTarget.textures.indexOf(t);
+      if (i > 0) sp.renderTarget.textures.splice(i, 1);
+      delete sp._textures[name];
+      delete sp._textureNodes?.[name];
+      delete sp._previousTextures?.[name];
+      delete sp._previousTextureNodes?.[name];
+      t.dispose();
+    }
   }
 
   /**
@@ -642,12 +667,21 @@ export class PostFxPipeline {
     // chain. Disabling the auto color transform avoids double-encoding.
     this._renderPipeline.outputColorTransform = false;
 
-    // Always use the n8ao-style MRT scene pass once post-FX is on. The
-    // additional fill rate for diffuse + normal RTs is small (~0.3 ms at
-    // 1080p) and lets us drop in SSAO later with no graph rebuild.
-    this._scenePass = createN8AOScenePass(scene, camera);
+    // THE SCENE PASS WRITES ONLY WHAT IS READ (2026-10-01). It used to write
+    // n8ao's layout (output + diffuseColor + normal) always, plus emissive in
+    // selective-bloom mode, "small (~0.3 ms at 1080p)". MEASURED in alg-rts
+    // (4x MSAA, render scale 2, interleaved): post-FX on cost 24 ms at the
+    // default zoom and 47 ms zoomed out with SSAO and bloom both OFF — every
+    // multisampled attachment is written per sample, and the zoomed-out
+    // terrain's small triangles leave few pixels the MSAA compression can
+    // fold. So: colour only, and an attachment joins the MRT the moment
+    // something asks the scene pass for it by name (SSAO, SSR, a game's post
+    // hook — `_wrapSceneTextureRequests`), or selective bloom is ON.
+    this._scenePass = pass(scene, camera);
+    this._sceneExtra = new Set();
+    this._wrapSceneTextureRequests(this._scenePass);
     this._scenePassColor = this._scenePass.getTextureNode("output");
-    if (this._bloomSelective) this._applySceneMRT();
+    this._applySceneMRT();
 
     if (this._ssaoEnabled) this._ensureSsaoBuilt();
 
@@ -744,27 +778,56 @@ export class PostFxPipeline {
     this._applySsaoConfig();
   }
 
+  /** Selective bloom actually drawing: the only time `emissive` is written. */
+  _emissiveWanted() {
+    return this._bloomSelective && this._bloomEnabled;
+  }
+
   /**
-   * (Re)apply the scene pass MRT layout. Mirrors n8ao's own layout
-   * (output/diffuse/normal, byte-typed where possible) and appends the
-   * `emissive` target in selective-bloom mode. Emissive stays HalfFloat —
-   * lantern/LED intensities live well above 1 in linear HDR.
+   * An attachment joins the MRT when anything asks the scene pass for it by
+   * name. three's PassNode.getTexture(name) PUSHES a new attachment onto the
+   * render target for any name it has not seen — if the MRT has no output of
+   * that name, every pipeline drawn into the pass is invalid ("Color target
+   * has no corresponding fragment stage output"). So the request itself adds
+   * the output: SSAO (normal + diffuse), SSR and game post hooks (normal), and
+   * the bloom (emissive) all go through here, and nothing is written unread.
+   */
+  _wrapSceneTextureRequests(sp) {
+    const OPTIONAL = new Set(["diffuseColor", "normal", "emissive"]);
+    const getTexture = sp.getTexture.bind(sp);
+    sp.getTexture = (name) => {
+      if (OPTIONAL.has(name) && !this._sceneExtra.has(name)) {
+        this._sceneExtra.add(name);
+        // n8ao reads both, and a normal without its diffuse partner is the
+        // pair n8ao's own layout always kept.
+        if (name === "normal" || name === "diffuseColor") { this._sceneExtra.add("normal"); this._sceneExtra.add("diffuseColor"); }
+        this._applySceneMRT();
+      }
+      return getTexture(name);
+    };
+  }
+
+  /**
+   * (Re)apply the scene pass MRT layout: `output`, plus each attachment
+   * something reads (`_sceneExtra`; diffuse/normal byte-typed as n8ao's own
+   * layout, emissive HalfFloat — lantern/LED intensities live well above 1).
    */
   _applySceneMRT() {
-    const targets = {
-      output,
-      diffuseColor,
-      normal: directionToColor(normalView),
-    };
+    const sp = this._scenePass;
+    if (!sp) return;
+    if (this._emissiveWanted()) this._sceneExtra.add("emissive");
+    const targets = { output };
+    if (this._sceneExtra.has("diffuseColor")) targets.diffuseColor = diffuseColor;
+    if (this._sceneExtra.has("normal")) targets.normal = directionToColor(normalView);
     // The emissive member carries the fragment's OWN coverage in .a, and the
     // attachment is told to blend like the material does. Both halves are
     // needed, and only together — see `_emissiveBlend` at the top of the file.
-    if (this._bloomSelective) targets.emissive = vec4(emissive, output.a);
+    if (this._sceneExtra.has("emissive")) targets.emissive = vec4(emissive, output.a);
     const sceneMRT = mrt(targets);
-    if (this._bloomSelective) sceneMRT.setBlendMode("emissive", _emissiveBlend);
-    this._scenePass.setMRT(sceneMRT);
-    this._scenePass.getTexture("diffuseColor").type = THREE.UnsignedByteType;
-    this._scenePass.getTexture("normal").type = THREE.UnsignedByteType;
+    if (targets.emissive) sceneMRT.setBlendMode("emissive", _emissiveBlend);
+    sp.setMRT(sceneMRT);
+    if (targets.diffuseColor) sp.getTexture("diffuseColor").type = THREE.UnsignedByteType;
+    if (targets.normal) sp.getTexture("normal").type = THREE.UnsignedByteType;
   }
 
   /**
@@ -778,7 +841,10 @@ export class PostFxPipeline {
     if (this._bloomPass?.dispose) this._bloomPass.dispose();
     if (this._cloudBloomPass?.dispose) this._cloudBloomPass.dispose();
     const bp = this._bloomParams;
-    const solidsInput = this._bloomSelective
+    // Selective bloom that is OFF reads nothing: asking for "emissive" would
+    // add the attachment (see _wrapSceneTextureRequests), so it waits for
+    // setBloomEnabled(true), which rebuilds these passes.
+    const solidsInput = this._emissiveWanted()
       ? this._scenePass.getTextureNode("emissive")
       : this._scenePassColor;
     this._bloomPass = bloom(solidsInput, bp.strength, bp.radius, bp.threshold);

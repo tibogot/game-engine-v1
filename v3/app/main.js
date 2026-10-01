@@ -1892,6 +1892,61 @@ export async function startV3App(opts = {}) {
     return _viewBand;
   }
 
+  /**
+   * THE GROUND THE SCREEN SHOWS, as a circle (2026-10-01, alg-rts popping).
+   * The four screen corners and the top-centre cast onto flat ground at the
+   * look point's height: `anchor` = the centre of that patch, `radius` = the
+   * circle around it that holds every corner, padded for hills and valleys.
+   *
+   * Why: the plant fields wrapped their tile around the CAMERA. Looking down at
+   * an RTS angle, half of that tile is behind the camera and the far corners of
+   * the screen (250-263 m at max zoom on a 2:1 window) lay past the fade (cut at
+   * 173/180 m by the tile cap), so trees and bushes appeared on screen while
+   * panning. Centred here, the same tile covers the whole view.
+   *
+   * Returns null when a corner ray misses the ground (looking at the horizon:
+   * the editor's low orbits, fly mode) — those keep the camera anchor.
+   */
+  const _fpNdc = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 1]];
+  const _fpRay = new THREE.Vector3();
+  const _fpOut = { anchor: new THREE.Vector3(), radius: 0, farthest: 0 };
+  const _fpPts = _fpNdc.map(() => new THREE.Vector2());
+  function viewFootprint() {
+    const t = controls?.target;
+    // __V3_DEBUG.scatterCameraAnchor = true: the old camera-centred tile, to A/B.
+    if (!t || playMode.active || window.__V3_DEBUG?.scatterCameraAnchor) return null;
+    camera.updateMatrixWorld();   // a game camera moved this frame: unproject needs it
+    const cp = camera.position;
+    const h = cp.y - t.y;
+    if (!(h > 0.5)) return null;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (let i = 0; i < _fpNdc.length; i++) {
+      _fpRay.set(_fpNdc[i][0], _fpNdc[i][1], 0.5).unproject(camera).sub(cp).normalize();
+      if (!(_fpRay.y < -0.02)) return null;   // at or above the horizon
+      const s = h / -_fpRay.y;
+      const x = cp.x + _fpRay.x * s, z = cp.z + _fpRay.z * s;
+      _fpPts[i].set(x, z);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+    }
+    // The bottom edge of the screen lies under the camera's feet in front of
+    // it; include the camera's ground point so nothing near it is left out.
+    minX = Math.min(minX, cp.x); maxX = Math.max(maxX, cp.x);
+    minZ = Math.min(minZ, cp.z); maxZ = Math.max(maxZ, cp.z);
+    const ax = (minX + maxX) * 0.5, az = (minZ + maxZ) * 0.5;
+    let r = Math.hypot(cp.x - ax, cp.z - az), far = 0;
+    for (const p of _fpPts) {
+      r = Math.max(r, Math.hypot(p.x - ax, p.y - az));
+      far = Math.max(far, Math.hypot(p.x - cp.x, p.y - cp.z));
+    }
+    _fpOut.anchor.set(ax, t.y, az);
+    // Hills rise into view past the flat-ground edge, valleys fall away below
+    // it: 6% + 6 m of slack.
+    _fpOut.radius = r * 1.06 + 6;
+    _fpOut.farthest = far * 1.06 + 6;
+    return _fpOut;
+  }
+
   const _grassAnchorV = new THREE.Vector3();
   const GRASS_ANCHOR_LEAD = 0.35;   // of tileSize, toward the look-at point
   function grassViewAnchor(tileSize) {
@@ -2008,8 +2063,22 @@ export async function startV3App(opts = {}) {
    * view, and stays the centre. See ScatterField.setShadowCentre for why.
    */
   const _shadowFwd = new THREE.Vector3();
-  function scatterShadowCentre(field) {
+  function scatterShadowCentre(field, footprint = null) {
     if (!field?.setShadowCentre) return;
+    // PLANT SHADOWS OVER THE WHOLE VIEW whenever the view is a footprint (an
+    // RTS camera looking down). The 35 m circle below left most of the view's
+    // plants shadowless and flat pale, and they gained and lost their shadows
+    // as the circle slid while panning. MEASURED alg-rts 2026-10-01 (scale 1,
+    // interleaved): within noise (±0.4 ms) at default and max zoom — the
+    // shadow pass draws the far LOD only. __V3_DEBUG.scatterShadowCircle =
+    // true brings the circle back to compare.
+    if (footprint && !window.__V3_DEBUG?.scatterShadowCircle) {
+      field._shadowDistSaved ??= field.u.uShadowDist.value;
+      field.u.uShadowDist.value = footprint.radius;
+      field.setShadowCentre(footprint.anchor.x, footprint.anchor.z);
+      return;
+    }
+    if (field._shadowDistSaved != null) { field.u.uShadowDist.value = field._shadowDistSaved; field._shadowDistSaved = null; }
     // The radius the compute USES — the state's number only reaches the
     // uniform on a sync, and a centre offset by the other one slides the
     // circle off the near plants.
@@ -4527,6 +4596,7 @@ export async function startV3App(opts = {}) {
   let _lastWidgetRefresh = 0;
   let _noEnvTimeSec = 0;
   const _preRenderHooks = [];
+  const _preUpdateHooks = [];   // a game's camera: before the clipmap, plants, shadow fit
   /*
    * FRAME THROTTLE (app.setFrameThrottle). A game that boots behind a loading
    * screen was rendering the full scene every animation frame the whole time —
@@ -4597,6 +4667,16 @@ export async function startV3App(opts = {}) {
           if (hit) applySculptStroke(hit.u, hit.v);
         }
         editorCamera.update(dt);
+        // A game's camera moves HERE (app.addPreUpdateHook), before anything
+        // reads it: the clipmap below, the plant fields' culling, LOD and
+        // shadow circle, the shadow fit. As a pre-render hook it ran after all
+        // of them, and they drew every frame against the last frame's view —
+        // plants and shadows at the screen's edge appeared a frame late.
+        for (const hook of _preUpdateHooks) {
+          try { hook(dt); } catch (err) {
+            if (!hook._erred) { hook._erred = true; console.error(`[V3] Pre-update hook "${hook.name || "(anonymous)"}" threw:`, err); }
+          }
+        }
         // The camera, not the orbit pivot: looking at something far from the
         // pivot used to put 8-16 m quads right under the viewer, which is
         // where the metre-sized float on sculpted ground came from.
@@ -4731,16 +4811,17 @@ export async function startV3App(opts = {}) {
         const wantSusuki = grassTerrainData.hasSusukiData;
         susukiSystem.setEnabled(wantSusuki);
         if (wantSusuki) {
-          const _susukiAnchor = playMode.active ? playMode.playerPosition : camera.position;
+          const fp = susukiState.autoDistances !== false ? viewFootprint() : null;
+          const _susukiAnchor = playMode.active ? playMode.playerPosition : fp ? fp.anchor : camera.position;
           if (susukiState.autoDistances !== false) {
             const band = viewGroundBand();
             // A tall plant is visible further than a ground one of the same
             // screen size, so its steps sit further out for the same view.
-            susukiSystem.field.setViewDistances(band.near * 1.2, band.far * 1.25);
+            susukiSystem.field.setViewDistances(band.near * 1.2, band.far * 1.25, fp);
           }
           susukiSystem.setShadowCameras(scatterShadowCameras(susukiState.shadowDistance ?? 35));
-          scatterShadowCentre(susukiSystem.field);
-          susukiSystem.update(_susukiAnchor, camera);
+          scatterShadowCentre(susukiSystem.field, fp);
+          susukiSystem.update(_susukiAnchor, camera, playMode.active ? playMode.playerPosition : null);
         }
       }
       // The far-field tint follows the paint, whether or not the 3D flowers are built yet.
@@ -4766,13 +4847,14 @@ export async function startV3App(opts = {}) {
           // the BUDGET (tile size and plant count), which is a cost decision
           // rather than a view one. `autoDistances: false` hands them back to
           // the panel sliders.
+          const fp = foliageScatterState.autoDistances !== false ? viewFootprint() : null;
           if (foliageScatterState.autoDistances !== false) {
             const band = viewGroundBand();
-            foliageScatter.field.setViewDistances(band.near, band.far);
+            foliageScatter.field.setViewDistances(band.near, band.far, fp);
           }
           foliageScatter.setShadowCameras(scatterShadowCameras(foliageScatterState.shadowDistance));
-          scatterShadowCentre(foliageScatter.field);
-          foliageScatter.update(playMode.active ? playMode.playerPosition : camera.position, camera);
+          scatterShadowCentre(foliageScatter.field, fp);
+          foliageScatter.update(playMode.active ? playMode.playerPosition : fp ? fp.anchor : camera.position, camera, playMode.active ? playMode.playerPosition : null);
         }
       }
       // Ambient FX: one compute and one draw, and only while something is
@@ -12859,6 +12941,15 @@ export async function startV3App(opts = {}) {
     removePreRenderHook(fn) {
       const i = _preRenderHooks.indexOf(fn);
       if (i >= 0) _preRenderHooks.splice(i, 1);
+    },
+    /** Run a callback at the START of the frame (outside play mode), before the terrain,
+     *  the plant fields and the shadow fit read the camera — where a game moves its camera. */
+    addPreUpdateHook(fn) {
+      if (typeof fn === "function" && !_preUpdateHooks.includes(fn)) _preUpdateHooks.push(fn);
+    },
+    removePreUpdateHook(fn) {
+      const i = _preUpdateHooks.indexOf(fn);
+      if (i >= 0) _preUpdateHooks.splice(i, 1);
     },
   };
 }

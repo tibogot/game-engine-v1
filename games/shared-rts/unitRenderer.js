@@ -1311,6 +1311,16 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       _sphere.center.set(p.x, p.y + (t.barY ?? 3) * 0.5, p.z);
       _sphere.radius = (t.radius ?? 1) + (t.barY ?? 3);
       v.onScreen = !camera || _frustum.intersectsSphere(_sphere);
+      // Close enough to the view to be drawn at all: on screen, or its shadow
+      // could fall on screen (the sun's shadow of a hull reaches ~1x its height
+      // in this light; an aircraft's lands tens of metres away). An instanced
+      // vehicle outside it writes no instance — its body, running gear,
+      // stencil, x-ray twin and shadow all skip it (2026-10-01: six parked
+      // vehicles cost ~68 draws a frame wherever the camera looked).
+      if (camera && !v.onScreen) {
+        _sphere.radius += t.isAir ? 60 : 12;
+        v.nearView = _frustum.intersectsSphere(_sphere);
+      } else v.nearView = true;
 
       const bobY = t.isAir ? Math.sin((v.bob += dt) * 1.6) * 0.25 : 0;
       x.position.set(p.x, p.y + bobY, p.z);
@@ -1379,7 +1389,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       }
 
       // Instanced unit: write one matrix per template part and move on.
-      if (v.inst) {
+      if (v.inst && v.nearView) {
         const inst = v.inst;
         const i = inst.n;
         if (i < MAX_PER_TYPE) {

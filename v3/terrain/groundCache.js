@@ -74,6 +74,14 @@ export const GROUND_CACHE_DEFAULTS = {
    */
   tilesPerFrame: 3,
   /**
+   * One render pass per target and tile (paint, splats, decals and the cavity
+   * finish as meshes of one scene, in renderOrder) instead of up to four. Each
+   * pass is a submit of its own: MEASURED ~0.08 ms apiece on the RTS laptop,
+   * and panning bakes 3 tiles a frame. false = the old pass-per-layer path
+   * (kept to A/B and to compare pixels).
+   */
+  mergedPasses: true,
+  /**
    * Metres of ground one screen pixel covers per metre of distance, used to
    * turn the near/far paint fade (set in camera metres) into a ring's texel
    * size. ~6e-4 at the RTS camera (40° lens, ~1800 px tall, 40-60° down).
@@ -276,6 +284,28 @@ export function createGroundCache({
   finishMat.fragmentNode = Fn(() => vec4(sqrt(max(cavityFactor(), vec3(0))).mul(0.5), 1))();
   const quadFinish = new QuadMesh(finishMat);
 
+  // The same three passes as MESHES over the tile, for the merged bake: a
+  // world-space square (y = 0) whose uv runs 0..1 across the tile, so the
+  // paint and finish shaders read exactly the uv the quads gave them
+  // (x = minX + u·S, z = minZ + v·S), drawn by decalCam like the splats.
+  const tileGeo = new THREE.BufferGeometry();
+  tileGeo.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1], 3));
+  tileGeo.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+  tileGeo.setIndex([0, 1, 2, 0, 2, 3]);
+  const tilePosition = vec3(uTile.x.add(uv().x.mul(uTile.z)), 0, uTile.y.add(uv().y.mul(uTile.z)));
+  const tileMesh = (mat, order) => {
+    mat.positionNode = tilePosition;
+    mat.side = THREE.DoubleSide;   // the top-down camera flips the winding (see the decals)
+    const m = new THREE.Mesh(tileGeo, mat);
+    m.frustumCulled = false;
+    m.renderOrder = order;
+    return m;
+  };
+  const finishPlaneMat = finishMat.clone();
+  finishPlaneMat.fragmentNode = finishMat.fragmentNode;
+  const tilePaint = { colour: tileMesh(bakeMaterial("colour"), 0), normal: tileMesh(bakeMaterial("normal"), 0) };
+  const tileFinish = tileMesh(finishPlaneMat, 3);
+
   // ── Bake: decals, drawn over the tile after the paint ───────────────────
   // The decal system's own data (DecalSystem: boxes projecting along local −Y,
   // two texture arrays), rasterised top-down: each decal is the quad of its
@@ -464,6 +494,9 @@ export function createGroundCache({
   let splatLib = null, splatBuf = null, splatGeo = null, splatCount = 0;
   const splatMats = {}, splatMeshes = {};
   let splatBounds = [];
+  // Every splat's data (CPU). The GPU buffer holds only the splats of the
+  // tile being baked — see splatsForTile.
+  let splatSrc = new Float32Array(0);
 
   function buildSplatGeometry(capacity) {
     const geo = new THREE.InstancedBufferGeometry();
@@ -559,7 +592,8 @@ export function createGroundCache({
       ({ geo: splatGeo, buf: splatBuf } = buildSplatGeometry(cap));
       for (const k of Object.keys(splatMeshes)) splatMeshes[k].geometry = splatGeo;
     }
-    const arr = splatBuf.array;
+    splatSrc = new Float32Array(list.length * SPLAT_STRIDE);
+    const arr = splatSrc;
     splatBounds = [];
     for (let i = 0; i < list.length; i++) {
       const p = list[i];
@@ -576,10 +610,7 @@ export function createGroundCache({
       const r = Math.hypot(p.w, p.l) * 0.5;
       splatBounds.push([p.x - r, p.z - r, p.x + r, p.z + r]);
     }
-    splatBuf.clearUpdateRanges();
-    splatBuf.addUpdateRange(0, Math.max(SPLAT_STRIDE, list.length * SPLAT_STRIDE));
-    splatBuf.needsUpdate = true;
-    splatGeo.instanceCount = list.length;
+    splatGeo.instanceCount = 0;
     splatCount = list.length;
     ensureSplatMeshes();
     markAllStale();
@@ -631,6 +662,33 @@ export function createGroundCache({
     return t * t * (3 - 2 * t);
   }
 
+  /**
+   * PER-TILE SPLATS (2026-10-01): copy into the GPU buffer only the splats
+   * whose quad overlaps this tile, in LIST ORDER (overlapping splats layer in
+   * the order they were laid). Every tile used to draw all ~4200: MEASURED
+   * 0.28 ms of a 0.78 ms tile bake on a 5 m tile that a handful touch, ~0.85
+   * ms a frame while panning (3 tiles). queue.writeBuffer is ordered before
+   * each later submit, so one buffer serves the tiles baked in one frame.
+   * Returns how many.
+   */
+  function splatsForTile(x0, z0, x1, z1) {
+    const arr = splatBuf.array;
+    let n = 0;
+    for (let i = 0; i < splatCount; i++) {
+      const b = splatBounds[i];
+      if (b[2] < x0 || b[0] > x1 || b[3] < z0 || b[1] > z1) continue;
+      arr.set(splatSrc.subarray(i * SPLAT_STRIDE, (i + 1) * SPLAT_STRIDE), n * SPLAT_STRIDE);
+      n++;
+    }
+    if (n) {
+      splatBuf.clearUpdateRanges();
+      splatBuf.addUpdateRange(0, n * SPLAT_STRIDE);
+      splatBuf.needsUpdate = true;
+    }
+    splatGeo.instanceCount = n;
+    return n;
+  }
+
   function bakeTile(ring, tx, tz) {
     const S = ring.S;
     uTile.value.set(tx * S, tz * S, S, farFadeFor(ring.k));
@@ -648,11 +706,25 @@ export function createGroundCache({
     // It used to go through a staging target and two copyTextureToTexture —
     // each copy its own command submit, 20 a frame while panning.
     const vx = mod(tx, T) * TILE, vy = mod(tz, T) * TILE;
-    for (const [rt, quad, which] of [[colRT, quadCol, "colour"], [nrmRT, quadNrm, "normal"]]) {
+    const nSplats = splatCount > 0 ? splatsForTile(tx * S, tz * S, (tx + 1) * S, (tz + 1) * S) : 0;
+    if (O.mergedPasses) {
+      // ONE pass per target: paint (0) → splats (1) → decals (2) → finish (3).
+      for (const [rt, which] of [[colRT, "colour"], [nrmRT, "normal"]]) {
+        rt.viewport.set(vx, vy, TILE, TILE);
+        renderer.setRenderTarget(rt, ring.k);
+        const parts = [tilePaint[which]];
+        if (nSplats > 0 && splatMeshes[which]) { splatMeshes[which].renderOrder = 1; parts.push(splatMeshes[which]); }
+        if (decalCount > 0 && decalMeshes[which]) { decalMeshes[which].renderOrder = 2; parts.push(decalMeshes[which]); }
+        if (which === "colour") parts.push(tileFinish);
+        for (const p of parts) decalScene.add(p);
+        renderer.render(decalScene, decalCam);
+        for (const p of parts) decalScene.remove(p);
+      }
+    } else for (const [rt, quad, which] of [[colRT, quadCol, "colour"], [nrmRT, quadNrm, "normal"]]) {
       rt.viewport.set(vx, vy, TILE, TILE);
       renderer.setRenderTarget(rt, ring.k);
       quad.render(renderer);
-      if (splatCount > 0 && splatMeshes[which]) {
+      if (nSplats > 0 && splatMeshes[which]) {
         decalScene.add(splatMeshes[which]);
         renderer.render(decalScene, decalCam);
         decalScene.remove(splatMeshes[which]);
@@ -826,12 +898,23 @@ export function createGroundCache({
     for (const r of rings) updateValidBox(r);
   }
 
-  /** Bake everything the current view needs, now (the boot, under a loading screen). */
-  function bakeAll(camera, heightVersion = getHeightVersion()) {
+  /**
+   * Bake everything the current view needs, now (the boot, under a loading
+   * screen). Returns a promise: ~450 tiles × 7 draws each take a GPU timestamp
+   * query while the renderer tracks them, and the pool (drained once a frame by
+   * the loop) overflowed and warned at boot. Its drain is a GPU readback, so it
+   * can only empty the pool if we WAIT for it — every 32 tiles.
+   */
+  async function bakeAll(camera, heightVersion = getHeightVersion()) {
     syncDecals();
     lookChanged(heightVersion);
     const c = retarget(camera);
-    for (const t of pendingTiles(c)) bakeTile(t.r, t.tx, t.tz);
+    const track = !!renderer.backend?.trackTimestamp;
+    let n = 0;
+    for (const t of pendingTiles(c)) {
+      bakeTile(t.r, t.tx, t.tz);
+      if (track && (++n % 32) === 0) await renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+    }
     stats.pending = 0;
     for (const r of rings) updateValidBox(r);
   }
@@ -942,6 +1025,7 @@ export function createGroundCache({
     dispose() {
       colRT.dispose(); nrmRT.dispose();
       quadCol.material.dispose(); quadNrm.material.dispose();
+      tilePaint.colour.material.dispose(); tilePaint.normal.material.dispose(); finishPlaneMat.dispose(); tileGeo.dispose();
       decalGeo?.dispose();
       for (const m of Object.values(decalMats)) m.dispose();
     },

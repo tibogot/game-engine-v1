@@ -823,5 +823,5 @@ export class FoliageScatterSystem {
 
   init(camera) { return this.field.init(camera); }
   setEnabled(on) { this.field.setEnabled(on); }
-  update(anchorPos, camera) { this.field.update(anchorPos, camera); }
+  update(anchorPos, camera, pushPos = anchorPos) { this.field.update(anchorPos, camera, pushPos); }
 }

@@ -445,6 +445,14 @@ export function createAirHaze({ renderer, atmosphere, clouds }) {
       for (const r of ss) r.setSize(Math.round(W * 0.25), Math.round(H * 0.25));
       out.setSize(W, H);
       histValid = false;
+      // setSize drops the GPU textures, and a target is only re-created when it is
+      // drawn INTO. The temporal pass reads the other history and the apply pass
+      // reads ss[3] (drawn only while the shafts show), so on the first frame after
+      // a resize they were bound unmade: "reading 'mipLevelCount'" on every
+      // render-scale change. Clear them all once so each exists.
+      const prev = renderer.getRenderTarget();
+      for (const r of [...hist, ...ss]) { renderer.setRenderTarget(r); renderer.clear(); }
+      renderer.setRenderTarget(prev);
     }
     colorNode.value = o.colorTex;
     frameNo = (frameNo + 1) % 1024;

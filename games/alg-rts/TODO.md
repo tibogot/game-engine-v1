@@ -6,6 +6,88 @@ started · **you** = your call or your work.
 
 Keep this file current: tick things off here, add new asks here.
 
+## PERF + QUALITY AUDIT (2026-10-01, you: "measure first, popping, culling, shadows, errors")
+
+Method: games/alg-rts/gpuBench.js (render N frames through the loop +
+onSubmittedWorkDone, cases interleaved; scale 1 = what you play, scale 2 to
+magnify GPU costs). The stats overlay's
+GPU ms and the per-pass timer are NOT reliable for A/Bs here.
+
+- [x] **Scene pass wrote 4 MSAA targets nobody read** (diffuse + normal for an
+      SSAO that is off, emissive for a bloom that is off): colour only now,
+      a target joins when something asks for it (bloom on → emissive back).
+      Before → after at YOUR resolution (scale 1): close 13.9 → 12.2,
+      default 15.9 → 13.9, max 18.7 → 15.7 ms (at 2x: 37 → 25, 56 → 37,
+      84 → 41 — the targets ran out of bandwidth there). nam keeps what it
+      reads (bloom, paddy normals).
+- [!] YOUR GPU WAS IN THE THROTTLE LATCH during this audit (885 of 3105 MHz,
+      23 W, reason 0x24 at 66 °C): absolute ms here are ~3x high; the A/B
+      deltas are interleaved and hold. EC reset when convenient.
+- [x] Render error on the first render-scale change (Sky Pro haze history
+      bound before it existed) — fixed.
+- [x] Boot warning "timestamp queries exceeded" (ground cache bakeAll) — fixed.
+- [x] Ground cache vs live blend (?gc=0): the cache is 10.2 ms CHEAPER at max zoom.
+- [x] CLEAN NUMBERS after the EC reset (GPU 41-45 W, 1.7-1.85 GHz), scale 1,
+      base view: frame 12.0 ms default / 12.5 max (GPU-bound; CPU 8-9.5 ms).
+      Cost of each (hide it, interleaved, ±0.4 noise), default / max:
+      terrain 2.75 / 3.2 · lakes 1.5 / 1.6 · Sky Pro update + dome 1.1 / 1.8
+      (never on screen in the RTS view) · haze 1.3 / 1.2 · shadow map 0.7 /
+      1.3 · stones 0.6 / 0.7 · buildings, units, animals, birds 0.1-0.4 each ·
+      trees + foliage −0.5 (they hide terrain that costs more to shade).
+   - [—] Sky Pro skip-when-unseen (~1-1.8 ms): NO — you, 2026-10-01: leave
+         the sky alone (the free camera / future third-person views).
+   - [ ] Lakes 1.5 ms: what the water's frame copies cost when an oasis is in view.
+   - [ ] Haze: the full-res copy back into the frame (a ping-pong would drop it).
+- [x] POPPING (engine, both games): the plant fields' tile now centres on the
+      GROUND ON SCREEN (main.js viewFootprint) and fades past the farthest
+      corner (max zoom: fade at 186/194 m from the view's centre; before 173/
+      180 m from the CAMERA while corners reached 250-263 m); detail switches
+      measured from the camera. Plant shadows cover the WHOLE view (was a 35 m
+      circle sliding under the screen). Orchards' far detail casts. The RTS
+      camera moves at the START of the frame (app.addPreUpdateHook) — the
+      clipmap, plants and shadow fit no longer see last frame's view (alg;
+      nam still updates its camera in its tick).
+      Cost (scale 1, interleaved): alg +0.3 ms (anchor), shadows within noise;
+      nam +0.7 (anchor) +0.55 (shadows). Debug: __V3_DEBUG.scatterCameraAnchor
+      / scatterShadowCircle = true for the old behaviour.
+   - [ ] **you, look**: plants now shaded all over the view (darker canopies,
+         was pale/flat outside the circle) — keep? nam too (+1.3 ms there).
+   - [ ] Plants past their first detail step receive no shadows (lod0 only) —
+         a building's shadow drops off a tree at ~100 m. Price it.
+   - [ ] nam: move its camera to addPreUpdateHook (it is inside its tick).
+- [x] DRAW CALLS (you: "~293 at the base, is it plenty?"): 287-310 a frame =
+      tall plants 84 (4 species × 3 variants × 3 details, depth pre-pass +
+      colour, + shadows), VEHICLES ~68 (6 types × body/gear/stencil + x-ray
+      twin + shadow — one of each, drawn wherever the camera looked), foliage
+      33, stones 22, soldiers' kit 13. CPU ≈ 8.5 ms a frame, ~16 µs a draw.
+      FIXED: an instanced vehicle out of view (and its shadow's reach: 12 m,
+      aircraft 60 m) writes no instance — away from the vehicles 283 → 205.
+   - [ ] Tall plants: 3 variants (your pick for variety) = 24 of the 84; the
+         depth pre-pass doubles them but saved ~14 ms on the cedars. Keep.
+   - [ ] Crowd soldiers + herds still skinned/drawn/shadowed off screen
+         (few now; matters with a big army).
+- [x] PANNING costs +2.7-2.9 ms a frame at every zoom: ALL of it the ground
+      cache's tile bakes (3 tiles × ~0.8-1 ms). Splats per tile now only those
+      that overlap it, in list order (was all 4207 per tile): −0.1 ms a tile.
+   - [x] MERGED PASSES (groundCache O.mergedPasses, default on): paint,
+         splats, decals and cavity are meshes of ONE scene per target →
+         7 render passes + 7 submits a tile become 2 (21 → 6 a panning
+         frame). Output BYTE-IDENTICAL (layer cleared, both paths baked,
+         colour + normal read back, rings 0/2/4: max diff 0). The ms saved
+         is not measured yet — the GPU latch came back mid-A/B (780 MHz,
+         15 W); first noisy read −5 ms at default zoom, a wash at max.
+- [ ] Static shadows into the cache: NOT worth it now — the whole shadow map
+      measured ≤0.5-1 ms in every A/B of this audit (the bar was 1.5 ms).
+- [x] PERF PANEL (Dev → Performance, gpuBench.js): **Check GPU health**
+      (a fixed compute kernel's TFLOPS vs the best this browser has seen —
+      catches the latch: it read 1.8-2.9 latched), **Measure this view**
+      (frame ms min/mean, CPU ms, draws, GPU- or CPU-bound), **Break it
+      down** (~40 s: each system hidden in turn, order rotated per round,
+      with a noise figure from a second untouched base). The old hint that
+      called the pass timer trustworthy is gone.
+   - [ ] **you**: press Check GPU health once right after a fresh EC reset,
+         so "best seen" is a healthy reference.
+
 ## PARKED / NEXT (2026-09-30)
 
 - [~] **THE COH GROUND** (2026-10-01; you: "that same CoH terrain texture,

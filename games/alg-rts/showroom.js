@@ -283,8 +283,12 @@ export function kitView(geo) {
  * prickly-pear hedges outside the garden walls.
  */
 function placePlants(app, placed) {
-  // Far LOD out to 260 m: an orchard is a place, it must not pop in late.
-  const pf = new PlacedFoliage({ scene: app.scene, lodDistances: [60, 140] });
+  // Detail steps at 60 / 140 m from the camera (3D: at max zoom the camera is
+  // 164 m up, so every orchard is at the far detail). shadowLods 3: the far
+  // detail casts too (the plant fields cast with it) — at 2 every orchard past
+  // 140 m lost its shadow, and at the default zoom that line crossed the top
+  // of the screen, so trees dropped their shadows as you panned.
+  const pf = new PlacedFoliage({ scene: app.scene, lodDistances: [60, 140], shadowLods: 3 });
   pf.setType("canaryPalm", structuredClone(FOLIAGE_PRESETS.canaryPalm));
   // Either side of the gate, a few metres out (post-local).
   for (const [lx, lz, scale, seed] of [[-7, 22, 1, 17], [7, 22, 0.95, 29]]) {
