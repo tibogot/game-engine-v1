@@ -78,6 +78,9 @@ export const PUBLIC_ENGINE_MODULES = [
   // Animals reshaped from the pack's donkey (goat, sheep, camel) — the builder
   // v3/sheep-lab.html tunes and the RTS herds place (a game places them)
   "v3/props/animalMorph.js",
+  // Birds from the pack's chicken (white / speckled / black hens…) — the
+  // builder v3/bird-lab.html tunes (a game places them)
+  "v3/props/birdMorph.js",
   // RTS object kit: structures built from the shared parts (a game places them)
   "v3/render/objects/rtsQuonset.js",
   "v3/render/objects/rtsFirebaseProps.js",

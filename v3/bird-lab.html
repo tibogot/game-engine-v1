@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Birds from the Pack's Chicken</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #c9b48e; color: #dfe6ea;
+             font: 13px/1.5 system-ui, sans-serif; }
+      #hud { position: fixed; top: 10px; left: 10px; z-index: 10;
+             background: rgba(12,16,12,0.88); border: 1px solid #2a342a;
+             border-radius: 8px; padding: 10px 12px; min-width: 230px; max-width: 320px; }
+      #hud h1 { margin: 0 0 6px; font-size: 12px; letter-spacing: .05em;
+                text-transform: uppercase; color: #cfd8b8; }
+      .row { display: flex; justify-content: space-between; gap: 14px; }
+      .row b { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+      .note { margin-top: 7px; padding-top: 6px; border-top: 1px solid #2a342a;
+              color: #8b998b; font-size: 11px; }
+      button { margin: 6px 4px 0 0; background: #2a342a; color: #dfe6ea; border: 1px solid #4a5a4a;
+               border-radius: 4px; padding: 3px 9px; cursor: pointer; }
+      button.on { background: #5a6a3a; }
+      #err { color: #ff8c8c; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Bird Lab — the pack's chicken</h1>
+      <div class="row"><span>Faces</span><b id="s-faces">—</b></div>
+      <div class="row"><span>Texture classes</span><b id="s-classes">—</b></div>
+      <div id="clips"></div>
+      <div class="note">Left to right: the pack's own hen (its painted
+        colours), a WHITE hen, a speckled hen, a black hen — one colour per
+        face, read from the texture and repainted by class (feathers, comb,
+        beak/legs, eyes). Ochre ground: the alg-rts map's colour, to judge
+        what reads.</div>
+      <div class="note" id="err"></div>
+    </div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { initBirdMorph, createBirdTemplate } from "./props/birdMorph.js";
+
+      const $ = (id) => document.getElementById(id);
+      addEventListener("error", (e) => { $("err").textContent += e.message + "\n"; });
+      addEventListener("unhandledrejection", (e) => { $("err").textContent += String(e.reason) + "\n"; });
+
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      document.body.appendChild(renderer.domElement);
+      await renderer.init();
+
+      const scene = new THREE.Scene();
+      const SKY = new THREE.Color("#b9cbd8");
+      scene.background = SKY;
+      const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.02, 200);
+      camera.position.set(0.6, 0.9, 2.4);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0.2, 0);
+      controls.update();
+      scene.add(new THREE.HemisphereLight(0xe8eefc, 0x8a6e4a, 1.1));
+      const sun = new THREE.DirectionalLight(0xfff0d8, 3.2);
+      sun.position.set(3, 5, 2);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      Object.assign(sun.shadow.camera, { left: -3, right: 3, top: 3, bottom: -3 });
+      scene.add(sun);
+      // the alg-rts map's ochre ground
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: "#b8986a", roughness: 1 }));
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      const stats = await initBirdMorph();
+      $("s-faces").textContent = stats.faces;
+      $("s-classes").textContent = Object.entries(stats.classes).map(([k, n]) => `${k} ${n}`).join(" · ");
+
+      const KINDS = ["henPack", "hen", "henSpeckled", "henBlack"];
+      const birds = KINDS.map((kind, k) => {
+        const tpl = createBirdTemplate(kind);
+        const box = new THREE.Box3().setFromObject(tpl.root);
+        const s = tpl.height / Math.max(1e-3, box.max.y - box.min.y);
+        tpl.root.scale.setScalar(s);
+        tpl.root.position.set((k - 1.5) * 0.55, -box.min.y * s, 0);
+        tpl.source.castShadow = true;
+        scene.add(tpl.root);
+        const mixer = new THREE.AnimationMixer(tpl.root);
+        return { kind, tpl, mixer, action: null };
+      });
+      const CLIPS = birds[0].tpl.clips.map((c) => c.name);
+      const play = (name) => {
+        for (const b of birds) {
+          const clip = b.tpl.clips.find((c) => c.name === name);
+          const next = b.mixer.clipAction(clip);
+          next.reset().play();
+          if (b.action && b.action !== next) b.action.crossFadeTo(next, 0.25, false);
+          b.action = next;
+        }
+        for (const el of document.querySelectorAll("#clips button")) el.classList.toggle("on", el.dataset.clip === name);
+      };
+      for (const n of CLIPS) {
+        const bt = document.createElement("button");
+        bt.textContent = n.replace(/^Chicken_\d+_/, "");
+        bt.dataset.clip = n;
+        bt.onclick = () => play(n);
+        $("clips").appendChild(bt);
+      }
+      play(CLIPS.find((n) => /idle/i.test(n)) ?? CLIPS[0]);
+
+      const P = { speed: 1 };
+      const clock = new THREE.Clock();
+      renderer.setAnimationLoop(() => {
+        const dt = clock.getDelta() * P.speed;
+        for (const b of birds) b.mixer.update(dt);
+        renderer.render(scene, camera);
+      });
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+      window.__BIRD = { renderer, scene, camera, controls, birds, play, P, stats };
+    </script>
+  </body>
+</html>

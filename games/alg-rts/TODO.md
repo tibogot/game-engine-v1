@@ -1248,6 +1248,19 @@ lift off the pad; the ALN comes out of the cave mouth.
 5. [~] Animals alongside: donkeys — DONE 2026-09-29 (see ALGERIAN DONKEY
        below); on the tracks (walking between villages) still to do;
        chickens (Chicken_001_compressed.glb) in the mechta yards
+- [~] **HENS — white, speckled, black** (you, 2026-10-01: the pack's brown
+      hen won't read on our ochre map). v3/props/birdMorph.js + the new
+      v3/bird-lab.html (ochre ground): the chicken's texture is read once
+      (KTX2 transcoded to plain RGBA — the GLB's BC7 can't be read back) into
+      one colour per face, sorted by class — feathers, comb (bright red only:
+      a looser rule took the red-brown neck), beak/legs, eyes — and repainted
+      per kind. Same skeleton and 3 clips (idle, walk, run); crowd format.
+      Not in the game yet.
+   - [x] you approved them (2026-10-01).
+   - [ ] In the mechta yards — mostly white, a few speckled / black (the
+         game chat places them: createBirdTemplate on the crowd path).
+   - [ ] More birds from the chicken: Barbary partridge (scrub slopes,
+         flushes), turkey / guinea fowl (yards), white stork (roofs).
 - [~] **Camel** — being built in v3/sheep-lab.html ("camel-morph", 2026-09-27):
       the pack's DONKEY mesh reshaped into an Arabian camel (hump, S-neck,
       pads), same quad look, plays the donkey's 13 clips. Saharan edge more
