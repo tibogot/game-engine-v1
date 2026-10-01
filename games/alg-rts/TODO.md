@@ -354,6 +354,47 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       smoke at the barrel; dust kicks / sparks where rounds land (miss
       feedback); a faint smoke trail on tank shells; sound-synced. Today's
       tracers: games/shared-rts/tracerField.js.
+   - [x] **Round 1 (2026-10-01)**. RESEARCH (agent, sources in its report):
+         CoH3 data — `fx_tracer_speed` 100 for rifles and MGs (~1/8 of real:
+         readable), every small arm has its own faint trail, cannons /
+         mortars have NO tracer (a visible munition); misses throw randomised
+         ground puffs; Relic explosions = directional dirt/debris JETS that
+         fall and kick secondary dust, staged, dust over fire; real belts
+         1 tracer in 4-5; a Men of War mod fixed "blasters" with smaller,
+         dimmer, less saturated streaks. DONE (alg only — opt-ins, nam as
+         it was): projectiles.js `weapons` (tracerEvery, dim, dark, jitter,
+         dirt) + `tracerColours`; algCombat ALG_FIRE: rifle 1 tracer in 6
+         (1.6 × 0.09 m, dim 0.45, 6 m dark from the muzzle), MG 1 in 4
+         (2.5 × 0.12 m, dim 0.6), both 100 m/s; one desaturated red-orange
+         for both sides (no Soviet green: the ALN used French / German
+         arms). combatFx style "coh": a 45 ms muzzle flash + a faint grey
+         wisp; explosions = a short flash, a smaller fireball, a FAN of dirt
+         clods under gravity (spriteField `gravity`, opt-in), a dust column
+         staged after it and a ring of secondary puffs where the clods land;
+         grenades the same, smaller. SEEN: a firefight with no laser lines
+         (a faint streak now and then, gun smoke, dust kicks); an explosion
+         with the clods arcing out of the blast. Tuned after the first look:
+         gun smoke halved (grey blobs round every rifleman), clods bigger and
+         soft (0.55 m: invisible; hard quads: black squares), dust delayed
+         so the fireball shows.
+   - [ ] **you, look in motion** (stills can't judge it): tracer
+         frequency and brightness, the clods (size, colour), the dust
+         column's grey (the flipbook's own tint — a sandier dust wants a
+         tinted book), the fireball size.
+   - [x] **Round 2 (2026-10-01)**: SPARKS — a bullet off a vehicle throws 5
+         white-hot specks (additive, gravity, ~0.35 s); off a wall, 3 stone
+         chips + a small grey kick (combat.js calls the game's
+         `fx.bulletHit` when it has one; nam keeps its flare). SHELL TRAIL —
+         a tank shell leaves 6 smoke puffs along its flight as it passes
+         (projectiles `trail` events, only when the game's fx has `trail`).
+         DUST RING — a tank gun firing raises 5 low dust puffs round it.
+         BLOOD PUFF on hits: already there (alg's bloodField sprays from the
+         wound — seen in the earlier fight). MEASURED: the whole combat FX
+         update 0.002 ms a frame idle, 0.033 ms in a heavy burst (40 bullet
+         hits + a trail + a tank shot + an explosion); the new fields draw
+         nothing when empty (visible = count > 0) — +2 draws only while
+         sparks / trails are alive. Seen: the tank's dust ring and trail;
+         the sparks spawn and draw (too short-lived for a screenshot).
 - [ ] **FIRE, SMOKE AND EXPLOSIONS, CoH style** (you, 2026-10-01: the
       explosion flipbook "looks not so good for this game"): research CoH's
       explosions (a fast bright flash, a dirt column / clods thrown up, a

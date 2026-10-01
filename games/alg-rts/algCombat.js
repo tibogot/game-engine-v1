@@ -19,8 +19,29 @@ import { createBloodField } from "../shared-rts/bloodField.js";
  * @param {object} o.units     the shared units
  * @param {(e: object) => void} [o.onDeath]
  */
+/**
+ * WEAPON FIRE, the COMPANY OF HEROES way (you, 2026-10-01: "it looks like a
+ * futuristic laser"; the research: CoH tracers travel ~100 m/s, belts carry
+ * 1 tracer in 4-5, misses throw ground puffs, a Men of War mod fixed its
+ * "blaster" look with smaller, dimmer, less saturated streaks):
+ *   rifle   NO streak on most shots (1 in 6, faint and short): the muzzle
+ *           and the dust where it lands do the reading
+ *   mg      1 tracer in 4, short (2.5 m), thin (0.12 m), dim, starting a few
+ *           metres out of the muzzle, jittered so they are not parallel
+ *   cannon  the shell stays a visible streak (a tank round is seen)
+ * The colours: desaturated red-orange for both sides (the ALN fought with
+ * French and German arms: no Soviet green here).
+ */
+const ALG_FIRE = {
+  rifle: { speed: 100, width: 0.09, length: 1.6, tracerEvery: 6, dim: 0.45, dark: 6, jitter: 0.3, dirt: 0.9 },
+  mg: { speed: 100, width: 0.12, length: 2.5, tracerEvery: 4, dim: 0.6, dark: 4, jitter: 0.8, dirt: 1.1, burst: 4, gap: 0.06, spread: 3.2 },
+  cannon: { speed: 140, width: 0.35, length: 5, dim: 0.75 },
+};
+const ALG_TRACERS = { red: [0.95, 0.42, 0.18], green: [0.95, 0.42, 0.18] };
+
 export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {}, onShot = null, onSplash = null, hitChance = null }) {
-  const fx = createCombatFx({ app });
+  // The CoH look (2026-10-01, research in TODO.md): see ALG_FIRE above.
+  const fx = createCombatFx({ app, style: "coh" });
   const fire = createFlameField({ app });
   const craters = await createCraterSystem({ app });
 
@@ -35,6 +56,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combat = null;
   const projectiles = createProjectiles({
+    weapons: ALG_FIRE, tracerColours: ALG_TRACERS,
     app, fx,
     // Every shot puts up any storks standing near it, and is HEARD (algSounds.js).
     sfx: {

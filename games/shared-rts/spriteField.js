@@ -32,6 +32,7 @@ export function createSpriteField({
   soft = true,                       // radial falloff → reads as a glow, not a quad
   scaleAt = (p) => 0.35 + p * 0.65,
   fadeAt = (p) => p,
+  gravity = 0,                       // m/s² pulling vy down (alg-rts' thrown dirt); 0 = drift as before
 }) {
   const geo = new THREE.PlaneGeometry(size, size);
 
@@ -97,6 +98,7 @@ export function createSpriteField({
         if (e.t <= 0) continue;
 
         const p = e.t / e.life; // 1 → 0 over its life
+        if (gravity) e.vy -= gravity * dt;
         e.x += e.vx * dt; e.y += e.vy * dt; e.z += e.vz * dt;
 
         _obj.position.set(e.x, e.y, e.z);

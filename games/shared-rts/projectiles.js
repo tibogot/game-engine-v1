@@ -47,7 +47,21 @@ const MAX_SHELLS = 24;
 const SHELL_G = 34;       // metres/s² — a game arc, not ballistics: it has to read in ~3 s
 const SHELL_R = 0.42;
 
-export function createProjectiles({ app, fx = null, sfx = null, onImpact = () => {}, onArcImpact = () => {} }) {
+/**
+ * `weapons`: a game's own look per weapon, merged over WEAPONS (alg-rts:
+ * the CoH look). Extra keys a game may set:
+ *   tracerEvery  1 in N rounds draws a tracer (the rest are seen only by
+ *                their muzzle and where they land); default 1 = every round
+ *   dim          tracer brightness × this (a faint streak, not a laser)
+ *   dark         metres of the flight from the muzzle with no streak (a
+ *                tracer ignites some way out)
+ *   dirt         the size of the dust kick where a round lands (m)
+ *   jitter       metres the end point wanders (streaks not parallel)
+ */
+export function createProjectiles({ app, fx = null, sfx = null, onImpact = () => {}, onArcImpact = () => {}, weapons = null, tracerColours = null }) {
+  const W_ = weapons ? Object.fromEntries(Object.keys({ ...WEAPONS, ...weapons }).map((k) => [k, { ...WEAPONS[k], ...weapons[k] }])) : WEAPONS;
+  const TC = { ...TRACER_COLOURS, ...(tracerColours ?? {}) };
+  let roundN = 0;
   // `sfx` (namSounds.js) is told about every shot, rocket, landing round and
   // shell coming down; it decides what, if anything, is heard.
   const { scene } = app;
@@ -177,9 +191,17 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
 
   /** Put one round in the air from `from` to `to`, arriving after its flight. */
   function round(w, from, to, colour, t0 = clock) {
-    const t1 = t0 + Math.max(0.03, from.distanceTo(to) / w.speed);
-    tracers.fire(from.x, from.y, from.z, to.x, to.y, to.z, t0, t1,
-      { width: w.width, length: w.length, colour });
+    const d = from.distanceTo(to);
+    const t1 = t0 + Math.max(0.03, d / w.speed);
+    // Most rounds draw nothing (tracerEvery); a drawn one ignites `dark` m out.
+    if (!w.tracerEvery || (roundN++ % w.tracerEvery) === 0) {
+      const f = w.dark ? Math.min(0.6, w.dark / Math.max(d, 1e-3)) : 0;
+      const j = w.jitter ?? 0;
+      const c = w.dim ? colour.map((v) => v * w.dim) : colour;
+      tracers.fire(from.x + (to.x - from.x) * f, from.y + (to.y - from.y) * f, from.z + (to.z - from.z) * f,
+        to.x + (Math.random() - 0.5) * j, to.y + (Math.random() - 0.5) * j * 0.5, to.z + (Math.random() - 0.5) * j,
+        t0 + (t1 - t0) * f, t1, { width: w.width, length: w.length, colour: c });
+    }
     return t1;
   }
 
@@ -202,9 +224,9 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
    * round (not a shell, not a rocket) goes into the dirt round him instead.
    */
   function spawn(from, target, damage, owner, _speed = null, { miss = false } = {}) {
-    const w = WEAPONS[owner?.weapon] ?? WEAPONS.rifle;
-    const colour = w.shell ? TRACER_COLOURS.shell
-      : owner?.team === "enemy" ? TRACER_COLOURS.green : TRACER_COLOURS.red;
+    const w = W_[owner?.weapon] ?? W_.rifle;
+    const colour = w.shell ? TC.shell
+      : owner?.team === "enemy" ? TC.green : TC.red;
     const src = from.clone();
     sfx?.shot(owner, w, src);
 
@@ -235,11 +257,17 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     if (miss && !w.shell) {
       const to = missPoint(target, w.spread ?? 2);
       const t1 = round(w, src, to, colour);
-      if (!target.isAir) pending.push({ at: t1, kind: "dirt", to });
+      if (!target.isAir) pending.push({ at: t1, kind: "dirt", to, dirt: w.dirt });
     } else {
       const to = targetPoint(target).clone();
       const t1 = round(w, src, to, colour);
-      pending.push({ at: t1, kind: "hit", target, damage, owner, to, shell: !!w.shell });
+      pending.push({ at: t1, kind: "hit", target, damage, owner, to, shell: !!w.shell, dirt: w.dirt });
+      // A tank shell's smoke trail (a game whose fx has `trail`): a puff at
+      // every 1/6 of the flight, left as the shell passes it.
+      if (w.shell && fx?.trail) {
+        const t0 = clock;
+        for (let k = 1; k <= 6; k++) { const f = k / 7; pending.push({ at: t0 + (t1 - t0) * f, kind: "trail", x: src.x + (to.x - src.x) * f, y: src.y + (to.y - src.y) * f, z: src.z + (to.z - src.z) * f }); }
+      }
     }
 
     // The rest of an MG burst: later rounds, scattered, into the dirt.
@@ -276,16 +304,18 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
         // The target may have died while the round was in the air: combat's
         // onImpact ignores the dead, and the round simply lands where it was.
         if (p.target?.alive) onImpact(p.target, p.damage, p.to, p.owner, { shell: p.shell, bullet: !p.shell });
-        else if (!p.shell) fx?.dirt(p.to.x, groundY(p.to.x, p.to.z), p.to.z);
+        else if (!p.shell) fx?.dirt(p.to.x, groundY(p.to.x, p.to.z), p.to.z, p.dirt);
         if (!p.shell) sfx?.impact(p.to);
       } else if (p.kind === "fire") {
         if (!p.target?.alive) continue;          // the burst stops when he does
         fx?.muzzle(p.from.x, p.from.y, p.from.z);
         const to = missPoint(p.target, p.w.spread);
         const t1 = round(p.w, p.from, to, p.colour);
-        if (!p.target.isAir) pending.push({ at: t1, kind: "dirt", to });
+        if (!p.target.isAir) pending.push({ at: t1, kind: "dirt", to, dirt: p.w.dirt });
+      } else if (p.kind === "trail") {
+        fx.trail(p.x, p.y, p.z);
       } else if (p.kind === "dirt") {
-        fx?.dirt(p.to.x, p.to.y, p.to.z);
+        fx?.dirt(p.to.x, p.to.y, p.to.z, p.dirt);
         sfx?.impact(p.to);
       }
     }

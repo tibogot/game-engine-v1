@@ -114,6 +114,9 @@ export function createCombat({
     // in Company of Heroes you read a rifle hit from the man, not a flare on
     // him. Anything else (napalm pulses, a splash) keeps the old flare.
     if (shell) fx.shellHit?.(at.x, at.y, at.z);
+    // A game with its own bullet hits (alg-rts: sparks off metal, chips off
+    // stone) takes them here; nam keeps the flare.
+    else if (bullet && !onFoot(target) && fx.bulletHit) fx.bulletHit(at.x, at.y, at.z, { metal: !target.isStructure });
     else if (!bullet || !onFoot(target)) fx.impact(at.x, at.y, at.z);
 
     // HARD COVER takes a bite out of the damage. Applied here, at the moment of
