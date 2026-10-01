@@ -33,6 +33,7 @@ export function createSpriteField({
   scaleAt = (p) => 0.35 + p * 0.65,
   fadeAt = (p) => p,
   gravity = 0,                       // m/s² pulling vy down (alg-rts' thrown dirt); 0 = drift as before
+  renderOrder = 49,                  // in the air: after the ground layers (≤ 44); a light over the smoke (50) passes 53
 }) {
   const geo = new THREE.PlaneGeometry(size, size);
 
@@ -63,8 +64,7 @@ export function createSpriteField({
   mat.mrtNode = new BloomMRTNode({ emissive: mul(mul(materialColor.rgb, float(bloomScale)), alpha) });
 
   const mesh = new THREE.InstancedMesh(geo, mat, max);
-  // In the air: after the ground layers (≤ 44), just under the smoke (50) as before.
-  mesh.renderOrder = 49;
+  mesh.renderOrder = renderOrder;
   mesh.count = 0;
   mesh.frustumCulled = false;
   scene.add(mesh);

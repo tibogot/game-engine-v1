@@ -23,8 +23,9 @@ import * as THREE from "three";
 import {
   Fn, attribute, cameraPosition, cameraWorldMatrix, cos, dot, float, floor, fract, max, mix,
   normalize, output, positionLocal, saturate, select, sin, smoothstep, step, texture, uniform, uv,
-  varying, vec2, vec3, vec4,
+  varying, vec2, vec3, vec4, positionWorld,
 } from "three/tsl";
+import { drapeY } from "./terrainDrape.js";
 
 export const SMOKE6_ATLAS = {
   a: "/textures/fx/smoke6_a.webp", b: "/textures/fx/smoke6_b.webp", mv: "/textures/fx/smoke6_mv.webp",
@@ -66,6 +67,8 @@ export function createLitSmoke({ app, max: MAX = 384, name = "LitSmoke" } = {}) 
   // turn the engine's light into this material's brightness, judged against
   // the sandbags and the ground in the same light.
   const uSunK = uniform(0.4), uSkyK = uniform(0.75);
+  // A HOT puff (heat > 0): fire in its core, cooling to smoke — how bright.
+  const uFireK = uniform(22);
 
   const quad = new THREE.PlaneGeometry(1, 1);
   const geo = new THREE.InstancedBufferGeometry();
@@ -76,7 +79,7 @@ export function createLitSmoke({ app, max: MAX = 384, name = "LitSmoke" } = {}) 
   //   iPos   x, y, z, size (m: the card at its biggest)
   //   iLife  start, duration, seed, opacity
   //   iVel   drift vx, vy, vz (m/s), growth (the card's swell over the life)
-  //   iTint  linear albedo r, g, b, —
+  //   iTint  linear albedo r, g, b, heat (0: smoke; 1: a fireball that cools to it)
   const attrs = {};
   for (const k of ["iPos", "iLife", "iVel", "iTint"]) {
     attrs[k] = new THREE.InstancedBufferAttribute(new Float32Array(MAX * 4), 4);
@@ -90,6 +93,8 @@ export function createLitSmoke({ app, max: MAX = 384, name = "LitSmoke" } = {}) 
   const vMirror = varying(float(0), `v_${name}_mirror`);
   const vL = varying(vec3(0, 1, 0), `v_${name}_light`);
   const vTint = varying(vec4(1, 1, 1, 1), `v_${name}_tint`);
+  const vHeat = varying(float(0), `v_${name}_heat`);
+  const vSoft = varying(float(1), `v_${name}_soft`);
 
   const material = new THREE.MeshBasicNodeMaterial({
     transparent: true, depthWrite: false, depthTest: true, blending: THREE.NormalBlending, side: THREE.FrontSide,
@@ -124,7 +129,10 @@ export function createLitSmoke({ app, max: MAX = 384, name = "LitSmoke" } = {}) 
     vL.assign(normalize(vec3(dot(L, ax).mul(float(1).sub(mirror.mul(2))), dot(L, ay), dot(L, az))));
     vAge.assign(a);
     vMirror.assign(mirror);
-    vTint.assign(vec4(attribute("iTint", "vec4").xyz, l.w));
+    const tint = attribute("iTint", "vec4");
+    vTint.assign(vec4(tint.xyz, l.w));
+    vHeat.assign(tint.w);
+    vSoft.assign(max(p.w.mul(0.18), float(0.4)));
     const lx = positionLocal.x, ly = positionLocal.y;
     return lifted.add(ax.mul(lx.mul(size))).add(ay.mul(ly.mul(size)));
   })();
@@ -152,15 +160,28 @@ export function createLitSmoke({ app, max: MAX = 384, name = "LitSmoke" } = {}) 
       .add(L2.z.mul(select(L.z.greaterThan(0), A.z, B.z)));
     // The sky from above mostly; the ground bounces a little into the underside.
     const sky = A.y.mul(0.7).add(B.y.mul(0.3));
-    const rgb = vTint.xyz.mul(vec3(uSun).mul(lit).mul(uSunK).add(vec3(uSky).mul(sky).mul(uSkyK)));
+    const smoke = vTint.xyz.mul(vec3(uSun).mul(lit).mul(uSunK).add(vec3(uSky).mul(sky).mul(uSkyK)));
+    // FIRE: a hot puff burns in its thick core over the first half of its
+    // life — yellow-white, orange, dark red — and is smoke after (the tint
+    // is the smoke it leaves: soot). HDR, so it reads as light.
+    // Hot where it is THICK and lit through (the maps' own structure): the
+    // thin edges cool first to dark red, the core stays yellow — not a flat
+    // orange cut-out (the first try, 2026-10-02).
+    const h0 = vHeat.mul(float(1).sub(smoothstep(float(0), float(0.5), vAge)));
+    const h = h0.mul(smoothstep(float(0.1), float(0.85), A.w)).mul(A.z.mul(0.7).add(B.z.mul(0.5)).add(0.15)).clamp(0, 1);
+    const fireCol = mix(vec3(0.5, 0.04, 0.01), mix(vec3(1, 0.34, 0.05), vec3(1, 0.8, 0.45), smoothstep(float(0.55), float(0.95), h)), smoothstep(float(0.1), float(0.5), h));
+    const rgb = smoke.add(fireCol.mul(h.mul(h)).mul(uFireK));
     // In over the first frames (the book's first frame is already a cloud), out at the end.
     const fade = smoothstep(float(0), float(0.04), vAge).mul(float(1).sub(smoothstep(float(0.85), float(1), vAge)));
     // Nothing at the card's own border: the mips and the motion slide pull in
     // a sliver of the next frame there, which drew each card's outline as a
     // pale line through a cloud of them (seen 2026-10-02).
     const e = uv().min(float(1).sub(uv()));
-    const border = smoothstep(float(0), float(0.08), e.x).mul(smoothstep(float(0), float(0.08), e.y));
-    return vec4(rgb, A.w.mul(fade).mul(vTint.w).mul(border));
+    const border = smoothstep(float(0), float(0.12), e.x).mul(smoothstep(float(0), float(0.12), e.y));
+    // Into the ground softly (one heightmap tap, as the flames): a card that
+    // cuts the terrain drew a hard straight line there.
+    const ground = app.heightTexNode ? saturate(positionWorld.y.sub(drapeY(app.heightTexNode, positionWorld.x, positionWorld.z)).div(vSoft)) : float(1);
+    return vec4(rgb, A.w.mul(fade).mul(vTint.w).mul(border).mul(ground));
   })();
   material.colorNode = shade.xyz;
   material.opacityNode = shade.w;
@@ -181,14 +202,14 @@ export function createLitSmoke({ app, max: MAX = 384, name = "LitSmoke" } = {}) 
 
   return {
     mesh,
-    params: { uSunK, uSkyK },
+    params: { uSunK, uSkyK, uFireK },
     /**
      * A puff at (x, y, z). `size`: the cloud's width at its biggest (m);
      * `duration` s; `delay` s; `tint` linear albedo (SMOKE_TINTS); `opacity`;
      * `vel` [vx, vy, vz] drift m/s; `grow` how much the card swells beyond
-     * the book's own growth.
+     * the book's own growth; `heat` 0..1 a fireball (cools to `tint`).
      */
-    puff(x, y, z, { size = 3, duration = 1.6, delay = 0, tint = SMOKE_TINTS.dust, opacity = 1, vel = null, grow = 0.25 } = {}) {
+    puff(x, y, z, { size = 3, duration = 1.6, delay = 0, tint = SMOKE_TINTS.dust, opacity = 1, vel = null, grow = 0.25, heat = 0 } = {}) {
       const i = cursor;
       cursor = (cursor + 1) % MAX;
       used = Math.max(used, cursor === 0 ? MAX : cursor);
@@ -197,7 +218,7 @@ export function createLitSmoke({ app, max: MAX = 384, name = "LitSmoke" } = {}) 
       attrs.iPos.array.set([x, y, z, card], i * 4);
       attrs.iLife.array.set([start, duration, seedN, opacity], i * 4);
       attrs.iVel.array.set([vel?.[0] ?? 0, vel?.[1] ?? size * 0.12, vel?.[2] ?? 0, grow], i * 4);
-      attrs.iTint.array.set([tint[0], tint[1], tint[2], 0], i * 4);
+      attrs.iTint.array.set([tint[0], tint[1], tint[2], heat], i * 4);
       if (fresh) { for (const k in attrs) attrs[k].clearUpdateRanges(); fresh = false; }
       for (const k in attrs) { attrs[k].addUpdateRange(i * 4, 4); attrs[k].needsUpdate = true; }
       geo.instanceCount = used;

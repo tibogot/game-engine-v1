@@ -56,7 +56,16 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // LIT SMOKE (shared litSmoke.js, 2026-10-02): the dust and smoke lit by
   // the sun (a six-way book) instead of the old painted-light book.
   // ?litsmoke=0 boots with the old one (the battle lab switches it live).
-  const fx = createCombatFx({ app, style: "coh", litSmoke: new URLSearchParams(location.search).get("litsmoke") !== "0" });
+  const fx = createCombatFx({ app, style: "coh", litSmoke: new URLSearchParams(location.search).get("litsmoke") !== "0",
+    // The blasts' dust columns drift with the map's wind (algWind: the flags'
+    // convention, along (cos d, sin d); x2.2 m/s as the vehicles' dust).
+    wind: () => {
+      const w = app.showroom?.wind;
+      if (!w) return [0, 0];
+      const t = performance.now() / 1000, d = w.dirRad(t), v = w.speed(t) * 2.2;
+      return [Math.cos(d) * v, Math.sin(d) * v];
+    },
+  });
   const fire = createFlameField({ app });
   const craters = await createCraterSystem({ app });
 

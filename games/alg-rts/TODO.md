@@ -424,8 +424,23 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       - [ ] you, look in the lab (Smoke test, Lit smoke on/off, Sun/Sky
             sliders): the dust colour, brightness, softness (the old book
             had crisper curls; the bake can sharpen).
-   - [ ] Step 2: explosions from many small pieces (fireball puffs,
-         debris, a lingering column that drifts with the wind).
+   - [x] **Step 2 (2026-10-02): EXPLOSIONS FROM MANY PIECES** (combatFx
+         litBlast, lit smoke on): the flash and the clods as before, then
+         — all lit puffs, ONE draw — a fireball of 4-8 small HOT puffs
+         (litSmoke `heat`: fire in the thick core, edges cooling to dark
+         red, then soot), a dirt jet thrown up in a cone, an 11-puff skirt
+         along the ground, a column of two big puffs that climbs and DRIFTS
+         WITH THE MAP'S WIND (algWind, 8-15 s). Shells in the desert: fire
+         0.6; vehicles (size ≥ 12): 1; grenades: a small one (0.35); a
+         shell on a hull: fire + smoke, no earth. Spawned in DRAW ORDER
+         (column, skirt, jet, fire last: the skirt hid the fire). Flashes,
+         impacts and sparks now draw OVER the smoke (53). Cards fade into
+         the ground (one heightmap tap, as the flames: a hard line where a
+         card cut the terrain). Seen at 0.1 / 0.4 / 1.5 / 5 s. MEASURED
+         (lab, frozen at its heaviest, 1.5 s, close zoom, x3): +0.14 ms vs
+         nothing (the old one +0.03), for a few seconds per blast.
+      - [ ] you, look in motion (lab: Big blast / Mortar on a squad, ×¼):
+            the fire's colour and life, the skirt, the column's drift.
    - [ ] Step 3: fire extras — embers, a black (soot) smoke column from
          wrecks (SMOKE_TINTS.soot), a ground glow.
 - [ ] **PLOUGHED FIELDS LOOK FLAT** (you, 2026-10-02: "too flat, not

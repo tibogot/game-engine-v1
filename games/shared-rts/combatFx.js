@@ -30,7 +30,7 @@ const grow = (p) => (1 + (1 - p) * 1.5) * (0.35 + p * 0.65);
  * lingers — in the desert, dust dominates fire. And a gun smoke wisp after
  * every shot.
  */
-export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = false }) {
+export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = false, wind = null }) {
   const { scene } = app;
   const coh = style === "coh";
   // Thrown dirt: dark clods, normal blending (dirt doesn't glow), gravity.
@@ -47,7 +47,7 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
   // gone in ~0.2 s — a bullet off metal. (CoH: speed-stretched sparks;
   // these are short enough that the speck reads as one.)
   const sparks = coh ? createSpriteField({
-    scene, max: 200, color: 0xffd99a, size: 0.45, bloomScale: BLOOM.impact, gravity: 14,
+    scene, max: 200, color: 0xffd99a, size: 0.45, bloomScale: BLOOM.impact, gravity: 14, renderOrder: 53,
     scaleAt: (p) => 0.4 + p * 0.6, fadeAt: (p) => p,
   }) : null;
   // TRAIL: a tank shell's thin smoke, left along its flight, fading over ~1.5 s.
@@ -68,16 +68,18 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
     }
   }
 
+  // LIGHT goes over the smoke (renderOrder 53 > 50): a flash under its own
+  // dust cloud was hidden by it. Clods and wisps stay under (49).
   const flashes = createSpriteField({
-    scene, max: pool, color: 0xffd27a, size: 2.4, bloomScale: BLOOM.muzzle, scaleAt: grow,
+    scene, max: pool, color: 0xffd27a, size: 2.4, bloomScale: BLOOM.muzzle, scaleAt: grow, renderOrder: 53,
   });
   const impacts = createSpriteField({
-    scene, max: pool, color: 0xff9a3c, size: 3.0, bloomScale: BLOOM.impact, scaleAt: grow,
+    scene, max: pool, color: 0xff9a3c, size: 3.0, bloomScale: BLOOM.impact, scaleAt: grow, renderOrder: 53,
   });
   // The flash only: the cloud is the flipbook's. Unit size, scaled per blast
   // isn't possible in a shared sprite field, so it is sized for a vehicle.
   const blasts = createSpriteField({
-    scene, max: 16, color: 0xff8a3a, size: 9, bloomScale: BLOOM.fire, scaleAt: grow,
+    scene, max: 16, color: 0xff8a3a, size: 9, bloomScale: BLOOM.fire, scaleAt: grow, renderOrder: 53,
   });
   const books = createExplosionField({ app });
   let clock = 0;
@@ -86,7 +88,9 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
   // blasts' columns, a man going down, dirt kicks, the gun smoke, the shell's
   // trail — lit by the game's sun instead of the old book's painted light.
   // setLitSmoke(false) puts the old look back, live (the battle lab's A/B).
-  const lit = litSmoke ? createLitSmoke({ app }) : null;
+  // 768: a big blast is ~25 puffs and its column lives 15 s, while every rifle
+  // shot leaves a wisp — the ring must not recycle a column still in the air.
+  const lit = litSmoke ? createLitSmoke({ app, max: 768 }) : null;
   let litOn = !!lit;
   const bookPuff = books.puff;
   books.puff = (x, y, z, o = {}) => {
@@ -95,6 +99,56 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
     // The old card sat ~0.3 of its size up and climbed 0.3 more: the same here.
     lit.puff(x, y + size * 0.3, z, { size, duration: o.duration ?? 1.4, delay: o.delay ?? 0, tint: o.grey ? SMOKE_TINTS.grey : SMOKE_TINTS.dust, vel: [0, (size * 0.3) / (o.duration ?? 1.4), 0] });
   };
+
+  /**
+   * AN EXPLOSION FROM MANY PIECES (step 2, 2026-10-02 — CoH builds a blast
+   * from a dozen emitters, not one card): all lit puffs, ONE draw.
+   *   fireball  4-8 small HOT puffs bursting out, cooling to soot (`fire` 0..1)
+   *   dirt jet  dust thrown up in a cone, slowing as it climbs
+   *   skirt     dust racing out along the ground and dying
+   *   column    two big slow puffs that climb and DRIFT WITH THE WIND, 8-15 s
+   * (the flash and the clods are the caller's, as before). `size`: the
+   * blast's width in metres.
+   */
+  const R = Math.random;
+  const fireSmoke = [0.22, 0.19, 0.16];   // dust darkened by what burnt in it
+  function litBlast(x, y, z, size, { fire = 1, ground = true } = {}) {
+    const s = size, [wx, wz] = wind?.() ?? [0, 0];
+    // ONE DRAW, DRAWN IN SPAWN ORDER: what must show on top is spawned last —
+    // the column (behind, delayed), then the skirt and the jet, the FIRE last
+    // (the skirt spawned after it hid the fireball, seen 2026-10-02).
+    if (ground) {
+      lit.puff(x + wx * 0.5, y + s * 0.75, z + wz * 0.5, { size: s * 1.3, duration: 9 + s * 0.5, delay: 0.7, tint: fire > 0.7 ? fireSmoke : SMOKE_TINTS.dust, opacity: 0.7, grow: 1.2, vel: [wx * 1.2, 0.8 + s * 0.05, wz * 1.2] });
+      lit.puff(x, y + s * 0.35, z, { size: s * 1.1, duration: 7 + s * 0.4, delay: 0.3, tint: SMOKE_TINTS.dust, opacity: 0.85, grow: 1.0, vel: [wx, 0.5 + s * 0.04, wz] });
+      // Overlapping (11 round, each wider than the gap): one skirt, not a ring of balls.
+      for (let k = 0; k < 11; k++) {
+        const a = (k / 11) * Math.PI * 2 + R() * 0.3, v = s * (0.35 + R() * 0.2);
+        lit.puff(x + Math.cos(a) * s * 0.08, y + s * 0.06, z + Math.sin(a) * s * 0.08, {
+          size: s * (0.42 + R() * 0.12), duration: 1.6 + R() * 0.8, delay: 0.03, tint: SMOKE_TINTS.dust, opacity: 0.85, grow: 1.4,
+          vel: [Math.cos(a) * v, 0.4, Math.sin(a) * v],
+        });
+      }
+      for (let k = 0, n = s > 8 ? 4 : 3; k < n; k++) {
+        lit.puff(x + (R() - 0.5) * s * 0.1, y + s * 0.1, z + (R() - 0.5) * s * 0.1, {
+          size: s * (0.35 + R() * 0.15), duration: 2.2 + R() * 1.2, delay: R() * 0.05, tint: SMOKE_TINTS.dust, grow: 1.2,
+          vel: [(R() - 0.5) * s * 0.25 + wx * 0.3, s * (0.7 + R() * 0.5), (R() - 0.5) * s * 0.25 + wz * 0.3],
+        });
+      }
+    } else {
+      // In the air (a shell on a hull): the fire and its smoke, no earth.
+      lit.puff(x, y + s * 0.3, z, { size: s * 1.2, duration: 4 + s * 0.4, delay: 0.25, tint: fireSmoke, opacity: 0.7, grow: 1.0, vel: [wx, 0.8, wz] });
+    }
+    if (fire > 0) {
+      const n = Math.round(4 + s * 0.25);
+      for (let k = 0; k < n; k++) {
+        const a = R() * Math.PI * 2, up = 0.3 + R() * 0.7, v = s * (0.3 + R() * 0.3), h = Math.sqrt(1 - up * up);
+        lit.puff(x + Math.cos(a) * s * 0.05, y + s * 0.1, z + Math.sin(a) * s * 0.05, {
+          size: s * (0.36 + R() * 0.16), duration: 0.9 + R() * 0.5, tint: SMOKE_TINTS.soot, opacity: 0.95,
+          heat: fire * (0.75 + R() * 0.25), grow: 1.0, vel: [Math.cos(a) * h * v, up * v * 0.8, Math.sin(a) * h * v],
+        });
+      }
+    }
+  }
 
   return {
     books,
@@ -131,6 +185,13 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
      */
     explosion(x, y, z, { size = 10, dust = false } = {}) {
       if (dust) { books.puff(x, y, z, { size, duration: 1.2 + size * 0.08 }); return; }
+      if (coh && litOn) {
+        blasts.spawn(x, y + 1.2, z, 0.12);
+        throwDirt(x, y, z, Math.round(10 + size * 1.6), 7 + size * 0.55);
+        // A shell in the desert throws more earth than fire; a vehicle burns.
+        litBlast(x, y, z, size, { fire: size >= 12 ? 1 : 0.6 });
+        return;
+      }
       if (coh) {
         // CoH: flash (a blink), a small fireball, the dirt jet, then the dust
         // column — big, slow, staged a few hundredths of a second apart.
@@ -158,6 +219,12 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
      * blast it had read as a bomb).
      */
     grenade(x, y, z) {
+      if (coh && litOn) {
+        impacts.spawn(x, y + 0.4, z, 0.08);
+        throwDirt(x, y, z, 9, 6);
+        litBlast(x, y, z, 4.5, { fire: 0.35 });
+        return;
+      }
       if (coh) {
         impacts.spawn(x, y + 0.4, z, 0.1);
         throwDirt(x, y, z, 9, 6);
@@ -193,6 +260,7 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
     /** A shell hitting something: a small blast (not the death one). */
     shellHit(x, y, z) {
       blasts.spawn(x, y, z, 0.16);
+      if (coh && litOn) { litBlast(x, y - 0.6, z, 4.5, { fire: 1, ground: false }); return; }
       books.explode(x, y - 1, z, { size: 4.5, duration: 1.3 });
     },
 
