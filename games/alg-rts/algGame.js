@@ -7,7 +7,7 @@
 // has the numbers): a fitted sun shadow instead of cascades, the lean terrain
 // shader, top-3 layers + near/far tiling, the terrain drawn last.
 //
-// URL options: ?world=/levels/other.v3proj · ?light=flat (the engine's default
+// URL options (also ?grassfar=0, ?recvlods=1 — see the boot options): ?world=/levels/other.v3proj · ?light=flat (the engine's default
 // light, to A/B) · ?fog=0 · ?warmup=0 (no pipeline warm-up, to A/B it) ·
 // ?sky=atmosphere (the old Atmosphere sky and its tuned Aurès light, to A/B;
 // the default is SKY PRO since 2026-09-29, see SKY_PRO below)
@@ -116,7 +116,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // terrain tints only multiplied zeros. MEASURED 2026-09-27 at 2x
     // zoom-out, A/B/A/B same clock: 82.3/79.2 → 77.7/77.8 ms. Lakebed STAYS
     // (the oases are lakes). Turn one back on the day the map uses it.
-    terrainFeatures: { cursor: false, snow: false, baseStyle: "flat", riverSand: false, grassFar: false, flowerTint: false },
+    // grassFar BACK ON (you, 2026-10-01): the oases have grass now, and its
+    // blades fade at 44-68 m from the camera — mid-screen in this view — so
+    // without the far tint the ground went bare past them (a line that
+    // followed the camera). ?grassfar=0 to compare.
+    terrainFeatures: { cursor: false, snow: false, baseStyle: "flat", riverSand: false, grassFar: params.get("grassfar") !== "0", flowerTint: false },
     // ?topk= ?farblend= ?layers= for A/B (perf investigation, 2026-09-27).
     // layerBudget 7: slot 6 is the Dirt track (tools/algTracks.mjs). At 6 it
     // was compiled OUT and the tracks drew the flat base colour, no texture

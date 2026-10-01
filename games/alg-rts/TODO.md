@@ -66,12 +66,15 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          engine default stays 1). Before/after at a wooded slope: crowns shaded
          across the whole view. Cost: within noise (≤0.3 ms, latched GPU) at
          wooded default/max and the base. ?recvlods=1 = the old way.
-   - [ ] GRASS CUT (you): the oasis grass blades fade at a FIXED 44-68 m from
-         the camera (revo grass, a walking-camera setting) — mid-screen at
-         default zoom (view 28-163 m) — and past it the ground goes BARE: the
-         terrain's far-grass tint was compiled out (grassFar: false) when the
-         map had no grass. Fix: grassFar back on (+ price it); blades further
-         out only if measured affordable.
+   - [x] GRASS CUT (you): the oasis grass blades fade at a FIXED 44-68 m from
+         the camera (revo grass) — mid-screen at default zoom — and past them
+         the ground went BARE: the terrain's far-grass tint had been compiled
+         out (grassFar: false) when the map had no grass. grassFar back ON:
+         the ground takes the blades' colour across the same fade band, so the
+         blades hand over to green ground. Before/after (oasis far up the
+         screen): bare → green to the top. Cost +0.2-0.8 ms (latched GPU;
+         max zoom the most). ?grassfar=0 to compare. Blades further out: only
+         if you still see a seam (a much bigger cost).
    - [ ] nam: move its camera to addPreUpdateHook (it is inside its tick).
 - [x] DRAW CALLS (you: "~293 at the base, is it plenty?"): 287-310 a frame =
       tall plants 84 (4 species × 3 variants × 3 details, depth pre-pass +
