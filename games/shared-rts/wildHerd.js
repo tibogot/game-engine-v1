@@ -29,12 +29,14 @@ const CLIP_NAMES = { eat: "Eating", idle: "Idle", look: "Idle_2", low: "Idle_Hea
  * `follow: "tight"` (a donkey on a lead) it keeps walking at the home while
  * the anchor moves, and only grazes when it stops.
  */
-export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], walkSpeed = 0.9, runSpeed = 7, name = "Wild", bolt = true, roam = 20 } = {}) {
+export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], walkSpeed = 0.9, runSpeed = 7, name = "Wild", bolt = true, roam = 20, clipNames = CLIP_NAMES } = {}) {
   if (!spots.length) return null;
   const box = new THREE.Box3().setFromObject(tpl.root);
   const baseH = Math.max(0.01, box.max.y - box.min.y);
   const clips = {};
-  for (const [k, n] of Object.entries(CLIP_NAMES)) { const c = tpl.clips.find((q) => q.name === n); if (c) clips[k] = c; }
+  // `clipNames`: another pack's clips for the same behaviours (alg-rts' hens:
+  // one idle with its own pecking for eat / idle / look / low).
+  for (const [k, n] of Object.entries(clipNames)) { const c = tpl.clips.find((q) => q.name === n); if (c) clips[k] = c; }
   const field = createCrowdField({
     scene: app.scene, renderer: app.renderer, source: tpl.source, animRoot: tpl.root, clips, max: spots.length, castShadow: true,
   });
@@ -47,6 +49,9 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
     cur: "eat", tCur: rnd() * 10, prev: "eat", tPrev: 0, fade: 1, rate: 0.85 + rnd() * 0.3,
     state: "eat", timer: 3 + rnd() * 10, target: null, speed: walkSpeed,
     anchor: s.anchor ?? null, off: s.off ?? null, follow: s.follow ?? "loose", vel: 0,
+    // `anyGround`: goes wherever its lead goes (a pack animal led by men over
+    // ground its herd's canStand refuses — alg-rts' FLN mule train).
+    anyGround: !!s.anyGround,
   }));
   /** An anchored animal's home: its place in the anchor's (moving) frame. */
   const homeFromAnchor = (h) => {
@@ -210,7 +215,7 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
           // An anchored animal standing where it can't (a cell that became
           // blocked under it) may walk OUT: stuck, it was lost to its flock
           // for good (measured: a sheep 87 m back on a garden wall's cell).
-          if (y == null && h.anchor && (canStand(h.x, h.z) == null || (h.clearTo && Math.abs(dA) < 0.35))) y = app.getWorldHeight(nx, nz);
+          if (y == null && h.anchor && (h.anyGround || canStand(h.x, h.z) == null || (h.clearTo && Math.abs(dA) < 0.35))) y = app.getWorldHeight(nx, nz);
           if (y != null) { h.x = nx; h.z = nz; h.y += (y - h.y) * Math.min(1, dt * 6); }
           h.vel = y != null ? step / Math.max(1e-4, dt) : 0;
           const onLead = h.follow === "tight" && h.anchor?.moving;

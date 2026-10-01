@@ -18,13 +18,14 @@ import { LAYOUT, PLAY, VIEW_YAW } from "./layout.js";
 import { TRACK_LINES } from "./algTracks.js";
 import * as THREE from "three";
 import { buildBurntFarm, buildFarmstead, buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
-import { buildArmsCache, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildArmsCache, buildLookout, buildRefuge, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { kitView } from "./showroom.js";
 
 const P = {
   farmsteads: 7, roman: 2, burnt: 1,
   caches: 3,              // hidden arms caches (plus the camp's own)
+  refuges: 2, lookouts: 3,
   // 3 of 10 placed with 90 m from EVERY site (the passes, springs and
   // lookouts are sites too): villages and bases 70 m, the rest 25 m.
   siteClear: 70, minorClear: 25,
@@ -99,6 +100,46 @@ export function landmarkEntries(app, list) {
     const e = { key: `armsCache${k + 2}`, build: () => buildArmsCache({ seed: 1957 + k * 11 }), x: best.x, z: best.z, yaw: VIEW_YAW + 0.5 + (R() - 0.5) * 0.6, rim: 5 };
     out.push(e);
   }
+  // REFUGES (casemates): toward the middle of the map, where the bands strike
+  // (they withdraw to the nearest instead of the far cave); in scrub, off the
+  // tracks, 60 m+ from the villages, 180 m+ from the post.
+  for (let k = 0; k < P.refuges; k++) {
+    let best = null, bestS = -Infinity;
+    for (let t = 0; t < 900; t++) {
+      const x = PLAY.x0 + 40 + R() * (PLAY.x1 - PLAY.x0 - 80), z = PLAY.z0 + 40 + R() * (PLAY.z1 - PLAY.z0 - 80);
+      // The FLN's half (nearer the cave than the post, as the caches), not on the cave.
+      if (Math.hypot(x - fr.x, z - fr.z) < 200 || Math.hypot(x - cave.x, z - cave.z) < 140 || Math.hypot(x - cave.x, z - cave.z) > Math.hypot(x - fr.x, z - fr.z) + 60) continue;
+      if (LAYOUT.sites.some((s) => ["hamlet", "dechra", "ksar"].includes(s.kind) && Math.hypot(s.x - x, s.z - z) < (s.r ?? 30) + 60)) continue;
+      if (list.some((e) => Math.hypot(e.x - x, e.z - z) < 30) || [...out, ...placed].some((p) => Math.hypot(p.x - x, p.z - z) < 120)) continue;
+      if (trackDist(x, z) < 25) continue;
+      let lo = Infinity, hi = -Infinity;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const h = H(x + i * 4, z + j * 4); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+      if (hi - lo > 3 || (app.getWaterLevelAt?.(x, z) ?? -Infinity) > lo - 0.3) continue;
+      const s = (app.sampleFoliageDensity?.(x, z) ?? 0) + (app.sampleTallPlantDensity?.(x, z) ?? 0) + R() * 0.1;
+      if (s > bestS) { bestS = s; best = { x, z }; }
+    }
+    if (best) out.push({ key: `refuge${k + 1}`, build: () => buildRefuge({ seed: 1997 + k * 13 }), x: best.x, z: best.z, yaw: VIEW_YAW + 0.5 + (R() - 0.5) * 0.8, rim: 5 });
+  }
+  // LOOKOUTS on the CRESTS: the highest points over their surroundings
+  // (ground 5 m+ above the land 50 m round), 170 m+ from the post, apart.
+  for (let k = 0; k < P.lookouts; k++) {
+    let best = null, bestS = -Infinity;
+    for (let t = 0; t < 1200; t++) {
+      const x = PLAY.x0 + 30 + R() * (PLAY.x1 - PLAY.x0 - 60), z = PLAY.z0 + 30 + R() * (PLAY.z1 - PLAY.z0 - 60);
+      if (Math.hypot(x - fr.x, z - fr.z) < 170) continue;
+      if ([...out, ...placed].some((p) => Math.hypot(p.x - x, p.z - z) < 100) || list.some((e) => Math.hypot(e.x - x, e.z - z) < 30)) continue;
+      const h = H(x, z);
+      let ring = 0;
+      for (let a = 0; a < 8; a++) ring += H(x + Math.cos(a * 0.785) * 50, z + Math.sin(a * 0.785) * 50);
+      const rise = h - ring / 8;
+      let lo = Infinity, hi = -Infinity;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const g = H(x + i * 2.5, z + j * 2.5); lo = Math.min(lo, g); hi = Math.max(hi, g); }
+      if (rise < 5 || hi - lo > 2.5) continue;
+      const s = rise + R() * 2;
+      if (s > bestS) { bestS = s; best = { x, z }; }
+    }
+    if (best) out.push({ key: `lookout${k + 1}`, build: () => buildLookout({ seed: 1998 + k * 7 }), x: best.x, z: best.z, yaw: VIEW_YAW + (R() - 0.5), rim: 3 });
+  }
   for (const w of want) {
     for (let t = 0; t < P.tries; t++) {
       const x = PLAY.x0 + R() * (PLAY.x1 - PLAY.x0), z = PLAY.z0 + R() * (PLAY.z1 - PLAY.z0);
@@ -147,6 +188,15 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     return !navGrid?.isBlockedAtWorld?.(x, z);
   };
   const slopeDeg = (x, z) => Math.acos(Math.min(1, app.getWorldNormal?.(x, z)?.y ?? 1)) * (180 / Math.PI);
+
+  // The FLN's hidden places: the trees and scrub OFF them (a lookout under a
+  // cedar's crown could neither see nor be seen); the caches and refuges keep
+  // the scrub round them — only their own ground is cleared.
+  for (const [key, m] of Object.entries(showroom)) {
+    const k = /^(armsCache|refuge|lookout)\d+$/.exec(key)?.[1];
+    if (!k || !m?.parent) continue;
+    app.clearVegetation?.(m.position.x, m.position.z, k === "lookout" ? 10 : 5, { grass: 3, edge: 0.6 });
+  }
 
   // ── Outcrops ─────────────────────────────────────────────────────────────
   const variants = [2000, 2001, 2002, 2003].map((seed) => buildRockOutcrop({ seed }));

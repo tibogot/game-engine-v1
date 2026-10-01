@@ -32,6 +32,8 @@ const STATS = {
   mortarPit: { team: "player", name: "Mortier de 81", hp: 600, mortar: { min: 25, max: 120, every: 7, damage: 45, splash: 7 }, vision: 45 },
   searchlight: { team: "player", name: "Projecteur", hp: 400, vision: 100 },
   armsCache: { team: "enemy", name: "Cache d'armes", hp: 500, vision: 30 },
+  refuge: { team: "enemy", name: "Refuge", hp: 450, vision: 30 },
+  lookout: { team: "enemy", name: "Guetteur", hp: 150, vision: 95 },
   sangar: { team: "enemy", name: "Sangar", hp: 500, weapon: "mg", range: 38, damage: 9, fireRate: 2.6, canHitAir: true, vision: 45 },
 };
 
@@ -86,7 +88,11 @@ export function createAlgStructures({ app, showroom, producers, units }) {
   for (const p of producers) add(p.structure.typeKey, p.mesh, p.structure);
   for (const key of ["mirador", "mgNest", "mortarPit", "searchlight", "armsCache", "sangar"]) add(key, showroom?.[key]);
   // The hidden caches in the hills (algLandmarks.js: armsCache2, 3 …).
-  for (const [key, mesh] of Object.entries(showroom ?? {})) if (/^armsCache\d+$/.test(key)) add("armsCache", mesh);
+  // … and the refuges and lookouts (algLandmarks.js: refuge1, lookout2 …).
+  for (const [key, mesh] of Object.entries(showroom ?? {})) {
+    const m = /^(armsCache|refuge|lookout)\d+$/.exec(key);
+    if (m) add(m[1], mesh);
+  }
 
   /** Where a building's shot leaves from: its gun, or the tower nearer the target. */
   function muzzleOf(s) {

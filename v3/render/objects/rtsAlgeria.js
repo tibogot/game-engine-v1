@@ -949,6 +949,49 @@ export function buildMineMarker({ seed = 1960 } = {}) {
   return finish(parts, { hx: 1.2, hz: 0.9, cx: 0.35, cz: 0.15, height: 0.7 });
 }
 
+/**
+ * REFUGE (casemate) — the ALN's hidden shelter dug into a hillside: a low
+ * mound of earth and brush, its mouth framed by two dry-stone cheeks and a
+ * timber lintel, a dark opening, a few stones and a water jar by it. From
+ * the air, one more scrubby hummock. The bands go to ground here (alg-rts
+ * algAI.js). Front (the mouth) at -Z.
+ */
+export function buildRefuge({ seed = 1997 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  // The mound: earth, the brush laid over it.
+  parts.push({ geo: earthBerm([[3.2, -0.15], [2.7, 0.7], [1.8, 1.35], [0.001, 1.6]], { seed, segs: 18, rJit: 0.25, yJit: 0.12 }), pos: [0, 0, 0.6], mat: MAT.spoil, tone: 0.38 });
+  for (let k = 0; k < 7; k++) {
+    const a = R() * Math.PI * 2, r = 0.6 + R() * 1.6;
+    parts.push(...brushClump(R, Math.cos(a) * r, 1.35 - r * 0.35, 0.6 + Math.sin(a) * r, { h: 0.7, r: 0.5, dry: R() < 0.4 }));
+  }
+  // The mouth: stone cheeks, a lintel, the dark opening.
+  dryStone(parts, R, [[-1.0, -1.9], [-0.95, -0.9]], { courses: 3, h: 1.0, depth: 0.45, len: 0.45, tone: 0.45 });
+  dryStone(parts, R, [[1.0, -1.9], [0.95, -0.9]], { courses: 3, h: 1.0, depth: 0.45, len: 0.45, tone: 0.45 });
+  parts.push({ geo: buildBox(2.4, 0.18, 0.22), pos: [0, 1.08, -1.75], rot: [0, 0, 0.03], mat: MAT.timber, tone: 0.2 });
+  parts.push({ geo: buildBox(1.5, 0.95, 0.06), pos: [0, 0.5, -1.25], mat: MAT.steel, tone: 0.0 });
+  parts.push(clayJar(1.45, -0.02, -2.2, 0.9));
+  for (let k = 0; k < 3; k++) parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.4, 0.26, 0.34), pos: [-1.6 + R() * 0.4, 0.08, -2.3 + R() * 0.5], rot: [R(), R() * 3, R()], mat: MAT.limestone, tone: 0.45 });
+  return finish(parts, { hx: 3.4, hz: 3.4, cz: 0.2, height: 1.8, ao: { strength: 0.35 } });
+}
+
+/**
+ * LOOKOUT (guetteur's post) — a ring of piled stones on a crest, waist-high,
+ * a brush shade on two poles over it, a water skin: where an ALN watcher sits
+ * all day and signals the bands when the French move (alg-rts algAI.js: the
+ * AI only knows what its men and lookouts see).
+ */
+export function buildLookout({ seed = 1998 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  dryStone(parts, R, arcPts(0, 0, 1.25, Math.PI * 0.62, Math.PI * 2.38, 10), { courses: 2, h: 0.75, depth: 0.5, len: 0.45, tone: 0.48 });
+  for (const sx of [-1, 1]) parts.push({ geo: new THREE.CylinderGeometry(0.04, 0.05, 1.9, 5).translate(0, 0.95, 0), pos: [sx * 0.95, 0, 0.75], rot: [0.05, 0, sx * 0.05], mat: MAT.timber, tone: 0.25 });
+  parts.push({ geo: buildBox(2.3, 0.12, 1.4), pos: [0, 1.88, 0.35], rot: [-0.22, 0, 0], mat: MAT.thatch, tone: 0.35 });
+  parts.push(...brushClump(R, 0.4, 1.9, 0.6, { h: 0.45, r: 0.5, dry: true }));
+  parts.push(clayJar(-0.5, -0.02, 0.4, 0.8));
+  return finish(parts, { hx: 1.7, hz: 1.7, height: 2.1, ao: { strength: 0.3 } });
+}
+
 // ── THE LAND AT WAR ─────────────────────────────────────────────────────────
 
 /**

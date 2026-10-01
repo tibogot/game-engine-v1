@@ -266,7 +266,16 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
     trainLoaded.push({ ...at({ x: 0, z: 0 }), anchor: tr.anchor, off: { x: 0, z: 0 }, follow: "tight", height: S * loadedTpl.height * (0.95 + rnd() * 0.08) });
     trainBare.push({ ...at({ x: 0.3 * S, z: -3.4 * S }), anchor: tr.anchor, off: { x: 0.3 * S, z: -3.4 * S }, follow: "tight", height: S * donkeyTpl.height * (0.92 + rnd() * 0.1) });
   }
+  // THE FLN MULE TRAIN (algAI.js convoys): three loaded donkeys in the same
+  // herd (no new draw), their anchor driven by the AI — it follows the
+  // escort from the frontier to a cache. Parked outside the play box between
+  // convoys.
+  const convoy = { anchor: { x: PLAY.x0 - 30, z: PLAY.z0 - 30, yaw: 0, moving: false } };
+  for (const off of [{ x: 0, z: -2.5 * S }, { x: 0.4 * S, z: -5.8 * S }, { x: -0.3 * S, z: -9.1 * S }]) {
+    trainLoaded.push({ x: convoy.anchor.x, z: convoy.anchor.z, anchor: convoy.anchor, off, follow: "tight", anyGround: true, height: S * loadedTpl.height * (0.95 + rnd() * 0.08) });
+  }
   const TRAIN_PACE = Math.min(loadedTpl.walkSpeed ?? 1, donkeyTpl.walkSpeed ?? 1) * S * 0.8;
+  convoy.pace = TRAIN_PACE * 1.15;
   /** A train's anchor at arc position s, facing its way of travel. */
   function placeTrain(tr, dt) {
     tr.s = Math.max(0, Math.min(tr.total, tr.s));
@@ -296,6 +305,14 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
     createWildHerd(app, donkeyTpl, donkeySpots, { canStand: soukStand, name: "Donkeys", walkSpeed: donkeyTpl.walkSpeed * S, runSpeed: donkeyTpl.runSpeed * S, bolt: false, roam: 3 * S }),
     createWildHerd(app, loadedTpl, loadedSpots, { canStand: soukStand, name: "Donkeys (loaded)", walkSpeed: loadedTpl.walkSpeed * S, runSpeed: loadedTpl.runSpeed * S, bolt: false, roam: 3 * S }),
   ].filter(Boolean);
+  // The convoy's donkeys go where a mule train starts (they wait parked off
+  // the map between convoys, far from where it enters).
+  const loadedTrainHerd = herds.find((h) => h.mesh.name === "Donkeys (train, loaded)");
+  convoy.place = (x, z) => {
+    convoy.anchor.x = x; convoy.anchor.z = z;
+    for (const r of loadedTrainHerd?.raw ?? []) if (r.anchor === convoy.anchor) { r.x = x + (r.off?.x ?? 0); r.z = z + (r.off?.z ?? 0); }
+  };
+  convoy.walk = loadedTpl.walkSpeed * S;   // their lead pace (m/s)
   /** Move the homes (flocks, trains), then the animals. */
   function step(dt) {
     dt = Math.min(dt, 0.1);
@@ -349,5 +366,5 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
   app.addPreRenderHook(step);
   console.log(`[herds] ${sheepSpots.length} sheep + ${goatSpots.length} goats + ${gazelleSpots.length} gazelles on ${pastures.length} pastures (${pastures.map((p) => p.site).join(", ")}), ${donkeySpots.length + loadedSpots.length} donkeys (${loadedSpots.length} loaded), ${trains.length} donkey trains, ${flocks.filter((f) => f.route.length > 1).length}/${flocks.length} flocks on the move (routes of ${flocks.map((f) => f.route.length).join("/")}, ${flocks.filter((f) => f.route.some((r) => r.well)).length} by a well) in ${Math.round(performance.now() - t0)} ms`,
     { sheep: sheepTpl.health, goat: goatTpl.health, donkey: donkeyTpl.health, loaded: loadedTpl.health });
-  return { herds, pastures, flocks, trains, step, sheep: sheepSpots.length, goats: goatSpots.length, gazelles: gazelleSpots.length, donkeys: donkeySpots.length, loaded: loadedSpots.length };
+  return { herds, pastures, flocks, trains, convoy, step, sheep: sheepSpots.length, goats: goatSpots.length, gazelles: gazelleSpots.length, donkeys: donkeySpots.length, loaded: loadedSpots.length };
 }

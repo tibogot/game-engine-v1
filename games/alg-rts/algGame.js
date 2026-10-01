@@ -25,6 +25,7 @@ import { createAlgPoles } from "./algPoles.js";
 import { createAlgDamage } from "./algDamage.js";
 import { createAlgWire } from "./algWire.js";
 import { createAlgFields } from "./algFields.js";
+import { createAlgHens } from "./algHens.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
@@ -359,6 +360,12 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       app.algHerds = await createAlgHerds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom });
     } catch (e) { console.warn("[alg herds] failed:", e); }
+  }
+  // HENS (algHens.js, your bird-lab hens) round the houses and yards. ?hens=0 = without.
+  if (params.get("hens") !== "0") {
+    try {
+      app.algHens = await createAlgHens(app, { units: app.algUnits?.units ?? null, showroom: app.showroom ?? {}, navGrid: app.navGrid ?? null });
+    } catch (e) { console.warn("[alg hens] failed:", e); }
   }
   // Dev controls (?dev=0 hides them).
   if (params.get("dev") !== "0") {

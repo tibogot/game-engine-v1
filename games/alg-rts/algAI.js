@@ -50,6 +50,7 @@
 //           in cover or bunched up, or at an MG nest, within his throw — one
 //           grenade per band every few seconds, not a hail.
 import { TRACK_LINES, nearestTrack } from "./algTracks.js";
+import { PLAY } from "./layout.js";
 
 const P = {
   firstBandAt: 45,
@@ -88,6 +89,13 @@ const P = {
   screenApart: 45,            // m between two ambush screens
   stuckCut: 30,               // m: a band stuck this near wire cuts it
   mgPerCache: 2,              // FM teams each standing arms cache arms
+  seeMen: 50, seeLookout: 110, seeVillage: 90,   // what the FLN knows (knownFrench)
+  lookoutHurry: 12,           // s: a lookout spots French → the next band within this
+  convoyFirst: 150,           // s to the first mule train
+  convoyEvery: [200, 280],    // s between mule trains
+  convoyEscort: 3,            // porters with the donkeys
+  convoyPace: 0.45,           // their walk (donkey pace)
+  convoyLoad: 150,            // supplies the load is worth
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -112,6 +120,23 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     u.alive = false; u.vanished = true; inBand.delete(u); homebound.delete(u); pool++;
     app.selection?.remove?.(u);
   }
+
+  // HOME: where a man goes to ground — the nearest REFUGE (a casemate the
+  // French have not found and destroyed: algLandmarks.js), or the cave.
+  const refugeMouths = new Map();
+  function homeFor(p) {
+    let best = caveMouth, bd = dist(p, caveMouth);
+    for (const s of app.algStructures?.list ?? []) {
+      if (s.typeKey !== "refuge" || !s.alive) continue;
+      let m = refugeMouths.get(s);
+      if (!m) { m = app.navGrid?.nearestOpenWorld?.(s.position.x, s.position.z, true) ?? s.position; refugeMouths.set(s, m); }
+      const d = dist(p, m);
+      if (d < bd) { bd = d; best = m; }
+    }
+    return best;
+  }
+  const sendHome = (u) => { u.home = homeFor(u.position); u.orderTo(u.home.x, u.home.z); };
+  const atHome = (u) => dist(u.position, u.home ?? caveMouth) < 5;
 
   const alive = (b) => b.members.filter((u) => u.alive);
   const centre = (list) => {
@@ -197,9 +222,23 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     return best && best.e < straight * 0.8 ? { x: best.x, z: best.z } : null;
   }
 
+  /**
+   * WHAT THE FLN KNOWS (2026-10-01): French its own men can see, French near
+   * a village that backs it (the villagers talk), and French a LOOKOUT on a
+   * crest can see. It used to know every French unit on the map; now the
+   * lookouts are its eyes — destroy them and its ambushes go blind.
+   */
+  function knownFrench() {
+    const eyes = [];
+    for (const u of units.list) if (u.alive && u.team === "enemy" && !u.ghost) eyes.push({ x: u.position.x, z: u.position.z, r: P.seeMen });
+    for (const s of app.algStructures?.list ?? []) if (s.alive && s.typeKey === "lookout") eyes.push({ x: s.position.x, z: s.position.z, r: P.seeLookout });
+    for (const v of app.algEconomy?.points ?? []) if (v.owner === "enemy") eyes.push({ x: v.position.x, z: v.position.z, r: P.seeVillage });
+    return french().filter((f) => !f.isAir && eyes.some((e) => (f.position.x - e.x) ** 2 + (f.position.z - e.z) ** 2 < e.r * e.r));
+  }
+
   /** The French to hit: a group out in the open, away from the post first. */
   function pickTarget(from) {
-    const fr = french().filter((u) => !u.isAir);
+    const fr = knownFrench();
     if (!fr.length) return null;
     const outside = fr.filter((u) => dist(u.position, post) > P.postKeepOff);
     const pool2 = outside.length ? outside : fr;
@@ -267,6 +306,21 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     const room = P.maxLive - liveFighters();
     const n = Math.min(size, room);
     if (n < 3) return;
+    // MEN GONE TO GROUND come back out FREE (already paid for): three or more
+    // waiting → the band forms at the REFUGE nearest the front (the cave if
+    // none stands) — refuges keep the katiba close and cheap; destroy them.
+    if (pool >= 3) {
+      const k = Math.min(pool, n);
+      const front = (app.algStructures?.list ?? []).filter((s) => s.typeKey === "refuge" && s.alive)
+        .map((s) => homeFor(s.position)).sort((a, b) => dist(a, post) - dist(b, post))[0] ?? cave.structure.rally;
+      for (let i = 0; i < k; i++) {
+        const a = (i / k) * Math.PI * 2;
+        units.spawn("moudjahid", front.x + Math.cos(a) * 3, front.z + Math.sin(a) * 3, { team: "enemy" });
+      }
+      pool -= k;
+      bands.push({ state: "gather", size: k, members: [], t: 0, start: 0, from: front });
+      return;
+    }
     // Only the men the katiba can PAY for (algEconomy.js: the cave's queue
     // charges the ALN purse): a band of however many that is, or none.
     let paid = 0;
@@ -288,7 +342,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     const caches = (app.algStructures?.list ?? []).filter((s) => s.typeKey === "armsCache" && s.alive).length;
     const out = units.list.filter((u) => u.alive && u.team === "enemy" && u.typeKey === "fmTeam").length;
     const queued = cave.structure.queue.filter((k) => k === "fmTeam").length;
-    return caches * P.mgPerCache - out - queued;
+    const extra = (app.algStructures?.list ?? []).reduce((n, s) => n + (s.typeKey === "armsCache" && s.alive ? s.extraMG ?? 0 : 0), 0);
+    return caches * P.mgPerCache + extra - out - queued;
   }
 
   function setState(b, s) { b.state = s; b.t = 0; }
@@ -333,7 +388,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
             // for the cave (he is no use to an ambush 500 m away).
             if (u.isMoving) continue;
             if (!u.retried) { u.retried = true; u.orderTo(b.spot.x, b.spot.z); }
-            else { b.members.splice(b.members.indexOf(u), 1); inBand.delete(u); u.holdFire = true; homebound.add(u); u.orderTo(caveMouth.x, caveMouth.z); }
+            else { b.members.splice(b.members.indexOf(u), 1); inBand.delete(u); u.holdFire = true; homebound.add(u); sendHome(u); }
           }
           setState(b, b.mission === "village" ? "occupy" : b.mission === "mine" ? "lay" : "ambush");
           break;
@@ -346,7 +401,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
           plan(b); break;
         }
         // The French moved on: a new spot every few seconds.
-        if (b.t > P.replanEvery && b.target && dist(b.target.lead.position, b.target.at) > 35) plan(b);
+        if (b.t > P.replanEvery && b.target?.lead && dist(b.target.lead.position, b.target.at) > 35) plan(b);
         break;
       }
       case "ambush": {
@@ -429,9 +484,9 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       case "withdraw": {
         if (!m.length) return setState(b, "done");
         // Into the mouth: gone to ground. They count toward the next band.
-        for (const u of m) if (dist(u.position, caveMouth) < 5) goToGround(u);
+        for (const u of m) if (atHome(u)) goToGround(u);
         if (!alive(b).length) setState(b, "done");
-        else if (b.t > 90) for (const u of alive(b)) u.orderTo(caveMouth.x, caveMouth.z);   // stragglers
+        else if (b.t > 90) for (const u of alive(b)) sendHome(u);   // stragglers
         break;
       }
     }
@@ -565,6 +620,98 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     return true;
   }
 
+  // ── THE MULE TRAIN (2026-10-01): arms from the frontier to a cache ────────
+  // An escort of porters (units: it can be ambushed) walks the donkeys
+  // (algHerds.js convoy, their anchor on the escort) from the map's edge on
+  // the FLN's side to the cache furthest from the French, holding fire. It
+  // arrives: the ALN purse gets the load, the cache arms one more gunner.
+  // French close: the escort fights; all of it dead: the load is lost.
+  let convoy = null, nextConvoy = P.convoyFirst;
+  /**
+   * Where a mule train enters: a point just inside the play box's edge on the
+   * FLN's side, far from the post — and one with a ROUTE to the cache (the
+   * first try picked the box's corner, a cliff: the escort never moved).
+   */
+  const frontier = (to) => {
+    const cands = [];
+    for (let k = 1; k < 40; k++) {
+      const f = k / 40;
+      for (const p of [{ x: PLAY.x0 + 14, z: PLAY.z0 + f * (PLAY.z1 - PLAY.z0) }, { x: PLAY.x0 + f * (PLAY.x1 - PLAY.x0), z: PLAY.z0 + 14 }]) {
+        if (app.navGrid?.isBlockedAtWorld?.(p.x, p.z, true)) continue;
+        if ((app.getWorldNormal?.(p.x, p.z)?.y ?? 1) < 0.85) continue;
+        if (dist(p, to) < 90) continue;
+        cands.push({ ...p, s: dist(p, post) - 0.5 * dist(p, caveMouth) + rand(0, 40) });
+      }
+    }
+    cands.sort((a, b) => b.s - a.s);
+    for (const p of cands.slice(0, 8)) {
+      const path = app.navGrid?.findPath?.(p.x, p.z, to.x, to.z, { foot: true });
+      if (path?.length) return p;
+    }
+    return null;
+  };
+  function startConvoy() {
+    const caches = (app.algStructures?.list ?? []).filter((s) => s.typeKey === "armsCache" && s.alive);
+    const herd = app.algHerds?.convoy;
+    if (!caches.length) return;
+    const to = caches.reduce((a, b) => (dist(b.position, post) > dist(a.position, post) ? b : a));
+    const from = frontier(to.position);
+    if (!from) return;
+    const men = [];
+    for (let i = 0; i < P.convoyEscort; i++) {
+      const u = units.spawn("moudjahid", from.x + (i - 1) * 2.5, from.z + (i % 2) * 2.5, { team: "enemy" });
+      if (!u) continue;
+      u.speedScale = P.convoyPace; u.holdFire = true; inBand.add(u);   // (moveMul is the posture's, reset each tick)
+      u.orderTo(to.position.x + (i - 1) * 3, to.position.z + 6);
+      men.push(u);
+    }
+    if (!men.length) return;
+    convoy = { men, to, t: 0, fighting: false, seen: false };
+    if (herd) { herd.place?.(from.x, from.z); herd.anchor.moving = true; }
+    // The porters walk at the DONKEYS' pace (a loaded donkey on a lead, ~1 m/s).
+    const pace = Math.min(1, (herd?.walk ?? 1) * 0.85 / 6);   // a little under the donkeys: they keep up
+    for (const u of men) u.speedScale = pace;
+  }
+  function stepConvoy(dt) {
+    if (!convoy) {
+      if ((nextConvoy -= dt) <= 0) { nextConvoy = rand(...P.convoyEvery); startConvoy(); }
+      return;
+    }
+    convoy.t += dt;
+    const live = convoy.men.filter((u) => u.alive);
+    const herd = app.algHerds?.convoy;
+    const end = (ok) => {
+      if (ok) {
+        app.algEconomy?.aln.earn(P.convoyLoad);
+        convoy.to.extraMG = (convoy.to.extraMG ?? 0) + 1;
+        for (const u of live) { u.holdFire = true; u.speedScale = 1; homebound.add(u); sendHome(u); }
+      }
+      convoy.outcome = ok ? "arrived" : "lost";
+      lastConvoy = convoy;
+      if (herd) herd.anchor.moving = false;
+      for (const u of convoy.men) inBand.delete(u);
+      convoy = null;
+    };
+    if (!live.length || !convoy.to.alive) return end(false);
+    const c = centre(live);
+    // The donkeys walk behind the escort's middle, facing its way.
+    if (herd) {
+      const A = herd.anchor, dx = c.x - A.x, dz = c.z - A.z, d = Math.hypot(dx, dz);
+      // As fast as the escort (6 m/s × convoyPace), a little more to close up.
+      const st = Math.min(Math.max(0, d - 3), (herd.walk ?? 1) * 0.9 * dt);
+      if (d > 0.01) { A.x += (dx / d) * st; A.z += (dz / d) * st; A.yaw = Math.atan2(dx, dz); }
+      A.moving = st > 0.01;
+    }
+    // French close: the escort fights (the donkeys stand); clear again: on.
+    const near = french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger);
+    if (near !== convoy.fighting) {
+      convoy.fighting = near;
+      for (const u of live) { u.holdFire = !near; if (near) u.haltMovement?.(); else u.orderTo(convoy.to.position.x, convoy.to.position.z + 6); }
+    }
+    if (dist(c, convoy.to.position) < 14) end(true);
+  }
+  let lastConvoy = null;
+
   // ── Garrisons, retakes, building (2026-10-01) ─────────────────────────────
   const garrisonOf = (v) => bands.find((g) => g.state === "garrison" && g.village === v && alive(g).length);
   /** Spots among a village's houses where a man has cover: the best few of a ring. */
@@ -644,6 +791,20 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     while (lostVillages.length && t - lostVillages.at(-1).at > P.retakeWindow) lostVillages.pop();
   }
 
+  // THE LOOKOUTS' SIGNAL: a lookout that starts seeing French hurries the
+  // next band out (it goes for them: pickTarget knows them now).
+  const lookoutSaw = new WeakMap();
+  let lastSignal = null;
+  function watchLookouts() {
+    const fr = french().filter((f) => !f.isAir);
+    for (const s of app.algStructures?.list ?? []) {
+      if (s.typeKey !== "lookout" || !s.alive) continue;
+      const sees = fr.some((f) => dist(f.position, s.position) < P.seeLookout);
+      if (sees && !lookoutSaw.get(s)) { nextBand = Math.min(nextBand, P.lookoutHurry); lastSignal = { at: { x: s.position.x, z: s.position.z }, t }; }
+      lookoutSaw.set(s, sees);
+    }
+  }
+
   function plan(b) {
     const m = alive(b);
     const c = centre(m);
@@ -670,10 +831,21 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       b.mission = "ambush";
     }
     const tg = pickTarget(c);
-    if (!tg) { setState(b, "gather"); b.t = 0; return; }   // nobody to hit: wait at the rally
-    const spot = ambushSpot(c, tg.at);
+    // NOBODY KNOWN (the FLN sees only what its men, villages and lookouts
+    // see): work a village if one is there to take; otherwise lie in wait by
+    // a PISTE, 150-380 m from the post — where the French patrols must come.
+    let tgt = tg;
+    if (!tgt) {
+      const v = pickVillage(c);
+      if (v && planVillage(b, v)) return;
+      const pts = TRACK_LINES.filter((t) => t.kind === "piste").flatMap((t) => t.line).filter((p) => { const d = dist(p, post); return d > 150 && d < 380; });
+      if (!pts.length) { setState(b, "gather"); b.t = 0; return; }
+      const p = pts.sort((p1, p2) => dist(p1, c) - dist(p2, c))[Math.floor(Math.random() * Math.min(8, pts.length))];
+      tgt = { lead: null, at: { x: p.x, z: p.z }, size: 0 };
+    }
+    const spot = ambushSpot(c, tgt.at);
     if (!spot) { withdraw(b); return; }
-    b.target = tg; b.spot = spot;
+    b.target = tgt; b.spot = spot;
     holdFire(b, true);
     sendBand(b, spot);
     setState(b, "approach");
@@ -687,7 +859,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
 
   function withdraw(b) {
     holdFire(b, true);
-    for (const u of alive(b)) { u.attackTarget = null; u.target = null; u.orderTo(caveMouth.x, caveMouth.z); }
+    for (const u of alive(b)) { u.attackTarget = null; u.target = null; sendHome(u); }
     setState(b, "withdraw");
   }
 
@@ -699,17 +871,19 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     /** On the fixed sim clock. */
     step(dt) {
       t += dt;
-      for (const u of homebound) { if (!u.alive) homebound.delete(u); else if (dist(u.position, caveMouth) < 5) goToGround(u); }
+      for (const u of homebound) { if (!u.alive) homebound.delete(u); else if (atHome(u)) goToGround(u); }
       for (let i = bands.length - 1; i >= 0; i--) {
         stepBand(bands[i], dt);
         if (bands[i].state === "done") { for (const u of bands[i].members) inBand.delete(u); bands.splice(i, 1); }
       }
       if (!enabled) return;
       watchVillages();
+      watchLookouts();
+      stepConvoy(dt);
       nextBand -= dt;
       if (nextBand <= 0) {
         nextBand = rand(...P.bandEvery) * (pool > 6 ? 0.7 : 1);
-        if (pool > 0) pool = Math.max(0, pool - 4);
+        // (the pool is spent by newBand: men gone to ground come back out free)
         newBand();
       }
     },
@@ -717,6 +891,17 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     bandNow() { newBand(); },
     /** The next band in `s` seconds (algDifficulty.js, at the start). */
     restartClock(s) { nextBand = s; },
+    /** Dev: where a man at (x, z) goes to ground (the nearest refuge or the cave). */
+    homeFor: (x, z) => homeFor({ x, z }),
+    /** The last lookout signal ({ at, t }) and men waiting to come back out. */
+    get lastSignal() { return lastSignal; },
+    get pool() { return pool; },
+    knownFrench: () => knownFrench(),
+    /** The mule train under way (null: none) and the last one's outcome. */
+    get convoy() { return convoy; },
+    get lastConvoy() { return lastConvoy; },
+    /** Dev: a mule train now. */
+    convoyNow() { if (!convoy) startConvoy(); },
     /** Dev: the last ambush-screen attempt ("placed" or why not). */
     get lastScreen() { return lastScreen; },
     /** Dev: the ambush spot a band at `from` would take on French at `tgt`. */

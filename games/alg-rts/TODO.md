@@ -286,9 +286,62 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
            an alert when one comes into sight. Minimap: the shroud at half
            strength (the land readable), villages always shown.
    - [ ] The FLN building new caches in villages it holds (algBuild piece).
+   - [x] **THE MULE TRAIN (2026-10-01, algAI convoy)**: every 200-280 s
+         (first at 2:30) 3 porters enter at the play box's edge on the FLN's
+         side (a point with a ROUTE to the cache: the corner was a cliff) and
+         walk to the cache furthest from the post at the DONKEYS' pace
+         (~0.85 m/s: a convoy takes minutes — time to intercept), holding
+         fire; French within 35 m: they stop and fight. Three loaded donkeys
+         follow (algHerds `convoy`: a reserved train in the loaded-train
+         herd, no new draw; `place` moves them to the start; shared
+         wildHerd `anyGround`: a led animal goes where its men go — the
+         trail rule stopped the last one on steep ground). ARRIVES: ALN +150
+         and that cache arms one more gunner (extraMG). ESCORT KILLED: the
+         load is lost. TESTED: arrived (+150, alert); escort killed → "Mule
+         train destroyed: its arms are lost". Alerts when seen / destroyed /
+         arrived-if-seen; an advice tip.
+   - [ ] The convoy's donkeys are NOT fogged (herd animals ignore the fog of
+         war): a mule train shows under the shroud. Fog the herds (per-animal
+         hide), or accept it as a "spotted by shepherds" hint (you, taste).
+   - [x] **REFUGES + LOOKOUTS (2026-10-01)**: new kit pieces (rtsAlgeria
+         buildRefuge — an earth-and-brush mound, stone-cheeked mouth, 2.1k
+         tris; buildLookout — a stone ring on a crest under a brush shade,
+         1.1k; both pass the z-fight tests). Placed by algLandmarks: 2
+         refuges in the FLN's half (in scrub, off tracks), 3 lookouts on
+         crests (5 m+ over the land 50 m round); trees cleared off them.
+         · REFUGE: bands go to ground at the NEAREST refuge, not the far cave
+           (homeFor; tested: from the ksar → north refuge, the hamlet → east
+           refuge, near the camp → the cave). Men gone to ground (3+) come
+           back out FREE as the next band, at the refuge nearest the front.
+         · LOOKOUT + WHAT THE FLN KNOWS: the AI only targets French its men
+           (50 m), its villages (90 m) or its lookouts (110 m) can see
+           (knownFrench; it knew every unit before). A lookout that starts
+           seeing French hurries the next band (≤ 12 s). Tested: 0 known →
+           4 known when a squad walked into a lookout's view; signal fired.
+           Knowing nobody, a band works a village or lies in wait by a piste
+           150-380 m from the post (it used to sit at the rally).
+         · Alerts when one is found (what it does, why destroy it).
+   - [ ] you, look: the refuge and lookout pieces up close; whether the FLN
+         now feels too blind / too sharp (seeMen 50, seeLookout 110,
+         seeVillage 90 in algAI P).
+- [x] **THE HENS in alg (2026-10-01, algHens.js)**: your bird-lab hens
+      (birdMorph white / speckled / black, 40/35/25%) — 25 round the village
+      houses (a third of them) and 4 in each farmstead's yard, at 1.3×, on
+      the shared wildHerd (`clipNames`: the chicken's own idle / walk / run
+      clips — an opt-in, the other herds unchanged): peck, potter 4 m round
+      their spot, scatter from men and vehicles. 3 draws. Seen in a yard by
+      the oven. ?hens=0 off. (A one-off "multiple KTX2 loaders" warning at
+      load: birdMorph's own RGBA loader, disposed right after — harmless.)
+   - [ ] you, look: the hens' size at play zoom; more of them? the souk.
+- [x] (done — see above) THE HENS in alg (you, 2026-10-01): your white / speckled / black
+      hens from the bird lab (v3/props/birdMorph.js, commit 8d9fae2) round
+      the villages, the farmsteads' yards and the ksar's souk, as the other
+      animals (nam already runs chickens: games/nam-rts/chickenFlock.js —
+      the shared machinery to reuse; alg's own placement). Scratch-feeding,
+      scatter from men and vehicles, at unit scale (1.3×).
    - [ ] A gunner formed after his band is gathered waits at the rally for
          the next band (bands take the first men standing).
-   - [ ] AI round 2b: the mule train; the refuge (casemate); the lookout.
+   - [x] AI round 2b: the mule train; the refuge (casemate); the lookout (all 2026-10-01).
    - [ ] you, play it: Normal hard enough? (Hard = 700 + 70/min, 12 out.)
 - [x] **FLOWERS + SMALL PLANTS, round 1** (2026-10-01; you: "the pink flowers
       are flat quads; still Algeria; the cactus"). Season kept: LATE SUMMER.
@@ -383,7 +436,7 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       CRUSH it, a grenade or shell BLOWS it, men beside it CUT it (8 s one
       man, ~5 s two; tested). Sappers: the "Couper" order (nearest wire,
       40 m). Wire leaves the grid at once, no rebuild (clearNoFootFootprint).
-   - [ ] **you (algAI.js)**: the FLN cutting wire that stands between a band
+   - [x] (2026-10-01, AI round 1: a stuck band cuts wire; sangars and screens built) **you (algAI.js)**: the FLN cutting wire that stands between a band
          and its goal — `app.algWire.cutNearest(men, x, z)`; today they
          only go round. Same for building: `app.algBuild.place("sangar" |
          "ambushScreen", x, z, yaw, men)`.
@@ -1227,9 +1280,9 @@ lift off the pad; the ALN comes out of the cave mouth.
          Tested: ?fow=1 → the post's ground clear, the rest shrouded, the
          cave hidden; an ALN man out of sight not drawn, one next to the
          appelés drawn (and shot). nam: loads, its fog of war works.
-   - [ ] **you**: fog of war ON by default once the map is built?
-   - [ ] Line of sight for vision (ridges hide the far side), as for fire.
-   - [ ] Sound (nam's recordings are there: rifle, MG, cannon, Huey…).
+   - [x] (2026-10-01: ON by default, ?fow=0 off) **you**: fog of war ON by default once the map is built?
+   - [x] (2026-10-01: ridgeLOS) Line of sight for vision (ridges hide the far side), as for fire.
+   - [x] (2026-09-30: algSounds.js) Sound (nam's recordings are there: rifle, MG, cannon, Huey…).
 4h. [x] N shows the NAV GRID (as nam), and Dev → Navigation → "Nav grid (N)".
    - [ ] The post and the motor pool have no health bar yet; the helipad
          (the Alouette lands and takes off) and the other buildings are not
@@ -1243,7 +1296,7 @@ lift off the pad; the ALN comes out of the cave mouth.
    - [ ] Next: vehicles as units (motor pool rolls them out through its
          own doors, helipad helicopters), set-rally-point by right-click,
          and the HQ/post card's own labels (still nam's).
-   - [ ] Minimap diamond uses 71% of the square — if it reads too small,
+   - [x] (2026-10-01: the minimap IS the diamond now, 236 px) Minimap diamond uses 71% of the square — if it reads too small,
          a rotated square map crop (cut the far corners) is the other way.
 5. [~] Animals alongside: donkeys — DONE 2026-09-29 (see ALGERIAN DONKEY
        below); on the tracks (walking between villages) still to do;
@@ -1257,7 +1310,7 @@ lift off the pad; the ALN comes out of the cave mouth.
       per kind. Same skeleton and 3 clips (idle, walk, run); crowd format.
       Not in the game yet.
    - [x] you approved them (2026-10-01).
-   - [ ] In the mechta yards — mostly white, a few speckled / black (the
+   - [x] (2026-10-01, algHens.js) In the mechta yards — mostly white, a few speckled / black (the
          game chat places them: createBirdTemplate on the crowd path).
    - [ ] More birds from the chicken: Barbary partridge (scrub slopes,
          flushes), turkey / guinea fowl (yards), white stork (roofs).

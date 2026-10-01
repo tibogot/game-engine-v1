@@ -127,6 +127,28 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     }
   }
 
+  // THE FLN MULE TRAIN (algAI.js): seen → an alert (intercept it); killed →
+  // the arms are lost; arrived unseen → nothing (you never knew).
+  let lastConvoySeen = null, lastConvoyDone = null;
+  function watchConvoy() {
+    const ai = app.algAI;
+    const c = ai?.convoy;
+    if (c && c !== lastConvoySeen) {
+      const m = c.men.find((u) => u.alive && seenByPlayer(u.position.x, u.position.z));
+      if (m) {
+        lastConvoySeen = c; c.seen = true;
+        say(`<b>FLN mule train</b> ${placeName(m.position.x, m.position.z)}! Arms for a cache — intercept it.`, m.position.x, m.position.z, "bad");
+        advise("convoy", "A mule train brings the FLN supplies and arms a cache with one more machine gun. Kill its escort and the load is lost.");
+      }
+    }
+    const d = ai?.lastConvoy;
+    if (d && d !== lastConvoyDone) {
+      lastConvoyDone = d;
+      if (d.outcome === "lost" && d.seen) say("<b>Mule train destroyed</b>: its arms are lost.", d.men[0]?.position.x, d.men[0]?.position.z, "good");
+      else if (d.outcome === "arrived" && d.seen) say("The mule train reached its cache: one more FLN machine gun.", d.to.position.x, d.to.position.z, "bad");
+    }
+  }
+
   function watchMines() {
     if (!mines) return;
     const now = new Set(mines.list);
@@ -144,6 +166,12 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
   }
 
   const foundCaches = new WeakSet();
+  // Hidden FLN places, and what finding one is worth.
+  const FOUND = {
+    armsCache: "<b>FLN arms cache found</b>! Destroy it: no more machine guns from it.",
+    refuge: "<b>FLN refuge found</b>! Its bands go to ground here and come back out free. Destroy it.",
+    lookout: "<b>FLN lookout found</b> on the crest! It tells the bands where you are. Take it out and their ambushes go blind.",
+  };
   function watchBuildings() {
     for (const s of structures.list) {
       const was = aliveB.get(s);
@@ -151,9 +179,9 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       const { x, z } = s.position;
       if (was && !s.alive) say(`${s.name ?? "A building"} destroyed.`, x, z, s.team === "player" ? "bad" : "good");
       // A hidden cache comes into sight.
-      if (s.typeKey === "armsCache" && s.alive && !foundCaches.has(s) && fog()?.enabled && fog().isVisible(x, z)) {   // seen, not the dev switch turning the fog off
+      if (FOUND[s.typeKey] && s.alive && !foundCaches.has(s) && fog()?.enabled && fog().isVisible(x, z)) {   // seen, not the dev switch turning the fog off
         foundCaches.add(s);
-        if (clock > 2) say("<b>FLN arms cache found</b>! Destroy it: no more machine guns from it.", x, z, "good");
+        if (clock > 2) say(FOUND[s.typeKey], x, z, "good");
       }
       const hp = hpOf.get(s);
       hpOf.set(s, s.hp);
@@ -276,6 +304,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     watchBuildings();
     watchVillages();
     watchMines();
+    watchConvoy();
     if (!over) stepScore(dt);
     hud.setScore({ fr: score.player, aln: score.enemy, max: P.start, heldFr: economy.held, heldAln: economy.heldByEnemy });
     hud.markers(economy.points);
