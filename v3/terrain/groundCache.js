@@ -89,6 +89,24 @@ export const GROUND_CACHE_DEFAULTS = {
    * size. ~6e-4 at the RTS camera (40° lens, ~1800 px tall, 40-60° down).
    */
   footPerMetre: 6e-4,
+  /**
+   * Hex tiling in the paint bake (no repeat grid). false = grid tiling.
+   * MEASURED 2026-10-01 (alg, same view): hex keeps 72% of the live paint's
+   * fine detail at the top of the screen, grid 77% — the three blended
+   * windows soften a little. Kept on: the repeat grid was the complaint.
+   */
+  hexBake: true,
+  /**
+   * DETAIL (2026-10-01; you: "CoH has nice terrain detail"). The cache holds
+   * the ground at 2-8 cm a texel where you look, filtered twice (baked, then
+   * read): MEASURED it keeps 72-87% of the live paint's fine detail. At draw
+   * time the terrain adds back the grain of the paint layer under the pixel
+   * (the bake stores which, in the normal target's alpha): that layer's photo
+   * read twice — full hardware sharpness (mips + anisotropic) and blurred to
+   * the cache texel — and their ratio multiplies the cache colour. Only the
+   * frequencies the cache lost; ~1 where it is already sharp. 0 = off.
+   */
+  detail: 0,
   /** Bake far grass where grass is painted (see FAR GRASS); needs the createGroundCache farGrass input. */
   farGrass: false,
   farGrassUrl: "/textures/grassfar/rocky_terrain_02_c.webp",
@@ -193,7 +211,7 @@ export function createGroundCache({
       position: P, topK: 4, farFade: uTile.w,
       // No repeat grid on any layer (splatOverlayTsl hexSample): 3× the
       // layer taps, affordable only because this runs once per texel.
-      hex: true,
+      hex: O.hexBake !== false,
     });
     return { sb, G, color: sb.color };
   }
@@ -321,16 +339,24 @@ export function createGroundCache({
     m.depthTest = m.depthWrite = false;
     m.fragmentNode = Fn(() => {
       const { sb, G, color } = bakeSurface();
+      // DETAIL: which paint layer is under this texel ((idx + 1) / 8 in the
+      // normal's alpha; 0 = the bare base, no grain) and how much of the texel
+      // is that paint (colour alpha; splats and far grass take it down).
+      let layerA = float(1);
+      if (O.detail > 0) {
+        const xw = uTile.x.add(uv().x.mul(uTile.z)), zw = uTile.y.add(uv().y.mul(uTile.z));
+        layerA = splatOverlay.dominantLayer(vec3(xw, 0, zw)).idx.add(1).div(8);
+      }
       if (farGrassOn) {
         const x = uTile.x.add(uv().x.mul(uTile.z)), z = uTile.y.add(uv().y.mul(uTile.z));
         const g = farGrassAt(x, z, G, color);
         // Grass hides the ground's bumps and is matte.
-        if (which === "colour") return vec4(sqrt(max(mix(color, g.col, g.w), vec3(0))), 1);
+        if (which === "colour") return vec4(sqrt(max(mix(color, g.col, g.w), vec3(0))), float(1).sub(g.w));
         const n = normalize(mix(normalize(sb.nrm), G, g.w.mul(0.7)));
-        return vec4(encodeDetail(n, G), clamp(mix(sb.rough, 0.95, g.w), 0, 1), 1);
+        return vec4(encodeDetail(n, G), clamp(mix(sb.rough, 0.95, g.w), 0, 1), layerA);
       }
       if (which === "colour") return vec4(sqrt(max(color, vec3(0))), 1);
-      return vec4(encodeDetail(normalize(sb.nrm), G), clamp(sb.rough, 0, 1), 1);
+      return vec4(encodeDetail(normalize(sb.nrm), G), clamp(sb.rough, 0, 1), layerA);
     })();
     splatOverlay.registerMaterial?.(m);
     return m;
@@ -589,7 +615,9 @@ export function createGroundCache({
     m.blendSrc = THREE.SrcAlphaFactor;
     m.blendDst = THREE.OneMinusSrcAlphaFactor;
     m.blendSrcAlpha = THREE.ZeroFactor;
-    m.blendDstAlpha = THREE.OneFactor;
+    // Colour: the splat takes the texel from the paint under it (DETAIL reads
+    // dst alpha as "how much paint"); normal: alpha (the layer) kept.
+    m.blendDstAlpha = which === "colour" ? THREE.OneMinusSrcAlphaFactor : THREE.OneFactor;
     m.side = THREE.DoubleSide;   // see the decal material
 
     const s0 = attribute("aS0", "vec4"), s1 = attribute("aS1", "vec4");
@@ -1017,6 +1045,18 @@ export function createGroundCache({
   const colNode = texture(colRT.texture);
   const nrmNode = texture(nrmRT.texture);
   const uLodBias = uniform(0);
+  /** DETAIL strength (0..1+), live. */
+  const uDetail = uniform(O.detail);
+  // The paint layers' albedo array (mips + anisotropic, as the live blend reads it).
+  const detailArr = O.detail > 0 && textureLib?.albedoArrayTex ? texture(textureLib.albedoArrayTex) : null;
+  const detailRes = textureLib?.albedoArrayTex?.image?.width ?? 1024;
+  /** A per-layer uniform picked by a dynamic layer index (select chain). */
+  const pickSlot = (li, get) => {
+    const slots = textureLib.getLayerUniforms();
+    let acc = get(slots[slots.length - 1]);
+    for (let i = slots.length - 2; i >= 0; i--) acc = select(li.equal(i), get(slots[i]), acc);
+    return acc;
+  };
   const uDebug = uniform(0);
 
   /**
@@ -1066,6 +1106,25 @@ export function createGroundCache({
     const n = mix(nA, nB, tB).toVar();
 
     let col = c.rgb.mul(c.rgb);
+    if (O.detail > 0 && detailArr) {
+      // DETAIL (see the option): ring A's layer and paint fraction (a blend of
+      // two rings' layer ids would be a third, wrong layer).
+      const idx = nA.a.mul(8).round().sub(1).toVar();
+      const has = idx.greaterThanEqual(0);
+      const li = int(max(idx, 0));
+      const scale = pickSlot(li, (s) => s.uUVScale);
+      const uvL = pv.mul(1 / W).mul(scale);
+      // Metres a photo texel covers (the layer repeats every W / scale m),
+      // against the cache texel of ring A: the level the cache already holds.
+      const photoTexel = float(W).div(scale).div(detailRes);
+      const lc = max(log2(float(O.texel0).mul(exp2(ia)).div(photoTexel)).add(0.5), 0);
+      const LUM = vec3(0.2126, 0.7152, 0.0722);
+      const hi = dot(detailArr.sample(uvL).depth(li).rgb, LUM);
+      const lo = dot(detailArr.sample(uvL).level(lc).depth(li).rgb, LUM);
+      const grain = clamp(hi.div(max(lo, 1e-3)), 0.5, 1.7);
+      const k = select(has, cA.a.mul(uDetail), float(0));
+      col = col.mul(mix(float(1), grain, k));
+    }
     // Debug (uDebug 1): tint each ring — which ring a pixel reads.
     const TINTS = [[1, 0.3, 0.3], [0.3, 1, 0.3], [0.3, 0.3, 1], [1, 1, 0.3], [1, 0.3, 1], [0.3, 1, 1], [0.6, 0.6, 0.6]];
     const tintOf = (c) => {
@@ -1092,6 +1151,7 @@ export function createGroundCache({
     rings,
     options: O,
     uLodBias,
+    uDetail,
     uDebug,
     colourTexture: colRT.texture,
     normalTexture: nrmRT.texture,

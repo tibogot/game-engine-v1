@@ -1027,7 +1027,24 @@ export function createSplatOverlay(
     return texture(splatTex, uv).depth(int(1)).level(float(0)).a.mul(ib);
   };
 
+  /**
+   * The paint layer that dominates at a world position: { idx (0..NL-1, or
+   * -1 where the bare base wins), w }. From the PAINTED weights (the auto
+   * rules are not in it). The ground cache bakes it so the terrain can add
+   * that layer's fine grain back at draw time (groundCache DETAIL).
+   */
+  function dominantLayer(P) {
+    const { nwExpr } = positional(P);
+    let idx = float(-1), w = nwExpr[0];
+    for (let i = 1; i < nwExpr.length; i++) {
+      const better = nwExpr[i].greaterThan(w);
+      idx = select(better, float(i - 1), idx);
+      w = select(better, nwExpr[i], w);
+    }
+    return { idx, w };
+  }
   return {
+    dominantLayer,
     holeKeepMask,
     holeAtUV,
     uHasPaint,

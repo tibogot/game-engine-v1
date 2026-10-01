@@ -87,6 +87,39 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          still.
    - [ ] **you, look**: the oasis meadows from default and max zoom; the
          hand-over from blades; the near oasis without its dirt patches.
+- [ ] **GROUND SHARPNESS — the cache loses detail with distance** (you: "CoH
+      looks really good resolution"). MEASURED 2026-10-01, same frame, cache
+      vs live paint (?gc=0, mips + anisotropic): the cache keeps 64% of the
+      fine detail at the top of the screen, 75% mid, 88% near. Cause: the
+      rings have NO mips and no anisotropic filtering, and a pixel picks its
+      ring by its LONGEST axis on the ground (an RTS pixel is long and thin)
+      → blur, growing up the screen. uLodBias −1 recovers 80/91/94% but the
+      far ground still streaks sideways (no aniso) and risks shimmer. Fix:
+      mip levels per ring (rebuilt per baked tile: 128/64/32/16), ring by the
+      SHORT axis, hardware anisotropic sampling. Needs your go. 2k source
+      photos would NOT help (the cache limits, not the photos).
+   - [x] TRIED, NO GAIN: ring by the short axis + 4 taps along the long one
+         (shader anisotropy): sharpness unchanged at default AND close zoom
+         (1.00-1.01) — the ring a pixel reads is set by how far each ring
+         REACHES from the focus (ring 0 only ±20 m, ring 1 ±41 m), not by
+         the pixel's shape. Removed. Mip chains per tile: ~16 more passes a
+         tile, not built.
+   - [x] Hex tiling costs a little: 72% (hex) vs 77% (grid) of the live
+         paint's detail far — kept (groundCache hexBake, ?gchex=0 to A/B).
+   - [x] FXAA WAS BLURRING THE WHOLE FRAME: it ran on top of the 4x MSAA.
+         Off in alg (?fxaa=1 back), + a light CAS sharpen 0.3 (?sharpen=).
+         Same frame: fine detail ×2.7 (FXAA off), ×4 with the sharpen —
+         stones defined instead of blobs. Cost ~0. **you**: judge shimmer
+         on leaves / thin wires while panning (FXAA was their only AA).
+   - [x] DETAIL LAYER (groundCache detail, alg 1, ?detail=0): the bake
+         stores the dominant paint layer (normal alpha) and the paint
+         fraction (colour alpha; splats + far grass lower it); the terrain
+         adds that layer's band-passed grain at draw time (photo sharp ÷
+         photo at the cache texel). +29% fine detail far, +11% mid, ~0 near
+         (by design). Cost ≤0.25 ms. Rings centred on the screen ground:
+         NOT done (far edge 50 m vs ring 1's 41 m reach — no gain, re-bakes).
+   - [ ] **you, look** in the game: crispness, shimmer, the grain on the
+         ground (too strong? uDetail is live: __ALG.groundCache.uDetail.value).
    - [ ] nam: move its camera to addPreUpdateHook (it is inside its tick).
 - [x] DRAW CALLS (you: "~293 at the base, is it plenty?"): 287-310 a frame =
       tall plants 84 (4 species × 3 variants × 3 details, depth pre-pass +

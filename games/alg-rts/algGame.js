@@ -140,7 +140,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // paint blend, to A/B.
     // farGrass: a top-down grass photo baked where grass is painted, past the
     // blades (groundCache.js FAR GRASS). ?fargrass=0 = without.
-    groundCache: { farGrass: params.get("fargrass") !== "0" },
+    // detail: the paint layer's fine grain added back at draw time (groundCache
+    // DETAIL; the cache alone kept 72-87% of it). ?detail=0 = without.
+    groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 1) },
   });
   app.setFrameThrottle?.(1000);
   // The stats-gl overlay: ON (you, 2026-10-01: "keep the performance stats
@@ -173,6 +175,20 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // every frame: MEASURED ~8 ms at 1.55x resolution (2026-09-27 perf pass).
   // Turn it on (Dev → Post-FX) the day the first emissive arrives.
   app.postFx?.setBloom({ enabled: false, strength: 0.85, threshold: 0.0, radius: 0.5 });
+  // CRISP, NOT SOFT (you, 2026-10-01: "CoH looks really good resolution").
+  // FXAA ran ON TOP of the 4x MSAA and blurred every pixel of the frame:
+  // MEASURED same frame, the fine detail (Laplacian) went ×2.7 with it off —
+  // stones defined instead of soft blobs. MSAA still smooths geometry edges;
+  // FXAA only adds anti-aliasing to alpha-cut leaves and thin wires (judge
+  // shimmer while panning). A light CAS sharpen on top (0.3). ?fxaa=1 brings
+  // FXAA back; ?sharpen=0..1 sets the sharpen (0 = off).
+  const postState = app.postFx?.state;
+  if (postState) {
+    postState.fxaa.enabled = params.get("fxaa") === "1";
+    const sharp = Number(params.get("sharpen") ?? 0.3);
+    Object.assign(postState.sharpen, { enabled: sharp > 0, sharpness: sharp });
+    app.postFx.apply();
+  }
   app.shadows?.setEnabled?.(false);   // the fitted frustum, not cascades (nam-rts measured)
 
   // The plain outside the heightmap is bare ground: soil, not the editor's white.
