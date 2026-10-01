@@ -28,9 +28,9 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // man going down (the dust puff) does not. The birds come after combat
   // (algGame.js), so they are looked up at the moment of the blast.
   const explosion = fx.explosion;
-  fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) { app.algBirds?.flush(x, z, { size: opts?.size ?? 10 }); app.algSounds?.blast(x, y, z, opts?.size ?? 10); } };
+  fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) { app.algBirds?.flush(x, z, { size: opts?.size ?? 10 }); app.algSounds?.blast(x, y, z, opts?.size ?? 10); app.algDamage?.blast(x, z, opts?.size ?? 10); } };
   const grenade = fx.grenade;
-  fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); app.algSounds?.blast(x, y, z, 6); };
+  fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); app.algSounds?.blast(x, y, z, 6); app.algDamage?.blast(x, z, 6); };
 
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combat = null;

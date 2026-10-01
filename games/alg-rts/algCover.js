@@ -103,7 +103,8 @@ export function createAlgCover(app, { showroom = {}, isArmed = () => true } = {}
           screens.push({ x: mesh.position.x, z: mesh.position.z, c: Math.cos(mesh.rotation.y), s: Math.sin(mesh.rotation.y), fp: mesh.geometry.userData.footprint });
         }
         if (!mesh?.isObject3D || NONE.has(key) || !mesh.parent) continue;
-        yield* circlesOf(mesh, HARD.has(key));
+        // A breached sandbag wall (algDamage.js): knee-high stubs, soft cover.
+        yield* circlesOf(mesh, HARD.has(key) && !mesh.userData.breached);
       }
     },
   });

@@ -129,6 +129,36 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
+- [x] **THE LAND AT WAR** (2026-10-01, you: "poles, tyre tracks, damage
+      states — always optimized"). MEASURED: all of it on vs hidden, same
+      view, gpuAB 4 rounds: 3.15 vs 3.22 ms — inside the noise (0.22).
+      · TELEGRAPH LINE (algPoles.js; rtsAlgeria buildTelegraphPole, 146
+        tris): 20 poles along the pistes, 5.5 m off the centre, ~42 m apart;
+        ONE instanced draw (+ its shadow) and ONE line draw for the 640 wire
+        segments, sagging. Each pole blocks a 2 × 2 m nav cell (a tank drove
+        through one). ?poles=0.
+      · TYRE / TRACK MARKS (shared-rts/trackMarks.js, wired in
+        algAmbience.js): one instanced draw, draped in the vertex shader,
+        ruts drawn in the fragment shader (tyres plain, tracks with links),
+        fade over 50 s in the shader; MULTIPLY blend (reads the same in
+        shadow); each mark uploads only its own slot. Per-vehicle gauge.
+      · DAMAGE (algDamage.js, fed by algCombat's explosion wrapper):
+        SANDBAGS breached by a blast ≥ grenade (rtsAlgeria
+        buildFrSandbagWallBreached, swapped in; cover hard → soft, one
+        re-bake 1.5 s after the last breach). HOUSES hit by a shell/mortar:
+        burn ~25 s on the roof, smoulder ~2 min (algAmbience.smoulder),
+        RUBBLE heap at the wall's foot toward the impact (rtsAlgeria
+        buildRubbleHeap, one InstancedMesh, ≤ 2 per house). BUILDINGS under
+        half health smoke (thicker the worse); a wreck smokes 90 s more.
+        All new kit pieces pass rtsPropsCoplanarTest + rtsGroundBandTest.
+   - [ ] Houses don't COLLAPSE: a village is one merged mesh with no house id
+         per vertex. Bake a house id into the village geometry, then a
+         shader can drop a hit house's roof and char its walls (one uniform
+         array per village).
+   - [ ] you, look: the poles' side and spacing; the rut strength (tint
+         0x9a8a78); the burning-house smoke (the ovens' grey, thicker).
+   - [ ] Poles: the FLN cuts the line → the post loses its radio (minimap
+         intel) — gameplay, later.
 - [x] **THE BATTLE — a goal, and the game telling you what happens**
       (2026-10-01, algBattle.js + ui/battleHud.js; you: "no enemies, what
       do I do with the village? very confused"). CoH victory points:
@@ -1161,7 +1191,7 @@ Order: foliage → villages → animals & birds → ground detail.
       Plan: `node tools/algPlanView.mjs --layout games/alg-rts/layout.js --view play`.
    - [ ] **you, look**: the piste's colour (a smooth tan band — paler?),
          the ruts' strength, the mule paths (faint by design).
-   - [ ] Telegraph poles along the piste (a kit piece; the post's radio
+   - [x] (2026-10-01, algPoles.js) Telegraph poles along the piste (a kit piece; the post's radio
          mast is the only wire today).
    - [x] (2026-09-29, algPatrols.js + algMines.js; the sapper still open) Patrol order ALONG a track; convoys (GMC) on the piste; ALN mines
          on it (the sapper); donkeys on the mule paths.
@@ -1754,12 +1784,12 @@ Asset follow-ups:
       · Barbed wire that MATTERS: the ALN must cut it (a few seconds, a
         sapper-like action) or go round; it snags a man for a moment.
       · Dust trails behind vehicles on the pistes (one shared particle
-        field), tyre-track decals fading behind them.
+        field), tyre-track decals fading behind them (DONE 2026-10-01, trackMarks.js).
       · Oven smoke from a few village houses, laundry on a ksar roof,
         a donkey tied at the souk (the herds already have donkeys).
       · Night: lit windows (emissive, no lights) in the post, villages and
         the ksar; a lantern at the souk arcades; the mirador lamp.
-      · Built pieces WEAR: sandbags slump and burst when shot (swap to a
+      · Built pieces WEAR (sandbags + houses + smoke DONE 2026-10-01, algDamage.js): sandbags slump and burst when shot (swap to a
         damaged variant), a burnt MG nest keeps its wreck (as structures).
       · Spent brass / a scorch decal at an MG nest after long firing.
       · Ambience: cicadas by day, the muezzin from the ksar at set hours,

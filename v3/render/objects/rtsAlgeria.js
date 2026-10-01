@@ -50,6 +50,30 @@ export function buildFrSandbagWall({ seed = 3, length = 5 } = {}) {
 }
 
 /**
+ * SANDBAG WALL, BREACHED — the same 5 m run after a shell or a grenade: a gap
+ * blown through the middle, the stubs either side lower and slumped, the burst
+ * bags thrown out flat in front and behind. Same footprint as the whole wall
+ * (alg-rts swaps one for the other: algDamage.js).
+ */
+export function buildFrSandbagWallBreached({ seed = 3, length = 5 } = {}) {
+  const R = rng(seed + 101);
+  const parts = [];
+  const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
+  const L = length / 2;
+  // The stubs: 4 courses on the left, 3 slumped ones on the right.
+  parts.push({ geo: buildSandbagWall({ length: 1.7, courses: 4, seed, bag, batter: 0.06 }), pos: [-L + 0.85, 0, 0], mat: null });
+  parts.push({ geo: buildSandbagWall({ length: 1.3, courses: 3, seed: seed + 2, bag, batter: 0.08 }), pos: [L - 0.65, 0, 0.04], rot: [0, -0.08, 0.03], mat: null });
+  // What is left of the firing step behind.
+  parts.push({ geo: buildSandbagWall({ length: 1.4, courses: 1, seed: seed + 1, bag, batter: 0.03 }), pos: [-L + 1.0, 0, 0.62], mat: null });
+  // The burst bags: single bags lying flat, thrown both ways out of the gap.
+  for (let k = 0; k < 9; k++) {
+    const x = (R() - 0.5) * 2.4, z = (R() < 0.6 ? -1 : 1) * (0.3 + R() * 1.1);
+    parts.push({ geo: buildSandbagWall({ length: 0.6, courses: 1, seed: seed + 11 + k, bag }), pos: [x, 0, z], rot: [0, R() * 3.1, 0], mat: null });
+  }
+  return finish(parts, { hx: length / 2 + 0.6, hz: 1.0, cz: 0.3, height: 0.8 });
+}
+
+/**
  * BARBED WIRE — a 6 m double-apron fence: a line of angle-iron pickets,
  * guy pickets out to each side, strands along the top and down both aprons,
  * and a coil of concertina along the front. Wire itself is sub-pixel at RTS
@@ -923,6 +947,57 @@ export function buildMineMarker({ seed = 1960 } = {}) {
   parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.4, 0.26, 0.34), pos: [cx + 0.03, 0.33, cz + 0.02], rot: [0.1, R() * 3, 0.05], mat: MAT.limestone, tone: 0.5 });
   parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.28, 0.22, 0.24), pos: [cx - 0.02, 0.52, cz], rot: [0.2, R() * 3, 0.1], mat: MAT.limestone, tone: 0.6 });
   return finish(parts, { hx: 1.2, hz: 0.9, cx: 0.35, cz: 0.15, height: 0.7 });
+}
+
+// ── THE LAND AT WAR ─────────────────────────────────────────────────────────
+
+/**
+ * RUBBLE HEAP — what a shell leaves against a village house (alg-rts
+ * algDamage.js): broken stone and lumps of plaster from the wall, a charred
+ * roof beam sticking out, all in a low heap ~2.6 m across. One merged piece;
+ * the game instances it, so a shelled village costs one draw however many
+ * houses are hit.
+ */
+export function buildRubbleHeap({ seed = 1961 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  // The core: a low spoil mound the stones sit in (nothing floats).
+  parts.push({ geo: earthBerm([[1.25, -0.1], [0.95, 0.16], [0.5, 0.36], [0.001, 0.42]], { seed, segs: 16, rJit: 0.12, yJit: 0.05 }), mat: MAT.spoil, tone: 0.35 });
+  for (let k = 0; k < 9; k++) {
+    const a = R() * Math.PI * 2, r = R() * 0.9, w = 0.3 + R() * 0.35;
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), w, w * 0.6, w * 0.8), pos: [Math.cos(a) * r, 0.42 - r * 0.32, Math.sin(a) * r], rot: [R() * 0.6, R() * 3, R() * 0.6], mat: MAT.limestone, tone: 0.3 + R() * 0.2 });
+  }
+  // Plaster lumps from the wall face.
+  for (let k = 0; k < 4; k++) {
+    const a = R() * Math.PI * 2, r = 0.3 + R() * 0.7;
+    parts.push({ geo: buildBox(0.35 + R() * 0.25, 0.12, 0.25 + R() * 0.2), pos: [Math.cos(a) * r, 0.4 - r * 0.28, Math.sin(a) * r], rot: [(R() - 0.5) * 0.7, R() * 3, (R() - 0.5) * 0.7], mat: MAT.plaster, tone: 0.3 });
+  }
+  // The roof beam, burnt black, its end in the air.
+  parts.push({ geo: buildBox(0.14, 0.14, 2.2), pos: [0.2, 0.55, 0.1], rot: [0.32, 0.7, 0.05], mat: MAT.timber, tone: 0.05 });
+  return finish(parts, { hx: 1.3, hz: 1.3, height: 0.8, ao: { strength: 0.35 } });
+}
+
+/**
+ * TELEGRAPH POLE — the PTT line along the pistes: a tarred pole, a crossarm
+ * with four white insulators, a brace. Instanced along the tracks by the game
+ * (alg-rts algPoles.js); `userData.wires` gives the four insulator tops
+ * (scaled, local) the wires hang from.
+ */
+export function buildTelegraphPole({ seed = 1962 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const H = 7, armY = 6.55;
+  parts.push({ geo: new THREE.CylinderGeometry(0.085, 0.12, H, 7).translate(0, H / 2, 0), rot: [0, R() * 3, 0], mat: MAT.timber, tone: 0.18 });
+  parts.push({ geo: buildBox(1.5, 0.1, 0.1), pos: [0, armY, 0.13], mat: MAT.timber, tone: 0.25 });
+  // The brace: pole to arm, one side.
+  parts.push(wirePart([0, armY - 0.65, 0.1], [0.45, armY - 0.05, 0.13], 0.025, { mat: MAT.steel, tone: 0.3 }));
+  const ins = [-0.62, -0.22, 0.22, 0.62];
+  for (const x of ins) {
+    parts.push({ geo: new THREE.CylinderGeometry(0.035, 0.05, 0.14, 6).translate(0, 0.07, 0), pos: [x, armY + 0.05, 0.13], mat: MAT.white, tone: 0.8 });
+  }
+  const geo = finish(parts, { hx: 0.8, hz: 0.3, height: H, ao: { strength: 0.15 } });
+  geo.userData.wires = ins.map((x) => [x * S, (armY + 0.2) * S, 0.13 * S]);
+  return geo;
 }
 
 // ── FRENCH, continued ───────────────────────────────────────────────────────

@@ -20,6 +20,8 @@ import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
 import { createAlgBattle } from "./algBattle.js";
+import { createAlgPoles } from "./algPoles.js";
+import { createAlgDamage } from "./algDamage.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
@@ -228,6 +230,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       });
     } catch (e) { console.warn("[alg battle] failed:", e); }
   }
+  // THE TELEGRAPH LINE (algPoles.js): poles and wires along the pistes, one
+  // draw each. ?poles=0 = without.
+  if (params.get("poles") !== "0") {
+    try { app.algPoles = createAlgPoles(app, { navGrid: app.navGrid ?? null }); } catch (e) { console.warn("[alg poles] failed:", e); }
+  }
   // BIRDS (algBirds.js, the shared engine): storks crossing and landing in
   // the open, crows, a stork on the minaret's nest, griffon vultures on the
   // thermals over the djebel — over the katiba's heights and the Kef. ?birds=0 = without.
@@ -265,6 +272,16 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       app.algAmbience = createAlgAmbience(app, { units: app.algUnits?.units ?? null, showroom: app.showroom, wind: app.showroom?.wind ?? null });
     } catch (e) { console.warn("[alg ambience] failed:", e); }
+  }
+  // DAMAGE (algDamage.js): breached sandbags, burning and smoking houses with
+  // rubble, smoking buildings. ?damage=0 = without.
+  if (params.get("damage") !== "0") {
+    try {
+      app.algDamage = createAlgDamage(app, {
+        showroom: app.showroom ?? {}, structures: app.algStructures ?? null, ambience: app.algAmbience ?? null,
+        cover: app.algCover ?? null, fire: app.algCombat?.fire ?? null,
+      });
+    } catch (e) { console.warn("[alg damage] failed:", e); }
   }
   // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,
   // the dechra and the springs; they bolt from soldiers. ?herds=0 = without.
