@@ -55,6 +55,8 @@ import {
   length, dFdx, dFdy, abs, step, cross, mix, mx_noise_float,
 } from "three/tsl";
 import { WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
+import { hexSample } from "./splatOverlayTsl.js";
+import { grassFieldAlbedo } from "../../v2/render/hybridGrass/grassFieldColor.js";
 import { flatSurface, gridSurface } from "../render/materials/gridMaterial.js";
 
 export const GROUND_CACHE_DEFAULTS = {
@@ -87,6 +89,11 @@ export const GROUND_CACHE_DEFAULTS = {
    * size. ~6e-4 at the RTS camera (40° lens, ~1800 px tall, 40-60° down).
    */
   footPerMetre: 6e-4,
+  /** Bake far grass where grass is painted (see FAR GRASS); needs the createGroundCache farGrass input. */
+  farGrass: false,
+  farGrassUrl: "/textures/grassfar/rocky_terrain_02_c.webp",
+  /** Metres the far-grass photo spans (Poly Haven rocky_terrain_02: 90 m). */
+  farGrassSize: 90,
 };
 
 const DECAL_STRIDE = 36;
@@ -94,6 +101,9 @@ const DECAL_STRIDE = 36;
 export function createGroundCache({
   renderer, splatOverlay, terrainNormals, heightTexNode = null, farTerrain = null,
   baseStyle = "flat", options = {}, splatTex = null, textureLib = null,
+  // The live far-grass tint (grassFarTsl.js): its density and blade colours
+  // feed the baked far grass when options.farGrass is on.
+  farGrass = null,
 }) {
   const O = { ...GROUND_CACHE_DEFAULTS, ...options };
   const N = O.rings, RES = O.res, T = O.tiles, TILE = RES / T;
@@ -254,12 +264,71 @@ export function createGroundCache({
     return vec2(d.x, d.z).mul(0.5).add(0.5);
   };
 
+/*
+   * FAR GRASS (2026-10-01, alg-rts; you: "the tint looks like bad tiling
+   * texture, not grass from far"). Past the grass blades' fade the ground used
+   * to take a live tint (grassFarTsl.js): the bare ground's own photo shifted
+   * green, patched with sine waves — read as a tiled texture. Here a real
+   * top-down grass photo is baked into the cache where grass is painted, the
+   * way Company of Heroes paints its far grass into the terrain texture:
+   *   - colour: the blades' own average (grassFieldAlbedo, the live tint's
+   *     uniforms) — so far grass is the blades' colour, by construction;
+   *   - detail: the photo's LUMINANCE only (Poly Haven rocky_terrain_02,
+   *     aerial, 90 m across — the scale this camera sees it at), hex-tiled
+   *     (no repeat grid), against its own mean;
+   *   - clumps: two octaves of noise (~3 m tufts, ~15 m patches), not sines;
+   *   - where: the blades' density × their slope rule, on rings whose texel
+   *     stands for a distance past the blades' fade (uGrassBake.x, per tile) —
+   *     the near rings, under the blades, keep the bare ground.
+   * Free at runtime: the cache is read anyway, and the live tint goes.
+   */
+  const farGrassOn = !!(farGrass && O.farGrass);
+  const uGrassBake = uniform(new THREE.Vector4(0, 1, 0, 0));   // x = this tile's ring fade, y = detail strength
+  let farGrassTex = null, farGrassNode = null;
+  if (farGrassOn) {
+    farGrassTex = new THREE.TextureLoader().load(O.farGrassUrl, () => markAllStale());
+    farGrassTex.wrapS = farGrassTex.wrapT = THREE.RepeatWrapping;
+    farGrassTex.colorSpace = THREE.SRGBColorSpace;
+    farGrassTex.anisotropy = 8;
+    farGrassNode = texture(farGrassTex);
+  }
+  /** { col, w }: the far-grass colour at world (x, z) and how much of it. */
+  function farGrassAt(x, z, G, ground) {
+    const u = farGrass.uniforms;
+    const mapUV = vec2(x.add(HALF).div(W), z.add(HALF).div(W));
+    const inMap = step(0, mapUV.x).mul(step(mapUV.x, 1)).mul(step(0, mapUV.y)).mul(step(mapUV.y, 1));
+    const slopeK = mix(float(1), smoothstep(u.slopeMin, u.slopeMax, G.y), u.slopeOn);
+    const cover = min(texture(farGrass.density, mapUV).r.mul(u.grassDensity), float(1)).mul(inMap).mul(slopeK);
+    const field = grassFieldAlbedo(ground, {
+      bladeCol: u.bladeCol, tipCol: u.tipCol,
+      aoBase: u.aoBase, aoPower: u.aoPower, farAoMul: u.farAoMul,
+      shadeVar: u.shadeVar, tintOn: u.tintOn, tintStrength: u.tintStrength, tintRootBias: u.tintRootBias,
+    });
+    const LUM = vec3(0.2126, 0.7152, 0.0722);
+    const photo = hexSample(farGrassNode, vec2(x, z).div(O.farGrassSize), null).rgb;
+    const mean = farGrassNode.sample(vec2(0.5, 0.5)).level(12).rgb;   // the 1×1 mip: the photo's mean
+    const detail = clamp(dot(photo, LUM).div(max(dot(mean, LUM), 1e-3)), 0.45, 1.8);
+    const tuft = mx_noise_float(vec3(x.mul(0.33), z.mul(0.33), 0.5));
+    const patch = mx_noise_float(vec3(x.mul(0.067), z.mul(0.067), 3.1));
+    const clump = float(1).add(tuft.mul(0.45).add(patch.mul(0.55)).mul(u.clumps));
+    const col = field.mul(mix(float(1), detail, uGrassBake.y)).mul(u.gain).mul(clump);
+    return { col, w: cover.mul(uGrassBake.x) };
+  }
+
   const bakeMaterial = (which) => {
     const m = new THREE.MeshBasicNodeMaterial();
     m.toneMapped = false; m.fog = false;
     m.depthTest = m.depthWrite = false;
     m.fragmentNode = Fn(() => {
       const { sb, G, color } = bakeSurface();
+      if (farGrassOn) {
+        const x = uTile.x.add(uv().x.mul(uTile.z)), z = uTile.y.add(uv().y.mul(uTile.z));
+        const g = farGrassAt(x, z, G, color);
+        // Grass hides the ground's bumps and is matte.
+        if (which === "colour") return vec4(sqrt(max(mix(color, g.col, g.w), vec3(0))), 1);
+        const n = normalize(mix(normalize(sb.nrm), G, g.w.mul(0.7)));
+        return vec4(encodeDetail(n, G), clamp(mix(sb.rough, 0.95, g.w), 0, 1), 1);
+      }
       if (which === "colour") return vec4(sqrt(max(color, vec3(0))), 1);
       return vec4(encodeDetail(normalize(sb.nrm), G), clamp(sb.rough, 0, 1), 1);
     })();
@@ -559,7 +628,14 @@ export function createGroundCache({
       // Holes: a patch of gravel or mud is never solid all the way through.
       const holes = mx_noise_float(vec3(vW.x.mul(0.35), vW.y.mul(0.35), seed.mul(2).add(9.1)));
       const interior = smoothstep(-0.55, 0.15, holes.add(body.mul(0.9)));
-      const a = smoothstep(0, max(s3.x, 0.02), body.mul(1.2).add(alb.a.sub(0.5).mul(s3.y))).mul(interior).mul(s1.w);
+      let a = smoothstep(0, max(s3.x, 0.02), body.mul(1.2).add(alb.a.sub(0.5).mul(s3.y))).mul(interior).mul(s1.w);
+      // No splat inside painted GRASS (FAR GRASS): a patch of mud baked over a
+      // meadow read as a tan hole in it. Everywhere, not only far, or splats
+      // would vanish at the far-grass rings — a pop of their own.
+      if (farGrassOn) {
+        const gUV = vec2(vW.x.add(HALF).div(W), vW.y.add(HALF).div(W));
+        a = a.mul(float(1).sub(min(texture(farGrass.density, gUV).r.mul(farGrass.uniforms.grassDensity), float(1))));
+      }
       if (which === "colour") {
         const tone = groundToneAt(vW.x, vW.y);
         const ratio = mix(vec3(1), tone.div(max(s4.xyz, vec3(1e-3))), s4.w);
@@ -689,9 +765,19 @@ export function createGroundCache({
     return n;
   }
 
+  // A ring stands for the distance whose pixel its texel matches (see
+  // farFadeFor): far grass on the rings past the blades' fade band.
+  function grassFadeFor(k) {
+    const d = texelOf(k) / O.footPerMetre;
+    const a = farGrass.uniforms.fadeStart.value, b = farGrass.uniforms.fadeEnd.value;
+    const t = Math.min(1, Math.max(0, (d - a) / Math.max(1e-3, b - a)));
+    return t * t * (3 - 2 * t);
+  }
+
   function bakeTile(ring, tx, tz) {
     const S = ring.S;
     uTile.value.set(tx * S, tz * S, S, farFadeFor(ring.k));
+    if (farGrassOn) uGrassBake.value.x = grassFadeFor(ring.k);
     const cx = (tx + 0.5) * S, cz = (tz + 0.5) * S;
     decalCam.left = -S / 2; decalCam.right = S / 2; decalCam.top = S / 2; decalCam.bottom = -S / 2;
     decalCam.position.set(cx, 10000, cz);
@@ -812,6 +898,14 @@ export function createGroundCache({
     _pushUniforms(splatOverlay.auto);
     _pushUniforms(splatOverlay.cliffRock);
     if (farTerrain) { _pushUniforms(farTerrain.u); _pushVal(farTerrain.tex); }
+    if (farGrassOn) {
+      // NOT the whole uniform set: its anchor follows the camera every frame.
+      const u = farGrass.uniforms;
+      for (const k of ["bladeCol", "tipCol", "aoBase", "aoPower", "farAoMul", "shadeVar", "tintOn", "tintStrength", "tintRootBias", "slopeOn", "slopeMin", "slopeMax", "grassDensity", "gain", "clumps", "fadeStart", "fadeEnd"]) _pushVal(u[k]?.value);
+      _pushVal(farGrass.density.value);
+      _pushVal(farGrassTex);
+      _pushVal(uGrassBake.value.y);
+    }
     let changed = !_prevKey || _prevKey.length !== _key.length;
     if (!changed) for (let i = 0; i < _key.length; i++) if (_key[i] !== _prevKey[i]) { changed = true; break; }
     if (changed) _prevKey = _key.slice();

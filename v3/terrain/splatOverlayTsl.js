@@ -180,7 +180,7 @@ function macroValueNoise(p) {
  */
 const HEX_CELLS = 1.3;     // cells per texture repeat
 const HEX_SHARP = 5.0;     // barycentric weight power (higher = narrower blends)
-function hexSample(arrNode, uv, layer, { rotate = true, orm = false } = {}) {
+export function hexSample(arrNode, uv, layer, { rotate = true, orm = false } = {}) {
   const gx = dFdx(uv), gy = dFdy(uv);
   const st = uv.mul(HEX_CELLS);
   const sk = vec2(st.x.sub(st.y.mul(0.57735027)), st.y.mul(1.15470054));
@@ -210,7 +210,9 @@ function hexSample(arrNode, uv, layer, { rotate = true, orm = false } = {}) {
       uvi = rot(uv).add(off.mul(7.31));
       gxi = rot(gx); gyi = rot(gy);
     }
-    let t = arrNode.sample(uvi).grad(gxi, gyi).depth(layer);
+    // layer null: a plain 2D texture (the ground cache's far-grass photo).
+    let t = arrNode.sample(uvi).grad(gxi, gyi);
+    if (layer != null) t = t.depth(layer);
     if (orm && rotate) {
       // uv' = R·uv, so a direction t in the photo is Rᵀ·t on the ground.
       const nx = t.b.mul(2).sub(1), ny = t.a.mul(2).sub(1);

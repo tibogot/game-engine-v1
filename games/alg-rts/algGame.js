@@ -79,6 +79,9 @@ const PLAIN_COLOR = "#a39480";
  */
 const SKY_PRO = params.get("sky") !== "atmosphere";
 
+/** The live far-grass tint: only where the ground cache does not bake far grass (see FAR GRASS). */
+const FAR_GRASS_TINT = params.get("grassfar") === "1" || params.get("gc") === "0" || params.get("fargrass") === "0";
+
 export async function startAlgGame({ container, onStatus = () => {}, onProgress = null } = {}) {
   onStatus("Starting engine…");
   // The kit's surface atlas is painted in a worker; until it lands every
@@ -116,11 +119,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // terrain tints only multiplied zeros. MEASURED 2026-09-27 at 2x
     // zoom-out, A/B/A/B same clock: 82.3/79.2 → 77.7/77.8 ms. Lakebed STAYS
     // (the oases are lakes). Turn one back on the day the map uses it.
-    // grassFar BACK ON (you, 2026-10-01): the oases have grass now, and its
-    // blades fade at 44-68 m from the camera — mid-screen in this view — so
-    // without the far tint the ground went bare past them (a line that
-    // followed the camera). ?grassfar=0 to compare.
-    terrainFeatures: { cursor: false, snow: false, baseStyle: "flat", riverSand: false, grassFar: params.get("grassfar") !== "0", flowerTint: false },
+    // FAR GRASS (you, 2026-10-01): the oases have grass, and its blades fade
+    // at 44-68 m from the camera — mid-screen in this view. Past them the
+    // ground went bare (a line that followed the camera). The live tint
+    // (grassFar) fixed the colour but read as tiled ground, so the ground
+    // cache now BAKES real far grass (groundCache farGrass, below) and the
+    // tint is only the fallback: on without the cache (?gc=0) or the bake
+    // (?fargrass=0), or by hand (?grassfar=1) to compare.
+    terrainFeatures: { cursor: false, snow: false, baseStyle: "flat", riverSand: false, grassFar: FAR_GRASS_TINT, flowerTint: false },
     // ?topk= ?farblend= ?layers= for A/B (perf investigation, 2026-09-27).
     // layerBudget 7: slot 6 is the Dirt track (tools/algTracks.mjs). At 6 it
     // was compiled OUT and the tracks drew the flat base colour, no texture
@@ -130,7 +136,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // the decals baked around the camera, read with four taps — the CoH way
     // (their terrain is a texture cache of tiles + splats). ?gc=0 = the live
     // paint blend, to A/B.
-    groundCache: true,
+    // farGrass: a top-down grass photo baked where grass is painted, past the
+    // blades (groundCache.js FAR GRASS). ?fargrass=0 = without.
+    groundCache: { farGrass: params.get("fargrass") !== "0" },
   });
   app.setFrameThrottle?.(1000);
   // The stats-gl overlay: ON (you, 2026-10-01: "keep the performance stats

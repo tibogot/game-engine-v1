@@ -716,6 +716,8 @@ export async function startV3App(opts = {}) {
     splatTex: splatMap.tex, textureLib,
     baseStyle: terrainFeatureOverrides.baseStyle,
     options: typeof groundCacheOpt === "object" ? groundCacheOpt : {},
+    // Its density and blade colours, for the baked far grass (options.farGrass).
+    farGrass: grassFarShading,
   }) : null;
   if (groundCache) {
     groundCache.watch({

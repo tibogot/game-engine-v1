@@ -75,6 +75,18 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          screen): bare → green to the top. Cost +0.2-0.8 ms (latched GPU;
          max zoom the most). ?grassfar=0 to compare. Blades further out: only
          if you still see a seam (a much bigger cost).
+   - [x] **FAR GRASS THAT LOOKS LIKE GRASS** (you: "looks like bad tiling
+         texture, not grass from far"): baked into the ground cache
+         (groundCache farGrass): Poly Haven rocky_terrain_02 (aerial, 90 m,
+         public/textures/grassfar), luminance only, hex-tiled, on the blades'
+         own average colour, noise clumps (the tint's were sines = the tiled
+         look), on rings past the blades' fade. The live tint is off (only
+         with ?gc=0 / ?fargrass=0 / ?grassfar=1). SPLATS no longer bake
+         inside painted grass (the mud patches were tan holes in the meadow).
+         Cost: a wash vs the tint (±0.5 ms, latched GPU); no re-bake while
+         still.
+   - [ ] **you, look**: the oasis meadows from default and max zoom; the
+         hand-over from blades; the near oasis without its dirt patches.
    - [ ] nam: move its camera to addPreUpdateHook (it is inside its tick).
 - [x] DRAW CALLS (you: "~293 at the base, is it plenty?"): 287-310 a frame =
       tall plants 84 (4 species × 3 variants × 3 details, depth pre-pass +

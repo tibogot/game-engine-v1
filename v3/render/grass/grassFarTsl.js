@@ -132,5 +132,7 @@ export function createGrassFarShading({ worldSize }) {
     u.slopeMax.value = gp.slopeMax ?? 0.85;
   }
 
-  return { apply, setSource, setActive, setAnchor, setBand, syncFromState, uniforms: u };
+  // `density`: the masked grass density node (what the blades grow from) — the
+  // ground cache bakes its far-grass layer from the same paint (groundCache.js).
+  return { apply, setSource, setActive, setAnchor, setBand, syncFromState, uniforms: u, density: densityNode };
 }
