@@ -45,6 +45,9 @@ export function createCombat({
   // (shooter, target, distance) → 0..1: the chance a round HITS (alg-rts
   // algAccuracy.js); a miss flies into the dirt. None: every round hits (nam).
   hitChance = null,
+  // (distance, radius, man) → true: a man on foot this close to a blast, if it
+  // kills him, comes apart (unitRenderer gibs). None: nobody does (nam).
+  gibChance = null,
 }) {
   const _muzzle = new THREE.Vector3();
   /** Scratch for acquire's grid query — acquisition runs one combatant at a time. */
@@ -198,7 +201,10 @@ export function createCombat({
       if (d > radius) return;
       const soft = o.isStructure || onFoot(o);
       const amount = damage * (1 - (d / radius) ** 1.5) * (soft ? 1 : vehicleMul);
-      if (amount > 0) onImpact(o, amount, at, null);       // null owner: no directional cover
+      if (amount <= 0) return;
+      if (gibChance && onFoot(o) && gibChance(d, radius, o)) o.gibbed = true;
+      onImpact(o, amount, at, null);       // null owner: no directional cover
+      if (o.alive) o.gibbed = false;      // he lived: the next death is his own
     };
     for (const o of units.near(at.x, at.z, radius, _splashNear)) hit(o);
     for (const o of structures.list) hit(o);

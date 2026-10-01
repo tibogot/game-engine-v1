@@ -20,11 +20,114 @@
 // skins the vertex against BOTH poses and mixes the results by the blend weight.
 import * as THREE from "three";
 import {
-  Fn, add, attributeArray, instanceIndex, mix, storage, transformNormal,
-  transformNormalToView, uint, uniform, vec4, vertexIndex,
+  Fn, add, attributeArray, cos, cross, dot, float, floor, instanceIndex, max, min, mix, select, sin, sqrt, storage, transformNormal,
+  transformNormalToView, uint, uniform, uniformArray, vec2, vec3, vec4, vertexIndex,
 } from "three/tsl";
 
 const BAKE_FPS = 30; // sampling rate of the baked clips (RTS zoom hides the steps)
+
+// ── MEN BLOWN APART (opt-in: createCrowdField's `gibs`) ─────────────────────
+// A man killed close to a blast comes apart in the SKINNING PASS itself: every
+// vertex belongs to one of six parts (by its strongest bone), and a gibbed
+// instance moves each part as a rigid piece — thrown, spinning, falling, lying
+// where it lands. No new mesh, no new draw: the parts are the crowd's own
+// vertices in his last pose, in his own look, with his shadow. A gibbed
+// instance's anim .z (the crossfade, 0-1 for everyone else) carries the
+// seed and the clock: 2 + seed·64 + seconds.
+//
+// The same motion runs on the CPU (gibMatrix) for his rigid kit — the helmet
+// goes with the head, the rifle with the arm. Both read the SAME random table
+// (GIB_RAND, a uniform on the GPU): a sin-hash differs between float32 and
+// float64, and the helmet would fly off on its own.
+export const GIB = { HEAD: 1, ARM_L: 2, ARM_R: 3, LEG_L: 4, LEG_R: 5, TORSO: 0, PARTS: 6, SEEDS: 16, GRAVITY: 22 };
+const GIB_RAND = (() => {
+  let s = 0x9e3779b9;
+  const r = () => ((s = Math.imul(s ^ (s >>> 15), 0x2c1b3c6d) ^ Math.imul(s ^ (s >>> 13), 0x297a2d39)) >>> 0) / 4294967296;
+  return Array.from({ length: GIB.SEEDS * GIB.PARTS }, () => new THREE.Vector4(r(), r(), r(), r()));
+})();
+
+/**
+ * One part's flight, the CPU side: `r` its four randoms, `piv` its joint and
+ * `torso` the chest (world), `ground` the height it comes to rest on, `t`
+ * seconds since the blast. → { ox, oy, oz, ax, ay, az, angle }: offset of the
+ * joint, spin axis, angle turned. MUST match the kernel's (gibMotionNode).
+ */
+function gibMotion(r, part, piv, torso, ground, t) {
+  const torsoPart = part === GIB.TORSO;
+  let dx = piv.x - torso.x + (r.x - 0.5) * 0.8, dz = piv.z - torso.z + (r.y - 0.5) * 0.8;
+  const dl = Math.max(Math.hypot(dx, dz), 1e-3);
+  dx /= dl; dz /= dl;
+  const speedH = torsoPart ? 1 + 1.5 * r.z : 2.5 + 4 * r.z;
+  const vy = torsoPart ? 2.5 + 2 * r.w : part === GIB.HEAD ? 5.5 + 3 * r.w : 4.5 + 4.5 * r.w;
+  let ax = r.y - 0.5, ay = r.z - 0.5 + 0.001, az = r.x - 0.5;
+  const al = Math.hypot(ax, ay, az);
+  ax /= al; ay /= al; az /= al;
+  const w = torsoPart ? 3 + 3 * r.w : 7 + 9 * r.x;
+  const h0 = Math.max(piv.y - ground - (torsoPart ? 0.25 : 0.12), 0);
+  const G = GIB.GRAVITY;
+  const te = Math.min(t, (vy + Math.sqrt(vy * vy + 2 * G * h0)) / G);
+  return { ox: dx * speedH * te, oy: vy * te - 0.5 * G * te * te, oz: dz * speedH * te, ax, ay, az, angle: w * te };
+}
+
+/** The same flight as nodes (TSL), for the skinning kernel. */
+function gibMotionNode(r, part, piv, torso, ground, t) {
+  const torsoPart = part.lessThan(0.5);
+  const d0 = vec2(piv.x.sub(torso.x).add(r.x.sub(0.5).mul(0.8)), piv.z.sub(torso.z).add(r.y.sub(0.5).mul(0.8)));
+  const d = d0.div(max(d0.length(), 1e-3));
+  const speedH = select(torsoPart, r.z.mul(1.5).add(1), r.z.mul(4).add(2.5));
+  const vy = select(torsoPart, r.w.mul(2).add(2.5), select(part.lessThan(1.5), r.w.mul(3).add(5.5), r.w.mul(4.5).add(4.5)));
+  const axis = vec3(r.y.sub(0.5), r.z.sub(0.5).add(0.001), r.x.sub(0.5)).normalize();
+  const w = select(torsoPart, r.w.mul(3).add(3), r.x.mul(9).add(7));
+  const h0 = max(piv.y.sub(ground).sub(select(torsoPart, float(0.25), float(0.12))), 0);
+  const G = float(GIB.GRAVITY);
+  const te = min(t, vy.add(sqrt(vy.mul(vy).add(G.mul(2).mul(h0)))).div(G));
+  const offset = vec3(d.x.mul(speedH).mul(te), vy.mul(te).sub(G.mul(0.5).mul(te).mul(te)), d.y.mul(speedH).mul(te));
+  return { offset, axis, angle: w.mul(te) };
+}
+/** Rodrigues: `v` turned by `angle` about the unit `axis` (nodes). */
+const rotateNode = (v, axis, angle) => {
+  const c = cos(angle), s = sin(angle);
+  return v.mul(c).add(cross(axis, v).mul(s)).add(axis.mul(dot(axis, v)).mul(c.oneMinus()));
+};
+
+const _gibB = new THREE.Matrix4(), _gibAxis = new THREE.Vector3();
+const _gibP = new THREE.Vector3(), _gibT = new THREE.Vector3(), _gibF = new THREE.Vector3(), _gibF2 = new THREE.Vector3();
+
+/**
+ * Re-cut a skinned geometry so no triangle spans two parts: each triangle goes
+ * to the part most of its corners belong to, and a corner shared across a cut
+ * is duplicated (one copy per part). Triangle order is kept, so groups stay
+ * valid. → { geometry, part: Float32Array per new vertex }.
+ */
+function splitByPart(geo, vPart) {
+  const idx = geo.index ? geo.index.array : null;
+  const nTri = (idx ? idx.length : geo.getAttribute("position").count) / 3;
+  const map = new Map(), srcOf = [], partOf = [], index = new Array(nTri * 3);
+  for (let t = 0; t < nTri; t++) {
+    const a = idx ? idx[t * 3] : t * 3, b = idx ? idx[t * 3 + 1] : t * 3 + 1, c = idx ? idx[t * 3 + 2] : t * 3 + 2;
+    const pa = vPart[a], pb = vPart[b], pc = vPart[c];
+    const p = pb === pc ? pb : pa;
+    for (let k = 0; k < 3; k++) {
+      const v = k === 0 ? a : k === 1 ? b : c, key = v * 8 + p;
+      let ni = map.get(key);
+      if (ni === undefined) { ni = srcOf.length; map.set(key, ni); srcOf.push(v); partOf.push(p); }
+      index[t * 3 + k] = ni;
+    }
+  }
+  const out = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(geo.attributes)) {
+    // Raw components (an interleaved glTF attribute reads through its buffer).
+    const n = attr.itemSize, il = attr.isInterleavedBufferAttribute;
+    const src = il ? attr.data.array : attr.array, stride = il ? attr.data.stride : n, off = il ? attr.offset : 0;
+    const arr = new src.constructor(srcOf.length * n);
+    for (let i = 0; i < srcOf.length; i++) for (let j = 0; j < n; j++) arr[i * n + j] = src[srcOf[i] * stride + off + j];
+    out.setAttribute(name, new THREE.BufferAttribute(arr, n, attr.normalized));
+  }
+  out.setIndex(index);
+  for (const g of geo.groups) out.addGroup(g.start, g.count, g.materialIndex);
+  out.userData = { ...geo.userData };
+  return { geometry: out, part: Float32Array.from(partOf) };
+}
 
 /**
  * Sample every clip into one flat bone-matrix table.
@@ -79,18 +182,41 @@ function bakeClips(animRoot, skeleton, clips) {
 export function createCrowdField({
   scene, renderer, source, animRoot, clips, max = 128, castShadow = true, aliases = {}, drawMesh = true,
   geometry: geometryIn = null,
+  // MEN BLOWN APART (see GIB above): { partOfBone: part per bone index,
+  // pivots: 6 bone indices (each part's joint, by GIB part), feet: [l, r] }.
+  // null: the kernel as it was. A field made with it holds ONLY gibbed men
+  // (every addPose passes `gib`): its own small crowd beside the living one.
+  gibs = null,
+  shareFrom = null,
 }) {
   const skeleton = source.skeleton;
-  const geometry = (geometryIn ?? source.geometry).clone();
+  let geometry = (geometryIn ?? source.geometry).clone();
+  let vPart = null;
+  if (gibs) {
+    // Each vertex's part: its strongest bone's.
+    const si = geometry.getAttribute("skinIndex"), sw = geometry.getAttribute("skinWeight");
+    const raw = new Uint8Array(si.count);
+    for (let i = 0; i < si.count; i++) {
+      let best = 0, bw = -1;
+      for (let k = 0; k < 4; k++) { const w = sw.getComponent(i, k); if (w > bw) { bw = w; best = si.getComponent(i, k); } }
+      raw[i] = gibs.partOfBone[best] ?? GIB.TORSO;
+    }
+    ({ geometry, part: vPart } = splitByPart(geometry, raw));
+  }
   const vertexCount = geometry.getAttribute("position").count;
 
-  const { table, slices, boneCount, info } = bakeClips(animRoot, skeleton, clips);
+  // `shareFrom`: another field of the SAME body and clips (a gib field beside
+  // its living crowd) — its baked table and its GPU copy, not a second bake.
+  const baked = shareFrom?.baked ?? (() => {
+    const b = bakeClips(animRoot, skeleton, clips);
+    const boneTable = new THREE.StorageBufferAttribute(b.slices * b.boneCount, 16);
+    boneTable.array.set(b.table);
+    boneTable.needsUpdate = true;
+    return { ...b, bones: storage(boneTable, "mat4", boneTable.count).toReadOnly() };
+  })();
+  const { table, boneCount, info, bones } = baked;
 
   // ── Static, upload-once buffers ────────────────────────────────────────────
-  const boneTable = new THREE.StorageBufferAttribute(slices * boneCount, 16);
-  boneTable.array.set(table);
-  boneTable.needsUpdate = true;
-  const bones = storage(boneTable, "mat4", boneTable.count).toReadOnly();
 
   const position = geometry.getAttribute("position");
   const normal = geometry.getAttribute("normal");
@@ -99,7 +225,17 @@ export function createCrowdField({
     const o = i * 8;
     src[o + 0] = position.getX(i); src[o + 1] = position.getY(i); src[o + 2] = position.getZ(i);
     src[o + 4] = normal.getX(i); src[o + 5] = normal.getY(i); src[o + 6] = normal.getZ(i);
+    if (vPart) src[o + 3] = vPart[i];   // the spare lane: the vertex's part (gibs)
   }
+  // Gibs: each part's joint (and the feet, for the ground) in BIND space —
+  // the bone's bind position, where the kernel's skinVertex lives — with the
+  // bone's index in .w; and the shared random table.
+  const gibJoints = gibs ? [...gibs.pivots, ...gibs.feet].map((b) => {
+    const p = new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().copy(skeleton.boneInverses[b]).invert());
+    return new THREE.Vector4(p.x, p.y, p.z, b);
+  }) : null;
+  const uGibJoints = gibs ? uniformArray(gibJoints, "vec4") : null;
+  const uGibRand = gibs ? uniformArray(GIB_RAND, "vec4") : null;
   const sourceVerts = storage(new THREE.StorageBufferAttribute(src, 4), "vec4", vertexCount * 2).toReadOnly();
   const skinIndices = storage(
     new THREE.StorageBufferAttribute(new Uint32Array(geometry.getAttribute("skinIndex").array), 4),
@@ -171,13 +307,38 @@ export function createCrowdField({
     // (Lerping the bone matrices themselves is cheaper but skews limbs mid-blend.)
     const state = animNode.element(inst); // (idle slice, run slice, blend, —)
     const a = poseAt(uint(state.x));
-    const b = poseAt(uint(state.y));
-    const pos = mix(a.pos, b.pos, state.z);
-    const nrm = mix(a.nrm, b.nrm, state.z).normalize();
+    // A GIB field (every instance blown apart) holds one frozen pose: no
+    // second skin, no crossfade — .z is 2 + seed·64 + seconds instead (GIB).
+    const b = gibs ? a : poseAt(uint(state.y));
+    const pos = gibs ? a.pos : mix(a.pos, b.pos, state.z);
+    const nrm = gibs ? a.nrm.normalize() : mix(a.nrm, b.nrm, state.z).normalize();
 
     const m = instMatricesNode.element(inst);
-    out.element(dstOff).assign(vec4(m.mul(vec4(pos, 1.0)).xyz, 1));
-    out.element(dstOff.add(uint(1))).assign(vec4(transformNormal(nrm, m), 0));
+    const wp = m.mul(vec4(pos, 1.0)).xyz.toVar();
+    const wn = transformNormal(nrm, m).toVar();
+    if (gibs) {
+      {
+        const g = state.z.sub(2);
+        const seed = floor(g.div(64));
+        const t = g.sub(seed.mul(64));
+        const part = sourceVerts.element(srcOff).w;
+        const off = uint(state.x).mul(uint(boneCount));
+        // A joint where this pose has it, in the world.
+        const joint = (k) => {
+          const j = uGibJoints.element(k);
+          return m.mul(vec4(uBindInv.mul(bones.element(off.add(uint(j.w))).mul(vec4(j.xyz, 1.0))).xyz, 1.0)).xyz;
+        };
+        const piv = joint(uint(part));
+        const torso = joint(uint(GIB.TORSO));
+        const ground = min(joint(uint(GIB.PARTS)).y, joint(uint(GIB.PARTS + 1)).y).sub(0.08);
+        const r = uGibRand.element(uint(seed).mul(uint(GIB.PARTS)).add(uint(part)));
+        const f = gibMotionNode(r, part, piv, torso, ground, t);
+        wp.assign(piv.add(rotateNode(wp.sub(piv), f.axis, f.angle)).add(f.offset));
+        wn.assign(rotateNode(wn, f.axis, f.angle));
+      }
+    }
+    out.element(dstOff).assign(vec4(wp, 1));
+    out.element(dstOff.add(uint(1))).assign(vec4(wn, 0));
   })().compute(max * vertexCount).setName("Crowd skinning");
 
   // ── Drawing ────────────────────────────────────────────────────────────────
@@ -223,8 +384,23 @@ export function createCrowdField({
     return c.offset + Math.min(f, c.frames - 1);
   };
 
+  /** A part's joint in his last pose (world) and its flight at gibT (gibMotion). */
+  function gibPart(clip, t, part, seed, gibT, matrix) {
+    const slice = sliceOf(clip, t);
+    const joint = (k, v) => {
+      const j = gibJoints[k];
+      _gibB.fromArray(table, (slice * boneCount + j.w) * 16);
+      return v.set(j.x, j.y, j.z).applyMatrix4(_gibB).applyMatrix4(source.bindMatrixInverse).applyMatrix4(matrix);
+    };
+    const piv = joint(part, _gibP), torso = joint(GIB.TORSO, _gibT);
+    const ground = Math.min(joint(GIB.PARTS, _gibF).y, joint(GIB.PARTS + 1, _gibF2).y) - 0.08;
+    return { piv, f: gibMotion(GIB_RAND[(seed % GIB.SEEDS) * GIB.PARTS + part], part, piv, torso, ground, gibT) };
+  }
+
   return {
     mesh,
+    /** The baked clips and their GPU table (shareFrom). */
+    baked,
     /** Per-soldier (idle slice, run slice, blend, team) — the x-ray reads the team. */
     animNode,
     /** Per-soldier vec4 for the material (addPose's `extra`), e.g. the look variation. */
@@ -295,13 +471,14 @@ export function createCrowdField({
      * by `blend` (0 → 1) into `clipB` at `tB`. For animals with more than
      * the soldiers' idle/run — graze, look round, walk (buffalo.js).
      */
-    addPose(matrix, clipA, tA, clipB, tB, blend, lane = 0, { holdA = false, holdB = false, extra: ex = null } = {}) {
+    addPose(matrix, clipA, tA, clipB, tB, blend, lane = 0, { holdA = false, holdB = false, extra: ex = null, gib = null } = {}) {
       if (n >= max) return false;
       matrix.toArray(instMatrices.array, n * 16);
       const o = n * 4;
       anim.array[o + 0] = sliceOf(clipA, tA, holdA);
       anim.array[o + 1] = sliceOf(clipB, tB, holdB);
-      anim.array[o + 2] = blend;
+      // `gib` { seed, t } (a field made with `gibs`): blown apart, pose A.
+      anim.array[o + 2] = gib && gibs ? 2 + (gib.seed % GIB.SEEDS) * 64 + Math.min(gib.t, 63.9) : blend;
       anim.array[o + 3] = lane;
       if (ex) { extra.array[o] = ex[0]; extra.array[o + 1] = ex[1]; extra.array[o + 2] = ex[2]; extra.array[o + 3] = ex[3] ?? 0; }
       n++;
@@ -326,6 +503,35 @@ export function createCrowdField({
       const b = (sliceOf(clipB, tB, holdB) * boneCount + bone) * 16;
       const e = out.elements;
       for (let k = 0; k < 16; k++) e[k] = table[a + k] + (table[b + k] - table[a + k]) * blend;
+      return out;
+    },
+
+    /** Made with `gibs`: men can come apart. Part of each bone (for rigid kit). */
+    gibs: gibs ? { partOfBone: gibs.partOfBone } : null,
+
+    /**
+     * A gibbed man's PART as a rigid motion, the CPU twin of the kernel's: a
+     * world matrix that carries what was on that part in his last pose (clip
+     * at t, not held) to where it is `gibT` seconds after the blast. `matrix`
+     * is his instance matrix (as given to addPose). For his helmet, his rifle.
+     */
+    gibMatrix(clip, t, part, seed, gibT, matrix, out) {
+      const { piv, f } = gibPart(clip, t, part, seed, gibT, matrix);
+      _gibAxis.set(f.ax, f.ay, f.az);
+      // T(piv + offset) · R · T(−piv)
+      out.makeRotationAxis(_gibAxis, f.angle);
+      _gibB.makeTranslation(-piv.x, -piv.y, -piv.z);
+      out.multiply(_gibB);
+      out.premultiply(_gibB.makeTranslation(piv.x + f.ox, piv.y + f.oy, piv.z + f.oz));
+      return out;
+    },
+    /** Where each of a gibbed man's six parts comes to rest (its joint), in the world. */
+    gibLandings(clip, t, seed, matrix) {
+      const out = [];
+      for (let p = 0; p < GIB.PARTS; p++) {
+        const { piv, f } = gibPart(clip, t, p, seed, 60, matrix);
+        out.push({ part: p, x: piv.x + f.ox, y: piv.y + f.oy, z: piv.z + f.oz });
+      }
       return out;
     },
 

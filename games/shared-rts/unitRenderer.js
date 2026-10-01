@@ -16,7 +16,7 @@ import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometr
 import { abs, attribute, floor, float, instanceIndex, materialColor, max, mix, mod, step, texture, varying, vec3 } from "three/tsl";
 import { UNIT_ORDER, XRAY_ORDER, createXrayMaterial, xrayOn } from "./xraySilhouette.js";
 import { teamTint, isUntinted } from "./teams.js";
-import { createCrowdField } from "./crowdSkinning.js";
+import { GIB, createCrowdField } from "./crowdSkinning.js";
 import { DEATH_CHEST, MOVES, MOVE_JOIN, deathFrom, fadeFor, postureOf } from "./soldierTransitions.js";
 import {
   HEADGEAR, KIT, LOOKS, headgearMaterial, loadout, lookColorNode, markHeadwear, markHelmet, measureCrown, neckPlane,
@@ -263,6 +263,7 @@ function mergeTemplateParts(root) {
 const MAX_PER_TYPE = 256; // instance buffer headroom for base production
 
 const _mat = new THREE.Matrix4();
+const _gibM = Array.from({ length: GIB.PARTS }, () => new THREE.Matrix4());   // a gibbed man's parts (writePieces)
 const _local = new THREE.Matrix4();
 const _euler = new THREE.Euler();
 const _quat = new THREE.Quaternion();
@@ -389,6 +390,8 @@ function buildInstancedType(tpl, scene) {
 // soldiers costs no draw calls and (measured in the lab) no CPU either.
 
 const MAX_CROWD = 160; // soldiers a TYPE may field at once; a body's crowd holds the sum of its types
+const CROUCH_AIM_AT = 0.98;   // share of rifle_crouch_firing held as the kneeling aim (its loop's end ≈ its aim)
+const GIB_MAX = 40;    // men of one body lying blown apart at once (each ~16 s); past it, a plain corpse
 
 /**
  * One CROWD per BODY: every soldier type dressed on the same body (the pack's
@@ -399,7 +402,7 @@ const MAX_CROWD = 160; // soldiers a TYPE may field at once; a body's crowd hold
  * (crowdSkinning view()), so there is no per-pixel branching between looks.
  * `members`: [{ key, type }] (the unit type key and its definition).
  */
-function buildCrowdGroup(tpl, members, app, scene) {
+function buildCrowdGroup(tpl, members, app, scene, { gibs = false } = {}) {
   const root = tpl.root;
   root.updateMatrixWorld(true);
 
@@ -478,17 +481,16 @@ function buildCrowdGroup(tpl, members, app, scene) {
 
   // A VIEW per type: its range of the crowd, drawn in its look.
   const views = new Map();
-  members.forEach(({ key, type }, i) => {
-    const look = looks[i];
+  const dress = (fld, key, type, look, name) => {
     const material = source.material.clone();
     // `crowdTint` [r, g, b]: a whole TYPE's clothing colour (it multiplies the
     // model's) — how a second side on the same stand-in model reads as
     // another army at a glance.
     if (type.crowdTint && material.color) material.color.multiply(new THREE.Color(...type.crowdTint));
-    const view = field.view(material, `Crowd:${key}`);
+    const view = fld.view(material, name);
     view.mesh.castShadow = type.castShadow !== false;
     view.mesh.renderOrder = UNIT_ORDER;
-    const ex = field.extraNode.element(view.index);
+    const ex = fld.extraNode.element(view.index);
     if (look && source.material.map) {
       material.colorNode = lookColorNode(source.material.map, look, neckPlane(source), varying(ex.xyz));
       // the skinned kit in its own (vertex) colours
@@ -502,8 +504,35 @@ function buildCrowdGroup(tpl, members, app, scene) {
       // (see soldierFlags). The shadow pass uses the same node.
       material.positionNode = mix(material.positionNode, vec3(0, 0, 0), hiddenNode(ex.w, kitSkinned.length));
     }
-    views.set(key, { ...view, key, look, living: [], dead: [] });
+    return view;
+  };
+  members.forEach(({ key, type }, i) => {
+    views.set(key, { ...dress(field, key, type, looks[i], `Crowd:${key}`), key, look: looks[i], living: [], dead: [] });
   });
+
+  // MEN BLOWN APART (crowdSkinning GIB): their own small crowd — the body re-cut
+  // into six parts, the living crowd's baked clips shared. The living keep the
+  // uncut body (the cut adds 6-9% vertices: +0.1 ms for 48 men, MEASURED), and
+  // an empty gib crowd dispatches and draws nothing. Each look its view, as above.
+  let gib = null;
+  const parts = gibs ? gibParts(source.skeleton) : null;
+  if (parts) {
+    const gf = createCrowdField({
+      scene, renderer: app.renderer, source, animRoot: root, clips,
+      aliases: { idle: idle.name, run: run.name }, max: GIB_MAX,
+      castShadow: members.some(({ type }) => type.castShadow !== false),
+      drawMesh: false, geometry: crowdGeometry, gibs: parts, shareFrom: field,
+    });
+    const gviews = new Map();
+    members.forEach(({ key, type }, i) => gviews.set(key, dress(gf, key, type, looks[i], `CrowdGib:${key}`)));
+    // Its compute pipeline built NOW, not on the first blast: one dispatch of
+    // one instance (nothing is drawn: the views stay at count 0).
+    gf.begin();
+    gf.addPose(new THREE.Matrix4().makeTranslation(0, -1e4, 0), idle.name, 0, idle.name, 0, 0, 2, { gib: { seed: 0, t: 0 } });
+    gf.commit();
+    gf.begin();
+    gib = { field: gf, views: gviews, partOfBone: parts.partOfBone };
+  }
 
   // Ground speed of the run clip (the planted foot slides back at exactly that
   // speed), in the WORLD — the template is scaled to the type's height — so
@@ -546,7 +575,30 @@ function buildCrowdGroup(tpl, members, app, scene) {
 
   const pieces = marked ? buildPieces(field, source, rel, looks.filter(Boolean), scene, root, cap) : null;
 
-  return { field, rel, scale: root.scale.x, xray, roles, runSpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
+  return { field, gib, rel, scale: root.scale.x, xray, roles, runSpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
+}
+
+/**
+ * MEN BLOWN APART (crowdSkinning.js GIB): the Mixamo skeleton cut in six — a
+ * bone belongs to the part of the first cut bone up its chain (the shoulder
+ * stays with the chest, the arm goes from the shoulder JOINT). Each part turns
+ * about its joint; the feet tell where the ground is. Null if the skeleton
+ * isn't Mixamo's.
+ */
+function gibParts(skeleton) {
+  const bones = skeleton.bones, at = (n) => bones.findIndex((b) => b.name === `mixamorig${n}`);
+  const cuts = { Neck: GIB.HEAD, LeftArm: GIB.ARM_L, RightArm: GIB.ARM_R, LeftUpLeg: GIB.LEG_L, RightUpLeg: GIB.LEG_R };
+  const pivots = [at("Spine1"), at("Neck"), at("LeftArm"), at("RightArm"), at("LeftUpLeg"), at("RightUpLeg")];
+  const feet = [at("LeftFoot"), at("RightFoot")];
+  if ([...pivots, ...feet].some((i) => i < 0)) { console.warn("[gibs] not a Mixamo skeleton: men won't come apart"); return null; }
+  const partOfBone = bones.map((b) => {
+    for (let o = b; o?.isBone; o = o.parent) {
+      const p = cuts[o.name.replace("mixamorig", "")];
+      if (p !== undefined) return p;
+    }
+    return GIB.TORSO;
+  });
+  return { partOfBone, pivots, feet };
 }
 
 /**
@@ -751,7 +803,7 @@ const _base = new THREE.Matrix4();
  * slung while a clip needs his hands), the shovel while digging, his hat, his
  * kit and extras. Pieces on the same bone share one bone-matrix lookup.
  */
-function writePieces(crd, v, unitMatrix, holdA = false, holdB = false) {
+function writePieces(crd, v, unitMatrix, holdA = false, holdB = false, gibM = null, partOfBone = null) {
   const P = crd.pieces;
   if (!P) return;
   const a = v.prev.clip, b = v.cur.clip;
@@ -766,6 +818,7 @@ function writePieces(crd, v, unitMatrix, holdA = false, holdB = false) {
       _boneStamp[piece.bone] = _stamp;
     }
     _B.multiplyMatrices(_base, B).multiply(piece.K);
+    if (gibM) _B.premultiply(gibM[partOfBone[piece.bone]]);   // blown apart: with its part
     piece.im.setMatrixAt(piece.n++, _B);
   };
   // A piece that CHANGES PLACE between the two clips (the rifle from the hands
@@ -781,12 +834,13 @@ function writePieces(crd, v, unitMatrix, holdA = false, holdB = false) {
     if (!piece || piece.n >= piece.cap) return;
     crd.field.boneMatrix(dom, domT, dom, domT, 0, piece.bone, _P, { holdA: domHold, holdB: domHold });
     _B.multiplyMatrices(_base, _P).multiply(piece.K);
+    if (gibM) _B.premultiply(gibM[partOfBone[piece.bone]]);
     piece.im.setMatrixAt(piece.n++, _B);
   };
   if (v.weapon) {
     const sa = STOWED.test(a), sb = STOWED.test(b);
     const hand = `w:${v.weapon}`;
-    if (v.deadT >= 0 && !sb && !STOWED.test(a)) dropRifle(crd, v, hand, put);
+    if (v.deadT >= 0 && !v.gib && !sb && !STOWED.test(a)) dropRifle(crd, v, hand, put);
     else if (sa === sb) put(sa ? `s:${v.weapon}` : hand);
     else putDom(STOWED.test(dom) ? `s:${v.weapon}` : hand);
   }
@@ -903,7 +957,11 @@ function soldierClip(unit, v, roles) {
   if (low === "prone" && roles.prone) return inRange && v.firing > 0 && roles.proneFire ? roles.proneFire : roles.prone;
   const kneel = low === "kneel" && roles.crouchIdle;
   if (inRange) {
-    if (kneel) return v.firing > 0 && roles.crouchFire ? roles.crouchFire : roles.crouchIdle;
+    // Kneeling there is no "crouch aim" clip: the crouch-fire clip IS his aim,
+    // held on its last frame between shots (sync) — it used to drop to the
+    // crouch idle (rifle down) after every shot and loop idle ⇄ fire (you,
+    // 2026-10-02).
+    if (kneel) return roles.crouchFire ?? roles.crouchIdle;
     return v.firing > 0 && roles.fire ? roles.fire : roles.aim;
   }
   return kneel ? roles.crouchIdle : roles.idle;
@@ -927,7 +985,7 @@ const CORPSE_SECONDS = 14;  // a body stays this long after its death clip, then
  * `paint`: [r, g, b] painted-surface tint for those vehicles (a game's own
  * army colour, rtsObjectMaterialTinted); null = the kit's colours.
  */
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null }) {
   const UNIT_TYPES = types;
   const UNIT_TYPE_KEYS = typeKeys ?? Object.keys(types);
   const PROCEDURAL_VEHICLES = procedural;
@@ -1053,7 +1111,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   const groups = [];
   const groupOf = new Map(); // template key → group
   for (const [key, m] of members) {
-    const g = buildCrowdGroup(m.tpl, m.members, app, scene);
+    const g = buildCrowdGroup(m.tpl, m.members, app, scene, { gibs });
     if (g) { groups.push(g); groupOf.set(key, g); }
   }
   /** Every crowd a type's soldiers go into: one per body. */
@@ -1239,6 +1297,26 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   /** A crowd soldier just killed plays a death clip, then lies there a while. */
   function drawCorpse(unit, v, dt) {
     const r = v.crowd.roles;
+    // BLOWN APART (a game's `gibs`; combat marks the man `gibbed`): no death
+    // clip — his last pose, frozen, comes apart in the skinning pass.
+    if (v.deadT < 0 && unit.gibbed && v.crowd.gib && v.crowd.gib.field.count < GIB_MAX) {
+      v.deadT = 0;
+      const last = v.fade < 0.5 ? v.prev : v.cur;
+      v.cur = { clip: last.clip, t: last.t };
+      v.prev = v.cur;
+      v.fade = 1;
+      v.move = null;
+      v.gib = { t: 0, seed: Math.floor(Math.random() * GIB.SEEDS) };
+      _mat.multiplyMatrices(v.xform.matrix, v.crowd.rel);
+      onGib?.(unit, v.crowd.gib.field.gibLandings(v.cur.clip, v.cur.t, v.gib.seed, _mat));
+    }
+    if (v.gib) {
+      v.deadT += dt;
+      v.gib.t += dt;
+      if (v.deadT > CORPSE_SECONDS + 2) return;
+      v.view.dead.push(unit);
+      return;
+    }
     if (v.deadT < 0) {
       v.deadT = 0;
       v.prev = v.cur;
@@ -1464,6 +1542,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           v.prev = v.cur;
           // a shot / a throw / a move's clip from its start (a throw from its own offset: algGrenades.js)
           const t0 = want === r.grenade ? unit.throwing?.start ?? 0
+            // kneeling into aim with no shot yet: straight to the held aim, no recoil
+            : want === r.crouchFire && v.firing <= 0 ? f.duration(want) * CROUCH_AIM_AT
             : v.move || want === r.fire || want === r.crouchFire || want === r.proneFire ? 0 : Math.random() * f.duration(want);
           v.cur = { clip: want, t: t0 };
           v.fade = 0;
@@ -1471,7 +1551,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         }
         const rate = v.move ? v.move.steps[v.move.i].rate ?? 1
           : v.cur.clip === r.run && v.crowd.runSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6) : 1;
-        v.cur.t += dt * rate;
+        // The crouch-fire clip plays once per shot (a shot restarts it) and
+        // then HOLDS its last frame — his aim — instead of looping.
+        if (v.cur.clip === r.crouchFire) v.cur.t = Math.min(v.cur.t + dt * rate, f.duration(r.crouchFire) * CROUCH_AIM_AT);
+        else v.cur.t += dt * rate;
         v.prev.t += dt;
         v.fade = Math.min(1, v.fade + dt / (v.fadeS ?? 0.2));
 
@@ -1573,6 +1656,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         for (const unit of view.dead) {
           const v = views.get(unit);
           _mat.multiplyMatrices(v.xform.matrix, g.rel);
+          if (v.gib) continue;   // in the gib crowd (below)
           const dying = (clip) => g.roles.deaths.includes(clip);
           f.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
             unit.team === "player" ? 2 : 3, { holdA: dying(v.prev.clip), holdB: true, extra: v.seed });
@@ -1593,6 +1677,29 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           f.addPose(_mat, g.roles.idle, st.t, g.roles.idle, st.t, 0, 2, { extra: STATIC_SEED });
         }
         view.setRange(start, f.count - start);
+      }
+      // THE BLOWN APART: each look's gibbed dead in the gib crowd; their kit
+      // (helmet, rifle, pack) carried by the part its bone is on.
+      if (g.gib) {
+        const gf = g.gib.field;
+        gf.begin();
+        for (const [key, gview] of g.gib.views) {
+          const start = gf.count;
+          for (const unit of g.views.get(key).dead) {
+            const v = views.get(unit);
+            if (!v.gib) continue;
+            _mat.multiplyMatrices(v.xform.matrix, g.rel);
+            if (!gf.addPose(_mat, v.cur.clip, v.cur.t, v.cur.clip, v.cur.t, 0, unit.team === "player" ? 2 : 3, { extra: v.seed, gib: v.gib })) break;
+            _sphere.center.copy(v.xform.position);
+            _sphere.radius = 8;   // the parts fly a few metres
+            if (g.pieces && (!camera || _frustum.intersectsSphere(_sphere))) {
+              for (let p = 0; p < GIB.PARTS; p++) gf.gibMatrix(v.cur.clip, v.cur.t, p, v.gib.seed, v.gib.t, _mat, _gibM[p]);
+              writePieces(g, v, v.xform.matrix, false, false, _gibM, g.gib.partOfBone);
+            }
+          }
+          gview.setRange(start, gf.count - start);
+        }
+        gf.commit();
       }
       for (const piece of g.pieces?.all ?? []) {
         piece.im.count = piece.n;

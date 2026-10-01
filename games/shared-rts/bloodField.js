@@ -185,14 +185,15 @@ export function createBloodField({ app, params = BLOOD }) {
     },
     /**
      * A man down, his chest at (x, z): his pool spreads under him, longer along
-     * `heading` (the way he faced: his body's axis) than across.
+     * `heading` (the way he faced: his body's axis) than across. `scale`: of
+     * the size (a torn-off limb's is small).
      */
-    pool(x, z, heading = rnd() * Math.PI * 2) {
+    pool(x, z, heading = rnd() * Math.PI * 2, scale = 1) {
       if (!enabled) return;
       const i = poolCursor;
       // The decal's stretched local x runs along (cos w, -sin w): the body's
       // axis (sin h, cos h) at w = h − π/2.
-      poolA.setXYZW(i, x, z, P.poolRadius + (rnd() - 0.5) * 2 * P.poolRadiusVar, heading - Math.PI / 2);
+      poolA.setXYZW(i, x, z, (P.poolRadius + (rnd() - 0.5) * 2 * P.poolRadiusVar) * scale, heading - Math.PI / 2);
       poolB.setXYZW(i, time, rnd() * 100, P.poolLife, 1.15 + rnd() * 0.3);
       poolA.needsUpdate = poolB.needsUpdate = true;
       poolCursor = (poolCursor + 1) % P.maxPools;

@@ -33,6 +33,12 @@ export const POSTURE = {
   perRound: { rifle: 0.07, mg: 0.2, cannon: 0.45, gunship: 0.3 },
   perRoundDefault: 0.08,
   /**
+   * The most suppression a weapon's rounds can build on their own (none: up
+   * to `max`). alg-rts: rifles KNEEL a man under steady fire but never pin
+   * him — pinning is the MG's job (CoH).
+   */
+  capByWeapon: {},
+  /**
    * Metres round the target that a round also suppresses (at `areaShare`):
    * an MG keeps a whole SQUAD's heads down, not just the man it aims at
    * (MEASURED 2026-09-30: aimed at one man, a band under the post's MG only
@@ -66,7 +72,7 @@ const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
  */
 export function createInfantryPosture({ units, cover = null, params = POSTURE }) {
   const onFoot = (u) => !!u?.type?.foot;
-  const add = (u, a) => { u.suppression = Math.min(params.max, (u.suppression ?? 0) + a); };
+  const add = (u, a, cap = params.max) => { const s = u.suppression ?? 0; u.suppression = Math.max(s, Math.min(cap, s + a)); };
   const near = [];
   let seq = 0;
 
@@ -87,12 +93,13 @@ export function createInfantryPosture({ units, cover = null, params = POSTURE })
       if (!target?.alive) return;
       target.firedOnBy = shooter;   // who: the AI takes cover FROM him (algAI.js)
       const w = shooter?.weapon, a = params.perRound[w] ?? params.perRoundDefault;
-      if (onFoot(target)) add(target, a);
+      const cap = params.capByWeapon?.[w] ?? params.max;
+      if (onFoot(target)) add(target, a, cap);
       const r = params.area[w];
       if (!r) return;
       for (const u of units.near(target.position.x, target.position.z, r, near)) {
         if (u === target || !u.alive || !onFoot(u) || u.team !== target.team) continue;
-        if (Math.hypot(u.position.x - target.position.x, u.position.z - target.position.z) < r) add(u, a * params.areaShare);
+        if (Math.hypot(u.position.x - target.position.x, u.position.z - target.position.z) < r) add(u, a * params.areaShare, cap);
       }
     },
     /** A shell landed at `at` with blast `radius` (combat.js splashAt). */

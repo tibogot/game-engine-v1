@@ -404,6 +404,8 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
 
   return {
     spawn, spawnArc, drawWarnings, update, tracers,
+    /** The live per-weapon look (W_): a lab may tune it while it plays. */
+    weapons: W_,
     get shellsInAir() { return shells.filter((s) => s.alive).length; },
   };
 }

@@ -402,6 +402,71 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       explosionField) — dust-coloured for this desert, black for vehicles
       burning, grey-white for buildings; fires that burn and smoke for a
       while. Measure the cost.
+- [x] **THE BATTLE LAB (2026-10-02, battle-lab.html + battleLab.js)** (you:
+      "everything related to the fight in a lab"). The REAL game booted lean
+      (URL defaults ai=0 battle=0 fow=0 herds/hens/birds=0, any game option
+      still works) on the flattest open patch ≥140 m from any armed building,
+      its plants cleared. Panel: two squads of any ground type (French left,
+      ALN right) N each, spacing, sandbag walls in front; Open / Hold fire;
+      grenade / mortar 81 / tank shell / big blast on either squad or where
+      you click (shift-click: keep dropping); time ×1 ×½ ×¼ ×0.1, pause (P),
+      one step (.); camera frame / play zoom / close on each side; tracer
+      look live (projectiles.weapons); blood on/off. Game hooks: app.timeScale
+      / app.timeStep in algUnits' loop (1 / 0 in the game). Seen: appelés vs
+      moudjahidine behind sandbags, an AMX-13 vs a band (gun smoke, shell,
+      blood), pause + step exact (1/60 s), Clear leaves no bodies. Console clean.
+   - [ ] you, look: is anything missing (a vehicle side, wounded, ranges)?
+   - [ ] The ALN's second wall can be refused on a slope (survey): a note.
+- [x] **MEN BLOWN APART (CoH 1 style, 2026-10-02)** (you: "separate the
+      soldiers into parts — exploded legs, heads"). Built IN THE SKINNING
+      PASS (shared crowdSkinning GIB, opt-in: nam unchanged):
+      · Each body re-cut at load into 6 parts by every vertex's strongest
+        bone (head from the neck, arms from the shoulder joint, legs from
+        the hip, the trunk); triangles never span a cut (seam verts doubled).
+      · A man a blast kills close by comes apart in his LAST POSE, his own
+        look: each part thrown out from the chest, spinning, falling under
+        22 m/s², lying where it lands (the feet give the ground). His kit
+        goes with its bone's part (helmet with the head, rifle with the arm,
+        pack with the trunk) — the CPU twin of the kernel's motion, sharing
+        its random table. Blood: three sprays, a pool under the trunk, small
+        ones under most limbs (bloodField pool `scale`).
+      · ITS OWN SMALL CROWD (40 per body) beside the living one, sharing the
+        baked clips: the living keep the uncut body. MEASURED (48 men, A/B
+        alternating loads): the cut on every man cost +0.10 ms (6-9% more
+        verts) → moved to the gib crowd: 4.48/4.30 off vs 4.29/4.30 on = 0.
+        20 men blown apart at once: +0.015 ms GPU. Empty: no dispatch, no
+        draw; its pipeline is built at load (one dispatch).
+      · Rule (algCombat GIBS): inside 30% of the blast radius, or 40% of
+        the time inside half of it — when the blast KILLS him. A mortar (45)
+        can't kill a fresh man (60 hp): only the wounded; a grenade (70) can.
+        OFF BY DEFAULT (you, 2026-10-02: "not by default for this war, but
+        we should be able to enable it"): ?gore=1 boots it on, Dev → Gore and
+        the lab switch it live (Off / CoH / every blast kill). ?gibs=0 = the
+        old kernel (A/B).
+   - [ ] you, look in the lab (×¼, Close): the throw height and spread, the
+         cut ends (open: no red cap yet).
+- [x] **KNEELING FIRE LOOPED idle ⇄ fire (2026-10-02, you)**: a kneeling man
+      in range dropped to the crouch idle (rifle down) after every shot —
+      there is no crouch-AIM clip. Now (unitRenderer soldierClip + sync) the
+      crouch-fire clip is his aim: a shot plays it from the start, then it
+      HOLDS its last frame (CROUCH_AIM_AT 0.98) instead of looping; kneeling
+      into aim with no shot yet starts on that frame. Lab, both sides behind
+      sandbags, 6 s: 914 of 949 kneeling samples on crouch-fire, the rest the
+      drop to the knee. Not touched: prone ⇄ prone-fire (same pattern, if it
+      shows).
+   - WHY THE FLN "DON'T CROUCH" (you): the same rules for both sides
+     (infantryPosture): a man KNEELS when sheltered from his target (cover
+     map, terrain too) or suppressed (≥ 0.4). Rifles alone suppress little
+     (0.07 a round, −0.3/s: fights sat at 0.1-0.26), so it was cover: in the
+     lab the French stood behind a rise of ground facing the FLN and knelt,
+     the FLN had nothing in front. Behind sandbags both kneel. MGs pin.
+   - [x] RIFLES SUPPRESS (you: "yes, as CoH"): alg perRound.rifle 0.07 →
+         0.12, capped at 0.8 by rifles alone (shared POSTURE capByWeapon,
+         opt-in): 0.12 uncapped PINNED men flat in the lab. Now, 8 v 8 in the
+         open: both sides ~45% kneeling, none prone; FM gunners still pin.
+   - [ ] Cut caps: dark-red discs over the open ends (they show inside the
+         body at close zoom).
+   - [ ] A tank shell hitting a man directly (not a splash) doesn't gib yet.
 - [x] **THE HENS in alg (2026-10-01, algHens.js)**: your bird-lab hens
       (birdMorph white / speckled / black, 40/35/25%) — 25 round the village
       houses (a third of them) and 4 in each farmstead's yard, at 1.3×, on

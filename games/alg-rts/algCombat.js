@@ -37,6 +37,18 @@ const ALG_FIRE = {
   mg: { speed: 100, width: 0.12, length: 2.5, tracerEvery: 4, dim: 0.6, dark: 4, jitter: 0.8, dirt: 1.1, burst: 4, gap: 0.06, spread: 3.2 },
   cannon: { speed: 140, width: 0.35, length: 5, dim: 0.75 },
 };
+/**
+ * MEN BLOWN APART, the Company of Heroes 1 way (you, 2026-10-02): most deaths
+ * stay deaths; a man killed right under a shell, a mortar bomb or a grenade
+ * comes apart (shared crowdSkinning GIB — in the skinning pass, no draw of
+ * its own). `mode`: "coh" (inside 30% of the blast radius, or 40% of the time
+ * inside half of it), "always" (every man a blast kills — the lab), "off".
+ * OFF BY DEFAULT for this war (you, 2026-10-02): ?gore=1 boots it on (CoH),
+ * Dev → Gore or the battle lab switch it live. Blood is separate (?blood=0).
+ */
+export const GIBS = { mode: typeof location !== "undefined" && new URLSearchParams(location.search).get("gore") === "1" ? "coh" : "off" };
+const gibChance = (d, r) => (GIBS.mode === "always" ? d < r : GIBS.mode === "coh" ? d < r * 0.3 || (d < r * 0.5 && Math.random() < 0.4) : false);
+
 const ALG_TRACERS = { red: [0.95, 0.42, 0.18], green: [0.95, 0.42, 0.18] };
 
 export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {}, onShot = null, onSplash = null, hitChance = null }) {
@@ -78,7 +90,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   const structures = { list: built?.list ?? [] };
   const structuresRenderer = { muzzleOf: (s) => built?.muzzleOf(s) ?? s.position.clone() };
   combat = createCombat({
-    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, hitChance,
+    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, hitChance, gibChance,
     onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
     onDeath: (e) => {
       if (e.isStructure) built?.wreck(e);
@@ -89,6 +101,16 @@ export async function createAlgCombat(app, { units, structures: built = null, co
 
   return {
     fx, fire, craters, projectiles, combat, blood,
+    /**
+     * A man came apart (unitRenderer onGib): a burst of blood where he stood,
+     * a pool where his trunk lands, small ones under his limbs. `parts`:
+     * [{ part, x, y, z }] where each comes to rest (crowdSkinning GIB order).
+     */
+    gib(unit, parts) {
+      const p = unit.position;
+      for (let k = 0; k < 3; k++) blood.hit({ x: p.x, y: p.y + 1.1, z: p.z }, { x: p.x + Math.random() - 0.5, z: p.z + Math.random() - 0.5 });
+      for (const q of parts) if (q.part === 0 || Math.random() < 0.6) blood.pool(q.x, q.z, undefined, q.part === 0 ? 0.9 : 0.35);
+    },
     /** On the fixed sim clock, after the units have moved. */
     step(dt, simTime) {
       combat.update(dt);

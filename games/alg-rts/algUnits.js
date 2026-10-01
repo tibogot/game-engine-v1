@@ -17,7 +17,7 @@ import { createAlgProducer } from "./algProducer.js";
 import { createAlgStructures } from "./algStructures.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
 import { createAlgCombat } from "./algCombat.js";
-import { createInfantryPosture } from "../shared-rts/infantryPosture.js";
+import { POSTURE, createInfantryPosture } from "../shared-rts/infantryPosture.js";
 import { createAlgGrenades } from "./algGrenades.js";
 import { createAlgAI } from "./algAI.js";
 import { createAlgAccuracy, ACCURACY } from "./algAccuracy.js";
@@ -199,6 +199,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
     // A man down: his pool under his torso (bloodField.js, made with combat).
     onCorpse: (u, x, z, heading) => app.algCombat?.blood.pool(x, z, heading),
+    // Men blown apart by a close blast (algCombat GIBS): their blood.
+    // ?gibs=0: the skinning pass without the cut (to A/B its cost).
+    gibs: new URLSearchParams(location.search).get("gibs") !== "0",
+    onGib: (u, parts) => app.algCombat?.gib(u, parts),
   });
   // After the renderer, which builds a view for each unit spawned from now on.
   const vehicles = takeOverVehicles(app, units, showroom);
@@ -427,7 +431,13 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // INFANTRY POSTURE (shared-rts/infantryPosture.js, the CoH way): fire
   // SUPPRESSES men on foot (they kneel, slow), heavy fire PINS them (prone,
   // crawling); a man sheltered from his target kneels behind his cover.
-  const posture = createInfantryPosture({ units, cover: coverSys.cover });
+  // RIFLES SUPPRESS TOO (you, 2026-10-02: "in CoH riflemen crouch under
+  // steady fire"): 0.07 a round topped out at 0.1-0.26 under a section's
+  // fire (kneel = 0.4) — nobody ever knelt from rifles alone. 0.12: a squad
+  // firing steadily at a man puts him on a knee; one rifle alone doesn't.
+  // Capped at 0.8 (pinned = 1.0): rifles alone never put a man flat (0.12
+  // uncapped did, in the lab) — that stays the MG's job.
+  const posture = createInfantryPosture({ units, cover: coverSys.cover, params: { ...POSTURE, perRound: { ...POSTURE.perRound, rifle: 0.12 }, capByWeapon: { rifle: 0.8 } } });
   app.algPosture = posture;
   const combat = await createAlgCombat(app, {
     units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
@@ -459,7 +469,13 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algPatrols = patrols;
 
   const sim = createSimClock({ hz: 60 });
-  app.addPreRenderHook((dt) => {
+  // THE BATTLE LAB's clock (battleLab.js): slow motion, pause, one step.
+  // The game never sets them (scale 1, no step); the camera keeps real time.
+  app.timeScale ??= 1;
+  app.timeStep ??= 0;
+  app.addPreRenderHook((frameDt) => {
+    let dt = frameDt * app.timeScale;
+    if (app.timeStep) { dt = app.timeStep; app.timeStep = 0; }
     sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); grenades.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
     searchlights.frame();
     combat.frame(dt);
