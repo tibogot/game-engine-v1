@@ -99,6 +99,8 @@ export function createAlgCover(app, { showroom = {}, isArmed = () => true } = {}
       screens.length = 0;
       // The field walls (algFields.js; made after this — the game re-bakes).
       if (app.algFields) yield* app.algFields.coverCircles();
+      // The rock outcrops (algLandmarks.js).
+      if (app.algLandmarks) yield* app.algLandmarks.coverCircles();
       for (const [name, mesh] of Object.entries(showroom)) {
         // A sapper's piece is listed as "built:<kind>:<n>"; its kind decides.
         const key = mesh?.userData?.kitKey ?? name;

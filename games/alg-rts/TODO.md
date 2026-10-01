@@ -203,6 +203,31 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
+- [x] **THE LAND BETWEEN THE VILLAGES** (2026-10-01, algLandmarks.js; you:
+      wires, farmsteads + ruins, outcrops + lone trees). MEASURED: on vs off
+      (outcrops + the 7 pieces) +0.06 ms (noise 0.06); the whole frame at
+      full zoom-out 1.70 ms; load: outcrops + trees 22 ms.
+      · TELEGRAPH WIRES fixed: thin RIBBONS in a cross (flat + upright),
+        drawn fat (4.4 cm), sag 2.6% varying per span, 16 segments; one
+        draw, 4096 tris (was 1 px GL lines with a 1.4% sag: ruled lines).
+      · FARMSTEADS (rtsAlgVillage buildFarmstead, ~5k tris, one draw each):
+        house + byre in an L on socles, walled yard with the oven, thorn pen,
+        straw, fig + olives, prickly pear; houses block, the yard is open,
+        walls are hard cover; its oven smokes (key "mechtaFarm*").
+      · RUINS: buildRomanRuin (podium, standing / broken columns, fallen
+        drums, blocks) ×2, buildBurntFarm (roofless soot-blackened stucco,
+        charred rafters, a corner of tiles, rubble) ×1. All showroom
+        entries (pads, nav, cover, trees come with it), placed by a seeded
+        search: 70 m from villages / bases, 25 m from minor sites, a farm
+        12-95 m from a track, 115 m apart, ruins placed first. Today: 2
+        ruins + the burnt farm + 4 farmsteads (of 7 wanted: no more room).
+      · OUTCROPS (rtsAlgeria buildRockOutcrop, 540 tris, 4 seeds = 4 draws):
+        42 on 9-32° slopes, 34 m apart, off tracks / fields / pieces; HARD
+        cover (algCover reads coverCircles), impassable (nav footprint).
+      · LONE TREES: 24 big olives / holm oaks / figs (×1.15-1.55), 60%
+        beside a track, 55 m apart (the showroom's PlacedFoliage: no draws).
+   - [ ] you, look: the burnt farm's soot (dark panels), the outcrops'
+         size (they may want to be bigger), the barley green (saturated).
 - [x] **FIELDS + HEDGES — filling the land** (2026-10-01, algFields.js; you:
       "it still looks empty for an RTS", picked 1 + 2 of the fill list).
       SEEN IN THE GAME: 45 plots, 1072 wall segments, 1064 hedge plants,
@@ -269,7 +294,7 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          array per village).
    - [ ] you, look: the poles' side and spacing; the rut strength (tint
          0x9a8a78); the burning-house smoke (the ovens' grey, thicker).
-   - [ ] **The wires read as ruled straight lines** (you, 2026-10-01). Why:
+   - [x] (FIXED 2026-10-01: ribbons, see THE LAND BETWEEN THE VILLAGES) **The wires read as ruled straight lines** (you, 2026-10-01). Why:
          they are 1 px GL lines (always 1 px, any zoom, no shading), and the
          sag is only 1.4% of the span (~0.6 m on 42 m) — nearly straight.
          Fix: real wires as thin RIBBONS (the barbed wire's trick: drawn fat,

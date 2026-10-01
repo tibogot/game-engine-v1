@@ -16,7 +16,9 @@ import { TRACK_LINES } from "./algTracks.js";
 import { kitView } from "./showroom.js";
 import { PLAY } from "./layout.js";
 
-const P = { spacing: 42, offset: 5.5, start: 12, sagPerM: 0.014, segs: 10, maxNormalTilt: 0.86 };
+// sagPerM: 2.6% of the span (1.1 m on 42 m: a PTT line hangs visibly); wireHalf:
+// the ribbon half-width, drawn fat (a real wire is under a pixel at play zoom).
+const P = { spacing: 42, offset: 5.5, start: 12, sagPerM: 0.026, segs: 16, wireHalf: 0.022, maxNormalTilt: 0.86 };
 
 export function createAlgPoles(app, { navGrid = null } = {}) {
   const geo = buildTelegraphPole();
@@ -77,28 +79,60 @@ export function createAlgPoles(app, { navGrid = null } = {}) {
   mesh.computeBoundingSphere();
   app.scene.add(mesh);
 
-  // ── The wires: one LineSegments, sagging between neighbours ──────────────
-  const pts = [];
+  // ── The wires: one mesh of thin ribbons, hanging between neighbours ──────
+  // They were 1 px GL lines with a 1.4% sag and read as ruled straight lines
+  // (you, 2026-10-01). Now each wire is a CROSS of two ribbons (flat and
+  // upright, so it reads from the RTS camera above and from a low view),
+  // drawn FAT (the barbed wire's trick: a real 4 mm wire is under a pixel),
+  // a visible sag that varies span to span, 16 segments a span. One draw.
+  const pos = [], nrm = [], idx = [];
   const v = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3();
   const tip = (p, k, out) => out.set(...wiresLocal[k]).applyQuaternion(p.q).add(v.set(p.x, p.y, p.z));
+  const W = P.wireHalf;
+  const ribbon = (pts, side, n) => {
+    // A strip along `pts`, offset ±`side` (a unit vector), normal `n`.
+    const base = pos.length / 3;
+    for (const q of pts) {
+      pos.push(q.x - side.x * W, q.y - side.y * W, q.z - side.z * W, q.x + side.x * W, q.y + side.y * W, q.z + side.z * W);
+      nrm.push(n.x, n.y, n.z, n.x, n.y, n.z);
+    }
+    for (let j = 0; j < pts.length - 1; j++) {
+      const o = base + j * 2;
+      idx.push(o, o + 2, o + 1, o + 1, o + 2, o + 3);
+    }
+  };
+  const UPV = new THREE.Vector3(0, 1, 0);
+  let spans = 0;
   for (let i = 1; i < poles.length; i++) {
     const p0 = poles[i - 1], p1 = poles[i];
     if (p0.track !== p1.track || p1.s - p0.s > P.spacing * 2.2) continue;    // a gap: the line breaks
-    const span = Math.hypot(p1.x - p0.x, p1.z - p0.z), sag = span * P.sagPerM;
+    spans++;
+    const span = Math.hypot(p1.x - p0.x, p1.z - p0.z);
+    const sag = span * P.sagPerM * (0.85 + ((i * 0.618) % 1) * 0.3);
     for (let k = 0; k < wiresLocal.length; k++) {
       tip(p0, k, a); tip(p1, k, b);
-      for (let j = 0; j < P.segs; j++) {
-        const f0 = j / P.segs, f1 = (j + 1) / P.segs;
-        for (const f of [f0, f1]) pts.push(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f - sag * 4 * f * (1 - f), a.z + (b.z - a.z) * f);
+      const pts = [];
+      for (let j = 0; j <= P.segs; j++) {
+        const f = j / P.segs;
+        pts.push(new THREE.Vector3(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f - sag * 4 * f * (1 - f), a.z + (b.z - a.z) * f));
       }
+      const along = new THREE.Vector3().subVectors(b, a).setY(0).normalize();
+      const flatSide = new THREE.Vector3().crossVectors(UPV, along).normalize();
+      ribbon(pts, flatSide, UPV);                   // seen from above
+      ribbon(pts, UPV, flatSide);                   // seen from the side
     }
   }
   const wgeo = new THREE.BufferGeometry();
-  wgeo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
-  const wires = new THREE.LineSegments(wgeo, new THREE.LineBasicMaterial({ color: 0x24211d }));
+  wgeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  wgeo.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+  wgeo.setIndex(idx);
+  wgeo.computeBoundingSphere();
+  const wires = new THREE.Mesh(wgeo, new THREE.MeshStandardMaterial({ color: 0x2b2722, roughness: 0.55, metalness: 0.35, side: THREE.DoubleSide }));
   wires.name = "TelegraphWires";
-  wires.frustumCulled = true;
+  wires.castShadow = false;       // a hair-thin shadow is noise in the shadow map
+  wires.receiveShadow = true;
   app.scene.add(wires);
 
-  return { poles, mesh, wires, dispose() { app.scene.remove(mesh, wires); wgeo.dispose(); geo.dispose(); } };
+
+  return { poles, mesh, wires, spans, dispose() { app.scene.remove(mesh, wires); wgeo.dispose(); geo.dispose(); } };
 }

@@ -33,7 +33,7 @@
 import * as THREE from "three";
 import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { MAT, buildBox, rng, wirePart } from "./rtsParts.js";
-import { house } from "./rtsMechta.js";
+import { house, oven } from "./rtsMechta.js";
 import { brushClump, clayJar, dryStone, earthBerm, fieldStone, finish } from "./rtsAlgeria.js";
 
 const FLAT = () => 0;
@@ -488,6 +488,204 @@ export function buildFieldWallSegment({ seed = 1964 } = {}) {
   // A loose stone or two fallen at its foot.
   for (let k = 0; k < 2; k++) parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.32, 0.22, 0.28), pos: [(R() - 0.5) * 1.6, 0.06, (R() < 0.5 ? -1 : 1) * 0.42], rot: [R(), R() * 3, R()], mat: MAT.limestone, tone: 0.45 });
   return finish(parts, { hx: 1.1, hz: 0.45, height: 0.75, ao: { strength: 0.3 } });
+}
+
+// ── THE LAND BETWEEN THE VILLAGES ───────────────────────────────────────────
+
+/** A house of rtsMechta seated on the ground: its socle down to the lowest ground under it. */
+function seatedHouse(parts, R, groundAt, o) {
+  const { top, low } = groundSpan(groundAt, o.x, o.z, o.w + 0.4, o.d + 0.4);
+  const n0 = parts.length;
+  const hh = house(parts, R, o);
+  lift(parts, n0, top);
+  const sh = top - low + 0.7 + 0.22;
+  parts.push({ geo: buildBox(o.w + 0.36, sh, o.d + 0.36), pos: [o.x, top + 0.22 - sh / 2, o.z], rot: [0, o.yaw, 0], mat: MAT.rubble, tone: 0.32 + R() * 0.12 });
+  return { ...hh, top };
+}
+
+/**
+ * FARMSTEAD — one family's place out in the land (alg-rts algLandmarks.js
+ * scatters them between the villages, a place worth holding in the empty
+ * middle of the map): the main house and a byre at right angles, a walled
+ * yard in front of them with the bread oven, a thorn pen for the goats, a
+ * straw heap, a fig and an olive or two, prickly pear along the back.
+ * Front (the yard's gate) at -Z.
+ */
+export function buildFarmstead({ seed = 1970, groundAt = FLAT } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const houses = [];
+  // The house along the back, the byre down the left side.
+  const w = 7.5 + R() * 2, d = 4.8 + R() * 0.6;
+  const h1 = seatedHouse(parts, R, groundAt, { x: 0.6, z: 3.2, yaw: 0, w, d, h: 2.7 + R() * 0.4, storey2: R() < 0.25, doorFace: -1, leanTo: false });
+  houses.push({ x: 0.6, z: 3.2 });
+  const bw = 5 + R(), bd = 3.8;
+  const h2 = seatedHouse(parts, R, groundAt, { x: -w / 2 - bd / 2 - 0.2, z: -1.4, yaw: Math.PI / 2, w: bw, d: bd, h: 2.3, doorFace: -1, leanTo: false });
+  houses.push({ x: -w / 2 - bd / 2 - 0.2, z: -1.4 });
+  void h1; void h2;
+  // The yard wall: from the byre's front corner round to the house's right end, a gate at the front.
+  const yx0 = -w / 2 + 0.2, yx1 = w / 2 + 1.2, yz = -5.6, gate = 0.6 + R() * 1.5;
+  const wallPts = [[yx0, yz], [gate - 1.3, yz], null, [gate + 1.3, yz], [yx1, yz], [yx1, 3.2 - d / 2 - 0.3]];
+  const yardLines = [];
+  for (let k = 0; k < wallPts.length - 1; k++) {
+    const a = wallPts[k], b = wallPts[k + 1];
+    if (!a || !b) continue;
+    groundWall(parts, R, groundAt, a, b, { h: 1.3, t: 0.5 });
+    yardLines.push({ hard: true, pts: [a, b] });
+  }
+  // The oven in the yard, a straw heap, two jars.
+  const ox = yx1 - 2.2, oz = yz + 2.2, og = groundAt(ox, oz);
+  const n0 = parts.length;
+  oven(parts, R, ox, oz, Math.PI * 1.2);
+  lift(parts, n0, og);
+  parts.push({ geo: earthBerm([[1.3, -0.1], [1.1, 0.5], [0.6, 1.0], [0.001, 1.15]], { seed: seed + 3, segs: 14, rJit: 0.12, yJit: 0.08 }), pos: [-2.2, groundAt(-2.2, -3.4), -3.4], mat: MAT.thatch, tone: 0.5 });
+  parts.push(clayJar(1.8, groundAt(1.8, 0.2) - 0.02, 0.2, 1));
+  parts.push(clayJar(2.4, groundAt(2.4, 0.4) - 0.02, 0.4, 0.85));
+  // The thorn pen, out to the right of the yard: a ring of cut thorn.
+  const px = yx1 + 6.5, pz = -1.5, pr = 3.6;
+  for (let k = 0; k < 16; k++) {
+    if (k === 12) continue;                                  // its gap
+    const a = (k / 16) * Math.PI * 2, x = px + Math.cos(a) * pr, z = pz + Math.sin(a) * pr;
+    parts.push(...brushClump(R, x, groundAt(x, z), z, { h: 0.9, r: 0.45, dry: true }));
+  }
+  const trees = [
+    { kind: "fig", x: yx1 - 1.5, z: yz + 4.8, scale: 0.9 + R() * 0.25, seed: Math.floor(R() * 1000) },
+    { kind: "olive", x: -w / 2 - 6, z: 5.5, scale: 0.85 + R() * 0.3, seed: Math.floor(R() * 1000) },
+  ];
+  if (R() < 0.6) trees.push({ kind: "olive", x: w / 2 + 4.5, z: 7.5, scale: 0.8 + R() * 0.3, seed: Math.floor(R() * 1000) });
+  // Prickly pear along the back, behind the house.
+  const hedge = [];
+  for (let x = -w / 2 - 2; x <= w / 2 + 3; x += 1.2) if (R() > 0.15) hedge.push([x + (R() - 0.5) * 0.4, 3.2 + d / 2 + 2.2 + (R() - 0.5) * 0.4]);
+  const geo = finish(parts, { hx: (yx1 + 10.5 - (-w / 2 - bd - 0.5)) / 2, hz: 7.5, cx: (yx1 + 10.5 + (-w / 2 - bd - 0.5)) / 2, cz: 0.6, height: 3.4 });
+  geo.userData.houses = scaled(houses);
+  geo.userData.trees = scaled(trees);
+  geo.userData.hedge = hedge.map(([x, z]) => [x * KIT, z * KIT]);
+  // Cover: the yard walls and the houses' walls; the open ground round them none.
+  const outline = (cx, cz, hw, hd, yaw) => {
+    const c = Math.cos(yaw), s = Math.sin(yaw), p = (lx, lz) => [cx + lx * c + lz * s, cz - lx * s + lz * c];
+    return { hard: true, pts: [p(-hw, -hd), p(hw, -hd), p(hw, hd), p(-hw, hd), p(-hw, -hd)] };
+  };
+  geo.userData.coverLines = scaledLines([...yardLines, outline(0.6, 3.2, w / 2 + 0.2, d / 2 + 0.2, 0), outline(-w / 2 - bd / 2 - 0.2, -1.4, bw / 2 + 0.2, bd / 2 + 0.2, Math.PI / 2)]);
+  geo.userData.coverPerimeter = false;
+  // The houses block; the yard, its gate and the pen stay open (men walk in).
+  const t = 2 / KIT;
+  geo.userData.navRects = [
+    { cx: 0.6, cz: 3.2, hx: w / 2 + 0.2, hz: d / 2 + 0.2 },
+    { cx: -w / 2 - bd / 2 - 0.2, cz: -1.4, hx: bd / 2 + 0.2, hz: bw / 2 + 0.2 },
+    { cx: yx1, cz: (yz + 3.2 - d / 2) / 2, hx: t, hz: (3.2 - d / 2 - yz) / 2 },
+  ].map((r) => ({ cx: r.cx * KIT, cz: r.cz * KIT, hx: r.hx * KIT, hz: r.hz * KIT }));
+  return geo;
+}
+
+/**
+ * ROMAN RUIN — the Aurès is full of them (Timgad is at its foot): a temple's
+ * podium of big cut blocks, a few columns still standing at different
+ * heights, drums fallen in the grass in a line, a piece of architrave, blocks
+ * scattered. Hard cover among the blocks; walked through.
+ */
+export function buildRomanRuin({ seed = 1980, groundAt = FLAT } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const PW = 11, PD = 7;
+  const { top, low } = groundSpan(groundAt, 0, 0, PW, PD);
+  // The podium: two courses of blocks, the upper set back, broken at one corner.
+  const ph = top - low + 1.0;
+  parts.push({ geo: buildBox(PW, ph, PD), pos: [0, top + 0.45 - ph / 2, 0], mat: MAT.sandstone, tone: 0.55 });
+  parts.push({ geo: buildBox(PW - 1.2, 0.5, PD - 1.2), pos: [-0.3, top + 0.7, 0.2], mat: MAT.sandstone, tone: 0.62 });
+  const deck = top + 0.95;
+  // Columns: a row of 5 along the front, most broken.
+  const colH = [5.6, 2.1, 0, 4.2, 1.3];
+  colH.forEach((hgt, k) => {
+    const x = -4 + k * 2;
+    if (!hgt) return;
+    parts.push({ geo: new THREE.CylinderGeometry(0.42, 0.48, 0.35, 12), pos: [x, deck + 0.17, -2.4], mat: MAT.sandstone, tone: 0.5 });
+    parts.push({ geo: new THREE.CylinderGeometry(0.36, 0.4, hgt, 12), pos: [x, deck + 0.34 + hgt / 2, -2.4], rot: [(R() - 0.5) * 0.03, 0, (R() - 0.5) * 0.03], mat: MAT.sandstone, tone: 0.58 + R() * 0.1 });
+    if (hgt > 5) parts.push({ geo: buildBox(1.1, 0.42, 1.1), pos: [x, deck + 0.34 + hgt + 0.21, -2.4], mat: MAT.sandstone, tone: 0.55 });
+  });
+  // The architrave block that fell off the tall one, across the podium edge.
+  parts.push({ geo: buildBox(3.2, 0.6, 0.75), pos: [-2.6, deck + 0.3, -0.8], rot: [0, 0.35, 0.06], mat: MAT.sandstone, tone: 0.5 });
+  // Fallen drums in a line in front, in the grass (ground level).
+  for (let k = 0; k < 4; k++) {
+    const x = 1.5 + k * 1.15, z = -6.2 + k * 0.3;
+    parts.push({ geo: new THREE.CylinderGeometry(0.38, 0.38, 1.05, 12), pos: [x, groundAt(x, z) + 0.3, z], rot: [0, 0.3 + (R() - 0.5) * 0.3, Math.PI / 2], mat: MAT.sandstone, tone: 0.5 + R() * 0.1 });
+  }
+  // Scattered blocks.
+  for (let k = 0; k < 7; k++) {
+    const a = R() * Math.PI * 2, r = 6.5 + R() * 3, x = Math.cos(a) * r, z = Math.sin(a) * r * 0.8;
+    const bw = 0.8 + R() * 0.7;
+    parts.push({ geo: buildBox(bw, 0.5 + R() * 0.3, 0.6 + R() * 0.4), pos: [x, groundAt(x, z) + 0.15, z], rot: [(R() - 0.5) * 0.3, R() * 3, (R() - 0.5) * 0.3], mat: MAT.sandstone, tone: 0.45 + R() * 0.15 });
+  }
+  const geo = finish(parts, { hx: 9, hz: 8, height: 6.5 });
+  geo.userData.coverLines = scaledLines([{ hard: true, pts: [[-PW / 2, -PD / 2], [PW / 2, -PD / 2], [PW / 2, PD / 2], [-PW / 2, PD / 2], [-PW / 2, -PD / 2]] }]);
+  geo.userData.coverPerimeter = false;
+  geo.userData.navRects = [{ cx: 0, cz: 0, hx: PW / 2 * KIT, hz: PD / 2 * KIT }];
+  return geo;
+}
+
+/**
+ * BURNT FARM — a colon's farm the ALN burnt early in the war: the long
+ * stuccoed house roofless, its walls standing to different heights with the
+ * window holes black, charred rafters fallen in, one corner of the tiled roof
+ * still up, rubble heaped against it. A ruin to fight in.
+ */
+export function buildBurntFarm({ seed = 1990, groundAt = FLAT } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const W = 14, D = 7, T = 0.45;
+  const { top, low } = groundSpan(groundAt, 0, 0, W + 1, D + 1);
+  const sh = top - low + 0.6;
+  // Its floor: the socle top, burnt earth and ash (the rubble cell read as bluish stone).
+  parts.push({ geo: buildBox(W + 0.6, sh, D + 0.6), pos: [0, top + 0.2 - sh / 2, 0], mat: MAT.spoil, tone: 0.12 });
+  const y0 = top + 0.2;
+  // The walls in 2 m bays, each its own broken height (fire and shells).
+  const side = (ax, az, bx, bz, full) => {
+    const len = Math.hypot(bx - ax, bz - az), n = Math.round(len / 2), yaw = Math.atan2(bx - ax, bz - az);
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5) / n, hgt = full * (R() < 0.25 ? 0.25 + R() * 0.3 : 0.65 + R() * 0.35);
+      parts.push({ geo: buildBox(T + (k % 2) * 0.03, hgt, len / n + 0.02), pos: [ax + (bx - ax) * t, y0 + hgt / 2, az + (bz - az) * t], rot: [0, yaw, 0], mat: MAT.stucco, tone: 0.2 + R() * 0.14 });   // smoke-grimed: clean stucco read new
+      const nx = Math.cos(yaw), nz = -Math.sin(yaw), cx = ax + (bx - ax) * t, cz = az + (bz - az) * t;
+      // A window hole: a black patch high on the outside face.
+      if (hgt > full * 0.7 && R() < 0.5) {
+        parts.push({ geo: buildBox(0.05, 0.9, 0.8), pos: [cx + nx * (T / 2 + 0.03), y0 + hgt - 0.9, cz + nz * (T / 2 + 0.03)], rot: [0, yaw, 0], mat: MAT.steel, tone: 0.02 });
+      }
+      // SOOT: the fire blackened the upper part of most bays, inside and out
+      // (the stucco's tone barely darkens it — the burnt farm read new).
+      if (R() < 0.8) {
+        const sh2 = hgt * (0.3 + R() * 0.25), sw = len / n - 0.12;
+        for (const sgn of [-1, 1]) {
+          parts.push({ geo: buildBox(0.04, sh2, sw), pos: [cx + sgn * nx * (T / 2 + 0.02 + (k % 2) * 0.015), y0 + hgt - sh2 / 2 - 0.02, cz + sgn * nz * (T / 2 + 0.02 + (k % 2) * 0.015)], rot: [0, yaw, 0], mat: MAT.timber, tone: 0.02 + R() * 0.04 });
+        }
+      }
+    }
+  };
+  side(-W / 2, -D / 2, W / 2, -D / 2, 4.2);
+  side(W / 2, -D / 2 + 0.25, W / 2, D / 2 - 0.25, 4.2);
+  side(W / 2, D / 2, -W / 2, D / 2, 4.2);
+  side(-W / 2, D / 2 - 0.25, -W / 2, -D / 2 + 0.25, 4.2);
+  // One corner of the roof still on: tiles on rafters, sagging.
+  parts.push({ geo: buildBox(3.6, 0.14, 4.2), pos: [W / 2 - 2, y0 + 4.5, D / 2 - 2.2], rot: [0.32, 0, 0.05], mat: MAT.tile, tone: 0.42 });
+  // Charred rafters fallen in, ends up on the walls.
+  for (let k = 0; k < 5; k++) {
+    const x = -W / 2 + 2 + k * 2.3 + (R() - 0.5);
+    parts.push({ geo: buildBox(0.18, 0.18, D - 0.4), pos: [x, y0 + 1.2 + R() * 1.2, (R() - 0.5) * 0.6], rot: [(R() - 0.5) * 0.7, (R() - 0.5) * 0.4, 0], mat: MAT.timber, tone: 0.03 });
+  }
+  // Rubble inside and against the front.
+  for (let k = 0; k < 12; k++) {
+    const x = (R() - 0.5) * (W - 1.5), z = (R() - 0.5) * (D - 1.5) + (k > 8 ? -D / 2 - 0.9 : 0);
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.5 + R() * 0.4, 0.3 + R() * 0.25, 0.4 + R() * 0.3), pos: [x, (k > 8 ? groundAt(x, z) : y0) + 0.12, z], rot: [R(), R() * 3, R()], mat: MAT.rubble, tone: 0.3 + R() * 0.2 });
+  }
+  const geo = finish(parts, { hx: W / 2 + 1.2, hz: D / 2 + 1.6, cz: -0.4, height: 4.6 });
+  geo.userData.houses = [{ x: 0, z: 0 }];
+  geo.userData.coverLines = scaledLines([{ hard: true, pts: [[-W / 2, -D / 2], [W / 2, -D / 2], [W / 2, D / 2], [-W / 2, D / 2], [-W / 2, -D / 2]] }]);
+  geo.userData.coverPerimeter = false;
+  // Its walls block; men get in through the broken low bays (a gap each side).
+  const t = 2 / KIT;
+  geo.userData.navRects = [
+    { cx: -W / 4 - 1, cz: -D / 2, hx: W / 4 - 1, hz: t },
+    { cx: W / 4 + 1, cz: D / 2, hx: W / 4 - 1, hz: t },
+    { cx: W / 2, cz: 0, hx: t, hz: D / 2 },
+  ].map((r) => ({ cx: r.cx * KIT, cz: r.cz * KIT, hx: r.hx * KIT, hz: r.hz * KIT }));
+  return geo;
 }
 
 /**

@@ -13,7 +13,8 @@
 // the default is SKY PRO since 2026-09-29, see SKY_PRO below)
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
-import { placeShowroom } from "./showroom.js";
+import { placeShowroom, SHOWROOM } from "./showroom.js";
+import { createAlgLandmarks, landmarkEntries } from "./algLandmarks.js";
 import { createAlgDevPanel } from "./devPanel.js";
 import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
@@ -203,7 +204,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // The new assets, on the map, until gameplay places them (showroom.js).
   if (params.get("showroom") !== "0") {
     onStatus("Placing assets…");
-    app.showroom = await placeShowroom(app);
+    // + the farmsteads and ruins between the villages (algLandmarks.js). ?landmarks=0 = without.
+    const extra = params.get("landmarks") !== "0" ? landmarkEntries(app, SHOWROOM) : [];
+    app.showroom = await placeShowroom(app, [...SHOWROOM, ...extra]);
   }
 
   onStatus("Setting up camera…");
@@ -334,10 +337,19 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       const t0 = performance.now();
       app.algFields = createAlgFields(app, { economy: app.algEconomy, navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, plants: app.showroom?.plants ?? null });
-      app.algCover?.bake();
       console.log(`[fields] ${JSON.stringify(app.algFields.stats)} in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { console.warn("[alg fields] failed:", e); }
   }
+  // ROCK OUTCROPS + LONE TREES (algLandmarks.js), after the fields so they
+  // keep off them. Then the cover map once, with the walls and rocks in it.
+  if (params.get("landmarks") !== "0") {
+    try {
+      const t0 = performance.now();
+      app.algLandmarks = createAlgLandmarks(app, { showroom: app.showroom ?? {}, fields: app.algFields ?? null, navGrid: app.navGrid ?? null, plants: app.showroom?.plants ?? null });
+      console.log(`[landmarks] ${JSON.stringify(app.algLandmarks.stats)} in ${Math.round(performance.now() - t0)} ms`);
+    } catch (e) { console.warn("[alg landmarks] failed:", e); }
+  }
+  if (app.algFields || app.algLandmarks) app.algCover?.bake();
   // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,
   // the dechra and the springs; they bolt from soldiers. ?herds=0 = without.
   if (params.get("herds") !== "0") {

@@ -978,6 +978,24 @@ export function buildRubbleHeap({ seed = 1961 } = {}) {
 }
 
 /**
+ * ROCK OUTCROP — a cluster of limestone crags breaking out of a hillside,
+ * 1-3 m high, the biggest leaning on the others: hard cover on open slopes
+ * (alg-rts algLandmarks.js instances a few seeds of it across the map). The
+ * crags reach 0.4 m below y = 0 so a sloping hillside never shows under them.
+ */
+export function buildRockOutcrop({ seed = 2000 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const n = 3 + Math.floor(R() * 3);
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * Math.PI * 2 + R() * 0.8, r = k === 0 ? 0 : 1.1 + R() * 1.2;
+    const w = (k === 0 ? 2.6 : 1.3 + R() * 1.1), h = (k === 0 ? 2.4 : 0.9 + R() * 1.2);
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), w, h, w * (0.7 + R() * 0.3), 1), pos: [Math.cos(a) * r, h * 0.32 - 0.4, Math.sin(a) * r], rot: [(R() - 0.5) * 0.3, R() * 3, (R() - 0.5) * 0.3], mat: MAT.limestone, tone: 0.42 + R() * 0.16 });
+  }
+  return finish(parts, { hx: 2.6, hz: 2.6, height: 2.6, ao: { strength: 0.3 } });
+}
+
+/**
  * TELEGRAPH POLE — the PTT line along the pistes: a tarred pole, a crossarm
  * with four white insulators, a brace. Instanced along the tracks by the game
  * (alg-rts algPoles.js); `userData.wires` gives the four insulator tops
