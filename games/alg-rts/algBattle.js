@@ -275,6 +275,9 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     if (stats.lostFr > 0 || told.has("contactSeen")) advise("contact", "Under fire: hold <b>V</b> to see cover (green) and concealment (cyan). Men behind walls and rocks live; men in the open don't.");
     if (economy.heldByEnemy > economy.held) advise("bleeding", "The FLN holds more villages than you: <b>your score is falling</b>. Take one back.");
     if (economy.french.stock >= 260 && clock > 60) advise("build", "Supplies to spend: click the post to train a <b>Sapeur</b> — he builds MG nests, wire and miradors to hold what you take.");
+    // The next French tier can be bought (algTiers.js).
+    const tn = app.algTiers?.next();
+    if (tn && !app.algTiers.blockedBy(tn)) advise(`tier${tn.n}`, `<b>${tn.name}</b> can be unlocked: click the post, then <b>▲ ${tn.name}</b> (${tn.cost} supplies) — ${tn.note}.`);
     if (told.has("mgSeen")) advise("mg", "An FLN <b>machine gun</b> pins your men in the open: get them behind walls and rocks (V), then flank it. Its guns come from the <b>arms caches</b> — destroy them and no more come.");
     if (told.has("bandSeen")) advise("band", "An FLN band won't fight fair: it waits in the scrub and strikes men who come close. Scout with the jeep, bring the MG, keep men together.");
     if ((tipGap -= dt) > 0 || !tips.length) return;
@@ -316,6 +319,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
 
   return {
     params: P, score, stats,
+    /** An alert from another system (algTiers.js). */
+    say: (text, x = null, z = null, kind = "good") => say(text, x, z, kind),
     get over() { return over; },
     get clock() { return clock; },
     /** Start without the briefing (?brief=0): the remembered difficulty. */

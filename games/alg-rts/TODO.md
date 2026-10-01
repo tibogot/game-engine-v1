@@ -324,6 +324,43 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
    - [ ] you, look: the refuge and lookout pieces up close; whether the FLN
          now feels too blind / too sharp (seeMen 50, seeLookout 110,
          seeVillage 90 in algAI P).
+- [x] **FRENCH TIERS (2026-10-01, algTiers.js)** — you: "motor pool →
+      helipad → armour". Tier 1 (start): appelés, sapeurs, jeep, GMC. Tier 2
+      "Moyens héliportés" (150, hold 1 village): paras + Alouette (the
+      helipad), the half-track. Tier 3 "Blindés" (250, hold 2 villages):
+      EBR, AMX-13, the Légion. Bought from the POST's card (a brass ▲
+      button: greyed with the reason while villages are short; live when
+      only the price is missing); locked units show greyed on their
+      building's card with the tier that opens them, and can't be queued.
+      The card re-renders when its options change (a village taken). An
+      alert on unlock, an advice tip when the next tier becomes buyable.
+      TESTED: 0 villages → locked "hold 1 village (you hold 0)"; 1 village
+      → live; bought → helipad opens (Para 110, Alouette 320), next shows
+      "hold 2 villages"; motor pool: half-track T2, EBR / AMX T3, a locked
+      click queues nothing. The other two asks were STALE: health bars on
+      the post and motor pool and vehicles out of the motor pool's doors
+      already worked (checked in the game).
+   - [ ] The STARTING army still has an AMX-13, an EBR, a half-track and the
+         Alouette (the showroom's park). Suggested (CoH: you start with an HQ
+         and a few squads; vehicles come from tiers): START LEANER — 2
+         appelé sections, a sapeur, a jeep; the armour and the Alouette
+         parked as SCENERY (unselectable, "in maintenance") or removed. Your
+         call.
+- [ ] **WEAPON FIRE THAT LOOKS LIKE COMPANY OF HEROES** (you, 2026-10-01: "it
+      looks like a futuristic laser, not realistic bullets"). Research CoH's
+      look first (articles / breakdowns), then: no continuous beams — short,
+      thin, fast tracers only on SOME rounds (MGs every ~4th, rifles rarely),
+      bright-headed and fading; muzzle flash a 1-2 frame star + a puff of
+      smoke at the barrel; dust kicks / sparks where rounds land (miss
+      feedback); a faint smoke trail on tank shells; sound-synced. Today's
+      tracers: games/shared-rts/tracerField.js.
+- [ ] **FIRE, SMOKE AND EXPLOSIONS, CoH style** (you, 2026-10-01: the
+      explosion flipbook "looks not so good for this game"): research CoH's
+      explosions (a fast bright flash, a dirt column / clods thrown up, a
+      dark lingering smoke, debris), then replace the flipbook (combatFx /
+      explosionField) — dust-coloured for this desert, black for vehicles
+      burning, grey-white for buildings; fires that burn and smoke for a
+      while. Measure the cost.
 - [x] **THE HENS in alg (2026-10-01, algHens.js)**: your bird-lab hens
       (birdMorph white / speckled / black, 40/35/25%) — 25 round the village
       houses (a third of them) and 4 in each farmstead's yard, at 1.3×, on
@@ -1284,7 +1321,7 @@ lift off the pad; the ALN comes out of the cave mouth.
    - [x] (2026-10-01: ridgeLOS) Line of sight for vision (ridges hide the far side), as for fire.
    - [x] (2026-09-30: algSounds.js) Sound (nam's recordings are there: rifle, MG, cannon, Huey…).
 4h. [x] N shows the NAV GRID (as nam), and Dev → Navigation → "Nav grid (N)".
-   - [ ] The post and the motor pool have no health bar yet; the helipad
+   - [x] (STALE, checked 2026-10-01: both show their bar when hurt or selected; the helipad is a producer) The post and the motor pool have no health bar yet; the helipad
          (the Alouette lands and takes off) and the other buildings are not
          selectable yet. Set rally by right-click with a building selected.
    - [ ] A vehicle appears INSIDE the open bay (as the man in the
@@ -1293,7 +1330,7 @@ lift off the pad; the ALN comes out of the cave mouth.
        toward the ALN), our post at the bottom. The world square is diagonal
        to that view, so it reads as a diamond; the view is a trapezoid
        (far edge capped at 2.5x the near one), not a wedge to the horizon.
-   - [ ] Next: vehicles as units (motor pool rolls them out through its
+   - [x] (STALE, done 2026-09-27 91d2f47: a jeep rolled out of the doors in the 2026-10-01 check) Next: vehicles as units (motor pool rolls them out through its
          own doors, helipad helicopters), set-rally-point by right-click,
          and the HQ/post card's own labels (still nam's).
    - [x] (2026-10-01: the minimap IS the diamond now, 236 px) Minimap diamond uses 71% of the square — if it reads too small,

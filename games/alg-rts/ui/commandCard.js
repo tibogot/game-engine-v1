@@ -52,6 +52,9 @@ export function createCommandCard({
     #rts-cmd-card button.poor { opacity: 0.45; }
     #rts-cmd-card button.poor:hover { background: #252920; border-color: #454c3a; }
     #rts-cmd-card button.poor .cc-cost { color: var(--hud-red); }
+    #rts-cmd-card button.locked { opacity: 0.45; cursor: not-allowed; }
+    #rts-cmd-card button .cc-lock { display: block; font-size: 9px; color: var(--hud-dim); margin-top: 2px; letter-spacing: 0.02em; }
+    #rts-cmd-card button.tier { border-color: var(--hud-brass); color: #f1dfa6; }
     #rts-cmd-card .cc-bar { height: 4px; background: #23261d; border: 1px solid #3a4031; overflow: hidden; }
     #rts-cmd-card .cc-bar i { display: block; height: 100%; width: 0%; background: var(--hud-brass); }
     #rts-cmd-card .cc-queue { display: flex; gap: 4px; flex-wrap: wrap; min-height: 16px; }
@@ -177,17 +180,22 @@ export function createCommandCard({
       <div class="cc-queue" id="cc-queue"></div>
       <div class="cc-actions">
         ${opts.map((b) => `
-          <button data-build="${b.key}" data-cost="${b.cost ?? 0}">
-            ${b.label}${b.cost ? `<span class="cc-cost">${b.cost}</span>` : ""}
+          <button data-build="${b.key}" data-cost="${b.cost ?? 0}" class="${b.locked ? "locked" : ""}${b.tier ? " tier" : ""}"
+            title="${(b.locked ? `Locked — ${b.locked}` : b.tip ?? "").replace(/"/g, "&quot;")}">
+            ${b.label}${b.locked ? `<span class="cc-lock">${b.locked}</span>` : b.cost ? `<span class="cc-cost">${b.cost}</span>` : ""}
           </button>`).join("")}
       </div>
     `;
     for (const b of opts) {
       root.querySelector(`[data-build="${b.key}"]`)
-        .addEventListener("click", () => onBuild(s, b.key));
+        .addEventListener("click", () => { if (!b.locked) onBuild(s, b.key); });
     }
+    prodSig = JSON.stringify(opts);
     refreshAffordability();
   }
+  // The card's options change under it (a tier unlocks when a village is
+  // taken): re-render when they do (checked twice a second, not per frame).
+  let prodSig = "", prodT = 0;
 
   /**
    * Grey out what the player can't pay for. Called on render AND every frame from
@@ -284,6 +292,10 @@ export function createCommandCard({
     refreshStance();
     if (!baseRef) return;
     refreshAffordability();
+    if (performance.now() - prodT > 500) {
+      prodT = performance.now();
+      if (JSON.stringify(productionFor(baseRef)) !== prodSig) { renderProducer(baseRef); return; }
+    }
     const prog = root.querySelector("#cc-prog");
     const queue = root.querySelector("#cc-queue");
     if (prog) prog.style.width = `${Math.round((baseRef.progress ?? 0) * 100)}%`;

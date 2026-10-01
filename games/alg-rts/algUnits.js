@@ -28,6 +28,7 @@ import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { COSTS, createAlgEconomy } from "./algEconomy.js";
+import { createAlgTiers } from "./algTiers.js";
 import { BUILD_BUTTONS, BUILD_COSTS, canBuild, createAlgBuild } from "./algBuild.js";
 import { createAlgSearchlights } from "./algSearchlight.js";
 import { createResourceHud } from "./ui/resourceHud.js";
@@ -66,11 +67,19 @@ const FR_VEHICLES = {
  * piece leaves the scene (and the showroom list) and a unit of the same key
  * spawns on its spot, facing its way (a vehicle's front is +Z).
  */
+// A LEAN START, Company of Heroes style (you, 2026-10-01): the post starts
+// with its infantry, a sapeur and the jeep; the trucks, the half-track, the
+// armour and the Alouette come with the TIERS (algTiers.js). ?army=full
+// starts with the whole park, as before.
+const START_VEHICLES = typeof location !== "undefined" && new URLSearchParams(location.search).get("army") === "full"
+  ? null : new Set(["willys"]);
+
 function takeOverVehicles(app, units, showroom) {
   let n = 0;
   for (const key of Object.keys(ALG_UNIT_TYPES)) {
     const o = ALG_UNIT_TYPES[key].procedural && showroom?.[key];
     if (!o?.isObject3D) continue;
+    if (START_VEHICLES && !START_VEHICLES.has(key)) { o.removeFromParent(); delete showroom[key]; continue; }
     const u = units.spawn(key, o.position.x, o.position.z);
     if (!u) continue;
     u.faceToward(u.position.x + Math.sin(o.rotation.y), u.position.z + Math.cos(o.rotation.y));
@@ -156,6 +165,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     const col = (i % 4) - 1.5, row = Math.floor(i / 4);
     const p = navGrid.nearestOpenWorld(muster.x + fx * row * 3.2 + rx * col * 3.2, muster.z + fz * row * 3.2 + rz * col * 3.2, true) ?? { x: muster.x, z: muster.z };
     units.spawn("appele", p.x, p.z);
+  }
+  // …and a sapeur beside them (the lean start: he digs the post's defences).
+  {
+    const p = navGrid.nearestOpenWorld(muster.x + rx * 9, muster.z + rz * 9, true) ?? { x: muster.x, z: muster.z };
+    units.spawn("sapeur", p.x, p.z);
   }
 
   // FOG OF WAR (the shared vision grid, as nam): what the French see — every
@@ -274,6 +288,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     sites: LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind)).map((s) => ({ ...s, ...villageCentre(s, showroom) })),
   });
   app.algEconomy = economy;
+  // THE FRENCH TIERS (algTiers.js): unlocked from the post's card.
+  const tiers = createAlgTiers(app, { economy });
+  app.algTiers = tiers;
   for (const p of producers) p.structure.pay = (key) => economy.purses[p.structure.team].spend(COSTS[key] ?? 0);
   // A faint ring round each village in its holder's colour (the shared ring
   // field: a thin band on a big circle).
@@ -300,9 +317,27 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       app.rtsCamera?.focusOn(sel.reduce((s, u) => s + u.position.x, 0) / sel.length, sel.reduce((s, u) => s + u.position.z, 0) / sel.length);
     },
     // What a selected structure produces (PRODUCTION), labelled by unit name.
-    productionFor: (s) => Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => ({ key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: COSTS[key] ?? 0 })),
+    // Locked units show greyed with what unlocks them (algTiers.js); the
+    // post's card also carries the NEXT TIER's button.
+    productionFor: (s) => {
+      const list = Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => {
+        const need = s.team === "player" ? tiers.needs(key) : 1;
+        return { key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: COSTS[key] ?? 0,
+          locked: need > tiers.tier ? `Tier ${need}: ${tiers.TIERS[need - 1].name}` : null };
+      });
+      const nx = tiers.next();
+      if (s.typeKey === "post" && nx) {
+        const why = tiers.blockedBy(nx);
+        list.push({
+          key: "tier", label: `▲ ${nx.name}`, cost: nx.cost, tier: true,
+          locked: why && !why.endsWith("supplies") ? why : null,
+          tip: `Tier ${nx.n}: ${nx.note}. Needs ${nx.villages} village${nx.villages > 1 ? "s" : ""} held.`,
+        });
+      }
+      return list;
+    },
     canAfford: (cost) => economy.french.canAfford(cost),
-    onBuild: (s, key) => s.enqueue(key),
+    onBuild: (s, key) => { if (key === "tier") { if (tiers.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (tiers.unlocked(key) || s.team !== "player") s.enqueue(key); },
     // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
     structureBuilds: BUILD_BUTTONS,
     buildingCosts: BUILD_COSTS,
