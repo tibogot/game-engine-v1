@@ -87,7 +87,7 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          still.
    - [ ] **you, look**: the oasis meadows from default and max zoom; the
          hand-over from blades; the near oasis without its dirt patches.
-- [ ] **GROUND SHARPNESS — the cache loses detail with distance** (you: "CoH
+- [x] **GROUND SHARPNESS — the cache loses detail with distance** (you: "CoH
       looks really good resolution"). MEASURED 2026-10-01, same frame, cache
       vs live paint (?gc=0, mips + anisotropic): the cache keeps 64% of the
       fine detail at the top of the screen, 75% mid, 88% near. Cause: the
@@ -120,7 +120,9 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          NOT done (far edge 50 m vs ring 1's 41 m reach — no gain, re-bakes).
    - [ ] **you, look** in the game: crispness, shimmer, the grain on the
          ground (too strong? uDetail is live: __ALG.groundCache.uDetail.value).
-   - [ ] nam: move its camera to addPreUpdateHook (it is inside its tick).
+   - [x] nam: its camera (+ foliage thinning) moved to addPreUpdateHook.
+         Checked: panning 0.9 m a frame, the plant field's camera = the real
+         camera on every frame (gap 0; was one frame behind).
 - [x] DRAW CALLS (you: "~293 at the base, is it plenty?"): 287-310 a frame =
       tall plants 84 (4 species × 3 variants × 3 details, depth pre-pass +
       colour, + shadows), VEHICLES ~68 (6 types × body/gear/stencil + x-ray
@@ -140,8 +142,9 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          7 render passes + 7 submits a tile become 2 (21 → 6 a panning
          frame). Output BYTE-IDENTICAL (layer cleared, both paths baked,
          colour + normal read back, rings 0/2/4: max diff 0). The ms saved
-         is not measured yet — the GPU latch came back mid-A/B (780 MHz,
-         15 W); first noisy read −5 ms at default zoom, a wash at max.
+         MEASURED CLEAN (GPU 1.8-2.1 GHz, interleaved, panning 40 m/s):
+         default zoom 13.2 → 11.6 ms (−1.7 min / −1.9 mean), max zoom −0.2 /
+         −1.1. Panning now costs ~1.5-2 ms over still (was ~3).
 - [ ] Static shadows into the cache: NOT worth it now — the whole shadow map
       measured ≤0.5-1 ms in every A/B of this audit (the bar was 1.5 ms).
 - [x] PERF PANEL (Dev → Performance, gpuBench.js): **Check GPU health**

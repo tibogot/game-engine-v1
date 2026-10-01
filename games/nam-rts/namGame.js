@@ -1238,11 +1238,20 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
       if (!_tickErred.has(name)) { _tickErred.add(name); console.error(`[nam] ${name} threw:`, err, "\n", err?.stack ?? ""); }
     }
   };
+  // THE CAMERA MOVES AT THE START OF THE FRAME (app.addPreUpdateHook,
+  // 2026-10-01, as alg-rts): the engine's terrain clipmap, plant fields
+  // (culling, LOD, shadow circle) and shadow fit read the camera BEFORE the
+  // pre-render hooks run — moved in `tick`, they all drew a frame behind it
+  // while panning (things at the screen's edge appeared a frame late).
+  const cameraTick = (dt) => {
+    guard("rtsCamera", () => { rtsCamera.update(dt); });                 // input, at the real frame rate
+    guard("setFoliageThin", () => { app.setFoliageThin?.(foliageKeepAt(rtsCamera.getView().zoomT)); });
+  };
+  if (app.addPreUpdateHook) app.addPreUpdateHook(cameraTick);
   const tick = (dt) => {
     const tickStart = performance.now();
     renderTime += dt;
-    guard("rtsCamera", () => { rtsCamera.update(dt); });                 // input, at the real frame rate
-    guard("setFoliageThin", () => { app.setFoliageThin?.(foliageKeepAt(rtsCamera.getView().zoomT)); });
+    if (!app.addPreUpdateHook) cameraTick(dt);
     guard("sim", () => { sim.advance(dt, simStep); });
     guard("fogOfWar", () => { fogOfWar.update(dt); });                  // vision grid → GPU shroud texture
     guard("resourceRenderer", () => { resourceRenderer.sync(); });              // only rewrites when a node visibly drains
