@@ -488,6 +488,10 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     // only spare channel): brown, and opaque to the backlight below.
     const dead = vRand.greaterThan(1.5);
     leaf.assign(select(dead, vec3(0.62, 0.42, 0.17).mul(float(0.85).add(vHeight.mul(0.3))), leaf));
+    // FRUIT (rand ≥ 3, the prickly pear's figs — foliageGeometry buildOpuntia):
+    // the type's colorBase, which a plant drawn in its head colour leaves free.
+    // Brightest at the top, where the sun hits (vHeight 0.9 there).
+    leaf.assign(select(vRand.greaterThan(2.9), r0.xyz.mul(float(0.8).add(vHeight.mul(0.25))), leaf));
     // The stalk: only a little paler and yellower than the blade, and as
     // dark as the blade toward the crown.
     const stem = mix(r1.xyz, vec3(0.72, 0.8, 0.4), float(0.5))

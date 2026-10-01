@@ -29,8 +29,12 @@ import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliag
 import { createFoliageMaterial, makeCardTexture } from "./foliageSystem.js";
 
 const ROWS = 4;
-/** Types one PlacedFoliage can hold (the uniform array is fixed-size). */
-const MAX_TYPES = 8;
+/**
+ * Types one PlacedFoliage can hold (the uniform array is fixed-size). 8 → 12
+ * (2026-10-01: alg-rts reached 8 with the agave; its flower mast is a 9th).
+ * 48 vec4 uniforms: nothing next to the 4096 a uniform buffer holds.
+ */
+const MAX_TYPES = 12;
 
 export class PlacedFoliage {
   /**

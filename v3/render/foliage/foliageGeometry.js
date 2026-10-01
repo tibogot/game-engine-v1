@@ -103,6 +103,11 @@ const LEAF_ROUNDING = {
   // Each pandanus tuft is a star of swords high on the plant: round a little,
   // from about its tufts' height, so the lit tops and hanging undersides read.
   pandanus:  [0.75, 0.35],
+  // The agave's thick leaves carry their own V-section normals (the lit and
+  // shaded halves of each leaf ARE its look): round only a little, so the
+  // rosette still shades as one mass.
+  agave:     [0.3, 0.22],
+  agaveMast: [0.6, 0.15],
 };
 
 function roundLeafNormals(type, P, N, A) {
@@ -232,6 +237,8 @@ export function createFoliageTypeGeometry(type, { lod = 0, variant = 0 } = {}) {
   if (type.kind === "atlasCedar") return buildAtlasCedar(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "pandanus") return buildPandanus(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "opuntia") return buildOpuntia(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "agave") return buildAgave(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "agaveMast") return buildAgaveMast(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
     const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : type.kind === "susuki" ? "fan" : "plume";
@@ -828,6 +835,151 @@ function buildOpuntia(type, { near, far, rand, push, vcount, I, finish }) {
     front = next;
   }
   for (const p of all) pad(p.c, p.up, p.face, p.len, p.wid, p.thick, p.tone);
+  // THE FRUIT (figues de barbarie, late summer): small eggs along the upper
+  // rims of the top pads — what makes a hedge read alive, not green paddles.
+  // A leaf part flagged FRUIT (rand ≥ 3): foliageSystem colours it with the
+  // type's colorBase, which the pads (head colour) leave free. (The "dead"
+  // leaf brown read pale cream: a linear colour, shown in sRGB.)
+  if (!far && (type.fruit ?? 0) > 0) {
+    const top = all.filter((p) => p.tone >= (tiers - 1) / tiers - 1e-6);
+    const fseg = near ? 6 : 4, frings = near ? 4 : 3;
+    for (const p of top) {
+      const nF = Math.round(type.fruit * (0.6 + rand() * 0.8));
+      const side = norm(cross(p.up, p.face));
+      for (let k = 0; k < nF; k++) {
+        // Round the pad's upper rim: an angle across its top half.
+        const a = (k + 0.5) / nF * Math.PI - Math.PI / 2 + (rand() - 0.5) * 0.3;
+        const rim = add(add(p.c, p.up, Math.cos(a) * p.len * 0.95), side, Math.sin(a) * p.wid * 0.95);
+        const out = norm(add(add([0, 0, 0], p.up, Math.cos(a)), side, Math.sin(a)));
+        const fl = p.len * 0.3, fw = fl * 0.62;
+        const c = add(rim, out, fl * 0.7);
+        const fn = norm(cross(out, p.face));
+        const base = vcount();
+        for (let r = 0; r <= frings; r++) {
+          const th = (r / frings) * Math.PI;
+          for (let s2 = 0; s2 < fseg; s2++) {
+            const ph = (s2 / fseg) * Math.PI * 2;
+            const ex = Math.cos(th), ey = Math.sin(th) * Math.cos(ph), ez = Math.sin(th) * Math.sin(ph);
+            const q = add(add(add(c, out, ex * fl), fn, ey * fw), p.face, ez * fw);
+            const nn = norm([0, 1, 2].map((i) => out[i] * ex / fl + fn[i] * ey / fw + p.face[i] * ez / fw));
+            push(q, nn, 0.25, 0.5, [0, 0.9, 3.2, 0]);   // rand 3.2: FRUIT (foliageSystem: colorBase)
+          }
+        }
+        for (let r = 0; r < frings; r++) for (let s2 = 0; s2 < fseg; s2++) {
+          const a0 = base + r * fseg + s2, b0 = base + r * fseg + ((s2 + 1) % fseg);
+          I.push(a0, a0 + fseg, b0, b0, a0 + fseg, b0 + fseg);
+        }
+      }
+    }
+  }
+  return finish();
+}
+
+/**
+ * AGAVE (Agave americana) — the big blue-grey rosette planted along every
+ * farm track and hedge in the Maghreb: 20-30 thick, stiff, V-section leaves
+ * from one root, the inner ones standing up, the outer ones spreading and
+ * arching their tips down, a few old ones folded over at mid-length. Solid
+ * geometry throughout (part 2, the head colour; `along` 0 at the root, 1 at
+ * the spine, so the leaves pale toward their tips). Unit frame (height ~1).
+ *   fronds  leaves
+ */
+function buildAgave(type, { near, far, rand, push, vcount, I, finish }) {
+  const leaves = Math.max(8, Math.round((type.fronds ?? 26) * (far ? 0.4 : near ? 1 : 0.7)));
+  const rings = far ? 3 : near ? 7 : 5;
+  const L0 = type.frondLength ?? 1;
+  for (let l = 0; l < leaves; l++) {
+    const age = l / (leaves - 1);                       // 0 inner/young … 1 outer/old
+    const az = l * 2.39996 + rand() * 0.4;
+    const elev = (1.35 - age * 1.0) + (rand() - 0.5) * 0.15;     // up in the middle, out at the rim
+    const curl = 0.15 + age * 0.75;                     // the tip bends down this much more
+    const fold = age > 0.6 && rand() < 0.22;            // an old leaf broken over
+    const len = L0 * (0.62 + age * 0.38) * (0.85 + rand() * 0.3);
+    const W = len * (0.14 + rand() * 0.03), thick = W * 0.45;
+    const out = [Math.cos(az), 0, Math.sin(az)];
+    const side = [-Math.sin(az), 0, Math.cos(az)];
+    // Walk the leaf: its spine bends as it goes.
+    let p = [out[0] * 0.03, 0.02, out[2] * 0.03];
+    const base = vcount();
+    for (let r = 0; r <= rings; r++) {
+      const t = r / rings;
+      let e = elev - curl * t * t;
+      if (fold && t > 0.55) e -= 1.6 * (t - 0.55) / 0.45;   // snapped down past the middle
+      const dir = norm([out[0] * Math.cos(e), Math.sin(e), out[2] * Math.cos(e)]);
+      if (r > 0) p = add(p, dir, len / rings);
+      const up = norm(cross(side, dir));                // the leaf's face normal (up-ish)
+      const w = W * Math.pow(1 - t, 0.75) * (0.75 + 0.25 * Math.min(1, t * 4));
+      const th = thick * (1 - t * 0.85);
+      // The section: edge, the V's floor (top face dips), edge, the keel below.
+      const sec = [
+        [add(p, side, -w), norm(add(up, side, -0.6))],
+        [add(p, up, -th * 0.35), up],
+        [add(p, side, w), norm(add(up, side, 0.6))],
+        [add(p, up, -th), norm([-up[0], -up[1], -up[2]])],
+      ];
+      for (const [q, n] of sec) push(q, n, 0.25, 0.5, [2, t, rand(), t]);
+    }
+    for (let r = 0; r < rings; r++) {
+      const a = base + r * 4, b = a + 4;
+      // top: L-C-R, bottom: L-K-R
+      I.push(a, b, a + 1, a + 1, b, b + 1, a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
+      I.push(a, a + 3, b, b, a + 3, b + 3, a + 3, a + 2, b + 3, b + 3, a + 2, b + 2);
+    }
+  }
+  return finish();
+}
+
+/**
+ * AGAVE MAST — the flower stalk an agave sends up once, at the end of its
+ * life: a straight pole 5-7 m tall, short arms in its upper third like a
+ * candelabrum, each holding a clump of (late-summer, drying) flowers. Placed
+ * beside one agave in a few (alg-rts algLandmarks.js). Stalk = part 1, the
+ * clumps = part 2 (colorHead). Unit frame (height 1).
+ */
+function buildAgaveMast(type, { near, far, rand, push, vcount, I, finish }) {
+  const sides = far ? 4 : 6;
+  const tube = (a, b, r0, r1, part) => {
+    const d = norm([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+    const u = norm(cross(d, Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0])), v = norm(cross(d, u));
+    const base = vcount();
+    for (const [p, r, t] of [[a, r0, 0], [b, r1, 1]]) {
+      for (let s = 0; s < sides; s++) {
+        const ph = (s / sides) * Math.PI * 2, n = norm(add(add([0, 0, 0], u, Math.cos(ph)), v, Math.sin(ph)));
+        push(add(p, n, r), n, s / sides, t, [part, t, 0.3, 0]);
+      }
+    }
+    for (let s = 0; s < sides; s++) {
+      const s1 = (s + 1) % sides;
+      I.push(base + s, base + sides + s, base + s1, base + s1, base + sides + s, base + sides + s1);
+    }
+  };
+  const lean = [(rand() - 0.5) * 0.06, 1, (rand() - 0.5) * 0.06];
+  const top = norm(lean).map((c) => c * 1.0);
+  tube([0, 0, 0], top, 0.012, 0.005, 1);
+  const arms = far ? 6 : 11;
+  for (let k = 0; k < arms; k++) {
+    const f = 0.6 + (k / arms) * 0.36;
+    const at = top.map((c) => c * f);
+    const az = k * 2.39996 + rand() * 0.3, reach = 0.05 + (1 - (f - 0.6) / 0.4) * 0.05;
+    const tip = add(at, [Math.cos(az), 0.35, Math.sin(az)], reach);
+    if (!far) tube(at, tip, 0.004, 0.003, 1);
+    // The clump: a squashed ball, the flowers' colour.
+    const cr = 0.022 + rand() * 0.01, segs = far ? 4 : 6, rings = far ? 2 : 4;
+    const c = add(tip, [0, cr * 0.6, 0]);
+    const base = vcount();
+    for (let r = 0; r <= rings; r++) {
+      const th = (r / rings) * Math.PI;
+      for (let s = 0; s < segs; s++) {
+        const ph = (s / segs) * Math.PI * 2;
+        const n = [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)];
+        push(add(c, [n[0] * cr * 1.3, n[1] * cr * 0.8, n[2] * cr * 1.3]), n, 0.25, 0.5, [2, 1, 0.5, 0.3 + 0.7 * (1 - r / rings)]);
+      }
+    }
+    for (let r = 0; r < rings; r++) for (let s = 0; s < segs; s++) {
+      const a0 = base + r * segs + s, b0 = base + r * segs + ((s + 1) % segs);
+      I.push(a0, a0 + segs, b0, b0, a0 + segs, b0 + segs);
+    }
+  }
   return finish();
 }
 
@@ -907,20 +1059,35 @@ function buildLeafy(type, { near, far, rand, push, vcount, I, finish, bush }) {
       // texture's solid middle, so they draw as solid colour, not a leaf
       // outline). Kept on the far level too — from the RTS camera the pink
       // is the whole point of an oleander line.
-      const fl = Math.round((type.flowers ?? 0) * (far ? 0.5 : 1));
+      //
+      // Each FLOWER is a real blossom: five rounded petals as a lobed star
+      // (a fan of triangles round a darker centre — `along` 0 at the heart,
+      // 1 at the petal tips, which the head colour ramps over), turned out
+      // and up from the cluster's middle. Two crossed flat quads per flower
+      // read as pink paper squares close up (you, 2026-10-01). A cane's
+      // cluster has `flowers` × 2 of them, bunched in a dome at its top.
+      // Petals EXAGGERATED (~10 cm across on a 3.6 m bush) so the pink
+      // still reads from the RTS camera.
+      const fl = Math.round((type.flowers ?? 0) * (far ? 1.5 : 3));
+      const lobes = far ? 3 : 5, steps = lobes * 2;
       for (let k = 0; k < fl; k++) {
-        const r = size * 0.1;
-        const c = add(top, [(rand() - 0.5) * r * 2, (rand() - 0.3) * r, (rand() - 0.5) * r * 2]);
-        const a = rand() * Math.PI;
-        const s = r * (0.4 + rand() * 0.25);
-        for (const q of [0, Math.PI / 2]) {
-          const d = [Math.cos(a + q), 0, Math.sin(a + q)];
-          const b = vcount();
-          for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-            push(add(add(c, d, dx * s), [0, 1, 0], dy * s), [0, 1, 0], 0.25, 0.5, [2, 1, 0.5, 0.5]);
-          }
-          I.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        const r = size * 0.11;
+        const off = [(rand() - 0.5) * r * 2, (rand() - 0.2) * r, (rand() - 0.5) * r * 2];
+        const c = add(top, off);
+        const n = norm(add(off, [0, 1, 0], r * 1.5));                // facing out of the dome
+        const u = norm(cross(n, [0.3, 0.1, 1]));
+        const v2 = norm(cross(n, u));
+        const s = r * (0.42 + rand() * 0.18);    // big enough to carry the pink at play zoom
+        const spin = rand() * Math.PI * 2;
+        const b = vcount();
+        push(add(c, n, s * 0.12), n, 0.25, 0.5, [2, 1, 0.5, 0]);       // the heart, a little raised
+        for (let q = 0; q < steps; q++) {
+          const a = spin + (q / steps) * Math.PI * 2;
+          const rr = q % 2 === 0 ? s : s * 0.55;                      // petal tip / notch
+          const p = add(add(c, u, Math.cos(a) * rr), v2, Math.sin(a) * rr);
+          push(p, n, 0.25, 0.5, [2, 1, 0.5, q % 2 === 0 ? 1 : 0.6]);
         }
+        for (let q = 0; q < steps; q++) I.push(b, b + 1 + q, b + 1 + ((q + 1) % steps));
       }
     }
     return finish();

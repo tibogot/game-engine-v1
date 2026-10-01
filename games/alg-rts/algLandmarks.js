@@ -87,6 +87,8 @@ export function landmarkEntries(app, list) {
 const Q = {
   outcrops: 42, outcropSpacing: 34, outcropSlope: [9, 32],   // degrees
   trees: 24, treeSpacing: 55,
+  mastShare: 0.13,        // agaves with their flower mast
+  agaveRun: 0.35,         // chance of a row at a track point near a village
   clear: 8,               // m from tracks, fields, pieces
 };
 
@@ -176,10 +178,55 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     }
   }
 
+  // ── Agaves: planted by people — a row before each farmstead's yard, short
+  // rows along the pistes near the villages; one in ~8 has its flower mast ──
+  const agaves = [];
+  // `byFarm`: the farmstead's own footprint is in `taken` — its row skips that test.
+  const plantAgave = (x, z, byFarm = false) => {
+    if (byFarm ? ((app.getWaterLevelAt?.(x, z) ?? -Infinity) > H(x, z) - 0.3 || navGrid?.isBlockedAtWorld?.(x, z) || nearTrack(x, z, 4)) : !free(x, z, 1.2)) return;
+    if (slopeDeg(x, z) > 22) return;
+
+    if (agaves.some((a) => Math.hypot(a.x - x, a.z - z) < 2.2)) return;
+    agaves.push({ x, z, mast: R() < Q.mastShare });
+    taken.push({ x, z, r: 1.4 });
+  };
+  for (const [key, m] of Object.entries(showroom)) {
+    if (!/^mechtaFarm/.test(key) || !m?.parent) continue;
+    const c = Math.cos(m.rotation.y), s = Math.sin(m.rotation.y);
+    for (let lx = -8; lx <= 12; lx += 2.6 + R() * 0.8) {
+      const lz = -10.5 + (R() - 0.5) * 1.2;
+      plantAgave(m.position.x + lx * c + lz * s, m.position.z - lx * s + lz * c, true);
+    }
+  }
+  const villages = LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind));
+  for (const t of TRACK_LINES) {
+    for (let i = 2; i < t.line.length - 2; i += 9) {
+      const p = t.line[i], q0 = t.line[i - 1];
+      if (!villages.some((v) => Math.hypot(v.x - p.x, v.z - p.z) < 170) || R() > Q.agaveRun) continue;
+      const tx = p.x - q0.x, tz = p.z - q0.z, tl = Math.hypot(tx, tz) || 1, side = R() < 0.5 ? 1 : -1;
+      const n = 3 + Math.floor(R() * 4);
+      for (let k = 0; k < n; k++) {
+        const along = k * 2.6;
+        plantAgave(p.x + (tx / tl) * along + (tz / tl) * 6.5 * side, p.z + (tz / tl) * along - (tx / tl) * 6.5 * side);
+      }
+    }
+  }
+  if (plants) {
+    if (!plants.types.has("agave")) plants.setType("agave", structuredClone(FOLIAGE_PRESETS.agave));
+    const masts = plants.types.has("agaveMast") || plants.types.size < 12;
+    if (masts && !plants.types.has("agaveMast")) plants.setType("agaveMast", structuredClone(FOLIAGE_PRESETS.agaveMast));
+    for (const a of agaves) {
+      const y = H(a.x, a.z) - 0.08;
+      plants.add("agave", a.x, y, a.z, { rotY: R() * 6.28, scale: 0.8 + R() * 0.45, seed: R() });
+      if (a.mast && masts) plants.add("agaveMast", a.x + 0.2, y, a.z, { rotY: R() * 6.28, scale: 0.85 + R() * 0.3, seed: R() });
+      app.clearVegetation?.(a.x, a.z, 1.8, { grass: 0, edge: 0.6 });
+    }
+  }
+
   return {
-    rocks, trees, meshes,
+    rocks, trees, meshes, agaves,
     /** Hard cover round the outcrops, for the cover bake (algCover.js). */
     *coverCircles() { for (const r of rocks) yield { x: r.x, z: r.z, radius: 2.4 * r.k, size: 1, hard: true }; },
-    stats: { outcrops: rocks.length, trees: trees.length },
+    stats: { outcrops: rocks.length, trees: trees.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length },
   };
 }

@@ -11,7 +11,7 @@ export const FOLIAGE_TYPE_COUNT = 8;
 /** Shape keys — changing one of these rebuilds that type's meshes. */
 export const FOLIAGE_GEOMETRY_KEYS = [
   "kind", "fronds", "frondLength", "leaflets", "leafletWidth", "leafletAngle", "spread", "arch", "droop", "stemWidth", "bareStalk",
-  "plumesPerStem", "plumeSpread", "crownDepth", "crownShade",
+  "plumesPerStem", "plumeSpread", "crownDepth", "crownShade", "fruit", "flowers",
 ];
 
 /** Height band that means "no limit" (the full slider range). */
@@ -395,7 +395,27 @@ export const FOLIAGE_PRESETS = {
     kind: "opuntia",
     fronds: 4, frondLength: 1.0, leaflets: 4, leafletWidth: 1, leafletAngle: 0,
     spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
-    colorBase: "#61744a", colorTip: "#7d8e58", colorHead: "#6c8050", size: 2.2, translucency: 0.15,
+    // fruit: per top pad (late-summer figues de barbarie, foliageGeometry
+    // buildOpuntia); colorBase IS the fruit colour (the pads are colorHead).
+    fruit: 2,
+    colorBase: "#b04a2c", colorTip: "#7d8e58", colorHead: "#6c8050", size: 2.2, translucency: 0.15,
+  },
+  // AGAVE (Agave americana) — the big blue-grey rosette along every farm
+  // track and hedge of the Maghreb (foliageGeometry buildAgave). Placed by the
+  // game, not painted (alg-rts algLandmarks.js).
+  agave: {
+    kind: "agave",
+    fronds: 26, frondLength: 1.0, leaflets: 1, leafletWidth: 1, leafletAngle: 0,
+    spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
+    colorBase: "#5d7468", colorTip: "#86a094", colorHead: "#7f9a90", size: 2.0, translucency: 0.1,
+  },
+  // Its flower mast: once in an agave's life, a 6 m candelabrum (late
+  // summer: the flowers drying to ochre).
+  agaveMast: {
+    kind: "agaveMast",
+    fronds: 1, frondLength: 1.0, leaflets: 1, leafletWidth: 1, leafletAngle: 0,
+    spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
+    colorBase: "#6b5a3e", colorTip: "#8a7550", colorHead: "#b8963e", size: 6.0, translucency: 0.05,
   },
   // DWARF FAN PALM (Chamaerops humilis, the "doum") — the knee-to-chest-high
   // clump of stiff grey-green fans that covers the Maghreb's dry hillsides.

@@ -203,6 +203,27 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
+- [x] **FLOWERS + SMALL PLANTS, round 1** (2026-10-01; you: "the pink flowers
+      are flat quads; still Algeria; the cactus"). Season kept: LATE SUMMER.
+      · OLEANDER: real blossoms — 5-petal lobed stars (a fan round a darker
+        heart), ~6 a cane in a dome, petals exaggerated so the pink carries
+        at play zoom (foliageGeometry buildLeafy `flowers`; were two crossed
+        flat quads per flower).
+      · PRICKLY PEAR: red-orange FRUIT along the top pads' rims (`fruit`: 2
+        a pad; a leaf part flagged rand ≥ 3 takes the type's colorBase —
+        foliageSystem, opt-in, nothing else sets it; the "dead leaf" brown
+        read pale cream). Map re-generated (algVegetation) for the painted.
+      · AGAVE (new kinds `agave` + `agaveMast`, foliageGeometry): blue-grey
+        rosette of thick V-section leaves, outer ones arching, a few folded;
+        the mast a 6 m candelabrum with drying ochre clumps. PLACED, not
+        painted (they're planted by people): a row before each farmstead's
+        yard, short rows along the pistes near the villages; 28 agaves, 5
+        masts (algLandmarks.js). PlacedFoliage MAX_TYPES 8 → 12 (alg hit 8).
+   - [ ] next (you picked 1-3 of 5): colour drifts on the open ground —
+         thistles (purple), asphodel (white / dry), yellow broom; then low
+         cushions (thyme, lavender, cistus). 2 painted slots are free.
+   - [ ] you, look: the oleander pink at play zoom, the fruit density, the
+         agave colour and size, the mast (thin; taller?).
 - [x] **THE LAND BETWEEN THE VILLAGES** (2026-10-01, algLandmarks.js; you:
       wires, farmsteads + ruins, outcrops + lone trees). MEASURED: on vs off
       (outcrops + the 7 pieces) +0.06 ms (noise 0.06); the whole frame at
