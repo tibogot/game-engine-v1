@@ -690,6 +690,61 @@ skinned to it) → judged in `games/shared-rts/soldier-lab.html`. In alg-rts
       group; HUD text no longer selects on a drag, a clicked button gives
       its focus back (Space no longer re-presses it).
    - [ ] **you, look**: a section of 30 in battle mix, from the RTS view
+- [x] **GRIP EDITOR** (you, 2026-10-01: "fine-tune the weapons in the hand
+      and on the back"). games/shared-rts/soldierGrips.js holds the hand-placed
+      corrections: per CLIP (baked by the pack into the weapon bone; on
+      aim/fire clips before the arm IK, so the right hand follows the rifle),
+      per WEAPON (baked into its geometry by procWeapons build()), the SLING
+      (baked into its bone). All free in the game. The soldier lab's Grip
+      editor: a gizmo on the first man's weapon (W move / E rotate) or typed cm
+      and °, markers on the palms and the shoulder pocket, close-up views (his
+      right / left / top / over the shoulder); edits kept in the browser,
+      "Copy grips" → paste to Claude → pack. Checked: an empty file packs
+      byte-identical; test grips land exactly (5.00 cm along the barrel,
+      10.00°, sling 3.00 cm); the lab moves the rifle exactly as typed.
+   - [x] **THE HAND POINT** (you, 2026-10-01: "in idle it's perfect but other
+         clips move the gun weirdly"). Measured: your five clip fixes were the
+         SAME fix (~10 cm forward, ~8 up) — the pack grabbed halfway from the
+         wrist to the index knuckle, which on this hand is the WRIST; every
+         unset clip kept it (the rifle jumped 6-14 cm on a clip change), and
+         the aim/fire fixes would have pushed the butt 13 cm off the shoulder
+         once baked (the arm chases the rifle). Now GRIPS.hand: one point in
+         the hand for EVERY clip — a carry hangs the rifle from it, an
+         aim/fire clip bends the arm so it lands on the grip; the lab runs the
+         pack's IK live, so the lab = the bake. Default 6 cm toward the
+         fingers (the stock wrist through the middle of the fist, close-up).
+         Checked: pack — every clip's keys shift exactly 6.00 cm, the 4 aim
+         clips re-bend the arm; lab — the hand point on the grip to 0.00 cm in
+         every clip, paused or playing (a paused mixer kept last frame's bent
+         arm: fixed). Empty grips still pack byte-identical.
+   - [x] **THE GRIPS SET** (you, 2026-10-01: "why can't you do it yourself?"
+         — Claude did, in the lab, measured + a four-view sheet per clip):
+         the LEFT fist was 5-8.5 cm to his right of the barrel in every clip
+         the hand holds the rifle — the lab's new AUTO-FIT turns each clip so
+         the barrel runs through it (carries in the right fist, aim/fire about
+         the butt so it stays in the shoulder); reload / crawl / posture moves
+         (the left hand lets go) left alone. The SLING lay underside-in, held
+         8 cm off the back by the magazine: rolled flat, 6 cm in. Checked on
+         a test pack, nothing corrected live: right fist on the grip 0.0 cm,
+         left fist 0.0-1.4 cm off the forestock line over every clip; MAT 49
+         and FM 24/29 looked at too. In soldierGrips.js, packed 2026-10-02.
+   - [x] **CLOSE-UP PASS** (you, 2026-10-01: "zoom on the hands, only
+         confirm when it really looks right; the shovel can be better"):
+         · the HAND POINTS measured, not guessed: the middle of each fist's
+           own mesh (right (3.1, 6, 1.6), left (-4.1, 4.2, 1.8) cm in the hand,
+           steady to ~1 cm across clips) — the left hand has its own now;
+         · the SHOVEL: aimed fist to fist (the right hand gripped 20 cm down
+           the shaft, the left on the socket, the blade 7 cm off the ground);
+           the top fist wraps the shaft with the D-grip clear above it, the
+           blade reaches the ground. The shovel MODEL's D-grip floated 2.5
+           cm off the handle: now a crossbar on two arms (procWeapons);
+         · the left-hand auto-fit re-run with the measured fist;
+         · a test that a held line is IN the fist: around it, the fist's
+           skin leaves no gap over 87° on any frame of 12 clips (the first
+           setup: 206-248°, beside the hand). Same on a baked test pack;
+           the shovel bakes to 0.04 cm / 0.16° of the lab's.
+   - [x] re-pack soldiers.glb with them (2026-10-02: lab finds all packed, both fists IN on the real file; the game loads it clean at 60 fps)
+   - [ ] **you, look** in the lab / the game after the re-pack
 - [~] **Weapons in their hands.** Built 2026-09-29: procedural MAS 49/56,
       MAT 49, MAS 36 (games/shared-rts/procWeapons.js, 180–280 tris) on a
       WEAPON bone the pack tool adds under the right hand, aimed per clip at the

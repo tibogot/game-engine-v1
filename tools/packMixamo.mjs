@@ -87,6 +87,9 @@ const { FBXLoader } = await import("three/addons/loaders/FBXLoader.js");
 const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
 const { mergeVertices } = await import("three/addons/utils/BufferGeometryUtils.js");
 const { MeshBVH } = await import("three-mesh-bvh");
+// The hand-placed weapon corrections (the soldier lab's grip editor): per
+// clip into the weapon bone, the sling into its bone — baked here, free in game.
+const { GRIPS, gripMatrix, isZeroGrip } = await import("../games/shared-rts/soldierGrips.js");
 
 // FBXLoader asks for every texture; Node can't decode them and we don't need
 // it to — remember WHICH file each slot asked for and match it to the PNGs.
@@ -425,6 +428,8 @@ const gltf = await new GLTFExporter().parseAsync(root, {
   animations: clips,
   onlyVisible: false,
 });
+// What was baked: the lab's grip editor previews changes on top of it.
+gltf.asset.extras = { ...(gltf.asset.extras ?? {}), grips: { clips: GRIPS.clips, sling: GRIPS.sling, hand: GRIPS.hand ?? null, handLeft: GRIPS.handLeft ?? null, tool: GRIPS.tool ?? null } };
 let bin = Buffer.from(gltf.buffers[0].uri.split(",")[1], "base64");
 delete gltf.buffers[0].uri;
 
@@ -589,6 +594,17 @@ function addWeaponBone() {
 
   // The bone: child of the right hand, world scale 1 (metres).
   const handScale = rh.getWorldScale(new THREE.Vector3()).x;
+  // THE HAND POINT (soldierGrips.js GRIPS.hand): where the fist really
+  // closes, as a shift from the point fitted above (halfway from the wrist to
+  // the index knuckle), in metres along the hand bone's own axes. Every clip
+  // takes it: a carry hangs the rifle from it, an aim/fire clip bends the arm
+  // so it lands on the grip, the crawl drags from it. Zero = as fitted.
+  const HAND = new THREE.Vector3(...(GRIPS.hand?.p ?? [0, 0, 0])).multiplyScalar(0.01);
+  // The LEFT hand's point, the same way in the left hand bone's frame (the
+  // shovel's lower fist).
+  const HAND_L = new THREE.Vector3(...(GRIPS.handLeft?.p ?? GRIPS.hand?.p ?? [0, 0, 0])).multiplyScalar(0.01);
+  const TOOL_OFF = gripMatrix(GRIPS.tool);   // the shovel's correction (identity when none)
+  if (HAND.lengthSq() > 0) console.log(`  hand point: shifted ${JSON.stringify(GRIPS.hand.p)} cm in the hand`);
   const bone = new THREE.Bone();
   bone.name = "mixamorigWeapon";
   bone.position.copy(avg.p).divideScalar(handScale);
@@ -616,6 +632,12 @@ function addWeaponBone() {
     const q = frame(d, new THREE.Vector3(0, 0, -1));                    // sights facing away from the back
     const t = inFrameOf(sp2, new THREE.Vector3(0.05, 1.05, -0.225), q);
     sling.position.copy(t.p); sling.quaternion.copy(t.q); sling.scale.copy(t.sc);
+    // The hand-placed correction (soldierGrips.js), in the slung rifle's own frame.
+    if (!isZeroGrip(GRIPS.sling)) {
+      new THREE.Matrix4().compose(sling.position, sling.quaternion, sling.scale).multiply(gripMatrix(GRIPS.sling))
+        .decompose(sling.position, sling.quaternion, sling.scale);
+      console.log(`  sling: grip correction ${JSON.stringify(GRIPS.sling)}`);
+    }
   }
   sp2.add(sling);
   sling.updateMatrix();
@@ -676,6 +698,31 @@ function addWeaponBone() {
     );
     perClip.set(clip, { held: f.held, spread: f.spread });
   }
+  // The hand-placed corrections (soldierGrips.js) on the clips the IK above
+  // did not take them in: right-multiplied into every key of the weapon
+  // bone, in the weapon's own frame (the bone's world scale is 1: metres).
+  const sBone = 1 / handScale, _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _t = new THREE.Vector3(), _r = new THREE.Quaternion();
+  // The hand point on the same clips: the weapon bone sits in the hand's
+  // frame, so the shift is one constant (hand units = metres / handScale).
+  const handLocal = HAND.clone().multiplyScalar(1 / handScale);
+  for (const clip of clips) {
+    const g = GRIPS.clips[clip.name];
+    const hasG = !isZeroGrip(g), hasH = handLocal.lengthSq() > 0;
+    if (!hasG && !hasH) continue;
+    if (!isAimClip(clip)) {
+      gripMatrix(g).decompose(_t, _r, new THREE.Vector3());
+      const P = clip.tracks.find((tr) => tr.name === `${bone.name}.position`);
+      const Q = clip.tracks.find((tr) => tr.name === `${bone.name}.quaternion`);
+      if (!P || !Q || P.times.length !== Q.times.length) { warn(`  ! ${clip.name}: no weapon keys to correct`); continue; }
+      for (let k = 0; k < P.times.length; k++) {
+        _p.fromArray(P.values, k * 3); _q.fromArray(Q.values, k * 4);
+        _p.add(handLocal);
+        if (hasG) { _p.add(_t.clone().multiplyScalar(sBone).applyQuaternion(_q)); _q.multiply(_r); }
+        _p.toArray(P.values, k * 3); _q.toArray(Q.values, k * 4);
+      }
+    }
+    if (hasG) console.log(`  ${clip.name}: grip correction ${JSON.stringify(g)}`);
+  }
   for (const [o, p, q, sc] of rest) { o.position.copy(p); o.quaternion.copy(q); o.scale.copy(sc); }
   root.updateMatrixWorld(true);
   return { bone, perClip, stowed, tool: withTool };
@@ -728,11 +775,15 @@ function addWeaponBone() {
       const t = (i / frames) * clip.duration;
       mixer3.setTime(t);
       root.updateMatrixWorld(true);
-      const palmR = wp(rh).add(wp(ri)).multiplyScalar(0.5);
-      const palmL = wp(lh).add(wp(li)).multiplyScalar(0.5);
+      // From the right FIST to the left one (each hand's point — the middle
+      // of the fist's mesh, soldierGrips.js), then GRIPS.tool. The top fist
+      // wraps the SHAFT in Mixamo's dig, so the D-grip sits on top of it;
+      // its crossbar stays level (world up squared).
+      const palmR = wp(rh).add(wp(ri)).multiplyScalar(0.5).add(HAND.clone().applyQuaternion(rh.getWorldQuaternion(new THREE.Quaternion())));
+      const palmL = wp(lh).add(wp(li)).multiplyScalar(0.5).add(HAND_L.clone().applyQuaternion(lh.getWorldQuaternion(new THREE.Quaternion())));
       const d = palmL.clone().sub(palmR).normalize();
       const q = frame(d, UP.clone().addScaledVector(d, -d.y));
-      const local = rh.matrixWorld.clone().invert().multiply(new THREE.Matrix4().compose(palmR, q, new THREE.Vector3(1, 1, 1)));
+      const local = rh.matrixWorld.clone().invert().multiply(new THREE.Matrix4().compose(palmR, q, new THREE.Vector3(1, 1, 1)).multiply(TOOL_OFF));
       const lp = new THREE.Vector3(), lq = new THREE.Quaternion();
       local.decompose(lp, lq, new THREE.Vector3());
       times.push(t);
@@ -761,6 +812,8 @@ function addWeaponBone() {
    * bone gets its own position/rotation tracks.
    */
   function shoulderRifle(clip, weaponBone) {
+    const off = isZeroGrip(GRIPS.clips[clip.name]) ? null : gripMatrix(GRIPS.clips[clip.name]);
+    const ONE = new THREE.Vector3(1, 1, 1);
     const mixer2 = new THREE.AnimationMixer(root);
     const action = mixer2.clipAction(clip).play();
     const frames = Math.max(2, Math.round(clip.duration * 30));
@@ -775,10 +828,13 @@ function addWeaponBone() {
       const d = palmL.sub(pocket).normalize();
       const grip = pocket.clone().addScaledVector(d, BUTT_TO_GRIP);
       const q = frame(d, UP.clone().addScaledVector(d, -d.y));
+      // The hand-placed correction moves the rifle; the IK below brings the
+      // right hand onto its grip wherever it went.
+      if (off) new THREE.Matrix4().compose(grip, q, ONE).multiply(off).decompose(grip, q, new THREE.Vector3());
 
       // Right hand onto the grip, keeping the hand's animated orientation.
       const handQ = rh.getWorldQuaternion(new THREE.Quaternion());
-      const wristToPalm = wp(ri).sub(wp(rh)).multiplyScalar(0.5);
+      const wristToPalm = wp(ri).sub(wp(rh)).multiplyScalar(0.5).add(HAND.clone().applyQuaternion(handQ));
       const target = grip.clone().sub(wristToPalm);
       twoBoneIK(ra, rf, rh, target);
       setWorldQuaternion(rh, handQ);
@@ -817,6 +873,7 @@ function addWeaponBone() {
 function isAimClip(c) { return /firing|shoot|aim/i.test(c.name); }
 
 function wp(o) { return o.getWorldPosition(new THREE.Vector3()); }
+
 
 /** Set a bone's WORLD rotation (writes its local quaternion). */
 function setWorldQuaternion(bone, q) {

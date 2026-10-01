@@ -13,6 +13,7 @@
 //
 // Sizes are from the real weapons (overall length, barrel, magazine), rounded.
 import * as THREE from "three";
+import { GRIPS, gripMatrix, isZeroGrip } from "./soldierGrips.js";
 
 const COLORS = {
   wood: 0x6e4526,     // MAS 49/56 beech/walnut, oiled
@@ -241,13 +242,23 @@ function enfield() {
   ]);
 }
 
+/**
+ * `build()`: the weapon with its hand-placed GRIP correction baked into the
+ * geometry (soldierGrips.js GRIPS.weapons — free at run time); `buildRaw()`:
+ * as modelled (the soldier lab's grip editor moves it live instead).
+ */
+const gripped = (key, raw) => () => {
+  const g = raw();
+  const off = GRIPS.weapons[key];
+  return isZeroGrip(off) ? g : g.applyMatrix4(gripMatrix(off));
+};
 export const WEAPONS = {
-  mas49_56: { label: "MAS 49/56", faction: "French — rifle", build: mas49_56 },
-  mat49: { label: "MAT 49", faction: "French — SMG (NCO, paras)", build: mat49 },
-  mas36: { label: "MAS 36", faction: "ALN — bolt rifle", build: mas36 },
-  fm2429: { label: "FM 24/29", faction: "French — section LMG", build: fm2429 },
-  mauser98: { label: "Mauser 98k", faction: "ALN — bolt rifle", build: mauser98 },
-  enfield: { label: "Lee-Enfield", faction: "ALN — bolt rifle", build: enfield },
+  mas49_56: { label: "MAS 49/56", faction: "French — rifle", build: gripped("mas49_56", mas49_56), buildRaw: mas49_56 },
+  mat49: { label: "MAT 49", faction: "French — SMG (NCO, paras)", build: gripped("mat49", mat49), buildRaw: mat49 },
+  mas36: { label: "MAS 36", faction: "ALN — bolt rifle", build: gripped("mas36", mas36), buildRaw: mas36 },
+  fm2429: { label: "FM 24/29", faction: "French — section LMG", build: gripped("fm2429", fm2429), buildRaw: fm2429 },
+  mauser98: { label: "Mauser 98k", faction: "ALN — bolt rifle", build: gripped("mauser98", mauser98), buildRaw: mauser98 },
+  enfield: { label: "Lee-Enfield", faction: "ALN — bolt rifle", build: gripped("enfield", enfield), buildRaw: enfield },
 };
 
 /**
@@ -258,8 +269,12 @@ export const WEAPONS = {
 function shovel() {
   const wood = 0x8a6440, steel = 0x4a4c4a;
   return toGeometry([
-    cyl(wood, 0, 0, -0.2, 0.62, 0.016),                                  // handle
-    box(wood, [0, 0, -0.235], [0.1, 0.02, 0.02]),                       // D-grip crossbar
+    // The D-grip: a crossbar on two arms that meet the shaft (the crossbar
+    // floated 2.5 cm off the handle's end — lab x-ray, 2026-10-01).
+    cyl(wood, 0, 0, -0.18, 0.62, 0.016),                                 // handle
+    box(wood, [0, 0, -0.25], [0.11, 0.018, 0.018]),                      // D-grip crossbar
+    block(wood, { z: -0.25, top: 0.008, bot: -0.008, w: 0.014, x: -0.048 }, { z: -0.17, top: 0.008, bot: -0.008, w: 0.014, x: -0.008 }),
+    block(wood, { z: -0.25, top: 0.008, bot: -0.008, w: 0.014, x: 0.048 }, { z: -0.17, top: 0.008, bot: -0.008, w: 0.014, x: 0.008 }),
     block(steel, { z: 0.6, top: 0.012, bot: -0.012, w: 0.05 }, { z: 0.66, top: 0.006, bot: -0.006, w: 0.19 }), // socket
     block(steel, { z: 0.66, top: 0.006, bot: -0.006, w: 0.2 }, { z: 0.9, top: 0.003, bot: -0.003, w: 0.17 }),  // blade
   ]);

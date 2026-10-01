@@ -51,12 +51,32 @@
       <div class="btns" id="weapons"></div>
       <div class="row" style="margin-top:4px"><span id="w-name">—</span><b id="w-tris">—</b></div>
       <div class="sub" id="w-carried">—</div>
-      <label>Forward <input id="t-fwd" type="range" min="-10" max="10" step="0.5" value="0" /> <b id="t-fwd-v">0</b></label>
-      <label>Up <input id="t-up" type="range" min="-10" max="10" step="0.5" value="0" /> <b id="t-up-v">0</b></label>
-      <label>Side <input id="t-side" type="range" min="-10" max="10" step="0.5" value="0" /> <b id="t-side-v">0</b></label>
-      <label>Pitch <input id="t-pitch" type="range" min="-30" max="30" step="1" value="0" /> <b id="t-pitch-v">0</b></label>
-      <label>Roll <input id="t-roll" type="range" min="-45" max="45" step="1" value="0" /> <b id="t-roll-v">0</b></label>
-      <div class="row"><span>Grip trim (cm, °)</span><b id="t-out">0, 0, 0 / 0, 0</b></div>
+
+      <h2>Grip editor</h2>
+      <div class="btns" id="g-targets">
+        <button data-target="hand">Right hand point</button>
+        <button data-target="handL">Left hand point</button>
+        <button data-target="clip" class="on">This clip</button>
+        <button data-target="weapon">This weapon</button>
+        <button data-target="sling">Sling (back)</button>
+        <button data-target="tool">Shovel (dig)</button>
+      </div>
+      <div class="sub" id="g-what">—</div>
+      <div class="btns" id="g-modes" style="margin-top:4px">
+        <button data-mode="translate" class="on">Move (W)</button>
+        <button data-mode="rotate">Rotate (E)</button>
+        <button data-mode="off">Gizmo off</button>
+      </div>
+      <div id="g-fields"></div>
+      <div class="btns" style="margin-top:4px">
+        <button id="g-reset">Reset this</button>
+        <button id="g-clear">Clear all clip corrections</button>
+        <button id="g-autofit">Auto-fit left hand (all clips)</button>
+        <button id="g-copy">Copy grips</button>
+      </div>
+      <label><input id="g-markers" type="checkbox" checked /> Hand / shoulder markers (first man)</label>
+      <div class="sub" id="g-list">—</div>
+      <div class="sub"><b>Hand point first</b> (red ball): drag it into his closed fist on a carry clip (rifle_idle) — every clip takes it; aim/fire clips bend the arm onto the grip, as the game will. Then per clip only what is left. Drag the gizmo on the FIRST man's weapon, or type. cm and ° in the weapon's frame: Forward = toward the muzzle, Up, Left; Pitch + = muzzle down, Yaw + = to his left, Roll. Edits are kept in this browser (a reload keeps them); <b>Copy grips</b> → paste to Claude → baked by the pack. On aim/fire clips the right hand follows the rifle after the re-pack (here it stays put).</div>
 
       <h2>Clips</h2>
       <div class="btns" id="clips"></div>
@@ -87,6 +107,12 @@
         <button data-view="close" class="on">Close</button>
         <button data-view="rts">RTS camera</button>
       </div>
+      <div class="btns" style="margin-top:4px" id="views2">
+        <button data-view="right">His right</button>
+        <button data-view="left">His left</button>
+        <button data-view="top">Top</button>
+        <button data-view="shoulder">Over shoulder</button>
+      </div>
 
       <h2>Debug</h2>
       <label><input id="weights" type="checkbox" /> Skin weights (colour = strongest bone)</label>
@@ -100,7 +126,7 @@
         <b>Weapon</b>: hung on the pack's weapon bone. Firing / aiming clips are
         SHOULDERED (butt in the shoulder pocket, forestock in the left palm, the
         right arm bent onto the grip); carry clips hold it hand to hand. Judge it on
-        the RIFLE clips (the unarmed ones swing it). The trim sliders nudge the grip; tell me the numbers you like.
+        the RIFLE clips (the unarmed ones swing it). The grip editor sets the hand-placed corrections (soldierGrips.js).
         <b>Skin weights</b>: a patch of the wrong colour (a sleeve coloured like the
         torso, a pouch like the thigh) is where a transferred soldier will stretch.
         The treadmill speed is measured from the clip (the planted foot slides back at
@@ -125,13 +151,15 @@
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
       import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
       import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
+      import { TransformControls } from "three/addons/controls/TransformControls.js";
       import { TOOLS, WEAPONS, weaponMaterial } from "./procWeapons.js";
+      import { GRIPS, gripMatrix, isZeroGrip } from "./soldierGrips.js";
       import {
         HEADGEAR, KIT, LOOKS, headgearMaterial, loadout, lookMaterial, markHelmet, measureCrown, neckPlane,
         stripHelmet, variationNode,
       } from "./soldierLooks.js";
 
-      const URL_GLB = "/models/soldiers/soldiers.glb";
+      const URL_GLB = new URLSearchParams(location.search).get("glb") ?? "/models/soldiers/soldiers.glb";   // ?glb= a test pack
       const FADE = 0.25; // s crossfade between clips
 
       const $ = (id) => document.getElementById(id);
@@ -270,10 +298,172 @@
       // carries that one. Picking a look never changes it (it used to).
       let weaponKey = hasWeaponBone ? "auto" : "none";
       const DEFAULT_RIFLE = "mas49_56";
-      const trim = { fwd: 0, up: 0, side: 0, pitch: 0, roll: 0 };
-      function applyTrim(m) {
-        m.position.set(trim.side / 100, trim.up / 100, trim.fwd / 100);
-        m.rotation.set(THREE.MathUtils.degToRad(-trim.pitch), 0, THREE.MathUtils.degToRad(trim.roll));
+      // ── GRIPS (soldierGrips.js): the hand-placed weapon corrections ─────────
+      // BAKED = what this soldiers.glb was packed with (the pack records it);
+      // EDITS = what you are setting now (the file's, then this browser's saved
+      // edits on top — a reload, or a page refresh by a file change, keeps them).
+      // A weapon here is built RAW, and its mesh carries the difference live:
+      //   in the hand   baked(clip)⁻¹ · edit(clip) · edit(weapon)
+      //   on the back   baked(sling)⁻¹ · edit(sling) · edit(weapon)
+      // so what you see is what the game shows once the pack bakes the edits.
+      const baked = gltf.asset?.extras?.grips ?? { clips: {}, sling: null, hand: null };
+      const GRIP_LS = "soldierLab.grips.v1";
+      let edits = { clips: { ...GRIPS.clips }, weapons: { ...GRIPS.weapons }, sling: GRIPS.sling, hand: GRIPS.hand ?? null, handLeft: GRIPS.handLeft ?? null, tool: GRIPS.tool ?? null };
+      // Saved browser edits are kept only while the FILE is the one they were
+      // made on: when soldierGrips.js changes (values pasted in, a bake), the
+      // file wins — the old edits go to the console, not silently over it.
+      const FILE_STAMP = JSON.stringify(GRIPS);
+      try {
+        const saved = JSON.parse(localStorage.getItem(GRIP_LS));
+        if (saved?.clips && saved.fileStamp === FILE_STAMP) edits = { clips: saved.clips, weapons: saved.weapons ?? {}, sling: saved.sling ?? null, hand: saved.hand ?? null, handLeft: saved.handLeft ?? null, tool: saved.tool ?? null };
+        else if (saved?.clips) console.info("soldier lab: soldierGrips.js changed since these browser edits — the file's grips are loaded; the old edits:", JSON.stringify(saved));
+      } catch { /* no storage */ }
+      const gripCache = new Map();   // "h|clip|weapon" / "s|weapon" → Matrix4, cleared on every edit
+      const _gm = new THREE.Matrix4();
+      function handLocal(clipName, wKey) {
+        const k = `h|${clipName}|${wKey}`;
+        let m = gripCache.get(k);
+        if (!m) {
+          m = gripMatrix(baked.clips?.[clipName]).invert()
+            .multiply(gripMatrix(edits.clips[clipName], _gm)).multiply(gripMatrix(edits.weapons[wKey], _gm));
+          gripCache.set(k, m);
+        }
+        return m;
+      }
+      function slingLocal(wKey) {
+        const k = `s|${wKey}`;
+        let m = gripCache.get(k);
+        if (!m) {
+          m = gripMatrix(baked.sling).invert().multiply(gripMatrix(edits.sling, _gm)).multiply(gripMatrix(edits.weapons[wKey], _gm));
+          gripCache.set(k, m);
+        }
+        return m;
+      }
+      const _gp = new THREE.Vector3(), _gq = new THREE.Quaternion(), _gs = new THREE.Vector3();
+      // THE HAND POINT (GRIPS.hand): where the fist closes, a shift in the
+      // right hand's frame from the pack's point (halfway wrist → index
+      // knuckle). Here, as the pack will bake it: a CARRY clip hangs the
+      // rifle from it (the rifle shifts with it); an AIM/FIRE clip keeps the
+      // rifle shouldered and bends the arm so the point lands on the grip —
+      // the pack's own two-bone IK, run live.
+      const AIM = /firing|shoot|aim/i;            // the pack's isAimClip
+      const handEdit = new THREE.Vector3(), handShift = new THREE.Vector3();   // metres: the edit, edit − baked
+      const handEditL = new THREE.Vector3();   // the LEFT hand's point (GRIPS.handLeft)
+      function refreshHand() {
+        const e = edits.hand?.p ?? [0, 0, 0], b = baked.hand?.p ?? [0, 0, 0];
+        handEdit.fromArray(e).multiplyScalar(0.01);
+        handEditL.fromArray(edits.handLeft?.p ?? e).multiplyScalar(0.01);
+        handShift.set(e[0] - b[0], e[1] - b[1], e[2] - b[2]).multiplyScalar(0.01);
+      }
+      refreshHand();
+      const armOf = (s) => (s.arm ??= (() => {
+        const g = (n) => s.root.getObjectByName(`mixamorig${n}`);
+        return { ra: g("RightArm"), rf: g("RightForeArm"), rh: g("RightHand"), ri: g("RightHandIndex1"), wb: g("Weapon") };
+      })());
+      const _hq = new THREE.Quaternion(), _bq = new THREE.Quaternion(), _wr = new THREE.Vector3(), _kn = new THREE.Vector3();
+      const _tg = new THREE.Vector3(), _rw = new THREE.Matrix4(), _sh = new THREE.Matrix4();
+      const _ws = (o, v) => o.getWorldPosition(v);
+      function setWorldQuat(bone, q) {
+        bone.quaternion.copy(bone.parent.getWorldQuaternion(_bq).invert().multiply(q));
+        bone.updateMatrixWorld(true);
+      }
+      function turnBone(bone, from, to) {
+        const d = new THREE.Quaternion().setFromUnitVectors(from.normalize(), to.normalize());
+        setWorldQuat(bone, d.multiply(bone.getWorldQuaternion(new THREE.Quaternion())));
+      }
+      /** tools/packMixamo.mjs twoBoneIK: the wrist to `target`, the elbow kept on its side. */
+      function twoBoneIK(upper, lower, end, target) {
+        const S = _ws(upper, new THREE.Vector3()), E = _ws(lower, new THREE.Vector3()), W = _ws(end, new THREE.Vector3());
+        const a = S.distanceTo(E), b = E.distanceTo(W);
+        const toT = target.clone().sub(S);
+        const dist = THREE.MathUtils.clamp(toT.length(), Math.abs(a - b) + 1e-4, a + b - 1e-4);
+        const dir = toT.normalize();
+        const cosA = THREE.MathUtils.clamp((a * a + dist * dist - b * b) / (2 * a * dist), -1, 1);
+        const pole = E.clone().sub(S);
+        pole.addScaledVector(dir, -pole.dot(dir));
+        if (pole.lengthSq() < 1e-10) pole.set(0, -1, 0).addScaledVector(dir, -dir.y);
+        pole.normalize();
+        const newE = S.clone().addScaledVector(dir, a * cosA).addScaledVector(pole, a * Math.sqrt(1 - cosA * cosA));
+        turnBone(upper, E.clone().sub(S), newE.clone().sub(S));
+        const E2 = _ws(lower, new THREE.Vector3()), W2 = _ws(end, new THREE.Vector3());
+        turnBone(lower, W2.clone().sub(E2), S.clone().addScaledVector(dir, dist).sub(E2));
+      }
+      const isIdentity = (m) => m.elements.every((v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-7);
+      // The mixer writes a bone only when its value CHANGES: paused (or on a
+      // repeated frame) it leaves last frame's bent arm in place, and a new
+      // bend would start from it (the rifle crept along with the hand). So a
+      // bend is undone first — on the bones the mixer did not touch since.
+      function unbend(s) {
+        if (!s.bent) return;
+        for (const [bone, pre, post] of s.bent) if (bone.quaternion.equals(post)) bone.quaternion.copy(pre);
+        s.bent = null;
+      }
+      /**
+       * Every soldier's weapon and slung weapon to its grip (his current clip).
+       * Keeps, per man, the weapon bone's world BEFORE any arm bend (s.wbPre)
+       * and the carry shift (s.shift): the grip editor backs edits out of them.
+       */
+      const _tf = new THREE.Matrix4(), _tx = new THREE.Vector3(), _ty = new THREE.Vector3(), _tz = new THREE.Vector3();
+      /**
+       * The shovel's frame in the world, packMixamo aimTool's rule: from the
+       * right hand point toward the left one, the crossbar level (the
+       * world's up squared).
+       */
+      function toolFrame(s, out) {
+        const A = armOf(s);
+        const b = (n) => s.root.getObjectByName(`mixamorig${n}`);
+        A.lh ??= b("LeftHand"); A.li ??= b("LeftHandIndex1");
+        const P = (o) => _ws(o, new THREE.Vector3());
+        const fist = (h, i, off) => {
+          const w = P(h);
+          return P(i).sub(w).multiplyScalar(0.5).add(off.clone().applyQuaternion(h.getWorldQuaternion(_hq))).add(w);
+        };
+        const r = fist(A.rh, A.ri, handEdit), l = fist(A.lh, A.li, handEditL);
+        _tz.copy(l).sub(r).normalize();
+        _ty.set(0, 1, 0).addScaledVector(_tz, -_tz.y).normalize();
+        _tx.crossVectors(_ty, _tz);
+        return out.makeBasis(_tx, _ty, _tz).setPosition(r);
+      }
+      function placeWeapons() {
+        for (const s of soldiers) {
+          if (s.toolMesh && /^dig/.test(s.action.getClip().name)) {
+            const bone = s.toolMesh.parent;
+            bone.updateWorldMatrix(true, false);
+            (s.toolW ??= new THREE.Matrix4()).copy(toolFrame(s, _tf));
+            _sh.copy(bone.matrixWorld).invert().multiply(s.toolW).multiply(gripMatrix(edits.tool, _gm))
+              .decompose(s.toolMesh.position, s.toolMesh.quaternion, s.toolMesh.scale);
+          }
+          if (!s.weaponKey || s.weaponKey === "none") continue;
+          const clipName = s.action.getClip().name;
+          if (s.slung) slingLocal(s.weaponKey).decompose(s.slung.position, s.slung.quaternion, s.slung.scale);
+          if (!s.weapon) continue;
+          const M = handLocal(clipName, s.weaponKey);
+          const A = armOf(s);
+          unbend(s);
+          A.wb.updateWorldMatrix(true, false);
+          (s.wbPre ??= new THREE.Matrix4()).copy(A.wb.matrixWorld);
+          (s.shift ??= new THREE.Vector3()).set(0, 0, 0);
+          M.decompose(s.weapon.position, s.weapon.quaternion, s.weapon.scale);
+          if (AIM.test(clipName)) {
+            if (handShift.lengthSq() === 0 && isIdentity(M)) continue;   // as packed: nothing to bend
+            // The rifle stays shouldered (+ its edit); the arm reaches for it.
+            _rw.multiplyMatrices(s.wbPre, M);
+            A.rh.getWorldQuaternion(_hq);
+            _ws(A.rh, _wr); _ws(A.ri, _kn);
+            const palm = _kn.sub(_wr).multiplyScalar(0.5).add(_tg.copy(handEdit).applyQuaternion(_hq));   // wrist → hand point
+            _tg.setFromMatrixPosition(_rw).sub(palm);
+            const pre = [A.ra, A.rf, A.rh].map((b) => b.quaternion.clone());
+            twoBoneIK(A.ra, A.rf, A.rh, _tg);
+            setWorldQuat(A.rh, _hq);
+            s.bent = [A.ra, A.rf, A.rh].map((b, i) => [b, pre[i], b.quaternion.clone()]);
+            A.ra.updateMatrixWorld(true);
+            _sh.copy(A.wb.matrixWorld).invert().multiply(_rw).decompose(s.weapon.position, s.weapon.quaternion, s.weapon.scale);
+          } else if (handShift.lengthSq() > 0) {
+            // A carry: the rifle hangs from the moved hand point.
+            s.shift.copy(handShift).applyQuaternion(A.rh.getWorldQuaternion(_hq)).applyQuaternion(A.wb.getWorldQuaternion(_bq).invert());
+            s.weapon.position.add(s.shift);
+          }
+        }
       }
       // Faction looks (soldierLooks.js): uniform recolour in the shader, helmet
       // off (index-only geometry, same skeleton), headgear on the Head bone.
@@ -381,25 +571,27 @@
         return weapon;
       }
 
+      /** His weapon in the hand and slung on the back (RAW: the grips place them live). */
       function arm(root, key) {
-        if (!key || key === "none" || !hasWeaponBone) return null;
-        if (!weaponGeo.has(key)) weaponGeo.set(key, WEAPONS[key].build());
+        if (!key || key === "none" || !hasWeaponBone) return {};
+        if (!weaponGeo.has(key)) weaponGeo.set(key, WEAPONS[key].buildRaw());
         const m = new THREE.Mesh(weaponGeo.get(key), weaponMat);
         m.castShadow = true;
-        applyTrim(m);
         root.getObjectByName(WEAPON_BONE).add(m);
         // The same rifle slung on the back, and the shovel: each clip shows the
         // one it needs by its bone's scale (tools/packMixamo.mjs).
         const sling = root.getObjectByName("mixamorigSling");
-        if (sling) { const s = new THREE.Mesh(weaponGeo.get(key), weaponMat); s.castShadow = true; sling.add(s); }
+        let slung = null;
+        if (sling) { slung = new THREE.Mesh(weaponGeo.get(key), weaponMat); slung.castShadow = true; sling.add(slung); }
         const tool = root.getObjectByName("mixamorigTool");
         if (tool) {
           if (!weaponGeo.has("shovel")) weaponGeo.set("shovel", TOOLS.shovel.build());
           const t = new THREE.Mesh(weaponGeo.get("shovel"), weaponMat);
           t.castShadow = true;
           tool.add(t);
+          return { weapon: m, slung, toolMesh: t };
         }
-        return m;
+        return { weapon: m, slung };
       }
       // "auto" (the look's own bodies — the ALN's aln1 + aln2, the French
       // soldier1), a body name, or "all" (every body in the pack, to compare).
@@ -474,7 +666,7 @@
           const skel = new THREE.SkeletonHelper(root);
           skel.visible = $("bones").checked;
           scene.add(skel);
-          soldiers.push({ root, mixer, action, skel, weapon: arm(root, weapon), weaponKey: weapon });
+          soldiers.push({ root, mixer, action, skel, ...arm(root, weapon), weaponKey: weapon });
         }
         // The sun's shadow box round the whole group (a section is ~20 m across).
         groupR = R;
@@ -560,20 +752,12 @@
         const w = WEAPONS[weaponKey];
         $("w-name").textContent = !hasWeaponBone ? "no weapon bone — pack a rifle clip"
           : weaponKey === "auto" ? "each man's own (look, armoury, role)" : w ? w.faction : "—";
-        if (w && !weaponGeo.has(weaponKey)) weaponGeo.set(weaponKey, w.build());
+        if (w && !weaponGeo.has(weaponKey)) weaponGeo.set(weaponKey, w.buildRaw());
         $("w-tris").textContent = w ? `${weaponGeo.get(weaponKey).attributes.position.count / 3} tris` : "";
         // What the men on show ACTUALLY carry.
         const n = new Map();
         for (const s of soldiers) { const k = s.weaponKey ?? "none"; n.set(k, (n.get(k) ?? 0) + 1); }
         $("w-carried").textContent = "Carried: " + ([...n].map(([k, c]) => `${WEAPONS[k]?.label ?? "none"} ×${c}`).join(", ") || "—");
-      }
-      for (const k of Object.keys(trim)) {
-        $(`t-${k}`).oninput = (e) => {
-          trim[k] = +e.target.value;
-          $(`t-${k}-v`).textContent = trim[k];
-          $("t-out").textContent = `${trim.fwd}, ${trim.up}, ${trim.side} / ${trim.pitch}, ${trim.roll}`;
-          for (const s of soldiers) if (s.weapon) applyTrim(s.weapon);
-        };
       }
 
       for (const name of ["auto", ...kinds, "all"]) {
@@ -590,6 +774,321 @@
         const off = kind !== "auto" && kind !== "all" && (own ? !own.includes(kind) : kind !== "soldier1");
         $("body-note").innerHTML = `On show: ${shown.join(" + ")}` +
           (off ? ` — <span class="warn">this look is made for ${(own ?? ["soldier1"]).join(" + ")}</span>` : "");
+      }
+
+
+      // ── GRIP EDITOR ─────────────────────────────────────────────────────────
+      // Set the hand-placed corrections on the FIRST man: a gizmo on his weapon
+      // (or his slung one), or typed numbers. What it edits: THIS CLIP (every
+      // weapon in it), THIS WEAPON (in every clip) or the SLING.
+      let gTarget = "clip", gMode = "translate";
+      const tcon = new TransformControls(camera, renderer.domElement);
+      tcon.setSpace("local");
+      tcon.setSize(0.6);
+      scene.add(tcon.getHelper());
+      // The gizmo drags this stand-in in WORLD space; the weapon (and the arm
+      // that reaches for it) follow from the edit it means — dragging the real
+      // rifle fought the arm bend (it hangs from the hand the bend moves).
+      const gProxy = new THREE.Object3D();
+      scene.add(gProxy);
+      let gDragging = false;
+      tcon.addEventListener("dragging-changed", (e) => {
+        controls.enabled = !e.value;
+        gDragging = e.value;
+        if (!e.value) { saveEdits(); gFields(); gList(); }
+      });
+      tcon.addEventListener("objectChange", () => { if (gDragging) fromGizmo(); });
+      const handBones = () => (lead() ? armOf(lead()) : null);
+      /** The hand point in the world, on the first man (wrist + half to the knuckle + the edit). */
+      function handPointWorld(out, side = "Right") {
+        const A = handBones();
+        const h = side === "Right" ? A.rh : (A.lh ??= lead().root.getObjectByName("mixamorigLeftHand"));
+        const k = side === "Right" ? A.ri : (A.li ??= lead().root.getObjectByName("mixamorigLeftHandIndex1"));
+        h.getWorldQuaternion(_hq);
+        const w = _ws(h, new THREE.Vector3());
+        return out.copy(_ws(k, _kn)).sub(w).multiplyScalar(0.5).add(_tg.copy(side === "Right" ? handEdit : handEditL).applyQuaternion(_hq)).add(w);
+      }
+      const lead = () => soldiers[0];
+      const gClip = () => lead()?.action.getClip().name ?? null;
+      const gWeapon = () => lead()?.weaponKey ?? null;
+      const SLUNG = /^(dig|hammer|grenade_throw|unarmed)/;
+      const gObject = () => (gTarget === "sling" ? lead()?.slung : gTarget === "hand" ? markers.r : gTarget === "handL" ? markers.l : gTarget === "tool" ? lead()?.toolMesh : lead()?.weapon) ?? null;
+      function getEdit() {
+        if (gTarget === "hand") return edits.hand ?? null;
+        if (gTarget === "handL") return edits.handLeft ?? null;
+        if (gTarget === "tool") return edits.tool ?? null;
+        if (gTarget === "clip") return edits.clips[gClip()] ?? null;
+        if (gTarget === "weapon") return edits.weapons[gWeapon()] ?? null;
+        return edits.sling ?? null;
+      }
+      const round = (v, k) => Math.round(v * k) / k;
+      function setEdit(v) {
+        const clean = v && !isZeroGrip(v) ? { p: v.p.map((x) => round(x, 10)), r: v.r.map((x) => round(x, 10)) } : null;
+        if (gTarget === "hand") { edits.hand = clean ? { p: clean.p, r: [0, 0, 0] } : null; refreshHand(); }
+        else if (gTarget === "handL") { edits.handLeft = clean ? { p: clean.p, r: [0, 0, 0] } : null; refreshHand(); }
+        else if (gTarget === "tool") edits.tool = clean;
+        else if (gTarget === "clip") { if (clean) edits.clips[gClip()] = clean; else delete edits.clips[gClip()]; }
+        else if (gTarget === "weapon") { if (clean) edits.weapons[gWeapon()] = clean; else delete edits.weapons[gWeapon()]; }
+        else edits.sling = clean;
+        gripCache.clear();
+      }
+      function saveEdits() { try { localStorage.setItem(GRIP_LS, JSON.stringify({ ...edits, fileStamp: FILE_STAMP })); } catch { /* no storage */ } }
+      const _ge = new THREE.Euler();
+      function toGrip(m) {
+        m.decompose(_gp, _gq, _gs);
+        _ge.setFromQuaternion(_gq, "XYZ");
+        return { p: [_gp.x * 100, _gp.y * 100, _gp.z * 100], r: [_ge.x, _ge.y, _ge.z].map((a) => (a * 180) / Math.PI) };
+      }
+      /** The gizmo moved the stand-in: back out the edit it means. */
+      function fromGizmo() {
+        const o = gObject(), s0 = lead();
+        if (!o || !s0) return;
+        gProxy.updateMatrixWorld(true);
+        if (gTarget === "hand" || gTarget === "handL") {
+          // The point in the hand's frame, from the pack's (halfway to the knuckle).
+          const A = handBones();
+          const h = gTarget === "hand" ? A.rh : A.lh, k = gTarget === "hand" ? A.ri : A.li;
+          const w = _ws(h, new THREE.Vector3());
+          const mid = _ws(k, _kn).sub(w).multiplyScalar(0.5).add(w);
+          const d = gProxy.position.clone().sub(mid).applyQuaternion(h.getWorldQuaternion(_hq).invert());
+          setEdit({ p: d.toArray().map((v) => v * 100), r: [0, 0, 0] });
+          placeWeapons();
+          gFields();
+          return;
+        }
+        if (gTarget === "tool") {
+          setEdit(toGrip(s0.toolW.clone().invert().multiply(gProxy.matrixWorld)));
+          placeWeapons();
+          gFields();
+          return;
+        }
+        // The stand-in's world → the mesh's frame as packed: slung, the sling
+        // bone; in the hand, the weapon bone BEFORE the arm bend, less the
+        // carry shift of the hand point.
+        const L = gTarget === "sling"
+          ? o.parent.matrixWorld.clone().invert().multiply(gProxy.matrixWorld)
+          : s0.wbPre.clone().multiply(new THREE.Matrix4().makeTranslation(s0.shift)).invert().multiply(gProxy.matrixWorld);
+        const W = gripMatrix(edits.weapons[gWeapon()]);
+        let m;
+        // in the hand: L = baked(clip)⁻¹ · clip · weapon;  slung: L = baked(sling)⁻¹ · sling · weapon
+        if (gTarget === "clip") m = gripMatrix(baked.clips?.[gClip()]).multiply(L).multiply(W.invert());
+        else if (gTarget === "weapon") m = gripMatrix(edits.clips[gClip()]).invert().multiply(gripMatrix(baked.clips?.[gClip()])).multiply(L);
+        else m = gripMatrix(baked.sling).multiply(L).multiply(W.invert());
+        setEdit(toGrip(m));
+        placeWeapons();
+        gFields();
+      }
+      /** Not dragging: the stand-in sits on what is edited (the hand point on the hand's axes). */
+      function syncProxy() {
+        const o = gObject();
+        if (!o || gDragging) return;
+        if (gTarget === "hand" || gTarget === "handL") {
+          handPointWorld(gProxy.position, gTarget === "hand" ? "Right" : "Left");
+          (gTarget === "hand" ? handBones().rh : handBones().lh).getWorldQuaternion(gProxy.quaternion);
+        } else {
+          o.updateWorldMatrix(true, false);
+          o.matrixWorld.decompose(gProxy.position, gProxy.quaternion, _gs);
+        }
+        gProxy.scale.set(1, 1, 1);
+      }
+
+      const FIELDS = [
+        ["Forward", "p", 2, 25, 0.1, "cm"], ["Up", "p", 1, 25, 0.1, "cm"], ["Left", "p", 0, 25, 0.1, "cm"],
+        ["Pitch", "r", 0, 90, 0.5, "°"], ["Yaw", "r", 1, 90, 0.5, "°"], ["Roll", "r", 2, 180, 0.5, "°"],
+      ];
+      for (const [label, k, i, max, step, unit] of FIELDS) {
+        const row = document.createElement("label");
+        row.dataset.label = label;
+        row.innerHTML = `<span style="width:52px">${label}</span><input type="range" min="${-max}" max="${max}" step="${step}" value="0" />` +
+          `<input type="number" step="${step}" value="0" style="width:58px;background:#1a222a;color:#dfe6ea;border:1px solid #2f3b45;border-radius:4px" /> ${unit}`;
+        const [range, num] = row.querySelectorAll("input");
+        const set = (v) => {
+          const cur = getEdit() ?? { p: [0, 0, 0], r: [0, 0, 0] };
+          const next = { p: [...cur.p], r: [...cur.r] };
+          next[k][i] = +v || 0;
+          setEdit(next);
+          placeWeapons();
+          saveEdits();
+          gFields(); gList();
+        };
+        range.oninput = (e) => set(e.target.value);
+        num.onchange = (e) => set(e.target.value);
+        row.dataset.k = k; row.dataset.i = i;
+        $("g-fields").appendChild(row);
+      }
+      const HAND_LABELS = ["X (hand)", "Y (fingers)", "Z (hand)"];
+      function gFields() {
+        const e = getEdit();
+        for (const row of $("g-fields").children) {
+          const hand = gTarget === "hand" || gTarget === "handL";
+          row.style.display = hand && row.dataset.k === "r" ? "none" : "";
+          row.querySelector("span").textContent = hand ? HAND_LABELS[+row.dataset.i] : row.dataset.label;
+          const v = e ? e[row.dataset.k][+row.dataset.i] : 0;
+          const [range, num] = row.querySelectorAll("input");
+          if (document.activeElement !== num) num.value = v;
+          range.value = v;
+        }
+      }
+      const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+      const fmt = (g) => `${g.p.join(", ")} cm / ${g.r.join(", ")}°`;
+      function gList() {
+        const lines = [];
+        for (const [c, g] of Object.entries(edits.clips)) lines.push(`clip ${c}: ${fmt(g)}${same(g, baked.clips?.[c]) ? "" : ' <span class="warn">• not packed</span>'}`);
+        for (const [w, g] of Object.entries(edits.weapons)) lines.push(`weapon ${WEAPONS[w]?.label ?? w}: ${fmt(g)}${same(g, GRIPS.weapons[w]) ? "" : ' <span class="warn">• not in the file</span>'}`);
+        if (edits.handLeft) lines.push(`left hand point: ${edits.handLeft.p.join(", ")} cm${same(edits.handLeft, baked.handLeft) ? "" : ' <span class="warn">• not packed</span>'}`);
+        if (edits.hand) lines.push(`hand point: ${edits.hand.p.join(", ")} cm${same(edits.hand, baked.hand) ? "" : ' <span class="warn">• not packed</span>'}`);
+        if (edits.tool) lines.push(`shovel: ${fmt(edits.tool)}${same(edits.tool, baked.tool) ? "" : ' <span class="warn">• not packed</span>'}`);
+        if (edits.sling) lines.push(`sling: ${fmt(edits.sling)}${same(edits.sling, baked.sling) ? "" : ' <span class="warn">• not packed</span>'}`);
+        for (const c of Object.keys(baked.clips ?? {})) if (!edits.clips[c]) lines.push(`clip ${c}: <span class="warn">reset — not packed</span>`);
+        $("g-list").innerHTML = lines.length ? lines.join("<br>") : "No corrections yet.";
+      }
+      let gLast = null;
+      /** Retarget: the first man, his clip, his weapon — gizmo, fields, label. */
+      function gRefresh() {
+        const c = gClip(), w = gWeapon();
+        gLast = `${soldiers[0]?.root.uuid}|${c}|${w}|${gTarget}|${gMode}`;
+        const o = gObject();
+        const slungNow = !!c && SLUNG.test(c);
+        let what = "", warn = "";
+        const aimNow = !!c && AIM.test(c);
+        if (gTarget === "hand") {
+          what = "The <b>hand point</b> (red) — where his fist closes, for EVERY clip";
+          if (aimNow) warn = "set it on a carry clip (rifle_idle): here the arm bends onto it";
+          else if (slungNow) warn = "the rifle is slung in this clip — pick rifle_idle";
+        } else if (gTarget === "handL") {
+          what = "The <b>left hand point</b> (blue) — the middle of his left fist (the shovel's lower hand, the left-hand auto-fit)";
+        } else if (gTarget === "tool") {
+          what = "The <b>shovel</b> — fist to fist; Forward slides it along the handle";
+          if (!/^dig/.test(c ?? "")) warn = "it shows on dig — pick that clip";
+        } else if (gTarget === "clip") {
+          what = `Clip <b>${c ?? "—"}</b> — every weapon in it`;
+          if (slungNow) warn = "the rifle is slung in this clip — pick Sling, or another clip";
+        } else if (gTarget === "weapon") {
+          what = `Weapon <b>${WEAPONS[w]?.label ?? "none"}</b> — in every clip (and slung)`;
+          if (!WEAPONS[w]) warn = "the first man carries no weapon";
+        } else {
+          what = "The rifle <b>slung on the back</b> — every weapon";
+          if (!slungNow) warn = "it shows on dig / grenade_throw — pick one of those clips";
+        }
+        $("g-what").innerHTML = what + (warn ? ` — <span class="warn">${warn}</span>` : "");
+        const visible = gTarget === "handL" ? true : gTarget === "sling" ? slungNow : gTarget === "tool" ? /^dig/.test(c ?? "") : gTarget === "hand" ? !slungNow && !aimNow : !slungNow;
+        if (o && gMode !== "off" && visible) { syncProxy(); tcon.attach(gProxy); tcon.setMode(gTarget === "hand" ? "translate" : gMode); }
+        else tcon.detach();
+        for (const b of $("g-targets").children) b.classList.toggle("on", b.dataset.target === gTarget);
+        for (const b of $("g-modes").children) b.classList.toggle("on", b.dataset.mode === gMode);
+        gFields(); gList();
+      }
+      $("g-targets").onclick = (e) => { const t = e.target.closest("button")?.dataset.target; if (t) { gTarget = t; gRefresh(); } };
+      $("g-modes").onclick = (e) => { const m = e.target.closest("button")?.dataset.mode; if (m) { gMode = m; gRefresh(); } };
+      addEventListener("keydown", (e) => {
+        if (/input|textarea|select/i.test(e.target.tagName)) return;
+        const k = e.key.toLowerCase();
+        if (k === "w") { gMode = "translate"; gRefresh(); }
+        else if (k === "e") { gMode = "rotate"; gRefresh(); }
+      });
+      $("g-reset").onclick = () => { setEdit(null); placeWeapons(); saveEdits(); gFields(); gList(); };
+      $("g-autofit").onclick = () => { const r = autoFitLeft(); console.table(r); };
+      $("g-clear").onclick = () => { edits.clips = {}; gripCache.clear(); placeWeapons(); saveEdits(); gFields(); gList(); };
+      $("g-copy").onclick = async () => {
+        const text = JSON.stringify({ clips: edits.clips, weapons: edits.weapons, sling: edits.sling ?? null, hand: edits.hand ?? null, handLeft: edits.handLeft ?? null, tool: edits.tool ?? null }, null, 2);
+        try { await navigator.clipboard.writeText(text); $("g-copy").textContent = "Copied ✓"; }
+        catch {
+          $("g-list").innerHTML = '<textarea style="width:100%;height:140px"></textarea>';
+          $("g-list").querySelector("textarea").value = text;
+          $("g-copy").textContent = "Select + copy below";
+        }
+        setTimeout(() => { $("g-copy").textContent = "Copy grips"; }, 1800);
+      };
+
+      // Markers on the first man: right palm (red), left palm (blue), the
+      // shoulder pocket a shouldered butt sits in (yellow) — what the pack aims at.
+      const mk = (c) => {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 8), new THREE.MeshBasicMaterial({ color: c, depthTest: false }));
+        m.renderOrder = 999;
+        scene.add(m);
+        return m;
+      };
+      const markers = { r: mk(0xff4040), l: mk(0x40a0ff), s: mk(0xffd040) };
+      let markBones = null, markRoot = null;
+      const _ma = new THREE.Vector3(), _mb = new THREE.Vector3();
+      function updateMarkers() {
+        const on = $("g-markers").checked && !!lead();
+        for (const m of Object.values(markers)) m.visible = on;
+        if (!on) return;
+        if (markRoot !== lead().root) {
+          markRoot = lead().root;
+          const g = (n) => markRoot.getObjectByName(`mixamorig${n}`);
+          markBones = { rh: g("RightHand"), ri: g("RightHandIndex1"), lh: g("LeftHand"), li: g("LeftHandIndex1"), ra: g("RightArm"), rs: g("RightShoulder") };
+        }
+        const B = markBones;
+        handPointWorld(markers.r.position);   // the hand point (the pack's, moved by the edit)
+        handPointWorld(markers.l.position, "Left");   // the left hand point
+        markers.s.position.copy(B.ra.getWorldPosition(_ma)).lerp(B.rs.getWorldPosition(_mb), 0.35);
+      }
+
+      // ── AUTO-FIT: the barrel line through the LEFT fist ─────────────────────
+      // The pack aims a carried rifle at the heel of the left hand (halfway
+      // wrist → knuckle); the fist that holds the forestock is further along
+      // (measured 2026-10-01: 5-8 cm to his right of the barrel in every clip
+      // the hand stays on). Per clip, this turns the rifle so the forestock's
+      // centre line runs through the left fist (the hand point's shift,
+      // mirrored onto the left hand): a carry pivots in the RIGHT fist; an
+      // aim/fire clip pivots at the BUTT, so it stays in the shoulder and the
+      // right arm follows. A clip whose left hand leaves the rifle (spread
+      // over the clip > 3 cm: reload, crawl, posture moves) is left alone.
+      const FORESTOCK_Y = 0.008;   // m: the forestock's centre line above the bore axis (procWeapons)
+      const BUTT = new THREE.Vector3(0, 0, -0.334);   // the butt plate on the axis (packMixamo BUTT_TO_GRIP)
+      function leftFistInWeapon(s, clip, N = 16) {
+        const g = (n) => s.root.getObjectByName(`mixamorig${n}`);
+        const lh = g("LeftHand"), li = g("LeftHandIndex1");
+        const pts = [];
+        const was = s.action;
+        s.mixer.stopAllAction();
+        s.action = s.mixer.clipAction(clip).reset().play();
+        for (let i = 0; i < N; i++) {
+          s.action.time = (i / N) * clip.duration;
+          s.mixer.update(0);
+          placeWeapons();
+          s.root.updateMatrixWorld(true);
+          const w = lh.getWorldPosition(new THREE.Vector3());
+          const fist = li.getWorldPosition(new THREE.Vector3()).sub(w).multiplyScalar(0.5)
+            .add(handEditL.clone().applyQuaternion(lh.getWorldQuaternion(new THREE.Quaternion()))).add(w);
+          pts.push(fist.applyMatrix4(s.weapon.matrixWorld.clone().invert()));
+        }
+        s.mixer.stopAllAction();
+        s.action = s.mixer.clipAction(was.getClip()).reset().play();
+        const m = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / N);
+        return { m, spread: Math.max(...pts.map((p) => p.distanceTo(m))) };
+      }
+      /** Fit every clip the left hand holds the rifle in (the FIRST man, his weapon). Returns a report. */
+      function autoFitLeft() {
+        const s = lead();
+        if (!s?.weapon) return "no weapon";
+        const report = {};
+        for (const clip of clips) {
+          if (SLUNG.test(clip.name) || /^death/.test(clip.name)) continue;
+          const keep = edits.clips[clip.name];
+          delete edits.clips[clip.name]; gripCache.clear();
+          const { m: F, spread } = leftFistInWeapon(s, clip);
+          if (spread > 0.03) { if (keep) edits.clips[clip.name] = keep; gripCache.clear(); report[clip.name] = `left hand leaves the rifle (${(spread * 100).toFixed(0)} cm) — left as it was`; continue; }
+          let R, p = new THREE.Vector3();
+          if (AIM.test(clip.name)) {
+            const d0 = new THREE.Vector3(0, FORESTOCK_Y, F.z).sub(BUTT).normalize();
+            R = new THREE.Quaternion().setFromUnitVectors(d0, F.clone().sub(BUTT).normalize());
+            p = BUTT.clone().sub(BUTT.clone().applyQuaternion(R));        // pivot at the butt
+          } else {
+            const d0 = new THREE.Vector3(0, FORESTOCK_Y, F.z).normalize();
+            R = new THREE.Quaternion().setFromUnitVectors(d0, F.clone().normalize());   // pivot in the right fist
+          }
+          const e = new THREE.Euler().setFromQuaternion(R, "XYZ");
+          const fit = { p: p.toArray().map((v) => Math.round(v * 1000) / 10), r: [e.x, e.y, e.z].map((a) => Math.round((a * 1800) / Math.PI) / 10) };
+          if (isZeroGrip(fit)) delete edits.clips[clip.name]; else edits.clips[clip.name] = fit;
+          gripCache.clear();
+          const after = leftFistInWeapon(s, clip).m;
+          report[clip.name] = `off the forestock ${(Math.hypot(F.x, F.y - FORESTOCK_Y) * 100).toFixed(1)} → ${(Math.hypot(after.x, after.y - FORESTOCK_Y) * 100).toFixed(1)} cm (${fmt(fit)})`;
+        }
+        placeWeapons(); saveEdits(); gFields(); gList();
+        return report;
       }
 
       // The clips, grouped the way a man uses them (the pack has 24 and more to come).
@@ -648,11 +1147,25 @@
         close: { pos: [2.6, 1.6, 4.4], target: [0, 0.95, 0], fov: 35 },
         // RTS: roughly the games' default zoom — high, ~50° down, 35 m out.
         rts: { pos: [14, 27, 22], target: [0, 0.5, -1], fov: 35 },
+        // Grip close-ups on the FIRST man (he faces +Z, his right is -X).
+        right: { pos: [-2.4, 1.4, 0.35], target: [0, 1.15, 0.35], fov: 30, lead: true },
+        left: { pos: [2.4, 1.4, 0.35], target: [0, 1.15, 0.35], fov: 30, lead: true },
+        top: { pos: [0.01, 3.8, 0.35], target: [0, 1.1, 0.35], fov: 30, lead: true },
+        shoulder: { pos: [-0.45, 1.8, -0.8], target: [0.05, 1.3, 1.2], fov: 35, lead: true },
       };
       let view = "close";
       function setView(name) {
         view = name;
         const v = VIEWS[name];
+        if (v.lead) {
+          const o = soldiers[0]?.root.position ?? new THREE.Vector3();
+          camera.position.set(v.pos[0] + o.x, v.pos[1], v.pos[2] + o.z);
+          controls.target.set(v.target[0] + o.x, v.target[1], v.target[2] + o.z);
+          camera.fov = v.fov;
+          camera.updateProjectionMatrix();
+          for (const b of [...$("views").children, ...$("views2").children]) b.classList.toggle("on", b.dataset.view === name);
+          return;
+        }
         // The RTS view backs off to take in the whole group (a section of 30
         // is ~20 m across); Close stays on the front man.
         const k = name === "rts" ? Math.max(1, (groupR + 3) / 9) : 1;
@@ -660,9 +1173,9 @@
         controls.target.set(v.target[0], v.target[1], v.target[2] + (name === "close" && count > 1 ? groupR * 0.6 : 0));
         camera.fov = v.fov;
         camera.updateProjectionMatrix();
-        for (const b of $("views").children) b.classList.toggle("on", b.dataset.view === name);
+        for (const b of [...$("views").children, ...$("views2").children]) b.classList.toggle("on", b.dataset.view === name);
       }
-      $("views").onclick = (e) => { const v = e.target.closest("button")?.dataset.view; if (v) setView(v); };
+      $("views").onclick = $("views2").onclick = (e) => { const v = e.target.closest("button")?.dataset.view; if (v) setView(v); };
       $("counts").onclick = (e) => {
         const n = +e.target.closest("button")?.dataset.count;
         if (!n) return;
@@ -706,6 +1219,9 @@
         pickLook, play: (name) => play(clips.find((c) => c.name === name)), setView,
         camera, controls, pause: (on) => { speed = on ? 0 : 1; },
         get soldiers() { return soldiers; }, setBehaviour,
+        // grips, for scripted checks: the edits (read / replace) and the placement
+        get edits() { return edits; }, setEdits(e) { edits = e; gripCache.clear(); refreshHand(); placeWeapons(); },
+        placeWeapons: () => placeWeapons(), clips, autoFitLeft: () => autoFitLeft(), get gProxy() { return gProxy; }, get markers() { return markers; },
       };
 
       // ── Loop ───────────────────────────────────────────────────────────────
@@ -726,7 +1242,13 @@
         if ($("treadmill").checked && behaviour === "same") {
           grid.position.z = (grid.position.z - groundSpeed.get(current) * dt) % 1;
         }
+        // The grips: every weapon to its man's clip (the dragged one stays under the gizmo).
+        placeWeapons();
+        syncProxy();
+        const gNow = `${soldiers[0]?.root.uuid}|${gClip()}|${gWeapon()}|${gTarget}|${gMode}`;
+        if (gNow !== gLast) gRefresh();
         controls.update();
+        updateMarkers();
         renderer.render(scene, camera);
       });
 
