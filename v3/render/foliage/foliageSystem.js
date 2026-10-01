@@ -611,6 +611,7 @@ export class FoliageScatterSystem {
     terrainSurface = null,
     variants = 1,   // shape variants per type (ScatterField)
     depthPrepass = false,   // cut-out cards: depth first, shade each pixel once (see _prepass)
+    receiveLods = 1,        // detail levels that receive shadows (ScatterField.setReceiveShadows)
   }) {
     this._depthPrepass = !!depthPrepass;
     // Foliage runs 8 types on a 192 m tile; susuki runs this same system with
@@ -618,7 +619,7 @@ export class FoliageScatterSystem {
     this.typeCount = typeCount;
     const field = (this.field = new ScatterField({
       scene, renderer, name,
-      typeCount, lods: FOLIAGE_LODS, rows: ROWS, ruleRow: RULE_ROW,
+      typeCount, lods: FOLIAGE_LODS, rows: ROWS, ruleRow: RULE_ROW, receiveLods,
       worldSize, tileSize, plantsPerSide,
       heightTex, terrainNormalTex, densityTex, splatTex, riverNearTex, waterMapTex, windTex, grassDensityTex,
       terrainSurface,  // stand on the mesh, like the grass does

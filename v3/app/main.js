@@ -616,6 +616,10 @@ export async function startV3App(opts = {}) {
   // Depth pre-pass for the plant fields' cut-out cards (FoliageScatterSystem
   // depthPrepass): a game opts in; default off = the fields as they were.
   const foliageDepthPrepass = opts.foliageDepthPrepass === true;
+  // Plant detail levels that RECEIVE shadows (ScatterField.setReceiveShadows):
+  // 1 = the near level (editor, walking cameras); an RTS camera sees all three
+  // at once and asks for them all (alg-rts, 2026-10-01).
+  const scatterReceiveLods = Number.isFinite(opts.scatterReceiveLods) ? opts.scatterReceiveLods : 1;
   // A/B switches for the terrain layer path, per page load (editor or game):
   // ?topk=3 (0 = classic, every layer on every pixel) and ?far=1 (near/far
   // blend on the top-K layers). See SPLAT_FEATURES in splatOverlayTsl.js.
@@ -1992,6 +1996,7 @@ export async function startV3App(opts = {}) {
         terrainSurface:   terrainSurfaceDesc(),
         variants:         tallPlantVariants,
         depthPrepass:     foliageDepthPrepass,
+        receiveLods:      scatterReceiveLods,
         fs:               susukiState,
         gp:               grassState,
       });
@@ -2140,6 +2145,7 @@ export async function startV3App(opts = {}) {
         tileSize:         FOLIAGE_FIELD.tileSize,
         plantsPerSide:    FOLIAGE_FIELD.plantsPerSide,
         depthPrepass:     foliageDepthPrepass,
+        receiveLods:      scatterReceiveLods,
         fs:               foliageScatterState,
         gp:               grassState,
       });

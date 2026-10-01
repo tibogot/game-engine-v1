@@ -110,6 +110,8 @@ export class ScatterField {
     waterMapTex = null,
     grassDensityTex = null, cullRadius = 2, fadeKeepGain = 1.6, slopeBand = 0.12, shadows = false,
     nearFade = 0.9, onKeep = null,
+    // Detail levels that RECEIVE shadows, nearest first (setReceiveShadows).
+    receiveLods = 1,
     // The clipmap description ({ centerXZ, baseStep, levels, halfCells,
     // gridOffset }), as the grass takes it. Omit it and plants fall back to
     // the raw heightmap and float wherever the mesh is coarse.
@@ -123,6 +125,7 @@ export class ScatterField {
     this.parts = parts;
     this.rows = rows;
     this.tileSize = tileSize;
+    this.receiveLods = receiveLods;
     const V = (this.variants = Math.max(1, Math.round(variants)));
     const subTypes = typeCount * V;
     const draws = (this.draws = subTypes * lods);
@@ -577,11 +580,23 @@ export class ScatterField {
     }
   }
 
-  /** Shadows on the near detail level only, and only when asked. */
+  /**
+   * Shadows on the nearest `receiveLods` detail levels, and only when asked.
+   * 1 (the default) = the near level only. An RTS camera sees every level at
+   * once, and the line where plants stop receiving (their own leaves, a
+   * building's shadow) was a band of flat bright crowns that followed the
+   * camera (alg-rts, 2026-10-01): a game looking down asks for all of them.
+   */
   setReceiveShadows(on) {
+    this._receiveOn = !!on;
     for (let m = 0; m < this.meshCount; m++) {
-      this.meshes[m].receiveShadow = !!on && Math.floor(m / this.parts) % this.lods === 0;
+      this.meshes[m].receiveShadow = this._receiveOn && Math.floor(m / this.parts) % this.lods < this.receiveLods;
     }
+  }
+
+  setReceiveLods(n) {
+    this.receiveLods = Math.max(0, n | 0);
+    if (this._receiveOn !== undefined) this.setReceiveShadows(this._receiveOn);
   }
 
   /**

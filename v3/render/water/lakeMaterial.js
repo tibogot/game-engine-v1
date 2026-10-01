@@ -59,7 +59,7 @@ import {
   normalize, reflect, texture, positionWorld, positionView, cameraPosition,
   cameraNear, cameraFar, cameraViewMatrix, cameraProjectionMatrix,
   screenUV, Discard,
-  viewportDepthTexture, viewportSharedTexture, perspectiveDepthToViewZ,
+  viewportDepthTexture, viewportSharedTexture, perspectiveDepthToViewZ, nodeObject,
 } from "three/tsl";
 
 /** Ray-march steps for SSR. Compile-time: TSL Loop counts are unrolled. */
@@ -91,7 +91,32 @@ export const waterSsrMasterNode = _ssrMaster;
  * (`viewportSharedTexture` shares the destination texture but NOT the copy, so it
  * does not solve this on its own.)
  */
-const _sceneColorTex = /*#__PURE__*/ viewportSharedTexture();
+/**
+ * ONE COLOUR COPY PER RENDER, HOWEVER MANY SAMPLES (2026-10-01, alg-rts oasis).
+ * Every `.sample(uv)` CLONES a texture node, and three copies the framebuffer
+ * once per NODE per render (updateBeforeType RENDER) — the clones share the
+ * destination texture but each runs its own copy. The lake samples the scene
+ * colour for its refraction and inside its SSR: MEASURED 3 colour copies + 1
+ * depth copy of the 4x-MSAA frame each frame an oasis was in view. This class
+ * lets the first clone in a render copy and the rest read that copy.
+ */
+// Keyed by frame AND render: renderId is info.calls, which restarts every frame.
+const _grabCopy = { frameId: -1, renderId: -1, target: undefined };
+const ViewportSharedBase = viewportSharedTexture().constructor;
+class CopyOnceSharedTextureNode extends ViewportSharedBase {
+  static get type() { return "CopyOnceSharedTextureNode"; }
+  updateBefore(frame) {
+    const target = frame.renderer.getRenderTarget();
+    // __V3_DEBUG.waterGrabPerSample = true: the old copy per sample, to A/B.
+    const again = !!globalThis.__V3_DEBUG?.waterGrabPerSample;
+    if (!again && _grabCopy.frameId === frame.frameId && _grabCopy.renderId === frame.renderId && _grabCopy.target === target) return;
+    _grabCopy.frameId = frame.frameId;
+    _grabCopy.renderId = frame.renderId;
+    _grabCopy.target = target;
+    super.updateBefore(frame);
+  }
+}
+const _sceneColorTex = /*#__PURE__*/ nodeObject(new CopyOnceSharedTextureNode());
 const _sceneDepthTex = /*#__PURE__*/ viewportDepthTexture();
 
 /**

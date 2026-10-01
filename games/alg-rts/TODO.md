@@ -36,7 +36,13 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       trees + foliage −0.5 (they hide terrain that costs more to shade).
    - [—] Sky Pro skip-when-unseen (~1-1.8 ms): NO — you, 2026-10-01: leave
          the sky alone (the free camera / future third-person views).
-   - [ ] Lakes 1.5 ms: what the water's frame copies cost when an oasis is in view.
+   - [x] LAKES: every frame an oasis was in view the frame was copied 4 times
+         (1 depth + 3 COLOUR): each .sample() clones three's viewport node and
+         every clone copies. Now one colour copy per render
+         (lakeMaterial CopyOnceSharedTextureNode; rivers share it): 4 → 2,
+         water unchanged. ms: not clean (latched GPU) — 0 to −0.9 ms; lakes
+         hidden at the base now ≈ 0 (the clean breakdown had 1.4).
+         A/B: __V3_DEBUG.waterGrabPerSample = true.
    - [ ] Haze: the full-res copy back into the frame (a ping-pong would drop it).
 - [x] POPPING (engine, both games): the plant fields' tile now centres on the
       GROUND ON SCREEN (main.js viewFootprint) and fades past the farthest
@@ -52,8 +58,20 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       / scatterShadowCircle = true for the old behaviour.
    - [ ] **you, look**: plants now shaded all over the view (darker canopies,
          was pale/flat outside the circle) — keep? nam too (+1.3 ms there).
-   - [ ] Plants past their first detail step receive no shadows (lod0 only) —
-         a building's shadow drops off a tree at ~100 m. Price it.
+   - [x] SHADING BAND (you: "the bottom of the screen has those shadows, the
+         top doesn't"): only the nearest plant detail level RECEIVED shadows
+         (8/24 foliage, 12/36 tree meshes) — past ~105/131 m from the camera
+         crowns went flat bright green, a band following the camera. Now all
+         three levels receive (boot option scatterReceiveLods: 3 in alg; the
+         engine default stays 1). Before/after at a wooded slope: crowns shaded
+         across the whole view. Cost: within noise (≤0.3 ms, latched GPU) at
+         wooded default/max and the base. ?recvlods=1 = the old way.
+   - [ ] GRASS CUT (you): the oasis grass blades fade at a FIXED 44-68 m from
+         the camera (revo grass, a walking-camera setting) — mid-screen at
+         default zoom (view 28-163 m) — and past it the ground goes BARE: the
+         terrain's far-grass tint was compiled out (grassFar: false) when the
+         map had no grass. Fix: grassFar back on (+ price it); blades further
+         out only if measured affordable.
    - [ ] nam: move its camera to addPreUpdateHook (it is inside its tick).
 - [x] DRAW CALLS (you: "~293 at the base, is it plenty?"): 287-310 a frame =
       tall plants 84 (4 species × 3 variants × 3 details, depth pre-pass +

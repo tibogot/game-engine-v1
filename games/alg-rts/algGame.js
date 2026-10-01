@@ -101,6 +101,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // Cut-out leaf cards drawn depth-first (cedar massif: ~12 ms → near 0).
     // ?prepass=0 to A/B.
     foliageDepthPrepass: params.get("prepass") !== "0",
+    // Every plant detail level RECEIVES shadows (the engine default is the
+    // near one only): the RTS view shows all three at once, and past the
+    // first step the crowns went flat and bright — a band that followed the
+    // camera (you, 2026-10-01). ?recvlods=1 = the old way, to A/B.
+    scatterReceiveLods: Number(params.get("recvlods") ?? 3),
     // shadowRadius 2 (engine default 4): the PCF disc is radius × texel, and at
     // 4 the palm fronds and soldiers smeared to grey smudges; 1 was crisp but
     // grainy. Chosen by eye in-game, 2026-09-29.
