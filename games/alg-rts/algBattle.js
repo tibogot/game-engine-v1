@@ -118,6 +118,11 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
           }
           if (!throttled("sight", x, z, P.sightEvery)) { say(`FLN ${n > 1 ? `band (${n})` : "fighter"} seen ${placeName(x, z)}.`, x, z, ""); told.add("bandSeen"); }
         }
+        // The first FLN machine gun seen: say so — it is what pins a section.
+        if (u.alive && u.typeKey === "fmTeam" && !told.has("mgSeen") && seenByPlayer(x, z) && (!cave || Math.hypot(x - cave.position.x, z - cave.position.z) > 80)) {
+          told.add("mgSeen");
+          say(`<b>FLN machine gun</b> ${placeName(x, z)}! It pins men in the open.`, x, z, "bad");
+        }
       }
     }
   }
@@ -206,6 +211,14 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
         x: todo.position.x, z: todo.position.z,
       });
     } else list.push({ text: "Hold your villages", sub: "leave a few men in each: the FLN works them back", state: "done" });
+    const caches = structures.list.filter((s) => s.typeKey === "armsCache"), live = caches.filter((s) => s.alive);
+    if (caches.length) {
+      list.push({
+        text: "Destroy the FLN arms caches",
+        sub: live.length ? `${live.length} standing · each arms two FLN machine guns` : "all destroyed: no more FLN machine guns",
+        state: live.length ? "" : "done", x: live[0]?.position.x, z: live[0]?.position.z,
+      });
+    }
     if (cave) list.push({ text: "Destroy the FLN cave (north-west)", sub: cave.alive ? (cave.hp < cave.maxHp ? `${Math.round((100 * cave.hp) / cave.maxHp)}% left` : "wins the war outright · bring armour and mortars") : "destroyed", state: cave.alive ? "" : "done", x: cave.position.x, z: cave.position.z });
     if (post) list.push({ text: "Keep the post", sub: post.hp < post.maxHp ? `${Math.round((100 * post.hp) / post.maxHp)}% left` : "lose it and the war is lost", state: post.hp < post.maxHp * 0.5 ? "bad" : "", x: post.position.x, z: post.position.z });
     const lv = { easy: "Easy", normal: "Normal", hard: "Hard" }[app.algDifficulty] ?? "";
@@ -225,6 +238,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     if (stats.lostFr > 0 || told.has("contactSeen")) advise("contact", "Under fire: hold <b>V</b> to see cover (green) and concealment (cyan). Men behind walls and rocks live; men in the open don't.");
     if (economy.heldByEnemy > economy.held) advise("bleeding", "The FLN holds more villages than you: <b>your score is falling</b>. Take one back.");
     if (economy.french.stock >= 260 && clock > 60) advise("build", "Supplies to spend: click the post to train a <b>Sapeur</b> — he builds MG nests, wire and miradors to hold what you take.");
+    if (told.has("mgSeen")) advise("mg", "An FLN <b>machine gun</b> pins your men in the open: get them behind walls and rocks (V), then flank it. Its guns come from the <b>arms caches</b> — destroy them and no more come.");
     if (told.has("bandSeen")) advise("band", "An FLN band won't fight fair: it waits in the scrub and strikes men who come close. Scout with the jeep, bring the MG, keep men together.");
     if ((tipGap -= dt) > 0 || !tips.length) return;
     tipGap = 14;

@@ -20,7 +20,7 @@ import * as THREE from "three";
 
 export const COSTS = {
   appele: 60, sapeur: 80, para: 110, legion: 150, willys: 90, gmc: 110, halftrack: 160, ebr: 220, amx13: 260, alouette: 320,
-  moudjahid: 40,
+  moudjahid: 40, fmTeam: 70,
 };
 
 const P = {

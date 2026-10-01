@@ -203,9 +203,20 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
 - [ ] **PARKED until Sky Pro has its night** (you, in another session): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
-- [ ] **A BETTER MINIMAP** (you, 2026-10-01: "reads small; a rotated square
-      inside a square doesn't look nice; we can do far better for the eyes
-      and for gameplay"). NEXT after the AI round.
+- [x] **A BETTER MINIMAP** (you, 2026-10-01: "reads small; a rotated square
+      inside a square doesn't look nice"; then "the camera must read as in the
+      game — a rotated map shouldn't sit in a non-rotated parent").
+      · SHAPED LIKE THE PLAY AREA: turned with the start camera (the view
+        outline upright, as on screen), the canvas CLIPPED to the play area
+        (CSS clip-path), its own border (SVG) round it, no square panel; a
+        drop shadow follows the shape. (A 90°-snapped square was tried first:
+        it filled the box but the view outline read crooked — you rejected it.)
+      · Bigger: 172 → 236 px block. Villages drawn as TERRITORY (the capture
+        ring tinted in the holder's colour, the capture arc on its rim, a big
+        marker, the NAME); the post and the cave marked and named; the
+        fields as a patchwork; a north arrow; unit dots larger. Names drawn
+        last (on top of units) and slid inside the shape.
+   - [ ] you, look: size (236 — bigger?), the territory tint strength.
 - [x] **A REAL ENEMY + A GAME THAT EXPLAINS ITSELF** (2026-10-01; you: "way
       too easy, almost no enemies … something should be written to explain").
       · DIFFICULTY (algDifficulty.js; chosen on the briefing, remembered,
@@ -246,9 +257,22 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
            spot). Seen: placed and built in 10 s.
          · WIRE: a band stuck short of its spot with wire within 30 m cuts it
            (state "cut", algWire.cut), then goes on. (Not seen in a test.)
-   - [ ] AI round 2: an MG team (FM 24/29 — a new unit type: model, weapon,
-         renderer) so ambushes PIN; the arms caches unlocking it; the mule
-         train; the refuge (casemate) and the lookout.
+   - [x] **AI round 2a (2026-10-01): the FM GUNNER + the caches.** New unit
+         `fmTeam` (algUnitTypes: weapon "mg", 80 hp, 42 m, slower; 70 a man)
+         in a new look `alnGunners` (soldierLooks: the section's look, every
+         man with the FM 24/29 — checked: 24/24 loadouts). Each standing
+         ARMS CACHE arms two (algAI mgRoom: caches × 2 − out − queued); a
+         band forming adds one while there's room. TESTED on Hard: the first
+         gunner out at 0:41; a 5-man section in the open at 32 m PINNED in
+         ~4.5 s; cache destroyed → no more queued, the objective reads "all
+         destroyed: no more FLN machine guns". Battle: an alert the first
+         time an FLN MG is seen, an advice tip (cover, flank, the caches), a
+         "Destroy the FLN arms caches" objective (count, click to go).
+   - [ ] The map has ONE cache (2 MGs at most): a second / third cache in
+         the hills, or the FLN building caches (algBuild piece).
+   - [ ] A gunner formed after his band is gathered waits at the rally for
+         the next band (bands take the first men standing).
+   - [ ] AI round 2b: the mule train; the refuge (casemate); the lookout.
    - [ ] you, play it: Normal hard enough? (Hard = 700 + 70/min, 12 out.)
 - [x] **FLOWERS + SMALL PLANTS, round 1** (2026-10-01; you: "the pink flowers
       are flat quads; still Algeria; the cactus"). Season kept: LATE SUMMER.

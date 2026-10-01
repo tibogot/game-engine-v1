@@ -87,6 +87,7 @@ const P = {
   screenWait: 3,              // s in ambush before it puts up a screen (8: they struck first)
   screenApart: 45,            // m between two ambush screens
   stuckCut: 30,               // m: a band stuck this near wire cuts it
+  mgPerCache: 2,              // FM teams each standing arms cache arms
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -276,7 +277,18 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       app.algEconomy?.aln.earn(paid * (app.algEconomy.costs?.moudjahid ?? 40));
       return;
     }
-    bands.push({ state: "gather", size: paid, members: [], t: 0, start: 0 });
+    // THE FM GUNNER: one in the band while the ARMS CACHES allow it (two
+    // MG teams per standing cache) — the French take the caches, the MGs stop.
+    let mg = 0;
+    if (mgRoom() > 0 && cave.structure.enqueue("fmTeam")) mg = 1;
+    bands.push({ state: "gather", size: paid + mg, members: [], t: 0, start: 0 });
+  }
+  /** MG teams the caches still allow (out on the map + on the cave's queue counted). */
+  function mgRoom() {
+    const caches = (app.algStructures?.list ?? []).filter((s) => s.typeKey === "armsCache" && s.alive).length;
+    const out = units.list.filter((u) => u.alive && u.team === "enemy" && u.typeKey === "fmTeam").length;
+    const queued = cave.structure.queue.filter((k) => k === "fmTeam").length;
+    return caches * P.mgPerCache - out - queued;
   }
 
   function setState(b, s) { b.state = s; b.t = 0; }
@@ -290,7 +302,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         for (const u of units.list) {
           if (b.members.length >= b.size) break;
           if (!u.alive || u.team !== "enemy" || inBand.has(u) || u.ghost || u.isMoving) continue;
-          if (u.typeKey !== "moudjahid") continue;
+          if (u.typeKey !== "moudjahid" && u.typeKey !== "fmTeam") continue;
           b.members.push(u); inBand.add(u);
         }
         if (b.members.length >= b.size || (b.t > 40 && b.members.length >= 3)) {

@@ -45,7 +45,7 @@ const PRODUCTION = {
   post: { appele: 6, sapeur: 8, legion: 14 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
   helipad: { para: 10, alouette: 30 },   // paras: the heliborne reserve
-  caveEntrance: { moudjahid: 4 },   // the ALN's: its AI will queue (Dev panel until then)
+  caveEntrance: { moudjahid: 4, fmTeam: 7 },   // the ALN's (its AI queues them; fmTeam needs an arms cache — algAI.js)
 };
 
 /** Pad-local point just past the footprint's edge, heading to (px, pz). */

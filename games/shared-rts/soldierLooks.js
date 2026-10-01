@@ -160,6 +160,22 @@ export const LOOKS = {
     weaponMix: { mas36: 0.45, mauser98: 0.3, enfield: 0.25 },
     extras: { beard: 0.45, mustache: 0.5, bandolier: 0.4, bandoliers: 0.25, cigarette: 0.1, kachabia: 0.2 },
   },
+  // The ALN's FM gunners (alg-rts fmTeam): the section's look, every man with
+  // the FM 24/29 (no mix, no roles), bandoliers for its magazines more often.
+  alnGunners: {
+    label: "ALN FM gunners", note: "the section's look, all with the FM 24/29",
+    green: 0x86775a, greenAlt: 0x5e4b37, khaki: 0xa08f6d, helmet: false, weapon: "fm2429",
+    skinTan: ALN_SKIN, clothRef: 0.045,
+    variants: [
+      { w: 0.35, headgear: "cheche", hatColor: 0xdcd5c3 },
+      { w: 0.25, headgear: "fieldCap", hatColor: 0x857953 },
+      { w: 0.2, headgear: "chechePulled", hatColor: 0xcfc6ae },
+      { w: 0.2, headgear: null, helmet: true },
+    ],
+    bodies: ["aln1", "aln2"],
+    kit: ["musette"],
+    extras: { beard: 0.5, mustache: 0.45, bandolier: 0.5, bandoliers: 0.35, cigarette: 0.1 },
+  },
   alnKachabia: {
     label: "ALN, kachabia", note: "hooded wool cloak over the drill",
     green: 0x86775a, greenAlt: 0x5e4b37, khaki: 0xa08f6d, helmet: false, headgear: "cheche", hatColor: 0xdcd5c3,

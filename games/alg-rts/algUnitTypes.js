@@ -190,6 +190,42 @@ export const ALG_UNIT_TYPES = {
     castShadow: true,
   },
 
+  // The FM GUNNER (2026-10-01, you: "ambushes can't pin"): a moudjahid with a
+  // captured FM 24/29 — the ALN's light MG. Weapon "mg": every burst
+  // SUPPRESSES an area (infantryPosture.js), so a band with one can pin a
+  // French section in the open. Slower (the gun and its pans), tougher to
+  // drop (the band covers him). The ARMS CACHES arm them: two per standing
+  // cache (algAI.js) — destroy the caches and the MGs stop coming.
+  fmTeam: {
+    typeKey: "fmTeam",
+    name: "Tireur FM",
+    buildLabel: "FM 24/29",
+    weapon: "mg",
+    isAir: false,
+    foot: true,
+    hover: 0,
+    speed: 4.8,
+    radius: 1.0,
+    turnRate: 5,
+    maxHp: 80,
+    range: 42,
+    damage: 5,
+    fireRate: 4.5,
+    canHitAir: true,
+    vision: 42,
+    url: "/models/soldiers/soldiers.glb",
+    bodies: ["aln1", "aln2"],
+    look: "alnGunners",
+    skinned: true,
+    targetHeight: REAL.soldierHeight * RTS_SCALE,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 1.7,
+    barWidth: 2.2,
+    barY: 3.4,
+    castShadow: true,
+  },
+
   // ── THE VEHICLES (rtsVehiclesFr.js, built in code, French paint) ────────
   // BEHAVIOUR IS NAM'S FOR NOW (you, 2026-09-27): each copies the numbers of
   // the nam vehicle it plays like (named on each). This game's own balance
