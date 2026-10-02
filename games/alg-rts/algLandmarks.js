@@ -157,6 +157,8 @@ export function landmarkEntries(app, list) {
 const Q = {
   outcrops: 42, outcropSpacing: 34, outcropSlope: [9, 32],   // degrees
   trees: 24, treeSpacing: 55,
+  betoums: 10, betoumSpacing: 70,   // the landmark shade trees (2026-10-03)
+  tamariskGroups: 9,                // along the wadis and the oasis edge
   mastShare: 0.13,        // agaves with their flower mast
   broomClumps: 14,
   agaveRun: 0.35,         // chance of a row at a track point near a village
@@ -258,6 +260,54 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     }
   }
 
+  // ── BETOUMS (Atlas pistachio, 2026-10-03): the landmark shade trees — alone
+  // on the open plain, near the villages, a few in the wide wadi beds. Big
+  // (11 m), so far apart; their ground under the crown cleared of scrub.
+  const paint = (x, z) => app.samplePaintWeights?.(x, z) ?? null;
+  const betoums = [];
+  for (let t = 0; t < 8000 && betoums.length < Q.betoums; t++) {
+    let x, z;
+    const u = R();
+    if (u < 0.35) {
+      // Near a village, 35-90 m out.
+      const vs = LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind));
+      const v = vs[Math.floor(R() * vs.length)], a = R() * Math.PI * 2, d = 35 + R() * 55;
+      x = v.x + Math.cos(a) * d; z = v.z + Math.sin(a) * d;
+    } else { x = PLAY.x0 + R() * (PLAY.x1 - PLAY.x0); z = PLAY.z0 + R() * (PLAY.z1 - PLAY.z0); }
+    if (slopeDeg(x, z) > 14 || !free(x, z, 5)) continue;
+    const w = paint(x, z);
+    if (w && (w[5] > 0.2 || w[3] > 0.4)) continue;              // not on cliffs, not in the oasis grove
+    if ([...betoums, ...trees].some((b) => Math.hypot(b.x - x, b.z - z) < Q.betoumSpacing)) continue;
+    betoums.push({ x, z });
+    taken.push({ x, z, r: 6 });
+  }
+  // ── TAMARISKS: small groups along the wadis and the oasis edge ───────────
+  const tamarisks = [];
+  for (let t = 0; t < 8000 && tamarisks.length < Q.tamariskGroups * 4; t++) {
+    const cx = PLAY.x0 + R() * (PLAY.x1 - PLAY.x0), cz = PLAY.z0 + R() * (PLAY.z1 - PLAY.z0);
+    const w = paint(cx, cz);
+    if (!w || !(w[4] > 0.35 || (w[3] > 0.2 && w[3] < 0.6))) continue;   // a wadi bed, or the grove's edge
+    if (tamarisks.some((b) => Math.hypot(b.x - cx, b.z - cz) < 40)) continue;
+    const n = 2 + Math.floor(R() * 4);
+    for (let k = 0; k < n; k++) {
+      const a = R() * Math.PI * 2, r = 2 + R() * 7, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+      if (slopeDeg(x, z) > 22 || !free(x, z, 2.5)) continue;
+      if (tamarisks.some((b) => Math.hypot(b.x - x, b.z - z) < 4)) continue;
+      tamarisks.push({ x, z });
+      taken.push({ x, z, r: 3 });
+    }
+  }
+  if (plants) {
+    for (const [kind, list, sc] of [["betoum", betoums, [0.85, 0.35]], ["tamariskTree", tamarisks, [0.75, 0.45]]]) {
+      if (!list.length || !FOLIAGE_PRESETS[kind]) continue;
+      if (!plants.types.has(kind)) plants.setType(kind, structuredClone(FOLIAGE_PRESETS[kind]));
+      for (const b of list) {
+        plants.add(kind, b.x, H(b.x, b.z) - 0.05, b.z, { rotY: R() * 6.28, scale: sc[0] + R() * sc[1], seed: R() });
+        app.clearVegetation?.(b.x, b.z, kind === "betoum" ? 4 : 2.5, { grass: 0, edge: 0.6 });
+      }
+    }
+  }
+
   // ── Agaves: planted by people — a row before each farmstead's yard, short
   // rows along the pistes near the villages; one in ~8 has its flower mast ──
   const agaves = [];
@@ -293,7 +343,7 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
   }
   if (plants) {
     if (!plants.types.has("agave")) plants.setType("agave", structuredClone(FOLIAGE_PRESETS.agave));
-    const masts = plants.types.has("agaveMast") || plants.types.size < 12;
+    const masts = plants.types.has("agaveMast") || plants.types.size < 16;   // PlacedFoliage MAX_TYPES
     if (masts && !plants.types.has("agaveMast")) plants.setType("agaveMast", structuredClone(FOLIAGE_PRESETS.agaveMast));
     for (const a of agaves) {
       const y = H(a.x, a.z) - 0.08;
@@ -322,9 +372,9 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
   }
 
   return {
-    rocks, trees, meshes, agaves, brooms,
+    rocks, trees, meshes, agaves, brooms, betoums, tamarisks,
     /** Hard cover round the outcrops, for the cover bake (algCover.js). */
     *coverCircles() { for (const r of rocks) yield { x: r.x, z: r.z, radius: 2.4 * r.k, size: 1, hard: true }; },
-    stats: { outcrops: rocks.length, trees: trees.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length, brooms: brooms.length },
+    stats: { outcrops: rocks.length, trees: trees.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length, brooms: brooms.length, betoums: betoums.length, tamarisks: tamarisks.length },
   };
 }
