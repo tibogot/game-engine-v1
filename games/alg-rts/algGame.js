@@ -174,14 +174,18 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   xrayParams.heightTexNode = app.heightTexNode ?? null;
 
   app.postFx?.setEnabled(true);
-  app.postFx?.setBloomSelective(true);
-  // Bloom OFF until something emits light (tracers, muzzle flash, fires,
-  // the searchlight at night). It is selective — only emissive materials
-  // glow — and nothing in this game is emissive yet, so it drew nothing:
-  // pixel diff on/off = motion only. It cost 5 full-resolution blur levels
-  // every frame: MEASURED ~8 ms at 1.55x resolution (2026-09-27 perf pass).
-  // Turn it on (Dev → Post-FX) the day the first emissive arrives.
-  app.postFx?.setBloom({ enabled: false, strength: 0.85, threshold: 0.0, radius: 0.5 });
+  // CHEAP BLOOM (2026-10-02, you: "the cheap bloom first"): THRESHOLD mode, not
+  // selective. Selective needs a 4th MSAA attachment (emissive) written per
+  // sample on every pixel of the scene pass: MEASURED most of the old 6.6-8.9
+  // ms (scale 2) — the blur was ~1 ms of it. Threshold reads the colour the
+  // frame already has; only real light passes 1.6 (flashes, fireballs, sparks,
+  // tracers are HDR) — not the white post in the sun, not the sky (fog of war
+  // and haze sit under 1). And the blur chain starts at an EIGHTH of the frame
+  // (postFxPipeline `resolution`; stock: a half). MEASURED interleaved at
+  // scale 2: 0.42-0.47 ms; seen: fireball, muzzle flashes, the tank's flash,
+  // sparks glow; walls and sand do not. ?bloom=0 = off.
+  app.postFx?.setBloomSelective(false);
+  app.postFx?.setBloom({ enabled: params.get("bloom") !== "0", strength: 1.4, threshold: 1.6, radius: 0.6, smoothWidth: 0.8, resolution: 0.125 });
   // CRISP, NOT SOFT (you, 2026-10-01: "CoH looks really good resolution").
   // FXAA ran ON TOP of the 4x MSAA and blurred every pixel of the frame:
   // MEASURED same frame, the fine detail (Laplacian) went ×2.7 with it off —

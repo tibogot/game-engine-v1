@@ -153,6 +153,10 @@ export class PostFxPipeline {
       threshold: 0.9,
       radius: 0.4,
       smoothWidth: 1.0,
+      // The blur chain's first level as a share of the frame (BloomNode's own:
+      // 0.5). 0.25 starts at a quarter (1/16 the pixels) — a game's cheap
+      // bloom (alg-rts, 2026-10-02: stock bloom MEASURED 6.6-8.9 ms at scale 2).
+      resolution: 0.5,
     };
 
     /** FXAA enable flag — node is built lazily inside `_refreshOutputNode`. */
@@ -459,7 +463,11 @@ export class PostFxPipeline {
     if (this._renderPipeline) this._refreshOutputNode();
   }
 
-  setBloomParams({ strength, threshold, radius, smoothWidth } = {}) {
+  setBloomParams({ strength, threshold, radius, smoothWidth, resolution } = {}) {
+    if (resolution != null && resolution !== this._bloomParams.resolution) {
+      this._bloomParams.resolution = resolution;
+      for (const p of [this._bloomPass, this._cloudBloomPass]) this._scaleBloom(p);
+    }
     if (strength != null) this._bloomParams.strength = strength;
     if (threshold != null) this._bloomParams.threshold = threshold;
     if (radius != null) this._bloomParams.radius = radius;
@@ -851,7 +859,16 @@ export class PostFxPipeline {
     this._cloudBloomPass = this._bloomSelective
       ? null
       : bloom(this._linearTextureNode, bp.strength, bp.radius, bp.threshold);
+    for (const p of [this._bloomPass, this._cloudBloomPass]) this._scaleBloom(p);
     this._applyBloomUniforms();
+  }
+
+  /** BloomNode sizes itself to half the frame each frame: scale what it is told. */
+  _scaleBloom(p) {
+    if (!p) return;
+    if (!p._stockSetSize) p._stockSetSize = p.setSize.bind(p);
+    const k = (this._bloomParams.resolution ?? 0.5) / 0.5;
+    p.setSize = (w, h) => p._stockSetSize(Math.max(2, w * k), Math.max(2, h * k));
   }
 
   _applyBloomUniforms() {

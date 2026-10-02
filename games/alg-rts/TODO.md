@@ -519,6 +519,17 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          bare grounds (Ground104 "crumbly"…), nothing for stubble or crops.
    - [ ] you, look at play zoom and close: the soil colour, the tints, the
          furrow scale (TILE_M), the stubble's bands, the barley's green.
+- [x] **CHEAP BLOOM (2026-10-02)**: on by default in alg. Stock selective
+      bloom MEASURED 6.6-8.9 ms (scale 2): most of it was the 4th MSAA
+      attachment (emissive) written per sample, the blur ~1 ms. Now THRESHOLD
+      mode (1.6: only HDR light — flashes, fireballs, sparks, tracers; the
+      white post and the sky stay under it) and the blur chain from an EIGHTH
+      of the frame (new postFxPipeline bloom `resolution`, default 0.5 = stock,
+      nam unchanged). MEASURED interleaved (scale 2, play zoom): 0.42-0.47 ms.
+      ?bloom=0 = off.
+   - [ ] you, look in a fight: the strength (1.4), the threshold (1.6).
+   - [ ] Next post-FX from the list: a colour-grade LUT + vignette (near
+         free), then GTAO (measure, keep only under ~1.5 ms).
 - [ ] **SOLDIERS' VOICES + RADIO CALLS, French and Arabic** (you,
       2026-10-02, first minutes of a match: "the soldiers' communication is
       missing, the enemies' too; radio calls in French and Arabic"). Today:
