@@ -38,6 +38,8 @@ import { createUnitBar } from "./ui/unitBar.js";
 import { createCommandCard } from "./ui/commandCard.js";
 import { createMinimap } from "./ui/minimap.js";
 import { createArmyTabs } from "./ui/armyTabs.js";
+import { createQueueBadges } from "./ui/queueBadges.js";
+import { installPortraits } from "./ui/portraits.js";
 
 /**
  * WHAT EACH BUILDING PRODUCES, seconds per unit (no costs yet: this game's
@@ -211,6 +213,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // and the command card look them up by thumbKeyOf: "struct:post", …).
   if (unitRenderer.thumbnails) {
     await bakeStructureThumbnails(app.renderer, unitRenderer.thumbnails).catch((e) => console.warn("[thumbs] structures:", e));
+    // The PAINTED portraits (ui/portraits.js) over the units' 3D ones;
+    // the buildings keep theirs. ?portraits=0 = the 3D ones.
+    if (new URLSearchParams(location.search).get("portraits") !== "0") {
+      app.algPortraits = await installPortraits(unitRenderer.thumbnails, units).catch((e) => { console.warn("[portraits]", e); return null; });
+    }
   }
   // The production buildings (algProducer.js): selectable, they produce, and
   // their gate or doors swing open for each unit that comes out.
@@ -311,6 +318,13 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     thumbnails: unitRenderer.thumbnails,
     onPickGroup: (arr) => app.selection?.select(arr),
     onSelectAllType: (key) => app.selection?.select(mine(key)),
+    // The cover and concealment chips (algCover.js), read at the first man.
+    stanceFor: (sel) => {
+      const u = sel.find((e) => !e.isStructure && !e.isAir);
+      const c = app.algCover;
+      if (!u || !c) return null;
+      return { concealment: c.concealmentAt(u.position.x, u.position.z), cover: c.coverAt(u.position.x, u.position.z) };
+    },
     mount: hud.centre,
   });
   const commandCard = createCommandCard({
@@ -406,10 +420,14 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
   hud.setCollapsed(true);   // nothing selected at the start
   // THE ARMY TABS (ui/armyTabs.js): every group you have, down the right edge.
+  // What each building is training, over its roof (ui/queueBadges.js).
+  const queueBadges = createQueueBadges({ app, producers, thumbnails: unitRenderer.thumbnails });
   const armyTabs = createArmyTabs({ units, selection, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
   // The tactical map from the start: the post has its own radio mast.
   const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: economy, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY });
-  const resourceHud = createResourceHud({ mount: hud.strip });
+  // Top right now (resourceHud.js); the bottom strip is gone with it.
+  const resourceHud = createResourceHud({ mount: document.body, troops: () => units.list.reduce((n, u) => n + (u.alive && u.team === "player" && !u.isStructure ? 1 : 0), 0) });
+  hud.strip.style.display = "none";
 
   // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up
   // enemies in range, close, fire visible rounds; the dead drop out of the
@@ -514,6 +532,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     commandCard.tick();
     unitBar.tick();
     armyTabs.tick(frameDt);
+    queueBadges.frame();
     minimap.draw();
   });
 

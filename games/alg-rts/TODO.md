@@ -521,15 +521,52 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
         brass when selected. Click: select (shift: add); double-click: the
         camera there. Regrouped 4×/s, DOM only on change. Seen: Appelés ×12,
         Sapeur, Willys; a click selected the 12 and opened the card.
-   - [ ] Next from the proposal: an ICON command grid with hotkeys (QWER /
-         ASDF), the richer selection card (a pip per man, state, cover),
-         resources top right, build-queue badges over buildings, tooltips.
+   - [x] **HUD round 2 (same day; you: "change it completely if you want")**:
+         · COMMAND CARD rebuilt (ui/commandCard.js): a fixed 4-wide grid of
+           ICON squares (game-icons.net, CC BY 3.0, public/textures/ui/icons/
+           + CREDITS.md, drawn as CSS masks in brass), hotkey in the corner
+           (mnemonic, clear of the camera keys: H halt, F camera, P patrol,
+           G grenade, X cut wire, Del cancel), price, a cooldown sweep,
+           locked = grey + lock; a real tooltip above the panel (name, price,
+           what it does, why locked, key). Buildings: the queue as portraits
+           (the first with its bar), training buttons as portraits.
+         · SELECTION CARD rebuilt (ui/unitBar.js): portrait, name, ×count, a
+           health PIP PER MAN, state chips (PINNED / SUPPRESSED / FIRING /
+           MOVING, HARD / LIGHT COVER, CONCEALED), weapon and speed.
+         · RESOURCES top right (+ troop count); the bottom strip is gone.
+         · QUEUE BADGES over every building training something
+           (ui/queueBadges.js): portrait, progress, +n.
+         Seen: appelés (12 pips, 4 orders), the post (queue + locked tier).
+   - [ ] you, play it: the sizes, the hotkeys, the tooltip; what's missing.
+   - [x] **PAINTED PORTRAITS IN (2026-10-02)**: your two ChatGPT sheets
+         (soldiers 8x4: rows 1-2 French, 3-4 ALN; vehicles 3x2) packed by
+         tools/packPortraits.py (cells FOUND from the gutters) into
+         public/textures/ui/portraits_soldiers.webp (240 KB) + _vehicles
+         (50 KB); the 4.8 MB PNGs deleted as you asked. ui/portraits.js
+         cuts one blob URL per type at load into the shared thumbnail map:
+         tabs, selection card, command card, queue badges all show them.
+         Faces per type: appelé 8, sapeur 3, para 2 (red berets), légion 2
+         (képis), colonel (officer's képi), moudjahid 10, FM 5 (bandoliers),
+         Si Tahar (hooded kachabia); faceOf(unit) gives each man his own.
+         ?portraits=0 = the 3D ones. Buildings keep their 3D portraits.
+   - [ ] Building portraits (the list in chat), and faceOf() per man where
+         one man is shown (a single-man selection, the death notices).
    - [ ] **PORTRAITS — keep for later** (you, 2026-10-02): an atlas of 32
          painted portraits (public/textures/alg-atlas.png, 1536×1024, 3 MB:
          rows 1-2 French, 3-4 ALN) for the tabs and the selection card
          instead of the 3D thumbnails. You'll redo it to match the troops
          (red berets, green berets…). Then: crop the cells, ~160×200 each
          into one WebP (~150 KB), a face per type (and per man, varied).
+      · THE ALN HERO (you, 2026-10-02: "we need a hero for the ALN too, even
+        if not built yet"), the counterpart of Colonel Delorme — FICTIONAL,
+        not a real commander: **Commandant Si Tahar**, an ALN katiba leader
+        of the Aurès, early 40s, lean and weathered, short greying beard and
+        moustache, dark watchful eyes. Khaki battledress (surplus jacket)
+        under a long brown KACHABIA (hooded wool cloak: the silhouette that
+        reads at RTS zoom), a sand chèche loose round the neck, a captured
+        MAT 49 on a sling, binoculars, a map case and a holstered pistol,
+        the officer's star on his chest. Role, as the colonel's: an aura
+        over the bands near him, 2-3 abilities, comes back if he falls.
 - [x] **THE BATTLE LAB (2026-10-02, battle-lab.html + battleLab.js)** (you:
       "everything related to the fight in a lab"). The REAL game booted lean
       (URL defaults ai=0 battle=0 fow=0 herds/hens/birds=0, any game option

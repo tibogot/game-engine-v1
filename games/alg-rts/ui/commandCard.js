@@ -1,316 +1,290 @@
-// THE ALGERIA GAME'S COMMAND CARD — own file (copy of nam-rts/commandCard.js,
-// 2026-09-27; nam's structure labels still inside, harmless, to be rewritten).
-// Command card — GAME UI (player-facing), the HUD bar's right slot (hudBar.js).
+// THE ALGERIA GAME'S COMMAND CARD — the HUD's right slot (hudBar.js).
+// REBUILT 2026-10-02 (you: "the UI could be better — change it completely if
+// you want"): a fixed GRID OF ICON BUTTONS, the Company of Heroes way.
 //
-// Two faces:
-//   • UNITS selected    → portrait, name, count, Stop / Focus.
-//   • The BASE selected → production: build buttons + queue + progress bar.
+//   • every order is a square: its icon, a short name, its hotkey in the
+//     corner, its price; a cooldown sweeps round it; locked = dark with a lock
+//   • the same order always sits in the same square (orders first, then the
+//     abilities, then what the selection can build / train)
+//   • hover: a real tooltip ABOVE the panel — name, price, what it does, why
+//     it is locked, the key
+//   • a building: its queue as portraits (the first with its progress), then
+//     what it trains as portrait buttons
+//
+// Who the selection is (portrait, men, state, cover) is the selection card's
+// (unitBar.js). Per frame: only classes, a CSS variable and text on change.
+import { HOTKEY, hasIcon, iconStyle } from "./icons.js";
+import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
+
+const CSS = `
+#rts-cmd-card { height: 100%; display: flex; flex-direction: column; gap: 6px; font-family: var(--hud-sans); color: var(--hud-text); }
+#rts-cmd-card .cc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+#rts-cmd-card .cc-b {
+  position: relative; height: 46px; cursor: pointer; overflow: hidden; padding: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  background: linear-gradient(#2a2e23, #1f221a); border: 1px solid #454c3a; border-radius: var(--hud-radius);
+  color: var(--hud-text); font: 600 9px var(--hud-sans); letter-spacing: 0.04em; text-transform: uppercase;
+}
+#rts-cmd-card .cc-b:hover { border-color: var(--hud-brass); background: linear-gradient(#343929, #262a20); }
+#rts-cmd-card .cc-b .ic { position: absolute; left: 50%; top: 4px; width: 24px; height: 24px; transform: translateX(-50%);
+  background: #d9c58f; -webkit-mask: center/contain no-repeat; mask: center/contain no-repeat; }
+#rts-cmd-card .cc-b .pic { position: absolute; inset: 0 0 13px 0; background: center 22%/cover no-repeat; }
+#rts-cmd-card .cc-b .lb { position: relative; padding: 0 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+#rts-cmd-card .cc-b .hk { position: absolute; left: 3px; top: 2px; font: 700 9px var(--hud-mono); color: var(--hud-dim); }
+#rts-cmd-card .cc-b .co { position: absolute; right: 3px; top: 2px; font: 700 10px var(--hud-mono); color: var(--hud-brass); text-shadow: 0 1px 2px #000; }
+#rts-cmd-card .cc-b.verb { background: linear-gradient(#3a3520, #2a2717); border-color: rgba(201,165,74,0.5); }
+#rts-cmd-card .cc-b.verb:hover { background: linear-gradient(#463f25, #332f1c); border-color: var(--hud-brass); }
+#rts-cmd-card .cc-b.tier { border-color: var(--hud-brass); box-shadow: inset 0 0 0 1px rgba(201,165,74,0.35); }
+#rts-cmd-card .cc-b.tier .ic { background: #f1dfa6; }
+/* Cooldown: a dark wedge that sweeps away as it comes back (--cd: 1 → 0). */
+#rts-cmd-card .cc-b::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: conic-gradient(rgba(8,9,6,0.78) calc(var(--cd, 0) * 360deg), transparent 0); }
+#rts-cmd-card .cc-b.cool { cursor: default; }
+#rts-cmd-card .cc-b.cool .co { display: none; }
+#rts-cmd-card .cc-b .cdn { position: absolute; left: 0; right: 0; top: 13px; text-align: center; font: 700 12px var(--hud-mono); color: #f1e6c4; z-index: 1; text-shadow: 0 1px 2px #000; }
+#rts-cmd-card .cc-b.poor .co { color: var(--hud-red); }
+#rts-cmd-card .cc-b.poor .ic, #rts-cmd-card .cc-b.poor .pic { opacity: 0.45; }
+#rts-cmd-card .cc-b.locked { cursor: not-allowed; filter: grayscale(1); opacity: 0.5; }
+#rts-cmd-card .cc-b.locked .co { display: none; }
+#rts-cmd-card .cc-b.locked::before { content: "🔒"; position: absolute; right: 3px; top: 1px; font-size: 9px; filter: grayscale(1); }
+#rts-cmd-card .cc-q { display: flex; gap: 4px; align-items: center; min-height: 34px; }
+#rts-cmd-card .cc-q .q { position: relative; width: 34px; height: 34px; flex: none; background: #1b1e17 center 22%/cover no-repeat; border: 1px solid #454c3a; border-radius: var(--hud-radius); }
+#rts-cmd-card .cc-q .q.first { width: 40px; height: 40px; border-color: var(--hud-brass); }
+#rts-cmd-card .cc-q .q .bar { position: absolute; left: 2px; right: 2px; bottom: 2px; height: 3px; background: #23261d; }
+#rts-cmd-card .cc-q .q .bar i { display: block; height: 100%; width: 0; background: var(--hud-brass); }
+#rts-cmd-card .cc-q .idle { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--hud-dim); }
+#rts-cmd-card .cc-hint { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hud-dim); }
+
+#alg-tip {
+  position: fixed; z-index: 70; pointer-events: none; display: none; width: 250px;
+  background: rgba(14, 16, 12, 0.98); border: 1px solid var(--hud-edge-hi); border-top: 2px solid var(--hud-brass);
+  border-radius: var(--hud-radius); padding: 8px 10px; box-shadow: 0 8px 22px rgba(0,0,0,0.5);
+  font: 12px/1.4 var(--hud-sans); color: var(--hud-text);
+}
+#alg-tip .t { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+#alg-tip .t b { font-size: 13px; color: #efe8d2; }
+#alg-tip .t span { font: 700 11px var(--hud-mono); color: var(--hud-brass); }
+#alg-tip .d { margin-top: 4px; color: #b9b3a0; }
+#alg-tip .l { margin-top: 5px; color: #ff9a86; font-weight: 600; }
+#alg-tip .k { margin-top: 5px; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--hud-dim); }
+#alg-tip .k kbd { font: 700 10px var(--hud-mono); color: var(--hud-text); border: 1px solid #4a503c; border-radius: 2px; padding: 0 4px; }
+`;
+
+const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
 export function createCommandCard({
   thumbnails,
   onStop = () => {},
   onFocus = () => {},
   onBuild = () => {},          // (structure, key) — enqueue production on that structure
-  productionFor = () => [],    // (structure) → [{ key, label, cost }] it can produce
-  canAfford = () => true,      // (cost) → is it affordable right now?
-  structureBuilds = [],        // [{ key, label }] — buildings a selected builder can raise
-  buildingCosts = {},          // { key: supplies } — shown on builder structure buttons
+  productionFor = () => [],    // (structure) → [{ key, label, cost, locked, tier, tip }]
+  canAfford = () => true,      // (cost) → affordable right now?
+  structureBuilds = [],        // [{ key, label, tip }] — what a builder can raise
+  buildingCosts = {},          // { key: supplies }
   onBuildStructure = () => {},
   abilitiesFor = () => [],     // (selected) → [{ key, label, hint, cost, ready, cooldown }]
-  onAbility = () => {},        // (key, selected) — enter targeting
-  stanceFor = () => null,      // (selected) → { concealment, cover } | null
+  onAbility = () => {},        // (key, selected)
+  stanceFor = () => null,      // kept for the API (the selection card shows the stance now)
   mount = document.body,
 }) {
   const root = document.createElement("div");
   root.id = "rts-cmd-card";
   mount.appendChild(root);
-
   const style = document.createElement("style");
-  style.textContent = `
-    #rts-cmd-card { height: 100%; display: flex; flex-direction: column; gap: 7px; font-family: var(--hud-sans); color: var(--hud-text); }
-    #rts-cmd-card .cc-head { display: flex; gap: 10px; align-items: center; }
-    #rts-cmd-card .cc-portrait {
-      width: 44px; height: 44px; flex: none;
-      background: #1b1e17 center/90% no-repeat; border: 1px solid #454c3a; border-radius: var(--hud-radius);
-    }
-    #rts-cmd-card .cc-name { font-weight: 600; font-size: 13px; letter-spacing: 0.03em; }
-    #rts-cmd-card .cc-sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hud-dim); margin-top: 2px; }
-    #rts-cmd-card .cc-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-    /* A builder has eight builds: four across, so two rows leave room for its abilities. */
-    #rts-cmd-card .cc-builds, #rts-cmd-card .cc-orders { grid-template-columns: repeat(4, 1fr); gap: 4px; }
-    #rts-cmd-card .cc-builds button { padding: 5px 2px; white-space: nowrap; }
-    #rts-cmd-card .cc-builds .cc-cost { margin-left: 3px; }
-    #rts-cmd-card button {
-      cursor: pointer; font: 11px var(--hud-sans); color: var(--hud-text); line-height: 1.15;
-      padding: 5px 3px; border-radius: var(--hud-radius); background: #252920; border: 1px solid #454c3a;
-    }
-    #rts-cmd-card button:hover { background: #2d3226; border-color: var(--hud-brass); }
-    #rts-cmd-card button .cc-cost {
-      font: 600 10px var(--hud-mono); color: var(--hud-brass); margin-left: 5px;   /* one line: the slot is 152 px tall */
-    }
-    /* Can't afford it — still clickable (the click just no-ops), but clearly dead. */
-    #rts-cmd-card button.poor { opacity: 0.45; }
-    #rts-cmd-card button.poor:hover { background: #252920; border-color: #454c3a; }
-    #rts-cmd-card button.poor .cc-cost { color: var(--hud-red); }
-    #rts-cmd-card button.locked { opacity: 0.45; cursor: not-allowed; }
-    #rts-cmd-card button .cc-lock { display: block; font-size: 9px; color: var(--hud-dim); margin-top: 2px; letter-spacing: 0.02em; }
-    #rts-cmd-card button.tier { border-color: var(--hud-brass); color: #f1dfa6; }
-    #rts-cmd-card .cc-bar { height: 4px; background: #23261d; border: 1px solid #3a4031; overflow: hidden; }
-    #rts-cmd-card .cc-bar i { display: block; height: 100%; width: 0%; background: var(--hud-brass); }
-    #rts-cmd-card .cc-queue { display: flex; gap: 4px; flex-wrap: wrap; min-height: 16px; }
-    /* Abilities read differently from production: they are VERBS, not purchases,
-       so they get their own colour and sit above Stop/Focus where a player's
-       eye lands first. */
-    #rts-cmd-card .cc-abil button { background: #33301c; border-color: rgba(201,165,74,0.45); }
-    #rts-cmd-card .cc-abil button:hover { background: #3e3a22; border-color: var(--hud-brass); }
-    #rts-cmd-card .cc-abil button.cooling { background: #1d2019; border-color: #33382b; color: #6f6d60; cursor: default; }
-    #rts-cmd-card .cc-abil button.cooling:hover { background: #1d2019; border-color: #33382b; }
-    #rts-cmd-card .cc-abil .cc-cd { font: 10px var(--hud-mono); color: var(--hud-dim); margin-left: 5px; }
-    /* Cover and concealment are RULES the player cannot see on the terrain.
-       Two chips are the whole readout: without them a unit that has stopped
-       shooting looks broken rather than outplayed. */
-    #rts-cmd-card .cc-stance { display: flex; gap: 5px; min-height: 16px; }
-    #rts-cmd-card .cc-tag {
-      font-size: 9px; font-weight: 600; letter-spacing: 0.1em;
-      padding: 2px 6px; border-radius: var(--hud-radius); border: 1px solid;
-    }
-    #rts-cmd-card .cc-tag.conceal { color: #9fcf7a; border-color: rgba(159,207,122,0.4); background: rgba(52,74,38,0.4); }
-    #rts-cmd-card .cc-tag.cover   { color: #c9b98a; border-color: rgba(201,185,138,0.4); background: rgba(74,66,42,0.4); }
-    #rts-cmd-card .cc-tag.seen    { color: #e0905a; border-color: rgba(224,144,90,0.45); background: rgba(94,52,25,0.4); }
-    #rts-cmd-card .cc-chip {
-      font-size: 10px; padding: 1px 5px; border-radius: var(--hud-radius);
-      background: #1d2019; border: 1px solid #3a4031; color: var(--hud-dim);
-    }
-  `;
+  style.textContent = CSS;
   document.head.appendChild(style);
+  const tip = document.createElement("div");
+  tip.id = "alg-tip";
+  document.body.appendChild(tip);
 
-  let baseRef = null;    // the base, while it's the thing selected
-  let selRef = [];       // the live selection, so tick() can refresh cooldowns
+  let selRef = [];
+  let baseRef = null;
+  let buttons = [];        // { el, kind, key, cost, info, run }
+  const cdMax = new Map(); // ability key → the longest cooldown seen (for the sweep)
+  let prodSig = "", prodT = 0, abilSig = "";
 
-  /**
-   * The ability row's markup. Shared by the unit face and the structure face
-   * because "what can this thing DO" is the same question for a squad and for
-   * a radio station, and two copies would drift.
-   */
-  function abilityRow(selected) {
-    const inner = abilityButtons(selected);
-    return inner ? `<div class="cc-actions cc-abil">${inner}</div>` : "";
+  // ── Buttons ────────────────────────────────────────────────────────────────
+  function button({ kind, key, label, cost = 0, icon = null, pic = null, verb = false, tier = false, locked = null, info = "", run }) {
+    const el = document.createElement("button");
+    el.className = `cc-b${verb ? " verb" : ""}${tier ? " tier" : ""}${locked ? " locked" : ""}`;
+    const hk = HOTKEY[key];
+    el.innerHTML = `${pic ? `<span class="pic" style="background-image:url(${pic})"></span>` : icon && hasIcon(icon) ? `<span class="ic" style="${iconStyle(icon)}"></span>` : ""}`
+      + `${hk ? `<span class="hk">${hk}</span>` : ""}${cost ? `<span class="co">${cost}</span>` : ""}<span class="lb">${esc(label)}</span>`;
+    const b = { el, kind, key, cost, label, info, locked, run };
+    el.addEventListener("click", () => {
+      if (b.locked || el.classList.contains("cool")) return;
+      if (b.cost > 0 && !canAfford(b.cost)) return;
+      run();
+    });
+    el.addEventListener("mouseenter", () => showTip(b));
+    el.addEventListener("mouseleave", hideTip);
+    buttons.push(b);
+    return el;
   }
+  function showTip(b) {
+    const hk = HOTKEY[b.key];
+    tip.innerHTML = `<div class="t"><b>${esc(b.label)}</b>${b.cost ? `<span>${b.cost} ravit.</span>` : ""}</div>`
+      + (b.info ? `<div class="d">${esc(b.info)}</div>` : "")
+      + (b.locked ? `<div class="l">Locked — ${esc(b.locked)}</div>` : b.cost && !canAfford(b.cost) ? `<div class="l">Not enough supplies</div>` : "")
+      + (hk ? `<div class="k">Key <kbd>${hk}</kbd></div>` : "");
+    tip.style.display = "block";
+    const r = b.el.getBoundingClientRect(), panel = root.getBoundingClientRect();
+    tip.style.left = `${Math.max(8, Math.min(window.innerWidth - 258, r.left + r.width / 2 - 125))}px`;
+    tip.style.top = `${panel.top - 10 - tip.offsetHeight - 6}px`;
+  }
+  function hideTip() { tip.style.display = "none"; }
 
-  /** Just the ability buttons, for a row that also holds other orders. */
-  function abilityButtons(selected) {
+  // ── Faces ──────────────────────────────────────────────────────────────────
+  function abilityButtons(selected, into) {
     const list = abilitiesFor(selected);
-    if (!list.length) return "";
-    return `${list.map((a) => `
-      <button data-abil="${a.key}" class="${a.ready ? "" : "cooling"}" title="${a.hint ?? ""}">
-        ${a.label}
-        ${a.ready
-          ? (a.cost ? `<span class="cc-cost">${a.cost}</span>` : "")
-          : `<span class="cc-cd">${a.cooldown > 0 ? `${a.cooldown}s` : "—"}</span>`}
-      </button>`).join("")}`;
-  }
-
-  /** Wire whatever ability buttons the last render produced. */
-  function bindAbilities(selected) {
-    for (const btn of root.querySelectorAll("[data-abil]")) {
-      btn.addEventListener("click", () => {
-        if (btn.classList.contains("cooling")) return;
-        onAbility(btn.dataset.abil, selected);
-      });
+    abilSig = list.map((a) => a.key).join(",");
+    for (const a of list) {
+      into.appendChild(button({
+        kind: "abil", key: a.key, label: a.label, cost: a.cost ?? 0, icon: a.key, verb: true, info: a.hint,
+        run: () => onAbility(a.key, selected),
+      }));
     }
   }
 
   function renderUnits(selected) {
     baseRef = null;
-    const types = new Set(selected.map((u) => u.typeKey));
-    const lead = selected[0];
-    const url = thumbnails?.get(lead.typeKey);
-
-    // Which buildings can this selection raise? (union of every selected builder's list)
-    const canBuild = new Set();
-    for (const u of selected) for (const k of u.type?.builds ?? []) canBuild.add(k);
-    const builds = structureBuilds.filter((b) => canBuild.has(b.key));
-
-    root.innerHTML = `
-      <div class="cc-head">
-        <div class="cc-portrait" style="${url ? `background-image:url(${url})` : ""}"></div>
-        <div>
-          <div class="cc-name">${types.size > 1 ? "Mixed group" : (lead.name ?? lead.typeKey)}</div>
-          <div class="cc-sub">${selected.length} unit${selected.length > 1 ? "s" : ""}</div>
-        </div>
-      </div>
-      ${builds.length ? `<div class="cc-actions cc-builds">${builds.map((b) => {
-        const cost = buildingCosts[b.key] ?? 0;
-        const poor = cost > 0 && !canAfford(cost);
-        return `<button data-struct="${b.key}" class="${poor ? "poor" : ""}" title="${b.tip ?? b.label}">${b.label}${cost ? `<span class="cc-cost">${cost}</span>` : ""}</button>`;
-      }).join("")}</div>` : ""}
-      <div class="cc-stance" id="cc-stance"></div>
-      <!-- Abilities and the standing orders share one row: the slot is 152 px tall. -->
-      <div class="cc-actions cc-orders">
-        ${abilityButtons(selected)}
-        <button data-act="stop">Stop</button>
-        <button data-act="focus">Focus</button>
-      </div>
-    `;
-    root.querySelector('[data-act="stop"]').addEventListener("click", onStop);
-    root.querySelector('[data-act="focus"]').addEventListener("click", onFocus);
-    bindAbilities(selected);
-    for (const b of builds) {
-      root.querySelector(`[data-struct="${b.key}"]`)
-        .addEventListener("click", () => {
-          const cost = buildingCosts[b.key] ?? 0;
-          if (cost > 0 && !canAfford(cost)) return;
-          onBuildStructure(b.key, selected);
-        });
+    root.replaceChildren();
+    const grid = document.createElement("div");
+    grid.className = "cc-grid";
+    grid.appendChild(button({ kind: "act", key: "stop", label: "Halte", icon: "stop", info: "Stop: drop the current order and hold here.", run: onStop }));
+    grid.appendChild(button({ kind: "act", key: "focus", label: "Caméra", icon: "focus", info: "Put the camera on the selection.", run: onFocus }));
+    abilityButtons(selected, grid);
+    // What these men can raise (the union of every builder's list).
+    const can = new Set();
+    for (const u of selected) for (const k of u.type?.builds ?? []) can.add(k);
+    for (const b of structureBuilds.filter((s) => can.has(s.key))) {
+      grid.appendChild(button({
+        kind: "build", key: b.key, label: b.label, cost: buildingCosts[b.key] ?? 0, icon: b.key, info: b.tip,
+        run: () => onBuildStructure(b.key, selected),
+      }));
     }
+    root.appendChild(grid);
+    refresh();
   }
 
   function renderProducer(s) {
     baseRef = s;
+    root.replaceChildren();
     const opts = productionFor(s);
-    const constructing = s.constructing === true;
-    root.innerHTML = `
-      <div class="cc-head">
-        <div>
-          <div class="cc-name">${s.name}</div>
-          <div class="cc-sub">${constructing ? "Under construction…" : "Production"}</div>
-        </div>
-      </div>
-      <div class="cc-bar"><i id="cc-prog"></i></div>
-      <div class="cc-queue" id="cc-queue"></div>
-      <div class="cc-actions">
-        ${opts.map((b) => `
-          <button data-build="${b.key}" data-cost="${b.cost ?? 0}" class="${b.locked ? "locked" : ""}${b.tier ? " tier" : ""}"
-            title="${(b.locked ? `Locked — ${b.locked}` : b.tip ?? "").replace(/"/g, "&quot;")}">
-            ${b.label}${b.locked ? `<span class="cc-lock">${b.locked}</span>` : b.cost ? `<span class="cc-cost">${b.cost}</span>` : ""}
-          </button>`).join("")}
-      </div>
-    `;
-    for (const b of opts) {
-      root.querySelector(`[data-build="${b.key}"]`)
-        .addEventListener("click", () => { if (!b.locked) onBuild(s, b.key); });
-    }
     prodSig = JSON.stringify(opts);
-    refreshAffordability();
-  }
-  // The card's options change under it (a tier unlocks when a village is
-  // taken): re-render when they do (checked twice a second, not per frame).
-  let prodSig = "", prodT = 0;
-
-  /**
-   * Grey out what the player can't pay for. Called on render AND every frame from
-   * tick(), because stock changes continuously as harvesters unload — a button
-   * that only re-evaluated on selection would lie for as long as the card is open.
-   */
-  function refreshAffordability() {
-    for (const btn of root.querySelectorAll("[data-build]")) {
-      const cost = Number(btn.dataset.cost) || 0;
-      btn.classList.toggle("poor", cost > 0 && !canAfford(cost));
+    const q = document.createElement("div");
+    q.className = "cc-q";
+    q.id = "cc-q";
+    root.appendChild(q);
+    const grid = document.createElement("div");
+    grid.className = "cc-grid";
+    for (const o of opts) {
+      const pic = o.tier ? null : thumbnails?.get(o.key);
+      grid.appendChild(button({
+        kind: "train", key: o.key, label: o.tier ? o.label.replace(/^▲\s*/, "") : o.label, cost: o.cost ?? 0, pic, icon: o.tier ? "tier" : null,
+        tier: !!o.tier, locked: o.locked, info: o.tip ?? (o.tier ? "" : `Train one. Leaves through the gate to the rally point.`),
+        run: () => onBuild(s, o.key),
+      }));
     }
+    root.appendChild(grid);
+    queueSig = "";
+    refresh();
   }
 
-  /**
-   * Keep ability buttons honest between renders — a cooldown ticks down every
-   * frame, and a button that only re-evaluated on re-selection would sit there
-   * saying "ready" on something that is not, or "38s" on something that is.
-   * Text only: re-rendering the row would drop the listeners mid-click.
-   */
-  /**
-   * The stance chips. Thresholds rather than a percentage on purpose: a player
-   * reading a command card in a firefight wants to know WHETHER they are
-   * hidden, not that they are 0.31 hidden.
-   */
-  function refreshStance() {
-    const el = root.querySelector("#cc-stance");
-    if (!el) return;
-    const st = stanceFor(selRef);
-    let html = "";
-    if (st) {
-      if (st.revealed) html += `<span class="cc-tag seen">SPOTTED</span>`;
-      else if (st.concealment >= 0.3) html += `<span class="cc-tag conceal">CONCEALED</span>`;
-      else if (st.concealment >= 0.1) html += `<span class="cc-tag conceal">IN COVER OF BRUSH</span>`;
-      if (st.cover >= 0.35) html += `<span class="cc-tag cover">HARD COVER</span>`;
-      else if (st.cover >= 0.12) html += `<span class="cc-tag cover">LIGHT COVER</span>`;
-    }
-    if (el.innerHTML !== html) el.innerHTML = html;
-  }
-
-  function refreshAbilities() {
-    const btns = root.querySelectorAll("[data-abil]");
-    if (!btns.length) return;
-    const live = new Map(abilitiesFor(selRef).map((a) => [a.key, a]));
-    for (const btn of btns) {
-      const a = live.get(btn.dataset.abil);
-      if (!a) continue;
-      btn.classList.toggle("cooling", !a.ready);
-      const cd = btn.querySelector(".cc-cd");
-      if (cd) cd.textContent = a.ready ? "" : `${a.cooldown}s`;
-    }
-  }
-
-  /** A structure with nothing to produce (a turret): identity + status only. */
   function renderStructure(s) {
     baseRef = null;
-    const status = s.constructing
-      ? "Under construction…"
-      : (s.deploy ?? 1) < 1 ? "Calibrating…"
-        : s.typeKey === "radio" ? "Tactical map · vision relay"
-          : s.typeKey === "captureNode" ? `Supply relay · +${s.type.incomeRate ?? 0}/s`
-          : s.typeKey === "enemyBase" ? "Primary objective · destroy to win"
-            : s.range ? `Defensive emplacement · ${Math.round(s.range)}m` : "Structure";
-    root.innerHTML = `
-      <div class="cc-head">
-        <div>
-          <div class="cc-name">${s.name}</div>
-          <div class="cc-sub">${status}</div>
-        </div>
-      </div>
-      ${abilityRow([s])}
-      <div class="cc-actions">
-        <button data-act="focus">Focus</button>
-      </div>
-    `;
-    root.querySelector('[data-act="focus"]').addEventListener("click", onFocus);
-    bindAbilities([s]);
+    root.replaceChildren();
+    const grid = document.createElement("div");
+    grid.className = "cc-grid";
+    grid.appendChild(button({ kind: "act", key: "focus", label: "Caméra", icon: "focus", info: "Put the camera on it.", run: onFocus }));
+    abilityButtons([s], grid);
+    root.appendChild(grid);
+    const st = s.constructing ? "Under construction" : (s.deploy ?? 1) < 1 ? "Calibrating" : s.range ? `Defensive · ${Math.round(s.range)} m` : "";
+    if (st) { const h = document.createElement("div"); h.className = "cc-hint"; h.textContent = st; root.appendChild(h); }
+    refresh();
   }
 
   function render(selected) {
     selRef = selected;
-    if (!selected.length) { baseRef = null; root.innerHTML = `<div class="empty">No orders</div>`; return; }
-    // A selected PRODUCING structure (base or a finished building) shows its queue.
+    buttons = [];
+    hideTip();
+    if (!selected.length) { baseRef = null; root.replaceChildren(); return; }
     const producer = selected.find((e) => e.isStructure && e.enqueue);
     const mobile = selected.filter((e) => !e.isStructure);
     if (producer) renderProducer(producer);
-    else if (mobile.length) { renderUnits(mobile); refreshStance(); }
-    // Nothing mobile and nothing producing — a lone turret or other silent structure.
+    else if (mobile.length) renderUnits(mobile);
     else renderStructure(selected[0]);
   }
 
-  /** Called each frame — keeps the production bar/queue/affordability live. */
-  function tick() {
-    refreshAbilities();
-    refreshStance();
-    if (!baseRef) return;
-    refreshAffordability();
-    if (performance.now() - prodT > 500) {
-      prodT = performance.now();
-      if (JSON.stringify(productionFor(baseRef)) !== prodSig) { renderProducer(baseRef); return; }
+  // ── Live state (per frame: classes, a variable, text — on change) ─────────
+  let queueSig = "";
+  function refresh() {
+    const live = new Map(abilitiesFor(selRef).map((a) => [a.key, a]));
+    for (const b of buttons) {
+      if (b.kind === "abil") {
+        const a = live.get(b.key);
+        const cool = !!a && !a.ready;
+        b.el.classList.toggle("cool", cool);
+        if (cool) {
+          const m = Math.max(cdMax.get(b.key) ?? 0, a.cooldown || 0);
+          cdMax.set(b.key, m);
+          b.el.style.setProperty("--cd", m > 0 ? (a.cooldown / m).toFixed(3) : "1");
+          let n = b.el.querySelector(".cdn");
+          if (!n) { n = document.createElement("span"); n.className = "cdn"; b.el.appendChild(n); }
+          const txt = a.cooldown > 0 ? `${a.cooldown}` : "";
+          if (n.textContent !== txt) n.textContent = txt;
+        } else if (b.el.style.getPropertyValue("--cd")) {
+          b.el.style.removeProperty("--cd");
+          b.el.querySelector(".cdn")?.remove();
+          cdMax.delete(b.key);
+        }
+      }
+      if (b.cost > 0 && !b.locked) b.el.classList.toggle("poor", !canAfford(b.cost));
     }
-    const prog = root.querySelector("#cc-prog");
-    const queue = root.querySelector("#cc-queue");
-    if (prog) prog.style.width = `${Math.round((baseRef.progress ?? 0) * 100)}%`;
-    if (queue) {
-      const chips = (baseRef.queue ?? []).map((k) => `<span class="cc-chip">${k}</span>`).join("");
-      if (queue.innerHTML !== chips) queue.innerHTML = chips;
+    if (baseRef) {
+      const qEl = root.querySelector("#cc-q");
+      const queue = baseRef.queue ?? [];
+      const sig = queue.join(",");
+      if (qEl && sig !== queueSig) {
+        queueSig = sig;
+        qEl.innerHTML = queue.length
+          ? queue.slice(0, 7).map((k, i) => `<span class="q${i === 0 ? " first" : ""}" style="background-image:url(${thumbnails?.get(k) ?? ""})" title="${esc(k)}">${i === 0 ? `<span class="bar"><i></i></span>` : ""}</span>`).join("")
+            + (queue.length > 7 ? `<span class="idle">+${queue.length - 7}</span>` : "")
+          : `<span class="idle">${baseRef.constructing ? "Under construction" : "Nothing in training"}</span>`;
+      }
+      const bar = qEl?.querySelector(".bar i");
+      if (bar) bar.style.width = `${Math.round((baseRef.progress ?? 0) * 100)}%`;
     }
   }
+
+  // Hotkeys (printed key, AZERTY-safe): only orders on the card now.
+  window.addEventListener("keydown", (e) => {
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.target?.matches?.("input, textarea, select")) return;
+    const k = e.key === "Delete" ? "Del" : e.key?.length === 1 ? e.key.toUpperCase() : null;
+    if (!k || k === "G") return;   // G: algGrenades.js has its own (it targets)
+    const b = buttons.find((x) => HOTKEY[x.key] === k);
+    if (b) { b.el.click(); e.preventDefault(); }
+  });
 
   render([]);
 
   return {
     root,
     render,
-    tick,
-    dispose() { root.remove(); style.remove(); },
+    /** Called each frame — cooldowns, affordability, the queue and its bar. */
+    tick() {
+      if (!selRef.length) return;
+      // A tier unlocking, abilities appearing (a site, wire in reach): re-render, twice a second.
+      if (performance.now() - prodT > 500) {
+        prodT = performance.now();
+        if (baseRef && JSON.stringify(productionFor(baseRef)) !== prodSig) { renderProducer(baseRef); return; }
+        if (!baseRef && abilitiesFor(selRef.filter((e) => !e.isStructure).length ? selRef.filter((e) => !e.isStructure) : selRef).map((a) => a.key).join(",") !== abilSig) { render(selRef); return; }
+      }
+      refresh();
+    },
+    dispose() { root.remove(); style.remove(); tip.remove(); },
   };
 }
+
+/** For the selection card: a portrait URL for anything selectable. */
+export const portraitOf = (thumbnails, u) => thumbnails?.get(thumbKeyOf(u)) ?? null;

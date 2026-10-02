@@ -29,7 +29,7 @@ const CSS = `
 #alg-tabs .tab {
   pointer-events: auto; cursor: pointer; position: relative; flex: none;
   width: 62px; height: 58px; box-sizing: border-box;
-  background: var(--hud-bg) center 40%/76% no-repeat; border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius);
+  background: var(--hud-bg) center 22%/cover no-repeat; border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
 }
 #alg-tabs .tab:hover { border-color: var(--hud-brass); }
