@@ -93,6 +93,17 @@ export const LOOKS = {
     camo: { base: 0xa59c72, green: 0x55603a, brown: 0x6a4b2f }, helmet: false, headgear: "beret", hatColor: 0x2f4a2c,
     badge: "grenade", weapon: "mas49_56", kit: ["belt"],
   },
+  // THE HERO (2026-10-02): Colonel Marc Delorme, a FICTIONAL para colonel in
+  // the Bigeard mould — the casquette, a cleaner léopard smock than his men's,
+  // sunglasses, a scarf; binoculars, the map case, a holster and the rank tab
+  // no other man has. Same body (soldier1) as the rest: what sets him apart
+  // is the kit, the silhouette and how he is drawn (alg-rts, on his own).
+  colonel: {
+    label: "Colonel (hero)", note: "Col. Delorme — casquette, binoculars, map case, holster, five galons",
+    camo: { base: 0xb3aa7e, green: 0x4f5c34, brown: 0x6e4a2b }, helmet: false, headgear: "bigeard", weapon: "mat49",
+    kit: ["belt", "binoculars", "mapCase", "holster", "rankTab", "sunglasses"],
+    hero: true,
+  },
   // SECTIONS: every man picks one of the look's `variants` (weighted), so a
   // squad mixes headgear; the per-soldier variation (fade, skin tone — see
   // lookColorNode) applies to every look.
@@ -973,6 +984,43 @@ function binoculars() {
   ]);
 }
 
+// ── The COLONEL's pieces (the hero look, 2026-10-02) ───────────────────────
+const GOLD = 0xc9a23a;
+
+/**
+ * His rank on the chest: the "patte de poitrine" of the camouflaged smock — a
+ * dark tab with a colonel's five gold galons, over his left breast. The bars
+ * stand 2 mm proud of the tab (never coplanar: no z-fighting).
+ */
+function rankTab() {
+  const { box } = prim;
+  const x = 0.085, y = 1.255, z = 0.19;
+  return toGeometry([
+    box(0x1e2a1e, [x, y, z], [0.045, 0.055, 0.006]),
+    ...[0, 1, 2, 3, 4].map((i) => box(GOLD, [x, y - 0.019 + i * 0.0095, z + 0.004], [0.034, 0.0045, 0.003])),
+  ]);
+}
+
+/** A leather map case on his left hip, its strap across the chest from the right shoulder. */
+function mapCase() {
+  const { box } = prim;
+  return toGeometry([
+    box(LEATHER, [0.205, 0.8, 0.02], [0.03, 0.24, 0.2]),
+    box(shade(LEATHER, 0.8), [0.222, 0.87, 0.02], [0.006, 0.09, 0.2]),   // the flap, 2 mm out
+    stick(shade(LEATHER, 0.85), [-0.12, 1.47, 0.06], [0.0, 1.24, 0.205], 0.007, 4),
+    stick(shade(LEATHER, 0.85), [0.0, 1.24, 0.205], [0.2, 0.93, 0.08], 0.007, 4),
+  ]);
+}
+
+/** A pistol holster on the right of the belt (the MAC 50). */
+function holster() {
+  const { box } = prim;
+  return toGeometry([
+    box(LEATHER, [-0.165, 0.85, 0.11], [0.05, 0.13, 0.06]),
+    box(shade(LEATHER, 0.75), [-0.165, 0.915, 0.11], [0.054, 0.02, 0.064]),   // the flap
+  ]);
+}
+
 /**
  * A full beard: a shell over the jaw and chin, open at the back (it stops
  * short of the ears), with a mustache on the upper lip. Face measured at
@@ -1140,6 +1188,9 @@ export const KIT = {
   scarf: { bone: "Neck", build: scarf },
   grenades: { bone: "Spine2", build: grenades },
   binoculars: { bone: "Spine2", build: binoculars },
+  rankTab: { bone: "Spine2", build: rankTab },
+  mapCase: { bone: "Hips", build: mapCase },
+  holster: { bone: "Hips", build: holster },
   beard: { bone: "Head", build: beard },
   bandolier: { bone: "Spine2", build: bandolier },
   bandoliers: { bone: "Spine2", build: bandoliers },

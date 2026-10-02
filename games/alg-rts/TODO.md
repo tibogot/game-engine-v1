@@ -858,6 +858,25 @@ skinned to it) → judged in `games/shared-rts/soldier-lab.html`. In alg-rts
            the shovel bakes to 0.04 cm / 0.16° of the lab's.
    - [x] re-pack soldiers.glb with them (2026-10-02: lab finds all packed, both fists IN on the real file; the game loads it clean at 60 fps)
    - [ ] **you, look** in the lab / the game after the re-pack
+- [~] **HERO: COLONEL MARC DELORME** (you, 2026-10-02: "a recognisable
+      leader, better looking than the others; the FLN one later"; "do with
+      what we have" — no new model; "show me in the lab first"). FICTIONAL,
+      a para colonel in the Bigeard mould.
+   - [x] his LOOK, in the soldier lab ("Colonel (hero)", soldierLooks.js):
+         the para body; casquette Bigeard, sunglasses, a cleaner léopard
+         smock, MAT 49, binoculars, and three new pieces no other man has —
+         a chest tab with five gold galons, a leather map case on the left
+         hip (strap across the chest), a holster on the right hip. The scarf
+         left off (a tan block at the throat on him).
+   - [ ] **you, look** in the lab, then say if he goes into the game
+   - [ ] LATER, the game (built once, taken out until you decide): a
+         "colonel" type (160 hp, one of him, at the post's gate); 6 % taller
+         in the shared crowd (no extra draw); a gold ring that always shows;
+         AURA (men on foot within 20 m shed suppression +0.35/s, shoot ×1.15
+         — an accMul in algAccuracy); RALLIEMENT on the command card (60 s:
+         suppression and pins gone within 25 m); he FALLS: a shock on the men
+         round him, an alert, back at the post in 90 s.
+   - [ ] the FLN's chief, the same way (a fictional Aurès katiba leader)
 - [~] **Weapons in their hands.** Built 2026-09-29: procedural MAS 49/56,
       MAT 49, MAS 36 (games/shared-rts/procWeapons.js, 180–280 tris) on a
       WEAPON bone the pack tool adds under the right hand, aimed per clip at the
